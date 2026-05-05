@@ -25,6 +25,7 @@ int cc_compile_c_to_s(const char *in_c, const char *display_src, const char *out
     int rc = -1;
     int pointer_size = target == CC_TARGET_I386 ? 4 : 8;
     int timings = getenv("CC_TIMINGS") != NULL;
+    int debug_counts = getenv("CC_DEBUG_COUNTS") != NULL;
     double t_parse = 0.0;
     double t_sema = 0.0;
     double t_ast2ir = 0.0;
@@ -67,6 +68,10 @@ int cc_compile_c_to_s(const char *in_c, const char *display_src, const char *out
     if (diag != NULL && display_src != NULL && display_src[0] != '\0') {
         snprintf(diag->path, sizeof(diag->path), "%s", display_src);
     }
+    if (debug_counts) {
+        fprintf(stderr, "cc: debug: parsed funcs=%zu globals=%zu structs=%zu from %s\n", tu.func_count, tu.global_count,
+                tu.struct_count, in_c != NULL ? in_c : "<null>");
+    }
     if (timings) {
         t_parse = now_seconds() - t0;
         fprintf(stderr, "cc: timing parse=%.3fs\n", t_parse);
@@ -103,6 +108,9 @@ int cc_compile_c_to_s(const char *in_c, const char *display_src, const char *out
         t_ast2ir = now_seconds() - t0;
         fprintf(stderr, "cc: timing ast2ir=%.3fs\n", t_ast2ir);
         t0 = now_seconds();
+    }
+    if (debug_counts) {
+        fprintf(stderr, "cc: debug: lowered funcs=%zu globals=%zu\n", ssa.func_count, ssa.global_count);
     }
     if (cc_run_middle_passes(&ssa, opt_level, diag) != 0) {
         if (diag != NULL && diag->message[0] == '\0') {

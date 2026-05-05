@@ -246,6 +246,32 @@ typedef struct {
 #define AT_SYSINFO 32
 #define AT_SYSINFO_EHDR 33
 
+/*
+ * FreeBSD-specific auxv types.  Indices >=15 collide with Linux's, so the
+ * kernel must select layouts based on the executing personality.  These come
+ * from FreeBSD sys/sys/elf_common.h and are what FreeBSD libc/csu/rtld read.
+ */
+#define AT_FBSD_EXECPATH    15  /* path to the executable */
+#define AT_FBSD_CANARY      16  /* SSP canary pointer */
+#define AT_FBSD_CANARYLEN   17  /* SSP canary length */
+#define AT_FBSD_OSRELDATE   18  /* osreldate, e.g. 1403000 */
+#define AT_FBSD_NCPUS       19
+#define AT_FBSD_PAGESIZES   20
+#define AT_FBSD_PAGESIZESLEN 21
+#define AT_FBSD_TIMEKEEP    22
+#define AT_FBSD_STACKPROT   23  /* PROT_* for the stack */
+#define AT_FBSD_EHDRFLAGS   24
+#define AT_FBSD_HWCAP       25
+#define AT_FBSD_HWCAP2      26
+#define AT_FBSD_BSDFLAGS    27
+#define AT_FBSD_ARGC        28
+#define AT_FBSD_ARGV        29
+#define AT_FBSD_ENVC        30
+#define AT_FBSD_ENVV        31  /* environment array pointer */
+#define AT_FBSD_PS_STRINGS  32  /* struct ps_strings * */
+#define AT_FBSD_USRSTACKBASE 35
+#define AT_FBSD_USRSTACKLIM 36
+
 typedef struct {
     uint32_t n_namesz;
     uint32_t n_descsz;

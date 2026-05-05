@@ -1,0 +1,9 @@
+test_demangle
+test_audit_regressions
+tools/demangle_cli
+fuzz/fuzz_random
+fuzz/cxxfilt_stdin_harness
+fuzz/fuzz_demangle_libfuzzer
+fuzz/diff_cxxfilt
+fuzz/corpus/
+*.o

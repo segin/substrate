@@ -42,11 +42,10 @@ static LineInfo make_li(const char *s) {
 void test_simple_split(void) {
     Tokenizer *tok = tok_init(NULL);
     assert(tok != NULL);
-    LineInfo li = make_li("hello world foo");
     int argc = 0;
     const char **argv = NULL;
 
-    int ret = tok_str(tok, &li, &argc, &argv);
+    int ret = tok_str(tok, "hello world foo", &argc, &argv);
     assert(ret == 0);
     assert(argc == 3);
     assert(strcmp(argv[0], "hello") == 0);
@@ -57,13 +56,34 @@ void test_simple_split(void) {
     tok_end(tok);
 }
 
+void test_tok_line_split(void) {
+    Tokenizer *tok = tok_init(NULL);
+    assert(tok != NULL);
+    LineInfo li = make_li("hello world foo");
+    int argc = 0;
+    int cursorc = -1;
+    int cursoro = -1;
+    const char **argv = NULL;
+
+    int ret = tok_line(tok, &li, &argc, &argv, &cursorc, &cursoro);
+    assert(ret == 0);
+    assert(argc == 3);
+    assert(strcmp(argv[0], "hello") == 0);
+    assert(strcmp(argv[1], "world") == 0);
+    assert(strcmp(argv[2], "foo") == 0);
+    assert(cursorc == argc);
+    assert(cursoro == 0);
+
+    tok_end(tok);
+}
+
 void test_multiple_spaces(void) {
     Tokenizer *tok = tok_init(NULL);
     LineInfo li = make_li("  hello   world  ");
     int argc = 0;
     const char **argv = NULL;
 
-    int ret = tok_str(tok, &li, &argc, &argv);
+    int ret = tok_line(tok, &li, &argc, &argv, NULL, NULL);
     assert(ret == 0);
     assert(argc == 2);
     assert(strcmp(argv[0], "hello") == 0);
@@ -78,7 +98,7 @@ void test_tabs_as_separator(void) {
     int argc = 0;
     const char **argv = NULL;
 
-    int ret = tok_str(tok, &li, &argc, &argv);
+    int ret = tok_line(tok, &li, &argc, &argv, NULL, NULL);
     assert(ret == 0);
     assert(argc == 3);
     assert(strcmp(argv[0], "a") == 0);
@@ -94,7 +114,7 @@ void test_empty_string(void) {
     int argc = 0;
     const char **argv = NULL;
 
-    int ret = tok_str(tok, &li, &argc, &argv);
+    int ret = tok_line(tok, &li, &argc, &argv, NULL, NULL);
     assert(ret == 0);
     assert(argc == 0);
 
@@ -107,7 +127,7 @@ void test_only_spaces(void) {
     int argc = 0;
     const char **argv = NULL;
 
-    int ret = tok_str(tok, &li, &argc, &argv);
+    int ret = tok_line(tok, &li, &argc, &argv, NULL, NULL);
     assert(ret == 0);
     assert(argc == 0);
 
@@ -120,7 +140,7 @@ void test_single_word(void) {
     int argc = 0;
     const char **argv = NULL;
 
-    int ret = tok_str(tok, &li, &argc, &argv);
+    int ret = tok_line(tok, &li, &argc, &argv, NULL, NULL);
     assert(ret == 0);
     assert(argc == 1);
     assert(strcmp(argv[0], "hello") == 0);
@@ -136,7 +156,7 @@ void test_single_quotes(void) {
     int argc = 0;
     const char **argv = NULL;
 
-    int ret = tok_str(tok, &li, &argc, &argv);
+    int ret = tok_line(tok, &li, &argc, &argv, NULL, NULL);
     assert(ret == 0);
     assert(argc == 1);
     assert(strcmp(argv[0], "hello world") == 0);
@@ -150,7 +170,7 @@ void test_double_quotes(void) {
     int argc = 0;
     const char **argv = NULL;
 
-    int ret = tok_str(tok, &li, &argc, &argv);
+    int ret = tok_line(tok, &li, &argc, &argv, NULL, NULL);
     assert(ret == 0);
     assert(argc == 1);
     assert(strcmp(argv[0], "hello world") == 0);
@@ -164,7 +184,7 @@ void test_mixed_quotes(void) {
     int argc = 0;
     const char **argv = NULL;
 
-    int ret = tok_str(tok, &li, &argc, &argv);
+    int ret = tok_line(tok, &li, &argc, &argv, NULL, NULL);
     assert(ret == 0);
     assert(argc == 2);
     assert(strcmp(argv[0], "hello") == 0);
@@ -179,7 +199,7 @@ void test_empty_quotes(void) {
     int argc = 0;
     const char **argv = NULL;
 
-    int ret = tok_str(tok, &li, &argc, &argv);
+    int ret = tok_line(tok, &li, &argc, &argv, NULL, NULL);
     assert(ret == 0);
     /* Empty quotes produce no tokens in this implementation */
     assert(argc == 0);
@@ -193,7 +213,7 @@ void test_quotes_with_adjacent_text(void) {
     int argc = 0;
     const char **argv = NULL;
 
-    int ret = tok_str(tok, &li, &argc, &argv);
+    int ret = tok_line(tok, &li, &argc, &argv, NULL, NULL);
     assert(ret == 0);
     assert(argc == 1);
     assert(strcmp(argv[0], "helloworldfoo") == 0);
@@ -209,7 +229,7 @@ void test_backslash_space(void) {
     int argc = 0;
     const char **argv = NULL;
 
-    int ret = tok_str(tok, &li, &argc, &argv);
+    int ret = tok_line(tok, &li, &argc, &argv, NULL, NULL);
     assert(ret == 0);
     assert(argc == 1);
     assert(strcmp(argv[0], "hello world") == 0);
@@ -223,7 +243,7 @@ void test_backslash_in_double_quotes(void) {
     int argc = 0;
     const char **argv = NULL;
 
-    int ret = tok_str(tok, &li, &argc, &argv);
+    int ret = tok_line(tok, &li, &argc, &argv, NULL, NULL);
     assert(ret == 0);
     assert(argc == 1);
     assert(strcmp(argv[0], "hello\"world") == 0);
@@ -237,7 +257,7 @@ void test_backslash_literal(void) {
     int argc = 0;
     const char **argv = NULL;
 
-    int ret = tok_str(tok, &li, &argc, &argv);
+    int ret = tok_line(tok, &li, &argc, &argv, NULL, NULL);
     assert(ret == 0);
     assert(argc == 1);
     assert(strcmp(argv[0], "hello\\world") == 0);
@@ -253,7 +273,7 @@ void test_continuation_single_quote(void) {
     int argc = 0;
     const char **argv = NULL;
 
-    int ret = tok_str(tok, &li, &argc, &argv);
+    int ret = tok_line(tok, &li, &argc, &argv, NULL, NULL);
     assert(ret == 1); /* continuation needed */
 
     tok_end(tok);
@@ -265,7 +285,7 @@ void test_continuation_double_quote(void) {
     int argc = 0;
     const char **argv = NULL;
 
-    int ret = tok_str(tok, &li, &argc, &argv);
+    int ret = tok_line(tok, &li, &argc, &argv, NULL, NULL);
     assert(ret == 1); /* continuation needed */
 
     tok_end(tok);
@@ -277,7 +297,7 @@ void test_continuation_trailing_backslash(void) {
     int argc = 0;
     const char **argv = NULL;
 
-    int ret = tok_str(tok, &li, &argc, &argv);
+    int ret = tok_line(tok, &li, &argc, &argv, NULL, NULL);
     assert(ret == 1); /* continuation needed */
 
     tok_end(tok);
@@ -289,7 +309,7 @@ void test_no_continuation_complete(void) {
     int argc = 0;
     const char **argv = NULL;
 
-    int ret = tok_str(tok, &li, &argc, &argv);
+    int ret = tok_line(tok, &li, &argc, &argv, NULL, NULL);
     assert(ret == 0);
     assert(argc == 3);
 
@@ -304,7 +324,7 @@ void test_tok_reset(void) {
     int argc = 0;
     const char **argv = NULL;
 
-    tok_str(tok, &li, &argc, &argv);
+    tok_line(tok, &li, &argc, &argv, NULL, NULL);
     assert(argc == 2);
 
     tok_reset(tok);
@@ -324,7 +344,7 @@ void test_custom_ifs(void) {
     int argc = 0;
     const char **argv = NULL;
 
-    int ret = tok_str(tok, &li, &argc, &argv);
+    int ret = tok_line(tok, &li, &argc, &argv, NULL, NULL);
     assert(ret == 0);
     assert(argc == 3);
     assert(strcmp(argv[0], "a") == 0);
@@ -342,7 +362,7 @@ void test_tok_null_args(void) {
     const char **argv = NULL;
 
     assert(tok_str(NULL, NULL, NULL, NULL) == -1);
-    assert(tok_str(tok, NULL, &argc, &argv) == -1);
+    assert(tok_line(tok, NULL, &argc, &argv, NULL, NULL) == -1);
 
     tok_end(tok);
     tok_end(NULL); /* should not crash */
@@ -354,6 +374,7 @@ int main(void) {
 
     /* Whitespace splitting (REQ-08-0364) */
     run_test(test_simple_split, "simple_split");
+    run_test(test_tok_line_split, "tok_line_split");
     run_test(test_multiple_spaces, "multiple_spaces");
     run_test(test_tabs_as_separator, "tabs_as_separator");
     run_test(test_empty_string, "empty_string");

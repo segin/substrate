@@ -1,4 +1,4 @@
-.Dd March 2, 2026
+.Dd April 22, 2026
 .Dt AS 1
 .Os
 .Sh NAME
@@ -45,6 +45,14 @@ Alias binaries
 and
 .Nm as.x64
 select 32-bit and 64-bit defaults respectively.
+.Pp
+When installed through the host toolchain workflow described in
+.Xr host_toolchain 7 ,
+the installed
+.Xr cc 1
+driver resolves the sibling assembler from the same prefix before falling back
+to other tools on
+.Ev PATH .
 .Sh OPTIONS
 .Bl -tag -width "--max-token-length"
 .It Fl 32 , Fl -32
@@ -230,10 +238,12 @@ Backend execution, validation, or internal frontend failure.
 Usage/argument error.
 .El
 .Sh SEE ALSO
+Li cc(1) ,
 Li cpp(1) ,
 Li ld(1) ,
 Li objdump(1) ,
 Li readelf(1) ,
 Li elfobj(3) ,
+Li host_toolchain(7) ,
 .Pa docs/specs/as_spec.md ,
 .Pa docs/specs/as_arch_reference.md

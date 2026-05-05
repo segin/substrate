@@ -11,7 +11,7 @@
 // Mock Implementations
 
 void kprint(const char *str) {
-    // printf("%s", str);
+    (void)str;
 }
 
 void *kmalloc(size_t size) {

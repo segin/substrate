@@ -1,0 +1,137 @@
+.TH CHOWN 1 "February 2026" "Substrate" "User Commands"
+.SH NAME
+chown \- change file owner and group
+.SH SYNOPSIS
+.B chown
+.RB [ \-R ]
+.RB [ \-H | \-L | \-P ]
+.RB [ \-fhv ]
+.I owner[:group]
+.I file ...
+.RS
+.PP
+.B chown
+.RB [ \-R ]
+.RB [ \-H | \-L | \-P ]
+.RB [ \-fhv ]
+.B \-r
+.I file ...
+.RE
+.SH DESCRIPTION
+The
+.B chown
+utility changes the owner and/or group of each specified
+.IR file .
+The
+.I owner
+argument may be a numeric user ID or a login name.
+The
+.I group
+argument may be a numeric group ID or a group name.
+When a colon separates owner and group (e.g.,
+.IR user :group ),
+both are changed.
+If only a colon follows the owner, only the group is changed.
+.PP
+When
+.B \-r
+is specified,
+.B chown
+sets the ownership from a reference file (equivalent to
+.B \-\-reference
+in GNU).
+.SH OPTIONS
+.TP
+.B \-R
+Recursively change the ownership of directories and their contents.
+.TP
+.B \-H
+When used with
+.B \-R ,
+follow symbolic links that appear on the command line, but do not follow
+symbolic links encountered during traversal.
+.TP
+.B \-L
+When used with
+.B \-R ,
+follow all symbolic links encountered during traversal.
+.TP
+.B \-P
+Do not follow symbolic links during recursive traversal (default).
+.TP
+.B \-f
+Suppress most diagnostics. Errors still cause a nonzero exit status.
+.TP
+.B \-h
+Change the ownership of symbolic links themselves, rather than their targets.
+.TP
+.B \-r
+Change the ownership using a reference file instead of an owner:group operand.
+.SH OWNER SPECIFICATION
+The
+.I owner[:group]
+operand specifies the new ownership:
+.TP
+.I owner
+Change owner only.
+.TP
+.I owner:
+Change owner and set group to \-1 (unchanged).
+.TP
+.I owner:group
+Change both owner and group.
+.TP
+.I :group
+Change group only.
+.SH ERROR HANDLING
+On per\-file failure,
+.B chown
+records the failure, continues processing remaining operands, and exits
+with a nonzero status.
+Error messages include the program name and target path unless
+.B \-f
+is specified.
+.SH PORTABILITY NOTES
+Setting ownership on symbolic links is not supported on all platforms.
+On platforms where it is unsupported,
+.B \-h
+fails for symbolic links with a clear diagnostic.
+.SH EXIT STATUS
+.TP
+.B 0
+All requested ownership changes succeeded.
+.TP
+.B 1
+One or more operations failed.
+.SH EXAMPLES
+.TP
+.B chown user file
+Change the owner of
+.B file
+to
+.BR user .
+.TP
+.B chown user:group file
+Change both owner and group of
+.BR file .
+.TP
+.B chown :staff file
+Change only the group of
+.BR file .
+.TP
+.B chown -R www:www /var/www
+Recursively change owner and group of
+.B /var/www
+to
+.BR www .
+.TP
+.B chown \-h user /usr/local/bin/link
+Change ownership of the symbolic link
+.B link
+itself, not its target.
+.SH SEE ALSO
+.BR stat (2),
+.BR lstat (2),
+.BR fchown (2),
+.BR chgrp (1),
+.BR chmod (1)

@@ -36,7 +36,15 @@ typedef struct {
     int started_empty;
     line_t *marks[26];
     int mark_cols[26];
+    line_t **line_array;
+    int line_array_cap;
 } buffer_t;
+
+typedef struct {
+    buffer_t *items;
+    int len;
+    int cap;
+} exvi_history_t;
 
 typedef enum {
     EXVI_COMMAND_BREAK_NONE = 0,
@@ -78,8 +86,11 @@ extern int option_scroll;
 extern int option_scroll_explicit;
 extern int option_wrapscan;
 extern char *option_tags;
-extern buffer_t undo_buf;
-extern int undo_valid;
+extern exvi_history_t undo_history;
+extern exvi_history_t redo_history;
+extern buffer_t pending_undo_buf;
+extern int pending_undo_valid;
+extern int exvi_history_suspended;
 extern char *last_search_pattern;
 extern char *last_sub_pattern;
 extern char *last_sub_replacement;
@@ -95,6 +106,7 @@ extern int input_mode;
 extern line_t *input_insert_pos;
 extern char exvi_pending_status[256];
 extern int exvi_pending_status_once;
+extern int exvi_exit_requested;
 
 void buf_init(buffer_t *b);
 line_t *buf_insert_after(buffer_t *b, line_t *pos, const char *text);
@@ -102,6 +114,11 @@ void buf_delete(buffer_t *b, line_t *l);
 void buf_free(buffer_t *b);
 void buf_copy(buffer_t *dst, buffer_t *src);
 void save_undo(buffer_t *current);
+void exvi_note_buffer_change(void);
+void exvi_discard_pending_undo(void);
+void exvi_reset_undo_state(void);
+int exvi_history_push_snapshot(exvi_history_t *history, buffer_t *src);
+int exvi_history_pop_snapshot(exvi_history_t *history, buffer_t *out);
 void buf_read_file(buffer_t *b, const char *filename);
 void buf_write_file(buffer_t *b, const char *filename, int append);
 void buf_write_range(buffer_t *b, const char *filename, int append, int addr1, int addr2);
@@ -148,6 +165,8 @@ int exvi_has_arglist(void);
 const char *exvi_current_arg(void);
 void exvi_execute_command(buffer_t *b, char *cmd);
 int exvi_visual_main(buffer_t *b);
+void exvi_visual_shell_suspend(void);
+void exvi_visual_shell_resume(void);
 void handle_sigint(int sig);
 void handle_sigterm(int sig);
 int handle_pop_command(buffer_t *b, int force);
@@ -168,6 +187,7 @@ int handle_read_command(buffer_t *b, const char *args, int addr2);
 int handle_delete_command(buffer_t *b, int explicit_range, int addr1, int addr2);
 int default_read_destination(buffer_t *b, int addr2);
 int handle_undo_command(buffer_t *b);
+int handle_redo_command(buffer_t *b);
 int handle_put_command(buffer_t *b, const char *args, int addr2);
 int handle_print_command(buffer_t *b, const char *cmd, int explicit_range,
     int addr1, int addr2);
@@ -183,6 +203,8 @@ int handle_move_command(buffer_t *b, const char *args, int explicit_range,
 int handle_join_command(buffer_t *b, int explicit_range, int addr1, int addr2);
 int handle_yank_command(buffer_t *b, const char *args, int explicit_range,
     int addr1, int addr2);
+
+size_t vi_utf8_prev_offset(const char *buf, size_t pos);
 int handle_substitute_command(buffer_t *b, const char *args, int addr1, int addr2);
 int handle_repeat_substitute_command(buffer_t *b, const char *args, int addr1,
     int addr2);

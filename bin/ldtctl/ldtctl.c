@@ -77,8 +77,9 @@ static void usage(const char *prog) {
 }
 
 static void print_entry(int index, uint8_t *desc) {
-    uint32_t a = *(uint32_t*)desc;
-    uint32_t b = *(uint32_t*)(desc + 4);
+    uint32_t a, b;
+    memcpy(&a, desc, sizeof(a));
+    memcpy(&b, desc + 4, sizeof(b));
     
     if (a == 0 && b == 0) return; /* Skip empty descriptor */
     

@@ -133,6 +133,37 @@ int coredump(process_t *p) {
                 last_core_record.regs.useresp,
                 (unsigned int)(last_core_record.regs.ss & 0xFFFFU),
                 last_core_record.regs.eflags);
+        kprintf("CORE: gpr  eax=0x%08x ebx=0x%08x ecx=0x%08x edx=0x%08x\n",
+                last_core_record.regs.eax, last_core_record.regs.ebx,
+                last_core_record.regs.ecx, last_core_record.regs.edx);
+        kprintf("CORE: gpr  esi=0x%08x edi=0x%08x ebp=0x%08x\n",
+                last_core_record.regs.esi, last_core_record.regs.edi,
+                last_core_record.regs.ebp);
+        /* Dump 8 dwords of user stack, peeked safely via copyin. */
+        if (last_core_record.regs.useresp != 0) {
+            uint32_t buf[8] = {0};
+            extern int copyin(const void *, void *, unsigned int);
+            if (copyin((const void *)last_core_record.regs.useresp, buf, sizeof(buf)) == 0) {
+                kprintf("CORE: stk  +00=%08x +04=%08x +08=%08x +0c=%08x\n",
+                        buf[0], buf[1], buf[2], buf[3]);
+                kprintf("CORE: stk  +10=%08x +14=%08x +18=%08x +1c=%08x\n",
+                        buf[4], buf[5], buf[6], buf[7]);
+            }
+        }
+        /* Dump 16 bytes of user code at eip, peeked via copyin. */
+        if (last_core_record.regs.eip != 0) {
+            unsigned char ibuf[16] = {0};
+            extern int copyin(const void *, void *, unsigned int);
+            if (copyin((const void *)last_core_record.regs.eip, ibuf, sizeof(ibuf)) == 0) {
+                kprintf("CORE: code @eip: %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x\n",
+                        ibuf[0], ibuf[1], ibuf[2], ibuf[3],
+                        ibuf[4], ibuf[5], ibuf[6], ibuf[7],
+                        ibuf[8], ibuf[9], ibuf[10], ibuf[11],
+                        ibuf[12], ibuf[13], ibuf[14], ibuf[15]);
+            } else {
+                kprintf("CORE: code @eip: <not mapped>\n");
+            }
+        }
     }
 
     if (last_core_record.segment_count > 0) {

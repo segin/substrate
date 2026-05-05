@@ -117,8 +117,10 @@ typedef struct {
 } __attribute__((packed)) ext2_dirent_t;
 
 // EXT2 filesystem context (per-mount)
+struct mount;
 typedef struct {
     fs_node_t *device;          // Block device node
+    struct mount *mp;           // VFS mount structure
     ext2_superblock_t sb;       // Superblock
     ext2_group_desc_t *bgd;     // Block group descriptor table
     uint32_t block_size;        // Block size in bytes

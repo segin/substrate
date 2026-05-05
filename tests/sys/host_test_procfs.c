@@ -141,6 +141,45 @@ static uint32_t mock_cpuinfo_gen(char *buf, size_t size, void *opaque) {
                               "vendor_id\t: TestVendor\n");
 }
 
+static char mock_large_runtime_text[4096];
+static size_t mock_large_runtime_len;
+
+static void init_mock_large_runtime_text(void) {
+    if (mock_large_runtime_len != 0) {
+        return;
+    }
+
+    for (int cpu = 0; cpu < 20; cpu++) {
+        mock_large_runtime_len += (size_t)snprintf(
+            mock_large_runtime_text + mock_large_runtime_len,
+            sizeof(mock_large_runtime_text) - mock_large_runtime_len,
+            "processor\t: %d\n"
+            "vendor_id\t: TestVendor\n"
+            "flags\t\t: fpu sse sse2 ht sse3\n\n",
+            cpu);
+    }
+}
+
+static uint32_t mock_large_runtime_gen(char *buf, size_t size, void *opaque) {
+    size_t copy_len;
+
+    (void)opaque;
+    init_mock_large_runtime_text();
+
+    if (!buf || size == 0) {
+        return (uint32_t)mock_large_runtime_len;
+    }
+
+    copy_len = mock_large_runtime_len;
+    if (copy_len >= size) {
+        copy_len = size - 1;
+    }
+
+    memcpy(buf, mock_large_runtime_text, copy_len);
+    buf[copy_len] = '\0';
+    return (uint32_t)mock_large_runtime_len;
+}
+
 void setup_processes() {
     memset(processes, 0, sizeof(processes));
     for(int i=0; i<MAX_PROCS; i++) processes[i].pid = -1;
@@ -447,6 +486,34 @@ void test_procfs_kmalloc_fail(void) {
     printf("PASS\n");
 }
 
+void test_procfs_large_runtime_entry(void) {
+    char buffer[4096];
+    fs_node_t *node;
+    size_t total = 0;
+
+    printf("Test: procfs large runtime entry read...\n");
+
+    init_mock_large_runtime_text();
+    assert(mock_large_runtime_len > 1024);
+    assert(procfs_register_entry("largecpuinfo", mock_large_runtime_gen, NULL) == 0);
+
+    node = procfs_finddir(NULL, "largecpuinfo");
+    assert(node != NULL);
+    memset(buffer, 0, sizeof(buffer));
+
+    while (total < mock_large_runtime_len) {
+        size_t chunk = node->read(node, (off_t)total, 257, (uint8_t *)buffer + total);
+        assert(chunk > 0);
+        total += chunk;
+    }
+
+    assert(total == mock_large_runtime_len);
+    assert(memcmp(buffer, mock_large_runtime_text, mock_large_runtime_len) == 0);
+    assert(node->read(node, (off_t)total, 257, (uint8_t *)buffer) == 0);
+
+    printf("PASS\n");
+}
+
 void test_proc_status_injection(void) {
     printf("Test: proc_status_injection...\n");
 
@@ -607,6 +674,7 @@ int main() {
     test_procfs_mounts_read();
     test_procfs_driver_model_entries();
     test_procfs_kmalloc_fail();
+    test_procfs_large_runtime_entry();
 
     printf("All tests passed!\n");
     return 0;

@@ -2508,5 +2508,6 @@ struct personality personality_elks = {
     .sendsig = elks_sendsig,
     .sigreturn = NULL,
     .rt_sigreturn = NULL,
-    .handle_trap = elks_handle_trap
+    .handle_trap = elks_handle_trap,
+    .path_prefix = "/perso/elks"
 };

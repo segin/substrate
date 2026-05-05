@@ -9,6 +9,8 @@ Editline library (libedit, \-ledit)
 .SH SYNOPSIS
 .B #include <histedit.h>
 .PP
+.BI "typedef const char *(*el_pfunc_t)(EditLine *);"
+.PP
 .BI "int el_set(EditLine *el, int op, ...);"
 .br
 .BI "int el_get(EditLine *el, int op, ...);"
@@ -23,10 +25,32 @@ reads current option values selected by
 The public operation macros are:
 .TP
 .B EL_PROMPT
-Set/get primary prompt callback.
+Set/get the primary prompt callback.  For
+.BR el_set (),
+pass an
+.IR el_pfunc_t .
+For
+.BR el_get (),
+pass an
+.IR "el_pfunc_t *" .
+.TP
+.B EL_PROMPT_ESC
+Set/get the primary prompt callback and the prompt escape marker.  For
+.BR el_set (),
+pass
+.IR "el_pfunc_t, int" .
+For
+.BR el_get (),
+pass
+.IR "el_pfunc_t *, char *" .
 .TP
 .B EL_RPROMPT
-Set/get right prompt callback.
+Set/get the right prompt callback.
+.TP
+.B EL_RPROMPT_ESC
+Set/get the right prompt callback and the prompt escape marker, using the
+same argument forms as
+.BR EL_PROMPT_ESC .
 .TP
 .B EL_EDITOR
 Set/get editing mode name.
@@ -58,8 +82,15 @@ Query a terminal capability.
 .B EL_SETTY
 Apply tty mode presets.
 .TP
-.B EL_GETTY
-Fetch tty mode presets.
+.B EL_GETFP
+Fetch the input, output, or error
+.I FILE
+pointer.
+.TP
+.B EL_SETFP
+Set the input, output, or error
+.I FILE
+pointer.
 .PP
 Argument types for each operation are defined by
 .BR <histedit.h> .

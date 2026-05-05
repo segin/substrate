@@ -1,6 +1,7 @@
 #include <vm/vm_object.h>
 #include <vm/vm_kmem.h>
 #include <vm/vm_pager.h>
+#include <sys/lock.h>
 #include <stddef.h>
 
 // Static pool for bootstrap objects (until kmalloc is ready)
@@ -8,6 +9,7 @@
 static vm_object_t bootstrap_objects[MAX_BOOTSTRAP_OBJECTS];
 static int next_bootstrap_object = 0;
 static int kmalloc_ready = 0;
+static spinlock_t vm_object_teardown_lock = SPINLOCK_INIT("vmobj_teardown");
 
 static vm_object_t *alloc_object(void) {
     if (next_bootstrap_object < MAX_BOOTSTRAP_OBJECTS)
@@ -45,25 +47,44 @@ vm_object_t *vm_object_allocate(vm_object_type_t type, size_t size) {
 
 void vm_object_reference(vm_object_t *object) {
     if (object) {
-        object->ref_count++;
+        __sync_fetch_and_add(&object->ref_count, 1);
     }
 }
 
 void vm_object_deallocate(vm_object_t *object) {
     if (!object) return;
 
-    object->ref_count--;
-    if (object->ref_count == 0) {
+    /* Atomic decrement and check */
+    if (__sync_sub_and_fetch(&object->ref_count, 1) == 0) {
+        vm_page_t *pages;
+
+        spinlock_acquire(&vm_object_teardown_lock);
+
+        /* Mark dead immediately to prevent concurrent page fault traversal */
+        object->type = VM_OBJ_TYPE_DEAD;
+        __sync_synchronize();  /* Full barrier: ensure DEAD is visible before teardown */
+
         vm_object_t *shadow = object->shadow;
         struct vm_pager *pager = object->pager;
 
         object->shadow = NULL;
         object->pager = NULL;
+        pages = object->pages;
+        object->pages = NULL;
+        object->page_count = 0;
 
-        // Free all pages
-        vm_page_t *p = object->pages;
+        spinlock_release(&vm_object_teardown_lock);
+
+        // Free all pages.  Walk via obj_next so we don't depend on the
+        // queue-linkage next pointer (which may have been set to whatever
+        // queue this page belongs to).  Detach each page before freeing
+        // and clear its object so vm_page_free skips vm_object_remove_page.
+        vm_page_t *p = pages;
         while (p) {
-            vm_page_t *next = p->next;
+            vm_page_t *next = p->obj_next;
+            p->obj_next = NULL;
+            p->obj_prev = NULL;
+            p->object = NULL;
             vm_page_free(p);
             p = next;
         }
@@ -87,34 +108,43 @@ void vm_object_deallocate(vm_object_t *object) {
 
 void vm_object_add_page(vm_object_t *object, vm_page_t *page) {
     page->object = object;
-    
-    // Add to head of object's page list
-    page->next = object->pages;
+
+    // Add to head of object's page list (using obj_next/obj_prev so this
+    // doesn't conflict with queue linkage in next/prev).
+    page->obj_next = object->pages;
     if (object->pages) {
-        object->pages->prev = page;
+        object->pages->obj_prev = page;
     }
     object->pages = page;
-    page->prev = NULL;
-    
+    page->obj_prev = NULL;
+
     object->page_count++;
 }
 
 void vm_object_remove_page(vm_object_t *object, vm_page_t *page) {
-    if (page->prev) {
-        page->prev->next = page->next;
+    /* Defensive: if the page isn't actually linked into this object's list,
+     * skip removal so we don't clobber object->pages. */
+    if (object->pages != page && page->obj_prev == NULL) {
+        page->object = NULL;
+        return;
+    }
+    if (page->obj_prev) {
+        page->obj_prev->obj_next = page->obj_next;
     } else {
-        object->pages = page->next;
+        object->pages = page->obj_next;
     }
-    if (page->next) {
-        page->next->prev = page->prev;
+    if (page->obj_next) {
+        page->obj_next->obj_prev = page->obj_prev;
     }
+    page->obj_next = NULL;
+    page->obj_prev = NULL;
     page->object = NULL;
     object->page_count--;
 }
 
 vm_page_t *vm_object_lookup_page(vm_object_t *object, uint64_t pindex) {
     vm_page_t *p;
-    for (p = object->pages; p != NULL; p = p->next) {
+    for (p = object->pages; p != NULL; p = p->obj_next) {
         if (p->pindex == pindex) return p;
     }
     return NULL;

@@ -74,4 +74,46 @@ void syncer_daemon(void *arg);
 
 int binval_vnode(struct vnode *vp, int save);
 
+/*
+ * Device-keyed buffer cache helpers.
+ *
+ * These allow non-VFS callers (raw device readers in fs/ext2, fs/udf, ...)
+ * to participate in the unified buffer cache without going through a
+ * struct vnode.  The cache is keyed by an opaque (dev, blkno, size) tuple.
+ *
+ * On miss the returned buf has B_CACHE clear and b_data zeroed; the caller
+ * is responsible for filling b_data and setting B_CACHE before releasing.
+ * On hit B_CACHE is set and b_data already contains the cached payload.
+ *
+ * Callers must NOT call bread/bwrite/breada on these buffers — those
+ * paths dereference b_vp via VOP_STRATEGY which is invalid for a raw
+ * device key.  Use bio_dev_get + manual fill + bio_dev_release.
+ */
+struct buf *bio_dev_get(void *dev, int64_t blkno, size_t size);
+void bio_dev_mark_dirty(struct buf *bp);
+void bio_dev_invalidate(void *dev, int64_t blkno);
+void bio_dev_release(struct buf *bp);
+
+/* Reclaim clean buffers under memory pressure. Returns bytes freed. */
+size_t bio_reclaim(size_t target_bytes);
+
+/* Drop ALL clean/empty buffers for a given device key (used on unmount). */
+void bio_dev_purge(void *dev);
+
+struct bio_stats {
+    uint32_t nbuf;             /* total resident buffers */
+    uint32_t nbuf_target;      /* current soft target (informational) */
+    uint64_t resident_bytes;   /* approximate cache footprint */
+    uint64_t free_ram_bytes;   /* free RAM as observed at sample time */
+    uint64_t hits;
+    uint64_t misses;
+    uint64_t reclaims;
+    uint32_t q_locked;
+    uint32_t q_clean;
+    uint32_t q_dirty;
+    uint32_t q_empty;
+};
+
+void bio_get_stats(struct bio_stats *out);
+
 #endif /* _VFS_BUF_H */

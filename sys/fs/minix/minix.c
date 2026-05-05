@@ -2,6 +2,7 @@
 #include <kern/console.h>
 #include <vm/vm_kmem.h>
 #include <vfs/vfs.h>
+#include <sys/errno.h>
 #include <sys/stat.h>
 #include <kern/time.h>
 #include <string.h>
@@ -39,6 +40,7 @@ static int minix_read_inode(minix_fs_t *fs, uint32_t inode_num, fs_node_t *node)
 static int minix_write_inode(minix_fs_t *fs, fs_node_t *node);
 static int minix_write_inode_raw(minix_fs_t *fs, uint32_t inode_num, struct minix_inode_v1 *inode);
 static void minix_free_block(minix_fs_t *fs, uint32_t zone);
+static int minix_chmod(fs_node_t *node, uint32_t mode);
 
 static uint16_t minix_type_bits_from_flags(uint32_t flags) {
     if (flags & FS_DIRECTORY) return 0x4000;
@@ -63,6 +65,15 @@ void minix_init(void) {
 }
 
 /* Zone conversion helper */
+/* Bounds-check a zone number that came from disk before using it as a
+ * device offset.  s_nzones (v1) / s_zones (v2) gives the filesystem's
+ * extent; anything outside that window is corrupt or hostile. */
+static inline uint32_t minix_zone_ok(minix_fs_t *fs, uint32_t z) {
+    uint32_t max = fs->sb.s_zones ? fs->sb.s_zones : fs->sb.s_nzones;
+    if (max == 0) return 0;        /* unknown size — be conservative */
+    return (z != 0 && z < max);
+}
+
 static uint32_t minix_get_zone_v1(minix_fs_t *fs, struct minix_inode_v1 *inode, uint32_t zone_index) {
     // Direct zones (0-6)
     if (zone_index < 7) {
@@ -75,7 +86,7 @@ static uint32_t minix_get_zone_v1(minix_fs_t *fs, struct minix_inode_v1 *inode, 
     // Indirect zone (7)
     if (indirect_index < entries_per_block) {
         uint16_t z = inode->i_zone[7];
-        if (z == 0) return 0;
+        if (!minix_zone_ok(fs, z)) return 0;
 
         uint16_t buf[MINIX_BLOCK_SIZE / 2];
         if (read_fs(fs->block_device, z * MINIX_BLOCK_SIZE, MINIX_BLOCK_SIZE, (uint8_t *)buf) != MINIX_BLOCK_SIZE) {
@@ -88,20 +99,20 @@ static uint32_t minix_get_zone_v1(minix_fs_t *fs, struct minix_inode_v1 *inode, 
     uint32_t double_indirect_index = indirect_index - entries_per_block;
     if (double_indirect_index < entries_per_block * entries_per_block) {
         uint16_t z = inode->i_zone[8];
-        if (z == 0) return 0;
+        if (!minix_zone_ok(fs, z)) return 0;
 
         uint16_t buf[MINIX_BLOCK_SIZE / 2];
         if (read_fs(fs->block_device, z * MINIX_BLOCK_SIZE, MINIX_BLOCK_SIZE, (uint8_t *)buf) != MINIX_BLOCK_SIZE) {
             return 0;
         }
-        
+
         uint16_t indirect_block = buf[double_indirect_index / entries_per_block];
-        if (indirect_block == 0) return 0;
+        if (!minix_zone_ok(fs, indirect_block)) return 0;
 
         if (read_fs(fs->block_device, indirect_block * MINIX_BLOCK_SIZE, MINIX_BLOCK_SIZE, (uint8_t *)buf) != MINIX_BLOCK_SIZE) {
             return 0;
         }
-        
+
         return buf[double_indirect_index % entries_per_block];
     }
 
@@ -121,7 +132,7 @@ static uint32_t minix_get_zone_v2(minix_fs_t *fs, struct minix_inode_v2 *inode, 
     // Indirect zone (7)
     if (indirect_index < entries_per_block) {
         uint32_t z = inode->i_zone[7];
-        if (z == 0) return 0;
+        if (!minix_zone_ok(fs, z)) return 0;
 
         uint32_t buf[MINIX_BLOCK_SIZE / 4];
         if (read_fs(fs->block_device, z * MINIX_BLOCK_SIZE, MINIX_BLOCK_SIZE, (uint8_t *)buf) != MINIX_BLOCK_SIZE) {
@@ -134,7 +145,7 @@ static uint32_t minix_get_zone_v2(minix_fs_t *fs, struct minix_inode_v2 *inode, 
     uint32_t double_indirect_index = indirect_index - entries_per_block;
     if (double_indirect_index < entries_per_block * entries_per_block) {
         uint32_t z = inode->i_zone[8];
-        if (z == 0) return 0;
+        if (!minix_zone_ok(fs, z)) return 0;
 
         uint32_t buf[MINIX_BLOCK_SIZE / 4];
         if (read_fs(fs->block_device, z * MINIX_BLOCK_SIZE, MINIX_BLOCK_SIZE, (uint8_t *)buf) != MINIX_BLOCK_SIZE) {
@@ -142,7 +153,7 @@ static uint32_t minix_get_zone_v2(minix_fs_t *fs, struct minix_inode_v2 *inode, 
         }
 
         uint32_t indirect_block = buf[double_indirect_index / entries_per_block];
-        if (indirect_block == 0) return 0;
+        if (!minix_zone_ok(fs, indirect_block)) return 0;
 
         if (read_fs(fs->block_device, indirect_block * MINIX_BLOCK_SIZE, MINIX_BLOCK_SIZE, (uint8_t *)buf) != MINIX_BLOCK_SIZE) {
             return 0;
@@ -470,6 +481,7 @@ static int minix_read_inode(minix_fs_t *fs, uint32_t inode_num, fs_node_t *node)
     } else node->flags = 0;
 
     node->mask = mode & 0xFFF;
+    node->chmod = minix_chmod;
 
     // Hook operations
     if (node->flags & FS_DIRECTORY) {
@@ -489,6 +501,22 @@ static int minix_read_inode(minix_fs_t *fs, uint32_t inode_num, fs_node_t *node)
          node->unlink = minix_unlink;
             node->rmdir = minix_rmdir;
          node->mknod = minix_mknod;
+    }
+
+    return 0;
+}
+
+static int minix_chmod(fs_node_t *node, uint32_t mode) {
+    minix_fs_t *fs;
+
+    if (!node) return -EINVAL;
+
+    fs = (minix_fs_t *)(uintptr_t)node->impl;
+    if (!fs) return -EINVAL;
+
+    node->mask = mode & 07777U;
+    if (minix_write_inode(fs, node) != 0) {
+        return -EIO;
     }
 
     return 0;

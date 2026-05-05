@@ -253,17 +253,13 @@ int device_unregister(struct device *dev) {
         dev->sibling = NULL;
     }
     
-    /* 3. Handle Children (Orphan them) */
+    /* 3. Handle Children (Orphan them - reparent to NULL) */
     spinlock_acquire(&dev->lock);
     curr = dev->children;
     while (curr) {
          struct device *next = curr->sibling;
          curr->parent = NULL;
-         curr->sibling = NULL; /* Detach from sibling list too as they are now top-level orphans? 
-                                  Or keep them linked? 
-                                  Usually orphans are just roots. sibling is used for parent's list.
-                                  If parent is NULL, sibling/children defines structure.
-                                  Let's zero sibling to be safe/clean roots. */
+         curr->sibling = NULL;
          curr = next;
     }
     dev->children = NULL;
@@ -292,11 +288,14 @@ void device_get(struct device *dev) {
  */
 void device_put(struct device *dev) {
     if (dev) {
-
-        if (__sync_sub_and_fetch(&dev->ref_count, 1) <= 0) {
-            /* Ensure it's unregistered? 
-               Usually safe to assume calling put on a registered device is bad if it hits zero,
-               but we just free memory here. */
+        /* Guard against underflow (finding #22) */
+        int old = __sync_fetch_and_sub(&dev->ref_count, 1);
+        if (old <= 1) {
+            if (old < 1) {
+                /* Already zero or negative - restore and bail */
+                __sync_fetch_and_add(&dev->ref_count, 1);
+                return;
+            }
             kfree(dev, sizeof(struct device));
         }
     }

@@ -16,7 +16,12 @@
 #define O_APPEND    0x0400
 #define O_NONBLOCK  0x0800
 #define O_DIRECTORY 0x10000
+#define O_NOFOLLOW  0x20000
 #define O_CLOEXEC   0x80000
+
+#define AT_FDCWD            (-100)
+#define AT_SYMLINK_NOFOLLOW 0x100
+#define AT_REMOVEDIR        0x200
 
 /* fcntl() commands */
 #define F_DUPFD     0
@@ -45,6 +50,7 @@ struct flock {
 };
 
 int open(const char *pathname, int flags, ...);
+int openat(int dirfd, const char *pathname, int flags, ...);
 int creat(const char *pathname, int mode);
 int fcntl(int fd, int cmd, ...);
 

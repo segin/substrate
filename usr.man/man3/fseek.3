@@ -1,0 +1,201 @@
+.\" fseek.3 - reposition a stream
+.TH FSEEK 3 "May 2026" "Substrate" "Library Functions Manual"
+.SH NAME
+fseek, ftell, rewind, fgetpos, fsetpos, fseeko, ftello \- reposition a stream
+.SH LIBRARY
+.B libc
+.SH SYNOPSIS
+.B #include <stdio.h>
+.PP
+.BI "int fseek(FILE *" stream ", long " offset ", int " whence ");"
+.PP
+.BI "long ftell(FILE *" stream ");"
+.PP
+.BI "void rewind(FILE *" stream ");"
+.PP
+.BI "int fgetpos(FILE *" stream ", fpos_t *" pos ");"
+.PP
+.BI "int fsetpos(FILE *" stream ", const fpos_t *" pos ");"
+.PP
+.B #include <sys/types.h>
+.PP
+.BI "int fseeko(FILE *" stream ", off_t " offset ", int " whence ");"
+.PP
+.BI "off_t ftello(FILE *" stream ");"
+.SH DESCRIPTION
+The
+.BR fseek ()
+function sets the file position indicator for the stream pointed to by
+.IR stream .
+The new position, measured in bytes, is obtained by adding
+.I offset
+bytes to the position specified by
+.IR whence .
+The value of
+.I whence
+shall be one of:
+.TP
+.B SEEK_SET
+The new file position is set to
+.I offset
+bytes from the beginning of the file.
+.TP
+.B SEEK_CUR
+The new file position is set to its current location plus
+.IR offset .
+.TP
+.B SEEK_END
+The new file position is set to the size of the file plus
+.IR offset .
+.PP
+Before the seek is performed,
+.BR fseek ()
+flushes any buffered output, invalidates the read buffer, discards a
+character pushed back via
+.BR ungetc (3),
+and clears the end-of-file indicator for the stream. The seek itself is
+implemented via
+.BR lseek (2).
+.PP
+The
+.BR fseeko ()
+function is identical to
+.BR fseek ()
+except that the
+.I offset
+argument has type
+.IR off_t ,
+allowing positions outside the range of
+.IR long .
+.PP
+The
+.BR ftell ()
+function obtains the current value of the file position indicator for
+.IR stream .
+For streams opened for reading the value returned by
+.BR lseek (2)
+is adjusted downward by the number of bytes that have been buffered but
+not yet returned to the caller, including any character pending from
+.BR ungetc (3).
+For streams opened for writing the value is adjusted upward by the
+number of bytes buffered but not yet flushed to the underlying file
+descriptor.
+.PP
+The
+.BR ftello ()
+function is identical to
+.BR ftell ()
+except that the return type is
+.IR off_t .
+.PP
+The
+.BR rewind ()
+function sets the file position indicator for
+.I stream
+to the beginning of the file. It is equivalent to:
+.PP
+.RS 4
+(void) fseek(stream, 0L, SEEK_SET);
+.RE
+.PP
+except that
+.BR rewind ()
+also clears the error indicator for the stream by calling
+.BR clearerr (3).
+.PP
+The
+.BR fgetpos ()
+and
+.BR fsetpos ()
+functions are alternate interfaces equivalent to
+.BR ftell ()
+and
+.BR fseek ()
+(with
+.I whence
+set to
+.BR SEEK_SET ),
+setting and storing the current value of the file position indicator
+through the object referenced by
+.IR pos .
+On Substrate
+.I fpos_t
+holds a byte offset compatible with
+.IR "long" .
+.SH RETURN VALUE
+The
+.BR fseek (),
+.BR fseeko (),
+and
+.BR fsetpos ()
+functions return 0 on success; otherwise, \-1 is returned and the error
+indicator for the stream is set.
+.PP
+The
+.BR ftell ()
+and
+.BR ftello ()
+functions return the current offset, in bytes, from the beginning of
+the file. On error, \-1 is returned.
+.PP
+The
+.BR fgetpos ()
+function returns 0 on success and \-1 on failure.
+.PP
+The
+.BR rewind ()
+function returns no value.
+.SH ERRORS
+These functions may fail with any of the errors specified for
+.BR lseek (2),
+including:
+.TP
+.B EBADF
+The
+.I stream
+is not associated with a seekable file (for example, a pipe, FIFO, or
+socket).
+.TP
+.B EINVAL
+The
+.I whence
+argument is not
+.BR SEEK_SET ,
+.BR SEEK_CUR ,
+or
+.BR SEEK_END ,
+or the resulting file offset would be negative.
+.TP
+.B EOVERFLOW
+For
+.BR ftell ()
+and
+.BR fgetpos (),
+the resulting file offset cannot be represented in a
+.IR long .
+.PP
+In addition, these functions may fail and set
+.I errno
+for any of the errors specified for the routines
+.BR fflush (3)
+and
+.BR lseek (2).
+.SH SEE ALSO
+.BR lseek (2),
+.BR clearerr (3),
+.BR fflush (3),
+.BR fopen (3),
+.BR ungetc (3)
+.SH STANDARDS
+.BR fseek (),
+.BR ftell (),
+.BR rewind (),
+.BR fgetpos (),
+and
+.BR fsetpos ()
+conform to ISO C99.
+.PP
+.BR fseeko ()
+and
+.BR ftello ()
+conform to POSIX.1-2001.

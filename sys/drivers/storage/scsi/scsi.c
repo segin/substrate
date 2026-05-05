@@ -59,7 +59,11 @@ static scsi_link_t *scsi_links[SCSI_MAX_LINKS];
 static int scsi_link_count = 0;
 
 /* Request Pool */
-#define SCSI_REQUEST_POOL_SIZE 32
+/* Bumped from 32 → 256.  Under heavy concurrent I/O (multiple block
+ * devices each issuing reads from filesystem callers) the smaller pool
+ * exhausted silently and callers that didn't check for NULL produced
+ * mysterious EIOs.  256 is still tiny against the kernel heap. */
+#define SCSI_REQUEST_POOL_SIZE 256
 static scsi_request_t scsi_request_pool[SCSI_REQUEST_POOL_SIZE];
 static scsi_request_t *scsi_free_requests = NULL;
 
@@ -1091,7 +1095,7 @@ int scsi_scan_bus(scsi_link_t *link, uint8_t bus) {
         return -1;
     }
     
-    kprintf("SCSI: Scanning bus %d via '%s'\n", bus, link->name[0] ? link->name : "unknown");
+    // kprintf("SCSI: Scanning bus %d via '%s'\n", bus, link->name[0] ? link->name : "unknown");
     
     int devices_found = 0;
     
@@ -1159,7 +1163,7 @@ int scsi_scan_bus(scsi_link_t *link, uint8_t bus) {
         }
     }
     
-    kprintf("SCSI: Bus %d scan complete, %d device(s) found\n", bus, devices_found);
+    // kprintf("SCSI: Bus %d scan complete, %d device(s) found\n", bus, devices_found);
     
     return devices_found;
 }

@@ -42,6 +42,13 @@ enum {
 #undef regoff_t
 #undef regmatch_t
 
+int host_regcomp(host_regex_t *restrict preg,
+    const char *restrict pattern, int cflags) __asm__("regcomp");
+int host_regexec(const host_regex_t *restrict preg,
+    const char *restrict string, size_t nmatch,
+    host_regmatch_t pmatch[restrict], int eflags) __asm__("regexec");
+void host_regfree(host_regex_t *preg) __asm__("regfree");
+
 #define regoff_t host_regoff_t
 #define regmatch_t host_regmatch_t
 
@@ -122,7 +129,7 @@ static int posix_match_from(const regex_t *re, const char *text, size_t text_len
     memcpy(tmp, text + offset, text_len - offset);
     tmp[text_len - offset] = '\0';
 
-    rc = regexec(&impl->re, tmp, mcount, m, 0);
+    rc = host_regexec(&impl->re, tmp, mcount, m, 0);
     free(tmp);
 
     if (rc == HOST_REG_NOMATCH) {
@@ -188,7 +195,7 @@ static regex_err_t posix_compile(regex_t *re, const char *pattern, unsigned flag
         return REGEX_ERR_NOMEM;
     }
 
-    rc = regcomp(&impl->re, final_pattern, cflags);
+    rc = host_regcomp(&impl->re, final_pattern, cflags);
     free(final_pattern);
     if (rc != 0) {
         free(impl);
@@ -212,7 +219,7 @@ static void posix_destroy(regex_t *re) {
     }
 
     impl = (posix_regex_impl *)re->impl;
-    regfree(&impl->re);
+    host_regfree(&impl->re);
     free(impl);
     re->impl = NULL;
 }
