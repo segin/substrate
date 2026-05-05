@@ -374,7 +374,7 @@ void *percpu_get(void) { return &mock_percpu_data; }
 int percpu_get_cpu_id(void) { return 0; }
 int sched_can_run_on_cpu(void) { return 1; }
 void host_wait_for_interrupt(void) {}
-void vm_map_destroy(vm_map_t *map) { (void)map; }
+__attribute__((weak)) void vm_map_destroy(vm_map_t *map) { (void)map; }
 void cmdline_get_full(char *buf, size_t buf_len) { if(buf && buf_len > 0) buf[0] = '\0'; }
 
 void wait_for_interrupt() {}
@@ -434,7 +434,7 @@ void i386_cpu_cycle_counter_split(uint32_t *lo, uint32_t *hi) {
 }
 
 /* ---- Lock / rwlock mocks ---- */
-void rwlock_init(rwlock_t *rw, const char *name) { (void)rw; (void)name; }
+__attribute__((weak)) void rwlock_init(rwlock_t *rw, const char *name) { (void)rw; (void)name; }
 void rw_rlock(rwlock_t *rw) { (void)rw; }
 bool rw_try_rlock(rwlock_t *rw) { (void)rw; return true; }
 void rw_runlock(rwlock_t *rw) { (void)rw; }
