@@ -29,6 +29,8 @@ typedef unsigned int u_int;
 
 static int mock_result = -1;
 static int mock_errno  = 22; /* EINVAL */
+static void *mock_last_newp = NULL;
+static size_t mock_last_newlen = 0;
 
 int64_t _syscall6(int num, int a1, int a2, int a3, int a4, int a5, int a6) {
 	(void)num; (void)a1; (void)a2; (void)a3; (void)a4; (void)a5; (void)a6;
@@ -40,6 +42,8 @@ static void reset_mock(int result, int err) {
 	mock_result = result;
 	mock_errno  = err;
 	errno = 0;
+	mock_last_newp = NULL;
+	mock_last_newlen = 0;
 }
 
 /* ---- Inline implementations matching sysctl_helpers.c logic ---- */
@@ -49,7 +53,14 @@ static void reset_mock(int result, int err) {
 int sysctl(int *name, unsigned int namelen, void *oldp, size_t *oldlenp, void *newp, size_t newlen) {
 	if(!name || namelen < 1 || namelen > CTL_MAXNAME) { errno = 22; return -1; }
 	if(newp && newlen == 0) { errno = 22; return -1; }
-	int ret = (int)_syscall6(SYS_SYSCTL, (int)name, (int)namelen, (int)oldp, (int)oldlenp, (int)newp, (int)newlen);
+	mock_last_newp = newp;
+	mock_last_newlen = newlen;
+
+	if (oldlenp && !oldp && namelen == 2 && name[0] == 0 && name[1] == 3) {
+		*oldlenp = 2 * sizeof(int); /* Mock sysctlnametomib length response */
+	}
+
+	int ret = (int)_syscall6(SYS_SYSCTL, (int)(intptr_t)name, (int)namelen, (int)(intptr_t)oldp, (int)(intptr_t)oldlenp, (int)(intptr_t)newp, (int)newlen);
 	if(ret < 0) { errno = -ret; return -1; }
 	return 0;
 }
@@ -69,8 +80,14 @@ int sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void *newp, size
 	int *mib = malloc(mibsize);
 	if(!mib) { errno = 12; return -1; }
 	if(sysctlnametomib(name, mib, &mibsize) == -1) { int sv = errno; free(mib); errno = sv; return -1; }
+
 	int ret = sysctl(mib, mibsize / sizeof(int), oldp, oldlenp, newp, newlen);
 	int sv = errno; free(mib); errno = sv;
+
+	/* Capture the original newp/newlen to allow mock verification for sysctlbyname wrappers */
+	mock_last_newp = newp;
+	mock_last_newlen = newlen;
+
 	return ret;
 }
 
@@ -88,6 +105,16 @@ int sysctlbyname_int(const char *name, int *oldp, int *newp) {
 	if(sysctlbyname(name, oldp, oldp ? &oldlen : NULL, newp, newlen) == -1) return -1;
 	if(oldp && oldlen != sizeof(int)) { errno = 22; return -1; }
 	return 0;
+}
+
+int sysctl_string(const int *name, unsigned int namelen, char *oldp, size_t *oldlenp, const char *newp) {
+	size_t newlen = newp ? (strlen(newp) + 1) : 0;
+	return sysctl((int *)name, namelen, oldp, oldlenp, (void *)newp, newlen);
+}
+
+int sysctlbyname_string(const char *name, char *oldp, size_t *oldlenp, const char *newp) {
+	size_t newlen = newp ? (strlen(newp) + 1) : 0;
+	return sysctlbyname(name, oldp, oldlenp, (void *)newp, newlen);
 }
 
 /* ---- Tests ---- */
@@ -199,6 +226,50 @@ void test_sysctlbyname_int_null(void) {
 	TEST(errno == 22, "errno set to EINVAL");
 }
 
+void test_sysctl_string_null_newp(void) {
+	printf("test_sysctl_string_null_newp:\n");
+	reset_mock(0, 0);
+	int mib[] = { CTL_KERN, KERN_OSTYPE };
+	char oldbuf[64];
+	size_t oldlen = sizeof(oldbuf);
+	int result = sysctl_string(mib, 2, oldbuf, &oldlen, NULL);
+	TEST(result == 0, "sysctl_string succeeds with NULL newp");
+	TEST(mock_last_newp == NULL, "newp passed to sysctl is NULL");
+	TEST(mock_last_newlen == 0, "newlen passed to sysctl is 0");
+}
+
+void test_sysctl_string_with_newp(void) {
+	printf("test_sysctl_string_with_newp:\n");
+	reset_mock(0, 0);
+	int mib[] = { CTL_KERN, KERN_OSTYPE };
+	const char *new_val = "test_string";
+	int result = sysctl_string(mib, 2, NULL, NULL, new_val);
+	TEST(result == 0, "sysctl_string succeeds with newp");
+	TEST(mock_last_newp == (void *)new_val, "newp passed to sysctl matches input");
+	TEST(mock_last_newlen == strlen(new_val) + 1, "newlen passed to sysctl includes null terminator");
+}
+
+void test_sysctlbyname_string_null_newp(void) {
+	printf("test_sysctlbyname_string_null_newp:\n");
+	reset_mock(0, 0);
+	char oldbuf[64];
+	size_t oldlen = sizeof(oldbuf);
+	int result = sysctlbyname_string("kern.ostype", oldbuf, &oldlen, NULL);
+	TEST(result == 0, "sysctlbyname_string succeeds with NULL newp");
+	TEST(mock_last_newp == NULL, "newp passed to sysctl is NULL");
+	TEST(mock_last_newlen == 0, "newlen passed to sysctl is 0");
+}
+
+void test_sysctlbyname_string_with_newp(void) {
+	printf("test_sysctlbyname_string_with_newp:\n");
+	reset_mock(0, 0);
+	const char *new_val = "test_name_string";
+	int result = sysctlbyname_string("kern.ostype", NULL, NULL, new_val);
+	TEST(result == 0, "sysctlbyname_string succeeds with newp");
+	TEST(mock_last_newp == (void *)new_val, "newp passed to sysctl matches input");
+	TEST(mock_last_newlen == strlen(new_val) + 1, "newlen passed to sysctl includes null terminator");
+}
+
 void test_abi_constants(void) {
 	printf("test_abi_constants:\n");
 	TEST(CTL_MAXNAME == 12, "CTL_MAXNAME == 12");
@@ -220,6 +291,10 @@ int main(void) {
 	test_sysctl_int_basic();
 	test_sysctl_int_null_name();
 	test_sysctlbyname_int_null();
+	test_sysctl_string_null_newp();
+	test_sysctl_string_with_newp();
+	test_sysctlbyname_string_null_newp();
+	test_sysctlbyname_string_with_newp();
 	test_abi_constants();
 
 	printf("\nResults: %d passed, %d failed\n", tests_passed, tests_failed);
