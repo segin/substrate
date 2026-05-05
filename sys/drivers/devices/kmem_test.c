@@ -36,17 +36,15 @@ void kmem_test_init(void) {
     /* Fill with known pattern */
     memset(kmem_test_buffer, 0xAA, kmem_test_size);
 
-    /* Write recognizable strings for verification */
-    const char *start_msg = "KMEM_TEST_START: This is a safe kernel buffer for testing.";
-    const char *end_msg = "KMEM_TEST_END: End of buffer.";
-
     if (kmem_test_size > 0) {
-        snprintf((char*)kmem_test_buffer, kmem_test_size, "%s", start_msg);
-    }
+        snprintf((char*)kmem_test_buffer, kmem_test_size, "KMEM_TEST_START: This is a safe kernel buffer for testing.");
 
-    if (kmem_test_size > (int)strlen(end_msg) + 1) {
-        int offset = kmem_test_size - strlen(end_msg) - 1;
-        snprintf((char*)kmem_test_buffer + offset, kmem_test_size - offset, "%s", end_msg);
+        const char *end_msg = "KMEM_TEST_END.\n";
+        size_t end_msg_len = strlen(end_msg);
+
+        if (kmem_test_size > (int)end_msg_len) {
+            snprintf((char*)kmem_test_buffer + kmem_test_size - end_msg_len - 1, end_msg_len + 1, "%s", end_msg);
+        }
     }
 
     char buf[128];
