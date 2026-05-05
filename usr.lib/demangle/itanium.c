@@ -524,11 +524,14 @@ parse_number(dm_itanium_parser_t *p, size_t *out)
     v = 0u;
     while (*s != '\0' && isdigit((unsigned char)*s)) {
         unsigned d = (unsigned)(*s - '0');
-        size_t nv = v * 10u + d;
-        if (nv < v) {
+        /* Pre-multiply saturation.  The post-multiply `nv < v` check
+         * misses overflow when v lands in [SIZE_MAX/10, SIZE_MAX/9):
+         * v*10 wraps but the wrapped result still happens to be ≥ v.
+         * Catch it before the wrap by checking v against the boundary. */
+        if (v > ((size_t)-1 - d) / 10u) {
             return -1;
         }
-        v = nv;
+        v = v * 10u + d;
         s++;
     }
 
@@ -551,7 +554,6 @@ parse_seq_id(dm_itanium_parser_t *p, size_t *out)
     saw = 0;
     while (isalnum((unsigned char)p->cur[0])) {
         unsigned d;
-        size_t nv;
 
         saw = 1;
         if (p->cur[0] >= '0' && p->cur[0] <= '9') {
@@ -564,12 +566,11 @@ parse_seq_id(dm_itanium_parser_t *p, size_t *out)
             return -1;
         }
 
-        nv = v * 36u + d;
-        if (nv < v) {
+        /* Pre-multiply saturation; see parse_number for details. */
+        if (v > ((size_t)-1 - d) / 36u) {
             return -1;
         }
-
-        v = nv;
+        v = v * 36u + d;
         p->cur++;
     }
 
@@ -1358,13 +1359,24 @@ static int
 parse_template_arg(dm_itanium_parser_t *p)
 {
     dm_parse_mark_t m;
+    int ret;
+
+    /* J<args>E pack expansion recurses into parse_template_arg per
+     * element, and each element can itself be J<...>E.  Bound the
+     * nesting via parser_enter; without it a deeply-nested pack
+     * input could blow the stack. */
+    if (parser_enter(p) != 0) {
+        return -1;
+    }
 
     if (p->cur[0] == 'X') {
         p->cur++;
         if (parse_expression(p) != 0 || p->cur[0] != 'E') {
+            parser_leave(p);
             return -1;
         }
         p->cur++;
+        parser_leave(p);
         return 0;
     }
 
@@ -1380,15 +1392,18 @@ parse_template_arg(dm_itanium_parser_t *p)
         while (p->cur[0] != '\0' && p->cur[0] != 'E') {
             size_t elem_off;
             if (!first && buf_append(&p->out, ", ", 2u) != 0) {
+                parser_leave(p);
                 return -1;
             }
             elem_off = p->out.len;
             if (parse_template_arg(p) != 0) {
+                parser_leave(p);
                 return -1;
             }
             /* Record each pack element as a separate template arg */
             if (is_in_template_args) {
                 if (parser_record_template_arg(p, elem_off, p->out.len - elem_off) != 0) {
+                    parser_leave(p);
                     return -1;
                 }
             }
@@ -1396,20 +1411,25 @@ parse_template_arg(dm_itanium_parser_t *p)
         }
 
         if (p->cur[0] != 'E') {
+            parser_leave(p);
             return -1;
         }
 
         p->cur++;
+        parser_leave(p);
         return 1; /* Return 1 to indicate pack (elements already recorded) */
     }
 
     mark_save(p, &m);
     if (parse_type(p) == 0) {
+        parser_leave(p);
         return 0;
     }
 
     mark_restore(p, &m);
-    return parse_expr_primary(p);
+    ret = parse_expr_primary(p);
+    parser_leave(p);
+    return ret;
 }
 
 static int
@@ -1850,6 +1870,17 @@ parse_type(dm_itanium_parser_t *p)
     int needs_sub;
     int saved_type_ctx;
 
+    /* Type production recurses through parse_type_inner into
+     * pointer/array/template/function-type sub-productions, which
+     * themselves recurse back into parse_type.  Without an entry
+     * count here the only protection was at parse_nested_name /
+     * parse_local_name / parse_expression / lambda — leaving
+     * P-PP-PPPi or deeply-nested templates free to blow the kernel
+     * stack.  Bound it. */
+    if (parser_enter(p) != 0) {
+        return -1;
+    }
+
     type_off = p->out.len;
     ch = p->cur[0];
 
@@ -1859,6 +1890,7 @@ parse_type(dm_itanium_parser_t *p)
     rc = parse_type_inner(p);
     p->in_type_context = saved_type_ctx;
     if (rc != 0) {
+        parser_leave(p);
         return rc;
     }
 
@@ -1878,10 +1910,12 @@ parse_type(dm_itanium_parser_t *p)
 
     if (needs_sub && p->out.len > type_off) {
         if (parser_add_substitution(p, type_off, p->out.len - type_off) != 0) {
+            parser_leave(p);
             return -1;
         }
     }
 
+    parser_leave(p);
     return 0;
 }
 

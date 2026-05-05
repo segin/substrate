@@ -12,33 +12,20 @@ usage(void)
     fprintf(stderr, "usage: mv [-f] source target\n       mv [-f] source ... directory\n");
 }
 
+/* Strip trailing slashes in place; argv strings are modifiable per C standard. */
+static void
+strip_trailing_slashes(char *path)
+{
+    size_t len = strlen(path);
+    while (len > 1u && path[len - 1u] == '/')
+        path[--len] = '\0';
+}
+
 static const char *
 base_name(const char *path)
 {
-    const char *slash;
-
-    slash = strrchr(path, '/');
-    if (slash == NULL) {
-        return path;
-    }
-    while (slash[1] == '\0' && slash > path) {
-        size_t len;
-        char *tmp;
-
-        len = (size_t)(slash - path);
-        tmp = malloc(len + 1u);
-        if (tmp == NULL) {
-            return path;
-        }
-        memcpy(tmp, path, len);
-        tmp[len] = '\0';
-        slash = strrchr(tmp, '/');
-        free(tmp);
-        if (slash == NULL) {
-            return path;
-        }
-    }
-    return slash[1] != '\0' ? slash + 1 : path;
+    const char *slash = strrchr(path, '/');
+    return (slash != NULL && slash[1] != '\0') ? slash + 1 : path;
 }
 
 static char *
@@ -112,7 +99,23 @@ main(int argc, char *argv[])
     }
 
     if (operands == 2) {
-        return move_one(argv[first_path], argv[first_path + 1]);
+        struct stat st;
+        const char *src = argv[first_path];
+        const char *dst = argv[first_path + 1];
+
+        if (stat(dst, &st) == 0 && S_ISDIR(st.st_mode)) {
+            /* POSIX: if destination is a directory, move source into it. */
+            strip_trailing_slashes(argv[first_path]);
+            char *dst_path = join_path(dst, base_name(src));
+            if (dst_path == NULL) {
+                fprintf(stderr, "mv: cannot move '%s': out of memory\n", src);
+                return 1;
+            }
+            int rc = move_one(src, dst_path);
+            free(dst_path);
+            return rc;
+        }
+        return move_one(src, dst);
     }
 
     {
@@ -129,6 +132,7 @@ main(int argc, char *argv[])
         for (i = first_path; i < argc - 1; ++i) {
             char *dst;
 
+            strip_trailing_slashes(argv[i]);
             dst = join_path(dst_dir, base_name(argv[i]));
             if (dst == NULL) {
                 fprintf(stderr, "mv: cannot move '%s': out of memory\n", argv[i]);

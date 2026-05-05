@@ -18,25 +18,27 @@ EXTRA_CLEAN += $(UNIT_BINS)
 
 .PHONY: test unit integration reference property fuzz-run
 
-test_opts: tests/test_opts.c cal_opts.c cal_math.c cal.h cal_opts.h cal_math.h
-	$(CC) $(TEST_CFLAGS) -I. -o $@ tests/test_opts.c cal_opts.c cal_math.c
+TESTS = ../../tests/bin/cal
 
-test_math: tests/test_math.c cal_math.c cal_opts.c cal.h cal_math.h cal_opts.h
-	$(CC) $(TEST_CFLAGS) -I. -o $@ tests/test_math.c cal_math.c cal_opts.c
+test_opts: $(TESTS)/test_opts.c cal_opts.c cal_math.c cal.h cal_opts.h cal_math.h
+	$(CC) $(TEST_CFLAGS) -I. -o $@ $(TESTS)/test_opts.c cal_opts.c cal_math.c
+
+test_math: $(TESTS)/test_math.c cal_math.c cal_opts.c cal.h cal_math.h cal_opts.h
+	$(CC) $(TEST_CFLAGS) -I. -o $@ $(TESTS)/test_math.c cal_math.c cal_opts.c
 
 unit: $(UNIT_BINS)
 	@for t in $(UNIT_BINS); do ./$$t; done
 
 integration: $(PROG)
-	sh tests/test_integration.sh ./$(PROG)
+	sh $(TESTS)/test_integration.sh ./$(PROG)
 
 reference: $(PROG)
-	$(PYTHON) tests/test_reference.py ./$(PROG)
+	$(PYTHON) $(TESTS)/test_reference.py ./$(PROG)
 
 property: $(PROG)
-	$(PYTHON) tests/test_property.py ./$(PROG)
+	$(PYTHON) $(TESTS)/test_property.py ./$(PROG)
 
 fuzz-run: $(PROG)
-	$(PYTHON) tests/fuzz_options.py ./$(PROG)
+	$(PYTHON) $(TESTS)/fuzz_options.py ./$(PROG)
 
 test: unit integration reference property fuzz-run

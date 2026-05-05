@@ -5,7 +5,7 @@
 #include <stdarg.h>
 #include <unistd.h>
 #include <sys/wait.h>
-#include "../../usr.lib/bc/num.h"
+#include "num.h"
 
 typedef enum { VAL_NUM, VAL_STR } val_type_t;
 
@@ -69,7 +69,9 @@ dc_val_t *val_dup(dc_val_t *v) {
 void push(dc_stack_t *s, dc_val_t *v) {
     if (s->sp >= s->cap) {
         s->cap *= 2;
-        s->data = realloc(s->data, s->cap * sizeof(dc_val_t*));
+        dc_val_t **tmp = realloc(s->data, s->cap * sizeof(dc_val_t*));
+        if (!tmp) { perror("realloc"); exit(1); }
+        s->data = tmp;
     }
     s->data[s->sp++] = v;
 }
@@ -197,7 +199,9 @@ void execute(input_t *in) {
                 }
                 if (i + 1 >= cap) {
                     cap *= 2;
-                    s = realloc(s, cap);
+                    char *tmp = realloc(s, cap);
+                    if (!tmp) { free(s); perror("realloc"); exit(1); }
+                    s = tmp;
                 }
                 s[i++] = c;
             }
@@ -273,19 +277,31 @@ void execute(input_t *in) {
             }
             case 'i': {
                 dc_val_t *v = pop(&main_stack);
-                if (v->type == VAL_NUM) bc_ibase = (int)bc_num_to_long(v->v.num);
+                if (v->type == VAL_NUM) {
+                    long long ib = bc_num_to_long(v->v.num);
+                    if (ib >= 2 && ib <= 36) bc_ibase = (int)ib;
+                    else fprintf(stderr, "dc: ibase must be in [2,36]\n");
+                }
                 val_free(v);
                 break;
             }
             case 'o': {
                 dc_val_t *v = pop(&main_stack);
-                if (v->type == VAL_NUM) bc_obase = (int)bc_num_to_long(v->v.num);
+                if (v->type == VAL_NUM) {
+                    long long ob = bc_num_to_long(v->v.num);
+                    if (ob >= 2) bc_obase = (int)ob;
+                    else fprintf(stderr, "dc: obase must be >= 2\n");
+                }
                 val_free(v);
                 break;
             }
             case 'k': {
                 dc_val_t *v = pop(&main_stack);
-                if (v->type == VAL_NUM) bc_scale = (int)bc_num_to_long(v->v.num);
+                if (v->type == VAL_NUM) {
+                    long long sc = bc_num_to_long(v->v.num);
+                    if (sc >= 0) bc_scale = (int)sc;
+                    else fprintf(stderr, "dc: scale must be >= 0\n");
+                }
                 val_free(v);
                 break;
             }
@@ -415,7 +431,8 @@ void execute(input_t *in) {
             case 'q': quit_levels = 2; return;
             case 'Q': {
                 dc_val_t *v = pop(&main_stack);
-                quit_levels = (int)bc_num_to_long(v->v.num);
+                if (v->type == VAL_NUM) quit_levels = (int)bc_num_to_long(v->v.num);
+                else fprintf(stderr, "dc: Q requires a numeric value\n");
                 val_free(v);
                 return;
             }
@@ -471,11 +488,18 @@ void execute(input_t *in) {
 
 int main(int argc, char *argv[]) {
     stack_init(&main_stack);
-    input_t in = { .p = NULL, .f = stdin };
     if (argc > 1) {
-        in.f = fopen(argv[argc-1], "r");
-        if (!in.f) { perror("dc"); return 1; }
+        for (int i = 1; i < argc; i++) {
+            FILE *f = fopen(argv[i], "r");
+            if (!f) { perror(argv[i]); return 1; }
+            input_t in = { .p = NULL, .f = f };
+            execute(&in);
+            fclose(f);
+            if (quit_levels > 0) break;
+        }
+    } else {
+        input_t in = { .p = NULL, .f = stdin };
+        execute(&in);
     }
-    execute(&in);
     return 0;
 }

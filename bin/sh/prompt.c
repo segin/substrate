@@ -330,7 +330,6 @@ char *expand_prompt_escapes(const char *ps1, int command_count, int extended, in
                     break;
                 }
                 case 'j': { // %j = number of background jobs
-                    extern job_t *first_job;
                     int job_count = 0;
                     job_t *j = first_job;
                     while (j) {

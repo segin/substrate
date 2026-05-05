@@ -74,8 +74,10 @@ int sethostname(const char *name, size_t len);
 
 int chmod(const char *pathname, mode_t mode);
 int chown(const char *pathname, uid_t owner, gid_t group);
+int lchown(const char *pathname, uid_t owner, gid_t group);
 int fchmod(int fd, mode_t mode);
 int fchown(int fd, uid_t owner, gid_t group);
+int fchownat(int dirfd, const char *pathname, uid_t owner, gid_t group, int flag);
 char *getlogin(void);
 int getgroups(int size, gid_t list[]);
 int setgroups(int size, const gid_t *list);

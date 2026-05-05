@@ -1,0 +1,101 @@
+.TH FETESTEXCEPT 3 "2026-05-03" "Substrate" "Library Functions Manual"
+.SH NAME
+fetestexcept \- test floating-point exception flags
+.SH LIBRARY
+Math Library (libm, \-lm)
+.SH SYNOPSIS
+.nf
+.B #include <fenv.h>
+.PP
+.BI "int fetestexcept(int " excepts );
+.fi
+.SH DESCRIPTION
+The
+.BR fetestexcept ()
+function tests the current floating-point exception sticky flags.
+It returns the bitwise AND of the current exception flags and
+.IR excepts ,
+allowing the caller to determine which of the requested flags are set.
+.PP
+The argument
+.I excepts
+is a bitwise OR of zero or more of the following macros:
+.TP
+.B FE_INVALID
+Test the invalid-operation flag.
+.TP
+.B FE_DIVBYZERO
+Test the division-by-zero flag.
+.TP
+.B FE_OVERFLOW
+Test the overflow flag.
+.TP
+.B FE_UNDERFLOW
+Test the underflow flag.
+.TP
+.B FE_INEXACT
+Test the inexact-result flag.
+.TP
+.B FE_ALL_EXCEPT
+Test all exception flags.
+.PP
+Passing zero for
+.I excepts
+always returns zero.
+.PP
+.BR fetestexcept ()
+does not clear or modify any flags.
+To clear flags after testing them, call
+.BR feclearexcept (3).
+.SH RETURN VALUE
+.BR fetestexcept ()
+returns the value of the currently set exception flags that are also set in
+.IR excepts .
+That is, it returns
+.IR excepts
+masked to only those bits that are currently raised.
+Returns zero if none of the requested flags are set.
+.SH ERRORS
+No errors are defined.
+The function does not set
+.IR errno .
+.SH EXAMPLES
+The following example performs a division and then tests whether any
+exception flags were raised:
+.PP
+.nf
+#pragma STDC FENV_ACCESS ON
+#include <fenv.h>
+#include <stdio.h>
+
+int main(void)
+{
+    /* Clear all flags before the operation. */
+    feclearexcept(FE_ALL_EXCEPT);
+
+    volatile double zero = 0.0;
+    volatile double x = 1.0 / zero;   /* raises FE_DIVBYZERO */
+    (void)x;
+
+    /* Test for specific flags. */
+    int raised = fetestexcept(FE_ALL_EXCEPT);
+
+    if (raised & FE_DIVBYZERO)
+        printf("FE_DIVBYZERO raised.\\n");
+    if (raised & FE_INVALID)
+        printf("FE_INVALID raised.\\n");
+    if (raised & FE_OVERFLOW)
+        printf("FE_OVERFLOW raised.\\n");
+    if (raised & FE_UNDERFLOW)
+        printf("FE_UNDERFLOW raised.\\n");
+    if (raised & FE_INEXACT)
+        printf("FE_INEXACT raised.\\n");
+
+    feclearexcept(FE_ALL_EXCEPT);
+    return 0;
+}
+.fi
+.SH SEE ALSO
+.BR fenv (7),
+.BR feclearexcept (3),
+.BR feraiseexcept (3)

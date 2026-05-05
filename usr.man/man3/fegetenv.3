@@ -1,0 +1,111 @@
+.TH FEGETENV 3 "2026-05-03" "Substrate" "Library Functions Manual"
+.SH NAME
+fegetenv, fesetenv \- get and set the floating-point environment
+.SH LIBRARY
+Math Library (libm, \-lm)
+.SH SYNOPSIS
+.nf
+.B #include <fenv.h>
+.PP
+.BI "int fegetenv(fenv_t *" envp );
+.BI "int fesetenv(const fenv_t *" envp );
+.fi
+.SH DESCRIPTION
+The
+.BR fegetenv ()
+and
+.BR fesetenv ()
+functions save and restore the complete floating-point environment, which
+includes the rounding mode, exception sticky flags, and (on x87) the
+exception masks.
+.SS fegetenv
+.BR fegetenv ()
+stores a snapshot of the current floating-point environment into the object
+pointed to by
+.IR envp .
+.PP
+On x87, this is implemented with the
+.B fnstenv
+instruction, which also has the side effect of masking all x87 exceptions in
+the hardware control word.
+.BR fegetenv ()
+corrects this by immediately reloading the saved control word so that the
+calling program's exception masks are left unchanged.
+.PP
+The value stored in
+.IR *envp
+is opaque; it must not be modified directly.
+It may only be passed to
+.BR fesetenv ()
+or
+.BR feupdateenv (3).
+.SS fesetenv
+.BR fesetenv ()
+installs the floating-point environment from the object pointed to by
+.IR envp .
+This restores the rounding mode, exception flags, and exception masks to the
+saved values.
+.PP
+.BR fesetenv ()
+does
+.I not
+raise any floating-point exceptions (even if the restored sticky flags
+include set exception bits).
+Use
+.BR feupdateenv (3)
+if the saved exceptions should be re-raised.
+.PP
+The special constant
+.B FE_DFL_ENV
+may be passed as
+.IR envp
+to install the default floating-point environment: round-to-nearest, all
+exception flags cleared, all exception traps masked.
+.SH RETURN VALUE
+Both functions return zero on success.
+A non-zero return value indicates failure.
+.SH ERRORS
+No errors are defined.
+Neither function sets
+.IR errno .
+.SH EXAMPLES
+The following example saves the full environment, modifies the rounding mode
+and clears the exception flags, performs a computation, and then restores the
+original environment:
+.PP
+.nf
+#pragma STDC FENV_ACCESS ON
+#include <fenv.h>
+#include <stdio.h>
+
+int main(void)
+{
+    fenv_t saved;
+
+    /* Save the full floating-point environment. */
+    fegetenv(&saved);
+
+    /* Modify: switch to round-toward-zero and clear all exceptions. */
+    fesetround(FE_TOWARDZERO);
+    feclearexcept(FE_ALL_EXCEPT);
+
+    volatile double x = 7.0 / 2.0;   /* 3.0 under FE_TOWARDZERO */
+    printf("7.0 / 2.0 (FE_TOWARDZERO) = %g\\n", x);
+
+    /* Restore original environment (does NOT re-raise any exceptions). */
+    fesetenv(&saved);
+
+    return 0;
+}
+.fi
+.PP
+To restore to the default environment:
+.PP
+.nf
+fesetenv(FE_DFL_ENV);
+.fi
+.SH SEE ALSO
+.BR fenv (7),
+.BR feholdexcept (3),
+.BR feupdateenv (3),
+.BR fegetround (3)

@@ -256,6 +256,11 @@ void open_fs(fs_node_t *node, uint8_t read, uint8_t write) {
 }
 
 void close_fs(fs_node_t *node) {
+    /* Tolerate NULL: callers like file_close_ptr pass f->f_data, which
+     * is intentionally NULL for stub-only file types (e.g. socket
+     * fds from compat.c sock_alloc_fd) — without this guard, exiting
+     * a process that opened such an fd panics in fd_close_all. */
+    if (!node) return;
     if (node->close != 0)
         node->close(node);
 }
@@ -301,8 +306,17 @@ fs_node_t *finddir_fs(fs_node_t *node, char *name) {
     return finddir_fs_internal(node, name, 0, 1);
 }
 
-// Maximum symlink recursion depth to prevent infinite loops
-#define MAX_SYMLINK_DEPTH 8
+/*
+ * Maximum symlink recursion depth.  Linux uses 8, but our stack frames
+ * are larger (vfs_lookup's local 512-byte ppath buffer dominates) and
+ * each "absolute symlink" cycle creates 4–6 nested frames between
+ * finddir_fs_internal's absolute branch, vfs_lookup's prefix recursion,
+ * and the directory walk loop.  Six full cycles already overflow the
+ * 8 KB kernel stack — deeper here means an unrecoverable PF in kernel
+ * mode rather than a clean ELOOP.  Drop to 4 until we shrink the
+ * frame sizes (or move ppath to kmalloc).
+ */
+#define MAX_SYMLINK_DEPTH 4
 
 static fs_node_t *finddir_fs_internal(fs_node_t *node, char *name, int depth, int follow_symlinks) {
     if (!node) return 0; // Safety
@@ -343,16 +357,34 @@ static fs_node_t *finddir_fs_internal(fs_node_t *node, char *name, int depth, in
             if (len > 0) {
                 if ((size_t)len >= sizeof(link_target)) return NULL;
                 link_target[len] = '\0';
-                
-                // Resolve the target path
+
+                // Resolve the target path.
+                //
+                // Both branches walk a full path (which may have
+                // multiple '/'-separated components, ".." entries,
+                // etc.), so both must call vfs_lookup() — the
+                // relative branch used to call finddir_fs_internal
+                // with the whole "../../libexec/ld.elf_so" string as
+                // a single entry name, asking the FS for a child
+                // literally named that, which obviously failed.
+                //
+                // Resolution base for relative targets is the
+                // symlink's parent directory (`node`), not fs_root.
+                //
+                // Use the per-thread counter to bound the chain
+                // across the re-entry into vfs_lookup().
                 fs_node_t *target;
+                if (current_thread &&
+                    current_thread->vfs_symlink_depth >= MAX_SYMLINK_DEPTH) {
+                    return NULL;
+                }
+                if (current_thread) current_thread->vfs_symlink_depth++;
                 if (link_target[0] == '/') {
-                    // Absolute symlink - start from root
                     target = vfs_lookup(fs_root, link_target);
                 } else {
-                    // Relative symlink - recurse
-                    target = finddir_fs_internal(node, link_target, depth + 1, 1); // Follow nested
+                    target = vfs_lookup(node, link_target);
                 }
+                if (current_thread) current_thread->vfs_symlink_depth--;
                 
                 if (target) {
                     return target;
@@ -370,6 +402,46 @@ static fs_node_t *finddir_fs_internal(fs_node_t *node, char *name, int depth, in
 // Lookup a path from a root node
 fs_node_t *vfs_lookup(fs_node_t *root, const char *path) {
     if (!path || !root) return NULL;
+    
+    /*
+     * Implement personality shadowing:
+     * Non-native processes try /perso/<name>/<path> first.
+     *
+     * Skip when the path is already under /perso/ — otherwise the
+     * recursive lookup below re-enters this branch and rewrites the
+     * path again ("/perso/linux/perso/linux/..."), each call adding
+     * ~800 bytes of stack, blowing past the 8 KB kernel stack and
+     * corrupting saved return addresses on the way down.  The earlier
+     * "Internal direct lookup to avoid infinite recursion" comment
+     * promised this guard but the code never enforced it.
+     */
+    if (current_process && current_process->perso_id != 0 && path[0] == '/' &&
+        strncmp(path, "/perso/", 7) != 0) {
+        extern const char *perso_name(int id);
+        const char *pname = perso_name(current_process->perso_id);
+        if (pname) {
+            char ppath[512];
+            char lname[32];
+            size_t k, count = 0;
+            for (k = 0; pname[k] && count < 31; k++) {
+                char c = pname[k];
+                if ((c >= 'A' && c <= 'Z')) {
+                    lname[count++] = c + 32;
+                } else if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')) {
+                    lname[count++] = c;
+                }
+                // Skip everything else (slashes, dots, etc)
+            }
+            lname[count] = '\0';
+
+            if (count > 0) {
+                snprintf(ppath, sizeof(ppath), "/perso/%s%s", lname, path);
+                fs_node_t *pnode = vfs_lookup(fs_root, ppath);
+                if (pnode) return pnode;
+            }
+        }
+    }
+
     if (path[0] == '/') path++; // Skip leading /
     if (path[0] == '\0') return root; // Root itself
     

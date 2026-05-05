@@ -7061,8 +7061,19 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             if (e->lhs->kind == CC_EXPR_MEMBER && e->lhs->member_is_bitfield) {
                 return lower_bitfield_store_to_addr(sf, e->lhs, ptrv, rhs, diag);
             }
-            if (mem_size <= 0) {
-                set_diag(diag, "unsupported pointer store type size in lowering");
+            if (mem_size == 0) {
+                /* Empty/opaque struct store: skip — there are no bytes to
+                 * write. Linux's vDSO has zero-sized helper structs guarded
+                 * by typeof macros that produce one of these. */
+                return rhs;
+            }
+            if (mem_size < 0) {
+                char msg[256];
+                snprintf(msg, sizeof(msg),
+                         "unsupported pointer store type size in lowering "
+                         "(value_type=%d struct_id=%d kind=%d ms=%ld)",
+                         (int)e->lhs->value_type, e->lhs->struct_id, (int)e->lhs->kind, mem_size);
+                set_diag(diag, msg);
                 return -1;
             }
             rhs = normalize_float_value(sf, rhs, e->lhs->value_type, diag);
@@ -9130,7 +9141,32 @@ static int lower_struct_init_to_ptr(const cc_translation_unit_t *tu, cc_ssa_func
         if (raw != NULL && raw->kind == CC_EXPR_MEMBER && raw->lhs == NULL && raw->rhs != NULL && raw->ident != NULL) {
             int didx = find_struct_member_index_by_name(sd, raw->ident);
             if (didx < 0) {
-                set_diag(diag, "unknown designated struct member in local initializer");
+                /* Anonymous nested struct/union: try matching the
+                 * designator against members of any anonymous member's
+                 * struct definition. Linux uses this pattern in
+                 * `struct hw_perf_event` and several other places. */
+                size_t mi;
+                for (mi = 0; mi < sd->member_count && didx < 0; ++mi) {
+                    const cc_struct_member_t *am = &sd->members[mi];
+                    const cc_struct_def_t *asd;
+                    if (am->name != NULL && am->name[0] != '\0') continue;
+                    if (am->type != CC_TYPE_VOID || am->type_struct_id < 0) continue;
+                    asd = (am->type_struct_id < (int)tu->struct_count) ?
+                          &tu->structs[am->type_struct_id] : NULL;
+                    if (asd != NULL) {
+                        int sub = find_struct_member_index_by_name(asd, raw->ident);
+                        if (sub >= 0) {
+                            didx = (int)mi;
+                            break;
+                        }
+                    }
+                }
+            }
+            if (didx < 0) {
+                char msg[160];
+                snprintf(msg, sizeof(msg), "unknown designated struct member '%s' in local initializer",
+                         raw->ident);
+                set_diag(diag, msg);
                 return -1;
             }
             member_idx = (size_t)didx;
@@ -9353,6 +9389,18 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
     if (s->kind == CC_STMT_DECL) {
         int v;
         int varv;
+        if ((s->storage & CC_STORAGE_EXTERN) != 0 && s->decl_name != NULL) {
+            if (s->expr != NULL) {
+                set_diag(diag, "extern local declaration cannot have an initializer");
+                return -1;
+            }
+            if (var_define(vars, var_count, s->decl_name, s->type, s->type_struct_id, s->array_len, s->array_ndim,
+                           s->array_dims, -1, depth, 1, 0, s->decl_name) != 0) {
+                set_diag(diag, "out of memory defining extern local declaration");
+                return -1;
+            }
+            return 0;
+        }
         if ((s->storage & CC_STORAGE_STATIC) != 0 && s->decl_name != NULL) {
             cc_ssa_global_t g;
             cc_ssa_instr_t in;
@@ -10684,12 +10732,19 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                 return -1;
             }
             if (asm_out_store_type[i4] == CC_TYPE_VOID && asm_out_store_sid[i4] >= 0) {
-                set_diag(diag, "aggregate asm register outputs are not supported");
-                free(asm_out_store_ptr);
-                free(asm_out_store_size);
-                free(asm_out_store_type);
-                free(asm_out_store_sid);
-                return -1;
+                /* Aggregate output: memcpy the asm result into the
+                 * storeback pointer. Linux's perf perf_event_open uses
+                 * an asm that returns a struct {u32, u32}; refusing
+                 * blocks the build. */
+                if (emit_memcpy_instr(sf, asm_out_store_ptr[i4], in.asm_out_values[i4],
+                                      asm_out_store_size[i4], diag) != 0) {
+                    free(asm_out_store_ptr);
+                    free(asm_out_store_size);
+                    free(asm_out_store_type);
+                    free(asm_out_store_sid);
+                    return -1;
+                }
+                continue;
             }
             rhs = in.asm_out_values[i4];
             rhs = normalize_float_value(sf, rhs, asm_out_store_type[i4], diag);
@@ -13183,7 +13238,10 @@ static int flatten_struct_init_bytes_cursor(const cc_translation_unit_t *tu, int
 
         if (m->type == CC_TYPE_VOID && m->type_struct_id >= 0) {
             const cc_expr_t *nested = extract_struct_init_list_expr(item, m->type_struct_id);
-            nested = unwrap_self_designated_init_list(nested, m->name);
+            if (m->name == NULL || m->type_struct_id < 0 || (size_t)m->type_struct_id >= tu->struct_count ||
+                find_struct_member_index_by_name(&tu->structs[m->type_struct_id], m->name) < 0) {
+                nested = unwrap_self_designated_init_list(nested, m->name);
+            }
             if (nested != NULL) {
                 size_t sub = 0;
                 if (!consumed_item) {
@@ -13573,10 +13631,16 @@ static int should_skip_fn_body_for_codegen(const cc_translation_unit_t *tu, cons
     if ((f->storage & CC_STORAGE_INLINE) == 0) {
         return 0;
     }
-    if ((f->attr_flags & CC_ATTR_UNUSED) == 0) {
-        return 0;
-    }
-    return 1;
+    /* Always emit static-inline bodies. Linux's `inline` macro pulls in
+     * __maybe_unused (which cc parses as __unused__), so without this we
+     * skipped the bodies of every static inline -- including referenced
+     * helpers like fls / __ffs / arch_*_bit / __arch_hweight* / etc. --
+     * leaving the vDSO link with a wall of undefined references. cc has
+     * no inliner, so these have to come out-of-line. Bad-form bodies
+     * from x86_64-only helpers like rip_rel_ptr produce dead-code asm
+     * that the assembler now tolerates (rip in 32-bit, oversized reloc,
+     * etc.); the linker drops them via section gc. */
+    return 0;
 }
 
 int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag_t *diag) {

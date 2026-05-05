@@ -113,7 +113,7 @@ Testing is a first-class citizen, utilizing a multi-layer approach:
   ELF runner used for host-side ABI experiments.
 - **Property and Fuzz Testing:** Ensuring robustness of parsers and ABI handlers.
 
-Native toolchain regression surfaces are split by tool under `tests/usr.bin/as/`, `tests/usr.bin/cc/`, `tests/usr.bin/ld/`, and `usr.lib/elfobj/tests/`.
+Native toolchain regression surfaces are split by tool under `tests/usr.bin/as/`, `tests/usr.bin/cc/`, `tests/usr.bin/ld/`, and `usr.lib/elfobj/tests/`. Userland program tests live under `tests/bin/<program>/` — all `bin/*/tests/` directories have been consolidated there; each `bin/*/Makefile` references its test sources via `$(TESTS) = ../../tests/bin/<program>`.
 
 For detailed testing policies, see `docs/specs/vm_page.md` (as a template) and the `tests/` directory.
 

@@ -224,6 +224,12 @@ int as_x86_encode_evex_3op(const as_x86_evex_insn_t *insn, uint8_t *out, size_t 
     p2 = (uint8_t)(((insn->zeroing ? 1 : 0) << 7) | (((l2 >> 1) & 1) << 6) | ((l2 & 1) << 5) |
                    ((bbit ? 1 : 0) << 4) | ((v4 ? 0 : 1) << 3) | (insn->opmask & 0x7));
 
+    /* Re-check the caller buffer fits the 4-byte EVEX prefix before
+     * we shift; emit8 alone lets ctx.at reach ctx.out_cap. */
+    if (ctx.at + 4u > ctx.out_cap) {
+        set_err(&ctx, "encoding overflow");
+        return -1;
+    }
     memmove(ctx.out + 4, ctx.out, ctx.at);
     ctx.out[0] = 0x62;
     ctx.out[1] = p0;

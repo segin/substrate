@@ -2298,7 +2298,7 @@ static int execute_subshell(ast_subshell_t *sub, exec_info_t *info) {
         exec_info_t sub_info = *info;
         sub_info.subshell = 1;
         
-        exit(execute_ast(sub->list, &sub_info));
+        _exit(execute_ast(sub->list, &sub_info));
     } else if (pid > 0) {
         int status;
         waitpid(pid, &status, 0);

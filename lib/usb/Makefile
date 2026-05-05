@@ -1,12 +1,13 @@
 include ../../Makefile.inc
 
 ifdef NATIVE_BUILD
-CFLAGS := $(CFLAGS) -DNATIVE_BUILD=1 -Iinclude -idirafter ../../sys/include -I../../sys
+CFLAGS := $(CFLAGS) -DNATIVE_BUILD=1 -Iinclude -Ios -idirafter ../../sys/include -I../../sys
 else
-CFLAGS := $(CFLAGS) -Iinclude -I../../include -I../../sys/include -I../../sys
+CFLAGS := $(CFLAGS) -Iinclude -Ios -I../../include -I../../sys/include -I../../sys
 endif
 
-SRCS = src/core.c src/device.c src/sync.c src/descriptor.c src/async.c src/poll.c
+SRCS = src/core.c src/device.c src/sync.c src/descriptor.c src/async.c src/poll.c \
+	os/substrate.c
 OBJS = $(SRCS:.c=.o)
 BUILD_MODE := $(if $(NATIVE_BUILD),native,target)
 MODE_STAMP = .build-mode

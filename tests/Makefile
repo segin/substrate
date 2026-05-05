@@ -20,7 +20,7 @@ UNIT_SRCS = unit/drivers/console/test_ansi.c unit/vm/test_kmem.c unit/vm/test_zo
              unit/kern/test_reboot.c \
              unit/vfs/test_fd.c unit/vfs/test_permissions.c unit/vfs/test_chroot.c unit/vfs/test_readdir.c \
              unit/vfs/test_link.c unit/vfs/test_rename.c unit/vfs/test_symlink.c unit/vfs/test_readlink.c \
-			 unit/vfs/test_namei.c \
+             unit/vfs/test_namei.c \
              unit/vfs/test_vnode_reclaim.c \
              unit/vfs/test_vnode_init.c \
              unit/vfs/test_vnode_create.c \
@@ -38,7 +38,7 @@ UNIT_OBJS = $(notdir $(UNIT_SRCS:.c=.o))
 
 MOCKS_OBJ = mocks.o
 
-all: test_runner test_getuid test_minix test_ext2_perf test_ext2_read_blocks test_ext2_find_next_zero_bit test_ext2_inode_write test_libc_string test_libc_errno test_libc_libgen test_libc_time test_libc_stdlib test_libc_ctype test_libc_assert test_libc_sysctl test_ext2_remove_perf bench_ext2_readdir test_ext2_write_block test_ext2_vfs_ops test_ext2_rename test_libpthread_mutex test_pthread_join test_readline test_history test_bc test_libedit host_test_wait_logic host_test_pgrp host_test_proc_tree host_test_proc_exit host_test_tty_jobctl host_test_sync_guards host_test_sleepq_private host_test_swapper host_test_rusage host_test_proc_lifecycle host_test_i386_signal host_test_linux_signal host_test_signal_restart host_test_signal_integration host_test_proc_signal_state host_test_rwlock host_test_mutex host_test_fork_exec_wait host_test_bio host_test_lockmgr host_test_isapnp host_test_isa host_test_uart test_getpagesize test_libc_stdio test_libc_printf test_libc_scanf test_bm
+all: test_runner test_getuid test_minix test_ext2_perf test_ext2_read_blocks test_ext2_find_next_zero_bit test_ext2_inode_write test_libc_string test_libc_errno test_libc_libgen test_libc_time test_libc_stdlib test_libc_ctype test_libc_assert test_libc_sysctl test_ext2_remove_perf bench_ext2_readdir test_ext2_write_block test_ext2_vfs_ops test_ext2_rename test_libpthread_mutex test_pthread_join test_readline test_history test_bc test_libedit host_test_wait_logic host_test_pgrp host_test_proc_tree host_test_proc_exit host_test_tty_jobctl host_test_sync_guards host_test_sleepq_private host_test_swapper host_test_rusage host_test_proc_lifecycle host_test_i386_signal host_test_linux_signal host_test_signal_restart host_test_signal_integration host_test_proc_signal_state host_test_rwlock host_test_mutex host_test_fork_exec_wait host_test_bio host_test_usb_msc_cbw host_test_lockmgr host_test_isapnp host_test_isa host_test_uart test_getpagesize test_libc_stdio test_libc_printf test_libc_scanf test_libc_prop_stdio test_libc_fuzz_printf test_libc_fuzz_scanf test_bm
 	./test_runner
 	./test_minix
 	./test_ext2_find_next_zero_bit
@@ -56,6 +56,9 @@ all: test_runner test_getuid test_minix test_ext2_perf test_ext2_read_blocks tes
 	./test_libc_stdio
 	./test_libc_printf
 	./test_libc_scanf
+	./test_libc_prop_stdio
+	./test_libc_fuzz_printf
+	./test_libc_fuzz_scanf
 	./test_bm
 	./test_ext2_remove_perf
 	./bench_ext2_readdir
@@ -88,6 +91,7 @@ all: test_runner test_getuid test_minix test_ext2_perf test_ext2_read_blocks tes
 	./host_test_rwlock
 	./host_test_fork_exec_wait
 	./host_test_bio
+	./host_test_usb_msc_cbw
 	./host_test_lockmgr
 	./host_test_isapnp
 	./host_test_isa
@@ -134,6 +138,9 @@ host_test_sync_guards: sys/host_test_sync_guards.c ../sys/kern/mutex.c ../sys/ke
 	$(CC) $(CFLAGS_KERN) $< -o $@
 
 host_test_bio: sys/host_test_bio.c
+	$(CC) $(CFLAGS_KERN) $< -o $@
+
+host_test_usb_msc_cbw: sys/host_test_usb_msc_cbw.c
 	$(CC) $(CFLAGS_KERN) $< -o $@
 
 host_test_lockmgr: sys/host_test_lockmgr.c
@@ -273,6 +280,9 @@ test_libc_prop_stdio: lib/c/property/prop_stdio.c libc_stdio_prefixed.o
 test_libc_fuzz_scanf: lib/c/fuzz/fuzz_scanf.c libc_stdio_prefixed.o
 	$(CC) $(CFLAGS_COMMON) -m32 $^ -o $@
 
+test_libc_fuzz_printf: lib/c/fuzz/fuzz_printf.c libc_stdio_prefixed.o
+	$(CC) $(CFLAGS_COMMON) -m32 $^ -o $@
+
 # Rules for objects
 %.o: ../sys/vm/%.c
 	$(CC) $(CFLAGS_KERN) -c $< -o $@
@@ -350,7 +360,7 @@ string_prefixed.o: ../lib/c/src/string.c
 	objcopy --prefix-symbols=libc_ string_raw.o string_prefixed.o
 
 clean:
-	rm -f *.o test_runner test_minix test_ext2_perf test_ext2_read_blocks test_ext2_find_next_zero_bit test_ext2_inode_write test_libc_string test_libc_errno test_libc_libgen test_libc_time test_libc_stdlib test_libc_ctype test_libc_assert test_ext2_remove_perf bench_ext2_readdir test_ext2_write_block test_ext2_vfs_ops test_ext2_rename test_libpthread_mutex test_pthread_join test_readline test_libedit test_bc host_test_wait_logic host_test_pgrp host_test_proc_tree host_test_proc_exit host_test_tty_jobctl host_test_sync_guards host_test_sleepq_private host_test_swapper host_test_rusage host_test_proc_lifecycle host_test_i386_signal host_test_signal_restart host_test_signal_integration host_test_rwlock host_test_fork_exec_wait host_test_bio host_test_lockmgr host_test_isapnp host_test_isa host_test_uart test_getpagesize test_getuid test_bm
+	rm -f *.o test_runner test_minix test_ext2_perf test_ext2_read_blocks test_ext2_find_next_zero_bit test_ext2_inode_write test_libc_string test_libc_errno test_libc_libgen test_libc_time test_libc_stdlib test_libc_ctype test_libc_assert test_ext2_remove_perf bench_ext2_readdir test_ext2_write_block test_ext2_vfs_ops test_ext2_rename test_libpthread_mutex test_pthread_join test_readline test_libedit test_bc host_test_wait_logic host_test_pgrp host_test_proc_tree host_test_proc_exit host_test_tty_jobctl host_test_sync_guards host_test_sleepq_private host_test_swapper host_test_rusage host_test_proc_lifecycle host_test_i386_signal host_test_signal_restart host_test_signal_integration host_test_rwlock host_test_fork_exec_wait host_test_bio host_test_usb_msc_cbw host_test_lockmgr host_test_isapnp host_test_isa host_test_uart test_getpagesize test_getuid test_bm
 	$(MAKE) -C sys clean
 	$(MAKE) -C lib/edit clean
 

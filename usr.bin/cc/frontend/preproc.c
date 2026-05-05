@@ -1667,6 +1667,9 @@ static int add_builtin_macros(pp_state_t *st) {
     if (macro_set(&st->macros, "__SIZEOF_LONG_LONG__", 0, 0, NULL, 0, "8") != 0) {
         return -1;
     }
+    if (st->target_bits == 64 && macro_set(&st->macros, "__SIZEOF_INT128__", 0, 0, NULL, 0, "16") != 0) {
+        return -1;
+    }
     if (macro_set(&st->macros, "__SIZEOF_SIZE_T__", 0, 0, NULL, 0, ptr_size) != 0) {
         return -1;
     }

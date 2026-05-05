@@ -24,7 +24,7 @@
 #define SYS_TIME    13
 #define SYS_MKNOD   14
 #define SYS_CHMOD   15
-#define SYS_LCHOWN  16
+#define SYS_CHOWN   16   /* V7 chown — follows symlinks (POSIX) */
 #define SYS_LSEEK   19
 #define SYS_GETPID  20
 #define SYS_MOUNT   21
@@ -65,6 +65,15 @@
 #define SYS_FCHMOD  94
 #define SYS_FCHOWN  95
 #define SYS_SETPRIORITY 96
+#define SYS_FCHOWNAT  260
+#define SYS_LCHOWNAT  261
+#define SYS_LCHOWN    263  /* lchown — does NOT follow symlinks (BSD addition).
+                            * V7 had no lchown; FreeBSD/NetBSD use 254/275 but
+                            * Substrate already has SYS_PROC_ENVIRON at 254 and
+                            * 275 is free elsewhere; drop it next to the at-
+                            * family.  The canonical chown lives at 16 (V7). */
+#define SYS_LCHMOD    264
+#define SYS_FCHMODAT  297
 #define SYS_GETGROUPS 80
 #define SYS_SETGROUPS 81
 #define SYS_WAIT4   114

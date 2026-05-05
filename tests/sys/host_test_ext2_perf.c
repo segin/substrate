@@ -46,7 +46,6 @@ size_t mock_device_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buf
     device_read_count++;
     device_bytes_read += size;
 
-    // printf("DEBUG: Read device offset %ld size %lu\n", offset, size);
 
     memset(buffer, 0xAA, size); // Fill with dummy data
 

@@ -6,6 +6,12 @@
 #include <string.h>
 
 #define DEMANGLE_BUF_INITIAL_CAP 256u
+/* Per-call output cap.  A real demangled symbol is at most a few KB;
+ * 1 MiB is well above any legitimate value and forms a hard ceiling
+ * against denial-of-service from a hostile mangled name with deeply-
+ * expanded substitutions or template packs.  Hit on either the
+ * pre-grow `need` check or the post-grow capacity. */
+#define DEMANGLE_BUF_MAX_BYTES (1u * 1024u * 1024u)
 
 static int
 demangle_buf_compute_need(const demangle_buf_t *buf, size_t extra, size_t *need)
@@ -34,6 +40,12 @@ demangle_buf_reserve(demangle_buf_t *buf, size_t extra)
     }
 
     if (demangle_buf_compute_need(buf, extra, &need) != 0) {
+        return -1;
+    }
+    /* Reject before allocating — a hostile mangled name should fail
+     * cleanly here, not after we've already paid the cost of growing
+     * to gigabytes. */
+    if (need > DEMANGLE_BUF_MAX_BYTES) {
         return -1;
     }
     if (need <= buf->cap) {

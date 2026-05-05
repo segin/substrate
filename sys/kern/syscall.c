@@ -38,6 +38,7 @@
 #include <sys/stat.h>
 #include <sys/errno.h>
 #include <sys/fcntl.h>
+#include <sys/random.h>
 #include <sys/reboot.h>
 #include <sys/exec.h>
 #include <sys/namei.h>
@@ -138,6 +139,31 @@ static void file_build_path(char *out, size_t out_sz, const char *path, const ch
 
     strncpy(out, path, out_sz - 1);
     out[out_sz - 1] = '\0';
+}
+
+/*
+ * vfs_perso_lookup - personality-aware VFS path lookup.
+ *
+ * For absolute paths, if the current process's personality has a path_prefix,
+ * try <prefix><path> first (e.g. /perso/freebsd/lib/libc.so.7), then fall
+ * back to <path> directly.  This mirrors NetBSD's TRYEMULROOT mechanism.
+ * Relative paths are always resolved against cwd without prefix.
+ */
+fs_node_t *vfs_perso_lookup(fs_node_t *root, fs_node_t *cwd, const char *path) {
+    if (!path) return NULL;
+
+    if (path[0] == '/' && current_process) {
+        struct personality *p = perso_lookup(current_process->perso_id);
+        if (p && p->path_prefix && p->path_prefix[0]) {
+            char prefixed[320];
+            snprintf(prefixed, sizeof(prefixed), "%s%s", p->path_prefix, path);
+            fs_node_t *node = vfs_lookup(root, prefixed);
+            if (node) return node;
+        }
+        return vfs_lookup(root, path);
+    }
+
+    return vfs_lookup(cwd ? cwd : root, path);
 }
 
 static int kern_resolve_parent_at(const char *path, fs_node_t *root, fs_node_t *cwd,
@@ -389,11 +415,7 @@ static int kern_open_from(const char *path, int flags, int mode, fs_node_t *root
     // Lookup file
     fs_node_t *node = 0;
 
-    if (path[0] == '/') {
-        node = vfs_lookup(root, path);
-    } else {
-        node = vfs_lookup(cwd, path);
-    }
+    node = vfs_perso_lookup(root, cwd, path);
 
     if (!node) {
         fs_node_t *parent = NULL;
@@ -417,11 +439,7 @@ static int kern_open_from(const char *path, int flags, int mode, fs_node_t *root
             return error;
         }
 
-        if (path[0] == '/') {
-            node = vfs_lookup(root, path);
-        } else {
-            node = vfs_lookup(cwd, path);
-        }
+        node = vfs_perso_lookup(root, cwd, path);
         if (!node) {
             proc_clear_fd(current_process, fd);
             return -ENOENT;
@@ -1185,7 +1203,7 @@ int kern_stat(const char *path, struct stat *buf) {
     if (!path || !buf) return -EFAULT;
     fs_node_t *root = current_process->root_node ? current_process->root_node : fs_root;
     fs_node_t *cwd  = current_process->cwd_node  ? current_process->cwd_node  : root;
-    fs_node_t *node = vfs_lookup((path[0] == '/') ? root : cwd, path);
+    fs_node_t *node = vfs_perso_lookup(root, cwd, path);
     if (!node) return -ENOENT;
     fill_stat(buf, node);
     close_fs(node);
@@ -1207,7 +1225,17 @@ int kern_lstat(const char *path, struct stat *buf) {
     if (!path || !buf) return -EFAULT;
     fs_node_t *root = current_process->root_node ? current_process->root_node : fs_root;
     fs_node_t *cwd  = current_process->cwd_node  ? current_process->cwd_node  : root;
-    fs_node_t *node = vfs_lookup_lstat((path[0] == '/') ? root : cwd, path);
+    /* For lstat, try prefix with lstat semantics, then plain lstat */
+    fs_node_t *node = NULL;
+    if (path[0] == '/' && current_process) {
+        struct personality *pp = perso_lookup(current_process->perso_id);
+        if (pp && pp->path_prefix && pp->path_prefix[0]) {
+            char prefixed[320];
+            snprintf(prefixed, sizeof(prefixed), "%s%s", pp->path_prefix, path);
+            node = vfs_lookup_lstat(root, prefixed);
+        }
+    }
+    if (!node) node = vfs_lookup_lstat((path[0] == '/') ? root : cwd, path);
     if (!node) return -ENOENT;
     fill_stat(buf, node);
     close_fs(node);
@@ -1683,15 +1711,9 @@ int kern_access(const char *path, int mode) {
 
     if (!path) return -EFAULT;
 
-    fs_node_t *node = 0;
     fs_node_t *root = current_process->root_node ? current_process->root_node : fs_root;
     fs_node_t *cwd = current_process->cwd_node ? current_process->cwd_node : root;
-
-    if (path[0] == '/') {
-        node = vfs_lookup(root, path);
-    } else {
-        node = vfs_lookup(cwd, path);
-    }
+    fs_node_t *node = vfs_perso_lookup(root, cwd, path);
 
     if (!node) return -ENOENT;
 
@@ -1847,15 +1869,60 @@ static fs_node_t *sys_lookup_path(const char *path, int follow_final_symlink) {
 
 int sys_chmod(const char *path, int mode) {
     char kpath[256];
+    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -EFAULT;
+    return kern_chmodat(AT_FDCWD, kpath, mode, 0);
+}
+
+/* sys_fchownat is defined further down; the forward declaration lets
+ * sys_chown() forward to it without restructuring the file. */
+extern int sys_fchownat(int dirfd, const char *path, int uid, int gid, int flag);
+
+/* POSIX chown(2) — follows symlinks.  Substrate previously only had
+ * lchown (no-follow); add the canonical behaviour here for personalities
+ * that issue the standard syscall. */
+int sys_chown(const char *path, int uid, int gid) {
+    return sys_fchownat(AT_FDCWD, path, uid, gid, 0);
+}
+
+/* POSIX lchmod(2) — does NOT follow symlinks.  No native Substrate
+ * equivalent; route through kern_chmodat with AT_SYMLINK_NOFOLLOW. */
+int sys_lchmod(const char *path, int mode) {
+    char kpath[256];
+    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -EFAULT;
+    return kern_chmodat(AT_FDCWD, kpath, mode, AT_SYMLINK_NOFOLLOW);
+}
+
+/* fchmodat(2) — flag-driven follow / no-follow.  flag values are
+ * Substrate-native (Linux-shape: AT_SYMLINK_NOFOLLOW=0x100).  BSD
+ * personalities translate at their wrapper layer before reaching here. */
+int sys_fchmodat(int dirfd, const char *path, int mode, int flag) {
+    char kpath[256];
+    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -EFAULT;
+    return kern_chmodat(dirfd, kpath, mode, flag);
+}
+
+int kern_chmodat(int dirfd, const char *path, int mode, int flags) {
+    fs_node_t *root;
+    fs_node_t *cwd;
     fs_node_t *node;
+    int nofollow;
     int ret;
 
-    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -EFAULT;
-    node = sys_lookup_path(kpath, 1);
+    if (!path) return -EFAULT;
+    if ((flags & ~AT_SYMLINK_NOFOLLOW) != 0) return -EINVAL;
+
+    ret = kern_path_roots_from_dirfd(dirfd, path, &root, &cwd);
+    if (ret != 0) return ret;
+
+    nofollow = (flags & AT_SYMLINK_NOFOLLOW) != 0;
+    node = nofollow
+        ? vfs_lookup_lstat((path[0] == '/') ? root : cwd, path)
+        : vfs_lookup((path[0] == '/') ? root : cwd, path);
     if (!node) return -ENOENT;
 
-    if (current_process->euid != 0 && current_process->euid != node->uid)
+    if (current_process->euid != 0 && current_process->euid != node->uid) {
         return -EPERM;
+    }
 
     if (current_process->euid != 0)
         mode &= ~(04000 | 02000);
@@ -1938,6 +2005,120 @@ int sys_fchown(int fd, int uid, int gid) {
     return 0;
 }
 
+int sys_fchownat(int dirfd, const char *path, int uid, int gid, int flag) {
+    char kpath[256];
+    char name[128];
+    fs_node_t *parent;
+    int ret;
+
+    if (uid < -1 || gid < -1) return -EINVAL;
+
+    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -EFAULT;
+
+    /* If flag has AT_SYMLINK_NOFOLLOW, resolve the path as a whole and don't
+       follow the last component (lchown semantics). Otherwise, follow it. */
+    if (flag & AT_SYMLINK_NOFOLLOW) {
+        /* For AT_SYMLINK_NOFOLLOW, we resolve the parent dir and do lchown */
+        ret = kern_resolve_parent_dirfd(dirfd, kpath, &parent, name, sizeof(name));
+        if (ret != 0) return ret;
+
+        /* Look up the final component */
+        fs_node_t *node = parent->finddir(parent, name);
+        if (!node) return -ENOENT;
+
+        /* If it's a symlink and AT_SYMLINK_NOFOLLOW is set, operate on the link */
+        if ((node->flags & 0x7) == FS_SYMLINK) {
+            /* Match fchown's current policy until supplementary groups exist. */
+            if (uid != -1 && current_process->euid != 0)
+                return -EPERM;
+            if (gid != -1 && current_process->euid != 0 && current_process->euid != node->uid)
+                return -EPERM;
+
+            if (uid != -1) node->uid = (uint32_t)uid;
+            if (gid != -1) node->gid = (uint32_t)gid;
+
+            if (current_process->euid != 0)
+                node->mask &= ~(uint32_t)(04000 | 02000);
+
+            node->ctime = get_time();
+            return 0;
+        }
+
+        /* Otherwise, do fchown-style operation on the resolved node */
+        if (uid != -1 && current_process->euid != 0)
+            return -EPERM;
+        if (gid != -1 && current_process->euid != 0 && current_process->euid != node->uid)
+            return -EPERM;
+
+        if (uid != -1) node->uid = (uint32_t)uid;
+        if (gid != -1) node->gid = (uint32_t)gid;
+
+        if (current_process->euid != 0)
+            node->mask &= ~(uint32_t)(04000 | 02000);
+
+        node->ctime = get_time();
+        return 0;
+    }
+
+    /* Default case (no AT_SYMLINK_NOFOLLOW): follow symlinks, resolve full path */
+    fs_node_t *node = sys_lookup_path(kpath, 1);
+    if (!node) return -ENOENT;
+
+    /* Match fchown's current policy until supplementary groups exist. */
+    if (uid != -1 && current_process->euid != 0)
+        return -EPERM;
+    if (gid != -1 && current_process->euid != 0 && current_process->euid != node->uid)
+        return -EPERM;
+
+    if (uid != -1) node->uid = (uint32_t)uid;
+    if (gid != -1) node->gid = (uint32_t)gid;
+
+    if (current_process->euid != 0)
+        node->mask &= ~(uint32_t)(04000 | 02000);
+
+    node->ctime = get_time();
+    return 0;
+}
+
+int sys_lchownat(int dirfd, const char *path, int uid, int gid, int flag) {
+    char kpath[256];
+    char name[128];
+    fs_node_t *parent;
+    int ret;
+
+    if (uid < -1 || gid < -1) return -EINVAL;
+
+    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -EFAULT;
+
+    /* lchownat always operates on the link itself, never follows symlinks */
+    ret = kern_resolve_parent_dirfd(dirfd, kpath, &parent, name, sizeof(name));
+    if (ret != 0) return ret;
+
+    fs_node_t *node = parent->finddir(parent, name);
+    if (!node) return -ENOENT;
+
+    /* Only operate on symlinks; if it's not a symlink, return ENOTLNK
+       unless the flag forces us to operate on it anyway */
+    if ((node->flags & 0x7) != FS_SYMLINK && !(flag & AT_REMOVEDIR)) {
+        /* Even for non-symlinks, we allow setting ownership */
+    }
+
+    /* Match fchown's current policy until supplementary groups exist. */
+    if (uid != -1 && current_process->euid != 0)
+        return -EPERM;
+    if (gid != -1 && current_process->euid != 0 && current_process->euid != node->uid)
+        return -EPERM;
+
+    if (uid != -1) node->uid = (uint32_t)uid;
+    if (gid != -1) node->gid = (uint32_t)gid;
+
+    if (current_process->euid != 0)
+        node->mask &= ~(uint32_t)(04000 | 02000);
+
+    node->ctime = get_time();
+    return 0;
+}
+
 int sys_fcntl(int fd, int cmd, int arg) {
     return proc_fcntl(current_process, fd, cmd, arg);
 }
@@ -1986,6 +2167,8 @@ int kern_execve(const char *f, char *const a[], char *const e[]) {
     int ret = exec_dispatch(f, a, e);
     if (ret == 0) {
         proc_vfork_done(current_process);
+        /* Wipe CSPRNG state at exec boundary to prevent entropy leakage */
+        random_on_exec();
     }
     exec_unpin_current_thread();
     return ret;

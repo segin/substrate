@@ -43,6 +43,10 @@ void test_linux_personality(void) {
                 "Linux syscall table wires mount to sys_mount");
     test_assert(linux->syscall_table[LINUX_SYS_umount] == (void *)&sys_umount,
                 "Linux syscall table wires umount to sys_umount");
+    test_assert(linux->syscall_table[LINUX_SYS_chmod] == (void *)&sys_chmod,
+                "Linux syscall table wires chmod to sys_chmod");
+    test_assert(linux->syscall_table[LINUX_SYS_fchmodat] != NULL,
+                "Linux syscall table wires fchmodat");
     test_assert(linux->syscall_table[LINUX_SYS_dup] == (void *)&sys_dup,
                 "Linux syscall table wires dup to sys_dup");
     test_assert(linux->syscall_table[LINUX_SYS_mprotect] == (void *)&sys_mprotect,
@@ -64,6 +68,12 @@ void test_linux_personality(void) {
     test_assert(linux->syscall_names[LINUX_SYS_umount] != NULL &&
                     strcmp(linux->syscall_names[LINUX_SYS_umount], "umount") == 0,
                 "Linux syscall name table exposes umount");
+    test_assert(linux->syscall_names[LINUX_SYS_chmod] != NULL &&
+                    strcmp(linux->syscall_names[LINUX_SYS_chmod], "chmod") == 0,
+                "Linux syscall name table exposes chmod");
+    test_assert(linux->syscall_names[LINUX_SYS_fchmodat] != NULL &&
+                    strcmp(linux->syscall_names[LINUX_SYS_fchmodat], "fchmodat") == 0,
+                "Linux syscall name table exposes fchmodat");
     test_assert(linux->syscall_names[LINUX_SYS_mprotect] != NULL &&
                     strcmp(linux->syscall_names[LINUX_SYS_mprotect], "mprotect") == 0,
                 "Linux syscall name table exposes mprotect");
@@ -89,6 +99,16 @@ void test_linux_personality(void) {
     test_assert(linux->syscall_fmts[LINUX_SYS_umount].nargs == 1 &&
                     linux->syscall_fmts[LINUX_SYS_umount].arg_types[0] == ARG_STR,
                 "Linux umount trace format matches ABI");
+    test_assert(linux->syscall_fmts[LINUX_SYS_chmod].nargs == 2 &&
+                    linux->syscall_fmts[LINUX_SYS_chmod].arg_types[0] == ARG_STR &&
+                    linux->syscall_fmts[LINUX_SYS_chmod].arg_types[1] == ARG_HEX,
+                "Linux chmod trace format matches ABI");
+    test_assert(linux->syscall_fmts[LINUX_SYS_fchmodat].nargs == 4 &&
+                    linux->syscall_fmts[LINUX_SYS_fchmodat].arg_types[0] == ARG_INT &&
+                    linux->syscall_fmts[LINUX_SYS_fchmodat].arg_types[1] == ARG_STR &&
+                    linux->syscall_fmts[LINUX_SYS_fchmodat].arg_types[2] == ARG_HEX &&
+                    linux->syscall_fmts[LINUX_SYS_fchmodat].arg_types[3] == ARG_HEX,
+                "Linux fchmodat trace format matches ABI");
     test_assert(linux->syscall_fmts[LINUX_SYS_mprotect].nargs == 3 &&
                     linux->syscall_fmts[LINUX_SYS_mprotect].arg_types[0] == ARG_PTR &&
                     linux->syscall_fmts[LINUX_SYS_mprotect].arg_types[1] == ARG_INT &&

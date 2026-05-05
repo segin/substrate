@@ -26,26 +26,48 @@ typedef void * _Atomic atomic_ptr;
 #define ATOMIC_VAR_INIT(value) (value)
 #define kill_dependency(value) (value)
 
-#define atomic_init(obj, value) __atomic_store_n((obj), (value), __ATOMIC_RELAXED)
-#define atomic_store_explicit(obj, value, order) __atomic_store_n((obj), (value), (order))
-#define atomic_store(obj, value) __atomic_store_n((obj), (value), __ATOMIC_SEQ_CST)
-#define atomic_load_explicit(obj, order) __atomic_load_n((obj), (order))
-#define atomic_load(obj) __atomic_load_n((obj), __ATOMIC_SEQ_CST)
+#ifdef __clang__
+/* Clang: use __c11_atomic_* builtins which accept _Atomic typed pointers */
+#define atomic_init(obj, value)      __c11_atomic_store((obj), (value), __ATOMIC_RELAXED)
+#define atomic_store_explicit(obj, value, order)  __c11_atomic_store((obj), (value), (order))
+#define atomic_store(obj, value)     __c11_atomic_store((obj), (value), __ATOMIC_SEQ_CST)
+#define atomic_load_explicit(obj, order)          __c11_atomic_load((obj), (order))
+#define atomic_load(obj)             __c11_atomic_load((obj), __ATOMIC_SEQ_CST)
+#define atomic_exchange_explicit(obj, value, order) __c11_atomic_exchange((obj), (value), (order))
+#define atomic_exchange(obj, value)  __c11_atomic_exchange((obj), (value), __ATOMIC_SEQ_CST)
+#define atomic_fetch_add_explicit(obj, arg, order) __c11_atomic_fetch_add((obj), (arg), (order))
+#define atomic_fetch_add(obj, arg)   __c11_atomic_fetch_add((obj), (arg), __ATOMIC_SEQ_CST)
+#define atomic_fetch_sub_explicit(obj, arg, order) __c11_atomic_fetch_sub((obj), (arg), (order))
+#define atomic_fetch_sub(obj, arg)   __c11_atomic_fetch_sub((obj), (arg), __ATOMIC_SEQ_CST)
+#define atomic_compare_exchange_strong_explicit(obj, expected, desired, succ, fail) \
+    __c11_atomic_compare_exchange_strong((obj), (expected), (desired), (succ), (fail))
+#define atomic_compare_exchange_strong(obj, expected, desired) \
+    __c11_atomic_compare_exchange_strong((obj), (expected), (desired), __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST)
+#define atomic_compare_exchange_weak_explicit(obj, expected, desired, succ, fail) \
+    __c11_atomic_compare_exchange_weak((obj), (expected), (desired), (succ), (fail))
+#define atomic_compare_exchange_weak(obj, expected, desired) \
+    __c11_atomic_compare_exchange_weak((obj), (expected), (desired), __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST)
+#else
+/* GCC: use __atomic_* builtins */
+#define atomic_init(obj, value)      __atomic_store_n((obj), (value), __ATOMIC_RELAXED)
+#define atomic_store_explicit(obj, value, order)  __atomic_store_n((obj), (value), (order))
+#define atomic_store(obj, value)     __atomic_store_n((obj), (value), __ATOMIC_SEQ_CST)
+#define atomic_load_explicit(obj, order)          __atomic_load_n((obj), (order))
+#define atomic_load(obj)             __atomic_load_n((obj), __ATOMIC_SEQ_CST)
 #define atomic_exchange_explicit(obj, value, order) __atomic_exchange_n((obj), (value), (order))
-#define atomic_exchange(obj, value) __atomic_exchange_n((obj), (value), __ATOMIC_SEQ_CST)
+#define atomic_exchange(obj, value)  __atomic_exchange_n((obj), (value), __ATOMIC_SEQ_CST)
 #define atomic_fetch_add_explicit(obj, arg, order) __atomic_fetch_add((obj), (arg), (order))
-#define atomic_fetch_add(obj, arg) __atomic_fetch_add((obj), (arg), __ATOMIC_SEQ_CST)
+#define atomic_fetch_add(obj, arg)   __atomic_fetch_add((obj), (arg), __ATOMIC_SEQ_CST)
 #define atomic_fetch_sub_explicit(obj, arg, order) __atomic_fetch_sub((obj), (arg), (order))
-#define atomic_fetch_sub(obj, arg) __atomic_fetch_sub((obj), (arg), __ATOMIC_SEQ_CST)
-
+#define atomic_fetch_sub(obj, arg)   __atomic_fetch_sub((obj), (arg), __ATOMIC_SEQ_CST)
 #define atomic_compare_exchange_strong_explicit(obj, expected, desired, succ, fail) \
     __atomic_compare_exchange_n((obj), (expected), (desired), 0, (succ), (fail))
 #define atomic_compare_exchange_strong(obj, expected, desired) \
     atomic_compare_exchange_strong_explicit((obj), (expected), (desired), __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST)
-
 #define atomic_compare_exchange_weak_explicit(obj, expected, desired, succ, fail) \
     __atomic_compare_exchange_n((obj), (expected), (desired), 1, (succ), (fail))
 #define atomic_compare_exchange_weak(obj, expected, desired) \
     atomic_compare_exchange_weak_explicit((obj), (expected), (desired), __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST)
+#endif /* __clang__ */
 
 #endif

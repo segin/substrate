@@ -68,9 +68,16 @@ int psf2_parse(const void *data, size_t size, struct font_info *out)
     if (hdr->headersize < sizeof(struct psf2_header))
         return -1;
 
-    /* Validate glyph data fits */
-    size_t glyph_data_size = (size_t)hdr->numglyph * hdr->bytesperglyph;
-    if (size < hdr->headersize + glyph_data_size)
+    /* Validate glyph data fits.  numglyph and bytesperglyph are
+     * attacker-controlled (PSF2 header read from disk / userspace);
+     * a 32-bit multiply on i386 with size_t = uint32_t silently wraps,
+     * which would let the bounds compare below succeed for a font
+     * that doesn't actually contain the claimed glyph data. */
+    if (hdr->bytesperglyph != 0 &&
+        hdr->numglyph > (uint32_t)(SIZE_MAX / hdr->bytesperglyph))
+        return -1;
+    size_t glyph_data_size = (size_t)hdr->numglyph * (size_t)hdr->bytesperglyph;
+    if (glyph_data_size > size - hdr->headersize)
         return -1;
 
     /* Sanity check dimensions */

@@ -566,13 +566,25 @@ static int ahci_identify(ahci_port_t *ap) {
         ap->firmware[i] = '\0';
     }
 
-    /* Sector size */
+    /* Sector size.  The IDENTIFY response is attacker-controlled (a
+     * malicious or buggy SATA device).  An out-of-range value here
+     * cascades into byte_count overflow in PRDT setup and division by
+     * zero in max_sectors math.  Accept only the four ATA-spec sector
+     * sizes; otherwise fall back to 512. */
     ap->sector_size = AHCI_SECTOR_SIZE;
-    /* Check for logical sector size > 512 (word 106 bit 12) */
     if ((id_buf[106] & (1 << 14)) && !(id_buf[106] & (1 << 15))) {
         if (id_buf[106] & (1 << 12)) {
-            ap->sector_size = ((uint32_t)id_buf[117] |
-                               ((uint32_t)id_buf[118] << 16)) * 2;
+            uint32_t reported = ((uint32_t)id_buf[117] |
+                                 ((uint32_t)id_buf[118] << 16)) * 2;
+            switch (reported) {
+            case 512: case 1024: case 2048: case 4096:
+                ap->sector_size = reported;
+                break;
+            default:
+                kprintf("ahci: ignoring nonsense sector_size=%u, using 512\n",
+                        reported);
+                break;
+            }
         }
     }
 

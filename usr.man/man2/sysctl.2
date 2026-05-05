@@ -1,61 +1,163 @@
-.TH SYSCTL 2 "February 2026" "Substrate" "System Calls Manual"
+.TH SYSCTL 2 "May 2026" "Substrate" "System Calls Manual"
 .SH NAME
-sysctl \- read or write system information
+sysctl \- read or write kernel state via a MIB path
 .SH SYNOPSIS
 .B #include <sys/sysctl.h>
 .PP
-.BI "int sysctl(int *" name ", unsigned int " namelen ", void *" oldp ,
-.BI "           size_t *" oldlenp ", void *" newp ", size_t " newlen ");"
+.BI "int sysctl(int *" name ", unsigned int " namelen ,
+.BI "           void *" oldp ", size_t *" oldlenp ,
+.BI "           void *" newp ", size_t " newlen ");"
 .SH DESCRIPTION
-The
 .BR sysctl ()
-call is used to examine and modify kernel parameters.  The
-parameters are organized as a tree of objects, and are designated by
-Management Information Base (MIB) style names.
+retrieves or modifies kernel parameters.
+Parameters are organised as a tree and are addressed by Management
+Information Base (MIB) style integer arrays.
 .PP
-The
 .I name
-is an array of integers of length
+is an array of
 .I namelen
-which specifies the object.
+integers designating the parameter.
+.I namelen
+must be in the range
+.RB [2,\~ CTL_MAXNAME ].
 .PP
-The
-.BR sysctl ()
-function copies information from the object to the buffer specified by
+.SS Reading a value
+If
 .I oldp
-if it is not NULL.  The amount of data copied is stored in the
-integer pointed to by
-.IR oldlenp .
+is non-NULL, the kernel copies the current value of the named parameter
+into the buffer it points to.
+.I oldlenp
+must point to a
+.I size_t
+that on entry holds the capacity of the buffer, and on return receives
+the number of bytes actually written.
+.PP
+To probe the required buffer size without reading the value, pass
+.B NULL
+for
+.I oldp
+and a non-NULL
+.IR oldlenp
+initialised to zero.
+The kernel will set
+.I *oldlenp
+to the current size of the parameter.
+This is the idiom used by the
+.BR sysctl (3)
+libc helpers to implement retry loops:
+.PP
+.RS 4
+.EX
+size_t sz = 0;
+sysctl(mib, miblen, NULL, &sz, NULL, 0);   /* probe */
+buf = malloc(sz);
+sysctl(mib, miblen, buf, &sz, NULL, 0);    /* fetch */
+.EE
+.RE
 .PP
 If
+.I oldlenp
+is NULL and
+.I oldp
+is NULL, the kernel ignores the read side entirely.
+.PP
+.SS Writing a value
+If
 .I newp
-is not NULL, it should point to a buffer containing new information
-to be written into the object.  The
+is non-NULL, the kernel copies
 .I newlen
-is the size of the new data.
+bytes from
+.I newp
+into the parameter.
+Writing requires
+.B CTLFLAG_WR
+to be set on the parameter and the caller to have effective user-ID 0
+(root).
+Reading and writing may be combined in a single call: the old value
+is fetched before the new value is installed.
+.PP
+.SS Atomicity
+Reads and writes of a single parameter are serialised by an internal
+.I sysctl_mutex
+held for the duration of the handler call, unless the parameter is
+registered with
+.BR CTLFLAG_NOLOCK .
+Callers must not assume atomicity across multiple
+.BR sysctl ()
+calls.
 .SH RETURN VALUE
-On success, 0 is returned.  On error, \-1 is returned, and
+On success, 0 is returned.
+On failure, \-1 is returned and
 .I errno
-is set appropriately.
+is set to indicate the error.
 .SH ERRORS
 .TP
 .B EFAULT
-An address specified in the call was invalid.
+.I name ,
+.IR oldp ,
+.IR oldlenp ,
+or
+.I newp
+points to an invalid address.
 .TP
 .B EINVAL
-The
 .I namelen
-was invalid.
+is less than 2 or greater than
+.BR CTL_MAXNAME ;
+or the handler rejected the supplied
+.I newlen
+as the wrong size for a typed parameter.
+.TP
+.B ENAMETOOLONG
+The new string value is longer than the maximum length allowed for
+that parameter.
+.TP
+.B ENOMEM
+The buffer supplied via
+.I oldp
+is smaller than the current value of the parameter.
+.I *oldlenp
+is updated to the required size so the caller can retry with a larger
+buffer.
+This error is used by
+.BR sysctl (3)
+to drive its retry loop.
 .TP
 .B ENOENT
-The specified name was not found.
+The MIB path does not correspond to any registered parameter.
 .TP
 .B EPERM
-An attempt was made to write into a read-only object.
+.I newp
+is non-NULL but the parameter is read-only
+.RB ( CTLFLAG_WR
+not set), or the caller is not root.
+.SH NOTES
+.BR sysctl (3)
+provides typed convenience wrappers
+.RB ( sysctl_int (),
+.BR sysctl_string (),
+\&…)
+that handle size probing, buffer growth, and
+.B ENOMEM
+retry loops automatically.
+Prefer those wrappers for application code; use the raw syscall only
+when a wrapper's overhead is unacceptable or when implementing the
+wrappers themselves.
+.PP
+The
+.B sysctl
+tree can be explored by name using
+.BR sysctlbyname (3)
+and
+.BR sysctlnametomib (3).
 .SH CONFORMING TO
-This call appeared in 4.4BSD. It is specific to BSD-like systems
-and Substrate.
+This interface first appeared in 4.4BSD and is present on BSD-derived
+systems including FreeBSD and Substrate.
+It is not part of POSIX.
 .SH SEE ALSO
+.BR sysctl (3),
+.BR sysctlbyname (3),
+.BR sysctlnametomib (3),
 .BR sysctl (8)
 .SH COLOPHON
 This page is part of the Substrate operating system documentation.

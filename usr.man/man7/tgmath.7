@@ -1,0 +1,254 @@
+.TH TGMATH 7 "2026-05-03" "Substrate" "Programmer's Manual"
+.SH NAME
+tgmath \- type-generic math macros
+.SH LIBRARY
+Math Library (libm, \-lm)
+.SH SYNOPSIS
+.nf
+.B #include <tgmath.h>
+.fi
+.SH DESCRIPTION
+The
+.B <tgmath.h>
+header provides a set of type-generic macros that wrap the functions
+declared in
+.B <math.h>
+and (when available)
+.BR <complex.h> .
+Each macro accepts arguments of any real floating-point type
+(\fBfloat\fR, \fBdouble\fR, or \fBlong double\fR) and dispatches
+the call to the correctly-typed underlying function, eliminating
+the need for the programmer to manually select between
+.BR sinf (3),
+.BR sin (3),
+and
+.BR sinl (3).
+.PP
+The header is specified by ISO C99 (and retained by C11 and C23).
+In Substrate it is implemented using the C11
+.B _Generic
+selection expression.
+.SS Type Selection
+The dispatching rule applied by each macro is:
+.RS 4
+.IP \(bu 2
+If any argument belonging to the type-domain of the function has type
+.B long double
+(or is an expression of that type), the
+.B l
+suffix variant is called (e.g.\&
+.BR sqrtl (3)).
+.IP \(bu 2
+Otherwise, if any such argument has type
+.B float
+(or an expression of that type), the
+.B f
+suffix variant is called (e.g.\&
+.BR sqrtf (3)).
+.IP \(bu 2
+Otherwise the unsuffixed
+.B double
+variant is called (e.g.\&
+.BR sqrt (3)).
+.RE
+.PP
+The selection is implemented via a
+.B _Generic
+expression.  Because
+.B _Generic
+does not accept integer types as alternatives (and because integer
+literals such as
+.B 2
+have type
+.BR int ),
+a common idiom is to use the
+.I +0
+trick when an integer value is intended to be treated as
+.BR double :
+.PP
+.RS 4
+.nf
+sin(x + 0)    /* promotes integer x to double */
+sin(x + 0.0)  /* equivalent, explicit */
+.fi
+.RE
+.PP
+Alternatively, a plain cast suffices:
+.B sin((double)n) .
+.SS Integer Arguments
+If all arguments are integer types, the C11 standard specifies that the
+call shall be treated as if the arguments were converted to
+.B double
+and the unsuffixed (double) variant is called.
+The Substrate implementation achieves this behaviour through the
+.B +0
+promotion embedded inside each macro expansion.
+.SS Covered Functions
+The following function families are covered by
+.BR <tgmath.h> :
+.TP
+.B Trigonometric
+.BR acos ,
+.BR asin ,
+.BR atan ,
+.BR atan2 ,
+.BR cos ,
+.BR sin ,
+.BR tan
+.TP
+.B Hyperbolic
+.BR acosh ,
+.BR asinh ,
+.BR atanh ,
+.BR cosh ,
+.BR sinh ,
+.BR tanh
+.TP
+.B Exponential and Logarithmic
+.BR exp ,
+.BR exp2 ,
+.BR expm1 ,
+.BR frexp ,
+.BR ilogb ,
+.BR ldexp ,
+.BR log ,
+.BR log10 ,
+.BR log1p ,
+.BR log2 ,
+.BR logb ,
+.BR scalbn ,
+.BR scalbln
+.TP
+.B Power and Absolute Value
+.BR cbrt ,
+.BR fabs ,
+.BR hypot ,
+.BR pow ,
+.BR sqrt
+.TP
+.B Rounding and Truncation
+.BR ceil ,
+.BR floor ,
+.BR nearbyint ,
+.BR rint ,
+.BR lrint ,
+.BR llrint ,
+.BR round ,
+.BR lround ,
+.BR llround ,
+.BR trunc
+.TP
+.B Remainder and Modulo
+.BR fmod ,
+.BR modf ,
+.BR remainder ,
+.BR remquo
+.TP
+.B Floating-Point Manipulation
+.BR copysign ,
+.BR nan ,
+.BR nextafter ,
+.BR nexttoward
+.TP
+.B Positive Difference, Max, Min, FMA
+.BR fdim ,
+.BR fmax ,
+.BR fmin ,
+.BR fma
+.SS No Multiple Evaluation
+Each macro is designed so that no argument expression is evaluated more
+than once.
+Under the C11
+.B _Generic
+mechanism only the
+.I controlling expression
+of the selection is evaluated at run-time; all non-selected branches
+are discarded at compile-time without evaluation.
+Thus side effects in arguments (e.g.\&
+.BR i++
+or a function call) occur exactly once, as expected.
+.SS Floating-Point Environment Interaction
+If a program wishes to observe or control the floating-point exception
+flags while calling functions through
+.BR <tgmath.h> ,
+it should enable access to the floating-point environment with:
+.PP
+.RS 4
+.nf
+#pragma STDC FENV_ACCESS ON
+.fi
+.RE
+.PP
+See
+.BR fenv (7)
+for details.
+.SS C++ Compatibility
+In C++ the functions declared in
+.B <cmath>
+are overloaded on argument type, making type-generic dispatch
+automatic.
+The C++
+.B <tgmath.h>
+header is therefore either a no-op or simply includes
+.B <cmath>
+and
+.BR <complex> .
+The macro-based dispatch mechanism described here applies only to C.
+.SS Complex Number Variants
+ISO C99 specifies that, when
+.B <complex.h>
+is included, the type-generic macros also dispatch to the complex
+variants (e.g.\&
+.BR csinf (3),
+.BR csin (3),
+.BR csinl (3)).
+The Substrate implementation does not yet provide
+.BR <complex.h> ;
+the complex dispatch paths are reserved for a future release.
+.SH NOTES
+Including
+.B <tgmath.h>
+implicitly includes both
+.B <math.h>
+and
+.BR <complex.h>
+(when the latter is available).
+.PP
+The type-generic macros are purely a syntactic convenience; there is no
+performance overhead relative to calling the typed functions directly.
+.SH EXAMPLES
+.nf
+#include <tgmath.h>
+
+int main(void) {
+    float       xf = 2.0f;
+    double      xd = 2.0;
+    long double xl = 2.0L;
+
+    /* Each call dispatches to the appropriately-typed variant */
+    float       r1 = sqrt(xf);   /* calls sqrtf(xf)  */
+    double      r2 = sqrt(xd);   /* calls sqrt(xd)   */
+    long double r3 = sqrt(xl);   /* calls sqrtl(xl)  */
+
+    /* Integer argument — promoted to double via +0 trick */
+    double r4 = sin(1);           /* calls sin(1+0) -> sin(double) */
+
+    /* Explicit cast is equally valid */
+    double r5 = sin((double)1);
+
+    (void)r1; (void)r2; (void)r3; (void)r4; (void)r5;
+    return 0;
+}
+.fi
+.SH SEE ALSO
+.BR math (3),
+.BR complex (7),
+.BR fenv (7),
+.BR sin (3),
+.BR cos (3),
+.BR tan (3),
+.BR sqrt (3),
+.BR pow (3),
+.BR exp (3),
+.BR log (3),
+.BR fma (3)
