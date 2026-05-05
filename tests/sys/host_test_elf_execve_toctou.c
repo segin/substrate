@@ -10,6 +10,7 @@
 #include <errno.h>
 #include <sys/mman.h> // for mmap
 #include <time.h>
+#include <sys/param.h>
 
 // Mock kernel constants/types if not provided by headers
 #define __kernel_size_t size_t
@@ -271,6 +272,10 @@ int random_get_bytes_flags(void *buf, size_t len, unsigned int flags) {
     memset(buf, 0, len);
     return 0;
 }
+int cmdline_debug_enabled(const char *key) {
+    (void)key;
+    return 0;
+}
 
 int kern_close(int fd) {
     (void)fd;
@@ -278,6 +283,19 @@ int kern_close(int fd) {
 }
 
 void exec_unpin_current_thread(void) {}
+void proc_capture_cmdline(process_t *proc, char *const argv[]) {
+    (void)proc;
+    (void)argv;
+}
+void ldt_free_process(process_t *proc) {
+    (void)proc;
+}
+void proc_close_cloexec(process_t *proc) {
+    (void)proc;
+}
+void pmap_destroy(pmap_t pmap) {
+    (void)pmap;
+}
 
 // Stub jump_to_userspace
 void jump_to_userspace(uint32_t entry, uint32_t stack) {
@@ -493,7 +511,7 @@ static void test_exec_setup_stack_uses_call_specific_execfn(void) {
 
     reset_host_mappings();
     assert(exec_setup_stack((pmap_t)0xDEADBEEF, &sp, argv_a, 1, NULL, 0,
-                            0x08048000u, 0, &image) == 0);
+                            0x08048000u, 0, image.at_phdr, &image) == 0);
     execfn_ptr = host_find_auxv_value(sp, AT_EXECFN);
     assert(execfn_ptr != 0);
     host_user_read_cstr(execfn_ptr, execfn, sizeof(execfn));
@@ -501,11 +519,56 @@ static void test_exec_setup_stack_uses_call_specific_execfn(void) {
 
     reset_host_mappings();
     assert(exec_setup_stack((pmap_t)0xDEADBEEF, &sp, argv_b, 1, NULL, 0,
-                            0x08048000u, 0, &image) == 0);
+                            0x08048000u, 0, image.at_phdr, &image) == 0);
     execfn_ptr = host_find_auxv_value(sp, AT_EXECFN);
     assert(execfn_ptr != 0);
     host_user_read_cstr(execfn_ptr, execfn, sizeof(execfn));
     assert(strcmp(execfn, "sh") == 0);
+}
+
+static void test_exec_setup_stack_linux_auxv_uses_main_entry(void) {
+    elf_image_info_t image;
+    char arg0[] = "/lib/vi";
+    char *argv[] = { arg0, NULL };
+    uint32_t sp;
+
+    reset_env();
+    memset(&image, 0, sizeof(image));
+    image.ehdr.e_phnum = 13;
+    image.ehdr.e_phentsize = sizeof(Elf32_Phdr);
+    image.at_phdr = 0x34u;
+    current_process->perso_id = PERS_LINUX;
+
+    reset_host_mappings();
+    assert(exec_setup_stack((pmap_t)0xDEADBEEF, &sp, argv, 1, NULL, 0,
+                            0x080496e0u, 0x40000000u,
+                            elf_runtime_phdr_addr(&image, ELF_ET_DYN_LOAD_BASE_I386),
+                            &image) == 0);
+    assert(host_find_auxv_value(sp, AT_ENTRY) == 0x080496e0u);
+    assert(host_find_auxv_value(sp, AT_BASE) == 0x40000000u);
+    assert(host_find_auxv_value(sp, AT_PHDR) == 0x08048034u);
+    assert(host_find_auxv_value(sp, AT_CLKTCK) == HZ);
+}
+
+static void test_et_dyn_main_uses_nonzero_load_bias(void) {
+    elf_image_info_t image;
+
+    memset(&image, 0, sizeof(image));
+    image.ehdr.e_type = 3;
+    assert(elf_exec_main_load_base(&image) == ELF_ET_DYN_LOAD_BASE_I386);
+
+    image.ehdr.e_type = 2;
+    assert(elf_exec_main_load_base(&image) == 0);
+}
+
+static void test_runtime_phdr_adds_load_bias(void) {
+    elf_image_info_t image;
+
+    memset(&image, 0, sizeof(image));
+    image.at_phdr = 0x34u;
+    assert(elf_runtime_phdr_addr(&image, 0) == 0x34u);
+    assert(elf_runtime_phdr_addr(&image, ELF_ET_DYN_LOAD_BASE_I386) ==
+           (ELF_ET_DYN_LOAD_BASE_I386 + 0x34u));
 }
 
 static void test_hot_cache_removes_repeat_metadata_reads(void) {
@@ -557,6 +620,9 @@ int main() {
     test_elf_cache_invalidates_on_metadata_change();
     test_hot_cache_preserves_personality_detection();
     test_exec_setup_stack_uses_call_specific_execfn();
+    test_exec_setup_stack_linux_auxv_uses_main_entry();
+    test_et_dyn_main_uses_nonzero_load_bias();
+    test_runtime_phdr_adds_load_bias();
     test_hot_cache_removes_repeat_metadata_reads();
 
 #if !defined(__i386__)
@@ -579,7 +645,6 @@ int main() {
         }
     }
 
-    // printf("Allocated low memory at %p\n", low_mem);
 
     if (!is_user_ptr(low_mem)) {
         printf("ERROR: Even mmap'd low memory is not considered user ptr! Check is_user_ptr logic.\n");

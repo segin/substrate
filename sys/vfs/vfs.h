@@ -40,6 +40,7 @@ typedef int (*truncate_type_t)(struct fs_node*, off_t);
 typedef int (*unmount_type_t)(struct fs_node*);
 typedef int (*rename_type_t)(struct fs_node *old_parent, const char *old_name, struct fs_node *new_parent, const char *new_name);
 typedef int (*statfs_type_t)(struct fs_node *node, struct statfs *buf);
+typedef int (*chmod_type_t)(struct fs_node *node, uint32_t mode);
 
 typedef struct fs_node {
     char name[128];
@@ -77,6 +78,7 @@ typedef struct fs_node {
     unmount_type_t unmount;
     rename_type_t rename;
     statfs_type_t statfs;
+    chmod_type_t chmod;
     struct fs_node *ptr; // Used by mountpoints and symlinks.
     struct mount *mp;    // Mount point this node belongs to.
 } fs_node_t;
@@ -114,10 +116,12 @@ int rename_fs(fs_node_t *old_parent, const char *old_name, fs_node_t *new_parent
 int statfs_fs(fs_node_t *node, struct statfs *buf);
 int mknod_fs(fs_node_t *node, const char *name, uint16_t mode, uint32_t dev);
 int vfs_mkdir(const char *path, uint16_t permission);
+int vfs_rmdir(const char *path);
 int vfs_mknod(const char *path, uint16_t mode, uint32_t dev);
 
 int vfs_check_permissions(fs_node_t *node, uint32_t uid, uint32_t gid, int mode);
 int vfs_may_open(fs_node_t *node, uint32_t uid, uint32_t gid, int flags);
+int vfs_chmod_node(fs_node_t *node, uint32_t mode);
 
 void vfs_register_filesystem(filesystem_t *fs);
 filesystem_t *vfs_get_filesystems(void);

@@ -347,14 +347,7 @@ static process_t *elks_active_process(void) {
 }
 
 static process_t *elks_swapper_process(void) {
-    int i;
-
-    for (i = 0; i < MAX_PROCS; i++) {
-        if (processes[i].pid == 0) {
-            return &processes[i];
-        }
-    }
-    return NULL;
+    return proc_find(0);
 }
 
 static int elks_proc_visible(const process_t *proc) {
@@ -623,6 +616,7 @@ static int elks_kmem_build_snapshot(uint8_t **buf_out, size_t *size_out) {
     int exported_count = 0;
     size_t seg_count = 0;
     size_t heap_count = 0;
+    size_t proc_slots;
     int i;
 
     if (!buf_out || !size_out) {
@@ -650,8 +644,9 @@ static int elks_kmem_build_snapshot(uint8_t **buf_out, size_t *size_out) {
     if (active && active != swapper && elks_proc_visible(active)) {
         exported[exported_count++] = active;
     }
-    for (i = 0; i < MAX_PROCS && exported_count < MAX_PROCS; i++) {
-        const process_t *proc = &processes[i];
+    proc_slots = proc_slot_count();
+    for (size_t slot = 0; slot < proc_slots && exported_count < MAX_PROCS; slot++) {
+        const process_t *proc = proc_slot(slot);
         int seen = 0;
         int j;
 
@@ -672,7 +667,7 @@ static int elks_kmem_build_snapshot(uint8_t **buf_out, size_t *size_out) {
     if (elks_debug_enabled("perso:elks:kmem")) {
         char msg[128];
 
-        sprintf(msg,
+        snprintf(msg, sizeof(msg),
                 "ELKS kmem: current pid=%d comm=%s thread=%d active=%d count=%d\n",
                 current_process ? current_process->pid : -1,
                 current_process ? current_process->comm : "(null)",
@@ -681,7 +676,7 @@ static int elks_kmem_build_snapshot(uint8_t **buf_out, size_t *size_out) {
                 exported_count);
         kprint(msg);
         for (i = 0; i < exported_count; i++) {
-            sprintf(msg,
+            snprintf(msg, sizeof(msg),
                     "ELKS kmem: slot %d pid=%d state=%d comm=%s kernel=%d\n",
                     i,
                     exported[i] ? exported[i]->pid : -1,
@@ -778,7 +773,7 @@ static int elks_handle_trap(void *regs_ptr) {
     }
 
     if (elks_debug_enabled("perso:elks:trap")) {
-        sprintf(msg, "ELKS: trapped Minix-86 syscall attempt via INT 0x20 at 0x%08X\n",
+        snprintf(msg, sizeof(msg), "ELKS: trapped Minix-86 syscall attempt via INT 0x20 at 0x%08X\n",
                 (unsigned int)softint_addr);
         kprint(msg);
     }
@@ -833,7 +828,7 @@ static int elks_sys_unimplemented(uint32_t unused0, uint32_t unused1, uint32_t u
     (void)unused4; (void)unused5; (void)unused6; (void)unused7;
 
     if (elks_debug_enabled("perso:elks:syscall")) {
-        sprintf(buf, "ELKS: unsupported syscall %u\n", nr);
+        snprintf(buf, sizeof(buf), "ELKS: unsupported syscall %u\n", nr);
         kprint(buf);
     }
     return -ENOSYS;
@@ -1119,7 +1114,7 @@ static int elks_sys_read(uint32_t fd, uint32_t buf_off, uint32_t count,
         if (elks_debug_enabled("perso:elks:kmem")) {
             char msg[128];
 
-            sprintf(msg, "ELKS kmem: read fd=%u off=%u count=%u size=%u\n",
+            snprintf(msg, sizeof(msg), "ELKS kmem: read fd=%u off=%u count=%u size=%u\n",
                     (unsigned int)fd,
                     (unsigned int)(current_process->fds[fd] ? current_process->fds[fd]->f_offset : 0),
                     (unsigned int)count,
@@ -1271,7 +1266,7 @@ static int elks_sys_lseek(uint32_t fd, uint32_t pos_off, uint32_t whence,
     if (elks_debug_enabled("perso:elks:kmem")) {
         char msg[128];
 
-        sprintf(msg, "ELKS kmem: lseek fd=%u whence=%u -> off=%u size=%u\n",
+        snprintf(msg, sizeof(msg), "ELKS kmem: lseek fd=%u whence=%u -> off=%u size=%u\n",
                 (unsigned int)fd,
                 (unsigned int)whence,
                 (unsigned int)f->f_offset,
@@ -1676,7 +1671,7 @@ static int elks_sys_brk(uint32_t brk_off, uint32_t unused1, uint32_t unused2,
     }
 
     linear = base + (uintptr_t)(uint16_t)brk_off;
-    current = (uintptr_t)sys_brk((uint32_t)linear);
+    current = (uintptr_t)sys_brk((void *)(uintptr_t)linear);
     if (current < base) {
         return -ENOMEM;
     }
@@ -1906,7 +1901,7 @@ static int elks_sys_sbrk(uint32_t increment, uint32_t oldbrk_off, uint32_t unuse
     if (new_brk < base || (new_brk - base) > (uintptr_t)(limit + 1U)) {
         return -ENOMEM;
     }
-    (void)sys_brk((uint32_t)new_brk);
+    (void)sys_brk((void *)(uintptr_t)new_brk);
     if ((uintptr_t)current_process->brk != new_brk) {
         return -ENOMEM;
     }
@@ -2513,5 +2508,6 @@ struct personality personality_elks = {
     .sendsig = elks_sendsig,
     .sigreturn = NULL,
     .rt_sigreturn = NULL,
-    .handle_trap = elks_handle_trap
+    .handle_trap = elks_handle_trap,
+    .path_prefix = "/perso/elks"
 };

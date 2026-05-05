@@ -19,6 +19,8 @@ void kmem_get_stats(uint64_t *allocs, uint64_t *frees, uint64_t *bytes) {
 }
 
 process_t *current_process = NULL;
+static time_t mock_now = 3000;
+static time_t mock_boot = 2500;
 struct fs_node *console_get_node(void) { return NULL; }
 void vfs_register_filesystem(struct filesystem *fs) { (void)fs; }
 int tty_read(struct tty *tty, char *buf, int len) { (void)tty; (void)buf; (void)len; return 0; }
@@ -26,6 +28,8 @@ int tty_write(struct tty *tty, const char *buf, int len) { (void)tty; (void)buf;
 int tty_ioctl(struct tty *tty, uint32_t cmd, unsigned long arg) { (void)tty; (void)cmd; (void)arg; return 0; }
 int kprintf(const char *fmt, ...) { (void)fmt; return 0; }
 void kprint(const char *str) { (void)str; }
+time_t get_time(void) { return mock_now; }
+time_t get_boot_time(void) { return mock_boot; }
 
 int copyin(const void *src, void *dst, size_t size) {
     memcpy(dst, src, size);
@@ -42,6 +46,27 @@ int scsi_execute_sync(scsi_device_t *dev, uint8_t *cdb, uint8_t cdb_len,
                       uint32_t timeout_ms) {
     (void)dev; (void)cdb; (void)cdb_len; (void)data;
     (void)data_len; (void)flags; (void)timeout_ms;
+    return 0;
+}
+
+scsi_request_t *scsi_request_alloc(void) {
+    return calloc(1, sizeof(scsi_request_t));
+}
+
+void scsi_request_free(scsi_request_t *req) {
+    free(req);
+}
+
+void scsi_request_init(scsi_request_t *req, scsi_device_t *dev) {
+    if (!req) {
+        return;
+    }
+    memset(req, 0, sizeof(*req));
+    req->device = dev;
+}
+
+int scsi_execute(scsi_request_t *req) {
+    (void)req;
     return 0;
 }
 
@@ -97,6 +122,9 @@ static void test_generic_node_goes_under_storage_scsi(void) {
     assert(node != NULL);
     assert(node->node != NULL);
     assert((node->node->flags & 0x7) == FS_CHARDEVICE);
+    assert(node->node->atime == mock_now);
+    assert(node->node->mtime == mock_now);
+    assert(node->node->ctime == mock_boot);
 }
 
 static void test_bus_node_goes_under_storage_scsi(void) {
@@ -122,6 +150,9 @@ static void test_bus_node_goes_under_storage_scsi(void) {
     assert(node != NULL);
     assert(node->node != NULL);
     assert((node->node->flags & 0x7) == FS_CHARDEVICE);
+    assert(node->node->atime == mock_now);
+    assert(node->node->mtime == mock_now);
+    assert(node->node->ctime == mock_boot);
 }
 
 static void test_auto_attach_creates_generic_node_and_calls_block_attach(void) {
@@ -151,6 +182,9 @@ static void test_auto_attach_creates_generic_node_and_calls_block_attach(void) {
     assert(node != NULL);
     assert(scsi_dev_attach_calls == 1);
     assert(last_attached_dev == &dev);
+    assert(node->node->atime == mock_now);
+    assert(node->node->mtime == mock_now);
+    assert(node->node->ctime == mock_boot);
 }
 
 int main(void) {

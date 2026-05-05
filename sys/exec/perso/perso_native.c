@@ -5,6 +5,7 @@
 #include <sys/resource.h>
 #include <sys/times.h>
 #include <include/sys/sysinfo.h>
+#include <kern/time.h>
 
 extern int sys_mlock(const void *addr, size_t len);
 extern int sys_munlock(const void *addr, size_t len);
@@ -24,6 +25,11 @@ extern int sys_getpriority(int which, int who);
 
 /* Native-specific syscalls are now in syscall_impl.h */
 
+static void *native_sys_mmap(void *addr, size_t length, int prot, int flags,
+                             int fd, uint32_t page_offset) {
+    return sys_mmap(addr, length, prot, flags, fd, (uint64_t)page_offset << 12);
+}
+
 static void *native_syscalls[MAX_SYSCALLS] = {
     [SYS_EXIT] = &sys_exit,
     [SYS_FORK] = &sys_fork,
@@ -32,9 +38,11 @@ static void *native_syscalls[MAX_SYSCALLS] = {
     [SYS_READ] = &sys_read,
     [SYS_WRITE] = &sys_write,
     [SYS_OPEN] = &sys_open,
+    [SYS_OPENAT] = &sys_openat,
     [SYS_CLOSE] = &sys_close,
     [SYS_EXECVE] = &sys_execve,
     [SYS_CHDIR] = &sys_chdir,
+    [SYS_CHMOD] = &sys_chmod,
     [SYS_UNLINK] = (void*)sys_unlink,
     [SYS_LINK] = (void*)sys_link,
     [SYS_SYMLINK] = (void*)sys_symlink,
@@ -54,6 +62,7 @@ static void *native_syscalls[MAX_SYSCALLS] = {
     [SYS_SYNC] = &sys_sync,
     [SYS_KILL] = &sys_kill,
     [SYS_MKDIR] = &sys_mkdir,
+    [SYS_MKDIRAT] = &sys_mkdirat,
     [SYS_RMDIR] = &sys_rmdir,
     [SYS_PIPE] = &sys_pipe,
     [SYS_SETGID] = &sys_setgid,
@@ -68,11 +77,23 @@ static void *native_syscalls[MAX_SYSCALLS] = {
     [SYS_STAT] = &sys_stat,
     [SYS_LSTAT] = &sys_lstat,
     [SYS_FSTAT] = &sys_fstat,
+    [SYS_FSTATAT] = &sys_fstatat,
     [SYS_UNAME] = &sys_uname,
     [SYS_MODIFY_LDT] = &sys_modify_ldt,
     [SYS_READLINK] = &sys_readlink,
     [SYS_REBOOT] = &sys_reboot,
-    [SYS_MMAP] = &sys_mmap,
+    [SYS_MMAP] = &native_sys_mmap,
+    [SYS_MUNMAP] = &sys_munmap,
+    [SYS_TRUNCATE] = &sys_truncate,
+    [SYS_FTRUNCATE] = &sys_ftruncate,
+    [SYS_FCHMOD] = &sys_fchmod,
+    [SYS_FCHOWN] = &sys_fchown,
+    [SYS_CHOWN] = &sys_chown,            /* 16  V7 chown, follows symlinks */
+    [SYS_LCHOWN] = &sys_lchown,          /* 254  BSD-era no-follow */
+    [SYS_LCHMOD] = &sys_lchmod,          /* 274  BSD-era no-follow */
+    [SYS_FCHOWNAT] = &sys_fchownat,
+    [SYS_LCHOWNAT] = &sys_lchownat,
+    [SYS_FCHMODAT] = &sys_fchmodat,
     [SYS_GETDENTS] = &sys_getdents, 
     [SYS_MSYNC] = &sys_msync,
     [SYS_NANOSLEEP] = &sys_nanosleep,
@@ -103,6 +124,7 @@ static void *native_syscalls[MAX_SYSCALLS] = {
     [SYS_GETPGID] = &sys_getpgid,
     [SYS_GETRUSAGE] = &sys_getrusage,
     [SYS_RENAME] = &sys_rename,
+    [SYS_UNLINKAT] = &sys_unlinkat,
     [SYS_STATFS] = &sys_statfs,
     [SYS_FSTATFS] = &sys_fstatfs,
     [SYS_TIMES] = &sys_times,
@@ -118,6 +140,8 @@ static void *native_syscalls[MAX_SYSCALLS] = {
     [SYS_GETPRIORITY] = &sys_getpriority,
     [SYS_SETITIMER] = &sys_setitimer,
     [SYS_GETITIMER] = &sys_getitimer,
+    [SYS_CLOCK_GETTIME] = &sys_clock_gettime,
+    [SYS_GETRANDOM] = &sys_getrandom,
 };
 
 static const char *native_names[MAX_SYSCALLS] = {
@@ -128,9 +152,11 @@ static const char *native_names[MAX_SYSCALLS] = {
     [SYS_READ] = "read",
     [SYS_WRITE] = "write",
     [SYS_OPEN] = "open",
+    [SYS_OPENAT] = "openat",
     [SYS_CLOSE] = "close",
     [SYS_EXECVE] = "execve",
     [SYS_CHDIR] = "chdir",
+    [SYS_CHMOD] = "chmod",
     [SYS_UNLINK] = "unlink",
     [SYS_LINK] = "link",
     [SYS_SYMLINK] = "symlink",
@@ -148,6 +174,7 @@ static const char *native_names[MAX_SYSCALLS] = {
     [SYS_SYNC] = "sync",
     [SYS_KILL] = "kill",
     [SYS_MKDIR] = "mkdir",
+    [SYS_MKDIRAT] = "mkdirat",
     [SYS_RMDIR] = "rmdir",
     [SYS_PIPE] = "pipe",
     [SYS_SETGID] = "setgid",
@@ -161,9 +188,22 @@ static const char *native_names[MAX_SYSCALLS] = {
     [SYS_DUP2] = "dup2",
     [SYS_READLINK] = "readlink",
     [SYS_REBOOT] = "reboot",
+    [SYS_MMAP] = "mmap",
+    [SYS_MUNMAP] = "munmap",
+    [SYS_TRUNCATE] = "truncate",
+    [SYS_FTRUNCATE] = "ftruncate",
+    [SYS_FCHMOD] = "fchmod",
+    [SYS_FCHOWN] = "fchown",
+    [SYS_LCHOWN] = "lchown",
+    [SYS_CHOWN]    = "chown",
+    [SYS_LCHMOD]   = "lchmod",
+    [SYS_FCHOWNAT] = "fchownat",
+    [SYS_LCHOWNAT] = "lchownat",
+    [SYS_FCHMODAT] = "fchmodat",
     [SYS_STAT] = "stat",
     [SYS_LSTAT] = "lstat",
     [SYS_FSTAT] = "fstat",
+    [SYS_FSTATAT] = "fstatat",
     [SYS_SIGRETURN] = "sigreturn",
     [SYS_UNAME] = "uname",
     [SYS_MODIFY_LDT] = "modify_ldt",
@@ -198,6 +238,7 @@ static const char *native_names[MAX_SYSCALLS] = {
     [SYS_GETPGID] = "getpgid",
     [SYS_GETRUSAGE] = "getrusage",
     [SYS_RENAME] = "rename",
+    [SYS_UNLINKAT] = "unlinkat",
     [SYS_STATFS] = "statfs",
     [SYS_FSTATFS] = "fstatfs",
     [SYS_TIMES] = "times",
@@ -213,6 +254,8 @@ static const char *native_names[MAX_SYSCALLS] = {
     [SYS_GETPRIORITY] = "getpriority",
     [SYS_SETITIMER] = "setitimer",
     [SYS_GETITIMER] = "getitimer",
+    [SYS_CLOCK_GETTIME] = "clock_gettime",
+    [SYS_GETRANDOM] = "getrandom",
 };
 
 static struct syscall_fmt native_fmts[MAX_SYSCALLS] = {
@@ -222,9 +265,11 @@ static struct syscall_fmt native_fmts[MAX_SYSCALLS] = {
     [SYS_READ] = { 3, { ARG_INT, ARG_PTR, ARG_INT } },
     [SYS_WRITE] = { 3, { ARG_INT, ARG_STR, ARG_INT } },
     [SYS_OPEN] = { 3, { ARG_STR, ARG_HEX, ARG_HEX } },
+    [SYS_OPENAT] = { 4, { ARG_INT, ARG_STR, ARG_HEX, ARG_HEX } },
     [SYS_CLOSE] = { 1, { ARG_INT } },
     [SYS_EXECVE] = { 3, { ARG_STR, ARG_PTR, ARG_PTR } },
     [SYS_CHDIR] = { 1, { ARG_STR } },
+    [SYS_CHMOD] = { 2, { ARG_STR, ARG_HEX } },
     [SYS_UNLINK] = { 1, { ARG_STR } },
     [SYS_LINK] = { 2, { ARG_STR, ARG_STR } },
     [SYS_SYMLINK] = { 2, { ARG_STR, ARG_STR } },
@@ -244,6 +289,7 @@ static struct syscall_fmt native_fmts[MAX_SYSCALLS] = {
     [SYS_SYNC] = { 0, { 0 } },
     [SYS_KILL] = { 2, { ARG_INT, ARG_INT } },
     [SYS_MKDIR] = { 2, { ARG_STR, ARG_HEX } },
+    [SYS_MKDIRAT] = { 3, { ARG_INT, ARG_STR, ARG_HEX } },
     [SYS_RMDIR] = { 1, { ARG_STR } },
     [SYS_PIPE] = { 1, { ARG_PTR } },
     [SYS_SETGID] = { 1, { ARG_INT } },
@@ -257,9 +303,22 @@ static struct syscall_fmt native_fmts[MAX_SYSCALLS] = {
     [SYS_DUP2] = { 2, { ARG_INT, ARG_INT } },
     [SYS_READLINK] = { 3, { ARG_STR, ARG_PTR, ARG_INT } },
     [SYS_REBOOT] = { 1, { ARG_INT } },
+    [SYS_MMAP] = { 6, { ARG_PTR, ARG_INT, ARG_INT, ARG_INT, ARG_INT, ARG_HEX } },
+    [SYS_MUNMAP] = { 2, { ARG_PTR, ARG_INT } },
+    [SYS_TRUNCATE] = { 3, { ARG_STR, ARG_LONG } },
+    [SYS_FTRUNCATE] = { 3, { ARG_INT, ARG_LONG } },
+    [SYS_FCHMOD] = { 2, { ARG_INT, ARG_HEX } },
+    [SYS_LCHOWN] = { 3, { ARG_STR, ARG_INT, ARG_INT } },
+    [SYS_LCHMOD] = { 2, { ARG_STR, ARG_HEX } },
+    [SYS_FCHOWN] = { 3, { ARG_INT, ARG_INT, ARG_INT } },
+    [SYS_FCHOWNAT] = { 5, { ARG_INT, ARG_STR, ARG_INT, ARG_INT, ARG_HEX } },
+    [SYS_LCHOWNAT] = { 5, { ARG_INT, ARG_STR, ARG_INT, ARG_INT, ARG_HEX } },
+    [SYS_CHOWN]    = { 3, { ARG_STR, ARG_INT, ARG_INT } },
+    [SYS_FCHMODAT] = { 4, { ARG_INT, ARG_STR, ARG_HEX, ARG_HEX } },
     [SYS_STAT] = { 2, { ARG_STR, ARG_PTR } },
     [SYS_LSTAT] = { 2, { ARG_STR, ARG_PTR } },
     [SYS_FSTAT] = { 2, { ARG_INT, ARG_PTR } },
+    [SYS_FSTATAT] = { 4, { ARG_INT, ARG_STR, ARG_PTR, ARG_HEX } },
     [SYS_UNAME] = { 1, { ARG_PTR } },
     [SYS_MODIFY_LDT] = { 3, { ARG_INT, ARG_PTR, ARG_LONG } },
     [SYS_GETDENTS] = { 3, { ARG_INT, ARG_PTR, ARG_INT } },
@@ -293,6 +352,7 @@ static struct syscall_fmt native_fmts[MAX_SYSCALLS] = {
     [SYS_GETPGID] = { 1, { ARG_INT } },
     [SYS_GETRUSAGE] = { 2, { ARG_INT, ARG_PTR } },
     [SYS_RENAME] = { 2, { ARG_STR, ARG_STR } },
+    [SYS_UNLINKAT] = { 3, { ARG_INT, ARG_STR, ARG_HEX } },
     [SYS_STATFS] = { 2, { ARG_STR, ARG_PTR } },
     [SYS_FSTATFS] = { 2, { ARG_INT, ARG_PTR } },
     [SYS_TIMES] = { 1, { ARG_PTR } },
@@ -308,6 +368,8 @@ static struct syscall_fmt native_fmts[MAX_SYSCALLS] = {
     [SYS_GETPRIORITY] = { 2, { ARG_INT, ARG_INT } },
     [SYS_SETITIMER] = { 3, { ARG_INT, ARG_PTR, ARG_PTR } },
     [SYS_GETITIMER] = { 2, { ARG_INT, ARG_PTR } },
+    [SYS_CLOCK_GETTIME] = { 2, { ARG_INT, ARG_PTR } },
+    [SYS_GETRANDOM] = { 3, { ARG_PTR, ARG_INT, ARG_HEX } },
 };
 
 extern void sendsig(void *handler, int sig, uint32_t mask, uint32_t flags, void *regs);

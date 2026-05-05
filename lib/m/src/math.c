@@ -5,6 +5,9 @@
  * using Taylor series approximations and mathematical identities.
  */
 
+#include <errno.h>
+#include <fenv.h>
+#include <limits.h>
 #include <math.h>
 #include <stdint.h>
 
@@ -14,6 +17,9 @@
 #endif
 #ifndef M_PI_2
 #define M_PI_2    1.57079632679489661923
+#endif
+#ifndef M_PI_4
+#define M_PI_4    0.78539816339744830962
 #endif
 #ifndef M_E
 #define M_E       2.71828182845904523536
@@ -196,6 +202,9 @@ double hypot(double x, double y) {
  * sin(x) = x - x^3/3! + x^5/5! - ...
  */
 double sin(double x) {
+    if (isnan(x)) return x;
+    if (isinf(x)) return NAN;
+
     double res;
     __asm__ __volatile__(
         "fldl %1\n\t"
@@ -221,6 +230,9 @@ double sin(double x) {
  * cos(x) = 1 - x^2/2! + x^4/4! - ...
  */
 double cos(double x) {
+    if (isnan(x)) return x;
+    if (isinf(x)) return NAN;
+
     double res;
     __asm__ __volatile__(
         "fldl %1\n\t"
@@ -263,6 +275,9 @@ void sincos(double x, double *s, double *c) {
 
 /* tan(x) = sin(x) / cos(x) */
 double tan(double x) {
+    if (isnan(x)) return x;
+    if (isinf(x)) return NAN;
+
     double res;
     __asm__ __volatile__(
         "fldl %1\n\t"
@@ -289,8 +304,14 @@ double tan(double x) {
  * atan(x) = x - x^3/3 + x^5/5 - ... for |x| <= 1
  */
 double atan(double x) {
+    if (isnan(x)) return x;
+    if (isinf(x)) return (x < 0) ? -M_PI_2 : M_PI_2;
+    if (x == 0.0) return x;
+
     int neg = (x < 0);
     if (neg) x = -x;
+
+    if (x == 1.0) return (neg) ? -M_PI_4 : M_PI_4;
     
     int inv = (x > 1.0);
     if (inv) x = 1.0 / x;
@@ -298,7 +319,7 @@ double atan(double x) {
     /* Taylor series for |x| <= 1 */
     double x2 = x * x;
     double term = x, sum = x;
-    for (int i = 1; i < 50 && fabs(term) > 1e-15; i++) {
+    for (int i = 1; i < 100 && fabs(term) > 1e-15; i++) {
         term *= -x2;
         sum += term / (2 * i + 1);
     }
@@ -307,8 +328,35 @@ double atan(double x) {
     return neg ? -sum : sum;
 }
 
-/* atan2(y, x) - Two-argument arctangent */
+/* atan2(y, x) - Two-argument arctangent (C99 Annex F.10.1.4) */
 double atan2(double y, double x) {
+    if (isnan(y) || isnan(x)) return NAN;
+
+    int y_neg = signbit(y);
+    int x_neg = signbit(x);
+    int y_inf = isinf(y);
+    int x_inf = isinf(x);
+
+    if (y == 0.0) {
+        if (!x_neg) return y;       /* preserves sign of zero in y */
+        return y_neg ? -M_PI : M_PI;
+    }
+    if (x == 0.0) {
+        return y_neg ? -M_PI_2 : M_PI_2;
+    }
+
+    if (y_inf) {
+        if (x_inf) {
+            double base = x_neg ? (3.0 * M_PI / 4.0) : M_PI_4;
+            return y_neg ? -base : base;
+        }
+        return y_neg ? -M_PI_2 : M_PI_2;
+    }
+    if (x_inf) {
+        if (!x_neg) return y_neg ? -0.0 : 0.0;
+        return y_neg ? -M_PI : M_PI;
+    }
+
     double res;
     __asm__ __volatile__("fldl %1; fldl %2; fpatan; fstpl %0" : "=m"(res) : "m"(y), "m"(x));
     return res;
@@ -319,7 +367,10 @@ double atan2(double y, double x) {
  * asin(x) = atan(x / sqrt(1 - x^2))
  */
 double asin(double x) {
+    if (isnan(x)) return x;
+    if (isinf(x)) return NAN;
     if (x < -1.0 || x > 1.0) return NAN;
+    if (x == 0.0) return x;
     if (x == 1.0) return M_PI_2;
     if (x == -1.0) return -M_PI_2;
     return atan(x / sqrt(1.0 - x * x));
@@ -338,18 +389,27 @@ double acos(double x) {
  * tanh(x) = sinh(x) / cosh(x)
  */
 double sinh(double x) {
+    if (isnan(x)) return x;
+    if (isinf(x)) return x;  /* sinh(+inf)=+inf, sinh(-inf)=-inf */
+    if (x == 0.0) return x;  /* preserves +0.0/-0.0 (sinh is odd) */
     if (fabs(x) < 1e-9) return x;  /* Taylor for small x */
     double ex = exp(x);
     return (ex - 1.0 / ex) * 0.5;
 }
 
 double cosh(double x) {
-    double ex = exp(x);
+    if (isnan(x)) return x;
+    if (isinf(x)) return INFINITY;  /* cosh(+/-inf)=+inf (even function) */
+    if (x == 0.0) return 1.0;        /* cosh(+/-0)=1 */
+    double ex = exp(fabs(x));        /* even function; use |x| for symmetry */
     return (ex + 1.0 / ex) * 0.5;
 }
 
 double tanh(double x) {
-    if (x > 20.0) return 1.0;
+    if (isnan(x)) return x;
+    if (isinf(x)) return x > 0 ? 1.0 : -1.0;  /* tanh(+/-inf)=+/-1 */
+    if (x == 0.0) return x;                    /* preserves +0.0/-0.0 (tanh is odd) */
+    if (x > 20.0) return 1.0;                  /* asymptote; avoids exp() overflow */
     if (x < -20.0) return -1.0;
     double e2x = exp(2.0 * x);
     return (e2x - 1.0) / (e2x + 1.0);
@@ -357,83 +417,576 @@ double tanh(double x) {
 
 /* asinh(x) = log(x + sqrt(x^2 + 1)) */
 double asinh(double x) {
-    if (fabs(x) < 1e-9) return x;
+    if (isnan(x)) return x;
+    if (isinf(x)) return x;  /* asinh(+/-inf)=+/-inf (asinh is odd, full real line) */
+    if (x == 0.0) return x;  /* preserves +0.0/-0.0 (asinh is odd) */
+    if (fabs(x) < 1e-9) return x;  /* Taylor for small x */
     return log(x + sqrt(x * x + 1.0));
 }
 
 /* acosh(x) = log(x + sqrt(x^2 - 1)), x >= 1 */
 double acosh(double x) {
-    if (x < 1.0) return NAN;
+    if (isnan(x)) return x;                 /* acosh(NaN)=NaN */
+    if (x == 1.0) return 0.0;               /* acosh(1)=+0 exactly */
+    if (x < 1.0) {                          /* domain error (incl. -inf) */
+        feraiseexcept(FE_INVALID);
+        return NAN;
+    }
+    if (isinf(x)) return x;                 /* acosh(+inf)=+inf */
     return log(x + sqrt(x * x - 1.0));
 }
 
 /* atanh(x) = 0.5 * log((1+x)/(1-x)), |x| < 1 */
 double atanh(double x) {
-    if (x <= -1.0 || x >= 1.0) return (x == 1.0) ? INFINITY : (x == -1.0) ? -INFINITY : NAN;
+    if (isnan(x)) return x;                 /* atanh(NaN)=NaN */
+    if (x == 0.0) return x;                 /* preserves +0.0/-0.0 (atanh is odd) */
+    if (x == 1.0) {                         /* +pole */
+        feraiseexcept(FE_DIVBYZERO);
+        return INFINITY;
+    }
+    if (x == -1.0) {                        /* -pole */
+        feraiseexcept(FE_DIVBYZERO);
+        return -INFINITY;
+    }
+    if (x < -1.0 || x > 1.0 || isinf(x)) {  /* domain error (incl. +/-inf) */
+        feraiseexcept(FE_INVALID);
+        return NAN;
+    }
     return 0.5 * log((1.0 + x) / (1.0 - x));
+}
+
+/*
+ * erf(x) - error function: 2/sqrt(pi) * integral_0^x e^(-t^2) dt
+ *
+ * Uses Abramowitz & Stegun 7.1.26 rational approximation
+ * (max error ~1.5e-7).  Range: [-1, 1].  Odd function.
+ */
+double erf(double x) {
+    if (isnan(x)) return x;
+    if (x == 0.0) return x;                 /* preserves +0.0/-0.0 (erf is odd) */
+    if (isinf(x)) return (x > 0) ? 1.0 : -1.0;
+
+    double sign = (x < 0) ? -1.0 : 1.0;
+    double absx = fabs(x);
+
+    /* For |x| > 6.0, erf is essentially +/-1 to double precision. */
+    if (absx > 6.0) return sign;
+
+    const double a1 =  0.254829592;
+    const double a2 = -0.284496736;
+    const double a3 =  1.421413741;
+    const double a4 = -1.453152027;
+    const double a5 =  1.061405429;
+    const double p  =  0.3275911;
+
+    double t = 1.0 / (1.0 + p * absx);
+    double y = 1.0 - (((((a5 * t + a4) * t) + a3) * t + a2) * t + a1)
+                     * t * exp(-absx * absx);
+
+    return sign * y;
+}
+
+/*
+ * erfc(x) - complementary error function: 1 - erf(x).
+ *
+ * v1 wrapper: defers to 1 - erf(x).  This loses precision for very large
+ * positive x where erf(x) approaches 1, but satisfies the C99 7.12.8.2
+ * special-value contract and the moderate-accuracy test suite.  A future
+ * revision can substitute an asymptotic expansion (A&S 7.1.26) for large x.
+ */
+double erfc(double x) {
+    if (isnan(x)) return x;
+    if (isinf(x)) return (x > 0) ? 0.0 : 2.0;
+    return 1.0 - erf(x);
+}
+
+/*
+ * tgamma(x) - true Gamma function, Gamma(x).
+ *
+ * C99 7.12.8.4 special-value contract:
+ *   tgamma(NaN)        -> NaN
+ *   tgamma(+0)         -> +Inf, FE_DIVBYZERO
+ *   tgamma(-0)         -> -Inf, FE_DIVBYZERO
+ *   tgamma(neg int)    -> NaN, FE_INVALID (poles)
+ *   tgamma(+Inf)       -> +Inf
+ *   tgamma(-Inf)       -> NaN, FE_INVALID
+ *   tgamma(n+1) == n!  for non-negative integer n
+ *   tgamma(0.5)        == sqrt(pi)
+ *   overflow at large x -> +HUGE_VAL, FE_OVERFLOW
+ *
+ * Implementation: Lanczos approximation (g=7, n=9), with the reflection
+ * formula Gamma(x) = pi / (sin(pi*x) * Gamma(1-x)) used for x < 0.5.
+ * Coefficients per Wikipedia "Lanczos approximation"; gives ~15 digits.
+ */
+double tgamma(double x) {
+    if (isnan(x)) return x;
+    if (isinf(x)) {
+        if (x > 0) return x;
+        feraiseexcept(FE_INVALID);
+        return NAN;
+    }
+    if (x == 0.0) {
+        feraiseexcept(FE_DIVBYZERO);
+        return signbit(x) ? -INFINITY : INFINITY;
+    }
+
+    /* Negative integer poles */
+    if (x < 0.0 && x == floor(x)) {
+        feraiseexcept(FE_INVALID);
+        return NAN;
+    }
+
+    /* Reflection formula for x < 0.5 */
+    if (x < 0.5) {
+        return M_PI / (sin(M_PI * x) * tgamma(1.0 - x));
+    }
+
+    /* Overflow guard: tgamma(171.624...) overflows double */
+    if (x > 171.624) {
+        feraiseexcept(FE_OVERFLOW);
+        return HUGE_VAL;
+    }
+
+    static const double g = 7.0;
+    static const double p[9] = {
+        0.99999999999980993,
+        676.5203681218851,
+       -1259.1392167224028,
+        771.32342877765313,
+       -176.61502916214059,
+        12.507343278686905,
+       -0.13857109526572012,
+        9.9843695780195716e-6,
+        1.5056327351493116e-7
+    };
+
+    x -= 1.0;
+    double a = p[0];
+    double t = x + g + 0.5;
+    for (int i = 1; i < 9; i++) {
+        a += p[i] / (x + i);
+    }
+    return sqrt(2.0 * M_PI) * pow(t, x + 0.5) * exp(-t) * a;
+}
+
+/*
+ * lgamma_r(x, signp) - natural log of |Gamma(x)|, reentrant (BSD extension).
+ *
+ * Stores the sign of Gamma(x) in *signp (+1 or -1).
+ *
+ * Special values (C99 7.12.8.3 + POSIX):
+ *   lgamma_r(NaN)        -> NaN, *signp = 1
+ *   lgamma_r(+/-0)       -> +Inf, FE_DIVBYZERO, *signp = 1
+ *   lgamma_r(neg int)    -> +Inf, FE_DIVBYZERO, *signp = 1 (poles)
+ *   lgamma_r(+/-Inf)     -> +Inf, *signp = 1
+ *   lgamma_r(1) == 0,  lgamma_r(2) == 0,  lgamma_r(n+1) == log(n!)
+ *
+ * Implementation: For |x| where tgamma() does not overflow, defer to the
+ * existing Lanczos-based tgamma() and take log of the absolute value.
+ * For large x (x >= 170) where tgamma overflows, fall back to Stirling's
+ * series:  ln Gamma(x) ~ (x-0.5) ln x - x + 0.5 ln(2pi) + 1/(12x).
+ */
+int signgam = 1;
+
+double lgamma_r(double x, int *signp) {
+    if (isnan(x)) { *signp = 1; return x; }
+    if (isinf(x)) { *signp = 1; return INFINITY; }
+    if (x == 0.0 || (x < 0.0 && x == floor(x))) {
+        feraiseexcept(FE_DIVBYZERO);
+        *signp = 1;
+        return INFINITY;
+    }
+
+    /* Moderate range: use Lanczos-backed tgamma directly. */
+    if (x < 170.0) {
+        double g = tgamma(x);
+        if (g < 0.0) { *signp = -1; g = -g; }
+        else { *signp = 1; }
+        return log(g);
+    }
+
+    /* Large positive x: Stirling's approximation (Gamma(x) > 0 here). */
+    *signp = 1;
+    return (x - 0.5) * log(x) - x + 0.5 * log(2.0 * M_PI) + 1.0 / (12.0 * x);
+}
+
+/*
+ * lgamma(x) - natural log of |Gamma(x)|; sets the global signgam to the
+ * sign of Gamma(x) (XSI/POSIX). Not thread-safe; use lgamma_r() for that.
+ */
+double lgamma(double x) {
+    return lgamma_r(x, &signgam);
+}
+
+/*
+ * C23 pi-argument trigonometric functions
+ */
+double sinpi(double x) {
+    if (isnan(x)) return x;
+    if (isinf(x)) return NAN;
+
+    double r = x - 2.0 * floor(x * 0.5 + 0.5);
+
+    if (r == 0.0) return 0.0;
+    if (r == 1.0 || r == -1.0) return 0.0;
+    if (r == 0.5) return 1.0;
+    if (r == -0.5) return -1.0;
+
+    if (r > 0.5) r = 1.0 - r;
+    else if (r < -0.5) r = -1.0 - r;
+
+    return sin(M_PI * r);
+}
+
+double cospi(double x) {
+    if (isnan(x)) return x;
+    if (isinf(x)) return NAN;
+
+    double r = x - 2.0 * floor(x * 0.5 + 0.5);
+
+    if (r == 0.0) return 1.0;
+    if (r == 1.0 || r == -1.0) return -1.0;
+    if (r == 0.5 || r == -0.5) return 0.0;
+
+    if (r > 0.5) return -cos(M_PI * (1.0 - r));
+    if (r < -0.5) return -cos(M_PI * (1.0 + r));
+
+    return cos(M_PI * r);
+}
+
+double tanpi(double x) {
+    if (isnan(x)) return x;
+    if (isinf(x)) return NAN;
+
+    double r = x - 2.0 * floor(x * 0.5 + 0.5);
+
+    if (r == 0.0) return 0.0;
+    if (r == 1.0 || r == -1.0) return 0.0;
+    if (r == 0.5) return INFINITY;
+    if (r == -0.5) return -INFINITY;
+
+    return sinpi(x) / cospi(x);
+}
+
+double asinpi(double x) {
+    if (isnan(x)) return x;
+    if (isinf(x)) return NAN;
+    if (x < -1.0 || x > 1.0) return NAN;
+    if (x == 0.0) return x;
+    if (x == 1.0) return 0.5;
+    if (x == -1.0) return -0.5;
+    return asin(x) / M_PI;
+}
+
+double acospi(double x) {
+    if (isnan(x)) return x;
+    if (isinf(x)) return NAN;
+    if (x < -1.0 || x > 1.0) return NAN;
+    if (x == 1.0) return 0.0;
+    if (x == 0.0) return 0.5;
+    if (x == -1.0) return 1.0;
+    return acos(x) / M_PI;
+}
+
+double atanpi(double x) {
+    if (isnan(x)) return x;
+    if (isinf(x)) return x > 0.0 ? 0.5 : -0.5;
+    if (x == 0.0) return x;
+    return atan(x) / M_PI;
+}
+
+double atan2pi(double y, double x) {
+    if (isnan(y) || isnan(x)) return NAN;
+    if (isinf(y) && isinf(x)) {
+        if (!signbit(x)) return signbit(y) ? -0.25 : 0.25;
+        return signbit(y) ? -0.75 : 0.75;
+    }
+    if (isinf(y)) return signbit(y) ? -0.5 : 0.5;
+    if (isinf(x)) {
+        if (!signbit(x)) return signbit(y) ? -0.0 : 0.0;
+        return signbit(y) ? -1.0 : 1.0;
+    }
+    if (y == 0.0) {
+        if (!signbit(x)) return y;
+        return signbit(y) ? -1.0 : 1.0;
+    }
+    if (x == 0.0) return signbit(y) ? -0.5 : 0.5;
+    return atan2(y, x) / M_PI;
 }
 
 /*
  * Floating-point manipulation functions
  */
 
-/* frexp: x = mantissa * 2^exp, where 0.5 <= |mantissa| < 1 */
+/* frexp: x = mantissa * 2^exp, where 0.5 <= |mantissa| < 1.
+ * Conformance: C99 7.12.6.4.
+ *  - x == 0.0 (including -0.0): *exp = 0, return x (preserves sign of zero).
+ *  - x == +/-inf or NaN: *exp = 0, return x (do not crash).
+ *  - Subnormal x: still normalized via the doubling loop.
+ */
 double frexp(double x, int *exp) {
-    if (x == 0.0) { *exp = 0; return 0.0; }
+    if (x == 0.0) { *exp = 0; return x; }
     if (isinf(x) || isnan(x)) { *exp = 0; return x; }
-    
+
     int neg = (x < 0);
     if (neg) x = -x;
-    
+
     *exp = 0;
     while (x >= 1.0) { x *= 0.5; (*exp)++; }
     while (x < 0.5) { x *= 2.0; (*exp)--; }
-    
+
     return neg ? -x : x;
 }
 
-/* ldexp: x * 2^exp */
+/* ldexp: x * 2^exp.
+ * Conformance: C99 7.12.6.6.
+ *  - x == 0.0 (including -0.0): return x (sign preserved).
+ *  - x == NaN: return NaN.
+ *  - x == +/-inf: return x.
+ *  - Overflow: return +/-HUGE_VAL with errno = ERANGE.
+ *  - Underflow: return +/-0 (or subnormal) with errno = ERANGE.
+ * Uses the x87 fscale instruction (matches scalbn's strategy).
+ */
 double ldexp(double x, int exp) {
-    if (x == 0.0 || isinf(x) || isnan(x)) return x;
-    while (exp > 0) { x *= 2.0; exp--; }
-    while (exp < 0) { x *= 0.5; exp++; }
-    return x;
-}
+    if (isnan(x)) return x;
+    if (x == 0.0 || isinf(x)) return x;
 
-/* modf: split into integer and fractional parts */
-double modf(double x, double *iptr) {
-    double i = trunc(x);
-    *iptr = i;
-    return x - i;
-}
-
-/* scalbn: x * 2^n (FLT_RADIX = 2) */
-double scalbn(double x, int n) {
     double res;
-    __asm__ __volatile__("fildl %2; fldl %1; fscale; fstp %%st(1); fstpl %0" 
-                         : "=m"(res) : "m"(x), "m"(n));
+    __asm__ __volatile__("fildl %2; fldl %1; fscale; fstp %%st(1); fstpl %0"
+                         : "=m"(res) : "m"(x), "m"(exp));
+
+    if (isinf(res) && !isinf(x)) {
+        errno = ERANGE;
+        return (x < 0.0) ? -HUGE_VAL : HUGE_VAL;
+    }
+    if (res == 0.0 && x != 0.0) {
+        errno = ERANGE;
+    }
     return res;
 }
 
-/* nextafter: next representable value after x towards y */
+/* modf: split into integer and fractional parts (C99 7.12.6.12) */
+double modf(double x, double *iptr) {
+    /* NaN: *iptr = NaN, return NaN */
+    if (isnan(x)) {
+        *iptr = x;
+        return x;
+    }
+    /* +/-Inf: *iptr = +/-Inf, return +/-0.0 (sign of x) */
+    if (isinf(x)) {
+        *iptr = x;
+        return copysign(0.0, x);
+    }
+    /* +/-0.0: *iptr = +/-0.0, return +/-0.0 (sign preserved on both) */
+    if (x == 0.0) {
+        *iptr = x;
+        return x;
+    }
+    /* Normal case: truncate via bit manipulation to preserve sign of zero
+     * (the local trunc() converts via int and loses -0.0 / overflows on huge x). */
+    union { double d; uint64_t u; } u = { .d = x };
+    int exp = (int)((u.u >> 52) & 0x7FF) - 1023;
+
+    if (exp < 0) {
+        /* |x| < 1: integer part is +/-0.0 with sign of x, fraction is x */
+        *iptr = copysign(0.0, x);
+        return x;
+    }
+    if (exp >= 52) {
+        /* |x| is so large it has no fractional bits */
+        *iptr = x;
+        return copysign(0.0, x);
+    }
+    /* Mask off the fractional mantissa bits */
+    uint64_t mask = ((uint64_t)1 << (52 - exp)) - 1;
+    if ((u.u & mask) == 0) {
+        /* Already an integer */
+        *iptr = x;
+        return copysign(0.0, x);
+    }
+    union { double d; uint64_t u; } iu = { .u = u.u & ~mask };
+    *iptr = iu.d;
+    return x - iu.d;
+}
+
+/* scalbn: x * 2^n (FLT_RADIX = 2 for IEEE-754).
+ * Conformance: C99 7.12.6.13.
+ *  - x == 0.0 (including -0.0): return x (sign preserved).
+ *  - x == NaN: return NaN.
+ *  - x == +/-inf: return x.
+ *  - Overflow: return +/-HUGE_VAL with errno = ERANGE.
+ *  - Underflow: return +/-0 with errno = ERANGE.
+ * Equivalent to ldexp() on IEEE-754 platforms.
+ */
+double scalbn(double x, int n) {
+    if (isnan(x)) return x;
+    if (x == 0.0 || isinf(x)) return x;
+
+    double res;
+    __asm__ __volatile__("fildl %2; fldl %1; fscale; fstp %%st(1); fstpl %0"
+                         : "=m"(res) : "m"(x), "m"(n));
+
+    if (isinf(res) && !isinf(x)) {
+        errno = ERANGE;
+        return (x < 0.0) ? -HUGE_VAL : HUGE_VAL;
+    }
+    if (res == 0.0 && x != 0.0) {
+        errno = ERANGE;
+    }
+    return res;
+}
+
+/* scalbln: x * 2^n with long exponent.
+ * Conformance: C99 7.12.6.13. Behaviour matches scalbn() once the
+ * exponent has been clamped into int range.
+ */
+double scalbln(double x, long n) {
+    if (n > INT_MAX) n = INT_MAX;
+    else if (n < INT_MIN) n = INT_MIN;
+    return scalbn(x, (int)n);
+}
+
+/* ilogb: extract the unbiased exponent of x as an int.
+ * Conformance: C99 7.12.6.5. For finite non-zero x the result is
+ * floor(log2(|x|)). The special inputs 0, +/-Inf and NaN raise
+ * FE_INVALID and return FP_ILOGB0, INT_MAX, FP_ILOGBNAN respectively.
+ * Implementation strategy: frexp() returns frac in [0.5, 1) such that
+ * x == frac * 2^e, hence log2(|x|) == e - 1. This naturally handles
+ * subnormals because frexp() normalises them.
+ */
+int ilogb(double x) {
+    if (isnan(x)) {
+        feraiseexcept(FE_INVALID);
+        return FP_ILOGBNAN;
+    }
+    if (x == 0.0) {
+        feraiseexcept(FE_INVALID);
+        return FP_ILOGB0;
+    }
+    if (isinf(x)) {
+        feraiseexcept(FE_INVALID);
+        return INT_MAX;
+    }
+    int e;
+    (void)frexp(x, &e);
+    return e - 1;
+}
+
+/* logb: extract the unbiased exponent of x as a double.
+ * Conformance: C99 7.12.6.11. For finite non-zero x the result is
+ * floor(log2(|x|)) returned as a double (same value as ilogb()).
+ * logb(0) is a pole error: returns -INFINITY and raises FE_DIVBYZERO.
+ * logb(+/-Inf) returns +INFINITY (no exception). logb(NaN) returns NaN.
+ */
+double logb(double x) {
+    if (isnan(x)) return x;
+    if (isinf(x)) return INFINITY;
+    if (x == 0.0) {
+        feraiseexcept(FE_DIVBYZERO);
+        return -INFINITY;
+    }
+    int e;
+    (void)frexp(x, &e);
+    return (double)(e - 1);
+}
+
+/* nextafter: next representable value after x towards y.
+ * Conformance: C99 7.12.11.3, Annex F.10.8.3.
+ *  - x or y NaN: return NaN.
+ *  - x == y: return y (preserves sign of zero per F.10.8.3).
+ *  - x == +/-0 moving outward: smallest +/-subnormal; range error
+ *    (errno = ERANGE, FE_UNDERFLOW raised).
+ *  - x finite, magnitude becomes infinite: return +/-HUGE_VAL; range error
+ *    (errno = ERANGE, FE_OVERFLOW raised).
+ *  - x finite, result is subnormal (loss of precision): range error
+ *    (errno = ERANGE, FE_UNDERFLOW raised).
+ *  - x == +/-INF moving toward finite y: return +/-DBL_MAX (no range error).
+ * Operates by incrementing/decrementing the IEEE-754 bit pattern.
+ */
 double nextafter(double x, double y) {
     if (isnan(x) || isnan(y)) return NAN;
     if (x == y) return y;
-    
+
     union { double d; uint64_t u; } u = { .d = x };
-    
+
     if (x == 0.0) {
-        /* Smallest subnormal */
+        /* Smallest subnormal in direction of y; sign comes from y. */
         u.u = 1;
-        return (y > 0) ? u.d : -u.d;
+        if (signbit(y)) u.u |= ((uint64_t)1 << 63);
+        errno = ERANGE;
+        feraiseexcept(FE_UNDERFLOW);
+        return u.d;
     }
-    
-    if ((x > 0) == (y > x)) {
+
+    /* x > 0 and y > x  -> increase magnitude (u.u++)
+     * x > 0 and y < x  -> decrease magnitude (u.u--)
+     * x < 0 and y > x  -> decrease magnitude (u.u--)
+     * x < 0 and y < x  -> increase magnitude (u.u++)
+     * Equivalent: (x > 0) == (y > x) selects increment. */
+    if ((x > 0.0) == (y > x)) {
         u.u++;
     } else {
         u.u--;
     }
+
+    /* Range checks per Annex F.10.8.3. */
+    if (isinf(u.d)) {
+        errno = ERANGE;
+        feraiseexcept(FE_OVERFLOW | FE_INEXACT);
+        return signbit(x) ? -HUGE_VAL : HUGE_VAL;
+    }
+    /* Subnormal result from a previously normal operation: underflow. */
+    if ((u.u & 0x7FF0000000000000ULL) == 0) {
+        errno = ERANGE;
+        feraiseexcept(FE_UNDERFLOW | FE_INEXACT);
+    }
     return u.d;
+}
+
+/* nexttoward: like nextafter() but with long double direction argument.
+ * Conformance: C99 7.12.11.4.
+ *  - x or y NaN: return NaN.
+ *  - (long double)x == y: return (double)y (preserves sign of zero).
+ *  - Otherwise: step x one ULP toward y using nextafter() with the
+ *    appropriate +/-INFINITY direction sentinel. The extra precision of
+ *    long double y matters precisely when (double)y == x but y differs
+ *    from x as a long double, in which case we must still step away.
+ */
+double nexttoward(double x, long double y) {
+    if (isnan(x) || isnan((double)y)) return NAN;
+    long double xl = (long double)x;
+    if (xl == y) return (double)y;
+    return nextafter(x, (xl < y) ? INFINITY : -INFINITY);
+}
+
+/* nextup: next representable value toward +INFINITY (C23 7.12.11.5).
+ *  - NaN: return NaN.
+ *  - +INFINITY: return +INFINITY (already at maximum; no further "up" step).
+ *  - -INFINITY: return -DBL_MAX.
+ *  - -0.0: returns smallest positive subnormal (per IEEE 754-2019 nextUp(-0)).
+ *  - Otherwise: next representable double > x.
+ * Trivially implemented via nextafter(x, +INFINITY); the x == y case of
+ * nextafter() handles +INFINITY by returning +INFINITY without raising
+ * any exceptions.
+ */
+double nextup(double x) {
+    if (isnan(x)) return x;
+    return nextafter(x, INFINITY);
+}
+
+/* nextdown: next representable value toward -INFINITY (C23 7.12.11.6).
+ *  - NaN: return NaN.
+ *  - -INFINITY: return -INFINITY (already at minimum; no further "down" step).
+ *  - +INFINITY: return DBL_MAX.
+ *  - +0.0: returns largest negative subnormal (per IEEE 754-2019 nextDown(+0)).
+ *  - Otherwise: next representable double < x.
+ * Trivially implemented via nextafter(x, -INFINITY); the x == y case of
+ * nextafter() handles -INFINITY by returning -INFINITY without raising
+ * any exceptions.
+ */
+double nextdown(double x) {
+    if (isnan(x)) return x;
+    return nextafter(x, -INFINITY);
 }
 
 /* copysign: magnitude of x with sign of y */
@@ -441,6 +994,16 @@ double copysign(double x, double y) {
     union { double d; uint64_t u; } ux = { .d = x }, uy = { .d = y };
     ux.u = (ux.u & 0x7FFFFFFFFFFFFFFFULL) | (uy.u & 0x8000000000000000ULL);
     return ux.d;
+}
+
+/*
+ * nan: return a quiet NaN. Per C99 7.12.11.2, the tagp string selects an
+ * implementation-defined NaN payload; we ignore tagp and return NAN, which
+ * is standards-compliant since most code cannot observe the payload.
+ */
+double nan(const char *tagp) {
+    (void)tagp;
+    return NAN;
 }
 
 /* Absolute value - actual implementation */
@@ -676,6 +1239,14 @@ long long llrint(double x) {
     return res;
 }
 
+long lround(double x) {
+    return (long)round(x);
+}
+
+long long llround(double x) {
+    return (long long)round(x);
+}
+
 /* Float versions */
 float sinf(float x) { return(float)sin(x); }
 float cosf(float x) { return(float)cos(x); }
@@ -727,3 +1298,17 @@ long double fmaximum_numl(long double x, long double y) { return fmaximum_num(x,
 long double fminimum_numl(long double x, long double y) { return fminimum_num(x, y); }
 long double fmaximum_magl(long double x, long double y) { return fmaximum_mag(x, y); }
 long double fminimum_magl(long double x, long double y) { return fminimum_mag(x, y); }
+
+/* C23 pi-argument trig float wrappers */
+float sinpif(float x) { return (float)sinpi(x); }
+float cospif(float x) { return (float)cospi(x); }
+float tanpif(float x) { return (float)tanpi(x); }
+float asinpif(float x) { return (float)asinpi(x); }
+float atanpif(float x) { return (float)atanpi(x); }
+
+/* C23 pi-argument trig long double wrappers */
+long double sinpil(long double x) { return sinpi(x); }
+long double cospil(long double x) { return cospi(x); }
+long double tanpil(long double x) { return tanpi(x); }
+long double asinpil(long double x) { return asinpi(x); }
+long double atanpil(long double x) { return atanpi(x); }

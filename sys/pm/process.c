@@ -3,6 +3,7 @@
 #include <sys/fcntl.h>
 #include <sys/file.h>
 #include <sys/lock.h>
+#include <sys/random.h>
 #include <sys/session.h>
 #include <kern/console.h>
 #include <kern/file.h>
@@ -16,15 +17,23 @@
 #include <vm/vm_map.h>
 #include <exec/perso/personality.h>
 #include <kern/time.h>
+#include <sys/types.h>
 #ifndef HOST_TEST
 #include <kern/cmdline.h>
+#include <vm/vm_kmem.h>
+#else
+#include <stdlib.h>
 #endif
 #include <vfs/vfs.h>
 
 process_t processes[MAX_PROCS];
 process_t *current_process = NULL;
 process_t *kernel_process = NULL;
+static process_t **process_chunks = NULL;
+static size_t process_chunk_count = 0;
+static size_t process_chunk_capacity = 0;
 static int next_pid = 1;
+static int last_pid = 0;
 static spinlock_t pid_lock;
 
 
@@ -52,6 +61,8 @@ extern struct personality personality_native;
 #define PROC_DEBUG(...) kprintf(__VA_ARGS__)
 #endif
 
+#define PROC_SLOT_CHUNK_SIZE ((size_t)MAX_PROCS)
+
 static void proc_idle_wait(void) {
 #ifdef HOST_TEST
     extern void host_wait_for_interrupt(void);
@@ -71,6 +82,58 @@ static void proc_sysvipc_exit(process_t *proc);
 static void proc_posixipc_exit(process_t *proc);
 static int proc_status_flags_from_file(const file_t *f);
 static void proc_apply_status_flags(file_t *f, int flags);
+static void proc_resource_limits_init(process_t *proc);
+static void proc_reset_free_slot(process_t *proc);
+
+#ifdef HOST_TEST
+static void *proc_table_alloc(size_t size) {
+    return malloc(size);
+}
+
+static void proc_table_free(void *ptr, size_t size) {
+    (void)size;
+    free(ptr);
+}
+
+__attribute__((weak)) size_t sched_thread_slot_count(void) {
+    return (size_t)MAX_THREADS;
+}
+
+__attribute__((weak)) thread_t *sched_thread_slot(size_t index) {
+    if (index < (size_t)MAX_THREADS) {
+        return &threads[index];
+    }
+    return NULL;
+}
+#else
+static void *proc_table_alloc(size_t size) {
+    return kmalloc(size);
+}
+
+static void proc_table_free(void *ptr, size_t size) {
+    kfree(ptr, size);
+}
+#endif
+
+size_t proc_slot_count(void) {
+    return (size_t)MAX_PROCS + (process_chunk_count * PROC_SLOT_CHUNK_SIZE);
+}
+
+process_t *proc_slot(size_t index) {
+    if (index < (size_t)MAX_PROCS) {
+        return &processes[index];
+    }
+
+    index -= (size_t)MAX_PROCS;
+    if (index < (process_chunk_count * PROC_SLOT_CHUNK_SIZE)) {
+        size_t chunk_index = index / PROC_SLOT_CHUNK_SIZE;
+        size_t slot_index = index % PROC_SLOT_CHUNK_SIZE;
+
+        return &process_chunks[chunk_index][slot_index];
+    }
+
+    return NULL;
+}
 
 static const char *proc_cmdline_name(const process_t *proc) {
     const char *name;
@@ -92,6 +155,112 @@ static const char *proc_cmdline_name(const process_t *proc) {
         return name;
     }
     return "unknown";
+}
+
+static int proc_pid_in_use_locked(pid_t pid) {
+    size_t slots = proc_slot_count();
+
+    for (size_t i = 0; i < slots; i++) {
+        process_t *proc = proc_slot(i);
+        if (proc && proc->pid == pid) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static void proc_reset_free_slot(process_t *proc) {
+    if (!proc) {
+        return;
+    }
+
+    memset(proc, 0, sizeof(*proc));
+    proc->pid = -1;
+    proc_timers_init(proc);
+    proc_resource_limits_init(proc);
+}
+
+static process_t *proc_grow_slots_locked(void) {
+    process_t **new_chunks = process_chunks;
+    size_t new_chunk_capacity = process_chunk_capacity;
+    size_t old_bytes = process_chunk_capacity * sizeof(*process_chunks);
+    size_t new_bytes;
+    process_t *new_chunk;
+
+    if (process_chunk_count == process_chunk_capacity) {
+        new_chunk_capacity = process_chunk_capacity ? process_chunk_capacity * 2U : 4U;
+        new_bytes = new_chunk_capacity * sizeof(*new_chunks);
+        new_chunks = proc_table_alloc(new_bytes);
+        if (!new_chunks) {
+            return NULL;
+        }
+
+        if (process_chunks && old_bytes != 0U) {
+            memcpy(new_chunks, process_chunks, old_bytes);
+            proc_table_free(process_chunks, old_bytes);
+        }
+        memset(new_chunks + process_chunk_count, 0,
+               (new_chunk_capacity - process_chunk_count) * sizeof(*new_chunks));
+    }
+
+    new_chunk = proc_table_alloc(PROC_SLOT_CHUNK_SIZE * sizeof(*new_chunk));
+    if (!new_chunk) {
+        if (new_chunks != process_chunks) {
+            proc_table_free(new_chunks, new_chunk_capacity * sizeof(*new_chunks));
+        }
+        return NULL;
+    }
+
+    if (new_chunks != process_chunks) {
+        process_chunks = new_chunks;
+        process_chunk_capacity = new_chunk_capacity;
+    }
+
+    for (size_t i = 0; i < PROC_SLOT_CHUNK_SIZE; i++) {
+        proc_reset_free_slot(&new_chunk[i]);
+    }
+    process_chunks[process_chunk_count++] = new_chunk;
+
+    return &new_chunk[0];
+}
+
+static process_t *proc_find_free_slot_locked(void) {
+    size_t slots = proc_slot_count();
+
+    for (size_t i = 0; i < slots; i++) {
+        process_t *proc = proc_slot(i);
+        if (proc && proc->pid == -1) {
+            return proc;
+        }
+    }
+
+    return proc_grow_slots_locked();
+}
+
+static int proc_alloc_pid_locked(void) {
+    int start;
+    int candidate;
+
+    start = next_pid;
+    if (start < 1 || start > SUBSTRATE_PID_MAX) {
+        start = 1;
+    }
+
+    candidate = start;
+    do {
+        if (!proc_pid_in_use_locked(candidate)) {
+            last_pid = candidate;
+            next_pid = (candidate == SUBSTRATE_PID_MAX) ? 1 : candidate + 1;
+            return candidate;
+        }
+
+        candidate++;
+        if (candidate > SUBSTRATE_PID_MAX) {
+            candidate = 1;
+        }
+    } while (candidate != start);
+
+    return -1;
 }
 
 void proc_capture_cmdline(process_t *proc, char *const argv[]) {
@@ -210,7 +379,10 @@ static void proc_resource_limits_init(process_t *proc) {
 }
 
 void pm_init(void) {
+    size_t slots;
+
     next_pid = 1;
+    last_pid = 0;
     memset(processes, 0, sizeof(processes));
     kernel_process = &processes[0];
     
@@ -218,10 +390,9 @@ void pm_init(void) {
     mutex_init(&proctree_lock, "proctree");
     spinlock_init(&pid_lock, "pid");
     
-    for (int i = 0; i < MAX_PROCS; i++) {
-        processes[i].pid = -1;
-        proc_timers_init(&processes[i]);
-        proc_resource_limits_init(&processes[i]);
+    slots = proc_slot_count();
+    for (size_t i = 0; i < slots; i++) {
+        proc_reset_free_slot(proc_slot(i));
     }
 
     // Create Initial Kernel Process (PID 1? Or 0?)
@@ -240,64 +411,71 @@ void pm_init(void) {
  * Returns NULL if no active process with that PID exists.
  */
 process_t *proc_find(int pid) {
-    for (int i = 0; i < MAX_PROCS; i++) {
-        if (processes[i].pid == pid) {
-            return &processes[i];
+    size_t slots = proc_slot_count();
+
+    for (size_t i = 0; i < slots; i++) {
+        process_t *proc = proc_slot(i);
+        if (proc && proc->pid == pid) {
+            return proc;
         }
     }
     return NULL;
 }
 
 int proc_get_last_pid(void) {
-    return next_pid - 1;
+    return last_pid;
 }
 
 process_t *proc_create(int perso_id) {
+    process_t *proc;
+
     spinlock_acquire(&pid_lock);
-    int i;
-    for (i = 0; i < MAX_PROCS; i++) {
-        if (processes[i].pid == -1) break;
-    }
-    if (i == MAX_PROCS) {
+    proc = proc_find_free_slot_locked();
+    if (!proc) {
         spinlock_release(&pid_lock);
         return NULL;
     }
-    
-    int pid = next_pid++;
-    spinlock_release(&pid_lock);
-    memset(&processes[i], 0, sizeof(processes[i]));
-    ldt_init_process(&processes[i]);
-    processes[i].pid = pid;
-    processes[i].ppid = current_process ? current_process->pid : 0;
-    processes[i].perso_id = perso_id;
-    processes[i].root_node = current_process ? current_process->root_node : fs_root;
-    if (processes[i].root_node && processes[i].root_node != fs_root) {
-        open_fs(processes[i].root_node, 1, 0);
+
+    int pid = proc_alloc_pid_locked();
+    if (pid < 0) {
+        spinlock_release(&pid_lock);
+        return NULL;
     }
-    processes[i].next_fd = 0; // Reset FD hint
-    processes[i].fd_bitmap = 0;
-    processes[i].fd_cloexec = 0;
-    for(int j=0; j<MAX_FD; j++) processes[i].fds[j] = 0;
+    spinlock_release(&pid_lock);
+
+    memset(proc, 0, sizeof(*proc));
+    ldt_init_process(proc);
+    proc->pid = pid;
+    proc->ppid = current_process ? current_process->pid : 0;
+    proc->perso_id = perso_id;
+    proc->root_node = current_process ? current_process->root_node : fs_root;
+    if (proc->root_node && proc->root_node != fs_root) {
+        open_fs(proc->root_node, 1, 0);
+    }
+    proc->next_fd = 0; // Reset FD hint
+    proc->fd_bitmap = 0;
+    proc->fd_cloexec = 0;
+    for (int j = 0; j < MAX_FD; j++) proc->fds[j] = 0;
     
     // Acct init
-    strncpy(processes[i].comm, "forked", AC_COMM_LEN);
-    processes[i].comm[AC_COMM_LEN - 1] = '\0';
-    processes[i].start_time = get_time();
-    processes[i].uid = current_process ? current_process->uid : 0;
-    processes[i].gid = current_process ? current_process->gid : 0;
-    processes[i].euid = current_process ? current_process->euid : 0;
-    processes[i].egid = current_process ? current_process->egid : 0;
-    processes[i].suid = current_process ? current_process->suid : 0;
-    processes[i].sgid = current_process ? current_process->sgid : 0;
-    processes[i].umask = current_process ? current_process->umask : 022;
-    proc_resource_limits_init(&processes[i]);
+    strncpy(proc->comm, "forked", AC_COMM_LEN);
+    proc->comm[AC_COMM_LEN - 1] = '\0';
+    proc->start_time = get_time();
+    proc->uid = current_process ? current_process->uid : 0;
+    proc->gid = current_process ? current_process->gid : 0;
+    proc->euid = current_process ? current_process->euid : 0;
+    proc->egid = current_process ? current_process->egid : 0;
+    proc->suid = current_process ? current_process->suid : 0;
+    proc->sgid = current_process ? current_process->sgid : 0;
+    proc->umask = current_process ? current_process->umask : 022;
+    proc_resource_limits_init(proc);
     
     // Initialize rusage structures
     extern void rusage_init(process_t *p);
-    rusage_init(&processes[i]);
-    proc_timers_init(&processes[i]);
+    rusage_init(proc);
+    proc_timers_init(proc);
     
-    return &processes[i];
+    return proc;
 }
 
 static int proc_fork_common(process_t *parent, void *stack, int is_vfork) {
@@ -375,11 +553,9 @@ static int proc_fork_common(process_t *parent, void *stack, int is_vfork) {
     // Copy Process Group and Session (inherit from parent)
     mutex_lock(&proctree_lock);
     child_proc->p_pgrp = parent->p_pgrp;
-    child_proc->p_pgrp_link = parent->p_pgrp_link; // Wait, we need to link into the group list properly!
     
     /* 
      * Correctly adding to process group:
-     * We can't just copy the pointer 'p_pgrp_link' - that would corrupt the linked list.
      * We need to add 'child_proc' to the process group's member list.
      */
     if (child_proc->p_pgrp) {
@@ -402,27 +578,54 @@ static int proc_fork_common(process_t *parent, void *stack, int is_vfork) {
     // Copy limits, etc. if implemented
     
     // Create Thread for child
-    // Implementation of this part relies on sched logic (threading).
-    // So PM depends on SCHED for thread creation.
-    
-    // sched_fork_thread logic?
-    // In sched.c it was inlined.
-    // We need sched_create_thread implementation to support "fork" style (copy regs).
-    // Or we just call sched_create_thread with a special entry point?
-    
-    // The previous implementation manually manipulated thread array to copy state.
-    // This implies sched.c should handle the thread part of fork.
-    // Maybe proc_fork should call `sched_fork_thread(child_proc, stack)`?
-    
-    // We'll declare `sched_fork_thread` in sched.h and assume it exists (we'll move it there).
-    extern int sched_fork_thread(process_t *proc, void *stack);
     
     /* 
-     * Link child into parent's list.
+     * Add child to parent's child list BEFORE making it schedulable.
+     * This ensures wait() sees a fully linked child and the child
+     * cannot run before it appears in the process tree.
      */
     proc_add_child(parent, child_proc);
-    
-    return sched_fork_thread(child_proc, stack);
+
+    extern int sched_fork_thread(process_t *proc, void *stack);
+    int fork_result = sched_fork_thread(child_proc, stack);
+    if (fork_result < 0) {
+        proc_remove_child(parent, child_proc);
+
+        if (child_proc->p_pgrp) {
+            pgrp_remove_proc(child_proc);
+        }
+
+        for (int j = 0; j < MAX_FD; j++) {
+            if (child_proc->fds[j]) {
+                child_proc->fds[j]->f_count--;
+                child_proc->fds[j] = NULL;
+            }
+        }
+
+        if (child_proc->cwd_node) {
+            close_fs(child_proc->cwd_node);
+            child_proc->cwd_node = NULL;
+        }
+
+        ldt_free_process(child_proc);
+
+        if (child_proc->vm_map) {
+            vm_map_destroy(child_proc->vm_map);
+            child_proc->vm_map = NULL;
+        }
+        if (child_proc->pmap) {
+            pmap_release(child_proc->pmap);
+            child_proc->pmap = NULL;
+        }
+
+        child_proc->pid = -1;
+        return fork_result;
+    }
+
+    /* Diverge parent/child CSPRNG state immediately after fork */
+    random_reseed_on_fork(fork_result);
+
+    return fork_result;
 }
 
 static void proc_sysvipc_exit(process_t *proc) {
@@ -777,10 +980,9 @@ void proc_reparent_children(process_t *p) {
         return;
     }
     
-    init = &processes[1]; // Assume PID 1 is index 1 or we search
-    if (init->state == SDYING || init->state == SZOMB) {
-        // init is dying, reparent to swapper?
-        init = &processes[0];
+    init = proc_find(1);
+    if (!init || init->state == SDYING || init->state == SZOMB) {
+        init = kernel_process ? kernel_process : &processes[0];
     }
     
     child = p->p_children;
@@ -810,11 +1012,15 @@ void proc_reparent_children(process_t *p) {
 }
 
 static int proc_threads_all_zombie(process_t *proc, thread_t *skip_thread) {
-    for (int i = 0; i < MAX_THREADS; i++) {
-        if (threads[i].tid == -1 || threads[i].proc != proc || &threads[i] == skip_thread) {
+    size_t slots = sched_thread_slot_count();
+
+    for (size_t i = 0; i < slots; i++) {
+        thread_t *thread = sched_thread_slot(i);
+
+        if (!thread || thread->tid == -1 || thread->proc != proc || thread == skip_thread) {
             continue;
         }
-        if (threads[i].state != THREAD_ZOMBIE) {
+        if (thread->state != THREAD_ZOMBIE) {
             return 0;
         }
     }
@@ -844,10 +1050,12 @@ static void proc_release_zombie_resources(process_t *proc) {
 }
 
 void proc_reap_autoreap_zombies(void) {
-    for (int i = 0; i < MAX_PROCS; i++) {
-        process_t *proc = &processes[i];
+    size_t slots = proc_slot_count();
 
-        if (proc->pid <= 0 || proc->state != SZOMB || !(proc->p_flag & P_AUTOREAP)) {
+    for (size_t i = 0; i < slots; i++) {
+        process_t *proc = proc_slot(i);
+
+        if (!proc || proc->pid <= 0 || proc->state != SZOMB || !(proc->p_flag & P_AUTOREAP)) {
             continue;
         }
         if (current_thread && current_thread->proc == proc) {
@@ -860,13 +1068,7 @@ void proc_reap_autoreap_zombies(void) {
         proc_release_zombie_resources(proc);
         sched_reap_process_threads(proc);
 
-        proc->pid = -1;
-        proc->ppid = 0;
-        proc->state = 0;
-        proc->p_flag = 0;
-        proc->p_parent = NULL;
-        proc->p_children = NULL;
-        proc->p_sibling = NULL;
+        proc_reset_free_slot(proc);
     }
 }
 
@@ -883,29 +1085,34 @@ void proc_exit(int code) {
     // 1. Set State
     current_process->state = SDYING;
     current_process->exit_code = code;
+    if ((current_process->p_flag & P_SIGEXIT) == 0) {
+        current_process->p_flag &= (uint16_t)~P_SIGEXIT;
+    }
     
     // 1b. Thread Cleanup (Robust Futexes & Pending Signals)
     extern void futex_thread_exit(thread_t *t);
     extern int mutex_release_owned_by_thread(thread_t *owner);
     extern void kprint(const char *msg);
-    for (int i = 0; i < MAX_THREADS; i++) {
-        if (threads[i].tid != -1 && threads[i].proc == current_process) {
-            /* Cleanup robust futexes for this thread */
-            futex_thread_exit(&threads[i]);
+    for (size_t i = 0; i < sched_thread_slot_count(); i++) {
+        thread_t *thread = sched_thread_slot(i);
 
-            if (mutex_release_owned_by_thread(&threads[i]) > 0) {
+        if (thread && thread->tid != -1 && thread->proc == current_process) {
+            /* Cleanup robust futexes for this thread */
+            futex_thread_exit(thread);
+
+            if (mutex_release_owned_by_thread(thread) > 0) {
                 kprint("proc_exit: force-releasing mutexes held by exiting thread.\n");
             }
 
             /* Remove sleepers from sleep queues before they become zombies. */
-            sleepq_remove_thread(&threads[i]);
+            sleepq_remove_thread(thread);
             
             /* Clear pending signals - process is dying */
-            threads[i].sig_pending = 0;
+            thread->sig_pending = 0;
             
             /* Mark as zombie to stop execution (if not current thread) */
-            if (&threads[i] != current_thread) {
-                threads[i].state = THREAD_ZOMBIE;
+            if (thread != current_thread) {
+                thread->state = THREAD_ZOMBIE;
             }
         }
     }
@@ -948,13 +1155,15 @@ void proc_exit(int code) {
     
     // 8. Phase 3: Thread Termination
     // Current thread becomes the "reaper thread"
-    for (int i = 0; i < MAX_THREADS; i++) {
-        if (threads[i].tid != -1 && threads[i].proc == current_process) {
-            if (&threads[i] != current_thread) {
+    for (size_t i = 0; i < sched_thread_slot_count(); i++) {
+        thread_t *thread = sched_thread_slot(i);
+
+        if (thread && thread->tid != -1 && thread->proc == current_process) {
+            if (thread != current_thread) {
                 // If not current thread, interrupt and terminate
-                threads[i].state = THREAD_ZOMBIE;
+                thread->state = THREAD_ZOMBIE;
                 // Wake up so it gets preempted/terminated if sleeping
-                sleepq_wake_all(&threads[i]);
+                sleepq_wake_all(thread);
             }
         }
     }
@@ -1025,14 +1234,19 @@ void proc_exit(int code) {
         }
     } else {
         // No parent? (swapper/init special case)
-        sched_wakeup(&processes[1].p_children); // Wake init just in case
+        process_t *init = proc_find(1);
+        if (init) {
+            sched_wakeup(&init->p_children);
+        }
     }
     
     // 8. Prevent further scheduling of ALL process threads and wake joiners
-    for (int i = 0; i < MAX_THREADS; i++) {
-        if (threads[i].tid != -1 && threads[i].proc == current_process) {
-            threads[i].state = THREAD_ZOMBIE;
-            sleepq_wake_all(&threads[i]);
+    for (size_t i = 0; i < sched_thread_slot_count(); i++) {
+        thread_t *thread = sched_thread_slot(i);
+
+        if (thread && thread->tid != -1 && thread->proc == current_process) {
+            thread->state = THREAD_ZOMBIE;
+            sleepq_wake_all(thread);
         }
     }
     

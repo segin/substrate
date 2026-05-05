@@ -110,6 +110,7 @@ typedef struct {
     size_t len;
     long long num;
     double fnum;
+    long double fnum_ld;
     int is_float;
     int float_is_single;
     int float_is_long;
@@ -898,6 +899,7 @@ static int lex_numeric_literal(cc_lexer_t *lx, cc_token_t *out, size_t line, siz
         copy_numeric_compact(tmp, sizeof(tmp), out->start, out->len);
         out->is_float = 1;
         out->fnum = strtod(tmp, NULL);
+        out->fnum_ld = strtold(tmp, NULL);
     } else {
         char tmp[128];
         char *parse_s = tmp;
@@ -978,6 +980,7 @@ static int lex_numeric_literal(cc_lexer_t *lx, cc_token_t *out, size_t line, siz
             out->int_is_unsigned = 0;
             out->int_is_longlong = 0;
             out->fnum = strtod(tmp, NULL);
+            out->fnum_ld = strtold(tmp, NULL);
         }
     }
     return 0;
@@ -997,6 +1000,7 @@ int cc_lexer_next(cc_lexer_t *lx, cc_token_t *out) {
     out->len = 1;
     out->num = 0;
     out->fnum = 0.0;
+    out->fnum_ld = 0.0L;
     out->is_float = 0;
     out->float_is_single = 0;
     out->float_is_long = 0;

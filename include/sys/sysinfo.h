@@ -12,6 +12,15 @@ typedef enum {
     BITNESS_64 = 64
 } proc_bitness_t;
 
+typedef enum {
+    SYS_PROC_STATE_IDLE = 1,
+    SYS_PROC_STATE_RUN = 2,
+    SYS_PROC_STATE_SLEEP = 3,
+    SYS_PROC_STATE_STOP = 4,
+    SYS_PROC_STATE_ZOMBIE = 5,
+    SYS_PROC_STATE_DYING = 6
+} sys_proc_state_t;
+
 // Process Info Structure
 // Used by sys_proc_info syscall
 typedef struct sys_procinfo {

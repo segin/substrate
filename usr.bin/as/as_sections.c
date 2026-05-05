@@ -46,6 +46,12 @@
 #ifndef SHF_EXECINSTR
 #define SHF_EXECINSTR 0x4
 #endif
+#ifndef SHF_MERGE
+#define SHF_MERGE 0x10
+#endif
+#ifndef SHF_STRINGS
+#define SHF_STRINGS 0x20
+#endif
 #ifndef SHF_GROUP
 #define SHF_GROUP 0x200
 #endif
@@ -222,6 +228,7 @@ static ssize_t add_section(as_section_state_t *s, const char *name, unsigned sub
     s->items[s->count].flags = flags;
     s->items[s->count].type = type;
     s->items[s->count].align = align;
+    s->items[s->count].entsize = 0;
     s->count++;
     return (ssize_t)(s->count - 1);
 }
@@ -247,11 +254,93 @@ static int ensure_builtins(as_section_state_t *s) {
 static int parse_u32_arg(const char *raw, unsigned *out) {
     char *tmp;
     char *end;
+    char *op;
     unsigned long v;
 
     tmp = trim_copy(raw);
     if (tmp == NULL) {
         return -1;
+    }
+    while (tmp[0] == '(') {
+        size_t n = strlen(tmp);
+        if (n < 2 || tmp[n - 1] != ')') {
+            break;
+        }
+        tmp[n - 1] = '\0';
+        memmove(tmp, tmp + 1, n - 1);
+        {
+            char *trimmed = trim_copy(tmp);
+            if (trimmed == NULL) {
+                free(tmp);
+                return -1;
+            }
+            free(tmp);
+            tmp = trimmed;
+        }
+    }
+    op = strstr(tmp, "<<");
+    if (op != NULL) {
+        unsigned lhs;
+        unsigned rhs;
+        *op = '\0';
+        if (parse_u32_arg(tmp, &lhs) != 0 || parse_u32_arg(op + 2, &rhs) != 0 || rhs >= 32) {
+            free(tmp);
+            return -1;
+        }
+        *out = lhs << rhs;
+        free(tmp);
+        return 0;
+    }
+    {
+        int depth = 0;
+        char *split = NULL;
+        char split_op = '\0';
+        size_t i;
+        for (i = strlen(tmp); i > 0; --i) {
+            char ch = tmp[i - 1];
+            if (ch == ')') {
+                depth++;
+            } else if (ch == '(' && depth > 0) {
+                depth--;
+            } else if (depth == 0 && i > 1 && (ch == '+' || ch == '-')) {
+                split = tmp + i - 1;
+                split_op = ch;
+                break;
+            }
+        }
+        if (split == NULL) {
+            depth = 0;
+            for (i = strlen(tmp); i > 0; --i) {
+                char ch = tmp[i - 1];
+                if (ch == ')') {
+                    depth++;
+                } else if (ch == '(' && depth > 0) {
+                    depth--;
+                } else if (depth == 0 && ch == '*') {
+                    split = tmp + i - 1;
+                    split_op = ch;
+                    break;
+                }
+            }
+        }
+        if (split != NULL) {
+            unsigned lhs;
+            unsigned rhs;
+            *split = '\0';
+            if (parse_u32_arg(tmp, &lhs) != 0 || parse_u32_arg(split + 1, &rhs) != 0) {
+                free(tmp);
+                return -1;
+            }
+            if (split_op == '+') {
+                *out = lhs + rhs;
+            } else if (split_op == '-') {
+                *out = lhs - rhs;
+            } else {
+                *out = lhs * rhs;
+            }
+            free(tmp);
+            return 0;
+        }
     }
     v = strtoul(tmp, &end, 0);
     if (end == tmp || *end != '\0') {
@@ -282,6 +371,12 @@ static unsigned parse_flags_string(const char *raw) {
             break;
         case 'x':
             flags |= SHF_EXECINSTR;
+            break;
+        case 'M':
+            flags |= SHF_MERGE;
+            break;
+        case 'S':
+            flags |= SHF_STRINGS;
             break;
         case 'g':
             flags |= SHF_GROUP;
@@ -343,6 +438,9 @@ static void infer_section_defaults(const char *name, unsigned *flags, unsigned *
             t = SHT_NOBITS;
         } else if (strcmp(name, ".rodata") == 0 || strncmp(name, ".rodata.", 8) == 0) {
             f = SHF_ALLOC;
+            t = SHT_PROGBITS;
+        } else if (strncmp(name, ".discard", 8) == 0) {
+            f = 0;
             t = SHT_PROGBITS;
         }
     }
@@ -437,7 +535,10 @@ static int process_section_like(sec_ctx_t *ctx, const as_stmt_t *st, int do_push
         free(name);
         return -1;
     }
-    if (d->arg_count >= 4) {
+    if ((flags & SHF_MERGE) != 0 && d->arg_count >= 4 &&
+        parse_u32_arg(d->args[3], &s->items[s->current_index].entsize) == 0) {
+        group = NULL;
+    } else if (d->arg_count >= 4) {
         group = trim_copy(d->args[3]);
         if (group == NULL) {
             free(name);
@@ -465,6 +566,9 @@ static int process_section_like(sec_ctx_t *ctx, const as_stmt_t *st, int do_push
     }
     if (s->items[s->current_index].group != NULL || s->items[s->current_index].comdat) {
         s->items[s->current_index].flags |= SHF_GROUP;
+    }
+    if (s->items[s->current_index].entsize == 0 && existing >= 0) {
+        s->items[s->current_index].entsize = s->items[existing].entsize;
     }
 
     free(name);

@@ -25,13 +25,16 @@ ssize_t write(int fd, const void *buf, size_t count);
 int close(int fd);
 int mkstemp(char *template);
 int unlink(const char *pathname);
+int unlinkat(int dirfd, const char *pathname, int flags);
 int rmdir(const char *pathname);
 int link(const char *oldpath, const char *newpath);
+int symlink(const char *target, const char *linkpath);
 ssize_t readlink(const char *pathname, char *buf, size_t bufsiz);
 int chdir(const char *path);
 char *getcwd(char *buf, size_t size);
 
 int pipe(int pipefd[2]);
+int dup(int oldfd);
 int dup2(int oldfd, int newfd);
 void sync(void);
 
@@ -43,6 +46,11 @@ uid_t geteuid(void);
 gid_t getegid(void);
 int setuid(uid_t uid);
 int setgid(gid_t gid);
+pid_t getpgrp(void);
+int setpgid(pid_t pid, pid_t pgid);
+pid_t tcgetpgrp(int fd);
+int tcsetpgrp(int fd, pid_t pgrp);
+pid_t setsid(void);
 
 int access(const char *pathname, int mode);
 #define R_OK 4
@@ -66,8 +74,10 @@ int sethostname(const char *name, size_t len);
 
 int chmod(const char *pathname, mode_t mode);
 int chown(const char *pathname, uid_t owner, gid_t group);
+int lchown(const char *pathname, uid_t owner, gid_t group);
 int fchmod(int fd, mode_t mode);
 int fchown(int fd, uid_t owner, gid_t group);
+int fchownat(int dirfd, const char *pathname, uid_t owner, gid_t group, int flag);
 char *getlogin(void);
 int getgroups(int size, gid_t list[]);
 int setgroups(int size, const gid_t *list);
@@ -78,7 +88,6 @@ int getopt(int argc, char * const argv[], const char *optstring);
 
 long syscall(long number, ...);
 
-#endif
 /* sysconf() constants */
 #define _SC_ARG_MAX      0
 #define _SC_CHILD_MAX    1
@@ -95,3 +104,5 @@ long syscall(long number, ...);
 #define _SC_PHYS_PAGES   11
 
 long sysconf(int name);
+
+#endif

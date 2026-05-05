@@ -21,25 +21,12 @@ int shell_promptvars = 0;
 
 static EditLine *el = NULL;
 static History *hist = NULL;
+static const char *editline_prompt = "$ ";
 
-extern int tcsetpgrp(int fd, pid_t pgrp);
-extern pid_t tcgetpgrp(int fd);
-extern pid_t getpgrp(void);
-extern int setpgid(pid_t pid, pid_t pgid);
-extern int tcgetattr(int fd, struct termios *termios_p);
-
-#ifndef SIGTTIN
-#define SIGTTIN 21
-#endif
-#ifndef SIGTTOU
-#define SIGTTOU 22
-#endif
-#ifndef SIGCHLD
-#define SIGCHLD 20
-#endif
-#ifndef SIGTSTP
-#define SIGTSTP 18
-#endif
+static const char *editline_prompt_callback(EditLine *editline) {
+    (void)editline;
+    return editline_prompt ? editline_prompt : "$ ";
+}
 
 int execute_line(char *buffer) {
     if (!buffer || !*buffer) return 0;
@@ -62,6 +49,10 @@ int execute_line(char *buffer) {
             ast_free(node);
         } else {
             // Parser error or empty
+            if (t && t->type != TOKEN_EOF) {
+                last_status = 2;
+                shell_var_set("?", "2");
+            }
             break;
         }
         
@@ -81,20 +72,14 @@ int execute_line(char *buffer) {
 // Source a file if it exists
 static void source_file(const char *path) {
     FILE *f = fopen(path, "r");
+    char *content;
+
     if (!f) return;
-    
-    fseek(f, 0, SEEK_END);
-    long fsize = ftell(f);
-    fseek(f, 0, SEEK_SET);
-    
-    if (fsize > 0) {
-        char *content = malloc(fsize + 1);
-        if (content) {
-            size_t n = fread(content, 1, fsize, f);
-            content[n] = '\0';
-            execute_line(content);
-            free(content);
-        }
+
+    content = read_stream_all(f);
+    if (content) {
+        execute_line(content);
+        free(content);
     }
     fclose(f);
 }
@@ -127,9 +112,11 @@ static void process_startup_files(int is_login_shell, int is_interactive) {
 // Initialize default environment values
 static void init_environment(void) {
     // POSIX: IFS default is space, tab, newline
-    if (!shell_var_get("IFS")) {
+    char *ifs = shell_var_get("IFS");
+    if (!ifs) {
         shell_var_set("IFS", " \t\n");
     }
+    free(ifs);
     
     // Set PATH if not already set
     if (!getenv("PATH")) {
@@ -141,15 +128,12 @@ static void init_environment(void) {
     shell_var_set_readonly("SHELL_PROMPT_MODE");
 }
 
-static void sigchld_handler(int sig) {
-    (void)sig;
-    // job_update_status will be called by the main loop.
-}
-
 // Helper to get last exit status
 static int get_last_status(void) {
     char *s = shell_var_get("?");
-    return s ? atoi(s) : 0;
+    int status = s ? atoi(s) : 0;
+    free(s);
+    return status;
 }
 
 
@@ -158,6 +142,7 @@ static int get_last_status(void) {
 int main(int argc, char **argv, char **envp) {
     shell_var_init(envp);
     init_environment();
+    shell_var_set_name((argv[0] && argv[0][0]) ? argv[0] : "sh");
     
     // Shell flags
     int opt_c = 0;           // -c: Execute string
@@ -235,7 +220,7 @@ int main(int argc, char **argv, char **envp) {
             perror(argv[optind]);
             return 127;
         }
-        shell_var_set("0", argv[optind]);
+        shell_var_set_name(argv[optind]);
         optind++;
         reading_script = 1;
     } else {
@@ -243,11 +228,13 @@ int main(int argc, char **argv, char **envp) {
         if (optind < argc && strcmp(argv[optind], "-") == 0) {
             optind++;  // Skip the "-"
         }
-        shell_var_set("0", argv[0] ? argv[0] : "sh");
+        shell_var_set_name((argv[0] && argv[0][0]) ? argv[0] : "sh");
     }
     
-    // Set positional parameters from remaining args
-    shell_var_set_args(argc - optind, argv + optind);
+    /* argv[optind-1] is the last consumed argument (program name, script name,
+     * or command string). Pass it as the pseudo-argv[0] so shell_var_set_args
+     * (which always skips argv[0]) correctly maps argv[optind] → $1. */
+    shell_var_set_args(argc - optind + 1, argv + optind - 1);
     
     // Initialize Job Control for interactive shells
     int is_interactive = ((input == stdin && isatty(STDIN_FILENO)) || opt_i) && !opt_c;
@@ -265,7 +252,6 @@ int main(int argc, char **argv, char **envp) {
             signal(SIGTSTP, SIG_IGN);
             signal(SIGTTIN, SIG_IGN);
             signal(SIGTTOU, SIG_IGN);
-            signal(SIGCHLD, sigchld_handler);
             
             shell_pgid = getpid();
             if (setpgid(shell_pgid, shell_pgid) < 0) {
@@ -282,6 +268,7 @@ int main(int argc, char **argv, char **envp) {
         if (el && hist) {
             el_set(el, EL_HIST, history, hist);
             el_set(el, EL_EDITOR, "emacs");
+            el_set(el, EL_PROMPT, editline_prompt_callback);
         }
     }
     
@@ -368,14 +355,17 @@ int main(int argc, char **argv, char **envp) {
                     p = shell_var_get("PS1");
                     extended = 0;  // PS1 uses bash-style \escapes
                 }
+                int p_alloc = (p != NULL);
                 if (!p) p = "$ ";
                 char *expanded = evaluate_prompt(p, command_count, extended);
                 
                 if (el) {
-                    el_set(el, EL_PROMPT, expanded ? expanded : p);
+                    editline_prompt = expanded ? expanded : p;
                     line = (char *)el_gets(el, &count);
+                    editline_prompt = "$ ";
                     if (!line) {
                         if (expanded) free(expanded);
+                        if (p_alloc) free(p);
                         break;
                     }
                 } else {
@@ -384,6 +374,7 @@ int main(int argc, char **argv, char **envp) {
                 }
                 
                 if (expanded) free(expanded);
+                if (p_alloc) free(p);
             }
             
             if (!line) {

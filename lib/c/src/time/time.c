@@ -527,6 +527,10 @@ char *ctime(const time_t *timer) {
 
 size_t strftime(char *__restrict s, size_t maxsize, const char *__restrict format, const struct tm *__restrict tp) {
     // Minimal implementation
+    static const char mon_name[][4] = {
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+        "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
+    };
     size_t count = 0;
     for (const char *p = format; *p; p++) {
         if (*p != '%') {
@@ -537,6 +541,14 @@ size_t strftime(char *__restrict s, size_t maxsize, const char *__restrict forma
         p++;
         char tmp[64];
         switch (*p) {
+            case 'b':
+                if (tp->tm_mon < 0 || tp->tm_mon > 11) {
+                    tmp[0] = 0;
+                } else {
+                    snprintf(tmp, sizeof(tmp), "%s", mon_name[tp->tm_mon]);
+                }
+                break;
+            case 'e': snprintf(tmp, sizeof(tmp), "%2d", tp->tm_mday); break;
             case 'Y': snprintf(tmp, sizeof(tmp), "%d", tp->tm_year + 1900); break;
             case 'm': snprintf(tmp, sizeof(tmp), "%.2d", tp->tm_mon + 1); break;
             case 'd': snprintf(tmp, sizeof(tmp), "%.2d", tp->tm_mday); break;

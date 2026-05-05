@@ -64,6 +64,7 @@ void pmap_activate(pmap_t pmap) { (void)pmap; pmap_activate_calls++; }
 void *pmm_alloc_block(void) { return NULL; }
 void pmm_free_block(void *p) { (void)p; }
 void *pmm_alloc_contiguous(size_t pages) { (void)pages; return NULL; }
+void pmm_free_contiguous(void *ptr, size_t count) { (void)ptr; (void)count; }
 int sched_fork_thread(process_t *proc, void *stack) { (void)proc; (void)stack; return -1; }
 thread_t *sched_create_thread(process_t *proc, void (*entry_point)(void *), void *stack, void *arg) {
     (void)proc;
@@ -97,6 +98,28 @@ void kprint(const char *msg) { last_kprint_msg = msg; }
 void tty_hangup(struct tty *tty) { (void)tty; tty_hangup_calls++; }
 void psignal(process_t *p, int sig) { last_psignal_proc = p; last_psignal_sig = sig; }
 void pgrp_remove_proc(struct process *proc) { if (proc) { proc->p_pgrp = NULL; pgrp_remove_calls++; } }
+void ldt_init_process(process_t *proc) {
+    if (proc) {
+        proc->ldt = NULL;
+        proc->ldt_entry_count = 0;
+    }
+}
+int ldt_clone_process(process_t *child, const process_t *parent) {
+    (void)child;
+    (void)parent;
+    return 0;
+}
+void ldt_free_process(process_t *proc) { (void)proc; }
+void open_fs(fs_node_t *node, uint8_t read, uint8_t write) {
+    (void)node;
+    (void)read;
+    (void)write;
+}
+struct vm_map *vm_map_fork(struct vm_map *src, pmap_t pmap) {
+    (void)src;
+    (void)pmap;
+    return NULL;
+}
 void sched_reap_process_threads(process_t *proc) {
     for (int i = 0; i < MAX_THREADS; i++) {
         if (threads[i].tid != -1 && threads[i].proc == proc) {

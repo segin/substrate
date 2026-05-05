@@ -7,7 +7,11 @@
 // Fixed host-side implementation of vm_map.c
 
 static vm_map_entry_t *alloc_entry(void) {
-    return malloc(sizeof(vm_map_entry_t));
+    vm_map_entry_t *entry = malloc(sizeof(vm_map_entry_t));
+    if (!entry) {
+        abort();
+    }
+    return entry;
 }
 
 void vm_map_init(vm_map_t *map, pmap_t pmap, uintptr_t min, uintptr_t max) {
@@ -18,15 +22,11 @@ void vm_map_init(vm_map_t *map, pmap_t pmap, uintptr_t min, uintptr_t max) {
     map->size = 0;
     
     // Fix: Allocate unique sentinel
-    vm_map_entry_t *sentinel = malloc(sizeof(vm_map_entry_t));
-    if (!sentinel) {
-        // In a test environment, failing to allocate the sentinel is fatal.
-        abort();
-    }
+    vm_map_entry_t *sentinel = alloc_entry();
     memset(sentinel, 0, sizeof(vm_map_entry_t));
     sentinel->next = sentinel;
     sentinel->prev = sentinel;
-    sentinel->start = sentinel->end = 0;
+    sentinel->start = sentinel->end = min;
     map->header = sentinel;
 }
 
@@ -106,6 +106,20 @@ int vm_map_find_space(vm_map_t *map, uintptr_t *addr, size_t length) {
     return -1;
 }
 
+void vm_map_destroy(vm_map_t *map) {
+    if (!map) return;
+    vm_map_entry_t *header = map->header;
+    if (header) {
+        vm_map_entry_t *cur = header->next;
+        while (cur != header) {
+            vm_map_entry_t *next = cur->next;
+            free(cur);
+            cur = next;
+        }
+        free(header);
+    }
+}
+
 int vm_map_remove(vm_map_t *map, uintptr_t start, uintptr_t end) {
     vm_map_entry_t *cur, *tmp;
     vm_map_entry_t *header = map->header;
@@ -116,6 +130,7 @@ int vm_map_remove(vm_map_t *map, uintptr_t start, uintptr_t end) {
             cur->next->prev = cur->prev;
             map->nentries--;
             map->size -= (cur->end - cur->start);
+            free(cur);
         }
         cur = tmp;
     }
@@ -135,3 +150,6 @@ void pmap_clear_reference_old(pmap_t pmap, uintptr_t pa) {
 }
 
 int syscall_trace_enabled = 0;
+
+__attribute__((weak)) void rwlock_init(rwlock_t *rw, const char *name) { (void)rw; (void)name; }
+__attribute__((weak)) void vm_object_deallocate(struct vm_object *obj) { (void)obj; }

@@ -24,6 +24,7 @@ _syscall0:
     mov 4(%esp), %eax       # syscall number
     push $0                 # dummy return address
     int $0x80
+    cdq                     # sign-extend eax into edx for int64_t return
     add $4, %esp            # pop dummy
     ret
 
@@ -34,6 +35,7 @@ _syscall1:
     push 8(%esp)            # arg1 (push before dummy)
     push $0                 # dummy return address
     int $0x80
+    cdq                     # sign-extend eax into edx for int64_t return
     add $8, %esp            # pop dummy + arg1
     ret
 
@@ -45,6 +47,7 @@ _syscall2:
     push 12(%esp)           # arg1 (offset changes after push)
     push $0                 # dummy return address
     int $0x80
+    cdq                     # sign-extend eax into edx for int64_t return
     add $12, %esp           # pop dummy + args
     ret
 
@@ -57,6 +60,7 @@ _syscall3:
     push 16(%esp)           # arg1
     push $0                 # dummy return address
     int $0x80
+    cdq                     # sign-extend eax into edx for int64_t return
     add $16, %esp           # pop dummy + args
     ret
 
@@ -70,6 +74,7 @@ _syscall4:
     push 20(%esp)           # arg1
     push $0                 # dummy return address
     int $0x80
+    cdq                     # sign-extend eax into edx for int64_t return
     add $20, %esp           # pop dummy + args
     ret
 
@@ -84,6 +89,7 @@ _syscall5:
     push 24(%esp)           # arg1
     push $0                 # dummy return address
     int $0x80
+    cdq                     # sign-extend eax into edx for int64_t return
     add $24, %esp           # pop dummy + args
     ret
 
@@ -99,5 +105,6 @@ _syscall6:
     push 28(%esp)           # arg1
     push $0                 # dummy return address
     int $0x80
+    cdq                     # sign-extend eax into edx for int64_t return
     add $28, %esp           # pop dummy + args
     ret

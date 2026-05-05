@@ -32,6 +32,9 @@ typedef struct {
     as_token_t *items;
     size_t count;
     size_t cap;
+    char **files;
+    size_t file_count;
+    size_t file_cap;
 } as_token_vec_t;
 
 typedef struct {

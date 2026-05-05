@@ -5,6 +5,8 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
+#include <sys/copy.h>
+#include <sys/errno.h>
 
 #ifdef HOST_TEST
 static inline uint32_t intr_disable(void) { return 0; }
@@ -35,8 +37,6 @@ int hw_text_active = 0;
 static uint16_t *vga_buffer = (uint16_t *)0xC00B8000;
 static spinlock_t hw_text_lock = SPINLOCK_INIT("hw_text");
 static vt_state_t *current_vt_ctx = NULL;
-static volatile uint32_t hw_text_status_epoch = 0;
-static uint16_t hw_text_start_addr = 0;
 static int hw_text_cols = VT_DEFAULT_WIDTH;
 static int hw_text_rows = VT_DEFAULT_HEIGHT;
 
@@ -60,19 +60,12 @@ static inline size_t hw_text_index(size_t x, size_t y) {
 }
 
 static inline size_t hw_text_vram_index(size_t x, size_t y) {
-    return ((size_t)hw_text_start_addr + y * (size_t)vt_get_width() + x) % HW_TEXT_VRAM_CELLS;
+    return y * (size_t)vt_get_width() + x;
 }
 
 static void hw_text_write_vga_cell_locked(size_t x, size_t y, uint16_t entry) {
     vga_buffer[hw_text_vram_index(x, y)] = entry;
 }
-
-static void hw_text_set_start_addr_locked(uint16_t start_addr) {
-    hw_text_start_addr = (uint16_t)(start_addr % HW_TEXT_VRAM_CELLS);
-    hw_text_write_crtc(VGA_CRTC_START_HI, (uint8_t)((hw_text_start_addr >> 8) & 0xFFU));
-    hw_text_write_crtc(VGA_CRTC_START_LO, (uint8_t)(hw_text_start_addr & 0xFFU));
-}
-
 
 static void hw_text_sync_buffer_row_locked(vt_state_t *vt, int row) {
     int x;
@@ -631,8 +624,7 @@ static void hw_text_update_cursor_locked(vt_state_t *vt) {
         col = vt_get_width() - 1;
     }
 
-    pos = (uint16_t)(((size_t)hw_text_start_addr +
-                      (size_t)row * (size_t)vt_get_width() +
+    pos = (uint16_t)(((size_t)row * (size_t)vt_get_width() +
                       (size_t)col) % HW_TEXT_VRAM_CELLS);
     outb(0x3D4, 0x0E);
     outb(0x3D5, (pos >> 8) & 0xFF);
@@ -681,9 +673,6 @@ static void hw_text_scroll_region_up_locked(vt_state_t *vt, int top, int bottom,
 
     /* Sync to VGA if active */
     if (vt->id == vt_get_active() && vt_get_scrollback_view(vt) == 0) {
-        if (top == 0 && bottom == vt_get_visible_height() - 1 && n == 1) {
-            hw_text_set_start_addr_locked((uint16_t)(hw_text_start_addr + (uint16_t)width));
-        }
         for (y = top; y <= bottom; y++) {
             hw_text_sync_buffer_row_locked(vt, y);
         }
@@ -1198,38 +1187,14 @@ static void cb_set_bracketed_paste(int on) {
 }
 
 static void cb_respond(const char *buf, size_t len) {
+    /* Same contract as fb_cb_respond: invoked from ansi_process under
+     * tty->lock.  Re-acquiring would deadlock; writing to tail
+     * directly leaves data unread.  Use the lock-held helper. */
     vt_state_t *vt = current_vt_ctx;
-    struct tty *tty;
-    uint32_t flags;
-    size_t i;
-
-    if (!vt || !buf || len == 0) {
-        return;
-    }
-
-    tty = vt->tty;
-    if (!tty) {
-        return;
-    }
-
-    flags = intr_disable();
-    spinlock_acquire(&tty->lock);
-    for (i = 0; i < len; i++) {
-        tty_buffer_t *tb = &tty->raw_buf;
-        if (tb->count >= TTY_BUF_SIZE) {
-            break;
-        }
-        tb->data[tb->tail] = buf[i];
-        tb->tail = (tb->tail + 1) % TTY_BUF_SIZE;
-        tb->count++;
-    }
-    spinlock_release(&tty->lock);
-    intr_restore(flags);
-
-    if (i > 0) {
-        sched_wakeup(&tty->read_wait);
-        sched_wakeup(&tty->poll_wait);
-    }
+    if (!vt || !buf || len == 0) return;
+    struct tty *tty = vt->tty;
+    if (!tty) return;
+    (void)tty_inject_input_locked(tty, buf, len);
 }
 
 static const struct ansi_callbacks ansi_cb = {
@@ -1268,7 +1233,6 @@ static const struct ansi_callbacks ansi_cb = {
     .set_origin_mode = cb_set_origin_mode,
     .set_alt_screen = cb_set_alt_screen,
     .set_bracketed_paste = cb_set_bracketed_paste,
-    .respond = cb_respond,
 };
 
 static int vt_tty_open(struct tty *tty) {
@@ -1358,7 +1322,7 @@ static int vt_tty_write_room(struct tty *tty) {
 
 static int vt_tty_ioctl(struct tty *tty, uint32_t cmd, unsigned long arg) {
     vt_state_t *vt;
-    int *value;
+    int kvalue;
 
     if (!tty || !arg) {
         return -1;
@@ -1369,39 +1333,45 @@ static int vt_tty_ioctl(struct tty *tty, uint32_t cmd, unsigned long arg) {
         return -1;
     }
 
-    value = (int *)(uintptr_t)arg;
-
     switch (cmd) {
     case VTIOCGTABW:
-        *value = (int)(vt->tab_width ? vt->tab_width : 8);
+        kvalue = (int)(vt->tab_width ? vt->tab_width : 8);
+        if (copyout(&kvalue, (void *)arg, sizeof(int)) != 0) return -14;
         return 0;
     case VTIOCSTABW:
-        if (*value < 1 || *value > 32) {
+        if (copyin((void *)arg, &kvalue, sizeof(int)) != 0) return -14;
+        if (kvalue < 1 || kvalue > 32) {
             return -1;
         }
-        vt->tab_width = (uint8_t)*value;
-        hw_text_reset_tab_stops(vt, (unsigned int)vt_get_width(), (unsigned int)*value);
+        vt->tab_width = (uint8_t)kvalue;
+        hw_text_reset_tab_stops(vt, (unsigned int)vt_get_width(), (unsigned int)kvalue);
         return 0;
     case VTIOCGCURSOR:
-        *value = vt->cursor_visible ? 1 : 0;
+        kvalue = vt->cursor_visible ? 1 : 0;
+        if (copyout(&kvalue, (void *)arg, sizeof(int)) != 0) return -14;
         return 0;
     case VTIOCSCURSOR:
-        vt->cursor_visible = *value ? 1 : 0;
+        if (copyin((void *)arg, &kvalue, sizeof(int)) != 0) return -14;
+        vt->cursor_visible = kvalue ? 1 : 0;
         if (vt->id == vt_get_active()) {
             hw_text_update_cursor_locked(vt);
         }
         return 0;
     case VTIOCGBLINK:
-        *value = hw_text_blink_enabled ? 1 : 0;
+        kvalue = hw_text_blink_enabled ? 1 : 0;
+        if (copyout(&kvalue, (void *)arg, sizeof(int)) != 0) return -EFAULT;
         return 0;
     case VTIOCSBLINK:
-        hw_text_set_blink_mode_locked(*value ? 1 : 0);
+        if (copyin((void *)arg, &kvalue, sizeof(int)) != 0) return -14;
+        hw_text_set_blink_mode_locked(kvalue ? 1 : 0);
         return 0;
     case VTIOCGCURBLINK:
-        *value = vt->cursor_blink ? 1 : 0;
+        kvalue = vt->cursor_blink ? 1 : 0;
+        if (copyout(&kvalue, (void *)arg, sizeof(int)) != 0) return -EFAULT;
         return 0;
     case VTIOCSCURBLINK:
-        vt->cursor_blink = *value ? 1 : 0;
+        if (copyin((void *)arg, &kvalue, sizeof(int)) != 0) return -14;
+        vt->cursor_blink = kvalue ? 1 : 0;
         if (!vt->cursor_blink) {
             hw_text_cursor_blink_phase = 1;
         }
@@ -1656,7 +1626,8 @@ void hw_text_init(void) {
 
     hw_text_active = 1;
     hw_text_set_blink_mode_locked(0);
-    hw_text_set_start_addr_locked(0);
+    hw_text_write_crtc(VGA_CRTC_START_HI, 0);
+    hw_text_write_crtc(VGA_CRTC_START_LO, 0);
     hw_text_cursor_blink_phase = 1;
     hw_text_cursor_blink_ticks = 0;
     console_register(&vt_kprint_backend);

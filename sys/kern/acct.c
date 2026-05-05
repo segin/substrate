@@ -2,6 +2,7 @@
 #include <sys/proc.h>
 #include <sys/session.h>
 #include <sys/signal.h>
+#include <sys/errno.h>
 #include <vfs/vfs.h>
 #include <drivers/video/vga.h>
 #include <kern/sched.h>
@@ -32,6 +33,9 @@ comp_t compress(uint32_t t) {
 }
 
 int kern_acct(const char *path) {
+    /* Only root may enable/disable process accounting */
+    if (current_process && current_process->euid != 0) return -EPERM;
+
     if (path == 0) {
         if (acct_node) {
             close_fs(acct_node);

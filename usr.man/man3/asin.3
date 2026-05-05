@@ -1,0 +1,314 @@
+.TH ASIN 3 "May 2026" "Substrate" "Library Functions Manual"
+.SH NAME
+asin, asinf, asinl, acos, acosf, acosl, atan, atanf, atanl, atan2, atan2f, atan2l \- inverse trigonometric functions
+.SH LIBRARY
+Math library (libm, \-lm)
+.SH SYNOPSIS
+.B #include <math.h>
+.PP
+.BI "double asin(double " x );
+.br
+.BI "float asinf(float " x );
+.br
+.BI "long double asinl(long double " x );
+.PP
+.BI "double acos(double " x );
+.br
+.BI "float acosf(float " x );
+.br
+.BI "long double acosl(long double " x );
+.PP
+.BI "double atan(double " x );
+.br
+.BI "float atanf(float " x );
+.br
+.BI "long double atanl(long double " x );
+.PP
+.BI "double atan2(double " y ", double " x );
+.br
+.BI "float atan2f(float " y ", float " x );
+.br
+.BI "long double atan2l(long double " y ", long double " x );
+.SH DESCRIPTION
+The
+.BR asin ()
+function returns the principal value of the arc sine of
+.IR x ,
+expressed in radians.  The argument must lie in the closed interval
+.BR [\-1,\ +1] ,
+and the result lies in
+.BR [\-\(*p/2,\ +\(*p/2] .
+.PP
+The
+.BR acos ()
+function returns the principal value of the arc cosine of
+.IR x ,
+expressed in radians.  The argument must lie in the closed interval
+.BR [\-1,\ +1] ,
+and the result lies in
+.BR [0,\ \(*p] .
+.PP
+The
+.BR atan ()
+function returns the principal value of the arc tangent of
+.IR x ,
+expressed in radians.  The argument may be any finite real number, and
+the result lies in the open interval
+.BR (\-\(*p/2,\ +\(*p/2) .
+.PP
+The
+.BR atan2 ()
+function returns the principal value of the arc tangent of
+.IR y / x ,
+using the signs of both arguments to determine the quadrant of the
+result.  A positive result represents a counterclockwise angle from the
+positive
+.I x
+axis; a negative result represents a clockwise angle.  The result lies
+in the half-open interval
+.BR (\-\(*p,\ +\(*p] .
+.PP
+The
+.BR asinf (),
+.BR acosf (),
+.BR atanf (),
+and
+.BR atan2f ()
+variants take and return
+.B float
+values.  The
+.BR asinl (),
+.BR acosl (),
+.BR atanl (),
+and
+.BR atan2l ()
+variants take and return
+.B "long double"
+values.
+.SH RETURN VALUE
+On success, these functions return the inverse trigonometric value of
+their argument(s) as described above.
+.PP
+If
+.I x
+is a NaN, all functions return a NaN.  For
+.BR atan2 (),
+if either argument is a NaN, a NaN is returned.
+.PP
+For
+.BR asin ()
+and
+.BR acos (),
+if the absolute value of
+.I x
+exceeds 1, a domain error occurs and the functions return NaN.
+.PP
+For
+.BR atan (),
+if
+.I x
+is positive infinity,
+.IR +\(*p/2
+is returned; if
+.I x
+is negative infinity,
+.IR \-\(*p/2
+is returned.
+.PP
+For
+.BR atan2 (),
+the special cases follow C99 Annex F.10.1.4.  In particular:
+.IP \(bu 2
+.BI atan2( \(+-0 ,\  \-0 )
+returns
+.IR \(+-\(*p .
+.IP \(bu 2
+.BI atan2( \(+-0 ,\  +0 )
+returns
+.IR \(+-0 .
+.IP \(bu 2
+.BI atan2( \(+-0 ,\  x )
+returns
+.I \(+-\(*p
+for
+.I x
+< 0, and
+.I \(+-0
+for
+.I x
+> 0.
+.IP \(bu 2
+.BI atan2( y ,\  \(+-0 )
+returns
+.I \-\(*p/2
+for
+.I y
+< 0, and
+.I +\(*p/2
+for
+.I y
+> 0.
+.IP \(bu 2
+.BI atan2( \(+-y ,\  \-\[if] )
+returns
+.IR \(+-\(*p ,
+and
+.BI atan2( \(+-y ,\  +\[if] )
+returns
+.IR \(+-0 ,
+for finite positive
+.IR y .
+.IP \(bu 2
+.BI atan2( \(+-\[if] ,\  x )
+returns
+.I \(+-\(*p/2
+for finite
+.IR x .
+.IP \(bu 2
+.BI atan2( \(+-\[if] ,\  \-\[if] )
+returns
+.IR \(+-3\(*p/4 .
+.IP \(bu 2
+.BI atan2( \(+-\[if] ,\  +\[if] )
+returns
+.IR \(+-\(*p/4 .
+.SH ERRORS
+See
+.BR math_error (7)
+for information on how to determine whether an error has occurred when
+calling these functions.
+.PP
+The following errors can occur:
+.TP
+Domain error: \fIx\fR is outside [\-1, +1] (\fBasin\fR, \fBacos\fR)
+An invalid floating-point exception
+.RB ( FE_INVALID )
+is raised.  If
+.I "math_errhandling & MATH_ERRNO"
+is non-zero,
+.I errno
+is set to
+.BR EDOM .
+.PP
+.BR atan ()
+and
+.BR atan2 ()
+do not raise domain errors for any combination of finite or infinite
+arguments; their results for the boundary cases are defined as listed
+in RETURN VALUE.
+.SH ATTRIBUTES
+For an explanation of the terms used in this section, see
+.BR attributes (7).
+.TS
+allbox;
+lb lb lb
+l l l.
+Interface	Attribute	Value
+T{
+.BR asin (),
+.BR asinf (),
+.BR asinl (),
+.BR acos (),
+.BR acosf (),
+.BR acosl (),
+.BR atan (),
+.BR atanf (),
+.BR atanl (),
+.BR atan2 (),
+.BR atan2f (),
+.BR atan2l ()
+T}	Thread safety	MT-Safe
+.TE
+.SH STANDARDS
+.BR asin (),
+.BR acos (),
+.BR atan (),
+.BR atan2 (),
+and their
+.BR f / l
+variants conform to C99 and POSIX.1-2008.  The handling of special
+arguments for
+.BR atan2 ()
+follows C99 Annex F.10.1.4 (IEC 60559).
+.SH EXAMPLES
+The following program computes
+.IR asin(1.0) ,
+which equals \(*p/2:
+.PP
+.RS 4
+.EX
+#include <math.h>
+#include <stdio.h>
+
+int
+main(void)
+{
+    double x = 1.0;
+
+    printf("asin(%.6f) = %.6f\en", x, asin(x));
+    return 0;
+}
+.EE
+.RE
+.PP
+The next example uses
+.BR atan2 ()
+to recover the angle of the vector
+.RI ( 1 ,\  1 ) ,
+which equals \(*p/4 (45\(de):
+.PP
+.RS 4
+.EX
+#include <math.h>
+#include <stdio.h>
+
+int
+main(void)
+{
+    double y = 1.0, x = 1.0;
+    double theta = atan2(y, x);
+
+    printf("atan2(%.1f, %.1f) = %.6f rad (%.2f deg)\en",
+           y, x, theta, theta * 180.0 / M_PI);
+    return 0;
+}
+.EE
+.RE
+.PP
+The following program triggers a domain error by passing an out-of-range
+argument to
+.BR asin ():
+.PP
+.RS 4
+.EX
+#include <errno.h>
+#include <math.h>
+#include <stdio.h>
+#include <string.h>
+
+int
+main(void)
+{
+    double r;
+
+    errno = 0;
+    r = asin(2.0);
+    if (errno != 0)
+        printf("asin(2.0) = %f, errno = %d (%s)\en",
+               r, errno, strerror(errno));
+    return 0;
+}
+.EE
+.RE
+.SH SEE ALSO
+.BR acospi (3),
+.BR asinpi (3),
+.BR atan2pi (3),
+.BR atanpi (3),
+.BR cos (3),
+.BR fenv (3),
+.BR sin (3),
+.BR tan (3),
+.BR math_error (7)
+.SH COLOPHON
+This page is part of the Substrate operating system documentation.

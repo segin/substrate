@@ -20,11 +20,38 @@
 #define ATEXIT_MAX 32
 static void (*__atexit_funcs[ATEXIT_MAX])(void);
 static int __atexit_count = 0;
+static atomic_int __atexit_lock = ATOMIC_VAR_INIT(0);
+
+static void
+__atexit_lock_acquire(void)
+{
+    int expected;
+
+    for (;;) {
+        expected = 0;
+        if (atomic_compare_exchange_weak(&__atexit_lock, &expected, 1)) {
+            return;
+        }
+    }
+}
+
+static void
+__atexit_lock_release(void)
+{
+    atomic_store(&__atexit_lock, 0);
+}
 
 void exit(int status) {
+    int count;
+
+    __atexit_lock_acquire();
+    count = __atexit_count;
+    __atexit_count = 0;
+    __atexit_lock_release();
+
     /* Call atexit handlers in reverse order */
-    while (__atexit_count > 0) {
-        __atexit_funcs[--__atexit_count]();
+    while (count > 0) {
+        __atexit_funcs[--count]();
     }
     /* Flush all open stdio streams (POSIX requirement) */
     fflush(NULL);
@@ -55,6 +82,16 @@ struct block_meta {
 };
 
 static struct block_meta *global_base = NULL;
+static struct block_meta *global_tail = NULL;
+static struct block_meta *search_hint = NULL;
+
+static void *block_payload(struct block_meta *block) {
+    return (void *)((char *)block + BLOCK_META_SIZE);
+}
+
+static struct block_meta *payload_block(void *ptr) {
+    return (struct block_meta *)((char *)ptr - BLOCK_META_SIZE);
+}
 
 static struct block_meta *request_space(struct block_meta *last, size_t size) {
     struct block_meta *block;
@@ -87,17 +124,28 @@ static struct block_meta *request_space(struct block_meta *last, size_t size) {
     if (!global_base) {
         global_base = block;
     }
+    global_tail = block;
+    search_hint = block;
 
     return block;
 }
 
-static struct block_meta *find_free_block(struct block_meta **last, size_t size) {
-    struct block_meta *current = global_base;
-    while (current && !(current->free && current->size >= size)) {
-        *last = current;
-        current = current->next;
+static struct block_meta *find_free_block(size_t size) {
+    struct block_meta *start;
+    struct block_meta *current;
+
+    if (global_base == NULL) {
+        return NULL;
     }
-    return current;
+    start = search_hint != NULL ? search_hint : global_base;
+    current = start;
+    do {
+        if (current->free && current->size >= size) {
+            return current;
+        }
+        current = current->next != NULL ? current->next : global_base;
+    } while (current != start);
+    return NULL;
 }
 
 static void split_block(struct block_meta *block, size_t size) {
@@ -111,22 +159,28 @@ static void split_block(struct block_meta *block, size_t size) {
 
         if (new_block->next) {
             new_block->next->prev = new_block;
+        } else {
+            global_tail = new_block;
         }
 
         block->size = size;
         block->next = new_block;
+        search_hint = new_block;
     }
 }
 
-static void coalesce_block(struct block_meta *block) {
+static struct block_meta *coalesce_block(struct block_meta *block) {
     // Coalesce with next
     if (block->next && block->next->free) {
         // Check adjacency
         if ((char*)block + BLOCK_META_SIZE + block->size == (char*)block->next) {
+            struct block_meta *next = block->next;
             block->size += BLOCK_META_SIZE + block->next->size;
             block->next = block->next->next;
             if (block->next) {
                 block->next->prev = block;
+            } else if (global_tail == next) {
+                global_tail = block;
             }
         }
     }
@@ -134,30 +188,33 @@ static void coalesce_block(struct block_meta *block) {
     if (block->prev && block->prev->free) {
         // Check adjacency
         if ((char*)block->prev + BLOCK_META_SIZE + block->prev->size == (char*)block) {
-            block->prev->size += BLOCK_META_SIZE + block->size;
-            block->prev->next = block->next;
+            struct block_meta *prev = block->prev;
+            prev->size += BLOCK_META_SIZE + block->size;
+            prev->next = block->next;
             if (block->next) {
-                block->next->prev = block->prev;
+                block->next->prev = prev;
+            } else if (global_tail == block) {
+                global_tail = prev;
             }
+            block = prev;
         }
     }
+    return block;
 }
 
 void *malloc(size_t size) {
     if (size <= 0) return NULL;
 
     struct block_meta *block;
-    struct block_meta *last = global_base;
     size_t aligned_size = ALIGN(size);
 
     if (!global_base) {
         block = request_space(NULL, aligned_size);
         if (!block) return NULL;
-        last = block;
     } else {
-        block = find_free_block(&last, aligned_size);
+        block = find_free_block(aligned_size);
         if (!block) {
-            block = request_space(last, aligned_size);
+            block = request_space(global_tail, aligned_size);
             if (!block) return NULL;
         }
     }
@@ -169,29 +226,33 @@ void *malloc(size_t size) {
 
     block->free = 0;
     block->magic = MAGIC;
-    return (block + 1);
+    if (search_hint == block) {
+        search_hint = block->next != NULL ? block->next : global_base;
+    }
+    return block_payload(block);
 }
 
 void free(void *ptr) {
     if (!ptr) return;
 
-    struct block_meta *block = (struct block_meta*)ptr - 1;
+    struct block_meta *block = payload_block(ptr);
     if (block->magic != MAGIC) {
         return;
     }
 
     block->free = 1;
-    coalesce_block(block);
+    search_hint = coalesce_block(block);
 }
 
 void *calloc(size_t nmemb, size_t size) {
-    size_t total = nmemb * size;
-    // Check for overflow
-    if (nmemb != 0 && total / nmemb != size) return NULL;
+    /* Check overflow before multiplication to prevent allocating too-small buffer. */
+    if (nmemb != 0 && size > SIZE_MAX / nmemb) {
+        return NULL;
+    }
 
-    void *ptr = malloc(total);
+    void *ptr = malloc(nmemb * size);
     if (ptr) {
-        memset(ptr, 0, total);
+        memset(ptr, 0, nmemb * size);
     }
     return ptr;
 }
@@ -203,7 +264,7 @@ void *realloc(void *ptr, size_t size) {
         return NULL;
     }
 
-    struct block_meta *block = (struct block_meta*)ptr - 1;
+    struct block_meta *block = payload_block(ptr);
     if (block->magic != MAGIC) return NULL;
 
     if (block->size >= size) {
@@ -218,11 +279,20 @@ void *realloc(void *ptr, size_t size) {
     if (block->next && block->next->free &&
         ((char*)block + BLOCK_META_SIZE + block->size == (char*)block->next) &&
         (block->size + BLOCK_META_SIZE + block->next->size >= ALIGN(size))) {
+        struct block_meta *next = block->next;
+        int hint_was_next = (search_hint == next);
 
         // Merge next block
-        block->size += BLOCK_META_SIZE + block->next->size;
-        block->next = block->next->next;
-        if (block->next) block->next->prev = block;
+        block->size += BLOCK_META_SIZE + next->size;
+        block->next = next->next;
+        if (block->next) {
+            block->next->prev = block;
+        } else if (global_tail == next) {
+            global_tail = block;
+        }
+        if (hint_was_next) {
+            search_hint = block->next != NULL ? block->next : global_base;
+        }
 
         // Now split if too big
         if (block->size >= ALIGN(size) + BLOCK_META_SIZE + ALIGNMENT) {
@@ -294,7 +364,7 @@ long strtol(const char *nptr, char **endptr, int base) {
     }
     if (base == 0) base = *s == '0' ? 8 : 10;
 
-    cutoff = neg ? -(unsigned long)-2147483648L : 2147483647L; // Simplified LONG_MAX/MIN for 32-bit
+    cutoff = neg ? (unsigned long)(-(LONG_MIN + 1L)) + 1u : (unsigned long)LONG_MAX;
     cutlim = cutoff % (unsigned long)base;
     cutoff /= (unsigned long)base;
     for (acc = 0, any = 0, c = *s++;; c = *s++) {
@@ -532,6 +602,7 @@ double atof(const char *nptr) {
 }
 
 extern char **environ;
+static int environ_owned = 0;
 
 char *getenv(const char *name) {
     if (!name || !environ) return NULL;
@@ -576,10 +647,23 @@ int setenv(const char *name, const char *value, int overwrite) {
         }
     }
 
-    char **new_env = realloc(environ, (count + 2) * sizeof(char *));
-    if (!new_env) {
-        errno = ENOMEM;
-        return -1;
+    char **new_env;
+    if (environ_owned) {
+        new_env = realloc(environ, (count + 2) * sizeof(char *));
+        if (!new_env) {
+            errno = ENOMEM;
+            return -1;
+        }
+    } else {
+        new_env = malloc((count + 2) * sizeof(char *));
+        if (!new_env) {
+            errno = ENOMEM;
+            return -1;
+        }
+        for (size_t i = 0; i < count; ++i) {
+            new_env[i] = environ[i];
+        }
+        environ_owned = 1;
     }
     environ = new_env;
 
@@ -657,8 +741,15 @@ lldiv_t lldiv(long long numer, long long denom) {
 }
 
 int atexit(void (*func)(void)) {
-    if (__atexit_count >= ATEXIT_MAX) return -1;
+    if (func == NULL) return -1;
+
+    __atexit_lock_acquire();
+    if (__atexit_count >= ATEXIT_MAX) {
+        __atexit_lock_release();
+        return -1;
+    }
     __atexit_funcs[__atexit_count++] = func;
+    __atexit_lock_release();
     return 0;
 }
 

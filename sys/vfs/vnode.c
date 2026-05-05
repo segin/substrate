@@ -9,6 +9,15 @@
  * - vget(): Lock and vref
  * - vgone(): Mark vnode for destruction
  * - vclean(): Disassociate vnode from filesystem
+ *
+ * Lock ordering (acquire in this order to avoid deadlocks):
+ *   1. vnode lock (lockmgr per-vnode)
+ *   2. vnode_freelist_lock (spinlock, protects freelist/LRU)
+ *   3. bio_lock (spinlock, protects buffer cache hash/queues)
+ *   4. nchash_lock (rwlock, protects name cache)
+ *
+ * Never acquire a higher-numbered lock while holding a lower-numbered one.
+ * Per-vnode locks are ordered by address to avoid A-B / B-A deadlocks.
  */
 
 #include <vfs/vnode.h>
@@ -247,16 +256,17 @@ void vref(struct vnode *vp)
 {
     spinlock_acquire(&vp->v_interlock);
     
-    /* Remove from free list if on it */
-    if (vp->v_usecount == 0 && (vp->v_flag & VONFREELIST)) {
-        spinlock_release(&vp->v_interlock);
-        vnode_freelist_remove(vp);
-        spinlock_acquire(&vp->v_interlock);
-    }
-    
+    /* Increment usecount first so the vnode cannot be reclaimed
+     * while we drop v_interlock to remove from freelist. */
     vp->v_usecount++;
     
-    spinlock_release(&vp->v_interlock);
+    /* Remove from free list if it was on it (transition from 0->1) */
+    if (vp->v_usecount == 1 && (vp->v_flag & VONFREELIST)) {
+        spinlock_release(&vp->v_interlock);
+        vnode_freelist_remove(vp);
+    } else {
+        spinlock_release(&vp->v_interlock);
+    }
 }
 
 /*
@@ -277,21 +287,31 @@ void vrele(struct vnode *vp)
     
     if (vp->v_usecount == 0) {
         /* Vnode is no longer in active use */
-        
-        /* Call VOP_INACTIVE if defined */
+
+        /* Call VOP_INACTIVE if defined.  We must drop v_interlock
+         * across the call because vop_inactive may sleep, so other
+         * threads can race and re-vref() this vnode in the window. */
         if (vp->v_op && vp->v_op->vop_inactive) {
             spinlock_release(&vp->v_interlock);
             vp->v_op->vop_inactive(vp, NULL);
             spinlock_acquire(&vp->v_interlock);
+
+            /* Re-check usecount: someone may have re-grabbed the
+             * vnode while we were inactive — in which case it now
+             * belongs to that caller, not the freelist. */
+            if (vp->v_usecount > 0) {
+                spinlock_release(&vp->v_interlock);
+                return;
+            }
         }
-        
+
         /* If doomed, reclaim immediately */
         if (vp->v_flag & VDOOMED) {
             spinlock_release(&vp->v_interlock);
             vnode_reclaim(vp);
-            return;
+            return; /* vp is freed by vnode_reclaim, do not touch */
         }
-        
+
         /* Add to free list for potential recycling */
         spinlock_release(&vp->v_interlock);
         vnode_freelist_add(vp);

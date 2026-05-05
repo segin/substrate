@@ -1,13 +1,17 @@
 #include <kern/console.h>
+#include <kern/device.h>
 #include <kern/sysrq.h>
 #include <drivers/console/uart/uart.h>
 #include <arch/x86-common/io.h>
 #include <arch/i386/idt.h>
 #include <kern/isa.h>
+#include <kern/isapnp.h>
+#include <kern/resource.h>
 #include <sys/termios.h>
 #include <sys/errno.h>
 #include <sys/poll.h>
 #include <vfs/vfs.h>
+#include <sys/copy.h>
 #include <string.h>
 #include <stdio.h>
 
@@ -51,6 +55,7 @@ int uart_received(void);
 
 /* TX output buffer */
 #define UART_TX_BUF_SIZE    256
+#define UART_TX_SPIN_LIMIT  100000U
 
 static struct {
     uint8_t buf[UART_TX_BUF_SIZE];
@@ -75,6 +80,9 @@ static const uint16_t uart_ports[UART_PORT_COUNT] = {
     UART_COM1, UART_COM2, UART_COM3, UART_COM4
 };
 
+static uint16_t uart_detected_ports[UART_PORT_COUNT];
+static int uart_ports_scanned;
+
 static uint16_t uart_base_port = UART_COM1;
 static uint32_t uart_base_index;
 static fs_node_t uart_nodes[UART_PORT_COUNT];
@@ -91,19 +99,81 @@ static int uart_probe_port(uint16_t port) {
     return probe == 0x5A;
 }
 
-static int uart_port_present(uint32_t serial_index) {
-    char name[16];
+static int uart_port_already_assigned(uint16_t port) {
+    for (uint32_t i = 0; i < UART_PORT_COUNT; i++) {
+        if (uart_detected_ports[i] == port) {
+            return 1;
+        }
+    }
+    return 0;
+}
 
+static void uart_assign_detected_port(uint16_t port) {
+    if (!port || uart_port_already_assigned(port)) {
+        return;
+    }
+
+    for (uint32_t i = 0; i < UART_PORT_COUNT; i++) {
+        if (uart_ports[i] == port) {
+            uart_detected_ports[i] = port;
+            return;
+        }
+    }
+
+    for (uint32_t i = 0; i < UART_PORT_COUNT; i++) {
+        if (uart_detected_ports[i] == 0) {
+            uart_detected_ports[i] = port;
+            return;
+        }
+    }
+}
+
+static int uart_is_pnp_serial(const struct device *dev) {
+    if (dev == NULL) {
+        return 0;
+    }
+    if (dev->vendor_id != ISAPNP_VENDOR('P', 'N', 'P')) {
+        return 0;
+    }
+    return dev->device_id == 0x0500 || dev->device_id == 0x0501;
+}
+
+static void uart_scan_ports(void) {
+    if (uart_ports_scanned) {
+        return;
+    }
+
+    memset(uart_detected_ports, 0, sizeof(uart_detected_ports));
+    for (uint32_t i = 0; i < UART_PORT_COUNT; i++) {
+        char name[16];
+
+        snprintf(name, sizeof(name), "serial%u", i);
+        if (isa_device_present(name) || uart_probe_port(uart_ports[i])) {
+            uart_detected_ports[i] = uart_ports[i];
+        }
+    }
+
+    for (struct device *dev = isa_first_device(); dev != NULL; dev = isa_next_device(dev)) {
+        struct resource *io;
+
+        if (!uart_is_pnp_serial(dev)) {
+            continue;
+        }
+        io = isa_device_resource(dev, RES_IO, 0);
+        if (io != NULL) {
+            uart_assign_detected_port((uint16_t)io->start);
+        }
+    }
+
+    uart_ports_scanned = 1;
+}
+
+static int uart_port_present(uint32_t serial_index) {
+    uart_scan_ports();
     if (serial_index >= UART_PORT_COUNT) {
         return 0;
     }
-
-    snprintf(name, sizeof(name), "serial%u", serial_index);
-    if (isa_device_present(name)) {
-        return 1;
-    }
-
-    return uart_probe_port(uart_ports[serial_index]);
+    return uart_detected_ports[serial_index] != 0;
 }
 
 static void uart_program_port(uint16_t port, int enable_rx_irq) {
@@ -129,6 +199,19 @@ static int uart_port_is_transmit_empty(uint16_t port) {
     return inb(port + 5) & 0x20;
 }
 
+static int uart_poll_putc(uint16_t port, uint8_t byte, uint32_t max_spins) {
+    uint32_t spins = 0;
+
+    while (!uart_port_is_transmit_empty(port)) {
+        if (++spins > max_spins) {
+            return 0;
+        }
+    }
+
+    outb(port + 0, byte);
+    return 1;
+}
+
 static size_t uart_node_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
     (void)offset;
     uint16_t port = uart_node_port(node);
@@ -150,13 +233,10 @@ static size_t uart_node_write(fs_node_t *node, off_t offset, size_t size, const 
     size_t count = 0;
 
     while (count < size) {
-        uint32_t spins = 0;
-        while (!uart_port_is_transmit_empty(port)) {
-            if (++spins > 100000) {
-                return count;
-            }
+        if (!uart_poll_putc(port, buffer[count], UART_TX_SPIN_LIMIT)) {
+            return count;
         }
-        outb(port + 0, buffer[count++]);
+        count++;
     }
 
     return count;
@@ -164,52 +244,50 @@ static size_t uart_node_write(fs_node_t *node, off_t offset, size_t size, const 
 
 static int uart_node_ioctl(fs_node_t *node, uint32_t request, void *arg) {
     uint16_t port = uart_node_port(node);
-    if (!port)
+    int bits;
+
+    if (!port) {
         return -ENOTTY;
+    }
 
     switch (request) {
     case TIOCMGET: {
         /* Read modem control/status lines */
         uint8_t mcr = inb(port + 4);
         uint8_t msr = inb(port + 6);
-        int bits = 0;
+        bits = 0;
         if (mcr & UART_MCR_DTR) bits |= TIOCM_DTR;
         if (mcr & UART_MCR_RTS) bits |= TIOCM_RTS;
         if (msr & UART_MSR_CTS) bits |= TIOCM_CTS;
         if (msr & UART_MSR_DSR) bits |= TIOCM_DSR;
         if (msr & UART_MSR_DCD) bits |= TIOCM_CD;
         if (msr & UART_MSR_RI)  bits |= TIOCM_RI;
-        if (arg)
-            *(int *)arg = bits;
+        if (copyout(&bits, arg, sizeof(int)) != 0) {
+            return -EFAULT;
+        }
         return 0;
     }
-    case TIOCMSET: {
-        /* Set modem control lines */
-        if (!arg) return -EINVAL;
-        int bits = *(int *)arg;
-        uint8_t mcr = inb(port + 4) & ~(UART_MCR_DTR | UART_MCR_RTS);
-        if (bits & TIOCM_DTR) mcr |= UART_MCR_DTR;
-        if (bits & TIOCM_RTS) mcr |= UART_MCR_RTS;
-        outb(port + 4, mcr);
-        return 0;
-    }
-    case TIOCMBIS: {
-        /* Set indicated modem bits */
-        if (!arg) return -EINVAL;
-        int bits = *(int *)arg;
-        uint8_t mcr = inb(port + 4);
-        if (bits & TIOCM_DTR) mcr |= UART_MCR_DTR;
-        if (bits & TIOCM_RTS) mcr |= UART_MCR_RTS;
-        outb(port + 4, mcr);
-        return 0;
-    }
+    case TIOCMSET:
+    case TIOCMBIS:
     case TIOCMBIC: {
-        /* Clear indicated modem bits */
+        /* Modem control line modifications */
         if (!arg) return -EINVAL;
-        int bits = *(int *)arg;
+        if (copyin(arg, &bits, sizeof(int)) != 0) {
+            return -EFAULT;
+        }
+
         uint8_t mcr = inb(port + 4);
-        if (bits & TIOCM_DTR) mcr &= ~UART_MCR_DTR;
-        if (bits & TIOCM_RTS) mcr &= ~UART_MCR_RTS;
+        if (request == TIOCMSET) {
+            mcr &= ~(UART_MCR_DTR | UART_MCR_RTS);
+            if (bits & TIOCM_DTR) mcr |= UART_MCR_DTR;
+            if (bits & TIOCM_RTS) mcr |= UART_MCR_RTS;
+        } else if (request == TIOCMBIS) {
+            if (bits & TIOCM_DTR) mcr |= UART_MCR_DTR;
+            if (bits & TIOCM_RTS) mcr |= UART_MCR_RTS;
+        } else { /* TIOCMBIC */
+            if (bits & TIOCM_DTR) mcr &= ~UART_MCR_DTR;
+            if (bits & TIOCM_RTS) mcr &= ~UART_MCR_RTS;
+        }
         outb(port + 4, mcr);
         return 0;
     }
@@ -227,8 +305,10 @@ static int uart_node_ioctl(fs_node_t *node, uint32_t request, void *arg) {
     }
     case TIOCOUTQ: {
         /* Report TX bytes pending */
-        if (arg)
-            *(int *)arg = (int)uart_tx.count;
+        bits = (int)uart_tx.count;
+        if (copyout(&bits, arg, sizeof(int)) != 0) {
+            return -EFAULT;
+        }
         return 0;
     }
     default:
@@ -257,10 +337,14 @@ static void uart_node_close(fs_node_t *node) {
 }
 
 int uart_select_port(uint32_t serial_index) {
+    uart_scan_ports();
     if (serial_index >= UART_PORT_COUNT) {
         return -1;
     }
-    uart_base_port = uart_ports[serial_index];
+    if (uart_detected_ports[serial_index] == 0) {
+        return -1;
+    }
+    uart_base_port = uart_detected_ports[serial_index];
     uart_base_index = serial_index;
     return 0;
 }
@@ -348,11 +432,13 @@ console_backend_t *uart_get_console(void) {
 void uart_devfs_init(void) {
     if (uart_nodes_registered) return;
 
+    uart_scan_ports();
+
     for (uint32_t i = 0; i < UART_PORT_COUNT; i++) {
         fs_node_t *node = &uart_nodes[i];
-        uint16_t port = uart_ports[i];
+        uint16_t port = uart_detected_ports[i];
 
-        if (!uart_port_present(i)) {
+        if (!port) {
             continue;
         }
 
@@ -382,9 +468,11 @@ void uart_devfs_init(void) {
 }
 
 int uart_init(void) {
+    uart_scan_ports();
     if (!uart_port_present(uart_base_index)) {
         return -1;
     }
+    uart_base_port = uart_detected_ports[uart_base_index];
     uart_tx.head = 0;
     uart_tx.tail = 0;
     uart_tx.count = 0;
@@ -424,11 +512,18 @@ static void uart_tx_drain(void) {
  * Falls back to polling if the buffer is full.
  */
 static void uart_tx_enqueue(uint8_t byte) {
-    if (uart_tx.count >= UART_TX_BUF_SIZE) {
-        /* Buffer full — poll-wait and send directly */
-        while (!(inb(uart_base_port + 5) & UART_LSR_THRE))
-            ;
+    uart_tx_drain();
+
+    if (uart_tx.count == 0 && !uart_tx.xoff_held &&
+        uart_port_is_transmit_empty(uart_base_port)) {
         outb(uart_base_port + 0, byte);
+        return;
+    }
+
+    if (uart_tx.count >= UART_TX_BUF_SIZE) {
+        if (!uart_tx.xoff_held) {
+            (void)uart_poll_putc(uart_base_port, byte, UART_TX_SPIN_LIMIT);
+        }
         return;
     }
     uart_tx.buf[uart_tx.head] = byte;
@@ -551,5 +646,18 @@ void uart_putc(char c) {
 void uart_write(const char* data, size_t size) {
     for (size_t i = 0; i < size; i++) {
         uart_putc(data[i]);
+    }
+}
+
+void uart_panic_write(const char *data, size_t size) {
+    /* Polled, lock-free, bypass-everything path for panic().  Caller
+     * may hold any spinlock or have interrupts disabled; we must not
+     * re-enter the IRQ tx queue or any console infrastructure. */
+    if (!data) return;
+    for (size_t i = 0; i < size; i++) {
+        if (data[i] == '\n') {
+            uart_poll_putc(uart_base_port, '\r', 1000000);
+        }
+        uart_poll_putc(uart_base_port, (uint8_t)data[i], 1000000);
     }
 }

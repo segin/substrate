@@ -1,4 +1,5 @@
 #include "job.h"
+#include "exec.h"
 #include <stdlib.h>
 #include <stdio.h>
 #include <unistd.h>
@@ -6,11 +7,6 @@
 #include <string.h>
 #include <signal.h>
 #include <termios.h>
-
-extern int tcsetpgrp(int fd, pid_t pgrp);
-#ifndef SIGCONT
-#define SIGCONT 18
-#endif
 #include "util.h"
 
 job_t *first_job = NULL;
@@ -156,7 +152,7 @@ void job_print_info(job_t *j, const char *status) {
     fprintf(stderr, "[%d] %d %s\t%s\n", j->id, (int)j->pgid, status, j->command ? j->command : "(unknown)");
 }
 
-static int mark_process_status(pid_t pid, int status) {
+int job_mark_process_status(pid_t pid, int status) {
     job_t *j;
     process_t *p;
 
@@ -185,7 +181,7 @@ void job_update_status(void) {
     pid_t pid;
 
     while ((pid = waitpid(-1, &status, WNOHANG | WUNTRACED)) > 0) {
-        mark_process_status(pid, status);
+        job_mark_process_status(pid, status);
     }
     
     // Notify user of finished jobs
@@ -212,7 +208,7 @@ int job_wait(job_t *j) {
     while (!job_is_stopped(j) && !job_is_completed(j)) {
         pid = waitpid(-j->pgid, &status, WUNTRACED);
         if (pid > 0) {
-            mark_process_status(pid, status);
+            job_mark_process_status(pid, status);
         } else {
             break;
         }
@@ -248,8 +244,6 @@ int builtin_jobs(int argc, char **argv) {
 
 
 int builtin_fg(int argc, char **argv) {
-    extern pid_t shell_pgid;
-    extern struct termios shell_tmodes;
     job_t *j = NULL;
 
     if (argc > 1) {
@@ -276,11 +270,14 @@ int builtin_fg(int argc, char **argv) {
     }
 
     kill(-j->pgid, SIGCONT);
-    job_wait(j);
+    int status = job_wait(j);
     
     tcsetpgrp(STDIN_FILENO, shell_pgid);
     tcsetattr(STDIN_FILENO, TCSADRAIN, &shell_tmodes);
-    return 0;
+
+    if (WIFEXITED(status)) return WEXITSTATUS(status);
+    if (WIFSIGNALED(status)) return 128 + WTERMSIG(status);
+    return 1;
 }
 
 int builtin_bg(int argc, char **argv) {

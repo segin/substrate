@@ -6,4 +6,5 @@
 #define SIGTTOU 22
 #define SIGWINCH 28
 #define SIGHUP 1
+#define SIGCHLD 17
 #define SIGCONT 18

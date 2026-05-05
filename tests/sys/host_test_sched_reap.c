@@ -20,6 +20,9 @@ static void *last_pmm_block_ptr;
 static void *last_pmm_contig_ptr;
 static size_t last_pmm_contig_count;
 
+void spinlock_init(spinlock_t *lock, const char *name) { (void)lock; (void)name; }
+void spinlock_acquire(spinlock_t *lock) { (void)lock; }
+void spinlock_release(spinlock_t *lock) { (void)lock; }
 void pm_init(void) {}
 void proc_reap_autoreap_zombies(void) {}
 void sched_periodic_balance(void) {}
@@ -126,8 +129,42 @@ static void test_reap_process_threads_frees_owned_stacks(void) {
     assert(borrowed_thread->tid == -1);
 }
 
+static void test_sched_alloc_thread_wraps_tid_at_arch_limit(void) {
+    process_t kernel_proc;
+    process_t user_proc;
+    thread_t *idle_thread;
+    thread_t *user_thread;
+    thread_t *wrapped_thread;
+
+    reset_env();
+
+    memset(&kernel_proc, 0, sizeof(kernel_proc));
+    kernel_proc.pid = 0;
+
+    memset(&user_proc, 0, sizeof(user_proc));
+    user_proc.pid = 42;
+
+    idle_thread = sched_alloc_thread(&kernel_proc);
+    assert(idle_thread != NULL);
+    assert(idle_thread->tid == 0);
+
+    next_tid = SUBSTRATE_TID_MAX;
+
+    user_thread = sched_alloc_thread(&user_proc);
+    wrapped_thread = sched_alloc_thread(&user_proc);
+
+    assert(user_thread != NULL);
+    assert(wrapped_thread != NULL);
+    assert(user_thread->tid == SUBSTRATE_TID_MAX);
+    assert(wrapped_thread->tid == 1);
+    assert(sched_get_thread(0) == idle_thread);
+    assert(sched_get_thread(SUBSTRATE_TID_MAX) == user_thread);
+    assert(sched_get_thread(1) == wrapped_thread);
+}
+
 int main(void) {
     test_reap_process_threads_frees_owned_stacks();
+    test_sched_alloc_thread_wraps_tid_at_arch_limit();
     puts("host_test_sched_reap: PASS");
     return 0;
 }

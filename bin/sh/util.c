@@ -101,10 +101,15 @@ void unquote_word(char *word) {
 }
 
 void buffer_append(char **buf, size_t *cap, size_t *len, char c) {
-    // Guard against exponential expansion - max 64KB
-    #define BUFFER_MAX_SIZE (64 * 1024)
+    #define BUFFER_MAX_SIZE (1024 * 1024)
     if (*len >= BUFFER_MAX_SIZE) {
-        return; // Silently stop appending beyond limit
+        static int warned;
+        if (!warned) {
+            const char *msg = "sh: warning: expansion truncated at 1MB\n";
+            if (write(2, msg, strlen(msg)) < 0) {}
+            warned = 1;
+        }
+        return;
     }
     
     if (*len + 1 >= *cap) {
@@ -133,4 +138,42 @@ void buffer_append_str(char **buf, size_t *cap, size_t *len, const char *str) {
     while (*str) {
         buffer_append(buf, cap, len, *str++);
     }
+}
+
+char *read_stream_all(FILE *stream) {
+    size_t cap = 256;
+    size_t len = 0;
+    char *buf = malloc(cap);
+    char chunk[256];
+
+    if (!buf) {
+        return NULL;
+    }
+    buf[0] = '\0';
+
+    while (!feof(stream)) {
+        size_t nread = fread(chunk, 1, sizeof(chunk), stream);
+
+        if (nread == 0) {
+            if (ferror(stream)) {
+                free(buf);
+                return NULL;
+            }
+            break;
+        }
+
+        while (len + nread + 1 > cap) {
+            cap *= 2;
+            buf = realloc(buf, cap);
+            if (!buf) {
+                return NULL;
+            }
+        }
+
+        memcpy(buf + len, chunk, nread);
+        len += nread;
+        buf[len] = '\0';
+    }
+
+    return buf;
 }

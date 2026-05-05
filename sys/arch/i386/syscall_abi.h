@@ -18,7 +18,16 @@ static inline void i386_extract_syscall_args(const struct personality *p,
         return;
     }
 
-    if (p && (p->id == PERS_FREEBSD || p->id == PERS_NATIVE || p->id == PERS_SVR4)) {
+    if (p && (p->id == PERS_FREEBSD || p->id == PERS_NETBSD ||
+              p->id == PERS_OPENBSD || p->id == PERS_NATIVE ||
+              p->id == PERS_SVR4)) {
+        /* NetBSD and OpenBSD use the same stack-based int $0x80 ABI as
+         * FreeBSD: caller pushes args, libc stubs do `mov $nr, %eax;
+         * int $0x80` with no register marshalling.  Without this branch
+         * NetBSD binaries fell through to the register-based extraction
+         * below and saw garbage args (manifested as ld.elf_so's mmap()
+         * appearing to "succeed" with bogus low addresses → SIGSEGV in
+         * imalloc on first writeback). */
         const uint32_t *user_stack = (const uint32_t *)(uintptr_t)regs->useresp;
 
         args[0] = user_stack[1];

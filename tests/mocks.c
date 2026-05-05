@@ -8,6 +8,8 @@
 #include "../sys/arch/i386/pmap.h"
 #include "../sys/arch/i386/cpu.h"
 #include "../sys/vm/vm_map.h"
+#include "../sys/include/sys/lock.h"
+#include "../sys/include/sys/proc.h"
 
 // VGA/UART Mocks
 void vga_write(const char *s, size_t n) { (void)s; (void)n; }
@@ -31,7 +33,6 @@ void fuse_init() {}
 void fuse_fs_init() {}
 void p9_init() {}
 void devfs_init(void) {}
-void namei_init(void) {}
 void vfs_init_mock_root(void);
 // nchinit and fs_root removed (linked from vfs)
 
@@ -295,9 +296,6 @@ const uint8_t sigprop[NSIG] = {0};
 int exec_dispatch(const char *path, char *const argv[], char *const envp[]) { (void)path; (void)argv; (void)envp; return 0; }
 
 struct fs_node *devfs_root_node_ptr;
-struct nameidata;
-int namei(const char *path, struct nameidata *ndp) { (void)path; (void)ndp; return -1; }
-int namei_simple(const char *path, struct nameidata *ndp) { (void)path; (void)ndp; return -1; }
 struct vnode;
 
 // vm_map_lookup stub
@@ -376,6 +374,7 @@ void *percpu_get(void) { return &mock_percpu_data; }
 int percpu_get_cpu_id(void) { return 0; }
 int sched_can_run_on_cpu(void) { return 1; }
 void host_wait_for_interrupt(void) {}
+__attribute__((weak)) void vm_map_destroy(vm_map_t *map) { (void)map; }
 void cmdline_get_full(char *buf, size_t buf_len) { if(buf && buf_len > 0) buf[0] = '\0'; }
 
 void wait_for_interrupt() {}
@@ -448,3 +447,60 @@ void i386_cpu_cycle_counter_split(uint32_t *lo, uint32_t *hi) {
     if (lo) *lo = 0;
     if (hi) *hi = 0;
 }
+
+/* ---- Lock / rwlock mocks ---- */
+__attribute__((weak)) void rwlock_init(rwlock_t *rw, const char *name) { (void)rw; (void)name; }
+void rw_rlock(rwlock_t *rw) { (void)rw; }
+bool rw_try_rlock(rwlock_t *rw) { (void)rw; return true; }
+void rw_runlock(rwlock_t *rw) { (void)rw; }
+void rw_wlock(rwlock_t *rw) { (void)rw; }
+bool rw_try_wlock(rwlock_t *rw) { (void)rw; return true; }
+void rw_wunlock(rwlock_t *rw) { (void)rw; }
+bool rw_wowned(rwlock_t *rw) { (void)rw; return false; }
+
+void lockinit(struct lock *lkp, int prio, const char *name, int flags) {
+    (void)prio; (void)name; (void)flags;
+    if (lkp) { lkp->lk_flags = 0; lkp->lk_sharecount = 0; lkp->lk_exclusivecount = 0; }
+}
+void lockdestroy(struct lock *lkp) { (void)lkp; }
+int lockmgr(struct lock *lkp, uint32_t flags, spinlock_t *interlock) {
+    (void)interlock;
+    if (!lkp) return -1;
+    if (flags & LK_RELEASE) {
+        if (lkp->lk_exclusivecount > 0)
+            lkp->lk_exclusivecount--;
+        else if (lkp->lk_sharecount > 0)
+            lkp->lk_sharecount--;
+    } else if (flags & LK_EXCLUSIVE) {
+        lkp->lk_exclusivecount++;
+    } else if (flags & LK_SHARED) {
+        lkp->lk_sharecount++;
+    }
+    return 0;
+}
+int lockstatus(struct lock *lkp) {
+    if (!lkp) return 0;
+    if (lkp->lk_exclusivecount > 0) return LK_EXCLUSIVE;
+    if (lkp->lk_sharecount > 0) return LK_SHARED;
+    return 0;
+}
+int lockcount(struct lock *lkp) {
+    if (!lkp) return 0;
+    return (int)(lkp->lk_exclusivecount + lkp->lk_sharecount);
+}
+
+/* ---- Misc kernel stubs needed by vfs.c / kthread.c / time.c ---- */
+process_t *swapper_get_proc(void) { return NULL; }
+void bio_init(void) {}
+void hw_text_tick(void) {}
+void fb_console_tick(void) {}
+void floppy_poll(void) {}
+void vt_tick_1hz(void) {}
+int pmap_protect(pmap_t pmap, uintptr_t sva, uintptr_t eva, uint32_t prot) {
+    (void)pmap; (void)sva; (void)eva; (void)prot;
+    return 0;
+}
+
+/* Buffer cache / zone stubs */
+int binval_vnode(struct vnode *vp, int save) { (void)vp; (void)save; return 0; }
+void uma_zdestroy(uma_zone_t *zone) { (void)zone; }

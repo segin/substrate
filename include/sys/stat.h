@@ -63,9 +63,11 @@ struct stat {
 #define S_IXOTH 00001
 
 int mkdir(const char *pathname, mode_t mode);
+int mkdirat(int dirfd, const char *pathname, mode_t mode);
 int stat(const char *pathname, struct stat *statbuf);
 int fstat(int fd, struct stat *statbuf);
 int lstat(const char *pathname, struct stat *statbuf);
+int fstatat(int dirfd, const char *pathname, struct stat *statbuf, int flags);
 int mknod(const char *pathname, mode_t mode, dev_t dev);
 int chmod(const char *pathname, mode_t mode);
 int chown(const char *pathname, uid_t owner, gid_t group);

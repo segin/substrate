@@ -39,6 +39,10 @@ int kprintf(const char *fmt, ...) { (void)fmt; return 0; }
 // Mock vfs_register_filesystem
 struct filesystem;
 void vfs_register_filesystem(struct filesystem *fs) { (void)fs; }
+static time_t mock_now = 2000;
+static time_t mock_boot = 1500;
+time_t get_time(void) { return mock_now; }
+time_t get_boot_time(void) { return mock_boot; }
 
 // Mock tty functions called by devfs.c
 struct tty;
@@ -68,6 +72,10 @@ int main() {
         return 1;
     }
     printf("root_entry: %s\n", root_entry->name);
+    if (devfs_root_node.atime != mock_now || devfs_root_node.mtime != mock_now || devfs_root_node.ctime != mock_boot) {
+        printf("FAIL: root timestamps incorrect\n");
+        return 1;
+    }
 
     // Test 1: Block Device
     printf("Registering block device 'sda'...\n");
@@ -100,6 +108,10 @@ int main() {
         printf("FAIL: 'sda' node does not match registered node\n");
         return 1;
     }
+    if (block_node->atime != mock_now || block_node->mtime != mock_now || block_node->ctime != mock_boot) {
+        printf("FAIL: 'sda' timestamps incorrect\n");
+        return 1;
+    }
     printf("PASS: Block device 'sda' found in 'storage/sda'\n");
 
     // Test 2: Character Device
@@ -115,6 +127,10 @@ int main() {
     if (!ttyUSB0) {
         printf("FAIL: 'ttyUSB0' not found in root\n");
         print_tree(root_entry, 0);
+        return 1;
+    }
+    if (char_node->atime != mock_now || char_node->mtime != mock_now || char_node->ctime != mock_boot) {
+        printf("FAIL: 'ttyUSB0' timestamps incorrect\n");
         return 1;
     }
     printf("PASS: Character device 'ttyUSB0' found in root\n");
@@ -142,6 +158,10 @@ int main() {
         printf("FAIL: 'mouse0' not found in 'input'\n");
         return 1;
     }
+    if (mouse_node->atime != mock_now || mouse_node->mtime != mock_now || mouse_node->ctime != mock_boot) {
+        printf("FAIL: 'mouse0' timestamps incorrect\n");
+        return 1;
+    }
     printf("PASS: Character device 'input/mouse0' found\n");
 
     if (devfs_register_alias("by-id/test-mouse", "/dev/input/mouse0") != 0) {
@@ -158,6 +178,10 @@ int main() {
     int linklen = alias->node->readlink(alias->node, linkbuf, sizeof(linkbuf));
     if (linklen <= 0 || strncmp(linkbuf, "/dev/input/mouse0", (size_t)linklen) != 0) {
         printf("FAIL: alias target incorrect\n");
+        return 1;
+    }
+    if (alias->node->atime != mock_now || alias->node->mtime != mock_now || alias->node->ctime != mock_boot) {
+        printf("FAIL: alias timestamps incorrect\n");
         return 1;
     }
     printf("PASS: Alias /dev/by-id/test-mouse points to /dev/input/mouse0\n");

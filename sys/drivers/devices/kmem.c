@@ -98,8 +98,13 @@ static size_t kmem_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buf
         return (size_t)-EPERM;
     }
 
-    /* 3. Address Validation (Sanity) */
-    /* We don't strictly validate KVA ranges here, relying on hardware faults (caught by copyout) */
+    /* 3. Address Validation */
+    uintptr_t kva_start = (uintptr_t)offset;
+    uintptr_t kva_end = kva_start + size;
+    /* Reject if: outside kernel space, or wraps around */
+    if (kva_start < 0xC0000000 || kva_end < kva_start || size == 0) {
+        return (size_t)-EFAULT;
+    }
 
     /* 4. Perform Copy */
     /*
@@ -109,10 +114,8 @@ static size_t kmem_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buf
      */
     void *kva = (void *)(uintptr_t)offset;
 
-    /* copyout returns 0 on success, -1 on fault */
-    if (copyout(kva, buffer, size) != 0) {
-        return (size_t)-EFAULT;
-    }
+    /* buffer is a kernel pointer here (sys_read double-buffers via IO_CHUNK_SIZE) */
+    memcpy(buffer, kva, size);
 
     return size;
 }
@@ -134,7 +137,14 @@ static size_t kmem_write(fs_node_t *node, off_t offset, size_t size, const uint8
         return (size_t)-EPERM;
     }
 
-    /* 3. Perform Copy */
+    /* 3. Address Validation */
+    uintptr_t kva_start = (uintptr_t)offset;
+    uintptr_t kva_end = kva_start + size;
+    if (kva_start < 0xC0000000 || kva_end < kva_start || size == 0) {
+        return (size_t)-EFAULT;
+    }
+
+    /* 4. Perform Copy */
     /*
      * copyin(src, dst, size)
      * src = User Buffer (buffer)
@@ -142,11 +152,8 @@ static size_t kmem_write(fs_node_t *node, off_t offset, size_t size, const uint8
      */
     void *kva = (void *)(uintptr_t)offset;
 
-    /* copyin returns 0 on success, -1 on fault */
-    /* Note: casting const away is necessary for copyin prototype but we are reading from it */
-    if (copyin(buffer, kva, size) != 0) {
-        return (size_t)-EFAULT;
-    }
+    /* buffer is a kernel pointer here (sys_write double-buffers via IO_CHUNK_SIZE) */
+    memcpy(kva, (void *)buffer, size);
 
     return size;
 }
@@ -190,7 +197,7 @@ static fs_node_t kmem_node;
  */
 void kmem_dev_init(void) {
     memset(&kmem_node, 0, sizeof(fs_node_t));
-    strcpy(kmem_node.name, "kmem");
+    strlcpy(kmem_node.name, "kmem", sizeof(kmem_node.name));
     kmem_node.flags = FS_CHARDEVICE;
     kmem_node.uid = 0;
     kmem_node.gid = 0;

@@ -62,7 +62,7 @@ void percpu_init_cpu(int cpu_id) {
     
     kprint("PERCPU: Initialized CPU ");
     char buf[16];
-    sprintf(buf, "%d", cpu_id);
+    snprintf(buf, sizeof(buf), "%d", cpu_id);
     kprint(buf);
     kprint("\n");
 }

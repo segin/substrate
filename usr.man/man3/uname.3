@@ -1,0 +1,44 @@
+.TH UNAME 3 "April 2026" "Substrate OS" "Library Functions"
+.SH NAME
+uname \- get name and information about current kernel
+.SH LIBRARY
+Substrate Standard C Library (libc, -lc)
+.SH SYNOPSIS
+.B #include <sys/utsname.h>
+.PP
+.BI "int uname(struct utsname *" buf ");"
+.SH DESCRIPTION
+.BR uname ()
+returns system information in the structure pointed to by
+.IR buf .
+The
+.I utsname
+struct is defined in
+.I <sys/utsname.h>
+and contains the following members:
+.PP
+.nf
+struct utsname {
+    char sysname[256];    /* Operating system name (e.g., "Substrate") */
+    char nodename[256];   /* Name within "some implementation-defined network" */
+    char release[256];    /* Operating system release (e.g., "0.1") */
+    char version[256];    /* Operating system version */
+    char machine[256];    /* Hardware identifier */
+    char domainname[256]; /* NIS or YP domain name */
+};
+.fi
+.PP
+The length of the arrays in a
+.I struct utsname
+is 256. The fields are null-terminated strings.
+.SH RETURN VALUE
+On success, zero is returned. On error, \-1 is returned, and
+.I errno
+is set appropriately.
+.SH ERRORS
+.TP
+.B EFAULT
+.I buf
+is not valid.
+.SH SEE ALSO
+.BR uname (1)

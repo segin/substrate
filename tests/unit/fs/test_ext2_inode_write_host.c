@@ -59,6 +59,7 @@ void uma_zfree(uma_zone_t *zone, void *item) {
     free(item);
 }
 void uma_zone_set_max(uma_zone_t *zone, int max) { (void)zone; (void)max; }
+void uma_zdestroy(uma_zone_t *zone) { free(zone); }
 
 #define vasprintf kernel_vasprintf
 #include <fs/ext2/ext2.c>
@@ -80,7 +81,7 @@ static size_t mock_write(fs_node_t *node, off_t offset, size_t size, const uint8
     return size;
 }
 
-static void run_test_ext2_inode_write(void) {
+static void init_test_fs(ext2_fs_t *fs, fs_node_t *dev_node, ext2_group_desc_t *bgd_table) {
     memset(mock_disk, 0, sizeof(mock_disk));
 
     ext2_superblock_t *sb = (ext2_superblock_t *)(mock_disk + 1024);
@@ -102,27 +103,32 @@ static void run_test_ext2_inode_write(void) {
     uint8_t *bitmap = mock_disk + 3072;
     memset(bitmap, 0xFF, 25);
 
-    ext2_fs_t fs;
-    memset(&fs, 0, sizeof(fs));
+    memset(fs, 0, sizeof(*fs));
+    memset(dev_node, 0, sizeof(*dev_node));
+    dev_node->read = mock_read;
+    dev_node->write = mock_write;
 
-    fs_node_t dev_node;
-    memset(&dev_node, 0, sizeof(dev_node));
-    dev_node.read = mock_read;
-    dev_node.write = mock_write;
-
-    fs.device = &dev_node;
-    fs.sb = *sb;
-    fs.block_size = 1024;
-    fs.group_count = 1;
-    fs.blocks_per_group = BLOCKS_COUNT;
-
-    ext2_group_desc_t bgd_table[1];
     bgd_table[0] = *bgd_disk;
-    fs.bgd = bgd_table;
+    fs->device = dev_node;
+    fs->sb = *sb;
+    fs->block_size = 1024;
+    fs->group_count = 1;
+    fs->blocks_per_group = BLOCKS_COUNT;
+    fs->inodes_per_group = 1024;
+    fs->inode_size = sizeof(ext2_inode_t);
+    fs->bgd = bgd_table;
 
     ext2_block_cache = uma_zcreate("ext2-block", 4096, NULL, NULL, NULL, NULL, 0, 0);
-    fs.active_bg_group = (uint32_t)-1;
-    fs.active_bg_bitmap = uma_zalloc(ext2_block_cache, M_WAITOK);
+    fs->active_bg_group = (uint32_t)-1;
+    fs->active_bg_bitmap = uma_zalloc(ext2_block_cache, M_WAITOK);
+}
+
+static void run_test_ext2_inode_write(void) {
+    ext2_fs_t fs;
+    fs_node_t dev_node;
+    ext2_group_desc_t bgd_table[1];
+
+    init_test_fs(&fs, &dev_node, bgd_table);
 
     ext2_node_t node;
     memset(&node, 0, sizeof(node));
@@ -159,8 +165,39 @@ static void run_test_ext2_inode_write(void) {
     if (memcmp(read_buf + 10, indirect_data, sizeof(indirect_data)) != 0) exit(1);
 }
 
+static void run_test_ext2_chmod_persistence(void) {
+    ext2_fs_t fs;
+    fs_node_t dev_node;
+    ext2_group_desc_t bgd_table[1];
+    ext2_inode_t disk_inode;
+    fs_node_t *node;
+
+    init_test_fs(&fs, &dev_node, bgd_table);
+
+    memset(&disk_inode, 0, sizeof(disk_inode));
+    disk_inode.i_mode = EXT2_S_IFREG | 0644;
+    disk_inode.i_uid = 1000;
+    disk_inode.i_gid = 1000;
+    disk_inode.i_ctime = 111;
+    if (ext2_write_inode(&fs, 1, &disk_inode) != 0) exit(1);
+
+    node = ext2_alloc_node(&fs, 1, &disk_inode);
+    if (node == NULL) exit(1);
+    if (node->chmod == NULL) exit(1);
+
+    node->mask = 0750;
+    node->ctime = 987654321;
+    if (node->chmod(node, node->mask) != 0) exit(1);
+
+    memset(&disk_inode, 0, sizeof(disk_inode));
+    if (ext2_read_inode(&fs, 1, &disk_inode) != 0) exit(1);
+    if ((disk_inode.i_mode & 07777) != 0750) exit(1);
+    if (disk_inode.i_ctime != 987654321U) exit(1);
+}
+
 int main(void) {
     run_test_ext2_inode_write();
+    run_test_ext2_chmod_persistence();
     puts("PASS: test_ext2_inode_write");
     return 0;
 }

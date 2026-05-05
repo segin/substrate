@@ -13,6 +13,13 @@ SECTIONS
 {
     . = 0x5000;
 
+    .boot16 : {
+        KEEP(*(.boot16.entry))
+        *(.boot16 .boot16.*)
+    }
+
+    . = 0x5800;
+
     .text : {
         *(.text.entry)
         *(.text .text.*)

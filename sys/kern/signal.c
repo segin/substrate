@@ -17,8 +17,6 @@
 #include <kern/time.h>
 #include <sys/kern_syscalls.h>
 
-extern thread_t threads[MAX_THREADS];
-
 static void signal_interrupt_thread(thread_t *t) {
     if (!t) {
         return;
@@ -35,12 +33,14 @@ static void signal_stop_process_threads(process_t *p, const char *reason) {
         return;
     }
 
-    for (int i = 0; i < MAX_THREADS; i++) {
-        if (threads[i].tid == -1 || threads[i].proc != p) {
+    for (size_t i = 0; i < sched_thread_slot_count(); i++) {
+        thread_t *thread = sched_thread_slot(i);
+
+        if (!thread || thread->tid == -1 || thread->proc != p) {
             continue;
         }
-        threads[i].state = THREAD_STOPPED;
-        threads[i].wait_reason = reason;
+        thread->state = THREAD_STOPPED;
+        thread->wait_reason = reason;
     }
     p->state = SSTOP;
 }
@@ -50,13 +50,15 @@ static void signal_resume_process_threads(process_t *p) {
         return;
     }
 
-    for (int i = 0; i < MAX_THREADS; i++) {
-        if (threads[i].tid == -1 || threads[i].proc != p) {
+    for (size_t i = 0; i < sched_thread_slot_count(); i++) {
+        thread_t *thread = sched_thread_slot(i);
+
+        if (!thread || thread->tid == -1 || thread->proc != p) {
             continue;
         }
-        if (threads[i].state == THREAD_STOPPED) {
-            threads[i].state = THREAD_READY;
-            threads[i].wait_reason = NULL;
+        if (thread->state == THREAD_STOPPED) {
+            thread->state = THREAD_READY;
+            thread->wait_reason = NULL;
         }
     }
     if (p->state == SSTOP) {
@@ -112,12 +114,62 @@ int kern_sigaction(int sig, const struct sigaction *act, struct sigaction *oact)
 int sys_sigaction(int sig, const void *act, void *oact) {
     struct sigaction kact, koact;
     struct sigaction *p_kact = NULL;
-    
+
     if (act) {
         if (copyin(act, &kact, sizeof(struct sigaction)) != 0) return -14;
         p_kact = &kact;
     }
-    
+
+    /* DEBUG: detect FreeBSD __fail()'s sigaction(SIGABRT, SIG_DFL).
+     * That call signals __stack_chk_fail (or __chk_fail) is being
+     * invoked.  Capture the user-EIP / return-address chain so we can
+     * cross-reference with the binary disasm and find which function
+     * tripped the canary. */
+    if (sig == 6 && p_kact && (uintptr_t)p_kact->sa_handler == 0 &&
+        current_process &&
+        (current_process->perso_id == PERS_FREEBSD ||
+         current_process->perso_id == PERS_NETBSD)) {
+        extern int kprintf(const char *fmt, ...);
+        registers_t *r = current_thread ? (registers_t *)current_thread->syscall_regs : NULL;
+        if (r) {
+            uint32_t *us = (uint32_t *)(uintptr_t)r->useresp;
+            kprintf("[ABORT] pid=%d eip=0x%08x esp=0x%08x ebp=0x%08x\n",
+                    current_process->pid, r->eip, r->useresp, r->ebp);
+            kprintf("[ABORT] stack: %08x %08x %08x %08x %08x %08x %08x %08x\n",
+                    us[0], us[1], us[2], us[3],
+                    us[4], us[5], us[6], us[7]);
+            /* Walk the EBP chain to recover caller frames. */
+            uint32_t fp = r->ebp;
+            uint32_t victim_ebp = 0;
+            for (int d = 0; d < 6 && fp >= 0x08000000 && fp < 0xC0000000; d++) {
+                uint32_t *frame = (uint32_t *)(uintptr_t)fp;
+                kprintf("[ABORT] frame[%d] ebp=0x%08x saved_ebp=0x%08x ret=0x%08x\n",
+                        d, fp, frame[0], frame[1]);
+                if (d == 3) victim_ebp = fp;  /* victim's frame */
+                fp = frame[0];
+            }
+            /* Dump __stack_chk_guard from ls's data segment (its R_386_COPY
+             * landing pad — known address from readelf).  Also dump the
+             * canary slot on the victim's stack frame at -0x10(%ebp). */
+            uint32_t *guard = (uint32_t *)0x409e28u;  /* ls __stack_chk_guard */
+            kprintf("[ABORT] ls __stack_chk_guard@0x409e28 = %08x %08x %08x %08x %08x %08x %08x %08x\n",
+                    guard[0], guard[1], guard[2], guard[3],
+                    guard[4], guard[5], guard[6], guard[7]);
+            if (victim_ebp) {
+                /* Dump a range under victim's ebp — the canary is the
+                 * stash slot that should hold __stack_chk_guard[0].
+                 * For the function at libc 0x84150 it's around -0x18
+                 * but the exact offset depends on the function. */
+                uint32_t *vs = (uint32_t *)(uintptr_t)victim_ebp;
+                kprintf("[ABORT] victim ebp=0x%08x dump:\n", victim_ebp);
+                for (int i = -8; i <= 0; i++) {
+                    kprintf("  ebp%+d (0x%08x) = 0x%08x\n",
+                            i * 4, victim_ebp + i * 4, vs[i]);
+                }
+            }
+        }
+    }
+
     int ret = kern_sigaction(sig, p_kact, oact ? &koact : NULL);
     if (ret == 0 && oact) {
         if (copyout(&koact, oact, sizeof(struct sigaction)) != 0) return -14;
@@ -442,43 +494,47 @@ void psignal(process_t *p, int sig) {
         uint32_t stop_mask = sigmask(SIGSTOP) | sigmask(SIGTSTP) | sigmask(SIGTTIN) | sigmask(SIGTTOU);
         
         // Clear pending stop signals on all threads
-        for (int i = 0; i < MAX_THREADS; i++) {
-            if (threads[i].tid != -1 && threads[i].proc == p) {
-                threads[i].sig_pending &= ~stop_mask;
+        for (size_t i = 0; i < sched_thread_slot_count(); i++) {
+            thread_t *thread = sched_thread_slot(i);
+            if (thread && thread->tid != -1 && thread->proc == p) {
+                thread->sig_pending &= ~stop_mask;
             }
         }
 
         if (p->state == SSTOP) {
             signal_resume_process_threads(p);
             p->p_flag |= P_CONTINUED;
+            p->p_flag &= (uint16_t)~P_WAITED;
             /* Notify parent if not SA_NOCLDSTOP */
-            if (p->p_parent && 
+            if (p->p_parent &&
                 !(p->p_parent->sig_actions[SIGCHLD-1].sa_flags & SA_NOCLDSTOP)) {
                 psignal(p->p_parent, SIGCHLD);
+            }
+            if (p->p_parent) {
+                sched_wakeup(&p->p_parent->p_children);
             }
         }
     }
 
     /* For SIGSTOP/SIGTSTP/SIGTTIN/SIGTTOU, clear SIGCONT */
     if (sig == SIGSTOP || sig == SIGTSTP || sig == SIGTTIN || sig == SIGTTOU) {
-        for (int i = 0; i < MAX_THREADS; i++) {
-            if (threads[i].tid != -1 && threads[i].proc == p) {
-                threads[i].sig_pending &= ~sigmask(SIGCONT);
+        for (size_t i = 0; i < sched_thread_slot_count(); i++) {
+            thread_t *thread = sched_thread_slot(i);
+            if (thread && thread->tid != -1 && thread->proc == p) {
+                thread->sig_pending &= ~sigmask(SIGCONT);
             }
         }
     }
 
     /* Select best thread for delivery and set pending on all threads */
-    extern thread_t threads[MAX_THREADS];
     uint32_t sig_mask = sigmask(sig);
     
     thread_t *best_thread = NULL;
     int best_priority = -1; // Higher is better
     
-    for (int i = 0; i < MAX_THREADS; i++) {
-        if (threads[i].tid == -1 || threads[i].proc != p) continue;
-        
-        thread_t *t = &threads[i];
+    for (size_t i = 0; i < sched_thread_slot_count(); i++) {
+        thread_t *t = sched_thread_slot(i);
+        if (!t || t->tid == -1 || t->proc != p) continue;
         
         /* SIGCONT Special: Wake up stopped threads */
         if (sig == SIGCONT && t->state == THREAD_STOPPED) {
@@ -616,6 +672,7 @@ void sigexit(process_t *p, int sig) {
     
     /* Terminate the process */
     extern void proc_exit(int status);
+    p->p_flag |= P_SIGEXIT;
     p->exit_code = exit_status;
     proc_exit(exit_status);
 }
@@ -668,12 +725,7 @@ int sys_kill(int pid, int sig) {
     if (pid > 0) {
         process_t *target = NULL;
         // Search process list
-        for (int i = 0; i < MAX_PROCS; i++) {
-            if (processes[i].pid == pid) {
-                target = &processes[i];
-                break;
-            }
-        }
+        target = proc_find(pid);
 
         if (!target) return -ESRCH;
         if (!signal_can_send(current_process, target)) {
@@ -703,9 +755,10 @@ int sys_kill(int pid, int sig) {
         // Send to all processes (except Init)
         int permitted = 0;
         int matched = 0;
-        for (int i = 0; i < MAX_PROCS; i++) {
-            if (processes[i].pid > 1) {
-                 signal_record_match(&processes[i], &matched, &permitted, sig);
+        for (size_t i = 0; i < proc_slot_count(); i++) {
+            process_t *proc = proc_slot(i);
+            if (proc && proc->pid > 1) {
+                 signal_record_match(proc, &matched, &permitted, sig);
             }
         }
         if (matched == 0) return -ESRCH;
@@ -803,9 +856,12 @@ void signal_handle_pending(registers_t *regs) {
              signal_stop_process_threads(current_process, "Signal");
              
              // Notify parent if not SA_NOCLDSTOP
-             if (current_process->p_parent && 
+             if (current_process->p_parent &&
                  !(current_process->p_parent->sig_actions[SIGCHLD-1].sa_flags & SA_NOCLDSTOP)) {
                  psignal(current_process->p_parent, SIGCHLD);
+             }
+             if (current_process->p_parent) {
+                 sched_wakeup(&current_process->p_parent->p_children);
              }
              signal_clear_trap_context(current_thread, sig);
              sched_yield();

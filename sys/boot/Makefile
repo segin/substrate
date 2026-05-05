@@ -18,7 +18,7 @@ CFLAGS  = -m32 -ffreestanding -fno-pic -fno-pie -fno-builtin \
 
 LDFLAGS = -m elf_i386 -T stage2.ld --oformat elf32-i386
 
-STAGE2_OBJS = stage2.o
+STAGE2_OBJS = stage2_boot16.o stage2.o
 
 .PHONY: all clean
 
@@ -26,6 +26,9 @@ all: stage1.bin stage2.bin
 
 stage1.bin: stage1.asm
 	$(NASM) -f bin -o $@ $<
+
+stage2_boot16.o: stage2_boot16.S
+	$(CC) $(CFLAGS) -c -o $@ $<
 
 stage2.o: stage2.c stage2.h
 	$(CC) $(CFLAGS) -c -o $@ $<

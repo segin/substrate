@@ -5,8 +5,10 @@ EXTRA_CLEAN += test_ps
 
 .PHONY: test
 
-test_ps: ps_parse.c ps_format.c tests/test_ps.c
-	cc $(TEST_CFLAGS) -o $@ tests/test_ps.c ps_parse.c ps_format.c
+TESTS = $(TOP)/tests/bin/ps
+
+test_ps: ps_parse.c ps_format.c $(TESTS)/test_ps.c
+	cc $(TEST_CFLAGS) -o $@ $(TESTS)/test_ps.c ps_parse.c ps_format.c
 
 test: test_ps
 	./test_ps
@@ -24,4 +26,6 @@ LDADD = -L$(TOP)/lib/sys -lsys
 
 include $(TOP)/Makefile.inc
 include $(TOP)/Makefile.bin.inc
+
+BRAND_CMD =
 endif

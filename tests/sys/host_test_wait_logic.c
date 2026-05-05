@@ -58,6 +58,17 @@ void sched_reap_process_threads(process_t *proc) {
     (void)proc;
 }
 
+size_t sched_thread_slot_count(void) {
+    return MAX_THREADS;
+}
+
+thread_t *sched_thread_slot(size_t index) {
+    if (index >= MAX_THREADS) {
+        return NULL;
+    }
+    return &threads[index];
+}
+
 void vm_map_destroy(vm_map_t *map) {
     (void)map;
     vm_map_destroy_calls++;
@@ -73,12 +84,17 @@ void pmap_release(pmap_t pmap) {
     }
 }
 
+void ldt_free_process(process_t *proc) {
+    (void)proc;
+}
+
 void sched_sleep(void *chan) {
     (void)chan;
     sched_sleep_calls++;
     if (sched_sleep_mode == 0) {
         if (mock_child2.pid == 102 && mock_child2.state == SRUN) {
             mock_child2.state = SZOMB;
+            threads[1].state = THREAD_ZOMBIE;
         }
     } else if (sched_sleep_mode == 1) {
         current_thread->sig_pending = sigmask(SIGUSR1);
@@ -99,6 +115,16 @@ static void setup_mocks(void) {
 
     for (int i = 0; i < MAX_PROCS; i++) processes[i].pid = -1;
     for (int i = 0; i < MAX_THREADS; i++) threads[i].tid = -1;
+
+    threads[0].tid = 1001;
+    threads[0].proc = &mock_child1;
+    threads[0].state = THREAD_ZOMBIE;
+    threads[1].tid = 1002;
+    threads[1].proc = &mock_child2;
+    threads[1].state = THREAD_RUNNING;
+    threads[2].tid = 1003;
+    threads[2].proc = &mock_child3;
+    threads[2].state = THREAD_ZOMBIE;
 
     mock_pg1.pg_id = 100;
     mock_pg2.pg_id = 200;
@@ -203,6 +229,19 @@ static void test_wait_wnohang_and_blocking(void) {
     assert(sched_sleep_calls == 1);
 }
 
+static void test_wait_defers_reap_until_threads_zombie(void) {
+    int status = 0;
+
+    setup_mocks();
+    assert(kern_wait4(101, &status, WNOHANG, NULL) == 101);
+
+    setup_mocks();
+    threads[0].state = THREAD_RUNNING;
+    assert(kern_wait4(101, &status, WNOHANG, NULL) == 0);
+    threads[0].state = THREAD_ZOMBIE;
+    assert(kern_wait4(101, &status, WNOHANG, NULL) == 101);
+}
+
 static void test_wait_job_control_states(void) {
     int status = 0;
 
@@ -220,12 +259,26 @@ static void test_wait_job_control_states(void) {
     assert((mock_child2.p_flag & P_CONTINUED) == 0);
 }
 
+static void test_wait_preserves_signaled_status(void) {
+    int status = 0;
+
+    setup_mocks();
+    mock_child1.exit_code = SIGSEGV | 0x80;
+    mock_child1.p_flag |= P_SIGEXIT;
+    assert(kern_wait4(101, &status, WNOHANG, NULL) == 101);
+    assert(WIFSIGNALED(status));
+    assert(WTERMSIG(status) == SIGSEGV);
+    assert(WCOREDUMP(status));
+}
+
 #include "../../sys/pm/wait.c"
 
 int main(void) {
     test_wait_search_and_reap();
     test_wait_wnohang_and_blocking();
+    test_wait_defers_reap_until_threads_zombie();
     test_wait_job_control_states();
+    test_wait_preserves_signaled_status();
     puts("host_test_wait_logic: PASS");
     return 0;
 }

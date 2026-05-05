@@ -374,6 +374,53 @@ int history(History *h, HistEvent *ev, int op, ...) {
         h->unique = va_arg(ap, int);
         break;
 
+    case H_GETUNIQUE:
+        if (ev) ev->num = h->unique;
+        break;
+
+    case H_DEL: {
+        int target = va_arg(ap, int);
+        struct hist_node *n;
+        for (n = h->head; n; n = n->next) {
+            if (n->num == target) {
+                hist_set_event(ev, n);
+                hist_remove_node(h, n);
+                break;
+            }
+        }
+        if (!n) { va_end(ap); return -1; }
+        break;
+    }
+
+    case H_DELDATA: {
+        int target = va_arg(ap, int);
+        histdata_t *data = va_arg(ap, histdata_t *);
+        struct hist_node *n;
+        if (data) *data = NULL;
+        for (n = h->head; n; n = n->next) {
+            if (n->num == target) {
+                hist_set_event(ev, n);
+                hist_remove_node(h, n);
+                break;
+            }
+        }
+        if (!n) { va_end(ap); return -1; }
+        break;
+    }
+
+    case H_REPLACE: {
+        const char *str = va_arg(ap, const char *);
+        va_arg(ap, histdata_t);
+        char *copy;
+        if (!h->curr || !str) { va_end(ap); return -1; }
+        copy = strdup(str);
+        if (!copy) { va_end(ap); return -1; }
+        free(h->curr->str);
+        h->curr->str = copy;
+        hist_set_event(ev, h->curr);
+        break;
+    }
+
     default:
         va_end(ap);
         return -1;

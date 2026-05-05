@@ -1,3 +1,5 @@
+#define _KERNEL
+
 #include <assert.h>
 #include <setjmp.h>
 #include <stddef.h>
@@ -69,6 +71,7 @@ void pmap_activate(pmap_t pmap) { (void)pmap; }
 void *pmm_alloc_block(void) { return NULL; }
 void pmm_free_block(void *ptr) { (void)ptr; }
 void *pmm_alloc_contiguous(size_t pages) { (void)pages; return NULL; }
+void pmm_free_contiguous(void *ptr, size_t count) { (void)ptr; (void)count; }
 int mutex_release_owned_by_thread(thread_t *owner) { (void)owner; return 0; }
 
 thread_t *sched_create_thread(process_t *proc, void (*entry_point)(void *), void *stack, void *arg) {
@@ -135,15 +138,15 @@ int kern_open(const char *path, int flags, int mode) {
     return 3;
 }
 
-int kern_read(int fd, char *buf, int len) {
+ssize_t kern_read(int fd, char *buf, size_t len) {
     static const unsigned char header[] = {0x7f, 'E', 'L', 'F', 1, 1, 1, 0};
 
     (void)fd;
-    if (len < (int)sizeof(header)) {
+    if (len < sizeof(header)) {
         return -1;
     }
     memcpy(buf, header, sizeof(header));
-    return (int)sizeof(header);
+    return (ssize_t)sizeof(header);
 }
 
 int kern_close(int fd) {
@@ -158,6 +161,28 @@ int kern_close(int fd) {
 void vm_map_destroy(struct vm_map *map) {
     (void)map;
     vm_map_destroy_calls++;
+}
+struct vm_map *vm_map_fork(struct vm_map *src, pmap_t pmap) {
+    (void)src;
+    (void)pmap;
+    return NULL;
+}
+void ldt_init_process(process_t *proc) {
+    if (proc) {
+        proc->ldt = NULL;
+        proc->ldt_entry_count = 0;
+    }
+}
+int ldt_clone_process(process_t *child, const process_t *parent) {
+    (void)child;
+    (void)parent;
+    return 0;
+}
+void ldt_free_process(process_t *proc) { (void)proc; }
+void open_fs(fs_node_t *node, uint8_t read, uint8_t write) {
+    (void)node;
+    (void)read;
+    (void)write;
 }
 
 void pgrp_remove_proc(struct process *proc) {
@@ -238,6 +263,9 @@ int elks_load(int fd, const char *path, char *const argv[], char *const envp[]) 
     (void)envp;
     return -1;
 }
+
+void elks_init_handler(void) {}
+void script_init_handler(void) {}
 
 #include "../../sys/kern/sleepq.c"
 #include "../../sys/pm/process.c"

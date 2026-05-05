@@ -3,7 +3,6 @@
 #include <string.h>
 #include <unistd.h>
 
-#include <sys/proc.h>
 #include <sys/sysinfo.h>
 
 #include "ps_impl.h"
@@ -33,12 +32,12 @@ static void format_time(uint32_t ticks, char *buf, size_t bufsz) {
 
 static const char *state_to_stat(uint8_t state) {
     switch (state) {
-        case SIDL:   return "I";
-        case SRUN:   return "R";
-        case SSLEEP: return "S";
-        case SSTOP:  return "T";
-        case SZOMB:  return "Z";
-        case SDYING: return "X";
+        case SYS_PROC_STATE_IDLE:   return "I";
+        case SYS_PROC_STATE_RUN:    return "R";
+        case SYS_PROC_STATE_SLEEP:  return "S";
+        case SYS_PROC_STATE_STOP:   return "T";
+        case SYS_PROC_STATE_ZOMBIE: return "Z";
+        case SYS_PROC_STATE_DYING:  return "X";
         default:     return "?";
     }
 }
@@ -170,9 +169,9 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    count = sys_proc_list(NULL, 0);
+    count = sys_proc_count();
     if (count < 0) {
-        fprintf(stderr, "ps: sys_proc_list failed\n");
+        fprintf(stderr, "ps: sys_proc_count failed\n");
         return 1;
     }
     if (count == 0) {

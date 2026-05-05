@@ -7,53 +7,63 @@ include ../../Makefile.bin.inc
 
 LDADD = -L$(TOP)/lib/edit -l:libedit.a
 
-$(LIBEDIT_A):
-	$(MAKE) -C $(TOP)/lib/edit clean all NATIVE_BUILD=$(NATIVE_BUILD)
+libedit_target:
+	$(MAKE) -C $(TOP)/lib/edit clean all
 
-$(PROG): $(LIBEDIT_A)
+libedit_host:
+	$(MAKE) -C $(TOP)/lib/edit NATIVE_BUILD=1 clean all
+
+$(PROG): libedit_target
 
 ifndef NATIVE_BUILD
 USER_CFLAGS += -I$(TOP)/sys
 endif
 
-test_lexer: lexer.c util.c shell_var.c tests/test_lexer.c
-	gcc -g -I. -o $@ lexer.c util.c shell_var.c tests/test_lexer.c
+TESTS = ../../tests/bin/sh
 
-test_parser: lexer.c parser.c util.c shell_var.c tests/test_parser.c
-	gcc -g -I. -o $@ lexer.c parser.c util.c shell_var.c tests/test_parser.c
+test_lexer: lexer.c util.c shell_var.c $(TESTS)/test_lexer.c
+	$(HOSTCC) -g -I. -o $@ lexer.c util.c shell_var.c $(TESTS)/test_lexer.c
 
-test_expand: expand.c shell_var.c util.c tests/test_expand.c
-	gcc -g -I. -o $@ expand.c shell_var.c util.c tests/test_expand.c
+test_parser: lexer.c parser.c util.c shell_var.c $(TESTS)/test_parser.c
+	$(HOSTCC) -g -I. -o $@ lexer.c parser.c util.c shell_var.c $(TESTS)/test_parser.c
 
-test_shell_var: shell_var.c util.c tests/test_shell_var.c
-	gcc -g -I. -o $@ shell_var.c util.c tests/test_shell_var.c
+test_expand: expand.c shell_var.c util.c $(TESTS)/test_expand.c
+	$(HOSTCC) -g -I. -o $@ expand.c shell_var.c util.c $(TESTS)/test_expand.c
 
-test_job: job.c tests/test_job.c
-	gcc -g -I. -o $@ job.c tests/test_job.c
+test_shell_var: shell_var.c util.c $(TESTS)/test_shell_var.c
+	$(HOSTCC) -g -I. -o $@ shell_var.c util.c $(TESTS)/test_shell_var.c
 
-test_util: util.c tests/test_util.c
-	gcc -g -I. -o $@ util.c tests/test_util.c
+test_job: job.c $(TESTS)/test_job.c
+	$(HOSTCC) -g -I. -o $@ job.c $(TESTS)/test_job.c
 
-test_exec: exec.c lexer.c parser.c expand.c shell_var.c job.c util.c prompt.c tests/test_exec.c
-	gcc -g -I. -o $@ exec.c lexer.c parser.c expand.c shell_var.c job.c util.c prompt.c tests/test_exec.c
+test_util: util.c $(TESTS)/test_util.c
+	$(HOSTCC) -g -I. -o $@ util.c $(TESTS)/test_util.c
 
-fuzzer: lexer.c parser.c util.c shell_var.c tests/fuzz_parser.c
-	clang -g -fsanitize=fuzzer,address -I. -o $@ lexer.c parser.c util.c shell_var.c tests/fuzz_parser.c
+test_exec: exec.c lexer.c parser.c expand.c shell_var.c job.c util.c prompt.c $(TESTS)/test_exec.c
+	$(HOSTCC) -g -I. -o $@ exec.c lexer.c parser.c expand.c shell_var.c job.c util.c prompt.c $(TESTS)/test_exec.c
 
-fuzz_ps1: prompt.c util.c shell_var.c tests/fuzz_ps1_parser.c
-	clang -g -fsanitize=fuzzer,address -I. -o $@ prompt.c util.c shell_var.c tests/fuzz_ps1_parser.c
+test_exec_property: exec.c lexer.c parser.c expand.c shell_var.c job.c util.c prompt.c $(TESTS)/test_exec_property.c
+	$(HOSTCC) -g -I. -o $@ exec.c lexer.c parser.c expand.c shell_var.c job.c util.c prompt.c $(TESTS)/test_exec_property.c
 
-fuzz_parser: lexer.c parser.c shell_var.c util.c tests/fuzz_parser.c
-	$(CC) -g -I. -o $@ $^
+fuzzer: lexer.c parser.c util.c shell_var.c $(TESTS)/fuzz_parser.c
+	clang -g -fsanitize=fuzzer,address -I. -o $@ lexer.c parser.c util.c shell_var.c $(TESTS)/fuzz_parser.c
 
-fuzz_expand: expand.c lexer.c parser.c shell_var.c util.c tests/fuzz_expand.c
-	clang -g -fsanitize=fuzzer,address -I. -o $@ expand.c lexer.c parser.c shell_var.c util.c tests/fuzz_expand.c
+fuzz_ps1: prompt.c util.c shell_var.c $(TESTS)/fuzz_ps1_parser.c
+	clang -g -fsanitize=fuzzer,address -I. -o $@ prompt.c util.c shell_var.c $(TESTS)/fuzz_ps1_parser.c
 
-sh_host: $(SRCS)
-	$(MAKE) -C $(TOP)/lib/edit NATIVE_BUILD=1 clean all
+fuzz_parser: lexer.c parser.c shell_var.c util.c $(TESTS)/fuzz_parser.c
+	clang -g -fsanitize=fuzzer,address -I. -o $@ $^
+
+fuzz_expand: expand.c lexer.c parser.c shell_var.c util.c $(TESTS)/fuzz_expand.c
+	clang -g -fsanitize=fuzzer,address -I. -o $@ expand.c lexer.c parser.c shell_var.c util.c $(TESTS)/fuzz_expand.c
+
+fuzz_expand_status: expand.c lexer.c parser.c shell_var.c util.c $(TESTS)/fuzz_expand_status.c
+	clang -g -fsanitize=fuzzer,address -I. -o $@ expand.c lexer.c parser.c shell_var.c util.c $(TESTS)/fuzz_expand_status.c
+
+sh_host: $(SRCS) libedit_host
 	$(CC) -g -D_GNU_SOURCE -I. -include $(TOP)/include/histedit.h -o $@ $(SRCS) -L$(TOP)/lib/edit -l:libedit.a
 
-test: all test_lexer test_parser test_expand test_shell_var test_job test_util test_exec test_prompt sh_host
+test: all test_lexer test_parser test_expand test_shell_var test_job test_util test_exec test_exec_property test_prompt sh_host
 	./test_lexer
 	./test_parser
 	./test_expand
@@ -61,8 +71,10 @@ test: all test_lexer test_parser test_expand test_shell_var test_job test_util t
 	./test_job
 	./test_util
 	./test_exec
+	./test_exec_property
 	./test_prompt
-	SH="./sh_host" sh tests/test_prompt_mode.sh
+	SH="./sh_host" sh $(TESTS)/test_prompt_mode.sh
+	SH="./sh_host" sh $(TESTS)/test_regressions.sh
 
-test_prompt: prompt.c util.c shell_var.c tests/test_prompt.c
-	gcc -g -I. -o $@ prompt.c util.c shell_var.c tests/test_prompt.c
+test_prompt: prompt.c util.c shell_var.c $(TESTS)/test_prompt.c
+	$(HOSTCC) -g -I. -o $@ prompt.c util.c shell_var.c $(TESTS)/test_prompt.c

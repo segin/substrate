@@ -2,6 +2,7 @@
 #include <pm/pm.h>
 #include <sys/proc.h>
 #include <sys/tty.h>
+#include <kern/time.h>
 #include <string.h>
 #include <stddef.h>
 #include <vm/vm_kmem.h>
@@ -80,6 +81,19 @@ static struct {
 static struct dirent *devfs_dir_readdir(fs_node_t *node, uint64_t index);
 static fs_node_t *devfs_dir_finddir(fs_node_t *node, char *name);
 
+static void devfs_refresh_timestamps(fs_node_t *node) {
+    time_t now;
+
+    if (!node) {
+        return;
+    }
+
+    now = get_time();
+    node->atime = now;
+    node->mtime = now;
+    node->ctime = get_boot_time();
+}
+
 static devfs_entry_t *devfs_find_child(devfs_entry_t *parent, const char *name) {
     devfs_entry_t *curr;
 
@@ -134,6 +148,7 @@ static fs_node_t *devfs_create_dir_node(const char *name) {
     node->gid = 0;
     node->readdir = &devfs_dir_readdir;
     node->finddir = &devfs_dir_finddir;
+    devfs_refresh_timestamps(node);
     return node;
 }
 
@@ -187,7 +202,10 @@ static fs_node_t *devfs_dir_finddir(fs_node_t *node, char *name) {
     if (!entry) return NULL;
 
     child = devfs_find_child(entry, name);
-    if (child) return child->node;
+    if (child) {
+        devfs_refresh_timestamps(child->node);
+        return child->node;
+    }
 
     return NULL;
 }
@@ -395,6 +413,8 @@ void devfs_register_device(fs_node_t *node) {
         return;
     }
 
+    devfs_refresh_timestamps(node);
+
     /* Queue for replay if devfs tree is not yet initialized */
     if (!root_entry) {
         if (devfs_deferred.count < DEVFS_DEFERRED_MAX) {
@@ -466,6 +486,7 @@ int devfs_register_alias(const char *path, const char *target) {
     node->uid = 0;
     node->gid = 0;
     node->readlink = devfs_symlink_readlink;
+    devfs_refresh_timestamps(node);
 
     if (devfs_add_entry(path, node) != 0) {
         kfree(node, sizeof(*node));
@@ -498,6 +519,7 @@ static fs_node_t *devfs_mount(const char *device, uint32_t flags, void *data) {
     (void)device;
     (void)flags;
     (void)data;
+    devfs_refresh_timestamps(&devfs_root_node);
     return &devfs_root_node;
 }
 
@@ -516,6 +538,7 @@ void devfs_init(void) {
     devfs_root_node.gid = 0;
     devfs_root_node.readdir = &devfs_dir_readdir;
     devfs_root_node.finddir = &devfs_dir_finddir;
+    devfs_refresh_timestamps(&devfs_root_node);
 
     root_entry = kmalloc(sizeof(devfs_entry_t));
     if (root_entry) {

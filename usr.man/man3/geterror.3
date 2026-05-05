@@ -1,0 +1,25 @@
+.TH GETERROR 3 2026-04-06 "Substrate LibC" "Substrate Library Functions"
+.SH NAME
+geterror \- return string describing error number
+.SH SYNOPSIS
+.B #include <string.h>
+.sp
+.BI "char *geterror(int " errnum ");"
+.SH DESCRIPTION
+The
+.BR geterror ()
+function returns a pointer to a string describing the error code passed in
+.IR errnum .
+It is a Substrate compatibility alias for
+.BR strerror (3).
+.SH RETURN VALUE
+The
+.BR geterror ()
+function returns a pointer to a static error description string. If
+.IR errnum
+is unknown, it returns
+.BR "Unknown error" .
+.SH SEE ALSO
+.BR errno (3),
+.BR perror (3),
+.BR strerror (3)

@@ -28,6 +28,7 @@ size_t strspn(const char *s, const char *accept);
 size_t strcspn(const char *s, const char *reject);
 char *strpbrk(const char *s1, const char *s2);
 char *strerror(int errnum);
+char *geterror(int errnum);
 char *strtok_r(char *str, const char *delim, char **saveptr);
 char *strfry(char *string);
 

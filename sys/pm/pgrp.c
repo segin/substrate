@@ -8,6 +8,7 @@
 #include <sys/proc.h>
 #include <sys/session.h>
 #include <sys/lock.h>
+#include <pm/pm.h>
 #include <stddef.h>
 #include <string.h>
 #include <vm/vm_kmem.h>
@@ -268,14 +269,7 @@ int sys_getsid(int pid) {
     if (pid == 0) {
         target = current_process;
     } else {
-        /* Find process by PID */
-        target = NULL;
-        for (int i = 0; i < 16; i++) {
-            if (processes[i].pid == pid) {
-                target = &processes[i];
-                break;
-            }
-        }
+        target = proc_find(pid);
     }
     
     if (!target) return -1; /* ESRCH */
@@ -300,14 +294,7 @@ int sys_getpgid(int pid) {
     if (pid == 0) {
         target = current_process;
     } else {
-        /* Find process by PID */
-        target = NULL;
-        for (int i = 0; i < 16; i++) {
-            if (processes[i].pid == pid) {
-                target = &processes[i];
-                break;
-            }
-        }
+        target = proc_find(pid);
     }
     
     if (!target) return -1; /* ESRCH */
@@ -331,13 +318,7 @@ int sys_setpgid(int pid, int pgid) {
         target = current_process;
         pid = target->pid;
     } else {
-        target = NULL;
-        for (int i = 0; i < 16; i++) {
-            if (processes[i].pid == pid) {
-                target = &processes[i];
-                break;
-            }
-        }
+        target = proc_find(pid);
     }
     
     if (!target) return -1; /* ESRCH */

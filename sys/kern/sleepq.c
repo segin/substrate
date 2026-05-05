@@ -34,9 +34,11 @@ static sleepq_t *sleepq_hash[SLEEPQ_HASH_SIZE];
 static volatile uint32_t sleepq_locks[SLEEPQ_HASH_SIZE];
 
 // Pre-allocated sleep queue pool
-#define SLEEPQ_POOL_SIZE 128
+#define SLEEPQ_POOL_SIZE 256
 static sleepq_t sleepq_pool[SLEEPQ_POOL_SIZE];
 static int sleepq_pool_next = 0;
+/* Free list for recycled sleep queues */
+static sleepq_t *sleepq_free_list = NULL;
 static volatile uint32_t pool_lock = 0;
 
 // Hash function for wait channels
@@ -76,13 +78,29 @@ static sleepq_t *sleepq_alloc(void) {
     }
     
     sleepq_t *sq = NULL;
-    if (sleepq_pool_next < SLEEPQ_POOL_SIZE) {
+    /* Try free list first (recycled entries) */
+    if (sleepq_free_list) {
+        sq = sleepq_free_list;
+        sleepq_free_list = sq->sq_next;
+        memset(sq, 0, sizeof(*sq));
+    } else if (sleepq_pool_next < SLEEPQ_POOL_SIZE) {
         sq = &sleepq_pool[sleepq_pool_next++];
         memset(sq, 0, sizeof(*sq));
     }
     
     __sync_lock_release(&pool_lock);
     return(sq);
+}
+
+// Return a sleep queue to the free list
+static void sleepq_free(sleepq_t *sq) {
+    while (__sync_lock_test_and_set(&pool_lock, 1)) {
+        while (pool_lock)
+            __asm__ volatile("pause");
+    }
+    sq->sq_next = sleepq_free_list;
+    sleepq_free_list = sq;
+    __sync_lock_release(&pool_lock);
 }
 
 // Find sleep queue for a channel (must hold bucket lock)
@@ -155,13 +173,14 @@ static void sleepq_insert(sleepq_t *sq, int hash) {
     sleepq_hash[hash] = sq;
 }
 
-// Remove sleep queue from hash table
+// Remove sleep queue from hash table and recycle
 static void sleepq_remove(sleepq_t *sq, int hash) {
     sleepq_t **pp = &sleepq_hash[hash];
     while (*pp) {
         if (*pp == sq) {
             *pp = sq->sq_next;
             sq->sq_next = NULL;
+            sleepq_free(sq);
             return;
         }
         pp = &(*pp)->sq_next;

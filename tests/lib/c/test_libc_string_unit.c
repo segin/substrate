@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <errno.h>
 #include <assert.h>
 #include <stdint.h>
 #include <stdbool.h>
@@ -31,6 +32,8 @@
 #define strncat libc_strncat
 #undef strcmp
 #define strcmp libc_strcmp
+#undef strcoll
+#define strcoll libc_strcoll
 #undef strncmp
 #define strncmp libc_strncmp
 #undef strchr
@@ -55,6 +58,8 @@
 #define strtok_r libc_strtok_r
 #undef strerror
 #define strerror libc_strerror
+#undef geterror
+#define geterror libc_geterror
 #undef strcasecmp
 #define strcasecmp libc_strcasecmp
 #undef strncasecmp
@@ -79,6 +84,7 @@ size_t libc_strlcpy(char *dest, const char *src, size_t n);
 char *libc_strcat(char *dest, const char *src);
 char *libc_strncat(char *dest, const char *src, size_t n);
 int libc_strcmp(const char *s1, const char *s2);
+int libc_strcoll(const char *s1, const char *s2);
 int libc_strncmp(const char *s1, const char *s2, size_t n);
 char *libc_strchr(const char *s, int c);
 char *libc_strrchr(const char *s, int c);
@@ -91,6 +97,7 @@ char *libc_strtok(char *str, const char *delim);
 char *libc_strpbrk(const char *s1, const char *s2);
 char *libc_strtok_r(char *str, const char *delim, char **saveptr);
 char *libc_strerror(int errnum);
+char *libc_geterror(int errnum);
 int libc_strcasecmp(const char *s1, const char *s2);
 int libc_strncasecmp(const char *s1, const char *s2, size_t n);
 int libc_ffs(int i);
@@ -109,6 +116,7 @@ int libc_ffsll(long long i);
 #undef strcat
 #undef strncat
 #undef strcmp
+#undef strcoll
 #undef strncmp
 #undef strchr
 #undef strrchr
@@ -121,6 +129,7 @@ int libc_ffsll(long long i);
 #undef strpbrk
 #undef strtok_r
 #undef strerror
+#undef geterror
 #undef ffs
 #undef ffsl
 #undef ffsll
@@ -602,6 +611,19 @@ void run_strncpy_tests(void) {
     ASSERT_MEM_EQ(dest, "xxxxxxxxxx", 10, "strncpy zero n");
 }
 
+void run_strerror_tests(void) {
+    printf("Running strerror/geterror tests...\n");
+    ASSERT_STREQ(libc_strerror(0), "Success", "strerror success");
+    ASSERT_STREQ(libc_strerror(ENOENT), "No such file or directory", "strerror ENOENT");
+    ASSERT_STREQ(libc_strerror(EINVAL), "Invalid argument", "strerror EINVAL");
+    ASSERT_STREQ(libc_strerror(123456), "Unknown error", "strerror unknown");
+
+    ASSERT_STREQ(libc_geterror(0), "Success", "geterror success");
+    ASSERT_STREQ(libc_geterror(ENOENT), "No such file or directory", "geterror ENOENT");
+    ASSERT_STREQ(libc_geterror(EINVAL), "Invalid argument", "geterror EINVAL");
+    ASSERT_STREQ(libc_geterror(123456), "Unknown error", "geterror unknown");
+}
+
 void run_strlcpy_tests(void) {
     printf("Running strlcpy tests...\n");
     char dest[20];
@@ -639,6 +661,11 @@ void run_strlcpy_tests(void) {
 
 bool test_libc_strncpy(void) {
     run_strncpy_tests();
+    return true;
+}
+
+bool test_libc_strerror(void) {
+    run_strerror_tests();
     return true;
 }
 
@@ -899,6 +926,40 @@ void run_ffs_tests(void) {
     ASSERT_EQ(libc_ffsll(0x100000000LL), 33, "ffsll(0x100000000)");
 }
 
+void run_strcoll_tests(void) {
+    printf("Running strcoll tests...\n");
+
+    // Equal strings
+    ASSERT_EQ(libc_strcoll("abc", "abc"), 0, "Equal strings");
+    ASSERT_EQ(libc_strcoll("", ""), 0, "Empty strings");
+    ASSERT_EQ(libc_strcoll("a", "a"), 0, "Single character equal");
+
+    // Differing strings
+    ASSERT_TRUE(libc_strcoll("abc", "abd") < 0, "abc < abd");
+    ASSERT_TRUE(libc_strcoll("abd", "abc") > 0, "abd > abc");
+
+    // Different lengths
+    ASSERT_TRUE(libc_strcoll("abc", "ab") > 0, "abc > ab");
+    ASSERT_TRUE(libc_strcoll("ab", "abc") < 0, "ab < abc");
+    ASSERT_TRUE(libc_strcoll("a", "") > 0, "a > empty");
+    ASSERT_TRUE(libc_strcoll("", "a") < 0, "empty < a");
+
+    // Test at different positions
+    ASSERT_TRUE(libc_strcoll("xbc", "abc") > 0, "Different at first byte");
+    ASSERT_TRUE(libc_strcoll("axc", "abc") > 0, "Different at middle byte");
+    ASSERT_TRUE(libc_strcoll("abx", "abc") > 0, "Different at last byte");
+
+    // Sign verification (ensure unsigned char comparison)
+    char s1[] = {(char)0xff, '\0'};
+    char s2[] = {(char)0x7f, '\0'};
+    ASSERT_TRUE(libc_strcoll(s1, s2) > 0, "0xff > 0x7f (unsigned)");
+}
+
+bool test_libc_strcoll(void) {
+    run_strcoll_tests();
+    return true;
+}
+
 bool test_libc_ffs(void) {
     run_ffs_tests();
     return true;
@@ -919,6 +980,7 @@ int main(void) {
     run_strcspn_tests();
     run_strcasecmp_tests();
     run_strncpy_tests();
+    run_strerror_tests();
     run_strncasecmp_tests();
     run_strlcpy_tests();
     run_strchr_tests();
@@ -928,6 +990,7 @@ int main(void) {
     run_strpbrk_tests();
     run_strncmp_tests();
     run_strdup_tests();
+    run_strcoll_tests();
     run_ffs_tests();
     return 0;
 }

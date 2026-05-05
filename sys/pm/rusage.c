@@ -266,31 +266,36 @@ void timeval_add(struct timeval *result, const struct timeval *a,
  *
  * Returns: 0 on success, -EINVAL on invalid who value
  */
-#include <sys/proc.h>
+#include <sys/copy.h>
 
 int
 sys_getrusage(int who, struct rusage *usage)
 {
+    struct rusage kru;
+
     if (!usage || !current_process)
         return -22; /* EINVAL */
 
     switch (who) {
     case RUSAGE_SELF:
-        *usage = current_process->rusage;
+        kru = current_process->rusage;
         break;
 
     case RUSAGE_CHILDREN:
-        *usage = current_process->rusage_children;
+        kru = current_process->rusage_children;
         break;
 
     case RUSAGE_THREAD:
         /* For now, thread rusage is same as process rusage */
-        *usage = current_process->rusage;
+        kru = current_process->rusage;
         break;
 
     default:
         return -22; /* EINVAL */
     }
+
+    if (copyout(&kru, usage, sizeof(struct rusage)) != 0)
+        return -14; /* EFAULT */
 
     return 0;
 }

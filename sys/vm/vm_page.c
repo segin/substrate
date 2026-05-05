@@ -78,13 +78,15 @@ static int vm_page_process_has_live_threads(process_t *proc) {
 		return 0;
 	}
 
-	for (int i = 0; i < MAX_THREADS; i++) {
-		if (threads[i].tid == -1 || threads[i].proc != proc) {
-			continue;
-		}
-		if (threads[i].state != THREAD_ZOMBIE) {
-			return 1;
-		}
+    for (size_t i = 0; i < sched_thread_slot_count(); i++) {
+        thread_t *thread = sched_thread_slot(i);
+
+        if (!thread || thread->tid == -1 || thread->proc != proc) {
+            continue;
+        }
+        if (thread->state != THREAD_ZOMBIE) {
+            return 1;
+        }
 	}
 
 	return 0;
@@ -124,13 +126,13 @@ process_t *vm_page_select_oom_victim(void) {
 	process_t *victim = NULL;
 	uint32_t best_score = 0;
 
-	for (int i = 0; i < MAX_PROCS; i++) {
-		process_t *proc = &processes[i];
-		uint32_t score;
+    for (size_t i = 0; i < proc_slot_count(); i++) {
+        process_t *proc = proc_slot(i);
+        uint32_t score;
 
-		if (proc->pid <= 1) {
-			continue;
-		}
+        if (!proc || proc->pid <= 1) {
+            continue;
+        }
 		if (proc->is_kernel_task) {
 			continue;
 		}
@@ -142,6 +144,12 @@ process_t *vm_page_select_oom_victim(void) {
 		}
 
 		score = vm_page_oom_score(proc);
+
+		/* Re-check process validity after scoring (concurrent exit defense) */
+		if (!proc || proc->pid <= 1 || proc->state == SDYING || proc->state == SZOMB) {
+			continue;
+		}
+
 		if (!victim || score > best_score ||
 		    (score == best_score && proc->pid > victim->pid)) {
 			victim = proc;
@@ -479,11 +487,17 @@ vm_page_t *vm_page_alloc(struct vm_object *object, uint64_t pindex, int req) {
 	vm_page_t *page = vm_phys_alloc_page();
 	if(!page) return(NULL); // OOM
 
-	// Initialize page
+	// Initialize page (clear list pointers to detached state so we can
+	// safely free the page even if it was never linked into an object,
+	// without corrupting that object's pages list).
 	page->object = object;
 	page->pindex = pindex;
 	page->ref_count = 1;
 	page->flags |= PG_BUSY;
+	page->next = NULL;
+	page->prev = NULL;
+	page->obj_next = NULL;
+	page->obj_prev = NULL;
 
 	return(page);
 }

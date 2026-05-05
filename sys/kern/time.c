@@ -67,11 +67,20 @@ static uint64_t timeval_to_ticks(const struct timeval *tv) {
         return 0;
     }
 
+    /* Clamp to prevent overflow: UINT64_MAX / HZ is the max safe tv_sec */
+    if ((uint64_t)tv->tv_sec > UINT64_MAX / HZ) {
+        return UINT64_MAX;
+    }
+
     sec_ticks = (uint64_t)tv->tv_sec * HZ;
     usec_ticks = ((uint64_t)tv->tv_usec * HZ + 999999ULL) / 1000000ULL;
 
     if (sec_ticks == 0 && usec_ticks == 0) {
         return 1;
+    }
+    /* Saturate on overflow */
+    if (sec_ticks > UINT64_MAX - usec_ticks) {
+        return UINT64_MAX;
     }
     return sec_ticks + usec_ticks;
 }
@@ -162,6 +171,10 @@ uint64_t get_ticks(void) {
 
 time_t get_time(void) {
     return boot_time + (ticks / HZ);
+}
+
+time_t get_boot_time(void) {
+    return boot_time;
 }
 
 time_t get_uptime(void) {
@@ -392,9 +405,9 @@ void timer_tick_context(int is_usermode) {
         if ((ticks % HZ) == 0) {
             vt_tick_1hz();
         }
-        for (int i = 0; i < MAX_PROCS; i++) {
-            process_t *p = &processes[i];
-            if (p->pid == -1 || p->is_kernel_task) {
+        for (size_t i = 0; i < proc_slot_count(); i++) {
+            process_t *p = proc_slot(i);
+            if (!p || p->pid == -1 || p->is_kernel_task) {
                 continue;
             }
             proc_timer_fire(p, ITIMER_REAL);

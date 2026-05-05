@@ -1,4 +1,5 @@
 #include <string.h>
+#include <errno.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <stddef.h>
@@ -10,6 +11,12 @@
 #undef strstr
 #undef strpbrk
 #endif
+
+static int
+string_ptr_is_null(const void *ptr)
+{
+    return ptr == NULL;
+}
 
 char *strfry(char *string) {
     if (!string) return NULL;
@@ -188,6 +195,13 @@ size_t strlcpy(char *dst, const char *src, size_t size) {
     return src_len;
 }
 
+size_t strlcat(char *dst, const char *src, size_t size) {
+    size_t dst_len = strnlen(dst, size);
+    if (dst_len == size)
+        return size + strlen(src);
+    return dst_len + strlcpy(dst + dst_len, src, size - dst_len);
+}
+
 char *strcat(char *dest, const char *src) {
     char *ret = dest;
     while (*dest) dest++;
@@ -288,6 +302,11 @@ size_t strnlen(const char *s, size_t maxlen) {
 }
 
 char *strdup(const char *s) {
+    if (string_ptr_is_null(s)) {
+        errno = EINVAL;
+        return NULL;
+    }
+
     size_t len = strlen(s) + 1;
     char *new_s = malloc(len);
     if (new_s) {
@@ -297,6 +316,11 @@ char *strdup(const char *s) {
 }
 
 char *strndup(const char *s, size_t n) {
+    if (string_ptr_is_null(s)) {
+        errno = EINVAL;
+        return NULL;
+    }
+
     size_t len = strnlen(s, n);
     char *new_s = malloc(len + 1);
     if (!new_s) return NULL;
@@ -331,6 +355,10 @@ size_t strcspn(const char *s, const char *reject) {
 }
 
 char *strtok(char *str, const char *delim) {
+    /*
+     * Match the current native libc reality: there is no target TLS bootstrap
+     * yet, so keep strtok's legacy internal state process-global for now.
+     */
     static char *saveptr;
     if (str) saveptr = str;
     else if (!saveptr) return NULL;
@@ -380,9 +408,61 @@ char *strtok_r(char *str, const char *delim, char **saveptr) {
     return token;
 }
 
+static char *lookup_error_string(int errnum) {
+    switch (errnum) {
+    case 0: return "Success";
+    case EPERM: return "Operation not permitted";
+    case ENOENT: return "No such file or directory";
+    case ESRCH: return "No such process";
+    case EINTR: return "Interrupted system call";
+    case EIO: return "I/O error";
+    case ENXIO: return "No such device or address";
+    case E2BIG: return "Argument list too long";
+    case ENOEXEC: return "Exec format error";
+    case EBADF: return "Bad file descriptor";
+    case ECHILD: return "No child processes";
+    case EAGAIN: return "Resource temporarily unavailable";
+    case ENOMEM: return "Out of memory";
+    case EACCES: return "Permission denied";
+    case EFAULT: return "Bad address";
+    case ENOTBLK: return "Block device required";
+    case EBUSY: return "Device or resource busy";
+    case EEXIST: return "File exists";
+    case EXDEV: return "Cross-device link";
+    case ENODEV: return "No such device";
+    case ENOTDIR: return "Not a directory";
+    case EISDIR: return "Is a directory";
+    case EINVAL: return "Invalid argument";
+    case ENFILE: return "File table overflow";
+    case EMFILE: return "Too many open files";
+    case ENOTTY: return "Inappropriate ioctl for device";
+    case ETXTBSY: return "Text file busy";
+    case EFBIG: return "File too large";
+    case ENOSPC: return "No space left on device";
+    case ESPIPE: return "Illegal seek";
+    case EROFS: return "Read-only file system";
+    case EMLINK: return "Too many links";
+    case EPIPE: return "Broken pipe";
+    case EDOM: return "Math argument out of domain";
+    case ERANGE: return "Result too large";
+    case EDEADLK: return "Resource deadlock would occur";
+    case ENOSYS: return "Function not implemented";
+    case ENOTEMPTY: return "Directory not empty";
+    case ENAMETOOLONG: return "File name too long";
+    case EOVERFLOW: return "Value too large for defined data type";
+    case ETIMEDOUT: return "Connection timed out";
+    case EOWNERDEAD: return "Owner died";
+    case ENOTRECOVERABLE: return "State not recoverable";
+    default: return "Unknown error";
+    }
+}
+
 char *strerror(int errnum) {
-    (void)errnum;
-    return "Error";
+    return lookup_error_string(errnum);
+}
+
+char *geterror(int errnum) {
+    return lookup_error_string(errnum);
 }
 int ffs(int i) {
     if (i == 0) return 0;

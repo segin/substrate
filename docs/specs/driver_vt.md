@@ -27,7 +27,7 @@
 - the VGA text `tty_driver->ioctl()` path exposes backend-specific controls for per-VT tab width, cursor visibility, cursor blink, and text blink mode, separate from generic termios handling.
 - the VGA text backend advances cursor blink from the real timer tick path and keeps blink state per VT, so a steady cursor and a blinking cursor are both supported without reusing the text-attribute blink bit.
 - the VGA text backend programs the attribute-controller mode register so blink mode can be toggled on and off, allowing bright backgrounds when blink is disabled.
-- the active VGA text VT uses the CRTC start-address registers for full-screen one-line scroll operations, so normal console scrolls can advance the visible text origin and only repaint the newly exposed line plus the status row.
+- the active VT backends keep scrolling strictly in software within the tty-visible rows; the reserved status row is never part of a hardware scroll region or viewport-pan fast path.
 - `Alt+F1..F12` switches the active VT.
 - `Shift+PageUp` and `Shift+PageDown` enter/exit scrollback and adjust the active VT scrollback view.
 - when scrollback is active, the VGA backend redraws historical lines and hides the hardware cursor.

@@ -1,0 +1,194 @@
+." rm(1)
+.TH RM 1 "April 2026" "Substrate" "User Commands"
+.SH NAME
+rm \- remove files or directories
+.SH SYNOPSIS
+.B rm
+.RI [ OPTION ]... " FILE" ...
+.SH DESCRIPTION
+.B rm
+removes each named
+.IR FILE .
+Regular files, symbolic links, sockets, FIFOs, and device nodes are removed with
+.BR unlinkat (2) .
+Directories are removed only when
+.BR -d
+or
+.BR -r
+is supplied.
+.PP
+Recursive removal uses descriptor-relative traversal.
+Directories are opened with
+.BR openat (2) ,
+inspected with
+.BR fstatat (2) ,
+enumerated through
+.BR fdopendir (3) / readdir (3) ,
+and removed with
+.BR unlinkat (2)
+using
+.BR AT_REMOVEDIR .
+Symbolic links are never followed during recursive traversal.
+.SH OPTIONS
+.TP
+.BR -d , " --dir"
+Remove empty directories.
+.TP
+.BR -f , " --force"
+Ignore nonexistent operands, suppress ordinary error messages, and never prompt.
+.TP
+.B -i
+Prompt before every removal.
+.TP
+.B -I
+Prompt once before removing more than three operands or before any recursive removal.
+.TP
+.BI "--interactive" [ =WHEN ]
+Prompt according to
+.IR WHEN :
+.BR never ,
+.BR once ,
+or
+.BR always .
+With no explicit value,
+.B always
+is used.
+.TP
+.BR -r , " -R , --recursive"
+Remove directories and their contents recursively.
+.TP
+.B --one-file-system
+Do not descend across filesystem boundaries during recursive removal.
+Mount roots outside the starting filesystem are skipped with a warning.
+.TP
+.B --preserve-root
+Refuse recursive removal of
+.BR / .
+This is the default.
+.TP
+.B --no-preserve-root
+Disable the default recursive safeguard for
+.BR / .
+Use with extreme care.
+.TP
+.BR -v , " --verbose"
+Print a line for each file or directory that is removed.
+.TP
+.B --help
+Display usage information and exit.
+.TP
+.B --version
+Display version information and exit.
+.SH SAFETY
+.B rm
+refuses to remove operands whose final path component is
+.B .
+or
+.BR .. .
+.PP
+With recursive removal and the default
+.BR --preserve-root
+policy,
+.B rm
+rejects
+.B /
+with the diagnostic:
+.PP
+.RS
+it is dangerous to operate recursively on '/'
+.RE
+.PP
+The command also warns when a recursive target resolves to the caller's
+.B HOME
+directory.
+.SH INTERACTIVE BEHAVIOR
+Prompts are written to standard error.
+If standard input is not a terminal,
+prompt-driven removals are skipped.
+.PP
+Answers beginning with
+.B y
+or
+.B Y
+confirm removal.
+Any other response declines it.
+.PP
+Write-protected targets and sticky-directory ownership conflicts trigger prompts of the form:
+.PP
+.RS
+rm: remove write-protected file 'path'?
+.RE
+.PP
+Ordinary interactive prompts use the form:
+.PP
+.RS
+rm: remove directory 'path'?
+.RE
+.SH TOCTOU MITIGATION
+Recursive directory traversal keeps the parent directory descriptor open while processing its children.
+Each child is identified relative to that descriptor instead of reconstructing path strings for every step.
+This narrows the race window for symlink swaps and concurrent directory modifications.
+.PP
+When descending into a subdirectory,
+.B rm
+opens it with
+.B O_NOFOLLOW
+so a directory entry that becomes a symbolic link is rejected instead of being followed.
+.SH PERMISSIONS AND IMMUTABLE FAILURES
+Removal still depends on parent-directory permissions and filesystem policy.
+If the filesystem rejects removal with errors such as
+.BR EACCES ,
+.BR EPERM ,
+.BR EBUSY ,
+.BR EROFS ,
+or
+.BR ENOTEMPTY ,
+.B rm
+reports the failure unless
+.B -f
+is active.
+.PP
+Immutable files are not cleared automatically.
+If the filesystem returns
+.B EPERM
+for an immutable target,
+.B rm
+reports that failure and leaves the file unchanged.
+.SH SIGNALS
+.B rm
+handles
+.B SIGINT
+and
+.B SIGTERM
+by stopping further work and exiting nonzero.
+Already completed removals are not rolled back.
+.SH EXIT STATUS
+.TP
+0
+All requested removals succeeded or were skipped by interactive decline.
+.TP
+1
+At least one removal failed.
+.SH EXAMPLES
+.TP
+rm file
+Remove a single file.
+.TP
+rm -r dir
+Remove a directory tree.
+.TP
+rm -d emptydir
+Remove an empty directory.
+.TP
+rm -f missing
+Ignore a missing operand.
+.TP
+rm -v file
+Print a diagnostic while removing a file.
+.SH SEE ALSO
+.BR rmdir (1),
+.BR unlink (2),
+.BR openat (2),
+.BR fstatat (2),
+.BR unlinkat (2),
+.BR fdopendir (3)

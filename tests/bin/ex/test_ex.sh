@@ -204,6 +204,33 @@ run_stdout_with_auxfile_test() {
     rm -f "$file" "$aux_file"
 }
 
+run_stdout_with_path_template_test() {
+    local name="$1"
+    local init_text="$2"
+    local script_template="$3"
+    local expected_template="$4"
+    local file
+    local script
+    local expected
+    local output
+
+    file=$(mktemp)
+    printf "%b" "$init_text" >"$file"
+    script=${script_template//__FILE__/$file}
+    expected=${expected_template//__FILE__/$file}
+    output=$(printf "%b" "$script" | "$EX_BIN" -s "$file" 2>/dev/null || true)
+
+    if [ "$output" != "$expected" ]; then
+        fail "$name"
+        printf 'expected stdout:\n%s\nactual stdout:\n%s\n' "$expected" "$output"
+        rm -f "$file" "$file.recover"
+        return
+    fi
+
+    pass "$name"
+    rm -f "$file" "$file.recover"
+}
+
 run_file_with_auxfile_test() {
     local name="$1"
     local init_text="$2"
@@ -912,6 +939,11 @@ run_file_stderr_status_test "Change updates unnamed register for put" \
     "" \
     "X\none\ntwo\nthree\n"
 
+run_stdout_test "Version command prints banner" \
+    "one\n" \
+    ":version\n:q!\n" \
+    "Substrate vi v0.1"
+
 run_stdout_test "Search address with relative offset" \
     "alpha\nbeta\ngamma\ndelta\n" \
     ":/gamma/-1p\n:q!\n" \
@@ -1214,6 +1246,14 @@ run_recover_test "Preserve and -r recover modified buffer" \
     ":1change\nRECOVERED\n.\n:preserve\n:q!\n" \
     ":1,2p\n:q!\n" \
     "RECOVERED
+two"
+
+run_stdout_with_path_template_test "Recover percent reloads preserved current file" \
+    "one\ntwo\n" \
+    ":1change\nRECOVERED\n.\n:preserve\n:recover %\n:1,2p\n:q!\n" \
+    "File preserved as __FILE__.recover
+\"__FILE__\" recovered, 2 lines
+RECOVERED
 two"
 
 run_file_bytes_test "Write preserves missing trailing newline" \
@@ -1657,6 +1697,18 @@ run_stdout_test "Set autoindent enables autoindent" \
     "one\ntwo\n" \
     ":set autoindent\n:set autoindent?\n:q!\n" \
     "autoindent"
+
+run_stdout_test "Undo restores previous ex change" \
+    "one\ntwo\n" \
+    ":1d\n:undo\n:1,2p\n:q!\n" \
+    "one
+two"
+
+run_stdout_test "Undo with empty history is a no-op" \
+    "one\ntwo\n" \
+    ":undo\n:1,2p\n:q!\n" \
+    "one
+two"
 
 run_stdout_test "Malformed range leaves current line unchanged" \
     "one\ntwo\nthree\n" \

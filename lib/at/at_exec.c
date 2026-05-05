@@ -2,30 +2,40 @@
 #include <unistd.h>
 #include <stdlib.h>
 #include <fcntl.h>
+#include <errno.h>
+#include <string.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <sys/stat.h>
 
 #include <at.h>
 
-extern pid_t setsid(void);
+#define AT_SPOOL_OUT "/var/spool/at/spool"
 
 /* Phase 4.1: runner logic */
+static pid_t
+at_setsid(void) {
+    return (pid_t)syscall(SYS_SETSID);
+}
+
 static int setup_job_environment(const struct batch_submit_request *req) {
     /* Phase 4.2: Restore cwd, umask, retained environment */
     if (req->cwd_snapshot) {
         chdir(req->cwd_snapshot);
     }
     
-    if (req->umask_snapshot) {
-        umask(req->umask_snapshot);
-    }
+    umask(req->umask_snapshot);
 
     /* Set UID/GID */
     setgid(req->submitter_gid);
     setuid(req->submitter_uid);
 
     return 0;
+}
+
+static int ensure_dir(const char *path, mode_t mode) {
+    if (mkdir(path, mode) == 0 || errno == EEXIST) return 0;
+    return -1;
 }
 
 int at_exec_run_job(const struct batch_submit_request *req, const char *job_file_path) {
@@ -36,15 +46,21 @@ int at_exec_run_job(const struct batch_submit_request *req, const char *job_file
 
     if (pid == 0) {
         /* Child process - Phase 4.1: run in separate process group without ctty */
-        setsid();
+        at_setsid();
 
         setup_job_environment(req);
 
         /* Phase 4.3: Stdout/stderr capture.
          * For now, pipe stdout and stderr to a file for the mailer to pick up.
          */
-        char out_path[128];
-        snprintf(out_path, sizeof(out_path), "/var/spool/at/spool/%s.out", "job"); // stubbed ID
+        char out_path[160];
+        const char *job_name = job_file_path;
+        const char *slash = strrchr(job_file_path, '/');
+        if (slash && slash[1] != '\0') job_name = slash + 1;
+
+        ensure_dir("/var/spool/at", 0700);
+        ensure_dir(AT_SPOOL_OUT, 0700);
+        snprintf(out_path, sizeof(out_path), "%s/%s.out", AT_SPOOL_OUT, job_name);
         
         int fd = open(out_path, O_CREAT | O_WRONLY | O_TRUNC, 0600);
         if (fd >= 0) {
@@ -76,5 +92,6 @@ int at_exec_run_job(const struct batch_submit_request *req, const char *job_file
      * execute `mail` command. This is stubbed for now.
      */
      
+    if (!WIFEXITED(status)) return -1;
     return WEXITSTATUS(status);
 }

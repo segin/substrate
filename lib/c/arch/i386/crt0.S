@@ -22,14 +22,14 @@ _start:
 
     # Store envp in environ
     mov %edx, environ
-    
-    push %edx # envp
-    push %ebx # argv
-    push %eax # argc
-    
-    # Align stack?
-    
+    mov %eax, %esi # argc, preserved across __stdio_init
+    mov %edx, %edi # envp, preserved across __stdio_init
+
     call __stdio_init
+
+    push %edi # envp
+    push %ebx # argv
+    push %esi # argc
     call main
     
     # Pass return value to exit

@@ -22,6 +22,28 @@
 #define PROC_WAIT_DEBUG(...) kprintf(__VA_ARGS__)
 #endif
 
+static int wait_threads_all_zombie(process_t *proc) {
+    size_t slots;
+
+    if (!proc) {
+        return 1;
+    }
+
+    slots = sched_thread_slot_count();
+    for (size_t i = 0; i < slots; i++) {
+        thread_t *thread = sched_thread_slot(i);
+
+        if (!thread || thread->tid == -1 || thread->proc != proc) {
+            continue;
+        }
+        if (thread->state != THREAD_ZOMBIE) {
+            return 0;
+        }
+    }
+
+    return 1;
+}
+
 /*
  * find_waitable_child: Search for a child matching the wait criteria.
  * 
@@ -82,9 +104,11 @@ static process_t *find_waitable_child(pid_t pid, process_t *parent, int options,
             
             // Check for zombie (always reported)
             if (child->state == SZOMB) {
-                found = child;
-                reason = 0; // Zombie
-                break;
+                if (wait_threads_all_zombie(child)) {
+                    found = child;
+                    reason = 0; // Zombie
+                    break;
+                }
             }
             
             // Check for stopped (WUNTRACED must be set)
@@ -131,8 +155,13 @@ int kern_wait4(pid_t pid, int *status, int options, struct rusage *rusage) {
             
             switch (reason) {
             case 0: // Zombie - reap it
-                // Return Status (exited: low 7 bits = 0, high 8 bits = exit code)
-                if (status) *status = (target->exit_code << 8);
+                if (status) {
+                    if (target->p_flag & P_SIGEXIT) {
+                        *status = target->exit_code;
+                    } else {
+                        *status = ((target->exit_code & 0xff) << 8);
+                    }
+                }
                 
                 // Handle Rusage - Copy to user buffer and accumulate to parent
                 if (rusage) *rusage = target->rusage;
@@ -184,6 +213,7 @@ int kern_wait4(pid_t pid, int *status, int options, struct rusage *rusage) {
                 target->p_parent = NULL;
                 target->p_sibling = NULL;
                 target->state = 0;
+                target->p_flag = 0;
                 
                 return pid_val;
                 
@@ -221,9 +251,22 @@ int kern_wait4(pid_t pid, int *status, int options, struct rusage *rusage) {
             return -EINTR;
         }
 
-        // Sleep on p_children channel
-        // current_process->p_children address is unique to this process
-        sched_sleep(&cur->p_children);
+        /*
+         * Sleep on p_children channel with a recheck to avoid missed wakeups.
+         * Child exit can race with the gap between the scan above and blocking.
+         */
+        current_thread->wait_chan = &cur->p_children;
+        current_thread->state = THREAD_BLOCKED;
+
+        target = find_waitable_child(pid, cur, options, &any_exists, &reason);
+        if (target || !any_exists ||
+            (current_thread->sig_pending & ~current_thread->sig_mask)) {
+            current_thread->state = THREAD_READY;
+            current_thread->wait_chan = NULL;
+            continue;
+        }
+
+        sched_yield();
     }
 }
 

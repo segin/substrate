@@ -15,6 +15,9 @@
 #include <sys/tty.h>
 #include <sys/vt.h>
 #include <sys/vtio.h>
+#include <sys/copy.h>
+#include <sys/errno.h>
+#include <arch/i386/intr.h>
 #include "fb.h"
 #include "fb_console.h"
 #include "fb_ops.h"
@@ -49,6 +52,17 @@ static unsigned int dirty_ticks = 0;
 static int fb_console_tty_count = 0;
 static vt_state_t *fb_current_vt_ctx = NULL;
 static spinlock_t fb_console_lock = SPINLOCK_INIT("fb_console");
+
+/*
+ * fb_console_lock is also touched from interrupt context (e.g. tty
+ * input echo arriving from the keyboard IRQ flowing through
+ * tty_flip_buffer_push -> echo path).  Process-side acquires must
+ * disable local interrupts so an IRQ can't recurse into the lock on
+ * the same CPU.  Mirror the irq.c pattern: save eflags on entry,
+ * restore on exit.
+ */
+#define FB_LOCK()   uint32_t _fb_flags = intr_disable(); spinlock_acquire(&fb_console_lock)
+#define FB_UNLOCK() do { spinlock_release(&fb_console_lock); intr_restore(_fb_flags); } while (0)
 
 #define FB_CONSOLE_FLUSH_HZ 60U
 
@@ -238,7 +252,7 @@ void fb_console_redraw_active(void) {
         return;
     }
 
-    spinlock_acquire(&fb_console_lock);
+    FB_LOCK();
     view_y_offset = 0;
     if (fb.set_viewport) {
         fb.set_viewport(0, 0);
@@ -255,7 +269,7 @@ void fb_console_redraw_active(void) {
     }
     fb_console_sync_row(vt, vt_get_status_row());
     fb_console_update_cursor_locked(vt);
-    spinlock_release(&fb_console_lock);
+    FB_UNLOCK();
 }
 
 void fb_console_draw_statusline(const char *line, int cols, int row) {
@@ -279,13 +293,13 @@ void fb_console_draw_statusline(const char *line, int cols, int row) {
         return;
     }
 
-    spinlock_acquire(&fb_console_lock);
+    FB_LOCK();
     fb_console_hide_cursor();
     for (col = 0; col < cols; col++) {
         fb_console_draw_cell_at(col, row, (unsigned char)line[col], 0x70, 0);
     }
     fb_console_update_cursor_locked(vt);
-    spinlock_release(&fb_console_lock);
+    FB_UNLOCK();
 }
 
 void fb_console_refresh_statusline(void) {
@@ -299,10 +313,10 @@ void fb_console_refresh_statusline(void) {
         return;
     }
 
-    spinlock_acquire(&fb_console_lock);
+    FB_LOCK();
     fb_console_sync_row(vt, vt_get_status_row());
     fb_console_update_cursor_locked(vt);
-    spinlock_release(&fb_console_lock);
+    FB_UNLOCK();
 }
 
 static void fb_console_store_cell_locked(vt_state_t *vt,
@@ -335,51 +349,9 @@ static void fb_console_fill_row_locked(vt_state_t *vt, int row, char c, uint8_t 
     }
 }
 
-static void fb_console_clear_scanlines(int start_y, int line_count, uint32_t color) {
-    int y;
-    int x;
-
-    if (start_y < 0) {
-        line_count += start_y;
-        start_y = 0;
-    }
-    if (line_count <= 0 || start_y >= (int)fb.virt_height) {
-        return;
-    }
-    if (start_y + line_count > (int)fb.virt_height) {
-        line_count = (int)fb.virt_height - start_y;
-    }
-
-    for (y = start_y; y < start_y + line_count; y++) {
-        for (x = 0; x < (int)fb.width; x++) {
-            fb_putpixel(x, y, color);
-        }
-    }
-}
-
 static int fb_console_smooth_scroll_fullscreen(uint32_t clear_color) {
-    int old_offset;
-    int target_offset;
-    int step;
-
-    if (!fb.scroll || fb.virt_height < fb.height * 2U) {
-        return 0;
-    }
-
-    old_offset = view_y_offset;
-    target_offset = old_offset + FB_FONT_HEIGHT;
-    if (target_offset + (int)fb.height > (int)fb.virt_height) {
-        return 0;
-    }
-
-    fb_console_clear_scanlines(target_offset + (int)fb.height - FB_FONT_HEIGHT,
-                               FB_FONT_HEIGHT, clear_color);
-    for (step = 1; step <= FB_FONT_HEIGHT; step++) {
-        fb.scroll(old_offset + step);
-    }
-    view_y_offset = target_offset;
-    fb_console_mark_dirty(0, view_y_offset, (int)fb.width, (int)fb.height);
-    return 1;
+    (void)clear_color;
+    return 0;
 }
 
 static void fb_console_erase_line_segment_locked(vt_state_t *vt,
@@ -628,35 +600,18 @@ static void fb_cb_putc(char c) {
 }
 
 static void fb_cb_respond(const char *buf, size_t len) {
+    /* Called from inside ansi_process(), which is itself called from
+     * fb_vt_tty_write() under tty->lock (taken in tty_write()).  We
+     * MUST NOT re-acquire that lock — the spinlock_is_held check in
+     * spinlock_acquire panics on recursive acquire, which is exactly
+     * how `cat /dev/urandom` used to crash the kernel via random CSI
+     * sequences.  Instead, append to raw_buf via the canonical
+     * lock-held helper. */
     vt_state_t *vt = fb_current_vt_ctx;
-    struct tty *tty;
-    size_t i;
-
-    if (!vt || !buf || len == 0) {
-        return;
-    }
-
-    tty = vt->tty;
-    if (!tty) {
-        return;
-    }
-
-    spinlock_acquire(&tty->lock);
-    for (i = 0; i < len; i++) {
-        tty_buffer_t *tb = &tty->raw_buf;
-        if (tb->count >= TTY_BUF_SIZE) {
-            break;
-        }
-        tb->data[tb->tail] = buf[i];
-        tb->tail = (tb->tail + 1) % TTY_BUF_SIZE;
-        tb->count++;
-    }
-    spinlock_release(&tty->lock);
-
-    if (i > 0) {
-        sched_wakeup(&tty->read_wait);
-        sched_wakeup(&tty->poll_wait);
-    }
+    if (!vt || !buf || len == 0) return;
+    struct tty *tty = vt->tty;
+    if (!tty) return;
+    (void)tty_inject_input_locked(tty, buf, len);
 }
 
 static void fb_cb_set_color(uint8_t fg, uint8_t bg) {
@@ -1129,9 +1084,9 @@ static int fb_vt_tty_write(struct tty *tty, const unsigned char *buf, int count)
         return -1;
     }
 
-    spinlock_acquire(&fb_console_lock);
+    FB_LOCK();
     fb_console_write_vt_locked(vt, (const char *)buf, (size_t)count);
-    spinlock_release(&fb_console_lock);
+    FB_UNLOCK();
     return count;
 }
 
@@ -1146,46 +1101,63 @@ static int fb_vt_tty_write_room(struct tty *tty) {
 
 static int fb_vt_tty_ioctl(struct tty *tty, uint32_t cmd, unsigned long arg) {
     vt_state_t *vt;
-    int *value;
+    int val;
 
     if (!tty || !arg) {
-        return -1;
+        return -EINVAL;
     }
 
     vt = (vt_state_t *)tty->driver_data;
     if (!vt) {
-        return -1;
+        return -EINVAL;
     }
 
-    value = (int *)(uintptr_t)arg;
     switch (cmd) {
     case VTIOCGTABW:
-        *value = (int)(vt->tab_width ? vt->tab_width : 8);
+        val = (int)(vt->tab_width ? vt->tab_width : 8);
+        if (copyout(&val, (void *)arg, sizeof(int)) != 0) {
+            return -EFAULT;
+        }
         return 0;
     case VTIOCSTABW:
-        if (*value < 1 || *value > 32) {
-            return -1;
+        if (copyin((void *)arg, &val, sizeof(int)) != 0) {
+            return -EFAULT;
         }
-        vt->tab_width = (uint8_t)*value;
+        if (val < 1 || val > 32) {
+            return -EINVAL;
+        }
+        vt->tab_width = (uint8_t)val;
         memset(vt->tab_stops, 0, sizeof(vt->tab_stops));
-        for (int col = *value; col < vt_get_width(); col += *value) {
+        for (int col = (int)vt->tab_width; col < vt_get_width(); col += (int)vt->tab_width) {
             vt->tab_stops[col / 32] |= (uint32_t)1U << (col % 32);
         }
         return 0;
     case VTIOCGCURSOR:
-        *value = vt->cursor_visible ? 1 : 0;
+        val = vt->cursor_visible ? 1 : 0;
+        if (copyout(&val, (void *)arg, sizeof(int)) != 0) {
+            return -EFAULT;
+        }
         return 0;
     case VTIOCSCURSOR:
-        vt->cursor_visible = *value ? 1 : 0;
+        if (copyin((void *)arg, &val, sizeof(int)) != 0) {
+            return -EFAULT;
+        }
+        vt->cursor_visible = val ? 1 : 0;
         if (vt->id == vt_get_active()) {
             fb_console_update_cursor_locked(vt);
         }
         return 0;
     case VTIOCGCURBLINK:
-        *value = vt->cursor_blink ? 1 : 0;
+        val = vt->cursor_blink ? 1 : 0;
+        if (copyout(&val, (void *)arg, sizeof(int)) != 0) {
+            return -EFAULT;
+        }
         return 0;
     case VTIOCSCURBLINK:
-        vt->cursor_blink = *value ? 1 : 0;
+        if (copyin((void *)arg, &val, sizeof(int)) != 0) {
+            return -EFAULT;
+        }
+        vt->cursor_blink = val ? 1 : 0;
         if (!vt->cursor_blink) {
             cursor_blink_phase = 1;
         }
@@ -1194,7 +1166,7 @@ static int fb_vt_tty_ioctl(struct tty *tty, uint32_t cmd, unsigned long arg) {
         }
         return 0;
     default:
-        return -1;
+        return -ENOTTY;
     }
 }
 
@@ -1554,7 +1526,7 @@ static void fb_console_flush_dirty_internal(void) {
 /* ==================== Console Backend ==================== */
 
 static void fb_console_clear(void) {
-    spinlock_acquire(&fb_console_lock);
+    FB_LOCK();
     cursor_drawn = 0;
     cursor_saved_valid = 0;
     cursor_blink_phase = 1;
@@ -1576,7 +1548,7 @@ static void fb_console_clear(void) {
     }
     fb_console_mark_dirty(0, 0, (int)fb.width, (int)fb.height);
     fb_console_show_cursor();
-    spinlock_release(&fb_console_lock);
+    FB_UNLOCK();
 }
 
 static void fb_console_backend_write(const char *data, size_t len) {
@@ -1591,9 +1563,9 @@ static void fb_console_backend_write(const char *data, size_t len) {
         return;
     }
 
-    spinlock_acquire(&fb_console_lock);
+    FB_LOCK();
     fb_console_write_vt_locked(vt, data, len);
-    spinlock_release(&fb_console_lock);
+    FB_UNLOCK();
 }
 
 static console_backend_t fb_console_backend = {
@@ -1661,51 +1633,8 @@ void fb_putc(char c, uint32_t fg, uint32_t bg) {
     if (cursor_y + FB_FONT_HEIGHT > (int)fb.height) {
         if (fb_console_smooth_scroll_fullscreen((bg != FB_COLOR_TRANSPARENT) ? bg : FB_COLOR_BLACK)) {
             cursor_y -= FB_FONT_HEIGHT;
-        } else if (fb.scroll && fb.virt_height >= fb.height * 2) {
-            /* Hardware Scrolling Strategy */
-
-            /* Advance view offset */
-            view_y_offset += FB_FONT_HEIGHT;
-
-            /* Check if we need to wrap around the circular buffer */
-            if (view_y_offset + (int)fb.height > (int)fb.virt_height) {
-                 /*
-                  * Buffer wrap-around strategy:
-                  * When the view offset reaches the end of the virtual buffer, we must
-                  * copy the currently visible content (shifted up by one line) back to
-                  * the top of the buffer (offset 0) to continue scrolling.
-                  */
-
-                 void *dst = fb.addr;
-                 int previous_offset = view_y_offset - FB_FONT_HEIGHT;
-
-                 /* Source is the second line of the previous view */
-                 void *src = (void *)((uintptr_t)fb.addr + (previous_offset + FB_FONT_HEIGHT) * fb.pitch);
-                 size_t size = (fb.height - FB_FONT_HEIGHT) * fb.pitch;
-
-                 optimized_memcpy(dst, src, size);
-                 view_y_offset = 0;
-            }
-
-            /* Clear the new bottom line */
-            uint32_t clear_color = (bg != FB_COLOR_TRANSPARENT) ? bg : FB_COLOR_BLACK;
-            int clear_y = view_y_offset + (fb.height - FB_FONT_HEIGHT);
-
-            /* Fill the new line with background */
-            for (uint32_t y = 0; y < FB_FONT_HEIGHT; y++) {
-                for (uint32_t x = 0; x < fb.width; x++) {
-                    fb_putpixel(x, clear_y + y, clear_color);
-                }
-            }
-
-            /* Commit Scroll */
-            fb.scroll(view_y_offset);
-            fb_console_mark_dirty(0, view_y_offset, (int)fb.width, (int)fb.height);
-
-            cursor_y -= FB_FONT_HEIGHT;
-
         } else {
-            /* Fallback: Software Scroll (optimized memcpy) */
+            /* Software scroll keeps the status row decoupled from the viewport. */
             void *dst = fb.addr;
             void *src = (void *)((uintptr_t)fb.addr + FB_FONT_HEIGHT * fb.pitch);
             size_t size = (fb.height - FB_FONT_HEIGHT) * fb.pitch;
@@ -1822,26 +1751,6 @@ void fb_putc_attr(char c, uint32_t fg, uint32_t bg, uint8_t attr) {
     if (cursor_y + FB_FONT_HEIGHT > (int)fb.height) {
         if (fb_console_smooth_scroll_fullscreen((bg != FB_COLOR_TRANSPARENT) ? bg : FB_COLOR_BLACK)) {
             cursor_y -= FB_FONT_HEIGHT;
-        } else if (fb.scroll && fb.virt_height >= fb.height * 2) {
-            view_y_offset += FB_FONT_HEIGHT;
-            if (view_y_offset + (int)fb.height > (int)fb.virt_height) {
-                void *dst = fb.addr;
-                int previous_offset = view_y_offset - FB_FONT_HEIGHT;
-                void *src = (void *)((uintptr_t)fb.addr + (previous_offset + FB_FONT_HEIGHT) * fb.pitch);
-                size_t size = (fb.height - FB_FONT_HEIGHT) * fb.pitch;
-                optimized_memcpy(dst, src, size);
-                view_y_offset = 0;
-            }
-            uint32_t clear_color = (bg != FB_COLOR_TRANSPARENT) ? bg : FB_COLOR_BLACK;
-            int clear_y = view_y_offset + (fb.height - FB_FONT_HEIGHT);
-            for (uint32_t fy = 0; fy < FB_FONT_HEIGHT; fy++) {
-                for (uint32_t fx = 0; fx < fb.width; fx++) {
-                    fb_putpixel(fx, clear_y + fy, clear_color);
-                }
-            }
-            fb.scroll(view_y_offset);
-            fb_console_mark_dirty(0, view_y_offset, (int)fb.width, (int)fb.height);
-            cursor_y -= FB_FONT_HEIGHT;
         } else {
             void *dst = fb.addr;
             void *src = (void *)((uintptr_t)fb.addr + FB_FONT_HEIGHT * fb.pitch);
@@ -1895,7 +1804,7 @@ void fb_console_tick(void) {
     if (spinlock_is_held(&fb_console_lock)) {
         return;
     }
-    spinlock_acquire(&fb_console_lock);
+    FB_LOCK();
     if (vt && vt->cursor_visible) {
         if (!vt->cursor_blink) {
             cursor_blink_ticks = 0;
@@ -1922,7 +1831,7 @@ void fb_console_tick(void) {
     }
 
     if (!dirty_valid) {
-        spinlock_release(&fb_console_lock);
+        FB_UNLOCK();
         return;
     }
 
@@ -1930,5 +1839,5 @@ void fb_console_tick(void) {
     if (dirty_ticks >= fb_console_flush_period_ticks()) {
         fb_console_flush_dirty_internal();
     }
-    spinlock_release(&fb_console_lock);
+    FB_UNLOCK();
 }

@@ -14,6 +14,8 @@
 #include "util.h"
 #include "parser.h"
 #include <signal.h>
+#include <termios.h>
+#include <errno.h>
 
 int shell_is_interactive = 0;
 int shell_errexit = 0;
@@ -21,40 +23,6 @@ int shell_xtrace = 0;
 int errexit_disabled = 0;
 pid_t shell_pgid;
 struct termios shell_tmodes;
-#include <termios.h>
-
-extern int tcsetpgrp(int fd, pid_t pgrp);
-extern int dup(int oldfd);
-extern int setpgid(pid_t pid, pid_t pgid);
-typedef void (*sig_t)(int);
-extern sig_t signal(int sig, sig_t func);
-
-#ifndef SIG_DFL
-#define SIG_DFL ((sig_t)0)
-#endif
-#ifndef SIG_IGN
-#define SIG_IGN ((sig_t)1)
-#endif
-
-#ifndef SIGINT
-#define SIGINT 2
-#endif
-#ifndef SIGQUIT
-#define SIGQUIT 3
-#endif
-#ifndef SIGTSTP
-#define SIGTSTP 18
-#endif
-#ifndef SIGTTIN
-#define SIGTTIN 21
-#endif
-#ifndef SIGTTOU
-#define SIGTTOU 22
-#endif
-#ifndef SIGCHLD
-#define SIGCHLD 20
-#endif
-#include <errno.h>
 
 /* Forward declarations of builtins */
 static int builtin_exit(int argc, char **argv);
@@ -99,6 +67,19 @@ static char **trap_commands = NULL;
 static volatile sig_atomic_t *pending_traps = NULL;
 static volatile sig_atomic_t trap_pending_any = 0;
 static int runtime_tables_ready = 0;
+
+static void child_exec_report_failure(const char *path) {
+    const char *msg = strerror(errno);
+
+    if (!path) {
+        path = "exec";
+    }
+
+    write(STDERR_FILENO, path, strlen(path));
+    write(STDERR_FILENO, ": ", 2);
+    write(STDERR_FILENO, msg, strlen(msg));
+    write(STDERR_FILENO, "\n", 1);
+}
 
 static void ensure_runtime_tables(void) {
     if (runtime_tables_ready) {
@@ -271,6 +252,13 @@ typedef struct fd_save {
     struct fd_save *next;
 } fd_save_t;
 
+typedef struct temp_assignment {
+    char *name;
+    char *value;
+    int existed;
+    int exported;
+} temp_assignment_t;
+
 static int save_redirections(ast_redirection_t *redir, fd_save_t **out_list) {
     fd_save_t *head = NULL;
     ast_redirection_t *r = redir;
@@ -416,9 +404,31 @@ static int builtin_exit(int argc, char **argv) {
 
 static int builtin_cd(int argc, char **argv) {
     (void)argc;
-    char *path = argv[1];
-    if (!path) path = shell_var_get("HOME");
-    if (!path) path = "/";
+    char *allocated_path = NULL;  /* track memory we need to free */
+    const char *path = argv[1];
+
+    /* cd with no arg: go to $HOME */
+    if (!path) {
+        allocated_path = shell_var_get("HOME");
+        path = allocated_path;
+        if (!path) path = "/";
+    }
+
+    /* cd -: go to $OLDPWD */
+    if (strcmp(path, "-") == 0) {
+        free(allocated_path);
+        allocated_path = shell_var_get("OLDPWD");
+        path = allocated_path;
+        if (!path) {
+            fprintf(stderr, "%s: cd: OLDPWD not set\n", shell_var_get_name());
+            return 1;
+        }
+    }
+
+    /* Save old cwd for OLDPWD before changing */
+    char oldcwd[1024];
+    if (!getcwd(oldcwd, sizeof(oldcwd)))
+        oldcwd[0] = '\0';
 
     /* POSIX: CDPATH handling - only for relative paths not starting with . or .. */
     int is_dot_ref = (path[0] == '.' && (path[1] == '\0' || path[1] == '/' ||
@@ -428,6 +438,7 @@ static int builtin_cd(int argc, char **argv) {
         char *cdpath = shell_var_get("CDPATH");
         if (cdpath && *cdpath) {
             char *cp = strdup(cdpath);
+            free(cdpath);
             char *saveptr;
             char *dir = strtok_r(cp, ":", &saveptr);
             while (dir) {
@@ -437,38 +448,61 @@ static int builtin_cd(int argc, char **argv) {
                     /* POSIX: If found via CDPATH, print the destination */
                     char cwd[1024];
                     if (getcwd(cwd, sizeof(cwd))) printf("%s\n", cwd);
+                    shell_var_set("OLDPWD", oldcwd);
+                    shell_var_set("PWD", cwd);
                     free(cp);
+                    free(allocated_path);
                     return 0;
                 }
                 dir = strtok_r(NULL, ":", &saveptr);
             }
             free(cp);
+        } else {
+            free(cdpath);
         }
     }
 
     if (chdir(path) < 0) {
         perror(path);
+        free(allocated_path);
         return 1;
     }
+
+    /* Update OLDPWD and PWD */
+    shell_var_set("OLDPWD", oldcwd);
+    char newcwd[1024];
+    if (getcwd(newcwd, sizeof(newcwd)))
+        shell_var_set("PWD", newcwd);
+
+    /* cd -: print destination */
+    if (argv[1] && strcmp(argv[1], "-") == 0)
+        printf("%s\n", newcwd);
+
+    free(allocated_path);
     return 0;
 }
 
 static int builtin_export(int argc, char **argv) {
-    if (argc > 1) {
-        char *eq = strchr(argv[1], '=');
+    for (int i = 1; i < argc; i++) {
+        char *eq = strchr(argv[i], '=');
         if (eq) {
-            *eq = 0;
-            shell_var_export(argv[1], eq + 1);
+            *eq = '\0';
+            shell_var_export(argv[i], eq + 1);
+            *eq = '=';
+        } else if (shell_var_exists(argv[i])) {
+            char *value = shell_var_get(argv[i]);
+            shell_var_export(argv[i], value ? value : "");
+            free(value);
         } else {
-            shell_var_export(argv[1], "");
+            shell_var_export(argv[i], "");
         }
     }
     return 0;
 }
 
 static int builtin_unset(int argc, char **argv) {
-    if (argc > 1) {
-        shell_var_unset(argv[1]);
+    for (int i = 1; i < argc; i++) {
+        shell_var_unset(argv[i]);
     }
     return 0;
 }
@@ -495,6 +529,8 @@ static int builtin_set(int argc, char **argv) {
                     }
                     if (strcmp(opt, "promptvars") == 0) {
                         shell_promptvars = 1;
+                        /* Internal state transition: this shell-managed variable is readonly to scripts,
+                         * but the shell itself updates it when prompt mode changes. */
                         shell_var_force_set("SHELL_PROMPT_MODE", "EXTENDED");
                     } else {
                         fprintf(stderr, "%s: set: unknown option %s\n", shell_var_get_name(), opt);
@@ -516,6 +552,8 @@ static int builtin_set(int argc, char **argv) {
                     }
                     if (strcmp(opt, "promptvars") == 0) {
                         shell_promptvars = 0;
+                        /* Internal state transition: this shell-managed variable is readonly to scripts,
+                         * but the shell itself updates it when prompt mode changes. */
                         shell_var_force_set("SHELL_PROMPT_MODE", "POSIX");
                     } else {
                         fprintf(stderr, "%s: set: unknown option %s\n", shell_var_get_name(), opt);
@@ -584,7 +622,8 @@ static int builtin_eval(int argc, char **argv) {
     int status = 0;
     if (argc > 1) {
         size_t total_len = 0;
-        size_t lengths[argc];
+        size_t *lengths = malloc(argc * sizeof(size_t));
+        if (!lengths) return 1;
         for (int i = 1; i < argc; i++) {
             lengths[i] = strlen(argv[i]);
             total_len += lengths[i] + 1;
@@ -601,6 +640,7 @@ static int builtin_eval(int argc, char **argv) {
             status = execute_line(line);
             free(line);
         }
+        free(lengths);
     }
     return status;
 }
@@ -739,12 +779,131 @@ static int builtin_local(int argc, char **argv) {
 }
 
 static int builtin_echo(int argc, char **argv) {
-    for (int i = 1; i < argc; i++) {
+    int newline = 1;
+    int start = 1;
+
+    while (start < argc && argv[start][0] == '-') {
+        int only_n = 1;
+        if (argv[start][1] == '\0') {
+            break;
+        }
+        for (int j = 1; argv[start][j] != '\0'; j++) {
+            if (argv[start][j] != 'n') {
+                only_n = 0;
+                break;
+            }
+        }
+        if (!only_n) {
+            break;
+        }
+        newline = 0;
+        start++;
+    }
+
+    for (int i = start; i < argc; i++) {
         printf("%s%s", argv[i], (i == argc - 1) ? "" : " ");
     }
-    printf("\n");
+    if (newline) {
+        printf("\n");
+    }
     fflush(stdout);
     return 0;
+}
+
+static int test_unary_file(const char *op, const char *path) {
+    struct stat st;
+    if (strcmp(op, "-e") == 0) return stat(path, &st) == 0;
+    if (strcmp(op, "-f") == 0) return stat(path, &st) == 0 && S_ISREG(st.st_mode);
+    if (strcmp(op, "-d") == 0) return stat(path, &st) == 0 && S_ISDIR(st.st_mode);
+    if (strcmp(op, "-r") == 0) return access(path, R_OK) == 0;
+    if (strcmp(op, "-w") == 0) return access(path, W_OK) == 0;
+    if (strcmp(op, "-x") == 0) return access(path, X_OK) == 0;
+    if (strcmp(op, "-s") == 0) return stat(path, &st) == 0 && st.st_size > 0;
+    if (strcmp(op, "-L") == 0 || strcmp(op, "-h") == 0) return lstat(path, &st) == 0 && S_ISLNK(st.st_mode);
+    if (strcmp(op, "-b") == 0) return stat(path, &st) == 0 && S_ISBLK(st.st_mode);
+    if (strcmp(op, "-c") == 0) return stat(path, &st) == 0 && S_ISCHR(st.st_mode);
+    if (strcmp(op, "-p") == 0) return stat(path, &st) == 0 && S_ISFIFO(st.st_mode);
+    if (strcmp(op, "-S") == 0) return stat(path, &st) == 0 && S_ISSOCK(st.st_mode);
+    if (strcmp(op, "-t") == 0) return isatty(atoi(path));
+    return 0;
+}
+
+static int test_primary(int argc, char **argv, int *pos) {
+    if (*pos >= argc) return 0;
+
+    /* ! negation */
+    if (strcmp(argv[*pos], "!") == 0) {
+        (*pos)++;
+        return !test_primary(argc, argv, pos);
+    }
+
+    /* ( expr ) grouping */
+    if (strcmp(argv[*pos], "(") == 0) {
+        (*pos)++;
+        int val = test_primary(argc, argv, pos);
+        if (*pos < argc && strcmp(argv[*pos], ")") == 0) (*pos)++;
+        return val;
+    }
+
+    /* Unary string tests */
+    if (strcmp(argv[*pos], "-z") == 0 && *pos + 1 < argc) {
+        (*pos) += 2;
+        return argv[*pos - 1][0] == '\0';
+    }
+    if (strcmp(argv[*pos], "-n") == 0 && *pos + 1 < argc) {
+        (*pos) += 2;
+        return argv[*pos - 1][0] != '\0';
+    }
+
+    /* Unary file tests */
+    if (argv[*pos][0] == '-' && argv[*pos][1] && !argv[*pos][2] && *pos + 1 < argc) {
+        char *op = argv[*pos];
+        if (strchr("efdrwxsLhbcpSt", op[1])) {
+            (*pos) += 2;
+            return test_unary_file(op, argv[*pos - 1]);
+        }
+    }
+
+    /* Binary operators: check if next token is binary op */
+    if (*pos + 2 < argc) {
+        char *left = argv[*pos];
+        char *op = argv[*pos + 1];
+        char *right = argv[*pos + 2];
+
+        /* String comparisons */
+        if (strcmp(op, "=") == 0) { *pos += 3; return strcmp(left, right) == 0; }
+        if (strcmp(op, "!=") == 0) { *pos += 3; return strcmp(left, right) != 0; }
+
+        /* Integer comparisons */
+        if (strcmp(op, "-eq") == 0) { *pos += 3; return atol(left) == atol(right); }
+        if (strcmp(op, "-ne") == 0) { *pos += 3; return atol(left) != atol(right); }
+        if (strcmp(op, "-lt") == 0) { *pos += 3; return atol(left) < atol(right); }
+        if (strcmp(op, "-le") == 0) { *pos += 3; return atol(left) <= atol(right); }
+        if (strcmp(op, "-gt") == 0) { *pos += 3; return atol(left) > atol(right); }
+        if (strcmp(op, "-ge") == 0) { *pos += 3; return atol(left) >= atol(right); }
+    }
+
+    /* Single string: true if non-empty */
+    (*pos)++;
+    return argv[*pos - 1][0] != '\0';
+}
+
+static int test_and(int argc, char **argv, int *pos) {
+    int val = test_primary(argc, argv, pos);
+    while (*pos < argc && strcmp(argv[*pos], "-a") == 0) {
+        (*pos)++;
+        val = test_primary(argc, argv, pos) && val;
+    }
+    return val;
+}
+
+static int test_or(int argc, char **argv, int *pos) {
+    int val = test_and(argc, argv, pos);
+    while (*pos < argc && strcmp(argv[*pos], "-o") == 0) {
+        (*pos)++;
+        val = test_and(argc, argv, pos) || val;
+    }
+    return val;
 }
 
 static int builtin_test(int argc, char **argv) {
@@ -758,32 +917,11 @@ static int builtin_test(int argc, char **argv) {
         real_argc--;
     }
     
-    /* [ ] or test with no args is false */
     if (real_argc == 1) return 1;
 
-    if (real_argc == 2) {
-        /* [ string ] or test string -> true if string not empty */
-        return (argv[1][0] == '\0');
-    }
-
-    if (real_argc == 3) {
-        if (strcmp(argv[1], "-z") == 0) return (argv[2][0] == '\0') ? 0 : 1;
-        if (strcmp(argv[1], "-n") == 0) return (argv[2][0] != '\0') ? 0 : 1;
-    }
-    
-    if (real_argc == 4) {
-        char *left = argv[1];
-        char *op = argv[2];
-        char *right = argv[3];
-
-        if (strcmp(op, "=") == 0) return strcmp(left, right) != 0;
-        if (strcmp(op, "!=") == 0) return strcmp(left, right) == 0;
-        if (strcmp(op, "-lt") == 0) return (atoi(left) < atoi(right)) ? 0 : 1;
-        if (strcmp(op, "-gt") == 0) return (atoi(left) > atoi(right)) ? 0 : 1;
-        if (strcmp(op, "-eq") == 0) return (atoi(left) == atoi(right)) ? 0 : 1;
-        if (strcmp(op, "-ne") == 0) return (atoi(left) != atoi(right)) ? 0 : 1;
-    }
-    return 1;
+    int pos = 1;
+    int result = test_or(real_argc, argv, &pos);
+    return result ? 0 : 1;
 }
 
 static int builtin_true(int argc, char **argv) {
@@ -802,20 +940,19 @@ static int builtin_source(int argc, char **argv) {
         fprintf(stderr, "%s: %s: %s: No such file or directory\n", shell_var_get_name(), argv[0], argv[1]);
         return 1;
     }
-    fseek(f, 0, SEEK_END);
-    long fsize = ftell(f);
-    fseek(f, 0, SEEK_SET);
-    if (fsize > 0) {
-        char *content = malloc(fsize + 1);
-        if (content) {
-            size_t n = fread(content, 1, fsize, f);
-            content[n] = 0;
-            execute_line(content);
-            free(content);
-        }
+    char *content = read_stream_all(f);
+    int status = 0;
+
+    if (!content && ferror(f)) {
+        fclose(f);
+        return 1;
     }
     fclose(f);
-    return 0;
+    if (content) {
+        status = execute_line(content);
+        free(content);
+    }
+    return status;
 }
 
 static int builtin_break(int argc, char **argv) {
@@ -938,6 +1075,7 @@ static int builtin_command(int argc, char **argv) {
         if (opt_p) {
             char *cur = shell_var_get("PATH");
             saved_path = cur ? strdup(cur) : strdup("");
+            free(cur);
             shell_var_export("PATH", "/bin:/usr/bin");
         }
         char *full = find_in_path(cmd_name);
@@ -960,6 +1098,7 @@ static int builtin_command(int argc, char **argv) {
     if (opt_p) {
         char *cur = shell_var_get("PATH");
         saved_path = cur ? strdup(cur) : strdup("");
+        free(cur);
         shell_var_export("PATH", "/bin:/usr/bin");
     }
 
@@ -984,7 +1123,7 @@ static int builtin_command(int argc, char **argv) {
                 signal(SIGQUIT, SIG_DFL);
                 char **envp = shell_var_get_envp();
                 execve(full, new_argv, envp);
-                perror(new_argv[0]);
+                child_exec_report_failure(new_argv[0]);
                 _exit(126);
             } else if (pid > 0) {
                 int wstatus;
@@ -1068,18 +1207,27 @@ static int builtin_read(int argc, char **argv) {
         return 1;
     }
 
-    char line[4096];
-    if (!fgets(line, sizeof(line), stdin)) return 1;  /* EOF */
+    /* Dynamic line buffer */
+    size_t cap = 4096, len = 0;
+    char *line = malloc(cap);
+    if (!line) return 1;
 
-    /* Remove trailing newline */
-    size_t len = strlen(line);
+    if (!fgets(line, cap, stdin)) { free(line); return 1; }  /* EOF */
+
+    len = strlen(line);
     if (len > 0 && line[len-1] == '\n') line[--len] = '\0';
 
     /* Handle backslash continuation unless -r */
     if (!opt_r) {
         while (len > 0 && line[len-1] == '\\') {
             line[--len] = '\0';
-            if (!fgets(line + len, sizeof(line) - len, stdin)) break;
+            if (len + 4096 >= cap) {
+                cap = len + 4096;
+                char *tmp = realloc(line, cap);
+                if (!tmp) { free(line); return 1; }
+                line = tmp;
+            }
+            if (!fgets(line + len, cap - len, stdin)) break;
             len = strlen(line);
             if (len > 0 && line[len-1] == '\n') line[--len] = '\0';
         }
@@ -1087,7 +1235,7 @@ static int builtin_read(int argc, char **argv) {
 
     /* Split by IFS and assign to variables */
     char *ifs = shell_var_get("IFS");
-    if (!ifs) ifs = " \t\n";
+    if (!ifs) ifs = strdup(" \t\n");
 
     char *saveptr = NULL;
     char *token = strtok_r(line, ifs, &saveptr);
@@ -1095,7 +1243,6 @@ static int builtin_read(int argc, char **argv) {
         if (i == argc - 1) {
             /* Last variable gets rest of line */
             if (token) {
-                char *rest = token;
                 if (saveptr && *saveptr) {
                     /* Reconstruct remaining with original spacing */
                     size_t rest_len = strlen(token) + 1 + strlen(saveptr);
@@ -1104,7 +1251,7 @@ static int builtin_read(int argc, char **argv) {
                     shell_var_set(argv[i], buf);
                     free(buf);
                 } else {
-                    shell_var_set(argv[i], rest);
+                    shell_var_set(argv[i], token);
                 }
             } else {
                 shell_var_set(argv[i], "");
@@ -1114,6 +1261,8 @@ static int builtin_read(int argc, char **argv) {
             token = strtok_r(NULL, ifs, &saveptr);
         }
     }
+    free(ifs);  /* shell_var_get() or strdup'd default — always allocated */
+    free(line);
     return 0;
 }
 
@@ -1298,11 +1447,11 @@ static int apply_redirections(ast_redirection_t *redir) {
     while (redir) {
         int fd;
         char *expanded = NULL;
+        expand_state_t state = {0};
         
         // Expand filename (except for here-docs which use heredoc_content)
         if (redir->type != REDIR_HERE_DOC && redir->filename) {
-            expanded = expand_word(redir->filename);
-            if (!expanded) {
+            if (expand_word_ex(redir->filename, &expanded, &state) != 0 || !expanded) {
                 fprintf(stderr, "%s: expansion failed for redirection\n", shell_var_get_name());
                 return 1;
             }
@@ -1348,7 +1497,13 @@ static int apply_redirections(ast_redirection_t *redir) {
                     int p[2];
                     if (pipe(p) < 0) { perror("pipe"); return 1; }
                     if (redir->heredoc_content) {
-                        char *heredoc_expanded = expand_heredoc(redir->heredoc_content, redir->quoted);
+                        char *heredoc_expanded = NULL;
+                        if (expand_heredoc_ex(redir->heredoc_content, redir->quoted,
+                            &heredoc_expanded, &state) != 0) {
+                            close(p[0]);
+                            close(p[1]);
+                            return 1;
+                        }
                         if (heredoc_expanded) {
                             if (write(p[1], heredoc_expanded, strlen(heredoc_expanded)) < 0) perror("write");
                             free(heredoc_expanded);
@@ -1372,10 +1527,11 @@ static int apply_redirections(ast_redirection_t *redir) {
 static char *find_in_path(const char *cmd) {
     if (strchr(cmd, '/')) return strdup(cmd);
 
-    char *path = shell_var_get("PATH");
-    if (!path) path = "/bin:/usr/bin";
+    char *path_alloc = shell_var_get("PATH");
+    const char *path = path_alloc ? path_alloc : "/bin:/usr/bin";
 
     char *path_copy = strdup(path);
+    free(path_alloc);
     char *dir = strtok(path_copy, ":");
     while (dir) {
         char full_path[1024];
@@ -1423,6 +1579,7 @@ static char **merge_env(char **base_env, int assign_count, char **assignments) {
 
         char *entry = strdup(buf);
         if (found != -1) {
+            free(new_env[found]);
             new_env[found] = entry;
         } else {
             new_env[current_count++] = entry;
@@ -1430,6 +1587,134 @@ static char **merge_env(char **base_env, int assign_count, char **assignments) {
     }
     new_env[current_count] = NULL;
     return new_env;
+}
+
+static void free_assignment_snapshot(temp_assignment_t *saved, int count) {
+    if (!saved) {
+        return;
+    }
+    for (int i = 0; i < count; i++) {
+        free(saved[i].name);
+        free(saved[i].value);
+    }
+    free(saved);
+}
+
+static void restore_temporary_assignments(temp_assignment_t *saved, int count) {
+    if (!saved) {
+        return;
+    }
+    for (int i = count - 1; i >= 0; i--) {
+        if (!saved[i].name) {
+            continue;
+        }
+        if (saved[i].existed) {
+            if (saved[i].exported) {
+                shell_var_export(saved[i].name, saved[i].value ? saved[i].value : "");
+            } else {
+                shell_var_set(saved[i].name, saved[i].value ? saved[i].value : "");
+            }
+        } else {
+            shell_var_unset(saved[i].name);
+        }
+    }
+    free_assignment_snapshot(saved, count);
+}
+
+static int expand_assignment(const char *assignment, char **name_out,
+    char **value_out, expand_state_t *state) {
+    const char *eq = strchr(assignment, '=');
+
+    *name_out = NULL;
+    *value_out = NULL;
+    if (!eq) {
+        return 0;
+    }
+
+    *name_out = sh_strndup(assignment, eq - assignment);
+    if (expand_word_ex(eq + 1, value_out, state) != 0) {
+        free(*name_out);
+        *name_out = NULL;
+        return -1;
+    }
+    return 0;
+}
+
+static int apply_persistent_assignments(ast_simple_command_t *cmd,
+    expand_state_t *state) {
+    for (int i = 0; i < cmd->assign_count; i++) {
+        char *name;
+        char *value;
+
+        if (expand_assignment(cmd->assignments[i], &name, &value, state) != 0) {
+            return state && state->fatal ? state->fatal_status : 1;
+        }
+        if (name) {
+            if (shell_var_is_readonly(name)) {
+                fprintf(stderr, "%s: %s: readonly variable\n",
+                    shell_var_get_name(), name);
+                free(name);
+                free(value);
+                return 1;
+            }
+            shell_var_set(name, value ? value : "");
+        }
+        free(name);
+        free(value);
+    }
+    return 0;
+}
+
+static int begin_temporary_assignments(ast_simple_command_t *cmd,
+    expand_state_t *state, temp_assignment_t **saved_out, int *saved_count_out) {
+    temp_assignment_t *saved;
+
+    *saved_out = NULL;
+    *saved_count_out = 0;
+    if (cmd->assign_count == 0) {
+        return 0;
+    }
+
+    saved = calloc(cmd->assign_count, sizeof(*saved));
+    if (!saved) {
+        return 1;
+    }
+
+    for (int i = 0; i < cmd->assign_count; i++) {
+        char *name;
+        char *value;
+
+        if (expand_assignment(cmd->assignments[i], &name, &value, state) != 0) {
+            restore_temporary_assignments(saved, i);
+            return state && state->fatal ? state->fatal_status : 1;
+        }
+        if (name) {
+            if (shell_var_is_readonly(name)) {
+                fprintf(stderr, "%s: %s: readonly variable\n",
+                    shell_var_get_name(), name);
+                free(name);
+                free(value);
+                restore_temporary_assignments(saved, i);
+                return 1;
+            }
+            saved[i].name = name;
+            saved[i].existed = shell_var_exists(name);
+            saved[i].exported = shell_var_is_exported(name);
+            if (saved[i].existed) {
+                saved[i].value = shell_var_get(name);
+            }
+            if (saved[i].exported) {
+                shell_var_export(name, value ? value : "");
+            } else {
+                shell_var_set(name, value ? value : "");
+            }
+        }
+        free(value);
+    }
+
+    *saved_out = saved;
+    *saved_count_out = cmd->assign_count;
+    return 0;
 }
 
 static int execute_simple_command(ast_simple_command_t *cmd, exec_info_t *info) {
@@ -1447,27 +1732,47 @@ static int execute_simple_command(ast_simple_command_t *cmd, exec_info_t *info) 
             }
         }
 
-        for (int i = 0; i < cmd->assign_count; i++) {
-            char *eq = strchr(cmd->assignments[i], '=');
-            if (eq) {
-                *eq = '\0';
-                char *val = expand_word(eq + 1);
-                shell_var_set(cmd->assignments[i], val ? val : "");
-                if (val) free(val);
-                *eq = '=';
-            }
-        }
+        expand_state_t state = {0};
+        int status = apply_persistent_assignments(cmd, &state);
+
         if (saved_fds) restore_redirections(saved_fds);
+        if (status != 0) {
+            return status;
+        }
+        if (state.saw_cmdsub) {
+            return state.cmdsub_status;
+        }
         return 0;
     }
 
-    char **argv = expand_list(cmd->args);
+    expand_state_t state = {0};
+    char **argv = NULL;
     int argc = 0;
+
+    if (expand_list_ex(cmd->args, &argv, &state) != 0) {
+        return state.fatal_status ? state.fatal_status : 1;
+    }
     while (argv[argc]) argc++;
+
+    if (argc == 0) {
+        int status = apply_persistent_assignments(cmd, &state);
+
+        free(argv);
+        if (status != 0) {
+            return status;
+        }
+        if (state.saw_cmdsub) {
+            return state.cmdsub_status;
+        }
+        return 0;
+    }
 
     /* Builtins */
     int is_exec = (strcmp(argv[0], "exec") == 0);
     int status = -1;
+    temp_assignment_t *saved_assignments = NULL;
+    int saved_assignment_count = 0;
+    function_entry_t *func = functions;
 
     fd_save_t *saved_fds = NULL;
     if (cmd->base.redirections) {
@@ -1487,8 +1792,17 @@ static int execute_simple_command(ast_simple_command_t *cmd, exec_info_t *info) 
         }
     }
 
-    status = handle_builtin(argc, argv);
-    if (status != -1) {
+    if (is_builtin(argv[0])) {
+        status = begin_temporary_assignments(cmd, &state, &saved_assignments,
+            &saved_assignment_count);
+        if (status != 0) {
+            if (saved_fds) restore_redirections(saved_fds);
+            for (int i = 0; argv[i]; i++) free(argv[i]);
+            free(argv);
+            return status;
+        }
+        status = handle_builtin(argc, argv);
+        restore_temporary_assignments(saved_assignments, saved_assignment_count);
         if (saved_fds) restore_redirections(saved_fds);
         for (int i = 0; argv[i]; i++) free(argv[i]);
         free(argv);
@@ -1496,10 +1810,18 @@ static int execute_simple_command(ast_simple_command_t *cmd, exec_info_t *info) 
     }
 
     /* Functions */
-    function_entry_t *func = functions;
     while (func) {
         if (strcmp(func->name, argv[0]) == 0) {
+            status = begin_temporary_assignments(cmd, &state, &saved_assignments,
+                &saved_assignment_count);
+            if (status != 0) {
+                if (saved_fds) restore_redirections(saved_fds);
+                for (int i = 0; argv[i]; i++) free(argv[i]);
+                free(argv);
+                return status;
+            }
             int ret = execute_function(func, argc, argv, info);
+            restore_temporary_assignments(saved_assignments, saved_assignment_count);
             if (saved_fds) restore_redirections(saved_fds);
             for (int i = 0; argv[i]; i++) free(argv[i]);
             free(argv);
@@ -1546,7 +1868,7 @@ static int execute_simple_command(ast_simple_command_t *cmd, exec_info_t *info) 
         }
         char **env = merge_env(shell_var_get_envp(), cmd->assign_count, cmd->assignments);
         execve(full_path, argv, env);
-        perror(argv[0]);
+        child_exec_report_failure(argv[0]);
         _exit(1);
     } else if (pid > 0) {
         job_t *job = info->job;
@@ -1574,7 +1896,8 @@ static int execute_simple_command(ast_simple_command_t *cmd, exec_info_t *info) 
             tcsetattr(STDIN_FILENO, TCSADRAIN, &shell_tmodes);
 
             if (WIFSTOPPED(wait_status)) {
-                job->notified = 0;
+                job_mark_process_status(pid, wait_status);
+                job->notified = 1;
                 printf("\n[%d]+ Stopped\t%s\n", job->id, job->command);
             } else {
                 job_free(job);
@@ -1603,7 +1926,15 @@ static int execute_simple_command(ast_simple_command_t *cmd, exec_info_t *info) 
 
 static int execute_pipeline(ast_pipeline_t *pipe_node, exec_info_t *info) {
     int n = pipe_node->command_count;
-    int pipefds[2 * (n - 1)];
+    int *pipefds = malloc(2 * (n - 1) * sizeof(int));
+    pid_t *pids = malloc(n * sizeof(pid_t));
+    int last_status = 0;
+
+    if (!pipefds || !pids) {
+        free(pipefds);
+        free(pids);
+        return 1;
+    }
 
     /* Create job if interactive and not already in one */
     job_t *job = info->job;
@@ -1617,6 +1948,8 @@ static int execute_pipeline(ast_pipeline_t *pipe_node, exec_info_t *info) {
     for (int i = 0; i < n - 1; i++) {
         if (pipe(pipefds + i * 2) < 0) {
             perror("pipe");
+            free(pipefds);
+            free(pids);
             return 1;
         }
     }
@@ -1626,7 +1959,6 @@ static int execute_pipeline(ast_pipeline_t *pipe_node, exec_info_t *info) {
     child_info.pipeline = 1;
     child_info.job = job;
 
-    pid_t pids[n];
     for (int i = 0; i < n; i++) {
         pids[i] = fork();
         if (pids[i] == 0) {
@@ -1666,6 +1998,8 @@ static int execute_pipeline(ast_pipeline_t *pipe_node, exec_info_t *info) {
             exit(execute_ast(pipe_node->commands[i], &child_info));
         } else if (pids[i] < 0) {
              perror("fork");
+             free(pipefds);
+             free(pids);
              return 1;
         }
         
@@ -1687,12 +2021,17 @@ static int execute_pipeline(ast_pipeline_t *pipe_node, exec_info_t *info) {
         
         if (info->background) {
             printf("[%d] %d %s\n", job->id, (int)job->pgid, job->command);
+            free(pipefds);
+            free(pids);
             return 0;
         }
         
         // Wait for job
         int wait_status;
         wait_status = job_wait(job);
+        last_status = 1;
+        if (WIFEXITED(wait_status)) last_status = WEXITSTATUS(wait_status);
+        else if (WIFSIGNALED(wait_status)) last_status = 128 + WTERMSIG(wait_status);
 
         if (WIFSTOPPED(wait_status)) {
             job->notified = 0;
@@ -1703,10 +2042,12 @@ static int execute_pipeline(ast_pipeline_t *pipe_node, exec_info_t *info) {
         
         tcsetpgrp(STDIN_FILENO, shell_pgid);
         tcsetattr(STDIN_FILENO, TCSADRAIN, &shell_tmodes);
+        free(pipefds);
+        free(pids);
+        return last_status;
     }
     
     /* Non-interactive or not the creator: wait for all children if not background */
-    int last_status = 0;
     if (!info->background) {
         for (int i = 0; i < n; i++) {
             int ws;
@@ -1718,20 +2059,76 @@ static int execute_pipeline(ast_pipeline_t *pipe_node, exec_info_t *info) {
         }
     }
 
+    free(pipefds);
+    free(pids);
     return last_status;
 }
 
 static int execute_binary_op(ast_binary_op_t *bin, exec_info_t *info) {
-    // Handle background execution by passing it down to avoid double-forking
+    /*
+     * A background list needs its own supervising child. Merely tagging the
+     * subtree as "background" suppresses later forks and lets an external
+     * command replace the shell process outright.
+     */
     if (bin->op == OP_BACKGROUND) {
+        job_t *job = job_new();
+        pid_t pid;
+        char pid_buf[32];
+
+        if (!job) {
+            perror("job_new");
+            return 1;
+        }
+        job->command = ast_to_string(bin->left);
+
+        pid = fork();
+        if (pid < 0) {
+            perror("fork");
+            job_free(job);
+            return 1;
+        }
+
+        if (pid == 0) {
+            exec_info_t bg_info = *info;
+
+            /*
+             * The parent created this bookkeeping node for its own jobs list.
+             * In the supervising child it is just an inherited ghost entry,
+             * and keeping it around yields bogus "[n] 0 Done" notifications.
+             */
+            job_free(job);
+            reset_traps();
+            bg_info.background = 1;
+            bg_info.job = NULL;
+            bg_info.subshell = 1;
+
+            if (setpgid(0, 0) < 0 && errno != EACCES) {
+                perror("setpgid");
+                _exit(1);
+            }
+            _exit(execute_ast(bin->left, &bg_info));
+        }
+
+        if (setpgid(pid, pid) < 0 && errno != EACCES) {
+            perror("setpgid");
+        }
+        job->pgid = pid;
+        job_add_process(job, pid, NULL);
+        snprintf(pid_buf, sizeof(pid_buf), "%d", (int)pid);
+        shell_var_set("!", pid_buf);
+
+        if (shell_is_interactive) {
+            printf("[%d] %d %s\n", job->id, (int)pid,
+                   job->command ? job->command : "(unknown)");
+        }
+
         exec_info_t bg_info = *info;
-        bg_info.background = 1;
-        execute_ast(bin->left, &bg_info);
-        
+
         if (bin->right) {
             return execute_ast(bin->right, info);
         }
-        return 0; // Background commands return 0
+        (void)bg_info;
+        return 0;
     }
     
     int left_status;
@@ -1856,14 +2253,17 @@ static int execute_case(ast_case_t *c, exec_info_t *info) {
     
     ast_case_item_t *item = c->items;
     while (item) {
-        char *pattern = expand_word(item->pattern); 
-        if (!pattern) pattern = strdup("");
-        
         int match = 0;
-        if (match_pattern(pattern, word)) {
-             match = 1;
+        for (int i = 0; i < item->pattern_count; i++) {
+            char *pattern = expand_word(item->patterns[i]);
+            if (!pattern) pattern = strdup("");
+            if (match_pattern(pattern, word)) {
+                match = 1;
+                free(pattern);
+                break;
+            }
+            free(pattern);
         }
-        free(pattern);
         
         if (match) {
             status = execute_ast(item->body, info);
@@ -1890,12 +2290,15 @@ static int execute_subshell(ast_subshell_t *sub, exec_info_t *info) {
 
     if (pid == 0) {
         if (must_fork) reset_traps();
+        if (sub->base.redirections && apply_redirections(sub->base.redirections) != 0) {
+            _exit(1);
+        }
         
         /* New context for subshell */
         exec_info_t sub_info = *info;
         sub_info.subshell = 1;
         
-        exit(execute_ast(sub->list, &sub_info));
+        _exit(execute_ast(sub->list, &sub_info));
     } else if (pid > 0) {
         int status;
         waitpid(pid, &status, 0);

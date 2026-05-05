@@ -15,6 +15,7 @@
 #include <vm/vm_page.h>
 #include <vm/vm_swap.h>
 #include <string.h>
+#include <sys/copy.h>
 
 #define PAGE_SIZE 4096
 
@@ -44,8 +45,9 @@ int do_sysinfo(struct sysinfo *info) {
     // Process Count
     // Iterate global process table
     uint16_t procs = 0;
-    for (int i = 0; i < MAX_PROCS; i++) {
-        if (processes[i].pid != -1) {
+    for (size_t i = 0; i < proc_slot_count(); i++) {
+        process_t *proc = proc_slot(i);
+        if (proc && proc->pid != -1) {
             procs++;
         }
     }
@@ -59,25 +61,18 @@ int do_sysinfo(struct sysinfo *info) {
     kinfo.loads[1] = load;
     kinfo.loads[2] = load;
 
-    // Copyout
-    // Using memcpy as placeholder for copyout/copy_to_user
-    // Assumes flat address space or same-context copy.
-    memcpy(info, &kinfo, sizeof(kinfo));
+    // Using copyout to send result to userspace
+    if (copyout(&kinfo, info, sizeof(struct sysinfo)) != 0) return -14; // EFAULT
 
     return 0;
 }
 
 int sys_sysinfo(struct sysinfo *info) {
-    // Check user pointer validity (basic)
-    if ((uintptr_t)info >= 0xC0000000) return -14;
-
     return do_sysinfo(info);
 }
 
 int sys_vm_stats(sys_vmstat_t *stats) {
     if (!stats) return -14; // EFAULT
-    if ((uintptr_t)stats >= 0xC0000000) return -14;
-    if ((uintptr_t)stats + sizeof(sys_vmstat_t) > 0xC0000000) return -14; // EFAULT
 
     sys_vmstat_t kstats;
     memset(&kstats, 0, sizeof(kstats));
@@ -105,6 +100,6 @@ int sys_vm_stats(sys_vmstat_t *stats) {
     kstats.swap_free = swap_free * PAGE_SIZE;
     kstats.swap_cached = 0; // Not tracked separately
 
-    memcpy(stats, &kstats, sizeof(kstats));
+    if (copyout(&kstats, stats, sizeof(sys_vmstat_t)) != 0) return -14; // EFAULT
     return 0;
 }

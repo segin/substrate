@@ -1,26 +1,15 @@
 PROG = ln
-SRCS = ln.c
+SRCS = ln.c ln_options.c ln_path.c ln_backup.c ln_execute.c
 
 include ../../Makefile.inc
+
+USER_CFLAGS += -DLINK_HAVE_SYMLINK=1
 
 ifeq ($(NATIVE_BUILD),1)
 USER_CFLAGS += -idirafter ../../include
 else
 USER_CFLAGS += -I../../include
 endif
-
-LDADD += -L../../usr.lib/link -llink
-
-.PHONY: linklib
-
-linklib:
-	$(MAKE) -C ../../usr.lib/link clean all NATIVE_BUILD=$(NATIVE_BUILD)
-
-# Must come after PROG/SRCS but include before linklib definition won't work,
-# so declare explicit default goal
-.DEFAULT_GOAL := all
-
-$(PROG): linklib
 
 include ../../Makefile.bin.inc
 
@@ -29,10 +18,12 @@ EXTRA_CLEAN += ln_host
 
 .PHONY: test integration
 
-ln_host: ln.c ../../usr.lib/link/liblink.c ../../include/liblink.h
-	$(CC) $(TEST_CFLAGS) -o $@ ln.c ../../usr.lib/link/liblink.c
+ln_host: $(SRCS) ln.h
+	$(CC) $(TEST_CFLAGS) -o $@ $(SRCS)
+
+TESTS = ../../tests/bin/ln
 
 integration: ln_host
-	sh tests/test_integration.sh ./ln_host
+	sh $(TESTS)/test_integration.sh ./ln_host
 
 test: integration

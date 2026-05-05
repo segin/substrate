@@ -361,17 +361,24 @@ struct udf_fs {
     uint32_t partition_length;      /* Partition length in sectors */
     uint32_t logical_block_size;    /* From LVD */
     struct udf_long_ad root_icb;    /* Root directory location */
+
+    /* Space bitmap */
+    uint8_t *space_bitmap;
+    uint32_t space_bitmap_size;
+    uint32_t space_bitmap_sector;
 };
 
 /* Helper functions exposed for write support */
 uint8_t udf_tag_checksum(struct udf_tag *tag);
 uint16_t udf_crc(const uint8_t *data, uint32_t len);
 
-extern struct udf_fs udf_ctx;
-int udf_read_space_bitmap(struct fs_node *dev, uint32_t partition_start, uint32_t bitmap_loc, uint32_t bitmap_len);
-uint32_t udf_alloc_block(void);
-void udf_free_block(uint32_t block);
-int udf_create_fe(struct fs_node *dev, uint32_t block, uint8_t file_type, uint32_t uid, uint32_t gid, uint32_t permissions);
-int udf_add_fid(struct fs_node *dev, struct udf_fe *dir_fe, uint32_t dir_block, const char *name, struct udf_long_ad *icb, uint8_t characteristics);
+int udf_read_space_bitmap(struct udf_fs *fs, uint32_t bitmap_loc, uint32_t bitmap_len);
+uint32_t udf_alloc_block(struct udf_fs *fs);
+void udf_free_block(struct udf_fs *fs, uint32_t block);
+int udf_create_fe(struct udf_fs *fs, uint32_t block, uint8_t file_type, uint32_t uid, uint32_t gid, uint32_t permissions);
+int udf_add_fid(struct udf_fs *fs, struct udf_fe *dir_fe, uint32_t dir_block, const char *name, struct udf_long_ad *icb, uint8_t characteristics);
+int udf_remove_fid(struct udf_fs *fs, struct udf_fe *dir_fe, uint32_t dir_block, const char *name);
+int udf_write_file(struct udf_fs *fs, struct udf_fe *fe, uint32_t fe_block, uint32_t offset, uint32_t size, const uint8_t *data);
+int udf_truncate_file(struct udf_fs *fs, struct udf_fe *fe, uint32_t fe_block, uint64_t new_size);
 
 #endif /* _FS_UDF_UDF_H */

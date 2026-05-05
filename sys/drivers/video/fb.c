@@ -20,6 +20,9 @@
 #include <vm/vm_object.h>
 #include <vm/vm_pager.h>
 #include <kern/resource.h>
+#include <sys/copy.h>
+#include <sys/errno.h>
+#include <vm/vm_kmem.h>
 
 #include <arch/i386/pmap.h>
 
@@ -335,6 +338,13 @@ static video_driver_t *video_drivers = NULL;
  * Examples: "1024x768@32", "640x480", "320x200@8"
  * Returns 0 on success, -1 on parse error.
  */
+/* Sane upper bounds — any real display mode is well under these.
+ * Keeping the cap small means a malicious cmdline can't drive
+ * width*pitch arithmetic into wraparound territory. */
+#define FB_MODE_MAX_WIDTH   16384
+#define FB_MODE_MAX_HEIGHT  16384
+#define FB_MODE_MAX_BPP     64
+
 int fb_parse_vga_mode(const char *arg, uint32_t *width, uint32_t *height, uint32_t *bpp) {
     uint32_t w = 0, h = 0, b = 0;
     const char *p = arg;
@@ -344,6 +354,7 @@ int fb_parse_vga_mode(const char *arg, uint32_t *width, uint32_t *height, uint32
     /* Parse width */
     while (*p >= '0' && *p <= '9') {
         w = w * 10 + (*p - '0');
+        if (w > FB_MODE_MAX_WIDTH) return -1;
         p++;
     }
     if (w == 0 || (*p != 'x' && *p != 'X')) return -1;
@@ -352,6 +363,7 @@ int fb_parse_vga_mode(const char *arg, uint32_t *width, uint32_t *height, uint32
     /* Parse height */
     while (*p >= '0' && *p <= '9') {
         h = h * 10 + (*p - '0');
+        if (h > FB_MODE_MAX_HEIGHT) return -1;
         p++;
     }
     if (h == 0) return -1;
@@ -361,6 +373,7 @@ int fb_parse_vga_mode(const char *arg, uint32_t *width, uint32_t *height, uint32
         p++;
         while (*p >= '0' && *p <= '9') {
             b = b * 10 + (*p - '0');
+            if (b > FB_MODE_MAX_BPP) return -1;
             p++;
         }
         if (b == 0) return -1;
@@ -456,56 +469,76 @@ int video_set_viewport(int x, int y) {
 static int fb_fs_ioctl(fs_node_t *node, uint32_t request, void *arg) {
     (void)node;
     if (request == FBIOGET_VSCREENINFO) {
-        struct fb_var_screeninfo *vi = (struct fb_var_screeninfo *)arg;
-        if (!vi) return -1;
+        struct fb_var_screeninfo vi;
+        if (!arg) return -EINVAL;
 
-        memset(vi, 0, sizeof(struct fb_var_screeninfo));
-        vi->xres = fb.width;
-        vi->yres = fb.height;
-        vi->xres_virtual = fb.virt_width ? fb.virt_width : fb.width;
-        vi->yres_virtual = fb.virt_height ? fb.virt_height : fb.height;
-        vi->bits_per_pixel = fb.bpp;
+        memset(&vi, 0, sizeof(struct fb_var_screeninfo));
+        vi.xres = fb.width;
+        vi.yres = fb.height;
+        vi.xres_virtual = fb.virt_width ? fb.virt_width : fb.width;
+        vi.yres_virtual = fb.virt_height ? fb.virt_height : fb.height;
+        vi.bits_per_pixel = fb.bpp;
 
         fb_set_default_color_layout(&fb);
         if (fb.red_length || fb.green_length || fb.blue_length) {
-            vi->red.offset = fb.red_offset;
-            vi->red.length = fb.red_length;
-            vi->green.offset = fb.green_offset;
-            vi->green.length = fb.green_length;
-            vi->blue.offset = fb.blue_offset;
-            vi->blue.length = fb.blue_length;
+            vi.red.offset = fb.red_offset;
+            vi.red.length = fb.red_length;
+            vi.green.offset = fb.green_offset;
+            vi.green.length = fb.green_length;
+            vi.blue.offset = fb.blue_offset;
+            vi.blue.length = fb.blue_length;
         }
 
+        if (copyout(&vi, arg, sizeof(struct fb_var_screeninfo)) != 0) {
+            return -EFAULT;
+        }
         return 0;
     } else if (request == FBIOGET_VIDEO_MODES) {
-        if (!current_driver || !current_driver->list_modes) return -1;
-        
-        struct video_mode_query *query = (struct video_mode_query *)arg;
-        if (!query) return -1;
+        struct video_mode_query query;
+        if (!arg) return -EINVAL;
+        if (copyin(arg, &query, sizeof(struct video_mode_query)) != 0) {
+            return -EFAULT;
+        }
 
+        if (!current_driver || !current_driver->list_modes) return -ENOTTY;
+        
         int total = current_driver->list_modes(NULL, 0);
 
-        if (query->modes) {
-            current_driver->list_modes(query->modes, query->count);
+        if (query.modes && query.count > 0) {
+            uint32_t to_copy = query.count;
+            if (to_copy > (uint32_t)total) to_copy = (uint32_t)total;
+            
+            struct video_mode_info *kmodes = kmalloc(to_copy * sizeof(struct video_mode_info));
+            if (!kmodes) return -ENOMEM;
+
+            current_driver->list_modes(kmodes, (int)to_copy);
+            if (copyout(kmodes, query.modes, to_copy * sizeof(struct video_mode_info)) != 0) {
+                kfree(kmodes, to_copy * sizeof(struct video_mode_info));
+                return -EFAULT;
+            }
+            kfree(kmodes, to_copy * sizeof(struct video_mode_info));
         }
 
-        query->count = total;
+        query.count = (uint32_t)total;
+        if (copyout(&query, arg, sizeof(struct video_mode_query)) != 0) {
+            return -EFAULT;
+        }
         return 0;
     } else if (request == FBIOPUT_VIDEO_MODE) {
-        if (!current_driver || !current_driver->set_mode) return -1;
-        uint32_t mode_id = (uint32_t)(uintptr_t)arg; /* Mode ID passed directly as arg or pointer? Usually pointer to int. */
-        /* Let's assume pointer to uint32_t */
-        if (!arg) return -1;
-        mode_id = *(uint32_t*)arg;
+        if (!current_driver || !current_driver->set_mode) return -ENOTTY;
+        if (!arg) return -EINVAL;
+
+        uint32_t mode_id;
+        if (copyin(arg, &mode_id, sizeof(uint32_t)) != 0) {
+            return -EFAULT;
+        }
         
         if (current_driver->set_mode(mode_id) == 0) {
-            /* Mode set success, fb info needs refresh? Driver init usually refreshes it. */
-            /* Maybe call init again logic? set_mode should allow updating `fb` global. */
             return 0;
         }
-        return -1;
+        return -EINVAL;
     }
-    return -1;
+    return -ENOTTY;
 }
 
 static void *fb_fs_mmap(fs_node_t *node, void *addr, size_t length, int prot, int flags, off_t offset) {
@@ -515,8 +548,16 @@ static void *fb_fs_mmap(fs_node_t *node, void *addr, size_t length, int prot, in
     size_t aligned_length;
     uint32_t vm_prot = 0;
 
-    uint32_t fb_size = fb.pitch * fb.height;
-    if (offset + length > fb_size) return (void *)-1;
+    /*
+     * Use 64-bit math for the size and the bounds compare; otherwise a
+     * crafted mode (e.g. via `vga=` cmdline) where pitch * height wraps
+     * a uint32_t lets `offset + length > fb_size` admit any window into
+     * physical RAM via /dev/fb0 mmap.
+     */
+    uint64_t fb_size = (uint64_t)fb.pitch * (uint64_t)fb.height;
+    if (offset < 0 || length == 0) return (void *)-1;
+    if ((uint64_t)offset > fb_size) return (void *)-1;
+    if ((uint64_t)length > fb_size - (uint64_t)offset) return (void *)-1;
     if ((offset & 0xFFF) != 0) return (void *)-1;
 
     aligned_length = (length + 0xFFF) & ~0xFFFU;
@@ -564,7 +605,6 @@ void video_register_driver(video_driver_t *drv) {
     if (!drv) return;
     drv->next = video_drivers;
     video_drivers = drv;
-    // kprint("Video: Registered driver: "); kprint(drv->name); kprint("\n");
 }
 
 /* External install functions for drivers (Since we lack constructors) */

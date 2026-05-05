@@ -1,0 +1,57 @@
+.TH MATH 7 "2026-05-03" "Substrate" "Library Functions Manual"
+.SH NAME
+math \- math library overview
+.SH DESCRIPTION
+The math library (\fBlibm\fR, linked with \fB\-lm\fR) provides
+mathematical functions for scientific computation. It implements
+IEEE 754 floating-point arithmetic using Taylor series
+approximations and mathematical identities.
+.SH AVAILABLE FUNCTIONS
+The following categories of functions are available:
+.TP
+.B Trigonometric
+.sin(3),
+.asin(3),
+.tan(3),
+.atan(3),
+.atan2(3)
+.TP
+.B Hyperbolic
+.sinh(3),
+.cosh(3),
+.tanh(3),
+.asinh(3),
+.acosh(3),
+.atanh(3)
+.TP
+.B Exponential and Logarithmic
+.exp(3),
+.exp2(3),
+.expm1(3),
+.log(3),
+.log10(3),
+.log2(3),
+.log1p(3),
+.pow(3),
+.sqrt(3),
+.cbrt(3),
+.hypot(3)
+.TP
+.B Absolute Value and Remainder
+.fabs(3),
+.fmod(3),
+.remainder(3),
+.remquo(3)
+.TP
+.B Rounding and Truncation
+.ceil(3),
+.floor(3),
+.trunc(3),
+.round(3),
+.rint(3),
+.nearbyint(3)
+.TP
+.B Floating-Point Classification
+.fpclassify(3)
+.SH SEE ALSO
+.fpclassify(3)

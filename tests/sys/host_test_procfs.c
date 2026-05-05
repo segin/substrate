@@ -11,6 +11,7 @@
 /* Include mocks first */
 #include <vfs/vfs.h>
 #include <include/sys/proc.h>
+#include <sys/file.h>
 #include <pm/pm.h>
 #include <kern/sched.h>
 #include <exec/perso/personality.h>
@@ -28,6 +29,10 @@ process_t *current_process;
 mutex_t proctree_lock;
 struct mountlist mountlist;
 int kmalloc_should_fail = 0;
+static time_t mock_now = 123456789;
+static time_t mock_boot = 111111111;
+static file_t proc_fd3;
+static file_t proc_fd7;
 
 void *kmalloc(size_t size) {
     if (kmalloc_should_fail) return NULL;
@@ -39,7 +44,8 @@ void kfree(void *ptr, size_t size) {
     free(ptr);
 }
 
-uint32_t get_time(void) { return 123456789; }
+time_t get_time(void) { return mock_now; }
+time_t get_boot_time(void) { return mock_boot; }
 int cmdline_get(const char *key, char *buf, size_t buf_len) {
     if (!key || !buf || buf_len == 0) return -1;
     if (strcmp(key, "root") == 0) {
@@ -135,9 +141,50 @@ static uint32_t mock_cpuinfo_gen(char *buf, size_t size, void *opaque) {
                               "vendor_id\t: TestVendor\n");
 }
 
+static char mock_large_runtime_text[4096];
+static size_t mock_large_runtime_len;
+
+static void init_mock_large_runtime_text(void) {
+    if (mock_large_runtime_len != 0) {
+        return;
+    }
+
+    for (int cpu = 0; cpu < 20; cpu++) {
+        mock_large_runtime_len += (size_t)snprintf(
+            mock_large_runtime_text + mock_large_runtime_len,
+            sizeof(mock_large_runtime_text) - mock_large_runtime_len,
+            "processor\t: %d\n"
+            "vendor_id\t: TestVendor\n"
+            "flags\t\t: fpu sse sse2 ht sse3\n\n",
+            cpu);
+    }
+}
+
+static uint32_t mock_large_runtime_gen(char *buf, size_t size, void *opaque) {
+    size_t copy_len;
+
+    (void)opaque;
+    init_mock_large_runtime_text();
+
+    if (!buf || size == 0) {
+        return (uint32_t)mock_large_runtime_len;
+    }
+
+    copy_len = mock_large_runtime_len;
+    if (copy_len >= size) {
+        copy_len = size - 1;
+    }
+
+    memcpy(buf, mock_large_runtime_text, copy_len);
+    buf[copy_len] = '\0';
+    return (uint32_t)mock_large_runtime_len;
+}
+
 void setup_processes() {
     memset(processes, 0, sizeof(processes));
     for(int i=0; i<MAX_PROCS; i++) processes[i].pid = -1;
+    memset(&proc_fd3, 0, sizeof(proc_fd3));
+    memset(&proc_fd7, 0, sizeof(proc_fd7));
 
     processes[0].pid = 1;
     strcpy(processes[0].comm, "init");
@@ -148,6 +195,16 @@ void setup_processes() {
     strcpy(processes[1].comm, "testproc");
     processes[1].uid = 1000;
     processes[1].gid = 1000;
+    strcpy(processes[1].cwd_path, "/home/testproc");
+    strcpy(processes[1].exec_path, "/bin/testproc");
+
+    strcpy(proc_fd3.f_path, "/lib/vi");
+    proc_fd3.f_type = DTYPE_VNODE;
+    processes[1].fds[3] = &proc_fd3;
+
+    strcpy(proc_fd7.f_path, "pipe:[write]");
+    proc_fd7.f_type = DTYPE_PIPE;
+    processes[1].fds[7] = &proc_fd7;
 
     current_process = &processes[0];
 }
@@ -182,9 +239,13 @@ void setup_mounts(void) {
 
 void test_procfs_finddir_static(void) {
     printf("Test: procfs_finddir static entries...\n");
+    mock_now = 123456800;
     fs_node_t *node = procfs_finddir(NULL, "cpuinfo");
     assert(node != NULL);
     assert(strcmp(node->name, "cpuinfo") == 0);
+    assert(node->atime == mock_now);
+    assert(node->mtime == mock_now);
+    assert(node->ctime == mock_boot);
     if (node->close) node->close(node);
 
     node = procfs_finddir(NULL, "meminfo");
@@ -219,6 +280,9 @@ void test_procfs_finddir_static(void) {
     assert(node != NULL);
     assert(strcmp(node->name, "self") == 0);
     assert(node->flags == FS_SYMLINK);
+    assert(node->atime == mock_now);
+    assert(node->mtime == mock_now);
+    assert(node->ctime == mock_boot);
     if (node->close) node->close(node);
 
     node = procfs_finddir(NULL, "nonexistent");
@@ -302,12 +366,16 @@ void test_procfs_self_dynamic_target(void) {
 
 void test_procfs_finddir_pid(void) {
     printf("Test: procfs_finddir PID entries...\n");
+    mock_now = 123456810;
 
     fs_node_t *node = procfs_finddir(NULL, "1");
     assert(node != NULL);
     assert(strcmp(node->name, "1") == 0);
     assert(node->inode == 1);
     assert(node->flags == FS_DIRECTORY);
+    assert(node->atime == mock_now);
+    assert(node->mtime == mock_now);
+    assert(node->ctime == mock_boot);
     if (node->close) node->close(node);
 
     node = procfs_finddir(NULL, "123");
@@ -333,6 +401,7 @@ void test_procfs_finddir_pid(void) {
 
 void test_proc_pid_finddir(void) {
     printf("Test: proc_pid_finddir entries...\n");
+    mock_now = 123456820;
 
     fs_node_t *node = procfs_finddir(NULL, "1");
     assert(node != NULL);
@@ -342,6 +411,9 @@ void test_proc_pid_finddir(void) {
     assert(status != NULL);
     assert(strcmp(status->name, "status") == 0);
     assert(status->flags == FS_FILE);
+    assert(status->atime == mock_now);
+    assert(status->mtime == mock_now);
+    assert(status->ctime == mock_boot);
     if (status->close) status->close(status);
 
     // Test finding cmdline
@@ -349,6 +421,9 @@ void test_proc_pid_finddir(void) {
     assert(cmdline != NULL);
     assert(strcmp(cmdline->name, "cmdline") == 0);
     assert(cmdline->flags == FS_FILE);
+    assert(cmdline->atime == mock_now);
+    assert(cmdline->mtime == mock_now);
+    assert(cmdline->ctime == mock_boot);
     if (cmdline->close) cmdline->close(cmdline);
 
     // Test finding invalid
@@ -357,6 +432,32 @@ void test_proc_pid_finddir(void) {
 
     if (node->close) node->close(node);
 
+    printf("PASS\n");
+}
+
+void test_procfs_timestamp_policy(void) {
+    printf("Test: procfs synthetic timestamps...\n");
+
+    mock_now = 123456789;
+    procfs_init();
+    assert(procfs_root_node.atime == mock_now);
+    assert(procfs_root_node.mtime == mock_now);
+    assert(procfs_root_node.ctime == mock_boot);
+
+    mock_now = 123456999;
+    fs_node_t *node = procfs_finddir(NULL, "meminfo");
+    assert(node != NULL);
+    assert(node->atime == mock_now);
+    assert(node->mtime == mock_now);
+    assert(node->ctime == mock_boot);
+
+    node = procfs_finddir(NULL, "1");
+    assert(node != NULL);
+    fs_node_t *status = node->finddir(node, "status");
+    assert(status != NULL);
+    assert(status->atime == mock_now);
+    assert(status->mtime == mock_now);
+    assert(status->ctime == mock_boot);
     printf("PASS\n");
 }
 
@@ -382,6 +483,34 @@ void test_procfs_kmalloc_fail(void) {
     assert(node->inode == 1);
 
     kmalloc_should_fail = 0;
+    printf("PASS\n");
+}
+
+void test_procfs_large_runtime_entry(void) {
+    char buffer[4096];
+    fs_node_t *node;
+    size_t total = 0;
+
+    printf("Test: procfs large runtime entry read...\n");
+
+    init_mock_large_runtime_text();
+    assert(mock_large_runtime_len > 1024);
+    assert(procfs_register_entry("largecpuinfo", mock_large_runtime_gen, NULL) == 0);
+
+    node = procfs_finddir(NULL, "largecpuinfo");
+    assert(node != NULL);
+    memset(buffer, 0, sizeof(buffer));
+
+    while (total < mock_large_runtime_len) {
+        size_t chunk = node->read(node, (off_t)total, 257, (uint8_t *)buffer + total);
+        assert(chunk > 0);
+        total += chunk;
+    }
+
+    assert(total == mock_large_runtime_len);
+    assert(memcmp(buffer, mock_large_runtime_text, mock_large_runtime_len) == 0);
+    assert(node->read(node, (off_t)total, 257, (uint8_t *)buffer) == 0);
+
     printf("PASS\n");
 }
 
@@ -444,6 +573,49 @@ void test_procfs_cmdline_read(void) {
     printf("PASS\n");
 }
 
+void test_procfs_fd_links(void) {
+    fs_node_t *pid_dir;
+    fs_node_t *fd_dir;
+    fs_node_t *fd_link;
+    struct dirent *de;
+    char target[256];
+
+    printf("Test: procfs fd links...\n");
+    setup_processes();
+
+    pid_dir = procfs_finddir(NULL, "123");
+    assert(pid_dir != NULL);
+
+    fd_dir = proc_pid_finddir(pid_dir, "fd");
+    assert(fd_dir != NULL);
+    assert(fd_dir->flags == FS_DIRECTORY);
+
+    de = proc_pid_fd_readdir(fd_dir, 0);
+    assert(de != NULL && strcmp(de->d_name, ".") == 0);
+    de = proc_pid_fd_readdir(fd_dir, 1);
+    assert(de != NULL && strcmp(de->d_name, "..") == 0);
+    de = proc_pid_fd_readdir(fd_dir, 2);
+    assert(de != NULL && strcmp(de->d_name, "3") == 0);
+    de = proc_pid_fd_readdir(fd_dir, 3);
+    assert(de != NULL && strcmp(de->d_name, "7") == 0);
+
+    fd_link = proc_pid_fd_finddir(fd_dir, "3");
+    assert(fd_link != NULL);
+    memset(target, 0, sizeof(target));
+    assert(fd_link->readlink(fd_link, target, sizeof(target)) > 0);
+    assert(strcmp(target, "/lib/vi") == 0);
+
+    fd_link = proc_pid_fd_finddir(fd_dir, "7");
+    assert(fd_link != NULL);
+    memset(target, 0, sizeof(target));
+    assert(fd_link->readlink(fd_link, target, sizeof(target)) > 0);
+    assert(strcmp(target, "pipe:[write]") == 0);
+
+    assert(proc_pid_fd_finddir(fd_dir, "9") == NULL);
+
+    printf("PASS\n");
+}
+
 void test_procfs_mounts_read(void) {
     printf("Test: procfs mounts read...\n");
 
@@ -489,6 +661,7 @@ int main() {
     setup_processes();
     setup_mounts();
 
+    test_procfs_timestamp_policy();
     test_procfs_finddir_static();
     test_procfs_finddir_pid();
     test_proc_pid_finddir();
@@ -497,9 +670,11 @@ int main() {
     test_procfs_self_dynamic_target();
     test_procfs_cow_stats_read();
     test_procfs_cmdline_read();
+    test_procfs_fd_links();
     test_procfs_mounts_read();
     test_procfs_driver_model_entries();
     test_procfs_kmalloc_fail();
+    test_procfs_large_runtime_entry();
 
     printf("All tests passed!\n");
     return 0;

@@ -1,8 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-extern int execvp(const char *file, char *const argv[]);
+#include <unistd.h>
 
 int main(int argc, char *argv[]) {
     char *user = "root";

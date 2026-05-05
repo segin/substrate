@@ -1,0 +1,59 @@
+.TH UNAME 1 "April 2026" "Substrate OS" "User Commands"
+.SH NAME
+uname \- print system information
+.SH SYNOPSIS
+.B uname
+[\fB\-amnprsvo\fR]
+.br
+.B uname
+[\fB\-\-all\fR] [\fB\-\-machine\fR] [\fB\-\-nodename\fR] [\fB\-\-processor\fR] [\fB\-\-kernel\-release\fR] [\fB\-\-kernel\-name\fR] [\fB\-\-kernel\-version\fR] [\fB\-\-operating\-system\fR] [\fB\-\-help\fR]
+.SH DESCRIPTION
+The
+.B uname
+utility writes system information to standard output. If no options are specified, it writes the operating system name (equivalent to
+.BR \-s ).
+.PP
+When multiple options are specified, the output is printed in a canonical fixed order: system name, node name, release, version, machine, processor, and operating system, separated by spaces.
+.SH OPTIONS
+.TP
+.BR \-a ", " \-\-all
+Behave as though all of the options
+.BR \-m ,
+.BR \-n ,
+.BR \-p ,
+.BR \-r ,
+.BR \-s ,
+and
+.BR \-v
+were specified.
+.TP
+.BR \-m ", " \-\-machine
+Print the machine hardware name.
+.TP
+.BR \-n ", " \-\-nodename
+Print the network node hostname.
+.TP
+.BR \-p ", " \-\-processor
+Print the processor type (application execution architecture).
+.TP
+.BR \-r ", " \-\-kernel\-release
+Print the operating system release.
+.TP
+.BR \-s ", " \-\-kernel\-name
+Print the operating system name.
+.TP
+.BR \-v ", " \-\-kernel\-version
+Print the operating system version.
+.TP
+.BR \-o ", " \-\-operating\-system
+Print the operating system name, synonymous with
+.BR \-s .
+.TP
+.B \-\-help
+Display a usage message and exit.
+.SH ERRORS
+The
+.B uname
+utility exits with status 0 on success, and >0 if an error occurs or invalid options/operands are specified.
+.SH SEE ALSO
+.BR uname (3)

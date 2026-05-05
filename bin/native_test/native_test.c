@@ -169,6 +169,53 @@ static void inspect_procfs(void) {
     printf("\n");
 }
 
+static int wait_for_child(const char *label, pid_t pid) {
+    int status;
+
+    if (waitpid(pid, &status, 0) < 0) {
+        printf("  %s: waitpid failed: %s\n", label, strerror(errno));
+        return -1;
+    }
+
+    if (WIFEXITED(status)) {
+        int code = WEXITSTATUS(status);
+        printf("  %s: exit=%d\n", label, code);
+        return code;
+    }
+
+    if (WIFSIGNALED(status)) {
+        int sig = WTERMSIG(status);
+        printf("  %s: signaled=%d\n", label, sig);
+        return 128 + sig;
+    }
+
+    if (WIFSTOPPED(status)) {
+        int sig = WSTOPSIG(status);
+        printf("  %s: stopped=%d\n", label, sig);
+        return 128 + sig;
+    }
+
+    printf("  %s: unexpected wait status=0x%x\n", label, status);
+    return -1;
+}
+
+static int run_program(const char *label, char *const argv[]) {
+    pid_t pid = fork();
+
+    if (pid < 0) {
+        printf("  %s: fork failed: %s\n", label, strerror(errno));
+        return -1;
+    }
+
+    if (pid == 0) {
+        execv(argv[0], argv);
+        perror(argv[0]);
+        exit(127);
+    }
+
+    return wait_for_child(label, pid);
+}
+
 int main(int argc, char **argv) {
     struct utsname uts;
     
@@ -227,12 +274,26 @@ int main(int argc, char **argv) {
         /* Parent */
         printf("  Parent: PID=%d (Returned from getpid())\n", getpid());
         printf("  Parent: Child PID=%d created\n", pid);
-        int status;
-        waitpid(pid, &status, 0);
-        printf("  Parent: Child exited\n");
+        printf("  Parent: Child exited with status %d\n", wait_for_child("fork child", pid));
     }
 
     printf("\n");
+
+    printf("Testing /bin/sh child-exit path with ls -l:\n");
+    char *const sh_argv[] = {
+        "/bin/sh",
+        "-c",
+        "/bin/ls -l /; /bin/echo native-shell-after",
+        NULL
+    };
+    int sh_status = run_program("sh ls-sequence", sh_argv);
+    if (sh_status != 0) {
+        printf("  FAIL: /bin/sh did not survive child exit cleanly\n");
+        return 1;
+    }
+    printf("  PASS: /bin/sh survived child exit cleanly\n");
+    printf("\n");
+
     printf("=== Test Complete ===\n");
     return 0;
 }

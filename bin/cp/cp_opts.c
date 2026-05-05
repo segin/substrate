@@ -127,7 +127,6 @@ static int cp_parse_preserve_list(struct cp_options *opts, const char *value, in
 int cp_parse_size(const char *text, size_t *out_size, const char **err_msg)
 {
     unsigned long long value;
-    long parsed;
     unsigned long long mult = 1;
     char *end = NULL;
     char suffix[8];
@@ -139,12 +138,11 @@ int cp_parse_size(const char *text, size_t *out_size, const char **err_msg)
     }
 
     errno = 0;
-    parsed = strtol(text, &end, 0);
-    if (end == text || errno == ERANGE || parsed < 0) {
+    value = strtoull(text, &end, 0);
+    if (end == text || errno == ERANGE) {
         *err_msg = "invalid numeric size";
         return -1;
     }
-    value = (unsigned long long)parsed;
 
     if (*end != '\0') {
         if (strlen(end) >= sizeof(suffix)) {

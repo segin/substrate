@@ -7,6 +7,7 @@
  */
 
 #include <kern/sched.h>
+#include <pm/pm.h>
 #include <sys/proc.h>
 #include <arch/i386/intr.h>
 #include <stdint.h>
@@ -57,8 +58,8 @@ void swapper_init(void) {
 }
 
 process_t *swapper_get_proc(void) {
-    if (processes[0].pid == 0) {
-        return &processes[0];
+    if (kernel_process && kernel_process->pid == 0) {
+        return kernel_process;
     }
 
     swapper_seed_fallback_context();

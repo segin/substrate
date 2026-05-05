@@ -5,10 +5,12 @@
 
 #include <sys/lock.h>
 
+/* Base static process slots. Additional slots may be grown dynamically. */
 #define MAX_PROCS 16
 
-extern process_t processes[MAX_PROCS];
+extern process_t processes[];
 extern process_t *current_process;
+extern process_t *kernel_process;
 extern mutex_t proctree_lock;
 
 void pm_init(void);
@@ -37,6 +39,8 @@ void proc_close_cloexec(process_t *p);
  * or when called from interrupt context with interrupts disabled.
  */
 process_t *proc_find(int pid);
+size_t proc_slot_count(void);
+process_t *proc_slot(size_t index);
 
 int proc_get_last_pid(void);
 void proc_reap_autoreap_zombies(void);

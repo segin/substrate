@@ -21,6 +21,7 @@
 #define P_TRACED     0x0002  // Being traced (ptrace)
 #define P_WAITED     0x0004  // Stopped state already reported
 #define P_AUTOREAP   0x0008  // Zombie should be reaped asynchronously
+#define P_SIGEXIT    0x0010  // Zombie status is signal/core encoded already
 
 #define PROC_ITIMER_COUNT 3
 #define PROC_CMDLINE_MAX  512
@@ -171,6 +172,14 @@ typedef struct thread {
     uint32_t  kstack_units; // Pages for PMM stacks, bytes for kmalloc stacks
     uint8_t   kstack_type; // thread_kstack_type_t
     uint8_t   kstack_owned; // Nonzero if the scheduler owns the kernel stack
+
+    /* Per-thread %gs TLS base (FreeBSD/Linux i386).  Stored here because the
+     * GDT_TLS_START slot is shared across all threads — without per-context
+     * reload on switch, the most recent thread's TCB would be visible to all
+     * others, and stale TCBs would have user-mode TLS reads return garbage
+     * (manifesting as SEGV in libc's TLS-relative loads — e.g. jemalloc
+     * __free reads %gs:0 which becomes 0 when the slot is empty). */
+    uint32_t  gs_base;
     
     // Scheduling - Basic
     int           priority;
@@ -200,6 +209,7 @@ typedef struct thread {
     uint8_t        needs_resched; // Set by IPI to trigger reschedule
     uint8_t        exec_pin_active; // Exec path temporarily pinned this thread
     uint8_t        exec_saved_no_preempt; // Preserve preempt state across exec pin
+    uint8_t        vfs_symlink_depth; // Current symlink-follow recursion depth
     
     void         *wait_chan; // Channel thread is sleeping on
     const char   *wait_reason; // Description of wait event
@@ -230,6 +240,9 @@ typedef struct thread {
     
     // Fault Recovery (copyin/copyout)
     uintptr_t                on_fault;
+
+    // Exec recursion tracking (shebang scripts)
+    int                      script_depth;
     
     // Syscall registers (for fork/vfork)
     void *syscall_regs;

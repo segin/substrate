@@ -6,16 +6,173 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
+#include <sys/types.h>
+#ifndef HOST_TEST
+#include <vm/vm_kmem.h>
+#else
+#include <stdlib.h>
+#endif
 
 thread_t threads[MAX_THREADS];
-// Generation counters for each thread slot to enable O(1) TID lookup.
-// TID = index + (generation * MAX_THREADS)
-static uint32_t slot_generations[MAX_THREADS];
 thread_t *current_thread = NULL;
+static thread_t **thread_chunks = NULL;
+static size_t thread_chunk_count = 0;
+static size_t thread_chunk_capacity = 0;
+static int next_tid = 1;
+static spinlock_t tid_lock;
 
 
 #include <kern/arch.h>
 #include <arch/i386/percpu.h>
+
+#define THREAD_SLOT_CHUNK_SIZE ((size_t)MAX_THREADS)
+
+#ifdef HOST_TEST
+static void *sched_table_alloc(size_t size) {
+    return malloc(size);
+}
+
+static void sched_table_free(void *ptr, size_t size) {
+    (void)size;
+    free(ptr);
+}
+#else
+static void *sched_table_alloc(size_t size) {
+    return kmalloc(size);
+}
+
+static void sched_table_free(void *ptr, size_t size) {
+    kfree(ptr, size);
+}
+#endif
+
+size_t sched_thread_slot_count(void) {
+    return (size_t)MAX_THREADS + (thread_chunk_count * THREAD_SLOT_CHUNK_SIZE);
+}
+
+thread_t *sched_thread_slot(size_t index) {
+    if (index < (size_t)MAX_THREADS) {
+        return &threads[index];
+    }
+
+    index -= (size_t)MAX_THREADS;
+    if (index < (thread_chunk_count * THREAD_SLOT_CHUNK_SIZE)) {
+        size_t chunk_index = index / THREAD_SLOT_CHUNK_SIZE;
+        size_t slot_index = index % THREAD_SLOT_CHUNK_SIZE;
+
+        return &thread_chunks[chunk_index][slot_index];
+    }
+
+    return NULL;
+}
+
+static void sched_reset_free_slot(thread_t *thread) {
+    if (!thread) {
+        return;
+    }
+
+    memset(thread, 0, sizeof(*thread));
+    thread->tid = -1;
+    thread->state = THREAD_ZOMBIE;
+}
+
+static int sched_tid_in_use_locked(tid_t tid) {
+    size_t slots = sched_thread_slot_count();
+
+    for (size_t i = 0; i < slots; i++) {
+        thread_t *thread = sched_thread_slot(i);
+        if (thread && thread->tid == tid) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static thread_t *sched_grow_slots_locked(void) {
+    thread_t **new_chunks = thread_chunks;
+    size_t new_chunk_capacity = thread_chunk_capacity;
+    size_t old_bytes = thread_chunk_capacity * sizeof(*thread_chunks);
+    size_t new_bytes;
+    thread_t *new_chunk;
+
+    if (thread_chunk_count == thread_chunk_capacity) {
+        new_chunk_capacity = thread_chunk_capacity ? thread_chunk_capacity * 2U : 4U;
+        new_bytes = new_chunk_capacity * sizeof(*new_chunks);
+        new_chunks = sched_table_alloc(new_bytes);
+        if (!new_chunks) {
+            return NULL;
+        }
+
+        if (thread_chunks && old_bytes != 0U) {
+            memcpy(new_chunks, thread_chunks, old_bytes);
+            sched_table_free(thread_chunks, old_bytes);
+        }
+        memset(new_chunks + thread_chunk_count, 0,
+               (new_chunk_capacity - thread_chunk_count) * sizeof(*new_chunks));
+    }
+
+    new_chunk = sched_table_alloc(THREAD_SLOT_CHUNK_SIZE * sizeof(*new_chunk));
+    if (!new_chunk) {
+        if (new_chunks != thread_chunks) {
+            sched_table_free(new_chunks, new_chunk_capacity * sizeof(*new_chunks));
+        }
+        return NULL;
+    }
+
+    if (new_chunks != thread_chunks) {
+        thread_chunks = new_chunks;
+        thread_chunk_capacity = new_chunk_capacity;
+    }
+
+    for (size_t i = 0; i < THREAD_SLOT_CHUNK_SIZE; i++) {
+        sched_reset_free_slot(&new_chunk[i]);
+    }
+    thread_chunks[thread_chunk_count++] = new_chunk;
+
+    return &new_chunk[0];
+}
+
+static thread_t *sched_find_free_slot_locked(void) {
+    size_t slots = sched_thread_slot_count();
+
+    for (size_t i = 0; i < slots; i++) {
+        thread_t *thread = sched_thread_slot(i);
+        if (thread && thread->tid == -1) {
+            return thread;
+        }
+    }
+
+    return sched_grow_slots_locked();
+}
+
+static int sched_alloc_tid_locked(process_t *proc) {
+    int start;
+    int candidate;
+
+    if (proc && proc->pid == 0 && !sched_tid_in_use_locked(0)) {
+        return 0;
+    }
+
+    start = next_tid;
+    if (start < 1 || start > SUBSTRATE_TID_MAX) {
+        start = 1;
+    }
+
+    candidate = start;
+    do {
+        if (!sched_tid_in_use_locked(candidate)) {
+            next_tid = (candidate == SUBSTRATE_TID_MAX) ? 1 : candidate + 1;
+            return candidate;
+        }
+
+        candidate++;
+        if (candidate > SUBSTRATE_TID_MAX) {
+            candidate = 1;
+        }
+    } while (candidate != start);
+
+    return -1;
+}
 
 static void sched_release_thread_storage(thread_t *t) {
     extern void kfree(void *ptr, size_t size);
@@ -50,60 +207,68 @@ static void sched_release_thread_storage(thread_t *t) {
 
 
 void sched_init_generic(void) {
-    extern void *memset(void *s, int c, size_t n);
+    size_t slots;
+
     memset(threads, 0, sizeof(threads));
-    memset(slot_generations, 0, sizeof(slot_generations));
+    next_tid = 1;
+    spinlock_init(&tid_lock, "tid");
     
     // Initialize PM
     pm_init();
 
     // Zero out arrays
-    for (int i = 0; i < MAX_THREADS; i++) {
-        threads[i].tid = -1;
-        threads[i].state = THREAD_ZOMBIE;
+    slots = sched_thread_slot_count();
+    for (size_t i = 0; i < slots; i++) {
+        sched_reset_free_slot(sched_thread_slot(i));
     }
 }
 
 // Just sets up structures, doesn't touch hardware/stack
 thread_t *sched_alloc_thread(process_t *proc) {
-    int i;
-    for (i = 0; i < MAX_THREADS; i++) {
-        if (threads[i].tid == -1) break;
+    thread_t *thread;
+    int tid;
+
+    spinlock_acquire(&tid_lock);
+    thread = sched_find_free_slot_locked();
+    if (!thread) {
+        spinlock_release(&tid_lock);
+        return NULL;
     }
-    if (i == MAX_THREADS) return NULL;
 
-    memset(&threads[i], 0, sizeof(threads[i]));
+    tid = sched_alloc_tid_locked(proc);
+    if (tid < 0) {
+        spinlock_release(&tid_lock);
+        return NULL;
+    }
 
-    // Allocate TID using generation index for O(1) lookup
-    // TID = (generation << 6) | index
-    // MAX_THREADS is 64, so 6 bits for index.
-    threads[i].tid = (slot_generations[i]++ << 6) | i;
-    threads[i].proc = proc;
-    threads[i].state = THREAD_BLOCKED; // Set to BLOCKED until stack is ready
-    threads[i].wait_chan = NULL;
-    threads[i].wait_reason = NULL;
-    threads[i].sleep_expiry = 0;
-    threads[i].priority = current_thread ? current_thread->priority : 20;
-    threads[i].base_priority = current_thread ? current_thread->base_priority : 20;
-    threads[i].sched_class = current_thread ? current_thread->sched_class : SCHED_TIMESHARE;
-    threads[i].kstack_base = 0;
-    threads[i].kstack_units = 0;
-    threads[i].kstack_type = THREAD_KSTACK_NONE;
-    threads[i].kstack_owned = 0;
-    threads[i].bound_cpu = -1;
-    threads[i].exec_saved_bound_cpu = -1;
-    threads[i].exec_pin_active = 0;
-    threads[i].exec_saved_no_preempt = 0;
+    memset(thread, 0, sizeof(*thread));
+    thread->tid = tid;
+    thread->proc = proc;
+    thread->state = THREAD_BLOCKED; // Set to BLOCKED until stack is ready
+    thread->wait_chan = NULL;
+    thread->wait_reason = NULL;
+    thread->sleep_expiry = 0;
+    thread->priority = current_thread ? current_thread->priority : 20;
+    thread->base_priority = current_thread ? current_thread->base_priority : 20;
+    thread->sched_class = current_thread ? current_thread->sched_class : SCHED_TIMESHARE;
+    thread->kstack_base = 0;
+    thread->kstack_units = 0;
+    thread->kstack_type = THREAD_KSTACK_NONE;
+    thread->kstack_owned = 0;
+    thread->bound_cpu = -1;
+    thread->exec_saved_bound_cpu = -1;
+    thread->exec_pin_active = 0;
+    thread->exec_saved_no_preempt = 0;
     
     // Initialize Signals
-    threads[i].sig_mask = current_thread ? current_thread->sig_mask : 0;
-    threads[i].sig_pending = 0;
-    threads[i].sig_on_stack = 0;
-    extern void *memset(void *s, int c, size_t n);
-    memset(&threads[i].sig_alt_stack, 0, sizeof(threads[i].sig_alt_stack));
-    threads[i].in_syscall = 0;
-    
-    return &threads[i];
+    thread->sig_mask = current_thread ? current_thread->sig_mask : 0;
+    thread->sig_pending = 0;
+    thread->sig_on_stack = 0;
+    memset(&thread->sig_alt_stack, 0, sizeof(thread->sig_alt_stack));
+    thread->in_syscall = 0;
+
+    spinlock_release(&tid_lock);
+    return thread;
 }
 
 static void sched_context_switch(thread_t *prev, thread_t *next) {
@@ -154,29 +319,42 @@ void sched_yield(void) {
      * one we scheduled, so that equal-priority threads get fair turns.
      */
     static int rr_start = 0;
-    int start = rr_start;
+    size_t total_slots = sched_thread_slot_count();
+    size_t best_index = 0;
+    size_t start = 0;
+
+    if (total_slots == 0) {
+        return;
+    }
+    if ((size_t)rr_start >= total_slots) {
+        rr_start = 0;
+    }
+    start = (size_t)rr_start;
 
     // Scan for best thread to run (Generic Policy)
-    for (int n = 0; n < MAX_THREADS; n++) {
-        int i = (start + n) % MAX_THREADS;
-        if (threads[i].tid == -1 || threads[i].state != THREAD_READY) continue;
-        if (!sched_can_run_on_cpu(&threads[i], cpu_id)) continue;
+    for (size_t n = 0; n < total_slots; n++) {
+        size_t i = (start + n) % total_slots;
+        thread_t *candidate = sched_thread_slot(i);
+
+        if (!candidate || candidate->tid == -1 || candidate->state != THREAD_READY) continue;
+        if (!sched_can_run_on_cpu(candidate, cpu_id)) continue;
 
         bool better = false;
         if (!best_thread) {
             better = true;
-        } else if (threads[i].sched_class < best_class) {
+        } else if (candidate->sched_class < best_class) {
             better = true;
-        } else if (threads[i].sched_class == best_class) {
-            if (threads[i].priority > highest_prio) {
+        } else if (candidate->sched_class == best_class) {
+            if (candidate->priority > highest_prio) {
                 better = true;
             }
         }
 
         if (better) {
-            best_thread = &threads[i];
-            highest_prio = threads[i].priority;
-            best_class = threads[i].sched_class;
+            best_thread = candidate;
+            best_index = i;
+            highest_prio = candidate->priority;
+            best_class = candidate->sched_class;
         }
     }
 
@@ -184,7 +362,7 @@ void sched_yield(void) {
 
     if (best_thread) {
         /* Advance round-robin start for next call */
-        rr_start = (int)((best_thread - threads) + 1) % MAX_THREADS;
+        rr_start = (int)((best_index + 1U) % total_slots);
         sched_context_switch(current_thread, best_thread);
     }
 }
@@ -205,13 +383,11 @@ int sched_get_current_tid(void) {
 thread_t *sched_get_thread(int tid) {
     if (tid < 0) return NULL;
 
-    // O(1) lookup
-    // Index is encoded in lower bits (MAX_THREADS must be power of 2, 64 is 2^6)
-    int index = tid & (MAX_THREADS - 1);
-
-    // Verify TID matches (checks generation)
-    if (threads[index].tid == tid) {
-        return &threads[index];
+    for (size_t i = 0; i < sched_thread_slot_count(); i++) {
+        thread_t *thread = sched_thread_slot(i);
+        if (thread && thread->tid == tid) {
+            return thread;
+        }
     }
     return NULL;
 }
@@ -257,16 +433,19 @@ void sched_tick(void) {
     extern void sched_periodic_balance(void);
     sched_periodic_balance();
 
-    for (int i = 0; i < MAX_THREADS; i++) {
-        if (threads[i].tid != -1 &&
-            threads[i].state == THREAD_BLOCKED &&
-            threads[i].sleep_expiry > 0 &&
-            now >= threads[i].sleep_expiry) {
+    for (size_t i = 0; i < sched_thread_slot_count(); i++) {
+        thread_t *thread = sched_thread_slot(i);
 
-            threads[i].state = THREAD_READY;
-            threads[i].wait_chan = NULL;
-            threads[i].sleep_status = -ETIMEDOUT;
-            threads[i].sleep_expiry = 0;
+        if (thread &&
+            thread->tid != -1 &&
+            thread->state == THREAD_BLOCKED &&
+            thread->sleep_expiry > 0 &&
+            now >= thread->sleep_expiry) {
+
+            thread->state = THREAD_READY;
+            thread->wait_chan = NULL;
+            thread->sleep_status = -ETIMEDOUT;
+            thread->sleep_expiry = 0;
         }
     }
 }
@@ -278,10 +457,12 @@ void sched_wakeup(void *chan) {
 void sched_wakeup_n(void *chan, int n) {
     int woken = 0;
 
-    for (int i = 0; i < MAX_THREADS; i++) {
-        if (threads[i].tid != -1 && threads[i].state == THREAD_BLOCKED && threads[i].wait_chan == chan) {
-            threads[i].state = THREAD_READY;
-            threads[i].wait_chan = NULL;
+    for (size_t i = 0; i < sched_thread_slot_count(); i++) {
+        thread_t *thread = sched_thread_slot(i);
+
+        if (thread && thread->tid != -1 && thread->state == THREAD_BLOCKED && thread->wait_chan == chan) {
+            thread->state = THREAD_READY;
+            thread->wait_chan = NULL;
             woken++;
             if (n > 0 && woken >= n) break;
         }
@@ -293,9 +474,10 @@ void sched_wakeup_n(void *chan, int n) {
 }
 
 void sched_iterate_threads(void (*callback)(thread_t *t, void *arg), void *arg) {
-    for (int i = 0; i < MAX_THREADS; i++) {
-        if (threads[i].tid != -1) {
-            callback(&threads[i], arg);
+    for (size_t i = 0; i < sched_thread_slot_count(); i++) {
+        thread_t *thread = sched_thread_slot(i);
+        if (thread && thread->tid != -1) {
+            callback(thread, arg);
         }
     }
 }
@@ -305,8 +487,10 @@ void sched_reap_process_threads(process_t *proc) {
         return;
     }
 
-    for (int i = 0; i < MAX_THREADS; i++) {
-        if (threads[i].tid == -1 || threads[i].proc != proc) {
+    for (size_t i = 0; i < sched_thread_slot_count(); i++) {
+        thread_t *thread = sched_thread_slot(i);
+
+        if (!thread || thread->tid == -1 || thread->proc != proc) {
             continue;
         }
 
@@ -314,9 +498,7 @@ void sched_reap_process_threads(process_t *proc) {
          * The process is already waitable and no thread in this group should
          * remain schedulable or visible after the parent reaps it.
          */
-        sched_release_thread_storage(&threads[i]);
-        memset(&threads[i], 0, sizeof(thread_t));
-        threads[i].tid = -1;
-        threads[i].state = THREAD_ZOMBIE;
+        sched_release_thread_storage(thread);
+        sched_reset_free_slot(thread);
     }
 }
