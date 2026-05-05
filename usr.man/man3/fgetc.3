@@ -1,0 +1,144 @@
+.\" fgetc.3 - character input/output on streams
+.TH FGETC 3 "May 2026" "Substrate" "Library Functions Manual"
+.SH NAME
+fgetc, getc, getchar, fputc, putc, putchar, ungetc \- character input/output on streams
+.SH LIBRARY
+.B libc
+.SH SYNOPSIS
+.B #include <stdio.h>
+.PP
+.BI "int fgetc(FILE *" stream ");"
+.PP
+.BI "int getc(FILE *" stream ");"
+.PP
+.B "int getchar(void);"
+.PP
+.BI "int fputc(int " c ", FILE *" stream ");"
+.PP
+.BI "int putc(int " c ", FILE *" stream ");"
+.PP
+.BI "int putchar(int " c ");"
+.PP
+.BI "int ungetc(int " c ", FILE *" stream ");"
+.SH DESCRIPTION
+.BR fgetc ()
+reads the next character from
+.I stream
+and returns it as an
+.I unsigned char
+cast to an
+.IR int ,
+or
+.B EOF
+on end of file or error.
+.PP
+.BR getc ()
+is equivalent to
+.BR fgetc ().
+In Substrate's libc it is implemented as a function (not a macro), so
+.I stream
+is evaluated only once.
+.PP
+.BR getchar ()
+is equivalent to
+.BI fgetc( stdin ).
+.PP
+.BR fputc ()
+writes the character
+.IR c ,
+cast to an
+.IR "unsigned char" ,
+to
+.IR stream .
+.PP
+.BR putc ()
+is equivalent to
+.BR fputc ().
+As with
+.BR getc (),
+it is implemented as a function in Substrate's libc.
+.PP
+.BR putchar ( c )
+is equivalent to
+.BI fputc( c ", " stdout ).
+.PP
+.BR ungetc ()
+pushes
+.I c
+back onto
+.I stream
+so that it will be returned by the next read operation on that stream.
+The pushed-back character is converted to
+.I unsigned char
+and a successful call clears the end-of-file indicator for the stream.
+.PP
+Substrate's libc supports a single character of pushback per stream.
+A second consecutive call to
+.BR ungetc ()
+without an intervening read will fail.
+A successful call to
+.BR fseek (3),
+.BR fsetpos (3),
+or
+.BR rewind (3)
+discards any pushed-back character.
+.SH RETURN VALUE
+.BR fgetc (),
+.BR getc (),
+and
+.BR getchar ()
+return the character read as an
+.I unsigned char
+cast to an
+.IR int ,
+or
+.B EOF
+on end of file or read error.
+.PP
+.BR fputc (),
+.BR putc (),
+and
+.BR putchar ()
+return the character written as an
+.I unsigned char
+cast to an
+.IR int ,
+or
+.B EOF
+on write error.
+.PP
+.BR ungetc ()
+returns
+.I c
+on success, or
+.B EOF
+if
+.I c
+equals
+.B EOF
+or if a previous pushed-back character has not yet been consumed.
+.BR ungetc ()
+does not set the stream error indicator on failure.
+.SH SEE ALSO
+.BR fopen (3),
+.BR fread (3),
+.BR fwrite (3),
+.BR fgets (3),
+.BR fputs (3),
+.BR scanf (3),
+.BR printf (3),
+.BR feof (3),
+.BR ferror (3)
+.SH STANDARDS
+.BR fgetc (),
+.BR getc (),
+.BR getchar (),
+.BR fputc (),
+.BR putc (),
+.BR putchar (),
+and
+.BR ungetc ()
+conform to ISO C90 and POSIX.1-2008.
+The single-character pushback guarantee for
+.BR ungetc ()
+matches the minimum required by the standards; portable code should not assume more.

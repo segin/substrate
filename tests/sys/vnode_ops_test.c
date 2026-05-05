@@ -219,20 +219,26 @@ void run_vnode_ops_tests(void) {
         kprint("FAIL: vop_access (owner) denied read\n");
     }
 
-    // Root access
+    // Root read/write bypass
     struct ucred root_cred = {0};
     root_cred.cr_uid = 0;
-    if (vop_access(&mock_file, 7, &root_cred) == 0) {
-        kprint("PASS: vop_access (root) allowed everything\n");
+    if (vop_access(&mock_file, 6, &root_cred) == 0) {
+        kprint("PASS: vop_access (root) allowed read/write bypass\n");
     } else {
-        kprint("FAIL: vop_access (root) denied access\n");
+        kprint("FAIL: vop_access (root) denied read/write bypass\n");
+    }
+
+    if (vop_access(&mock_file, 1, &root_cred) == EACCES) {
+        kprint("PASS: vop_access (root) denied execute without x bit\n");
+    } else {
+        kprint("FAIL: vop_access (root) allowed execute without x bit\n");
     }
 
     // Access Denied
     struct ucred other_cred = {0};
     other_cred.cr_uid = 2000;
     other_cred.cr_gid = 2000;
-    if (vop_access(&mock_file, 2, &other_cred) != 0) {
+    if (vop_access(&mock_file, 2, &other_cred) == EACCES) {
         kprint("PASS: vop_access (other) denied write\n");
     } else {
         kprint("FAIL: vop_access (other) allowed write unexpectedly\n");

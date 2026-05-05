@@ -72,7 +72,9 @@
 #define NETBSD_SYS_obs_vwrite     68
 #define NETBSD_SYS_sbrk           69
 #define NETBSD_SYS_sstk           70
-#define NETBSD_SYS_mmap           71
+/* Slot 71 is COMPAT_43 ommap with i386 off_t (32-bit) — kept under
+ * the legacy name; modern NetBSD mmap is slot 197 (see below). */
+#define NETBSD_SYS_compat_43_ommap 71
 #define NETBSD_SYS_vadvise        72
 #define NETBSD_SYS_munmap         73
 #define NETBSD_SYS_mprotect       74
@@ -128,8 +130,27 @@
 #define NETBSD_SYS_fstat          189
 #define NETBSD_SYS_lstat          190
 #define NETBSD_SYS_nanosleep      196
+/* Modern mmap with `long PAD` between fd and pos to align off_t.
+ * Signature: void *mmap(void*, size_t, int, int, int, long pad, off_t pos). */
+#define NETBSD_SYS_mmap           197
 #define NETBSD_SYS_poll           209
 #define NETBSD_SYS_getcwd         326
 #define NETBSD_SYS_getdents       340
+
+/* chown/chmod family.  NetBSD numbers fchown/fchmod identically to FreeBSD
+ * (123/124) but lchmod=274 / lchown=275 (NetBSD swaps lchown into 275 vs
+ * FreeBSD's 254).  The __posix_*chown variants (283/284/285) implement
+ * POSIX-correct behavior: when called by an unprivileged owner, the
+ * setuid/setgid bits are cleared from the new mode after the change.
+ * fchmodat/fchownat are NetBSD-numbered 463/464. */
+#define NETBSD_SYS_fchown         123
+#define NETBSD_SYS_fchmod         124
+#define NETBSD_SYS_lchmod         274
+#define NETBSD_SYS_lchown         275
+#define NETBSD_SYS_posix_chown    283
+#define NETBSD_SYS_posix_fchown   284
+#define NETBSD_SYS_posix_lchown   285
+#define NETBSD_SYS_fchmodat       463
+#define NETBSD_SYS_fchownat       464
 
 #endif /* _NETBSD_SYSCALLS_H */

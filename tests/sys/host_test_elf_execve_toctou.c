@@ -10,6 +10,7 @@
 #include <errno.h>
 #include <sys/mman.h> // for mmap
 #include <time.h>
+#include <sys/param.h>
 
 // Mock kernel constants/types if not provided by headers
 #define __kernel_size_t size_t
@@ -525,6 +526,30 @@ static void test_exec_setup_stack_uses_call_specific_execfn(void) {
     assert(strcmp(execfn, "sh") == 0);
 }
 
+static void test_exec_setup_stack_linux_auxv_uses_main_entry(void) {
+    elf_image_info_t image;
+    char arg0[] = "/lib/vi";
+    char *argv[] = { arg0, NULL };
+    uint32_t sp;
+
+    reset_env();
+    memset(&image, 0, sizeof(image));
+    image.ehdr.e_phnum = 13;
+    image.ehdr.e_phentsize = sizeof(Elf32_Phdr);
+    image.at_phdr = 0x34u;
+    current_process->perso_id = PERS_LINUX;
+
+    reset_host_mappings();
+    assert(exec_setup_stack((pmap_t)0xDEADBEEF, &sp, argv, 1, NULL, 0,
+                            0x080496e0u, 0x40000000u,
+                            elf_runtime_phdr_addr(&image, ELF_ET_DYN_LOAD_BASE_I386),
+                            &image) == 0);
+    assert(host_find_auxv_value(sp, AT_ENTRY) == 0x080496e0u);
+    assert(host_find_auxv_value(sp, AT_BASE) == 0x40000000u);
+    assert(host_find_auxv_value(sp, AT_PHDR) == 0x08048034u);
+    assert(host_find_auxv_value(sp, AT_CLKTCK) == HZ);
+}
+
 static void test_et_dyn_main_uses_nonzero_load_bias(void) {
     elf_image_info_t image;
 
@@ -595,6 +620,7 @@ int main() {
     test_elf_cache_invalidates_on_metadata_change();
     test_hot_cache_preserves_personality_detection();
     test_exec_setup_stack_uses_call_specific_execfn();
+    test_exec_setup_stack_linux_auxv_uses_main_entry();
     test_et_dyn_main_uses_nonzero_load_bias();
     test_runtime_phdr_adds_load_bias();
     test_hot_cache_removes_repeat_metadata_reads();
@@ -619,7 +645,7 @@ int main() {
         }
     }
 
-    // printf("Allocated low memory at %p\n", low_mem);
+
 
     if (!is_user_ptr(low_mem)) {
         printf("ERROR: Even mmap'd low memory is not considered user ptr! Check is_user_ptr logic.\n");

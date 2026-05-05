@@ -1,0 +1,166 @@
+.\" tmpfile.3 - create a temporary file
+.TH TMPFILE 3 "May 2026" "Substrate" "Library Functions Manual"
+.SH NAME
+tmpfile, tmpnam \- create a temporary file
+.SH LIBRARY
+.B libc
+.SH SYNOPSIS
+.B #include <stdio.h>
+.PP
+.BI "FILE *tmpfile(void);"
+.PP
+.BI "char *tmpnam(char *" s ");"
+.SH DESCRIPTION
+The
+.BR tmpfile ()
+function opens a unique temporary file in binary read/write
+.RB ( "w+" )
+mode.
+The file is created beneath
+.I /tmp
+with a name of the form
+.IR /tmp/.tmpf.<pid>.<counter> ,
+opened with
+.BR O_RDWR ,
+.BR O_CREAT ,
+and
+.B O_EXCL
+flags and mode 0600, and then immediately
+.BR unlink (2)ed
+so that the file is removed automatically when the returned stream is closed
+or when the process exits.
+Up to 100 candidate names are tried before failure is reported.
+.PP
+The
+.BR tmpnam ()
+function generates a file name string that is suitable for use as a
+temporary file name, of the form
+.IR /tmp/tmp.<pid>.<counter> .
+If the argument
+.I s
+is not
+.BR NULL ,
+the name is written into the buffer pointed to by
+.IR s ,
+which must have room for at least
+.B L_tmpnam
+bytes; otherwise a pointer to a static buffer is returned and may be
+overwritten by subsequent calls.
+.SS "Security and deprecation of tmpnam()"
+.BR tmpnam ()
+is
+.B deprecated
+and should not be used in new code.
+The function returns only a path
+.I name
+\(em it does not create or open the file.
+Between the time
+.BR tmpnam ()
+returns and the time the caller opens the file there is a window in
+which another process may create a file (or symbolic link) at the same
+path, leading to a classic time-of-check / time-of-use
+.RB ( TOCTOU )
+race.
+An attacker who wins this race can cause the calling program to
+truncate, overwrite, or read an arbitrary file with the privileges of
+the caller, which is a known vector for symlink attacks in setuid and
+daemon programs.
+.PP
+New code should use
+.BR tmpfile ()
+\(em which performs the create-and-unlink atomically with
+.B O_EXCL
+\(em or
+.BR mkstemp (3)
+when a named file is required.
+Both interfaces remove the race because the file is created by the
+same call that returns the descriptor or stream.
+.SH RETURN VALUE
+On success,
+.BR tmpfile ()
+returns a pointer to the open stream.
+On failure it returns
+.B NULL
+and
+.I errno
+is set to indicate the error.
+.PP
+.BR tmpnam ()
+returns a pointer to the name string.
+If
+.I s
+is non-NULL the value returned is
+.IR s ;
+otherwise it is a pointer to an internal static buffer of length
+.BR L_tmpnam .
+On failure
+.B NULL
+is returned.
+.SH ERRORS
+.BR tmpfile ()
+may fail and set
+.I errno
+for any of the reasons given for
+.BR open (2),
+.BR unlink (2),
+or
+.BR fdopen (3).
+In particular:
+.TP
+.B EACCES
+Search permission is denied for a directory in the path prefix of
+.IR /tmp ,
+or write permission is denied on
+.IR /tmp .
+.TP
+.B EEXIST
+A unique name could not be generated within the internal retry limit.
+.TP
+.B EMFILE
+The per-process limit on open file descriptors has been reached.
+.TP
+.B ENFILE
+The system-wide limit on the total number of open files has been reached.
+.TP
+.B ENOMEM
+Insufficient memory was available to allocate the
+.B FILE
+object.
+.TP
+.B ENOSPC
+The filesystem containing
+.I /tmp
+has no space for a new file.
+.TP
+.B EROFS
+.I /tmp
+resides on a read-only filesystem.
+.PP
+.BR tmpnam ()
+itself performs no I/O and therefore reports no errors via
+.IR errno .
+A subsequent attempt to
+.BR open (2)
+the returned name may, of course, fail for any of the reasons listed in
+.BR open (2).
+.SH SEE ALSO
+.BR mkstemp (3),
+.BR mktemp (3),
+.BR fopen (3),
+.BR fdopen (3),
+.BR open (2),
+.BR unlink (2),
+.BR tmpfile (3)
+.SH STANDARDS
+.BR tmpfile ()
+and
+.BR tmpnam ()
+conform to ISO C99 and POSIX.1-2008.
+.BR tmpnam ()
+is marked
+.B obsolescent
+in POSIX.1-2008 and is scheduled for removal in future revisions of the
+standard; portable code should prefer
+.BR mkstemp (3)
+or
+.BR tmpfile ().

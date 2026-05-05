@@ -25,9 +25,7 @@ reset_shared_state(void)
 {
     exvi_reset_runtime(EXVI_FRONTEND_EX);
     exvi_cleanup_session_state();
-    buf_free(&undo_buf);
-    buf_init(&undo_buf);
-    undo_valid = 0;
+    exvi_reset_undo_state();
     exvi_free_registers();
     exvi_init_registers();
 }
@@ -36,8 +34,7 @@ static void
 cleanup_shared_state(void)
 {
     exvi_free_registers();
-    buf_free(&undo_buf);
-    buf_init(&undo_buf);
+    exvi_reset_undo_state();
     exvi_cleanup_runtime();
     exvi_cleanup_session_state();
 }

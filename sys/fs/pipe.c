@@ -30,7 +30,9 @@ typedef struct {
 static void pipe_wait(void *chan, mutex_t *m) {
     sleepq_add(chan, current_thread);
     mutex_unlock(m);
-    sched_yield();
+    if (current_thread->wait_chan == chan) {
+        sched_yield();
+    }
     mutex_lock(m);
 }
 

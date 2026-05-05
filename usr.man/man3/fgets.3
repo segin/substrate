@@ -1,0 +1,117 @@
+.\" fgets.3 - line input and string output for streams
+.TH FGETS 3 "May 2026" "Substrate" "Library Functions Manual"
+.SH NAME
+fgets, fputs \- input of a line from, and output of a string to, a stream
+.SH LIBRARY
+.B libc
+.SH SYNOPSIS
+.B #include <stdio.h>
+.PP
+.BI "char *fgets(char *" s ", int " size ", FILE *" stream ");"
+.PP
+.BI "int fputs(const char *" s ", FILE *" stream ");"
+.SH DESCRIPTION
+.BR fgets ()
+reads in at most one less than
+.I size
+characters from
+.I stream
+and stores them into the buffer pointed to by
+.IR s .
+Reading stops after an
+.B EOF
+or a newline.
+If a newline is read, it is stored into the buffer.
+A terminating null byte (\(aq\\0\(aq) is stored after the last character in the buffer.
+.PP
+.BR fputs ()
+writes the string
+.I s
+to
+.IR stream ,
+without its terminating null byte (\(aq\\0\(aq).
+.SS Removed interface: gets()
+The
+.BR gets ()
+function is
+.B not
+provided by Substrate libc.
+It was removed from the C standard by C11 (and from POSIX by POSIX.1-2008) because it
+performs an unbounded write into a caller-supplied buffer with no way to specify
+the buffer size, making any use of it a buffer-overflow vulnerability.
+Programs that previously called
+.BR gets ()
+must be updated to use
+.BR fgets ()
+or
+.BR getline (3)
+instead (REQ-06-0254).
+Note that
+.BR fgets ()
+preserves any trailing newline in the destination buffer, whereas
+.BR gets ()
+historically discarded it; callers porting old code may need to strip the
+newline themselves.
+.SH RETURN VALUE
+.BR fgets ()
+returns
+.I s
+on success.
+It returns
+.B NULL
+on end-of-file with no characters read, on read error, or when
+.I size
+is less than or equal to zero.
+.PP
+.BR fputs ()
+returns
+.B 0
+on success and
+.B EOF
+on error.
+.SH ERRORS
+These functions do not set
+.I errno
+themselves; underlying I/O errors set the stream's error indicator (see
+.BR ferror (3))
+and may be reported by lower-level routines such as
+.BR read (2)
+and
+.BR write (2)
+via
+.IR errno .
+The most common conditions reported by the underlying layer are:
+.TP
+.B EBADF
+The file descriptor associated with
+.I stream
+is not valid, or is not open for the required mode (reading for
+.BR fgets (),
+writing for
+.BR fputs ()).
+.TP
+.B EINTR
+The read or write call was interrupted by a signal before any data was transferred.
+.TP
+.B EIO
+A low-level I/O error occurred while accessing the underlying object.
+.SH SEE ALSO
+.BR fread (3),
+.BR fwrite (3),
+.BR fgetc (3),
+.BR fputc (3),
+.BR getline (3),
+.BR puts (3),
+.BR ferror (3),
+.BR scanf (3),
+.BR printf (3)
+.SH STANDARDS
+.BR fgets ()
+and
+.BR fputs ()
+conform to ISO C99 and POSIX.1-2008.
+.PP
+The historical
+.BR gets ()
+function was removed from the C language by ISO C11 and from POSIX by POSIX.1-2008
+on security grounds, and is intentionally not provided by Substrate libc.

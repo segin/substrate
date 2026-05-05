@@ -1,85 +1,168 @@
+#include "cal.h"
+
+#include "cal_math.h"
+#include "cal_opts.h"
+#include "cal_render.h"
+
+#include <locale.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
-#include <time.h> // We need time.h
 
-// Helper to determine day of week for 1st of month (0=Sun)
-// Zeller's congruence
-int get_day_of_week(int d, int m, int y) {
-    if (m < 3) {
-        m += 12;
-        y -= 1;
-    }
-    int k = y % 100;
-    int j = y / 100;
-    int day = (d + 13*(m+1)/5 + k + k/4 + j/4 + 5*j) % 7;
-    // Zeller returns 0=Sat, 1=Sun... 6=Fri
-    // Convert to 0=Sun, 1=Mon...
-    return (day + 6) % 7; // Wait, standard is: 0=Sat, 1=Sun...
-    // Let's verify:
-    // (h + 5) % 7? No.
-    // Result: 0 = Saturday, 1 = Sunday, 2 = Monday, ..., 6 = Friday
-    // We want 0 = Sunday. So (day + 1) % 7.
+static void
+cal_print_usage(FILE *stream, const char *progname)
+{
+    fprintf(stream,
+        "Usage: %s [OPTION]... [[month] year]\n"
+        "Display a calendar.\n",
+        progname);
 }
 
-int is_leap(int y) {
-    return (y % 4 == 0 && y % 100 != 0) || (y % 400 == 0);
+static void
+cal_print_help(const char *progname)
+{
+    cal_print_usage(stdout, progname);
+    fputs(
+        "\n"
+        "Options:\n"
+        "  -1                         display a single month\n"
+        "  -3                         display previous, current, and next month\n"
+        "  -y                         display a full year\n"
+        "  -m                         start weeks on Monday\n"
+        "  -s                         start weeks on Sunday\n"
+        "  -j                         display day-of-year numbers\n"
+        "  -w                         display ISO week numbers\n"
+        "  -n NUM                     display NUM months starting at the base month\n"
+        "  -A NUM                     display NUM months after the base month\n"
+        "  -B NUM                     display NUM months before the base month\n"
+        "  -h, --no-highlight         do not highlight today\n"
+        "      --color=WHEN           color mode: auto, always, never\n"
+        "      --gregorian            use Gregorian calendar rules only\n"
+        "      --julian               use Julian calendar rules only\n"
+        "  -p, --reform=DATE          set Gregorian reform date (YYYY-MM-DD)\n"
+        "      --help                 display this help and exit\n"
+        "      --version              output version information and exit\n",
+        stdout);
 }
 
-int days_in_month[] = {0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
-char *months[] = {"", "January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"};
-
-void print_cal(int m, int y) {
-    printf("     %s %d\n", months[m], y);
-    printf("Su Mo Tu We Th Fr Sa\n");
-    
-    int days = days_in_month[m];
-    if (m == 2 && is_leap(y)) days = 29;
-    
-    // Zeller: m=13,14 for Jan/Feb of prev year
-    int z_m = m;
-    int z_y = y;
-    if (z_m < 3) { z_m += 12; z_y--; }
-    int q = 1;
-    int K = z_y % 100;
-    int J = z_y / 100;
-    int h = (q + 13*(z_m+1)/5 + K + K/4 + J/4 + 5*J) % 7;
-    // h: 0=Sat, 1=Sun ...
-    // Map to 0=Sun (offset 3 spaces per day)
-    // 0(Sat) -> 6
-    // 1(Sun) -> 0
-    int start_day = (h + 6) % 7; // 0=Sun..6=Sat
-    
-    // Print padding
-    for (int i = 0; i < start_day; i++) printf("   ");
-    
-    for (int d = 1; d <= days; d++) {
-        printf("%2d ", d);
-        if ((start_day + d) % 7 == 0) printf("\n");
-    }
-    printf("\n");
+static void
+cal_print_version(void)
+{
+    puts(CAL_VERSION);
 }
 
-int main(int argc, char *argv[]) {
-    // Default to current date? We don't have time() syscall yet really.
-    // Mock current date: Dec 2025
-    int m = 12, y = 2025;
-    
-    if (argc == 3) {
-        m = atoi(argv[1]);
-        y = atoi(argv[2]);
-    } else if (argc == 2) {
-        y = atoi(argv[1]);
-        // Print whole year? Just do current month of that year for now or error
-        printf("Usage: cal [month] year\n");
-        return 0;
+static size_t
+cal_month_count(const struct cal_options *opts)
+{
+    if (opts->view_mode == CAL_VIEW_YEAR) {
+        return 12;
     }
-    
-    if (m < 1 || m > 12) {
-        printf("cal: illegal month value: use 1-12\n");
+    if (opts->view_mode == CAL_VIEW_RANGE) {
+        return (size_t)(opts->months_before + opts->months_after + 1);
+    }
+    return 1;
+}
+
+static size_t
+cal_column_count(const struct cal_options *opts, size_t month_count)
+{
+    if (opts->view_mode == CAL_VIEW_YEAR) {
+        return 3;
+    }
+    return month_count >= 3 ? 3 : month_count;
+}
+
+int
+main(int argc, char *argv[])
+{
+    const char *err_msg;
+    struct cal_options opts;
+    struct cal_date today;
+    struct cal_month_block *blocks;
+    long today_jdn;
+    size_t count;
+    size_t columns;
+    size_t index;
+    int start_year;
+    int start_month;
+
+    err_msg = NULL;
+    blocks = NULL;
+    setlocale(LC_TIME, "");
+
+    cal_options_init(&opts, argv[0]);
+    if (cal_parse_options(&opts, argc, argv, &err_msg) != 0) {
+        cal_print_usage(stderr, opts.progname);
+        if (err_msg != NULL) {
+            fprintf(stderr, "%s: %s\n", opts.progname, err_msg);
+        }
         return 1;
     }
-    
-    print_cal(m, y);
+    if (opts.show_help) {
+        cal_print_help(opts.progname);
+        return 0;
+    }
+    if (opts.show_version) {
+        cal_print_version();
+        return 0;
+    }
+
+    if (cal_get_current_date(&today, &today_jdn) != 0) {
+        today.year = 1970;
+        today.month = 1;
+        today.day = 1;
+        today_jdn = cal_gregorian_jdn(today.year, today.month, today.day);
+    }
+
+    count = cal_month_count(&opts);
+    columns = cal_column_count(&opts, count);
+    blocks = (struct cal_month_block *)calloc(count, sizeof(*blocks));
+    if (blocks == NULL) {
+        fprintf(stderr, "%s: out of memory\n", opts.progname);
+        return 1;
+    }
+
+    if (opts.view_mode == CAL_VIEW_YEAR) {
+        start_year = opts.base_year;
+        start_month = 1;
+    } else if (opts.view_mode == CAL_VIEW_RANGE) {
+        if (cal_add_months(opts.base_year, opts.base_month, -opts.months_before,
+                &start_year, &start_month) != 0) {
+            fprintf(stderr, "%s: month range exceeds supported year bounds\n",
+                opts.progname);
+            free(blocks);
+            return 1;
+        }
+    } else {
+        start_year = opts.base_year;
+        start_month = opts.base_month;
+    }
+
+    for (index = 0; index < count; ++index) {
+        int current_year;
+        int current_month;
+
+        if (cal_add_months(start_year, start_month, (int)index, &current_year,
+                &current_month) != 0 ||
+            cal_make_month_block(&opts, current_year, current_month, today_jdn,
+                opts.view_mode != CAL_VIEW_YEAR, &blocks[index]) != 0) {
+            fprintf(stderr, "%s: failed to render %d/%d\n", opts.progname,
+                current_month, current_year);
+            free(blocks);
+            return 1;
+        }
+    }
+
+    if (opts.view_mode == CAL_VIEW_YEAR) {
+        char year_title[32];
+        size_t total_width;
+
+        snprintf(year_title, sizeof(year_title), "%d", opts.base_year);
+        total_width = columns * blocks[0].width + (columns - 1) * 2;
+        cal_print_centered_header(stdout, year_title, total_width);
+        fputc('\n', stdout);
+    }
+    cal_print_month_blocks(stdout, blocks, count, columns);
+
+    free(blocks);
     return 0;
 }

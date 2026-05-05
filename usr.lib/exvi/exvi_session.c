@@ -282,11 +282,11 @@ handle_pop_command(buffer_t *b, int force)
     tag_frame_t frame;
 
     if (b->modified && !force) {
-        fprintf(stderr, "No write since last change (add ! to override)\n");
+        exvi_report_error("No write since last change (add ! to override)");
         return 1;
     }
     if (tag_stack_len == 0) {
-        fprintf(stderr, "Tag stack empty\n");
+        exvi_report_error("Tag stack empty");
         return 1;
     }
 
@@ -389,7 +389,7 @@ handle_tag_command(buffer_t *b, const char *args, void (*command_fn)(buffer_t *,
                 return 1;
             }
             if (push_tag_frame(b) != 0) {
-                fprintf(stderr, "Out of memory\n");
+                exvi_report_error("Out of memory");
                 free(line);
                 fclose(f);
                 return 1;
@@ -398,6 +398,14 @@ handle_tag_command(buffer_t *b, const char *args, void (*command_fn)(buffer_t *,
             buf_free(b);
             buf_init(b);
             b->filename = strdup(tfile);
+            if (!b->filename) {
+                exvi_report_error("Out of memory");
+                free(old_filename);
+                free(line);
+                fclose(f);
+                free(tags_path);
+                return 1;
+            }
             buf_read_file(b, b->filename);
             replace_saved_string(&alternate_filename, old_filename);
             free(old_filename);
@@ -1242,6 +1250,7 @@ handle_read_command(buffer_t *b, const char *args, int addr2)
                     perror("strdup");
                     return 1;
                 }
+                exvi_note_buffer_change();
                 free(b->head->text);
                 b->head->text = text;
                 b->head->len = strlen(text);

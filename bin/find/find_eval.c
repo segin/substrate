@@ -367,7 +367,9 @@ static void exec_batch_add(node_t *n, entry_t *e)
 {
 	if (n->batch_count >= n->batch_cap) {
 		n->batch_cap = n->batch_cap ? n->batch_cap * 2 : 256;
-		n->batch_args = realloc(n->batch_args, sizeof(char *) * n->batch_cap);
+		char **tmp = realloc(n->batch_args, sizeof(char *) * n->batch_cap);
+		if (!tmp) { perror("realloc"); exit(1); }
+		n->batch_args = tmp;
 	}
 	n->batch_args[n->batch_count++] = strdup(n->exec_dir ? e->name : e->path);
 

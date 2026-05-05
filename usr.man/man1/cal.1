@@ -1,0 +1,127 @@
+." cal(1)
+.TH CAL 1 "April 2026" "Substrate" "User Commands"
+.SH NAME
+cal \- display calendars
+.SH SYNOPSIS
+.B cal
+.RI [ OPTION ]...
+.RI [[ month ] year ]
+.SH DESCRIPTION
+.B cal
+prints a calendar for the current month by default.
+With one numeric operand it prints an entire year.
+With two numeric operands it prints the specified month of the specified year.
+.PP
+Substrate
+.B cal
+supports mixed Julian/Gregorian rendering with a configurable reform date.
+In the default mixed mode, dates before the reform are interpreted in the Julian calendar and dates on or after the reform are interpreted in the Gregorian calendar. Dates in the skipped transition gap are omitted from output.
+.SH OPTIONS
+.TP
+.B -1
+Display a single month.
+This is the default when no explicit year-only mode is selected.
+.TP
+.B -3
+Display the previous, current, and next month side by side.
+.TP
+.B -y
+Display an entire year in a three-column layout.
+.TP
+.B -m
+Start weeks on Monday.
+.TP
+.B -s
+Start weeks on Sunday.
+This is the default.
+.TP
+.B -j
+Display day-of-year ordinals instead of day-of-month numbers.
+.TP
+.B -w
+Display ISO week numbers in the left column.
+.TP
+.BI -n " NUM"
+Display
+.I NUM
+months starting at the base month.
+.TP
+.BI -A " NUM"
+Display
+.I NUM
+months after the base month.
+.TP
+.BI -B " NUM"
+Display
+.I NUM
+months before the base month.
+.TP
+.BR -h , " --no-highlight"
+Disable highlighting of today's date.
+.TP
+.BI --color = WHEN
+Control ANSI highlighting behavior.
+.I WHEN
+may be
+.BR auto ,
+.BR always ,
+or
+.BR never .
+.TP
+.B --gregorian
+Use Gregorian calendar rules exclusively.
+.TP
+.B --julian
+Use Julian calendar rules exclusively.
+.TP
+.BR -p , " --reform=" DATE
+Set the first Gregorian calendar date used in mixed mode.
+.I DATE
+must use the form
+.BR YYYY-MM-DD .
+.TP
+.B --help
+Display usage information and exit.
+.TP
+.B --version
+Display version information and exit.
+.SH REFORM HANDLING
+The default reform date is
+.BR 1752-09-14 .
+Under that default, September 1752 omits the dates 3 through 13 inclusive.
+.PP
+For a mixed-mode month, a textual date is shown only if it exists either as a Julian date before the reform or as a Gregorian date on or after the reform.
+.SH HIGHLIGHTING
+When highlighting is enabled,
+.B cal
+renders today's date with reverse-video ANSI escape sequences.
+In
+.B auto
+color mode this happens only when standard output is a terminal.
+.SH EXAMPLES
+.TP
+cal
+Display the current month.
+.TP
+cal 2024
+Display the entire 2024 calendar.
+.TP
+cal 9 1752
+Display September 1752 using the default British/American reform gap.
+.TP
+cal -3 1 2024
+Display December 2023, January 2024, and February 2024.
+.TP
+cal --julian 2 1900
+Display February 1900 using Julian leap-year rules.
+.SH EXIT STATUS
+.TP
+0
+Success.
+.TP
+1
+Usage error or rendering failure.
+.SH SEE ALSO
+.BR date (1),
+.BR strftime (3),
+.BR localtime (3)

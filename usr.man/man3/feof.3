@@ -1,0 +1,89 @@
+.\" feof.3 - check and reset stream status
+.TH FEOF 3 "May 2026" "Substrate" "Library Functions Manual"
+.SH NAME
+feof, ferror, clearerr \- check and reset stream status
+.SH LIBRARY
+.B libc
+.SH SYNOPSIS
+.B #include <stdio.h>
+.PP
+.BI "int feof(FILE *" stream ");"
+.PP
+.BI "int ferror(FILE *" stream ");"
+.PP
+.BI "void clearerr(FILE *" stream ");"
+.SH DESCRIPTION
+The
+.BR feof ()
+function tests the end-of-file indicator for the stream pointed to by
+.IR stream ,
+returning a non-zero value if it is set.
+The end-of-file indicator can be cleared only by an explicit call to
+.BR clearerr ().
+.PP
+The end-of-file indicator is set when a read from the underlying file
+descriptor returns zero bytes, signalling that no more input is
+available.
+A successful call to
+.BR ungetc (3)
+also clears the end-of-file indicator for the stream.
+.PP
+The
+.BR ferror ()
+function tests the error indicator for the stream pointed to by
+.IR stream ,
+returning a non-zero value if it is set.
+The error indicator is set when an underlying
+.BR read (2)
+or
+.BR write (2)
+system call returns -1, indicating that an I/O error has occurred on the
+stream.
+The error indicator can be reset only by an explicit call to
+.BR clearerr ().
+.PP
+The
+.BR clearerr ()
+function clears both the end-of-file and error indicators for the stream
+pointed to by
+.IR stream .
+.PP
+The end-of-file and error indicators are distinct: a stream may report
+end-of-file without an error, or an error without end-of-file, and a
+caller that needs to distinguish the two conditions after a short or
+failed I/O operation should test both.
+.SH RETURN VALUE
+The
+.BR feof ()
+function returns non-zero if the end-of-file indicator is set for
+.IR stream ,
+and zero otherwise.
+.PP
+The
+.BR ferror ()
+function returns non-zero if the error indicator is set for
+.IR stream ,
+and zero otherwise.
+.PP
+The
+.BR clearerr ()
+function returns no value.
+.PP
+These functions do not themselves set
+.IR errno .
+.SH SEE ALSO
+.BR fopen (3),
+.BR fread (3),
+.BR fwrite (3),
+.BR fgetc (3),
+.BR fputc (3),
+.BR ungetc (3),
+.BR read (2),
+.BR write (2)
+.SH STANDARDS
+The
+.BR feof (),
+.BR ferror (),
+and
+.BR clearerr ()
+functions conform to ISO C (C89 and later) and POSIX.1.

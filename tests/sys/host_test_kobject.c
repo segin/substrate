@@ -47,7 +47,7 @@ void fail(const char *msg) {
 void my_release(struct kobject *kobj) {
     release_called++;
     released_obj = kobj;
-    // printf("Release called for %s\n", kobj->name);
+
 }
 
 void test_kobject_init(void) {

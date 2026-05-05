@@ -6,7 +6,7 @@
 
 // Mocks for kernel functions
 void kprint(const char *s) {
-    // printf("[KERNEL] %s", s);
+
 }
 
 void *kmalloc(size_t size) {

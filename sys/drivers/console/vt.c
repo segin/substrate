@@ -9,6 +9,8 @@
 #include <kern/console.h>
 #include <string.h>
 #include <sys/tty.h>
+#include <sys/lock.h>
+#include <arch/i386/intr.h>
 #include <kern/time.h>
 #include <arch/x86-common/rtc.h>
 #include <stdio.h>
@@ -19,6 +21,14 @@ static int vt_width = VT_DEFAULT_WIDTH;
 static int vt_height = VT_DEFAULT_HEIGHT;
 static int vt_initialized = 0;
 static uint16_t vt_buffer_scratch[VT_MAX_BUF_SIZE];
+
+/*
+ * Serializes vt_activate() so a switch can't race with concurrent
+ * console writes to the previously-active VT.  Held only briefly
+ * around the active_vt flip + LED/console handoff; per-VT cell state
+ * remains protected by the framebuffer/console layer's own locks.
+ */
+static spinlock_t vt_switch_lock = SPINLOCK_INIT("vt_switch");
 
 void vt_redraw_active(void);
 
@@ -368,9 +378,20 @@ struct tty *vt_get_active_tty(void) {
 void vt_activate(int n) {
     vt_state_t *old_vt;
     vt_state_t *vt;
+    uint32_t flags;
 
     if (n < 0 || n >= VT_MAX) return;
-    if (n == active_vt) return;
+
+    flags = intr_disable();
+    spinlock_acquire(&vt_switch_lock);
+
+    /* Re-check inside the critical section: another CPU may have
+     * already activated this VT. */
+    if (n == active_vt) {
+        spinlock_release(&vt_switch_lock);
+        intr_restore(flags);
+        return;
+    }
 
     old_vt = &vt_states[active_vt];
     old_vt->led_state = keyboard_get_led_state();
@@ -381,6 +402,12 @@ void vt_activate(int n) {
     if (vt->tty) {
         console_set_tty(vt->tty);
     }
+
+    spinlock_release(&vt_switch_lock);
+    intr_restore(flags);
+
+    /* Redraw outside the lock — fb_console takes its own lock and we
+     * don't want to nest console locks under vt_switch_lock. */
     vt_redraw_active();
 }
 

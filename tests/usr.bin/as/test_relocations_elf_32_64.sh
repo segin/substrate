@@ -19,6 +19,7 @@ f32:
 
 .data
     .long ext32
+    .long ext32 + 20 - 8
     .long .text
 SRC
 
@@ -35,6 +36,7 @@ f64:
 
 .data
     .quad ext64 + 8
+    .quad ext64 + 20 - 8
     .quad .text + 16
 SRC
 
@@ -68,8 +70,10 @@ readelf --wide -r "$TMP/rel64.o" | grep -q "R_X86_64_64"
 
 # Addend handling and section/symbol-relative relocations
 readelf --wide -r "$TMP/rel64.o" | grep -Eq "ext64.*\+ 8"
+readelf --wide -r "$TMP/rel64.o" | grep -Eq "ext64.*\+ (12|c)"
 readelf --wide -r "$TMP/rel64.o" | grep -Eq "\\.text.*\+ (16|10)"
 readelf --wide -r "$TMP/rel32.o" | grep -q "\\.text"
+objdump -s -j .data "$TMP/rel32.o" | grep -q "00000000 0c000000"
 
 # String/symbol tables and section header layout basics
 readelf -S "$TMP/rel32.o" | grep -q "\\.symtab"

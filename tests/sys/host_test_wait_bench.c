@@ -73,7 +73,7 @@ thread_t *current_thread = NULL;
 
 // Mock Functions
 void kprint(const char *msg) {
-    // printf("%s", msg);
+
     (void)msg;
 }
 

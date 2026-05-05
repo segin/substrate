@@ -144,7 +144,7 @@ static void *zero_mmap(fs_node_t *node, void *addr, size_t length, int prot, int
  */
 void zero_init(void) {
     memset(&zero_node, 0, sizeof(fs_node_t));
-    strcpy(zero_node.name, "zero");
+    strlcpy(zero_node.name, "zero", sizeof(zero_node.name));
     zero_node.flags = FS_CHARDEVICE;
     zero_node.mask = 0666;
     zero_node.uid = 0;

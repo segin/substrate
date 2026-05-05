@@ -43,13 +43,13 @@ void spinlock_acquire(spinlock_t *lock) {
     spinlock_acquire_count++;
     lock->locked = 1;
     last_acquired_lock_name = lock->name;
-    // printf("Acquired lock: %s\n", lock->name ? lock->name : "NULL");
+
 }
 
 void spinlock_release(spinlock_t *lock) {
     spinlock_release_count++;
     lock->locked = 0;
-    // printf("Released lock: %s\n", lock->name ? lock->name : "NULL");
+
 }
 
 bool spinlock_is_held(spinlock_t *lock) {

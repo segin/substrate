@@ -57,7 +57,9 @@ void linux_sendsig(void *handler, int sig, uint32_t mask, uint32_t flags, void *
         memset(&frame, 0, sizeof(frame));
 
         esp -= sizeof(struct linux_rt_sigframe);
-        esp &= ~0xFUL;
+        /* x86 ABI: ESP must be 16-byte aligned before CALL.
+         * pretcode at [ESP] acts as return address, so align ESP-4 to 16. */
+        esp = ((esp + 4) & ~0xFUL) - 4;
 
         if (validate_user_addr((void*)(uintptr_t)esp, sizeof(frame)) != 0) {
             sigexit(current_process, SIGSEGV);
@@ -121,7 +123,9 @@ void linux_sendsig(void *handler, int sig, uint32_t mask, uint32_t flags, void *
         memset(&frame, 0, sizeof(frame));
 
         esp -= sizeof(struct linux_sigframe);
-        esp &= ~0xFUL;
+        /* x86 ABI: ESP must be 16-byte aligned before CALL.
+         * pretcode at [ESP] acts as return address, so align ESP-4 to 16. */
+        esp = ((esp + 4) & ~0xFUL) - 4;
 
         if (validate_user_addr((void*)(uintptr_t)esp, sizeof(frame)) != 0) {
             sigexit(current_process, SIGSEGV);
