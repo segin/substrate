@@ -110,6 +110,11 @@ typedef struct sb16_dev {
 	uintptr_t dma_phys;
 	size_t   dma_size;
 
+	/* Back-pressure: SB16 single-buffer DMA, so at most one chunk
+	 * is in flight.  Block in write() until IRQ confirms drain. */
+	volatile uint32_t writes_queued;
+	volatile uint32_t plays_done;
+
 	audio_dev_t audio;
 } sb16_dev_t;
 
@@ -194,7 +199,10 @@ static int sb16_irq_handler(unsigned int irq, void *dev_id, void *frame)
 	if (d == NULL) {
 		return 0;
 	}
+	/* Reading the 16-bit INTR ack port clears the latched interrupt
+	 * line in the DSP — required even for single-shot DMA. */
 	(void)inb((uint16_t)(d->io_base + SB16_REG_INTR_ACK_16));
+	__atomic_add_fetch(&d->plays_done, 1, __ATOMIC_ACQ_REL);
 	return 1;
 }
 
@@ -282,7 +290,28 @@ static int sb16_write(audio_dev_t *adev, const void *buf, size_t len)
 		return (int)len;
 	}
 	copy_len = (len > d->dma_size) ? d->dma_size : len;
+
+	/*
+	 * Back-pressure: SB16 single-shot DMA — at most one chunk in
+	 * flight.  Block until IRQ has confirmed the previous chunk
+	 * drained.  Without this, every write() reprograms the DMA
+	 * pointer mid-playback and the DSP races through whatever's in
+	 * the (partially overwritten) buffer at full speed.
+	 */
+	for (;;) {
+		uint32_t done = __atomic_load_n(&d->plays_done,
+		                                __ATOMIC_ACQUIRE);
+		uint32_t in_flight = d->writes_queued - done;
+		if (in_flight == 0) {
+			break;
+		}
+		__asm__ volatile("pause");
+	}
+
 	memcpy(d->dma_buf, buf, copy_len);
+	/* Make the buffer write visible to the DMA controller before we
+	 * program the DMA address registers. */
+	__sync_synchronize();
 
 	sb16_program_dma16(d, copy_len);
 
@@ -293,6 +322,8 @@ static int sb16_write(audio_dev_t *adev, const void *buf, size_t len)
 	sb16_dsp_write(d, mode);
 	sb16_dsp_write(d, (uint8_t)(samples & 0xFF));
 	sb16_dsp_write(d, (uint8_t)((samples >> 8) & 0xFF));
+
+	d->writes_queued++;
 	return (int)copy_len;
 }
 

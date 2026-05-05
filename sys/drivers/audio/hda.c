@@ -155,6 +155,18 @@ typedef struct hda_dev {
 	uint8_t          stream_tag;
 	uint8_t          next_idx;
 
+	/* Back-pressure: writes_queued bumps in hda_write after we
+	 * advance LVI; slots_played bumps in IRQ handler on BCIS.
+	 * Block when in_flight = (writes_queued - slots_played) hits
+	 * BDL_ENTRIES - 1 to leave a slot for the controller's
+	 * prefetch.  Same template as ac97 — independent of any
+	 * hardware position register. */
+	volatile uint32_t writes_queued;
+	volatile uint32_t slots_played;
+
+	int              running;       /* SDCTL.RUN has been set; don't
+	                                 * re-write CTL on every queue */
+
 	audio_dev_t      audio;
 } hda_dev_t;
 
@@ -327,9 +339,15 @@ static int hda_irq_handler(unsigned int irq, void *dev_id, void *frame)
 	if (status == 0) {
 		return 0;
 	}
-	/* ACK output stream 0 status if it fired. */
+	/* ACK output stream 0 status if it fired.  BCIS = buffer
+	 * completion (one IOC-marked BDL slot drained); track for the
+	 * write-path back-pressure. */
 	sdsts = hda_read8(d, HDA_SD_BASE + HDA_SD_STS);
 	if (sdsts & (HDA_SDSTS_BCIS | HDA_SDSTS_FIFOE | HDA_SDSTS_DESE)) {
+		if (sdsts & HDA_SDSTS_BCIS) {
+			__atomic_add_fetch(&d->slots_played, 1,
+			                   __ATOMIC_ACQ_REL);
+		}
 		hda_write8(d, HDA_SD_BASE + HDA_SD_STS,
 		           sdsts & (HDA_SDSTS_BCIS | HDA_SDSTS_FIFOE |
 		                    HDA_SDSTS_DESE));
@@ -432,6 +450,22 @@ static int hda_write(audio_dev_t *adev, const void *buf, size_t len)
 	}
 	copy_len = (len > HDA_CHUNK_BYTES) ? HDA_CHUNK_BYTES : len;
 
+	/*
+	 * Back-pressure: cap in-flight slots at BDL_ENTRIES-1 so the
+	 * controller always has at least one new slot to prefetch.
+	 * IRQ handler bumps slots_played on each BCIS; we bump
+	 * writes_queued after committing this slot.
+	 */
+	for (;;) {
+		uint32_t played = __atomic_load_n(&d->slots_played,
+		                                  __ATOMIC_ACQUIRE);
+		uint32_t in_flight = d->writes_queued - played;
+		if (in_flight < (HDA_BDL_ENTRIES - 1)) {
+			break;
+		}
+		__asm__ volatile("pause");
+	}
+
 	slot = d->next_idx;
 	memcpy((uint8_t *)d->chunk_buf + (size_t)slot * HDA_CHUNK_BYTES,
 	       buf, copy_len);
@@ -441,13 +475,28 @@ static int hda_write(audio_dev_t *adev, const void *buf, size_t len)
 	                    (uint64_t)slot * HDA_CHUNK_BYTES,
 	                    (uint32_t)copy_len, 1 /* IOC */);
 
+	/* Make the BDL store globally visible before LVI / CBL update —
+	 * the controller may fetch this entry the moment LVI changes. */
+	__sync_synchronize();
+
 	hda_write16(d, HDA_SD_BASE + HDA_SD_LVI, slot);
-	hda_write32(d, HDA_SD_BASE + HDA_SD_CBL, (uint32_t)copy_len);
+	/* CBL is the cyclic buffer length — the total byte count the
+	 * controller streams before wrapping.  For a true ring we'd
+	 * compute the sum of all live BDL entries, but with uniform
+	 * CHUNK_BYTES slots that simplifies to entries * CHUNK_BYTES.
+	 * Use the full ring so the controller never thinks we've
+	 * "ended" mid-stream. */
+	hda_write32(d, HDA_SD_BASE + HDA_SD_CBL,
+	            (uint32_t)(HDA_BDL_ENTRIES * HDA_CHUNK_BYTES));
 
-	ctl = HDA_SDCTL_RUN | HDA_SDCTL_IOCE |
-	      ((uint32_t)d->stream_tag << HDA_SDCTL_STREAM_SHIFT);
-	hda_write32(d, HDA_SD_BASE + HDA_SD_CTL, ctl);
+	if (!d->running) {
+		ctl = HDA_SDCTL_RUN | HDA_SDCTL_IOCE |
+		      ((uint32_t)d->stream_tag << HDA_SDCTL_STREAM_SHIFT);
+		hda_write32(d, HDA_SD_BASE + HDA_SD_CTL, ctl);
+		d->running = 1;
+	}
 
+	d->writes_queued++;
 	d->next_idx = (uint8_t)((slot + 1U) % HDA_BDL_ENTRIES);
 	return (int)copy_len;
 }
