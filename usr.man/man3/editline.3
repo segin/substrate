@@ -12,6 +12,10 @@ Editline library (libedit, \-ledit)
 .B typedef struct editline EditLine;
 .br
 .B typedef struct history History;
+.br
+.B typedef const char *(*el_pfunc_t)(EditLine *);
+.br
+.B typedef unsigned char (*el_func_t)(EditLine *, int);
 .PP
 .B typedef struct lineinfo {
 .br
@@ -43,13 +47,17 @@ Editline library (libedit, \-ledit)
 .br
 .BI "int el_get(EditLine *el, int op, ...);"
 .br
+.BI "void el_resize(EditLine *el);"
+.br
 .BI "int el_source(EditLine *el, const char *file);"
 .br
 .BI "const LineInfo *el_line(EditLine *el);"
 .br
 .BI "int el_insertstr(EditLine *el, const char *str);"
 .br
-.BI "int el_deletestr(EditLine *el, int count);"
+.BI "void el_deletestr(EditLine *el, int count);"
+.br
+.BI "int el_replacestr(EditLine *el, const char *str);"
 .PP
 .BI "History *history_init(void);"
 .br
@@ -237,10 +245,25 @@ and
 include:
 .TP
 .B EL_PROMPT
-Set/get primary prompt callback.
+Set/get the primary prompt callback.  The
+.BR el_set ()
+argument is an
+.I el_pfunc_t
+and
+.BR el_get ()
+stores an
+.I el_pfunc_t
+in the caller-supplied pointer.
+.TP
+.B EL_PROMPT_ESC
+Set/get the primary prompt callback plus the character used to mark
+non-printing prompt escape spans.
 .TP
 .B EL_RPROMPT
-Set/get right-side prompt callback.
+Set/get the right-side prompt callback.
+.TP
+.B EL_RPROMPT_ESC
+Set/get the right-side prompt callback plus the non-printing escape marker.
 .TP
 .B EL_EDITOR
 Set/get editing mode (for example, "emacs" or "vi").
@@ -272,8 +295,11 @@ Query terminal capability values.
 .B EL_SETTY
 Apply tty mode presets.
 .TP
-.B EL_GETTY
-Read current tty mode presets.
+.B EL_GETFP
+Fetch the input, output, or error stream.
+.TP
+.B EL_SETFP
+Set the input, output, or error stream.
 .PP
 Public history operation macros used with
 .BR history ()

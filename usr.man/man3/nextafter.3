@@ -1,0 +1,380 @@
+.TH NEXTAFTER 3 "May 2026" "Substrate" "Library Functions Manual"
+.SH NAME
+nextafter, nextafterf, nextafterl, nexttoward, nexttowardf, nexttowardl, nextup, nextupf, nextupl, nextdown, nextdownf, nextdownl \- next representable floating-point value
+.SH LIBRARY
+Math library (libm, \-lm)
+.SH SYNOPSIS
+.B #include <math.h>
+.PP
+.BI "double nextafter(double " x ", double " y );
+.br
+.BI "float nextafterf(float " x ", float " y );
+.br
+.BI "long double nextafterl(long double " x ", long double " y );
+.PP
+.BI "double nexttoward(double " x ", long double " y );
+.br
+.BI "float nexttowardf(float " x ", long double " y );
+.br
+.BI "long double nexttowardl(long double " x ", long double " y );
+.PP
+.BI "double nextup(double " x );
+.br
+.BI "float nextupf(float " x );
+.br
+.BI "long double nextupl(long double " x );
+.PP
+.BI "double nextdown(double " x );
+.br
+.BI "float nextdownf(float " x );
+.br
+.BI "long double nextdownl(long double " x );
+.SH DESCRIPTION
+The
+.BR nextafter ()
+family returns the next representable floating-point value after
+.I x
+in the direction of
+.IR y .
+If
+.I x
+equals
+.IR y ,
+the functions return
+.I y
+converted to the return type (so that, for example,
+.BR nextafter ()
+of two equal arguments returns the second argument unchanged in sign,
+including the case of signed zeros).
+.PP
+The
+.BR nexttoward ()
+family behaves identically to
+.BR nextafter (),
+except that the second argument
+.I y
+is always of type
+.BR "long double" .
+This permits a finer-grained direction argument when the first
+operand is
+.B float
+or
+.BR double ,
+and avoids loss of precision when comparing
+.I x
+against an extended-precision target value.
+.PP
+The
+.BR nextup ()
+family (introduced in C23 / ISO/IEC 60559:2020) returns the least
+.B float
+(respectively
+.B double
+or
+.BR "long double" )
+that compares greater than
+.IR x ;
+that is, the next representable value in the direction of positive
+infinity.  The
+.BR nextdown ()
+family returns the greatest representable value that compares less
+than
+.IR x ;
+that is, the next representable value in the direction of negative
+infinity.  These are equivalent to
+.BI nextafter( x ", +INFINITY)"
+and
+.BI nextafter( x ", \-INFINITY)"
+respectively, except for the handling of NaN (see RETURN VALUE).
+.PP
+On a binary IEC 60559 platform such as Substrate, "next representable"
+means a one-unit-in-the-last-place
+.RB ( ULP )
+step in the bit pattern: for normalized numbers the result differs from
+.I x
+by 2^(E\-p+1), where
+.I E
+is the unbiased exponent of
+.I x
+and
+.I p
+is the precision of the format (24 for
+.BR float ,
+53 for
+.BR double ,
+64 for IEEE\ 754 80-bit
+.BR "long double" ).
+For subnormal numbers the step is the smallest representable positive
+value of the format (DBL_MIN \(mu 2^(\-52) for
+.BR double ).
+.PP
+Crossing zero is well defined: the next value above
+.B \-0.0
+is the smallest positive subnormal, and the next value below
+.B +0.0
+is the smallest negative subnormal (in magnitude).  Stepping outward
+from
+.B \(+-DBL_MAX
+yields
+.BR \(+-INFINITY ;
+stepping inward from
+.B \(+-INFINITY
+yields
+.BR \(+-DBL_MAX .
+.SH RETURN VALUE
+On success,
+.BR nextafter ()
+and
+.BR nexttoward ()
+return the next representable value after
+.I x
+in the direction of
+.IR y .
+If
+.I x
+equals
+.IR y ,
+.I y
+(converted to the return type) is returned.
+.PP
+.BR nextup ()
+returns the next representable value strictly greater than
+.IR x ;
+.BR nextdown ()
+returns the next representable value strictly less than
+.IR x .
+.PP
+The following special cases apply:
+.TP
+.IR x " or " y " is a NaN"
+For
+.BR nextafter ()
+and
+.BR nexttoward (),
+a NaN is returned.
+.TP
+.B "nextup(NaN)"
+returns a NaN; likewise for
+.BR nextdown ().
+.TP
+.B "nextup(\-Inf)"
+returns
+.BR \-DBL_MAX
+(or the format equivalent: the most negative finite value).
+.TP
+.B "nextup(+Inf)"
+returns
+.BR +Inf .
+.TP
+.B "nextdown(+Inf)"
+returns
+.B +DBL_MAX
+(or the format equivalent: the largest finite value).
+.TP
+.B "nextdown(\-Inf)"
+returns
+.BR \-Inf .
+.TP
+.B "nextup(\-0.0)"
+returns the smallest positive subnormal value of the format.
+.TP
+.B "nextdown(+0.0)"
+returns the negative of the smallest positive subnormal value.
+.PP
+If the magnitude of
+.I x
+equals the largest finite value of the format and the result would
+step outward (away from zero), a range (overflow) error occurs and the
+function returns
+.B \(+-HUGE_VAL
+(or
+.B \(+-HUGE_VALF
+or
+.BR \(+-HUGE_VALL )
+with the sign of
+.IR x .
+.PP
+If
+.I x
+is
+.B \(+-0
+and the result steps outward (toward
+.IR y ),
+or if
+.I x
+is the smallest positive (largest negative) subnormal stepping toward
+zero, a range (underflow) error occurs and the function returns the
+smallest representable subnormal value (or signed zero) with the
+appropriate sign.
+.SH ERRORS
+See
+.BR math_error (7)
+for information on how to determine whether an error has occurred when
+calling these functions.
+.PP
+The following errors can occur:
+.TP
+Range error: result overflow
+.I x
+is finite and the result is infinite (the function steps outward from
+.BR \(+-DBL_MAX ).
+An overflow floating-point exception
+.RB ( FE_OVERFLOW )
+is raised.  If
+.I "math_errhandling & MATH_ERRNO"
+is non-zero,
+.I errno
+is set to
+.BR ERANGE .
+.TP
+Range error: result underflow
+.I x
+is finite and the result is subnormal (the function steps outward from
+.B \(+-0
+into the subnormal range, or between subnormals).  An underflow
+floating-point exception
+.RB ( FE_UNDERFLOW )
+is raised.  If
+.I "math_errhandling & MATH_ERRNO"
+is non-zero,
+.I errno
+is set to
+.BR ERANGE .
+.PP
+No domain error is raised when
+.I x
+or
+.I y
+is NaN; the NaN is propagated as the result.
+.PP
+.BR nextup ()
+and
+.BR nextdown ()
+follow the same range-error rules as
+.BR nextafter ()
+when stepping past
+.B \(+-DBL_MAX
+or producing a subnormal result.
+.SH ATTRIBUTES
+For an explanation of the terms used in this section, see
+.BR attributes (7).
+.TS
+allbox;
+lb lb lb
+l l l.
+Interface	Attribute	Value
+T{
+.BR nextafter (),
+.BR nextafterf (),
+.BR nextafterl (),
+.BR nexttoward (),
+.BR nexttowardf (),
+.BR nexttowardl (),
+.BR nextup (),
+.BR nextupf (),
+.BR nextupl (),
+.BR nextdown (),
+.BR nextdownf (),
+.BR nextdownl ()
+T}	Thread safety	MT-Safe
+.TE
+.SH STANDARDS
+.BR nextafter (),
+.BR nexttoward (),
+and their
+.BR f / l
+variants conform to C99 and POSIX.1-2008.
+.BR nextup ()
+and
+.BR nextdown ()
+were standardized in ISO/IEC 60559:2020 and added to C in C23.  The
+handling of zero, infinity, and NaN follows C99 Annex F.10.8 and the
+IEC 60559 nextUp/nextDown operations.
+.SH EXAMPLES
+The following program walks a few ULPs above
+.B 1.0
+to illustrate the granularity of
+.B double
+precision near unity, and contrasts
+.BR nextup ()
+with
+.BR nextdown ()
+at the same point:
+.PP
+.RS 4
+.EX
+#include <float.h>
+#include <math.h>
+#include <stdio.h>
+
+int
+main(void)
+{
+    double x = 1.0;
+    double up, down;
+    int i;
+
+    /* Step four ULPs above 1.0. */
+    for (i = 0; i < 4; i++) {
+        double next = nextafter(x, INFINITY);
+        printf("ulp #%d above 1.0: %.17g (delta = %.3e)\en",
+               i + 1, next, next - x);
+        x = next;
+    }
+
+    /* nextup vs nextdown at 1.0. */
+    up   = nextup(1.0);
+    down = nextdown(1.0);
+    printf("nextup  (1.0) = %.17g (delta = %.3e)\en",
+           up,   up   - 1.0);
+    printf("nextdown(1.0) = %.17g (delta = %.3e)\en",
+           down, down - 1.0);
+
+    /* Crossing zero. */
+    printf("nextafter(+0, -1) = %.3e\en", nextafter(0.0, -1.0));
+    printf("nextafter(-0, +1) = %.3e\en", nextafter(-0.0, 1.0));
+
+    /* Outward overshoot from DBL_MAX. */
+    printf("nextafter(DBL_MAX, INF) = %g\en",
+           nextafter(DBL_MAX, INFINITY));
+
+    return 0;
+}
+.EE
+.RE
+.PP
+A representative output is:
+.PP
+.RS 4
+.EX
+ulp #1 above 1.0: 1.0000000000000002 (delta = 2.220e-16)
+ulp #2 above 1.0: 1.0000000000000004 (delta = 2.220e-16)
+ulp #3 above 1.0: 1.0000000000000007 (delta = 2.220e-16)
+ulp #4 above 1.0: 1.0000000000000009 (delta = 2.220e-16)
+nextup  (1.0) = 1.0000000000000002 (delta = 2.220e-16)
+nextdown(1.0) = 0.99999999999999989 (delta = -1.110e-16)
+nextafter(+0, -1) = -4.941e-324
+nextafter(-0, +1) = 4.941e-324
+nextafter(DBL_MAX, INF) = inf
+.EE
+.RE
+.PP
+Note that the step below
+.B 1.0
+is half the step above it: the binade
+.BR [0.5,\ 1.0)
+has exponent \-1, so its ULP is
+.B 2^\-53
+rather than
+.BR 2^\-52 .
+This asymmetry is intrinsic to floating-point representation, not a
+quirk of the implementation.
+.SH SEE ALSO
+.BR nextafterf (3),
+.BR fpclassify (3),
+.BR fenv (3),
+.BR frexp (3),
+.BR ilogb (3),
+.BR math_error (7)
+.SH COLOPHON
+This page is part of the Substrate operating system documentation.

@@ -1,0 +1,115 @@
+.TH FEGETROUND 3 "2026-05-03" "Substrate" "Library Functions Manual"
+.SH NAME
+fegetround, fesetround \- get and set the floating-point rounding mode
+.SH LIBRARY
+Math Library (libm, \-lm)
+.SH SYNOPSIS
+.nf
+.B #include <fenv.h>
+.PP
+.B "int fegetround(void);"
+.BI "int fesetround(int " rdir );
+.fi
+.SH DESCRIPTION
+The
+.BR fegetround ()
+and
+.BR fesetround ()
+functions query and set the current floating-point rounding direction.
+.SS fegetround
+.BR fegetround ()
+returns the rounding direction macro corresponding to the current rounding
+mode.
+The default mode after program startup is
+.BR FE_TONEAREST .
+.SS fesetround
+.BR fesetround ()
+sets the floating-point rounding mode to
+.IR rdir .
+The argument must be one of the rounding mode macros defined in
+.IR <fenv.h> :
+.TP
+.B FE_TONEAREST
+Round to the nearest representable value; ties are broken by rounding to even
+(the default IEEE 754 mode).
+.TP
+.B FE_DOWNWARD
+Round toward negative infinity (floor rounding).
+.TP
+.B FE_UPWARD
+Round toward positive infinity (ceiling rounding).
+.TP
+.B FE_TOWARDZERO
+Round toward zero (truncation).
+.PP
+On x86, the rounding bits are stored in both the x87 control word (bits 10:11)
+and, when SSE is available, in the MXCSR register (bits 13:14).
+.BR fesetround ()
+updates both.
+.PP
+Changing the rounding mode affects all subsequent floating-point operations
+in the calling thread until the mode is changed again.
+To limit the scope of a rounding-mode change, save the current mode with
+.BR fegetround ()
+and restore it afterward:
+.PP
+.nf
+int saved = fegetround();
+fesetround(FE_UPWARD);
+/* ... operations under FE_UPWARD ... */
+fesetround(saved);
+.fi
+.SH RETURN VALUE
+.BR fegetround ()
+returns the current rounding mode macro
+.RB ( FE_TONEAREST ,
+.BR FE_DOWNWARD ,
+.BR FE_UPWARD ,
+or
+.BR FE_TOWARDZERO )
+on success, or a negative value if the current rounding mode cannot be
+determined.
+.PP
+.BR fesetround ()
+returns zero on success.
+A non-zero return value indicates that
+.I rdir
+is not a valid rounding-mode macro or is not supported by the implementation.
+.SH ERRORS
+No errors are defined.
+Neither function sets
+.IR errno .
+.SH EXAMPLES
+The following example saves the current rounding mode, switches to
+.BR FE_UPWARD ,
+performs a computation, and then restores the original mode:
+.PP
+.nf
+#pragma STDC FENV_ACCESS ON
+#include <fenv.h>
+#include <stdio.h>
+
+int main(void)
+{
+    /* Save the current rounding mode. */
+    int saved_rounding = fegetround();
+
+    /* Switch to round-toward-positive-infinity. */
+    if (fesetround(FE_UPWARD) != 0) {
+        fprintf(stderr, "fesetround: unsupported mode\\n");
+        return 1;
+    }
+
+    volatile double a = 1.0, b = 3.0;
+    volatile double result = a / b;   /* rounded up */
+    printf("1.0 / 3.0 (FE_UPWARD) = %.17g\\n", result);
+
+    /* Restore the original rounding mode. */
+    fesetround(saved_rounding);
+
+    return 0;
+}
+.fi
+.SH SEE ALSO
+.BR fenv (7),
+.BR fegetenv (3)

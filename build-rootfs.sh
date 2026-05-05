@@ -49,6 +49,18 @@ build_components() {
     echo "Building libc..."
     make -C "$TOP/lib/c" -j4
 
+    echo "Building runtime libraries..."
+    make -C "$TOP/lib/sys" -j4
+    make -C "$TOP/lib/m" -j4
+    make -C "$TOP/usr.lib/elfobj" -j4
+
+    echo "Building target toolchain..."
+    for dir in cc as ld ar ranlib nm objdump objcopy readelf strip strings size addr2line elfedit; do
+        if [ -f "$TOP/usr.bin/$dir/Makefile" ]; then
+            make -C "$TOP/usr.bin/$dir" -j4
+        fi
+    done
+
     echo "Building userland..."
     make -C "$TOP/bin" -j4
 }
@@ -79,6 +91,62 @@ install_to_dist() {
     cp -r "$TOP/etc/." "$DIST/etc/"
     cp "$TOP/etc/init.sh" "$DIST/sbin/init"
     chmod +x "$DIST/sbin/init"
+
+    echo "Installing toolchain to dist/usr/bin..."
+    mkdir -p "$DIST/usr/bin"
+    # C compiler and preprocessor
+    if [ -f "$TOP/usr.bin/cc/cc" ]; then
+        cp "$TOP/usr.bin/cc/cc" "$DIST/usr/bin/"
+        ln -sf cc "$DIST/usr/bin/cpp"
+    fi
+    # Assembler
+    if [ -f "$TOP/usr.bin/as/as" ]; then
+        cp "$TOP/usr.bin/as/as" "$DIST/usr/bin/"
+    fi
+    # Linker
+    if [ -f "$TOP/usr.bin/ld/ld" ]; then
+        cp "$TOP/usr.bin/ld/ld" "$DIST/usr/bin/"
+    fi
+    # Archive tools
+    for tool in ar ranlib nm objdump objcopy readelf strip strings size addr2line elfedit; do
+        if [ -f "$TOP/usr.bin/$tool/$tool" ]; then
+            cp "$TOP/usr.bin/$tool/$tool" "$DIST/usr/bin/"
+        fi
+    done
+    # CC resource directory (SIMD headers)
+    if [ -d "$TOP/usr.bin/cc/resource" ]; then
+        mkdir -p "$DIST/usr/lib/substratecc"
+        cp -r "$TOP/usr.bin/cc/resource/include" "$DIST/usr/lib/substratecc/"
+    fi
+
+    echo "Installing usr.sbin binaries..."
+    mkdir -p "$DIST/usr/sbin"
+    for dir in "$TOP/usr.sbin"/*/ ; do
+        if [ -d "$dir" ]; then
+            name=$(basename "$dir")
+            if [ -f "$dir/$name" ]; then
+                cp "$dir/$name" "$DIST/usr/sbin/"
+            fi
+        fi
+    done
+
+    echo "Installing sbin binaries..."
+    for dir in "$TOP/sbin"/*/ ; do
+        if [ -d "$dir" ]; then
+            name=$(basename "$dir")
+            if [ -f "$dir/$name" ]; then
+                cp "$dir/$name" "$DIST/sbin/"
+            fi
+        fi
+    done
+
+    echo "Installing libraries to dist/usr/lib..."
+    # crt0 and libsys needed for linking
+    [ -f "$TOP/lib/c/crt0.o" ] && cp "$TOP/lib/c/crt0.o" "$DIST/usr/lib/"
+    [ -f "$TOP/lib/sys/libsys.a" ] && cp "$TOP/lib/sys/libsys.a" "$DIST/usr/lib/"
+    [ -f "$TOP/lib/m/libm.a" ] && cp "$TOP/lib/m/libm.a" "$DIST/usr/lib/"
+    # elfobj library (needed by ld, as)
+    [ -f "$TOP/usr.lib/elfobj/libelfobj.a" ] && cp "$TOP/usr.lib/elfobj/libelfobj.a" "$DIST/usr/lib/"
 
     echo "Root filesystem prepared in: $DIST"
 }

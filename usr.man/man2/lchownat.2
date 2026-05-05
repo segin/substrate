@@ -1,0 +1,104 @@
+.TH LCHOWNAT 2 "February 2026" "Substrate" "System Calls"
+.SH NAME
+lchownat \- change ownership of a symbolic link (relative to directory fd)
+.SH LIBRARY
+Standard C library (libc, \-lc)
+.SH SYNOPSIS
+.B #include <unistd.h>
+.PP
+.B #include <fcntl.h>
+.PP
+.B #include <sys/types.h>
+.PP
+.B #include <sys/stat.h>
+.PP
+.BI "int lchownat(int dirfd, const char *pathname, uid_t uid, gid_t gid, int flag);"
+.SH DESCRIPTION
+.B lchownat()
+changes the ownership of the symbolic link referred to by a directory file
+descriptor
+.IR dirfd ,
+with the path specified as
+.IR pathname .
+If
+.I pathname
+is relative, it is interpreted relative to the directory referred to by
+.IR dirfd .
+If
+.I pathname
+is absolute,
+.I dirfd
+is ignored.
+.PP
+Unlike
+.B fchownat()
+(see
+.BR fchownat (2)
+),
+.B lchownat()
+always operates on the symbolic link itself, never on its target.
+This is equivalent to calling
+.B lchown()
+but relative to a directory file descriptor.
+.PP
+The
+.I uid
+and
+.I gid
+arguments specify the new owner and group.
+Passing \-1 leaves the respective ID unchanged.
+.PP
+The
+.I flag
+argument may include
+.B AT_REMOVEDIR
+to allow deletion of directories (when
+.I pathname
+names a directory).
+.SH RETURN VALUE
+On success, zero is returned. On error, \-1 is returned.
+.SH ERRORS
+.TP
+.B EACCES
+Search permission is denied for a component of the path prefix.
+.TP
+.B EBADF
+.I dirfd
+is not a valid file descriptor.
+.TP
+.B ELOOP
+A loop was detected in symbolic links.
+.TP
+.B EINVAL
+One of
+.I uid
+or
+.I gid
+was negative.
+.TP
+.B ENAMEXLERR
+.I pathname
+is too long.
+.TP
+.B ENOENT
+The file does not exist, or a component of the path does not exist.
+.TP
+.B ENOTDIR
+A component of the path prefix is not a directory.
+.TP
+.B EPERM
+The effective user ID is not root, and the caller does not own the file.
+.SH EXAMPLES
+Change ownership of a symbolic link relative to a directory:
+.IP
+.BI "lchownat(fd, \"link\", uid, gid, 0)"
+.PP
+Change ownership of a directory relative to a fd:
+.IP
+.BI "lchownat(fd, \"dir\", uid, gid, AT_REMOVEDIR)"
+.SH SEE ALSO
+.BR intro (2),
+.BR chown (1),
+.BR fchownat (2),
+.BR lchown (2),
+.BR fchown (2)

@@ -2,22 +2,48 @@
  * fenv.c - Floating-point environment functions for i386
  *
  * Implements the C99/POSIX floating-point environment interface
- * using x87 FPU instructions. SSE support is stubbed.
+ * using x87 FPU instructions and optional SSE (MXCSR) support.
  *
  * All functions are __attribute__((noinline)) to prevent
  * compiler from reordering FPU state operations.
+ *
+ * MXCSR register layout (SSE):
+ *   Bits  0-5:  Exception flags (same bit positions as x87 SW bits 0-5)
+ *   Bit   6:    DAZ (Denormals Are Zero)
+ *   Bits  7-12: Exception masks (1 = masked/quiet)
+ *   Bits 13-14: Rounding mode (same encoding as x87 CW bits 10-11)
+ *   Bit  15:    Flush-to-zero
+ *
+ * x87 MXCSR rounding bits vs x87 CW rounding bits:
+ *   x87 CW bits 10-11: RC field
+ *   MXCSR bits 13-14:  RC field (same encoding)
+ *
+ * Note: On i386 with -mno-sse the __SSE__ macro is not defined and
+ * MXCSR paths are compiled out entirely.
  */
 
 #include <fenv.h>
 
-/* Helper to extract rounding mode from control word */
+/* MXCSR bit positions */
+#define MXCSR_EXCEPT_MASK    0x003F   /* bits 0-5: exception flags */
+#define MXCSR_EMASK_SHIFT    7        /* exception mask bits start at 7 */
+#define MXCSR_EMASK_MASK     0x1F80   /* bits 7-12: exception masks */
+#define MXCSR_RC_SHIFT       13       /* rounding control bits 13-14 */
+#define MXCSR_RC_MASK        0x6000   /* bits 13-14: rounding control */
+
+/* x87 FPU status word exception bits are in bits 0-5, same as FE_* macros */
+/* x87 FPU control word rounding mode is in bits 10-11 */
+#define FPU_CW_RC_SHIFT      10
+#define FPU_CW_RC_MASK       0x0C00
+
+/* Helper to extract rounding mode from x87 control word */
 static int __get_round_mode(unsigned short cw) {
-    return (cw >> 10) & 0x03;
+    return (cw >> FPU_CW_RC_SHIFT) & 0x03;
 }
 
-/* Helper to set rounding mode in control word */
+/* Helper to set rounding mode in x87 control word */
 static unsigned short __set_round_mode(unsigned short cw, int mode) {
-    return (cw & ~(0x03 << 10)) | ((mode & 0x03) << 10);
+    return (unsigned short)((cw & ~FPU_CW_RC_MASK) | ((mode & 0x03) << FPU_CW_RC_SHIFT));
 }
 
 /* Helper to check if rounding mode is valid */
@@ -33,193 +59,270 @@ static int __is_valid_round_mode(int mode) {
     }
 }
 
+#ifdef __SSE__
+static unsigned int __get_mxcsr(void) {
+    unsigned int mxcsr;
+    __asm__ __volatile__("stmxcsr %0" : "=m"(mxcsr));
+    return mxcsr;
+}
+
+static void __set_mxcsr(unsigned int mxcsr) {
+    __asm__ __volatile__("ldmxcsr %0" : : "m"(mxcsr));
+}
+#endif /* __SSE__ */
+
 /* Clear specified exceptions */
+__attribute__((noinline))
 int feclearexcept(int excepts) {
     fenv_t env;
-    
-    /* Save current environment */
+    int mask = excepts & FE_ALL_EXCEPT;
+
+    /* Save full x87 environment, modify status word, reload */
     __asm__ __volatile__("fnstenv %0" : "=m"(env));
-    
-    /* Clear specified exception bits in status word */
-    env.__status_word &= ~(excepts & FE_ALL_EXCEPT);
-    
-    /* Load modified environment */
+    env.__status_word = (unsigned short)(env.__status_word & ~mask);
     __asm__ __volatile__("fldenv %0" : : "m"(env));
-    
+
+#ifdef __SSE__
+    unsigned int mxcsr = __get_mxcsr();
+    mxcsr &= ~(unsigned int)mask;
+    __set_mxcsr(mxcsr);
+#endif
+
     return 0;
 }
 
 /* Get exception flags */
+__attribute__((noinline))
 int fegetexceptflag(fexcept_t *flagp, int excepts) {
     unsigned short sw;
-    
-    /* Get status word */
+    int mask = excepts & FE_ALL_EXCEPT;
+
     __asm__ __volatile__("fnstsw %0" : "=m"(sw));
-    
-    /* Mask and store requested exception bits */
-    *flagp = sw & (excepts & FE_ALL_EXCEPT);
-    
+    *flagp = (fexcept_t)(sw & mask);
+
+#ifdef __SSE__
+    *flagp = (fexcept_t)(*flagp | (__get_mxcsr() & (unsigned int)mask));
+#endif
+
     return 0;
 }
 
-/* Raise specified exceptions */
+/*
+ * Raise specified exceptions.
+ *
+ * Uses the env-manipulation method (save SW, set bits, reload, fwait) to
+ * reliably raise exception flags.  Per C99 §7.6.2.3, raising FE_OVERFLOW
+ * or FE_UNDERFLOW must also set FE_INEXACT.
+ */
+__attribute__((noinline))
 int feraiseexcept(int excepts) {
     fenv_t env;
-    
-    /* Save current environment */
-    fegetenv(&env);
-    
-    /* Unmask exceptions so they can be raised */
-    fenv_t temp_env = env;
-    temp_env.__control_word &= ~(excepts & FE_ALL_EXCEPT);
-    fesetenv(&temp_env);
-    
-    /* Raise exceptions by performing operations that trigger them */
-    if (excepts & FE_INVALID) {
-        volatile float f = 0.0f / 0.0f;
-        (void)f;
-    }
-    if (excepts & FE_DIVBYZERO) {
-        volatile float f = 1.0f / 0.0f;
-        (void)f;
-    }
-    if (excepts & FE_OVERFLOW) {
-        volatile float f = __builtin_huge_valf() * 2.0f;
-        (void)f;
-    }
-    if (excepts & FE_UNDERFLOW) {
-        volatile float f = 1e-38f / 2.0f;
-        (void)f;
-    }
-    if (excepts & FE_INEXACT) {
-        volatile float f = 1.0f / 3.0f;
-        (void)f;
-    }
-    
-    /* Restore original environment */
-    fesetenv(&env);
-    
+    int mask = excepts & FE_ALL_EXCEPT;
+
+    /* FE_OVERFLOW and FE_UNDERFLOW imply FE_INEXACT (C99 7.6.2.3) */
+    if (mask & (FE_OVERFLOW | FE_UNDERFLOW))
+        mask |= FE_INEXACT;
+
+    /* Save current x87 environment */
+    __asm__ __volatile__("fnstenv %0" : "=m"(env));
+
+    /* Set exception flags in status word */
+    env.__status_word = (unsigned short)(env.__status_word | mask);
+
+    /* Reload — this does NOT raise traps by itself */
+    __asm__ __volatile__("fldenv %0" : : "m"(env));
+
+    /* fwait will trigger a pending unmasked exception trap if applicable */
+    __asm__ __volatile__("fwait");
+
+#ifdef __SSE__
+    unsigned int mxcsr = __get_mxcsr();
+    mxcsr |= (unsigned int)mask;
+    __set_mxcsr(mxcsr);
+#endif
+
     return 0;
 }
 
-/* Set exception flags */
+/* Set exception flags without raising them */
+__attribute__((noinline))
 int fesetexceptflag(const fexcept_t *flagp, int excepts) {
     fenv_t env;
-    
+    int mask = excepts & FE_ALL_EXCEPT;
+
     /* Save current environment */
     __asm__ __volatile__("fnstenv %0" : "=m"(env));
-    
-    /* Replace specified exception bits in status word */
-    env.__status_word = (env.__status_word & ~(excepts & FE_ALL_EXCEPT)) |
-                       (*flagp & (excepts & FE_ALL_EXCEPT));
-    
-    /* Load modified environment */
+
+    /* Replace specified exception bits in status word — must NOT raise traps */
+    env.__status_word = (unsigned short)((env.__status_word & ~mask) |
+                                         (*flagp & mask));
+
+    /* Reload — does not trigger traps */
     __asm__ __volatile__("fldenv %0" : : "m"(env));
-    
+
+#ifdef __SSE__
+    unsigned int mxcsr = __get_mxcsr();
+    mxcsr = (mxcsr & ~(unsigned int)mask) | ((unsigned int)*flagp & (unsigned int)mask);
+    __set_mxcsr(mxcsr);
+#endif
+
     return 0;
 }
 
 /* Test if any of the specified exceptions are raised */
+__attribute__((noinline))
 int fetestexcept(int excepts) {
     unsigned short sw;
-    
-    /* Get status word */
+    int mask = excepts & FE_ALL_EXCEPT;
+
     __asm__ __volatile__("fnstsw %0" : "=m"(sw));
-    
-    return sw & (excepts & FE_ALL_EXCEPT);
+    int result = sw & mask;
+
+#ifdef __SSE__
+    result |= (int)(__get_mxcsr() & (unsigned int)mask);
+#endif
+
+    return result;
 }
 
 /* Get current rounding mode */
+__attribute__((noinline))
 int fegetround(void) {
     unsigned short cw;
-    
-    /* Get control word */
     __asm__ __volatile__("fnstcw %0" : "=m"(cw));
-    
     return __get_round_mode(cw);
 }
 
 /* Set rounding mode */
+__attribute__((noinline))
 int fesetround(int rdir) {
     unsigned short cw;
-    
-    /* Validate rounding mode */
-    if (!__is_valid_round_mode(rdir)) {
+
+    if (!__is_valid_round_mode(rdir))
         return -1;
-    }
-    
-    /* Get current control word */
+
     __asm__ __volatile__("fnstcw %0" : "=m"(cw));
-    
-    /* Update rounding mode */
     cw = __set_round_mode(cw, rdir);
-    
-    /* Load new control word */
     __asm__ __volatile__("fldcw %0" : : "m"(cw));
-    
+
+#ifdef __SSE__
+    unsigned int mxcsr = __get_mxcsr();
+    mxcsr = (mxcsr & ~(unsigned int)MXCSR_RC_MASK) |
+            ((unsigned int)rdir << MXCSR_RC_SHIFT);
+    __set_mxcsr(mxcsr);
+#endif
+
     return 0;
 }
 
 /* Get current environment */
+__attribute__((noinline))
 int fegetenv(fenv_t *envp) {
-    /* Save x87 environment */
+    /* fnstenv masks all FPU exceptions as a side effect; save first */
     __asm__ __volatile__("fnstenv %0" : "=m"(*envp));
-    
-    /* Save MXCSR (stub for now) */
-    envp->__mxcsr = 0;
-    
-    /* fnstenv masks all exceptions, so restore control word */
+
+    /* Undo the fnstenv masking side effect by reloading the original CW */
     __asm__ __volatile__("fldcw %0" : : "m"(envp->__control_word));
-    
+
+#ifdef __SSE__
+    envp->__mxcsr = __get_mxcsr();
+#else
+    envp->__mxcsr = 0;
+#endif
+
     return 0;
 }
 
-/* Set environment */
+/* Set environment — must NOT raise exceptions */
+__attribute__((noinline))
 int fesetenv(const fenv_t *envp) {
     if (envp == FE_DFL_ENV) {
-        /* Load default environment */
+        /* fninit resets x87 to default state without raising exceptions */
         __asm__ __volatile__("fninit");
+#ifdef __SSE__
+        /* Reset MXCSR to default: all exceptions masked, round-to-nearest */
+        unsigned int default_mxcsr = 0x1F80; /* bits 7-12 set = all masked */
+        __set_mxcsr(default_mxcsr);
+#endif
         return 0;
     }
-    
-    /* Load x87 environment */
+
+    /* Load x87 environment — does not cause exception traps */
     __asm__ __volatile__("fldenv %0" : : "m"(*envp));
-    
-    /* Load MXCSR (stub for now) */
-    (void)envp->__mxcsr;
-    
+
+#ifdef __SSE__
+    __set_mxcsr(envp->__mxcsr);
+#endif
+
     return 0;
 }
 
-/* Hold exceptions (enter non-stop mode) */
+/*
+ * Hold exceptions (enter non-stop mode).
+ *
+ * Saves the current environment to *envp (original state, unmodified),
+ * then installs a non-stop environment with:
+ *   - all exception flags cleared
+ *   - all exception traps masked
+ */
+__attribute__((noinline))
 int feholdexcept(fenv_t *envp) {
-    /* Save current environment */
+    fenv_t tmp;
+
+    /*
+     * fnstenv stores the original environment into *envp and then masks
+     * all FPU exception traps in the FPU's CW (side effect).
+     * *envp now contains the original state (original CW, SW, etc.).
+     */
     __asm__ __volatile__("fnstenv %0" : "=m"(*envp));
-    
-    /* Modify environment: clear exceptions, mask all traps */
-    envp->__status_word &= ~FE_ALL_EXCEPT;
-    envp->__control_word |= FE_ALL_EXCEPT;
-    
-    /* Load modified environment */
-    __asm__ __volatile__("fldenv %0" : : "m"(*envp));
-    
+
+#ifdef __SSE__
+    envp->__mxcsr = __get_mxcsr();
+#else
+    envp->__mxcsr = 0;
+#endif
+
+    /*
+     * Build the non-stop environment from the saved original:
+     * - Clear all exception flags in status word
+     * - Mask all exception traps in control word
+     */
+    tmp = *envp;
+    tmp.__status_word = (unsigned short)(tmp.__status_word & ~FE_ALL_EXCEPT);
+    tmp.__control_word = (unsigned short)(tmp.__control_word | FE_ALL_EXCEPT);
+
+    /* Install the non-stop environment */
+    __asm__ __volatile__("fldenv %0" : : "m"(tmp));
+
+#ifdef __SSE__
+    /* Clear MXCSR exception flags and mask all SSE exceptions */
+    unsigned int mxcsr = envp->__mxcsr;
+    mxcsr &= ~(unsigned int)MXCSR_EXCEPT_MASK; /* clear exception flags */
+    mxcsr |= MXCSR_EMASK_MASK;                 /* mask all exceptions */
+    __set_mxcsr(mxcsr);
+#endif
+
     return 0;
 }
 
-/* Update environment and re-raise exceptions */
+/*
+ * Update environment and re-raise exceptions.
+ *
+ * Saves currently raised exceptions, restores *envp, then re-raises
+ * the saved exceptions into the restored environment.
+ */
+__attribute__((noinline))
 int feupdateenv(const fenv_t *envp) {
-    int exceptions;
-    
-    /* Get currently raised exceptions */
-    exceptions = fetestexcept(FE_ALL_EXCEPT);
-    
-    /* Load new environment */
+    int pending = fetestexcept(FE_ALL_EXCEPT);
+
+    /* Restore the environment (silently, without raising traps) */
     fesetenv(envp);
-    
-    /* Re-raise exceptions */
-    if (exceptions) {
-        feraiseexcept(exceptions);
-    }
-    
+
+    /* Re-raise exceptions that were pending before the restore */
+    if (pending)
+        feraiseexcept(pending);
+
     return 0;
 }
+
+

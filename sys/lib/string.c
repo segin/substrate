@@ -258,3 +258,12 @@ char *strncat(char *dest, const char *src, size_t n) {
     *d = '\0';
     return dest;
 }
+
+char *strrchr(const char *s, int c) {
+    const char *last = NULL;
+    do {
+        if (*s == (char)c)
+            last = s;
+    } while (*s++);
+    return (char *)last;
+}

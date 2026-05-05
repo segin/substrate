@@ -1,0 +1,115 @@
+.TH CHGRP 1 "February 2026" "Substrate" "User Commands"
+.SH NAME
+chgrp \- change group ownership
+.SH SYNOPSIS
+.B chgrp
+.RB [ \-R ]
+.RB [ \-H | \-L | \-P ]
+.RB [ \-fhv ]
+.I group
+.I file ...
+.RS
+.PP
+.B chgrp
+.RB [ \-R ]
+.RB [ \-H | \-L | \-P ]
+.RB [ \-fhv ]
+.B \-r
+.I file ...
+.RE
+.SH DESCRIPTION
+The
+.B chgrp
+utility changes the group of each specified
+.IR file .
+The
+.I group
+argument may be a numeric group ID or a group name.
+When
+.B \-r
+is specified,
+.B chgrp
+sets the group from a reference file (equivalent to
+.B \-\-reference
+in GNU).
+.PP
+.B chgrp
+is equivalent to running
+.B chown
+with only the group portion specified (i.e., \fB:\fIgroup\fR).
+.SH OPTIONS
+.TP
+.B \-R
+Recursively change the group of directories and their contents.
+.TP
+.B \-H
+When used with
+.B \-R ,
+follow symbolic links that appear on the command line, but do not follow
+symbolic links encountered during traversal.
+.TP
+.B \-L
+When used with
+.B \-R ,
+follow all symbolic links encountered during traversal.
+.TP
+.B \-P
+Do not follow symbolic links during recursive traversal (default).
+.TP
+.B \-f
+Suppress most diagnostics. Errors still cause a nonzero exit status.
+.TP
+.B \-h
+Change the group of symbolic links themselves, rather than their targets.
+.TP
+.B \-r
+Change the group using a reference file instead of a group operand.
+.SH ERROR HANDLING
+On per\-file failure,
+.B chgrp
+records the failure, continues processing remaining operands, and exits
+with a nonzero status.
+Error messages include the program name and target path unless
+.B \-f
+is specified.
+.SH PORTABILITY NOTES
+Setting group ownership on symbolic links is not supported on all platforms.
+On platforms where it is unsupported,
+.B \-h
+fails for symbolic links with a clear diagnostic.
+.SH EXIT STATUS
+.TP
+.B 0
+All requested group changes succeeded.
+.TP
+.B 1
+One or more operations failed.
+.SH EXAMPLES
+.TP
+.B chgrp staff file
+Change the group of
+.B file
+to
+.BR staff .
+.TP
+.B chgrp 100 file
+Change the group of
+.B file
+to numeric group 100.
+.TP
+.B chown \-R staff /var/www
+Recursively change group of
+.B /var/www
+to
+.BR staff .
+.TP
+.B chgrp \-h users /usr/local/bin/link
+Change group of the symbolic link
+.B link
+itself, not its target.
+.SH SEE ALSO
+.BR stat (2),
+.BR lstat (2),
+.BR fchown (2),
+.BR chown (1),
+.BR chmod (1)

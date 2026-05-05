@@ -1,0 +1,221 @@
+--- sys/drivers/storage/blkdev.c
++++ sys/drivers/storage/blkdev.c
+@@ -10,6 +10,103 @@
+ static blkdev_t *blkdev_list = NULL;
+ 
+ typedef struct blkdev_geom_provider {
+     blkdev_t *blkdev;
+     geom_disk_t disk;
+ } blkdev_geom_provider_t;
+ 
++#define BCACHE_ENTRIES 1024
++
++typedef struct {
++    blkdev_t *dev;
++    uint64_t sector;
++    uint32_t flags; // 1 = valid, 2 = dirty
++    uint64_t lru_time;
++    uint8_t *data; // allocated via kmalloc
++} bcache_entry_t;
++
++static bcache_entry_t bcache[BCACHE_ENTRIES];
++static uint64_t bcache_clock = 0;
++static spinlock_t bcache_lock;
++static int bcache_initialized = 0;
++
++static void bcache_init(void) {
++    spinlock_init(&bcache_lock, "bcache");
++    memset(bcache, 0, sizeof(bcache));
++    bcache_initialized = 1;
++}
++
++static bcache_entry_t *bcache_lookup(blkdev_t *dev, uint64_t sector) {
++    for (int i = 0; i < BCACHE_ENTRIES; i++) {
++        if ((bcache[i].flags & 1) && bcache[i].dev == dev && bcache[i].sector == sector) {
++            bcache[i].lru_time = ++bcache_clock;
++            return &bcache[i];
++        }
++    }
++    return NULL;
++}
++
++static bcache_entry_t *bcache_evict(void) {
++    uint64_t oldest = UINT64_MAX;
++    int oldest_idx = 0;
++    for (int i = 0; i < BCACHE_ENTRIES; i++) {
++        if (!(bcache[i].flags & 1)) return &bcache[i];
++        if (bcache[i].lru_time < oldest) {
++            oldest = bcache[i].lru_time;
++            oldest_idx = i;
++        }
++    }
++    bcache_entry_t *entry = &bcache[oldest_idx];
++    if (entry->flags & 2) {
++        entry->dev->write(entry->dev, entry->sector, 1, entry->data);
++        entry->flags &= ~2;
++    }
++    return entry;
++}
++
++static void bcache_invalidate(blkdev_t *dev, uint64_t start_sector, uint32_t count) {
++    if (!bcache_initialized) return;
++    spinlock_acquire(&bcache_lock);
++    for (int i = 0; i < BCACHE_ENTRIES; i++) {
++        if ((bcache[i].flags & 1) && bcache[i].dev == dev && 
++            bcache[i].sector >= start_sector && bcache[i].sector < start_sector + count) {
++            if (bcache[i].flags & 2) {
++                bcache[i].dev->write(bcache[i].dev, bcache[i].sector, 1, bcache[i].data);
++            }
++            bcache[i].flags = 0;
++        }
++    }
++    spinlock_release(&bcache_lock);
++}
++
++static int blkdev_do_read(blkdev_t *dev, uint64_t sector, uint32_t count, void *buffer) {
++    if (count > 1) {
++        bcache_invalidate(dev, sector, count);
++        return dev->read(dev, sector, count, buffer);
++    }
++    if (!bcache_initialized) bcache_init();
++    spinlock_acquire(&bcache_lock);
++    bcache_entry_t *entry = bcache_lookup(dev, sector);
++    if (entry) {
++        memcpy(buffer, entry->data, dev->sector_size);
++        spinlock_release(&bcache_lock);
++        return 0;
++    }
++    entry = bcache_evict();
++    if (!entry->data) {
++        entry->data = kmalloc(dev->sector_size);
++        if (!entry->data) {
++            spinlock_release(&bcache_lock);
++            return dev->read(dev, sector, 1, buffer);
++        }
++    }
++    int ret = dev->read(dev, sector, 1, entry->data);
++    if (ret == 0) {
++        entry->dev = dev;
++        entry->sector = sector;
++        entry->flags = 1;
++        entry->lru_time = ++bcache_clock;
++        memcpy(buffer, entry->data, dev->sector_size);
++    } else {
++        entry->flags = 0;
++    }
++    spinlock_release(&bcache_lock);
++    return ret;
++}
++
++static int blkdev_do_write(blkdev_t *dev, uint64_t sector, uint32_t count, const void *buffer) {
++    if (count > 1) {
++        bcache_invalidate(dev, sector, count);
++        return dev->write(dev, sector, count, buffer);
++    }
++    if (!bcache_initialized) bcache_init();
++    spinlock_acquire(&bcache_lock);
++    bcache_entry_t *entry = bcache_lookup(dev, sector);
++    if (!entry) {
++        entry = bcache_evict();
++        if (!entry->data) {
++            entry->data = kmalloc(dev->sector_size);
++            if (!entry->data) {
++                spinlock_release(&bcache_lock);
++                return dev->write(dev, sector, 1, buffer);
++            }
++        }
++        entry->dev = dev;
++        entry->sector = sector;
++    }
++    memcpy(entry->data, buffer, dev->sector_size);
++    entry->flags = 3;
++    entry->lru_time = ++bcache_clock;
++    int ret = dev->write(dev, sector, 1, buffer);
++    entry->flags &= ~2;
++    spinlock_release(&bcache_lock);
++    return ret;
++}
++
+ // VFS read wrapper - translates byte reads to sector reads
+ static size_t blkdev_vfs_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
+@@ -84,13 +181,13 @@
+     blkdev_geom_provider_t *provider = (blkdev_geom_provider_t *)disk->priv;
+     if (!provider || !provider->blkdev || !provider->blkdev->read) return -1;
+     if (count > 0xFFFFFFFFU) return -1;
+-    return provider->blkdev->read(provider->blkdev, sector, (uint32_t)count, buf);
++    return blkdev_do_read(provider->blkdev, sector, (uint32_t)count, buf);
+ }
+ 
+ static int blkdev_geom_write(struct geom_disk *disk, uint64_t sector, size_t count, const void *buf) {
+     blkdev_geom_provider_t *provider = (blkdev_geom_provider_t *)disk->priv;
+     if (!provider || !provider->blkdev || !provider->blkdev->write) return -1;
+     if (count > 0xFFFFFFFFU) return -1;
+-    return provider->blkdev->write(provider->blkdev, sector, (uint32_t)count, buf);
++    return blkdev_do_write(provider->blkdev, sector, (uint32_t)count, buf);
+ }
+ 
+@@ -167,7 +264,7 @@
+         }
+ 
+-        if (dev->read(dev, start_sector, 1, sector_buf) != 0) {
++        if (blkdev_do_read(dev, start_sector, 1, sector_buf) != 0) {
+             if (sector_buf && sector_buf != stack_buf) kfree(sector_buf, sector_size);
+             return 0; // Read error
+         }
+@@ -188,7 +285,7 @@
+         uint32_t sector_count = (uint32_t)sectors;
+ 
+         // Read directly into user buffer
+-        if (dev->read(dev, start_sector, sector_count, buf) != 0) {
++        if (blkdev_do_read(dev, start_sector, sector_count, buf) != 0) {
+             if (sector_buf && sector_buf != stack_buf) kfree(sector_buf, sector_size);
+             return total_read;
+         }
+@@ -208,7 +305,7 @@
+         }
+ 
+-        if (dev->read(dev, start_sector, 1, sector_buf) != 0) {
++        if (blkdev_do_read(dev, start_sector, 1, sector_buf) != 0) {
+             if (sector_buf && sector_buf != stack_buf) kfree(sector_buf, sector_size);
+             return total_read;
+         }
+@@ -248,7 +345,7 @@
+         
+         // Read-Modify-Write
+-        if (dev->read(dev, start_sector, 1, sector_buf) != 0) {
++        if (blkdev_do_read(dev, start_sector, 1, sector_buf) != 0) {
+             if (sector_buf && sector_buf != stack_buf) kfree(sector_buf, sector_size);
+             return 0;
+         }
+         
+         memcpy(sector_buf + sector_offset, buf, copy_size);
+         
+-        if (dev->write(dev, start_sector, 1, sector_buf) != 0) {
++        if (blkdev_do_write(dev, start_sector, 1, sector_buf) != 0) {
+             if (sector_buf && sector_buf != stack_buf) kfree(sector_buf, sector_size);
+             return 0;
+         }
+@@ -269,7 +366,7 @@
+ 
+         // Write directly from user buffer
+-        if (dev->write(dev, start_sector, sector_count, buf) != 0) {
++        if (blkdev_do_write(dev, start_sector, sector_count, buf) != 0) {
+             if (sector_buf && sector_buf != stack_buf) kfree(sector_buf, sector_size);
+             return total_written;
+         }
+@@ -288,7 +385,7 @@
+ 
+         // Read-Modify-Write
+-        if (dev->read(dev, start_sector, 1, sector_buf) != 0) {
++        if (blkdev_do_read(dev, start_sector, 1, sector_buf) != 0) {
+             if (sector_buf && sector_buf != stack_buf) kfree(sector_buf, sector_size);
+             return total_written;
+         }
+ 
+         memcpy(sector_buf, buf, size);
+ 
+-        if (dev->write(dev, start_sector, 1, sector_buf) != 0) {
++        if (blkdev_do_write(dev, start_sector, 1, sector_buf) != 0) {
+             if (sector_buf && sector_buf != stack_buf) kfree(sector_buf, sector_size);
+             return total_written;
+         }

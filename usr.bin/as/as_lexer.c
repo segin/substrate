@@ -2,11 +2,14 @@
 
 #include <ctype.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <limits.h>
 #include <stdarg.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #ifndef PATH_MAX
 #define PATH_MAX 4096
@@ -37,9 +40,7 @@ void as_token_vec_init(as_token_vec_t *v) {
     if (v == NULL) {
         return;
     }
-    v->items = NULL;
-    v->count = 0;
-    v->cap = 0;
+    memset(v, 0, sizeof(*v));
 }
 
 static void as_token_free(as_token_t *t) {
@@ -47,7 +48,6 @@ static void as_token_free(as_token_t *t) {
         return;
     }
     free(t->text);
-    free(t->file);
     t->text = NULL;
     t->file = NULL;
 }
@@ -61,17 +61,54 @@ void as_token_vec_free(as_token_vec_t *v) {
     for (i = 0; i < v->count; ++i) {
         as_token_free(&v->items[i]);
     }
+    for (i = 0; i < v->file_count; ++i) {
+        free(v->files[i]);
+    }
     free(v->items);
-    v->items = NULL;
-    v->count = 0;
-    v->cap = 0;
+    free(v->files);
+    memset(v, 0, sizeof(*v));
+}
+
+static char *as_token_vec_intern_file(as_token_vec_t *v, const char *file) {
+    char **next;
+    char *copy;
+    size_t i;
+
+    if (v == NULL || file == NULL) {
+        return NULL;
+    }
+    for (i = 0; i < v->file_count; ++i) {
+        if (strcmp(v->files[i], file) == 0) {
+            return v->files[i];
+        }
+    }
+    if (v->file_count == v->file_cap) {
+        size_t ncap = v->file_cap == 0 ? 4 : v->file_cap * 2;
+        next = (char **)realloc(v->files, ncap * sizeof(*next));
+        if (next == NULL) {
+            return NULL;
+        }
+        v->files = next;
+        v->file_cap = ncap;
+    }
+    copy = strdup(file);
+    if (copy == NULL) {
+        return NULL;
+    }
+    v->files[v->file_count++] = copy;
+    return copy;
 }
 
 static int as_token_vec_push(as_token_vec_t *v, as_token_kind_t kind, const char *text,
                              const char *file, unsigned line, unsigned col) {
     as_token_t *next;
+    char *interned_file;
 
     if (v == NULL || text == NULL || file == NULL) {
+        return -1;
+    }
+    interned_file = as_token_vec_intern_file(v, file);
+    if (interned_file == NULL) {
         return -1;
     }
     if (v->count == v->cap) {
@@ -85,14 +122,40 @@ static int as_token_vec_push(as_token_vec_t *v, as_token_kind_t kind, const char
     }
     v->items[v->count].kind = kind;
     v->items[v->count].text = strdup(text);
-    v->items[v->count].file = strdup(file);
+    v->items[v->count].file = interned_file;
     v->items[v->count].line = line;
     v->items[v->count].col = col;
-    if (v->items[v->count].text == NULL || v->items[v->count].file == NULL) {
+    if (v->items[v->count].text == NULL) {
         as_token_free(&v->items[v->count]);
         return -1;
     }
     v->count++;
+    return 0;
+}
+
+static int as_token_vec_push_take(as_token_vec_t *v, as_token_t *src) {
+    as_token_t *next;
+    char *interned_file;
+
+    if (v == NULL || src == NULL || src->file == NULL) {
+        return -1;
+    }
+    interned_file = as_token_vec_intern_file(v, src->file);
+    if (interned_file == NULL) {
+        return -1;
+    }
+    if (v->count == v->cap) {
+        size_t ncap = v->cap == 0 ? 64 : v->cap * 2;
+        next = (as_token_t *)realloc(v->items, ncap * sizeof(*next));
+        if (next == NULL) {
+            return -1;
+        }
+        v->items = next;
+        v->cap = ncap;
+    }
+    v->items[v->count++] = *src;
+    v->items[v->count - 1].file = interned_file;
+    memset(src, 0, sizeof(*src));
     return 0;
 }
 
@@ -503,6 +566,9 @@ static char *path_join2(const char *a, const char *b) {
     alen = strlen(a);
     blen = strlen(b);
     slash = (alen > 0 && a[alen - 1] != '/');
+    if (alen > SIZE_MAX - blen - 2) {
+        return NULL;
+    }
     out = (char *)malloc(alen + (size_t)slash + blen + 1);
     if (out == NULL) {
         return NULL;
@@ -557,6 +623,71 @@ static char *resolve_include_path(const as_lexer_cfg_t *cfg, const char *curr_fi
         }
     }
     return NULL;
+}
+
+static char *read_file_all(const char *path, size_t *len_out, lex_ctx_t *ctx) {
+    int fd;
+    char *buf = NULL;
+    size_t len = 0;
+    size_t cap = 0;
+
+    if (len_out != NULL) {
+        *len_out = 0;
+    }
+    fd = open(path, O_RDONLY);
+    if (fd < 0) {
+        set_err(ctx, "%s: %s", path, strerror(errno));
+        return NULL;
+    }
+    for (;;) {
+        ssize_t nread;
+        if (len == cap) {
+            size_t ncap = cap == 0 ? 65536 : cap * 2;
+            char *next;
+            if (ncap <= cap) {
+                set_err(ctx, "%s: input too large", path);
+                free(buf);
+                close(fd);
+                return NULL;
+            }
+            next = (char *)realloc(buf, ncap + 1);
+            if (next == NULL) {
+                set_err(ctx, "%s: out of memory", path);
+                free(buf);
+                close(fd);
+                return NULL;
+            }
+            buf = next;
+            cap = ncap;
+        }
+        nread = read(fd, buf + len, cap - len);
+        if (nread < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            set_err(ctx, "%s: %s", path, strerror(errno));
+            free(buf);
+            close(fd);
+            return NULL;
+        }
+        if (nread == 0) {
+            break;
+        }
+        len += (size_t)nread;
+    }
+    close(fd);
+    if (buf == NULL) {
+        buf = (char *)malloc(1);
+        if (buf == NULL) {
+            set_err(ctx, "%s: out of memory", path);
+            return NULL;
+        }
+    }
+    buf[len] = '\0';
+    if (len_out != NULL) {
+        *len_out = len;
+    }
+    return buf;
 }
 
 static as_token_kind_t classify_token(const char *tok, int intel_syntax) {
@@ -709,6 +840,23 @@ static int tokenize_line(const char *file, unsigned line_no, const char *line, i
             if (n > 0 && tok[n - 1] == ':' && (token_looks_like_segment_prefix(tok) == 0 || !saw_mnemonic)) {
                 tok[n - 1] = '\0';
                 kind = AS_TOK_LABEL;
+            } else if (!saw_mnemonic) {
+                size_t j = i;
+                while (line[j] != '\0' && isspace((unsigned char)line[j])) {
+                    j++;
+                }
+                if (line[j] == ':') {
+                    kind = AS_TOK_LABEL;
+                    i = j + 1;
+                } else {
+                    kind = classify_token(tok, intel_syntax);
+                    if (kind == AS_TOK_IDENTIFIER && !saw_mnemonic) {
+                        kind = AS_TOK_MNEMONIC;
+                        saw_mnemonic = 1;
+                    } else if (kind != AS_TOK_DIRECTIVE && kind != AS_TOK_LABEL) {
+                        saw_mnemonic = 1;
+                    }
+                }
             } else {
                 kind = classify_token(tok, intel_syntax);
                 if (kind == AS_TOK_IDENTIFIER && !saw_mnemonic) {
@@ -731,10 +879,9 @@ static int tokenize_line(const char *file, unsigned line_no, const char *line, i
 }
 
 static int lex_file_internal(lex_ctx_t *ctx, const char *path, unsigned depth) {
-    FILE *fp;
-    char *line = NULL;
-    size_t line_cap = 0;
-    ssize_t nread;
+    char *file_buf = NULL;
+    size_t file_len = 0;
+    size_t pos = 0;
     unsigned line_no = 0;
     int in_block_comment = 0;
 
@@ -751,25 +898,30 @@ static int lex_file_internal(lex_ctx_t *ctx, const char *path, unsigned depth) {
         return -1;
     }
 
-    fp = fopen(path, "rb");
-    if (fp == NULL) {
-        set_err(ctx, "%s: %s", path, strerror(errno));
+    file_buf = read_file_all(path, &file_len, ctx);
+    if (file_buf == NULL) {
         return -1;
     }
 
-    while ((nread = getline(&line, &line_cap, fp)) >= 0) {
+    while (pos < file_len) {
         as_token_vec_t line_tokens;
         char *sanitized;
+        char *line = file_buf + pos;
+        size_t end = pos;
         size_t i;
+        char saved;
 
+        while (end < file_len && file_buf[end] != '\n') {
+            end++;
+        }
+        saved = file_buf[end];
+        file_buf[end] = '\0';
         line_no++;
-        (void)nread;
 
         sanitized = strip_comments(line, &in_block_comment);
         if (sanitized == NULL) {
             set_err(ctx, "%s:%u: out of memory", path, line_no);
-            free(line);
-            fclose(fp);
+            free(file_buf);
             return -1;
         }
         trim_trailing(sanitized);
@@ -778,8 +930,7 @@ static int lex_file_internal(lex_ctx_t *ctx, const char *path, unsigned depth) {
         if (tokenize_line(path, line_no, sanitized, ctx->cfg != NULL ? ctx->cfg->intel_syntax : 0, &line_tokens, ctx) != 0) {
             free(sanitized);
             as_token_vec_free(&line_tokens);
-            free(line);
-            fclose(fp);
+            free(file_buf);
             return -1;
         }
         free(sanitized);
@@ -796,11 +947,10 @@ static int lex_file_internal(lex_ctx_t *ctx, const char *path, unsigned depth) {
                 i += 2;
                 continue;
             }
-            if (as_token_vec_push(ctx->out, t->kind, t->text, t->file, t->line, t->col) != 0) {
+            if (as_token_vec_push_take(ctx->out, t) != 0) {
                 set_err(ctx, "%s:%u: out of memory", path, line_no);
                 as_token_vec_free(&line_tokens);
-                free(line);
-                fclose(fp);
+                free(file_buf);
                 return -1;
             }
         }
@@ -814,8 +964,7 @@ static int lex_file_internal(lex_ctx_t *ctx, const char *path, unsigned depth) {
             if (inc_path == NULL) {
                 set_err(ctx, "%s:%u: out of memory", path, line_no);
                 as_token_vec_free(&line_tokens);
-                free(line);
-                fclose(fp);
+                free(file_buf);
                 return -1;
             }
             inc = resolve_include_path(ctx->cfg, path, inc_path);
@@ -823,8 +972,7 @@ static int lex_file_internal(lex_ctx_t *ctx, const char *path, unsigned depth) {
                 set_err(ctx, "%s:%u: include file not found: %s", path, line_no, inc_path);
                 free(inc_path);
                 as_token_vec_free(&line_tokens);
-                free(line);
-                fclose(fp);
+                free(file_buf);
                 return -1;
             }
             free(inc_path);
@@ -834,8 +982,7 @@ static int lex_file_internal(lex_ctx_t *ctx, const char *path, unsigned depth) {
                     set_err(ctx, "%s:%u: include cycle detected: %s", path, line_no, inc);
                     free(inc);
                     as_token_vec_free(&line_tokens);
-                    free(line);
-                    fclose(fp);
+                    free(file_buf);
                     return -1;
                 }
             }
@@ -843,18 +990,18 @@ static int lex_file_internal(lex_ctx_t *ctx, const char *path, unsigned depth) {
             if (lex_file_internal(ctx, inc, depth + 1) != 0) {
                 free(inc);
                 as_token_vec_free(&line_tokens);
-                free(line);
-                fclose(fp);
+                free(file_buf);
                 return -1;
             }
             free(inc);
         }
 
         as_token_vec_free(&line_tokens);
+        file_buf[end] = saved;
+        pos = saved == '\n' ? end + 1 : end;
     }
 
-    free(line);
-    fclose(fp);
+    free(file_buf);
 
     free(ctx->include_stack[ctx->include_stack_count - 1]);
     ctx->include_stack_count--;

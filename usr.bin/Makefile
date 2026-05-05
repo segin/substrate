@@ -2,7 +2,7 @@ include ../Makefile.inc
 
 .PHONY: all clean install
 
-SUBDIRS = brandelf elfedit readelf as ld cc yacc lex compress pr uudecode pax cpio ar cxxfilt addr2line lsusb
+SUBDIRS = brandelf elfedit readelf as ld cc yacc lex compress pr uudecode pax cpio ar cxxfilt addr2line lsusb nm size
 
 all:
 	@echo "Building User Binaries (usr.bin)..."

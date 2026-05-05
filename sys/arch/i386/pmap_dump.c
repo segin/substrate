@@ -26,7 +26,7 @@ void pmap_dump(pmap_t pmap) {
     char buf[128];
     int mapped_pdes = 0;
 
-    sprintf(buf,
+    snprintf(buf, sizeof(buf),
         "pmap stats: resident=%u wired=%u mapped=%u faults=%u cow_faults=%u\n",
         pmap->resident_count,
         pmap->wired_count,
@@ -52,7 +52,7 @@ void pmap_dump(pmap_t pmap) {
             }
             
             if (pt_mapped > 0) {
-                sprintf(buf, "  PDE[%3d] = 0x%08X -> 0x%08X-0x%08X (%d pages, %s%s%s)\n",
+                snprintf(buf, sizeof(buf), "  PDE[%3d] = 0x%08X -> 0x%08X-0x%08X (%d pages, %s%s%s)\n",
                     pde_idx, pd[pde_idx],
                     pde_addr, pde_addr + 0x3FFFFF,
                     pt_mapped,
@@ -65,6 +65,6 @@ void pmap_dump(pmap_t pmap) {
         }
     }
     
-    sprintf(buf, "Total: %d mapped page directories\n", mapped_pdes);
+    snprintf(buf, sizeof(buf), "Total: %d mapped page directories\n", mapped_pdes);
     kprint(buf);
 }

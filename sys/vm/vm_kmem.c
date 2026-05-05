@@ -82,12 +82,14 @@ typedef struct kmem_large_header {
 } kmem_large_header_t;
 
 #define KMEM_LARGE_MAGIC 0x4C41524D /* "LAML" */
+#define KMEM_MAX_ALLOC (128U * 1024U * 1024U)
 
 /*
  * Allocate kernel memory
  */
 void *kmalloc(size_t size) {
     if (size == 0) return NULL;
+    if (size > KMEM_MAX_ALLOC) return NULL;
     
     kmem_stats.allocs++;
     kmem_stats.bytes_allocated += size;
@@ -114,6 +116,11 @@ void *kmalloc(size_t size) {
     
     /* Large allocation: bypass UMA, allocate pages directly */
     size_t total = size + sizeof(kmem_large_header_t);
+    if (total < size) {
+        /* Integer overflow */
+        kmem_stats.bytes_outstanding -= size;
+        return NULL;
+    }
     size_t pages = (total + 4095) / 4096;
     
     void *mem = pmm_alloc_contiguous(pages);

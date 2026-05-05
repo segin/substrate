@@ -1,78 +1,290 @@
-.TH FPCLASSIFY 3 "2026-02-06" "Substrate" "Library Functions Manual"
+.TH FPCLASSIFY 3 "May 2026" "Substrate" "Library Functions Manual"
 .SH NAME
-fpclassify, isfinite, isinf, isnan, isnormal, signbit \- floating-point classification macros
+fpclassify, isfinite, isinf, isnan, isnormal, signbit, issubnormal,
+iszero, iscanonical \- floating-point classification
 .SH LIBRARY
-Math Library (libm, \-lm)
+Standard C library (libc, \-lc)
 .SH SYNOPSIS
-.nf
 .B #include <math.h>
 .PP
 .BI "int fpclassify(" x );
+.br
 .BI "int isfinite(" x );
+.br
 .BI "int isinf(" x );
+.br
 .BI "int isnan(" x );
+.br
 .BI "int isnormal(" x );
+.br
 .BI "int signbit(" x );
-.fi
-.SH DESCRIPTION
-These macros classify IEEE 754 floating-point numbers. They work with 
+.PP
+.BI "int issubnormal(" x );
+.br
+.BI "int iszero(" x );
+.br
+.BI "int iscanonical(" x );
+.PP
+.I x
+may be of type
 .BR float ,
 .BR double ,
-and
-.B long double
-arguments.
+or
+.BR "long double" .
+The macro selects the underlying implementation by the size of
+.IR x ;
+no header-side cast is performed.
+.SH DESCRIPTION
+These macros classify a floating-point value
+.I x
+according to the IEEE 754 (IEC 60559) categorisation of binary
+floating-point representations.  None of them raise a floating-point
+exception, even when
+.I x
+is a signaling NaN: the value is inspected as a bit pattern and never
+made to participate in an arithmetic operation.
 .PP
 .BR fpclassify ()
-returns one of the following constants:
-.RS
-.TP
+returns one of the following symbolic categories:
+.TP 14
 .B FP_NAN
-The argument is Not-a-Number.
+.I x
+is Not-a-Number: exponent field all-ones with a non-zero mantissa.
+Both quiet and signaling NaNs map to
+.BR FP_NAN ;
+to distinguish the two see
+.BR issignaling (3).
 .TP
 .B FP_INFINITE
-The argument is positive or negative infinity.
+.I x
+is positive or negative infinity: exponent field all-ones with a zero
+mantissa.
 .TP
 .B FP_ZERO
-The argument is positive or negative zero.
+.I x
+is positive or negative zero.
+.B +0.0
+and
+.B \-0.0
+are distinct bit patterns but both classify as
+.BR FP_ZERO .
 .TP
 .B FP_SUBNORMAL
-The argument is a subnormal (denormalized) number.
+.I x
+is a non-zero subnormal (a.k.a. denormal): exponent field is zero, the
+mantissa is non-zero, and there is no implicit leading bit.  Subnormals
+fill the gap between zero and the smallest normal.
 .TP
 .B FP_NORMAL
-The argument is a normal floating-point number.
-.RE
-.PP
-.BR isfinite ()
-returns nonzero if
 .I x
-is finite (not infinity or NaN).
+is any other finite value: a normalized number with an implicit
+leading 1 in the mantissa.
 .PP
-.BR isinf ()
-returns nonzero if
+The remaining macros report a single boolean property of
+.IR x .
+Each is defined to be the equivalent
+.BR fpclassify ()
+test, written as a separate macro both for readability and so an
+implementation may short-circuit through faster bit-level inspections
+where appropriate:
+.TP 18
+.BR isfinite( x )
+True iff
+.I x
+is finite, i.e. not infinity and not NaN.  Equivalent to
+.BR "fpclassify(" x ") >= FP_ZERO" .
+Subnormals and zeros are finite.
+.TP
+.BR isinf( x )
+True iff
 .I x
 is positive or negative infinity.
-.PP
-.BR isnan ()
-returns nonzero if
+.TP
+.BR isnan( x )
+True iff
 .I x
-is a NaN.
-.PP
-.BR isnormal ()
-returns nonzero if
+is a NaN of either flavour (quiet or signaling).
+.TP
+.BR isnormal( x )
+True iff
 .I x
-is a normal number (not zero, subnormal, infinity, or NaN).
-.PP
-.BR signbit ()
-returns nonzero if the sign bit of
+is finite, non-zero, and not subnormal.
+.TP
+.BR signbit( x )
+Non-zero iff the sign bit of
 .I x
-is set (negative).
+is set.  This includes
+.B \-0.0
+(which compares equal to
+.B +0.0
+but has a distinct bit pattern) and the negative NaN encodings.  See
+.BR copysign (3)
+for a portable way to fabricate signed zero.
+.TP
+.BR issubnormal( x )
+True iff
+.I x
+is a non-zero subnormal.  Equivalent to
+.BR "fpclassify(" x ") == FP_SUBNORMAL" .
+Added in C23.
+.TP
+.BR iszero( x )
+True iff
+.I x
+is
+.B +0.0
+or
+.BR \-0.0 .
+Equivalent to
+.BR "fpclassify(" x ") == FP_ZERO" .
+Added in C23.
+.TP
+.BR iscanonical( x )
+True iff
+.I x
+is a canonical encoding of its value.  For IEEE 754 binary formats
+every encoding is canonical, so on Substrate this macro evaluates
+.I x
+once for any side effects and returns
+.BR 1 .
+The macro exists for source portability with formats that do support
+non-canonical encodings (decimal floating-point, IBM extended-precision
+double-doubles, etc.).  Added in C23.
+.PP
+For all of these macros,
+.I x
+is evaluated exactly once.  The macros are valid in any context
+where an
+.B int
+expression is valid, including initialisers in C23.
 .SH RETURN VALUE
 .BR fpclassify ()
-returns one of the FP_* constants.
-All other macros return nonzero for true, zero for false.
+returns one of
+.BR FP_NAN ,
+.BR FP_INFINITE ,
+.BR FP_ZERO ,
+.BR FP_SUBNORMAL ,
+or
+.BR FP_NORMAL .
+.PP
+The remaining macros return a non-zero
+.B int
+when the predicate is true, and zero otherwise.
+.PP
+None of these macros set
+.I errno
+or raise a floating-point exception.  In particular,
+.BR isnan ()
+on a signaling NaN does
+.I not
+raise
+.B FE_INVALID
+\(em that is the principal advantage of using these macros over the
+"is x equal to itself?" idiom or the
+.B ==
+operator.
+.SH ATTRIBUTES
+For an explanation of the terms used in this section, see
+.BR attributes (7).
+.TS
+allbox;
+lb lb lb
+l l l.
+Interface	Attribute	Value
+T{
+.BR fpclassify (),
+.BR isfinite (),
+.BR isinf (),
+.BR isnan (),
+.BR isnormal (),
+.BR signbit ()
+T}	Thread safety	MT-Safe
+T{
+.BR issubnormal (),
+.BR iszero (),
+.BR iscanonical ()
+T}	Thread safety	MT-Safe
+.TE
 .SH STANDARDS
-C99, POSIX.1-2001.
+.BR fpclassify (),
+.BR isfinite (),
+.BR isinf (),
+.BR isnan (),
+.BR isnormal (),
+and
+.BR signbit ()
+are specified by C99 §7.12.3 and POSIX.1-2008.
+.PP
+.BR issubnormal (),
+.BR iszero (),
+and
+.BR iscanonical ()
+were added in C23 §7.12.4.
+.SH EXAMPLES
+The following program prints the classification of a small set of
+representative values:
+.PP
+.RS 4
+.EX
+#include <math.h>
+#include <stdio.h>
+#include <float.h>
+
+static const char *
+classify(double x)
+{
+    switch (fpclassify(x)) {
+    case FP_NAN:       return "NaN";
+    case FP_INFINITE:  return "infinity";
+    case FP_ZERO:      return "zero";
+    case FP_SUBNORMAL: return "subnormal";
+    case FP_NORMAL:    return "normal";
+    default:           return "?";
+    }
+}
+
+int
+main(void)
+{
+    double samples[] = {
+        0.0, \-0.0, 1.0, \-1.0,
+        DBL_MIN, DBL_MIN / 2, DBL_MAX,
+        INFINITY, \-INFINITY, NAN,
+    };
+    for (size_t i = 0; i < sizeof(samples)/sizeof(samples[0]); i++) {
+        double x = samples[i];
+        printf("x=% \-12g  class=%-9s  finite=%d  signbit=%d\en",
+               x, classify(x), isfinite(x), signbit(x) ? 1 : 0);
+    }
+    return 0;
+}
+.EE
+.RE
+.SH NOTES
+.BR isnan ()
+should be preferred over the idiom
+.B "x != x"
+even where the latter "happens to work".  Some compilers exploit
+.B \-ffast-math
+or similar flags to assume operands of arithmetic comparisons are not
+NaN, and the idiom may be folded to
+.B 0
+unconditionally.  The macros in this page are documented to inspect
+the bit pattern and are unaffected.
+.PP
+On Substrate
+.B "long double"
+shares the same representation as
+.B double
+on i386 builds.  Code that requires the 80-bit extended-precision x87
+format must be compiled with the appropriate target flags; the
+classification macros remain correct under either width.
 .SH SEE ALSO
+.BR copysign (3),
+.BR isgreater (3),
+.BR issignaling (3),
 .BR fabs (3),
-.BR isnan (3),
-.BR math (7)
+.BR nan (3),
+.BR math_error (7)
+.SH COLOPHON
+This page is part of the Substrate operating system documentation.

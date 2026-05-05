@@ -212,7 +212,10 @@ static elf_err_t cfi_stats(const elf_section_t *section, size_t *cie_count_out, 
         if (!elf__u64_add((uint64_t)len_field_size, payload_size, &total_size)) {
             return ELF_ERR_BOUNDS;
         }
-        if (total_size > SIZE_MAX || off + (size_t)total_size > size) {
+        if (total_size > SIZE_MAX) {
+            return ELF_ERR_FORMAT;
+        }
+        if ((size_t)total_size > size - off) {
             return ELF_ERR_FORMAT;
         }
         cie_id = read_uint_width(data + off + len_field_size, section->obj->endian, id_width);

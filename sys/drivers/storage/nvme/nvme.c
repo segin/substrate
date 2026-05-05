@@ -12,7 +12,17 @@
 #define NVME_PCI_CLASS_STORAGE 0x01
 #define NVME_PCI_SUBCLASS_NVM  0x08
 #define NVME_PCI_PROGIF_NVME   0x02
-#define NVME_ADMIN_OP_IDENTIFY 0x06U
+#define NVME_ADMIN_OP_DELETE_IO_SQ   0x00U
+#define NVME_ADMIN_OP_CREATE_IO_SQ   0x01U
+#define NVME_ADMIN_OP_DELETE_IO_CQ   0x04U
+#define NVME_ADMIN_OP_CREATE_IO_CQ   0x05U
+#define NVME_ADMIN_OP_IDENTIFY       0x06U
+#define NVME_ADMIN_OP_SET_FEATURES   0x09U
+#define NVME_NVM_OP_WRITE            0x01U
+#define NVME_NVM_OP_READ             0x02U
+#define NVME_FEATURE_NUMBER_OF_QUEUES 0x07U
+#define NVME_QUEUE_FLAG_PC           0x0001U
+#define NVME_QUEUE_FLAG_IEN          0x0002U
 #define NVME_IDENTIFY_CNS_NAMESPACE  0x00U
 #define NVME_IDENTIFY_CNS_CONTROLLER 0x01U
 #define NVME_CQE_STATUS_PHASE 0x0001U
@@ -82,13 +92,20 @@ static void nvme_mmio_write64(volatile uint8_t *mmio, uint32_t reg, uint64_t val
     nvme_mmio_write32(mmio, reg + 4U, (uint32_t)(value >> 32));
 }
 
+static uint32_t nvme_sq_doorbell_reg(const nvme_controller_t *ctrl, uint16_t qid) {
+    return NVME_REG_DBS + (uint32_t)(2U * qid) * ctrl->cap.doorbell_stride_bytes;
+}
+
+static uint32_t nvme_cq_doorbell_reg(const nvme_controller_t *ctrl, uint16_t qid) {
+    return NVME_REG_DBS + (uint32_t)(2U * qid + 1U) * ctrl->cap.doorbell_stride_bytes;
+}
+
 static uint32_t nvme_sq0_doorbell_reg(const nvme_controller_t *ctrl) {
-    (void)ctrl;
-    return NVME_REG_DBS;
+    return nvme_sq_doorbell_reg(ctrl, 0);
 }
 
 static uint32_t nvme_cq0_doorbell_reg(const nvme_controller_t *ctrl) {
-    return NVME_REG_DBS + ctrl->cap.doorbell_stride_bytes;
+    return nvme_cq_doorbell_reg(ctrl, 0);
 }
 
 static void nvme_copy_trim_string(char *dst, size_t dst_len,
@@ -144,7 +161,10 @@ static int nvme_admin_submit_sync(nvme_controller_t *ctrl,
     cq = (nvme_cqe_t *)ctrl->admin_cq;
     tail = ctrl->admin_sq_tail;
     head = ctrl->admin_cq_head;
-    cid = ctrl->admin_cid_next++;
+    /* Modulo by queue depth so the CID can't wrap into the
+     * 16-bit field and alias an in-flight command's id. */
+    cid = ctrl->admin_cid_next;
+    ctrl->admin_cid_next = (uint16_t)((cid + 1U) % ctrl->admin_sq_entries);
 
     memset(&sq[tail], 0, sizeof(*sq));
     cmd->cid = cid;
@@ -535,6 +555,409 @@ int nvme_identify_namespaces(nvme_controller_t *ctrl) {
     ctrl->namespace_count = found;
     dma_free_coherent(id_data, 4096U);
     return 0;
+}
+
+#ifdef HOST_TEST
+extern void nvme_test_io_kick(nvme_controller_t *ctrl, uint16_t sq_tail);
+#endif
+
+static int nvme_io_submit_sync(nvme_controller_t *ctrl,
+                               nvme_admin_cmd_t *cmd,
+                               nvme_cqe_t *cqe,
+                               uint32_t timeout_ms) {
+    nvme_io_queue_t *q;
+    nvme_admin_cmd_t *sq;
+    nvme_cqe_t *cq;
+    uint16_t tail;
+    uint16_t head;
+    uint16_t cid;
+    uint64_t start_ms;
+
+    if (ctrl == NULL || cmd == NULL || cqe == NULL) {
+        return -1;
+    }
+    q = &ctrl->io_queue;
+    if (!ctrl->enabled || !q->valid || q->sq == NULL || q->cq == NULL) {
+        return -1;
+    }
+
+    sq = (nvme_admin_cmd_t *)q->sq;
+    cq = (nvme_cqe_t *)q->cq;
+    tail = q->sq_tail;
+    head = q->cq_head;
+    cid = q->cid_next;
+    q->cid_next = (uint16_t)((cid + 1U) % q->sq_entries);
+
+    memset(&sq[tail], 0, sizeof(*sq));
+    cmd->cid = cid;
+    sq[tail] = *cmd;
+
+    q->sq_tail = (uint16_t)((tail + 1U) % q->sq_entries);
+    nvme_mmio_write32(ctrl->mmio, nvme_sq_doorbell_reg(ctrl, q->qid), q->sq_tail);
+#ifdef HOST_TEST
+    nvme_test_io_kick(ctrl, tail);
+#endif
+
+    start_ms = (uint64_t)get_uptime_ms();
+    while ((cq[head].status & NVME_CQE_STATUS_PHASE) != q->cq_phase) {
+        if (((uint64_t)get_uptime_ms() - start_ms) >= timeout_ms) {
+            return -1;
+        }
+        __asm__ volatile("pause");
+    }
+
+    *cqe = cq[head];
+    if ((cqe->status & NVME_CQE_STATUS_MASK) != 0 || cqe->cid != cid) {
+        return -1;
+    }
+
+    memset(&cq[head], 0, sizeof(*cq));
+    q->cq_head = (uint16_t)((head + 1U) % q->cq_entries);
+    if (q->cq_head == 0) {
+        q->cq_phase ^= 1U;
+    }
+    nvme_mmio_write32(ctrl->mmio, nvme_cq_doorbell_reg(ctrl, q->qid), q->cq_head);
+    return 0;
+}
+
+int nvme_request_io_queue_count(nvme_controller_t *ctrl, uint16_t requested) {
+    nvme_admin_cmd_t cmd;
+    nvme_cqe_t cqe;
+    uint32_t timeout_ms;
+    uint16_t allocated_sq;
+    uint16_t allocated_cq;
+
+    if (ctrl == NULL || ctrl->mmio == NULL || !ctrl->present || !ctrl->enabled) {
+        return -1;
+    }
+    if (requested == 0) {
+        return -1;
+    }
+
+    timeout_ms = ctrl->cap.timeout_ms;
+    if (timeout_ms == 0) {
+        timeout_ms = 500;
+    }
+
+    memset(&cmd, 0, sizeof(cmd));
+    cmd.opcode = NVME_ADMIN_OP_SET_FEATURES;
+    cmd.cdw10 = NVME_FEATURE_NUMBER_OF_QUEUES;
+    cmd.cdw11 = (uint32_t)(requested - 1U) |
+                ((uint32_t)(requested - 1U) << 16);
+
+    if (nvme_admin_submit_sync(ctrl, &cmd, &cqe, timeout_ms) < 0) {
+        return -1;
+    }
+
+    /* Result is 0's based: NSQA in [15:0], NCQA in [31:16]. */
+    allocated_sq = (uint16_t)((cqe.result & 0xFFFFU) + 1U);
+    allocated_cq = (uint16_t)((cqe.result >> 16) + 1U);
+    ctrl->io_queue_count_requested = requested;
+    ctrl->max_io_queues_alloc = allocated_sq < allocated_cq ?
+                                allocated_sq : allocated_cq;
+    if (ctrl->max_io_queues_alloc == 0) {
+        return -1;
+    }
+    return 0;
+}
+
+int nvme_create_io_queues(nvme_controller_t *ctrl, uint16_t entries) {
+    nvme_admin_cmd_t cmd;
+    nvme_cqe_t cqe;
+    nvme_io_queue_t *q;
+    uint32_t timeout_ms;
+
+    if (ctrl == NULL || ctrl->mmio == NULL || !ctrl->present || !ctrl->enabled) {
+        return -1;
+    }
+    if (ctrl->max_io_queues_alloc == 0) {
+        return -1;
+    }
+    if (entries < NVME_IO_QUEUE_MIN_ENTRIES ||
+        entries > NVME_IO_QUEUE_MAX_ENTRIES) {
+        return -1;
+    }
+    if (ctrl->cap.mqes != 0 && (uint32_t)entries > (uint32_t)ctrl->cap.mqes + 1U) {
+        return -1;
+    }
+
+    q = &ctrl->io_queue;
+    if (q->valid || q->sq != NULL || q->cq != NULL) {
+        return -1;
+    }
+
+    timeout_ms = ctrl->cap.timeout_ms;
+    if (timeout_ms == 0) {
+        timeout_ms = 500;
+    }
+
+    q->qid = (uint16_t)NVME_IO_QID;
+    q->sq_entries = entries;
+    q->cq_entries = entries;
+    q->sq_bytes = (size_t)entries * NVME_IO_SQ_ENTRY_SIZE;
+    q->cq_bytes = (size_t)entries * NVME_IO_CQ_ENTRY_SIZE;
+
+    q->cq = dma_alloc_coherent(q->cq_bytes, &q->cq_dma);
+    if (q->cq == NULL) {
+        memset(q, 0, sizeof(*q));
+        return -1;
+    }
+
+    q->sq = dma_alloc_coherent(q->sq_bytes, &q->sq_dma);
+    if (q->sq == NULL) {
+        dma_free_coherent(q->cq, q->cq_bytes);
+        memset(q, 0, sizeof(*q));
+        return -1;
+    }
+
+    /* Create I/O Completion Queue first (SQ references it). */
+    memset(&cmd, 0, sizeof(cmd));
+    cmd.opcode = NVME_ADMIN_OP_CREATE_IO_CQ;
+    cmd.prp1 = (uint64_t)q->cq_dma;
+    cmd.cdw10 = (uint32_t)q->qid |
+                ((uint32_t)(q->cq_entries - 1U) << 16);
+    cmd.cdw11 = NVME_QUEUE_FLAG_PC;
+    if (nvme_admin_submit_sync(ctrl, &cmd, &cqe, timeout_ms) < 0) {
+        dma_free_coherent(q->sq, q->sq_bytes);
+        dma_free_coherent(q->cq, q->cq_bytes);
+        memset(q, 0, sizeof(*q));
+        return -1;
+    }
+
+    /* Then create the I/O Submission Queue, bound to the new CQ. */
+    memset(&cmd, 0, sizeof(cmd));
+    cmd.opcode = NVME_ADMIN_OP_CREATE_IO_SQ;
+    cmd.prp1 = (uint64_t)q->sq_dma;
+    cmd.cdw10 = (uint32_t)q->qid |
+                ((uint32_t)(q->sq_entries - 1U) << 16);
+    cmd.cdw11 = NVME_QUEUE_FLAG_PC | ((uint32_t)q->qid << 16);
+    if (nvme_admin_submit_sync(ctrl, &cmd, &cqe, timeout_ms) < 0) {
+        nvme_admin_cmd_t del;
+        memset(&del, 0, sizeof(del));
+        del.opcode = NVME_ADMIN_OP_DELETE_IO_CQ;
+        del.cdw10 = (uint32_t)q->qid;
+        (void)nvme_admin_submit_sync(ctrl, &del, &cqe, timeout_ms);
+        dma_free_coherent(q->sq, q->sq_bytes);
+        dma_free_coherent(q->cq, q->cq_bytes);
+        memset(q, 0, sizeof(*q));
+        return -1;
+    }
+
+    q->sq_tail = 0;
+    q->cq_head = 0;
+    q->cid_next = 0;
+    q->cq_phase = 1;
+    q->valid = 1;
+    return 0;
+}
+
+int nvme_destroy_io_queues(nvme_controller_t *ctrl) {
+    nvme_admin_cmd_t cmd;
+    nvme_cqe_t cqe;
+    nvme_io_queue_t *q;
+    uint32_t timeout_ms;
+    int rc = 0;
+
+    if (ctrl == NULL || ctrl->mmio == NULL || !ctrl->present) {
+        return -1;
+    }
+    q = &ctrl->io_queue;
+    if (!q->valid) {
+        return 0;
+    }
+
+    timeout_ms = ctrl->cap.timeout_ms;
+    if (timeout_ms == 0) {
+        timeout_ms = 500;
+    }
+
+    /* Delete SQ before CQ (controller rejects CQ delete with active SQs). */
+    memset(&cmd, 0, sizeof(cmd));
+    cmd.opcode = NVME_ADMIN_OP_DELETE_IO_SQ;
+    cmd.cdw10 = (uint32_t)q->qid;
+    if (nvme_admin_submit_sync(ctrl, &cmd, &cqe, timeout_ms) < 0) {
+        rc = -1;
+    }
+
+    memset(&cmd, 0, sizeof(cmd));
+    cmd.opcode = NVME_ADMIN_OP_DELETE_IO_CQ;
+    cmd.cdw10 = (uint32_t)q->qid;
+    if (nvme_admin_submit_sync(ctrl, &cmd, &cqe, timeout_ms) < 0) {
+        rc = -1;
+    }
+
+    if (q->sq != NULL) {
+        dma_free_coherent(q->sq, q->sq_bytes);
+    }
+    if (q->cq != NULL) {
+        dma_free_coherent(q->cq, q->cq_bytes);
+    }
+    memset(q, 0, sizeof(*q));
+    return rc;
+}
+
+/*
+ * Build a PRP (Physical Region Page) descriptor pair for a contiguous data
+ * buffer described by its physical start, byte length, and accompanying CPU
+ * pointer.  The caller passes pointers that receive prp1, prp2, and an
+ * optional PRP-list page allocated when the transfer spans 3 or more pages.
+ *
+ * Returns 0 on success, -1 if the transfer cannot be described (e.g. PRP list
+ * allocation failed, or the buffer is larger than a single PRP list can
+ * cover).  On success, *prp_list_out and *prp_list_dma_out are non-NULL when
+ * a list page was allocated; the caller must dma_free_coherent the list page
+ * after the I/O completes.
+ */
+static int nvme_build_prp(dma_addr_t buffer_dma, size_t length,
+                          uint64_t *prp1_out, uint64_t *prp2_out,
+                          void **prp_list_out, dma_addr_t *prp_list_dma_out,
+                          size_t *prp_list_bytes_out) {
+    uint64_t base = (uint64_t)buffer_dma;
+    uint64_t offset = base & NVME_PAGE_MASK;
+    size_t first_len;
+    size_t remaining;
+
+    *prp1_out = base;
+    *prp2_out = 0;
+    *prp_list_out = NULL;
+    *prp_list_dma_out = (dma_addr_t)0;
+    *prp_list_bytes_out = 0;
+
+    if (length == 0) {
+        return 0;
+    }
+
+    first_len = (size_t)(NVME_PAGE_SIZE - offset);
+    if (length <= first_len) {
+        return 0;
+    }
+    remaining = length - first_len;
+
+    if (remaining <= NVME_PAGE_SIZE) {
+        *prp2_out = (base + first_len) & ~(uint64_t)NVME_PAGE_MASK;
+        return 0;
+    }
+
+    {
+        uint64_t list_base = (base + first_len) & ~(uint64_t)NVME_PAGE_MASK;
+        size_t list_pages = (remaining + NVME_PAGE_SIZE - 1U) / NVME_PAGE_SIZE;
+        uint64_t *list;
+        dma_addr_t list_dma;
+        size_t i;
+
+        if (list_pages > NVME_PRP_LIST_ENTRIES) {
+            return -1;
+        }
+        list = (uint64_t *)dma_alloc_coherent(NVME_PAGE_SIZE, &list_dma);
+        if (list == NULL) {
+            return -1;
+        }
+        memset(list, 0, NVME_PAGE_SIZE);
+        for (i = 0; i < list_pages; i++) {
+            list[i] = list_base + (uint64_t)(i * NVME_PAGE_SIZE);
+        }
+        *prp_list_out = list;
+        *prp_list_dma_out = list_dma;
+        *prp_list_bytes_out = NVME_PAGE_SIZE;
+        *prp2_out = (uint64_t)list_dma;
+    }
+    return 0;
+}
+
+static const nvme_namespace_t *nvme_namespace_by_id(const nvme_controller_t *ctrl,
+                                                    uint32_t nsid) {
+    uint32_t i;
+
+    for (i = 0; i < ctrl->namespace_count; i++) {
+        if (ctrl->namespaces[i].valid && ctrl->namespaces[i].nsid == nsid) {
+            return &ctrl->namespaces[i];
+        }
+    }
+    return NULL;
+}
+
+static int nvme_io_rw(nvme_controller_t *ctrl, uint8_t opcode, uint32_t nsid,
+                      uint64_t slba, uint16_t nblocks, void *buffer,
+                      size_t buffer_len) {
+    const nvme_namespace_t *ns;
+    nvme_admin_cmd_t cmd;
+    nvme_cqe_t cqe;
+    void *bounce;
+    dma_addr_t bounce_dma;
+    void *prp_list;
+    dma_addr_t prp_list_dma;
+    size_t prp_list_bytes;
+    size_t expected_bytes;
+    uint32_t timeout_ms;
+    int rc;
+
+    if (ctrl == NULL || buffer == NULL || nblocks == 0) {
+        return -1;
+    }
+    if (!ctrl->enabled || !ctrl->io_queue.valid) {
+        return -1;
+    }
+    ns = nvme_namespace_by_id(ctrl, nsid);
+    if (ns == NULL || ns->block_size == 0) {
+        return -1;
+    }
+
+    expected_bytes = (size_t)nblocks * (size_t)ns->block_size;
+    if (buffer_len < expected_bytes) {
+        return -1;
+    }
+
+    bounce = dma_alloc_coherent(expected_bytes, &bounce_dma);
+    if (bounce == NULL) {
+        return -1;
+    }
+
+    if (opcode == NVME_NVM_OP_WRITE) {
+        memcpy(bounce, buffer, expected_bytes);
+    } else {
+        memset(bounce, 0, expected_bytes);
+    }
+
+    memset(&cmd, 0, sizeof(cmd));
+    cmd.opcode = opcode;
+    cmd.nsid = nsid;
+    cmd.cdw10 = (uint32_t)(slba & 0xFFFFFFFFU);
+    cmd.cdw11 = (uint32_t)(slba >> 32);
+    cmd.cdw12 = (uint32_t)(nblocks - 1U);
+
+    if (nvme_build_prp(bounce_dma, expected_bytes, &cmd.prp1, &cmd.prp2,
+                       &prp_list, &prp_list_dma, &prp_list_bytes) < 0) {
+        dma_free_coherent(bounce, expected_bytes);
+        return -1;
+    }
+
+    timeout_ms = ctrl->cap.timeout_ms;
+    if (timeout_ms == 0) {
+        timeout_ms = 500;
+    }
+
+    rc = nvme_io_submit_sync(ctrl, &cmd, &cqe, timeout_ms);
+    if (rc == 0 && opcode == NVME_NVM_OP_READ) {
+        memcpy(buffer, bounce, expected_bytes);
+    }
+
+    if (prp_list != NULL) {
+        dma_free_coherent(prp_list, prp_list_bytes);
+    }
+    dma_free_coherent(bounce, expected_bytes);
+    return rc;
+}
+
+int nvme_io_read(nvme_controller_t *ctrl, uint32_t nsid, uint64_t slba,
+                 uint16_t nblocks, void *buffer, size_t buffer_len) {
+    return nvme_io_rw(ctrl, NVME_NVM_OP_READ, nsid, slba, nblocks, buffer,
+                      buffer_len);
+}
+
+int nvme_io_write(nvme_controller_t *ctrl, uint32_t nsid, uint64_t slba,
+                  uint16_t nblocks, const void *buffer, size_t buffer_len) {
+    return nvme_io_rw(ctrl, NVME_NVM_OP_WRITE, nsid, slba, nblocks,
+                      (void *)(uintptr_t)buffer, buffer_len);
 }
 
 size_t nvme_controller_count(void) {

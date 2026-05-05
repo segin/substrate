@@ -226,6 +226,9 @@ static as_symbol_t *get_or_create_symbol(sym_ctx_t *ctx, const char *name) {
 
     if (ctx->tab->count == ctx->tab->cap) {
         size_t ncap = ctx->tab->cap == 0 ? 32 : ctx->tab->cap * 2;
+        if (ncap < ctx->tab->cap || ncap > SIZE_MAX / sizeof(*next)) {
+            return NULL;
+        }
         next = (as_symbol_t *)realloc(ctx->tab->items, ncap * sizeof(*next));
         if (next == NULL) {
             return NULL;
@@ -477,6 +480,19 @@ static int parse_size_arg(const char *expr, const char *sym_name, as_symbol_t *s
                 free(tmp);
                 return -1;
             }
+            if (strcmp(lhs, ".") == 0) {
+                sym->size = 0;
+                sym->size_target_symbol = rhs;
+                sym->size_base_from_dot = 1;
+                sym->size_anchor_file = xstrdup(file);
+                sym->size_anchor_line = line;
+                free(lhs);
+                free(tmp);
+                if (sym->size_anchor_file == NULL) {
+                    return -1;
+                }
+                return 0;
+            }
             if (strcmp(rhs, sym_name) == 0) {
                 sym->size = 0;
                 sym->size_base_symbol = lhs;
@@ -486,6 +502,17 @@ static int parse_size_arg(const char *expr, const char *sym_name, as_symbol_t *s
             }
             free(lhs);
             free(rhs);
+        }
+        if (tmp[0] != '\0' && strcmp(tmp, ".") != 0 && strchr(tmp, ' ') == NULL && strchr(tmp, '\t') == NULL) {
+            sym->size = 0;
+            sym->size_base_symbol = xstrdup(tmp);
+            sym->size_target_symbol = xstrdup(sym_name);
+            if (sym->size_base_symbol == NULL || sym->size_target_symbol == NULL) {
+                free(tmp);
+                return -1;
+            }
+            free(tmp);
+            return 0;
         }
     }
 
@@ -545,15 +572,15 @@ static as_sym_type_t parse_type_name(const char *raw) {
         s++;
     }
 
-    if (strcmp(s, "function") == 0 || strcmp(s, "func") == 0) {
+    if (strcmp(s, "function") == 0 || strcmp(s, "func") == 0 || strcmp(s, "STT_FUNC") == 0) {
         t = AS_SYM_TYPE_FUNCTION;
-    } else if (strcmp(s, "object") == 0) {
+    } else if (strcmp(s, "object") == 0 || strcmp(s, "STT_OBJECT") == 0) {
         t = AS_SYM_TYPE_OBJECT;
-    } else if (strcmp(s, "tls_object") == 0) {
+    } else if (strcmp(s, "tls_object") == 0 || strcmp(s, "STT_TLS") == 0) {
         t = AS_SYM_TYPE_TLS_OBJECT;
     } else if (strcmp(s, "common") == 0) {
         t = AS_SYM_TYPE_COMMON;
-    } else if (strcmp(s, "notype") == 0) {
+    } else if (strcmp(s, "notype") == 0 || strcmp(s, "STT_NOTYPE") == 0) {
         t = AS_SYM_TYPE_NOTYPE;
     }
 
@@ -651,44 +678,91 @@ static int handle_directive(sym_ctx_t *ctx, const as_stmt_t *st) {
     }
 
     if (strcmp(d->name, ".type") == 0) {
-        char *name;
+        char *name = NULL;
+        char *type = NULL;
         as_symbol_t *sym;
 
-        if (d->arg_count < 2) {
-            return -1;
+        if (d->arg_count >= 2) {
+            name = trim_copy(d->args[0]);
+            type = trim_copy(d->args[1]);
+        } else if (d->arg_count == 1) {
+            char *tmp = trim_copy(d->args[0]);
+            char *sp;
+            if (tmp == NULL) {
+                return -1;
+            }
+            sp = tmp;
+            while (*sp != '\0' && !isspace((unsigned char)*sp)) {
+                sp++;
+            }
+            if (*sp == '\0') {
+                free(tmp);
+                return -1;
+            }
+            *sp++ = '\0';
+            name = trim_copy(tmp);
+            type = trim_copy(sp);
+            free(tmp);
         }
-        name = trim_copy(d->args[0]);
-        if (name == NULL) {
+        if (name == NULL || type == NULL) {
+            free(name);
+            free(type);
             return -1;
         }
         sym = get_or_create_symbol(ctx, name);
         free(name);
         if (sym == NULL) {
+            free(type);
             return -1;
         }
-        sym->type = parse_type_name(d->args[1]);
+        sym->type = parse_type_name(type);
+        free(type);
         return 0;
     }
 
     if (strcmp(d->name, ".size") == 0) {
-        char *name;
+        char *name = NULL;
+        char *size = NULL;
         as_symbol_t *sym;
-        if (d->arg_count < 2) {
-            return -1;
+        if (d->arg_count >= 2) {
+            name = trim_copy(d->args[0]);
+            size = trim_copy(d->args[1]);
+        } else if (d->arg_count == 1) {
+            char *tmp = trim_copy(d->args[0]);
+            char *sp;
+            if (tmp == NULL) {
+                return -1;
+            }
+            sp = tmp;
+            while (*sp != '\0' && !isspace((unsigned char)*sp)) {
+                sp++;
+            }
+            if (*sp == '\0') {
+                free(tmp);
+                return -1;
+            }
+            *sp++ = '\0';
+            name = trim_copy(tmp);
+            size = trim_copy(sp);
+            free(tmp);
         }
-        name = trim_copy(d->args[0]);
-        if (name == NULL) {
+        if (name == NULL || size == NULL) {
+            free(name);
+            free(size);
             return -1;
         }
         sym = get_or_create_symbol(ctx, name);
         if (sym == NULL) {
             free(name);
+            free(size);
             return -1;
         }
-        if (parse_size_arg(d->args[1], name, sym, st->file, st->line) != 0) {
+        if (parse_size_arg(size, name, sym, st->file, st->line) != 0) {
             free(name);
+            free(size);
             return -1;
         }
+        free(size);
         free(name);
         return 0;
     }
@@ -859,7 +933,16 @@ static int collect_instruction_refs(sym_ctx_t *ctx, const as_stmt_t *st) {
 }
 
 static int is_numeric_local_label_name(const char *name) {
-    return name != NULL && name[0] >= '0' && name[0] <= '9' && name[1] == '\0';
+    size_t i;
+    if (name == NULL || name[0] == '\0') {
+        return 0;
+    }
+    for (i = 0; name[i] != '\0'; ++i) {
+        if (name[i] < '0' || name[i] > '9') {
+            return 0;
+        }
+    }
+    return 1;
 }
 
 int as_symtab_build(const as_parse_result_t *parsed, as_symtab_t *tab,

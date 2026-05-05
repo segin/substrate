@@ -2,8 +2,11 @@
 
 #include <kern/console.h>
 #include <kern/device.h>
+#include <kern/isapnp.h>
+#include <kern/resource.h>
 #include <stdio.h>
 #include <string.h>
+#include <vm/vm_kmem.h>
 
 #ifndef HOST_TEST
 #include <arch/x86-common/io.h>
@@ -30,6 +33,7 @@ struct bus_type isa_bus_type = {
 };
 
 static int isa_bus_initialized;
+static int isa_pnp_probed;
 static void isa_ensure_init(void);
 
 static int isa_probe_default(uint16_t base) {
@@ -93,6 +97,84 @@ static struct device *isa_find_device_by_name(const char *name) {
     return NULL;
 }
 
+static int isa_attach_resource_copy(struct device *dev, uint32_t type,
+                                    resource_size_t start,
+                                    resource_size_t length,
+                                    const char *name) {
+    struct resource *res;
+
+    if (dev == NULL || length == 0) {
+        return -1;
+    }
+
+    res = kmalloc(sizeof(*res));
+    if (res == NULL) {
+        return -1;
+    }
+
+    memset(res, 0, sizeof(*res));
+    res->type = type;
+    res->start = start;
+    res->end = start + length - 1;
+    res->name = name;
+    res->owner = dev;
+    res->sibling = dev->resources;
+    dev->resources = res;
+    return 0;
+}
+
+static void isa_set_pnp_compatibles(struct device *dev,
+                                    const isapnp_logical_device_t *logical) {
+    char *compat;
+    size_t total = strlen(logical->id) + 2;
+    size_t used = 0;
+    size_t i;
+
+    if (dev == NULL || logical == NULL) {
+        return;
+    }
+
+    for (i = 0; i < logical->compat_count; i++) {
+        char id[8];
+
+        isapnp_eisa_id_to_string(logical->compat_ids[i], id);
+        total += strlen(id) + 1;
+    }
+
+    compat = kmalloc(total);
+    if (compat == NULL) {
+        return;
+    }
+
+    strcpy(compat + used, logical->id);
+    used += strlen(logical->id) + 1;
+    for (i = 0; i < logical->compat_count; i++) {
+        char id[8];
+
+        isapnp_eisa_id_to_string(logical->compat_ids[i], id);
+        strcpy(compat + used, id);
+        used += strlen(id) + 1;
+    }
+    compat[used] = '\0';
+    dev->compatible = compat;
+}
+
+struct resource *isa_device_resource(struct device *dev, uint32_t type, unsigned index) {
+    struct resource *res = dev ? dev->resources : NULL;
+
+    while (res != NULL) {
+        if (res->type == type) {
+            if (index == 0) {
+                return res;
+            }
+            index--;
+        }
+        res = res->sibling;
+    }
+
+    return NULL;
+}
+
 static void isa_ensure_init(void) {
     if (isa_bus_initialized) {
         return;
@@ -122,6 +204,7 @@ int isa_device_present(const char *name) {
 
 void isa_init(void) {
     isa_ensure_init();
+    isapnp_init();
 }
 
 int isa_port_alive(uint16_t port) {
@@ -135,6 +218,11 @@ void isa_probe_legacy(void) {
     for (i = 0; isa_legacy_table[i].name != NULL; i++) {
         struct device *dev;
         int present;
+
+        if (resource_find(RES_IO, isa_legacy_table[i].base,
+                          isa_legacy_table[i].span) != NULL) {
+            continue;
+        }
 
         present = isa_legacy_table[i].probe
             ? isa_legacy_table[i].probe(isa_legacy_table[i].base)
@@ -160,6 +248,105 @@ void isa_probe_legacy(void) {
         }
         kprintf("isa: detected %s at 0x%x\n", isa_legacy_table[i].name, isa_legacy_table[i].base);
     }
+}
+
+void isa_probe_pnp(void) {
+    int cards;
+    int csn;
+
+    isa_ensure_init();
+    if (isa_pnp_probed) {
+        return;
+    }
+
+    cards = isapnp_isolate();
+    if (cards <= 0) {
+        isa_pnp_probed = 1;
+        return;
+    }
+
+    for (csn = 1; csn <= cards; csn++) {
+        isapnp_device_t card;
+        unsigned logical_index;
+
+        if (isapnp_read_resources((uint8_t)csn, &card) != 0) {
+            continue;
+        }
+        if (isapnp_activate(&card) != 0) {
+            continue;
+        }
+
+        for (logical_index = 0; logical_index < card.logical_count; logical_index++) {
+            isapnp_logical_device_t *logical = &card.logical[logical_index];
+            struct device *dev;
+            char name[32];
+            unsigned idx;
+
+            snprintf(name, sizeof(name), "pnp-%s-%u-%u",
+                     logical->id,
+                     (unsigned)csn,
+                     (unsigned)logical->logical_device);
+            if (isa_find_device_by_name(name) != NULL) {
+                continue;
+            }
+
+            dev = device_create(name, NULL);
+            if (dev == NULL) {
+                continue;
+            }
+
+            dev->vendor_id = logical->vendor_id;
+            dev->device_id = logical->device_id;
+            snprintf(dev->serial, sizeof(dev->serial),
+                     "isapnp-%02u-%02u-%08x",
+                     (unsigned)csn,
+                     (unsigned)logical->logical_device,
+                     (unsigned)card.serial);
+            isa_set_pnp_compatibles(dev, logical);
+
+            for (idx = 0; idx < logical->io_count; idx++) {
+                if (logical->io[idx].base != 0 && logical->io[idx].length != 0) {
+                    (void)isa_attach_resource_copy(dev, RES_IO,
+                                                   logical->io[idx].base,
+                                                   logical->io[idx].length,
+                                                   name);
+                }
+            }
+            for (idx = 0; idx < logical->irq_count; idx++) {
+                if (logical->irq[idx].irq != 0xFFU) {
+                    (void)isa_attach_resource_copy(dev, RES_IRQ,
+                                                   logical->irq[idx].irq,
+                                                   1,
+                                                   name);
+                }
+            }
+            for (idx = 0; idx < logical->dma_count; idx++) {
+                if (logical->dma[idx].channel != 0xFFU) {
+                    (void)isa_attach_resource_copy(dev, RES_DMA,
+                                                   logical->dma[idx].channel,
+                                                   1,
+                                                   name);
+                }
+            }
+            for (idx = 0; idx < logical->mem_count; idx++) {
+                if (logical->mem[idx].base != 0 && logical->mem[idx].length != 0) {
+                    (void)isa_attach_resource_copy(dev, RES_MEM,
+                                                   logical->mem[idx].base,
+                                                   logical->mem[idx].length,
+                                                   name);
+                }
+            }
+
+            if (device_register(dev, &isa_bus_type) != 0) {
+                device_put(dev);
+                continue;
+            }
+
+            kprintf("isa-pnp: detected %s (%s)\n", name, logical->id);
+        }
+    }
+
+    isa_pnp_probed = 1;
 }
 
 struct device *isa_first_device(void) {

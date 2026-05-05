@@ -15,6 +15,7 @@
 #include <sys/kern_syscalls.h>
 #include <sys/file.h>
 #include <sys/errno.h>
+#include <sys/stat.h>
 #include <arch/i386/pmm.h>
 #if defined(__i386__) || defined(HOST_TEST)
 #include <arch/i386/pmap.h>
@@ -90,6 +91,17 @@ static int elf_note_detect_os(const uint8_t *buf, uint32_t len) {
 
         if (namesz >= 8 && memcmp(buf + name_off, "FreeBSD", 8) == 0) {
             return ELFOSABI_FREEBSD;
+        }
+
+        /* NetBSD/OpenBSD ship with EI_OSABI = SYSV (0) and announce
+         * the OS via PT_NOTE with owner "NetBSD\0" / "OpenBSD\0".
+         * NetBSD uses .note.netbsd.ident (n_type = NT_NETBSD_IDENT,
+         * n_namesz = 7); OpenBSD uses .note.openbsd.ident similarly. */
+        if (namesz >= 7 && memcmp(buf + name_off, "NetBSD", 7) == 0) {
+            return ELFOSABI_NETBSD;
+        }
+        if (namesz >= 8 && memcmp(buf + name_off, "OpenBSD", 8) == 0) {
+            return ELFOSABI_OPENBSD;
         }
 
         off = next_off;
@@ -175,11 +187,34 @@ static int elf_read_image_info(fs_node_t *file, elf_image_info_t *image) {
     image->phnum = image->ehdr.e_phnum;
     image->detected_os = elf_detect_osabi(&image->ehdr);
 
+    /* e_phentsize must at least span Elf32_Phdr; reject pathological
+     * values up front so the multiply below stays bounded. */
+    if (image->ehdr.e_phentsize < sizeof(Elf32_Phdr) ||
+        image->ehdr.e_phentsize > 0x1000) {
+        return -ENOEXEC;
+    }
+
     for (uint16_t i = 0; i < image->phnum; i++) {
-        uint32_t ph_offset = image->ehdr.e_phoff + i * image->ehdr.e_phentsize;
+        /* 64-bit math + explicit overflow rejection — a hostile ELF can
+         * set e_phoff close to UINT32_MAX and pick e_phentsize so that
+         * uint32_t addition wraps and we end up reading the ELF header
+         * itself as a phdr. */
+        uint64_t ph_offset64 = (uint64_t)image->ehdr.e_phoff +
+                               (uint64_t)i * (uint64_t)image->ehdr.e_phentsize;
+        if (ph_offset64 + sizeof(Elf32_Phdr) > 0xFFFFFFFFULL) {
+            return -ENOEXEC;
+        }
+        uint32_t ph_offset = (uint32_t)ph_offset64;
         Elf32_Phdr *phdr = &image->phdrs[i];
 
         if (file->read(file, ph_offset, sizeof(Elf32_Phdr), (uint8_t *)phdr) != sizeof(Elf32_Phdr)) {
+            return -ENOEXEC;
+        }
+
+        /* Reject overflow of p_offset + p_filesz (used in arithmetic
+         * below and in the segment loader) before any caller observes
+         * a wrapped value. */
+        if (phdr->p_filesz > 0xFFFFFFFFU - phdr->p_offset) {
             return -ENOEXEC;
         }
 
@@ -297,7 +332,8 @@ static int is_linux_ldso_path(const char *interp_path) {
            strcmp(interp_path, "/lib/ld-linux-x86-64.so.2") == 0;
 }
 
-static fs_node_t *elf_lookup_interpreter(fs_node_t *root, const char *interp_path) {
+static fs_node_t *elf_lookup_interpreter(fs_node_t *root, const char *interp_path,
+                                          const char *prefix) {
     static const struct {
         const char *requested;
         const char *fallback;
@@ -312,6 +348,14 @@ static fs_node_t *elf_lookup_interpreter(fs_node_t *root, const char *interp_pat
         return NULL;
     }
 
+    /* Try personality prefix first: e.g. /perso/freebsd/libexec/ld-elf.so.1 */
+    if (prefix && prefix[0]) {
+        char prefixed[320];
+        snprintf(prefixed, sizeof(prefixed), "%s%s", prefix, interp_path);
+        node = vfs_lookup(root, prefixed);
+        if (node) return node;
+    }
+
     node = vfs_lookup(root, interp_path);
     if (node) {
         return node;
@@ -319,7 +363,8 @@ static fs_node_t *elf_lookup_interpreter(fs_node_t *root, const char *interp_pat
 
     for (size_t i = 0; i < sizeof(aliases) / sizeof(aliases[0]); i++) {
         if (strcmp(interp_path, aliases[i].requested) == 0) {
-            return vfs_lookup(root, aliases[i].fallback);
+            node = vfs_lookup(root, aliases[i].fallback);
+            if (node) return node;
         }
     }
 
@@ -457,6 +502,10 @@ uint32_t elf_load(fs_node_t *file, uint32_t load_base, int is_main_image,
     (void)tls_vaddr;  // Will be used for debug output
     (void)tls_align;  // Will be used for proper alignment
     
+    /* Track mapped VA ranges for overlap detection (finding #3) */
+    struct { uint32_t start; uint32_t end; } mapped_ranges[256];
+    int mapped_range_count = 0;
+
     for (int i = 0; i < image->phnum; i++) {
         Elf32_Phdr phdr = image->phdrs[i];
 
@@ -471,6 +520,14 @@ uint32_t elf_load(fs_node_t *file, uint32_t load_base, int is_main_image,
         
         // Detect TLS segment
         if (phdr.p_type == PT_TLS) {
+            uint32_t tls_end = phdr.p_vaddr + load_base + phdr.p_memsz;
+            // SECURITY CHECK: Validate TLS segment bounds (finding #2)
+            if (tls_end < phdr.p_vaddr + load_base || tls_end >= 0xC0000000 ||
+                phdr.p_vaddr + load_base >= 0xC0000000) {
+                kprint("ELF: PT_TLS segment has invalid bounds\n");
+                kfree(image, sizeof(*image));
+                return 0;
+            }
             tls_vaddr = phdr.p_vaddr;
             tls_filesz = phdr.p_filesz;
             tls_memsz = phdr.p_memsz;
@@ -513,14 +570,46 @@ uint32_t elf_load(fs_node_t *file, uint32_t load_base, int is_main_image,
             // Calculate page-aligned start and end
             uint32_t vaddr = phdr.p_vaddr + load_base;
             
+            // SECURITY CHECK: Detect overflow in p_vaddr + load_base (finding #1)
+            if (load_base != 0 && vaddr < phdr.p_vaddr) {
+                kprint("ELF: Segment vaddr overflow (p_vaddr + load_base wraps)\n");
+                kfree(image, sizeof(*image));
+                return 0;
+            }
+
+            // SECURITY CHECK: Detect overflow in p_memsz + vaddr before performing addition
+            if (phdr.p_memsz > 0xFFFFFFFFU - vaddr) {
+                kprint("ELF: Segment size overflow\n");
+                kfree(image, sizeof(*image));
+                return 0;
+            }
+
             // SECURITY/ROBUSTNESS CHECK: Disallow loading ELF segments into kernel space
-            if (vaddr >= 0xC0000000 || (vaddr + phdr.p_memsz) >= 0xC0000000 || (vaddr + phdr.p_memsz) < vaddr) {
+            if (vaddr >= 0xC0000000 || (vaddr + phdr.p_memsz) >= 0xC0000000) {
                 kprint("ELF: Refusing to load segment into kernel space\n");
                 kfree(image, sizeof(*image));
                 return 0;
             }
             uint32_t va_start = vaddr & 0xFFFFF000;
             uint32_t va_end = (vaddr + phdr.p_memsz + 0xFFF) & 0xFFFFF000;
+
+            // SECURITY CHECK: Detect overlapping segments (finding #3)
+            for (int j = 0; j < mapped_range_count; j++) {
+                if (va_start < mapped_ranges[j].end && va_end > mapped_ranges[j].start) {
+                    kprint("ELF: Overlapping PT_LOAD segments detected\n");
+                    kfree(image, sizeof(*image));
+                    return 0;
+                }
+            }
+            if (mapped_range_count < 256) {
+                mapped_ranges[mapped_range_count].start = va_start;
+                mapped_ranges[mapped_range_count].end = va_end;
+                mapped_range_count++;
+            } else {
+                kprint("ELF: Too many PT_LOAD segments (>256)\n");
+                kfree(image, sizeof(*image));
+                return 0;
+            }
 
             
             // Allocate and map pages for this segment
@@ -547,6 +636,13 @@ uint32_t elf_load(fs_node_t *file, uint32_t load_base, int is_main_image,
                 void *pa = pmm_alloc_block();
                 if (!pa) {
                     kprint("ELF: Out of physical memory\n");
+                    /* Free already-mapped pages for this segment (finding #11) */
+                    for (int pi = 0; pi < num_pages; pi++) {
+                        pmap_remove(pmap, page_maps[pi].va);
+                        pmm_free_block(page_maps[pi].pa);
+                    }
+                    kfree(page_maps, segment_pages * sizeof(*page_maps));
+                    kfree(image, sizeof(*image));
                     return 0;
                 }
                 
@@ -555,6 +651,11 @@ uint32_t elf_load(fs_node_t *file, uint32_t load_base, int is_main_image,
                 uint32_t pa_phys = (uint32_t)(uintptr_t)pa - 0xC0000000;
                 if (pmap_enter(pmap, va, pa_phys, prot, 0) < 0) {
                     kprint("ELF: Failed to map page\n");
+                    pmm_free_block(pa);
+                    for (int pi = 0; pi < num_pages; pi++) {
+                        pmap_remove(pmap, page_maps[pi].va);
+                        pmm_free_block(page_maps[pi].pa);
+                    }
                     kfree(page_maps, segment_pages * sizeof(*page_maps));
                     kfree(image, sizeof(*image));
                     return 0;
@@ -597,8 +698,15 @@ uint32_t elf_load(fs_node_t *file, uint32_t load_base, int is_main_image,
                         
                         // Read directly to kernel-mapped page (pa is already virtual)
                         uint8_t *dest = (uint8_t *)page_maps[pi].pa + offset_in_page;
+                        /* p_offset+p_filesz was already overflow-checked
+                         * at parse time; offset_in_segment is bounded by
+                         * the segment so this addition is safe. */
                         if (file->read(file, phdr.p_offset + offset_in_segment, copy_size, dest) != copy_size) {
                             kprint("ELF: Failed to read segment data directly\n");
+                            for (int ri = 0; ri < num_pages; ri++) {
+                                pmap_remove(pmap, page_maps[ri].va);
+                                pmm_free_block(page_maps[ri].pa);
+                            }
                             kfree(page_maps, segment_pages * sizeof(*page_maps));
                             kfree(image, sizeof(*image));
                             return 0;
@@ -636,6 +744,8 @@ uint32_t elf_load(fs_node_t *file, uint32_t load_base, int is_main_image,
         kprint("ELF: Personality: ");
         if (detected_os == ELFOSABI_LINUX) kprint("Linux\n");
         else if (detected_os == ELFOSABI_FREEBSD) kprint("FreeBSD\n");
+        else if (detected_os == ELFOSABI_NETBSD) kprint("NetBSD\n");
+        else if (detected_os == ELFOSABI_OPENBSD) kprint("OpenBSD\n");
         else kprint("Native\n");
     }
     
@@ -646,6 +756,12 @@ uint32_t elf_load(fs_node_t *file, uint32_t load_base, int is_main_image,
                 break;
             case ELFOSABI_LINUX:
                 current_process->perso_id = PERS_LINUX;
+                break;
+            case ELFOSABI_NETBSD:
+                current_process->perso_id = PERS_NETBSD;
+                break;
+            case ELFOSABI_OPENBSD:
+                current_process->perso_id = PERS_OPENBSD;
                 break;
             default:
                 current_process->perso_id = PERS_NATIVE;
@@ -756,7 +872,8 @@ static int exec_copy_args(char *const array[], int count, char **k_array, char *
 // Helper to set up the user stack
 static int exec_setup_stack(pmap_t pmap, uint32_t *sp_out, char **k_argv, int argc, char **k_envp, int envc,
                             uint32_t at_entry, uint32_t at_base, uint32_t at_phdr,
-                            const elf_image_info_t *image) {
+                            const elf_image_info_t *image,
+                            uint32_t *ps_strings_out) {
     uint32_t user_stack_top = 0xC0000000;
     uint32_t user_stack_size = 256; // 1MB initial user stack
     uint32_t user_stack_base = user_stack_top - (user_stack_size * 0x1000);
@@ -764,25 +881,54 @@ static int exec_setup_stack(pmap_t pmap, uint32_t *sp_out, char **k_argv, int ar
     // Track physical addresses for kernel-space access
     typedef struct { uint32_t va; void *pa; } stack_page_t;
     stack_page_t stack_pages[256];
+    uint32_t mapped_stack_pages = 0;
     
     for (uint32_t i = 0; i < user_stack_size; i++) {
         uint32_t va = user_stack_base + i * 0x1000;
         void *pa = pmm_alloc_block();
         if (!pa) {
             kprint("execve: Out of memory for user stack\n");
+            for (uint32_t j = 0; j < mapped_stack_pages; j++) {
+                pmap_remove(pmap, stack_pages[j].va);
+                pmm_free_block(stack_pages[j].pa);
+            }
             return -1;
         }
         uint32_t pa_phys = (uint32_t)(uintptr_t)pa - 0xC0000000;
         if (pmap_enter(pmap, va, pa_phys, VM_PROT_WRITE, 0) < 0) {
             kprint("execve: Failed to map user stack\n");
+            pmm_free_block(pa);
+            for (uint32_t j = 0; j < mapped_stack_pages; j++) {
+                pmap_remove(pmap, stack_pages[j].va);
+                pmm_free_block(stack_pages[j].pa);
+            }
             return -1;
         }
         stack_pages[i].va = va;
         stack_pages[i].pa = pa;
+        mapped_stack_pages++;
         memset(pa, 0, 0x1000);
     }
     
-    uint32_t sp = user_stack_top - 4; // Start at top of user stack region
+    /*
+     * Reserve 16 bytes at the very top for `struct ps_strings` —
+     * but ONLY for NetBSD/OpenBSD.  Their _start
+     * (lib/csu/arch/i386/crt0.S) reads its argv/envp from this struct
+     * via %ebx, not from argc-on-stack, so the kernel must construct
+     * it and pass its address.  Linux/FreeBSD don't read here, and
+     * shifting their sp by 16 bytes was triggering a regression in
+     * FreeBSD's __stack_chk_fail path — so leave their layout
+     * untouched (sp = user_stack_top - 4 as before).
+     */
+    int needs_ps_strings = current_process &&
+        (current_process->perso_id == PERS_NETBSD ||
+         current_process->perso_id == PERS_OPENBSD);
+    uint32_t ps_strings_addr = 0;
+    uint32_t sp = user_stack_top - 4;
+    if (needs_ps_strings) {
+        ps_strings_addr = user_stack_top - 16;
+        sp = ps_strings_addr - 4;
+    }
     
     // Helper to write to user stack via kernel mapping
     #define STACK_WRITE32(user_va, val) do { \
@@ -818,7 +964,7 @@ static int exec_setup_stack(pmap_t pmap, uint32_t *sp_out, char **k_argv, int ar
             k_envp[i] = (char*)(uintptr_t)user_ptr;
         }
     }
-    
+
     if (k_argv) {
         for (int i = argc - 1; i >= 0; i--) {
             uint32_t user_ptr;
@@ -826,7 +972,46 @@ static int exec_setup_stack(pmap_t pmap, uint32_t *sp_out, char **k_argv, int ar
             k_argv[i] = (char*)(uintptr_t)user_ptr;
         }
     }
-    
+
+    /* Place data blobs at the top of the stack, above the auxv array.
+     * FreeBSD (and Linux) rtld walks auxv as a contiguous Elf_Auxinfo[]
+     * array starting right after the envp NULL terminator.  Any raw bytes
+     * embedded inside the array corrupt that walk and cause assertion
+     * failures (e.g. rtld.c:565 assert(aux_info[AT_BASE] != NULL)).
+     * Strategy: push all string/data blobs here first (highest addresses),
+     * record their user-space pointers, then emit a clean auxv below. */
+    uint32_t platform_ptr;
+    PUSH_STRING("i686", platform_ptr);
+
+    /* Random buffer used for both AT_RANDOM (Linux, first 16 bytes) and
+     * AT_FBSD_CANARY (FreeBSD, all 64 bytes).  FreeBSD libc's __guard_setup
+     * calls _elf_aux_info(AT_CANARY, &__stack_chk_guard, sizeof(...)) where
+     * __stack_chk_guard is `long[8]` = 32 bytes on i386.  _elf_aux_info
+     * requires AT_CANARYLEN >= buflen, so we must publish at least 32 bytes;
+     * 64 leaves headroom for future LP64 ports (long[8] = 64 bytes). */
+    uint8_t rand_buf[64];
+    int rand_rc = random_get_bytes_flags(rand_buf, sizeof(rand_buf), GRND_NONBLOCK);
+    if (rand_rc != (int)sizeof(rand_buf)) {
+        /* Avoid stalling exec during early boot when entropy is still low. */
+        random_get_bytes_flags(rand_buf, sizeof(rand_buf), GRND_INSECURE);
+    }
+    sp -= sizeof(rand_buf);
+    sp &= ~15;
+    uint32_t rand_ptr = sp;
+    for (unsigned i = 0; i < sizeof(rand_buf) / 4; i++) {
+        uint32_t val;
+        memcpy(&val, &rand_buf[i * 4], 4);
+        STACK_WRITE32(sp + i * 4, val);
+    }
+    if (current_process && current_process->perso_id == PERS_FREEBSD) {
+        extern int kprintf(const char *fmt, ...);
+        kprintf("[AUXV] FBSD canary @0x%08x len=64 first8=%02x%02x%02x%02x%02x%02x%02x%02x\n",
+                rand_ptr,
+                rand_buf[0], rand_buf[1], rand_buf[2], rand_buf[3],
+                rand_buf[4], rand_buf[5], rand_buf[6], rand_buf[7]);
+    }
+
+    /* Align to 16 before the auxv array. */
     sp &= ~15;
 
     if (!image) {
@@ -834,60 +1019,48 @@ static int exec_setup_stack(pmap_t pmap, uint32_t *sp_out, char **k_argv, int ar
         return -1;
     }
 
+    /* Emit a clean, contiguous Elf_Auxinfo[] array.
+     * AT_NULL is pushed first so it lands at the highest address;
+     * subsequent entries are pushed below it.  The rtld walks from
+     * the lowest entry (last pushed) up to AT_NULL.
+     *
+     * Indices 0..14 are POSIX-aligned and identical between Linux and
+     * FreeBSD.  Indices >=15 diverge — Linux has AT_PLATFORM/AT_HWCAP/
+     * AT_CLKTCK/AT_SECURE/AT_RANDOM/AT_EXECFN at 15/16/17/23/25/31, while
+     * FreeBSD assigns those slots to AT_EXECPATH/AT_CANARY/AT_CANARYLEN/
+     * AT_STACKPROT/AT_HWCAP/AT_ENVV.  Sending Linux entries to a FreeBSD
+     * process therefore makes libc read garbage — most visibly, FreeBSD
+     * libc reads our AT_EXECFN (argv[0] string pointer) as AT_ENVV (the
+     * environ array), and the next getenv() walks off into the weeds. */
+
+    int is_freebsd = current_process && current_process->perso_id == PERS_FREEBSD;
+
+    uint32_t execfn_ptr = 0;
+    if (k_argv && argc > 0) execfn_ptr = (uint32_t)(uintptr_t)k_argv[0];
+
     sp -= 4; STACK_WRITE32(sp, 0);
     sp -= 4; STACK_WRITE32(sp, AT_NULL);
-    
+
     sp -= 4; STACK_WRITE32(sp, at_entry);
     sp -= 4; STACK_WRITE32(sp, AT_ENTRY);
-    
+
     sp -= 4; STACK_WRITE32(sp, image->ehdr.e_phnum);
     sp -= 4; STACK_WRITE32(sp, AT_PHNUM);
-    
+
     sp -= 4; STACK_WRITE32(sp, image->ehdr.e_phentsize);
     sp -= 4; STACK_WRITE32(sp, AT_PHENT);
 
     sp -= 4; STACK_WRITE32(sp, at_phdr);
     sp -= 4; STACK_WRITE32(sp, AT_PHDR);
-    
+
     sp -= 4; STACK_WRITE32(sp, 4096);
     sp -= 4; STACK_WRITE32(sp, AT_PAGESZ);
 
     sp -= 4; STACK_WRITE32(sp, 0);
     sp -= 4; STACK_WRITE32(sp, AT_FLAGS);
-    
+
     sp -= 4; STACK_WRITE32(sp, at_base);
     sp -= 4; STACK_WRITE32(sp, AT_BASE);
-
-    if (current_process && current_process->perso_id == PERS_LINUX) {
-        sp -= 4; STACK_WRITE32(sp, HZ);
-        sp -= 4; STACK_WRITE32(sp, AT_CLKTCK);
-
-        sp -= 4; STACK_WRITE32(sp, 0);
-        sp -= 4; STACK_WRITE32(sp, AT_HWCAP);
-    }
-
-    uint32_t rand_ptr;
-    sp -= 16;
-    rand_ptr = sp;
-
-    uint8_t rand_buf[16];
-    int rand_rc = random_get_bytes_flags(rand_buf, sizeof(rand_buf), GRND_NONBLOCK);
-    if (rand_rc != (int)sizeof(rand_buf)) {
-        /* Avoid stalling exec during early boot when entropy is still low. */
-        random_get_bytes_flags(rand_buf, sizeof(rand_buf), GRND_INSECURE);
-    }
-
-    for (int i = 0; i < 4; i++) {
-        uint32_t val;
-        memcpy(&val, &rand_buf[i * 4], 4);
-        STACK_WRITE32(sp + i * 4, val);
-    }
-    
-    sp -= 4; STACK_WRITE32(sp, rand_ptr);
-    sp -= 4; STACK_WRITE32(sp, AT_RANDOM);
-
-    sp -= 4; STACK_WRITE32(sp, 0);
-    sp -= 4; STACK_WRITE32(sp, AT_SECURE);
 
     sp -= 4; STACK_WRITE32(sp, current_process->uid);
     sp -= 4; STACK_WRITE32(sp, AT_UID);
@@ -898,52 +1071,107 @@ static int exec_setup_stack(pmap_t pmap, uint32_t *sp_out, char **k_argv, int ar
     sp -= 4; STACK_WRITE32(sp, current_process->egid);
     sp -= 4; STACK_WRITE32(sp, AT_EGID);
 
-    const char *platform_str = "i686";
-    size_t platform_len = 5;
-    sp -= platform_len;
-    sp &= ~3;
-    uint32_t platform_ptr = sp;
-    for (size_t i = 0; i < platform_len; i++) {
-        uint32_t addr = platform_ptr + i;
-        uint32_t page_idx = (addr - user_stack_base) / 0x1000;
-        uint32_t offset = (addr - user_stack_base) % 0x1000;
-        if (page_idx < user_stack_size) {
-            uint8_t *kptr = (uint8_t*)stack_pages[page_idx].pa + offset;
-            *kptr = platform_str[i];
-        }
-    }
-    
-    sp -= 4; STACK_WRITE32(sp, platform_ptr);
-    sp -= 4; STACK_WRITE32(sp, AT_PLATFORM);
-    
-    uint32_t execfn_ptr = 0;
-    if (k_argv && argc > 0) execfn_ptr = (uint32_t)(uintptr_t)k_argv[0];
+    if (is_freebsd) {
+        /* FreeBSD-specific entries.  Order doesn't matter (rtld walks
+         * the array indexing by a_type), but use BSD a_type values. */
+        sp -= 4; STACK_WRITE32(sp, execfn_ptr);
+        sp -= 4; STACK_WRITE32(sp, AT_FBSD_EXECPATH);
 
-    sp -= 4; STACK_WRITE32(sp, execfn_ptr);
-    sp -= 4; STACK_WRITE32(sp, AT_EXECFN);
-    
+        /* Stack canary: point at the 64 random bytes we already pushed.
+         * FreeBSD libc's __guard_setup requests sizeof(__stack_chk_guard) =
+         * 32 bytes (long[8] on i386), and _elf_aux_info requires
+         * AT_CANARYLEN >= the request.  Publishing 16 here used to fall
+         * through to a sysctl(KERN_ARND) we don't implement, leaving the
+         * guard at the {0,0,'\\n',0xff} terminator canary while compiled
+         * code wrote real (non-terminator) bytes — every function return
+         * tripped __stack_chk_fail and aborted via the syslog/abort path. */
+        sp -= 4; STACK_WRITE32(sp, rand_ptr);
+        sp -= 4; STACK_WRITE32(sp, AT_FBSD_CANARY);
+        sp -= 4; STACK_WRITE32(sp, 64);
+        sp -= 4; STACK_WRITE32(sp, AT_FBSD_CANARYLEN);
+
+        sp -= 4; STACK_WRITE32(sp, 1403000);
+        sp -= 4; STACK_WRITE32(sp, AT_FBSD_OSRELDATE);
+
+        sp -= 4; STACK_WRITE32(sp, 1);
+        sp -= 4; STACK_WRITE32(sp, AT_FBSD_NCPUS);
+
+        /* PROT_READ|PROT_WRITE = 0x3 — stack protection FreeBSD libc
+         * uses to refrain from setting PROT_EXEC on returns. */
+        sp -= 4; STACK_WRITE32(sp, 0x3);
+        sp -= 4; STACK_WRITE32(sp, AT_FBSD_STACKPROT);
+
+        sp -= 4; STACK_WRITE32(sp, 0);
+        sp -= 4; STACK_WRITE32(sp, AT_FBSD_HWCAP);
+
+        sp -= 4; STACK_WRITE32(sp, 0);
+        sp -= 4; STACK_WRITE32(sp, AT_FBSD_BSDFLAGS);
+
+        sp -= 4; STACK_WRITE32(sp, (uint32_t)argc);
+        sp -= 4; STACK_WRITE32(sp, AT_FBSD_ARGC);
+
+        sp -= 4; STACK_WRITE32(sp, (uint32_t)envc);
+        sp -= 4; STACK_WRITE32(sp, AT_FBSD_ENVC);
+    } else {
+        if (current_process && current_process->perso_id == PERS_LINUX) {
+            sp -= 4; STACK_WRITE32(sp, HZ);
+            sp -= 4; STACK_WRITE32(sp, AT_CLKTCK);
+
+            sp -= 4; STACK_WRITE32(sp, 0);
+            sp -= 4; STACK_WRITE32(sp, AT_HWCAP);
+        }
+
+        sp -= 4; STACK_WRITE32(sp, rand_ptr);
+        sp -= 4; STACK_WRITE32(sp, AT_RANDOM);
+
+        sp -= 4; STACK_WRITE32(sp, 0);
+        sp -= 4; STACK_WRITE32(sp, AT_SECURE);
+
+        sp -= 4; STACK_WRITE32(sp, platform_ptr);
+        sp -= 4; STACK_WRITE32(sp, AT_PLATFORM);
+
+        sp -= 4; STACK_WRITE32(sp, execfn_ptr);
+        sp -= 4; STACK_WRITE32(sp, AT_EXECFN);
+    }
+
+    /* envp pointer array (NULL-terminated), then argv, then argc.
+     * Capture the user-space addresses of the argv and envp ARRAYS
+     * (i.e. address of argv[0], address of envp[0]) for ps_strings. */
     sp -= 4; STACK_WRITE32(sp, 0);
+    uint32_t envp_arr_user = sp;  /* tentative: NULL-only case */
     if (k_envp) {
         for (int i = envc - 1; i >= 0; i--) {
             sp -= 4;
             STACK_WRITE32(sp, (uint32_t)(uintptr_t)k_envp[i]);
         }
+        envp_arr_user = sp;  /* address of envp[0] */
     }
-    
+
     sp -= 4; STACK_WRITE32(sp, 0);
+    uint32_t argv_arr_user = sp;
     if (k_argv) {
         for (int i = argc - 1; i >= 0; i--) {
             sp -= 4;
             STACK_WRITE32(sp, (uint32_t)(uintptr_t)k_argv[i]);
         }
+        argv_arr_user = sp;
     }
-    
+
     sp -= 4; STACK_WRITE32(sp, argc);
-    
+
+    /* Populate the ps_strings struct at the reserved top slot, if any. */
+    if (needs_ps_strings) {
+        STACK_WRITE32(ps_strings_addr +  0, argv_arr_user);
+        STACK_WRITE32(ps_strings_addr +  4, (uint32_t)argc);
+        STACK_WRITE32(ps_strings_addr +  8, envp_arr_user);
+        STACK_WRITE32(ps_strings_addr + 12, (uint32_t)envc);
+    }
+
     #undef STACK_WRITE32
     #undef PUSH_STRING
 
     *sp_out = sp;
+    if (ps_strings_out) *ps_strings_out = ps_strings_addr;
     return 0;
 }
 
@@ -1084,6 +1312,18 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
     }
 
     uint32_t entry = main_entry;
+    if (interp_len == 0 && image && image->ehdr.e_type == 3) {
+        /* No PT_INTERP and the main image is ET_DYN.  Two cases:
+         *   1. The dynamic linker is being run directly (e.g. ldd execs
+         *      /libexec/ld-elf.so.1 with the target binary as argv[1]).
+         *   2. A PIE executable that links itself.
+         * In both cases AT_BASE must equal the load base of the program
+         * the auxv describes — for FreeBSD rtld that's how _rtld_start
+         * recovers its own mapbase before any relocation has happened.
+         * Without this, init_rtld() reads aux_info[AT_BASE]=0, computes
+         * dynamic = 0 + p_vaddr (e.g. 0x1c1d0), and faults. */
+        at_base = main_load_base;
+    }
     if (interp_len > 0) {
         if (elf_debug_enabled() || cmdline_debug_enabled("perso:linux")) {
             kprint("execve: Loading interpreter: ");
@@ -1100,7 +1340,12 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
             current_process->perso_id = PERS_LINUX;
         }
 
-        fs_node_t *interp_file = elf_lookup_interpreter(root, interp_path);
+        const char *perso_prefix = NULL;
+        if (current_process) {
+            struct personality *p = perso_lookup(current_process->perso_id);
+            if (p) perso_prefix = p->path_prefix;
+        }
+        fs_node_t *interp_file = elf_lookup_interpreter(root, interp_path, perso_prefix);
         if (!interp_file) {
             kprint("execve: Interpreter not found\n");
             goto cleanup;
@@ -1126,6 +1371,12 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
     if (current_process) {
         // Reset signal handlers on successful exec (POSIX requirement)
         exec_reset_signals();
+
+        // Handle setuid/setgid bits (POSIX exec credential change)
+        if (file && (file->mask & S_ISUID))
+            current_process->euid = file->uid;
+        if (file && (file->mask & S_ISGID))
+            current_process->egid = file->gid;
 
         // Extract basename
         const char *name = path;
@@ -1159,8 +1410,10 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
     set_kernel_stack((uint32_t)current_thread->kstack_top);
 
     uint32_t sp;
+    uint32_t ps_strings_user = 0;
     if (exec_setup_stack(new_pmap, &sp, k_argv, argc, k_envp, envc,
-                         main_entry, at_base, at_phdr, image) < 0) {
+                         main_entry, at_base, at_phdr, image,
+                         &ps_strings_user) < 0) {
         goto cleanup;
     }
 
@@ -1216,9 +1469,18 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
     if (image) kfree(image, sizeof(*image));
     if (fd >= 0) kern_close(fd);
 
-    // Jump to userspace - does not return
-    extern void jump_to_userspace(uint32_t entry, uint32_t stack);
-    jump_to_userspace(entry, sp);
+    // Jump to userspace - does not return.
+    // For NetBSD/OpenBSD, _start reads ps_strings from %ebx
+    // (lib/csu/arch/i386/crt0.S); other personalities ignore the
+    // third arg.  jump_to_userspace zeros %ebx unless we override.
+    extern void jump_to_userspace(uint32_t entry, uint32_t stack, uint32_t ebx);
+    uint32_t entry_ebx = 0;
+    if (current_process &&
+        (current_process->perso_id == PERS_NETBSD ||
+         current_process->perso_id == PERS_OPENBSD)) {
+        entry_ebx = ps_strings_user;
+    }
+    jump_to_userspace(entry, sp, entry_ebx);
     
     // Should never reach here
     panic("jump_to_userspace returned!");

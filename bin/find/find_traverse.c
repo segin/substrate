@@ -87,7 +87,9 @@ void traverse(const char *path, node_t *expr, int depth,
 					continue;
 				if (entry_count >= entry_cap) {
 					entry_cap = entry_cap ? entry_cap * 2 : 64;
-					entries = realloc(entries, sizeof(char *) * entry_cap);
+					char **tmp = realloc(entries, sizeof(char *) * entry_cap);
+					if (!tmp) { perror("realloc"); exit(1); }
+					entries = tmp;
 				}
 				entries[entry_count++] = strdup(de->d_name);
 			}

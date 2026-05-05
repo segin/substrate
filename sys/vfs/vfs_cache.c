@@ -34,13 +34,14 @@ int vfs_cache_count = 0;
 /* Reader/writer lock for SMP scalability */
 static rwlock_t nchash_lock;
 
-/* Simple hash function for name cache */
+/* FNV-1a hash for name cache (better distribution than simple multiplicative) */
 static uint32_t
 cache_hash(struct vnode *dvp, const char *name, size_t len)
 {
-    uint32_t hash = (uint32_t)(uintptr_t)dvp;
+    uint32_t hash = 2166136261u ^ (uint32_t)(uintptr_t)dvp;
     for (size_t i = 0; i < len; i++) {
-        hash = (hash << 5) + hash + name[i];
+        hash ^= (uint8_t)name[i];
+        hash *= 16777619u;
     }
     return hash & NCHASH_MASK;
 }

@@ -12,7 +12,6 @@
 typedef long off_t;
 
 void kprint(const char *str) {
-    // printf("%s", str); // Silence kprint for test output clarity
     (void)str;
 }
 

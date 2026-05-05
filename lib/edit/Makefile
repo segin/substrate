@@ -1,6 +1,5 @@
 include ../../Makefile.inc
 
-CC = gcc
 ifdef NATIVE_BUILD
 CFLAGS := -Wall -g
 CPPFLAGS := -include ../../include/histedit.h

@@ -218,6 +218,7 @@ sbin/*/*
 /usr.bin/lex/lex
 /usr.bin/lex/out.txt
 /usr.bin/lex/test_posix
+/usr.bin/nm/nm
 /usr.bin/pax/pax
 /usr.bin/pr/pr
 /usr.bin/readelf/readelf
@@ -238,9 +239,19 @@ sbin/*/*
 /tests/test_ext2_find_next_zero_bit
 /tests/test_ext2_inode_write
 /tests/test_ext2_read_blocks
+/tests/test_ext2_remove_perf
+/tests/test_ext2_rename
+/tests/test_ext2_vfs_ops
+/tests/test_ext2_write_block
 /tests/test_libc_sysctl
 /tests/test_libpthread_mutex
+/tests/test_minix
 /tests/test_readline
+/tests/test_runner
+/tests/chmod/fuzz_mode_parser
+/tests/chmod/fuzz_traversal_paths
+/tests/chmod/unit_cli
+/tests/chmod/unit_mode_parser
 /tests/usr.bin/cc/test_ast2ir_bin
 /tests/usr.bin/compress/uncompress
 /tests/sys/property_cmdline
@@ -274,3 +285,9 @@ tests/lib/edit/test_tokenizer
 tests/lib/edit/test_vi
 tools/sbsh_expect.exp
 /usr.lib/elfobj/tests/test_ensure_symbols_relocs
+tests/usr.lib/exvi/test_exvi_prop
+tests/usr.lib/exvi/test_exvi_core
+**/.build-mode
+tests/usr.lib/demangle/test_audit_regressions
+tests/usr.lib/demangle/test_demangle
+tests/usr.lib/demangle/fuzz/corpus/

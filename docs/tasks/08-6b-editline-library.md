@@ -257,7 +257,8 @@
 
 - [x] **Tokenizer (`tok_init` / `tok_str` / `tok_end`):** (REQ: REQ-08-0226)
     - [x] `tok_init(const char *ifs)`: create tokenizer context with IFS string. (REQ: REQ-08-0227)
-    - [x] `tok_str(Tokenizer *tok, const LineInfo *li, int *argc, const char ***argv)`: tokenize line content into argv. (REQ: REQ-08-0228)
+    - [x] `tok_str(Tokenizer *tok, const char *str, int *argc, const char ***argv)`: tokenize a string into argv using the BSD libedit signature. (REQ: REQ-08-0228)
+    - [x] `tok_line(Tokenizer *tok, const LineInfo *li, int *argc, const char ***argv, int *cursorc, int *cursoro)`: tokenize line-editing state into argv. (REQ: REQ-08-0228)
     - [x] `tok_reset(Tokenizer *tok)`: reset tokenizer state. (REQ: REQ-08-0229)
     - [x] `tok_end(Tokenizer *tok)`: free tokenizer resources. (REQ: REQ-08-0230)
     - [x] Handle single‑quoting, double‑quoting, and backslash‑escaping. (REQ: REQ-08-0231)
@@ -265,19 +266,20 @@
     - [x] Add `Tokenizer` typedef and API to `histedit.h`. (REQ: REQ-08-0233)
 
 - [x] **`el_set()` / `el_get()` Operations:** (REQ: REQ-08-0234)
-    - [x] `EL_PROMPT` (0): set/get prompt string pointer. **(Implemented)** (REQ: REQ-08-0235)
-    - [x] `EL_PROMPT_ESC`: set prompt function with escape‑char marking (for non‑printing sequences). (REQ: REQ-08-0236)
+    - [x] `EL_PROMPT` (0): set/get BSD-style prompt callback. **(Implemented)** (REQ: REQ-08-0235)
+    - [x] `EL_PROMPT_ESC` (21): set/get prompt callback with escape-char marking (for non-printing sequences). (REQ: REQ-08-0236)
     - [x] `EL_TERMINAL` (1): set terminal type string. **(Stub, unused)** (REQ: REQ-08-0237)
     - [x] `EL_EDITOR` (2): set editor mode (`"emacs"` or `"vi"`). **(Implemented)** (REQ: REQ-08-0238)
     - [x] `EL_SIGNAL` (3): enable/disable signal handling during `el_gets`. **(Implemented)** (REQ: REQ-08-0239)
     - [x] `EL_BIND` (4): bind key sequence → editor command. (REQ: REQ-08-0240)
-    - [x] `EL_ECHOTC` (5): echo a termcap string. (REQ: REQ-08-0241)
+    - [x] `EL_ECHOTC` (7): echo a termcap string. (REQ: REQ-08-0241)
     - [x] `EL_SETTC` (6): set a termcap value. (REQ: REQ-08-0242)
-    - [x] `EL_REFRESH` (7): force screen refresh. **(Implemented)** (REQ: REQ-08-0243)
-    - [x] `EL_HIST` (8): set history function + context. **(Implemented)** (REQ: REQ-08-0244)
+    - [x] `EL_REFRESH` (20): force screen refresh. **(Implemented)** (REQ: REQ-08-0243)
+    - [x] `EL_HIST` (10): set history function + context. **(Implemented)** (REQ: REQ-08-0244)
     - [x] `EL_ADDFN`: register user‑defined editing function. (REQ: REQ-08-0245)
     - [x] `EL_SETFN`: replace an existing named function. (REQ: REQ-08-0246)
-    - [x] `EL_RPROMPT`: set right‑side prompt string/function. (REQ: REQ-08-0247)
+    - [x] `EL_RPROMPT` (12): set/get right-side prompt callback. (REQ: REQ-08-0247)
+    - [x] `EL_RPROMPT_ESC` (22): set/get right-side prompt callback with escape-char marking. (REQ: REQ-08-0247)
     - [x] `EL_CLIENTDATA`: set/get opaque user pointer. (REQ: REQ-08-0248)
     - [x] `EL_SETTY`: set tty mode and character assignments. (REQ: REQ-08-0249)
     - [x] `EL_GETFP`: get FILE * (in/out/err). (REQ: REQ-08-0250)
@@ -309,8 +311,8 @@
         - [x] `H_NEXT` (6): move cursor forward (toward newest). (REQ: REQ-08-0274)
     - [x] **Missing Operations:** (REQ: REQ-08-0275)
         - [x] `H_GETSIZE` (2): return current entry count via `HistEvent.num`. (REQ: REQ-08-0276)
-        - [x] `H_CURR` (7): return current entry without moving cursor. (REQ: REQ-08-0277)
-        - [x] `H_SET` (8): set cursor to entry by number. (REQ: REQ-08-0278)
+        - [x] `H_SET` (7): set cursor to entry by number. (REQ: REQ-08-0278)
+        - [x] `H_CURR` (8): return current entry without moving cursor. (REQ: REQ-08-0277)
         - [x] `H_ADD` (9): append text to current entry (multi‑line continuation). (REQ: REQ-08-0279)
         - [x] `H_APPEND` (11): append string to last entry. (REQ: REQ-08-0280)
         - [x] `H_END` (12): move cursor past end (sentinel, `ev.str = NULL`). (REQ: REQ-08-0281)
@@ -672,7 +674,7 @@
 - **US-08-0225**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to document callback interface in editline(3) so that this capability is implemented with clear verification evidence.
 - **US-08-0226**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to tokenizer (tok_init / tok_str / tok_end): so that this capability is implemented with clear verification evidence.
 - **US-08-0227**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to tok_init(const char *ifs): create tokenizer context with IFS string so that this capability is implemented with clear verification evidence.
-- **US-08-0228**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to tok_str(Tokenizer *tok, const LineInfo *li, int *argc, const char ***argv): tokenize line content into argv so that this capability is implemented with clear verification evidence.
+- **US-08-0228**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to expose BSD-compatible tok_str() for strings and tok_line() for LineInfo so that this capability is implemented with clear verification evidence.
 - **US-08-0229**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to tok_reset(Tokenizer *tok): reset tokenizer state so that this capability is implemented with clear verification evidence.
 - **US-08-0230**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to tok_end(Tokenizer *tok): free tokenizer resources so that this capability is implemented with clear verification evidence.
 - **US-08-0231**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to handle single-quoting, double-quoting, and backslash-escaping so that this capability is implemented with clear verification evidence.
@@ -1532,7 +1534,7 @@
 - **REQ-08-0227** (EARS/Ubiquitous): The Substrate system shall tok_init(const char *ifs): create tokenizer context with IFS string.
   - Context: 6b. Editline Library (`lib/edit`)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-08-0228** (EARS/Ubiquitous): The Substrate system shall tok_str(Tokenizer *tok, const LineInfo *li, int *argc, const char ***argv): tokenize line content into argv.
+- **REQ-08-0228** (EARS/Ubiquitous): The Substrate system shall expose BSD-compatible tok_str() for strings and tok_line() for LineInfo tokenization.
   - Context: 6b. Editline Library (`lib/edit`)
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-08-0229** (EARS/Ubiquitous): The Substrate system shall tok_reset(Tokenizer *tok): reset tokenizer state.

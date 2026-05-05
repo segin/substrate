@@ -1,0 +1,428 @@
+.TH TGAMMA 3 "May 2026" "Substrate" "Library Functions Manual"
+.SH NAME
+tgamma, tgammaf, tgammal, lgamma, lgammaf, lgammal, lgamma_r, signgam \- Gamma functions
+.SH LIBRARY
+Math library (libm, \-lm)
+.SH SYNOPSIS
+.B #include <math.h>
+.PP
+.BI "double tgamma(double " x );
+.br
+.BI "float tgammaf(float " x );
+.br
+.BI "long double tgammal(long double " x );
+.PP
+.BI "double lgamma(double " x );
+.br
+.BI "float lgammaf(float " x );
+.br
+.BI "long double lgammal(long double " x );
+.PP
+.BI "double lgamma_r(double " x ", int *" signp );
+.PP
+.B "extern int signgam;"
+.SH DESCRIPTION
+The
+.BR tgamma ()
+function returns the value of the true Gamma function
+.I \[*G](x)
+of
+.IR x ,
+defined for
+.I x > 0
+by the Euler integral
+.PP
+.RS 4
+.EX
+          /\[if]    x\-1   \-t
+\[*G](x) = |    t   * e   dt
+        /0
+.EE
+.RE
+.PP
+and extended to the rest of the real line by the recurrence
+.BI \[*G]( "x+1" ") = " x " * \[*G](" x )
+and the reflection formula
+.BR "\[*G](x) * \[*G](1\-x) = \[*pi] / sin(\[*pi]*x)" .
+For every positive integer
+.IR n ,
+.PP
+.RS 4
+.BI tgamma( n ") == (" "n\-1" ")!"
+.RE
+.PP
+so
+.BR "tgamma(1) = tgamma(2) = 1" ,
+.BR "tgamma(3) = 2" ,
+.BR "tgamma(4) = 6" ,
+.BR "tgamma(5) = 24" ,
+and so on.  At the half-integer
+.B 0.5
+the value
+.BI tgamma( 0.5 ") = sqrt(\[*pi])"
+\(em the famous Euler identity \(em is recovered from the reflection
+formula.
+.PP
+The
+.BR lgamma ()
+function returns the natural logarithm of the absolute value of the
+Gamma function,
+.PP
+.RS 4
+.EX
+lgamma(x) = ln |\[*G](x)|
+.EE
+.RE
+.PP
+and additionally stores the sign of
+.I \[*G](x)
+(either
+.B +1
+or
+.BR \-1 )
+in the global
+.B int
+variable
+.B signgam
+declared in
+.BR <math.h> .
+Because Gamma grows so rapidly that
+.B tgamma(171.0)
+already overflows
+.BR double ,
+.BR lgamma ()
+is the practical interface for evaluating Gamma at large positive
+arguments: the result of
+.B \[*G](x)
+can be reconstructed (when finite) as
+.BI signgam " * exp(lgamma(" x "))" .
+.PP
+The
+.BR lgamma_r ()
+function is a thread-safe (re-entrant) variant of
+.BR lgamma ()
+that stores the sign in
+.BI * signp
+instead of writing to the shared global
+.BR signgam .
+It is a BSD extension; multithreaded callers should always prefer it
+to
+.BR lgamma ().
+.PP
+The
+.BR tgammaf (),
+.BR tgammal (),
+.BR lgammaf (),
+and
+.BR lgammal ()
+variants take and return
+.B float
+or
+.B "long double"
+values; they otherwise have the same semantics as the
+.B double
+versions.
+.PP
+.SS Substrate Implementation
+The Substrate libm computes
+.BR tgamma ()
+using a Lanczos approximation with
+.B g = 7
+and
+.B "n = 9"
+coefficients (the standard Wikipedia tabulation), giving roughly 15
+significant decimal digits for arguments in the moderate range.  For
+.I "x < 0.5"
+the reflection formula
+.BI "\[*G](x) = \[*pi] / (sin(\[*pi]*x) * \[*G](1\-x))"
+is applied recursively.  Arguments greater than
+.B 171.624
+are short-circuited to
+.B +HUGE_VAL
+with
+.B FE_OVERFLOW
+because the true result exceeds
+.BR DBL_MAX .
+.PP
+.BR lgamma_r ()
+\(em and therefore
+.BR lgamma ()
+\(em defers to
+.BR tgamma ()
+followed by
+.BR log ()
+for
+.IR "|x| < 170" ,
+which inherits the Lanczos accuracy.  For
+.I "x \[>=] 170"
+where
+.BR tgamma ()
+would overflow, the implementation switches to a single-term
+Stirling expansion:
+.PP
+.RS 4
+.EX
+ln \[*G](x) ~ (x \- 0.5) ln x  \-  x  +  0.5 ln(2\[*pi])  +  1 / (12x)
+.EE
+.RE
+.PP
+This is sufficient for the large-argument regime where the
+.BR 1/(12x)
+correction is the only term that matters; callers needing higher
+accuracy at moderate
+.I x
+should rely on the Lanczos branch and not attempt to evaluate
+Stirling directly.
+.SH RETURN VALUE
+On success,
+.BR tgamma ()
+returns the value of
+.I \[*G](x)
+and
+.BR lgamma ()
+(or
+.BR lgamma_r ())
+returns
+.IR "ln |\[*G](x)|" .
+.PP
+If
+.I x
+is a NaN,
+.BR tgamma (),
+.BR lgamma (),
+and
+.BR lgamma_r ()
+all return a NaN.
+.BR lgamma_r ()
+additionally stores
+.B +1
+in
+.BI * signp .
+.PP
+If
+.I x
+is
+.B +0
+or
+.BR \-0 ,
+.BR tgamma ()
+returns
+.B +\[if]
+or
+.BR \-\[if] ,
+respectively, and raises
+.BR FE_DIVBYZERO ;
+.BR lgamma ()
+returns
+.B +\[if]
+and raises
+.BR FE_DIVBYZERO .
+.PP
+If
+.I x
+is a negative integer (a pole of Gamma),
+.BR tgamma ()
+returns NaN and raises
+.BR FE_INVALID ;
+.BR lgamma ()
+returns
+.B +\[if]
+and raises
+.BR FE_DIVBYZERO .
+.PP
+If
+.I x
+is positive infinity,
+.BR tgamma ()
+returns
+.B +\[if]
+and
+.BR lgamma ()
+returns
+.BR +\[if] .
+If
+.I x
+is negative infinity,
+.BR tgamma ()
+returns NaN and raises
+.B FE_INVALID
+while
+.BR lgamma ()
+returns
+.BR +\[if] .
+.PP
+If the magnitude of the result of
+.BR tgamma ()
+would exceed
+.BR DBL_MAX
+(approximately, when
+.IR "x > 171.624" ),
+.B +HUGE_VAL
+is returned and
+.B FE_OVERFLOW
+is raised.
+.SH ERRORS
+See
+.BR math_error (7)
+for information on how to determine whether an error has occurred when
+calling these functions.
+.PP
+The following errors can occur:
+.TP
+Domain error: \fIx\fP is a negative integer or \-\[if]
+.BR tgamma ()
+returns NaN and raises
+.BR FE_INVALID .
+.TP
+Pole error: \fIx\fP is +0, \-0, or a negative integer
+.BR tgamma ()
+returns
+.B \(+-\[if]
+and raises
+.BR FE_DIVBYZERO ;
+.BR lgamma ()
+returns
+.B +\[if]
+and raises
+.BR FE_DIVBYZERO .
+.TP
+Overflow error: \fIx\fP is too large
+.BR tgamma ()
+returns
+.B +HUGE_VAL
+and raises
+.BR FE_OVERFLOW .
+The Substrate implementation triggers this guard for
+.IR "x > 171.624" .
+.PP
+None of these functions sets
+.IR errno ;
+errors are reported via the floating-point environment only.  Use
+.BR feclearexcept (3)
+and
+.BR fetestexcept (3)
+to detect them.
+.SH ATTRIBUTES
+For an explanation of the terms used in this section, see
+.BR attributes (7).
+.TS
+allbox;
+lb lb lb
+l l l.
+Interface	Attribute	Value
+T{
+.BR tgamma (),
+.BR tgammaf (),
+.BR tgammal (),
+.BR lgamma_r ()
+T}	Thread safety	MT-Safe
+T{
+.BR lgamma (),
+.BR lgammaf (),
+.BR lgammal ()
+T}	Thread safety	MT-Unsafe race:signgam
+.TE
+.PP
+.BR lgamma ()
+and its
+.BR f / l
+variants write to the shared global
+.B signgam
+on every call.  Multithreaded code that needs the sign of
+.I \[*G](x)
+must use
+.BR lgamma_r ().
+.SH STANDARDS
+.BR tgamma (),
+.BR lgamma (),
+and their
+.BR f / l
+variants conform to C99 and POSIX.1-2008.  The handling of special
+arguments follows C99 Annex F.10.4.  The global
+.B signgam
+is specified by XSI / POSIX.1-2008.
+.BR lgamma_r ()
+is a BSD extension provided by Substrate, glibc, and most other
+modern C libraries; it is not part of POSIX.  The accuracy of all of
+these functions is implementation-defined; see
+.B "Substrate Implementation"
+above.
+.SH EXAMPLES
+The following program verifies
+.BI tgamma( 0.5 ") = sqrt(\[*pi])"
+and
+.BI tgamma( 5 ") = 4! = 24" ,
+prints the natural log of
+.BR 10! ,
+and demonstrates how
+.B signgam
+is updated by
+.BR lgamma ():
+.PP
+.RS 4
+.EX
+#include <math.h>
+#include <stdio.h>
+
+int
+main(void)
+{
+    double half = tgamma(0.5);
+    double fact4 = tgamma(5.0);          /* 4! = 24            */
+    double l10  = lgamma(11.0);          /* ln(10!) ~ 15.1044  */
+
+    printf("tgamma(0.5) = %.10f\en", half);
+    printf("sqrt(pi)    = %.10f\en", sqrt(M_PI));
+    printf("|tgamma(0.5) \- sqrt(pi)| = %g\en",
+           fabs(half \- sqrt(M_PI)));
+
+    printf("tgamma(5)   = %.1f  (expect 24)\en", fact4);
+    printf("lgamma(11)  = %.6f  signgam=%+d\en", l10, signgam);
+
+    /* Negative non-integer: Gamma is negative on (\-1, 0). */
+    double n = lgamma(\-0.5);
+    printf("lgamma(\-0.5) = %.6f  signgam=%+d\en", n, signgam);
+
+    /* Reentrant variant: no global side effect. */
+    int sgn;
+    double r = lgamma_r(\-0.5, &sgn);
+    printf("lgamma_r(\-0.5) = %.6f  sign=%+d\en", r, sgn);
+
+    /* Special values. */
+    printf("tgamma(1)        = %g\en",    tgamma(1.0));
+    printf("tgamma(0)        = %g\en",    tgamma(0.0));
+    printf("isnan(tgamma(\-1)) = %d\en",   isnan(tgamma(\-1.0)));
+    printf("tgamma(+INF)     = %g\en",    tgamma(INFINITY));
+    printf("isnan(tgamma(\-INF)) = %d\en", isnan(tgamma(\-INFINITY)));
+
+    return 0;
+}
+.EE
+.RE
+.PP
+A representative output is:
+.PP
+.RS 4
+.EX
+tgamma(0.5) = 1.7724538509
+sqrt(pi)    = 1.7724538509
+|tgamma(0.5) \- sqrt(pi)| = 0
+tgamma(5)   = 24.0  (expect 24)
+lgamma(11)  = 15.104413  signgam=+1
+lgamma(\-0.5) = 1.265512  signgam=\-1
+lgamma_r(\-0.5) = 1.265512  sign=\-1
+tgamma(1)        = 1
+tgamma(0)        = inf
+isnan(tgamma(\-1)) = 1
+tgamma(+INF)     = inf
+isnan(tgamma(\-INF)) = 1
+.EE
+.RE
+.SH SEE ALSO
+.BR erf (3),
+.BR exp (3),
+.BR fenv (3),
+.BR log (3),
+.BR math_error (7)
+.SH COLOPHON
+This page is part of the Substrate operating system documentation.
