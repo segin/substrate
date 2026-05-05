@@ -79,14 +79,14 @@ int sys_set_thread_area(struct user_desc *u_info) {
     }
     
     gdt_set_gate(info.entry_number, info.base_addr, info.limit, access, gran);
-    
+
     // Load GS with the new selector (entry_number * 8 | RPL 3)
     uint16_t selector = (info.entry_number << 3) | 3;
     __asm__ volatile("mov %0, %%gs" : : "r"(selector));
-    
+
     // Write back the entry number to user
     u_info->entry_number = info.entry_number;
-    
+
     // CRITICAL: Update the saved regs context so that when syscall returns,
     // the POP GS instruction in isr_exit restores this new selector,
     // causing the CPU to reload the cached descriptor base.
@@ -95,7 +95,21 @@ int sys_set_thread_area(struct user_desc *u_info) {
     if (current_thread && current_thread->syscall_regs) {
         ((registers_t *)current_thread->syscall_regs)->gs = selector;
     }
-    
+
+    /*
+     * Persist the TLS base so arch_switch_to -> i386_load_gs_for_thread
+     * re-installs it into GDT_TLS_START on every context switch.
+     * Without this, any other personality (or another Linux process)
+     * that sets its own TLS overwrites our slot, and on resume our
+     * %gs:offset reads return that other thread's TCB — symptom is
+     * a SIGSEGV at `mov %gs:0xc, %eax` in glibc/libc-style TLS loads
+     * the moment we get scheduled back in after running an FreeBSD or
+     * NetBSD child.
+     */
+    if (current_thread && info.entry_number == GDT_TLS_START) {
+        current_thread->gs_base = info.base_addr;
+    }
+
     return 0;
 }
 

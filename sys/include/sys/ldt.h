@@ -49,6 +49,16 @@ int sys_modify_ldt(int func, void *ptr, unsigned long bytecount);
 void fill_ldt_entry(void *entry, struct user_desc *info);
 void ldt_get_diag_snapshot(struct ldt_diag_snapshot *out);
 
+/*
+ * Install a 4 GB ring-3 data descriptor at the given LDT slot of `proc`,
+ * lazy-allocating the LDT if needed, and re-arm LDTR if `proc` is current.
+ * Used by FreeBSD/NetBSD sysarch SET_GSBASE to publish the per-process
+ * %gs TLS base in the LDT (selector = (slot << 3) | 0x4 | 3) instead of
+ * the GDT — the GDT slot is shared across personalities and gets clobbered
+ * on cross-personality context switches.
+ */
+int ldt_set_tls_base(struct process *proc, unsigned int slot, uint32_t base);
+
 static inline uint32_t ldt_entry_base(const void *entry_ptr) {
     const gdt_entry_t *entry = (const gdt_entry_t *)entry_ptr;
 

@@ -2,6 +2,7 @@
 #include <sys/sysarch.h>
 #include <sys/copy.h>
 #include <sys/proc.h>
+#include <sys/ldt.h>
 #include <errno.h>
 #include <kern/console.h>
 #include <kern/sched.h>
@@ -12,42 +13,53 @@
 extern int vm86_init_bsd(void *args);
 extern void gdt_set_gate(int num, uint32_t base, uint32_t limit, uint8_t access, uint8_t gran);
 extern thread_t *current_thread;
+extern process_t *current_process;
 
 /*
- * Set up a GDT data segment with the given base for use as a GS TLS descriptor.
- * Uses GDT_TLS_START slot (one past the standard user segments).
+ * LDT slot reserved for the *BSD %gs TLS descriptor.  Each process owns
+ * its own LDT (loaded via lldt on context switch in arch_switch_to), so
+ * placing the TLS descriptor here gives full per-process isolation —
+ * unlike the legacy GDT_TLS_START approach where every personality
+ * shared one slot and the most-recent setter clobbered everyone else.
+ */
+#define BSD_LDT_TLS_SLOT 0
+#define BSD_LDT_TLS_SEL  ((BSD_LDT_TLS_SLOT << 3) | 0x4 | 3)
+
+/*
+ * Linux's set_thread_area still uses the GDT (glibc's selector formula
+ * `(entry_number << 3) | 3` cannot encode TI=1).  This function reloads
+ * GDT_TLS_START from the incoming thread's saved gs_base on context
+ * switch — required for Linux multi-threaded processes and for any
+ * Linux thread whose TLS slot was overwritten by another process
+ * before our cross-personality cleanup.
  *
- * The slot is shared across all threads, so we also stash the per-thread base
- * in current_thread->gs_base.  arch_switch_to() reloads the slot from the
- * incoming thread's gs_base on every context switch — without that, the
- * second process to set its TLS clobbers everyone else's, and on resume the
- * %gs selector still loads but reads from the wrong (or zeroed) base.
+ * No-op for *BSD threads (their gs_base is 0; their TLS lives in the
+ * per-process LDT and is restored by lldt).
  */
 void i386_load_gs_for_thread(thread_t *t) {
-    /* Only touch the GDT TLS slot if this thread actually established a
-     * gs base via sysarch(I386_SET_GSBASE).  Kernel-only threads (swapper,
-     * syncer, USB poll, vm_pagedaemon, kinit before exec) never set one;
-     * unconditionally rewriting the slot to 0 on every context switch
-     * gains nothing and risks confusing whatever userspace thread held
-     * the slot's contents previously. */
     if (!t || t->gs_base == 0) return;
     gdt_set_gate(GDT_TLS_START, t->gs_base, 0xFFFFF, 0xF2, 0xC0);
 }
 
 static int set_gsbase(uint32_t base) {
-    /* Ring-3 32-bit data segment: present, DPL=3, writable, 4GB limit */
-    gdt_set_gate(GDT_TLS_START, base, 0xFFFFF, 0xF2, 0xC0);
+    /* *BSD path: install the TLS descriptor into the current process's
+     * own LDT slot (process-isolated — context switch reloads via lldt). */
+    if (!current_process) return -ESRCH;
+    int rc = ldt_set_tls_base(current_process, BSD_LDT_TLS_SLOT, base);
+    if (rc < 0) return rc;
 
-    uint16_t selector = (GDT_TLS_START << 3) | 3;
+    uint16_t selector = (uint16_t)BSD_LDT_TLS_SEL;
     __asm__ volatile("mov %0, %%gs" : : "r"(selector));
 
-    /* Persist into the saved trap frame so iret reloads the descriptor. */
     if (current_thread) {
+        /* gs_base persists for I386_GET_GSBASE.  The per-thread reload
+         * path may also write this to GDT_TLS_START — harmless for BSD
+         * threads (their %gs is LDT-based and ignores the GDT slot)
+         * and useful for Linux threads sharing the same field. */
         current_thread->gs_base = base;
         if (current_thread->syscall_regs)
             ((registers_t *)current_thread->syscall_regs)->gs = selector;
     }
-
     return 0;
 }
 
