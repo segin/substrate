@@ -605,7 +605,6 @@ void video_register_driver(video_driver_t *drv) {
     if (!drv) return;
     drv->next = video_drivers;
     video_drivers = drv;
-    // kprint("Video: Registered driver: "); kprint(drv->name); kprint("\n");
 }
 
 /* External install functions for drivers (Since we lack constructors) */
