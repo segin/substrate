@@ -30,6 +30,24 @@ void vm_map_init(vm_map_t *map, pmap_t pmap, uintptr_t min, uintptr_t max) {
     map->header = sentinel;
 }
 
+void vm_map_destroy(vm_map_t *map) {
+    if (!map) return;
+    vm_map_entry_t *header = map->header;
+    if (header) {
+        vm_map_entry_t *cur = header->next;
+        while (cur != header) {
+            vm_map_entry_t *next = cur->next;
+            free(cur);
+            cur = next;
+        }
+        free(header);
+    }
+    // Note: map itself might be on stack or heap;
+    // this function follows vm_map_destroy signature.
+    // In some contexts it might be kmalloced, but here it's
+    // often used with vm_map_init on a stack-allocated map in tests.
+}
+
 static bool vm_map_lookup_entry(vm_map_t *map, uintptr_t va, vm_map_entry_t **entry) {
     vm_map_entry_t *cur;
     vm_map_entry_t *header = map->header;
