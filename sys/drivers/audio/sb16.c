@@ -253,6 +253,11 @@ static int sb16_close(audio_dev_t *adev)
 	sb16_dev_t *d = adev->driver_data;
 	sb16_dsp_write(d, SB16_DSP_HALT_DMA16);
 	sb16_dsp_write(d, SB16_DSP_SPEAKER_OFF);
+	/* Reset back-pressure state — without this the second cat
+	 * inherits stale writes_queued and the spin thinks a chunk is
+	 * forever in flight. */
+	d->writes_queued = 0;
+	d->plays_done    = 0;
 	return 0;
 }
 

@@ -421,6 +421,19 @@ static int hda_close(audio_dev_t *adev)
 	hda_dev_t *d = adev->driver_data;
 
 	hda_write32(d, HDA_SD_BASE + HDA_SD_CTL, 0);
+	/* Drop latched status bits so stale BCIS doesn't bump the next
+	 * stream's slots_played at open. */
+	hda_write8(d, HDA_SD_BASE + HDA_SD_STS,
+	           HDA_SDSTS_BCIS | HDA_SDSTS_FIFOE | HDA_SDSTS_DESE);
+
+	/* Reset ring back-pressure state.  Otherwise the second cat
+	 * inherits writes_queued from this stream but slots_played
+	 * never catches up (no more IRQs after CTL=0), so the
+	 * back-pressure spin thinks the ring is permanently full. */
+	d->writes_queued = 0;
+	d->slots_played  = 0;
+	d->next_idx      = 0;
+	d->running       = 0;
 	return 0;
 }
 

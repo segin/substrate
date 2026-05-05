@@ -193,6 +193,22 @@ static int ac97_close(audio_dev_t *adev)
 
 	/* Stop the bus master if anything was running. */
 	ac97_bm_write8(d, AC97_BM_PO_BASE + AC97_BM_CR, 0);
+
+	/* Drop any latched status bits so a stale BCIS doesn't bump the
+	 * NEXT stream's slots_played at open time. */
+	ac97_bm_write16(d, AC97_BM_PO_BASE + AC97_BM_SR,
+	                AC97_SR_BCIS | AC97_SR_LVBCI | AC97_SR_FIFOE);
+
+	/* Reset the ring back-pressure counters and BDL position.
+	 * Otherwise the next open inherits writes_queued from this
+	 * stream while slots_played is stuck (no more IRQs after CR=0),
+	 * making the back-pressure spin in ac97_write think the ring is
+	 * permanently full and never accept new data. */
+	d->writes_queued = 0;
+	d->slots_played  = 0;
+	d->next_idx      = 0;
+	d->lvi           = 0;
+	d->running       = 0;
 	return 0;
 }
 
