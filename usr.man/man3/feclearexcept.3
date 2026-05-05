@@ -1,0 +1,96 @@
+.TH FECLEAREXCEPT 3 "2026-05-03" "Substrate" "Library Functions Manual"
+.SH NAME
+feclearexcept \- clear floating-point exception flags
+.SH LIBRARY
+Math Library (libm, \-lm)
+.SH SYNOPSIS
+.nf
+.B #include <fenv.h>
+.PP
+.BI "int feclearexcept(int " excepts );
+.fi
+.SH DESCRIPTION
+The
+.BR feclearexcept ()
+function clears the floating-point exception sticky flags specified by the
+bitwise-OR expression
+.IR excepts .
+.PP
+The argument
+.I excepts
+is a bitwise OR of zero or more of the following macros:
+.TP
+.B FE_INVALID
+Clear the invalid-operation flag.
+.TP
+.B FE_DIVBYZERO
+Clear the division-by-zero flag.
+.TP
+.B FE_OVERFLOW
+Clear the overflow flag.
+.TP
+.B FE_UNDERFLOW
+Clear the underflow flag.
+.TP
+.B FE_INEXACT
+Clear the inexact-result flag.
+.TP
+.B FE_ALL_EXCEPT
+Clear all exception flags (bitwise OR of all the above).
+.PP
+Passing zero for
+.I excepts
+is valid and is a no-op.
+.PP
+On x86, this function clears the corresponding bits in the x87 FPU status word
+and, when SSE is available, in the MXCSR register.
+.PP
+Unlike
+.BR feraiseexcept (3),
+this function never causes a floating-point trap.
+.SH RETURN VALUE
+.BR feclearexcept ()
+returns zero on success.
+A non-zero return value indicates that one or more of the requested flags
+could not be cleared (for example, because
+.I excepts
+contains bits not supported by the implementation).
+.SH ERRORS
+No errors are defined.
+The function does not set
+.IR errno .
+.SH EXAMPLES
+The following example raises a division-by-zero exception, tests for it, and
+then clears it:
+.PP
+.nf
+#pragma STDC FENV_ACCESS ON
+#include <fenv.h>
+#include <stdio.h>
+
+int main(void)
+{
+    /* Clear all exception flags before the computation. */
+    feclearexcept(FE_ALL_EXCEPT);
+
+    volatile double zero = 0.0;
+    volatile double result = 1.0 / zero;   /* raises FE_DIVBYZERO */
+    (void)result;
+
+    if (fetestexcept(FE_DIVBYZERO))
+        printf("Division by zero detected.\\n");
+
+    /* Clear only the division-by-zero flag. */
+    feclearexcept(FE_DIVBYZERO);
+
+    if (!fetestexcept(FE_DIVBYZERO))
+        printf("Division-by-zero flag cleared.\\n");
+
+    return 0;
+}
+.fi
+.SH SEE ALSO
+.BR fenv (7),
+.BR fegetexceptflag (3),
+.BR feraiseexcept (3),
+.BR fetestexcept (3)

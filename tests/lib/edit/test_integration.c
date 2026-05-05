@@ -157,13 +157,26 @@ void test_history_save_load_large(void) {
 
 /* ======== el_set / el_get API (REQ-08-0391) ======== */
 
+static const char *integration_prompt(EditLine *el) {
+    (void)el;
+    return "test> ";
+}
+
 void test_el_set_prompt(void) {
     EditLine *el = el_init("test", stdin, stdout, stderr);
+    el_pfunc_t prompt = NULL;
+    char esc = '\0';
+
     assert(el != NULL);
 
-    el_set(el, EL_PROMPT, "test> ");
-    assert(el->prompt != NULL);
-    assert(strcmp(el->prompt, "test> ") == 0);
+    assert(el_set(el, EL_PROMPT, integration_prompt) == 0);
+    assert(el->prompt_func == integration_prompt);
+    assert(strcmp(el_current_prompt(el), "test> ") == 0);
+
+    assert(el_set(el, EL_PROMPT_ESC, integration_prompt, '\001') == 0);
+    assert(el_get(el, EL_PROMPT_ESC, &prompt, &esc) == 0);
+    assert(prompt == integration_prompt);
+    assert(esc == '\001');
 
     el_end(el);
 }

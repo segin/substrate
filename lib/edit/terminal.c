@@ -291,7 +291,7 @@ void terminal_init_caps(EditLine *el) {
     caps = &el->term.caps;
     memset(caps, 0, sizeof(*caps));
 
-    term = getenv("TERM");
+    term = el->terminal_name ? el->terminal_name : getenv("TERM");
     entry = term ? tc_find_entry(TC_PATH, term, 0) : NULL;
 
     /* String capabilities */

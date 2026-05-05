@@ -106,7 +106,9 @@ typedef struct ast_subshell {
 void ast_free(ast_node_t *node);
 
 typedef struct ast_case_item {
-    char *pattern;
+    char **patterns;
+    int pattern_count;
+    int pattern_capacity;
     ast_node_t *body; // list
     struct ast_case_item *next;
 } ast_case_item_t;

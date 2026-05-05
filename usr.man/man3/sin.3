@@ -1,0 +1,218 @@
+.TH SIN 3 "May 2026" "Substrate" "Library Functions Manual"
+.SH NAME
+sin, sinf, sinl, cos, cosf, cosl, tan, tanf, tanl, sincos, sincosf, sincosl \- trigonometric functions
+.SH LIBRARY
+Math library (libm, \-lm)
+.SH SYNOPSIS
+.B #include <math.h>
+.PP
+.BI "double sin(double " x );
+.br
+.BI "float sinf(float " x );
+.br
+.BI "long double sinl(long double " x );
+.PP
+.BI "double cos(double " x );
+.br
+.BI "float cosf(float " x );
+.br
+.BI "long double cosl(long double " x );
+.PP
+.BI "double tan(double " x );
+.br
+.BI "float tanf(float " x );
+.br
+.BI "long double tanl(long double " x );
+.PP
+.BI "void sincos(double " x ", double *" sinp ", double *" cosp );
+.br
+.BI "void sincosf(float " x ", float *" sinp ", float *" cosp );
+.br
+.BI "void sincosl(long double " x ", long double *" sinp ", long double *" cosp );
+.SH DESCRIPTION
+The
+.BR sin (),
+.BR cos (),
+and
+.BR tan ()
+functions return the sine, cosine, and tangent of
+.IR x ,
+respectively, where
+.I x
+is expressed in radians.
+.PP
+The
+.BR sinf (),
+.BR cosf (),
+and
+.BR tanf ()
+variants take and return
+.B float
+values.  The
+.BR sinl (),
+.BR cosl (),
+and
+.BR tanl ()
+variants take and return
+.B "long double"
+values.
+.PP
+The
+.BR sincos ()
+function computes both
+.BI sin( x )
+and
+.BI cos( x )
+in a single call, storing the sine in
+.RI * sinp
+and the cosine in
+.RI * cosp .
+On platforms whose hardware computes both values together, this is
+faster than calling
+.BR sin ()
+and
+.BR cos ()
+separately.  The
+.BR sincosf ()
+and
+.BR sincosl ()
+variants operate on
+.B float
+and
+.B "long double"
+respectively.
+.SH RETURN VALUE
+.BR sin (),
+.BR cos (),
+and their variants return a value in the range
+.BR [\-1,\ +1] .
+.PP
+.BR tan ()
+and its variants return the tangent of
+.IR x ,
+which can be any finite value or, near odd multiples of
+.IR \(*p/2 ,
+a value of arbitrarily large magnitude.
+.PP
+If
+.I x
+is a NaN, all functions return a NaN.
+.PP
+If
+.I x
+is positive or negative infinity, all functions return a NaN and a
+domain error occurs.
+.PP
+.BR sincos ()
+and its variants do not return a value; they store their results
+through
+.I sinp
+and
+.IR cosp .
+.SH ERRORS
+See
+.BR math_error (7)
+for information on how to determine whether an error has occurred when
+calling these functions.
+.PP
+The following errors can occur:
+.TP
+Domain error: \fIx\fR is an infinity
+An invalid floating-point exception
+.RB ( FE_INVALID )
+is raised.  If
+.I "math_errhandling & MATH_ERRNO"
+is non-zero,
+.I errno
+is set to
+.BR EDOM .
+.SH ATTRIBUTES
+For an explanation of the terms used in this section, see
+.BR attributes (7).
+.TS
+allbox;
+lb lb lb
+l l l.
+Interface	Attribute	Value
+T{
+.BR sin (),
+.BR sinf (),
+.BR sinl (),
+.BR cos (),
+.BR cosf (),
+.BR cosl (),
+.BR tan (),
+.BR tanf (),
+.BR tanl (),
+.BR sincos (),
+.BR sincosf (),
+.BR sincosl ()
+T}	Thread safety	MT-Safe
+.TE
+.SH STANDARDS
+.BR sin (),
+.BR cos (),
+.BR tan ()
+and their
+.BR f / l
+variants conform to C99 and POSIX.1-2008.
+.PP
+.BR sincos (),
+.BR sincosf (),
+and
+.BR sincosl ()
+are GNU extensions, also adopted by FreeBSD.  They are not specified
+by any standard.
+.SH EXAMPLES
+The following program computes \fIsin(\(*p/4)\fR and prints the result:
+.PP
+.RS 4
+.EX
+#include <math.h>
+#include <stdio.h>
+
+int
+main(void)
+{
+    double x = M_PI / 4;
+
+    printf("sin(%.6f) = %.6f\en", x, sin(x));
+    return 0;
+}
+.EE
+.RE
+.PP
+The next example uses
+.BR sincos ()
+to compute both values in a single call:
+.PP
+.RS 4
+.EX
+#include <math.h>
+#include <stdio.h>
+
+int
+main(void)
+{
+    double x = M_PI / 6;
+    double s, c;
+
+    sincos(x, &s, &c);
+    printf("sin(%.6f) = %.6f, cos(%.6f) = %.6f\en",
+           x, s, x, c);
+    return 0;
+}
+.EE
+.RE
+.SH SEE ALSO
+.BR acos (3),
+.BR asin (3),
+.BR atan (3),
+.BR atan2 (3),
+.BR cospi (3),
+.BR fenv (3),
+.BR sinpi (3),
+.BR tanpi (3),
+.BR math_error (7)
+.SH COLOPHON
+This page is part of the Substrate operating system documentation.

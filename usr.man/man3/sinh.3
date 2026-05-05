@@ -1,0 +1,199 @@
+.TH SINH 3 "May 2026" "Substrate" "Library Functions Manual"
+.SH NAME
+sinh, sinhf, sinhl, cosh, coshf, coshl, tanh, tanhf, tanhl \- hyperbolic functions
+.SH LIBRARY
+Math library (libm, \-lm)
+.SH SYNOPSIS
+.B #include <math.h>
+.PP
+.BI "double sinh(double " x );
+.br
+.BI "float sinhf(float " x );
+.br
+.BI "long double sinhl(long double " x );
+.PP
+.BI "double cosh(double " x );
+.br
+.BI "float coshf(float " x );
+.br
+.BI "long double coshl(long double " x );
+.PP
+.BI "double tanh(double " x );
+.br
+.BI "float tanhf(float " x );
+.br
+.BI "long double tanhl(long double " x );
+.SH DESCRIPTION
+The
+.BR sinh ()
+function returns the hyperbolic sine of
+.IR x ,
+defined mathematically as
+.RI ( e^x \ \-\ e^-x )/2 .
+It is an odd function whose domain is the entire real line and whose
+range is also the entire real line.
+.PP
+The
+.BR cosh ()
+function returns the hyperbolic cosine of
+.IR x ,
+defined mathematically as
+.RI ( e^x \ +\ e^-x )/2 .
+It is an even function whose domain is the entire real line and whose
+range is the half-open interval
+.BR [1,\ +\[if]) .
+.PP
+The
+.BR tanh ()
+function returns the hyperbolic tangent of
+.IR x ,
+defined mathematically as
+.IR sinh( x )/ cosh( x ) .
+It is an odd function whose domain is the entire real line and whose
+range is the open interval
+.BR (\-1,\ +1) ,
+with horizontal asymptotes at \(+-1 as
+.I x
+tends to \(+-\[if].
+.PP
+The
+.BR sinhf (),
+.BR coshf (),
+and
+.BR tanhf ()
+variants take and return
+.B float
+values.  The
+.BR sinhl (),
+.BR coshl (),
+and
+.BR tanhl ()
+variants take and return
+.B "long double"
+values.
+.SH RETURN VALUE
+On success, these functions return the hyperbolic value of
+.I x
+as described above.
+.PP
+If
+.I x
+is +0 (\-0), all three functions return +0 (\-0).
+.PP
+If
+.I x
+is positive infinity,
+.BR sinh ()
+returns positive infinity,
+.BR cosh ()
+returns positive infinity, and
+.BR tanh ()
+returns +1.  If
+.I x
+is negative infinity,
+.BR sinh ()
+returns negative infinity,
+.BR cosh ()
+returns positive infinity, and
+.BR tanh ()
+returns \-1.
+.PP
+If
+.I x
+is a NaN, all three functions return a NaN.
+.PP
+If the magnitude of the result of
+.BR sinh ()
+or
+.BR cosh ()
+is too large to be representable in the return type, a range
+(overflow) error occurs and the function returns
+.B \(+-HUGE_VAL
+(or
+.B \(+-HUGE_VALF
+or
+.BR \(+-HUGE_VALL )
+with the appropriate sign.
+.PP
+.BR tanh ()
+never overflows; its result always lies in
+.BR (\-1,\ +1) .
+.SH ERRORS
+See
+.BR math_error (7)
+for information on how to determine whether an error has occurred when
+calling these functions.
+.PP
+The following errors can occur:
+.TP
+Range error: result overflow (\fBsinh\fR, \fBcosh\fR)
+An overflow floating-point exception
+.RB ( FE_OVERFLOW )
+is raised.  If
+.I "math_errhandling & MATH_ERRNO"
+is non-zero,
+.I errno
+is set to
+.BR ERANGE .
+.PP
+.BR tanh ()
+does not raise range errors for any finite or infinite argument.
+.SH ATTRIBUTES
+For an explanation of the terms used in this section, see
+.BR attributes (7).
+.TS
+allbox;
+lb lb lb
+l l l.
+Interface	Attribute	Value
+T{
+.BR sinh (),
+.BR sinhf (),
+.BR sinhl (),
+.BR cosh (),
+.BR coshf (),
+.BR coshl (),
+.BR tanh (),
+.BR tanhf (),
+.BR tanhl ()
+T}	Thread safety	MT-Safe
+.TE
+.SH STANDARDS
+.BR sinh (),
+.BR cosh (),
+.BR tanh (),
+and their
+.BR f / l
+variants conform to C99 and POSIX.1-2008.  The handling of special
+arguments follows C99 Annex F.10.2 (IEC 60559).
+.SH EXAMPLES
+The following program computes the hyperbolic sine, cosine, and
+tangent of 1.0:
+.PP
+.RS 4
+.EX
+#include <math.h>
+#include <stdio.h>
+
+int
+main(void)
+{
+    double x = 1.0;
+
+    printf("sinh(%.6f) = %.6f\en", x, sinh(x));
+    printf("cosh(%.6f) = %.6f\en", x, cosh(x));
+    printf("tanh(%.6f) = %.6f\en", x, tanh(x));
+    return 0;
+}
+.EE
+.RE
+.SH SEE ALSO
+.BR acosh (3),
+.BR asinh (3),
+.BR atanh (3),
+.BR exp (3),
+.BR fenv (3),
+.BR sin (3),
+.BR math_error (7)
+.SH COLOPHON
+This page is part of the Substrate operating system documentation.

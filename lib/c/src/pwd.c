@@ -19,6 +19,7 @@ struct passwd *getpwuid(uid_t uid) {
 }
 
 struct passwd *getpwnam(const char *name) {
+    if (name == NULL) return NULL;
     if (strcmp(name, "root") == 0) return &mock_passwd;
     return NULL;
 }

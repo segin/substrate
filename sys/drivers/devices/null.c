@@ -127,7 +127,7 @@ static void *null_mmap(fs_node_t *node, void *addr, size_t length, int prot, int
  */
 void null_init(void) {
     memset(&null_node, 0, sizeof(fs_node_t));
-    strcpy(null_node.name, "null");
+    strlcpy(null_node.name, "null", sizeof(null_node.name));
 
     /* U5: File attributes - Character Device */
     null_node.flags = FS_CHARDEVICE;

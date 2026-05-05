@@ -1,0 +1,73 @@
+.\" perror.3 - print error message
+.TH PERROR 3 "May 2026" "Substrate" "Library Functions Manual"
+.SH NAME
+perror \- print error message to standard error
+.SH LIBRARY
+.B libc
+.SH SYNOPSIS
+.B #include <stdio.h>
+.PP
+.BI "void perror(const char *" s ");"
+.SH DESCRIPTION
+The
+.BR perror ()
+function writes a message describing the current value of the global variable
+.I errno
+to the standard error stream
+.RB ( stderr ).
+.PP
+If
+.I s
+is non-NULL and points to a non-empty string, the output has the form:
+.PP
+.RS 4
+.IB s ": error " errno
+.RE
+.PP
+followed by a newline.
+Otherwise (if
+.I s
+is NULL or points to an empty string), the output is:
+.PP
+.RS 4
+.BI "error " errno
+.RE
+.PP
+followed by a newline.
+.PP
+.B NOTE:
+The Substrate
+.BR perror ()
+implementation does
+.I not
+translate
+.I errno
+into a textual diagnostic message.
+The numeric value of
+.I errno
+is printed in decimal as the literal token following
+.BR error .
+This differs from the behavior mandated by ISO C and POSIX, which require a human-readable message equivalent to that returned by
+.BR strerror (3).
+Programs requiring a textual error description should call
+.BR strerror (3)
+directly.
+.PP
+The value of
+.I errno
+is read at the time
+.BR perror ()
+is called; it is the caller's responsibility to invoke
+.BR perror ()
+before any intervening library call has the opportunity to modify
+.IR errno .
+.SH SEE ALSO
+.BR strerror (3),
+.BR fprintf (3),
+.BR errno (3)
+.SH STANDARDS
+The
+.BR perror ()
+function conforms to ISO C99 and IEEE Std 1003.1-2008 (POSIX.1) in interface, but the Substrate implementation deviates by emitting the decimal
+.I errno
+value rather than a translated diagnostic string.

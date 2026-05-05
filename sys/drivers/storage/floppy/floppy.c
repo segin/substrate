@@ -774,7 +774,7 @@ static int fdc_irq_handler(unsigned int irq, void *dev_id, void *frame) {
 static int floppy_read(blkdev_t *dev, uint64_t sector, uint32_t count, void *buffer) {
     fdc_drive_t *drive = (fdc_drive_t *)dev->priv;
     uint8_t *cursor = (uint8_t *)buffer;
-    uint32_t i;
+    uint32_t i = 0;
 
     if (drive == NULL || !drive->present || cursor == NULL) {
         return -EINVAL;
@@ -806,7 +806,7 @@ static int floppy_read(blkdev_t *dev, uint64_t sector, uint32_t count, void *buf
 static int floppy_write(blkdev_t *dev, uint64_t sector, uint32_t count, const void *buffer) {
     fdc_drive_t *drive = (fdc_drive_t *)dev->priv;
     const uint8_t *cursor = (const uint8_t *)buffer;
-    uint32_t i;
+    uint32_t i = 0;
 
     if (drive == NULL || !drive->present || cursor == NULL) {
         return -EINVAL;

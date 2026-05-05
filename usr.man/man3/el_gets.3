@@ -15,7 +15,9 @@ Editline library (libedit, \-ledit)
 .br
 .BI "int el_insertstr(EditLine *el, const char *str);"
 .br
-.BI "int el_deletestr(EditLine *el, int count);"
+.BI "void el_deletestr(EditLine *el, int count);"
+.br
+.BI "int el_replacestr(EditLine *el, const char *str);"
 .PP
 .B typedef struct lineinfo {
 .br
@@ -49,15 +51,20 @@ at the cursor.
 .BR el_deletestr ()
 deletes up to
 .I count
-bytes starting at the cursor.
+bytes before the cursor.
+.BR el_replacestr ()
+replaces the complete edited line with
+.IR str .
 .SH RETURN VALUE
 .BR el_gets ()
 returns a pointer to edited line data on success.
 On EOF or error it returns NULL.
 .PP
+.BR el_deletestr ()
+does not return a value.
 .BR el_insertstr ()
 and
-.BR el_deletestr ()
+.BR el_replacestr ()
 return 0 on success and \-1 on error.
 .PP
 .BR el_line ()

@@ -1,0 +1,231 @@
+.\" fread.3 - binary stream input/output
+.TH FREAD 3 "May 2026" "Substrate" "Library Functions Manual"
+.SH NAME
+fread, fwrite \- binary stream input/output
+.SH LIBRARY
+.B libc
+.SH SYNOPSIS
+.B #include <stdio.h>
+.PP
+.BI "size_t fread(void *" ptr ", size_t " size ", size_t " nmemb \
+", FILE *" stream );
+.PP
+.BI "size_t fwrite(const void *" ptr ", size_t " size ", size_t " nmemb \
+", FILE *" stream );
+.SH DESCRIPTION
+The
+.BR fread ()
+function reads
+.I nmemb
+items of data, each
+.I size
+bytes long, from the stream pointed to by
+.IR stream ,
+storing them at the location given by
+.IR ptr .
+.PP
+The
+.BR fwrite ()
+function writes
+.I nmemb
+items of data, each
+.I size
+bytes long, to the stream pointed to by
+.IR stream ,
+obtaining them from the location given by
+.IR ptr .
+.PP
+For both functions the total number of bytes transferred is
+.IR "size * nmemb" .
+If either
+.I size
+or
+.I nmemb
+is zero, no bytes are transferred and the return value is zero; the
+state of the stream and the contents of the buffer pointed to by
+.I ptr
+are unchanged.
+.PP
+.SS Substrate Implementation
+.BR fread ()
+first consumes any character previously pushed back with
+.BR ungetc (3)
+before transferring data from the stream's read buffer.  When the
+buffer is exhausted, the implementation refills it via
+.BR read (2).
+Requests for at least
+.B BUFSIZ
+bytes after the buffer is empty bypass the stream buffer and read
+directly into
+.IR ptr ,
+which avoids an extra copy for bulk transfers.  A short
+.BR read (2)
+result that returns 0 sets the end-of-file indicator; a negative
+result sets the error indicator.  Either condition terminates the
+transfer.
+.PP
+.BR fwrite ()
+copies data into the stream's write buffer and flushes whenever the
+buffer fills.  When the stream is in line-buffered mode
+.RB ( _IOLBF ),
+the buffer is flushed after a newline character is copied in.  When
+the stream is unbuffered
+.RB ( _IONBF ),
+.BR fwrite ()
+issues a single
+.BR write (2)
+of
+.I "size * nmemb"
+bytes and reports the count converted to elements; partial writes by
+the underlying
+.BR write (2)
+are reflected in the returned element count.
+.PP
+Both functions report the count of
+.I complete
+elements transferred.  A partial element at end-of-file or after an
+error is not counted, even though its bytes have been read into
+.I ptr
+(for
+.BR fread ())
+or written to the stream (for
+.BR fwrite ()).
+Callers that need to recover from a partial transfer should set
+.I size
+to 1 and pass the byte count as
+.IR nmemb ;
+the return value is then the exact number of bytes transferred.
+.SH RETURN VALUE
+On success,
+.BR fread ()
+and
+.BR fwrite ()
+return the number of items read or written.  This number equals the
+number of bytes transferred only when
+.I size
+is 1.
+.PP
+If an error occurs, or the end of the file is reached, the return
+value is a short item count, or zero.
+.PP
+.BR fread ()
+does not distinguish between end-of-file and error; callers must use
+.BR feof (3)
+and
+.BR ferror (3)
+to determine which occurred.
+.PP
+A return value of zero from
+.BR fread ()
+when
+.I nmemb
+is non-zero indicates that no complete element could be read, either
+because end-of-file was reached before
+.I size
+bytes were available, or because a read error occurred.  Bytes from a
+partial element, if any, are left in
+.I ptr
+but are not reported.
+.SH ERRORS
+See
+.BR read (2)
+and
+.BR write (2)
+for the errors that may be set by the underlying transfer.  The
+stream's error indicator is set on any I/O failure and may be tested
+with
+.BR ferror (3)
+and cleared with
+.BR clearerr (3).
+.SH EXAMPLES
+The following program writes an array of integers to a temporary
+file, rewinds the stream, reads the data back, and verifies that the
+round-trip preserves the contents:
+.PP
+.RS 4
+.EX
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+int
+main(void)
+{
+    int out[] = { 1, 2, 3, 4, 5 };
+    int in[5] = { 0 };
+    size_t n;
+    FILE *fp;
+
+    fp = fopen("/tmp/fread.example", "w+b");
+    if (fp == NULL) {
+        perror("fopen");
+        return 1;
+    }
+
+    /* Write 5 elements of size sizeof(int). */
+    n = fwrite(out, sizeof(int), 5, fp);
+    if (n != 5) {
+        fprintf(stderr, "short write: %zu of 5\en", n);
+        fclose(fp);
+        return 1;
+    }
+
+    /* Rewind and read back into a fresh buffer. */
+    rewind(fp);
+    n = fread(in, sizeof(int), 5, fp);
+    if (n != 5) {
+        if (feof(fp))
+            fprintf(stderr, "unexpected EOF after %zu of 5\en", n);
+        if (ferror(fp))
+            perror("fread");
+        fclose(fp);
+        return 1;
+    }
+
+    /* Verify the round-trip. */
+    if (memcmp(in, out, sizeof(out)) != 0) {
+        fprintf(stderr, "round-trip mismatch\en");
+        fclose(fp);
+        return 1;
+    }
+
+    /* A trailing partial element is not counted: read 2 more ints
+       from a stream positioned at end-of-file and observe that the
+       return value is 0, not a fraction. */
+    n = fread(in, sizeof(int), 2, fp);
+    printf("at EOF, fread returned %zu (eof=%d)\en", n, feof(fp));
+
+    fclose(fp);
+    return 0;
+}
+.EE
+.RE
+.PP
+A representative output is:
+.PP
+.RS 4
+.EX
+at EOF, fread returned 0 (eof=1)
+.EE
+.RE
+.SH SEE ALSO
+.BR read (2),
+.BR write (2),
+.BR clearerr (3),
+.BR fclose (3),
+.BR feof (3),
+.BR ferror (3),
+.BR fopen (3),
+.BR fseek (3),
+.BR setbuf (3),
+.BR ungetc (3)
+.SH STANDARDS
+.BR fread ()
+and
+.BR fwrite ()
+conform to C89, C99, and POSIX.1-2008.  The convention that the
+return value is the number of complete elements transferred, and that
+a partial trailing element at end-of-file is not counted, is
+specified by C89 \[sc]7.9.8.1 and \[sc]7.9.8.2.
+.SH COLOPHON
+This page is part of the Substrate operating system documentation.

@@ -128,6 +128,8 @@ _start:
 	mov %eax, 4076(%edx)
 
 	# Fill LAPIC page table - identity map 0xFEC00000-0xFFFFFFFF
+	# Maps full 4MB PDE range covering IOAPIC (0xFEC00000) + LAPIC (0xFEE00000).
+	# One PDE inherently spans 4MB; this is early boot and gets replaced by pmap.
 	mov $(boot_page_table_lapic - 0xC0000000), %edi
 	mov $0xFEC00, %esi          # Start at page 0xFEC00 (0xFEC00000 >> 12)
 	mov $1024, %ecx

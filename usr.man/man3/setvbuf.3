@@ -1,0 +1,290 @@
+.TH SETVBUF 3 "May 2026" "Substrate" "Library Functions Manual"
+.SH NAME
+setvbuf, setbuf, setlinebuf \- assign buffering to a stream
+.SH LIBRARY
+Standard C library (libc, \-lc)
+.SH SYNOPSIS
+.B #include <stdio.h>
+.PP
+.BI "int setvbuf(FILE *" stream ", char *" buf ", int " mode ", size_t " size );
+.br
+.BI "void setbuf(FILE *" stream ", char *" buf );
+.br
+.BI "void setlinebuf(FILE *" stream );
+.SH DESCRIPTION
+The three types of buffering available are unbuffered, line buffered, and
+fully buffered.  When an output stream is unbuffered, characters are
+written directly to the underlying file descriptor with
+.BR write (2)
+as soon as they are produced; when line buffered, characters are saved up
+in an internal buffer until a newline is written or the buffer is full,
+at which point the buffer is flushed; when fully buffered, characters are
+saved up until the buffer is full, at which point the buffer is flushed.
+.PP
+The
+.BR setvbuf ()
+function may be used to alter the buffering behaviour of
+.IR stream .
+The
+.I mode
+argument must be one of the following macros defined in
+.RB < stdio.h >:
+.TP 8
+.B _IONBF
+unbuffered.  Each
+.BR fwrite (3)
+on the stream is translated directly into a single
+.BR write (2)
+call.  The
+.I buf
+and
+.I size
+arguments are ignored.
+.TP
+.B _IOLBF
+line buffered.  Output is accumulated in the stream's buffer and flushed
+to the file descriptor when a newline character is written through
+.BR fwrite (3)
+or when the buffer becomes full.
+.TP
+.B _IOFBF
+fully buffered.  Output is accumulated in the buffer and flushed only
+when the buffer becomes full or when the stream is explicitly flushed
+with
+.BR fflush (3)
+or closed with
+.BR fclose (3).
+This is the default mode for streams returned by
+.BR fopen (3)
+and
+.BR fdopen (3).
+.PP
+If
+.I buf
+is non-NULL, it points to a caller-supplied array of
+.I size
+bytes that the stream will use as its buffer.  The caller is responsible
+for ensuring that the storage remains valid for the lifetime of the
+stream (or until another
+.BR setvbuf ()
+call replaces it) and is freed only after the stream has been closed or
+its buffer replaced.
+.PP
+If
+.I buf
+is
+.B NULL
+and
+.I size
+is non-zero (and differs from the stream's current buffer size), the
+implementation allocates a new buffer of
+.I size
+bytes via
+.BR malloc (3)
+and takes ownership of it; the buffer is freed automatically when the
+stream is closed or replaced.
+.PP
+Any data already buffered for output on
+.I stream
+is flushed before the new mode and buffer take effect, so
+.BR setvbuf ()
+should be called immediately after the stream is opened, before any
+other I/O operation is performed on it.
+.PP
+The
+.BR setbuf ()
+function is exactly equivalent to the call
+.PP
+.RS 4
+.EX
+setvbuf(stream, buf, buf ? _IOFBF : _IONBF, BUFSIZ);
+.EE
+.RE
+.PP
+That is, passing a non-NULL
+.I buf
+selects fully buffered mode using the caller-supplied buffer of size
+.B BUFSIZ
+(1024 bytes on Substrate); passing
+.B NULL
+disables buffering entirely.
+.PP
+The
+.BR setlinebuf ()
+function is exactly equivalent to the call
+.PP
+.RS 4
+.EX
+setvbuf(stream, NULL, _IOLBF, 0);
+.EE
+.RE
+.PP
+which switches the stream to line-buffered mode while retaining its
+existing buffer.
+.SS Substrate Implementation
+The Substrate implementation of
+.BR setvbuf ()
+calls
+.BR fflush (3)
+on
+.I stream
+before changing modes.  When
+.I mode
+is
+.B _IONBF
+the existing buffer is left in place but ignored; the buffer is not
+freed until the stream is closed.
+.PP
+When
+.I buf
+is non-NULL the previously owned buffer (if any) is released with
+.BR free (3)
+and the supplied buffer is adopted without copying its contents; when
+.I buf
+is
+.B NULL
+and
+.I size
+matches the existing buffer length, the existing buffer is retained and
+only the buffering mode is changed.
+.PP
+.BR setbuf ()
+and
+.BR setlinebuf ()
+have no return value and therefore cannot report failure; if the
+underlying
+.BR setvbuf ()
+call fails (for example because
+.BR malloc (3)
+returns
+.BR NULL )
+the stream's buffering state is left unchanged.
+.SH RETURN VALUE
+.BR setvbuf ()
+returns 0 on success and a non-zero value on failure.
+.PP
+.BR setbuf ()
+and
+.BR setlinebuf ()
+do not return a value.
+.SH ERRORS
+.BR setvbuf ()
+fails if:
+.TP
+.B EINVAL
+.I stream
+is
+.B NULL
+or
+.I mode
+is not one of
+.BR _IOFBF ,
+.BR _IOLBF ,
+or
+.BR _IONBF .
+The Substrate implementation reports such failures by returning a
+non-zero value but does not necessarily set
+.I errno .
+.TP
+.B ENOMEM
+.I buf
+was
+.B NULL
+and the implementation could not allocate a replacement buffer of
+.I size
+bytes.
+.SH EXAMPLES
+The following program associates a fully buffered, caller-supplied 8\ KiB
+buffer with
+.B stdout
+before producing any output, so that bulk writes accumulate in the
+buffer until it is full or the stream is flushed:
+.PP
+.RS 4
+.EX
+#include <stdio.h>
+#include <stdlib.h>
+
+int
+main(void)
+{
+    static char outbuf[8192];
+
+    if (setvbuf(stdout, outbuf, _IOFBF, sizeof(outbuf)) != 0) {
+        perror("setvbuf");
+        return EXIT_FAILURE;
+    }
+
+    for (int i = 0; i < 10000; i++)
+        printf("line %d\en", i);
+
+    /* Buffer is flushed automatically when stdout is closed at exit. */
+    return EXIT_SUCCESS;
+}
+.EE
+.RE
+.PP
+The next example uses
+.BR setlinebuf ()
+to make a log stream flush after every newline, which is convenient when
+the output is being read interactively or piped to another process:
+.PP
+.RS 4
+.EX
+#include <stdio.h>
+
+int
+main(void)
+{
+    FILE *log = fopen("/tmp/progress.log", "w");
+    if (log == NULL) return 1;
+
+    setlinebuf(log);
+
+    fprintf(log, "stage 1 complete\en");  /* flushed immediately */
+    fprintf(log, "stage 2 complete\en");  /* flushed immediately */
+
+    fclose(log);
+    return 0;
+}
+.EE
+.RE
+.PP
+Finally,
+.BR setbuf ()
+is used to disable buffering on
+.B stderr
+so that diagnostics appear without delay:
+.PP
+.RS 4
+.EX
+#include <stdio.h>
+
+int
+main(void)
+{
+    setbuf(stderr, NULL);   /* equivalent to setvbuf(stderr, NULL, _IONBF, 0) */
+    fprintf(stderr, "starting up\en");
+    return 0;
+}
+.EE
+.RE
+.SH SEE ALSO
+.BR fclose (3),
+.BR fflush (3),
+.BR fopen (3),
+.BR fread (3),
+.BR fwrite (3),
+.BR malloc (3),
+.BR stdio (3)
+.SH STANDARDS
+.BR setvbuf ()
+and
+.BR setbuf ()
+conform to C89, C99, C11, and POSIX.1-2008.
+.PP
+.BR setlinebuf ()
+is a BSD extension also provided by GNU libc; it is not part of the ISO
+C or POSIX standards.
+.SH COLOPHON
+This page is part of the Substrate operating system documentation.

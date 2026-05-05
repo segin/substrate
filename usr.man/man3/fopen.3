@@ -1,0 +1,373 @@
+.TH FOPEN 3 "May 2026" "Substrate" "Library Functions Manual"
+.SH NAME
+fopen, fdopen, freopen \- open a stream
+.SH LIBRARY
+Standard C library (libc, \-lc)
+.SH SYNOPSIS
+.B #include <stdio.h>
+.PP
+.BI "FILE *fopen(const char *" path ", const char *" mode );
+.br
+.BI "FILE *fdopen(int " fd ", const char *" mode );
+.br
+.BI "FILE *freopen(const char *" path ", const char *" mode ", FILE *" stream );
+.SH DESCRIPTION
+The
+.BR fopen ()
+function opens the file whose name is the string pointed to by
+.I path
+and associates a buffered I/O stream with it.  The newly created
+.B FILE
+object is fully buffered
+.RB ( _IOFBF )
+by default and is added to an internal list of open streams so that
+.BR fflush (NULL)
+and
+.BR fcloseall ()
+can act on it.
+.PP
+The
+.I mode
+argument is a null-terminated string beginning with one of the
+following sequences:
+.TP 8
+.B r
+Open for reading.  The stream is positioned at the beginning of the
+file.  The file must exist.
+.TP
+.B w
+Open for writing.  The file is created if it does not exist, and
+truncated to zero length if it does.  The stream is positioned at the
+beginning of the file.
+.TP
+.B a
+Open for appending.  The file is created if it does not exist.  The
+stream is positioned at the end of the file.
+.PP
+The initial mode character may be followed, in any order, by any of
+the following modifier characters:
+.TP 8
+.B +
+Open for both reading and writing
+.RB ( O_RDWR ).
+The initial position and truncation behaviour are determined by the
+leading mode character.
+.TP
+.B x
+(C11) Exclusive create.  Combined with
+.B w
+or
+.BR a ,
+this causes the underlying
+.BR open (2)
+call to specify
+.BR O_EXCL ,
+so the call fails if the file already exists.
+.PP
+Other characters that may appear in
+.I mode
+on conforming systems (such as
+.BR b ,
+.BR e ,
+or
+.BR m )
+are silently ignored by the Substrate implementation; only the
+characters listed above influence the resulting file descriptor flags.
+.PP
+The
+.BR fdopen ()
+function associates a stream with the existing file descriptor
+.IR fd .
+The
+.I mode
+argument is parsed as for
+.BR fopen ()
+but is used only to record the access flags on the
+.B FILE
+object; it does not change the underlying file descriptor and must be
+compatible with the access mode of
+.IR fd .
+After a successful call,
+.I fd
+is owned by the stream and will be closed by
+.BR fclose (3).
+.PP
+The
+.BR freopen ()
+function reuses the
+.B FILE
+object pointed to by
+.I stream
+to open the file named by
+.IR path .
+Any pending output is first flushed and the existing descriptor is
+closed; the stream's buffer, error indicator, EOF indicator, and
+push-back state are then reset, and the new file is opened with the
+flags derived from
+.IR mode .
+.BR freopen ()
+is typically used to redirect one of the predefined streams
+.RB ( stdin ,
+.BR stdout ,
+.BR stderr )
+to a file.
+.SS Substrate Implementation
+The Substrate
+.BR fopen ()
+recognises only the leading mode characters
+.BR r ,
+.BR w ,
+and
+.B a
+and the modifiers
+.B +
+and
+.BR x ;
+any other leading character causes
+.B NULL
+to be returned without setting
+.I errno
+to a portable value.
+.PP
+.BR freopen ()
+in the current revision does not support a
+.B NULL
+.I path
+argument: the C99 mode-change variant always returns
+.B NULL
+because the implementation does not yet use
+.BR fcntl (2)
+.B F_SETFL
+to alter the flags of an already-open descriptor.
+.PP
+.BR fdopen ()
+always allocates an internal buffer of
+.B BUFSIZ
+bytes regardless of
+.IR fd 's
+underlying type; callers that require unbuffered or line-buffered
+behaviour must use
+.BR setvbuf (3)
+afterwards.
+.SH RETURN VALUE
+On success,
+.BR fopen (),
+.BR fdopen (),
+and
+.BR freopen ()
+return a pointer to the new
+.B FILE
+object.  On failure they return
+.BR NULL .
+.PP
+On error from
+.BR fopen ()
+or
+.BR freopen ()
+the underlying
+.BR open (2)
+call sets
+.I errno
+to indicate the cause; on a memory-allocation failure inside
+.BR fdopen ()
+or
+.BR fopen ()
+.I errno
+is set to
+.B ENOMEM
+by the allocator.
+.SH ERRORS
+.TP
+.B EINVAL
+The
+.I mode
+argument supplied to
+.BR fopen ()
+or
+.BR freopen ()
+does not begin with
+.BR r ,
+.BR w ,
+or
+.BR a .
+(The Substrate implementation reports this by returning
+.B NULL
+without invoking
+.BR open (2);
+.I errno
+may not be modified in that case.)
+.TP
+.B EBADF
+The descriptor passed to
+.BR fdopen ()
+is negative.
+.TP
+.B ENOMEM
+Insufficient memory to allocate the
+.B FILE
+object or its buffer.
+.PP
+In addition,
+.BR fopen ()
+and
+.BR freopen ()
+may fail and set
+.I errno
+to any of the values specified for
+.BR open (2),
+including
+.BR EACCES ,
+.BR EEXIST
+(when the
+.B x
+modifier is used),
+.BR EISDIR ,
+.BR ELOOP ,
+.BR EMFILE ,
+.BR ENAMETOOLONG ,
+.BR ENFILE ,
+.BR ENOENT ,
+.BR ENOSPC ,
+.BR ENOTDIR ,
+.BR EOVERFLOW ,
+and
+.BR EROFS .
+.SH EXAMPLES
+The following program opens a file for writing, truncating it if it
+already exists, and writes a single line of text:
+.PP
+.RS 4
+.EX
+#include <stdio.h>
+#include <stdlib.h>
+
+int
+main(void)
+{
+    FILE *fp = fopen("/tmp/hello.txt", "w");
+    if (fp == NULL) {
+        perror("fopen");
+        return EXIT_FAILURE;
+    }
+
+    fprintf(fp, "hello, substrate\en");
+    fclose(fp);
+    return EXIT_SUCCESS;
+}
+.EE
+.RE
+.PP
+The next example uses the C11
+.B x
+modifier to fail rather than overwrite an existing file:
+.PP
+.RS 4
+.EX
+#include <errno.h>
+#include <stdio.h>
+#include <string.h>
+
+int
+main(void)
+{
+    FILE *fp = fopen("/tmp/once.lock", "wx");
+    if (fp == NULL) {
+        if (errno == EEXIST)
+            fprintf(stderr, "already locked\en");
+        else
+            fprintf(stderr, "fopen: %s\en", strerror(errno));
+        return 1;
+    }
+    fclose(fp);
+    return 0;
+}
+.EE
+.RE
+.PP
+The following snippet wraps an existing file descriptor obtained from
+.BR pipe (2)
+in a stream using
+.BR fdopen ():
+.PP
+.RS 4
+.EX
+#include <stdio.h>
+#include <unistd.h>
+
+int
+main(void)
+{
+    int pfd[2];
+    if (pipe(pfd) < 0) return 1;
+
+    FILE *r = fdopen(pfd[0], "r");
+    FILE *w = fdopen(pfd[1], "w");
+    if (!r || !w) return 1;
+
+    fputs("through the pipe\en", w);
+    fflush(w);
+
+    char buf[64];
+    if (fgets(buf, sizeof(buf), r))
+        fputs(buf, stdout);
+
+    fclose(w);
+    fclose(r);
+    return 0;
+}
+.EE
+.RE
+.PP
+Finally,
+.BR freopen ()
+is used to redirect
+.B stdout
+to a log file for the remainder of the program:
+.PP
+.RS 4
+.EX
+#include <stdio.h>
+
+int
+main(void)
+{
+    if (freopen("/tmp/program.log", "w", stdout) == NULL) {
+        perror("freopen");
+        return 1;
+    }
+
+    printf("this line goes to the log file\en");
+    return 0;
+}
+.EE
+.RE
+.SH SEE ALSO
+.BR open (2),
+.BR pipe (2),
+.BR fclose (3),
+.BR fflush (3),
+.BR fread (3),
+.BR fwrite (3),
+.BR setvbuf (3),
+.BR stdio (3)
+.SH STANDARDS
+.BR fopen ()
+and
+.BR freopen ()
+conform to C89, C99, C11, and POSIX.1-2008.  The
+.B x
+mode modifier was added in C11.
+.BR fdopen ()
+conforms to POSIX.1-2008.
+.PP
+The behaviour of
+.BR freopen ()
+when invoked with a
+.B NULL
+.I path
+(introduced in C99 to permit changing the access mode of an already
+open stream) is not implemented in the current Substrate revision and
+returns
+.BR NULL .
+.SH COLOPHON
+This page is part of the Substrate operating system documentation.

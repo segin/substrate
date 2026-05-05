@@ -69,8 +69,8 @@ SYSCTL_INT(hw, HW_PAGESIZE, pagesize, CTLFLAG_RD, &hw_pagesize, 0, "System page 
 extern void early_uart_print(const char *s);
 
 void sysctl_init(void) {
-    if (sysctl_initialized) return;
-    sysctl_initialized = 1;
+    if (__sync_bool_compare_and_swap(&sysctl_initialized, 0, 1) == 0)
+        return;
 
     hw_ncpu = smp_get_cpu_count();
 
@@ -118,6 +118,16 @@ int sys_sysctl(int *name, unsigned int namelen, void *oldp, size_t *oldlenp, voi
     error = copyin(name, name_buf, namelen * sizeof(int));
     if (error) return error;
 
+    /* DEBUG: spot KERN_ARND fallback from FreeBSD libc __guard_setup —
+     * if __guard_setup gets a valid AT_CANARY, this should never fire.
+     * KERN_ARND mib is {1, 37}. */
+    {
+        extern int kprintf(const char *fmt, ...);
+        if (namelen == 2 && name_buf[0] == 1 && name_buf[1] == 37) {
+            kprintf("[GUARD] KERN_ARND sysctl fallback hit (AT_CANARY path failed)\n");
+        }
+    }
+
     /* 2. Setup request */
     memset(&req, 0, sizeof(req));
     if (current_process) {
@@ -147,10 +157,17 @@ int sys_sysctl(int *name, unsigned int namelen, void *oldp, size_t *oldlenp, voi
         return ENOENT;
     }
 
-    /* 5. Permission checks (Basic) */
-    if ((oid->oid_kind & CTLFLAG_WR) == 0 && newp != NULL) {
-        mutex_unlock(&sysctl_mutex);
-        return EPERM;
+    /* 5. Permission checks */
+    if (newp != NULL) {
+        if ((oid->oid_kind & CTLFLAG_WR) == 0) {
+            mutex_unlock(&sysctl_mutex);
+            return EPERM;
+        }
+        /* Only root may write to sysctl variables */
+        if (current_process && current_process->euid != 0) {
+            mutex_unlock(&sysctl_mutex);
+            return EPERM;
+        }
     }
 
     /* 6. Lock dropping and Call parameters setup */

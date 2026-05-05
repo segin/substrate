@@ -1,0 +1,92 @@
+.Dd April 22, 2026
+.Dt HOST_TOOLCHAIN 7
+.Os Substrate
+.Sh NAME
+.Nm host_toolchain
+.Nd building, installing, and using the Substrate host toolchain
+.Sh DESCRIPTION
+The Substrate repository can build host-runnable copies of its toolchain and
+selected userland utilities for validation on a Linux host.
+The staged output lives in
+.Pa host_dist/
+and can be synchronized into an install prefix such as
+.Pa /opt/substrate .
+.Sh BUILDING
+Build the staged host tool tree with:
+.Bd -literal -offset indent
+make host_dist
+.Ed
+.Pp
+By default,
+.Dq Li host_dist
+uses the system host compiler for native rebuilds
+.Pq typically Pa /usr/bin/cc
+so rebuilding the installed toolchain does not recursively invoke the
+Substrate
+.Xr cc 1
+driver unless
+.Ev HOSTCC
+is set explicitly.
+.Sh INSTALLING
+Install the staged host tree into
+.Pa /opt/substrate
+with:
+.Bd -literal -offset indent
+sudo make HOST_DIST_PREFIX=/opt/substrate host_install
+.Ed
+.Pp
+The install step rebuilds
+.Pa host_dist/
+and then synchronizes its contents into the chosen prefix.
+.Ev HOST_DIST_PREFIX
+may be used to select a different install location.
+.Sh USING THE INSTALLED TOOLCHAIN
+To prefer the installed Substrate tools for host-native validation, place the
+installed directories first in
+.Ev PATH :
+.Bd -literal -offset indent
+export PATH=/opt/substrate/usr/bin:/opt/substrate/bin:$PATH
+.Ed
+.Pp
+After that,
+.Xr cc 1
+will resolve the sibling installed
+.Xr as 1
+and
+.Xr ld 1
+from the same prefix before falling back to other tools on
+.Ev PATH .
+Use
+.Dq Li cc -###
+to print the exact assembler and linker commands that will be used.
+.Pp
+To force exact backend paths in mixed environments:
+.Bd -literal -offset indent
+AS=/opt/substrate/usr/bin/as LD=/opt/substrate/usr/bin/ld cc -m64 hello.c -o hello64
+.Ed
+.Sh ENVIRONMENT
+.Bl -tag -width HOST_DIST_PREFIX
+.It Ev HOSTCC
+Override the compiler used to rebuild host-native tools during
+.Dq Li make host_dist
+and
+.Dq Li make host_install .
+.It Ev HOST_DIST_PREFIX
+Select the installation prefix used by
+.Dq Li make host_install .
+.El
+.Sh FILES
+.Bl -tag -width Pa
+.It Pa host_dist/
+Staged host-runnable toolchain and utility tree.
+.It Pa /opt/substrate/usr/bin/cc
+Installed host compiler driver when the default prefix is used.
+.It Pa /opt/substrate/usr/bin/as
+Installed host assembler when the default prefix is used.
+.It Pa /opt/substrate/usr/bin/ld
+Installed host linker when the default prefix is used.
+.El
+.Sh SEE ALSO
+.Xr as 1 ,
+.Xr cc 1 ,
+.Xr ld 1

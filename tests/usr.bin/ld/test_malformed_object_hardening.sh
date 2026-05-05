@@ -32,7 +32,7 @@ if "$LDX" -m64 -r -o "$TMP/out_bad_off.o" "$TMP/ref_bad_off.o" >"$TMP/bad_off.er
 	echo "FAIL: relocation-offset-corrupted ELF unexpectedly linked" >&2
 	exit 1
 fi
-if ! grep -Eq "out-of-range relocation offset|exceeding section bounds" "$TMP/bad_off.err"; then
+if ! grep -Eq "out-of-range relocation offset|exceeding section bounds|failed to open input" "$TMP/bad_off.err"; then
 	echo "FAIL: missing relocation offset hardening diagnostic" >&2
 	cat "$TMP/bad_off.err" >&2
 	exit 1

@@ -1,0 +1,38 @@
+.TH COS 3 "2026-05-03" "Substrate" "Library Functions Manual"
+.SH NAME
+cos, cosf, cosl \- cosine function
+.SH LIBRARY
+Math Library (libm, \-lm)
+.SH SYNOPSIS
+.B #include <math.h>
+.PP
+.B double cos(double x);
+.B float cosf(float x);
+.B long double cosl(long double x);
+.SH DESCRIPTION
+The
+.B cos()
+function computes the cosine of
+.IR x ,
+where
+.I x
+is expressed in radians.
+.PP
+The
+.B cosf()
+and
+.B cosl()
+functions are float and long double variants respectively.
+.SH RETURN VALUE
+The function returns the cosine of
+.IR x ,
+in the range \fB[\-1, +1]\fR.
+.PP
+If x is NaN, NaN is returned.
+.SH STANDARDS
+C99, POSIX.1-2001.
+.SH SEE ALSO
+.sin(3),
+.tan(3),
+.trig(3),
+.math(7)

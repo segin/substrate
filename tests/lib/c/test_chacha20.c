@@ -37,6 +37,8 @@
 static uint8_t mock_secret_data[44]; // sizeof(process_secret) in stdlib.c is 11 * 4 = 44
 static int use_fixed_mock_secret = 0;
 
+// Mock the open/read calls for arc4random_buf to use /dev/urandom.
+
 #define open mock_open
 #define read mock_read
 #define close mock_close

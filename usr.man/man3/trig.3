@@ -1,0 +1,94 @@
+.TH SINPI 3 "2026-05-03" "Substrate" "Library Functions Manual"
+.SH NAME
+sinpi, cospi, tanpi, asinpi, atanpi \- pi-argument trigonometric functions
+.SH LIBRARY
+Math Library (libm, \-lm)
+.SH SYNOPSIS
+.B #include <math.h>
+.PP
+.B double sinpi(double x);
+.B double cospi(double x);
+.B double tanpi(double x);
+.B double asinpi(double x);
+.B double atanpi(double x);
+.PP
+.B float sinpif(float x);
+.B float cospif(float x);
+.B float tanpif(float x);
+.B float asinpif(float x);
+.B float atanpif(float x);
+.PP
+.B long double sinpil(long double x);
+.B long double cospil(long double x);
+.B long double tanpil(long double x);
+.B long double asinpil(long double x);
+.B long double atanpil(long double x);
+.SH DESCRIPTION
+These functions compute the trigonometric functions with arguments expressed
+in multiples of \fB\pi\fR radians. They are defined as:
+.TP
+.B sinpi(x)
+Returns \fBsin(\fB\pi\fR x)\fR.
+.TP
+.B cospi(x)
+Returns \fBcos(\fB\pi\fR x)\fR.
+.TP
+.B tanpi(x)
+Returns \fBtan(\fB\pi\fR x)\fR.
+.TP
+.B asinpi(x)
+Returns \fBasin(x)\fR / \fB\pi\fR. Equivalent to \fB1/\fR\fB\pi\fR times the
+arc sine of \fBx\fR.
+.TP
+.B atanpi(x)
+Returns \fBatan(x)\fR / \fB\pi\fR. Equivalent to \fB1/\fR\fB\pi\fR times the
+arc tangent of \fBx\fR.
+.PP
+For integer values of \fBx\fR, the implementations exploit the mathematical
+identities to compute exact results without floating-point transcendental
+operations:
+.RS
+.TP
+.B sinpi(\fIn\fR)
+Returns exactly 0 for integer \fIn\fR.
+.TP
+.B cospi(\fIn\fR)
+Returns exactly +1 or \-1 for integer \fIn\fR.
+.TP
+.B tanpi(\fIn\fR)
+Returns exactly 0 for integer \fIn\fR.
+.TP
+.B asinpi(\fIn\fR)
+Returns 0 for \fIn\fR = 0, +1/\fB\pi\fR or \-1/\fB\pi\fR for \fIn\fR = \fB\pm\fR1.
+.TP
+.B atanpi(\fIn\fR)
+Returns 0 for \fIn\fR = 0, +1/4 or \-1/4 for \fIn\fR = \fB\pm\fR1.
+.RE
+.SH RETURN VALUE
+All functions return the computed trigonometric value.
+.PP
+For \fBtanpi(x)\fR:
+.RS
+.TP
+Returns \fBNaN\fR when \fBx\fR is a half-integer (e.g., 0.5, 1.5, \-0.5).
+.TP
+Returns \fB+\fR or \fB\-\fR infinity when \fBx\fR is infinity.
+.TP
+Returns \fBNaN\fR when \fBx\fR is \fBNaN\fR.
+.RE
+.PP
+For \fBasinpi(x)\fR:
+.RS
+.TP
+Returns \fBNaN\fR when |x| > 1 (domain error).
+.TP
+Returns \fBNaN\fR when x is \fBNaN\fR.
+.RE
+.SH STANDARDS
+C23 (ISO/IEC 9899:2024), pi-argument trig functions (Clause 7.12.16).
+.SH SEE ALSO
+.sin(3),
+.cos(3),
+.tan(3),
+.asin(3),
+.math(7)

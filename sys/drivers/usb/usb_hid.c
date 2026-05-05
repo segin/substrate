@@ -75,6 +75,7 @@ typedef struct usb_hid_dev {
     input_dev_t   input_dev;
     struct hid_kbd_report prev_report;
     uint8_t  active;
+    uint8_t  poll_exited;    /* set by poll thread before kthread_exit() */
     int      poll_chan;      /* wait channel for kthread sleep */
 } usb_hid_dev_t;
 
@@ -275,11 +276,15 @@ static void usb_hid_poll_thread(void *arg)
         if (ret == USB_XFER_OK)
             usb_hid_process_kbd_report(hid, &report);
 
-        /* Sleep until next poll interval */
+        /* Sleep until next poll interval, but wake immediately if
+         * detach signals via poll_chan. */
         uint64_t deadline = get_ticks() + interval_ticks;
         sched_sleep_until(&hid->poll_chan, deadline);
     }
 
+    /* Tell detach() it is now safe to free hid->udev / reuse the slot. */
+    hid->poll_exited = 1;
+    sched_wakeup(&hid->poll_exited);
     kthread_exit();
 }
 
@@ -361,7 +366,15 @@ static void usb_hid_detach(usb_device_t *dev)
     if (!hid)
         return;
 
+    /* Signal the polling thread to exit and wait for it.  Without
+     * this the thread keeps issuing usb_control_transfer() against
+     * a freed udev after the USB core has reclaimed the device,
+     * leading to use-after-free. */
     hid->active = 0;
+    sched_wakeup(&hid->poll_chan);
+    while (!hid->poll_exited)
+        sched_sleep(&hid->poll_exited);
+
     input_unregister_device(&hid->input_dev);
     dev->driver_data = NULL;
 }
