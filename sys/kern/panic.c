@@ -4,6 +4,7 @@
 #include <drivers/video/vga.h>
 #include <drivers/video/hw_text.h>
 #include <drivers/video/fb.h>
+#include <drivers/console/uart/uart.h>
 #include <arch/i386/idt.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -18,6 +19,41 @@ void panic_test_halt(void);
 #endif
 
 #define KERN_BASE 0xC0000000U
+
+/*
+ * Reentrancy guard.  panic() and panic_with_regs() route through
+ * kprint -> console -> tty/vt -> framebuffer/ANSI handler, any of
+ * which can themselves panic.  Without a guard, the second panic
+ * starts a third, etc., until the screen is just header swarms with
+ * no body — the symptom we observed running `cat /dev/urandom`.
+ *
+ * On the second entry we abandon the rich console/VT path entirely
+ * and emit raw text directly to the COM port via uart_panic_write,
+ * which holds no locks and uses polled THR-empty.  After two levels
+ * of recursion we simply halt.
+ *
+ * Single global is fine: i386 has no SMP-safe panic protocol here,
+ * and once one CPU panics the others are about to be stopped anyway.
+ */
+static volatile int panic_depth = 0;
+
+static void panic_serial_emit(const char *s) {
+    if (!s) return;
+    size_t n = 0;
+    while (s[n]) n++;
+    uart_panic_write(s, n);
+}
+
+static void panic_serial_hex32(uint32_t v) {
+    static const char hex[] = "0123456789abcdef";
+    char buf[11];
+    buf[0] = '0'; buf[1] = 'x';
+    for (int i = 0; i < 8; i++) {
+        buf[2 + i] = hex[(v >> (28 - i * 4)) & 0xF];
+    }
+    buf[10] = '\0';
+    panic_serial_emit(buf);
+}
 
 static int panic_addr_is_kernel_text(uintptr_t va) {
     /* Conservative: kernel virtual addresses live in [KERN_BASE, 0xFF000000). */
@@ -148,7 +184,41 @@ static void panic_finish(void) {
     }
 }
 
+/*
+ * Recursive-panic emergency path: write a tiny notice plus the message
+ * straight to the COM port, then halt.  Bypasses kprint / console /
+ * VT / TTY / framebuffer entirely so we cannot recurse again.
+ */
+static void panic_serial_only(const char *msg, const registers_t *regs) {
+#ifndef HOST_TEST
+    __asm__ volatile("cli");
+#endif
+    panic_serial_emit("\n\n*** RECURSIVE KERNEL PANIC ***\n");
+    panic_serial_emit("Fatal Error: ");
+    panic_serial_emit(msg ? msg : "(null)");
+    panic_serial_emit("\n");
+    if (regs) {
+        panic_serial_emit("eip=");  panic_serial_hex32(regs->eip);
+        panic_serial_emit(" esp=");
+        panic_serial_hex32((regs->cs & 0x3) ? regs->useresp : regs->esp);
+        panic_serial_emit(" eflags=");
+        panic_serial_hex32(regs->eflags);
+        panic_serial_emit("\n");
+    }
+    panic_serial_emit("System Halted (recursive).\n");
+#ifdef HOST_TEST
+    panic_test_halt();
+    return;
+#endif
+    while (1) { __asm__ volatile("hlt"); }
+}
+
 void panic_with_regs(const char *msg, const registers_t *regs) {
+    int depth = ++panic_depth;
+    if (depth > 1) {
+        panic_serial_only(msg, regs);
+        return;
+    }
     panic_emit_header(msg);
     if (regs) {
         panic_dump_regs(regs);
@@ -157,6 +227,11 @@ void panic_with_regs(const char *msg, const registers_t *regs) {
 }
 
 void panic(const char *msg) {
+    int depth = ++panic_depth;
+    if (depth > 1) {
+        panic_serial_only(msg, NULL);
+        return;
+    }
     panic_emit_header(msg);
     /* No trap frame available; synthesize the call site so the operator at
      * least sees where panic() was invoked from and a peek at the kernel

@@ -809,6 +809,27 @@ int tty_read(struct tty *tty, char *buf, int len) {
     return count;
 }
 
+size_t tty_inject_input_locked(struct tty *tty, const char *buf, size_t len) {
+    /* tty->lock must already be held by the caller — see header.  We
+     * append to raw_buf via the head-side put-helper convention so
+     * tty_buf_get (which advances tail) finds the bytes correctly.
+     * The previous implementation in fb_cb_respond / cb_respond
+     * advanced tail directly, leaving the data at locations the
+     * reader never visited; that data was effectively lost. */
+    size_t i;
+    if (!tty || !buf) return 0;
+    for (i = 0; i < len; i++) {
+        if (tty_buf_put(&tty->raw_buf, buf[i]) != 0) {
+            break;
+        }
+    }
+    if (i > 0) {
+        sched_wakeup(&tty->read_wait);
+        sched_wakeup(&tty->poll_wait);
+    }
+    return i;
+}
+
 int tty_write(struct tty *tty, const char *buf, int len) {
     if (!tty_valid(tty)) return -EIO;
     

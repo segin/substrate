@@ -648,3 +648,16 @@ void uart_write(const char* data, size_t size) {
         uart_putc(data[i]);
     }
 }
+
+void uart_panic_write(const char *data, size_t size) {
+    /* Polled, lock-free, bypass-everything path for panic().  Caller
+     * may hold any spinlock or have interrupts disabled; we must not
+     * re-enter the IRQ tx queue or any console infrastructure. */
+    if (!data) return;
+    for (size_t i = 0; i < size; i++) {
+        if (data[i] == '\n') {
+            uart_poll_putc(uart_base_port, '\r', 1000000);
+        }
+        uart_poll_putc(uart_base_port, (uint8_t)data[i], 1000000);
+    }
+}

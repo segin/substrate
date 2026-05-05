@@ -17,6 +17,7 @@
 #include <sys/vtio.h>
 #include <sys/copy.h>
 #include <sys/errno.h>
+#include <arch/i386/intr.h>
 #include "fb.h"
 #include "fb_console.h"
 #include "fb_ops.h"
@@ -51,6 +52,17 @@ static unsigned int dirty_ticks = 0;
 static int fb_console_tty_count = 0;
 static vt_state_t *fb_current_vt_ctx = NULL;
 static spinlock_t fb_console_lock = SPINLOCK_INIT("fb_console");
+
+/*
+ * fb_console_lock is also touched from interrupt context (e.g. tty
+ * input echo arriving from the keyboard IRQ flowing through
+ * tty_flip_buffer_push -> echo path).  Process-side acquires must
+ * disable local interrupts so an IRQ can't recurse into the lock on
+ * the same CPU.  Mirror the irq.c pattern: save eflags on entry,
+ * restore on exit.
+ */
+#define FB_LOCK()   uint32_t _fb_flags = intr_disable(); spinlock_acquire(&fb_console_lock)
+#define FB_UNLOCK() do { spinlock_release(&fb_console_lock); intr_restore(_fb_flags); } while (0)
 
 #define FB_CONSOLE_FLUSH_HZ 60U
 
@@ -240,7 +252,7 @@ void fb_console_redraw_active(void) {
         return;
     }
 
-    spinlock_acquire(&fb_console_lock);
+    FB_LOCK();
     view_y_offset = 0;
     if (fb.set_viewport) {
         fb.set_viewport(0, 0);
@@ -257,7 +269,7 @@ void fb_console_redraw_active(void) {
     }
     fb_console_sync_row(vt, vt_get_status_row());
     fb_console_update_cursor_locked(vt);
-    spinlock_release(&fb_console_lock);
+    FB_UNLOCK();
 }
 
 void fb_console_draw_statusline(const char *line, int cols, int row) {
@@ -281,13 +293,13 @@ void fb_console_draw_statusline(const char *line, int cols, int row) {
         return;
     }
 
-    spinlock_acquire(&fb_console_lock);
+    FB_LOCK();
     fb_console_hide_cursor();
     for (col = 0; col < cols; col++) {
         fb_console_draw_cell_at(col, row, (unsigned char)line[col], 0x70, 0);
     }
     fb_console_update_cursor_locked(vt);
-    spinlock_release(&fb_console_lock);
+    FB_UNLOCK();
 }
 
 void fb_console_refresh_statusline(void) {
@@ -301,10 +313,10 @@ void fb_console_refresh_statusline(void) {
         return;
     }
 
-    spinlock_acquire(&fb_console_lock);
+    FB_LOCK();
     fb_console_sync_row(vt, vt_get_status_row());
     fb_console_update_cursor_locked(vt);
-    spinlock_release(&fb_console_lock);
+    FB_UNLOCK();
 }
 
 static void fb_console_store_cell_locked(vt_state_t *vt,
@@ -588,35 +600,18 @@ static void fb_cb_putc(char c) {
 }
 
 static void fb_cb_respond(const char *buf, size_t len) {
+    /* Called from inside ansi_process(), which is itself called from
+     * fb_vt_tty_write() under tty->lock (taken in tty_write()).  We
+     * MUST NOT re-acquire that lock — the spinlock_is_held check in
+     * spinlock_acquire panics on recursive acquire, which is exactly
+     * how `cat /dev/urandom` used to crash the kernel via random CSI
+     * sequences.  Instead, append to raw_buf via the canonical
+     * lock-held helper. */
     vt_state_t *vt = fb_current_vt_ctx;
-    struct tty *tty;
-    size_t i;
-
-    if (!vt || !buf || len == 0) {
-        return;
-    }
-
-    tty = vt->tty;
-    if (!tty) {
-        return;
-    }
-
-    spinlock_acquire(&tty->lock);
-    for (i = 0; i < len; i++) {
-        tty_buffer_t *tb = &tty->raw_buf;
-        if (tb->count >= TTY_BUF_SIZE) {
-            break;
-        }
-        tb->data[tb->tail] = buf[i];
-        tb->tail = (tb->tail + 1) % TTY_BUF_SIZE;
-        tb->count++;
-    }
-    spinlock_release(&tty->lock);
-
-    if (i > 0) {
-        sched_wakeup(&tty->read_wait);
-        sched_wakeup(&tty->poll_wait);
-    }
+    if (!vt || !buf || len == 0) return;
+    struct tty *tty = vt->tty;
+    if (!tty) return;
+    (void)tty_inject_input_locked(tty, buf, len);
 }
 
 static void fb_cb_set_color(uint8_t fg, uint8_t bg) {
@@ -1089,9 +1084,9 @@ static int fb_vt_tty_write(struct tty *tty, const unsigned char *buf, int count)
         return -1;
     }
 
-    spinlock_acquire(&fb_console_lock);
+    FB_LOCK();
     fb_console_write_vt_locked(vt, (const char *)buf, (size_t)count);
-    spinlock_release(&fb_console_lock);
+    FB_UNLOCK();
     return count;
 }
 
@@ -1531,7 +1526,7 @@ static void fb_console_flush_dirty_internal(void) {
 /* ==================== Console Backend ==================== */
 
 static void fb_console_clear(void) {
-    spinlock_acquire(&fb_console_lock);
+    FB_LOCK();
     cursor_drawn = 0;
     cursor_saved_valid = 0;
     cursor_blink_phase = 1;
@@ -1553,7 +1548,7 @@ static void fb_console_clear(void) {
     }
     fb_console_mark_dirty(0, 0, (int)fb.width, (int)fb.height);
     fb_console_show_cursor();
-    spinlock_release(&fb_console_lock);
+    FB_UNLOCK();
 }
 
 static void fb_console_backend_write(const char *data, size_t len) {
@@ -1568,9 +1563,9 @@ static void fb_console_backend_write(const char *data, size_t len) {
         return;
     }
 
-    spinlock_acquire(&fb_console_lock);
+    FB_LOCK();
     fb_console_write_vt_locked(vt, data, len);
-    spinlock_release(&fb_console_lock);
+    FB_UNLOCK();
 }
 
 static console_backend_t fb_console_backend = {
@@ -1809,7 +1804,7 @@ void fb_console_tick(void) {
     if (spinlock_is_held(&fb_console_lock)) {
         return;
     }
-    spinlock_acquire(&fb_console_lock);
+    FB_LOCK();
     if (vt && vt->cursor_visible) {
         if (!vt->cursor_blink) {
             cursor_blink_ticks = 0;
@@ -1836,7 +1831,7 @@ void fb_console_tick(void) {
     }
 
     if (!dirty_valid) {
-        spinlock_release(&fb_console_lock);
+        FB_UNLOCK();
         return;
     }
 
@@ -1844,5 +1839,5 @@ void fb_console_tick(void) {
     if (dirty_ticks >= fb_console_flush_period_ticks()) {
         fb_console_flush_dirty_internal();
     }
-    spinlock_release(&fb_console_lock);
+    FB_UNLOCK();
 }

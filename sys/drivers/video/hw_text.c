@@ -1187,38 +1187,14 @@ static void cb_set_bracketed_paste(int on) {
 }
 
 static void cb_respond(const char *buf, size_t len) {
+    /* Same contract as fb_cb_respond: invoked from ansi_process under
+     * tty->lock.  Re-acquiring would deadlock; writing to tail
+     * directly leaves data unread.  Use the lock-held helper. */
     vt_state_t *vt = current_vt_ctx;
-    struct tty *tty;
-    uint32_t flags;
-    size_t i;
-
-    if (!vt || !buf || len == 0) {
-        return;
-    }
-
-    tty = vt->tty;
-    if (!tty) {
-        return;
-    }
-
-    flags = intr_disable();
-    spinlock_acquire(&tty->lock);
-    for (i = 0; i < len; i++) {
-        tty_buffer_t *tb = &tty->raw_buf;
-        if (tb->count >= TTY_BUF_SIZE) {
-            break;
-        }
-        tb->data[tb->tail] = buf[i];
-        tb->tail = (tb->tail + 1) % TTY_BUF_SIZE;
-        tb->count++;
-    }
-    spinlock_release(&tty->lock);
-    intr_restore(flags);
-
-    if (i > 0) {
-        sched_wakeup(&tty->read_wait);
-        sched_wakeup(&tty->poll_wait);
-    }
+    if (!vt || !buf || len == 0) return;
+    struct tty *tty = vt->tty;
+    if (!tty) return;
+    (void)tty_inject_input_locked(tty, buf, len);
 }
 
 static const struct ansi_callbacks ansi_cb = {
