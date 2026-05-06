@@ -851,12 +851,13 @@ static int exec_copy_args(char *const array[], int count, char **k_array, char *
             } else if (is_user_ptr(uarg)) {
                 ret = copyinstr(uarg, *p_buf, *remaining, &copied_len);
             } else {
-                size_t len = strlen(uarg) + 1;
-                if (len > *remaining) {
+                size_t len = strnlen(uarg, *remaining);
+                if (len == *remaining) {
                     ret = -7; // E2BIG
                 } else {
                     memcpy(*p_buf, uarg, len);
-                    copied_len = len;
+                    (*p_buf)[len] = '\0';
+                    copied_len = len + 1;
                     ret = 0;
                 }
             }
