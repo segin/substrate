@@ -140,8 +140,14 @@ void setup_fs(ext2_fs_t *fs, fs_node_t *dev_node) {
     bgd_disk->bg_free_inodes_count = 16384;
     bgd_disk->bg_used_dirs_count = 0;
 
-    // Mark bitmaps as free (0) mostly. block 3 and 4 are bitmaps.
-    // They are already 0 from memset.
+    // Mark metadata blocks as used in the block bitmap (block 3):
+    // blocks 1-2053 (superblock, BGD, bitmaps, 2048-block inode table) + block 100 (dir data)
+    // bit N in block bitmap = block (N+s_first_data_block) = block (N+1)
+    uint8_t *bbmap = mock_disk + 3 * 1024;
+    for (uint32_t b = 1; b <= 2053; b++) {
+        uint32_t bit = b - 1; // s_first_data_block=1, so bit = block - 1
+        bbmap[bit / 8] |= (uint8_t)(1u << (bit % 8));
+    }
 
     // --- Setup In-Memory FS Structure ---
     memset(fs, 0, sizeof(ext2_fs_t));
@@ -165,6 +171,16 @@ void setup_fs(ext2_fs_t *fs, fs_node_t *dev_node) {
     // But here fs is local. We should allocate bgd table.
     fs->bgd = (ext2_group_desc_t *)calloc(1, sizeof(ext2_group_desc_t));
     fs->bgd[0] = *bgd_disk;
+    fs->active_bg_group = (uint32_t)-1;
+    fs->active_bg_bitmap = malloc(fs->block_size);
+    memset(fs->active_bg_bitmap, 0, fs->block_size);
+    fs->active_inode_bg_group = (uint32_t)-1;
+    fs->active_inode_bg_bitmap = malloc(fs->block_size);
+    memset(fs->active_inode_bg_bitmap, 0, fs->block_size);
+
+    memset(ext2_node_cache, 0, sizeof(ext2_node_cache));
+    memset(ext2_fs_node_cache, 0, sizeof(ext2_fs_node_cache));
+    ext2_node_cache_idx = 0;
 }
 
 void run_ext2_remove_perf_test(void) {
@@ -244,6 +260,8 @@ void run_ext2_remove_perf_test(void) {
     }
 
     // Cleanup
+    free(fs.active_bg_bitmap);
+    free(fs.active_inode_bg_bitmap);
     free(fs.bgd);
     // free(dir); // allocated in cache, tricky to free in this test setup
 }

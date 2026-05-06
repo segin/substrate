@@ -156,6 +156,11 @@ static void setup_fs(ext2_fs_t *fs, fs_node_t *dev_node, ext2_node_t *root_ctx, 
     fs->active_bg_group = (uint32_t)-1;
     fs->active_inode_bg_group = (uint32_t)-1;
 
+    memset(ext2_node_cache, 0, sizeof(ext2_node_cache));
+    memset(ext2_fs_node_cache, 0, sizeof(ext2_fs_node_cache));
+    ext2_node_cache_idx = 0;
+
+    memset(&root_inode, 0, sizeof(root_inode));
     root_inode.i_mode = EXT2_S_IFDIR | 0755;
     root_inode.i_uid = 0;
     root_inode.i_gid = 0;
