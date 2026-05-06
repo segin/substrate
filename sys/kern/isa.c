@@ -146,16 +146,23 @@ static void isa_set_pnp_compatibles(struct device *dev,
         return;
     }
 
-    strcpy(compat + used, logical->id);
-    used += strlen(logical->id) + 1;
+    strlcpy(compat + used, logical->id, total - used);
+    used += strlen(compat + used) + 1;
     for (i = 0; i < logical->compat_count; i++) {
         char id[8];
 
         isapnp_eisa_id_to_string(logical->compat_ids[i], id);
-        strcpy(compat + used, id);
-        used += strlen(id) + 1;
+        if (total > used) {
+            strlcpy(compat + used, id, total - used);
+            used += strlen(compat + used) + 1;
+        }
     }
-    compat[used] = '\0';
+
+    if (total > used) {
+        compat[used] = '\0';
+    } else {
+        compat[total - 1] = '\0';
+    }
     dev->compatible = compat;
 }
 
