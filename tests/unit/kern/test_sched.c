@@ -4,11 +4,12 @@
 
 extern void timer_tick(void);
 extern uint32_t get_time(void);
+extern uint32_t get_hz(void);
 
 bool test_timer_tick_increments(void) {
     uint32_t initial_time = get_time();
-    // Simulate 100 ticks (1 second at 100Hz)
-    for (int i = 0; i < 100; i++) {
+    uint32_t hz = get_hz();
+    for (uint32_t i = 0; i < hz; i++) {
         timer_tick();
     }
     uint32_t new_time = get_time();

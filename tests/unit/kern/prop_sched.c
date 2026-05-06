@@ -21,11 +21,11 @@ bool prop_realtime_preempts_timeshare(void) {
     char s1[4096], s2[4096];
     thread_t *t_ts = sched_create_thread(current_process, (void*)0x1, s1+4096, NULL);
     thread_t *t_rt = sched_create_thread(current_process, (void*)0x2, s2+4096, NULL);
-    
+
     // RT with lower priority than TS
     sched_set_priority(t_ts->tid, SCHED_TIMESHARE, 100);
     sched_set_priority(t_rt->tid, SCHED_REALTIME, 10);
-    
+
     sched_yield();
     return (current_thread->tid == t_rt->tid);
 }
@@ -39,15 +39,14 @@ bool prop_sleep_wakeup_consistency(void) {
     void *chan1 = (void*)0x111;
     void *chan2 = (void*)0x222;
     
-    // Switch to t1 and sleep
-    sched_yield(); // should pick t1
+    // Switch to t1 and sleep; sched_sleep internally yields to the next thread
+    sched_yield(); // pick t1
     if (current_thread->tid != t1->tid) return false;
-    sched_sleep(chan1);
-    
-    // Switch to t2 and sleep
-    sched_yield(); // should pick t2
+    sched_sleep(chan1); // blocks t1, internally yields — lands on t2
+
+    // sched_sleep already switched to the next ready thread (t2)
     if (current_thread->tid != t2->tid) return false;
-    sched_sleep(chan2);
+    sched_sleep(chan2); // blocks t2, internally yields
     
     // Wakeup chan1
     sched_wakeup(chan1);

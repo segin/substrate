@@ -38,10 +38,10 @@ bool test_kmem_multiple_alloc(void) {
 }
 
 bool test_kmem_too_large(void) {
-    // We now expect 4KB to be the limit
-    void *ptr = kmalloc(8192); // Test even larger
+    /* Allocations over KMEM_MAX_ALLOC (128MB) must fail */
+    void *ptr = kmalloc((size_t)KMEM_MAX_ALLOC + 1);
     if (ptr != NULL) {
-        kfree(ptr, 8192);
+        kfree(ptr, (size_t)KMEM_MAX_ALLOC + 1);
         return false;
     }
     return true;

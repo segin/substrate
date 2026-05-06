@@ -362,7 +362,15 @@ void cmdline_get(char *buf, size_t buf_len) { buf[0] = '\0'; }
 void swapper_request_work(void) {}
 int pmap_page_is_referenced(struct vm_page *m) { (void)m; return 0; }
 void pmap_page_clear_reference(struct vm_page *m) { (void)m; }
-void *vm_phys_alloc_page(void) { return NULL; }
+static vm_page_t mock_vm_page_pool[8];
+static int mock_vm_page_pool_idx = 0;
+void *vm_phys_alloc_page(void) {
+    if (mock_vm_page_pool_idx >= 8) return NULL;
+    vm_page_t *p = &mock_vm_page_pool[mock_vm_page_pool_idx++];
+    memset(p, 0, sizeof(*p));
+    p->magic_head = p->magic_tail = VM_PAGE_MAGIC;
+    return p;
+}
 void vm_phys_free_page(void *p) { (void)p; }
 void cpuid_init(void) {}
 void *blkdev_get(void) { return NULL; }

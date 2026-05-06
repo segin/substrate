@@ -7,6 +7,7 @@
 #define KMEM_MIN_SHIFT 4
 #define KMEM_MAX_SHIFT 12
 #define KMEM_ZONES (KMEM_MAX_SHIFT - KMEM_MIN_SHIFT + 1)
+#define KMEM_MAX_ALLOC (128U * 1024U * 1024U)
 
 typedef struct kmem_bucket_stat {
     size_t bucket_size;

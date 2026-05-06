@@ -532,7 +532,7 @@ void vm_page_free(vm_page_t *m) {
 	m->wire_count = 0;
 	m->access_count = 0;
 	m->age = 0;
-	m->flags = 0; // Clear all flags
+	m->flags = PG_FREE;
 
 	// Return to generic PMM (Buddy Allocator Coalescing)
 	vm_phys_free_page(m);

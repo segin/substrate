@@ -36,8 +36,9 @@ bool test_vm_fault_protection_violation(void) {
     vm_object_t *obj = vm_object_allocate(VM_OBJ_TYPE_DEFAULT, 4096);
     if (vm_map_insert(&map, obj, 0, 0x1000, 0x2000, 0x3, 0x3, 1) != 0) return false;
     
-    // Set entry to Read Only (0x01)
+    // Set entry to Read Only with no write in max_protection either
     map.header->next->protection = 0x01;
+    map.header->next->max_protection = 0x01;
     
     // Try to trigger a write fault (0x02)
     int result = vm_fault(&map, 0x1500, 0x02);
