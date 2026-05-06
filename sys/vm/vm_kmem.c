@@ -8,6 +8,7 @@
 #include <vm/vm_kmem.h>
 #include <vm/uma.h>
 #include <arch/i386/pmm.h>
+#include <sys/lock.h>
 #include <stdint.h>
 #include <string.h>
 
@@ -28,6 +29,7 @@ typedef struct kmem_stats {
 } kmem_stats_t;
 
 static kmem_stats_t kmem_stats;
+static spinlock_t kmem_stats_lock = SPINLOCK_INIT("kmem_stats");
 
 /* Zone names */
 static const char *kmem_zone_names[] = {
@@ -89,48 +91,69 @@ typedef struct kmem_large_header {
 void *kmalloc(size_t size) {
     if (size == 0) return NULL;
     if (size > KMEM_MAX_ALLOC) return NULL;
-    
+
+    spinlock_acquire(&kmem_stats_lock);
     kmem_stats.allocs++;
     kmem_stats.bytes_allocated += size;
     kmem_stats.bytes_outstanding += size;
-    
+    spinlock_release(&kmem_stats_lock);
+
     /* Small allocation via UMA zone */
     int idx = kmem_zone_index(size);
     if (idx >= 0) {
         void *result = uma_zalloc(kmem_zones[idx], M_NOWAIT);
+        spinlock_acquire(&kmem_stats_lock);
         if (!result) {
-            kmem_stats.bytes_outstanding -= size;
-            extern void kprint(const char*);
-            kprint("kmalloc: uma_zalloc failed for zone ");
-            kprint(kmem_zone_names[idx]);
-            kprint("\n");
+            if (kmem_stats.bytes_outstanding >= size)
+                kmem_stats.bytes_outstanding -= size;
+            else
+                kmem_stats.bytes_outstanding = 0;
         } else {
             kmem_stats.buckets[idx].allocs++;
             kmem_stats.buckets[idx].bytes_requested += size;
             kmem_stats.buckets[idx].bytes_outstanding += size;
             kmem_stats.buckets[idx].objects_outstanding++;
         }
+        spinlock_release(&kmem_stats_lock);
+        if (!result) {
+            extern void kprint(const char*);
+            kprint("kmalloc: uma_zalloc failed for zone ");
+            kprint(kmem_zone_names[idx]);
+            kprint("\n");
+        }
         return result;
     }
-    
+
     /* Large allocation: bypass UMA, allocate pages directly */
     size_t total = size + sizeof(kmem_large_header_t);
     if (total < size) {
         /* Integer overflow */
-        kmem_stats.bytes_outstanding -= size;
+        spinlock_acquire(&kmem_stats_lock);
+        if (kmem_stats.bytes_outstanding >= size)
+            kmem_stats.bytes_outstanding -= size;
+        else
+            kmem_stats.bytes_outstanding = 0;
+        spinlock_release(&kmem_stats_lock);
         return NULL;
     }
     size_t pages = (total + 4095) / 4096;
-    
+
     void *mem = pmm_alloc_contiguous(pages);
     if (!mem) {
-        kmem_stats.bytes_outstanding -= size;
+        spinlock_acquire(&kmem_stats_lock);
+        if (kmem_stats.bytes_outstanding >= size)
+            kmem_stats.bytes_outstanding -= size;
+        else
+            kmem_stats.bytes_outstanding = 0;
+        spinlock_release(&kmem_stats_lock);
         return NULL;
     }
-    
+
+    spinlock_acquire(&kmem_stats_lock);
     kmem_stats.large_allocs++;
     kmem_stats.large_bytes_requested += size;
     kmem_stats.large_bytes_outstanding += size;
+    spinlock_release(&kmem_stats_lock);
     
     /* Store header */
     kmem_large_header_t *hdr = (kmem_large_header_t *)mem;
@@ -145,14 +168,15 @@ void *kmalloc(size_t size) {
  */
 void kfree(void *ptr, size_t size) {
     if (!ptr) return;
-    
+
+    spinlock_acquire(&kmem_stats_lock);
     kmem_stats.frees++;
     if (kmem_stats.bytes_outstanding >= size) {
         kmem_stats.bytes_outstanding -= size;
     } else {
         kmem_stats.bytes_outstanding = 0;
     }
-    
+
     /* Small allocation via UMA zone */
     int idx = kmem_zone_index(size);
     if (idx >= 0) {
@@ -165,30 +189,34 @@ void kfree(void *ptr, size_t size) {
         if (kmem_stats.buckets[idx].objects_outstanding > 0) {
             kmem_stats.buckets[idx].objects_outstanding--;
         }
+        spinlock_release(&kmem_stats_lock);
         uma_zfree(kmem_zones[idx], ptr);
         return;
     }
-    
+    spinlock_release(&kmem_stats_lock);
+
     /* Large allocation: check header and free pages */
     kmem_large_header_t *hdr = (kmem_large_header_t *)ptr - 1;
-    
+
     if (hdr->magic != KMEM_LARGE_MAGIC) {
         /* Corrupted or invalid pointer */
         return;
     }
-    
+
     size_t total = hdr->size + sizeof(kmem_large_header_t);
     size_t pages = (total + 4095) / 4096;
-    
+
     /* Free pages */
     pmm_free_contiguous(hdr, pages);
-    
+
+    spinlock_acquire(&kmem_stats_lock);
     kmem_stats.large_frees++;
     if (kmem_stats.large_bytes_outstanding >= hdr->size) {
         kmem_stats.large_bytes_outstanding -= hdr->size;
     } else {
         kmem_stats.large_bytes_outstanding = 0;
     }
+    spinlock_release(&kmem_stats_lock);
 }
 
 /*
@@ -232,6 +260,11 @@ void *krealloc(void *ptr, size_t size) {
         }
     }
     if (old_size == 0) {
+        /* Pointer was not produced by kmalloc/kzalloc — original allocation
+         * is leaked, and the caller will treat the NULL return as ENOMEM
+         * rather than a misuse.  Make the bug loud. */
+        extern void kprint(const char *);
+        kprint("krealloc: unknown pointer (neither UMA zone nor large alloc) — leak!\n");
         return NULL;
     }
 
@@ -253,9 +286,11 @@ void *krealloc(void *ptr, size_t size) {
  * Get allocator statistics
  */
 void kmem_get_stats(uint64_t *allocs, uint64_t *frees, uint64_t *bytes) {
+    spinlock_acquire(&kmem_stats_lock);
     if (allocs) *allocs = kmem_stats.allocs;
     if (frees) *frees = kmem_stats.frees;
     if (bytes) *bytes = kmem_stats.bytes_allocated;
+    spinlock_release(&kmem_stats_lock);
 }
 
 void kmem_get_snapshot(kmem_stat_snapshot_t *snapshot) {
@@ -263,6 +298,7 @@ void kmem_get_snapshot(kmem_stat_snapshot_t *snapshot) {
         return;
     }
 
+    spinlock_acquire(&kmem_stats_lock);
     memset(snapshot, 0, sizeof(*snapshot));
     snapshot->total_allocs = kmem_stats.allocs;
     snapshot->total_frees = kmem_stats.frees;
@@ -273,4 +309,5 @@ void kmem_get_snapshot(kmem_stat_snapshot_t *snapshot) {
     snapshot->large_bytes_requested = kmem_stats.large_bytes_requested;
     snapshot->large_bytes_outstanding = kmem_stats.large_bytes_outstanding;
     memcpy(snapshot->buckets, kmem_stats.buckets, sizeof(snapshot->buckets));
+    spinlock_release(&kmem_stats_lock);
 }

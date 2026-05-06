@@ -307,6 +307,13 @@ int truncate_fs(fs_node_t *node, off_t length) {
 ssize_t sys_write(int fd, const char *buf, size_t len) {
     if (len == 0) return 0;
 
+    /* Reject buffers that wrap the address space — `buf + total_written`
+     * later in the loop would underflow into the kernel direct-map. */
+    uintptr_t buf_end;
+    if (__builtin_add_overflow((uintptr_t)buf, len, &buf_end)) {
+        return -14; // EFAULT
+    }
+
     void *kbuf = kmalloc(IO_CHUNK_SIZE);
     if (!kbuf) return -12; // ENOMEM
 
@@ -361,6 +368,12 @@ ssize_t sys_read(int fd, char *buf, size_t len) {
     if (len == 0) return 0;
     if (!current_process) return -1;
     if (fd < 0 || fd >= MAX_FD) return -1;
+
+    /* Bounds-check `buf + total_read` against pointer wrap. */
+    uintptr_t buf_end;
+    if (__builtin_add_overflow((uintptr_t)buf, len, &buf_end)) {
+        return -14; // EFAULT
+    }
 
     file_t *f = current_process->fds[fd];
     if (!f || !f->f_data) return -1;

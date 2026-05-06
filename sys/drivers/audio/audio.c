@@ -11,6 +11,7 @@
 #include <sys/audioio.h>
 #include <sys/copy.h>
 #include <sys/errno.h>
+#include <sys/lock.h>
 #include <kern/console.h>
 #include <vfs/vfs.h>
 #include <stdio.h>
@@ -19,6 +20,7 @@
 extern void devfs_register_device(fs_node_t *node);
 
 static audio_dev_t *audio_devices_head;
+static spinlock_t audio_dev_lock = SPINLOCK_INIT("audio_dev");
 
 /*
  * One pair of fs_node_t per registered audio_dev_t (audio + audioctl).
@@ -414,12 +416,16 @@ static int audio_node_ioctl(fs_node_t *node, uint32_t request, void *arg)
 static void audio_node_open(fs_node_t *node)
 {
 	audio_dev_t *dev = audio_dev_for_node(node);
+	int first_open = 0;
 
 	if (dev == NULL) {
 		return;
 	}
+	spinlock_acquire(&audio_dev_lock);
 	dev->open_refs++;
-	if (dev->ops != NULL && dev->ops->open != NULL && dev->open_refs == 1) {
+	first_open = (dev->open_refs == 1);
+	spinlock_release(&audio_dev_lock);
+	if (first_open && dev->ops != NULL && dev->ops->open != NULL) {
 		(void)dev->ops->open(dev, dev->current.mode);
 	}
 }
@@ -427,12 +433,20 @@ static void audio_node_open(fs_node_t *node)
 static void audio_node_close(fs_node_t *node)
 {
 	audio_dev_t *dev = audio_dev_for_node(node);
+	int last_close = 0;
 
-	if (dev == NULL || dev->open_refs == 0) {
+	if (dev == NULL) {
+		return;
+	}
+	spinlock_acquire(&audio_dev_lock);
+	if (dev->open_refs == 0) {
+		spinlock_release(&audio_dev_lock);
 		return;
 	}
 	dev->open_refs--;
-	if (dev->open_refs == 0 && dev->ops != NULL && dev->ops->close != NULL) {
+	last_close = (dev->open_refs == 0);
+	spinlock_release(&audio_dev_lock);
+	if (last_close && dev->ops != NULL && dev->ops->close != NULL) {
 		(void)dev->ops->close(dev);
 	}
 }

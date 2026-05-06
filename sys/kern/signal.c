@@ -325,7 +325,7 @@ int kern_sigwait(const uint32_t *set, int *sig) {
             for (int i = 0; i < NSIG; i++) {
                 if (deliverable & (1 << i)) {
                     int signal = i + 1;
-                    current_thread->sig_pending &= ~sigmask(signal);
+                    __sync_fetch_and_and(&current_thread->sig_pending, ~sigmask(signal));
                     *sig = signal;
                     current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
                     return 0;
@@ -440,9 +440,9 @@ int kern_sigtimedwait(const uint32_t *set, siginfo_t *info,
     }
     
     if (signal == 0) return -22; // Should not happen
-    
+
     // Remove from pending (consume it)
-    current_thread->sig_pending &= ~sigmask(signal);
+    __sync_fetch_and_and(&current_thread->sig_pending, ~sigmask(signal));
     
     // Fill siginfo if provided
     if (info) {
@@ -491,12 +491,12 @@ void psignal(process_t *p, int sig) {
     /* Handle SIGCONT: Resume stopped process and clear pending stop signals */
     if (sig == SIGCONT) {
         uint32_t stop_mask = sigmask(SIGSTOP) | sigmask(SIGTSTP) | sigmask(SIGTTIN) | sigmask(SIGTTOU);
-        
-        // Clear pending stop signals on all threads
+
+        // Clear pending stop signals on all threads (atomic — racing psignal on SMP)
         for (size_t i = 0; i < sched_thread_slot_count(); i++) {
             thread_t *thread = sched_thread_slot(i);
             if (thread && thread->tid != -1 && thread->proc == p) {
-                thread->sig_pending &= ~stop_mask;
+                __sync_fetch_and_and(&thread->sig_pending, ~stop_mask);
             }
         }
 
@@ -520,7 +520,7 @@ void psignal(process_t *p, int sig) {
         for (size_t i = 0; i < sched_thread_slot_count(); i++) {
             thread_t *thread = sched_thread_slot(i);
             if (thread && thread->tid != -1 && thread->proc == p) {
-                thread->sig_pending &= ~sigmask(SIGCONT);
+                __sync_fetch_and_and(&thread->sig_pending, ~sigmask(SIGCONT));
             }
         }
     }
@@ -540,8 +540,11 @@ void psignal(process_t *p, int sig) {
             t->state = THREAD_READY;
         }
         
-        /* Set pending bit on ALL threads (signal is process-directed) */
-        t->sig_pending |= sig_mask;
+        /* Set pending bit on ALL threads (signal is process-directed).
+         * Atomic OR since another CPU may concurrently psignal the same
+         * thread, or the thread itself may be clearing bits during signal
+         * delivery. */
+        __sync_fetch_and_or(&t->sig_pending, sig_mask);
         
         /* Select best thread for immediate delivery:
          * Priority order:
@@ -625,8 +628,9 @@ void trapsignal(process_t *p, int sig, int code) {
         current_thread->trap_code = code;
         current_thread->trap_addr = 0;
         
-        /* Set signal pending on this specific thread */
-        current_thread->sig_pending |= sigmask(sig);
+        /* Set signal pending on this specific thread (atomic — psignal
+         * may also be modifying sig_pending from another CPU) */
+        __sync_fetch_and_or(&current_thread->sig_pending, sigmask(sig));
         
         /* For synchronous signals, we don't need to wake - the signal
          * will be handled when returning from the exception handler.
@@ -811,8 +815,8 @@ void signal_handle_pending(registers_t *regs) {
 
     if (sig == 0) return;
 
-    // Clear pending bit
-    current_thread->sig_pending &= ~sigmask(sig);
+    // Clear pending bit (atomic — concurrent psignal may set bits)
+    __sync_fetch_and_and(&current_thread->sig_pending, ~sigmask(sig));
 
     // Special Handling: SIGKILL always terminates immediately
     if (sig == SIGKILL) {

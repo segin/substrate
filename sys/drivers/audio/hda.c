@@ -23,6 +23,7 @@
 #include <sys/dma.h>
 #include <sys/errno.h>
 #include <sys/irq.h>
+#include <sys/lock.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -166,6 +167,12 @@ typedef struct hda_dev {
 
 	int              running;       /* SDCTL.RUN has been set; don't
 	                                 * re-write CTL on every queue */
+
+	/* Serialises hda_write() against itself.  The IRQ handler still
+	 * touches `slots_played` lockless via __atomic_*; everything else
+	 * (next_idx, writes_queued, BDL build, MMIO sequence, running)
+	 * runs under this lock. */
+	spinlock_t       write_lock;
 
 	audio_dev_t      audio;
 } hda_dev_t;
@@ -383,7 +390,13 @@ static int hda_output_stream_init(hda_dev_t *d)
 	d->stream_tag = 1;   /* tag 0 is reserved per spec */
 	d->next_idx = 0;
 
-	/* Reset stream descriptor 0 (output stream 0). */
+	/* Reset stream descriptor 0 (output stream 0).  Per HDA spec
+	 * §3.3.35, software must wait for SRST to read back as 1
+	 * (controller acknowledged the request), then clear SRST and
+	 * wait for it to read back as 0 (reset complete).  The
+	 * controller is required to honor a 100 µs link-reset window;
+	 * the second readback poll inherently waits for that since
+	 * each MMIO read costs hundreds of nanoseconds. */
 	hda_write32(d, HDA_SD_BASE + HDA_SD_CTL, HDA_SDCTL_SRST);
 	{
 		int budget;
@@ -395,6 +408,15 @@ static int hda_output_stream_init(hda_dev_t *d)
 		}
 	}
 	hda_write32(d, HDA_SD_BASE + HDA_SD_CTL, 0);
+	{
+		int budget;
+		for (budget = 0; budget < 1000; budget++) {
+			if ((hda_read32(d, HDA_SD_BASE + HDA_SD_CTL) &
+			     HDA_SDCTL_SRST) == 0) {
+				break;
+			}
+		}
+	}
 
 	hda_write32(d, HDA_SD_BASE + HDA_SD_BDPL, (uint32_t)d->bdl_phys);
 	hda_write32(d, HDA_SD_BASE + HDA_SD_BDPU, 0);
@@ -451,30 +473,52 @@ static int hda_set_params(audio_dev_t *adev, audio_info_t *info)
 	return 0;
 }
 
+/* Bounded spin budget while waiting for the IRQ handler to drain a
+ * slot.  Each iteration is one PAUSE — on a 1 GHz core that's ~5–10 ns,
+ * so the cap below resolves to roughly tens of milliseconds in the
+ * worst case.  If we exceed it the IRQ is wedged (IOCE not enabled,
+ * shared IRQ, controller hung) and we return -EIO instead of hanging
+ * the kernel. */
+#define HDA_WRITE_BACKPRESSURE_BUDGET  10000000U
+
 static int hda_write(audio_dev_t *adev, const void *buf, size_t len)
 {
 	hda_dev_t *d = adev->driver_data;
 	size_t copy_len;
 	uint8_t slot;
 	uint32_t ctl;
+	uint32_t spin_iters;
 
 	if (len == 0 || d->chunk_buf == NULL) {
 		return (int)len;
 	}
 	copy_len = (len > HDA_CHUNK_BYTES) ? HDA_CHUNK_BYTES : len;
 
+	spinlock_acquire(&d->write_lock);
+
 	/*
 	 * Back-pressure: cap in-flight slots at BDL_ENTRIES-1 so the
 	 * controller always has at least one new slot to prefetch.
 	 * IRQ handler bumps slots_played on each BCIS; we bump
 	 * writes_queued after committing this slot.
+	 *
+	 * Bounded loop: if we never see slots_played advance the IRQ
+	 * is wedged and we surface that as -EIO rather than hanging
+	 * the kernel in a hard spin.
 	 */
+	spin_iters = 0;
 	for (;;) {
 		uint32_t played = __atomic_load_n(&d->slots_played,
 		                                  __ATOMIC_ACQUIRE);
-		uint32_t in_flight = d->writes_queued - played;
+		uint32_t queued = __atomic_load_n(&d->writes_queued,
+		                                  __ATOMIC_ACQUIRE);
+		uint32_t in_flight = queued - played;
 		if (in_flight < (HDA_BDL_ENTRIES - 1)) {
 			break;
+		}
+		if (++spin_iters > HDA_WRITE_BACKPRESSURE_BUDGET) {
+			spinlock_release(&d->write_lock);
+			return -EIO;
 		}
 		__asm__ volatile("pause");
 	}
@@ -519,8 +563,9 @@ static int hda_write(audio_dev_t *adev, const void *buf, size_t len)
 		d->running = 1;
 	}
 
-	d->writes_queued++;
+	__atomic_add_fetch(&d->writes_queued, 1, __ATOMIC_RELEASE);
 	d->next_idx = (uint8_t)((slot + 1U) % HDA_BDL_ENTRIES);
+	spinlock_release(&d->write_lock);
 	return (int)copy_len;
 }
 
@@ -533,8 +578,10 @@ static int hda_drain(audio_dev_t *adev)
 static int hda_flush(audio_dev_t *adev)
 {
 	hda_dev_t *d = adev->driver_data;
+	spinlock_acquire(&d->write_lock);
 	hda_write32(d, HDA_SD_BASE + HDA_SD_CTL, HDA_SDCTL_SRST);
 	d->next_idx = 0;
+	spinlock_release(&d->write_lock);
 	return 0;
 }
 
@@ -585,6 +632,7 @@ static int hda_attach(pci_device_t *pdev)
 	}
 	d = &hda_devices[hda_device_count];
 	memset(d, 0, sizeof(*d));
+	spinlock_init(&d->write_lock, "hda_write");
 	d->pdev = pdev;
 
 	cmd = pci_read_config16(pdev->bus, pdev->slot, pdev->func,

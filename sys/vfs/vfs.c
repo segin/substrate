@@ -4,6 +4,7 @@
 #include <sys/mount.h>
 #include <sys/namei.h>
 #include <sys/proc.h>
+#include <sys/lock.h>
 #include <pm/pm.h>
 
 #include <string.h>
@@ -31,8 +32,19 @@
 #include <vm/vm_kmem.h>
 
 struct mountlist mountlist;
-fs_node_t *fs_root = 0; 
+fs_node_t *fs_root = 0;
 struct vnode *rootvnode = NULL;
+
+/*
+ * vfs_mount_lock guards the (FS_MOUNTPOINT flag, node->ptr) tuple on
+ * any node that participates in the mount graph, plus mountlist.
+ *
+ * Acquired both by mount-point traversal (vfs_cross_mountpoint and
+ * inline lookups in vfs_lookup) and by mount/umount mutators.  The
+ * critical sections are tiny: read two fields, or update two fields
+ * and the list — no sleeping operations, no recursion.
+ */
+static spinlock_t vfs_mount_lock = SPINLOCK_INIT("vfs_mount");
 
 static filesystem_t *filesystems = NULL;
 
@@ -41,10 +53,11 @@ static char *vfs_strrchr(const char *s, int c);
 static fs_node_t *vfs_cross_mountpoint(fs_node_t *node) {
     if (!node) return NULL;
 
-    if ((node->flags & FS_MOUNTPOINT) && node->ptr) {
-        return node->ptr;
-    }
-    return node;
+    spinlock_acquire(&vfs_mount_lock);
+    fs_node_t *target = ((node->flags & FS_MOUNTPOINT) && node->ptr)
+                            ? node->ptr : node;
+    spinlock_release(&vfs_mount_lock);
+    return target;
 }
 
 void vfs_init(void) {
@@ -176,9 +189,12 @@ int vfs_mount_legacy(const char *device, const char *path, const char *type, uin
              return -1;
         }
         
-        // Attach
-        mountpoint->flags |= FS_MOUNTPOINT;
+        // Attach (locked — concurrent traversals must see both fields
+        // updated together).
+        spinlock_acquire(&vfs_mount_lock);
         mountpoint->ptr = root;
+        mountpoint->flags |= FS_MOUNTPOINT;
+        spinlock_release(&vfs_mount_lock);
     }
     
     // Register in generic mount list
@@ -321,15 +337,13 @@ fs_node_t *finddir_fs(fs_node_t *node, char *name) {
 
 static fs_node_t *finddir_fs_internal(fs_node_t *node, char *name, int depth, int follow_symlinks) {
     if (!node) return 0; // Safety
-    
+
     // If this is a mountpoint, cross into the mounted filesystem
-    if ((node->flags & FS_MOUNTPOINT) && node->ptr) {
-        node = node->ptr;
-    }
+    node = vfs_cross_mountpoint(node);
 
     if ((node->flags & 0x7) == FS_DIRECTORY && node->finddir != 0) {
         fs_node_t *result = node->finddir(node, name);
-        
+
         if (result && !result->mp) {
             result->mp = node->mp;
         }
@@ -338,9 +352,7 @@ static fs_node_t *finddir_fs_internal(fs_node_t *node, char *name, int depth, in
          * Mountpoint crossing for terminal lookups:
          * path "/dev" should resolve to devfs root, not the covered directory.
          */
-        if (result && (result->flags & FS_MOUNTPOINT) && result->ptr) {
-            result = result->ptr;
-        }
+        result = vfs_cross_mountpoint(result);
 
         // Resolve symlinks (with depth limit)
         if (result && (result->flags & 0x7) == FS_SYMLINK && result->readlink) {
@@ -974,9 +986,13 @@ int vfs_unmount_legacy(const char *path) {
         }
     }
 
-    // Detach
-    mountpoint->ptr = NULL;
+    // Detach (locked so concurrent vfs_cross_mountpoint either sees
+    // a fully attached mount or a fully detached node — never the
+    // FS_MOUNTPOINT flag with ptr cleared, which would race-deref NULL).
+    spinlock_acquire(&vfs_mount_lock);
     mountpoint->flags &= ~FS_MOUNTPOINT;
+    mountpoint->ptr = NULL;
+    spinlock_release(&vfs_mount_lock);
     
     // Cleanup fs instance
     if (root && root->unmount) {
