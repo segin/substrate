@@ -33,6 +33,13 @@ void psignal(process_t *proc, int sig) {
     last_signal_mask |= sigmask(sig);
 }
 
+process_t *proc_find(int pid) {
+    for (int i = 0; i < MAX_PROCS; i++) {
+        if (processes[i].pid == pid) return &processes[i];
+    }
+    return NULL;
+}
+
 #include "../../sys/pm/pgrp.c"
 
 static void reset_env(void) {

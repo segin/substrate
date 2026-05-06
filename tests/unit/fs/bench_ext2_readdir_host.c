@@ -173,9 +173,6 @@ void run_ext2_readdir_bench(void) {
     fs.active_inode_bg_bitmap = calloc(1, 1024);
     fs.active_inode_bg_group = (uint32_t)-1;
 
-    // Initialize allocator cache
-    ext2_block_cache = uma_zcreate("ext2-block", 4096, NULL, NULL, NULL, NULL, 0, 0);
-
     // Create a directory inode
     uint32_t dir_inode = ext2_alloc_inode(&fs, 1);
     ext2_inode_t inode_struct;

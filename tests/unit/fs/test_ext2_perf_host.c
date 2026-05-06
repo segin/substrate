@@ -151,12 +151,9 @@ void run_ext2_perf_test_host(void) {
     bgd_table[0] = *bgd_disk;
     fs.bgd = bgd_table;
 
-    // Initialize allocator cache (fix for missing init in host test)
-    ext2_block_cache = uma_zcreate("ext2-block", 4096, NULL, NULL, NULL, NULL, 0, 0);
-
     // Initialize active block bitmap cache
     fs.active_bg_group = (uint32_t)-1;
-    fs.active_bg_bitmap = uma_zalloc(ext2_block_cache, M_WAITOK);
+    fs.active_bg_bitmap = malloc(fs.block_size);
 
     // --- Benchmark Loop ---
     uint64_t start_tsc, end_tsc;

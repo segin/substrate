@@ -118,9 +118,8 @@ static void init_test_fs(ext2_fs_t *fs, fs_node_t *dev_node, ext2_group_desc_t *
     fs->inode_size = sizeof(ext2_inode_t);
     fs->bgd = bgd_table;
 
-    ext2_block_cache = uma_zcreate("ext2-block", 4096, NULL, NULL, NULL, NULL, 0, 0);
     fs->active_bg_group = (uint32_t)-1;
-    fs->active_bg_bitmap = uma_zalloc(ext2_block_cache, M_WAITOK);
+    fs->active_bg_bitmap = malloc(fs->block_size);
 }
 
 static void run_test_ext2_inode_write(void) {

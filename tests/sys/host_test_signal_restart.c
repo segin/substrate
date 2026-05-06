@@ -62,6 +62,19 @@ void sendsig(sig_t handler, int sig, uint32_t mask, uint32_t flags, registers_t 
     last_regs = regs;
 }
 
+int kprintf(const char *fmt, ...) { (void)fmt; return 0; }
+thread_t *sched_thread_slot(size_t i) { return (i < MAX_THREADS) ? &threads[i] : NULL; }
+size_t sched_thread_slot_count(void) { return MAX_THREADS; }
+process_t *proc_find(int pid) {
+    for (int i = 0; i < MAX_PROCS; i++)
+        if (processes[i].pid == pid) return &processes[i];
+    return NULL;
+}
+process_t *proc_slot(size_t i) { return (i < MAX_PROCS) ? &processes[i] : NULL; }
+size_t proc_slot_count(void) { return MAX_PROCS; }
+void core_prepare_dump(process_t *p, int sig) { (void)p; (void)sig; }
+void core_capture_trapframe(process_t *p, const registers_t *r) { (void)p; (void)r; }
+
 #include "../../sys/kern/signal.c"
 
 static void reset_env(void) {

@@ -20,7 +20,7 @@
 #define ATEXIT_MAX 32
 static void (*__atexit_funcs[ATEXIT_MAX])(void);
 static int __atexit_count = 0;
-static atomic_int __atexit_lock = ATOMIC_VAR_INIT(0);
+static atomic_int __atexit_lock = 0;
 
 static void
 __atexit_lock_acquire(void)

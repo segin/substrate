@@ -125,6 +125,8 @@ struct vm_map *vm_map_fork(struct vm_map *src, pmap_t pmap) {
     return NULL;
 }
 
+void random_reseed_on_fork(int child_pid) { (void)child_pid; }
+
 #include "../../sys/pm/process.c"
 
 static void reset_env(void) {

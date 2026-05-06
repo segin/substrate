@@ -7,6 +7,11 @@
 process_t *current_process;
 thread_t *current_thread;
 
+int copyout(const void *src, void *dst, size_t len) {
+    memcpy(dst, src, len);
+    return 0;
+}
+
 #include "../../sys/pm/rusage.c"
 
 static void test_rusage_fields_finalize_correctly(void) {

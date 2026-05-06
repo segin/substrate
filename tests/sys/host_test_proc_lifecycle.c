@@ -127,6 +127,8 @@ void sched_reap_process_threads(process_t *proc) {
     }
 }
 
+void random_reseed_on_fork(int child_pid) { (void)child_pid; }
+
 #include "../../sys/kern/sleepq.c"
 #include "../../sys/pm/process.c"
 #include "../../sys/pm/wait.c"

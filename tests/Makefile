@@ -38,8 +38,7 @@ UNIT_OBJS = $(notdir $(UNIT_SRCS:.c=.o))
 
 MOCKS_OBJ = mocks.o
 
-all: test_runner test_getuid test_minix test_ext2_perf test_ext2_read_blocks test_ext2_find_next_zero_bit test_ext2_inode_write test_libc_string test_libc_errno test_libc_libgen test_libc_time test_libc_stdlib test_libc_ctype test_libc_assert test_libc_sysctl test_ext2_remove_perf bench_ext2_readdir test_ext2_write_block test_ext2_vfs_ops test_ext2_rename test_libpthread_mutex test_pthread_join test_readline test_history test_bc test_libedit host_test_wait_logic host_test_pgrp host_test_proc_tree host_test_proc_exit host_test_tty_jobctl host_test_sync_guards host_test_sleepq_private host_test_swapper host_test_rusage host_test_proc_lifecycle host_test_i386_signal host_test_linux_signal host_test_signal_restart host_test_signal_integration host_test_proc_signal_state host_test_rwlock host_test_mutex host_test_fork_exec_wait host_test_bio host_test_usb_msc_cbw host_test_lockmgr host_test_isapnp host_test_isa host_test_uart test_getpagesize test_libc_stdio test_libc_printf test_libc_scanf test_libc_prop_stdio test_libc_fuzz_printf test_libc_fuzz_scanf test_bm test_boot_lib
-	./test_boot_lib
+all: test_runner test_getuid test_minix test_ext2_perf test_ext2_read_blocks test_ext2_find_next_zero_bit test_ext2_inode_write test_libc_string test_libc_errno test_libc_libgen test_libc_time test_libc_stdlib test_libc_ctype test_libc_assert test_libc_sysctl test_ext2_remove_perf bench_ext2_readdir test_ext2_write_block test_ext2_vfs_ops test_ext2_rename test_libpthread_mutex test_pthread_join test_readline test_history test_bc test_libedit host_test_wait_logic host_test_pgrp host_test_proc_tree host_test_proc_exit host_test_tty_jobctl host_test_sync_guards host_test_sleepq_private host_test_swapper host_test_rusage host_test_proc_lifecycle host_test_i386_signal host_test_linux_signal host_test_signal_restart host_test_signal_integration host_test_proc_signal_state host_test_rwlock host_test_fork_exec_wait host_test_bio host_test_usb_msc_cbw host_test_lockmgr host_test_isapnp host_test_isa host_test_uart test_getpagesize test_libc_stdio test_libc_printf test_libc_scanf test_libc_prop_stdio test_libc_fuzz_printf test_libc_fuzz_scanf
 	./test_runner
 	./test_minix
 	./test_ext2_find_next_zero_bit
@@ -60,7 +59,6 @@ all: test_runner test_getuid test_minix test_ext2_perf test_ext2_read_blocks tes
 	./test_libc_prop_stdio
 	./test_libc_fuzz_printf
 	./test_libc_fuzz_scanf
-	./test_bm
 	./test_ext2_remove_perf
 	./bench_ext2_readdir
 	./test_ext2_write_block
@@ -111,11 +109,19 @@ test_getuid: lib/sys/test_getuid.c
 test_getrusage: lib/sys/test_getrusage.c
 	$(CC) $(CFLAGS_COMMON) -D__i386__ -I../sys -I../sys/arch/i386 -I../include $^ -o $@
 
-test_readline: lib/edit/test_readline.c ../lib/edit/readline.c
-	$(CC) $(CFLAGS_COMMON) -I../lib/edit $< -o $@
+EDIT_SRCS_NO_RL = ../lib/edit/editline.c ../lib/edit/terminal.c \
+                  ../lib/edit/history.c ../lib/edit/signal.c ../lib/edit/keymap.c \
+                  ../lib/edit/tokenizer.c ../lib/edit/rl_compat.c ../lib/edit/utf8.c
 
-test_libedit: lib/edit/test_editline.c ../lib/edit/editline.c
-	$(CC) $(CFLAGS_COMMON) -I../include -I../lib/edit $< ../lib/edit/editline.c -o $@
+test_readline: lib/edit/test_readline.c $(EDIT_SRCS_NO_RL)
+	$(CC) $(CFLAGS_COMMON) -Ilib/edit -I../sys -I../lib/edit $< $(EDIT_SRCS_NO_RL) -Wl,--allow-multiple-definition -o $@
+
+EDIT_SRCS = ../lib/edit/editline.c ../lib/edit/readline.c ../lib/edit/terminal.c \
+            ../lib/edit/history.c ../lib/edit/signal.c ../lib/edit/keymap.c \
+            ../lib/edit/tokenizer.c ../lib/edit/rl_compat.c ../lib/edit/utf8.c
+
+test_libedit: lib/edit/test_editline.c $(EDIT_SRCS)
+	$(CC) $(CFLAGS_COMMON) -Ilib/edit -I../sys -I../lib/edit $< $(EDIT_SRCS) -o $@
 
 host_test_bm2: sys/host_test_bm2.c
 	$(CC) $(CFLAGS_COMMON) $< -o $@
@@ -194,7 +200,7 @@ host_test_fork_exec_wait: sys/host_test_fork_exec_wait.c
 test_pthread_join: lib/test_pthread_join.c ../lib/pthreads/pthread.c
 	$(CC) $(CFLAGS_COMMON) -Wno-int-conversion -Wno-pointer-to-int-cast -I../include -I../sys/include -I../sys $< -o $@
 
-test_libpthread_mutex: lib/test_libpthread_mutex.c ../lib/pthreads/pthread.c
+test_libpthread_mutex: lib/test_pthread_mutex.c ../lib/pthreads/pthread.c
 	$(CC) $(CFLAGS_COMMON) -I../include -I../sys/include -I../sys $< -o $@
 
 test_history:
@@ -382,7 +388,7 @@ mocks_vm.o: mocks_vm.c
 	$(CC) $(CFLAGS_KERN) -c $< -o $@
 
 test_bc: bin/bc/host_test_bc.c ../bin/bc/bc.c ../usr.lib/bc/num.c ../usr.lib/bc/arith.c
-	$(CC) $(CFLAGS_COMMON) $< ../usr.lib/bc/num.c ../usr.lib/bc/arith.c -o $@
+	$(CC) $(CFLAGS_COMMON) -I../usr.lib/bc $< ../usr.lib/bc/num.c ../usr.lib/bc/arith.c -o $@
 
 test_arith: usr.lib/bc/test_arith.c ../usr.lib/bc/num.c ../usr.lib/bc/arith.c
 	$(CC) $(CFLAGS_COMMON) -I../usr.lib/bc $< ../usr.lib/bc/num.c ../usr.lib/bc/arith.c -o $@
@@ -394,4 +400,4 @@ test_bm: test_bm.c
 	$(CC) $(CFLAGS_COMMON) $< -o $@
 
 test_boot_lib: contrib/ext2-boot/test_lib.c
-	$(CC) $(CFLAGS_COMMON) -I../contrib/ext2-boot/stage2 $< -o $@
+	$(CC) $(CFLAGS_COMMON) -Wno-int-conversion -I../contrib/ext2-boot/stage2 $< -o $@

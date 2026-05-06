@@ -219,7 +219,7 @@ void run_ext2_remove_perf_test(void) {
     for (int i = 0; i < num_entries; i++) {
         sprintf(name, "file_%d", i);
         // We use dummy inode numbers (e.g., 10 + i)
-        if (ext2_add_entry(dir, name, 10 + i) != 0) {
+        if (ext2_add_entry(dir, name, 10 + i, EXT2_FT_REG_FILE) != 0) {
             printf("Failed to add entry %d\n", i);
             break;
         }

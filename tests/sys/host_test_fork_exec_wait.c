@@ -267,6 +267,8 @@ int elks_load(int fd, const char *path, char *const argv[], char *const envp[]) 
 void elks_init_handler(void) {}
 void script_init_handler(void) {}
 
+void random_reseed_on_fork(int child_pid) { (void)child_pid; }
+
 #include "../../sys/kern/sleepq.c"
 #include "../../sys/pm/process.c"
 #include "../../sys/pm/wait.c"

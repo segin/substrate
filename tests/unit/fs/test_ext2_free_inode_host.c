@@ -147,16 +147,13 @@ void run_ext2_free_inode_test(void) {
     bgd_table[0] = *bgd_disk;
     fs.bgd = bgd_table;
 
-    // Initialize allocator cache
-    ext2_block_cache = uma_zcreate("ext2-block", 4096, NULL, NULL, NULL, NULL, 0, 0);
-
     // Initialize active block bitmap cache
     fs.active_bg_group = (uint32_t)-1;
-    fs.active_bg_bitmap = uma_zalloc(ext2_block_cache, M_WAITOK);
+    fs.active_bg_bitmap = malloc(fs.block_size);
 
     // Initialize active inode bitmap cache
     fs.active_inode_bg_group = (uint32_t)-1;
-    fs.active_inode_bg_bitmap = uma_zalloc(ext2_block_cache, M_WAITOK);
+    fs.active_inode_bg_bitmap = malloc(fs.block_size);
 
 
     uint32_t initial_free = fs.bgd[0].bg_free_inodes_count;

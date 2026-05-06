@@ -19,6 +19,7 @@ process_t processes[MAX_PROCS];
 thread_t threads[MAX_THREADS];
 thread_t *current_thread;
 process_t *current_process;
+process_t *kernel_process;
 
 static thread_t *idle_balance_target;
 static int vm_pageout_calls;
@@ -70,6 +71,7 @@ static void test_swapper_prefers_live_pid0_process(void) {
     reset_env();
     processes[0].pid = 0;
     strcpy(processes[0].comm, "swapper");
+    kernel_process = &processes[0];
     assert(swapper_get_proc() == &processes[0]);
 }
 

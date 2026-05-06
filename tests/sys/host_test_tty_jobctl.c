@@ -75,6 +75,8 @@ void psignal(process_t *proc, int sig) {
     last_psignal_sig = sig;
 }
 
+uint64_t get_ticks(void) { return 0; }
+
 #include "../../sys/drivers/console/tty.c"
 
 static void reset_env(void) {
