@@ -570,6 +570,20 @@ void run_strncasecmp_tests(void) {
     ASSERT_TRUE(libc_strncasecmp("a", "", 1) > 0, "a > empty string");
     ASSERT_TRUE(libc_strncasecmp("", "a", 1) < 0, "empty string < a");
 
+    // Cross-case differ
+    ASSERT_TRUE(libc_strncasecmp("HELLA", "hello", 5) < 0, "HELLA < hello cross case");
+    ASSERT_TRUE(libc_strncasecmp("hello", "HELLA", 5) > 0, "hello > HELLA cross case");
+
+    // Prefix scenarios
+    ASSERT_TRUE(libc_strncasecmp("hell", "hello", 5) < 0, "Prefix shorter up to n=5");
+    ASSERT_TRUE(libc_strncasecmp("hello", "hell", 5) > 0, "Prefix longer up to n=5");
+    ASSERT_EQ(libc_strncasecmp("hell", "hello", 4), 0, "Prefix shorter up to n=4");
+    ASSERT_EQ(libc_strncasecmp("hello", "hell", 4), 0, "Prefix longer up to n=4");
+
+    // Non-alphabetic characters
+    ASSERT_EQ(libc_strncasecmp("1234!", "1234!", 5), 0, "Non-alphabetic equal");
+    ASSERT_TRUE(libc_strncasecmp("1234!", "1234@", 5) < 0, "'!' < '@'");
+
     // Sign verification with large values (ensure unsigned char comparison)
     unsigned char c1[] = {0xff, '\0'};
     unsigned char c2[] = {0x7f, '\0'};
