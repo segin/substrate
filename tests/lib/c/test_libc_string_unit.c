@@ -808,6 +808,9 @@ void run_strncmp_tests(void) {
 
     // n=0
     ASSERT_EQ(libc_strncmp("abc", "xyz", 0), 0, "n=0");
+    ASSERT_EQ(libc_strncmp(NULL, NULL, 0), 0, "NULL pointers n=0");
+    ASSERT_EQ(libc_strncmp("abc", NULL, 0), 0, "First pointer valid, second NULL n=0");
+    ASSERT_EQ(libc_strncmp(NULL, "xyz", 0), 0, "First pointer NULL, second valid n=0");
 
     // Test with embedded nulls
     ASSERT_EQ(libc_strncmp("a\0b", "a\0c", 3), 0, "Equal with embedded null (stops at null)");
