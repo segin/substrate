@@ -2,8 +2,9 @@
 #define _SYS_TTY_H
 
 #include <sys/termios.h>
-#include <sys/proc.h> 
+#include <sys/proc.h>
 #include <sys/lock.h>
+#include <sys/types.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -120,5 +121,15 @@ size_t tty_inject_input_locked(struct tty *tty, const char *buf, size_t len);
 
 // Helper
 void tty_default_termios(struct termios *t);
+
+// VFS-facing tty operations exposed to other drivers (PTYs, vt, etc.).
+struct fs_node;
+size_t tty_fs_read(struct fs_node *node, off_t offset, size_t size,
+                   uint8_t *buffer);
+size_t tty_fs_write(struct fs_node *node, off_t offset, size_t size,
+                    const uint8_t *buffer);
+int    tty_fs_ioctl(struct fs_node *node, uint32_t request, void *arg);
+void   tty_fs_open(struct fs_node *node);
+void   tty_fs_close(struct fs_node *node);
 
 #endif

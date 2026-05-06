@@ -35,6 +35,7 @@
 #include <sys/types.h>
 #include <sys/param.h>
 #include <sys/mount.h>
+#include <sys/statvfs.h>
 #include <sys/stat.h>
 #include <sys/errno.h>
 #include <sys/fcntl.h>
@@ -1554,6 +1555,43 @@ int kern_fstatfs(int fd, struct statfs *buf) {
     file_t *f = current_process->fds[fd];
     if (!f || !f->f_data) return -EBADF;
     return statfs_fs((fs_node_t*)f->f_data, buf);
+}
+
+int kern_statvfs(const char *path, struct statvfs *buf) {
+    if (!buf) return -EINVAL;
+    fs_node_t *root = current_process->root_node ? current_process->root_node : fs_root;
+    fs_node_t *cwd = current_process->cwd_node ? current_process->cwd_node : root;
+    fs_node_t *node = vfs_lookup(path[0] == '/' ? root : cwd, path);
+    if (!node) return -ENOENT;
+    return statvfs_fs(node, buf);
+}
+
+int sys_statvfs(const char *path, struct statvfs *buf) {
+    char kpath[256];
+    struct statvfs ks;
+    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -EFAULT;
+    int error = kern_statvfs(kpath, &ks);
+    if (error == 0) {
+        if (copyout(&ks, buf, sizeof(struct statvfs)) != 0) return -EFAULT;
+    }
+    return error;
+}
+
+int kern_fstatvfs(int fd, struct statvfs *buf) {
+    if (!buf) return -EINVAL;
+    if (fd < 0 || fd >= MAX_FD) return -EBADF;
+    file_t *f = current_process->fds[fd];
+    if (!f || !f->f_data) return -EBADF;
+    return statvfs_fs((fs_node_t*)f->f_data, buf);
+}
+
+int sys_fstatvfs(int fd, struct statvfs *buf) {
+    struct statvfs ks;
+    int error = kern_fstatvfs(fd, &ks);
+    if (error == 0) {
+        if (copyout(&ks, buf, sizeof(struct statvfs)) != 0) return -EFAULT;
+    }
+    return error;
 }
 
 int kern_link(const char *oldpath, const char *newpath) {

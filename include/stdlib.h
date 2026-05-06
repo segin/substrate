@@ -77,5 +77,11 @@ uint32_t arc4random_uniform(uint32_t upper_bound);
 int mkstemp(char *tmpl);
 char *mkdtemp(char *tmpl);
 
+/* Unix98 pseudo-terminal helpers (XSI). */
+int posix_openpt(int flags);
+int grantpt(int fd);
+int unlockpt(int fd);
+char *ptsname(int fd);
+int ptsname_r(int fd, char *buf, size_t buflen);
 
 #endif

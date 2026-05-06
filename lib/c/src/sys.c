@@ -843,38 +843,13 @@ long sysconf(int name) {
 #include <errno.h>
 
 int statvfs(const char *path, struct statvfs *buf) {
-    (void)path;
-    if (!buf) { errno = EFAULT; return -1; }
-    /* Stub: return fake values */
-    buf->f_bsize  = 4096;
-    buf->f_frsize = 4096;
-    buf->f_blocks = 65536;
-    buf->f_bfree  = 32768;
-    buf->f_bavail = 32768;
-    buf->f_files  = 4096;
-    buf->f_ffree  = 2048;
-    buf->f_favail = 2048;
-    buf->f_fsid   = 0;
-    buf->f_flag   = 0;
-    buf->f_namemax = 255;
-    return 0;
+    return __set_errno((int)_syscall2(SYS_STATVFS,
+                                       (uintptr_t)path, (uintptr_t)buf));
 }
 
 int fstatvfs(int fd, struct statvfs *buf) {
-    (void)fd;
-    if (!buf) { errno = EFAULT; return -1; }
-    buf->f_bsize  = 4096;
-    buf->f_frsize = 4096;
-    buf->f_blocks = 65536;
-    buf->f_bfree  = 32768;
-    buf->f_bavail = 32768;
-    buf->f_files  = 4096;
-    buf->f_ffree  = 2048;
-    buf->f_favail = 2048;
-    buf->f_fsid   = 0;
-    buf->f_flag   = 0;
-    buf->f_namemax = 255;
-    return 0;
+    return __set_errno((int)_syscall2(SYS_FSTATVFS,
+                                       (uintptr_t)fd, (uintptr_t)buf));
 }
 
 int statfs(const char *path, struct statfs *buf) {

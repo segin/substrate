@@ -17,6 +17,7 @@
 struct fs_node;
 struct mount;
 struct statfs;
+struct statvfs;
 
 typedef size_t (*read_type_t)(struct fs_node*, off_t, size_t, uint8_t*);
 typedef size_t (*write_type_t)(struct fs_node*, off_t, size_t, const uint8_t*);
@@ -114,6 +115,7 @@ int unlink_fs(fs_node_t *node, const char *name);
 int rmdir_fs(fs_node_t *node, const char *name);
 int rename_fs(fs_node_t *old_parent, const char *old_name, fs_node_t *new_parent, const char *new_name);
 int statfs_fs(fs_node_t *node, struct statfs *buf);
+int statvfs_fs(fs_node_t *node, struct statvfs *buf);
 int mknod_fs(fs_node_t *node, const char *name, uint16_t mode, uint32_t dev);
 int vfs_mkdir(const char *path, uint16_t permission);
 int vfs_rmdir(const char *path);

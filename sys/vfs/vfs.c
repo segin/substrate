@@ -5,6 +5,7 @@
 #include <sys/namei.h>
 #include <sys/proc.h>
 #include <sys/lock.h>
+#include <sys/statvfs.h>
 #include <pm/pm.h>
 
 #include <string.h>
@@ -28,6 +29,7 @@
 #include <fs/9p.h>
 #include <drivers/devices/full.h>
 #include <drivers/devices/cpuid.h>
+#include <drivers/console/pty.h>
 #include <drivers/storage/blkdev.h>
 #include <vm/vm_kmem.h>
 
@@ -79,6 +81,11 @@ void vfs_init(void) {
     sysfs_init();
     pseudo_init();
     full_init();
+
+    /* PTY subsystem — depends on devfs being up so /dev/ptmx and
+     * /dev/pts/ are reachable. */
+    extern void pty_init(void);
+    pty_init();
     
     // Register network/special filesystems
     fuse_init();
@@ -724,6 +731,50 @@ int statfs_fs(fs_node_t *node, struct statfs *buf) {
         return node->statfs(node, buf);
     }
     return -1;
+}
+
+/*
+ * Synthesize a struct statvfs from the underlying filesystem's statfs.
+ *
+ * Filesystems only implement node->statfs (BSD form) — the POSIX form
+ * is derived here so individual filesystem drivers don't have to grow a
+ * second method.  All non-trivially-derivable fields are taken from
+ * statfs as-is.
+ */
+int statvfs_fs(fs_node_t *node, struct statvfs *buf) {
+    if (!node || !buf) {
+        return -EINVAL;
+    }
+
+    struct statfs sf;
+    int err = statfs_fs(node, &sf);
+    if (err) {
+        return err;
+    }
+
+    memset(buf, 0, sizeof(*buf));
+    /* Use f_iosize (or fall back to f_bsize) as the I/O hint.  Both
+     * fields exist in our struct statfs; the BSD convention is that
+     * f_bsize is the fundamental block and f_iosize is the I/O hint. */
+    buf->f_bsize    = (unsigned long)(sf.f_iosize ? sf.f_iosize : sf.f_bsize);
+    buf->f_frsize   = (unsigned long)sf.f_bsize;
+    buf->f_blocks   = sf.f_blocks;
+    buf->f_bfree    = sf.f_bfree;
+    buf->f_bavail   = sf.f_bavail;
+    buf->f_files    = sf.f_files;
+    buf->f_ffree    = sf.f_ffree;
+    buf->f_favail   = sf.f_ffree; /* same value — no separate quota */
+    buf->f_fsid     = (unsigned long)sf.f_fsid;
+    buf->f_flag     = 0;
+    if (sf.f_flags & MNT_RDONLY) buf->f_flag |= ST_RDONLY;
+    if (sf.f_flags & MNT_NOSUID) buf->f_flag |= ST_NOSUID;
+    /* Conservative default: most filesystems we host accept up to 255
+     * bytes per name component.  Filesystems that disagree should
+     * extend their statfs callback. */
+    buf->f_namemax  = 255;
+    strlcpy(buf->f_fstypename, sf.f_fstypename, sizeof(buf->f_fstypename));
+    strlcpy(buf->f_basetype,   sf.f_fstypename, sizeof(buf->f_basetype));
+    return 0;
 }
 
 static int vfs_resolve_parent_path(const char *path, fs_node_t **parent_out,

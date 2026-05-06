@@ -137,6 +137,8 @@
 #define SYS_GETRUSAGE   117
 #define SYS_STATFS      157
 #define SYS_FSTATFS     158
+#define SYS_STATVFS     159
+#define SYS_FSTATVFS    160
 
 void syscall_init(void);
 

@@ -1101,3 +1101,56 @@ char *realpath(const char *restrict path, char *restrict resolved_path) {
     }
     return out;
 }
+
+/* ------------------------------------------------------------------ */
+/* Unix98 pseudo-terminal API                                         */
+/* ------------------------------------------------------------------ */
+
+#include <sys/ioctl.h>
+
+int posix_openpt(int flags) {
+    return open("/dev/ptmx", flags);
+}
+
+int grantpt(int fd) {
+    /* Substrate has no traditional pty group / setuid model — every
+     * /dev/pts/N is opened with the caller's credentials and chowned
+     * by the kernel at allocation time.  The libc stub exists for
+     * portability; nothing to do. */
+    if (fd < 0) {
+        errno = EBADF;
+        return -1;
+    }
+    return 0;
+}
+
+int unlockpt(int fd) {
+    int unlock = 0;
+    return ioctl(fd, TIOCSPTLCK, &unlock);
+}
+
+int ptsname_r(int fd, char *buf, size_t buflen) {
+    int ptn;
+    if (!buf || buflen == 0) {
+        errno = EINVAL;
+        return EINVAL;
+    }
+    if (ioctl(fd, TIOCGPTN, &ptn) < 0) {
+        return errno;
+    }
+    int n = snprintf(buf, buflen, "/dev/pts/%d", ptn);
+    if (n < 0 || (size_t)n >= buflen) {
+        errno = ERANGE;
+        return ERANGE;
+    }
+    return 0;
+}
+
+char *ptsname(int fd) {
+    static char ptsname_buf[32];
+    int err = ptsname_r(fd, ptsname_buf, sizeof(ptsname_buf));
+    if (err != 0) {
+        return NULL;
+    }
+    return ptsname_buf;
+}

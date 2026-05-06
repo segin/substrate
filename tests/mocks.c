@@ -373,6 +373,7 @@ void *vm_phys_alloc_page(void) {
 }
 void vm_phys_free_page(void *p) { (void)p; }
 void cpuid_init(void) {}
+void pty_init(void) {}
 void *blkdev_get(void) { return NULL; }
 void arch_fork_with_stack(void) {}
 void exec_pin_current_thread(void) {}

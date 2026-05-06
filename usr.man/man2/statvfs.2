@@ -1,0 +1,92 @@
+.\"
+.\" STATVFS(2) - Substrate Native Personality
+.\"
+.TH STATVFS 2 "May 2026" "Substrate OS" "System Calls"
+.SH NAME
+statvfs, fstatvfs \- get filesystem statistics
+.SH LIBRARY
+Standard C library
+.RB ( libc ", " -lc )
+.SH SYNOPSIS
+.nf
+.B #include <sys/statvfs.h>
+.PP
+.BI "int statvfs(const char *" path ", struct statvfs *" buf );
+.BI "int fstatvfs(int " fd ", struct statvfs *" buf );
+.fi
+.SH DESCRIPTION
+.BR statvfs ()
+returns information about the filesystem containing
+.IR path .
+.BR fstatvfs ()
+is identical, except that the file referred to by the open file descriptor
+.I fd
+is used to identify the filesystem.
+.PP
+.I buf
+is a pointer to a
+.I statvfs
+structure with at least the following members:
+.PP
+.in +4n
+.EX
+struct statvfs {
+    unsigned long  f_bsize;     /* preferred block size */
+    unsigned long  f_frsize;    /* fundamental block size */
+    fsblkcnt_t     f_blocks;    /* total blocks (f_frsize units) */
+    fsblkcnt_t     f_bfree;     /* free blocks */
+    fsblkcnt_t     f_bavail;    /* free blocks for unprivileged */
+    fsfilcnt_t     f_files;     /* total inodes */
+    fsfilcnt_t     f_ffree;     /* free inodes */
+    fsfilcnt_t     f_favail;    /* free inodes for unprivileged */
+    unsigned long  f_fsid;      /* filesystem ID */
+    unsigned long  f_flag;      /* mount flags */
+    unsigned long  f_namemax;   /* max filename length */
+};
+.EE
+.in
+.PP
+.I f_flag
+is the bitwise OR of zero or more of the following:
+.TP
+.B ST_RDONLY
+The filesystem is mounted read-only.
+.TP
+.B ST_NOSUID
+The filesystem ignores set-user-ID and set-group-ID bits.
+.SH RETURN VALUE
+On success, zero is returned. On error, \-1 is returned and
+.I errno
+is set to indicate the error.
+.SH ERRORS
+.TP
+.B EBADF
+.RB ( fstatvfs ())
+.I fd
+is not a valid open file descriptor.
+.TP
+.B EFAULT
+.I buf
+or
+.I path
+points outside the calling process's accessible address space.
+.TP
+.B EINVAL
+.I buf
+is NULL.
+.TP
+.B ENOENT
+.RB ( statvfs ())
+A component of
+.I path
+does not exist.
+.SH SEE ALSO
+.BR statfs (2),
+.BR stat (2)
+.SH HISTORY
+.BR statvfs ()
+and
+.BR fstatvfs ()
+are specified by POSIX.1-2001 / SUSv3.
+.SH STANDARDS
+POSIX.1-2008.

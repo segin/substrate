@@ -80,6 +80,8 @@ extern int sys_fstat(int, void*);
 extern int sys_fstatat(int, const char*, void*, int);
 extern int sys_statfs(const char*, void*);
 extern int sys_fstatfs(int, void*);
+extern int sys_statvfs(const char*, void*);
+extern int sys_fstatvfs(int, void*);
 
 /* File system operations */
 extern int sys_link(const char*, const char*);

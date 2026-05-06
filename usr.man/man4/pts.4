@@ -1,0 +1,93 @@
+.\"
+.\" PTS(4) - Substrate Pseudo-Terminal Subsystem
+.\"
+.TH PTS 4 "May 2026" "Substrate OS" "Devices"
+.SH NAME
+ptmx, pts \- Unix98 pseudo-terminal multiplexer and slaves
+.SH SYNOPSIS
+.nf
+.B /dev/ptmx
+.B /dev/pts/<N>
+.fi
+.SH DESCRIPTION
+The Unix98 pseudo-terminal subsystem provides bidirectional pipes that
+look like terminals to the slave end while the master end appears as
+a raw byte stream.  A foreground process group on the slave receives
+job-control signals exactly as it would on a real serial line.
+.SS /dev/ptmx
+Opening
+.B /dev/ptmx
+allocates a fresh master/slave pair.  Each open returns a distinct
+master fd; multiple processes may open
+.B /dev/ptmx
+simultaneously.  The slave's index is queried with
+.BR TIOCGPTN .
+The master remains in a "locked" state — the slave cannot be opened —
+until the caller issues
+.BR TIOCSPTLCK
+with a value of 0
+.RB ( unlockpt (3)).
+.SS /dev/pts/<N>
+The slave behaves like a regular controlling terminal.  All termios
+flags (canonical mode, echo, signal generation, software flow
+control, etc.) apply normally.
+.SH IOCTLS
+.TP
+.B TIOCGPTN
+Get the slave's index.  Argument: pointer to
+.BR int .
+.TP
+.B TIOCSPTLCK
+Set the lock state.  Argument: pointer to
+.BR int .
+Non-zero locks the slave; zero unlocks it.
+.TP
+.B TIOCGPKT
+Read the master's packet-mode flag.  Argument: pointer to
+.BR int .
+.TP
+.B TIOCPKT
+Set packet mode.  In packet mode each master read is prefixed with a
+.B TIOCPKT_*
+control byte.  Argument: pointer to
+.BR int .
+.TP
+.B TIOCSIG
+Send a signal to the slave's foreground process group.  Argument:
+.BR int .
+.TP
+.B TCFLSH
+Flush queued data from the master read buffer.  In packet mode,
+sets the
+.B TIOCPKT_FLUSHREAD
+status bit so the master sees a flush event on its next read.
+.SH PACKET-MODE CONTROL BYTES
+.TP
+.B TIOCPKT_DATA
+The remainder of the read is normal data.
+.TP
+.B TIOCPKT_FLUSHREAD
+The master read buffer was flushed.
+.TP
+.B TIOCPKT_FLUSHWRITE
+Pending writes were discarded.
+.TP
+.B TIOCPKT_STOP
+Output stopped (XOFF received).
+.TP
+.B TIOCPKT_START
+Output resumed (XON received).
+.SH FILES
+.TP
+.B /dev/ptmx
+PTY multiplexer (open this to allocate a pair).
+.TP
+.B /dev/pts/
+Directory of allocated slaves.
+.SH SEE ALSO
+.BR posix_openpt (3),
+.BR ioctl (2),
+.BR tty (4),
+.BR termios (3)
+.SH HISTORY
+The Unix98 PTY interface was introduced in SVR4 and adopted by POSIX.

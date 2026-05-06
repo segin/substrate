@@ -61,29 +61,29 @@ void tty_default_termios(struct termios *t) {
 }
 // ...
 // VFS Proxy functions for specific TTY devices
-static size_t tty_fs_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
+size_t tty_fs_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
     (void)offset;
     struct tty *tty = (struct tty *)node->ptr;
     return tty_read(tty, (char *)buffer, size);
 }
 
-static size_t tty_fs_write(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer) {
+size_t tty_fs_write(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer) {
     (void)offset;
     struct tty *tty = (struct tty *)node->ptr;
     return tty_write(tty, (const char *)buffer, size);
 }
 
-static int tty_fs_ioctl(fs_node_t *node, uint32_t request, void *arg) {
+int tty_fs_ioctl(fs_node_t *node, uint32_t request, void *arg) {
     struct tty *tty = (struct tty *)node->ptr;
     return tty_ioctl(tty, request, (unsigned long)arg);
 }
 
-static void tty_fs_open(fs_node_t *node) {
+void tty_fs_open(fs_node_t *node) {
     struct tty *tty = (struct tty *)node->ptr;
     tty_open(tty);
 }
 
-static void tty_fs_close(fs_node_t *node) {
+void tty_fs_close(fs_node_t *node) {
     struct tty *tty = (struct tty *)node->ptr;
     tty_close(tty);
 }
@@ -527,16 +527,64 @@ void tty_flip_buffer_push_status(struct tty *tty, char c, uint32_t status) {
     
     TTY_LOCK(tty);
 
-    if ((status & TTY_INPUT_BREAK) && (tty->termios.c_iflag & IGNBRK)) {
-        TTY_UNLOCK(tty);
-        return;
+    if (status & TTY_INPUT_BREAK) {
+        if (tty->termios.c_iflag & IGNBRK) {
+            TTY_UNLOCK(tty);
+            return;
+        }
+        if (tty->termios.c_iflag & BRKINT) {
+            /* POSIX: BRKINT (without IGNBRK) flushes input/output and
+             * sends SIGINT to the foreground process group. */
+            tty->raw_buf.head = tty->raw_buf.tail = tty->raw_buf.count = 0;
+            tty->write_buf.head = tty->write_buf.tail = tty->write_buf.count = 0;
+            tty->canon_len = 0;
+            tty->delct = 0;
+            if (tty->pgrp > 0) signal_send_group(tty->pgrp, SIGINT);
+            sched_wakeup(&tty->read_wait);
+            sched_wakeup(&tty->poll_wait);
+            TTY_UNLOCK(tty);
+            return;
+        }
+        /* Neither IGNBRK nor BRKINT: deliver as a NUL byte if PARMRK
+         * is set, else as NUL — matches Linux/BSD behaviour. */
+        if (tty->termios.c_iflag & PARMRK) {
+            tty_buf_put(&tty->raw_buf, (char)0xFF);
+            tty_buf_put(&tty->raw_buf, (char)0x00);
+            tty_buf_put(&tty->raw_buf, (char)0x00);
+            sched_wakeup(&tty->read_wait);
+            sched_wakeup(&tty->poll_wait);
+            TTY_UNLOCK(tty);
+            return;
+        }
+        c = '\0';
     }
 
-    if ((status & TTY_INPUT_PARITY_ERROR) &&
-        (tty->termios.c_iflag & INPCK) &&
-        (tty->termios.c_iflag & IGNPAR)) {
-        TTY_UNLOCK(tty);
-        return;
+    if (status & TTY_INPUT_PARITY_ERROR) {
+        if (!(tty->termios.c_iflag & INPCK)) {
+            /* INPCK off: parity flag is ignored. */
+        } else if (tty->termios.c_iflag & IGNPAR) {
+            TTY_UNLOCK(tty);
+            return;
+        } else if (tty->termios.c_iflag & PARMRK) {
+            /* Mark with the 0xFF 0x00 X sequence. */
+            tty_buf_put(&tty->raw_buf, (char)0xFF);
+            tty_buf_put(&tty->raw_buf, (char)0x00);
+            tty_buf_put(&tty->raw_buf, c);
+            sched_wakeup(&tty->read_wait);
+            sched_wakeup(&tty->poll_wait);
+            TTY_UNLOCK(tty);
+            return;
+        } else {
+            c = '\0';
+        }
+    }
+
+    /* PARMRK escape for unsolicited 0xFF: when PARMRK is on, a real
+     * 0xFF byte must be doubled to disambiguate from the marker. */
+    if ((unsigned char)c == 0xFF &&
+        (tty->termios.c_iflag & PARMRK) &&
+        !(tty->termios.c_iflag & ISTRIP)) {
+        tty_buf_put(&tty->raw_buf, (char)0xFF);
     }
 
     /* Input Processing */
@@ -613,7 +661,11 @@ void tty_flip_buffer_push_status(struct tty *tty, char c, uint32_t status) {
     
     if (raw) {
         wake_readers = 1;
-    } else if (c == '\n' || c == tty->termios.c_cc[VEOF]) {
+    } else if (c == '\n' || c == tty->termios.c_cc[VEOF] ||
+               (tty->termios.c_cc[VEOL] != 0 &&
+                c == tty->termios.c_cc[VEOL]) ||
+               (tty->termios.c_cc[VEOL2] != 0 &&
+                c == tty->termios.c_cc[VEOL2])) {
         // Add delimiter
         if (tty_buf_put(&tty->raw_buf, (char)0xFF) == 0) {
             tty->delct++;

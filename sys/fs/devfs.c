@@ -552,6 +552,7 @@ void devfs_init(void) {
         devfs_create_common_dir("storage");
         devfs_create_common_dir("input");
         devfs_create_common_dir("by-id");
+        devfs_create_common_dir("pts");
     }
 
     devfs_root_node_ptr = &devfs_root_node;

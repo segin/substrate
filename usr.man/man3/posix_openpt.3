@@ -1,0 +1,96 @@
+.\"
+.\" POSIX_OPENPT(3) - Substrate libc
+.\"
+.TH POSIX_OPENPT 3 "May 2026" "Substrate OS" "Library Functions"
+.SH NAME
+posix_openpt, grantpt, unlockpt, ptsname, ptsname_r \- Unix98 pseudo-terminal API
+.SH LIBRARY
+Standard C library
+.RB ( libc ", " -lc )
+.SH SYNOPSIS
+.nf
+.B #include <stdlib.h>
+.PP
+.BI "int posix_openpt(int " flags );
+.BI "int grantpt(int " fd );
+.BI "int unlockpt(int " fd );
+.BI "char *ptsname(int " fd );
+.BI "int ptsname_r(int " fd ", char *" buf ", size_t " buflen );
+.fi
+.SH DESCRIPTION
+.BR posix_openpt ()
+opens
+.B /dev/ptmx
+and returns a file descriptor referring to a freshly-allocated
+pseudo-terminal master.  The corresponding slave is reachable at
+.B /dev/pts/<N>
+once
+.BR unlockpt ()
+has been called.  The slave's
+.I N
+is reported by
+.BR ptsname ().
+.PP
+.BR grantpt ()
+is a no-op on Substrate; the kernel grants ownership of the slave to
+the caller's UID at allocation time.  Returns 0 on success, or \-1 on
+error (with
+.I errno
+set).
+.PP
+.BR unlockpt ()
+clears the slave's allocation lock by issuing
+.BR TIOCSPTLCK (2)
+with a value of 0.  Until the lock is cleared, opening the slave
+returns
+.BR EIO ,
+which guards against a concurrent process opening a slave that's
+about to be reused.
+.PP
+.BR ptsname ()
+returns a pointer to a static buffer naming the slave (e.g.
+.BR /dev/pts/3 ).
+.BR ptsname_r ()
+writes the same name into the caller-supplied buffer and is the
+thread-safe form.
+.SH RETURN VALUE
+.BR posix_openpt ()
+returns the master fd, or \-1 on failure.
+.BR grantpt (),
+.BR unlockpt ()
+return 0 on success, \-1 on failure.
+.BR ptsname ()
+returns a pointer or
+.BR NULL .
+.BR ptsname_r ()
+returns 0 on success, an
+.B errno
+value on failure.
+.SH ERRORS
+.TP
+.B EBADF
+.I fd
+is not an open PTY master.
+.TP
+.B ENOTTY
+.I fd
+does not refer to a Unix98 PTY master.
+.TP
+.B ERANGE
+.RB ( ptsname_r ())
+.I buflen
+is too small to hold the slave's name.
+.SH EXAMPLE
+.EX
+int m = posix_openpt(O_RDWR);
+grantpt(m);
+unlockpt(m);
+char *slave = ptsname(m);
+int s = open(slave, O_RDWR);
+.EE
+.SH SEE ALSO
+.BR open (2),
+.BR ioctl (2),
+.BR pts (4)
+.SH STANDARDS
+POSIX.1-2008 (XSI option).
