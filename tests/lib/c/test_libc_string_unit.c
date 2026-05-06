@@ -44,6 +44,8 @@
 #define strstr libc_strstr
 #undef strlen
 #define strlen libc_strlen
+#undef strnlen
+#define strnlen libc_strnlen
 #undef strdup
 #define strdup libc_strdup
 #undef strspn
@@ -90,6 +92,7 @@ char *libc_strchr(const char *s, int c);
 char *libc_strrchr(const char *s, int c);
 char *libc_strstr(const char *haystack, const char *needle);
 size_t libc_strlen(const char *s);
+size_t libc_strnlen(const char *s, size_t maxlen);
 char *libc_strdup(const char *s);
 size_t libc_strspn(const char *s, const char *accept);
 size_t libc_strcspn(const char *s, const char *reject);
@@ -178,6 +181,18 @@ void run_strlen_tests(void) {
     ASSERT_EQ(libc_strlen("hello world"), 11, "hello world length");
     char buf[] = {'h', 'i', '\0', 'x'};
     ASSERT_EQ(libc_strlen(buf), 2, "Embedded null");
+}
+
+void run_strnlen_tests(void) {
+    printf("Running strnlen tests...\n");
+    ASSERT_EQ(libc_strnlen("", 5), 0, "Empty string");
+    ASSERT_EQ(libc_strnlen("a", 5), 1, "Single character, maxlen > len");
+    ASSERT_EQ(libc_strnlen("abc", 5), 3, "abc length, maxlen > len");
+    ASSERT_EQ(libc_strnlen("hello world", 11), 11, "hello world length, maxlen == len");
+    ASSERT_EQ(libc_strnlen("hello world", 5), 5, "hello world length, maxlen < len");
+    char buf[] = {'h', 'i', '\0', 'x'};
+    ASSERT_EQ(libc_strnlen(buf, 4), 2, "Embedded null");
+    ASSERT_EQ(libc_strnlen("abc", 0), 0, "maxlen == 0");
 }
 
 void run_memmove_tests(void) {
@@ -595,6 +610,11 @@ bool test_libc_strlen(void) {
     return true;
 }
 
+bool test_libc_strnlen(void) {
+    run_strnlen_tests();
+    return true;
+}
+
 void run_strncpy_tests(void) {
     printf("Running strncpy tests...\n");
     char dest[20];
@@ -987,6 +1007,7 @@ int main(void) {
     run_strcpy_tests();
     run_memcpy_tests();
     run_strlen_tests();
+    run_strnlen_tests();
     run_strspn_tests();
     run_memmove_tests();
     run_strcat_tests();
