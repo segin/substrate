@@ -1,0 +1,201 @@
+.TH FMA 3 "May 2026" "Substrate" "Library Functions Manual"
+.SH NAME
+fma, fmaf, fmal \- fused multiply-add
+.SH LIBRARY
+Math library (libm, \-lm)
+.SH SYNOPSIS
+.B #include <math.h>
+.PP
+.BI "double fma(double " x ", double " y ", double " z );
+.br
+.BI "float fmaf(float " x ", float " y ", float " z );
+.br
+.BI "long double fmal(long double " x ", long double " y ", long double " z );
+.SH DESCRIPTION
+The
+.BR fma ()
+function computes
+.IR "x * y + z "
+with only a single rounding operation.  This differs from the naive
+sequence
+.IR "x * y + z" ,
+which involves two separate roundings: one after the multiplication and
+another after the addition.
+.PP
+The fused multiply-add operation is particularly useful for:
+.IP \(bu 3
+Dot products of vectors, where the accumulation of many products
+requires high precision.
+.IP \(bu 3
+Polynomial evaluation (Horner's method).
+.IP \(bu 3
+Compensated summation and other numerically sensitive algorithms.
+.PP
+By reducing rounding error from two operations to one, the FMA operation
+provides more accurate results for many numerical computations.
+.PP
+On hardware that supports a native FMA instruction (such as modern x86_64,
+ARM, or POWER processors), the function is typically implemented directly.
+On platforms without native FMA support (such as x87-only i386 systems),
+the implementation uses Dekker's algorithm or similar techniques to achieve
+the single-rounding semantics in software.
+.PP
+The
+.BR fmaf ()
+and
+.BR fmal ()
+variants take and return
+.B float
+and
+.B "long double"
+values respectively.
+.SH RETURN VALUE
+On success, these functions return
+.I "(x * y) + z"
+computed with a single rounding operation.
+.PP
+If the product
+.IR "x * y"
+overflows but the result of adding
+.I z
+is representable, the result is rounded once and returned.
+.PP
+If
+.I x
+or
+.I y
+is zero and the other is infinity, or if
+.I x
+or
+.I y
+is infinity and the other is zero, the special case 0 × ∞ is treated as a
+domain error, returning NaN and raising
+.BR FE_INVALID .
+.PP
+If the mathematically exact result overflows the range of the return type,
+.B HUGE_VAL
+(or
+.B HUGE_VALF
+or
+.BR HUGE_VALL )
+is returned with the appropriate sign, and an overflow exception
+.RB ( FE_OVERFLOW )
+is raised.
+.PP
+If the mathematically exact result underflows to zero, zero with the
+appropriate sign is returned, and an underflow exception
+.RB ( FE_UNDERFLOW )
+is raised.
+.PP
+If any argument is NaN, NaN is returned.
+.PP
+If
+.I x
+and
+.I y
+are infinite but with opposite signs (e.g., +∞ and −∞), the result
+depends on the value of
+.IR z :
+if
+.I z
+is also infinite, the sign of the infinities determines whether the result
+is +∞, −∞, or NaN.
+.SH ERRORS
+See
+.BR math_error (7)
+for information on how to determine whether an error has occurred when
+calling these functions.
+.PP
+The following errors can occur:
+.TP
+Domain error: \fIx\fR × \fIy\fR is 0 × ∞
+An invalid floating-point exception
+.RB ( FE_INVALID )
+is raised.  If
+.I "math_errhandling & MATH_ERRNO"
+is non-zero,
+.I errno
+is set to
+.BR EDOM .
+.TP
+Range error: overflow
+An overflow floating-point exception
+.RB ( FE_OVERFLOW )
+is raised.  If
+.I "math_errhandling & MATH_ERRNO"
+is non-zero,
+.I errno
+is set to
+.BR ERANGE .
+.TP
+Range error: underflow
+An underflow floating-point exception
+.RB ( FE_UNDERFLOW )
+is raised.  If
+.I "math_errhandling & MATH_ERRNO"
+is non-zero,
+.I errno
+is set to
+.BR ERANGE .
+.SH ATTRIBUTES
+For an explanation of the terms used in this section, see
+.BR attributes (7).
+.TS
+allbox;
+lb lb lb
+l l l.
+Interface	Attribute	Value
+T{
+.BR fma (),
+.BR fmaf (),
+.BR fmal ()
+T}	Thread safety	MT-Safe
+.TE
+.SH STANDARDS
+.BR fma ()
+and its variants conform to C99 and POSIX.1-2008.
+.PP
+The handling of special arguments follows C99 Annex F (IEC 60559).
+.SH EXAMPLES
+The following program demonstrates computing a dot product with high
+precision using
+.BR fma ():
+.PP
+.RS 4
+.EX
+#include <math.h>
+#include <stdio.h>
+
+double
+dot_product(const double *a, const double *b, int n)
+{
+    double sum = 0.0;
+    for (int i = 0; i < n; i++)
+        sum = fma(a[i], b[i], sum);
+    return sum;
+}
+
+int
+main(void)
+{
+    double x[] = { 1.0, 2.0, 3.0 };
+    double y[] = { 4.0, 5.0, 6.0 };
+
+    printf("Dot product: %.1f\en", dot_product(x, y, 3));
+    return 0;
+}
+.EE
+.RE
+.PP
+The output is:
+.PP
+.RS 4
+Dot product: 32.0
+.RE
+.SH SEE ALSO
+.BR fabs (3),
+.BR pow (3),
+.BR sqrt (3),
+.BR math_error (7)
+.SH COLOPHON
+This page is part of the Substrate operating system documentation.

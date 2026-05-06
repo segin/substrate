@@ -1,0 +1,171 @@
+.TH FMAX 3 "May 2026" "Substrate" "Library Functions Manual"
+.SH NAME
+fmax, fmaxf, fmaxl, fmin, fminf, fminl, fdim, fdimf, fdiml \- floating-point maximum, minimum, and positive difference
+.SH LIBRARY
+Math library (libm, \-lm)
+.SH SYNOPSIS
+.B #include <math.h>
+.PP
+.BI "double fmax(double " x ", double " y );
+.br
+.BI "float fmaxf(float " x ", float " y );
+.br
+.BI "long double fmaxl(long double " x ", long double " y );
+.PP
+.BI "double fmin(double " x ", double " y );
+.br
+.BI "float fminf(float " x ", float " y );
+.br
+.BI "long double fminl(long double " x ", long double " y );
+.PP
+.BI "double fdim(double " x ", double " y );
+.br
+.BI "float fdimf(float " x ", float " y );
+.br
+.BI "long double fdiml(long double " x ", long double " y );
+.SH DESCRIPTION
+These functions perform floating-point comparisons and return extreme or
+difference values.
+.PP
+The
+.BR fmax ()
+function returns the maximum of
+.I x
+and
+.IR y .
+If one argument is NaN and the other is numeric, the numeric value is returned
+(i.e., NaN is ignored).  If both arguments are NaN, NaN is returned.
+When both arguments are non-NaN and equal in magnitude (including the case
+where both are zero), the value with the positive sign is returned.
+.PP
+The
+.BR fmin ()
+function returns the minimum of
+.I x
+and
+.IR y .
+The NaN-handling and sign semantics are the same as for
+.BR fmax (),
+except that the negative sign is preferred when both values have equal magnitude.
+.PP
+The
+.BR fdim ()
+function returns the positive difference between
+.I x
+and
+.IR y :
+.IR max(x " \- " y ,\ 0) .
+If the mathematical difference would underflow, 0 is returned.
+.PP
+The
+.BR fmaxf ()
+and
+.BR fmaxl ()
+variants take and return
+.B float
+and
+.B "long double"
+values respectively.  Similarly for
+.BR fminf (),
+.BR fminl (),
+.BR fdimf (),
+and
+.BR fdiml ().
+.SH RETURN VALUE
+.BR fmax ()
+returns the maximum of
+.I x
+and
+.I y ,
+with NaN-ignoring and sign semantics as described above.
+.PP
+.BR fmin ()
+returns the minimum of
+.I x
+and
+.I y ,
+with NaN-ignoring and sign semantics as described above.
+.PP
+.BR fdim ()
+returns
+.IR max(x " \- " y ,\ 0) .
+If
+.I x
+or
+.I y
+is NaN, NaN is returned.
+.SH ERRORS
+These functions do not raise floating-point exceptions (unless an input
+operation itself raises an exception).  They do not set
+.I errno .
+.SH ATTRIBUTES
+For an explanation of the terms used in this section, see
+.BR attributes (7).
+.TS
+allbox;
+lb lb lb
+l l l.
+Interface	Attribute	Value
+T{
+.BR fmax (),
+.BR fmaxf (),
+.BR fmaxl (),
+.BR fmin (),
+.BR fminf (),
+.BR fminl (),
+.BR fdim (),
+.BR fdimf (),
+.BR fdiml ()
+T}	Thread safety	MT-Safe
+.TE
+.SH STANDARDS
+These functions conform to C99 and POSIX.1-2008.
+.PP
+The handling of special arguments (NaN, infinity, signed zeros) follows
+C99 Annex F (IEC 60559).
+.PP
+The C23 standard defines
+.BR fmaximum (),
+.BR fminimum (),
+and related functions with different NaN semantics; those are described
+in a separate manual page.
+.SH EXAMPLES
+The following program demonstrates these functions:
+.PP
+.RS 4
+.EX
+#include <math.h>
+#include <stdio.h>
+
+int
+main(void)
+{
+    printf("fmax(3.5, 2.0)  = %.1f\en", fmax(3.5, 2.0));
+    printf("fmin(3.5, 2.0)  = %.1f\en", fmin(3.5, 2.0));
+    printf("fdim(3.5, 2.0)  = %.1f\en", fdim(3.5, 2.0));
+    printf("fdim(2.0, 3.5)  = %.1f\en", fdim(2.0, 3.5));
+    printf("fmax(NaN, 1.0)  = %.1f\en", fmax(NAN, 1.0));
+    return 0;
+}
+.EE
+.RE
+.PP
+The output is:
+.PP
+.RS 4
+.EX
+fmax(3.5, 2.0)  = 3.5
+fmin(3.5, 2.0)  = 2.0
+fdim(3.5, 2.0)  = 1.5
+fdim(2.0, 3.5)  = 0.0
+fmax(NaN, 1.0)  = 1.0
+.EE
+.RE
+.SH SEE ALSO
+.BR fabs (3),
+.BR fma (3),
+.BR fmaximum (3),
+.BR copysign (3),
+.BR math_error (7)
+.SH COLOPHON
+This page is part of the Substrate operating system documentation.

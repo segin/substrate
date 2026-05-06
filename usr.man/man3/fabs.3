@@ -1,0 +1,109 @@
+.TH FABS 3 "May 2026" "Substrate" "Library Functions Manual"
+.SH NAME
+fabs, fabsf, fabsl \- absolute value of floating-point number
+.SH LIBRARY
+Math library (libm, \-lm)
+.SH SYNOPSIS
+.B #include <math.h>
+.PP
+.BI "double fabs(double " x );
+.br
+.BI "float fabsf(float " x );
+.br
+.BI "long double fabsl(long double " x );
+.SH DESCRIPTION
+The
+.BR fabs ()
+function computes the absolute value of
+.I x .
+.PP
+The
+.BR fabsf ()
+and
+.BR fabsl ()
+variants take and return
+.B float
+and
+.B "long double"
+values respectively.
+.SH RETURN VALUE
+On success, these functions return the absolute value of
+.IR x ,
+which is a non-negative number of the same magnitude as
+.I x
+but with the sign bit cleared.
+.PP
+If
+.I x
+is +0 or \-0,
+.BR fabs ()
+returns +0.
+.PP
+If
+.I x
+is positive infinity or negative infinity,
+.BR fabs ()
+returns positive infinity.
+.PP
+If
+.I x
+is NaN,
+.BR fabs ()
+returns NaN.
+.SH ERRORS
+These functions do not raise floating-point exceptions and do not set
+.IR errno .
+.SH ATTRIBUTES
+For an explanation of the terms used in this section, see
+.BR attributes (7).
+.TS
+allbox;
+lb lb lb
+l l l.
+Interface	Attribute	Value
+T{
+.BR fabs (),
+.BR fabsf (),
+.BR fabsl ()
+T}	Thread safety	MT-Safe
+.TE
+.SH STANDARDS
+.BR fabs (),
+.BR fabsf (),
+and
+.BR fabsl ()
+conform to C99 and POSIX.1-2008.  The handling of special arguments
+follows C99 Annex F (IEC 60559).
+.SH EXAMPLES
+The following program computes the absolute value of a user-supplied
+floating-point number:
+.PP
+.RS 4
+.EX
+#include <math.h>
+#include <stdio.h>
+
+int
+main(void)
+{
+    double x = \-12.5;
+    printf("fabs(%.1f) = %.1f\en", x, fabs(x));
+    return 0;
+}
+.EE
+.RE
+.PP
+The output is:
+.PP
+.RS 4
+fabs(\-12.5) = 12.5
+.RE
+.SH SEE ALSO
+.BR copysign (3),
+.BR fdim (3),
+.BR fmax (3),
+.BR fmin (3),
+.BR hypot (3),
+.BR math_error (7)
+.SH COLOPHON
+This page is part of the Substrate operating system documentation.

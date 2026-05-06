@@ -1,0 +1,155 @@
+.TH REMQUO 3 "May 2026" "Substrate" "Library Functions Manual"
+.SH NAME
+remquo, remquof, remquol \- remainder with quotient bits
+.SH LIBRARY
+Math library (libm, \-lm)
+.SH SYNOPSIS
+.B #include <math.h>
+.PP
+.BI "double remquo(double " x ", double " y ", int *" quo );
+.br
+.BI "float remquof(float " x ", float " y ", int *" quo );
+.br
+.BI "long double remquol(long double " x ", long double " y ", int *" quo );
+.SH DESCRIPTION
+The
+.BR remquo ()
+function computes the IEEE 754 remainder of the division of
+.I x
+by
+.I y
+(same as
+.BR remainder (3)),
+and stores a copy of the low-order bits of the quotient (along with the
+sign) in the
+.B int
+variable pointed to by
+.IR quo .
+.PP
+Specifically,
+.I *quo
+is set to
+.I sign(x/y) * (quotient & 0x7) ,
+where the quotient is computed using IEEE 754 rounding (round-to-nearest,
+ties to even).  The sign of
+.I *quo
+is the sign of
+.I x/y .
+.PP
+This function is useful for argument reduction in trigonometric functions
+and other algorithms that require both the remainder and knowledge of which
+octant or quadrant the original quotient falls into.
+.PP
+The
+.BR remquof ()
+and
+.BR remquol ()
+variants take and return
+.B float
+and
+.B "long double"
+values respectively.
+.SH RETURN VALUE
+On success,
+.BR remquo ()
+returns the remainder of the division (the same value as
+.BR remainder (3)),
+and stores the quotient bits in
+.RI * quo .
+.PP
+If
+.I y
+is zero, the function returns NaN and stores an unspecified value in
+.RI * quo .
+.PP
+If
+.I x
+or
+.I y
+is NaN, NaN is returned and
+.RI * quo
+is set to 0.
+.PP
+If
+.I x
+is \(+/-\(infinity, NaN is returned and
+.RI * quo
+is set to 0.
+.PP
+If
+.I y
+is \(+/-\(infinity and
+.I x
+is finite, the remainder (
+.I x
+itself) is returned and
+.RI * quo
+is set to
+.I sign(x/y) .
+.SH ERRORS
+See
+.BR math_error (7)
+for information on how to determine whether an error has occurred when
+calling these functions.
+.PP
+The following errors can occur:
+.TP
+Domain error: \fIy\fR is zero
+An invalid floating-point exception
+.RB ( FE_INVALID )
+is raised.  If
+.I "math_errhandling & MATH_ERRNO"
+is non-zero,
+.I errno
+is set to
+.BR EDOM .
+.SH ATTRIBUTES
+For an explanation of the terms used in this section, see
+.BR attributes (7).
+.TS
+allbox;
+lb lb lb
+l l l.
+Interface	Attribute	Value
+T{
+.BR remquo (),
+.BR remquof (),
+.BR remquol ()
+T}	Thread safety	MT-Safe
+.TE
+.SH STANDARDS
+.BR remquo ()
+and its variants conform to C99 and POSIX.1-2008.
+.PP
+The handling of special arguments follows C99 Annex F (IEC 60559).
+.SH EXAMPLES
+The following program uses
+.BR remquo ()
+to implement trigonometric argument reduction for sine:
+.PP
+.RS 4
+.EX
+#include <math.h>
+#include <stdio.h>
+
+int
+main(void)
+{
+    double angle = 5.0 * M_PI;
+    int quo;
+    double remainder = remquo(angle, M_PI, &quo);
+
+    printf("Angle: %.4f radians\en", angle);
+    printf("Remainder: %.4f, Quadrant bits: %d\en", remainder, quo);
+    return 0;
+}
+.EE
+.RE
+.SH SEE ALSO
+.BR fmod (3),
+.BR remainder (3),
+.BR sin (3),
+.BR cos (3),
+.BR math_error (7)
+.SH COLOPHON
+This page is part of the Substrate operating system documentation.

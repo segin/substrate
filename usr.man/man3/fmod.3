@@ -1,0 +1,194 @@
+.TH FMOD 3 "May 2026" "Substrate" "Library Functions Manual"
+.SH NAME
+fmod, fmodf, fmodl, remainder, remainderf, remainderl \- floating-point remainder
+.SH LIBRARY
+Math library (libm, \-lm)
+.SH SYNOPSIS
+.B #include <math.h>
+.PP
+.BI "double fmod(double " x ", double " y );
+.br
+.BI "float fmodf(float " x ", float " y );
+.br
+.BI "long double fmodl(long double " x ", long double " y );
+.PP
+.BI "double remainder(double " x ", double " y );
+.br
+.BI "float remainderf(float " x ", float " y );
+.br
+.BI "long double remainderl(long double " x ", long double " y );
+.SH DESCRIPTION
+The
+.BR fmod ()
+function computes the floating-point remainder of the division of
+.I x
+by
+.IR y .
+The result has the same sign as
+.I x
+(the dividend) and magnitude less than the magnitude of
+.I y
+(the divisor).
+Specifically, for any representable values of
+.I x
+and non-zero
+.IR y ,
+.IR fmod(x, y) " = " x " \- n*" y ,
+where
+.I n
+is the quotient of
+.I x / y ,
+rounded toward zero to an integer.
+.PP
+The
+.BR remainder ()
+function computes the IEEE 754 remainder of the division of
+.I x
+by
+.IR y .
+The result is computed as
+.IR x " \- n*" y ,
+where
+.I n
+is the quotient of
+.I x / y
+rounded to the nearest integer.  When the quotient is exactly halfway
+between two integers (i.e., the fractional part is 0.5), the quotient
+is rounded to the nearest even integer (banker's rounding).  The result
+has the same sign as
+.I x
+and magnitude less than half the magnitude of
+.IR y .
+.PP
+For most arguments, the result of
+.BR remainder ()
+is smaller in magnitude than the result of
+.BR fmod (),
+making it more accurate for subsequent calculations.
+.PP
+The
+.BR fmodf ()
+and
+.BR fmodl ()
+variants take and return
+.B float
+and
+.B "long double"
+values respectively.  Similarly for
+.BR remainderf ()
+and
+.BR remainderl ().
+.SH RETURN VALUE
+On success, these functions return the remainder of the division,
+with magnitude less than
+.I y
+(or less than
+.I y /2
+for
+.BR remainder ()).
+.PP
+If
+.I y
+is zero, the functions return NaN and raise an invalid floating-point
+exception.
+.PP
+If
+.I x
+or
+.I y
+is NaN, NaN is returned.
+.PP
+If
+.I x
+is \(+/-\(infinity, NaN is returned.
+.PP
+If
+.I y
+is \(+/-\(infinity and
+.I x
+is finite, the functions return
+.I x
+unchanged.
+.SH ERRORS
+See
+.BR math_error (7)
+for information on how to determine whether an error has occurred when
+calling these functions.
+.PP
+The following errors can occur:
+.TP
+Domain error: \fIy\fR is zero
+An invalid floating-point exception
+.RB ( FE_INVALID )
+is raised.  If
+.I "math_errhandling & MATH_ERRNO"
+is non-zero,
+.I errno
+is set to
+.BR EDOM .
+.SH ATTRIBUTES
+For an explanation of the terms used in this section, see
+.BR attributes (7).
+.TS
+allbox;
+lb lb lb
+l l l.
+Interface	Attribute	Value
+T{
+.BR fmod (),
+.BR fmodf (),
+.BR fmodl (),
+.BR remainder (),
+.BR remainderf (),
+.BR remainderl ()
+T}	Thread safety	MT-Safe
+.TE
+.SH STANDARDS
+.BR fmod ()
+and its variants conform to C99 and POSIX.1-2008.
+.PP
+.BR remainder ()
+and its variants conform to C99 and POSIX.1-2008.
+.PP
+The handling of special arguments follows C99 Annex F (IEC 60559).
+.SH EXAMPLES
+The following program demonstrates the difference between
+.BR fmod ()
+and
+.BR remainder ():
+.PP
+.RS 4
+.EX
+#include <math.h>
+#include <stdio.h>
+
+int
+main(void)
+{
+    printf("fmod(5.3, 2.2)       = %.3f\en", fmod(5.3, 2.2));
+    printf("remainder(5.3, 2.2)  = %.3f\en", remainder(5.3, 2.2));
+    printf("fmod(\-5.3, 2.2)      = %.3f\en", fmod(\-5.3, 2.2));
+    printf("remainder(\-5.3, 2.2) = %.3f\en", remainder(\-5.3, 2.2));
+    return 0;
+}
+.EE
+.RE
+.PP
+The output is:
+.PP
+.RS 4
+.EX
+fmod(5.3, 2.2)       = 1.000
+remainder(5.3, 2.2)  = \-0.100
+fmod(\-5.3, 2.2)      = \-1.000
+remainder(\-5.3, 2.2) = 0.100
+.EE
+.RE
+.SH SEE ALSO
+.BR div (3),
+.BR fabs (3),
+.BR fdim (3),
+.BR remquo (3),
+.BR math_error (7)
+.SH COLOPHON
+This page is part of the Substrate operating system documentation.
