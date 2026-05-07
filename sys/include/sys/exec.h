@@ -49,6 +49,18 @@ void exec_pin_current_thread(void);
 void exec_unpin_current_thread(void);
 void exec_maybe_unpin_current_thread(int from_user);
 
+/*
+ * Per-thread exec-arg cleanup list.  Personalities that kmalloc argv/envp
+ * out of segmented user memory (e.g. ELKS) push their kbufs here before
+ * calling kern_execve.  Format handlers drain the list immediately before
+ * the userspace jump on success; kern_execve drains it on failure.
+ *
+ * exec_cleanup_push: returns 0 on success, -1 if the list is full.
+ * exec_cleanup_drain: idempotent — safe to call when count==0.
+ */
+int exec_cleanup_push(void (*free_fn)(void *), void *ptr);
+void exec_cleanup_drain(void);
+
 #ifdef HOST_TEST
 int exec_handler_registered(const char *name);
 #endif

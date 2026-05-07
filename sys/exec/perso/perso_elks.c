@@ -2,6 +2,7 @@
 #include <exec/perso/elks_syscall_table.h>
 #include <exec/perso/elks_kmem.h>
 #include <exec/formats/elks_aout.h>
+#include <sys/exec.h>
 #include <sys/errno.h>
 #include <sys/core.h>
 #include <sys/termios.h>
@@ -1694,6 +1695,17 @@ static int elks_sys_vfork(uint32_t unused0, uint32_t unused1, uint32_t unused2,
     return sys_vfork();
 }
 
+static void elks_kfree_path(void *p) {
+    char *s = p;
+    if (s) {
+        kfree(s, strlen(s) + 1U);
+    }
+}
+
+static void elks_kfree_vector_v(void *v) {
+    elks_free_vector((char **)v);
+}
+
 static int elks_sys_execve(uint32_t path_off, uint32_t stack_off, uint32_t stack_bytes,
                            uint32_t unused3, uint32_t unused4, uint32_t unused5,
                            uint32_t unused6, uint32_t unused7) {
@@ -1704,22 +1716,41 @@ static int elks_sys_execve(uint32_t path_off, uint32_t stack_off, uint32_t stack
 
     (void)unused3; (void)unused4; (void)unused5; (void)unused6; (void)unused7;
 
+    /*
+     * Register all kmalloc'd kbufs with the per-thread exec cleanup list:
+     * a successful exec hands control off to user mode via jump_to_elks
+     * without unwinding this frame, so any kfree below kern_execve becomes
+     * dead code on the success path and leaks ~150–400 B/exec.  The handler
+     * (elks_load) drains the list immediately before the 16-bit iret; on
+     * failure, kern_execve drains it for us.
+     */
     ret = elks_copy_ds_string(path_off, &path);
     if (ret != 0) {
         return ret;
     }
+    if (exec_cleanup_push(elks_kfree_path, path) < 0) {
+        elks_kfree_path(path);
+        return -ENOMEM;
+    }
 
     ret = elks_unpack_exec_stack(stack_off, stack_bytes, &argv, &envp);
     if (ret != 0) {
-        kfree(path, strlen(path) + 1U);
+        exec_cleanup_drain();
         return ret;
     }
+    if (exec_cleanup_push(elks_kfree_vector_v, argv) < 0) {
+        exec_cleanup_drain();
+        elks_free_vector(argv);
+        elks_free_vector(envp);
+        return -ENOMEM;
+    }
+    if (exec_cleanup_push(elks_kfree_vector_v, envp) < 0) {
+        exec_cleanup_drain();
+        elks_free_vector(envp);
+        return -ENOMEM;
+    }
 
-    ret = kern_execve(path, argv, envp);
-    elks_free_vector(argv);
-    elks_free_vector(envp);
-    kfree(path, strlen(path) + 1U);
-    return ret;
+    return kern_execve(path, argv, envp);
 }
 
 static int elks_do_stat_path(uint32_t path_off, uint32_t stat_off, int follow_links) {

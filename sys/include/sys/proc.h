@@ -243,7 +243,22 @@ typedef struct thread {
 
     // Exec recursion tracking (shebang scripts)
     int                      script_depth;
-    
+
+    /*
+     * Personality-allocated args that must outlive the syscall layer because
+     * a successful exec never returns through the caller's frame.  Pushed by
+     * personalities that kmalloc argv/envp from segmented user memory (ELKS),
+     * drained by the format handler immediately before the userspace jump,
+     * or by kern_execve on failure.  Keep small — only the vector heads need
+     * tracking; per-string frees happen inside the registered free_fn.
+     */
+#define EXEC_CLEANUP_MAX 4
+    struct {
+        void (*free_fn)(void *);
+        void *ptr;
+    } exec_cleanup[EXEC_CLEANUP_MAX];
+    uint8_t exec_cleanup_count;
+
     // Syscall registers (for fork/vfork)
     void *syscall_regs;
 

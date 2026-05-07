@@ -94,6 +94,39 @@ void exec_maybe_unpin_current_thread(int from_user) {
     exec_unpin_current_thread();
 }
 
+int exec_cleanup_push(void (*free_fn)(void *), void *ptr) {
+    if (!current_thread || !free_fn) {
+        return -1;
+    }
+    if (current_thread->exec_cleanup_count >= EXEC_CLEANUP_MAX) {
+        return -1;
+    }
+    uint8_t i = current_thread->exec_cleanup_count;
+    current_thread->exec_cleanup[i].free_fn = free_fn;
+    current_thread->exec_cleanup[i].ptr = ptr;
+    current_thread->exec_cleanup_count = (uint8_t)(i + 1);
+    return 0;
+}
+
+void exec_cleanup_drain(void) {
+    if (!current_thread) {
+        return;
+    }
+    uint8_t n = current_thread->exec_cleanup_count;
+    /* Reset the count first so a recursive drain (or an exec that re-enters
+     * via a free_fn — none today, but defensive) sees an empty list. */
+    current_thread->exec_cleanup_count = 0;
+    for (uint8_t i = 0; i < n; i++) {
+        void (*free_fn)(void *) = current_thread->exec_cleanup[i].free_fn;
+        void *ptr = current_thread->exec_cleanup[i].ptr;
+        current_thread->exec_cleanup[i].free_fn = NULL;
+        current_thread->exec_cleanup[i].ptr = NULL;
+        if (free_fn) {
+            free_fn(ptr);
+        }
+    }
+}
+
 /*
  * exec_dispatch
  *

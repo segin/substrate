@@ -564,7 +564,11 @@ int elks_load(int fd, const char *path, char *const argv[], char *const envp[]) 
     } else {
         elks_stack_size = plan.data_limit;
     }
-    
+
+    /* Last opportunity to free personality-allocated argv/envp/path before the
+     * 16-bit iret takes us out of any return path that could reach kfree. */
+    exec_cleanup_drain();
+
     jump_to_elks(hdr.entry, user_sp ? user_sp : 0xFFFE, layout.cs_sel, layout.ds_sel,
                  layout.ss_sel, layout.es_sel, elks_stack_size);
     

@@ -2264,6 +2264,11 @@ int kern_execve(const char *f, char *const a[], char *const e[]) {
         random_on_exec();
     }
     exec_unpin_current_thread();
+    /* On success exec_dispatch never returns; on failure, free any
+     * personality-allocated argv/envp/path the caller pushed before us. */
+    if (ret != 0) {
+        exec_cleanup_drain();
+    }
     return ret;
 }
 
