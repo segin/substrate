@@ -6,6 +6,7 @@
 #include <kern/panic.h>
 #include <string.h>
 #include <vm/vm_map.h>
+#include <vm/vm_object.h>
 #include <vm/vm_kmem.h>
 #include <exec/perso/personality.h>
 #include <exec/perso/linux/linux_exec.h>
@@ -620,6 +621,65 @@ uint32_t elf_load(fs_node_t *file, uint32_t load_base, int is_main_image,
             
             // Allocate and map pages for this segment
             // Track PA for each VA so we can write to it via kernel mapping
+            // Determine permissions from ELF segment flags
+            int prot = 0;
+            if (phdr.p_flags & 0x4) prot |= VM_PROT_READ;    // PF_R
+            if (phdr.p_flags & 0x2) prot |= VM_PROT_WRITE;   // PF_W
+            if (phdr.p_flags & 0x1) prot |= VM_PROT_EXEC;    // PF_X
+
+            /*
+             * SHARED FILE MAPPING FAST PATH.
+             *
+             * If the segment is fully file-backed (filesz == memsz, no BSS
+             * tail) and we have a vm_map available, plumb it through a
+             * shared vnode-backed vm_object instead of allocating fresh
+             * physical pages and copying.  This is what lets every
+             * process exec'ing the same binary share the same physical
+             * `.text`/`.rodata` pages — the page cache does the
+             * deduplication automatically the moment the second process
+             * faults on a page already resident from the first.
+             *
+             * Page faults inside this region are resolved by vm_fault →
+             * vnode pager, which reads the bytes from `file` on first
+             * touch.  Writes (e.g. relocations into a writable
+             * fully-file-backed segment, which is rare but possible)
+             * trigger COW per the existing fault path.
+             *
+             * Falls back to the per-page pmm_alloc_block + read loop
+             * below if the fast path can't be used.
+             */
+            if (current_process && current_process->vm_map &&
+                phdr.p_filesz == phdr.p_memsz && phdr.p_filesz > 0) {
+                /* p_offset and p_vaddr must be page-congruent (ELF spec
+                 * §"Program Loading"); the file offset for va_start is
+                 * therefore p_offset minus the same in-page slack. */
+                uint64_t in_page_off = (uint64_t)(vaddr & 0xFFF);
+                uint64_t file_off = (uint64_t)phdr.p_offset - in_page_off;
+                size_t obj_len = (size_t)(va_end - va_start);
+
+                vm_object_t *fobj = mmap_get_shared_backing_object(
+                    file, obj_len, (uint32_t)prot, file_off);
+                if (fobj) {
+                    int rc = vm_map_insert(current_process->vm_map, fobj, 0,
+                                           va_start, va_end,
+                                           (uint8_t)prot,
+                                           (uint8_t)VM_PROT_ALL,
+                                           VM_INHERIT_COPY);
+                    if (rc == 0) {
+                        if (va_end > max_vaddr) max_vaddr = va_end;
+                        /* Done: pages will lazy-fault through the pager. */
+                        continue;
+                    }
+                    vm_object_deallocate(fobj);
+                    kprint("ELF: vm_map_insert for shared segment failed; "
+                           "falling back to per-page copy\n");
+                }
+                /* Fall through to legacy path on any allocation failure. */
+            }
+
+            // Legacy path: per-process anonymous pages + manual file copy.
+            // Used for segments with BSS overflow (filesz != memsz), or
+            // when the vm_map isn't available.
             uint32_t segment_pages = (va_end - va_start) / 0x1000;
             elf_page_map_t *page_maps;
             int num_pages = 0;
@@ -630,13 +690,8 @@ uint32_t elf_load(fs_node_t *file, uint32_t load_base, int is_main_image,
                 kfree(image, sizeof(*image));
                 return 0;
             }
-            
-            // Determine permissions from ELF segment flags
-            int prot = 0;
-            if (phdr.p_flags & 0x4) prot |= VM_PROT_READ;    // PF_R
-            if (phdr.p_flags & 0x2) prot |= VM_PROT_WRITE;   // PF_W
-            if (phdr.p_flags & 0x1) prot |= VM_PROT_EXEC;    // PF_X
-            
+
+
             for (uint32_t va = va_start; va < va_end; va += 0x1000) {
                 // Allocate physical page
                 void *pa = pmm_alloc_block();
@@ -1187,6 +1242,15 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
     elf_image_info_t *image = NULL;
     fs_node_t *root = (current_process && current_process->root_node) ? current_process->root_node : fs_root;
     pmap_t old_pmap = NULL;
+    /*
+     * Save the old vm_map up-front: we install a fresh vm_map before
+     * elf_load() runs so that PT_LOAD segments can be inserted with
+     * vm_map_insert() against vnode-backed shared vm_objects.  On
+     * rollback we restore old_vm_map and destroy the new one; on
+     * commit we destroy the old one.
+     */
+    struct vm_map *old_vm_map = current_process ? current_process->vm_map : NULL;
+    struct vm_map *new_vm_map = NULL;
     int old_perso_id = current_process ? current_process->perso_id : PERS_NATIVE;
     int switched_pmap = 0;
     int vm_state_committed = 0;
@@ -1305,6 +1369,20 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
     pmap_activate(new_pmap);
     switched_pmap = 1;
 
+    // Build the new vm_map before loading any ELF segments so that
+    // elf_load() can use vm_map_insert() against vnode-backed shared
+    // objects (.text/.rodata pages of the same binary will then
+    // physically share between every process exec'ing it).
+    new_vm_map = vm_map_create(new_pmap, 0x10000, 0xC0000000);
+    if (!new_vm_map) {
+        kprint("execve: Failed to create vm_map\n");
+        error_code = -1;
+        goto cleanup;
+    }
+    if (current_process) {
+        current_process->vm_map = new_vm_map;
+    }
+
     // Load the ELF
     char interp_path[256];
     uint32_t interp_len = sizeof(interp_path);
@@ -1399,14 +1477,11 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
          * ELKS/private-LDT execution context across exec.
          */
         ldt_free_process(current_process);
-        // Initialize VM map
-        if (current_process->vm_map) {
-             vm_map_destroy(current_process->vm_map);
-        }
-        // Use the proper pmap pointer (already active)
-        // min=0x10000: reserve low 64KB to catch NULL dereferences and
-        // match typical Linux mmap_min_addr default.
-        current_process->vm_map = vm_map_create((pmap_t)(uintptr_t)current_process->pmap, 0x10000, 0xC0000000);
+        /*
+         * vm_map already swapped earlier (so elf_load could use it).
+         * The old vm_map will be destroyed below as part of commit;
+         * mark the swap committed so cleanup leaves new_vm_map alone.
+         */
         vm_state_committed = 1;
     }
 
@@ -1500,6 +1575,16 @@ cleanup:
         if (current_process) {
             current_process->pmap = (struct pmap *)(uintptr_t)old_pmap;
         }
+    }
+    if (!vm_state_committed && new_vm_map) {
+        /* Restore the old vm_map and destroy the failed-exec one. */
+        if (current_process) {
+            current_process->vm_map = old_vm_map;
+        }
+        vm_map_destroy(new_vm_map);
+    } else if (vm_state_committed && old_vm_map) {
+        /* Commit: drop the old vm_map; new one is now installed. */
+        vm_map_destroy(old_vm_map);
     }
     if (!vm_state_committed && new_pmap) {
         pmap_destroy(new_pmap);

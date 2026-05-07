@@ -82,8 +82,8 @@ typedef struct shared_file_object_entry {
 static shared_file_object_entry_t *shared_file_objects;
 static spinlock_t shared_file_objects_lock = SPINLOCK_INIT("mmap_shared_fileobj");
 
-static vm_object_t *mmap_get_shared_backing_object(fs_node_t *node, size_t length,
-                                                    uint32_t vm_prot, uint64_t offset) {
+vm_object_t *mmap_get_shared_backing_object(fs_node_t *node, size_t length,
+                                             uint32_t vm_prot, uint64_t offset) {
     uint64_t page_offset = offset >> 12;
     shared_file_object_entry_t *entry;
 

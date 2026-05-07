@@ -179,4 +179,50 @@ struct winsize {
 };
 #endif
 
+/*
+ * POSIX termios(3) attribute-control constants and prototypes.
+ *
+ * These are user-space API; the kernel implements them via the
+ * underlying TCGETS / TCSETS{,W,F} ioctls.  They live in this
+ * header rather than the userspace-only one because the kernel
+ * Makefile search order puts sys/include before include/, so a
+ * userspace component built with the kernel CFLAGS would
+ * otherwise miss the prototypes.
+ */
+#define TCSANOW    0    /* change attributes immediately */
+#define TCSADRAIN  1    /* change after pending output has drained */
+#define TCSAFLUSH  2    /* drain output, flush input, then change */
+
+/* tcflush(3) queue selectors. */
+#ifndef TCIFLUSH
+#define TCIFLUSH   0
+#define TCOFLUSH   1
+#define TCIOFLUSH  2
+#endif
+
+/* tcflow(3) actions. */
+#ifndef TCOOFF
+#define TCOOFF     0
+#define TCOON      1
+#define TCIOFF     2
+#define TCION      3
+#endif
+
+#ifndef _KERNEL
+#include <sys/types.h>      /* for pid_t */
+int   tcgetattr(int fd, struct termios *termios_p);
+int   tcsetattr(int fd, int optional_actions, const struct termios *termios_p);
+int   tcsendbreak(int fd, int duration);
+int   tcdrain(int fd);
+int   tcflush(int fd, int queue_selector);
+int   tcflow(int fd, int action);
+pid_t tcgetsid(int fd);
+void  cfmakeraw(struct termios *termios_p);
+speed_t cfgetispeed(const struct termios *termios_p);
+speed_t cfgetospeed(const struct termios *termios_p);
+int   cfsetispeed(struct termios *termios_p, speed_t speed);
+int   cfsetospeed(struct termios *termios_p, speed_t speed);
+int   cfsetspeed(struct termios *termios_p, speed_t speed);
+#endif
+
 #endif

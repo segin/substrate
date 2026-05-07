@@ -58,4 +58,17 @@ void vm_object_add_page(vm_object_t *object, vm_page_t *page);
 void vm_object_remove_page(vm_object_t *object, vm_page_t *page);
 vm_page_t *vm_object_lookup_page(vm_object_t *object, uint64_t pindex);
 
+/*
+ * Get (or create-and-cache) a shared vnode-backed vm_object for the
+ * given file region.  Used by both sys_mmap(MAP_SHARED, fd, ...) and
+ * the ELF loader so that `.text` pages of an executable are shared
+ * across every process exec'ing the same binary.
+ *
+ * Returns a referenced vm_object — caller must vm_object_deallocate
+ * when its mapping reference goes away.
+ */
+struct fs_node;
+vm_object_t *mmap_get_shared_backing_object(struct fs_node *node, size_t length,
+                                             uint32_t vm_prot, uint64_t offset);
+
 #endif
