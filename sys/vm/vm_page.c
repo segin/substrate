@@ -527,12 +527,21 @@ void vm_page_free(vm_page_t *m) {
 	// Remove all pv_entry backlinks
 	pv_remove_all(m);
 
-	// Reset state
+	// Reset state.
+	//
+	// Do NOT set PG_FREE here.  vm_phys_free_page() interprets PG_FREE
+	// as "this page is already on the buddy free list" and early-returns
+	// to guard against double-free.  Setting it before the call means
+	// the page never actually reaches vm_phys_buddy_enqueue() — the
+	// counter at vm_phys_free_count is silently never incremented and
+	// the physical memory is permanently lost from the allocator's
+	// view.  vm_phys_buddy_enqueue() will set PG_FREE itself once the
+	// page is actually on the free list.
 	m->ref_count = 0;
 	m->wire_count = 0;
 	m->access_count = 0;
 	m->age = 0;
-	m->flags = PG_FREE;
+	m->flags = 0;
 
 	// Return to generic PMM (Buddy Allocator Coalescing)
 	vm_phys_free_page(m);
