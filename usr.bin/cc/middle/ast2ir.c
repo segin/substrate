@@ -4067,7 +4067,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             }
             return cast_value(sf, lhs, CC_VAL_I64, diag);
         }
-        long mem_size = type_size_bytes(e->value_type);
+        long mem_size = type_size_bytes_with_struct(tu, e->value_type, e->struct_id);
         if (mem_size <= 0) {
             set_diag(diag, "unsupported dereference type size in lowering");
             return -1;
@@ -6682,7 +6682,10 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                             pass_union_scalar = 1;
                         }
                     }
-                    if (!is_transparent_union && !pass_union_scalar && g_pointer_size_bytes == 8 && agg_size > 16) {
+                    if (!is_transparent_union && !pass_union_scalar && agg_size == 0) {
+                        in.call_arg_abi[i] = CC_CALL_ARG_ABI_ZERO;
+                        arg_size = 0;
+                    } else if (!is_transparent_union && !pass_union_scalar && g_pointer_size_bytes == 8 && agg_size > 16) {
                         pass_agg_mem = 1;
                     } else if (!is_transparent_union && !pass_union_scalar && g_pointer_size_bytes == 8 &&
                                agg_size > g_pointer_size_bytes && agg_size <= 16) {
@@ -7495,10 +7498,16 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                                            e->array_ndim, e->array_dims, cast_src, diag);
         }
         if (aggregate_cast_target) {
+            const cc_struct_def_t *target_sd;
             int dst_ptr;
             int storesrc;
             long store_size;
             long sz = type_size_bytes_with_struct(tu, e->aux_type, e->aux_struct_id);
+            if ((size_t)e->aux_struct_id >= tu->struct_count) {
+                set_diag(diag, "invalid aggregate cast target in lowering");
+                return -1;
+            }
+            target_sd = &tu->structs[e->aux_struct_id];
             if (sz <= 0) {
                 sz = 1;
             }
@@ -7516,9 +7525,19 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 }
                 return dst_ptr;
             }
-            if ((size_t)e->aux_struct_id >= tu->struct_count || !tu->structs[e->aux_struct_id].is_union) {
-                set_diag(diag, "aggregate cast lowering only supports union targets");
-                return -1;
+            if (!target_sd->is_union) {
+                if (cast_src->value_type != CC_TYPE_VOID || cast_src->struct_id < 0) {
+                    set_diag(diag, "struct cast lowering requires aggregate source");
+                    return -1;
+                }
+                storesrc = lower_expr(tu, sf, ctx, vars, var_count, depth, cast_src, diag);
+                if (storesrc < 0) {
+                    return -1;
+                }
+                if (emit_memcpy_instr(sf, dst_ptr, storesrc, sz, diag) != 0) {
+                    return -1;
+                }
+                return dst_ptr;
             }
             {
                 const cc_struct_member_t *m = find_union_cast_member(tu, e->aux_struct_id, cast_src->value_type);
@@ -8414,6 +8433,8 @@ static int lower_struct_init_to_ptr(const cc_translation_unit_t *tu, cc_ssa_func
                                     var_entry_t *vars, size_t var_count, int depth, int base_ptr, int struct_id,
                                     const cc_expr_t *init, cc_diag_t *diag);
 static int find_struct_member_index_by_name(const cc_struct_def_t *sd, const char *name);
+static int find_struct_member_recursive(const cc_translation_unit_t *tu, int struct_id, const char *name,
+                                        const cc_struct_member_t **out_member, long *out_off);
 static size_t struct_next_init_member_index(const cc_struct_def_t *sd, size_t member_idx);
 
 static const cc_expr_t *unwrap_scalar_initializer_expr(const cc_expr_t *e, cc_diag_t *diag) {
@@ -9135,56 +9156,46 @@ static int lower_struct_init_to_ptr(const cc_translation_unit_t *tu, cc_ssa_func
         const cc_expr_t *item = raw;
         size_t member_idx = next_member;
         const cc_struct_member_t *m;
+        const cc_struct_member_t *nested_m = NULL;
+        int is_nested_designator = 0;
+        long nested_off = 0;
+        long field_off = 0;
         int field_ptr = base_ptr;
         cc_ssa_instr_t in;
 
         if (raw != NULL && raw->kind == CC_EXPR_MEMBER && raw->lhs == NULL && raw->rhs != NULL && raw->ident != NULL) {
             int didx = find_struct_member_index_by_name(sd, raw->ident);
             if (didx < 0) {
-                /* Anonymous nested struct/union: try matching the
-                 * designator against members of any anonymous member's
-                 * struct definition. Linux uses this pattern in
-                 * `struct hw_perf_event` and several other places. */
-                size_t mi;
-                for (mi = 0; mi < sd->member_count && didx < 0; ++mi) {
-                    const cc_struct_member_t *am = &sd->members[mi];
-                    const cc_struct_def_t *asd;
-                    if (am->name != NULL && am->name[0] != '\0') continue;
-                    if (am->type != CC_TYPE_VOID || am->type_struct_id < 0) continue;
-                    asd = (am->type_struct_id < (int)tu->struct_count) ?
-                          &tu->structs[am->type_struct_id] : NULL;
-                    if (asd != NULL) {
-                        int sub = find_struct_member_index_by_name(asd, raw->ident);
-                        if (sub >= 0) {
-                            didx = (int)mi;
-                            break;
-                        }
-                    }
+                if (find_struct_member_recursive(tu, struct_id, raw->ident, &nested_m, &nested_off) == 0) {
+                    is_nested_designator = 1;
                 }
             }
-            if (didx < 0) {
+            if (didx < 0 && !is_nested_designator) {
                 char msg[160];
                 snprintf(msg, sizeof(msg), "unknown designated struct member '%s' in local initializer",
                          raw->ident);
                 set_diag(diag, msg);
                 return -1;
             }
-            member_idx = (size_t)didx;
+            if (!is_nested_designator) {
+                member_idx = (size_t)didx;
+            }
             item = raw->rhs;
         }
-        if (member_idx >= sd->member_count) {
+        if (!is_nested_designator && member_idx >= sd->member_count) {
             break;
         }
-        m = &sd->members[member_idx];
-        if (!sd->is_union) {
+        m = is_nested_designator ? nested_m : &sd->members[member_idx];
+        if (!is_nested_designator && !sd->is_union) {
             next_member = struct_next_init_member_index(sd, member_idx);
         }
-        if (sd->has_flexible_array && member_idx + 1 == sd->member_count) {
+        if (!is_nested_designator && sd->has_flexible_array && member_idx + 1 == sd->member_count) {
             /* GNU-compatible extension: accept and ignore flexible-array initializers. */
             continue;
         }
-        if (m->offset != 0) {
-            int offv = emit_const_i64_instr(sf, m->offset);
+        field_off = is_nested_designator ? nested_off : m->offset;
+        if (field_off != 0) {
+            int offv = emit_const_i64_instr(sf, field_off);
             if (offv < 0) {
                 return -1;
             }
@@ -14514,6 +14525,7 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
         for (j = 0; j < af->param_count; ++j) {
             cc_ssa_instr_t in;
             long param_size;
+            long aggregate_size = -1;
             int is_aggregate_param = (af->params[j].type == CC_TYPE_VOID && af->params[j].type_struct_id >= 0);
             int use_agg_mem_abi = 0;
             int use_agg_reg_abi = 0;
@@ -14526,10 +14538,15 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
             in.rhs = -1;
             in.param_index = (int)j;
             param_size = type_size_bytes_with_struct(tu, af->params[j].type, af->params[j].type_struct_id);
-            if (param_size <= 0) {
-                param_size = g_pointer_size_bytes;
+            if (is_aggregate_param) {
+                aggregate_size = param_size;
             }
-            if (is_aggregate_param && g_pointer_size_bytes == 8 && param_size > 16) {
+            if (param_size <= 0) {
+                param_size = is_aggregate_param && aggregate_size == 0 ? 0 : g_pointer_size_bytes;
+            }
+            if (is_aggregate_param && aggregate_size == 0) {
+                /* GNU C empty structs are zero-width ABI parameters. */
+            } else if (is_aggregate_param && g_pointer_size_bytes == 8 && param_size > 16) {
                 use_agg_mem_abi = 1;
             } else if (is_aggregate_param && g_pointer_size_bytes == 8 && param_size > g_pointer_size_bytes &&
                        param_size <= 16) {
@@ -14561,6 +14578,8 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                 sf->param_abi[j] = CC_CALL_ARG_ABI_AGG_MEM;
             } else if (use_agg_reg_abi) {
                 sf->param_abi[j] = CC_CALL_ARG_ABI_AGG_REG;
+            } else if (is_aggregate_param && aggregate_size == 0) {
+                sf->param_abi[j] = CC_CALL_ARG_ABI_ZERO;
             } else {
                 sf->param_abi[j] =
                     (unsigned char)(af->params[j].type == CC_TYPE_LDOUBLE ? CC_CALL_ARG_ABI_LDOUBLE
@@ -14578,17 +14597,24 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
             if (is_aggregate_param) {
                 long agg_size = type_size_bytes_with_struct(tu, af->params[j].type, af->params[j].type_struct_id);
                 int agg_addr;
-                if (agg_size <= 0) {
-                    set_diag(diag, "unsupported aggregate parameter size");
+                if (agg_size < 0) {
+                    char msg[192];
+                    snprintf(msg, sizeof(msg), "unsupported aggregate parameter size for %s.%s (struct_id=%d size=%ld)",
+                             af->name != NULL ? af->name : "<function>",
+                             af->params[j].name != NULL ? af->params[j].name : "<anonymous>",
+                             af->params[j].type_struct_id, agg_size);
+                    set_diag(diag, msg);
                     cc_ssa_module_free(out);
                     return -1;
                 }
-                agg_addr = emit_local_storage_alloc(sf, agg_size, diag);
+                agg_addr = emit_local_storage_alloc(sf, agg_size > 0 ? agg_size : 1, diag);
                 if (agg_addr < 0) {
                     cc_ssa_module_free(out);
                     return -1;
                 }
-                if (agg_size <= g_pointer_size_bytes) {
+                if (agg_size == 0) {
+                    /* No incoming ABI bytes exist for a GNU empty struct. */
+                } else if (agg_size <= g_pointer_size_bytes) {
                     cc_ssa_instr_t st;
                     memset(&st, 0, sizeof(st));
                     st.op = CC_SSA_STORE;

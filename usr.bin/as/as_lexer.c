@@ -837,6 +837,34 @@ static int tokenize_line(const char *file, unsigned line_no, const char *line, i
             memcpy(tok, line + start, n);
             tok[n] = '\0';
 
+            if (!saw_mnemonic) {
+                char *embedded_colon = strchr(tok, ':');
+                if (embedded_colon != NULL && embedded_colon != tok && embedded_colon[1] != '\0' &&
+                    token_looks_like_segment_prefix(tok) == 0) {
+                    as_token_kind_t rest_kind;
+                    char *rest = embedded_colon + 1;
+                    *embedded_colon = '\0';
+                    if (as_token_vec_push(line_tokens, AS_TOK_LABEL, tok, file, line_no, col) != 0) {
+                        free(tok);
+                        set_err(ctx, "%s:%u: out of memory", file, line_no);
+                        return -1;
+                    }
+                    rest_kind = classify_token(rest, intel_syntax);
+                    if (rest_kind == AS_TOK_IDENTIFIER) {
+                        rest_kind = AS_TOK_MNEMONIC;
+                    }
+                    if (as_token_vec_push(line_tokens, rest_kind, rest, file, line_no,
+                                          col + (unsigned)(rest - tok)) != 0) {
+                        free(tok);
+                        set_err(ctx, "%s:%u: out of memory", file, line_no);
+                        return -1;
+                    }
+                    saw_mnemonic = (rest_kind != AS_TOK_DIRECTIVE && rest_kind != AS_TOK_LABEL);
+                    free(tok);
+                    continue;
+                }
+            }
+
             if (n > 0 && tok[n - 1] == ':' && (token_looks_like_segment_prefix(tok) == 0 || !saw_mnemonic)) {
                 tok[n - 1] = '\0';
                 kind = AS_TOK_LABEL;

@@ -9,7 +9,8 @@
 typedef enum {
     ABI_LOC_GPR = 0,
     ABI_LOC_XMM,
-    ABI_LOC_STACK
+    ABI_LOC_STACK,
+    ABI_LOC_NONE
 } abi_loc_kind_t;
 
 typedef struct {
@@ -3251,7 +3252,17 @@ static abi_loc_t abi64_param_loc(const cc_ssa_function_t *f, int param_index, si
         int is_ldouble = (f->param_abi != NULL && f->param_abi[i] == CC_CALL_ARG_ABI_LDOUBLE) ? 1 : 0;
         int is_agg_mem = (f->param_abi != NULL && f->param_abi[i] == CC_CALL_ARG_ABI_AGG_MEM) ? 1 : 0;
         int is_agg_reg = (f->param_abi != NULL && f->param_abi[i] == CC_CALL_ARG_ABI_AGG_REG) ? 1 : 0;
+        int is_zero = (f->param_abi != NULL && f->param_abi[i] == CC_CALL_ARG_ABI_ZERO) ? 1 : 0;
         cc_value_type_t vt = f->param_types[i];
+        if (is_zero) {
+            if (i == param_index) {
+                loc.kind = ABI_LOC_NONE;
+                loc.index = 0;
+                loc.size = 0;
+                return loc;
+            }
+            continue;
+        }
         if (is_agg_mem) {
             long size = x86_64_param_size_bytes(f, i, 8);
             size_t slot_size = align_up_size((size_t)(size > 0 ? size : 8), 8);
@@ -3407,6 +3418,12 @@ static void abi64_classify_call_args(const cc_ssa_function_t *f, const cc_ssa_in
 
     for (i = 0; i < in->arg_count; ++i) {
         cc_value_type_t vt = f->value_types[in->args[i]];
+        if (in->call_arg_abi != NULL && in->call_arg_abi[i] == CC_CALL_ARG_ABI_ZERO) {
+            locs[i].kind = ABI_LOC_NONE;
+            locs[i].index = 0;
+            locs[i].size = 0;
+            continue;
+        }
         if (call_arg_is_agg_mem_abi(in, i)) {
             long size = call_arg_size_bytes(in, i, 8);
             size_t slot_size = align_up_size((size_t)(size > 0 ? size : 8), 8);
@@ -3871,6 +3888,9 @@ static int emit_x86_64_move_value_to_abi_loc(FILE *fp, const cc_ssa_function_t *
     if (value < 0 || value >= f->value_count) {
         set_diag(diag, "call argument value out of range");
         return -1;
+    }
+    if (loc->kind == ABI_LOC_NONE) {
+        return 0;
     }
     if (loc->kind == ABI_LOC_XMM) {
         const char *reg = arg_reg64_xmm(loc->index);
@@ -4356,7 +4376,16 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
                      f->param_abi[in->param_index] == CC_CALL_ARG_ABI_AGG_REG)
                         ? 1
                         : 0;
+                int param_is_zero =
+                    (f->param_abi != NULL && in->param_index >= 0 &&
+                     (size_t)in->param_index < f->param_count &&
+                     f->param_abi[in->param_index] == CC_CALL_ARG_ABI_ZERO)
+                        ? 1
+                        : 0;
                 long pbytes = in->imm > 0 ? in->imm : 8;
+                if (param_is_zero) {
+                    break;
+                }
                 if (param_is_agg_mem) {
                     int rd;
                     if (loc.kind != ABI_LOC_STACK) {

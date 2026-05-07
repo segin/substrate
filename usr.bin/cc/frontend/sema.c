@@ -931,7 +931,7 @@ static const cc_struct_def_t *find_struct_def(const cc_translation_unit_t *tu, i
 }
 
 static int type_carries_struct_id(cc_type_t t) {
-    if (t == CC_TYPE_VOID) {
+    if (t == CC_TYPE_VOID || t == CC_TYPE_BITINT || t == CC_TYPE_ATOMIC) {
         return 1;
     }
     if (!cc_type_is_pointer(t)) {
@@ -3789,7 +3789,7 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
         }
         e->value_type = ptr_base_type(e->lhs->value_type);
         e->struct_id = -1;
-        if (e->lhs->struct_id >= 0 && (e->value_type == CC_TYPE_VOID || is_pointer_type(e->value_type))) {
+        if (e->lhs->struct_id >= 0 && type_carries_struct_id(e->value_type)) {
             e->struct_id = e->lhs->struct_id;
         }
         if (e->lhs->array_ndim > 0 && is_pointer_type(e->value_type)) {
