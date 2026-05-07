@@ -471,13 +471,36 @@ void pmap_destroy(pmap_t pmap) {
                 if (pt[j] & PTE_P) {
                     uint32_t page_phys = pt[j] & ~0xFFF;
                     uintptr_t va = ((uintptr_t)i << 22) | ((uintptr_t)j << 12);
-                    
+
                     // Edge case: Validate page address before dropping the mapping reference
                     if (page_phys != 0 && !(page_phys & 0xFFF)) {
                         vm_page_t *page = pmm_get_page(page_phys);
                         if (page) {
                             pv_remove(page, pmap, va);
                             vm_page_unhold(page);
+
+                            /*
+                             * Anonymous pages (no owning vm_object) that
+                             * just dropped to zero references and aren't
+                             * wired must be returned to the physical
+                             * allocator — vm_page_unhold only adjusts the
+                             * counter; the page is otherwise leaked.
+                             *
+                             * vm_object-owned pages are deliberately left
+                             * alone here: vm_object_deallocate() walks the
+                             * object's page list and frees them through
+                             * the proper path.  Touching them here would
+                             * double-free or strand the object pointer.
+                             *
+                             * Wired pages skip the free even when refcount
+                             * reaches zero (e.g. kernel pages); the wire
+                             * holder is responsible for releasing them.
+                             */
+                            if (page->ref_count == 0 &&
+                                page->wire_count == 0 &&
+                                page->object == NULL) {
+                                vm_page_free(page);
+                            }
                         }
                     }
                 }
