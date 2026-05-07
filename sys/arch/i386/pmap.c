@@ -1962,29 +1962,43 @@ int pmap_fault(uint32_t err_code, uint32_t cr2) {
         // Copy from faulting address (readable) to new page (writable)
         memcpy(virt_new, (void*)(cr2 & 0xFFFFF000), 0x1000);
 
-        // 3. Update mappings
-        // Decrement ref count of old page
-        if (page_old->ref_count > 1) {
-            vm_page_unhold(page_old);
-        } else {
-             // Optimization: If ref_count == 1, steal the page?
-             // But we already allocated a new one. 
-             // To implement the optimization properly, we should check BEFORE allocation.
-             // But for safety/simplicity now, we just swap.
-             // Actually, if ref_count is 1, we don't need to copy, just upgrade!
-             // Checkbox 6 says "If refcount == 1, optionally remap..."
-             // Let's implement that optimization now to save the allocation.
-             
-             // Free the unused new page
+        // 3. Update mappings.
+        //
+        // Single-mapper optimization: if nobody else holds page_old we
+        // can just upgrade permissions.  ref_count==2 here means alloc
+        // + this pmap's pmap_enter hold; no second mapper.  (ref_count>2
+        // means there are still other mappers: must copy.)
+        if (page_old->ref_count <= 2) {
+             // Free the unused new page we allocated up front.
              vm_page_free(pmm_get_page((uintptr_t)phys_new));
-             
-             // Just upgrade permissions
+
+             // Just upgrade permissions in place.
              pt[pti] |= PTE_W;
              pmap_invalidate_page(cr2);
              return 1;
         }
 
-        // 4. Map new page R/W in place of old
+        /*
+         * Multiple-mapper case: build a private copy.  Critical that
+         * pv_list bookkeeping match the new PTE — failing to update
+         * pv_list silently desyncs "what pmaps map this page" from the
+         * actual PTEs.  A later pmap_destroy that walks this pmap will
+         * see phys_new with pv_list==NULL and free it while the pmap
+         * still has a live PTE pointing at it; the freed frame gets
+         * recycled and the pmap reads back garbage.  This was the
+         * shell-corruption-after-second-cat bug.
+         */
+        vm_page_t *page_new = pmm_get_page((uintptr_t)phys_new);
+
+        // Drop the old mapping from page_old.
+        pv_remove(page_old, pmap, cr2 & 0xFFFFF000);
+        vm_page_unhold(page_old);
+
+        // Install new mapping in this pmap, with matching pv_list entry.
+        if (page_new) {
+            vm_page_hold(page_new);
+            pv_insert(page_new, pmap, cr2 & 0xFFFFF000);
+        }
         pt[pti] = (uint32_t)phys_new | PTE_P | PTE_W | PTE_U | PTE_A | PTE_D;
         pmap_invalidate_page(cr2);
         
