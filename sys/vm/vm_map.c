@@ -1100,10 +1100,41 @@ vm_map_t *vm_map_fork(vm_map_t *src_map, pmap_t dst_pmap) {
         } else if (src_entry->inheritance == VM_INHERIT_COPY) {
             // Copy-on-Write
             if (obj) {
-                vm_object_t *parent_shadow = vm_object_shadow(obj);
-                vm_object_t *child_shadow = vm_object_shadow(obj);
+                /*
+                 * Shadow-chain growth guard: if the parent's entry is
+                 * already a never-written shadow over some source (e.g.
+                 * because shell forked once before), we'd otherwise
+                 * stack a new pair of shadows on top — every fork
+                 * adds two layers of vm_object_t allocations and they
+                 * never collapse back, leaking ~80 bytes/fork.  When
+                 * the existing shadow has zero pages of its own
+                 * (no COW writes happened) we can reuse it as the
+                 * parent_shadow and only allocate one fresh shadow
+                 * for the child.
+                 */
+                vm_object_t *parent_shadow;
+                vm_object_t *child_shadow;
+                int reused_parent_shadow = 0;
+
+                if (obj->shadow != NULL && obj->page_count == 0 &&
+                    obj->ref_count == 1) {
+                    /* Reuse: shell's existing shadow is empty and
+                     * solely held by this map entry.  Don't stack
+                     * a new shadow on top — it would never collapse
+                     * back, leaking ~80 bytes per fork.  Just put a
+                     * fresh child shadow over the same underlying
+                     * source. */
+                    parent_shadow = obj;          /* no ref change */
+                    child_shadow = vm_object_shadow(obj->shadow);
+                    reused_parent_shadow = 1;
+                } else {
+                    parent_shadow = vm_object_shadow(obj);
+                    child_shadow = vm_object_shadow(obj);
+                }
                 if (!parent_shadow || !child_shadow) {
-                    if (parent_shadow) vm_object_deallocate(parent_shadow);
+                    if (!reused_parent_shadow && parent_shadow) {
+                        vm_object_deallocate(parent_shadow);
+                    }
                     if (child_shadow) vm_object_deallocate(child_shadow);
                     vm_map_unlock(src_map);
                     vm_map_destroy(dst_map);
@@ -1114,8 +1145,13 @@ vm_map_t *vm_map_fork(vm_map_t *src_map, pmap_t dst_pmap) {
                 src_entry->flags |= VME_NEEDS_COPY;
                 new_obj = child_shadow;
 
-                // Parent entry no longer owns the original object directly.
-                vm_object_deallocate(obj);
+                // The parent entry's reference to obj is replaced (in the
+                // non-reuse path) with the reference vm_object_shadow took.
+                // In the reuse path, src_entry was already pointing at obj,
+                // so no replacement happened and no deallocate is needed.
+                if (!reused_parent_shadow) {
+                    vm_object_deallocate(obj);
+                }
 
                 // Downgrade protection in parent to ensure COW trap happens.
                 pmap_protect(src_map->pmap, src_entry->start, src_entry->end,
