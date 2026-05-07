@@ -120,19 +120,14 @@ int vfs_mount_legacy(const char *device, const char *path, const char *type, uin
         return -EINVAL;
     }
 
-    /* Reject mount-over-critical-path unless MNT_UPDATE is set (which
-     * indicates remounting, not overlaying).  These paths are managed
-     * by the kernel and overlaying them would shadow the kernel's
-     * device/proc tree. */
-    if (!(flags & MNT_UPDATE)) {
-        if (strcmp(path, "/dev") == 0 ||
-            strcmp(path, "/proc") == 0 ||
-            strcmp(path, "/sys") == 0) {
-            kprintf("VFS: mount(%s on %s): refusing to overlay critical path\n",
-                    type, path);
-            return -EBUSY;
-        }
-    }
+    /*
+     * NOTE: Critical-path overlay protection (preventing user code
+     * from shadowing /dev, /proc, /sys with a hostile filesystem)
+     * lives in kern_mount() — i.e. only on the syscall path.  The
+     * kernel boot sequence calls vfs_mount_legacy() directly to
+     * mount devfs/procfs/sysfs on those very paths, so the check
+     * cannot live here.
+     */
 
     // Find filesystem type
     filesystem_t *fs = filesystems;

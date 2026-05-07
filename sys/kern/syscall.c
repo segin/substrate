@@ -2295,8 +2295,27 @@ int sys_mount(const char *source, const char *target, const char *fstype, unsign
 }
 
 int kern_mount(const char *source, const char *target, const char *fstype, unsigned long flags, void *data) {
-    if (!target || !fstype) return -1;
+    if (!target || !fstype) return -EINVAL;
     if (current_process->euid != 0) return -EPERM;
+
+    /*
+     * Userspace must not be allowed to shadow /dev, /proc, or /sys
+     * with arbitrary filesystem content — that's a privilege-escalation
+     * vector (substitute /dev/random, /proc/<pid>, etc.).  Kernel-internal
+     * mounts of devfs/procfs/sysfs onto those same paths come through
+     * vfs_mount_legacy() directly and bypass this guard.  MNT_UPDATE
+     * (remount-in-place) is exempt.
+     */
+    if (!(flags & MNT_UPDATE)) {
+        if (strcmp(target, "/dev")  == 0 ||
+            strcmp(target, "/proc") == 0 ||
+            strcmp(target, "/sys")  == 0) {
+            kprintf("mount: refusing user-mount over critical path %s\n",
+                    target);
+            return -EBUSY;
+        }
+    }
+
     return vfs_mount_legacy(source, target, fstype, (uint32_t)flags, data);
 }
 
