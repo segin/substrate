@@ -84,6 +84,69 @@ int coff_validate_aouthdr(const coff_aouthdr_t *opt) {
     return 0;
 }
 
+int coff_apply_relocation(uint8_t *section_data, uint32_t section_va,
+                          uint32_t section_size, const coff_reloc_t *r,
+                          uint32_t symbol_value) {
+    if (!section_data || !r) return -1;
+    if (section_size < 4) return -1;
+
+    /* The relocation site lives at r->r_vaddr in user-space terms; translate
+     * into an offset within the section's raw bytes.  Reject OOB sites and
+     * the case where the 4-byte fixup would run past the end of section. */
+    if ((uint32_t)r->r_vaddr < section_va) return -1;
+    uint32_t off = (uint32_t)r->r_vaddr - section_va;
+    if (off > section_size - 4U) return -1;
+
+    uint8_t *site = section_data + off;
+
+    /* Read the existing 32-bit value (the addend the linker stored).  COFF
+     * is little-endian; on i386 we could just cast, but the test runs on a
+     * potentially differently-aligned host so use byte-wise I/O. */
+    uint32_t addend = (uint32_t)site[0]
+                    | ((uint32_t)site[1] << 8)
+                    | ((uint32_t)site[2] << 16)
+                    | ((uint32_t)site[3] << 24);
+
+    uint32_t result;
+    switch (r->r_type) {
+    case R_DIR32:
+        /* Absolute 32-bit: addend + symbol_value. */
+        result = addend + symbol_value;
+        break;
+    case R_PCRLONG:
+        /* 32-bit PC-relative: symbol - (site + 4) + addend.  The "+4" is
+         * because PC-relative on i386 reckons from the byte after the
+         * relocated displacement, not from the displacement itself. */
+        result = symbol_value - ((uint32_t)r->r_vaddr + 4U) + addend;
+        break;
+    default:
+        return -1;
+    }
+
+    site[0] = (uint8_t)(result & 0xFF);
+    site[1] = (uint8_t)((result >> 8) & 0xFF);
+    site[2] = (uint8_t)((result >> 16) & 0xFF);
+    site[3] = (uint8_t)((result >> 24) & 0xFF);
+    return 0;
+}
+
+int coff_apply_relocations(uint8_t *section_data, uint32_t section_va,
+                           uint32_t section_size,
+                           const coff_reloc_t *relocs, uint32_t nrelocs,
+                           coff_symbol_resolver_t resolve, void *ctx) {
+    if (!section_data || !resolve) return -1;
+    if (nrelocs > 0 && !relocs) return -1;
+
+    for (uint32_t i = 0; i < nrelocs; i++) {
+        uint32_t symval = resolve(relocs[i].r_symndx, ctx);
+        if (coff_apply_relocation(section_data, section_va, section_size,
+                                  &relocs[i], symval) != 0) {
+            return -1;
+        }
+    }
+    return 0;
+}
+
 #ifndef HOST_TEST
 int coff_load_file(void *file, uint32_t size) {
     coff_filehdr_t *filehdr = (coff_filehdr_t *)file;

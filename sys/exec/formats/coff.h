@@ -111,6 +111,39 @@ int coff_validate_filehdr(const coff_filehdr_t *fh, uint32_t file_size);
  */
 int coff_validate_aouthdr(const coff_aouthdr_t *opt);
 
+/*
+ * coff_apply_relocation - apply a single COFF i386 relocation in place.
+ *
+ *   section_data     pointer to the section's loaded raw bytes (kernel VA)
+ *   section_va       the user VA the section was mapped at (used for PC-rel)
+ *   section_size     length in bytes of section_data
+ *   r                the relocation record being processed
+ *   symbol_value     resolved value for the referenced symbol
+ *
+ * Supports R_DIR32 (absolute 32-bit) and R_PCRLONG (PC-relative 32-bit).
+ * Validates that r->r_vaddr falls within [section_va, section_va+size-4]
+ * so the 4-byte fixup cannot run off either end.  Returns 0 on success,
+ * -1 on unsupported type or OOB site.
+ */
+int coff_apply_relocation(uint8_t *section_data, uint32_t section_va,
+                          uint32_t section_size, const coff_reloc_t *r,
+                          uint32_t symbol_value);
+
+/*
+ * coff_apply_relocations - walk an array of relocations and apply each.
+ * Identical resolver model: the caller resolves symbol values via
+ * resolve(symndx, ctx) which must return the absolute VA of the named
+ * symbol (or 0 on failure — cannot be distinguished from a real 0 here,
+ * so resolvers should signal failure by writing through *err_out instead
+ * via the loader-side wrapper).  Returns 0 if every relocation applied,
+ * -1 on the first failure.
+ */
+typedef uint32_t (*coff_symbol_resolver_t)(int32_t symndx, void *ctx);
+int coff_apply_relocations(uint8_t *section_data, uint32_t section_va,
+                           uint32_t section_size,
+                           const coff_reloc_t *relocs, uint32_t nrelocs,
+                           coff_symbol_resolver_t resolve, void *ctx);
+
 int coff_load_file(void *file, uint32_t size);
 
 #endif

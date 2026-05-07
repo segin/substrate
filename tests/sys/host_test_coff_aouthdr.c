@@ -191,12 +191,118 @@ static void test_aouthdr_layout(void) {
     EXPECT(coff_validate_aouthdr(&opt) == 0, "valid data-only rejected");
 }
 
+/* The relocation tests use a fixed resolver that maps symndx -> a
+ * known value, so the expected fixup is deterministic. */
+static uint32_t fake_resolver(int32_t symndx, void *ctx) {
+    (void)ctx;
+    /* symndx 1 -> 0x10000000, symndx 2 -> 0x20000000, etc. */
+    return (uint32_t)symndx << 28;
+}
+
+static void test_reloc_dir32(void) {
+    /* Section mapped at VA 0x08000000, 32 bytes long, addend at offset 8
+     * is 0x100; resolver returns 0x10000000 for symndx 1. */
+    uint8_t buf[32];
+    memset(buf, 0, sizeof(buf));
+    buf[8] = 0x00; buf[9] = 0x01; buf[10] = 0x00; buf[11] = 0x00; /* addend = 0x100 */
+
+    coff_reloc_t r = { .r_vaddr = 0x08000008, .r_symndx = 1, .r_type = R_DIR32 };
+    EXPECT(coff_apply_relocations(buf, 0x08000000, sizeof(buf), &r, 1,
+                                  fake_resolver, NULL) == 0,
+           "DIR32 application returned error");
+
+    uint32_t got = (uint32_t)buf[8] | ((uint32_t)buf[9] << 8)
+                 | ((uint32_t)buf[10] << 16) | ((uint32_t)buf[11] << 24);
+    /* Expected: 0x10000000 + 0x100 = 0x10000100 */
+    EXPECT(got == 0x10000100, "DIR32 wrote wrong value");
+}
+
+static void test_reloc_pcrlong(void) {
+    /* PC-rel: result = symbol - (site_va + 4) + addend.
+     * site_va = 0x08000010, addend = 0, symbol = 0x10000000 (symndx 1).
+     * Expected = 0x10000000 - 0x08000014 = 0x07FFFFEC */
+    uint8_t buf[32];
+    memset(buf, 0, sizeof(buf));
+
+    coff_reloc_t r = { .r_vaddr = 0x08000010, .r_symndx = 1, .r_type = R_PCRLONG };
+    EXPECT(coff_apply_relocations(buf, 0x08000000, sizeof(buf), &r, 1,
+                                  fake_resolver, NULL) == 0,
+           "PCRLONG application returned error");
+
+    uint32_t got = (uint32_t)buf[16] | ((uint32_t)buf[17] << 8)
+                 | ((uint32_t)buf[18] << 16) | ((uint32_t)buf[19] << 24);
+    EXPECT(got == 0x07FFFFEC, "PCRLONG wrote wrong value");
+}
+
+static void test_reloc_addend_preserved(void) {
+    /* PC-rel with non-zero addend: result = symbol - (site+4) + addend.
+     * symndx 2 -> 0x20000000, addend stored at site = 0x42, site_va = 0,
+     * section mapped at VA 0.  Expected = 0x20000000 - 4 + 0x42 = 0x2000003E */
+    uint8_t buf[16];
+    memset(buf, 0, sizeof(buf));
+    buf[0] = 0x42;
+    coff_reloc_t r = { .r_vaddr = 0, .r_symndx = 2, .r_type = R_PCRLONG };
+    EXPECT(coff_apply_relocations(buf, 0, sizeof(buf), &r, 1,
+                                  fake_resolver, NULL) == 0,
+           "PCRLONG-with-addend failed");
+    uint32_t got = (uint32_t)buf[0] | ((uint32_t)buf[1] << 8)
+                 | ((uint32_t)buf[2] << 16) | ((uint32_t)buf[3] << 24);
+    EXPECT(got == 0x2000003E, "PCRLONG addend not honored");
+}
+
+static void test_reloc_oob(void) {
+    uint8_t buf[16];
+    memset(buf, 0, sizeof(buf));
+
+    /* Site below section. */
+    coff_reloc_t r1 = { .r_vaddr = 0x07FFFFF0, .r_symndx = 1, .r_type = R_DIR32 };
+    EXPECT(coff_apply_relocations(buf, 0x08000000, sizeof(buf), &r1, 1,
+                                  fake_resolver, NULL) != 0,
+           "OOB-low site accepted");
+
+    /* Site at end-3 (would overrun by 1 byte for 4-byte fixup). */
+    coff_reloc_t r2 = { .r_vaddr = 0x08000000 + 13, .r_symndx = 1, .r_type = R_DIR32 };
+    EXPECT(coff_apply_relocations(buf, 0x08000000, sizeof(buf), &r2, 1,
+                                  fake_resolver, NULL) != 0,
+           "OOB-high site accepted");
+
+    /* Site at end-4 (last legal slot). */
+    coff_reloc_t r3 = { .r_vaddr = 0x08000000 + 12, .r_symndx = 1, .r_type = R_DIR32 };
+    EXPECT(coff_apply_relocations(buf, 0x08000000, sizeof(buf), &r3, 1,
+                                  fake_resolver, NULL) == 0,
+           "last-slot site rejected");
+}
+
+static void test_reloc_unknown_type(void) {
+    uint8_t buf[16];
+    memset(buf, 0, sizeof(buf));
+
+    coff_reloc_t r = { .r_vaddr = 0x08000000, .r_symndx = 1, .r_type = 0x99 };
+    EXPECT(coff_apply_relocations(buf, 0x08000000, sizeof(buf), &r, 1,
+                                  fake_resolver, NULL) != 0,
+           "unknown reloc type accepted");
+}
+
+static void test_reloc_zero_count(void) {
+    uint8_t buf[16] = {0};
+    /* nrelocs == 0 with NULL relocs is the legitimate empty-table case. */
+    EXPECT(coff_apply_relocations(buf, 0, sizeof(buf), NULL, 0,
+                                  fake_resolver, NULL) == 0,
+           "empty reloc table rejected");
+}
+
 int main(void) {
     test_filehdr();
     test_aouthdr_zmagic();
     test_aouthdr_sizes();
     test_aouthdr_entry();
     test_aouthdr_layout();
+    test_reloc_dir32();
+    test_reloc_pcrlong();
+    test_reloc_addend_preserved();
+    test_reloc_oob();
+    test_reloc_unknown_type();
+    test_reloc_zero_count();
 
     if (fail_count == 0) {
         printf("host_test_coff_aouthdr: ok\n");
