@@ -480,23 +480,29 @@ void pmap_destroy(pmap_t pmap) {
                             vm_page_unhold(page);
 
                             /*
-                             * Anonymous pages (no owning vm_object) that
-                             * just dropped to zero references and aren't
-                             * wired must be returned to the physical
-                             * allocator — vm_page_unhold only adjusts the
-                             * counter; the page is otherwise leaked.
+                             * Anonymous pages (no owning vm_object) must
+                             * be returned to the physical allocator when
+                             * their last mapping goes away — vm_page_unhold
+                             * only adjusts the mapping refcount, but
+                             * vm_phys_alloc_page sets ref_count = 1 at
+                             * allocation time and pmap_enter does
+                             * vm_page_hold, so a page with one mapping
+                             * sits at ref_count = 2.  After this unhold
+                             * it's at 1: the lingering allocator
+                             * reference, with no remaining mappings.
+                             * No one else holds this page, so we free it.
                              *
                              * vm_object-owned pages are deliberately left
-                             * alone here: vm_object_deallocate() walks the
+                             * alone: vm_object_deallocate() walks the
                              * object's page list and frees them through
                              * the proper path.  Touching them here would
                              * double-free or strand the object pointer.
                              *
-                             * Wired pages skip the free even when refcount
-                             * reaches zero (e.g. kernel pages); the wire
+                             * Wired pages skip the free even after the
+                             * unhold (e.g. kernel-pinned pages); the wire
                              * holder is responsible for releasing them.
                              */
-                            if (page->ref_count == 0 &&
+                            if (page->ref_count == 1 &&
                                 page->wire_count == 0 &&
                                 page->object == NULL) {
                                 vm_page_free(page);
