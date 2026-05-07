@@ -719,6 +719,35 @@ static int proc_pid_fd_readlink(fs_node_t *node, char *buf, size_t size) {
 }
 
 /*
+ * Release the procfs_pid_nodes_t for `pid` if one was lazily created
+ * by procfs_get_pid_nodes().  Called from wait_reap() when the kernel
+ * is about to free the process slot — without this, every fresh pid
+ * permanently leaks ~10 KB of synthesised /proc/<pid> entries.
+ */
+void procfs_release_pid_nodes(int pid) {
+    if (pid <= 0) return;
+
+    if (!procfs_pid_nodes_lock_init) {
+        return;
+    }
+    spinlock_acquire(&procfs_pid_nodes_lock);
+    for (size_t i = 0; i < procfs_pid_nodes_count; i++) {
+        procfs_pid_nodes_t *nodes = procfs_pid_nodes[i];
+        if (nodes && nodes->pid == pid) {
+            /* Compact the array by moving the last entry into this slot.
+             * Order doesn't matter — procfs_get_pid_nodes does linear scan. */
+            procfs_pid_nodes[i] = procfs_pid_nodes[procfs_pid_nodes_count - 1];
+            procfs_pid_nodes[procfs_pid_nodes_count - 1] = NULL;
+            procfs_pid_nodes_count--;
+            spinlock_release(&procfs_pid_nodes_lock);
+            kfree(nodes, sizeof(*nodes));
+            return;
+        }
+    }
+    spinlock_release(&procfs_pid_nodes_lock);
+}
+
+/*
  * Generic read function for table-driven entries
  * The entry pointer is stored in node->impl
  */

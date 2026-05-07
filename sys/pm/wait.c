@@ -9,6 +9,7 @@
 #include <arch/i386/pmap.h>
 #include <sys/ldt.h>
 #include <vm/vm_map.h>
+#include <fs/procfs.h>
 #ifndef HOST_TEST
 #include <kern/cmdline.h>
 #include <kern/console.h>
@@ -207,7 +208,12 @@ int kern_wait4(pid_t pid, int *status, int options, struct rusage *rusage) {
 
                 // Retire all thread slots that belonged to the reaped process.
                 sched_reap_process_threads(target);
-                
+
+                // Release the lazy /proc/<pid>/* nodes (~10 KB each) that
+                // procfs synthesised for this pid.  Without this every
+                // exec'd process permanently leaks its procfs entry.
+                procfs_release_pid_nodes(target->pid);
+
                 // Free Process Slot
                 target->pid = -1;
                 target->p_parent = NULL;
