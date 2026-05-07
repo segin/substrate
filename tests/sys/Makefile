@@ -16,7 +16,168 @@ SRCS += test_floppy_qemu.c test_uname.c test_native_personality.c test_freebsd_p
 
 OBJS = $(SRCS:.c=.o)
 
-HOST_TESTS = host_test_coff_aouthdr host_test_udf_read_file host_test_kmem_test host_test_udf_large_write host_test_udf_truncate_expand host_test_minix_vuln host_test_crc32 host_test_compat_stat host_test_compat_lseek32 host_test_elf_execve_toctou host_test_negdi2 host_test_string host_test_div64 host_test_printf_specifiers host_test_printf_vsnprintf host_test_vm_swap host_test_wait_bench host_test_wait_logic host_test_acct_compress host_test_procfs host_test_sysfs_health host_test_kern_write host_test_cmdline property_cmdline host_test_perso_netbsd_rusage host_test_input_subsys host_test_compat host_test_keyboard host_test_ps2 host_test_fb_console host_test_hw_text host_test_udf_read_vds host_test_udf_read_fe host_test_udf_read_fsd host_test_udf_read_tag host_test_udf_find_avdp host_test_ext2_read_block host_test_ext2_free_block host_test_ext2_alloc_inode_block host_test_ext2_readlink host_test_ext2_get_block_num host_test_ext2_get_blocks_extent host_test_fat_get_next_cluster host_test_fat_mount host_test_fat_file_read host_test_ntsync_fd host_test_uma_redzone host_test_uma_poison host_test_uma_coloring host_test_uma_depot host_test_uma_reclaim host_test_fat_inode_identity host_test_vm_kmem host_test_smp_discovery host_test_lapic host_test_percpu host_test_sched_ipi host_test_sched_steal host_test_sched_core host_test_sched_reap host_test_pmap_shootdown host_test_futex host_test_itimer host_test_gdt_iomap host_test_vm86 host_test_panic_diag host_test_idt_diag host_test_debug_dump host_test_devfs_overflow host_test_devfs_register host_test_device_publish host_test_driver_register_attach host_test_isa host_test_kobject host_test_scsi_ctl host_test_scsi_core host_test_atapi_scsi host_test_scsi_nodes host_test_scsi_dev host_test_ide_identify host_test_ide_pci host_test_ide_prdt host_test_ide_power host_test_nvme host_test_random_ioctl host_test_usb_hid_mouse host_test_audio host_test_ac97 host_test_sb16 host_test_hda host_test_pci_config host_test_pci_scan host_test_pci_device host_test_pci_bar host_test_pci_caps host_test_pci_hotplug host_test_pci_ecam host_test_resource host_test_ioremap host_test_x86_64_gdt host_test_x86_64_idt host_test_x86_64_syscall host_test_x86_64_asm host_test_elks_aout host_test_exec_init host_test_access host_test_elks_load_plan host_test_elks_segments host_test_elks_stack_bounds host_test_elks_data_bounds host_test_elks_syscall_abi host_test_elks_stack_image host_test_elks_exec_state host_test_elks_ptr_translation host_test_perso_elks host_test_elks_core host_test_ldt_lifecycle host_test_ldt_race host_test_ldt_codec host_test_ldt_fuzz host_test_i386_sched_ldt host_test_proc_fcntl host_test_virtio_scsi host_test_rwlock
+# Host tests, grouped by subsystem.  Add new entries to the matching group
+# rather than appending to a mega-line so diffs stay reviewable.
+
+# Exec / binary loaders
+HOST_TESTS  = host_test_coff_aouthdr
+HOST_TESTS += host_test_elf_execve_toctou
+HOST_TESTS += host_test_exec_init
+HOST_TESTS += host_test_access
+
+# ELKS personality + 16-bit a.out loader
+HOST_TESTS += host_test_elks_aout
+HOST_TESTS += host_test_elks_core
+HOST_TESTS += host_test_elks_data_bounds
+HOST_TESTS += host_test_elks_exec_state
+HOST_TESTS += host_test_elks_load_plan
+HOST_TESTS += host_test_elks_ptr_translation
+HOST_TESTS += host_test_elks_segments
+HOST_TESTS += host_test_elks_stack_bounds
+HOST_TESTS += host_test_elks_stack_image
+HOST_TESTS += host_test_elks_syscall_abi
+HOST_TESTS += host_test_perso_elks
+
+# Personalities (other)
+HOST_TESTS += host_test_perso_netbsd_rusage
+HOST_TESTS += host_test_compat
+HOST_TESTS += host_test_compat_lseek32
+HOST_TESTS += host_test_compat_stat
+
+# LDT
+HOST_TESTS += host_test_i386_sched_ldt
+HOST_TESTS += host_test_ldt_codec
+HOST_TESTS += host_test_ldt_fuzz
+HOST_TESTS += host_test_ldt_lifecycle
+HOST_TESTS += host_test_ldt_race
+
+# Filesystems — UDF
+HOST_TESTS += host_test_udf_find_avdp
+HOST_TESTS += host_test_udf_large_write
+HOST_TESTS += host_test_udf_read_fe
+HOST_TESTS += host_test_udf_read_file
+HOST_TESTS += host_test_udf_read_fsd
+HOST_TESTS += host_test_udf_read_tag
+HOST_TESTS += host_test_udf_read_vds
+HOST_TESTS += host_test_udf_truncate_expand
+
+# Filesystems — ext2
+HOST_TESTS += host_test_ext2_alloc_inode_block
+HOST_TESTS += host_test_ext2_free_block
+HOST_TESTS += host_test_ext2_get_block_num
+HOST_TESTS += host_test_ext2_get_blocks_extent
+HOST_TESTS += host_test_ext2_read_block
+HOST_TESTS += host_test_ext2_readlink
+
+# Filesystems — FAT / Minix / procfs / sysfs
+HOST_TESTS += host_test_fat_file_read
+HOST_TESTS += host_test_fat_get_next_cluster
+HOST_TESTS += host_test_fat_inode_identity
+HOST_TESTS += host_test_fat_mount
+HOST_TESTS += host_test_minix_vuln
+HOST_TESTS += host_test_procfs
+HOST_TESTS += host_test_sysfs_health
+
+# VM / UMA / kmem
+HOST_TESTS += host_test_kmem_test
+HOST_TESTS += host_test_uma_coloring
+HOST_TESTS += host_test_uma_depot
+HOST_TESTS += host_test_uma_poison
+HOST_TESTS += host_test_uma_reclaim
+HOST_TESTS += host_test_uma_redzone
+HOST_TESTS += host_test_vm_kmem
+HOST_TESTS += host_test_vm_swap
+
+# Scheduler / SMP / futex / pmap shootdown
+HOST_TESTS += host_test_futex
+HOST_TESTS += host_test_itimer
+HOST_TESTS += host_test_lapic
+HOST_TESTS += host_test_percpu
+HOST_TESTS += host_test_pmap_shootdown
+HOST_TESTS += host_test_sched_core
+HOST_TESTS += host_test_sched_ipi
+HOST_TESTS += host_test_sched_reap
+HOST_TESTS += host_test_sched_steal
+HOST_TESTS += host_test_smp_discovery
+HOST_TESTS += host_test_wait_bench
+HOST_TESTS += host_test_wait_logic
+
+# Process / signals / syscalls
+HOST_TESTS += host_test_acct_compress
+HOST_TESTS += host_test_kern_write
+HOST_TESTS += host_test_proc_fcntl
+HOST_TESTS += host_test_ntsync_fd
+
+# Cmdline / property
+HOST_TESTS += host_test_cmdline
+HOST_TESTS += property_cmdline
+
+# Architecture (i386 + x86_64)
+HOST_TESTS += host_test_debug_dump
+HOST_TESTS += host_test_gdt_iomap
+HOST_TESTS += host_test_idt_diag
+HOST_TESTS += host_test_panic_diag
+HOST_TESTS += host_test_vm86
+HOST_TESTS += host_test_x86_64_asm
+HOST_TESTS += host_test_x86_64_gdt
+HOST_TESTS += host_test_x86_64_idt
+HOST_TESTS += host_test_x86_64_syscall
+
+# Device model / drivers — core
+HOST_TESTS += host_test_device_publish
+HOST_TESTS += host_test_devfs_overflow
+HOST_TESTS += host_test_devfs_register
+HOST_TESTS += host_test_driver_register_attach
+HOST_TESTS += host_test_isa
+HOST_TESTS += host_test_kobject
+
+# Drivers — input / display
+HOST_TESTS += host_test_fb_console
+HOST_TESTS += host_test_hw_text
+HOST_TESTS += host_test_input_subsys
+HOST_TESTS += host_test_keyboard
+HOST_TESTS += host_test_ps2
+
+# Drivers — storage (SCSI / IDE / NVMe / virtio)
+HOST_TESTS += host_test_atapi_scsi
+HOST_TESTS += host_test_ide_identify
+HOST_TESTS += host_test_ide_pci
+HOST_TESTS += host_test_ide_power
+HOST_TESTS += host_test_ide_prdt
+HOST_TESTS += host_test_nvme
+HOST_TESTS += host_test_scsi_core
+HOST_TESTS += host_test_scsi_ctl
+HOST_TESTS += host_test_scsi_dev
+HOST_TESTS += host_test_scsi_nodes
+HOST_TESTS += host_test_virtio_scsi
+
+# Drivers — audio / USB / random
+HOST_TESTS += host_test_ac97
+HOST_TESTS += host_test_audio
+HOST_TESTS += host_test_hda
+HOST_TESTS += host_test_random_ioctl
+HOST_TESTS += host_test_sb16
+HOST_TESTS += host_test_usb_hid_mouse
+
+# Bus / resource — PCI, ioremap
+HOST_TESTS += host_test_ioremap
+HOST_TESTS += host_test_pci_bar
+HOST_TESTS += host_test_pci_caps
+HOST_TESTS += host_test_pci_config
+HOST_TESTS += host_test_pci_device
+HOST_TESTS += host_test_pci_ecam
+HOST_TESTS += host_test_pci_hotplug
+HOST_TESTS += host_test_pci_scan
+HOST_TESTS += host_test_resource
+
+# Misc utilities
+HOST_TESTS += host_test_crc32
+HOST_TESTS += host_test_div64
+HOST_TESTS += host_test_negdi2
+HOST_TESTS += host_test_printf_specifiers
+HOST_TESTS += host_test_printf_vsnprintf
+HOST_TESTS += host_test_rwlock
+HOST_TESTS += host_test_string
 
 host_test_rwlock: host_test_rwlock.c
 	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_rwlock.c -o $@
