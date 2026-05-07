@@ -139,6 +139,9 @@
 #define SYS_FSTATFS     158
 #define SYS_STATVFS     159
 #define SYS_FSTATVFS    160
+#define SYS_UMOUNT2     161 /* umount(2) with flags (MNT_FORCE etc.) */
+#define SYS_PIPE2       163 /* pipe2(int[2], int flags) */
+#define SYS_DUP3        164 /* dup3(int old, int new, int flags) */
 
 void syscall_init(void);
 

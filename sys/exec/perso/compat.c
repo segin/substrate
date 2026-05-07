@@ -72,13 +72,13 @@ int32_t compat_time32(int32_t *tloc) {
 #include <string.h>
 
 /* Old lseek (syscall 19): (fd, pad, off_lo, off_hi, whence) with alignment pad */
-int64_t sys_freebsd_lseek(int fd, int pad, uint32_t off_lo, uint32_t off_hi, int whence) {
+int64_t freebsd_sys_lseek(int fd, int pad, uint32_t off_lo, uint32_t off_hi, int whence) {
     (void)pad;
     return sys_lseek(fd, off_lo, off_hi, whence);
 }
 
 /* lseek_freebsd13 (syscall 478): pad-less ABI - (fd, off_lo, off_hi, whence) */
-int64_t sys_freebsd_lseek13(int fd, uint32_t off_lo, uint32_t off_hi, int whence) {
+int64_t freebsd_sys_lseek13(int fd, uint32_t off_lo, uint32_t off_hi, int whence) {
     return sys_lseek(fd, off_lo, off_hi, whence);
 }
 
@@ -103,7 +103,7 @@ int64_t sys_freebsd_lseek13(int fd, uint32_t off_lo, uint32_t off_hi, int whence
  * Unlike the old mmap (197), there is no alignment dummy between fd and off_t.
  * Stack layout: addr, len, prot, flags, fd, off_lo, off_hi (7 args, no pad).
  */
-void *sys_freebsd_mmap(void *addr, size_t len, int prot, int flags, int fd, uint32_t off_lo, uint32_t off_hi) {
+void *freebsd_sys_mmap(void *addr, size_t len, int prot, int flags, int fd, uint32_t off_lo, uint32_t off_hi) {
     uint64_t offset = ((uint64_t)off_hi << 32) | off_lo;
     int kflags = flags & (KERN_MAP_SHARED | KERN_MAP_PRIVATE | KERN_MAP_FIXED);
     if (flags & FREEBSD_MAP_ANON)
@@ -647,10 +647,10 @@ int sys_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void *newp, 
 }
 
 /*
- * sys_freebsd_sysctl - FreeBSD sysctl(2) via MIB
+ * freebsd_sys_sysctl - FreeBSD sysctl(2) via MIB
  * Translates a subset of FreeBSD MIB numbers to Substrate information.
  */
-int sys_freebsd_sysctl(int *name, unsigned int namelen, void *oldp, size_t *oldlenp, void *newp, size_t newlen) {
+int freebsd_sys_sysctl(int *name, unsigned int namelen, void *oldp, size_t *oldlenp, void *newp, size_t newlen) {
     (void)newp; (void)newlen;
     if (!name || namelen < 1) return -EINVAL;
 
@@ -851,7 +851,7 @@ static void native_to_freebsd_termios(const struct termios *nv,
     fb->c_ospeed = nv->c_ospeed;
 }
 
-int sys_freebsd_ioctl(int fd, uint32_t request, void *arg) {
+int freebsd_sys_ioctl(int fd, uint32_t request, void *arg) {
     switch (request) {
     case FBSD_TIOCGETA: {
         struct termios native;

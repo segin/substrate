@@ -57,7 +57,9 @@ extern int sys_close(int);
 extern int sys_creat(const char*, int);
 extern int sys_dup(int);
 extern int sys_dup2(int, int);
+extern int sys_dup3(int, int, int);
 extern int sys_pipe(int*);
+extern int sys_pipe2(int*, int);
 extern int sys_fcntl(int, int, int);
 extern int sys_ioctl(int, uint32_t, void*);
 extern int sys_readlink(const char*, char*, size_t);
@@ -105,6 +107,7 @@ extern int sys_utime(const char*, void*);
 extern int sys_sync(void);
 extern int sys_mount(const char*, const char*, const char*, unsigned long, void*);
 extern int sys_umount(const char*);
+extern int sys_umount2(const char*, int);
 extern int sys_getdents(unsigned int, void*, unsigned int);
 extern int sys_getdents64(unsigned int, void*, unsigned int);
 extern int sys_getcwd(char*, size_t);
@@ -179,7 +182,7 @@ extern int sys_getrusage(int, struct rusage*);
 extern int sys_getpriority(int, int);
 extern int sys_setpriority(int, int, int);
 extern int sys_sysarch(int, void*);
-extern int sys_freebsd4_uname(void*);
+extern int freebsd_sys_uname(void*);
 
 /* FreeBSD personality stubs */
 extern int sys_profil(void*, unsigned int, unsigned int, unsigned int);
@@ -222,6 +225,6 @@ extern int sys_shutdown(int, int);
 extern int sys_socketpair(int, int, int, int*);
 extern int sys_msync(void*, size_t, int);
 extern int sys_pdfork(int*, int);
-extern int sys_freebsd_sysctl(int*, unsigned int, void*, size_t*, void*, size_t);
+extern int freebsd_sys_sysctl(int*, unsigned int, void*, size_t*, void*, size_t);
 
 #endif /* _SYS_SYSCALL_IMPL_H */

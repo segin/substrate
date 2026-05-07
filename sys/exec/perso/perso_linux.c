@@ -12,6 +12,7 @@
 #include <sys/uio.h>
 #include <exec/perso/compat.h>
 #include <exec/perso/linux/linux_syscalls.h>
+#include <sys/fcntl.h>
 #include <exec/perso/linux_user.h>
 #include <exec/perso/linux/linux_blkio.h>
 #include <exec/perso/linux/linux_errno.h>
@@ -507,20 +508,24 @@ void *linux_sys_mmap(void *uap) {
     return sys_mmap((void*)args.addr, args.len, args.prot, args.flags, args.fd, (uint64_t)args.offset);
 }
 
-int linux_sys_pipe2(int *fds, int flags) {
-    (void)flags;
-    int kfds[2];
-    int ret = kern_pipe(kfds);
-    if (ret != 0) return ret;
+/*
+ * Linux pipe2(2): O_CLOEXEC = 02000000, O_NONBLOCK = 04000.
+ * Translate to Substrate's flag values, then call the native sys_pipe2.
+ */
+#define LINUX_O_CLOEXEC  02000000
+#define LINUX_O_NONBLOCK 04000
 
-    /* Linux pipe2 flags translation */
-    /* Substrate/BSD O_CLOEXEC is usually 0x00020000 or similar */
-    /* O_NONBLOCK is usually 0x00000004 or similar */
-    /* However, for now we apply them manually if possible or just return fds */
-    /* In a real kernel we would pass flags to kern_pipe */
-    
-    if (copyout(kfds, fds, 2 * sizeof(int)) != 0) return -14;
-    return 0;
+int linux_sys_pipe2(int *fds, int flags) {
+    int native_flags = 0;
+    if (flags & LINUX_O_CLOEXEC)  native_flags |= O_CLOEXEC;
+    if (flags & LINUX_O_NONBLOCK) native_flags |= O_NONBLOCK;
+    return sys_pipe2(fds, native_flags);
+}
+
+int linux_sys_dup3(int oldfd, int newfd, int flags) {
+    int native_flags = 0;
+    if (flags & LINUX_O_CLOEXEC) native_flags |= O_CLOEXEC;
+    return sys_dup3(oldfd, newfd, native_flags);
 }
 
 void *linux_sys_mmap2(void *addr, size_t len, int prot, int flags, int fd, uint32_t pgoffset) {
@@ -874,8 +879,8 @@ static void *linux_syscalls[MAX_SYSCALLS] = {
     [LINUX_SYS_stat]           = (void *)linux_sys_stat,
     [LINUX_SYS_lseek]          = (void *)&linux_sys_lseek,
     [LINUX_SYS_getpid]         = (void *)&sys_getpid,
-    [LINUX_SYS_mount]          = (void *)&kern_mount,
-    [LINUX_SYS_umount]         = (void *)&kern_umount,
+    [LINUX_SYS_mount]          = (void *)&sys_mount,
+    [LINUX_SYS_umount]         = (void *)&sys_umount,
     [LINUX_SYS_setuid]         = (void *)&sys_setuid,
     [LINUX_SYS_getuid]         = (void *)&sys_getuid,
     [LINUX_SYS_stime]          = (void *)&kern_stime,
@@ -902,7 +907,7 @@ static void *linux_syscalls[MAX_SYSCALLS] = {
     [LINUX_SYS_geteuid]        = (void *)&sys_geteuid,
     [LINUX_SYS_getegid]        = (void *)&sys_getegid,
     [LINUX_SYS_acct]           = (void *)&kern_acct,
-    [LINUX_SYS_umount2]        = (void *)&kern_umount,
+    [LINUX_SYS_umount2]        = (void *)&sys_umount2,
     [LINUX_SYS_ioctl]          = (void *)&linux_sys_ioctl,
     [LINUX_SYS_fcntl]          = (void *)&sys_fcntl,
     [LINUX_SYS_setpgid]        = (void *)&sys_setpgid,
@@ -942,8 +947,12 @@ static void *linux_syscalls[MAX_SYSCALLS] = {
     [LINUX_SYS_fchown]         = (void *)&sys_fchown,
     [LINUX_SYS_getpriority]    = NULL,
     [LINUX_SYS_setpriority]    = NULL,
-    [LINUX_SYS_statfs]         = (void *)&kern_statfs,
-    [LINUX_SYS_fstatfs]        = (void *)&kern_fstatfs,
+    /* TODO: Linux struct statfs layout differs from Substrate's; a
+     * proper translation thunk should produce the Linux-format buf.
+     * Use sys_statfs/sys_fstatfs for now — they at least do the
+     * copyin correctly, even if the buf layout is BSD-shaped. */
+    [LINUX_SYS_statfs]         = (void *)&sys_statfs,
+    [LINUX_SYS_fstatfs]        = (void *)&sys_fstatfs,
     [LINUX_SYS_ioperm]         = NULL,
     [LINUX_SYS_socketcall]     = NULL,
     [LINUX_SYS_syslog]         = NULL,
@@ -1052,6 +1061,7 @@ static void *linux_syscalls[MAX_SYSCALLS] = {
     [LINUX_SYS_set_thread_area] = (void *)&sys_set_thread_area,
     [LINUX_SYS_exit_group]     = (void *)&sys_exit,
     [LINUX_SYS_pipe2]          = (void *)&linux_sys_pipe2,
+    [LINUX_SYS_dup3]           = (void *)&linux_sys_dup3,
     [LINUX_SYS_getrandom]      = (void *)&sys_getrandom,
     [LINUX_SYS_statx]          = (void *)linux_sys_statx,
     [LINUX_SYS_fchmodat]       = (void *)&sys_fchmodat,

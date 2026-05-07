@@ -508,6 +508,16 @@ int umount(const char *target) {
     return __set_errno((int)_syscall1(SYS_UMOUNT, (uintptr_t)target));
 }
 
+int umount2(const char *target, int flags) {
+    return __set_errno((int)_syscall2(SYS_UMOUNT2,
+                                       (uintptr_t)target, (uintptr_t)flags));
+}
+
+/* BSD spelling. */
+int unmount(const char *target, int flags) {
+    return umount2(target, flags);
+}
+
 int rename(const char *oldpath, const char *newpath) {
     return __set_errno((int)_syscall2(SYS_RENAME, (uintptr_t)oldpath, (uintptr_t)newpath));
 }

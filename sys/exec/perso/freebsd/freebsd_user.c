@@ -33,7 +33,7 @@ static void translate_stat_to_freebsd(struct stat *native, struct freebsd_stat *
     fbsd->st_blksize = native->st_blksize;
 }
 
-int sys_freebsd_stat(const char *path, struct freebsd_stat *buf) {
+int freebsd_sys_stat(const char *path, struct freebsd_stat *buf) {
     char kpath[256];
     if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -14;
 
@@ -47,7 +47,7 @@ int sys_freebsd_stat(const char *path, struct freebsd_stat *buf) {
     return ret;
 }
 
-int sys_freebsd_lstat(const char *path, struct freebsd_stat *buf) {
+int freebsd_sys_lstat(const char *path, struct freebsd_stat *buf) {
     char kpath[256];
     if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -14;
 
@@ -61,7 +61,7 @@ int sys_freebsd_lstat(const char *path, struct freebsd_stat *buf) {
     return ret;
 }
 
-int sys_freebsd_fstat(int fd, struct freebsd_stat *buf) {
+int freebsd_sys_fstat(int fd, struct freebsd_stat *buf) {
     struct stat native;
     int ret = kern_fstat(fd, &native);
     if (ret == 0) {
@@ -88,7 +88,7 @@ static void translate_stat_to_freebsd13(struct stat *native, struct freebsd13_st
  *
  * Wire both COMPAT11 syscall 493 and modern 552 at the same handler
  * since FreeBSD-13/14 binaries don't issue 493 anyway. */
-int sys_freebsd_fstatat(int dirfd, const char *path, struct freebsd13_stat *buf, int flags) {
+int freebsd_sys_fstatat(int dirfd, const char *path, struct freebsd13_stat *buf, int flags) {
     char kpath[256];
     if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -14;
     struct stat native;
@@ -122,7 +122,7 @@ static void translate_stat_to_freebsd11(struct stat *native, struct freebsd11_st
     fbsd->st_blksize = native->st_blksize;
 }
 
-int sys_freebsd11_stat(const char *path, struct freebsd11_stat *buf) {
+int freebsd_sys_stat_v11(const char *path, struct freebsd11_stat *buf) {
     char kpath[256];
     if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -14;
 
@@ -136,7 +136,7 @@ int sys_freebsd11_stat(const char *path, struct freebsd11_stat *buf) {
     return ret;
 }
 
-int sys_freebsd11_lstat(const char *path, struct freebsd11_stat *buf) {
+int freebsd_sys_lstat_v11(const char *path, struct freebsd11_stat *buf) {
     char kpath[256];
     if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -14;
 
@@ -150,7 +150,7 @@ int sys_freebsd11_lstat(const char *path, struct freebsd11_stat *buf) {
     return ret;
 }
 
-int sys_freebsd11_fstat(int fd, struct freebsd11_stat *buf) {
+int freebsd_sys_fstat_v11(int fd, struct freebsd11_stat *buf) {
     struct stat native;
     int ret = kern_fstat(fd, &native);
     if (ret == 0) {
@@ -186,7 +186,7 @@ static void translate_stat_to_freebsd13(struct stat *native, struct freebsd13_st
     fbsd->st_gen      = 0;
 }
 
-int sys_freebsd13_stat(const char *path, struct freebsd13_stat *buf) {
+int freebsd_sys_stat_v13(const char *path, struct freebsd13_stat *buf) {
     char kpath[256];
     if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -14;
     struct stat native;
@@ -199,7 +199,7 @@ int sys_freebsd13_stat(const char *path, struct freebsd13_stat *buf) {
     return ret;
 }
 
-int sys_freebsd13_lstat(const char *path, struct freebsd13_stat *buf) {
+int freebsd_sys_lstat_v13(const char *path, struct freebsd13_stat *buf) {
     char kpath[256];
     if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -14;
     struct stat native;
@@ -212,7 +212,7 @@ int sys_freebsd13_lstat(const char *path, struct freebsd13_stat *buf) {
     return ret;
 }
 
-int sys_freebsd13_fstat(int fd, struct freebsd13_stat *buf) {
+int freebsd_sys_fstat_v13(int fd, struct freebsd13_stat *buf) {
     struct stat native;
     int ret = kern_fstat(fd, &native);
     if (ret == 0) {
@@ -279,13 +279,34 @@ static int freebsd_atflags(int f) {
     return k;
 }
 
-int sys_freebsd_open(const char *path, int flags, int mode) {
+int freebsd_sys_open(const char *path, int flags, int mode) {
     char kpath[256];
     if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -EFAULT;
     return kern_openat(AT_FDCWD, kpath, freebsd_oflags(flags), mode);
 }
 
-int sys_freebsd_openat(int dirfd, const char *path, int flags, int mode) {
+/*
+ * pipe2 / dup3 thunks.  FreeBSD uses different numeric values for
+ * O_CLOEXEC / O_NONBLOCK than Substrate, so we translate before
+ * dispatching to the native syscall.
+ */
+#define FREEBSD_O_NONBLOCK 0x000004
+#define FREEBSD_O_CLOEXEC  0x100000
+
+int freebsd_sys_pipe2(int *fds, int flags) {
+    int native = 0;
+    if (flags & FREEBSD_O_CLOEXEC)  native |= O_CLOEXEC;
+    if (flags & FREEBSD_O_NONBLOCK) native |= O_NONBLOCK;
+    return sys_pipe2(fds, native);
+}
+
+int freebsd_sys_dup3(int oldfd, int newfd, int flags) {
+    int native = 0;
+    if (flags & FREEBSD_O_CLOEXEC) native |= O_CLOEXEC;
+    return sys_dup3(oldfd, newfd, native);
+}
+
+int freebsd_sys_openat(int dirfd, const char *path, int flags, int mode) {
     char kpath[256];
     if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -EFAULT;
     return kern_openat(dirfd, kpath, freebsd_oflags(flags), mode);
@@ -303,7 +324,7 @@ int sys_freebsd_openat(int dirfd, const char *path, int flags, int mode) {
  * helpers grow for them.
  * ---------------------------------------------------------------------- */
 
-int sys_freebsd_faccessat(int dirfd, const char *path, int amode, int flag) {
+int freebsd_sys_faccessat(int dirfd, const char *path, int amode, int flag) {
     char kpath[256];
     if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -EFAULT;
     (void)flag;  /* AT_EACCESS handled implicitly */
@@ -311,19 +332,19 @@ int sys_freebsd_faccessat(int dirfd, const char *path, int amode, int flag) {
     return -ENOSYS;
 }
 
-int sys_freebsd_fchmodat(int dirfd, const char *path, int mode, int flag) {
+int freebsd_sys_fchmodat(int dirfd, const char *path, int mode, int flag) {
     char kpath[256];
     if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -EFAULT;
     return kern_chmodat(dirfd, kpath, mode, freebsd_atflags(flag));
 }
 
-int sys_freebsd_fchownat(int dirfd, const char *path, int uid, int gid, int flag) {
+int freebsd_sys_fchownat(int dirfd, const char *path, int uid, int gid, int flag) {
     /* sys_fchownat does its own copyinstr and supports arbitrary dirfd.
      * Just translate the flag bits and forward. */
     return sys_fchownat(dirfd, path, uid, gid, freebsd_atflags(flag));
 }
 
-int sys_freebsd_linkat(int olddir, const char *oldpath, int newdir, const char *newpath, int flag) {
+int freebsd_sys_linkat(int olddir, const char *oldpath, int newdir, const char *newpath, int flag) {
     char kold[256], knew[256];
     if (copyinstr(oldpath, kold, sizeof(kold), NULL) != 0) return -EFAULT;
     if (copyinstr(newpath, knew, sizeof(knew), NULL) != 0) return -EFAULT;
@@ -332,18 +353,18 @@ int sys_freebsd_linkat(int olddir, const char *oldpath, int newdir, const char *
     return -ENOSYS;
 }
 
-int sys_freebsd_mkdirat(int dirfd, const char *path, int mode) {
+int freebsd_sys_mkdirat(int dirfd, const char *path, int mode) {
     char kpath[256];
     if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -EFAULT;
     return kern_mkdirat(dirfd, kpath, mode);
 }
 
-int sys_freebsd_readlinkat(int dirfd, const char *path, char *buf, size_t bufsiz) {
+int freebsd_sys_readlinkat(int dirfd, const char *path, char *buf, size_t bufsiz) {
     /* sys_readlinkat does its own copyinstr/copyout. */
     return sys_readlinkat(dirfd, path, buf, bufsiz);
 }
 
-int sys_freebsd_renameat(int olddir, const char *oldpath, int newdir, const char *newpath) {
+int freebsd_sys_renameat(int olddir, const char *oldpath, int newdir, const char *newpath) {
     char kold[256], knew[256];
     if (copyinstr(oldpath, kold, sizeof(kold), NULL) != 0) return -EFAULT;
     if (copyinstr(newpath, knew, sizeof(knew), NULL) != 0) return -EFAULT;
@@ -351,7 +372,7 @@ int sys_freebsd_renameat(int olddir, const char *oldpath, int newdir, const char
     return -ENOSYS;
 }
 
-int sys_freebsd_symlinkat(const char *target, int newdir, const char *newpath) {
+int freebsd_sys_symlinkat(const char *target, int newdir, const char *newpath) {
     char ktgt[256], knew[256];
     if (copyinstr(target,  ktgt, sizeof(ktgt), NULL) != 0) return -EFAULT;
     if (copyinstr(newpath, knew, sizeof(knew), NULL) != 0) return -EFAULT;
@@ -359,7 +380,7 @@ int sys_freebsd_symlinkat(const char *target, int newdir, const char *newpath) {
     return -ENOSYS;
 }
 
-int sys_freebsd_unlinkat(int dirfd, const char *path, int flag) {
+int freebsd_sys_unlinkat(int dirfd, const char *path, int flag) {
     char kpath[256];
     if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -EFAULT;
     return kern_unlinkat(dirfd, kpath, freebsd_atflags(flag));
@@ -378,19 +399,19 @@ int sys_freebsd_unlinkat(int dirfd, const char *path, int flag) {
  * that does NOT.  We synthesize them here using the at-variants.
  * ------------------------------------------------------------------ */
 
-int sys_freebsd_chown(const char *path, int uid, int gid) {
+int freebsd_sys_chown(const char *path, int uid, int gid) {
     /* FreeBSD chown(2) follows symlinks.  sys_fchownat with flag=0
      * gives that semantic and already does its own copyinstr. */
     return sys_fchownat(AT_FDCWD, path, uid, gid, 0);
 }
 
-int sys_freebsd_lchmod(const char *path, int mode) {
+int freebsd_sys_lchmod(const char *path, int mode) {
     char kpath[256];
     if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -EFAULT;
     return kern_chmodat(AT_FDCWD, kpath, mode, AT_SYMLINK_NOFOLLOW);
 }
 
-int sys_freebsd13_fstatat(int dirfd, const char *path, struct freebsd13_stat *buf, int flags) {
+int freebsd_sys_fstatat_v13(int dirfd, const char *path, struct freebsd13_stat *buf, int flags) {
     char kpath[256];
     if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -EFAULT;
     struct stat native;
@@ -405,7 +426,7 @@ int sys_freebsd13_fstatat(int dirfd, const char *path, struct freebsd13_stat *bu
 
 /* COMPAT11 fstatat (syscall 493) — narrow ino_t/time_t.  Same dirfd
  * semantics as the modern variant; only the output struct differs. */
-int sys_freebsd11_fstatat(int dirfd, const char *path, struct freebsd11_stat *buf, int flags) {
+int freebsd_sys_fstatat_v11(int dirfd, const char *path, struct freebsd11_stat *buf, int flags) {
     char kpath[256];
     if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -EFAULT;
     struct stat native;
@@ -441,7 +462,7 @@ static void translate_stat_to_ostat(struct stat *native, struct freebsd_ostat *o
     o->st_blocks = (int32_t)native->st_blocks;
 }
 
-int sys_freebsd_ostat(const char *path, struct freebsd_ostat *buf) {
+int freebsd_sys_ostat(const char *path, struct freebsd_ostat *buf) {
     char kpath[256];
     if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -EFAULT;
     struct stat native;
@@ -454,7 +475,7 @@ int sys_freebsd_ostat(const char *path, struct freebsd_ostat *buf) {
     return ret;
 }
 
-int sys_freebsd_olstat(const char *path, struct freebsd_ostat *buf) {
+int freebsd_sys_olstat(const char *path, struct freebsd_ostat *buf) {
     char kpath[256];
     if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -EFAULT;
     struct stat native;
@@ -467,7 +488,7 @@ int sys_freebsd_olstat(const char *path, struct freebsd_ostat *buf) {
     return ret;
 }
 
-int sys_freebsd_ofstat(int fd, struct freebsd_ostat *buf) {
+int freebsd_sys_ofstat(int fd, struct freebsd_ostat *buf) {
     struct stat native;
     int ret = kern_fstat(fd, &native);
     if (ret == 0) {
@@ -482,7 +503,7 @@ int sys_freebsd_ofstat(int fd, struct freebsd_ostat *buf) {
  * variant but emits the narrow freebsd11_dirent layout (32-bit ino,
  * no record-level alignment padding).  basep is `long *` (32-bit on
  * i386). */
-ssize_t sys_freebsd11_getdirentries(int fd, char *buf, unsigned int nbytes, int32_t *basep) {
+ssize_t freebsd_sys_getdirentries_v11(int fd, char *buf, unsigned int nbytes, int32_t *basep) {
     if (fd < 0 || fd >= MAX_FD) return -EBADF;
     if (!current_process) return -EINVAL;
     file_t *f = current_process->fds[fd];
@@ -541,7 +562,7 @@ ssize_t sys_freebsd11_getdirentries(int fd, char *buf, unsigned int nbytes, int3
  * Returns FreeBSD struct dirent (64-bit ino_t, 8-byte aligned records).
  * basep receives the file offset at the start of the call.
  */
-ssize_t sys_freebsd_getdirentries(int fd, char *buf, size_t nbytes, int64_t *basep) {
+ssize_t freebsd_sys_getdirentries(int fd, char *buf, size_t nbytes, int64_t *basep) {
     if (fd < 0 || fd >= MAX_FD) return -EBADF;
     if (!current_process) return -EINVAL;
     file_t *f = current_process->fds[fd];

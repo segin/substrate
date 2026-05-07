@@ -1902,6 +1902,48 @@ int sys_dup2(int oldfd, int newfd) {
     return newfd;
 }
 
+/*
+ * dup3 — Linux extension: like dup2 but takes an O_CLOEXEC flag.
+ * If oldfd == newfd, returns -EINVAL (POSIX dup2 returns the fd; dup3
+ * specifically rejects this).
+ */
+int sys_dup3(int oldfd, int newfd, int flags) {
+    if (oldfd == newfd) return -EINVAL;
+    if (flags & ~O_CLOEXEC) return -EINVAL;
+
+    int rc = sys_dup2(oldfd, newfd);
+    if (rc < 0) return rc;
+    if (flags & O_CLOEXEC) {
+        current_process->fd_cloexec |= (1U << newfd);
+    }
+    return rc;
+}
+
+/*
+ * pipe2 — Linux extension: like pipe(2) plus an O_CLOEXEC / O_NONBLOCK
+ * flag set applied atomically to both ends.
+ */
+int sys_pipe2(int *fds, int flags) {
+    if (flags & ~(O_CLOEXEC | O_NONBLOCK)) return -EINVAL;
+
+    int kfds[2];
+    int ret = kern_pipe(kfds);
+    if (ret) return ret;
+
+    if (flags & O_CLOEXEC) {
+        current_process->fd_cloexec |= (1U << kfds[0]);
+        current_process->fd_cloexec |= (1U << kfds[1]);
+    }
+    if (flags & O_NONBLOCK) {
+        if (kfds[0] >= 0 && current_process->fds[kfds[0]])
+            current_process->fds[kfds[0]]->f_flag |= O_NONBLOCK;
+        if (kfds[1] >= 0 && current_process->fds[kfds[1]])
+            current_process->fds[kfds[1]]->f_flag |= O_NONBLOCK;
+    }
+    if (copyout(kfds, fds, 2 * sizeof(int)) != 0) return -EFAULT;
+    return 0;
+}
+
 static fs_node_t *sys_lookup_path(const char *path, int follow_final_symlink) {
     fs_node_t *root;
     fs_node_t *cwd;
@@ -2258,16 +2300,29 @@ int kern_mount(const char *source, const char *target, const char *fstype, unsig
     return vfs_mount_legacy(source, target, fstype, (uint32_t)flags, data);
 }
 
-int sys_umount(const char *target) {
-    char ktarget[256];
-    if (copyinstr(target, ktarget, sizeof(ktarget), NULL) != 0) return -14;
-    return kern_umount(ktarget);
+int kern_umount2(const char *target, int flags) {
+    if (!target) return -EINVAL;
+    /* MNT_FORCE / MNT_DETACH require root.  No flags also requires root. */
+    if (current_process->euid != 0) return -EPERM;
+    /* Reject unknown flag bits so we can extend safely later. */
+    if (flags & ~(MNT_FORCE | MNT_UPDATE)) return -EINVAL;
+    return vfs_unmount_legacy_flags(target, flags);
 }
 
 int kern_umount(const char *target) {
-    if (!target) return -1;
-    if (current_process->euid != 0) return -EPERM;
-    return vfs_unmount_legacy(target);
+    return kern_umount2(target, 0);
+}
+
+int sys_umount2(const char *target, int flags) {
+    char ktarget[256];
+    if (copyinstr(target, ktarget, sizeof(ktarget), NULL) != 0) return -EFAULT;
+    return kern_umount2(ktarget, flags);
+}
+
+int sys_umount(const char *target) {
+    /* Legacy 1-arg form, retained for the BSD-style 158/159 ABI;
+     * forwards to the 2-arg form with no flags. */
+    return sys_umount2(target, 0);
 }
 
 
@@ -2909,7 +2964,7 @@ int sys_select(int nfds, void *rfds, void *wfds, void *efds, void *timeout) {
     return -ENOSYS;
 }
 
-int sys_freebsd4_uname(void *ubuf) {
+int freebsd_sys_uname(void *ubuf) {
     (void)ubuf;
     return -ENOTSUP;
 }

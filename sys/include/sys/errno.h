@@ -47,5 +47,6 @@
 #define EOPNOTSUPP   95 /* Operation not supported on transport endpoint */
 #define ENOTSUP      EOPNOTSUPP
 #define EDEFER      517 /* Driver probe should be retried later */
+#define EUNKNOWNFS   514 /* Unknown filesystem type (sys_mount diagnostic) */
 
 #endif

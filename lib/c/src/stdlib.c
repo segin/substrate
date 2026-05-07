@@ -17,6 +17,9 @@
 #include <errno.h>
 #include <sys/wait.h>
 #include <sys/random.h>
+#include <sys/syscall.h>
+
+extern int64_t _syscall3(int, uintptr_t, uintptr_t, uintptr_t);
 
 #define ATEXIT_MAX 32
 static void (*__atexit_funcs[ATEXIT_MAX])(void);
@@ -1050,11 +1053,13 @@ static void fill_temp_suffix(char *suffix) {
         "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
     /* Pull entropy from the kernel directly so the suffix is
      * unguessable even before libc has reseeded its PRNG (e.g. in a
-     * just-forked child).  Falls back to arc4random_uniform if the
-     * syscall is unavailable. */
+     * just-forked child).  We call the syscall directly here rather
+     * than via libsys's getrandom() — libc cannot depend on libsys.
+     * Falls back to arc4random_uniform if the syscall is unavailable. */
     unsigned char rnd[MKSTEMP_SUFFIX_LEN];
-    ssize_t got = getrandom(rnd, sizeof(rnd), 0);
-    if (got == (ssize_t)sizeof(rnd)) {
+    int64_t got = _syscall3(SYS_GETRANDOM,
+                            (uintptr_t)rnd, (uintptr_t)sizeof(rnd), 0);
+    if (got == (int64_t)sizeof(rnd)) {
         for (size_t i = 0; i < MKSTEMP_SUFFIX_LEN; i++) {
             suffix[i] = alphabet[rnd[i] % (sizeof(alphabet) - 1)];
         }

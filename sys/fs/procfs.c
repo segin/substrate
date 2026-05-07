@@ -244,17 +244,27 @@ static uint32_t gen_cow_stats(char *buf, size_t size, void *opaque) {
 
 static uint32_t gen_filesystems(char *buf, size_t size, void *opaque) {
     (void)opaque;
-    /* Dynamically generate from VFS registry */
+    /* Dynamically generate from VFS registry.  Format follows the Linux
+     * /proc/filesystems convention: "nodev\t<name>" for filesystems
+     * that don't need a backing device (VFS_CAP_VIRTUAL or no
+     * VFS_CAP_NEEDS_DEV), "\t<name>" otherwise. */
     uint32_t off = 0;
     filesystem_t *fs = vfs_get_filesystems();
-    
+
     while (fs) {
-        /* Check if this is a pseudo-filesystem (no device required) */
-        int nodev = (strcmp(fs->name, "procfs") == 0 ||
-                    strcmp(fs->name, "devfs") == 0 ||
-                    strcmp(fs->name, "sysfs") == 0 ||
-                    strcmp(fs->name, "tmpfs") == 0);
-        
+        int nodev;
+        if (fs->caps != 0) {
+            nodev = (fs->caps & VFS_CAP_VIRTUAL) ||
+                    !(fs->caps & VFS_CAP_NEEDS_DEV);
+        } else {
+            /* Pre-existing filesystems without caps fall back to a
+             * name-based heuristic until they're updated. */
+            nodev = (strcmp(fs->name, "procfs") == 0 ||
+                     strcmp(fs->name, "devfs") == 0 ||
+                     strcmp(fs->name, "sysfs") == 0 ||
+                     strcmp(fs->name, "tmpfs") == 0);
+        }
+
         size_t space = (off < size) ? (size - off) : 0;
         char *target = (off < size) ? (buf + off) : NULL;
 

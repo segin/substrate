@@ -1,61 +1,132 @@
 .\"
-.\" MOUNT(2) - Substrate Native Personality
+.\" MOUNT(2) — Substrate Native Personality
 .\"
-.TH MOUNT 2 "January 2026" "Substrate OS" "System Calls"
+.TH MOUNT 2 "May 2026" "Substrate OS" "System Calls"
 .SH NAME
-mount, umount \- mount and unmount filesystems
+mount \- attach a filesystem to the namespace
+.SH LIBRARY
+Standard C library
+.RB ( libc ", " -lc )
 .SH SYNOPSIS
 .nf
 .B #include <sys/mount.h>
 .PP
-.BI "int mount(const char *" source ", const char *" target ","
-.BI "          const char *" filesystemtype ", unsigned long " mountflags ","
-.BI "          const void *" data ");
-.PP
-.BI "int umount(const char *" target ");
+.BI "int mount(const char *" source ", const char *" target ,
+.BI "          const char *" filesystemtype ", unsigned long " mountflags ,
+.BI "          const void *" data );
 .fi
 .SH DESCRIPTION
 .BR mount ()
-attaches the filesystem specified by
-.I source
-(often a pathname referring to a device) to the location specified by
-.IR target .
-.PP
+attaches the filesystem named by
 .I filesystemtype
-is a string identifying the filesystem type (e.g., "ext2", "minix").
-.PP
-.BR umount ()
-removes the attachment of the (topmost) filesystem mounted on
+on
+.I source
+to the directory
 .IR target .
-.SH RETURN VALUE
-On success, zero is returned.
+For network or virtual filesystems
+.I source
+may be NULL.
 .PP
-On error, \-1 is returned, and
+.I mountflags
+is a bitmask of:
+.TP
+.B MNT_RDONLY
+Mount read-only.
+.TP
+.B MNT_NOSUID
+Ignore set-user-ID and set-group-ID bits when executing files on this fs.
+.TP
+.B MNT_NODEV
+Disallow access to special files.
+.TP
+.B MNT_NOEXEC
+Disallow program execution.
+.TP
+.B MNT_SYNCHRONOUS
+Force synchronous writes.
+.TP
+.B MNT_ASYNC
+Defer all writes (best-effort).
+.TP
+.B MNT_UPDATE
+Re-mount an already-mounted filesystem to change its flags rather
+than overlaying a new one.
+.PP
+The
+.I data
+argument is filesystem-specific.  Most filesystems accept a
+NUL-terminated comma-separated options string of
+.B key=value
+pairs (parsed by the kernel's mountopt subsystem); the framework
+strips the standard options
+.RB ( ro ", " rw ", " nosuid ", " nodev ", " noexec ", " sync ", " async )
+out of that string and folds them into
+.I mountflags
+before handing the remainder to the filesystem driver.
+.SH RETURN VALUE
+On success, 0 is returned.  On error, \-1 is returned and
 .I errno
-is set appropriately.
+is set to indicate the error.
 .SH ERRORS
+.TP
+.B EPERM
+The caller's effective UID is not 0.
+.TP
+.B EINVAL
+.I mountflags
+contains conflicting bits, or
+.I target
+is malformed.
+.TP
+.B ENOENT
+.I target
+does not exist.
+.TP
+.B ENOTDIR
+.I target
+is not a directory.
 .TP
 .B EBUSY
 .I target
-is still busy.
+is one of the kernel-managed paths
+.RB ( /dev ", " /proc ", " /sys )
+and
+.B MNT_UPDATE
+was not specified, or the filesystem couldn't be locked.
 .TP
-.B ENOENT
-A pathname was empty or had a nonexistent component.
+.B EUNKNOWNFS
+.I filesystemtype
+isn't registered.
 .TP
-.B ENOTBLK
-.I source
-is not a block device (when a device was required).
+.B EFAULT
+.IR source ", " target ", or " filesystemtype
+points outside the calling process's address space.
+.TP
+.B EIO
+The filesystem driver's mount handler failed.
+.SH SECURITY
+.BR mount ()
+requires effective UID 0.  Mount-over-critical-path is rejected
+unless
+.B MNT_UPDATE
+is set; this guards against shadowing
+.B /dev
+or
+.B /proc
+with attacker-controlled content.  The kernel logs every failed mount
+attempt with
+.BR kprintf .
 .SH NOTES
 .SS Substrate Native ABI
 .nf
-mount:  Syscall Number: 21
-umount: Syscall Number: 22
+mount:    syscall number 21
+umount:   syscall number 22
+umount2:  syscall number 161
 .fi
 .SS Supported Filesystems
-Substrate supports: ext2, minix, exfat, udf.
+ext2, fat, exfat, minix, udf, devfs, procfs, sysfs, fuse, 9p.
 .SH SEE ALSO
-.BR mount (8),
-.BR umount (8),
-.BR substrate (7)
-.SH STANDARDS
-Linux-specific.
+.BR umount (2),
+.BR statvfs (2),
+.BR statfs (2),
+.BR mount (8)

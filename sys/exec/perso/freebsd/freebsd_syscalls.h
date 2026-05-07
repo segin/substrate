@@ -227,24 +227,26 @@ struct freebsd13_stat;
 
 /* FreeBSD-specific system call wrappers/translations */
 struct freebsd11_stat;
-int sys_freebsd_open(const char *path, int flags, int mode);
-int sys_freebsd_openat(int dirfd, const char *path, int flags, int mode);
-int sys_freebsd_stat(const char *path, struct freebsd_stat *buf);
-int sys_freebsd_lstat(const char *path, struct freebsd_stat *buf);
-int sys_freebsd_fstat(int fd, struct freebsd_stat *buf);
-int sys_freebsd11_stat(const char *path, struct freebsd11_stat *buf);
-int sys_freebsd11_lstat(const char *path, struct freebsd11_stat *buf);
-int sys_freebsd11_fstat(int fd, struct freebsd11_stat *buf);
-int sys_freebsd13_stat(const char *path, struct freebsd13_stat *buf);
-int sys_freebsd13_lstat(const char *path, struct freebsd13_stat *buf);
-int sys_freebsd13_fstat(int fd, struct freebsd13_stat *buf);
-int sys_freebsd13_fstatat(int dirfd, const char *path, struct freebsd13_stat *buf, int flags);
-ssize_t sys_freebsd_getdirentries(int fd, char *buf, size_t nbytes, int64_t *basep);
-int sys_freebsd_uname(void *buf);
-int sys_freebsd4_uname(void *buf);
-int64_t sys_freebsd_lseek(int fd, int pad, uint32_t off_lo, uint32_t off_hi, int whence);
-int64_t sys_freebsd_lseek13(int fd, uint32_t off_lo, uint32_t off_hi, int whence);
-void *sys_freebsd_mmap(void *addr, size_t len, int prot, int flags, int fd, uint32_t off_lo, uint32_t off_hi);
+int freebsd_sys_open(const char *path, int flags, int mode);
+int freebsd_sys_openat(int dirfd, const char *path, int flags, int mode);
+int freebsd_sys_pipe2(int *fds, int flags);
+int freebsd_sys_dup3(int oldfd, int newfd, int flags);
+int freebsd_sys_stat(const char *path, struct freebsd_stat *buf);
+int freebsd_sys_lstat(const char *path, struct freebsd_stat *buf);
+int freebsd_sys_fstat(int fd, struct freebsd_stat *buf);
+int freebsd_sys_stat_v11(const char *path, struct freebsd11_stat *buf);
+int freebsd_sys_lstat_v11(const char *path, struct freebsd11_stat *buf);
+int freebsd_sys_fstat_v11(int fd, struct freebsd11_stat *buf);
+int freebsd_sys_stat_v13(const char *path, struct freebsd13_stat *buf);
+int freebsd_sys_lstat_v13(const char *path, struct freebsd13_stat *buf);
+int freebsd_sys_fstat_v13(int fd, struct freebsd13_stat *buf);
+int freebsd_sys_fstatat_v13(int dirfd, const char *path, struct freebsd13_stat *buf, int flags);
+ssize_t freebsd_sys_getdirentries(int fd, char *buf, size_t nbytes, int64_t *basep);
+int freebsd_sys_uname(void *buf);
+int freebsd_sys_uname_v4(void *buf);
+int64_t freebsd_sys_lseek(int fd, int pad, uint32_t off_lo, uint32_t off_hi, int whence);
+int64_t freebsd_sys_lseek13(int fd, uint32_t off_lo, uint32_t off_hi, int whence);
+void *freebsd_sys_mmap(void *addr, size_t len, int prot, int flags, int fd, uint32_t off_lo, uint32_t off_hi);
 
 /* New stubs for missing syscalls */
 int sys_profil(void *samples, unsigned int size, unsigned int offset, unsigned int scale);
@@ -288,6 +290,6 @@ int sys_socketpair(int domain, int type, int protocol, int *sv);
 int sys_msync(void *addr, size_t len, int flags);
 int sys_pdfork(int *fdp, int flags);
 int sys_getpriority(int which, int who);
-int sys_freebsd_sysctl(int *name, unsigned int namelen, void *oldp, size_t *oldlenp, void *newp, size_t newlen);
+int freebsd_sys_sysctl(int *name, unsigned int namelen, void *oldp, size_t *oldlenp, void *newp, size_t newlen);
 
 #endif /* _FREEBSD_SYSCALLS_H */

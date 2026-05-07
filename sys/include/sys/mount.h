@@ -5,6 +5,16 @@
 #include <sys/queue.h>
 #include <sys/lock.h>
 #include <stdint.h>
+#include <stddef.h>
+
+#ifndef __cplusplus
+/* C2x has _Static_assert as a keyword; on older compilers we use the
+ * historic _Static_assert macro shipped by the C11 runtime header.
+ * Either way it's a compile-time check with zero runtime cost. */
+#define _MOUNT_SASSERT(cond, msg) _Static_assert((cond), msg)
+#else
+#define _MOUNT_SASSERT(cond, msg) static_assert((cond), msg)
+#endif
 
 struct vnode;
 struct fs_node;
@@ -13,6 +23,25 @@ struct thread;
 struct ucred;
 struct fid;
 struct vfsconf;
+
+/*
+ * Versioned mount-args blob.  Userspace passes one of these through the
+ * `data` parameter of sys_mount() to communicate filesystem-specific
+ * options without burning a new syscall every time we add a tunable.
+ *
+ * `mnt_arg_version` is bumped whenever the layout below changes;
+ * filesystem-specific args follow inline (use offsetof to skip past
+ * the header).
+ */
+struct mount_args {
+    uint32_t mnt_arg_version;   /* MOUNT_ARGS_VERSION_* */
+    uint32_t mnt_arg_size;      /* sizeof entire blob, header included */
+    uint32_t mnt_arg_flags;     /* mirror of MNT_* */
+    uint32_t mnt_arg_reserved;  /* must be 0 */
+    /* filesystem-specific bytes follow */
+};
+
+#define MOUNT_ARGS_VERSION_1 1u
 
 /*
  * Filesystem statistics
@@ -144,5 +173,23 @@ int unmount(const char *dir, int flags);
 }
 #endif
 #endif
+
+/*
+ * Build-time invariants.  These guard against accidental ABI breakage
+ * when somebody reorders fields or changes a type without updating the
+ * copyin/copyout glue and userspace mirrors.
+ */
+_MOUNT_SASSERT(sizeof(struct mount_args) == 16,
+               "struct mount_args ABI changed; bump MOUNT_ARGS_VERSION");
+_MOUNT_SASSERT(offsetof(struct mount_args, mnt_arg_version) == 0,
+               "mnt_arg_version must be the first field");
+_MOUNT_SASSERT(offsetof(struct mount_args, mnt_arg_size) == 4,
+               "mnt_arg_size offset changed");
+_MOUNT_SASSERT(sizeof(((struct statfs *)0)->f_fstypename) == 16,
+               "statfs f_fstypename must be exactly 16 bytes");
+_MOUNT_SASSERT(sizeof(((struct statfs *)0)->f_mntonname) == 128,
+               "statfs f_mntonname must be exactly 128 bytes");
+_MOUNT_SASSERT(sizeof(((struct statfs *)0)->f_mntfromname) == 128,
+               "statfs f_mntfromname must be exactly 128 bytes");
 
 #endif /* !_SYS_MOUNT_H */

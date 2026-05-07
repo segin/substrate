@@ -107,6 +107,13 @@ extern bool test_namei_dot_and_dotdot(void);
 extern bool test_namei_mount_crossing(void);
 extern bool test_namei_symlink_resolution(void);
 extern bool test_namei_maxsymlinks(void);
+extern bool test_mountopt_empty(void);
+extern bool test_mountopt_basic(void);
+extern bool test_mountopt_last_wins(void);
+extern bool test_mountopt_apply_generic(void);
+extern bool test_mountopt_int_overflow(void);
+extern bool test_mountopt_bool_forms(void);
+extern bool test_mountopt_malformed(void);
 extern bool test_vnode_cache_insert_basic(void);
 extern bool test_vnode_cache_insert_no_mount(void);
 extern bool test_vnode_cache_insert_zero_ino(void);
@@ -290,6 +297,13 @@ test_case_t tests[] = {
     { "namei_mount_cross", test_namei_mount_crossing },
     { "namei_symlink", test_namei_symlink_resolution },
     { "namei_maxsymlinks", test_namei_maxsymlinks },
+    { "mountopt_empty", test_mountopt_empty },
+    { "mountopt_basic", test_mountopt_basic },
+    { "mountopt_last_wins", test_mountopt_last_wins },
+    { "mountopt_apply_generic", test_mountopt_apply_generic },
+    { "mountopt_int_overflow", test_mountopt_int_overflow },
+    { "mountopt_bool_forms", test_mountopt_bool_forms },
+    { "mountopt_malformed", test_mountopt_malformed },
     { "vnode_cache_insert_basic", test_vnode_cache_insert_basic },
     { "vnode_cache_insert_no_mount", test_vnode_cache_insert_no_mount },
     { "vnode_cache_insert_zero_ino", test_vnode_cache_insert_zero_ino },

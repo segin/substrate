@@ -86,9 +86,22 @@ typedef struct fs_node {
 
 typedef struct fs_node * (*mount_type_t)(const char *device, uint32_t flags, void *data);
 
+/*
+ * Filesystem capability bitmap.  Each backend declares which
+ * features it supports so userspace tools (and /proc/filesystems
+ * style enumeration) can report capabilities consistently.
+ */
+#define VFS_CAP_NEEDS_DEV       0x00000001U /* needs a backing device */
+#define VFS_CAP_RDONLY_ONLY     0x00000002U /* MNT_RDONLY is mandatory */
+#define VFS_CAP_REMOUNT         0x00000004U /* supports MNT_UPDATE */
+#define VFS_CAP_VIRTUAL         0x00000008U /* synthesised, no source */
+#define VFS_CAP_NETWORK         0x00000010U /* network-backed */
+#define VFS_CAP_USER_MOUNT      0x00000020U /* unprivileged users may mount */
+
 typedef struct filesystem {
     char name[32];
     mount_type_t mount;
+    uint32_t caps;                  /* VFS_CAP_* bitmap */
     struct filesystem *next;
 } filesystem_t;
 
@@ -129,6 +142,7 @@ void vfs_register_filesystem(filesystem_t *fs);
 filesystem_t *vfs_get_filesystems(void);
 int vfs_mount_legacy(const char *device, const char *path, const char *type, uint32_t flags, void *data);
 int vfs_unmount_legacy(const char *path);
+int vfs_unmount_legacy_flags(const char *path, int flags);
 fs_node_t *vfs_lookup(fs_node_t *root, const char *path);
 fs_node_t *vfs_lookup_lstat(fs_node_t *root, const char *path);
 void vfs_init(void);

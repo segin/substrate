@@ -397,39 +397,39 @@ void freebsd_sendsig(void *handler, int sig, uint32_t mask, uint32_t flags, void
 int  freebsd_sys_sigreturn(void *regs);
 
 
-int sys_freebsd_open(const char *path, int flags, int mode);
-int sys_freebsd_openat(int dirfd, const char *path, int flags, int mode);
-int sys_freebsd_stat(const char *path, struct freebsd_stat *buf);
-int sys_freebsd_lstat(const char *path, struct freebsd_stat *buf);
-int sys_freebsd_fstat(int fd, struct freebsd_stat *buf);
-int sys_freebsd11_stat(const char *path, struct freebsd11_stat *buf);
-int sys_freebsd11_lstat(const char *path, struct freebsd11_stat *buf);
-int sys_freebsd11_fstat(int fd, struct freebsd11_stat *buf);
-int sys_freebsd13_fstatat(int dirfd, const char *path, struct freebsd13_stat *buf, int flags);
-int sys_freebsd_fstatat(int dirfd, const char *path, struct freebsd13_stat *buf, int flags);
-int sys_freebsd11_fstatat(int dirfd, const char *path, struct freebsd11_stat *buf, int flags);
-ssize_t sys_freebsd_getdirentries(int fd, char *buf, size_t nbytes, int64_t *basep);
-ssize_t sys_freebsd11_getdirentries(int fd, char *buf, unsigned int nbytes, int32_t *basep);
+int freebsd_sys_open(const char *path, int flags, int mode);
+int freebsd_sys_openat(int dirfd, const char *path, int flags, int mode);
+int freebsd_sys_stat(const char *path, struct freebsd_stat *buf);
+int freebsd_sys_lstat(const char *path, struct freebsd_stat *buf);
+int freebsd_sys_fstat(int fd, struct freebsd_stat *buf);
+int freebsd_sys_stat_v11(const char *path, struct freebsd11_stat *buf);
+int freebsd_sys_lstat_v11(const char *path, struct freebsd11_stat *buf);
+int freebsd_sys_fstat_v11(int fd, struct freebsd11_stat *buf);
+int freebsd_sys_fstatat_v13(int dirfd, const char *path, struct freebsd13_stat *buf, int flags);
+int freebsd_sys_fstatat(int dirfd, const char *path, struct freebsd13_stat *buf, int flags);
+int freebsd_sys_fstatat_v11(int dirfd, const char *path, struct freebsd11_stat *buf, int flags);
+ssize_t freebsd_sys_getdirentries(int fd, char *buf, size_t nbytes, int64_t *basep);
+ssize_t freebsd_sys_getdirentries_v11(int fd, char *buf, unsigned int nbytes, int32_t *basep);
 
 /* Pre-FreeBSD-5 ostat family.  Almost no extant binary uses these. */
-int sys_freebsd_ostat(const char *path, struct freebsd_ostat *buf);
-int sys_freebsd_olstat(const char *path, struct freebsd_ostat *buf);
-int sys_freebsd_ofstat(int fd, struct freebsd_ostat *buf);
+int freebsd_sys_ostat(const char *path, struct freebsd_ostat *buf);
+int freebsd_sys_olstat(const char *path, struct freebsd_ostat *buf);
+int freebsd_sys_ofstat(int fd, struct freebsd_ostat *buf);
 
 /* FreeBSD at-family wrappers (translate at-flag bits + path copyin). */
-int sys_freebsd_faccessat(int dirfd, const char *path, int amode, int flag);
-int sys_freebsd_fchmodat(int dirfd, const char *path, int mode, int flag);
-int sys_freebsd_fchownat(int dirfd, const char *path, int uid, int gid, int flag);
-int sys_freebsd_linkat(int olddir, const char *oldpath, int newdir, const char *newpath, int flag);
-int sys_freebsd_mkdirat(int dirfd, const char *path, int mode);
-int sys_freebsd_readlinkat(int dirfd, const char *path, char *buf, size_t bufsiz);
-int sys_freebsd_renameat(int olddir, const char *oldpath, int newdir, const char *newpath);
-int sys_freebsd_symlinkat(const char *target, int newdir, const char *newpath);
-int sys_freebsd_unlinkat(int dirfd, const char *path, int flag);
+int freebsd_sys_faccessat(int dirfd, const char *path, int amode, int flag);
+int freebsd_sys_fchmodat(int dirfd, const char *path, int mode, int flag);
+int freebsd_sys_fchownat(int dirfd, const char *path, int uid, int gid, int flag);
+int freebsd_sys_linkat(int olddir, const char *oldpath, int newdir, const char *newpath, int flag);
+int freebsd_sys_mkdirat(int dirfd, const char *path, int mode);
+int freebsd_sys_readlinkat(int dirfd, const char *path, char *buf, size_t bufsiz);
+int freebsd_sys_renameat(int olddir, const char *oldpath, int newdir, const char *newpath);
+int freebsd_sys_symlinkat(const char *target, int newdir, const char *newpath);
+int freebsd_sys_unlinkat(int dirfd, const char *path, int flag);
 
 /* chown/chmod family.  Substrate native chown does not follow symlinks
  * but FreeBSD's chown does; lchmod has no native equivalent. */
-int sys_freebsd_chown(const char *path, int uid, int gid);
-int sys_freebsd_lchmod(const char *path, int mode);
+int freebsd_sys_chown(const char *path, int uid, int gid);
+int freebsd_sys_lchmod(const char *path, int mode);
 
 #endif /* _FREEBSD_USER_H */

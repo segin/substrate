@@ -61,5 +61,6 @@ extern int errno;
 #define ENOTRECOVERABLE 131 /* State not recoverable */
 #define ETIMEDOUT   110 /* Connection timed out */
 #define EOVERFLOW   75  /* Value too large for defined data type */
+#define EUNKNOWNFS  514 /* Unknown filesystem type (sys_mount diagnostic) */
 
 #endif

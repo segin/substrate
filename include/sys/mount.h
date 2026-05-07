@@ -26,11 +26,25 @@
 #define MS_I_VERSION    (1 << 23)
 #define MS_STRICTATIME  (1 << 24)
 
+/* BSD-style mount flags (mirrored in sys/sys/mount.h on the kernel side
+ * — see the kernel header for the authoritative numbering). */
+#define MNT_RDONLY      0x00000001
+#define MNT_SYNCHRONOUS 0x00000002
+#define MNT_NOEXEC      0x00000004
+#define MNT_NOSUID      0x00000008
+#define MNT_NODEV       0x00000010
+#define MNT_ASYNC       0x00000040
+#define MNT_UPDATE      0x00010000
+#define MNT_FORCE       0x00080000
+
 int mount(const char *source, const char *target,
           const char *filesystemtype, unsigned long mountflags,
           const void *data);
 
 int umount(const char *target);
 int umount2(const char *target, int flags);
+
+/* BSD-spelling alias for umount2(). */
+int unmount(const char *target, int flags);
 
 #endif /* _SYS_MOUNT_H */

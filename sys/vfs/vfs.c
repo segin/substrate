@@ -108,6 +108,32 @@ filesystem_t *vfs_get_filesystems(void) {
 }
 
 int vfs_mount_legacy(const char *device, const char *path, const char *type, uint32_t flags, void *data) {
+    if (!type || !path) {
+        return -EINVAL;
+    }
+
+    /* Reject conflicting flags before doing any work. */
+    if ((flags & MNT_RDONLY) && (flags & MNT_ASYNC)) {
+        return -EINVAL;
+    }
+    if ((flags & MNT_SYNCHRONOUS) && (flags & MNT_ASYNC)) {
+        return -EINVAL;
+    }
+
+    /* Reject mount-over-critical-path unless MNT_UPDATE is set (which
+     * indicates remounting, not overlaying).  These paths are managed
+     * by the kernel and overlaying them would shadow the kernel's
+     * device/proc tree. */
+    if (!(flags & MNT_UPDATE)) {
+        if (strcmp(path, "/dev") == 0 ||
+            strcmp(path, "/proc") == 0 ||
+            strcmp(path, "/sys") == 0) {
+            kprintf("VFS: mount(%s on %s): refusing to overlay critical path\n",
+                    type, path);
+            return -EBUSY;
+        }
+    }
+
     // Find filesystem type
     filesystem_t *fs = filesystems;
     while (fs) {
@@ -115,8 +141,9 @@ int vfs_mount_legacy(const char *device, const char *path, const char *type, uin
         fs = fs->next;
     }
     if (!fs) {
-        kprintf("VFS: Unknown filesystem type: %s\n", type);
-        return -1;
+        kprintf("VFS: mount(%s on %s): unknown filesystem type\n",
+                type, path);
+        return -EUNKNOWNFS;
     }
 
     // Lookup device node if device path is specified
@@ -169,7 +196,11 @@ int vfs_mount_legacy(const char *device, const char *path, const char *type, uin
 
     // Call mount implementation with device node as data
     fs_node_t *root = fs->mount(device, flags, dev_node ? dev_node : data);
-    if (!root) return -1;
+    if (!root) {
+        kprintf("VFS: mount(%s on %s): filesystem init failed\n",
+                type, path);
+        return -EIO;
+    }
 
     // Handle Root Mount
     fs_node_t *mountpoint = NULL;
@@ -181,19 +212,21 @@ int vfs_mount_legacy(const char *device, const char *path, const char *type, uin
         mountpoint = vfs_lookup(fs_root, path);
         
         if (!mountpoint) {
-            kprintf("VFS: Mount point not found: %s\n", path);
+            kprintf("VFS: mount(%s on %s): mount point not found\n",
+                    type, path);
             if (root && root->unmount) {
                 root->unmount(root);
             }
-            return -1; 
+            return -ENOENT;
         }
 
         if ((mountpoint->flags & 0x7) != FS_DIRECTORY) {
-             kprintf("VFS: Mount point is not a directory: %s\n", path);
+             kprintf("VFS: mount(%s on %s): mount point is not a directory\n",
+                     type, path);
              if (root->unmount) {
                  root->unmount(root);
              }
-             return -1;
+             return -ENOTDIR;
         }
         
         // Attach (locked — concurrent traversals must see both fields
@@ -950,7 +983,11 @@ int vfs_mknod(const char *path, uint16_t mode, uint32_t dev) {
 }
 
 int vfs_unmount_legacy(const char *path) {
-    if (!path) return -1;
+    return vfs_unmount_legacy_flags(path, 0);
+}
+
+int vfs_unmount_legacy_flags(const char *path, int flags) {
+    if (!path) return -EINVAL;
     
     /*
      * Lookup mount point (the directory that was mounted ON).
@@ -1033,7 +1070,14 @@ int vfs_unmount_legacy(const char *path) {
 
     if (target_mp) {
         if (vfs_is_busy(target_mp)) {
-            return -16; // EBUSY
+            /* MNT_FORCE bypasses the busy check.  Caller is asserting
+             * that they understand stale fds will start failing once
+             * the underlying fs is gone. */
+            if (!(flags & MNT_FORCE)) {
+                return -EBUSY;
+            }
+            kprintf("VFS: forced unmount of %s while busy (MNT_FORCE)\n",
+                    path);
         }
     }
 

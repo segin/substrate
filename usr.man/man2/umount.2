@@ -1,25 +1,80 @@
-.\" Process this file with
-.\" groff -man -Tascii umount.2
 .\"
-.TH UMOUNT 2 "January 2026" "Substrate Kernel" "System Calls Manual"
+.\" UMOUNT(2) — Substrate Native Personality
+.\"
+.TH UMOUNT 2 "May 2026" "Substrate OS" "System Calls"
 .SH NAME
-umount \- unmount filesystem
+umount, umount2, unmount \- detach a mounted filesystem
 .SH LIBRARY
-Standard C library (libc, -lc)
+Standard C library
+.RB ( libc ", " -lc )
 .SH SYNOPSIS
+.nf
 .B #include <sys/mount.h>
 .PP
-.BI "int umount(const char *" target ");"
+.BI "int umount(const char *" target );
+.BI "int umount2(const char *" target ", int " flags );
+.BI "int unmount(const char *" target ", int " flags );
+.fi
 .SH DESCRIPTION
-.B umount()
-removes the attachment of the (topmost) filesystem mounted on
-.IR target .
+.BR umount ()
+detaches the filesystem mounted at
+.IR target ;
+it is equivalent to
+.BR umount2 ( target ", 0)."
+.PP
+.BR umount2 ()
+takes an additional
+.I flags
+argument:
+.TP
+.B MNT_FORCE
+Drop the filesystem even if it has open files or active vnodes.
+Stale file descriptors against the filesystem will start failing
+with
+.B EIO
+once the unmount completes.  Use only when a graceful unmount is
+known to be impossible (a hung NFS mount, a removed device).
+.TP
+.B MNT_UPDATE
+Reserved.  Currently no effect for unmount.
+.PP
+.BR unmount ()
+is the BSD spelling of
+.BR umount2 ();
+both refer to the same syscall.
 .SH RETURN VALUE
-On success, zero is returned. On error, -1 is returned.
+On success, 0 is returned.  On error, \-1 is returned and
+.I errno
+is set to indicate the error.
 .SH ERRORS
 .TP
+.B EPERM
+The caller's effective UID is not 0.
+.TP
+.B EINVAL
+.I flags
+contains an unknown bit, or
+.I target
+is malformed.
+.TP
+.B ENOENT
+.I target
+isn't currently a mount point.
+.TP
 .B EBUSY
-The target could not be unmounted because it is busy.
-
+The filesystem still has open files and
+.B MNT_FORCE
+was not set.
+.TP
+.B EFAULT
+.I target
+points outside the calling process's address space.
+.SH NOTES
+.SS Substrate Native ABI
+.nf
+umount:   syscall number 22
+umount2:  syscall number 161
+.fi
 .SH SEE ALSO
-.BR intro(2)
+.BR mount (2),
+.BR umount (8)
