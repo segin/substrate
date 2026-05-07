@@ -1,40 +1,107 @@
 #include <exec/formats/coff.h>
 
+#ifndef HOST_TEST
 #include <kern/console.h>
 #include <exec/perso/personality.h>
 #include <kern/sched.h>
 #include <sys/sysinfo.h>
 #include <pm/pm.h>
-#include <string.h>
 #include <stdio.h>
 #include <vm/vm_map.h>
 #include <vm/vm_object.h>
 #include <vm/vm_page.h>
 #include <sys/proc.h>
 #include <arch/i386/pmap.h>
+#endif
 
+#include <string.h>
 
+/*
+ * Hard cap on per-segment size.  COFF stores sizes as int32_t; we further
+ * reject anything that would overflow user-space layout calculations.  The
+ * cap is intentionally well below 2 GiB so that text+data+bss arithmetic
+ * cannot wrap a 32-bit address.
+ */
+#define COFF_MAX_SEGMENT_BYTES (1U << 30)  /* 1 GiB */
+
+int coff_validate_filehdr(const coff_filehdr_t *fh, uint32_t file_size) {
+    if (!fh) return -1;
+    if (fh->f_magic != COFF_MAGIC_I386) return -1;
+    if (fh->f_nscns == 0 || fh->f_nscns > 256) return -1;
+
+    /* The optional header (if present) sits immediately after the file
+     * header; the section table follows.  Bound both against file_size. */
+    if (fh->f_opthdr > 4096) return -1;  /* sane upper bound */
+    uint32_t scn_offset = (uint32_t)sizeof(coff_filehdr_t) + (uint32_t)fh->f_opthdr;
+    if (scn_offset > file_size) return -1;
+
+    uint32_t scn_table_bytes = (uint32_t)fh->f_nscns * (uint32_t)sizeof(coff_scnhdr_t);
+    if (scn_offset + scn_table_bytes < scn_offset) return -1;  /* overflow */
+    if (scn_offset + scn_table_bytes > file_size) return -1;
+
+    return 0;
+}
+
+int coff_validate_aouthdr(const coff_aouthdr_t *opt) {
+    if (!opt) return -1;
+
+    /* REQ-05-0407, REQ-05-0408: only ZMAGIC (demand-paged) is accepted. */
+    if (opt->magic != AOUT_ZMAGIC) return -1;
+
+    /* REQ-05-0413: sizes must be non-negative and bounded.  Negative values
+     * are nonsensical for an executable image; very large values are likely
+     * corrupted headers and would overflow address arithmetic below. */
+    if (opt->tsize < 0 || (uint32_t)opt->tsize > COFF_MAX_SEGMENT_BYTES) return -1;
+    if (opt->dsize < 0 || (uint32_t)opt->dsize > COFF_MAX_SEGMENT_BYTES) return -1;
+    if (opt->bsize < 0 || (uint32_t)opt->bsize > COFF_MAX_SEGMENT_BYTES) return -1;
+
+    /* ZMAGIC requires page-aligned tsize so .text and .data live in disjoint
+     * page frames — without this, demand paging would have to copy partial
+     * pages on first fault.  dsize/bsize need only sub-page accuracy. */
+    if ((uint32_t)opt->tsize & (COFF_PAGE_SIZE - 1U)) return -1;
+
+    /* REQ-05-0420: text_start must be strictly below data_start when both
+     * are present, and text+tsize must fit before data_start.  When the
+     * binary is BSS-only (tsize == 0) we relax the ordering requirement. */
+    if (opt->tsize > 0) {
+        uint32_t text_end = (uint32_t)opt->text_start + (uint32_t)opt->tsize;
+        if (text_end < (uint32_t)opt->text_start) return -1;  /* overflow */
+
+        if (opt->dsize > 0 || opt->bsize > 0) {
+            if ((uint32_t)opt->data_start < text_end) return -1;
+        }
+
+        /* REQ-05-0416: entry must fall within the text segment. */
+        if ((uint32_t)opt->entry < (uint32_t)opt->text_start ||
+            (uint32_t)opt->entry >= text_end) {
+            return -1;
+        }
+    } else if (opt->dsize > 0 || opt->bsize > 0) {
+        /* BSS-only / data-only image: there's no text to anchor entry in. */
+        if (opt->entry != 0) return -1;
+    }
+
+    return 0;
+}
+
+#ifndef HOST_TEST
 int coff_load_file(void *file, uint32_t size) {
     coff_filehdr_t *filehdr = (coff_filehdr_t *)file;
 
-    if (filehdr->f_magic != COFF_MAGIC_I386) {
-        return -1;
-    }
-
-    // Validate section header offset and count against file size
-    uint32_t scn_offset = sizeof(coff_filehdr_t) + filehdr->f_opthdr;
-    if (scn_offset > size || filehdr->f_nscns > 256 ||
-        scn_offset + (uint32_t)filehdr->f_nscns * sizeof(coff_scnhdr_t) > size) {
-        kprint("COFF: Header exceeds file size\n");
+    if (coff_validate_filehdr(filehdr, size) != 0) {
+        kprint("COFF: Invalid file header\n");
         return -1;
     }
 
     kprint("Loading COFF file...\n");
 
     // If it has an optional header, parse it for entry point
-    if (filehdr->f_opthdr > 0) {
+    if (filehdr->f_opthdr >= sizeof(coff_aouthdr_t)) {
         coff_aouthdr_t *aouthdr = (coff_aouthdr_t *)((uintptr_t)file + sizeof(coff_filehdr_t));
-        // Entry point is aouthdr->entry
+        if (coff_validate_aouthdr(aouthdr) != 0) {
+            kprint("COFF: Invalid optional header (magic/size/entry)\n");
+            return -1;
+        }
         char buf[64];
         snprintf(buf, sizeof(buf), "COFF: Entry point at 0x%08x\n", aouthdr->entry);
         kprint(buf);
@@ -169,4 +236,5 @@ int coff_load_file(void *file, uint32_t size) {
 
     return 0;
 }
+#endif /* !HOST_TEST */
 

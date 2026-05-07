@@ -2,6 +2,7 @@
 #define _COFF_H
 
 #include <stdint.h>
+#include <stddef.h>
 
 // COFF File Header
 typedef struct {
@@ -79,6 +80,36 @@ typedef struct {
 } coff_scnhdr_t;
 
 #define COFF_MAGIC_I386 0x14c
+
+/*
+ * COFF optional-header (a.out-style) magic numbers.  ZMAGIC is the only form
+ * shipped by SCO/SVR3 demand-paged binaries; OMAGIC and NMAGIC describe older
+ * unpaged or pure-text layouts that the kernel does not load.
+ */
+#define AOUT_OMAGIC 0x0107
+#define AOUT_NMAGIC 0x0108
+#define AOUT_ZMAGIC 0x010B
+
+/* COFF page granularity for ZMAGIC layouts (matches SVR3 PAGSIZ). */
+#define COFF_PAGE_SIZE 4096U
+
+/*
+ * coff_validate_filehdr - cheap structural check on the file header.
+ * Returns 0 if the header is well-formed for an i386 COFF executable that
+ * is at least file_size bytes long; negative error otherwise.
+ */
+int coff_validate_filehdr(const coff_filehdr_t *fh, uint32_t file_size);
+
+/*
+ * coff_validate_aouthdr - validate the ZMAGIC optional header that follows
+ * the file header.  Verifies magic, segment sizes, page alignment, and that
+ * the entry point lies within [text_start, text_start + tsize).  Caller is
+ * responsible for confirming f_opthdr >= sizeof(coff_aouthdr_t) before call.
+ *
+ * Returns 0 on success, negative error otherwise.  No allocations, no
+ * dependencies on kernel state — host-test friendly.
+ */
+int coff_validate_aouthdr(const coff_aouthdr_t *opt);
 
 int coff_load_file(void *file, uint32_t size);
 
