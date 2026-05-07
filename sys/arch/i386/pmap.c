@@ -533,28 +533,35 @@ void pmap_destroy(pmap_t pmap) {
                              * holder is responsible for releasing them.
                              */
                             /*
-                             * Free the page only when it has NO remaining
-                             * mappings in any pmap (pv_list == NULL after
-                             * pv_remove above) AND no vm_object owner AND
-                             * isn't wired.  Using pv_list as the
-                             * authoritative "is this still mapped
-                             * anywhere?" signal is safe: ref_count counts
-                             * vm_page_hold calls and can be desynced from
-                             * actual mappings (e.g. kernel direct-map
-                             * pages, or any pmap_enter path that doesn't
-                             * call vm_page_hold).
+                             * Free the page only when ALL of these hold:
+                             *   - pv_list == NULL  → no pmap maps it anymore
+                             *   - ref_count == 1   → only the original
+                             *                        allocator reference
+                             *                        remains (alloc gives
+                             *                        ref=1, pmap_enter's
+                             *                        vm_page_hold added
+                             *                        the second one, our
+                             *                        unhold above just
+                             *                        backed it out)
+                             *   - wire_count == 0  → not pinned
+                             *   - object == NULL   → anonymous; vm_object
+                             *                        pages go through
+                             *                        vm_object_deallocate
                              *
-                             * If we only checked ref_count == 1, we could
-                             * free a page that's still mapped in another
-                             * pmap, leaving a dangling PTE — the other
-                             * process would later trap on freed-and-reused
-                             * memory.  That was the cause of the shell
-                             * crashing after the second cat: cat's
-                             * pmap_destroy was freeing pages whose ref
-                             * counts said "alloc only" but whose pv_list
-                             * still pointed at the shell's pmap.
+                             * Both pv_list AND ref_count are required:
+                             * either alone has been observed lying.  If
+                             * pv_list is NULL but ref_count > 1, somebody
+                             * else holds the page (a hold without a
+                             * corresponding pv_entry).  If ref_count == 1
+                             * but pv_list is non-NULL, somebody mapped
+                             * the page without a paired vm_page_hold.
+                             * Conservative: skip when in doubt.  A
+                             * mis-freed page corrupts whatever still
+                             * refers to it (busybox ash crashing at a
+                             * deterministic eip after the second exec).
                              */
                             if (page->pv_list == NULL &&
+                                page->ref_count == 1 &&
                                 page->wire_count == 0 &&
                                 page->object == NULL) {
                                 vm_page_free(page);
@@ -563,7 +570,8 @@ void pmap_destroy(pmap_t pmap) {
                                 pmap_destroy_anon_skipped++;
                                 pmap_destroy_skip_obj   += (page->object  != NULL);
                                 pmap_destroy_skip_wired += (page->wire_count != 0);
-                                pmap_destroy_skip_refcnt+= (page->pv_list != NULL);
+                                pmap_destroy_skip_refcnt+= (page->pv_list != NULL ||
+                                                             page->ref_count != 1);
                                 if (page->object == NULL && page->wire_count == 0) {
                                     if (page->ref_count == 0) pmap_destroy_anon_rc0++;
                                     else if (page->ref_count == 2) pmap_destroy_anon_rc2++;
