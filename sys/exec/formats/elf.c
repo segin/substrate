@@ -1478,10 +1478,19 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
          */
         ldt_free_process(current_process);
         /*
-         * vm_map already swapped earlier (so elf_load could use it).
-         * The old vm_map will be destroyed below as part of commit;
-         * mark the swap committed so cleanup leaves new_vm_map alone.
+         * vm_map was already swapped earlier so elf_load could use it.
+         * Drop the old vm_map *inline* — the function exits via
+         * __builtin_unreachable() on success and never reaches the
+         * cleanup label, so deferring the free to cleanup leaks the
+         * old vm_map across every exec (visible as ~1 MB per exec
+         * eaten out of free memory).  Null the saved pointer so a
+         * post-commit failure that does goto cleanup doesn't try to
+         * double-free.
          */
+        if (old_vm_map) {
+            vm_map_destroy(old_vm_map);
+            old_vm_map = NULL;
+        }
         vm_state_committed = 1;
     }
 
@@ -1582,10 +1591,9 @@ cleanup:
             current_process->vm_map = old_vm_map;
         }
         vm_map_destroy(new_vm_map);
-    } else if (vm_state_committed && old_vm_map) {
-        /* Commit: drop the old vm_map; new one is now installed. */
-        vm_map_destroy(old_vm_map);
     }
+    /* On success, old_vm_map was destroyed inline at commit (and the
+     * pointer NULL'd), so we don't need a post-commit branch here. */
     if (!vm_state_committed && new_pmap) {
         pmap_destroy(new_pmap);
     }
