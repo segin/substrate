@@ -54,6 +54,10 @@ uint64_t pmap_destroy_skip_obj       = 0;
 uint64_t pmap_destroy_skip_wired     = 0;
 uint64_t pmap_destroy_skip_refcnt    = 0;
 uint64_t pmap_destroy_calls          = 0;
+/* Histogram of post-unhold ref_count for anonymous (obj==NULL) skipped pages. */
+uint64_t pmap_destroy_anon_rc0       = 0;  /* ref_count == 0 */
+uint64_t pmap_destroy_anon_rc2       = 0;  /* ref_count == 2 */
+uint64_t pmap_destroy_anon_rc_big    = 0;  /* ref_count >= 3 */
 
 void pmap_dump_destroy_stats(void) {
     char buf[256];
@@ -534,16 +538,20 @@ void pmap_destroy(pmap_t pmap) {
                                 vm_page_free(page);
                                 pmap_destroy_anon_freed++;
                             } else {
-                                /* Diagnostic: count pages that pmap_destroy
-                                 * walked but did NOT free.  If the leak
-                                 * persists despite the freer-condition
-                                 * being correct, this counter rising
-                                 * tells us my predicate is screening
-                                 * out the wrong pages. */
                                 pmap_destroy_anon_skipped++;
                                 pmap_destroy_skip_obj   += (page->object  != NULL);
                                 pmap_destroy_skip_wired += (page->wire_count != 0);
                                 pmap_destroy_skip_refcnt+= (page->ref_count != 1);
+                                /* For anonymous skipped pages, bucket by
+                                 * actual ref_count so we can see whether
+                                 * the predicate is wrong (rc=0 means we
+                                 * over-unheld; rc>=2 means the page is
+                                 * still really in use). */
+                                if (page->object == NULL && page->wire_count == 0) {
+                                    if (page->ref_count == 0) pmap_destroy_anon_rc0++;
+                                    else if (page->ref_count == 2) pmap_destroy_anon_rc2++;
+                                    else if (page->ref_count >= 3) pmap_destroy_anon_rc_big++;
+                                }
                             }
                         }
                     }

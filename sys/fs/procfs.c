@@ -194,6 +194,9 @@ extern uint64_t pmap_destroy_skip_obj;
 extern uint64_t pmap_destroy_skip_wired;
 extern uint64_t pmap_destroy_skip_refcnt;
 extern uint64_t pmap_destroy_calls;
+extern uint64_t pmap_destroy_anon_rc0;
+extern uint64_t pmap_destroy_anon_rc2;
+extern uint64_t pmap_destroy_anon_rc_big;
 
 static uint32_t proc_pmap_stats_read(char *buf, size_t size, void *opaque) {
     (void)opaque;
@@ -221,7 +224,10 @@ static uint32_t proc_pmap_stats_read(char *buf, size_t size, void *opaque) {
         "Destroy Anon Skipped: %llu\n"
         "  skip reason obj!=NULL: %llu\n"
         "  skip reason wired:     %llu\n"
-        "  skip reason refcnt!=1: %llu\n",
+        "  skip reason refcnt!=1: %llu\n"
+        "  anon refcnt==0:        %llu\n"
+        "  anon refcnt==2:        %llu\n"
+        "  anon refcnt>=3:        %llu\n",
         stats.faults,
         stats.cow_faults,
         stats.zero_fills,
@@ -239,7 +245,10 @@ static uint32_t proc_pmap_stats_read(char *buf, size_t size, void *opaque) {
         (unsigned long long)pmap_destroy_anon_skipped,
         (unsigned long long)pmap_destroy_skip_obj,
         (unsigned long long)pmap_destroy_skip_wired,
-        (unsigned long long)pmap_destroy_skip_refcnt
+        (unsigned long long)pmap_destroy_skip_refcnt,
+        (unsigned long long)pmap_destroy_anon_rc0,
+        (unsigned long long)pmap_destroy_anon_rc2,
+        (unsigned long long)pmap_destroy_anon_rc_big
     );
 }
 
