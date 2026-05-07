@@ -12,12 +12,25 @@ int optind = 1;
 int opterr = 1;
 int optopt = '?';
 
+/*
+ * BSD-style optreset.  Setting it to 1 resets the static parsing state
+ * so the same process can call getopt against a fresh argv (typical in
+ * shells and test harnesses).  Cleared on every reset.
+ */
+int optreset = 0;
+
 static char *nextchar = NULL;
 
 static int _getopt_internal(int argc, char *const argv[], const char *optstring,
                             const struct option *longopts, int *longindex, int long_only) {
     char c;
     char *cp;
+
+    if (optreset) {
+        optreset = 0;
+        nextchar = NULL;
+        if (optind < 1) optind = 1;
+    }
 
     if (optind >= argc || !argv[optind])
         return -1;

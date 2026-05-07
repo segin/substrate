@@ -16,6 +16,7 @@
 #include <limits.h>
 #include <errno.h>
 #include <sys/wait.h>
+#include <sys/random.h>
 
 #define ATEXIT_MAX 32
 static void (*__atexit_funcs[ATEXIT_MAX])(void);
@@ -604,6 +605,41 @@ double atof(const char *nptr) {
 extern char **environ;
 static int environ_owned = 0;
 
+/*
+ * Linked list of "NAME=VALUE" strings libc malloc'd via setenv.  The
+ * crt0-supplied entries (and those installed by execve) live on the
+ * stack/argument area and must NOT be freed; only entries on this
+ * list are ours to free when overwritten or unset.
+ */
+struct env_owned_entry {
+    char *str;
+    struct env_owned_entry *next;
+};
+static struct env_owned_entry *env_owned_list = NULL;
+
+static void env_track_owned(char *str) {
+    struct env_owned_entry *e = malloc(sizeof(*e));
+    if (!e) return; /* leak rather than abort */
+    e->str = str;
+    e->next = env_owned_list;
+    env_owned_list = e;
+}
+
+/* If `str` is on the owned list, free it and remove the tracker. */
+static void env_free_if_owned(char *str) {
+    struct env_owned_entry **pp = &env_owned_list;
+    while (*pp) {
+        if ((*pp)->str == str) {
+            struct env_owned_entry *gone = *pp;
+            *pp = gone->next;
+            free(gone->str);
+            free(gone);
+            return;
+        }
+        pp = &(*pp)->next;
+    }
+}
+
 char *getenv(const char *name) {
     if (!name || !environ) return NULL;
     size_t len = strlen(name);
@@ -642,7 +678,10 @@ int setenv(const char *name, const char *value, int overwrite) {
             memcpy(entry, name, name_len);
             entry[name_len] = '=';
             memcpy(entry + name_len + 1, value, value_len + 1);
+            char *old = environ[i];
             environ[i] = entry;
+            env_track_owned(entry);
+            env_free_if_owned(old);
             return 0;
         }
     }
@@ -678,6 +717,7 @@ int setenv(const char *name, const char *value, int overwrite) {
 
     environ[count] = entry;
     environ[count + 1] = NULL;
+    env_track_owned(entry);
     return 0;
 }
 
@@ -692,6 +732,7 @@ int unsetenv(const char *name) {
     size_t dst = 0;
     for (size_t src = 0; environ[src]; src++) {
         if (strncmp(environ[src], name, name_len) == 0 && environ[src][name_len] == '=') {
+            env_free_if_owned(environ[src]);
             continue;
         }
         environ[dst++] = environ[src];
@@ -1007,6 +1048,18 @@ uint32_t arc4random_uniform(uint32_t upper_bound) {
 static void fill_temp_suffix(char *suffix) {
     static const char alphabet[] =
         "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    /* Pull entropy from the kernel directly so the suffix is
+     * unguessable even before libc has reseeded its PRNG (e.g. in a
+     * just-forked child).  Falls back to arc4random_uniform if the
+     * syscall is unavailable. */
+    unsigned char rnd[MKSTEMP_SUFFIX_LEN];
+    ssize_t got = getrandom(rnd, sizeof(rnd), 0);
+    if (got == (ssize_t)sizeof(rnd)) {
+        for (size_t i = 0; i < MKSTEMP_SUFFIX_LEN; i++) {
+            suffix[i] = alphabet[rnd[i] % (sizeof(alphabet) - 1)];
+        }
+        return;
+    }
     for (size_t i = 0; i < MKSTEMP_SUFFIX_LEN; i++) {
         suffix[i] = alphabet[arc4random_uniform((uint32_t)(sizeof(alphabet) - 1))];
     }
@@ -1059,45 +1112,204 @@ char *mkdtemp(char *tmpl) {
     return NULL;
 }
 
+/*
+ * realpath — canonicalize an absolute path.
+ *
+ * Walks `path` one component at a time, expanding symlinks on every
+ * step.  Maintains an "out" buffer that always holds the
+ * canonicalized prefix (no symlinks, no "." or ".." remaining).
+ *
+ * Loop guard: at most SYMLOOP_MAX (40, matching Linux) symlink
+ * dereferences over the whole resolution; anything beyond that
+ * yields ELOOP.
+ *
+ * Errors propagated:
+ *   EINVAL       — path is NULL or empty
+ *   ENOMEM       — resolved_path == NULL and malloc failed
+ *   ENAMETOOLONG — accumulated result exceeds PATH_MAX
+ *   ELOOP        — symlink chain longer than SYMLOOP_MAX
+ *   ENOENT       — a component doesn't exist
+ *   ENOTDIR      — non-final component isn't a directory
+ *   EACCES       — search permission denied on a directory
+ */
+#define REALPATH_SYMLOOP_MAX 40
+
 char *realpath(const char *restrict path, char *restrict resolved_path) {
     if (!path || *path == '\0') {
-        errno = EINVAL;
+        errno = (path == NULL) ? EINVAL : ENOENT;
         return NULL;
-    }
-
-    char tmp[PATH_MAX];
-    if (path[0] == '/') {
-        if (strlcpy(tmp, path, sizeof(tmp)) >= sizeof(tmp)) {
-            errno = ENAMETOOLONG;
-            return NULL;
-        }
-    } else {
-        char cwd[PATH_MAX];
-        if (!getcwd(cwd, sizeof(cwd))) return NULL;
-        size_t cwd_len = strlen(cwd);
-        size_t path_len = strlen(path);
-        if (cwd_len + 1 + path_len + 1 > sizeof(tmp)) {
-            errno = ENAMETOOLONG;
-            return NULL;
-        }
-        memcpy(tmp, cwd, cwd_len);
-        tmp[cwd_len] = '/';
-        memcpy(tmp + cwd_len + 1, path, path_len + 1);
     }
 
     char *out = resolved_path;
+    int owned = 0;
     if (!out) {
         out = malloc(PATH_MAX);
-        if (!out) {
-            errno = ENOMEM;
+        if (!out) { errno = ENOMEM; return NULL; }
+        owned = 1;
+    }
+
+    /* Seed `out` with the appropriate root.  Relative paths get cwd. */
+    size_t out_len = 0;
+    if (path[0] == '/') {
+        out[0] = '/';
+        out[1] = '\0';
+        out_len = 1;
+    } else {
+        if (!getcwd(out, PATH_MAX)) {
+            if (owned) free(out);
             return NULL;
+        }
+        out_len = strlen(out);
+        if (out_len == 0 || out[out_len - 1] != '/') {
+            if (out_len + 1 >= PATH_MAX) {
+                if (owned) free(out);
+                errno = ENAMETOOLONG;
+                return NULL;
+            }
+            out[out_len++] = '/';
+            out[out_len] = '\0';
         }
     }
 
-    if (strlcpy(out, tmp, PATH_MAX) >= PATH_MAX) {
-        if (!resolved_path) free(out);
+    /* `remaining` holds the unresolved tail that still needs walking;
+     * symlink expansion prepends the link target onto it. */
+    char remaining[PATH_MAX];
+    if (strlcpy(remaining, path, sizeof(remaining)) >= sizeof(remaining)) {
+        if (owned) free(out);
         errno = ENAMETOOLONG;
         return NULL;
+    }
+
+    int symlinks = 0;
+    char *p = remaining;
+    /* Skip leading slashes — already accounted for by the seed. */
+    while (*p == '/') p++;
+
+    while (*p) {
+        /* Extract next component into `comp`. */
+        char *slash = p;
+        while (*slash && *slash != '/') slash++;
+        size_t comp_len = (size_t)(slash - p);
+        char comp[PATH_MAX];
+        if (comp_len >= sizeof(comp)) {
+            if (owned) free(out);
+            errno = ENAMETOOLONG;
+            return NULL;
+        }
+        memcpy(comp, p, comp_len);
+        comp[comp_len] = '\0';
+        p = slash;
+        while (*p == '/') p++;
+
+        if (comp_len == 0) continue;
+        if (comp_len == 1 && comp[0] == '.') continue;
+        if (comp_len == 2 && comp[0] == '.' && comp[1] == '.') {
+            /* Pop the trailing '/' then the component before it. */
+            if (out_len > 1) {
+                out_len--;                             /* drop trailing '/' */
+                while (out_len > 0 && out[out_len - 1] != '/') out_len--;
+                out[out_len] = '\0';
+                if (out_len == 0) {                    /* never go above '/' */
+                    out[0] = '/';
+                    out[1] = '\0';
+                    out_len = 1;
+                }
+            }
+            continue;
+        }
+
+        /* Append component to `out` (with separator). */
+        if (out[out_len - 1] != '/') {
+            if (out_len + 1 >= PATH_MAX) {
+                if (owned) free(out);
+                errno = ENAMETOOLONG;
+                return NULL;
+            }
+            out[out_len++] = '/';
+        }
+        if (out_len + comp_len >= PATH_MAX) {
+            if (owned) free(out);
+            errno = ENAMETOOLONG;
+            return NULL;
+        }
+        memcpy(out + out_len, comp, comp_len);
+        out_len += comp_len;
+        out[out_len] = '\0';
+
+        /* lstat to test for a symlink at this level. */
+        struct stat st;
+        if (lstat(out, &st) < 0) {
+            if (owned) free(out);
+            return NULL;
+        }
+        if (!S_ISLNK(st.st_mode)) {
+            /* Not a symlink — final or directory; nothing more to do
+             * unless there are more components to walk.  If this is a
+             * non-final component and not a directory, that's ENOTDIR. */
+            if (*p != '\0' && !S_ISDIR(st.st_mode)) {
+                if (owned) free(out);
+                errno = ENOTDIR;
+                return NULL;
+            }
+            continue;
+        }
+
+        /* Symlink: read the target and splice it into `remaining`. */
+        if (++symlinks > REALPATH_SYMLOOP_MAX) {
+            if (owned) free(out);
+            errno = ELOOP;
+            return NULL;
+        }
+        char target[PATH_MAX];
+        ssize_t tlen = readlink(out, target, sizeof(target) - 1);
+        if (tlen < 0) {
+            if (owned) free(out);
+            return NULL;
+        }
+        target[tlen] = '\0';
+
+        /* Pop the symlink itself off `out`. */
+        out_len -= comp_len;
+        if (out_len > 0 && out[out_len - 1] == '/') out_len--;
+        out[out_len] = '\0';
+        /* Absolute target: start over from the root. */
+        if (target[0] == '/') {
+            out[0] = '/';
+            out[1] = '\0';
+            out_len = 1;
+        } else if (out_len == 0) {
+            out[0] = '/';
+            out[1] = '\0';
+            out_len = 1;
+        }
+
+        /* Splice: new remaining = target + '/' + p */
+        char merged[PATH_MAX];
+        size_t plen = strlen(p);
+        size_t total_len = (size_t)tlen + (plen > 0 ? 1 + plen : 0);
+        if (total_len >= sizeof(merged)) {
+            if (owned) free(out);
+            errno = ENAMETOOLONG;
+            return NULL;
+        }
+        memcpy(merged, target, (size_t)tlen);
+        if (plen > 0) {
+            merged[tlen] = '/';
+            memcpy(merged + tlen + 1, p, plen);
+        }
+        merged[total_len] = '\0';
+        memcpy(remaining, merged, total_len + 1);
+        p = remaining;
+        while (*p == '/') {
+            /* Absolute target consumed leading slash already. */
+            if (target[0] == '/') break;
+            p++;
+        }
+    }
+
+    /* Strip any trailing slash unless we are exactly at "/". */
+    if (out_len > 1 && out[out_len - 1] == '/') {
+        out[out_len - 1] = '\0';
     }
     return out;
 }

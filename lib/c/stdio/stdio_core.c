@@ -7,13 +7,36 @@
 
 static FILE *g_file_list_head = NULL;
 
+/*
+ * Stdio's internal read/write retry on EINTR.  POSIX read(2)/write(2)
+ * may return -1 with EINTR when a signal arrives mid-call; the public
+ * read/write surface that to callers, but stdio operations want to
+ * be transparent to signals (otherwise fread sometimes returns 0
+ * with errno=EINTR for no apparent reason).
+ */
+static ssize_t stdio_read(int fd, void *buf, size_t n) {
+    while (1) {
+        ssize_t r = read(fd, buf, n);
+        if (r < 0 && errno == EINTR) continue;
+        return r;
+    }
+}
+
+static ssize_t stdio_write(int fd, const void *buf, size_t n) {
+    while (1) {
+        ssize_t r = write(fd, buf, n);
+        if (r < 0 && errno == EINTR) continue;
+        return r;
+    }
+}
+
 // Helper to flush buffer
 static int __fflush_write(FILE *f) {
 	if(f->pos > f->buffer) {
 		size_t len = f->pos - f->buffer;
 		unsigned char *p = f->buffer;
 		while(len > 0) {
-			ssize_t written = write(f->fd, p, len);
+			ssize_t written = stdio_write(f->fd, p, len);
 			if(written < 0) {
 				f->error = 1;
 				return EOF;
@@ -211,6 +234,11 @@ int fcloseall(void) {
 }
 
 size_t fread(void *ptr, size_t size, size_t nmemb, FILE *stream) {
+    /* Overflow check before multiply — see fwrite for rationale. */
+    if (size != 0 && nmemb > SIZE_MAX / size) {
+        stream->error = 1;
+        return 0;
+    }
     size_t total = size * nmemb;
     size_t read_bytes = 0;
     unsigned char *dest = ptr;
@@ -236,7 +264,7 @@ size_t fread(void *ptr, size_t size, size_t nmemb, FILE *stream) {
             // Refill
             if (total >= BUFSIZ) {
                 // Read directly if request is large
-                ssize_t ret = read(stream->fd, dest, total);
+                ssize_t ret = stdio_read(stream->fd, dest, total);
                 if (ret <= 0) {
                     if (ret == 0) stream->eof = 1; else stream->error = 1;
                     break;
@@ -245,7 +273,7 @@ size_t fread(void *ptr, size_t size, size_t nmemb, FILE *stream) {
                 read_bytes += ret;
                 total -= ret;
             } else {
-                ssize_t ret = read(stream->fd, stream->buffer, BUFSIZ);
+                ssize_t ret = stdio_read(stream->fd, stream->buffer, BUFSIZ);
                 if (ret <= 0) {
                     if (ret == 0) stream->eof = 1; else stream->error = 1;
                     break;
@@ -259,29 +287,38 @@ size_t fread(void *ptr, size_t size, size_t nmemb, FILE *stream) {
 }
 
 size_t fwrite(const void *ptr, size_t size, size_t nmemb, FILE *stream) {
+    /* Reject overflow before computing total — hostile callers can pass
+     * size*nmemb that wraps to a small positive value on 32-bit. */
+    if (size != 0 && nmemb > SIZE_MAX / size) {
+        stream->error = 1;
+        return 0;
+    }
     size_t total = size * nmemb;
     size_t written = 0;
     const unsigned char *src = ptr;
-    
+
     if (stream->mode == _IONBF) {
-        ssize_t ret = write(stream->fd, ptr, total);
+        ssize_t ret = stdio_write(stream->fd, ptr, total);
         if (ret >= 0) return ret / size;
         stream->error = 1;
         return 0;
     }
-    
+
     while (total > 0) {
         size_t room = stream->buf_end - stream->pos;
         if (total < room) {
-            memcpy(stream->pos, src, total);
+            unsigned char *dst_start = stream->pos;
+            memcpy(dst_start, src, total);
             stream->pos += total;
             src += total;
             written += total;
-            total = 0;
-            // Check line buffering
-            if (stream->mode == _IOLBF && memchr(stream->pos - written, '\n', written)) {
+            /* Line-buffer flush: search the bytes JUST written, not the
+             * cumulative range — `written` accumulates across iterations
+             * and would walk past the buffer start. */
+            if (stream->mode == _IOLBF && memchr(dst_start, '\n', total)) {
                 __fflush_write(stream);
             }
+            total = 0;
         } else {
             // Buffer full, flush
             memcpy(stream->pos, src, room);
@@ -313,7 +350,8 @@ long ftell(FILE *stream) {
 	long pos = lseek(stream->fd, 0, SEEK_CUR);
 	if(pos == -1) return -1;
 
-	if(stream->flags == O_RDONLY || (stream->flags & O_RDWR)) {
+	int access_mode = stream->flags & O_ACCMODE;
+	if(access_mode == O_RDONLY || access_mode == O_RDWR) {
 		// Read mode: subtract unread buffered data
 		pos -= (stream->limit - stream->pos);
 		if(stream->has_unget) pos--;
@@ -353,7 +391,8 @@ off_t ftello(FILE *stream) {
 	off_t pos = lseek(stream->fd, 0, SEEK_CUR);
 	if(pos == -1) return -1;
 
-	if(stream->flags == O_RDONLY || (stream->flags & O_RDWR)) {
+	int access_mode = stream->flags & O_ACCMODE;
+	if(access_mode == O_RDONLY || access_mode == O_RDWR) {
 		pos -= (stream->limit - stream->pos);
 		if(stream->has_unget) pos--;
 	} else {
@@ -523,6 +562,13 @@ FILE *popen(const char *command, const char *type) {
         argv[2] = command;
         argv[3] = NULL;
         execv("/bin/sh", (char *const *)argv);
+        /* execv only returns on failure.  Surface a diagnostic so the
+         * caller knows the child died without ever running the command,
+         * rather than seeing an instant EOF from the pipe. */
+        const char *msg = "popen: failed to exec /bin/sh\n";
+        size_t mlen = 0;
+        while (msg[mlen]) mlen++;
+        (void)write(STDERR_FILENO, msg, mlen);
         _exit(127);
     }
 

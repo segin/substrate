@@ -7,6 +7,7 @@ extern "C" {
 
 extern char *optarg;
 extern int optind, opterr, optopt;
+extern int optreset; /* BSD: set to 1 to restart getopt against a new argv */
 
 struct option {
     const char *name;

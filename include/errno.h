@@ -55,6 +55,7 @@ extern int errno;
 #define ENOTEMPTY   39  /* Directory not empty */
 #define EDEADLK     35  /* Resource deadlock would occur */
 #define ENAMETOOLONG 63 /* File name too long */
+#define ELOOP       62  /* Too many levels of symbolic links (matches kernel) */
 #define EWOULDBLOCK EAGAIN  /* Operation would block */
 #define EOWNERDEAD  130 /* Owner died */
 #define ENOTRECOVERABLE 131 /* State not recoverable */

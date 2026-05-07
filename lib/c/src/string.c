@@ -22,9 +22,12 @@ char *strfry(char *string) {
     if (!string) return NULL;
     size_t len = strlen(string);
     if (len == 0) return string;
-    
-    for (size_t i = 0; i < len; i++) {
-        size_t r = rand() % len;
+
+    /* Fisher-Yates with arc4random_uniform — avoids modulo bias
+     * (rand() % len skews when len is not a power of two and gives
+     * weak randomness from the LCG underlying rand). */
+    for (size_t i = len - 1; i > 0; i--) {
+        size_t r = (size_t)arc4random_uniform((uint32_t)(i + 1));
         char tmp = string[i];
         string[i] = string[r];
         string[r] = tmp;

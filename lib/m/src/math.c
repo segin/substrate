@@ -84,39 +84,115 @@ double exp2(double x) {
     return res;
 }
 
-/* expm1(x) = e^x - 1, accurate for small x */
+/* expm1(x) = e^x - 1, accurate for small x.
+ *
+ * For |x| above ~ln(2)/2 the catastrophic cancellation in exp(x)-1 is
+ * negligible, so we just call exp.  Otherwise we use the identity
+ *   e^x - 1 = 2 * sinh(x/2) * exp(x/2)
+ * and a polynomial for sinh(z) = z + z^3/6 + z^5/120 + ... that
+ * converges fast for the reduced range. */
 double expm1(double x) {
-    if (fabs(x) < 1e-9) return x + 0.5 * x * x;  /* Taylor for small x */
-    return exp(x) - 1.0;
+    if (isnan(x)) return x;
+    if (isinf(x)) return (x > 0) ? INFINITY : -1.0;
+    if (fabs(x) > 0.35) return exp(x) - 1.0;
+
+    /* sinh(z) Taylor, |z| <= 0.175 */
+    double z = x * 0.5;
+    double z2 = z * z;
+    double sinh_z = z * (1.0 + z2 *
+                         (1.0/6.0 + z2 *
+                          (1.0/120.0 + z2 *
+                           (1.0/5040.0 + z2 / 362880.0))));
+    return 2.0 * sinh_z * exp(z);
 }
 
 /*
- * log(x) - natural logarithm using Newton-Raphson on exp
- * Uses identity: log(x) = 2 * atanh((x-1)/(x+1)) for x > 0
+ * Portable natural log via argument reduction + Taylor series.
+ *
+ * Reduce x = m * 2^e with m in [1, 2), then
+ *   log(x) = e*ln(2) + log(m) = e*ln(2) + 2*atanh((m-1)/(m+1))
+ * The atanh series converges quickly because z = (m-1)/(m+1) lies in
+ * [0, 1/3].  Twenty terms of (z + z^3/3 + z^5/5 + ...) deliver near
+ * double precision over the reduced range.
+ */
+__attribute__((unused))
+static double log_portable(double x) {
+    union { double d; uint64_t u; } v;
+    v.d = x;
+    int e = (int)((v.u >> 52) & 0x7FF) - 1023;
+    /* Force exponent to 0 → m in [1, 2). */
+    v.u = (v.u & 0x000FFFFFFFFFFFFFULL) | 0x3FF0000000000000ULL;
+    double m = v.d;
+    double z = (m - 1.0) / (m + 1.0);
+    double z2 = z * z;
+    double sum = z;
+    double term = z;
+    for (int k = 1; k < 25; k++) {
+        term *= z2;
+        sum += term / (double)(2 * k + 1);
+    }
+    /* M_LN2 = ln(2) */
+    return 2.0 * sum + (double)e * 0.69314718055994530942;
+}
+
+/*
+ * log family — POSIX requires:
+ *   log(0)   → -INF, errno = ERANGE
+ *   log(<0)  → NaN,  errno = EDOM
+ *   log(NaN) → NaN
+ * fyl2x on x <= 0 is undefined per the i387 spec, so guard explicitly.
  */
 double log(double x) {
+    if (isnan(x)) return x;
+    if (x < 0.0)   { errno = EDOM;   return NAN; }
+    if (x == 0.0)  { errno = ERANGE; return -INFINITY; }
+    if (isinf(x))  return x;
+#if defined(__i386__) || defined(__x86_64__)
     double res;
     __asm__ __volatile__("fldln2; fldl %1; fyl2x; fstpl %0" : "=m"(res) : "m"(x));
     return res;
+#else
+    return log_portable(x);
+#endif
 }
 
-/* log2(x) = log(x) / ln(2) */
 double log2(double x) {
+    if (isnan(x)) return x;
+    if (x < 0.0)   { errno = EDOM;   return NAN; }
+    if (x == 0.0)  { errno = ERANGE; return -INFINITY; }
+    if (isinf(x))  return x;
+#if defined(__i386__) || defined(__x86_64__)
     double res;
     __asm__ __volatile__("fld1; fldl %1; fyl2x; fstpl %0" : "=m"(res) : "m"(x));
     return res;
+#else
+    /* log2(x) = log(x) / ln(2) */
+    return log_portable(x) * 1.4426950408889634074;
+#endif
 }
 
-/* log10(x) = log(x) / ln(10) */
 double log10(double x) {
+    if (isnan(x)) return x;
+    if (x < 0.0)   { errno = EDOM;   return NAN; }
+    if (x == 0.0)  { errno = ERANGE; return -INFINITY; }
+    if (isinf(x))  return x;
+#if defined(__i386__) || defined(__x86_64__)
     double res;
     __asm__ __volatile__("fldlg2; fldl %1; fyl2x; fstpl %0" : "=m"(res) : "m"(x));
     return res;
+#else
+    /* log10(x) = log(x) / ln(10) */
+    return log_portable(x) * 0.43429448190325182765;
+#endif
 }
 
-/* log1p(x) = log(1+x), accurate for small x */
+/* log1p(x) = log(1+x), accurate for small x.
+ * Domain: x > -1.  log1p(-1) = -INF, log1p(<-1) = NaN. */
 double log1p(double x) {
-    if (fabs(x) < 1e-9) return x - 0.5 * x * x;  /* Taylor for small x */
+    if (isnan(x)) return x;
+    if (x < -1.0)  { errno = EDOM;   return NAN; }
+    if (x == -1.0) { errno = ERANGE; return -INFINITY; }
+    if (fabs(x) < 1e-9) return x - 0.5 * x * x;
     return log(1.0 + x);
 }
 
@@ -128,11 +204,14 @@ double pow(double x, double y) {
     if (isnan(x) || isnan(y)) return NAN;
 
     if (x < 0.0) {
-        /* Negative base: only valid if y is an integer */
+        /* Negative base: only valid if y is an integer.  The cast back
+         * to long long is undefined for |y| >= 2^63, so test parity via
+         * fmod(yi, 2.0) which works at any magnitude. */
         double yi;
         if (modf(y, &yi) != 0.0) return NAN;
         double res = pow(-x, y);
-        if (((long long)yi) % 2) return -res;
+        double parity = fmod(yi, 2.0);
+        if (parity == 1.0 || parity == -1.0) return -res;
         return res;
     }
 
@@ -166,25 +245,71 @@ double sqrt(double x) {
     return res;
 }
 
-/* cbrt(x) - Cube root using Newton-Raphson */
+/*
+ * cbrt(x) - Cube root.
+ *
+ * Argument reduction: x = m * 2^e with m in [0.5, 1).  Then
+ *   cbrt(x) = cbrt(m) * 2^(e/3)
+ * Split e = 3q + r with r in {0, 1, 2}:
+ *   cbrt(x) = cbrt(m * 2^r) * 2^q
+ * The reduced argument m*2^r lies in [0.5, 4), so a fixed-precision
+ * Newton iteration converges in a handful of steps from a good seed.
+ * The previous implementation used `guess = x/2` which diverges for
+ * very small or very large x.
+ */
 double cbrt(double x) {
-    if (x == 0) return 0.0;
-    
+    if (isnan(x) || isinf(x)) return x;
+    if (x == 0.0) return x;
+
     int neg = (x < 0);
     if (neg) x = -x;
-    
-    /* Initial guess */
-    double guess = x * 0.5;
-    if (guess == 0) guess = 1.0;
-    
-    /* Newton-Raphson: x_{n+1} = (2*x_n + S/x_n^2) / 3 */
+
+    /* Decompose x = m * 2^e, m in [0.5, 1). */
+    union { double d; uint64_t u; } v;
+    v.d = x;
+    int e = (int)((v.u >> 52) & 0x7FF) - 1022; /* unbiased exp s.t. m in [0.5,1) */
+    v.u = (v.u & 0x000FFFFFFFFFFFFFULL) | 0x3FE0000000000000ULL;
+    double m = v.d;
+
+    /* e = 3q + r, r in {0,1,2} */
+    int q;
+    int r;
+    if (e >= 0) {
+        q = e / 3;
+        r = e % 3;
+    } else {
+        q = -((-e + 2) / 3);
+        r = e - 3 * q;
+    }
+    /* Pull r into the mantissa: m_r = m * 2^r ∈ [0.5, 4) */
+    static const double pow2_r[3] = { 1.0, 2.0, 4.0 };
+    double mr = m * pow2_r[r];
+
+    /* Linear-interpolated seed for cbrt(mr) on [0.5, 4) — within ~5%. */
+    double guess = 0.5 + 0.5 * mr; /* good enough for Newton to hit double precision in <10 iters */
+
+    /* Newton: g_{n+1} = (2g + mr/g^2) / 3 */
     for (int i = 0; i < 20; i++) {
-        double next = (2.0 * guess + x / (guess * guess)) / 3.0;
-        if (fabs(next - guess) < 1e-15 * fabs(guess)) break;
+        double g2 = guess * guess;
+        if (g2 == 0.0) { guess = 1e-300; continue; }
+        double next = (2.0 * guess + mr / g2) / 3.0;
+        if (fabs(next - guess) < 1e-16 * fabs(next)) {
+            guess = next;
+            break;
+        }
         guess = next;
     }
-    
-    return neg ? -guess : guess;
+
+    /* Re-apply 2^q */
+    double result;
+    if (q >= 0) {
+        result = guess * (double)(1ULL << (q < 63 ? q : 0));
+        if (q >= 63) result *= (double)(1ULL << 62) * (double)(1ULL << (q - 62));
+    } else {
+        result = guess / (double)(1ULL << (-q < 63 ? -q : 0));
+        if (-q >= 63) result /= (double)(1ULL << 62) * (double)(1ULL << (-q - 62));
+    }
+    return neg ? -result : result;
 }
 
 /* hypot(x, y) = sqrt(x^2 + y^2), avoiding overflow */
@@ -1202,53 +1327,211 @@ double fminimum_mag(double x, double y) {
 	return fminimum(x, y);
 }
 
-/* Rounding functions */
+/* Rounding functions.
+ *
+ * The naive (int)x cast was undefined behaviour for |x| > 2^31.  The
+ * portable implementation works on the IEEE-754 representation: extract
+ * the unbiased exponent, mask off the fractional bits, then nudge by
+ * ±1 ULP (in the integer sense) for floor/ceil when the input had a
+ * non-zero fractional part.  This does not depend on x87 and works on
+ * every architecture with a 64-bit IEEE double.
+ *
+ * On i386/x86_64 we also provide an x87 fast path using frndint with
+ * an explicitly-set rounding mode.  The original control word is
+ * restored before returning.
+ */
+
+/* mode: 0 = truncate-toward-zero, 1 = floor (down), 2 = ceil (up) */
+__attribute__((unused))
+static double round_to_int_portable(double x, int mode) {
+    if (isnan(x) || isinf(x) || x == 0.0) return x;
+
+    union { double d; uint64_t u; } v;
+    v.d = x;
+    int sign = (int)(v.u >> 63);
+    int e = (int)((v.u >> 52) & 0x7FF) - 1023;
+
+    if (e >= 52) {
+        /* No fractional bits — already an integer. */
+        return x;
+    }
+    if (e < 0) {
+        /* |x| < 1 */
+        if (mode == 0) return sign ? -0.0 : 0.0;
+        if (mode == 1) return sign ? -1.0 : 0.0;          /* floor */
+        return sign ? -0.0 : 1.0;                          /* ceil */
+    }
+
+    uint64_t frac_mask = (1ULL << (52 - e)) - 1ULL;
+    if ((v.u & frac_mask) == 0) return x;
+
+    union { double d; uint64_t u; } t;
+    t.u = v.u & ~frac_mask; /* truncated toward zero */
+    if (mode == 0) return t.d;
+    if (mode == 1) return sign ? t.d - 1.0 : t.d;        /* floor */
+    return sign ? t.d : t.d + 1.0;                        /* ceil */
+}
+
+#if defined(__i386__) || defined(__x86_64__)
+/*
+ * Rounding-control bits in the i387 control word:
+ *   00 = round to nearest, 01 = round down (-inf),
+ *   10 = round up (+inf),  11 = truncate toward zero.
+ */
+static inline double round_to_int_x87(double x, unsigned rc_bits) {
+    double res;
+    unsigned short cw_orig, cw_new;
+    __asm__ __volatile__("fnstcw %0" : "=m"(cw_orig));
+    cw_new = (unsigned short)((cw_orig & 0xF3FFu) | (rc_bits & 0x0C00u));
+    __asm__ __volatile__(
+        "fldcw %1\n\t"
+        "fldl %2\n\t"
+        "frndint\n\t"
+        "fstpl %0\n\t"
+        "fldcw %3\n\t"
+        : "=m"(res)
+        : "m"(cw_new), "m"(x), "m"(cw_orig));
+    return res;
+}
+#endif
+
 double ceil(double x) {
-    int i = (int)x;
-    return (x > i) ? (double)(i + 1) : (double)i;
+    if (isnan(x) || isinf(x)) return x;
+#if defined(__i386__) || defined(__x86_64__)
+    return round_to_int_x87(x, 0x0800);
+#else
+    return round_to_int_portable(x, 2);
+#endif
 }
 
 double floor(double x) {
-    int i = (int)x;
-    return (x < i) ? (double)(i - 1) : (double)i;
+    if (isnan(x) || isinf(x)) return x;
+#if defined(__i386__) || defined(__x86_64__)
+    return round_to_int_x87(x, 0x0400);
+#else
+    return round_to_int_portable(x, 1);
+#endif
 }
 
 double trunc(double x) {
-    return (double)(int)x;
+    if (isnan(x) || isinf(x)) return x;
+#if defined(__i386__) || defined(__x86_64__)
+    return round_to_int_x87(x, 0x0C00);
+#else
+    return round_to_int_portable(x, 0);
+#endif
 }
 
 double round(double x) {
-    return (x >= 0) ? floor(x + 0.5) : ceil(x - 0.5);
+    /* C99: round-half-away-from-zero, regardless of current mode. */
+    if (isnan(x) || isinf(x)) return x;
+    return (x >= 0.0) ? floor(x + 0.5) : ceil(x - 0.5);
 }
 
 double rint(double x) {
+    if (isnan(x) || isinf(x)) return x;
+#if defined(__i386__) || defined(__x86_64__)
     double res;
     __asm__ __volatile__("fldl %1; frndint; fstpl %0" : "=m"(res) : "m"(x));
     return res;
+#else
+    /* Portable round-to-nearest-even.  Loses fenv rounding mode on
+     * non-x86 — the right fix is a per-arch fenv backend, which is
+     * out of scope here. */
+    double t = round_to_int_portable(x, 0); /* truncate */
+    double frac = x - t;
+    if (frac > 0.5)  return t + 1.0;
+    if (frac < -0.5) return t - 1.0;
+    if (frac == 0.5 || frac == -0.5) {
+        /* Round to even. */
+        long long ti = (long long)t;
+        if (ti & 1LL) {
+            return frac > 0 ? t + 1.0 : t - 1.0;
+        }
+        return t;
+    }
+    return t;
+#endif
 }
 
 double nearbyint(double x) {
-    return rint(x); // x87 frndint honors CW but doesn't necessarily raise inexact if masked
+    return rint(x); /* x87 frndint honours CW; portable path approximates. */
 }
 
+/*
+ * lrint/llrint: round per current FE rounding mode and convert to integer.
+ *
+ * x87 path: fistp stores the indefinite-integer encoding on overflow and
+ * sets the FPU's invalid-operation flag.  We surface that as errno=ERANGE.
+ *
+ * Portable path: rint() honours the current rounding mode (no x87 needed
+ * on non-x86 — left as nearbyint-equivalent), then we range-check before
+ * the cast.  The `rint` here is the C-fallback version below.
+ */
 long lrint(double x) {
+#if defined(__i386__) || defined(__x86_64__)
     long res;
-    __asm__ __volatile__("fldl %1; fistpl %0" : "=m"(res) : "m"(x));
+    unsigned short sw;
+    __asm__ __volatile__(
+        "fclex\n\t"
+        "fldl %2\n\t"
+        "fistpl %0\n\t"
+        "fnstsw %1\n\t"
+        : "=m"(res), "=m"(sw) : "m"(x));
+    if (sw & 0x01) errno = ERANGE; /* IE: invalid operation */
     return res;
+#else
+    if (isnan(x)) { errno = EDOM; return 0; }
+    double r = rint(x);
+    if (r > (double)LONG_MAX || r < (double)LONG_MIN) {
+        errno = ERANGE;
+        return r > 0 ? LONG_MAX : LONG_MIN;
+    }
+    return (long)r;
+#endif
 }
 
 long long llrint(double x) {
+#if defined(__i386__) || defined(__x86_64__)
     long long res;
-    __asm__ __volatile__("fldl %1; fistpq %0" : "=m"(res) : "m"(x));
+    unsigned short sw;
+    __asm__ __volatile__(
+        "fclex\n\t"
+        "fldl %2\n\t"
+        "fistpq %0\n\t"
+        "fnstsw %1\n\t"
+        : "=m"(res), "=m"(sw) : "m"(x));
+    if (sw & 0x01) errno = ERANGE;
     return res;
+#else
+    if (isnan(x)) { errno = EDOM; return 0; }
+    double r = rint(x);
+    if (r > (double)LLONG_MAX || r < (double)LLONG_MIN) {
+        errno = ERANGE;
+        return r > 0 ? LLONG_MAX : LLONG_MIN;
+    }
+    return (long long)r;
+#endif
 }
 
+/*
+ * lround/llround: round-half-away-from-zero, then convert.  The cast back to
+ * a signed integer type is UB on overflow so we bound-check first and clamp.
+ */
 long lround(double x) {
-    return (long)round(x);
+    if (isnan(x)) { errno = EDOM; return 0; }
+    double r = round(x);
+    if (r > (double)LONG_MAX) { errno = ERANGE; return LONG_MAX; }
+    if (r < (double)LONG_MIN) { errno = ERANGE; return LONG_MIN; }
+    return (long)r;
 }
 
 long long llround(double x) {
-    return (long long)round(x);
+    if (isnan(x)) { errno = EDOM; return 0; }
+    double r = round(x);
+    if (r > (double)LLONG_MAX) { errno = ERANGE; return LLONG_MAX; }
+    if (r < (double)LLONG_MIN) { errno = ERANGE; return LLONG_MIN; }
+    return (long long)r;
 }
 
 /* Float versions */

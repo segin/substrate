@@ -591,7 +591,14 @@ char *ttyname(int fd) {
 
 int gethostname(char *name, size_t len) {
     struct utsname u;
+    if (!name || len == 0) {
+        errno = EINVAL;
+        return -1;
+    }
     if (uname(&u) < 0) return -1;
+    /* If the host name doesn't fit, glibc/POSIX behaviour differ —
+     * Linux returns -1/ENAMETOOLONG, but for compatibility with
+     * existing callers we truncate and force-terminate. */
     strncpy(name, u.nodename, len);
     name[len - 1] = '\0';
     return 0;
@@ -622,27 +629,30 @@ int setpriority(int which, id_t who, int prio) {
 
 int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds,
            struct timeval *timeout) {
-    /* Implement select using poll syscall */
+    /* Implement select using the poll syscall.  Stack-allocate the
+     * pollfd array for the common case (≤ 256 fds) but fall back to
+     * malloc for larger sets so we don't hit a hard EINVAL at 256. */
     if (nfds < 0 || nfds > FD_SETSIZE) {
         errno = EINVAL;
         return -1;
     }
-    
-    /* Count fds and build poll array */
-    struct pollfd fds[256];  /* Stack limit */
-    int poll_count = 0;
-    
+
+    struct pollfd stack_fds[256];
+    struct pollfd *fds = stack_fds;
+    int allocated = 0;
     if (nfds > 256) {
-        errno = EINVAL;
-        return -1;
+        fds = malloc((size_t)nfds * sizeof(struct pollfd));
+        if (!fds) { errno = ENOMEM; return -1; }
+        allocated = 1;
     }
-    
+    int poll_count = 0;
+
     for (int i = 0; i < nfds; i++) {
         short events = 0;
         if (readfds && FD_ISSET(i, readfds)) events |= POLLIN;
         if (writefds && FD_ISSET(i, writefds)) events |= POLLOUT;
         if (exceptfds && FD_ISSET(i, exceptfds)) events |= POLLERR;
-        
+
         if (events) {
             fds[poll_count].fd = i;
             fds[poll_count].events = events;
@@ -650,32 +660,32 @@ int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds,
             poll_count++;
         }
     }
-    
+
     /* Convert timeout */
     int poll_timeout = -1;
     if (timeout) {
         poll_timeout = timeout->tv_sec * 1000 + timeout->tv_usec / 1000;
     }
-    
+
     /* Call poll */
     int ret = (int)_syscall3(SYS_POLL, (uintptr_t)fds, poll_count, poll_timeout);
-    
+
     if (ret > 0) {
         /* Convert poll results back to select format */
         fd_set result_read, result_write, result_except;
         if (readfds) FD_ZERO(&result_read);
         if (writefds) FD_ZERO(&result_write);
         if (exceptfds) FD_ZERO(&result_except);
-        
+
         for (int i = 0; i < poll_count; i++) {
             int fd = fds[i].fd;
             short revents = fds[i].revents;
-            
+
             if (revents & POLLIN && readfds) FD_SET(fd, &result_read);
             if (revents & POLLOUT && writefds) FD_SET(fd, &result_write);
             if (revents & POLLERR && exceptfds) FD_SET(fd, &result_except);
         }
-        
+
         if (readfds) *readfds = result_read;
         if (writefds) *writefds = result_write;
         if (exceptfds) *exceptfds = result_except;
@@ -685,8 +695,10 @@ int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds,
         if (writefds) FD_ZERO(writefds);
         if (exceptfds) FD_ZERO(exceptfds);
     } else {
+        if (allocated) free(fds);
         return __set_errno(ret);
     }
+    if (allocated) free(fds);
     
     return ret;
 }
