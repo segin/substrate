@@ -10,8 +10,8 @@
 #include <arch/i386/syscall.h>
 #include <sys/syscall_impl.h>
 #include <exec/perso/openbsd/openbsd_syscalls.h>
-#include "../../include/sys/resource.h"
-#include "../../include/sys/times.h"
+#include <sys/resource.h>
+#include <sys/times.h>
 
 // OpenBSD uses same logic as NetBSD for getrusage via times() wrapper if times syscall is missing
 int openbsd_sys_getrusage(int who, struct rusage *rusage) {

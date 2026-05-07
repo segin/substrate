@@ -132,9 +132,10 @@ int sys_sigaction(int sig, const void *act, void *oact) {
         extern int kprintf(const char *fmt, ...);
         registers_t *r = current_thread ? (registers_t *)current_thread->syscall_regs : NULL;
         if (r) {
-            uint32_t *us = (uint32_t *)(uintptr_t)r->useresp;
             kprintf("[ABORT] pid=%d eip=0x%08x esp=0x%08x ebp=0x%08x\n",
                     current_process->pid, r->eip, r->useresp, r->ebp);
+            uint32_t us[8] = {0};
+            copyin((const void *)(uintptr_t)r->useresp, us, sizeof(us));
             kprintf("[ABORT] stack: %08x %08x %08x %08x %08x %08x %08x %08x\n",
                     us[0], us[1], us[2], us[3],
                     us[4], us[5], us[6], us[7]);
@@ -142,7 +143,8 @@ int sys_sigaction(int sig, const void *act, void *oact) {
             uint32_t fp = r->ebp;
             uint32_t victim_ebp = 0;
             for (int d = 0; d < 6 && fp >= 0x08000000 && fp < 0xC0000000; d++) {
-                uint32_t *frame = (uint32_t *)(uintptr_t)fp;
+                uint32_t frame[2] = {0};
+                copyin((const void *)(uintptr_t)fp, frame, sizeof(frame));
                 kprintf("[ABORT] frame[%d] ebp=0x%08x saved_ebp=0x%08x ret=0x%08x\n",
                         d, fp, frame[0], frame[1]);
                 if (d == 3) victim_ebp = fp;  /* victim's frame */
@@ -151,20 +153,17 @@ int sys_sigaction(int sig, const void *act, void *oact) {
             /* Dump __stack_chk_guard from ls's data segment (its R_386_COPY
              * landing pad — known address from readelf).  Also dump the
              * canary slot on the victim's stack frame at -0x10(%ebp). */
-            uint32_t *guard = (uint32_t *)0x409e28u;  /* ls __stack_chk_guard */
-            kprintf("[ABORT] ls __stack_chk_guard@0x409e28 = %08x %08x %08x %08x %08x %08x %08x %08x\n",
-                    guard[0], guard[1], guard[2], guard[3],
-                    guard[4], guard[5], guard[6], guard[7]);
             if (victim_ebp) {
                 /* Dump a range under victim's ebp — the canary is the
                  * stash slot that should hold __stack_chk_guard[0].
                  * For the function at libc 0x84150 it's around -0x18
                  * but the exact offset depends on the function. */
-                uint32_t *vs = (uint32_t *)(uintptr_t)victim_ebp;
                 kprintf("[ABORT] victim ebp=0x%08x dump:\n", victim_ebp);
                 for (int i = -8; i <= 0; i++) {
+                    uint32_t vs = 0;
+                    copyin((const void *)(uintptr_t)(victim_ebp + (uint32_t)(i * 4)), &vs, sizeof(vs));
                     kprintf("  ebp%+d (0x%08x) = 0x%08x\n",
-                            i * 4, victim_ebp + i * 4, vs[i]);
+                            i * 4, victim_ebp + i * 4, vs);
                 }
             }
         }

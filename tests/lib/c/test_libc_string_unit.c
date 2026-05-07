@@ -44,6 +44,8 @@
 #define strstr libc_strstr
 #undef strlen
 #define strlen libc_strlen
+#undef strnlen
+#define strnlen libc_strnlen
 #undef strdup
 #define strdup libc_strdup
 #undef strspn
@@ -90,6 +92,7 @@ char *libc_strchr(const char *s, int c);
 char *libc_strrchr(const char *s, int c);
 char *libc_strstr(const char *haystack, const char *needle);
 size_t libc_strlen(const char *s);
+size_t libc_strnlen(const char *s, size_t maxlen);
 char *libc_strdup(const char *s);
 size_t libc_strspn(const char *s, const char *accept);
 size_t libc_strcspn(const char *s, const char *reject);
@@ -178,6 +181,18 @@ void run_strlen_tests(void) {
     ASSERT_EQ(libc_strlen("hello world"), 11, "hello world length");
     char buf[] = {'h', 'i', '\0', 'x'};
     ASSERT_EQ(libc_strlen(buf), 2, "Embedded null");
+}
+
+void run_strnlen_tests(void) {
+    printf("Running strnlen tests...\n");
+    ASSERT_EQ(libc_strnlen("", 5), 0, "Empty string");
+    ASSERT_EQ(libc_strnlen("a", 5), 1, "Single character, maxlen > len");
+    ASSERT_EQ(libc_strnlen("abc", 5), 3, "abc length, maxlen > len");
+    ASSERT_EQ(libc_strnlen("hello world", 11), 11, "hello world length, maxlen == len");
+    ASSERT_EQ(libc_strnlen("hello world", 5), 5, "hello world length, maxlen < len");
+    char buf[] = {'h', 'i', '\0', 'x'};
+    ASSERT_EQ(libc_strnlen(buf, 4), 2, "Embedded null");
+    ASSERT_EQ(libc_strnlen("abc", 0), 0, "maxlen == 0");
 }
 
 void run_memmove_tests(void) {
@@ -570,6 +585,20 @@ void run_strncasecmp_tests(void) {
     ASSERT_TRUE(libc_strncasecmp("a", "", 1) > 0, "a > empty string");
     ASSERT_TRUE(libc_strncasecmp("", "a", 1) < 0, "empty string < a");
 
+    // Cross-case differ
+    ASSERT_TRUE(libc_strncasecmp("HELLA", "hello", 5) < 0, "HELLA < hello cross case");
+    ASSERT_TRUE(libc_strncasecmp("hello", "HELLA", 5) > 0, "hello > HELLA cross case");
+
+    // Prefix scenarios
+    ASSERT_TRUE(libc_strncasecmp("hell", "hello", 5) < 0, "Prefix shorter up to n=5");
+    ASSERT_TRUE(libc_strncasecmp("hello", "hell", 5) > 0, "Prefix longer up to n=5");
+    ASSERT_EQ(libc_strncasecmp("hell", "hello", 4), 0, "Prefix shorter up to n=4");
+    ASSERT_EQ(libc_strncasecmp("hello", "hell", 4), 0, "Prefix longer up to n=4");
+
+    // Non-alphabetic characters
+    ASSERT_EQ(libc_strncasecmp("1234!", "1234!", 5), 0, "Non-alphabetic equal");
+    ASSERT_TRUE(libc_strncasecmp("1234!", "1234@", 5) < 0, "'!' < '@'");
+
     // Sign verification with large values (ensure unsigned char comparison)
     unsigned char c1[] = {0xff, '\0'};
     unsigned char c2[] = {0x7f, '\0'};
@@ -578,6 +607,11 @@ void run_strncasecmp_tests(void) {
 
 bool test_libc_strlen(void) {
     run_strlen_tests();
+    return true;
+}
+
+bool test_libc_strnlen(void) {
+    run_strnlen_tests();
     return true;
 }
 
@@ -808,6 +842,9 @@ void run_strncmp_tests(void) {
 
     // n=0
     ASSERT_EQ(libc_strncmp("abc", "xyz", 0), 0, "n=0");
+    ASSERT_EQ(libc_strncmp(NULL, NULL, 0), 0, "NULL pointers n=0");
+    ASSERT_EQ(libc_strncmp("abc", NULL, 0), 0, "First pointer valid, second NULL n=0");
+    ASSERT_EQ(libc_strncmp(NULL, "xyz", 0), 0, "First pointer NULL, second valid n=0");
 
     // Test with embedded nulls
     ASSERT_EQ(libc_strncmp("a\0b", "a\0c", 3), 0, "Equal with embedded null (stops at null)");
@@ -970,6 +1007,7 @@ int main(void) {
     run_strcpy_tests();
     run_memcpy_tests();
     run_strlen_tests();
+    run_strnlen_tests();
     run_strspn_tests();
     run_memmove_tests();
     run_strcat_tests();

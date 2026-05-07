@@ -19,6 +19,7 @@
 #include <arch/i386/pmm.h>
 #if defined(__i386__) || defined(HOST_TEST)
 #include <arch/i386/pmap.h>
+#include <arch/i386/gdt.h>
 #elif defined(__x86_64__)
 #include <arch/x86_64/pmap.h>
 #endif
@@ -478,6 +479,11 @@ uint32_t elf_load(fs_node_t *file, uint32_t load_base, int is_main_image,
     }
 
     entry = ehdr->e_entry + load_base;
+    if (entry >= 0xC0000000U) {
+        kprint("ELF: entry point in kernel space, rejecting\n");
+        kfree(image, sizeof(*image));
+        return 0;
+    }
     val = entry;
     trace_elf = elf_debug_enabled();
     trace_personality = elf_personality_debug_enabled(image->detected_os);
@@ -845,12 +851,13 @@ static int exec_copy_args(char *const array[], int count, char **k_array, char *
             } else if (is_user_ptr(uarg)) {
                 ret = copyinstr(uarg, *p_buf, *remaining, &copied_len);
             } else {
-                size_t len = strlen(uarg) + 1;
-                if (len > *remaining) {
+                size_t len = strnlen(uarg, *remaining);
+                if (len == *remaining) {
                     ret = -7; // E2BIG
                 } else {
-                    strcpy(*p_buf, uarg);
-                    copied_len = len;
+                    memcpy(*p_buf, uarg, len);
+                    (*p_buf)[len] = '\0';
+                    copied_len = len + 1;
                     ret = 0;
                 }
             }
@@ -1004,7 +1011,6 @@ static int exec_setup_stack(pmap_t pmap, uint32_t *sp_out, char **k_argv, int ar
         STACK_WRITE32(sp + i * 4, val);
     }
     if (current_process && current_process->perso_id == PERS_FREEBSD) {
-        extern int kprintf(const char *fmt, ...);
         kprintf("[AUXV] FBSD canary @0x%08x len=64 first8=%02x%02x%02x%02x%02x%02x%02x%02x\n",
                 rand_ptr,
                 rand_buf[0], rand_buf[1], rand_buf[2], rand_buf[3],
@@ -1394,7 +1400,6 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
          */
         ldt_free_process(current_process);
         // Initialize VM map
-        extern vm_map_t *vm_map_create(pmap_t pmap, uintptr_t min, uintptr_t max);
         if (current_process->vm_map) {
              vm_map_destroy(current_process->vm_map);
         }
@@ -1406,7 +1411,6 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
     }
 
     // Set up kernel stack for this process in TSS
-    extern void set_kernel_stack(uint32_t stack);
     set_kernel_stack((uint32_t)current_thread->kstack_top);
 
     uint32_t sp;
@@ -1473,7 +1477,6 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
     // For NetBSD/OpenBSD, _start reads ps_strings from %ebx
     // (lib/csu/arch/i386/crt0.S); other personalities ignore the
     // third arg.  jump_to_userspace zeros %ebx unless we override.
-    extern void jump_to_userspace(uint32_t entry, uint32_t stack, uint32_t ebx);
     uint32_t entry_ebx = 0;
     if (current_process &&
         (current_process->perso_id == PERS_NETBSD ||
@@ -1484,7 +1487,7 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
     
     // Should never reach here
     panic("jump_to_userspace returned!");
-    return 0;
+    __builtin_unreachable();
 
 cleanup:
     if (!vm_state_committed && current_process) {

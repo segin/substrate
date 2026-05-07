@@ -93,11 +93,15 @@ static void nvme_mmio_write64(volatile uint8_t *mmio, uint32_t reg, uint64_t val
 }
 
 static uint32_t nvme_sq_doorbell_reg(const nvme_controller_t *ctrl, uint16_t qid) {
-    return NVME_REG_DBS + (uint32_t)(2U * qid) * ctrl->cap.doorbell_stride_bytes;
+    uint32_t offset = (uint32_t)(2U * qid) * ctrl->cap.doorbell_stride_bytes;
+    if (offset > 0x100000U) return NVME_REG_DBS; /* overflow guard */
+    return NVME_REG_DBS + offset;
 }
 
 static uint32_t nvme_cq_doorbell_reg(const nvme_controller_t *ctrl, uint16_t qid) {
-    return NVME_REG_DBS + (uint32_t)(2U * qid + 1U) * ctrl->cap.doorbell_stride_bytes;
+    uint32_t offset = (uint32_t)(2U * qid + 1U) * ctrl->cap.doorbell_stride_bytes;
+    if (offset > 0x100000U) return NVME_REG_DBS; /* overflow guard */
+    return NVME_REG_DBS + offset;
 }
 
 static uint32_t nvme_sq0_doorbell_reg(const nvme_controller_t *ctrl) {

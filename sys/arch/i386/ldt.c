@@ -71,6 +71,9 @@ static void *ldt_alloc_storage(unsigned int entry_count, uint8_t *is_uma_out) {
     }
 #endif
 
+    if (entry_count > SIZE_MAX / LDT_ENTRY_SIZE) {
+        return NULL;
+    }
     bytes = (size_t)entry_count * LDT_ENTRY_SIZE;
     ptr = kmalloc(bytes);
     if (!ptr) {

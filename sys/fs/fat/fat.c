@@ -94,7 +94,7 @@ static int fat_read_sectors(fat_fs_t *fs, uint32_t sector, uint32_t count, void 
     return (read == size) ? 0 : -1;
 }
 
-static int fat_read_fat_bytes(fat_fs_t *fs, uint32_t offset, uint32_t size, uint8_t *buffer) {
+static int fat_read_fat_bytes(fat_fs_t *fs, uint64_t offset, uint32_t size, uint8_t *buffer) {
     if (!fs || !buffer || !size) return -1;
     if (!fs->device || !fs->device->read) return -1;
 
@@ -126,7 +126,7 @@ uint32_t fat_get_next_cluster(fat_fs_t *fs, uint32_t cluster) {
             entry = fat32[cluster];
         } else {
             uint8_t raw[4];
-            if (fat_read_fat_bytes(fs, (uint32_t)off, sizeof(raw), raw) != 0) return 0x0FFFFFFF;
+            if (fat_read_fat_bytes(fs, off, sizeof(raw), raw) != 0) return 0x0FFFFFFF;
             entry = (uint32_t)raw[0] |
                     ((uint32_t)raw[1] << 8) |
                     ((uint32_t)raw[2] << 16) |
@@ -146,7 +146,7 @@ uint32_t fat_get_next_cluster(fat_fs_t *fs, uint32_t cluster) {
             next = fat16[cluster];
         } else {
             uint8_t raw[2];
-            if (fat_read_fat_bytes(fs, (uint32_t)off, sizeof(raw), raw) != 0) return 0x0FFFFFFF;
+            if (fat_read_fat_bytes(fs, off, sizeof(raw), raw) != 0) return 0x0FFFFFFF;
             next = (uint16_t)raw[0] | ((uint16_t)raw[1] << 8);
         }
 

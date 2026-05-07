@@ -307,7 +307,11 @@ void isr_handler(registers_t *regs) {
 
         char buf[256];
         kprint("\nEXCEPTION: ");
-        kprint(exception_messages[regs->int_no]);
+        if (regs->int_no < 32) {
+            kprint(exception_messages[regs->int_no]);
+        } else {
+            kprint("Unknown Exception");
+        }
         if (is_usermode) {
             kprint(" (in user process)\n");
         } else {
