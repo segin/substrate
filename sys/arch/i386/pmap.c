@@ -45,6 +45,30 @@ static volatile int pmap_list_lock = 0;
 // Global Statistics
 static struct pmap_stats global_pmap_stats = {0};
 
+/* Diagnostic counters for the pmap_destroy anonymous-page free path.
+ * Exposed via /proc/pmap_stats so we can see whether the per-exec
+ * leak is here or somewhere else. */
+uint64_t pmap_destroy_anon_freed     = 0;
+uint64_t pmap_destroy_anon_skipped   = 0;
+uint64_t pmap_destroy_skip_obj       = 0;
+uint64_t pmap_destroy_skip_wired     = 0;
+uint64_t pmap_destroy_skip_refcnt    = 0;
+uint64_t pmap_destroy_calls          = 0;
+
+void pmap_dump_destroy_stats(void) {
+    char buf[256];
+    snprintf(buf, sizeof(buf),
+             "pmap_destroy: calls=%llu freed=%llu skipped=%llu "
+             "(obj=%llu wired=%llu refcnt!=1=%llu)\n",
+             (unsigned long long)pmap_destroy_calls,
+             (unsigned long long)pmap_destroy_anon_freed,
+             (unsigned long long)pmap_destroy_anon_skipped,
+             (unsigned long long)pmap_destroy_skip_obj,
+             (unsigned long long)pmap_destroy_skip_wired,
+             (unsigned long long)pmap_destroy_skip_refcnt);
+    kprint(buf);
+}
+
 // Feature flags
 static int pmap_has_pcid = 0;
 
@@ -412,10 +436,12 @@ pmap_t pmap_create(void) {
 void pmap_destroy(pmap_t pmap) {
     // Edge case: NULL pmap
     if (!pmap) return;
-    
+
     // Edge case: Don't destroy kernel pmap
     if (pmap == kernel_pmap_ptr) return;
-    
+
+    pmap_destroy_calls++;
+
     // Decrement reference count (checkpoint 123)
     pmap->ref_count--;
     
@@ -506,6 +532,18 @@ void pmap_destroy(pmap_t pmap) {
                                 page->wire_count == 0 &&
                                 page->object == NULL) {
                                 vm_page_free(page);
+                                pmap_destroy_anon_freed++;
+                            } else {
+                                /* Diagnostic: count pages that pmap_destroy
+                                 * walked but did NOT free.  If the leak
+                                 * persists despite the freer-condition
+                                 * being correct, this counter rising
+                                 * tells us my predicate is screening
+                                 * out the wrong pages. */
+                                pmap_destroy_anon_skipped++;
+                                pmap_destroy_skip_obj   += (page->object  != NULL);
+                                pmap_destroy_skip_wired += (page->wire_count != 0);
+                                pmap_destroy_skip_refcnt+= (page->ref_count != 1);
                             }
                         }
                     }

@@ -187,6 +187,14 @@ static uint32_t gen_vmstat(char *buf, size_t size, void *opaque) {
         stats.zero_fill_pages);
 }
 
+/* Diagnostic counters from pmap.c — defined there, declared here */
+extern uint64_t pmap_destroy_anon_freed;
+extern uint64_t pmap_destroy_anon_skipped;
+extern uint64_t pmap_destroy_skip_obj;
+extern uint64_t pmap_destroy_skip_wired;
+extern uint64_t pmap_destroy_skip_refcnt;
+extern uint64_t pmap_destroy_calls;
+
 static uint32_t proc_pmap_stats_read(char *buf, size_t size, void *opaque) {
     (void)opaque;
     struct pmap_stats stats;
@@ -194,7 +202,7 @@ static uint32_t proc_pmap_stats_read(char *buf, size_t size, void *opaque) {
     if (sys_pmap_stats(&stats) != 0) {
         return snprintf(buf, size, "error: could not get stats\n");
     }
-    
+
     return snprintf(buf, size,
         "Faults: %u\n"
         "COW Faults: %u\n"
@@ -207,7 +215,13 @@ static uint32_t proc_pmap_stats_read(char *buf, size_t size, void *opaque) {
         "TLB Single Invalidations: %u\n"
         "TLB Full Flushes: %u\n"
         "Total PMAPs: %u\n"
-        "Active PMAPs: %u\n",
+        "Active PMAPs: %u\n"
+        "Destroy Calls: %llu\n"
+        "Destroy Anon Freed: %llu\n"
+        "Destroy Anon Skipped: %llu\n"
+        "  skip reason obj!=NULL: %llu\n"
+        "  skip reason wired:     %llu\n"
+        "  skip reason refcnt!=1: %llu\n",
         stats.faults,
         stats.cow_faults,
         stats.zero_fills,
@@ -219,7 +233,13 @@ static uint32_t proc_pmap_stats_read(char *buf, size_t size, void *opaque) {
         stats.tlb_invlpg_count,
         stats.tlb_full_flush_count,
         stats.total_pmaps,
-        stats.active_pmaps
+        stats.active_pmaps,
+        (unsigned long long)pmap_destroy_calls,
+        (unsigned long long)pmap_destroy_anon_freed,
+        (unsigned long long)pmap_destroy_anon_skipped,
+        (unsigned long long)pmap_destroy_skip_obj,
+        (unsigned long long)pmap_destroy_skip_wired,
+        (unsigned long long)pmap_destroy_skip_refcnt
     );
 }
 
