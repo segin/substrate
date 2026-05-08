@@ -176,7 +176,12 @@ void turnstile_release(void *lockobj) {
     thread_t *waiter = ts->ts_waiters;
     while (waiter) {
         thread_t *next = waiter->next;
-        waiter->state = THREAD_READY;
+        /* A SIGTSTP'd waiter must stay STOPPED — promoting it to READY
+         * here would resurrect a stopped thread.  Same in every
+         * sleepq/turnstile wake path. */
+        if (waiter->state != THREAD_STOPPED) {
+            waiter->state = THREAD_READY;
+        }
         waiter->next = NULL;
         waiter = next;
     }

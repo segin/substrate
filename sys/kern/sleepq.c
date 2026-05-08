@@ -267,13 +267,18 @@ static thread_t *sleepq_wake_one_internal(void *chan, int type, int pid) {
 
     t->next = NULL;
     t->wait_chan = NULL;
-    t->state = THREAD_READY;
-    
+    /* A SIGTSTP'd thread can still be on a sleepq if signal_stop ran
+     * after it queued.  Don't resurrect it to READY here — its state
+     * stays THREAD_STOPPED until SIGCONT.  Same in every wake path. */
+    if (t->state != THREAD_STOPPED) {
+        t->state = THREAD_READY;
+    }
+
     // Remove sleep queue if empty
     if (sq->sq_count == 0) {
         sleepq_remove(sq, hash);
     }
-    
+
     sq_unlock(hash);
     return(t);
 }
@@ -307,14 +312,16 @@ static int sleepq_wake_all_internal(void *chan, int type, int pid) {
         thread_t *next = t->next;
         t->next = NULL;
         t->wait_chan = NULL;
-        t->state = THREAD_READY;
+        if (t->state != THREAD_STOPPED) {
+            t->state = THREAD_READY;
+        }
         woken++;
         t = next;
     }
-    
+
     // Remove sleep queue
     sleepq_remove(sq, hash);
-    
+
     sq_unlock(hash);
     return(woken);
 }
@@ -351,17 +358,19 @@ static int sleepq_wake_n_internal(void *chan, int n, int type, int pid) {
         if (!sq->sq_head)
             sq->sq_tail = NULL;
         sq->sq_count--;
-        
+
         t->next = NULL;
         t->wait_chan = NULL;
-        t->state = THREAD_READY;
+        if (t->state != THREAD_STOPPED) {
+            t->state = THREAD_READY;
+        }
         woken++;
     }
-    
+
     // Remove sleep queue if empty
     if (sq->sq_count == 0)
         sleepq_remove(sq, hash);
-    
+
     sq_unlock(hash);
     return(woken);
 }
@@ -432,7 +441,9 @@ static int sleepq_requeue_internal(void *src_chan, void *dst_chan, int wake_n, i
             
             t->next = NULL;
             t->wait_chan = NULL;
-            t->state = THREAD_READY;
+            if (t->state != THREAD_STOPPED) {
+                t->state = THREAD_READY;
+            }
             woken_count++;
         }
     }

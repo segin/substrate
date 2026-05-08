@@ -1065,13 +1065,6 @@ static int exec_setup_stack(pmap_t pmap, uint32_t *sp_out, char **k_argv, int ar
         memcpy(&val, &rand_buf[i * 4], 4);
         STACK_WRITE32(sp + i * 4, val);
     }
-    if (current_process && current_process->perso_id == PERS_FREEBSD) {
-        kprintf("[AUXV] FBSD canary @0x%08x len=64 first8=%02x%02x%02x%02x%02x%02x%02x%02x\n",
-                rand_ptr,
-                rand_buf[0], rand_buf[1], rand_buf[2], rand_buf[3],
-                rand_buf[4], rand_buf[5], rand_buf[6], rand_buf[7]);
-    }
-
     /* Align to 16 before the auxv array. */
     sp &= ~15;
 
