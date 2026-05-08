@@ -434,12 +434,22 @@ static void init_core_subsystems(multiboot_info_t *mboot_info) {
     sysctl_init();
 
     keyboard_init();
+    /*
+     * Bisect markers (i486 hang reported between keyboard_init and pci_init).
+     * If you boot and the last visible message is M:KBD-DONE, the hang is
+     * inside fb_init.  If M:FB-DONE is last, hang is efi_runtime_init.  If
+     * M:EFI-DONE is last, hang is intr_enable / first IRQ delivery.  If
+     * M:IRQ-ENABLED is last, hang is pci_init's first probe.  Remove these
+     * markers once the cause is pinned.
+     */
+    kprint("M:KBD-DONE\n");
     if (mboot_info) {
         fb_init(mboot_info);
     }
+    kprint("M:FB-DONE\n");
 
     efi_runtime_init();
-
+    kprint("M:EFI-DONE\n");
 }
 
 static void init_storage_and_vfs(multiboot_info_t *mboot_info) {
@@ -450,8 +460,10 @@ static void init_storage_and_vfs(multiboot_info_t *mboot_info) {
      * are all configured by init_core_subsystems() above.
      */
     intr_enable();
+    kprint("M:IRQ-ENABLED\n");
 
     pci_init();
+    kprint("M:PCI-DONE\n");
     isa_init();
     isa_probe_legacy();
     isa_probe_pnp();
