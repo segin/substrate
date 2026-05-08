@@ -111,6 +111,11 @@ static void build_precedence_tables(void) {
                 rule_assoc[i] = symbol_assoc[sym];
             }
         }
+        /* %prec overrides the rightmost-terminal default. */
+        if (rprec[i] != 0) {
+            rule_prec[i]  = rprec[i];
+            rule_assoc[i] = rassoc[i];
+        }
     }
 }
 

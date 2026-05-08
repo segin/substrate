@@ -38,6 +38,8 @@ int union_defined = 0;
 short plhs[MAXPROD];
 short ritem[MAXPROD * 4];
 short rrhs[MAXPROD]; /* index in ritem for RHS of rule i */
+short rprec[MAXPROD];
+char  rassoc[MAXPROD];
 
 int lineno = 1;
 char *temp_name1 = NULL;

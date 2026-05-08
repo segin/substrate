@@ -143,6 +143,8 @@ extern int union_defined;   /* Set if %union was used */
 extern short plhs[MAXPROD];
 extern short ritem[MAXPROD * 4]; /* Conservative estimate */
 extern short rrhs[MAXPROD]; /* Index into ritem */
+extern short rprec[MAXPROD]; /* Explicit precedence (%prec) override per rule */
+extern char  rassoc[MAXPROD]; /* Explicit associativity override per rule */
 
 /* LR(0) state construction globals (defined in lr0.c) */
 extern short *item_set;
@@ -214,6 +216,8 @@ void no_space(void);
 #define EXPECT          267     /* %expect */
 #define LCURLY          268     /* { */
 #define RCURLY          269     /* } */
+#define PREC            270     /* %prec */
+#define PURE_PARSER     271     /* %pure-parser (extension) */
 
 /* -- Global variables for Reader -- */
 extern char *line;

@@ -317,25 +317,89 @@ static int get_token(void) {
     }
     
     if (c == '\'') {
-        /* Character literal */
+        /* Character literal: produce a synthetic name 'X' that can be
+         * stored in the symbol table.  Supports the full ISO C escape
+         * sequence repertoire including hex (\xHH...) and octal (\NNN). */
+        int ch;
         bp = token_buffer;
+        *bp++ = '\'';
         c = nextc();
-        if (c == '\\') {
-            c = nextc();  /* Escape sequence */
-            switch (c) {
-                case 'n': c = '\n'; break;
-                case 't': c = '\t'; break;
-                case 'r': c = '\r'; break;
-                case '\\': c = '\\'; break;
-                case '\'': c = '\''; break;
-                default: break;
-            }
+        if (c == EOF || c == '\n') {
+            fprintf(stderr, "yacc: %s:%d: unterminated character literal\n",
+                    infile_name ? infile_name : "<stdin>", lineno);
+            done(1);
         }
-        *bp++ = c;
+        if (c == '\\') {
+            int e = nextc();
+            switch (e) {
+            case 'n':  ch = '\n'; break;
+            case 't':  ch = '\t'; break;
+            case 'r':  ch = '\r'; break;
+            case 'b':  ch = '\b'; break;
+            case 'f':  ch = '\f'; break;
+            case 'v':  ch = '\v'; break;
+            case 'a':  ch = '\a'; break;
+            case '\\': ch = '\\'; break;
+            case '\'': ch = '\''; break;
+            case '"':  ch = '"';  break;
+            case '?':  ch = '?';  break;
+            case '0': case '1': case '2': case '3':
+            case '4': case '5': case '6': case '7': {
+                int n = e - '0';
+                int k;
+                for (k = 0; k < 2; k++) {
+                    int d = nextc();
+                    if (d < '0' || d > '7') { ungetc_char(d); break; }
+                    n = n * 8 + (d - '0');
+                }
+                ch = n & 0xFF;
+                break;
+            }
+            case 'x': {
+                int n = 0, k;
+                int saw = 0;
+                for (k = 0; k < 2; k++) {
+                    int d = nextc();
+                    if (isdigit(d))      n = n * 16 + (d - '0');
+                    else if (d >= 'a' && d <= 'f') n = n * 16 + (d - 'a' + 10);
+                    else if (d >= 'A' && d <= 'F') n = n * 16 + (d - 'A' + 10);
+                    else { ungetc_char(d); break; }
+                    saw = 1;
+                }
+                if (!saw) {
+                    fprintf(stderr, "yacc: %s:%d: \\x with no hex digits\n",
+                            infile_name ? infile_name : "<stdin>", lineno);
+                    done(1);
+                }
+                ch = n & 0xFF;
+                break;
+            }
+            default:
+                fprintf(stderr,
+                    "yacc: %s:%d: unknown escape sequence '\\%c'\n",
+                    infile_name ? infile_name : "<stdin>", lineno, e);
+                done(1);
+                ch = e;
+                break;
+            }
+        } else {
+            ch = c;
+        }
+        if (ch == 0) {
+            fprintf(stderr, "yacc: %s:%d: NUL character forbidden in literal\n",
+                    infile_name ? infile_name : "<stdin>", lineno);
+            done(1);
+        }
+        *bp++ = (char)ch;
+        *bp++ = '\'';
         *bp = '\0';
-        c = nextc();  /* Consume closing quote */
-        if (c != '\'') { fprintf(stderr, "Unterminated character literal\n"); }
-        return IDENTIFIER;  /* Treat as identifier for symbol lookup */
+        c = nextc();
+        if (c != '\'') {
+            fprintf(stderr, "yacc: %s:%d: multi-character literal\n",
+                    infile_name ? infile_name : "<stdin>", lineno);
+            done(1);
+        }
+        return IDENTIFIER;
     }
     
     if (c == '{') { return LCURLY; }
@@ -358,15 +422,24 @@ static int keyword(void) {
     ungetc_char(c);
     *bp = '\0';
     
-    if (strcmp(buf, "token") == 0) return TERM;
-    if (strcmp(buf, "left") == 0) return LEFT;
-    if (strcmp(buf, "right") == 0) return RIGHT;
+    if (strcmp(buf, "token") == 0)    return TERM;
+    if (strcmp(buf, "term") == 0)     return TERM;
+    if (strcmp(buf, "left") == 0)     return LEFT;
+    if (strcmp(buf, "right") == 0)    return RIGHT;
     if (strcmp(buf, "nonassoc") == 0) return NONASSOC;
-    if (strcmp(buf, "start") == 0) return START;
-    if (strcmp(buf, "type") == 0) return TYPE;
-    if (strcmp(buf, "union") == 0) return UNION;
-    
-    return IDENTIFIER; /* Unknown keyword */
+    if (strcmp(buf, "binary") == 0)   return NONASSOC;
+    if (strcmp(buf, "start") == 0)    return START;
+    if (strcmp(buf, "type") == 0)     return TYPE;
+    if (strcmp(buf, "union") == 0)    return UNION;
+    if (strcmp(buf, "prec") == 0)     return PREC;
+    if (strcmp(buf, "expect") == 0)   return EXPECT;
+    if (strcmp(buf, "pure-parser") == 0 || strcmp(buf, "pure_parser") == 0)
+        return PURE_PARSER;
+
+    fprintf(stderr, "yacc: %s:%d: unrecognized %%%s directive\n",
+            infile_name ? infile_name : "<stdin>", lineno, buf);
+    done(1);
+    return 0;
 }
 
 static void skip_comment(void) {
@@ -712,9 +785,31 @@ static void parse_rules(void) {
                          ritem[nitems++] = -idx;
                      }
 
-                     break; 
+                     break;
+                } else if (t == PREC) {
+                    /* %prec TOKEN: override current rule's precedence. */
+                    int pt = get_token();
+                    if (pt != IDENTIFIER) {
+                        fprintf(stderr,
+                            "yacc: %s:%d: %%prec must be followed by a token\n",
+                            infile_name ? infile_name : "<stdin>", lineno);
+                        done(1);
+                    }
+                    bucket *pbp = lookup(token_buffer);
+                    if (pbp->class != CLASS_TERM) {
+                        fprintf(stderr,
+                            "yacc: %s:%d: %%prec %s: must name a terminal\n",
+                            infile_name ? infile_name : "<stdin>", lineno,
+                            pbp->name);
+                        done(1);
+                    }
+                    rprec[nrules]  = pbp->prec;
+                    rassoc[nrules] = pbp->assoc;
                 } else {
-                     /* prec? */
+                    fprintf(stderr,
+                        "yacc: %s:%d: unexpected token %d in rules\n",
+                        infile_name ? infile_name : "<stdin>", lineno, t);
+                    done(1);
                 }
                 
                 t = get_token();
@@ -776,15 +871,19 @@ static void pack_symbols(void) {
     nvars = 0;
     nsyms = 0;
     
-    /* Assign values to tokens that don't have them */
+    /* Assign values to tokens that don't have them.
+     * - $end is always 0
+     * - error is always 256 (or whatever %token assigned)
+     * - 'X' character literals get their character value
+     * - Everything else gets the next free value >= 257
+     */
     for (bp = first_symbol; bp != NULL; bp = bp->next) {
-        if (bp->class == CLASS_TERM) {
-            if (bp->value == 0) {
-                 if (strcmp(bp->name, "$end") == 0) bp->value = 0;
-                 else if (strcmp(bp->name, "error") == 0) bp->value = 256;
-                 else bp->value = token_value++;
-            }
-        }
+        if (bp->class != CLASS_TERM) continue;
+        if (bp->value != 0) continue;
+        if (strcmp(bp->name, "$end") == 0)        bp->value = 0;
+        else if (strcmp(bp->name, "error") == 0)  bp->value = 256;
+        else if (bp->name[0] == '\'')             bp->value = (unsigned char)bp->name[1];
+        else                                       bp->value = token_value++;
     }
 
     /* Assign indices = values */
