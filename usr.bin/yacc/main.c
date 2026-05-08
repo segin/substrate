@@ -6,6 +6,7 @@
 
 #include "defs.h"
 #include <unistd.h>
+#include <locale.h>
 
 /* Global option flags */
 int dflag = 0;
@@ -131,6 +132,11 @@ void no_space(void) {
 }
 
 int main(int argc, char *argv[]) {
+    /* POSIX requires honoring LANG, LC_ALL, LC_CTYPE, LC_MESSAGES.
+     * Calling setlocale(LC_ALL, "") makes the host's locale machinery
+     * pick those up automatically. */
+    setlocale(LC_ALL, "");
+
     get_args(argc, argv);
     open_files();
     init_symtab();

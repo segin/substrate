@@ -5,325 +5,325 @@
 ## 1. Command-Line Interface
 
 ### 1.1 Options
-- [ ] `-b file_prefix` - Use `file_prefix` instead of `y` for output filenames
-- [ ] `-d` - Generate header file (`y.tab.h` or `file_prefix.tab.h`)
-- [ ] `-l` - Suppress `#line` directives in generated code
-- [ ] `-p sym_prefix` - Replace `yy` prefix with `sym_prefix` in external names
-- [ ] `-t` - Enable runtime debugging code compilation (`YYDEBUG`)
-- [ ] `-v` - Generate description file (`y.output` or `file_prefix.output`)
+- [x] `-b file_prefix` - Use `file_prefix` instead of `y` for output filenames
+- [x] `-d` - Generate header file (`y.tab.h` or `file_prefix.tab.h`)
+- [x] `-l` - Suppress `#line` directives in generated code
+- [x] `-p sym_prefix` - Replace `yy` prefix with `sym_prefix` in external names
+- [x] `-t` - Enable runtime debugging code compilation (`YYDEBUG`)
+- [x] `-v` - Generate description file (`y.output` or `file_prefix.output`)
 
 ### 1.2 Operands
-- [ ] Accept single grammar file operand
-- [ ] Report error if no grammar file specified
+- [x] Accept single grammar file operand
+- [x] Report error if no grammar file specified
 
 ### 1.3 Exit Status
-- [ ] Return 0 on successful completion
-- [ ] Return >0 on error
+- [x] Return 0 on successful completion
+- [x] Return >0 on error
 
 ---
 
 ## 2. Input File Format
 
 ### 2.1 Three-Section Structure
-- [ ] Parse declarations section (before first `%%`)
-- [ ] Parse grammar rules section (between `%%` markers)
-- [ ] Parse programs/epilogue section (after second `%%`, optional)
-- [ ] Second `%%` is optional if programs section is empty
+- [x] Parse declarations section (before first `%%`)
+- [x] Parse grammar rules section (between `%%` markers)
+- [x] Parse programs/epilogue section (after second `%%`, optional)
+- [x] Second `%%` is optional if programs section is empty
 
 ### 2.2 Lexical Structure
-- [ ] Ignore `<blank>`, `<newline>`, `<formfeed>` except in names/symbols
-- [ ] Support C-style comments `/* ... */`
-- [ ] Names: letters, `.`, `_`, non-initial digits (arbitrary length)
-- [ ] Case-sensitive names
-- [ ] Character literals: single character in single quotes
-- [ ] Support all ISO C escape sequences in literals (`\n`, `\t`, `\r`, `\\`, `\'`, etc.)
-- [ ] Reject NUL character in grammar rules or literals
+- [x] Ignore `<blank>`, `<newline>`, `<formfeed>` except in names/symbols
+- [x] Support C-style comments `/* ... */`
+- [x] Names: letters, `.`, `_`, non-initial digits (arbitrary length)
+- [x] Case-sensitive names
+- [x] Character literals: single character in single quotes
+- [x] Support all ISO C escape sequences in literals (`\n`, `\t`, `\r`, `\\`, `\'`, etc.)
+- [x] Reject NUL character in grammar rules or literals
 
 ---
 
 ## 3. Declarations Section
 
 ### 3.1 Token Declarations
-- [ ] `%token [<tag>] name [number] [name [number]]...`
-- [ ] Optional `<tag>` for C union member type
-- [ ] Optional `number` to assign explicit token value
-- [ ] Tokens not explicitly numbered get values > 256
+- [x] `%token [<tag>] name [number] [name [number]]...`
+- [x] Optional `<tag>` for C union member type
+- [x] Optional `number` to assign explicit token value
+- [x] Tokens not explicitly numbered get values > 256
 
 ### 3.2 Precedence/Associativity Declarations
-- [ ] `%left [<tag>] name [number]...` - Left associative
-- [ ] `%right [<tag>] name [number]...` - Right associative
-- [ ] `%nonassoc [<tag>] name [number]...` - Non-associative (error on associative use)
-- [ ] Lines in order of increasing precedence
-- [ ] All tokens on same line have same precedence
+- [x] `%left [<tag>] name [number]...` - Left associative
+- [x] `%right [<tag>] name [number]...` - Right associative
+- [x] `%nonassoc [<tag>] name [number]...` - Non-associative (error on associative use)
+- [x] Lines in order of increasing precedence
+- [x] All tokens on same line have same precedence
 
 ### 3.3 Type Declarations
-- [ ] `%type <tag> name...` - Declare non-terminal types
-- [ ] Require `<tag>` for `%type`
-- [ ] Prohibit token numbers or literals with `%type`
-- [ ] Enable type checking when `%type` is used
+- [x] `%type <tag> name...` - Declare non-terminal types
+- [x] Require `<tag>` for `%type`
+- [x] Prohibit token numbers or literals with `%type`
+- [x] Enable type checking when `%type` is used
 
 ### 3.4 Start Symbol
-- [ ] `%start name` - Declare start symbol
-- [ ] Default to LHS of first grammar rule if not specified
+- [x] `%start name` - Declare start symbol
+- [x] Default to LHS of first grammar rule if not specified
 
 ### 3.5 Union Declaration
-- [ ] `%union { body }` - Declare YYSTYPE union
-- [ ] Body must not contain unbalanced curly braces
-- [ ] Generate YYSTYPE typedef from union
+- [x] `%union { body }` - Declare YYSTYPE union
+- [x] Body must not contain unbalanced curly braces
+- [x] Generate YYSTYPE typedef from union
 
 ### 3.6 C Code Blocks
-- [ ] `%{ ... %}` - Copy enclosed C code to output file
-- [ ] Code has global scope in output
-- [ ] Must not contain `%}` outside comment/string/literal
-- [ ] Terminate declarations section with `%%`
+- [x] `%{ ... %}` - Copy enclosed C code to output file
+- [x] Code has global scope in output
+- [x] Must not contain `%}` outside comment/string/literal
+- [x] Terminate declarations section with `%%`
 
 ---
 
 ## 4. Grammar Rules Section
 
 ### 4.1 Rule Syntax
-- [ ] `A : BODY ;` format
-- [ ] `|` for multiple alternatives with same LHS
-- [ ] Empty BODY for epsilon productions
-- [ ] Assign unique number to each rule
+- [x] `A : BODY ;` format
+- [x] `|` for multiple alternatives with same LHS
+- [x] Empty BODY for epsilon productions
+- [x] Assign unique number to each rule
 
 ### 4.2 Semantic Actions
-- [ ] `{ C-code }` - Arbitrary C statements
-- [ ] Actions can appear anywhere in rule (mid-rule actions)
-- [ ] Mid-rule actions create anonymous nonterminals
-- [ ] `$$` - Access/set rule result value (translates to `yyval`)
-- [ ] `$N` - Access Nth RHS symbol value (translates to `yyvsp[offset]`)
-- [ ] `$-N` - Access symbol before current rule
-- [ ] `$<tag>N` - Typed access with explicit union member
-- [ ] Default `$$ = $1` if no action specified
+- [x] `{ C-code }` - Arbitrary C statements
+- [x] Actions can appear anywhere in rule (mid-rule actions)
+- [x] Mid-rule actions create anonymous nonterminals
+- [x] `$$` - Access/set rule result value (translates to `yyval`)
+- [x] `$N` - Access Nth RHS symbol value (translates to `yyvsp[offset]`)
+- [x] `$-N` - Access symbol before current rule
+- [x] `$<tag>N` - Typed access with explicit union member
+- [x] Default `$$ = $1` if no action specified
 
 ### 4.3 Precedence Override
-- [ ] `%prec token` - Override rule precedence with token's precedence
-- [ ] Rule precedence defaults to last token/literal in body
+- [x] `%prec token` - Override rule precedence with token's precedence
+- [x] Rule precedence defaults to last token/literal in body
 
 ### 4.4 Error Token
-- [ ] Reserved `error` token for error recovery
-- [ ] Default value 256 (configurable via `%token`)
-- [ ] Lexer should not return `error` value
+- [x] Reserved `error` token for error recovery
+- [x] Default value 256 (configurable via `%token`)
+- [x] Lexer should not return `error` value
 
 ---
 
 ## 5. Programs/Epilogue Section
 
 ### 5.1 Epilogue Handling
-- [ ] Copy all code after second `%%` to end of output file
-- [ ] Code appears after `yyparse()` definition
-- [ ] Placement relative to semantic actions is unspecified
+- [x] Copy all code after second `%%` to end of output file
+- [x] Code appears after `yyparse()` definition
+- [x] Placement relative to semantic actions is unspecified
 
 ---
 
 ## 6. Output Files
 
 ### 6.1 Code File (`y.tab.c`)
-- [ ] Generate C source conforming to ISO C standard
-- [ ] No undefined/unspecified/implementation-defined behavior (except copied code)
-- [ ] Include `extern int yychar` or `int yychar` definition
-- [ ] Include function prototypes:
-  - [ ] `void yyerror(const char *);`
-  - [ ] `int yylex(void);`
-  - [ ] `int yyparse(void);`
-- [ ] Protect `yyerror`/`yylex` declarations with `#ifndef` macros
-- [ ] Include `#define` statements for tokens (same as header)
-- [ ] Include YYSTYPE definition if `%union` used
-- [ ] Include `extern YYSTYPE yylval` or `YYSTYPE yylval` definition
-- [ ] NO declaration of `main()` unless in `%{ %}` block
-- [ ] Copy `%{ %}` code before semantic actions
-- [ ] Generate `yyparse()` function
+- [x] Generate C source conforming to ISO C standard
+- [x] No undefined/unspecified/implementation-defined behavior (except copied code)
+- [x] Include `extern int yychar` or `int yychar` definition
+- [x] Include function prototypes:
+  - [x] `void yyerror(const char *);`
+  - [x] `int yylex(void);`
+  - [x] `int yyparse(void);`
+- [x] Protect `yyerror`/`yylex` declarations with `#ifndef` macros
+- [x] Include `#define` statements for tokens (same as header)
+- [x] Include YYSTYPE definition if `%union` used
+- [x] Include `extern YYSTYPE yylval` or `YYSTYPE yylval` definition
+- [x] NO declaration of `main()` unless in `%{ %}` block
+- [x] Copy `%{ %}` code before semantic actions
+- [x] Generate `yyparse()` function
 
 ### 6.2 Header File (`y.tab.h`)
-- [ ] Generate only with `-d` option
-- [ ] `#define` statements for token names/values
-- [ ] YYSTYPE declaration if `%union` used
-- [ ] `extern YYSTYPE yylval` declaration
-- [ ] May declare `yyparse()` with prototype
-- [ ] Must NOT declare `yyerror()` or `yylex()`
+- [x] Generate only with `-d` option
+- [x] `#define` statements for token names/values
+- [x] YYSTYPE declaration if `%union` used
+- [x] `extern YYSTYPE yylval` declaration
+- [x] May declare `yyparse()` with prototype
+- [x] Must NOT declare `yyerror()` or `yylex()`
 
 ### 6.3 Description File (`y.output`)
-- [ ] Generate only with `-v` option
-- [ ] State machine description (format unspecified)
-- [ ] Internal table limits report
+- [x] Generate only with `-v` option
+- [x] State machine description (format unspecified)
+- [x] Internal table limits report
 
 ---
 
 ## 7. Generated Parser Requirements
 
 ### 7.1 Parser Function
-- [ ] `int yyparse(void)` - Main parser function
-- [ ] Return 0 on successful parse (YYACCEPT)
-- [ ] Return non-zero on error (YYABORT or unrecoverable)
-- [ ] Implement LALR(1) parsing algorithm
+- [x] `int yyparse(void)` - Main parser function
+- [x] Return 0 on successful parse (YYACCEPT)
+- [x] Return non-zero on error (YYABORT or unrecoverable)
+- [x] Implement LALR(1) parsing algorithm
 
 ### 7.2 External Variables
-- [ ] `int yychar` - Current lookahead token
-- [ ] `YYSTYPE yylval` - Semantic value of lookahead
-- [ ] `int yydebug` - Runtime debug flag (initial value 0)
-- [ ] `int yynerrs` - Syntax error count
-- [ ] `int yyerrflag` - Error recovery state
+- [x] `int yychar` - Current lookahead token
+- [x] `YYSTYPE yylval` - Semantic value of lookahead
+- [x] `int yydebug` - Runtime debug flag (initial value 0)
+- [x] `int yynerrs` - Syntax error count
+- [x] `int yyerrflag` - Error recovery state
 
 ### 7.3 Required Macros
-- [ ] `YYEOF` - End-of-file token value
-- [ ] `YYEMPTY` - No lookahead token indicator
-- [ ] `YYERRCODE` - Error token value (default 256)
-- [ ] `YYMAXDEPTH` - Maximum parse stack depth
-- [ ] `yyerrok` - Clear error state: `(yyerrflag = 0)`
-- [ ] `yyclearin` - Discard lookahead: `(yychar = YYEMPTY)` or `(yychar = -1)`
-- [ ] `YYACCEPT` - Return 0 from parser
-- [ ] `YYABORT` - Return non-zero from parser
-- [ ] `YYERROR` - Initiate error handling from semantic action
-- [ ] `YYRECOVERING()` - Return 1 if recovering from error, 0 otherwise
+- [x] `YYEOF` - End-of-file token value
+- [x] `YYEMPTY` - No lookahead token indicator
+- [x] `YYERRCODE` - Error token value (default 256)
+- [x] `YYMAXDEPTH` - Maximum parse stack depth
+- [x] `yyerrok` - Clear error state: `(yyerrflag = 0)`
+- [x] `yyclearin` - Discard lookahead: `(yychar = YYEMPTY)` or `(yychar = -1)`
+- [x] `YYACCEPT` - Return 0 from parser
+- [x] `YYABORT` - Return non-zero from parser
+- [x] `YYERROR` - Initiate error handling from semantic action
+- [x] `YYRECOVERING()` - Return 1 if recovering from error, 0 otherwise
 
 ### 7.4 Debugging
-- [ ] `YYDEBUG` preprocessor symbol controls debug code
-- [ ] `-t` sets `YYDEBUG` to 1 if not already defined
-- [ ] Without `-t`, set `YYDEBUG` to 0 if not defined
-- [ ] Debug output includes shift/reduce actions, input symbols, error recovery
+- [x] `YYDEBUG` preprocessor symbol controls debug code
+- [x] `-t` sets `YYDEBUG` to 1 if not already defined
+- [x] Without `-t`, set `YYDEBUG` to 0 if not defined
+- [x] Debug output includes shift/reduce actions, input symbols, error recovery
 
 ### 7.5 Lexer Interface
-- [ ] Call `yylex()` to get next token
-- [ ] `yylex()` returns token number > 0, or ≤ 0 for EOF
-- [ ] Assign return value to `yychar`
-- [ ] Associated value in `yylval`
-- [ ] Convert ≤ 0 returns to `YYEOF`
-- [ ] Single-byte literals: token = character value
-- [ ] Never request token when only reduction possible
+- [x] Call `yylex()` to get next token
+- [x] `yylex()` returns token number > 0, or ≤ 0 for EOF
+- [x] Assign return value to `yychar`
+- [x] Associated value in `yylval`
+- [x] Convert ≤ 0 returns to `YYEOF`
+- [x] Single-byte literals: token = character value
+- [x] Never request token when only reduction possible
 
 ---
 
 ## 8. Error Handling
 
 ### 8.1 Error Detection
-- [ ] Detect syntax error when action is `error`
-- [ ] Call `yyerror("syntax error")` on first error
-- [ ] Do NOT call `yyerror()` if recovering (< 3 shifts since last error)
-- [ ] Do NOT call `yyerror()` when `YYERROR` executed
+- [x] Detect syntax error when action is `error`
+- [x] Call `yyerror("syntax error")` on first error
+- [x] Do NOT call `yyerror()` if recovering (< 3 shifts since last error)
+- [x] Do NOT call `yyerror()` when `YYERROR` executed
 
 ### 8.2 Error Recovery
-- [ ] Pop stack until state allows shift on `error` token
-- [ ] If stack empties, return non-zero
-- [ ] Shift `error` token and resume parsing
-- [ ] Discard lookahead if error during recovery and not endmarker
-- [ ] Return non-zero if endmarker during recovery
-- [ ] Parser fully recovered after 3 normal shifts or `yyerrok`
+- [x] Pop stack until state allows shift on `error` token
+- [x] If stack empties, return non-zero
+- [x] Shift `error` token and resume parsing
+- [x] Discard lookahead if error during recovery and not endmarker
+- [x] Return non-zero if endmarker during recovery
+- [x] Parser fully recovered after 3 normal shifts or `yyerrok`
 
 ### 8.3 YYERROR Macro
-- [ ] Semantic actions can execute `YYERROR`
-- [ ] `YYERROR` passes control back to parser
-- [ ] Cannot be used outside semantic actions
+- [x] Semantic actions can execute `YYERROR`
+- [x] `YYERROR` passes control back to parser
+- [x] Cannot be used outside semantic actions
 
 ---
 
 ## 9. Conflict Resolution
 
 ### 9.1 Shift/Reduce Conflicts
-- [ ] Use precedence/associativity if both rule and token have them
-- [ ] Higher precedence wins
-- [ ] Same precedence: left→reduce, right→shift, nonassoc→error
-- [ ] Default: shift (count as conflict)
+- [x] Use precedence/associativity if both rule and token have them
+- [x] Higher precedence wins
+- [x] Same precedence: left→reduce, right→shift, nonassoc→error
+- [x] Default: shift (count as conflict)
 
 ### 9.2 Reduce/Reduce Conflicts
-- [ ] Reduce by earlier rule in input sequence
-- [ ] Count as conflict
+- [x] Reduce by earlier rule in input sequence
+- [x] Count as conflict
 
 ### 9.3 Conflict Reporting
-- [ ] Report conflicts to stderr (format unspecified)
-- [ ] Conflicts resolved by precedence NOT counted
-- [ ] Report in description file with `-v`
+- [x] Report conflicts to stderr (format unspecified)
+- [x] Conflicts resolved by precedence NOT counted
+- [x] Report in description file with `-v`
 
 ---
 
 ## 10. Symbol Prefix (`-p` Option)
 
 ### 10.1 Required Substitutions
-- [ ] `yychar` → `{prefix}char`
-- [ ] `yydebug` → `{prefix}debug`
-- [ ] `yyerror` → `{prefix}error`
-- [ ] `yylex` → `{prefix}lex`
-- [ ] `yylval` → `{prefix}lval`
-- [ ] `yynerrs` → `{prefix}nerrs`
-- [ ] `yyparse` → `{prefix}parse`
+- [x] `yychar` → `{prefix}char`
+- [x] `yydebug` → `{prefix}debug`
+- [x] `yyerror` → `{prefix}error`
+- [x] `yylex` → `{prefix}lex`
+- [x] `yylval` → `{prefix}lval`
+- [x] `yynerrs` → `{prefix}nerrs`
+- [x] `yyparse` → `{prefix}parse`
 
 ---
 
 ## 11. Yacc Library (`-ly`)
 
 ### 11.1 Library Functions
-- [ ] `int main(void)` - Calls `yyparse()`, returns 0
-- [ ] `void yyerror(const char *msg)` - Prints message to stderr
-- [ ] `main()` calls `setlocale(LC_ALL, "")`
+- [x] `int main(void)` - Calls `yyparse()`, returns 0
+- [x] `void yyerror(const char *msg)` - Prints message to stderr
+- [x] `main()` calls `setlocale(LC_ALL, "")`
 
 ### 11.2 Library Precedence
-- [ ] `-ly` must precede `-ll` for correct `main()`
+- [x] `-ly` must precede `-ll` for correct `main()`
 
 ---
 
 ## 12. Internal Limits
 
 ### 12.1 Minimum Maximums
-- [ ] `{NTERMS}` ≥ 126 tokens
-- [ ] `{NNONTERM}` ≥ 200 non-terminals
-- [ ] `{NPROD}` ≥ 300 rules
-- [ ] `{NSTATES}` ≥ 600 states
-- [ ] `{MEMSIZE}` ≥ 5200 rule length (names)
-- [ ] `{ACTSIZE}` ≥ 4000 parser actions
+- [x] `{NTERMS}` ≥ 126 tokens
+- [x] `{NNONTERM}` ≥ 200 non-terminals
+- [x] `{NPROD}` ≥ 300 rules
+- [x] `{NSTATES}` ≥ 600 states
+- [x] `{MEMSIZE}` ≥ 5200 rule length (names)
+- [x] `{ACTSIZE}` ≥ 4000 parser actions
 
 ---
 
 ## 13. Environment Variables
 
-- [ ] `LANG` - Default internationalization
-- [ ] `LC_ALL` - Override all LC_* variables
-- [ ] `LC_CTYPE` - Character interpretation
-- [ ] `LC_MESSAGES` - Diagnostic message format
-- [ ] `NLSPATH` - Message catalog location (XSI)
+- [x] `LANG` - Default internationalization
+- [x] `LC_ALL` - Override all LC_* variables
+- [x] `LC_CTYPE` - Character interpretation
+- [x] `LC_MESSAGES` - Diagnostic message format
+- [x] `NLSPATH` - Message catalog location (XSI)
 
 ---
 
 ## 14. Test Suite
 
 ### 14.1 Basic Tests
-- [ ] Minimal grammar (single rule)
-- [ ] Token declarations with explicit numbers
-- [ ] Precedence and associativity
-- [ ] `%type` declarations with type checking
-- [ ] `%union` declaration
-- [ ] `%start` symbol override
+- [x] Minimal grammar (single rule)
+- [x] Token declarations with explicit numbers
+- [x] Precedence and associativity
+- [x] `%type` declarations with type checking
+- [x] `%union` declaration
+- [x] `%start` symbol override
 
 ### 14.2 Grammar Tests
-- [ ] Empty productions
-- [ ] Mid-rule actions
-- [ ] `$$`, `$N`, `$-N` references
-- [ ] `%prec` precedence override
-- [ ] Multiple alternatives with `|`
+- [x] Empty productions
+- [x] Mid-rule actions
+- [x] `$$`, `$N`, `$-N` references
+- [x] `%prec` precedence override
+- [x] Multiple alternatives with `|`
 
 ### 14.3 Error Recovery Tests
-- [ ] `error` token in grammar
-- [ ] `yyerrok` macro
-- [ ] `yyclearin` macro
-- [ ] `YYERROR` from semantic action
-- [ ] `YYRECOVERING()` macro
+- [x] `error` token in grammar
+- [x] `yyerrok` macro
+- [x] `yyclearin` macro
+- [x] `YYERROR` from semantic action
+- [x] `YYRECOVERING()` macro
 
 ### 14.4 Output Tests
-- [ ] Code file structure
-- [ ] Header file with `-d`
-- [ ] Description file with `-v`
-- [ ] `-b` prefix option
-- [ ] `-p` symbol prefix
-- [ ] `-l` suppress line directives
-- [ ] `-t` debug mode
+- [x] Code file structure
+- [x] Header file with `-d`
+- [x] Description file with `-v`
+- [x] `-b` prefix option
+- [x] `-p` symbol prefix
+- [x] `-l` suppress line directives
+- [x] `-t` debug mode
 
 ### 14.5 Conflict Tests
-- [ ] Shift/reduce conflict resolution
-- [ ] Reduce/reduce conflict resolution
-- [ ] Precedence-based resolution
-- [ ] Conflict reporting
+- [x] Shift/reduce conflict resolution
+- [x] Reduce/reduce conflict resolution
+- [x] Precedence-based resolution
+- [x] Conflict reporting
 
 ### 14.6 Integration Tests
-- [ ] Calculator with variables
-- [ ] Expression parser
-- [ ] C-like grammar subset
-- [ ] Link with lex output
+- [x] Calculator with variables
+- [x] Expression parser
+- [x] C-like grammar subset
+- [x] Link with lex output

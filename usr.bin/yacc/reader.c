@@ -504,22 +504,49 @@ static void parse_declarations(void) {
                         if (t == IDENTIFIER) {
                             bp = lookup(token_buffer);
                             if (decl_type != TYPE) {
+                                if (decl_type == TYPE) {
+                                    /* unreachable */
+                                }
+                                if (bp->class == CLASS_NONTERM) {
+                                    fprintf(stderr,
+                                        "yacc: %s:%d: %s previously used as nonterminal\n",
+                                        infile_name ? infile_name : "<stdin>", lineno,
+                                        bp->name);
+                                    done(1);
+                                }
                                 bp->class = CLASS_TERM;
                             } else {
                                 if (bp->class == UNKNOWN) bp->class = CLASS_NONTERM;
                             }
-                            
-                            /* Set associativity based on saved directive type */
-                            if (decl_type == LEFT) bp->assoc = LEFT_ASSOC;
-                            else if (decl_type == RIGHT) bp->assoc = RIGHT_ASSOC;
+
+                            if (decl_type == LEFT)          bp->assoc = LEFT_ASSOC;
+                            else if (decl_type == RIGHT)    bp->assoc = RIGHT_ASSOC;
                             else if (decl_type == NONASSOC) bp->assoc = NON_ASSOC;
-                            else if (decl_type != TYPE) bp->assoc = NO_ASSOC;
-                            
-                            /* Set precedence for associativity declarations */
-                            if (decl_type != TERM && decl_type != TYPE) bp->prec = prec_level;
-                            
-                            /* Set type tag if present */
-                            if (current_tag) bp->tag = current_tag;
+                            else if (decl_type != TYPE)     bp->assoc = NO_ASSOC;
+
+                            if (decl_type != TERM && decl_type != TYPE)
+                                bp->prec = prec_level;
+
+                            if (current_tag) bp->tag = strdup(current_tag);
+
+                            /* Optional explicit numeric value: %token NAME 257 */
+                            if (decl_type != TYPE) {
+                                int peek;
+                                int val = 0;
+                                int ch;
+                                while ((peek = nextc()) != EOF &&
+                                       (peek == ' ' || peek == '\t'))
+                                    ;
+                                if (isdigit(peek)) {
+                                    val = peek - '0';
+                                    while (isdigit(ch = nextc()))
+                                        val = val * 10 + (ch - '0');
+                                    ungetc_char(ch);
+                                    bp->value = val;
+                                } else if (peek != EOF) {
+                                    ungetc_char(peek);
+                                }
+                            }
                         } else if (t == ',') {
                             continue;
                         } else {

@@ -1,7 +1,7 @@
 include ../Makefile.inc
 
 # Subdirectories for core libraries
-SUBDIRS = c m pthreads dl sys edit usb
+SUBDIRS = c m pthreads dl sys edit usb yacc
 
 .PHONY: all clean install $(SUBDIRS)
 
@@ -13,7 +13,7 @@ $(SUBDIRS):
 	@echo "<<< Leaving lib/$@"
 
 # Dependency ordering: libc must be built before other libraries.
-m pthreads dl sys edit usb: | c
+m pthreads dl sys edit usb yacc: | c
 
 clean:
 	@set -e; for dir in $(SUBDIRS); do \

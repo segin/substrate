@@ -47,6 +47,10 @@ void output(void) {
         output_token_defines(defines_file, 1);
         output_stype(defines_file);
         fprintf(defines_file, "extern YYSTYPE %slval;\n", symbol_prefix);
+        fprintf(defines_file, "extern int    %schar;\n",  symbol_prefix);
+        fprintf(defines_file, "extern int    %snerrs;\n", symbol_prefix);
+        fprintf(defines_file, "extern int    %serrflag;\n", symbol_prefix);
+        fprintf(defines_file, "int %sparse(void);\n", symbol_prefix);
         fprintf(defines_file, "\n#endif /* _y_tab_h_INCLUDED */\n");
     }
 }
