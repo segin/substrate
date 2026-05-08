@@ -626,11 +626,38 @@ void tty_flip_buffer_push_status(struct tty *tty, char c, uint32_t status) {
         if (c == tty->termios.c_cc[VINTR]) sig = SIGINT;
         else if (c == tty->termios.c_cc[VQUIT]) sig = SIGQUIT;
         else if (c == tty->termios.c_cc[VSUSP]) sig = SIGTSTP;
-        
+
         if (sig) {
             tty_echo(tty, (unsigned char)c);
             tty_start_locked(tty);
             if (tty->pgrp > 0) signal_send_group(tty->pgrp, sig);
+
+            /*
+             * After SIGTSTP, every member of the foreground pgrp is now
+             * stopped.  POSIX says the shell should tcsetpgrp(getpid())
+             * to reclaim the foreground, but if it never gets that far —
+             * because SIGTTOU isn't blocked, or job control isn't wired
+             * up at all — every subsequent ^C/^Z lands on the stopped
+             * pgrp and queues uselessly.  The user-visible symptom is
+             * "after ^Z, ^C does nothing".
+             *
+             * Pragmatically rebind the foreground pgrp to the session
+             * leader's pgrp when we deliver SIGTSTP so the keyboard stays
+             * usable.  `fg` (which calls tcsetpgrp on the stopped child's
+             * pgrp before SIGCONT) still works because tcsetpgrp simply
+             * overwrites tty->pgrp again.
+             *
+             * Only do this for SIGTSTP — SIGINT/SIGQUIT may be caught by
+             * the fg process, which then keeps running and should keep
+             * the foreground pgrp.
+             */
+            if (sig == SIGTSTP && tty->session > 0) {
+                struct session *sess = session_find(tty->session);
+                if (sess && sess->s_leader && sess->s_leader->p_pgrp) {
+                    tty->pgrp = sess->s_leader->p_pgrp->pg_id;
+                }
+            }
+
             TTY_UNLOCK(tty);
             return;
         }
@@ -1133,6 +1160,38 @@ int tty_ioctl(struct tty *tty, uint32_t cmd, unsigned long arg) {
     return ret;
 }
 
+/*
+ * tty_attach_first_opener_locked - claim an unclaimed tty for the opener.
+ *
+ * Until something claims a tty's foreground pgrp, ISIG keystrokes (^C/^Z/^\)
+ * are silently dropped by tty_flip_buffer_push because it gates on
+ * `tty->pgrp > 0`.  POSIX expects this claim to happen via TIOCSCTTY +
+ * tcsetpgrp, but in early-userspace boots and for ad-hoc redirections like
+ * `sh < /dev/tty3 > /dev/tty3 2>&1 &` no such call is ever made and ^Z is
+ * effectively a no-op on every VT past tty1.
+ *
+ * Mirror what early Unix and modern Linux do for first-opener: if the tty
+ * has no claimed session, the opener's session and pgrp become the tty's,
+ * and (only if the opener doesn't already have a ctty) the opener gets
+ * this tty as its controlling terminal.  Subsequent opens are no-ops here
+ * — TIOCSPGRP/TIOCSCTTY remain the canonical way to change ownership.
+ *
+ * Caller must hold tty->lock.
+ */
+static void tty_attach_first_opener_locked(struct tty *tty) {
+    process_t *p = current_process;
+
+    if (!tty || !p) return;
+    if (tty->session != 0) return;          /* already claimed */
+    if (!p->p_pgrp || !p->p_pgrp->pg_session) return;
+
+    tty->session = p->p_pgrp->pg_session->s_sid;
+    tty->pgrp    = p->p_pgrp->pg_id;
+    if (!p->tty) {
+        p->tty = tty;
+    }
+}
+
 int tty_open(struct tty *tty) {
     if (!tty_valid(tty)) return -EIO;
     for (;;) {
@@ -1147,6 +1206,7 @@ int tty_open(struct tty *tty) {
             !tty_driver_cb_valid((const void *)tty->driver->open)) {
             tty->count++;
             tty->driver_active = 1;
+            tty_attach_first_opener_locked(tty);
             TTY_UNLOCK(tty);
             return 0;
         }
@@ -1162,6 +1222,7 @@ int tty_open(struct tty *tty) {
             tty->lifecycle_busy = 0;
             if (ret == 0) {
                 tty->driver_active = 1;
+                tty_attach_first_opener_locked(tty);
                 TTY_UNLOCK(tty);
                 return 0;
             }
