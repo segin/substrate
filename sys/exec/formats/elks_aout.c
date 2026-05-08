@@ -115,6 +115,22 @@ static int elks_map_object_pages(vm_map_t *map, pmap_t pmap, uint32_t start,
         }
 
         vm_object_add_page(obj, page);
+
+        /*
+         * The kernel direct map only covers the first ~1 GiB of physical
+         * memory (PMAP_BOOTSTRAP_DIRECT_PTES * 4 MiB).  Above that,
+         * `phys_addr + 0xC0000000` either points outside the direct map or,
+         * for phys >= 0x40000000, wraps past UINT32_MAX into user-space
+         * virtual addresses — and the subsequent memset takes a kernel
+         * page fault.  We have no on-demand kmap path here, so refuse
+         * out-of-range physical pages rather than corrupt user memory.
+         *
+         * The plumb-through fix is for vm_page_alloc to grow a "low memory"
+         * variant; for now bail and the caller can retry / fail exec.
+         */
+        if (page->phys_addr >= 0x3EC00000U) {
+            return -ENOMEM;
+        }
         page_kva = (void *)(uintptr_t)(page->phys_addr + 0xC0000000U);
         memset(page_kva, 0, 0x1000U);
 
