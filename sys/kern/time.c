@@ -13,6 +13,7 @@
 #include <kern/sched.h>
 #include <pm/pm.h>
 #include <arch/i386/percpu.h>
+#include <arch/i386/intr.h>
 #include <arch/x86-common/io.h>
 #include <drivers/storage/floppy/floppy.h>
 #include <drivers/video/fb_console.h>
@@ -111,7 +112,17 @@ static int proc_timer_fire(process_t *p, int which) {
         return 0;
     }
 
-    spinlock_acquire(&p->itimer_lock);
+    /*
+     * Called from timer IRQ context.  If the syscall path on the SAME CPU
+     * (e.g. proc_exit -> proc_timers_cancel, sys_setitimer) is mid-update
+     * and holds itimer_lock, our blocking acquire would deadlock — the
+     * spinlock detects same-CPU re-entry and panics.  Use try_acquire and
+     * skip this tick; the next tick will pick the timer up cleanly because
+     * itimer_value_ticks/interval are not stale across that single skip.
+     */
+    if (!spinlock_try_acquire(&p->itimer_lock)) {
+        return 0;
+    }
     if (p->itimer_value_ticks[idx] > 0) {
         p->itimer_value_ticks[idx]--;
         if (p->itimer_value_ticks[idx] == 0) {
@@ -140,13 +151,20 @@ void proc_timers_init(process_t *p) {
 }
 
 void proc_timers_cancel(process_t *p) {
+    uint32_t flags;
+
     if (!p) {
         return;
     }
+    /* Disable IRQs so the timer ISR on the same CPU cannot try to acquire
+     * itimer_lock while we hold it (the spinlock would detect same-CPU
+     * re-entry and panic).  Same rationale for sys_setitimer/getitimer. */
+    flags = intr_disable();
     spinlock_acquire(&p->itimer_lock);
     memset(p->itimer_value_ticks, 0, sizeof(p->itimer_value_ticks));
     memset(p->itimer_interval_ticks, 0, sizeof(p->itimer_interval_ticks));
     spinlock_release(&p->itimer_lock);
+    intr_restore(flags);
 }
 
 void timer_init(void) {
@@ -273,19 +291,23 @@ unsigned int kern_alarm(unsigned int sec) {
 
 int kern_getitimer(int which, struct itimerval *curr_value) {
     int idx = proc_itimer_index(which);
+    uint32_t flags;
 
     if (!current_process || !curr_value || idx < 0) {
         return -EINVAL;
     }
 
+    flags = intr_disable();
     spinlock_acquire(&current_process->itimer_lock);
     proc_getitimer_locked(current_process, idx, curr_value);
     spinlock_release(&current_process->itimer_lock);
+    intr_restore(flags);
     return 0;
 }
 
 int kern_setitimer(int which, const struct itimerval *new_value, struct itimerval *old_value) {
     int idx = proc_itimer_index(which);
+    uint32_t flags;
 
     if (!current_process || !new_value || idx < 0) {
         return -EINVAL;
@@ -294,6 +316,7 @@ int kern_setitimer(int which, const struct itimerval *new_value, struct itimerva
         return -EINVAL;
     }
 
+    flags = intr_disable();
     spinlock_acquire(&current_process->itimer_lock);
     if (old_value) {
         proc_getitimer_locked(current_process, idx, old_value);
@@ -301,6 +324,7 @@ int kern_setitimer(int which, const struct itimerval *new_value, struct itimerva
     current_process->itimer_interval_ticks[idx] = timeval_to_ticks(&new_value->it_interval);
     current_process->itimer_value_ticks[idx] = timeval_to_ticks(&new_value->it_value);
     spinlock_release(&current_process->itimer_lock);
+    intr_restore(flags);
     return 0;
 }
 
