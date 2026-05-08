@@ -952,11 +952,14 @@
                 - [ ] Define Subsystem ID for Substrate (e.g., in `sys/pe.h`). (REQ: REQ-05-0658)
                 - [ ] **Native Syscalls:** Thunks for syscall instruction directly in PE text. (REQ: REQ-05-0659)
                 - [ ] **Relocations:** Full `.reloc` processing (Base Relocations) for ASLR/PIC. (REQ: REQ-05-0660)
-        - [ ] **a.out Loader (Legacy/Multi-OS):** (REQ: REQ-05-0661)
-             > See [docs/aout_loader_spec.md](docs/aout_loader_spec.md) for implementation specs.
-            - [ ] **Legacy a.out:** Implement `exec_aout` for OMAGIC/QMAGIC/ZMAGIC binaries. (REQ: REQ-05-0662)
-            - [ ] **Unified a.out Loader:** Create a common `exec_aout` loader for 32-bit `a.out` (Linux/BSD/Minix) that dispatches based on machine ID/magic. (REQ: REQ-05-0663)
-            - [ ] **SunOS 4.0.x (Sun386i):** Support Sun386i `a.out` format and personality. (REQ: REQ-05-0664)
+        - [/] **a.out Loader (Legacy/Multi-OS):** (REQ: REQ-05-0661)
+             > See [docs/specs/aout_loader_spec.md](../specs/aout_loader_spec.md) for implementation specs.
+            - [/] **Legacy a.out:** Implement `exec_aout` for OMAGIC/QMAGIC/ZMAGIC binaries. (REQ: REQ-05-0662)
+              <!-- Header parse + structural validation done; segment mapping + relocation pending. -->
+            - [x] **Unified a.out Loader:** Create a common `exec_aout` loader for 32-bit `a.out` (Linux/BSD/Minix) that dispatches based on machine ID/magic. (REQ: REQ-05-0663)
+            - [/] **SunOS 4.0.x (Sun386i):** Support Sun386i `a.out` format and personality. (REQ: REQ-05-0664)
+              <!-- Classifier recognises MID 151; personality wiring + segment loading still TODO. -->
+        
         - [x] **Personality / Migration:** (REQ: REQ-05-0665)
             - [x] **Syscall Translation:** Remap foreign syscall numbers to native. (REQ: REQ-05-0666)
             - [x] **Errno Translation:** Remap error codes. (REQ: REQ-05-0667)

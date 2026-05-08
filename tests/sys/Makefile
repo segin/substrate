@@ -20,7 +20,8 @@ OBJS = $(SRCS:.c=.o)
 # rather than appending to a mega-line so diffs stay reviewable.
 
 # Exec / binary loaders
-HOST_TESTS  = host_test_coff_aouthdr
+HOST_TESTS  = host_test_aout
+HOST_TESTS += host_test_coff_aouthdr
 HOST_TESTS += host_test_elf_execve_toctou
 HOST_TESTS += host_test_exec_init
 HOST_TESTS += host_test_access
@@ -262,6 +263,9 @@ host_test_elks_aout: host_test_elks_aout.c
 
 host_test_coff_aouthdr: host_test_coff_aouthdr.c
 	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_coff_aouthdr.c ../../sys/exec/formats/coff.c -o $@
+
+host_test_aout: host_test_aout.c
+	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_aout.c ../../sys/exec/formats/aout.c -o $@
 
 host_test_itimer: host_test_itimer.c
 	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_itimer.c -o $@
