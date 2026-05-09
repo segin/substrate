@@ -778,10 +778,33 @@ uint32_t elf_load(fs_node_t *file, uint32_t load_base, int is_main_image,
             }
 
             kfree(page_maps, segment_pages * sizeof(*page_maps));
-            
+
             // BSS is already zeroed since we memset each page
-            
+
             if (va_end > max_vaddr) max_vaddr = va_end;
+
+            /*
+             * Reserve this range in the vm_map so vm_map_find_space() (used
+             * by anonymous mmap) won't hand it out to a later allocator and
+             * silently overlay our pre-populated .data/.got pages with a
+             * zero-fill anonymous vm_object.  We pmap_enter()'ed real pages
+             * above; the vm_map entry is just a *reservation* (NULL obj) so
+             * that the holes tree learns the range is occupied.  The pages
+             * stay valid through the existing pmap mappings; vm_fault on a
+             * NULL-obj entry returns ERROR so we never accidentally re-fault
+             * and clobber the file content with zeros.
+             */
+            if (current_process && current_process->vm_map) {
+                int rc = vm_map_insert(current_process->vm_map, NULL, 0,
+                                       va_start, va_end,
+                                       (uint8_t)prot,
+                                       (uint8_t)VM_PROT_ALL,
+                                       VM_INHERIT_COPY);
+                if (rc != 0 && trace_elf) {
+                    kprintf("ELF: vm_map_insert reservation failed for [0x%08x,0x%08x)\n",
+                            va_start, va_end);
+                }
+            }
         }
     }
     
