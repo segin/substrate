@@ -129,6 +129,13 @@
 #define NETBSD_SYS_stat           188
 #define NETBSD_SYS_fstat          189
 #define NETBSD_SYS_lstat          190
+/* NetBSD 6+ wide-stat (sys_50_*) variants — 64-bit ino_t, embedded
+ * struct timespec timestamps, st_birthtim.  These are what ld.elf_so
+ * actually calls today; without them every dlopen() / library load
+ * fails with "not found" the moment rtld can't fstat the candidate. */
+#define NETBSD_SYS_stat50         439
+#define NETBSD_SYS_fstat50        440
+#define NETBSD_SYS_lstat50        441
 #define NETBSD_SYS_nanosleep      196
 /* Modern mmap with `long PAD` between fd and pos to align off_t.
  * Signature: void *mmap(void*, size_t, int, int, int, long pad, off_t pos). */

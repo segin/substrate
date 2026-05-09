@@ -108,6 +108,71 @@ int netbsd_sys_fstat(int fd, struct netbsd_stat *buf) {
     return ret;
 }
 
+/* NetBSD 6+ "wide" stat translator — fills the 124-byte struct
+ * netbsd_stat50 layout with 64-bit ino_t/dev_t and 12-byte timespecs. */
+static void translate_stat_to_netbsd50(const struct stat *native,
+                                       struct netbsd_stat50 *nbsd) {
+    memset(nbsd, 0, sizeof(*nbsd));
+    nbsd->st_dev   = native->st_dev;
+    nbsd->st_mode  = native->st_mode;
+    nbsd->st_ino   = native->st_ino;
+    nbsd->st_nlink = native->st_nlink;
+    nbsd->st_uid   = native->st_uid;
+    nbsd->st_gid   = native->st_gid;
+    nbsd->st_rdev  = native->st_rdev;
+    nbsd->st_atim.tv_sec  = native->st_atime;
+    nbsd->st_atim.tv_nsec = (int32_t)native->st_atime_nsec;
+    nbsd->st_mtim.tv_sec  = native->st_mtime;
+    nbsd->st_mtim.tv_nsec = (int32_t)native->st_mtime_nsec;
+    nbsd->st_ctim.tv_sec  = native->st_ctime;
+    nbsd->st_ctim.tv_nsec = (int32_t)native->st_ctime_nsec;
+    /* No native birthtime — mirror ctime, the closest analogue. */
+    nbsd->st_birthtim.tv_sec  = native->st_ctime;
+    nbsd->st_birthtim.tv_nsec = (int32_t)native->st_ctime_nsec;
+    nbsd->st_size    = native->st_size;
+    nbsd->st_blocks  = native->st_blocks;
+    nbsd->st_blksize = native->st_blksize;
+    nbsd->st_flags   = 0;
+    nbsd->st_gen     = 0;
+}
+
+int netbsd_sys_stat50(const char *path, struct netbsd_stat50 *buf) {
+    char kpath[256];
+    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -14;
+    struct stat native;
+    int ret = kern_stat(kpath, &native);
+    if (ret == 0) {
+        struct netbsd_stat50 knbsd;
+        translate_stat_to_netbsd50(&native, &knbsd);
+        if (copyout(&knbsd, buf, sizeof(knbsd)) != 0) return -14;
+    }
+    return ret;
+}
+
+int netbsd_sys_lstat50(const char *path, struct netbsd_stat50 *buf) {
+    char kpath[256];
+    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -14;
+    struct stat native;
+    int ret = kern_lstat(kpath, &native);
+    if (ret == 0) {
+        struct netbsd_stat50 knbsd;
+        translate_stat_to_netbsd50(&native, &knbsd);
+        if (copyout(&knbsd, buf, sizeof(knbsd)) != 0) return -14;
+    }
+    return ret;
+}
+
+int netbsd_sys_fstat50(int fd, struct netbsd_stat50 *buf) {
+    struct stat native;
+    int ret = kern_fstat(fd, &native);
+    if (ret == 0) {
+        struct netbsd_stat50 knbsd;
+        translate_stat_to_netbsd50(&native, &knbsd);
+        if (copyout(&knbsd, buf, sizeof(knbsd)) != 0) return -14;
+    }
+    return ret;
+}
+
 int netbsd_sys_compat_stat(const char *path, struct netbsd_stat43 *buf) {
     char kpath[256];
     if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -14; // EFAULT
