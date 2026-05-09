@@ -152,7 +152,14 @@
  * Signature: void *mmap(void*, size_t, int, int, int, long pad, off_t pos). */
 #define NETBSD_SYS_mmap           197
 #define NETBSD_SYS_poll           209
-#define NETBSD_SYS_getcwd         326
+/* NetBSD 6+ assigns __getcwd at syscall 296 (verified against
+ * NetBSD 10.1 libc.so.12.220.1: `mov $0x128,%eax; int $0x80`).
+ * Older docs and some NetBSD branches put it at 326, which is
+ * what we previously had — every dlopen-using NetBSD binary
+ * therefore landed in libc's userland-traversal fallback, which
+ * fails on Substrate (we lack a working ".." readdir from the
+ * root) and reports getcwd "Operation not permitted". */
+#define NETBSD_SYS_getcwd         296
 #define NETBSD_SYS_getdents       340
 
 /* chown/chmod family.  NetBSD numbers fchown/fchmod identically to FreeBSD
