@@ -185,9 +185,29 @@ int netbsd_sys_fchownat(int dirfd, const char *path, int uid, int gid, int flag)
  * Signature per NetBSD's syscalls.master line 438:
  *   void *mmap(void *addr, size_t len, int prot, int flags,
  *              int fd, long pad, off_t pos);
+ *
+ * NetBSD MAP_* flag values diverge from Substrate's (Linux-style)
+ * native values most importantly for MAP_ANON: NetBSD uses 0x1000,
+ * Substrate uses 0x020.  Without translation our sys_mmap saw fd=-1
+ * without MAP_ANONYMOUS set and refused with EPERM ("Cannot map
+ * anonymous memory").  Translate the bits that differ; MAP_SHARED /
+ * MAP_PRIVATE / MAP_FIXED match by accident at 0x001/0x002/0x010.
  */
+#define NETBSD_MAP_ANON     0x1000
+#define NETBSD_MAP_STACK    0x2000
+#define KERN_MAP_ANONYMOUS  0x020
+#define KERN_MAP_FIXED      0x010
+#define KERN_MAP_PRIVATE    0x002
+#define KERN_MAP_SHARED     0x001
 void *netbsd_sys_mmap(void *addr, size_t len, int prot, int flags,
                       int fd, long pad, uint64_t pos) {
     (void)pad;
-    return sys_mmap(addr, len, prot, flags, fd, pos);
+    int kflags = flags & (KERN_MAP_SHARED | KERN_MAP_PRIVATE | KERN_MAP_FIXED);
+    if (flags & NETBSD_MAP_ANON)
+        kflags |= KERN_MAP_ANONYMOUS;
+    /* NetBSD MAP_STACK is mostly advisory (the kernel allocates a
+     * grow-down region).  Closest fit: anonymous private mapping. */
+    if (flags & NETBSD_MAP_STACK)
+        kflags |= KERN_MAP_PRIVATE | KERN_MAP_ANONYMOUS;
+    return sys_mmap(addr, len, prot, kflags, fd, pos);
 }
