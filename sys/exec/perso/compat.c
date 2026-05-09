@@ -700,10 +700,31 @@ int freebsd_sys_sysctl(int *name, unsigned int namelen, void *oldp, size_t *oldl
         }
     }
     if (kname[0] == 1 && namelen >= 2) { /* CTL_KERN */
-        if (kname[1] == 4) { /* KERN_OSRELDATE */
+        /* FreeBSD CTL_KERN MIB indices (sys/sysctl.h):
+         *   KERN_OSRELDATE = 24, NOT 4 (which is KERN_VERSION, a string).
+         * We previously matched 4, returning the OSRELDATE int into a
+         * caller expecting a string — the symptom was libc's
+         * __getosreldate() failing, which steered _getdirentries into
+         * the COMPAT11 (32-bit-inode) syscall path.  ls then read
+         * directories via libc's __cvt_dirents_from11, and a converter
+         * mismatch with our freebsd11_getdirentries layout chopped the
+         * first 4 bytes off every filename. */
+        if (kname[1] == 24) { /* KERN_OSRELDATE */
             int val = 1403000;
             if (oldlenp) { size_t want = sizeof(int); copyout(&want, oldlenp, sizeof(size_t)); }
             if (oldp) return copyout(&val, oldp, sizeof(int));
+            return 0;
+        }
+        if (kname[1] == 37) { /* KERN_ARND - secure random bytes */
+            extern int random_get_bytes_flags(void *, size_t, unsigned int);
+            size_t want = 0;
+            if (oldlenp && copyin(oldlenp, &want, sizeof(size_t)) != 0) return -EFAULT;
+            if (want == 0 || want > 4096) return -EINVAL;
+            uint8_t kbuf[256];
+            if (want > sizeof(kbuf)) want = sizeof(kbuf);
+            if (random_get_bytes_flags(kbuf, want, 0x4 /*GRND_INSECURE*/) != (int)want) return -EIO;
+            if (oldp && copyout(kbuf, oldp, want) != 0) return -EFAULT;
+            if (oldlenp && copyout(&want, oldlenp, sizeof(size_t)) != 0) return -EFAULT;
             return 0;
         }
     }
