@@ -4,6 +4,7 @@
 #include <arch/i386/pmm.h>
 #include <arch/x86-common/lapic.h>
 #include <vm/vm_page.h>
+#include <vm/vm_object.h>
 #include <vm/phys_mem.h>
 #include <kern/panic.h>
 #include <kern/console.h>
@@ -1968,7 +1969,24 @@ int pmap_fault(uint32_t err_code, uint32_t cr2) {
         // can just upgrade permissions.  ref_count==2 here means alloc
         // + this pmap's pmap_enter hold; no second mapper.  (ref_count>2
         // means there are still other mappers: must copy.)
-        if (page_old->ref_count <= 2) {
+        //
+        // CRITICAL: only safe for ANONYMOUS (private to this process)
+        // pages.  If page_old is owned by a file-backed shared vm_object
+        // (VNODE/DEVICE) — typically the shared backing for a MAP_PRIVATE
+        // file mapping that lives in the global mmap_get_shared_backing
+        // cache — refcount can transiently sit at 2 even though every
+        // future mmap of the same file will hand out the same vm_object
+        // and resolve faults to the same page.  Upgrading the PTE in
+        // place would let the user write through to the cached backing,
+        // and the next process to load the same .text/.rodata page would
+        // see the modification (mid-instruction landings, garbage phdr
+        // pointers, leaked kernel addresses in user registers — anything
+        // that depended on the file content being intact).  Always copy
+        // for non-anonymous owners.
+        int single_mapper_safe = (page_old->ref_count <= 2) &&
+            (page_old->object == NULL ||
+             page_old->object->type == VM_OBJ_TYPE_DEFAULT);
+        if (single_mapper_safe) {
              // Free the unused new page we allocated up front.
              vm_page_free(pmm_get_page((uintptr_t)phys_new));
 
