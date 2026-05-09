@@ -142,11 +142,22 @@ static void *freebsd_syscalls[MAX_SYSCALLS] = {
     [FREEBSD_SYS_accept4]  = &sys_accept4,
     [FREEBSD_SYS_ppoll]    = &sys_ppoll,
     [FREEBSD_SYS_fdatasync] = &sys_fdatasync,
-    [FREEBSD_SYS_fstat_freebsd13] = (void *)&freebsd_sys_fstat_v11,
+    /*
+     * Syscall 551 is FreeBSD's modern fstat (post-COMPAT_FREEBSD11 cutover);
+     * userland writes its result into a `struct stat` whose i386-FreeBSD-14
+     * layout matches our `struct freebsd13_stat` (8-byte inodes, 12-byte
+     * timespecs with `_ext` prefix fields, st_size at offset 112).  Wiring
+     * this to freebsd_sys_fstat_v11 silently writes the *narrow* layout
+     * (32-bit inode, 8-byte timespecs) — every offset past st_atim shifts,
+     * st_size is read from where the kernel wrote st_blksize, ld-elf sees
+     * a tiny/zero size and bails with "invalid file format".  Use v13.
+     */
+    [FREEBSD_SYS_fstat_freebsd13] = (void *)&freebsd_sys_fstat_v13,
     [FREEBSD_SYS_getrandom] = &sys_getrandom,
     [FREEBSD_SYS_sysctlbyname] = &sys_sysctlbyname,
     [FREEBSD_SYS_fstatat]   = (void *)&freebsd_sys_fstatat_v11,  /* 493: COMPAT11 freebsd11_stat */
-    [FREEBSD_SYS_fstatat_modern] = (void *)&freebsd_sys_fstatat_v11,
+    /* Syscall 552 is the modern fstatat — same st_size-shift bug as 551. */
+    [FREEBSD_SYS_fstatat_modern] = (void *)&freebsd_sys_fstatat,
     [FREEBSD_SYS_freebsd11_getdirentries] = (void *)&freebsd_sys_getdirentries_v11,
     [FREEBSD_SYS_openat]    = (void *)&freebsd_sys_openat,
     [FREEBSD_SYS_getdirentries_freebsd13] = (void *)&freebsd_sys_getdirentries_v11,
