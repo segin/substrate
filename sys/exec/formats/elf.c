@@ -1470,26 +1470,17 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
          * ELKS/private-LDT execution context across exec.
          */
         ldt_free_process(current_process);
-        /*
-         * vm_map was already swapped earlier so elf_load could use it.
-         * Drop the old vm_map *inline* — the function exits via
-         * __builtin_unreachable() on success and never reaches the
-         * cleanup label, so deferring the free to cleanup leaks the
-         * old vm_map across every exec (visible as ~1 MB per exec
-         * eaten out of free memory).  Null the saved pointer so a
-         * post-commit failure that does goto cleanup doesn't try to
-         * double-free.
-         */
-        if (old_vm_map) {
-            vm_map_destroy(old_vm_map);
-            old_vm_map = NULL;
-        }
-        vm_state_committed = 1;
     }
 
     // Set up kernel stack for this process in TSS
     set_kernel_stack((uint32_t)current_thread->kstack_top);
 
+    /*
+     * exec_setup_stack writes user pages in the *new* pmap; on failure we
+     * still want to be able to roll back to the old vm_map/pmap, so keep
+     * old_vm_map alive across this call.  vm_state_committed only flips
+     * once we've passed the point of no return.
+     */
     uint32_t sp;
     uint32_t ps_strings_user = 0;
     if (exec_setup_stack(new_pmap, &sp, k_argv, argc, k_envp, envc,
@@ -1497,6 +1488,21 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
                          &ps_strings_user) < 0) {
         goto cleanup;
     }
+
+    /*
+     * Past this point we are committed: the image is loaded, the user
+     * stack is built, and we will jump to userspace.  Drop the old
+     * vm_map *inline* — the success path exits via jump_to_userspace
+     * which never reaches the cleanup label, so destroying old_vm_map
+     * here is the only place we can do it without leaking ~1 MB per
+     * exec.  Null the saved pointer so a post-commit failure that does
+     * goto cleanup does not try to double-free.
+     */
+    if (old_vm_map) {
+        vm_map_destroy(old_vm_map);
+        old_vm_map = NULL;
+    }
+    vm_state_committed = 1;
 
     char hexbuf[16];
     uint32_t val;
