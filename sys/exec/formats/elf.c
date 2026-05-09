@@ -8,6 +8,8 @@
 #include <vm/vm_map.h>
 #include <vm/vm_object.h>
 #include <vm/vm_kmem.h>
+#include <vm/vm_page.h>
+#include <vm/phys_mem.h>
 #include <exec/perso/personality.h>
 #include <exec/perso/linux/linux_exec.h>
 #include <sys/exec.h>
@@ -680,6 +682,15 @@ uint32_t elf_load(fs_node_t *file, uint32_t load_base, int is_main_image,
             // Legacy path: per-process anonymous pages + manual file copy.
             // Used for segments with BSS overflow (filesz != memsz), or
             // when the vm_map isn't available.
+            //
+            // We allocate an anonymous vm_object to *own* the populated
+            // pages so that vm_map_destroy() / process exit will free them.
+            // Pre-populating via pmap_enter alone (without an owning
+            // vm_object) leaks the pages on exit AND leaves the address
+            // range marked as free in the holes tree so that a later
+            // anonymous mmap() can vm_map_find_space() right on top of our
+            // .got/.data pages and (on first user touch) page-fault them
+            // with zeros — silently corrupting the binary.
             uint32_t segment_pages = (va_end - va_start) / 0x1000;
             elf_page_map_t *page_maps;
             int num_pages = 0;
@@ -691,6 +702,18 @@ uint32_t elf_load(fs_node_t *file, uint32_t load_base, int is_main_image,
                 return 0;
             }
 
+            vm_object_t *seg_obj = NULL;
+            int seg_obj_inserted = 0;
+            if (current_process && current_process->vm_map) {
+                seg_obj = vm_object_allocate(VM_OBJ_TYPE_DEFAULT,
+                                             (size_t)(va_end - va_start));
+                if (!seg_obj) {
+                    kprint("ELF: Failed to allocate segment vm_object\n");
+                    kfree(page_maps, segment_pages * sizeof(*page_maps));
+                    kfree(image, sizeof(*image));
+                    return 0;
+                }
+            }
 
             for (uint32_t va = va_start; va < va_end; va += 0x1000) {
                 // Allocate physical page
@@ -702,11 +725,12 @@ uint32_t elf_load(fs_node_t *file, uint32_t load_base, int is_main_image,
                         pmap_remove(pmap, page_maps[pi].va);
                         pmm_free_block(page_maps[pi].pa);
                     }
+                    if (seg_obj) vm_object_deallocate(seg_obj);
                     kfree(page_maps, segment_pages * sizeof(*page_maps));
                     kfree(image, sizeof(*image));
                     return 0;
                 }
-                
+
                 // Map with permissions from segment header
                 // pmap_enter expects physical address, convert virtual to physical
                 uint32_t pa_phys = (uint32_t)(uintptr_t)pa - 0xC0000000;
@@ -717,21 +741,35 @@ uint32_t elf_load(fs_node_t *file, uint32_t load_base, int is_main_image,
                         pmap_remove(pmap, page_maps[pi].va);
                         pmm_free_block(page_maps[pi].pa);
                     }
+                    if (seg_obj) vm_object_deallocate(seg_obj);
                     kfree(page_maps, segment_pages * sizeof(*page_maps));
                     kfree(image, sizeof(*image));
                     return 0;
                 }
-                
+
+                /* Hand the underlying physical page to the segment's
+                 * vm_object so process teardown frees it.  pmm_alloc_block
+                 * already came from vm_phys_alloc_page_below, so the
+                 * vm_page_t for this paddr exists in the global page array
+                 * — we just relink it to seg_obj. */
+                if (seg_obj) {
+                    vm_page_t *vp = vm_phys_paddr_to_page(pa_phys);
+                    if (vp) {
+                        uint64_t pindex = (uint64_t)((va - va_start) / 0x1000);
+                        vm_page_insert(vp, seg_obj, pindex);
+                    }
+                }
+
                 // Save mapping for later access via kernel space
                 page_maps[num_pages].va = va;
                 page_maps[num_pages].pa = pa;
                 num_pages++;
-                
+
                 // Zero the page - pa is already virtual from pmm_alloc_block
                 memset(pa, 0, 0x1000);
             }
-            
-            
+
+
             // Now copy file data to the mapped segment via kernel space
             // We need to translate user VA to kernel VA via the physical address
             // Simple approach: read directly from the file into the mapped kernel pages
@@ -741,22 +779,22 @@ uint32_t elf_load(fs_node_t *file, uint32_t load_base, int is_main_image,
                     uint32_t page_va = page_maps[pi].va;
                     uint32_t segment_va = phdr.p_vaddr + load_base;
 
-                    
+
                     // Does this page overlap with the segment?
                     uint32_t page_end = page_va + 0x1000;
                     uint32_t segment_end = segment_va + phdr.p_filesz;
-                    
+
                     if (page_va < segment_end && page_end > segment_va) {
                         // Calculate overlap
                         uint32_t copy_start_va = (page_va > segment_va) ? page_va : segment_va;
                         uint32_t copy_end_va = (page_end < segment_end) ? page_end : segment_end;
                         uint32_t copy_size = copy_end_va - copy_start_va;
-                        
+
                         // Offset into page
                         uint32_t offset_in_page = copy_start_va - page_va;
                         // Offset into segment data
                         uint32_t offset_in_segment = copy_start_va - segment_va;
-                        
+
                         // Read directly to kernel-mapped page (pa is already virtual)
                         uint8_t *dest = (uint8_t *)page_maps[pi].pa + offset_in_page;
                         /* p_offset+p_filesz was already overflow-checked
@@ -768,6 +806,7 @@ uint32_t elf_load(fs_node_t *file, uint32_t load_base, int is_main_image,
                                 pmap_remove(pmap, page_maps[ri].va);
                                 pmm_free_block(page_maps[ri].pa);
                             }
+                            if (seg_obj && !seg_obj_inserted) vm_object_deallocate(seg_obj);
                             kfree(page_maps, segment_pages * sizeof(*page_maps));
                             kfree(image, sizeof(*image));
                             return 0;
@@ -784,25 +823,31 @@ uint32_t elf_load(fs_node_t *file, uint32_t load_base, int is_main_image,
             if (va_end > max_vaddr) max_vaddr = va_end;
 
             /*
-             * Reserve this range in the vm_map so vm_map_find_space() (used
-             * by anonymous mmap) won't hand it out to a later allocator and
-             * silently overlay our pre-populated .data/.got pages with a
-             * zero-fill anonymous vm_object.  We pmap_enter()'ed real pages
-             * above; the vm_map entry is just a *reservation* (NULL obj) so
-             * that the holes tree learns the range is occupied.  The pages
-             * stay valid through the existing pmap mappings; vm_fault on a
-             * NULL-obj entry returns ERROR so we never accidentally re-fault
-             * and clobber the file content with zeros.
+             * Insert the populated vm_object into the vm_map.  This both
+             * reserves the address range against vm_map_find_space() (so
+             * later anonymous mmaps don't overlay the binary's .got/.data)
+             * AND ties the underlying physical pages to the process so
+             * that vm_map_destroy() at exit reclaims them.  The vm_fault
+             * path will treat the pages as already-resident (each is on
+             * seg_obj->pages with the right pindex) and won't re-page
+             * them with zeros even on a spurious fault.
              */
-            if (current_process && current_process->vm_map) {
-                int rc = vm_map_insert(current_process->vm_map, NULL, 0,
+            if (seg_obj) {
+                int rc = vm_map_insert(current_process->vm_map, seg_obj, 0,
                                        va_start, va_end,
                                        (uint8_t)prot,
                                        (uint8_t)VM_PROT_ALL,
                                        VM_INHERIT_COPY);
-                if (rc != 0 && trace_elf) {
-                    kprintf("ELF: vm_map_insert reservation failed for [0x%08x,0x%08x)\n",
-                            va_start, va_end);
+                if (rc == 0) {
+                    seg_obj_inserted = 1;
+                } else {
+                    if (trace_elf) {
+                        kprintf("ELF: vm_map_insert failed for [0x%08x,0x%08x); leaking pages until exit\n",
+                                va_start, va_end);
+                    }
+                    /* Last-resort: drop the object reference; vm_object_deallocate
+                     * will free the pages we just inserted into it. */
+                    vm_object_deallocate(seg_obj);
                 }
             }
         }
