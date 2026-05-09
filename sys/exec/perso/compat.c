@@ -285,6 +285,31 @@ int sys_madvise(void *addr, size_t len, int behav) {
 }
 
 /*
+ * sys_minherit - Set inheritance attribute for a memory region.
+ *
+ * BSD minherit(2): controls whether a memory region survives across fork.
+ * INHERIT_SHARE/INHERIT_COPY/INHERIT_NONE/INHERIT_ZERO.
+ *
+ * FreeBSD libc's arc4random_buf helper calls this to mark its random pool
+ * as MAP_INHERIT_NONE so that a fork() child does not see the same RNG
+ * state as the parent.  When the syscall returned -ENOSYS the helper hit
+ * `cmp $-1, %eax; je abort_path` and called abort() — visibly killing
+ * every dynamically-linked FreeBSD binary that touched arc4random in
+ * libc init (which includes anything calling __libc_setup_tls /
+ * __guard_setup → secure RNG setup).
+ *
+ * Stub: accept any inheritance value and return 0.  We don't honor
+ * INHERIT_NONE yet — fork() inherits everything via vm_map_copy().  The
+ * worst-case is that an arc4random child shares its parent's seed state
+ * for one fork; a future enhancement can record the inheritance flag
+ * per-vm_map_entry and have vm_map_copy() honor it.
+ */
+int sys_minherit(void *addr, size_t len, int inherit) {
+    (void)addr; (void)len; (void)inherit;
+    return 0;
+}
+
+/*
  * sys_getrlimit / sys_setrlimit - resource limit stubs
  * Return RLIM_INFINITY for all limits; setrlimit is a no-op.
  */

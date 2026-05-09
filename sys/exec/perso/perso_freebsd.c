@@ -73,6 +73,7 @@ static void *freebsd_syscalls[MAX_SYSCALLS] = {
     [FREEBSD_SYS_munmap]   = &sys_munmap,
     [FREEBSD_SYS_mprotect] = &sys_mprotect,
     [FREEBSD_SYS_madvise]  = &sys_madvise,
+    [FREEBSD_SYS_minherit] = (void *)&sys_minherit,
     [FREEBSD_SYS_mincore]  = NULL,
     [FREEBSD_SYS_getgroups] = &sys_getgroups,
     [FREEBSD_SYS_setgroups] = &sys_setgroups,

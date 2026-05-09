@@ -187,6 +187,7 @@ extern int freebsd_sys_uname(void*);
 /* FreeBSD personality stubs */
 extern int sys_profil(void*, unsigned int, unsigned int, unsigned int);
 extern int sys_madvise(void*, size_t, int);
+extern int sys_minherit(void*, size_t, int);
 extern int sys_getrlimit(int, void*);
 extern int sys_setrlimit(int, const void*);
 extern int sys_issetugid(void);
