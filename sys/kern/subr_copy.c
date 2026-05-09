@@ -51,26 +51,41 @@ int copyout(const void *src, void *dst, size_t size) {
         return EFAULT;
     }
 
-    /* Set up fault handler */
-    current_thread->on_fault = (uintptr_t)&&fault;
-
-    /* Perform copy using inline assembly (rep movsb) */
-    /* If a page fault occurs, the IDT handler will redirect us to 'fault' */
+    /*
+     * The fault recovery target lives inside the asm block so the
+     * compiler cannot fold its address back into the success path
+     * (when the only difference is the return value, GCC will happily
+     * place `fault:` at the same instruction as the post-validate code,
+     * making the trap handler resume into a re-arm of on_fault and
+     * a re-execution of rep movsb — instant kernel hang).
+     *
+     * The asm sets on_fault, runs rep movsb, then clears on_fault.
+     * On fault, the IDT handler jumps eip to 1f, which falls through
+     * to clearing on_fault and setting result = EFAULT.  The dual-exit
+     * is encoded entirely in the asm so there is no C-level dead code
+     * for the optimiser to fold.
+     */
+    int result;
     __asm__ volatile (
-        "cld; rep movsb"
-        : "+S"(src), "+D"(dst), "+c"(size)
-        :
+        /* Set on_fault = label 1f */
+        "movl $1f, (%[on_fault])\n\t"
+        "cld\n\t"
+        "rep movsb\n\t"
+        /* Success: clear on_fault, result = 0, jump past fault path */
+        "movl $0, (%[on_fault])\n\t"
+        "xorl %[result], %[result]\n\t"
+        "jmp 2f\n"
+        "1:\n\t"
+        /* Fault: clear on_fault, result = EFAULT */
+        "movl $0, (%[on_fault])\n\t"
+        "movl %[efault], %[result]\n"
+        "2:\n\t"
+        : "+S"(src), "+D"(dst), "+c"(size), [result] "=&r"(result)
+        : [on_fault] "r"(&current_thread->on_fault),
+          [efault] "i"(EFAULT)
         : "memory"
     );
-
-    /* Success - clear fault handler */
-    current_thread->on_fault = 0;
-    return 0;
-
-fault:
-    /* Fault occurred - clear handler and return error */
-    current_thread->on_fault = 0;
-    return EFAULT;
+    return result;
 }
 
 /*
@@ -89,23 +104,25 @@ int copyin(const void *src, void *dst, size_t size) {
         return EFAULT;
     }
 
-    /* Set up fault handler */
-    current_thread->on_fault = (uintptr_t)&&fault;
-
-    /* Perform copy using inline assembly (rep movsb) */
+    /* See copyout() for why the fault label is embedded in the asm. */
+    int result;
     __asm__ volatile (
-        "cld; rep movsb"
-        : "+S"(src), "+D"(dst), "+c"(size)
-        :
+        "movl $1f, (%[on_fault])\n\t"
+        "cld\n\t"
+        "rep movsb\n\t"
+        "movl $0, (%[on_fault])\n\t"
+        "xorl %[result], %[result]\n\t"
+        "jmp 2f\n"
+        "1:\n\t"
+        "movl $0, (%[on_fault])\n\t"
+        "movl %[efault], %[result]\n"
+        "2:\n\t"
+        : "+S"(src), "+D"(dst), "+c"(size), [result] "=&r"(result)
+        : [on_fault] "r"(&current_thread->on_fault),
+          [efault] "i"(EFAULT)
         : "memory"
     );
-
-    current_thread->on_fault = 0;
-    return 0;
-
-fault:
-    current_thread->on_fault = 0;
-    return EFAULT;
+    return result;
 }
 
 /*
