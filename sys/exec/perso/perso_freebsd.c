@@ -161,7 +161,12 @@ static void *freebsd_syscalls[MAX_SYSCALLS] = {
     [FREEBSD_SYS_fstatat_modern] = (void *)&freebsd_sys_fstatat,
     [FREEBSD_SYS_freebsd11_getdirentries] = (void *)&freebsd_sys_getdirentries_v11,
     [FREEBSD_SYS_openat]    = (void *)&freebsd_sys_openat,
-    [FREEBSD_SYS_getdirentries_freebsd13] = (void *)&freebsd_sys_getdirentries_v11,
+    /* Syscall 554 returns the modern (FreeBSD 12+) struct dirent with
+     * 64-bit ino_t and a d_off field — wiring it to the v11 handler
+     * made userspace read 32-bit-fileno records as 64-bit-fileno
+     * records, so d_name landed 4 bytes early and every filename
+     * appeared shifted ("lost+found" → "+found", "test.sh" → ".sh"). */
+    [FREEBSD_SYS_getdirentries_freebsd13] = (void *)&freebsd_sys_getdirentries,
     /* at-family wrappers (FreeBSD flag/path translation). */
     [FREEBSD_SYS_faccessat]  = (void *)&freebsd_sys_faccessat,
     [FREEBSD_SYS_fchmodat]   = (void *)&freebsd_sys_fchmodat,
