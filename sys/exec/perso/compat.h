@@ -23,6 +23,7 @@ int64_t freebsd_sys_lseek(int fd, int pad, uint32_t off_lo, uint32_t off_hi, int
 int64_t freebsd_sys_lseek13(int fd, uint32_t off_lo, uint32_t off_hi, int whence);
 void *freebsd_sys_mmap(void *addr, size_t len, int prot, int flags, int fd, uint32_t off_lo, uint32_t off_hi);
 int freebsd_sys_ioctl(int fd, uint32_t request, void *arg);
+int freebsd_sys_fcntl(int fd, int cmd, int arg);
 
 /* execv wrapper for ancient NetBSD/SunOS binaries */
 int sys_compat_execv(const char *path, char **argv);

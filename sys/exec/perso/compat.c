@@ -187,6 +187,44 @@ int sys_mprotect(void *addr, size_t len, int prot) {
     return ret < 0 ? -ENOMEM : 0;
 }
 
+/*
+ * freebsd_sys_fcntl - FreeBSD fcntl wrapper.
+ *
+ * FreeBSD's fcntl cmd values mostly overlap with our (Linux-style)
+ * native ones for F_DUPFD/F_GETFD/F_SETFD/F_GETFL/F_SETFL (0..4),
+ * but FreeBSD adds F_DUPFD_CLOEXEC (17) and F_DUP2FD_CLOEXEC (18)
+ * that our native fcntl doesn't recognise — they came back as
+ * -EINVAL, which left FreeBSD sh's setjobctl unable to relocate
+ * its /dev/tty fd above 9 ("can't access tty; job control turned
+ * off"), and the resulting non-job-control sh got SIGTTIN'd on
+ * its first prompt read.  Translate the cloexec variants into the
+ * non-cloexec equivalent + a follow-up F_SETFD(FD_CLOEXEC).
+ */
+extern int proc_fcntl(process_t *, int, int, int);
+#define FBSD_F_DUPFD_CLOEXEC  17
+#define FBSD_F_DUP2FD_CLOEXEC 18
+#define FBSD_F_DUP2FD          10
+#define FD_CLOEXEC             1
+int freebsd_sys_fcntl(int fd, int cmd, int arg) {
+    if (cmd == FBSD_F_DUPFD_CLOEXEC) {
+        int newfd = proc_fcntl(current_process, fd, 0 /*F_DUPFD*/, arg);
+        if (newfd < 0) return newfd;
+        proc_fcntl(current_process, newfd, 2 /*F_SETFD*/, FD_CLOEXEC);
+        return newfd;
+    }
+    if (cmd == FBSD_F_DUP2FD || cmd == FBSD_F_DUP2FD_CLOEXEC) {
+        /* dup2-style: set up arg as the new fd; close-and-replace. */
+        extern int sys_dup2(int, int);
+        int rc = sys_dup2(fd, arg);
+        if (rc < 0) return rc;
+        if (cmd == FBSD_F_DUP2FD_CLOEXEC) {
+            proc_fcntl(current_process, arg, 2 /*F_SETFD*/, FD_CLOEXEC);
+        }
+        return arg;
+    }
+    return proc_fcntl(current_process, fd, cmd, arg);
+}
+
 int sys_sigret(void) { return -ENOSYS; }
 int sys_ptrace(int req, int pid, int addr, int data) { (void)req; (void)pid; (void)addr; (void)data; return -ENOSYS; }
 

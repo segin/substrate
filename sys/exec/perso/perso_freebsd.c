@@ -86,7 +86,7 @@ static void *freebsd_syscalls[MAX_SYSCALLS] = {
     /* FreeBSD pipe2 — translates FreeBSD's O_CLOEXEC / O_NONBLOCK
      * values into Substrate native before invoking sys_pipe2. */
     [FREEBSD_SYS_pipe2]    = (void *)&freebsd_sys_pipe2,
-    [FREEBSD_SYS_fcntl]    = &sys_fcntl,
+    [FREEBSD_SYS_fcntl]    = (void *)&freebsd_sys_fcntl,
     [FREEBSD_SYS_fsync]    = &sys_fsync,
     [FREEBSD_SYS_setpriority] = &sys_setpriority,
     [FREEBSD_SYS_socket]   = &sys_socket,
