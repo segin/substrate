@@ -8,6 +8,9 @@
 #include <string.h>
 #include <sys/errno.h>
 #include <stddef.h>
+#include <sys/sysarch.h>
+
+extern int sys_sysarch(int op, void *parms);
 
 /* NetBSD at-flags identical to FreeBSD/POSIX (NOFOLLOW=0x200,
  * REMOVEDIR=0x800).  Substrate native at-flags differ (NOFOLLOW=0x100,
@@ -275,4 +278,12 @@ void *netbsd_sys_mmap(void *addr, size_t len, int prot, int flags,
     if (flags & NETBSD_MAP_STACK)
         kflags |= KERN_MAP_PRIVATE | KERN_MAP_ANONYMOUS;
     return sys_mmap(addr, len, prot, kflags, fd, pos);
+}
+
+/* _lwp_setprivate(addr) — NetBSD's i386 TLS install.  ld.elf_so calls
+ * this on its very first syscall after exec; the kernel must point
+ * %gs:0 at the supplied TCB or every TLS access faults.  Mirrors the
+ * cpu_lwp_setprivate() path in NetBSD's machine-dependent code. */
+int netbsd_sys_lwp_setprivate(uintptr_t tcb) {
+    return i386_set_gsbase((uint32_t)tcb);
 }

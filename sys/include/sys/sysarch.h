@@ -19,4 +19,11 @@ struct i386_vm86_args {
     void    *sub_args;    /* argument to sub-operation */
 };
 
+/* Direct (non-syscall) entry point for installing a TLS base on the
+ * current thread.  Used by foreign personalities whose own TLS
+ * primitive (e.g. NetBSD _lwp_setprivate, Linux set_thread_area)
+ * receives the base by value rather than via a userspace pointer,
+ * so they can't go through sys_sysarch which copyin()s the arg. */
+int i386_set_gsbase(uint32_t base);
+
 #endif

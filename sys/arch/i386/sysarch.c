@@ -51,6 +51,11 @@ static int set_gsbase(uint32_t base) {
     return 0;
 }
 
+/* Public wrapper: install a TLS base from a kernel caller (no copyin). */
+int i386_set_gsbase(uint32_t base) {
+    return set_gsbase(base);
+}
+
 static int get_gsbase(uint32_t *out) {
     /* Use the per-thread base, not the (potentially stale) GDT slot, since
      * the slot belongs to whichever thread last touched it. */

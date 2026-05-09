@@ -136,6 +136,11 @@
 #define NETBSD_SYS_stat50         439
 #define NETBSD_SYS_fstat50        440
 #define NETBSD_SYS_lstat50        441
+
+/* _lwp_setprivate(addr) — NetBSD i386's TLS install primitive.  rtld
+ * calls this immediately after exec to point %gs:0 at the TCB; until
+ * then every TLS access faults at the first `mov %gs:0x0,%eax`. */
+#define NETBSD_SYS__lwp_setprivate 317
 #define NETBSD_SYS_nanosleep      196
 /* Modern mmap with `long PAD` between fd and pos to align off_t.
  * Signature: void *mmap(void*, size_t, int, int, int, long pad, off_t pos). */

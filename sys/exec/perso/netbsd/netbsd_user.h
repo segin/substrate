@@ -125,6 +125,10 @@ int netbsd_sys_stat50(const char *path, struct netbsd_stat50 *buf);
 int netbsd_sys_lstat50(const char *path, struct netbsd_stat50 *buf);
 int netbsd_sys_fstat50(int fd, struct netbsd_stat50 *buf);
 
+/* TLS install — wraps the i386 GSBASE primitive that ld.elf_so calls
+ * on its very first syscall after exec to point %gs:0 at the TCB. */
+int netbsd_sys_lwp_setprivate(uintptr_t tcb);
+
 /* Translation functions for NetBSD compat stat (stat43) */
 int netbsd_sys_compat_stat(const char *path, struct netbsd_stat43 *buf);
 int netbsd_sys_compat_lstat(const char *path, struct netbsd_stat43 *buf);
