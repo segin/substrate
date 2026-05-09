@@ -1075,6 +1075,25 @@ void pmm_free_contiguous(void* p, size_t count) {
          kprint("PMM: ignoring contiguous free outside direct-mapped window.\n");
          return;
      }
+     /*
+      * The buddy allocator requires the freed address to be aligned to the
+      * block size implied by `count` (rounded to power-of-two).  A misaligned
+      * free corrupts the free list — the page lands at a non-aligned slot
+      * the alignment-aware coalescer never finds, then the next single-page
+      * alloc happily hands it back out, double-allocating it onto the
+      * caller (catastrophic when the caller is exec_setup_stack zeroing
+      * the page via memset and the page is some other thread's kstack).
+      * Refuse misaligned contiguous frees rather than corrupt state.
+      */
+     {
+         int order = 0;
+         while ((1UL << order) < count) order++;
+         uintptr_t blocksz = (uintptr_t)((1U << order) * PMM_BLOCK_SIZE);
+         if (v & (blocksz - 1)) {
+             kprint("PMM: refusing misaligned contiguous free (corruption guard)\n");
+             return;
+         }
+     }
      vm_page_t *page = vm_phys_paddr_to_page(v - PMM_PHYS_VIRT_BASE);
      if (!page) {
          kprint("PMM: ignoring free of unknown direct-mapped range.\n");
