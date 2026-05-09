@@ -157,26 +157,28 @@ struct freebsd13_stat {
     uint32_t st_gid;          /* offset  32 */
     int32_t  st_padding1;     /* offset  36 */
     uint64_t st_rdev;         /* offset  40 */
-    /* FreeBSD 14 i386 defines __STAT_TIME_T_EXT and inserts a 4-byte
-     * _ext field before every timespec in struct stat.  Userland reads
-     * time at offset (timespec_offset + 4); without these fields,
-     * tv_sec values land at the wrong offsets and decode to 1970. */
-    int32_t  st_atim_ext;     /* offset  48 */
-    struct freebsd13_timespec st_atim;     /* offset  52  (12 bytes) */
-    int32_t  st_mtim_ext;     /* offset  64 */
-    struct freebsd13_timespec st_mtim;     /* offset  68 */
-    int32_t  st_ctim_ext;     /* offset  80 */
-    struct freebsd13_timespec st_ctim;     /* offset  84 */
-    int32_t  st_btim_ext;     /* offset  96 */
-    struct freebsd13_timespec st_birthtim; /* offset 100 */
-    int64_t  st_size;         /* offset 112 */
-    int64_t  st_blocks;       /* offset 120 */
-    int32_t  st_blksize;      /* offset 128 */
-    uint32_t st_flags;        /* offset 132 */
-    uint64_t st_gen;          /* offset 136 */
-    uint64_t st_filerev;      /* offset 144 */
-    uint64_t st_spare[9];     /* offset 152 */
-    /* total: 224 bytes */
+    /* FreeBSD 14.3-RELEASE i386 ships struct stat WITHOUT
+     * __STAT_TIME_T_EXT — verified by inspecting libc.so.7's _fstat
+     * which only writes 0xD0 = 208 bytes total to the caller's buffer
+     * (it advances %edi by 0x88 then `rep stos` 0x12 dwords = 72 more
+     * bytes).  HEAD/CURRENT defines the _ext fields, but the released
+     * binaries don't see them.  Adding _ext fields here makes our
+     * fstat write 224 bytes — overflowing libelf's 208-byte stack
+     * buffer in _libelf_open_object and corrupting its stack canary,
+     * crashing ldd with "stack overflow detected; terminated" at
+     * function epilogue. */
+    struct freebsd13_timespec st_atim;     /* offset  48 (12 bytes) */
+    struct freebsd13_timespec st_mtim;     /* offset  60 */
+    struct freebsd13_timespec st_ctim;     /* offset  72 */
+    struct freebsd13_timespec st_birthtim; /* offset  84 */
+    int64_t  st_size;         /* offset  96 */
+    int64_t  st_blocks;       /* offset 104 */
+    int32_t  st_blksize;      /* offset 112 */
+    uint32_t st_flags;        /* offset 116 */
+    uint64_t st_gen;          /* offset 120 */
+    uint64_t st_filerev;      /* offset 128 */
+    uint64_t st_spare[9];     /* offset 136 */
+    /* total: 208 bytes (0xD0) */
 };
 #endif
 
