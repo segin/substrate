@@ -220,11 +220,35 @@ void isr_handler(registers_t *regs) {
             if (pmap_fault(regs->err_code, cr2)) {
                 return;
             }
+
+            /*
+             * Recursive-fault breaker: if vm_fault keeps claiming SUCCESS at
+             * the same address but the rep movsb keeps re-faulting (e.g.
+             * because pmap_enter silently failed or the vm_object is
+             * stale), the kernel hangs spinning on the same byte.  Track
+             * the last faulting EIP+CR2 in this thread; on the third
+             * consecutive matching fault, fall through to on_fault and
+             * abandon vm_fault.
+             */
+            int loop_break = 0;
+            if (!is_usermode && current_thread && current_thread->on_fault) {
+                if (current_thread->fault_loop_eip == regs->eip &&
+                    current_thread->fault_loop_cr2 == cr2) {
+                    if (++current_thread->fault_loop_count >= 3) {
+                        loop_break = 1;
+                    }
+                } else {
+                    current_thread->fault_loop_eip = regs->eip;
+                    current_thread->fault_loop_cr2 = cr2;
+                    current_thread->fault_loop_count = 1;
+                }
+            }
+
             // Demand paging: try vm_fault for vm_map-backed regions.
             // This must work for BOTH usermode AND kernel mode (copyout/copyin)
             // so that syscalls like read/write can copy to/from demand-paged
             // user buffers backed by mmap(MAP_ANONYMOUS).
-            if (current_process && current_process->vm_map) {
+            if (!loop_break && current_process && current_process->vm_map) {
                 uint8_t fault_prot = VM_PROT_READ;
                 if (regs->err_code & 0x02) fault_prot |= VM_PROT_WRITE;
                 if (regs->err_code & 0x10) fault_prot |= VM_PROT_EXEC;
@@ -239,6 +263,14 @@ void isr_handler(registers_t *regs) {
         // This is checked AFTER page fault handling so demand-paging can service
         // the fault first; on_fault is the fallback for truly invalid accesses.
         if (!is_usermode && current_thread && current_thread->on_fault) {
+             /* Reset the fault-loop counter — leaving on_fault is the
+              * recovery boundary; whatever the next syscall does shouldn't
+              * inherit our spin-detection state. */
+             if (current_thread) {
+                 current_thread->fault_loop_eip = 0;
+                 current_thread->fault_loop_cr2 = 0;
+                 current_thread->fault_loop_count = 0;
+             }
              regs->eip = (uint32_t)current_thread->on_fault;
              current_thread->on_fault = 0; // Reset to avoid loop if handler faults
              return;

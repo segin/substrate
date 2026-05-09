@@ -240,6 +240,16 @@ typedef struct thread {
     
     // Fault Recovery (copyin/copyout)
     uintptr_t                on_fault;
+    /*
+     * Recursive-fault breaker for the trap handler — when vm_fault
+     * keeps claiming SUCCESS at the same EIP+CR2 but the access keeps
+     * re-faulting, fall through to on_fault rather than spin forever.
+     * Reset on every on_fault recovery so the next copyin starts
+     * fresh.
+     */
+    uint32_t                 fault_loop_eip;
+    uint32_t                 fault_loop_cr2;
+    uint32_t                 fault_loop_count;
 
     // Exec recursion tracking (shebang scripts)
     int                      script_depth;
