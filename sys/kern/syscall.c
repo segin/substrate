@@ -12,6 +12,7 @@
 #include <kern/version.h>
 #include <kern/panic.h>
 #include <kern/console.h>
+#include <kern/cmdline.h>
 #include <exec/perso/personality.h>
 #include <pm/pm.h>
 #include <vm/vm_kmem.h>
@@ -159,7 +160,14 @@ fs_node_t *vfs_perso_lookup(fs_node_t *root, fs_node_t *cwd, const char *path) {
             char prefixed[320];
             snprintf(prefixed, sizeof(prefixed), "%s%s", p->path_prefix, path);
             fs_node_t *node = vfs_lookup(root, prefixed);
-            if (node) return node;
+            if (node) {
+                if (cmdline_debug_enabled("perso_lookup")) {
+                    extern int kprintf(const char *, ...);
+                    kprintf("PERSO_LOOKUP: %s -> %s : node=%p flags=%x len=%d\n",
+                        path, prefixed, node, node->flags, (int)node->length);
+                }
+                return node;
+            }
         }
         return vfs_lookup(root, path);
     }
