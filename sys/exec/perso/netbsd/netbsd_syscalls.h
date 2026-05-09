@@ -141,6 +141,12 @@
  * calls this immediately after exec to point %gs:0 at the TCB; until
  * then every TLS access faults at the first `mov %gs:0x0,%eax`. */
 #define NETBSD_SYS__lwp_setprivate 317
+
+/* NetBSD __sysctl(name, namelen, oldp, oldlenp, newp, newlen).  Used
+ * by libc startup (getprogname, stack-guard, page-size lookup);
+ * static-pie binaries like vi crash at _start without it because
+ * the unfilled `oldp` buffer is later dereferenced as a pointer. */
+#define NETBSD_SYS___sysctl       202
 #define NETBSD_SYS_nanosleep      196
 /* Modern mmap with `long PAD` between fd and pos to align off_t.
  * Signature: void *mmap(void*, size_t, int, int, int, long pad, off_t pos). */

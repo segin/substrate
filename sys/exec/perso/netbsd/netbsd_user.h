@@ -129,6 +129,13 @@ int netbsd_sys_fstat50(int fd, struct netbsd_stat50 *buf);
  * on its very first syscall after exec to point %gs:0 at the TCB. */
 int netbsd_sys_lwp_setprivate(uintptr_t tcb);
 
+/* NetBSD __sysctl(2).  Handles a small set of MIB queries that libc
+ * startup makes; returns -ENOENT for everything else (which NetBSD
+ * libc treats as "no such variable" rather than fatal ENOSYS). */
+int netbsd_sys_sysctl(int *name, unsigned int namelen,
+                      void *oldp, unsigned int *oldlenp,
+                      void *newp, unsigned int newlen);
+
 /* Translation functions for NetBSD compat stat (stat43) */
 int netbsd_sys_compat_stat(const char *path, struct netbsd_stat43 *buf);
 int netbsd_sys_compat_lstat(const char *path, struct netbsd_stat43 *buf);

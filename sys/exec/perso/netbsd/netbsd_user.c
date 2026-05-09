@@ -287,3 +287,111 @@ void *netbsd_sys_mmap(void *addr, size_t len, int prot, int flags,
 int netbsd_sys_lwp_setprivate(uintptr_t tcb) {
     return i386_set_gsbase((uint32_t)tcb);
 }
+
+/* NetBSD MIB constants — sys/sys/sysctl.h */
+#define NBSD_CTL_KERN          1
+#define NBSD_CTL_HW            6
+/* CTL_KERN children */
+#define NBSD_KERN_OSTYPE       1   /* string */
+#define NBSD_KERN_OSRELEASE    2   /* string */
+#define NBSD_KERN_OSREV        3   /* int */
+#define NBSD_KERN_VERSION      4   /* string */
+#define NBSD_KERN_HOSTNAME    10   /* string */
+#define NBSD_KERN_ARND        81   /* opaque random bytes */
+/* CTL_HW children */
+#define NBSD_HW_MACHINE        1   /* string "i386" */
+#define NBSD_HW_MODEL          2   /* string */
+#define NBSD_HW_NCPU           3   /* int */
+#define NBSD_HW_PAGESIZE       7   /* int */
+#define NBSD_HW_MACHINE_ARCH  11   /* string "i386" */
+
+extern int sys_cpu_count(void);
+extern int random_get_bytes_flags(void *, size_t, unsigned int);
+
+static int nbsd_sysctl_string(const char *s, void *oldp, unsigned int *oldlenp) {
+    size_t slen = strlen(s) + 1;
+    if (oldlenp) {
+        unsigned int want;
+        if (copyin(oldlenp, &want, sizeof(want)) != 0) return -EFAULT;
+        if (oldp) {
+            size_t n = slen <= want ? slen : want;
+            if (copyout((void *)s, oldp, n) != 0) return -EFAULT;
+        }
+        unsigned int wrote = (unsigned int)slen;
+        if (copyout(&wrote, oldlenp, sizeof(wrote)) != 0) return -EFAULT;
+    } else if (oldp) {
+        if (copyout((void *)s, oldp, slen) != 0) return -EFAULT;
+    }
+    return 0;
+}
+
+static int nbsd_sysctl_int(int val, void *oldp, unsigned int *oldlenp) {
+    if (oldlenp) {
+        unsigned int want = sizeof(int);
+        if (copyout(&want, oldlenp, sizeof(want)) != 0) return -EFAULT;
+    }
+    if (oldp && copyout(&val, oldp, sizeof(val)) != 0) return -EFAULT;
+    return 0;
+}
+
+int netbsd_sys_sysctl(int *name, unsigned int namelen,
+                      void *oldp, unsigned int *oldlenp,
+                      void *newp, unsigned int newlen) {
+    (void)newp; (void)newlen;
+    if (!name || namelen < 1 || namelen > 8) return -EINVAL;
+
+    int kname[8];
+    if (copyin(name, kname, namelen * sizeof(int)) != 0) return -EFAULT;
+
+    if (kname[0] == NBSD_CTL_KERN && namelen >= 2) {
+        switch (kname[1]) {
+        case NBSD_KERN_OSTYPE:
+            return nbsd_sysctl_string("NetBSD", oldp, oldlenp);
+        case NBSD_KERN_OSRELEASE:
+            return nbsd_sysctl_string("10.1", oldp, oldlenp);
+        case NBSD_KERN_OSREV:
+            return nbsd_sysctl_int(1001000000, oldp, oldlenp);
+        case NBSD_KERN_VERSION:
+            return nbsd_sysctl_string("Substrate (NetBSD 10.1 compat)",
+                                      oldp, oldlenp);
+        case NBSD_KERN_HOSTNAME:
+            return nbsd_sysctl_string("substrate", oldp, oldlenp);
+        case NBSD_KERN_ARND: {
+            unsigned int want = 0;
+            if (oldlenp && copyin(oldlenp, &want, sizeof(want)) != 0)
+                return -EFAULT;
+            if (want == 0 || want > 4096) return -EINVAL;
+            uint8_t kbuf[256];
+            if (want > sizeof(kbuf)) want = sizeof(kbuf);
+            if (random_get_bytes_flags(kbuf, want, 0x4) != (int)want)
+                return -EIO;
+            if (oldp && copyout(kbuf, oldp, want) != 0) return -EFAULT;
+            if (oldlenp && copyout(&want, oldlenp, sizeof(want)) != 0)
+                return -EFAULT;
+            return 0;
+        }
+        }
+    }
+
+    if (kname[0] == NBSD_CTL_HW && namelen >= 2) {
+        switch (kname[1]) {
+        case NBSD_HW_MACHINE:
+        case NBSD_HW_MACHINE_ARCH:
+            return nbsd_sysctl_string("i386", oldp, oldlenp);
+        case NBSD_HW_MODEL:
+            return nbsd_sysctl_string("Substrate i386", oldp, oldlenp);
+        case NBSD_HW_NCPU: {
+            int n = sys_cpu_count();
+            if (n < 1) n = 1;
+            return nbsd_sysctl_int(n, oldp, oldlenp);
+        }
+        case NBSD_HW_PAGESIZE:
+            return nbsd_sysctl_int(4096, oldp, oldlenp);
+        }
+    }
+
+    /* Unknown MIB — NetBSD libc treats ENOENT as "no such variable",
+     * far gentler than ENOSYS (which trips libc's static-pie startup
+     * into dereferencing an uninitialized result buffer). */
+    return -ENOENT;
+}
