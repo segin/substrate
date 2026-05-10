@@ -31,6 +31,11 @@ static TAILQ_HEAD(nclru_head, namecache) nclru;
 int vfs_cache_limit = 10240;
 int vfs_cache_count = 0;
 
+/* Leak instrumentation — surfaced by `debug=vm_leak` from proc_exit. */
+unsigned long namecache_enter_count   = 0;
+unsigned long namecache_evict_count   = 0;
+unsigned long namecache_purge_count   = 0;
+
 /* Reader/writer lock for SMP scalability */
 static rwlock_t nchash_lock;
 
@@ -129,6 +134,7 @@ cache_enter(struct vnode *dvp, struct vnode *vp, const char *name, size_t len)
             TAILQ_REMOVE(&nclru, lru, nc_lru);
             kfree(lru, sizeof(struct namecache) + lru->nc_nlen + 1);
             vfs_cache_count--;
+            namecache_evict_count++;
         }
     }
 
@@ -141,6 +147,7 @@ cache_enter(struct vnode *dvp, struct vnode *vp, const char *name, size_t len)
     LIST_INSERT_HEAD(&nchash[hash], ncp, nc_hash);
     TAILQ_INSERT_TAIL(&nclru, ncp, nc_lru);
     vfs_cache_count++;
+    namecache_enter_count++;
 
     rw_wunlock(&nchash_lock);
 }
@@ -163,6 +170,7 @@ cache_purge(struct vnode *vp)
                 TAILQ_REMOVE(&nclru, ncp, nc_lru);
                 kfree(ncp, sizeof(struct namecache) + ncp->nc_nlen + 1);
                 vfs_cache_count--;
+                namecache_purge_count++;
             }
         }
     }
@@ -201,6 +209,7 @@ cache_purgevfs(struct mount *mp)
                 TAILQ_REMOVE(&nclru, ncp, nc_lru);
                 kfree(ncp, sizeof(struct namecache) + ncp->nc_nlen + 1);
                 vfs_cache_count--;
+                namecache_purge_count++;
             }
         }
     }

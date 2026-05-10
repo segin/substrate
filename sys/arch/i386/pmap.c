@@ -364,7 +364,12 @@ pmap_t pmap_kernel(void) {
     return kernel_pmap_ptr;
 }
 
+/* Leak instrumentation — `debug=vm_leak` prints these against
+ * pmap_destroy_calls so we can see whether pmaps balance. */
+uint64_t pmap_create_calls = 0;
+
 pmap_t pmap_create(void) {
+    pmap_create_calls++;
     // 1. Allocate page for struct pmap
     // We waste a whole page for a tiny struct, but we don't have kmalloc yet
     // NOTE: pmm_alloc_block returns virtual address (kernel direct mapping)

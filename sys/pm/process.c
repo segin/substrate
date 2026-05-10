@@ -1091,16 +1091,30 @@ void proc_exit(int code) {
         extern unsigned long vm_map_destroy_entries;
         extern unsigned long fs_open_count;
         extern unsigned long fs_close_count;
+        extern uint64_t      pmap_create_calls;
+        extern uint64_t      pmap_destroy_calls;
+        extern unsigned long namecache_enter_count;
+        extern unsigned long namecache_evict_count;
+        extern unsigned long namecache_purge_count;
+        extern int           vfs_cache_count;
         kprintf("vm_leak[pid=%d exit=%d]: pager A=%lu D=%lu (live=%ld) "
                 "map_destroy=%lu (ents=%lu) "
-                "fs_open=%lu fs_close=%lu (drift=%ld)\n",
+                "fs_open=%lu fs_close=%lu (drift=%ld) "
+                "pmap C=%llu D=%llu (live=%lld) "
+                "nc=%d (E=%lu V=%lu P=%lu)\n",
                 current_process->pid, code,
                 vm_pager_vnode_alloc_count,
                 vm_pager_vnode_dealloc_count,
                 (long)(vm_pager_vnode_alloc_count - vm_pager_vnode_dealloc_count),
                 vm_map_destroy_count, vm_map_destroy_entries,
                 fs_open_count, fs_close_count,
-                (long)(fs_open_count - fs_close_count));
+                (long)(fs_open_count - fs_close_count),
+                (unsigned long long)pmap_create_calls,
+                (unsigned long long)pmap_destroy_calls,
+                (long long)(pmap_create_calls - pmap_destroy_calls),
+                vfs_cache_count,
+                namecache_enter_count, namecache_evict_count,
+                namecache_purge_count);
     }
 
     proc_vfork_done(current_process);
