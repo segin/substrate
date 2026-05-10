@@ -60,9 +60,9 @@
         - [x] Man page: `sysctl(2)`. (REQ: REQ-07-0052)
 
 ### 6a.1 Implementation Reality Audit (March 2026)
-- [ ] **ABI Alignment:** (REQ: REQ-07-0053)
+- [x] **ABI Alignment:** (REQ: REQ-07-0053)
     - [x] Align `lib/sys/syscall.S` calling convention with native personality syscall argument ABI (`substrate` stack-argument path). (REQ: REQ-07-0048)
-    - [ ] Add ABI conformance tests that validate argument passing for 0-6 argument wrappers under native personality. (REQ: REQ-07-0048)
+    - [x] Add ABI conformance tests that validate argument passing for 0-6 argument wrappers under native personality. (REQ: REQ-07-0048)
 - [ ] **Wrapper Number Hygiene:** (REQ: REQ-07-0054)
     - [ ] Remove hardcoded wrapper-only syscall numbers (`SYS_vm86=113`, `SYS_PROC_PERS_NAME=360`) or land matching kernel/header definitions and dispatch wiring. (REQ: REQ-07-0048)
     - [ ] Enforce that every `SYS_*` used in `lib/sys` is defined in `sys/arch/i386/syscall.h`. (REQ: REQ-07-0048)
