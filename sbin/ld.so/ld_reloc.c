@@ -1,0 +1,110 @@
+/*
+ * ld_reloc.c — apply DT_REL and DT_JMPREL on a loaded object.
+ *
+ * Phase 3 supports the i386 relocation types listed below; every
+ * other type aborts with a diagnostic so we never silently scribble
+ * the wrong value:
+ *
+ *   R_386_NONE     — no-op.
+ *   R_386_RELATIVE — *p += base                (already done in
+ *                    ld_start.S for our own image; included here
+ *                    for shared libraries the loader brings in).
+ *   R_386_GLOB_DAT — *p  = S
+ *   R_386_JMP_SLOT — *p  = S  (eager binding; no lazy stub)
+ *   R_386_32       — *p  = S + A   (A = current contents of p)
+ *   R_386_PC32     — *p  = S + A - P
+ *
+ * No DT_RELA on i386 by spec.  R_386_COPY is rejected (a Phase-4
+ * concern; needed only for executables that copy DSO data, and
+ * none of our tests trigger it).
+ */
+
+#include "ld.h"
+
+static int apply_one(ld_obj_t *obj, Elf32_Rel *r) {
+    ld_u32 type = ELF32_R_TYPE(r->r_info);
+    ld_u32 sym  = ELF32_R_SYM(r->r_info);
+    ld_u32 *p   = (ld_u32 *)(r->r_offset + obj->base);
+
+    switch (type) {
+    case R_386_NONE:
+        return 0;
+
+    case R_386_RELATIVE:
+        /* Per the ABI the addend is the current contents of *p,
+         * which for a freshly-mapped image is the link-time vaddr.
+         * Adding the base bias gives the runtime address. */
+        *p += obj->base;
+        return 0;
+
+    case R_386_GLOB_DAT:
+    case R_386_JMP_SLOT: {
+        if (sym == 0) {
+            ld_puts("ld.so: GLOB_DAT/JMP_SLOT with sym=0 in ");
+            ld_puts(obj->name); ld_puts("\n");
+            return -1;
+        }
+        const char *name = obj->strtab + obj->symtab[sym].st_name;
+        ld_u32 v = ld_resolve(name);
+        if (v == 0) {
+            /* Weak undefined symbols are allowed to remain 0. */
+            unsigned char bind = ELF32_ST_BIND(obj->symtab[sym].st_info);
+            if (bind == STB_WEAK) { *p = 0; return 0; }
+            ld_puts("ld.so: undefined symbol: "); ld_puts(name);
+            ld_puts(" in "); ld_puts(obj->name); ld_puts("\n");
+            return -1;
+        }
+        *p = v;
+        return 0;
+    }
+
+    case R_386_32: {
+        if (sym == 0) { *p += obj->base; return 0; }
+        const char *name = obj->strtab + obj->symtab[sym].st_name;
+        ld_u32 v = ld_resolve(name);
+        if (v == 0) {
+            unsigned char bind = ELF32_ST_BIND(obj->symtab[sym].st_info);
+            if (bind == STB_WEAK) { /* keep addend */ return 0; }
+            ld_puts("ld.so: undefined R_386_32: "); ld_puts(name); ld_puts("\n");
+            return -1;
+        }
+        *p = v + *p;            /* S + A; A = current contents */
+        return 0;
+    }
+
+    case R_386_PC32: {
+        if (sym == 0) return 0;
+        const char *name = obj->strtab + obj->symtab[sym].st_name;
+        ld_u32 v = ld_resolve(name);
+        if (v == 0) {
+            unsigned char bind = ELF32_ST_BIND(obj->symtab[sym].st_info);
+            if (bind == STB_WEAK) return 0;
+            ld_puts("ld.so: undefined R_386_PC32: "); ld_puts(name); ld_puts("\n");
+            return -1;
+        }
+        *p = v + *p - (ld_u32)(unsigned long)p;   /* S + A - P */
+        return 0;
+    }
+
+    default:
+        ld_puts("ld.so: unsupported reloc type "); ld_putd(type);
+        ld_puts(" in "); ld_puts(obj->name); ld_puts("\n");
+        return -1;
+    }
+}
+
+int ld_relocate(ld_obj_t *obj) {
+    if (obj->rel) {
+        ld_u32 n = obj->relsz / sizeof(Elf32_Rel);
+        for (ld_u32 i = 0; i < n; i++) {
+            if (apply_one(obj, &obj->rel[i]) != 0) return -1;
+        }
+    }
+    if (obj->jmprel) {
+        ld_u32 n = obj->pltrelsz / sizeof(Elf32_Rel);
+        for (ld_u32 i = 0; i < n; i++) {
+            if (apply_one(obj, &obj->jmprel[i]) != 0) return -1;
+        }
+    }
+    return 0;
+}

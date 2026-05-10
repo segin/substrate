@@ -8,11 +8,13 @@ include ../../Makefile.inc
 # (which ld_start.S applies before any C runs).
 
 PROG = ld.so
-OBJS = ld_start.o ld_main.o ld_io.o
+OBJS = ld_start.o ld_main.o ld_io.o ld_load.o ld_resolve.o ld_reloc.o
 
 LD_CFLAGS  := -m32 -nostdlib -nostartfiles -fpic -ffreestanding \
               -Wall -Wextra -Werror -fno-stack-protector \
-              -fvisibility=hidden -fno-builtin -O2 -g
+              -fvisibility=hidden -fno-builtin -O2 -g \
+              -mno-sse -mno-sse2 -mno-mmx -mno-80387 \
+              -mno-3dnow -mno-avx
 LD_LDFLAGS := -m32 -nostdlib -nostartfiles -shared \
               -Wl,-Bsymbolic \
               -Wl,-e,_start \

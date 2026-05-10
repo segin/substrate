@@ -205,12 +205,93 @@ ld_u32 ld_main(ld_u32 *initial_stack) {
 
     ld_u32 bias = 0;
     Elf32_Dyn *dyn = find_dynamic(&a, &bias);
-    if (dyn) {
-        summarize_dynamic(dyn, bias);
-    } else {
+    if (!dyn) {
         ld_puts("ld.so: program has no PT_DYNAMIC (static-PIE)\n");
+        return a.entry;
+    }
+    summarize_dynamic(dyn, bias);
+
+    /* --- Phase 3 begins ---------------------------------------------
+     * Wrap the program itself in an ld_obj_t so the resolver and
+     * relocator treat it uniformly with the .so's it pulls in. */
+    static ld_obj_t prog_obj;
+    /* Copy field-by-field to avoid relying on libc memset semantics
+     * inside the freestanding linker. */
+    prog_obj.name[0]    = '\0';
+    prog_obj.base       = bias;
+    prog_obj.dynamic    = dyn;
+    prog_obj.strtab     = 0;
+    prog_obj.symtab     = 0;
+    prog_obj.strsz      = 0;
+    prog_obj.gnu_hash   = 0;
+    prog_obj.hash       = 0;
+    prog_obj.rel        = 0;
+    prog_obj.relsz      = 0;
+    prog_obj.jmprel     = 0;
+    prog_obj.pltrelsz   = 0;
+    prog_obj.next       = 0;
+    {
+        const char p_name[] = "main-program";
+        for (ld_size i = 0; i < sizeof(p_name); i++) prog_obj.name[i] = p_name[i];
+    }
+    /* Cache dynamic-table pointers on the program too. */
+    {
+        ld_u32 strtab_off=0, symtab_off=0, hash_off=0, gnu_hash_off=0;
+        ld_u32 rel_off=0, jmprel_off=0;
+        for (Elf32_Dyn *d = dyn; d->d_tag != DT_NULL; d++) {
+            switch (d->d_tag) {
+            case DT_STRTAB:   strtab_off   = d->d_un.d_ptr; break;
+            case DT_STRSZ:    prog_obj.strsz    = d->d_un.d_val; break;
+            case DT_SYMTAB:   symtab_off   = d->d_un.d_ptr; break;
+            case DT_HASH:     hash_off     = d->d_un.d_ptr; break;
+            case DT_GNU_HASH: gnu_hash_off = d->d_un.d_ptr; break;
+            case DT_REL:      rel_off      = d->d_un.d_ptr; break;
+            case DT_RELSZ:    prog_obj.relsz    = d->d_un.d_val; break;
+            case DT_JMPREL:   jmprel_off   = d->d_un.d_ptr; break;
+            case DT_PLTRELSZ: prog_obj.pltrelsz = d->d_un.d_val; break;
+            }
+        }
+        prog_obj.strtab   = strtab_off   ? (const char *)(strtab_off   + bias) : 0;
+        prog_obj.symtab   = symtab_off   ? (Elf32_Sym  *)(symtab_off   + bias) : 0;
+        prog_obj.hash     = hash_off     ? (ld_u32     *)(hash_off     + bias) : 0;
+        prog_obj.gnu_hash = gnu_hash_off ? (ld_u32     *)(gnu_hash_off + bias) : 0;
+        prog_obj.rel      = rel_off      ? (Elf32_Rel  *)(rel_off      + bias) : 0;
+        prog_obj.jmprel   = jmprel_off   ? (Elf32_Rel  *)(jmprel_off   + bias) : 0;
     }
 
-    /* Phase 2 stops here.  Hand control to the program. */
+    /* Splice the program into the loaded-object list head so the
+     * resolver scans it first per the standard ELF lookup order. */
+    extern void ld_obj_prepend(ld_obj_t *o);   /* see ld_load.c */
+    ld_obj_prepend(&prog_obj);
+
+    /* Walk DT_NEEDED, loading each in order.  ld_load_object
+     * dedup's by SONAME; this walk is BFS at depth 1.  Recursion
+     * into nested DT_NEEDED is handled when ld_load_object itself
+     * walks the loaded object's dynamic table — but for Phase 3
+     * we depth-bound at one level (no .so we ship has further
+     * DT_NEEDED yet, since they all link against libc.so.0 only). */
+    if (prog_obj.strtab) {
+        for (Elf32_Dyn *d = dyn; d->d_tag != DT_NULL; d++) {
+            if (d->d_tag != DT_NEEDED) continue;
+            const char *soname = prog_obj.strtab + d->d_un.d_val;
+            ld_puts("ld.so: loading "); ld_puts(soname); ld_puts("\n");
+            ld_obj_t *o = ld_load_object(soname);
+            if (!o) {
+                ld_puts("ld.so: failed to load "); ld_puts(soname); ld_puts("\n");
+                ld_die("DT_NEEDED resolution failed");
+            }
+            ld_puts("ld.so:   loaded at base "); ld_putx(o->base); ld_puts("\n");
+        }
+    }
+
+    /* Apply relocations across all loaded objects (program + libs). */
+    for (ld_obj_t *o = ld_obj_list(); o; o = o->next) {
+        ld_puts("ld.so: relocating "); ld_puts(o->name); ld_puts("\n");
+        if (ld_relocate(o) != 0) {
+            ld_die("relocation failed");
+        }
+    }
+
+    ld_puts("ld.so: handoff to program entry\n");
     return a.entry;
 }

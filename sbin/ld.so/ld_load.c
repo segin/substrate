@@ -1,0 +1,313 @@
+/*
+ * ld_load.c — load a shared object into memory.
+ *
+ * Phase 3 strategy: open the file, read its ELF header off the
+ * first page, walk PT_LOAD entries, mmap each segment with the
+ * right protection bits, then cache the dynamic-table pointers
+ * (DT_*) into a ld_obj_t record for the resolver and relocator.
+ *
+ * Limits we accept for the first cut:
+ *   - Up to LD_MAX_OBJS loaded shared objects (program counts as
+ *     one).  Plenty for an init-style boot.
+ *   - SONAME-based dedup: if a .so with this DT_SONAME is already
+ *     loaded, return the cached descriptor.  Loaders without a
+ *     SONAME fall back to basename matching.
+ *   - No DT_RPATH / DT_RUNPATH yet — search /lib, /usr/lib, then
+ *     LD_LIBRARY_PATH (later).
+ *   - Each PT_LOAD must be page-aligned in p_vaddr / p_offset
+ *     (per the ELF spec).
+ */
+
+#include "ld.h"
+
+#define LD_MAX_OBJS 32
+#define PAGE_SIZE   0x1000
+
+static ld_obj_t  ld_obj_pool[LD_MAX_OBJS];
+static ld_size   ld_obj_count = 0;
+static ld_obj_t *ld_obj_head = 0;
+static ld_obj_t *ld_obj_tail = 0;
+
+/* Default system search paths.  Extending the list is just adding
+ * an entry — keep terminating NULL. */
+static const char *const ld_search_paths[] = {
+    "/lib",
+    "/usr/lib",
+    "/usr/local/lib",
+    0,
+};
+
+static ld_size ld_strlen(const char *s) {
+    const char *p = s;
+    while (*p) p++;
+    return (ld_size)(p - s);
+}
+
+static int ld_strncmp(const char *a, const char *b, ld_size n) {
+    while (n--) {
+        if (*a != *b) return (int)((unsigned char)*a) - (int)((unsigned char)*b);
+        if (!*a) return 0;
+        a++; b++;
+    }
+    return 0;
+}
+
+static int ld_streq(const char *a, const char *b) {
+    while (*a && *b) {
+        if (*a != *b) return 0;
+        a++; b++;
+    }
+    return *a == *b;
+}
+
+static void ld_strncpy(char *dst, const char *src, ld_size cap) {
+    ld_size i = 0;
+    if (cap == 0) return;
+    for (; i + 1 < cap && src[i]; i++) dst[i] = src[i];
+    dst[i] = '\0';
+}
+
+/* Append `right` onto `left/`.  Returns total length, or -1 if it
+ * doesn't fit in `cap`. */
+static int ld_path_join(char *out, ld_size cap,
+                        const char *left, const char *right) {
+    ld_size ll = ld_strlen(left);
+    ld_size lr = ld_strlen(right);
+    if (ll + 1 + lr + 1 > cap) return -1;
+    for (ld_size i = 0; i < ll; i++) out[i] = left[i];
+    out[ll] = '/';
+    for (ld_size i = 0; i < lr; i++) out[ll + 1 + i] = right[i];
+    out[ll + 1 + lr] = '\0';
+    return (int)(ll + 1 + lr);
+}
+
+/* Look up a previously-loaded object by its SONAME (or basename
+ * if SONAME absent).  Returns NULL if not present. */
+static ld_obj_t *find_loaded(const char *name) {
+    for (ld_obj_t *o = ld_obj_head; o; o = o->next) {
+        if (ld_streq(o->name, name)) return o;
+    }
+    return 0;
+}
+
+/* Walk an Elf32_Dyn array, populating the cached pointers in `o`.
+ * `o->base` and `o->dynamic` must already be set; everything else
+ * is filled here.  We compute SONAME late because we need DT_STRTAB
+ * first. */
+static void ld_cache_dynamic(ld_obj_t *o) {
+    ld_u32 strtab_off = 0;
+    ld_u32 symtab_off = 0;
+    ld_u32 rel_off = 0;
+    ld_u32 jmprel_off = 0;
+    ld_u32 hash_off = 0;
+    ld_u32 gnu_hash_off = 0;
+    ld_u32 soname_str = 0;
+    int    soname_seen = 0;
+
+    for (Elf32_Dyn *d = o->dynamic; d->d_tag != DT_NULL; d++) {
+        switch (d->d_tag) {
+        case DT_STRTAB:    strtab_off = d->d_un.d_ptr; break;
+        case DT_STRSZ:     o->strsz   = d->d_un.d_val; break;
+        case DT_SYMTAB:    symtab_off = d->d_un.d_ptr; break;
+        case DT_HASH:      hash_off   = d->d_un.d_ptr; break;
+        case DT_GNU_HASH:  gnu_hash_off = d->d_un.d_ptr; break;
+        case DT_REL:       rel_off    = d->d_un.d_ptr; break;
+        case DT_RELSZ:     o->relsz   = d->d_un.d_val; break;
+        case DT_JMPREL:    jmprel_off = d->d_un.d_ptr; break;
+        case DT_PLTRELSZ:  o->pltrelsz = d->d_un.d_val; break;
+        case DT_SONAME:    soname_str = d->d_un.d_val; soname_seen = 1; break;
+        }
+    }
+
+    o->strtab   = strtab_off   ? (const char *)(strtab_off   + o->base) : 0;
+    o->symtab   = symtab_off   ? (Elf32_Sym  *)(symtab_off   + o->base) : 0;
+    o->hash     = hash_off     ? (ld_u32     *)(hash_off     + o->base) : 0;
+    o->gnu_hash = gnu_hash_off ? (ld_u32     *)(gnu_hash_off + o->base) : 0;
+    o->rel      = rel_off      ? (Elf32_Rel  *)(rel_off      + o->base) : 0;
+    o->jmprel   = jmprel_off   ? (Elf32_Rel  *)(jmprel_off   + o->base) : 0;
+
+    if (soname_seen && o->strtab && o->name[0] == '\0') {
+        ld_strncpy(o->name, o->strtab + soname_str, sizeof(o->name));
+    }
+}
+
+/* Append `o` to the global loaded-object list, preserving order. */
+static void ld_obj_append(ld_obj_t *o) {
+    o->next = 0;
+    if (!ld_obj_head) ld_obj_head = o;
+    if (ld_obj_tail) ld_obj_tail->next = o;
+    ld_obj_tail = o;
+}
+
+/* Load a single .so file from `path` into memory.  Returns the
+ * descriptor or NULL on failure. */
+static ld_obj_t *load_from_path(const char *path) {
+    if (ld_obj_count >= LD_MAX_OBJS) return 0;
+
+    int fd = ld_open(path, LD_O_RDONLY);
+    if (fd < 0) return 0;
+
+    /* Read just the file header so we can locate phdrs. */
+    Elf32_Ehdr eh;
+    if (ld_read(fd, &eh, sizeof(eh)) != (long)sizeof(eh)) {
+        ld_close(fd);
+        return 0;
+    }
+    if (eh.e_ident[0] != 0x7f || eh.e_ident[1] != 'E' ||
+        eh.e_ident[2] != 'L'  || eh.e_ident[3] != 'F') {
+        ld_close(fd);
+        return 0;
+    }
+    if (eh.e_type != 3 /* ET_DYN */ || eh.e_machine != 3 /* EM_386 */) {
+        ld_close(fd);
+        return 0;
+    }
+    if (eh.e_phnum == 0 || eh.e_phentsize != sizeof(Elf32_Phdr)) {
+        ld_close(fd);
+        return 0;
+    }
+
+    /* Read the program header table.  Bound it so a malicious
+     * file can't ask for arbitrary memory. */
+    if (eh.e_phnum > 64) {
+        ld_close(fd);
+        return 0;
+    }
+    Elf32_Phdr ph[64];
+    if (ld_lseek(fd, (long)eh.e_phoff, 0) < 0) { ld_close(fd); return 0; }
+    ld_size ph_bytes = (ld_size)eh.e_phnum * sizeof(Elf32_Phdr);
+    if (ld_read(fd, ph, ph_bytes) != (long)ph_bytes) {
+        ld_close(fd);
+        return 0;
+    }
+
+    /* Compute the spanning range of all PT_LOAD segments so we can
+     * reserve a contiguous run of address space and let the kernel
+     * pick the base, then fix up subsequent segments at MAP_FIXED
+     * offsets relative to that base. */
+    ld_u32 lo = 0xFFFFFFFFu, hi = 0;
+    int    have_load = 0;
+    for (int i = 0; i < eh.e_phnum; i++) {
+        if (ph[i].p_type != PT_LOAD) continue;
+        have_load = 1;
+        ld_u32 vstart = ph[i].p_vaddr & ~(PAGE_SIZE - 1);
+        ld_u32 vend   = (ph[i].p_vaddr + ph[i].p_memsz + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
+        if (vstart < lo) lo = vstart;
+        if (vend   > hi) hi = vend;
+    }
+    if (!have_load) { ld_close(fd); return 0; }
+
+    /* Anonymous reserve for the whole span — we'll overwrite each
+     * PT_LOAD with MAP_FIXED + file backing.  This guarantees we
+     * get a contiguous address range. */
+    ld_size span = (ld_size)(hi - lo);
+    void *base_v = ld_mmap(0, span, LD_PROT_READ,
+                           LD_MAP_PRIVATE | LD_MAP_ANON, -1, 0);
+    if ((long)base_v < 0) { ld_close(fd); return 0; }
+    ld_u32 base = (ld_u32)(unsigned long)base_v - lo;
+
+    /* Map each PT_LOAD over the reserved range. */
+    for (int i = 0; i < eh.e_phnum; i++) {
+        if (ph[i].p_type != PT_LOAD) continue;
+        int prot = 0;
+        if (ph[i].p_flags & 0x1) prot |= LD_PROT_EXEC;
+        if (ph[i].p_flags & 0x2) prot |= LD_PROT_WRITE;
+        if (ph[i].p_flags & 0x4) prot |= LD_PROT_READ;
+
+        ld_u32 vaddr = (ph[i].p_vaddr + base) & ~(PAGE_SIZE - 1);
+        ld_u32 voff  = ph[i].p_vaddr - (ph[i].p_vaddr & ~(PAGE_SIZE - 1));
+        ld_u32 fileoff_pages = (ph[i].p_offset & ~(PAGE_SIZE - 1)) / PAGE_SIZE;
+        ld_size mapsz = (voff + ph[i].p_filesz + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
+
+        if (ph[i].p_filesz > 0) {
+            void *r = ld_mmap((void *)vaddr, mapsz,
+                              prot | LD_PROT_WRITE,
+                              LD_MAP_PRIVATE | LD_MAP_FIXED,
+                              fd, fileoff_pages);
+            if ((long)r < 0 || r != (void *)vaddr) { ld_close(fd); return 0; }
+        }
+        /* BSS: anonymous pad if memsz > filesz. */
+        if (ph[i].p_memsz > ph[i].p_filesz) {
+            ld_u32 bss_start = (ph[i].p_vaddr + base + ph[i].p_filesz);
+            ld_u32 bss_pg    = bss_start & ~(PAGE_SIZE - 1);
+            ld_u32 bss_end   = (ph[i].p_vaddr + base + ph[i].p_memsz + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
+            if (bss_end > bss_pg + mapsz) {
+                ld_u32 anon_start = bss_pg + (mapsz ? mapsz : 0);
+                /* Use the conservative anon_start so we never re-map
+                 * a page that the file mapping above already covered. */
+                if (anon_start < bss_end) {
+                    void *a = ld_mmap((void *)anon_start, bss_end - anon_start,
+                                      prot | LD_PROT_WRITE,
+                                      LD_MAP_PRIVATE | LD_MAP_ANON | LD_MAP_FIXED,
+                                      -1, 0);
+                    (void)a; /* best-effort; failure leaves zero pages from the reserve */
+                }
+            }
+        }
+    }
+
+    ld_close(fd);
+
+    /* Locate PT_DYNAMIC. */
+    Elf32_Dyn *dyn = 0;
+    for (int i = 0; i < eh.e_phnum; i++) {
+        if (ph[i].p_type == PT_DYNAMIC) {
+            dyn = (Elf32_Dyn *)(ph[i].p_vaddr + base);
+            break;
+        }
+    }
+    if (!dyn) return 0;
+
+    ld_obj_t *o = &ld_obj_pool[ld_obj_count++];
+    o->base    = base;
+    o->dynamic = dyn;
+    /* Take basename from path as a placeholder; SONAME will
+     * overwrite it inside ld_cache_dynamic. */
+    {
+        const char *bn = path;
+        for (const char *p = path; *p; p++) if (*p == '/') bn = p + 1;
+        ld_strncpy(o->name, bn, sizeof(o->name));
+    }
+    ld_cache_dynamic(o);
+    ld_obj_append(o);
+    return o;
+}
+
+/* Resolve a soname against the search paths and load it. */
+ld_obj_t *ld_load_object(const char *soname) {
+    ld_obj_t *cached = find_loaded(soname);
+    if (cached) return cached;
+
+    char path[256];
+    /* Absolute paths are tried verbatim. */
+    if (soname[0] == '/') {
+        return load_from_path(soname);
+    }
+    for (int i = 0; ld_search_paths[i]; i++) {
+        if (ld_path_join(path, sizeof(path), ld_search_paths[i], soname) < 0)
+            continue;
+        ld_obj_t *o = load_from_path(path);
+        if (o) return o;
+    }
+    return 0;
+}
+
+/* Suppress unused-warning for ld_strncmp until the resolver
+ * actually uses prefix matches. */
+__attribute__((unused))
+static void ld_keep_helpers(void) {
+    (void)ld_strncmp;
+}
+
+/* Public accessor for the loaded-object list — used by the
+ * resolver and relocator. */
+ld_obj_t *ld_obj_list(void) { return ld_obj_head; }
+
+/* Prepend an externally-allocated descriptor (the program itself)
+ * onto the list so the resolver scans the program first per the
+ * standard ELF lookup order. */
+void ld_obj_prepend(ld_obj_t *o) {
+    o->next = ld_obj_head;
+    ld_obj_head = o;
+    if (!ld_obj_tail) ld_obj_tail = o;
+}

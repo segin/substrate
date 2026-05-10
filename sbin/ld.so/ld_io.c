@@ -9,31 +9,60 @@
 
 #include "ld.h"
 
+/* Native syscall ABI: number in %eax, args at [esp+4..], dummy at
+ * [esp+0].  Inline-asm pitfall: any "g"/"m"-constrained operand
+ * may resolve to a stack slot, and explicit pushes shift %esp
+ * before the operand is read — the kernel then sees garbage.
+ * i386 also has only 7 GPRs total, so a 6-arg syscall plus the
+ * number can exhaust the register pool.
+ *
+ * Robust pattern: build the kernel's arg block as a local array
+ * at a stable address, swap %esp to point at that array for the
+ * duration of int $0x80, restore %esp on return.  The kernel
+ * uses its own stack so playing tricks with our %esp is safe.
+ */
+
 static long ld_syscall3(int nr, ld_u32 a, ld_u32 b, ld_u32 c) {
-    long ret;
+    ld_u32 stk[4] = { 0 /*dummy*/, a, b, c };
+    long ret, saved;
     __asm__ volatile (
-        "pushl %4\n\t"
-        "pushl %3\n\t"
-        "pushl %2\n\t"
-        "pushl $0\n\t"          /* dummy ret slot */
-        "int   $0x80\n\t"
-        "addl  $16, %%esp\n\t"
-        : "=a"(ret)
-        : "0"(nr), "g"(a), "g"(b), "g"(c)
+        "movl %%esp, %1\n\t"
+        "movl %2, %%esp\n\t"
+        "int  $0x80\n\t"
+        "movl %1, %%esp\n\t"
+        : "=a"(ret), "=&r"(saved)
+        : "r"(stk), "0"(nr)
         : "memory", "cc"
     );
     return ret;
 }
 
 static long ld_syscall1(int nr, ld_u32 a) {
-    long ret;
+    ld_u32 stk[2] = { 0, a };
+    long ret, saved;
     __asm__ volatile (
-        "pushl %2\n\t"
-        "pushl $0\n\t"
-        "int   $0x80\n\t"
-        "addl  $8, %%esp\n\t"
-        : "=a"(ret)
-        : "0"(nr), "g"(a)
+        "movl %%esp, %1\n\t"
+        "movl %2, %%esp\n\t"
+        "int  $0x80\n\t"
+        "movl %1, %%esp\n\t"
+        : "=a"(ret), "=&r"(saved)
+        : "r"(stk), "0"(nr)
+        : "memory", "cc"
+    );
+    return ret;
+}
+
+static long ld_syscall6(int nr, ld_u32 a, ld_u32 b, ld_u32 c,
+                        ld_u32 d, ld_u32 e, ld_u32 f) {
+    ld_u32 stk[7] = { 0, a, b, c, d, e, f };
+    long ret, saved;
+    __asm__ volatile (
+        "movl %%esp, %1\n\t"
+        "movl %2, %%esp\n\t"
+        "int  $0x80\n\t"
+        "movl %1, %%esp\n\t"
+        : "=a"(ret), "=&r"(saved)
+        : "r"(stk), "0"(nr)
         : "memory", "cc"
     );
     return ret;
@@ -86,4 +115,31 @@ void ld_die(const char *msg) {
     ld_puts("\n");
     ld_syscall1(SYS_exit, 127);
     for (;;) { /* unreachable */ }
+}
+
+int ld_open(const char *path, int flags) {
+    /* sys_open(path, flags, mode) — pass 0 for mode since
+     * we never create files. */
+    return (int)ld_syscall3(SYS_open, (ld_u32)(unsigned long)path,
+                            (ld_u32)flags, 0);
+}
+
+int ld_close(int fd) {
+    return (int)ld_syscall1(SYS_close, (ld_u32)fd);
+}
+
+long ld_read(int fd, void *buf, ld_size n) {
+    return ld_syscall3(SYS_read, (ld_u32)fd, (ld_u32)(unsigned long)buf, (ld_u32)n);
+}
+
+long ld_lseek(int fd, long off, int whence) {
+    return ld_syscall3(SYS_lseek, (ld_u32)fd, (ld_u32)off, (ld_u32)whence);
+}
+
+void *ld_mmap(void *addr, ld_size len, int prot, int flags,
+              int fd, ld_u32 page_off) {
+    long r = ld_syscall6(SYS_mmap, (ld_u32)(unsigned long)addr,
+                         (ld_u32)len, (ld_u32)prot, (ld_u32)flags,
+                         (ld_u32)fd, page_off);
+    return (void *)r;
 }
