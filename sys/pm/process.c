@@ -18,6 +18,7 @@
 #include <exec/perso/personality.h>
 #include <kern/time.h>
 #include <sys/types.h>
+#include <vfs/buf.h>
 #ifndef HOST_TEST
 #include <kern/cmdline.h>
 #include <vm/vm_kmem.h>
@@ -1097,11 +1098,15 @@ void proc_exit(int code) {
         extern unsigned long namecache_evict_count;
         extern unsigned long namecache_purge_count;
         extern int           vfs_cache_count;
+        struct bio_stats bs;
+        bio_get_stats(&bs);
         kprintf("vm_leak[pid=%d exit=%d]: pager A=%lu D=%lu (live=%ld) "
                 "map_destroy=%lu (ents=%lu) "
                 "fs_open=%lu fs_close=%lu (drift=%ld) "
                 "pmap C=%llu D=%llu (live=%lld) "
-                "nc=%d (E=%lu V=%lu P=%lu)\n",
+                "nc=%d (E=%lu V=%lu P=%lu) "
+                "bio nbuf=%u bytes=%llu hits=%llu miss=%llu reclaim=%llu "
+                "[L=%u C=%u D=%u E=%u]\n",
                 current_process->pid, code,
                 vm_pager_vnode_alloc_count,
                 vm_pager_vnode_dealloc_count,
@@ -1114,7 +1119,13 @@ void proc_exit(int code) {
                 (long long)(pmap_create_calls - pmap_destroy_calls),
                 vfs_cache_count,
                 namecache_enter_count, namecache_evict_count,
-                namecache_purge_count);
+                namecache_purge_count,
+                bs.nbuf,
+                (unsigned long long)bs.resident_bytes,
+                (unsigned long long)bs.hits,
+                (unsigned long long)bs.misses,
+                (unsigned long long)bs.reclaims,
+                bs.q_locked, bs.q_clean, bs.q_dirty, bs.q_empty);
     }
 
     proc_vfork_done(current_process);
