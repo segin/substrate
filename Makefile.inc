@@ -75,6 +75,17 @@ endif
     USER_LDFLAGS := -m32 -nostdlib -fno-pie -no-pie $(EXTRA_USER_LDFLAGS)
     _LIBGCC_PATH := $(shell $(CC) -m32 -print-libgcc-file-name 2>/dev/null)
     LIBGCC = $(if $(wildcard $(_LIBGCC_PATH)),$(_LIBGCC_PATH),)
+
+    # Shared-library compile / link flags.  Same defines as
+    # USER_CFLAGS but PIC instead of -fno-pie, and the link line
+    # produces a versioned ET_DYN with a SONAME.  Library Makefiles
+    # use these to produce libX.so.<N> alongside their libX.a.
+    SHLIB_CFLAGS  := $(filter-out -fno-pie,$(USER_CFLAGS)) -fPIC
+    SHLIB_LDFLAGS := -m32 -nostdlib -nostartfiles -shared \
+                     -Wl,-Bsymbolic-functions \
+                     -Wl,-z,max-page-size=0x1000 \
+                     -Wl,-z,now \
+                     $(EXTRA_USER_LDFLAGS)
 endif
 
 # Macro to brand a binary as Substrate native (OSABI=64)

@@ -2,24 +2,39 @@ include ../../Makefile.inc
 
 ifeq ($(NATIVE_BUILD),1)
 MATH_CFLAGS = $(CFLAGS) -I../../include
+PIC_MATH_CFLAGS = $(MATH_CFLAGS)
 else
-MATH_CFLAGS = $(USER_CFLAGS) -fno-builtin
+MATH_CFLAGS     = $(USER_CFLAGS)  -fno-builtin
+PIC_MATH_CFLAGS = $(SHLIB_CFLAGS) -fno-builtin
 endif
 
 SRCS = src/math.c src/mathf.c src/mathl.c src/fenv.c
-OBJS = $(SRCS:.c=.o)
+OBJS     = $(SRCS:.c=.o)
+PIC_OBJS = $(SRCS:.c=.pic.o)
 
-all: libm.a
+all: libm.a $(if $(NATIVE_BUILD),,libm.so.0)
 
 libm.a: $(OBJS)
 	$(AR) rcs $@ $(OBJS)
 
+# libm has no DT_NEEDED — math is self-contained, no syscalls.
+# No libm.so symlink in source tree — see lib/c/Makefile.
+libm.so.0: $(PIC_OBJS)
+	$(CC) $(SHLIB_LDFLAGS) -Wl,-soname,libm.so.0 -o $@ $(PIC_OBJS)
+
 %.o: %.c
 	$(CC) $(MATH_CFLAGS) -c $< -o $@
 
-clean:
-	rm -f src/*.o libm.a
+%.pic.o: %.c
+	$(CC) $(PIC_MATH_CFLAGS) -c $< -o $@
 
-install: libm.a
-	@mkdir -p $(DESTDIR)/usr/lib
-	cp libm.a $(DESTDIR)/usr/lib/
+clean:
+	rm -f src/*.o src/*.pic.o libm.a libm.so libm.so.0
+
+install: libm.a $(if $(NATIVE_BUILD),,libm.so.0)
+	@mkdir -p $(DESTDIR)/usr/lib $(DESTDIR)/lib
+	install -m 644 libm.a $(DESTDIR)/usr/lib/
+ifndef NATIVE_BUILD
+	install -m 755 libm.so.0 $(DESTDIR)/lib/
+	@ln -sf libm.so.0 $(DESTDIR)/lib/libm.so
+endif

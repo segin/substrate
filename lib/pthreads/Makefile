@@ -1,22 +1,36 @@
 include ../../Makefile.inc
 
-CFLAGS := $(CFLAGS) -I. -I../c/include -I../../include -I../../sys
-LDFLAGS := $(USER_LDFLAGS)
+CFLAGS    := $(CFLAGS) -I. -I../c/include -I../../include -I../../sys
+PICFLAGS  := $(SHLIB_CFLAGS) -I. -I../c/include -I../../include -I../../sys
+LDFLAGS   := $(USER_LDFLAGS)
 
 SRCS = pthread.c
-OBJS = $(SRCS:.c=.o)
+OBJS     = $(SRCS:.c=.o)
+PIC_OBJS = $(SRCS:.c=.pic.o)
 
-all: libpthread.a
+all: libpthread.a $(if $(NATIVE_BUILD),,libpthread.so.0)
 
 libpthread.a: $(OBJS)
 	$(AR) rcs $@ $(OBJS)
 
+libpthread.so.0: $(PIC_OBJS)
+	$(CC) $(SHLIB_LDFLAGS) -Wl,-soname,libpthread.so.0 \
+	      -L$(TOP)/lib/c -l:libc.so.0 \
+	      -o $@ $(PIC_OBJS)
+
 %.o: %.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
-clean:
-	rm -f $(OBJS) libpthread.a
+%.pic.o: %.c
+	$(CC) $(PICFLAGS) -c $< -o $@
 
-install: libpthread.a
-	@mkdir -p $(DESTDIR)/usr/lib
-	cp libpthread.a $(DESTDIR)/usr/lib/
+clean:
+	rm -f $(OBJS) $(PIC_OBJS) libpthread.a libpthread.so libpthread.so.0
+
+install: libpthread.a $(if $(NATIVE_BUILD),,libpthread.so.0)
+	@mkdir -p $(DESTDIR)/usr/lib $(DESTDIR)/lib
+	install -m 644 libpthread.a $(DESTDIR)/usr/lib/
+ifndef NATIVE_BUILD
+	install -m 755 libpthread.so.0 $(DESTDIR)/lib/
+	@ln -sf libpthread.so.0 $(DESTDIR)/lib/libpthread.so
+endif
