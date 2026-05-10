@@ -1,0 +1,83 @@
+.TH RINT 3 "2026-05-10" "Substrate" "Library Functions Manual"
+.SH NAME
+rint, nearbyint \- round to nearest integer, ties to even
+.SH LIBRARY
+Math Library (libm, \-lm)
+.SH SYNOPSIS
+.nf
+.B #include <math.h>
+.PP
+.BI "double rint(double " x ");"
+.PP
+.B #include <math.h>
+.PP
+.BI "double nearbyint(double " x ");"
+.PP
+.B #include <math.h>
+.PP
+.BI "float rintf(float " x ");"
+.PP
+.B #include <math.h>
+.PP
+.BI "float nearbyintf(float " x ");"
+.PP
+.B #include <math.h>
+.PP
+.BI "long double rintl(long double " x ");"
+.PP
+.B #include <math.h>
+.PP
+.BI "long double nearbyintl(long double " x ");"
+.SH DESCRIPTION
+The
+.BR rint ()
+and
+.BR nearbyint ()
+functions round
+.I x
+to the nearest integral value.
+When the fractional part is exactly 0.5, ties are resolved by rounding to
+the nearest even integer (also known as "banker's rounding").
+.PP
+The
+.BR rintf ()
+,
+.BR nearbyintf ()
+,
+.BR rintl ()
+, and
+.BR nearbyintl ()
+functions are float and long double variants, respectively.
+.PP
+The
+.BR nearbyint ()
+function is guaranteed not to raise the
+.BR FE_INEXACT
+floating-point exception.
+.SH RETURN VALUE
+The
+.BR rint ()
+and
+.BR nearbyint ()
+functions return the rounded integral value.
+.br
+If the result cannot be represented, the return value is unspecified.
+.SH ERRORS
+No errors are defined.
+The functions do not set
+.IR errno .
+.SH EXAMPLES
+.RS
+.nf
+printf("\\%f\\n", rint(0.5));   /* prints 0.0 (ties to even) */
+printf("\\%f\\n", rint(1.5));   /* prints 2.0 (ties to even) */
+printf("\\%f\\n", rint(2.5));   /* prints 2.0 (ties to even) */
+printf("\\%f\\n", rint(3.5));   /* prints 4.0 (ties to even) */
+.fi
+.RE
+.SH SEE ALSO
+.BR ceil (3),
+.BR floor (3),
+.BR trunc (3),
+.BR round (3),
+.BR roundeven (3)

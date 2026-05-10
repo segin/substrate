@@ -1155,6 +1155,17 @@ void proc_exit(int code) {
                 (unsigned long long)ext2_root_pin_lost);
     }
 
+    /* Per-syscall cost histogram dump for the just-exited process.
+     * Counters are accumulated across the whole boot (per personality),
+     * so for clean per-process windows pass reset=1 here. */
+    if (cmdline_debug_enabled("syscall_stats")) {
+        extern void syscall_stats_dump(int reset);
+        kprintf("=== syscall_stats[pid=%d exit=%d] ===\n",
+                current_process->pid, code);
+        syscall_stats_dump(1);
+        kprintf("=== end syscall_stats ===\n");
+    }
+
     proc_vfork_done(current_process);
     
     // 1. Set State

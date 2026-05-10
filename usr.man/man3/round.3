@@ -1,0 +1,57 @@
+.TH ROUND 3 "2026-05-10" "Substrate" "Library Functions Manual"
+.SH NAME
+round \- round to nearest integer, ties away from zero
+.SH LIBRARY
+Math Library (libm, \-lm)
+.SH SYNOPSIS
+.nf
+.B #include <math.h>
+.PP
+.BI "double round(double " x ");"
+.PP
+.B #include <math.h>
+.PP
+.BI "float roundf(float " x ");"
+.PP
+.B #include <math.h>
+.PP
+.BI "long double roundl(long double " x ");"
+.SH DESCRIPTION
+The
+.BR round ()
+function rounds
+.I x
+to the nearest integral value.
+When the fractional part is exactly 0.5, it rounds away from zero.
+.PP
+The
+.BR roundf ()
+and
+.BR roundl ()
+functions are float and long double variants, respectively.
+.SH RETURN VALUE
+The
+.BR round ()
+functions return the rounded integral value.
+.br
+If the result cannot be represented, the return value is unspecified.
+.SH ERRORS
+No errors are defined.
+The functions do not set
+.IR errno .
+.SH EXAMPLES
+.RS
+.nf
+printf("\\%f\\n", round(0.5));   /* prints 1.0 */
+printf("\\%f\\n", round(1.5));   /* prints 2.0 */
+printf("\\%f\\n", round(2.5));   /* prints 3.0 */
+printf("\\%f\\n", round(-0.5));  /* prints -1.0 */
+printf("\\%f\\n", round(-1.5));  /* prints -2.0 */
+.fi
+.RE
+.SH SEE ALSO
+.BR ceil (3),
+.BR floor (3),
+.BR trunc (3),
+.BR roundeven (3),
+.BR rint (3)

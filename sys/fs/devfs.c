@@ -78,6 +78,16 @@ static struct {
     int count;
 } devfs_deferred = { .count = 0 };
 
+/* Same problem for aliases: drivers like the audio framework wire up
+ * /dev/audio -> /dev/audio0 during pre-vfs init, so devfs_register_alias
+ * also has to queue when root_entry is still NULL. */
+#define DEVFS_DEFERRED_ALIAS_MAX 16
+static struct {
+    char path[DEVFS_DEFERRED_ALIAS_MAX][64];
+    char target[DEVFS_DEFERRED_ALIAS_MAX][64];
+    int count;
+} devfs_deferred_alias = { .count = 0 };
+
 static struct dirent *devfs_dir_readdir(fs_node_t *node, uint64_t index);
 static fs_node_t *devfs_dir_finddir(fs_node_t *node, char *name);
 
@@ -465,6 +475,20 @@ int devfs_register_alias(const char *path, const char *target) {
         return -1;
     }
 
+    /* Pre-init queue, mirrors devfs_register_device above. */
+    if (!root_entry) {
+        if (devfs_deferred_alias.count < DEVFS_DEFERRED_ALIAS_MAX) {
+            int n = devfs_deferred_alias.count++;
+            strncpy(devfs_deferred_alias.path[n], path,
+                    sizeof(devfs_deferred_alias.path[n]) - 1);
+            devfs_deferred_alias.path[n][sizeof(devfs_deferred_alias.path[n]) - 1] = '\0';
+            strncpy(devfs_deferred_alias.target[n], target,
+                    sizeof(devfs_deferred_alias.target[n]) - 1);
+            devfs_deferred_alias.target[n][sizeof(devfs_deferred_alias.target[n]) - 1] = '\0';
+        }
+        return 0;
+    }
+
     entry = devfs_lookup_path(path);
     if (entry != NULL) {
         if (entry->node == NULL || (entry->node->flags & 0x7) != FS_SYMLINK) {
@@ -564,4 +588,11 @@ void devfs_init(void) {
         devfs_register_device(devfs_deferred.nodes[i]);
     }
     devfs_deferred.count = 0;
+
+    /* Same for aliases queued before the tree existed. */
+    for (int i = 0; i < devfs_deferred_alias.count; i++) {
+        (void)devfs_register_alias(devfs_deferred_alias.path[i],
+                                   devfs_deferred_alias.target[i]);
+    }
+    devfs_deferred_alias.count = 0;
 }

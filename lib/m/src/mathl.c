@@ -125,3 +125,43 @@ long double erfl(long double x)    { return (long double)erf((double)x); }
 long double erfcl(long double x)   { return (long double)erfc((double)x); }
 long double tgammal(long double x) { return (long double)tgamma((double)x); }
 long double lgammal(long double x) { return (long double)lgamma((double)x); }
+
+/* C23: fromfp family (long double variants) */
+int fromfpxl(long double *y, long double x, fenv_t *envp, int rounding_mode) {
+    if (envp) {
+        fenv_t zero_env = { 0 };
+        *envp = zero_env;
+    }
+    switch (rounding_mode) {
+    case FE_TONEAREST:
+        *y = x;
+        break;
+    case FE_DOWNWARD:
+        *y = floorl(x);
+        break;
+    case FE_UPWARD:
+        *y = ceill(x);
+        break;
+    case FE_TOWARDZERO:
+        *y = truncl(x);
+        break;
+    default:
+        return -1;
+    }
+    return 0;
+}
+
+int fromfpl(long double *y, long double x, fenv_t *envp, int rounding_mode) {
+    return fromfpxl(y, x, envp, rounding_mode);
+}
+
+int ufromfpul(unsigned int *y, long double x, fenv_t *envp, int rounding_mode) {
+    long double tmp = 0;
+    int rc = fromfpxl(&tmp, x, envp, rounding_mode);
+    *y = (unsigned int)tmp;
+    return rc;
+}
+
+int ufromfpxl(unsigned int *y, long double x, fenv_t *envp, int rounding_mode) {
+    return ufromfpul(y, x, envp, rounding_mode);
+}

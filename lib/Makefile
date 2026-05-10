@@ -5,7 +5,7 @@ include ../Makefile.inc
 # DT_NEEDED libsys.so.0, and the link line names the .so files
 # directly with -l:libm.so.0 / -l:libsys.so.0 — those files have
 # to exist before libc.so.0 links, so libm and libsys come first.
-SUBDIRS = m sys c pthreads dl edit usb yacc
+SUBDIRS = m sys c pthreads dl edit usb yacc at dbm
 
 .PHONY: all clean install $(SUBDIRS)
 
@@ -23,7 +23,7 @@ $(SUBDIRS):
 #     must exist before libc.so.0 links.
 #   - Everything else (pthreads, dl, edit, ...) depends on libc.
 c: | m sys
-pthreads dl edit usb yacc: | c
+pthreads dl edit usb yacc at dbm: | c
 
 clean:
 	@set -e; for dir in $(SUBDIRS); do \

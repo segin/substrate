@@ -1,0 +1,53 @@
+.TH CEIL 3 "2026-05-10" "Substrate" "Library Functions Manual"
+.SH NAME
+ceil \- round to smallest integer not less than argument
+.SH LIBRARY
+Math Library (libm, \-lm)
+.SH SYNOPSIS
+.nf
+.B #include <math.h>
+.PP
+.BI "double ceil(double " x ");"
+.PP
+.B #include <math.h>
+.PP
+.BI "float ceilf(float " x ");"
+.PP
+.B #include <math.h>
+.PP
+.BI "long double ceill(long double " x ");"
+.SH DESCRIPTION
+The
+.BR ceil ()
+function returns the smallest integral value that is not less than
+.IR x .
+.PP
+The
+.BR ceilf ()
+and
+.BR ceill ()
+functions are float and long double variants, respectively.
+.SH RETURN VALUE
+The
+.BR ceil ()
+functions return the smallest integral value not less than
+.IR x .
+.br
+If the result cannot be represented, the return value is unspecified.
+.SH ERRORS
+No errors are defined.
+The functions do not set
+.IR errno .
+.SH EXAMPLES
+.RS
+.nf
+printf("\\%f\\n", ceil(3.2));  /* prints 4.0 */
+printf("\\%f\\n", ceil(3.0));  /* prints 3.0 */
+printf("\\%f\\n", ceil(-3.2)); /* prints -3.0 */
+.fi
+.RE
+.SH SEE ALSO
+.BR floor (3),
+.BR trunc (3),
+.BR round (3),
+.BR rint (3)

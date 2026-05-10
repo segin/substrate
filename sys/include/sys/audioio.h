@@ -23,6 +23,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 
 /* ------------------------------------------------------------------- */
 /* Encodings                                                           */
@@ -63,6 +64,11 @@ typedef struct audio_encoding {
 /* Per-direction info                                                  */
 /* ------------------------------------------------------------------- */
 
+/*
+ * Layout below is byte-for-byte identical to NetBSD 10's
+ * struct audio_prinfo (sizeof == 56) so binaries built against
+ * NetBSD's <sys/audioio.h> see the same offsets.  Do not reorder.
+ */
 typedef struct audio_prinfo {
 	uint32_t sample_rate;        /* samples per second */
 	uint32_t channels;           /* mono = 1, stereo = 2 */
@@ -70,33 +76,41 @@ typedef struct audio_prinfo {
 	uint32_t encoding;           /* AUDIO_ENCODING_* */
 	uint32_t gain;               /* AUDIO_MIN_GAIN..AUDIO_MAX_GAIN */
 	uint32_t port;               /* selected port bitmap */
+	uint32_t seek;               /* BSD: byte offset within buffer */
 	uint32_t avail_ports;        /* available port bitmap */
 	uint32_t buffer_size;        /* device buffer size in bytes */
+	uint32_t _ispare[1];
 	uint32_t samples;            /* samples processed since open */
 	uint32_t eof;                /* EOF count (write side) */
 	uint8_t  pause;              /* non-zero = paused */
 	uint8_t  error;              /* over/underrun since last query */
 	uint8_t  waiting;            /* a thread is blocked on this side */
 	uint8_t  balance;            /* AUDIO_LEFT_BAL..AUDIO_RIGHT_BAL */
-	uint8_t  cflags;             /* channel flags (reserved) */
-	uint8_t  pad[3];
+	uint8_t  cspare[2];
 	uint8_t  open;               /* device is open for this direction */
-	uint8_t  active;              /* I/O is in progress */
+	uint8_t  active;             /* I/O is in progress */
 } audio_prinfo_t;
 
 /* ------------------------------------------------------------------- */
 /* Aggregate device state                                              */
 /* ------------------------------------------------------------------- */
 
+/*
+ * Layout matches NetBSD 10's struct audio_info exactly (sizeof == 136,
+ * 2 × audio_prinfo + 6 × uint32_t).  `mode` is the LAST field — do not
+ * move it; mpg123's libout123/output_sun.so writes a sizeof'd struct
+ * here and the SETINFO ioctl number embeds the size in the high half
+ * of the request word, so the layout MUST agree to the byte.
+ */
 typedef struct audio_info {
 	audio_prinfo_t play;
 	audio_prinfo_t record;
 	uint32_t monitor_gain;       /* monitor (loopback) gain */
-	uint32_t mode;               /* AUMODE_* bitmap */
 	uint32_t blocksize;          /* I/O block size in bytes */
 	uint32_t hiwat;              /* output high-water (in blocks) */
 	uint32_t lowat;              /* output low-water (in blocks) */
 	uint32_t _ispare1;
+	uint32_t mode;               /* AUMODE_* bitmap */
 } audio_info_t;
 
 /*
@@ -144,59 +158,50 @@ typedef struct audio_device {
 #define AUDIO_NOTSET_U32 0xFFFFFFFFu
 #define AUDIO_NOTSET_U8  0xFFu
 
-#define AUDIO_INITINFO(_p) do {                                        \
-	audio_info_t *__a = (_p);                                          \
-	audio_prinfo_t *__pri = &__a->play;                                \
-	audio_prinfo_t *__rec = &__a->record;                              \
-	int __i;                                                           \
-	for (__i = 0; __i < 2; __i++) {                                    \
-		audio_prinfo_t *__d = (__i == 0) ? __pri : __rec;              \
-		__d->sample_rate = AUDIO_NOTSET_U32;                           \
-		__d->channels    = AUDIO_NOTSET_U32;                           \
-		__d->precision   = AUDIO_NOTSET_U32;                           \
-		__d->encoding    = AUDIO_NOTSET_U32;                           \
-		__d->gain        = AUDIO_NOTSET_U32;                           \
-		__d->port        = AUDIO_NOTSET_U32;                           \
-		__d->avail_ports = AUDIO_NOTSET_U32;                           \
-		__d->buffer_size = AUDIO_NOTSET_U32;                           \
-		__d->samples     = AUDIO_NOTSET_U32;                           \
-		__d->eof         = AUDIO_NOTSET_U32;                           \
-		__d->pause       = AUDIO_NOTSET_U8;                            \
-		__d->error       = AUDIO_NOTSET_U8;                            \
-		__d->waiting     = AUDIO_NOTSET_U8;                            \
-		__d->balance     = AUDIO_NOTSET_U8;                            \
-		__d->cflags      = AUDIO_NOTSET_U8;                            \
-		__d->open        = AUDIO_NOTSET_U8;                            \
-		__d->active      = AUDIO_NOTSET_U8;                            \
-	}                                                                  \
-	__a->monitor_gain = AUDIO_NOTSET_U32;                              \
-	__a->mode         = AUDIO_NOTSET_U32;                              \
-	__a->blocksize    = AUDIO_NOTSET_U32;                              \
-	__a->hiwat        = AUDIO_NOTSET_U32;                              \
-	__a->lowat        = AUDIO_NOTSET_U32;                              \
-	__a->_ispare1     = AUDIO_NOTSET_U32;                              \
-} while (0)
+/*
+ * Mirror NetBSD's idiom: blanket-fill with 0xff so every field
+ * (including any layout padding) carries the sentinel uniformly,
+ * regardless of whether the caller built against an older or newer
+ * variant of the struct.
+ */
+#define AUDIO_INITINFO(_p) \
+	(void)memset((void *)(_p), 0xff, sizeof(audio_info_t))
 
 /* ------------------------------------------------------------------- */
 /* ioctl numbers                                                       */
 /* ------------------------------------------------------------------- */
 
 /*
- * Numbering follows the convention used elsewhere in Substrate (high
- * byte 'A' = 0x41, second byte the subsystem id, low half the command).
- * The trailing byte mirrors NetBSD's offsets where the API overlaps so
- * porting an existing audio program is a recompile.
+ * BSD-encoded ioctl numbers, matching NetBSD audio(4) byte-for-byte:
+ *
+ *   bits 31..30 : direction (00 none, 01 R, 10 W, 11 RW)
+ *   bits 28..16 : payload size in bytes
+ *   bits 15..8  : group ('A' for audio)
+ *   bits  7..0  : sub-command number
+ *
+ * Defined inline (rather than via <sys/ioccom.h>) because Substrate's
+ * generic _IOC encoding (memio.h) uses 14 size bits — incompatible
+ * with NetBSD's 13-bit field — and we want exact source compatibility
+ * with NetBSD binaries.
  */
-#define AUDIO_GETINFO        0x41020001U  /* R audio_info_t */
-#define AUDIO_SETINFO        0x41020002U  /* W audio_info_t */
-#define AUDIO_DRAIN          0x41020003U  /* (no arg) */
-#define AUDIO_FLUSH          0x41020004U  /* (no arg) */
-#define AUDIO_WSEEK          0x41020005U  /* R uint32_t */
-#define AUDIO_RERROR         0x41020006U  /* R int (record errors) */
-#define AUDIO_GETDEV         0x41020007U  /* R audio_device_t */
-#define AUDIO_GETENC         0x41020008U  /* RW audio_encoding_t */
-#define AUDIO_GETFD          0x41020009U  /* R int */
-#define AUDIO_SETFD          0x4102000AU  /* W int */
-#define AUDIO_GETPROPS       0x4102000BU  /* R int */
+#define _AUDIO_IOC(dir, nr, sz) \
+	((uint32_t)((dir) | (((sz) & 0x1fff) << 16) | (0x41 << 8) | (nr)))
+#define _AUDIO_IO(nr)         _AUDIO_IOC(0x20000000U, (nr), 0)
+#define _AUDIO_IOR(nr, t)     _AUDIO_IOC(0x40000000U, (nr), sizeof(t))
+#define _AUDIO_IOW(nr, t)     _AUDIO_IOC(0x80000000U, (nr), sizeof(t))
+#define _AUDIO_IOWR(nr, t)    _AUDIO_IOC(0xc0000000U, (nr), sizeof(t))
+
+#define AUDIO_GETINFO    _AUDIO_IOR(21, audio_info_t)        /* 0x40884115 */
+#define AUDIO_SETINFO    _AUDIO_IOWR(22, audio_info_t)       /* 0xc0884116 */
+#define AUDIO_DRAIN      _AUDIO_IO(23)                       /* 0x20004117 */
+#define AUDIO_FLUSH      _AUDIO_IO(24)                       /* 0x20004118 */
+#define AUDIO_WSEEK      _AUDIO_IOR(25, uint32_t)            /* 0x40044119 */
+#define AUDIO_RERROR     _AUDIO_IOR(26, int)                 /* 0x4004411a */
+#define AUDIO_GETDEV     _AUDIO_IOR(27, audio_device_t)      /* 0x4030411b */
+#define AUDIO_GETENC     _AUDIO_IOWR(28, audio_encoding_t)   /* 0xc028411c */
+#define AUDIO_GETFD      _AUDIO_IOR(29, int)                 /* 0x4004411d */
+#define AUDIO_SETFD      _AUDIO_IOWR(30, int)                /* 0xc004411e */
+#define AUDIO_PERROR     _AUDIO_IOR(31, int)                 /* 0x4004411f */
+#define AUDIO_GETPROPS   _AUDIO_IOR(34, int)                 /* 0x40044122 */
 
 #endif /* _SYS_AUDIOIO_H */

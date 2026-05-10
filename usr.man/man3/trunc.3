@@ -1,0 +1,56 @@
+.TH TRUNC 3 "2026-05-10" "Substrate" "Library Functions Manual"
+.SH NAME
+trunc \- round to nearest integer toward zero
+.SH LIBRARY
+Math Library (libm, \-lm)
+.SH SYNOPSIS
+.nf
+.B #include <math.h>
+.PP
+.BI "double trunc(double " x ");"
+.PP
+.B #include <math.h>
+.PP
+.BI "float truncf(float " x ");"
+.PP
+.B #include <math.h>
+.PP
+.BI "long double truncl(long double " x ");"
+.SH DESCRIPTION
+The
+.BR trunc ()
+function rounds
+.I x
+to the nearest integral value not larger in magnitude than
+.IR x .
+In other words, it rounds toward zero.
+.PP
+The
+.BR truncf ()
+and
+.BR truncl ()
+functions are float and long double variants, respectively.
+.SH RETURN VALUE
+The
+.BR trunc ()
+functions return the truncated integral value.
+.br
+If the result cannot be represented, the return value is unspecified.
+.SH ERRORS
+No errors are defined.
+The functions do not set
+.IR errno .
+.SH EXAMPLES
+.RS
+.nf
+printf("\\%f\\n", trunc(3.2));   /* prints 3.0 */
+printf("\\%f\\n", trunc(3.9));   /* prints 3.0 */
+printf("\\%f\\n", trunc(-3.2));  /* prints -3.0 */
+printf("\\%f\\n", trunc(-3.9));  /* prints -3.0 */
+.fi
+.RE
+.SH SEE ALSO
+.BR ceil (3),
+.BR floor (3),
+.BR round (3),
+.BR rint (3)

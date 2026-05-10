@@ -1,0 +1,53 @@
+.TH FLOOR 3 "2026-05-10" "Substrate" "Library Functions Manual"
+.SH NAME
+floor \- round to largest integer not greater than argument
+.SH LIBRARY
+Math Library (libm, \-lm)
+.SH SYNOPSIS
+.nf
+.B #include <math.h>
+.PP
+.BI "double floor(double " x ");"
+.PP
+.B #include <math.h>
+.PP
+.BI "float floorf(float " x ");"
+.PP
+.B #include <math.h>
+.PP
+.BI "long double floorl(long double " x ");"
+.SH DESCRIPTION
+The
+.BR floor ()
+function returns the largest integral value that is not greater than
+.IR x .
+.PP
+The
+.BR floorf ()
+and
+.BR floorl ()
+functions are float and long double variants, respectively.
+.SH RETURN VALUE
+The
+.BR floor ()
+functions return the largest integral value not greater than
+.IR x .
+.br
+If the result cannot be represented, the return value is unspecified.
+.SH ERRORS
+No errors are defined.
+The functions do not set
+.IR errno .
+.SH EXAMPLES
+.RS
+.nf
+printf("\\%f\\n", floor(3.2));   /* prints 3.0 */
+printf("\\%f\\n", floor(3.0));   /* prints 3.0 */
+printf("\\%f\\n", floor(-3.2));  /* prints -4.0 */
+.fi
+.RE
+.SH SEE ALSO
+.BR ceil (3),
+.BR trunc (3),
+.BR round (3),
+.BR rint (3)

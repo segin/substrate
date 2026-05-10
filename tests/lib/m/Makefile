@@ -7,7 +7,7 @@ CFLAGS = -m32 -Wall -Wextra -g -I../../../include -O2
 FPCLASSIFY = ../../../lib/c/src/fpclassify.c
 
 all: test_trig prop_trig test_fenv prop_fenv fuzz_fenv test_tgmath \
-     test_classify prop_classify test_arith prop_arith
+     test_classify prop_classify test_arith prop_arith test_round prop_round
 test_trig: unit/test_trig.c ../../../lib/m/src/math.c $(FPCLASSIFY) ../../../lib/m/src/fenv.c
 	$(CC) $(CFLAGS) -fno-builtin $^ -o $@ -lm
 
@@ -38,6 +38,12 @@ test_arith: unit/test_arith.c ../../../lib/m/src/math.c $(FPCLASSIFY) ../../../l
 prop_arith: property/prop_arith.c ../../../lib/m/src/math.c $(FPCLASSIFY) ../../../lib/m/src/fenv.c
 	$(CC) $(CFLAGS) -fno-builtin $^ -o $@ -lm
 
+test_round: unit/test_round.c ../../../lib/m/src/math.c ../../../lib/m/src/mathl.c $(FPCLASSIFY) ../../../lib/m/src/fenv.c
+	$(CC) $(CFLAGS) -fno-builtin $^ -o $@ -lm
+
+prop_round: property/prop_round.c ../../../lib/m/src/math.c $(FPCLASSIFY) ../../../lib/m/src/fenv.c
+	$(CC) $(CFLAGS) -fno-builtin $^ -o $@ -lm
+
 test: all
 	./test_trig
 	./prop_trig
@@ -49,7 +55,9 @@ test: all
 	./test_classify
 	./test_arith
 	./prop_classify
+	./test_round
+	./prop_round
 
 clean:
 	rm -f test_trig prop_trig test_fenv prop_fen prop_arithv fuzz_fenv test_tgmath \
-	      test_classify prop_classify test_arith
+	      test_classify prop_classify test_arith test_round prop_round

@@ -1428,6 +1428,14 @@ double round(double x) {
     return (x >= 0.0) ? floor(x + 0.5) : ceil(x - 0.5);
 }
 
+/*
+ * roundeven: round-half-to-even (banker's rounding), C23.
+ * Always uses round-to-nearest-even regardless of rounding mode.
+ */
+double roundeven(double x) {
+    return rint(x);
+}
+
 double rint(double x) {
     if (isnan(x) || isinf(x)) return x;
 #if defined(__i386__) || defined(__x86_64__)
@@ -1553,6 +1561,7 @@ float ceilf(float x) { return(float)ceil(x); }
 float floorf(float x) { return(float)floor(x); }
 float truncf(float x) { return(float)trunc(x); }
 float roundf(float x) { return(float)round(x); }
+float roundevenf(float x) { return(roundeven(x)); }
 float fmaximumf(float x, float y) { return(float)fmaximum(x, y); }
 float fminimumf(float x, float y) { return(float)fminimum(x, y); }
 float fmaximum_numf(float x, float y) { return(float)fmaximum_num(x, y); }
@@ -1579,6 +1588,7 @@ long double ceill(long double x) { return ceil(x); }
 long double floorl(long double x) { return floor(x); }
 long double truncl(long double x) { return trunc(x); }
 long double roundl(long double x) { return round(x); }
+long double roundevenl(long double x) { return roundeven(x); }
 long double fmaximuml(long double x, long double y) { return fmaximum(x, y); }
 long double fminimuml(long double x, long double y) { return fminimum(x, y); }
 long double fmaximum_numl(long double x, long double y) { return fmaximum_num(x, y); }
@@ -1599,3 +1609,50 @@ long double cospil(long double x) { return cospi(x); }
 long double tanpil(long double x) { return tanpi(x); }
 long double asinpil(long double x) { return asinpi(x); }
 long double atanpil(long double x) { return atanpi(x); }
+
+/* C23: fromfp family — convert floating-point values with explicit rounding */
+
+/*
+ * fromfp: store x into *y using the given rounding_mode.
+ * rounding_mode values match fesetround() modes; FE_TONEAREST is default.
+ * Returns 0 on success, non-zero for unsupported rounding modes.
+ * envp (if non-NULL) is set to the current fenv state.
+ */
+int fromfp(double *y, double x, fenv_t *envp, int rounding_mode) {
+    if (envp) {
+        fenv_t zero_env = { 0 };
+        *envp = zero_env;
+    }
+    switch (rounding_mode) {
+    case FE_TONEAREST:
+        *y = x;
+        break;
+    case FE_DOWNWARD:
+        *y = floor(x);
+        break;
+    case FE_UPWARD:
+        *y = ceil(x);
+        break;
+    case FE_TOWARDZERO:
+        *y = trunc(x);
+        break;
+    default:
+        return -1;
+    }
+    return 0;
+}
+
+int fromfpx(double *y, double x, fenv_t *envp, int rounding_mode) {
+    return fromfp(y, x, envp, rounding_mode);
+}
+
+int ufromfp(unsigned int *y, double x, fenv_t *envp, int rounding_mode) {
+    double tmp = 0;
+    int rc = fromfp(&tmp, x, envp, rounding_mode);
+    *y = (unsigned int)tmp;
+    return rc;
+}
+
+int ufromfpx(unsigned int *y, double x, fenv_t *envp, int rounding_mode) {
+    return ufromfp(y, x, envp, rounding_mode);
+}

@@ -1,5 +1,6 @@
 #include "dbm.h"
 #include <stdlib.h>
+#include <stdio.h>     /* SEEK_SET / SEEK_CUR — POSIX puts them here */
 #include <unistd.h>
 #include <fcntl.h>
 #include <string.h>

@@ -115,6 +115,69 @@ int sys_set_thread_area(struct user_desc *u_info) {
 
 extern int syscall_trace_enabled;
 
+/*
+ * Per-syscall, per-personality cycle accounting.  Surfaces the cost
+ * distribution of every syscall a process makes, so we can tell at a
+ * glance which call (and which personality) is responsible for a
+ * realtime deficit (e.g. mpg123 stuttering under the netbsd perso).
+ *
+ * Indexed [personality_id][syscall_nr], capped at sane bounds.  The
+ * counters are updated unconditionally — the cost of two rdtsc's
+ * plus four 64-bit adds is negligible compared with the dispatched
+ * syscall body itself.  Dumping requires `debug=syscall_stats`.
+ */
+#define SCSTAT_MAX_PERSO    16
+#define SCSTAT_MAX_NR      512
+struct syscall_stat {
+    uint64_t count;
+    uint64_t total_cycles;
+    uint64_t min_cycles;
+    uint64_t max_cycles;
+};
+static struct syscall_stat scstat[SCSTAT_MAX_PERSO][SCSTAT_MAX_NR];
+
+static inline uint64_t syscall_rdtsc(void) {
+    uint32_t lo, hi;
+    __asm__ volatile("rdtsc" : "=a"(lo), "=d"(hi));
+    return ((uint64_t)hi << 32) | lo;
+}
+
+void syscall_stats_dump(int reset) {
+    extern int kprintf(const char *, ...);
+    extern const char *perso_name(int id);
+    for (int p = 0; p < SCSTAT_MAX_PERSO; p++) {
+        int any = 0;
+        for (int n = 0; n < SCSTAT_MAX_NR; n++) {
+            if (scstat[p][n].count) { any = 1; break; }
+        }
+        if (!any) continue;
+        const char *pn = perso_name(p);
+        kprintf("syscall_stats[%s]:\n", pn ? pn : "?");
+        for (int n = 0; n < SCSTAT_MAX_NR; n++) {
+            struct syscall_stat *s = &scstat[p][n];
+            if (!s->count) continue;
+            kprintf("  #%-3d N=%-6llu total=%llu min=%llu max=%llu avg=%llu\n",
+                    n,
+                    (unsigned long long)s->count,
+                    (unsigned long long)s->total_cycles,
+                    (unsigned long long)s->min_cycles,
+                    (unsigned long long)s->max_cycles,
+                    (unsigned long long)(s->total_cycles / s->count));
+            if (reset) {
+                s->count = 0; s->total_cycles = 0;
+                s->min_cycles = 0; s->max_cycles = 0;
+            }
+        }
+    }
+}
+
+/*
+ * Per-PID trace gate.  Syscall trace is normally global (very noisy);
+ * set `trace_pid=<n>` on the kernel cmdline to restrict the
+ * SYSCALL: ... lines to a single process.  0 = trace all (legacy).
+ */
+int syscall_trace_pid = 0;
+
 void syscall_handler(registers_t *regs) {
     __asm__ volatile("sti");
     thread_t *cpu_thread = CURRENT_THREAD();
@@ -151,7 +214,12 @@ void syscall_handler(registers_t *regs) {
     uint32_t args[8];
     i386_extract_syscall_args(p, regs, args);
 
-    if (syscall_trace_enabled) {
+    /* If `trace_pid=N` was set, only emit trace lines for that PID. */
+    int trace_this = syscall_trace_enabled &&
+                     (syscall_trace_pid == 0 ||
+                      current_process->pid == syscall_trace_pid);
+
+    if (trace_this) {
         char buf[512];
         const char *name = (p->syscall_names && syscall_num < p->syscall_count) ? p->syscall_names[syscall_num] : NULL;
         struct syscall_fmt *fmt = (p->syscall_fmts && syscall_num < p->syscall_count) ? &p->syscall_fmts[syscall_num] : NULL;
@@ -280,7 +348,7 @@ void syscall_handler(registers_t *regs) {
     
     // Check if syscall number is out of range
     if (syscall_num >= p->syscall_count) {
-        if (syscall_trace_enabled) {
+        if (trace_this) {
             char buf[64];
             snprintf(buf, sizeof(buf), "SYSCALL: Out of range #%u\n", (unsigned int)syscall_num);
             kprint(buf);
@@ -290,7 +358,7 @@ void syscall_handler(registers_t *regs) {
     }
     
     if (!p->syscall_table || (uintptr_t)p->syscall_table < 0xC0000000U) {
-        if (syscall_trace_enabled) {
+        if (trace_this) {
             kprint("SYSCALL: Invalid syscall table\n");
         }
         regs->eax = -38; // ENOSYS
@@ -316,13 +384,13 @@ void syscall_handler(registers_t *regs) {
     }
 
     if (!location) {
-        if (syscall_trace_enabled) kprint("SYSCALL: Not Implemented\n");
+        if (trace_this) kprint("SYSCALL: Not Implemented\n");
         regs->eax = -38; // ENOSYS
         return;
     }
 
     if ((uintptr_t)location < 0xC0000000U) {
-        if (syscall_trace_enabled) {
+        if (trace_this) {
             char buf[96];
             snprintf(buf, sizeof(buf), "SYSCALL: Invalid handler %p for #%u\n",
                     location, (unsigned int)syscall_num);
@@ -335,8 +403,17 @@ void syscall_handler(registers_t *regs) {
     typedef int64_t (*sys_func_t)(uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t);
     sys_func_t func = (sys_func_t)location;
 
-    // Dispatch
+    // Dispatch (with TSC accounting for syscall_stats)
+    uint64_t t0 = syscall_rdtsc();
     int64_t ret = func(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7]);
+    uint64_t dt = syscall_rdtsc() - t0;
+    if (p->id < SCSTAT_MAX_PERSO && syscall_num < SCSTAT_MAX_NR) {
+        struct syscall_stat *s = &scstat[p->id][syscall_num];
+        s->count++;
+        s->total_cycles += dt;
+        if (s->min_cycles == 0 || dt < s->min_cycles) s->min_cycles = dt;
+        if (dt > s->max_cycles) s->max_cycles = dt;
+    }
     if (p->id == PERS_ELKS) {
         regs->eax = (uint16_t)ret;
     } else if (p->id == PERS_FREEBSD || p->id == PERS_NETBSD || p->id == PERS_OPENBSD) {
@@ -375,7 +452,7 @@ void syscall_handler(registers_t *regs) {
     }
 
 syscall_done:
-    if (syscall_trace_enabled) {
+    if (trace_this) {
         char buf[64];
         snprintf(buf, sizeof(buf), " ret %d\n", (int)regs->eax);
         kprint(buf);

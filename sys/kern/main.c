@@ -379,6 +379,19 @@ static void init_runtime_console(int serial_console) {
         kprint("Syscall Tracing Enabled.\n");
     }
 
+    /* trace_pid=<n> restricts SYSCALL: ... trace lines to one PID. */
+    {
+        extern int syscall_trace_pid;
+        char vbuf[16];
+        if (cmdline_get("trace_pid", vbuf, sizeof(vbuf)) > 0) {
+            int pid = 0;
+            for (const char *q = vbuf; *q >= '0' && *q <= '9'; q++) {
+                pid = pid * 10 + (*q - '0');
+            }
+            syscall_trace_pid = pid;
+            kprintf("Syscall trace gated to PID %d\n", pid);
+        }
+    }
 }
 
 static void init_core_subsystems(multiboot_info_t *mboot_info) {

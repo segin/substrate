@@ -15,6 +15,7 @@
  */
 
 #include <math.h>
+#include <string.h>
 
 /* Inverse trigonometric */
 float asinf(float x)  { return (float)asin((double)x); }
@@ -107,3 +108,44 @@ float erff(float x)    { return (float)erf((double)x); }
 float erfcf(float x)   { return (float)erfc((double)x); }
 float tgammaf(float x) { return (float)tgamma((double)x); }
 float lgammaf(float x) { return (float)lgamma((double)x); }
+
+/* C23: fromfp family (float variants) */
+int fromfpxf(float *y, float x, fenv_t *envp, int rounding_mode) {
+    if (envp) {
+        fenv_t zero_env;
+        memset(&zero_env, 0, sizeof(zero_env));
+        *envp = zero_env;
+    }
+    switch (rounding_mode) {
+    case FE_TONEAREST:
+        *y = x;
+        break;
+    case FE_DOWNWARD:
+        *y = floorf(x);
+        break;
+    case FE_UPWARD:
+        *y = ceilf(x);
+        break;
+    case FE_TOWARDZERO:
+        *y = truncf(x);
+        break;
+    default:
+        return -1;
+    }
+    return 0;
+}
+
+int fromfpf(float *y, float x, fenv_t *envp, int rounding_mode) {
+    return fromfpxf(y, x, envp, rounding_mode);
+}
+
+int ufromfpf(unsigned int *y, float x, fenv_t *envp, int rounding_mode) {
+    float tmp = 0;
+    int rc = fromfpxf(&tmp, x, envp, rounding_mode);
+    *y = (unsigned int)tmp;
+    return rc;
+}
+
+int ufromfpxf(unsigned int *y, float x, fenv_t *envp, int rounding_mode) {
+    return ufromfpf(y, x, envp, rounding_mode);
+}

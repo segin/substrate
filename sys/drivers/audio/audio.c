@@ -84,6 +84,7 @@ static void audio_merge_prinfo(audio_prinfo_t *base, const audio_prinfo_t *o)
 	MERGE_U32(base, o, encoding);
 	MERGE_U32(base, o, gain);
 	MERGE_U32(base, o, port);
+	MERGE_U32(base, o, seek);
 	MERGE_U32(base, o, avail_ports);
 	MERGE_U32(base, o, buffer_size);
 	MERGE_U32(base, o, samples);
@@ -92,7 +93,6 @@ static void audio_merge_prinfo(audio_prinfo_t *base, const audio_prinfo_t *o)
 	MERGE_U8(base, o, error);
 	MERGE_U8(base, o, waiting);
 	MERGE_U8(base, o, balance);
-	MERGE_U8(base, o, cflags);
 	MERGE_U8(base, o, open);
 	MERGE_U8(base, o, active);
 }
@@ -519,6 +519,17 @@ int audio_register_device(audio_dev_t *dev)
 	devfs_register_device(audioctl_n);
 
 	kprintf("audio: registered %s as /dev/audio%d\n", dev->name, unit);
+
+	/* /dev/audio -> /dev/audio0 alias.  NetBSD-side userland (and most
+	 * Sun-compat audio code, including mpg123's output_sun module)
+	 * opens /dev/audio without a unit suffix; absent this symlink the
+	 * open fails with ENOENT.  Register the alias once, on the first
+	 * device to come up regardless of which driver got there first. */
+	if (unit == 0) {
+		(void)devfs_register_alias("audio", "audio0");
+		(void)devfs_register_alias("audioctl", "audioctl0");
+	}
+
 	return 0;
 }
 

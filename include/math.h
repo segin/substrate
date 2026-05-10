@@ -2,6 +2,7 @@
 #define _MATH_H
 
 #include <stdint.h>
+#include <fenv.h>
 
 /*
  * C99 Math Library Header
@@ -234,6 +235,7 @@ double ceil(double x);
 double floor(double x);
 double trunc(double x);
 double round(double x);
+double roundeven(double x);
 double rint(double x);
 double nearbyint(double x);
 long lrint(double x);
@@ -288,6 +290,7 @@ float ceilf(float x);
 float floorf(float x);
 float truncf(float x);
 float roundf(float x);
+float roundevenf(float x);
 float rintf(float x);
 float nearbyintf(float x);
 long      lroundf(float x);
@@ -347,6 +350,7 @@ long double ceill(long double x);
 long double floorl(long double x);
 long double truncl(long double x);
 long double roundl(long double x);
+long double roundevenl(long double x);
 long double rintl(long double x);
 long double nearbyintl(long double x);
 long      lroundl(long double x);
@@ -390,5 +394,23 @@ long double cospil(long double x);
 long double tanpil(long double x);
 long double asinpil(long double x);
 long double atanpil(long double x);
+
+/* C23: fromfp family — convert floating-point values with explicit rounding */
+int fromfp(double *y, double x, fenv_t *envp, int rounding_mode);
+int fromfpx(double *y, double x, fenv_t *envp, int rounding_mode);
+int ufromfp(unsigned int *y, double x, fenv_t *envp, int rounding_mode);
+int ufromfpx(unsigned int *y, double x, fenv_t *envp, int rounding_mode);
+
+/* Float fromfp variants */
+int fromfpf(float *y, float x, fenv_t *envp, int rounding_mode);
+int fromfpxf(float *y, float x, fenv_t *envp, int rounding_mode);
+int ufromfpf(unsigned int *y, float x, fenv_t *envp, int rounding_mode);
+int ufromfpxf(unsigned int *y, float x, fenv_t *envp, int rounding_mode);
+
+/* Long double fromfp variants */
+int fromfpxl(long double *y, long double x, fenv_t *envp, int rounding_mode);
+int fromfpl(long double *y, long double x, fenv_t *envp, int rounding_mode);
+int ufromfpul(unsigned int *y, long double x, fenv_t *envp, int rounding_mode);
+int ufromfpxl(unsigned int *y, long double x, fenv_t *envp, int rounding_mode);
 
 #endif /* _MATH_H */
