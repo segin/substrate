@@ -163,17 +163,19 @@ void ps_print_rows(ps_row_t *rows, size_t count, const ps_options_t *opts) {
         widths[elastic_index] = max_int(fields[elastic_index].min_width, remaining > 8 ? remaining : 8);
     }
 
-    for (i = 0; i < field_count; i++) {
-        if (i > 0) {
-            putchar(' ');
+    if (!opts->flag_no_headers) {
+        for (i = 0; i < field_count; i++) {
+            if (i > 0) {
+                putchar(' ');
+            }
+            if (fields[i].align == PS_ALIGN_RIGHT) {
+                printf("%*s", widths[i], fields[i].header);
+            } else {
+                printf("%-*s", widths[i], fields[i].header);
+            }
         }
-        if (fields[i].align == PS_ALIGN_RIGHT) {
-            printf("%*s", widths[i], fields[i].header);
-        } else {
-            printf("%-*s", widths[i], fields[i].header);
-        }
+        putchar('\n');
     }
-    putchar('\n');
 
     for (i = 0; i < count; i++) {
         size_t j;

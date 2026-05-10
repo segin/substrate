@@ -2,10 +2,13 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <pwd.h>
 
 #include <sys/sysinfo.h>
 
 #include "ps_impl.h"
+
+extern int sys_proc_cmdline(pid_t pid, char **argv, size_t *argc);
 
 static void print_usage(const char *progname) {
     fprintf(stderr, "usage: %s [auxleb]\n", progname);
@@ -63,19 +66,64 @@ static void render_tty(int16_t tty, char *buf, size_t bufsz) {
     }
 }
 
+/* Render USER column.  Try getpwuid for a name; if the libc table
+ * doesn't know this uid, render the numeric value so callers always
+ * see SOMETHING parseable.  procps does the same. */
+static void render_user(uint32_t uid, char *buf, size_t bufsz) {
+    struct passwd *pw = getpwuid((uid_t)uid);
+    if (pw && pw->pw_name && pw->pw_name[0]) {
+        snprintf(buf, bufsz, "%s", pw->pw_name);
+    } else {
+        snprintf(buf, bufsz, "%lu", (unsigned long)uid);
+    }
+}
+
+/* Append procps-style STAT suffix bits to the one-letter state.
+ *   +  process is in the foreground process group of its tty
+ *   <  high-priority (nice < 0)
+ *   N  low-priority (nice > 0)
+ *   l  multi-threaded (placeholder — we'd query sys_proc_threads
+ *      when threads are tracked per-process; for now always off) */
+static void append_stat_suffix(char *buf, size_t bufsz, const sys_procinfo_t *info) {
+    size_t len = strlen(buf);
+    /* Convert nice from the 0..40 PRI_USER+nice convention back to
+     * a signed -20..+19 range when comparing to zero. */
+    int signed_nice = (int)info->nice - 20;
+    if (signed_nice < 0 && len + 1 < bufsz) buf[len++] = '<';
+    else if (signed_nice > 0 && len + 1 < bufsz) buf[len++] = 'N';
+    /* Foreground-pgid detection is best-effort: pid == pgid && pgid
+     * == sid is the canonical session-leader / foreground hint we
+     * can derive without a TIOCGPGRP call. */
+    if (info->pid == info->pgid && info->pgid != 0 && len + 1 < bufsz) buf[len++] = '+';
+    buf[len] = '\0';
+}
+
+/* Build the COMMAND column.  When -e is set we try sys_proc_cmdline
+ * to recover the full argv blob; otherwise the 16-char `comm` name
+ * already in info.name is what's displayed. */
 static void render_cmd(ps_row_t *row, const ps_options_t *opts) {
-    snprintf(row->cmd, sizeof(row->cmd), "%s", row->info.name[0] ? row->info.name : "?");
     if (opts->flag_e) {
-        size_t len = strlen(row->cmd);
-        if (len + sizeof(" [env?]") < sizeof(row->cmd)) {
-            snprintf(row->cmd + len, sizeof(row->cmd) - len, " [env?]");
+        char blob[512];
+        size_t cap = sizeof(blob);
+        if (sys_proc_cmdline(row->info.pid, (char **)blob, &cap) == 0 && cap > 0) {
+            /* sys_proc_cmdline writes the cmdline_tail blob —
+             * NUL-separated argv.  Re-NUL → space for display,
+             * keeping the final NUL terminator intact. */
+            size_t n = cap < sizeof(blob) ? cap : sizeof(blob) - 1;
+            for (size_t i = 0; i + 1 < n; i++)
+                if (blob[i] == '\0') blob[i] = ' ';
+            blob[n] = '\0';
+            snprintf(row->cmd, sizeof(row->cmd), "%s", blob[0] ? blob : (row->info.name[0] ? row->info.name : "?"));
+            return;
         }
     }
+    snprintf(row->cmd, sizeof(row->cmd), "%s", row->info.name[0] ? row->info.name : "?");
 }
 
 void ps_derive_row(ps_row_t *row, const ps_options_t *opts) {
     memset(row->user, 0, sizeof(row->user));
-    format_u32(row->user, sizeof(row->user), row->info.euid ? row->info.euid : row->info.uid);
+    render_user(row->info.euid ? row->info.euid : row->info.uid,
+                row->user, sizeof(row->user));
     format_u32(row->uid, sizeof(row->uid), row->info.uid);
     format_u32(row->euid, sizeof(row->euid), row->info.euid);
     format_u32(row->gid, sizeof(row->gid), row->info.gid);
@@ -87,6 +135,7 @@ void ps_derive_row(ps_row_t *row, const ps_options_t *opts) {
     format_u32(row->ni, sizeof(row->ni), row->info.nice);
     render_tty(row->info.tty, row->tty, sizeof(row->tty));
     snprintf(row->stat, sizeof(row->stat), "%s", state_to_stat(row->info.state));
+    append_stat_suffix(row->stat, sizeof(row->stat), &row->info);
     render_bitness(row->info.bitness, row->bits, sizeof(row->bits));
     format_time(row->info.user_time + row->info.sys_time, row->time, sizeof(row->time));
     format_u32(row->vsize, sizeof(row->vsize), row->info.vsize);
@@ -133,6 +182,20 @@ static bool select_row(const ps_row_t *row, const ps_options_t *opts, const sys_
     bool has_tty = row->info.tty >= 0;
     uid_t self_uid = self->euid ? self->euid : self->uid;
     uid_t row_uid = row->info.euid ? row->info.euid : row->info.uid;
+
+    /* Explicit filters take precedence over the auxleb selection
+     * presets — `ps -p 123` should always show pid 123, regardless
+     * of whether it has a tty or whose uid owns it. */
+    if (opts->pid_filter_n > 0) {
+        for (size_t i = 0; i < opts->pid_filter_n; i++)
+            if (opts->pid_filter[i] == row->info.pid) return true;
+        return false;
+    }
+    if (opts->uid_filter_n > 0) {
+        for (size_t i = 0; i < opts->uid_filter_n; i++)
+            if ((uid_t)opts->uid_filter[i] == row_uid) return true;
+        return false;
+    }
 
     if (opts->flag_a && opts->flag_x) {
         return true;
