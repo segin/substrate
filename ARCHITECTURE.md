@@ -12,7 +12,11 @@ Substrate is a complete Unix OS project with five first-class pillars:
   archives (`libX.a`) and shared objects (`libX.so.0`).
 - Native dynamic linker (`sbin/ld.so`) — loaded by the kernel at the
   PT_INTERP base for every dynamically-linked native binary; performs
-  DT_NEEDED traversal, symbol resolution, and i386 relocation.
+  recursive DT_NEEDED traversal, symbol resolution (DT_GNU_HASH +
+  DT_HASH), i386 REL/JMPREL relocations, DT_INIT/DT_INIT_ARRAY
+  execution, and per-thread TLS install (PT_TLS images copied into a
+  variant-II layout and the GS base installed via the native
+  `sys_set_gsbase` syscall).
 - Native toolchain (`usr.bin/cc`, `usr.bin/as`, `usr.bin/ld`, `usr.lib/elfobj`)
 
 Primary target architecture is i386. x86_64 support is active and expanding.
@@ -51,10 +55,15 @@ sys/         kernel
 sys/boot/    Substrate BIOS bootloader (stage1 asm + stage2 C)
 bin/         base Unix userland
 sbin/        system utilities
-sbin/ld.so/  Substrate native dynamic linker (Phase 1-3 today; design
-             in docs/design/ld.so-design.md, reloc matrix in
-             docs/specs/ld.so-reloc-matrix.md, kernel ABI contract
-             in docs/kernel-ldso-abi-substrate.md)
+sbin/ld.so/  Substrate native dynamic linker.  Phases 1-4c live:
+             bootstrap + auxv handoff (1), self-relocate + parse
+             program PT_DYNAMIC (2), recursive DT_NEEDED loading +
+             REL/JMPREL relocations (3, 4a), DT_INIT/DT_INIT_ARRAY
+             execution (4b), variant-II TLS install via GS segment
+             (4c).  Open: dlopen/dlsym (4e), fini_array on exit
+             (4f).  Design in docs/design/ld.so-design.md, reloc
+             matrix in docs/specs/ld.so-reloc-matrix.md, kernel
+             ABI contract in docs/kernel-ldso-abi-substrate.md.
 usr.bin/     compiler/toolchain and extended user tools
              per-tool architecture docs live beside the native toolchain entry points:
              usr.bin/as/ARCHITECTURE.md, usr.bin/cc/ARCHITECTURE.md, usr.bin/ld/ARCHITECTURE.md

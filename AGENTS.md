@@ -57,6 +57,15 @@ For the full detailed changelog, see `docs/CHANGELOG.md`.
     scope, apply REL/JMPREL relocations (R_386_RELATIVE / GLOB_DAT /
     JMP_SLOT / 32 / PC32) with eager binding.  DT_GNU_HASH preferred,
     DT_HASH fallback.  Search paths `/lib`, `/usr/lib`, `/usr/local/lib`.
+  - Phase 4a: recursive (BFS) DT_NEEDED traversal — transitive deps
+    pulled in automatically.
+  - Phase 4b: DT_INIT and DT_INIT_ARRAY execution in dependency
+    order (deepest deps first, program last).
+  - Phase 4c: per-thread TLS — variant-II layout (TCB at TP, data
+    at negative offsets), PT_TLS images copied into mmap'd block,
+    GS base installed via the new native `sys_set_gsbase` syscall
+    (SYS_SET_GSBASE = 274).  Local-exec / initial-exec models work;
+    GD/LD models deferred until libpthread needs them.
 - `lib/c/arch/i386/crt0.S` is now PIC-safe (`%ebx`/GOT setup, `@PLT`
   for calls, `environ@GOT` for data) so the same `crt0.o` works for
   both static and PIE binaries.
@@ -206,10 +215,13 @@ If the kernel hangs in `hlt`, check `eflags` bit 9. If `IF=1`, the IRQ may be ma
 - Refactor PMAP to dynamically allocate page tables (reduce 128KB overhead)
 - Implement mmap() syscall with personality driver integration
 - Flesh out 9P filesystem logic implementation
-- /sbin/ld.so Phase 4+: recursive DT_NEEDED traversal (currently
-  depth-1 only); init_array / fini_array execution; TLS install via
-  GS segment (for `__thread`); R_386_COPY for executables that copy
-  DSO data; dlopen / dlsym / dlclose API.
+- /sbin/ld.so remaining work: dlopen / dlsym / dlclose API;
+  fini_array execution at exit (needs libc atexit hookup);
+  R_386_COPY for executables that copy DSO data; per-thread TLS
+  for additional threads (currently only the initial thread is
+  set up — pthread_create needs libpthread to allocate per-thread
+  blocks via the same layout); GD/LD TLS models (need
+  __tls_get_addr, only matters once dlopen lands).
 - Switch userland binaries to dynamic linking incrementally — start
   with non-bootstrap-essential ones (`bin/echo` is a good first
   candidate) and verify before expanding.
