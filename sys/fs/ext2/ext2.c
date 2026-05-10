@@ -728,8 +728,51 @@ uint64_t ext2_alloc_node_fail        = 0;  /* every slot pinned or locked */
 uint64_t ext2_alloc_node_fail_pinned = 0;  /* slots pinned at fail time */
 uint64_t ext2_alloc_node_fail_locked = 0;  /* slots locked at fail time */
 
+uint64_t ext2_finddir_calls          = 0;
+uint64_t ext2_finddir_dcache_hit     = 0;
+uint64_t ext2_finddir_walk_found     = 0;
+uint64_t ext2_finddir_walk_missing   = 0;  /* finished walk without match */
+uint64_t ext2_finddir_break_recv_malformed = 0;
+uint64_t ext2_finddir_break_block0   = 0;
+
+/* Root-pin watchdog: assert that the slot describing EXT2_ROOT_INO
+ * keeps pin_count >= 1 across every alloc.  If it ever drops to 0
+ * the slot becomes recyclable and `fs_root` becomes a dangling
+ * pointer the next time anybody pulls a different inode through
+ * ext2_alloc_node — this would explain the global lookup failure
+ * we see after the first /bin walk. */
+uint64_t ext2_root_pin_lost          = 0;
+
 fs_node_t *ext2_alloc_node(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_t *inode) {
     int idx = -1;
+
+    /* Pre-condition watchdog: scan for the slot holding the root
+     * inode.  If we find it with pin_count==0 the slot is about to
+     * become recyclable; ext2_mount() pinned it at boot and nothing
+     * legitimately unpins it, so reaching 0 means somebody dropped
+     * an extra close_fs() on a node we treated as root. */
+    {
+        for (int i = 0; i < EXT2_NODE_CACHE_SIZE; i++) {
+            if (ext2_node_cache[i].fs == fs &&
+                ext2_node_cache[i].inode_num == EXT2_ROOT_INO &&
+                ext2_node_cache[i].pin_count == 0) {
+                ext2_root_pin_lost++;
+                if (ext2_root_pin_lost <= 4) {
+                    extern int kprintf(const char *, ...);
+                    kprintf("ext2: WARNING root slot %d pin_count=0 "
+                            "(alloc_node entry, requesting inode=%u, "
+                            "lost-pin event #%llu)\n",
+                            i, inode_num,
+                            (unsigned long long)ext2_root_pin_lost);
+                }
+                /* Re-pin defensively — never let the root slot fall
+                 * to 0 even if something drops it.  This is a band-
+                 * aid; the real fix lives wherever the extra close
+                 * is coming from. */
+                ext2_node_cache[i].pin_count = 1;
+            }
+        }
+    }
 
     // 1. Search for existing node in cache
     for (int i = 0; i < EXT2_NODE_CACHE_SIZE; i++) {
@@ -1003,19 +1046,22 @@ cleanup:
 fs_node_t *ext2_finddir(fs_node_t *node, char *name) {
     if (!node || !name) return NULL;
 
+    ext2_finddir_calls++;
     ext2_node_t *ctx = (ext2_node_t *)(uintptr_t)node->impl;
     ext2_fs_t *fs = ctx->fs;
-    
+
     // Lazily set mount pointer in filesystem context
     if (!fs->mp && node->mp) fs->mp = node->mp;
-    
+
     size_t name_len = strlen(name);
     uint32_t dir_size = ctx->inode.i_size;
     uint32_t pos = 0;
-    
+
     mutex_lock(&ctx->lock);
 
     fs_node_t *result_node = NULL;
+    int walk_break_malformed = 0;
+    int walk_break_block0 = 0;
 
     // 1. Check dcache
     for (int k = 0; k < EXT2_DCACHE_SIZE; k++) {
@@ -1034,6 +1080,7 @@ fs_node_t *ext2_finddir(fs_node_t *node, char *name) {
                 }
                 memcpy(result_node->name, name, len);
                 result_node->name[len] = '\0';
+                ext2_finddir_dcache_hit++;
                 goto cleanup;
             }
         }
@@ -1060,14 +1107,21 @@ fs_node_t *ext2_finddir(fs_node_t *node, char *name) {
         uint32_t block_idx = pos / fs->block_size;
         uint32_t block_off = pos % fs->block_size;
         uint32_t block_num = ext2_get_block_num(fs, &ctx->inode, block_idx, indirect, dindirect, tindirect);
-        
-        if (block_num == 0) break;
+
+        if (block_num == 0) { walk_break_block0 = 1; break; }
         ext2_read_block(fs, block_num, ext2_dir_buf);
-        
+
         while (block_off + 8 <= fs->block_size && pos < dir_size) {
             ext2_dirent_t *de = (ext2_dirent_t *)(ext2_dir_buf + block_off);
-            
-            if (de->rec_len < 8 || block_off + de->rec_len > fs->block_size) break;
+
+            if (de->rec_len < 8 || block_off + de->rec_len > fs->block_size) {
+                walk_break_malformed = 1;
+                /* Round pos up to next block boundary so the outer
+                 * loop doesn't re-read the same garbage in a tight
+                 * spin. */
+                pos = (block_idx + 1) * fs->block_size;
+                break;
+            }
 
             if (de->inode != 0 && de->name_len > 0) {
                 // Compare names
@@ -1095,17 +1149,41 @@ fs_node_t *ext2_finddir(fs_node_t *node, char *name) {
                             ctx->dcache[idx].name[len] = '\0';
                         }
 
+                        ext2_finddir_walk_found++;
                         goto cleanup;
                     }
                 }
             }
-            
-            if (de->rec_len == 0) break;
+
+            if (de->rec_len == 0) {
+                walk_break_malformed = 1;
+                pos = (block_idx + 1) * fs->block_size;
+                break;
+            }
             block_off += de->rec_len;
             pos += de->rec_len;
         }
     }
-    
+
+    /* Walk completed without a match.  Record any abnormal break
+     * paths so the proc_exit dump shows whether the directory
+     * iteration is silently truncating. */
+    if (!result_node) {
+        ext2_finddir_walk_missing++;
+        if (walk_break_malformed) ext2_finddir_break_recv_malformed++;
+        if (walk_break_block0)    ext2_finddir_break_block0++;
+        if ((walk_break_malformed || walk_break_block0) &&
+            (ext2_finddir_break_recv_malformed +
+             ext2_finddir_break_block0) <= 4) {
+            extern int kprintf(const char *, ...);
+            kprintf("ext2: finddir(inode=%u, '%s') walk truncated: "
+                    "malformed=%d block0=%d pos=%u dir_size=%u\n",
+                    ctx->inode_num, name,
+                    walk_break_malformed, walk_break_block0,
+                    pos, dir_size);
+        }
+    }
+
 cleanup:
     mutex_unlock(&ctx->lock);
     return result_node;

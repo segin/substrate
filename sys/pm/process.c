@@ -1105,6 +1105,13 @@ void proc_exit(int code) {
         extern uint64_t ext2_alloc_node_fail;
         extern uint64_t ext2_alloc_node_fail_pinned;
         extern uint64_t ext2_alloc_node_fail_locked;
+        extern uint64_t ext2_finddir_calls;
+        extern uint64_t ext2_finddir_dcache_hit;
+        extern uint64_t ext2_finddir_walk_found;
+        extern uint64_t ext2_finddir_walk_missing;
+        extern uint64_t ext2_finddir_break_recv_malformed;
+        extern uint64_t ext2_finddir_break_block0;
+        extern uint64_t ext2_root_pin_lost;
         kprintf("vm_leak[pid=%d exit=%d]: pager A=%lu D=%lu (live=%ld) "
                 "map_destroy=%lu (ents=%lu) "
                 "fs_open=%lu fs_close=%lu (drift=%ld) "
@@ -1112,7 +1119,9 @@ void proc_exit(int code) {
                 "nc=%d (E=%lu V=%lu P=%lu) "
                 "bio nbuf=%u bytes=%llu hits=%llu miss=%llu reclaim=%llu "
                 "[L=%u C=%u D=%u E=%u] "
-                "ext2 H=%llu N=%llu F=%llu (pin=%llu lock=%llu)\n",
+                "ext2 H=%llu N=%llu F=%llu (pin=%llu lock=%llu) "
+                "fd C=%llu Dh=%llu Wf=%llu Wm=%llu (mal=%llu blk0=%llu) "
+                "rootlost=%llu\n",
                 current_process->pid, code,
                 vm_pager_vnode_alloc_count,
                 vm_pager_vnode_dealloc_count,
@@ -1136,7 +1145,14 @@ void proc_exit(int code) {
                 (unsigned long long)ext2_alloc_node_new,
                 (unsigned long long)ext2_alloc_node_fail,
                 (unsigned long long)ext2_alloc_node_fail_pinned,
-                (unsigned long long)ext2_alloc_node_fail_locked);
+                (unsigned long long)ext2_alloc_node_fail_locked,
+                (unsigned long long)ext2_finddir_calls,
+                (unsigned long long)ext2_finddir_dcache_hit,
+                (unsigned long long)ext2_finddir_walk_found,
+                (unsigned long long)ext2_finddir_walk_missing,
+                (unsigned long long)ext2_finddir_break_recv_malformed,
+                (unsigned long long)ext2_finddir_break_block0,
+                (unsigned long long)ext2_root_pin_lost);
     }
 
     proc_vfork_done(current_process);
