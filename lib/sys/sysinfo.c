@@ -8,21 +8,13 @@
 /*
  * sysinfo() - Returns information on overall system statistics
  */
-#ifndef SYS_SYSINFO
-#define SYS_SYSINFO 116
-#endif
-
 int sysinfo(struct sysinfo *info) {
     return syscall(SYS_SYSINFO, info);
 }
 
 /*
- * Memory Statistics API - Stub implementations
+ * Memory Statistics API
  */
-#ifndef SYS_VM_STATS
-#define SYS_VM_STATS 255
-#endif
-
 int sys_vm_stats(sys_vmstat_t *stats) {
     if (!stats) {
         errno = EINVAL;
