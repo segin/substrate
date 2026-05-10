@@ -13,10 +13,15 @@ Substrate is a complete Unix OS project with five first-class pillars:
 - Native dynamic linker (`sbin/ld.so`) — loaded by the kernel at the
   PT_INTERP base for every dynamically-linked native binary; performs
   recursive DT_NEEDED traversal, symbol resolution (DT_GNU_HASH +
-  DT_HASH), i386 REL/JMPREL relocations, DT_INIT/DT_INIT_ARRAY
-  execution, and per-thread TLS install (PT_TLS images copied into a
-  variant-II layout and the GS base installed via the native
-  `sys_set_gsbase` syscall).
+  DT_HASH), i386 REL/JMPREL relocations (RELATIVE / GLOB_DAT /
+  JMP_SLOT / 32 / PC32 / COPY / TLS_TPOFF), DT_INIT_ARRAY +
+  DT_FINI_ARRAY execution, per-thread TLS install (PT_TLS images
+  copied into a variant-II layout and the GS base installed via the
+  native `sys_set_gsbase` syscall), and runtime `dlopen` / `dlsym` /
+  `dlclose` for plugin-style loading.  ld.so registers itself in the
+  loaded-object scope so its `__ldso_*` exports are visible to libdl
+  and to libc (which calls `__ldso_run_fini` as a weak hook from
+  `exit()` to run destructors before the process is reaped).
 - Native toolchain (`usr.bin/cc`, `usr.bin/as`, `usr.bin/ld`, `usr.lib/elfobj`)
 
 Primary target architecture is i386. x86_64 support is active and expanding.
@@ -55,15 +60,21 @@ sys/         kernel
 sys/boot/    Substrate BIOS bootloader (stage1 asm + stage2 C)
 bin/         base Unix userland
 sbin/        system utilities
-sbin/ld.so/  Substrate native dynamic linker.  Phases 1-4c live:
+sbin/ld.so/  Substrate native dynamic linker.  Phases 1-4f live:
              bootstrap + auxv handoff (1), self-relocate + parse
              program PT_DYNAMIC (2), recursive DT_NEEDED loading +
-             REL/JMPREL relocations (3, 4a), DT_INIT/DT_INIT_ARRAY
+             REL/JMPREL relocations (3, 4a), DT_INIT_ARRAY
              execution (4b), variant-II TLS install via GS segment
-             (4c).  Open: dlopen/dlsym (4e), fini_array on exit
-             (4f).  Design in docs/design/ld.so-design.md, reloc
-             matrix in docs/specs/ld.so-reloc-matrix.md, kernel
-             ABI contract in docs/kernel-ldso-abi-substrate.md.
+             (4c), R_386_COPY relocations (4d), runtime
+             dlopen/dlsym/dlclose API (4e), DT_FINI_ARRAY at
+             exit() time via libc weak hook (4f).  Per-object
+             relocated/initialized/finalized guards prevent the
+             non-idempotent R_386_RELATIVE and the run-once
+             init/fini arrays from firing twice when dlopen
+             re-walks the loaded list.  Design in
+             docs/design/ld.so-design.md, reloc matrix in
+             docs/specs/ld.so-reloc-matrix.md, kernel ABI contract
+             in docs/kernel-ldso-abi-substrate.md.
 usr.bin/     compiler/toolchain and extended user tools
              per-tool architecture docs live beside the native toolchain entry points:
              usr.bin/as/ARCHITECTURE.md, usr.bin/cc/ARCHITECTURE.md, usr.bin/ld/ARCHITECTURE.md

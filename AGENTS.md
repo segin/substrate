@@ -66,6 +66,27 @@ For the full detailed changelog, see `docs/CHANGELOG.md`.
     GS base installed via the new native `sys_set_gsbase` syscall
     (SYS_SET_GSBASE = 274).  Local-exec / initial-exec models work;
     GD/LD models deferred until libpthread needs them.
+  - Phase 4d: R_386_COPY support — `ld_resolve_skip` finds the
+    source-of-truth in a SHARED library (not the executable
+    receiving the copy); relocator memcpy's bytes sized via
+    st_size.  PIE binaries don't emit COPY (they prefer GLOB_DAT
+    to keep .text relocation-free) but the path is in place for
+    non-PIE callers.
+  - Phase 4e: runtime dlopen / dlsym / dlclose.  ld.so exports
+    `__ldso_dlopen` / `__ldso_dlsym` / `__ldso_dlclose` with
+    default visibility and registers itself as an ld_obj_t at
+    the tail of the loaded-object scope so libdl's weak refs
+    resolve.  libdl (`lib/dl/`) provides POSIX wrappers; static-
+    linked binaries that pull libdl in without ld.so see NULL
+    stubs that return 0 / -1 instead of crashing.
+  - Phase 4f: DT_FINI_ARRAY at exit() time.  ld.so exports
+    `__ldso_run_fini` (mirror of init_arrays in REVERSE init
+    order with each object's array walked backwards); libc's
+    `exit()` calls it via a weak ref before _exit syscall.
+  - Per-object guards: `relocated` / `initialized` / `finalized`
+    booleans on ld_obj_t prevent the non-idempotent
+    R_386_RELATIVE (`*p += base`) and the run-once init/fini
+    arrays from firing twice when dlopen re-walks the loaded list.
 - `lib/c/arch/i386/crt0.S` is now PIC-safe (`%ebx`/GOT setup, `@PLT`
   for calls, `environ@GOT` for data) so the same `crt0.o` works for
   both static and PIE binaries.
@@ -215,13 +236,14 @@ If the kernel hangs in `hlt`, check `eflags` bit 9. If `IF=1`, the IRQ may be ma
 - Refactor PMAP to dynamically allocate page tables (reduce 128KB overhead)
 - Implement mmap() syscall with personality driver integration
 - Flesh out 9P filesystem logic implementation
-- /sbin/ld.so remaining work: dlopen / dlsym / dlclose API;
-  fini_array execution at exit (needs libc atexit hookup);
-  R_386_COPY for executables that copy DSO data; per-thread TLS
-  for additional threads (currently only the initial thread is
-  set up — pthread_create needs libpthread to allocate per-thread
-  blocks via the same layout); GD/LD TLS models (need
-  __tls_get_addr, only matters once dlopen lands).
+- /sbin/ld.so remaining work: per-thread TLS for additional
+  threads (currently only the initial thread is set up;
+  pthread_create needs libpthread to allocate per-thread blocks
+  via the same layout); GD/LD TLS models (need __tls_get_addr,
+  only matters once dlopen-loaded libs use them); RTLD_NEXT
+  semantics (need to know which object the caller was in);
+  proper dlclose unmap + reverse-dependency safety; dlerror
+  string buffer.
 - Switch userland binaries to dynamic linking incrementally — start
   with non-bootstrap-essential ones (`bin/echo` is a good first
   candidate) and verify before expanding.
