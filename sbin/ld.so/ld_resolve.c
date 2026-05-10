@@ -113,15 +113,34 @@ static Elf32_Sym *lookup_sysv(const ld_obj_t *o, const char *name) {
     return 0;
 }
 
-ld_u32 ld_resolve(const char *name) {
+/* Internal: scope walk with optional skip-this-object and a place
+ * to deposit the symbol's st_size for R_386_COPY callers. */
+static ld_u32 resolve_internal(const char *name, const ld_obj_t *skip,
+                               ld_u32 *size_out) {
     for (ld_obj_t *o = ld_obj_list(); o; o = o->next) {
+        if (o == skip) continue;
         Elf32_Sym *s = lookup_gnu(o, name);
         if (!s) s = lookup_sysv(o, name);
         if (!s) continue;
         if (s->st_shndx == SHN_UNDEF) continue;
         unsigned char bind = ELF32_ST_BIND(s->st_info);
         if (bind != STB_GLOBAL && bind != STB_WEAK) continue;
+        if (size_out) *size_out = s->st_size;
         return s->st_value + o->base;
     }
+    if (size_out) *size_out = 0;
     return 0;
+}
+
+ld_u32 ld_resolve(const char *name) {
+    return resolve_internal(name, 0, 0);
+}
+
+ld_u32 ld_resolve_skip(const char *name, const ld_obj_t *skip) {
+    return resolve_internal(name, skip, 0);
+}
+
+ld_u32 ld_resolve_with_size(const char *name, const ld_obj_t *skip,
+                            ld_u32 *size_out) {
+    return resolve_internal(name, skip, size_out);
 }

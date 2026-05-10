@@ -300,7 +300,69 @@ ld_u32 ld_main(ld_u32 *initial_stack) {
     /* Splice the program into the loaded-object list head so the
      * resolver scans it first per the standard ELF lookup order. */
     extern void ld_obj_prepend(ld_obj_t *o);   /* see ld_load.c */
+    extern void ld_obj_append(ld_obj_t *o);    /* see ld_load.c */
     ld_obj_prepend(&prog_obj);
+
+    /* Build an ld_obj_t for ld.so itself and append it to the
+     * loaded-object list so dlsym() / weak-symbol references in
+     * libdl can find our __ldso_* exports.  Our own _DYNAMIC is
+     * accessible by name; the load base is AT_BASE. */
+    static ld_obj_t self_obj;
+    {
+        extern Elf32_Dyn _DYNAMIC[];
+        const char self_name[] = "ld.so";
+        for (ld_size i = 0; i < sizeof(self_name); i++)
+            self_obj.name[i] = self_name[i];
+        self_obj.base       = a.base;
+        self_obj.dynamic    = _DYNAMIC;
+        self_obj.strtab     = 0;
+        self_obj.symtab     = 0;
+        self_obj.strsz      = 0;
+        self_obj.gnu_hash   = 0;
+        self_obj.hash       = 0;
+        self_obj.rel        = 0;
+        self_obj.relsz      = 0;
+        self_obj.jmprel     = 0;
+        self_obj.pltrelsz   = 0;
+        self_obj.init       = 0;
+        self_obj.init_array = 0;
+        self_obj.init_arraysz = 0;
+        self_obj.fini       = 0;
+        self_obj.fini_array = 0;
+        self_obj.fini_arraysz = 0;
+        self_obj.tls_image  = 0;
+        self_obj.tls_filesz = 0;
+        self_obj.tls_memsz  = 0;
+        self_obj.tls_align  = 1;
+        self_obj.tls_offset = 0;
+        self_obj.next       = 0;
+
+        /* Walk our own dynamic table the same way ld_cache_dynamic
+         * does for shared libraries, but inline because that helper
+         * is static to ld_load.c. */
+        ld_u32 strtab_off = 0, symtab_off = 0;
+        ld_u32 hash_off = 0, gnu_hash_off = 0;
+        for (Elf32_Dyn *d = _DYNAMIC; d->d_tag != DT_NULL; d++) {
+            switch (d->d_tag) {
+            case DT_STRTAB:   strtab_off   = d->d_un.d_ptr; break;
+            case DT_STRSZ:    self_obj.strsz = d->d_un.d_val; break;
+            case DT_SYMTAB:   symtab_off   = d->d_un.d_ptr; break;
+            case DT_HASH:     hash_off     = d->d_un.d_ptr; break;
+            case DT_GNU_HASH: gnu_hash_off = d->d_un.d_ptr; break;
+            }
+        }
+        self_obj.strtab   = strtab_off   ? (const char *)(strtab_off   + a.base) : 0;
+        self_obj.symtab   = symtab_off   ? (Elf32_Sym  *)(symtab_off   + a.base) : 0;
+        self_obj.hash     = hash_off     ? (ld_u32     *)(hash_off     + a.base) : 0;
+        self_obj.gnu_hash = gnu_hash_off ? (ld_u32     *)(gnu_hash_off + a.base) : 0;
+        /* ld.so already self-relocated in ld_start.S and has no
+         * external init/fini.  Mark both so the relocator and
+         * init walker skip us. */
+        self_obj.relocated  = 1;
+        self_obj.initialized = 1;
+        self_obj.finalized   = 1;
+        ld_obj_append(&self_obj);
+    }
 
     /* BFS over the loaded-object list resolving DT_NEEDED.  Walk
      * the list head-to-tail; for each object, load every entry in
@@ -360,6 +422,25 @@ ld_u32 ld_main(ld_u32 *initial_stack) {
     return a.entry;
 }
 
+/* Run DT_FINI_ARRAY then DT_FINI for every loaded object, in
+ * REVERSE init order: program first, deepest deps last.  Called
+ * by libc's exit() via a weak link to __ldso_run_fini.  Within
+ * each object the array entries fire in REVERSE declared order
+ * (mirror of init's forward declared-order). */
+void __ldso_run_fini(void) {
+    for (ld_obj_t *o = ld_obj_list(); o; o = o->next) {
+        if (o->finalized) continue;
+        if (o->fini_array && o->fini_arraysz >= sizeof(void (*)(void))) {
+            ld_u32 cnt = o->fini_arraysz / sizeof(void (*)(void));
+            for (ld_u32 j = cnt; j > 0; j--) {
+                if (o->fini_array[j - 1]) o->fini_array[j - 1]();
+            }
+        }
+        if (o->fini) o->fini();
+        o->finalized = 1;
+    }
+}
+
 /* Walk loaded-object list, gather pointers into a small fixed
  * array, then iterate in reverse so deepest deps run first.  Each
  * object's DT_INIT runs before its DT_INIT_ARRAY (per ABI), and
@@ -374,9 +455,12 @@ void ld_run_init_arrays(void) {
         stack[n++] = o;
     }
     /* Reverse-iterate so the last-loaded (deepest) object's
-     * constructors run first. */
+     * constructors run first.  Per-object guard `initialized`
+     * prevents constructors from re-firing when this is called a
+     * second time after dlopen brings new objects in. */
     for (ld_size i = n; i > 0; i--) {
         ld_obj_t *o = stack[i - 1];
+        if (o->initialized) continue;
         if (o->init) {
             ld_puts("ld.so: init "); ld_puts(o->name); ld_puts(" (DT_INIT)\n");
             o->init();
@@ -389,5 +473,6 @@ void ld_run_init_arrays(void) {
                 if (o->init_array[j]) o->init_array[j]();
             }
         }
+        o->initialized = 1;
     }
 }

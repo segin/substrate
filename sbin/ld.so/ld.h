@@ -223,6 +223,16 @@ typedef struct ld_obj {
     ld_u32          tls_align;
     ld_u32          tls_offset;     /* abs(offset) below thread pointer */
 
+    /* Per-object guards.  R_386_RELATIVE is `*p += base` —
+     * non-idempotent — so re-running ld_relocate on an already-
+     * relocated object would double the bias and silently corrupt
+     * every relative pointer (notably DT_FINI_ARRAY entries).
+     * Same concern for init/fini arrays which must fire exactly
+     * once. */
+    int             relocated;
+    int             initialized;
+    int             finalized;
+
     struct ld_obj  *next;
 } ld_obj_t;
 
@@ -235,6 +245,16 @@ ld_obj_t *ld_load_object(const char *path);
  * symbol's runtime address, or 0 if undefined / weak-undef. */
 ld_u32 ld_resolve(const char *name);
 
+/* Same, but skip `skip` while searching.  Used by R_386_COPY which
+ * must find the source-of-truth in a SHARED library, not in the
+ * executable that's about to receive the copy. */
+ld_u32 ld_resolve_skip(const char *name, const ld_obj_t *skip);
+
+/* Same, but also returns the symbol size (for R_386_COPY).
+ * Returns 0 (and *size_out=0) if not found. */
+ld_u32 ld_resolve_with_size(const char *name, const ld_obj_t *skip,
+                            ld_u32 *size_out);
+
 /* Apply DT_REL and DT_JMPREL on `obj`.  Returns 0 on success. */
 int ld_relocate(ld_obj_t *obj);
 
@@ -246,6 +266,15 @@ ld_obj_t *ld_obj_list(void);
  * — each object is initialized exactly once via a per-object guard
  * inside the function. */
 void ld_run_init_arrays(void);
+
+/* Run DT_FINI_ARRAY then DT_FINI for every loaded object in REVERSE
+ * dependency order (program first, deepest deps last).  Called by
+ * libc's exit() via the weak `__ldso_run_fini` pointer so that
+ * destructors fire before the kernel reaps the process.  Static-
+ * linked binaries don't have ld.so loaded, so libc's call resolves
+ * to a NULL stub and is a harmless no-op. */
+__attribute__((visibility("default")))
+void __ldso_run_fini(void);
 
 /* Allocate the per-thread TLS region, copy each loaded object's
  * PT_TLS image into it, install the GS base via the new native

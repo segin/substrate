@@ -45,6 +45,11 @@ __atexit_lock_release(void)
     atomic_store(&__atexit_lock, 0);
 }
 
+/* Weak reference to /sbin/ld.so's destructor entry point.  Only
+ * dynamically-linked binaries have it resolved; static binaries
+ * see a NULL function pointer and skip the call. */
+extern void __ldso_run_fini(void) __attribute__((weak));
+
 void exit(int status) {
     int count;
 
@@ -57,6 +62,8 @@ void exit(int status) {
     while (count > 0) {
         __atexit_funcs[--count]();
     }
+    /* Run DT_FINI_ARRAY / DT_FINI for every loaded .so via ld.so. */
+    if (__ldso_run_fini) __ldso_run_fini();
     /* Flush all open stdio streams (POSIX requirement) */
     fflush(NULL);
     _exit(status);

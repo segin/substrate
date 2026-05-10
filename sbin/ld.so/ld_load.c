@@ -146,7 +146,7 @@ static void ld_cache_dynamic(ld_obj_t *o) {
 }
 
 /* Append `o` to the global loaded-object list, preserving order. */
-static void ld_obj_append(ld_obj_t *o) {
+void ld_obj_append(ld_obj_t *o) {
     o->next = 0;
     if (!ld_obj_head) ld_obj_head = o;
     if (ld_obj_tail) ld_obj_tail->next = o;
