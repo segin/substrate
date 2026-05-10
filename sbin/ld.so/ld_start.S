@@ -1,136 +1,117 @@
 /*
  * ld_start.S — entry point for /sbin/ld.so (Substrate dynamic linker).
  *
- * Phase 1 minimum viable bootstrap.  When the kernel detects a
- * PT_INTERP=/sbin/ld.so on a native ELF, it:
+ * Phase-2 responsibilities (executed BEFORE any C code):
+ *   1. Save the kernel-handed initial %esp (where argc lives).
+ *   2. Compute our own load base = runtime address of __ehdr_start.
+ *   3. Walk our own PT_DYNAMIC for DT_REL / DT_RELSZ.
+ *   4. Apply every R_386_RELATIVE in our image: *(base+r_offset) += base.
+ *      (Only RELATIVE — we have no DT_NEEDED, no symbol resolutions.)
+ *   5. Call ld_main(initial_stack), receive program entry in %eax.
+ *   6. Restore %esp to the saved value, zero %ebp/%edx, jump to entry.
  *
- *   - loads ld.so as ET_DYN at base 0x40000000,
- *   - sets up the user stack with [argc, argv[], NULL, envp[], NULL,
- *     auxv[], AT_NULL] and pushes ld.so's startup state into auxv
- *     (AT_BASE, AT_ENTRY, AT_PHDR, AT_PHENT, AT_PHNUM, AT_PAGESZ),
- *   - jumps to ld.so's e_entry (this _start).
- *
- * %ESP at entry points at argc.  Native syscall ABI is stack-based
- * (REQ-23-not-relevant; see docs/specs/abi-i386.md §1): args at
- * [esp+4..], dummy slot at [esp+0], number in %eax, int $0x80.
- *
- * Phase 1 just proves the kernel-interp handoff works for native
- * binaries:
- *   - emit a single-line "ld.so: hello\n" via SYS_write,
- *   - locate AT_ENTRY in the auxv,
- *   - jump to it with %esp left exactly as the kernel handed it,
- *     so the program's _start sees a normal native stack.
- *
- * No PT_DYNAMIC parsing, no relocations on the program, no TLS.
- * Those land in Phase 2+.  Until they do, the program had better
- * be self-contained (no DT_NEEDED).
+ * After step 4 globals are reachable by their final addresses, so
+ * the C code in ld_main.c is free to use string literals, function
+ * pointers, etc. — anything the linker emitted as R_386_RELATIVE
+ * has been fixed up.
  */
 
-#define SYS_write  4
-#define SYS_exit   1
-
-#define AT_NULL    0
-#define AT_ENTRY   9   /* program entry point */
+#define DT_NULL        0
+#define DT_REL        17
+#define DT_RELSZ      18
+#define R_386_RELATIVE 8
 
     .text
     .global _start
     .type _start, @function
 
 _start:
-    /* %ebp = saved esp = address of argc.  We must NOT clobber the
-     * stack contents above ESP — the program's _start expects to
-     * see argc / argv / envp / auxv exactly as the kernel built it. */
-    movl %esp, %ebp
+    movl  %esp, %ebp                /* save kernel-handed stack -> %ebp */
 
-    /* Phase-1 banner: write(STDERR_FILENO, ld_so_msg, ld_so_msg_len)
-     * via the native stack ABI.  Get our own load address via
-     * call/pop so we don't need any relocations. */
-    call .Lpc_anchor
-.Lpc_anchor:
-    popl %ebx                           /* %ebx = address of .Lpc_anchor */
+    /* --- Compute our load base --------------------------------------
+     * __ehdr_start is the linker-defined symbol at the very start
+     * of the loaded image (vaddr 0 in the .so).  At runtime it lives
+     * at base+0, so its address IS the base. */
+    call  .Lpc
+.Lpc:
+    popl  %ebx                      /* %ebx = runtime addr of .Lpc */
+    leal  __ehdr_start - .Lpc(%ebx), %ebx  /* %ebx = base */
 
-    /* Push args right-to-left for SYS_write(2, msg, len): */
-    leal ld_so_msg-.Lpc_anchor(%ebx), %ecx
-    pushl $ld_so_msg_len_const          /* len */
-    pushl %ecx                          /* buf */
-    pushl $2                            /* fd = STDERR_FILENO */
-    pushl $0                            /* dummy ret-addr slot */
-    movl  $SYS_write, %eax
-    int   $0x80
-    addl  $16, %esp
+    /* --- Locate _DYNAMIC --------------------------------------------
+     * _DYNAMIC has link-time vaddr; runtime addr = base + that. */
+    leal  _DYNAMIC@GOTOFF, %ecx     /* would need GOT — easier path: */
+    /* Fallback: call/pop to get a known PC address, then add the
+     * fixed offset from .Lpc to _DYNAMIC at link time. */
 
-    /* Walk auxv to find AT_ENTRY.
-     *
-     * Stack layout from %ebp (= original esp):
-     *   [ebp+0]      argc
-     *   [ebp+4]      argv[0]
-     *   [ebp+...]    argv[N], NULL
-     *   [ebp+...]    envp[0..M], NULL
-     *   [ebp+...]    auxv: pairs of (a_type, a_un.a_val) terminated by AT_NULL.
-     *
-     * We need to skip over argc + argv (count = argc+1, pointer-sized) +
-     * envp (count to NULL, pointer-sized) to land on auxv. */
+    /* The above @GOTOFF path needs a GOT register set up; easier
+     * pattern: re-anchor at .Lpc and use _DYNAMIC - .Lpc as a
+     * link-time-known offset. */
+    call  .Lpc2
+.Lpc2:
+    popl  %ecx                      /* %ecx = runtime addr of .Lpc2 */
+    leal  _DYNAMIC - .Lpc2(%ecx), %ecx  /* %ecx = runtime &_DYNAMIC */
 
-    movl  %ebp, %edx
-    movl  (%edx), %eax                  /* eax = argc */
-    leal  4(%edx, %eax, 4), %edx        /* edx -> argv[argc] (== NULL slot) */
-    addl  $4, %edx                      /* edx -> envp[0] */
-
-    /* Skip envp until NULL terminator. */
-.Lskip_envp:
-    movl  (%edx), %eax
-    addl  $4, %edx
+    /* --- Walk dynamic table for DT_REL and DT_RELSZ ----------------
+     * Save: %ecx = current Elf32_Dyn*
+     * Out:  %edi = REL table base (runtime addr), %esi = REL bytes */
+    xorl  %edi, %edi
+    xorl  %esi, %esi
+.Ldyn_loop:
+    movl  (%ecx), %eax              /* d_tag */
     testl %eax, %eax
-    jnz   .Lskip_envp                   /* loop while *p != NULL */
+    jz    .Ldyn_done
+    cmpl  $DT_REL, %eax
+    je    .Ldyn_set_rel
+    cmpl  $DT_RELSZ, %eax
+    je    .Ldyn_set_relsz
+    addl  $8, %ecx
+    jmp   .Ldyn_loop
+.Ldyn_set_rel:
+    movl  4(%ecx), %edi
+    addl  %ebx, %edi                /* %edi = base + d_un.d_ptr */
+    addl  $8, %ecx
+    jmp   .Ldyn_loop
+.Ldyn_set_relsz:
+    movl  4(%ecx), %esi             /* %esi = d_un.d_val (bytes) */
+    addl  $8, %ecx
+    jmp   .Ldyn_loop
+.Ldyn_done:
 
-    /* %edx now points at the first auxv entry.  Walk pairs of
-     * (type, value) until type == AT_NULL or AT_ENTRY. */
-.Lscan_auxv:
-    movl  (%edx), %eax                  /* a_type */
-    testl %eax, %eax
-    jz    .Lentry_missing               /* AT_NULL — no AT_ENTRY found */
-    cmpl  $AT_ENTRY, %eax
-    je    .Lentry_found
-    addl  $8, %edx
-    jmp   .Lscan_auxv
+    /* --- Apply R_386_RELATIVE entries ------------------------------
+     * Each Elf32_Rel is { r_offset, r_info } = 8 bytes.
+     * If type == R_386_RELATIVE: *(base + r_offset) += base. */
+    testl %edi, %edi
+    jz    .Lreloc_done
+.Lrel_loop:
+    testl %esi, %esi
+    jz    .Lreloc_done
+    movl  (%edi), %eax              /* r_offset */
+    movl  4(%edi), %edx             /* r_info */
+    movzbl %dl, %edx                /* type = r_info & 0xff */
+    cmpl  $R_386_RELATIVE, %edx
+    jne   .Lrel_next
+    addl  %ebx, %eax                /* %eax = base + r_offset */
+    addl  %ebx, (%eax)              /* *p += base */
+.Lrel_next:
+    addl  $8, %edi
+    subl  $8, %esi
+    jmp   .Lrel_loop
+.Lreloc_done:
 
-.Lentry_found:
-    movl  4(%edx), %eax                 /* a_un.a_val = program entry */
-    /* Restore %esp so the program sees the original stack. */
+    /* --- Hand off to C ---------------------------------------------
+     * Cdecl: push args right-to-left, call.  Single arg = the
+     * saved kernel-handed stack pointer. */
+    pushl %ebp
+    call  ld_main
+    addl  $4, %esp                  /* drop our pushed arg */
+
+    /* --- Jump to the program entry ---------------------------------
+     * %eax = program entry returned by ld_main.  Restore %esp to
+     * the kernel-handed value and clear %ebp / %edx (the latter is
+     * the atexit pointer slot; native ABI expects it zero). */
     movl  %ebp, %esp
-    /* Zero callee-saved regs that the program's _start would expect
-     * cleared per the native ABI (matches what the kernel does on
-     * a fresh exec). */
     xorl  %ebp, %ebp
-    xorl  %edx, %edx                    /* edx is "atexit" pointer slot */
+    xorl  %edx, %edx
     jmp   *%eax
 
-.Lentry_missing:
-    /* No AT_ENTRY in the auxv — kernel violated the contract.
-     * Diagnostic + exit(127). */
-    leal  err_no_entry-.Lpc_anchor(%ebx), %ecx
-    pushl $err_no_entry_len_const
-    pushl %ecx
-    pushl $2
-    pushl $0
-    movl  $SYS_write, %eax
-    int   $0x80
-    addl  $16, %esp
-    pushl $127
-    pushl $0
-    movl  $SYS_exit, %eax
-    int   $0x80
-    /* unreachable */
-1:  hlt
-    jmp 1b
-
     .size _start, . - _start
-
-    .section .rodata
-ld_so_msg:
-    .ascii "ld.so: hello\n"
-    .equ   ld_so_msg_len_const, . - ld_so_msg
-
-err_no_entry:
-    .ascii "ld.so: no AT_ENTRY in auxv\n"
-    .equ   err_no_entry_len_const, . - err_no_entry
