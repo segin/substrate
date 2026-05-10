@@ -10,7 +10,12 @@ include ../../Makefile.inc
 CFLAGS    := $(USER_CFLAGS) -Iinclude -I../../include -I$(TOP)/sys
 PICFLAGS  := $(SHLIB_CFLAGS) -Iinclude -I../../include -I$(TOP)/sys
 LDFLAGS   := $(USER_LDFLAGS)
-SOLDFLAGS := $(SHLIB_LDFLAGS) -Wl,-soname,libc.so.0
+# libc.so.0 references feraiseexcept (and a few other floating-point
+# helpers) that live in libm.  Declare the DT_NEEDED so ld.so pulls
+# libm in transitively when a program lists only -lc.
+SOLDFLAGS := $(SHLIB_LDFLAGS) -Wl,-soname,libc.so.0 \
+             -Wl,--unresolved-symbols=ignore-all \
+             -L$(TOP)/lib/m -l:libm.so.0
 
 SRCS = src/sys.c src/stdlib.c src/string.c src/ctype.c src/assert.c src/dirent.c \
        src/pwd.c src/grp.c src/time/time.c src/div64.c fnmatch.c src/getopt.c src/wchar.c src/libgen.c \

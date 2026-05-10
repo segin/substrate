@@ -264,23 +264,38 @@ ld_u32 ld_main(ld_u32 *initial_stack) {
     extern void ld_obj_prepend(ld_obj_t *o);   /* see ld_load.c */
     ld_obj_prepend(&prog_obj);
 
-    /* Walk DT_NEEDED, loading each in order.  ld_load_object
-     * dedup's by SONAME; this walk is BFS at depth 1.  Recursion
-     * into nested DT_NEEDED is handled when ld_load_object itself
-     * walks the loaded object's dynamic table — but for Phase 3
-     * we depth-bound at one level (no .so we ship has further
-     * DT_NEEDED yet, since they all link against libc.so.0 only). */
-    if (prog_obj.strtab) {
-        for (Elf32_Dyn *d = dyn; d->d_tag != DT_NULL; d++) {
+    /* BFS over the loaded-object list resolving DT_NEEDED.  Walk
+     * the list head-to-tail; for each object, load every entry in
+     * its DT_NEEDED.  ld_load_object dedup's by SONAME and appends
+     * new objects to the same list — the loop sees them and
+     * processes their dependencies in turn.  Terminates when we
+     * walk off the end (every reachable DT_NEEDED has been loaded
+     * and its own deps already queued).
+     *
+     * Per ELF lookup order the program comes first; libraries are
+     * appended in BFS order matching what the spec requires for
+     * symbol resolution scope. */
+    for (ld_obj_t *cur = ld_obj_list(); cur; cur = cur->next) {
+        if (!cur->dynamic || !cur->strtab) continue;
+        for (Elf32_Dyn *d = cur->dynamic; d->d_tag != DT_NULL; d++) {
             if (d->d_tag != DT_NEEDED) continue;
-            const char *soname = prog_obj.strtab + d->d_un.d_val;
-            ld_puts("ld.so: loading "); ld_puts(soname); ld_puts("\n");
+            const char *soname = cur->strtab + d->d_un.d_val;
             ld_obj_t *o = ld_load_object(soname);
             if (!o) {
-                ld_puts("ld.so: failed to load "); ld_puts(soname); ld_puts("\n");
+                ld_puts("ld.so: ");
+                ld_puts(cur->name);
+                ld_puts(" needs ");
+                ld_puts(soname);
+                ld_puts(" — not found\n");
                 ld_die("DT_NEEDED resolution failed");
             }
-            ld_puts("ld.so:   loaded at base "); ld_putx(o->base); ld_puts("\n");
+            ld_puts("ld.so: loaded ");
+            ld_puts(o->name);
+            ld_puts(" (needed by ");
+            ld_puts(cur->name);
+            ld_puts(") at base ");
+            ld_putx(o->base);
+            ld_puts("\n");
         }
     }
 
