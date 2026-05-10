@@ -194,6 +194,14 @@ typedef struct ld_obj {
     Elf32_Rel      *jmprel;     /* DT_JMPREL */
     ld_u32          pltrelsz;   /* bytes */
 
+    /* Initializers / finalizers (DT_INIT, DT_INIT_ARRAY, ...). */
+    void          (*init)(void);
+    void          (**init_array)(void);
+    ld_u32          init_arraysz;   /* bytes — count = sz / sizeof(fn ptr) */
+    void          (*fini)(void);
+    void          (**fini_array)(void);
+    ld_u32          fini_arraysz;
+
     struct ld_obj  *next;
 } ld_obj_t;
 
@@ -211,6 +219,18 @@ int ld_relocate(ld_obj_t *obj);
 
 /* Public head of the loaded-object list. */
 ld_obj_t *ld_obj_list(void);
+
+/* Run DT_INIT and DT_INIT_ARRAY for every loaded object in
+ * dependency order (deepest deps first, program last).  Idempotent
+ * — each object is initialized exactly once via a per-object guard
+ * inside the function. */
+void ld_run_init_arrays(void);
+
+/* Per-process upper bound on objects we'll iterate during init.
+ * Sized to match LD_MAX_OBJS in ld_load.c so it's effectively the
+ * same limit, kept here so ld_main can size a stack array without
+ * pulling in ld_load.c's private constants. */
+#define LD_MAX_OBJS_INIT_LIMIT 32
 
 /* Phase 2 entry point from asm. */
 ld_u32 ld_main(ld_u32 *initial_stack);

@@ -101,6 +101,10 @@ static void ld_cache_dynamic(ld_obj_t *o) {
     ld_u32 jmprel_off = 0;
     ld_u32 hash_off = 0;
     ld_u32 gnu_hash_off = 0;
+    ld_u32 init_off = 0;
+    ld_u32 fini_off = 0;
+    ld_u32 init_arr_off = 0;
+    ld_u32 fini_arr_off = 0;
     ld_u32 soname_str = 0;
     int    soname_seen = 0;
 
@@ -115,6 +119,12 @@ static void ld_cache_dynamic(ld_obj_t *o) {
         case DT_RELSZ:     o->relsz   = d->d_un.d_val; break;
         case DT_JMPREL:    jmprel_off = d->d_un.d_ptr; break;
         case DT_PLTRELSZ:  o->pltrelsz = d->d_un.d_val; break;
+        case DT_INIT:      init_off   = d->d_un.d_ptr; break;
+        case DT_FINI:      fini_off   = d->d_un.d_ptr; break;
+        case DT_INIT_ARRAY:    init_arr_off = d->d_un.d_ptr; break;
+        case DT_INIT_ARRAYSZ:  o->init_arraysz = d->d_un.d_val; break;
+        case DT_FINI_ARRAY:    fini_arr_off = d->d_un.d_ptr; break;
+        case DT_FINI_ARRAYSZ:  o->fini_arraysz = d->d_un.d_val; break;
         case DT_SONAME:    soname_str = d->d_un.d_val; soname_seen = 1; break;
         }
     }
@@ -125,6 +135,10 @@ static void ld_cache_dynamic(ld_obj_t *o) {
     o->gnu_hash = gnu_hash_off ? (ld_u32     *)(gnu_hash_off + o->base) : 0;
     o->rel      = rel_off      ? (Elf32_Rel  *)(rel_off      + o->base) : 0;
     o->jmprel   = jmprel_off   ? (Elf32_Rel  *)(jmprel_off   + o->base) : 0;
+    o->init       = init_off       ? (void (*)(void))(init_off       + o->base) : 0;
+    o->fini       = fini_off       ? (void (*)(void))(fini_off       + o->base) : 0;
+    o->init_array = init_arr_off   ? (void (**)(void))(init_arr_off  + o->base) : 0;
+    o->fini_array = fini_arr_off   ? (void (**)(void))(fini_arr_off  + o->base) : 0;
 
     if (soname_seen && o->strtab && o->name[0] == '\0') {
         ld_strncpy(o->name, o->strtab + soname_str, sizeof(o->name));

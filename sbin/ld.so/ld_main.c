@@ -229,6 +229,12 @@ ld_u32 ld_main(ld_u32 *initial_stack) {
     prog_obj.relsz      = 0;
     prog_obj.jmprel     = 0;
     prog_obj.pltrelsz   = 0;
+    prog_obj.init       = 0;
+    prog_obj.init_array = 0;
+    prog_obj.init_arraysz = 0;
+    prog_obj.fini       = 0;
+    prog_obj.fini_array = 0;
+    prog_obj.fini_arraysz = 0;
     prog_obj.next       = 0;
     {
         const char p_name[] = "main-program";
@@ -238,6 +244,7 @@ ld_u32 ld_main(ld_u32 *initial_stack) {
     {
         ld_u32 strtab_off=0, symtab_off=0, hash_off=0, gnu_hash_off=0;
         ld_u32 rel_off=0, jmprel_off=0;
+        ld_u32 init_off=0, fini_off=0, init_arr_off=0, fini_arr_off=0;
         for (Elf32_Dyn *d = dyn; d->d_tag != DT_NULL; d++) {
             switch (d->d_tag) {
             case DT_STRTAB:   strtab_off   = d->d_un.d_ptr; break;
@@ -249,6 +256,12 @@ ld_u32 ld_main(ld_u32 *initial_stack) {
             case DT_RELSZ:    prog_obj.relsz    = d->d_un.d_val; break;
             case DT_JMPREL:   jmprel_off   = d->d_un.d_ptr; break;
             case DT_PLTRELSZ: prog_obj.pltrelsz = d->d_un.d_val; break;
+            case DT_INIT:         init_off     = d->d_un.d_ptr; break;
+            case DT_FINI:         fini_off     = d->d_un.d_ptr; break;
+            case DT_INIT_ARRAY:   init_arr_off = d->d_un.d_ptr; break;
+            case DT_INIT_ARRAYSZ: prog_obj.init_arraysz = d->d_un.d_val; break;
+            case DT_FINI_ARRAY:   fini_arr_off = d->d_un.d_ptr; break;
+            case DT_FINI_ARRAYSZ: prog_obj.fini_arraysz = d->d_un.d_val; break;
             }
         }
         prog_obj.strtab   = strtab_off   ? (const char *)(strtab_off   + bias) : 0;
@@ -257,6 +270,10 @@ ld_u32 ld_main(ld_u32 *initial_stack) {
         prog_obj.gnu_hash = gnu_hash_off ? (ld_u32     *)(gnu_hash_off + bias) : 0;
         prog_obj.rel      = rel_off      ? (Elf32_Rel  *)(rel_off      + bias) : 0;
         prog_obj.jmprel   = jmprel_off   ? (Elf32_Rel  *)(jmprel_off   + bias) : 0;
+        prog_obj.init       = init_off       ? (void (*)(void))(init_off       + bias) : 0;
+        prog_obj.fini       = fini_off       ? (void (*)(void))(fini_off       + bias) : 0;
+        prog_obj.init_array = init_arr_off   ? (void (**)(void))(init_arr_off  + bias) : 0;
+        prog_obj.fini_array = fini_arr_off   ? (void (**)(void))(fini_arr_off  + bias) : 0;
     }
 
     /* Splice the program into the loaded-object list head so the
@@ -307,6 +324,43 @@ ld_u32 ld_main(ld_u32 *initial_stack) {
         }
     }
 
+    /* Run constructors in dependency order: deepest deps first
+     * (= reverse of load order, since the program is at the head
+     * and its deepest dependency is at the tail). */
+    ld_run_init_arrays();
+
     ld_puts("ld.so: handoff to program entry\n");
     return a.entry;
+}
+
+/* Walk loaded-object list, gather pointers into a small fixed
+ * array, then iterate in reverse so deepest deps run first.  Each
+ * object's DT_INIT runs before its DT_INIT_ARRAY (per ABI), and
+ * within the array entries fire in declared order.  The program
+ * itself is included — it may carry its own __attribute__((ctor))
+ * functions even without static C++ globals. */
+void ld_run_init_arrays(void) {
+    ld_obj_t *stack[LD_MAX_OBJS_INIT_LIMIT];
+    ld_size n = 0;
+    for (ld_obj_t *o = ld_obj_list(); o; o = o->next) {
+        if (n >= LD_MAX_OBJS_INIT_LIMIT) break;
+        stack[n++] = o;
+    }
+    /* Reverse-iterate so the last-loaded (deepest) object's
+     * constructors run first. */
+    for (ld_size i = n; i > 0; i--) {
+        ld_obj_t *o = stack[i - 1];
+        if (o->init) {
+            ld_puts("ld.so: init "); ld_puts(o->name); ld_puts(" (DT_INIT)\n");
+            o->init();
+        }
+        if (o->init_array && o->init_arraysz >= sizeof(void (*)(void))) {
+            ld_u32 cnt = o->init_arraysz / sizeof(void (*)(void));
+            ld_puts("ld.so: init "); ld_puts(o->name);
+            ld_puts(" (DT_INIT_ARRAY x"); ld_putd(cnt); ld_puts(")\n");
+            for (ld_u32 j = 0; j < cnt; j++) {
+                if (o->init_array[j]) o->init_array[j]();
+            }
+        }
+    }
 }
