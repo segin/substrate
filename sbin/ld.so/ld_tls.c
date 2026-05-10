@@ -61,7 +61,7 @@ int ld_setup_tls(void) {
         /* No TLS-using objects.  Skip — gs:0 stays whatever the
          * kernel left it; libc that doesn't use __thread won't
          * touch it. */
-        ld_puts("ld.so: no PT_TLS modules — skipping TLS setup\n");
+        LD_DBG(ld_puts("ld.so: no PT_TLS modules — skipping TLS setup\n"));
         return 0;
     }
     if (cursor + LD_TLS_TCB_SIZE > LD_TLS_MAX_BYTES) {
@@ -95,11 +95,13 @@ int ld_setup_tls(void) {
         ld_u32 i;
         for (i = 0; i < o->tls_filesz; i++) slot[i] = src[i];
         for (; i < o->tls_memsz; i++)        slot[i] = 0;
-        ld_puts("ld.so: tls "); ld_puts(o->name);
-        ld_puts(" memsz="); ld_putx(o->tls_memsz);
-        ld_puts(" filesz="); ld_putx(o->tls_filesz);
-        ld_puts(" offset=-"); ld_putx(o->tls_offset);
-        ld_puts("\n");
+        if (ld_debug) {
+            ld_puts("ld.so: tls "); ld_puts(o->name);
+            ld_puts(" memsz="); ld_putx(o->tls_memsz);
+            ld_puts(" filesz="); ld_putx(o->tls_filesz);
+            ld_puts(" offset=-"); ld_putx(o->tls_offset);
+            ld_puts("\n");
+        }
     }
 
     /* Install the GS base.  After this, %gs:N maps to (tp + N)
@@ -112,6 +114,8 @@ int ld_setup_tls(void) {
         ld_puts("\n");
         return rc;
     }
-    ld_puts("ld.so: TLS installed, tp="); ld_putx(tp); ld_puts("\n");
+    if (ld_debug) {
+        ld_puts("ld.so: TLS installed, tp="); ld_putx(tp); ld_puts("\n");
+    }
     return 0;
 }

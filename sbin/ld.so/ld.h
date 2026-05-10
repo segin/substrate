@@ -176,6 +176,13 @@ void  ld_putx(ld_u32 v);
 void  ld_putd(ld_u32 v);
 void  ld_die(const char *msg) __attribute__((noreturn));
 
+/* When non-zero, emit the verbose loading / relocating / TLS / etc.
+ * trace.  Set from LD_DEBUG=<anything> in envp.  Errors and the
+ * LD_TRACE_LOADED_OBJECTS dump are NOT gated by this — they go to
+ * stderr / stdout regardless. */
+extern int ld_debug;
+#define LD_DBG(stmt) do { if (ld_debug) { stmt; } } while (0)
+
 /* Filesystem + mapping syscalls.  Return -errno on failure. */
 int   ld_open(const char *path, int flags);
 int   ld_close(int fd);

@@ -159,6 +159,8 @@ static void summarize_dynamic(Elf32_Dyn *dyn, ld_u32 bias) {
         }
     }
 
+    if (!ld_debug) return;       /* whole function is diagnostics */
+
     ld_puts("ld.so: program PT_DYNAMIC at "); ld_putx((ld_u32)(unsigned long)dyn); ld_puts("\n");
     ld_puts("ld.so:   load bias = "); ld_putx(bias); ld_puts("\n");
     ld_puts("ld.so:   DT_NEEDED count = "); ld_putd(needed_count); ld_puts("\n");
@@ -169,9 +171,7 @@ static void summarize_dynamic(Elf32_Dyn *dyn, ld_u32 bias) {
     if (rel)    { ld_puts("ld.so:   DT_REL     = "); ld_putx(rel + bias); ld_puts(" ("); ld_putd(relsz / 8); ld_puts(" entries)\n"); }
     if (jmprel) { ld_puts("ld.so:   DT_JMPREL  = "); ld_putx(jmprel + bias); ld_puts(" ("); ld_putd(pltrelsz / 8); ld_puts(" entries)\n"); }
 
-    /* List DT_NEEDED entries by index into strtab.  We can't
-     * dereference strtab safely until we know it's mapped
-     * read-only and validated; for Phase 2 just list the offsets. */
+    /* List DT_NEEDED entries by name. */
     if (needed_count > 0 && strtab) {
         const char *s = (const char *)(strtab + bias);
         ld_u32 idx = 0;
@@ -191,12 +191,37 @@ ld_u32 ld_main(ld_u32 *initial_stack) {
     ld_auxv_t a;
     parse_auxv(initial_stack, &a);
 
-    ld_puts("ld.so: AT_BASE  = "); ld_putx(a.base);   ld_puts("\n");
-    ld_puts("ld.so: AT_ENTRY = "); ld_putx(a.entry);  ld_puts("\n");
-    ld_puts("ld.so: AT_PHDR  = "); ld_putx(a.phdr);   ld_puts("\n");
-    ld_puts("ld.so: AT_PHNUM = "); ld_putd(a.phnum);  ld_puts("\n");
-    ld_puts("ld.so: AT_PHENT = "); ld_putd(a.phent);  ld_puts("\n");
-    ld_puts("ld.so: AT_PAGESZ= "); ld_putx(a.pagesz); ld_puts("\n");
+    /* Scan envp for LD_DEBUG / LD_TRACE_LOADED_OBJECTS up-front so
+     * the very first AT_* / summarize_dynamic prints below honour
+     * the debug flag.  trace_mode is consumed later in this
+     * function (see the post-relocation block). */
+    int trace_mode = 0;
+    {
+        ld_u32 argc = initial_stack[0];
+        ld_u32 *p = initial_stack + 1 + argc + 1;   /* skip argv + NULL */
+        const char k_trace[] = "LD_TRACE_LOADED_OBJECTS=";
+        const char k_debug[] = "LD_DEBUG=";
+        while (*p) {
+            const char *e = (const char *)(unsigned long)*p;
+            unsigned i;
+            for (i = 0; i < sizeof(k_trace) - 1; i++)
+                if (e[i] != k_trace[i]) break;
+            if (i == sizeof(k_trace) - 1 && e[i] != '\0') trace_mode = 1;
+            for (i = 0; i < sizeof(k_debug) - 1; i++)
+                if (e[i] != k_debug[i]) break;
+            if (i == sizeof(k_debug) - 1 && e[i] != '\0') ld_debug = 1;
+            p++;
+        }
+    }
+
+    if (ld_debug) {
+        ld_puts("ld.so: AT_BASE  = "); ld_putx(a.base);   ld_puts("\n");
+        ld_puts("ld.so: AT_ENTRY = "); ld_putx(a.entry);  ld_puts("\n");
+        ld_puts("ld.so: AT_PHDR  = "); ld_putx(a.phdr);   ld_puts("\n");
+        ld_puts("ld.so: AT_PHNUM = "); ld_putd(a.phnum);  ld_puts("\n");
+        ld_puts("ld.so: AT_PHENT = "); ld_putd(a.phent);  ld_puts("\n");
+        ld_puts("ld.so: AT_PAGESZ= "); ld_putx(a.pagesz); ld_puts("\n");
+    }
 
     if (a.entry == 0)
         ld_die("AT_ENTRY missing from auxv");
@@ -206,7 +231,7 @@ ld_u32 ld_main(ld_u32 *initial_stack) {
     ld_u32 bias = 0;
     Elf32_Dyn *dyn = find_dynamic(&a, &bias);
     if (!dyn) {
-        ld_puts("ld.so: program has no PT_DYNAMIC (static-PIE)\n");
+        LD_DBG(ld_puts("ld.so: program has no PT_DYNAMIC (static-PIE)\n"));
         return a.entry;
     }
     summarize_dynamic(dyn, bias);
@@ -389,39 +414,21 @@ ld_u32 ld_main(ld_u32 *initial_stack) {
                 ld_puts(" — not found\n");
                 ld_die("DT_NEEDED resolution failed");
             }
-            ld_puts("ld.so: loaded ");
-            ld_puts(o->name);
-            ld_puts(" (needed by ");
-            ld_puts(cur->name);
-            ld_puts(") at base ");
-            ld_putx(o->base);
-            ld_puts("\n");
+            if (ld_debug) {
+                ld_puts("ld.so: loaded ");
+                ld_puts(o->name);
+                ld_puts(" (needed by ");
+                ld_puts(cur->name);
+                ld_puts(") at base ");
+                ld_putx(o->base);
+                ld_puts("\n");
+            }
         }
     }
 
-    /* Scan envp for LD_TRACE_LOADED_OBJECTS — when set to any
-     * non-empty value, suppress the normal handoff and emit each
-     * loaded object in `ldd`-style output, then exit cleanly.
-     * Argv / envp follow argc on the kernel-built initial stack:
-     * envp starts after argv's NULL terminator. */
-    int trace_mode = 0;
-    {
-        ld_u32 argc = initial_stack[0];
-        ld_u32 *p = initial_stack + 1 + argc + 1;   /* skip argv + NULL */
-        const char key[] = "LD_TRACE_LOADED_OBJECTS=";
-        while (*p) {
-            const char *e = (const char *)(unsigned long)*p;
-            unsigned i;
-            for (i = 0; i < sizeof(key) - 1; i++) {
-                if (e[i] != key[i]) break;
-            }
-            if (i == sizeof(key) - 1 && e[i] != '\0') {
-                trace_mode = 1;
-                break;
-            }
-            p++;
-        }
-    }
+    /* trace_mode is checked below to decide whether to emit the
+     * ldd-style dump and exit instead of jumping to the program;
+     * the env scan that set it lives at the top of ld_main. */
 
     /* Lay out per-thread TLS BEFORE relocations so TLS_TPOFF reloc
      * sites can reference each module's tls_offset. */
@@ -431,7 +438,7 @@ ld_u32 ld_main(ld_u32 *initial_stack) {
 
     /* Apply relocations across all loaded objects (program + libs). */
     for (ld_obj_t *o = ld_obj_list(); o; o = o->next) {
-        if (!trace_mode) {
+        if (ld_debug && !trace_mode) {
             ld_puts("ld.so: relocating "); ld_puts(o->name); ld_puts("\n");
         }
         if (ld_relocate(o) != 0) {
@@ -477,7 +484,7 @@ ld_u32 ld_main(ld_u32 *initial_stack) {
      * and its deepest dependency is at the tail). */
     ld_run_init_arrays();
 
-    ld_puts("ld.so: handoff to program entry\n");
+    LD_DBG(ld_puts("ld.so: handoff to program entry\n"));
     return a.entry;
 }
 
@@ -521,13 +528,15 @@ void ld_run_init_arrays(void) {
         ld_obj_t *o = stack[i - 1];
         if (o->initialized) continue;
         if (o->init) {
-            ld_puts("ld.so: init "); ld_puts(o->name); ld_puts(" (DT_INIT)\n");
+            LD_DBG({ ld_puts("ld.so: init "); ld_puts(o->name); ld_puts(" (DT_INIT)\n"); });
             o->init();
         }
         if (o->init_array && o->init_arraysz >= sizeof(void (*)(void))) {
             ld_u32 cnt = o->init_arraysz / sizeof(void (*)(void));
-            ld_puts("ld.so: init "); ld_puts(o->name);
-            ld_puts(" (DT_INIT_ARRAY x"); ld_putd(cnt); ld_puts(")\n");
+            if (ld_debug) {
+                ld_puts("ld.so: init "); ld_puts(o->name);
+                ld_puts(" (DT_INIT_ARRAY x"); ld_putd(cnt); ld_puts(")\n");
+            }
             for (ld_u32 j = 0; j < cnt; j++) {
                 if (o->init_array[j]) o->init_array[j]();
             }

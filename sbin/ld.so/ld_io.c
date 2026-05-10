@@ -9,6 +9,10 @@
 
 #include "ld.h"
 
+/* Set from envp scan in ld_main.c.  When zero (default) the verbose
+ * loader trace is suppressed entirely. */
+int ld_debug = 0;
+
 /* Native syscall ABI: number in %eax, args at [esp+4..], dummy at
  * [esp+0].  Inline-asm pitfall: any "g"/"m"-constrained operand
  * may resolve to a stack slot, and explicit pushes shift %esp
