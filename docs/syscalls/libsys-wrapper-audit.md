@@ -57,9 +57,18 @@ Sources:
 
 ## Error-Handling Consistency Notes
 
-- `lib/sys` wrappers generally return raw syscall values directly.
-- There is no uniform `-1`/`errno` normalization in `lib/sys`.
-- Kernel syscall handlers currently use mixed return conventions (`-errno`, plain `-1`, and positive errno in `sys_sysctl`).
+The Substrate-wide error contract lives in
+[`docs/syscalls/error-contract.md`](error-contract.md): the kernel
+returns negated errno (`>= 0` success, `-1..-255` failure), and the
+public lib/sys / lib/c wrappers normalize that to POSIX `-1`/`errno`.
+
+Known stragglers still in the legacy mixed-return regime (these
+will be migrated next time they're touched):
+
+- `sys_sysctl` returns positive errno values from some sub-paths.
+- A few internal-only `sys_*` helpers return plain `-1`.
+- Pre-contract typed wrappers in `lib/sys` that return raw kernel
+  values without the `errno = -ret; return -1;` normalization.
 
 ## Recommended Follow-up
 
