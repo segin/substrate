@@ -33,11 +33,13 @@ Sources:
 - `sys_proc_info()`, `sys_proc_list()`, `sys_proc_threads()`, `sys_proc_fds()`, `sys_proc_maps()`, `sys_proc_cwd()`, `sys_proc_exe()`, `sys_proc_cmdline()`, `sys_proc_environ()` -> `SYS_PROC_*`
 - `sys_proc_pers_name()` -> `SYS_PROC_PERS_NAME` (256)
 - `sys_vm_stats()` -> `SYS_VM_STATS`
-- `getpriority()` / `setpriority()` -> `SYS_GETPRIORITY` / `SYS_SETPRIORITY`
-- `clock_gettime()` -> `SYS_CLOCK_GETTIME`
-- `waitpid()` -> `SYS_WAITPID`
-- `munmap()` -> `SYS_MUNMAP`
 - `vm86()` -> `SYS_VM86` (113)
+
+`getpriority`, `setpriority`, `clock_gettime`, `waitpid`, and
+`munmap` already have typed wrappers in `lib/c/src/sys.c`; they do
+NOT live in `lib/sys` to avoid duplicate-symbol link errors when a
+binary links both archives.  Adding them here was attempted in an
+earlier commit and reverted once the conflict surfaced.
 
 ### Wrappers or APIs with known gaps
 
