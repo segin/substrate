@@ -125,6 +125,14 @@
 #define SYS_PROC_PERS_NAME 256 /* lookup personality name by id (was hardcoded 360 in wrapper) */
 #define SYS_CLOCK_GETTIME 265
 #define SYS_GETRANDOM    266
+/* Detailed VM information beyond the SYS_VM_STATS summary.  Each
+ * call has its own number so userland can probe support per-feature
+ * via the standard ENOSYS path; multiplexing through SYS_VM_STATS
+ * with a sub-op was rejected to keep the typed-syscall convention. */
+#define SYS_VM_INFO      270 /* per-zone (DMA / Normal / HighMem) breakdown */
+#define SYS_VM_SWAP      271 /* enumerate swap devices */
+#define SYS_VM_BUFFERS   272 /* bio cache buffer stats */
+#define SYS_VM_SLABS     273 /* UMA zone stats */
 #define SYS_OPENAT       295
 #define SYS_MKDIRAT      296
 #define SYS_FSTATAT      300

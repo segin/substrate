@@ -24,43 +24,23 @@ int sys_vm_stats(sys_vmstat_t *stats) {
 }
 
 int sys_vm_info(sys_vminfo_t *info) {
-    if (!info) {
-        errno = EINVAL;
-        return -1;
-    }
-    memset(info, 0, sizeof(*info));
-    errno = ENOSYS;
-    return -1;
+    if (!info) { errno = EINVAL; return -1; }
+    return syscall(SYS_VM_INFO, info);
 }
 
 int sys_vm_swap(sys_swapinfo_t *swap, size_t *count) {
-    if (!swap || !count) {
-        errno = EINVAL;
-        return -1;
-    }
-    *count = 0;
-    errno = ENOSYS;
-    return -1;
+    if (!swap || !count) { errno = EINVAL; return -1; }
+    return syscall(SYS_VM_SWAP, swap, count);
 }
 
 int sys_vm_buffers(sys_bufinfo_t *buf) {
-    if (!buf) {
-        errno = EINVAL;
-        return -1;
-    }
-    memset(buf, 0, sizeof(*buf));
-    errno = ENOSYS;
-    return -1;
+    if (!buf) { errno = EINVAL; return -1; }
+    return syscall(SYS_VM_BUFFERS, buf);
 }
 
 int sys_vm_slabs(sys_slabinfo_t *slabs, size_t *count) {
-    if (!slabs || !count) {
-        errno = EINVAL;
-        return -1;
-    }
-    *count = 0;
-    errno = ENOSYS;
-    return -1;
+    if (!slabs || !count) { errno = EINVAL; return -1; }
+    return syscall(SYS_VM_SLABS, slabs, count);
 }
 
 /*

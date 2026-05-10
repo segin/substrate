@@ -20,6 +20,10 @@ extern int sys_ptrace(int req, int pid, int addr, int data);
 extern int sys_reboot(int cmd);
 extern int sys_sysctl(int *name, unsigned int namelen, void *oldp, size_t *oldlenp, void *newp, size_t newlen);
 extern int sys_vm_stats(sys_vmstat_t *stats);
+extern int sys_vm_info(sys_vminfo_t *info);
+extern int sys_vm_swap(sys_swapinfo_t *swap, size_t *count);
+extern int sys_vm_buffers(sys_bufinfo_t *buf);
+extern int sys_vm_slabs(sys_slabinfo_t *slabs, size_t *count);
 extern int sys_setpriority(int which, int who, int prio);
 extern int sys_getpriority(int which, int who);
 struct vm86_struct;  /* forward decl — defined in <sys/vm86.h> */
@@ -144,6 +148,10 @@ static void *native_syscalls[MAX_SYSCALLS] = {
     [SYS_PROC_CMDLINE] = &sys_proc_cmdline,
     [SYS_PROC_ENVIRON] = &sys_proc_environ,
     [SYS_VM_STATS] = &sys_vm_stats,
+    [SYS_VM_INFO] = &sys_vm_info,
+    [SYS_VM_SWAP] = &sys_vm_swap,
+    [SYS_VM_BUFFERS] = &sys_vm_buffers,
+    [SYS_VM_SLABS] = &sys_vm_slabs,
     [SYS_PROC_PERS_NAME] = &sys_proc_pers_name,
     [SYS_VM86] = (void *)&sys_vm86,
     [SYS_SETPRIORITY] = &sys_setpriority,
@@ -260,6 +268,10 @@ static const char *native_names[MAX_SYSCALLS] = {
     [SYS_PROC_CMDLINE] = "proc_cmdline",
     [SYS_PROC_ENVIRON] = "proc_environ",
     [SYS_VM_STATS] = "vm_stats",
+    [SYS_VM_INFO] = "vm_info",
+    [SYS_VM_SWAP] = "vm_swap",
+    [SYS_VM_BUFFERS] = "vm_buffers",
+    [SYS_VM_SLABS] = "vm_slabs",
     [SYS_PROC_PERS_NAME] = "proc_pers_name",
     [SYS_VM86] = "vm86",
     [SYS_SETPRIORITY] = "setpriority",
@@ -376,6 +388,10 @@ static struct syscall_fmt native_fmts[MAX_SYSCALLS] = {
     [SYS_PROC_CMDLINE] = { 3, { ARG_INT, ARG_PTR, ARG_PTR } },
     [SYS_PROC_ENVIRON] = { 3, { ARG_INT, ARG_PTR, ARG_PTR } },
     [SYS_VM_STATS] = { 1, { ARG_PTR } },
+    [SYS_VM_INFO] = { 1, { ARG_PTR } },
+    [SYS_VM_SWAP] = { 2, { ARG_PTR, ARG_PTR } },
+    [SYS_VM_BUFFERS] = { 1, { ARG_PTR } },
+    [SYS_VM_SLABS] = { 2, { ARG_PTR, ARG_PTR } },
     [SYS_PROC_PERS_NAME] = { 3, { ARG_INT, ARG_PTR, ARG_INT } },
     [SYS_VM86] = { 1, { ARG_PTR } },
     [SYS_SETPRIORITY] = { 3, { ARG_INT, ARG_INT, ARG_INT } },

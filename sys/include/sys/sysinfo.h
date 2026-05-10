@@ -91,6 +91,46 @@ typedef struct sys_vmstat {
     uint64_t swap_cached;  /* Cached swap */
 } sys_vmstat_t;
 
+/* Detailed VM info structures — must stay byte-identical with the
+ * userspace mirror in include/sys/sysinfo.h.  Both kernel handlers
+ * and lib/sys wrappers use these typedefs directly. */
+typedef struct sys_vminfo {
+    uint64_t dma_total;
+    uint64_t dma_free;
+    uint64_t normal_total;
+    uint64_t normal_free;
+    uint64_t highmem_total;
+    uint64_t highmem_free;
+} sys_vminfo_t;
+
+typedef struct sys_swapinfo {
+    char path[256];
+    uint64_t total;
+    uint64_t used;
+    int priority;
+} sys_swapinfo_t;
+
+typedef struct sys_bufinfo {
+    uint64_t nr_buffers;
+    uint64_t buffer_size;
+    uint64_t dirty;
+    uint64_t writeback;
+} sys_bufinfo_t;
+
+typedef struct sys_slabinfo {
+    char name[32];
+    uint32_t active;
+    uint32_t total;
+    uint32_t objsize;
+    uint32_t slabs;
+    uint32_t pages_per_slab;
+} sys_slabinfo_t;
+
+int sys_vm_info(sys_vminfo_t *info);
+int sys_vm_swap(sys_swapinfo_t *swap, size_t *count);
+int sys_vm_buffers(sys_bufinfo_t *buf);
+int sys_vm_slabs(sys_slabinfo_t *slabs, size_t *count);
+
 #ifndef _KERNEL
 int sysinfo(struct sysinfo *info);
 int sys_proc_count(void);

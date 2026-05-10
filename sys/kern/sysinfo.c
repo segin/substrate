@@ -103,3 +103,73 @@ int sys_vm_stats(sys_vmstat_t *stats) {
     if (copyout(&kstats, stats, sizeof(sys_vmstat_t)) != 0) return -14; // EFAULT
     return 0;
 }
+
+/* sys_vm_info: per-zone breakdown.  Substrate today maintains a
+ * single physical zone (the buddy allocator covers everything below
+ * PMM_DIRECTMAP_PHYS_LIMIT), so we report the entire pool under
+ * "normal" with DMA and HighMem zeroed.  When a zone split lands the
+ * accessor becomes vm_phys_zone_stats(zone) per slot. */
+int sys_vm_info(sys_vminfo_t *info) {
+    if (!info) return -14;
+    sys_vminfo_t k;
+    memset(&k, 0, sizeof(k));
+    uint64_t total = (uint64_t)(vm_phys_get_free() + vm_phys_get_used()) * PAGE_SIZE;
+    uint64_t free  = (uint64_t)vm_phys_get_free() * PAGE_SIZE;
+    k.normal_total = total;
+    k.normal_free  = free;
+    if (copyout(&k, info, sizeof(k)) != 0) return -14;
+    return 0;
+}
+
+/* sys_vm_swap: enumerate swap backing stores.  *count is in/out
+ * (capacity → actual).  Substrate currently exposes a single
+ * aggregate via vm_swap_get_stats; until per-device enumeration
+ * lands we synthesize one entry "swap0" iff swap is configured. */
+int sys_vm_swap(sys_swapinfo_t *swap, size_t *count) {
+    if (!count) return -14;
+    size_t cap = 0;
+    if (copyin(count, &cap, sizeof(cap)) != 0) return -14;
+
+    uint64_t total = 0, free = 0;
+    vm_swap_get_stats(&total, &free);
+    size_t n = (total > 0) ? 1 : 0;
+
+    if (swap && cap > 0 && n > 0) {
+        sys_swapinfo_t k;
+        memset(&k, 0, sizeof(k));
+        const char *path = "swap0";
+        size_t plen = strlen(path);
+        memcpy(k.path, path, plen);
+        k.total = total * PAGE_SIZE;
+        k.used  = (total - free) * PAGE_SIZE;
+        k.priority = 0;
+        if (copyout(&k, &swap[0], sizeof(k)) != 0) return -14;
+    }
+
+    if (copyout(&n, count, sizeof(n)) != 0) return -14;
+    return 0;
+}
+
+/* sys_vm_buffers: report bio cache buffer counts.  Substrate's bio
+ * subsystem doesn't yet export a stats accessor, so report all-zero
+ * with the conventional 4 KiB buffer size.  Field semantics are
+ * preserved so the wrapper doesn't have to gate on feature support. */
+int sys_vm_buffers(sys_bufinfo_t *buf) {
+    if (!buf) return -14;
+    sys_bufinfo_t k;
+    memset(&k, 0, sizeof(k));
+    k.buffer_size = PAGE_SIZE;
+    if (copyout(&k, buf, sizeof(k)) != 0) return -14;
+    return 0;
+}
+
+/* sys_vm_slabs: enumerate UMA zones.  No public iterator yet;
+ * return 0-count and let userland degrade gracefully (procfs
+ * /proc/slabinfo will fill in once UMA grows a public walker). */
+int sys_vm_slabs(sys_slabinfo_t *slabs, size_t *count) {
+    (void)slabs;
+    if (!count) return -14;
+    size_t zero = 0;
+    if (copyout(&zero, count, sizeof(zero)) != 0) return -14;
+    return 0;
+}
