@@ -70,7 +70,7 @@
     - [x] Add missing `lib/sys` wrappers for wired native syscalls with no typed entry points (`setpriority`, `getpriority`, `clock_gettime`, `waitpid`, `brk`, `munmap`, `futex` as applicable to native ABI policy). (REQ: REQ-07-0048)
     - [x] Add typed wrappers for implemented process introspection and VM info calls as they transition from stubs. (REQ: REQ-07-0048)
 - [ ] **Stub Burn-Down:** (REQ: REQ-07-0055)
-    - [ ] Implement kernel handlers for `sys_proc_threads`, `sys_proc_fds`, `sys_proc_maps`, `sys_proc_cwd`, `sys_proc_exe`, `sys_proc_cmdline`, `sys_proc_environ`. (REQ: REQ-07-0048)
+    - [x] Implement kernel handlers for `sys_proc_threads`, `sys_proc_fds`, `sys_proc_maps`, `sys_proc_cwd`, `sys_proc_exe`, `sys_proc_cmdline`, `sys_proc_environ`. (REQ: REQ-07-0048)
     - [ ] Replace userspace `ENOSYS` stubs in `lib/sys/sysinfo.c` for `sys_vm_info`, `sys_vm_swap`, `sys_vm_buffers`, and `sys_vm_slabs` with real syscall-backed implementations. (REQ: REQ-07-0048)
 - [ ] **Error Contract Normalization:** (REQ: REQ-07-0056)
     - [ ] Define and enforce one syscall error contract (`-errno` at kernel boundary, libc/libsys normalization policy). (REQ: REQ-07-0048)

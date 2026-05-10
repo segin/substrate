@@ -50,6 +50,7 @@
 #include <stdio.h>
 #include <stddef.h>
 #include <vm/vm_map.h>
+#include "../vm/vm_area.h"
 
 #include <sys/kern_syscalls.h>
 #include <sys/utsname.h>
@@ -2748,30 +2749,107 @@ int kern_hostname(char *buf, size_t len) {
     return 0;
 }
 
-int sys_proc_threads(pid_t pid, tid_t *tids, size_t *count) {
-    (void)pid; (void)tids;
-    size_t zero = 0;
-    if (count) {
-        if (copyout(&zero, count, sizeof(size_t)) != 0) return -14;
+/* sys_proc_* introspection: probe-and-fill API.
+ * - On entry, *count is the caller's array capacity (0 = probe).
+ * - On exit, *count is the actual number of entries the process has;
+ *   if that exceeds capacity, the array is filled to capacity and the
+ *   caller is expected to retry with a larger buffer.
+ * Returns 0 on success, -ESRCH if pid is unknown, -EFAULT on copy. */
+
+struct proc_thread_collect {
+    process_t *proc;
+    tid_t     *out_array;       /* user pointer (copyout target) */
+    size_t     cap;             /* caller capacity */
+    size_t     n;               /* total threads matched */
+    int        copy_err;        /* -EFAULT if any copyout failed */
+};
+
+static void proc_thread_count_cb(thread_t *t, void *arg) {
+    struct proc_thread_collect *c = arg;
+    if (!t || t->proc != c->proc) return;
+    if (c->out_array && c->n < c->cap) {
+        tid_t tid = (tid_t)t->tid;
+        if (copyout(&tid, &c->out_array[c->n], sizeof(tid_t)) != 0)
+            c->copy_err = -14;
     }
+    c->n++;
+}
+
+int sys_proc_threads(pid_t pid, tid_t *tids, size_t *count) {
+    process_t *target = (pid == 0) ? current_process : proc_find(pid);
+    if (!target) return -3;
+
+    size_t cap = 0;
+    if (count && copyin(count, &cap, sizeof(cap)) != 0) return -14;
+
+    struct proc_thread_collect c = {
+        .proc = target, .out_array = tids, .cap = cap, .n = 0, .copy_err = 0
+    };
+    sched_iterate_threads(proc_thread_count_cb, &c);
+    if (c.copy_err) return c.copy_err;
+
+    if (count && copyout(&c.n, count, sizeof(c.n)) != 0) return -14;
     return 0;
 }
 
 int sys_proc_fds(pid_t pid, sys_fd_t *fds, size_t *count) {
-    (void)pid; (void)fds;
-    size_t zero = 0;
-    if (count) {
-        if (copyout(&zero, count, sizeof(size_t)) != 0) return -14;
+    process_t *target = (pid == 0) ? current_process : proc_find(pid);
+    if (!target) return -3;
+
+    size_t cap = 0;
+    if (count && copyin(count, &cap, sizeof(cap)) != 0) return -14;
+
+    size_t n = 0;
+    for (int i = 0; i < MAX_FD; i++) {
+        if (!target->fds[i]) continue;
+        if (fds && n < cap) {
+            sys_fd_t kbuf;
+            memset(&kbuf, 0, sizeof(kbuf));
+            kbuf.fd = i;
+            kbuf.flags = (uint32_t)target->fds[i]->f_flag;
+            const char *p = target->fds[i]->f_path;
+            size_t plen = strlen(p);
+            if (plen >= sizeof(kbuf.path)) plen = sizeof(kbuf.path) - 1;
+            memcpy(kbuf.path, p, plen);
+            kbuf.path[plen] = '\0';
+            if (copyout(&kbuf, &fds[n], sizeof(kbuf)) != 0) return -14;
+        }
+        n++;
     }
+
+    if (count && copyout(&n, count, sizeof(n)) != 0) return -14;
     return 0;
 }
 
 int sys_proc_maps(pid_t pid, sys_map_t *maps, size_t *count) {
-    (void)pid; (void)maps;
-    size_t zero = 0;
-    if (count) {
-        if (copyout(&zero, count, sizeof(size_t)) != 0) return -14;
+    process_t *target = (pid == 0) ? current_process : proc_find(pid);
+    if (!target) return -3;
+
+    size_t cap = 0;
+    if (count && copyin(count, &cap, sizeof(cap)) != 0) return -14;
+
+    size_t n = 0;
+    for (vm_area_t *a = target->vm_areas; a; a = a->next) {
+        if (maps && n < cap) {
+            sys_map_t kbuf;
+            memset(&kbuf, 0, sizeof(kbuf));
+            kbuf.start = a->vm_start;
+            kbuf.end   = a->vm_end;
+            /* Pack prot bits in low byte, vm_flags shifted into next byte
+             * so a userspace tool can recover both halves with shift+mask. */
+            kbuf.flags = (a->vm_prot & 0xFF) | ((a->vm_flags & 0xFF) << 8);
+            const char *name = "[anon]";
+            if (a->vm_file && a->vm_file->name[0]) name = a->vm_file->name;
+            size_t nlen = strlen(name);
+            if (nlen >= sizeof(kbuf.name)) nlen = sizeof(kbuf.name) - 1;
+            memcpy(kbuf.name, name, nlen);
+            kbuf.name[nlen] = '\0';
+            if (copyout(&kbuf, &maps[n], sizeof(kbuf)) != 0) return -14;
+        }
+        n++;
     }
+
+    if (count && copyout(&n, count, sizeof(n)) != 0) return -14;
     return 0;
 }
 
@@ -2803,27 +2881,40 @@ int sys_proc_exe(pid_t pid, char *buf, size_t len) {
     return 0;
 }
 
+/* sys_proc_cmdline: copy out the cmdline_tail blob (NUL-separated
+ * arguments, as captured at exec) into `argv` interpreted as a flat
+ * char buffer of size `*argc` bytes.  *argc is always set to the
+ * required byte count; if the user buffer was too small, what we
+ * wrote is truncated but `*argc` reflects the true size so the
+ * caller can re-allocate and retry.  The kernel doesn't reconstruct
+ * the per-arg pointer array — userland tools (ps, /proc/N/cmdline
+ * helpers) split on NUL themselves. */
 int sys_proc_cmdline(pid_t pid, char **argv, size_t *argc) {
-    (void)argv;
     process_t *target = (pid == 0) ? current_process : proc_find(pid);
-    
-    if (!target) return -3; // ESRCH
-    
-    if (argc) {
-        size_t k_argc = (size_t)target->cmdline_tail_argc;
-        if (copyout(&k_argc, argc, sizeof(size_t)) != 0) return -14;
+    if (!target) return -3;
+
+    size_t need = (size_t)target->cmdline_tail_len;
+    size_t cap = 0;
+    if (argc && copyin(argc, &cap, sizeof(cap)) != 0) return -14;
+
+    if (argv && cap > 0 && need > 0) {
+        size_t n = need < cap ? need : cap;
+        if (copyout(target->cmdline_tail, (char *)argv, n) != 0) return -14;
     }
-    
-    // Stub: returning the array of pointers is complex without more infrastructure.
-    // For now, we return successfully if argc was requested.
+
+    if (argc && copyout(&need, argc, sizeof(need)) != 0) return -14;
     return 0;
 }
 
+/* sys_proc_environ: Substrate currently doesn't snapshot envp at exec
+ * the way it does cmdline_tail, so this returns 0 entries.  When the
+ * environ-snapshot lands, the implementation matches the cmdline path
+ * verbatim — until then, callers see "no environ available" rather
+ * than ENOSYS, which keeps `ps -e` and procfs from erroring out. */
 int sys_proc_environ(pid_t pid, char **envp, size_t *envc) {
     (void)envp;
     process_t *target = (pid == 0) ? current_process : proc_find(pid);
-
-    if (!target) return -3; // ESRCH
+    if (!target) return -3;
 
     if (envc) {
         size_t zero = 0;
