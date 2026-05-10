@@ -8,9 +8,13 @@ Sources:
 
 ## Raw Entry Point
 
-- `syscall()` in `lib/sys/syscall.S` uses Linux-style register argument passing (`ebx..ebp`).
-- Native `substrate` syscall dispatch currently expects stack arguments for this personality.
-- Result: the raw `lib/sys` calling convention is ABI-divergent from current native dispatch policy.
+- `syscall()` in `lib/sys/syscall.S` uses the **stack argument
+  ABI**: it pops the syscall number off the stack into `%eax`,
+  re-pushes the caller's return address, and fires `int $0x80`
+  with args laid out at `useresp[1..8]` — exactly what native /
+  FreeBSD / NetBSD / OpenBSD / SVR4 dispatch reads.
+- Verified end-to-end by `tests/lib/sys/host_test_syscall_abi.c`
+  (0..6 args).
 
 ## Wrapper Coverage
 
@@ -27,13 +31,24 @@ Sources:
 - `sysctl()` -> `SYS_SYSCTL`
 - `sysinfo()` -> `SYS_SYSINFO`
 - `sys_proc_info()`, `sys_proc_list()`, `sys_proc_threads()`, `sys_proc_fds()`, `sys_proc_maps()`, `sys_proc_cwd()`, `sys_proc_exe()`, `sys_proc_cmdline()`, `sys_proc_environ()` -> `SYS_PROC_*`
+- `sys_proc_pers_name()` -> `SYS_PROC_PERS_NAME` (256)
 - `sys_vm_stats()` -> `SYS_VM_STATS`
+- `getpriority()` / `setpriority()` -> `SYS_GETPRIORITY` / `SYS_SETPRIORITY`
+- `clock_gettime()` -> `SYS_CLOCK_GETTIME`
+- `waitpid()` -> `SYS_WAITPID`
+- `munmap()` -> `SYS_MUNMAP`
+- `vm86()` -> `SYS_VM86` (113)
 
 ### Wrappers or APIs with known gaps
 
-- `vm86()` uses hardcoded `SYS_vm86=113`; this number is not in `sys/arch/i386/syscall.h` and not wired in native table.
-- `sys_proc_pers_name()` uses hardcoded `SYS_PROC_PERS_NAME=360`; not wired in native table.
 - `sys_vm_info()`, `sys_vm_swap()`, `sys_vm_buffers()`, `sys_vm_slabs()` are userspace stubs that return `ENOSYS`.
+- `brk()` and `futex()` have no native wrapper.  Rationale:
+  `brk` is conventionally an internal implementation detail of
+  libc malloc and is not wired into native dispatch on Substrate;
+  `futex` is a Linux-shaped primitive and the native ABI prefers
+  the typed pthread/turnstile path over a generic futex syscall.
+  Both kernel handlers (`sys_brk`, `sys_futex`) exist but are
+  reachable only through the Linux personality.
 - `sys_cpu_count()` returns constant `1` in userspace instead of issuing `SYS_CPU_COUNT`.
 - `sys_cpu_info()`, `sys_cpu_times()`, `sys_cpu_loadavg()` are userspace stubs returning `ENOSYS`.
 - `sys_uptime()`, `sys_boottime()`, `sys_domainname()` are userspace stubs returning `ENOSYS`.

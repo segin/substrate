@@ -3,7 +3,7 @@ include ../../Makefile.inc
 CFLAGS := $(USER_CFLAGS) -fno-builtin
 ASFLAGS := $(USER_CFLAGS)
 
-OBJS = syscall.o vm86.o proc.o sysctl.o sysinfo.o getpagesize.o mlock.o getpid.o getuid.o pgrp.o getrusage.o getrandom.o times.o ioctl.o stime.o ptrace.o reboot.o modify_ldt.o stat.o select.o chown.o
+OBJS = syscall.o vm86.o proc.o sysctl.o sysinfo.o getpagesize.o mlock.o getpid.o getuid.o pgrp.o getrusage.o getrandom.o times.o ioctl.o stime.o ptrace.o reboot.o modify_ldt.o stat.o select.o chown.o priority.o clock_gettime.o wait.o munmap.o
 
 all: libsys.a
 
