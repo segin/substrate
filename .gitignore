@@ -291,3 +291,22 @@ tests/usr.lib/exvi/test_exvi_core
 tests/usr.lib/demangle/test_audit_regressions
 tests/usr.lib/demangle/test_demangle
 tests/usr.lib/demangle/fuzz/corpus/
+
+# Host-built test/bench/fuzz binaries (NATIVE_BUILD=1).  These are
+# all unversioned 64-bit ELFs; the previous policy was to list each
+# one individually but the long tail keeps growing.  Wildcard the
+# common parents instead — source files (.c/.cpp/.h) at these paths
+# are explicitly *.c/etc and not affected.
+/tests/test_*
+/tests/bench_*
+/tests/fuzz_*
+/tests/prop_*
+/tests/lib/m/test_*
+/tests/lib/m/bench_*
+/tests/lib/m/fuzz_*
+/tests/lib/m/prop_*
+
+# Local scratch / staging directories (build root preview, ad-hoc
+# model & data dumps).  Not part of the source tree.
+/stage/
+/privacy-filter/
