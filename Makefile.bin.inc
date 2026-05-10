@@ -27,7 +27,10 @@ ifeq ($(DYNAMIC),1)
                   -Wl,--dynamic-linker=/sbin/ld.so \
                   -Wl,--unresolved-symbols=ignore-in-shared-libs
 else
-    BIN_CFLAGS := $(USER_CFLAGS)
+    # Deferred (=) so per-program Makefiles that do
+    # `USER_CFLAGS += -I...` AFTER including this file still work
+    # — the variable is re-expanded each time the compile rule fires.
+    BIN_CFLAGS  = $(USER_CFLAGS)
     LDFLAGS    := $(USER_LDFLAGS)
 endif
 
@@ -48,13 +51,18 @@ ifdef NATIVE_BUILD
     LIBS =
     BRAND_CMD =
 else
-    # Substrate build: manual linking
+    # Substrate build: manual linking.
+    #
+    # libc.a's fpclassify TU references feraiseexcept (in libm), so
+    # every static-link binary needs libm too — otherwise the
+    # static linker fails with "undefined reference".  The dynamic
+    # path doesn't have this issue because libc.so.0 declares
+    # DT_NEEDED libm.so.0 and ld.so resolves it at runtime.
     CRT0 = $(LIBC_DIR)/crt0.o
     ifeq ($(DYNAMIC),1)
-        # Dynamic: ld.so will resolve symbols at runtime.
         LIBS = -L$(LIBC_DIR) -l:libc.so.0 $(LIBGCC)
     else
-        LIBS = -L$(LIBC_DIR) -lc $(LIBGCC)
+        LIBS = -L$(LIBC_DIR) -lc -L$(TOP)/lib/m -lm $(LIBGCC)
     endif
     BRAND_CMD = $(call BRAND_SUBSTRATE,$@)
 endif

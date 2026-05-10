@@ -32,7 +32,9 @@ else
     TOOL_LDFLAGS = $(USER_LDFLAGS)
     TOOL_CRT0 = $(TOP)/lib/c/crt0.o
     TOOL_LIBC = $(TOP)/lib/c/libc.a
-    TOOL_LIBS = -L$(TOP)/lib/c -lc $(LIBGCC)
+    # libc.a's fpclassify.o references feraiseexcept (in libm),
+    # so static-link binaries need libm too.
+    TOOL_LIBS = -L$(TOP)/lib/c -lc -L$(TOP)/lib/m -lm $(LIBGCC)
     TOOL_BRAND = $(call BRAND_SUBSTRATE,$@)
 endif
 
