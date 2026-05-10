@@ -122,6 +122,7 @@
 #define SYS_PROC_CMDLINE 253
 #define SYS_PROC_ENVIRON 254
 #define SYS_VM_STATS     255
+#define SYS_PROC_PERS_NAME 256 /* lookup personality name by id (was hardcoded 360 in wrapper) */
 #define SYS_CLOCK_GETTIME 265
 #define SYS_GETRANDOM    266
 #define SYS_OPENAT       295
@@ -142,6 +143,7 @@
 #define SYS_UMOUNT2     161 /* umount(2) with flags (MNT_FORCE etc.) */
 #define SYS_PIPE2       163 /* pipe2(int[2], int flags) */
 #define SYS_DUP3        164 /* dup3(int old, int new, int flags) */
+#define SYS_VM86        113 /* enter virtual 8086 mode (sys_vm86) */
 
 void syscall_init(void);
 

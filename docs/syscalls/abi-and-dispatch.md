@@ -47,5 +47,9 @@ This means ABI correctness depends on both caller stub and selected personality.
 
 ## Known ABI Gaps
 
-- `SYS_vm86` and `SYS_PROC_PERS_NAME` are hardcoded in `lib/sys` wrappers but are not defined in `sys/arch/i386/syscall.h` and not mapped in native dispatch.
+- ~~`SYS_vm86` and `SYS_PROC_PERS_NAME` are hardcoded in `lib/sys`
+  wrappers but are not defined in `sys/arch/i386/syscall.h` and not
+  mapped in native dispatch.~~ Resolved: `SYS_VM86=113` and
+  `SYS_PROC_PERS_NAME=256` are now header-defined and wired into
+  `perso_native` (see commit log).
 - Several numbered syscalls are defined in `sys/arch/i386/syscall.h` but not wired into native personality dispatch (`SYS_WAITPID`, `SYS_BRK`, `SYS_MUNMAP`, `SYS_CLOCK_GETTIME`, etc.).

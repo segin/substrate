@@ -2822,14 +2822,39 @@ int sys_proc_cmdline(pid_t pid, char **argv, size_t *argc) {
 int sys_proc_environ(pid_t pid, char **envp, size_t *envc) {
     (void)envp;
     process_t *target = (pid == 0) ? current_process : proc_find(pid);
-    
+
     if (!target) return -3; // ESRCH
-    
+
     if (envc) {
         size_t zero = 0;
         if (copyout(&zero, envc, sizeof(size_t)) != 0) return -14;
     }
     return 0;
+}
+
+/*
+ * sys_proc_pers_name(perso_id, buf, len) — copy out the human-readable
+ * personality name for `perso_id` (e.g. "Linux", "FreeBSD", "Native").
+ * Used by `sys/proc.h` introspection helpers and by tools that render
+ * `ps`-style personality columns.  Returns the byte length written
+ * (including NUL) on success, 0 if `len` was 0, or -EFAULT on copyout
+ * failure / -EINVAL if `buf` is NULL with non-zero `len`.
+ */
+int sys_proc_pers_name(int perso_id, char *buf, size_t len) {
+    extern const char *perso_name(int id);
+    const char *name = perso_name(perso_id);
+    if (!name) name = "unknown";
+    size_t need = strlen(name) + 1;
+    if (len == 0) return (int)need;          /* probe: tell caller buffer size */
+    if (!buf) return -EINVAL;
+    size_t n = need <= len ? need : len;
+    if (copyout((void *)name, buf, n) != 0) return -EFAULT;
+    if (n < need) {
+        /* Force NUL terminator at the truncated end. */
+        char nul = '\0';
+        if (copyout(&nul, buf + n - 1, 1) != 0) return -EFAULT;
+    }
+    return (int)need;
 }
 
 int sys_reboot(int cmd) {
