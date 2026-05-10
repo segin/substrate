@@ -42,6 +42,26 @@ For the full detailed changelog, see `docs/CHANGELOG.md`.
 ### Libraries & Build
 - libsys syscall wrapper library, kernel library modularization
 - Root filesystem staging (`dist/`), test framework (`tests/sys/`)
+- Every library under `lib/` ships both static (`libX.a`) and shared
+  (`libX.so.0`) builds from a single source tree via dual `.o` /
+  `.pic.o` compile passes; `SHLIB_CFLAGS` / `SHLIB_LDFLAGS` defined
+  in `Makefile.inc`.  The `libX.so` link-time symlink is install-only
+  so it can't shadow `libX.a` in source-tree builds.
+
+### Dynamic Linking
+- `/sbin/ld.so` (Substrate native dynamic linker, `sbin/ld.so/`):
+  - Phase 1: bootstrap, asm `_start`, auxv walk, AT_ENTRY handoff.
+  - Phase 2: parse program PT_DYNAMIC, summarize DT_*, self-relocate
+    (R_386_RELATIVE).
+  - Phase 3: load DT_NEEDED libs via `mmap` + MAP_FIXED, build symbol
+    scope, apply REL/JMPREL relocations (R_386_RELATIVE / GLOB_DAT /
+    JMP_SLOT / 32 / PC32) with eager binding.  DT_GNU_HASH preferred,
+    DT_HASH fallback.  Search paths `/lib`, `/usr/lib`, `/usr/local/lib`.
+- `lib/c/arch/i386/crt0.S` is now PIC-safe (`%ebx`/GOT setup, `@PLT`
+  for calls, `environ@GOT` for data) so the same `crt0.o` works for
+  both static and PIE binaries.
+- Specs: `docs/design/ld.so-design.md`, `docs/specs/ld.so-reloc-matrix.md`,
+  `docs/kernel-ldso-abi-substrate.md`, `docs/specs/abi-i386.md`.
 
 
 ## Current Status
@@ -135,11 +155,17 @@ pmm_free_block(virt);  // CORRECT - convert first
 - `bin/`: User-space utilities (`ls`, `sh`, `vi`, etc.). Test sources live in `tests/bin/<program>/`; each program's `Makefile` references them via `TESTS = ../../tests/bin/<program>`.
 - `include/`: Userspace C library headers (shared by all libraries).
 - `lib/`:
-    - `c/`: LibC implementation **(Substrate target ONLY, never for Linux/host)**.
+    - `c/`: LibC implementation **(Substrate target ONLY, never for Linux/host)**.  Builds `libc.a` AND `libc.so.0`.
     - `sys/`: System call wrapper library (libsys). Raw `syscall()` and typed wrappers **(Substrate target ONLY)**.
-    - `pthreads/`: Threading support.
-    - `dbm/`: Database library.
+    - `m/`: Math library — `libm.a` + `libm.so.0`.
+    - `edit/`: Command-line editing — `libedit.a` + `libedit.so.0` (DT_NEEDED libc.so.0).
+    - `pthreads/`: Threading support — `libpthread.a` + `libpthread.so.0`.
+    - `dbm/`: Database library (currently broken upstream — missing `SEEK_SET` include in `dbm.c`).
 - `sbin/`: System binaries.
+    - `ld.so/`: **Substrate native dynamic linker.**  Position-independent
+      ET_DYN with no DT_NEEDED.  Loaded by the kernel at AT_BASE =
+      0x40000000 for every PIE binary that lists `/sbin/ld.so` in its
+      PT_INTERP.  Exec ABI documented in `docs/kernel-ldso-abi-substrate.md`.
 - `tests/bin/`: Per-program test suites for `bin/` utilities (unit, integration, property, fuzz).
 
 ### Kernel Debugging
@@ -180,3 +206,12 @@ If the kernel hangs in `hlt`, check `eflags` bit 9. If `IF=1`, the IRQ may be ma
 - Refactor PMAP to dynamically allocate page tables (reduce 128KB overhead)
 - Implement mmap() syscall with personality driver integration
 - Flesh out 9P filesystem logic implementation
+- /sbin/ld.so Phase 4+: recursive DT_NEEDED traversal (currently
+  depth-1 only); init_array / fini_array execution; TLS install via
+  GS segment (for `__thread`); R_386_COPY for executables that copy
+  DSO data; dlopen / dlsym / dlclose API.
+- Switch userland binaries to dynamic linking incrementally — start
+  with non-bootstrap-essential ones (`bin/echo` is a good first
+  candidate) and verify before expanding.
+- Fix `lib/dbm/dbm.c` (missing `SEEK_SET`/`SEEK_CUR` include) so
+  libdbm.{a,so.0} build cleanly.

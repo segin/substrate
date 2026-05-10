@@ -5,10 +5,14 @@ It is a living technical baseline for kernel, userland, libraries, and toolchain
 
 ## 1. System Identity
 
-Substrate is a complete Unix OS project with four first-class pillars:
+Substrate is a complete Unix OS project with five first-class pillars:
 - Kernel (`sys/`)
 - Userland programs (`bin/`, `sbin/`, `usr.bin/`)
-- Runtime/system libraries (`lib/`, `usr.lib/`)
+- Runtime/system libraries (`lib/`, `usr.lib/`) — shipped as both static
+  archives (`libX.a`) and shared objects (`libX.so.0`).
+- Native dynamic linker (`sbin/ld.so`) — loaded by the kernel at the
+  PT_INTERP base for every dynamically-linked native binary; performs
+  DT_NEEDED traversal, symbol resolution, and i386 relocation.
 - Native toolchain (`usr.bin/cc`, `usr.bin/as`, `usr.bin/ld`, `usr.lib/elfobj`)
 
 Primary target architecture is i386. x86_64 support is active and expanding.
@@ -23,8 +27,11 @@ Primary target architecture is i386. x86_64 support is active and expanding.
 ## 3. Top-Level Architecture
 
 ```text
-User Programs
-  -> libc/libsys/libm/... (userspace ABI)
+User Programs (static or PIE)
+  -> /sbin/ld.so (PT_INTERP for PIE only)
+       -> mmap loaded shared objects (lib*.so.0)
+       -> resolve relocations across the loaded-object scope
+  -> libc/libm/libedit/libpthread/libsys/... (userspace ABI)
   -> syscall boundary
   -> kernel services (proc/vm/vfs/drivers/personality)
   -> hardware
@@ -44,6 +51,10 @@ sys/         kernel
 sys/boot/    Substrate BIOS bootloader (stage1 asm + stage2 C)
 bin/         base Unix userland
 sbin/        system utilities
+sbin/ld.so/  Substrate native dynamic linker (Phase 1-3 today; design
+             in docs/design/ld.so-design.md, reloc matrix in
+             docs/specs/ld.so-reloc-matrix.md, kernel ABI contract
+             in docs/kernel-ldso-abi-substrate.md)
 usr.bin/     compiler/toolchain and extended user tools
              per-tool architecture docs live beside the native toolchain entry points:
              usr.bin/as/ARCHITECTURE.md, usr.bin/cc/ARCHITECTURE.md, usr.bin/ld/ARCHITECTURE.md
@@ -100,6 +111,36 @@ Userland is split by role (essential, admin, extended) and supported by a suite 
 ## 7. ABI and Interface Boundaries
 
 Substrate maintains strict ABI boundaries between the kernel and userland, and between toolchain outputs and the runtime loader. Any change to these boundaries requires synchronization across all affected layers and documentation updates.
+
+### Library Build Policy
+
+Every public library under `lib/` produces both flavors from a single source tree:
+
+- **Static archive** `libX.a` — compiled with `USER_CFLAGS` (`-fno-pie`),
+  what `-lX` resolves to in source-tree builds.  Used by every binary
+  that statically links today (`bin/echo`, `bin/sh`, ..., `sbin/init`).
+- **Shared object** `libX.so.0` — compiled with `SHLIB_CFLAGS`
+  (`-fPIC`), linked with `-shared -Bsymbolic-functions -z now`,
+  carrying the `DT_SONAME` `libX.so.0`.  Installed under
+  `$(DESTDIR)/lib/`; the `libX.so` link-time symlink is created
+  ONLY at install time so it doesn't shadow `libX.a` in the source
+  tree (otherwise `-lc` would silently pull undefined symbols like
+  `feraiseexcept` from `libc.so` into static-linked binaries).
+
+Build infrastructure lives in `Makefile.inc` as `SHLIB_CFLAGS` /
+`SHLIB_LDFLAGS`.  See `docs/design/ld.so-design.md` for the full
+loader contract that `.so.0` files must honour.
+
+### Native crt0
+
+`lib/c/arch/i386/crt0.S` is PIC-safe: it sets up `%ebx` as the GOT
+pointer via `call/pop` + `_GLOBAL_OFFSET_TABLE_`, accesses `environ`
+through `environ@GOT(%ebx)`, and routes every external call
+(`__stdio_init`, `main`, `exit`) through `@PLT`.  This single object
+serves both static and dynamic links — for static builds the linker
+resolves the `@PLT`/`@GOT` references to direct addresses; for PIE
+builds `/sbin/ld.so` fills the GOT slots during its relocation pass
+before `_start` runs.
 
 ## 8. Testing Strategy
 
