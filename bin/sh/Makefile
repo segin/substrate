@@ -2,10 +2,14 @@ PROG=sh
 SRCS=sh.c lexer.c parser.c expand.c exec.c shell_var.c util.c job.c prompt.c
 OBJS=$(SRCS:.c=.o)
 LIBEDIT_A=$(TOP)/lib/edit/libedit.a
+DYNAMIC = 1
 
 include ../../Makefile.bin.inc
 
-LDADD = -L$(TOP)/lib/edit -l:libedit.a
+# Use the libedit.so.0 shared library so ld.so resolves it at
+# runtime alongside libc.so.0.  Requires lib/edit to have been
+# built (sbin/Makefile pulls it in via the lib/ chain).
+LDADD = -L$(TOP)/lib/edit -l:libedit.so.0
 
 libedit_target:
 	$(MAKE) -C $(TOP)/lib/edit clean all

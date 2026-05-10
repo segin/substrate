@@ -1,6 +1,8 @@
-PROG = mv
-SRCS = mv.c
-DYNAMIC = 1
-
 include ../../Makefile.inc
+
+PROG = ldd
+SRCS = ldd.c
+
 include ../../Makefile.bin.inc
+
+BINDIR := $(DESTDIR)/usr/bin

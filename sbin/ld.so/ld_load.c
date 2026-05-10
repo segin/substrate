@@ -240,22 +240,33 @@ static ld_obj_t *load_from_path(const char *path) {
                               fd, fileoff_pages);
             if ((long)r < 0 || r != (void *)vaddr) { ld_close(fd); return 0; }
         }
-        /* BSS: anonymous pad if memsz > filesz. */
+        /* BSS handling.  Two pieces:
+         *   1. Bytes from (p_vaddr + p_filesz) up to the next page
+         *      boundary are part of the LAST file page we mapped.
+         *      The file mmap brought in whatever happened to live
+         *      in the file at that offset (typically the next
+         *      segment's contents) — definitely not zero.  Memset
+         *      them to 0 so BSS data starts blank.
+         *   2. Pages beyond that (vaddr + mapsz onward, up to the
+         *      page-aligned end of memsz) get an anonymous
+         *      MAP_FIXED mapping — anon pages are kernel-zeroed. */
         if (ph[i].p_memsz > ph[i].p_filesz) {
-            ld_u32 bss_start = (ph[i].p_vaddr + base + ph[i].p_filesz);
-            ld_u32 bss_pg    = bss_start & ~(PAGE_SIZE - 1);
-            ld_u32 bss_end   = (ph[i].p_vaddr + base + ph[i].p_memsz + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
-            if (bss_end > bss_pg + mapsz) {
-                ld_u32 anon_start = bss_pg + (mapsz ? mapsz : 0);
-                /* Use the conservative anon_start so we never re-map
-                 * a page that the file mapping above already covered. */
-                if (anon_start < bss_end) {
-                    void *a = ld_mmap((void *)anon_start, bss_end - anon_start,
-                                      prot | LD_PROT_WRITE,
-                                      LD_MAP_PRIVATE | LD_MAP_ANON | LD_MAP_FIXED,
-                                      -1, 0);
-                    (void)a; /* best-effort; failure leaves zero pages from the reserve */
-                }
+            ld_u32 bss_start  = ph[i].p_vaddr + base + ph[i].p_filesz;
+            ld_u32 bss_actual_end = ph[i].p_vaddr + base + ph[i].p_memsz;
+            ld_u32 file_page_end  = vaddr + mapsz;
+            if (bss_start < file_page_end) {
+                ld_u32 zlen = (bss_actual_end < file_page_end ? bss_actual_end : file_page_end) - bss_start;
+                unsigned char *z = (unsigned char *)(unsigned long)bss_start;
+                for (ld_u32 k = 0; k < zlen; k++) z[k] = 0;
+            }
+            ld_u32 anon_start = file_page_end;
+            ld_u32 mem_end    = (bss_actual_end + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
+            if (anon_start < mem_end) {
+                void *a = ld_mmap((void *)anon_start, mem_end - anon_start,
+                                  prot | LD_PROT_WRITE,
+                                  LD_MAP_PRIVATE | LD_MAP_ANON | LD_MAP_FIXED,
+                                  -1, 0);
+                (void)a;
             }
         }
     }

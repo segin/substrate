@@ -4,6 +4,7 @@ include $(TOP)/Makefile.inc
 PROG = ls
 SRCS = ls.c ls_opts.c ls_print.c ls_sort.c ls_traverse.c ls_colors.c
 OBJS = $(SRCS:.c=.o)
+DYNAMIC = 1
 
 include $(TOP)/Makefile.bin.inc
 

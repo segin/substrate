@@ -399,6 +399,30 @@ ld_u32 ld_main(ld_u32 *initial_stack) {
         }
     }
 
+    /* Scan envp for LD_TRACE_LOADED_OBJECTS — when set to any
+     * non-empty value, suppress the normal handoff and emit each
+     * loaded object in `ldd`-style output, then exit cleanly.
+     * Argv / envp follow argc on the kernel-built initial stack:
+     * envp starts after argv's NULL terminator. */
+    int trace_mode = 0;
+    {
+        ld_u32 argc = initial_stack[0];
+        ld_u32 *p = initial_stack + 1 + argc + 1;   /* skip argv + NULL */
+        const char key[] = "LD_TRACE_LOADED_OBJECTS=";
+        while (*p) {
+            const char *e = (const char *)(unsigned long)*p;
+            unsigned i;
+            for (i = 0; i < sizeof(key) - 1; i++) {
+                if (e[i] != key[i]) break;
+            }
+            if (i == sizeof(key) - 1 && e[i] != '\0') {
+                trace_mode = 1;
+                break;
+            }
+            p++;
+        }
+    }
+
     /* Lay out per-thread TLS BEFORE relocations so TLS_TPOFF reloc
      * sites can reference each module's tls_offset. */
     if (ld_setup_tls() != 0) {
@@ -407,10 +431,45 @@ ld_u32 ld_main(ld_u32 *initial_stack) {
 
     /* Apply relocations across all loaded objects (program + libs). */
     for (ld_obj_t *o = ld_obj_list(); o; o = o->next) {
-        ld_puts("ld.so: relocating "); ld_puts(o->name); ld_puts("\n");
+        if (!trace_mode) {
+            ld_puts("ld.so: relocating "); ld_puts(o->name); ld_puts("\n");
+        }
         if (ld_relocate(o) != 0) {
             ld_die("relocation failed");
         }
+    }
+
+    /* Trace mode: dump the loaded-object map and exit without
+     * handing control to the program.  Output format mirrors GNU
+     * `ldd`: one tab-indented "soname => path (0xbase)" per line.
+     * Skip the program itself (head of list) — GNU ldd's output
+     * doesn't list the binary itself. */
+    if (trace_mode) {
+        for (ld_obj_t *o = ld_obj_list(); o; o = o->next) {
+            if (o == ld_obj_list()) continue;       /* skip program */
+            ld_puts("\t");
+            ld_puts(o->name);
+            int is_self = o->name[0]=='l'&&o->name[1]=='d'&&o->name[2]=='.';
+            if (is_self) {
+                /* ld.so itself — no /lib path. */
+                ld_puts(" (");
+            } else {
+                ld_puts(" => /lib/");
+                ld_puts(o->name);
+                ld_puts(" (");
+            }
+            ld_putx(o->base);
+            ld_puts(")\n");
+        }
+        /* exit(0) via raw SYS_exit. */
+        __asm__ volatile (
+            "subl $8, %%esp\n\t"
+            "movl $0, 4(%%esp)\n\t"
+            "movl $1, %%eax\n\t"
+            "int $0x80\n\t"
+            : : : "eax", "memory"
+        );
+        for (;;) {}
     }
 
     /* Run constructors in dependency order: deepest deps first
