@@ -4,8 +4,8 @@ include ../Makefile.inc
 ifdef NATIVE_BUILD
 SUBDIRS = mkfs fsck
 else
-SUBDIRS = init mkfs fsck
-endif 
+SUBDIRS = init ld.so mkfs fsck
+endif
 
 
 .PHONY: all clean install $(SUBDIRS)
