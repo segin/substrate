@@ -52,7 +52,7 @@ int select(int nfds, fd_set * __restrict readfds, fd_set * __restrict writefds,
     }
     
     /* Call poll syscall */
-    int ret = (int)syscall(209, pfd_buf, poll_count, poll_timeout);  /* 209 = SYS_poll */
+    int ret = (int)syscall(SYS_POLL, pfd_buf, poll_count, poll_timeout);
     
     if (ret > 0) {
         /* Clear the output sets */
