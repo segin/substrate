@@ -72,9 +72,9 @@
 - [x] **Stub Burn-Down:** (REQ: REQ-07-0055)
     - [x] Implement kernel handlers for `sys_proc_threads`, `sys_proc_fds`, `sys_proc_maps`, `sys_proc_cwd`, `sys_proc_exe`, `sys_proc_cmdline`, `sys_proc_environ`. (REQ: REQ-07-0048)
     - [x] Replace userspace `ENOSYS` stubs in `lib/sys/sysinfo.c` for `sys_vm_info`, `sys_vm_swap`, `sys_vm_buffers`, and `sys_vm_slabs` with real syscall-backed implementations. (REQ: REQ-07-0048)
-- [ ] **Error Contract Normalization:** (REQ: REQ-07-0056)
+- [x] **Error Contract Normalization:** (REQ: REQ-07-0056)
     - [x] Define and enforce one syscall error contract (`-errno` at kernel boundary, libc/libsys normalization policy). (REQ: REQ-07-0048)
-    - [ ] Add wrapper tests proving consistent return and `errno` behavior across `lib/c` and `lib/sys`. (REQ: REQ-07-0048)
+    - [x] Add wrapper tests proving consistent return and `errno` behavior across `lib/c` and `lib/sys`. (REQ: REQ-07-0048)
 - [ ] **Documentation Synchronization:** (REQ: REQ-07-0057)
     - [ ] Keep `docs/syscalls/*.md` and `usr.man/man2/sys_proc_*.2`, `usr.man/man2/sys_vm_*.2` synchronized with implementation changes. (REQ: REQ-07-0048)
 
