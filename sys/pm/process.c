@@ -1100,13 +1100,19 @@ void proc_exit(int code) {
         extern int           vfs_cache_count;
         struct bio_stats bs;
         bio_get_stats(&bs);
+        extern uint64_t ext2_alloc_node_hits;
+        extern uint64_t ext2_alloc_node_new;
+        extern uint64_t ext2_alloc_node_fail;
+        extern uint64_t ext2_alloc_node_fail_pinned;
+        extern uint64_t ext2_alloc_node_fail_locked;
         kprintf("vm_leak[pid=%d exit=%d]: pager A=%lu D=%lu (live=%ld) "
                 "map_destroy=%lu (ents=%lu) "
                 "fs_open=%lu fs_close=%lu (drift=%ld) "
                 "pmap C=%llu D=%llu (live=%lld) "
                 "nc=%d (E=%lu V=%lu P=%lu) "
                 "bio nbuf=%u bytes=%llu hits=%llu miss=%llu reclaim=%llu "
-                "[L=%u C=%u D=%u E=%u]\n",
+                "[L=%u C=%u D=%u E=%u] "
+                "ext2 H=%llu N=%llu F=%llu (pin=%llu lock=%llu)\n",
                 current_process->pid, code,
                 vm_pager_vnode_alloc_count,
                 vm_pager_vnode_dealloc_count,
@@ -1125,7 +1131,12 @@ void proc_exit(int code) {
                 (unsigned long long)bs.hits,
                 (unsigned long long)bs.misses,
                 (unsigned long long)bs.reclaims,
-                bs.q_locked, bs.q_clean, bs.q_dirty, bs.q_empty);
+                bs.q_locked, bs.q_clean, bs.q_dirty, bs.q_empty,
+                (unsigned long long)ext2_alloc_node_hits,
+                (unsigned long long)ext2_alloc_node_new,
+                (unsigned long long)ext2_alloc_node_fail,
+                (unsigned long long)ext2_alloc_node_fail_pinned,
+                (unsigned long long)ext2_alloc_node_fail_locked);
     }
 
     proc_vfork_done(current_process);

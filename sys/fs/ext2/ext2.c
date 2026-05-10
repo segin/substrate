@@ -719,12 +719,22 @@ uint32_t ext2_inode_write(ext2_node_t *node, off_t offset, uint32_t size, const 
 }
 
 // Allocate a node from the cache
+/* Leak instrumentation — surfaced via `debug=vm_leak`.  Counts how
+ * often the per-FS 64-slot node cache hits each path so we can tell
+ * a stuck-pin condition from genuine cache pressure. */
+uint64_t ext2_alloc_node_hits        = 0;  /* found cached by inode_num */
+uint64_t ext2_alloc_node_new         = 0;  /* recycled an empty slot */
+uint64_t ext2_alloc_node_fail        = 0;  /* every slot pinned or locked */
+uint64_t ext2_alloc_node_fail_pinned = 0;  /* slots pinned at fail time */
+uint64_t ext2_alloc_node_fail_locked = 0;  /* slots locked at fail time */
+
 fs_node_t *ext2_alloc_node(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_t *inode) {
     int idx = -1;
 
     // 1. Search for existing node in cache
     for (int i = 0; i < EXT2_NODE_CACHE_SIZE; i++) {
         if (ext2_node_cache[i].fs == fs && ext2_node_cache[i].inode_num == inode_num) {
+            ext2_alloc_node_hits++;
             return &ext2_fs_node_cache[i];
         }
     }
@@ -740,8 +750,24 @@ fs_node_t *ext2_alloc_node(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_t *inod
         }
     }
     if (idx < 0) {
+        unsigned pinned = 0, locked = 0;
+        for (int i = 0; i < EXT2_NODE_CACHE_SIZE; i++) {
+            if (ext2_node_cache[i].pin_count != 0) pinned++;
+            if (ext2_node_cache[i].lock.locked != 0) locked++;
+        }
+        ext2_alloc_node_fail++;
+        ext2_alloc_node_fail_pinned += pinned;
+        ext2_alloc_node_fail_locked += locked;
+        if (ext2_alloc_node_fail <= 4) {
+            extern int kprintf(const char *, ...);
+            kprintf("ext2: alloc_node fail #%llu inode=%u "
+                    "(pinned=%u locked=%u of %d)\n",
+                    (unsigned long long)ext2_alloc_node_fail,
+                    inode_num, pinned, locked, EXT2_NODE_CACHE_SIZE);
+        }
         return NULL;
     }
+    ext2_alloc_node_new++;
     
     ext2_node_t *ctx = &ext2_node_cache[idx];
     fs_node_t *node = &ext2_fs_node_cache[idx];
