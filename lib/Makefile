@@ -1,7 +1,12 @@
 include ../Makefile.inc
 
-# Subdirectories for core libraries
-SUBDIRS = c m pthreads dl sys edit usb yacc
+# Subdirectories for core libraries.  Build order matters: libm
+# must come BEFORE libc.so.0 because libc references libm
+# functions (feraiseexcept and friends) and declares DT_NEEDED
+# libm.so.0 — the libc.so.0 link rule pulls in
+# $(TOP)/lib/m/libm.so.0 to satisfy the soname embedding, which
+# requires the file to already exist on disk.
+SUBDIRS = m c pthreads dl sys edit usb yacc
 
 .PHONY: all clean install $(SUBDIRS)
 
@@ -12,8 +17,13 @@ $(SUBDIRS):
 	$(MAKE) -C $@
 	@echo "<<< Leaving lib/$@"
 
-# Dependency ordering: libc must be built before other libraries.
-m pthreads dl sys edit usb yacc: | c
+# Dependency ordering:
+#   - libm has no dependencies, builds first.
+#   - libc references libm symbols and embeds DT_NEEDED libm.so.0,
+#     so libm.so.0 must exist before libc.so.0 links.
+#   - Everything else (pthreads, dl, edit, ...) depends on libc.
+c: | m
+pthreads dl sys edit usb yacc: | c
 
 clean:
 	@set -e; for dir in $(SUBDIRS); do \
