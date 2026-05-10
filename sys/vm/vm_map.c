@@ -924,8 +924,14 @@ static void free_holes_tree(vm_map_hole_t *node) {
 }
 
 // Destroy a vm_map and free all its entries
+/* Leak instrumentation — same pattern as vm_pager.  When
+ * `debug=vm_leak` is on these get printed at every proc_exit. */
+unsigned long vm_map_destroy_count = 0;
+unsigned long vm_map_destroy_entries = 0;
+
 void vm_map_destroy(vm_map_t *map) {
     if (!map) return;
+    __sync_fetch_and_add(&vm_map_destroy_count, 1);
 
     /*
      * Tear down hardware mappings before releasing backing objects.
@@ -951,6 +957,7 @@ void vm_map_destroy(vm_map_t *map) {
                 vm_object_deallocate(cur->object);
             }
             free_entry(cur);
+            __sync_fetch_and_add(&vm_map_destroy_entries, 1);
             cur = next;
         }
         free_entry(header);

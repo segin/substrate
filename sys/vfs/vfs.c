@@ -301,8 +301,15 @@ size_t write_fs(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffe
         return 0;
 }
 
+/* Leak instrumentation — counts open_fs / close_fs invocations to
+ * see whether they balance across many fork+exec+exit cycles.
+ * Read by proc_exit when `debug=vm_leak` is on. */
+unsigned long fs_open_count  = 0;
+unsigned long fs_close_count = 0;
+
 void open_fs(fs_node_t *node, uint8_t read, uint8_t write) {
     (void)read; (void)write;
+    __sync_fetch_and_add(&fs_open_count, 1);
     if (node->open != 0)
         node->open(node);
 }
@@ -313,6 +320,7 @@ void close_fs(fs_node_t *node) {
      * fds from compat.c sock_alloc_fd) — without this guard, exiting
      * a process that opened such an fd panics in fd_close_all. */
     if (!node) return;
+    __sync_fetch_and_add(&fs_close_count, 1);
     if (node->close != 0)
         node->close(node);
 }

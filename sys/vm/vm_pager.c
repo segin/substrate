@@ -152,6 +152,12 @@ bool vm_pager_device_phys(vm_pager_t *pager, uint64_t pindex, uintptr_t *phys_ou
 // VNode Pager: File-backed memory mapping
 // pager->priv contains a pointer to the fs_node_t
 
+/* Leak instrumentation — counters bumped from the alloc/dealloc
+ * paths so a `debug=vm_leak`-enabled kernel can print the running
+ * total at every proc_exit and we can watch for growth. */
+unsigned long vm_pager_vnode_alloc_count   = 0;
+unsigned long vm_pager_vnode_dealloc_count = 0;
+
 static struct vm_pager *vnode_alloc(void *handle, size_t size, uint8_t prot, uint64_t offset) {
     (void)prot;
     (void)size;
@@ -176,6 +182,7 @@ static struct vm_pager *vnode_alloc(void *handle, size_t size, uint8_t prot, uin
     if (node) {
         open_fs(node, 0, 0);
     }
+    __sync_fetch_and_add(&vm_pager_vnode_alloc_count, 1);
     return &pager->base;
 }
 
@@ -184,6 +191,7 @@ static void vnode_dealloc(struct vm_pager *pager) {
     if (vpager && vpager->node) {
         close_fs(vpager->node);
     }
+    __sync_fetch_and_add(&vm_pager_vnode_dealloc_count, 1);
     kfree(pager, sizeof(vm_vnode_pager_t));
 }
 

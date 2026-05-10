@@ -1080,6 +1080,29 @@ void proc_exit(int code) {
         }
     }
 
+    /* Leak instrumentation.  When booted with `debug=vm_leak` print
+     * a one-line snapshot at every proc_exit so we can watch the
+     * vnode-pager / vm_map / vnode-stat counters drift relative to
+     * exec/exit count.  Healthy steady-state: alloc - dealloc == 0. */
+    if (cmdline_debug_enabled("vm_leak")) {
+        extern unsigned long vm_pager_vnode_alloc_count;
+        extern unsigned long vm_pager_vnode_dealloc_count;
+        extern unsigned long vm_map_destroy_count;
+        extern unsigned long vm_map_destroy_entries;
+        extern unsigned long fs_open_count;
+        extern unsigned long fs_close_count;
+        kprintf("vm_leak[pid=%d exit=%d]: pager A=%lu D=%lu (live=%ld) "
+                "map_destroy=%lu (ents=%lu) "
+                "fs_open=%lu fs_close=%lu (drift=%ld)\n",
+                current_process->pid, code,
+                vm_pager_vnode_alloc_count,
+                vm_pager_vnode_dealloc_count,
+                (long)(vm_pager_vnode_alloc_count - vm_pager_vnode_dealloc_count),
+                vm_map_destroy_count, vm_map_destroy_entries,
+                fs_open_count, fs_close_count,
+                (long)(fs_open_count - fs_close_count));
+    }
+
     proc_vfork_done(current_process);
     
     // 1. Set State
