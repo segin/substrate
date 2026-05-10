@@ -37,9 +37,13 @@ This means ABI correctness depends on both caller stub and selected personality.
 
 ### `lib/sys`
 
-- `lib/sys/syscall.S` uses register argument ABI.
-- This is compatible with Linux-style personality dispatch.
-- For native (`substrate`) stack ABI, this is currently a mismatch and requires remediation.
+- `lib/sys/syscall.S` uses the stack argument ABI: it pops the
+  syscall number off the stack into `%eax` and re-pushes the
+  caller's return address, leaving args at `useresp[1..8]` —
+  exactly what `i386_extract_syscall_args` reads under native /
+  FreeBSD / NetBSD / OpenBSD / SVR4 personalities.
+- Linux-style register-passing wrappers should not call this
+  entry point; they live in `lib/c/arch/i386/linux*` instead.
 
 ## Known ABI Gaps
 
