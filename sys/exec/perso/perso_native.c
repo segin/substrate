@@ -28,6 +28,7 @@ extern int sys_setpriority(int which, int who, int prio);
 extern int sys_getpriority(int which, int who);
 struct vm86_struct;  /* forward decl — defined in <sys/vm86.h> */
 extern int sys_vm86(struct vm86_struct *info);
+extern int sys_set_gsbase(uint32_t base);
 extern int sys_proc_pers_name(int perso_id, char *buf, size_t len);
 
 /* Native-specific syscalls are now in syscall_impl.h */
@@ -154,6 +155,7 @@ static void *native_syscalls[MAX_SYSCALLS] = {
     [SYS_VM_SLABS] = &sys_vm_slabs,
     [SYS_PROC_PERS_NAME] = &sys_proc_pers_name,
     [SYS_VM86] = (void *)&sys_vm86,
+    [SYS_SET_GSBASE] = (void *)&sys_set_gsbase,
     [SYS_SETPRIORITY] = &sys_setpriority,
     [SYS_GETPRIORITY] = &sys_getpriority,
     [SYS_SETITIMER] = &sys_setitimer,
@@ -274,6 +276,7 @@ static const char *native_names[MAX_SYSCALLS] = {
     [SYS_VM_SLABS] = "vm_slabs",
     [SYS_PROC_PERS_NAME] = "proc_pers_name",
     [SYS_VM86] = "vm86",
+    [SYS_SET_GSBASE] = "set_gsbase",
     [SYS_SETPRIORITY] = "setpriority",
     [SYS_GETPRIORITY] = "getpriority",
     [SYS_SETITIMER] = "setitimer",
@@ -394,6 +397,7 @@ static struct syscall_fmt native_fmts[MAX_SYSCALLS] = {
     [SYS_VM_SLABS] = { 2, { ARG_PTR, ARG_PTR } },
     [SYS_PROC_PERS_NAME] = { 3, { ARG_INT, ARG_PTR, ARG_INT } },
     [SYS_VM86] = { 1, { ARG_PTR } },
+    [SYS_SET_GSBASE] = { 1, { ARG_HEX } },
     [SYS_SETPRIORITY] = { 3, { ARG_INT, ARG_INT, ARG_INT } },
     [SYS_GETPRIORITY] = { 2, { ARG_INT, ARG_INT } },
     [SYS_SETITIMER] = { 3, { ARG_INT, ARG_PTR, ARG_PTR } },

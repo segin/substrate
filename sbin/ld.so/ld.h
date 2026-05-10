@@ -89,6 +89,16 @@ typedef struct {
 #define R_386_JMP_SLOT 7
 #define R_386_RELATIVE 8
 
+/* i386 TLS relocations.  Phase 4c supports the "local exec" model
+ * (initial-exec / TPOFF) which is what static-PIE programs and
+ * non-dlopen shared libs emit for `__thread` accesses. */
+#define R_386_TLS_TPOFF   14   /* offset from thread pointer */
+#define R_386_TLS_IE      15   /* offset via GOT */
+#define R_386_TLS_GOTIE   16
+#define R_386_TLS_LE      17
+#define R_386_TLS_GD      18
+#define R_386_TLS_LDM     19
+
 /* Auxv entries used in Phase 2 */
 #define AT_NULL    0
 #define AT_PHDR    3
@@ -108,8 +118,9 @@ typedef struct {
 #define SYS_open   5
 #define SYS_close  6
 #define SYS_lseek 19
-#define SYS_mmap  90
-#define SYS_fstat 108
+#define SYS_mmap        90
+#define SYS_fstat      108
+#define SYS_set_gsbase 274
 
 /* mmap flags / prot bits we use. */
 #define LD_PROT_READ   1
@@ -202,6 +213,16 @@ typedef struct ld_obj {
     void          (**fini_array)(void);
     ld_u32          fini_arraysz;
 
+    /* PT_TLS metadata, populated when an object carries a thread-
+     * local segment.  `tls_offset` is the negative offset from the
+     * thread pointer at which this module's TLS image lives in the
+     * combined per-thread block — assigned by ld_setup_tls(). */
+    const void     *tls_image;      /* file-image (PT_TLS at p_offset+base) */
+    ld_u32          tls_filesz;
+    ld_u32          tls_memsz;
+    ld_u32          tls_align;
+    ld_u32          tls_offset;     /* abs(offset) below thread pointer */
+
     struct ld_obj  *next;
 } ld_obj_t;
 
@@ -225,6 +246,16 @@ ld_obj_t *ld_obj_list(void);
  * — each object is initialized exactly once via a per-object guard
  * inside the function. */
 void ld_run_init_arrays(void);
+
+/* Allocate the per-thread TLS region, copy each loaded object's
+ * PT_TLS image into it, install the GS base via the new native
+ * sys_set_gsbase syscall.  Returns 0 on success or a negative
+ * errno.  Called once after relocations and before init arrays. */
+int ld_setup_tls(void);
+
+/* Native syscall: install a TLS base for the current thread.
+ * Returns 0 on success or -errno. */
+int ld_sys_set_gsbase(ld_u32 base);
 
 /* Per-process upper bound on objects we'll iterate during init.
  * Sized to match LD_MAX_OBJS in ld_load.c so it's effectively the

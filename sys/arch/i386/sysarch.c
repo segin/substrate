@@ -56,6 +56,14 @@ int i386_set_gsbase(uint32_t base) {
     return set_gsbase(base);
 }
 
+/* sys_set_gsbase(base) — native-personality syscall that takes the
+ * TLS base by value rather than via a userspace pointer.  Used by
+ * /sbin/ld.so to install the TCB pointer after allocating the TLS
+ * region.  Mirrors `i386_set_gsbase` but at the syscall boundary. */
+int sys_set_gsbase(uint32_t base) {
+    return set_gsbase(base);
+}
+
 static int get_gsbase(uint32_t *out) {
     /* Use the per-thread base, not the (potentially stale) GDT slot, since
      * the slot belongs to whichever thread last touched it. */

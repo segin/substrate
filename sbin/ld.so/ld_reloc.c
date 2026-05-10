@@ -86,6 +86,30 @@ static int apply_one(ld_obj_t *obj, Elf32_Rel *r) {
         return 0;
     }
 
+    case R_386_TLS_TPOFF: {
+        /* Resolve symbol's offset within its module's TLS image,
+         * subtract the module's negative-offset-from-TP, store the
+         * result so `mov %gs:p, %eax` produces the slot address. */
+        Elf32_Sym *s = &obj->symtab[sym];
+        if (s->st_shndx == SHN_UNDEF) {
+            ld_puts("ld.so: TLS undef sym in "); ld_puts(obj->name); ld_puts("\n");
+            return -1;
+        }
+        if (obj->tls_memsz == 0) {
+            ld_puts("ld.so: TPOFF reloc but obj has no PT_TLS: ");
+            ld_puts(obj->name); ld_puts("\n");
+            return -1;
+        }
+        /* Per the i386 TLS variant-II ABI: TPOFF = sym_value - tls_offset
+         * where tls_offset is the module's offset below TP.  Since
+         * gs:0 sits at TP, gs:NEG produces an address below it.
+         * Our `tls_offset` is the absolute (positive) value, so the
+         * actual TPOFF is sym_value - obj->tls_offset, which fits in
+         * a signed 32-bit; userspace then loads gs:TPOFF. */
+        *p = s->st_value - obj->tls_offset + *p;
+        return 0;
+    }
+
     default:
         ld_puts("ld.so: unsupported reloc type "); ld_putd(type);
         ld_puts(" in "); ld_puts(obj->name); ld_puts("\n");

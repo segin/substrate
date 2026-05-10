@@ -262,12 +262,18 @@ static ld_obj_t *load_from_path(const char *path) {
 
     ld_close(fd);
 
-    /* Locate PT_DYNAMIC. */
+    /* Locate PT_DYNAMIC and PT_TLS. */
     Elf32_Dyn *dyn = 0;
+    const void *tls_image = 0;
+    ld_u32 tls_filesz = 0, tls_memsz = 0, tls_align = 1;
     for (int i = 0; i < eh.e_phnum; i++) {
         if (ph[i].p_type == PT_DYNAMIC) {
             dyn = (Elf32_Dyn *)(ph[i].p_vaddr + base);
-            break;
+        } else if (ph[i].p_type == PT_TLS) {
+            tls_image  = (const void *)(ph[i].p_vaddr + base);
+            tls_filesz = ph[i].p_filesz;
+            tls_memsz  = ph[i].p_memsz;
+            tls_align  = ph[i].p_align ? ph[i].p_align : 1;
         }
     }
     if (!dyn) return 0;
@@ -275,6 +281,11 @@ static ld_obj_t *load_from_path(const char *path) {
     ld_obj_t *o = &ld_obj_pool[ld_obj_count++];
     o->base    = base;
     o->dynamic = dyn;
+    o->tls_image  = tls_image;
+    o->tls_filesz = tls_filesz;
+    o->tls_memsz  = tls_memsz;
+    o->tls_align  = tls_align;
+    o->tls_offset = 0;          /* assigned by ld_setup_tls */
     /* Take basename from path as a placeholder; SONAME will
      * overwrite it inside ld_cache_dynamic. */
     {

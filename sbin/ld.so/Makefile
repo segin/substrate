@@ -8,7 +8,7 @@ include ../../Makefile.inc
 # (which ld_start.S applies before any C runs).
 
 PROG = ld.so
-OBJS = ld_start.o ld_main.o ld_io.o ld_load.o ld_resolve.o ld_reloc.o
+OBJS = ld_start.o ld_main.o ld_io.o ld_load.o ld_resolve.o ld_reloc.o ld_tls.o
 
 LD_CFLAGS  := -m32 -nostdlib -nostartfiles -fpic -ffreestanding \
               -Wall -Wextra -Werror -fno-stack-protector \

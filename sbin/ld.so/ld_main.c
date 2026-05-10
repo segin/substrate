@@ -235,7 +235,28 @@ ld_u32 ld_main(ld_u32 *initial_stack) {
     prog_obj.fini       = 0;
     prog_obj.fini_array = 0;
     prog_obj.fini_arraysz = 0;
+    prog_obj.tls_image  = 0;
+    prog_obj.tls_filesz = 0;
+    prog_obj.tls_memsz  = 0;
+    prog_obj.tls_align  = 1;
+    prog_obj.tls_offset = 0;
     prog_obj.next       = 0;
+
+    /* Detect PT_TLS in the program's phdrs.  AT_PHDR is the
+     * program's own phdr table at runtime; iterate by AT_PHNUM. */
+    {
+        Elf32_Phdr *php = (Elf32_Phdr *)a.phdr;
+        for (ld_u32 i = 0; i < a.phnum; i++) {
+            Elf32_Phdr *pp = (Elf32_Phdr *)((char *)php + i * a.phent);
+            if (pp->p_type == PT_TLS) {
+                prog_obj.tls_image  = (const void *)(pp->p_vaddr + bias);
+                prog_obj.tls_filesz = pp->p_filesz;
+                prog_obj.tls_memsz  = pp->p_memsz;
+                prog_obj.tls_align  = pp->p_align ? pp->p_align : 1;
+                break;
+            }
+        }
+    }
     {
         const char p_name[] = "main-program";
         for (ld_size i = 0; i < sizeof(p_name); i++) prog_obj.name[i] = p_name[i];
@@ -314,6 +335,12 @@ ld_u32 ld_main(ld_u32 *initial_stack) {
             ld_putx(o->base);
             ld_puts("\n");
         }
+    }
+
+    /* Lay out per-thread TLS BEFORE relocations so TLS_TPOFF reloc
+     * sites can reference each module's tls_offset. */
+    if (ld_setup_tls() != 0) {
+        ld_die("TLS setup failed");
     }
 
     /* Apply relocations across all loaded objects (program + libs). */

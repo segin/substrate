@@ -143,3 +143,7 @@ void *ld_mmap(void *addr, ld_size len, int prot, int flags,
                          (ld_u32)fd, page_off);
     return (void *)r;
 }
+
+int ld_sys_set_gsbase(ld_u32 base) {
+    return (int)ld_syscall1(SYS_set_gsbase, base);
+}

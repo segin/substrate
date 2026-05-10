@@ -152,6 +152,7 @@
 #define SYS_PIPE2       163 /* pipe2(int[2], int flags) */
 #define SYS_DUP3        164 /* dup3(int old, int new, int flags) */
 #define SYS_VM86        113 /* enter virtual 8086 mode (sys_vm86) */
+#define SYS_SET_GSBASE  274 /* install per-thread TLS base (sys_set_gsbase) */
 
 void syscall_init(void);
 
