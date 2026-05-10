@@ -1,4 +1,4 @@
-.TH SYS_PROC_CMDLINE 2 "March 2026" "Substrate" "System Calls Manual"
+.TH SYS_PROC_CMDLINE 2 "May 2026" "Substrate" "System Calls Manual"
 .SH NAME
 sys_proc_cmdline \- query process argument vector
 .SH LIBRARY
@@ -9,18 +9,52 @@ System library (libsys, \-lsys)
 .BI "int sys_proc_cmdline(pid_t " pid ", char **" argv ", size_t *" argc ");"
 .SH DESCRIPTION
 .BR sys_proc_cmdline ()
-attempts to retrieve command-line argument data for process
+copies out the cmdline_tail blob captured at exec for process
 .IR pid .
-The API is designed to return an argument pointer array and element count.
+The blob is a flat byte sequence in which each argument string is
+NUL-terminated, mirroring the Linux
+.B /proc/PID/cmdline
+layout.  Userland tools (ps, /proc helpers) split on NUL to
+reconstruct the argument array.
+.PP
+The
+.I argv
+parameter is reinterpreted as a flat
+.B char *
+buffer of size
+.I *argc
+bytes.  On entry
+.I *argc
+is the buffer capacity; on return it is the true blob size in
+bytes.  If the user buffer was too small, the kernel writes what
+fits and the caller can re-allocate based on
+.I *argc
+and retry.
+.PP
+.I pid
+= 0 means the calling process.  Probe with
+.I argv
+=
+.B NULL ,
+.I *argc
+= 0.
 .SH RETURN VALUE
-On success, 0 is returned.
-On error, a negative value is returned by the current implementation.
+0 on success, a negated errno on failure.
 .SH ERRORS
 .TP
-.B ENOSYS
-Current kernel implementation is a stub.
+.B ESRCH
+.I pid
+does not refer to an existing process.
+.TP
+.B EFAULT
+.I argv
+or
+.I argc
+points outside the caller's address space.
 .SH NOTES
-Wired in native dispatch, currently unimplemented in kernel.
+The kernel does not reconstruct the per-argument
+.B char **
+pointer array — the on-disk blob layout is the API.
 .SH SEE ALSO
 .BR execve (2),
 .BR sys_proc_environ (2),

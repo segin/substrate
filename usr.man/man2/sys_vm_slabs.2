@@ -1,4 +1,4 @@
-.TH SYS_VM_SLABS 2 "March 2026" "Substrate" "System Calls Manual"
+.TH SYS_VM_SLABS 2 "May 2026" "Substrate" "System Calls Manual"
 .SH NAME
 sys_vm_slabs \- query slab allocator statistics
 .SH LIBRARY
@@ -9,23 +9,44 @@ System library (libsys, \-lsys)
 .BI "int sys_vm_slabs(sys_slabinfo_t *" slabs ", size_t *" count ");"
 .SH DESCRIPTION
 .BR sys_vm_slabs ()
-is intended to return slab allocator usage records in
-.I slabs
-and record count via
-.IR *count .
+enumerates UMA zones (Substrate's slab allocator).  Each entry is
+a
+.B sys_slabinfo_t :
+.PP
+.RS
+.nf
+typedef struct sys_slabinfo {
+    char     name[32];
+    uint32_t active;
+    uint32_t total;
+    uint32_t objsize;
+    uint32_t slabs;
+    uint32_t pages_per_slab;
+} sys_slabinfo_t;
+.fi
+.RE
+.PP
+On entry
+.I *count
+is the array capacity; on return it is the actual number of UMA
+zones.  Until UMA grows a public iterator the syscall returns
+.IR *count " = 0"
+and writes nothing — a graceful "no data" answer rather than
+.BR ENOSYS .
 .SH RETURN VALUE
-On success, 0 is returned.
-On error, -1 is returned and
+0 on success; on failure -1 and
 .I errno
-is set.
+is set per the error contract.
 .SH ERRORS
 .TP
 .B EINVAL
-Invalid pointers.
+.I slabs
+or
+.I count
+is NULL.
 .TP
-.B ENOSYS
-Current `lib/sys` implementation is a userspace stub with no backing kernel
-syscall.
+.B EFAULT
+either pointer is unmapped.
 .SH SEE ALSO
 .BR sys_vm_stats (2),
 .BR sys_vm_buffers (2),

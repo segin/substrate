@@ -1,4 +1,4 @@
-.TH SYS_PROC_THREADS 2 "March 2026" "Substrate" "System Calls Manual"
+.TH SYS_PROC_THREADS 2 "May 2026" "Substrate" "System Calls Manual"
 .SH NAME
 sys_proc_threads \- list thread IDs for a process
 .SH LIBRARY
@@ -9,29 +9,47 @@ System library (libsys, \-lsys)
 .BI "int sys_proc_threads(pid_t " pid ", tid_t *" tids ", size_t *" count ");"
 .SH DESCRIPTION
 .BR sys_proc_threads ()
-returns thread IDs associated with process
+enumerates the threads belonging to process
 .IR pid .
-The caller supplies an output array in
-.I tids
-and an in/out element count in
-.IR *count .
+On entry,
+.I *count
+is the caller's array capacity; on return it is the actual number of
+threads the process has.  When the kernel writes more threads than
+.I *count
+allowed, the array is filled to capacity and the caller is expected
+to retry with a larger buffer.
 .PP
 If
 .I pid
-is 0, the current process is implied.
+is 0, the current process is implied.  Pass
+.I tids
+=
+.B NULL
+with
+.I *count
+= 0 to probe just the count.
+.PP
+The implementation walks the global scheduler thread list with
+.BR sched_iterate_threads (9)
+and emits each matching thread's
+.B tid
+into the user array.
 .SH RETURN VALUE
-On success, 0 is returned.
-On error, a negative value is returned by the current implementation.
+On success, 0 is returned and
+.I *count
+holds the true thread count.
+On failure, a negated errno is returned.
 .SH ERRORS
 .TP
-.B ENOSYS
-Current kernel implementation is a stub and returns not implemented.
+.B ESRCH
+.I pid
+does not refer to an existing process.
 .TP
-.B EINVAL
-Invalid pointers or invalid count pointer semantics.
-.SH NOTES
-This syscall number is wired in native dispatch, but the current kernel handler
-is a stub in `sys/kern/syscall.c`.
+.B EFAULT
+.I tids
+or
+.I count
+points outside the caller's address space.
 .SH SEE ALSO
 .BR sys_proc_info (2),
 .BR sys_proc_list (2),

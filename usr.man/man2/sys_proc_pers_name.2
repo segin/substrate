@@ -1,4 +1,4 @@
-.TH SYS_PROC_PERS_NAME 2 "March 2026" "Substrate" "System Calls Manual"
+.TH SYS_PROC_PERS_NAME 2 "May 2026" "Substrate" "System Calls Manual"
 .SH NAME
 sys_proc_pers_name \- resolve a personality ID to a name
 .SH LIBRARY
@@ -9,20 +9,46 @@ System library (libsys, \-lsys)
 .BI "int sys_proc_pers_name(int " perso_id ", char *" buf ", size_t " len ");"
 .SH DESCRIPTION
 .BR sys_proc_pers_name ()
-attempts to translate a personality identifier (for example native, Linux,
-FreeBSD compatibility IDs) into a textual name.
+copies the human-readable name of personality
+.I perso_id
+into
+.I buf .
+The name is the same string the kernel uses internally
+.RB ( perso_name ()
+in
+.BR sys/exec/perso/personality.c ),
+e.g.
+.BR \[dq]Native\[dq] ,
+.BR \[dq]Linux\[dq] ,
+.BR \[dq]FreeBSD\[dq] ,
+.BR \[dq]NetBSD\[dq] .
+Unknown IDs resolve to
+.BR \[dq]unknown\[dq] .
 .PP
-The current `lib/sys` implementation issues syscall number 360 directly.
+The
+.I len
+parameter has classic probe semantics: pass
+.I len
+= 0 to learn the required buffer size (returned via the function
+result) without writing anything.  When
+.I len
+is too small for the full string, the kernel writes
+.IR "len - 1"
+bytes followed by a NUL terminator.
 .SH RETURN VALUE
-On success, 0 is returned.
-On error, a negative value is returned by the current implementation.
+On success, the byte length needed (including the NUL terminator).
+On failure, a negated errno is returned.
 .SH ERRORS
 .TP
-.B ENOSYS
-The syscall number is not currently wired in native dispatch.
-.SH NOTES
-This interface is currently wrapper-only and does not have a native syscall
-number definition in `sys/arch/i386/syscall.h`.
+.B EINVAL
+.I len
+is non-zero but
+.I buf
+is NULL.
+.TP
+.B EFAULT
+.I buf
+points outside the caller's address space.
 .SH SEE ALSO
 .BR sys_proc_info (2),
 .BR uname (2),

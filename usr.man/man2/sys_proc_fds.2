@@ -1,4 +1,4 @@
-.TH SYS_PROC_FDS 2 "March 2026" "Substrate" "System Calls Manual"
+.TH SYS_PROC_FDS 2 "May 2026" "Substrate" "System Calls Manual"
 .SH NAME
 sys_proc_fds \- list file descriptors for a process
 .SH LIBRARY
@@ -9,22 +9,57 @@ System library (libsys, \-lsys)
 .BI "int sys_proc_fds(pid_t " pid ", sys_fd_t *" fds ", size_t *" count ");"
 .SH DESCRIPTION
 .BR sys_proc_fds ()
-attempts to enumerate open file descriptors for process
+enumerates the open file descriptors of process
 .IR pid .
-The output array is
+For each populated entry of the process's
+.B fds[]
+table the kernel writes a
+.B sys_fd_t
+record:
+.PP
+.RS
+.nf
+typedef struct sys_fd {
+    int      fd;            /* descriptor index */
+    char     path[256];     /* best-effort path */
+    uint32_t flags;         /* f_flag bits */
+} sys_fd_t;
+.fi
+.RE
+.PP
+On entry
+.I *count
+is the array capacity; on return it is the true number of open
+descriptors.  Caller may probe with
 .I fds
-with element count supplied and returned through
-.IR *count .
+=
+.B NULL
+and
+.I *count
+= 0.
+.PP
+.I pid
+= 0 means the calling process.
 .SH RETURN VALUE
-On success, 0 is returned.
-On error, a negative value is returned by the current implementation.
+0 on success, a negated errno on failure.
 .SH ERRORS
 .TP
-.B ENOSYS
-Current kernel implementation is a stub.
+.B ESRCH
+.I pid
+does not refer to an existing process.
+.TP
+.B EFAULT
+.I fds
+or
+.I count
+points outside the caller's address space.
 .SH NOTES
-Wired in native dispatch, currently unimplemented in kernel.
+.B path
+is filled from the underlying file's
+.B f_path
+field which is best-effort: pipes, sockets, and anonymous file
+descriptors return an empty string.
 .SH SEE ALSO
 .BR sys_proc_info (2),
-.BR sys_proc_list (2),
+.BR sys_proc_maps (2),
 .BR open (2)

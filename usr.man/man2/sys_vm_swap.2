@@ -1,4 +1,4 @@
-.TH SYS_VM_SWAP 2 "March 2026" "Substrate" "System Calls Manual"
+.TH SYS_VM_SWAP 2 "May 2026" "Substrate" "System Calls Manual"
 .SH NAME
 sys_vm_swap \- query swap device statistics
 .SH LIBRARY
@@ -9,23 +9,46 @@ System library (libsys, \-lsys)
 .BI "int sys_vm_swap(sys_swapinfo_t *" swap ", size_t *" count ");"
 .SH DESCRIPTION
 .BR sys_vm_swap ()
-is intended to return swap device information records in
-.I swap
-and record count through
-.IR *count .
+enumerates configured swap backing stores.  Each entry is a
+.B sys_swapinfo_t :
+.PP
+.RS
+.nf
+typedef struct sys_swapinfo {
+    char     path[256];
+    uint64_t total;       /* bytes */
+    uint64_t used;        /* bytes */
+    int      priority;
+} sys_swapinfo_t;
+.fi
+.RE
+.PP
+On entry
+.I *count
+is the array capacity; on return it is the actual number of swap
+devices.  Substrate currently exposes a single aggregate swap pool
+via
+.BR vm_swap_get_stats ;
+when configured the syscall returns one synthetic entry named
+.B swap0
+with
+.B priority
+= 0.  Per-device enumeration becomes available once the swap
+subsystem grows a public iterator.
 .SH RETURN VALUE
-On success, 0 is returned.
-On error, -1 is returned and
+0 on success; on failure -1 and
 .I errno
-is set.
+is set per the error contract.
 .SH ERRORS
 .TP
 .B EINVAL
-Invalid pointers.
+.I swap
+or
+.I count
+is NULL.
 .TP
-.B ENOSYS
-Current `lib/sys` implementation is a userspace stub with no backing kernel
-syscall.
+.B EFAULT
+either pointer is unmapped.
 .SH SEE ALSO
 .BR sys_vm_stats (2),
 .BR sys_vm_info (2),

@@ -1,4 +1,4 @@
-.TH SYS_VM_INFO 2 "March 2026" "Substrate" "System Calls Manual"
+.TH SYS_VM_INFO 2 "May 2026" "Substrate" "System Calls Manual"
 .SH NAME
 sys_vm_info \- query VM zone-level memory breakdown
 .SH LIBRARY
@@ -9,24 +9,50 @@ System library (libsys, \-lsys)
 .BI "int sys_vm_info(sys_vminfo_t *" info ");"
 .SH DESCRIPTION
 .BR sys_vm_info ()
-is intended to return per-zone VM totals and free counts (DMA, normal,
-high memory) in
-.IR *info .
+fills
+.I *info
+with per-zone physical memory totals and free counts:
+.PP
+.RS
+.nf
+typedef struct sys_vminfo {
+    uint64_t dma_total;     uint64_t dma_free;
+    uint64_t normal_total;  uint64_t normal_free;
+    uint64_t highmem_total; uint64_t highmem_free;
+} sys_vminfo_t;
+.fi
+.RE
+.PP
+Substrate today maintains a single physical zone — the buddy
+allocator covers all memory below
+.BR PMM_DIRECTMAP_PHYS_LIMIT .
+The whole pool is therefore reported under
+.B normal_total
+/
+.BR normal_free ,
+with
+.B dma_*
+and
+.B highmem_*
+zeroed.  When zone splitting lands the same syscall begins
+populating the other zones; the layout is forward-compatible.
 .SH RETURN VALUE
-On success, 0 is returned.
-On error, -1 is returned and
+0 on success; on failure -1 and
 .I errno
-is set.
+is set per the error contract
+.RB ( docs/syscalls/error-contract.md ).
 .SH ERRORS
 .TP
 .B EINVAL
 .I info
 is NULL.
 .TP
-.B ENOSYS
-Current `lib/sys` implementation is a userspace stub with no backing kernel
-syscall.
+.B EFAULT
+.I info
+points outside the caller's address space.
 .SH SEE ALSO
 .BR sys_vm_stats (2),
 .BR sys_vm_swap (2),
+.BR sys_vm_buffers (2),
+.BR sys_vm_slabs (2),
 .BR sysinfo (2)
