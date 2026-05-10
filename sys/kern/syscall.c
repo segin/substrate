@@ -1228,6 +1228,12 @@ int kern_stat(const char *path, struct stat *buf) {
     fs_node_t *cwd  = current_process->cwd_node  ? current_process->cwd_node  : root;
     fs_node_t *node = vfs_perso_lookup(root, cwd, path);
     if (!node) return -ENOENT;
+    /* Match the close_fs below.  vfs_perso_lookup itself does not
+     * open_fs the returned node, so without this pin bump close_fs
+     * would drop a reference that was borrowed from somewhere else
+     * (most importantly fs_root, which the mount path pinned at
+     * boot — see commit 2824601e for the breakdown trace). */
+    open_fs(node, 1, 0);
     fill_stat(buf, node);
     close_fs(node);
     return 0;
@@ -1248,17 +1254,19 @@ int kern_lstat(const char *path, struct stat *buf) {
     if (!path || !buf) return -EFAULT;
     fs_node_t *root = current_process->root_node ? current_process->root_node : fs_root;
     fs_node_t *cwd  = current_process->cwd_node  ? current_process->cwd_node  : root;
-    /* For lstat, try prefix with lstat semantics, then plain lstat */
+    /* For lstat, try prefix with lstat semantics, then plain lstat.
+     * Use the _ref variants so the close_fs below has a matching
+     * pin bump (see commit 2824601e). */
     fs_node_t *node = NULL;
     if (path[0] == '/' && current_process) {
         struct personality *pp = perso_lookup(current_process->perso_id);
         if (pp && pp->path_prefix && pp->path_prefix[0]) {
             char prefixed[320];
             snprintf(prefixed, sizeof(prefixed), "%s%s", pp->path_prefix, path);
-            node = vfs_lookup_lstat(root, prefixed);
+            node = vfs_lookup_lstat_ref(root, prefixed);
         }
     }
-    if (!node) node = vfs_lookup_lstat((path[0] == '/') ? root : cwd, path);
+    if (!node) node = vfs_lookup_lstat_ref((path[0] == '/') ? root : cwd, path);
     if (!node) return -ENOENT;
     fill_stat(buf, node);
     close_fs(node);
@@ -1394,8 +1402,8 @@ int kern_fstatat(int dirfd, const char *path, struct stat *buf, int flags) {
     }
 
     node = nofollow
-        ? vfs_lookup_lstat((path[0] == '/') ? root : cwd, path)
-        : vfs_lookup((path[0] == '/') ? root : cwd, path);
+        ? vfs_lookup_lstat_ref((path[0] == '/') ? root : cwd, path)
+        : vfs_lookup_ref((path[0] == '/') ? root : cwd, path);
     if (!node) return -ENOENT;
 
     fill_stat(buf, node);

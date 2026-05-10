@@ -570,6 +570,18 @@ fs_node_t *vfs_lookup(fs_node_t *root, const char *path) {
     return current;
 }
 
+fs_node_t *vfs_lookup_ref(fs_node_t *root, const char *path) {
+    fs_node_t *n = vfs_lookup(root, path);
+    if (n) open_fs(n, 1, 0);
+    return n;
+}
+
+fs_node_t *vfs_lookup_lstat_ref(fs_node_t *root, const char *path) {
+    fs_node_t *n = vfs_lookup_lstat(root, path);
+    if (n) open_fs(n, 1, 0);
+    return n;
+}
+
 fs_node_t *vfs_lookup_lstat(fs_node_t *root, const char *path) {
     if (!path || !root) return NULL;
     if (path[0] == '/') path++; // Skip leading /

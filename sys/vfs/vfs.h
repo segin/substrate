@@ -145,6 +145,20 @@ int vfs_unmount_legacy(const char *path);
 int vfs_unmount_legacy_flags(const char *path, int flags);
 fs_node_t *vfs_lookup(fs_node_t *root, const char *path);
 fs_node_t *vfs_lookup_lstat(fs_node_t *root, const char *path);
+
+/*
+ * Reference-counted lookup variants.  On success the returned node
+ * has had open_fs() called on it, and the caller MUST balance with
+ * close_fs() once it stops using the node.  Use these (rather than
+ * vfs_lookup / vfs_lookup_lstat) whenever the caller intends to
+ * close_fs the result — otherwise the unbalanced close drops a
+ * reference borrowed from somewhere else (notably fs_root, which
+ * the mount path pinned at boot) and silently turns the affected
+ * cache slot into a recyclable one.  See sys/kern/syscall.c
+ * kern_stat / kern_lstat / kern_readlink for the canonical use.
+ */
+fs_node_t *vfs_lookup_ref(fs_node_t *root, const char *path);
+fs_node_t *vfs_lookup_lstat_ref(fs_node_t *root, const char *path);
 void vfs_init(void);
 
 void devfs_init(void);
