@@ -312,3 +312,6 @@ tests/usr.lib/demangle/fuzz/corpus/
 # model & data dumps).  Not part of the source tree.
 /stage/
 /privacy-filter/
+
+# Built binaries that don't fit the *.o or *.so patterns.
+/usr.bin/ldd/ldd
