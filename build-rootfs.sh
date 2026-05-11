@@ -6,7 +6,7 @@ set -e
 TOP="$(cd "$(dirname "$0")" && pwd)"
 DIST="$TOP/dist"
 IMAGE="$TOP/rootfs.img"
-IMAGE_SIZE_MIB=100
+IMAGE_SIZE_MIB=300
 BOOT_DIR="$TOP/sys/boot"
 EXT2BOOT_DIR="$TOP/contrib/ext2-boot"
 
