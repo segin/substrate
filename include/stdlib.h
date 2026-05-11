@@ -4,6 +4,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+/* wchar_t comes from stddef.h above. */
+
 #define RAND_MAX 2147483647
 #define MB_CUR_MAX 4
 
@@ -63,6 +65,12 @@ void qsort_r(void *base, size_t nmemb, size_t size,
              void *arg);
 void *bsearch(const void *key, const void *base, size_t nmemb, size_t size, int (*compar)(const void *, const void *));
 
+/* C89 stateless multibyte conversion.  See <wchar.h> for restartable
+ * forms (mbrtowc/wcrtomb). */
+int mblen(const char *s, size_t n);
+int mbtowc(wchar_t *pwc, const char *s, size_t n);
+int wctomb(char *s, wchar_t wc);
+
 int abs(int j);
 long labs(long j);
 long long llabs(long long j);
@@ -73,6 +81,8 @@ lldiv_t lldiv(long long numer, long long denom);
 
 int rand(void);
 void srand(unsigned int seed);
+long random(void);
+void srandom(unsigned seed);
 
 uint32_t arc4random(void);
 void arc4random_buf(void *buf, size_t n);

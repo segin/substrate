@@ -4,6 +4,7 @@ include ../Makefile.inc
 # new tool is a one-line diff and `git blame` is useful.
 SUBDIRS = \
 	audioctl \
+	awk \
 	bas \
 	basename \
 	bc \

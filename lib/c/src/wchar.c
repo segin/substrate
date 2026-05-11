@@ -75,6 +75,60 @@ size_t mbrtowc(wchar_t *restrict pwc, const char *restrict s, size_t n, mbstate_
     return (size_t)-1;
 }
 
+/*
+ * C89 stateless multibyte conversion wrappers around mbrtowc.
+ * Substrate's encoding is UTF-8 unconditionally, so there is no
+ * shift state and the (s == NULL) state-reset query always returns
+ * zero.  mbtowc returns the byte count, 0 for NUL, or -1 on error
+ * (matching C89's int-valued contract).
+ */
+int mbtowc(wchar_t *pwc, const char *s, size_t n) {
+    if (s == NULL)
+        return 0;
+    if (n == 0)
+        return -1;
+    size_t r = mbrtowc(pwc, s, n, NULL);
+    if (r == (size_t)-1 || r == (size_t)-2)
+        return -1;
+    return (int)r;
+}
+
+int wctomb(char *s, wchar_t wc) {
+    if (s == NULL)
+        return 0;
+    if (wc < 0)
+        return -1;
+    if (wc < 0x80) {
+        s[0] = (char)wc;
+        return 1;
+    }
+    if (wc < 0x800) {
+        s[0] = (char)(0xC0 | (wc >> 6));
+        s[1] = (char)(0x80 | (wc & 0x3F));
+        return 2;
+    }
+    if (wc >= 0xD800 && wc <= 0xDFFF)
+        return -1;                              /* surrogate */
+    if (wc < 0x10000) {
+        s[0] = (char)(0xE0 | (wc >> 12));
+        s[1] = (char)(0x80 | ((wc >> 6) & 0x3F));
+        s[2] = (char)(0x80 | (wc & 0x3F));
+        return 3;
+    }
+    if (wc < 0x110000) {
+        s[0] = (char)(0xF0 | (wc >> 18));
+        s[1] = (char)(0x80 | ((wc >> 12) & 0x3F));
+        s[2] = (char)(0x80 | ((wc >> 6) & 0x3F));
+        s[3] = (char)(0x80 | (wc & 0x3F));
+        return 4;
+    }
+    return -1;
+}
+
+int mblen(const char *s, size_t n) {
+    return mbtowc(NULL, s, n);
+}
+
 int wcwidth(wchar_t c) {
     if (c == 0)
         return 0;

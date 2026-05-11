@@ -42,8 +42,50 @@ typedef void (*sighandler_t)(int);
 
 typedef uint32_t sigset_t;
 
+/*
+ * POSIX siginfo_t.  Layout mirrors sys/include/sys/signal.h so the
+ * kernel-populated frame is byte-compatible with userspace reads.
+ */
+typedef struct {
+    int          si_signo;
+    int          si_errno;
+    int          si_code;
+    int          si_pid;
+    unsigned int si_uid;
+    void        *si_addr;
+    int          si_status;
+    int          _pad[26];
+} siginfo_t;
+
+/* si_code values for SIGFPE / SIGILL / SIGSEGV / SIGBUS / SIGTRAP. */
+#define SI_USER        0
+#define SI_KERNEL      1
+
+#define ILL_ILLOPC     1
+#define ILL_PRVOPC     5
+
+#define FPE_INTDIV     1
+#define FPE_INTOVF     2
+#define FPE_FLTDIV     3
+#define FPE_FLTOVF     4
+#define FPE_FLTUND     5
+#define FPE_FLTRES     6
+#define FPE_FLTINV     7
+#define FPE_FLTSUB     8
+
+#define SEGV_MAPERR    1
+#define SEGV_ACCERR    2
+
+#define BUS_ADRALN     1
+
+#define TRAP_BRKPT     1
+#define TRAP_TRACE     2
+
 struct sigaction {
-    sighandler_t sa_handler;
+    union {
+        sighandler_t sa_handler;
+        void       (*sa_sigaction)(int, siginfo_t *, void *);
+    };
     sigset_t     sa_mask;
     int          sa_flags;
 };

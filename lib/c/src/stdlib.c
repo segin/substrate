@@ -1027,6 +1027,21 @@ int rand(void) {
     return (int)(chacha_block[chacha_idx++] & 0x7FFFFFFF);
 }
 
+/*
+ * BSD random()/srandom() compatibility.  Substrate's rand() already
+ * returns the full [0, 2^31-1] range that BSD random() guarantees, so
+ * we route through it rather than maintain a second PRNG.  Callers
+ * that need an independent stream (POSIX permits separate state) can
+ * be revisited if the need arises.
+ */
+long random(void) {
+    return (long)rand();
+}
+
+void srandom(unsigned seed) {
+    srand(seed);
+}
+
 void arc4random_buf(void *buf, size_t n) {
     static atomic_int urandom_fd = -1;
     int fd = atomic_load(&urandom_fd);
