@@ -239,10 +239,10 @@ main(int argc, char **argv)
     }
 
     if (set_clock) {
-        struct timeval tv;
-        tv.tv_sec  = set_to;
-        tv.tv_usec = 0;
-        if (settimeofday(&tv, NULL) != 0) {
+        /* stime(2) is the simplest clock-setter wired into native
+         * dispatch.  settimeofday is declared in <sys/time.h> but
+         * not implemented in libc yet. */
+        if (stime(&set_to) != 0) {
             fprintf(stderr, "%s: cannot set time: %s\n", prog,
                     strerror(errno));
             return 1;

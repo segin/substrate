@@ -459,6 +459,11 @@ time_t time(time_t *tloc) {
     return (time_t)_syscall1(SYS_TIME, (uintptr_t)tloc);
 }
 
+int stime(const time_t *t) {
+    if (t == NULL) { errno = EINVAL; return -1; }
+    return __set_errno((int)_syscall1(SYS_STIME, (uintptr_t)t));
+}
+
 unsigned int alarm(unsigned int seconds) {
     return (unsigned int)_syscall1(SYS_ALARM, seconds);
 }
