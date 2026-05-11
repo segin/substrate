@@ -467,6 +467,28 @@ char *strerror(int errnum) {
 char *geterror(int errnum) {
     return lookup_error_string(errnum);
 }
+
+/*
+ * POSIX strerror_r: copy the canonical message for errnum into the
+ * caller's buffer.  Returns 0 on success or ERANGE if the buffer is
+ * too small to hold the full string (in that case `buf` still gets
+ * the truncated message, NUL-terminated).
+ */
+int strerror_r(int errnum, char *buf, size_t buflen) {
+    const char *src;
+    size_t      n;
+    if (buf == NULL || buflen == 0) {
+        return ERANGE;
+    }
+    src = lookup_error_string(errnum);
+    n = 0;
+    while (n + 1 < buflen && src[n] != '\0') {
+        buf[n] = src[n];
+        n++;
+    }
+    buf[n] = '\0';
+    return (src[n] == '\0') ? 0 : ERANGE;
+}
 int ffs(int i) {
     if (i == 0) return 0;
     int bit = 1;

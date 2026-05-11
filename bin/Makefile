@@ -1,7 +1,89 @@
 include ../Makefile.inc
 
-# Subdirectories for core binaries
-SUBDIRS = audioctl bc cat chmod cp dc devtree echo ex false find getty grep head id kill ln login ls lspci mkdir mknod more mount mv passwd ps pwd rm rmdir sh sleep sum sync time top true tty umount uname uptime vi wc whoami yes hostname ldtctl
+# Subdirectories for core binaries.  One name per line so adding a
+# new tool is a one-line diff and `git blame` is useful.
+SUBDIRS = \
+	audioctl \
+	bas \
+	basename \
+	bc \
+	cal \
+	cat \
+	chgrp \
+	chmod \
+	chown \
+	cp \
+	date \
+	dc \
+	devtree \
+	echo \
+	ed \
+	ex \
+	false \
+	find \
+	getty \
+	grep \
+	head \
+	hostname \
+	id \
+	join \
+	kill \
+	last \
+	ldtctl \
+	ln \
+	login \
+	ls \
+	lspci \
+	make \
+	mkdir \
+	mknod \
+	more \
+	mount \
+	mv \
+	native_test \
+	newgrp \
+	nice \
+	nproc \
+	od \
+	passwd \
+	pgrep \
+	prof \
+	ps \
+	pwd \
+	rm \
+	rmdir \
+	sed \
+	sh \
+	size \
+	sleep \
+	sort \
+	split \
+	su \
+	sum \
+	sync \
+	tabs \
+	tail \
+	tar \
+	tc \
+	tee \
+	test \
+	time \
+	top \
+	touch \
+	true \
+	tty \
+	umount \
+	uname \
+	uniq \
+	uptime \
+	vi \
+	w \
+	wall \
+	wc \
+	who \
+	whoami \
+	write \
+	yes
 
 .PHONY: all clean install $(SUBDIRS)
 

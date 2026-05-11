@@ -96,6 +96,7 @@ static void *native_syscalls[MAX_SYSCALLS] = {
     [SYS_UMASK] = (void *)&sys_umask,
     [SYS_GETGROUPS] = (void *)&sys_getgroups,
     [SYS_SETGROUPS] = (void *)&sys_setgroups,
+    [SYS_WAIT4] = (void *)&sys_wait4,
     [SYS_MMAP] = &native_sys_mmap,
     [SYS_MUNMAP] = &sys_munmap,
     [SYS_TRUNCATE] = &sys_truncate,

@@ -268,7 +268,8 @@ static int run_cmd(const cc_opts_t *o, char **argv) {
       }
     } else {
     if (debug_subproc) {
-      fprintf(stderr, "cc: debug: waitpid failed for %s errno=%d\n", argv[0], errno);
+      fprintf(stderr, "cc: debug: waitpid failed for %s: %s\n", argv[0],
+              strerror(errno));
     }
     sigchld_guard_end(&sigchld_guard);
     return -1;
