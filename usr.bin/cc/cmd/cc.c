@@ -20,8 +20,9 @@
 #endif
 
 #ifdef CC_SUBSTRATE_BUILD
-#define CC_SUBSTRATE_LIBDIR "/usr/lib"
-#define CC_SUBSTRATE_INCDIR "/usr/include"
+#define CC_SUBSTRATE_LIBDIR  "/usr/lib"   /* static .a + crt0.o */
+#define CC_SUBSTRATE_SHLIBDIR "/lib"      /* dynamic .so.0 */
+#define CC_SUBSTRATE_INCDIR  "/usr/include"
 #define CC_SUBSTRATE_LOCAL_INCDIR "/usr/local/include"
 #endif
 
@@ -433,6 +434,20 @@ static int substrate_print_runtime_file(const char *name, char out[PATH_MAX]) {
         return -1;
       }
     } else if (snprintf(out, PATH_MAX, "%s/%s", CC_SUBSTRATE_LIBDIR, name) >=
+               PATH_MAX) {
+      return -1;
+    }
+    return 0;
+  }
+  /* Shared libraries live in /lib (not /usr/lib) per the install
+   * policy in the per-component Makefiles under lib/ and usr.lib/. */
+  if (strcmp(name, "libc.so.0") == 0 || strcmp(name, "libm.so.0") == 0) {
+    if (root != NULL) {
+      if (snprintf(out, PATH_MAX, "%s%s/%s", root, CC_SUBSTRATE_SHLIBDIR,
+                   name) >= PATH_MAX) {
+        return -1;
+      }
+    } else if (snprintf(out, PATH_MAX, "%s/%s", CC_SUBSTRATE_SHLIBDIR, name) >=
                PATH_MAX) {
       return -1;
     }
@@ -1901,15 +1916,26 @@ static int run_ld(const cc_opts_t *o, const strvec_t *objs, const char *out) {
   }
   if (want_default_runtime) {
 #ifdef CC_SUBSTRATE_BUILD
+    /* Substrate's runtime is now dynamically linked: every userland
+     * binary is PIE + /sbin/ld.so + libc.so.0 (see commits switching
+     * bin/, sbin/, usr.bin/, lib/, usr.lib/ to .so.0).  Stop forcing
+     * -static here and route the link through ld.so so cc-built
+     * programs match every other binary on the system. */
     if (gcc_print_runtime_file("crt0.o", o->target, crt0) != 0 ||
-        gcc_print_runtime_file("libc.a", o->target, libc_path) != 0 ||
-        gcc_print_runtime_file("libm.a", o->target, libm_path) != 0) {
+        gcc_print_runtime_file("libc.so.0", o->target, libc_path) != 0) {
       fprintf(stderr, "cc: failed to discover Substrate runtime paths\n");
       free(argv);
       return -1;
     }
+    /* libm.so.0 is pulled in transitively via libc.so.0's DT_NEEDED;
+     * no need to name it on the link line.  Likewise libgcc — only
+     * append if it actually exists on disk. */
+    libm_path[0] = '\0';
+    libgcc[0] = '\0';
     (void)gcc_print_libgcc(o->target, libgcc);
-    argv[at++] = "-static";
+    argv[at++] = "-pie";
+    argv[at++] = "-dynamic-linker";
+    argv[at++] = "/sbin/ld.so";
     argv[at++] = crt0;
 #else
     if (gcc_print_runtime_file("crt1.o", o->target, crt1) != 0 ||
@@ -1952,8 +1978,14 @@ static int run_ld(const cc_opts_t *o, const strvec_t *objs, const char *out) {
       argv[at++] = libc_nonshared;
     }
 #endif
-    argv[at++] = libm_path;
-    if (access(libgcc, R_OK) == 0) {
+    if (libm_path[0] != '\0') {
+      argv[at++] = libm_path;
+    }
+    /* Guard against gcc_print_libgcc returning an empty path or a
+     * stack-uninitialized buffer: previously the code relied on
+     * access(R_OK) alone, but access("/", R_OK) succeeds and we'd
+     * end up with a literal `/` on the link line. */
+    if (libgcc[0] != '\0' && access(libgcc, R_OK) == 0) {
       argv[at++] = libgcc;
     }
 #ifndef CC_SUBSTRATE_BUILD
