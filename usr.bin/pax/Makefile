@@ -1,4 +1,6 @@
 TOP = ../..
+DYNAMIC = 1
+
 include $(TOP)/Makefile.inc
 
 PROG = pax

@@ -1,3 +1,5 @@
+DYNAMIC = 1
+
 include ../../Makefile.inc
 
 PROGS = cc cpp ir-verifier ir-normalize ir-diff
@@ -28,13 +30,19 @@ ifeq ($(NATIVE_BUILD),1)
     TOOL_LIBS =
     TOOL_BRAND = @true
 else
-    TOOL_CFLAGS = $(USER_CFLAGS) -fno-builtin -DCC_SUBSTRATE_BUILD=1
-    TOOL_LDFLAGS = $(USER_LDFLAGS)
+    # Dynamic-link the cc/cpp/ir-* tools (mirrors Makefile.bin.inc
+    # DYNAMIC=1 — this Makefile rolls its own toolchain glue
+    # because it builds five PROGS with shared object sets).
+    TOOL_CFLAGS = $(filter-out -fno-pie,$(USER_CFLAGS)) -fPIE \
+                  -fno-builtin -DCC_SUBSTRATE_BUILD=1
+    TOOL_LDFLAGS = -m32 -nostdlib -pie -fPIE \
+                   -Wl,--dynamic-linker=/sbin/ld.so \
+                   -Wl,--unresolved-symbols=ignore-in-shared-libs
     TOOL_CRT0 = $(TOP)/lib/c/crt0.o
-    TOOL_LIBC = $(TOP)/lib/c/libc.a
-    # libc.a's fpclassify.o references feraiseexcept (in libm),
-    # so static-link binaries need libm too.
-    TOOL_LIBS = -L$(TOP)/lib/c -lc -L$(TOP)/lib/m -lm $(LIBGCC)
+    # libc.so.0 declares DT_NEEDED libm.so.0 + DT_NEEDED libsys.so.0,
+    # so the only thing we need on the link line is libc itself.
+    TOOL_LIBC = $(TOP)/lib/c/libc.so.0
+    TOOL_LIBS = -L$(TOP)/lib/c -l:libc.so.0 $(LIBGCC)
     TOOL_BRAND = $(call BRAND_SUBSTRATE,$@)
 endif
 

@@ -1,6 +1,8 @@
 PROG = pr
 SRCS = pr.c
 
+DYNAMIC = 1
+
 include ../../Makefile.bin.inc
 
 .PHONY: test

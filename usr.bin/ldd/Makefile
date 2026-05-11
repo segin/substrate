@@ -1,3 +1,5 @@
+DYNAMIC = 1
+
 include ../../Makefile.inc
 
 PROG = ldd
