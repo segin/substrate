@@ -1005,12 +1005,20 @@ static int exec_setup_stack(pmap_t pmap, uint32_t *sp_out, char **k_argv, int ar
                             const elf_image_info_t *image,
                             uint32_t *ps_strings_out) {
     uint32_t user_stack_top = 0xC0000000;
-    uint32_t user_stack_size = 256; // 1MB initial user stack
+    /*
+     * 4 MiB initial user stack.  The previous 1 MiB ceiling was tight
+     * enough that usr.bin/as crashed on real input — emit_relocations
+     * does `sub $0x13021c,%esp` (1.18 MiB single-frame allocation)
+     * and there's no on-demand stack growth yet, so anything past
+     * the mapped region faults instead of extending.  Leave room for
+     * a few large frames before adding proper grow-down support.
+     */
+    uint32_t user_stack_size = 1024;
     uint32_t user_stack_base = user_stack_top - (user_stack_size * 0x1000);
-    
+
     // Track physical addresses for kernel-space access
     typedef struct { uint32_t va; void *pa; } stack_page_t;
-    stack_page_t stack_pages[256];
+    stack_page_t stack_pages[1024];
     uint32_t mapped_stack_pages = 0;
     
     for (uint32_t i = 0; i < user_stack_size; i++) {
