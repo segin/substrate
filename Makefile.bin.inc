@@ -22,7 +22,10 @@ LIBC_DIR = $(TOP)/lib/c
 ifeq ($(DYNAMIC),1)
     # Clean PIE flags — do NOT inherit USER_LDFLAGS' -fno-pie /
     # -no-pie or we'd get conflicting modes on the link line.
-    BIN_CFLAGS := $(filter-out -fno-pie,$(USER_CFLAGS)) -fPIE
+    # Deferred (=) like the static branch so per-program Makefiles
+    # that do `USER_CFLAGS += -I...` AFTER including this file still
+    # take effect — bc/Makefile is the canonical example.
+    BIN_CFLAGS  = $(filter-out -fno-pie,$(USER_CFLAGS)) -fPIE
     LDFLAGS    := -m32 -nostdlib -pie -fPIE \
                   -Wl,--dynamic-linker=/sbin/ld.so \
                   -Wl,--unresolved-symbols=ignore-in-shared-libs
