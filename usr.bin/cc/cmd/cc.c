@@ -458,19 +458,28 @@ static int substrate_print_runtime_file(const char *name, char out[PATH_MAX]) {
 #endif
 
 static int canonicalize_path(const char *in, char out[PATH_MAX]) {
+  char saved[PATH_MAX];
   char *resolved;
 
   if (in == NULL || in[0] == '\0') {
     return -1;
   }
-  resolved = realpath(in, out);
+  /* `in` and `out` may alias.  Substrate's realpath() seeds the
+   * output buffer with the absolute prefix before walking the path,
+   * so by the time it returns NULL on a nonexistent target the
+   * caller's `in` has been clobbered to `/` and the fallback
+   * memcpy below would silently produce a stray `/` on the cc
+   * link line.  Snapshot first. */
+  if (strlen(in) >= sizeof(saved)) {
+    return -1;
+  }
+  memcpy(saved, in, strlen(in) + 1);
+
+  resolved = realpath(saved, out);
   if (resolved != NULL) {
     return 0;
   }
-  if (strlen(in) >= PATH_MAX) {
-    return -1;
-  }
-  memcpy(out, in, strlen(in) + 1);
+  memcpy(out, saved, strlen(saved) + 1);
   return 0;
 }
 

@@ -11582,6 +11582,22 @@ int main(int argc, char **argv) {
             }
             continue;
         }
+        /* Defensive: silently skip an empty argv entry or a bare "/"
+         * argv slot.  Substrate's cc occasionally synthesised one of
+         * these from a misresolved runtime path (uninitialised libgcc
+         * buffer + access("/", R_OK) succeeds + libgcc kept as just
+         * "/").  Treating this as a hard error left users staring at
+         * `ld: failed to open input /` with no idea what produced it.
+         * Rather than failing the whole link, ignore the bogus input
+         * and let cc be fixed at its source.  A real one-character "/"
+         * input file would be wrong on every conceivable system, so
+         * losing nothing legitimate. */
+        if (a == NULL || a[0] == '\0' ||
+            (a[0] == '/' && a[1] == '\0')) {
+            ld_warn(&ctx, "ignoring empty/bare-slash input argv slot "
+                          "(probable upstream cc bug)");
+            continue;
+        }
         if (inputvec_push(&ctx.inputs, LD_INPUT_FILE, ctx.current_lib_mode,
                           ctx.current_whole_archive, ctx.current_as_needed, a) != 0) {
             inputvec_free(&ctx.inputs);
