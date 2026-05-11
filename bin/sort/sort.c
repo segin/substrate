@@ -304,11 +304,10 @@ compare_lines(const void *pa, const void *pb, const sort_opts_t *o)
     return r;
 }
 
-static const sort_opts_t *cmp_opts;
 static int
-cmp_qsort(const void *a, const void *b)
+cmp_qsort_r(const void *a, const void *b, void *ctx)
 {
-    return compare_lines(a, b, cmp_opts);
+    return compare_lines(a, b, (const sort_opts_t *)ctx);
 }
 
 static void
@@ -445,8 +444,7 @@ next_arg: ;
         return do_check(&o);
     }
 
-    cmp_opts = &o;
-    qsort(all_lines, n_lines, sizeof(*all_lines), cmp_qsort);
+    qsort_r(all_lines, n_lines, sizeof(*all_lines), cmp_qsort_r, &o);
 
     if (o.outfile != NULL) {
         outf = fopen(o.outfile, "w");

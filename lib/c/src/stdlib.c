@@ -816,22 +816,30 @@ static void swap_bytes(char *a, char *b, size_t size) {
     }
 }
 
-static void insertion_sort(char *base, size_t nmemb, size_t size,
-                           int (*compar)(const void *, const void *)) {
+/*
+ * Internal: qsort core takes a context-aware comparator
+ * (a, b, arg).  The plain qsort() at the bottom is a thin wrapper
+ * that ignores arg and calls a 2-arg comparator via a thunk.
+ */
+typedef int (*compar_r_fn)(const void *, const void *, void *);
+
+static void insertion_sort_r(char *base, size_t nmemb, size_t size,
+                             compar_r_fn compar, void *arg) {
     for (size_t i = 1; i < nmemb; i++) {
         size_t j = i;
-        while (j > 0 && compar(base + j * size, base + (j - 1) * size) < 0) {
+        while (j > 0 &&
+               compar(base + j * size, base + (j - 1) * size, arg) < 0) {
             swap_bytes(base + j * size, base + (j - 1) * size, size);
             j--;
         }
     }
 }
 
-static size_t med3(char *base, size_t a, size_t b, size_t c, size_t size,
-                   int (*compar)(const void *, const void *)) {
-    int ab = compar(base + a * size, base + b * size);
-    int bc = compar(base + b * size, base + c * size);
-    int ac = compar(base + a * size, base + c * size);
+static size_t med3_r(char *base, size_t a, size_t b, size_t c, size_t size,
+                     compar_r_fn compar, void *arg) {
+    int ab = compar(base + a * size, base + b * size, arg);
+    int bc = compar(base + b * size, base + c * size, arg);
+    int ac = compar(base + a * size, base + c * size, arg);
     if (ab <= 0) {
         if (bc <= 0) return b;
         return ac <= 0 ? c : a;
@@ -840,7 +848,9 @@ static size_t med3(char *base, size_t a, size_t b, size_t c, size_t size,
     return ac >= 0 ? c : a;
 }
 
-void qsort(void *base, size_t nmemb, size_t size, int (*compar)(const void *, const void *)) {
+void qsort_r(void *base, size_t nmemb, size_t size,
+             int (*compar)(const void *, const void *, void *),
+             void *arg) {
     if (nmemb < 2 || size == 0) return;
 
     char *arr = (char *)base;
@@ -860,21 +870,21 @@ void qsort(void *base, size_t nmemb, size_t size, int (*compar)(const void *, co
 
         /* Use insertion sort for small partitions */
         if (hi - lo + 1 <= 16) {
-            insertion_sort(arr + lo * size, hi - lo + 1, size, compar);
+            insertion_sort_r(arr + lo * size, hi - lo + 1, size, compar, arg);
             continue;
         }
 
         /* Median-of-three pivot selection */
         size_t mid = lo + (hi - lo) / 2;
-        size_t pivot_idx = med3(arr, lo, mid, hi, size, compar);
+        size_t pivot_idx = med3_r(arr, lo, mid, hi, size, compar, arg);
         swap_bytes(arr + pivot_idx * size, arr + lo * size, size);
 
         /* Partition */
         size_t i = lo + 1;
         size_t j = hi;
         while (1) {
-            while (i <= hi && compar(arr + i * size, arr + lo * size) < 0) i++;
-            while (j > lo && compar(arr + j * size, arr + lo * size) > 0) j--;
+            while (i <= hi && compar(arr + i * size, arr + lo * size, arg) < 0) i++;
+            while (j > lo && compar(arr + j * size, arr + lo * size, arg) > 0) j--;
             if (i >= j) break;
             swap_bytes(arr + i * size, arr + j * size, size);
             i++;
@@ -909,6 +919,23 @@ void qsort(void *base, size_t nmemb, size_t size, int (*compar)(const void *, co
             stack[top].hi = hi;
         }
     }
+}
+
+/*
+ * qsort(): thin wrapper around qsort_r.  The trampoline reinterprets
+ * `arg` as the caller's 2-arg comparator and drops the unused thunk.
+ */
+static int
+qsort_compat_thunk(const void *a, const void *b, void *arg)
+{
+    int (*compar)(const void *, const void *) =
+        (int (*)(const void *, const void *))arg;
+    return compar(a, b);
+}
+
+void qsort(void *base, size_t nmemb, size_t size,
+           int (*compar)(const void *, const void *)) {
+    qsort_r(base, nmemb, size, qsort_compat_thunk, (void *)compar);
 }
 
 void *bsearch(const void *key, const void *base, size_t nmemb, size_t size, int (*compar)(const void *, const void *)) {

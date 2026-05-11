@@ -1,0 +1,110 @@
+.TH QSORT 3 2026-05-10 "Substrate LibC" "Substrate Library Functions"
+.SH NAME
+qsort, qsort_r \- sort an array
+.SH LIBRARY
+Standard C library
+.RB ( libc ", " -lc )
+.SH SYNOPSIS
+.B #include <stdlib.h>
+.sp
+.BI "void qsort(void *" base ", size_t " nmemb ", size_t " size ","
+.BI "           int (*" compar ")(const void *, const void *));"
+.sp
+.BI "void qsort_r(void *" base ", size_t " nmemb ", size_t " size ","
+.BI "             int (*" compar ")(const void *, const void *, void *),"
+.BI "             void *" arg ");"
+.SH DESCRIPTION
+The
+.BR qsort ()
+function sorts an array of
+.I nmemb
+objects, the initial element of which is pointed to by
+.IR base .
+The size of each object is specified by
+.IR size .
+The contents of the array are sorted in ascending order according to a
+comparison function pointed to by
+.IR compar ,
+which is called with two arguments that point to the objects being
+compared.
+.sp
+The comparison function must return an integer less than, equal to, or
+greater than zero if the first argument is considered to be respectively
+less than, equal to, or greater than the second.  If two members compare
+as equal, their order in the sorted array is unspecified.
+.sp
+.BR qsort_r ()
+behaves identically except that the comparison function takes a third
+argument,
+.IR arg ,
+which is forwarded unchanged from the call to
+.BR qsort_r ().
+This makes it possible to use a single comparator with per-call context
+(for example, sort direction, locale, or a key index) without resorting
+to a global variable.  Substrate uses the GNU/Linux argument order: the
+comparator's signature is
+.RI "(const void *" a ", const void *" b ", void *" arg ),
+and
+.I arg
+is the last parameter to
+.BR qsort_r ().
+.sp
+Both functions perform an in-place iterative quicksort with
+median-of-three pivot selection and an insertion-sort fallback for small
+partitions.  The algorithm is not stable; if stability matters, encode an
+original index into the elements and break ties on it inside
+.IR compar .
+.SH RETURN VALUE
+Neither function returns a value.
+.SH EXAMPLES
+Sort an array of integers in ascending order:
+.EX
+#include <stdlib.h>
+#include <stdio.h>
+
+static int
+cmp_int(const void *a, const void *b)
+{
+    int ia = *(const int *)a, ib = *(const int *)b;
+    return (ia > ib) - (ia < ib);
+}
+
+int main(void)
+{
+    int v[] = { 5, 3, 1, 4, 2 };
+    qsort(v, 5, sizeof(int), cmp_int);
+    for (int i = 0; i < 5; i++) printf("%d ", v[i]);
+    putchar('\\n');
+    return 0;
+}
+.EE
+.sp
+Sort with caller-supplied direction via
+.BR qsort_r ():
+.EX
+#include <stdlib.h>
+
+static int
+cmp_dir(const void *a, const void *b, void *ctx)
+{
+    int dir = *(int *)ctx;
+    int ia = *(const int *)a, ib = *(const int *)b;
+    return dir > 0 ? (ia - ib) : (ib - ia);
+}
+
+void sort_with(int *v, size_t n, int direction)
+{
+    qsort_r(v, n, sizeof(int), cmp_dir, &direction);
+}
+.EE
+.SH SEE ALSO
+.BR bsearch (3),
+.BR strcmp (3)
+.SH STANDARDS
+.BR qsort ()
+conforms to C89, C99, C11, C17, C2x, and POSIX.1-2008.
+.BR qsort_r ()
+is specified by POSIX.1-2024 and is also available as a GNU and BSD
+extension.  Substrate follows the GNU argument order
+.RI ( compar ", " arg ),
+which matches POSIX.1-2024.
