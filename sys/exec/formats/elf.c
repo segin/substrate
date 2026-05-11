@@ -1016,9 +1016,20 @@ static int exec_setup_stack(pmap_t pmap, uint32_t *sp_out, char **k_argv, int ar
     uint32_t user_stack_size = 1024;
     uint32_t user_stack_base = user_stack_top - (user_stack_size * 0x1000);
 
-    // Track physical addresses for kernel-space access
+    /*
+     * Track physical addresses for kernel-space access.  Heap-allocated
+     * because the array sizes with user_stack_size and is too big to
+     * keep on the 8 KiB kernel stack — at 8 B per entry × 1024 pages
+     * that's the entire kstack frame, and exec_setup_stack's saved
+     * return state gets clobbered (manifested as wild user-space EIP
+     * after exec).
+     */
     typedef struct { uint32_t va; void *pa; } stack_page_t;
-    stack_page_t stack_pages[1024];
+    stack_page_t *stack_pages = kmalloc(sizeof(stack_page_t) * user_stack_size);
+    if (!stack_pages) {
+        kprint("execve: Out of memory tracking user stack pages\n");
+        return -1;
+    }
     uint32_t mapped_stack_pages = 0;
     
     for (uint32_t i = 0; i < user_stack_size; i++) {
@@ -1030,6 +1041,7 @@ static int exec_setup_stack(pmap_t pmap, uint32_t *sp_out, char **k_argv, int ar
                 pmap_remove(pmap, stack_pages[j].va);
                 pmm_free_block(stack_pages[j].pa);
             }
+            kfree(stack_pages, sizeof(stack_page_t) * user_stack_size);
             return -1;
         }
         uint32_t pa_phys = (uint32_t)(uintptr_t)pa - 0xC0000000;
@@ -1040,6 +1052,7 @@ static int exec_setup_stack(pmap_t pmap, uint32_t *sp_out, char **k_argv, int ar
                 pmap_remove(pmap, stack_pages[j].va);
                 pmm_free_block(stack_pages[j].pa);
             }
+            kfree(stack_pages, sizeof(stack_page_t) * user_stack_size);
             return -1;
         }
         stack_pages[i].va = va;
@@ -1146,6 +1159,7 @@ static int exec_setup_stack(pmap_t pmap, uint32_t *sp_out, char **k_argv, int ar
 
     if (!image) {
         kprint("execve: Missing ELF image metadata for AUXV\n");
+        kfree(stack_pages, sizeof(stack_page_t) * user_stack_size);
         return -1;
     }
 
@@ -1302,6 +1316,7 @@ static int exec_setup_stack(pmap_t pmap, uint32_t *sp_out, char **k_argv, int ar
 
     *sp_out = sp;
     if (ps_strings_out) *ps_strings_out = ps_strings_addr;
+    kfree(stack_pages, sizeof(stack_page_t) * user_stack_size);
     return 0;
 }
 
