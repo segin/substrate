@@ -1,26 +1,26 @@
 /*
  * ldd — list dynamic dependencies of an ELF binary.
  *
- * This implementation reads the ELF file directly: it walks
- * program headers to find PT_DYNAMIC, parses the dynamic section
- * for DT_STRTAB / DT_NEEDED, and resolves each NEEDED soname
- * against a search-path list chosen by the ELF's OSABI.
+ * Two paths:
  *
- * Unlike the previous LD_TRACE_LOADED_OBJECTS-via-exec approach
- * this works for:
+ *  1. NATIVE dynamic binaries (PT_INTERP=/sbin/ld.so).  Re-exec
+ *     the target with LD_TRACE_LOADED_OBJECTS=1 set; /sbin/ld.so
+ *     honours that and prints the loaded-object scope with REAL
+ *     addresses (where each library actually mapped) instead of a
+ *     placeholder.  FreeBSD-style — hand the work to the runtime
+ *     linker rather than re-implementing it.
  *
- *   - Static binaries:           prints "not a dynamic executable".
- *   - Substrate native PIE:      walks /sbin/ld.so's search path.
- *   - NetBSD binaries:           /perso/netbsd/lib, /perso/netbsd/usr/lib,
- *                                /perso/netbsd/usr/pkg/lib.
- *   - FreeBSD:                   /perso/freebsd/lib, /perso/freebsd/usr/lib.
- *   - Linux:                     /perso/linux/lib, /perso/linux/usr/lib.
+ *  2. STATIC binaries and FOREIGN (NetBSD/FreeBSD/Linux) binaries.
+ *     We can't trust a foreign runtime linker to honour our env
+ *     var, and a static binary runs no linker at all.  For these,
+ *     fall back to parsing the ELF directly: walk Phdrs for
+ *     PT_DYNAMIC, dynamic for DT_NEEDED, resolve names against a
+ *     perso-aware search-path list.  Addresses are reported as
+ *     "0x????????" placeholders since we don't actually load.
  *
- * Output mirrors GNU ldd's format.  The address column is a
- * placeholder ("0x????????") because resolving the actual load
- * base would require running the binary — and the whole point
- * of this rewrite is to NOT do that.  The "=> " marker keeps
- * scripts grepping for it happy.
+ * Path selection happens after an ELF header peek: ELFOSABI byte +
+ * presence of PT_DYNAMIC + (for the trace path) PT_INTERP of
+ * /sbin/ld.so.
  */
 
 #include <ctype.h>
@@ -32,7 +32,10 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <sys/wait.h>
 #include <unistd.h>
+
+#define SUBSTRATE_LDSO_INTERP "/sbin/ld.so"
 
 typedef struct {
     unsigned char e_ident[16];
@@ -174,6 +177,43 @@ file_exists(const char *dir, const char *name, char *out, size_t out_max)
     return stat(out, &st) == 0 && S_ISREG(st.st_mode);
 }
 
+/*
+ * Native trace path: fork, set LD_TRACE_LOADED_OBJECTS=1, execv
+ * the target.  /sbin/ld.so loads everything as usual, sees the
+ * env var, prints the loaded-object list with real addresses, then
+ * exits 0 before handing control to the program.
+ *
+ * Returns 0 on a successful trace (whether the binary's exit code
+ * was 0 or not — `ldd` reports deps regardless), and -1 if exec
+ * itself failed (caller can then fall back to ELF parsing).
+ */
+static int
+trace_via_ldso(const char *path)
+{
+    pid_t pid = fork();
+    int   status = 0;
+    if (pid < 0) {
+        return -1;
+    }
+    if (pid == 0) {
+        setenv("LD_TRACE_LOADED_OBJECTS", "1", 1);
+        {
+            char *const argv[] = { (char *)path, NULL };
+            execv(path, argv);
+        }
+        /* exec failed — signal via non-zero exit so the parent's
+         * waitpid sees it.  127 by sh convention. */
+        _exit(127);
+    }
+    if (waitpid(pid, &status, 0) < 0) {
+        return -1;
+    }
+    if (WIFEXITED(status) && WEXITSTATUS(status) == 127) {
+        return -1;  /* exec failed in the child */
+    }
+    return 0;
+}
+
 static int
 do_ldd(const char *path)
 {
@@ -274,6 +314,59 @@ do_ldd(const char *path)
             fprintf(stderr, "ldd: %s: DT_STRTAB unmappable\n", path);
             free(blob);
             return -1;
+        }
+    }
+
+    /*
+     * Native dynamic binary?  Hand off to ld.so via the trace
+     * env var so we get real addresses.  Free the slurped buffer
+     * first since execv will replace the address space anyway —
+     * but the child fork'd from us inherits our memory, and we
+     * don't want a 100 KB buffer per fork.
+     */
+    if (have_interp && strcmp(interp, SUBSTRATE_LDSO_INTERP) == 0) {
+        free(blob);
+        if (trace_via_ldso(path) == 0) {
+            return 0;
+        }
+        /* trace failed (target probably exec-broken) — fall through
+         * to ELF-parse path.  Re-slurp. */
+        blob = slurp(path, &len);
+        if (blob == NULL) {
+            return -1;
+        }
+        eh = (Elf32_Ehdr *)blob;
+        ph = (Elf32_Phdr *)((char *)blob + eh->e_phoff);
+        /* dyn / strtab / strsz / interp pointers were into the old
+         * blob — re-derive them.  Easier to re-do the whole walk. */
+        have_interp = 0; have_dyn = 0; interp = NULL; dyn = NULL;
+        strtab = NULL; strsz = 0; dyn_count = 0;
+        for (i = 0; i < eh->e_phnum; i++) {
+            if (ph[i].p_type == PT_INTERP) {
+                interp = (const char *)blob + ph[i].p_offset;
+                have_interp = 1;
+            } else if (ph[i].p_type == PT_DYNAMIC) {
+                dyn = (Elf32_Dyn *)((char *)blob + ph[i].p_offset);
+                dyn_count = ph[i].p_filesz / sizeof(Elf32_Dyn);
+                have_dyn = 1;
+            }
+        }
+        if (have_dyn) {
+            uint32_t strtab_va = 0;
+            for (i = 0; i < (int)dyn_count; i++) {
+                if (dyn[i].d_tag == DT_NULL) break;
+                if (dyn[i].d_tag == DT_STRTAB) strtab_va = dyn[i].d_val;
+                else if (dyn[i].d_tag == DT_STRSZ) strsz = dyn[i].d_val;
+            }
+            for (i = 0; i < eh->e_phnum; i++) {
+                if (ph[i].p_type != PT_LOAD) continue;
+                if (strtab_va >= ph[i].p_vaddr &&
+                    strtab_va <  ph[i].p_vaddr + ph[i].p_filesz) {
+                    strtab = (const char *)blob + ph[i].p_offset +
+                             (strtab_va - ph[i].p_vaddr);
+                    break;
+                }
+            }
         }
     }
 
