@@ -2,18 +2,27 @@
  * bin/login/login.c — real login.
  *
  * Prompts for a username + password, validates against /etc/passwd
- * + /etc/shadow, then becomes that user (setgid, initgroups,
- * setuid), sets a minimal environment (HOME / SHELL / USER / PATH /
- * LOGNAME), chdirs to the home directory, and execs the user's
- * login shell.
+ * + /etc/shadow via crypt(3), then becomes that user (setgid,
+ * initgroups, setuid), sets a minimal environment (HOME / SHELL /
+ * USER / PATH / LOGNAME), chdirs to the home directory, and execs
+ * the user's login shell.
  *
- * TODO: real password hashing (crypt()).  Today /etc/shadow holds
- * the password in plaintext — we compare strings.  Replace with
- * crypt-format `$5$salt$hash` once a SHA-256 / DES crypt landed in
- * libc.  Until then this is "auth that works on a single-user box"
- * not "auth you'd ship".
+ * Shadow entries are matched as follows:
+ *
+ *   ""              → no password required (account, no auth)
+ *   "*" or "!..."   → account locked
+ *   "$5$...", "$1$..."  → hashed with crypt(3); we crypt the
+ *                          attempt under the stored salt and
+ *                          string-compare
+ *   anything else (13-char or shorter) → treated as a traditional
+ *                          DES crypt setting and verified the same
+ *                          way
+ *
+ * (Plaintext shadow entries are no longer accepted — set up real
+ * hashes with passwd(1) before deploying.)
  */
 
+#include <crypt.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <grp.h>
@@ -110,16 +119,13 @@ lookup_shadow(const char *user)
 }
 
 /*
- * Compare `attempt` against the stored shadow string.
- *
- *   ""      → no password required, attempt is ignored, success
- *   "*"     → locked, always fails
- *   "!..."  → locked
- *   anything else → plaintext compare (TEMPORARY — see file header)
+ * Compare `attempt` against the stored shadow string using
+ * crypt(3).  See file header for the full match policy.
  */
 static int
 shadow_matches(const char *stored, const char *attempt)
 {
+    char *hashed;
     if (stored == NULL) {
         return 0;
     }
@@ -129,7 +135,11 @@ shadow_matches(const char *stored, const char *attempt)
     if (stored[0] == '*' || stored[0] == '!') {
         return 0;
     }
-    return strcmp(stored, attempt) == 0;
+    hashed = crypt(attempt, stored);
+    if (hashed == NULL) {
+        return 0;
+    }
+    return strcmp(hashed, stored) == 0;
 }
 
 static int

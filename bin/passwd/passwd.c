@@ -7,13 +7,15 @@
  * root may change other users' passwords.  Non-root users must
  * prove they know the current password first.
  *
- * Today /etc/shadow holds the password in plaintext (see the
- * TODO in bin/login/login.c) so we just rewrite the entry's
- * second field.  When crypt() lands the same path will produce
- * `$5$salt$hash` instead.
+ * New passwords are stored as `$5$<salt>$<hash>` (SHA-256-crypt,
+ * 5000 default rounds) via crypt(3).  Old `$1$` / DES hashes in
+ * /etc/shadow continue to verify but get upgraded to `$5$` on the
+ * next successful password change.
  */
 
+#include <crypt.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <pwd.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -230,14 +232,22 @@ main(int argc, char **argv)
 
     if (my_uid != 0) {
         const char *cur_stored;
+        char       *cur_hashed;
         if (read_password("Current password: ", cur, sizeof(cur)) < 0) {
             return 1;
         }
         cur_stored = shadow_current(user, line, sizeof(line));
-        if (cur_stored == NULL ||
-            (cur_stored[0] != '\0' && strcmp(cur_stored, cur) != 0)) {
+        if (cur_stored == NULL) {
             fprintf(stderr, "passwd: authentication failure\n");
             return 1;
+        }
+        if (cur_stored[0] != '\0') {
+            cur_hashed = crypt(cur, cur_stored);
+            if (cur_hashed == NULL ||
+                strcmp(cur_hashed, cur_stored) != 0) {
+                fprintf(stderr, "passwd: authentication failure\n");
+                return 1;
+            }
         }
     }
 
@@ -256,9 +266,46 @@ main(int argc, char **argv)
         return 1;
     }
 
-    if (rewrite_shadow(user, new1) != 0) {
-        fprintf(stderr, "passwd: failed to update /etc/shadow\n");
-        return 1;
+    {
+        /* Build a $5$ setting with a fresh salt and crypt the new
+         * password under it.  Salt: 8 chars from the b64 alphabet
+         * seeded from time + uid + a /dev/urandom byte if available. */
+        static const char b64[] =
+            "./0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+        char  setting[64];
+        char *hashed;
+        unsigned long seed;
+        int           i, urand_fd;
+        unsigned char rb[8];
+
+        seed = (unsigned long)getpid() * 0x9E3779B1u + (unsigned long)getuid();
+        urand_fd = open("/dev/urandom", 0);
+        if (urand_fd >= 0) {
+            (void)read(urand_fd, rb, sizeof(rb));
+            close(urand_fd);
+            for (i = 0; i < 8; i++) {
+                seed = seed * 1103515245u + rb[i];
+            }
+        }
+
+        memcpy(setting, "$5$", 3);
+        for (i = 0; i < 8; i++) {
+            setting[3 + i] = b64[seed & 63];
+            seed >>= 6;
+            if (seed == 0) seed = 0xDEADBEEFu ^ (unsigned long)i;
+        }
+        setting[11] = '\0';
+
+        hashed = crypt(new1, setting);
+        if (hashed == NULL) {
+            fprintf(stderr, "passwd: crypt() failed\n");
+            return 1;
+        }
+
+        if (rewrite_shadow(user, hashed) != 0) {
+            fprintf(stderr, "passwd: failed to update /etc/shadow\n");
+            return 1;
+        }
     }
 
     printf("passwd: password updated for %s\n", user);

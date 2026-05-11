@@ -5,10 +5,10 @@
  *
  * Default user is "root".  If the invoker is already uid 0 we skip
  * the password prompt; otherwise we read a password and compare
- * against /etc/shadow (plaintext, until crypt() lands — see
- * bin/login/login.c).
+ * against /etc/shadow via crypt(3).
  */
 
+#include <crypt.h>
 #include <errno.h>
 #include <grp.h>
 #include <pwd.h>
@@ -89,6 +89,7 @@ lookup_shadow(const char *user)
 static int
 shadow_matches(const char *stored, const char *attempt)
 {
+    char *hashed;
     if (stored == NULL) {
         return 0;
     }
@@ -98,7 +99,11 @@ shadow_matches(const char *stored, const char *attempt)
     if (stored[0] == '*' || stored[0] == '!') {
         return 0;
     }
-    return strcmp(stored, attempt) == 0;
+    hashed = crypt(attempt, stored);
+    if (hashed == NULL) {
+        return 0;
+    }
+    return strcmp(hashed, stored) == 0;
 }
 
 int
