@@ -423,7 +423,19 @@ modeparse_apply(const struct mode_change *mode, mode_t old_mode)
         } else if (clause->op == CLAUSE_REMOVE) {
             new_mode &= ~(rwx_apply | special_apply);
         } else {
-            new_mode &= ~(rwx_scope | special_scope);
+            /*
+             * `=`: clear the WHO scope, then set perm bits restricted by
+             * umask.  The clear must use the FULL who scope, not the
+             * umask-restricted rwx_scope — otherwise `chmod =r f` with
+             * umask 022 leaves the old g/o write bits intact (since the
+             * clear mask had those positions zeroed out by ~umask), and
+             * `=r` becomes a no-op for w bits.  POSIX: "The mode
+             * specified by the symbolic mode shall be applied as a
+             * complete replacement of [the file's] permission bits."
+             */
+            mode_t clear_scope = who_to_rwx_mask(
+                clause->who_specified ? clause->who : WHO_ALL);
+            new_mode &= ~(clear_scope | special_scope);
             new_mode |= (rwx_apply | special_apply);
         }
     }

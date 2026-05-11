@@ -93,6 +93,7 @@ static void *native_syscalls[MAX_SYSCALLS] = {
     [SYS_MODIFY_LDT] = &sys_modify_ldt,
     [SYS_READLINK] = &sys_readlink,
     [SYS_REBOOT] = &sys_reboot,
+    [SYS_UMASK] = (void *)&sys_umask,
     [SYS_MMAP] = &native_sys_mmap,
     [SYS_MUNMAP] = &sys_munmap,
     [SYS_TRUNCATE] = &sys_truncate,
