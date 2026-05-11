@@ -96,6 +96,10 @@ typedef struct process {
     uint32_t egid;
     uint32_t suid;
     uint32_t sgid;
+    /* Supplementary group list set by setgroups()/initgroups().
+     * NGROUPS_MAX in Substrate's <sys/param.h> is 32; sized to match. */
+    uint32_t supp_groups[32];
+    int      n_supp_groups;
     uint16_t umask;
     uint8_t  ac_flag;
     uint8_t  is_kernel_task; // 1 if kernel thread, 0 if user process

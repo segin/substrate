@@ -413,15 +413,42 @@ ssize_t sys_writev(int fd, const void *iov_user, int iovcnt) {
 }
 
 int sys_getgroups(int gidsetsize, void *gidset) {
-    if (gidsetsize == 0) return 1;
-    if (gidsetsize < 1) return -EINVAL;
-    gid_t kg = current_process->gid;
-    return copyout(&kg, gidset, sizeof(gid_t));
+    int n = current_process->n_supp_groups;
+    /* Effective list = primary gid + supplementary list.  POSIX
+     * permits an implementation to omit the primary gid from
+     * getgroups(); we include it so a user that calls getgroups()
+     * sees a complete picture. */
+    if (gidsetsize == 0) {
+        return n + 1;
+    }
+    if (gidsetsize < n + 1) return -EINVAL;
+    {
+        gid_t kbuf[33];
+        int   i;
+        kbuf[0] = current_process->gid;
+        for (i = 0; i < n; i++) kbuf[i + 1] = current_process->supp_groups[i];
+        if (copyout(kbuf, gidset, sizeof(gid_t) * (size_t)(n + 1)) < 0)
+            return -EFAULT;
+    }
+    return n + 1;
 }
 
 int sys_setgroups(int gidsetsize, const void *gidset) {
-    (void)gidsetsize; (void)gidset;
     if (current_process->euid != 0) return -EPERM;
+    if (gidsetsize < 0) return -EINVAL;
+    if (gidsetsize > 32) return -EINVAL;
+    if (gidsetsize == 0) {
+        current_process->n_supp_groups = 0;
+        return 0;
+    }
+    {
+        gid_t kbuf[32];
+        if (copyin(gidset, kbuf, sizeof(gid_t) * (size_t)gidsetsize) < 0)
+            return -EFAULT;
+        for (int i = 0; i < gidsetsize; i++)
+            current_process->supp_groups[i] = kbuf[i];
+        current_process->n_supp_groups = gidsetsize;
+    }
     return 0;
 }
 

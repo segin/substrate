@@ -763,17 +763,7 @@ char *getlogin(void) {
     return NULL; /* stub: no kernel support yet */
 }
 
-int getgrouplist(const char *user, gid_t group, gid_t *groups, int *ngroups) {
-    (void)user;
-    /* stub: return primary group only */
-    if (*ngroups >= 1) {
-        groups[0] = group;
-        *ngroups = 1;
-        return 1;
-    }
-    *ngroups = 1;
-    return -1;
-}
+/* getgrouplist now lives in src/grp.c — it actually walks /etc/group. */
 
 /* --- Locale stubs --- */
 

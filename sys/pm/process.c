@@ -575,6 +575,10 @@ static int proc_fork_common(process_t *parent, void *stack, int is_vfork) {
     child_proc->sig_ignore = parent->sig_ignore;
     memcpy(child_proc->rlimits, parent->rlimits, sizeof(parent->rlimits));
     child_proc->umask = parent->umask;
+    /* Supplementary group list inherits across fork. */
+    memcpy(child_proc->supp_groups, parent->supp_groups,
+           sizeof(parent->supp_groups));
+    child_proc->n_supp_groups = parent->n_supp_groups;
     
     // Copy limits, etc. if implemented
     
