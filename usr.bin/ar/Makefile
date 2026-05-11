@@ -1,17 +1,19 @@
+DYNAMIC = 1
+
 include ../../Makefile.inc
 
 PROG = ar
 SRCS = ar.c
-LDADD += ../../usr.lib/elfobj/libelfobj.a
+LDADD += -L$(TOP)/usr.lib/elfobj -l:libelfobj.so.0
 USER_CFLAGS += -iquote ../../include
 
 include ../../Makefile.bin.inc
 
 BINDIR := $(DESTDIR)/usr/bin
 
-$(PROG): ../../usr.lib/elfobj/libelfobj.a
+$(PROG): ../../usr.lib/elfobj/libelfobj.so.0
 
-../../usr.lib/elfobj/libelfobj.a:
+../../usr.lib/elfobj/libelfobj.so.0:
 	$(MAKE) -C ../../usr.lib/elfobj $(if $(NATIVE_BUILD),NATIVE_BUILD=1)
 
 install: install-ranlib-link install-man

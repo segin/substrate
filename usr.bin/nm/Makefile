@@ -1,8 +1,10 @@
+DYNAMIC = 1
+
 include ../../Makefile.inc
 
 PROG = nm
 SRCS = nm.c
-LDADD += ../../usr.lib/elfobj/libelfobj.a ../../usr.lib/demangle/libdemangle.a
+LDADD += -L$(TOP)/usr.lib/elfobj -l:libelfobj.so.0 -L$(TOP)/usr.lib/demangle -l:libdemangle.so.0
 USER_CFLAGS += -idirafter ../../include
 EXTRA_CLEAN += .build-mode
 
@@ -42,12 +44,12 @@ demangle-build-native:
 	$(MAKE) -C ../../usr.lib/demangle clean
 	$(MAKE) -C ../../usr.lib/demangle NATIVE_BUILD=1
 else
-$(PROG): ../../usr.lib/elfobj/libelfobj.a ../../usr.lib/demangle/libdemangle.a
+$(PROG): ../../usr.lib/elfobj/libelfobj.so.0 ../../usr.lib/demangle/libdemangle.so.0
 
-../../usr.lib/elfobj/libelfobj.a:
+../../usr.lib/elfobj/libelfobj.so.0:
 	$(MAKE) -C ../../usr.lib/elfobj
 
-../../usr.lib/demangle/libdemangle.a:
+../../usr.lib/demangle/libdemangle.so.0:
 	$(MAKE) -C ../../usr.lib/demangle
 endif
 

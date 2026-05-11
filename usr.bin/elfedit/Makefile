@@ -1,17 +1,20 @@
+DYNAMIC = 1
+
 include ../../Makefile.inc
 
 PROG = elfedit
 SRCS = elfedit.c
-LDADD += ../../usr.lib/elfobj/libelfobj.a
+LDADD += -L$(TOP)/usr.lib/elfobj -l:libelfobj.so.0
 USER_CFLAGS += -iquote ../../include
 
 include ../../Makefile.bin.inc
 
 BINDIR := $(DESTDIR)/usr/bin
 
-$(PROG): ../../usr.lib/elfobj/libelfobj.a
+ELFOBJ_SHLIB = ../../usr.lib/elfobj/libelfobj.so.0
+$(PROG): $(ELFOBJ_SHLIB)
 
-../../usr.lib/elfobj/libelfobj.a:
+$(ELFOBJ_SHLIB):
 	$(MAKE) -C ../../usr.lib/elfobj $(if $(NATIVE_BUILD),NATIVE_BUILD=1)
 
 .PHONY: install-man

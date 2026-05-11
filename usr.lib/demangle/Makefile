@@ -1,10 +1,16 @@
 include ../../Makefile.inc
 
 SRCS = buffer.c demangle.c itanium.c rust.c dlang.c
-OBJS = $(SRCS:.c=.o)
-LIBNAME = libdemangle.a
+OBJS     = $(SRCS:.c=.o)
+PIC_OBJS = $(SRCS:.c=.pic.o)
+LIBNAME  = libdemangle.a
+SHLIB    = libdemangle.so.0
 BUILD_MODE := $(if $(NATIVE_BUILD),native,target)
 MODE_STAMP = .build-mode
+
+ifndef NATIVE_BUILD
+PIC_CFLAGS := $(SHLIB_CFLAGS) -I../../include
+endif
 
 CFLAGS += -I../../include
 
@@ -26,19 +32,24 @@ endif
 
 .PHONY: all clean install FORCE
 
-all: $(LIBNAME)
+all: $(LIBNAME) $(if $(NATIVE_BUILD),,$(SHLIB))
 
 $(LIBNAME): $(OBJS)
 	$(AR) rcs $@ $(OBJS)
 
-$(OBJS): $(MODE_STAMP)
+$(SHLIB): $(PIC_OBJS)
+	$(CC) $(SHLIB_LDFLAGS) -Wl,-soname,$(SHLIB) \
+	      -L$(TOP)/lib/c -l:libc.so.0 \
+	      -o $@ $(PIC_OBJS)
+
+$(OBJS) $(PIC_OBJS): $(MODE_STAMP)
 
 $(MODE_STAMP): FORCE
 	@mode="$(BUILD_MODE)"; \
 	cur=""; \
 	if [ -f "$(MODE_STAMP)" ]; then cur=$$(cat "$(MODE_STAMP)"); fi; \
 	if [ "$$cur" != "$$mode" ]; then \
-		rm -f $(OBJS) $(LIBNAME); \
+		rm -f $(OBJS) $(PIC_OBJS) $(LIBNAME) $(SHLIB); \
 		printf '%s\n' "$$mode" > "$(MODE_STAMP).tmp"; \
 		mv "$(MODE_STAMP).tmp" "$(MODE_STAMP)"; \
 	elif [ ! -f "$(MODE_STAMP)" ]; then \
@@ -48,13 +59,20 @@ $(MODE_STAMP): FORCE
 %.o: %.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
-clean:
-	rm -f $(OBJS) $(LIBNAME) $(MODE_STAMP)
+%.pic.o: %.c
+	$(CC) $(PIC_CFLAGS) -c $< -o $@
 
-install: $(LIBNAME)
-	@mkdir -p $(DESTDIR)/usr/lib
+clean:
+	rm -f $(OBJS) $(PIC_OBJS) $(LIBNAME) $(SHLIB) $(MODE_STAMP)
+
+install: $(LIBNAME) $(if $(NATIVE_BUILD),,$(SHLIB))
+	@mkdir -p $(DESTDIR)/usr/lib $(DESTDIR)/lib
 	@mkdir -p $(DESTDIR)/usr/include
 	@mkdir -p $(DESTDIR)/usr/man/man3
 	cp $(LIBNAME) $(DESTDIR)/usr/lib/
 	cp ../../include/demangle.h $(DESTDIR)/usr/include/
 	cp man3/*.3 $(DESTDIR)/usr/man/man3/
+ifndef NATIVE_BUILD
+	install -m 755 $(SHLIB) $(DESTDIR)/lib/
+	@ln -sf $(SHLIB) $(DESTDIR)/lib/libdemangle.so
+endif

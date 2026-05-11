@@ -1,8 +1,10 @@
+DYNAMIC = 1
+
 include ../../Makefile.inc
 
 PROG = size
 SRCS = size.c
-LDADD += ../../usr.lib/elfobj/libelfobj.a
+LDADD += -L$(TOP)/usr.lib/elfobj -l:libelfobj.so.0
 USER_CFLAGS += -idirafter ../../include
 
 include ../../Makefile.bin.inc
@@ -18,9 +20,9 @@ elfobj-build-native:
 	$(MAKE) -C ../../usr.lib/elfobj clean
 	$(MAKE) -C ../../usr.lib/elfobj NATIVE_BUILD=1
 else
-$(PROG): ../../usr.lib/elfobj/libelfobj.a
+$(PROG): ../../usr.lib/elfobj/libelfobj.so.0
 
-../../usr.lib/elfobj/libelfobj.a:
+../../usr.lib/elfobj/libelfobj.so.0:
 	$(MAKE) -C ../../usr.lib/elfobj
 endif
 

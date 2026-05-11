@@ -11,6 +11,10 @@ $(SUBDIRS):
 	$(MAKE) -C $@
 	@echo "<<< Leaving usr.lib/$@"
 
+# libexvi.so.0 declares DT_NEEDED libregex.so.0 — regex must build
+# first so that .so file exists when exvi links.
+exvi: | regex
+
 clean:
 	@set -e; for dir in $(SUBDIRS); do \
 		echo ">>> Cleaning usr.lib/$$dir"; \

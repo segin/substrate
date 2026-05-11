@@ -1,12 +1,21 @@
+DYNAMIC = 1
+
 include ../../Makefile.inc
 
 PROG = ld
 SRCS = ld.c
 ELFOBJ_DIR = ../../usr.lib/elfobj
-ELFOBJ_AR = $(ELFOBJ_DIR)/libelfobj.a
+ELFOBJ_AR    = $(ELFOBJ_DIR)/libelfobj.a
+ELFOBJ_SHLIB = $(ELFOBJ_DIR)/libelfobj.so.0
 ELFOBJ_SRCS = $(wildcard $(ELFOBJ_DIR)/src/*.c) $(wildcard $(ELFOBJ_DIR)/src/*.h) $(ELFOBJ_DIR)/Makefile
 
+ifdef NATIVE_BUILD
 LDADD += $(ELFOBJ_AR)
+ELFOBJ_DEP = $(ELFOBJ_AR)
+else
+LDADD += -L$(ELFOBJ_DIR) -l:libelfobj.so.0
+ELFOBJ_DEP = $(ELFOBJ_SHLIB)
+endif
 USER_CFLAGS += -iquote ../../include
 ifndef NATIVE_BUILD
 USER_CFLAGS += -DLD_SUBSTRATE_BUILD=1
@@ -16,9 +25,9 @@ include ../../Makefile.bin.inc
 
 BINDIR := $(DESTDIR)/usr/bin
 
-$(PROG): $(ELFOBJ_AR)
+$(PROG): $(ELFOBJ_DEP)
 
-$(ELFOBJ_AR): $(ELFOBJ_SRCS)
+$(ELFOBJ_AR) $(ELFOBJ_SHLIB): $(ELFOBJ_SRCS)
 	$(MAKE) -C $(ELFOBJ_DIR) $(if $(NATIVE_BUILD),NATIVE_BUILD=1)
 
 all: alias_links
