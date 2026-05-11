@@ -184,6 +184,13 @@ int main(int argc, char **argv, char **envp) {
                 case 'i':
                     opt_i = 1;
                     break;
+                case 'l':
+                    /* `-l`: login shell.  Equivalent semantically to
+                     * argv[0] beginning with '-' — bin/login and
+                     * bin/su both pass this when invoking a login
+                     * shell, and POSIX/bash/dash accept it. */
+                    is_login_shell = 1;
+                    break;
                 case 'e':
                     shell_errexit = 1;
                     break;
