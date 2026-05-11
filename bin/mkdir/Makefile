@@ -7,6 +7,8 @@ ifdef NATIVE_BUILD
 USER_CFLAGS += -D_GNU_SOURCE
 endif
 
+DYNAMIC = 1
+
 include ../../Makefile.inc
 include ../../Makefile.bin.inc
 

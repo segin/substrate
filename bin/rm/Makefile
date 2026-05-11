@@ -1,6 +1,8 @@
 PROG = rm
 SRCS = rm.c rm_opts.c rm_safety.c rm_walk.c
 
+DYNAMIC = 1
+
 include ../../Makefile.inc
 
 ifeq ($(NATIVE_BUILD),1)

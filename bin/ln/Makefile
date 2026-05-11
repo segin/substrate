@@ -1,6 +1,8 @@
 PROG = ln
 SRCS = ln.c ln_options.c ln_path.c ln_backup.c ln_execute.c
 
+DYNAMIC = 1
+
 include ../../Makefile.inc
 
 USER_CFLAGS += -DLINK_HAVE_SYMLINK=1

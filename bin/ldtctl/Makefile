@@ -9,6 +9,8 @@ SRCS = ldtctl.c
 EXTRA_CLEAN = setldt
 USER_CFLAGS += -I../../sys/include
 
+DYNAMIC = 1
+
 include ../../Makefile.bin.inc
 
 all: setldt

@@ -1,6 +1,8 @@
 PROG = cp
 SRCS = cp.c cp_opts.c cp_path.c cp_hardlink.c cp_atomic.c cp_preserve.c cp_copy.c
 
+DYNAMIC = 1
+
 include ../../Makefile.inc
 include ../../Makefile.bin.inc
 

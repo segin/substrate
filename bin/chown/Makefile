@@ -7,6 +7,8 @@ ifdef NATIVE_BUILD
 USER_CFLAGS += -DNATIVE_BUILD=1
 endif
 
+DYNAMIC = 1
+
 include ../../Makefile.inc
 include ../../Makefile.bin.inc
 

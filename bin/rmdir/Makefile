@@ -1,6 +1,8 @@
 PROG = rmdir
 SRCS = rmdir.c rmdir_opts.c rmdir_parents.c
 
+DYNAMIC = 1
+
 include ../../Makefile.inc
 
 ifeq ($(NATIVE_BUILD),1)

@@ -8,7 +8,8 @@ install:
 else
 PROG = top
 SRCS = top.c top_snapshot.c
-LDADD = -L$(TOP)/lib/sys -lsys
+DYNAMIC = 1
+LDADD = -L$(TOP)/lib/sys -l:libsys.so.0
 
 include $(TOP)/Makefile.inc
 include $(TOP)/Makefile.bin.inc

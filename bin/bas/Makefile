@@ -1,6 +1,8 @@
 PROG = bas
 SRCS = bas.c compile.c run.c
 
+DYNAMIC = 1
+
 include ../../Makefile.inc
 
 ifdef NATIVE_BUILD

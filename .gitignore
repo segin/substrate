@@ -70,6 +70,11 @@ vgcore.*
 /dist/
 /host_dist/
 
+# Per-component install staging — `make install DESTDIR=$(pwd)/dist`
+# inside lib/foo/ or usr.lib/foo/ leaks a `dist/` subtree there.
+# Always ignore those, regardless of depth.
+dist/
+
 # Kernel build artifacts
 /kernel.map
 /sys/arch/i386/floppy/stage1.bin
