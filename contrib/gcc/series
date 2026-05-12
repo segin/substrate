@@ -1,0 +1,7 @@
+# Substrate patch series for GCC.  Ordering matters — 0002 references
+# the headers added by 0003 / 0004 via config.gcc's tm_file list.
+0001-config-sub-substrate.patch
+0002-config-gcc-i386-substrate.patch
+0003-gcc-config-substrate-h.patch
+0004-gcc-config-i386-substrate-h.patch
+0005-libgcc-config-host-substrate.patch

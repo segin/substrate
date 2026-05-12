@@ -1,0 +1,26 @@
+Subject: gcc/config.gcc: add i386-substrate target stanza
+
+Substrate is a clean SysV ELF target.  Pull in the standard i386 ELF preamble (i386/unix.h, i386/att.h, elfos.h, glibc-stdint.h) plus the two substrate-specific headers added in subsequent patches.  Mark gas=yes and gnu_ld=yes so the driver knows we ship binutils, not the platform assembler/linker.  x86_64 deferred.
+
+---
+diff --git a/gcc/config.gcc b/gcc/config.gcc
+--- a/gcc/config.gcc	2026-05-11 23:07:23.384133432 -0500
++++ b/gcc/config.gcc	2026-05-11 23:08:30.469889534 -0500
+@@ -2033,6 +2033,17 @@
+ 	tm_file="${tm_file} i386/unix.h i386/att.h elfos.h dragonfly.h dragonfly-stdint.h i386/x86-64.h i386/dragonfly.h"
+ 	tmake_file="${tmake_file} i386/t-crtstuff"
+ 	;;
++i[34567]86-*-substrate*)
++	# Substrate OS — clean SysV ELF i386 target.  glibc-style int
++	# sizes (substrate libc follows glibc on the int_least/fast
++	# typedefs), substrate.h carries the OS-level cpp #define s,
++	# i386/substrate.h carries the i386-specific link/specs glue
++	# (dynamic linker is /sbin/ld.so, crt0 is in /usr/lib).
++	tm_file="${tm_file} i386/unix.h i386/att.h elfos.h glibc-stdint.h substrate.h i386/substrate.h"
++	tmake_file="${tmake_file} i386/t-crtstuff"
++	gas=yes
++	gnu_ld=yes
++	;;
+ i[34567]86-*-freebsd*)
+ 	tm_file="${tm_file} i386/unix.h i386/att.h elfos.h ${fbsd_tm_file} i386/freebsd.h"
+ 	;;

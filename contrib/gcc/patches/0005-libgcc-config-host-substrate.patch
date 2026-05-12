@@ -1,0 +1,23 @@
+Subject: libgcc/config.host: register i386-substrate
+
+Pull in i386/t-crtstuff (so libgcc builds crtbegin/crtend) and t-dfprules (decimal floating point — same set FreeBSD uses).  No unwind header yet because substrate's signal-trampoline path doesn't dive into libgcc's frame unwinder; revisit when we wire up DWARF-driven C++ exceptions or pthread cleanups.
+
+---
+diff --git a/libgcc/config.host b/libgcc/config.host
+--- a/libgcc/config.host	2026-05-11 23:07:26.175151480 -0500
++++ b/libgcc/config.host	2026-05-11 23:09:24.013886021 -0500
+@@ -783,6 +783,14 @@
+ 	;;
+ x86_64-*-openbsd*)
+ 	;;
++i[34567]86-*-substrate*)
++	# Substrate builds standard i386 ELF libgcc.  No unwind header
++	# yet (signal handlers don't reach into libgcc's unwinder),
++	# no t-heap-trampoline (no GCC nested-function support needed
++	# for the libraries we actually build).
++	tmake_file="${tmake_file} i386/t-crtstuff t-dfprules"
++	tm_file="${tm_file} i386/elf-lib.h"
++	;;
+ i[34567]86-*-linux*)
+ 	extra_parts="$extra_parts crtprec32.o crtprec64.o crtprec80.o crtfastmath.o"
+ 	tmake_file="${tmake_file} i386/t-crtpc t-crtfm i386/t-crtstuff t-dfprules"

@@ -1,0 +1,54 @@
+Subject: gcc/config/substrate.h: new common OS header
+
+Defines the substrate cpp builtins (__substrate__, __unix__, system=posix/substrate asserts) and overrides LIB_SPEC to link via -l:libc.so.0 (substrate libc has no /usr/lib/libc.so symlink at install time).  Library / include path overrides are intentionally NOT here — they would hit GCC's poisoned-identifier check in system.h; the sysroot mechanism (--with-sysroot at configure time, %s in specs at driver time) handles paths instead.
+
+---
+diff --git a/gcc/config/substrate.h b/gcc/config/substrate.h
+new file mode 100644
+--- /dev/null
++++ b/gcc/config/substrate.h
+@@ -0,0 +1,44 @@
++/* Substrate OS — common (architecture-independent) target definitions.
++   These are layered on top of elfos.h by config.gcc and define the
++   substrate-specific cpp builtins that userland code uses to switch
++   behaviour at preprocess time.
++
++   Architecture-specific link/startfile/lib specs live in the
++   companion <arch>/substrate.h header (e.g. config/i386/substrate.h).  */
++
++#ifndef GCC_SUBSTRATE_H
++#define GCC_SUBSTRATE_H
++
++#undef  TARGET_OS_CPP_BUILTINS
++#define TARGET_OS_CPP_BUILTINS()			\
++  do {							\
++    builtin_define ("__substrate__");			\
++    builtin_define ("__unix__");			\
++    builtin_assert ("system=unix");			\
++    builtin_assert ("system=posix");			\
++    builtin_assert ("system=substrate");		\
++  } while (0)
++
++/*
++ * Substrate userland install layout — mirrors dist/ in the source tree:
++ *
++ *   /usr/include   public headers
++ *   /usr/lib       static + shared libraries plus crt*.o
++ *   /lib           bootstrap libraries (libc.so.0, ld.so)
++ *   /sbin/ld.so    dynamic linker (path also in PT_INTERP)
++ *
++ * Standard include / startfile / library paths are picked up via the
++ * sysroot mechanism (--with-sysroot at configure time, %s in specs at
++ * driver time).  We don't override STANDARD_INCLUDE_DIR et al. here
++ * because GCC's system.h poisons those macros — modern targets are
++ * expected to use specs and sysroots instead.
++ */
++
++/* Substrate's libc.so.0 carries an explicit SONAME but ships no
++ * /usr/lib/libc.so symlink at install time (see lib/Makefile.inc).
++ * Route the driver's default -lc through -l:libc.so.0 so the link
++ * resolves cleanly. */
++#undef  LIB_SPEC
++#define LIB_SPEC "%{!shared:%{!nostdlib:%{!nodefaultlibs:-l:libc.so.0}}}"
++
++#endif /* GCC_SUBSTRATE_H */
