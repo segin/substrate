@@ -124,6 +124,31 @@ static void test_float_variants(void) {
     if (!isclosef(ynf(0, 1.0f), y0f(1.0f), 1e-4f)) FAIL("ynf(0,x)==y0f(x)");
 }
 
+/*
+ * Mid-band coverage — the band x in (8, ~15) used to fall in the
+ * gap between the Taylor and Hankel-asymptotic regimes, with
+ * relative errors around 1e-7 immediately past x=8.  Lock in the
+ * tighter accuracy here with a 1e-9 absolute tolerance: every
+ * value below was lifted from glibc's libm.
+ */
+static void test_midband(void) {
+    if (!isclose(j0(9.0),  -0.0903336111828761, 1e-9))  FAIL("j0(9)");
+    if (!isclose(j0(10.0), -0.2459357644513483, 1e-9))  FAIL("j0(10)");
+    if (!isclose(j0(12.0),  0.0476893107968335, 1e-9))  FAIL("j0(12)");
+    if (!isclose(j1(9.0),   0.2453117865733253, 1e-9))  FAIL("j1(9)");
+    if (!isclose(j1(10.0),  0.0434727461688614, 1e-9))  FAIL("j1(10)");
+    if (!isclose(j1(12.0), -0.2234471044906276, 1e-9))  FAIL("j1(12)");
+    if (!isclose(y0(9.0),   0.2499366982850247, 1e-9))  FAIL("y0(9)");
+    if (!isclose(y0(10.0),  0.0556711672835994, 1e-9))  FAIL("y0(10)");
+    if (!isclose(y0(12.0), -0.2252373126343614, 1e-9))  FAIL("y0(12)");
+    if (!isclose(y1(9.0),   0.1043145751967159, 1e-9))  FAIL("y1(9)");
+    if (!isclose(y1(10.0),  0.2490154242069539, 1e-9))  FAIL("y1(10)");
+    if (!isclose(y1(12.0), -0.0570992182608965, 1e-9))  FAIL("y1(12)");
+    if (!isclose(jn(2,  9.0),  0.1448473415325040, 1e-9))  FAIL("jn(2,9)");
+    if (!isclose(jn(3, 10.0),  0.0583793793051868, 1e-9))  FAIL("jn(3,10)");
+    if (!isclose(yn(2, 10.0), -0.0058680824422086, 1e-9))  FAIL("yn(2,10)");
+}
+
 static void test_nan_inf(void) {
     if (!isnan(j0(NAN))) FAIL("j0(NaN)");
     if (!isnan(j1(NAN))) FAIL("j1(NaN)");
@@ -157,6 +182,9 @@ int main(void) {
 
     test_yn();
     printf("yn: %s\n", failures ? "FAIL" : "PASS");
+
+    test_midband();
+    printf("mid-band (8 < x < 15): %s\n", failures ? "FAIL" : "PASS");
 
     test_float_variants();
     printf("float variants: %s\n", failures ? "FAIL" : "PASS");

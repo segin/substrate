@@ -1893,16 +1893,23 @@ int ufromfp(unsigned int *y, double x, fenv_t *envp, int rounding_mode) {
 /*
  * Bessel functions J_n(x) and Y_n(x) — XSI/POSIX extensions.
  *
- *   |x| <= 8: Taylor series in z = (x/2)^2.  Converges absolutely
- *             for any x, but the term count grows with |x|; we cap
- *             at 60 iterations and trust the early-out below.  At
- *             |x|=8 the series reaches 1e-18 in ~35 terms.
+ *   |x| <= 12.5: Taylor series in z = (x/2)^2.  Converges absolutely
+ *             for any x; we cap the iteration count at 80.  The
+ *             cutoff is high enough that the Taylor regime overlaps
+ *             well into the band where the Hankel asymptotic would
+ *             still be returning ~1e-8 relative error.  Taylor at
+ *             x=12.5 loses ~5 decimal digits to cancellation between
+ *             alternating terms but keeps ~11 sig figs — better than
+ *             the asymptotic in that band.  At x=12.5 the series
+ *             needs ~30 iterations to drive the term below 1e-18 of
+ *             the running sum.
  *
- *   |x| >  8: Hankel asymptotic expansion via the standard P_n / Q_n
- *             modulus and phase functions in z = 1/(8x)^2.  This is
- *             a *divergent* series — we sum until the term magnitude
- *             stops shrinking and then stop, which gives the best
- *             obtainable accuracy for the given |x|.
+ *   |x| > 12.5: Hankel asymptotic expansion via the standard P_n /
+ *             Q_n modulus and phase functions in z = 1/(8x)^2.  This
+ *             is a *divergent* series — we sum until the term
+ *             magnitude stops shrinking and then stop, which gives
+ *             the best obtainable accuracy for the given |x|.  At
+ *             x=12.5 the smallest reachable term is ~1e-12.
  *
  * J_n with n >= 2:
  *   n <= x : forward recurrence from j0/j1 (numerically stable).
@@ -1923,8 +1930,9 @@ int ufromfp(unsigned int *y, double x, fenv_t *envp, int rounding_mode) {
  *   j*(+inf)  = 0            y*(+inf)  = 0
  */
 
-#define BESSEL_EPS    1.0e-18
-#define BESSEL_MAXIT  60
+#define BESSEL_EPS              1.0e-18
+#define BESSEL_MAXIT            80
+#define BESSEL_SERIES_CUTOFF    12.5
 /* As #define to avoid any chance of -O2 misoptimising a file-scope
  * static const reference across the x87-asm log() boundary. */
 #define BESSEL_GAMMA    0.5772156649015328606
@@ -2064,7 +2072,7 @@ static double bessel_y_asymp(int n, double x)
 /* Internal: J_n(|x|) for n = 0 or 1. */
 static double bessel_j_pos(int n, double x_abs)
 {
-    if (x_abs <= 8.0) return bessel_j_series(n, x_abs);
+    if (x_abs <= BESSEL_SERIES_CUTOFF) return bessel_j_series(n, x_abs);
     return bessel_j_asymp(n, x_abs);
 }
 
@@ -2095,7 +2103,7 @@ double y0(double x)
     if (x < 0.0) { feraiseexcept(FE_INVALID); return NAN; }
     if (x == 0.0) return -INFINITY;
     if (isinf(x)) return 0.0;
-    if (x <= 8.0) return bessel_y0_series(x);
+    if (x <= BESSEL_SERIES_CUTOFF) return bessel_y0_series(x);
     return bessel_y_asymp(0, x);
 }
 
@@ -2105,7 +2113,7 @@ double y1(double x)
     if (x < 0.0) { feraiseexcept(FE_INVALID); return NAN; }
     if (x == 0.0) return -INFINITY;
     if (isinf(x)) return 0.0;
-    if (x <= 8.0) return bessel_y1_series(x);
+    if (x <= BESSEL_SERIES_CUTOFF) return bessel_y1_series(x);
     return bessel_y_asymp(1, x);
 }
 
