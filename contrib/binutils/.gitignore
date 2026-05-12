@@ -1,0 +1,4 @@
+# Anything fetch.sh produces — upstream tarball + extracted tree +
+# downstream cross-build directory.  None of this is source-controlled.
+build/
+build-*/

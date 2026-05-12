@@ -1,0 +1,16 @@
+Subject: gas: add i386-substrate target
+
+Plain ELF assembler target — no substrate-specific assembler quirks.
+
+---
+diff --git a/gas/configure.tgt b/gas/configure.tgt
+--- a/gas/configure.tgt	2026-05-11 21:33:54.006747926 -0500
++++ b/gas/configure.tgt	2026-05-11 21:35:35.252255340 -0500
+@@ -243,6 +243,7 @@
+   i386-*-lynxos*)			fmt=elf em=lynx ;;
+   i386-*-redox*)			fmt=elf ;;
+   i386-*-solaris*)			fmt=elf em=solaris ;;
++  i386-*-substrate*)			fmt=elf ;;
+   i386-*-freebsd* \
+   | i386-*-kfreebsd*-gnu)		fmt=elf em=freebsd ;;
+   i386-*-msdosdjgpp* \

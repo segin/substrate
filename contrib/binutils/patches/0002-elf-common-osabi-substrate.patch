@@ -1,0 +1,20 @@
+Subject: elf/common.h: define ELFOSABI_SUBSTRATE (64)
+
+Reuse the architecture-specific OSABI slot at 64.  The ELF spec scopes values 64..255 per e_machine, so we don't collide with ELFOSABI_AMDGPU_HSA (EM_AMDGPU) or ELFOSABI_C6000_ELFABI (EM_TI_C6000); for EM_386 / EM_X86_64 this number is otherwise unused.
+
+---
+diff --git a/include/elf/common.h b/include/elf/common.h
+--- a/include/elf/common.h	2026-05-11 21:33:54.226435814 -0500
++++ b/include/elf/common.h	2026-05-11 21:34:44.703258657 -0500
+@@ -79,6 +79,11 @@
+ #define ELFOSABI_CUDA          51 /* NVIDIA CUDA architecture.  */
+ #define ELFOSABI_C6000_ELFABI  64 /* Bare-metal TMS320C6000 */
+ #define ELFOSABI_AMDGPU_HSA    64 /* AMD HSA Runtime */
++#define ELFOSABI_SUBSTRATE     64 /* Substrate OS — same numeric slot as
++				     ELFOSABI_AMDGPU_HSA / _C6000_ELFABI; the
++				     ELF spec scopes 64..255 per e_machine,
++				     so the meaning is unambiguous given
++				     EM_386 / EM_X86_64.  */
+ #define ELFOSABI_C6000_LINUX   65 /* Linux TMS320C6000 */
+ #define ELFOSABI_AMDGPU_PAL    65 /* AMD PAL Runtime */
+ #define ELFOSABI_ARM_FDPIC     65 /* ARM FDPIC */

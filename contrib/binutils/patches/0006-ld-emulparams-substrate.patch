@@ -1,0 +1,30 @@
+Subject: ld: add elf_{i386,x86_64}_substrate emulation parameters
+
+Layered on top of the stock elf_i386 / elf_x86_64 emuls; the only delta is ELF_INTERPRETER_NAME = /sbin/ld.so so PIE binaries get the substrate dynamic linker stamped in.  Library search paths fall out of --sysroot at configure time, so no overrides needed here.
+
+---
+diff --git a/ld/emulparams/elf_i386_substrate.sh b/ld/emulparams/elf_i386_substrate.sh
+new file mode 100644
+--- /dev/null
++++ b/ld/emulparams/elf_i386_substrate.sh
+@@ -0,0 +1,10 @@
++source_sh ${srcdir}/emulparams/elf_i386.sh
++
++# Substrate's dynamic linker.  Programs that don't carry an explicit
++# PT_INTERP get this stamped in by ld; matches the path the kernel's
++# exec path expects for PIE binaries.
++ELF_INTERPRETER_NAME=\"/sbin/ld.so\"
++
++# Substrate userland searches /lib then /usr/lib then /usr/local/lib;
++# the toolchain installs into ${sysroot}/usr/lib so leave the default
++# library search order alone — ld --sysroot does the right thing.
+diff --git a/ld/emulparams/elf_x86_64_substrate.sh b/ld/emulparams/elf_x86_64_substrate.sh
+new file mode 100644
+--- /dev/null
++++ b/ld/emulparams/elf_x86_64_substrate.sh
+@@ -0,0 +1,5 @@
++source_sh ${srcdir}/emulparams/elf_x86_64.sh
++
++# Substrate's dynamic linker (same path on x86_64 — the kernel
++# normalises this regardless of word size).
++ELF_INTERPRETER_NAME=\"/sbin/ld.so\"

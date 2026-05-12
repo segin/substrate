@@ -1,0 +1,10 @@
+# Substrate patch series for GNU binutils.  Ordering matters — later
+# patches assume earlier ones have applied (e.g. 0007 references the
+# emul names introduced by 0006 in ld/Makefile.{am,in}).
+0001-config-sub-substrate.patch
+0002-elf-common-osabi-substrate.patch
+0003-bfd-config-bfd-substrate.patch
+0004-gas-configure-tgt-substrate.patch
+0005-ld-configure-tgt-substrate.patch
+0006-ld-emulparams-substrate.patch
+0007-ld-makefile-wire-substrate.patch
