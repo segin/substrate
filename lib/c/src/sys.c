@@ -24,6 +24,7 @@
 #include <sys/sysctl.h>
 #include <sys/select.h>
 #include <sys/poll.h>
+#include <dirent.h>
 
 extern int64_t _syscall0(int);
 extern int64_t _syscall1(int, uintptr_t);
@@ -597,10 +598,105 @@ int isatty(int fd) {
     return ioctl(fd, TCGETS, &ios) == 0;
 }
 
+/*
+ * Scan a directory for an entry whose stat.st_rdev matches `rdev`
+ * and whose type is character device.  Writes the full path into
+ * `out` (size out_sz) and returns 0 on hit, -1 otherwise.  Subdirs
+ * (like /dev/pts) are descended one level deep so /dev/pts/N names
+ * are discoverable too.
+ */
+static int ttyname_scan_dir(const char *dir, dev_t rdev,
+                            char *out, size_t out_sz, int recurse) {
+    DIR *dp = opendir(dir);
+    if (!dp) return -1;
+
+    struct dirent *de;
+    while ((de = readdir(dp)) != NULL) {
+        if (de->d_name[0] == '.' &&
+            (de->d_name[1] == '\0' ||
+             (de->d_name[1] == '.' && de->d_name[2] == '\0')))
+            continue;
+
+        char path[256];
+        int n = snprintf(path, sizeof(path), "%s/%s", dir, de->d_name);
+        if (n <= 0 || (size_t)n >= sizeof(path)) continue;
+
+        struct stat st;
+        if (stat(path, &st) != 0) continue;
+
+        if (S_ISCHR(st.st_mode) && st.st_rdev == rdev) {
+            strncpy(out, path, out_sz - 1);
+            out[out_sz - 1] = '\0';
+            closedir(dp);
+            return 0;
+        }
+        if (recurse && S_ISDIR(st.st_mode)) {
+            if (ttyname_scan_dir(path, rdev, out, out_sz, 0) == 0) {
+                closedir(dp);
+                return 0;
+            }
+        }
+    }
+    closedir(dp);
+    return -1;
+}
+
+int ttyname_r(int fd, char *buf, size_t buflen) {
+    if (!buf || buflen < 2) {
+        errno = ERANGE;
+        return ERANGE;
+    }
+    if (!isatty(fd)) {
+        errno = ENOTTY;
+        return ENOTTY;
+    }
+
+    /*
+     * Fast path: /proc/self/fd/<n> is a kernel-maintained symlink
+     * whose target is the path the descriptor was opened with.
+     * That target is the canonical tty name in nearly every case
+     * (getty / login open /dev/ttyN, the shell inherits via fork).
+     */
+    char proc_link[32];
+    snprintf(proc_link, sizeof(proc_link), "/proc/self/fd/%d", fd);
+    ssize_t n = readlink(proc_link, buf, buflen - 1);
+    if (n > 0) {
+        buf[n] = '\0';
+        /* Sanity-check: the target must still be a chardev with the
+         * same st_rdev as fd — otherwise the symlink lied (rare
+         * but possible if the file was renamed). */
+        struct stat fst, tst;
+        if (fstat(fd, &fst) == 0 && stat(buf, &tst) == 0 &&
+            S_ISCHR(tst.st_mode) && tst.st_rdev == fst.st_rdev) {
+            return 0;
+        }
+        /* fall through to the dev-scan fallback. */
+    }
+
+    /*
+     * Slow path (proc not mounted, or symlink stale): stat the fd,
+     * then walk /dev looking for a chardev with a matching st_rdev.
+     */
+    struct stat fst;
+    if (fstat(fd, &fst) != 0) {
+        return errno;
+    }
+
+    if (ttyname_scan_dir("/dev", fst.st_rdev, buf, buflen, 1) == 0) {
+        return 0;
+    }
+
+    errno = ENOTTY;
+    return ENOTTY;
+}
+
 char *ttyname(int fd) {
-    if (!isatty(fd)) return NULL;
-    static char buf[32];
-    snprintf(buf, sizeof(buf), "/dev/tty%d", fd);
+    static char buf[256];
+    int r = ttyname_r(fd, buf, sizeof(buf));
+    if (r != 0) {
+        errno = r;
+        return NULL;
+    }
     return buf;
 }
 

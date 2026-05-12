@@ -60,6 +60,7 @@ int access(const char *pathname, int mode);
 
 int isatty(int fd);
 char *ttyname(int fd);
+int   ttyname_r(int fd, char *buf, size_t buflen);
 
 off_t lseek(int fd, off_t offset, int whence);
 int ftruncate(int fd, off_t length);
