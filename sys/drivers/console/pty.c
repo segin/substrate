@@ -188,9 +188,14 @@ static void pty_publish_slave_node(pty_pair_t *p) {
     memset(node, 0, sizeof(*node));
     snprintf(node->name, sizeof(node->name), "pts/%d", p->index);
     node->flags = FS_CHARDEVICE;
+    /*
+     * /dev/pts/N: 0620 root:tty until the master's grantpt(3) is
+     * invoked; grantpt() chowns to the calling user.  Matches
+     * Unix98 / glibc behaviour.
+     */
     node->mask  = 0620;
-    node->uid   = 0;
-    node->gid   = 0;
+    node->uid   = GID_ROOT;
+    node->gid   = GID_TTY;
     /* Unix98 PTY slaves live at major 136, minor = pair index. */
     node->rdev  = makedev(UNIX98_PTS_MAJOR, p->index & 0xFF);
     /* Wire up the same VFS callbacks as a regular tty.  The slave
@@ -556,9 +561,14 @@ void pty_init(void) {
     memset(&ptmx_node, 0, sizeof(ptmx_node));
     strncpy(ptmx_node.name, "ptmx", sizeof(ptmx_node.name) - 1);
     ptmx_node.flags = FS_CHARDEVICE;
+    /*
+     * /dev/ptmx is the clone-device entry point: anyone may open()
+     * it to allocate a new master/slave pair.  Hence 0666 — the
+     * actual access check happens on the resulting slave (/dev/pts/N).
+     */
     ptmx_node.mask  = 0666;
-    ptmx_node.uid   = 0;
-    ptmx_node.gid   = 0;
+    ptmx_node.uid   = GID_ROOT;
+    ptmx_node.gid   = GID_TTY;
     ptmx_node.rdev  = makedev(TTYAUX_MAJOR, TTYAUX_MINOR_PTMX);
     ptmx_node.open  = ptmx_open;
     ptmx_node.read  = ptmx_node_read;

@@ -448,9 +448,16 @@ void uart_devfs_init(void) {
         memset(node, 0, sizeof(*node));
         snprintf(node->name, sizeof(node->name), "comm/serial%u", i);
         node->flags = FS_CHARDEVICE;
+        /*
+         * Serial ports are ttys.  0660 root:tty matches BSD / pre-
+         * systemd Linux convention (Linux later moved to dialout,
+         * which substrate doesn't bother provisioning — group tty
+         * captures the intent: terminal access requires
+         * authentication).
+         */
         node->mask = 0660;
-        node->uid = 0;
-        node->gid = 0;
+        node->uid  = GID_ROOT;
+        node->gid  = GID_TTY;
         /* Serial ports share major 4 with virtual consoles but live
          * in the 64+ minor range so the spaces don't overlap. */
         node->rdev = makedev(TTY_MAJOR, TTY_MINOR_SERIAL + (i & 0x7F));

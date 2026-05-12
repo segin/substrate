@@ -42,6 +42,14 @@
 #define TTYAUX_MINOR_CONSOLE  1  /* /dev/console */
 #define TTYAUX_MINOR_PTMX     2  /* /dev/ptmx */
 
+/*
+ * Well-known group IDs used for default device-node ownership.
+ * These mirror /etc/group; keep both in sync or chgrp at boot.
+ */
+#define GID_ROOT             0
+#define GID_TTY              5
+#define GID_AUDIO            29
+
 /* Minor sub-allocations within MEM_MAJOR (1). */
 #define MEM_MINOR_MEM        1
 #define MEM_MINOR_KMEM       2

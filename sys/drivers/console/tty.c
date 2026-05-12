@@ -100,9 +100,15 @@ void tty_register_device(struct tty *tty, char *name) {
     memset(node, 0, sizeof(fs_node_t));
     strncpy(node->name, name, sizeof(node->name) - 1);
     node->flags = FS_CHARDEVICE;
-    node->mask = 0666;
-    node->uid = 0;
-    node->gid = 0;
+    /*
+     * Standard Unix: VCs are 0620 root:tty.  login(1) chowns the
+     * controlling terminal to the user it just authenticated, so
+     * only that user (owner-rw) and members of group tty (write,
+     * for wall/write/mesg) can use it.  Anyone else gets nothing.
+     */
+    node->mask = 0620;
+    node->uid  = GID_ROOT;
+    node->gid  = GID_TTY;
     /*
      * dev_t encoding mirrors Linux: tty1..tty63 live at major 4,
      * minor (index+1) so /dev/tty1 = 4:1.  Drivers that aren't

@@ -12,6 +12,7 @@
 #include <sys/copy.h>
 #include <sys/errno.h>
 #include <sys/lock.h>
+#include <sys/major.h>
 #include <kern/console.h>
 #include <vfs/vfs.h>
 #include <stdio.h>
@@ -498,24 +499,39 @@ int audio_register_device(audio_dev_t *dev)
 	memset(audio_n, 0, sizeof(*audio_n));
 	snprintf(audio_n->name, sizeof(audio_n->name), "audio%d", unit);
 	audio_n->flags = FS_CHARDEVICE;
+	/*
+	 * /dev/audio*: 0660 root:audio.  Members of the audio group
+	 * get read/write; everyone else is denied.  Without this the
+	 * nodes inherited mode 0 (memset → bzero) and only root could
+	 * open them via the kernel's uid-0 bypass.
+	 */
+	audio_n->mask  = 0660;
+	audio_n->uid   = GID_ROOT;
+	audio_n->gid   = GID_AUDIO;
 	audio_n->read  = audio_node_read;
 	audio_n->write = audio_node_write;
 	audio_n->ioctl = audio_node_ioctl;
 	audio_n->open  = audio_node_open;
 	audio_n->close = audio_node_close;
 	audio_n->impl = (uintptr_t)dev;
-	audio_n->rdev  = (14U << 8) | (unit * 2);
+	audio_n->rdev  = makedev(SOUND_MAJOR, unit * 2);
 	devfs_register_device(audio_n);
 
 	audioctl_n = &audioctl_nodes[unit];
 	memset(audioctl_n, 0, sizeof(*audioctl_n));
 	snprintf(audioctl_n->name, sizeof(audioctl_n->name), "audioctl%d", unit);
 	audioctl_n->flags = FS_CHARDEVICE;
+	/* audioctl is the mixer / settings sibling — same policy as the
+	 * data node so a user that can play audio can adjust its
+	 * parameters. */
+	audioctl_n->mask  = 0660;
+	audioctl_n->uid   = GID_ROOT;
+	audioctl_n->gid   = GID_AUDIO;
 	audioctl_n->ioctl = audio_node_ioctl;
 	audioctl_n->open  = audio_node_open;
 	audioctl_n->close = audio_node_close;
 	audioctl_n->impl = (uintptr_t)dev;
-	audioctl_n->rdev  = (14U << 8) | (unit * 2 + 1);
+	audioctl_n->rdev  = makedev(SOUND_MAJOR, unit * 2 + 1);
 	devfs_register_device(audioctl_n);
 
 	kprintf("audio: registered %s as /dev/audio%d\n", dev->name, unit);
