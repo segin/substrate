@@ -1,0 +1,65 @@
+.TH WHOAMI 1 2026-05-11 "Substrate" "User Commands"
+.SH NAME
+whoami \- print the effective user name
+.SH SYNOPSIS
+.B whoami
+.RI [ OPTION ...]
+.SH DESCRIPTION
+The
+.BR whoami
+utility prints the user name associated with the current effective
+user ID.  It is equivalent to
+.BR "id -un" .
+.PP
+No operands are accepted.  Any non-option argument is treated as an
+error.
+.SH OPTIONS
+.TP
+.B \-\-help
+Display a short usage message and exit.
+.TP
+.B \-\-version
+Print version information and exit.
+.SH EXIT STATUS
+.TP
+.B 0
+The user name was printed successfully.
+.TP
+.B 1
+The effective user ID has no matching entry in the user database, or
+an unexpected operand was given.
+.SH ERRORS
+.TP
+.B "cannot find name for user ID N"
+The effective UID
+.I N
+returned by
+.BR geteuid (2)
+has no
+.BR passwd (5)
+entry.  Either the user database is missing the row, or
+.BR getpwuid (3)
+failed for another reason.
+.SH EXAMPLE
+.EX
+$ whoami
+segin
+.EE
+.SH SEE ALSO
+.BR id (1),
+.BR logname (1),
+.BR getpwuid (3),
+.BR geteuid (2)
+.SH STANDARDS
+.BR whoami
+is specified by POSIX.1-2024 and by long-standing BSD and GNU
+practice.  Substrate's implementation matches the GNU coreutils
+form: the
+.B \-\-help
+and
+.B \-\-version
+long options are honoured; all other arguments are rejected.
+.SH HISTORY
+.BR whoami
+appeared in 2BSD as a shorthand for
+.BR "id -un" .

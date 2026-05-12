@@ -53,17 +53,11 @@ static void print_help(struct id_opts *o)
 "  -g, --group          print only the effective group ID\n"
 "  -G, --groups         print all group IDs\n"
 "  -n, --name           print a name instead of a number, for -ugG\n"
-"  -r, --real           print the real ID instead of the effective ID, with -ug\n"
+"  -r, --real           print the real ID instead of the effective ID, for -ug\n"
 "  -z, --zero           delimit output with NUL characters, not whitespace\n"
-"  -Z, --context        print only the security context of the process\n"
 "  -p                   make the output human-readable (BSD)\n"
-"  -P                   output a passwd(5)-style entry (FreeBSD)\n"
-"  -c                   output the login class (BSD)\n"
-"  -d                   output the home directory (FreeBSD)\n"
-"  -s                   output the login shell (FreeBSD)\n"
-"  -A                   output the process audit user ID (FreeBSD)\n"
-"  -M                   output the MAC label of the process (FreeBSD)\n"
-"  -R                   output the routing table (OpenBSD)\n"
+"  -P                   output a passwd(5)-style entry (BSD)\n"
+"  -A, -M, -R, -Z, -c, -d, -s   unsupported on this platform\n"
 "      --help           display this help and exit\n"
 "      --version        output version information and exit\n"
 	);
@@ -187,7 +181,7 @@ static void print_bsd_p(const char *req_user, uid_t ruid, uid_t euid, gid_t rgid
 	/* class omitted as we don't have login classes in substrate yet */
 }
 
-static int do_id(const char *user, struct id_opts *o, bool is_last_user)
+static int do_id(const char *user, struct id_opts *o, bool is_last_user, bool multi_user)
 {
 	uid_t ruid, euid;
 	gid_t rgid, egid;
@@ -259,7 +253,12 @@ static int do_id(const char *user, struct id_opts *o, bool is_last_user)
 			first = false;
 		}
 		putchar(delim);
-		if(o->zero_term && !is_last_user) putchar('\0');
+		/* GNU emits a record-terminator NUL after each user's
+		 * group list when multiple users were operands and -z
+		 * is set, so consumers can split on the boundary.  Single
+		 * users get only the per-group terminators. */
+		if(o->zero_term && multi_user) putchar('\0');
+		(void)is_last_user;
 		break;
 	}
 	case MODE_DEFAULT:
@@ -283,21 +282,17 @@ static int do_id(const char *user, struct id_opts *o, bool is_last_user)
 		       pw->pw_shell ? pw->pw_shell : "");
 		break;
 	case MODE_C:
-		/* Login class */
-		printf("default\n");
-		break;
 	case MODE_D:
-		if(!pw && !user) pw = getpwuid(ruid);
-		if(pw) { fputs(pw->pw_dir, stdout); putchar(delim); }
-		break;
 	case MODE_S:
-		if(!pw && !user) pw = getpwuid(ruid);
-		if(pw) { fputs(pw->pw_shell, stdout); putchar(delim); }
-		break;
 	case MODE_A:
 	case MODE_M:
 	case MODE_R:
 	case MODE_CAP_Z:
+		/* Audit / MAC / SELinux / login-class / routing-table
+		 * options.  Substrate doesn't carry any of these subsystems,
+		 * and the BSDs disagree on what -c/-d/-s mean — FreeBSD's
+		 * -d is audit ID, OpenBSD has no -d at all.  Rather than
+		 * invent a substrate-specific meaning, refuse cleanly. */
 		fprintf(stderr, "%s: option unsupported on this platform\n", o->progname);
 		return 1;
 	}
@@ -359,15 +354,13 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "%s: cannot print multiple formats\n", o.progname);
 		return 1;
 	}
-	if(o.mode == MODE_DEFAULT && o.use_name) {
-		fprintf(stderr, "%s: cannot print only names or real IDs in default format\n", o.progname);
+	if(o.mode == MODE_DEFAULT && (o.use_name || o.use_real)) {
+		/* POSIX: -n and -r are only meaningful with -u/-g/-G.
+		 * GNU and BSD both reject them in default mode. */
+		fprintf(stderr,
+		    "%s: printing only names or real IDs requires -u, -g, or -G\n",
+		    o.progname);
 		return 1;
-	}
-	if(o.mode == MODE_DEFAULT && o.use_real) {
-		/* -r is ignored in default mode by BSD, but GNU rejects it.
-		 * "If combined with -G, BSD-first: accept but ignore"
-		 * Let's just follow BSD's lead and potentially ignore.
-		 * POSIX: -r with -u or -g. */
 	}
 	if(o.mode == MODE_DEFAULT && o.zero_term) {
 		fprintf(stderr, "%s: option --zero not permitted in default format\n", o.progname);
@@ -376,10 +369,11 @@ int main(int argc, char *argv[])
 
 	int ret = 0;
 	if(optind == argc) {
-		ret = do_id(NULL, &o, true);
+		ret = do_id(NULL, &o, true, false);
 	} else {
+		bool multi = (argc - optind) > 1;
 		for(int i = optind; i < argc; i++) {
-			if(do_id(argv[i], &o, (i == argc - 1)) != 0) {
+			if(do_id(argv[i], &o, (i == argc - 1), multi) != 0) {
 				ret = 1;
 			}
 		}

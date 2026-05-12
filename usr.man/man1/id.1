@@ -1,97 +1,170 @@
-.TH ID 1 "March 2026" "Substrate" "User Commands"
+.TH ID 1 2026-05-11 "Substrate" "User Commands"
 .SH NAME
-id \- return user identity
+id \- print real and effective user and group IDs
 .SH SYNOPSIS
 .B id
-.RB [ user ]
-.br
-.B id \-G
-.RB [ \-n ]
-.RB [ user ]
-.br
-.B id \-g
-.RB [ \-nr ]
-.RB [ user ]
-.br
-.B id \-u
-.RB [ \-nr ]
-.RB [ user ]
-.br
-.B id
-.RB [ \-pPcdsAMR ]
-.RB [ user ]
-.br
-.B id
-.RB [ \-\-zero ]
-.RB [ \-\-context ]
-.RB [ user... ]
+.RI [ OPTION ...]
+.RI [ USER ...]
 .SH DESCRIPTION
 The
-.B id
-utility writes information about the current user or a specified
-.IR user .
-By default, the utility writes the user name, user ID, group name, group ID,
-and supplementary group information of the current or specified user.
+.BR id
+utility prints real and effective user and group IDs for each
+.IR USER ,
+or for the current process when no
+.I USER
+operand is given.
+.PP
+With no options, output follows the POSIX format
+.RS
+uid=\fIN\fR(\fIname\fR) gid=\fIN\fR(\fIname\fR) [euid=...] [egid=...] groups=...
+.RE
+where
+.B euid
+and
+.B egid
+are emitted only when they differ from the corresponding real IDs.
+Substrate does not append a
+.BR context=
+field even when SELinux-style labels would be available; this matches
+BSD behaviour.  The per-flag conflict-resolution policy between
+POSIX, BSD, and GNU is documented in
+.BR docs/id.md
+in the source tree.
 .SH OPTIONS
-The following options are supported:
-.TP
-.BR \-A
-Output the process audit user ID and audit properties (FreeBSD extension).
-.TP
-.BR \-c
-Output the login class (BSD extension).
-.TP
-.BR \-d
-Output the home directory of the current or specified user (FreeBSD extension).
-.TP
-.BR \-G ", " \-\-groups
-Output all different group IDs (effective, real, and supplementary).
-.TP
-.BR \-g ", " \-\-group
-Output only the effective group ID.
-.TP
-.BR \-M
-Output the MAC label of the current process (FreeBSD extension).
-.TP
-.BR \-n ", " \-\-name
-Output the name in the format specified by the
-.B \-u
-or
-.B \-g
-or
-.B \-G
-options instead of the numeric ID. If the ID cannot be mapped to a name, the numeric value is printed.
-.TP
-.BR \-p
-Make the output human-readable, emitting keywords on separate lines (BSD extension).
-.TP
-.BR \-P
-Output a passwd(5)-style entry for the specified user (FreeBSD extension).
-.TP
-.BR \-R
-Output the routing table of the current process (OpenBSD extension).
-.TP
-.BR \-r ", " \-\-real
-Output the real ID instead of the effective ID for the
-.B \-u
-or
-.B \-g
-options.
-.TP
-.BR \-s
-Output the login shell of the current or specified user (FreeBSD extension).
+.SS Output mode (mutually exclusive)
 .TP
 .BR \-u ", " \-\-user
-Output only the effective user ID.
+Print only the effective user ID.
 .TP
-.BR \-Z ", " \-\-context
-Print only the security context of the process (GNU extension).
+.BR \-g ", " \-\-group
+Print only the effective group ID.
+.TP
+.BR \-G ", " \-\-groups
+Print all group IDs (effective, real, supplementary) in that order,
+deduplicated.
+.TP
+.B \-p
+BSD: print a human-readable summary.
+.TP
+.B \-P
+BSD: print a
+.BR passwd (5)-style
+record for the user.
+.SS Modifiers
+.TP
+.BR \-n ", " \-\-name
+Print the name instead of the numeric ID.  Only valid with
+.BR \-u ", " \-g ", or " \-G .
+.TP
+.BR \-r ", " \-\-real
+Print the real ID instead of the effective ID.  Only valid with
+.BR \-u " or " \-g .
 .TP
 .BR \-z ", " \-\-zero
-Delimit output with NUL characters instead of whitespace (GNU extension).
+Delimit output with NUL bytes rather than whitespace.  Not permitted
+in the default format.  With multiple
+.I USER
+operands and
+.BR \-G ,
+each user's group list ends with an additional NUL so records are
+self-delimited.
+.TP
+.B \-a
+Accepted for compatibility with other implementations; ignored.
+.TP
+.B \-\-help
+Display a short usage message and exit.
+.TP
+.B \-\-version
+Print version information and exit.
+.SS Unsupported on this platform
+The flags
+.BR \-A " (audit user ID), " \-M " (MAC label), " \-R " (login class or"
+.RB "routing table, depending on BSD), " \-Z " (security context), and"
+.RB "BSD " \-c " / " \-d " / " \-s
+are recognised but always report
+.RS
+.B id: option unsupported on this platform
+.RE
+because Substrate does not carry the corresponding subsystems.
 .SH EXIT STATUS
-The
-.B id
-utility returns 0 on success, and >0 if an error occurs.
+.TP
+.B 0
+All requested information was printed.
+.TP
+.B 1
+A
+.I USER
+operand did not resolve, an unsupported mode was requested, or option
+parsing failed.  With multiple
+.I USER
+operands, exit status is the OR of per-user results: processing
+continues even after a per-user failure.
+.SH ERRORS
+.TP
+.B "'USER': no such user"
+.BR getpwnam (3)
+returned NULL for the named user.
+.TP
+.B "cannot print multiple formats"
+More than one of
+.BR \-u ", " \-g ", " \-G ", " \-p ", " \-P
+was given.
+.TP
+.B "printing only names or real IDs requires -u, -g, or -G"
+.B \-n
+or
+.B \-r
+was given without an accompanying mode flag.
+.TP
+.B "option --zero not permitted in default format"
+.B \-z
+was given without a mode flag.  The default
+.BR uid=...
+format is not NUL-delimitable.
+.SH EXAMPLES
+Print the current user's full record:
+.EX
+$ id
+uid=1000(segin) gid=998(wheel) groups=998(wheel),50(games),1000(flutter)
+.EE
+.PP
+Numeric effective UID only:
+.EX
+$ id -u
+1000
+.EE
+.PP
+Names of all groups, NUL-delimited:
+.EX
+$ id -Gnz | xargs -0 -n1
+wheel
+games
+flutter
+.EE
 .SH SEE ALSO
-getgroups(2), getgid(2), getuid(2), passwd(5)
+.BR whoami (1),
+.BR groups (1),
+.BR getuid (2),
+.BR getgid (2),
+.BR getgroups (2),
+.BR getpwnam (3),
+.BR getgrgid (3),
+.BR passwd (5),
+.BR group (5)
+.SH STANDARDS
+The
+.BR \-u ", " \-g ", " \-G ", " \-n ", and " \-r
+options conform to POSIX.1-2024.  The
+.BR \-p " and " \-P
+options follow FreeBSD convention.  The
+.BR \-z ", " \-\-zero ", " \-\-help ", and " \-\-version
+options follow GNU coreutils.  Where the three traditions disagree,
+Substrate follows POSIX first, then BSD, then GNU.
+.SH HISTORY
+.BR id
+first appeared in System III.  The BSD
+.BR \-p " and " \-P
+variants are from 4.4BSD.  GNU added
+.BR \-Z " and " \-\-zero
+in coreutils 8.x.
