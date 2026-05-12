@@ -2,6 +2,7 @@
 #include <sys/proc.h>
 #include <sys/tty.h>
 #include <sys/file.h>
+#include <sys/major.h>
 #include <vfs/vfs.h>
 #include <kern/version.h>
 #include <sys/session.h>
@@ -228,6 +229,8 @@ static void console_node_close(fs_node_t *node) {
 static fs_node_t console_node = {
     .name = "console",
     .flags = FS_CHARDEVICE,
+    .mask  = 0600,
+    .rdev  = makedev(TTYAUX_MAJOR, TTYAUX_MINOR_CONSOLE),
     .read = console_node_read,
     .write = console_node_write,
     .ioctl = console_node_ioctl,

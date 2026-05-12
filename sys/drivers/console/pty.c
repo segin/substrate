@@ -30,6 +30,7 @@
 #include <sys/proc.h>
 #include <sys/lock.h>
 #include <sys/signal.h>
+#include <sys/major.h>
 #include <vfs/vfs.h>
 #include <vm/vm_kmem.h>
 #include <kern/sched.h>
@@ -190,6 +191,8 @@ static void pty_publish_slave_node(pty_pair_t *p) {
     node->mask  = 0620;
     node->uid   = 0;
     node->gid   = 0;
+    /* Unix98 PTY slaves live at major 136, minor = pair index. */
+    node->rdev  = makedev(UNIX98_PTS_MAJOR, p->index & 0xFF);
     /* Wire up the same VFS callbacks as a regular tty.  The slave
      * tty is a struct tty so the existing tty_fs_* glue in tty.c
      * Just Works. */
@@ -556,6 +559,7 @@ void pty_init(void) {
     ptmx_node.mask  = 0666;
     ptmx_node.uid   = 0;
     ptmx_node.gid   = 0;
+    ptmx_node.rdev  = makedev(TTYAUX_MAJOR, TTYAUX_MINOR_PTMX);
     ptmx_node.open  = ptmx_open;
     ptmx_node.read  = ptmx_node_read;
     ptmx_node.write = ptmx_node_write;

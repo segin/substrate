@@ -8,6 +8,7 @@
 #include <kern/isapnp.h>
 #include <kern/resource.h>
 #include <sys/termios.h>
+#include <sys/major.h>
 #include <sys/errno.h>
 #include <sys/poll.h>
 #include <vfs/vfs.h>
@@ -450,7 +451,9 @@ void uart_devfs_init(void) {
         node->mask = 0660;
         node->uid = 0;
         node->gid = 0;
-        node->rdev = (4 << 8) | i;
+        /* Serial ports share major 4 with virtual consoles but live
+         * in the 64+ minor range so the spaces don't overlap. */
+        node->rdev = makedev(TTY_MAJOR, TTY_MINOR_SERIAL + (i & 0x7F));
         node->impl = (uintptr_t)port;
         node->open = uart_node_open;
         node->close = uart_node_close;

@@ -2,6 +2,7 @@
 #include <sys/proc.h>
 #include <sys/session.h>
 #include <sys/signal.h>
+#include <sys/major.h>
 #include <vfs/vfs.h>
 #include <string.h>
 #include <stdio.h>
@@ -102,6 +103,14 @@ void tty_register_device(struct tty *tty, char *name) {
     node->mask = 0666;
     node->uid = 0;
     node->gid = 0;
+    /*
+     * dev_t encoding mirrors Linux: tty1..tty63 live at major 4,
+     * minor (index+1) so /dev/tty1 = 4:1.  Drivers that aren't
+     * virtual consoles (e.g. PTY slaves, serial) set rdev
+     * themselves *after* this call — they hit a different major.
+     */
+    node->rdev = makedev(TTY_MAJOR,
+                         TTY_MINOR_VC_FIRST + (tty->index & 0xFF));
     node->ptr = (fs_node_t *)tty;
     node->read = tty_fs_read;
     node->write = tty_fs_write;
