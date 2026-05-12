@@ -27,12 +27,12 @@ struct itimerval {
 };
 
 
-int gettimeofday(struct timeval *restrict tp, void *restrict tzp);
+int gettimeofday(struct timeval *__restrict tp, void *__restrict tzp);
 int settimeofday(const struct timeval *tp, const void *tzp);
 
 int getitimer(int which, struct itimerval *curr_value);
-int setitimer(int which, const struct itimerval *restrict new_value,
-              struct itimerval *restrict old_value);
+int setitimer(int which, const struct itimerval *__restrict new_value,
+              struct itimerval *__restrict old_value);
 
 int utimes(const char *path, const struct timeval times[2]);
 

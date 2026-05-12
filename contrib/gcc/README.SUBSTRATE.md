@@ -55,6 +55,9 @@ Both stages are orchestrated by `../build-toolchain.sh`.
 | 0003 | `gcc/config/substrate.h` (new) | common OS header — cpp builtins (`__substrate__`, `__unix__`, `system=posix/substrate` asserts), `LIB_SPEC` linking via `-l:libc.so.0` |
 | 0004 | `gcc/config/i386/substrate.h` (new) | i386-specific specs — `GLIBC_DYNAMIC_LINKER = /sbin/ld.so`, `LINK_EMULATION = elf_i386_substrate`, startfile spec pulling `crt0.o` + `crti.o`/`crtn.o` + `crtbegin*.o`/`crtend*.o` |
 | 0005 | `libgcc/config.host` | register `i386-substrate` for libgcc: `t-crtstuff` + `t-dfprules` (decimal FP rules) |
+| 0006 | `libstdc++-v3/config/os/substrate/` (new) | OS-specific config directory cloned from `os/generic`; forces `_GLIBCXX_HAVE_FENV_H` |
+| 0007 | `libstdc++-v3/configure.host` | recognise `substrate*` as host_os, point at `os/substrate` |
+| 0008 | `libstdc++-v3/crossconfig.m4` + `configure` | substrate goes with `*-linux*`/`*-gnu*`/`*-solaris*` for math + stdlib detection |
 
 ## What's deliberately deferred
 

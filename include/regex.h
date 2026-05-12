@@ -5,10 +5,10 @@
 #include <stdint.h>
 #include <sys/types.h>
 
-/* C++ does not have the restrict keyword. */
+/* C++ does not have the __restrict keyword. */
 #ifdef __cplusplus
-#ifndef restrict
-#define restrict
+#ifndef __restrict
+#define __restrict
 #endif
 #endif
 
@@ -126,12 +126,12 @@ typedef struct {
 #define REG_ESPACE    12
 #define REG_BADRPT    13
 
-int  regcomp(regex_t *restrict preg, const char *restrict pattern, int cflags);
-int  regexec(const regex_t *restrict preg, const char *restrict string,
-             size_t nmatch, regmatch_t pmatch[restrict], int eflags);
+int  regcomp(regex_t *__restrict preg, const char *__restrict pattern, int cflags);
+int  regexec(const regex_t *__restrict preg, const char *__restrict string,
+             size_t nmatch, regmatch_t pmatch[__restrict], int eflags);
 void regfree(regex_t *preg);
-size_t regerror(int errcode, const regex_t *restrict preg,
-                char *restrict errbuf, size_t errbuf_size);
+size_t regerror(int errcode, const regex_t *__restrict preg,
+                char *__restrict errbuf, size_t errbuf_size);
 #endif
 
 #ifdef __cplusplus

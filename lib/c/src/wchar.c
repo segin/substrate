@@ -129,6 +129,42 @@ int mblen(const char *s, size_t n) {
     return mbtowc(NULL, s, n);
 }
 
+/*
+ * mbstowcs / wcstombs — bulk multibyte-string ↔ wchar-array conversion.
+ * C89 require these; C++ libstdc++ exposes them as ::mbstowcs etc.
+ * Built on top of mbtowc / wctomb so they share the UTF-8 logic.
+ */
+size_t mbstowcs(wchar_t *pwcs, const char *s, size_t n) {
+    size_t produced = 0;
+    while (n == 0 || produced < n) {
+        wchar_t wc;
+        int r = mbtowc(&wc, s, 4);
+        if (r < 0) return (size_t)-1;
+        if (pwcs) pwcs[produced] = wc;
+        if (wc == 0) return produced;
+        produced++;
+        s += r;
+    }
+    return produced;
+}
+
+size_t wcstombs(char *s, const wchar_t *pwcs, size_t n) {
+    size_t produced = 0;
+    char buf[4];
+    while (*pwcs != 0) {
+        int r = wctomb(buf, *pwcs);
+        if (r < 0) return (size_t)-1;
+        if (s) {
+            if (produced + (size_t)r > n) return produced;
+            for (int i = 0; i < r; i++) s[produced + i] = buf[i];
+        }
+        produced += (size_t)r;
+        pwcs++;
+    }
+    if (s && produced < n) s[produced] = '\0';
+    return produced;
+}
+
 int wcwidth(wchar_t c) {
     if (c == 0)
         return 0;

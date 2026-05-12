@@ -14,6 +14,6 @@ typedef struct {
 #define WEOF ((wint_t)-1)
 
 int wcwidth(wchar_t c);
-size_t mbrtowc(wchar_t *restrict pwc, const char *restrict s, size_t n, mbstate_t *restrict ps);
+size_t mbrtowc(wchar_t *__restrict pwc, const char *__restrict s, size_t n, mbstate_t *__restrict ps);
 
 #endif

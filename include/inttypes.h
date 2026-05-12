@@ -104,7 +104,7 @@ typedef struct { intmax_t quot; intmax_t rem; } imaxdiv_t;
 
 intmax_t  imaxabs(intmax_t j);
 imaxdiv_t imaxdiv(intmax_t numer, intmax_t denom);
-intmax_t  strtoimax(const char *restrict nptr, char **restrict endptr, int base);
-uintmax_t strtoumax(const char *restrict nptr, char **restrict endptr, int base);
+intmax_t  strtoimax(const char *__restrict nptr, char **__restrict endptr, int base);
+uintmax_t strtoumax(const char *__restrict nptr, char **__restrict endptr, int base);
 
 #endif /* _INTTYPES_H */

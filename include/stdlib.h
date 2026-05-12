@@ -52,7 +52,7 @@ unsigned long long strtoull(const char *nptr, char **endptr, int base);
 char *getenv(const char *name);
 int setenv(const char *name, const char *value, int overwrite);
 int unsetenv(const char *name);
-char *realpath(const char *restrict path, char *restrict resolved_path);
+char *realpath(const char *__restrict path, char *__restrict resolved_path);
 int system(const char *command);
 
 void quick_exit(int status);
@@ -70,6 +70,8 @@ void *bsearch(const void *key, const void *base, size_t nmemb, size_t size, int 
 int mblen(const char *s, size_t n);
 int mbtowc(wchar_t *pwc, const char *s, size_t n);
 int wctomb(char *s, wchar_t wc);
+size_t mbstowcs(wchar_t *pwcs, const char *s, size_t n);
+size_t wcstombs(char *s, const wchar_t *pwcs, size_t n);
 
 int abs(int j);
 long labs(long j);

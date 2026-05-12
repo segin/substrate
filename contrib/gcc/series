@@ -5,3 +5,6 @@
 0003-gcc-config-substrate-h.patch
 0004-gcc-config-i386-substrate-h.patch
 0005-libgcc-config-host-substrate.patch
+0006-libstdcxx-config-os-substrate.patch
+0007-libstdcxx-configure-host.patch
+0008-libstdcxx-crossconfig.patch

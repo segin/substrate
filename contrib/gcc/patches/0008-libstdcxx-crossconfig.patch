@@ -1,0 +1,42 @@
+Subject: libstdc++: crossconfig.m4 + configure — substrate goes with glibc/solaris
+
+Substrate's libc is glibc-shaped enough that the math/stdlib/random-device detection block used for *-linux*/*-gnu*/*-solaris* applies cleanly.  Patch both crossconfig.m4 and the regenerated configure in parallel — re-running autoconf would otherwise drop the hand edit on the next bump.
+
+---
+diff --git a/libstdc++-v3/crossconfig.m4 b/libstdc++-v3/crossconfig.m4
+--- a/libstdc++-v3/crossconfig.m4	2026-05-11 23:07:26.538718916 -0500
++++ b/libstdc++-v3/crossconfig.m4	2026-05-12 09:44:01.191877653 -0500
+@@ -174,7 +174,7 @@
+ 
+     GCC_CHECK_TLS
+     ;;
+-  *-linux* | *-uclinux* | *-gnu* | *-kfreebsd*-gnu | *-cygwin* | *-solaris*)
++  *-linux* | *-uclinux* | *-gnu* | *-kfreebsd*-gnu | *-cygwin* | *-solaris* | *-substrate*)
+     GLIBCXX_CHECK_COMPILER_FEATURES
+     GLIBCXX_CHECK_LINKER_FEATURES
+     GLIBCXX_CHECK_MATH_SUPPORT
+diff --git a/libstdc++-v3/configure b/libstdc++-v3/configure
+--- a/libstdc++-v3/configure	2026-05-11 23:07:26.537893729 -0500
++++ b/libstdc++-v3/configure	2026-05-12 09:44:01.245387667 -0500
+@@ -8325,10 +8325,10 @@
+       case $lt_cv_prog_gnu_ld in
+       yes*)
+         case $host in
+-        i?86-*-solaris*|x86_64-*-solaris*)
++        i?86-*-solaris*|x86_64-*-solaris* | *-substrate*)
+           LD="${LD-ld} -m elf_x86_64"
+           ;;
+-        sparc*-*-solaris*)
++        sparc*-*-solaris* | *-substrate*)
+           LD="${LD-ld} -m elf64_sparc"
+           ;;
+         esac
+@@ -39193,7 +39193,7 @@
+ 
+   fi
+     ;;
+-  *-linux* | *-uclinux* | *-gnu* | *-kfreebsd*-gnu | *-cygwin* | *-solaris*)
++  *-linux* | *-uclinux* | *-gnu* | *-kfreebsd*-gnu | *-cygwin* | *-solaris* | *-substrate*)
+ 
+   # All these tests are for C++; save the language and the compiler flags.
+   # The CXXFLAGS thing is suspicious, but based on similar bits previously

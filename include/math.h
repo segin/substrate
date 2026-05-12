@@ -194,6 +194,21 @@ double sqrt(double x);
 double cbrt(double x);
 double hypot(double x, double y);
 
+/* C23 exponential and logarithmic extensions */
+double exp10(double x);
+double exp10m1(double x);
+double exp2m1(double x);
+double log10p1(double x);
+double log2p1(double x);
+double logp1(double x);
+
+/* C23 power and root functions */
+double pown(double x, intmax_t n);
+double powr(double x, double y);
+double rootn(double x, int n);
+double compound(double x, intmax_t n);
+double rsqrt(double x);
+
 /* Absolute value and remainder */
 double fabs(double x);
 double fmod(double x, double y);
@@ -253,6 +268,16 @@ double lgamma_r(double x, int *signp);
 /* Sign of Gamma(x) set by lgamma() (XSI/POSIX) */
 extern int signgam;
 
+/* Bessel functions of the first kind (XSI/POSIX) */
+double j0(double x);
+double j1(double x);
+double jn(int n, double x);
+
+/* Bessel functions of the second kind (XSI/POSIX) */
+double y0(double x);
+double y1(double x);
+double yn(int n, double x);
+
 /* Float versions (f suffix) */
 float sinf(float x);
 float cosf(float x);
@@ -279,6 +304,22 @@ float powf(float x, float y);
 float sqrtf(float x);
 float cbrtf(float x);
 float hypotf(float x, float y);
+
+/* C23 float exponential and logarithmic extensions */
+float exp10f(float x);
+float exp10m1f(float x);
+float exp2m1f(float x);
+float log10p1f(float x);
+float log2p1f(float x);
+float logp1f(float x);
+
+/* C23 float power and root functions */
+float pownf(float x, intmax_t n);
+float powrf(float x, float y);
+float rootnf(float x, int n);
+float compoundf(float x, intmax_t n);
+float rsqrtf(float x);
+
 float fabsf(float x);
 float fmodf(float x, float y);
 float remainderf(float x, float y);
@@ -312,6 +353,12 @@ float erff(float x);
 float erfcf(float x);
 float tgammaf(float x);
 float lgammaf(float x);
+float j0f(float x);
+float j1f(float x);
+float jnf(int n, float x);
+float y0f(float x);
+float y1f(float x);
+float ynf(int n, float x);
 
 /* Long double versions (l suffix) */
 long double sinl(long double x);
@@ -339,6 +386,22 @@ long double powl(long double x, long double y);
 long double sqrtl(long double x);
 long double cbrtl(long double x);
 long double hypotl(long double x, long double y);
+
+/* C23 long double exponential and logarithmic extensions */
+long double exp10l(long double x);
+long double exp10m1l(long double x);
+long double exp2m1l(long double x);
+long double log10p1l(long double x);
+long double log2p1l(long double x);
+long double logp1l(long double x);
+
+/* C23 long double power and root functions */
+long double pownl(long double x, intmax_t n);
+long double powrl(long double x, long double y);
+long double rootnl(long double x, int n);
+long double compoundl(long double x, intmax_t n);
+long double rsqrtl(long double x);
+
 long double fabsl(long double x);
 long double fmodl(long double x, long double y);
 long double remainderl(long double x, long double y);
@@ -372,6 +435,12 @@ long double erfl(long double x);
 long double erfcl(long double x);
 long double tgammal(long double x);
 long double lgammal(long double x);
+long double j0l(long double x);
+long double j1l(long double x);
+long double jnl(int n, long double x);
+long double y0l(long double x);
+long double y1l(long double x);
+long double ynl(int n, long double x);
 
 /* C23: pi-argument trigonometric functions */
 double sinpi(double x);

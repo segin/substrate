@@ -1,0 +1,18 @@
+Subject: libstdc++: configure.host — recognise substrate
+
+Add substrate* to the host_os case in libstdc++-v3/configure.host so the os_include_dir resolves to the new os/substrate directory.
+
+---
+diff --git a/libstdc++-v3/configure.host b/libstdc++-v3/configure.host
+--- a/libstdc++-v3/configure.host	2026-05-11 23:07:26.538693826 -0500
++++ b/libstdc++-v3/configure.host	2026-05-12 09:44:01.186927662 -0500
+@@ -307,6 +307,9 @@
+     # Use libatomic if necessary and avoid libstdc++ specific atomicity support
+     atomicity_dir="cpu/generic/atomicity_builtins"
+     ;;
++  substrate*)
++    os_include_dir="os/substrate"
++    ;;
+   solaris2*)
+     os_include_dir="os/solaris"
+     ;;
