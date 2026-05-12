@@ -2,7 +2,10 @@
 #define _SYSCALL_H
 
 #include <stdint.h>
-#include "idt.h"
+/* idt.h was historically included here but no symbol from it is
+ * actually used by syscall.h, and the relative include leaks a
+ * kernel-internal header into every userspace TU that pulls in
+ * <unistd.h>.  Drop it. */
 #include <sys/ldt.h>
 
 // Define max syscalls
