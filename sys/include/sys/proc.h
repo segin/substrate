@@ -205,6 +205,7 @@ typedef struct thread {
     
 #define THREAD_F_INTERRUPTIBLE 0x0001 // Sleep is interruptible by signals
 #define THREAD_F_NO_PREEMPT    0x0002 // Suppress timer-driven reschedule
+#define THREAD_F_WAKE_PENDING  0x0004 // thr_wake() seen before thr_suspend() — latched
 
     // Scheduling - Runqueue linkage
     struct thread *rq_next;       // Next in runqueue level
@@ -284,6 +285,10 @@ typedef struct thread {
     void *retval;
     // FreeBSD-style exit notification
     int *exit_tid_ptr;
+
+    /* Thread name (FreeBSD thr_set_name).  Visible in ps -L and gdb's
+     * `info threads`.  NUL-terminated.  Empty string = unnamed. */
+    char name[16];
 
     thread_state_t state;
     struct thread *next;

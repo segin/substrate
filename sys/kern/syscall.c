@@ -1033,6 +1033,159 @@ int sys_thr_join(tid_t tid, void **status) {
     return 0;
 }
 
+/* ---------------------------------------------------------------------------
+ * FreeBSD-compatible thread API extensions.  These complement the substrate
+ * native thr_new/exit/self/join with the per-thread signal and naming
+ * primitives that libthr-style userlands expect.
+ *
+ *   thr_kill / thr_kill2 — thread-directed signal delivery.  We OR the
+ *                          signal into target->sig_pending.  The signal
+ *                          dispatcher (already per-thread-aware via
+ *                          thread_t.sig_pending / sig_mask) will pick it
+ *                          up at the next return-to-user.
+ *
+ *   thr_suspend          — current thread parks on its own sleepq channel
+ *                          until thr_wake hits it or the timeout expires.
+ *
+ *   thr_wake             — wake a parked thread by tid.  Idempotent — a
+ *                          wake to a not-currently-parked thread sets a
+ *                          one-shot flag so the next thr_suspend returns
+ *                          immediately.  Models FreeBSD's "wake before
+ *                          suspend" race-free contract.
+ *
+ *   thr_set_name         — copy a NUL-terminated name (<= 15 chars) into
+ *                          thread->name.  Visible to ps / gdb.
+ * ------------------------------------------------------------------------ */
+
+/* Resolve a tid into a thread within the current process.  Returns NULL
+ * with errno-on-return semantics handled at the caller.  Cross-process
+ * lookup is the explicit job of thr_kill2 / pid-aware paths. */
+static thread_t *thr_lookup_in_proc(long tid, process_t *p) {
+    thread_t *t = sched_get_thread((int)tid);
+    if (!t || t->proc != p) return NULL;
+    return t;
+}
+
+/* Callback context for the broadcast (id == -1) path of thr_kill /
+ * thr_kill2.  sched_iterate_threads walks the global thread list and
+ * calls us back per-thread; we filter by target process and skip the
+ * sender. */
+struct thr_kill_ctx {
+    process_t *target;
+    thread_t  *skip;        /* don't signal this thread (or NULL) */
+    int        sig;
+};
+
+static void thr_kill_visit(thread_t *t, void *arg) {
+    struct thr_kill_ctx *c = (struct thr_kill_ctx *)arg;
+    if (t->proc != c->target) return;
+    if (t == c->skip) return;
+    if (c->sig != 0) t->sig_pending |= (1u << c->sig);
+}
+
+int sys_thr_kill(long id, int sig) {
+    if (sig < 0 || sig >= 32) return -22; /* EINVAL */
+    if (id == -1) {
+        /* All other threads in this process. */
+        struct thr_kill_ctx c = { current_process, current_thread, sig };
+        sched_iterate_threads(thr_kill_visit, &c);
+        return 0;
+    }
+    if (id == 0) id = current_thread->tid;
+    thread_t *t = thr_lookup_in_proc(id, current_process);
+    if (!t) return -3;
+    if (sig == 0) return 0;
+    t->sig_pending |= (1u << sig);
+    return 0;
+}
+
+int sys_thr_kill2(pid_t pid, long id, int sig) {
+    if (sig < 0 || sig >= 32) return -22;
+    process_t *target_proc = (pid == 0) ? current_process : proc_find(pid);
+    if (!target_proc) return -3;
+    if (id == -1) {
+        struct thr_kill_ctx c = { target_proc, NULL, sig };
+        sched_iterate_threads(thr_kill_visit, &c);
+        return 0;
+    }
+    thread_t *t = sched_get_thread((int)id);
+    if (!t || t->proc != target_proc) return -3;
+    if (sig == 0) return 0;
+    t->sig_pending |= (1u << sig);
+    return 0;
+}
+
+int sys_thr_suspend(const struct timespec *timeout) {
+    /* Pull the timeout into the kernel (NULL = sleep forever). */
+    struct timespec kts = {0, 0};
+    int has_timeout = 0;
+    if (timeout) {
+        if (copyin(timeout, &kts, sizeof(kts)) != 0) return -14;
+        has_timeout = 1;
+    }
+
+    /* Edge case: a thr_wake fired before we entered.  We model that
+     * with THREAD_F_WAKE_PENDING; consume and return immediately. */
+    if (current_thread->flags & THREAD_F_WAKE_PENDING) {
+        current_thread->flags &= ~THREAD_F_WAKE_PENDING;
+        return 0;
+    }
+
+    if (has_timeout) {
+        uint64_t ticks = (uint64_t)kts.tv_sec * 100 + (uint64_t)kts.tv_nsec / 10000000;
+        if (ticks == 0) ticks = 1;
+        current_thread->sleep_expiry = get_ticks() + ticks;
+    } else {
+        current_thread->sleep_expiry = 0;
+    }
+    sleepq_add(current_thread, current_thread);
+    sched_yield();
+    current_thread->sleep_expiry = 0;
+    /* sleep_status: 0 normal wake, -ETIMEDOUT if timer expired,
+     * -EINTR if a signal woke us. */
+    return current_thread->sleep_status;
+}
+
+int sys_thr_wake(long id) {
+    if (id == 0) id = current_thread->tid;
+    thread_t *t = sched_get_thread((int)id);
+    if (!t) return -3;
+    /* Set the latched-wake bit so a subsequent thr_suspend returns
+     * immediately (FreeBSD-style wake-before-sleep race fix). */
+    t->flags |= THREAD_F_WAKE_PENDING;
+    sleepq_wake_all(t);
+    return 0;
+}
+
+int sys_thr_set_name(long id, const char *name) {
+    if (id == 0) id = current_thread->tid;
+    thread_t *t = thr_lookup_in_proc(id, current_process);
+    if (!t) return -3;
+    if (!name) {
+        t->name[0] = '\0';
+        return 0;
+    }
+    char buf[16];
+    if (copyin(name, buf, sizeof(buf)) != 0) {
+        /* Short string — try byte-by-byte fallback. */
+        size_t i;
+        for (i = 0; i < sizeof(buf) - 1; i++) {
+            char c;
+            if (copyin((const void *)((const char *)name + i), &c, 1) != 0) break;
+            buf[i] = c;
+            if (c == '\0') break;
+        }
+        buf[sizeof(buf) - 1] = '\0';
+    }
+    buf[sizeof(buf) - 1] = '\0';
+    for (size_t i = 0; i < sizeof(buf); i++) {
+        t->name[i] = buf[i];
+        if (buf[i] == '\0') break;
+    }
+    t->name[sizeof(t->name) - 1] = '\0';
+    return 0;
+}
+
 extern int sys_vm86(void *v);
 extern int sys_sysarch(int op, void *args);
 

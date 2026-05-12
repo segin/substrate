@@ -107,10 +107,15 @@
 #define SYS_SYSCTL  202
 #define SYS_PMAP_STATS 241
 #define SYS_GET_COW_STATS SYS_PMAP_STATS
-#define SYS_THR_EXIT 431
-#define SYS_THR_SELF 432
-#define SYS_THR_NEW 455
-#define SYS_THR_JOIN 457
+#define SYS_THR_EXIT      431
+#define SYS_THR_SELF      432
+#define SYS_THR_KILL      433   /* FreeBSD-compat: signal a thread in current proc */
+#define SYS_THR_SUSPEND   442   /* FreeBSD-compat: park current thread until thr_wake */
+#define SYS_THR_WAKE      443   /* FreeBSD-compat: wake a parked thread */
+#define SYS_THR_NEW       455
+#define SYS_THR_JOIN      457
+#define SYS_THR_SET_NAME  464   /* FreeBSD-compat: set thread name (visible in ps/gdb) */
+#define SYS_THR_KILL2     481   /* FreeBSD-compat: signal a thread in another proc */
 #define SYS_PROC_INFO 242
 #define SYS_PROC_LIST 243
 #define SYS_PROC_COUNT 244

@@ -459,9 +459,10 @@ int sys_getlogin(char *namebuf, unsigned int namelen) {
     return copyout(login, namebuf, len);
 }
 
-int sys_thr_kill(long tid, int sig) {
-    return sys_kill((int)tid, sig);
-}
+/* sys_thr_kill lives in kern/syscall.c now — it does proper
+ * thread-directed signal delivery via thread_t.sig_pending rather
+ * than collapsing to process-wide kill().  Both native and FreeBSD
+ * personalities dispatch to it. */
 
 int sys_umtx_op(void *obj, int op, unsigned long val, void *uaddr, void *uaddr2) {
     (void)obj; (void)op; (void)val; (void)uaddr; (void)uaddr2;
