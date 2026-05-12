@@ -149,7 +149,8 @@ double log(double x) {
     if (isinf(x))  return x;
 #if defined(__i386__) || defined(__x86_64__)
     double res;
-    __asm__ __volatile__("fldln2; fldl %1; fyl2x; fstpl %0" : "=m"(res) : "m"(x));
+    __asm__ __volatile__("fldln2; fldl %1; fyl2x; fstpl %0"
+                         : "=m"(res) : "m"(x) : "st", "st(1)");
     return res;
 #else
     return log_portable(x);
@@ -163,7 +164,8 @@ double log2(double x) {
     if (isinf(x))  return x;
 #if defined(__i386__) || defined(__x86_64__)
     double res;
-    __asm__ __volatile__("fld1; fldl %1; fyl2x; fstpl %0" : "=m"(res) : "m"(x));
+    __asm__ __volatile__("fld1; fldl %1; fyl2x; fstpl %0"
+                         : "=m"(res) : "m"(x) : "st", "st(1)");
     return res;
 #else
     /* log2(x) = log(x) / ln(2) */
@@ -178,7 +180,8 @@ double log10(double x) {
     if (isinf(x))  return x;
 #if defined(__i386__) || defined(__x86_64__)
     double res;
-    __asm__ __volatile__("fldlg2; fldl %1; fyl2x; fstpl %0" : "=m"(res) : "m"(x));
+    __asm__ __volatile__("fldlg2; fldl %1; fyl2x; fstpl %0"
+                         : "=m"(res) : "m"(x) : "st", "st(1)");
     return res;
 #else
     /* log10(x) = log(x) / ln(10) */
@@ -204,9 +207,6 @@ double pow(double x, double y) {
     if (isnan(x) || isnan(y)) return NAN;
 
     if (x < 0.0) {
-        /* Negative base: only valid if y is an integer.  The cast back
-         * to long long is undefined for |y| >= 2^63, so test parity via
-         * fmod(yi, 2.0) which works at any magnitude. */
         double yi;
         if (modf(y, &yi) != 0.0) return NAN;
         double res = pow(-x, y);
@@ -232,6 +232,238 @@ double pow(double x, double y) {
         "fstpl %0"
         : "=m"(res) : "m"(x), "m"(y) : "ax", "cc");
     return res;
+}
+
+/* logp1(x) — alias for log1p(x) per C23. */
+double logp1(double x) {
+    return log1p(x);
+}
+
+/* log2p1(x) — compute log2(1+x) accurately for small x.
+ * On x87, use fyl2xp1 for |x| < 1 - sqrt(2)/2 (~0.2929).
+ * log2(1+x) = x/ln(2) for tiny x (Taylor). */
+double log2p1(double x) {
+    if (isnan(x)) return x;
+    if (isinf(x)) return x;
+    if (x < -1.0)  { errno = EDOM;   return NAN; }
+    if (x == -1.0) { errno = ERANGE; return -INFINITY; }
+    if (fabs(x) < 1e-9) return x * 1.4426950408889634074; /* /ln(2) */
+#if defined(__i386__) || defined(__x86_64__)
+    if (fabs(x) < 0.2929) {
+        double res;
+        __asm__ __volatile__(
+            "fldl %1\n\t"
+            "fldl %%st(0)\n\t"
+            "fld1\n\t"
+            "fsubp\n\t"
+            "fyl2xp1\n\t"
+            "fstpl %0"
+            : "=m"(res) : "m"(x) : "ax", "cc");
+        return res;
+    }
+#endif
+    return log2(1.0 + x);
+}
+
+/* log10p1(x) — compute log10(1+x) accurately for small x. */
+double log10p1(double x) {
+    if (isnan(x)) return x;
+    if (isinf(x)) return x;
+    if (x < -1.0)  { errno = EDOM;   return NAN; }
+    if (x == -1.0) { errno = ERANGE; return -INFINITY; }
+    if (fabs(x) < 1e-9) return x * 0.43429448190325182765; /* /ln(10) */
+    return log10(1.0 + x);
+}
+
+/* exp2m1(x) — compute 2^x - 1 accurately for |x| < 1.
+ * On x87: direct f2xm1 for |x| < 1. */
+double exp2m1(double x) {
+    if (isnan(x)) return x;
+    if (x == 0.0) return 0.0;
+    if (isinf(x)) return (x > 0) ? INFINITY : -1.0;
+    if (fabs(x) >= 1.0) {
+        return exp2(x) - 1.0;
+    }
+#if defined(__i386__) || defined(__x86_64__)
+    double res;
+    __asm__ __volatile__(
+        "fldl %1\n\t"
+        "f2xm1\n\t"
+        "fstpl %0"
+        : "=m"(res) : "m"(x));
+    return res;
+#else
+    static const double ln2 = 0.69314718055994530942;
+    double t = x * ln2;
+    double t2 = t * t;
+    return t2 * (0.5 + t2 * (1.0/6.0 + t2 * (1.0/120.0 + t2 * (1.0/5040.0 + t2/362880.0))));
+#endif
+}
+
+/* exp10(x) — compute 10^x.
+ * On x87: x * log2(10) → fyl2x/fscale.  10^x = 2^(x*log2(10)). */
+double exp10(double x) {
+    if (isnan(x)) return x;
+    if (x == 0.0) return 1.0;
+    if (x >  308.0) return INFINITY;
+    if (x < -323.0) return 0.0;
+#if defined(__i386__) || defined(__x86_64__)
+    static const double log2_10 = 3.32192809488736234787;
+    double res;
+    __asm__ __volatile__(
+        "fldl %2\n\t"
+        "fldln2\n\t"
+        "fmulp %%st, %%st(1)\n\t"
+        "fld %%st(0)\n\t"
+        "frndint\n\t"
+        "fxch\n\t"
+        "fsub %%st(0), %%st(1)\n\t"
+        "fxch\n\t"
+        "f2xm1\n\t"
+        "fld1\n\t"
+        "faddp\n\t"
+        "fscale\n\t"
+        "fstp %%st(1)\n\t"
+        "fstpl %0"
+        : "=m"(res) : "m"(log2_10), "m"(x) : "ax", "cc");
+    return res;
+#else
+    return exp(x * 2.30258509299404568402); /* x * ln(10) */
+#endif
+}
+
+/* exp10m1(x) — compute 10^x - 1 accurately for small x. */
+double exp10m1(double x) {
+    if (isnan(x)) return x;
+    if (isinf(x)) return (x > 0) ? INFINITY : -1.0;
+    if (fabs(x) > 0.35) {
+        return exp10(x) - 1.0;
+    }
+    static const double ln10 = 2.30258509299404568402;
+    static const double ln10_2 = ln10 * ln10;
+    double z = x * ln10;
+    return z * (1.0 + 0.5 * z * (1.0 + z * (ln10_2 / 6.0)));
+}
+
+/* rsqrt(x) — reciprocal square root: 1/sqrt(x).
+ * On x87: fsqrt then fdivr with 1.0. */
+double rsqrt(double x) {
+    if (isnan(x) || x < 0.0) return NAN;
+    if (x == 0.0) return INFINITY;
+    if (isinf(x)) return 0.0;
+#if defined(__i386__) || defined(__x86_64__)
+    double res;
+    __asm__ __volatile__(
+        "fldl %1\n\t"
+        "fsqrt\n\t"
+        "fld1\n\t"
+        "fdivrp %%st, %%st(1)\n\t"
+        "fstpl %0"
+        : "=m"(res) : "m"(x) : "ax");
+    return res;
+#else
+    return 1.0 / sqrt(x);
+#endif
+}
+
+/* pown(x, n) — x raised to integer power n (intmax_t).
+ * Binary exponentiation. Handles n < 0 via reciprocal. */
+double pown(double x, intmax_t n) {
+    if (x == 0.0) {
+        if (n == 0) return 1.0;
+        if (n > 0) return 0.0;
+        return INFINITY;
+    }
+    if (isnan(x)) return NAN;
+    if (isinf(x)) return (n > 0) ? INFINITY : (n < 0) ? 0.0 : 1.0;
+    if (n == 0) return 1.0;
+    if (n == 1) return x;
+    if (x < 0.0 && n == (intmax_t)(long long)n) {
+        double r = pown(-x, n);
+        int q = (int)(n % 2);
+        if (q == 0) return r;
+        return -r;
+    }
+    if (x < 0.0) return NAN;
+    int neg = (n < 0);
+    if (neg) n = -n;
+    double result = 1.0;
+    double base = x;
+    while (n > 0) {
+        if (n & 1) result *= base;
+        base *= base;
+        n >>= 1;
+    }
+    if (neg) result = 1.0 / result;
+    return result;
+}
+
+/* powr(x, y) — e^(y * ln(x)), domain x >= 0.
+ * Different NaN/±0 semantics from pow() (C23 F.9.9.4.3). */
+double powr(double x, double y) {
+    if (isnan(x) || isnan(y)) return NAN;
+    if (x == 0.0) {
+        if (y > 0.0) return 0.0;
+        if (y < 0.0) return INFINITY;
+        return 1.0;
+    }
+    if (x < 0.0) { errno = EDOM; return NAN; }
+    if (x == 1.0) return 1.0;
+    if (isinf(y)) {
+        if (x > 1.0) return (y < 0) ? 0.0 : INFINITY;
+        if (x < 1.0) return (y < 0) ? INFINITY : 0.0;
+        return 1.0;
+    }
+    if (isinf(x)) return (y > 0) ? INFINITY : 0.0;
+    if (y == 0.0) return 1.0;
+    return exp(y * log(x));
+}
+
+/* rootn(x, n) — n-th root of x.
+ * rootn(x, 2) == sqrt(x), rootn(x, 3) == cbrt(x). */
+double rootn(double x, int n) {
+    if (n == 0) return NAN;
+    if (isnan(x)) return NAN;
+    if (x == 0.0) {
+        if (n > 0) return 0.0;
+        if (n < 0) return INFINITY;
+    }
+    if (n < 0) {
+        double r = rootn(x, -n);
+        return (r == 0.0) ? INFINITY : (1.0 / r);
+    }
+    if (x < 0.0 && (n % 2) == 0) return NAN;
+    if (x < 0.0) {
+        return -pow(-x, 1.0 / (double)n);
+    }
+    return pow(x, 1.0 / (double)n);
+}
+
+/* compound(x, n) — (1+x)^n, computed stably for small x. */
+double compound(double x, intmax_t n) {
+    if (isnan(x)) return NAN;
+    if (x == 0.0) return 1.0;
+    if (n == 0) return 1.0;
+    if (n == 1) return 1.0 + x;
+    if (n < 0) {
+        double r = compound(x, -n);
+        return (r == 0.0) ? INFINITY : (1.0 / r);
+    }
+    int neg = (x < 0.0 && (n % 2) != 0);
+    if (neg) x = -x;
+    if (fabs(x) < 1e-9) {
+        double s = n * (x - 0.5 * x * x);
+        return neg ? (-exp(s)) : exp(s);
+    }
+    double result = 1.0;
+    double base = 1.0 + x;
+    intmax_t nn = n;
+    while (nn > 0) {
+        if (nn & 1) result *= base;
+        base *= base;
+        nn >>= 1;
+    }
+    return neg ? -result : result;
 }
 
 /*
@@ -1131,11 +1363,16 @@ double nan(const char *tagp) {
     return NAN;
 }
 
-/* Absolute value - actual implementation */
+/* Absolute value — bit-twiddle on the IEEE-754 sign bit.  The
+ * previous x87 inline-asm version (fldl; fabs; fstpl) was correct
+ * in isolation but broke at -O2 when GCC inlined it into a caller
+ * already using a deep x87 stack: the inner `fldl` could push past
+ * st(7) and silently produce a NaN.  Bit-twiddle has no such
+ * coupling to the x87 register allocator. */
 double fabs(double x) {
-    double res;
-    __asm__ __volatile__("fldl %1; fabs; fstpl %0" : "=m"(res) : "m"(x));
-    return res;
+    union { double d; uint64_t u; } v = { .d = x };
+    v.u &= 0x7FFFFFFFFFFFFFFFULL;
+    return v.d;
 }
 
 /* Remainder functions */
@@ -1652,6 +1889,322 @@ int ufromfp(unsigned int *y, double x, fenv_t *envp, int rounding_mode) {
     *y = (unsigned int)tmp;
     return rc;
 }
+
+/*
+ * Bessel functions J_n(x) and Y_n(x) — XSI/POSIX extensions.
+ *
+ *   |x| <= 8: Taylor series in z = (x/2)^2.  Converges absolutely
+ *             for any x, but the term count grows with |x|; we cap
+ *             at 60 iterations and trust the early-out below.  At
+ *             |x|=8 the series reaches 1e-18 in ~35 terms.
+ *
+ *   |x| >  8: Hankel asymptotic expansion via the standard P_n / Q_n
+ *             modulus and phase functions in z = 1/(8x)^2.  This is
+ *             a *divergent* series — we sum until the term magnitude
+ *             stops shrinking and then stop, which gives the best
+ *             obtainable accuracy for the given |x|.
+ *
+ * J_n with n >= 2:
+ *   n <= x : forward recurrence from j0/j1 (numerically stable).
+ *   n >  x : Miller's backward recurrence with the standard
+ *            normalisation  J_0 + 2(J_2 + J_4 + ...) = 1.
+ *
+ * Y_n with n >= 2: forward recurrence always (stable for Y).
+ *
+ * Symmetry:
+ *   J_n(-x) = (-1)^n J_n(x)
+ *   J_{-n}(x) = (-1)^n J_n(x)
+ *
+ * Special values:
+ *   j0(0) = 1, j1(0) = 0, jn(n != 0, 0) = 0
+ *   y0(0) = y1(0) = yn(n, 0) = -inf
+ *   y*(x < 0) = NaN + FE_INVALID
+ *   j*(NaN)   = NaN          y*(NaN)   = NaN
+ *   j*(+inf)  = 0            y*(+inf)  = 0
+ */
+
+#define BESSEL_EPS    1.0e-18
+#define BESSEL_MAXIT  60
+/* As #define to avoid any chance of -O2 misoptimising a file-scope
+ * static const reference across the x87-asm log() boundary. */
+#define BESSEL_GAMMA    0.5772156649015328606
+#define BESSEL_TWOOPI   0.6366197723675813431
+#define BESSEL_ONEOPI   0.3183098861837906715
+#define BESSEL_RSQRTPI  0.5641895835477562869
+
+/*
+ * Taylor series for J_n(x), x >= 0.  Only called for n = 0 or 1
+ * from the public API; works for any n >= 0 in principle.
+ */
+static double bessel_j_series(int n, double x)
+{
+    double half = 0.5 * x;
+    double z = half * half;
+    double term;
+    int k;
+
+    /* term_0 = (x/2)^n / n!  */
+    term = 1.0;
+    for (k = 1; k <= n; k++) term *= half / k;
+
+    double sum = term;
+    for (k = 1; k <= BESSEL_MAXIT; k++) {
+        term *= -z / ((double)k * (double)(n + k));
+        sum += term;
+        if (fabs(term) < BESSEL_EPS * fabs(sum)) break;
+    }
+    return sum;
+}
+
+/* Y_0(x), power series, x > 0. */
+static double bessel_y0_series(double x)
+{
+    double half = 0.5 * x;
+    double z = half * half;
+    /* Build J_0 and a sum involving harmonic numbers in parallel. */
+    double term = 1.0;
+    double j0sum = 1.0;
+    double Hk = 0.0;
+    double hsum = 0.0;
+    for (int k = 1; k <= BESSEL_MAXIT; k++) {
+        term *= -z / ((double)k * (double)k);
+        j0sum += term;
+        Hk += 1.0 / k;
+        hsum += Hk * term;
+        if (fabs(term) * (Hk + 1.0) <
+            BESSEL_EPS * (fabs(j0sum) + fabs(hsum))) break;
+    }
+    return BESSEL_TWOOPI * ((log(half) + BESSEL_GAMMA) * j0sum - hsum);
+}
+
+/* Y_1(x), power series, x > 0. */
+static double bessel_y1_series(double x)
+{
+    double half = 0.5 * x;
+    double z = half * half;
+    /* j1sum is J_1(x) / (x/2). */
+    double term = 1.0;
+    double j1sum = 1.0;
+    double Hk = 0.0;            /* H_0 */
+    double Hkp1 = 1.0;          /* H_1 */
+    double psum = Hk + Hkp1;    /* k=0 contribution to Σ (H_k + H_{k+1}) z^k / (k!(k+1)!) */
+    for (int k = 1; k <= BESSEL_MAXIT; k++) {
+        term *= -z / ((double)k * (double)(k + 1));
+        j1sum += term;
+        Hk = Hkp1;
+        Hkp1 = Hk + 1.0 / (k + 1);
+        psum += (Hk + Hkp1) * term;
+        if (fabs(term) * (Hkp1 + 1.0) <
+            BESSEL_EPS * (fabs(j1sum) + fabs(psum))) break;
+    }
+    double j1x = half * j1sum;
+    return BESSEL_TWOOPI * ((log(half) + BESSEL_GAMMA) * j1x - 1.0 / x)
+         - half * BESSEL_ONEOPI * psum;
+}
+
+/*
+ * Hankel asymptotic modulus and phase.  Computes P_n(x), Q_n(x)
+ * in z = 1/(8x)^2.  Truncates on the first non-decreasing term —
+ * standard handling for an asymptotic (divergent) series.
+ */
+static void bessel_pq(int n, double x, double *P, double *Q)
+{
+    double mu = 4.0 * (double)n * (double)n;
+    double inv8x = 1.0 / (8.0 * x);
+    double inv8x2 = inv8x * inv8x;
+
+    double p_term = 1.0;
+    double q_term = (mu - 1.0) * inv8x;
+    double p_sum  = p_term;
+    double q_sum  = q_term;
+    double prev   = fabs(p_term) + fabs(q_term);
+
+    for (int k = 1; k <= 16; k++) {
+        double f1 = mu - (4.0*k - 3.0) * (4.0*k - 3.0);
+        double f2 = mu - (4.0*k - 1.0) * (4.0*k - 1.0);
+        double f3 = mu - (4.0*k + 1.0) * (4.0*k + 1.0);
+
+        p_term *= -f1 * f2 * inv8x2 / ((2.0*k - 1.0) * (2.0*k));
+        q_term *= -f2 * f3 * inv8x2 / ((2.0*k)       * (2.0*k + 1.0));
+
+        p_sum += p_term;
+        q_sum += q_term;
+
+        double mag = fabs(p_term) + fabs(q_term);
+        if (mag > prev) break;                          /* diverging — stop */
+        if (mag < BESSEL_EPS * (fabs(p_sum) + fabs(q_sum))) break;
+        prev = mag;
+    }
+    *P = p_sum;
+    *Q = q_sum;
+}
+
+/* J_n(x) for x >> 1, n = 0 or 1. */
+static double bessel_j_asymp(int n, double x)
+{
+    double P, Q;
+    bessel_pq(n, x, &P, &Q);
+    double inv = BESSEL_RSQRTPI / sqrt(x);
+    double s = sin(x), c = cos(x);
+    if (n == 0) return inv * ((P + Q) * c + (P - Q) * s);
+    return         inv * ((Q - P) * c + (P + Q) * s);   /* n == 1 */
+}
+
+/* Y_n(x) for x >> 1, n = 0 or 1. */
+static double bessel_y_asymp(int n, double x)
+{
+    double P, Q;
+    bessel_pq(n, x, &P, &Q);
+    double inv = BESSEL_RSQRTPI / sqrt(x);
+    double s = sin(x), c = cos(x);
+    if (n == 0) return inv * ((Q - P) * c + (P + Q) * s);
+    return         inv * (-(P + Q) * c + (Q - P) * s);  /* n == 1 */
+}
+
+/* Internal: J_n(|x|) for n = 0 or 1. */
+static double bessel_j_pos(int n, double x_abs)
+{
+    if (x_abs <= 8.0) return bessel_j_series(n, x_abs);
+    return bessel_j_asymp(n, x_abs);
+}
+
+/* --- Public API --- */
+
+double j0(double x)
+{
+    if (isnan(x)) return x;
+    if (isinf(x)) return 0.0;
+    double ax = fabs(x);
+    if (ax == 0.0) return 1.0;
+    return bessel_j_pos(0, ax);
+}
+
+double j1(double x)
+{
+    if (isnan(x)) return x;
+    if (isinf(x)) return 0.0;
+    double ax = fabs(x);
+    if (ax == 0.0) return 0.0;
+    double r = bessel_j_pos(1, ax);
+    return (x < 0.0) ? -r : r;
+}
+
+double y0(double x)
+{
+    if (isnan(x)) return x;
+    if (x < 0.0) { feraiseexcept(FE_INVALID); return NAN; }
+    if (x == 0.0) return -INFINITY;
+    if (isinf(x)) return 0.0;
+    if (x <= 8.0) return bessel_y0_series(x);
+    return bessel_y_asymp(0, x);
+}
+
+double y1(double x)
+{
+    if (isnan(x)) return x;
+    if (x < 0.0) { feraiseexcept(FE_INVALID); return NAN; }
+    if (x == 0.0) return -INFINITY;
+    if (isinf(x)) return 0.0;
+    if (x <= 8.0) return bessel_y1_series(x);
+    return bessel_y_asymp(1, x);
+}
+
+double jn(int n, double x)
+{
+    if (isnan(x)) return x;
+
+    /* Reduce to non-negative order via J_{-n}(x) = (-1)^n J_n(x). */
+    int sign_n = 1;
+    if (n < 0) {
+        n = -n;
+        if (n & 1) sign_n = -sign_n;
+    }
+
+    /* Reduce to non-negative argument via J_n(-x) = (-1)^n J_n(x). */
+    int sign_x = 1;
+    if (x < 0.0) {
+        x = -x;
+        if (n & 1) sign_x = -sign_x;
+    }
+
+    if (isinf(x)) return 0.0;
+    if (n == 0) return sign_n * sign_x * j0(x);
+    if (n == 1) return sign_n * sign_x * bessel_j_pos(1, x);
+    if (x == 0.0) return 0.0;
+
+    double result;
+    if ((double)n <= x) {
+        /* Forward recurrence — stable when n <= x. */
+        double fkm1 = bessel_j_pos(0, x);
+        double fk   = bessel_j_pos(1, x);
+        for (int k = 1; k < n; k++) {
+            double fkp1 = (2.0 * (double)k / x) * fk - fkm1;
+            fkm1 = fk;
+            fk   = fkp1;
+        }
+        result = fk;
+    } else {
+        /* Miller's backward recurrence — stable when n > x.
+           Pick m well above n; round to even so the normalisation
+           sum (J_0 + 2(J_2+J_4+...) = 1) captures only even-indexed
+           terms cleanly. */
+        int m = n + (int)sqrt(40.0 * (double)n);
+        if (m < n + 20) m = n + 20;
+        m = (m + 1) & ~1;
+
+        double fkp1 = 0.0;
+        double fk   = 1.0;
+        double saved = 0.0;
+        double sum_even = 0.0;
+        for (int k = m; k >= 1; k--) {
+            double fkm1 = (2.0 * (double)k / x) * fk - fkp1;
+            fkp1 = fk;
+            fk   = fkm1;
+            int idx = k - 1;
+            if (idx == n) saved = fk;
+            if (idx > 0 && (idx & 1) == 0) sum_even += fk;
+            if (fabs(fk) > 1.0e100) {
+                fk        *= 1.0e-100;
+                fkp1      *= 1.0e-100;
+                saved     *= 1.0e-100;
+                sum_even  *= 1.0e-100;
+            }
+        }
+        /* fk is now f_0; renormalise so that J_0 + 2(J_2+...) = 1. */
+        double norm = fk + 2.0 * sum_even;
+        result = saved / norm;
+    }
+    return sign_n * sign_x * result;
+}
+
+double yn(int n, double x)
+{
+    if (isnan(x)) return x;
+    if (x < 0.0) { feraiseexcept(FE_INVALID); return NAN; }
+
+    int sign_n = 1;
+    if (n < 0) {
+        n = -n;
+        if (n & 1) sign_n = -sign_n;
+    }
+
+    if (x == 0.0) return -INFINITY;
+    if (isinf(x)) return 0.0;
+    if (n == 0) return sign_n * y0(x);
+    if (n == 1) return sign_n * y1(x);
+
+    /* Y_n forward recurrence is always stable. */
+    double ykm1 = y0(x);
+    double yk   = y1(x);
+    for (int k = 1; k < n; k++) {
+        double ykp1 = (2.0 * (double)k / x) * yk - ykm1;
+        ykm1 = yk;
+        yk   = ykp1;
+        if (!isfinite(yk)) break;            /* Y grows fast for n >> x */
+    }
+    return sign_n * yk;
+}
+
 
 int ufromfpx(unsigned int *y, double x, fenv_t *envp, int rounding_mode) {
     return ufromfp(y, x, envp, rounding_mode);

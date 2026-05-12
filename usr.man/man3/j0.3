@@ -1,0 +1,181 @@
+.TH J0 3 2026-05-11 "Substrate LibM" "Substrate Library Functions"
+.SH NAME
+j0, j1, jn, y0, y1, yn,
+j0f, j1f, jnf, y0f, y1f, ynf,
+j0l, j1l, jnl, y0l, y1l, ynl
+\- Bessel functions of the first and second kinds
+.SH LIBRARY
+Math library
+.RB ( libm ", " -lm )
+.SH SYNOPSIS
+.B #include <math.h>
+.sp
+.BI "double j0(double " x ");"
+.br
+.BI "double j1(double " x ");"
+.br
+.BI "double jn(int " n ", double " x ");"
+.sp
+.BI "double y0(double " x ");"
+.br
+.BI "double y1(double " x ");"
+.br
+.BI "double yn(int " n ", double " x ");"
+.sp
+.BI "float  j0f(float " x ");"
+.br
+.BI "float  j1f(float " x ");"
+.br
+.BI "float  jnf(int " n ", float " x ");"
+.br
+.BI "float  y0f(float " x ");"
+.br
+.BI "float  y1f(float " x ");"
+.br
+.BI "float  ynf(int " n ", float " x ");"
+.sp
+.BI "long double j0l(long double " x ");"
+.br
+.BI "long double j1l(long double " x ");"
+.br
+.BI "long double jnl(int " n ", long double " x ");"
+.br
+.BI "long double y0l(long double " x ");"
+.br
+.BI "long double y1l(long double " x ");"
+.br
+.BI "long double ynl(int " n ", long double " x ");"
+.SH DESCRIPTION
+The
+.BR j0 ()
+and
+.BR j1 ()
+functions return Bessel functions of
+.IR x ,
+of the first kind, of orders 0 and 1 respectively;
+.BR jn ()
+returns the Bessel function of
+.I x
+of the first kind of order
+.IR n .
+.PP
+The
+.BR y0 ()
+and
+.BR y1 ()
+functions return Bessel functions of
+.IR x ,
+of the second kind, of orders 0 and 1 respectively;
+.BR yn ()
+returns the Bessel function of
+.I x
+of the second kind of order
+.IR n .
+.PP
+The
+.B f
+and
+.B l
+suffixed variants take and return
+.BR float " and " "long double" ,
+respectively.  They are computed by delegating to the
+.BR double
+implementation; substrate's
+.BR long " " double
+is i386 x87 80-bit extended precision but the Bessel routines work in
+.BR double
+internally.
+.SH ALGORITHM
+For |x| up to 8, the implementation uses the Taylor series expansion
+in z = (x/2)².  For |x| > 8, it switches to the standard Hankel
+asymptotic expansion via the auxiliary P_n / Q_n modulus and phase
+functions.  For
+.BR jn ()
+with
+.I n
+≥ 2, forward recurrence is used when n ≤ x (stable) and Miller's
+backward recurrence with the standard normalisation J_0 + 2(J_2 + J_4
++ ...) = 1 is used otherwise (forward recurrence is numerically
+unstable in that regime).
+.BR yn ()
+uses forward recurrence throughout, which is always stable for Y.
+.SH RETURN VALUE
+The
+.BR j0 (), j1 (), " and " jn ()
+functions return the Bessel value of
+.IR x .
+For finite
+.IR x ,
+the value is in [-1, 1] for J_0 and small for higher orders.
+.PP
+The
+.BR y0 (), y1 (), " and " yn ()
+functions return the Bessel value of
+.IR x ,
+which diverges to
+.BR -inf
+as
+.I x
+→ 0⁺.
+.PP
+If
+.I x
+is NaN, all functions return NaN with no exception.
+.PP
+If
+.I x
+is +inf, all functions return 0.
+.SH ERRORS
+.TP
+.BR EDOM " (y-family only)"
+The argument
+.I x
+is negative.  The function returns NaN and raises
+.BR FE_INVALID .
+.SH EXAMPLES
+.EX
+#include <math.h>
+#include <stdio.h>
+
+int main(void)
+{
+    /* J_0 has its first zero near 2.40483. */
+    printf("j0(2.40483) = %g\\n", j0(2.40483));
+
+    /* Three-term recurrence:
+     *   J_{n-1}(x) + J_{n+1}(x) = (2n/x) J_n(x).
+     */
+    double x = 3.0;
+    int n = 4;
+    double lhs = jn(n - 1, x) + jn(n + 1, x);
+    double rhs = (2.0 * n / x) * jn(n, x);
+    printf("recurrence error = %g\\n", lhs - rhs);
+
+    /* Y is unbounded at zero. */
+    printf("y0(1e-10) = %g\\n", y0(1e-10));
+
+    return 0;
+}
+.EE
+.SH SEE ALSO
+.BR sqrt (3),
+.BR sin (3),
+.BR cos (3),
+.BR log (3),
+.BR feraiseexcept (3)
+.SH STANDARDS
+The double-precision routines
+.BR j0 (), j1 (), jn (), y0 (), y1 (), " and " yn ()
+are XSI / POSIX.1-2024 extensions to ISO C.  The
+.B f
+and
+.B l
+suffixed variants are BSD / glibc extensions and follow the same
+naming convention as the rest of substrate's
+.BR libm .
+.SH HISTORY
+.BR j0 ()
+through
+.BR yn ()
+appeared in Version 7 AT&T UNIX as a fixture of every Unix
+math library since.

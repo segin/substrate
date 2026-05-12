@@ -126,7 +126,18 @@ long double erfcl(long double x)   { return (long double)erfc((double)x); }
 long double tgammal(long double x) { return (long double)tgamma((double)x); }
 long double lgammal(long double x) { return (long double)lgamma((double)x); }
 
-/* C23: fromfp family (long double variants) */
+/* C23: long double fromfp family (long double variants) */
+long double exp10l(long double x)         { return (long double)exp10((double)x); }
+long double exp10m1l(long double x)       { return (long double)exp10m1((double)x); }
+long double exp2m1l(long double x)        { return (long double)exp2m1((double)x); }
+long double logp1l(long double x)         { return (long double)logp1((double)x); }
+long double log2p1l(long double x)        { return (long double)log2p1((double)x); }
+long double log10p1l(long double x)       { return (long double)log10p1((double)x); }
+long double rsqrtl(long double x)         { return (long double)rsqrt((double)x); }
+long double pownl(long double x, intmax_t n) { return (long double)pown((double)x, n); }
+long double powrl(long double x, long double y) { return (long double)powr((double)x, (double)y); }
+long double rootnl(long double x, int n)  { return (long double)rootn((double)x, n); }
+long double compoundl(long double x, intmax_t n) { return (long double)compound((double)x, n); }
 int fromfpxl(long double *y, long double x, fenv_t *envp, int rounding_mode) {
     if (envp) {
         fenv_t zero_env = { 0 };
@@ -151,6 +162,14 @@ int fromfpxl(long double *y, long double x, fenv_t *envp, int rounding_mode) {
     return 0;
 }
 
+/* Bessel functions (long double) */
+long double j0l(long double x) { return (long double)j0((double)x); }
+long double j1l(long double x) { return (long double)j1((double)x); }
+long double jnl(int n, long double x) { return (long double)jn(n, (double)x); }
+long double y0l(long double x) { return (long double)y0((double)x); }
+long double y1l(long double x) { return (long double)y1((double)x); }
+long double ynl(int n, long double x) { return (long double)yn(n, (double)x); }
+
 int fromfpl(long double *y, long double x, fenv_t *envp, int rounding_mode) {
     return fromfpxl(y, x, envp, rounding_mode);
 }
@@ -165,3 +184,4 @@ int ufromfpul(unsigned int *y, long double x, fenv_t *envp, int rounding_mode) {
 int ufromfpxl(unsigned int *y, long double x, fenv_t *envp, int rounding_mode) {
     return ufromfpul(y, x, envp, rounding_mode);
 }
+

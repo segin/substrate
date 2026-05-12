@@ -109,7 +109,26 @@ float erfcf(float x)   { return (float)erfc((double)x); }
 float tgammaf(float x) { return (float)tgamma((double)x); }
 float lgammaf(float x) { return (float)lgamma((double)x); }
 
-/* C23: fromfp family (float variants) */
+/* C23: exp/log family */
+float exp10f(float x)         { return (float)exp10((double)x); }
+float exp10m1f(float x)       { return (float)exp10m1((double)x); }
+float exp2m1f(float x)        { return (float)exp2m1((double)x); }
+float logp1f(float x)         { return (float)logp1((double)x); }
+float log2p1f(float x)        { return (float)log2p1((double)x); }
+float log10p1f(float x)       { return (float)log10p1((double)x); }
+float rsqrtf(float x)         { return (float)rsqrt((double)x); }
+float pownf(float x, intmax_t n) { return (float)pown((double)x, n); }
+float powrf(float x, float y) { return (float)powr((double)x, (double)y); }
+float rootnf(float x, int n)  { return (float)rootn((double)x, n); }
+float compoundf(float x, intmax_t n) { return (float)compound((double)x, n); }
+/* Bessel functions (float) */
+float j0f(float x) { return (float)j0((double)x); }
+float j1f(float x) { return (float)j1((double)x); }
+float jnf(int n, float x) { return (float)jn(n, (double)x); }
+float y0f(float x) { return (float)y0((double)x); }
+float y1f(float x) { return (float)y1((double)x); }
+float ynf(int n, float x) { return (float)yn(n, (double)x); }
+
 int fromfpxf(float *y, float x, fenv_t *envp, int rounding_mode) {
     if (envp) {
         fenv_t zero_env;
@@ -149,3 +168,4 @@ int ufromfpf(unsigned int *y, float x, fenv_t *envp, int rounding_mode) {
 int ufromfpxf(unsigned int *y, float x, fenv_t *envp, int rounding_mode) {
     return ufromfpf(y, x, envp, rounding_mode);
 }
+
