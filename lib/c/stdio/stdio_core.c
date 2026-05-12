@@ -434,6 +434,8 @@ void clearerr(FILE *stream) {
 
 int feof(FILE *stream) { return stream->eof; }
 int ferror(FILE *stream) { return stream->error; }
+#undef fileno
+int fileno(FILE *stream) { return stream ? stream->fd : -1; }
 
 // Wrappers
 int getc(FILE *stream) { return fgetc(stream); }

@@ -1,6 +1,10 @@
 #ifndef _SIGNAL_H
 #define _SIGNAL_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <sys/types.h>
 
 #define SIGHUP  1
@@ -103,6 +107,7 @@ struct sigaction {
 #define SIG_SETMASK 3
 
 int kill(pid_t pid, int sig);
+int raise(int sig);
 sighandler_t signal(int signum, sighandler_t handler);
 int sigaction(int sig, const struct sigaction *act, struct sigaction *oact);
 int sigprocmask(int how, const sigset_t *set, sigset_t *oset);
@@ -118,4 +123,7 @@ int sigismember(const sigset_t *set, int signo);
 /* Dummy sig_atomic_t */
 typedef int sig_atomic_t;
 
+#ifdef __cplusplus
+}
+#endif
 #endif

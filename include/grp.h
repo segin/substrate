@@ -1,6 +1,10 @@
 #ifndef _GRP_H
 #define _GRP_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <sys/types.h>
 #include <stddef.h>
 
@@ -38,4 +42,7 @@ int getgrouplist(const char *user, gid_t group, gid_t *groups, int *ngroups);
  */
 int initgroups(const char *user, gid_t group);
 
+#ifdef __cplusplus
+}
+#endif
 #endif

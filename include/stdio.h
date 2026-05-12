@@ -1,6 +1,10 @@
 #ifndef _STDIO_H
 #define _STDIO_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stddef.h>
 #include <stdarg.h>
 #include <sys/types.h>
@@ -84,6 +88,7 @@ int putchar(int c);
 int puts(const char *s);
 ssize_t getline(char **lineptr, size_t *n, FILE *stream);
 int ungetc(int c, FILE *stream);
+int fileno(FILE *stream);
 
 FILE *fopen(const char *path, const char *mode);
 FILE *fdopen(int fd, const char *mode);
@@ -120,6 +125,16 @@ int pclose(FILE *stream);
 
 void __stdio_init(void);
 
+/*
+ * fileno() is declared earlier in this header as a real function.
+ * The macro form here is for C-only fast paths; suppress it under
+ * C++ so libstdc++ can take ::fileno's address as a function symbol.
+ */
+#ifndef __cplusplus
 #define fileno(f) ((f)->fd)
+#endif
 
+#ifdef __cplusplus
+}
+#endif
 #endif

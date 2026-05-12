@@ -8,6 +8,10 @@
 #ifndef _SYS_SEM_H
 #define _SYS_SEM_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <sys/types.h>
 
 #define SEM_UNDO  0x1000
@@ -35,4 +39,7 @@ int semget(key_t key, int nsems, int semflg);
 int semctl(int semid, int semnum, int cmd, ...);
 int semop(int semid, struct sembuf *sops, size_t nsops);
 
+#ifdef __cplusplus
+}
+#endif
 #endif

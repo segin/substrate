@@ -1,6 +1,10 @@
 #ifndef _SYS_TIME_H
 #define _SYS_TIME_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <sys/types.h>
 
 struct timeval {
@@ -43,4 +47,7 @@ int utimes(const char *path, const struct timeval times[2]);
 #define CLOCK_REALTIME 0
 #define CLOCK_MONOTONIC 1
 
+#ifdef __cplusplus
+}
+#endif
 #endif

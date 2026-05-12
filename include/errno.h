@@ -1,6 +1,10 @@
 #ifndef _ERRNO_H
 #define _ERRNO_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #if defined(__linux__)
 int *__errno_location(void);
 #define errno (*__errno_location())
@@ -63,4 +67,65 @@ extern int errno;
 #define EOVERFLOW   75  /* Value too large for defined data type */
 #define EUNKNOWNFS  514 /* Unknown filesystem type (sys_mount diagnostic) */
 
+/*
+ * POSIX network / IPC / streams errno values.  Numbers track the Linux
+ * UAPI values so cross-personality binaries see the same constants
+ * (Linux personality emulation in sys/exec/perso/ does the
+ * Linux-to-substrate remap when those differ; for the network ones
+ * they don't differ).  Substrate doesn't ship full BSD sockets today
+ * but libstdc++'s <system_error> needs every one of these defined.
+ */
+#define EILSEQ           84  /* Illegal byte sequence */
+#define EBADMSG          74  /* Bad message */
+#define EIDRM            43  /* Identifier removed */
+#define EMULTIHOP        72  /* Multihop attempted */
+#define ENODATA          61  /* No data available */
+#define ENOLINK          67  /* Link severed */
+#define ENOMSG           42  /* No message of desired type */
+/*
+ * Substrate's ELOOP (62) and ENAMETOOLONG (63) historically diverge
+ * from Linux UAPI (40, 36) because the kernel chose its own numbers
+ * before we tracked Linux closely.  Map the late-arriving streams
+ * codes around those collisions rather than renumbering the kernel.
+ */
+#define ENOSR            81  /* Out of streams resources */
+#define ENOSTR           80  /* Device not a stream */
+#define EPROTO           71  /* Protocol error */
+#define ETIME            82  /* Timer expired */
+#define EINPROGRESS     115  /* Operation now in progress */
+#define EALREADY        114  /* Operation already in progress */
+#define ENOTSOCK         88  /* Socket operation on non-socket */
+#define EDESTADDRREQ     89  /* Destination address required */
+#define EMSGSIZE         90  /* Message too long */
+#define EPROTOTYPE       91  /* Protocol wrong type for socket */
+#define ENOPROTOOPT      92  /* Protocol not available */
+#define EPROTONOSUPPORT  93  /* Protocol not supported */
+#define ESOCKTNOSUPPORT  94  /* Socket type not supported */
+#define EOPNOTSUPP       95  /* Operation not supported on transport */
+#define ENOLCK           37  /* No record locks available */
+#define ENOTSUP          EOPNOTSUPP /* POSIX alias for EOPNOTSUPP */
+#define EPFNOSUPPORT     96  /* Protocol family not supported */
+#define EAFNOSUPPORT     97  /* Address family not supported by protocol */
+#define EADDRINUSE       98  /* Address already in use */
+#define EADDRNOTAVAIL    99  /* Cannot assign requested address */
+#define ENETDOWN        100  /* Network is down */
+#define ENETUNREACH     101  /* Network is unreachable */
+#define ENETRESET       102  /* Network dropped connection because of reset */
+#define ECONNABORTED    103  /* Software caused connection abort */
+#define ECONNRESET      104  /* Connection reset by peer */
+#define ENOBUFS         105  /* No buffer space available */
+#define EISCONN         106  /* Transport endpoint is already connected */
+#define ENOTCONN        107  /* Transport endpoint is not connected */
+#define ESHUTDOWN       108  /* Cannot send after transport endpoint shutdown */
+#define ETOOMANYREFS    109  /* Too many references: cannot splice */
+#define ECONNREFUSED    111  /* Connection refused */
+#define EHOSTDOWN       112  /* Host is down */
+#define EHOSTUNREACH    113  /* No route to host */
+#define ECANCELED       125  /* Operation canceled */
+#define EDQUOT          122  /* Quota exceeded */
+#define ESTALE           116 /* Stale file handle */
+
+#ifdef __cplusplus
+}
+#endif
 #endif

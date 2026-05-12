@@ -1,6 +1,10 @@
 #ifndef _STDLIB_H
 #define _STDLIB_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stddef.h>
 #include <stdint.h>
 
@@ -99,4 +103,7 @@ int unlockpt(int fd);
 char *ptsname(int fd);
 int ptsname_r(int fd, char *buf, size_t buflen);
 
+#ifdef __cplusplus
+}
+#endif
 #endif

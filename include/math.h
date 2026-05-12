@@ -1,6 +1,10 @@
 #ifndef _MATH_H
 #define _MATH_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdint.h>
 #include <fenv.h>
 
@@ -482,4 +486,7 @@ int fromfpl(long double *y, long double x, fenv_t *envp, int rounding_mode);
 int ufromfpul(unsigned int *y, long double x, fenv_t *envp, int rounding_mode);
 int ufromfpxl(unsigned int *y, long double x, fenv_t *envp, int rounding_mode);
 
+#ifdef __cplusplus
+}
+#endif
 #endif /* _MATH_H */

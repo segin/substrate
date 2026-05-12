@@ -1,6 +1,10 @@
 #ifndef _TIME_H
 #define _TIME_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stddef.h>
 #include <sys/types.h>
 
@@ -58,4 +62,7 @@ int clock_gettime(clockid_t clk_id, struct timespec *tp);
 
 #define TIME_UTC 1
 
+#ifdef __cplusplus
+}
+#endif
 #endif

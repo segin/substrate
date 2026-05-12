@@ -8,6 +8,7 @@
 #include <errno.h>
 #include <ctype.h>
 #include <wchar.h>
+#include <wctype.h>
 #include <limits.h>
 #include <sys/syscall.h>
 #include <sys/stat.h>
@@ -334,6 +335,10 @@ int kill(pid_t pid, int sig) {
         return -1;
     }
     return ret;
+}
+
+int raise(int sig) {
+    return kill(getpid(), sig);
 }
 
 sighandler_t signal(int signum, sighandler_t handler) {
@@ -993,4 +998,58 @@ int fstatfs(int fd, struct statfs *buf) {
     buf->f_fsid    = 0;
     buf->f_namelen = 255;
     return 0;
+}
+
+/* POSIX pathconf — substrate returns conservative defaults.
+ * Real implementation would dispatch on filesystem type. */
+long pathconf(const char *path, int name) {
+    (void)path;
+    switch (name) {
+    case 0:  /* _PC_LINK_MAX */          return 8;
+    case 3:  /* _PC_NAME_MAX */          return 255;
+    case 4:  /* _PC_PATH_MAX */          return 4096;
+    case 5:  /* _PC_PIPE_BUF */          return 4096;
+    case 6:  /* _PC_CHOWN_RESTRICTED */  return 1;
+    case 7:  /* _PC_NO_TRUNC */          return 1;
+    case 8:  /* _PC_VDISABLE */          return 0xFF;
+    default: return -1;
+    }
+}
+
+long fpathconf(int fd, int name) {
+    (void)fd;
+    return pathconf("/", name);
+}
+
+int getpagesize(void) { return 4096; }
+
+/* mktemp — stub.  Mutates the template's trailing XXXXXX in place
+ * with a (weak) pseudo-random suffix; doesn't actually create the
+ * file (the caller must open(2) it).  Real impl would call
+ * mkstemp().  libstdc++ doesn't use it; libiberty does. */
+char *mktemp(char *template) {
+    char *end = template;
+    while (*end) end++;
+    char *p = end;
+    while (p > template && p[-1] == 'X') p--;
+    static unsigned long counter = 0x12345678UL;
+    for (char *q = p; q < end; q++) {
+        counter = counter * 1103515245UL + 12345UL;
+        *q = 'a' + ((counter >> 16) & 0xff) % 26;
+    }
+    return template;
+}
+
+wctrans_t wctrans(const char *property) {
+    if (!property) return 0;
+    if (__builtin_strcmp(property, "tolower") == 0) return 1;
+    if (__builtin_strcmp(property, "toupper") == 0) return 2;
+    return 0;
+}
+wint_t towctrans(wint_t wc, wctrans_t desc) {
+    switch (desc) {
+    case 1: return towlower(wc);
+    case 2: return towupper(wc);
+    default: return wc;
+    }
 }

@@ -1,6 +1,10 @@
 #ifndef _SYS_TYPES_H
 #define _SYS_TYPES_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdint.h>
 #include <stddef.h>
 
@@ -59,4 +63,7 @@ typedef int32_t  pthread_barrierattr_t;
 typedef uint32_t vm_offset_t;
 typedef uint32_t vm_size_t;
 
+#ifdef __cplusplus
+}
+#endif
 #endif

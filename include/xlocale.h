@@ -6,5 +6,12 @@
  */
 #ifndef _XLOCALE_H
 #define _XLOCALE_H
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 #include <locale.h>
+#ifdef __cplusplus
+}
+#endif
 #endif

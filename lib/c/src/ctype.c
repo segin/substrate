@@ -15,3 +15,6 @@ int isxdigit(int c) { return isdigit(c) || (c >= 'a' && c <= 'f') || (c >= 'A' &
 int tolower(int c) { return isupper(c) ? c + 32 : c; }
 int toupper(int c) { return islower(c) ? c - 32 : c; }
 
+
+int isascii(int c) { return (unsigned)c < 128; }
+int toascii(int c) { return c & 0x7f; }

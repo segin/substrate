@@ -1,6 +1,10 @@
 #ifndef _INTTYPES_H
 #define _INTTYPES_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdint.h>
 
 /* Printf format macros for exact-width types */
@@ -107,4 +111,7 @@ imaxdiv_t imaxdiv(intmax_t numer, intmax_t denom);
 intmax_t  strtoimax(const char *__restrict nptr, char **__restrict endptr, int base);
 uintmax_t strtoumax(const char *__restrict nptr, char **__restrict endptr, int base);
 
+#ifdef __cplusplus
+}
+#endif
 #endif /* _INTTYPES_H */

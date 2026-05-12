@@ -1,6 +1,10 @@
 #ifndef _DIRENT_H
 #define _DIRENT_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <sys/types.h>
 #include <stdint.h>
 
@@ -24,4 +28,7 @@ struct dirent *readdir(DIR *dirp);
 int closedir(DIR *dirp);
 int dirfd(DIR *dirp);
 
+#ifdef __cplusplus
+}
+#endif
 #endif

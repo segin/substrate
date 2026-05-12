@@ -1,6 +1,10 @@
 #ifndef _UNISTD_H
 #define _UNISTD_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stddef.h>
 #include <sys/syscall.h>
 #include <sys/types.h>
@@ -23,7 +27,7 @@ pid_t waitpid(pid_t pid, int *status, int options);
 ssize_t read(int fd, void *buf, size_t count);
 ssize_t write(int fd, const void *buf, size_t count);
 int close(int fd);
-int mkstemp(char *template);
+int mkstemp(char *__template);
 int unlink(const char *pathname);
 int unlinkat(int dirfd, const char *pathname, int flags);
 int rmdir(const char *pathname);
@@ -61,6 +65,35 @@ int access(const char *pathname, int mode);
 int isatty(int fd);
 char *ttyname(int fd);
 int   ttyname_r(int fd, char *buf, size_t buflen);
+char *mktemp(char *_template);
+
+/* POSIX configurable path/file limit query.  Substrate returns
+ * conservative defaults; the values are documented in
+ * usr.man/man3/pathconf.3 (stub today). */
+long pathconf(const char *path, int name);
+long fpathconf(int fd, int name);
+int getpagesize(void);
+
+#define _PC_LINK_MAX           0
+#define _PC_MAX_CANON          1
+#define _PC_MAX_INPUT          2
+#define _PC_NAME_MAX           3
+#define _PC_PATH_MAX           4
+#define _PC_PIPE_BUF           5
+#define _PC_CHOWN_RESTRICTED   6
+#define _PC_NO_TRUNC           7
+#define _PC_VDISABLE           8
+#define _PC_SYNC_IO            9
+#define _PC_ASYNC_IO          10
+#define _PC_PRIO_IO           11
+#define _PC_FILESIZEBITS      13
+#define _PC_REC_INCR_XFER_SIZE 14
+#define _PC_REC_MAX_XFER_SIZE  15
+#define _PC_REC_MIN_XFER_SIZE  16
+#define _PC_REC_XFER_ALIGN     17
+#define _PC_ALLOC_SIZE_MIN     18
+#define _PC_SYMLINK_MAX        19
+#define _PC_2_SYMLINKS         20
 
 off_t lseek(int fd, off_t offset, int whence);
 int ftruncate(int fd, off_t length);
@@ -106,4 +139,7 @@ long syscall(long number, ...);
 
 long sysconf(int name);
 
+#ifdef __cplusplus
+}
+#endif
 #endif

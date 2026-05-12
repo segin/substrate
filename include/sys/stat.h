@@ -1,6 +1,10 @@
 #ifndef _SYS_STAT_H
 #define _SYS_STAT_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <sys/types.h>
 
 struct stat {
@@ -75,4 +79,7 @@ int fchmod(int fd, mode_t mode);
 int fchown(int fd, uid_t owner, gid_t group);
 mode_t umask(mode_t mask);
 
+#ifdef __cplusplus
+}
+#endif
 #endif
