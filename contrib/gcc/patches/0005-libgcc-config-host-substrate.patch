@@ -1,12 +1,41 @@
-Subject: libgcc/config.host: register i386-substrate
+Subject: libgcc: register i386-substrate with full crt extra_parts
 
-Pull in i386/t-crtstuff (so libgcc builds crtbegin/crtend) and t-dfprules (decimal floating point — same set FreeBSD uses).  No unwind header yet because substrate's signal-trampoline path doesn't dive into libgcc's frame unwinder; revisit when we wire up DWARF-driven C++ exceptions or pthread cleanups.
+Two-part change to libgcc/config.host:
+
+1. A *-*-substrate* OS-level stanza that sets extra_parts to the
+   standard crtbegin.o / crtbeginS.o / crtbeginT.o / crtend.o /
+   crtendS.o set (same as Linux), pulls t-crtstuff-pic + t-libgcc-pic
+   + t-eh-dw2-dip, and registers t-slibgcc + the GNU ld helpers.
+   Without this stanza extra_parts stays empty and gcc's
+   STARTFILE_SPEC reference to crtbegin.o fails the link.
+
+2. A per-CPU i[34567]86-*-substrate* stanza that adds i386/t-crtstuff
+   (CRTSTUFF_T_CFLAGS for the i386 frame-pointer requirement) and
+   pulls in i386/elf-lib.h.  t-dfprules enables decimal-floating-
+   point ops in libgcc.  No md_unwind_header yet — C++ exceptions
+   that roll out of signal handlers will not work until one is
+   provided.
 
 ---
 diff --git a/libgcc/config.host b/libgcc/config.host
 --- a/libgcc/config.host	2026-05-11 23:07:26.175151480 -0500
-+++ b/libgcc/config.host	2026-05-11 23:09:24.013886021 -0500
-@@ -783,6 +783,14 @@
++++ b/libgcc/config.host	2026-05-11 23:58:51.509691315 -0500
+@@ -297,6 +297,14 @@
+   tmake_file="$tmake_file t-crtstuff-pic t-libgcc-pic t-eh-dw2-dip t-slibgcc t-slibgcc-fuchsia"
+   extra_parts="crtbegin.o crtend.o"
+   ;;
++*-*-substrate*)
++  # Same set as linux: full crtbegin/end + the S (shared) and T
++  # (static) flavours.  t-crtstuff-pic builds PIC versions of the
++  # support code; t-libgcc-pic builds libgcc itself PIC so it can
++  # be linked into shared objects.
++  tmake_file="$tmake_file t-crtstuff-pic t-libgcc-pic t-eh-dw2-dip t-slibgcc t-slibgcc-gld t-slibgcc-elf-ver"
++  extra_parts="crtbegin.o crtbeginS.o crtbeginT.o crtend.o crtendS.o"
++  ;;
+ *-*-linux* | frv-*-*linux* | *-*-kfreebsd*-gnu | *-*-gnu* | *-*-kopensolaris*-gnu | *-*-uclinuxfdpiceabi)
+   tmake_file="$tmake_file t-crtstuff-pic t-libgcc-pic t-eh-dw2-dip t-slibgcc t-slibgcc-gld t-slibgcc-elf-ver t-linux"
+   extra_parts="crtbegin.o crtbeginS.o crtbeginT.o crtend.o crtendS.o"
+@@ -783,6 +791,14 @@
  	;;
  x86_64-*-openbsd*)
  	;;
