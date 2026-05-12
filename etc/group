@@ -12,7 +12,7 @@ mail:x:8:
 ftp:x:50:
 games:x:100:
 www:x:33:
-audio:x:29:substrate
+audio:x:29:root,substrate
 video:x:44:substrate
 nobody:x:65534:
 substrate:x:1000:
