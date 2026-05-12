@@ -6,6 +6,7 @@
 
 #include <stdio.h>
 #include <math.h>
+#include <fenv.h>
 #include <float.h>
 
 #define FAIL(msg) do { \
@@ -39,7 +40,7 @@ static void test_j1(void) {
     if (!isclose(j1(0.0), 0.0, 1e-15)) FAIL("j1(0) == 0");
     if (!isclose(j1(1.0), 0.4400505857, 1e-9)) FAIL("j1(1)");
     if (!isclose(j1(2.0), 0.5767248078, 1e-9)) FAIL("j1(2)");
-    if (!isclose(j1(5.0), -0.3275791379, 1e-9)) FAIL("j1(5)");
+    if (!isclose(j1(5.0), -0.3275791376, 1e-9)) FAIL("j1(5)");
     double z2 = j1(3.8317059702);
     if (fabs(z2) > 1e-6) FAIL("j1(first zero ~3.8317) ~= 0");
     if (!isnan(j1(NAN))) FAIL("j1(NaN)");
@@ -68,11 +69,13 @@ static void test_y0(void) {
     if (isnan(y0(0.1)) || isinf(y0(0.1))) FAIL("y0(0.1) finite");
     if (!isclose(y0(1.0), 0.0882569642, 1e-8)) FAIL("y0(1)");
     if (!isclose(y0(2.0), 0.5103756726, 1e-8)) FAIL("y0(2)");
-    if (!isclose(y0(5.0), -0.3085176250, 1e-8)) FAIL("y0(5)");
-    /* y0's first positive zero is 0.8935776, NOT 2.4048 (that's j0's). */
-    double z3 = y0(0.8935776);
+    if (!isclose(y0(5.0), -0.3085176252, 1e-8)) FAIL("y0(5)");
+    /* y0's first positive zero is 0.8935769662..., NOT 2.4048 (that's j0's). */
+    double z3 = y0(0.8935769663);
     if (fabs(z3) > 1e-6) FAIL("y0(first zero ~0.8936) ~= 0");
+    feclearexcept(FE_INVALID);
     if (!isnan(y0(-1.0))) FAIL("y0(-1) == NaN");
+    if (!fetestexcept(FE_INVALID)) FAIL("y0(-1) raises FE_INVALID");
     if (!isnan(y0(NAN))) FAIL("y0(NaN)");
     if (!isclose(y0(INFINITY), 0.0, 1e-15)) FAIL("y0(+inf)");
 }
@@ -88,7 +91,9 @@ static void test_y1(void) {
     /* y1's first positive zero is 2.1971413, NOT 3.8317 (that's j1's). */
     double z4 = y1(2.1971413);
     if (fabs(z4) > 1e-6) FAIL("y1(first zero ~2.1971) ~= 0");
+    feclearexcept(FE_INVALID);
     if (!isnan(y1(-1.0))) FAIL("y1(-1) == NaN");
+    if (!fetestexcept(FE_INVALID)) FAIL("y1(-1) raises FE_INVALID");
     if (!isnan(y1(NAN))) FAIL("y1(NaN)");
     if (!isclose(y1(INFINITY), 0.0, 1e-15)) FAIL("y1(+inf)");
 }
