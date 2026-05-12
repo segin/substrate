@@ -37,7 +37,7 @@ PIC_C_OBJS = $(SRCS:.c=.pic.o)
 PIC_S_OBJS = $(filter-out arch/i386/crt0.pic.o,$(ASM_SRCS:.S=.pic.o))
 PIC_OBJS   = $(PIC_C_OBJS) $(PIC_S_OBJS)
 
-all: libc.a libc.so.0 crt0.o
+all: libc.a libc.so.0 crt0.o crti.o crtn.o
 
 # Static archive (no crt0).
 libc.a: $(OBJS)
@@ -56,6 +56,12 @@ libc.so.0: $(PIC_OBJS)
 crt0.o: arch/i386/crt0.o
 	cp $< $@
 
+crti.o: arch/i386/crti.o
+	cp $< $@
+
+crtn.o: arch/i386/crtn.o
+	cp $< $@
+
 %.o: %.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
@@ -69,11 +75,15 @@ crt0.o: arch/i386/crt0.o
 	$(CC) $(PICFLAGS) -c $< -o $@
 
 clean:
-	rm -f $(OBJS) $(PIC_OBJS) libc.a libc.so libc.so.0 crt0.o
+	rm -f $(OBJS) $(PIC_OBJS) libc.a libc.so libc.so.0 \
+	      crt0.o crti.o crtn.o \
+	      arch/i386/crti.o arch/i386/crtn.o
 
-install: libc.a libc.so.0 crt0.o
+install: libc.a libc.so.0 crt0.o crti.o crtn.o
 	@mkdir -p $(DESTDIR)/usr/lib $(DESTDIR)/lib
 	install -m 644 libc.a $(DESTDIR)/usr/lib/
 	install -m 755 libc.so.0 $(DESTDIR)/lib/
 	@ln -sf libc.so.0 $(DESTDIR)/lib/libc.so
 	install -m 644 crt0.o $(DESTDIR)/usr/lib/
+	install -m 644 crti.o $(DESTDIR)/usr/lib/
+	install -m 644 crtn.o $(DESTDIR)/usr/lib/
