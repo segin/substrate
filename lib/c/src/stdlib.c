@@ -751,6 +751,32 @@ int unsetenv(const char *name) {
     return 0;
 }
 
+int putenv(char *string) {
+    if (!string) {
+        errno = EINVAL;
+        return -1;
+    }
+    char *eq = strchr(string, '=');
+    if (!eq || eq == string) {
+        errno = EINVAL;
+        return -1;
+    }
+    /* POSIX says putenv() should make `string' part of environ directly
+     * (mutating it later mutates environ).  We trade strict conformance
+     * for a clean lifetime model: copy into a name/value pair and route
+     * through setenv().  Matches what glibc/musl effectively give callers
+     * who don't poke at the string after the call. */
+    size_t name_len = (size_t)(eq - string);
+    char buf[256];
+    if (name_len >= sizeof(buf)) {
+        errno = ENOMEM;
+        return -1;
+    }
+    memcpy(buf, string, name_len);
+    buf[name_len] = '\0';
+    return setenv(buf, eq + 1, 1);
+}
+
 int system(const char *command) {
     if (!command) return 1;
 

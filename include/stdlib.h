@@ -56,6 +56,7 @@ unsigned long long strtoull(const char *nptr, char **endptr, int base);
 char *getenv(const char *name);
 int setenv(const char *name, const char *value, int overwrite);
 int unsetenv(const char *name);
+int putenv(char *string);
 char *realpath(const char *__restrict path, char *__restrict resolved_path);
 int system(const char *command);
 
