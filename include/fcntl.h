@@ -1,6 +1,10 @@
 #ifndef _FCNTL_H
 #define _FCNTL_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <sys/syscall.h>
 #include <sys/types.h>
 
@@ -53,5 +57,9 @@ int open(const char *pathname, int flags, ...);
 int openat(int dirfd, const char *pathname, int flags, ...);
 int creat(const char *pathname, int mode);
 int fcntl(int fd, int cmd, ...);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

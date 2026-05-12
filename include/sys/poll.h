@@ -1,6 +1,10 @@
 #ifndef _SYS_POLL_H
 #define _SYS_POLL_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 struct pollfd {
     int   fd;
     short events;
@@ -24,5 +28,9 @@ struct pollfd {
 typedef unsigned int nfds_t;
 
 int poll(struct pollfd *fds, nfds_t nfds, int timeout);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif
