@@ -66,6 +66,17 @@ while read -r p; do
     patch -p1 --no-backup-if-mismatch -i "${HERE}/patches/${p}" >/dev/null
 done < "${HERE}/series"
 
+# gcc's prerequisites (gmp / mpfr / mpc / isl / gettext) each ship
+# their own copy of config.sub which is older than the top-level
+# one and doesn't know about substrate.  Patch 0001 only touches
+# the top-level config.sub; mirror it into the prereqs so their
+# per-component configure scripts accept i386-unknown-substrate.
+echo "==> Propagating top-level config.sub to bundled prereqs"
+TOPSUB="$(pwd)/config.sub"
+for f in $(find . -name config.sub | grep -v '^./config.sub$'); do
+    cp "$TOPSUB" "$f"
+done
+
 echo "==> Done.  Tree is at ${TREE_DIR}"
 echo ""
 echo "Next: run ../build-toolchain.sh from contrib/, or for gcc"
