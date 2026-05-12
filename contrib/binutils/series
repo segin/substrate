@@ -1,10 +1,14 @@
 # Substrate patch series for GNU binutils.  Ordering matters — later
-# patches assume earlier ones have applied (e.g. 0007 references the
-# emul names introduced by 0006 in ld/Makefile.{am,in}).
+# patches assume earlier ones have applied (the bfd vec patches must
+# precede config.bfd / emulparams which reference the new vec names).
 0001-config-sub-substrate.patch
 0002-elf-common-osabi-substrate.patch
-0003-bfd-config-bfd-substrate.patch
-0004-gas-configure-tgt-substrate.patch
-0005-ld-configure-tgt-substrate.patch
-0006-ld-emulparams-substrate.patch
-0007-ld-makefile-wire-substrate.patch
+0003-bfd-elf-substrate-vecs.patch
+0004-bfd-targets-substrate.patch
+0005-bfd-configure-substrate.patch
+0006-bfd-config-bfd-substrate.patch
+0007-gas-configure-tgt-substrate.patch
+0008-ld-configure-tgt-substrate.patch
+0009-ld-emulparams-substrate.patch
+0010-ld-makefile-wire-substrate.patch
+0011-readelf-substrate-osabi-name.patch

@@ -12,78 +12,96 @@ listed in `series`.
 | Tarball SHA-256  | `d75a94f4d73e7a4086f7513e67e439e8fcdcbb726ffe63f4661744e6256b2cf2` |
 | Source           | `https://ftp.gnu.org/gnu/binutils/binutils-2.46.0.tar.xz` |
 | Target triples   | `i386-unknown-substrate`, `x86_64-unknown-substrate` |
+| OSABI byte       | `ELFOSABI_SUBSTRATE = 64`, stamped in `e_ident[EI_OSABI]` |
 
 ## Quick start
 
 ```sh
 cd contrib/binutils
-./fetch.sh                                 # download + extract + patch
-
-mkdir build-i386-substrate
-cd    build-i386-substrate
-../build/binutils-2.46.0/configure \
-    --target=i386-unknown-substrate \
-    --prefix=/opt/substrate-toolchain \
-    --with-sysroot=$(realpath ../../../dist) \
-    --disable-werror --disable-nls --disable-gdb \
-    --disable-gdbserver --disable-sim
-
-make -j$(nproc)
-sudo make install
+./fetch.sh                              # download + sha256 + extract + patch
+./build.sh --stage=1                    # build the cross-toolchain
 ```
 
-Installs `i386-unknown-substrate-{as,ld,ar,nm,objdump,objcopy,strip,
-readelf,...}` under `${prefix}/bin/`.  `--with-sysroot=…/dist` points
-ld at substrate's staged userland so the resulting binaries pick up
-the right `crt0.o` / `libc.so.0`.
+`build.sh` is the recommended entry point — it locates the patched
+tree under `build/`, configures it correctly against the substrate
+sysroot, and installs to `$STAGE1_PREFIX` (default
+`/opt/substrate-toolchain`).  See `--help` and the env knobs at the
+top of the script.
+
+## Two build stages
+
+`build.sh --stage=1`
+:   **Cross-toolchain.** build = host = Linux; target = substrate.
+    Produces `i386-unknown-substrate-{as,ld,ar,nm,objdump,readelf,
+    strip,...}` running on the Linux build host, emitting substrate
+    ELFs.  This is the toolchain you use from a Linux box to cross-
+    compile substrate userland.
+
+`build.sh --stage=2`
+:   **Native-on-substrate (Canadian cross).** build = Linux;
+    host = target = substrate; `--prefix=/usr`.  Compiles binutils
+    itself as substrate ELFs using the stage-1 cross gcc, installs
+    into a staging `DESTDIR` so the result can be dropped into
+    `rootfs.img` (substrate's `/usr/bin/as`, `/usr/bin/ld`, etc.).
+    **Currently parked**: needs `contrib/gcc/` patches (not yet
+    vendored) to provide a substrate-target C compiler.
+
+Both stages are orchestrated by `../build-toolchain.sh`, which loops
+over `contrib/{binutils,gcc}/` and runs every component through every
+requested stage in the right order.
 
 ## What the patches do
 
-| File | Touches |
-|---|---|
-| `0001-config-sub-substrate.patch` | accept `substrate*` as an OS suffix in `config.sub` |
-| `0002-elf-common-osabi-substrate.patch` | `ELFOSABI_SUBSTRATE = 64` (arch-specific slot, doesn't collide with HSA/C6000 for EM_386 / EM_X86_64) |
-| `0003-bfd-config-bfd-substrate.patch` | BFD target stanzas for i386 / x86_64 substrate (route through stock vecs) |
-| `0004-gas-configure-tgt-substrate.patch` | `gas` accepts the new triple, plain ELF format |
-| `0005-ld-configure-tgt-substrate.patch` | `ld` accepts the new triple, defaults to the substrate emulation |
-| `0006-ld-emulparams-substrate.patch` | `elf_i386_substrate` / `elf_x86_64_substrate` emulparams — stamp PT_INTERP = `/sbin/ld.so` |
-| `0007-ld-makefile-wire-substrate.patch` | hook the new emuls into `ld/Makefile.{am,in}` |
+| # | Touches | Purpose |
+|---|---|---|
+| 0001 | `config.sub` | accept `substrate*` as an OS suffix |
+| 0002 | `include/elf/common.h` | `ELFOSABI_SUBSTRATE = 64` (arch-specific slot; same numeric value as ELFOSABI_AMDGPU_HSA on EM_AMDGPU and ELFOSABI_C6000_ELFABI on EM_TI_C6000 but the spec scopes 64..255 per e_machine, so no real collision for EM_386 / EM_X86_64) |
+| 0003 | `bfd/elf32-i386.c`, `bfd/elf64-x86-64.c` | new BFD output vecs `elf32-i386-substrate` / `elf64-x86-64-substrate` that stamp `EI_OSABI = ELFOSABI_SUBSTRATE` (64) into e_ident |
+| 0004 | `bfd/targets.c` | forward-declare + add the new vecs to the default vector list |
+| 0005 | `bfd/configure.ac`, `bfd/configure` | link the substrate vec backends (parallel edit to both autotools input and regenerated output, so re-running autoreconf doesn't lose the change) |
+| 0006 | `bfd/config.bfd` | i386/x86_64-substrate stanzas now use the new substrate vecs as defvecs |
+| 0007 | `gas/configure.tgt` | gas accepts the new triple, plain ELF format |
+| 0008 | `ld/configure.tgt` | ld accepts the new triple; default emul = `elf_{i386,x86_64}_substrate` |
+| 0009 | `ld/emulparams/elf_{i386,x86_64}_substrate.sh` | new emuls — set `OUTPUT_FORMAT` to the OSABI-stamping vec and `ELF_INTERPRETER_NAME = /sbin/ld.so` |
+| 0010 | `ld/Makefile.am`, `ld/Makefile.in` | hook the new emuls into the build |
+| 0011 | `binutils/readelf.c` | pretty-print `OS/ABI: Substrate` instead of `<unknown: 40>` for substrate ELFs |
 
 ## What's deliberately deferred
 
-- **Dedicated BFD output target.**  A real `elf32-i386-substrate` /
-  `elf64-x86-64-substrate` BFD vector with `ELF_OSABI =
-  ELFOSABI_SUBSTRATE` would stamp the substrate OSABI byte into the
-  ELF header.  That's a C-side change in `bfd/elf32-i386.c` /
-  `bfd/elf64-x86-64.c` plus `bfd/targets.c` plus the regenerated
-  `bfd/configure`.  Substrate's kernel doesn't currently enforce the
-  OSABI byte on exec, so the current patches leave OSABI = NONE (0)
-  and rely on the e_machine + INTERP path to identify substrate
-  binaries.  Add the vec when the kernel starts checking.
-- **Self-hosted (native) build.**  The patches assume a cross-build
-  from a Linux/BSD host.  Building binutils *on* substrate needs
-  more userland in place (bash, perl, etc.) than currently exists.
+- **Stage 2 native build.**  Substrate-ELF binutils that run on the
+  target — uses Canadian cross via stage-1 gcc.  Blocked on
+  `contrib/gcc/` (not yet vendored).  `build.sh --stage=2` is
+  wired up and will work the moment a substrate-target `gcc` is
+  on PATH.
+
+- **Self-hosted (native) build.**  Building binutils *on* substrate
+  needs much more userland (bash, perl, make) than currently exists.
+  Canadian cross from Linux suffices for now.
 
 ## Re-vendoring upstream
 
 Bumping to a newer binutils release:
 
 1. Edit `VERSION` and `SHA256` in `fetch.sh`.
-2. Re-run `./fetch.sh` — patches probably won't apply cleanly.
-3. For each rejected hunk: rebase the corresponding patch against
-   the new upstream source.  The "substrate stanza" insertions live
-   beside the FreeBSD/NetBSD/Redox stanzas in every file, so
-   visually finding the right context is straightforward.
-4. Re-run `fetch.sh` until all patches apply, then `make` to verify.
+2. Remove the stale tree:  `rm -rf build/binutils-*/`
+3. Re-run `./fetch.sh` — patches probably won't apply cleanly against
+   the new upstream.
+4. For each rejected hunk: rebase the corresponding patch against the
+   new upstream source.  Substrate stanzas live beside the FreeBSD /
+   NetBSD / Redox stanzas in every file, so visually finding the
+   right context is straightforward.
+5. Re-run `fetch.sh` until all patches apply, then `build.sh
+   --stage=1` to verify the cross-toolchain still builds.
 
 If upstream restructures `ld/Makefile.{am,in}` significantly,
-re-generating patch `0007` is faster than rebasing the unified diff.
+regenerating patch `0010` from a diff between pristine and a working
+tree is faster than rebasing.
 
-## Smoke test
-
-After `make install`:
+## Smoke test (after `build.sh --stage=1`)
 
 ```sh
+PATH=/opt/substrate-toolchain/bin:$PATH
+
 cat > /tmp/hello.s <<EOF
 .text
 .globl _start
@@ -95,9 +113,14 @@ EOF
 
 i386-unknown-substrate-as -o /tmp/hello.o /tmp/hello.s
 i386-unknown-substrate-ld -pie -o /tmp/hello /tmp/hello.o
-file /tmp/hello
-# → ELF 32-bit LSB pie executable, Intel 80386, ..., interpreter /sbin/ld.so
 
-readelf -h /tmp/hello | grep OS/ABI
-# → OS/ABI:    UNIX - System V         (until the dedicated BFD vec lands)
+i386-unknown-substrate-readelf -h /tmp/hello | grep OS/ABI
+# → OS/ABI: Substrate
+
+i386-unknown-substrate-objdump -p /tmp/hello | head -1
+# → file format elf32-i386-substrate
+
+od -An -tx1 -N16 /tmp/hello | head -1
+# →  7f 45 4c 46 01 01 01 40 00 00 00 00 00 00 00 00
+#                        ^^ EI_OSABI = ELFOSABI_SUBSTRATE = 64
 ```

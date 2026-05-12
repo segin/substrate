@@ -1,14 +1,19 @@
 Subject: ld: add elf_{i386,x86_64}_substrate emulation parameters
 
-Layered on top of the stock elf_i386 / elf_x86_64 emuls; the only delta is ELF_INTERPRETER_NAME = /sbin/ld.so so PIE binaries get the substrate dynamic linker stamped in.  Library search paths fall out of --sysroot at configure time, so no overrides needed here.
+Two deltas vs the stock elf_i386 / elf_x86_64 emuls: OUTPUT_FORMAT points at the OSABI-stamping BFD vec, and ELF_INTERPRETER_NAME points at /sbin/ld.so so PIE binaries get the substrate dynamic linker in PT_INTERP.
 
 ---
 diff --git a/ld/emulparams/elf_i386_substrate.sh b/ld/emulparams/elf_i386_substrate.sh
 new file mode 100644
 --- /dev/null
 +++ b/ld/emulparams/elf_i386_substrate.sh
-@@ -0,0 +1,10 @@
+@@ -0,0 +1,15 @@
 +source_sh ${srcdir}/emulparams/elf_i386.sh
++
++# Use the substrate-flavoured BFD output target (elf32-i386-substrate)
++# so the linker stamps EI_OSABI = ELFOSABI_SUBSTRATE (64) into the
++# e_ident byte.  Defined in bfd/elf32-i386.c.
++OUTPUT_FORMAT="elf32-i386-substrate"
 +
 +# Substrate's dynamic linker.  Programs that don't carry an explicit
 +# PT_INTERP get this stamped in by ld; matches the path the kernel's
@@ -22,8 +27,13 @@ diff --git a/ld/emulparams/elf_x86_64_substrate.sh b/ld/emulparams/elf_x86_64_su
 new file mode 100644
 --- /dev/null
 +++ b/ld/emulparams/elf_x86_64_substrate.sh
-@@ -0,0 +1,5 @@
+@@ -0,0 +1,10 @@
 +source_sh ${srcdir}/emulparams/elf_x86_64.sh
++
++# Use the substrate-flavoured BFD output target (elf64-x86-64-substrate)
++# so the linker stamps EI_OSABI = ELFOSABI_SUBSTRATE (64) into the
++# e_ident byte.  Defined in bfd/elf64-x86-64.c.
++OUTPUT_FORMAT="elf64-x86-64-substrate"
 +
 +# Substrate's dynamic linker (same path on x86_64 — the kernel
 +# normalises this regardless of word size).

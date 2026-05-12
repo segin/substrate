@@ -1,6 +1,6 @@
 Subject: gas: add i386-substrate target
 
-Plain ELF assembler target — no substrate-specific assembler quirks.
+Plain ELF assembler target — no substrate-specific assembler quirks.  The OSABI byte is stamped by ld, not gas.
 
 ---
 diff --git a/gas/configure.tgt b/gas/configure.tgt

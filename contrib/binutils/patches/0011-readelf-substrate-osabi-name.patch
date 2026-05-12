@@ -1,0 +1,26 @@
+Subject: binutils/readelf: pretty-print ELFOSABI_SUBSTRATE
+
+Without this, readelf -h on a substrate binary prints "<unknown: 40>" for the OS/ABI field — the value is in the architecture-specific range that the existing switch doesn't enumerate.  Hook EM_386 / EM_X86_64 / EM_IAMCU through the same OSABI=64 mapping the AMDGPU and C6000 backends use for their own values.
+
+---
+diff --git a/binutils/readelf.c b/binutils/readelf.c
+--- a/binutils/readelf.c	2026-05-11 21:33:53.987835830 -0500
++++ b/binutils/readelf.c	2026-05-11 22:39:56.771001975 -0500
+@@ -5679,6 +5679,17 @@
+ 	      }
+ 	    break;
+ 
++	  case EM_386:
++	  case EM_X86_64:
++	  case EM_IAMCU:
++	    switch (osabi)
++	      {
++	      case ELFOSABI_SUBSTRATE:	return "Substrate";
++	      default:
++		break;
++	      }
++	    break;
++
+ 	  default:
+ 	    break;
+ 	  }

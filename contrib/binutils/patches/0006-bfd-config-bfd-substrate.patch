@@ -1,0 +1,32 @@
+Subject: bfd/config.bfd: i386/x86_64-substrate stanzas use new substrate vecs
+
+Default vec is now the OSABI-stamping i386_elf32_substrate_vec / x86_64_elf64_substrate_vec; the stock unstamped vecs are kept as selvecs so object files produced by other Unix toolchains can still be read.
+
+---
+diff --git a/bfd/config.bfd b/bfd/config.bfd
+--- a/bfd/config.bfd	2026-05-11 21:33:53.970193864 -0500
++++ b/bfd/config.bfd	2026-05-11 22:25:55.165057195 -0500
+@@ -666,6 +666,11 @@
+     targ_selvecs=
+     targ64_selvecs=x86_64_elf64_vec
+     ;;
++  i[3-7]86-*-substrate*)
++    targ_defvec=i386_elf32_substrate_vec
++    targ_selvecs="i386_elf32_vec iamcu_elf32_vec"
++    targ64_selvecs="x86_64_elf64_substrate_vec x86_64_elf64_vec x86_64_elf32_vec"
++    ;;
+ #ifdef BFD64
+   x86_64-*-darwin*)
+     targ_defvec=x86_64_mach_o_vec
+@@ -727,6 +732,11 @@
+     targ_selvecs=i386_elf32_vec
+     want64=true
+     ;;
++  x86_64-*-substrate*)
++    targ_defvec=x86_64_elf64_substrate_vec
++    targ_selvecs="x86_64_elf64_vec i386_elf32_substrate_vec i386_elf32_vec iamcu_elf32_vec x86_64_elf32_vec"
++    want64=true
++    ;;
+   x86_64-*-solaris2*)
+     targ_defvec=x86_64_elf64_sol2_vec
+     targ_selvecs="i386_elf32_sol2_vec x86_64_elf64_vec i386_elf32_vec"

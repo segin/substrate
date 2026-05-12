@@ -1,0 +1,62 @@
+Subject: bfd: add elf{32-i386,64-x86-64}-substrate output targets
+
+Two new BFD output vectors that stamp ELFOSABI_SUBSTRATE (64) into e_ident[EI_OSABI].  Identical to the stock SysV i386 / x86_64 vecs in every other respect — the ELF backend's ELF_OSABI machinery is enough on its own; no init-file-header callback is needed (cf. the FreeBSD vec which has one only for the additional EI_ABIVERSION 'FreeBSD' label).
+
+---
+diff --git a/bfd/elf32-i386.c b/bfd/elf32-i386.c
+--- a/bfd/elf32-i386.c	2026-05-11 21:33:53.973567336 -0500
++++ b/bfd/elf32-i386.c	2026-05-11 22:22:59.214068740 -0500
+@@ -4652,6 +4652,24 @@
+ 
+ #undef elf_backend_init_file_header
+ 
++/* Substrate support.  Identical to the stock i386-elf BFD vec except
++   that EI_OSABI is stamped with ELFOSABI_SUBSTRATE (64).  No init-
++   file-header callback is needed: ELF_OSABI alone is enough for the
++   ELF backend to write the right byte.  */
++
++#undef	TARGET_LITTLE_SYM
++#define	TARGET_LITTLE_SYM		i386_elf32_substrate_vec
++#undef	TARGET_LITTLE_NAME
++#define	TARGET_LITTLE_NAME		"elf32-i386-substrate"
++#undef	ELF_OSABI
++#define	ELF_OSABI			ELFOSABI_SUBSTRATE
++#undef	ELF_OSABI_EXACT
++#define	ELF_OSABI_EXACT			1
++#undef	elf32_bed
++#define	elf32_bed			elf32_i386_substrate_bed
++
++#include "elf32-target.h"
++
+ /* Solaris 2.  */
+ 
+ #undef	TARGET_LITTLE_SYM
+diff --git a/bfd/elf64-x86-64.c b/bfd/elf64-x86-64.c
+--- a/bfd/elf64-x86-64.c	2026-05-11 21:33:53.975858823 -0500
++++ b/bfd/elf64-x86-64.c	2026-05-11 22:23:26.281066964 -0500
+@@ -6434,6 +6434,25 @@
+ 
+ #include "elf64-target.h"
+ 
++/* Substrate support.  Sole delta from the stock vec is EI_OSABI =
++   ELFOSABI_SUBSTRATE (64).  Architecture-specific OSABI slot per the
++   ELF spec — no real collision with ELFOSABI_AMDGPU_HSA for EM_X86_64.  */
++
++#undef	TARGET_LITTLE_SYM
++#define	TARGET_LITTLE_SYM		    x86_64_elf64_substrate_vec
++#undef	TARGET_LITTLE_NAME
++#define	TARGET_LITTLE_NAME		    "elf64-x86-64-substrate"
++
++#undef	ELF_OSABI
++#define	ELF_OSABI			    ELFOSABI_SUBSTRATE
++#undef	ELF_OSABI_EXACT
++#define	ELF_OSABI_EXACT			    1
++
++#undef	elf64_bed
++#define elf64_bed			    elf64_x86_64_substrate_bed
++
++#include "elf64-target.h"
++
+ /* Solaris 2 support.  */
+ 
+ #undef  TARGET_LITTLE_SYM

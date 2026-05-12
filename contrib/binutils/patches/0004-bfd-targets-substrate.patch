@@ -1,0 +1,40 @@
+Subject: bfd/targets.c: register substrate vecs in default vector list
+
+Forward-declare and add i386_elf32_substrate_vec / x86_64_elf64_substrate_vec so they appear in bfd_target_vector — without this, the linker can't find them by name at runtime.
+
+---
+diff --git a/bfd/targets.c b/bfd/targets.c
+--- a/bfd/targets.c	2026-05-11 21:33:53.981135813 -0500
++++ b/bfd/targets.c	2026-05-11 22:24:21.774063323 -0500
+@@ -752,6 +752,7 @@
+ extern const bfd_target i386_elf32_vec;
+ extern const bfd_target i386_elf32_fbsd_vec;
+ extern const bfd_target i386_elf32_sol2_vec;
++extern const bfd_target i386_elf32_substrate_vec;
+ extern const bfd_target i386_elf32_vxworks_vec;
+ extern const bfd_target i386_mach_o_vec;
+ extern const bfd_target i386_msdos_vec;
+@@ -935,6 +936,7 @@
+ extern const bfd_target x86_64_elf64_vec;
+ extern const bfd_target x86_64_elf64_fbsd_vec;
+ extern const bfd_target x86_64_elf64_sol2_vec;
++extern const bfd_target x86_64_elf64_substrate_vec;
+ extern const bfd_target x86_64_mach_o_vec;
+ extern const bfd_target x86_64_pe_vec;
+ extern const bfd_target x86_64_pe_big_vec;
+@@ -1097,6 +1099,7 @@
+ 	&i386_elf32_vec,
+ 	&i386_elf32_fbsd_vec,
+ 	&i386_elf32_sol2_vec,
++	&i386_elf32_substrate_vec,
+ 	&i386_elf32_vxworks_vec,
+ 	&i386_mach_o_vec,
+ 	&i386_msdos_vec,
+@@ -1345,6 +1348,7 @@
+ 	&x86_64_elf64_vec,
+ 	&x86_64_elf64_fbsd_vec,
+ 	&x86_64_elf64_sol2_vec,
++	&x86_64_elf64_substrate_vec,
+ 	&x86_64_mach_o_vec,
+ 	&x86_64_pe_vec,
+ 	&x86_64_pe_big_vec,
