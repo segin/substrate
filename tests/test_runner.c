@@ -84,6 +84,9 @@ extern bool test_fd_dup2(void);
 extern bool test_vfs_permissions_root(void);
 extern bool test_vfs_permissions_user(void);
 extern bool test_vfs_permissions_group(void);
+extern bool test_vfs_permissions_supp_group_match(void);
+extern bool test_vfs_permissions_owner_class_is_exclusive(void);
+extern bool test_vfs_may_open_supp_groups(void);
 extern bool test_vfs_open_permissions(void);
 extern bool test_vfs_chroot_basic(void);
 extern bool test_vfs_chroot_effect(void);
@@ -274,6 +277,9 @@ test_case_t tests[] = {
     {"vfs_perm_root", test_vfs_permissions_root},
     {"vfs_perm_user", test_vfs_permissions_user},
     {"vfs_perm_group", test_vfs_permissions_group},
+    {"vfs_perm_supp_group", test_vfs_permissions_supp_group_match},
+    {"vfs_perm_owner_exclusive", test_vfs_permissions_owner_class_is_exclusive},
+    {"vfs_may_open_supp", test_vfs_may_open_supp_groups},
     {"vfs_open_perm", test_vfs_open_permissions},
     {"vfs_chroot_basic", test_vfs_chroot_basic},
     {"vfs_chroot_effect", test_vfs_chroot_effect},

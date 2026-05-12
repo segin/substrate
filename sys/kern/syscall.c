@@ -472,10 +472,12 @@ static int kern_open_from(const char *path, int flags, int mode, fs_node_t *root
         return -EEXIST;
     }
 
-    if (vfs_may_open(node,
-                     current_process ? current_process->euid : 0,
-                     current_process ? current_process->egid : 0,
-                     flags) != 0) {
+    if (vfs_may_open_groups(node,
+            current_process ? current_process->euid : 0,
+            current_process ? current_process->egid : 0,
+            current_process ? current_process->supp_groups : NULL,
+            current_process ? current_process->n_supp_groups : 0,
+            flags) != 0) {
         proc_clear_fd(current_process, fd);
         return -EACCES;
     }
@@ -1788,7 +1790,10 @@ int kern_access(const char *path, int mode) {
     // F_OK check
     if (mode == F_OK) return 0;
 
-    ret = vfs_check_permissions(node, current_process->uid, current_process->gid, mode);
+    ret = vfs_check_permissions_groups(node,
+        current_process->uid, current_process->gid,
+        current_process->supp_groups, current_process->n_supp_groups,
+        mode);
     if (ret != 0) {
         return -EACCES;
     }

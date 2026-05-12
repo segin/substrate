@@ -7,7 +7,11 @@
 #include <string.h>
 
 extern int vfs_check_permissions(fs_node_t *node, uint32_t uid, uint32_t gid, int mode);
+extern int vfs_check_permissions_groups(fs_node_t *node, uint32_t uid, uint32_t gid,
+                                        const uint32_t *groups, int ngroups, int mode);
 extern int vfs_may_open(fs_node_t *node, uint32_t uid, uint32_t gid, int flags);
+extern int vfs_may_open_groups(fs_node_t *node, uint32_t uid, uint32_t gid,
+                               const uint32_t *groups, int ngroups, int flags);
 extern int vfs_chmod_node(fs_node_t *node, uint32_t mode);
 
 static int test_chmod_calls;
@@ -110,6 +114,79 @@ bool test_vfs_chmod_dispatches_callback(void) {
     if (test_chmod_mode != 04755) return false;
     if (node.mask != 04755) return false;
 
+    return true;
+}
+
+/*
+ * Supplementary-group access checks.  File owned by uid=1000, gid=2000,
+ * mode 0070 (group rwx only).  A user whose primary gid does not match
+ * 2000 but who has 2000 in their supplementary list should still get
+ * access via the group class.
+ */
+bool test_vfs_permissions_supp_group_match(void) {
+    fs_node_t node;
+    memset(&node, 0, sizeof(node));
+    node.uid = 1000;
+    node.gid = 2000;
+    node.mask = 0070;
+
+    /* Without supplementary groups, user 1001/1001 falls to "other"
+     * which has no bits — must deny. */
+    if (vfs_check_permissions_groups(&node, 1001, 1001, NULL, 0, 4) == 0)
+        return false;
+
+    /* Primary gid 1001 but 2000 in supplementary list — must allow. */
+    uint32_t supp[] = { 50, 2000, 999 };
+    if (vfs_check_permissions_groups(&node, 1001, 1001, supp, 3, 7) != 0)
+        return false;
+
+    /* Supplementary list without 2000 — must still deny. */
+    uint32_t supp_no[] = { 50, 999 };
+    if (vfs_check_permissions_groups(&node, 1001, 1001, supp_no, 2, 4) == 0)
+        return false;
+
+    return true;
+}
+
+/*
+ * POSIX tiered selection: if uid matches owner, only owner bits are
+ * consulted — even when the file's gid is in the caller's groups and
+ * the group class would have allowed.  Supplementary groups must not
+ * leak a permission that the owner class doesn't grant.
+ */
+bool test_vfs_permissions_owner_class_is_exclusive(void) {
+    fs_node_t node;
+    memset(&node, 0, sizeof(node));
+    node.uid  = 1000;
+    node.gid  = 2000;
+    node.mask = 0070;       /* owner has nothing, group has rwx */
+
+    uint32_t supp[] = { 2000 };
+    /* uid matches owner ⇒ stuck in owner class ⇒ deny, even though
+     * group class would allow. */
+    if (vfs_check_permissions_groups(&node, 1000, 99, supp, 1, 4) == 0)
+        return false;
+
+    return true;
+}
+
+/*
+ * vfs_may_open_groups must thread groups into the underlying check.
+ */
+bool test_vfs_may_open_supp_groups(void) {
+    fs_node_t node;
+    memset(&node, 0, sizeof(node));
+    node.uid  = 1000;
+    node.gid  = 2000;
+    node.mask = 0060;       /* group rw, no execute */
+
+    uint32_t supp[] = { 100, 2000 };
+    /* O_RDONLY should pass via supplementary group membership. */
+    if (vfs_may_open_groups(&node, 1001, 1001, supp, 2, 0) != 0) return false;
+    /* O_WRONLY should pass too. */
+    if (vfs_may_open_groups(&node, 1001, 1001, supp, 2, 1) != 0) return false;
+    /* Caller without 2000 in any of their groups falls to "other" — deny. */
+    if (vfs_may_open_groups(&node, 1001, 1001, NULL, 0, 0) == 0) return false;
     return true;
 }
 

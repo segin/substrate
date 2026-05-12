@@ -648,7 +648,24 @@ fs_node_t *vfs_lookup_lstat(fs_node_t *root, const char *path) {
 }
 
 
-int vfs_check_permissions(fs_node_t *node, uint32_t uid, uint32_t gid, int mode) {
+/*
+ * POSIX permission check.  Mode is a bitmask of R_OK (4) / W_OK (2) /
+ * X_OK (1).  The caller passes the process's primary uid / gid plus
+ * its supplementary group list; we consider all of them when picking
+ * which permission class applies.
+ *
+ * POSIX class selection is strictly tiered: owner class is checked
+ * if uid matches, otherwise group class if the file's gid appears in
+ * { primary gid } ∪ supplementary groups, otherwise other.  Once a
+ * class is selected we test only that class — even if a less-
+ * privileged class would grant access, POSIX requires the deny.
+ *
+ * Root (uid 0) bypasses read/write checks but still needs at least
+ * one execute bit set somewhere when X_OK is requested.
+ */
+int vfs_check_permissions_groups(fs_node_t *node, uint32_t uid, uint32_t gid,
+                                 const uint32_t *groups, int ngroups, int mode)
+{
     if (uid == 0) {
         if ((mode & 1) && (node->mask & 0111) == 0) {
             return -1;
@@ -661,20 +678,42 @@ int vfs_check_permissions(fs_node_t *node, uint32_t uid, uint32_t gid, int mode)
         if (mode & 4) mask |= 0400;
         if (mode & 2) mask |= 0200;
         if (mode & 1) mask |= 0100;
-    } else if (gid == node->gid) {
-        if (mode & 4) mask |= 0040;
-        if (mode & 2) mask |= 0020;
-        if (mode & 1) mask |= 0010;
     } else {
-        if (mode & 4) mask |= 0004;
-        if (mode & 2) mask |= 0002;
-        if (mode & 1) mask |= 0001;
+        int in_group = (gid == node->gid);
+        if (!in_group && groups != NULL) {
+            for (int i = 0; i < ngroups; i++) {
+                if (groups[i] == node->gid) {
+                    in_group = 1;
+                    break;
+                }
+            }
+        }
+
+        if (in_group) {
+            if (mode & 4) mask |= 0040;
+            if (mode & 2) mask |= 0020;
+            if (mode & 1) mask |= 0010;
+        } else {
+            if (mode & 4) mask |= 0004;
+            if (mode & 2) mask |= 0002;
+            if (mode & 1) mask |= 0001;
+        }
     }
 
     return (node->mask & mask) == mask ? 0 : -1;
 }
 
-int vfs_may_open(fs_node_t *node, uint32_t uid, uint32_t gid, int flags) {
+/*
+ * Legacy shim: no supplementary groups.  Kept for callers that don't
+ * have a process context (rare), and so the ABI doesn't break for
+ * out-of-tree users.  New code should call the _groups form.
+ */
+int vfs_check_permissions(fs_node_t *node, uint32_t uid, uint32_t gid, int mode) {
+    return vfs_check_permissions_groups(node, uid, gid, NULL, 0, mode);
+}
+
+int vfs_may_open_groups(fs_node_t *node, uint32_t uid, uint32_t gid,
+                        const uint32_t *groups, int ngroups, int flags) {
     int mode = 0;
     int accmode;
 
@@ -699,7 +738,11 @@ int vfs_may_open(fs_node_t *node, uint32_t uid, uint32_t gid, int flags) {
         return 0;
     }
 
-    return vfs_check_permissions(node, uid, gid, mode);
+    return vfs_check_permissions_groups(node, uid, gid, groups, ngroups, mode);
+}
+
+int vfs_may_open(fs_node_t *node, uint32_t uid, uint32_t gid, int flags) {
+    return vfs_may_open_groups(node, uid, gid, NULL, 0, flags);
 }
 
 int vfs_chmod_node(fs_node_t *node, uint32_t mode) {
