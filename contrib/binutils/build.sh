@@ -73,7 +73,7 @@ fi
 
 TARGET_TRIPLE="${TARGET_TRIPLE:-i386-unknown-substrate}"
 PARALLEL="${PARALLEL:-$(nproc 2>/dev/null || echo 4)}"
-STAGE1_PREFIX="${STAGE1_PREFIX:-/opt/substrate-toolchain}"
+STAGE1_PREFIX="${STAGE1_PREFIX:-/opt/substrate}"
 STAGE2_DESTDIR="${STAGE2_DESTDIR:-${SUBSTRATE_TOP}/dist-toolchain}"
 
 # Locate the patched source tree.  fetch.sh extracts to ./build/binutils-X.Y.Z/

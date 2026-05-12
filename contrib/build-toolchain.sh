@@ -45,7 +45,7 @@ for arg in "$@"; do
 done
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
-export STAGE1_PREFIX="${STAGE1_PREFIX:-/opt/substrate-toolchain}"
+export STAGE1_PREFIX="${STAGE1_PREFIX:-/opt/substrate}"
 
 # Ensure stage-1 bins are on PATH so each successive component finds the
 # tools it needs (binutils for gcc; both for stage 2).
