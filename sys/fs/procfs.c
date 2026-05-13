@@ -55,6 +55,13 @@ static struct dirent *proc_pid_readdir(fs_node_t *node, uint64_t index);
 static fs_node_t *proc_pid_finddir(fs_node_t *node, char *name);
 static struct dirent *proc_pid_fd_readdir(fs_node_t *node, uint64_t index);
 static fs_node_t *proc_pid_fd_finddir(fs_node_t *node, char *name);
+static struct dirent *proc_pid_task_readdir(fs_node_t *node, uint64_t index);
+static fs_node_t *proc_pid_task_finddir(fs_node_t *node, char *name);
+static struct dirent *proc_pid_task_tid_readdir(fs_node_t *node, uint64_t index);
+static fs_node_t *proc_pid_task_tid_finddir(fs_node_t *node, char *name);
+static size_t proc_pid_task_comm_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer);
+static size_t proc_pid_task_status_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer);
+static size_t proc_pid_task_stat_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer);
 static size_t proc_pid_status_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer);
 static size_t proc_pid_stat_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer);
 static size_t proc_pid_cmdline_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer);
@@ -439,6 +446,7 @@ typedef struct procfs_pid_nodes {
     fs_node_t cwd;
     fs_node_t fd_dir;
     fs_node_t fd_links[MAX_FD];
+    fs_node_t task_dir;
 } procfs_pid_nodes_t;
 
 static procfs_pid_nodes_t **procfs_pid_nodes = NULL;
@@ -617,6 +625,16 @@ static procfs_pid_nodes_t *procfs_get_pid_nodes(int pid) {
         link->readlink = &proc_pid_fd_readlink;
         procfs_refresh_timestamps(link);
     }
+
+    strncpy(nodes->task_dir.name, "task", sizeof(nodes->task_dir.name) - 1);
+    nodes->task_dir.flags = FS_DIRECTORY;
+    nodes->task_dir.mask = 0555;
+    nodes->task_dir.uid = target->uid;
+    nodes->task_dir.gid = target->gid;
+    nodes->task_dir.inode = pid;
+    nodes->task_dir.readdir = &proc_pid_task_readdir;
+    nodes->task_dir.finddir = &proc_pid_task_finddir;
+    procfs_refresh_timestamps(&nodes->task_dir);
 
     spinlock_release(&procfs_pid_nodes_lock);
     return nodes;
@@ -983,8 +1001,8 @@ static size_t proc_pid_cmdline_read(fs_node_t *node, off_t offset, size_t size, 
 
 static struct dirent *proc_pid_readdir(fs_node_t *node, uint64_t index) {
     (void)node;
-    const char *entries[] = { ".", "..", "status", "cmdline", "stat", "exe", "cwd", "fd", NULL };
-    if (index >= 8) return NULL;
+    const char *entries[] = { ".", "..", "status", "cmdline", "stat", "exe", "cwd", "fd", "task", NULL };
+    if (index >= 9) return NULL;
     strncpy(proc_dirent.d_name, entries[index], sizeof(proc_dirent.d_name) - 1);
     proc_dirent.d_name[sizeof(proc_dirent.d_name) - 1] = '\0';
     proc_dirent.d_ino = node->inode;
@@ -1072,6 +1090,11 @@ static fs_node_t *proc_pid_finddir(fs_node_t *node, char *name) {
         nodes->fd_dir.inode = node->inode;
         procfs_refresh_timestamps(&nodes->fd_dir);
         return &nodes->fd_dir;
+    }
+    if (strcmp(name, "task") == 0) {
+        nodes->task_dir.inode = node->inode;
+        procfs_refresh_timestamps(&nodes->task_dir);
+        return &nodes->task_dir;
     }
     return NULL;
 }
@@ -1250,6 +1273,281 @@ static fs_node_t *procfs_mount(const char *device, uint32_t flags, void *data) {
     (void)device; (void)flags; (void)data;
     procfs_refresh_timestamps(&procfs_root_node);
     return &procfs_root_node;
+}
+
+/* ============================================================
+ * /proc/<pid>/task/ — per-thread directory tree.
+ *
+ * Layout:
+ *   /proc/<pid>/task/                  directory (one entry per thread)
+ *   /proc/<pid>/task/<tid>/            directory (one per live thread)
+ *   /proc/<pid>/task/<tid>/comm        thread name (writable counterpart NYI)
+ *   /proc/<pid>/task/<tid>/status      multi-line key:value status
+ *   /proc/<pid>/task/<tid>/stat        Linux-style /proc/<pid>/stat line
+ *
+ * Thread identity is encoded into the static per-tid nodes as
+ *   inode = pid    (so proc_find still works)
+ *   impl  = tid    (consumed by the read callbacks).
+ *
+ * Like other procfs subtrees, lookups use shared static node
+ * scratch space; concurrent readdir/finddir from multiple threads
+ * already share proc_dirent globally, so no new race is introduced.
+ * ============================================================ */
+
+static fs_node_t proc_task_tid_dir_node;
+static fs_node_t proc_task_tid_comm_node;
+static fs_node_t proc_task_tid_status_node;
+static fs_node_t proc_task_tid_stat_node;
+
+struct procfs_task_index {
+    int       pid;
+    uint64_t  want_index;
+    int       found_tid;
+    uint64_t  cur_index;
+};
+
+static void procfs_task_index_visit(thread_t *t, void *arg) {
+    struct procfs_task_index *it = arg;
+    if (!t || t->tid == -1 || !t->proc || t->proc->pid != it->pid) return;
+    if (it->found_tid != -1) return;
+    if (it->cur_index == it->want_index) it->found_tid = t->tid;
+    it->cur_index++;
+}
+
+struct procfs_tid_lookup {
+    int pid;
+    int want_tid;
+    int found;
+    char name[16];
+    int state;
+    int priority;
+    uint32_t sig_pending;
+    uint32_t sig_mask;
+    int bound_cpu;
+    uint32_t flags;
+};
+
+static void procfs_tid_lookup_visit(thread_t *t, void *arg) {
+    struct procfs_tid_lookup *l = arg;
+    if (!t || t->tid == -1 || !t->proc) return;
+    if (t->proc->pid != l->pid || t->tid != l->want_tid) return;
+    l->found = 1;
+    /* Copy fields while under sched_iterate_threads' implicit guard. */
+    size_t i = 0;
+    while (i < sizeof(l->name) - 1 && t->name[i]) { l->name[i] = t->name[i]; i++; }
+    l->name[i] = '\0';
+    l->state       = (int)t->state;
+    l->priority    = t->priority;
+    l->sig_pending = t->sig_pending;
+    l->sig_mask    = t->sig_mask;
+    l->bound_cpu   = t->bound_cpu;
+    l->flags       = t->flags;
+}
+
+/* Linux-style single-character thread state. */
+static char procfs_thread_state_char(int state) {
+    switch (state) {
+        case THREAD_READY:   return 'R';
+        case THREAD_RUNNING: return 'R';
+        case THREAD_BLOCKED: return 'S';
+        case THREAD_ZOMBIE:  return 'Z';
+        case THREAD_STOPPED: return 'T';
+        default:             return 'R';
+    }
+}
+
+static struct dirent *proc_pid_task_readdir(fs_node_t *node, uint64_t index) {
+    int pid = (int)node->inode;
+    if (index == 0) {
+        strncpy(proc_dirent.d_name, ".", sizeof(proc_dirent.d_name) - 1);
+        proc_dirent.d_name[sizeof(proc_dirent.d_name) - 1] = '\0';
+        proc_dirent.d_ino = node->inode;
+        return &proc_dirent;
+    }
+    if (index == 1) {
+        strncpy(proc_dirent.d_name, "..", sizeof(proc_dirent.d_name) - 1);
+        proc_dirent.d_name[sizeof(proc_dirent.d_name) - 1] = '\0';
+        proc_dirent.d_ino = node->inode;
+        return &proc_dirent;
+    }
+    struct procfs_task_index it = {
+        .pid = pid, .want_index = index - 2, .found_tid = -1, .cur_index = 0
+    };
+    sched_iterate_threads(procfs_task_index_visit, &it);
+    if (it.found_tid == -1) return NULL;
+    snprintf(proc_dirent.d_name, sizeof(proc_dirent.d_name), "%d", it.found_tid);
+    proc_dirent.d_ino = node->inode;
+    return &proc_dirent;
+}
+
+static fs_node_t *proc_pid_task_finddir(fs_node_t *node, char *name) {
+    int pid = (int)node->inode;
+
+    if (strcmp(name, ".") == 0) {
+        procfs_refresh_timestamps(node);
+        return node;
+    }
+    if (strcmp(name, "..") == 0) {
+        procfs_pid_nodes_t *nodes = procfs_get_pid_nodes(pid);
+        if (!nodes) return NULL;
+        procfs_refresh_timestamps(&nodes->dir);
+        return &nodes->dir;
+    }
+
+    /* Parse name as decimal TID. */
+    if (!name[0]) return NULL;
+    int tid = 0;
+    for (char *p = name; *p; p++) {
+        if (*p < '0' || *p > '9') return NULL;
+        tid = tid * 10 + (*p - '0');
+        if (tid > SUBSTRATE_TID_MAX) return NULL;
+    }
+
+    struct procfs_tid_lookup l = { .pid = pid, .want_tid = tid, .found = 0 };
+    sched_iterate_threads(procfs_tid_lookup_visit, &l);
+    if (!l.found) return NULL;
+
+    process_t *p = proc_find(pid);
+    memset(&proc_task_tid_dir_node, 0, sizeof(proc_task_tid_dir_node));
+    snprintf(proc_task_tid_dir_node.name, sizeof(proc_task_tid_dir_node.name), "%d", tid);
+    proc_task_tid_dir_node.flags = FS_DIRECTORY;
+    proc_task_tid_dir_node.mask = 0555;
+    if (p) {
+        proc_task_tid_dir_node.uid = p->uid;
+        proc_task_tid_dir_node.gid = p->gid;
+    }
+    proc_task_tid_dir_node.inode = pid;
+    proc_task_tid_dir_node.impl  = (uintptr_t)tid;
+    proc_task_tid_dir_node.readdir = &proc_pid_task_tid_readdir;
+    proc_task_tid_dir_node.finddir = &proc_pid_task_tid_finddir;
+    procfs_refresh_timestamps(&proc_task_tid_dir_node);
+    return &proc_task_tid_dir_node;
+}
+
+static struct dirent *proc_pid_task_tid_readdir(fs_node_t *node, uint64_t index) {
+    (void)node;
+    const char *entries[] = { ".", "..", "comm", "status", "stat", NULL };
+    if (index >= 5) return NULL;
+    strncpy(proc_dirent.d_name, entries[index], sizeof(proc_dirent.d_name) - 1);
+    proc_dirent.d_name[sizeof(proc_dirent.d_name) - 1] = '\0';
+    proc_dirent.d_ino = node->inode;
+    return &proc_dirent;
+}
+
+static fs_node_t *proc_pid_task_tid_finddir(fs_node_t *node, char *name) {
+    if (strcmp(name, ".") == 0) {
+        procfs_refresh_timestamps(node);
+        return node;
+    }
+    if (strcmp(name, "..") == 0) {
+        procfs_pid_nodes_t *nodes = procfs_get_pid_nodes((int)node->inode);
+        if (!nodes) return NULL;
+        procfs_refresh_timestamps(&nodes->task_dir);
+        return &nodes->task_dir;
+    }
+
+    fs_node_t *out = NULL;
+    if (strcmp(name, "comm") == 0) {
+        out = &proc_task_tid_comm_node;
+        memset(out, 0, sizeof(*out));
+        strncpy(out->name, "comm", sizeof(out->name) - 1);
+        out->read = &proc_pid_task_comm_read;
+    } else if (strcmp(name, "status") == 0) {
+        out = &proc_task_tid_status_node;
+        memset(out, 0, sizeof(*out));
+        strncpy(out->name, "status", sizeof(out->name) - 1);
+        out->read = &proc_pid_task_status_read;
+    } else if (strcmp(name, "stat") == 0) {
+        out = &proc_task_tid_stat_node;
+        memset(out, 0, sizeof(*out));
+        strncpy(out->name, "stat", sizeof(out->name) - 1);
+        out->read = &proc_pid_task_stat_read;
+    } else {
+        return NULL;
+    }
+
+    out->flags = FS_FILE;
+    out->mask  = 0444;
+    out->inode = node->inode;
+    out->impl  = node->impl;
+    procfs_refresh_timestamps(out);
+    return out;
+}
+
+/* Common helper: collect a thread snapshot and return -1 if not found. */
+static int procfs_task_collect(fs_node_t *node, struct procfs_tid_lookup *l) {
+    l->pid      = (int)node->inode;
+    l->want_tid = (int)node->impl;
+    l->found    = 0;
+    sched_iterate_threads(procfs_tid_lookup_visit, l);
+    return l->found ? 0 : -1;
+}
+
+/* Bounded slice-from-buffer copy used by all the per-tid file readers. */
+static size_t procfs_emit_slice(const char *src, int len, off_t offset,
+                                size_t size, uint8_t *buffer) {
+    if (len < 0) return 0;
+    if (offset >= (off_t)len) return 0;
+    size_t n = size;
+    if ((off_t)(offset + n) > (off_t)len) n = (size_t)(len - offset);
+    memcpy(buffer, src + offset, n);
+    return n;
+}
+
+static size_t proc_pid_task_comm_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
+    struct procfs_tid_lookup l;
+    if (procfs_task_collect(node, &l) < 0) return 0;
+    char buf[32];
+    int len = snprintf(buf, sizeof(buf), "%s\n", l.name);
+    return procfs_emit_slice(buf, len, offset, size, buffer);
+}
+
+static size_t proc_pid_task_status_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
+    struct procfs_tid_lookup l;
+    if (procfs_task_collect(node, &l) < 0) return 0;
+    char buf[512];
+    int len = snprintf(buf, sizeof(buf),
+        "Name:\t%s\n"
+        "Tgid:\t%d\n"
+        "Pid:\t%d\n"
+        "State:\t%c\n"
+        "Prio:\t%d\n"
+        "SigPnd:\t%08x\n"
+        "SigBlk:\t%08x\n"
+        "Cpus_allowed:\t%08x\n"
+        "BoundCpu:\t%d\n"
+        "Flags:\t%08x\n",
+        l.name, l.pid, l.want_tid,
+        procfs_thread_state_char(l.state),
+        l.priority, l.sig_pending, l.sig_mask,
+        0u, l.bound_cpu, l.flags);
+    return procfs_emit_slice(buf, len, offset, size, buffer);
+}
+
+static size_t proc_pid_task_stat_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
+    struct procfs_tid_lookup l;
+    if (procfs_task_collect(node, &l) < 0) return 0;
+    char name_safe[17];
+    size_t i = 0;
+    while (i < sizeof(name_safe) - 1 && l.name[i]) {
+        unsigned char c = (unsigned char)l.name[i];
+        name_safe[i] = (c < 32 || c > 126 || c == '(' || c == ')') ? '_' : (char)c;
+        i++;
+    }
+    name_safe[i] = '\0';
+    char buf[256];
+    /* Minimal Linux-style line: tid (comm) state ppid pgrp session tty tpgid
+     * + zero-padded fields so ps doesn't run past end-of-string. */
+    int len = snprintf(buf, sizeof(buf),
+        "%d (%s) %c %d 0 0 0 -1 "
+        "0 0 0 0 0 "
+        "0 0 0 0 %d 0 1 0 0 0 0 "
+        "0 0 0 0 0 0 0 0 0 0 "
+        "0 0 0 0 0 0 0 0 0 0\n",
+        l.want_tid, name_safe,
+        procfs_thread_state_char(l.state),
+        l.pid, l.priority);
+    return procfs_emit_slice(buf, len, offset, size, buffer);
 }
 
 static filesystem_t procfs_fs = {
