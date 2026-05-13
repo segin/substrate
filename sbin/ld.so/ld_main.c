@@ -191,16 +191,22 @@ ld_u32 ld_main(ld_u32 *initial_stack) {
     ld_auxv_t a;
     parse_auxv(initial_stack, &a);
 
-    /* Scan envp for LD_DEBUG / LD_TRACE_LOADED_OBJECTS up-front so
-     * the very first AT_* / summarize_dynamic prints below honour
-     * the debug flag.  trace_mode is consumed later in this
-     * function (see the post-relocation block). */
+    /* Scan envp for LD_DEBUG / LD_TRACE_LOADED_OBJECTS / LD_PRELOAD
+     * up-front so the very first AT_* / summarize_dynamic prints
+     * below honour the debug flag.  trace_mode is consumed later in
+     * this function (see the post-relocation block).  preload_list
+     * is consumed below — right after the program is registered on
+     * the loaded-object list, so the preload libs interpose between
+     * the program and its DT_NEEDED chain (the canonical position
+     * defined by the ELF spec and matched by glibc). */
     int trace_mode = 0;
+    const char *preload_list = 0;
     {
         ld_u32 argc = initial_stack[0];
         ld_u32 *p = initial_stack + 1 + argc + 1;   /* skip argv + NULL */
-        const char k_trace[] = "LD_TRACE_LOADED_OBJECTS=";
-        const char k_debug[] = "LD_DEBUG=";
+        const char k_trace[]   = "LD_TRACE_LOADED_OBJECTS=";
+        const char k_debug[]   = "LD_DEBUG=";
+        const char k_preload[] = "LD_PRELOAD=";
         while (*p) {
             const char *e = (const char *)(unsigned long)*p;
             unsigned i;
@@ -210,6 +216,10 @@ ld_u32 ld_main(ld_u32 *initial_stack) {
             for (i = 0; i < sizeof(k_debug) - 1; i++)
                 if (e[i] != k_debug[i]) break;
             if (i == sizeof(k_debug) - 1 && e[i] != '\0') ld_debug = 1;
+            for (i = 0; i < sizeof(k_preload) - 1; i++)
+                if (e[i] != k_preload[i]) break;
+            if (i == sizeof(k_preload) - 1 && e[i] != '\0')
+                preload_list = e + i;
             p++;
         }
     }
@@ -387,6 +397,50 @@ ld_u32 ld_main(ld_u32 *initial_stack) {
         self_obj.initialized = 1;
         self_obj.finalized   = 1;
         ld_obj_append(&self_obj);
+    }
+
+    /* LD_PRELOAD — colon-separated list of paths or basenames loaded
+     * AFTER the program but BEFORE its DT_NEEDED chain (because we
+     * load them BEFORE the BFS below).  This is the canonical ELF
+     * scope position — preload symbols win over libc/libstdc++/etc.
+     * but not over the program's own symbols.  Standard uses:
+     * malloc instrumentation, function interposition, debugging.
+     *
+     * Path resolution: an entry containing '/' is treated as
+     * absolute (or relative-to-cwd, which is rarely useful);
+     * otherwise ld_load_object searches the standard paths.
+     *
+     * Empty entries (e.g. trailing ':') are skipped silently.
+     * Missing-file failures are non-fatal — we warn and continue
+     * so a misconfigured LD_PRELOAD doesn't kill the program. */
+    if (preload_list && *preload_list) {
+        const char *p = preload_list;
+        char path[256];
+        while (*p) {
+            /* Skip leading separator(s). */
+            while (*p == ':' || *p == ' ') p++;
+            if (!*p) break;
+            /* Copy one path. */
+            ld_u32 n = 0;
+            while (*p && *p != ':' && *p != ' ' && n + 1 < sizeof(path))
+                path[n++] = *p++;
+            path[n] = '\0';
+            if (n == 0) continue;
+            ld_obj_t *o = ld_load_object(path);
+            if (!o) {
+                ld_puts("ld.so: LD_PRELOAD: cannot load ");
+                ld_puts(path);
+                ld_puts(" — skipping\n");
+                continue;
+            }
+            if (ld_debug) {
+                ld_puts("ld.so: LD_PRELOAD loaded ");
+                ld_puts(o->name);
+                ld_puts(" at base ");
+                ld_putx(o->base);
+                ld_puts("\n");
+            }
+        }
     }
 
     /* BFS over the loaded-object list resolving DT_NEEDED.  Walk
