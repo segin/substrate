@@ -6,7 +6,7 @@ set -e
 TOP="$(cd "$(dirname "$0")" && pwd)"
 DIST="$TOP/dist"
 IMAGE="$TOP/rootfs.img"
-IMAGE_SIZE_MIB=512
+IMAGE_SIZE_MIB=4096
 BOOT_DIR="$TOP/sys/boot"
 EXT2BOOT_DIR="$TOP/contrib/ext2-boot"
 
@@ -14,12 +14,45 @@ usage() {
     echo "Usage: $0 [options]"
     echo ""
     echo "Options:"
-    echo "  --dist     Prepare the dist/ directory with all distribution files"
-    echo "  --image    Create a ${IMAGE_SIZE_MIB}MiB ext2 filesystem image (rootfs.img)"
-    echo "  --no-boot  Skip ext2-boot bootloader installation"
-    echo "  --help     Show this help message"
+    echo "  --dist       Prepare the dist/ directory with all distribution files"
+    echo "  --toolchain  Overlay contrib stage-2 toolchain staging trees onto dist/usr/"
+    echo "               (gcc + binutils built by contrib/build-toolchain.sh --stage=2)"
+    echo "  --image      Create a ${IMAGE_SIZE_MIB}MiB ext2 filesystem image (rootfs.img)"
+    echo "  --no-boot    Skip ext2-boot bootloader installation"
+    echo "  --help       Show this help message"
+    echo ""
+    echo "Typical full bootstrap sequence:"
+    echo "  contrib/build-toolchain.sh           # binutils + gcc stage 1 (cross) and stage 2 (substrate)"
+    echo "  $0 --dist                            # substrate userland into dist/"
+    echo "  $0 --toolchain                       # overlay gcc + binutils on top"
+    echo "  $0 --image                           # bake rootfs.img"
     echo ""
     exit 1
+}
+
+# Stage-2 toolchain staging trees are produced by contrib/build-toolchain.sh
+# under SUBSTRATE_TOP/dist-toolchain (binutils) and /tmp/gcc-stage2-staging
+# (gcc) — see contrib/{binutils,gcc}/build.sh for the canonical paths.
+DIST_TOOLCHAIN="${DIST_TOOLCHAIN:-$TOP/dist-toolchain}"
+GCC_STAGE2_STAGING="${GCC_STAGE2_STAGING:-/tmp/gcc-stage2-staging}"
+
+overlay_toolchain() {
+    local merged=0
+    for staging in "$DIST_TOOLCHAIN" "$GCC_STAGE2_STAGING"; do
+        if [ -d "$staging/usr" ]; then
+            echo "Overlaying $staging/usr/ -> $DIST/usr/"
+            cp -a "$staging"/usr/. "$DIST/usr/"
+            merged=$((merged + 1))
+        else
+            echo "  (skipped: $staging/usr does not exist)"
+        fi
+    done
+    if [ "$merged" = 0 ]; then
+        echo "Error: no stage-2 toolchain staging found." >&2
+        echo "       run contrib/build-toolchain.sh --stage=2 first." >&2
+        exit 1
+    fi
+    echo "Toolchain overlay complete."
 }
 
 clean_dist() {
@@ -220,6 +253,7 @@ if [ $# -eq 0 ]; then
 fi
 
 DO_DIST=false
+DO_TOOLCHAIN=false
 DO_IMAGE=false
 DO_BOOT=true
 
@@ -227,6 +261,10 @@ while [[ $# -gt 0 ]]; do
     case $1 in
         --dist)
             DO_DIST=true
+            shift
+            ;;
+        --toolchain)
+            DO_TOOLCHAIN=true
             shift
             ;;
         --image)
@@ -255,6 +293,14 @@ if [ "$DO_DIST" = true ]; then
     fi
     build_components
     install_to_dist
+fi
+
+if [ "$DO_TOOLCHAIN" = true ]; then
+    if [ ! -d "$DIST/usr" ]; then
+        echo "Error: dist/usr/ does not exist; run --dist first." >&2
+        exit 1
+    fi
+    overlay_toolchain
 fi
 
 if [ "$DO_IMAGE" = true ]; then
