@@ -2856,20 +2856,14 @@ int sys_proc_list(pid_t *pids, size_t count) {
 
 int kern_proc_list(pid_t *pids, size_t count) {
     int total_procs = 0;
-    for (size_t i = 0; i < proc_slot_count(); i++) {
-        process_t *proc = proc_slot(i);
-        if (proc && proc->pid != -1) total_procs++;
-    }
-    
+    FOREACH_PROC(proc) { (void)proc; total_procs++; }
+
     if (!pids || count == 0) return total_procs;
-    
+
     int copied = 0;
-    for (size_t i = 0; i < proc_slot_count() && copied < (int)count; i++) {
-        process_t *proc = proc_slot(i);
-        if (proc && proc->pid != -1) {
-            pids[copied] = proc->pid;
-            copied++;
-        }
+    FOREACH_PROC(proc) {
+        if (copied >= (int)count) break;
+        pids[copied++] = proc->pid;
     }
     return copied;
 }
@@ -2877,12 +2871,7 @@ int kern_proc_list(pid_t *pids, size_t count) {
 // sys_proc_count - Get total number of active processes
 int sys_proc_count(void) {
     int count = 0;
-    for (size_t i = 0; i < proc_slot_count(); i++) {
-        process_t *proc = proc_slot(i);
-        if (proc && proc->pid != -1) {
-            count++;
-        }
-    }
+    FOREACH_PROC(proc) { (void)proc; count++; }
     return count;
 }
 
@@ -3248,11 +3237,7 @@ int sys_setpriority(int which, int who, int prio) {
         else if (which == PRIO_USER) target_id = current_process->uid;
     }
 
-    /* Iterate over processes using hardcoded limit matching syscall.c conventions */
-    for (size_t i = 0; i < proc_slot_count(); i++) {
-        process_t *p = proc_slot(i);
-        if (!p || p->pid == -1) continue;
-
+    FOREACH_PROC(p) {
         bool match = false;
         if (which == PRIO_PROCESS && p->pid == target_id) match = true;
         else if (which == PRIO_PGRP && p->p_pgrp && p->p_pgrp->pg_id == target_id) match = true;
@@ -3325,10 +3310,7 @@ int sys_getpriority(int which, int who) {
     int found = 0;
     int best_nice = 20; /* Start with lowest priority (highest nice) */
 
-    for (size_t i = 0; i < proc_slot_count(); i++) {
-        process_t *p = proc_slot(i);
-        if (!p || p->pid == -1) continue;
-
+    FOREACH_PROC(p) {
         bool match = false;
         if (which == PRIO_PROCESS && p->pid == target_id) match = true;
         else if (which == PRIO_PGRP && p->p_pgrp && p->p_pgrp->pg_id == target_id) match = true;

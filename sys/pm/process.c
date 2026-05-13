@@ -7,7 +7,7 @@
 #include <sys/session.h>
 #include <kern/console.h>
 #include <kern/file.h>
-#include <kern/sched.h> // For MAX_THREADS, thread creation
+#include <kern/sched.h>
 #include <kern/sleepq.h>
 #include <stddef.h>
 #include <string.h>
@@ -27,15 +27,40 @@
 #endif
 #include <vfs/vfs.h>
 
-process_t processes[MAX_PROCS];
 process_t *current_process = NULL;
 process_t *kernel_process = NULL;
-static process_t **process_chunks = NULL;
-static size_t process_chunk_count = 0;
-static size_t process_chunk_capacity = 0;
+
+/*
+ * Process registry — every live process_t is on `allproc` (head-linked
+ * singly-linked list) and in exactly one `pid_hash[]` bucket.  Both
+ * are protected by pid_lock.
+ */
+#define PID_HASH_SIZE 64
+#define PID_HASH(pid) ((unsigned)(pid) & (PID_HASH_SIZE - 1))
+
+static process_t *allproc = NULL;
+static process_t *pid_hash[PID_HASH_SIZE];
 static int next_pid = 1;
 static int last_pid = 0;
 static spinlock_t pid_lock;
+
+#ifdef HOST_TEST
+static process_t *proc_storage_alloc(void) {
+    process_t *p = malloc(sizeof(*p));
+    if (p) memset(p, 0, sizeof(*p));
+    return p;
+}
+static void proc_storage_free(process_t *p) { free(p); }
+#else
+static process_t *proc_storage_alloc(void) {
+    process_t *p = kmalloc(sizeof(*p));
+    if (p) memset(p, 0, sizeof(*p));
+    return p;
+}
+static void proc_storage_free(process_t *p) {
+    if (p) kfree(p, sizeof(*p));
+}
+#endif
 
 
 /*
@@ -62,8 +87,6 @@ extern struct personality personality_native;
 #define PROC_DEBUG(...) kprintf(__VA_ARGS__)
 #endif
 
-#define PROC_SLOT_CHUNK_SIZE ((size_t)MAX_PROCS)
-
 static void proc_idle_wait(void) {
 #ifdef HOST_TEST
     extern void host_wait_for_interrupt(void);
@@ -84,56 +107,58 @@ static void proc_posixipc_exit(process_t *proc);
 static int proc_status_flags_from_file(const file_t *f);
 static void proc_apply_status_flags(file_t *f, int flags);
 static void proc_resource_limits_init(process_t *proc);
-static void proc_reset_free_slot(process_t *proc);
 
-#ifdef HOST_TEST
-static void *proc_table_alloc(size_t size) {
-    return malloc(size);
+/*
+ * Link `proc` onto allproc and pid_hash[].  pid_lock must be held.
+ */
+static void proc_link_locked(process_t *proc) {
+    proc->p_allproc_next = allproc;
+    allproc = proc;
+
+    unsigned bucket = PID_HASH(proc->pid);
+    proc->p_pidhash_next = pid_hash[bucket];
+    pid_hash[bucket] = proc;
 }
 
-static void proc_table_free(void *ptr, size_t size) {
-    (void)size;
-    free(ptr);
+/*
+ * Unlink `proc` from allproc and pid_hash[].  pid_lock must be held.
+ */
+static void proc_unlink_locked(process_t *proc) {
+    process_t **link;
+
+    for (link = &allproc; *link; link = &(*link)->p_allproc_next) {
+        if (*link == proc) {
+            *link = proc->p_allproc_next;
+            break;
+        }
+    }
+    proc->p_allproc_next = NULL;
+
+    unsigned bucket = PID_HASH(proc->pid);
+    for (link = &pid_hash[bucket]; *link; link = &(*link)->p_pidhash_next) {
+        if (*link == proc) {
+            *link = proc->p_pidhash_next;
+            break;
+        }
+    }
+    proc->p_pidhash_next = NULL;
 }
 
-__attribute__((weak)) size_t sched_thread_slot_count(void) {
-    return (size_t)MAX_THREADS;
-}
-
-__attribute__((weak)) thread_t *sched_thread_slot(size_t index) {
-    if (index < (size_t)MAX_THREADS) {
-        return &threads[index];
+static process_t *proc_lookup_locked(int pid) {
+    for (process_t *p = pid_hash[PID_HASH(pid)]; p; p = p->p_pidhash_next) {
+        if (p->pid == pid) {
+            return p;
+        }
     }
     return NULL;
 }
-#else
-static void *proc_table_alloc(size_t size) {
-    return kmalloc(size);
+
+process_t *proc_first(void) {
+    return allproc;
 }
 
-static void proc_table_free(void *ptr, size_t size) {
-    kfree(ptr, size);
-}
-#endif
-
-size_t proc_slot_count(void) {
-    return (size_t)MAX_PROCS + (process_chunk_count * PROC_SLOT_CHUNK_SIZE);
-}
-
-process_t *proc_slot(size_t index) {
-    if (index < (size_t)MAX_PROCS) {
-        return &processes[index];
-    }
-
-    index -= (size_t)MAX_PROCS;
-    if (index < (process_chunk_count * PROC_SLOT_CHUNK_SIZE)) {
-        size_t chunk_index = index / PROC_SLOT_CHUNK_SIZE;
-        size_t slot_index = index % PROC_SLOT_CHUNK_SIZE;
-
-        return &process_chunks[chunk_index][slot_index];
-    }
-
-    return NULL;
+process_t *proc_next(process_t *p) {
+    return p ? p->p_allproc_next : NULL;
 }
 
 static const char *proc_cmdline_name(const process_t *proc) {
@@ -158,86 +183,6 @@ static const char *proc_cmdline_name(const process_t *proc) {
     return "unknown";
 }
 
-static int proc_pid_in_use_locked(pid_t pid) {
-    size_t slots = proc_slot_count();
-
-    for (size_t i = 0; i < slots; i++) {
-        process_t *proc = proc_slot(i);
-        if (proc && proc->pid == pid) {
-            return 1;
-        }
-    }
-    return 0;
-}
-
-static void proc_reset_free_slot(process_t *proc) {
-    if (!proc) {
-        return;
-    }
-
-    memset(proc, 0, sizeof(*proc));
-    proc->pid = -1;
-    proc_timers_init(proc);
-    proc_resource_limits_init(proc);
-}
-
-static process_t *proc_grow_slots_locked(void) {
-    process_t **new_chunks = process_chunks;
-    size_t new_chunk_capacity = process_chunk_capacity;
-    size_t old_bytes = process_chunk_capacity * sizeof(*process_chunks);
-    size_t new_bytes;
-    process_t *new_chunk;
-
-    if (process_chunk_count == process_chunk_capacity) {
-        new_chunk_capacity = process_chunk_capacity ? process_chunk_capacity * 2U : 4U;
-        new_bytes = new_chunk_capacity * sizeof(*new_chunks);
-        new_chunks = proc_table_alloc(new_bytes);
-        if (!new_chunks) {
-            return NULL;
-        }
-
-        if (process_chunks && old_bytes != 0U) {
-            memcpy(new_chunks, process_chunks, old_bytes);
-            proc_table_free(process_chunks, old_bytes);
-        }
-        memset(new_chunks + process_chunk_count, 0,
-               (new_chunk_capacity - process_chunk_count) * sizeof(*new_chunks));
-    }
-
-    new_chunk = proc_table_alloc(PROC_SLOT_CHUNK_SIZE * sizeof(*new_chunk));
-    if (!new_chunk) {
-        if (new_chunks != process_chunks) {
-            proc_table_free(new_chunks, new_chunk_capacity * sizeof(*new_chunks));
-        }
-        return NULL;
-    }
-
-    if (new_chunks != process_chunks) {
-        process_chunks = new_chunks;
-        process_chunk_capacity = new_chunk_capacity;
-    }
-
-    for (size_t i = 0; i < PROC_SLOT_CHUNK_SIZE; i++) {
-        proc_reset_free_slot(&new_chunk[i]);
-    }
-    process_chunks[process_chunk_count++] = new_chunk;
-
-    return &new_chunk[0];
-}
-
-static process_t *proc_find_free_slot_locked(void) {
-    size_t slots = proc_slot_count();
-
-    for (size_t i = 0; i < slots; i++) {
-        process_t *proc = proc_slot(i);
-        if (proc && proc->pid == -1) {
-            return proc;
-        }
-    }
-
-    return proc_grow_slots_locked();
-}
-
 static int proc_alloc_pid_locked(void) {
     int start;
     int candidate;
@@ -249,7 +194,7 @@ static int proc_alloc_pid_locked(void) {
 
     candidate = start;
     do {
-        if (!proc_pid_in_use_locked(candidate)) {
+        if (!proc_lookup_locked(candidate)) {
             last_pid = candidate;
             next_pid = (candidate == SUBSTRATE_PID_MAX) ? 1 : candidate + 1;
             return candidate;
@@ -380,47 +325,58 @@ static void proc_resource_limits_init(process_t *proc) {
 }
 
 void pm_init(void) {
-    size_t slots;
-
     next_pid = 1;
     last_pid = 0;
-    memset(processes, 0, sizeof(processes));
-    kernel_process = &processes[0];
-    
-    /* Initialize the process tree lock */
+    allproc = NULL;
+    memset(pid_hash, 0, sizeof(pid_hash));
+
     mutex_init(&proctree_lock, "proctree");
     spinlock_init(&pid_lock, "pid");
-    
-    slots = proc_slot_count();
-    for (size_t i = 0; i < slots; i++) {
-        proc_reset_free_slot(proc_slot(i));
-    }
-
-    // Create Initial Kernel Process (PID 1? Or 0?)
-    // sched.c used to do this.
-    // We should probably let sched.c init the *first* thread/proc manually or calling this?
-    // Sched init usually sets up idle/kernel task.
-    
-    // Let's allow pm_init to setup the array, but sched_init might populate the first one?
-    // Or we provide a function to allocate the first one.
 }
 
 /*
- * proc_find - Find a process by PID
- *
- * Searches the process table for a process with the given PID.
- * Returns NULL if no active process with that PID exists.
+ * Bootstrap path for the swapper/kernel process.  Called exactly
+ * once from sched_init() after kmalloc is up.  The caller fills in
+ * pmap/comm/root_node/etc after we return.
  */
-process_t *proc_find(int pid) {
-    size_t slots = proc_slot_count();
-
-    for (size_t i = 0; i < slots; i++) {
-        process_t *proc = proc_slot(i);
-        if (proc && proc->pid == pid) {
-            return proc;
-        }
+process_t *proc_bootstrap_kernel(int pid, int perso_id) {
+    process_t *proc = proc_storage_alloc();
+    if (!proc) {
+        return NULL;
     }
-    return NULL;
+
+    proc->pid = pid;
+    proc->ppid = 0;
+    proc->perso_id = perso_id;
+    proc->is_kernel_task = 1;
+    proc_timers_init(proc);
+    proc_resource_limits_init(proc);
+
+    spinlock_acquire(&pid_lock);
+    proc_link_locked(proc);
+    spinlock_release(&pid_lock);
+
+    return proc;
+}
+
+void proc_destroy(process_t *p) {
+    if (!p) return;
+
+    spinlock_acquire(&pid_lock);
+    proc_unlink_locked(p);
+    spinlock_release(&pid_lock);
+
+    proc_storage_free(p);
+}
+
+process_t *proc_find(int pid) {
+    process_t *proc;
+
+    spinlock_acquire(&pid_lock);
+    proc = proc_lookup_locked(pid);
+    spinlock_release(&pid_lock);
+
+    return proc;
 }
 
 int proc_get_last_pid(void) {
@@ -428,37 +384,34 @@ int proc_get_last_pid(void) {
 }
 
 process_t *proc_create(int perso_id) {
-    process_t *proc;
-
-    spinlock_acquire(&pid_lock);
-    proc = proc_find_free_slot_locked();
+    process_t *proc = proc_storage_alloc();
     if (!proc) {
-        spinlock_release(&pid_lock);
         return NULL;
     }
 
+    spinlock_acquire(&pid_lock);
     int pid = proc_alloc_pid_locked();
     if (pid < 0) {
         spinlock_release(&pid_lock);
+        proc_storage_free(proc);
         return NULL;
     }
+    proc->pid = pid;
+    proc_link_locked(proc);
     spinlock_release(&pid_lock);
 
-    memset(proc, 0, sizeof(*proc));
     ldt_init_process(proc);
-    proc->pid = pid;
     proc->ppid = current_process ? current_process->pid : 0;
     proc->perso_id = perso_id;
     proc->root_node = current_process ? current_process->root_node : fs_root;
     if (proc->root_node && proc->root_node != fs_root) {
         open_fs(proc->root_node, 1, 0);
     }
-    proc->next_fd = 0; // Reset FD hint
+    proc->next_fd = 0;
     proc->fd_bitmap = 0;
     proc->fd_cloexec = 0;
     for (int j = 0; j < MAX_FD; j++) proc->fds[j] = 0;
-    
-    // Acct init
+
     strncpy(proc->comm, "forked", AC_COMM_LEN);
     proc->comm[AC_COMM_LEN - 1] = '\0';
     proc->start_time = get_time();
@@ -470,12 +423,11 @@ process_t *proc_create(int perso_id) {
     proc->sgid = current_process ? current_process->sgid : 0;
     proc->umask = current_process ? current_process->umask : 022;
     proc_resource_limits_init(proc);
-    
-    // Initialize rusage structures
+
     extern void rusage_init(process_t *p);
     rusage_init(proc);
     proc_timers_init(proc);
-    
+
     return proc;
 }
 
@@ -491,8 +443,7 @@ static int proc_fork_common(process_t *parent, void *stack, int is_vfork) {
     if (parent->pmap) {
         child_proc->pmap = pmap_fork(parent->pmap);
         if (!child_proc->pmap) {
-            // Failed to clone pmap
-            child_proc->pid = -1; // Mark as free
+            proc_destroy(child_proc);
             return -1;
         }
     } else {
@@ -504,7 +455,7 @@ static int proc_fork_common(process_t *parent, void *stack, int is_vfork) {
         if (!child_proc->vm_map) {
             pmap_release(child_proc->pmap);
             child_proc->pmap = NULL;
-            child_proc->pid = -1;
+            proc_destroy(child_proc);
             return -1;
         }
     }
@@ -518,7 +469,7 @@ static int proc_fork_common(process_t *parent, void *stack, int is_vfork) {
             pmap_release(child_proc->pmap);
             child_proc->pmap = NULL;
         }
-        child_proc->pid = -1;
+        proc_destroy(child_proc);
         return -1;
     }
     
@@ -623,7 +574,7 @@ static int proc_fork_common(process_t *parent, void *stack, int is_vfork) {
             child_proc->pmap = NULL;
         }
 
-        child_proc->pid = -1;
+        proc_destroy(child_proc);
         return fork_result;
     }
 
@@ -987,7 +938,7 @@ void proc_reparent_children(process_t *p) {
     
     init = proc_find(1);
     if (!init || init->state == SDYING || init->state == SZOMB) {
-        init = kernel_process ? kernel_process : &processes[0];
+        init = kernel_process;
     }
     
     child = p->p_children;
@@ -1055,12 +1006,12 @@ static void proc_release_zombie_resources(process_t *proc) {
 }
 
 void proc_reap_autoreap_zombies(void) {
-    size_t slots = proc_slot_count();
+    process_t *proc, *next;
 
-    for (size_t i = 0; i < slots; i++) {
-        process_t *proc = proc_slot(i);
+    for (proc = proc_first(); proc; proc = next) {
+        next = proc_next(proc);
 
-        if (!proc || proc->pid <= 0 || proc->state != SZOMB || !(proc->p_flag & P_AUTOREAP)) {
+        if (proc->pid <= 0 || proc->state != SZOMB || !(proc->p_flag & P_AUTOREAP)) {
             continue;
         }
         if (current_thread && current_thread->proc == proc) {
@@ -1072,8 +1023,7 @@ void proc_reap_autoreap_zombies(void) {
 
         proc_release_zombie_resources(proc);
         sched_reap_process_threads(proc);
-
-        proc_reset_free_slot(proc);
+        proc_destroy(proc);
     }
 }
 

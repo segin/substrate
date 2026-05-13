@@ -345,10 +345,7 @@ static int vfs_is_busy(struct mount *mp) {
     if (!mp) return 0;
 
     // Check all processes
-    for (size_t i = 0; i < proc_slot_count(); i++) {
-        process_t *p = proc_slot(i);
-        if (!p || p->pid == -1) continue;
-
+    FOREACH_PROC(p) {
         if (p->cwd_node && p->cwd_node->mp == mp) return 1;
         if (p->root_node && p->root_node->mp == mp) return 1;
 

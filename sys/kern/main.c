@@ -791,11 +791,12 @@ void kmain(unsigned long magic, unsigned long addr) {
     early_uart_print("KMAIN START\n");
     mboot_orig_addr = addr;
 
-    early_uart_print("KMAIN: pm_init\n");
-    pm_init();
-    current_process = &processes[0];
-    current_process->pid = 0;
-    strcpy(current_process->comm, "(swapper)");
+    /*
+     * pm_init() / kernel_process bootstrap now happen inside
+     * sched_init() — which runs from init_core_subsystems() after
+     * kmem_init().  process_t is kmalloc'd, not statically allocated,
+     * so we cannot touch it here.
+     */
 
     // boot.S converts the Multiboot info pointer to higher-half virtual, but
     // pointers inside the structure remain physical until translated here.

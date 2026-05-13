@@ -13,7 +13,6 @@
 extern void switch_to(thread_t *prev, thread_t *next);
 extern void set_kernel_stack(uint32_t stack);
 extern thread_t *current_thread; // Now defined in generic sched.c
-extern process_t processes[]; // from pm
 extern fs_node_t *fs_root;
 
 // Generic Allocation Helper
@@ -67,36 +66,33 @@ void sched_init(void) {
     extern void sched_smp_init(int);
     sched_smp_init(smp_get_cpu_count());
 
-    // Arch-Specific: Setup Initial Kernel Thread (TID 1)
-    // sched_init_generic zeroes things. We rely on it.
-    // Manually setup threads[0] equivalent logic, but via alloc?
-    // alloc requires a process.
-    
-    // Setup Kernel Process (PID 0 - Swapper)
-    processes[0].pid = 0;
-    processes[0].ppid = 0;
-    processes[0].perso_id = PERS_NATIVE;
-    processes[0].root_node = fs_root;
-    processes[0].is_kernel_task = 1;
-    processes[0].pmap = pmap_kernel(); // Use Kernel PMAP
-    ldt_init_process(&processes[0]);
-    
+    /* Bootstrap the swapper (PID 0).  kmalloc is up by this point, so
+     * proc_bootstrap_kernel allocates a real process_t and links it
+     * into allproc / pid_hash[0].  No static array involved. */
+    kernel_process = proc_bootstrap_kernel(0, PERS_NATIVE);
+    if (!kernel_process) {
+        for (;;) { __asm__ volatile("hlt"); } /* unrecoverable */
+    }
+    kernel_process->root_node = fs_root;
+    kernel_process->pmap = pmap_kernel();
+    ldt_init_process(kernel_process);
     extern char *strcpy(char *, const char *);
-    strcpy(processes[0].comm, "swapper");
-    
-    thread_t *t = sched_alloc_thread(&processes[0]);
+    strcpy(kernel_process->comm, "swapper");
+
+    thread_t *t = sched_alloc_thread(kernel_process);
     t->state = THREAD_RUNNING;
     t->priority = 20;
     t->base_priority = 20;
     t->bound_cpu = 0;
-    
+
     current_thread = t;
-    current_process = &processes[0];
+    current_process = kernel_process;
     THIS_CPU()->current = t;
     THIS_CPU()->idle = t;
-    
-    // Ensure we start effectively in kernel pmap (already loaded but helpful for consistency)
-    pmap_activate(processes[0].pmap);
+
+    /* Ensure we start effectively in kernel pmap (already loaded but
+     * helpful for consistency). */
+    pmap_activate(kernel_process->pmap);
 }
 
 int sched_fork_thread(process_t *proc, void *parent_regs) {

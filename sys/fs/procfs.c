@@ -30,19 +30,6 @@
 #include <kern/resource.h>
 #include <sys/kobject.h>
 
-#ifdef HOST_TEST
-__attribute__((weak)) size_t proc_slot_count(void) {
-    return (size_t)MAX_PROCS;
-}
-
-__attribute__((weak)) process_t *proc_slot(size_t index) {
-    if (index < (size_t)MAX_PROCS) {
-        return &processes[index];
-    }
-    return NULL;
-}
-#endif
-
 /* Forward declarations */
 static size_t procfs_generic_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer);
 static struct dirent *procfs_readdir(fs_node_t *node, uint64_t index);
@@ -527,7 +514,7 @@ static procfs_pid_nodes_t *procfs_get_pid_nodes(int pid) {
 
     if (procfs_pid_nodes_count == procfs_pid_nodes_capacity) {
         old_capacity = procfs_pid_nodes_capacity;
-        new_capacity = old_capacity ? old_capacity * 2U : (size_t)MAX_PROCS;
+        new_capacity = old_capacity ? old_capacity * 2U : 16U;
         old_bytes = old_capacity * sizeof(*procfs_pid_nodes);
         new_bytes = new_capacity * sizeof(*procfs_pid_nodes);
 
@@ -1206,9 +1193,8 @@ static struct dirent *procfs_readdir(fs_node_t *node, uint64_t index) {
     /* Process directories */
     uint64_t proc_idx = entry_idx;
     uint32_t count = 0;
-    for (size_t i = 0; i < proc_slot_count(); i++) {
-        process_t *proc = proc_slot(i);
-        if (proc && proc->pid > 0) {
+    FOREACH_PROC(proc) {
+        if (proc->pid > 0) {
             if (count == proc_idx) {
                 snprintf(proc_dirent.d_name, sizeof(proc_dirent.d_name), "%d", proc->pid);
                 proc_dirent.d_ino = proc->pid;

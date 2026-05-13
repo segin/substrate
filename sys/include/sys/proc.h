@@ -139,6 +139,12 @@ typedef struct process {
     uint32_t supp_groups[32];
     int      n_supp_groups;
 
+    /* allproc list link + pid_hash chain link.  Every live process is
+     * on the allproc singly-linked list and on exactly one pid_hash
+     * bucket.  Both protected by pm.c's pid_lock. */
+    struct process *p_allproc_next;
+    struct process *p_pidhash_next;
+
     // Resource limits, FDs, etc. would go here
 } process_t;
 
@@ -297,7 +303,6 @@ typedef struct thread {
 // Globals
 extern thread_t *current_thread;
 extern process_t *current_process;
-extern process_t processes[];
 
 // File Descriptor Management
 int  proc_alloc_fd(process_t *p);

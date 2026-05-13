@@ -213,7 +213,14 @@ struct elks_statfs {
 #define ELKS_KMEM_LIST_SIZE          0x0004U
 #define ELKS_KMEM_LIST_PREV          0x0000U
 #define ELKS_KMEM_LIST_NEXT          0x0002U
-#define ELKS_KMEM_SEGALL_OFFSET      (ELKS_KMEM_TASKS_OFFSET + (MAX_PROCS * ELKS_KMEM_TASK_SLOT_SIZE))
+/*
+ * ELKS personality emulates an old 16-bit task table.  Cap the
+ * exported task list at this many slots so the snapshot fits the
+ * fixed-size on-disk layout — substrate-side allproc can hold many
+ * more, but the ELKS-image format can't.
+ */
+#define ELKS_KMEM_MAX_EXPORTED 16
+#define ELKS_KMEM_SEGALL_OFFSET      (ELKS_KMEM_TASKS_OFFSET + (ELKS_KMEM_MAX_EXPORTED * ELKS_KMEM_TASK_SLOT_SIZE))
 #define ELKS_KMEM_HEAPALL_OFFSET     (ELKS_KMEM_SEGALL_OFFSET + ELKS_KMEM_LIST_SIZE)
 #define ELKS_KMEM_DYNAMIC_OFFSET     (ELKS_KMEM_HEAPALL_OFFSET + ELKS_KMEM_LIST_SIZE)
 #define ELKS_KMEM_TASK_STATE         0x0000U
@@ -608,16 +615,15 @@ static uint16_t elks_kmem_meminfo_kb(size_t pages) {
 static int elks_kmem_build_snapshot(uint8_t **buf_out, size_t *size_out) {
     uint8_t *buf;
     uint32_t cursor = ELKS_KMEM_DYNAMIC_OFFSET;
-    const process_t *exported[MAX_PROCS];
-    struct elks_kmem_task_refs refs[MAX_PROCS];
-    uint16_t seg_nodes[MAX_PROCS * 2U];
-    uint16_t heap_nodes[MAX_PROCS * 2U];
+    const process_t *exported[ELKS_KMEM_MAX_EXPORTED];
+    struct elks_kmem_task_refs refs[ELKS_KMEM_MAX_EXPORTED];
+    uint16_t seg_nodes[ELKS_KMEM_MAX_EXPORTED * 2U];
+    uint16_t heap_nodes[ELKS_KMEM_MAX_EXPORTED * 2U];
     process_t *active = elks_active_process();
     process_t *swapper = elks_swapper_process();
     int exported_count = 0;
     size_t seg_count = 0;
     size_t heap_count = 0;
-    size_t proc_slots;
     int i;
 
     if (!buf_out || !size_out) {
@@ -645,12 +651,13 @@ static int elks_kmem_build_snapshot(uint8_t **buf_out, size_t *size_out) {
     if (active && active != swapper && elks_proc_visible(active)) {
         exported[exported_count++] = active;
     }
-    proc_slots = proc_slot_count();
-    for (size_t slot = 0; slot < proc_slots && exported_count < MAX_PROCS; slot++) {
-        const process_t *proc = proc_slot(slot);
+    FOREACH_PROC(proc) {
         int seen = 0;
         int j;
 
+        if (exported_count >= ELKS_KMEM_MAX_EXPORTED) {
+            break;
+        }
         if (!elks_proc_visible(proc)) {
             continue;
         }
@@ -688,7 +695,7 @@ static int elks_kmem_build_snapshot(uint8_t **buf_out, size_t *size_out) {
         }
     }
 
-    for (i = 0; i < MAX_PROCS; i++) {
+    for (i = 0; i < ELKS_KMEM_MAX_EXPORTED; i++) {
         elks_kmem_emit_task(buf, ELKS_KMEM_TASKS_OFFSET + (i * ELKS_KMEM_TASK_SLOT_SIZE),
                             i < exported_count ? exported[i] : NULL, &cursor, &refs[i]);
         if (refs[i].code_seg_off != 0U) {
@@ -2311,7 +2318,7 @@ static int elks_sys_ioctl(uint32_t fd, uint32_t request, uint32_t arg_off,
                 if (!arg) {
                     return -EFAULT;
                 }
-                *(uint16_t *)arg = (uint16_t)MAX_PROCS;
+                *(uint16_t *)arg = (uint16_t)ELKS_KMEM_MAX_EXPORTED;
                 return 0;
             case ELKS_MEM_GETUSAGE:
                 if (!arg) {

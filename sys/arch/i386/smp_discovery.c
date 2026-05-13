@@ -9,13 +9,13 @@
 #include <arch/i386/gdt.h>
 #include <arch/i386/pmap.h>
 #include <sys/proc.h>
+#include <pm/pm.h>
 #include <arch/x86-common/lapic.h>
 #include <arch/x86-common/ioapic.h>
 #include <stdio.h>
 
 // Externs for Scheduler and IDT
 #ifndef HOST_TEST
-extern process_t processes[];
 extern thread_t *sched_alloc_thread(process_t *proc);
 
 // IDT Pointer (defined in idt.c)
@@ -621,7 +621,7 @@ int smp_boot_ap(uint8_t apic_id) {
     pcpu->tss.esp0 = (uint32_t)&ap_stacks[cpu_idx][4096];
 
     // 2d. Create Idle Thread for the new core
-    thread_t *idle = sched_alloc_thread(&processes[0]);
+    thread_t *idle = sched_alloc_thread(kernel_process);
     if (idle) {
         idle->state = THREAD_RUNNING;
         idle->on_runqueue = 0;
@@ -629,7 +629,7 @@ int smp_boot_ap(uint8_t apic_id) {
         idle->kstack_top = pcpu->tss.esp0;
         idle->priority = 0;
         idle->sched_class = SCHED_IDLE;
-        idle->proc = &processes[0]; // Ensure it belongs to kernel process
+        idle->proc = kernel_process;
         idle->bound_cpu = cpu_idx;
 
         pcpu->idle = idle;

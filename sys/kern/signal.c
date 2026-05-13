@@ -758,10 +758,9 @@ int sys_kill(int pid, int sig) {
         // Send to all processes (except Init)
         int permitted = 0;
         int matched = 0;
-        for (size_t i = 0; i < proc_slot_count(); i++) {
-            process_t *proc = proc_slot(i);
-            if (proc && proc->pid > 1) {
-                 signal_record_match(proc, &matched, &permitted, sig);
+        FOREACH_PROC(proc) {
+            if (proc->pid > 1) {
+                signal_record_match(proc, &matched, &permitted, sig);
             }
         }
         if (matched == 0) return -ESRCH;

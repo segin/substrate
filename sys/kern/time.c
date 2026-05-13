@@ -429,9 +429,8 @@ void timer_tick_context(int is_usermode) {
         if ((ticks % HZ) == 0) {
             vt_tick_1hz();
         }
-        for (size_t i = 0; i < proc_slot_count(); i++) {
-            process_t *p = proc_slot(i);
-            if (!p || p->pid == -1 || p->is_kernel_task) {
+        FOREACH_PROC(p) {
+            if (p->is_kernel_task) {
                 continue;
             }
             proc_timer_fire(p, ITIMER_REAL);

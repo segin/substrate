@@ -126,11 +126,10 @@ process_t *vm_page_select_oom_victim(void) {
 	process_t *victim = NULL;
 	uint32_t best_score = 0;
 
-    for (size_t i = 0; i < proc_slot_count(); i++) {
-        process_t *proc = proc_slot(i);
+    FOREACH_PROC(proc) {
         uint32_t score;
 
-        if (!proc || proc->pid <= 1) {
+        if (proc->pid <= 1) {
             continue;
         }
 		if (proc->is_kernel_task) {
