@@ -36,6 +36,13 @@ int strncmp(const char *s1, const char *s2, size_t n);
 int strcoll(const char *s1, const char *s2);
 size_t strxfrm(char *dest, const char *src, size_t n);
 
+/* BSD/GNU extension: case-insensitive compare also visible via
+ * <string.h>.  Canonical home is <strings.h> per POSIX but most
+ * userland (binutils gas/as.c, autoconf, many old packages) just
+ * #include <string.h> and expect these to be declared. */
+int strcasecmp(const char *s1, const char *s2);
+int strncasecmp(const char *s1, const char *s2, size_t n);
+
 char *strchr(const char *s, int c);
 char *strrchr(const char *s, int c);
 size_t strcspn(const char *s, const char *reject);
