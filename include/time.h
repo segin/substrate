@@ -59,6 +59,7 @@ struct tm *localtime_r(const time_t *__restrict timer, struct tm *__restrict res
 
 clock_t clock(void);
 int clock_gettime(clockid_t clk_id, struct timespec *tp);
+int nanosleep(const struct timespec *req, struct timespec *rem);
 
 #define TIME_UTC 1
 
