@@ -8,7 +8,9 @@ MATH_CFLAGS     = $(USER_CFLAGS)  -fno-builtin
 PIC_MATH_CFLAGS = $(SHLIB_CFLAGS) -fno-builtin
 endif
 
-SRCS = src/math.c src/mathf.c src/mathl.c src/fenv.c
+SRCS = src/math_exp.c src/math_trig.c src/math_special.c \
+       src/math_round.c src/math_wrap.c \
+       src/mathf.c src/mathl.c src/fenv.c
 OBJS     = $(SRCS:.c=.o)
 PIC_OBJS = $(SRCS:.c=.pic.o)
 
