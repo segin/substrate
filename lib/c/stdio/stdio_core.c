@@ -333,25 +333,31 @@ size_t fwrite(const void *ptr, size_t size, size_t nmemb, FILE *stream) {
 }
 
 int fseek(FILE *stream, long offset, int whence) {
-	fflush(stream);
-
 	/* SEEK_CUR must compensate for read-ahead buffering: after an
 	 * fread, the kernel's file position is N bytes past the caller's
 	 * logical position, where N = (limit - pos) bytes still buffered
-	 * (plus one for ungetc).  Without this adjustment,
-	 * fseek(-16, SEEK_CUR) right after reading 8 bytes lseeks the
-	 * underlying fd by -16 from its already-advanced position rather
-	 * than from the caller's view, landing far beyond where the
-	 * caller expects.  BFD's bfd_generic_archive_p hits this exact
-	 * pattern when probing ar archives — reads the 8-byte magic,
-	 * then seeks back -16 + reads 16 to grab the first member-header
-	 * name — and silently sees garbage when the seek lands inside
+	 * (plus one for ungetc).  Compute the compensation BEFORE fflush
+	 * — fflush on a read stream resets pos/limit to the buffer base
+	 * (per the POSIX 2017 input-fflush contract this is incomplete,
+	 * but it's what we do today) which destroys the pending count.
+	 * Without this adjustment, fseek(-16, SEEK_CUR) right after
+	 * reading 8 bytes lseeks the fd by -16 from its already-advanced
+	 * position rather than from the caller's view, landing far past
+	 * where the caller expects.  BFD's bfd_generic_archive_p hits
+	 * this exact pattern when probing ar archives — reads the 8-byte
+	 * magic, reads 16 more for the first member header, then seeks
+	 * back -16 — and silently sees garbage if the seek lands inside
 	 * the first member's content. */
+	long pending = 0;
 	if (whence == SEEK_CUR) {
-		long pending = stream->limit - stream->pos;
+		pending = stream->limit - stream->pos;
 		if (stream->has_unget) pending++;
-		offset -= pending;
 	}
+
+	fflush(stream);
+
+	if (whence == SEEK_CUR)
+		offset -= pending;
 
 	stream->pos = stream->limit = stream->buffer;
 	stream->has_unget = 0;
@@ -393,14 +399,18 @@ int fsetpos(FILE *stream, const fpos_t *pos) {
 }
 
 int fseeko(FILE *stream, off_t offset, int whence) {
+	/* Same buffer-compensation rationale as fseek() above — compute
+	 * pending BEFORE fflush. */
+	off_t pending = 0;
+	if (whence == SEEK_CUR) {
+		pending = (off_t)(stream->limit - stream->pos);
+		if (stream->has_unget) pending++;
+	}
+
 	fflush(stream);
 
-	/* Same buffer-compensation rationale as fseek() above. */
-	if (whence == SEEK_CUR) {
-		off_t pending = (off_t)(stream->limit - stream->pos);
-		if (stream->has_unget) pending++;
+	if (whence == SEEK_CUR)
 		offset -= pending;
-	}
 
 	stream->pos = stream->limit = stream->buffer;
 	stream->has_unget = 0;
