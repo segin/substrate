@@ -334,6 +334,25 @@ size_t fwrite(const void *ptr, size_t size, size_t nmemb, FILE *stream) {
 
 int fseek(FILE *stream, long offset, int whence) {
 	fflush(stream);
+
+	/* SEEK_CUR must compensate for read-ahead buffering: after an
+	 * fread, the kernel's file position is N bytes past the caller's
+	 * logical position, where N = (limit - pos) bytes still buffered
+	 * (plus one for ungetc).  Without this adjustment,
+	 * fseek(-16, SEEK_CUR) right after reading 8 bytes lseeks the
+	 * underlying fd by -16 from its already-advanced position rather
+	 * than from the caller's view, landing far beyond where the
+	 * caller expects.  BFD's bfd_generic_archive_p hits this exact
+	 * pattern when probing ar archives — reads the 8-byte magic,
+	 * then seeks back -16 + reads 16 to grab the first member-header
+	 * name — and silently sees garbage when the seek lands inside
+	 * the first member's content. */
+	if (whence == SEEK_CUR) {
+		long pending = stream->limit - stream->pos;
+		if (stream->has_unget) pending++;
+		offset -= pending;
+	}
+
 	stream->pos = stream->limit = stream->buffer;
 	stream->has_unget = 0;
 	stream->eof = 0;
@@ -375,6 +394,14 @@ int fsetpos(FILE *stream, const fpos_t *pos) {
 
 int fseeko(FILE *stream, off_t offset, int whence) {
 	fflush(stream);
+
+	/* Same buffer-compensation rationale as fseek() above. */
+	if (whence == SEEK_CUR) {
+		off_t pending = (off_t)(stream->limit - stream->pos);
+		if (stream->has_unget) pending++;
+		offset -= pending;
+	}
+
 	stream->pos = stream->limit = stream->buffer;
 	stream->has_unget = 0;
 	stream->eof = 0;
