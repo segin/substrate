@@ -21,6 +21,9 @@ libm.a: $(OBJS)
 # No libm.so symlink in source tree — see lib/c/Makefile.
 libm.so.0: $(PIC_OBJS)
 	$(CC) $(SHLIB_LDFLAGS) -Wl,-soname,libm.so.0 -o $@ $(PIC_OBJS)
+	@# Host ld stamps OSABI=SYSV (0); substrate's ld.so rejects with
+	@# "file in wrong format".  Patch byte 7 to 0x40 (ELFOSABI_SUBSTRATE).
+	@printf '\x40' | dd of=$@ bs=1 count=1 seek=7 conv=notrunc status=none
 
 %.o: %.c
 	$(CC) $(MATH_CFLAGS) -c $< -o $@

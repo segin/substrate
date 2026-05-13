@@ -27,6 +27,10 @@ libsys.a: $(OBJS)
 # shouldn't pull libc in (libc depends on libsys, not the other way).
 libsys.so.0: $(PIC_OBJS)
 	$(CC) $(SHLIB_LDFLAGS) -Wl,-soname,libsys.so.0 -o $@ $(PIC_OBJS)
+	@# Host ld stamps OSABI=SYSV (0); substrate's ld.so rejects with
+	@# "file in wrong format".  Patch byte 7 to 0x40 (ELFOSABI_SUBSTRATE).
+	@# Same scheme as lib/c/Makefile.
+	@printf '\x40' | dd of=$@ bs=1 count=1 seek=7 conv=notrunc status=none
 
 %.o: %.c
 	$(CC) $(CFLAGS) -c -o $@ $<
