@@ -42,19 +42,32 @@ static ld_u32 align_up(ld_u32 v, ld_u32 a) {
     return a <= 1 ? v : (v + a - 1) & ~(a - 1);
 }
 
+/* Global GS base — recorded here so __tls_get_addr() can read it
+ * cheaply without a syscall.  Set at the end of ld_setup_tls().
+ * The same value is also stored at TCB[0] via the variant-II
+ * self-pointer, but reading via gs:0 needs a tiny asm helper —
+ * doing it from C through this variable is portable enough. */
+static ld_u32 ld_tp = 0;
+
 int ld_setup_tls(void) {
     /* First pass: assign each PT_TLS module a negative offset from
      * the thread pointer, in load order.  The deepest dep gets the
      * highest |offset| (= farthest below the TP), the program gets
      * the lowest |offset| (= immediately below the TP) — same as
-     * what static linkers compute when relocating the program. */
+     * what static linkers compute when relocating the program.
+     *
+     * Module IDs are 1-based (0 means "no TLS"), allocated in the
+     * same load order so GD/LD relocations can find the matching
+     * object via a linear scan in __tls_get_addr(). */
     ld_u32 cursor = 0;     /* running |offset| from TP, grows with each module */
     ld_u32 max_align = LD_TLS_TCB_SIZE;
+    ld_u32 next_modid = 1;
     for (ld_obj_t *o = ld_obj_list(); o; o = o->next) {
         if (o->tls_memsz == 0) continue;
         ld_u32 align = o->tls_align ? o->tls_align : 1;
         cursor = align_up(cursor + o->tls_memsz, align);
         o->tls_offset = cursor;     /* slot starts at TP - cursor */
+        o->tls_modid  = next_modid++;
         if (align > max_align) max_align = align;
     }
     if (cursor == 0) {
@@ -114,8 +127,42 @@ int ld_setup_tls(void) {
         ld_puts("\n");
         return rc;
     }
+    ld_tp = tp;
     if (ld_debug) {
         ld_puts("ld.so: TLS installed, tp="); ld_putx(tp); ld_puts("\n");
     }
     return 0;
 }
+
+/* C++ thread_local (and __thread in DSOs) compiles to GD/LD model
+ * calls into __tls_get_addr.  GCC emits:
+ *
+ *     leal  X@TLSGD(,%ebx,1), %eax
+ *     call  ___tls_get_addr@PLT
+ *
+ * with X@TLSGD resolving (via two relocations on a GOT pair) to a
+ * tls_index{module, offset} struct.  The helper returns the runtime
+ * address of variable X within the current thread.
+ *
+ * Substrate's loader stores per-module TLS offsets in ld_obj_t.
+ * Linear scan is fine — programs rarely have more than a handful
+ * of TLS-using modules. */
+/* Public surface — explicit visibility since the rest of ld.so is
+ * built with -fvisibility=hidden. */
+#define LD_PUBLIC __attribute__((visibility("default")))
+
+LD_PUBLIC void *__tls_get_addr(tls_index *idx) {
+    if (!idx || idx->ti_module == 0) return 0;
+    for (ld_obj_t *o = ld_obj_list(); o; o = o->next) {
+        if (o->tls_modid == idx->ti_module)
+            return (void *)(unsigned long)
+                (ld_tp - o->tls_offset + idx->ti_offset);
+    }
+    return 0;
+}
+
+/* GNU's libc historically also exports ___tls_get_addr (three
+ * underscores) — same function, alternate name from the early
+ * x86 PIC linker conventions.  Alias the entry. */
+LD_PUBLIC void *___tls_get_addr(tls_index *idx)
+    __attribute__((alias("__tls_get_addr")));

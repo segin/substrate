@@ -21,6 +21,47 @@
 
 #include "ld.h"
 
+/* If the importer carries DT_VERSYM + DT_VERNEED, find the version
+ * hash that this reference requires.  Returns 0 if either the
+ * object has no versioning or this particular reference is
+ * unversioned (VER_NDX_GLOBAL).  Used to keep cross-DSO links
+ * inside the right ABI version family — vital for libstdc++ which
+ * legitimately ships multiple definitions of the same symbol name
+ * at different GLIBCXX_3.4.* version tags. */
+static ld_u32 importer_version_hash(const ld_obj_t *obj, ld_u32 sym_idx) {
+    if (!obj->versym || !obj->verneed) return 0;
+    Elf32_Half vs = obj->versym[sym_idx];
+    ld_u32 ndx = VER_NDX(vs);
+    if (ndx == VER_NDX_LOCAL || ndx == VER_NDX_GLOBAL) return 0;
+
+    /* Walk the verneed entries, look up the vernaux whose vna_other
+     * matches our VERSYM ndx. */
+    unsigned char *p = (unsigned char *)obj->verneed;
+    for (ld_u32 i = 0; i < obj->verneednum; i++) {
+        Elf32_Verneed *vn = (Elf32_Verneed *)p;
+        unsigned char *ap = p + vn->vn_aux;
+        for (ld_u32 j = 0; j < vn->vn_cnt; j++) {
+            Elf32_Vernaux *va = (Elf32_Vernaux *)ap;
+            if (va->vna_other == ndx)
+                return va->vna_hash;
+            if (va->vna_next == 0) break;
+            ap += va->vna_next;
+        }
+        if (vn->vn_next == 0) break;
+        p += vn->vn_next;
+    }
+    return 0;
+}
+
+/* Wrapper: version-aware ld_resolve.  Picks the right resolver
+ * depending on whether the importer has versioning metadata. */
+static ld_u32 resolve_for(const ld_obj_t *obj, ld_u32 sym_idx,
+                          const char *name) {
+    ld_u32 vh = importer_version_hash(obj, sym_idx);
+    if (vh == 0) return ld_resolve(name);
+    return ld_resolve_versioned(name, vh, 0, 0);
+}
+
 static int apply_one(ld_obj_t *obj, Elf32_Rel *r) {
     ld_u32 type = ELF32_R_TYPE(r->r_info);
     ld_u32 sym  = ELF32_R_SYM(r->r_info);
@@ -45,7 +86,7 @@ static int apply_one(ld_obj_t *obj, Elf32_Rel *r) {
             return -1;
         }
         const char *name = obj->strtab + obj->symtab[sym].st_name;
-        ld_u32 v = ld_resolve(name);
+        ld_u32 v = resolve_for(obj, sym, name);
         if (v == 0) {
             /* Weak undefined symbols are allowed to remain 0. */
             unsigned char bind = ELF32_ST_BIND(obj->symtab[sym].st_info);
@@ -61,7 +102,7 @@ static int apply_one(ld_obj_t *obj, Elf32_Rel *r) {
     case R_386_32: {
         if (sym == 0) { *p += obj->base; return 0; }
         const char *name = obj->strtab + obj->symtab[sym].st_name;
-        ld_u32 v = ld_resolve(name);
+        ld_u32 v = resolve_for(obj, sym, name);
         if (v == 0) {
             unsigned char bind = ELF32_ST_BIND(obj->symtab[sym].st_info);
             if (bind == STB_WEAK) { /* keep addend */ return 0; }
@@ -75,7 +116,7 @@ static int apply_one(ld_obj_t *obj, Elf32_Rel *r) {
     case R_386_PC32: {
         if (sym == 0) return 0;
         const char *name = obj->strtab + obj->symtab[sym].st_name;
-        ld_u32 v = ld_resolve(name);
+        ld_u32 v = resolve_for(obj, sym, name);
         if (v == 0) {
             unsigned char bind = ELF32_ST_BIND(obj->symtab[sym].st_info);
             if (bind == STB_WEAK) return 0;
@@ -130,6 +171,34 @@ static int apply_one(ld_obj_t *obj, Elf32_Rel *r) {
          * actual TPOFF is sym_value - obj->tls_offset, which fits in
          * a signed 32-bit; userspace then loads gs:TPOFF. */
         *p = s->st_value - obj->tls_offset + *p;
+        return 0;
+    }
+
+    case R_386_TLS_DTPMOD32:
+        /* Module-id half of the tls_index pair consumed by
+         * __tls_get_addr in the GD model.  For undef-sym variants
+         * (LDM uses sym=0) the module is the current object;
+         * otherwise it's the defining object of the symbol.  In
+         * either case the binding stays inside this DSO because
+         * GD on a globally-defined TLS symbol is unusual — gcc
+         * would have emitted IE/TPOFF instead.  Substrate always
+         * binds DTPMOD32 to obj->tls_modid for both flavours,
+         * which is correct for the LDM/GD-of-local cases that
+         * libstdc++ and __thread C++ types produce. */
+        *p = obj->tls_modid;
+        return 0;
+
+    case R_386_TLS_DTPOFF32: {
+        /* Offset-within-module half of the GD/LD pair.  For LDM
+         * (sym == 0) the addend already carries the offset.  For
+         * GD-with-symbol, resolve to st_value within obj. */
+        if (sym == 0) return 0;
+        Elf32_Sym *s = &obj->symtab[sym];
+        if (s->st_shndx == SHN_UNDEF) {
+            ld_puts("ld.so: DTPOFF undef in "); ld_puts(obj->name); ld_puts("\n");
+            return -1;
+        }
+        *p = s->st_value + *p;
         return 0;
     }
 

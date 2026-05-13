@@ -1,18 +1,31 @@
 /*
  * ld_resolve.c — symbol resolution against the loaded-object list.
  *
- * Phase 3 strategy: walk the loaded-object list in load order; for
- * each object, hash-lookup the name in DT_GNU_HASH (preferred) or
- * fall back to DT_HASH.  Return the first non-undef definition.
+ * Phase 3 + Phase 5 strategy: walk the loaded-object list in load
+ * order; for each object, hash-lookup the name in DT_GNU_HASH
+ * (preferred) or fall back to DT_HASH.  Return the first
+ * non-undef definition that matches the importer's version
+ * requirement (if any).
  *
- * Skipped for now (deferred to later phases):
- *   - Symbol versioning (DT_VERSYM / DT_VERDEF / DT_VERNEED).
+ * Phase 5 adds GNU symbol versioning (DT_VERSYM / DT_VERDEF /
+ * DT_VERNEED).  Required by libstdc++.so.6 which decorates every
+ * exported symbol with GLIBCXX_3.4.* version tags and ABI-versions
+ * a handful of them across releases.  Without version-aware
+ * resolution the loader would happily bind a caller's
+ * `std::string::compare@GLIBCXX_3.4.21` reference to the unversioned
+ * symbol of the same name in a stale libstdc++, silently corrupting
+ * the C++ ABI.
+ *
+ * Still deferred:
  *   - LD_PRELOAD / interposition rules.
- *   - Weak symbol semantics — treat WEAK undef as "keep looking",
- *     but don't promote weak defs over strong defs in later objects
- *     (we always take the first definition seen).
  *   - STV_HIDDEN / STV_PROTECTED visibility filtering — every
  *     globally-bound symbol is currently eligible.
+ *
+ * Weak symbol semantics: WEAK undef references keep looking past
+ * undef; first non-undef def (strong or weak) wins.  Standard
+ * vague-linkage handling — multiple DSOs may legitimately export
+ * the same symbol (vtables, typeinfo, template instantiations) and
+ * the runtime picks one canonical instance.
  */
 
 #include "ld.h"
@@ -113,10 +126,83 @@ static Elf32_Sym *lookup_sysv(const ld_obj_t *o, const char *name) {
     return 0;
 }
 
-/* Internal: scope walk with optional skip-this-object and a place
- * to deposit the symbol's st_size for R_386_COPY callers. */
-static ld_u32 resolve_internal(const char *name, const ld_obj_t *skip,
-                               ld_u32 *size_out) {
+/* Standard ELF hash — the same function ELF uses for symbol-name
+ * hashing in the SysV DT_HASH section, and (separately) for
+ * GNU-versioning verdef/verneed name hashes. */
+ld_u32 ld_elf_hash(const char *s) {
+    ld_u32 h = 0, g;
+    while (*s) {
+        h = (h << 4) + (unsigned char)*s++;
+        g = h & 0xf0000000;
+        if (g) h ^= g >> 24;
+        h &= ~g;
+    }
+    return h;
+}
+
+/* Given a symbol index in object `o`, decide whether the symbol is
+ * eligible to satisfy a lookup requesting version-hash `want_hash`.
+ *
+ *   want_hash == 0   The caller didn't specify a version (legacy
+ *                    unversioned reference, or the importer's
+ *                    VERSYM says GLOBAL=1).  Match any symbol whose
+ *                    VERSYM is GLOBAL, BASE (vd_flags & VER_FLG_BASE),
+ *                    or non-hidden.  Skip hidden non-default
+ *                    versions.
+ *
+ *   want_hash != 0   Caller wants a specific version.  Match iff
+ *                    the symbol's verdef carries that vd_hash.
+ *
+ * For DSOs without DT_VERSYM (substrate's own libc / libm / etc.
+ * pre-Phase-5) every symbol matches — versioning is opt-in per
+ * object. */
+static int version_matches(const ld_obj_t *o, ld_u32 sym_index,
+                           ld_u32 want_hash) {
+    if (!o->versym || !o->verdef) return 1;   /* unversioned exporter */
+    Elf32_Half vs = o->versym[sym_index];
+    ld_u32 ndx = VER_NDX(vs);
+    int hidden = VER_IS_HIDDEN(vs);
+
+    if (ndx == VER_NDX_LOCAL) return 0;       /* not exported */
+
+    if (want_hash == 0) {
+        /* Unversioned reference.  Hidden non-default versions are
+         * NOT eligible; only the base/default version answers. */
+        if (ndx == VER_NDX_GLOBAL) return 1;
+        if (hidden) return 0;
+        /* Look up vd_flags for this index. */
+        unsigned char *p = (unsigned char *)o->verdef;
+        for (ld_u32 i = 0; i < o->verdefnum; i++) {
+            Elf32_Verdef *vd = (Elf32_Verdef *)p;
+            if (vd->vd_ndx == ndx)
+                return (vd->vd_flags & VER_FLG_BASE) != 0
+                    || (vd->vd_flags & VER_FLG_WEAK) != 0
+                    || !hidden;
+            if (vd->vd_next == 0) break;
+            p += vd->vd_next;
+        }
+        return !hidden;
+    }
+
+    /* Versioned reference.  Find this index's vd_hash; compare. */
+    if (ndx == VER_NDX_GLOBAL) return 0;      /* unversioned def can't
+                                                 satisfy versioned req */
+    unsigned char *p = (unsigned char *)o->verdef;
+    for (ld_u32 i = 0; i < o->verdefnum; i++) {
+        Elf32_Verdef *vd = (Elf32_Verdef *)p;
+        if (vd->vd_ndx == ndx)
+            return vd->vd_hash == want_hash;
+        if (vd->vd_next == 0) break;
+        p += vd->vd_next;
+    }
+    return 0;
+}
+
+/* Internal: scope walk with optional skip-this-object, version
+ * filter, and a place to deposit the symbol's st_size for R_386_COPY
+ * callers. */
+static ld_u32 resolve_internal(const char *name, ld_u32 want_ver_hash,
+                               const ld_obj_t *skip, ld_u32 *size_out) {
     for (ld_obj_t *o = ld_obj_list(); o; o = o->next) {
         if (o == skip) continue;
         Elf32_Sym *s = lookup_gnu(o, name);
@@ -125,6 +211,8 @@ static ld_u32 resolve_internal(const char *name, const ld_obj_t *skip,
         if (s->st_shndx == SHN_UNDEF) continue;
         unsigned char bind = ELF32_ST_BIND(s->st_info);
         if (bind != STB_GLOBAL && bind != STB_WEAK) continue;
+        ld_u32 sym_idx = (ld_u32)(s - o->symtab);
+        if (!version_matches(o, sym_idx, want_ver_hash)) continue;
         if (size_out) *size_out = s->st_size;
         return s->st_value + o->base;
     }
@@ -133,14 +221,19 @@ static ld_u32 resolve_internal(const char *name, const ld_obj_t *skip,
 }
 
 ld_u32 ld_resolve(const char *name) {
-    return resolve_internal(name, 0, 0);
+    return resolve_internal(name, 0, 0, 0);
 }
 
 ld_u32 ld_resolve_skip(const char *name, const ld_obj_t *skip) {
-    return resolve_internal(name, skip, 0);
+    return resolve_internal(name, 0, skip, 0);
 }
 
 ld_u32 ld_resolve_with_size(const char *name, const ld_obj_t *skip,
                             ld_u32 *size_out) {
-    return resolve_internal(name, skip, size_out);
+    return resolve_internal(name, 0, skip, size_out);
+}
+
+ld_u32 ld_resolve_versioned(const char *name, ld_u32 vh_hash,
+                            const ld_obj_t *skip, ld_u32 *size_out) {
+    return resolve_internal(name, vh_hash, skip, size_out);
 }

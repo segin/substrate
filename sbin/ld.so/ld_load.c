@@ -107,6 +107,7 @@ static void ld_cache_dynamic(ld_obj_t *o) {
     ld_u32 fini_arr_off = 0;
     ld_u32 soname_str = 0;
     int    soname_seen = 0;
+    ld_u32 versym_off = 0, verdef_off = 0, verneed_off = 0;
 
     for (Elf32_Dyn *d = o->dynamic; d->d_tag != DT_NULL; d++) {
         switch (d->d_tag) {
@@ -126,6 +127,11 @@ static void ld_cache_dynamic(ld_obj_t *o) {
         case DT_FINI_ARRAY:    fini_arr_off = d->d_un.d_ptr; break;
         case DT_FINI_ARRAYSZ:  o->fini_arraysz = d->d_un.d_val; break;
         case DT_SONAME:    soname_str = d->d_un.d_val; soname_seen = 1; break;
+        case DT_VERSYM:    versym_off  = d->d_un.d_ptr; break;
+        case DT_VERDEF:    verdef_off  = d->d_un.d_ptr; break;
+        case DT_VERDEFNUM: o->verdefnum  = d->d_un.d_val; break;
+        case DT_VERNEED:   verneed_off = d->d_un.d_ptr; break;
+        case DT_VERNEEDNUM: o->verneednum = d->d_un.d_val; break;
         }
     }
 
@@ -139,6 +145,9 @@ static void ld_cache_dynamic(ld_obj_t *o) {
     o->fini       = fini_off       ? (void (*)(void))(fini_off       + o->base) : 0;
     o->init_array = init_arr_off   ? (void (**)(void))(init_arr_off  + o->base) : 0;
     o->fini_array = fini_arr_off   ? (void (**)(void))(fini_arr_off  + o->base) : 0;
+    o->versym  = versym_off  ? (Elf32_Half    *)(versym_off  + o->base) : 0;
+    o->verdef  = verdef_off  ? (Elf32_Verdef  *)(verdef_off  + o->base) : 0;
+    o->verneed = verneed_off ? (Elf32_Verneed *)(verneed_off + o->base) : 0;
 
     if (soname_seen && o->strtab && o->name[0] == '\0') {
         ld_strncpy(o->name, o->strtab + soname_str, sizeof(o->name));

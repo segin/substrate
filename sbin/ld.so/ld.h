@@ -67,6 +67,13 @@ typedef struct {
 #define DT_INIT    12
 #define DT_FINI    13
 #define DT_INIT_ARRAY    25
+/* GNU symbol versioning — required to load libstdc++.so.6 and any
+ * other DSO that uses versioned symbols (GLIBCXX_3.4 etc.). */
+#define DT_VERSYM      0x6ffffff0   /* Per-symbol version index table */
+#define DT_VERDEF      0x6ffffffc   /* Verdef array (what we provide) */
+#define DT_VERDEFNUM   0x6ffffffd
+#define DT_VERNEED     0x6ffffffe   /* Verneed array (what we require) */
+#define DT_VERNEEDNUM  0x6fffffff
 #define DT_FINI_ARRAY    26
 #define DT_INIT_ARRAYSZ  27
 #define DT_FINI_ARRAYSZ  28
@@ -98,6 +105,8 @@ typedef struct {
 #define R_386_TLS_LE      17
 #define R_386_TLS_GD      18
 #define R_386_TLS_LDM     19
+#define R_386_TLS_DTPMOD32 35  /* module id of GD/LD tls_index slot */
+#define R_386_TLS_DTPOFF32 36  /* offset within module for GD/LD tls_index */
 
 /* Auxv entries used in Phase 2 */
 #define AT_NULL    0
@@ -168,6 +177,67 @@ typedef struct {
 #define STB_WEAK   2
 #define STN_UNDEF  0
 #define SHN_UNDEF  0
+
+/* GNU symbol versioning — DT_VERDEF / DT_VERNEED / DT_VERSYM blocks.
+ * Layout per glibc / binutils elf/external.h.  Strings live in the
+ * dynamic strtab; the version-name HASH is computed via the standard
+ * ELF hash function (NOT the GNU hash). */
+typedef ld_u16 Elf32_Half;
+
+typedef struct {
+    Elf32_Half vd_version;  /* always 1 */
+    Elf32_Half vd_flags;    /* VER_FLG_BASE (1) for the base def slot */
+    Elf32_Half vd_ndx;      /* version index (1..N), matches VERSYM */
+    Elf32_Half vd_cnt;      /* number of vd_aux entries (>=1) */
+    ld_u32     vd_hash;     /* ELF hash of the version name */
+    ld_u32     vd_aux;      /* byte offset to first Elf32_Verdaux */
+    ld_u32     vd_next;     /* byte offset to next Elf32_Verdef (0=end) */
+} Elf32_Verdef;
+
+typedef struct {
+    ld_u32     vda_name;    /* offset into strtab — version name */
+    ld_u32     vda_next;    /* byte offset to next aux (0=end) */
+} Elf32_Verdaux;
+
+typedef struct {
+    Elf32_Half vn_version;  /* always 1 */
+    Elf32_Half vn_cnt;      /* number of vn_aux entries */
+    ld_u32     vn_file;     /* offset into strtab — providing soname */
+    ld_u32     vn_aux;      /* byte offset to first Elf32_Vernaux */
+    ld_u32     vn_next;     /* byte offset to next Elf32_Verneed (0=end) */
+} Elf32_Verneed;
+
+typedef struct {
+    ld_u32     vna_hash;    /* ELF hash of the required version name */
+    Elf32_Half vna_flags;
+    Elf32_Half vna_other;   /* version index — matches VERSYM in this DSO */
+    ld_u32     vna_name;    /* offset into strtab — version name */
+    ld_u32     vna_next;    /* byte offset to next aux (0=end) */
+} Elf32_Vernaux;
+
+/* VERSYM is a Half[] parallel to .dynsym.  Index meanings:
+ *   0 = VER_NDX_LOCAL    (symbol not exported)
+ *   1 = VER_NDX_GLOBAL   (no version assigned — base def)
+ *   N = a verdef vd_ndx (exporter) or vernaux vna_other (importer)
+ * The high bit 0x8000 is the HIDDEN flag: when set on a defined
+ * symbol, the symbol is NOT eligible to satisfy an unversioned
+ * (or differently-versioned) lookup.  Strip with VER_NDX(). */
+#define VER_NDX_LOCAL    0
+#define VER_NDX_GLOBAL   1
+#define VER_NDX_HIDDEN   0x8000
+#define VER_NDX(v)       ((v) & 0x7fff)
+#define VER_IS_HIDDEN(v) (((v) & VER_NDX_HIDDEN) != 0)
+#define VER_FLG_BASE     1
+#define VER_FLG_WEAK     2
+
+/* TLS module descriptor passed to __tls_get_addr() for GD/LD models.
+ * On i386 the call is regparm(1) — pointer in %eax — but our exported
+ * symbol is plain cdecl since GCC emits a normal call instruction
+ * with the pointer pushed on the stack for the GD sequence. */
+typedef struct {
+    ld_u32 ti_module;
+    ld_u32 ti_offset;
+} tls_index;
 
 /* Tiny IO helpers — implemented in ld_io.c. */
 void  ld_write(int fd, const char *buf, ld_size len);
@@ -240,6 +310,22 @@ typedef struct ld_obj {
     int             initialized;
     int             finalized;
 
+    /* Phase 5 (C++ linkage): GNU symbol-versioning sections.  All
+     * three are biased pointers into the loaded image.  NULL when
+     * the DSO doesn't carry versioning (substrate libc, libm, etc.
+     * currently don't — libstdc++.so.6 does). */
+    Elf32_Half     *versym;     /* DT_VERSYM — parallel to symtab */
+    Elf32_Verdef   *verdef;     /* DT_VERDEF — what we EXPORT */
+    Elf32_Verneed  *verneed;    /* DT_VERNEED — what we IMPORT */
+    ld_u32          verdefnum;  /* count of verdef entries */
+    ld_u32          verneednum; /* count of verneed entries */
+
+    /* Phase 5 (TLS GD/LD): per-DSO module index.  Assigned when the
+     * object loads, used as the ti_module field passed to
+     * __tls_get_addr() by GD/LD-model relocations.  0 = "no TLS in
+     * this object". */
+    ld_u32          tls_modid;
+
     struct ld_obj  *next;
 } ld_obj_t;
 
@@ -256,6 +342,20 @@ ld_u32 ld_resolve(const char *name);
  * must find the source-of-truth in a SHARED library, not in the
  * executable that's about to receive the copy. */
 ld_u32 ld_resolve_skip(const char *name, const ld_obj_t *skip);
+
+/* Version-aware resolution.  When the IMPORTER's VERSYM marks a
+ * reference with a non-default version index, the resolver only
+ * matches symbols whose VERSYM in the candidate object carries the
+ * matching vd_hash (or whose vd_flags has VER_FLG_BASE set,
+ * indicating a default version).  vh_hash is the ELF hash of the
+ * importer's required-version-name; pass 0 for unversioned
+ * lookups (caller wants the default version). */
+ld_u32 ld_resolve_versioned(const char *name, ld_u32 vh_hash,
+                            const ld_obj_t *skip, ld_u32 *size_out);
+
+/* Standard ELF hash function — re-used for version-name hashing
+ * (the SAME function ELF uses for the SysV symbol-name hash table). */
+ld_u32 ld_elf_hash(const char *s);
 
 /* Same, but also returns the symbol size (for R_386_COPY).
  * Returns 0 (and *size_out=0) if not found. */
