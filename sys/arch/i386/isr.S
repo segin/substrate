@@ -300,6 +300,68 @@ jump_to_elks:
     
     iret
 
+# new_user_thread_trampoline - first-run entry for a user thread created
+# via SYS_THR_NEW.  Called by switch_to's `ret` on the new thread's
+# initial scheduling.  Expects three cdecl-style args at the top of the
+# kernel stack (pushed by sched_create_thread):
+#
+#   [esp+0]   user_entry   (user-mode function to invoke, e.g. __pthread_trampoline)
+#   [esp+4]   user_stack   (user-mode stack top — already malloc'd in user space)
+#   [esp+8]   user_arg     (single void* argument to user_entry, cdecl)
+#
+# Builds the iret frame on the kernel stack and IRETs to userspace.  The
+# user stack is rewritten in-place to look like a normal call frame
+# (return-addr 0 followed by arg) so user_entry sees `arg` at [esp+4]
+# exactly as if it had been `call`'d.
+.global new_user_thread_trampoline
+new_user_thread_trampoline:
+    pop %ecx                # user_entry
+    pop %edx                # user_stack
+    pop %eax                # user_arg
+
+    cli
+
+    # Load user data segments.  We can't trust whatever the previous
+    # context left here.
+    push %eax               # save user_arg across segment moves
+    mov $0x23, %ax          # USER_DATA_SEL
+    mov %ax, %ds
+    mov %ax, %es
+    xor %ax, %ax            # null FS/GS — TLS slot is reloaded via arch_switch_to
+    mov %ax, %fs
+    mov %ax, %gs
+    pop %eax                # restore user_arg
+
+    # Build the cdecl call frame on the *user* stack so the trampoline
+    # sees `arg` at [esp+4] like a normal call.
+    sub $4, %edx
+    movl %eax, (%edx)       # *user_stack = arg
+    sub $4, %edx
+    movl $0, (%edx)         # *user_stack = return-addr 0
+                            # (returning would _exit; trampoline does that
+                            #  itself via pthread_exit)
+
+    # Build IRET frame: push in order [SS, ESP, EFLAGS, CS, EIP]
+    push $0x23              # User SS
+    push %edx               # User ESP
+    pushf
+    pop %eax
+    or $0x200, %eax         # IF=1 (enable interrupts in user mode)
+    push %eax               # EFLAGS
+    push $0x1B              # User CS
+    push %ecx               # User EIP
+
+    # Clear GPRs so the new thread starts with a clean slate.
+    xor %eax, %eax
+    xor %ebx, %ebx
+    xor %ecx, %ecx
+    xor %edx, %edx
+    xor %esi, %esi
+    xor %edi, %edi
+    xor %ebp, %ebp
+
+    iret
+
 # fork_child_return - called when child process is scheduled
 # Child's stack already has: GS, FS, ES, DS, pusha regs, int_no, err_code, IRET frame
 # This restores registers and returns to userspace via IRET

@@ -181,29 +181,76 @@ int sched_fork_thread(process_t *proc, void *parent_regs) {
 thread_t *sched_create_thread(process_t *proc, void (*entry_point)(void*), void *stack, void *arg) {
     thread_t *t = sched_alloc_thread(proc);
     if (!t) return NULL;
-    
-    // Simulate stack frame for "entry_point(arg)"
-    uint32_t *stk = (uint32_t*)stack;
-    t->kstack_top = (uintptr_t)stk;
-    
-    // Correct stack for switch_to (same as before):
-    // [Arg]
-    // [0] (Ret addr for entry_point)
-    // [exit_wrapper]
-    // [entry_point] (saved EIP for switch_to)
-    // [ebp, edi, esi, ebx]
-    
-    stk--; *stk = (uint32_t)(uintptr_t)arg;
-    stk--; *stk = (uint32_t)(uintptr_t)thread_exit_wrapper; 
-    stk--; *stk = (uint32_t)(uintptr_t)entry_point; 
-    stk--; *stk = 0; // ebp
-    stk--; *stk = 0; // edi
-    stk--; *stk = 0; // esi
-    stk--; *stk = 0; // ebx
-    
-    t->kstack_ptr = (uintptr_t)stk; 
-    t->instr_ptr = (uintptr_t)entry_point;
-    t->state = THREAD_READY; // Ready to be scheduled
 
+    /* Branch on entry mode:
+     *
+     *   Kernel thread  (entry_point in kernel virtual range, >= 0xC0000000):
+     *     entry_point is a plain kernel function reached by `ret`.  Set
+     *     up the user-supplied stack as the kernel stack with
+     *     [arg, exit_wrapper, entry_point, saved-regs] — this is the
+     *     historical path and remains correct for kthreads (the swapper,
+     *     bio sync, etc).
+     *
+     *   User thread    (entry_point in user range, < 0xC0000000):
+     *     entry_point is user code (libpthread's __pthread_trampoline).
+     *     Allocate a dedicated kernel stack (8KB) and arrange for
+     *     switch_to's first `ret` to land in
+     *     new_user_thread_trampoline (asm helper in isr.S), which
+     *     builds the user IRET frame and switches to CPL=3.
+     *     The user-supplied `stack` becomes the user-mode stack
+     *     (handed to the trampoline, which adjusts it for cdecl). */
+    int is_user = (uint32_t)(uintptr_t)entry_point < 0xC0000000U;
+
+    if (!is_user) {
+        uint32_t *stk = (uint32_t*)stack;
+        t->kstack_top = (uintptr_t)stk;
+
+        stk--; *stk = (uint32_t)(uintptr_t)arg;
+        stk--; *stk = (uint32_t)(uintptr_t)thread_exit_wrapper;
+        stk--; *stk = (uint32_t)(uintptr_t)entry_point;
+        stk--; *stk = 0; // ebp
+        stk--; *stk = 0; // edi
+        stk--; *stk = 0; // esi
+        stk--; *stk = 0; // ebx
+
+        t->kstack_ptr = (uintptr_t)stk;
+        t->instr_ptr  = (uintptr_t)entry_point;
+        t->state      = THREAD_READY;
+        return t;
+    }
+
+    /* User thread path. */
+    extern void *pmm_alloc_contiguous(size_t);
+    void *kstack_base = pmm_alloc_contiguous(2);   /* 8 KiB */
+    if (!kstack_base) {
+        t->proc  = NULL;
+        t->tid   = -1;
+        t->state = THREAD_ZOMBIE;
+        return NULL;
+    }
+    uint32_t *kstack = (uint32_t *)((uint32_t)kstack_base + 0x2000);
+    t->kstack_base  = (uintptr_t)kstack_base;
+    t->kstack_top   = (uintptr_t)kstack;
+    t->kstack_units = 2;
+    t->kstack_type  = THREAD_KSTACK_PMM_CONTIG;
+    t->kstack_owned = 1;
+
+    /* The trampoline (new_user_thread_trampoline, in isr.S) pops three
+     * cdecl args off this stack: user_entry, user_stack, user_arg.
+     * Below those, switch_to expects [ebx, esi, edi, ebp, ret_addr]. */
+    kstack--; *kstack = (uint32_t)(uintptr_t)arg;          /* user_arg   */
+    kstack--; *kstack = (uint32_t)(uintptr_t)stack;        /* user_stack */
+    kstack--; *kstack = (uint32_t)(uintptr_t)entry_point;  /* user_entry */
+
+    extern void new_user_thread_trampoline(void);
+    kstack--; *kstack = (uint32_t)(uintptr_t)&new_user_thread_trampoline; /* ret-addr */
+    kstack--; *kstack = 0; /* ebp */
+    kstack--; *kstack = 0; /* edi */
+    kstack--; *kstack = 0; /* esi */
+    kstack--; *kstack = 0; /* ebx */
+
+    t->kstack_ptr = (uintptr_t)kstack;
+    t->instr_ptr  = (uintptr_t)entry_point;
+    t->state      = THREAD_READY;
     return t;
 }

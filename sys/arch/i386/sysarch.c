@@ -8,6 +8,7 @@
 #include <arch/i386/syscall.h>
 #include <arch/i386/percpu.h>
 #include <arch/i386/gdt.h>
+#include <arch/i386/idt.h>  /* registers_t */
 
 extern int vm86_init_bsd(void *args);
 extern void gdt_set_gate(int num, uint32_t base, uint32_t limit, uint8_t access, uint8_t gran);
