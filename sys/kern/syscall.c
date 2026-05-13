@@ -994,11 +994,17 @@ int kern_thr_new(struct thr_param *param, int param_size) {
     struct thr_param p = *param;
     void *stack_top = (char*)p.stack_base + p.stack_size;
     thread_t *t = sched_create_thread(current_process, p.start_func, stack_top, p.arg);
-    if (t) {
-        if (p.child_tid) *p.child_tid = t->tid;
-        return 0;
-    }
-    return -1;
+    if (!t) return -1;
+    if (p.child_tid) *p.child_tid = t->tid;
+    /* Per-thread TLS: caller (libpthread) allocated a fresh TLS
+     * block, computed the thread pointer (TP), and passed it in
+     * p.tls_base.  Store on the thread_t so the scheduler reloads
+     * the corresponding GDT slot whenever this thread is switched
+     * in — that's what makes %gs:N TLS reads find this thread's
+     * own block instead of the most recent thread's TCB.  tls_size
+     * is informational; the kernel doesn't currently use it. */
+    if (p.tls_base) t->gs_base = (uint32_t)(uintptr_t)p.tls_base;
+    return 0;
 }
 
 int sys_thr_exit(void *retval) {

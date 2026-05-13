@@ -78,17 +78,33 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr,
     ta->start_routine = start_routine;
     ta->arg = arg;
 
+    /* Per-thread TLS: ask ld.so to allocate a fresh block laid out
+     * the same as the initial thread's, with each module's PT_TLS
+     * image copied into place.  Returned pointer is the TP (= TCB
+     * address); the kernel installs it as the new thread's
+     * gs_base so `mov %gs:0, %eax` and TLS-relative loads inside
+     * the new thread find this thread's own data.
+     *
+     * Resolved as a weak ref so a statically-linked program
+     * without ld.so (no TLS, or all TLS in the initial thread)
+     * still links — in that case __ldso_alloc_tls is NULL and we
+     * pass tls_base=NULL, which the kernel treats as "inherit / no
+     * change".  Threads in such a program don't have proper TLS,
+     * which matches the pre-this-commit behaviour. */
+    extern void *__ldso_alloc_tls(void) __attribute__((weak));
+    void *tp = __ldso_alloc_tls ? __ldso_alloc_tls() : NULL;
+
     struct thr_param param;
     param.start_func = (void(*)(void*))(uintptr_t)__pthread_trampoline;
     param.arg = ta;
     param.stack_base = ti->stack;
     param.stack_size = ti->stack_size;
-    param.tls_base = NULL;
-    param.tls_size = 0;
+    param.tls_base = tp;
+    param.tls_size = 0;        /* informational, kernel ignores */
     param.child_tid = (long*)&ti->tid;
     param.parent_tid = NULL;
     param.flags = 0;
-    
+
     int ret = (int)syscall(SYS_THR_NEW, (intptr_t)&param, sizeof(param));
     
     if (ret != 0) {

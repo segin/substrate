@@ -46,8 +46,21 @@ static ld_u32 align_up(ld_u32 v, ld_u32 a) {
  * cheaply without a syscall.  Set at the end of ld_setup_tls().
  * The same value is also stored at TCB[0] via the variant-II
  * self-pointer, but reading via gs:0 needs a tiny asm helper —
- * doing it from C through this variable is portable enough. */
+ * doing it from C through this variable is portable enough.
+ *
+ * NOTE: this is the INITIAL thread's TP.  Each pthread_create-
+ * spawned thread has its own per-thread block (allocated by
+ * __ldso_alloc_tls below); __tls_get_addr() reads gs:0 instead of
+ * ld_tp when running on a non-initial thread.  Since gs:0 *is* the
+ * TP (TCB self-pointer), this works for both. */
 static ld_u32 ld_tp = 0;
+
+/* Total per-thread block size (cursor + TCB), cached after the
+ * first ld_setup_tls() pass so __ldso_alloc_tls can allocate
+ * additional blocks for pthread_create-spawned threads with the
+ * same layout. */
+static ld_u32 ld_tls_total = 0;
+static ld_u32 ld_tls_cursor = 0;  /* |offset| of farthest module from TP */
 
 int ld_setup_tls(void) {
     /* First pass: assign each PT_TLS module a negative offset from
@@ -83,8 +96,12 @@ int ld_setup_tls(void) {
     }
 
     /* Allocate (TLS data) + TCB.  Round up to page so anonymous
-     * mmap is happy and the TCB ends on a fixed alignment. */
+     * mmap is happy and the TCB ends on a fixed alignment.  Stash
+     * the cursor + total so __ldso_alloc_tls can replicate this
+     * layout for new threads later. */
     ld_size total = align_up(cursor + LD_TLS_TCB_SIZE, 0x1000);
+    ld_tls_cursor = cursor;
+    ld_tls_total  = total;
     void *block = ld_mmap(0, total, LD_PROT_READ | LD_PROT_WRITE,
                           LD_MAP_PRIVATE | LD_MAP_ANON, -1, 0);
     if ((long)block < 0) {
@@ -151,14 +168,76 @@ int ld_setup_tls(void) {
  * built with -fvisibility=hidden. */
 #define LD_PUBLIC __attribute__((visibility("default")))
 
+/* Read the current thread's TP via the variant-II self-pointer at
+ * gs:0.  This works for both the initial thread (where the kernel
+ * set gs_base via sys_set_gsbase from ld_setup_tls) AND for
+ * pthread-created threads (where the kernel set gs_base from
+ * thr_param.tls_base via kern_thr_new).  Cheaper and more correct
+ * than reading the static ld_tp — which only knows about the
+ * initial thread's block. */
+static inline ld_u32 current_tp(void) {
+    ld_u32 tp;
+    __asm__ volatile ("movl %%gs:0, %0" : "=r"(tp));
+    return tp;
+}
+
 LD_PUBLIC void *__tls_get_addr(tls_index *idx) {
     if (!idx || idx->ti_module == 0) return 0;
+    ld_u32 tp = current_tp();
     for (ld_obj_t *o = ld_obj_list(); o; o = o->next) {
         if (o->tls_modid == idx->ti_module)
             return (void *)(unsigned long)
-                (ld_tp - o->tls_offset + idx->ti_offset);
+                (tp - o->tls_offset + idx->ti_offset);
     }
     return 0;
+}
+
+/* Allocate a per-thread TLS block for pthread_create.  Mirrors the
+ * second-pass logic in ld_setup_tls(): mmap a block big enough for
+ * every PT_TLS module plus the TCB, copy each module's initialization
+ * image into its slot, set TCB[0] to the TP self-pointer.  Returns
+ * the TP (= address of the TCB), which libpthread passes to the
+ * kernel as thr_param.tls_base; the kernel installs it as the new
+ * thread's gs_base.
+ *
+ * Returns NULL on failure (no TLS-using modules, mmap failure,
+ * called before initial-thread setup ran). */
+LD_PUBLIC void *__ldso_alloc_tls(void) {
+    if (ld_tls_total == 0 || ld_tls_cursor == 0) {
+        /* No PT_TLS at all, or ld_setup_tls() hasn't run yet. */
+        return 0;
+    }
+    void *block = ld_mmap(0, ld_tls_total, LD_PROT_READ | LD_PROT_WRITE,
+                          LD_MAP_PRIVATE | LD_MAP_ANON, -1, 0);
+    if ((long)block < 0) return 0;
+
+    ld_u32 tp = (ld_u32)(unsigned long)block + ld_tls_cursor;
+    ld_u32 *tcb = (ld_u32 *)(unsigned long)tp;
+    tcb[0] = tp;            /* variant-II self-pointer */
+    tcb[1] = 0;             /* DTV slot reserved */
+
+    for (ld_obj_t *o = ld_obj_list(); o; o = o->next) {
+        if (o->tls_memsz == 0) continue;
+        unsigned char *slot = (unsigned char *)(unsigned long)(tp - o->tls_offset);
+        const unsigned char *src = (const unsigned char *)o->tls_image;
+        ld_u32 i;
+        for (i = 0; i < o->tls_filesz; i++) slot[i] = src[i];
+        for (; i < o->tls_memsz; i++)        slot[i] = 0;
+    }
+    return (void *)(unsigned long)tp;
+}
+
+/* Optional: free a TLS block returned by __ldso_alloc_tls.  Called
+ * from a thread's exit path after the thread is detached from its
+ * own TP.  block is the address of the underlying allocation
+ * (= tp - ld_tls_cursor). */
+LD_PUBLIC void __ldso_free_tls(void *tp_ptr) {
+    if (!tp_ptr || ld_tls_total == 0) return;
+    /* munmap not yet wired through ld.so's io layer; for now we
+     * leak the block.  libpthread doesn't currently support
+     * detach-then-exit either, so the leak is bounded by
+     * MAX_PTHREADS. */
+    (void)tp_ptr;
 }
 
 /* GNU's libc historically also exports ___tls_get_addr (three
