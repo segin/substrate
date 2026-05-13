@@ -10,6 +10,7 @@
 #include <wchar.h>
 #include <wctype.h>
 #include <limits.h>
+#include <locale.h>
 #include <sys/syscall.h>
 #include <sys/stat.h>
 #include <sys/utsname.h>
@@ -879,7 +880,34 @@ char *setlocale(int category, const char *locale) {
     return (char *)"C";
 }
 
-/* localeconv is in stdlib.c or here */
+/* POSIX "C" locale.  Char-typed fields use CHAR_MAX (127) per spec
+ * meaning "no value available".  Sufficient for any program that
+ * doesn't actually rely on locale data — which is all of substrate
+ * userland today, plus mpfr's vasprintf (which only consults
+ * decimal_point and falls back cleanly to "." when grouping is ""). */
+struct lconv *localeconv(void) {
+    static struct lconv c_locale = {
+        .decimal_point     = (char *)".",
+        .thousands_sep     = (char *)"",
+        .grouping          = (char *)"",
+        .int_curr_symbol   = (char *)"",
+        .currency_symbol   = (char *)"",
+        .mon_decimal_point = (char *)"",
+        .mon_thousands_sep = (char *)"",
+        .mon_grouping      = (char *)"",
+        .positive_sign     = (char *)"",
+        .negative_sign     = (char *)"",
+        .int_frac_digits   = 127,
+        .frac_digits       = 127,
+        .p_cs_precedes     = 127,
+        .p_sep_by_space    = 127,
+        .n_cs_precedes     = 127,
+        .n_sep_by_space    = 127,
+        .p_sign_posn       = 127,
+        .n_sign_posn       = 127,
+    };
+    return &c_locale;
+}
 
 /* --- Wide-character stubs (ASCII-safe) --- */
 
