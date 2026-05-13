@@ -185,6 +185,30 @@ int kern_sigprocmask(int how, const uint32_t *set, uint32_t *oset) {
         else if (how == 2) current_thread->sig_mask &= ~new_set;    // SIG_UNBLOCK
         else if (how == 3) current_thread->sig_mask = new_set;      // SIG_SETMASK
     }
+    /* Drain matching bits from the process-level pending bitmap into
+     * this thread's per-thread pending.  These are signals that
+     * psignal() couldn't deliver because every thread had the signal
+     * blocked at the time; now that this thread has potentially
+     * unblocked something, claim the bits atomically so no other
+     * thread also picks them up.  See docs/design/signal-delivery-mt.md.
+     */
+    process_t *p = current_thread->proc;
+    if (p) {
+        uint32_t deliverable;
+        for (;;) {
+            uint32_t pending = __atomic_load_n(&p->sig_pending, __ATOMIC_ACQUIRE);
+            deliverable = pending & ~current_thread->sig_mask;
+            if (!deliverable) break;
+            uint32_t want = pending & ~deliverable;
+            if (__atomic_compare_exchange_n(&p->sig_pending, &pending, want,
+                                            0, __ATOMIC_ACQ_REL,
+                                            __ATOMIC_ACQUIRE)) {
+                __sync_fetch_and_or(&current_thread->sig_pending, deliverable);
+                break;
+            }
+            /* CAS lost — pending was modified concurrently; retry. */
+        }
+    }
     return 0;
 }
 
@@ -525,37 +549,46 @@ void psignal(process_t *p, int sig) {
         }
     }
 
-    /* Select best thread for delivery and set pending on all threads */
+    /* Select the one thread that will receive this process-directed
+     * signal, or fall back to process-level pending if every thread
+     * has it blocked.  See docs/design/signal-delivery-mt.md for the
+     * full policy.
+     *
+     * Exception: SIGSTOP / SIGCONT need to reach every thread to
+     * actually stop or resume the whole process — we keep broadcasting
+     * their pending bits.  SIGKILL also broadcasts (the first thread
+     * to handle it exits the process anyway, so duplicate delivery is
+     * a wasted scheduler hop, not a correctness bug). */
     uint32_t sig_mask = sigmask(sig);
-    
+    int broadcast = (sig == SIGKILL || sig == SIGSTOP || sig == SIGCONT);
+
     thread_t *best_thread = NULL;
-    int best_priority = -1; // Higher is better
-    
+    int best_priority = -1; /* higher is better, -1 = nothing found */
+
     for (size_t i = 0; i < sched_thread_slot_count(); i++) {
         thread_t *t = sched_thread_slot(i);
         if (!t || t->tid == -1 || t->proc != p) continue;
-        
-        /* SIGCONT Special: Wake up stopped threads */
+
+        /* SIGCONT Special: Wake up stopped threads. */
         if (sig == SIGCONT && t->state == THREAD_STOPPED) {
             t->state = THREAD_READY;
         }
-        
-        /* Set pending bit on ALL threads (signal is process-directed).
-         * Atomic OR since another CPU may concurrently psignal the same
-         * thread, or the thread itself may be clearing bits during signal
-         * delivery. */
-        __sync_fetch_and_or(&t->sig_pending, sig_mask);
-        
-        /* Select best thread for immediate delivery:
-         * Priority order:
-         * 3: Running/Ready thread with signal unmasked
-         * 2: Blocked (interruptible) thread with signal unmasked
-         * 1: Any thread with signal unmasked
-         * 0: Any thread (fallback)
-         */
-        int priority = 0;
+
         int unmasked = !(t->sig_mask & sig_mask);
-        
+
+        if (broadcast) {
+            /* Process-affecting signal — set on every thread. */
+            __sync_fetch_and_or(&t->sig_pending, sig_mask);
+            /* Wake any interruptibly-sleeping thread so it can act. */
+            if (t->state == THREAD_BLOCKED && unmasked &&
+                (t->flags & THREAD_F_INTERRUPTIBLE)) {
+                signal_interrupt_thread(t);
+            }
+            continue;
+        }
+
+        /* Score candidates and remember the best. */
+        int priority = 0;
         if (unmasked) {
             if (t->state == THREAD_RUNNING || t->state == THREAD_READY) {
                 priority = 3;
@@ -565,25 +598,28 @@ void psignal(process_t *p, int sig) {
             } else {
                 priority = 1;
             }
-        }
-        
-        if (priority > best_priority) {
-            best_priority = priority;
-            best_thread = t;
-        }
-        
-        /* Wake interruptibly-sleeping threads */
-        if (t->state == THREAD_BLOCKED && unmasked &&
-            (t->flags & THREAD_F_INTERRUPTIBLE)) {
-            signal_interrupt_thread(t);
+            if (priority > best_priority) {
+                best_priority = priority;
+                best_thread = t;
+            }
         }
     }
-    
-    /* If we found a best thread and it's blocked, wake it */
-    if (best_thread && best_thread->state == THREAD_BLOCKED && 
-        best_priority > 0 &&
-        (best_thread->flags & THREAD_F_INTERRUPTIBLE)) {
-        signal_interrupt_thread(best_thread);
+
+    if (broadcast) return;
+
+    if (best_thread) {
+        /* Exactly-one delivery: set the bit on the chosen thread only. */
+        __sync_fetch_and_or(&best_thread->sig_pending, sig_mask);
+        if (best_thread->state == THREAD_BLOCKED &&
+            (best_thread->flags & THREAD_F_INTERRUPTIBLE)) {
+            signal_interrupt_thread(best_thread);
+        }
+    } else {
+        /* Every thread blocked the signal — hold pending at the
+         * process level until a thread unblocks via sigprocmask /
+         * pthread_sigmask, which drains process->sig_pending into
+         * that thread's per-thread sig_pending. */
+        __sync_fetch_and_or(&p->sig_pending, sig_mask);
     }
 }
 
