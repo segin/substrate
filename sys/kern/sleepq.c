@@ -9,6 +9,7 @@
 #include <kern/sleepq.h>
 #include <stdint.h>
 #include <string.h>
+#include <vm/vm_kmem.h>
 
 #define SLEEPQ_TYPE_SHARED 0
 #define SLEEPQ_TYPE_PRIVATE 1
@@ -33,11 +34,13 @@ static sleepq_t *sleepq_hash[SLEEPQ_HASH_SIZE];
 // Per-bucket locks for scalability
 static volatile uint32_t sleepq_locks[SLEEPQ_HASH_SIZE];
 
-// Pre-allocated sleep queue pool
-#define SLEEPQ_POOL_SIZE 256
-static sleepq_t sleepq_pool[SLEEPQ_POOL_SIZE];
-static int sleepq_pool_next = 0;
-/* Free list for recycled sleep queues */
+/*
+ * Sleepq nodes are kmalloc'd on demand.  Freed nodes go on a global
+ * free list (protected by pool_lock) so that the typical "park, wake,
+ * park again" cycle re-uses storage instead of pounding kmalloc.  The
+ * free list has no cap — kfree drains it in proportion to system
+ * pressure if we ever start trimming.
+ */
 static sleepq_t *sleepq_free_list = NULL;
 static volatile uint32_t pool_lock = 0;
 
@@ -70,26 +73,28 @@ static inline void sq_unlock(int hash) {
     __sync_lock_release(&sleepq_locks[hash]);
 }
 
-// Allocate a sleep queue
+// Allocate a sleep queue (free list first, then kmalloc)
 static sleepq_t *sleepq_alloc(void) {
+    sleepq_t *sq;
+
     while (__sync_lock_test_and_set(&pool_lock, 1)) {
         while (pool_lock)
             __asm__ volatile("pause");
     }
-    
-    sleepq_t *sq = NULL;
-    /* Try free list first (recycled entries) */
     if (sleepq_free_list) {
         sq = sleepq_free_list;
         sleepq_free_list = sq->sq_next;
+        __sync_lock_release(&pool_lock);
         memset(sq, 0, sizeof(*sq));
-    } else if (sleepq_pool_next < SLEEPQ_POOL_SIZE) {
-        sq = &sleepq_pool[sleepq_pool_next++];
+        return sq;
+    }
+    __sync_lock_release(&pool_lock);
+
+    sq = kmalloc(sizeof(*sq));
+    if (sq) {
         memset(sq, 0, sizeof(*sq));
     }
-    
-    __sync_lock_release(&pool_lock);
-    return(sq);
+    return sq;
 }
 
 // Return a sleep queue to the free list
@@ -191,7 +196,7 @@ static void sleepq_remove(sleepq_t *sq, int hash) {
 void sleepq_init(void) {
     memset(sleepq_hash, 0, sizeof(sleepq_hash));
     memset((void*)sleepq_locks, 0, sizeof(sleepq_locks));
-    sleepq_pool_next = 0;
+    sleepq_free_list = NULL;
 }
 
 // Internal helper to add thread
