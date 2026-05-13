@@ -52,6 +52,13 @@ libc.a: $(OBJS)
 # only exists on the installed root under $(DESTDIR)/lib.
 libc.so.0: $(PIC_OBJS)
 	$(CC) $(SOLDFLAGS) -o $@ $(PIC_OBJS)
+	@# Host ld produces OSABI=0 (SysV); substrate-ld rejects it as
+	@# "file in wrong format" when later cross-builds try to link
+	@# against this libc.  Patch the e_ident[EI_OSABI] byte to 0x40
+	@# (ELFOSABI_SUBSTRATE).  Cheaper than re-invoking substrate-ld
+	@# with a hand-built link line, and yields identical bytes
+	@# everywhere except offset 7.
+	@printf '\x40' | dd of=$@ bs=1 count=1 seek=7 conv=notrunc status=none
 
 crt0.o: arch/i386/crt0.o
 	cp $< $@
