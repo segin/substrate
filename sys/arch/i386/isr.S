@@ -327,8 +327,14 @@ new_user_thread_trampoline:
     mov $0x23, %ax          # USER_DATA_SEL
     mov %ax, %ds
     mov %ax, %es
-    xor %ax, %ax            # null FS/GS — TLS slot is reloaded via arch_switch_to
+    xor %ax, %ax            # null FS — userspace can install its own selector
     mov %ax, %fs
+    # %gs gets the per-thread TLS selector (GDT_TLS_START << 3 | RPL=3 = 0x33).
+    # arch_switch_to has already pointed the GDT TLS slot at this thread's
+    # gs_base, so loading the selector here picks up the right descriptor.
+    # Without this, %gs starts as 0 and the first __thread access in user
+    # mode reads from %gs:0 = address 0 → SIGSEGV.
+    mov $0x33, %ax          # (GDT_TLS_START=6) << 3 | DPL=3
     mov %ax, %gs
     pop %eax                # restore user_arg
 
