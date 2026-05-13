@@ -23,8 +23,8 @@ ifeq ($(CROSS),)
   KERNEL_INC =
   PTHREAD_INC =
 else
-  PTHREAD = -L../../../lib/pthreads -lpthread
-  PTHREAD_INC = -I../../../include -I../../../lib/pthreads
+  PTHREAD = -L../../../lib/pthread -lpthread
+  PTHREAD_INC = -I../../../include -I../../../lib/pthread
 endif
 
 TESTS_PORTABLE = torture_kernel

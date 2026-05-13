@@ -69,17 +69,10 @@ typedef int32_t  key_t;
 typedef uint64_t fsblkcnt_t;
 typedef uint64_t fsfilcnt_t;
 
-// Pthread types
-typedef int32_t  pthread_t;
-typedef int32_t  pthread_attr_t;
-typedef int32_t  pthread_mutex_t;
-typedef int32_t  pthread_mutexattr_t;
-typedef int32_t  pthread_cond_t;
-typedef int32_t  pthread_condattr_t;
-typedef int32_t  pthread_key_t;
-typedef int32_t  pthread_once_t;
-typedef int32_t  pthread_rwlock_t;
-typedef int32_t  pthread_rwlockattr_t;
+/* Pthread types live in <pthread.h>; this header used to declare
+ * them as opaque int32_t which conflicts with the real struct
+ * shape (pthread_cond_t carries a futex-backed seq counter, etc.).
+ * Code that needs the types should #include <pthread.h>. */
 typedef int32_t  pthread_spinlock_t;
 typedef int32_t  pthread_barrier_t;
 typedef int32_t  pthread_barrierattr_t;

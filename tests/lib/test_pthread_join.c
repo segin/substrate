@@ -33,7 +33,7 @@ long mock_syscall(long number, ...) {
 }
 
 #define syscall mock_syscall
-#include "../../lib/pthreads/pthread.c"
+#include "../../lib/pthread/pthread.c"
 
 bool test_pthread_join_invalid_thread() {
     void *retval;

@@ -35,7 +35,7 @@ void mock_sync_lock_release(int *ptr);
 #define __sync_lock_release mock_sync_lock_release
 
 // Include the source to test
-#include "../../lib/pthreads/pthread.c"
+#include "../../lib/pthread/pthread.c"
 
 /*
  * Validates the missing edge case for null attributes.

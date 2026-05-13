@@ -1081,3 +1081,27 @@ wint_t towctrans(wint_t wc, wctrans_t desc) {
     default: return wc;
     }
 }
+
+#include <sched.h>
+int sched_yield(void) {
+    /* SYS_SCHED_YIELD is a 0-arg syscall that always succeeds. */
+    syscall(SYS_SCHED_YIELD);
+    return 0;
+}
+
+/* The full sched_* surface beyond yield isn't kernel-backed yet —
+ * stub the rest as ENOSYS so callers link cleanly. */
+int sched_getscheduler(pid_t pid) { (void)pid; errno = ENOSYS; return -1; }
+int sched_setscheduler(pid_t pid, int policy, const struct sched_param *p)
+{ (void)pid; (void)policy; (void)p; errno = ENOSYS; return -1; }
+int sched_getparam(pid_t pid, struct sched_param *p)
+{ (void)pid; (void)p; errno = ENOSYS; return -1; }
+int sched_setparam(pid_t pid, const struct sched_param *p)
+{ (void)pid; (void)p; errno = ENOSYS; return -1; }
+int sched_get_priority_min(int policy) { (void)policy; return 0; }
+int sched_get_priority_max(int policy) { (void)policy; return policy == SCHED_FIFO || policy == SCHED_RR ? 99 : 0; }
+int sched_rr_get_interval(pid_t pid, struct timespec *t) {
+    (void)pid;
+    if (t) { t->tv_sec = 0; t->tv_nsec = 10000000; /* 10 ms */ }
+    return 0;
+}

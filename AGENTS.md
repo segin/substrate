@@ -22,6 +22,13 @@ For the full detailed changelog, see `docs/CHANGELOG.md`.
 - TTY signals (SIGINT/SIGQUIT/SIGTSTP), VMIN/VTIME support, per-process ctty
 - 64-bit time_t, POSIX timestamp compliance (atime/mtime/ctime across VFS and ext2)
 - Syscall tracing with typed arguments and personality detail
+- Full FreeBSD-compatible thread syscall set: `thr_new` (455),
+  `thr_exit` (431), `thr_self` (432), `thr_kill` (433), `thr_suspend`
+  (442), `thr_wake` (443), `thr_join` (457), `thr_set_name` (464),
+  `thr_kill2` (481).  Per-thread `sig_pending`/`sig_mask` already
+  drove signal delivery; the new entry points expose it to libpthread
+  for cancellation, naming, and parking.  `thread_t.name[16]` field
+  and `THREAD_F_WAKE_PENDING` flag for race-free suspend/wake.
 
 ### Filesystems
 - VFS: link/unlink, readdir atime, chmod/chown ctime
@@ -33,6 +40,16 @@ For the full detailed changelog, see `docs/CHANGELOG.md`.
 - Framebuffer: linear FB, BGA, `vga=WxH@BPP` mode selection, multi-device registry
 - Rendering: PSF1/PSF2/BDF/PCF font parsers, glyph cache, fb_fillrect/fb_copyarea/fb_imageblit, bold/italic/underline/strikethrough/reverse attributes
 - VirtIO (block + 9P), PS/2 dual-channel, FPU lazy save
+- PS/2 mouse: IntelliMouse (3-button + wheel) and IntelliMouse Explorer
+  (5-button + wheel) detection via the Microsoft sample-rate knock
+  sequence; 4-byte packet decoding; `BTN_SIDE` / `BTN_EXTRA` /
+  `REL_WHEEL` emitted on the input layer
+- PS/2 keyboard: runtime-switchable Set 1 (translated XT, default)
+  and Set 2 (AT, native) scancode decoders with `0xF0` break-prefix
+  state machine and an E0-prefix path that handles both encodings
+- Intel HDA, AC'97, SB16, null audio backends (Sun-compat audio
+  framework)
+- USB HID boot-protocol mouse
 
 ### Boot & Architecture
 - GRUB boot fix, early boot debugging, LAPIC identity mapping
@@ -47,6 +64,62 @@ For the full detailed changelog, see `docs/CHANGELOG.md`.
   `.pic.o` compile passes; `SHLIB_CFLAGS` / `SHLIB_LDFLAGS` defined
   in `Makefile.inc`.  The `libX.so` link-time symlink is install-only
   so it can't shadow `libX.a` in source-tree builds.
+- `lib/c`, `lib/m`, `lib/sys` Makefiles auto-patch the OSABI byte of
+  every produced `libX.so.0` to `ELFOSABI_SUBSTRATE` (0x40) via a
+  one-byte `dd` post-step.  Required because host `cc -shared` stamps
+  `ELFOSABI_SYSV` (0), which substrate's cross-ld rejects as "file
+  in wrong format".  Build infrastructure picks up additions without
+  ceremony.
+- libc additions for the GCC toolchain bring-up: `putenv`,
+  `localeconv` (POSIX "C" lconv), `htons` / `htonl` / `ntohs` /
+  `ntohl` (real `__builtin_bswap` impls), socket / netdb / arpa-inet
+  ENOSYS stub family for link-time satisfaction pending a real
+  in-kernel sockets layer.
+- libpthread torture suite (`tests/lib/pthread/`): portable POSIX
+  `torture_kernel.c` runs on Linux/FreeBSD/macOS/substrate alike as a
+  cross-OS baseline; 8 scenarios target specific scheduler/threading
+  bug classes (storm, fpu, wakeup, signals, mutex_fair, tls,
+  massive, lockord).  Plus a substrate-specific `torture_pthread.c`
+  for libpthread surface correctness.
+
+### Toolchain (Substrate-Native GNU Toolchain)
+- **Stage 1 (cross)**: binutils 2.46.0 + GCC 16.1.0 patched for
+  the substrate target, built on a Linux host.  Installs into
+  `/opt/substrate` (`STAGE1_PREFIX`) as
+  `i386-unknown-substrate-{gcc,g++,as,ld,ar,nm,objdump,...}`.  Used
+  to cross-compile substrate userland.
+- **Stage 2 (Canadian cross)**: same binutils + GCC sources, but
+  built with the stage-1 cross compiler to produce substrate-ELF
+  binaries that run *on* substrate itself.  Installs into
+  `dist-toolchain/usr/` (binutils) and `/tmp/gcc-stage2-staging/usr/`
+  (gcc) as `/usr/bin/{gcc,g++,ld,as,ar,nm,objdump,readelf,strip,
+  ranlib,size,strings,addr2line,c++filt,elfedit,gprof,ld.bfd}`,
+  `/usr/libexec/gcc/i386-unknown-substrate/16.1.0/{cc1,cc1plus,lto1,
+  lto-dump,collect2,lto-wrapper}`, and
+  `/usr/lib/gcc/i386-unknown-substrate/16.1.0/{libgcc.a,libgcov.a,
+  crtbegin*.o,crtend*.o}`.
+- **Bootstrap orchestrator**: `contrib/build-toolchain.sh` drives
+  all four phases (binutils stage 1, gcc stage 1, binutils stage 2,
+  gcc stage 2) with idempotent fetch + patch + build.  Per-component
+  scripts at `contrib/binutils/build.sh` and `contrib/gcc/build.sh`
+  can also be run individually.
+- **ELFOSABI_SUBSTRATE = 64**: architecture-specific OSABI byte
+  stamped by every substrate-target BFD output vec
+  (`elf32-i386-substrate`, `elf64-x86-64-substrate`).  The vec has
+  `ELF_OSABI_EXACT = 0` so it accepts SysV (OSABI=0) input objects
+  during bootstrap, but every executable/DSO it produces carries
+  OSABI=64.  This is the wire-level identifier the kernel exec
+  personality dispatch uses to route a binary to its loader.
+- Patch series for both binutils and gcc lives in
+  `contrib/{binutils,gcc}/patches/` and is reapplied by `fetch.sh`.
+  Nothing in `contrib/*/build/` is vendored.
+- Image bootstrap chain (committed end-to-end):
+  ```
+  contrib/build-toolchain.sh        # stage 1 cross + stage 2 native
+  ./build-rootfs.sh --dist          # substrate userland into dist/
+  ./build-rootfs.sh --toolchain     # overlay stage-2 toolchain
+  ./build-rootfs.sh --image         # bake 4 GiB rootfs.img
+  ```
 
 ### Dynamic Linking
 - `/sbin/ld.so` (Substrate native dynamic linker, `sbin/ld.so/`):
@@ -196,7 +269,25 @@ pmm_free_block(virt);  // CORRECT - convert first
       ET_DYN with no DT_NEEDED.  Loaded by the kernel at AT_BASE =
       0x40000000 for every PIE binary that lists `/sbin/ld.so` in its
       PT_INTERP.  Exec ABI documented in `docs/kernel-ldso-abi-substrate.md`.
-- `tests/bin/`: Per-program test suites for `bin/` utilities (unit, integration, property, fuzz).
+- `contrib/`: Third-party components as patch series against
+  upstream releases — nothing in `contrib/*/build/` is vendored,
+  `fetch.sh` downloads + patches.
+    - `binutils/`: GNU binutils 2.46.0 patch series + build script.
+      Adds the `elf32-i386-substrate` / `elf64-x86-64-substrate` BFD
+      output vecs, the `elf_i386_substrate` ld emulation, the
+      ELFOSABI_SUBSTRATE constant in `include/elf/common.h`, and
+      readelf's name-resolution for OSABI=64.
+    - `gcc/`: GCC 16.1.0 patch series + build script.  Configures
+      `i386-unknown-substrate` as a target and a libstdc++-v3 OS
+      port at `libstdc++-v3/config/os/substrate/`.
+    - `build-toolchain.sh`: orchestrates both at stages 1 and 2.
+    - `ext2-boot/`: third-party BIOS ext2 bootloader (submodule).
+- `tests/`:
+    - `bin/`: Per-program test suites for `bin/` utilities.
+    - `lib/pthread/`: portable POSIX `torture_kernel.c` +
+      substrate-specific `torture_pthread.c` (scheduler stress + libpthread surface).
+    - `lib/m/`: unit + property tests for libm including
+      `test_bessel.c` / `prop_bessel.c` and the rest.
 
 ### Kernel Debugging
 When debugging kernel crashes (including triple faults):
@@ -234,6 +325,10 @@ If the kernel hangs in `hlt`, check `eflags` bit 9. If `IF=1`, the IRQ may be ma
 
 ## Next Steps
 - Refactor PMAP to dynamically allocate page tables (reduce 128KB overhead)
+- Replace the static `processes[16]` (`MAX_PROCS`) table with a
+  pid-hash + all-procs list.  26 callers across 10 files.  My new
+  `sys_thr_kill2` already routes through `proc_find()` so it'll
+  come along for free.
 - Implement mmap() syscall with personality driver integration
 - Flesh out 9P filesystem logic implementation
 - /sbin/ld.so remaining work: per-thread TLS for additional
@@ -249,3 +344,25 @@ If the kernel hangs in `hlt`, check `eflags` bit 9. If `IF=1`, the IRQ may be ma
   candidate) and verify before expanding.
 - Fix `lib/dbm/dbm.c` (missing `SEEK_SET`/`SEEK_CUR` include) so
   libdbm.{a,so.0} build cleanly.
+- **Make gas stamp ELFOSABI_SUBSTRATE on output `.o` files.**
+  Currently gas emits `ELFOSABI_SYSV` (0); we sidestep with
+  `ELF_OSABI_EXACT=0` in the substrate BFD vec.  Real fix is in
+  `gas/config/obj-elf.c` (or a new gas/config/te-substrate.h)
+  to set the OSABI byte when the target is `i386-unknown-substrate`.
+- **In-kernel sockets layer for AF_UNIX.**  GCC's sarif-sink
+  references socket/connect at link time; we provide ENOSYS stubs.
+  syslog, X11 local connections, D-Bus, and a long tail of IPC
+  users all need real UDS.  Scope: ~1500-2500 LOC kernel (generic
+  socket dispatch + af_unix SOCK_STREAM/DGRAM + buffer queues +
+  scm_rights for fd passing) + replacing the libc stubs with real
+  syscall wrappers.
+- libpthread surface expansion to match the suite:
+  `pthread_cond_*`, `pthread_kill` (wraps SYS_THR_KILL), `pthread_sigmask`,
+  `pthread_setname_np` (wraps SYS_THR_SET_NAME), `pthread_self`.
+- Build a shared `libstdc++.so.6` once a real userland is up
+  (currently shipping `libstdc++.a` only — `--disable-shared`).
+  Requires ld.so to handle C++ symbol versioning, vague linkage
+  dedup, and TLS GD/LD models.
+- Rebuild stage 2 GCC with `--with-arch=i486` to drop the
+  pentium-pro default and produce binaries that run on plain i486
+  QEMU CPUs.

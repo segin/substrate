@@ -44,15 +44,12 @@ typedef int32_t  key_t;
 typedef uint64_t fsblkcnt_t;
 typedef uint64_t fsfilcnt_t;
 
-// Pthread types (Opaque integers or pointers for now)
-typedef int32_t  pthread_t;
-typedef int32_t  pthread_attr_t;
-typedef int32_t  pthread_mutex_t;
-typedef int32_t  pthread_mutexattr_t;
-typedef int32_t  pthread_cond_t;
-typedef int32_t  pthread_condattr_t;
-typedef int32_t  pthread_key_t;
-typedef int32_t  pthread_once_t;
+/* Pthread types live in <pthread.h>.  They're declared there so the
+ * struct shape of pthread_cond_t (a futex-backed seq counter, not
+ * an int) is visible to every translation unit that #includes
+ * pthread.h.  Keeping the typedefs duplicated here as `int32_t`
+ * conflicts with the real struct shape and silently breaks any code
+ * that pulls in sys/types.h *and* pthread.h. */
 typedef int32_t  pthread_rwlock_t;
 typedef int32_t  pthread_rwlockattr_t;
 typedef int32_t  pthread_spinlock_t;

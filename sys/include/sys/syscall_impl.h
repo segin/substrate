@@ -164,6 +164,7 @@ struct timespec;
 extern int sys_thr_suspend(const struct timespec *);
 extern int sys_thr_wake(long);
 extern int sys_thr_set_name(long, const char *);
+extern int sys_yield(void);
 struct pmap_stats;
 extern int sys_pmap_stats(struct pmap_stats*);
 extern int sys_proc_info(pid_t, sys_procinfo_t*);

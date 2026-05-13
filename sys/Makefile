@@ -184,7 +184,7 @@ klib:
 libs:
 	@echo "Building User Libraries..."
 	$(MAKE) -C ../lib/c
-	$(MAKE) -C ../lib/pthreads
+	$(MAKE) -C ../lib/pthread
 
 vfs:
 	@echo "Building VFS..."

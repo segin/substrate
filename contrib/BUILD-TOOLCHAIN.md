@@ -152,7 +152,7 @@ repo root:
 make -C lib/c                # libc.a, libc.so.0, crt0.o, crti.o, crtn.o
 make -C lib/m                # libm.a, libm.so.0
 make -C lib/sys              # libsys.so.0
-make -C lib/pthreads         # libpthread.so.0
+make -C lib/pthread         # libpthread.so.0
 make -C lib/dl               # libdl.so.0
 ```
 
@@ -209,7 +209,7 @@ cp sys/arch/i386/syscall.h dist/usr/include/arch/i386/   # if not staged
 cp lib/c/libc.a lib/m/libm.a dist/usr/lib/
 cp lib/c/crt0.o lib/c/crti.o lib/c/crtn.o dist/usr/lib/
 cp lib/sys/libsys.so.0 lib/m/libm.so.0 lib/c/libc.so.0 dist/lib/
-cp lib/pthreads/libpthread.so.0 lib/dl/libdl.so.0 dist/lib/
+cp lib/pthread/libpthread.so.0 lib/dl/libdl.so.0 dist/lib/
 ln -sf libc.so.0 dist/lib/libc.so
 ```
 
@@ -246,7 +246,7 @@ EOF
 
 ```sh
 for f in lib/sys/libsys.so.0 lib/m/libm.so.0 lib/c/libc.so.0 \
-         lib/pthreads/libpthread.so.0 lib/dl/libdl.so.0; do
+         lib/pthread/libpthread.so.0 lib/dl/libdl.so.0; do
     name=$(basename $f)
     debugfs -w -R "rm /lib/$name" rootfs.img
     debugfs -w -R "write $f /lib/$name" rootfs.img

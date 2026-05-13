@@ -1001,7 +1001,7 @@ they are not mandatory.
                 - Docs: define `__tls_get_addr` ABI contract and failure modes.
                 - Acceptance: dynamic TLS lookups return correct per-thread addresses across repeated calls.
             - [ ] Integrate TLS module lifecycle with `dlopen`/`dlclose` and pthread creation. (REQ: REQ-06-0868)
-                - Files/Headers: `libexec/ld.so/rtld_tls_lifecycle.c`, `lib/pthreads/pthread_tls_hooks.c`.
+                - Files/Headers: `libexec/ld.so/rtld_tls_lifecycle.c`, `lib/pthread/pthread_tls_hooks.c`.
                 - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_tls_dlopen.c`; property `tests/libexec/ld.so/property/prop_tls_isolation_threads.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_tls_lifecycle.c`.
                 - Docs: document TLS lifecycle events and teardown rules.
                 - Acceptance: TLS data is isolated per thread and modules loaded after startup are usable from all threads.

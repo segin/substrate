@@ -229,10 +229,10 @@ host_test_fork_exec_wait: sys/host_test_fork_exec_wait.c
 
 # Duplicate rule removed
 
-test_pthread_join: lib/test_pthread_join.c ../lib/pthreads/pthread.c
+test_pthread_join: lib/test_pthread_join.c ../lib/pthread/pthread.c
 	$(CC) $(CFLAGS_COMMON) -Wno-int-conversion -Wno-pointer-to-int-cast -I../include -I../sys/include -I../sys $< -o $@
 
-test_libpthread_mutex: lib/test_pthread_mutex.c ../lib/pthreads/pthread.c
+test_libpthread_mutex: lib/test_pthread_mutex.c ../lib/pthread/pthread.c
 	$(CC) $(CFLAGS_COMMON) -I../include -I../sys/include -I../sys $< -o $@
 
 test_history:
