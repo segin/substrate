@@ -6,8 +6,13 @@ It is not just a kernel repository. The tree contains:
 - a native kernel (`sys/`)
 - base userland (`bin/`, `sbin/`, `usr.bin/`)
 - system libraries (`lib/`, `usr.lib/`)
-- an in-tree C toolchain (`usr.bin/cc`, `usr.bin/as`, `usr.bin/ld`, `usr.lib/elfobj`)
-- build/install staging for both target and host (`dist/`, `host_dist/`)
+- a native dynamic linker (`sbin/ld.so`)
+- an in-tree homebrew C toolchain (`usr.bin/cc`, `usr.bin/as`, `usr.bin/ld`, `usr.lib/elfobj`)
+- a vendored GNU toolchain port — GNU binutils + GCC patched for the
+  substrate target, built as a Canadian cross to run on substrate itself
+  (`contrib/binutils`, `contrib/gcc`, `contrib/build-toolchain.sh`)
+- build/install staging for both target and host (`dist/`, `host_dist/`,
+  `dist-toolchain/`)
 
 ## Design Origin
 
@@ -40,10 +45,40 @@ That original design intent remains:
 - Additional runtime/tool libraries under `usr.lib/` (including `libelfobj` and demangling work).
 
 ### Toolchain
-- `usr.bin/cc`: C compiler driver + frontend/middle/backends.
-- `usr.bin/as`: assembler.
-- `usr.bin/ld`: linker.
-- `usr.lib/elfobj`: ELF object model and manipulation library shared by tooling.
+Substrate ships two parallel C toolchains, both native to the substrate
+target:
+
+- **Homebrew in-tree toolchain** — built from scratch inside the tree:
+  - `usr.bin/cc`: C compiler driver + frontend/middle/backends.
+  - `usr.bin/as`: assembler.
+  - `usr.bin/ld`: linker.
+  - `usr.lib/elfobj`: ELF object model and manipulation library shared
+    by tooling.
+
+- **GNU toolchain port** — upstream binutils + GCC patched for the
+  substrate target, vendored as patch series against the unmodified
+  upstream releases (nothing in `contrib/*/build/` is checked in):
+  - `contrib/binutils` — GNU binutils 2.46.0 patch series adding the
+    `elf32-i386-substrate` / `elf64-x86-64-substrate` BFD output vecs,
+    the `elf_i386_substrate` ld emulation, and the `ELFOSABI_SUBSTRATE`
+    OSABI byte.
+  - `contrib/gcc` — GCC 16.1.0 patch series adding the
+    `i386-unknown-substrate` target and a `libstdc++-v3` OS port.
+  - `contrib/build-toolchain.sh` — single orchestrator that fetches +
+    patches + builds both at stage 1 (Linux-hosted cross) and stage 2
+    (Canadian cross — substrate-hosted, runs inside the rootfs).
+
+Stage-1 install lands at `/opt/substrate/` and provides
+`i386-unknown-substrate-{gcc,g++,ld,as,ar,nm,objdump,...}` for
+cross-compilation on the build host.  Stage 2 installs into
+`dist-toolchain/usr/` and is folded into the rootfs image so the
+substrate target ships with a working `/usr/bin/gcc`,
+`/usr/bin/g++`, `/usr/bin/ld`, and the rest.
+
+The wire-level identifier for substrate-produced binaries is
+`ELFOSABI_SUBSTRATE = 64` stamped into `e_ident[EI_OSABI]` by the
+substrate BFD vec.  The kernel personality dispatch keys off that
+byte to route each ELF to its loader.
 
 ## Planned Unix Binary Support
 
@@ -127,59 +162,82 @@ Boot the tracked reference root filesystem image under QEMU:
 ```sh
 qemu-system-i386 \
   -kernel sys/kernel.bin \
-  -append "serial_debug root=/dev/storage/ide0 init=/bin/sh" \
-  -serial stdio \
-  -hda root.img \
+  -drive file=rootfs.img,format=raw,if=ide \
+  -append "root=/dev/storage/ide0 init=/sbin/init serial_debug" \
+  -cpu pentium3 \
+  -serial mon:stdio \
   -m 2048
 ```
+
+`-cpu pentium3` (or higher) is required when the rootfs ships
+GCC: cc1 was compiled with default `-march=pentiumpro` tuning and
+emits CMOV instructions that the default QEMU i386 CPU rejects with
+SIGILL.  For a kernel-only image without GCC, the default CPU is
+fine.
 
 The same root image can also be used with:
 
 - `sys/kernel.zimage` for direct BIOS-style boot
-- `sys/kernel.flp` as a floppy bootloader artifact, with `root.img` attached as the primary IDE disk
+- `sys/kernel.flp` as a floppy bootloader artifact, with `rootfs.img`
+  attached as the primary IDE disk
 
-Useful boot parameters are documented in [`kernel_command_line.7`](usr.man/man7/kernel_command_line.7).
+Useful boot parameters are documented in
+[`kernel_command_line.7`](usr.man/man7/kernel_command_line.7).
 
 ## Constructing A Root Filesystem
 
-Stage a complete target root tree into `dist/`:
+The full reproducible bootstrap from a clean checkout is driven by
+two scripts.
+
+### Step 1 — build the toolchain
+
+If you want substrate to carry a working `/usr/bin/gcc` (which a real
+userland wants), build both stages of the GNU toolchain port:
 
 ```sh
-make install DESTDIR=$PWD/dist
+contrib/build-toolchain.sh                        # binutils + gcc, stage 1 + stage 2
 ```
 
-That staging tree is the source for a real bootable root image. Create a fresh ext2 image from it with host tools:
+Stage 1 installs into `/opt/substrate/` (override with
+`STAGE1_PREFIX=...`); stage 2 stages into
+`./dist-toolchain/usr/` and (for gcc) `/tmp/gcc-stage2-staging/usr/`
+ready for the next step to fold into the image.  Each
+`contrib/<name>/build.sh` can also be invoked individually for
+targeted rebuilds.
+
+### Step 2 — stage the rootfs and bake an image
 
 ```sh
-truncate -s 256M myroot.img
-mkfs.ext2 -F myroot.img
-
-tmpdir=$(mktemp -d)
-sudo mount -o loop myroot.img "$tmpdir"
-sudo cp -a dist/. "$tmpdir"/
-sudo mkdir -p "$tmpdir"/dev "$tmpdir"/proc "$tmpdir"/sys "$tmpdir"/tmp
-sudo chmod 1777 "$tmpdir"/tmp
-sync
-sudo umount "$tmpdir"
-rmdir "$tmpdir"
+./build-rootfs.sh --dist           # populate ./dist/ from substrate sources
+./build-rootfs.sh --toolchain      # overlay stage-2 GCC + binutils onto dist/usr/
+./build-rootfs.sh --image          # bake rootfs.img (default 4 GiB ext2)
 ```
 
-Minimum practical contents:
+`--toolchain` is optional — skip it for a minimal rootfs without
+GCC/binutils, useful for kernel-bring-up images.  It will refuse
+to run if neither stage-2 staging tree exists; run
+`contrib/build-toolchain.sh --stage=2` first.
+
+The resulting `rootfs.img` contains:
+
+- substrate kernel, ld.so, libc / libsys / libm / libpthread / ...
+  (all OSABI=ELFOSABI_SUBSTRATE)
+- the homebrew toolchain (`cc`, `as`, `ld.i386`, ...)
+- (if `--toolchain` was run) GNU binutils + GCC at `/usr/bin/`
+  and `/usr/libexec/gcc/i386-unknown-substrate/16.1.0/`
+
+### Minimum manual contents
+
+If you'd rather build a rootfs the old-fashioned way without
+`build-rootfs.sh`:
 
 - `/sbin/init`, or an alternate program supplied with `init=`
 - `/bin/sh`
 - `/dev`, `/proc`, `/sys`, `/tmp`
 - the libraries and userland required by your chosen init path
 
-If you want to start from the tracked reference image instead of building from `dist/`:
-
-```sh
-cp root.img myroot.img
-```
-
-then mount and modify `myroot.img` as needed.
-
-`dist/` remains only the staged contents of a target filesystem tree. Disk images such as `root.img` are separate artifacts.
+`dist/` remains only the staged contents of a target filesystem
+tree.  Disk images such as `rootfs.img` are separate artifacts.
 
 ## Host Toolchain Install (`host_dist` / `host_install`)
 
