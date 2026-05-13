@@ -20,6 +20,7 @@
 #include <kern/sleepq.h>
 #include <kern/time.h>
 #include <arch/i386/pmap.h>
+#include <vm/vm_kmem.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -526,11 +527,13 @@ typedef struct pi_state {
 static pi_state_t *pi_hash[PI_HASH_SIZE];
 static volatile uint32_t pi_lock = 0;
 
-#define PI_POOL_SIZE 32
-static pi_state_t pi_pool[PI_POOL_SIZE];
-static pi_waiter_t waiter_pool[PI_POOL_SIZE * 4];
-static int pi_pool_idx = 0;
-static int waiter_pool_idx = 0;
+/*
+ * PI state and waiter structs are kmalloc'd on demand.  The previous
+ * implementation bump-allocated from fixed-size pools (32 states,
+ * 128 waiters) and never freed — after enough distinct PI futex
+ * addresses or contended waits the allocator silently returned NULL.
+ * Now: kmalloc on alloc, kfree on the matching free path.
+ */
 
 static inline void pi_spinlock(void) {
     while (__sync_lock_test_and_set(&pi_lock, 1))
@@ -549,8 +552,8 @@ static inline int pi_hash_func(void *key, int type, int pid) {
 }
 
 static pi_state_t *pi_state_alloc(void) {
-    if (pi_pool_idx >= PI_POOL_SIZE) return NULL;
-    pi_state_t *ps = &pi_pool[pi_pool_idx++];
+    pi_state_t *ps = kmalloc(sizeof(*ps));
+    if (!ps) return NULL;
     ps->key = NULL;
     ps->type = 0;
     ps->pid = 0;
@@ -562,14 +565,22 @@ static pi_state_t *pi_state_alloc(void) {
     return ps;
 }
 
+static void pi_state_free(pi_state_t *ps) {
+    if (ps) kfree(ps, sizeof(*ps));
+}
+
 static pi_waiter_t *pi_waiter_alloc(void) {
-    if (waiter_pool_idx >= PI_POOL_SIZE * 4) return NULL;
-    pi_waiter_t *pw = &waiter_pool[waiter_pool_idx++];
+    pi_waiter_t *pw = kmalloc(sizeof(*pw));
+    if (!pw) return NULL;
     pw->task = NULL;
     pw->priority = 0;
     pw->next = NULL;
     pw->key = NULL;
     return pw;
+}
+
+static void pi_waiter_free(pi_waiter_t *pw) {
+    if (pw) kfree(pw, sizeof(*pw));
 }
 
 static pi_state_t *pi_lookup(void *key, int type, int pid) {
@@ -616,16 +627,41 @@ static void pi_insert_waiter(pi_state_t *ps, pi_waiter_t *pw) {
     }
 }
 
-/* Remove a waiter from the list */
+/*
+ * Remove a waiter from the list and free its storage.
+ *
+ * If after removal the pi_state has no waiters and no owner, it's
+ * idle — unlink it from the hash and free it as well, so a long-lived
+ * system doesn't accumulate one pi_state per ever-used PI futex
+ * address.
+ */
 static void pi_remove_waiter(pi_state_t *ps, thread_t *t) {
     pi_waiter_t **pp = &ps->waiters;
     while (*pp) {
         if ((*pp)->task == t) {
-            *pp = (*pp)->next;
-            return;
+            pi_waiter_t *gone = *pp;
+            *pp = gone->next;
+            pi_waiter_free(gone);
+            break;
         }
         pp = &(*pp)->next;
     }
+
+    if (ps->waiters || ps->owner) {
+        return;
+    }
+
+    /* pi_state is idle — unlink from hash and free. */
+    int hash = pi_hash_func(ps->key, ps->type, ps->pid);
+    pi_state_t **link = &pi_hash[hash];
+    while (*link) {
+        if (*link == ps) {
+            *link = ps->next;
+            break;
+        }
+        link = &(*link)->next;
+    }
+    pi_state_free(ps);
 }
 
 /* Get highest priority among waiters */
@@ -864,8 +900,25 @@ int futex_unlock_pi(int *uaddr, int private) {
             ps->boosted_prio = 0;
         }
         ps->owner = NULL;
+
+        /* If there are no remaining waiters either, the pi_state is
+         * idle — unlink and free it.  Done here under pi_lock so a
+         * concurrent contender doesn't fish a half-freed entry out
+         * of the hash. */
+        if (!ps->waiters) {
+            int h = pi_hash_func(ps->key, ps->type, ps->pid);
+            pi_state_t **link = &pi_hash[h];
+            while (*link) {
+                if (*link == ps) {
+                    *link = ps->next;
+                    break;
+                }
+                link = &(*link)->next;
+            }
+            pi_state_free(ps);
+        }
     }
-    
+
     pi_unlock();
     
     /* Release the lock */
