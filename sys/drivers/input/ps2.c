@@ -6,12 +6,26 @@
  */
 
 #include <drivers/input/ps2.h>
+#include <drivers/input/mouse.h>
 #include <arch/x86-common/io.h>
 #include <kern/console.h>
 #include <stdio.h>
 
 /* Global state */
 static int ps2_dual_channel = 0;
+
+/*
+ * Detected mouse generation.  Visible to mouse.c via
+ * ps2_mouse_get_generation() so the IRQ handler knows packet length
+ * and byte-3 layout.
+ *
+ *   0 — standard 3-byte PS/2 mouse (no wheel, 3 buttons max)
+ *   3 — Microsoft IntelliMouse (4-byte packet, signed Z-axis in byte 3)
+ *   4 — Microsoft IntelliMouse Explorer (4-byte packet, Z in low nibble,
+ *       buttons 4/5 in bits 4/5 of byte 3)
+ */
+static int ps2_mouse_generation = 0;
+int ps2_mouse_get_generation(void) { return ps2_mouse_generation; }
 
 /*
  * ps2_wait_write - Wait until input buffer is empty (ready to receive command/data)
@@ -246,29 +260,101 @@ int ps2_init(void) {
     
     /* Step 9: Initialize mouse on port 2 if present */
     if (ps2_dual_channel) {
-        uint8_t byte;
-        
-        /* Send reset command to mouse */
-        if (ps2_write_aux(PS2_DEV_RESET) == 0) {
-            /* Wait for ACK (0xFA) */
-            if (ps2_read_data_timeout(&byte, PS2_MOUSE_TIMEOUT_LOOPS) == 0 &&
-                byte == PS2_DEV_ACK) {
-                /* Wait for self-test passed (0xAA) */
-                if (ps2_read_data_timeout(&byte, PS2_MOUSE_TIMEOUT_LOOPS) == 0 &&
-                    byte == 0xAA) {
-                    /* Consume device ID (0x00 for standard mouse) */
-                    ps2_read_data_timeout(&byte, PS2_TIMEOUT_LOOPS);
-                    
-                    /* Enable data reporting */
-                    if (ps2_write_aux(PS2_DEV_SCAN_ON) == 0) {
-                        ps2_read_data_timeout(&byte, PS2_TIMEOUT_LOOPS); /* ACK */
-                        kprint("PS/2: Mouse enabled\n");
-                    }
+        ps2_mouse_setup();
+    }
+
+    kprint("PS/2: Controller initialized\n");
+    return 0;
+}
+
+/*
+ * Send a single byte to the mouse and wait for the standard ACK (0xFA).
+ * Returns 0 on success, -1 on any timeout/NAK.
+ */
+static int ps2_aux_cmd(uint8_t cmd) {
+    uint8_t ack;
+    if (ps2_write_aux(cmd) != 0) return -1;
+    if (ps2_read_data_timeout(&ack, PS2_MOUSE_TIMEOUT_LOOPS) != 0) return -1;
+    return (ack == PS2_DEV_ACK) ? 0 : -1;
+}
+
+/*
+ * Microsoft's "knock sequence" for entering an extended IntelliMouse mode.
+ * The sequence is three consecutive Set Sample Rate (0xF3) commands with
+ * specific values; the mouse interprets that triplet as a request to
+ * switch personality.  After the knock, Read Device Type (0xF2) returns
+ * the new ID byte.
+ *
+ *   200, 100, 80  → 0x03 IntelliMouse                       (3-button + wheel)
+ *   200, 200, 80  → 0x04 IntelliMouse Explorer              (5-button + wheel)
+ *
+ * Explorer's knock is only honoured AFTER the IntelliMouse knock has
+ * landed; we issue them in sequence.  A non-Microsoft mouse that
+ * doesn't recognise either sequence simply stays in standard mode
+ * and returns 0x00 from 0xF2 — which is exactly what we want.
+ */
+static int ps2_mouse_knock(uint8_t a, uint8_t b, uint8_t c) {
+    if (ps2_aux_cmd(0xF3) != 0) return -1;
+    if (ps2_aux_cmd(a)    != 0) return -1;
+    if (ps2_aux_cmd(0xF3) != 0) return -1;
+    if (ps2_aux_cmd(b)    != 0) return -1;
+    if (ps2_aux_cmd(0xF3) != 0) return -1;
+    if (ps2_aux_cmd(c)    != 0) return -1;
+    return 0;
+}
+
+/* Send 0xF2 (Read Device Type), return the ID byte on success, -1 on failure. */
+static int ps2_mouse_read_id(void) {
+    uint8_t ack, id;
+    if (ps2_write_aux(0xF2) != 0) return -1;
+    if (ps2_read_data_timeout(&ack, PS2_MOUSE_TIMEOUT_LOOPS) != 0) return -1;
+    if (ack != PS2_DEV_ACK) return -1;
+    if (ps2_read_data_timeout(&id, PS2_MOUSE_TIMEOUT_LOOPS) != 0) return -1;
+    return (int)id;
+}
+
+/*
+ * Probe an attached PS/2 mouse, escalating through:
+ *   plain → IntelliMouse (200/100/80) → Explorer (200/200/80)
+ * and finally turn on data reporting.  Stores the resulting generation
+ * in ps2_mouse_generation.
+ */
+void ps2_mouse_setup(void) {
+    uint8_t byte;
+
+    /* Reset.  Expect ACK + 0xAA self-test + initial ID. */
+    if (ps2_write_aux(PS2_DEV_RESET) != 0) return;
+    if (ps2_read_data_timeout(&byte, PS2_MOUSE_TIMEOUT_LOOPS) != 0 ||
+        byte != PS2_DEV_ACK) return;
+    if (ps2_read_data_timeout(&byte, PS2_MOUSE_TIMEOUT_LOOPS) != 0 ||
+        byte != 0xAA) return;
+    /* Initial device ID (post-reset).  Plain mice return 0x00 — note
+     * that we will re-read it below after the knock. */
+    ps2_read_data_timeout(&byte, PS2_TIMEOUT_LOOPS);
+
+    ps2_mouse_generation = 0;
+
+    /* Knock for IntelliMouse (wheel). */
+    if (ps2_mouse_knock(200, 100, 80) == 0) {
+        int id = ps2_mouse_read_id();
+        if (id == 0x03) {
+            ps2_mouse_generation = 3;
+            kprint("PS/2: IntelliMouse (wheel) detected\n");
+
+            /* Knock for IntelliMouse Explorer (5-button).  Only meaningful
+             * once the mouse has already gone into IntelliMouse mode. */
+            if (ps2_mouse_knock(200, 200, 80) == 0) {
+                id = ps2_mouse_read_id();
+                if (id == 0x04) {
+                    ps2_mouse_generation = 4;
+                    kprint("PS/2: IntelliMouse Explorer (5-button) detected\n");
                 }
             }
         }
     }
 
-    kprint("PS/2: Controller initialized\n");
-    return 0;
+    /* Enable data reporting. */
+    if (ps2_aux_cmd(PS2_DEV_SCAN_ON) == 0) {
+        kprint("PS/2: Mouse enabled\n");
+    }
 }

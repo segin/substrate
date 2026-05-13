@@ -17,10 +17,12 @@
 #define REL_Y      0x01
 #define REL_WHEEL  0x08
 
-// Mouse Buttons
-#define BTN_LEFT   0x110
-#define BTN_RIGHT  0x111
-#define BTN_MIDDLE 0x112
+// Mouse Buttons (Linux input-event-codes.h compatible)
+#define BTN_LEFT    0x110
+#define BTN_RIGHT   0x111
+#define BTN_MIDDLE  0x112
+#define BTN_SIDE    0x113   /* Mouse button 4 — IntelliMouse Explorer back   */
+#define BTN_EXTRA   0x114   /* Mouse button 5 — IntelliMouse Explorer forward */
 
 // Input Event Structure (Linux compatible)
 typedef struct input_event {

@@ -66,6 +66,18 @@
 
 /* Public API */
 int ps2_init(void);
+
+/* Re-probe the PS/2 mouse: reset, IntelliMouse / Explorer knock, enable
+ * scan.  Called from ps2_init(); exposed so a hot-replug can re-detect. */
+void ps2_mouse_setup(void);
+
+/*
+ * Returns the IntelliMouse "device generation":
+ *   0 — plain 3-byte mouse (no wheel)
+ *   3 — IntelliMouse        (4-byte packet, signed Z in byte 3)
+ *   4 — IntelliMouse Explorer (4-byte, Z in low nibble + buttons 4/5)
+ */
+int ps2_mouse_get_generation(void);
 int ps2_write_command(uint8_t cmd);
 int ps2_write_data(uint8_t data);
 int ps2_write_aux(uint8_t data);

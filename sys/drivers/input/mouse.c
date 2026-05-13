@@ -13,11 +13,12 @@ static mouse_event_t mouse_queue[MOUSE_QUEUE_SIZE];
 static int mouse_q_head = 0;
 static int mouse_q_tail = 0;
 
-static void mouse_q_push(int32_t dx, int32_t dy, uint8_t buttons) {
+static void mouse_q_push(int32_t dx, int32_t dy, int32_t wheel, uint8_t buttons) {
     int next = (mouse_q_head + 1) % MOUSE_QUEUE_SIZE;
     if (next != mouse_q_tail) {
         mouse_queue[mouse_q_head].dx = dx;
         mouse_queue[mouse_q_head].dy = dy;
+        mouse_queue[mouse_q_head].wheel = wheel;
         mouse_queue[mouse_q_head].buttons = buttons;
         mouse_q_head = next;
     }
@@ -42,7 +43,7 @@ void mouse_init(void) {
 }
 
 static uint8_t mouse_cycle = 0;
-static int8_t  mouse_byte[3];
+static int8_t  mouse_byte[4];   /* byte 3 used only on IntelliMouse / Explorer */
 static int32_t mouse_x = 0;
 static int32_t mouse_y = 0;
 
@@ -57,17 +58,20 @@ void mouse_handler(registers_t *regs) {
     uint8_t status = inb(PS2_STATUS_PORT);
     if (status & 1) {
         uint8_t data = inb(PS2_DATA_PORT);
-        
+
         /* Harvest entropy from mouse event timing */
         uint32_t entropy_data[2];
         i386_cpu_cycle_counter_split(&entropy_data[0], &entropy_data[1]);
         entropy_data[1] ^= data; /* Mix in data byte */
         random_harvest_fast(entropy_data, sizeof(entropy_data));
-        
+
+        int gen = ps2_mouse_get_generation();
+        int packet_len = (gen == 3 || gen == 4) ? 4 : 3;
+
         switch (mouse_cycle) {
             case 0:
                 mouse_byte[0] = data;
-                // Bit 3 should always be 1 for the first byte
+                /* Bit 3 of byte 0 is always 1 on a valid packet header. */
                 if (data & 0x08) mouse_cycle++;
                 break;
             case 1:
@@ -76,38 +80,70 @@ void mouse_handler(registers_t *regs) {
                 break;
             case 2:
                 mouse_byte[2] = data;
+                if (packet_len == 3) {
+                    mouse_cycle = 0;
+                    goto deliver;
+                }
+                mouse_cycle++;
+                break;
+            case 3:
+                mouse_byte[3] = data;
                 mouse_cycle = 0;
 
-                // Decode
-                mouse_buttons = mouse_byte[0] & 0x07; // Left, Right, Middle bits
-                
+            deliver: {
+                /* Decode */
                 int32_t dx = (int32_t)mouse_byte[1];
                 int32_t dy = (int32_t)mouse_byte[2];
+                int32_t wheel = 0;
+                uint8_t buttons = mouse_byte[0] & 0x07;   /* L,R,M */
 
-                // Handle sign bits
+                /* Sign extend / overflow clamp on the 9-bit X/Y deltas. */
                 if (mouse_byte[0] & 0x10) dx -= 256;
                 if (mouse_byte[0] & 0x20) dy -= 256;
-
                 dx = mouse_clamp_delta(dx, mouse_byte[0] & 0x40, mouse_byte[0] & 0x10);
                 dy = mouse_clamp_delta(dy, mouse_byte[0] & 0x80, mouse_byte[0] & 0x20);
 
-                mouse_x += dx;
-                mouse_y -= dy; // PS/2 Y-axis is inverted relative to screen coords
+                if (gen == 3) {
+                    /* IntelliMouse: byte 3 is a signed 8-bit Z-axis.
+                     * The cast to int8_t does the sign extension. */
+                    wheel = (int32_t)(int8_t)mouse_byte[3];
+                } else if (gen == 4) {
+                    /* IntelliMouse Explorer: byte 3 layout is
+                     *   bits 0-3 — Z-axis, signed 4-bit (-8..7)
+                     *   bit  4   — button 4 (BTN_SIDE)
+                     *   bit  5   — button 5 (BTN_EXTRA)
+                     *   bits 6-7 — reserved (always zero)
+                     */
+                    int8_t z4 = (int8_t)(mouse_byte[3] & 0x0F);
+                    if (z4 & 0x08) z4 |= 0xF0;          /* sign-extend bit 3 */
+                    wheel = (int32_t)z4;
+                    if (mouse_byte[3] & 0x10) buttons |= (1u << 3);   /* btn 4 */
+                    if (mouse_byte[3] & 0x20) buttons |= (1u << 4);   /* btn 5 */
+                }
 
-                mouse_q_push(dx, -dy, mouse_buttons);
-                
+                mouse_buttons = buttons;
+                mouse_x += dx;
+                mouse_y -= dy;  /* PS/2 Y-axis is inverted relative to screen */
+
+                mouse_q_push(dx, -dy, wheel, buttons);
+
                 input_report_rel(&mouse_dev, REL_X, dx);
                 input_report_rel(&mouse_dev, REL_Y, -dy);
-                input_report_key(&mouse_dev, BTN_LEFT, (mouse_buttons & 1) ? 1 : 0);
-                input_report_key(&mouse_dev, BTN_RIGHT, (mouse_buttons & 2) ? 1 : 0);
-                input_report_key(&mouse_dev, BTN_MIDDLE, (mouse_buttons & 4) ? 1 : 0);
+                if (wheel) input_report_rel(&mouse_dev, REL_WHEEL, wheel);
+                input_report_key(&mouse_dev, BTN_LEFT,   (buttons & 0x01) ? 1 : 0);
+                input_report_key(&mouse_dev, BTN_RIGHT,  (buttons & 0x02) ? 1 : 0);
+                input_report_key(&mouse_dev, BTN_MIDDLE, (buttons & 0x04) ? 1 : 0);
+                if (gen == 4) {
+                    input_report_key(&mouse_dev, BTN_SIDE,  (buttons & 0x08) ? 1 : 0);
+                    input_report_key(&mouse_dev, BTN_EXTRA, (buttons & 0x10) ? 1 : 0);
+                }
                 input_sync(&mouse_dev);
-
                 break;
+            }
         }
     }
-    
-    // EOI handled by IDT dispatcher
+
+    /* EOI handled by IDT dispatcher */
     (void)regs;
 }
 
