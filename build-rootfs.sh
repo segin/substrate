@@ -41,7 +41,21 @@ overlay_toolchain() {
     for staging in "$DIST_TOOLCHAIN" "$GCC_STAGE2_STAGING"; do
         if [ -d "$staging/usr" ]; then
             echo "Overlaying $staging/usr/ -> $DIST/usr/"
-            cp -a "$staging"/usr/. "$DIST/usr/"
+            # --remove-destination is critical: a plain `cp -a` would
+            # WRITE THROUGH existing symlinks (substrate's homebrew
+            # install creates `ranlib -> ar` and friends in dist/usr/bin/).
+            # Without --remove-destination, copying the new `ranlib`
+            # binary onto that symlink overwrites `ar` instead — and
+            # both names then resolve to the same ranlib content.
+            # --remove-destination unlinks the destination first so the
+            # new file replaces the symlink cleanly.
+            cp -a --remove-destination "$staging"/usr/. "$DIST/usr/" 2>/dev/null || {
+                # Fallback for non-GNU cp: explicit unlink + copy.
+                (cd "$staging/usr" && find . \( -type f -o -type l \)) | while read -r f; do
+                    rm -f "$DIST/usr/${f#./}"
+                done
+                cp -a "$staging"/usr/. "$DIST/usr/"
+            }
             merged=$((merged + 1))
         else
             echo "  (skipped: $staging/usr does not exist)"

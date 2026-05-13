@@ -1,0 +1,195 @@
+.TH WHICH 1 2026-05-12 "Substrate" "Substrate User Commands"
+.SH NAME
+which \- locate a program file in the user's PATH
+.SH SYNOPSIS
+.B which
+.RI [ options ]
+.IR name ...
+.SH DESCRIPTION
+For each
+.I name
+on the command line,
+.B which
+searches the directories listed in the
+.B PATH
+environment variable, in order, and prints the absolute path of the
+first executable file matching that name.
+.PP
+With
+.B \-a
+(or
+.BR \-\-all ),
+all matches are printed instead of just the first.
+.PP
+If a
+.I name
+contains a slash, no
+.B PATH
+search is performed and the
+.I name
+itself is checked for executability.
+.SH OPTIONS
+.TP
+.BR \-a ", " \-\-all
+Print every matching pathname in
+.B PATH
+order, not just the first.
+.TP
+.B \-s
+Silent.  Suppress all output; exit status alone indicates whether
+each
+.I name
+was found.  BSD convention.
+.TP
+.B \-\-skip\-dot
+Ignore
+.B PATH
+entries that start with a literal
+.RB ` . '.
+.TP
+.B \-\-skip\-tilde
+Ignore
+.B PATH
+entries that start with
+.RB ` ~ '.
+.TP
+.B \-\-show\-dot
+When a match is in the current working directory, print it as
+.IB ./ name
+instead of expanding to the full
+.B $PWD
+path.
+.TP
+.B \-\-show\-tilde
+When a match is in
+.BR $HOME ,
+print it as
+.IB ~/ relative
+instead of expanding to the full
+.B $HOME
+path.
+.TP
+.B \-\-tty\-only
+Apply
+.B \-\-show\-dot
+and
+.B \-\-show\-tilde
+transformations only when standard output is a terminal.  Useful when
+output is piped to another program that wants absolute paths.
+.TP
+.BR \-i ", " \-\-read\-alias
+GNU compatibility; not implemented on Substrate.  Substrate's
+.B which
+runs as a standalone program and has no integration with the shell's
+alias table, so this flag is accepted with a one-line warning to
+standard error.
+.TP
+.B \-\-skip\-alias
+No-op (we don't read aliases in the first place).
+.TP
+.B \-\-read\-functions
+GNU compatibility; not implemented on Substrate.  Warned and ignored.
+.TP
+.B \-\-skip\-functions
+No-op.
+.TP
+.BR \-v ", " \-\-version
+Print the program version and exit.
+.TP
+.B \-\-help
+Print a usage summary and exit.
+.SH "EXIT STATUS"
+.TP
+.B 0
+Every
+.I name
+was found.
+.TP
+.B 1
+One or more
+.I name
+arguments could not be located in
+.BR PATH .
+.TP
+.B 2
+Usage error (unknown option, no
+.I name
+arguments).
+.SH ENVIRONMENT
+.TP
+.B PATH
+Colon-separated list of directories to search.  An empty component
+is treated as the current directory.
+.TP
+.B HOME
+Used by
+.B \-\-show\-tilde
+to recognise paths that should be abbreviated with
+.RB ` ~ '.
+.SH EXAMPLES
+Locate the
+.I gcc
+binary that will be invoked when the user types
+.RI ` gcc ':
+.PP
+.RS
+.nf
+$ which gcc
+/usr/bin/gcc
+.fi
+.RE
+.PP
+Show every
+.I as
+in
+.B PATH
+(useful when binutils and a homebrew toolchain coexist):
+.PP
+.RS
+.nf
+$ which -a as
+/usr/bin/as
+/usr/local/bin/as
+.fi
+.RE
+.PP
+Silent existence probe in a shell script:
+.PP
+.RS
+.nf
+if which -s gmake; then
+        gmake
+else
+        make
+fi
+.fi
+.RE
+.SH "SEE ALSO"
+.BR command (1),
+.BR sh (1),
+.BR access (2),
+.BR execvp (3),
+.BR environ (7)
+.SH STANDARDS
+POSIX does not standardise
+.BR which ;
+the POSIX-recommended portable equivalent is
+.IR "command -v" .
+This implementation merges the BSD
+.RB ( \-a ", " \-s )
+and GNU
+.RB ( \-\-all ,
+.BR \-\-skip\-dot ,
+.B \-\-show\-tilde
+and the rest)
+option sets into a single binary so the same
+.B which
+invocation works on either flavour.
+.SH HISTORY
+.B which
+appeared in Berkeley csh, was rewritten as a standalone C program in
+4.3BSD-Reno, and has been re-implemented and extended many times since.
+This Substrate implementation was written from scratch and patterned
+on the
+.BR id (1)
+single-binary-multi-flavour approach.
