@@ -2964,6 +2964,91 @@ int sys_proc_threads(pid_t pid, tid_t *tids, size_t *count) {
     return 0;
 }
 
+/* sys_proc_thr_count(pid) — return number of threads owned by the
+ * process.  Use to size the buffer for a subsequent sys_proc_thr_list. */
+struct proc_thr_counter {
+    process_t *proc;
+    size_t     n;
+};
+static void proc_thr_counter_cb(thread_t *t, void *arg) {
+    struct proc_thr_counter *c = arg;
+    if (t && t->proc == c->proc && t->tid != -1) c->n++;
+}
+int sys_proc_thr_count(pid_t pid) {
+    process_t *target = (pid == 0) ? current_process : proc_find(pid);
+    if (!target) return -3;
+    struct proc_thr_counter c = { .proc = target, .n = 0 };
+    sched_iterate_threads(proc_thr_counter_cb, &c);
+    return (int)c.n;
+}
+
+/* sys_proc_thr_list(pid, array, size_bytes) — fill array with one
+ * sys_thrinfo_t per thread.  size_bytes must equal
+ * sizeof(sys_thrinfo_t) * sys_proc_thr_count(pid) exactly.  The
+ * two-pass design (count + fill) ensures the contract holds even
+ * under concurrent thread creation/exit; if the count changes between
+ * calls the caller resizes and retries. */
+struct proc_thr_fill {
+    process_t      *proc;
+    sys_thrinfo_t  *out;
+    size_t          cap;        /* in entries */
+    size_t          n;
+    int             copy_err;
+};
+static void proc_thr_fill_cb(thread_t *t, void *arg) {
+    struct proc_thr_fill *c = arg;
+    if (!t || t->proc != c->proc || t->tid == -1) return;
+    if (c->n < c->cap) {
+        sys_thrinfo_t kbuf;
+        memset(&kbuf, 0, sizeof(kbuf));
+        kbuf.tid            = (int32_t)t->tid;
+        kbuf.pid            = (int32_t)(t->proc ? t->proc->pid : 0);
+        kbuf.state          = (uint32_t)t->state;
+        kbuf.priority       = t->priority;
+        kbuf.base_priority  = t->base_priority;
+        kbuf.sched_class    = (uint32_t)t->sched_class;
+        kbuf.flags          = t->flags;
+        kbuf.bound_cpu      = t->bound_cpu;
+        kbuf.cpu_affinity   = t->cpu_affinity;
+        kbuf.sig_pending    = t->sig_pending;
+        kbuf.sig_mask       = t->sig_mask;
+        kbuf.run_time       = t->run_time;
+        kbuf.sleep_time     = t->sleep_time;
+        kbuf.time_slice     = t->time_slice;
+        kbuf.time_slice_max = t->time_slice_max;
+        /* Copy thread name (NUL-padded). */
+        size_t i = 0;
+        while (i < sizeof(kbuf.name) - 1 && t->name[i]) {
+            kbuf.name[i] = t->name[i];
+            i++;
+        }
+        kbuf.name[i] = '\0';
+        if (copyout(&kbuf, &c->out[c->n], sizeof(kbuf)) != 0)
+            c->copy_err = -14;
+    }
+    c->n++;
+}
+int sys_proc_thr_list(pid_t pid, sys_thrinfo_t *array, size_t size_bytes) {
+    process_t *target = (pid == 0) ? current_process : proc_find(pid);
+    if (!target) return -3;
+    if (!array) return -22;                              /* -EINVAL */
+    if (size_bytes % sizeof(sys_thrinfo_t)) return -22;
+    size_t cap = size_bytes / sizeof(sys_thrinfo_t);
+
+    /* Pass 1: count.  Enforce size_bytes == sizeof * count strictly. */
+    struct proc_thr_counter cnt = { .proc = target, .n = 0 };
+    sched_iterate_threads(proc_thr_counter_cb, &cnt);
+    if (cap != cnt.n) return -22;
+
+    /* Pass 2: fill. */
+    struct proc_thr_fill c = {
+        .proc = target, .out = array, .cap = cap, .n = 0, .copy_err = 0
+    };
+    sched_iterate_threads(proc_thr_fill_cb, &c);
+    if (c.copy_err) return c.copy_err;
+    return 0;
+}
+
 int sys_proc_fds(pid_t pid, sys_fd_t *fds, size_t *count) {
     process_t *target = (pid == 0) ? current_process : proc_find(pid);
     if (!target) return -3;

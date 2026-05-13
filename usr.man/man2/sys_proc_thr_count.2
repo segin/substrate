@@ -1,0 +1,40 @@
+.TH SYS_PROC_THR_COUNT 2 "May 2026" "Substrate" "System Calls Manual"
+.SH NAME
+sys_proc_thr_count \- return the count of threads owned by a process
+.SH LIBRARY
+System library (libsys, \-lsys)
+.SH SYNOPSIS
+.B #include <sys/sysinfo.h>
+.PP
+.BI "int sys_proc_thr_count(pid_t " pid ");"
+.SH DESCRIPTION
+.BR sys_proc_thr_count ()
+returns the number of threads currently owned by the process whose ID is
+.IR pid .
+If
+.I pid
+is 0, the current process is implied.
+.PP
+Use the returned count to size a buffer for
+.BR sys_proc_thr_list (2):
+.PP
+.RS 4
+.nf
+int n = sys_proc_thr_count(pid);
+sys_thrinfo_t *buf = malloc(n * sizeof(*buf));
+sys_proc_thr_list(pid, buf, n * sizeof(*buf));
+.fi
+.RE
+.SH RETURN VALUE
+On success the non-negative thread count is returned.
+On failure, a negated errno is returned.
+.SH ERRORS
+.TP
+.B ESRCH
+.I pid
+does not refer to an existing process.
+.SH SEE ALSO
+.BR sys_proc_thr_list (2),
+.BR sys_proc_threads (2),
+.BR sys_proc_info (2),
+.BR thr_self (2)

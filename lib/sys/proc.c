@@ -18,6 +18,15 @@ int sys_proc_threads(pid_t pid, tid_t *tids, size_t *count) {
     return (int)syscall(SYS_PROC_THREADS, pid, (uintptr_t)tids, (uintptr_t)count, 0, 0, 0);
 }
 
+int sys_proc_thr_count(pid_t pid) {
+    return (int)syscall(SYS_PROC_THR_COUNT, pid, 0, 0, 0, 0, 0);
+}
+
+int sys_proc_thr_list(pid_t pid, sys_thrinfo_t *array, size_t size_bytes) {
+    return (int)syscall(SYS_PROC_THR_LIST, pid,
+                        (uintptr_t)array, (uintptr_t)size_bytes, 0, 0, 0);
+}
+
 int sys_proc_fds(pid_t pid, sys_fd_t *fds, size_t *count) {
     return (int)syscall(SYS_PROC_FDS, pid, (uintptr_t)fds, (uintptr_t)count, 0, 0, 0);
 }

@@ -63,6 +63,28 @@ typedef struct sys_map {
     char name[256];
 } sys_map_t;
 
+/* Per-thread snapshot returned by sys_proc_thr_list.  Layout is fixed
+ * (changing fields rev's the ABI); keep in sync with sys/include/sys/sysinfo.h. */
+typedef struct sys_thrinfo {
+    int32_t  tid;
+    int32_t  pid;            /* owner process id */
+    uint32_t state;          /* 0=READY 1=RUNNING 2=BLOCKED 3=ZOMBIE 4=STOPPED */
+    int32_t  priority;
+    int32_t  base_priority;
+    uint32_t sched_class;
+    uint32_t flags;          /* THREAD_F_* */
+    int16_t  bound_cpu;      /* -1 = floating */
+    int16_t  reserved0;
+    uint32_t cpu_affinity;
+    uint32_t sig_pending;
+    uint32_t sig_mask;
+    uint32_t run_time;       /* ticks accumulated this epoch */
+    uint32_t sleep_time;
+    char     name[16];       /* thr_set_name */
+    uint16_t time_slice;
+    uint16_t time_slice_max;
+} sys_thrinfo_t;
+
 struct sysinfo {
     long uptime;             /* Seconds since boot */
     unsigned long loads[3];  /* 1, 5, and 15 minute load averages */
@@ -212,6 +234,8 @@ int sys_proc_count(void);
 int sys_proc_list(pid_t *pids, size_t count);
 int sys_proc_info(pid_t pid, sys_procinfo_t *info);
 int sys_proc_threads(pid_t pid, tid_t *tids, size_t *count);
+int sys_proc_thr_count(pid_t pid);
+int sys_proc_thr_list(pid_t pid, sys_thrinfo_t *array, size_t size_bytes);
 int sys_proc_fds(pid_t pid, sys_fd_t *fds, size_t *count);
 int sys_proc_maps(pid_t pid, sys_map_t *maps, size_t *count);
 int sys_proc_cwd(pid_t pid, char *buf, size_t len);

@@ -1,0 +1,102 @@
+.TH SYS_PROC_THR_LIST 2 "May 2026" "Substrate" "System Calls Manual"
+.SH NAME
+sys_proc_thr_list \- fill an array with one sys_thrinfo_t per thread
+.SH LIBRARY
+System library (libsys, \-lsys)
+.SH SYNOPSIS
+.B #include <sys/sysinfo.h>
+.PP
+.BI "int sys_proc_thr_list(pid_t " pid ", sys_thrinfo_t *" array ", size_t " size_bytes ");"
+.SH DESCRIPTION
+.BR sys_proc_thr_list ()
+fills
+.I array
+with one
+.B sys_thrinfo_t
+entry for every thread owned by the process whose ID is
+.IR pid .
+If
+.I pid
+is 0, the current process is implied.
+.PP
+.I size_bytes
+must equal
+.IB sizeof( sys_thrinfo_t ") * sys_proc_thr_count(" pid )
+exactly.
+This is a strict contract \- if the buffer is too small or too large,
+.B EINVAL
+is returned.  If the thread count changes between
+.BR sys_proc_thr_count (2)
+and this call (e.g. a thread exits or
+.BR pthread_create (3)
+spawns a new one), the caller must resize and retry.
+.PP
+Each
+.B sys_thrinfo_t
+carries the thread's TID, owner PID, scheduler state, priority,
+scheduling class, signal mask / pending bitmap, accumulated user-ticks,
+CPU binding, time-slice budget, and the name set by
+.BR thr_set_name (2).
+.SS Thread states
+.TP 12
+.B 0
+THREAD_READY \- ready to run
+.TP
+.B 1
+THREAD_RUNNING \- currently on a CPU
+.TP
+.B 2
+THREAD_BLOCKED \- sleeping in a syscall or on a wait channel
+.TP
+.B 3
+THREAD_ZOMBIE \- exited, awaiting join
+.TP
+.B 4
+THREAD_STOPPED \- SIGSTOP'd
+.SH RETURN VALUE
+On success, 0 is returned and
+.I array
+is filled.
+On failure, a negated errno is returned.
+.SH ERRORS
+.TP
+.B ESRCH
+.I pid
+does not refer to an existing process.
+.TP
+.B EINVAL
+.I array
+is NULL, or
+.I size_bytes
+is not a whole multiple of
+.BR sizeof(sys_thrinfo_t) ,
+or
+.I size_bytes
+does not match the current thread count exactly.
+.TP
+.B EFAULT
+.I array
+points outside the caller's address space.
+.SH EXAMPLE
+.nf
+#include <sys/sysinfo.h>
+#include <stdlib.h>
+#include <stdio.h>
+
+void dump_threads(pid_t pid) {
+    int n = sys_proc_thr_count(pid);
+    if (n <= 0) return;
+    sys_thrinfo_t *t = malloc(n * sizeof(*t));
+    if (sys_proc_thr_list(pid, t, n * sizeof(*t)) == 0) {
+        for (int i = 0; i < n; i++)
+            printf("tid=%d state=%u name=%s\\n", t[i].tid, t[i].state, t[i].name);
+    }
+    free(t);
+}
+.fi
+.SH SEE ALSO
+.BR sys_proc_thr_count (2),
+.BR sys_proc_threads (2),
+.BR sys_proc_info (2),
+.BR thr_set_name (2),
+.BR pthread_create (3)

@@ -108,6 +108,8 @@
 #define SYS_PMAP_STATS 241
 #define SYS_GET_COW_STATS SYS_PMAP_STATS
 #define SYS_SCHED_YIELD   298   /* sched_yield(2) — voluntary CPU yield */
+#define SYS_PROC_THR_COUNT 320  /* count threads in pid */
+#define SYS_PROC_THR_LIST  321  /* fill sys_thrinfo_t array; size must == count * sizeof */
 #define SYS_THR_EXIT      431
 #define SYS_THR_SELF      432
 #define SYS_THR_KILL      433   /* FreeBSD-compat: signal a thread in current proc */
