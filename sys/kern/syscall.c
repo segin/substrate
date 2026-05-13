@@ -1086,11 +1086,11 @@ static void thr_kill_visit(thread_t *t, void *arg) {
     struct thr_kill_ctx *c = (struct thr_kill_ctx *)arg;
     if (t->proc != c->target) return;
     if (t == c->skip) return;
-    if (c->sig != 0) t->sig_pending |= (1u << c->sig);
+    if (c->sig != 0) t->sig_pending |= sigmask(c->sig);
 }
 
 int sys_thr_kill(long id, int sig) {
-    if (sig < 0 || sig >= 32) return -22; /* EINVAL */
+    if (sig < 0 || sig >= NSIG) return -22; /* EINVAL */
     if (id == -1) {
         /* All other threads in this process. */
         struct thr_kill_ctx c = { current_process, current_thread, sig };
@@ -1101,12 +1101,12 @@ int sys_thr_kill(long id, int sig) {
     thread_t *t = thr_lookup_in_proc(id, current_process);
     if (!t) return -3;
     if (sig == 0) return 0;
-    t->sig_pending |= (1u << sig);
+    t->sig_pending |= sigmask(sig);
     return 0;
 }
 
 int sys_thr_kill2(pid_t pid, long id, int sig) {
-    if (sig < 0 || sig >= 32) return -22;
+    if (sig < 0 || sig >= NSIG) return -22;
     process_t *target_proc = (pid == 0) ? current_process : proc_find(pid);
     if (!target_proc) return -3;
     if (id == -1) {
@@ -1117,7 +1117,7 @@ int sys_thr_kill2(pid_t pid, long id, int sig) {
     thread_t *t = sched_get_thread((int)id);
     if (!t || t->proc != target_proc) return -3;
     if (sig == 0) return 0;
-    t->sig_pending |= (1u << sig);
+    t->sig_pending |= sigmask(sig);
     return 0;
 }
 

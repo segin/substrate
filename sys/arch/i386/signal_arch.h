@@ -11,9 +11,19 @@
 /*
  * Signal trampoline address - mapped by kernel at a fixed location.
  * Contains code to invoke sys_sigreturn after signal handler returns.
+ *
+ * The trampoline lives OUTSIDE the recursive PDE range (PDE 1023 =
+ * 0xFFC00000-0xFFFFFFFF).  Mapping any user-accessible page in that
+ * region is impossible: pmap_enter for that range writes to a PDE
+ * slot rather than a PTE (and corrupts the page directory), and the
+ * recursive PDE itself has no USER bit so the underlying page would
+ * fault on any ring-3 access regardless.  0xFE000000 (PDE 1016) is
+ * unused kernel virtual space; pmap_enter allocates a fresh page
+ * table there with the USER bit set on the new PDE, and the trampoline
+ * PTE inherits VM_PROT_USER cleanly.
  */
-#define SIG_TRAMPOLINE_ADDR     0xFFFF1000
-#define RT_SIG_TRAMPOLINE_ADDR  0xFFFF1010  /* For SA_SIGINFO handlers -> rt_sigreturn */
+#define SIG_TRAMPOLINE_ADDR     0xFE000000
+#define RT_SIG_TRAMPOLINE_ADDR  0xFE000010  /* For SA_SIGINFO handlers -> rt_sigreturn */
 
 /*
  * Signal Context (sigcontext)

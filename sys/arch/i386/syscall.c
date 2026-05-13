@@ -376,12 +376,13 @@ void syscall_handler(registers_t *regs) {
         regs->eax = (uint32_t)p->rt_sigreturn(regs);
         goto syscall_done;
     }
-    // Native Substrate sigreturn
-    if (p->id == 0 && syscall_num == SYS_SIGRETURN) {
-        extern int sys_sigreturn(void*);
-        regs->eax = (uint32_t)sys_sigreturn(regs);
-        goto syscall_done;
-    }
+    /* Native sigreturn no longer takes a fast path — sys_sigreturn(void *scp)
+     * expects a user-space sigcontext pointer (arg from the trampoline's
+     * pushed &sigcontext), but the old fast path passed the kernel-side
+     * `regs` pointer instead, which copyin then rejected as EFAULT.  The
+     * native syscall table maps SYS_SIGRETURN to sys_sigreturn directly,
+     * so the normal func(args[0], ...) dispatch below handles it
+     * correctly. */
 
     if (!location) {
         if (trace_this) kprint("SYSCALL: Not Implemented\n");

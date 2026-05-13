@@ -427,12 +427,12 @@ int sys_sigreturn(void *scp_ptr) {
     if (!scp) {
         return -1;  /* EINVAL */
     }
-    
+
     if (!current_thread || !current_thread->syscall_regs) {
         return -1;  /* Internal error */
     }
     registers_t *syscall_regs = (registers_t *)current_thread->syscall_regs;
-    
+
     /*
      * Copy sigcontext from user space to kernel buffer
      */

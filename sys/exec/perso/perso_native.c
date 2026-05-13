@@ -446,6 +446,16 @@ struct personality personality_native = {
     .syscall_fmts = native_fmts,
     .syscall_count = MAX_SYSCALLS,
     .sendsig = sendsig,
-    .sigreturn = sys_sigreturn,
-    .rt_sigreturn = sys_rt_sigreturn
+    /* .sigreturn / .rt_sigreturn deliberately left NULL.
+     *
+     * The arch-level fast path in arch/i386/syscall.c invokes
+     * `p->sigreturn(regs)` directly with the kernel-side registers_t
+     * pointer, which is the convention Linux/FreeBSD-style
+     * sigreturn handlers need.  Substrate's native sys_sigreturn
+     * takes a USER-SPACE sigcontext pointer (pushed by the
+     * trampoline as the syscall arg), so it must go through the
+     * normal syscall-table dispatch path where args[0] is extracted
+     * from the user stack.  SYS_SIGRETURN / SYS_RT_SIGRETURN are
+     * already mapped to sys_sigreturn / sys_rt_sigreturn in
+     * native_syscalls[]. */
 };

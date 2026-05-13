@@ -2,6 +2,7 @@
 #include "../../../include/sys/proc.h"
 #include "linux_user.h"
 #include "../../../arch/i386/idt.h"
+#include "../../../arch/i386/signal_arch.h"   /* SIG_TRAMPOLINE_ADDR */
 #include <string.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -108,7 +109,7 @@ void linux_sendsig(void *handler, int sig, uint32_t mask, uint32_t flags, void *
 
         /* Linux expects a return trampoline */
         /* For now we use the kernel-mapped trampoline if it matches Linux ABI */
-        frame.pretcode = restorer ? restorer : 0xFFFF1010; // RT_SIG_TRAMPOLINE_ADDR
+        frame.pretcode = restorer ? restorer : RT_SIG_TRAMPOLINE_ADDR;
 
         if (copyout(&frame, (void*)(uintptr_t)esp, sizeof(frame)) != 0) {
             sigexit(current_process, SIGSEGV);
@@ -151,7 +152,7 @@ void linux_sendsig(void *handler, int sig, uint32_t mask, uint32_t flags, void *
         frame.sc.gs = regs->gs;
         frame.sc.oldmask = mask;
 
-        frame.pretcode = restorer ? restorer : 0xFFFF1000; // SIG_TRAMPOLINE_ADDR
+        frame.pretcode = restorer ? restorer : SIG_TRAMPOLINE_ADDR;
 
         if (copyout(&frame, (void*)(uintptr_t)esp, sizeof(frame)) != 0) {
             sigexit(current_process, SIGSEGV);

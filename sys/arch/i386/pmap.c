@@ -809,6 +809,17 @@ int pmap_enter(pmap_t pmap, uintptr_t va, uintptr_t pa, uint32_t prot, uint32_t 
         // Zero the page table using virtual address
         uint32_t *pt = (uint32_t *)pt_virt;
         for (int i = 0; i < 1024; i++) pt[i] = 0;
+    } else if ((prot & VM_PROT_USER) && !(V_PD[pdi] & PTE_U)) {
+        /* Existing PDE was kernel-only (e.g. a pre-existing kernel
+         * mapping that happens to share this 4 MiB slot).  The CPU's
+         * privilege check uses the lower of PDE/PTE USER bits, so a
+         * user-accessible PTE underneath a kernel-only PDE still
+         * faults with a protection violation in ring 3.  Promote the
+         * PDE to user-accessible — the underlying PTEs retain their
+         * individual USER/SUPERVISOR bits so existing kernel-only
+         * pages in this PDE stay kernel-only. */
+        V_PD[pdi] |= PTE_U;
+        pmap_invalidate_page((uint32_t)V_PT(pdi));
     }
 
     // Build PTE flags from prot parameter
@@ -996,9 +1007,10 @@ void pmap_map_trampoline(void) {
     // (page is a kernel virtual address)
     memcpy(page, sig_trampoline_code, sig_trampoline_size);
     
-    // 3. Map it at SIG_TRAMPOLINE_ADDR (0xFFFF1000)
+    // 3. Map it at SIG_TRAMPOLINE_ADDR (see signal_arch.h for rationale —
+    //    must NOT be in the recursive PDE range).
     // Use VM_PROT_USER to allow Ring 3 execution
-    #define SIG_TRAMPOLINE_ADDR 0xFFFF1000
+    #define SIG_TRAMPOLINE_ADDR 0xFE000000
     
     // Convert to physical
     uint32_t pa = (uint32_t)(uintptr_t)page - 0xC0000000;
@@ -1011,7 +1023,7 @@ void pmap_map_trampoline(void) {
         panic("PMAP: Failed to map trampoline page");
     }
     
-    kprint("PMAP: Mapped Signal Trampoline at 0xFFFF1000\n");
+    kprintf("PMAP: Mapped Signal Trampoline at 0x%08x\n", SIG_TRAMPOLINE_ADDR);
 }
 
 // Map a 4MB page (Single PDE, no Page Table)
