@@ -41,3 +41,6 @@ longjmp:
 	movl 20(%eax), %edx
 	movl %ecx, %eax         /* return value */
 	jmp *%edx
+
+/* No executable stack required — see lib/c/arch/i386/crt0.S. */
+	.section .note.GNU-stack,"",@progbits

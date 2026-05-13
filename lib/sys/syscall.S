@@ -41,3 +41,6 @@ syscall:
     ret                     /* pop ret_addr, jump to caller            */
 
 .size syscall, . - syscall
+
+/* No executable stack required — see lib/c/arch/i386/crt0.S. */
+    .section .note.GNU-stack,"",@progbits

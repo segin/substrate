@@ -67,3 +67,9 @@ _start:
     jmp 1b
 
     .size _start, . - _start
+
+/* Tell GNU ld the resulting executable does not need an executable
+ * stack.  Without this section, ld defaults to a W+X stack and warns
+ * "missing .note.GNU-stack section implies executable stack" at
+ * every link that consumes this object. */
+    .section .note.GNU-stack,"",@progbits

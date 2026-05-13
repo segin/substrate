@@ -108,3 +108,6 @@ _syscall6:
     cdq                     # sign-extend eax into edx for int64_t return
     add $28, %esp           # pop dummy + args
     ret
+
+/* No executable stack required — see lib/c/arch/i386/crt0.S. */
+    .section .note.GNU-stack,"",@progbits
