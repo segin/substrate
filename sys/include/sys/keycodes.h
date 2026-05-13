@@ -115,6 +115,10 @@
 
 #define KEY_PAUSE		119
 
+#define KEY_LEFTMETA		125		/* Left Windows / Super */
+#define KEY_RIGHTMETA		126		/* Right Windows / Super */
+#define KEY_MENU		127		/* Application / Menu */
+
 /* LED bits for keyboard LED control */
 #define LED_SCROLLL		0x01
 #define LED_NUML		0x02

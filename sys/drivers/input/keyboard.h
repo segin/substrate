@@ -13,6 +13,15 @@ void kbd_push(char c);
 void keyboard_set_keymap(const struct keymap *km);
 void keyboard_set_typematic(uint8_t delay, uint8_t rate);
 
+/* Scancode set selection.
+ *   set 1 — i8042 translated XT codes (default; bit 7 = break)
+ *   set 2 — native AT codes (F0 prefix = break)
+ *
+ * Keep in sync with the i8042's PS2_CFG_TRANSLATION bit and any
+ * `F0 nn` Set Scancode Set command sent to the keyboard itself. */
+void keyboard_set_scancode_set(int set);
+int  keyboard_get_scancode_set(void);
+
 /* Process a hardware-independent keycode (shared with USB HID) */
 void process_keycode(uint16_t keycode, int pressed);
 

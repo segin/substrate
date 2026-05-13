@@ -105,6 +105,98 @@ static const uint16_t scancode1_e0_to_keycode[128] = {
     [0x53] = KEY_DELETE,
 };
 
+/* ---- Scancode Set 2 (AT, native, untranslated) ---- *
+ *
+ * Used when the i8042 has translation disabled (PS2_CFG_TRANSLATION
+ * cleared) and the keyboard is reporting its native Set 2.  Break
+ * codes are NOT signalled by bit 7 (as in Set 1) — instead the byte
+ * 0xF0 precedes the make code of the released key.  E0 marks
+ * extended keys; E1 begins the long Pause/Break sequence.
+ *
+ * Single-byte make codes (most common keys).  Unmapped entries
+ * remain zero (KEY_RESERVED).
+ */
+static const uint16_t scancode2_to_keycode[256] = {
+    [0x01] = KEY_F9,
+    [0x03] = KEY_F5,        [0x04] = KEY_F3,        [0x05] = KEY_F1,
+    [0x06] = KEY_F2,        [0x07] = KEY_F12,
+    [0x09] = KEY_F10,       [0x0A] = KEY_F8,        [0x0B] = KEY_F6,
+    [0x0C] = KEY_F4,        [0x0D] = KEY_TAB,       [0x0E] = KEY_GRAVE,
+    [0x11] = KEY_LEFTALT,   [0x12] = KEY_LEFTSHIFT, [0x14] = KEY_LEFTCTRL,
+    [0x15] = KEY_Q,         [0x16] = KEY_1,
+    [0x1A] = KEY_Z,         [0x1B] = KEY_S,         [0x1C] = KEY_A,
+    [0x1D] = KEY_W,         [0x1E] = KEY_2,
+    [0x21] = KEY_C,         [0x22] = KEY_X,         [0x23] = KEY_D,
+    [0x24] = KEY_E,         [0x25] = KEY_4,         [0x26] = KEY_3,
+    [0x29] = KEY_SPACE,     [0x2A] = KEY_V,         [0x2B] = KEY_F,
+    [0x2C] = KEY_T,         [0x2D] = KEY_R,         [0x2E] = KEY_5,
+    [0x31] = KEY_N,         [0x32] = KEY_B,         [0x33] = KEY_H,
+    [0x34] = KEY_G,         [0x35] = KEY_Y,         [0x36] = KEY_6,
+    [0x3A] = KEY_M,         [0x3B] = KEY_J,         [0x3C] = KEY_U,
+    [0x3D] = KEY_7,         [0x3E] = KEY_8,
+    [0x41] = KEY_COMMA,     [0x42] = KEY_K,         [0x43] = KEY_I,
+    [0x44] = KEY_O,         [0x45] = KEY_0,         [0x46] = KEY_9,
+    [0x49] = KEY_DOT,       [0x4A] = KEY_SLASH,     [0x4B] = KEY_L,
+    [0x4C] = KEY_SEMICOLON, [0x4D] = KEY_P,         [0x4E] = KEY_MINUS,
+    [0x52] = KEY_APOSTROPHE,
+    [0x54] = KEY_LEFTBRACE, [0x55] = KEY_EQUAL,
+    [0x58] = KEY_CAPSLOCK,  [0x59] = KEY_RIGHTSHIFT,[0x5A] = KEY_ENTER,
+    [0x5B] = KEY_RIGHTBRACE,[0x5D] = KEY_BACKSLASH,
+    [0x66] = KEY_BACKSPACE,
+    [0x69] = KEY_KP1,       [0x6B] = KEY_KP4,       [0x6C] = KEY_KP7,
+    [0x70] = KEY_KP0,       [0x71] = KEY_KPDOT,
+    [0x72] = KEY_KP2,       [0x73] = KEY_KP5,       [0x74] = KEY_KP6,
+    [0x75] = KEY_KP8,
+    [0x76] = KEY_ESC,       [0x77] = KEY_NUMLOCK,   [0x78] = KEY_F11,
+    [0x79] = KEY_KPPLUS,    [0x7A] = KEY_KP3,       [0x7B] = KEY_KPMINUS,
+    [0x7C] = KEY_KPASTERISK,[0x7D] = KEY_KP9,       [0x7E] = KEY_SCROLLLOCK,
+    [0x83] = KEY_F7,
+};
+
+/*
+ * E0-prefixed Set 2 extended scancodes -> KEY_*.  Different byte
+ * values from the Set 1 E0 table — these are the keyboard's native
+ * extended encodings.
+ */
+static const uint16_t scancode2_e0_to_keycode[256] = {
+    [0x11] = KEY_RIGHTALT,
+    [0x14] = KEY_RIGHTCTRL,
+    [0x1F] = KEY_LEFTMETA,
+    [0x27] = KEY_RIGHTMETA,
+    [0x2F] = KEY_MENU,
+    [0x4A] = KEY_KPSLASH,
+    [0x5A] = KEY_KPENTER,
+    [0x69] = KEY_END,
+    [0x6B] = KEY_LEFT,
+    [0x6C] = KEY_HOME,
+    [0x70] = KEY_INSERT,
+    [0x71] = KEY_DELETE,
+    [0x72] = KEY_DOWN,
+    [0x74] = KEY_RIGHT,
+    [0x75] = KEY_UP,
+    [0x7A] = KEY_PAGEDOWN,
+    [0x7C] = KEY_SYSRQ,     /* Print Screen — full make is E0 12 E0 7C */
+    [0x7D] = KEY_PAGEUP,
+};
+
+/* ---- Scancode-set selection ---- *
+ *
+ * 1 = i8042 translated Set 1 (default, what most boots produce)
+ * 2 = native Set 2 (controller translation disabled or AT-only HW)
+ *
+ * Switched via keyboard_set_scancode_set().  Keep in sync with the
+ * controller's PS2_CFG_TRANSLATION bit and any 0xF0-prefixed Set
+ * Scancode Set command sent to the keyboard. */
+static int kbd_scancode_set = 1;
+
+void keyboard_set_scancode_set(int set) {
+    if (set == 1 || set == 2) kbd_scancode_set = set;
+}
+
+int keyboard_get_scancode_set(void) {
+    return kbd_scancode_set;
+}
+
 /* ---- Keymap Infrastructure ---- */
 
 struct keymap {
@@ -384,6 +476,10 @@ static int kbd_e1_state = 0; /* 0=idle, 1..4=collecting E1 sequence */
 
 static int kbd_extended = 0;
 
+/* Set 2 state: F0 = upcoming byte is a break (release), independent
+ * of the E0 extended flag.  E1 (Pause) uses its own counter above. */
+static int kbd_s2_break_pending = 0;
+
 /*
  * Handle a modifier key press/release.
  * Returns 1 if the scancode was a modifier (consumed), 0 otherwise.
@@ -610,6 +706,64 @@ void process_keycode(uint16_t keycode, int pressed)
 
 /* ---- IRQ1 Handler ---- */
 
+/*
+ * Set 2 (AT, native) scancode state machine.  Called from the IRQ
+ * handler when kbd_scancode_set == 2.  Tracks E0 (extended) and F0
+ * (release-prefix) independently — they can stack as `E0 F0 xx`
+ * meaning "release of extended key xx".  E1 (Pause) is handled
+ * separately via kbd_e1_state, same as Set 1.
+ */
+static void keyboard_handle_set2(uint8_t scancode) {
+    uint16_t keycode;
+    int pressed;
+
+    /* E1 prefix (Pause: E1 14 77 E1 F0 14 F0 77 — 8 bytes total) */
+    if (scancode == 0xE1) {
+        kbd_e1_state = 1;
+        return;
+    }
+    if (kbd_e1_state > 0) {
+        kbd_e1_state++;
+        if (kbd_e1_state >= 8) {
+            kbd_e1_state = 0;
+            process_keycode(KEY_PAUSE, 1);
+            process_keycode(KEY_PAUSE, 0);
+        }
+        return;
+    }
+
+    /* F0 break prefix — next byte is a release. */
+    if (scancode == 0xF0) {
+        kbd_s2_break_pending = 1;
+        return;
+    }
+
+    /* E0 extended prefix. */
+    if (scancode == 0xE0) {
+        kbd_extended = 1;
+        return;
+    }
+
+    pressed = !kbd_s2_break_pending;
+    kbd_s2_break_pending = 0;
+
+    if (kbd_extended) {
+        kbd_extended = 0;
+        /* Print Screen make is E0 12 E0 7C; release is E0 F0 7C E0
+         * F0 12.  Suppress the standalone 0x12 (fake LSHIFT). */
+        if (scancode == 0x12)
+            return;
+        keycode = scancode2_e0_to_keycode[scancode];
+    } else {
+        keycode = scancode2_to_keycode[scancode];
+    }
+
+    if (keycode == KEY_RESERVED)
+        return;
+
+    process_keycode(keycode, pressed);
+}
+
 void keyboard_handler(registers_t *regs) {
     uint8_t scancode = inb(0x60);
     uint16_t keycode;
@@ -624,6 +778,13 @@ void keyboard_handler(registers_t *regs) {
         entropy_data[1] = scancode;
         random_harvest_fast(entropy_data, sizeof(entropy_data));
     }
+
+    if (kbd_scancode_set == 2) {
+        keyboard_handle_set2(scancode);
+        return;
+    }
+
+    /* --- Set 1 (translated XT) path --- */
 
     /* E1 prefix state machine (Pause/Break: E1 1D 45 E1 9D C5) */
     if (scancode == 0xE1) {
