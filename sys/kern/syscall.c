@@ -3263,10 +3263,8 @@ int sys_setpriority(int which, int who, int prio) {
         int thread_prio = 20; /* Default */
 
         /* Find a thread belonging to p to get its priority */
-        /* Use MAX_THREADS from sched.h */
-        for (size_t t = 0; t < sched_thread_slot_count(); t++) {
-            thread_t *thread = sched_thread_slot(t);
-            if (thread && thread->tid != -1 && thread->proc == p) {
+        FOREACH_THREAD(thread) {
+            if (thread->proc == p) {
                 thread_prio = thread->base_priority;
                 break;
             }
@@ -3284,9 +3282,8 @@ int sys_setpriority(int which, int who, int prio) {
         if (new_base_prio < 1) new_base_prio = 1;
         if (new_base_prio > 40) new_base_prio = 40;
 
-        for (size_t t = 0; t < sched_thread_slot_count(); t++) {
-            thread_t *thread = sched_thread_slot(t);
-            if (thread && thread->tid != -1 && thread->proc == p) {
+        FOREACH_THREAD(thread) {
+            if (thread->proc == p) {
                 sched_set_priority(thread->tid, thread->sched_class, new_base_prio);
             }
         }
@@ -3320,9 +3317,8 @@ int sys_getpriority(int which, int who) {
         found++;
 
         int thread_prio = 20;
-        for (size_t t = 0; t < sched_thread_slot_count(); t++) {
-            thread_t *thread = sched_thread_slot(t);
-            if (thread && thread->tid != -1 && thread->proc == p) {
+        FOREACH_THREAD(thread) {
+            if (thread->proc == p) {
                 thread_prio = thread->base_priority;
                 break;
             }

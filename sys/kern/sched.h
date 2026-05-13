@@ -4,11 +4,29 @@
 #include <sys/proc.h>
 #include <sys/smp.h>
 
-/* Base static thread slots. Additional slots may be grown dynamically. */
-#define MAX_THREADS 64
+/*
+ * Thread registry layout
+ * ======================
+ *
+ * Every thread_t is kmalloc'd at sched_alloc_thread() time and linked
+ * into two structures protected by sched.c's tid_lock:
+ *
+ *   allthread     — singly-linked list of every live thread, walked
+ *                   by FOREACH_THREAD / thread_first / thread_next.
+ *   tid_hash[]    — open-chained hash table for O(1)
+ *                   sched_get_thread(tid).
+ *
+ * The swapper's TID-0 thread is the first one bootstrapped via
+ * sched_alloc_thread(kernel_process).
+ */
 
-extern thread_t threads[];
 extern thread_t *current_thread;
+
+thread_t *thread_first(void);
+thread_t *thread_next(thread_t *t);
+
+#define FOREACH_THREAD(var) \
+    for (thread_t *var = thread_first(); (var) != NULL; (var) = thread_next(var))
 
 /* IPI vector for scheduler preemption (must match IDT setup) */
 #define SCHED_IPI_VECTOR 0xFD
@@ -58,8 +76,6 @@ void sched_wakeup(void *chan);
 void sched_wakeup_n(void *chan, int n);
 process_t *sched_create_process(struct personality *pers);
 thread_t *sched_get_thread(int tid);
-size_t sched_thread_slot_count(void);
-thread_t *sched_thread_slot(size_t index);
 void sched_iterate_threads(void (*callback)(thread_t *t, void *arg), void *arg);
 void sched_reap_process_threads(process_t *proc);
 

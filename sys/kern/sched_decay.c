@@ -100,11 +100,9 @@ void sched_decay_tick(uint32_t current_tick) {
     last_decay_tick = current_tick;
     
     // Decay all timeshare threads
-    for (size_t i = 0; i < sched_thread_slot_count(); i++) {
-        thread_t *thread = sched_thread_slot(i);
-        if (!thread || thread->tid < 0) continue;
+    FOREACH_THREAD(thread) {
         if (thread->sched_class != SCHED_TIMESHARE) continue;
-        
+
         decay_thread_priority(thread);
         boost_starved_thread(thread, current_tick);
     }
@@ -114,17 +112,13 @@ void sched_decay_tick(uint32_t current_tick) {
 void sched_recalc_all_priorities(uint32_t current_tick) {
     if (current_tick - last_recalc_tick < RECALC_PERIOD) return;
     last_recalc_tick = current_tick;
-    
-    for (size_t i = 0; i < sched_thread_slot_count(); i++) {
-        thread_t *thread = sched_thread_slot(i);
-        if (!thread || thread->tid < 0) continue;
+
+    FOREACH_THREAD(thread) {
         sched_recalc_priority(thread);
     }
-    
+
     // Reset epoch counters to allow priorities to recover
-    for (size_t i = 0; i < sched_thread_slot_count(); i++) {
-        thread_t *thread = sched_thread_slot(i);
-        if (!thread || thread->tid < 0) continue;
+    FOREACH_THREAD(thread) {
         thread->run_time = thread->run_time / 2;
         thread->sleep_time = thread->sleep_time / 2;
     }

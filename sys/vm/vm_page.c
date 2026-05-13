@@ -78,10 +78,8 @@ static int vm_page_process_has_live_threads(process_t *proc) {
 		return 0;
 	}
 
-    for (size_t i = 0; i < sched_thread_slot_count(); i++) {
-        thread_t *thread = sched_thread_slot(i);
-
-        if (!thread || thread->tid == -1 || thread->proc != proc) {
+    FOREACH_THREAD(thread) {
+        if (thread->proc != proc) {
             continue;
         }
         if (thread->state != THREAD_ZOMBIE) {

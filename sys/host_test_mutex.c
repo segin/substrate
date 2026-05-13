@@ -9,7 +9,9 @@
 #include <sys/proc.h>
 #include <kern/sched.h>
 
-thread_t threads[MAX_THREADS];
+/* Host test only — kernel proper no longer has a static thread array. */
+#define HOST_TEST_HOST_TEST_MAX_THREADS 64
+static thread_t threads[HOST_TEST_HOST_TEST_MAX_THREADS];
 thread_t *current_thread;
 
 static int wake_one_calls;
@@ -37,7 +39,7 @@ void panic(const char *msg) {
 
 static void reset_env(void) {
     memset(threads, 0, sizeof(threads));
-    for (int i = 0; i < MAX_THREADS; i++) {
+    for (int i = 0; i < HOST_TEST_MAX_THREADS; i++) {
         threads[i].tid = -1;
     }
     wake_one_calls = 0;

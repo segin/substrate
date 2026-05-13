@@ -24,17 +24,12 @@
 #endif
 
 static int wait_threads_all_zombie(process_t *proc) {
-    size_t slots;
-
     if (!proc) {
         return 1;
     }
 
-    slots = sched_thread_slot_count();
-    for (size_t i = 0; i < slots; i++) {
-        thread_t *thread = sched_thread_slot(i);
-
-        if (!thread || thread->tid == -1 || thread->proc != proc) {
+    FOREACH_THREAD(thread) {
+        if (thread->proc != proc) {
             continue;
         }
         if (thread->state != THREAD_ZOMBIE) {

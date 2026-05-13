@@ -1683,26 +1683,22 @@ void pmap_growkernel(uintptr_t va) {
 }
 
 static uint32_t pmap_count_active(void) {
-    size_t slot_count = sched_thread_slot_count();
-    pmap_t *seen;
-    uint32_t seen_count = 0;
-
-    if (slot_count == 0) {
+    uint32_t total = 0;
+    FOREACH_THREAD(t) { (void)t; total++; }
+    if (total == 0) {
         return 0;
     }
 
-    seen = kmalloc(slot_count * sizeof(*seen));
+    pmap_t *seen = kmalloc(total * sizeof(*seen));
     if (!seen) {
         return 0;
     }
 
-    for (size_t i = 0; i < slot_count; i++) {
-        thread_t *thread = sched_thread_slot(i);
-
-        if (!thread || thread->tid == -1 || thread->state == THREAD_ZOMBIE || !thread->proc) {
+    uint32_t seen_count = 0;
+    FOREACH_THREAD(thread) {
+        if (thread->state == THREAD_ZOMBIE || !thread->proc) {
             continue;
         }
-
         pmap_t pmap = thread->proc->pmap;
         if (!pmap) {
             continue;
@@ -1715,12 +1711,12 @@ static uint32_t pmap_count_active(void) {
                 break;
             }
         }
-        if (!duplicate && seen_count < slot_count) {
+        if (!duplicate && seen_count < total) {
             seen[seen_count++] = pmap;
         }
     }
 
-    kfree(seen, slot_count * sizeof(*seen));
+    kfree(seen, total * sizeof(*seen));
     return seen_count;
 }
 

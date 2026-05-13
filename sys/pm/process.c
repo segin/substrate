@@ -968,12 +968,8 @@ void proc_reparent_children(process_t *p) {
 }
 
 static int proc_threads_all_zombie(process_t *proc, thread_t *skip_thread) {
-    size_t slots = sched_thread_slot_count();
-
-    for (size_t i = 0; i < slots; i++) {
-        thread_t *thread = sched_thread_slot(i);
-
-        if (!thread || thread->tid == -1 || thread->proc != proc || thread == skip_thread) {
+    FOREACH_THREAD(thread) {
+        if (thread->proc != proc || thread == skip_thread) {
             continue;
         }
         if (thread->state != THREAD_ZOMBIE) {
@@ -1133,27 +1129,25 @@ void proc_exit(int code) {
     extern void futex_thread_exit(thread_t *t);
     extern int mutex_release_owned_by_thread(thread_t *owner);
     extern void kprint(const char *msg);
-    for (size_t i = 0; i < sched_thread_slot_count(); i++) {
-        thread_t *thread = sched_thread_slot(i);
+    FOREACH_THREAD(thread) {
+        if (thread->proc != current_process) continue;
 
-        if (thread && thread->tid != -1 && thread->proc == current_process) {
-            /* Cleanup robust futexes for this thread */
-            futex_thread_exit(thread);
+        /* Cleanup robust futexes for this thread */
+        futex_thread_exit(thread);
 
-            if (mutex_release_owned_by_thread(thread) > 0) {
-                kprint("proc_exit: force-releasing mutexes held by exiting thread.\n");
-            }
+        if (mutex_release_owned_by_thread(thread) > 0) {
+            kprint("proc_exit: force-releasing mutexes held by exiting thread.\n");
+        }
 
-            /* Remove sleepers from sleep queues before they become zombies. */
-            sleepq_remove_thread(thread);
-            
-            /* Clear pending signals - process is dying */
-            thread->sig_pending = 0;
-            
-            /* Mark as zombie to stop execution (if not current thread) */
-            if (thread != current_thread) {
-                thread->state = THREAD_ZOMBIE;
-            }
+        /* Remove sleepers from sleep queues before they become zombies. */
+        sleepq_remove_thread(thread);
+
+        /* Clear pending signals - process is dying */
+        thread->sig_pending = 0;
+
+        /* Mark as zombie to stop execution (if not current thread) */
+        if (thread != current_thread) {
+            thread->state = THREAD_ZOMBIE;
         }
     }
 
@@ -1195,17 +1189,13 @@ void proc_exit(int code) {
     
     // 8. Phase 3: Thread Termination
     // Current thread becomes the "reaper thread"
-    for (size_t i = 0; i < sched_thread_slot_count(); i++) {
-        thread_t *thread = sched_thread_slot(i);
-
-        if (thread && thread->tid != -1 && thread->proc == current_process) {
-            if (thread != current_thread) {
-                // If not current thread, interrupt and terminate
-                thread->state = THREAD_ZOMBIE;
-                // Wake up so it gets preempted/terminated if sleeping
-                sleepq_wake_all(thread);
-            }
-        }
+    FOREACH_THREAD(thread) {
+        if (thread->proc != current_process) continue;
+        if (thread == current_thread) continue;
+        // If not current thread, interrupt and terminate
+        thread->state = THREAD_ZOMBIE;
+        // Wake up so it gets preempted/terminated if sleeping
+        sleepq_wake_all(thread);
     }
     
     // Wait for all threads to reach zombie state
@@ -1281,13 +1271,10 @@ void proc_exit(int code) {
     }
     
     // 8. Prevent further scheduling of ALL process threads and wake joiners
-    for (size_t i = 0; i < sched_thread_slot_count(); i++) {
-        thread_t *thread = sched_thread_slot(i);
-
-        if (thread && thread->tid != -1 && thread->proc == current_process) {
-            thread->state = THREAD_ZOMBIE;
-            sleepq_wake_all(thread);
-        }
+    FOREACH_THREAD(thread) {
+        if (thread->proc != current_process) continue;
+        thread->state = THREAD_ZOMBIE;
+        sleepq_wake_all(thread);
     }
     
     sched_yield();

@@ -297,7 +297,22 @@ typedef struct thread {
     char name[16];
 
     thread_state_t state;
+
+    /*
+     * `next` is the in-queue link used by sleepq.c / turnstile.c to
+     * chain a thread onto whichever wait queue it's currently parked
+     * on.  Don't reuse it for the registry — see t_allthread_next /
+     * t_tidhash_next below for the kernel-wide list / hash links.
+     */
     struct thread *next;
+
+    /*
+     * Registry links — protected by sched.c's tid_lock.  Every live
+     * thread is on `allthread` exactly once and in one tid_hash[]
+     * bucket exactly once.
+     */
+    struct thread *t_allthread_next;
+    struct thread *t_tidhash_next;
 } thread_t;
 
 // Globals

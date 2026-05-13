@@ -31,14 +31,10 @@ static unsigned long avenrun[3] = { 0, 0, 0 };
  */
 uint32_t sched_count_runnable(void) {
     uint32_t count = 0;
-    for (size_t i = 0; i < sched_thread_slot_count(); i++) {
-        thread_t *thread = sched_thread_slot(i);
-
-        if (thread && thread->tid != -1) {
-            if (thread->state == THREAD_RUNNING ||
-                thread->state == THREAD_READY) {
-                count++;
-            }
+    FOREACH_THREAD(thread) {
+        if (thread->state == THREAD_RUNNING ||
+            thread->state == THREAD_READY) {
+            count++;
         }
     }
     return count;
@@ -49,11 +45,9 @@ uint32_t sched_count_runnable(void) {
  */
 uint32_t sched_count_threads(void) {
     uint32_t count = 0;
-    for (size_t i = 0; i < sched_thread_slot_count(); i++) {
-        thread_t *thread = sched_thread_slot(i);
-        if (thread && thread->tid != -1) {
-            count++;
-        }
+    FOREACH_THREAD(thread) {
+        (void)thread;
+        count++;
     }
     return count;
 }

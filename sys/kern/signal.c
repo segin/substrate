@@ -33,12 +33,8 @@ static void signal_stop_process_threads(process_t *p, const char *reason) {
         return;
     }
 
-    for (size_t i = 0; i < sched_thread_slot_count(); i++) {
-        thread_t *thread = sched_thread_slot(i);
-
-        if (!thread || thread->tid == -1 || thread->proc != p) {
-            continue;
-        }
+    FOREACH_THREAD(thread) {
+        if (thread->proc != p) continue;
         thread->state = THREAD_STOPPED;
         thread->wait_reason = reason;
     }
@@ -50,12 +46,8 @@ static void signal_resume_process_threads(process_t *p) {
         return;
     }
 
-    for (size_t i = 0; i < sched_thread_slot_count(); i++) {
-        thread_t *thread = sched_thread_slot(i);
-
-        if (!thread || thread->tid == -1 || thread->proc != p) {
-            continue;
-        }
+    FOREACH_THREAD(thread) {
+        if (thread->proc != p) continue;
         if (thread->state == THREAD_STOPPED) {
             thread->state = THREAD_READY;
             thread->wait_reason = NULL;
@@ -493,9 +485,8 @@ void psignal(process_t *p, int sig) {
         uint32_t stop_mask = sigmask(SIGSTOP) | sigmask(SIGTSTP) | sigmask(SIGTTIN) | sigmask(SIGTTOU);
 
         // Clear pending stop signals on all threads (atomic — racing psignal on SMP)
-        for (size_t i = 0; i < sched_thread_slot_count(); i++) {
-            thread_t *thread = sched_thread_slot(i);
-            if (thread && thread->tid != -1 && thread->proc == p) {
+        FOREACH_THREAD(thread) {
+            if (thread->proc == p) {
                 __sync_fetch_and_and(&thread->sig_pending, ~stop_mask);
             }
         }
@@ -517,9 +508,8 @@ void psignal(process_t *p, int sig) {
 
     /* For SIGSTOP/SIGTSTP/SIGTTIN/SIGTTOU, clear SIGCONT */
     if (sig == SIGSTOP || sig == SIGTSTP || sig == SIGTTIN || sig == SIGTTOU) {
-        for (size_t i = 0; i < sched_thread_slot_count(); i++) {
-            thread_t *thread = sched_thread_slot(i);
-            if (thread && thread->tid != -1 && thread->proc == p) {
+        FOREACH_THREAD(thread) {
+            if (thread->proc == p) {
                 __sync_fetch_and_and(&thread->sig_pending, ~sigmask(SIGCONT));
             }
         }
@@ -530,11 +520,10 @@ void psignal(process_t *p, int sig) {
     
     thread_t *best_thread = NULL;
     int best_priority = -1; // Higher is better
-    
-    for (size_t i = 0; i < sched_thread_slot_count(); i++) {
-        thread_t *t = sched_thread_slot(i);
-        if (!t || t->tid == -1 || t->proc != p) continue;
-        
+
+    FOREACH_THREAD(t) {
+        if (t->proc != p) continue;
+
         /* SIGCONT Special: Wake up stopped threads */
         if (sig == SIGCONT && t->state == THREAD_STOPPED) {
             t->state = THREAD_READY;
