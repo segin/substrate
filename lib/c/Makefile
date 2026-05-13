@@ -26,7 +26,7 @@ SRCS = src/sys.c src/stdlib.c src/string.c src/ctype.c src/assert.c src/dirent.c
        src/pwd.c src/grp.c src/sha256.c src/md5.c \
        src/crypt.c src/crypt_sha256.c src/crypt_md5.c src/crypt_des.c \
        src/time/time.c src/div64.c fnmatch.c src/getopt.c src/wchar.c src/libgen.c \
-       src/fpclassify.c \
+       src/fpclassify.c src/socket_stubs.c \
        stdio/stdio_core.c stdio/stdstreams.c stdio/printf.c stdio/scanf.c sys_generic.c src/sysctl_helpers.c
 ASM_SRCS = arch/i386/syscall.S arch/i386/crt0.S arch/i386/setjmp.S
 
