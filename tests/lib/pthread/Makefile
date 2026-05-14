@@ -15,6 +15,13 @@
 CROSS  ?=
 CC      = $(CROSS)cc
 CFLAGS  = -Wall -Wextra -O2 -g
+# When cross-compiling for substrate, match the userland baseline
+# (i486+) so 4-byte atomics inline as cmpxchg/xchg rather than
+# expanding to libcalls (__sync_*_4 / __atomic_*_4) that the
+# substrate libgcc.a does not provide.
+ifneq ($(CROSS),)
+  CFLAGS += -march=i486 -mtune=i486
+endif
 
 # Host build (no CROSS): -pthread links against the system pthreads.
 # Cross build (CROSS set): point at substrate's libpthread + headers.

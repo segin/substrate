@@ -167,19 +167,17 @@ thread_t *sched_alloc_thread(process_t *proc) {
         return NULL;
     }
 
-    spinlock_acquire(&tid_lock);
-    tid = sched_alloc_tid_locked(proc);
-    if (tid < 0) {
-        spinlock_release(&tid_lock);
-        sched_storage_free(thread);
-        return NULL;
-    }
-    thread->tid = tid;
-    sched_link_locked(thread);
-    spinlock_release(&tid_lock);
-
+    /*
+     * Initialize ALL fields before linking into allthread.  The
+     * default kmalloc-zeroed state would be THREAD_READY (=0), which
+     * a concurrent sched_yield from a timer IRQ would happily pick
+     * — switching into a thread with no proc, no kstack, no
+     * anything.  The kernel-panic at eip=0xf0 with esp pointing at
+     * a user stack was exactly this: a half-constructed thread
+     * raced into context-switching.
+     */
     thread->proc = proc;
-    thread->state = THREAD_BLOCKED; /* Set to BLOCKED until stack is ready */
+    thread->state = THREAD_BLOCKED; /* until caller sets up stack and flips to READY */
     thread->wait_chan = NULL;
     thread->wait_reason = NULL;
     thread->sleep_expiry = 0;
@@ -200,6 +198,17 @@ thread_t *sched_alloc_thread(process_t *proc) {
     thread->sig_on_stack = 0;
     memset(&thread->sig_alt_stack, 0, sizeof(thread->sig_alt_stack));
     thread->in_syscall = 0;
+
+    spinlock_acquire(&tid_lock);
+    tid = sched_alloc_tid_locked(proc);
+    if (tid < 0) {
+        spinlock_release(&tid_lock);
+        sched_storage_free(thread);
+        return NULL;
+    }
+    thread->tid = tid;
+    sched_link_locked(thread);
+    spinlock_release(&tid_lock);
 
     return thread;
 }

@@ -26,8 +26,15 @@ BRANDELF = $(TOP)/usr.bin/brandelf/brandelf
 # Default install destination
 DESTDIR ?= $(TOP)/dist
 
-# Base flags for 32-bit x86
-COMMON_FLAGS = -m32 $(WARNFLAGS) -g -fno-stack-protector -mno-sse -mno-sse2 -mno-mmx
+# Base flags for 32-bit x86.
+# -march=i486 is the substrate-wide ISA baseline: the kernel has
+# always required CMPXCHG (introduced on i486), and the userland
+# libpthread futex mutex needs LOCK CMPXCHG / LOCK XADD to inline
+# the GCC __sync_* / __atomic_* builtins.  Without it those expand
+# to libcalls (__sync_val_compare_and_swap_4 etc) that the
+# substrate libgcc.a does not provide.  Putting it in COMMON_FLAGS
+# rather than just KERNEL_CFLAGS keeps user binaries consistent.
+COMMON_FLAGS = -m32 $(WARNFLAGS) -g -fno-stack-protector -mno-sse -mno-sse2 -mno-mmx -march=i486 -mtune=i486
 USR_INCLUDE = $(TOP)/include
 SYS_INCLUDE = $(TOP)/sys/include
 GCC_INCLUDE = $(shell $(CC) -m32 -print-file-name=include 2>/dev/null)
@@ -64,7 +71,8 @@ ifdef NATIVE_BUILD
     USER_LDFLAGS := $(EXTRA_USER_LDFLAGS)
     LIBGCC :=
 else
-    # Target build configuration (Substrate i386)
+    # Target build configuration (Substrate i386).
+    # -march=i486 already comes via COMMON_FLAGS.
     USER_CFLAGS := $(COMMON_FLAGS) -std=c2x -nostdinc -fno-pie -I$(USR_INCLUDE) -I$(SYS_INCLUDE) -I$(TOP)/sys
 ifneq ($(strip $(GCC_INCLUDE)),)
 ifneq ($(wildcard $(GCC_INCLUDE)),)
