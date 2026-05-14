@@ -110,7 +110,14 @@ build_components() {
     make -C "$TOP/lib/pthread" -j4
     make -C "$TOP/lib/dl" -j4
     make -C "$TOP/lib/edit" -j4
-    make -C "$TOP/usr.lib/elfobj" -j4
+
+    echo "Building usr.lib helper libraries (libelfobj, libregex,"
+    echo "libexvi, libbc, libdemangle, libjoin, libuu, ...)"
+    for dir in "$TOP/usr.lib"/*/ ; do
+        if [ -f "$dir/Makefile" ]; then
+            make -C "$dir" -j4
+        fi
+    done
 
     echo "Building dynamic linker..."
     make -C "$TOP/sbin/ld.so" -j4
@@ -119,6 +126,13 @@ build_components() {
     for dir in cc as ld ar ranlib nm objdump objcopy readelf strip strings size addr2line elfedit; do
         if [ -f "$TOP/usr.bin/$dir/Makefile" ]; then
             make -C "$TOP/usr.bin/$dir" -j4
+        fi
+    done
+
+    echo "Building all usr.bin programs (ldd, sysctl, ...)"
+    for dir in "$TOP/usr.bin"/*/ ; do
+        if [ -f "$dir/Makefile" ]; then
+            make -C "$dir" -j4
         fi
     done
 
@@ -228,11 +242,39 @@ install_to_dist() {
             cp "$TOP/usr.bin/$tool/$tool" "$DIST/usr/bin/"
         fi
     done
+    # Everything else under usr.bin/ (ldd, sysctl, ...).  Each subdir
+    # named NAME ships a binary at NAME/NAME; this loop catches every
+    # one not handled by the explicit toolchain block above.
+    for dir in "$TOP/usr.bin"/*/ ; do
+        if [ -d "$dir" ]; then
+            name=$(basename "$dir")
+            if [ -f "$dir/$name" ] && [ ! -f "$DIST/usr/bin/$name" ]; then
+                cp "$dir/$name" "$DIST/usr/bin/"
+            fi
+        fi
+    done
     # CC resource directory (SIMD headers)
     if [ -d "$TOP/usr.bin/cc/resource" ]; then
         mkdir -p "$DIST/usr/lib/substratecc"
         cp -r "$TOP/usr.bin/cc/resource/include" "$DIST/usr/lib/substratecc/"
     fi
+
+    # usr.lib helper libraries (libregex, libexvi, libbc, ...) are
+    # DT_NEEDED'd by vi, ex, grep, find, sed, bc, dc, etc.  ld.so
+    # searches /lib, /usr/lib, /usr/local/lib so install both flavours
+    # of each into /usr/lib (with the bare .so symlink).
+    echo "Installing usr.lib helper libraries to dist/usr/lib..."
+    for dir in "$TOP/usr.lib"/*/ ; do
+        [ -d "$dir" ] || continue
+        name=$(basename "$dir")
+        if [ -f "$dir/lib$name.a" ]; then
+            cp "$dir/lib$name.a" "$DIST/usr/lib/"
+        fi
+        if [ -f "$dir/lib$name.so.0" ]; then
+            cp "$dir/lib$name.so.0" "$DIST/usr/lib/"
+            ln -sf "lib$name.so.0" "$DIST/usr/lib/lib$name.so"
+        fi
+    done
 
     echo "Installing usr.sbin binaries..."
     mkdir -p "$DIST/usr/sbin"
