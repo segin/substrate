@@ -1,0 +1,94 @@
+.\" kvm_open / kvm_close / kvm_geterr — BSD libkvm shim
+.TH KVM_OPEN 3 "May 2026" "Substrate libkvm" "Library Functions"
+.SH NAME
+kvm_open, kvm_openfiles, kvm_close, kvm_geterr \-
+open / close the kernel-introspection descriptor
+.SH LIBRARY
+.B libkvm
+\(em "-lkvm".
+.SH SYNOPSIS
+.nf
+.B #include <kvm.h>
+.PP
+.BI "kvm_t *kvm_open(const char *" execfile ", const char *" corefile ,
+.BI "                const char *" swapfile ", int " flags ", const char *" errstr );
+.PP
+.BI "kvm_t *kvm_openfiles(const char *" execfile ", const char *" corefile ,
+.BI "                     const char *" swapfile ", int " flags ", char *" errbuf );
+.PP
+.BI "int kvm_close(kvm_t *" kd );
+.PP
+.BI "char *kvm_geterr(kvm_t *" kd );
+.fi
+.SH DESCRIPTION
+The substrate
+.B libkvm
+shim provides source-level compatibility with the FreeBSD / NetBSD / OpenBSD
+.B libkvm
+API.  It is implemented entirely in userspace by translating every entry
+point into the corresponding
+.BR libsys (3)
+calls.  There is no
+.I /dev/kmem
+on substrate; the
+.I execfile
+/
+.I corefile
+/
+.I swapfile
+arguments to
+.BR kvm_open / kvm_openfiles
+are accepted only when each is
+.BR NULL .
+Passing a non-NULL file refuses with an error message about
+"live-only" inspection.
+.PP
+.BR kvm_geterr ()
+returns the last error message buffered into the descriptor.  Both
+.BR kvm_open ()
+and
+.BR kvm_openfiles ()
+buffer the message in the
+.I errbuf
+argument when given; otherwise an internal buffer in the
+.B kvm_t
+is used.
+.SH RETURN VALUES
+.BR kvm_open ()
+and
+.BR kvm_openfiles ()
+return a pointer to an opaque
+.B kvm_t
+on success, or
+.B NULL
+on failure with an error message stored in
+.I errbuf .
+.PP
+.BR kvm_close ()
+always returns 0 — substrate's
+.B libkvm
+has no kernel-side state to release.
+.SH ERRORS
+.TP
+.B "substrate libkvm is live-only"
+The caller passed a non-NULL file argument to
+.BR kvm_open ()
+or
+.BR kvm_openfiles ().
+The substrate shim does not consult exec / core / swap files.
+.TP
+.B "out of memory"
+.BR calloc (3)
+failed allocating the descriptor.
+.SH SEE ALSO
+.BR kvm_getprocs (3),
+.BR kvm_read (3),
+.BR kvm_nlist (3),
+.BR libsys (3),
+.BR readproc (3).
+.SH NOTES
+.BR kvm_read ()
+and
+.BR kvm_write ()
+always fail on substrate.  Code paths that depend on raw kernel-memory
+access must be rewritten to use the structured libsys / /proc interfaces.

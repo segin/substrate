@@ -5,7 +5,10 @@ include ../Makefile.inc
 # DT_NEEDED libsys.so.0, and the link line names the .so files
 # directly with -l:libm.so.0 / -l:libsys.so.0 — those files have
 # to exist before libc.so.0 links, so libm and libsys come first.
-SUBDIRS = m sys c pthreads dl edit usb yacc at dbm
+#
+# kvm and proc depend on libsys + libc; placed after both are
+# guaranteed to be linkable.
+SUBDIRS = m sys c pthread dl edit usb yacc at dbm kvm proc
 
 .PHONY: all clean install $(SUBDIRS)
 
@@ -23,7 +26,9 @@ $(SUBDIRS):
 #     must exist before libc.so.0 links.
 #   - Everything else (pthreads, dl, edit, ...) depends on libc.
 c: | m sys
-pthreads dl edit usb yacc at dbm: | c
+pthread dl edit usb yacc at dbm: | c
+# libkvm and libproc wrap libsys directly (and pull libc for stdlib).
+kvm proc: | c sys
 
 clean:
 	@set -e; for dir in $(SUBDIRS); do \

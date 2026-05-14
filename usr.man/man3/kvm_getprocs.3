@@ -1,0 +1,98 @@
+.\" kvm_getprocs / kvm_getargv / kvm_getenvv — process enumeration
+.TH KVM_GETPROCS 3 "May 2026" "Substrate libkvm" "Library Functions"
+.SH NAME
+kvm_getprocs, kvm_getproc2, kvm_getargv, kvm_getenvv \-
+enumerate processes and their argv / envv
+.SH LIBRARY
+.B libkvm
+\(em "-lkvm".
+.SH SYNOPSIS
+.nf
+.B #include <kvm.h>
+.PP
+.BI "struct kinfo_proc *kvm_getprocs(kvm_t *" kd ", int " op ", int " arg ", int *" cnt );
+.PP
+.BI "struct kinfo_proc *kvm_getproc2(kvm_t *" kd ", int " op ", int " arg ,
+.BI "                                size_t " elem_size ", int *" cnt );
+.PP
+.BI "char **kvm_getargv(kvm_t *" kd ", const struct kinfo_proc *" p ", int " nchr );
+.BI "char **kvm_getenvv(kvm_t *" kd ", const struct kinfo_proc *" p ", int " nchr );
+.fi
+.SH DESCRIPTION
+.BR kvm_getprocs ()
+returns an array of
+.B struct kinfo_proc
+selected by
+.IR op :
+.TP
+.B KERN_PROC_ALL
+every visible process.
+.TP
+.B KERN_PROC_PID
+the process whose pid is
+.IR arg ,
+or empty if no such process.
+.TP
+.B KERN_PROC_PGRP
+processes whose process-group id is
+.IR arg .
+.TP
+.B KERN_PROC_SESSION
+processes in session
+.IR arg .
+.TP
+.B KERN_PROC_UID
+processes whose effective uid is
+.IR arg .
+.TP
+.B KERN_PROC_RUID
+processes whose real uid is
+.IR arg .
+.TP
+.B KERN_PROC_TTY
+processes whose controlling tty's device number is
+.IR arg
+(-1 == "no controlling tty").
+.PP
+The returned array is owned by
+.I kd
+and remains valid until the next
+.BR kvm_getprocs ()
+call against the same descriptor or until
+.BR kvm_close (3).
+.PP
+.BR kvm_getargv ()
+and
+.BR kvm_getenvv ()
+return a NULL-terminated
+.B char **
+filled from
+.BR sys_proc_cmdline (3)
+and
+.BR sys_proc_environ (3)
+respectively.  Both are owned by
+.I kd
+and invalidated on the next call to the same function.
+.PP
+.I nchr
+caps the total bytes returned; pass 0 for unlimited.
+.PP
+.BR kvm_getproc2 ()
+is the NetBSD-flavoured entry point that accepts an
+.I elem_size
+parameter; on substrate the only supported value is
+.BR "sizeof(struct kinfo_proc)" .
+.SH RETURN VALUES
+On success, a pointer to the array;
+.RI * cnt
+is set to its element count.
+On failure, NULL with
+.RI * cnt
+set to 0 and
+.BR kvm_geterr (3)
+populated.
+.SH SEE ALSO
+.BR kvm_open (3),
+.BR kvm_getvmmap (3),
+.BR sys_proc_info (3),
+.BR readproc (3).

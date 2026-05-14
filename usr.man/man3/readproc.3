@@ -1,0 +1,172 @@
+.\" libproc — procps-ng compatibility shim
+.TH READPROC 3 "May 2026" "Substrate libproc" "Library Functions"
+.SH NAME
+openproc, readproc, closeproc, readproctab, look_up_our_self,
+get_proc_stats \-
+procps-ng compatible process enumeration
+.SH LIBRARY
+.B libproc
+\(em "-lproc".
+.SH SYNOPSIS
+.nf
+.B #include <proc/readproc.h>
+.PP
+.BI "PROCTAB *openproc(int " flags ", ...);"
+.BI "void     closeproc(PROCTAB *" pt );
+.BI "proc_t  *readproc(PROCTAB *" pt ", proc_t *" p );
+.BI "proc_t **readproctab(int " flags ", ...);"
+.BI "int      look_up_our_self(proc_t *" p );
+.BI "proc_t  *get_proc_stats(pid_t " pid ", proc_t *" p );
+.fi
+.SH DESCRIPTION
+Substrate's
+.B libproc
+mirrors the procps-ng
+.BR libprocps (3)
+interface so that unmodified
+.BR ps (1),
+.BR top (1),
+.BR free (1),
+.BR vmstat (1),
+and
+.BR uptime (1)
+source compiles and links.  Every entry point is implemented through
+.BR libsys (3)
+\(em
+.BR sys_proc_list (3),
+.BR sys_proc_info (3),
+.BR sys_proc_cmdline (3),
+.BR sys_proc_environ (3)
+\(em with direct
+.B /proc
+parsing for system-wide aggregates.
+.PP
+.BR openproc ()
+returns an opaque
+.B PROCTAB *
+iterator.
+.I flags
+is the bitwise-OR of:
+.TP
+.B PROC_FILLMEM
+populate
+.IR proc_t::size ,
+.IR ::resident ,
+.IR ::text ,
+.I ::data
+(currently always done; flag is accepted for source compat).
+.TP
+.B PROC_FILLCOM
+populate
+.I proc_t::cmd
+(always done; the flag is a hint).
+.TP
+.B PROC_FILLARG
+populate
+.IR proc_t::cmdline .
+.TP
+.B PROC_FILLENV
+populate
+.IR proc_t::environ .
+.TP
+.B PROC_FILLSTATUS \fR / \fBPROC_FILLSTAT
+populate
+.IR proc_t::state ,
+.IR ::priority ,
+.IR ::nice
+(always done).
+.TP
+.B PROC_FILLUSR
+populate
+.IR proc_t::euser / ::ruser
+from
+.IR /etc/passwd
+(currently no-op pending substrate nss).
+.TP
+"\fBPROC_PID\fR  \fIpid_t *list\fR"
+filter to the NUL-terminated list of pids passed as the next vararg.
+.TP
+"\fBPROC_UID\fR  \fIuid_t *list, int n\fR"
+filter to the
+.I n
+uids passed as the next two varargs.
+.PP
+.BR readproc ()
+returns
+.I p
+filled with the next matching process or
+.B NULL
+when the iterator is exhausted.
+.PP
+.BR readproctab ()
+is the convenience form: walks the iterator and returns a
+.B NULL\fR-terminated\fB proc_t **
+array.  The caller frees each element and the array itself.
+.PP
+.BR look_up_our_self ()
+fills
+.I p
+with the calling process's info.  Equivalent to
+.BR "openproc(PROC_FILL... | PROC_PID, getpid_array)" .
+.PP
+.BR get_proc_stats ()
+fills
+.I p
+from a single pid without the iterator overhead.
+.SH SYSTEM-WIDE
+.nf
+.BI "int meminfo(meminfo_t *" out );
+.BI "int cpuinfo(cpuinfo_t *" out );
+.BI "int uptime(double *" total ", double *" idle );
+.BI "int loadavg(double *" one ", double *" five ", double *" fifteen );
+.fi
+.PP
+.BR meminfo (),
+.BR cpuinfo (),
+.BR uptime (),
+and
+.BR loadavg ()
+parse
+.IR /proc/meminfo ,
+.IR /proc/cpuinfo ,
+.IR /proc/uptime ,
+and
+.IR /proc/loadavg
+respectively.  Each returns 0 on success and -1 on failure.
+.SH RETURN VALUES
+.BR openproc ()
+returns the iterator or
+.B NULL
+on
+.BR calloc (3)
+failure.
+.BR readproc ()
+returns
+.I p
+or
+.B NULL
+at iteration end.
+.BR readproctab ()
+returns the proc_t** array or
+.B NULL
+on allocation failure.
+.SH SEE ALSO
+.BR ps (1),
+.BR top (1),
+.BR free (1),
+.BR libsys (3),
+.BR kvm_getprocs (3).
+.SH NOTES
+.IR proc_t::cmdline " /" proc_t::environ
+are reused between successive
+.BR readproc ()
+calls on the same proc_t — do
+.B not
+free them by hand.  Calling
+.BR closeproc ()
+on the iterator does
+.B not
+free those buffers; the caller is responsible for releasing
+.B proc_t **
+arrays produced by
+.BR readproctab ().
