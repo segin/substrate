@@ -106,10 +106,17 @@ extern "C" {
 
 typedef struct { intmax_t quot; intmax_t rem; } imaxdiv_t;
 
+/* Need wchar_t for the wcstoimax/wcstoumax prototypes.  Pull it from
+ * stddef.h rather than redefine — substrate's wchar_t is `long int`,
+ * and a local typedef-with-different-spelling would conflict. */
+#include <stddef.h>
+
 intmax_t  imaxabs(intmax_t j);
 imaxdiv_t imaxdiv(intmax_t numer, intmax_t denom);
 intmax_t  strtoimax(const char *__restrict nptr, char **__restrict endptr, int base);
 uintmax_t strtoumax(const char *__restrict nptr, char **__restrict endptr, int base);
+intmax_t  wcstoimax(const wchar_t *__restrict nptr, wchar_t **__restrict endptr, int base);
+uintmax_t wcstoumax(const wchar_t *__restrict nptr, wchar_t **__restrict endptr, int base);
 
 #ifdef __cplusplus
 }
