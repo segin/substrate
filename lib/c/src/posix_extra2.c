@@ -167,21 +167,31 @@ static const char *sig_names[] = {
     [SIGINT]    = "Interrupt",
     [SIGQUIT]   = "Quit",
     [SIGILL]    = "Illegal instruction",
+    [SIGTRAP]   = "Trace/breakpoint trap",
     [SIGABRT]   = "Aborted",
+    [SIGBUS]    = "Bus error",
     [SIGFPE]    = "Floating point exception",
     [SIGKILL]   = "Killed",
+    [SIGUSR1]   = "User defined signal 1",
     [SIGSEGV]   = "Segmentation fault",
+    [SIGUSR2]   = "User defined signal 2",
     [SIGPIPE]   = "Broken pipe",
     [SIGALRM]   = "Alarm clock",
     [SIGTERM]   = "Terminated",
-    [SIGUSR1]   = "User defined signal 1",
-    [SIGUSR2]   = "User defined signal 2",
+    [SIGURG]    = "Urgent I/O condition",
     [SIGCHLD]   = "Child exited",
     [SIGCONT]   = "Continued",
     [SIGSTOP]   = "Stopped (signal)",
     [SIGTSTP]   = "Stopped",
     [SIGTTIN]   = "Stopped (tty input)",
     [SIGTTOU]   = "Stopped (tty output)",
+    [SIGPOLL]   = "I/O possible",
+    [SIGXCPU]   = "CPU time limit exceeded",
+    [SIGXFSZ]   = "File size limit exceeded",
+    [SIGVTALRM] = "Virtual timer expired",
+    [SIGPROF]   = "Profiling timer expired",
+    [SIGWINCH]  = "Window changed",
+    [SIGSYS]    = "Bad system call",
 };
 #define NSIGNAMES (int)(sizeof(sig_names)/sizeof(sig_names[0]))
 
@@ -256,11 +266,16 @@ int sigwaitinfo(const sigset_t *set, siginfo_t *info) {
 /* sig2str / str2sig (POSIX 2024).  Tables of signal name <-> number. */
 struct sig_name { int num; const char *name; };
 static const struct sig_name signamemap[] = {
-    {SIGHUP,"HUP"},{SIGINT,"INT"},{SIGQUIT,"QUIT"},{SIGILL,"ILL"},
-    {SIGABRT,"ABRT"},{SIGFPE,"FPE"},{SIGKILL,"KILL"},{SIGSEGV,"SEGV"},
-    {SIGPIPE,"PIPE"},{SIGALRM,"ALRM"},{SIGTERM,"TERM"},{SIGUSR1,"USR1"},
-    {SIGUSR2,"USR2"},{SIGCHLD,"CHLD"},{SIGCONT,"CONT"},{SIGSTOP,"STOP"},
-    {SIGTSTP,"TSTP"},{SIGTTIN,"TTIN"},{SIGTTOU,"TTOU"},
+    {SIGHUP,"HUP"},   {SIGINT,"INT"},   {SIGQUIT,"QUIT"}, {SIGILL,"ILL"},
+    {SIGTRAP,"TRAP"}, {SIGABRT,"ABRT"}, {SIGBUS,"BUS"},   {SIGFPE,"FPE"},
+    {SIGKILL,"KILL"}, {SIGUSR1,"USR1"}, {SIGSEGV,"SEGV"}, {SIGUSR2,"USR2"},
+    {SIGPIPE,"PIPE"}, {SIGALRM,"ALRM"}, {SIGTERM,"TERM"}, {SIGURG,"URG"},
+    {SIGCHLD,"CHLD"}, {SIGCONT,"CONT"}, {SIGSTOP,"STOP"}, {SIGTSTP,"TSTP"},
+    {SIGTTIN,"TTIN"}, {SIGTTOU,"TTOU"}, {SIGPOLL,"POLL"}, {SIGXCPU,"XCPU"},
+    {SIGXFSZ,"XFSZ"}, {SIGVTALRM,"VTALRM"}, {SIGPROF,"PROF"},
+    {SIGWINCH,"WINCH"}, {SIGSYS,"SYS"},
+    /* IO is a glibc alias for POLL; accept both spellings on input. */
+    {SIGPOLL,"IO"},   {SIGIOT,"IOT"},
 };
 #define NSIGNAMEMAP (int)(sizeof(signamemap)/sizeof(signamemap[0]))
 
