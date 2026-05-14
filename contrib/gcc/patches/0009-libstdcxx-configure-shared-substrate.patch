@@ -1,0 +1,39 @@
+Subject: [PATCH] libstdc++-v3/configure: recognize substrate for shared lib builds
+
+The libtool host_os case statements that decide "does this OS support
+shared libraries via GNU ld" and "what's the dynamic linker on this
+host" only list linux* / k*bsd*-gnu / kopensolaris*-gnu / etc.  Without
+a matching arm, an i386-unknown-substrate cross build of libstdc++
+falls through to the defaults: enable_shared=no, dynamic_linker=no,
+and the build produces libstdc++.a only.
+
+Add `substrate*` to those case alternatives so an --enable-shared
+configure produces a real ET_DYN libstdc++.so.6 with a SONAME entry
+and is recognised as supporting shared libraries.
+
+Note: the libstdc++.so produced by libtool still needs a follow-up
+manual relink with -lc -lgcc_s to populate DT_NEEDED entries —
+substrate's libtool postdeps for $host_os aren't wired up to add
+those automatically yet.  See contrib/gcc/build-libstdcxx-shared.sh
+for the helper that does the end-to-end build.
+
+---
+ libstdc++-v3/configure | 12 ++++++------
+ 1 file changed, 6 insertions(+), 6 deletions(-)
+
+diff --git a/libstdc++-v3/configure b/libstdc++-v3/configure
+@@ libstdc++-v3/configure @@
+-    gnu* | linux* | tpf* | k*bsd*-gnu | kopensolaris*-gnu | uclinuxfdpiceabi)
++    gnu* | linux* | substrate* | tpf* | k*bsd*-gnu | kopensolaris*-gnu | uclinuxfdpiceabi)
+@@ libstdc++-v3/configure @@
+-linux* | k*bsd*-gnu | kopensolaris*-gnu | gnu* | uclinuxfdpiceabi)
++linux* | substrate* | k*bsd*-gnu | kopensolaris*-gnu | gnu* | uclinuxfdpiceabi)
+@@ libstdc++-v3/configure @@
+-      gnu* | linux* | kfreebsd*-gnu | knetbsd*-gnu)
++      gnu* | linux* | substrate* | kfreebsd*-gnu | knetbsd*-gnu)
+@@ libstdc++-v3/configure @@
+-      gnu* | linux* | kfreebsd*-gnu | knetbsd*-gnu | uclinux*)
++      gnu* | linux* | substrate* | kfreebsd*-gnu | knetbsd*-gnu | uclinux*)
+@@ libstdc++-v3/configure @@
+-      gnu* | linux* | solaris* | uclinux*)
++      gnu* | linux* | substrate* | solaris* | uclinux*)

@@ -1,0 +1,152 @@
+#!/usr/bin/env bash
+# build-libstdcxx-shared.sh — build libgcc_s.so.1 and libstdc++.so.6
+# against the substrate stage-1 cross toolchain.
+#
+# This is a follow-up step to contrib/gcc/build.sh stage 1.  The
+# main build.sh currently passes --disable-shared / --disable-libstdcxx
+# so the stage-1 install ships only the .a flavours; this script does
+# the (re)configure with --enable-shared, builds libgcc + libstdc++
+# as shared, manually relinks libstdc++.so against -lc -lgcc_s
+# (libtool doesn't add postdeps for the substrate target yet), and
+# installs the .so + libgcc_s.so.1 into both
+#   /opt/substrate/i386-unknown-substrate/lib/        (for -l: search)
+#   /opt/substrate/lib/gcc/i386-unknown-substrate/16.1.0/  (for shared-libgcc)
+#
+# Prerequisites:
+#   - contrib/gcc/build.sh stage 1 has already been run (gives us xgcc).
+#   - contrib/binutils stage 1 installed (gives us as/ld/ar for the target).
+#   - substrate libc.so.0 staged at $SYSROOT/usr/lib/libc.so.0.
+#
+# Run it from anywhere; paths are derived from $0.
+
+set -e
+
+HERE="$(cd -- "$(dirname -- "$0")" && pwd)"
+SUBSTRATE_TOP="$(cd -- "$HERE/../.." && pwd)"
+STAGE1_PREFIX="${STAGE1_PREFIX:-/opt/substrate}"
+TARGET_TRIPLE="i386-unknown-substrate"
+SRC_TREE="$HERE/build/gcc-16.1.0"
+BUILD_DIR="$HERE/build-shared"
+SYSROOT="${SYSROOT:-$SUBSTRATE_TOP/dist}"
+PARALLEL="${PARALLEL:-$(nproc 2>/dev/null || echo 4)}"
+
+export PATH="$STAGE1_PREFIX/bin:$PATH"
+
+if [ ! -d "$SRC_TREE" ]; then
+    echo "build-libstdcxx-shared.sh: source tree missing — run contrib/gcc/fetch.sh first" >&2
+    exit 1
+fi
+if ! command -v "${TARGET_TRIPLE}-gcc" >/dev/null 2>&1; then
+    echo "build-libstdcxx-shared.sh: ${TARGET_TRIPLE}-gcc not on PATH — run build.sh stage 1 first" >&2
+    exit 1
+fi
+
+# Refresh sysroot headers from the in-tree include/.  GCC's
+# include-fixed/ snapshots are taken at toolchain install time; if
+# the libc headers gained extern "C" wrappers or new prototypes (e.g.
+# nanosleep, assert __cplusplus guards), we need both the sysroot and
+# the fixincludes copy refreshed before libstdc++ can be (re)built.
+echo "==> Refreshing sysroot + GCC fixincludes from substrate include/"
+mkdir -p "$SYSROOT/usr/include/sys"
+cp -r "$SUBSTRATE_TOP/include/." "$SYSROOT/usr/include/"
+FIXDIR="$STAGE1_PREFIX/lib/gcc/$TARGET_TRIPLE/16.1.0/include-fixed"
+mkdir -p "$FIXDIR/sys"
+cp "$SUBSTRATE_TOP/include/assert.h"        "$FIXDIR/assert.h"
+cp "$SUBSTRATE_TOP/include/sys/statvfs.h"   "$FIXDIR/sys/statvfs.h"
+
+# Toplevel reconfigure.  Compared to build.sh stage 1 we drop
+# --disable-libstdcxx and --disable-shared so libstdc++-v3 actually
+# gets built and as both .a + .so.  --disable-libstdcxx-threads /
+# --disable-tls stay set because substrate's runtime isn't ready for
+# the GD/LD TLS models yet.
+echo "==> Configuring (--enable-shared)"
+rm -rf "$BUILD_DIR"
+mkdir -p "$BUILD_DIR"
+cd "$BUILD_DIR"
+"$SRC_TREE/configure" \
+    --target="$TARGET_TRIPLE" \
+    --prefix="$STAGE1_PREFIX" \
+    --with-sysroot="$SYSROOT" \
+    --enable-languages=c,c++ \
+    --enable-shared \
+    --disable-multilib --disable-nls --disable-bootstrap \
+    --disable-libgomp --disable-libitm --disable-libsanitizer \
+    --disable-libquadmath --disable-libvtv --disable-libssp \
+    --disable-libada --disable-libphobos --disable-libcc1 \
+    --disable-libstdcxx-pch --disable-libstdcxx-verbose \
+    --disable-libstdcxx-filesystem-ts --disable-libstdcxx-debug \
+    --disable-libstdcxx-threads \
+    --disable-libatomic --disable-tls
+
+# Build libgcc first (libstdc++ links against libgcc_s).
+echo "==> Building libgcc (-j $PARALLEL)"
+make -j "$PARALLEL" all-target-libgcc
+
+echo "==> Building libstdc++-v3 (-j $PARALLEL)"
+make -j "$PARALLEL" all-target-libstdc++-v3 || true   # libtool's link
+                                                       # produces a so
+                                                       # with no DT_NEEDED;
+                                                       # we relink below
+
+# Manual relink: libtool's link line for substrate uses -nostdlib
+# with no -l flags at all, producing a libstdc++.so with no
+# .dynamic section.  Re-execute the same link command with -lc and
+# -lgcc_s appended so the resulting .so has proper DT_NEEDED entries.
+echo "==> Relinking libstdc++.so.6 with -lc -lgcc_s"
+SRCDIR="$BUILD_DIR/i386-unknown-substrate/libstdc++-v3/src"
+cd "$SRCDIR"
+"$BUILD_DIR/./gcc/xgcc" \
+  -shared-libgcc -B"$BUILD_DIR/./gcc" -nostdinc++ \
+  -B"$STAGE1_PREFIX/i386-unknown-substrate/bin/" \
+  -B"$STAGE1_PREFIX/i386-unknown-substrate/lib/" \
+  -fPIC -DPIC -D_GLIBCXX_SHARED -shared -nostdlib \
+  .libs/compatibility.o .libs/compatibility-debug_list.o .libs/compatibility-debug_list-2.o \
+  .libs/compatibility-atomic-c++0x.o .libs/compatibility-c++0x.o .libs/compatibility-chrono.o \
+  .libs/compatibility-condvar.o .libs/compatibility-thread-c++0x.o \
+  -Wl,--whole-archive \
+    ../libsupc++/.libs/libsupc++convenience.a \
+    ../src/c++98/.libs/libc++98convenience.a \
+    ../src/c++11/.libs/libc++11convenience.a \
+    ../src/c++17/.libs/libc++17convenience.a \
+    ../src/c++20/.libs/libc++20convenience.a \
+    ../src/c++23/.libs/libmodulesconvenience.a \
+  -Wl,--no-whole-archive \
+  "$BUILD_DIR/./gcc/crtendS.o" \
+  "$SYSROOT/usr/lib/crtn.o" \
+  -Wl,-O1 -Wl,-z -Wl,relro -Wl,--gc-sections \
+  -Wl,--version-script=libstdc++-symbols.ver \
+  -Wl,-soname -Wl,libstdc++.so.6 \
+  -L"$SYSROOT/usr/lib" -l:libc.so.0 -lgcc_s \
+  -o .libs/libstdc++.so.6.0.35
+
+# Install both shared libraries into the locations GCC's spec file
+# expects.  $STAGE1_PREFIX/i386-unknown-substrate/lib is where ld
+# resolves -l: from; the GCC libdir is where shared-libgcc looks
+# at link time.
+TARGET_LIB="$STAGE1_PREFIX/$TARGET_TRIPLE/lib"
+GCC_LIB="$STAGE1_PREFIX/lib/gcc/$TARGET_TRIPLE/16.1.0"
+
+echo "==> Installing libstdc++.so.6 to $TARGET_LIB"
+cp -v "$SRCDIR/.libs/libstdc++.so.6.0.35" "$TARGET_LIB/"
+ln -sf libstdc++.so.6.0.35 "$TARGET_LIB/libstdc++.so.6"
+ln -sf libstdc++.so.6.0.35 "$TARGET_LIB/libstdc++.so"
+
+echo "==> Installing libgcc_s.so.1 to $TARGET_LIB and $GCC_LIB"
+for d in "$TARGET_LIB" "$GCC_LIB"; do
+    cp -v "$BUILD_DIR/gcc/libgcc_s.so.1" "$d/"
+    ln -sf libgcc_s.so.1 "$d/libgcc_s.so"
+done
+
+cat <<EOF
+
+==> Shared C++ runtime is installed.
+
+    Verify with:
+      cat > /tmp/h.cc <<'CPP'
+      #include <iostream>
+      int main(){ std::cout << "hello from libstdc++.so.6\n"; }
+      CPP
+      ${TARGET_TRIPLE}-g++ -m32 -Wl,-rpath-link=$TARGET_LIB -o /tmp/h /tmp/h.cc
+      ${TARGET_TRIPLE}-readelf -d /tmp/h | grep NEEDED
+        # → libstdc++.so.6, libm.so.0, libc.so.0
+EOF

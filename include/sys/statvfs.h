@@ -3,6 +3,10 @@
 
 #include <sys/types.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 struct statvfs {
     unsigned long  f_bsize;      /* file system block size */
     unsigned long  f_frsize;     /* fragment size */
@@ -24,5 +28,9 @@ struct statvfs {
 
 int statvfs(const char *path, struct statvfs *buf);
 int fstatvfs(int fd, struct statvfs *buf);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* _SYS_STATVFS_H */
