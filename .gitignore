@@ -70,6 +70,11 @@ vgcore.*
 /dist/
 /host_dist/
 
+# Stage-2 toolchain install staging — produced by contrib/binutils
+# stage-2 `make install DESTDIR=$(pwd)/dist-toolchain`.  Overlaid onto
+# the rootfs by build-rootfs.sh --toolchain.
+/dist-toolchain/
+
 # Per-component install staging — `make install DESTDIR=$(pwd)/dist`
 # inside lib/foo/ or usr.lib/foo/ leaks a `dist/` subtree there.
 # Always ignore those, regardless of depth.
