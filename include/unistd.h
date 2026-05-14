@@ -45,6 +45,34 @@ int pipe(int pipefd[2]);
 int dup(int oldfd);
 int dup2(int oldfd, int newfd);
 void sync(void);
+int fsync(int fd);
+int fdatasync(int fd);
+int fchdir(int fd);
+
+/* C99 / POSIX additions filled in by lib/c/src/posix_extra.c. */
+size_t confstr(int name, char *buf, size_t len);
+int    dup3(int oldfd, int newfd, int flags);
+int    faccessat(int dirfd, const char *path, int mode, int flags);
+int    getlogin_r(char *buf, size_t bufsize);
+int    lockf(int fd, int cmd, off_t len);
+int    nice(int inc);
+int    pause(void);
+int    pipe2(int pipefd[2], int flags);
+ssize_t readlinkat(int dirfd, const char *path, char *buf, size_t bufsiz);
+int    setegid(gid_t egid);
+int    seteuid(uid_t euid);
+int    setpgrp(void);
+int    setregid(gid_t rgid, gid_t egid);
+int    setreuid(uid_t ruid, uid_t euid);
+void   swab(const void *src, void *dst, ssize_t nbytes);
+int    symlinkat(const char *target, int newdirfd, const char *linkpath);
+pid_t  vfork(void);
+
+/* lockf cmds — POSIX 7. */
+#define F_ULOCK 0
+#define F_LOCK  1
+#define F_TLOCK 2
+#define F_TEST  3
 
 int getpid(void);
 pid_t getppid(void);

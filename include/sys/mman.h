@@ -28,6 +28,32 @@ extern "C" {
 void *mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset);
 int munmap(void *addr, size_t length);
 int mprotect(void *addr, size_t length, int prot);
+int msync(void *addr, size_t length, int flags);
+int mlock(const void *addr, size_t len);
+int munlock(const void *addr, size_t len);
+int mlockall(int flags);
+int munlockall(void);
+int posix_madvise(void *addr, size_t length, int advice);
+
+int shm_open(const char *name, int oflag, mode_t mode);
+int shm_unlink(const char *name);
+
+/* msync flags */
+#define MS_ASYNC      0x01
+#define MS_SYNC       0x02
+#define MS_INVALIDATE 0x04
+
+/* mlockall flags */
+#define MCL_CURRENT   0x01
+#define MCL_FUTURE    0x02
+#define MCL_ONFAULT   0x04
+
+/* posix_madvise advice values */
+#define POSIX_MADV_NORMAL     0
+#define POSIX_MADV_RANDOM     1
+#define POSIX_MADV_SEQUENTIAL 2
+#define POSIX_MADV_WILLNEED   3
+#define POSIX_MADV_DONTNEED   4
 
 #ifdef __cplusplus
 }

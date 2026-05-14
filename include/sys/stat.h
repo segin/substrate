@@ -79,6 +79,9 @@ int fchmod(int fd, mode_t mode);
 int fchown(int fd, uid_t owner, gid_t group);
 mode_t umask(mode_t mask);
 
+int mkfifo(const char *path, mode_t mode);
+int mkfifoat(int dirfd, const char *path, mode_t mode);
+
 #ifdef __cplusplus
 }
 #endif

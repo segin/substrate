@@ -35,6 +35,28 @@ pid_t wait(int *status);
 pid_t waitpid(pid_t pid, int *status, int options);
 pid_t wait4(pid_t pid, int *status, int options, struct rusage *rusage);
 
+/* C99/POSIX waitid(3p) — kernel SYS_WAITID isn't wired yet, so the
+ * libc emulation runs over waitpid; see lib/c/src/posix_extra.c. */
+typedef enum {
+    P_ALL  = 0,
+    P_PID  = 1,
+    P_PGID = 2
+} idtype_t;
+
+#define WEXITED     0x04
+#define WSTOPPED    0x10
+#define WNOWAIT     0x20
+
+#define CLD_EXITED    1
+#define CLD_KILLED    2
+#define CLD_DUMPED    3
+#define CLD_TRAPPED   4
+#define CLD_STOPPED   5
+#define CLD_CONTINUED 6
+
+#include <signal.h>     /* for siginfo_t */
+int waitid(idtype_t idtype, id_t id, siginfo_t *infop, int options);
+
 #ifdef __cplusplus
 }
 #endif

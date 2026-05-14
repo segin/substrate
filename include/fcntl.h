@@ -58,6 +58,18 @@ int openat(int dirfd, const char *pathname, int flags, ...);
 int creat(const char *pathname, int mode);
 int fcntl(int fd, int cmd, ...);
 
+int posix_close(int fd, int flag);
+int posix_fadvise(int fd, off_t offset, off_t len, int advice);
+int posix_fallocate(int fd, off_t offset, off_t len);
+
+/* posix_fadvise advice values. */
+#define POSIX_FADV_NORMAL     0
+#define POSIX_FADV_RANDOM     1
+#define POSIX_FADV_SEQUENTIAL 2
+#define POSIX_FADV_WILLNEED   3
+#define POSIX_FADV_DONTNEED   4
+#define POSIX_FADV_NOREUSE    5
+
 #ifdef __cplusplus
 }
 #endif
