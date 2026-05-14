@@ -24,7 +24,13 @@ libm.a: $(OBJS)
 # libm has no DT_NEEDED — math is self-contained, no syscalls.
 # No libm.so symlink in source tree — see lib/c/Makefile.
 libm.so.0: $(PIC_OBJS)
-	$(CC) $(SHLIB_LDFLAGS) -Wl,-soname,libm.so.0 -o $@ $(PIC_OBJS)
+	$(CC) $(SHLIB_LDFLAGS) -Wl,-soname,libm.so.0 -o $@ $(PIC_OBJS) \
+	      -lgcc_s
+# DT_NEEDED libgcc_s.so.1: substrate's stage-2 gcc emits __divxc3 /
+# __mulxc3 (long-double complex division/multiplication helpers) for
+# some operations in cmath_special.c.  These live in libgcc_s.so.1;
+# without the link-time reference, ld.so fails at runtime with
+# "undefined symbol: __divxc3 in libm.so.0".
 	@# Host ld stamps OSABI=SYSV (0); substrate's ld.so rejects with
 	@# "file in wrong format".  Patch byte 7 to 0x40 (ELFOSABI_SUBSTRATE).
 	@printf '\x40' | dd of=$@ bs=1 count=1 seek=7 conv=notrunc status=none

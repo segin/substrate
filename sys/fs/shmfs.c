@@ -52,6 +52,8 @@ typedef struct shmfs_inode {
     char     name[SHMFS_NAME_MAX];
     uint8_t *data;
     size_t   data_cap;        /* allocated bytes */
+    int      refcount;        /* open fd count; freed when 0 + unlinked */
+    int      unlinked;        /* set true after directory removal */
     fs_node_t node;
     struct shmfs_inode *next;
 } shmfs_inode_t;
@@ -116,6 +118,64 @@ static size_t shmfs_write(fs_node_t *node, off_t off, size_t sz, const uint8_t *
     if ((uint64_t)end > (uint64_t)node->length) node->length = (off_t)end;
     node->mtime = node->ctime = get_time();
     return sz;
+}
+
+/* --------------------------------------------------------------
+ * Refcounted open/close.  open_fs/close_fs in sys/vfs/vfs.c
+ * dispatch to these for every fd lifecycle event.  An inode's
+ * buffer outlives unlink as long as someone still has it open.
+ * -------------------------------------------------------------- */
+static void shmfs_free_inode(shmfs_inode_t *inode) {
+    if (!inode) return;
+    if (inode->data) kfree(inode->data, inode->data_cap);
+    kfree(inode, sizeof(*inode));
+}
+
+static void shmfs_node_open(fs_node_t *node) {
+    shmfs_inode_t *inode = (shmfs_inode_t *)(uintptr_t)node->impl;
+    if (inode) inode->refcount++;
+}
+
+static void shmfs_node_close(fs_node_t *node) {
+    shmfs_inode_t *inode = (shmfs_inode_t *)(uintptr_t)node->impl;
+    if (!inode) return;
+    if (inode->refcount > 0) inode->refcount--;
+    /* Last close + unlinked + not in directory list → free now. */
+    if (inode->refcount == 0 && inode->unlinked) {
+        shmfs_free_inode(inode);
+    }
+}
+
+/* --------------------------------------------------------------
+ * mmap — return the kernel-VA pointer at which the inode's
+ * backing buffer already lives.  The shmfs buffer is allocated
+ * with kmalloc (kernel heap), so it's reachable from any process
+ * via the kernel direct-map region.  For a real userspace mapping
+ * we'd allocate physical pages and pmap_enter them into the caller's
+ * vm_map; sys/vm/vm_syscalls.c's sys_mmap calls this hook and
+ * publishes the returned address as-is, so callers do get a
+ * usable pointer — though one that aliases the kernel buffer and
+ * is therefore only safe to dereference from a kernel-aware path.
+ *
+ * The important guarantee shmfs provides for now: every process
+ * that opens the same inode shares the same buffer (refcounted
+ * above), so write-through visibility between fd holders is
+ * automatic for read/write callers.  Direct userspace mmap with
+ * usermode page tables is queued.
+ * -------------------------------------------------------------- */
+static void *shmfs_node_mmap(fs_node_t *node, void *addr, size_t length,
+                             int prot, int flags, off_t offset) {
+    (void)addr; (void)prot; (void)flags;
+    shmfs_inode_t *inode = (shmfs_inode_t *)(uintptr_t)node->impl;
+    if (!inode || offset < 0) return (void *)-1;
+
+    size_t end = (size_t)offset + length;
+    if (shmfs_grow(inode, end) != 0) return (void *)-1;
+    /* Extend logical length so subsequent read/write past the
+     * pre-mmap length still sees the mapped region as live. */
+    if ((uint64_t)end > (uint64_t)node->length) node->length = (off_t)end;
+
+    return (void *)(inode->data + (size_t)offset);
 }
 
 static int shmfs_truncate(fs_node_t *node, off_t len) {
@@ -191,6 +251,9 @@ static int shmfs_root_mknod(fs_node_t *parent, const char *name, uint16_t mode, 
     ino->node.read     = shmfs_read;
     ino->node.write    = shmfs_write;
     ino->node.truncate = shmfs_truncate;
+    ino->node.open     = shmfs_node_open;
+    ino->node.close    = shmfs_node_close;
+    ino->node.mmap     = shmfs_node_mmap;
     shmfs_refresh_timestamps(&ino->node);
 
     ino->next = shmfs_children;
@@ -209,9 +272,16 @@ static int shmfs_root_unlink(fs_node_t *node, const char *name) {
         if (strcmp((*link)->name, name) == 0) {
             shmfs_inode_t *victim = *link;
             *link = victim->next;
-            if (victim->data) kfree(victim->data, victim->data_cap);
-            kfree(victim, sizeof(*victim));
             shmfs_root_node.mtime = shmfs_root_node.ctime = get_time();
+            /* Refcounted free: if no one has it open, drop it now;
+             * otherwise mark it deleted so the last close cleans up.
+             * Either way it's gone from the directory listing
+             * immediately (POSIX semantics). */
+            if (victim->refcount == 0) {
+                shmfs_free_inode(victim);
+            } else {
+                victim->unlinked = 1;
+            }
             return 0;
         }
         link = &(*link)->next;
