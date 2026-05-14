@@ -1,0 +1,179 @@
+.TH LOG 3 "May 2026" "Substrate" "Library Functions Manual"
+.SH NAME
+log, logf, logl, log2, log2f, log2l, log10, log10f, log10l,
+log1p, log1pf, log1pl, logp1, log2p1, log10p1 \- logarithmic functions
+.SH LIBRARY
+Math library (libm, \-lm)
+.SH SYNOPSIS
+.B #include <math.h>
+.PP
+.BI "double log(double " x );
+.br
+.BI "float logf(float " x );
+.br
+.BI "long double logl(long double " x );
+.PP
+.BI "double log2(double " x );
+.br
+.BI "float log2f(float " x );
+.br
+.BI "long double log2l(long double " x );
+.PP
+.BI "double log10(double " x );
+.br
+.BI "float log10f(float " x );
+.br
+.BI "long double log10l(long double " x );
+.PP
+.BI "double log1p(double " x );
+.br
+.BI "float log1pf(float " x );
+.br
+.BI "long double log1pl(long double " x );
+.PP
+.BI "double logp1(double " x );
+.br
+.BI "double log2p1(double " x );
+.br
+.BI "double log10p1(double " x );
+.SH DESCRIPTION
+The
+.BR log ()
+function returns the natural logarithm (base
+.IR e )
+of
+.IR x .
+.PP
+The
+.BR log2 ()
+and
+.BR log10 ()
+functions return the base-2 and base-10 logarithms respectively.
+.PP
+The
+.BR log1p ()
+function returns the value of
+.BR "log(1 +" " " "x" ),
+computed in a way that is accurate even when
+.I x
+is close to zero \(em the direct
+.BI log(1 " + " x )
+form would lose precision because
+.B 1 + x
+rounds out most of the significant bits of a small
+.IR x .
+.PP
+The C23
+.BR logp1 ()
+function is an alias for
+.BR log1p ().
+.BR log2p1 ()
+and
+.BR log10p1 ()
+are the base-2 and base-10 forms of the same identity \(em they return
+.BR "log2(1 +" " " "x" )
+and
+.BR "log10(1 +" " " "x" )
+respectively, with the same precision guarantees for small
+.IR x .
+.SH RETURN VALUE
+On success, these functions return the natural / base-2 / base-10
+logarithm of the argument.
+.PP
+If
+.I x
+is NaN, NaN is returned.
+.PP
+If
+.I x
+is +1.0 (or 0.0 for the
+.BR *p1 / log1p
+variants),
+.B +0
+is returned.
+.PP
+If
+.I x
+is +0 (or \-1.0 for the
+.BR *p1 / log1p
+variants), a pole error occurs:
+.B \-HUGE_VAL
+is returned and
+.I errno
+is set to
+.BR ERANGE .
+A divide-by-zero floating-point exception
+.RB ( FE_DIVBYZERO )
+is raised.
+.PP
+If
+.I x
+is negative (or less than \-1.0 for the
+.BR *p1 / log1p
+variants), a domain error occurs: NaN is returned,
+.I errno
+is set to
+.BR EDOM ,
+and the invalid floating-point exception
+.RB ( FE_INVALID )
+is raised.
+.PP
+If
+.I x
+is +infinity, +infinity is returned (for the
+.B *p1
+forms,
+.B 1 + x
+must be evaluated first, so +infinity in
+.I x
+gives +infinity).
+.SH ERRORS
+.TP
+.B EDOM
+.I x
+is negative (or less than \-1.0 for
+.BR *p1 / log1p
+variants).
+.TP
+.B ERANGE
+.I x
+is 0.0 (or \-1.0 for
+.BR *p1 / log1p
+variants).
+.SH EXAMPLES
+.PP
+Computing the entropy of a probability distribution:
+.PP
+.RS
+.nf
+#include <math.h>
+double entropy(const double *p, int n) {
+    double h = 0;
+    for (int i = 0; i < n; i++) {
+        if (p[i] > 0.0) h \-= p[i] * log2(p[i]);
+    }
+    return h;  /* in bits */
+}
+.fi
+.RE
+.PP
+Compounding small interest rates accurately:
+.PP
+.RS
+.nf
+double effective_rate(double r_per_period, int periods) {
+    /* (1 + r)^N - 1, equivalent to expm1(N * log1p(r)) */
+    return expm1((double)periods * log1p(r_per_period));
+}
+.fi
+.RE
+.SH SEE ALSO
+.BR exp (3),
+.BR pow (3),
+.BR math (7)
+.SH STANDARDS
+C99, POSIX.1\-2001.  C23 added
+.BR logp1 (),
+.BR log2p1 (),
+and
+.BR log10p1 ().

@@ -1,0 +1,258 @@
+.TH POW 3 "May 2026" "Substrate" "Library Functions Manual"
+.SH NAME
+pow, powf, powl, sqrt, sqrtf, sqrtl, cbrt, cbrtf, cbrtl, hypot,
+hypotf, hypotl, rsqrt, pown, powr, rootn, compound \- power and
+root functions
+.SH LIBRARY
+Math library (libm, \-lm)
+.SH SYNOPSIS
+.B #include <math.h>
+.PP
+.BI "double pow(double " x ", double " y );
+.br
+.BI "float powf(float " x ", float " y );
+.br
+.BI "long double powl(long double " x ", long double " y );
+.PP
+.BI "double sqrt(double " x );
+.br
+.BI "float sqrtf(float " x );
+.br
+.BI "long double sqrtl(long double " x );
+.PP
+.BI "double cbrt(double " x );
+.br
+.BI "float cbrtf(float " x );
+.br
+.BI "long double cbrtl(long double " x );
+.PP
+.BI "double hypot(double " x ", double " y );
+.br
+.BI "float hypotf(float " x ", float " y );
+.br
+.BI "long double hypotl(long double " x ", long double " y );
+.PP
+.BI "double rsqrt(double " x );
+.br
+.BI "double pown(double " x ", intmax_t " n );
+.br
+.BI "double powr(double " x ", double " y );
+.br
+.BI "double rootn(double " x ", int " n );
+.br
+.BI "double compound(double " x ", intmax_t " n );
+.SH DESCRIPTION
+The
+.BR pow ()
+function returns the value of
+.IR x
+raised to the power of
+.IR y .
+.PP
+The
+.BR sqrt (),
+.BR cbrt (),
+and
+.BR rsqrt ()
+functions return the square root, cube root, and reciprocal square
+root (
+.RI 1 " /" " " sqrt( x )
+) of
+.IR x .
+.PP
+The
+.BR hypot ()
+function returns
+.RI sqrt( x "^2 + " y ^2)
+without spurious overflow or underflow when one argument is much
+larger than the other.
+.PP
+The C23
+.BR pown ()
+function raises
+.I x
+to an integer power
+.I n
+using binary exponentiation; unlike
+.BR pow (),
+the sign of the result for negative
+.I x
+is unambiguous (\-1 if
+.I n
+is odd, +1 if even).
+.PP
+The
+.BR powr ()
+function computes
+.RI x ^ y
+via
+.RI exp( y " * ln(" x ))
+and is defined only for
+.I x
+.BR ">= 0;"
+unlike
+.BR pow ()
+it deliberately returns NaN for several boundary cases (
+.RB powr(0,\ 0),
+.RB powr(\(+-inf,\ 0),
+.RB powr(1,\ \(+-inf)
+) where the limit doesn't exist or isn't unique.
+.PP
+The
+.BR rootn ()
+function returns the
+.IR n -th
+root of
+.IR x .
+.RB rootn( x ,\ 2)
+is
+.BR sqrt( x ),
+.RB rootn( x ,\ 3)
+is
+.BR cbrt( x ).
+A negative
+.I n
+gives the reciprocal of the corresponding positive-root call.
+.PP
+The
+.BR compound ()
+function returns
+.RI (1\ +\  x )^ n ,
+implemented as
+.RI exp( n " * log1p(" x ))
+to remain accurate for small
+.I x
+(financial compounding patterns).
+.SH RETURN VALUE
+.SS pow(x, y) — C99 Annex F.9.4.4 special cases
+The following are all returned exactly, ignoring rounding:
+.RS 4
+.nf
+pow(x, \(+-0)         = 1     for any x, including NaN and infinities
+pow(\(+-1, y)         = 1     for any y, including NaN
+pow(+1, NaN)        = 1
+pow(\(+-0, y > 0)     = \(+-0    sign follows x if y is an odd integer
+pow(\(+-0, y < 0)     = \(+-inf  pole error; raises FE_DIVBYZERO
+pow(x < 0, frac)    = NaN   domain error; raises FE_INVALID
+pow(\(+-inf, y > 0)   = \(+-inf
+pow(\(+-inf, y < 0)   = \(+-0
+pow(x, \(+-inf)       = 0/inf depending on |x| < 1, > 1, or == 1
+pow(NaN, y != 0)    = NaN
+pow(x, NaN)         = NaN
+.fi
+.RE
+.SS sqrt(x), cbrt(x), hypot(x, y), rsqrt(x)
+On a normal positive input
+.BR sqrt ()
+and
+.BR cbrt ()
+return the positive root.
+.BR cbrt (\-x)
+returns
+.BR \-cbrt( x ).
+.PP
+.BR sqrt (\-0)
+returns \-0.
+.BR sqrt (\-1)
+and any negative input raises
+.BR FE_INVALID ,
+sets
+.I errno
+to
+.BR EDOM ,
+and returns NaN.
+.PP
+.BR rsqrt (0)
+raises
+.BR FE_DIVBYZERO ,
+sets
+.I errno
+to
+.BR ERANGE ,
+and returns +infinity.
+.BR rsqrt (\-1)
+behaves the same way as
+.BR sqrt (\-1).
+.PP
+.BR hypot ()
+returns +infinity whenever either argument is infinite, even if the
+other is NaN \(em this matches IEEE 754 because the infinite leg
+dominates any finite or NaN second leg.
+.SH ERRORS
+.TP
+.B EDOM
+A domain error occurred.  Specifically:
+.BR pow ()
+called with negative
+.I x
+and non-integer
+.IR y ;
+.BR sqrt ()
+or
+.BR rsqrt ()
+called with negative
+.IR x ;
+.BR powr ()
+called with negative
+.IR x .
+.TP
+.B ERANGE
+A range error occurred.  Specifically:
+.BR pow ()
+result overflows the
+.I double
+range;
+.BR pow (0,\ y)
+with negative
+.IR y ;
+.BR rsqrt (0).
+.SH EXAMPLES
+.PP
+Computing the Euclidean distance between two points:
+.PP
+.RS
+.nf
+#include <math.h>
+double distance(double x1, double y1, double x2, double y2) {
+    return hypot(x2 \- x1, y2 \- y1);
+}
+.fi
+.RE
+.PP
+Note that
+.BR hypot ()
+is used rather than
+.BR sqrt(dx*dx + dy*dy) ;
+the latter overflows whenever
+.B dx
+or
+.B dy
+exceeds about
+.RB sqrt(DBL_MAX) ,
+while
+.BR hypot ()
+remains correct up to the representable range of either coordinate.
+.PP
+Integer exponentiation that handles negative bases correctly:
+.PP
+.RS
+.nf
+double signed_pow(double base, int exponent) {
+    return pown(base, exponent);
+}
+/* signed_pow(\-2.0, 3) == \-8.0 (pow would also return \-8.0 in
+ * this case, but pow(\-2.0, 3.5) is NaN while pown is undefined). */
+.fi
+.RE
+.SH SEE ALSO
+.BR exp (3),
+.BR log (3),
+.BR math (7)
+.SH STANDARDS
+C99, POSIX.1\-2001.  C23 added
+.BR pown (),
+.BR powr (),
+.BR rootn (),
+.BR compound (),
+and
+.BR rsqrt ().

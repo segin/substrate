@@ -1,0 +1,140 @@
+.TH EXP 3 "May 2026" "Substrate" "Library Functions Manual"
+.SH NAME
+exp, expf, expl, exp2, exp2f, exp2l, expm1, expm1f, expm1l,
+exp10, exp10f, exp10l, exp10m1, exp2m1 \- exponential functions
+.SH LIBRARY
+Math library (libm, \-lm)
+.SH SYNOPSIS
+.B #include <math.h>
+.PP
+.BI "double exp(double " x );
+.br
+.BI "float expf(float " x );
+.br
+.BI "long double expl(long double " x );
+.PP
+.BI "double exp2(double " x );
+.br
+.BI "float exp2f(float " x );
+.br
+.BI "long double exp2l(long double " x );
+.PP
+.BI "double expm1(double " x );
+.br
+.BI "float expm1f(float " x );
+.br
+.BI "long double expm1l(long double " x );
+.PP
+.BI "double exp10(double " x );
+.br
+.BI "double exp10m1(double " x );
+.br
+.BI "double exp2m1(double " x );
+.SH DESCRIPTION
+The
+.BR exp ()
+function returns the value of
+.RI e^ x ,
+where
+.I e
+is the base of the natural logarithm.
+.PP
+The
+.BR exp2 ()
+function returns
+.RI 2^ x .
+.PP
+The
+.BR expm1 ()
+function returns
+.RI e^ x " \- 1.  It is computed in a way that is accurate even when "
+.I x
+is very close to zero \(em a case in which a direct
+.BI exp( x )" \- 1"
+would lose nearly all significant digits to catastrophic cancellation.
+.PP
+The C23 extensions
+.BR exp10 (),
+.BR exp10m1 (),
+and
+.BR exp2m1 ()
+return
+.RI 10^ x ,
+.RI 10^ x " \- 1, and 2^" x " \- 1 respectively, the latter two preserving"
+precision for small arguments in the same way as
+.BR expm1 ().
+.SH RETURN VALUE
+On success the family of exponential functions returns the value
+specified above.
+.PP
+If
+.I x
+is NaN the returned value is NaN.
+.PP
+If
+.I x
+is a positive infinity the value returned is positive infinity for
+.BR exp (),
+.BR exp2 (),
+.BR exp10 (),
+.BR expm1 (),
+.BR exp2m1 (),
+and
+.BR exp10m1 ().
+.PP
+If
+.I x
+is a negative infinity the value returned is +0 for
+.BR exp (),
+.BR exp2 (),
+and
+.BR exp10 (),
+and \-1 for
+.BR expm1 (),
+.BR exp2m1 (),
+and
+.BR exp10m1 ().
+.PP
+If the result overflows the range of representable values, positive
+infinity is returned.  If the result underflows to zero, zero is
+returned.  In both cases
+.I errno
+is set to
+.BR ERANGE .
+.SH ERRORS
+.TP
+.B ERANGE
+A range error occurred: the magnitude of
+.I x
+is large enough that
+.RI e^ x
+overflows the
+.I double
+range, or so negative that
+.RI e^ x
+underflows to zero.
+.SH EXAMPLES
+.PP
+Computing the cumulative distribution function of an exponential
+random variable:
+.PP
+.RS
+.nf
+#include <math.h>
+double F(double x, double lambda) {
+    /* 1 \- exp(\-lambda * x) — expm1 avoids cancellation near x=0 */
+    return \-expm1(\-lambda * x);
+}
+.fi
+.RE
+.SH SEE ALSO
+.BR log (3),
+.BR pow (3),
+.BR sinh (3),
+.BR math (7)
+.SH STANDARDS
+C99, POSIX.1\-2001.  C23 added
+.BR exp10 (),
+.BR exp10m1 (),
+and
+.BR exp2m1 ().
