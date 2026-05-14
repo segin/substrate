@@ -116,6 +116,7 @@ struct termios {
 #define TIOCSCTTY   0x540E
 #define TIOCGPGRP   0x540F
 #define TIOCSPGRP   0x5410
+#define TIOCNOTTY   0x5422
 #define TIOCOUTQ    0x5411
 #define TIOCSTI     0x5412
 #define TIOCGWINSZ  0x5413

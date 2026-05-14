@@ -24,7 +24,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/ioctl.h>
 #include <sys/wait.h>
+#include <termios.h>
 #include <unistd.h>
 
 struct gettyline {
@@ -196,6 +198,21 @@ main(int argc, char **argv)
         if (cfd != 2) dup2(cfd, 2);
         if (cfd > 2)  close(cfd);
     }
+
+    /*
+     * Release tty1 as a controlling terminal.  kinit_task() calls
+     * console_attach_std_fds() which stamps init's session/pgrp onto
+     * the active VT's tty (i.e. tty1) at boot.  That leaves getty
+     * unable to acquire tty1 as its own ctty later — TIOCSCTTY's
+     * substrate check refuses to take over a tty that's already owned
+     * by another session.  TIOCNOTTY clears tty1->session and ->pgrp
+     * via tty_hangup(), with SIGHUP routed back to init's pgrp; ignore
+     * SIGHUP so it doesn't kill us first.
+     */
+    struct sigaction hup_ign = { 0 };
+    hup_ign.sa_handler = SIG_IGN;
+    sigaction(SIGHUP, &hup_ign, NULL);
+    (void)ioctl(0, TIOCNOTTY, 0);
 
     struct sigaction sa = { 0 };
     sa.sa_handler = on_shutdown_signal;
