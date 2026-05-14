@@ -64,8 +64,18 @@ static int strcmp_local(const char *a, const char *b) {
  *   uint32 buckets[nbuckets]
  *   uint32 chain[nsymbols - symbias]
  *
- * On i386 size_t is 4 bytes so bloom words are 32-bit. */
-static Elf32_Sym *lookup_gnu(const ld_obj_t *o, const char *name) {
+ * On i386 size_t is 4 bytes so bloom words are 32-bit.
+ *
+ * Returns the first chain entry whose name matches `name` AND whose
+ * st_shndx + binding + version pass `pred(o, sym_idx, pred_arg)`.
+ * The chain may contain MULTIPLE entries with the same name but
+ * different version indices (libstdc++ does this routinely for
+ * GLIBCXX_3.4.* compat shims) so we can't return early on the first
+ * name match. */
+typedef int (*sym_pred_t)(const ld_obj_t *o, ld_u32 sym_idx, void *arg);
+
+static Elf32_Sym *lookup_gnu(const ld_obj_t *o, const char *name,
+                             sym_pred_t pred, void *pred_arg) {
     if (!o->gnu_hash || !o->symtab || !o->strtab) return 0;
 
     const ld_u32 *h = o->gnu_hash;
@@ -94,7 +104,8 @@ static Elf32_Sym *lookup_gnu(const ld_obj_t *o, const char *name) {
         if (((chain_v ^ hv) >> 1) == 0) {
             Elf32_Sym *s = &o->symtab[idx];
             const char *sname = o->strtab + s->st_name;
-            if (strcmp_local(sname, name) == 0) return s;
+            if (strcmp_local(sname, name) == 0 && pred(o, idx, pred_arg))
+                return s;
         }
         if (chain_v & 1) break;     /* end-of-chain marker */
         idx++;
@@ -107,8 +118,12 @@ static Elf32_Sym *lookup_gnu(const ld_obj_t *o, const char *name) {
  *   uint32 nchains
  *   uint32 buckets[nbuckets]
  *   uint32 chains[nchains]   (chain[i] = next idx in collision list,
- *                             0 terminates) */
-static Elf32_Sym *lookup_sysv(const ld_obj_t *o, const char *name) {
+ *                             0 terminates)
+ *
+ * Same multi-version handling as lookup_gnu: walk past name matches
+ * that fail the predicate. */
+static Elf32_Sym *lookup_sysv(const ld_obj_t *o, const char *name,
+                              sym_pred_t pred, void *pred_arg) {
     if (!o->hash || !o->symtab || !o->strtab) return 0;
     ld_u32 nbuckets = o->hash[0];
     /* nchains = o->hash[1]; */
@@ -121,7 +136,8 @@ static Elf32_Sym *lookup_sysv(const ld_obj_t *o, const char *name) {
         Elf32_Sym *s = &o->symtab[idx];
         if (s->st_shndx == SHN_UNDEF) continue;
         const char *sname = o->strtab + s->st_name;
-        if (strcmp_local(sname, name) == 0) return s;
+        if (strcmp_local(sname, name) == 0 && pred(o, idx, pred_arg))
+            return s;
     }
     return 0;
 }
@@ -198,6 +214,27 @@ static int version_matches(const ld_obj_t *o, ld_u32 sym_index,
     return 0;
 }
 
+/* Predicate threaded through lookup_gnu / lookup_sysv so a single
+ * hash-chain walk can skip past name-matches that fail binding /
+ * version checks.  Without this, libstdc++.so.6 self-references like
+ *   _ZNSt13basic_istreamIwSt11char_traitsIwEE6ignoreEl
+ * fail to resolve: the symbol has two definitions in libstdc++ (one
+ * tagged @GLIBCXX_3.4 for ABI compat, one tagged @@GLIBCXX_3.4.5 as
+ * the default) and whichever one happens to land first in the chain
+ * is what the old single-shot lookup returned.  If that first hit is
+ * the hidden compat tag, version_matches rejects it for an
+ * unversioned reference and resolve_internal moves on to the next
+ * DSO — missing the default-version definition sitting one chain
+ * link later. */
+static int resolve_pred(const ld_obj_t *o, ld_u32 sym_idx, void *arg) {
+    ld_u32 want = *(ld_u32 *)arg;
+    Elf32_Sym *s = &o->symtab[sym_idx];
+    if (s->st_shndx == SHN_UNDEF) return 0;
+    unsigned char bind = ELF32_ST_BIND(s->st_info);
+    if (bind != STB_GLOBAL && bind != STB_WEAK) return 0;
+    return version_matches(o, sym_idx, want);
+}
+
 /* Internal: scope walk with optional skip-this-object, version
  * filter, and a place to deposit the symbol's st_size for R_386_COPY
  * callers. */
@@ -205,14 +242,9 @@ static ld_u32 resolve_internal(const char *name, ld_u32 want_ver_hash,
                                const ld_obj_t *skip, ld_u32 *size_out) {
     for (ld_obj_t *o = ld_obj_list(); o; o = o->next) {
         if (o == skip) continue;
-        Elf32_Sym *s = lookup_gnu(o, name);
-        if (!s) s = lookup_sysv(o, name);
+        Elf32_Sym *s = lookup_gnu(o, name, resolve_pred, &want_ver_hash);
+        if (!s) s = lookup_sysv(o, name, resolve_pred, &want_ver_hash);
         if (!s) continue;
-        if (s->st_shndx == SHN_UNDEF) continue;
-        unsigned char bind = ELF32_ST_BIND(s->st_info);
-        if (bind != STB_GLOBAL && bind != STB_WEAK) continue;
-        ld_u32 sym_idx = (ld_u32)(s - o->symtab);
-        if (!version_matches(o, sym_idx, want_ver_hash)) continue;
         if (size_out) *size_out = s->st_size;
         return s->st_value + o->base;
     }
