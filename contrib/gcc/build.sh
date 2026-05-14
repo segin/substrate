@@ -142,6 +142,18 @@ if [ "$STAGE" = 2 ]; then
 
     BUILD_TRIPLE="$(cc -dumpmachine 2>/dev/null || echo x86_64-linux-gnu)"
     echo "==> Configuring gcc stage 2 (Canadian cross — runs on substrate)"
+    # CC_FOR_BUILD / CXX_FOR_BUILD point at the BUILD machine's compiler
+    # (Linux host gcc/g++) so build-time helpers (genmodes, gengtype,
+    # ...) link against the host libc.  Without these, GCC's configure
+    # defaults CC_FOR_BUILD = $(CC) = the cross compiler, and genmodes
+    # gets built as a substrate-target ELF that can't run on the build
+    # host.
+    #
+    # LDFLAGS="" suppresses the default `-static-libstdc++ -static-libgcc`
+    # that gcc bakes into the bootstrap link line.  We *want* the host
+    # binaries (cc1, cc1plus, lto1, lto-dump, xgcc, cpp) to DT_NEEDED
+    # libstdc++.so.6 + libgcc_s.so.1 at runtime — substrate ships both
+    # via build-libstdcxx-shared.sh + install-stripped-to-rootfs.sh.
     "$SRC_TREE/configure" \
         --build="$BUILD_TRIPLE" \
         --host="$TARGET_TRIPLE" \
@@ -157,15 +169,33 @@ if [ "$STAGE" = 2 ]; then
         LD="${TARGET_TRIPLE}-ld" \
         NM="${TARGET_TRIPLE}-nm" \
         RANLIB="${TARGET_TRIPLE}-ranlib" \
-        STRIP="${TARGET_TRIPLE}-strip"
+        STRIP="${TARGET_TRIPLE}-strip" \
+        CC_FOR_BUILD=gcc \
+        CXX_FOR_BUILD=g++ \
+        LDFLAGS=""
 
     echo "==> Building (-j $PARALLEL)"
-    make -j "$PARALLEL"
+    # Pass through again on the make line — GCC's Makefiles re-derive
+    # CC_FOR_BUILD/CXX_FOR_BUILD/LDFLAGS for subdirectories and the
+    # cleanest way to keep them honest is to repeat the override.
+    make -j "$PARALLEL" \
+        CC_FOR_BUILD=gcc \
+        CXX_FOR_BUILD=g++
 
     echo "==> Staging to $STAGE2_DESTDIR"
     rm -rf "$STAGE2_DESTDIR"
     mkdir -p "$STAGE2_DESTDIR"
-    make install DESTDIR="$STAGE2_DESTDIR"
+    make install DESTDIR="$STAGE2_DESTDIR" \
+        CC_FOR_BUILD=gcc \
+        CXX_FOR_BUILD=g++
+
+    # lto-dump isn't part of the default install target — copy it
+    # explicitly so it lands in $STAGE2_DESTDIR/usr/libexec/...
+    LTO_DUMP_SRC="$BUILD_DIR/gcc/lto-dump"
+    LTO_DUMP_DST="$STAGE2_DESTDIR/usr/libexec/gcc/${TARGET_TRIPLE}/$(cat "$SRC_TREE/gcc/BASE-VER")/lto-dump"
+    if [ -x "$LTO_DUMP_SRC" ]; then
+        install -m 755 "$LTO_DUMP_SRC" "$LTO_DUMP_DST"
+    fi
 
     cat <<EOF
 

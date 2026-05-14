@@ -19,15 +19,12 @@
 #         them at runtime (it searches /lib, /usr/lib,
 #         /usr/local/lib — NOT /usr/i386-unknown-substrate/lib).
 #
-# What this script does NOT do (yet):
-#
-#   - Relink cc1 / cc1plus against libstdc++.so.6 instead of the
-#     statically-embedded libstdc++.a.  That requires a partial
-#     stage-2 rebuild with LDFLAGS overrides; the GCC bootstrap
-#     pulls -static-libstdc++ in via BOOT_LDFLAGS and the
-#     `genmodes` build target re-uses it, which fights any naïve
-#     LDFLAGS= override.  Tracked as a follow-up; the strip pass
-#     above already takes cc1 from 361 MB to 37 MB.
+# build.sh stage 2 now passes LDFLAGS="" + CC_FOR_BUILD=gcc /
+# CXX_FOR_BUILD=g++ at configure time so the host binaries
+# (cc1 / cc1plus / lto1 / lto-dump / xgcc / cpp) DT_NEEDED
+# libstdc++.so.6 + libgcc_s.so.1 from /lib rather than statically
+# embedding libstdc++.a / libgcc.a.  Combined with --strip-all,
+# cc1 drops from 361 MB to 37 MB.
 #
 # Usage:
 #   contrib/gcc/install-stripped-to-rootfs.sh /path/to/rootfs.img
