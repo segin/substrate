@@ -1,25 +1,16 @@
 #!/usr/bin/env bash
 # install-stripped-to-rootfs.sh — strip the substrate-target stage-2
 # toolchain binaries + libstdc++.so / libgcc_s.so, then inject them
-# into an ext2 rootfs image.
+# into an EXISTING ext2 rootfs image.
 #
-# Why this exists separately from build-toolchain.sh:
+# For fresh builds you usually don't need this script — `build-rootfs.sh
+# --toolchain --image` now overlays libstdc++.so.6 + libgcc_s.so.1
+# from $GCC_STAGE2_STAGING into dist/lib + dist/usr/lib + dist/usr/.../lib
+# automatically (build-libstdcxx-shared.sh stages stripped copies there).
+# This script is the post-hoc path: it takes a built rootfs.img and
+# overwrites the toolchain bits in-place without rebuilding the image.
 #
-#   contrib/gcc/build.sh stage 2 produces dynamically-linked binaries
-#   that statically embed libstdc++ + libgcc (the -static-libstdc++
-#   -static-libgcc default GCC's bootstrap uses).  After
-#   contrib/gcc/build-libstdcxx-shared.sh has built a proper shared
-#   libstdc++.so.6 we can:
-#
-#     (a) `strip --strip-all` every binary in the staging tree —
-#         a 10× reduction for cc1 / cc1plus / lto1 / lto-dump
-#         (each drops from ~360 MB to ~37 MB).
-#     (b) ship the same .so files into /lib AND /usr/.../lib of
-#         the rootfs so the dynamic linker (/sbin/ld.so) can find
-#         them at runtime (it searches /lib, /usr/lib,
-#         /usr/local/lib — NOT /usr/i386-unknown-substrate/lib).
-#
-# build.sh stage 2 now passes LDFLAGS="" + CC_FOR_BUILD=gcc /
+# build.sh stage 2 passes LDFLAGS="" + CC_FOR_BUILD=gcc /
 # CXX_FOR_BUILD=g++ at configure time so the host binaries
 # (cc1 / cc1plus / lto1 / lto-dump / xgcc / cpp) DT_NEEDED
 # libstdc++.so.6 + libgcc_s.so.1 from /lib rather than statically

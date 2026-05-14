@@ -137,11 +137,62 @@ for d in "$TARGET_LIB" "$GCC_LIB"; do
     ln -sf libgcc_s.so.1 "$d/libgcc_s.so"
 done
 
+# Stage the same .so files into the gcc-stage2 staging tree so that
+# `build-rootfs.sh --toolchain` overlays them onto $DIST automatically.
+# Without this, rootfs.img ships cc1/cc1plus/lto1/lto-dump that
+# DT_NEEDED libstdc++.so.6 but no libstdc++.so.6 anywhere on the image.
+#
+# Layout mirrors what install-stripped-to-rootfs.sh injects post-hoc:
+#   /lib/                                       ← ld.so search path
+#   /usr/lib/                                   ← ld.so search path
+#   /usr/i386-unknown-substrate/lib/            ← stage-2 driver -L
+#   /usr/lib/gcc/i386-unknown-substrate/16.1.0/ ← shared-libgcc spec
+STG="${GCC_STAGE2_STAGING:-/tmp/gcc-stage2-staging}"
+GCCV="$(cat "$SRC_TREE/gcc/BASE-VER")"
+STRIP="$STAGE1_PREFIX/bin/${TARGET_TRIPLE}-strip"
+
+# Stage stripped copies side-by-side in $STG/_tmp first so we strip
+# once and then fan out copies + symlinks.  Unstripped originals at
+# /opt/substrate remain intact for build-host development/debug.
+TMP_STG="$STG/_libstdcxx-stage"
+rm -rf "$TMP_STG"
+mkdir -p "$TMP_STG"
+cp "$SRCDIR/.libs/libstdc++.so.6.0.35" "$TMP_STG/"
+cp "$BUILD_DIR/gcc/libgcc_s.so.1"       "$TMP_STG/"
+if [ -x "$STRIP" ]; then
+    echo "==> Stripping staged libstdc++.so.6 + libgcc_s.so.1"
+    "$STRIP" --strip-debug "$TMP_STG/libstdc++.so.6.0.35"
+    "$STRIP" --strip-debug "$TMP_STG/libgcc_s.so.1"
+fi
+
+echo "==> Staging libstdc++.so.6 + libgcc_s.so.1 into $STG for build-rootfs.sh"
+for sub in \
+    "lib" \
+    "usr/lib" \
+    "usr/$TARGET_TRIPLE/lib" \
+    "usr/lib/gcc/$TARGET_TRIPLE/$GCCV"; do
+    d="$STG/$sub"
+    mkdir -p "$d"
+    install -m 755 "$TMP_STG/libstdc++.so.6.0.35" "$d/"
+    ln -sf libstdc++.so.6.0.35 "$d/libstdc++.so.6"
+    ln -sf libstdc++.so.6.0.35 "$d/libstdc++.so"
+    install -m 755 "$TMP_STG/libgcc_s.so.1" "$d/"
+    ln -sf libgcc_s.so.1 "$d/libgcc_s.so"
+done
+rm -rf "$TMP_STG"
+
 cat <<EOF
 
 ==> Shared C++ runtime is installed.
 
-    Verify with:
+    Build host: $TARGET_LIB + $GCC_LIB
+    Staged for rootfs: $STG/{lib,usr/lib,usr/$TARGET_TRIPLE/lib,
+                              usr/lib/gcc/$TARGET_TRIPLE/$GCCV}/
+
+    \`build-rootfs.sh --toolchain --image\` will now overlay them
+    onto rootfs.img with no separate install-stripped step needed.
+
+    Verify the build-host side with:
       cat > /tmp/h.cc <<'CPP'
       #include <iostream>
       int main(){ std::cout << "hello from libstdc++.so.6\n"; }

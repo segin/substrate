@@ -39,8 +39,18 @@ GCC_STAGE2_STAGING="${GCC_STAGE2_STAGING:-/tmp/gcc-stage2-staging}"
 overlay_toolchain() {
     local merged=0
     for staging in "$DIST_TOOLCHAIN" "$GCC_STAGE2_STAGING"; do
-        if [ -d "$staging/usr" ]; then
-            echo "Overlaying $staging/usr/ -> $DIST/usr/"
+        if [ ! -d "$staging" ]; then
+            echo "  (skipped: $staging does not exist)"
+            continue
+        fi
+        # Overlay both the usr/ subtree (binaries + headers + libs)
+        # and the optional top-level lib/ subtree (libstdc++.so.6 +
+        # libgcc_s.so.1 staged by build-libstdcxx-shared.sh land
+        # here so the runtime ends up at /lib on rootfs.img).
+        for sub in usr lib; do
+            [ -d "$staging/$sub" ] || continue
+            mkdir -p "$DIST/$sub"
+            echo "Overlaying $staging/$sub/ -> $DIST/$sub/"
             # --remove-destination is critical: a plain `cp -a` would
             # WRITE THROUGH existing symlinks (substrate's homebrew
             # install creates `ranlib -> ar` and friends in dist/usr/bin/).
@@ -49,17 +59,15 @@ overlay_toolchain() {
             # both names then resolve to the same ranlib content.
             # --remove-destination unlinks the destination first so the
             # new file replaces the symlink cleanly.
-            cp -a --remove-destination "$staging"/usr/. "$DIST/usr/" 2>/dev/null || {
+            cp -a --remove-destination "$staging/$sub"/. "$DIST/$sub/" 2>/dev/null || {
                 # Fallback for non-GNU cp: explicit unlink + copy.
-                (cd "$staging/usr" && find . \( -type f -o -type l \)) | while read -r f; do
-                    rm -f "$DIST/usr/${f#./}"
+                (cd "$staging/$sub" && find . \( -type f -o -type l \)) | while read -r f; do
+                    rm -f "$DIST/$sub/${f#./}"
                 done
-                cp -a "$staging"/usr/. "$DIST/usr/"
+                cp -a "$staging/$sub"/. "$DIST/$sub/"
             }
             merged=$((merged + 1))
-        else
-            echo "  (skipped: $staging/usr does not exist)"
-        fi
+        done
     done
     if [ "$merged" = 0 ]; then
         echo "Error: no stage-2 toolchain staging found." >&2
