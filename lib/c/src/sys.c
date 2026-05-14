@@ -83,6 +83,31 @@ ssize_t write(int fd, const void *buf, size_t count) {
     return (ssize_t)r;
 }
 
+/* Substrate has no pread/pwrite syscall yet; emulate via save / lseek /
+ * read / lseek-back.  Not atomic against concurrent fd users — callers
+ * that need atomicity must serialize externally. */
+ssize_t pread(int fd, void *buf, size_t count, off_t offset) {
+    off_t save = lseek(fd, 0, SEEK_CUR);
+    if (save == (off_t)-1) return -1;
+    if (lseek(fd, offset, SEEK_SET) == (off_t)-1) return -1;
+    ssize_t r = read(fd, buf, count);
+    int saved_errno = errno;
+    lseek(fd, save, SEEK_SET);
+    errno = saved_errno;
+    return r;
+}
+
+ssize_t pwrite(int fd, const void *buf, size_t count, off_t offset) {
+    off_t save = lseek(fd, 0, SEEK_CUR);
+    if (save == (off_t)-1) return -1;
+    if (lseek(fd, offset, SEEK_SET) == (off_t)-1) return -1;
+    ssize_t r = write(fd, buf, count);
+    int saved_errno = errno;
+    lseek(fd, save, SEEK_SET);
+    errno = saved_errno;
+    return r;
+}
+
 int close(int fd) {
     return __set_errno((int)_syscall1(SYS_CLOSE, fd));
 }
@@ -223,6 +248,56 @@ int execl(const char *path, const char *arg, ...) {
     va_end(ap);
 
     int ret = execv(path, argv);
+    free(argv);
+    return ret;
+}
+
+int execlp(const char *file, const char *arg, ...) {
+    va_list ap;
+    int argc = 0;
+    va_start(ap, arg);
+    while (va_arg(ap, char *)) argc++;
+    va_end(ap);
+
+    char **argv = malloc((argc + 2) * sizeof(char *));
+    if (argv == NULL) {
+        errno = ENOMEM;
+        return -1;
+    }
+
+    argv[0] = (char *)arg;
+    va_start(ap, arg);
+    for (int i = 1; i <= argc; i++) argv[i] = va_arg(ap, char *);
+    argv[argc + 1] = NULL;
+    va_end(ap);
+
+    int ret = execvp(file, argv);
+    free(argv);
+    return ret;
+}
+
+int execle(const char *path, const char *arg, ...) {
+    va_list ap;
+    int argc = 0;
+    va_start(ap, arg);
+    while (va_arg(ap, char *)) argc++;
+    /* After the NULL argv terminator, execle takes one more arg: envp. */
+    char *const *envp = va_arg(ap, char *const *);
+    va_end(ap);
+
+    char **argv = malloc((argc + 2) * sizeof(char *));
+    if (argv == NULL) {
+        errno = ENOMEM;
+        return -1;
+    }
+
+    argv[0] = (char *)arg;
+    va_start(ap, arg);
+    for (int i = 1; i <= argc; i++) argv[i] = va_arg(ap, char *);
+    argv[argc + 1] = NULL;
+    va_end(ap);
+
+    int ret = execve(path, argv, (char *const *)envp);
     free(argv);
     return ret;
 }
@@ -509,6 +584,28 @@ int chmod(const char *pathname, mode_t mode) {
 
 int utimes(const char *filename, const struct timeval times[2]) {
     (void)filename; (void)times;
+    errno = ENOSYS;
+    return -1;
+}
+
+int utimensat(int dirfd, const char *path, const struct timespec times[2],
+              int flags) {
+    (void)dirfd; (void)flags;
+    /* Lower to utimes() — substrate's VFS only supports microsecond
+     * resolution for now; nanosecond fields get truncated. */
+    if (times == NULL) {
+        return utimes(path, NULL);
+    }
+    struct timeval tv[2];
+    tv[0].tv_sec  = times[0].tv_sec;
+    tv[0].tv_usec = times[0].tv_nsec / 1000;
+    tv[1].tv_sec  = times[1].tv_sec;
+    tv[1].tv_usec = times[1].tv_nsec / 1000;
+    return utimes(path, tv);
+}
+
+int futimens(int fd, const struct timespec times[2]) {
+    (void)fd; (void)times;
     errno = ENOSYS;
     return -1;
 }

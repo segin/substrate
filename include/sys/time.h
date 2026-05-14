@@ -39,6 +39,9 @@ int setitimer(int which, const struct itimerval *__restrict new_value,
               struct itimerval *__restrict old_value);
 
 int utimes(const char *path, const struct timeval times[2]);
+int utimensat(int dirfd, const char *path, const struct timespec times[2],
+              int flags);
+int futimens(int fd, const struct timespec times[2]);
 
 #define ITIMER_REAL    0
 #define ITIMER_VIRTUAL 1

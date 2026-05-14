@@ -107,7 +107,13 @@ build_components() {
     echo "Building runtime libraries..."
     make -C "$TOP/lib/sys" -j4
     make -C "$TOP/lib/m" -j4
+    make -C "$TOP/lib/pthread" -j4
+    make -C "$TOP/lib/dl" -j4
+    make -C "$TOP/lib/edit" -j4
     make -C "$TOP/usr.lib/elfobj" -j4
+
+    echo "Building dynamic linker..."
+    make -C "$TOP/sbin/ld.so" -j4
 
     echo "Building target toolchain..."
     for dir in cc as ld ar ranlib nm objdump objcopy readelf strip strings size addr2line elfedit; do
@@ -118,6 +124,20 @@ build_components() {
 
     echo "Building userland..."
     make -C "$TOP/bin" -j4
+
+    echo "Building sbin (init, ld.so, ...)"
+    for dir in "$TOP/sbin"/*/ ; do
+        if [ -f "$dir/Makefile" ]; then
+            make -C "$dir" -j4
+        fi
+    done
+
+    echo "Building usr.sbin..."
+    for dir in "$TOP/usr.sbin"/*/ ; do
+        if [ -f "$dir/Makefile" ]; then
+            make -C "$dir" -j4
+        fi
+    done
 }
 
 install_to_dist() {
@@ -127,10 +147,39 @@ install_to_dist() {
     # Install kernel as /vmunix for the ext2 bootloader
     cp "$TOP/sys/kernel.multiboot" "$DIST/vmunix"
 
-    echo "Installing libc to dist/usr/lib..."
-    cp "$TOP/lib/c/libc.a" "$DIST/usr/lib/"
+    echo "Installing libc + runtime libraries to dist/usr/lib + dist/lib..."
     mkdir -p "$DIST/usr/include"
     cp -r "$TOP/include/"* "$DIST/usr/include/"
+
+    # Every PIE binary substrate ships DT_NEEDED at minimum libc.so.0 +
+    # libsys.so.0; getty / login also pull libpthread + libm; gcc on
+    # substrate pulls libstdc++ + libgcc_s (overlaid from gcc staging).
+    # ld.so searches /lib, /usr/lib, /usr/local/lib — populate both
+    # so resolution succeeds whichever path is hit first.
+    for libdir in c sys m pthread dl edit; do
+        if [ -f "$TOP/lib/$libdir/lib$libdir.a" ]; then
+            cp "$TOP/lib/$libdir/lib$libdir.a" "$DIST/usr/lib/"
+        fi
+        if [ -f "$TOP/lib/$libdir/lib$libdir.so.0" ]; then
+            cp "$TOP/lib/$libdir/lib$libdir.so.0" "$DIST/lib/"
+            cp "$TOP/lib/$libdir/lib$libdir.so.0" "$DIST/usr/lib/"
+            ln -sf "lib$libdir.so.0" "$DIST/lib/lib$libdir.so"
+            ln -sf "lib$libdir.so.0" "$DIST/usr/lib/lib$libdir.so"
+        fi
+    done
+
+    # crt0.o lives next to libc.a — userland Makefiles reference it as
+    # $(TOP)/lib/c/crt0.o at link time, but on-target it's expected at
+    # /usr/lib/crt0.o for the substrate-native compiler.
+    if [ -f "$TOP/lib/c/crt0.o" ]; then
+        cp "$TOP/lib/c/crt0.o" "$DIST/usr/lib/"
+    fi
+
+    # The native dynamic linker every PIE binary names as PT_INTERP.
+    if [ -f "$TOP/sbin/ld.so/ld.so" ]; then
+        cp "$TOP/sbin/ld.so/ld.so" "$DIST/sbin/ld.so"
+        chmod +x "$DIST/sbin/ld.so"
+    fi
 
     echo "Installing userland binaries to dist/bin..."
     for dir in "$TOP/bin"/*/ ; do
@@ -144,7 +193,18 @@ install_to_dist() {
 
     echo "Installing configuration from etc/..."
     cp -r "$TOP/etc/." "$DIST/etc/"
-    cp "$TOP/etc/init.sh" "$DIST/sbin/init"
+
+    # init was migrated from etc/init.sh (shell) to sbin/init (C
+    # binary) in 5116c3a3.  Prefer the built C binary; only fall back
+    # to the shell script if for some reason the C build was skipped.
+    if [ -f "$TOP/sbin/init/init" ]; then
+        cp "$TOP/sbin/init/init" "$DIST/sbin/init"
+    elif [ -f "$TOP/etc/init.sh" ]; then
+        cp "$TOP/etc/init.sh" "$DIST/sbin/init"
+    else
+        echo "Error: no init found ($TOP/sbin/init/init or $TOP/etc/init.sh)" >&2
+        exit 1
+    fi
     chmod +x "$DIST/sbin/init"
 
     echo "Installing toolchain to dist/usr/bin..."

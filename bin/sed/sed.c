@@ -14,21 +14,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#ifdef NATIVE_BUILD
 #include <unistd.h>
 #include <fcntl.h>
-#else
-/* Substrate: provide minimal declarations for in-place editing */
-extern int dup(int);
-extern int dup2(int, int);
-extern int close(int);
-extern int unlink(const char *);
-extern int getpid(void);
-extern int rename(const char *, const char *);
-extern int fileno(FILE *);
-extern int mkstemp(char *);
-#define STDOUT_FILENO 1
-#endif
 
 #include "sed.h"
 

@@ -22,10 +22,14 @@ int execve(const char *filename, char *const argv[], char *const envp[]);
 int execv(const char *path, char *const argv[]);
 int execvp(const char *file, char *const argv[]);
 int execl(const char *path, const char *arg, ...);
+int execlp(const char *file, const char *arg, ...);
+int execle(const char *path, const char *arg, ...);
 pid_t waitpid(pid_t pid, int *status, int options);
 
 ssize_t read(int fd, void *buf, size_t count);
 ssize_t write(int fd, const void *buf, size_t count);
+ssize_t pread(int fd, void *buf, size_t count, off_t offset);
+ssize_t pwrite(int fd, const void *buf, size_t count, off_t offset);
 int close(int fd);
 int mkstemp(char *__template);
 int unlink(const char *pathname);
