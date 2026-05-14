@@ -1,17 +1,14 @@
-include ../../Makefile.inc
-
-# sbin/init is a shell script (etc/init.sh installed as /sbin/init);
-# there's no compiled program to make dynamic.
 PROG = init
+SRCS = init.c
 
-.PHONY: all clean install
+DYNAMIC = 1
+# setsid() is provided by libsys.so.0 (see sbin/getty/Makefile for
+# the same dance).  libc.so.0 has a DT_NEEDED on libsys.so.0 so
+# /sbin/ld.so resolves the symbol at runtime, but the static side
+# of the link still needs the unresolved reference satisfied.
+LDADD = -L$(TOP)/lib/sys -l:libsys.so.0
 
-all:
-	@true
+include ../../Makefile.inc
+include ../../Makefile.bin.inc
 
-clean:
-	@true
-
-install:
-	@echo "Installing $(PROG) script..."
-	install -m 755 ../../etc/init.sh $(DESTDIR)/sbin/$(PROG)
+BINDIR ?= $(DESTDIR)/sbin

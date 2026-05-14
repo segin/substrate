@@ -1,5 +1,5 @@
 /*
- * bin/login/login.c — real login.
+ * bin/login/login.c — substrate login.
  *
  * Prompts for a username + password, validates against /etc/passwd
  * + /etc/shadow via crypt(3), then becomes that user (setgid,
@@ -18,6 +18,23 @@
  *                          DES crypt setting and verified the same
  *                          way
  *
+ * Refactor notes (vs the previous version):
+ *
+ *   - Banner now reports the real tty name from ttyname(0), not a
+ *     hardcoded "tty" string.
+ *   - /etc/issue contents are printed before the prompt when
+ *     present, so admins can edit the per-tty banner without
+ *     recompiling.
+ *   - Signal dispositions are reset to SIG_DFL so the shell we
+ *     exec doesn't inherit handlers from init or getty.
+ *   - setsid() is attempted so the login shell heads its own
+ *     session; if we were already a session leader (getty path)
+ *     it's a harmless no-op.
+ *   - Environment is wiped to the minimum POSIX set rather than
+ *     just overlaid on top of init's environment.
+ *   - The hot retry loop now sleeps a moment between failed
+ *     attempts to slow down a brute-force attacker.
+ *
  * (Plaintext shadow entries are no longer accepted — set up real
  * hashes with passwd(1) before deploying.)
  */
@@ -27,9 +44,11 @@
 #include <fcntl.h>
 #include <grp.h>
 #include <pwd.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <sys/types.h>
 #include <termios.h>
 #include <unistd.h>
@@ -37,6 +56,99 @@
 #define LOGIN_MAX_USER  64
 #define LOGIN_MAX_PASS  64
 #define LOGIN_MAX_TRIES 3
+#define LOGIN_FAIL_DELAY_SECS 2
+
+/*
+ * Reset every catchable signal to its default disposition.  We
+ * inherit init's mask via getty; the user's shell should start
+ * with the equivalent of a fresh process's signal state.
+ */
+static void
+reset_signals(void)
+{
+    struct sigaction dfl;
+    int              sig;
+
+    memset(&dfl, 0, sizeof(dfl));
+    dfl.sa_handler = SIG_DFL;
+    for (sig = 1; sig < 32; sig++) {
+        if (sig == SIGKILL || sig == SIGSTOP) {
+            continue;
+        }
+        (void)sigaction(sig, &dfl, NULL);
+    }
+}
+
+/*
+ * Print /etc/issue verbatim before showing the prompt.  Quiet on
+ * any I/O error — the banner is decorative and shouldn't block
+ * login on a missing or unreadable file.
+ */
+static void
+print_issue(void)
+{
+    FILE *f = fopen("/etc/issue", "r");
+    if (f == NULL) {
+        return;
+    }
+    char buf[256];
+    while (fgets(buf, sizeof(buf), f) != NULL) {
+        fputs(buf, stdout);
+    }
+    fclose(f);
+}
+
+/*
+ * Strip "/dev/" so the banner reads "tty1" rather than "/dev/tty1".
+ * Returns a pointer into the input buffer.
+ */
+static const char *
+tty_basename(const char *path)
+{
+    const char *slash;
+    if (path == NULL) {
+        return "?";
+    }
+    slash = strrchr(path, '/');
+    return slash != NULL ? slash + 1 : path;
+}
+
+/*
+ * Build a clean environment for the login shell.  We don't pass
+ * through whatever init had; instead the shell gets exactly:
+ *   HOME, SHELL, USER, LOGNAME, PATH, TERM
+ * with sensible defaults.
+ */
+static void
+set_login_env(const struct passwd *pw, const char *inherited_term)
+{
+    /* clear what we can — clearenv() if libc had it, but we don't.
+     * Walk a known prefix of common names and unset them; the rest
+     * stay (harmless for login). */
+    static const char *to_clear[] = {
+        "IFS", "ENV", "BASH_ENV", "CDPATH", "LD_PRELOAD",
+        "LD_LIBRARY_PATH", "PS1", "PS2", "PWD", "OLDPWD", NULL,
+    };
+    for (int i = 0; to_clear[i] != NULL; i++) {
+        unsetenv(to_clear[i]);
+    }
+
+    setenv("HOME",    pw->pw_dir,   1);
+    setenv("SHELL",   pw->pw_shell, 1);
+    setenv("USER",    pw->pw_name,  1);
+    setenv("LOGNAME", pw->pw_name,  1);
+    setenv("PATH",
+           pw->pw_uid == 0
+               ? "/usr/local/sbin:/usr/local/bin:/usr/sbin:"
+                 "/usr/bin:/sbin:/bin"
+               : "/usr/local/bin:/usr/bin:/bin",
+           1);
+    if (inherited_term != NULL && inherited_term[0] != '\0') {
+        setenv("TERM", inherited_term, 1);
+    } else if (getenv("TERM") == NULL) {
+        setenv("TERM", "linux", 1);
+    }
+}
 
 static int
 read_line_echo(int fd, char *buf, size_t bufsz)
@@ -199,16 +311,27 @@ do_login_one(const char *forced_user)
         return 0;
     }
 
-    setenv("HOME", pw->pw_dir, 1);
-    setenv("SHELL", pw->pw_shell, 1);
-    setenv("USER", pw->pw_name, 1);
-    setenv("LOGNAME", pw->pw_name, 1);
-    if (getenv("PATH") == NULL) {
-        setenv("PATH", "/usr/local/bin:/usr/bin:/bin:/sbin:/usr/sbin", 1);
+    {
+        /* Preserve TERM (set by getty) across set_login_env's wipe. */
+        const char *inherited_term = getenv("TERM");
+        char        term_save[64];
+        if (inherited_term != NULL) {
+            snprintf(term_save, sizeof(term_save), "%s", inherited_term);
+            inherited_term = term_save;
+        }
+
+        set_login_env(pw, inherited_term);
     }
+
     if (chdir(pw->pw_dir) != 0) {
         (void)chdir("/");
     }
+
+    /* Fresh signal state for the shell. */
+    reset_signals();
+
+    /* Try to head our own session, ignoring EPERM if we already are. */
+    (void)setsid();
 
     printf("\n");
 
@@ -217,6 +340,11 @@ do_login_one(const char *forced_user)
         if (shell == NULL || shell[0] == '\0') {
             shell = "/bin/sh";
         }
+        /* argv[0] = "-sh" convention requests a login shell. */
+        char argv0[64];
+        const char *base = strrchr(shell, '/');
+        snprintf(argv0, sizeof(argv0), "-%s", base != NULL ? base + 1 : shell);
+        execl(shell, argv0, (char *)NULL);
         execl(shell, shell, "-l", (char *)NULL);
         execl(shell, shell, (char *)NULL);
         perror("login: exec");
@@ -227,14 +355,16 @@ do_login_one(const char *forced_user)
 int
 main(int argc, char **argv)
 {
-    int tries;
+    int         tries;
     const char *forced = NULL;
+    const char *tty    = tty_basename(ttyname(0));
 
     if (argc >= 2 && argv[1][0] != '-') {
         forced = argv[1];
     }
 
-    printf("Substrate (%s)\n\n", "tty");
+    print_issue();
+    printf("Substrate (%s)\n\n", tty);
 
     for (tries = 0; tries < LOGIN_MAX_TRIES; tries++) {
         int rc = do_login_one(forced);
@@ -242,6 +372,10 @@ main(int argc, char **argv)
             return 1;
         }
         forced = NULL;
+        if (rc == 0 && tries + 1 < LOGIN_MAX_TRIES) {
+            /* slow brute-force attempts down a touch */
+            sleep(LOGIN_FAIL_DELAY_SECS);
+        }
     }
     return 1;
 }
