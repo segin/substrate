@@ -137,6 +137,21 @@ for d in "$TARGET_LIB" "$GCC_LIB"; do
     ln -sf libgcc_s.so.1 "$d/libgcc_s.so"
 done
 
+# Install the C++ headers into the cross-toolchain prefix.  libstdc++-v3
+# generates a target-specific bits/c++config.h with all the
+# _GLIBCXX_HAVE_* defines that probed positive against substrate's
+# refreshed sysroot — those defines diverge from stage 1's static-only
+# c++config.h, so we want the build-shared version to be canonical on
+# the build host AND on the rootfs.
+#
+# `make install` of libstdc++-v3 installs both libs (.a + .so + .la)
+# and headers (~860 files / 16 MB under ${prefix}/${target}/include/
+# c++/${gccver}/).  It re-installs libstdc++.so.6.0.35 with the same
+# .libs/libstdc++.so.6.0.35 we relinked above, so the manual cp earlier
+# isn't undone.
+echo "==> Installing libstdc++-v3 headers + libs into $STAGE1_PREFIX"
+make -C "$BUILD_DIR/$TARGET_TRIPLE/libstdc++-v3" install >/dev/null
+
 # Stage the same .so files into the gcc-stage2 staging tree so that
 # `build-rootfs.sh --toolchain` overlays them onto $DIST automatically.
 # Without this, rootfs.img ships cc1/cc1plus/lto1/lto-dump that
@@ -180,6 +195,24 @@ for sub in \
     ln -sf libgcc_s.so.1 "$d/libgcc_s.so"
 done
 rm -rf "$TMP_STG"
+
+# Stage C++ headers for the on-substrate compiler.  cc1plus's
+# hardcoded default looks at:
+#   /usr/lib/gcc/i386-unknown-substrate/16.1.0/../../../../include/c++/16.1.0
+# = /usr/include/c++/16.1.0/ on the rootfs (sysroot=/, prefix=/usr).
+# Source from /opt/substrate where `make install` just dropped them.
+HDR_SRC="$STAGE1_PREFIX/$TARGET_TRIPLE/include/c++/$GCCV"
+HDR_DST="$STG/usr/include/c++/$GCCV"
+if [ -d "$HDR_SRC" ]; then
+    echo "==> Staging C++ headers into $HDR_DST"
+    rm -rf "$HDR_DST"
+    mkdir -p "$HDR_DST"
+    # `cp -a` preserves symlinks (the c++ header tree has none today
+    # but several distros add bits/std_*.h aliases later).
+    cp -a "$HDR_SRC"/. "$HDR_DST/"
+else
+    echo "==> WARNING: $HDR_SRC not found; C++ headers not staged" >&2
+fi
 
 cat <<EOF
 
