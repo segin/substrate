@@ -25,6 +25,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
+#include <sys/reboot.h>
 #include <sys/wait.h>
 #include <termios.h>
 #include <unistd.h>
@@ -52,13 +53,31 @@ static struct gettyline g_lines[] = {
 };
 #define NLINES ((int)(sizeof(g_lines) / sizeof(g_lines[0])))
 
+/*
+ * Shutdown intent.  g_shutdown_cmd selects what reboot() does at the
+ * tail of shutdown_sequence:
+ *   RB_HALT_SYSTEM  on SIGTERM / SIGQUIT (the historical Unix default —
+ *                  init does the cleanup, then halts)
+ *   RB_AUTOBOOT    on SIGINT (Ctrl-Alt-Del convention)
+ *   RB_POWER_OFF   on SIGUSR1 (sysvinit convention: kill -USR1 1)
+ * sbin/{halt,reboot,poweroff} flip the matching signal at init; users
+ * can also signal init directly with the kill(1) equivalents.
+ */
 static volatile sig_atomic_t g_want_shutdown = 0;
+static volatile sig_atomic_t g_shutdown_cmd  = RB_HALT_SYSTEM;
 
 static void
 on_shutdown_signal(int sig)
 {
-    (void)sig;
     g_want_shutdown = 1;
+    switch (sig) {
+    case SIGINT:   g_shutdown_cmd = RB_AUTOBOOT;    break;
+    case SIGUSR1:  g_shutdown_cmd = RB_POWER_OFF;   break;
+    case SIGUSR2:  g_shutdown_cmd = RB_AUTOBOOT;    break;
+    case SIGTERM:
+    case SIGQUIT:
+    default:       g_shutdown_cmd = RB_HALT_SYSTEM; break;
+    }
 }
 
 /*
@@ -175,7 +194,17 @@ shutdown_sequence(void)
 
     sync();
 
-    fprintf(stderr, "init: halt\n");
+    const char *action = "halt";
+    if (g_shutdown_cmd == RB_AUTOBOOT)       action = "reboot";
+    else if (g_shutdown_cmd == RB_POWER_OFF) action = "power-off";
+    fprintf(stderr, "init: %s\n", action);
+
+    /* reboot() doesn't return on success — the kernel resets the CPU
+     * before the syscall does.  If it fails (EPERM is the only
+     * realistic case, and only if someone has stripped CAP_ROOT from
+     * init), fall through to the idle loop so the system at least
+     * doesn't reboot uncontrollably. */
+    (void)reboot((int)g_shutdown_cmd);
     for (;;) {
         sleep(3600);
     }
@@ -219,6 +248,8 @@ main(int argc, char **argv)
     sigaction(SIGTERM, &sa, NULL);
     sigaction(SIGINT,  &sa, NULL);
     sigaction(SIGQUIT, &sa, NULL);
+    sigaction(SIGUSR1, &sa, NULL);   /* halt / poweroff */
+    sigaction(SIGUSR2, &sa, NULL);   /* reboot */
 
     /*
      * Reap children async via SIGCHLD too — without it the main
