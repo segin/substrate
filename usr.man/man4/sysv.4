@@ -1,0 +1,105 @@
+.\" sysv / xenix driver man page
+.TH SYSV 4 "May 2026" "Substrate Kernel" "Special Files"
+.SH NAME
+sysv, xenix \- read-only mount driver for V7-derived filesystems
+.SH SYNOPSIS
+.B mount -t sysv
+.I device mountpoint
+.br
+.B mount -t xenix
+.I device mountpoint
+.SH DESCRIPTION
+The
+.B sysv
+driver provides
+.B read-only
+mount support for the V7-derived family of on-disk layouts:
+.IP \[bu] 2
+.B Xenix
+(Microsoft Xenix and SCO Xenix 86 / 286 / 386 \(em V7 filesystem with the
+0x012FF7B5 superblock magic).
+.IP \[bu]
+.B System V
+release 2 / 3 / 4 (0xFD187E20 superblock magic).
+.IP \[bu]
+.B Coherent
+(no magic; recognised only when explicitly requested).
+.PP
+The driver is the same code path regardless of which name (\fBsysv\fR or
+\fBxenix\fR) was used at mount time; both names exist to make the intent obvious
+when reading a
+.IR /etc/fstab
+or
+.BR mount (8)
+invocation.
+.SS On-disk format
+The superblock is a 1024-byte block at disk offset 512.  Magic and "type" words
+sit at offsets 0x1F8 and 0x1FC respectively:
+.TP
+.B Magic
+0x012FF7B5 means Xenix; 0xFD187E20 means SystemV; anything else is rejected.
+.TP
+.B Type
+1 = 512-byte logical blocks (Xenix V1 only), 2 = 1024-byte (Xenix V2 and
+SystemV), 3 = 2048-byte (SystemV "AFS").
+.PP
+Each inode is 64 bytes; the root inode is number 2 (V7 convention).  Direct
+and indirect block pointers in
+.B i_addr[]
+are packed as 13 three-byte little-endian zone numbers in 40 bytes \(em the
+high byte sits one above the low two bytes, just like the historical V7 disk
+encoding.  The driver unpacks these at inode-read time and caches the resulting
+32-bit block numbers in the per-node state.
+.SS Features
+.IP \[bu] 2
+Variants: Xenix V1 (512-byte block), Xenix V2 / SystemV (1024-byte block),
+SystemV AFS (2048-byte block).
+.IP \[bu]
+Directory traversal:
+.BR readdir (3)
+and
+.BR finddir (3)
+through V7-style 16-byte
+.I struct sysv_dirent
+records (14-byte name field).
+.IP \[bu]
+File data: direct, single-indirect, double-indirect, and triple-indirect zone
+addressing.  Sparse files (zero zone numbers) read back as zeros, matching V7
+semantics.
+.SS Limitations
+.IP \[bu] 2
+Read-only.  All write paths (write, mkdir, unlink, rename, truncate) are
+unimplemented; attempts return
+.BR EROFS .
+.IP \[bu]
+14-character filenames only.  Longer-name Xenix variants from SCO Unix-derived
+systems are not yet probed for.
+.IP \[bu]
+Coherent variant is wired into the variant enum but not auto-probed.
+.SH EXAMPLE
+Mount an SCO Xenix 86 disk image at
+.IR /mnt/xenix :
+.PP
+.RS
+.nf
+mount -t xenix /dev/storage/ide1 /mnt/xenix
+.fi
+.RE
+.SH FILES
+.TP
+.I sys/fs/sysv/sysv.c
+Driver implementation.
+.TP
+.I sys/fs/sysv/sysv.h
+On-disk structure definitions and per-mount state.
+.SH SEE ALSO
+.BR mount (8),
+.BR mount (2),
+.BR ext2 (4),
+.BR udf (5)
+.SH HISTORY
+The V7 filesystem layout dates to UNIX V7 (1979).  Microsoft Xenix carried it
+forward to the 8086 / 80286 / 80386 in the early 1980s; SCO Xenix 86 and later
+SCO Xenix System V both ship variants of this format.  System V release 2
+introduced the 1024-byte block size and the AFS extensions added 2048-byte
+blocks for performance.

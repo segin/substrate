@@ -72,6 +72,10 @@ void vfs_init(void) {
     fat_init();
     exfat_init();
     minix_init();
+    {
+        extern void sysv_init(void);
+        sysv_init();
+    }
     udf_init();
     
     // Register pseudo-filesystems
