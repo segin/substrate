@@ -54,20 +54,37 @@ extern "C" {
 /*
  * Floating-point environment type (x87 + optional SSE)
  *
- * Layout matches the 28-byte block written by fnstenv/fldenv,
- * plus a trailing __mxcsr field for SSE state.
- * Total size: 32 bytes.
+ * The first 28 bytes mirror the exact image fnstenv writes in 32-bit
+ * protected mode.  Each x87 16-bit register sits in the LOW HALF of a
+ * 32-bit slot, with the high half reserved — so __control_word,
+ * __status_word, and __tag_word need 32-bit storage, not 16-bit, even
+ * though only their low halves carry data.  An earlier version of
+ * this struct packed the 16-bit fields back-to-back; that put
+ * __status_word at offset 2 (where fnstenv writes the reserved upper
+ * half of the control-word slot) and silently broke
+ * feraiseexcept / fesetexceptflag / nearbyint.  The 32-bit-slot
+ * layout below puts each field at the byte offset fnstenv actually
+ * uses on this platform.
+ *
+ * Layout (matches Intel SDM Vol 1 §8.1.10 "Save FPU Environment"):
+ *   offset 0:  control word slot   (CW in low 16)
+ *   offset 4:  status word slot    (SW in low 16)
+ *   offset 8:  tag word slot       (TW in low 16)
+ *   offset 12: instruction pointer offset
+ *   offset 16: FCS + opcode  (FCS in low 16)
+ *   offset 20: data pointer offset
+ *   offset 24: FDS slot
+ *   offset 28: MXCSR  (SSE state, separate from the fnstenv block)
  */
 typedef struct {
-    /* x87 FPU environment (fnstenv/fldenv 28-byte format) */
-    unsigned short int __control_word;    /* Control word (CW) */
-    unsigned short int __status_word;     /* Status word (SW) */
-    unsigned short int __tag_word;        /* Tag word (TW) */
-    unsigned int __ip_offset;             /* Instruction pointer offset (FIP) */
-    unsigned short int __ip_selector;     /* Instruction pointer selector (FCS) */
-    unsigned int __dp_offset;             /* Data pointer offset (FDP) */
-    unsigned short int __dp_selector;     /* Data pointer selector (FDS) */
-    unsigned int __mxcsr;                 /* MXCSR (SSE control/status register) */
+    unsigned int __control_word;          /* CW in low 16 bits */
+    unsigned int __status_word;           /* SW in low 16 bits */
+    unsigned int __tag_word;              /* TW in low 16 bits */
+    unsigned int __ip_offset;             /* Instruction pointer offset */
+    unsigned int __ip_sel_opcode;         /* FCS in low 16, opcode in high 16 */
+    unsigned int __dp_offset;             /* Data pointer offset */
+    unsigned int __dp_selector;           /* FDS in low 16 */
+    unsigned int __mxcsr;                 /* MXCSR (SSE) */
 } fenv_t;
 
 /* Exception flag type (snapshot of status word exception bits) */

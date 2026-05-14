@@ -399,6 +399,7 @@ int main(void) {
 }
 
 
+#if 0  /* legacy second test program — kept for archeology; rename to keep build clean */
 /* Helper function to print test results */
 static void test_result(const char *test, int passed) {
     printf("%-60s [%s]\n", test, passed ? "PASS" : "FAIL");
@@ -647,3 +648,4 @@ int main() {
     
     return 0;
 }
+#endif

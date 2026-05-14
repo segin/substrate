@@ -1,0 +1,210 @@
+.TH MATH_X87 7 "May 2026" "Substrate" "Miscellaneous Information Manual"
+.SH NAME
+math_x87 \- i386/x87 inline-assembly optimisations in substrate libm
+.SH SYNOPSIS
+Most substrate
+.BR libm (3)
+entry points compile down to one or two x87 instructions on i386.
+This page enumerates which functions take the hardware path, what
+each path does, and what accuracy guarantees it provides.
+.SH DESCRIPTION
+.SS Hardware-backed functions
+The following entry points dispatch directly to a single x87
+instruction (or a tight loop around one).  All live in
+.IR lib/m/src/ .
+.PP
+.TP 16
+.B Function
+.B x87 instruction (file)
+.TP
+.BR sin (), cos ()
+.B fsin / fcos
++ fprem1 reduction
+.RI ( math_trig.c )
+.TP
+.BR sincos ()
+.B fsincos
++ fprem1 reduction
+.RI ( math_trig.c )
+.TP
+.BR tan ()
+.B fptan
++ fprem1 reduction
+.RI ( math_trig.c )
+.TP
+.BR atan2 ()
+.B fpatan
+.RI ( math_trig.c )
+.TP
+.BR log (), log2 (), log10 ()
+.B fyl2x
+with appropriate base constant
+.RI ( math_exp.c )
+.TP
+.BR log1p (), log2p1 (), log10p1 ()
+.B fyl2xp1
+for
+.RB | x |
+< 1\(en\(*r2/2; falls back otherwise
+.RI ( math_exp.c )
+.TP
+.BR exp (), exp2 (), exp10 (), pow ()
+.B frndint / f2xm1 / fscale
+range-split
+.RI ( math_exp.c ,
+.IR x87_exp2 )
+.TP
+.BR exp2m1 ()
+.B f2xm1
+direct for
+.RB | x |
+\(<= 1
+.RI ( math_exp.c )
+.TP
+.BR sqrt ()
+.B fsqrt
+.RI ( math_exp.c )
+.TP
+.BR rsqrt ()
+.B fsqrt
+then divide
+.RI ( math_exp.c )
+.TP
+.BR fmod ()
+.B fprem
+in a C2-status-loop
+.RI ( math_round.c )
+.TP
+.BR remainder ()
+.B fprem1
+in a C2-status-loop
+.RI ( math_round.c )
+.TP
+.BR rint (), nearbyint ()
+.B frndint
+\(em
+.BR nearbyint ()
+additionally snapshots / restores
+.B FE_INEXACT
+so its required POSIX behaviour is preserved
+.RI ( math_round.c )
+.TP
+.BR scalbn ()
+.B fildl
+then
+.B fscale
+.RI ( math_round.c )
+.TP
+.BR lrint (), llrint ()
+.B fistp
+in current rounding mode
+.RI ( math_round.c )
+.SS Range reduction
+.B fsin
+/
+.B fcos
+/
+.B fptan
+/
+.B fsincos
+have a hardware domain of |x| < 2\(ha63.  For larger arguments the
+implementation enters a loop that uses
+.B fprem1
+against
+.B 2\(*p
+to reduce the argument into the native domain, then retries the
+trig instruction.  Termination is detected via the FPU status word's
+C2 bit \(em while C2=1, fprem1 has produced only a partial result and
+must be repeated.
+.PP
+For
+.B fprem
+(used by
+.BR fmod ())
+and
+.B fprem1
+(used by
+.BR remainder ()),
+the same C2-loop pattern reduces oversized dividends down to a single
+multiple of the divisor.  Without the loop the result for a dividend
+above ~2\(ha32 \(mu divisor would be undefined.
+.SS Accuracy
+.TP
+.BR sqrt (),
+.BR fabs ()
+\(em
+correctly rounded (1 ULP).  These are IEEE-754 primitives.
+.TP
+.BR rint (),
+.BR nearbyint (),
+.BR scalbn ()
+\(em
+exact when the result is representable.
+.TP
+Trigonometric and logarithmic operations
+\(em
+faithfully rounded; on substrate this means typically 1\(en2 ULP from
+the correctly-rounded result for ordinary arguments, climbing to 4\(en8
+ULP for arguments near a singularity (e.g.
+.BR sin "(\(*p) ≈"
+0 with the residual coming entirely from \(*p reduction error).
+.TP
+.BR pow ()
+\(em
+faithfully rounded.  Internally a single
+.B fyl2x
+followed by the
+.B frndint / f2xm1 / fscale
+exp2 path; one rounding per multiplicative step, so error budgets
+add but stay below ~3 ULP for non-pathological arguments.
+.SS Fallback path
+For non-i386 targets (currently stubbed but allowed for in the
+source via
+.BR __i386__ / __x86_64__
+guards) every primitive has a portable C implementation:
+range-reduction-by-argument, Taylor or minimax polynomial,
+software exp/log.  Substrate's i386 build never enters those paths.
+.SH NOTES
+.SS GAS quirk: fsub / fsubr operand order
+Some two-register forms of
+.B fsub
+and
+.B fdiv
+have their semantics swapped by GAS \(em
+.B fsub %st(0), %st(1)
+is assembled as the REVERSE-subtract opcode (
+.RB DC " E0+i = FSUBR )"
+rather than the FSUB you'd expect.  Substrate's exp / exp2 / pow paths
+sidestep this by using the
+.B fsub %st(i), %st(0)
+form (D8 E0+i, unambiguous) for argument reduction.
+.SS fenv_t struct layout
+The 32-bit protected-mode FPU environment image written by
+.B fnstenv
+places each 16-bit register in the LOW HALF of a 32-bit slot, with
+the upper half reserved.  Substrate's
+.B fenv_t
+is laid out with 32-bit fields wrapping each register so the struct's
+field offsets align with the
+.B fnstenv
+output.  An earlier packed-16-bit layout put
+.B __status_word
+at offset 2 (the reserved upper half of the control-word slot) which
+silently broke
+.BR feraiseexcept (3),
+.BR fesetexceptflag (3),
+and
+.BR nearbyint (3).
+.SH SEE ALSO
+.BR exp (3),
+.BR log (3),
+.BR pow (3),
+.BR sin (3),
+.BR fenv (7),
+.BR libm (3)
+.PP
+Intel\(rg 64 and IA-32 Architectures Software Developer's Manual,
+Volume 1, Chapter 8 ("Programming with the x87 FPU"), and
+Volume 2A entries for FSIN, FCOS, FSINCOS, FPTAN, FPATAN, FYL2X,
+F2XM1, FSCALE, FPREM, FPREM1, FSQRT, FRNDINT, FISTP, FNSTENV /
+FLDENV.

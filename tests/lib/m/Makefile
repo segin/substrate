@@ -17,7 +17,8 @@ FENV = ../../../lib/m/src/fenv.c
 
 all: test_trig prop_trig test_fenv prop_fenv fuzz_fenv test_tgmath \
       test_classify prop_classify test_arith prop_arith test_round prop_round \
-      test_explog prop_explog test_bessel prop_bessel
+      test_explog prop_explog test_bessel prop_bessel \
+      test_accuracy test_x87_opt fuzz_math fuzz_mathf
 
 test_trig: unit/test_trig.c $(MATH_SRCS) $(FPCLASSIFY) $(FENV)
 	$(CC) $(CFLAGS) -fno-builtin $^ -o $@ -lm
@@ -67,6 +68,18 @@ test_bessel: unit/test_bessel.c $(MATH_SRCS) ../../../lib/m/src/mathf.c $(FPCLAS
 prop_bessel: property/prop_bessel.c $(MATH_SRCS) $(FPCLASSIFY) $(FENV)
 	$(CC) $(CFLAGS) -fno-builtin $^ -o $@ -lm
 
+test_accuracy: unit/test_accuracy.c $(MATH_SRCS) ../../../lib/m/src/mathf.c $(FPCLASSIFY) $(FENV)
+	$(CC) $(CFLAGS) -fno-builtin $^ -o $@ -lm
+
+test_x87_opt: unit/test_x87_opt.c $(MATH_SRCS) ../../../lib/m/src/mathf.c $(FPCLASSIFY) $(FENV)
+	$(CC) $(CFLAGS) -fno-builtin $^ -o $@ -lm
+
+fuzz_math: fuzz/fuzz_math.c $(MATH_SRCS) ../../../lib/m/src/mathf.c $(FPCLASSIFY) $(FENV)
+	$(CC) $(CFLAGS) -fno-builtin $^ -o $@ -lm
+
+fuzz_mathf: fuzz/fuzz_mathf.c $(MATH_SRCS) ../../../lib/m/src/mathf.c ../../../lib/m/src/mathl.c $(FPCLASSIFY) $(FENV)
+	$(CC) $(CFLAGS) -fno-builtin $^ -o $@ -lm
+
 test: all
 	./test_trig
 	./prop_trig
@@ -83,9 +96,14 @@ test: all
 	./prop_explog
 	./test_bessel
 	./prop_bessel
+	./test_accuracy
+	./test_x87_opt
+	./fuzz_math
+	./fuzz_mathf
 
 clean:
 	rm -f test_trig prop_trig test_fenv prop_fenv fuzz_fenv test_tgmath \
 	      test_classify prop_classify test_arith prop_arith \
 	      test_round prop_round test_explog prop_explog \
-	      test_bessel prop_bessel
+	      test_bessel prop_bessel \
+	      test_accuracy test_x87_opt fuzz_math fuzz_mathf

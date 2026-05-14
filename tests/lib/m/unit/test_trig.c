@@ -13,6 +13,24 @@
 #include <stdint.h>
 #include <float.h>
 
+/* substrate's <math.h> doesn't expose the BSD M_* constants; provide
+ * the ones this test consumes locally. */
+#ifndef M_PI
+#define M_PI    3.14159265358979323846
+#endif
+#ifndef M_PI_2
+#define M_PI_2  1.57079632679489661923
+#endif
+#ifndef M_PI_4
+#define M_PI_4  0.78539816339744830962
+#endif
+#ifndef M_E
+#define M_E     2.71828182845904523536
+#endif
+#ifndef M_SQRT2
+#define M_SQRT2 1.41421356237309504880
+#endif
+
 #define FAIL(msg) do { \
     printf("FAIL: %s\n", msg); \
     failures++; \

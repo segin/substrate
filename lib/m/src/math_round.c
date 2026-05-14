@@ -664,7 +664,18 @@ double rint(double x) {
 }
 
 double nearbyint(double x) {
-    return rint(x); /* x87 frndint honours CW; portable path approximates. */
+    /* nearbyint() is rint() except it MUST NOT raise FE_INEXACT
+     * even when the result differs from x.  rint()'s x87 path
+     * relies on frndint, which sets FE_INEXACT unconditionally.
+     * Snapshot the exception state, call rint(), then restore so
+     * that any FE_INEXACT raised by rint() is hidden from the
+     * caller (any pre-existing FE_INEXACT survives via the
+     * snapshot). */
+    fexcept_t save;
+    fegetexceptflag(&save, FE_INEXACT);
+    double r = rint(x);
+    fesetexceptflag(&save, FE_INEXACT);
+    return r;
 }
 
 /*
