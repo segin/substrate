@@ -75,13 +75,13 @@ static int futex_read_timespec(void *uaddr, struct timespec *out) {
  */
 void *futex_get_key(uintptr_t uaddr) {
     if (!current_process || !current_process->pmap) return NULL;
-    
+
     /* Use pmap_extract to get physical address */
     uintptr_t pa = pmap_extract(current_process->pmap, uaddr);
-    
+
     /* Page must be present */
     if (pa == 0) return NULL;
-    
+
     /* pmap_extract returns the exact physical address (including offset).
        We use it directly as the key. */
     return (void *)pa;

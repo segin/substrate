@@ -431,13 +431,18 @@ void sched_reap_process_threads(process_t *proc) {
     for (t = thread_first(); t; t = next) {
         next = thread_next(t);
         if (t->proc != proc) continue;
-
-        sched_release_thread_storage(t);
-
-        spinlock_acquire(&tid_lock);
-        sched_unlink_locked(t);
-        spinlock_release(&tid_lock);
-
-        sched_storage_free(t);
+        sched_reap_thread(t);
     }
+}
+
+void sched_reap_thread(thread_t *t) {
+    if (!t) return;
+
+    sched_release_thread_storage(t);
+
+    spinlock_acquire(&tid_lock);
+    sched_unlink_locked(t);
+    spinlock_release(&tid_lock);
+
+    sched_storage_free(t);
 }

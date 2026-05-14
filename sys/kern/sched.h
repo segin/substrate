@@ -79,6 +79,14 @@ thread_t *sched_get_thread(int tid);
 void sched_iterate_threads(void (*callback)(thread_t *t, void *arg), void *arg);
 void sched_reap_process_threads(process_t *proc);
 
+/*
+ * Reap one specific thread: unlink from allthread/tid_hash, release
+ * kernel stack, free the thread_t.  Caller must be sure no one else
+ * holds a pointer to t (typically the thread is THREAD_ZOMBIE and a
+ * joiner just confirmed it).
+ */
+void sched_reap_thread(thread_t *t);
+
 void sched_check_timeouts(void);
 int sched_can_run_on_cpu(thread_t *t, int cpu_id);
 int sched_bind_thread(thread_t *t, int cpu_id);

@@ -203,10 +203,10 @@ void sleepq_init(void) {
 static void sleepq_add_internal(void *chan, thread_t *t, int type, int pid) {
     if (!chan || !t)
         return;
-    
+
     int hash = sleepq_hash_func(chan, type, pid);
     sq_lock(hash);
-    
+
     // Find or create sleep queue
     sleepq_t *sq = sleepq_lookup(chan, type, pid, hash);
     if (!sq) {
@@ -346,16 +346,16 @@ static int sleepq_wake_n_internal(void *chan, int n, int type, int pid) {
         return(0);
     if (n < 0)
         return(sleepq_wake_all_internal(chan, type, pid));
-    
+
     int hash = sleepq_hash_func(chan, type, pid);
     sq_lock(hash);
-    
+
     sleepq_t *sq = sleepq_lookup(chan, type, pid, hash);
     if (!sq || sq->sq_count == 0) {
         sq_unlock(hash);
         return(0);
     }
-    
+
     int woken = 0;
     while (sq->sq_head && woken < n) {
         thread_t *t = sq->sq_head;

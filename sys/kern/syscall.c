@@ -1033,8 +1033,16 @@ int sys_thr_join(tid_t tid, void **status) {
         if (copyout(&kstatus, status, sizeof(void*)) != 0) return -14; // EFAULT
     }
 
-    // Reap the thread
-    thread->tid = -1;
+    /*
+     * Reap the thread: unlink from allthread/tid_hash and kfree the
+     * thread_t.  Without this, each pthread_create/join cycle leaks
+     * a zombie onto allthread — sched_yield walks the whole list and
+     * storm-class tests degrade to O(n²) (3000 cycles → 3000 zombies
+     * each visited per pick).  Pre-refactor the equivalent leak was
+     * masked by the static slot array since `tid=-1` was the slot's
+     * "free" marker; the dynamic list has no such marker.
+     */
+    sched_reap_thread(thread);
 
     return 0;
 }
