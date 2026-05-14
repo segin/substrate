@@ -98,6 +98,53 @@ double      complex catan (double      complex z);
 float       complex catanf(float       complex z);
 long double complex catanl(long double complex z);
 
+/* ---- exponential / logarithmic / power / sqrt -------------------------- */
+double      complex cexp (double      complex z);
+float       complex cexpf(float       complex z);
+long double complex cexpl(long double complex z);
+
+double      complex clog (double      complex z);
+float       complex clogf(float       complex z);
+long double complex clogl(long double complex z);
+
+double      complex csqrt (double      complex z);
+float       complex csqrtf(float       complex z);
+long double complex csqrtl(long double complex z);
+
+double      complex cpow (double      complex x, double      complex y);
+float       complex cpowf(float       complex x, float       complex y);
+long double complex cpowl(long double complex x, long double complex y);
+
+/* ---- hyperbolic / inverse hyperbolic ----------------------------------- */
+double      complex ccosh (double      complex z);
+float       complex ccoshf(float       complex z);
+long double complex ccoshl(long double complex z);
+
+double      complex csinh (double      complex z);
+float       complex csinhf(float       complex z);
+long double complex csinhl(long double complex z);
+
+double      complex ctanh (double      complex z);
+float       complex ctanhf(float       complex z);
+long double complex ctanhl(long double complex z);
+
+double      complex cacosh (double      complex z);
+float       complex cacoshf(float       complex z);
+long double complex cacoshl(long double complex z);
+
+double      complex casinh (double      complex z);
+float       complex casinhf(float       complex z);
+long double complex casinhl(long double complex z);
+
+double      complex catanh (double      complex z);
+float       complex catanhf(float       complex z);
+long double complex catanhl(long double complex z);
+
+/* ---- Riemann-sphere projection ----------------------------------------- */
+double      complex cproj (double      complex z);
+float       complex cprojf(float       complex z);
+long double complex cprojl(long double complex z);
+
 #ifdef __cplusplus
 }
 #endif
