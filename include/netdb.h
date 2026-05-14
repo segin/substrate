@@ -39,6 +39,19 @@ struct servent {
     char  *s_proto;
 };
 
+struct protoent {
+    char  *p_name;
+    char **p_aliases;
+    int    p_proto;
+};
+
+struct netent {
+    char    *n_name;
+    char   **n_aliases;
+    int      n_addrtype;
+    uint32_t n_net;
+};
+
 #define AI_PASSIVE     0x01
 #define AI_CANONNAME   0x02
 #define AI_NUMERICHOST 0x04
@@ -65,6 +78,40 @@ const char *gai_strerror(int errcode);
 int getnameinfo(const struct sockaddr *sa, socklen_t salen,
                 char *host, socklen_t hostlen,
                 char *serv, socklen_t servlen, int flags);
+
+/* Legacy / setXent / endXent iteration interfaces.  All four
+ * families (hosts / networks / protocols / services) read from
+ * the corresponding /etc/<file> on each invocation; substrate has
+ * no DNS resolver yet so gethostbyname is local-files-only. */
+struct hostent *gethostent(void);
+void           sethostent(int stayopen);
+void           endhostent(void);
+
+struct netent *getnetent(void);
+struct netent *getnetbyname(const char *name);
+struct netent *getnetbyaddr(uint32_t net, int type);
+void           setnetent(int stayopen);
+void           endnetent(void);
+
+struct protoent *getprotoent(void);
+struct protoent *getprotobyname(const char *name);
+struct protoent *getprotobynumber(int proto);
+void             setprotoent(int stayopen);
+void             endprotoent(void);
+
+struct servent *getservent(void);
+struct servent *getservbyname(const char *name, const char *proto);
+struct servent *getservbyport(int port, const char *proto);
+void            setservent(int stayopen);
+void            endservent(void);
+
+/* h_errno + values for gethostbyname-family callers. */
+extern int h_errno;
+#define HOST_NOT_FOUND 1
+#define TRY_AGAIN      2
+#define NO_RECOVERY    3
+#define NO_DATA        4
+#define NO_ADDRESS     NO_DATA
 
 #ifdef __cplusplus
 }
