@@ -185,9 +185,15 @@ install_to_dist() {
     # crt0.o lives next to libc.a — userland Makefiles reference it as
     # $(TOP)/lib/c/crt0.o at link time, but on-target it's expected at
     # /usr/lib/crt0.o for the substrate-native compiler.
-    if [ -f "$TOP/lib/c/crt0.o" ]; then
-        cp "$TOP/lib/c/crt0.o" "$DIST/usr/lib/"
-    fi
+    # crti.o / crtn.o pair: GCC's SysV-style startfile spec wraps user
+    # code with `crti.o ... crtbegin.o ... <user> ... crtend.o ... crtn.o`.
+    # The substrate-native g++ driver expects them at /usr/lib/ —
+    # without them `g++ foo.cpp` fails with "cannot find crti.o".
+    for crt in crt0.o crti.o crtn.o; do
+        if [ -f "$TOP/lib/c/$crt" ]; then
+            cp "$TOP/lib/c/$crt" "$DIST/usr/lib/"
+        fi
+    done
 
     # The native dynamic linker every PIE binary names as PT_INTERP.
     if [ -f "$TOP/sbin/ld.so/ld.so" ]; then
@@ -298,8 +304,10 @@ install_to_dist() {
     done
 
     echo "Installing libraries to dist/usr/lib..."
-    # crt0 and libsys needed for linking
-    [ -f "$TOP/lib/c/crt0.o" ] && cp "$TOP/lib/c/crt0.o" "$DIST/usr/lib/"
+    # crt0 + crti/crtn (SysV-style startfile bracket) and libsys for linking.
+    for crt in crt0.o crti.o crtn.o; do
+        [ -f "$TOP/lib/c/$crt" ] && cp "$TOP/lib/c/$crt" "$DIST/usr/lib/"
+    done
     [ -f "$TOP/lib/sys/libsys.a" ] && cp "$TOP/lib/sys/libsys.a" "$DIST/usr/lib/"
     [ -f "$TOP/lib/m/libm.a" ] && cp "$TOP/lib/m/libm.a" "$DIST/usr/lib/"
     # elfobj library (needed by ld, as)
