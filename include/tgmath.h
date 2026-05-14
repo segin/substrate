@@ -380,24 +380,67 @@ extern "C" {
 /* This stub records the hook point for future implementation.        */
 /* ------------------------------------------------------------------ */
 #if _TGMATH_HAVE_COMPLEX
-/*
- * Complex variants are declared in <complex.h>.  For each function f,
- * the complex counterpart is cf (e.g. csin, ccos, cexp …).
- * The dispatch would look like:
- *
- *   #undef sin
- *   #define sin(x) _Generic((x)+0,
- *       float:               sinf,
- *       double:              sin,
- *       long double:         sinl,
- *       _Complex float:      csinf,
- *       _Complex double:     csin,
- *       _Complex long double: csinl,
- *       default:             sin
- *   )(x)
- *
- * Deferred until <complex.h> is fully implemented.
- */
+/* _TGMATH1C(fn, cfn, x) — 1-argument type-generic dispatch that
+ * also routes _Complex arguments to the cfn family (csin/ccos/...). */
+#define _TGMATH1C(fn, cfn, x) \
+    _Generic((x)+0, \
+        float:                fn##f, \
+        long double:          fn##l, \
+        float _Complex:       cfn##f, \
+        double _Complex:      cfn, \
+        long double _Complex: cfn##l, \
+        default:              fn \
+    )(x)
+
+/* Override the relevant macros from above to use the complex-aware
+ * dispatcher.  Functions WITHOUT a complex counterpart (ceil, floor,
+ * round, fabs, ...) keep their plain _TGMATH1 forms above. */
+#undef sin
+#define sin(x)    _TGMATH1C(sin,   csin,   x)
+#undef cos
+#define cos(x)    _TGMATH1C(cos,   ccos,   x)
+#undef tan
+#define tan(x)    _TGMATH1C(tan,   ctan,   x)
+#undef asin
+#define asin(x)   _TGMATH1C(asin,  casin,  x)
+#undef acos
+#define acos(x)   _TGMATH1C(acos,  cacos,  x)
+#undef atan
+#define atan(x)   _TGMATH1C(atan,  catan,  x)
+#undef sinh
+#define sinh(x)   _TGMATH1C(sinh,  csinh,  x)
+#undef cosh
+#define cosh(x)   _TGMATH1C(cosh,  ccosh,  x)
+#undef tanh
+#define tanh(x)   _TGMATH1C(tanh,  ctanh,  x)
+#undef asinh
+#define asinh(x)  _TGMATH1C(asinh, casinh, x)
+#undef acosh
+#define acosh(x)  _TGMATH1C(acosh, cacosh, x)
+#undef atanh
+#define atanh(x)  _TGMATH1C(atanh, catanh, x)
+#undef exp
+#define exp(x)    _TGMATH1C(exp,   cexp,   x)
+#undef log
+#define log(x)    _TGMATH1C(log,   clog,   x)
+#undef sqrt
+#define sqrt(x)   _TGMATH1C(sqrt,  csqrt,  x)
+#undef erf
+#define erf(x)    _TGMATH1C(erf,    cerf,    x)
+#undef erfc
+#define erfc(x)   _TGMATH1C(erfc,   cerfc,   x)
+#undef tgamma
+#define tgamma(x) _TGMATH1C(tgamma, ctgamma, x)
+#undef lgamma
+#define lgamma(x) _TGMATH1C(lgamma, clgamma, x)
+#undef j0
+#define j0(x)     _TGMATH1C(j0,     cj0,     x)
+#undef j1
+#define j1(x)     _TGMATH1C(j1,     cj1,     x)
+#undef y0
+#define y0(x)     _TGMATH1C(y0,     cy0,     x)
+#undef y1
+#define y1(x)     _TGMATH1C(y1,     cy1,     x)
 #endif /* _TGMATH_HAVE_COMPLEX */
 
 #ifdef __cplusplus

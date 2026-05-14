@@ -145,6 +145,38 @@ double      complex cproj (double      complex z);
 float       complex cprojf(float       complex z);
 long double complex cprojl(long double complex z);
 
+/* ---- gamma / error / Bessel (substrate extension) ---------------------- *
+ * These mirror the real tgamma/lgamma/erf/erfc/j0/j1/y0/y1 set; not part
+ * of any C standard but useful when tgmath dispatches on a _Complex
+ * argument.  Implementations live in lib/m/src/cmath_special.c. */
+double      complex clgamma (double      complex z);
+float       complex clgammaf(float       complex z);
+long double complex clgammal(long double complex z);
+double      complex ctgamma (double      complex z);
+float       complex ctgammaf(float       complex z);
+long double complex ctgammal(long double complex z);
+
+double      complex cerf  (double      complex z);
+float       complex cerff (float       complex z);
+long double complex cerfl (long double complex z);
+double      complex cerfc (double      complex z);
+float       complex cerfcf(float       complex z);
+long double complex cerfcl(long double complex z);
+
+double      complex cj0 (double      complex z);
+float       complex cj0f(float       complex z);
+long double complex cj0l(long double complex z);
+double      complex cj1 (double      complex z);
+float       complex cj1f(float       complex z);
+long double complex cj1l(long double complex z);
+
+double      complex cy0 (double      complex z);
+float       complex cy0f(float       complex z);
+long double complex cy0l(long double complex z);
+double      complex cy1 (double      complex z);
+float       complex cy1f(float       complex z);
+long double complex cy1l(long double complex z);
+
 #ifdef __cplusplus
 }
 #endif
