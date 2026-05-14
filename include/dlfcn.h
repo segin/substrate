@@ -29,6 +29,20 @@ void *dlsym(void *handle, const char *name);
 int   dlclose(void *handle);
 const char *dlerror(void);
 
+/* GNU extension: identify the DSO + nearest symbol covering `addr`.
+ * Returns non-zero on success, 0 if `addr` is not in any loaded DSO.
+ * On success info->dli_fname / fbase are always populated; sname /
+ * saddr are only set when a symbol's [value, value+size) range
+ * contains `addr` (otherwise NULL/0). */
+typedef struct {
+    const char *dli_fname;
+    void       *dli_fbase;
+    const char *dli_sname;
+    void       *dli_saddr;
+} Dl_info;
+
+int dladdr(const void *addr, Dl_info *info);
+
 #ifdef __cplusplus
 }
 #endif

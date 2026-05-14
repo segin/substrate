@@ -299,8 +299,14 @@ static ld_obj_t *load_from_path(const char *path) {
     if (!dyn) return 0;
 
     ld_obj_t *o = &ld_obj_pool[ld_obj_count++];
-    o->base    = base;
-    o->dynamic = dyn;
+    o->base       = base;
+    /* [load_start, load_end) covers every PT_LOAD page-aligned to
+     * the span we just mmap'd.  Used by __ldso_dladdr to figure out
+     * which DSO owns an address and by RTLD_NEXT-style scope walks
+     * to identify the caller's object. */
+    o->load_start = base + lo;
+    o->load_end   = base + hi;
+    o->dynamic    = dyn;
     o->tls_image  = tls_image;
     o->tls_filesz = tls_filesz;
     o->tls_memsz  = tls_memsz;

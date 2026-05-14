@@ -267,6 +267,8 @@ void *ld_mmap(void *addr, ld_size len, int prot, int flags,
 typedef struct ld_obj {
     char            name[64];   /* SONAME or basename, for diagnostics */
     ld_u32          base;       /* load bias */
+    ld_u32          load_start; /* low end of PT_LOAD span (absolute) */
+    ld_u32          load_end;   /* high end of PT_LOAD span (absolute) */
     Elf32_Dyn      *dynamic;    /* PT_DYNAMIC pointer (already biased) */
 
     /* Cached dynamic-table pointers (all already biased). */

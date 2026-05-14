@@ -254,6 +254,21 @@ ld_u32 ld_main(ld_u32 *initial_stack) {
      * inside the freestanding linker. */
     prog_obj.name[0]    = '\0';
     prog_obj.base       = bias;
+    /* Compute the load span from the program's PT_LOAD phdrs.  Needed
+     * by __ldso_dladdr() to map addresses back to the program. */
+    {
+        Elf32_Phdr *ph = (Elf32_Phdr *)a.phdr;
+        ld_u32 lo = 0xFFFFFFFFu, hi = 0;
+        for (ld_u32 i = 0; i < a.phnum; i++) {
+            if (ph[i].p_type != PT_LOAD) continue;
+            ld_u32 vstart = ph[i].p_vaddr & ~0xFFFu;
+            ld_u32 vend   = (ph[i].p_vaddr + ph[i].p_memsz + 0xFFFu) & ~0xFFFu;
+            if (vstart < lo) lo = vstart;
+            if (vend   > hi) hi = vend;
+        }
+        prog_obj.load_start = bias + lo;
+        prog_obj.load_end   = bias + hi;
+    }
     prog_obj.dynamic    = dyn;
     prog_obj.strtab     = 0;
     prog_obj.symtab     = 0;
@@ -349,6 +364,11 @@ ld_u32 ld_main(ld_u32 *initial_stack) {
         for (ld_size i = 0; i < sizeof(self_name); i++)
             self_obj.name[i] = self_name[i];
         self_obj.base       = a.base;
+        /* We don't have ld.so's own phdrs handy here — leave the
+         * load span empty.  __ldso_dladdr will simply not report
+         * addresses inside ld.so itself; that's fine for a loader. */
+        self_obj.load_start = 0;
+        self_obj.load_end   = 0;
         self_obj.dynamic    = _DYNAMIC;
         self_obj.strtab     = 0;
         self_obj.symtab     = 0;
