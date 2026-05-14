@@ -83,6 +83,7 @@ void vfs_init(void) {
     procfs_init();
     cpuid_init();
     sysfs_init();
+    shmfs_init();    /* mount point at /dev/shm — kmain mounts it after devfs */
     pseudo_init();
     full_init();
 

@@ -449,19 +449,18 @@ int posix_madvise(void *addr, size_t len, int advice) {
 }
 
 int shm_open(const char *name, int oflag, mode_t mode) {
-    /* POSIX shared memory.  Substrate has no shm fs yet — emulate
-     * under /tmp/shm-<name> so the surface compiles.  Programs that
-     * actually depend on cross-process shm get a per-process file
-     * (degraded but won't crash). */
+    /* POSIX shared memory — backed by shmfs mounted at /dev/shm.
+     * shmfs gives every object its own kmalloc-backed buffer so
+     * multiple processes mmap'ing the same name share storage. */
     char buf[256];
     if (name[0] == '/') name++;
-    snprintf(buf, sizeof(buf), "/tmp/shm-%s", name);
+    snprintf(buf, sizeof(buf), "/dev/shm/%s", name);
     return open(buf, oflag, mode);
 }
 
 int shm_unlink(const char *name) {
     char buf[256];
     if (name[0] == '/') name++;
-    snprintf(buf, sizeof(buf), "/tmp/shm-%s", name);
+    snprintf(buf, sizeof(buf), "/dev/shm/%s", name);
     return unlink(buf);
 }

@@ -663,6 +663,14 @@ static void init_root_fs(void) {
     } else {
         kprint("VFS: Mounted devfs on /dev\n");
     }
+    /* shmfs sits on top of the empty /dev/shm directory devfs
+     * creates at init time.  Must come AFTER /dev is mounted so the
+     * mount-point path exists. */
+    if (vfs_mount_legacy(NULL, "/dev/shm", "shmfs", 0, NULL) != 0) {
+        kprint("VFS: Failed to mount shmfs on /dev/shm\n");
+    } else {
+        kprint("VFS: Mounted shmfs on /dev/shm\n");
+    }
     if (vfs_mount_legacy(NULL, "/proc", "procfs", 0, NULL) != 0) {
         kprint("VFS: Failed to mount procfs on /proc\n");
     } else {

@@ -171,6 +171,10 @@ void devfs_unregister_device(fs_node_t *node);
 int devfs_register_alias(const char *path, const char *target);
 void devfs_unregister_alias(const char *path);
 
+/* shmfs — POSIX shared-memory filesystem.  Mounted at /dev/shm
+ * immediately after devfs by sys/kern/main.c. */
+void shmfs_init(void);
+
 extern fs_node_t *fs_root; // Global root node
 
 #endif

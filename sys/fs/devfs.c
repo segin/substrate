@@ -577,6 +577,10 @@ void devfs_init(void) {
         devfs_create_common_dir("input");
         devfs_create_common_dir("by-id");
         devfs_create_common_dir("pts");
+        /* Mount point for shmfs (POSIX shared memory).  Created
+         * empty as a normal devfs directory; kmain mounts shmfs
+         * over it right after devfs is up. */
+        devfs_create_common_dir("shm");
     }
 
     devfs_root_node_ptr = &devfs_root_node;
