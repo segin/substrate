@@ -324,3 +324,112 @@ int feupdateenv(const fenv_t *envp) {
 
     return 0;
 }
+
+/* ============================================================
+ * C23 additions
+ * ============================================================ */
+
+/* C23 7.6.2.5: set exception flags without raising traps.  Identical
+ * to fesetexceptflag(&all_set, excepts) — but the C23 spelling takes
+ * the bitmask directly. */
+__attribute__((noinline))
+int fesetexcept(int excepts) {
+    fenv_t env;
+    int mask = excepts & FE_ALL_EXCEPT;
+
+    __asm__ __volatile__("fnstenv %0" : "=m"(env));
+    env.__status_word = (unsigned int)((env.__status_word & ~(unsigned int)mask)
+                                       | (unsigned int)mask);
+    __asm__ __volatile__("fldenv %0" : : "m"(env));
+
+#ifdef __SSE__
+    unsigned int mxcsr = __get_mxcsr();
+    mxcsr |= (unsigned int)mask;
+    __set_mxcsr(mxcsr);
+#endif
+    return 0;
+}
+
+/* C23 7.6.2.7: test whether `excepts` bits are set in the SNAPSHOT
+ * pointed at by `flagp` (NOT in the live FPU state).  Mirror of
+ * fetestexcept but operating on a saved fexcept_t. */
+__attribute__((noinline))
+int fetestexceptflag(const fexcept_t *flagp, int excepts) {
+    if (!flagp) return 0;
+    int mask = excepts & FE_ALL_EXCEPT;
+    return (int)(*flagp) & mask;
+}
+
+/* C23 7.6.4.1 / 7.6.4.2: control-mode get / set.  "Modes" are the
+ * rounding direction plus (on x86) precision control and the
+ * exception-mask bits — distinct from status (raised flags).
+ *
+ * We snapshot the x87 CW directly; the masking and rounding bits are
+ * both inside that 16-bit word.  MXCSR's control half (rounding + masks
+ * + FTZ/DAZ) is in the high bits we save separately. */
+__attribute__((noinline))
+int fegetmode(femode_t *modep) {
+    if (!modep) return -1;
+    unsigned short cw;
+    __asm__ __volatile__("fnstcw %0" : "=m"(cw));
+    modep->__control_word = cw;
+#ifdef __SSE__
+    modep->__mxcsr_control = __get_mxcsr() & 0xFFC0u;
+    /* keep only the control bits (rounding + masks + FTZ/DAZ);
+     * exception-status low 6 bits are NOT modes. */
+#else
+    modep->__mxcsr_control = 0;
+#endif
+    return 0;
+}
+
+__attribute__((noinline))
+int fesetmode(const femode_t *modep) {
+    if (modep == FE_DFL_MODE) {
+        /* Default control word: precision 53-bit, round-to-nearest,
+         * all exceptions masked.  Matches what fninit produces, but
+         * without disturbing the status word. */
+        unsigned short cw = 0x037F;
+        __asm__ __volatile__("fldcw %0" : : "m"(cw));
+#ifdef __SSE__
+        unsigned int mxcsr = __get_mxcsr();
+        mxcsr = (mxcsr & 0x003Fu) | 0x1F80u;  /* keep status, default modes */
+        __set_mxcsr(mxcsr);
+#endif
+        return 0;
+    }
+    if (!modep) return -1;
+    unsigned short cw = (unsigned short)modep->__control_word;
+    __asm__ __volatile__("fldcw %0" : : "m"(cw));
+#ifdef __SSE__
+    unsigned int mxcsr = __get_mxcsr();
+    mxcsr = (mxcsr & 0x003Fu) | (modep->__mxcsr_control & 0xFFC0u);
+    __set_mxcsr(mxcsr);
+#endif
+    return 0;
+}
+
+/* C23 7.6.5: decimal-FP rounding direction.  Substrate has no
+ * decimal FPU; this is in-memory state only, so callers that save +
+ * restore it round-trip cleanly. */
+static int g_dec_round = FE_DEC_TONEAREST;
+
+__attribute__((noinline))
+int fe_dec_getround(void) {
+    return g_dec_round;
+}
+
+__attribute__((noinline))
+int fe_dec_setround(int rdir) {
+    switch (rdir) {
+    case FE_DEC_TONEAREST:
+    case FE_DEC_DOWNWARD:
+    case FE_DEC_UPWARD:
+    case FE_DEC_TOWARDZERO:
+    case FE_DEC_TONEARESTFROMZERO:
+        g_dec_round = rdir;
+        return 0;
+    default:
+        return -1;
+    }
+}

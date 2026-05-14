@@ -90,8 +90,28 @@ typedef struct {
 /* Exception flag type (snapshot of status word exception bits) */
 typedef unsigned short int fexcept_t;
 
+/* C23: control-mode type.  Holds the subset of fenv_t that constitutes
+ * "modes" (rounding direction, on x86 also precision control and the
+ * exception-mask bits) — distinct from "status" (raised exception
+ * flags).  Substrate stores the full x87 control word + MXCSR's
+ * control half so fesetmode is a faithful round-trip. */
+typedef struct {
+    unsigned int __control_word;    /* x87 CW (low 16) */
+    unsigned int __mxcsr_control;   /* MXCSR (low half holds control bits) */
+} femode_t;
+
 /* Default environment pointer sentinel */
 #define FE_DFL_ENV ((const fenv_t *)-1)
+/* C23: default mode pointer sentinel */
+#define FE_DFL_MODE ((const femode_t *)-1)
+/* C23: decimal-FP rounding directions — substrate has no decimal FP
+ * hardware; we honour these enums as in-memory state only, but the
+ * spelling is the standard one so consuming code compiles. */
+#define FE_DEC_TONEAREST       0
+#define FE_DEC_DOWNWARD        1
+#define FE_DEC_UPWARD          2
+#define FE_DEC_TOWARDZERO      3
+#define FE_DEC_TONEARESTFROMZERO 4
 
 /*
  * Floating-point environment functions
@@ -132,6 +152,30 @@ int feholdexcept(fenv_t *envp) __attribute__((noinline));
 
 /* Restore environment and re-raise exceptions pending before the restore */
 int feupdateenv(const fenv_t *envp) __attribute__((noinline));
+
+/* C23 7.6.2.5: raise specified exceptions without trapping.  Like
+ * feraiseexcept() but never asks the hardware to deliver a signal —
+ * for code that wants to model the side effects of a future
+ * computation. */
+int fesetexcept(int excepts) __attribute__((noinline));
+
+/* C23 7.6.2.7: test whether the specified exception flags are raised
+ * IN THE SAVED SNAPSHOT, not in the live FPU state.  Symmetric to
+ * fegetexceptflag's snapshot semantics. */
+int fetestexceptflag(const fexcept_t *flagp, int excepts) __attribute__((noinline));
+
+/* C23 7.6.4: get / set the dynamic floating-point control modes
+ * (rounding direction + alternate-exception-handling configuration).
+ * On x86 we save the x87 CW and the MXCSR control half. */
+int fegetmode(femode_t *modep) __attribute__((noinline));
+int fesetmode(const femode_t *modep) __attribute__((noinline));
+
+/* C23 7.6.5: decimal-floating-point rounding direction.  Substrate
+ * has no decimal FP hardware; these maintain the requested direction
+ * as in-memory state so callers that just save / restore it
+ * round-trip correctly. */
+int fe_dec_getround(void) __attribute__((noinline));
+int fe_dec_setround(int rdir) __attribute__((noinline));
 
 #ifdef __cplusplus
 }
