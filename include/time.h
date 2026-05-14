@@ -59,7 +59,34 @@ struct tm *localtime_r(const time_t *__restrict timer, struct tm *__restrict res
 
 clock_t clock(void);
 int clock_gettime(clockid_t clk_id, struct timespec *tp);
+int clock_settime(clockid_t clk_id, const struct timespec *tp);
+int clock_getres(clockid_t clk_id, struct timespec *res);
+int clock_nanosleep(clockid_t clk_id, int flags,
+                    const struct timespec *req, struct timespec *rem);
+int clock_getcpuclockid(pid_t pid, clockid_t *clock_id);
 int nanosleep(const struct timespec *req, struct timespec *rem);
+
+/* TIMER_ABSTIME flag for clock_nanosleep. */
+#define TIMER_ABSTIME 1
+
+/* Per-process / per-thread CPU-time clocks. */
+#define CLOCK_PROCESS_CPUTIME_ID 2
+#define CLOCK_THREAD_CPUTIME_ID  3
+
+/* timer_create / delete / get / set / overrun.  Stubs in libc
+ * — substrate has no per-process timer infrastructure yet. */
+typedef int timer_t;
+struct itimerspec {
+    struct timespec it_interval;
+    struct timespec it_value;
+};
+int timer_create (clockid_t clk_id, void *sevp, timer_t *timerid);
+int timer_delete (timer_t timerid);
+int timer_getoverrun(timer_t timerid);
+int timer_gettime(timer_t timerid, struct itimerspec *curr);
+int timer_settime(timer_t timerid, int flags,
+                  const struct itimerspec *new_value,
+                  struct itimerspec *old_value);
 
 #define TIME_UTC 1
 

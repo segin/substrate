@@ -120,6 +120,41 @@ int sigaddset(sigset_t *set, int signo);
 int sigdelset(sigset_t *set, int signo);
 int sigismember(const sigset_t *set, int signo);
 
+/* POSIX extensions implemented in lib/c/src/posix_extra2.c. */
+typedef struct {
+    void  *ss_sp;
+    int    ss_flags;
+    size_t ss_size;
+} stack_t;
+
+#define SS_ONSTACK 1
+#define SS_DISABLE 2
+#define MINSIGSTKSZ 2048
+#define SIGSTKSZ    8192
+
+#ifndef __sigval_t_defined
+#define __sigval_t_defined 1
+union sigval {
+    int   sival_int;
+    void *sival_ptr;
+};
+#endif
+
+struct timespec;     /* forward — full def in <time.h> */
+int killpg(pid_t pgrp, int sig);
+void psignal(int signum, const char *s);
+void psiginfo(const siginfo_t *si, const char *s);
+int sigaltstack(const stack_t *ss, stack_t *oss);
+int sigqueue(pid_t pid, int sig, const union sigval value);
+int sigtimedwait(const sigset_t *set, siginfo_t *info, const struct timespec *timeout);
+int sigwait(const sigset_t *set, int *sig);
+int sigwaitinfo(const sigset_t *set, siginfo_t *info);
+int sig2str(int signum, char *str);
+int str2sig(const char *str, int *pnum);
+
+/* POSIX 2024 sig2str buffer length. */
+#define SIG2STR_MAX 32
+
 /* Dummy sig_atomic_t */
 typedef int sig_atomic_t;
 

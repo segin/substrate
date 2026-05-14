@@ -144,7 +144,58 @@ struct winsize {
 #define TCSADRAIN  1
 #define TCSAFLUSH  2
 
+/* tcflush queue selectors */
+#define TCIFLUSH  0
+#define TCOFLUSH  1
+#define TCIOFLUSH 2
+
+/* tcflow actions */
+#define TCOOFF    0
+#define TCOON     1
+#define TCIOFF    2
+#define TCION     3
+
+/* Line speeds — values are the POSIX-compatible "encoded baud index"
+ * stored in c_cflag's CBAUD field on Linux-style termios.  Substrate
+ * carries them in c_ispeed / c_ospeed (the BSD style); the constants
+ * are kept for source-compat with code that does the encode/decode
+ * dance via cfgetispeed/cfsetispeed. */
+#define B0       0000000
+#define B50      0000001
+#define B75      0000002
+#define B110     0000003
+#define B134     0000004
+#define B150     0000005
+#define B200     0000006
+#define B300     0000007
+#define B600     0000010
+#define B1200    0000011
+#define B1800    0000012
+#define B2400    0000013
+#define B4800    0000014
+#define B9600    0000015
+#define B19200   0000016
+#define B38400   0000017
+#define B57600   0010001
+#define B115200  0010002
+#define B230400  0010003
+
+#include <sys/types.h>
+
 int tcgetattr(int fd, struct termios *termios_p);
 int tcsetattr(int fd, int optional_actions, const struct termios *termios_p);
+
+speed_t cfgetispeed(const struct termios *termios_p);
+speed_t cfgetospeed(const struct termios *termios_p);
+int     cfsetispeed(struct termios *termios_p, speed_t speed);
+int     cfsetospeed(struct termios *termios_p, speed_t speed);
+
+int     tcdrain(int fd);
+int     tcflow(int fd, int action);
+int     tcflush(int fd, int queue);
+pid_t   tcgetsid(int fd);
+int     tcsendbreak(int fd, int duration);
+
+#define TIOCGSID 0x5429   /* substrate ioctl number, mirrors Linux */
 
 #endif
