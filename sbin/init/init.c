@@ -33,8 +33,18 @@ struct gettyline {
     long        last_spawn; /* serial counter used for rate-limit */
 };
 
+/*
+ * /dev/console is a raw passthrough façade in the kernel — it forwards
+ * writes to the active console backend but has no termios / line
+ * discipline, so a getty spawned on it sees ICANON / ECHO / ISIG
+ * silently no-op'd: ^C generates the literal ETX glyph and Enter never
+ * cooks input into lines.  Real ttys live at /dev/tty1..tty63 and go
+ * through sys/drivers/console/tty.c which has the full line discipline.
+ * Run the primary getty on tty1 and reserve /dev/console for kernel
+ * diagnostics where its raw write semantics are actually desirable.
+ */
 static struct gettyline g_lines[] = {
-    { "/dev/console", 0, 0 },
+    { "/dev/tty1",    0, 0 },
     { "/dev/tty2",    0, 0 },
     { "/dev/tty3",    0, 0 },
 };
