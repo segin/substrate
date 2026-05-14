@@ -176,6 +176,14 @@ typedef struct sys_cputimes {
     uint64_t softirq;      /* Software interrupt jiffies */
 } sys_cputimes_t;
 
+/* CPU Topology Structure */
+typedef struct sys_cputopo {
+    int32_t socket_id;     /* Physical socket index (-1 unknown) */
+    int32_t core_id;       /* Core index within socket */
+    int32_t thread_id;     /* SMT thread within core (0 = primary) */
+    int32_t numa_node;     /* NUMA node index (-1 = unknown / UMA) */
+} sys_cputopo_t;
+
 /* Kernel Version Structure */
 typedef struct sys_version {
     int major;
@@ -214,6 +222,44 @@ typedef struct sys_netstats {
     uint64_t tx_errors;
     uint64_t tx_dropped;
 } sys_netstats_t;
+
+/* ARP / neighbour-table entry */
+typedef struct sys_arpentry {
+    uint8_t  ip[16];       /* Peer IP (4 used for IPv4) */
+    uint8_t  hwaddr[6];    /* Hardware (MAC) address */
+    uint16_t flags;        /* ATF_COM / ATF_PERM / ATF_PUBL */
+    int      family;       /* AF_INET, AF_INET6 */
+    char     ifname[16];   /* Interface */
+} sys_arpentry_t;
+
+/* Block-device info */
+typedef struct sys_diskinfo {
+    char     name[32];     /* Kernel device name, e.g. "ide0" */
+    uint64_t size;         /* Total capacity (bytes) */
+    uint32_t sector_size;  /* Logical sector size (bytes) */
+    char     model[64];    /* Vendor model string (may be empty) */
+    char     serial[64];   /* Serial number (may be empty) */
+} sys_diskinfo_t;
+
+/* Block-device I/O statistics */
+typedef struct sys_diskstat {
+    uint64_t reads;        /* Completed read requests */
+    uint64_t read_bytes;
+    uint64_t writes;       /* Completed write requests */
+    uint64_t write_bytes;
+    uint64_t read_ticks;   /* Time spent reading (ms) */
+    uint64_t write_ticks;  /* Time spent writing (ms) */
+    uint64_t in_flight;    /* Currently-outstanding I/O */
+} sys_diskstat_t;
+
+/* Mounted filesystem entry — matches /proc/mounts ordering */
+typedef struct sys_mountinfo {
+    char     device[64];     /* Source device or pseudo name */
+    char     mountpoint[256];/* Mount point */
+    char     fstype[32];     /* "ext2", "procfs", "tmpfs", ... */
+    char     options[128];   /* Comma-separated, kernel-canonical */
+    uint32_t flags;          /* MS_RDONLY / MS_NOEXEC / ... */
+} sys_mountinfo_t;
 
 /* Routing Entry Structure */
 typedef struct sys_route {
@@ -256,6 +302,7 @@ int sys_cpu_count(void);
 int sys_cpu_info(int cpu, sys_cpuinfo_t *info);
 int sys_cpu_times(int cpu, sys_cputimes_t *times);
 int sys_cpu_loadavg(double *avg1, double *avg5, double *avg15);
+int sys_cpu_topology(int cpu, sys_cputopo_t *topo);
 
 /* System Information API */
 int sys_uptime(struct timespec *ts);
@@ -269,6 +316,12 @@ int sys_net_interfaces(sys_netif_t *ifs, size_t *count);
 int sys_net_addrs(const char *ifname, sys_netaddr_t *addrs, size_t *count);
 int sys_net_stats(const char *ifname, sys_netstats_t *stats);
 int sys_net_routes(sys_route_t *routes, size_t *count);
+int sys_net_arp(sys_arpentry_t *entries, size_t *count);
+
+/* Disk / storage information API */
+int sys_disk_list(sys_diskinfo_t *disks, size_t *count);
+int sys_disk_stats(const char *dev, sys_diskstat_t *stats);
+int sys_mount_list(sys_mountinfo_t *mounts, size_t *count);
 #endif
 
 #endif
