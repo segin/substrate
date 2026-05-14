@@ -30,7 +30,13 @@ ifeq ($(CROSS),)
   KERNEL_INC =
   PTHREAD_INC =
 else
-  PTHREAD = -L../../../lib/pthread -lpthread
+  # -l:libpthread.so.0 forces dynamic linking against the .so.
+  # The source tree only ships libpthread.so.0 (no `libpthread.so`
+  # symlink), so a plain `-lpthread` falls through to libpthread.a
+  # and the weak __ldso_alloc_tls reference bakes to address 0 —
+  # every pthread_create then passes tls_base=NULL and all threads
+  # share one TLS block, which the tls scenario detects as aliasing.
+  PTHREAD = -L../../../lib/pthread -l:libpthread.so.0
   PTHREAD_INC = -I../../../include -I../../../lib/pthread
 endif
 
