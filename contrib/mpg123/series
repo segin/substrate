@@ -1,0 +1,7 @@
+# mpg123 patch series for substrate.
+#
+# One patch filename per line, relative to ./patches/.  Lines
+# beginning with `#` and blank lines are ignored.  Applied in order.
+
+0001-config-sub-recognize-substrate.patch
+0002-configure-libtool-substrate-shared.patch

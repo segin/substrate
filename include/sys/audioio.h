@@ -51,28 +51,6 @@
 
 #define AUDIO_ENCODINGSTRLEN        16
 
-/* ------------------------------------------------------------------- */
-/* Port bitmap (audio_prinfo.port / avail_ports)                       */
-/* ------------------------------------------------------------------- */
-/*
- * Sun/NetBSD-compatible port identifiers.  Userspace ORs these into
- * audio_prinfo.port to select output (or input) routing; the kernel
- * advertises which ones the underlying hardware supports via
- * avail_ports.  Bit assignments match SunOS / Solaris / NetBSD so a
- * binary compiled against those headers behaves identically here.
- */
-#define AUDIO_SPEAKER       0x01    /* play: built-in speaker */
-#define AUDIO_HEADPHONE     0x02    /* play: headphone jack */
-#define AUDIO_LINE_OUT      0x04    /* play: line-level output */
-#define AUDIO_LINE_IN       0x08    /* record: line-level input */
-#define AUDIO_MICROPHONE    0x10    /* record: built-in or jack mic */
-#define AUDIO_CD            0x20    /* record: CD audio in */
-#define AUDIO_AUX1_OUT      0x40    /* play: aux output 1 */
-#define AUDIO_AUX2_OUT      0x80    /* play: aux output 2 */
-#define AUDIO_AUX1_IN       0x100   /* record: aux input 1 */
-#define AUDIO_AUX2_IN       0x200   /* record: aux input 2 */
-#define AUDIO_INTERNAL_CD_IN AUDIO_CD  /* alias for compatibility */
-
 typedef struct audio_encoding {
 	int     index;                                   /* in */
 	char    name[AUDIO_ENCODINGSTRLEN];              /* out */

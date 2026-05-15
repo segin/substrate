@@ -95,14 +95,20 @@ extern "C" {
 
 /* Maximum-width type */
 #define PRIdMAX "lld"
+#define PRIiMAX "lli"
 #define PRIuMAX "llu"
 #define PRIxMAX "llx"
 #define PRIoMAX "llo"
 #define PRIXMAX "llX"
 
+/* PRIi for pointer-width signed type — mirror of PRId*PTR. */
+#define PRIiPTR "i"
+
 #define SCNdMAX "lld"
+#define SCNiMAX "lli"
 #define SCNuMAX "llu"
 #define SCNxMAX "llx"
+#define SCNoMAX "llo"
 
 typedef struct { intmax_t quot; intmax_t rem; } imaxdiv_t;
 

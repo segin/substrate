@@ -25,6 +25,11 @@ libdl.so.0: $(PIC_OBJS)
 	$(CC) $(SHLIB_LDFLAGS) -Wl,-soname,libdl.so.0 \
 	      -Wl,--unresolved-symbols=ignore-all \
 	      -o $@ $(PIC_OBJS)
+	@# Host ld produces OSABI=0 (SysV); substrate-cross-ld rejects
+	@# it as "file in wrong format" when later cross-builds try to
+	@# link against this libdl.  Patch e_ident[EI_OSABI] to 0x40
+	@# (ELFOSABI_SUBSTRATE).  Same recipe as lib/c, lib/m, lib/sys.
+	@printf '\x40' | dd of=$@ bs=1 count=1 seek=7 conv=notrunc status=none
 
 %.o: %.c
 	$(CC) $(CFLAGS) -c $< -o $@

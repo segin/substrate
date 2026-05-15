@@ -1,0 +1,71 @@
+Teach libtool's `host_os` cases in configure about substrate.
+
+mpg123 ships its configure pre-generated.  Libtool's `host_os` case
+statements don't list `substrate*`, so when --host=i386-unknown-
+substrate is passed:
+
+  * `lt_cv_deplibs_check_method` falls through to "unknown" (no
+    pattern), so libtool can't decide which files are shared libs.
+  * `lt_prog_compiler_pic` is left empty, so PIC builds use no flag.
+  * The shared-link `archive_cmds` block leaves `ld_shlibs=no`.
+  * The dynamic-linker-properties block falls through to the catch-
+    all `*)` arm, which sets `dynamic_linker=no` and therefore
+    `can_build_shared=no`.
+
+End result: configure prints "checking if libtool supports shared
+libraries... no" and the build silently falls back to static-only,
+even though substrate has libdl + ld.so Phase 4e
+(dlopen/dlsym/dlclose).
+
+substrate's ld.so is GNU/Linux-compatible (SONAME-based ELF,
+LD_LIBRARY_PATH, /lib + /usr/lib search paths, -fPIC PIC model), so
+the simplest correct fix is to alias `substrate*` into each of the
+four GNU/ELF case matches in the shipped configure.
+
+We patch the generated configure rather than m4/libtool.m4 because:
+  * mpg123 ships configure pre-generated; no autoreconf is expected
+    at consumer-side build time.
+  * libtool.m4 has the same case match seven times across different
+    sections; a fully comprehensive m4 patch is materially larger
+    than the four configure edits and gains nothing unless someone
+    re-runs autoreconf.  When that need arises, generate a
+    companion patch from a fresh autoreconf diff.
+
+--- a/configure
++++ b/configure
+@@ -8949,7 +8949,7 @@ freebsd* | dragonfly* | midnightbsd*)
+   ;;
+
+ # This must be glibc/ELF.
+-linux* | k*bsd*-gnu | kopensolaris*-gnu | gnu*)
++linux* | substrate* | k*bsd*-gnu | kopensolaris*-gnu | gnu*)
+   lt_cv_deplibs_check_method=pass_all
+   ;;
+
+@@ -12338,7 +12338,7 @@ case $host_os in
+     # old Intel for x86_64, which still supported -KPIC.
+       ;;
+
+-    linux* | k*bsd*-gnu | kopensolaris*-gnu | gnu*)
++    linux* | substrate* | k*bsd*-gnu | kopensolaris*-gnu | gnu*)
+       case $cc_basename in
+       # old Intel for x86_64, which still supported -KPIC.
+       ecc*)
+@@ -13011,7 +13011,7 @@ _LT_EOF
+       archive_expsym_cmds='sed "s|^|_|" $export_symbols >$output_objdir/$soname.expsym~$CC -shared $pic_flag $libobjs $deplibs $compiler_flags $wl-h,$soname $wl--retain-symbols-file,$output_objdir/$soname.expsym $wl--image-base,`expr ${RANDOM-$$} % 4096 / 2 \* 262144 + 1342177280` -o $lib'
+       ;;
+
+-    gnu* | linux* | tpf* | k*bsd*-gnu | kopensolaris*-gnu)
++    gnu* | linux* | substrate* | tpf* | k*bsd*-gnu | kopensolaris*-gnu)
+       tmp_diet=no
+       if test linux-dietlibc = "$host_os"; then
+ 	case $cc_basename in
+@@ -14836,7 +14836,7 @@ android*)
+   ;;
+
+ # This must be glibc/ELF.
+-linux* | k*bsd*-gnu | kopensolaris*-gnu | gnu*)
++linux* | substrate* | k*bsd*-gnu | kopensolaris*-gnu | gnu*)
+   version_type=linux # correct to gnu/linux during the next big refactor
+   need_lib_prefix=no
+   need_version=no
