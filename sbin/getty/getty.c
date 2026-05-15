@@ -116,10 +116,15 @@ apply_termios_defaults(void)
     t.c_iflag = BRKINT | ICRNL | IXON;
     t.c_oflag = OPOST | ONLCR;
     t.c_cflag = (t.c_cflag & ~CSIZE) | CS8 | CREAD | HUPCL | CLOCAL;
-    t.c_lflag = ISIG | ICANON | ECHO | ECHOE | ECHOK | ECHONL | IEXTEN;
+    t.c_lflag = ISIG | ICANON | ECHO | ECHOE | ECHOK | ECHOCTL | ECHOKE
+              | ECHONL | IEXTEN;
     t.c_cc[VEOF]   = 4;   /* ^D */
     t.c_cc[VEOL]   = 0;
-    t.c_cc[VERASE] = 8;   /* ^H */
+    /* The PS/2 keyboard driver maps the Backspace key to 127 (DEL),
+     * matching modern Linux/BSD defaults — not 8 (^H).  VERASE must
+     * agree or canonical-mode erase silently drops control chars
+     * into the read buffer where the shell renders them as glyphs. */
+    t.c_cc[VERASE] = 127; /* DEL */
     t.c_cc[VINTR]  = 3;   /* ^C */
     t.c_cc[VKILL]  = 21;  /* ^U */
     t.c_cc[VQUIT]  = 28;  /* ^\ */
