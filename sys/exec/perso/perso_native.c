@@ -85,6 +85,7 @@ static void *native_syscalls[MAX_SYSCALLS] = {
     [SYS_DUP2] = &sys_dup2,
     [SYS_DUP3] = &sys_dup3,
     [SYS_PIPE2] = &sys_pipe2,
+    [SYS_FCNTL] = &sys_fcntl,
 
     /* AF_UNIX sockets (sys/net/af_unix.c) */
     [SYS_SOCKET]      = &sys_socket,

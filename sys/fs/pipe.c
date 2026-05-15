@@ -7,6 +7,7 @@
 #include <stddef.h>
 #include <sys/lock.h>
 #include <kern/sleepq.h>
+#include <errno.h>
 
 #define PIPE_SIZE 4096
 
@@ -25,6 +26,9 @@ typedef struct {
 typedef struct {
     pipe_t *pipe;
     uint8_t is_writer;
+    uint8_t nonblock;   /* O_NONBLOCK on this endpoint — read/write
+                           return -EAGAIN instead of blocking when
+                           the buffer would force a wait. */
 } pipe_endpoint_t;
 
 static void pipe_wait(void *chan, mutex_t *m) {
@@ -50,6 +54,11 @@ static size_t pipe_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buf
         if (p->writers_open == 0) {
             mutex_unlock(&p->lock);
             return 0;
+        }
+        if (ep->nonblock) {
+            mutex_unlock(&p->lock);
+            /* Caller treats the negative return as a syscall errno. */
+            return (size_t)-EAGAIN;
         }
         pipe_wait(p->wait_read, &p->lock);
     }
@@ -87,6 +96,13 @@ static size_t pipe_write(fs_node_t *node, off_t offset, size_t size, const uint8
             if (p->readers_open == 0) {
                 mutex_unlock(&p->lock);
                 return written;
+            }
+            if (ep->nonblock) {
+                mutex_unlock(&p->lock);
+                /* If we've already accepted some bytes, return the
+                 * short-count.  Otherwise surface EAGAIN. */
+                if (written > 0) return written;
+                return (size_t)-EAGAIN;
             }
             pipe_wait(p->wait_write, &p->lock);
         }
@@ -209,4 +225,16 @@ void pipe_create(fs_node_t **read_node, fs_node_t **write_node) {
 
     *read_node = rn;
     *write_node = wn;
+}
+
+/* Toggle O_NONBLOCK on a pipe endpoint.  Called from sys_pipe2 and
+ * (eventually) fcntl(F_SETFL).  Safe to call on a non-pipe node —
+ * returns -EINVAL in that case. */
+int pipe_set_nonblock(fs_node_t *node, int nonblock) {
+    if (!node) return -EINVAL;
+    if ((node->flags & 0x7) != FS_PIPE) return -EINVAL;
+    pipe_endpoint_t *ep = (pipe_endpoint_t *)(uintptr_t)node->impl;
+    if (!ep) return -EINVAL;
+    ep->nonblock = nonblock ? 1 : 0;
+    return 0;
 }

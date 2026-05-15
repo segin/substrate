@@ -1991,6 +1991,7 @@ int sys_sync(void) {
 
 extern int sys_stat(const char *p, struct stat *buf);
 extern void pipe_create(fs_node_t **read_node, fs_node_t **write_node);
+extern int pipe_set_nonblock(fs_node_t *node, int nonblock);
 
 int sys_pipe(int *fds) {
     int kfds[2];
@@ -2124,10 +2125,17 @@ int sys_pipe2(int *fds, int flags) {
         current_process->fd_cloexec |= (1U << kfds[1]);
     }
     if (flags & O_NONBLOCK) {
-        if (kfds[0] >= 0 && current_process->fds[kfds[0]])
-            current_process->fds[kfds[0]]->f_flag |= O_NONBLOCK;
-        if (kfds[1] >= 0 && current_process->fds[kfds[1]])
-            current_process->fds[kfds[1]]->f_flag |= O_NONBLOCK;
+        for (int side = 0; side < 2; side++) {
+            int kfd = kfds[side];
+            if (kfd < 0) continue;
+            file_t *f = current_process->fds[kfd];
+            if (!f) continue;
+            f->f_flag |= O_NONBLOCK;
+            /* The pipe driver doesn't see f_flag — push the flag
+             * onto the endpoint so pipe_read/_write return -EAGAIN
+             * instead of blocking on an empty/full buffer. */
+            if (f->f_data) pipe_set_nonblock((fs_node_t *)f->f_data, 1);
+        }
     }
     if (copyout(kfds, fds, 2 * sizeof(int)) != 0) return -EFAULT;
     return 0;

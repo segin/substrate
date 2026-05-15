@@ -153,12 +153,23 @@ build_components() {
         fi
     done
 
-    echo "Building target testsuites (tests/lib/sockets, ...)..."
+    echo "Building target testsuites (tests/lib/sockets, tests/lib/ipc, ...)..."
+    # The cross-toolchain's sysroot ships an older libc.so.0 from
+    # when stage 1 was installed.  Tests that link against newer
+    # libc additions (mkfifo, pipe2, the socket syscall wrappers,
+    # ...) fail at link time until the sysroot is refreshed.  Do it
+    # in-line here so every build sees the freshly-built libc.
+    if [ -f "$TOP/lib/c/libc.so.0" ] && \
+       [ -d /opt/substrate/i386-unknown-substrate/lib ]; then
+        cp "$TOP/lib/c/libc.so.0" \
+           /opt/substrate/i386-unknown-substrate/lib/libc.so.0
+    fi
+
     # Cross-build the portable POSIX testsuites so the binaries are
     # ready for install_to_dist() to drop into /tmp on the image.
     # Each Makefile follows the CROSS=PREFIX convention; the listed
     # subdirs each produce one or more standalone test programs.
-    for dir in "$TOP/tests/lib/sockets"; do
+    for dir in "$TOP/tests/lib/sockets" "$TOP/tests/lib/ipc"; do
         if [ -f "$dir/Makefile" ]; then
             make -C "$dir" clean >/dev/null
             make -C "$dir" \
@@ -321,7 +332,9 @@ install_to_dist() {
     # Each entry below is "src-dir:binary-name".  The cross-built
     # binary is dropped into $DIST/tmp so users can run /tmp/<name>
     # from a live shell on the target.
-    for entry in "tests/lib/sockets:torture_unix"; do
+    for entry in \
+        "tests/lib/sockets:torture_unix" \
+        "tests/lib/ipc:torture_ipc"; do
         srcdir="${entry%%:*}"
         binname="${entry##*:}"
         srcbin="$TOP/$srcdir/$binname"
