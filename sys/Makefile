@@ -22,12 +22,12 @@ ifeq ($(ARCH),i386)
 		--change-section-vma .bss-0xBFC00000
 endif
 
-.PHONY: all clean install arch_kernel core kern pm drivers fs exec vfs exec_perso vm multiboot freebsd zimage efi tests klib floppy
+.PHONY: all clean install arch_kernel core kern pm drivers fs net exec vfs exec_perso vm multiboot freebsd zimage efi tests klib floppy
 
 all: kernel.bin kernel.efi kernel.multiboot kernel.freebsd kernel.zimage
 	@echo "Kernel build complete (all formats)."
 
-kernel.bin: arch_kernel klib kern pm drivers fs exec vfs exec_perso vm tests
+kernel.bin: arch_kernel klib kern pm drivers fs net exec vfs exec_perso vm tests
 	# First pass: link kernel without ksyms
 	$(LD) -m elf_i386 -T arch/$(ARCH)/linker.ld -o kernel.tmp \
 		arch/$(ARCH)/kernel.o \
@@ -44,7 +44,7 @@ kernel.bin: arch_kernel klib kern pm drivers fs exec vfs exec_perso vm tests
 		drivers/devices/devices.o \
 		drivers/virtio/virtio_drv.o \
 		vfs/vfs_subsys.o \
-		fs/fs.o \
+		fs/fs.o net/net.o \
 		exec/formats/exec.o \
 		exec/perso/perso.o \
 		vm/vm.o \
@@ -68,7 +68,7 @@ kernel.bin: arch_kernel klib kern pm drivers fs exec vfs exec_perso vm tests
 		drivers/devices/devices.o \
 		drivers/virtio/virtio_drv.o \
 		vfs/vfs_subsys.o \
-		fs/fs.o \
+		fs/fs.o net/net.o \
 		exec/formats/exec.o \
 		exec/perso/perso.o \
 		vm/vm.o \
@@ -93,7 +93,7 @@ kernel.flp: kernel.zimage
 	@echo "Building floppy image..."
 	arch/$(ARCH)/floppy/mkfloppy.py kernel.zimage kernel.flp
 
-kernel.efi: arch_kernel klib kern pm drivers fs exec vfs exec_perso vm tests
+kernel.efi: arch_kernel klib kern pm drivers fs net exec vfs exec_perso vm tests
 	# First pass for EFI kernel
 	$(LD) -m elf_i386 -T arch/$(ARCH)/efi.ld -o kernel_efi.tmp \
 		arch/$(ARCH)/kernel.o \
@@ -110,7 +110,7 @@ kernel.efi: arch_kernel klib kern pm drivers fs exec vfs exec_perso vm tests
 		drivers/devices/devices.o \
 		drivers/virtio/virtio_drv.o \
 		vfs/vfs_subsys.o \
-		fs/fs.o \
+		fs/fs.o net/net.o \
 		exec/formats/exec.o \
 		exec/perso/perso.o \
 		vm/vm.o \
@@ -135,7 +135,7 @@ kernel.efi: arch_kernel klib kern pm drivers fs exec vfs exec_perso vm tests
 		drivers/devices/devices.o \
 		drivers/virtio/virtio_drv.o \
 		vfs/vfs_subsys.o \
-		fs/fs.o \
+		fs/fs.o net/net.o \
 		exec/formats/exec.o \
 		exec/perso/perso.o \
 		vm/vm.o \
@@ -194,6 +194,10 @@ fs:
 	@echo "Building FS..."
 	$(MAKE) -C fs
 
+net:
+	@echo "Building Net..."
+	$(MAKE) -C net
+
 exec:
 	@echo "Building Exec Loaders..."
 	$(MAKE) -C exec/formats
@@ -213,6 +217,7 @@ clean:
 	$(MAKE) -C drivers/console/uart clean
 	$(MAKE) -C vfs clean
 	$(MAKE) -C fs clean
+	$(MAKE) -C net clean
 	$(MAKE) -C exec/formats clean
 	$(MAKE) -C exec/perso clean
 	$(MAKE) -C vm clean

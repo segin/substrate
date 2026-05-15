@@ -532,6 +532,106 @@ void *linux_sys_mmap2(void *addr, size_t len, int prot, int flags, int fd, uint3
     return sys_mmap(addr, len, prot, flags, fd, (uint64_t)pgoffset << 12);
 }
 
+/*
+ * Linux i386 multiplexes the entire BSD-socket family through one
+ * syscall (number 102, socketcall) that takes (sub-op, args_ptr).
+ * args_ptr is a userspace array of `unsigned long` slots — one per
+ * argument of the underlying call.  We copy the slot vector in, then
+ * dispatch to the substrate AF_UNIX implementation.
+ *
+ * Sub-op numbers come from Linux's include/linux/net.h.
+ */
+#define LINUX_SOCKETCALL_SOCKET       1
+#define LINUX_SOCKETCALL_BIND         2
+#define LINUX_SOCKETCALL_CONNECT      3
+#define LINUX_SOCKETCALL_LISTEN       4
+#define LINUX_SOCKETCALL_ACCEPT       5
+#define LINUX_SOCKETCALL_GETSOCKNAME  6
+#define LINUX_SOCKETCALL_GETPEERNAME  7
+#define LINUX_SOCKETCALL_SOCKETPAIR   8
+#define LINUX_SOCKETCALL_SEND         9
+#define LINUX_SOCKETCALL_RECV        10
+#define LINUX_SOCKETCALL_SENDTO      11
+#define LINUX_SOCKETCALL_RECVFROM    12
+#define LINUX_SOCKETCALL_SHUTDOWN    13
+#define LINUX_SOCKETCALL_SETSOCKOPT  14
+#define LINUX_SOCKETCALL_GETSOCKOPT  15
+#define LINUX_SOCKETCALL_SENDMSG     16
+#define LINUX_SOCKETCALL_RECVMSG     17
+#define LINUX_SOCKETCALL_ACCEPT4     18
+
+int linux_sys_socketcall(int call, void *uargs) {
+    /* Every socketcall takes at most 6 ulong-sized slots (sendto). */
+    unsigned long a[6] = {0};
+    size_t n;
+    switch (call) {
+    case LINUX_SOCKETCALL_LISTEN:
+    case LINUX_SOCKETCALL_SHUTDOWN:                                  n = 2; break;
+    case LINUX_SOCKETCALL_SOCKET:
+    case LINUX_SOCKETCALL_BIND:
+    case LINUX_SOCKETCALL_CONNECT:
+    case LINUX_SOCKETCALL_ACCEPT:
+    case LINUX_SOCKETCALL_GETSOCKNAME:
+    case LINUX_SOCKETCALL_GETPEERNAME:
+    case LINUX_SOCKETCALL_SENDMSG:
+    case LINUX_SOCKETCALL_RECVMSG:                                   n = 3; break;
+    case LINUX_SOCKETCALL_SOCKETPAIR:
+    case LINUX_SOCKETCALL_SEND:
+    case LINUX_SOCKETCALL_RECV:
+    case LINUX_SOCKETCALL_ACCEPT4:                                   n = 4; break;
+    case LINUX_SOCKETCALL_SETSOCKOPT:
+    case LINUX_SOCKETCALL_GETSOCKOPT:                                n = 5; break;
+    case LINUX_SOCKETCALL_SENDTO:
+    case LINUX_SOCKETCALL_RECVFROM:                                  n = 6; break;
+    default: return -38; /* -ENOSYS */
+    }
+    if (copyin(uargs, a, n * sizeof(unsigned long)) != 0) return -14; /* -EFAULT */
+
+    switch (call) {
+    case LINUX_SOCKETCALL_SOCKET:
+        return sys_socket((int)a[0], (int)a[1], (int)a[2]);
+    case LINUX_SOCKETCALL_BIND:
+        return sys_bind((int)a[0], (const void *)a[1], (int)a[2]);
+    case LINUX_SOCKETCALL_CONNECT:
+        return sys_connect((int)a[0], (const void *)a[1], (int)a[2]);
+    case LINUX_SOCKETCALL_LISTEN:
+        return sys_listen((int)a[0], (int)a[1]);
+    case LINUX_SOCKETCALL_ACCEPT:
+        return sys_accept((int)a[0], (void *)a[1], (int *)a[2]);
+    case LINUX_SOCKETCALL_GETSOCKNAME:
+        return sys_getsockname((int)a[0], (void *)a[1], (int *)a[2]);
+    case LINUX_SOCKETCALL_GETPEERNAME:
+        return sys_getpeername((int)a[0], (void *)a[1], (int *)a[2]);
+    case LINUX_SOCKETCALL_SOCKETPAIR:
+        return sys_socketpair((int)a[0], (int)a[1], (int)a[2], (int *)a[3]);
+    case LINUX_SOCKETCALL_SEND:
+        return (int)sys_send((int)a[0], (const void *)a[1], (size_t)a[2], (int)a[3]);
+    case LINUX_SOCKETCALL_RECV:
+        return (int)sys_recv((int)a[0], (void *)a[1], (size_t)a[2], (int)a[3]);
+    case LINUX_SOCKETCALL_SENDTO:
+        return (int)sys_sendto((int)a[0], (const void *)a[1], (size_t)a[2],
+                               (int)a[3], (const void *)a[4], (int)a[5]);
+    case LINUX_SOCKETCALL_RECVFROM:
+        return (int)sys_recvfrom((int)a[0], (void *)a[1], (size_t)a[2],
+                                 (int)a[3], (void *)a[4], (int *)a[5]);
+    case LINUX_SOCKETCALL_SHUTDOWN:
+        return sys_shutdown((int)a[0], (int)a[1]);
+    case LINUX_SOCKETCALL_SETSOCKOPT:
+        return sys_setsockopt((int)a[0], (int)a[1], (int)a[2],
+                              (const void *)a[3], (int)a[4]);
+    case LINUX_SOCKETCALL_GETSOCKOPT:
+        return sys_getsockopt((int)a[0], (int)a[1], (int)a[2],
+                              (void *)a[3], (int *)a[4]);
+    case LINUX_SOCKETCALL_SENDMSG:
+        return (int)sys_sendmsg((int)a[0], (const void *)a[1], (int)a[2]);
+    case LINUX_SOCKETCALL_RECVMSG:
+        return (int)sys_recvmsg((int)a[0], (void *)a[1], (int)a[2]);
+    case LINUX_SOCKETCALL_ACCEPT4:
+        return sys_accept4((int)a[0], (void *)a[1], (int *)a[2], (int)a[3]);
+    }
+    return -38; /* unreachable */
+}
+
 int linux_sys_lseek(int fd, int32_t offset, int whence) {
     return (int)sys_lseek(fd, (uint32_t)offset, (offset < 0) ? 0xFFFFFFFF : 0, whence);
 }
@@ -954,7 +1054,7 @@ static void *linux_syscalls[MAX_SYSCALLS] = {
     [LINUX_SYS_statfs]         = (void *)&sys_statfs,
     [LINUX_SYS_fstatfs]        = (void *)&sys_fstatfs,
     [LINUX_SYS_ioperm]         = NULL,
-    [LINUX_SYS_socketcall]     = NULL,
+    [LINUX_SYS_socketcall]     = (void *)&linux_sys_socketcall,
     [LINUX_SYS_syslog]         = NULL,
     [LINUX_SYS_setitimer]      = (void *)&kern_setitimer,
     [LINUX_SYS_getitimer]      = (void *)&kern_getitimer,

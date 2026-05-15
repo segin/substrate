@@ -165,6 +165,28 @@
 #define SYS_VM86        113 /* enter virtual 8086 mode (sys_vm86) */
 #define SYS_SET_GSBASE  274 /* install per-thread TLS base (sys_set_gsbase) */
 
+/* AF_UNIX sockets layer (sys/net/af_unix.c).
+ * Numbers chosen to avoid collisions with SYS_FSTATAT(300), SYS_UNLINKAT(301),
+ * SYS_GETSID(310), and SYS_PROC_THR_*(320,321). */
+#define SYS_SOCKET      360
+#define SYS_SOCKETPAIR  361
+#define SYS_BIND        362
+#define SYS_LISTEN      363
+#define SYS_ACCEPT      364
+#define SYS_CONNECT     365
+#define SYS_SEND        366
+#define SYS_RECV        367
+#define SYS_SENDTO      368
+#define SYS_RECVFROM    369
+#define SYS_SENDMSG     370
+#define SYS_RECVMSG     371
+#define SYS_SHUTDOWN    372
+#define SYS_GETSOCKNAME 373
+#define SYS_GETPEERNAME 374
+#define SYS_GETSOCKOPT  375
+#define SYS_SETSOCKOPT  376
+#define SYS_ACCEPT4     377
+
 void syscall_init(void);
 
 // GDT TLS entries

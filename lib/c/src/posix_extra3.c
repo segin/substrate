@@ -401,17 +401,6 @@ struct netent *getnetbyaddr(uint32_t net, int type) {
     return NULL;
 }
 
-/* ============================================================
- * sys/socket.h missing entries.  No kernel socket layer yet —
- * stubs match the pattern in socket_stubs.c.
- * ============================================================ */
-
-int accept4(int sockfd, struct sockaddr *addr, socklen_t *addrlen, int flags) {
-    (void)sockfd; (void)addr; (void)addrlen; (void)flags;
-    errno = ENOSYS; return -1;
-}
-
-int sockatmark(int sockfd) {
-    (void)sockfd;
-    errno = ENOSYS; return -1;
-}
+/* accept4 and sockatmark moved to socket_stubs.c — they're real
+ * wrappers around the SYS_ACCEPT4 syscall (and a no-op return for
+ * sockatmark, since AF_UNIX has no OOB data). */

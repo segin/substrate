@@ -75,12 +75,14 @@ static void *netbsd_syscalls[MAX_SYSCALLS] = {
     [NETBSD_SYS_getuid]         = &sys_getuid,
     [NETBSD_SYS_geteuid]        = &sys_geteuid,
     [NETBSD_SYS_ptrace]         = NULL,            /* ptrace - not implemented */
-    [NETBSD_SYS_recvmsg]        = NULL,            /* recvmsg */
-    [NETBSD_SYS_sendmsg]        = NULL,            /* sendmsg */
-    [NETBSD_SYS_recvfrom]       = NULL,            /* recvfrom */
-    [NETBSD_SYS_accept]         = NULL,            /* accept */
-    [NETBSD_SYS_getpeername]    = NULL,            /* getpeername */
-    [NETBSD_SYS_getsockname]    = NULL,            /* getsockname */
+    /* AF_UNIX sockets — see sys/net/af_unix.c.  Native handlers route
+     * directly; struct layouts match (sockaddr_un / msghdr / iovec). */
+    [NETBSD_SYS_recvmsg]        = &sys_recvmsg,
+    [NETBSD_SYS_sendmsg]        = &sys_sendmsg,
+    [NETBSD_SYS_recvfrom]       = &sys_recvfrom,
+    [NETBSD_SYS_accept]         = &sys_accept,
+    [NETBSD_SYS_getpeername]    = &sys_getpeername,
+    [NETBSD_SYS_getsockname]    = &sys_getsockname,
     [NETBSD_SYS_access]         = &sys_access,
     [NETBSD_SYS_chflags]        = NULL,            /* chflags */
     [NETBSD_SYS_fchflags]       = NULL,            /* fchflags */
@@ -145,28 +147,28 @@ static void *netbsd_syscalls[MAX_SYSCALLS] = {
     [NETBSD_SYS_setdopt]        = NULL,            /* setdopt */
     [NETBSD_SYS_fsync]          = NULL,            /* fsync */
     [NETBSD_SYS_setpriority]    = NULL,            /* setpriority */
-    [NETBSD_SYS_socket]         = NULL,            /* socket */
-    [NETBSD_SYS_connect]        = NULL,            /* connect */
-    [NETBSD_SYS_compat_accept]  = NULL,            /* compat_accept */
+    [NETBSD_SYS_socket]         = &sys_socket,
+    [NETBSD_SYS_connect]        = &sys_connect,
+    [NETBSD_SYS_compat_accept]  = &sys_accept,     /* compat: identical surface */
     [NETBSD_SYS_getpriority]    = NULL,            /* getpriority */
-    [NETBSD_SYS_compat_send]    = NULL,            /* compat_send */
-    [NETBSD_SYS_compat_recv]    = NULL,            /* compat_recv */
+    [NETBSD_SYS_compat_send]    = &sys_send,
+    [NETBSD_SYS_compat_recv]    = &sys_recv,
     [NETBSD_SYS_compat_sigret]  = NULL,            /* compat_sigret */
-    [NETBSD_SYS_bind]           = NULL,            /* bind */
-    [NETBSD_SYS_setsockopt]     = NULL,            /* setsockopt */
-    [NETBSD_SYS_listen]         = NULL,            /* listen */
+    [NETBSD_SYS_bind]           = &sys_bind,
+    [NETBSD_SYS_setsockopt]     = &sys_setsockopt,
+    [NETBSD_SYS_listen]         = &sys_listen,
     [NETBSD_SYS_obs_vtimes]     = NULL,            /* obs_vtimes */
     [NETBSD_SYS_compat_sigvec]  = NULL,            /* compat_sigvec */
     [NETBSD_SYS_compat_sigblk]  = NULL,            /* compat_sigblk */
     [NETBSD_SYS_compat_sigset]  = NULL,            /* compat_sigset */
     [NETBSD_SYS_sigsuspend]     = NULL,            /* sigsuspend */
     [NETBSD_SYS_compat_sigstk]  = NULL,            /* compat_sigstk */
-    [NETBSD_SYS_compat_recvmsg] = NULL,            /* compat_recvmsg */
-    [NETBSD_SYS_compat_sendmsg] = NULL,            /* compat_sendmsg */
+    [NETBSD_SYS_compat_recvmsg] = &sys_recvmsg,
+    [NETBSD_SYS_compat_sendmsg] = &sys_sendmsg,
     [NETBSD_SYS_obs_vtrace]     = NULL,            /* obs_vtrace */
     [NETBSD_SYS_gettimeofday]   = &sys_gettimeofday,
     [NETBSD_SYS_getrusage]      = &netbsd_sys_getrusage,
-    [NETBSD_SYS_getsockopt]     = NULL,            /* getsockopt */
+    [NETBSD_SYS_getsockopt]     = &sys_getsockopt,
     [NETBSD_SYS_resuba]         = NULL,            /* resuba */
     /* Higher syscalls */
     [NETBSD_SYS_mkdir]          = &sys_mkdir,
@@ -199,6 +201,12 @@ static void *netbsd_syscalls[MAX_SYSCALLS] = {
     [NETBSD_SYS_posix_lchown]   = (void *)&sys_lchown,                /* 285 */
     [NETBSD_SYS_fchmodat]       = (void *)&netbsd_sys_fchmodat,       /* 463 */
     [NETBSD_SYS_fchownat]       = (void *)&netbsd_sys_fchownat,       /* 464 */
+
+    /* AF_UNIX socket-family additions not present in the original
+     * NetBSD section above.  Numbers from 4.4BSD socket dispatch. */
+    [NETBSD_SYS_sendto]         = &sys_sendto,                        /* 133 */
+    [NETBSD_SYS_shutdown]       = &sys_shutdown,                      /* 134 */
+    [NETBSD_SYS_socketpair]     = &sys_socketpair,                    /* 135 */
 };
 
 static const char *netbsd_names[MAX_SYSCALLS] = {
@@ -347,6 +355,9 @@ static const char *netbsd_names[MAX_SYSCALLS] = {
     [NETBSD_SYS_posix_lchown]   = "__posix_lchown",
     [NETBSD_SYS_fchmodat]       = "fchmodat",
     [NETBSD_SYS_fchownat]       = "fchownat",
+    [NETBSD_SYS_sendto]         = "sendto",
+    [NETBSD_SYS_shutdown]       = "shutdown",
+    [NETBSD_SYS_socketpair]     = "socketpair",
 };
 
 static struct syscall_fmt netbsd_fmts[MAX_SYSCALLS] = {

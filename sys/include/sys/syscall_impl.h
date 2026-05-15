@@ -228,6 +228,8 @@ extern int sys_getsockopt(int, int, int, void*, int*);
 extern int sys_setsockopt(int, int, int, const void*, int);
 extern ssize_t sys_recvmsg(int, void*, int);
 extern ssize_t sys_sendmsg(int, const void*, int);
+extern ssize_t sys_send(int, const void*, size_t, int);
+extern ssize_t sys_recv(int, void*, size_t, int);
 extern int sys_sysctlbyname(const char*, void*, size_t*, void*, size_t);
 extern int sys_sigwaitinfo(const void*, void*);
 extern int sys_getdtablesize(void);

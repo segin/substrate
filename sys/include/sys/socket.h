@@ -26,11 +26,34 @@
 #define SOCK_RAW    3
 
 typedef uint16_t sa_family_t;
+typedef uint32_t socklen_t;
 
 struct sockaddr {
     sa_family_t sa_family;
     char        sa_data[14];
 };
+
+struct sockaddr_un {
+    sa_family_t sun_family;
+    char        sun_path[108];
+};
+
+#ifndef SOCK_SEQPACKET
+#define SOCK_SEQPACKET 5
+#endif
+
+#define SHUT_RD   0
+#define SHUT_WR   1
+#define SHUT_RDWR 2
+
+#define SOL_SOCKET 1
+#define SO_REUSEADDR 2
+#define SO_TYPE      3
+#define SO_ERROR     4
+#define SO_BROADCAST 6
+#define SO_SNDBUF    7
+#define SO_RCVBUF    8
+#define SO_KEEPALIVE 9
 
 struct sockaddr_storage {
     sa_family_t ss_family;

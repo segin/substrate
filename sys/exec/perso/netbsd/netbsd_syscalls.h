@@ -178,4 +178,9 @@
 #define NETBSD_SYS_fchmodat       463
 #define NETBSD_SYS_fchownat       464
 
+/* 4.4BSD socket-family numbers not covered above. */
+#define NETBSD_SYS_sendto         133
+#define NETBSD_SYS_shutdown       134
+#define NETBSD_SYS_socketpair     135
+
 #endif /* _NETBSD_SYSCALLS_H */

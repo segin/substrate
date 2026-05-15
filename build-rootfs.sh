@@ -152,6 +152,19 @@ build_components() {
             make -C "$dir" -j4
         fi
     done
+
+    echo "Building target testsuites (tests/lib/sockets, ...)..."
+    # Cross-build the portable POSIX testsuites so the binaries are
+    # ready for install_to_dist() to drop into /tmp on the image.
+    # Each Makefile follows the CROSS=PREFIX convention; the listed
+    # subdirs each produce one or more standalone test programs.
+    for dir in "$TOP/tests/lib/sockets"; do
+        if [ -f "$dir/Makefile" ]; then
+            make -C "$dir" clean >/dev/null
+            make -C "$dir" \
+                CROSS=/opt/substrate/bin/i386-unknown-substrate- -j4
+        fi
+    done
 }
 
 install_to_dist() {
@@ -300,6 +313,23 @@ install_to_dist() {
             if [ -f "$dir/$name" ]; then
                 cp "$dir/$name" "$DIST/sbin/"
             fi
+        fi
+    done
+
+    echo "Installing target testsuites to /tmp on the image..."
+    mkdir -p "$DIST/tmp"
+    # Each entry below is "src-dir:binary-name".  The cross-built
+    # binary is dropped into $DIST/tmp so users can run /tmp/<name>
+    # from a live shell on the target.
+    for entry in "tests/lib/sockets:torture_unix"; do
+        srcdir="${entry%%:*}"
+        binname="${entry##*:}"
+        srcbin="$TOP/$srcdir/$binname"
+        if [ -f "$srcbin" ]; then
+            cp "$srcbin" "$DIST/tmp/$binname"
+            chmod +x "$DIST/tmp/$binname"
+        else
+            echo "  (skip: $srcbin not built)"
         fi
     done
 
