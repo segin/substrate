@@ -146,11 +146,90 @@ int sockatmark(int sockfd)
  * pack the service path verbatim into a sockaddr_un.
  * ------------------------------------------------------------------ */
 
+/* AF_INET path — used by every internet daemon that doesn't go
+ * straight to socket()+bind() with a numeric port (inetutils inetd,
+ * sshd, postfix, etc.).  Without this they all fall over with
+ * EAI_FAMILY.  Caller fills in hints.ai_family = AF_INET, optionally
+ * AI_PASSIVE for wildcard binds, optionally AI_NUMERICHOST/SERV. */
+static int getaddrinfo_inet(const char *node, const char *service,
+                            const struct addrinfo *hints,
+                            struct addrinfo **res)
+{
+    int socktype = hints && hints->ai_socktype ? hints->ai_socktype : SOCK_STREAM;
+    int flags    = hints ? hints->ai_flags : 0;
+
+    struct sockaddr_in *sin = (struct sockaddr_in *)malloc(sizeof(*sin));
+    if (!sin) return EAI_MEMORY;
+    struct addrinfo *ai = (struct addrinfo *)malloc(sizeof(*ai));
+    if (!ai) { free(sin); return EAI_MEMORY; }
+    memset(sin, 0, sizeof(*sin));
+    memset(ai, 0, sizeof(*ai));
+
+    sin->sin_family = AF_INET;
+
+    /* Address: NULL + AI_PASSIVE → wildcard; NULL + no flag → 127.0.0.1;
+     * dotted-quad → parse with inet_pton; anything else → gethostbyname. */
+    if (!node) {
+        sin->sin_addr.s_addr = (flags & AI_PASSIVE) ? 0 : htonl(0x7f000001);
+    } else {
+        if (inet_pton(AF_INET, node, &sin->sin_addr) != 1) {
+            if (flags & AI_NUMERICHOST) {
+                free(ai); free(sin); return EAI_NONAME;
+            }
+            struct hostent *h = gethostbyname(node);
+            if (!h || h->h_addrtype != AF_INET || !h->h_addr_list[0]) {
+                free(ai); free(sin); return EAI_NONAME;
+            }
+            memcpy(&sin->sin_addr, h->h_addr_list[0], 4);
+        }
+    }
+
+    /* Port: numeric, or service name via getservbyname. */
+    if (!service) {
+        sin->sin_port = 0;
+    } else {
+        char *end;
+        unsigned long p = strtoul(service, &end, 10);
+        if (end != service && *end == '\0') {
+            sin->sin_port = htons((uint16_t)p);
+        } else if (flags & AI_NUMERICSERV) {
+            free(ai); free(sin); return EAI_NONAME;
+        } else {
+            const char *proto = (socktype == SOCK_DGRAM) ? "udp" : "tcp";
+            struct servent *sv = getservbyname(service, proto);
+            if (!sv) { free(ai); free(sin); return EAI_SERVICE; }
+            sin->sin_port = sv->s_port;   /* already in net order */
+        }
+    }
+
+    ai->ai_family    = AF_INET;
+    ai->ai_socktype  = socktype;
+    ai->ai_protocol  = hints ? hints->ai_protocol : 0;
+    ai->ai_addrlen   = sizeof(*sin);
+    ai->ai_addr      = (struct sockaddr *)sin;
+    ai->ai_canonname = NULL;
+    ai->ai_next      = NULL;
+    *res = ai;
+    return 0;
+}
+
 int getaddrinfo(const char *node, const char *service,
                 const struct addrinfo *hints, struct addrinfo **res)
 {
     if (!res) return EAI_FAIL;
     int family = hints ? hints->ai_family : AF_UNSPEC;
+
+    /* AF_INET / AF_INET6 → real internet resolver. */
+    if (family == AF_INET || family == AF_INET6)
+        return getaddrinfo_inet(node, service, hints, res);
+
+    /* AF_UNSPEC: if it looks like an internet query (numeric port,
+     * dotted-quad node, or a service name not starting with '/'),
+     * try INET first; otherwise fall through to the AF_UNIX path. */
+    if (family == AF_UNSPEC && (node || (service && service[0] != '/'))) {
+        if (getaddrinfo_inet(node, service, hints, res) == 0) return 0;
+    }
+
     if (family != AF_UNIX && family != AF_LOCAL && family != AF_UNSPEC)
         return EAI_FAMILY;
     /* AF_UNSPEC without a node string still falls through to AF_UNIX. */
@@ -255,6 +334,90 @@ static int parse_ipv4(const char *src, uint8_t out[4])
     }
 }
 
+/* RFC 3986 §3.2.2 + RFC 4291 §2.2 IPv6 text form, supporting `::`
+ * abbreviation (anywhere) and embedded IPv4 in the last 32 bits. */
+static int parse_ipv6(const char *src, uint8_t out[16])
+{
+    uint16_t groups[8] = { 0 };
+    int gi = 0;
+    int seen_double = -1;   /* index where :: was */
+    const char *p = src;
+
+    /* Leading "::" */
+    if (p[0] == ':' && p[1] == ':') {
+        seen_double = 0;
+        p += 2;
+        if (*p == '\0') {
+            memset(out, 0, 16);
+            return 1;
+        }
+    }
+
+    while (*p && gi < 8) {
+        /* Parse one hex group. */
+        unsigned v = 0;
+        int n = 0;
+        while (*p) {
+            char c = *p;
+            unsigned d;
+            if (c >= '0' && c <= '9') d = c - '0';
+            else if (c >= 'a' && c <= 'f') d = c - 'a' + 10;
+            else if (c >= 'A' && c <= 'F') d = c - 'A' + 10;
+            else break;
+            v = (v << 4) | d;
+            n++;
+            p++;
+            if (n > 4) return 0;
+        }
+        /* Embedded IPv4 in last group? */
+        if (*p == '.') {
+            /* Rewind to start of this group and parse as v4. */
+            const char *q = p;
+            while (q > src && *(q - 1) != ':') q--;
+            uint8_t v4[4];
+            if (!parse_ipv4(q, v4)) return 0;
+            if (gi > 6) return 0;
+            groups[gi++] = ((uint16_t)v4[0] << 8) | v4[1];
+            groups[gi++] = ((uint16_t)v4[2] << 8) | v4[3];
+            while (*p) p++;   /* consume rest */
+            break;
+        }
+        if (n == 0) return 0;
+        groups[gi++] = (uint16_t)v;
+        if (*p == ':') {
+            p++;
+            if (*p == ':') {
+                if (seen_double >= 0) return 0;  /* multiple :: */
+                seen_double = gi;
+                p++;
+                if (*p == '\0') break;
+            }
+        } else if (*p == '\0') {
+            break;
+        } else {
+            return 0;
+        }
+    }
+
+    if (seen_double < 0) {
+        if (gi != 8) return 0;
+    } else {
+        /* Expand zeros. */
+        int zeros = 8 - gi;
+        if (zeros < 0) return 0;
+        for (int i = gi - 1; i >= seen_double; i--)
+            groups[i + zeros] = groups[i];
+        for (int i = seen_double; i < seen_double + zeros; i++)
+            groups[i] = 0;
+    }
+
+    for (int i = 0; i < 8; i++) {
+        out[i * 2]     = (uint8_t)(groups[i] >> 8);
+        out[i * 2 + 1] = (uint8_t)(groups[i] & 0xFF);
+    }
+    return 1;
+}
+
 int inet_pton(int af, const char *src, void *dst)
 {
     if (!src || !dst) { errno = EINVAL; return -1; }
@@ -265,8 +428,10 @@ int inet_pton(int af, const char *src, void *dst)
         return 1;
     }
     if (af == AF_INET6) {
-        /* Not implemented — there's no v6 stack to feed. */
-        return 0;
+        uint8_t b[16];
+        if (!parse_ipv6(src, b)) return 0;
+        memcpy(dst, b, 16);
+        return 1;
     }
     errno = EAFNOSUPPORT;
     return -1;
@@ -292,8 +457,41 @@ const char *inet_ntop(int af, const void *src, char *dst, socklen_t size)
         return dst;
     }
     if (af == AF_INET6) {
-        errno = EAFNOSUPPORT;
-        return NULL;
+        const uint8_t *b = (const uint8_t *)src;
+        /* Find the longest run of zero groups (≥2) for "::" compression. */
+        uint16_t g[8];
+        for (int i = 0; i < 8; i++) g[i] = ((uint16_t)b[i*2] << 8) | b[i*2+1];
+        int best_i = -1, best_n = 0;
+        for (int i = 0; i < 8;) {
+            if (g[i] != 0) { i++; continue; }
+            int j = i;
+            while (j < 8 && g[j] == 0) j++;
+            int n = j - i;
+            if (n >= 2 && n > best_n) { best_i = i; best_n = n; }
+            i = j;
+        }
+        char buf[48];
+        int n = 0;
+        for (int i = 0; i < 8;) {
+            if (i == best_i) {
+                buf[n++] = ':';
+                if (i == 0) buf[n++] = ':';
+                i += best_n;
+                if (i == 8) buf[n++] = ':';
+                continue;
+            }
+            unsigned v = g[i];
+            const char hex[] = "0123456789abcdef";
+            char tmp[5]; int t = 0;
+            do { tmp[t++] = hex[v & 0xF]; v >>= 4; } while (v);
+            while (t > 0) buf[n++] = tmp[--t];
+            i++;
+            if (i < 8 && i != best_i) buf[n++] = ':';
+        }
+        buf[n] = '\0';
+        if ((socklen_t)(n + 1) > size) { errno = ENOSPC; return NULL; }
+        memcpy(dst, buf, n + 1);
+        return dst;
     }
     errno = EAFNOSUPPORT;
     return NULL;

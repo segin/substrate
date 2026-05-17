@@ -373,18 +373,20 @@ install_to_dist() {
         fi
     done
 
-    # contrib/inetutils overlays /usr/bin/telnet and /usr/libexec/telnetd
-    # — those are the BSD-derived, battle-tested implementations we
-    # ship in place of the in-tree bin/telnet + sbin/telnetd (which
-    # had loopback/PTY crashes that GNU inetutils' versions don't
-    # reproduce).  Built by contrib/inetutils/build.sh.
-    : "${DIST_INETUTILS:=$TOP/dist-inetutils}"
-    if [ -d "$DIST_INETUTILS" ]; then
-        echo "Overlaying contrib/inetutils from $DIST_INETUTILS..."
-        (cd "$DIST_INETUTILS" && tar -cf - .) | (cd "$DIST" && tar -xf -)
-    else
-        echo "  (skipped: $DIST_INETUTILS does not exist — run contrib/inetutils/build.sh)"
-    fi
+    # contrib overlays — staged trees produced by each contrib/$pkg/build.sh.
+    # Inetutils ships /usr/bin/telnet + /usr/libexec/{inetd,telnetd}; OpenSSL
+    # ships libssl/libcrypto + the openssl CLI under /usr/{lib,bin}; curl
+    # ships /usr/bin/curl + libcurl.  Each is independent — missing one
+    # just means that one isn't on the image.
+    for ov in inetutils openssl curl; do
+        stage="$TOP/dist-$ov"
+        if [ -d "$stage" ]; then
+            echo "Overlaying contrib/$ov from $stage..."
+            (cd "$stage" && tar -cf - .) | (cd "$DIST" && tar -xf -)
+        else
+            echo "  (skipped contrib/$ov: $stage does not exist)"
+        fi
+    done
 
     echo "Installing target testsuites to /tmp on the image..."
     mkdir -p "$DIST/tmp"

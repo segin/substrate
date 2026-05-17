@@ -1,0 +1,23 @@
+Subject: include/internal/sockets.h: pull in <sys/select.h> on Unix
+
+Several apps/ TUs (apps.c, s_server.c, s_client.c, speed.c, ocsp.c)
+use fd_set / FD_ZERO / FD_SET / select via the shared
+include/internal/sockets.h umbrella but the umbrella never includes
+<sys/select.h>.  On glibc / BSD libc sys/types.h or sys/socket.h
+re-export the symbols transitively; substrate keeps the POSIX
+header layout strict (a transitive include between sys/time.h and
+sys/select.h creates mutual recursion).  Pull the header in
+explicitly in the Unix branch.
+
+---
+diff -urN a/include/internal/sockets.h b/include/internal/sockets.h
+--- a/include/internal/sockets.h
++++ b/include/internal/sockets.h
+@@ -89,6 +89,7 @@
+ #   include <netinet/in.h>
+ #   include <arpa/inet.h>
+ #   include <netinet/tcp.h>
++#   include <sys/select.h>
+ #  endif
+
+ #  ifdef OPENSSL_SYS_AIX

@@ -86,6 +86,15 @@ struct cmsghdr {
 #define SO_SNDTIMEO    21
 #define SO_ACCEPTCONN  30
 
+/* SO_LINGER companion struct.  Used by setsockopt() to control how
+ * close() handles in-flight data: l_onoff=0 closes immediately and
+ * the kernel drains in the background; l_onoff!=0 blocks close()
+ * for up to l_linger seconds waiting for queued data to flush. */
+struct linger {
+    int l_onoff;
+    int l_linger;
+};
+
 #define MSG_OOB        0x01
 #define MSG_PEEK       0x02
 #define MSG_DONTROUTE  0x04

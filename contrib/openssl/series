@@ -1,0 +1,2 @@
+# Substrate patches for OpenSSL.
+0001-apps-include-sys-select.patch
