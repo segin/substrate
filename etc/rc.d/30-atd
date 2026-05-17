@@ -7,40 +7,48 @@
 # from telnet sessions have somewhere to land by the time the first
 # user logs in.
 #
-# atd self-daemonizes by default (fork + setsid).  -f / -d forces
-# foreground.  We don't pass them — the kernel's job-control IPC
-# is fine with detached daemons.  atd doesn't write a pidfile, so
-# is_running() falls back to pgrep.
+# atd's default mode forks + setsid and doesn't write a pidfile.
+# substrate's pgrep is a printf stub and there's no pkill, so we
+# can't rely on either for liveness.  Instead, run atd in
+# foreground (`-f`) backgrounded by the shell and capture $! into
+# our own pidfile — same shape as 05-syslogd.
 
 PROG=/usr/sbin/atd
+PIDFILE=/var/run/atd.pid
 
 is_running() {
-    pgrep -x atd >/dev/null 2>&1
+    [ -r "$PIDFILE" ] || return 1
+    pid=$(cat "$PIDFILE") || return 1
+    [ -n "$pid" ] || return 1
+    kill -0 "$pid" 2>/dev/null
 }
 
 case "${1:-start}" in
     start)
         if is_running; then
-            echo "atd: already running"
+            echo "atd: already running (pid $(cat $PIDFILE))"
             exit 0
         fi
         if [ ! -x "$PROG" ]; then
             echo "atd: $PROG not installed; skipping"
             exit 0
         fi
-        mkdir -p /var/spool/at
-        "$PROG"
+        mkdir -p /var/spool/at /var/run
+        "$PROG" -f >/dev/null 2>&1 &
+        echo $! > "$PIDFILE"
         ;;
     stop)
         if ! is_running; then
             echo "atd: not running"
             exit 0
         fi
-        pkill -TERM -x atd 2>/dev/null
+        pid=$(cat "$PIDFILE")
+        kill -TERM "$pid" 2>/dev/null
+        rm -f "$PIDFILE"
         ;;
     status)
         if is_running; then
-            echo "atd: running"
+            echo "atd: running (pid $(cat $PIDFILE))"
         else
             echo "atd: stopped"
             exit 1
