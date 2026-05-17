@@ -44,9 +44,16 @@ static int          g_option      = 0;
 static int          g_facility    = LOG_USER;
 static int          g_mask        = 0xff;   /* allow all by default */
 
+/* Substrate's AF_UNIX implementation is currently SOCK_STREAM-only.
+ * We frame messages with a trailing newline so the daemon side can
+ * cheaply parse them (it does `until '\n'` over the recv buffer).
+ * BSD/Linux syslog historically used SOCK_DGRAM, but RFC 6587
+ * (syslog over TCP) standardises octet-stuffing for stream
+ * transports; we use the simpler non-transparent newline framing
+ * because we control both ends.  */
 static int try_connect(const char *path)
 {
-    int fd = socket(AF_UNIX, SOCK_DGRAM, 0);
+    int fd = socket(AF_UNIX, SOCK_STREAM, 0);
     if (fd < 0) return -1;
     struct sockaddr_un sun;
     memset(&sun, 0, sizeof(sun));
@@ -156,14 +163,21 @@ void vsyslog(int priority, const char *fmt, va_list ap)
     }
     n += vsnprintf(buf + n, sizeof(buf) - n, fmt, ap);
     if (n >= (int)sizeof(buf)) n = sizeof(buf) - 1;
-    /* No trailing newline per RFC 3164; syslogd records frame the
-     * line itself when writing to a log file. */
+    /* Trailing newline doubles as our stream-mode record delimiter
+     * (substrate AF_UNIX is SOCK_STREAM only).  Daemon trims it.  */
+    if (n + 1 < (int)sizeof(buf)) buf[n++] = '\n';
 
     try_open();
     int sent = 0;
     if (g_logfd >= 0) {
         ssize_t r = send(g_logfd, buf, n, 0);
         if (r >= 0) sent = 1;
+        else if (errno == EPIPE || errno == ECONNRESET) {
+            /* Daemon went away — drop the fd and let next call
+             * reconnect on demand. */
+            close(g_logfd);
+            g_logfd = -1;
+        }
     }
 
     /* Fallback path on no daemon. */

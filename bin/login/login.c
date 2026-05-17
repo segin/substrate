@@ -50,8 +50,10 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <sys/wait.h>
 #include <termios.h>
 #include <unistd.h>
+#include <utmp.h>
 
 #define LOGIN_MAX_USER  64
 #define LOGIN_MAX_PASS  64
@@ -105,11 +107,18 @@ print_issue(void)
 static const char *
 tty_basename(const char *path)
 {
-    const char *slash;
     if (path == NULL) {
         return "?";
     }
-    slash = strrchr(path, '/');
+    /* Strip the "/dev/" prefix so /dev/tty1 becomes "tty1" and
+     * /dev/pts/0 becomes "pts/0" — the basename idiom would have
+     * lost the "pts/" qualifier on PTYs.  Falls back to strrchr
+     * for paths that aren't under /dev (shouldn't happen in
+     * practice, but defensive). */
+    if (strncmp(path, "/dev/", 5) == 0) {
+        return path + 5;
+    }
+    const char *slash = strrchr(path, '/');
     return slash != NULL ? slash + 1 : path;
 }
 
@@ -150,16 +159,26 @@ set_login_env(const struct passwd *pw, const char *inherited_term)
     }
 }
 
+/* Returns chars typed (>= 0) on a complete line, or -1 on EOF /
+ * read error before any character was typed.  We need to tell
+ * "empty line, user just pressed Enter" apart from "user typed
+ * ^D" so main() can respawn the prompt on the latter instead of
+ * letting login exit. */
+#define LOGIN_READ_EOF (-1)
+
 static int
 read_line_echo(int fd, char *buf, size_t bufsz)
 {
     size_t i = 0;
     char   c;
+    int    got_any = 0;
     while (i + 1 < bufsz) {
         ssize_t n = read(fd, &c, 1);
         if (n <= 0) {
+            if (!got_any) { buf[0] = '\0'; return LOGIN_READ_EOF; }
             break;
         }
+        got_any = 1;
         if (c == '\n' || c == '\r') {
             break;
         }
@@ -267,16 +286,16 @@ do_login_one(const char *forced_user)
     } else {
         printf("login: ");
         fflush(stdout);
-        if (read_line_echo(0, user, sizeof(user)) <= 0) {
-            return -1;
-        }
+        int n = read_line_echo(0, user, sizeof(user));
+        if (n == LOGIN_READ_EOF) return -1;     /* ^D — caller respawns */
+        if (n == 0) return 0;                   /* empty line — retry */
     }
 
     printf("Password: ");
     fflush(stdout);
-    if (read_line_no_echo(0, pass, sizeof(pass)) < 0) {
-        return -1;
-    }
+    int pn = read_line_no_echo(0, pass, sizeof(pass));
+    if (pn == LOGIN_READ_EOF) return -1;        /* ^D — caller respawns */
+    if (pn < 0) return 0;                       /* read error — retry */
 
     pw = getpwnam(user);
     if (pw == NULL) {
@@ -295,6 +314,50 @@ do_login_one(const char *forced_user)
         printf("Login incorrect\n");
         return 0;
     }
+
+    /* Record the session in utmp + wtmp BEFORE forking.  Two reasons:
+     * (1) we're still root and can write /var/run/utmp;
+     * (2) the parent (root) will overwrite this slot with DEAD_PROCESS
+     *     when the user's shell exits.
+     *
+     * `line` is the basename of the controlling tty; `host` is the
+     * remote-host string supplied by telnetd via $REMOTEHOST (empty
+     * for local console logins). */
+    const char *line_name = tty_basename(ttyname(0));
+    const char *remote    = getenv("REMOTEHOST");
+    {
+        struct utmp ut;
+        memset(&ut, 0, sizeof(ut));
+        ut.ut_type = USER_PROCESS;
+        ut.ut_pid  = getpid();
+        if (line_name) {
+            strncpy(ut.ut_line, line_name, UT_LINESIZE - 1);
+            /* ut_id is the last 2..4 chars of the line — convention. */
+            size_t lnlen = strlen(line_name);
+            const char *idsrc = lnlen > 4 ? line_name + lnlen - 4 : line_name;
+            strncpy(ut.ut_id, idsrc, sizeof(ut.ut_id));
+        }
+        strncpy(ut.ut_user, pw->pw_name, UT_NAMESIZE - 1);
+        if (remote) strncpy(ut.ut_host, remote, UT_HOSTSIZE - 1);
+        struct timeval tv;
+        gettimeofday(&tv, NULL);
+        ut.ut_tv.tv_sec  = (int32_t)tv.tv_sec;
+        ut.ut_tv.tv_usec = (int32_t)tv.tv_usec;
+
+        setutent();
+        pututline(&ut);
+        endutent();
+        updwtmp(WTMP_FILE, &ut);
+    }
+
+    /* (DEAD_PROCESS writing on logout would require login to fork
+     * and wait for the user's shell.  That breaks tty ownership in
+     * substrate's session model — the child needs to inherit the
+     * controlling tty from getty, and an intervening fork moves
+     * the leadership to the wrong process.  Skip for now;
+     * `who -d` and `last` will show the USER_PROCESS as if the
+     * user is still active until init or a reboot writes a
+     * RUN_LVL entry to wtmp.) */
 
     /* Become the user.  Order matters: setgid+initgroups BEFORE
      * setuid, otherwise we lose the privilege needed to install the
@@ -363,19 +426,35 @@ main(int argc, char **argv)
         forced = argv[1];
     }
 
-    print_issue();
-    printf("Substrate (%s)\n\n", tty);
+    /* Only show the banner when run standalone.  When invoked from
+     * getty with a username already in hand, getty has already shown
+     * /etc/issue + the host banner before reading the user — printing
+     * them again here would land them between "login:" and "Password:"
+     * which looks like garbage. */
+    if (forced == NULL) {
+        print_issue();
+        printf("Substrate (%s)\n\n", tty);
+    }
 
-    for (tries = 0; tries < LOGIN_MAX_TRIES; tries++) {
+    for (tries = 0; tries < LOGIN_MAX_TRIES; ) {
         int rc = do_login_one(forced);
         if (rc < 0) {
-            return 1;
+            /* EOF at a prompt — user typed ^D.  Don't let that
+             * close the session; loop back and re-prompt.  This
+             * matches getty / mingetty behaviour on stock Linux,
+             * where ^D at "login:" just reprints the banner.
+             * The try counter is NOT advanced (it'd be unfair to
+             * lock out someone who ^D'd by accident).  */
+            putchar('\n');
+            forced = NULL;
+            continue;
         }
         forced = NULL;
         if (rc == 0 && tries + 1 < LOGIN_MAX_TRIES) {
             /* slow brute-force attempts down a touch */
             sleep(LOGIN_FAIL_DELAY_SECS);
         }
+        tries++;
     }
     return 1;
 }

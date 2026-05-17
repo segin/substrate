@@ -456,6 +456,36 @@ static char *lookup_error_string(int errnum) {
     case ETIMEDOUT: return "Connection timed out";
     case EOWNERDEAD: return "Owner died";
     case ENOTRECOVERABLE: return "State not recoverable";
+    /* Socket / network errnos — added so daemon failures stop
+     * showing as the unhelpful "Unknown error" when their bind /
+     * connect / accept paths fail.  */
+    case ENOTSOCK: return "Socket operation on non-socket";
+    case EDESTADDRREQ: return "Destination address required";
+    case EMSGSIZE: return "Message too long";
+    case EPROTOTYPE: return "Protocol wrong type for socket";
+    case ENOPROTOOPT: return "Protocol not available";
+    case EPROTONOSUPPORT: return "Protocol not supported";
+    case ESOCKTNOSUPPORT: return "Socket type not supported";
+    case EOPNOTSUPP: return "Operation not supported";
+    case EPFNOSUPPORT: return "Protocol family not supported";
+    case EAFNOSUPPORT: return "Address family not supported by protocol";
+    case EADDRINUSE: return "Address already in use";
+    case EADDRNOTAVAIL: return "Cannot assign requested address";
+    case ENETDOWN: return "Network is down";
+    case ENETUNREACH: return "Network is unreachable";
+    case ENETRESET: return "Network dropped connection on reset";
+    case ECONNABORTED: return "Software caused connection abort";
+    case ECONNRESET: return "Connection reset by peer";
+    case ENOBUFS: return "No buffer space available";
+    case EISCONN: return "Transport endpoint is already connected";
+    case ENOTCONN: return "Transport endpoint is not connected";
+    case ESHUTDOWN: return "Cannot send after transport endpoint shutdown";
+    case ETOOMANYREFS: return "Too many references: cannot splice";
+    case ECONNREFUSED: return "Connection refused";
+    case EHOSTDOWN: return "Host is down";
+    case EHOSTUNREACH: return "No route to host";
+    case EALREADY: return "Operation already in progress";
+    case EINPROGRESS: return "Operation now in progress";
     default: return "Unknown error";
     }
 }
@@ -488,6 +518,14 @@ int strerror_r(int errnum, char *buf, size_t buflen) {
     }
     buf[n] = '\0';
     return (src[n] == '\0') ? 0 : ERANGE;
+}
+
+/* POSIX strerror_l(3) — locale-aware variant.  Substrate is C-locale
+ * only today, so this returns the same string as strerror(). */
+typedef void *locale_t;
+char *strerror_l(int errnum, locale_t locale) {
+    (void)locale;
+    return (char *)lookup_error_string(errnum);
 }
 int ffs(int i) {
     if (i == 0) return 0;

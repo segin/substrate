@@ -51,6 +51,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <signal.h>
+#include <poll.h>
 #include <time.h>
 #include <sys/socket.h>
 #include <sys/un.h>
@@ -322,9 +323,19 @@ static void write_pidfile(void)
 
 /* ---------------------------------------------------------- main */
 
+/* Substrate's AF_UNIX implementation is SOCK_STREAM-only — datagrams
+ * aren't wired up yet.  We use SOCK_STREAM with newline-framed records
+ * (libc syslog client matches).  Each connected sender gets its own
+ * fd; we keep them in a small table and poll across them. */
+
+#define MAX_CLIENTS 32
+static int  g_listen_fd = -1;
+static int  g_client_fd[MAX_CLIENTS];
+static int  g_n_clients;
+
 static int open_socket(void)
 {
-    int fd = socket(AF_UNIX, SOCK_DGRAM, 0);
+    int fd = socket(AF_UNIX, SOCK_STREAM, 0);
     if (fd < 0) return -1;
 
     /* Make sure no stale socket file blocks the bind. */
@@ -335,6 +346,10 @@ static int open_socket(void)
     sun.sun_family = AF_UNIX;
     strncpy(sun.sun_path, SOCK_PATH, sizeof(sun.sun_path) - 1);
     if (bind(fd, (struct sockaddr *)&sun, sizeof(sun)) < 0) {
+        close(fd);
+        return -1;
+    }
+    if (listen(fd, 16) < 0) {
         close(fd);
         return -1;
     }
@@ -404,7 +419,14 @@ int main(int argc, char **argv)
                        (int)getpid());
     write_to_target(DEFAULT_LOG, banner, (size_t)bn);
 
-    char buf[MAX_MSG + 1];
+    g_listen_fd = sock;
+    /* Per-client receive buffers — messages can arrive split across
+     * recv() calls, so we buffer until we see a '\n' (or buffer
+     * fills, in which case we deliver the truncated line).  */
+    static char  rxbuf[MAX_CLIENTS][MAX_MSG + 1];
+    static int   rxlen[MAX_CLIENTS];
+
+    char line[MAX_MSG + 128];
     while (!g_quit) {
         if (g_reload) {
             g_reload = 0;
@@ -412,39 +434,116 @@ int main(int argc, char **argv)
             const char *m = "<46>syslogd: configuration reloaded\n";
             write_to_target(DEFAULT_LOG, m, strlen(m));
         }
-        ssize_t n = recv(sock, buf, MAX_MSG, 0);
-        if (n < 0) {
+
+        /* Build pollfd set: listener + every active client. */
+        struct pollfd pfds[1 + MAX_CLIENTS];
+        int           pfd_to_client[MAX_CLIENTS];
+        pfds[0].fd = g_listen_fd;
+        pfds[0].events = POLLIN;
+        int npfd = 1;
+        for (int i = 0; i < g_n_clients; i++) {
+            pfds[npfd].fd = g_client_fd[i];
+            pfds[npfd].events = POLLIN;
+            pfd_to_client[npfd - 1] = i;
+            npfd++;
+        }
+
+        int pr = poll(pfds, npfd, -1);
+        if (pr < 0) {
             if (errno == EINTR) continue;
             break;
         }
-        if (n == 0) continue;
-        buf[n] = '\0';
 
-        int fac = LOG_USER >> 3;
-        int lvl = LOG_NOTICE;
-        const char *body = buf;
-        if (parse_pri(buf, (size_t)n, &fac, &lvl, &body) == 0) {
-            n -= (body - buf);
+        /* New connection? */
+        if (pfds[0].revents & POLLIN) {
+            int cfd = accept(g_listen_fd, NULL, NULL);
+            if (cfd >= 0) {
+                if (g_n_clients < MAX_CLIENTS) {
+                    g_client_fd[g_n_clients] = cfd;
+                    rxlen[g_n_clients] = 0;
+                    g_n_clients++;
+                } else {
+                    /* Drop on the floor — too many clients. */
+                    close(cfd);
+                }
+            }
         }
 
-        /* Build the on-disk line: TIMESTAMP HOSTNAME body */
-        char ts[32];
-        format_timestamp(ts, sizeof(ts));
+        /* Process every client with data ready.  Walk from the end
+         * so we can compact the array if a client disconnects. */
+        for (int p = npfd - 1; p >= 1; p--) {
+            if (!(pfds[p].revents & (POLLIN | POLLHUP | POLLERR)))
+                continue;
+            int ci = pfd_to_client[p - 1];
+            int fd = g_client_fd[ci];
 
-        char line[MAX_MSG + 128];
-        int ln = snprintf(line, sizeof(line), "%s %s %.*s",
-                          ts, g_hostname, (int)n, body);
-        if (ln < 0) continue;
-        if (ln >= (int)sizeof(line)) ln = sizeof(line) - 1;
+            ssize_t n = recv(fd, rxbuf[ci] + rxlen[ci],
+                             MAX_MSG - rxlen[ci], 0);
+            if (n <= 0) {
+                /* EOF or error — drop the client. */
+                close(fd);
+                g_client_fd[ci] = g_client_fd[g_n_clients - 1];
+                rxlen[ci]       = rxlen[g_n_clients - 1];
+                memmove(rxbuf[ci], rxbuf[g_n_clients - 1],
+                        rxlen[g_n_clients - 1]);
+                g_n_clients--;
+                continue;
+            }
+            rxlen[ci] += (int)n;
 
-        for (int i = 0; i < g_n_rules; i++) {
-            if (rule_matches(&g_rules[i], fac, lvl))
-                write_to_target(g_rules[i].target, line, (size_t)ln);
+            /* Drain complete records (terminated by '\n').  */
+            int consumed = 0;
+            for (;;) {
+                char *nl = memchr(rxbuf[ci] + consumed, '\n',
+                                  rxlen[ci] - consumed);
+                int   msglen;
+                if (nl) {
+                    msglen = (nl - (rxbuf[ci] + consumed));
+                } else if (rxlen[ci] - consumed >= MAX_MSG) {
+                    /* No newline and buffer's full — deliver
+                     * truncated. */
+                    msglen = rxlen[ci] - consumed;
+                } else {
+                    break;  /* wait for more bytes */
+                }
+
+                char *msg = rxbuf[ci] + consumed;
+                msg[msglen] = '\0';
+
+                int fac = LOG_USER >> 3;
+                int lvl = LOG_NOTICE;
+                const char *body = msg;
+                int blen = msglen;
+                if (parse_pri(msg, (size_t)msglen, &fac, &lvl, &body) == 0)
+                    blen = msglen - (body - msg);
+
+                char ts[32];
+                format_timestamp(ts, sizeof(ts));
+                int ln = snprintf(line, sizeof(line), "%s %s %.*s",
+                                  ts, g_hostname, blen, body);
+                if (ln > 0) {
+                    if (ln >= (int)sizeof(line)) ln = sizeof(line) - 1;
+                    for (int r = 0; r < g_n_rules; r++) {
+                        if (rule_matches(&g_rules[r], fac, lvl))
+                            write_to_target(g_rules[r].target, line, (size_t)ln);
+                    }
+                }
+
+                consumed += msglen + (nl ? 1 : 0);
+                if (consumed >= rxlen[ci]) break;
+            }
+
+            /* Shift unconsumed bytes to the front. */
+            if (consumed > 0 && consumed < rxlen[ci])
+                memmove(rxbuf[ci], rxbuf[ci] + consumed,
+                        rxlen[ci] - consumed);
+            rxlen[ci] -= consumed;
         }
     }
 
+    for (int i = 0; i < g_n_clients; i++) close(g_client_fd[i]);
     unlink(PID_PATH);
-    close(sock);
+    close(g_listen_fd);
     unlink(SOCK_PATH);
     return 0;
 }
