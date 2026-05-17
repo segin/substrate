@@ -392,6 +392,16 @@ static void init_runtime_console(int serial_console) {
             kprintf("Syscall trace gated to PID %d\n", pid);
         }
     }
+
+    /* syscall_trace_serial routes the trace stream straight to UART
+     * via uart_write() instead of kprint().  Keeps VGA console quiet
+     * so userland output is still legible while we capture the trace
+     * via QEMU -serial file:trace.log. */
+    if (cmdline_has("syscall_trace_serial")) {
+        extern int syscall_trace_serial;
+        syscall_trace_serial = 1;
+        kprint("Syscall trace routed to serial only.\n");
+    }
 }
 
 static void init_core_subsystems(multiboot_info_t *mboot_info) {

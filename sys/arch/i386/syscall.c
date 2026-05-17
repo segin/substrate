@@ -178,6 +178,28 @@ void syscall_stats_dump(int reset) {
  */
 int syscall_trace_pid = 0;
 
+/*
+ * Serial-only trace gate.  When non-zero, the trace path writes
+ * directly to the UART via uart_write() instead of kprint(), which
+ * would also stamp the VGA console / any other registered backend.
+ * Useful when the trace stream is so dense it shoves all other
+ * console output offscreen — keep VGA quiet, capture serial via
+ * QEMU's -serial.  Set `syscall_trace_serial` on the kernel cmdline.
+ */
+int syscall_trace_serial = 0;
+
+extern void uart_write(const char *data, size_t size);
+extern size_t strlen(const char *);
+
+static inline void syscall_trace_emit(const char *s) {
+    if (syscall_trace_serial) {
+        uart_write(s, strlen(s));
+    } else {
+        extern void kprint(const char *);
+        kprint(s);
+    }
+}
+
 void syscall_handler(registers_t *regs) {
     __asm__ volatile("sti");
     thread_t *cpu_thread = CURRENT_THREAD();
@@ -228,7 +250,7 @@ void syscall_handler(registers_t *regs) {
         // "SYSCALL: PID=1, Personality=Linux"
         char *pers_name = p->name ? (char*)p->name : "Unknown";
         snprintf(buf, sizeof(buf), "SYSCALL: PID=%d, Personality=%s\n", current_process->pid, pers_name);
-        kprint(buf);
+        syscall_trace_emit(buf);
 
         // Print Call start
         // "sys_write(0, "val", 14)"
@@ -343,7 +365,7 @@ void syscall_handler(registers_t *regs) {
 
         #undef TRACE_APPEND
 
-        kprint(buf); // Print the call part (no newline yet)
+        syscall_trace_emit(buf); // Print the call part (no newline yet)
     }
     
     // Check if syscall number is out of range
@@ -351,7 +373,7 @@ void syscall_handler(registers_t *regs) {
         if (trace_this) {
             char buf[64];
             snprintf(buf, sizeof(buf), "SYSCALL: Out of range #%u\n", (unsigned int)syscall_num);
-            kprint(buf);
+            syscall_trace_emit(buf);
         }
         regs->eax = -38; // ENOSYS
         return;
@@ -359,7 +381,7 @@ void syscall_handler(registers_t *regs) {
     
     if (!p->syscall_table || (uintptr_t)p->syscall_table < 0xC0000000U) {
         if (trace_this) {
-            kprint("SYSCALL: Invalid syscall table\n");
+            syscall_trace_emit("SYSCALL: Invalid syscall table\n");
         }
         regs->eax = -38; // ENOSYS
         return;
@@ -385,7 +407,7 @@ void syscall_handler(registers_t *regs) {
      * correctly. */
 
     if (!location) {
-        if (trace_this) kprint("SYSCALL: Not Implemented\n");
+        if (trace_this) syscall_trace_emit("SYSCALL: Not Implemented\n");
         regs->eax = -38; // ENOSYS
         return;
     }
@@ -395,7 +417,7 @@ void syscall_handler(registers_t *regs) {
             char buf[96];
             snprintf(buf, sizeof(buf), "SYSCALL: Invalid handler %p for #%u\n",
                     location, (unsigned int)syscall_num);
-            kprint(buf);
+            syscall_trace_emit(buf);
         }
         regs->eax = -38; // ENOSYS
         return;
@@ -456,7 +478,7 @@ syscall_done:
     if (trace_this) {
         char buf[64];
         snprintf(buf, sizeof(buf), " ret %d\n", (int)regs->eax);
-        kprint(buf);
+        syscall_trace_emit(buf);
     }
 
     signal_handle_pending(regs);
@@ -472,7 +494,7 @@ syscall_done:
     }
     
     if (regs->cs == 0x1B && regs->useresp >= 0xC0000000) {
-        kprint("SYSCALL RET: Bad User ESP detected!\n");
+        syscall_trace_emit("SYSCALL RET: Bad User ESP detected!\n");
         panic("Syscall returning with Kernel ESP in User Frame");
     }
 }
