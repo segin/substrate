@@ -43,6 +43,7 @@
 #include <sys/proc.h>
 #include <sys/file.h>
 #include <sys/socket.h>
+#include <kern/console.h>
 #include <kern/sched.h>
 #include <kern/sleepq.h>
 #include <kern/file.h>
@@ -772,12 +773,31 @@ int sys_setsockopt(int fd, int level, int optname,
     return 0;
 }
 
+/* Forward-decl the AF_INET helper.  af_inet.c exposes the per-socket
+ * so_error so SO_ERROR can return the real connect-failure errno
+ * instead of always 0 (which made curl think the connection had
+ * succeeded and proceed to send into a dead PCB).  */
+extern int afinet_so_error(int fd);
+
 int sys_getsockopt(int fd, int level, int optname,
                    void *optval, socklen_t *optlen) {
-    (void)fd; (void)level; (void)optname;
-    if (optval && optlen && *optlen >= sizeof(int)) {
-        *(int *)optval = 0;
-        *optlen = sizeof(int);
+    if (!optval || !optlen || *optlen < (socklen_t)sizeof(int))
+        return -EINVAL;
+
+    #define SOL_SOCKET_K   1
+    #define SO_ERROR_K     4
+    #define SO_TYPE_K      3
+    #define SO_ACCEPTCONN_K 30
+    if (level == SOL_SOCKET_K) {
+        if (optname == SO_ERROR_K) {
+            int err = afinet_so_error(fd);
+            *(int *)optval = err;
+            *optlen = sizeof(int);
+            kprintf("getsockopt(SO_ERROR) fd=%d -> %d\n", fd, err);
+            return 0;
+        }
     }
+    *(int *)optval = 0;
+    *optlen = sizeof(int);
     return 0;
 }

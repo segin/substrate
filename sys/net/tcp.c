@@ -265,11 +265,30 @@ static void tcp_timer_tick(uint64_t now) {
     }
 }
 
+static uint64_t tcp_timer_ticks_seen = 0;
 static void tcp_timer_thread(void *arg) {
     (void)arg;
+    kprintf("tcp: retx kthread started\n");
     for (;;) {
         sched_sleep_until(&g_tcp_pcbs,
                           get_ticks() + TCP_TIMER_PERIOD);
+        tcp_timer_ticks_seen++;
+        /* Diagnostic: pulse every 16 ticks (~4s) so we can confirm
+         * the kthread is actually waking + walking the PCB list.
+         * Also log every PCB state so a hang's stuck-state shows.
+         * Drop this once non-blocking TCP is stable.  */
+        if ((tcp_timer_ticks_seen & 0xF) == 0) {
+            int npcb = 0;
+            for (tcp_pcb_t *p = g_tcp_pcbs; p; p = p->next) {
+                kprintf("tcp:   pcb[%d] state=%d snd_una=%u snd_nxt=%u "
+                        "rcv_nxt=%u rx_count=%u unacked=%p\n",
+                        npcb, p->state, p->snd_una, p->snd_nxt,
+                        p->rcv_nxt, p->rx_count, p->unacked_head);
+                npcb++;
+            }
+            kprintf("tcp: tick %llu, %d pcb(s)\n",
+                    (unsigned long long)tcp_timer_ticks_seen, npcb);
+        }
         tcp_timer_tick(get_ticks());
     }
 }
@@ -720,6 +739,13 @@ ssize_t tcp_recv(tcp_pcb_t *p, void *buf, size_t len) {
         if (current_thread->sig_pending & ~current_thread->sig_mask)
             return -EINTR;
     }
+}
+
+int tcp_take_so_error(tcp_pcb_t *p) {
+    if (!p) return 0;
+    int err = p->so_error;
+    p->so_error = 0;
+    return err;
 }
 
 int tcp_close(tcp_pcb_t *p) {
