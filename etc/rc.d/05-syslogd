@@ -1,0 +1,62 @@
+#!/bin/sh
+# /etc/rc.d/05-syslogd — system log daemon.
+#
+# Start early so /dev/log exists by the time other services start
+# logging (and so anything that writes to it before then doesn't
+# silently drop messages).  Substrate's libc syslog() falls back to
+# /dev/console with LOG_CONS, so pre-syslogd messages aren't lost,
+# but most callers don't pass LOG_CONS.
+
+PROG=/sbin/syslogd
+PIDFILE=/var/run/syslogd.pid
+
+is_running() {
+    [ -r "$PIDFILE" ] || return 1
+    pid=$(cat "$PIDFILE") || return 1
+    [ -n "$pid" ] || return 1
+    kill -0 "$pid" 2>/dev/null
+}
+
+case "${1:-start}" in
+    start)
+        if is_running; then
+            echo "syslogd: already running (pid $(cat $PIDFILE))"
+            exit 0
+        fi
+        "$PROG"
+        ;;
+    stop)
+        if is_running; then
+            pid=$(cat "$PIDFILE")
+            kill "$pid" 2>/dev/null
+            rm -f "$PIDFILE"
+            echo "syslogd: stopped (was pid $pid)"
+        else
+            echo "syslogd: not running"
+        fi
+        ;;
+    status)
+        if is_running; then
+            echo "syslogd: running (pid $(cat $PIDFILE))"
+        else
+            echo "syslogd: stopped"
+        fi
+        ;;
+    restart)
+        $0 stop
+        $0 start
+        ;;
+    reload)
+        if is_running; then
+            kill -HUP "$(cat $PIDFILE)"
+            echo "syslogd: reloaded"
+        else
+            echo "syslogd: not running"
+            exit 1
+        fi
+        ;;
+    *)
+        echo "usage: $0 {start|stop|status|restart|reload}"
+        exit 2
+        ;;
+esac

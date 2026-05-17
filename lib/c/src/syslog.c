@@ -28,8 +28,15 @@
 #include <time.h>
 #include <errno.h>
 
-#define SYSLOG_SOCK_PATH  "/dev/log"
-#define SYSLOG_FALLBACK   "/dev/console"
+/* BSD convention.  Substrate's /dev is a kernel-managed devfs that
+ * can't host an arbitrary AF_UNIX socket inode (no backing storage),
+ * so we use /var/run/log — the path FreeBSD's syslogd has used
+ * forever.  Linux/glibc uses /dev/log instead; we try that path too
+ * as a fallback so binaries that hard-code it (gnulib's syslog
+ * module, sendmail, ...) don't silently lose messages. */
+#define SYSLOG_SOCK_PATH      "/var/run/log"
+#define SYSLOG_SOCK_PATH_ALT  "/dev/log"
+#define SYSLOG_FALLBACK       "/dev/console"
 
 static int          g_logfd       = -1;
 static const char  *g_ident       = NULL;
@@ -37,23 +44,26 @@ static int          g_option      = 0;
 static int          g_facility    = LOG_USER;
 static int          g_mask        = 0xff;   /* allow all by default */
 
-static void try_open(void)
+static int try_connect(const char *path)
 {
-    if (g_logfd >= 0) return;
     int fd = socket(AF_UNIX, SOCK_DGRAM, 0);
-    if (fd < 0) return;
+    if (fd < 0) return -1;
     struct sockaddr_un sun;
     memset(&sun, 0, sizeof(sun));
     sun.sun_family = AF_UNIX;
-    strncpy(sun.sun_path, SYSLOG_SOCK_PATH, sizeof(sun.sun_path) - 1);
+    strncpy(sun.sun_path, path, sizeof(sun.sun_path) - 1);
     if (connect(fd, (struct sockaddr *)&sun, sizeof(sun)) < 0) {
-        /* Daemon isn't listening — keep the fd so future writes can
-         * try sending, but don't error.  Some syslog setups create
-         * the socket only when a daemon attaches. */
         close(fd);
-        return;
+        return -1;
     }
-    g_logfd = fd;
+    return fd;
+}
+
+static void try_open(void)
+{
+    if (g_logfd >= 0) return;
+    g_logfd = try_connect(SYSLOG_SOCK_PATH);
+    if (g_logfd < 0) g_logfd = try_connect(SYSLOG_SOCK_PATH_ALT);
 }
 
 void openlog(const char *ident, int option, int facility)

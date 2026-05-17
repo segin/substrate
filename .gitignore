@@ -1,6 +1,9 @@
 # Generic objects, libraries, and binaries
 *.a
 *.d
+# `*.d` accidentally caught etc/rc.d/ (the rc service-script tree),
+# leaving rc.d entries untrackable — un-ignore the directory.
+!etc/rc.d/
 *.dll
 *.elf
 *.exe
@@ -440,3 +443,4 @@ tests/usr.lib/demangle/fuzz/corpus/
 /usr.bin/strip/strip
 /usr.bin/uudecode/uudecode
 /usr.bin/yacc/yacc
+rootfs.img.zst

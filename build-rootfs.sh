@@ -80,7 +80,20 @@ overlay_toolchain() {
 clean_dist() {
     echo "Cleaning dist directory..."
     rm -rf "$DIST"
-    mkdir -p "$DIST"/{bin,sbin,usr/{bin,lib,include},lib,dev,etc,proc,tmp,var,var/empty,home,root,boot}
+    mkdir -p "$DIST"/{bin,sbin,usr/{bin,lib,include},lib,dev,etc,proc,tmp,home,root,boot,sys}
+    # /var subtree.  Standard hier(7) layout — most subdirs are
+    # initially empty but services expect them to exist or they
+    # silently fail their own mkdir-after-EACCES and produce no logs.
+    mkdir -p "$DIST/var"/{empty,log,run,spool,spool/mail,tmp,cache,lib,lock}
+    # /var/run/utmp + /var/log/wtmp are touched by init/login.  Pre-create
+    # empty files with sensible perms so first-write doesn't have to
+    # decide on a mode.
+    : > "$DIST/var/run/utmp"
+    : > "$DIST/var/log/wtmp"
+    : > "$DIST/var/log/lastlog"
+    chmod 0644 "$DIST/var/run/utmp" "$DIST/var/log/wtmp" "$DIST/var/log/lastlog"
+    chmod 1777 "$DIST/var/tmp"
+    chmod 1777 "$DIST/tmp"
 }
 
 build_ext2boot() {
@@ -153,7 +166,7 @@ build_components() {
         fi
     done
 
-    echo "Building target testsuites (tests/lib/sockets, tests/lib/ipc, ...)..."
+    echo "Building target testsuites (tests/lib/sockets, tests/lib/ipc, tests/lib/pty, tests/lib/signal, ...)..."
     # The cross-toolchain's sysroot ships an older libc.so.0 from
     # when stage 1 was installed.  Tests that link against newer
     # libc additions (mkfifo, pipe2, the socket syscall wrappers,
@@ -169,11 +182,15 @@ build_components() {
     # ready for install_to_dist() to drop into /tmp on the image.
     # Each Makefile follows the CROSS=PREFIX convention; the listed
     # subdirs each produce one or more standalone test programs.
-    for dir in "$TOP/tests/lib/sockets" "$TOP/tests/lib/ipc"; do
+    for dir in "$TOP/tests/lib/sockets" "$TOP/tests/lib/ipc" "$TOP/tests/lib/pty" "$TOP/tests/lib/signal"; do
         if [ -f "$dir/Makefile" ]; then
             make -C "$dir" clean >/dev/null
+            # Tolerant: a broken test build (e.g. cross-libc out of sync)
+            # shouldn't stop the rest of the rootfs from going together.
+            # The image will simply be missing that test binary.
             make -C "$dir" \
-                CROSS=/opt/substrate/bin/i386-unknown-substrate- -j4
+                CROSS=/opt/substrate/bin/i386-unknown-substrate- -j4 \
+                || echo "build-rootfs: warning: failed to build $dir, skipping"
         fi
     done
 }
@@ -205,6 +222,35 @@ install_to_dist() {
             ln -sf "lib$libdir.so.0" "$DIST/usr/lib/lib$libdir.so"
         fi
     done
+
+    # libgcc_s.so.1 is the unwind/divide/multiply runtime libm.so.0
+    # DT_NEEDEDs.  Without it, ld.so fatal-errors on EVERY dynamic
+    # binary load because libm is in libc.so.0's needed list (libc
+    # uses softfloat helpers from libgcc on i386).  The toolchain
+    # owns this file: install it from the cross sysroot, where
+    # build-libstdcxx-shared.sh stripped it down to ~185 KB.  Fall
+    # back to the heavier debug copy under the gcc internal lib dir
+    # if the stripped one isn't present.  Without this, a fresh
+    # `--dist` ALWAYS produces an unbootable image even if a prior
+    # `--toolchain` overlay had once landed the file — `--dist`
+    # wipes dist/lib.
+    : "${STAGE1_PREFIX:=/opt/substrate}"
+    _libgcc_src=""
+    for cand in \
+        "$STAGE1_PREFIX/i386-unknown-substrate/lib/libgcc_s.so.1" \
+        "$STAGE1_PREFIX/lib/gcc/i386-unknown-substrate/16.1.0/libgcc_s.so.1"; do
+        if [ -f "$cand" ]; then _libgcc_src="$cand"; break; fi
+    done
+    if [ -n "$_libgcc_src" ]; then
+        cp "$_libgcc_src" "$DIST/lib/libgcc_s.so.1"
+        cp "$_libgcc_src" "$DIST/usr/lib/libgcc_s.so.1"
+        ln -sf libgcc_s.so.1 "$DIST/lib/libgcc_s.so"
+        ln -sf libgcc_s.so.1 "$DIST/usr/lib/libgcc_s.so"
+    else
+        echo "build-rootfs: WARNING libgcc_s.so.1 not found under $STAGE1_PREFIX" >&2
+        echo "build-rootfs:   the image will boot-panic in ld.so" >&2
+    fi
+    unset _libgcc_src
 
     # crt0.o lives next to libc.a — userland Makefiles reference it as
     # $(TOP)/lib/c/crt0.o at link time, but on-target it's expected at
@@ -334,7 +380,9 @@ install_to_dist() {
     # from a live shell on the target.
     for entry in \
         "tests/lib/sockets:torture_unix" \
-        "tests/lib/ipc:torture_ipc"; do
+        "tests/lib/ipc:torture_ipc" \
+        "tests/lib/pty:torture_pty" \
+        "tests/lib/signal:torture_signal"; do
         srcdir="${entry%%:*}"
         binname="${entry##*:}"
         srcbin="$TOP/$srcdir/$binname"
