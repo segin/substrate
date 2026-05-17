@@ -492,6 +492,16 @@ static void init_storage_and_vfs(multiboot_info_t *mboot_info) {
     audio_init();
     usb_init();
     virtio_init();
+    {
+        extern void rtl8139_init(void);
+        rtl8139_init();
+    }
+    {
+        extern void inet_init(void);
+        extern void loopback_init(void);
+        loopback_init();
+        inet_init();
+    }
     register_boot_ramdisks(mboot_info);
     ntsync_init();
 
