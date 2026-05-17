@@ -1527,6 +1527,19 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
                 return NULL;
             }
             kprintf("ext2: superblock metadata_csum verified (%08x)\n", got);
+
+            /* Establish the csum seed used for every other csum'd
+             * object on the filesystem.  Default = crc32c(~0, uuid).
+             * If the fs has INCOMPAT_CSUM_SEED set, the seed is the
+             * explicit s_checksum_seed superblock word (offset 0x270)
+             * instead — this lets fsck change the UUID without
+             * recomputing every csum on disk.  */
+            if (fs->sb.s_feature_incompat & EXT2F_INCOMPAT_CSUM_SEED) {
+                fs->csum_seed = *(uint32_t *)(sb_buf + 0x270);
+            } else {
+                fs->csum_seed = crc32c_update(0xFFFFFFFFu, fs->sb.s_uuid,
+                                              sizeof(fs->sb.s_uuid));
+            }
         }
     }
 
@@ -1587,10 +1600,41 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
     uint32_t bgd_block = (fs->block_size == 1024) ? 2 : 1;
 
     // Read enough blocks for the BGD table
-    for (uint32_t i = 0; i < bgd_blocks; i++) {        ext2_read_block(fs, bgd_block + i, 
+    for (uint32_t i = 0; i < bgd_blocks; i++) {        ext2_read_block(fs, bgd_block + i,
                        ((uint8_t *)fs->bgd) + i * fs->block_size);
     }
-    
+
+    /* Per-group descriptor metadata_csum check.  For each descriptor
+     * (32-byte legacy layout; INCOMPAT_64BIT extends to 64 but we
+     * already refuse that bit) the on-disk csum lives at byte 30 of
+     * the descriptor.  Expected value = low 16 bits of
+     *   crc32c(seed, le32(group)) -> crc32c(state, gd[0..29])
+     *                             -> crc32c(state, 0_u16, 2)
+     * Any mismatch on any descriptor refuses the mount — same
+     * argument as superblock-csum.  */
+    if (fs->sb.s_feature_ro_compat & EXT2F_ROCOMPAT_METADATA_CKSUM) {
+        extern int kprintf(const char *, ...);
+        extern uint32_t crc32c_update(uint32_t, const void *, size_t);
+        const uint16_t zero16 = 0;
+        for (uint32_t g = 0; g < fs->group_count; g++) {
+            uint8_t *gd = (uint8_t *)&fs->bgd[g];
+            uint32_t le_g = g;     /* substrate runs little-endian */
+            uint32_t c = crc32c_update(fs->csum_seed, &le_g, 4);
+            c = crc32c_update(c, gd, 30);
+            c = crc32c_update(c, &zero16, 2);
+            uint16_t expect = c & 0xFFFFu;
+            uint16_t actual = *(uint16_t *)(gd + 30);
+            if (expect != actual) {
+                kprintf("ext2: bg descriptor %u csum mismatch want=%04x got=%04x — refuse mount\n",
+                        g, expect, actual);
+                kfree(fs->bgd, bgd_size);
+                kfree(fs, sizeof(ext2_fs_t));
+                return NULL;
+            }
+        }
+        kprintf("ext2: %u group descriptor csums verified\n", fs->group_count);
+    }
+
     // Read root inode (inode 2)
     ext2_inode_t root_inode;
     if (ext2_read_inode(fs, EXT2_ROOT_INO, &root_inode) != 0) {

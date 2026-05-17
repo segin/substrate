@@ -316,6 +316,49 @@ check='echo SHOULD_NOT_GET_HERE'"
     assert_log "$log" "FSTEST: mount FAIL"           "userland sees mount failure"
 }
 
+t_bg_csum_verify() {
+    echo "==> bg-csum-verify"
+    # Same setup as csum-verify-ok, but assert that the group-
+    # descriptor verify line is also emitted, and add a second
+    # case where we tamper a bg descriptor byte and confirm
+    # the mount is refused with bg-csum diagnostic.
+    local img; img=$(mkimg t-bgcsum ext4 -O '^64bit,metadata_csum')
+    local conf="device=/dev/storage/sata1
+mount=/mnt/test
+fs=ext2
+check='echo CHECK_OK'"
+    local rfs; rfs=$(prep_rootfs t-bgcsum "$conf")
+    local log="$WORK/t-bgcsum.log"
+    boot_with "$rfs" "$img" "$log" 30
+    assert_log "$log" "group descriptor csums verified" "bg csums verified"
+    assert_log "$log" "CHECK_OK"                        "bg-csum-OK boot reached check"
+
+    # Tamper: flip a byte inside the first bg descriptor (offset
+    # 4096 with 1KiB blocks: block 1 = group descriptor table).
+    # bg0 lives at the start; bytes 0..29 are checksum-covered.
+    local img2; img2=$(mkimg t-bgfail ext4 -O '^64bit,metadata_csum')
+    python3 -c "
+import os, struct
+# Find block_size: superblock at 1024, s_log_block_size at offset 24
+with open('$img2','r+b') as f:
+    f.seek(1024+24)
+    log_bs = struct.unpack('<I', f.read(4))[0]
+    bs = 1024 << log_bs
+    # bg descriptor table follows superblock: block 2 if bs==1024, else block 1
+    gdt_off = (2 if bs == 1024 else 1) * bs
+    # flip a byte inside bg0's descriptor (offset 8 = bg_inode_table low)
+    f.seek(gdt_off + 8)
+    b = f.read(1)
+    f.seek(gdt_off + 8)
+    f.write(bytes([b[0] ^ 0xAA]))
+" 2>/dev/null
+    local rfs2; rfs2=$(prep_rootfs t-bgfail "$conf")
+    local log2="$WORK/t-bgfail.log"
+    boot_with "$rfs2" "$img2" "$log2" 30
+    assert_log "$log2" "bg descriptor 0 csum mismatch" "bg tamper refused"
+    assert_log "$log2" "FSTEST: mount FAIL"            "userland sees bg failure"
+}
+
 t_refuse_extent_write() {
     echo "==> refuse-ext4-extent-write"
     # ext4 with extents only (no 64bit / csum).  Pre-create a file
@@ -381,6 +424,7 @@ t_ro_unsupported_rocompat
 t_extent_large_read
 t_csum_verify_ok
 t_csum_verify_fail
+t_bg_csum_verify
 t_refuse_extent_write
 t_refuse_64bit
 

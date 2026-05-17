@@ -280,6 +280,11 @@ typedef struct {
      * unknown feature, so we refuse.  */
     uint32_t mnt_flags;
     int      readonly;
+
+    /* metadata_csum seed.  Either crc32c(~0, uuid, 16) (default) or
+     * the explicit s_checksum_seed value if EXT2F_INCOMPAT_CSUM_SEED
+     * is on.  Used for group-descriptor and (future) inode csums.  */
+    uint32_t csum_seed;
 } ext2_fs_t;
 
 #define EXT2_DCACHE_SIZE 16
