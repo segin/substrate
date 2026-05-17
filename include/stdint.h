@@ -89,6 +89,36 @@ typedef uint64_t uint_fast64_t;
 #define INTMAX_MAX INT64_MAX
 #define UINTMAX_MAX UINT64_MAX
 
+/* INT_LEAST*_MIN/MAX and INT_FAST*_MIN/MAX — the typedefs above use
+ * the same widths as the exact-width N versions, so the limits alias
+ * 1:1.  Required by C99 §7.18.2.2 / 7.18.2.3 and used by any code
+ * that talks in terms of int_fast64_t (tzcode, ICU, ...). */
+#define INT_LEAST8_MIN   INT8_MIN
+#define INT_LEAST8_MAX   INT8_MAX
+#define UINT_LEAST8_MAX  UINT8_MAX
+#define INT_LEAST16_MIN  INT16_MIN
+#define INT_LEAST16_MAX  INT16_MAX
+#define UINT_LEAST16_MAX UINT16_MAX
+#define INT_LEAST32_MIN  INT32_MIN
+#define INT_LEAST32_MAX  INT32_MAX
+#define UINT_LEAST32_MAX UINT32_MAX
+#define INT_LEAST64_MIN  INT64_MIN
+#define INT_LEAST64_MAX  INT64_MAX
+#define UINT_LEAST64_MAX UINT64_MAX
+
+#define INT_FAST8_MIN    INT8_MIN
+#define INT_FAST8_MAX    INT8_MAX
+#define UINT_FAST8_MAX   UINT8_MAX
+#define INT_FAST16_MIN   INT32_MIN     /* int_fast16_t is uint32_t */
+#define INT_FAST16_MAX   INT32_MAX
+#define UINT_FAST16_MAX  UINT32_MAX
+#define INT_FAST32_MIN   INT32_MIN
+#define INT_FAST32_MAX   INT32_MAX
+#define UINT_FAST32_MAX  UINT32_MAX
+#define INT_FAST64_MIN   INT64_MIN
+#define INT_FAST64_MAX   INT64_MAX
+#define UINT_FAST64_MAX  UINT64_MAX
+
 #define SIG_ATOMIC_MIN INT32_MIN
 #define SIG_ATOMIC_MAX INT32_MAX
 
