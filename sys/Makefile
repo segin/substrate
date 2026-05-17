@@ -43,6 +43,7 @@ kernel.bin: arch_kernel klib kern pm drivers fs net exec vfs exec_perso vm tests
 		drivers/audio/audio_drv.o \
 		drivers/devices/devices.o \
 		drivers/virtio/virtio_drv.o \
+		drivers/net/net_drv.o \
 		vfs/vfs_subsys.o \
 		fs/fs.o net/net.o \
 		exec/formats/exec.o \
@@ -66,6 +67,7 @@ kernel.bin: arch_kernel klib kern pm drivers fs net exec vfs exec_perso vm tests
 		drivers/usb/usb_drv.o \
 		drivers/audio/audio_drv.o \
 		drivers/devices/devices.o \
+		drivers/net/net_drv.o \
 		drivers/virtio/virtio_drv.o \
 		vfs/vfs_subsys.o \
 		fs/fs.o net/net.o \
@@ -107,6 +109,7 @@ kernel.efi: arch_kernel klib kern pm drivers fs net exec vfs exec_perso vm tests
 		drivers/storage/storage.o \
 		drivers/usb/usb_drv.o \
 		drivers/audio/audio_drv.o \
+		drivers/net/net_drv.o \
 		drivers/devices/devices.o \
 		drivers/virtio/virtio_drv.o \
 		vfs/vfs_subsys.o \
@@ -131,6 +134,7 @@ kernel.efi: arch_kernel klib kern pm drivers fs net exec vfs exec_perso vm tests
 		drivers/console/uart/uart_drv.o \
 		drivers/storage/storage.o \
 		drivers/usb/usb_drv.o \
+		drivers/net/net_drv.o \
 		drivers/audio/audio_drv.o \
 		drivers/devices/devices.o \
 		drivers/virtio/virtio_drv.o \
@@ -175,6 +179,7 @@ klib:
 	$(MAKE) -C drivers/storage
 	$(MAKE) -C drivers/devices
 	$(MAKE) -C drivers/virtio
+	$(MAKE) -C drivers/net
 	$(MAKE) -C drivers/usb
 	$(MAKE) -C drivers/audio
 	$(MAKE) -C drivers/console
@@ -212,6 +217,7 @@ clean:
 	$(MAKE) -C drivers/storage clean
 	$(MAKE) -C drivers/devices clean
 	$(MAKE) -C drivers/virtio clean
+	$(MAKE) -C drivers/net clean
 	$(MAKE) -C drivers/usb clean
 	$(MAKE) -C drivers/console clean
 	$(MAKE) -C drivers/console/uart clean
