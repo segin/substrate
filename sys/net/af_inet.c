@@ -544,6 +544,57 @@ int afinet_accept(int fd, void *addr, socklen_t *addrlen) {
     return newfd;
 }
 
+/* Common helper: fill a struct sockaddr_in / sockaddr_in6 from
+ * a (port, addr-bytes) pair, honouring the buffer size hint
+ * conventional to getsockname/getpeername.  */
+static int afinet_pack_sockaddr(int family, uint16_t hport,
+                                const uint8_t addr_bytes[16],
+                                void *out, socklen_t *outlen)
+{
+    if (!out || !outlen) return -EINVAL;
+    if (family == AF_INET) {
+        struct sin_kern sin;
+        memset(&sin, 0, sizeof(sin));
+        sin.sin_family = AF_INET;
+        sin.sin_port   = __builtin_bswap16(hport);
+        memcpy(&sin.sin_addr, addr_bytes, 4);
+        socklen_t want = sizeof(sin);
+        socklen_t cpy  = (*outlen < want) ? *outlen : want;
+        memcpy(out, &sin, cpy);
+        *outlen = want;
+    } else {
+        struct sin6_kern sin6;
+        memset(&sin6, 0, sizeof(sin6));
+        sin6.sin6_family = AF_INET6;
+        sin6.sin6_port   = __builtin_bswap16(hport);
+        memcpy(sin6.sin6_addr, addr_bytes, 16);
+        socklen_t want = sizeof(sin6);
+        socklen_t cpy  = (*outlen < want) ? *outlen : want;
+        memcpy(out, &sin6, cpy);
+        *outlen = want;
+    }
+    return 0;
+}
+
+int afinet_getsockname(int fd, void *addr, socklen_t *addrlen) {
+    afi_sock_t *s = afi_from_fd(fd);
+    if (!s) return -ENOTSOCK;
+    return afinet_pack_sockaddr(s->family, s->local_port, s->local_addr,
+                                addr, addrlen);
+}
+
+int afinet_getpeername(int fd, void *addr, socklen_t *addrlen) {
+    afi_sock_t *s = afi_from_fd(fd);
+    if (!s) return -ENOTSOCK;
+    /* afinet_connect sets s->connected on both UDP and TCP paths;
+     * for TCP it's set right after tcp_connect{,_nb} returns
+     * success (or EINPROGRESS).  Good enough as a "has-a-peer"
+     * signal for the rare callers that bother checking.  */
+    if (!s->connected) return -ENOTCONN;
+    return afinet_pack_sockaddr(s->family, s->peer_port, s->peer_addr,
+                                addr, addrlen);
+}
+
 int afinet_connect(int fd, const void *addr, socklen_t len) {
     afi_sock_t *s = afi_from_fd(fd);
     if (!s) return -ENOTSOCK;

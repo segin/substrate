@@ -353,8 +353,44 @@ static afunix_sock_t *afunix_from_fd(int fd) {
  * Syscalls
  * ============================================================ */
 
+/* Forward decls for AF_PACKET — sys/net/af_packet.c provides these. */
+extern int     afpacket_socket(int type, int protocol);
+extern int     afpacket_bind(int fd, const void *sll, socklen_t len);
+extern ssize_t afpacket_sendto(int fd, const void *buf, size_t len, int flags,
+                               const void *to, socklen_t tolen);
+extern ssize_t afpacket_recvfrom(int fd, void *buf, size_t len, int flags,
+                                 void *from, socklen_t *fromlen);
+
+/* Forward decls for AF_INET / AF_INET6 — sys/net/af_inet.c provides. */
+extern int     afinet_socket(int family, int type, int protocol);
+extern int     afinet_bind(int fd, const void *addr, socklen_t len);
+extern int     afinet_listen(int fd, int backlog);
+extern int     afinet_accept(int fd, void *addr, socklen_t *addrlen);
+extern int     afinet_connect(int fd, const void *addr, socklen_t len);
+extern ssize_t afinet_sendto(int fd, const void *buf, size_t len, int flags,
+                             const void *addr, socklen_t addrlen);
+extern ssize_t afinet_recvfrom(int fd, void *buf, size_t len, int flags,
+                               void *addr, socklen_t *addrlen);
+extern size_t  afinet_node_read(fs_node_t *, off_t, size_t, uint8_t *);
+
+#ifndef AF_PACKET
+#define AF_PACKET 17
+#endif
+#ifndef AF_INET
+#define AF_INET 2
+#endif
+#ifndef AF_INET6
+#define AF_INET6 10
+#endif
+
 int sys_socket(int domain, int type, int protocol) {
     (void)protocol;
+    if (domain == AF_PACKET) {
+        return afpacket_socket(type, protocol);
+    }
+    if (domain == AF_INET || domain == AF_INET6) {
+        return afinet_socket(domain, type, protocol);
+    }
     if (domain != AF_UNIX) { return -EAFNOSUPPORT; }
     if (type != SOCK_STREAM) { return -EPROTONOSUPPORT; }
     afunix_sock_t *s = afunix_alloc(type);
@@ -393,6 +429,12 @@ int sys_socketpair(int domain, int type, int protocol, int sv[2]) {
 
 int sys_bind(int fd, const struct sockaddr *addr, socklen_t addrlen) {
     if (!addr || addrlen < 2) return -EINVAL;
+    if (addr->sa_family == AF_PACKET) {
+        return afpacket_bind(fd, addr, addrlen);
+    }
+    if (addr->sa_family == AF_INET || addr->sa_family == AF_INET6) {
+        return afinet_bind(fd, addr, addrlen);
+    }
     if (addr->sa_family != AF_UNIX) return -EAFNOSUPPORT;
     if (addrlen > AFUNIX_PATH_MAX + 2) return -EINVAL;
     afunix_sock_t *s = afunix_from_fd(fd);
@@ -413,6 +455,15 @@ int sys_bind(int fd, const struct sockaddr *addr, socklen_t addrlen) {
 }
 
 int sys_listen(int fd, int backlog) {
+    /* Try AF_INET TCP first. */
+    if (fd >= 0 && fd < MAX_FD && current_process) {
+        file_t *f = current_process->fds[fd];
+        if (f && f->f_data) {
+            fs_node_t *n = (fs_node_t *)f->f_data;
+            if (n->read == (void *)afinet_node_read)
+                return afinet_listen(fd, backlog);
+        }
+    }
     afunix_sock_t *s = afunix_from_fd(fd);
     if (!s) return -ENOTSOCK;
     if (s->state != AFUS_BOUND) return -EINVAL;
@@ -426,6 +477,15 @@ int sys_listen(int fd, int backlog) {
 }
 
 int sys_accept(int fd, struct sockaddr *addr, socklen_t *addrlen) {
+    /* AF_INET TCP first. */
+    if (fd >= 0 && fd < MAX_FD && current_process) {
+        file_t *f = current_process->fds[fd];
+        if (f && f->f_data) {
+            fs_node_t *n = (fs_node_t *)f->f_data;
+            if (n->read == (void *)afinet_node_read)
+                return afinet_accept(fd, addr, addrlen);
+        }
+    }
     afunix_sock_t *server = afunix_from_fd(fd);
     if (!server) return -ENOTSOCK;
     if (server->state != AFUS_LISTENING) return -EINVAL;
@@ -463,6 +523,9 @@ int sys_accept(int fd, struct sockaddr *addr, socklen_t *addrlen) {
 
 int sys_connect(int fd, const struct sockaddr *addr, socklen_t addrlen) {
     if (!addr || addrlen < 2) return -EINVAL;
+    if (addr->sa_family == AF_INET || addr->sa_family == AF_INET6) {
+        return afinet_connect(fd, addr, addrlen);
+    }
     if (addr->sa_family != AF_UNIX) return -EAFNOSUPPORT;
     afunix_sock_t *client = afunix_from_fd(fd);
     if (!client) return -ENOTSOCK;
@@ -519,7 +582,23 @@ int sys_connect(int fd, const struct sockaddr *addr, socklen_t addrlen) {
  * mostly ignored — MSG_DONTWAIT support would need O_NONBLOCK
  * plumbing through the rx/tx waits.  No SCM cmsg support. */
 
+/* AF_PACKET dispatcher: if `fd` is an AF_PACKET socket, route to
+ * afpacket_{send,recv}to with a NULL addr (broadcast to current
+ * bound ifindex).  Otherwise fall back to AF_UNIX semantics. */
 ssize_t sys_send(int fd, const void *buf, size_t len, int flags) {
+    if (fd >= 0 && fd < MAX_FD && current_process) {
+        file_t *f = current_process->fds[fd];
+        if (f && f->f_data) {
+            fs_node_t *n = (fs_node_t *)f->f_data;
+            extern size_t afpkt_node_read(fs_node_t *, off_t, size_t, uint8_t *);
+            if (n->read == (void *)afpkt_node_read) {
+                return afpacket_sendto(fd, buf, len, flags, NULL, 0);
+            }
+            if (n->read == (void *)afinet_node_read) {
+                return afinet_sendto(fd, buf, len, flags, NULL, 0);
+            }
+        }
+    }
     (void)flags;
     afunix_sock_t *s = afunix_from_fd(fd);
     if (!s) return -ENOTSOCK;
@@ -527,6 +606,21 @@ ssize_t sys_send(int fd, const void *buf, size_t len, int flags) {
 }
 
 ssize_t sys_recv(int fd, void *buf, size_t len, int flags) {
+    if (fd >= 0 && fd < MAX_FD && current_process) {
+        file_t *f = current_process->fds[fd];
+        if (f && f->f_data) {
+            fs_node_t *n = (fs_node_t *)f->f_data;
+            extern size_t afpkt_node_read(fs_node_t *, off_t, size_t, uint8_t *);
+            if (n->read == (void *)afpkt_node_read) {
+                socklen_t zero = 0;
+                return afpacket_recvfrom(fd, buf, len, flags, NULL, &zero);
+            }
+            if (n->read == (void *)afinet_node_read) {
+                socklen_t zero = 0;
+                return afinet_recvfrom(fd, buf, len, flags, NULL, &zero);
+            }
+        }
+    }
     (void)flags;
     afunix_sock_t *s = afunix_from_fd(fd);
     if (!s) return -ENOTSOCK;
@@ -535,12 +629,46 @@ ssize_t sys_recv(int fd, void *buf, size_t len, int flags) {
 
 ssize_t sys_sendto(int fd, const void *buf, size_t len, int flags,
                    const struct sockaddr *addr, socklen_t addrlen) {
-    (void)addr; (void)addrlen;
+    /* Route by destination address family first. */
+    if (addr && addrlen >= 2) {
+        if (addr->sa_family == AF_PACKET)
+            return afpacket_sendto(fd, buf, len, flags, addr, addrlen);
+        if (addr->sa_family == AF_INET || addr->sa_family == AF_INET6)
+            return afinet_sendto(fd, buf, len, flags, addr, addrlen);
+    }
+    /* No addr: route by fd type. */
+    if (fd >= 0 && fd < MAX_FD && current_process) {
+        file_t *f = current_process->fds[fd];
+        if (f && f->f_data) {
+            fs_node_t *n = (fs_node_t *)f->f_data;
+            if (n->read && n->read != afunix_node_read) {
+                extern size_t afpkt_node_read(fs_node_t *, off_t, size_t, uint8_t *);
+                if (n->read == (void *)afpkt_node_read)
+                    return afpacket_sendto(fd, buf, len, flags, addr, addrlen);
+                if (n->read == (void *)afinet_node_read)
+                    return afinet_sendto(fd, buf, len, flags, addr, addrlen);
+            }
+        }
+    }
+    (void)addrlen;
     return sys_send(fd, buf, len, flags);
 }
 
 ssize_t sys_recvfrom(int fd, void *buf, size_t len, int flags,
                      struct sockaddr *addr, socklen_t *addrlen) {
+    if (fd >= 0 && fd < MAX_FD && current_process) {
+        file_t *f = current_process->fds[fd];
+        if (f && f->f_data) {
+            fs_node_t *n = (fs_node_t *)f->f_data;
+            extern size_t afpkt_node_read(fs_node_t *, off_t, size_t, uint8_t *);
+            if (n->read == (void *)afpkt_node_read) {
+                return afpacket_recvfrom(fd, buf, len, flags, addr, addrlen);
+            }
+            if (n->read == (void *)afinet_node_read) {
+                return afinet_recvfrom(fd, buf, len, flags, addr, addrlen);
+            }
+        }
+    }
     (void)addr; (void)addrlen;
     return sys_recv(fd, buf, len, flags);
 }
@@ -596,10 +724,19 @@ int sys_shutdown(int fd, int how) {
     return 0;
 }
 
+/* AF_INET surface lives in af_inet.c.  Try it first — most callers
+ * (curl, inetd, every internet daemon) are looking up AF_INET fds.
+ * Fall through to AF_UNIX only on ENOTSOCK.  */
+extern int afinet_getsockname(int fd, void *addr, socklen_t *addrlen);
+extern int afinet_getpeername(int fd, void *addr, socklen_t *addrlen);
+
 int sys_getsockname(int fd, struct sockaddr *addr, socklen_t *addrlen) {
+    if (!addr || !addrlen) return -EINVAL;
+    int rc = afinet_getsockname(fd, addr, addrlen);
+    if (rc != -ENOTSOCK) return rc;
+
     afunix_sock_t *s = afunix_from_fd(fd);
     if (!s) return -ENOTSOCK;
-    if (!addr || !addrlen) return -EINVAL;
     struct sockaddr_un *un = (struct sockaddr_un *)addr;
     un->sun_family = AF_UNIX;
     int plen = s->pathlen;
@@ -611,10 +748,13 @@ int sys_getsockname(int fd, struct sockaddr *addr, socklen_t *addrlen) {
 }
 
 int sys_getpeername(int fd, struct sockaddr *addr, socklen_t *addrlen) {
+    if (!addr || !addrlen) return -EINVAL;
+    int rc = afinet_getpeername(fd, addr, addrlen);
+    if (rc != -ENOTSOCK) return rc;
+
     afunix_sock_t *s = afunix_from_fd(fd);
     if (!s) return -ENOTSOCK;
     if (!s->peer) return -ENOTCONN;
-    if (!addr || !addrlen) return -EINVAL;
     struct sockaddr_un *un = (struct sockaddr_un *)addr;
     un->sun_family = AF_UNIX;
     int plen = s->peer->pathlen;
