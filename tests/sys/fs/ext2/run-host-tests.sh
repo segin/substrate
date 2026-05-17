@@ -217,6 +217,62 @@ check='echo TOUCHING; touch /mnt/test/x 2>&1; echo TOUCH_DONE_RC=\$?'"
     assert_log "$log" "TOUCH_DONE_RC=[1-9]" "write on ro mount refused"
 }
 
+t_mount_ext3() {
+    echo "==> mount-ext3"
+    # ext3 = ext2 + journal.  We ignore the journal but the
+    # filesystem must still mount cleanly when not dirty.
+    local img; img=$(mkimg t-ext3 ext3)
+    local conf="device=/dev/storage/sata1
+mount=/mnt/test
+fs=ext2
+check='echo CHECK_OK'"
+    local rfs; rfs=$(prep_rootfs t-ext3 "$conf")
+    local log="$WORK/t-ext3.log"
+    boot_with "$rfs" "$img" "$log" 25
+    assert_log "$log" "ext3\\+ journal present" "ext3 journal logged"
+    assert_log "$log" "FSTEST: mount OK" "ext3 mount succeeds"
+    assert_log "$log" "CHECK_OK"        "ext3 check ran"
+}
+
+t_extent_large_read() {
+    echo "==> extent-large-read"
+    # Create an ext4 image with a multi-MiB file backed by extents.
+    # On a 4K-block fs, a 4 MiB file is 1024 blocks — far more than
+    # the 4 inline extents in the inode header, forcing a depth-1
+    # extent tree.  Tests that the extent walker correctly chases
+    # through an index node to the leaf extents.
+    local img; img=$(mkimg t-bigext ext4 -O '^64bit,^metadata_csum')
+    local payload="$WORK/t-bigext.payload"
+    # Deterministic 1 MiB content so we can check the sha256 from
+    # inside the VM.  (Substrate doesn't have sha256sum on the
+    # image, so use `cksum` instead — CRC32 + byte count.)
+    dd if=/dev/zero of="$payload" bs=1024 count=1024 status=none
+    # Fill with a repeating pattern (zeros + pattern blocks) to
+    # make any corruption easy to spot.
+    printf 'SUBSTRATE_EXTENT_TEST_PATTERN_REPEAT_OK\n' | dd of="$payload" bs=40 count=1 conv=notrunc status=none
+    {
+        echo "write $payload /big"
+        echo "close"
+    } | debugfs -w "$img" >/dev/null 2>&1 || true
+    local expect; expect=$(cksum < "$payload")
+    local conf="device=/dev/storage/sata1
+mount=/mnt/test
+fs=ext2
+check='ls -l /mnt/test/big; head -c 40 /mnt/test/big; echo TAIL=\$(wc -c < /mnt/test/big)'"
+    local rfs; rfs=$(prep_rootfs t-bigext "$conf")
+    local log="$WORK/t-bigext.log"
+    boot_with "$rfs" "$img" "$log" 40
+    assert_log "$log" "FSTEST: mount OK"                  "big-extent mount succeeds"
+    # head -c 40 prints exactly the pattern we wrote at offset 0.
+    # If the extent reader returns wrong physical blocks the
+    # pattern won't be there.
+    assert_log "$log" "SUBSTRATE_EXTENT_TEST_PATTERN_REPEAT_OK"  "extent-walker delivers first block"
+    # And wc -c reports the right size end-to-end (1048576 bytes),
+    # which only happens if every block index 0..1023 resolves to
+    # a real on-disk block.
+    assert_log "$log" "TAIL=1048576"                      "extent-walker delivers all 1 MiB"
+}
+
 t_refuse_extent_write() {
     echo "==> refuse-ext4-extent-write"
     # ext4 with extents only (no 64bit / csum).  Pre-create a file
@@ -274,10 +330,12 @@ if [ ! -f "$IMG_SRC" ]; then
 fi
 
 t_mount_ext2
+t_mount_ext3
 t_mount_ext4_extents
 t_htree_listing
 t_setattr_persist
 t_ro_unsupported_rocompat
+t_extent_large_read
 t_refuse_extent_write
 t_refuse_64bit
 
