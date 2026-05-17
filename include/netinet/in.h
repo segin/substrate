@@ -15,6 +15,10 @@ extern "C" {
 typedef uint32_t in_addr_t;
 typedef uint16_t in_port_t;
 
+/* inet_ntop() output-buffer sizes — POSIX-2008.  */
+#define INET_ADDRSTRLEN   16    /* "255.255.255.255\0" */
+#define INET6_ADDRSTRLEN  46    /* IPv6 + scope id + NUL */
+
 struct in_addr   { in_addr_t s_addr; };
 struct in6_addr  { uint8_t s6_addr[16]; };
 

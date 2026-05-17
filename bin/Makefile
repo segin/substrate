@@ -48,6 +48,8 @@ SUBDIRS = \
 	od \
 	passwd \
 	pgrep \
+	ping \
+	printf \
 	prof \
 	ps \
 	pwd \

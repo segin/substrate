@@ -18,6 +18,7 @@
 #include <sys/wait.h>
 #include <sys/random.h>
 #include <sys/syscall.h>
+#include <termios.h>
 
 extern int64_t _syscall3(int, uintptr_t, uintptr_t, uintptr_t);
 
@@ -1053,6 +1054,15 @@ int rand(void) {
     return (int)(chacha_block[chacha_idx++] & 0x7FFFFFFF);
 }
 
+/* POSIX rand_r(3): thread-safe variant.  Uses a simple LCG seeded
+ * from the user-provided state — caller manages reentrancy by
+ * passing a per-thread *seed in. */
+int rand_r(unsigned int *seedp) {
+    if (!seedp) return 0;
+    *seedp = *seedp * 1103515245u + 12345u;
+    return (int)((*seedp / 65536u) & 0x7FFFu);
+}
+
 /*
  * BSD random()/srandom() compatibility.  Substrate's rand() already
  * returns the full [0, 2^31-1] range that BSD random() guarantees, so
@@ -1445,4 +1455,113 @@ char *ptsname(int fd) {
         return NULL;
     }
     return ptsname_buf;
+}
+
+/*
+ * openpty / login_tty — BSD-style PTY helpers.  No <pty.h> header
+ * yet, telnetd and friends declare these locally with `extern int
+ * openpty(int *, int *, char *, void *, void *)` until we sit down to
+ * write <pty.h>.
+ */
+int openpty(int *amaster, int *aslave, char *name,
+            const struct termios *termp,
+            const struct winsize *winp) {
+    int m = posix_openpt(O_RDWR | O_NOCTTY);
+    if (m < 0) return -1;
+    if (grantpt(m) < 0 || unlockpt(m) < 0) {
+        close(m);
+        return -1;
+    }
+    char path[64];
+    if (ptsname_r(m, path, sizeof(path)) != 0) {
+        close(m);
+        return -1;
+    }
+    int s = open(path, O_RDWR | O_NOCTTY);
+    if (s < 0) {
+        close(m);
+        return -1;
+    }
+    if (termp) {
+        (void)tcsetattr(s, TCSANOW, termp);
+    }
+    if (winp) {
+        (void)ioctl(s, TIOCSWINSZ, winp);
+    }
+    if (name) {
+        /* Caller is responsible for ensuring `name` is large enough;
+         * the BSD interface gives no length, so this is a foot-gun
+         * we inherit from history.  pts paths are short. */
+        strcpy(name, path);
+    }
+    *amaster = m;
+    *aslave  = s;
+    return 0;
+}
+
+/* daemon(3) — BSD/glibc helper that detaches the caller from the
+ * controlling terminal so it can run in the background.  Identical
+ * semantics to BSD's daemon(): fork once so the parent can exit and
+ * the child is orphaned, become a new session leader so we lose the
+ * tty, optionally chdir("/") and optionally redirect stdio at
+ * /dev/null.  Returns 0 to the (now detached) child, -1 on failure
+ * (errno set).  The parent never returns — _exit(0) after fork.
+ *
+ * Uses raw syscall(SYS_SETSID) for the same reason login_tty does,
+ * so static linkees aren't forced to drag in libsys.  */
+int daemon(int nochdir, int noclose) {
+    extern long syscall(long number, ...);
+    pid_t pid = fork();
+    if (pid < 0) return -1;
+    if (pid > 0) _exit(0);
+    (void)syscall(SYS_SETSID);
+    if (!nochdir) chdir("/");
+    if (!noclose) {
+        int fd = open("/dev/null", O_RDWR);
+        if (fd >= 0) {
+            dup2(fd, 0);
+            dup2(fd, 1);
+            dup2(fd, 2);
+            if (fd > 2) close(fd);
+        }
+    }
+    return 0;
+}
+
+/* login_tty — make `fd` the controlling tty for this process and
+ * point stdio at it.  Standard recipe: new session, TIOCSCTTY,
+ * dup2 to 0/1/2, close the original if it wasn't one of those.
+ *
+ * We call SYS_SETSID via raw syscall() instead of setsid(3) so
+ * statically-linked binaries that pull this file in via libc.a
+ * don't acquire a hard libsys.a dependency.  The wrapper for
+ * setsid lives in lib/sys/pgrp.c and dynamic linkees see it via
+ * DT_NEEDED libsys.so.0; static linkees that don't need login_tty
+ * shouldn't have to drag setsid in. */
+int login_tty(int fd) {
+    extern long syscall(long number, ...);
+    /* Become session leader first.  Ignoring failure: if we're
+     * already a session leader (unusual here, but possible) the
+     * TIOCSCTTY below still does the right thing. */
+    (void)syscall(SYS_SETSID);
+    /*
+     * Pass arg=1 to TIOCSCTTY to "steal" the tty.  Substrate's
+     * tty_open() runs tty_attach_first_opener which auto-claims an
+     * unowned tty for the OPENING process's session — even with
+     * O_NOCTTY.  For PTYs that's painful: the parent (telnetd /
+     * sshd-style daemons) opens both master and slave inside its
+     * own session before forking, so by the time the child fork
+     * gets here the slave already lists the PARENT's session in
+     * tty->session and a non-force TIOCSCTTY would fail EPERM.
+     * arg=1 tells the kernel we're aware and want it anyway —
+     * matches Linux semantics for `int arg = 1`.
+     */
+    if (ioctl(fd, TIOCSCTTY, 1) < 0) {
+        return -1;
+    }
+    if (dup2(fd, 0) < 0) return -1;
+    if (dup2(fd, 1) < 0) return -1;
+    if (dup2(fd, 2) < 0) return -1;
+    if (fd > 2) close(fd);
+    return 0;
 }

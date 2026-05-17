@@ -58,6 +58,14 @@ if [ -d "${OPENSSL_STAGE}/usr/lib/pkgconfig" ]; then
     export PKG_CONFIG_PATH="${OPENSSL_STAGE}/usr/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
 fi
 
+# Linker flag rationale: substrate's libsys.so.0 supplies wrappers
+# like setsid(), tcsetpgrp(), etc., and libc.so.0 lists it as
+# DT_NEEDED.  Modern binutils defaults to --no-copy-dt-needed-entries,
+# so calls to setsid() in caller code (e.g. inetd.c) don't resolve
+# through libc -> libsys; the link fails with "DSO missing from
+# command line".  Re-enable the historical pass-through.
+export LDFLAGS="${LDFLAGS:-} -Wl,--copy-dt-needed-entries"
+
 "${TREE_DIR}/configure" \
     --host="${TARGET}" \
     --prefix=/usr \
@@ -65,13 +73,14 @@ fi
     --without-krb5 \
     --enable-authentication \
     --enable-encryption \
-    --enable-ftp --enable-ftpd \
+    --disable-ftp --disable-ftpd \
     --disable-rcp --disable-rsh --disable-rshd \
     --disable-rlogin --disable-rlogind \
     --disable-talk --disable-talkd \
     --disable-tftp --disable-tftpd \
     --disable-uucpd \
-    --disable-syslogd --disable-inetd \
+    --enable-inetd \
+    --disable-syslogd \
     --disable-traceroute \
     --disable-ping --disable-ping6 \
     --disable-hostname --disable-dnsdomainname \

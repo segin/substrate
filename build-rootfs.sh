@@ -373,6 +373,19 @@ install_to_dist() {
         fi
     done
 
+    # contrib/inetutils overlays /usr/bin/telnet and /usr/libexec/telnetd
+    # — those are the BSD-derived, battle-tested implementations we
+    # ship in place of the in-tree bin/telnet + sbin/telnetd (which
+    # had loopback/PTY crashes that GNU inetutils' versions don't
+    # reproduce).  Built by contrib/inetutils/build.sh.
+    : "${DIST_INETUTILS:=$TOP/dist-inetutils}"
+    if [ -d "$DIST_INETUTILS" ]; then
+        echo "Overlaying contrib/inetutils from $DIST_INETUTILS..."
+        (cd "$DIST_INETUTILS" && tar -cf - .) | (cd "$DIST" && tar -xf -)
+    else
+        echo "  (skipped: $DIST_INETUTILS does not exist — run contrib/inetutils/build.sh)"
+    fi
+
     echo "Installing target testsuites to /tmp on the image..."
     mkdir -p "$DIST/tmp"
     # Each entry below is "src-dir:binary-name".  The cross-built

@@ -4,7 +4,7 @@ include ../Makefile.inc
 ifdef NATIVE_BUILD
 SUBDIRS = mkfs fsck
 else
-SUBDIRS = init ld.so mkfs fsck getty echod syslogd telnetd radvd
+SUBDIRS = init ld.so mkfs fsck getty echod syslogd radvd
 endif
 
 

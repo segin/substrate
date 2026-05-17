@@ -108,6 +108,10 @@ pid_t tcgetpgrp(int fd);
 int tcsetpgrp(int fd, pid_t pgrp);
 pid_t setsid(void);
 
+/* BSD/glibc daemon(3) — fork, setsid, optional chdir(/) and reopen
+ * stdio against /dev/null.  Returns 0 on success, -1 on failure. */
+int   daemon(int nochdir, int noclose);
+
 int access(const char *pathname, int mode);
 #define R_OK 4
 #define W_OK 2
