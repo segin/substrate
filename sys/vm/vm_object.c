@@ -169,30 +169,89 @@ vm_object_t *vm_object_shadow(vm_object_t *source) {
     return shadow;
 }
 
+/*
+ * Merge `shadow` (object->shadow) up into `object`, then drop the shadow.
+ * Standard BSD-style collapse: for each page P in shadow at pindex SP,
+ * compute the corresponding pindex in `object` as OP = SP - shadow_offset_pages.
+ * If `object` already has a page at OP, that page shadows P and P is freed.
+ * Otherwise P is moved from shadow into object at pindex OP.  After all
+ * pages are processed, object inherits shadow's shadow + shadow_offset and
+ * shadow is deallocated.
+ *
+ * Preconditions enforced by the caller (or checked here):
+ *   - object->shadow != NULL
+ *   - shadow->ref_count == 1 (only this object references it)
+ *   - shadow->pager == NULL (anonymous; collapsing across a pager would
+ *     require reading remaining pager-backed pages, out of scope here)
+ *   - shadow has no other shadowers (implied by ref_count == 1)
+ */
 int vm_object_collapse(vm_object_t *object) {
-    uint64_t required_pages;
     vm_object_t *shadow;
+    uint64_t shadow_offset_pages;
 
     if (!object || !object->shadow) {
         return -1;
     }
 
     shadow = object->shadow;
-    if (object->shadow_offset != 0) {
+    if (shadow->ref_count != 1 || shadow->pager) {
+        return -1;
+    }
+    if (shadow->type == VM_OBJ_TYPE_DEAD) {
         return -1;
     }
 
-    if (shadow->ref_count != 1) {
-        return -1;
+    shadow_offset_pages = object->shadow_offset / 4096;
+
+    /* Walk shadow's pages, moving or discarding each. */
+    vm_page_t *p = shadow->pages;
+    while (p) {
+        vm_page_t *next = p->obj_next;
+        uint64_t op = (p->pindex >= shadow_offset_pages)
+                          ? (p->pindex - shadow_offset_pages)
+                          : (uint64_t)-1;
+
+        if (op == (uint64_t)-1) {
+            /* Out of object's mapping range — stays only in shadow.
+             * Since shadow is going away, this page is unreachable;
+             * free it. */
+            p->obj_next = NULL;
+            p->obj_prev = NULL;
+            p->object = NULL;
+            vm_page_free(p);
+        } else if (vm_object_lookup_page(object, op)) {
+            /* Object already has a page here; shadow's copy is masked.
+             * Detach and free. */
+            p->obj_next = NULL;
+            p->obj_prev = NULL;
+            p->object = NULL;
+            vm_page_free(p);
+        } else {
+            /* Move page from shadow to object at translated pindex. */
+            p->obj_next = NULL;
+            p->obj_prev = NULL;
+            p->object = NULL;
+            p->pindex = op;
+            vm_object_add_page(object, p);
+        }
+        p = next;
     }
 
-    required_pages = (object->size + 4095) / 4096;
-    if (required_pages != 0 && object->page_count < required_pages) {
-        return -1;
-    }
+    /* Shadow is now drained — clear its page list so the eventual
+     * deallocate() doesn't try to free pages we already moved. */
+    shadow->pages = NULL;
+    shadow->page_count = 0;
 
-    object->shadow = NULL;
-    object->shadow_offset = 0;
+    /* Inherit shadow's shadow + offset (shadow already owns a ref on
+     * its own shadow, which we are about to take over).  Don't reference
+     * it again — we are transferring shadow's reference, not duplicating. */
+    vm_object_t *next_shadow = shadow->shadow;
+    uint64_t next_offset = object->shadow_offset + shadow->shadow_offset;
+    shadow->shadow = NULL;  /* prevent shadow's dealloc from recursing into next_shadow */
+
+    object->shadow = next_shadow;
+    object->shadow_offset = next_offset;
+
     vm_object_deallocate(shadow);
     return 0;
 }
