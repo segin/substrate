@@ -779,6 +779,20 @@ static void proc_apply_status_flags(file_t *f, int flags) {
     if (flags & O_NONBLOCK) {
         f->f_flag |= FNONBLOCK;
     }
+
+    /* Pipe endpoints carry their own ep->nonblock flag because the
+     * pipe_read / pipe_write callbacks only see the fs_node, not the
+     * file_t.  Mirror the file-level flag down to the endpoint so
+     * fcntl(F_SETFL, O_NONBLOCK) actually changes pipe behaviour —
+     * without this, bsdtar's select-multiplex through gzip
+     * deadlocks because every read on the pipe still blocks. */
+    if (f->f_data) {
+        extern int pipe_set_nonblock(fs_node_t *, int);
+        fs_node_t *node = (fs_node_t *)f->f_data;
+        if ((node->flags & 0x7) == FS_PIPE) {
+            (void)pipe_set_nonblock(node, (flags & O_NONBLOCK) ? 1 : 0);
+        }
+    }
 }
 
 int proc_alloc_fd_from(process_t *p, int start) {
