@@ -536,10 +536,21 @@ static int skip_padded(FILE *in, int64_t sz) {
 static int process_read(FILE *in, bool extract) {
     struct pax_state ps; pax_init(&ps);
     int zeros = 0;
+    int dbg = getenv("TAR_DEBUG") != NULL;
+    long total_read = 0;
     while (1) {
         struct tar_header h;
-        if (rd(in, &h, sizeof(h))) break;
-        if (all_zero((unsigned char *)&h, sizeof(h))) { if (++zeros == 2) break; continue; }
+        if (dbg) fprintf(stderr, "tar: reading header (total=%ld)\n", total_read);
+        if (rd(in, &h, sizeof(h))) {
+            if (dbg) fprintf(stderr, "tar: header read failed/short\n");
+            break;
+        }
+        total_read += sizeof(h);
+        if (all_zero((unsigned char *)&h, sizeof(h))) {
+            if (dbg) fprintf(stderr, "tar: zero block %d\n", zeros + 1);
+            if (++zeros == 2) break;
+            continue;
+        }
         zeros = 0;
         if (!verify_checksum(&h)) return -1;
 
@@ -644,6 +655,20 @@ int main(int argc, char **argv) {
     memset(&opt, 0, sizeof(opt));
     opt.format = FMT_PAX;
     opt.safe_extract = true; /* Enable safe extraction by default */
+
+    /* Traditional tar form: the first arg is a bare option bundle
+     * without a leading dash (e.g. `tar xvzf archive.tar.gz file1
+     * file2 ...`).  Predates getopt(3) by decades; GNU tar still
+     * supports it.  Detect by: argv[1] exists, doesn't start with
+     * '-', and contains at least one valid mode character (c, x,
+     * t, r, u).  If so, splice in the dash by rewriting argv[1]
+     * with a leading '-' into a scratch buffer.  */
+    if (argc > 1 && argv[1][0] != '-' &&
+        strpbrk(argv[1], "cxtru") != NULL) {
+        static char dashed[64];
+        snprintf(dashed, sizeof(dashed), "-%s", argv[1]);
+        argv[1] = dashed;
+    }
 
     static struct option lo[] = {
         {"file", required_argument, 0, 'f'},
