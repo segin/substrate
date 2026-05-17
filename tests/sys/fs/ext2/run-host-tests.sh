@@ -254,6 +254,12 @@ t_setattr_persist
 t_ro_unsupported_rocompat
 t_refuse_64bit
 
+# Restore the production rootfs.img so the user's next interactive
+# boot isn't sitting on whichever test config we ran last.
+echo "==> restoring production rootfs.img"
+rm -f "$TOP/dist/etc/fstest.conf"
+(cd "$TOP" && ./build-rootfs.sh --image >/dev/null 2>&1)
+
 echo
 echo "Total: $((PASS + FAIL)) — $PASS passed, $FAIL failed"
 exit $FAIL

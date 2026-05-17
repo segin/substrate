@@ -21,6 +21,13 @@ CONF=/etc/fstest.conf
 : "${check:=ls -la $mount}"
 : "${poweroff_on_done:=1}"
 
+# Defensive: if the configured device doesn't exist on this system
+# (someone booted an image with stale fstest.conf but no test
+# disk attached) silently exit instead of failing the boot.
+if ! [ -e "$device" ]; then
+    exit 0
+fi
+
 echo "FSTEST: starting"
 mkdir -p "$mount"
 
