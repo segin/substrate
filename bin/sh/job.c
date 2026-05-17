@@ -17,6 +17,7 @@ void job_init(void) {
 
 job_t *job_new(void) {
     job_t *j = calloc(1, sizeof(job_t));
+    if (!j) return NULL;
     j->stdin_fd = -1;
     j->stdout_fd = -1;
     j->stderr_fd = -1;
@@ -42,6 +43,7 @@ job_t *job_new(void) {
 }
 
 void job_free(job_t *j) {
+    if (!j) return;
     // Remove from list
     if (first_job == j) {
         first_job = j->next;
@@ -66,18 +68,21 @@ void job_free(job_t *j) {
 }
 
 void job_add_process(job_t *j, pid_t pid, char **argv) {
+    if (!j) return;
     process_t *p = calloc(1, sizeof(process_t));
+    if (!p) return;
     p->pid = pid;
-    
+
     // Deep copy argv
     if (argv) {
         int argc = 0;
         while (argv[argc]) argc++;
         p->argv = malloc((argc + 1) * sizeof(char *));
+        if (!p->argv) { free(p); return; }
         for (int i = 0; i < argc; i++) p->argv[i] = strdup(argv[i]);
         p->argv[argc] = NULL;
     }
-    
+
     // Add to tail
     if (!j->first_process) {
         j->first_process = p;
@@ -131,6 +136,7 @@ job_t *job_find(const char *name) {
 }
 
 int job_is_stopped(job_t *j) {
+    if (!j) return 0;
     process_t *p;
     for (p = j->first_process; p; p = p->next) {
         if (!p->completed && !p->stopped)
@@ -140,6 +146,7 @@ int job_is_stopped(job_t *j) {
 }
 
 int job_is_completed(job_t *j) {
+    if (!j) return 0;
     process_t *p;
     for (p = j->first_process; p; p = p->next) {
         if (!p->completed)
