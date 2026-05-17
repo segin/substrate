@@ -1,0 +1,58 @@
+# /etc/protocols — IP protocol number registry.
+# Read by getprotobyname(), getprotobynumber(), getprotoent().
+# inetd / netstat / tcpdump all need this file present (inetd
+# silently skips every rule whose protocol name doesn't resolve).
+#
+# Format: <name>  <number>  [aliases...]
+
+ip            0     IP        # Internet protocol, pseudo number
+icmp          1     ICMP      # Internet control message protocol
+igmp          2     IGMP      # Internet group management protocol
+ggp           3     GGP       # Gateway-gateway protocol
+ipencap       4     IP-ENCAP  # IP encapsulated in IP (RFC 2003)
+st            5     ST        # ST datagram mode (RFC 1190)
+tcp           6     TCP       # transmission control protocol
+egp           8     EGP       # exterior gateway protocol
+igp           9     IGP       # any private interior gateway
+pup          12     PUP       # PARC universal packet protocol
+udp          17     UDP       # user datagram protocol
+hmp          20     HMP       # host monitoring protocol
+xns-idp      22     XNS-IDP   # Xerox NS IDP
+rdp          27     RDP       # reliable datagram protocol
+iso-tp4      29     ISO-TP4   # ISO Transport Protocol class 4
+dccp         33     DCCP      # Datagram Congestion Control Protocol
+xtp          36     XTP       # Xpress Transfer Protocol
+ddp          37     DDP       # Datagram Delivery Protocol
+idpr-cmtp    38     IDPR-CMTP # IDPR Control Message Transport
+ipv6         41     IPv6      # IPv6
+ipv6-route   43     IPv6-Route
+ipv6-frag    44     IPv6-Frag
+idrp         45     IDRP
+rsvp         46     RSVP      # Resource ReSerVation Protocol
+gre          47     GRE       # Generic Routing Encapsulation
+esp          50     IPSEC-ESP # Encapsulating Security Payload
+ah           51     IPSEC-AH  # Authentication Header
+skip         57     SKIP
+ipv6-icmp    58     IPv6-ICMP
+ipv6-nonxt   59     IPv6-NoNxt
+ipv6-opts    60     IPv6-Opts
+rspf         73     RSPF      # Radio Shortest Path First
+vmtp         81     VMTP
+eigrp        88     EIGRP
+ospf         89     OSPFIGP
+ax.25        93     AX.25     # Amateur radio AX.25
+ipip         94     IPIP      # IPIP encapsulation
+etherip      97     ETHERIP
+encap        98     ENCAP
+pim         103     PIM       # Protocol Independent Multicast
+ipcomp      108     IPCOMP    # IP Payload Compression
+vrrp        112     VRRP      # Virtual Router Redundancy Protocol
+l2tp        115     L2TP
+isis        124     IS-IS     # IS-IS over IPv4
+sctp        132     SCTP
+fc          133     FC        # Fibre Channel
+udplite     136     UDPLite
+mpls-in-ip  137
+manet       138               # MANET protocols (RFC5498)
+hip         139     HIP       # Host Identity Protocol
+shim6       140     Shim6
