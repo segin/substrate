@@ -63,7 +63,17 @@ fi
 TARGET_TRIPLE="${TARGET_TRIPLE:-i386-unknown-substrate}"
 STAGE1_PREFIX="${STAGE1_PREFIX:-/opt/substrate}"
 PARALLEL="${PARALLEL:-$(nproc 2>/dev/null || echo 4)}"
-INSTALL_PREFIX="${INSTALL_PREFIX:-/usr/local}"
+# Install under /usr (not /usr/local) so build-rootfs.sh's contrib
+# overlay loop picks the binary up at /usr/bin/mpg123.
+INSTALL_PREFIX="${INSTALL_PREFIX:-/usr}"
+
+if [ -z "${SUBSTRATE_TOP:-}" ]; then
+    p="${HERE}"
+    while [ "${p}" != "/" ] && [ ! -f "${p}/AGENTS.md" ] && [ ! -f "${p}/CLAUDE.md" ]; do
+        p=$(dirname "${p}")
+    done
+    SUBSTRATE_TOP="${p}"
+fi
 
 SRC_TREE="$(ls -d "$HERE"/build/mpg123-*/ 2>/dev/null | head -1 || true)"
 if [ -z "$SRC_TREE" ]; then
@@ -74,7 +84,9 @@ fi
 SRC_TREE="${SRC_TREE%/}"
 
 BUILD_DIR="$HERE/build/build-substrate"
-INSTALL_DIR="$HERE/build/install"
+# Stage into ${SUBSTRATE_TOP}/dist-mpg123 so build-rootfs.sh's
+# contrib-overlay loop picks it up the same way the other ports do.
+INSTALL_DIR="${DESTDIR:-${SUBSTRATE_TOP}/dist-mpg123}"
 
 if [ "$DO_CLEAN" = 1 ]; then
     echo "==> Cleaning $BUILD_DIR"
