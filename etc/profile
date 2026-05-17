@@ -1,6 +1,6 @@
 # Substrate default shell profile
 
-PATH=/usr/bin:/bin:/usr/sbin:/sbin
+PATH=/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin
 export PATH
 
 prompt='%n@%m[%T]:{%~}%% '
