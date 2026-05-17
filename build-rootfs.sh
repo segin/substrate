@@ -382,15 +382,35 @@ install_to_dist() {
     # ships libssl/libcrypto + the openssl CLI under /usr/{lib,bin}; curl
     # ships /usr/bin/curl + libcurl.  Each is independent — missing one
     # just means that one isn't on the image.
-    for ov in inetutils openssl curl gzip bzip2 libarchive; do
-        stage="$TOP/dist-$ov"
-        if [ -d "$stage" ]; then
-            echo "Overlaying contrib/$ov from $stage..."
-            (cd "$stage" && tar -cf - .) | (cd "$DIST" && tar -xf -)
-        else
-            echo "  (skipped contrib/$ov: $stage does not exist)"
-        fi
+    #
+    # Iterate every dist-* tree that exists at $TOP so newly-added
+    # ports get picked up without having to update this list.  The
+    # toolchain split — binutils stage 2 in dist-toolchain, gcc stage
+    # 2 in /tmp/gcc-stage2-staging because gcc's build doesn't honor
+    # a single DESTDIR cleanly — gets handled explicitly below.
+    for stage in "$TOP"/dist-*; do
+        [ -d "$stage" ] || continue
+        name=$(basename "$stage")
+        # Skip dist-* directories that aren't contrib outputs (none
+        # currently, but a guard for future "dist-something-else").
+        case "$name" in
+            dist) continue ;;       # the rootfs staging itself
+        esac
+        echo "Overlaying $name from $stage..."
+        (cd "$stage" && tar -cf - .) | (cd "$DIST" && tar -xf -)
     done
+
+    # gcc stage 2 lives in /tmp/gcc-stage2-staging (see contrib/gcc/
+    # build.sh — the gcc build doesn't cooperate with a custom
+    # DESTDIR the way binutils does, so it stages to /tmp instead of
+    # alongside dist-toolchain).  Overlay it the same way.
+    GCC_STAGE2_STAGING="${GCC_STAGE2_STAGING:-/tmp/gcc-stage2-staging}"
+    if [ -d "$GCC_STAGE2_STAGING" ]; then
+        echo "Overlaying contrib/gcc stage 2 from $GCC_STAGE2_STAGING..."
+        (cd "$GCC_STAGE2_STAGING" && tar -cf - .) | (cd "$DIST" && tar -xf -)
+    else
+        echo "  (skipped contrib/gcc stage 2: $GCC_STAGE2_STAGING does not exist)"
+    fi
 
     echo "Installing target testsuites to /tmp on the image..."
     mkdir -p "$DIST/tmp"
