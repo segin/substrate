@@ -144,17 +144,27 @@ static FILE *open_write(bool *pipep) {
 
     if (arc_pid == 0) {
         close(pfd[1]);
-        if (dup2(pfd[0], STDIN_FILENO) < 0) exit(1);
+        if (dup2(pfd[0], STDIN_FILENO) < 0) {
+            perror("tar: dup2 (stdin)"); exit(1);
+        }
         close(pfd[0]);
 
         int out_fd = open(opt.archive, O_WRONLY | O_CREAT | O_TRUNC, 0666);
-        if (out_fd < 0) exit(1);
-        if (dup2(out_fd, STDOUT_FILENO) < 0) exit(1);
+        if (out_fd < 0) {
+            fprintf(stderr, "tar: open %s: %s\n",
+                    opt.archive, strerror(errno));
+            exit(1);
+        }
+        if (dup2(out_fd, STDOUT_FILENO) < 0) {
+            perror("tar: dup2 (stdout)"); exit(1);
+        }
         close(out_fd);
 
         const char *prog = opt.comp == COMP_GZIP ? "gzip" : (opt.comp == COMP_XZ ? "xz" : "bzip2");
         execlp(prog, prog, "-c", NULL);
-        exit(1);
+        if (opt.comp == COMP_GZIP) execl("/usr/bin/gzip", "gzip", "-c", NULL);
+        fprintf(stderr, "tar: exec %s -c: %s\n", prog, strerror(errno));
+        exit(127);
     }
 
     close(pfd[0]);
@@ -179,17 +189,30 @@ static FILE *open_read(bool *pipep) {
 
     if (arc_pid == 0) {
         close(pfd[0]);
-        if (dup2(pfd[1], STDOUT_FILENO) < 0) exit(1);
+        if (dup2(pfd[1], STDOUT_FILENO) < 0) {
+            perror("tar: dup2 (stdout)"); exit(1);
+        }
         close(pfd[1]);
 
         int in_fd = open(opt.archive, O_RDONLY);
-        if (in_fd < 0) exit(1);
-        if (dup2(in_fd, STDIN_FILENO) < 0) exit(1);
+        if (in_fd < 0) {
+            fprintf(stderr, "tar: open %s: %s\n",
+                    opt.archive, strerror(errno));
+            exit(1);
+        }
+        if (dup2(in_fd, STDIN_FILENO) < 0) {
+            perror("tar: dup2 (stdin)"); exit(1);
+        }
         close(in_fd);
 
         const char *prog = opt.comp == COMP_GZIP ? "gzip" : (opt.comp == COMP_XZ ? "xz" : "bzip2");
         execlp(prog, prog, "-dc", NULL);
-        exit(1);
+        /* execlp returned — couldn't find the decompressor.  Try the
+         * conventional absolute path before giving up; PATH might
+         * not include /usr/bin in some contexts.  */
+        if (opt.comp == COMP_GZIP) execl("/usr/bin/gzip", "gzip", "-dc", NULL);
+        fprintf(stderr, "tar: exec %s -dc: %s\n", prog, strerror(errno));
+        exit(127);
     }
 
     close(pfd[1]);
@@ -201,7 +224,14 @@ static void close_arc(FILE *f, bool pipep) {
     if (!f || f == stdin || f == stdout) return;
     fclose(f);
     if (pipep && arc_pid > 0) {
-        waitpid(arc_pid, NULL, 0);
+        int wst = 0;
+        waitpid(arc_pid, &wst, 0);
+        if (WIFEXITED(wst) && WEXITSTATUS(wst) != 0)
+            fprintf(stderr, "tar: decompressor exited with status %d\n",
+                    WEXITSTATUS(wst));
+        else if (WIFSIGNALED(wst))
+            fprintf(stderr, "tar: decompressor killed by signal %d\n",
+                    WTERMSIG(wst));
     }
 }
 
