@@ -269,17 +269,17 @@ void vm_phys_add_range(uintptr_t start, uintptr_t end) {
 vm_page_t *vm_phys_alloc_page(void) {
     uint32_t flags = intr_disable();
     spinlock_acquire(&vm_phys_lock);
-    
+
     vm_page_t *page = vm_phys_alloc_locked(0);
     size_t free_left = vm_phys_free_count;
-    
+
     spinlock_release(&vm_phys_lock);
     intr_restore(flags);
-    
+
     if (page && free_left < vm_phys_low_watermark) {
         vm_page_wakeup_daemon();
     }
-    
+
     return page;
 }
 
@@ -304,7 +304,7 @@ void vm_phys_free_page(vm_page_t *page) {
     if (!page) return;
     uint32_t flags = intr_disable();
     spinlock_acquire(&vm_phys_lock);
-    
+
     // Check if double free
     if (page->flags & PG_FREE) {
         spinlock_release(&vm_phys_lock);
@@ -319,30 +319,30 @@ void vm_phys_free_page(vm_page_t *page) {
         page->ref_count = 0;
         vm_phys_free_locked(page, 0);
     }
-    
+
     spinlock_release(&vm_phys_lock);
     intr_restore(flags);
 }
 
 vm_page_t *vm_phys_alloc_contiguous(size_t count) {
     if (count == 0) return NULL;
-    
+
     int order = 0;
     while ((1UL << order) < count) order++;
 
     uint32_t flags = intr_disable();
     spinlock_acquire(&vm_phys_lock);
-    
+
     vm_page_t *page = vm_phys_alloc_locked(order);
     size_t free_left = vm_phys_free_count;
-    
+
     spinlock_release(&vm_phys_lock);
     intr_restore(flags);
-    
+
     if (page && free_left < vm_phys_low_watermark) {
         vm_page_wakeup_daemon();
     }
-    
+
     return page;
 }
 
@@ -372,14 +372,14 @@ void vm_phys_free_contiguous(vm_page_t *page, size_t count) {
      if (!page || count == 0) return;
      int order = 0;
      while ((1UL << order) < count) order++;
-     
+
      uint32_t flags = intr_disable();
      spinlock_acquire(&vm_phys_lock);
-     
+
      if (!(page->flags & PG_FREE)) {
          vm_phys_free_locked(page, order);
      }
-     
+
      spinlock_release(&vm_phys_lock);
      intr_restore(flags);
 }
