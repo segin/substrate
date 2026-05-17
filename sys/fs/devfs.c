@@ -1,4 +1,5 @@
 #include <vfs/vfs.h>
+#include <sys/mount.h>
 #include <pm/pm.h>
 #include <sys/proc.h>
 #include <sys/tty.h>
@@ -144,6 +145,14 @@ static devfs_entry_t *devfs_create_entry(const char *name, fs_node_t *node, devf
     if (!node->impl) {
         node->impl = (uintptr_t)entry;
     }
+
+    /* Stamp the inode field with the same per-entry identifier that
+     * devfs_dir_readdir emits as d_ino.  Without this, find_name_by_
+     * inode() in kern_getcwd can never match — readdir says d_ino =
+     * (uintptr_t)child, but every devfs node->inode is still 0.  cwd
+     * resolution then falls through to "/" the moment you cd into a
+     * devfs subdirectory (e.g. /dev/pts, /dev/storage). */
+    node->inode = (uint64_t)(uintptr_t)entry;
     return entry;
 }
 
@@ -210,6 +219,24 @@ static fs_node_t *devfs_dir_finddir(fs_node_t *node, char *name) {
     devfs_entry_t *child;
 
     if (!entry) return NULL;
+
+    /* Handle "." and "..".  Without this, getcwd's ".." walk fails
+     * the moment cwd crosses into devfs and returns -ENOENT, which
+     * is what surfaced as the shell prompt showing {?} under /dev.
+     * For the devfs root entry, ".." crosses the mount boundary —
+     * caller's getcwd notices via curr->mp == mp->mnt_node_root and
+     * splices in the mount path directly, so we just return the
+     * underlying covered node (or self as a fallback). */
+    if (name && name[0] == '.' && name[1] == '\0') {
+        return node;
+    }
+    if (name && name[0] == '.' && name[1] == '.' && name[2] == '\0') {
+        if (entry->parent && entry->parent->node)
+            return entry->parent->node;
+        if (node->mp && node->mp->mnt_node_covered)
+            return node->mp->mnt_node_covered;
+        return node;   /* devfs root with no covered node — self */
+    }
 
     child = devfs_find_child(entry, name);
     if (child) {
