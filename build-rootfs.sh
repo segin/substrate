@@ -275,6 +275,10 @@ install_to_dist() {
     for dir in "$TOP/bin"/*/ ; do
         if [ -d "$dir" ]; then
             name=$(basename "$dir")
+            # In-tree bin/tar/tar is superseded by contrib/libarchive's
+            # bsdtar (installed at /usr/bin/tar via the overlay).  Skip
+            # so we don't shadow the working binary with the broken one.
+            [ "$name" = "tar" ] && continue
             if [ -f "$dir/$name" ]; then
                 cp "$dir/$name" "$DIST/bin/"
             fi
@@ -378,7 +382,7 @@ install_to_dist() {
     # ships libssl/libcrypto + the openssl CLI under /usr/{lib,bin}; curl
     # ships /usr/bin/curl + libcurl.  Each is independent — missing one
     # just means that one isn't on the image.
-    for ov in inetutils openssl curl gzip bzip2; do
+    for ov in inetutils openssl curl gzip bzip2 libarchive; do
         stage="$TOP/dist-$ov"
         if [ -d "$stage" ]; then
             echo "Overlaying contrib/$ov from $stage..."

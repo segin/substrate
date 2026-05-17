@@ -647,3 +647,43 @@ char *strptime(const char *__restrict s, const char *__restrict format,
     }
     return (char *)p;
 }
+
+/* --- tzset / tz globals ------------------------------------------ *
+ * Minimal POSIX-shape implementation.  tzset() consults $TZ; the
+ * substrate libc presently understands only the GMT default — if
+ * $TZ is unset, names land as "UTC" / "UTC".  Real Olson-database
+ * parsing is a TODO.  The globals are mutable plain memory; thread
+ * safety is the same "atomic-pointer" promise glibc gives.  */
+static char tz_std_name[16] = "UTC";
+static char tz_dst_name[16] = "UTC";
+char *tzname[2] = { tz_std_name, tz_dst_name };
+long  timezone = 0;
+int   daylight = 0;
+
+void tzset(void) {
+    extern char *getenv(const char *);
+    const char *tz = getenv("TZ");
+    if (!tz || !*tz) {
+        /* Default: UTC.  */
+        tz_std_name[0] = 'U'; tz_std_name[1] = 'T'; tz_std_name[2] = 'C'; tz_std_name[3] = 0;
+        tz_dst_name[0] = 'U'; tz_dst_name[1] = 'T'; tz_dst_name[2] = 'C'; tz_dst_name[3] = 0;
+        timezone = 0;
+        daylight = 0;
+        return;
+    }
+    /* Naive parse: just copy the leading [A-Za-z]+ as the std name.
+     * Full POSIX TZ string parsing (offset, dst rules) deferred —
+     * substrate has no Olson db on disk yet.  */
+    size_t i = 0;
+    while (i < sizeof(tz_std_name) - 1 && tz[i] &&
+           ((tz[i] >= 'A' && tz[i] <= 'Z') || (tz[i] >= 'a' && tz[i] <= 'z'))) {
+        tz_std_name[i] = tz[i];
+        i++;
+    }
+    tz_std_name[i] = 0;
+    if (i == 0) { tz_std_name[0] = 'U'; tz_std_name[1] = 'T'; tz_std_name[2] = 'C'; tz_std_name[3] = 0; }
+    /* No DST parsing yet — mirror std into dst.  */
+    for (size_t j = 0; j < sizeof(tz_dst_name); j++) tz_dst_name[j] = tz_std_name[j];
+    daylight = 0;
+    timezone = 0;
+}

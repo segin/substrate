@@ -1173,7 +1173,14 @@ int fstatfs(int fd, struct statfs *buf) {
 }
 
 /* POSIX pathconf — substrate returns conservative defaults.
- * Real implementation would dispatch on filesystem type. */
+ * Real implementation would dispatch on filesystem type.
+ *
+ * POSIX requires that an unrecognised `name` set errno=EINVAL and
+ * return -1, distinct from "the variable is meaningful but has no
+ * limit" (which is -1 with errno unchanged).  Callers like
+ * libarchive's get_xfer_size() rely on this distinction — if we
+ * silently return -1 without EINVAL they treat the absence as a
+ * failure and refuse to proceed.  */
 long pathconf(const char *path, int name) {
     (void)path;
     switch (name) {
@@ -1184,7 +1191,9 @@ long pathconf(const char *path, int name) {
     case 6:  /* _PC_CHOWN_RESTRICTED */  return 1;
     case 7:  /* _PC_NO_TRUNC */          return 1;
     case 8:  /* _PC_VDISABLE */          return 0xFF;
-    default: return -1;
+    default:
+        errno = EINVAL;
+        return -1;
     }
 }
 

@@ -51,6 +51,15 @@ char *ctime(const time_t *timer);
 struct tm *gmtime(const time_t *timer);
 struct tm *localtime(const time_t *timer);
 
+/* tz globals — POSIX-shape declarations.  tzset() re-parses $TZ
+ * and refreshes tzname / timezone / daylight.  Substrate's libc
+ * stores them in a fixed buffer; threading-wise the writes race
+ * but the reads never tear (all 3 are plain pointers/longs).  */
+extern char *tzname[2];
+extern long  timezone;
+extern int   daylight;
+void tzset(void);
+
 // POSIX Reentrant versions
 char *asctime_r(const struct tm *__restrict timeptr, char *__restrict buf);
 char *ctime_r(const time_t *timer, char *buf);

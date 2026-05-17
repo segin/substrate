@@ -77,6 +77,10 @@ int chmod(const char *pathname, mode_t mode);
 int chown(const char *pathname, uid_t owner, gid_t group);
 int fchmod(int fd, mode_t mode);
 int fchown(int fd, uid_t owner, gid_t group);
+int lchmod(const char *pathname, mode_t mode);
+int lchown(const char *pathname, uid_t owner, gid_t group);
+int fchmodat(int dirfd, const char *pathname, mode_t mode, int flags);
+int fchownat(int dirfd, const char *pathname, uid_t owner, gid_t group, int flags);
 mode_t umask(mode_t mask);
 
 int mkfifo(const char *path, mode_t mode);

@@ -66,7 +66,6 @@ SUBDIRS = \
 	sync \
 	tabs \
 	tail \
-	tar \
 	tc \
 	tee \
 	test \
