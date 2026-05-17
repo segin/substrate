@@ -739,6 +739,27 @@ static bool vm_map_lookup_entry(vm_map_t *map, uintptr_t va, vm_map_entry_t **en
 
 int vm_map_insert(vm_map_t *map, struct vm_object *obj, uint64_t offset, uintptr_t start, uintptr_t end, uint8_t prot, uint8_t max_prot, uint8_t inheritance) {
     vm_map_entry_t *prev_entry;
+
+    /*
+     * For a private (VM_INHERIT_COPY) mapping of a file-backed (pager)
+     * object, wrap obj in a fresh shadow.  Without this, the first COW
+     * fault adds the COW-copied page back into the shared cache's
+     * pages list — every exec of the same binary then deposits one
+     * more page in the cached file object and the steady-state usage
+     * grows by 1 page per exec.  The shadow takes our ref on `obj`;
+     * the caller's ref is transferred into the shadow (no double-ref).
+     */
+    if (obj && inheritance == VM_INHERIT_COPY && obj->pager) {
+        vm_object_t *shadow = vm_object_shadow(obj);
+        if (!shadow) {
+            return -1;
+        }
+        /* vm_object_shadow took an extra ref on obj; drop the caller's
+         * original ref so the net ref count on obj is unchanged. */
+        vm_object_deallocate(obj);
+        obj = shadow;
+    }
+
     vm_map_lock(map);
 
     // Check for overlap and consume free space
@@ -747,7 +768,7 @@ int vm_map_insert(vm_map_t *map, struct vm_object *obj, uint64_t offset, uintptr
         vm_map_unlock(map);
         return -1; // Overlap or allocation failure
     }
-    
+
     // We still need 'prev_entry' to insert into the list correctly.
     // vm_map_lookup_entry gives us the entry <= start.
     // Even if we know space is free, we need the insertion point.
@@ -766,7 +787,7 @@ int vm_map_insert(vm_map_t *map, struct vm_object *obj, uint64_t offset, uintptr
         vm_map_unlock(map);
         return -1;
     }
-    
+
     new_entry->start = start;
     new_entry->end = end;
     new_entry->object = obj;
@@ -1107,6 +1128,22 @@ vm_map_t *vm_map_fork(vm_map_t *src_map, pmap_t dst_pmap) {
         } else if (src_entry->inheritance == VM_INHERIT_COPY) {
             // Copy-on-Write
             if (obj) {
+                /*
+                 * Before stacking yet another shadow on top, try to
+                 * collapse any unreferenced shadow that this object
+                 * already owns.  Without this, a long-lived process
+                 * (e.g. init or a shell) accumulates one extra shadow
+                 * layer per fork that never collapses back — the
+                 * accumulated state shows up as a steady 1-page-per-
+                 * fork leak as pages and metadata pile up in the
+                 * chain.
+                 */
+                while (obj->shadow && obj->shadow->ref_count == 1 &&
+                       !obj->shadow->pager &&
+                       obj->shadow->type != VM_OBJ_TYPE_DEAD) {
+                    if (vm_object_collapse(obj) != 0) break;
+                }
+
                 /*
                  * Shadow-chain growth guard: if the parent's entry is
                  * already a never-written shadow over some source (e.g.
