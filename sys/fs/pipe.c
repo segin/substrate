@@ -29,15 +29,56 @@ typedef struct {
     uint8_t nonblock;   /* O_NONBLOCK on this endpoint — read/write
                            return -EAGAIN instead of blocking when
                            the buffer would force a wait. */
+    struct fifo_reg *fifo;  /* NULL for anonymous pipes; set for
+                               FIFO endpoints so close can refcount
+                               the shared (dev,ino) registry entry. */
 } pipe_endpoint_t;
 
-static void pipe_wait(void *chan, mutex_t *m) {
+/* ------------------------------------------------------------------ */
+/* Named-FIFO registry.  open(2) on an S_IFIFO inode looks up (or
+ * lazily creates) an entry here keyed by (dev, inum) and attaches
+ * its endpoint to the entry's shared pipe_t.  Multiple opens of the
+ * same inode get the same buffer.  The registry entry is kept alive
+ * for as long as at least one endpoint refers to it; the on-disk
+ * inode itself persists independently of the in-memory buffer.
+ * ------------------------------------------------------------------ */
+
+typedef struct fifo_reg {
+    uint32_t dev;
+    uint64_t inum;
+    pipe_t  *pipe;
+    int      refcount;       /* number of live endpoints */
+    struct fifo_reg *next;
+} fifo_reg_t;
+
+static fifo_reg_t *g_fifo_registry;
+static mutex_t     g_fifo_reg_lock;
+static int         g_fifo_reg_lock_inited;
+
+static void fifo_reg_lock_init(void) {
+    if (!g_fifo_reg_lock_inited) {
+        mutex_init(&g_fifo_reg_lock, "fifo_registry");
+        g_fifo_reg_lock_inited = 1;
+    }
+}
+
+/* Returns 0 on normal wake (data arrived, peer closed, etc.) and
+ * -EINTR if psignal yanked us out via signal_interrupt_thread.
+ * Order is load-bearing: set THREAD_F_INTERRUPTIBLE before letting
+ * the thread land in THREAD_BLOCKED so psignal scans see the flag
+ * and actually call signal_interrupt_thread on us. */
+static int pipe_wait(void *chan, mutex_t *m) {
+    current_thread->flags |= THREAD_F_INTERRUPTIBLE;
     sleepq_add(chan, current_thread);
     mutex_unlock(m);
     if (current_thread->wait_chan == chan) {
         sched_yield();
     }
     mutex_lock(m);
+    current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
+    if (current_thread->sig_pending & ~current_thread->sig_mask)
+        return -EINTR;
+    return 0;
 }
 
 static size_t pipe_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
@@ -60,7 +101,10 @@ static size_t pipe_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buf
             /* Caller treats the negative return as a syscall errno. */
             return (size_t)-EAGAIN;
         }
-        pipe_wait(p->wait_read, &p->lock);
+        if (pipe_wait(p->wait_read, &p->lock) == -EINTR) {
+            mutex_unlock(&p->lock);
+            return (size_t)-EINTR;
+        }
     }
 
     size_t i = 0;
@@ -104,7 +148,11 @@ static size_t pipe_write(fs_node_t *node, off_t offset, size_t size, const uint8
                 if (written > 0) return written;
                 return (size_t)-EAGAIN;
             }
-            pipe_wait(p->wait_write, &p->lock);
+            if (pipe_wait(p->wait_write, &p->lock) == -EINTR) {
+                mutex_unlock(&p->lock);
+                if (written > 0) return written;
+                return (size_t)-EINTR;
+            }
         }
 
         while (written < size && p->count < PIPE_SIZE) {
@@ -127,6 +175,7 @@ static void pipe_close(fs_node_t *node) {
     }
 
     pipe_t *p = ep->pipe;
+    fifo_reg_t *fifo = ep->fifo;
 
     mutex_lock(&p->lock);
     if (ep->is_writer) {
@@ -140,16 +189,40 @@ static void pipe_close(fs_node_t *node) {
         }
         sleepq_wake_all(p->wait_write);
     }
-    int free_pipe = (p->readers_open == 0 && p->writers_open == 0);
+    int can_free_pipe = (p->readers_open == 0 && p->writers_open == 0);
+    /* Anonymous pipes free as soon as both ends are gone.  FIFOs
+     * keep the pipe alive while the registry entry holds a refcount
+     * (in case a new open arrives before the close completes). */
+    int free_pipe_now = can_free_pipe && (fifo == NULL);
     mutex_unlock(&p->lock);
 
     node->impl = 0;
     kfree(ep, sizeof(*ep));
     kfree(node, sizeof(*node));
 
-    if (free_pipe) {
+    if (free_pipe_now) {
         kfree(p->buffer, PIPE_SIZE);
         kfree(p, sizeof(*p));
+    }
+
+    /* FIFO bookkeeping: drop the registry refcount and tear down
+     * the buffer only when the last opener is gone. */
+    if (fifo) {
+        mutex_lock(&g_fifo_reg_lock);
+        fifo->refcount--;
+        int drop = (fifo->refcount == 0);
+        if (drop) {
+            /* Unlink from registry */
+            fifo_reg_t **pp = &g_fifo_registry;
+            while (*pp && *pp != fifo) pp = &(*pp)->next;
+            if (*pp == fifo) *pp = fifo->next;
+        }
+        mutex_unlock(&g_fifo_reg_lock);
+        if (drop) {
+            kfree(fifo->pipe->buffer, PIPE_SIZE);
+            kfree(fifo->pipe, sizeof(*fifo->pipe));
+            kfree(fifo, sizeof(*fifo));
+        }
     }
 }
 
@@ -236,5 +309,183 @@ int pipe_set_nonblock(fs_node_t *node, int nonblock) {
     pipe_endpoint_t *ep = (pipe_endpoint_t *)(uintptr_t)node->impl;
     if (!ep) return -EINVAL;
     ep->nonblock = nonblock ? 1 : 0;
+    return 0;
+}
+
+/* ------------------------------------------------------------------ */
+/* fifo_open — open(2)-side handler for S_IFIFO inodes.
+ *
+ * Returns a freshly-allocated fs_node_t representing one end of the
+ * shared FIFO buffer.  Caller (sys_open) replaces the inode node in
+ * the file_t with this shadow node, so subsequent read/write hit
+ * the pipe buffer instead of the on-disk inode's blocks.
+ *
+ * POSIX blocking semantics on first open of each role:
+ *   O_RDONLY: block until a writer attaches (unless O_NONBLOCK).
+ *   O_WRONLY: block until a reader attaches (with O_NONBLOCK,
+ *             return ENXIO immediately if no reader).
+ *   O_RDWR  : Linux extension — never blocks, opener counts as
+ *             both a reader and a writer (we model it as a reader
+ *             so subsequent O_WRONLY can connect; the FD itself
+ *             can read AND write since the endpoint isn't role-
+ *             pinned at this level).
+ * ------------------------------------------------------------------ */
+
+/* O_* flag values match include/fcntl.h.  We can't include that
+ * here without dragging userspace headers into the kernel; mirror
+ * the bits inline. */
+#ifndef O_RDONLY
+#define O_RDONLY    0x00
+#endif
+#ifndef O_WRONLY
+#define O_WRONLY    0x01
+#endif
+#ifndef O_RDWR
+#define O_RDWR      0x02
+#endif
+#ifndef O_ACCMODE
+#define O_ACCMODE   0x03
+#endif
+#ifndef O_NONBLOCK
+#define O_NONBLOCK  0x800
+#endif
+
+static fifo_reg_t *fifo_lookup_or_create(uint32_t dev, uint64_t inum) {
+    fifo_reg_lock_init();
+    mutex_lock(&g_fifo_reg_lock);
+    fifo_reg_t *f = g_fifo_registry;
+    while (f) {
+        if (f->dev == dev && f->inum == inum) {
+            mutex_unlock(&g_fifo_reg_lock);
+            return f;
+        }
+        f = f->next;
+    }
+    /* Not found — allocate a new entry + its pipe_t. */
+    f = (fifo_reg_t *)kmalloc(sizeof(*f));
+    if (!f) { mutex_unlock(&g_fifo_reg_lock); return NULL; }
+    memset(f, 0, sizeof(*f));
+    f->dev  = dev;
+    f->inum = inum;
+    f->pipe = (pipe_t *)kmalloc(sizeof(pipe_t));
+    if (!f->pipe) { kfree(f, sizeof(*f)); mutex_unlock(&g_fifo_reg_lock); return NULL; }
+    memset(f->pipe, 0, sizeof(pipe_t));
+    f->pipe->buffer = (uint8_t *)kmalloc(PIPE_SIZE);
+    if (!f->pipe->buffer) {
+        kfree(f->pipe, sizeof(*f->pipe));
+        kfree(f, sizeof(*f));
+        mutex_unlock(&g_fifo_reg_lock);
+        return NULL;
+    }
+    memset(f->pipe->buffer, 0, PIPE_SIZE);
+    f->pipe->wait_read  = &f->pipe->head;
+    f->pipe->wait_write = &f->pipe->tail;
+    mutex_init(&f->pipe->lock, "fifo_pipe");
+    f->next = g_fifo_registry;
+    g_fifo_registry = f;
+    mutex_unlock(&g_fifo_reg_lock);
+    return f;
+}
+
+/* Build an fs_node_t endpoint pinned to a shared (FIFO) pipe_t.
+ * is_writer determines role; caller bumps refcount + role counters
+ * before publishing the node. */
+static fs_node_t *fifo_endpoint_new(fifo_reg_t *fifo, int is_writer) {
+    pipe_endpoint_t *ep = (pipe_endpoint_t *)kmalloc(sizeof(*ep));
+    if (!ep) return NULL;
+    fs_node_t *n = (fs_node_t *)kmalloc(sizeof(*n));
+    if (!n) { kfree(ep, sizeof(*ep)); return NULL; }
+    memset(ep, 0, sizeof(*ep));
+    memset(n, 0, sizeof(*n));
+    ep->pipe      = fifo->pipe;
+    ep->is_writer = is_writer ? 1 : 0;
+    ep->fifo      = fifo;
+    strncpy(n->name, is_writer ? "fifo_write" : "fifo_read",
+            sizeof(n->name) - 1);
+    n->name[sizeof(n->name) - 1] = '\0';
+    n->flags = FS_PIPE;
+    n->read  = &pipe_read;
+    n->write = &pipe_write;
+    n->close = &pipe_close;
+    n->impl  = (uintptr_t)ep;
+    return n;
+}
+
+int fifo_open(fs_node_t *inode, int oflags, fs_node_t **out) {
+    if (!inode || !out) return -EINVAL;
+    *out = NULL;
+
+    int accmode  = oflags & O_ACCMODE;
+    int nonblock = (oflags & O_NONBLOCK) ? 1 : 0;
+
+    fifo_reg_t *fifo = fifo_lookup_or_create(0 /*dev*/, inode->inode);
+    if (!fifo) return -ENOMEM;
+
+    int is_writer = (accmode == O_WRONLY);
+    fs_node_t *node = fifo_endpoint_new(fifo, is_writer);
+    if (!node) return -ENOMEM;
+
+    pipe_t *p = fifo->pipe;
+    mutex_lock(&p->lock);
+    /* Bump role counters + registry refcount before any potential
+     * wait — guarantees the pipe stays alive for the duration. */
+    if (accmode == O_RDONLY || accmode == O_RDWR) p->readers_open++;
+    if (accmode == O_WRONLY || accmode == O_RDWR) p->writers_open++;
+    mutex_lock(&g_fifo_reg_lock);
+    fifo->refcount++;
+    mutex_unlock(&g_fifo_reg_lock);
+
+    /* O_RDWR never blocks. */
+    if (accmode == O_RDONLY && !nonblock) {
+        while (p->writers_open == 0) {
+            sleepq_add(p->wait_read, current_thread);
+            mutex_unlock(&p->lock);
+            sched_yield();
+            mutex_lock(&p->lock);
+        }
+    } else if (accmode == O_WRONLY) {
+        if (p->readers_open == 0) {
+            if (nonblock) {
+                /* POSIX: open(O_WRONLY|O_NONBLOCK) on a FIFO with no
+                 * reader returns ENXIO. */
+                p->writers_open--;
+                sleepq_wake_all(p->wait_read);  /* paranoia */
+                mutex_unlock(&p->lock);
+                /* Decrement refcount + free node since open failed. */
+                mutex_lock(&g_fifo_reg_lock);
+                fifo->refcount--;
+                int drop = (fifo->refcount == 0);
+                if (drop) {
+                    fifo_reg_t **pp = &g_fifo_registry;
+                    while (*pp && *pp != fifo) pp = &(*pp)->next;
+                    if (*pp == fifo) *pp = fifo->next;
+                }
+                mutex_unlock(&g_fifo_reg_lock);
+                pipe_endpoint_t *ep = (pipe_endpoint_t *)(uintptr_t)node->impl;
+                kfree(ep, sizeof(*ep));
+                kfree(node, sizeof(*node));
+                if (drop) {
+                    kfree(fifo->pipe->buffer, PIPE_SIZE);
+                    kfree(fifo->pipe, sizeof(*fifo->pipe));
+                    kfree(fifo, sizeof(*fifo));
+                }
+                return -ENXIO;
+            }
+            while (p->readers_open == 0) {
+                sleepq_add(p->wait_write, current_thread);
+                mutex_unlock(&p->lock);
+                sched_yield();
+                mutex_lock(&p->lock);
+            }
+        }
+    }
+    /* Wake any open() peers that may be sleeping on us. */
+    if (accmode == O_RDONLY || accmode == O_RDWR) sleepq_wake_all(p->wait_write);
+    if (accmode == O_WRONLY || accmode == O_RDWR) sleepq_wake_all(p->wait_read);
+    mutex_unlock(&p->lock);
+
+    pipe_endpoint_t *ep = (pipe_endpoint_t *)(uintptr_t)node->impl;
+    ep->nonblock = nonblock;
+    *out = node;
     return 0;
 }
