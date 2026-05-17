@@ -887,7 +887,13 @@ static void fdc_register_drive(fdc_drive_t *drive) {
     drive->bdev.read = floppy_read;
     drive->bdev.write = floppy_write;
     drive->bdev.ioctl = floppy_ioctl;
-    blkdev_register_disk(&drive->bdev);
+    /* Plain register, NOT blkdev_register_disk — floppies don't get
+     * partition-scanned.  An MBR scan on a freshly-inserted disk
+     * spins the drive needlessly, takes seconds per probe, and on
+     * QEMU's emulated FDC has wedged the controller while the drive
+     * wasn't ready.  Floppy media is whole-disk filesystems
+     * (mkfs.fat /dev/fd0); there's no partition table to find.  */
+    blkdev_register(&drive->bdev);
     kprintf("fdc: %s %s registered (%llu sectors)\n",
             drive->bdev.name,
             drive->geom->name,
