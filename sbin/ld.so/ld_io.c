@@ -36,7 +36,15 @@ static long ld_syscall3(int nr, ld_u32 a, ld_u32 b, ld_u32 c) {
         "movl %1, %%esp\n\t"
         : "=a"(ret), "=&r"(saved)
         : "r"(stk), "0"(nr)
-        : "memory", "cc"
+        : "memory", "cc",
+          /* Substrate's syscall return path stuffs the high half of
+           * the 64-bit return into %edx — any caller that doesn't
+           * sign-extend (cdq) or re-load edx will pick up the
+           * clobbered value.  Without the explicit clobber GCC
+           * happily reuses edx for `stk` across calls, and the
+           * second int 0x80 swaps esp to whatever the kernel
+           * stuffed there.  Spell it out so GCC reloads.  */
+          "edx"
     );
     return ret;
 }
@@ -51,7 +59,15 @@ static long ld_syscall1(int nr, ld_u32 a) {
         "movl %1, %%esp\n\t"
         : "=a"(ret), "=&r"(saved)
         : "r"(stk), "0"(nr)
-        : "memory", "cc"
+        : "memory", "cc",
+          /* Substrate's syscall return path stuffs the high half of
+           * the 64-bit return into %edx — any caller that doesn't
+           * sign-extend (cdq) or re-load edx will pick up the
+           * clobbered value.  Without the explicit clobber GCC
+           * happily reuses edx for `stk` across calls, and the
+           * second int 0x80 swaps esp to whatever the kernel
+           * stuffed there.  Spell it out so GCC reloads.  */
+          "edx"
     );
     return ret;
 }
@@ -67,7 +83,15 @@ static long ld_syscall6(int nr, ld_u32 a, ld_u32 b, ld_u32 c,
         "movl %1, %%esp\n\t"
         : "=a"(ret), "=&r"(saved)
         : "r"(stk), "0"(nr)
-        : "memory", "cc"
+        : "memory", "cc",
+          /* Substrate's syscall return path stuffs the high half of
+           * the 64-bit return into %edx — any caller that doesn't
+           * sign-extend (cdq) or re-load edx will pick up the
+           * clobbered value.  Without the explicit clobber GCC
+           * happily reuses edx for `stk` across calls, and the
+           * second int 0x80 swaps esp to whatever the kernel
+           * stuffed there.  Spell it out so GCC reloads.  */
+          "edx"
     );
     return ret;
 }

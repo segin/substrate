@@ -40,6 +40,26 @@ rm -rf "${BUILD_DIR}"
 mkdir -p "${BUILD_DIR}"
 cd "${BUILD_DIR}"
 
+# Optional backends: enable each one only if its sibling contrib
+# port has been staged.  This keeps the libarchive build idempotent
+# whether you've built bzip2/zlib/xz first or not — substrate's
+# contribs each stage under dist-<name>/usr/, so a `[ -d ... ]`
+# test on the staged tree is the cleanest gate.  CFLAGS / LDFLAGS
+# pick up sibling headers + libs without polluting the live
+# substrate sysroot.
+ARCHIVE_BACKEND_CFLAGS=""
+ARCHIVE_BACKEND_LDFLAGS=""
+ARCHIVE_BZIP2_FLAG="--without-bz2lib"
+if [ -f "${SUBSTRATE_TOP}/dist-bzip2/usr/include/bzlib.h" ] &&
+   [ -f "${SUBSTRATE_TOP}/dist-bzip2/usr/lib/libbz2.so.1.0.8" ]; then
+    ARCHIVE_BACKEND_CFLAGS="${ARCHIVE_BACKEND_CFLAGS} -I${SUBSTRATE_TOP}/dist-bzip2/usr/include"
+    ARCHIVE_BACKEND_LDFLAGS="${ARCHIVE_BACKEND_LDFLAGS} -L${SUBSTRATE_TOP}/dist-bzip2/usr/lib"
+    ARCHIVE_BZIP2_FLAG=""
+    echo "==> bzip2 backend: ON (dist-bzip2 found)"
+else
+    echo "==> bzip2 backend: OFF (run contrib/bzip2/build.sh first)"
+fi
+
 # Many backends auto-detect at configure time; explicitly disable
 # anything substrate hasn't ported yet so the resulting binary
 # doesn't link against missing host libs.  Re-enable a backend by
@@ -54,7 +74,7 @@ cd "${BUILD_DIR}"
     --disable-bsdcat \
     --disable-bsdunzip \
     --without-zlib \
-    --without-bz2lib \
+    ${ARCHIVE_BZIP2_FLAG} \
     --without-libb2 \
     --without-iconv \
     --without-lz4 \
@@ -71,8 +91,8 @@ cd "${BUILD_DIR}"
     CC=i386-unknown-substrate-gcc \
     AR=i386-unknown-substrate-ar \
     RANLIB=i386-unknown-substrate-ranlib \
-    CFLAGS="-O2 -g -fno-pie" \
-    LDFLAGS="-fno-pie"
+    CFLAGS="-O2 -g -fno-pie ${ARCHIVE_BACKEND_CFLAGS}" \
+    LDFLAGS="-fno-pie ${ARCHIVE_BACKEND_LDFLAGS}"
 
 make -j"${JOBS}"
 

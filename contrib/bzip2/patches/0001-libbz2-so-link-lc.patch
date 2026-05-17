@@ -1,0 +1,26 @@
+Subject: Makefile-libbz2_so: add -lc to the -shared link
+
+Substrate's cross-ld elf_i386_substrate emulation only emits a
+.dynamic section (PT_DYNAMIC + DT_HASH + DT_STRTAB + ...) when the
+link line pulls in at least one DT_NEEDED — passing only object
+files produces an ET_DYN with NO dynamic-linking metadata, which
+the substrate ld.so can't load.
+
+Adding -lc makes the link explicitly NEEDED on libc.so.0; that
+nudges the linker into laying down PT_DYNAMIC and produces a
+proper shared library.  Same shape as the workaround OpenSSL uses
+(LDFLAGS=-lc).
+
+---
+diff -urN a/Makefile-libbz2_so b/Makefile-libbz2_so
+--- a/Makefile-libbz2_so
++++ b/Makefile-libbz2_so
+@@ -38,7 +38,7 @@
+       bzlib.o
+
+ all: $(OBJS)
+-	$(CC) -shared -Wl,-soname -Wl,libbz2.so.1.0 -o libbz2.so.1.0.8 $(OBJS)
++	$(CC) -shared -Wl,-soname -Wl,libbz2.so.1.0 -o libbz2.so.1.0.8 $(OBJS) -lc
+ 	$(CC) $(CFLAGS) -o bzip2-shared bzip2.c libbz2.so.1.0.8
+ 	rm -f libbz2.so.1.0
+ 	rm -f libbz2.so.1
