@@ -697,6 +697,7 @@ ssize_t tcp_send(tcp_pcb_t *p, const void *buf, size_t len) {
 
 ssize_t tcp_recv_nb(tcp_pcb_t *p, void *buf, size_t len) {
     if (p->rx_count > 0) {
+        size_t prev_count = p->rx_count;
         size_t n = p->rx_count < len ? p->rx_count : len;
         uint8_t *b = (uint8_t *)buf;
         for (size_t i = 0; i < n; i++) {
@@ -704,6 +705,21 @@ ssize_t tcp_recv_nb(tcp_pcb_t *p, void *buf, size_t len) {
             p->rx_tail = (p->rx_tail + 1) % TCP_RING_LEN;
         }
         p->rx_count -= n;
+        /* Window-update ACK: peer may have been throttled by our
+         * shrinking window.  If we've freed at least one MSS of
+         * receive space, fire a bare ACK so the peer knows it can
+         * resume.  Without this the connection stalls until the
+         * peer's zero-window-probe timer fires (10+ seconds),
+         * which looks like a hang in interactive curl downloads.
+         * Matches BSD's silly-window-syndrome avoidance shape.  */
+        size_t old_wnd = TCP_RING_LEN - prev_count;
+        size_t new_wnd = TCP_RING_LEN - p->rx_count;
+        if (new_wnd >= old_wnd + TCP_MSS &&
+            (p->state == TCP_ESTABLISHED ||
+             p->state == TCP_FIN_WAIT_1  ||
+             p->state == TCP_FIN_WAIT_2)) {
+            tcp_send_ctl(p, TCP_ACK);
+        }
         return (ssize_t)n;
     }
     if (p->state == TCP_CLOSE_WAIT || p->state == TCP_CLOSED) return 0;
