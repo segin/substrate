@@ -33,6 +33,103 @@
 #define EXT2_ROOT_INO      2
 #define EXT2_GOOD_OLD_INODE_SIZE 128
 
+/* Inode flags (i_flags) — substrate handles a subset.  The ext4
+ * EXTENTS flag is the load-bearing one: when set, i_block[] is
+ * NOT the legacy 12-direct/1-indir/2-indir/3-indir pointer array,
+ * it's an inline ext4_extent_header followed by extents/indexes.
+ * Reading the file requires walking the extent tree.  */
+#define EXT4_EXTENTS_FL    0x00080000
+
+/* Feature flag groups — sb.s_feature_{compat,incompat,ro_compat}.
+ * Definitions taken verbatim from FreeBSD's ext2fs/ext2fs.h for
+ * cross-reference clarity.  */
+#define EXT2F_COMPAT_PREALLOC         0x0001
+#define EXT2F_COMPAT_IMAGIC_INODES    0x0002
+#define EXT2F_COMPAT_HASJOURNAL       0x0004   /* ext3+ */
+#define EXT2F_COMPAT_EXT_ATTR         0x0008
+#define EXT2F_COMPAT_RESIZE           0x0010
+#define EXT2F_COMPAT_DIRHASHINDEX     0x0020   /* htree dir index */
+#define EXT2F_COMPAT_LAZY_BG          0x0040
+#define EXT2F_COMPAT_EXCLUDE_BITMAP   0x0100
+#define EXT2F_COMPAT_SPARSESUPER2     0x0200
+
+#define EXT2F_ROCOMPAT_SPARSESUPER    0x0001
+#define EXT2F_ROCOMPAT_LARGEFILE      0x0002   /* >2GB files */
+#define EXT2F_ROCOMPAT_BTREE_DIR      0x0004
+#define EXT2F_ROCOMPAT_HUGE_FILE      0x0008
+#define EXT2F_ROCOMPAT_GDT_CSUM       0x0010
+#define EXT2F_ROCOMPAT_DIR_NLINK      0x0020
+#define EXT2F_ROCOMPAT_EXTRA_ISIZE    0x0040   /* nsec timestamps */
+#define EXT2F_ROCOMPAT_HAS_SNAPSHOT   0x0080
+#define EXT2F_ROCOMPAT_QUOTA          0x0100
+#define EXT2F_ROCOMPAT_BIGALLOC       0x0200
+#define EXT2F_ROCOMPAT_METADATA_CKSUM 0x0400
+#define EXT2F_ROCOMPAT_READONLY       0x1000
+#define EXT2F_ROCOMPAT_PROJECT        0x2000
+
+#define EXT2F_INCOMPAT_COMP           0x0001
+#define EXT2F_INCOMPAT_FTYPE          0x0002   /* dirent file_type */
+#define EXT2F_INCOMPAT_RECOVER        0x0004   /* needs journal replay */
+#define EXT2F_INCOMPAT_JOURNAL_DEV    0x0008
+#define EXT2F_INCOMPAT_META_BG        0x0010
+#define EXT2F_INCOMPAT_EXTENTS        0x0040   /* ext4 extent tree */
+#define EXT2F_INCOMPAT_64BIT          0x0080   /* >2^32 blocks */
+#define EXT2F_INCOMPAT_MMP            0x0100
+#define EXT2F_INCOMPAT_FLEX_BG        0x0200
+#define EXT2F_INCOMPAT_CSUM_SEED      0x2000
+
+/* The set we support.  Anything outside SUPP triggers a refuse-mount
+ * (INCOMPAT) or ro-only mount (ROCOMPAT).  COMPAT bits never block
+ * a mount, they're informational.  */
+#define EXT2F_INCOMPAT_SUPP   (EXT2F_INCOMPAT_FTYPE | \
+                               EXT2F_INCOMPAT_META_BG | \
+                               EXT2F_INCOMPAT_EXTENTS | \
+                               EXT2F_INCOMPAT_FLEX_BG)
+#define EXT2F_ROCOMPAT_SUPP   (EXT2F_ROCOMPAT_SPARSESUPER | \
+                               EXT2F_ROCOMPAT_LARGEFILE | \
+                               EXT2F_ROCOMPAT_DIR_NLINK | \
+                               EXT2F_ROCOMPAT_HUGE_FILE | \
+                               EXT2F_ROCOMPAT_EXTRA_ISIZE | \
+                               EXT2F_ROCOMPAT_GDT_CSUM | \
+                               EXT2F_ROCOMPAT_METADATA_CKSUM)
+
+/* ext4 extent tree (when i_flags & EXT4_EXTENTS_FL).
+ * Header sits at i_block[0..11] (60 bytes); contains up to 4
+ * inline extents at depth 0, or up to 4 indexes pointing to
+ * deeper levels.  Each level lives in one fs block — its own
+ * header + array of leaf extents or indexes.  See FreeBSD's
+ * fs/ext2fs/ext2_extents.h for the canonical reference.  */
+#define EXT4_EXT_MAGIC          0xF30A
+#define EXT4_EXT_DEPTH_MAX      5
+
+typedef struct {
+    uint16_t eh_magic;     /* 0xF30A */
+    uint16_t eh_ecount;    /* valid entries in this node */
+    uint16_t eh_max;       /* capacity of this node */
+    uint16_t eh_depth;     /* 0 = leaf (extents); >0 = index */
+    uint32_t eh_gen;
+} __attribute__((packed)) ext4_extent_header_t;
+
+/* Leaf-level entry: maps logical block range to physical range. */
+typedef struct {
+    uint32_t e_blk;        /* first logical block */
+    uint16_t e_len;        /* number of blocks (initialised when
+                              top bit is 0; uninitialised extent
+                              for sparse-region preallocation when
+                              top bit is set — we treat both the
+                              same on read) */
+    uint16_t e_start_hi;   /* high 16 bits of physical block */
+    uint32_t e_start_lo;   /* low 32 bits */
+} __attribute__((packed)) ext4_extent_t;
+
+/* Index node entry: points to a child node holding more entries. */
+typedef struct {
+    uint32_t ei_blk;       /* first logical block covered */
+    uint32_t ei_leaf_lo;   /* low 32 bits of child node phys block */
+    uint16_t ei_leaf_hi;   /* high 16 bits */
+    uint16_t ei_unused;
+} __attribute__((packed)) ext4_extent_idx_t;
+
 // Superblock (at offset 1024)
 typedef struct {
     uint32_t s_inodes_count;

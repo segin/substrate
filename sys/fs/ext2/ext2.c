@@ -332,10 +332,80 @@ int ext2_write_inode(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_t *inode) {
 
 // Get block number for a given file block index (handles indirect blocks)
 // Requires caller-provided scratch buffers (each size of block_size)
+/* ext4 extent-tree resolver — translate a logical file-block index
+ * into the physical block on disk by walking the inline extent
+ * header at i_block[] and (if depth > 0) chasing index nodes down
+ * to the leaf level.  Returns 0 for holes (logical block not
+ * covered by any extent) or for any error.
+ *
+ * Substrate's block addresses are uint32_t, so the high 16 bits of
+ * the ext4 48-bit physical address are clamped — fine for any
+ * filesystem under 16 TiB.  Add 64-bit-block lookup when we
+ * actually grow a >2^32-block target.  */
+static uint32_t ext4_extent_resolve(ext2_fs_t *fs, ext2_inode_t *inode,
+                                    uint32_t logical, uint8_t *scratch) {
+    /* Start at the inline header in the inode itself.  */
+    ext4_extent_header_t *eh = (ext4_extent_header_t *)&inode->i_block[0];
+    if (eh->eh_magic != EXT4_EXT_MAGIC) return 0;
+
+    /* Walk indexes down to depth 0.  At each level pick the rightmost
+     * index whose ei_blk <= logical — that's the child covering this
+     * logical block.  */
+    uint8_t *node = (uint8_t *)&inode->i_block[0];
+    for (int depth = eh->eh_depth; depth > 0; depth--) {
+        ext4_extent_idx_t *idx = (ext4_extent_idx_t *)(node + sizeof(*eh));
+        int n = eh->eh_ecount;
+        if (n <= 0) return 0;
+        int pick = -1;
+        for (int i = 0; i < n; i++) {
+            if (idx[i].ei_blk <= logical) pick = i;
+            else break;
+        }
+        if (pick < 0) return 0;
+        uint64_t child = ((uint64_t)idx[pick].ei_leaf_hi << 32)
+                       | idx[pick].ei_leaf_lo;
+        if (child == 0 || child >> 32) return 0;
+        ext2_read_block(fs, (uint32_t)child, scratch);
+        node = scratch;
+        eh = (ext4_extent_header_t *)node;
+        if (eh->eh_magic != EXT4_EXT_MAGIC) return 0;
+    }
+
+    /* Leaf level: array of extents.  Each extent covers
+     * [e_blk, e_blk + e_len).  Find the one containing `logical`.  */
+    ext4_extent_t *ex = (ext4_extent_t *)(node + sizeof(*eh));
+    int n = eh->eh_ecount;
+    for (int i = 0; i < n; i++) {
+        uint32_t ext_start = ex[i].e_blk;
+        /* Uninitialised extent's e_len has the high bit set; mask
+         * it for length math (data still reads as zeros, but the
+         * extent does cover the range).  */
+        uint32_t len = ex[i].e_len & 0x7FFF;
+        if (logical >= ext_start && logical < ext_start + len) {
+            uint64_t phys = ((uint64_t)ex[i].e_start_hi << 32)
+                          | ex[i].e_start_lo;
+            phys += (logical - ext_start);
+            if (phys >> 32) return 0;   /* needs 64-bit block addr */
+            return (uint32_t)phys;
+        }
+    }
+    /* Hole.  Sparse files have unreferenced ranges; the caller
+     * reads zeros for them.  */
+    return 0;
+}
+
 uint32_t ext2_get_block_num(ext2_fs_t *fs, ext2_inode_t *inode, uint32_t block_idx,
                                    uint32_t *indirect_buf, uint32_t *dindirect_buf, uint32_t *tindirect_buf) {
+    /* ext4 extent-tree path takes over completely when the flag is
+     * set on the inode.  i_block[] is overlaid with the extent
+     * header in that case, NOT the legacy 12+1+1+1 array.  */
+    if (inode->i_flags & EXT4_EXTENTS_FL) {
+        return ext4_extent_resolve(fs, inode, block_idx,
+                                   (uint8_t *)indirect_buf);
+    }
+
     uint32_t ptrs_per_block = fs->block_size / 4;
-    
+
     // Direct blocks (0-11)
     if (block_idx < 12) {
         return inode->i_block[block_idx];
@@ -1302,7 +1372,50 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
         kfree(fs, sizeof(ext2_fs_t));
         return NULL;
     }
-    
+
+    /* Feature-flag gate.  Refuse mounts when the filesystem
+     * advertises an INCOMPAT bit we don't understand (writing
+     * blindly would corrupt structures we can't parse).  For
+     * unsupported ROCOMPAT bits, we'd want to force a ro-mount;
+     * substrate doesn't have a read-only mount flag yet, so we
+     * just warn and proceed — a future commit should plumb
+     * MS_RDONLY through and refuse rw mounts here.  COMPAT bits
+     * never block.  */
+    if (fs->sb.s_rev_level >= 1) {
+        uint32_t bad_inc = fs->sb.s_feature_incompat & ~EXT2F_INCOMPAT_SUPP;
+        if (bad_inc) {
+            extern int kprintf(const char *, ...);
+            kprintf("ext2: mount refused — unsupported INCOMPAT features 0x%08x\n", bad_inc);
+            if (bad_inc & EXT2F_INCOMPAT_JOURNAL_DEV)
+                kprintf("ext2:   journal device (ext3+ external journal)\n");
+            if (bad_inc & EXT2F_INCOMPAT_RECOVER)
+                kprintf("ext2:   needs journal replay — won't mount dirty ext3/4\n");
+            if (bad_inc & EXT2F_INCOMPAT_64BIT)
+                kprintf("ext2:   64-bit block addresses\n");
+            if (bad_inc & EXT2F_INCOMPAT_MMP)
+                kprintf("ext2:   multi-mount protection\n");
+            if (bad_inc & EXT2F_INCOMPAT_CSUM_SEED)
+                kprintf("ext2:   metadata csum seed\n");
+            kfree(fs, sizeof(ext2_fs_t));
+            return NULL;
+        }
+        uint32_t bad_ro = fs->sb.s_feature_ro_compat & ~EXT2F_ROCOMPAT_SUPP;
+        if (bad_ro) {
+            extern int kprintf(const char *, ...);
+            kprintf("ext2: mount warning — unsupported ROCOMPAT features 0x%08x; "
+                    "should be ro but substrate has no ro-mount flag yet\n", bad_ro);
+        }
+        /* Informational: log which ext3/ext4 features are present.  */
+        if (fs->sb.s_feature_compat & EXT2F_COMPAT_HASJOURNAL) {
+            extern int kprintf(const char *, ...);
+            kprintf("ext2: ext3+ journal present (ignored — read-only journal use)\n");
+        }
+        if (fs->sb.s_feature_incompat & EXT2F_INCOMPAT_EXTENTS) {
+            extern int kprintf(const char *, ...);
+            kprintf("ext2: ext4 extents enabled — extent-tree files supported\n");
+        }
+    }
+
     fs->device = dev;
 
     // Validate s_log_block_size before shifting (max 64KB blocks, i.e. log=6)
