@@ -138,6 +138,14 @@ void idt_init(void) {
     idt_set_gate(IDT_SYSCALL_VECTOR, (uint32_t)isr128,
                  KERNEL_CODE_SELECTOR, IDT_FLAG_USER_INT_GATE);
 
+    /* Panic IPI (0xFB).  Handler is a bare cli;hlt loop in isr.S —
+     * intentionally bypasses the common stub since we never return. */
+    {
+        extern void isr_panic_ipi(void);
+        idt_set_gate(0xFB, (uint32_t)(uintptr_t)isr_panic_ipi,
+                     KERNEL_CODE_SELECTOR, IDT_FLAG_KERNEL_INT_GATE);
+    }
+
     idt_flush((uint32_t)&idt_ptr);
 }
 
