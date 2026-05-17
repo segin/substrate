@@ -86,6 +86,36 @@ extern "C" {
 #define PRIxFAST32 PRIx32
 #define PRIxFAST64 PRIx64
 
+/* SCN<conv>LEAST<N> and SCN<conv>FAST<N> — same widths as the
+ * exact-width SCN<conv>N, since stdint.h's _least_ / _fast_
+ * typedefs alias the exact-width N versions on substrate.  Required
+ * by C99 §7.8.1 for code that scans into int_fast64_t etc.  */
+#define SCNdLEAST8  SCNd8
+#define SCNdLEAST16 SCNd16
+#define SCNdLEAST32 SCNd32
+#define SCNdLEAST64 SCNd64
+#define SCNuLEAST8  SCNu8
+#define SCNuLEAST16 SCNu16
+#define SCNuLEAST32 SCNu32
+#define SCNuLEAST64 SCNu64
+#define SCNxLEAST8  SCNx8
+#define SCNxLEAST16 SCNx16
+#define SCNxLEAST32 SCNx32
+#define SCNxLEAST64 SCNx64
+
+#define SCNdFAST8   SCNd8
+#define SCNdFAST16  SCNd32
+#define SCNdFAST32  SCNd32
+#define SCNdFAST64  SCNd64
+#define SCNuFAST8   SCNu8
+#define SCNuFAST16  SCNu32
+#define SCNuFAST32  SCNu32
+#define SCNuFAST64  SCNu64
+#define SCNxFAST8   SCNx8
+#define SCNxFAST16  SCNx32
+#define SCNxFAST32  SCNx32
+#define SCNxFAST64  SCNx64
+
 /* Pointer */
 #define PRIdPTR "d"
 #define PRIuPTR "u"
