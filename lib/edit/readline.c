@@ -620,8 +620,24 @@ static int default_filename_complete(EditLine *el) {
 }
 
 static size_t get_terminal_columns(EditLine *el) {
-    if (el && el->term.cols > 0)
-        return (size_t)el->term.cols;
+    /* Re-query every call.  SIGWINCH delivery is unreliable on
+     * substrate's getty/PTY chain and even when it does fire the
+     * user-visible symptom of a stale cached column count is
+     * permanently garbled line editing for wrapped input.  One
+     * ioctl per refresh is cheap; fall through to el->term.cols if
+     * the ioctl fails (test pipes, non-tty fouts) so the legacy
+     * cache still wins.  */
+    if (el) {
+        struct winsize ws;
+        if (el->fout &&
+            ioctl(fileno(el->fout), TIOCGWINSZ, &ws) == 0 &&
+            ws.ws_col > 0) {
+            el->term.cols = ws.ws_col;
+            if (ws.ws_row > 0) el->term.rows = ws.ws_row;
+            return (size_t)ws.ws_col;
+        }
+        if (el->term.cols > 0) return (size_t)el->term.cols;
+    }
     return 80;
 }
 
