@@ -25,10 +25,95 @@ time_t boot_time = 0;
 
 static uint64_t ticks = 0;
 
+/*
+ * TSC-based sub-tick interpolation.  HZ is 128 (≈7.8 ms per tick); without
+ * a finer source any RTT shorter than a tick quantizes to a multiple of
+ * 7.8 ms and gettimeofday's tv_usec is useless for things like ping(8).
+ * We calibrate the TSC against the PIT at boot, then in the timer ISR
+ * snapshot `tsc_at_last_tick` so gettimeofday / clock_gettime can add
+ * `(rdtsc() - tsc_at_last_tick) / tsc_hz` worth of nanoseconds on top of
+ * the tick-aligned base.
+ */
+static uint64_t tsc_hz             = 0;       /* 0 = uncalibrated, fall back */
+static uint64_t tsc_at_last_tick   = 0;
+static uint64_t tsc_ns_per_tick    = 0;       /* 1e9 / HZ, precomputed */
+
+extern uint64_t i386_cpu_cycle_counter(void);
+extern int      i386_cpu_has_tsc(void);
+
 #define PIT_FREQUENCY 1193182U
 #define PIT_CHANNEL0  0x40U
+#define PIT_CHANNEL2  0x42U
 #define PIT_COMMAND   0x43U
 #define PIT_MODE_RATE_GENERATOR 0x34U
+/* PIT channel 2 one-shot, lobyte/hibyte access, mode 0 (interrupt on
+ * terminal count), binary count.  Gated by NMI status/ctrl port 0x61 bit 0. */
+#define PIT_MODE2_ONESHOT       0xB0U
+#define NMI_STATUS_CONTROL      0x61U
+
+/*
+ * Calibrate TSC frequency by polling PIT channel 2 for a known interval.
+ * Called once at timer_init.  Result in `tsc_hz`; 0 means calibration
+ * failed and we'll skip the interpolation.
+ */
+static void tsc_calibrate(void) {
+    if (!i386_cpu_has_tsc()) return;
+
+    /* Program PIT ch2 for a one-shot of ~50ms (calibrate_us microseconds).
+     * Count = PIT_FREQUENCY * us / 1_000_000.  50ms is large enough to
+     * dominate sampling jitter and small enough that the count fits in
+     * 16 bits (50000us * 1193182 / 1e6 = 59659 — fits). */
+    const uint32_t calibrate_us = 50000;
+    uint32_t count = (uint32_t)((uint64_t)PIT_FREQUENCY * calibrate_us / 1000000U);
+    if (count == 0 || count > 0xFFFFU) return;
+
+    /* Disable speaker, enable PIT2 gate */
+    uint8_t prev = inb(NMI_STATUS_CONTROL);
+    outb(NMI_STATUS_CONTROL, (uint8_t)((prev & ~0x02U) | 0x01U));
+
+    outb(PIT_COMMAND, PIT_MODE2_ONESHOT);
+    outb(PIT_CHANNEL2, (uint8_t)(count & 0xFFU));
+    outb(PIT_CHANNEL2, (uint8_t)((count >> 8) & 0xFFU));
+
+    uint64_t tsc_start = i386_cpu_cycle_counter();
+    /* Wait for OUT2 (bit 5 of port 0x61) to go high — terminal count reached. */
+    while ((inb(NMI_STATUS_CONTROL) & 0x20U) == 0) {
+        /* spin */
+    }
+    uint64_t tsc_end = i386_cpu_cycle_counter();
+
+    /* Restore the NMI/SC port. */
+    outb(NMI_STATUS_CONTROL, prev);
+
+    uint64_t cycles = tsc_end - tsc_start;
+    /* tsc_hz = cycles / (calibrate_us / 1e6) = cycles * 1e6 / calibrate_us */
+    tsc_hz = (cycles * 1000000ULL) / calibrate_us;
+    tsc_ns_per_tick = 1000000000ULL / HZ;
+    tsc_at_last_tick = i386_cpu_cycle_counter();
+    extern int kprintf(const char *fmt, ...);
+    kprintf("timer: TSC calibrated at %u MHz (%llu Hz)\n",
+            (unsigned)(tsc_hz / 1000000ULL),
+            (unsigned long long)tsc_hz);
+}
+
+/*
+ * Sub-tick nanoseconds since the most recent timer tick, computed from
+ * the TSC.  Returns 0 if calibration hasn't run or TSC isn't available.
+ * Clamped to one tick's worth of nanoseconds so a missed snapshot
+ * doesn't make tv_nsec overflow into next-second territory.
+ */
+static uint64_t subtick_nsec(void) {
+    if (tsc_hz == 0) return 0;
+    uint64_t snap = tsc_at_last_tick;
+    uint64_t now  = i386_cpu_cycle_counter();
+    if (now <= snap) return 0;
+    uint64_t delta = now - snap;
+    /* ns = delta * 1e9 / tsc_hz; avoid overflow by using a slightly
+     * lossier scaled form. */
+    uint64_t ns = (delta / (tsc_hz / 1000000ULL + 1)) * 1000ULL;
+    if (ns >= tsc_ns_per_tick) ns = tsc_ns_per_tick - 1;
+    return ns;
+}
 
 static int proc_itimer_index(int which) {
     switch (which) {
@@ -170,6 +255,11 @@ void proc_timers_cancel(process_t *p) {
 void timer_init(void) {
     uint32_t divisor;
 
+    /* Calibrate TSC against PIT channel 2 BEFORE we program channel 0 for
+     * periodic ticks.  Doing it first keeps the calibration deterministic
+     * (no IRQs touching channel 0 mid-poll). */
+    tsc_calibrate();
+
     divisor = (PIT_FREQUENCY + (HZ / 2U)) / HZ;
     if (divisor == 0) {
         divisor = 1;
@@ -224,17 +314,25 @@ int kern_stime(time_t *t) {
 }
 int kern_gettimeofday(struct timeval *tv, struct timezone *tz) {
     if (!tv) return -1;
-    
+
     time_t total_seconds = boot_time + (ticks / HZ);
-    
+    uint64_t base_usec = ((ticks % HZ) * 1000000ULL) / HZ;
+    base_usec += subtick_nsec() / 1000ULL;
+    if (base_usec >= 1000000ULL) {
+        /* Sub-tick overflowed past a full second — unlikely (capped to
+         * <tick worth of ns) but defensive. */
+        total_seconds += (time_t)(base_usec / 1000000ULL);
+        base_usec %= 1000000ULL;
+    }
+
     tv->tv_sec = total_seconds;
-    tv->tv_usec = (suseconds_t)(((ticks % HZ) * 1000000) / HZ);
-    
+    tv->tv_usec = (suseconds_t)base_usec;
+
     if (tz) {
         tz->tz_minuteswest = 0;
         tz->tz_dsttime = 0;
     }
-    
+
     return 0;
 }
 
@@ -245,19 +343,25 @@ int kern_gettimeofday(struct timeval *tv, struct timezone *tz) {
 
 int kern_clock_gettime(clockid_t clk_id, struct timespec *tp) {
     if (!tp) return -1;
-    
+
+    time_t sec_base;
     if (clk_id == CLOCK_REALTIME) {
-        time_t total_seconds = boot_time + (ticks / HZ);
-        tp->tv_sec = total_seconds;
-        tp->tv_nsec = (long)(((ticks % HZ) * 1000000000) / HZ);
+        sec_base = boot_time + (ticks / HZ);
     } else if (clk_id == CLOCK_MONOTONIC) {
-        time_t uptime = ticks / HZ;
-        tp->tv_sec = uptime;
-        tp->tv_nsec = (long)(((ticks % HZ) * 1000000000) / HZ);
+        sec_base = (time_t)(ticks / HZ);
     } else {
         return -1;
     }
-    
+
+    uint64_t nsec = ((ticks % HZ) * 1000000000ULL) / HZ;
+    nsec += subtick_nsec();
+    if (nsec >= 1000000000ULL) {
+        sec_base += (time_t)(nsec / 1000000000ULL);
+        nsec %= 1000000000ULL;
+    }
+
+    tp->tv_sec  = sec_base;
+    tp->tv_nsec = (long)nsec;
     return 0;
 }
 
@@ -419,6 +523,7 @@ void timer_tick_context(int is_usermode) {
      */
     if (cpu_id == 0) {
         ticks++;
+        if (tsc_hz != 0) tsc_at_last_tick = i386_cpu_cycle_counter();
         sched_tick();
         hw_text_tick();
         fb_console_tick();
@@ -438,8 +543,16 @@ void timer_tick_context(int is_usermode) {
     }
 
     if (current_process && current_process->pid != -1 && !current_process->is_kernel_task) {
+        /* CPU accounting: charge this tick to user or system time of
+         * the running process.  utime/stime are uint32_t in HZ ticks
+         * (POSIX SC_CLK_TCK semantics).  Reads via sys_proc_info,
+         * sys_times, getrusage, and procfs all consume these fields.
+         * Without this, ps' TIME column was always 00:00:00. */
         if (is_usermode) {
+            current_process->utime++;
             proc_timer_fire(current_process, ITIMER_VIRTUAL);
+        } else {
+            current_process->stime++;
         }
         proc_timer_fire(current_process, ITIMER_PROF);
     }
