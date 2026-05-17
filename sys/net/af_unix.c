@@ -793,7 +793,6 @@ int sys_getsockopt(int fd, int level, int optname,
             int err = afinet_so_error(fd);
             *(int *)optval = err;
             *optlen = sizeof(int);
-            kprintf("getsockopt(SO_ERROR) fd=%d -> %d\n", fd, err);
             return 0;
         }
     }

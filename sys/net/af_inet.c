@@ -330,8 +330,6 @@ static size_t afinet_node_write(fs_node_t *node, off_t off, size_t size, const u
     if (!s || s->closed) return 0;
     if (s->type == SOCK_STREAM && s->tcp) {
         ssize_t n = tcp_send(s->tcp, buf, size);
-        kprintf("write(SOCK_STREAM, len=%u) -> %d\n",
-                (unsigned)size, (int)n);
         return n < 0 ? (size_t)n : (size_t)n;
     }
     /* write() without an address only works on a connected DGRAM socket. */
@@ -660,23 +658,15 @@ ssize_t afinet_sendto(int fd, const void *buf, size_t len, int flags,
                       const void *addr, socklen_t addrlen) {
     (void)flags;
     afi_sock_t *s = afi_from_fd(fd);
-    if (!s) { kprintf("sendto(fd=%d) -> ENOTSOCK\n", fd); return -ENOTSOCK; }
-    if (!buf || len == 0) {
-        kprintf("sendto(fd=%d len=%u addr=%p) -> EINVAL\n",
-                fd, (unsigned)len, addr);
-        return -EINVAL;
-    }
-    kprintf("sendto(fd=%d len=%u type=%d connected=%d addr=%p)\n",
-            fd, (unsigned)len, s->type, s->connected, addr);
-    /* TCP path: data on a connected stream socket goes through the
-     * tcp_send queue regardless of whether the caller passed an
-     * addr.  This was previously a foot-gun — curl uses sendto()
-     * with addr=NULL on a connected stream, and we fell into the
-     * UDP path below, looking for a dest addr that wasn't there.  */
+    if (!s) return -ENOTSOCK;
+    if (!buf || len == 0) return -EINVAL;
+    /* TCP: connected stream socket goes through the tcp_send queue
+     * regardless of whether the caller passed an addr.  Previously
+     * a foot-gun — curl uses sendto() with addr=NULL on a connected
+     * stream, and we fell into the UDP path below, looking for a
+     * dest addr that wasn't there.  */
     if (s->type == SOCK_STREAM && s->tcp) {
-        ssize_t n = tcp_send(s->tcp, buf, len);
-        kprintf("sendto[TCP] -> %d\n", (int)n);
-        return n;
+        return tcp_send(s->tcp, buf, len);
     }
 
     /* Resolve target addr/port. */
@@ -764,11 +754,8 @@ ssize_t afinet_recvfrom(int fd, void *buf, size_t len, int flags,
                         ? current_process->fds[fd] : NULL;
         int nb = (flags & 0x40 /*MSG_DONTWAIT*/) ||
                  (f && (f->f_flag & FNONBLOCK));
-        ssize_t r = nb ? tcp_recv_nb(s->tcp, buf, len)
-                       : tcp_recv   (s->tcp, buf, len);
-        kprintf("recv(fd=%d, len=%u, nb=%d) -> %d\n",
-                fd, (unsigned)len, nb, (int)r);
-        return r;
+        return nb ? tcp_recv_nb(s->tcp, buf, len)
+                  : tcp_recv   (s->tcp, buf, len);
     }
 
     for (;;) {
