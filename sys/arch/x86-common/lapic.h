@@ -75,6 +75,11 @@
 
 // TLB Shootdown IPI vector (must not conflict with hardware IRQs)
 #define TLB_SHOOTDOWN_VECTOR    0xFE
+// Scheduler preemption IPI (defined in kern/sched.h, value 0xFD)
+// Panic IPI: one CPU panics, sends this to every other CPU so they
+// halt instead of continuing to schedule userspace.  Handler stub
+// is isr_panic_ipi in arch/i386/isr.S and arch/x86_64/isr.S.
+#define PANIC_IPI_VECTOR        0xFB
 
 // Initialization and configuration
 void lapic_init(void);
