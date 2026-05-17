@@ -10,6 +10,13 @@
 #include <stdio.h>
 #include <string.h>
 
+/* Cross-arch LAPIC IPI sender; halts other CPUs by jumping them into
+ * isr_panic_ipi (vector PANIC_IPI_VECTOR = 0xFB). */
+#ifndef HOST_TEST
+extern void lapic_send_ipi_all_excl_self(uint8_t vector);
+extern int  lapic_is_initialized(void);
+#endif
+
 // Forward decls
 void vga_text_set_color(uint8_t fg, uint8_t bg);
 extern int copyin(const void *, void *, unsigned int);
@@ -145,10 +152,27 @@ static void panic_dump_regs(const registers_t *regs) {
     panic_dump_stack_words(fault_esp, is_user);
 }
 
+static void panic_stop_other_cpus(void) {
+#ifndef HOST_TEST
+    /* Send PANIC_IPI to every CPU except this one.  Each remote CPU's
+     * isr_panic_ipi stub does an immediate cli;hlt;jmp$, so they stop
+     * scheduling user processes and stay halted while we print the
+     * panic message.  Without this an AP would happily keep running
+     * init / playing MP3s / accepting VT logins after the BSP
+     * crashed. */
+    if (lapic_is_initialized()) {
+        lapic_send_ipi_all_excl_self(0xFB /* PANIC_IPI_VECTOR */);
+    }
+#endif
+}
+
 static void panic_emit_header(const char *msg) {
 #ifndef HOST_TEST
-    /* Disable interrupts immediately */
+    /* Disable interrupts immediately, then halt every other CPU
+     * BEFORE we start any printing — otherwise an AP would still
+     * be running while we're trying to render the red header. */
     __asm__ volatile("cli");
+    panic_stop_other_cpus();
 #endif
 
     /* Set high-visibility color but DON'T clear screen */
@@ -192,6 +216,7 @@ static void panic_finish(void) {
 static void panic_serial_only(const char *msg, const registers_t *regs) {
 #ifndef HOST_TEST
     __asm__ volatile("cli");
+    panic_stop_other_cpus();
 #endif
     panic_serial_emit("\n\n*** RECURSIVE KERNEL PANIC ***\n");
     panic_serial_emit("Fatal Error: ");
