@@ -1869,41 +1869,99 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
     // Read block group descriptor table (starts at block 2 for 1K blocks, block 1 for larger)
     uint32_t bgd_block = (fs->block_size == 1024) ? 2 : 1;
 
-    // Read enough blocks for the BGD table
-    for (uint32_t i = 0; i < bgd_blocks; i++) {        ext2_read_block(fs, bgd_block + i,
-                       ((uint8_t *)fs->bgd) + i * fs->block_size);
+    /* Pick the on-disk descriptor size.  For ext2/3 and ext4-without-
+     * 64BIT, it's 32 bytes (sizeof(ext2_group_desc_t)).  When the
+     * filesystem advertises INCOMPAT_64BIT, the descriptor is 64
+     * bytes — the second half carries the high words of every
+     * block/inode address that the first half stores as a uint32_t
+     * low half.  s_desc_size lives at superblock offset 0xFE (254).  */
+    fs->desc_size = sizeof(ext2_group_desc_t);
+    if (fs->sb.s_feature_incompat & EXT2F_INCOMPAT_64BIT) {
+        uint16_t on_disk = *(uint16_t *)(sb_buf + 0xFE);
+        if (on_disk == 0)               on_disk = 64;
+        if (on_disk < 32 || on_disk > 1024 || (on_disk & 3)) {
+            extern int kprintf(const char *, ...);
+            kprintf("ext2: implausible s_desc_size %u\n", on_disk);
+            kfree(fs->bgd, bgd_size);
+            kfree(fs, sizeof(ext2_fs_t));
+            return NULL;
+        }
+        fs->desc_size = on_disk;
     }
 
-    /* Per-group descriptor metadata_csum check.  For each descriptor
-     * (32-byte legacy layout; INCOMPAT_64BIT extends to 64 but we
-     * already refuse that bit) the on-disk csum lives at byte 30 of
-     * the descriptor.  Expected value = low 16 bits of
-     *   crc32c(seed, le32(group)) -> crc32c(state, gd[0..29])
-     *                             -> crc32c(state, 0_u16, 2)
-     * Any mismatch on any descriptor refuses the mount — same
-     * argument as superblock-csum.  */
-    if (fs->sb.s_feature_ro_compat & EXT2F_ROCOMPAT_METADATA_CKSUM) {
-        extern int kprintf(const char *, ...);
-        extern uint32_t crc32c_update(uint32_t, const void *, size_t);
-        const uint16_t zero16 = 0;
-        for (uint32_t g = 0; g < fs->group_count; g++) {
-            uint8_t *gd = (uint8_t *)&fs->bgd[g];
-            uint32_t le_g = g;     /* substrate runs little-endian */
-            uint32_t c = crc32c_update(fs->csum_seed, &le_g, 4);
-            c = crc32c_update(c, gd, 30);
-            c = crc32c_update(c, &zero16, 2);
-            uint16_t expect = c & 0xFFFFu;
-            uint16_t actual = *(uint16_t *)(gd + 30);
-            if (expect != actual) {
-                kprintf("ext2: bg descriptor %u csum mismatch want=%04x got=%04x — refuse mount\n",
-                        g, expect, actual);
+    /* Re-size fs->bgd if the on-disk stride differs from 32 — we
+     * still keep 32-byte slots in memory but the disk read stride
+     * must match.  Read the raw descriptors into a temporary
+     * staging buffer, copy the first 32 bytes of each, and reject
+     * the mount if any high-half field is non-zero (we have no way
+     * to address those blocks with uint32_t internals).  */
+    uint32_t on_disk_total = fs->group_count * fs->desc_size;
+    uint32_t on_disk_blocks = (on_disk_total + fs->block_size - 1) / fs->block_size;
+    uint32_t on_disk_size   = on_disk_blocks * fs->block_size;
+    uint8_t *gdt_raw = kmalloc(on_disk_size);
+    if (!gdt_raw) {
+        kfree(fs->bgd, bgd_size);
+        kfree(fs, sizeof(ext2_fs_t));
+        return NULL;
+    }
+    for (uint32_t i = 0; i < on_disk_blocks; i++) {
+        ext2_read_block(fs, bgd_block + i, gdt_raw + i * fs->block_size);
+    }
+    for (uint32_t g = 0; g < fs->group_count; g++) {
+        uint8_t *src = gdt_raw + g * fs->desc_size;
+        /* Reject anything that would force >32-bit addressing.  */
+        if (fs->desc_size >= 64) {
+            uint32_t bb_hi = *(uint32_t *)(src + 32);   /* bg_block_bitmap_hi  */
+            uint32_t ib_hi = *(uint32_t *)(src + 36);   /* bg_inode_bitmap_hi  */
+            uint32_t it_hi = *(uint32_t *)(src + 40);   /* bg_inode_table_hi   */
+            if (bb_hi || ib_hi || it_hi) {
+                extern int kprintf(const char *, ...);
+                kprintf("ext2: bg %u uses >32-bit addresses (bb_hi=%x ib_hi=%x it_hi=%x) — refuse mount\n",
+                        g, bb_hi, ib_hi, it_hi);
+                kfree(gdt_raw, on_disk_size);
                 kfree(fs->bgd, bgd_size);
                 kfree(fs, sizeof(ext2_fs_t));
                 return NULL;
             }
         }
-        kprintf("ext2: %u group descriptor csums verified\n", fs->group_count);
+        memcpy(&fs->bgd[g], src, sizeof(ext2_group_desc_t));
     }
+
+    /* Per-group descriptor metadata_csum check.  The on-disk csum
+     * field lives at byte 30 of the descriptor regardless of
+     * desc_size.  Computation:
+     *   crc32c(seed, le32(group)) -> crc32c(state, gd[0..29])
+     *                             -> crc32c(state, 0_u16, 2)
+     *                             -> crc32c(state, gd[32..desc_size-1])
+     * For 32-byte descriptors the trailing range is empty.  Any
+     * mismatch refuses the mount — same argument as superblock-csum.  */
+    if (fs->sb.s_feature_ro_compat & EXT2F_ROCOMPAT_METADATA_CKSUM) {
+        extern int kprintf(const char *, ...);
+        extern uint32_t crc32c_update(uint32_t, const void *, size_t);
+        const uint16_t zero16 = 0;
+        for (uint32_t g = 0; g < fs->group_count; g++) {
+            uint8_t *gd = gdt_raw + g * fs->desc_size;
+            uint32_t le_g = g;
+            uint32_t c = crc32c_update(fs->csum_seed, &le_g, 4);
+            c = crc32c_update(c, gd, 30);
+            c = crc32c_update(c, &zero16, 2);
+            if (fs->desc_size > 32)
+                c = crc32c_update(c, gd + 32, fs->desc_size - 32);
+            uint16_t expect = c & 0xFFFFu;
+            uint16_t actual = *(uint16_t *)(gd + 30);
+            if (expect != actual) {
+                kprintf("ext2: bg descriptor %u csum mismatch want=%04x got=%04x — refuse mount\n",
+                        g, expect, actual);
+                kfree(gdt_raw, on_disk_size);
+                kfree(fs->bgd, bgd_size);
+                kfree(fs, sizeof(ext2_fs_t));
+                return NULL;
+            }
+        }
+        kprintf("ext2: %u group descriptor csums verified (desc_size=%u)\n",
+                fs->group_count, fs->desc_size);
+    }
+    kfree(gdt_raw, on_disk_size);
 
     // Read root inode (inode 2)
     ext2_inode_t root_inode;

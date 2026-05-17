@@ -100,7 +100,8 @@
                                EXT2F_INCOMPAT_META_BG | \
                                EXT2F_INCOMPAT_EXTENTS | \
                                EXT2F_INCOMPAT_FLEX_BG | \
-                               EXT2F_INCOMPAT_CSUM_SEED)
+                               EXT2F_INCOMPAT_CSUM_SEED | \
+                               EXT2F_INCOMPAT_64BIT)
 #define EXT2F_ROCOMPAT_SUPP   (EXT2F_ROCOMPAT_SPARSESUPER | \
                                EXT2F_ROCOMPAT_LARGEFILE | \
                                EXT2F_ROCOMPAT_DIR_NLINK | \
@@ -306,6 +307,14 @@ typedef struct {
      * it.  Lifted from sb_buf at mount because it lives past the
      * end of our truncated ext2_superblock_t struct.  */
     uint32_t hash_seed[4];
+
+    /* On-disk group-descriptor size.  32 for legacy ext2/3 + ext4
+     * without INCOMPAT_64BIT; 64 when 64BIT is on.  The bgd table
+     * is read with this stride from disk; we still only KEEP 32
+     * bytes per descriptor in fs->bgd because all our internal
+     * addresses are uint32_t — anything that needs the high half
+     * would have made the mount refuse to begin with.  */
+    uint32_t desc_size;
 } ext2_fs_t;
 
 #define EXT2_DCACHE_SIZE 16

@@ -473,19 +473,39 @@ check='cat /mnt/test/target >/dev/null && echo READ_OK; echo NEWCONTENT > /mnt/t
     assert_log "$log" "root +0 +.* /mnt/test/target" "extent-file write left size 0"
 }
 
-t_refuse_64bit() {
-    echo "==> refuse-ext4-64bit"
-    local img; img=$(mkimg t-64bit ext4 -O 64bit)
+t_mount_64bit() {
+    echo "==> mount-ext4-64bit"
+    # Small 64bit-flagged ext4 image (no high-half addresses since
+    # the fs is small enough to fit in 32 bits).  Substrate should
+    # now mount cleanly using the 64-byte group-descriptor stride.
+    local img; img=$(mkimg t-64bit ext4 -O '64bit,^metadata_csum')
     local conf="device=/dev/storage/sata1
 mount=/mnt/test
 fs=ext2
-check=echo SHOULD_NOT_GET_HERE"
+check='echo MOUNT64_OK'"
     local rfs; rfs=$(prep_rootfs t-64bit "$conf")
     local log="$WORK/t-64bit.log"
     boot_with "$rfs" "$img" "$log" 25
-    assert_log "$log" "unsupported INCOMPAT"   "INCOMPAT refusal logged"
-    assert_log "$log" "64-bit block addresses" "64-bit explained"
-    assert_log "$log" "FSTEST: mount FAIL"     "userland sees mount failure"
+    assert_log "$log" "FSTEST: mount OK"  "64bit mount succeeds"
+    assert_log "$log" "MOUNT64_OK"        "64bit check ran"
+}
+
+t_mount_64bit_with_csum() {
+    echo "==> mount-ext4-64bit-with-csum"
+    # 64bit AND metadata_csum — bg-descriptor checksum input now
+    # covers the full 64-byte descriptor.  If we picked the wrong
+    # csum range every group's csum would mismatch.
+    local img; img=$(mkimg t-64csum ext4 -O '64bit,metadata_csum')
+    local conf="device=/dev/storage/sata1
+mount=/mnt/test
+fs=ext2
+check='echo CSUM64_OK'"
+    local rfs; rfs=$(prep_rootfs t-64csum "$conf")
+    local log="$WORK/t-64csum.log"
+    boot_with "$rfs" "$img" "$log" 30
+    assert_log "$log" "FSTEST: mount OK"           "64bit+csum mount succeeds"
+    assert_log "$log" "csums verified .desc_size=64" "csum used 64-byte descriptors"
+    assert_log "$log" "CSUM64_OK"                  "64bit+csum check ran"
 }
 
 # --- main ----------------------------------------------------------
@@ -516,7 +536,8 @@ t_csum_verify_fail
 t_bg_csum_verify
 t_xattr_read
 t_refuse_extent_write
-t_refuse_64bit
+t_mount_64bit
+t_mount_64bit_with_csum
 
 # Restore the production rootfs.img so the user's next interactive
 # boot isn't sitting on whichever test config we ran last.
