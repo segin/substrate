@@ -26,6 +26,7 @@
 
 #include <sys/tty.h>
 #include <sys/ioctl.h>
+#include <sys/poll.h>
 #include <sys/errno.h>
 #include <sys/proc.h>
 #include <sys/lock.h>
@@ -207,6 +208,7 @@ static void pty_publish_slave_node(pty_pair_t *p) {
     node->ioctl = tty_fs_ioctl;
     node->open  = tty_fs_open;
     node->close = tty_fs_close;
+    node->poll  = tty_fs_poll;
 
     p->slave_node = node;
     devfs_register_device(node);
@@ -305,10 +307,12 @@ int pty_alloc_pair(fs_node_t **master_node_out) {
     mn->flags = FS_CHARDEVICE;
     mn->mask  = 0600;
     mn->ptr   = (fs_node_t *)p; /* impl pointer for master fops below */
+    extern int pty_master_node_poll(fs_node_t *node, void *waiter);
     mn->read  = pty_master_node_read;
     mn->write = pty_master_node_write;
     mn->ioctl = pty_master_node_ioctl;
     mn->close = pty_master_node_close;
+    mn->poll  = pty_master_node_poll;
     p->master_node = mn;
     p->master_open = 1;
 
@@ -320,6 +324,26 @@ static void pty_destroy(pty_pair_t *p) {
     if (!p) return;
     p->magic = 0;
     pty_unpublish_slave_node(p);
+
+    /*
+     * Sweep the proc table so any process that still has this PTY's
+     * slave_tty as its controlling terminal loses the dangling
+     * reference.  Without this, `ps` (sys_proc_info) walking the
+     * proc list later faults the kernel on the first
+     * `target->tty->driver->driver_name` dereference of freed
+     * memory.  proc_exit clears its own tty, but a session leader's
+     * EXITED-but-not-yet-reaped state or a sibling thread sharing
+     * the tty can still hold the pointer.
+     */
+    if (p->slave_tty) {
+        extern struct process *proc_first(void);
+        extern struct process *proc_next(struct process *);
+        struct process *pr;
+        for (pr = proc_first(); pr; pr = proc_next(pr)) {
+            if (pr->tty == p->slave_tty) pr->tty = NULL;
+        }
+    }
+
     if (p->master_tty) {
         kfree(p->master_tty, sizeof(*p->master_tty));
     }
@@ -403,6 +427,45 @@ size_t pty_master_node_write(fs_node_t *node, off_t offset, size_t size,
     return size;
 }
 
+/*
+ * poll(2) support for the PTY master.  Required by select/poll-driven
+ * forwarders (e.g. telnetd) that watch the master for data written by
+ * the slave-side process.  Returns POLLIN when there's anything
+ * pending in the master's read buffer (or a packet-mode status byte),
+ * POLLOUT whenever the slave is alive (we don't model slave back-
+ * pressure today — flip-buffer push always accepts), and POLLHUP if
+ * the pair has been torn down.  When nothing is ready and `waiter`
+ * is non-NULL, publish &p->read_wait so the caller blocks on the
+ * same channel `tty_flip_buffer_push` wakes from the slave side.
+ */
+int pty_master_node_poll(fs_node_t *node, void *waiter) {
+    pty_pair_t *p = (pty_pair_t *)node->ptr;
+    if (!p || p->magic != PTY_MAGIC) return POLLNVAL;
+
+    int events = 0;
+
+    spinlock_acquire(&p->lock);
+    if (p->dead) {
+        events |= POLLHUP;
+    }
+    if (p->packet_mode && p->packet_status) {
+        events |= POLLIN | POLLRDNORM;
+    }
+    if (p->mr_count > 0) {
+        events |= POLLIN | POLLRDNORM;
+    }
+    /* Master→slave write goes through tty_flip_buffer_push which
+     * doesn't currently back-pressure callers; treat the master as
+     * always writable. */
+    events |= POLLOUT | POLLWRNORM;
+    spinlock_release(&p->lock);
+
+    if ((events & (POLLIN | POLLRDNORM)) == 0 && waiter) {
+        *(void **)waiter = &p->read_wait;
+    }
+    return events;
+}
+
 int pty_master_node_ioctl(fs_node_t *node, uint32_t request, void *arg) {
     pty_pair_t *p = (pty_pair_t *)node->ptr;
 
@@ -480,7 +543,20 @@ void pty_master_node_close(fs_node_t *node) {
     /* Wake any reader / writer waiting on us. */
     sched_wakeup(&p->read_wait);
     int slave_open = p->slave_open;
+    struct tty *slave_tty = p->slave_tty;
     spinlock_release(&p->lock);
+
+    /* Hangup the slave: any pending slave read returns 0 (EOF)
+     * after draining whatever's already in raw_buf.  Wake any
+     * blocked slave reader so it can observe hung_up and return.
+     * SIGHUP delivery to the slave's session is a follow-up. */
+    if (slave_tty) {
+        spinlock_acquire(&slave_tty->lock);
+        slave_tty->hung_up = 1;
+        spinlock_release(&slave_tty->lock);
+        sched_wakeup(&slave_tty->read_wait);
+        sched_wakeup(&slave_tty->poll_wait);
+    }
 
     /* If the slave is also closed (or never opened), free everything. */
     if (!slave_open) {
@@ -547,6 +623,11 @@ static int ptmx_node_ioctl(fs_node_t *node, uint32_t req, void *arg) {
     if (!master) return -ENOTTY;
     return pty_master_node_ioctl(master, req, arg);
 }
+static int ptmx_node_poll(fs_node_t *node, void *waiter) {
+    fs_node_t *master = (fs_node_t *)node->impl;
+    if (!master) return POLLNVAL;
+    return pty_master_node_poll(master, waiter);
+}
 static void ptmx_node_close(fs_node_t *node) {
     fs_node_t *master = (fs_node_t *)node->impl;
     if (master) {
@@ -575,5 +656,6 @@ void pty_init(void) {
     ptmx_node.write = ptmx_node_write;
     ptmx_node.ioctl = ptmx_node_ioctl;
     ptmx_node.close = ptmx_node_close;
+    ptmx_node.poll  = ptmx_node_poll;
     devfs_register_device(&ptmx_node);
 }
