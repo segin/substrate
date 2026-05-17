@@ -126,6 +126,16 @@ ISR_NOERRCODE 46
 ISR_NOERRCODE 47
 ISR_NOERRCODE 128
 
+# Panic IPI (vector 0xFB).  When one CPU panics, it sends this IPI
+# to every other CPU.  The handler does NOT return — it disables
+# interrupts and halts forever.  No common-stub round-trip, no LAPIC
+# EOI: once we're here, the system is dead.
+.global isr_panic_ipi
+isr_panic_ipi:
+    cli
+1:  hlt
+    jmp 1b
+
 .extern isr_handler
 .extern syscall_handler
 
