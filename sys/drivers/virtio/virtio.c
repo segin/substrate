@@ -27,6 +27,19 @@ static const device_id_t virtio_gpu_pci_ids[] = {
     { 0, 0, 0, 0, 0 },
 };
 
+static const device_id_t virtio_net_pci_ids[] = {
+    { VIRTIO_VENDOR_ID, VIRTIO_PCI_DEVICE_ID_NET, 0, 0, 0 },
+    { 0, 0, 0, 0, 0 },
+};
+
+extern int virtio_net_setup(uint8_t bus, uint8_t slot, uint8_t func);
+
+static int virtio_net_pci_attach(struct device *dev) {
+    pci_device_t *pdev = pci_find_device_by_kdev(dev);
+    if (pdev == NULL) return -1;
+    return virtio_net_setup(pdev->bus, pdev->slot, pdev->func);
+}
+
 static int virtio_blk_pci_attach(struct device *dev) {
     pci_device_t *pdev = pci_find_device_by_kdev(dev);
 
@@ -103,6 +116,13 @@ static struct driver virtio_gpu_pci_driver = {
     .detach = virtio_pci_detach,
 };
 
+static struct driver virtio_net_pci_driver = {
+    .name = "virtio-net-pci",
+    .id_table = virtio_net_pci_ids,
+    .attach = virtio_net_pci_attach,
+    .detach = virtio_pci_detach,
+};
+
 // Find capabilities / BARs
 uint16_t virtio_get_io_base(uint8_t bus, uint8_t slot, uint8_t func) {
     // Read BAR0 (Offset 0x10)
@@ -123,6 +143,7 @@ void virtio_init(void) {
         (void)driver_register(&virtio_9p_pci_driver, &pci_bus_type);
         (void)driver_register(&virtio_scsi_pci_driver, &pci_bus_type);
         (void)driver_register(&virtio_gpu_pci_driver, &pci_bus_type);
+        (void)driver_register(&virtio_net_pci_driver, &pci_bus_type);
         virtio_drivers_registered = 1;
     }
 
