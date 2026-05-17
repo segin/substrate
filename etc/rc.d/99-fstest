@@ -1,0 +1,41 @@
+#!/bin/sh
+# /etc/rc.d/99-fstest — automated FS test runner.
+#
+# Read by the test harness in tests/sys/fs/ext2/run-host-tests.sh.
+# Reads /etc/fstest.conf for a single line:
+#
+#   device=<dev>  mount=<path>  fs=<type>  check=<command>
+#
+# Mounts the named device, runs the check command, prints
+# "FSTEST: <name> = <result>" lines to console, then optionally
+# powers off the VM so the host can read the serial transcript
+# and assert.
+
+CONF=/etc/fstest.conf
+[ -r "$CONF" ] || exit 0
+
+. "$CONF"
+: "${device:=/dev/storage/sata1}"
+: "${mount:=/mnt/test}"
+: "${fs:=ext2}"
+: "${check:=ls -la $mount}"
+: "${poweroff_on_done:=1}"
+
+echo "FSTEST: starting"
+mkdir -p "$mount"
+
+if mount "$device" "$mount" "$fs" 2>/tmp/fstest.err; then
+    echo "FSTEST: mount OK ($device on $mount type $fs)"
+else
+    rc=$?
+    echo "FSTEST: mount FAIL rc=$rc"
+    [ -r /tmp/fstest.err ] && sed 's/^/FSTEST:   /' /tmp/fstest.err
+    [ "$poweroff_on_done" = 1 ] && poweroff
+    exit $rc
+fi
+
+echo "FSTEST: running check: $check"
+sh -c "$check" 2>&1 | sed 's/^/FSTEST:   /'
+echo "FSTEST: done"
+
+[ "$poweroff_on_done" = 1 ] && poweroff

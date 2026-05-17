@@ -46,6 +46,13 @@ static void ext2_node_close(fs_node_t *node) {
     }
 }
 
+/* Refuse a write op when the mount is read-only.  Returns the
+ * supplied errno from the caller; used as:
+ *     if (EXT2_RO_REFUSE(ctx->fs)) return -EROFS;
+ * Stored on ext2_fs_t at mount time via MNT_RDONLY or auto-set
+ * when unsupported ROCOMPAT bits were in the superblock.  */
+#define EXT2_RO_REFUSE(fs)   ((fs) && (fs)->readonly)
+
 // Forward declarations
 fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data);
 int ext2_unmount(fs_node_t *node);
@@ -979,6 +986,7 @@ static int ext2_chmod(fs_node_t *node, uint32_t mode) {
 
     ctx = (ext2_node_t *)(uintptr_t)node->impl;
     if (!ctx || !ctx->fs) return -EINVAL;
+    if (EXT2_RO_REFUSE(ctx->fs)) return -EROFS;
 
     ctx->inode.i_mode = (uint16_t)((ctx->inode.i_mode & 0xF000U) | (mode & 0x0FFFU));
     ctx->inode.i_ctime = (uint32_t)node->ctime;
@@ -1001,6 +1009,7 @@ static int ext2_setattr(fs_node_t *node, const struct fs_attr *a) {
     if (!node || !a) return -EINVAL;
     ext2_node_t *ctx = (ext2_node_t *)(uintptr_t)node->impl;
     if (!ctx || !ctx->fs) return -EINVAL;
+    if (EXT2_RO_REFUSE(ctx->fs)) return -EROFS;
     if (a->mask == 0) return 0;
 
     if (a->mask & FS_ATTR_ATIME) {
@@ -1092,7 +1101,8 @@ size_t ext2_file_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffe
 size_t ext2_file_write(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer) {
     ext2_node_t *ctx = (ext2_node_t *)(uintptr_t)node->impl;
     ext2_fs_t *fs = ctx->fs;
-    
+    if (EXT2_RO_REFUSE(fs)) return (size_t)-EROFS;
+
     uint32_t written = ext2_inode_write(ctx, offset, size, buffer);
     
     // Write updated inode back to disk
@@ -1344,17 +1354,19 @@ cleanup:
 
 // Mount ext2 filesystem
 fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
-    (void)device; (void)flags;
-    
+    (void)device;
+
     fs_node_t *dev = (fs_node_t *)data;
     if (!dev || !dev->read) {
         kprint("EXT2: No device or read function\n");
         return NULL;
     }
-    
+
     ext2_fs_t *fs = kmalloc(sizeof(ext2_fs_t));
     if (!fs) return NULL;
     memset(fs, 0, sizeof(ext2_fs_t));
+    fs->mnt_flags = flags;
+    fs->readonly  = !!(flags & MNT_RDONLY);
 
     // Read superblock (at offset 1024)
     uint8_t sb_buf[1024];
@@ -1402,8 +1414,9 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
         uint32_t bad_ro = fs->sb.s_feature_ro_compat & ~EXT2F_ROCOMPAT_SUPP;
         if (bad_ro) {
             extern int kprintf(const char *, ...);
-            kprintf("ext2: mount warning — unsupported ROCOMPAT features 0x%08x; "
-                    "should be ro but substrate has no ro-mount flag yet\n", bad_ro);
+            kprintf("ext2: mount forced read-only — unsupported ROCOMPAT 0x%08x\n",
+                    bad_ro);
+            fs->readonly = 1;
         }
         /* Informational: log which ext3/ext4 features are present.  */
         if (fs->sb.s_feature_compat & EXT2F_COMPAT_HASJOURNAL) {
@@ -1908,6 +1921,7 @@ int ext2_truncate(fs_node_t *node, off_t length) {
     ctx = (ext2_node_t *)(uintptr_t)node->impl;
     if (!ctx) return -EINVAL;
     fs = ctx->fs;
+    if (EXT2_RO_REFUSE(fs)) return -EROFS;
 
     if (length == (off_t)ctx->inode.i_size) {
         return 0;
@@ -2088,6 +2102,10 @@ int ext2_link(fs_node_t *parent, fs_node_t *source, const char *name) {
     if (!parent || !source || !name || !name[0]) return -EINVAL;
     if ((parent->flags & 0x7) != FS_DIRECTORY) return -ENOTDIR;
     if ((source->flags & 0x7) == FS_DIRECTORY) return -EPERM; // POSIX doesn't allow hard links to directories
+    {
+        ext2_node_t *pc = (ext2_node_t *)(uintptr_t)parent->impl;
+        if (pc && EXT2_RO_REFUSE(pc->fs)) return -EROFS;
+    }
 
     ext2_node_t *dir_ctx = (ext2_node_t *)(uintptr_t)parent->impl;
     ext2_node_t *source_ctx = (ext2_node_t *)(uintptr_t)source->impl;
@@ -2123,7 +2141,11 @@ int ext2_link(fs_node_t *parent, fs_node_t *source, const char *name) {
 // Implement ext2_rename
 int ext2_rename(fs_node_t *old_parent, const char *old_name, fs_node_t *new_parent, const char *new_name) {
     if (!old_parent || !old_name || !new_parent || !new_name) return -EINVAL;
-    
+    {
+        ext2_node_t *oc = (ext2_node_t *)(uintptr_t)old_parent->impl;
+        if (oc && EXT2_RO_REFUSE(oc->fs)) return -EROFS;
+    }
+
     fs_node_t *old_node = ext2_finddir(old_parent, (char *)old_name);
     if (!old_node) return -ENOENT;
 
@@ -2412,6 +2434,10 @@ int ext2_mkdir(fs_node_t *dir, const char *name, uint16_t permission) {
     ext2_node_t *dir_ctx;
     ext2_fs_t *fs;
     ext2_inode_t inode;
+    {
+        ext2_node_t *dc = (ext2_node_t *)(uintptr_t)dir->impl;
+        if (dc && EXT2_RO_REFUSE(dc->fs)) return -EROFS;
+    }
     uint32_t inode_num;
     uint32_t block_num;
     uint8_t *block_buf = NULL;
@@ -2514,6 +2540,10 @@ int ext2_unlink(fs_node_t *dir, const char *name) {
     fs_node_t *victim;
     ext2_node_t *victim_ctx;
     ext2_fs_t *fs;
+    {
+        ext2_node_t *dc = (ext2_node_t *)(uintptr_t)dir->impl;
+        if (dc && EXT2_RO_REFUSE(dc->fs)) return -EROFS;
+    }
     int ret;
 
     if (!dir || !name || !name[0]) return -EINVAL;
@@ -2573,6 +2603,10 @@ int ext2_rmdir(fs_node_t *dir, const char *name) {
     fs_node_t *victim;
     ext2_node_t *dir_ctx;
     ext2_node_t *victim_ctx;
+    {
+        ext2_node_t *dc = (ext2_node_t *)(uintptr_t)dir->impl;
+        if (dc && EXT2_RO_REFUSE(dc->fs)) return -EROFS;
+    }
     ext2_fs_t *fs;
     int ret;
 

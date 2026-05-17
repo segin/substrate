@@ -236,6 +236,14 @@ typedef struct {
     // Active inode group bitmap cache
     uint32_t active_inode_bg_group;
     uint8_t *active_inode_bg_bitmap;
+
+    /* Mount flags — MNT_RDONLY refuses every write op.  Also set
+     * automatically when the on-disk superblock has ROCOMPAT bits
+     * we don't understand: writing might still work for code paths
+     * we control, but the fs's invariants might depend on the
+     * unknown feature, so we refuse.  */
+    uint32_t mnt_flags;
+    int      readonly;
 } ext2_fs_t;
 
 #define EXT2_DCACHE_SIZE 16
