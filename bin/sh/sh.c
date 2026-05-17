@@ -120,7 +120,7 @@ static void init_environment(void) {
     
     // Set PATH if not already set
     if (!getenv("PATH")) {
-        shell_var_export("PATH", "/usr/bin:/bin");
+        shell_var_export("PATH", "/usr/bin:/bin:/usr/local/bin");
     }
     
     // Initialize Prompt Mode
