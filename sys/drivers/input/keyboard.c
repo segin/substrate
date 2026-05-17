@@ -19,6 +19,8 @@
 #include <string.h>
 #include <sys/vt.h>
 #include <sys/tty.h>
+#include <arch/i386/intr.h>
+#include <sys/lock.h>
 
 /* ---- Key Buffer ---- */
 
@@ -403,8 +405,38 @@ static void keyboard_emit_char(char c) {
 }
 
 static void keyboard_emit_seq(const char *seq) {
-    while (*seq) {
-        keyboard_emit_char(*seq++);
+    int active;
+    vt_state_t *vt;
+    size_t len;
+
+    if (!seq || !*seq) return;
+
+    /* Push the entire escape sequence under a single tty lock
+     * acquisition so libedit's read_esc_byte select() sees the
+     * follow-up bytes within its 80 ms timeout window.  Naive
+     * byte-by-byte tty_flip_buffer_push fires per-byte wake-ups —
+     * libedit can wake on the ESC alone, time out on the [, and
+     * insert the trailing "[A" as literal characters (the user-
+     * visible "up arrow types [A" symptom). */
+    for (const char *p = seq; *p; p++) kbd_push(*p);
+
+    /* Inline strlen to keep this hot path self-contained. */
+    len = 0;
+    while (seq[len]) len++;
+
+    active = vt_get_active();
+    vt = vt_get_state(active);
+    if (vt && vt->tty) {
+        /* tty_inject_input_locked wants the caller to hold tty->lock
+         * with interrupts disabled — same contract as
+         * tty_flip_buffer_push's internal critical section. */
+        uint32_t flags = intr_disable();
+        spinlock_acquire(&vt->tty->lock);
+        tty_inject_input_locked(vt->tty, seq, len);
+        spinlock_release(&vt->tty->lock);
+        intr_restore(flags);
+    } else {
+        for (const char *p = seq; *p; p++) console_push_char(*p);
     }
 }
 
