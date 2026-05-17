@@ -149,11 +149,20 @@ t_htree_listing() {
         done
         echo "close"
     } | debugfs -w "$img" >/dev/null 2>&1 || true
+    # debugfs doesn't promote to htree on insert — only the kernel
+    # does that, and we don't have a write-capable kernel here.
+    # e2fsck -fD rebuilds dir indices, which IS the canonical way
+    # to materialise an htree on an offline image.
+    e2fsck -yfD "$img" >/dev/null 2>&1 || true
 
+    # Exercise finddir on a representative spread of names — any of
+    # these failing means the htree leaf-routing is broken for that
+    # name's hash range.  The "OK N/M" line at the end summarises.
+    local probes="f1 f50 f100 f150 f200 f250 f300 f350 f400 f450 f499 f7 f73 f139 f211 f290 f377 f444"
     local conf="device=/dev/storage/sata1
 mount=/mnt/test
 fs=ext2
-check='ls /mnt/test/many | wc -l'"
+check='ls /mnt/test/many | wc -l; ok=0; for n in $probes; do [ -e /mnt/test/many/\$n ] && ok=\$((ok+1)); done; echo PROBES_FOUND=\$ok; ls -l /mnt/test/many/f1; ls -l /mnt/test/many/f499; ls /mnt/test/many/no_such_file 2>&1 | head -1'"
     local rfs; rfs=$(prep_rootfs t-htree "$conf")
     local log="$WORK/t-htree.log"
     boot_with "$rfs" "$img" "$log" 40
@@ -161,6 +170,15 @@ check='ls /mnt/test/many | wc -l'"
     # If the linear-scan walks the htree blocks correctly, ls reports
     # 500.  If it stops at the index block, it reports < 10.
     assert_log "$log" "FSTEST:[[:space:]]+500$" "htree listing sees all 500 entries"
+    # 18 probes across the namespace — all must exist.  This is
+    # the real htree correctness test: if any leaf-routing is
+    # wrong, some subset of hashes lands on the wrong leaf and we
+    # don't see the full count.
+    assert_log "$log" "PROBES_FOUND=18"     "htree finddir hits all 18 spread-probe names"
+    assert_log "$log" "/mnt/test/many/f1"   "htree finddir resolves early-name"
+    assert_log "$log" "/mnt/test/many/f499" "htree finddir resolves late-name"
+    # And a non-existent name returns ENOENT-equivalent from sh.
+    assert_log "$log" "No such file"        "htree finddir miss returns ENOENT"
 }
 
 t_setattr_persist() {

@@ -39,6 +39,21 @@
  * it's an inline ext4_extent_header followed by extents/indexes.
  * Reading the file requires walking the extent tree.  */
 #define EXT4_EXTENTS_FL    0x00080000
+/* This directory uses an htree index (root block holds index entries
+ * instead of plain dirents past . and .. ).  ext4 default for any
+ * directory that has grown past one block.  */
+#define EXT2_INDEX_FL      0x00001000
+
+/* htree hash variants (root block byte at h_hash_version).  Substrate
+ * supports all six because mkfs.ext4 picks half_md4 by default and
+ * older e2fsprogs picked legacy; we may meet either in the wild.  */
+#define EXT2_HTREE_LEGACY            0
+#define EXT2_HTREE_HALF_MD4          1
+#define EXT2_HTREE_TEA               2
+#define EXT2_HTREE_LEGACY_UNSIGNED   3
+#define EXT2_HTREE_HALF_MD4_UNSIGNED 4
+#define EXT2_HTREE_TEA_UNSIGNED      5
+#define EXT2_HTREE_EOF               0x7FFFFFFF
 
 /* Feature flag groups — sb.s_feature_{compat,incompat,ro_compat}.
  * Definitions taken verbatim from FreeBSD's ext2fs/ext2fs.h for
@@ -285,6 +300,12 @@ typedef struct {
      * the explicit s_checksum_seed value if EXT2F_INCOMPAT_CSUM_SEED
      * is on.  Used for group-descriptor and (future) inode csums.  */
     uint32_t csum_seed;
+
+    /* htree hash seed — four words at sb_buf+236 on disk.  Initial
+     * state for the half_md4 and tea hash functions; legacy ignores
+     * it.  Lifted from sb_buf at mount because it lives past the
+     * end of our truncated ext2_superblock_t struct.  */
+    uint32_t hash_seed[4];
 } ext2_fs_t;
 
 #define EXT2_DCACHE_SIZE 16
@@ -361,5 +382,13 @@ int ext2_statfs(fs_node_t *node, struct statfs *buf);
 // Helpers
 int ext2_find_next_zero_bit(void *bitmap, uint32_t total_bits, uint32_t start, uint32_t end, uint32_t *found_idx);
 fs_node_t *ext2_alloc_node(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_t *inode);
+
+/* htree name hash — see ext2_hash.c for the port notes.  Returns 0
+ * on success with *hash_major and (optionally) *hash_minor filled
+ * in; returns -1 if the name is empty / too long / the hash version
+ * isn't one we recognise.  */
+int ext2_htree_hash(const char *name, int len, const uint32_t *hash_seed,
+                    int hash_version, uint32_t *hash_major,
+                    uint32_t *hash_minor);
 
 #endif

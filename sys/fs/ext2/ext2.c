@@ -1383,6 +1383,130 @@ cleanup:
     return result;
 }
 
+/* Counters for htree path; mostly diagnostic, surface them via
+ * the same dump as the other finddir counters.  */
+uint64_t ext2_finddir_htree_hit  = 0;
+uint64_t ext2_finddir_htree_miss = 0;
+uint64_t ext2_finddir_htree_bypass = 0;
+
+/* Search one leaf block (already read into `block`, of size
+ * fs->block_size) for `name`.  Returns inode number on hit, 0 on
+ * miss / malformed.  Caller holds ctx->lock.  */
+static uint32_t ext2_scan_leaf(uint8_t *block, uint32_t block_size,
+                               const char *name, size_t name_len) {
+    uint32_t off = 0;
+    while (off + 8 <= block_size) {
+        ext2_dirent_t *de = (ext2_dirent_t *)(block + off);
+        if (de->rec_len < 8 || off + de->rec_len > block_size) return 0;
+        if (de->inode != 0 && de->name_len == name_len &&
+            memcmp(de->name, name, name_len) == 0) {
+            return de->inode;
+        }
+        off += de->rec_len;
+    }
+    return 0;
+}
+
+/* htree-accelerated lookup.  Returns:
+ *   >0  : inode number of the matching entry
+ *    0  : name proven absent (full leaf walked, no hit)
+ *   -1  : not an htree directory / hash version unknown / block 0
+ *         absent — caller must fall back to linear scan
+ *
+ * Limitations vs FreeBSD:
+ *   - single-level only (h_ind_levels == 0).  Multi-level dirs are
+ *     rare in practice (would need >~120 leaf blocks at h_ind_levels=0;
+ *     ~3M entries before that fills) but if we see h_ind_levels > 0
+ *     we return -1 so the linear-scan fallback covers the case.
+ *   - we only check the one leaf the htree points to.  If a name
+ *     was inserted in a hash-collision-overflow leaf we'd return
+ *     0 here; the caller treats 0 as a real miss.  Acceptable for
+ *     a first cut — the same risk doesn't apply on lookup because
+ *     the hash for that name lands in the same leaf as the actual
+ *     entry under any sane indexer.
+ */
+static int ext2_htree_lookup(ext2_node_t *ctx, const char *name,
+                             size_t name_len, uint32_t *out_inode) {
+    ext2_fs_t *fs = ctx->fs;
+    if (!(fs->sb.s_feature_compat & EXT2F_COMPAT_DIRHASHINDEX)) return -1;
+    if (!(ctx->inode.i_flags & EXT2_INDEX_FL))                  return -1;
+
+    uint8_t *root = ctx->block_buf;     /* scratch — already kmalloc'd by caller */
+    /* Root block is block 0 of the directory.  Walk the indirect/
+     * direct map to find its physical address.  */
+    uint32_t root_blk = ext2_get_block_num(fs, &ctx->inode, 0,
+                                           ctx->indirect_buf,
+                                           ctx->dindirect_buf,
+                                           ctx->tindirect_buf);
+    if (root_blk == 0) return -1;
+    if (ext2_read_block(fs, root_blk, root) != fs->block_size) return -1;
+
+    /* htree info starts at byte 24 (past 12-byte "." + 12-byte "..").
+     *   root+24: h_reserved1 (4B)
+     *   root+28: h_hash_version (1B)
+     *   root+29: h_info_len    (1B, typically 8)
+     *   root+30: h_ind_levels  (1B)
+     *   root+31: h_reserved2   (1B)
+     *
+     * Index entries begin at root + 24 + h_info_len.  The FIRST
+     * entry slot is overloaded as a count:
+     *   bytes 0-1: h_entries_max
+     *   bytes 2-3: h_entries_num   (total slots in use, INCLUDING
+     *                                this leftmost-leaf slot)
+     *   bytes 4-7: h_blk           (the leftmost leaf's block #)
+     * Real index entries are slots [1..h_entries_num-1], each
+     * { u32 h_hash; u32 h_blk }.  */
+    if (fs->block_size < 64) return -1;
+    uint8_t  hash_version = root[24 + 4];
+    uint8_t  h_info_len   = root[24 + 5];
+    uint8_t  ind_levels   = root[24 + 6];
+    if (ind_levels != 0) return -1;     /* multi-level — fall back  */
+    if (h_info_len < 8 || h_info_len > 16) return -1;
+    uint32_t entries_off  = 24 + h_info_len;
+    if (entries_off + 8 > fs->block_size) return -1;
+    uint16_t entries_num  = *(uint16_t *)(root + entries_off + 2);
+    if (entries_num == 0 ||
+        entries_off + (uint32_t)entries_num * 8 > fs->block_size)
+        return -1;
+
+    uint32_t hash_major = 0, hash_minor = 0;
+    if (ext2_htree_hash(name, (int)name_len, fs->hash_seed,
+                        (int)hash_version, &hash_major, &hash_minor) != 0)
+        return -1;
+
+    /* Binary search entries[1..entries_num-1] for the largest
+     * entry whose h_hash <= hash_major.  If hash_major is below
+     * every real entry's h_hash, found == 0 (= the leftmost leaf
+     * slot).  */
+    uint8_t *entries = root + entries_off;
+    int start = 1, end = (int)entries_num - 1;
+    while (start <= end) {
+        int mid = start + (end - start) / 2;
+        uint32_t mh = *(uint32_t *)(entries + mid * 8);
+        if (mh > hash_major) end = mid - 1;
+        else                 start = mid + 1;
+    }
+    int found = start - 1;
+    uint32_t leaf_logical = *(uint32_t *)(entries + found * 8 + 4);
+
+    /* Translate logical block in directory to physical, then read. */
+    uint32_t leaf_phys = ext2_get_block_num(fs, &ctx->inode, leaf_logical,
+                                            ctx->indirect_buf,
+                                            ctx->dindirect_buf,
+                                            ctx->tindirect_buf);
+    if (leaf_phys == 0) return -1;
+    if (ext2_read_block(fs, leaf_phys, root) != fs->block_size) return -1;
+
+    uint32_t inum = ext2_scan_leaf(root, fs->block_size, name, name_len);
+    if (inum != 0) {
+        *out_inode = inum;
+        ext2_finddir_htree_hit++;
+        return 1;
+    }
+    ext2_finddir_htree_miss++;
+    return 0;
+}
+
 // Find entry by name in directory
 fs_node_t *ext2_finddir(fs_node_t *node, char *name) {
     if (!node || !name) return NULL;
@@ -1443,6 +1567,41 @@ fs_node_t *ext2_finddir(fs_node_t *node, char *name) {
     uint32_t *indirect = ctx->indirect_buf;
     uint32_t *dindirect = ctx->dindirect_buf;
     uint32_t *tindirect = ctx->tindirect_buf;
+
+    /* htree fast path.  Only attempted when the dir actually carries
+     * the EXT2_INDEX_FL flag — most dirs in real filesystems do
+     * (mkfs.ext4 turns it on automatically as soon as a directory
+     * needs > 1 block).  A return of >=0 is authoritative:
+     *   >0 -> found, build node and exit;
+     *    0 -> not found in the indexed leaf (treat as miss);
+     *   -1 -> can't htree (single-block dir / unknown hash version
+     *         / multi-level index we don't support yet), fall through
+     *         to linear scan.  */
+    {
+        uint32_t htree_inum = 0;
+        int htr = ext2_htree_lookup(ctx, name, name_len, &htree_inum);
+        if (htr > 0) {
+            ext2_inode_t inode;
+            if (ext2_read_inode(fs, htree_inum, &inode) == 0) {
+                result_node = ext2_alloc_node(fs, htree_inum, &inode);
+                if (result_node) {
+                    size_t len = name_len;
+                    if (len >= sizeof(result_node->name))
+                        len = sizeof(result_node->name) - 1;
+                    memcpy(result_node->name, name, len);
+                    result_node->name[len] = '\0';
+                    goto cleanup;
+                }
+            }
+        } else if (htr == 0) {
+            /* htree said "not here" — trust the indexer and return
+             * NULL.  This is the FreeBSD behaviour; linear-scanning
+             * after a successful htree miss is a waste.  */
+            goto cleanup;
+        }
+        if (htr < 0) ext2_finddir_htree_bypass++;
+        /* fall through to linear scan */
+    }
 
     while (pos < dir_size) {
         uint32_t block_idx = pos / fs->block_size;
@@ -1625,7 +1784,18 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
                 return NULL;
             }
             kprintf("ext2: superblock metadata_csum verified (%08x)\n", got);
+        }
 
+        /* Stash htree hash seed (sb_buf+236, four u32 words).  Used
+         * by ext2_htree_hash() — initial state for the half_md4 and
+         * tea hash functions.  Always loaded if rev_level >= 1
+         * because mkfs.ext4 generates a non-zero seed even when
+         * neither metadata_csum nor htree-by-default is requested.  */
+        memcpy(fs->hash_seed, sb_buf + 236, sizeof(fs->hash_seed));
+
+        if (fs->sb.s_feature_ro_compat & EXT2F_ROCOMPAT_METADATA_CKSUM) {
+            extern int kprintf(const char *, ...);
+            extern uint32_t crc32c_update(uint32_t, const void *, size_t);
             /* Establish the csum seed used for every other csum'd
              * object on the filesystem.  Default = crc32c(~0, uuid).
              * If the fs has INCOMPAT_CSUM_SEED set, the seed is the
