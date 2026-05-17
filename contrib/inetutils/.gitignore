@@ -1,0 +1,4 @@
+# Anything fetch.sh / build.sh produces — upstream tarball + extracted
+# tree + downstream build staging.  None of this is source-controlled.
+build/
+build-*/

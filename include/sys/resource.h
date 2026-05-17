@@ -19,8 +19,19 @@ typedef unsigned long rlim_t;
 
 #define RLIM_INFINITY ((rlim_t)-1)
 
-#define RLIMIT_CORE 0
-#define RLIM_NLIMITS 1
+#define RLIMIT_CPU      0
+#define RLIMIT_FSIZE    1
+#define RLIMIT_DATA     2
+#define RLIMIT_STACK    3
+#define RLIMIT_CORE     4
+#define RLIMIT_RSS      5
+#define RLIMIT_MEMLOCK  6
+#define RLIMIT_NPROC    7
+#define RLIMIT_NOFILE   8
+#define RLIMIT_SBSIZE   9
+#define RLIMIT_VMEM     10
+#define RLIMIT_AS       RLIMIT_VMEM
+#define RLIM_NLIMITS    11
 
 struct rlimit {
     rlim_t rlim_cur;

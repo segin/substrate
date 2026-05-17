@@ -75,6 +75,16 @@ int getaddrinfo(const char *node, const char *service,
                 const struct addrinfo *hints, struct addrinfo **res);
 void freeaddrinfo(struct addrinfo *res);
 const char *gai_strerror(int errcode);
+/* getnameinfo() buffer sizes + flag bits — POSIX-2008.  */
+#define NI_MAXHOST      1025
+#define NI_MAXSERV      32
+
+#define NI_NUMERICHOST  0x01    /* fill host buf with numeric address */
+#define NI_NUMERICSERV  0x02    /* fill serv buf with numeric port */
+#define NI_NOFQDN       0x04    /* return only nodename portion */
+#define NI_NAMEREQD     0x08    /* fail if name not reverse-resolvable */
+#define NI_DGRAM        0x10    /* service is datagram (port mapping diff) */
+
 int getnameinfo(const struct sockaddr *sa, socklen_t salen,
                 char *host, socklen_t hostlen,
                 char *serv, socklen_t servlen, int flags);
@@ -112,6 +122,13 @@ extern int h_errno;
 #define NO_RECOVERY    3
 #define NO_DATA        4
 #define NO_ADDRESS     NO_DATA
+
+/* Decode the value of h_errno (or the eai* values).  Substrate's
+ * gethostbyname is currently /etc/hosts-only so the only h_errno
+ * that ever surfaces is HOST_NOT_FOUND — but ports still expect the
+ * decoder to exist.  */
+const char *hstrerror(int err);
+void        herror(const char *s);
 
 #ifdef __cplusplus
 }

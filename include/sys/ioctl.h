@@ -17,6 +17,16 @@ struct winsize {
 };
 #endif
 
+/* Generic file/socket ioctls — Linux numbers.  */
+#define FIONREAD     0x541B    /* int *: pending readable bytes */
+#define FIONBIO      0x5421    /* int *: enable non-blocking I/O */
+#define FIOCLEX      0x5451    /* set close-on-exec */
+#define FIONCLEX     0x5450    /* clear close-on-exec */
+#define FIOASYNC     0x5452    /* int *: enable SIGIO-on-ready */
+#define SIOCATMARK   0x8905    /* int *: TCP urgent-data mark */
+#define SIOCSPGRP    0x8902    /* set sock's pgrp for SIGIO */
+#define SIOCGPGRP    0x8904    /* get sock's pgrp for SIGIO */
+
 /* TTY ioctls */
 #define TIOCGWINSZ   0x5413
 #define TIOCSWINSZ   0x5414

@@ -29,6 +29,7 @@
 
 #include <arpa/inet.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <netdb.h>
 #include <netinet/in.h>
 #include <stdio.h>
@@ -64,6 +65,24 @@ char *inet_ntoa(struct in_addr in) {
  * ============================================================ */
 
 int h_errno = 0;
+
+const char *hstrerror(int err)
+{
+    switch (err) {
+    case 0:              return "Resolver Error 0 (no error)";
+    case HOST_NOT_FOUND: return "Unknown host";
+    case TRY_AGAIN:      return "Host name lookup failure";
+    case NO_RECOVERY:    return "Unknown server error";
+    case NO_DATA:        return "No address associated with name";
+    default:             return "Unknown resolver error";
+    }
+}
+
+void herror(const char *s)
+{
+    if (s && *s) fprintf(stderr, "%s: %s\n", s, hstrerror(h_errno));
+    else         fprintf(stderr, "%s\n",    hstrerror(h_errno));
+}
 
 /* Per-family FILE* state.  NULL = not opened; reopened lazily on
  * first call.  setXent(1) "stay open" — we always stay open
@@ -152,8 +171,235 @@ struct hostent *gethostent(void) {
     return NULL;
 }
 
+/* DNS resolver — queries each nameserver from /etc/resolv.conf in
+ * order, sends a UDP/53 A-record query, parses the first answer.
+ *
+ * Implementation notes:
+ *   - Minimal RFC 1035 parser; only IN/A and IN/AAAA records.
+ *   - No retransmission inside one nameserver, but moves on to the
+ *     next nameserver on timeout/parse-failure.
+ *   - Single-shot: blocks up to ~2s per nameserver before giving up.
+ */
+
+static int dns_encode_name(uint8_t *out, size_t outsz, const char *name) {
+    size_t pos = 0;
+    const char *p = name;
+    while (*p) {
+        const char *dot = strchr(p, '.');
+        size_t lab = dot ? (size_t)(dot - p) : strlen(p);
+        if (lab == 0 || lab > 63) return -1;
+        if (pos + 1 + lab >= outsz) return -1;
+        out[pos++] = (uint8_t)lab;
+        memcpy(out + pos, p, lab);
+        pos += lab;
+        if (!dot) break;
+        p = dot + 1;
+    }
+    if (pos + 1 > outsz) return -1;
+    out[pos++] = 0;  /* root label */
+    return (int)pos;
+}
+
+static int dns_skip_name(const uint8_t *pkt, size_t pktlen, size_t pos) {
+    while (pos < pktlen) {
+        uint8_t l = pkt[pos];
+        if (l == 0) return (int)(pos + 1);
+        if ((l & 0xC0) == 0xC0) return (int)(pos + 2);
+        pos += 1 + l;
+    }
+    return -1;
+}
+
+/* Returns 1 on success, 0 on not-found, -1 on error. */
+static int dns_query_v4(const struct sockaddr_in *server,
+                        const char *name,
+                        uint8_t addr_out[4]) {
+    int s = socket(AF_INET, SOCK_DGRAM, 0);
+    if (s < 0) return -1;
+    uint8_t req[512];
+    uint16_t txid = (uint16_t)(rand() & 0xFFFF);
+    req[0] = txid >> 8; req[1] = txid & 0xFF;
+    req[2] = 0x01; req[3] = 0x00;          /* RD set */
+    req[4] = 0;    req[5] = 1;             /* qdcount=1 */
+    req[6] = req[7] = req[8] = req[9] = req[10] = req[11] = 0;
+    int n = dns_encode_name(req + 12, sizeof(req) - 12, name);
+    if (n < 0) { close(s); return -1; }
+    size_t off = 12 + n;
+    if (off + 4 > sizeof(req)) { close(s); return -1; }
+    req[off++] = 0; req[off++] = 1;        /* QTYPE=A */
+    req[off++] = 0; req[off++] = 1;        /* QCLASS=IN */
+    if (sendto(s, req, off, 0, (const struct sockaddr *)server,
+               sizeof(*server)) != (ssize_t)off) { close(s); return -1; }
+
+    /* Pass MSG_DONTWAIT on every recv so the substrate AF_INET
+     * socket layer returns -EAGAIN immediately when no datagram
+     * has arrived, rather than parking the calling thread in a
+     * non-interruptible sleep.  (substrate's afinet_recvfrom only
+     * honors the per-call MSG_DONTWAIT flag; an fcntl(O_NONBLOCK)
+     * on the fd has no effect there.)  Loop at ~20 ms cadence
+     * for a 2 s budget, then give up.  Without this, ^C cannot
+     * reach the thread and any unresolvable host wedges ping(8)
+     * forever. */
+    uint8_t resp[1500];
+    int got = -1;
+    for (int i = 0; i < 100; i++) {
+        ssize_t r = recv(s, resp, sizeof(resp), MSG_DONTWAIT);
+        if (r > 0) { got = (int)r; break; }
+        if (r < 0 && errno != EAGAIN && errno != EWOULDBLOCK &&
+                     errno != EINTR) {
+            break;
+        }
+        usleep(20000);
+    }
+    close(s);
+    if (got <= 0) return -1;
+    if (got < 12) return -1;
+    if (resp[0] != req[0] || resp[1] != req[1]) return -1;
+    int qd = (resp[4] << 8) | resp[5];
+    int an = (resp[6] << 8) | resp[7];
+    int pos = 12;
+    for (int i = 0; i < qd; i++) {
+        pos = dns_skip_name(resp, got, pos);
+        if (pos < 0 || pos + 4 > got) return -1;
+        pos += 4;
+    }
+    for (int i = 0; i < an; i++) {
+        pos = dns_skip_name(resp, got, pos);
+        if (pos < 0 || pos + 10 > got) return -1;
+        int type   = (resp[pos] << 8) | resp[pos + 1];
+        int rdlen  = (resp[pos + 8] << 8) | resp[pos + 9];
+        pos += 10;
+        if (pos + rdlen > got) return -1;
+        if (type == 1 && rdlen == 4) {
+            memcpy(addr_out, resp + pos, 4);
+            return 1;
+        }
+        pos += rdlen;
+    }
+    return 0;
+}
+
+/*
+ * Parse a /etc/resolv.conf-style file once into a parallel pair of
+ * lists: server IPs (in network byte order) and search domains.
+ * Both are caller-bounded.  `search` and `domain` are treated as
+ * synonyms — POSIX-style "either, last one wins" semantics; the
+ * caller's `searches` array receives every label.
+ *
+ * Returns the number of nameservers found, or -1 on file open
+ * failure.  search_count_out is filled in unconditionally.
+ */
+static int resolv_parse(struct sockaddr_in *servers, int srv_max,
+                        char (*searches)[256], int search_max,
+                        int *search_count_out) {
+    int srv_n = 0;
+    int srch_n = 0;
+    FILE *f = fopen("/etc/resolv.conf", "r");
+    if (!f) { *search_count_out = 0; return -1; }
+    char line[512];
+    while (fgets(line, sizeof(line), f)) {
+        char *p = line;
+        while (*p == ' ' || *p == '\t') p++;
+
+        if (strncmp(p, "nameserver", 10) == 0 &&
+            (p[10] == ' ' || p[10] == '\t')) {
+            p += 10;
+            while (*p == ' ' || *p == '\t') p++;
+            char *end = p;
+            while (*end && *end != '\n' && *end != ' ' && *end != '\t' && *end != '#') end++;
+            *end = '\0';
+            if (srv_n < srv_max) {
+                struct sockaddr_in *srv = &servers[srv_n];
+                memset(srv, 0, sizeof(*srv));
+                srv->sin_family = AF_INET;
+                srv->sin_port = __builtin_bswap16(53);
+                if (inet_pton(AF_INET, p, &srv->sin_addr) == 1) {
+                    srv_n++;
+                }
+            }
+            continue;
+        }
+
+        /* Both `search` and `domain` populate the search list.
+         * `search` accepts up to 6 whitespace-separated labels per
+         * RFC 1123; `domain` takes a single label. */
+        const char *kw = NULL;
+        int kwlen = 0;
+        if (strncmp(p, "search", 6) == 0 && (p[6] == ' ' || p[6] == '\t')) {
+            kw = "search"; kwlen = 6;
+        } else if (strncmp(p, "domain", 6) == 0 && (p[6] == ' ' || p[6] == '\t')) {
+            kw = "domain"; kwlen = 6;
+        }
+        if (kw) {
+            p += kwlen;
+            while (*p == ' ' || *p == '\t') p++;
+            /* Tokenize whitespace-separated labels until EOL/#. */
+            while (*p && *p != '\n' && *p != '#' && srch_n < search_max) {
+                char *tok = p;
+                while (*p && *p != ' ' && *p != '\t' && *p != '\n' && *p != '#') p++;
+                size_t n = (size_t)(p - tok);
+                if (n > 0 && n < sizeof(searches[0])) {
+                    memcpy(searches[srch_n], tok, n);
+                    searches[srch_n][n] = '\0';
+                    srch_n++;
+                }
+                while (*p == ' ' || *p == '\t') p++;
+            }
+            continue;
+        }
+    }
+    fclose(f);
+    *search_count_out = srch_n;
+    return srv_n;
+}
+
+/* Try every nameserver in `servers` for one `name`; first hit wins. */
+static int dns_try_all_servers(struct sockaddr_in *servers, int srv_n,
+                               const char *name, uint8_t addr_out[4]) {
+    for (int i = 0; i < srv_n; i++) {
+        int rc = dns_query_v4(&servers[i], name, addr_out);
+        if (rc == 1) return 1;
+    }
+    return 0;
+}
+
+static int dns_lookup_via_resolv(const char *name, uint8_t addr_out[4]) {
+    struct sockaddr_in servers[8];
+    char               searches[8][256];
+    int                search_n = 0;
+    int srv_n = resolv_parse(servers, 8, searches, 8, &search_n);
+    if (srv_n <= 0) return srv_n;  /* -1 = no file, 0 = no nameservers */
+
+    /* RFC 1535 §6: "If the supplied name contains a dot, try as-is
+     * first; only fall back to the search list if that fails."  For
+     * unqualified names (no dot), the search list is consulted
+     * first, then the bare name.  Substrate adopts the more common
+     * absolute-first behaviour for safety. */
+    int has_dot = (strchr(name, '.') != NULL);
+
+    if (has_dot) {
+        if (dns_try_all_servers(servers, srv_n, name, addr_out) == 1) return 1;
+        /* Fall through to search-list expansion. */
+    }
+
+    /* Search-list expansion: append each search domain, retry. */
+    for (int i = 0; i < search_n; i++) {
+        char fqdn[512];
+        int n = snprintf(fqdn, sizeof(fqdn), "%s.%s", name, searches[i]);
+        if (n <= 0 || (size_t)n >= sizeof(fqdn)) continue;
+        if (dns_try_all_servers(servers, srv_n, fqdn, addr_out) == 1) return 1;
+    }
+
+    /* Last resort for unqualified names: try as-is. */
+    if (!has_dot) {
+        if (dns_try_all_servers(servers, srv_n, name, addr_out) == 1) return 1;
+    }
+    return 0;
+}
+
 struct hostent *gethostbyname(const char *name) {
     if (!name) { h_errno = HOST_NOT_FOUND; return NULL; }
+    /* First check /etc/hosts. */
     sethostent(1);
     struct hostent *he;
     while ((he = gethostent()) != NULL) {
@@ -161,6 +407,20 @@ struct hostent *gethostbyname(const char *name) {
         for (char **a = he->h_aliases; *a; a++) {
             if (strcmp(*a, name) == 0) return he;
         }
+    }
+    /* Fall back to DNS. */
+    uint8_t addr[4];
+    if (dns_lookup_via_resolv(name, addr) == 1) {
+        memcpy(g_hostent_addr_buf, addr, 4);
+        g_hostent_addr_list[0] = g_hostent_addr_buf;
+        g_hostent_addr_list[1] = NULL;
+        snprintf(g_hostent_line, sizeof(g_hostent_line), "%s", name);
+        g_hostent.h_name      = g_hostent_line;
+        g_hostent.h_aliases   = (char *[]){ NULL };
+        g_hostent.h_addrtype  = AF_INET;
+        g_hostent.h_length    = 4;
+        g_hostent.h_addr_list = g_hostent_addr_list;
+        return &g_hostent;
     }
     h_errno = HOST_NOT_FOUND;
     return NULL;

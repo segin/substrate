@@ -1,0 +1,181 @@
+/*
+ * lib/c/src/syslog.c — libc client side of the system log API.
+ *
+ * Format per RFC 3164 (the BSD syslog protocol — what every existing
+ * syslogd parses), sent over /dev/log (UNIX-domain datagram socket
+ * the daemon listens on).  If /dev/log isn't there yet (early boot,
+ * no syslogd), and LOG_CONS is set, fall back to /dev/console.
+ * LOG_PERROR additionally echoes to stderr.
+ *
+ *   <PRI>TIMESTAMP HOSTNAME ident[pid]: message
+ *
+ * PRI is the encoded facility|level integer in angle brackets.
+ *
+ * The socket is opened lazily on the first syslog() call (LOG_ODELAY
+ * is the default per POSIX), unless LOG_NDELAY was passed to
+ * openlog().  Resends after a closelog() reopen lazily again.
+ */
+
+#include <syslog.h>
+#include <unistd.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/socket.h>
+#include <sys/un.h>
+#include <sys/time.h>
+#include <fcntl.h>
+#include <time.h>
+#include <errno.h>
+
+#define SYSLOG_SOCK_PATH  "/dev/log"
+#define SYSLOG_FALLBACK   "/dev/console"
+
+static int          g_logfd       = -1;
+static const char  *g_ident       = NULL;
+static int          g_option      = 0;
+static int          g_facility    = LOG_USER;
+static int          g_mask        = 0xff;   /* allow all by default */
+
+static void try_open(void)
+{
+    if (g_logfd >= 0) return;
+    int fd = socket(AF_UNIX, SOCK_DGRAM, 0);
+    if (fd < 0) return;
+    struct sockaddr_un sun;
+    memset(&sun, 0, sizeof(sun));
+    sun.sun_family = AF_UNIX;
+    strncpy(sun.sun_path, SYSLOG_SOCK_PATH, sizeof(sun.sun_path) - 1);
+    if (connect(fd, (struct sockaddr *)&sun, sizeof(sun)) < 0) {
+        /* Daemon isn't listening — keep the fd so future writes can
+         * try sending, but don't error.  Some syslog setups create
+         * the socket only when a daemon attaches. */
+        close(fd);
+        return;
+    }
+    g_logfd = fd;
+}
+
+void openlog(const char *ident, int option, int facility)
+{
+    g_ident    = ident;
+    g_option   = option;
+    g_facility = facility ? facility : LOG_USER;
+    if (option & LOG_NDELAY) try_open();
+}
+
+void closelog(void)
+{
+    if (g_logfd >= 0) { close(g_logfd); g_logfd = -1; }
+    g_ident = NULL;
+}
+
+int setlogmask(int mask)
+{
+    int prev = g_mask;
+    if (mask) g_mask = mask;
+    return prev;
+}
+
+void vsyslog(int priority, const char *fmt, va_list ap)
+{
+    /* Drop levels not in the mask. */
+    if (!(g_mask & LOG_MASK(LOG_PRI(priority)))) return;
+
+    /* If caller didn't bake a facility into priority, use ours. */
+    if ((priority & LOG_FACMASK) == 0) priority |= g_facility;
+
+    /* RFC 3164: <PRI>Mmm DD HH:MM:SS HOSTNAME ident[pid]: msg
+     * Hostname is left blank when not known (kernel route does the
+     * fixup); ident defaults to argv[0]'s basename if openlog
+     * wasn't called. */
+    char  buf[1024];
+    int   n = 0;
+    n += snprintf(buf + n, sizeof(buf) - n, "<%d>", priority);
+
+    time_t now;
+    struct timeval tv;
+    if (gettimeofday(&tv, NULL) == 0) now = tv.tv_sec;
+    else now = time(NULL);
+
+    struct tm tmv;
+    /* No gmtime_r / localtime_r yet in substrate libc; compute the
+     * "Mmm DD HH:MM:SS" string by hand from UTC seconds.  syslogd
+     * is welcome to re-stamp with localtime later. */
+    {
+        static const char *mon[] = {
+            "Jan","Feb","Mar","Apr","May","Jun",
+            "Jul","Aug","Sep","Oct","Nov","Dec"
+        };
+        /* Days from 1970-01-01 to current date, civil-from-days
+         * algorithm (Howard Hinnant).  */
+        long secs  = (long)now;
+        long days  = secs / 86400;
+        long tod   = secs - days * 86400;
+        int  hour  = tod / 3600;
+        int  min   = (tod % 3600) / 60;
+        int  sec   = tod % 60;
+        long z     = days + 719468;
+        long era   = (z >= 0 ? z : z - 146096) / 146097;
+        unsigned doe = z - era * 146097;
+        unsigned yoe = (doe - doe/1460 + doe/36524 - doe/146096) / 365;
+        long y     = (long)yoe + era * 400;
+        unsigned doy  = doe - (365*yoe + yoe/4 - yoe/100);
+        unsigned mp   = (5*doy + 2) / 153;
+        unsigned d    = doy - (153*mp + 2)/5 + 1;
+        unsigned mo   = mp + (mp < 10 ? 3 : -9);
+        y += (mo <= 2);
+        (void)y;
+        tmv.tm_mon = mo - 1;
+        tmv.tm_mday = d;
+        tmv.tm_hour = hour;
+        tmv.tm_min  = min;
+        tmv.tm_sec  = sec;
+        n += snprintf(buf + n, sizeof(buf) - n,
+                      "%s %2d %02d:%02d:%02d ",
+                      mon[tmv.tm_mon], tmv.tm_mday,
+                      tmv.tm_hour, tmv.tm_min, tmv.tm_sec);
+    }
+
+    if (g_ident && *g_ident) {
+        if (g_option & LOG_PID)
+            n += snprintf(buf + n, sizeof(buf) - n, "%s[%d]: ",
+                          g_ident, (int)getpid());
+        else
+            n += snprintf(buf + n, sizeof(buf) - n, "%s: ", g_ident);
+    }
+    n += vsnprintf(buf + n, sizeof(buf) - n, fmt, ap);
+    if (n >= (int)sizeof(buf)) n = sizeof(buf) - 1;
+    /* No trailing newline per RFC 3164; syslogd records frame the
+     * line itself when writing to a log file. */
+
+    try_open();
+    int sent = 0;
+    if (g_logfd >= 0) {
+        ssize_t r = send(g_logfd, buf, n, 0);
+        if (r >= 0) sent = 1;
+    }
+
+    /* Fallback path on no daemon. */
+    if (!sent && (g_option & LOG_CONS)) {
+        int fd = open(SYSLOG_FALLBACK, O_WRONLY | O_NOCTTY);
+        if (fd >= 0) {
+            write(fd, buf, n);
+            write(fd, "\n", 1);
+            close(fd);
+        }
+    }
+
+    if (g_option & LOG_PERROR) {
+        write(2, buf, n);
+        write(2, "\n", 1);
+    }
+}
+
+void syslog(int priority, const char *fmt, ...)
+{
+    va_list ap;
+    va_start(ap, fmt);
+    vsyslog(priority, fmt, ap);
+    va_end(ap);
+}

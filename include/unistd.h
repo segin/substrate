@@ -9,6 +9,26 @@ extern "C" {
 #include <sys/syscall.h>
 #include <sys/types.h>
 
+/*
+ * POSIX feature-test stamp.
+ *
+ * Substrate targets POSIX.1-2017 (a.k.a. Issue 7 TC2 = 200809L);
+ * many third-party headers use _POSIX_VERSION (and the older
+ * _POSIX2_VERSION / _XOPEN_VERSION) to decide whether to redeclare
+ * libc primitives with pre-ANSI signatures.  GNU make's
+ * src/makeint.h is the canonical example — without
+ * _POSIX_VERSION it falls back to `long lseek ()` / `char *getcwd
+ * (void)` K&R prototypes that conflict with substrate's ISO ones.
+ */
+#define _POSIX_VERSION   200809L
+#define _POSIX2_VERSION  200809L
+#define _XOPEN_VERSION   700
+
+/* POSIX-2017 §11.1.7: a c_cc[] slot set to _POSIX_VDISABLE disables
+ * the associated special-character function.  Substrate matches the
+ * Linux/glibc value of 0 (0xff is the BSD convention).  */
+#define _POSIX_VDISABLE  0
+
 #define STDIN_FILENO  0
 #define STDOUT_FILENO 1
 #define STDERR_FILENO 2

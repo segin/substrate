@@ -1,0 +1,22 @@
+Subject: telnet/sys_bsd.c: drop spurious arg to stilloob()
+
+stilloob() is declared and defined as `int stilloob (void)` in
+network.c / externs.h, but sys_bsd.c calls it with the socket fd as
+an arg.  On most hosts the call site is shielded by an OOB-handling
+branch the configure pass dead-codes out, so the arity mismatch
+escapes notice; on substrate the branch compiles and the build
+breaks.  Drop the extraneous argument.
+
+---
+diff -urN a/telnet/sys_bsd.c b/telnet/sys_bsd.c
+--- a/telnet/sys_bsd.c
++++ b/telnet/sys_bsd.c
+@@ -1235,7 +1235,7 @@
+ 		  c = recv (net, netiring.supply, canread, 0);
+ 		  if (clocks.didnetreceive < clocks.gotDM)
+ 		    {
+-		      SYNCHing = stilloob (net);
++		      SYNCHing = stilloob ();
+ 		    }
+ 		}
+ 	      else if (first && c > 0)

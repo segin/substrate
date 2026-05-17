@@ -7,6 +7,36 @@ extern "C" {
 
 #include <stddef.h>
 #include <stdarg.h>
+
+/* FILE must be declared BEFORE pulling in <sys/types.h>.  That header
+ * transitively brings in <stdint.h>, and under gnulib's replacement
+ * headers <stdint.h> drags in <wchar.h>, which itself includes
+ * <stdio.h>.  The re-entrant <stdio.h> hits the _STDIO_H guard and
+ * bails out with FILE still undefined — every gnulib-using package
+ * (inetutils, coreutils, ...) then fails to compile wchar.h.  Define
+ * the typedef up front to break the cycle.  Body uses only int and
+ * unsigned char*, so it has no header prerequisites.  */
+typedef struct FILE {
+    int fd;
+    int flags;     // RW, APPEND, etc.
+    int mode;      // Buffering mode
+    int error;
+    int eof;
+
+    unsigned char *buffer;     // Start of buffer
+    unsigned char *buf_end;    // End of allocated buffer
+    unsigned char *pos;        // Current read/write position
+    unsigned char *limit;      // End of valid data (read) or buffer end (write)
+
+    int own_buffer; // 1 if malloc'd
+
+    int unget_char; // Single char pushback (simplified)
+    int has_unget;
+
+    struct FILE *next;
+    struct FILE *prev;
+} FILE;
+
 #include <sys/types.h>
 
 #define EOF (-1)
@@ -23,27 +53,6 @@ extern "C" {
 #define SEEK_CUR 1
 #define SEEK_END 2
 typedef long fpos_t;
-
-typedef struct FILE {
-    int fd;
-    int flags;     // RW, APPEND, etc.
-    int mode;      // Buffering mode
-    int error;
-    int eof;
-    
-    unsigned char *buffer;     // Start of buffer
-    unsigned char *buf_end;    // End of allocated buffer
-    unsigned char *pos;        // Current read/write position
-    unsigned char *limit;      // End of valid data (read) or buffer end (write)
-    
-    int own_buffer; // 1 if malloc'd
-    
-    int unget_char; // Single char pushback (simplified)
-    int has_unget;
-
-    struct FILE *next;
-    struct FILE *prev;
-} FILE;
 
 extern FILE *stdin;
 extern FILE *stdout;

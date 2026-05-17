@@ -1,0 +1,46 @@
+Subject: telnet/telnetd: explicitly include <sys/select.h>
+
+Several translation units (telnet/utilities, telnet/tn3270,
+telnetd/telnetd, telnetd/utility) use fd_set / FD_ZERO / FD_SET /
+select() but rely on the historical glibc/BSD-libc behavior of
+pulling <sys/select.h> in transitively from <sys/types.h> or
+<sys/time.h>.  Substrate keeps those headers strictly separated
+(adding the include creates mutual recursion: sys/select.h →
+sys/time.h → sys/select.h).  Add the explicit include — once in
+telnetd's shared umbrella header (covers telnetd.c + utility.c)
+and once each in the standalone telnet TUs.
+
+---
+diff -urN a/telnet/tn3270.c b/telnet/tn3270.c
+--- a/telnet/tn3270.c
++++ b/telnet/tn3270.c
+@@ -50,6 +50,7 @@
+ #include <config.h>
+
+ #include <sys/types.h>
++#include <sys/select.h>
+ #include <arpa/telnet.h>
+
+ #include "general.h"
+diff -urN a/telnet/utilities.c b/telnet/utilities.c
+--- a/telnet/utilities.c
++++ b/telnet/utilities.c
+@@ -56,6 +56,7 @@
+ #include <sys/types.h>
+ #include <sys/socket.h>
+ #include <sys/time.h>
++#include <sys/select.h>
+ #include <time.h>
+ #include <ctype.h>
+
+diff -urN a/telnetd/telnetd.h b/telnetd/telnetd.h
+--- a/telnetd/telnetd.h
++++ b/telnetd/telnetd.h
+@@ -19,6 +19,7 @@
+ #include <config.h>
+ #include <sys/types.h>
+ #include <sys/time.h>
++#include <sys/select.h>
+ #include <sys/stat.h>
+ #include <stdio.h>
+ #include <stdlib.h>
