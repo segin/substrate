@@ -582,32 +582,32 @@ int chmod(const char *pathname, mode_t mode) {
     return __set_errno((int)_syscall2(SYS_CHMOD, (uintptr_t)pathname, mode));
 }
 
+/* utimes / futimens / utimensat — silent-success stubs.
+ *
+ * The kernel doesn't have a setattr syscall wired up yet, so we
+ * can't actually update file mtime/atime.  Returning ENOSYS here
+ * broke every userspace tool that does best-effort timestamp
+ * preservation (gzip on the file it just wrote, cp -p, tar with
+ * default extract, ...) — they treat ENOSYS as fatal and print
+ * "Function not implemented" before exiting.
+ *
+ * Return 0 so those tools proceed.  The actual mtime/atime won't
+ * match the source, but the data is correct.  Real fix: wire up
+ * SYS_UTIMENSAT through vop_setattr in the VFS layer.  */
 int utimes(const char *filename, const struct timeval times[2]) {
     (void)filename; (void)times;
-    errno = ENOSYS;
-    return -1;
+    return 0;
 }
 
 int utimensat(int dirfd, const char *path, const struct timespec times[2],
               int flags) {
-    (void)dirfd; (void)flags;
-    /* Lower to utimes() — substrate's VFS only supports microsecond
-     * resolution for now; nanosecond fields get truncated. */
-    if (times == NULL) {
-        return utimes(path, NULL);
-    }
-    struct timeval tv[2];
-    tv[0].tv_sec  = times[0].tv_sec;
-    tv[0].tv_usec = times[0].tv_nsec / 1000;
-    tv[1].tv_sec  = times[1].tv_sec;
-    tv[1].tv_usec = times[1].tv_nsec / 1000;
-    return utimes(path, tv);
+    (void)dirfd; (void)path; (void)times; (void)flags;
+    return 0;
 }
 
 int futimens(int fd, const struct timespec times[2]) {
     (void)fd; (void)times;
-    errno = ENOSYS;
-    return -1;
+    return 0;
 }
 int mount(const char *source, const char *target, const char *filesystemtype, unsigned long mountflags, const void *data) {
     return __set_errno((int)_syscall5(SYS_MOUNT, (uintptr_t)source, (uintptr_t)target, (uintptr_t)filesystemtype, (uintptr_t)mountflags, (uintptr_t)data));
@@ -819,9 +819,8 @@ int gethostname(char *name, size_t len) {
 }
 
 int sethostname(const char *name, size_t len) {
-    (void)name; (void)len;
-    errno = ENOSYS;
-    return -1;
+    return __set_errno((int)_syscall2(SYS_SETHOSTNAME,
+                                       (uintptr_t)name, len));
 }
 
 int futex(int *uaddr, int op, int val, const struct timespec *timeout, int *uaddr2, int val3) {
@@ -1069,7 +1068,7 @@ int iswctype(wint_t wc, wctype_t desc) {
 long sysconf(int name) {
     switch (name) {
     case 0 /* _SC_ARG_MAX */:      return 65536;
-    case 2 /* _SC_CLK_TCK */:      return 100;
+    case 2 /* _SC_CLK_TCK */:      return 128;  /* substrate HZ */
     case 3 /* _SC_NGROUPS_MAX */:  return 32;
     case 4 /* _SC_OPEN_MAX */:     return 256;
     case 7 /* _SC_VERSION */:      return 200809L;
