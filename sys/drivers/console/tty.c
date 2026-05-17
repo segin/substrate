@@ -84,6 +84,17 @@ void tty_fs_open(fs_node_t *node) {
     tty_open(tty);
 }
 
+/* VFS-level poll bridge for TTY device nodes.  Without this, poll_fs's
+ * default fallback returns 0 events for FS_CHARDEVICE nodes — and
+ * libedit's read_esc_byte select() therefore times out on every ESC
+ * sequence, so the user sees "[A" inserted literally instead of an
+ * up-arrow history scroll.  Hooked into the node by tty_register_device
+ * below. */
+int tty_fs_poll(fs_node_t *node, void *waiter) {
+    struct tty *tty = node ? (struct tty *)node->ptr : NULL;
+    return tty_poll(tty, waiter);
+}
+
 void tty_fs_close(fs_node_t *node) {
     struct tty *tty = (struct tty *)node->ptr;
     tty_close(tty);
@@ -123,6 +134,7 @@ void tty_register_device(struct tty *tty, char *name) {
     node->ioctl = tty_fs_ioctl;
     node->open = tty_fs_open;
     node->close = tty_fs_close;
+    node->poll = tty_fs_poll;
     
     devfs_register_device(node);
     tty->devnode = node;
@@ -414,7 +426,23 @@ static int canon(struct tty *tp, uint32_t *flags_ptr) {
     
     // Wait for delimiter
     while (tp->delct == 0) {
-        // sleep
+        /* Hangup already pending? Don't enter the wait — return EOF.
+         * This catches the close-then-read race (see tty_read raw
+         * branch for the long-form rationale). */
+        if (tp->hung_up) {
+            return 1;   /* eof_seen = true */
+        }
+
+        /* Pending signal? Don't park — return so the syscall-exit
+         * path delivers the signal.  Sentinel: -1 means "EINTR"; the
+         * caller (tty_read canonical branch) treats it as no data. */
+        if (current_thread->sig_pending & ~current_thread->sig_mask) {
+            return -1;
+        }
+
+        // sleep — set INTERRUPTIBLE before BLOCKED for psignal's sake
+        // (see tty_read raw branch for the long-form rationale).
+        current_thread->flags |= THREAD_F_INTERRUPTIBLE;
         current_thread->wait_chan = &tp->read_wait;
         current_thread->state = THREAD_BLOCKED;
 
@@ -427,6 +455,18 @@ static int canon(struct tty *tp, uint32_t *flags_ptr) {
         // Re-lock and disable interrupts
         *flags_ptr = intr_disable();
         spinlock_acquire(&tp->lock);
+        current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
+
+        /* Post-wake check for the case where hangup fired while we
+         * were already sleeping. */
+        if (tp->hung_up && tp->delct == 0) {
+            return 1;   /* eof_seen = true */
+        }
+
+        /* Or signal-interrupted while sleeping. */
+        if (current_thread->sig_pending & ~current_thread->sig_mask) {
+            return -1;
+        }
     }
     
     while (tty_buf_get(&tp->raw_buf, &c)) {
@@ -783,14 +823,14 @@ int tty_check_change(struct tty *tty) {
 
 int tty_read(struct tty *tty, char *buf, int len) {
     if (!tty_valid(tty) || len <= 0) return 0;
-    
+
     TTY_LOCK(tty);
 
     if (tty_check_read(tty)) {
         TTY_UNLOCK(tty);
         return -EINTR;
     }
-    
+
     int count = 0;
     
     if (!(tty->termios.c_lflag & ICANON)) {
@@ -864,7 +904,36 @@ int tty_read(struct tty *tty, char *buf, int len) {
                     break;
             }
 
-            /* Sleep waiting for input */
+            /* Hangup already pending and no data: signal EOF NOW,
+             * without sleeping.  This closes the close-then-read
+             * race where the master closes (setting hung_up + waking
+             * read_wait) BEFORE we ever entered the sleep — the
+             * wake-up vanishes and the subsequent sched_yield parks
+             * forever.  Checking hung_up here turns the race into a
+             * clean drain-and-EOF. */
+            if (tty->hung_up
+                && tty->raw_buf.head == tty->raw_buf.tail) {
+                break;
+            }
+
+            /* Pending signal at sleep entry: don't park — return so
+             * the syscall-exit path delivers the signal.  Mirror
+             * after-wake check below. */
+            if (current_thread->sig_pending & ~current_thread->sig_mask) {
+                TTY_UNLOCK(tty);
+                return count > 0 ? count : -EINTR;
+            }
+
+            /* Sleep waiting for input.  Order is load-bearing:
+             *   1. flags |= INTERRUPTIBLE   (so psignal will wake us)
+             *   2. wait_chan = read_wait
+             *   3. state = BLOCKED          (visible to psignal scans)
+             * If state is set BEFORE the flag, a concurrent psignal
+             * on another CPU can see THREAD_BLOCKED without
+             * THREAD_F_INTERRUPTIBLE, skip signal_interrupt_thread,
+             * and leave us sleeping after returning — net effect:
+             * kill -9 doesn't kick a process out of read(). */
+            current_thread->flags |= THREAD_F_INTERRUPTIBLE;
             current_thread->wait_chan = &tty->read_wait;
             current_thread->state = THREAD_BLOCKED;
             spinlock_release(&tty->lock);
@@ -874,6 +943,20 @@ int tty_read(struct tty *tty, char *buf, int len) {
 
             _flags = intr_disable();
             spinlock_acquire(&tty->lock);
+            current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
+
+            /* Same check after wakeup — covers the case where the
+             * master closed while we were already sleeping. */
+            if (tty->hung_up
+                && tty->raw_buf.head == tty->raw_buf.tail) {
+                break;
+            }
+
+            /* Woken by a signal?  Return -EINTR (or partial bytes). */
+            if (current_thread->sig_pending & ~current_thread->sig_mask) {
+                TTY_UNLOCK(tty);
+                return count > 0 ? count : -EINTR;
+            }
         }
 
         TTY_UNLOCK(tty);
@@ -884,6 +967,12 @@ int tty_read(struct tty *tty, char *buf, int len) {
     while (count < len) {
         if (tty->read_buf.head == tty->read_buf.tail) {
             int eof = canon(tty, &_flags);
+            if (eof < 0) {
+                /* Signal-interrupted.  Return -EINTR if no data, or
+                 * the short count if some bytes already landed. */
+                TTY_UNLOCK(tty);
+                return count > 0 ? count : -EINTR;
+            }
             if (eof && tty->read_buf.head == tty->read_buf.tail) {
                 TTY_UNLOCK(tty);
                 return count;
