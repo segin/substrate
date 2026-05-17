@@ -261,6 +261,23 @@ size_t fread(void *ptr, size_t size, size_t nmemb, FILE *stream) {
             read_bytes += copy;
             total -= copy;
         } else {
+            /* POSIX-2017 §7.21.5.3: when an input operation on a
+             * tty-backed stream needs unbuffered data, every
+             * line-buffered, tty-backed output stream must be
+             * flushed first.  Without this, prompts like
+             *   printf("foo> "); fgets(line, ..., stdin);
+             * appear to hang — the prompt is sitting in stdout's
+             * line buffer waiting for a '\n' that won't come until
+             * the user has typed and we've returned.  Limit the
+             * flush to the stdout/stderr pair that's likely to
+             * carry a prompt, and only when the input stream is
+             * a tty (matches glibc behavior).  */
+            if (isatty(stream->fd)) {
+                if (stdout && stdout != stream &&
+                    stdout->mode == _IOLBF) fflush(stdout);
+                if (stderr && stderr != stream &&
+                    stderr->mode == _IOLBF) fflush(stderr);
+            }
             // Refill
             if (total >= BUFSIZ) {
                 // Read directly if request is large
