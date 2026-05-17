@@ -1,0 +1,4 @@
+# Substrate patches for GNU gzip.
+0001-config-sub-substrate.patch
+0002-lib-gnulib-substrate.patch
+0003-gnulib-getprogname-substrate.patch

@@ -1,0 +1,27 @@
+Subject: gnulib/getprogname: substrate branch using /proc/self/cmdline
+
+Substrate has a Linux-shape /proc filesystem; $pid/cmdline holds
+the argv joined by NULs.  Same patch shape as contrib/inetutils.
+
+---
+diff -urN a/lib/getprogname.c b/lib/getprogname.c
+--- a/lib/getprogname.c
++++ b/lib/getprogname.c
+@@ -49,7 +49,7 @@
+ # include <sys/procfs.h>
+ #endif
+
+-#if defined __SCO_VERSION__ || defined __sysv5__
++#if defined __SCO_VERSION__ || defined __sysv5__ || defined __substrate__
+ # include <fcntl.h>
+ # include <string.h>
+ #endif
+@@ -266,7 +266,7 @@
+         }
+     }
+   return NULL;
+-# elif defined __SCO_VERSION__ || defined __sysv5__                /* SCO OpenServer6/UnixWare */
++# elif defined __SCO_VERSION__ || defined __sysv5__ || defined __substrate__   /* SCO OpenServer6/UnixWare or substrate */
+   char buf[80];
+   int fd;
+   sprintf (buf, "/proc/%d/cmdline", getpid());

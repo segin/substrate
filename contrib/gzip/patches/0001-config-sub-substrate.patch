@@ -1,0 +1,18 @@
+Subject: config.sub: accept substrate as an OS name
+
+i386-unknown-substrate triples bounce off the unrecognised-OS
+check otherwise.  Same patch shape as the other contrib packages.
+
+---
+diff -urN a/build-aux/config.sub b/build-aux/config.sub
+--- a/build-aux/config.sub
++++ b/build-aux/config.sub
+@@ -1713,7 +1713,7 @@
+ 	     | os9* | macos* | osx* | ios* \
+ 	     | mpw* | magic* | mmixware* | mon960* | lnews* \
+ 	     | amigaos* | amigados* | msdos* | newsos* | unicos* | aof* \
+-	     | aos* | aros* | cloudabi* | sortix* | twizzler* \
++	     | aos* | aros* | cloudabi* | sortix* | substrate* | twizzler* \
+ 	     | nindy* | vxsim* | vxworks* | ebmon* | hms* | mvs* \
+ 	     | clix* | riscos* | uniplus* | iris* | isc* | rtu* | xenix* \
+ 	     | mirbsd* | netbsd* | dicos* | openedition* | ose* \

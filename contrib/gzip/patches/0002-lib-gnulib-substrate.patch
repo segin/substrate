@@ -1,0 +1,64 @@
+Subject: lib/{fpurge,freading,fseterr}.c: substrate branches
+
+Both helpers poke at FILE* internals — fpurge to drop buffered data,
+freading to detect read-vs-write state.  Substrate's stdio doesn't
+track "currently reading" as a distinct state (the FILE struct
+unifies the read/write cursor at fp->pos/fp->limit), so we take the
+pragmatic approach:
+
+  - fpurge: reset pos/limit to buffer to invalidate any buffered
+    data, clear pushback.  Matches the BSD intent.
+  - freading: return non-zero iff the file was opened for read AND
+    we have buffered data we haven't drained.
+
+These are good enough for gzip (which calls fpurge before fseeko
+and freading to check whether to commit-write).  The real fix is
+to either patch gnulib's hairy auto-detection or write a substrate
+sniffer in gnulib's stdio-impl.h — both larger than this commit
+warrants.
+
+---
+diff -urN a/lib/fpurge.c b/lib/fpurge.c
+--- a/lib/fpurge.c
++++ b/lib/fpurge.c
+@@ -143,6 +143,12 @@
+ # elif defined EPLAN9               /* Plan9 */
+   fp->rp = fp->wp = fp->lp = fp->buf;
+   return 0;
++# elif defined __substrate__
++  /* Substrate stdio: invalidate buffered data + drop pushback.  */
++  fp->pos = fp->buffer;
++  fp->limit = fp->buffer;
++  fp->has_unget = 0;
++  return 0;
+ # else
+ #  error "Please port gnulib fpurge.c to your platform! Look at the definitions of fflush, setvbuf and ungetc on your system, then report this to bug-gnulib."
+ # endif
+diff -urN a/lib/freading.c b/lib/freading.c
+--- a/lib/freading.c
++++ b/lib/freading.c
+@@ -69,6 +69,11 @@
+   if (fp->state == 0 /* CLOSED */ || fp->state == 4 /* WR */)
+     return 0;
+   return (fp->state == 3 /* RD */ && (fp->bufl == 0 || fp->rp < fp->wp));
++# elif defined __substrate__
++  /* Substrate stdio doesn't track read-vs-write last op; report
++   * "reading" when the buffer has pending data the caller hasn't
++   * yet drained.  Gzip uses this to decide whether to flush.  */
++  return fp->pos < fp->limit;
+ # else
+ #  error "Please port gnulib freading.c to your platform!"
+ # endif
+diff -urN a/lib/fseterr.c b/lib/fseterr.c
+--- a/lib/fseterr.c
++++ b/lib/fseterr.c
+@@ -79,6 +79,9 @@
+       close (fd2);
+     }
+   errno = saved_errno;
++#elif defined __substrate__
++  /* Substrate stdio FILE: set the explicit error flag.  */
++  fp->error = 1;
+ #else
+  #error "Please port gnulib fseterr.c to your platform! Look at the definitions of ferror and clearerr on your system, then report this to bug-gnulib."
+ #endif

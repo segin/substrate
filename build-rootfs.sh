@@ -378,7 +378,7 @@ install_to_dist() {
     # ships libssl/libcrypto + the openssl CLI under /usr/{lib,bin}; curl
     # ships /usr/bin/curl + libcurl.  Each is independent — missing one
     # just means that one isn't on the image.
-    for ov in inetutils openssl curl; do
+    for ov in inetutils openssl curl gzip; do
         stage="$TOP/dist-$ov"
         if [ -d "$stage" ]; then
             echo "Overlaying contrib/$ov from $stage..."
