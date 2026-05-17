@@ -81,7 +81,11 @@ struct tty {
     // State flags
     int stopped; // Output stopped (IXON)
     int input_stopped; // Input stopped (IXOFF)
-    
+    int hung_up;       // Carrier-lost / peer gone — read returns 0 (EOF),
+                       // write returns -EIO.  Set by drivers (PTY master
+                       // close, modem CD drop) and checked by tty_read /
+                       // tty_write inside the wait loop.
+
     void *driver_data; // Private driver data
     struct fs_node *devnode; // Published device node (for direct stdio attachment)
 };
@@ -131,5 +135,6 @@ size_t tty_fs_write(struct fs_node *node, off_t offset, size_t size,
 int    tty_fs_ioctl(struct fs_node *node, uint32_t request, void *arg);
 void   tty_fs_open(struct fs_node *node);
 void   tty_fs_close(struct fs_node *node);
+int    tty_fs_poll(struct fs_node *node, void *waiter);
 
 #endif
