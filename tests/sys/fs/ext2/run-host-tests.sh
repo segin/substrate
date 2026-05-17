@@ -50,10 +50,15 @@ prep_rootfs() {
     # prep_rootfs <name> <conf-content>
     local name=$1 conf=$2
     local out="$WORK/rootfs-$name.img"
+    # 99-fstest is test-only infrastructure — lives in this directory,
+    # not in etc/rc.d.  Stage it into the rootfs only for the duration
+    # of the build, then yank it back out so we don't pollute the
+    # production image with it.
+    install -m 0755 "$(dirname "$0")/99-fstest" "$TOP/dist/etc/rc.d/99-fstest"
     printf '%s\n' "$conf" > "$TOP/dist/etc/fstest.conf"
     (cd "$TOP" && ./build-rootfs.sh --image >/dev/null 2>&1)
     cp "$IMG_SRC" "$out"
-    rm -f "$TOP/dist/etc/fstest.conf"
+    rm -f "$TOP/dist/etc/fstest.conf" "$TOP/dist/etc/rc.d/99-fstest"
     echo "$out"
 }
 
