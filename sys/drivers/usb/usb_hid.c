@@ -21,6 +21,7 @@
 #include <kern/console.h>
 #include <kern/time.h>
 #include <kern/sched.h>
+#include <sys/param.h>     /* for HZ */
 #include <stdio.h>
 #include <string.h>
 
@@ -77,7 +78,20 @@ typedef struct usb_hid_dev {
     uint8_t  active;
     uint8_t  poll_exited;    /* set by poll thread before kthread_exit() */
     int      poll_chan;      /* wait channel for kthread sleep */
+
+    /* Software typematic — boot-protocol HID has no kernel-side
+     * repeat; we synthesize it.  The driver tracks the most-recently
+     * pressed key, the tick at which the press event fired, and the
+     * tick of the last synthetic repeat we emitted.  Configured for
+     * 500 ms initial delay then ~30 Hz repeat (33 ms between
+     * subsequent repeats), matching common defaults. */
+    uint16_t repeat_key;     /* substrate KEY_* code of the held key */
+    uint64_t repeat_press_tick;
+    uint64_t repeat_last_tick;
 } usb_hid_dev_t;
+
+#define USB_HID_REPEAT_DELAY_TICKS  (HZ / 2)        /* 500 ms */
+#define USB_HID_REPEAT_PERIOD_TICKS (HZ / 30 ? HZ / 30 : 1)  /* ~30 Hz */
 
 static usb_hid_dev_t hid_devices[USB_HID_MAX_DEVICES];
 
@@ -223,6 +237,7 @@ static void usb_hid_process_kbd_report(usb_hid_dev_t *hid,
     }
 
     /* Detect pressed keys: in cur but not in prev */
+    uint16_t newly_pressed = 0;
     for (int i = 0; i < 6; i++) {
         uint8_t usage = cur->keys[i];
         if (usage < 4)
@@ -236,13 +251,59 @@ static void usb_hid_process_kbd_report(usb_hid_dev_t *hid,
         }
         if (!found) {
             uint8_t kc = hid_usage_to_keycode[usage];
-            if (kc != KEY_RESERVED)
+            if (kc != KEY_RESERVED) {
                 process_keycode(kc, 1);
+                newly_pressed = kc;
+            }
+        }
+    }
+
+    /* Typematic state update: a fresh press becomes the new repeat
+     * candidate; if no keys are held, clear it.  This is the
+     * "diff-edge" half — the poll thread injects the actual repeat
+     * events on its own cadence (see usb_hid_poll_thread). */
+    if (newly_pressed) {
+        hid->repeat_key = newly_pressed;
+        hid->repeat_press_tick = get_ticks();
+        hid->repeat_last_tick  = hid->repeat_press_tick;
+    } else {
+        /* Is the previously-held key still in the report?  If not,
+         * stop repeating. */
+        int still_held = 0;
+        if (hid->repeat_key) {
+            for (int i = 0; i < 6; i++) {
+                uint8_t usage = cur->keys[i];
+                if (usage < 4) continue;
+                if (hid_usage_to_keycode[usage] == hid->repeat_key) {
+                    still_held = 1;
+                    break;
+                }
+            }
+            if (!still_held) hid->repeat_key = 0;
         }
     }
 
     /* Save for next comparison */
     hid->prev_report = *cur;
+}
+
+/* Inject synthetic key-press events for a held key, throttled by
+ * the typematic cadence.  Called from the poll thread on every
+ * tick; does nothing if no key is held or the cadence hasn't
+ * elapsed yet. */
+static void usb_hid_handle_typematic(usb_hid_dev_t *hid)
+{
+    if (!hid->repeat_key) return;
+    uint64_t now = get_ticks();
+    if (now < hid->repeat_press_tick + USB_HID_REPEAT_DELAY_TICKS)
+        return;   /* still inside the initial delay window */
+    if (now < hid->repeat_last_tick + USB_HID_REPEAT_PERIOD_TICKS)
+        return;   /* not yet time for the next repeat */
+    /* Fire one more press event without a release — exactly what
+     * hardware typematic does on PS/2.  Userland sees a stream of
+     * "down" events at ~30 Hz. */
+    process_keycode(hid->repeat_key, 1);
+    hid->repeat_last_tick = now;
 }
 
 /*
@@ -275,6 +336,11 @@ static void usb_hid_poll_thread(void *arg)
 
         if (ret == USB_XFER_OK)
             usb_hid_process_kbd_report(hid, &report);
+
+        /* Boot-protocol HID has no hardware typematic — synthesize
+         * it here on every poll cycle.  Cheap: usually a no-op until
+         * the initial delay window elapses. */
+        usb_hid_handle_typematic(hid);
 
         /* Sleep until next poll interval, but wake immediately if
          * detach signals via poll_chan. */
