@@ -38,4 +38,12 @@ echo "FSTEST: running check: $check"
 sh -c "$check" 2>&1 | sed 's/^/FSTEST:   /'
 echo "FSTEST: done"
 
+# Best-effort flush + umount so anything the check wrote to the test
+# filesystem makes it to disk before we cut power.  Crucial for the
+# setattr-persist case where the second boot reads the on-disk inode
+# fresh and needs to see the timestamp we just touched.
+sync 2>/dev/null || true
+umount "$mount" 2>/dev/null || true
+sync 2>/dev/null || true
+
 [ "$poweroff_on_done" = 1 ] && poweroff

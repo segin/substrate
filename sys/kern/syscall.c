@@ -2086,8 +2086,13 @@ int sys_munlock(const void *addr, size_t len) {
 }
 
 int sys_sync(void) {
-    // In a real system, we'd iterate over all mounted filesystems
-    // and call their sync methods.
+    /* Flush every delayed-write buffer through bufsync — the bio
+     * layer walks BQ_DIRTY and calls bwrite() on each, draining
+     * the cache to disk.  Crucial for power-off / fsck / hot-swap
+     * scenarios where the user wants on-disk state to match what
+     * stat() reports.  */
+    extern int bufsync(int freq);
+    (void)bufsync(0);
     return 0;
 }
 
