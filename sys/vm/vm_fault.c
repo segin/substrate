@@ -156,7 +156,7 @@ int vm_fault(vm_map_t *map, uintptr_t va, uint8_t prot) {
                     goto out;
                 }
             }
-            
+
             m->flags |= PG_VALID;
             // Add prefaulted page if successful
             if (count > 1 && pages[1]) {
@@ -208,6 +208,10 @@ int vm_fault(vm_map_t *map, uintptr_t va, uint8_t prot) {
     if (err < 0) {
         goto out;
     }
+
+    /* Page is no longer being filled — clear PG_BUSY so the pageout
+     * daemon can consider it for reclamation. */
+    m->flags &= ~PG_BUSY;
 
     result = VM_FAULT_SUCCESS;
 out:
