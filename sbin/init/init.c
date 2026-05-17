@@ -19,6 +19,7 @@
  * needs three gettys to come up.
  */
 
+#include <errno.h>
 #include <fcntl.h>
 #include <signal.h>
 #include <stdio.h>
@@ -26,9 +27,12 @@
 #include <string.h>
 #include <sys/ioctl.h>
 #include <sys/reboot.h>
+#include <sys/stat.h>
+#include <sys/time.h>
 #include <sys/wait.h>
 #include <termios.h>
 #include <unistd.h>
+#include <utmp.h>
 
 struct gettyline {
     const char *tty;        /* device path */
@@ -174,23 +178,48 @@ respawn_dead_lines(long now_serial)
 static void
 shutdown_sequence(void)
 {
-    int passes = 0;
-
     fprintf(stderr, "init: shutdown requested, signalling children\n");
 
     /* kill(-1, SIG) sends to every process the caller can signal —
-     * as PID 1 that's effectively everything except init itself. */
+     * as PID 1 that's effectively everything except init itself.
+     * SIGHUP first so login shells / interactive readers see a hangup
+     * and unwind any blocking read(); SIGTERM next for everything that
+     * ignored the hangup. */
+    kill(-1, SIGHUP);
     kill(-1, SIGTERM);
 
-    while (passes++ < 20) {
-        if (waitpid(-1, NULL, WNOHANG) > 0) {
-            continue;
+    /* Drain children with an early exit once all are reaped.  Up to
+     * 5 seconds of grace before we escalate to SIGKILL.  This used
+     * to be a fixed 20-second sleep that fired even when every child
+     * had already exited, so `poweroff` took 20 s to take effect even
+     * after the user closed their shell. */
+    for (int passes = 0; passes < 5; passes++) {
+        /* Drain everything ready right now. */
+        while (waitpid(-1, NULL, WNOHANG) > 0) { }
+        /* No remaining children?  We're done draining. */
+        if (waitpid(-1, NULL, WNOHANG) < 0 && errno == ECHILD) {
+            break;
         }
         sleep(1);
     }
 
     kill(-1, SIGKILL);
     while (waitpid(-1, NULL, WNOHANG) > 0) { }
+
+    /* Stamp wtmp with a shutdown record so `last` shows the
+     * symmetric reboot/shutdown bracket. */
+    {
+        struct utmp ut;
+        memset(&ut, 0, sizeof(ut));
+        ut.ut_type = RUN_LVL;
+        strncpy(ut.ut_line, "~", UT_LINESIZE - 1);
+        strncpy(ut.ut_user, "shutdown", UT_NAMESIZE - 1);
+        struct timeval tv;
+        gettimeofday(&tv, NULL);
+        ut.ut_tv.tv_sec  = (int32_t)tv.tv_sec;
+        ut.ut_tv.tv_usec = (int32_t)tv.tv_usec;
+        updwtmp(WTMP_FILE, &ut);
+    }
 
     sync();
 
@@ -262,6 +291,49 @@ main(int argc, char **argv)
     sigaction(SIGCHLD, &chld, NULL);
 
     fprintf(stderr, "Substrate init starting (pid 1)\n");
+
+    /* Make sure the spool dirs exist before any login activity tries
+     * to open them.  Idempotent — mkdir EEXIST is fine. */
+    (void)mkdir("/var", 0755);
+    (void)mkdir("/var/run", 0755);
+    (void)mkdir("/var/log", 0755);
+
+    /* Stamp wtmp with a BOOT_TIME record so `last reboot` works. */
+    {
+        struct utmp ut;
+        memset(&ut, 0, sizeof(ut));
+        ut.ut_type = BOOT_TIME;
+        ut.ut_pid  = 0;
+        strncpy(ut.ut_line, "~", UT_LINESIZE - 1);
+        strncpy(ut.ut_user, "reboot", UT_NAMESIZE - 1);
+        struct timeval tv;
+        gettimeofday(&tv, NULL);
+        ut.ut_tv.tv_sec  = (int32_t)tv.tv_sec;
+        ut.ut_tv.tv_usec = (int32_t)tv.tv_usec;
+        updwtmp(WTMP_FILE, &ut);
+        /* Also reset utmp by truncating + writing a BOOT_TIME entry —
+         * this clears stale USER_PROCESS rows from the previous boot. */
+        int fd = open(UTMP_FILE, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+        if (fd >= 0) {
+            (void)write(fd, &ut, sizeof(ut));
+            close(fd);
+        }
+    }
+
+    /* Run BSD-style /etc/rc once at boot to bring up services.
+     * Synchronous: we want all rc.d scripts to finish before we
+     * open the consoles. */
+    {
+        pid_t rc_pid = fork();
+        if (rc_pid == 0) {
+            /* child */
+            execl("/bin/sh", "sh", "/etc/rc", "start", (char *)NULL);
+            _exit(127);
+        } else if (rc_pid > 0) {
+            int status;
+            (void)waitpid(rc_pid, &status, 0);
+        }
+    }
 
     long tick = 0;
     /* Spawn initial gettys. */
