@@ -15,6 +15,8 @@
 #include <vfs/vfs.h>
 #include <sys/proc.h>
 #include <sys/file.h>
+#include <sys/fcntl.h>
+#include <sys/poll.h>
 #include <sys/socket.h>
 #include <sys/netdev.h>
 #include <net/inet.h>
@@ -53,6 +55,8 @@ extern void       tcp_free(tcp_pcb_t *p);
 extern int        tcp_bind(tcp_pcb_t *p, uint32_t laddr, uint16_t lport);
 extern int        tcp_listen(tcp_pcb_t *p, int backlog);
 extern int        tcp_connect(tcp_pcb_t *p, uint32_t raddr, uint16_t rport);
+extern int        tcp_connect_nb(tcp_pcb_t *p, uint32_t raddr, uint16_t rport);
+extern int        tcp_poll(tcp_pcb_t *p, short events, void **wait_chan);
 extern tcp_pcb_t *tcp_accept(tcp_pcb_t *listen_p);
 extern ssize_t    tcp_send(tcp_pcb_t *p, const void *buf, size_t len);
 extern ssize_t    tcp_recv(tcp_pcb_t *p, void *buf, size_t len);
@@ -269,6 +273,26 @@ static int afinet_ioctl(fs_node_t *node, uint32_t request, void *arg) {
 size_t afinet_node_read(fs_node_t *node, off_t off, size_t size, uint8_t *buf);
 static size_t afinet_node_write(fs_node_t *node, off_t off, size_t size, const uint8_t *buf);
 static void   afinet_node_close(fs_node_t *node);
+static int    afinet_node_poll(fs_node_t *node, void *waiter);
+
+static int afinet_node_poll(fs_node_t *node, void *waiter)
+{
+    afi_sock_t *s = (afi_sock_t *)(uintptr_t)node->impl;
+    if (!s) return POLLNVAL;
+    if (s->tcp) {
+        /* Defer to TCP for connect-state / accept / recv readiness. */
+        void *chan = NULL;
+        int   rv   = tcp_poll(s->tcp, POLLIN | POLLOUT, &chan);
+        if (waiter && chan) *(void **)waiter = chan;
+        return rv;
+    }
+    /* UDP/RAW: ready-to-read when the per-socket packet ring has
+     * something queued; always writeable.  */
+    int rv = POLLOUT;
+    if (s->count > 0) rv |= POLLIN;
+    if (waiter && rv == POLLOUT) *(void **)waiter = s->wait_chan;
+    return rv;
+}
 
 size_t afinet_node_read(fs_node_t *node, off_t off, size_t size, uint8_t *buf) {
     (void)off;
@@ -382,6 +406,7 @@ static int afi_install_fd(afi_sock_t *s) {
     s->node.write = afinet_node_write;
     s->node.close = afinet_node_close;
     s->node.ioctl = afinet_ioctl;
+    s->node.poll  = afinet_node_poll;
     s->node.impl  = (uintptr_t)s;
     strncpy(s->node.name, "<af_inet>", sizeof(s->node.name) - 1);
     f->f_data = &s->node;
@@ -523,6 +548,14 @@ int afinet_connect(int fd, const void *addr, socklen_t len) {
     afi_sock_t *s = afi_from_fd(fd);
     if (!s) return -ENOTSOCK;
     if (!addr) return -EINVAL;
+
+    /* Honour O_NONBLOCK on the underlying fd — clients like curl
+     * fcntl() the socket non-blocking and then expect connect() to
+     * return -EINPROGRESS so they can poll for POLLOUT.  Without
+     * this, curl wedges in connect() until ^C.  */
+    file_t *f = (fd >= 0 && fd < MAX_FD) ? current_process->fds[fd] : NULL;
+    int nonblock = f && (f->f_flag & O_NONBLOCK);
+
     if (s->family == AF_INET) {
         if (len < (socklen_t)sizeof(struct sin_kern)) return -EINVAL;
         const struct sin_kern *sin = (const struct sin_kern *)addr;
@@ -531,7 +564,8 @@ int afinet_connect(int fd, const void *addr, socklen_t len) {
         memcpy(s->peer_addr, &sin->sin_addr, 4);
         if (s->tcp) {
             uint32_t ra; memcpy(&ra, s->peer_addr, 4);
-            int rc = tcp_connect(s->tcp, ra, s->peer_port);
+            int rc = nonblock ? tcp_connect_nb(s->tcp, ra, s->peer_port)
+                              : tcp_connect   (s->tcp, ra, s->peer_port);
             if (rc < 0) return rc;
         }
     } else {
