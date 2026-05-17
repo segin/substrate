@@ -551,10 +551,11 @@ int afinet_connect(int fd, const void *addr, socklen_t len) {
 
     /* Honour O_NONBLOCK on the underlying fd — clients like curl
      * fcntl() the socket non-blocking and then expect connect() to
-     * return -EINPROGRESS so they can poll for POLLOUT.  Without
-     * this, curl wedges in connect() until ^C.  */
+     * return -EINPROGRESS so they can poll for POLLOUT.  The kernel
+     * canonicalises O_NONBLOCK to FNONBLOCK internally (see
+     * proc_apply_status_flags); check that, not the userland bit.  */
     file_t *f = (fd >= 0 && fd < MAX_FD) ? current_process->fds[fd] : NULL;
-    int nonblock = f && (f->f_flag & O_NONBLOCK);
+    int nonblock = f && (f->f_flag & FNONBLOCK);
 
     if (s->family == AF_INET) {
         if (len < (socklen_t)sizeof(struct sin_kern)) return -EINVAL;
