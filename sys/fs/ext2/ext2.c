@@ -73,6 +73,8 @@ static uint8_t ext2_file_type_to_dt(uint8_t ext2_type);
 static int ext2_free_indirect_tree(ext2_fs_t *fs, uint32_t block_num, uint32_t depth);
 static int ext2_free_inode_blocks(ext2_fs_t *fs, ext2_inode_t *inode);
 static int ext2_chmod(fs_node_t *node, uint32_t mode);
+static int ext2_setattr(fs_node_t *node, const struct fs_attr *a);
+static int ext2_getattr(fs_node_t *node, struct fs_attr *a);
 
 // Helper to find a zero bit in a bitmap range
 int ext2_find_next_zero_bit(void *bitmap, uint32_t total_bits, uint32_t start, uint32_t end, uint32_t *found_idx) {
@@ -854,6 +856,8 @@ fs_node_t *ext2_alloc_node(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_t *inod
     node->open = ext2_node_open;
     node->close = ext2_node_close;
     node->chmod = ext2_chmod;
+    node->setattr = ext2_setattr;
+    node->getattr = ext2_getattr;
     ctx->cache_slot = (uint16_t)idx;
     ctx->pin_count = 0;
     
@@ -886,6 +890,14 @@ fs_node_t *ext2_alloc_node(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_t *inod
     } else if (type == EXT2_S_IFBLK) {
         node->flags = FS_BLOCKDEVICE;
         node->rdev = inode->i_block[0];
+    } else if (type == EXT2_S_IFIFO) {
+        /* Named FIFO.  The disk inode is the persistent name; the
+         * actual byte-stream buffer lives in the in-kernel FIFO
+         * registry (sys/fs/pipe.c) and is attached at open(2) time
+         * by fifo_open().  Leave node->read/write unset so a stray
+         * read/write on the inode node (rather than the FIFO
+         * endpoint shadow node) is a no-op. */
+        node->flags = FS_PIPE;
     }
     return node;
 }
@@ -905,6 +917,77 @@ static int ext2_chmod(fs_node_t *node, uint32_t mode) {
         return -EIO;
     }
 
+    return 0;
+}
+
+/* ext2_setattr — write fs_attr's mask-selected fields into the
+ * on-disk inode and flush.  Mirrors the change into the cached
+ * fs_node fields so a follow-up stat() picks it up without a
+ * fresh inode-read.  ext2's 32-bit timestamps clamp to 2038-01-19
+ * — substrate's int64_t time_t wraps when cast.  Fixing Y2038 in
+ * ext2 means moving to ext4-style 64-bit timestamps; out of scope
+ * for this commit.  */
+static int ext2_setattr(fs_node_t *node, const struct fs_attr *a) {
+    if (!node || !a) return -EINVAL;
+    ext2_node_t *ctx = (ext2_node_t *)(uintptr_t)node->impl;
+    if (!ctx || !ctx->fs) return -EINVAL;
+    if (a->mask == 0) return 0;
+
+    if (a->mask & FS_ATTR_ATIME) {
+        ctx->inode.i_atime = (uint32_t)a->atime;
+        node->atime        = a->atime;
+    }
+    if (a->mask & FS_ATTR_MTIME) {
+        ctx->inode.i_mtime = (uint32_t)a->mtime;
+        node->mtime        = a->mtime;
+    }
+    if (a->mask & FS_ATTR_CTIME) {
+        ctx->inode.i_ctime = (uint32_t)a->ctime;
+        node->ctime        = a->ctime;
+    }
+    if (a->mask & FS_ATTR_MODE) {
+        ctx->inode.i_mode = (uint16_t)((ctx->inode.i_mode & 0xF000U) |
+                                       (a->mode & 0x0FFFU));
+        node->mask        = a->mode & 0x0FFFU;
+    }
+    if (a->mask & FS_ATTR_UID) {
+        ctx->inode.i_uid = (uint16_t)a->uid;
+        node->uid        = a->uid;
+    }
+    if (a->mask & FS_ATTR_GID) {
+        ctx->inode.i_gid = (uint16_t)a->gid;
+        node->gid        = a->gid;
+    }
+    /* SIZE — truncation needs to free data blocks; route through
+     * the existing truncate path.  Refuse here so the caller
+     * doesn't silently get half-truncated data.  */
+    if (a->mask & FS_ATTR_SIZE) {
+        return -EINVAL;
+    }
+
+    if (ext2_write_inode(ctx->fs, ctx->inode_num, &ctx->inode) != 0)
+        return -EIO;
+    return 0;
+}
+
+/* ext2_getattr — fill from the cached on-disk inode.  Same shape
+ * as the VFS-generic fallback but going through the explicit op
+ * makes a future "validate cached inode against disk before
+ * answering" hook trivial.  */
+static int ext2_getattr(fs_node_t *node, struct fs_attr *a) {
+    if (!node || !a) return -EINVAL;
+    ext2_node_t *ctx = (ext2_node_t *)(uintptr_t)node->impl;
+    if (!ctx) return -EINVAL;
+    a->mask  = FS_ATTR_ATIME | FS_ATTR_MTIME | FS_ATTR_CTIME |
+               FS_ATTR_MODE  | FS_ATTR_UID   | FS_ATTR_GID   |
+               FS_ATTR_SIZE;
+    a->atime = ctx->inode.i_atime;
+    a->mtime = ctx->inode.i_mtime;
+    a->ctime = ctx->inode.i_ctime;
+    a->mode  = ctx->inode.i_mode & 0x0FFFU;
+    a->uid   = ctx->inode.i_uid;
+    a->gid   = ctx->inode.i_gid;
+    a->size  = ctx->inode.i_size;
     return 0;
 }
 
@@ -1538,11 +1621,48 @@ uint32_t ext2_alloc_inode(ext2_fs_t *fs, int is_dir) {
 // Free an inode
 void ext2_free_inode(ext2_fs_t *fs, uint32_t inode_num, int was_dir) {
     if (!fs || inode_num == 0) return;
-    
+
+    /* Evict any cached fs_node_t / ext2_node_t for this inode.  The
+     * inode is about to be reusable for a fresh mknod (potentially
+     * with a different file type); if we leave the stale cache slot
+     * in place, the next finddir/lookup that reaches the cache lookup
+     * loop will hand back the OLD node — same inode_num but with the
+     * old mode bits and the old node->flags (FS_FILE vs FS_PIPE vs
+     * FS_CHARDEVICE).  That manifested as torture_ipc tests 7 and 9
+     * failing S_ISFIFO/S_ISCHR after mknod-of-a-recycled-inode. */
+    for (int i = 0; i < EXT2_NODE_CACHE_SIZE; i++) {
+        if (ext2_node_cache[i].fs == fs &&
+            ext2_node_cache[i].inode_num == inode_num &&
+            ext2_node_cache[i].pin_count == 0) {
+            uint32_t bs = fs->block_size;
+            if (ext2_node_cache[i].block_buf) {
+                kfree(ext2_node_cache[i].block_buf, bs);
+                ext2_node_cache[i].block_buf = NULL;
+            }
+            if (ext2_node_cache[i].indirect_buf) {
+                kfree(ext2_node_cache[i].indirect_buf, bs);
+                ext2_node_cache[i].indirect_buf = NULL;
+            }
+            if (ext2_node_cache[i].dindirect_buf) {
+                kfree(ext2_node_cache[i].dindirect_buf, bs);
+                ext2_node_cache[i].dindirect_buf = NULL;
+            }
+            if (ext2_node_cache[i].tindirect_buf) {
+                kfree(ext2_node_cache[i].tindirect_buf, bs);
+                ext2_node_cache[i].tindirect_buf = NULL;
+            }
+            ext2_node_cache[i].fs = NULL;
+            ext2_node_cache[i].inode_num = 0;
+            /* fs_node_t side: zero it so a stale finddir-by-pointer
+             * comparison can't see the old flags either. */
+            memset(&ext2_fs_node_cache[i], 0, sizeof(ext2_fs_node_cache[i]));
+        }
+    }
+
     // Calculate which group this inode belongs to
     uint32_t group = (inode_num - 1) / fs->inodes_per_group;
     uint32_t index = (inode_num - 1) % fs->inodes_per_group;
-    
+
     if (group >= fs->group_count) return;
     
     // Read the inode bitmap if it's not cached
