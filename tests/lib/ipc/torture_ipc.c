@@ -46,6 +46,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 #define MUST(cond, msg) do {                                          \
@@ -71,7 +72,7 @@
     else              { fprintf(stdout, "  -> FAILED\n"); tests_fail++; } \
 } while (0)
 
-static const int TOTAL = 10;
+static const int TOTAL = 11;
 
 /* Build a per-pid unique path under /tmp so concurrent runs don't
  * trip over each other. */
@@ -256,13 +257,12 @@ TEST(fifo_open_roundtrip)
 
     MUST(mkfifo(path, 0644) == 0, "mkfifo");
 
-    /* O_RDWR | O_NONBLOCK so we don't block forever on a half-open
-     * pipe.  This is enough to check that open() succeeds, write
-     * accepts bytes, and a subsequent read returns them — regardless
-     * of whether the kernel routes through a pipe buffer or the
-     * inode's data blocks. */
-    int fd = open(path, O_RDWR | O_NONBLOCK);
-    MUST(fd >= 0, "open(O_RDWR|O_NONBLOCK)");
+    /* O_RDWR never blocks on a FIFO — opener counts as both reader
+     * and writer.  Write a string, read it back, demand exact match.
+     * This requires the kernel route opens of S_IFIFO inodes
+     * through a real pipe buffer (fifo_open in sys/fs/pipe.c). */
+    int fd = open(path, O_RDWR);
+    MUST(fd >= 0, "open(O_RDWR)");
 
     const char msg[] = "fifo-byte-stream";
     ssize_t n = write(fd, msg, sizeof(msg));
@@ -270,17 +270,58 @@ TEST(fifo_open_roundtrip)
 
     char buf[64] = {0};
     n = read(fd, buf, sizeof(buf));
-    /* Real pipe semantics: read returns the bytes we just wrote.
-     * Regular-file fallback: read may return 0 if the file pointer
-     * sits past the data, or the bytes if the pointer is at 0.
-     * Either way we should not get -1. */
-    MUST(n >= 0, "read returned <0");
-    if (n > 0) {
-        /* Bytes recovered — semantics work end-to-end for at least
-         * the trivial single-process case. */
-        MUST((size_t)n <= sizeof(msg), "read returned more than was written");
-    }
+    MUST(n == (ssize_t)sizeof(msg), "read returned wrong byte count");
+    MUST(memcmp(buf, msg, sizeof(msg)) == 0, "payload mismatch");
     close(fd);
+    MUST(unlink(path) == 0, "unlink");
+    return 0;
+}
+
+/* fork()-based two-end test: parent opens the FIFO for write, child
+ * opens for read.  Without real FIFO semantics this would either
+ * deadlock (open(O_WRONLY) blocks forever) or silently fall back to
+ * disk reads.  Skipped if fork() is unavailable (no MUST against
+ * fork because we want a clean skip when running on minimal libc). */
+TEST(fifo_fork_two_ends)
+{
+    char path[64];
+    make_path(path, sizeof(path), "fifo4");
+    unlink(path);
+    MUST(mkfifo(path, 0644) == 0, "mkfifo");
+
+    fprintf(stdout, "[fork] "); fflush(stdout);
+    pid_t pid = fork();
+    if (pid < 0) {
+        unlink(path);
+        SKIP("fork() unavailable");
+    }
+    if (pid == 0) {
+        /* Child: read end.  open(O_RDONLY) blocks until parent
+         * opens write end. */
+        int rfd = open(path, O_RDONLY);
+        if (rfd < 0) _exit(10);
+        char buf[64] = {0};
+        ssize_t n = read(rfd, buf, sizeof(buf));
+        if (n < 7) _exit(11);
+        if (memcmp(buf, "hello-c", 7) != 0) _exit(12);
+        close(rfd);
+        _exit(0);
+    }
+    /* Parent: write end.  open(O_WRONLY) blocks until child opens
+     * read end; the two opens rendezvous in fifo_open. */
+    fprintf(stdout, "[popen] "); fflush(stdout);
+    int wfd = open(path, O_WRONLY);
+    MUST(wfd >= 0, "parent open(O_WRONLY)");
+    fprintf(stdout, "[pwrite] "); fflush(stdout);
+    MUST(write(wfd, "hello-child", 11) == 11, "parent write");
+    fprintf(stdout, "[pclose] "); fflush(stdout);
+    close(wfd);
+    fprintf(stdout, "[wait] "); fflush(stdout);
+    int status = 0;
+    waitpid(pid, &status, 0);
+    fprintf(stdout, "[reaped] "); fflush(stdout);
+    MUST(WIFEXITED(status) && WEXITSTATUS(status) == 0,
+         "child exited non-zero");
     MUST(unlink(path) == 0, "unlink");
     return 0;
 }
@@ -304,6 +345,7 @@ int main(void)
     RUN(mkfifo_basic);
     RUN(mknod_chardev);
     RUN(fifo_open_roundtrip);
+    RUN(fifo_fork_two_ends);
 
     fprintf(stdout, "----------------------------------------------------\n");
     fprintf(stdout, "Result: %d/%d passed", tests_pass, tests_run);
