@@ -165,10 +165,13 @@ void ps_print_rows(ps_row_t *rows, size_t count, const ps_options_t *opts) {
 
     if (!opts->flag_no_headers) {
         for (i = 0; i < field_count; i++) {
+            int is_last = (i + 1 == field_count);
             if (i > 0) {
                 putchar(' ');
             }
-            if (fields[i].align == PS_ALIGN_RIGHT) {
+            if (is_last && fields[i].align != PS_ALIGN_RIGHT) {
+                printf("%s", fields[i].header);
+            } else if (fields[i].align == PS_ALIGN_RIGHT) {
                 printf("%*s", widths[i], fields[i].header);
             } else {
                 printf("%-*s", widths[i], fields[i].header);
@@ -187,6 +190,7 @@ void ps_print_rows(ps_row_t *rows, size_t count, const ps_options_t *opts) {
         for (j = 0; j < field_count; j++) {
             const char *value = field_value(&rows[i], fields[j].id);
             int width = widths[j];
+            int is_last = (j + 1 == field_count);
 
             if (j > 0) {
                 putchar(' ');
@@ -197,7 +201,15 @@ void ps_print_rows(ps_row_t *rows, size_t count, const ps_options_t *opts) {
                 continue;
             }
 
-            if (fields[j].align == PS_ALIGN_RIGHT) {
+            /* For the trailing field, don't pad with right-side
+             * spaces.  Padding the last column to exactly $COLUMNS
+             * triggers terminal auto-wrap and the subsequent '\n'
+             * lands on the row AFTER that, producing a blank line
+             * between every row.  Width-only matters for column
+             * alignment, which the last column doesn't need. */
+            if (is_last && fields[j].align != PS_ALIGN_RIGHT) {
+                printf("%s", value);
+            } else if (fields[j].align == PS_ALIGN_RIGHT) {
                 printf("%*s", width, value);
             } else {
                 printf("%-*s", width, value);
