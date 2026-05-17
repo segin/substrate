@@ -273,6 +273,49 @@ check='ls -l /mnt/test/big; head -c 40 /mnt/test/big; echo TAIL=\$(wc -c < /mnt/
     assert_log "$log" "TAIL=1048576"                      "extent-walker delivers all 1 MiB"
 }
 
+t_csum_verify_ok() {
+    echo "==> csum-verify-ok"
+    # mkfs.ext4 with metadata_csum on — we should verify the
+    # superblock checksum and mount cleanly.
+    local img; img=$(mkimg t-csum ext4 -O '^64bit,metadata_csum')
+    local conf="device=/dev/storage/sata1
+mount=/mnt/test
+fs=ext2
+check='echo CHECK_OK'"
+    local rfs; rfs=$(prep_rootfs t-csum "$conf")
+    local log="$WORK/t-csum.log"
+    boot_with "$rfs" "$img" "$log" 30
+    assert_log "$log" "superblock metadata_csum verified" "csum verify logged"
+    assert_log "$log" "FSTEST: mount OK"                   "csum-OK mount succeeds"
+    assert_log "$log" "CHECK_OK"                           "csum-OK check ran"
+}
+
+t_csum_verify_fail() {
+    echo "==> csum-verify-fail"
+    # Corrupt the superblock's first block-count field after mkfs.
+    # That changes the csum-protected bytes; verify must fail.
+    local img; img=$(mkimg t-cfail ext4 -O '^64bit,metadata_csum')
+    # Flip one byte in the superblock at offset 1024+4 (s_blocks_count
+    # low half).  Don't recompute the on-disk csum.
+    python3 -c "
+import sys
+with open('$img','r+b') as f:
+    f.seek(1024+4)
+    b = f.read(1)
+    f.seek(1024+4)
+    f.write(bytes([b[0] ^ 0x55]))
+" 2>/dev/null
+    local conf="device=/dev/storage/sata1
+mount=/mnt/test
+fs=ext2
+check='echo SHOULD_NOT_GET_HERE'"
+    local rfs; rfs=$(prep_rootfs t-cfail "$conf")
+    local log="$WORK/t-cfail.log"
+    boot_with "$rfs" "$img" "$log" 30
+    assert_log "$log" "superblock checksum mismatch" "tampered csum refused"
+    assert_log "$log" "FSTEST: mount FAIL"           "userland sees mount failure"
+}
+
 t_refuse_extent_write() {
     echo "==> refuse-ext4-extent-write"
     # ext4 with extents only (no 64bit / csum).  Pre-create a file
@@ -336,6 +379,8 @@ t_htree_listing
 t_setattr_persist
 t_ro_unsupported_rocompat
 t_extent_large_read
+t_csum_verify_ok
+t_csum_verify_fail
 t_refuse_extent_write
 t_refuse_64bit
 

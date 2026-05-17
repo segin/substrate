@@ -84,7 +84,8 @@
 #define EXT2F_INCOMPAT_SUPP   (EXT2F_INCOMPAT_FTYPE | \
                                EXT2F_INCOMPAT_META_BG | \
                                EXT2F_INCOMPAT_EXTENTS | \
-                               EXT2F_INCOMPAT_FLEX_BG)
+                               EXT2F_INCOMPAT_FLEX_BG | \
+                               EXT2F_INCOMPAT_CSUM_SEED)
 #define EXT2F_ROCOMPAT_SUPP   (EXT2F_ROCOMPAT_SPARSESUPER | \
                                EXT2F_ROCOMPAT_LARGEFILE | \
                                EXT2F_ROCOMPAT_DIR_NLINK | \

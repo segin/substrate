@@ -1448,6 +1448,27 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
             extern int kprintf(const char *, ...);
             kprintf("ext2: ext4 extents enabled — extent-tree files supported\n");
         }
+
+        /* metadata_csum verify on the superblock.  The on-disk
+         * superblock has the csum at offset 0x3FC (1020); CRC32C
+         * over the first 1020 bytes must equal that value.  If
+         * mismatch, refuse the mount — silently mounting a
+         * checksum-mismatched superblock invites later corruption
+         * (we'd start writing csum-claiming-valid blocks whose
+         * derived csums use stale superblock state).  */
+        if (fs->sb.s_feature_ro_compat & EXT2F_ROCOMPAT_METADATA_CKSUM) {
+            extern int kprintf(const char *, ...);
+            extern uint32_t crc32c_update(uint32_t, const void *, size_t);
+            uint32_t want = *(uint32_t *)(sb_buf + 0x3FC);
+            uint32_t got  = crc32c_update(0xFFFFFFFFu, sb_buf, 0x3FC);
+            if (want != got) {
+                kprintf("ext2: superblock checksum mismatch want=%08x got=%08x — refuse mount\n",
+                        want, got);
+                kfree(fs, sizeof(ext2_fs_t));
+                return NULL;
+            }
+            kprintf("ext2: superblock metadata_csum verified (%08x)\n", got);
+        }
     }
 
     fs->device = dev;
