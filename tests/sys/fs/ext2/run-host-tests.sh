@@ -198,6 +198,48 @@ check='ls -l /mnt/test/target'"
     assert_log "$log2" "Jan +1 +2020" "setattr survives umount + remount"
 }
 
+t_setattr_csum_survives() {
+    echo "==> setattr-persist-on-metadata-csum"
+    # Same shape as setattr_persist but on a metadata_csum-enabled
+    # ext4 image.  This exercises the per-inode csum recompute on
+    # write: if write_inode forgot to update chksum_lo/hi after
+    # bumping i_mtime, the re-mount's inode-csum verify would
+    # refuse to open the file and the "Jan 1 2020" assert would
+    # fail because ls returns ENOENT/EIO.
+    local img; img=$(mkimg t-setattr-csum ext4 -O '^64bit,metadata_csum')
+    {
+        echo "write /dev/null /target"
+        echo "close"
+    } | debugfs -w "$img" >/dev/null 2>&1 || true
+
+    local conf="device=/dev/storage/sata1
+mount=/mnt/test
+fs=ext2
+check='touch -d @1577836800 /mnt/test/target && ls -l /mnt/test/target'"
+    local rfs; rfs=$(prep_rootfs t-setattr-csum "$conf")
+    local log="$WORK/t-setattr-csum.log"
+    boot_with "$rfs" "$img" "$log" 30
+    assert_log "$log" "FSTEST: mount OK" "setattr-csum mount succeeds"
+    assert_log "$log" "Jan +1 +2020"    "setattr-csum mtime visible immediately"
+
+    local conf2="device=/dev/storage/sata1
+mount=/mnt/test
+fs=ext2
+check='ls -l /mnt/test/target'"
+    local rfs2; rfs2=$(prep_rootfs t-setattr-csum-readback "$conf2")
+    local log2="$WORK/t-setattr-csum-readback.log"
+    boot_with "$rfs2" "$img" "$log2" 30
+    assert_log "$log2" "Jan +1 +2020"   "setattr-csum re-mount validates csum"
+    # And confirm no inode-csum mismatch warning leaked into the log.
+    if grep -q "inode .* csum mismatch" "$log2"; then
+        echo "  FAIL: post-setattr inode csum mismatch detected"
+        FAIL=$((FAIL + 1))
+    else
+        echo "  PASS: post-setattr inode csum stays valid"
+        PASS=$((PASS + 1))
+    fi
+}
+
 t_ro_unsupported_rocompat() {
     echo "==> ro-mount-on-unsupported-rocompat"
     # mkfs with the QUOTA ROCOMPAT — we don't support it but the
@@ -420,6 +462,7 @@ t_mount_ext3
 t_mount_ext4_extents
 t_htree_listing
 t_setattr_persist
+t_setattr_csum_survives
 t_ro_unsupported_rocompat
 t_extent_large_read
 t_csum_verify_ok

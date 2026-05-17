@@ -195,6 +195,63 @@ int ext2_read_inode(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_t *inode) {
         return -1;
     }
     
+    uint8_t *raw = block_buf + inode_offset;
+
+    /* Per-inode metadata_csum verification.  Algorithm matches
+     * FreeBSD's ext2_ei_csum (ext2_csum.c:570):
+     *   seed = crc32c(fs->csum_seed, le32(inode_num))
+     *   seed = crc32c(seed,           le32(inode_generation))
+     *   c    = crc32c(seed, raw[0..123])               // up to chksum_lo
+     *   c    = crc32c(c,    0_u16, 2)                   // zero chksum_lo
+     *   c    = crc32c(c,    raw[126..127])              // rest of legacy
+     *   // for 256-byte inodes:
+     *   c    = crc32c(c,    raw[128..129])              // extra_isize
+     *   if extra_isize >= 4:
+     *     c    = crc32c(c,  0_u16, 2)                   // zero chksum_hi
+     *     c    = crc32c(c,  raw[132..inode_size-1])
+     *   else:
+     *     c    = crc32c(c,  raw[130..inode_size-1])
+     * provided = chksum_lo (| chksum_hi << 16 if extra_isize>=4)
+     * If mismatch, refuse the read so callers can't act on a
+     * tampered inode.  */
+    if (fs->sb.s_feature_ro_compat & EXT2F_ROCOMPAT_METADATA_CKSUM) {
+        extern int kprintf(const char *, ...);
+        extern uint32_t crc32c_update(uint32_t, const void *, size_t);
+        const uint16_t zero16 = 0;
+        uint32_t le_inum = inode_num;
+        uint32_t le_gen  = *(uint32_t *)(raw + 100);   /* i_generation @100 */
+        uint32_t c = crc32c_update(fs->csum_seed, &le_inum, 4);
+        c = crc32c_update(c, &le_gen, 4);
+        c = crc32c_update(c, raw, 124);                 /* up to chksum_lo */
+        c = crc32c_update(c, &zero16, 2);
+        c = crc32c_update(c, raw + 126, 2);             /* legacy tail */
+        uint16_t lo = *(uint16_t *)(raw + 124);
+        uint16_t hi = 0;
+        uint16_t extra_isize = 0;
+        if (fs->inode_size > EXT2_GOOD_OLD_INODE_SIZE) {
+            extra_isize = *(uint16_t *)(raw + 128);
+            c = crc32c_update(c, raw + 128, 2);         /* extra_isize  */
+            uint32_t off = 130;
+            if (extra_isize >= 4) {
+                hi = *(uint16_t *)(raw + 130);
+                c  = crc32c_update(c, &zero16, 2);
+                off = 132;
+            }
+            if (off < fs->inode_size)
+                c = crc32c_update(c, raw + off, fs->inode_size - off);
+        }
+        uint32_t provided = lo;
+        uint32_t calc     = c;
+        if (extra_isize >= 4) provided |= ((uint32_t)hi) << 16;
+        else                  calc     &= 0xFFFFu;
+        if (provided != calc) {
+            kprintf("ext2: inode %u csum mismatch want=%08x got=%08x\n",
+                    inode_num, calc, provided);
+            kfree(block_buf, fs->block_size);
+            return -1;
+        }
+    }
+
     /* Read the legacy 128 bytes unconditionally; if the on-disk
      * inode is larger and the file system actually uses the extra
      * region (i_extra_isize > 0), read that too.  We cap at the
@@ -365,6 +422,47 @@ int ext2_write_inode(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_t *inode) {
         if (inode->i_extra_isize < want) inode->i_extra_isize = want;
     }
     memcpy(block_buf + inode_offset, inode, write_bytes);
+
+    /* metadata_csum: recompute the per-inode csum over what we're
+     * about to commit, and patch chksum_lo (and chksum_hi if the
+     * inode is 256-byte AND extra_isize claims those bytes are
+     * valid).  Without this the next read_inode would fail csum
+     * verify after any setattr/chmod/utime write.  */
+    if (fs->sb.s_feature_ro_compat & EXT2F_ROCOMPAT_METADATA_CKSUM) {
+        extern uint32_t crc32c_update(uint32_t, const void *, size_t);
+        uint8_t *raw = block_buf + inode_offset;
+        const uint16_t zero16 = 0;
+        /* Zero the csum bytes in the buffer before the calculation
+         * so the algorithm replays the same "csum-field-cleared"
+         * shape the verifier expects.  */
+        *(uint16_t *)(raw + 124) = 0;
+        uint16_t prev_hi = 0;
+        int has_hi = 0;
+        if (fs->inode_size > EXT2_GOOD_OLD_INODE_SIZE) {
+            uint16_t extra = *(uint16_t *)(raw + 128);
+            if (extra >= 4) { has_hi = 1; prev_hi = *(uint16_t *)(raw + 130); (void)prev_hi; *(uint16_t *)(raw + 130) = 0; }
+        }
+        uint32_t le_inum = inode_num;
+        uint32_t le_gen  = *(uint32_t *)(raw + 100);
+        uint32_t c = crc32c_update(fs->csum_seed, &le_inum, 4);
+        c = crc32c_update(c, &le_gen, 4);
+        c = crc32c_update(c, raw, 124);
+        c = crc32c_update(c, &zero16, 2);
+        c = crc32c_update(c, raw + 126, 2);
+        if (fs->inode_size > EXT2_GOOD_OLD_INODE_SIZE) {
+            c = crc32c_update(c, raw + 128, 2);
+            uint32_t off = 130;
+            if (has_hi) {
+                c = crc32c_update(c, &zero16, 2);
+                off = 132;
+            }
+            if (off < fs->inode_size)
+                c = crc32c_update(c, raw + off, fs->inode_size - off);
+        }
+        *(uint16_t *)(raw + 124) = (uint16_t)(c & 0xFFFFu);
+        if (has_hi)
+            *(uint16_t *)(raw + 130) = (uint16_t)((c >> 16) & 0xFFFFu);
+    }
     
     // Write the block back to disk
     if (ext2_write_block(fs, inode_table_block + block_offset, block_buf) != fs->block_size) {
