@@ -209,13 +209,15 @@ int kern_wait4(pid_t pid, int *status, int options, struct rusage *rusage) {
                 // exec'd process permanently leaks its procfs entry.
                 procfs_release_pid_nodes(target->pid);
 
-                // Free Process Slot
-                target->pid = -1;
-                target->p_parent = NULL;
-                target->p_sibling = NULL;
-                target->state = 0;
-                target->p_flag = 0;
-                
+                /* Fully release the process_t: unlink from allproc +
+                 * pid_hash and free storage.  Previously we just set
+                 * target->pid = -1 and left the entry linked, which
+                 * meant sys_proc_list kept reporting a stale -1
+                 * entry (visible in ps as a phantom row when paired
+                 * with sys_proc_info's pid=0 → "self" sentinel).
+                 * proc_destroy is the canonical teardown. */
+                proc_destroy(target);
+
                 return pid_val;
                 
             case 1: // Stopped (WUNTRACED)
