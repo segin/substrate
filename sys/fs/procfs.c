@@ -104,7 +104,8 @@ static uint32_t gen_meminfo(char *buf, size_t size, void *opaque) {
 
 static uint32_t gen_uptime(char *buf, size_t size, void *opaque) {
     (void)opaque;
-    uint32_t t = get_time();
+    extern time_t get_uptime(void);
+    uint32_t t = (uint32_t)get_uptime();
     return snprintf(buf, size, "%u.00 0.00\n", t);
 }
 
