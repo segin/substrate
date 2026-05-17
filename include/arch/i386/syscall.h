@@ -97,6 +97,7 @@
 #define SYS_CLONE   120
 #define SYS_UNAME   122
 #define SYS_MODIFY_LDT 123
+#define SYS_SETHOSTNAME 170
 #define SYS_GETDENTS 141
 #define SYS_MSYNC   144
 #define SYS_NANOSLEEP 162
@@ -186,6 +187,9 @@
 #define SYS_GETSOCKOPT  375
 #define SYS_SETSOCKOPT  376
 #define SYS_ACCEPT4     377
+
+#define SYS_UTIMENSAT   380
+#define SYS_FUTIMENS    381
 
 void syscall_init(void);
 

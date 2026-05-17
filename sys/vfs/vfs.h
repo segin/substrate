@@ -43,6 +43,35 @@ typedef int (*rename_type_t)(struct fs_node *old_parent, const char *old_name, s
 typedef int (*statfs_type_t)(struct fs_node *node, struct statfs *buf);
 typedef int (*chmod_type_t)(struct fs_node *node, uint32_t mode);
 
+/* set-attribute interface for whole-vnode updates that don't fit
+ * the per-attribute chmod/chown calls.  Today the only caller is
+ * utimes/utimensat, which needs to write atime/mtime atomically;
+ * but the struct + mask design accommodates future setuid/setgid
+ * /size-truncate paths without churning fs_node_t every time.  */
+struct fs_attr {
+    uint32_t mask;      /* FS_ATTR_* — which fields are valid */
+    int64_t  atime;     /* in seconds-since-epoch (no nsec yet) */
+    int64_t  mtime;
+    int64_t  ctime;
+    uint32_t mode;
+    uint32_t uid;
+    uint32_t gid;
+    off_t    size;
+};
+#define FS_ATTR_ATIME   0x0001U
+#define FS_ATTR_MTIME   0x0002U
+#define FS_ATTR_CTIME   0x0004U
+#define FS_ATTR_MODE    0x0008U
+#define FS_ATTR_UID     0x0010U
+#define FS_ATTR_GID     0x0020U
+#define FS_ATTR_SIZE    0x0040U
+/* "use current time for this field" — analogous to UTIME_NOW.  */
+#define FS_ATTR_ATIME_NOW   0x0100U
+#define FS_ATTR_MTIME_NOW   0x0200U
+
+typedef int (*setattr_type_t)(struct fs_node *node, const struct fs_attr *a);
+typedef int (*getattr_type_t)(struct fs_node *node, struct fs_attr *a);
+
 typedef struct fs_node {
     char name[128];
     uint32_t mask;        // The permissions mask.
@@ -80,6 +109,8 @@ typedef struct fs_node {
     rename_type_t rename;
     statfs_type_t statfs;
     chmod_type_t chmod;
+    setattr_type_t setattr;
+    getattr_type_t getattr;
     struct fs_node *ptr; // Used by mountpoints and symlinks.
     struct mount *mp;    // Mount point this node belongs to.
 } fs_node_t;
@@ -122,6 +153,8 @@ int ioctl_fs(fs_node_t *node, uint32_t request, void *arg);
 void *mmap_fs(fs_node_t *node, void *addr, size_t length, int prot, int flags, off_t offset);
 int poll_fs(fs_node_t *node, void *waiter);
 int readlink_fs(fs_node_t *node, char *buf, size_t size);
+int setattr_fs(fs_node_t *node, const struct fs_attr *a);
+int getattr_fs(fs_node_t *node, struct fs_attr *a);
 int symlink_fs(fs_node_t *parent, const char *target, const char *name);
 int link_fs(fs_node_t *parent, fs_node_t *source, const char *name);
 int unlink_fs(fs_node_t *node, const char *name);

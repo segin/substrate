@@ -582,32 +582,31 @@ int chmod(const char *pathname, mode_t mode) {
     return __set_errno((int)_syscall2(SYS_CHMOD, (uintptr_t)pathname, mode));
 }
 
-/* utimes / futimens / utimensat — silent-success stubs.
- *
- * The kernel doesn't have a setattr syscall wired up yet, so we
- * can't actually update file mtime/atime.  Returning ENOSYS here
- * broke every userspace tool that does best-effort timestamp
- * preservation (gzip on the file it just wrote, cp -p, tar with
- * default extract, ...) — they treat ENOSYS as fatal and print
- * "Function not implemented" before exiting.
- *
- * Return 0 so those tools proceed.  The actual mtime/atime won't
- * match the source, but the data is correct.  Real fix: wire up
- * SYS_UTIMENSAT through vop_setattr in the VFS layer.  */
-int utimes(const char *filename, const struct timeval times[2]) {
-    (void)filename; (void)times;
-    return 0;
-}
-
+/* utimes / utimensat / futimens — real syscalls now that the
+ * kernel has SYS_UTIMENSAT / SYS_FUTIMENS wired through vfs
+ * setattr_fs.  futimens lowers to utimensat with a NULL path so
+ * we only have to maintain one path in the kernel.  */
 int utimensat(int dirfd, const char *path, const struct timespec times[2],
               int flags) {
-    (void)dirfd; (void)path; (void)times; (void)flags;
-    return 0;
+    return __set_errno((int)_syscall4(SYS_UTIMENSAT,
+        (uintptr_t)dirfd, (uintptr_t)path, (uintptr_t)times, (uintptr_t)flags));
 }
 
 int futimens(int fd, const struct timespec times[2]) {
-    (void)fd; (void)times;
-    return 0;
+    return __set_errno((int)_syscall2(SYS_FUTIMENS,
+        (uintptr_t)fd, (uintptr_t)times));
+}
+
+int utimes(const char *filename, const struct timeval times[2]) {
+    if (!times) {
+        /* NULL means "use current time".  */
+        return utimensat(AT_FDCWD, filename, NULL, 0);
+    }
+    struct timespec ts[2] = {
+        { .tv_sec = times[0].tv_sec, .tv_nsec = times[0].tv_usec * 1000 },
+        { .tv_sec = times[1].tv_sec, .tv_nsec = times[1].tv_usec * 1000 }
+    };
+    return utimensat(AT_FDCWD, filename, ts, 0);
 }
 int mount(const char *source, const char *target, const char *filesystemtype, unsigned long mountflags, const void *data) {
     return __set_errno((int)_syscall5(SYS_MOUNT, (uintptr_t)source, (uintptr_t)target, (uintptr_t)filesystemtype, (uintptr_t)mountflags, (uintptr_t)data));

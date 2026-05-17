@@ -187,6 +187,9 @@
 #define SYS_SETSOCKOPT  376
 #define SYS_ACCEPT4     377
 
+#define SYS_UTIMENSAT   380
+#define SYS_FUTIMENS    381
+
 void syscall_init(void);
 
 // GDT TLS entries

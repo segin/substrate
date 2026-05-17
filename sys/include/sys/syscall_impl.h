@@ -80,6 +80,8 @@ extern int sys_stat(const char*, void*);
 extern int sys_lstat(const char*, void*);
 extern int sys_fstat(int, void*);
 extern int sys_fstatat(int, const char*, void*, int);
+extern int sys_utimensat(int, const char *, const void *, int);
+extern int sys_futimens(int, const void *);
 extern int sys_statfs(const char*, void*);
 extern int sys_fstatfs(int, void*);
 extern int sys_statvfs(const char*, void*);

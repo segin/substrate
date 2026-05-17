@@ -944,16 +944,80 @@ void *mmap_fs(fs_node_t *node, void *addr, size_t length, int prot, int flags, o
 
 int poll_fs(fs_node_t *node, void *waiter) {
     if (!node) return POLLNVAL;
-    
+
     if (node->poll) {
         return node->poll(node, waiter);
     }
-    
+
     // Default behavior: Regular files and directories are always readable/writable
     if ((node->flags & 0x7) == FS_FILE || (node->flags & 0x7) == FS_DIRECTORY) {
-        return POLLIN | POLLOUT | POLLRDNORM | POLLWRNORM; 
+        return POLLIN | POLLOUT | POLLRDNORM | POLLWRNORM;
     }
-    
+
+    return 0;
+}
+
+/* setattr_fs / getattr_fs — generic dispatch through the fs_node
+ * op vector.  If the backend implements setattr, call it; that
+ * function is responsible for both persisting the change and
+ * mirroring it back into the in-memory fs_node fields.  If the
+ * backend lacks a setattr op (devfs, procfs, sysfs, ramfs), apply
+ * the change to the in-memory node only — that's enough to make
+ * stat() report sane timestamps in the lifetime of the mount.
+ *
+ * The "set this field to current time" semantics (FS_ATTR_*_NOW)
+ * are resolved here once, then handed to the backend so backends
+ * don't each have to call get_realtime themselves.  */
+int setattr_fs(fs_node_t *node, const struct fs_attr *a) {
+    if (!node || !a) return -EINVAL;
+
+    struct fs_attr eff = *a;
+    if (eff.mask & (FS_ATTR_ATIME_NOW | FS_ATTR_MTIME_NOW)) {
+        extern time_t kern_time(time_t *tloc);
+        int64_t now = (int64_t)kern_time(NULL);
+        if (eff.mask & FS_ATTR_ATIME_NOW) {
+            eff.atime = now;
+            eff.mask  = (eff.mask | FS_ATTR_ATIME) & ~FS_ATTR_ATIME_NOW;
+        }
+        if (eff.mask & FS_ATTR_MTIME_NOW) {
+            eff.mtime = now;
+            eff.mask  = (eff.mask | FS_ATTR_MTIME) & ~FS_ATTR_MTIME_NOW;
+        }
+    }
+
+    if (node->setattr) {
+        return node->setattr(node, &eff);
+    }
+
+    /* Generic in-memory fallback.  Updates the cached fields so a
+     * follow-up stat() sees the change; persistence requires the
+     * backend's setattr op.  */
+    if (eff.mask & FS_ATTR_ATIME) node->atime = eff.atime;
+    if (eff.mask & FS_ATTR_MTIME) node->mtime = eff.mtime;
+    if (eff.mask & FS_ATTR_CTIME) node->ctime = eff.ctime;
+    if (eff.mask & FS_ATTR_MODE)  node->mask  = eff.mode & 07777;
+    if (eff.mask & FS_ATTR_UID)   node->uid   = eff.uid;
+    if (eff.mask & FS_ATTR_GID)   node->gid   = eff.gid;
+    /* SIZE is more invasive (truncation); only honored if the
+     * backend implements it explicitly.  */
+    return 0;
+}
+
+int getattr_fs(fs_node_t *node, struct fs_attr *a) {
+    if (!node || !a) return -EINVAL;
+    if (node->getattr) return node->getattr(node, a);
+
+    /* Generic: pull from the cached fs_node fields.  */
+    a->mask  = FS_ATTR_ATIME | FS_ATTR_MTIME | FS_ATTR_CTIME |
+               FS_ATTR_MODE  | FS_ATTR_UID   | FS_ATTR_GID   |
+               FS_ATTR_SIZE;
+    a->atime = node->atime;
+    a->mtime = node->mtime;
+    a->ctime = node->ctime;
+    a->mode  = node->mask;
+    a->uid   = node->uid;
+    a->gid   = node->gid;
+    a->size  = node->length;
     return 0;
 }
 

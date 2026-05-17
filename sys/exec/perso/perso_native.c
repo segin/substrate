@@ -26,6 +26,7 @@ extern int sys_vm_buffers(sys_bufinfo_t *buf);
 extern int sys_vm_slabs(sys_slabinfo_t *slabs, size_t *count);
 extern int sys_setpriority(int which, int who, int prio);
 extern int sys_getpriority(int which, int who);
+extern int sys_sethostname(const char *name, size_t len);
 struct vm86_struct;  /* forward decl — defined in <sys/vm86.h> */
 extern int sys_vm86(struct vm86_struct *info);
 extern int sys_set_gsbase(uint32_t base);
@@ -86,6 +87,13 @@ static void *native_syscalls[MAX_SYSCALLS] = {
     [SYS_DUP3] = &sys_dup3,
     [SYS_PIPE2] = &sys_pipe2,
     [SYS_FCNTL] = &sys_fcntl,
+    [SYS_MKNOD] = &sys_mknod,
+    [SYS_CHROOT] = &sys_chroot,
+    [SYS_CREAT] = (void *)&sys_creat,
+    /* SYS_SELECT shares slot 85 with SYS_READLINK in the current
+     * header; substrate's libc select() routes through SYS_POLL so
+     * the SYS_SELECT entry would just collide.  Don't wire it. */
+    [SYS_ACCEPT4] = &sys_accept4,
 
     /* AF_UNIX sockets (sys/net/af_unix.c) */
     [SYS_SOCKET]      = &sys_socket,
@@ -109,7 +117,10 @@ static void *native_syscalls[MAX_SYSCALLS] = {
     [SYS_LSTAT] = &sys_lstat,
     [SYS_FSTAT] = &sys_fstat,
     [SYS_FSTATAT] = &sys_fstatat,
+    [SYS_UTIMENSAT] = &sys_utimensat,
+    [SYS_FUTIMENS]  = &sys_futimens,
     [SYS_UNAME] = &sys_uname,
+    [SYS_SETHOSTNAME] = &sys_sethostname,
     [SYS_MODIFY_LDT] = &sys_modify_ldt,
     [SYS_READLINK] = &sys_readlink,
     [SYS_REBOOT] = &sys_reboot,
@@ -257,8 +268,11 @@ static const char *native_names[MAX_SYSCALLS] = {
     [SYS_LSTAT] = "lstat",
     [SYS_FSTAT] = "fstat",
     [SYS_FSTATAT] = "fstatat",
+    [SYS_UTIMENSAT] = "utimensat",
+    [SYS_FUTIMENS]  = "futimens",
     [SYS_SIGRETURN] = "sigreturn",
     [SYS_UNAME] = "uname",
+    [SYS_SETHOSTNAME] = "sethostname",
     [SYS_MODIFY_LDT] = "modify_ldt",
     [SYS_GETDENTS] = "getdents",
     [SYS_MSYNC] = "msync",
@@ -388,7 +402,10 @@ static struct syscall_fmt native_fmts[MAX_SYSCALLS] = {
     [SYS_LSTAT] = { 2, { ARG_STR, ARG_PTR } },
     [SYS_FSTAT] = { 2, { ARG_INT, ARG_PTR } },
     [SYS_FSTATAT] = { 4, { ARG_INT, ARG_STR, ARG_PTR, ARG_HEX } },
+    [SYS_UTIMENSAT] = { 4, { ARG_INT, ARG_STR, ARG_PTR, ARG_HEX } },
+    [SYS_FUTIMENS]  = { 2, { ARG_INT, ARG_PTR } },
     [SYS_UNAME] = { 1, { ARG_PTR } },
+    [SYS_SETHOSTNAME] = { 2, { ARG_PTR, ARG_INT } },
     [SYS_MODIFY_LDT] = { 3, { ARG_INT, ARG_PTR, ARG_LONG } },
     [SYS_GETDENTS] = { 3, { ARG_INT, ARG_PTR, ARG_INT } },
     [SYS_MSYNC] = { 3, { ARG_PTR, ARG_INT, ARG_INT } },

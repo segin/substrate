@@ -418,6 +418,9 @@ ssize_t sys_read(int fd, char *buf, size_t len) {
     return total_read;
 }
 
+/* Forward decl — fifo_open lives in sys/fs/pipe.c. */
+extern int fifo_open(fs_node_t *inode, int oflags, fs_node_t **out);
+
 int sys_open(const char *path, int flags, int mode) {
     char kpath[256];
     if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -14;
@@ -493,6 +496,23 @@ static int kern_open_from(const char *path, int flags, int mode, fs_node_t *root
         file_free(f);
         proc_clear_fd(current_process, fd);
         return -ENOMEM;
+    }
+
+    /* S_IFIFO inodes route through the FIFO layer.  fifo_open()
+     * looks up (or lazily creates) the in-kernel pipe buffer keyed
+     * by (dev, inum) and returns a shadow fs_node_t whose read/
+     * write hit the buffer instead of the on-disk file.  The shadow
+     * node owns the close path that drops the refcount; we install
+     * it in place of the inode node so callers see pipe semantics. */
+    if ((open_node->flags & 0x7) == FS_PIPE) {
+        fs_node_t *fifo_node = NULL;
+        int err = fifo_open(open_node, flags, &fifo_node);
+        if (err < 0) {
+            file_free(f);
+            proc_clear_fd(current_process, fd);
+            return err;
+        }
+        open_node = fifo_node;
     }
 
     f->f_data = open_node;
@@ -929,9 +949,20 @@ int sys_uname(struct utsname *buf) {
     return ret;
 }
 
+int sys_sethostname(const char *uname, size_t len) {
+    extern char kernel_hostname[MAXHOSTNAMELEN];
+    if (!uname || len == 0) return -EINVAL;
+    if (len >= MAXHOSTNAMELEN) len = MAXHOSTNAMELEN - 1;
+    char kbuf[MAXHOSTNAMELEN];
+    if (copyin(uname, kbuf, len) != 0) return -EFAULT;
+    memcpy(kernel_hostname, kbuf, len);
+    kernel_hostname[len] = '\0';
+    return 0;
+}
+
 int kern_uname(struct utsname *buf) {
     if (!buf) return -1;
-    
+
     extern char kernel_hostname[MAXHOSTNAMELEN];
     
     memset(buf, 0, sizeof(struct utsname));
@@ -1229,6 +1260,8 @@ static void fill_stat(struct stat *buf, fs_node_t *node) {
         buf->st_mode |= 0020000;  // S_IFCHR
     else if (ftype == FS_BLOCKDEVICE)
         buf->st_mode |= 0060000;  // S_IFBLK
+    else if (ftype == FS_PIPE)
+        buf->st_mode |= 0010000;  // S_IFIFO
     else
         buf->st_mode |= 0100000;  // S_IFREG
     
@@ -1440,6 +1473,75 @@ int kern_lstat(const char *path, struct stat *buf) {
     fill_stat(buf, node);
     close_fs(node);
     return 0;
+}
+
+/* utimensat / futimens — set per-file timestamps via the new vfs
+ * setattr op.  Callers pass a struct timespec[2] = { atime, mtime }
+ * (or NULL to mean "use current time for both"); UTIME_NOW /
+ * UTIME_OMIT are honored in each slot individually.  */
+#define KERN_UTIME_NOW  ((1L << 30) - 1L)
+#define KERN_UTIME_OMIT ((1L << 30) - 2L)
+
+static int kern_utimens_apply(fs_node_t *node, const struct timespec *kts) {
+    struct fs_attr a;
+    memset(&a, 0, sizeof(a));
+    if (!kts) {
+        a.mask = FS_ATTR_ATIME_NOW | FS_ATTR_MTIME_NOW;
+    } else {
+        if (kts[0].tv_nsec == KERN_UTIME_NOW) {
+            a.mask |= FS_ATTR_ATIME_NOW;
+        } else if (kts[0].tv_nsec != KERN_UTIME_OMIT) {
+            a.mask  |= FS_ATTR_ATIME;
+            a.atime  = kts[0].tv_sec;
+        }
+        if (kts[1].tv_nsec == KERN_UTIME_NOW) {
+            a.mask |= FS_ATTR_MTIME_NOW;
+        } else if (kts[1].tv_nsec != KERN_UTIME_OMIT) {
+            a.mask  |= FS_ATTR_MTIME;
+            a.mtime  = kts[1].tv_sec;
+        }
+        if (a.mask == 0) return 0;   /* both omitted = no-op */
+    }
+    return setattr_fs(node, &a);
+}
+
+int sys_utimensat(int dirfd, const char *path,
+                  const struct timespec times[2], int flags) {
+    (void)flags;   /* AT_SYMLINK_NOFOLLOW not honored yet */
+    struct timespec kts[2];
+    struct timespec *p = NULL;
+    if (times) {
+        if (copyin(times, kts, sizeof(kts)) != 0) return -EFAULT;
+        p = kts;
+    }
+    fs_node_t *root = current_process->root_node ? current_process->root_node : fs_root;
+    fs_node_t *cwd  = current_process->cwd_node  ? current_process->cwd_node  : root;
+    fs_node_t *node = NULL;
+    if (path) {
+        char kpath[256];
+        if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -EFAULT;
+        fs_node_t *base = (kpath[0] == '/') ? root : cwd;
+        if (dirfd != AT_FDCWD && kpath[0] != '/') {
+            if (dirfd < 0 || dirfd >= MAX_FD) return -EBADF;
+            file_t *f = current_process->fds[dirfd];
+            if (!f || !f->f_data) return -EBADF;
+            base = (fs_node_t *)f->f_data;
+        }
+        node = vfs_lookup_ref(base, kpath);
+        if (!node) return -ENOENT;
+        int rc = kern_utimens_apply(node, p);
+        close_fs(node);
+        return rc;
+    }
+    /* No path: implies futimens-style on dirfd.  */
+    if (dirfd < 0 || dirfd >= MAX_FD) return -EBADF;
+    file_t *f = current_process->fds[dirfd];
+    if (!f || !f->f_data) return -EBADF;
+    return kern_utimens_apply((fs_node_t *)f->f_data, p);
+}
+
+int sys_futimens(int fd, const struct timespec times[2]) {
+    return sys_utimensat(fd, NULL, times, 0);
 }
 
 // poll() implementation
@@ -2755,6 +2857,28 @@ int kern_getcwd(char *buf, size_t size) {
                 break;
             }
 
+            /* If we've reached the root of a mounted filesystem,
+             * splice in its mount path verbatim and stop.  Without
+             * this, getcwd fails for any cwd inside a synthetic
+             * filesystem (devfs, procfs, sysfs, shmfs) — those
+             * filesystems don't have a meaningful inode-numbering
+             * scheme that find_name_by_inode could walk through the
+             * covering filesystem with. */
+            if (curr->mp && curr == curr->mp->mnt_node_root) {
+                const char *mpath = curr->mp->mnt_stat_path;
+                int mlen = strlen(mpath);
+                if (mlen > 0) {
+                    if (ptr - kbuf < mlen) {
+                        kfree(kbuf, 4096);
+                        return -36;
+                    }
+                    ptr -= mlen;
+                    memcpy(ptr, mpath, mlen);
+                }
+                if (*ptr == '\0') *(--ptr) = '/';
+                break;
+            }
+
             fs_node_t *parent = finddir_fs(curr, "..");
             if (!parent) {
                 kfree(kbuf, 4096);
@@ -2838,7 +2962,36 @@ int kern_proc_info(pid_t pid, sys_procinfo_t *info) {
     info->state = target->state;
     info->bitness = target->bitness;
     info->perso_id = (int16_t)target->perso_id;
-    info->tty = target->tty ? (int16_t)target->tty->index : (int16_t)-1;
+    /* Encode the controlling tty as (major << 8) | minor so userland
+     * can render /dev/tty<N> vs /dev/pts/<N> without a second
+     * syscall.  See <sys/sysinfo.h> for the SYS_TTY_* helpers.
+     *
+     * Defensive: target->tty can be a DANGLING pointer if the
+     * process held a PTY whose pair was destroyed (master + slave
+     * both closed) without the proc-side reference being cleared.
+     * Validate the magic before dereferencing or `ps` faults the
+     * kernel.  Substrate's VT drivers identify as "fbvt"/"hwvt";
+     * PTY slaves announce as "ptyslave". */
+    info->tty = SYS_TTY_NONE;
+    if (target->tty &&
+        ((uintptr_t)target->tty >= 0xC0000000U) &&
+        target->tty->magic == 0x5401 /* TTY_MAGIC */) {
+        const char *dn = "";
+        if (target->tty->driver &&
+            (uintptr_t)target->tty->driver >= 0xC0000000U &&
+            target->tty->driver->driver_name &&
+            (uintptr_t)target->tty->driver->driver_name >= 0xC0000000U) {
+            dn = target->tty->driver->driver_name;
+        }
+        int idx = target->tty->index;
+        if (dn[0] == 'p') {
+            /* /dev/pts/N — N is the pair index, 0-based. */
+            info->tty = SYS_TTY_MAKE(SYS_TTY_MAJ_PTS, idx);
+        } else {
+            /* /dev/tty<N> — VT1 is index 0, so add one. */
+            info->tty = SYS_TTY_MAKE(SYS_TTY_MAJ_VT, idx + 1);
+        }
+    }
     info->nice = 0;
     info->start_time = target->start_time;
     info->user_time = target->utime;
@@ -3358,15 +3511,119 @@ int sys_fsync(int fd) {
     return 0; // Stub
 }
 
+/*
+ * sys_select — implement on top of sys_poll.  We translate the three
+ * fd_set bitmaps into a pollfd array, dispatch, then translate the
+ * returned revents back into bitmaps.  Bitmap layout matches glibc
+ * fd_set: an array of long words, fd N is bit (N % NFDBITS) of word
+ * (N / NFDBITS).  Substrate fd_set is the same shape.
+ */
 int sys_select(int nfds, void *rfds, void *wfds, void *efds, void *timeout) {
-    (void)nfds; (void)rfds; (void)wfds; (void)efds; (void)timeout;
-    return -ENOSYS;
+    if (nfds < 0 || nfds > 1024) return -EINVAL;
+
+    /* Copy in the three bitmaps.  Size in bytes = ceil(nfds/8). */
+    size_t bytes = (size_t)((nfds + 7) / 8);
+    /* Round up to long alignment so subsequent bit ops are safe. */
+    size_t lbytes = ((bytes + sizeof(long) - 1) / sizeof(long)) * sizeof(long);
+    if (lbytes == 0) lbytes = sizeof(long);
+
+    unsigned long *kr = NULL, *kw = NULL, *ke = NULL;
+    if (rfds) { kr = kmalloc(lbytes); if (!kr) return -ENOMEM;
+                memset(kr, 0, lbytes);
+                if (copyin(rfds, kr, bytes) != 0) { kfree(kr, lbytes); return -EFAULT; } }
+    if (wfds) { kw = kmalloc(lbytes); if (!kw) { if (kr) kfree(kr, lbytes); return -ENOMEM; }
+                memset(kw, 0, lbytes);
+                if (copyin(wfds, kw, bytes) != 0) { kfree(kw, lbytes); if (kr) kfree(kr, lbytes); return -EFAULT; } }
+    if (efds) { ke = kmalloc(lbytes); if (!ke) { if (kw) kfree(kw, lbytes); if (kr) kfree(kr, lbytes); return -ENOMEM; }
+                memset(ke, 0, lbytes);
+                if (copyin(efds, ke, bytes) != 0) { kfree(ke, lbytes); if (kw) kfree(kw, lbytes); if (kr) kfree(kr, lbytes); return -EFAULT; } }
+
+    /* Count interesting fds and build a pollfd array. */
+    struct pollfd *pfds = kmalloc(sizeof(struct pollfd) * (size_t)nfds);
+    if (!pfds) {
+        if (kr) kfree(kr, lbytes);
+        if (kw) kfree(kw, lbytes);
+        if (ke) kfree(ke, lbytes);
+        return -ENOMEM;
+    }
+    int n = 0;
+    #define FD_SET_TEST(s, fd) ((s) ? (((s)[(fd)/(8*sizeof(long))] >> ((fd) & (8*sizeof(long)-1))) & 1UL) : 0UL)
+    #define FD_SET_BIT(s, fd)  do { if (s) (s)[(fd)/(8*sizeof(long))] |=  (1UL << ((fd) & (8*sizeof(long)-1))); } while (0)
+    #define FD_CLR_BIT(s, fd)  do { if (s) (s)[(fd)/(8*sizeof(long))] &= ~(1UL << ((fd) & (8*sizeof(long)-1))); } while (0)
+
+    for (int fd = 0; fd < nfds; fd++) {
+        short ev = 0;
+        if (FD_SET_TEST(kr, fd)) ev |= POLLIN  | POLLRDNORM;
+        if (FD_SET_TEST(kw, fd)) ev |= POLLOUT | POLLWRNORM;
+        if (FD_SET_TEST(ke, fd)) ev |= POLLPRI;
+        if (ev) {
+            pfds[n].fd     = fd;
+            pfds[n].events = ev;
+            pfds[n].revents = 0;
+            n++;
+        }
+    }
+
+    /* Translate the BSD timeval timeout into poll's millisecond
+     * timeout.  NULL means block forever (-1); zero means non-block. */
+    int tmo = -1;
+    if (timeout) {
+        struct timeval tv;
+        if (copyin(timeout, &tv, sizeof(tv)) != 0) {
+            kfree(pfds, sizeof(struct pollfd) * (size_t)nfds);
+            if (kr) kfree(kr, lbytes);
+            if (kw) kfree(kw, lbytes);
+            if (ke) kfree(ke, lbytes);
+            return -EFAULT;
+        }
+        if (tv.tv_sec < 0 || tv.tv_usec < 0) tmo = 0;
+        else if (tv.tv_sec > 2000000) tmo = -1;       /* effectively forever */
+        else tmo = (int)(tv.tv_sec * 1000 + tv.tv_usec / 1000);
+    }
+
+    int rc = kern_poll(pfds, (unsigned)n, tmo);
+
+    /* Translate revents back into the bitmaps, zeroing first. */
+    if (kr) memset(kr, 0, lbytes);
+    if (kw) memset(kw, 0, lbytes);
+    if (ke) memset(ke, 0, lbytes);
+
+    int ready = 0;
+    if (rc > 0) {
+        for (int i = 0; i < n; i++) {
+            int fd = pfds[i].fd;
+            short re = pfds[i].revents;
+            int counted = 0;
+            if ((re & (POLLIN | POLLRDNORM | POLLHUP)) && kr) {
+                FD_SET_BIT(kr, fd); counted = 1;
+            }
+            if ((re & (POLLOUT | POLLWRNORM)) && kw) {
+                FD_SET_BIT(kw, fd); counted = 1;
+            }
+            if ((re & (POLLPRI | POLLERR)) && ke) {
+                FD_SET_BIT(ke, fd); counted = 1;
+            }
+            if (counted) ready++;
+        }
+    } else {
+        ready = rc;
+    }
+
+    if (rfds && copyout(kr, rfds, bytes) != 0) ready = -EFAULT;
+    if (wfds && copyout(kw, wfds, bytes) != 0) ready = -EFAULT;
+    if (efds && copyout(ke, efds, bytes) != 0) ready = -EFAULT;
+
+    kfree(pfds, sizeof(struct pollfd) * (size_t)nfds);
+    if (kr) kfree(kr, lbytes);
+    if (kw) kfree(kw, lbytes);
+    if (ke) kfree(ke, lbytes);
+    return ready;
+    #undef FD_SET_TEST
+    #undef FD_SET_BIT
+    #undef FD_CLR_BIT
 }
 
-int freebsd_sys_uname(void *ubuf) {
-    (void)ubuf;
-    return -ENOTSUP;
-}
+/* freebsd_sys_uname moved to sys/exec/perso/freebsd/freebsd_uname.c */
 
 int sys_fstatat(int dirfd, const char *path, void *buf, int flags) {
     char kpath[256];
