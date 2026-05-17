@@ -1493,12 +1493,14 @@ static int kern_utimens_apply(fs_node_t *node, const struct timespec *kts) {
         } else if (kts[0].tv_nsec != KERN_UTIME_OMIT) {
             a.mask  |= FS_ATTR_ATIME;
             a.atime  = kts[0].tv_sec;
+            a.atime_nsec = (uint32_t)kts[0].tv_nsec;
         }
         if (kts[1].tv_nsec == KERN_UTIME_NOW) {
             a.mask |= FS_ATTR_MTIME_NOW;
         } else if (kts[1].tv_nsec != KERN_UTIME_OMIT) {
             a.mask  |= FS_ATTR_MTIME;
             a.mtime  = kts[1].tv_sec;
+            a.mtime_nsec = (uint32_t)kts[1].tv_nsec;
         }
         if (a.mask == 0) return 0;   /* both omitted = no-op */
     }

@@ -183,7 +183,15 @@ typedef struct {
     uint32_t bg_reserved[3];
 } __attribute__((packed)) ext2_group_desc_t;
 
-// Inode structure
+/* Inode structure.  The legacy ext2 layout ends at offset 128
+ * (i_osd2[]'s last byte).  Modern ext4 (mkfs default) uses 256-byte
+ * inodes — the post-128 region holds *_extra fields for nanosecond
+ * timestamps and per-object checksums.  Whether these fields are
+ * actually meaningful on a given mount depends on fs->inode_size and
+ * the per-inode i_extra_isize byte (which says how many of the post-
+ * 128 bytes the on-disk format defines).  Read/write code must clamp
+ * the byte count it touches to fs->inode_size to avoid corrupting
+ * neighbouring inodes on a 128-byte-inode mount.  */
 typedef struct {
     uint16_t i_mode;
     uint16_t i_uid;
@@ -203,7 +211,34 @@ typedef struct {
     uint32_t i_dir_acl;
     uint32_t i_faddr;
     uint8_t  i_osd2[12];
+    /* --- offset 128: ext4 extended fields, valid iff inode_size > 128 --- */
+    uint16_t i_extra_isize;       /* 128: bytes used past offset 128   */
+    uint16_t i_checksum_hi;       /* 130: high 16 bits of inode csum   */
+    uint32_t i_ctime_extra;       /* 132: nsec << 2 | (sec >> 32 & 3)  */
+    uint32_t i_mtime_extra;       /* 136                                */
+    uint32_t i_atime_extra;       /* 140                                */
+    uint32_t i_crtime;            /* 144: birthtime, seconds            */
+    uint32_t i_crtime_extra;      /* 148: birthtime nsec encoding       */
 } __attribute__((packed)) ext2_inode_t;
+
+/* Helpers: split / pack the (sec,nsec) pair against the on-disk
+ * (i_*time, i_*time_extra) encoding.
+ *   - i_*time holds bits [31:0] of the second value (signed pre-1970,
+ *     unsigned post-2038 when the extra extension bits are present).
+ *   - i_*time_extra packs (nsec << 2) | (sec_high & 0x3) in 32 bits.
+ *     The 2-bit sec_high lets the on-disk format reach year ~2446.
+ *     We only carry 32-bit time_t in the kernel for now, so we just
+ *     ignore the high bits on read and zero them on write.
+ *
+ * If extra is 0 (small inode, or pre-EXTRA_ISIZE on-disk image) then
+ * nsec=0, sec=as-stored.  Encoding the kernel-side "no nsec known"
+ * value to 0 round-trips that case correctly.  */
+static inline uint32_t ext2_time_pack_extra(uint32_t nsec) {
+    return (nsec & 0x3FFFFFFFu) << 2;
+}
+static inline uint32_t ext2_time_extra_nsec(uint32_t extra) {
+    return extra >> 2;
+}
 
 // Directory Entry
 typedef struct {

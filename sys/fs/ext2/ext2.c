@@ -195,7 +195,31 @@ int ext2_read_inode(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_t *inode) {
         return -1;
     }
     
-    memcpy(inode, block_buf + inode_offset, sizeof(ext2_inode_t));
+    /* Read the legacy 128 bytes unconditionally; if the on-disk
+     * inode is larger and the file system actually uses the extra
+     * region (i_extra_isize > 0), read that too.  We cap at the
+     * struct's declared size so 256-byte mkfs.ext4 inodes only
+     * give us the timestamp-extra block we care about, not the
+     * trailing xattr area.  */
+    memset(inode, 0, sizeof(ext2_inode_t));
+    uint32_t legacy = EXT2_GOOD_OLD_INODE_SIZE;
+    memcpy(inode, block_buf + inode_offset, legacy);
+    if (fs->inode_size > legacy) {
+        uint32_t want = sizeof(ext2_inode_t) - legacy;
+        uint32_t avail = fs->inode_size - legacy;
+        uint32_t copy = (want < avail) ? want : avail;
+        memcpy((uint8_t *)inode + legacy,
+               block_buf + inode_offset + legacy, copy);
+        /* If i_extra_isize claims fewer bytes than we read, zero
+         * the slop so callers don't act on uninitialised on-disk
+         * fields that a future mkfs may repurpose.  */
+        if (inode->i_extra_isize < copy - 2 /* skip i_extra_isize self */) {
+            uint32_t valid = (uint32_t)inode->i_extra_isize + 2;
+            if (valid < copy) {
+                memset((uint8_t *)inode + legacy + valid, 0, copy - valid);
+            }
+        }
+    }
     kfree(block_buf, fs->block_size);
     return 0;
 }
@@ -324,8 +348,23 @@ int ext2_write_inode(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_t *inode) {
         return -1;
     }
 
-    // Update the inode data
-    memcpy(block_buf + inode_offset, inode, sizeof(ext2_inode_t));
+    /* Read-modify-write: preserve everything past sizeof(ext2_inode_t)
+     * (xattr area on 256-byte inodes) and everything past inode_size
+     * when we'd otherwise overshoot.  For 128-byte mounts we only
+     * touch the legacy area.  For 256-byte mounts we touch through
+     * i_crtime_extra (offset 148) and leave the xattr block alone.  */
+    uint32_t write_bytes = sizeof(ext2_inode_t);
+    if (write_bytes > fs->inode_size) write_bytes = fs->inode_size;
+    /* Make sure i_extra_isize correctly advertises how many post-128
+     * bytes we are about to commit.  Skip the i_extra_isize field
+     * itself (2 bytes) when counting — the on-disk meaning is "bytes
+     * past offset 130 that are in use".  */
+    if (fs->inode_size > EXT2_GOOD_OLD_INODE_SIZE &&
+        write_bytes > EXT2_GOOD_OLD_INODE_SIZE) {
+        uint16_t want = write_bytes - EXT2_GOOD_OLD_INODE_SIZE - 2;
+        if (inode->i_extra_isize < want) inode->i_extra_isize = want;
+    }
+    memcpy(block_buf + inode_offset, inode, write_bytes);
     
     // Write the block back to disk
     if (ext2_write_block(fs, inode_table_block + block_offset, block_buf) != fs->block_size) {
@@ -1026,16 +1065,29 @@ static int ext2_setattr(fs_node_t *node, const struct fs_attr *a) {
     if (EXT2_RO_REFUSE(ctx->fs)) return -EROFS;
     if (a->mask == 0) return 0;
 
+    /* Whether the on-disk inode has room for nsec extras depends on
+     * the mount-wide inode_size (256 vs 128 bytes).  ext2_write_inode
+     * already gates the write byte count on inode_size, so writing
+     * the *_extra fields on a 128-byte mount is harmless (the bytes
+     * just don't reach disk).  We still set them in the cached copy
+     * so a subsequent getattr returns what the caller asked for.  */
+    int big_inode = (ctx->fs->inode_size > EXT2_GOOD_OLD_INODE_SIZE);
     if (a->mask & FS_ATTR_ATIME) {
         ctx->inode.i_atime = (uint32_t)a->atime;
+        if (big_inode)
+            ctx->inode.i_atime_extra = ext2_time_pack_extra(a->atime_nsec);
         node->atime        = a->atime;
     }
     if (a->mask & FS_ATTR_MTIME) {
         ctx->inode.i_mtime = (uint32_t)a->mtime;
+        if (big_inode)
+            ctx->inode.i_mtime_extra = ext2_time_pack_extra(a->mtime_nsec);
         node->mtime        = a->mtime;
     }
     if (a->mask & FS_ATTR_CTIME) {
         ctx->inode.i_ctime = (uint32_t)a->ctime;
+        if (big_inode)
+            ctx->inode.i_ctime_extra = ext2_time_pack_extra(a->ctime_nsec);
         node->ctime        = a->ctime;
     }
     if (a->mask & FS_ATTR_MODE) {
@@ -1077,6 +1129,13 @@ static int ext2_getattr(fs_node_t *node, struct fs_attr *a) {
     a->atime = ctx->inode.i_atime;
     a->mtime = ctx->inode.i_mtime;
     a->ctime = ctx->inode.i_ctime;
+    if (ctx->fs->inode_size > EXT2_GOOD_OLD_INODE_SIZE) {
+        a->atime_nsec = ext2_time_extra_nsec(ctx->inode.i_atime_extra);
+        a->mtime_nsec = ext2_time_extra_nsec(ctx->inode.i_mtime_extra);
+        a->ctime_nsec = ext2_time_extra_nsec(ctx->inode.i_ctime_extra);
+    } else {
+        a->atime_nsec = a->mtime_nsec = a->ctime_nsec = 0;
+    }
     a->mode  = ctx->inode.i_mode & 0x0FFFU;
     a->uid   = ctx->inode.i_uid;
     a->gid   = ctx->inode.i_gid;

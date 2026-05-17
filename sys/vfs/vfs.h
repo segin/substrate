@@ -50,9 +50,15 @@ typedef int (*chmod_type_t)(struct fs_node *node, uint32_t mode);
  * /size-truncate paths without churning fs_node_t every time.  */
 struct fs_attr {
     uint32_t mask;      /* FS_ATTR_* — which fields are valid */
-    int64_t  atime;     /* in seconds-since-epoch (no nsec yet) */
+    int64_t  atime;     /* seconds since epoch */
     int64_t  mtime;
     int64_t  ctime;
+    uint32_t atime_nsec;/* 0..999_999_999 — meaningful only when the
+                         * backing fs records nsec (e.g. ext4 with
+                         * EXTRA_ISIZE).  Backends that lack precision
+                         * silently round.  */
+    uint32_t mtime_nsec;
+    uint32_t ctime_nsec;
     uint32_t mode;
     uint32_t uid;
     uint32_t gid;
