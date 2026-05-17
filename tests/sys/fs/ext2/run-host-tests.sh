@@ -447,12 +447,14 @@ check='ls -@l /mnt/test/probe; echo XATTR_DONE'"
     assert_log "$log" "XATTR_DONE"      "check command ran to completion"
 }
 
-t_refuse_extent_write() {
-    echo "==> refuse-ext4-extent-write"
-    # ext4 with extents only (no 64bit / csum).  Pre-create a file
-    # with EXT4_EXTENTS_FL; substrate should READ it but REFUSE
-    # writes (EROFS) until the extent alloc path lands.  Without
-    # the guard, writes would corrupt the extent header.
+t_extent_append_write() {
+    echo "==> extent-append-write"
+    # ext4 with extents; pre-create an empty file marked
+    # EXT4_EXTENTS_FL.  Substrate's partial extent-write path should
+    # now allow append-only writes (case "extent list empty" — fresh
+    # extent allocation, then contiguous extension as more blocks
+    # land).  The check writes a short payload, umounts, and the
+    # second-boot read-back proves the data persists on disk.
     local img; img=$(mkimg t-extwr ext4 -O '^64bit,^metadata_csum')
     {
         echo "write /dev/null /target"
@@ -461,16 +463,26 @@ t_refuse_extent_write() {
     local conf="device=/dev/storage/sata1
 mount=/mnt/test
 fs=ext2
-check='cat /mnt/test/target >/dev/null && echo READ_OK; echo NEWCONTENT > /mnt/test/target; ls -l /mnt/test/target'"
+check='echo EXTENT_PAYLOAD > /mnt/test/target; ls -l /mnt/test/target'"
     local rfs; rfs=$(prep_rootfs t-extwr "$conf")
     local log="$WORK/t-extwr.log"
     boot_with "$rfs" "$img" "$log" 30
-    assert_log "$log" "FSTEST: mount OK" "extent-file mount succeeds"
-    assert_log "$log" "READ_OK" "extent-file read works"
-    # If write was refused, the ls line shows " root 0 " for the
-    # file size column.  If the write had taken effect (corrupting
-    # the extent header), the size would be 11 ("NEWCONTENT\n").
-    assert_log "$log" "root +0 +.* /mnt/test/target" "extent-file write left size 0"
+    assert_log "$log" "FSTEST: mount OK"               "extent mount succeeds"
+    # ls -l should show size 15 ("EXTENT_PAYLOAD\n") if the write
+    # succeeded.  If the EROFS-fallback were still active size'd be 0.
+    assert_log "$log" "root +15 +.* /mnt/test/target"  "extent append wrote 15 bytes"
+
+    # Re-boot the same image; read the file and verify the payload
+    # survived umount.  Proves the extent header was correctly
+    # written back to disk.
+    local conf2="device=/dev/storage/sata1
+mount=/mnt/test
+fs=ext2
+check='cat /mnt/test/target'"
+    local rfs2; rfs2=$(prep_rootfs t-extwr-readback "$conf2")
+    local log2="$WORK/t-extwr-readback.log"
+    boot_with "$rfs2" "$img" "$log2" 25
+    assert_log "$log2" "EXTENT_PAYLOAD" "extent append survives umount + remount"
 }
 
 t_mount_64bit() {
@@ -535,7 +547,7 @@ t_csum_verify_ok
 t_csum_verify_fail
 t_bg_csum_verify
 t_xattr_read
-t_refuse_extent_write
+t_extent_append_write
 t_mount_64bit
 t_mount_64bit_with_csum
 

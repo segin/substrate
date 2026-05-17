@@ -730,11 +730,105 @@ uint32_t ext2_inode_read(ext2_node_t *node, off_t offset, uint32_t size, void *b
     return total_read;
 }
 
+/* Extent-tree block allocator — append path only.
+ *
+ * Handles three cases on an inline depth-0 extent header:
+ *   1. Extent list is empty: create a single-block extent covering
+ *      block_idx.  Always succeeds if disk has any free block.
+ *   2. The last extent's logical end == block_idx AND a contiguous
+ *      physical block (e_start + e_len) is still free: extend the
+ *      extent's e_len by 1 in place.  Cheapest case.
+ *   3. The last extent's logical end == block_idx but contiguous
+ *      isn't free / e_len would overflow uint16_t: create a fresh
+ *      single-block extent if eh_max > eh_ecount.  Refuse if the
+ *      header is full (would need to grow the tree into a leaf
+ *      block — not implemented; falls back to -EROFS).
+ *
+ * Anything else (sparse writes, multi-level trees, writes into the
+ * middle of an existing extent) refuses with -EROFS so file_write
+ * fails cleanly instead of silently corrupting the extent tree.
+ * Returns 0 on success, -1 on out-of-space / refusal.  */
+static int ext4_extent_alloc_inode_block(ext2_fs_t *fs, ext2_inode_t *inode,
+                                         uint32_t block_idx) {
+    uint8_t *h = (uint8_t *)inode->i_block;
+    ext4_extent_header_t *eh = (ext4_extent_header_t *)h;
+    if (eh->eh_magic != EXT4_EXT_MAGIC)             return -1;
+    if (eh->eh_depth != 0)                          return -1;   /* multi-level: TODO */
+    uint32_t sectors_per_block = fs->block_size / 512;
+
+    ext4_extent_t *exts = (ext4_extent_t *)(h + sizeof(*eh));
+    uint16_t n = eh->eh_ecount;
+    uint16_t max = eh->eh_max;
+
+    if (n == 0) {
+        if (max == 0) return -1;
+        uint32_t blk = ext2_alloc_block(fs);
+        if (blk == 0) return -1;
+        exts[0].e_blk     = block_idx;
+        exts[0].e_len     = 1;
+        exts[0].e_start_hi = 0;
+        exts[0].e_start_lo = blk;
+        eh->eh_ecount = 1;
+        inode->i_blocks += sectors_per_block;
+        return 0;
+    }
+
+    /* Append-only check.  The "last extent" is the one whose
+     * logical range ends highest.  In a sane on-disk layout the
+     * entries are sorted by e_blk so exts[n-1] is the last; we
+     * don't bother verifying.  */
+    ext4_extent_t *last = &exts[n - 1];
+    uint32_t logical_end = last->e_blk + last->e_len;
+    if (logical_end != block_idx) return -1;    /* sparse — refuse */
+
+    uint32_t phys_end = ((uint32_t)last->e_start_hi << 16) |
+                        last->e_start_lo;
+    phys_end += last->e_len;
+
+    uint32_t blk = ext2_alloc_block(fs);
+    if (blk == 0) return -1;
+    inode->i_blocks += sectors_per_block;
+
+    if (blk == phys_end && last->e_len < 0x7FFF) {
+        /* Case 2: contiguous extension.  Grow the existing extent's
+         * length and call it a day.  No tree-structure change.  */
+        last->e_len = last->e_len + 1;
+        return 0;
+    }
+
+    if (n >= max) {
+        /* Case 4: header is full and the allocator didn't give us a
+         * contiguous block.  Releasing `blk` here would be the right
+         * thing to do; substrate's ext2_free_block does that — call
+         * it so the disk doesn't leak.  */
+        ext2_free_block(fs, blk);
+        inode->i_blocks -= sectors_per_block;
+        return -1;
+    }
+
+    /* Case 3: new single-block extent.  */
+    ext4_extent_t *ne = &exts[n];
+    ne->e_blk      = block_idx;
+    ne->e_len      = 1;
+    ne->e_start_hi = (blk >> 16) & 0xFFFFu;
+    ne->e_start_lo = blk & 0xFFFFFFFFu;
+    eh->eh_ecount  = n + 1;
+    return 0;
+}
+
 // Allocate and add a block to an inode
 int ext2_alloc_inode_block(ext2_fs_t *fs, ext2_inode_t *inode, uint32_t block_idx, uint32_t *indirect, uint32_t *dindirect, uint32_t *tindirect) {
+    /* Extent-tree files route through the extent allocator instead
+     * of the legacy block-pointer arithmetic — i_block[] doesn't
+     * hold direct/indirect addresses for these inodes.  Append-only
+     * for now; sparse / multi-level / split / grow are all in the
+     * "TODO: extent-tree WRITE path" task.  */
+    if (inode->i_flags & EXT4_EXTENTS_FL)
+        return ext4_extent_alloc_inode_block(fs, inode, block_idx);
+
     uint32_t ptrs_per_block = fs->block_size / 4;
     uint32_t sectors_per_block = fs->block_size / 512;
-    
+
     // Direct blocks (0-11)
     if (block_idx < 12) {
         uint32_t new_block = ext2_alloc_block(fs);
@@ -864,18 +958,14 @@ uint32_t ext2_inode_write(ext2_node_t *node, off_t offset, uint32_t size, const 
     ext2_inode_t *inode = &node->inode;
 
     /* Extent-flagged inodes use a completely different on-disk
-     * layout for i_block[] (inline ext4_extent_header + extents,
-     * not the legacy 12-direct/1-/2-/3-indirect pointer array).
-     * Our write/alloc path walks the legacy array unconditionally,
-     * which would corrupt the extent header.  Refuse the write
-     * until a real ext4_extent_alloc / ext4_extent_split pair
-     * lands.  Strictly better than the previous silent corruption.
-     *
-     * NB: the extent READ path (ext2_get_block_num routing) is
-     * fine — only the alloc side is missing.  */
-    if (inode->i_flags & EXT4_EXTENTS_FL) {
-        return (uint32_t)-EROFS;
-    }
+     * layout for i_block[] (inline ext4_extent_header + extents).
+     * ext2_alloc_inode_block now dispatches to a small extent
+     * allocator for append-only writes; sparse writes / multi-level
+     * trees / splits / grows still hit -EROFS down inside that
+     * allocator.  The legacy block-pointer code path below is
+     * still safe to enter for extent inodes because it never
+     * touches i_block[] — block lookups go through ext2_get_block_num
+     * which already routes extent files to ext4_extent_resolve.  */
 
     mutex_lock(&node->lock);
 
@@ -1275,14 +1365,12 @@ size_t ext2_file_write(fs_node_t *node, off_t offset, size_t size, const uint8_t
     ext2_node_t *ctx = (ext2_node_t *)(uintptr_t)node->impl;
     ext2_fs_t *fs = ctx->fs;
     if (EXT2_RO_REFUSE(fs)) return (size_t)-EROFS;
-    /* Extent-flagged files: refuse the write up-front because the
-     * legacy alloc path inside ext2_inode_write would corrupt the
-     * inline extent header.  We do the same check inside
-     * ext2_inode_write (defense in depth), but checking here lets
-     * us avoid the misleading "written > 0" branch below treating
-     * the (uint32_t)-EROFS sentinel as a successful write count.  */
-    if (ctx->inode.i_flags & EXT4_EXTENTS_FL) return (size_t)-EROFS;
-
+    /* Extent-tree files: now go through the partial extent-write
+     * path inside ext2_inode_write -> ext4_extent_alloc_inode_block.
+     * Append-only (sparse / multi-level still bail with -EROFS
+     * inside the allocator) so a write that "succeeds" up to N
+     * bytes and then fails will leave a consistent file at length
+     * N.  */
     uint32_t written = ext2_inode_write(ctx, offset, size, buffer);
     
     // Write updated inode back to disk
