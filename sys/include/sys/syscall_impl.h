@@ -82,6 +82,21 @@ extern int sys_fstat(int, void*);
 extern int sys_fstatat(int, const char*, void*, int);
 extern int sys_utimensat(int, const char *, const void *, int);
 extern int sys_futimens(int, const void *);
+
+/* xattr family — read side implemented for ext2/4, others NULL-hook
+ * and return -ENOTSUP; write side is ENOSYS until a writer ports.  */
+extern int sys_getxattr(const char *, const char *, void *, size_t);
+extern int sys_lgetxattr(const char *, const char *, void *, size_t);
+extern int sys_fgetxattr(int,          const char *, void *, size_t);
+extern int sys_listxattr(const char *, char *, size_t);
+extern int sys_llistxattr(const char *, char *, size_t);
+extern int sys_flistxattr(int, char *, size_t);
+extern int sys_setxattr(const char *, const char *, const void *, size_t, int);
+extern int sys_lsetxattr(const char *, const char *, const void *, size_t, int);
+extern int sys_fsetxattr(int,          const char *, const void *, size_t, int);
+extern int sys_removexattr(const char *, const char *);
+extern int sys_lremovexattr(const char *, const char *);
+extern int sys_fremovexattr(int, const char *);
 extern int sys_statfs(const char*, void*);
 extern int sys_fstatfs(int, void*);
 extern int sys_statvfs(const char*, void*);

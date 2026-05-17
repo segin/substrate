@@ -190,6 +190,22 @@
 #define SYS_UTIMENSAT   380
 #define SYS_FUTIMENS    381
 
+/* Extended attribute (xattr) family.  Linux-style namespaced names
+ * ("user.foo", "security.selinux", etc.).  Substrate read-side is
+ * fully implemented; write-side (set/remove) is ENOSYS for now.  */
+#define SYS_GETXATTR    390
+#define SYS_LGETXATTR   391
+#define SYS_FGETXATTR   392
+#define SYS_LISTXATTR   393
+#define SYS_LLISTXATTR  394
+#define SYS_FLISTXATTR  395
+#define SYS_SETXATTR    396
+#define SYS_LSETXATTR   397
+#define SYS_FSETXATTR   398
+#define SYS_REMOVEXATTR 399
+#define SYS_LREMOVEXATTR 400
+#define SYS_FREMOVEXATTR 401
+
 void syscall_init(void);
 
 // GDT TLS entries

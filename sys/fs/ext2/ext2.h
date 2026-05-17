@@ -391,4 +391,14 @@ int ext2_htree_hash(const char *name, int len, const uint32_t *hash_seed,
                     int hash_version, uint32_t *hash_major,
                     uint32_t *hash_minor);
 
+/* xattr read-side — see ext2_xattr.c.  full_name is the namespaced
+ * form: "user.foo", "security.selinux", "trusted.bar", etc.  out
+ * may be NULL to query the byte count without reading.  Returns 0
+ * on hit (or 0-byte list), -ENODATA on miss, -ERANGE if a non-NULL
+ * out buffer was too small, -ENOTSUP for unknown namespace.  */
+int ext2_xattr_get(fs_node_t *node, const char *full_name,
+                   void *out, size_t out_size, size_t *result_size);
+int ext2_xattr_list(fs_node_t *node, void *out, size_t out_size,
+                    size_t *result_size);
+
 #endif

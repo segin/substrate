@@ -608,6 +608,55 @@ int utimes(const char *filename, const struct timeval times[2]) {
     };
     return utimensat(AT_FDCWD, filename, ts, 0);
 }
+
+/* xattr family.  Read-side talks to the ext2/4 backend (the only one
+ * with a getxattr/listxattr hook today); write-side stubs to ENOSYS
+ * because no backend implements set/remove yet.  */
+ssize_t getxattr(const char *path, const char *name, void *value, size_t size) {
+    return (ssize_t)__set_errno((int)_syscall4(SYS_GETXATTR,
+        (uintptr_t)path, (uintptr_t)name, (uintptr_t)value, (uintptr_t)size));
+}
+ssize_t lgetxattr(const char *path, const char *name, void *value, size_t size) {
+    return (ssize_t)__set_errno((int)_syscall4(SYS_LGETXATTR,
+        (uintptr_t)path, (uintptr_t)name, (uintptr_t)value, (uintptr_t)size));
+}
+ssize_t fgetxattr(int fd, const char *name, void *value, size_t size) {
+    return (ssize_t)__set_errno((int)_syscall4(SYS_FGETXATTR,
+        (uintptr_t)fd, (uintptr_t)name, (uintptr_t)value, (uintptr_t)size));
+}
+ssize_t listxattr(const char *path, char *list, size_t size) {
+    return (ssize_t)__set_errno((int)_syscall3(SYS_LISTXATTR,
+        (uintptr_t)path, (uintptr_t)list, (uintptr_t)size));
+}
+ssize_t llistxattr(const char *path, char *list, size_t size) {
+    return (ssize_t)__set_errno((int)_syscall3(SYS_LLISTXATTR,
+        (uintptr_t)path, (uintptr_t)list, (uintptr_t)size));
+}
+ssize_t flistxattr(int fd, char *list, size_t size) {
+    return (ssize_t)__set_errno((int)_syscall3(SYS_FLISTXATTR,
+        (uintptr_t)fd, (uintptr_t)list, (uintptr_t)size));
+}
+int setxattr(const char *path, const char *name, const void *value, size_t size, int flags) {
+    return __set_errno((int)_syscall5(SYS_SETXATTR,
+        (uintptr_t)path, (uintptr_t)name, (uintptr_t)value, (uintptr_t)size, (uintptr_t)flags));
+}
+int lsetxattr(const char *path, const char *name, const void *value, size_t size, int flags) {
+    return __set_errno((int)_syscall5(SYS_LSETXATTR,
+        (uintptr_t)path, (uintptr_t)name, (uintptr_t)value, (uintptr_t)size, (uintptr_t)flags));
+}
+int fsetxattr(int fd, const char *name, const void *value, size_t size, int flags) {
+    return __set_errno((int)_syscall5(SYS_FSETXATTR,
+        (uintptr_t)fd, (uintptr_t)name, (uintptr_t)value, (uintptr_t)size, (uintptr_t)flags));
+}
+int removexattr(const char *path, const char *name) {
+    return __set_errno((int)_syscall2(SYS_REMOVEXATTR, (uintptr_t)path, (uintptr_t)name));
+}
+int lremovexattr(const char *path, const char *name) {
+    return __set_errno((int)_syscall2(SYS_LREMOVEXATTR, (uintptr_t)path, (uintptr_t)name));
+}
+int fremovexattr(int fd, const char *name) {
+    return __set_errno((int)_syscall2(SYS_FREMOVEXATTR, (uintptr_t)fd, (uintptr_t)name));
+}
 int mount(const char *source, const char *target, const char *filesystemtype, unsigned long mountflags, const void *data) {
     return __set_errno((int)_syscall5(SYS_MOUNT, (uintptr_t)source, (uintptr_t)target, (uintptr_t)filesystemtype, (uintptr_t)mountflags, (uintptr_t)data));
 }

@@ -117,6 +117,12 @@ typedef struct fs_node {
     chmod_type_t chmod;
     setattr_type_t setattr;
     getattr_type_t getattr;
+    /* xattr read-side hooks.  Backends that don't support xattr
+     * leave these NULL — the syscall layer returns -ENOTSUP.  */
+    int (*getxattr)(struct fs_node *node, const char *name,
+                    void *out, size_t out_size, size_t *result_size);
+    int (*listxattr)(struct fs_node *node,
+                     void *out, size_t out_size, size_t *result_size);
     struct fs_node *ptr; // Used by mountpoints and symlinks.
     struct mount *mp;    // Mount point this node belongs to.
 } fs_node_t;

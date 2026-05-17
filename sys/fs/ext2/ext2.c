@@ -1086,6 +1086,8 @@ fs_node_t *ext2_alloc_node(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_t *inod
     node->chmod = ext2_chmod;
     node->setattr = ext2_setattr;
     node->getattr = ext2_getattr;
+    node->getxattr  = ext2_xattr_get;
+    node->listxattr = ext2_xattr_list;
     ctx->cache_slot = (uint16_t)idx;
     ctx->pin_count = 0;
     

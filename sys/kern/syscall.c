@@ -1546,6 +1546,150 @@ int sys_futimens(int fd, const struct timespec times[2]) {
     return sys_utimensat(fd, NULL, times, 0);
 }
 
+/* --- xattr family ------------------------------------------------- */
+
+/* The {l,f}getxattr / {l,f}listxattr group routes a path or fd to a
+ * fs_node and hands off to the per-backend op.  Backends that don't
+ * support xattr leave the hook NULL — the syscall returns -ENOTSUP.  */
+static int xattr_resolve(int dirfd_or_fd, const char *path, int follow,
+                         fs_node_t **out_node, int *out_close) {
+    fs_node_t *root = current_process->root_node ? current_process->root_node : fs_root;
+    fs_node_t *cwd  = current_process->cwd_node  ? current_process->cwd_node  : root;
+    *out_close = 0;
+    if (path != NULL) {
+        char kpath[256];
+        if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -EFAULT;
+        fs_node_t *base = (kpath[0] == '/') ? root : cwd;
+        fs_node_t *node = follow ? vfs_lookup_ref(base, kpath)
+                                 : vfs_lookup_lstat_ref(base, kpath);
+        if (!node) return -ENOENT;
+        *out_node = node;
+        *out_close = 1;
+        return 0;
+    }
+    if (dirfd_or_fd < 0 || dirfd_or_fd >= MAX_FD) return -EBADF;
+    file_t *f = current_process->fds[dirfd_or_fd];
+    if (!f || !f->f_data) return -EBADF;
+    *out_node = (fs_node_t *)f->f_data;
+    return 0;
+}
+
+static int kern_getxattr(fs_node_t *node, const char *name,
+                         void *value, size_t size) {
+    if (!node->getxattr) return -ENOTSUP;
+    char kname[256];
+    if (copyinstr(name, kname, sizeof(kname), NULL) != 0) return -EFAULT;
+    /* Two-call convention: if value==NULL or size==0, return size
+     * needed (don't read).  Else write at most `size` bytes; if the
+     * value is bigger, return -ERANGE.  */
+    size_t actual = 0;
+    if (value == NULL || size == 0) {
+        int rc = node->getxattr(node, kname, NULL, 0, &actual);
+        if (rc != 0) return rc;
+        return (int)actual;
+    }
+    /* Bounce buffer — we don't want a backend writing into user
+     * memory while holding fs locks.  */
+    if (size > 65536) size = 65536;
+    void *kbuf = kmalloc(size);
+    if (!kbuf) return -ENOMEM;
+    int rc = node->getxattr(node, kname, kbuf, size, &actual);
+    if (rc == 0) {
+        if (copyout(kbuf, value, actual) != 0) { kfree(kbuf, size); return -EFAULT; }
+        kfree(kbuf, size);
+        return (int)actual;
+    }
+    kfree(kbuf, size);
+    return rc;
+}
+
+static int kern_listxattr(fs_node_t *node, char *list, size_t size) {
+    if (!node->listxattr) return -ENOTSUP;
+    size_t actual = 0;
+    if (list == NULL || size == 0) {
+        int rc = node->listxattr(node, NULL, 0, &actual);
+        if (rc != 0) return rc;
+        return (int)actual;
+    }
+    if (size > 65536) size = 65536;
+    void *kbuf = kmalloc(size);
+    if (!kbuf) return -ENOMEM;
+    int rc = node->listxattr(node, kbuf, size, &actual);
+    if (rc == 0) {
+        if (copyout(kbuf, list, actual) != 0) { kfree(kbuf, size); return -EFAULT; }
+        kfree(kbuf, size);
+        return (int)actual;
+    }
+    kfree(kbuf, size);
+    return rc;
+}
+
+int sys_getxattr(const char *path, const char *name, void *value, size_t size) {
+    fs_node_t *node; int close = 0;
+    int rc = xattr_resolve(-1, path, 1, &node, &close);
+    if (rc != 0) return rc;
+    rc = kern_getxattr(node, name, value, size);
+    if (close) close_fs(node);
+    return rc;
+}
+int sys_lgetxattr(const char *path, const char *name, void *value, size_t size) {
+    fs_node_t *node; int close = 0;
+    int rc = xattr_resolve(-1, path, 0, &node, &close);
+    if (rc != 0) return rc;
+    rc = kern_getxattr(node, name, value, size);
+    if (close) close_fs(node);
+    return rc;
+}
+int sys_fgetxattr(int fd, const char *name, void *value, size_t size) {
+    fs_node_t *node; int close = 0;
+    int rc = xattr_resolve(fd, NULL, 0, &node, &close);
+    if (rc != 0) return rc;
+    return kern_getxattr(node, name, value, size);
+}
+int sys_listxattr(const char *path, char *list, size_t size) {
+    fs_node_t *node; int close = 0;
+    int rc = xattr_resolve(-1, path, 1, &node, &close);
+    if (rc != 0) return rc;
+    rc = kern_listxattr(node, list, size);
+    if (close) close_fs(node);
+    return rc;
+}
+int sys_llistxattr(const char *path, char *list, size_t size) {
+    fs_node_t *node; int close = 0;
+    int rc = xattr_resolve(-1, path, 0, &node, &close);
+    if (rc != 0) return rc;
+    rc = kern_listxattr(node, list, size);
+    if (close) close_fs(node);
+    return rc;
+}
+int sys_flistxattr(int fd, char *list, size_t size) {
+    fs_node_t *node; int close = 0;
+    int rc = xattr_resolve(fd, NULL, 0, &node, &close);
+    if (rc != 0) return rc;
+    return kern_listxattr(node, list, size);
+}
+/* Write-side: not yet implemented.  Stub at ENOSYS instead of
+ * -ENOTSUP so callers can distinguish "this kernel lacks xattr
+ * writes" from "this fs lacks xattr support at all".  */
+int sys_setxattr(const char *path, const char *name, const void *value,
+                 size_t size, int flags) {
+    (void)path; (void)name; (void)value; (void)size; (void)flags;
+    return -ENOSYS;
+}
+int sys_lsetxattr(const char *path, const char *name, const void *value,
+                  size_t size, int flags) {
+    (void)path; (void)name; (void)value; (void)size; (void)flags;
+    return -ENOSYS;
+}
+int sys_fsetxattr(int fd, const char *name, const void *value,
+                  size_t size, int flags) {
+    (void)fd; (void)name; (void)value; (void)size; (void)flags;
+    return -ENOSYS;
+}
+int sys_removexattr(const char *path, const char *name)  { (void)path; (void)name; return -ENOSYS; }
+int sys_lremovexattr(const char *path, const char *name) { (void)path; (void)name; return -ENOSYS; }
+int sys_fremovexattr(int fd, const char *name)           { (void)fd;   (void)name; return -ENOSYS; }
+
 // poll() implementation
 #include <sys/poll.h>
 

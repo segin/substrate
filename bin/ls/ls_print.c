@@ -14,9 +14,13 @@
 
 #ifdef NATIVE_BUILD
 #include <sys/ioctl.h>
-#if defined(__linux__)
-#include <sys/xattr.h>
 #endif
+/* sys/xattr.h is provided by both substrate libc (target) and glibc/
+ * Apple libc on common hosts.  Older FreeBSD-y hosts may lack it;
+ * the listxattr/getxattr call sites are no-ops if listxattr returns
+ * <= 0, so a host without xattr just silently won't show them.  */
+#if __has_include(<sys/xattr.h>)
+#include <sys/xattr.h>
 #endif
 
 #ifndef major
@@ -415,13 +419,9 @@ static void format_mode(const file_info_t *file, char out[12]) {
     out[10] = ' ';
     out[11] = '\0';
 
-#ifdef NATIVE_BUILD
-#if defined(__linux__)
     if (file->full_path != NULL && !file->display_as_symlink && listxattr(file->full_path, NULL, 0) > 0) {
         out[10] = '@';
     }
-#endif
-#endif
 }
 
 static void format_size(const ls_config_t *config, off_t size, char *buf, size_t bufsz) {
@@ -729,8 +729,6 @@ static void print_long_entry(const file_info_t *file, const ls_config_t *config,
         printf(" -> %s", file->link_target);
     }
 
-#ifdef NATIVE_BUILD
-#if defined(__linux__)
     if (config->list_xattr_names && file->full_path != NULL) {
         ssize_t sz = listxattr(file->full_path, NULL, 0);
         if (sz > 0) {
@@ -748,8 +746,6 @@ static void print_long_entry(const file_info_t *file, const ls_config_t *config,
             }
         }
     }
-#endif
-#endif
 
     putchar('\n');
     free(name);

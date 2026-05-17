@@ -419,6 +419,34 @@ with open('$img2','r+b') as f:
     assert_log "$log2" "FSTEST: mount FAIL"            "userland sees bg failure"
 }
 
+t_xattr_read() {
+    echo "==> xattr-read"
+    # Create an ext4 image with two xattrs on /probe via debugfs's
+    # ea_set, then ask substrate to (a) flag the file with '@' in
+    # `ls -l` output and (b) list both names with `ls -@l`.  Proves
+    # both the listxattr syscall and the underlying block-xattr
+    # parser are wired end-to-end.
+    local img; img=$(mkimg t-xattr ext4 -O '^64bit,^metadata_csum')
+    {
+        echo "write /dev/null /probe"
+        echo "ea_set /probe user.greeting hello-from-host"
+        echo "ea_set /probe security.test contextstring"
+        echo "close"
+    } | debugfs -w "$img" >/dev/null 2>&1 || true
+
+    local conf="device=/dev/storage/sata1
+mount=/mnt/test
+fs=ext2
+check='ls -@l /mnt/test/probe; echo XATTR_DONE'"
+    local rfs; rfs=$(prep_rootfs t-xattr "$conf")
+    local log="$WORK/t-xattr.log"
+    boot_with "$rfs" "$img" "$log" 30
+    assert_log "$log" "FSTEST: mount OK" "xattr mount succeeds"
+    assert_log "$log" "user.greeting"   "listxattr returns user.greeting"
+    assert_log "$log" "security.test"   "listxattr returns security.test"
+    assert_log "$log" "XATTR_DONE"      "check command ran to completion"
+}
+
 t_refuse_extent_write() {
     echo "==> refuse-ext4-extent-write"
     # ext4 with extents only (no 64bit / csum).  Pre-create a file
@@ -486,6 +514,7 @@ t_extent_large_read
 t_csum_verify_ok
 t_csum_verify_fail
 t_bg_csum_verify
+t_xattr_read
 t_refuse_extent_write
 t_refuse_64bit
 
