@@ -726,6 +726,20 @@ uint32_t ext2_inode_write(ext2_node_t *node, off_t offset, uint32_t size, const 
     ext2_fs_t *fs = node->fs;
     ext2_inode_t *inode = &node->inode;
 
+    /* Extent-flagged inodes use a completely different on-disk
+     * layout for i_block[] (inline ext4_extent_header + extents,
+     * not the legacy 12-direct/1-/2-/3-indirect pointer array).
+     * Our write/alloc path walks the legacy array unconditionally,
+     * which would corrupt the extent header.  Refuse the write
+     * until a real ext4_extent_alloc / ext4_extent_split pair
+     * lands.  Strictly better than the previous silent corruption.
+     *
+     * NB: the extent READ path (ext2_get_block_num routing) is
+     * fine — only the alloc side is missing.  */
+    if (inode->i_flags & EXT4_EXTENTS_FL) {
+        return (uint32_t)-EROFS;
+    }
+
     mutex_lock(&node->lock);
 
     // Lazy allocate
@@ -1102,6 +1116,13 @@ size_t ext2_file_write(fs_node_t *node, off_t offset, size_t size, const uint8_t
     ext2_node_t *ctx = (ext2_node_t *)(uintptr_t)node->impl;
     ext2_fs_t *fs = ctx->fs;
     if (EXT2_RO_REFUSE(fs)) return (size_t)-EROFS;
+    /* Extent-flagged files: refuse the write up-front because the
+     * legacy alloc path inside ext2_inode_write would corrupt the
+     * inline extent header.  We do the same check inside
+     * ext2_inode_write (defense in depth), but checking here lets
+     * us avoid the misleading "written > 0" branch below treating
+     * the (uint32_t)-EROFS sentinel as a successful write count.  */
+    if (ctx->inode.i_flags & EXT4_EXTENTS_FL) return (size_t)-EROFS;
 
     uint32_t written = ext2_inode_write(ctx, offset, size, buffer);
     

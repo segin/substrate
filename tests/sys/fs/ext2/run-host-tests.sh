@@ -217,6 +217,32 @@ check='echo TOUCHING; touch /mnt/test/x 2>&1; echo TOUCH_DONE_RC=\$?'"
     assert_log "$log" "TOUCH_DONE_RC=[1-9]" "write on ro mount refused"
 }
 
+t_refuse_extent_write() {
+    echo "==> refuse-ext4-extent-write"
+    # ext4 with extents only (no 64bit / csum).  Pre-create a file
+    # with EXT4_EXTENTS_FL; substrate should READ it but REFUSE
+    # writes (EROFS) until the extent alloc path lands.  Without
+    # the guard, writes would corrupt the extent header.
+    local img; img=$(mkimg t-extwr ext4 -O '^64bit,^metadata_csum')
+    {
+        echo "write /dev/null /target"
+        echo "close"
+    } | debugfs -w "$img" >/dev/null 2>&1 || true
+    local conf="device=/dev/storage/sata1
+mount=/mnt/test
+fs=ext2
+check='cat /mnt/test/target >/dev/null && echo READ_OK; echo NEWCONTENT > /mnt/test/target; ls -l /mnt/test/target'"
+    local rfs; rfs=$(prep_rootfs t-extwr "$conf")
+    local log="$WORK/t-extwr.log"
+    boot_with "$rfs" "$img" "$log" 30
+    assert_log "$log" "FSTEST: mount OK" "extent-file mount succeeds"
+    assert_log "$log" "READ_OK" "extent-file read works"
+    # If write was refused, the ls line shows " root 0 " for the
+    # file size column.  If the write had taken effect (corrupting
+    # the extent header), the size would be 11 ("NEWCONTENT\n").
+    assert_log "$log" "root +0 +.* /mnt/test/target" "extent-file write left size 0"
+}
+
 t_refuse_64bit() {
     echo "==> refuse-ext4-64bit"
     local img; img=$(mkimg t-64bit ext4 -O 64bit)
@@ -252,6 +278,7 @@ t_mount_ext4_extents
 t_htree_listing
 t_setattr_persist
 t_ro_unsupported_rocompat
+t_refuse_extent_write
 t_refuse_64bit
 
 # Restore the production rootfs.img so the user's next interactive
