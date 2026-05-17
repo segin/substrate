@@ -21,6 +21,29 @@ typedef enum {
     SYS_PROC_STATE_DYING = 6
 } sys_proc_state_t;
 
+/*
+ * sys_procinfo_t.tty encoding.
+ *
+ * The kernel reports a controlling-tty identifier as a 16-bit value
+ * packing (major << 8) | minor:
+ *
+ *   major 0 (SYS_TTY_MAJ_VT)  → /dev/tty<minor>     (minor 1..63)
+ *   major 1 (SYS_TTY_MAJ_PTS) → /dev/pts/<minor>    (minor 0..N)
+ *
+ * SYS_TTY_NONE (-1) means the process has no controlling tty.
+ *
+ * Tools rendering the column should use SYS_TTY_MAJ() / SYS_TTY_MIN()
+ * to decompose.  The encoding is backwards-compatible with the
+ * old-style "small positive number = tty<N>" layout because VT
+ * minors fit in the low byte and the high byte is zero.
+ */
+#define SYS_TTY_NONE     ((int16_t)-1)
+#define SYS_TTY_MAJ_VT   0
+#define SYS_TTY_MAJ_PTS  1
+#define SYS_TTY_MAJ(t)   (((t) >> 8) & 0xff)
+#define SYS_TTY_MIN(t)   ((t) & 0xff)
+#define SYS_TTY_MAKE(maj, min) ((int16_t)(((maj) << 8) | ((min) & 0xff)))
+
 // Process Info Structure
 // Used by sys_proc_info syscall
 typedef struct sys_procinfo {
