@@ -618,6 +618,15 @@ int afinet_connect(int fd, const void *addr, socklen_t len) {
             uint32_t ra; memcpy(&ra, s->peer_addr, 4);
             int rc = nonblock ? tcp_connect_nb(s->tcp, ra, s->peer_port)
                               : tcp_connect   (s->tcp, ra, s->peer_port);
+            /* -EINPROGRESS is the success-but-async return for the
+             * non-blocking path.  Record the peer + the connected
+             * state BEFORE returning so a follow-up sendto() sees
+             * s->connected and uses the stored peer_addr/port,
+             * rather than failing with EDESTADDRREQ. */
+            if (rc == -EINPROGRESS) {
+                s->connected = 1;
+                return -EINPROGRESS;
+            }
             if (rc < 0) return rc;
         }
     } else {
