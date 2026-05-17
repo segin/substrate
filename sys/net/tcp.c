@@ -470,19 +470,27 @@ ssize_t tcp_send(tcp_pcb_t *p, const void *buf, size_t len) {
     return (ssize_t)sent;
 }
 
+/* Non-blocking variant — single drain pass, returns -EAGAIN if the
+ * ring is empty and the connection's still open.  */
+ssize_t tcp_recv_nb(tcp_pcb_t *p, void *buf, size_t len) {
+    if (p->rx_count > 0) {
+        size_t n = p->rx_count < len ? p->rx_count : len;
+        uint8_t *b = (uint8_t *)buf;
+        for (size_t i = 0; i < n; i++) {
+            b[i] = p->rxbuf[p->rx_tail];
+            p->rx_tail = (p->rx_tail + 1) % TCP_RING_LEN;
+        }
+        p->rx_count -= n;
+        return (ssize_t)n;
+    }
+    if (p->state == TCP_CLOSE_WAIT || p->state == TCP_CLOSED) return 0;
+    return -EAGAIN;
+}
+
 ssize_t tcp_recv(tcp_pcb_t *p, void *buf, size_t len) {
     for (;;) {
-        if (p->rx_count > 0) {
-            size_t n = p->rx_count < len ? p->rx_count : len;
-            uint8_t *b = (uint8_t *)buf;
-            for (size_t i = 0; i < n; i++) {
-                b[i] = p->rxbuf[p->rx_tail];
-                p->rx_tail = (p->rx_tail + 1) % TCP_RING_LEN;
-            }
-            p->rx_count -= n;
-            return (ssize_t)n;
-        }
-        if (p->state == TCP_CLOSE_WAIT || p->state == TCP_CLOSED) return 0;
+        ssize_t r = tcp_recv_nb(p, buf, len);
+        if (r != -EAGAIN) return r;
         current_thread->flags |= THREAD_F_INTERRUPTIBLE;
         sched_sleep(p->recv_chan);
         current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;

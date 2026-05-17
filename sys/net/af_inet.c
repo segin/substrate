@@ -60,6 +60,7 @@ extern int        tcp_poll(tcp_pcb_t *p, short events, void **wait_chan);
 extern tcp_pcb_t *tcp_accept(tcp_pcb_t *listen_p);
 extern ssize_t    tcp_send(tcp_pcb_t *p, const void *buf, size_t len);
 extern ssize_t    tcp_recv(tcp_pcb_t *p, void *buf, size_t len);
+extern ssize_t    tcp_recv_nb(tcp_pcb_t *p, void *buf, size_t len);
 extern int        tcp_close(tcp_pcb_t *p);
 
 /* Match userland struct sockaddr_in / sockaddr_in6 from
@@ -720,6 +721,21 @@ ssize_t afinet_recvfrom(int fd, void *buf, size_t len, int flags,
     afi_sock_t *s = afi_from_fd(fd);
     if (!s) return -ENOTSOCK;
     if (!buf) return -EINVAL;
+
+    /* TCP path — data lives in the PCB's rxbuf, NOT the per-socket
+     * UDP/RAW ring below.  Without this branch every TCP recv hung
+     * forever waiting for s->count to become non-zero, which it
+     * never did because the TCP input path only touches the PCB's
+     * own ring.  Respect both per-call MSG_DONTWAIT and the fd's
+     * FNONBLOCK flag.  */
+    if (s->type == SOCK_STREAM && s->tcp) {
+        file_t *f = (fd >= 0 && fd < MAX_FD)
+                        ? current_process->fds[fd] : NULL;
+        int nb = (flags & 0x40 /*MSG_DONTWAIT*/) ||
+                 (f && (f->f_flag & FNONBLOCK));
+        return nb ? tcp_recv_nb(s->tcp, buf, len)
+                  : tcp_recv   (s->tcp, buf, len);
+    }
 
     for (;;) {
         if (s->count > 0) {
