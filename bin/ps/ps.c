@@ -23,7 +23,12 @@ static void format_i32(char *buf, size_t bufsz, int32_t value) {
 }
 
 static void format_time(uint32_t ticks, char *buf, size_t bufsz) {
-    uint32_t seconds = ticks / 100U;
+    /* utime/stime live in kernel-HZ ticks.  Query the libc-reported
+     * clock-tick rate rather than hardcoding 100 — substrate's HZ is
+     * 128, and the previous hardcoded 100 over-reported by ~28%. */
+    long hz = sysconf(_SC_CLK_TCK);
+    if (hz <= 0) hz = 100;
+    uint32_t seconds = ticks / (uint32_t)hz;
     uint32_t minutes = seconds / 60U;
     uint32_t hours = minutes / 60U;
 
@@ -59,10 +64,20 @@ static void render_bitness(uint8_t bitness, char *buf, size_t bufsz) {
 }
 
 static void render_tty(int16_t tty, char *buf, size_t bufsz) {
-    if (tty < 0) {
+    if (tty == SYS_TTY_NONE || tty < 0) {
         snprintf(buf, bufsz, "?");
-    } else {
-        snprintf(buf, bufsz, "tty%d", (int)tty);
+        return;
+    }
+    int maj = SYS_TTY_MAJ(tty);
+    int min = SYS_TTY_MIN(tty);
+    switch (maj) {
+    case SYS_TTY_MAJ_PTS:
+        snprintf(buf, bufsz, "pts/%d", min);
+        break;
+    case SYS_TTY_MAJ_VT:
+    default:
+        snprintf(buf, bufsz, "tty%d", min);
+        break;
     }
 }
 
@@ -260,6 +275,14 @@ int main(int argc, char **argv) {
 
     for (i = 0; i < count; i++) {
         sys_procinfo_t info;
+
+        /* Skip the swapper (pid 0) and stale reaped slots (pid -1).
+         * sys_proc_info uses pid=0 as a "current process" sentinel,
+         * so passing 0 here would return ps's own info — manifesting
+         * as a duplicate row.  Stale slots have pid<=0 too. */
+        if (pids[i] <= 0) {
+            continue;
+        }
 
         if (sys_proc_info(pids[i], &info) != 0) {
             continue;
