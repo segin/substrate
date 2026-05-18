@@ -211,17 +211,36 @@ int kern_sigsuspend(const uint32_t *mask) {
     if (mask) {
         current_thread->sig_mask = *mask;
     }
-    
+
     /* Mark interruptible so psignal() can wake us */
     current_thread->flags |= THREAD_F_INTERRUPTIBLE;
-    
+
     /* Sleep until a signal arrives that is not masked */
     while (!(current_thread->sig_pending & ~current_thread->sig_mask)) {
         sched_sleep(&current_thread->sig_pending);
     }
-    
+
     current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
-    current_thread->sig_mask = old_mask;
+
+    /*
+     * Do NOT restore sig_mask here.  signal_handle_pending runs after
+     * we return to the syscall return path; it gates on
+     * `sig_pending & ~sig_mask`.  If we restored old_mask now, that
+     * mask would re-block the very signal that woke us, so
+     * signal_handle_pending would observe no deliverable signal and
+     * return to userspace without running the handler.  The pending
+     * bit would stay set, the next sigsuspend would see it
+     * immediately, and zsh-style "block + sigsuspend" loops would
+     * spin in tight back-to-back syscalls (the symptom: every wait4
+     * deadlock from a shell that uses sigsuspend to await SIGCHLD).
+     *
+     * Instead: keep sig_mask at the temporary suspend mask, stash
+     * the pre-suspend mask in sig_mask_suspend, and let
+     * signal_handle_pending pass *that* into the signal frame so
+     * sigreturn restores the right thing.
+     */
+    current_thread->sig_mask_suspend = old_mask;
+    current_thread->sig_mask_suspend_active = 1;
     return -1; /* Always returns -1 (EINTR) per POSIX */
 }
 
@@ -867,10 +886,33 @@ void signal_handle_pending(registers_t *regs) {
     // Capture handler config
     sig_t handler = act->sa_handler;
     uint32_t flags = act->sa_flags;
-    uint32_t old_mask = current_thread->sig_mask;
+
+    /*
+     * Two mask values to track separately:
+     *
+     *   pre_handler_mask — what sig_mask is *right now* (which is
+     *     the temporary suspend-mask if we're delivering during a
+     *     sigsuspend, otherwise the regular thread mask).  This is
+     *     the base for the during-handler mask per POSIX.
+     *
+     *   restore_mask — what sigreturn must put back into sig_mask
+     *     when the handler returns.  Normally same as pre_handler_mask,
+     *     but if sig_mask_suspend_active is set we must use the
+     *     pre-sigsuspend mask saved there instead — otherwise the
+     *     temporary suspend mask leaks past sigreturn.
+     */
+    uint32_t pre_handler_mask = current_thread->sig_mask;
+    uint32_t restore_mask;
+    if (current_thread->sig_mask_suspend_active) {
+        restore_mask = current_thread->sig_mask_suspend;
+        current_thread->sig_mask_suspend_active = 0;
+        current_thread->sig_mask_suspend = 0;
+    } else {
+        restore_mask = pre_handler_mask;
+    }
 
     // SA_NODEFER: Block the signal itself unless requested not to
-    uint32_t new_mask = old_mask | act->sa_mask;
+    uint32_t new_mask = pre_handler_mask | act->sa_mask;
     if (!(flags & SA_NODEFER)) {
         new_mask |= sigmask(sig);
     }
@@ -895,14 +937,16 @@ void signal_handle_pending(registers_t *regs) {
         }
     }
 
-    // Deliver signal via personality-specific sendsig
+    // Deliver signal via personality-specific sendsig.  Pass
+    // restore_mask (not pre_handler_mask) so sigreturn restores the
+    // correct pre-signal/pre-sigsuspend mask.
     struct personality *p = perso_lookup(current_process->perso_id);
     if (p && p->sendsig) {
-        p->sendsig((void*)handler, sig, old_mask, flags, regs);
+        p->sendsig((void*)handler, sig, restore_mask, flags, regs);
     } else {
         // Fallback to native sendsig if no personality hook (should not happen for valid perso)
         extern void sendsig(sig_t handler, int sig, uint32_t mask, uint32_t flags, registers_t *regs);
-        sendsig(handler, sig, old_mask, flags, regs);
+        sendsig(handler, sig, restore_mask, flags, regs);
     }
     signal_clear_trap_context(current_thread, sig);
 

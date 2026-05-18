@@ -236,6 +236,14 @@ typedef struct thread {
     // Signals
     uint32_t      sig_pending;
     uint32_t      sig_mask;
+    /* sigsuspend stashes the pre-suspend mask here.  When set, the
+     * next signal_handle_pending pass uses this value as the "mask
+     * to restore" in the signal frame (so sigreturn restores the
+     * original mask) instead of the temporary suspend-mask that's
+     * live in sig_mask while a handler runs.  sig_mask_suspend_active
+     * gates the field — sig_mask_suspend may legitimately be 0.       */
+    uint32_t      sig_mask_suspend;
+    uint8_t       sig_mask_suspend_active;
     stack_t       sig_alt_stack;
     uint8_t       sig_on_stack;   // Nonzero if executing on alternate signal stack
     
