@@ -1,0 +1,22 @@
+Subject: configure: recognise substrate* in shared-libs host_os case
+
+ncurses 6.4's configure has a host_os dispatch at line 6389 that
+gates whether shared libraries are buildable.  Without a branch
+matching substrate, CC_SHARED_OPTS stays empty and the build
+bails with "Shared libraries are not supported in this version."
+
+Treat substrate* the same as linux*/gnu*/k*bsd*-gnu — same
+ELF/ld.so model, same -shared / -Wl,-soname output convention.
+
+---
+--- a/configure
++++ b/configure
+@@ -6386,7 +6386,7 @@
+ 		fi
+ 		cf_cv_rm_so_locs=yes
+ 		;;
+-	(linux*|gnu*|k*bsd*-gnu)
++	(linux*|gnu*|k*bsd*-gnu|substrate*)
+ 		if test "$DFT_LWR_MODEL" = "shared" && test -n "$LD_RPATH_OPT" ; then
+ 			LOCAL_LDFLAGS="${LD_RPATH_OPT}\$(LOCAL_LIBDIR)"
+ 			LOCAL_LDFLAGS2="$LOCAL_LDFLAGS"
