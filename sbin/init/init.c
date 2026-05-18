@@ -31,7 +31,6 @@
 #include <sys/time.h>
 #include <sys/wait.h>
 #include <termios.h>
-#include <time.h>
 #include <unistd.h>
 #include <utmp.h>
 
@@ -323,44 +322,18 @@ main(int argc, char **argv)
 
     /*
      * Run BSD-style /etc/rc once at boot to bring up services.
-     * Synchronous: every rc.d hook must finish before we hand the
-     * console over to getty.  Redirect rc.d's stdout/stderr to
-     * /var/log/rc.log so the per-script progress messages
-     * (dhclient: DHCPOFFER..., /etc/rc.d/30-atd start, ...) don't
-     * bleed into the login session on /dev/tty1.  Failures still
-     * propagate via the exit status, and /var/log/rc.log is the
-     * one place to look post-boot.
-     *
-     * waitpid() is wrapped in a restart loop to absorb spurious
-     * EINTR — if SIGCHLD arrives before rc.d's main process exits
-     * (e.g. a daemonised grandchild re-parents onto init), the
-     * default-disposition SIGCHLD would otherwise wake waitpid
-     * with -1/EINTR and we'd race past rc.d into getty spawn.
+     * Block here until rc.d is fully done — getty spawn must not
+     * race the rc.d run.  waitpid() is wrapped in an EINTR-restart
+     * loop because SIGCHLD fires for every short-lived helper that
+     * /etc/rc forks (cat, kill -0, $(...) substitutions, ...), and
+     * substrate's kernel surfaces those as -EINTR on a blocking
+     * wait even with default SIGCHLD disposition.  Without the
+     * restart, the first sub-helper to exit kicks init out of
+     * waitpid early and getty spawns alongside an unfinished rc.d.
      */
     {
-        /* Make sure /var/log exists.  proc_setup_directories() runs
-         * a few lines above but it's cheap to retry — mkdir is
-         * idempotent. */
-        (void)mkdir("/var", 0755);
-        (void)mkdir("/var/log", 0755);
-
         pid_t rc_pid = fork();
         if (rc_pid == 0) {
-            /* child — point fds 1+2 at /var/log/rc.log */
-            int lfd = open("/var/log/rc.log",
-                           O_WRONLY | O_CREAT | O_APPEND, 0644);
-            if (lfd >= 0) {
-                /* Header so each boot is delimited in the log. */
-                time_t now = time(NULL);
-                char hdr[64];
-                int n = snprintf(hdr, sizeof(hdr),
-                                 "\n==== boot @ %ld ====\n", (long)now);
-                (void)write(lfd, hdr, (size_t)(n > 0 ? n : 0));
-
-                dup2(lfd, 1);
-                dup2(lfd, 2);
-                if (lfd > 2) close(lfd);
-            }
             execl("/bin/sh", "sh", "/etc/rc", "start", (char *)NULL);
             _exit(127);
         } else if (rc_pid > 0) {
@@ -369,7 +342,6 @@ main(int argc, char **argv)
                 pid_t w = waitpid(rc_pid, &status, 0);
                 if (w == rc_pid) break;
                 if (w < 0 && errno == EINTR) continue;
-                /* Any other error: don't loop forever, just move on. */
                 break;
             }
         }
