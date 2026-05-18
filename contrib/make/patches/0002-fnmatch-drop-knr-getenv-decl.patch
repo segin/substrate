@@ -1,0 +1,26 @@
+Subject: lib/fnmatch.c: drop K&R-style getenv() redeclaration
+
+Substrate's <stdlib.h> declares getenv() with the ISO C signature
+(`char *getenv(const char *)`).  fnmatch.c's defensive
+`extern char *getenv ();` (no args, K&R style) conflicts with the
+ISO declaration under modern GCC's stricter prototype checks.
+
+Drop the unguarded extern — every libc substrate cares about has
+stdlib.h with the proper declaration, and gnulib only inserted this
+defensive block for pre-ANSI systems we don't target.
+
+---
+diff -urN a/lib/fnmatch.c b/lib/fnmatch.c
+--- a/lib/fnmatch.c
++++ b/lib/fnmatch.c
+@@ -121,9 +121,7 @@
+ /* Avoid depending on library functions or files
+    whose names are inconsistent.  */
+
+-# if !defined _LIBC && !defined getenv
+-extern char *getenv ();
+-# endif
++/* getenv() is declared by <stdlib.h>; the K&R-era fallback was removed. */
+
+ # ifndef errno
+ extern int errno;

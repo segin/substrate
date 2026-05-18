@@ -1,0 +1,38 @@
+Subject: lib/getloadavg.c: undef LOAD_AVE_TYPE on substrate
+
+Substrate's sys/param.h defines BSD, which causes gnulib's
+getloadavg to take the kernel-symbol-table fallback path:
+struct nlist[] table, nlist() against /vmunix, KERNEL_FILE
+file open.  Substrate has none of those.  Undefining
+LOAD_AVE_TYPE early forces the file's outer `#else` branch
+to take over, which on Linux/Android/substrate reads
+/proc/loadavg via the syscall fallback.
+
+---
+diff -urN a/lib/getloadavg.c b/lib/getloadavg.c
+--- a/lib/getloadavg.c
++++ b/lib/getloadavg.c
+@@ -85,6 +85,11 @@
+ 
+ # include <sys/types.h>
+ 
++# ifdef __substrate__
++/* Substrate has no a.out.h / nlist() — skip the kernel-symbol
++ * fallback entirely. */
++#  define LOAD_AVE_TYPE_UNAVAIL 1
++# endif
+ # if HAVE_SYS_PARAM_H
+ #  include <sys/param.h>
+ # endif
+@@ -253,6 +258,11 @@
+ #  define LOAD_AVE_TYPE double
+ # endif
+ 
++# if defined LOAD_AVE_TYPE_UNAVAIL
++#  undef LOAD_AVE_TYPE
++#  undef LDAV_CVT
++# endif
++
+ # ifdef LOAD_AVE_TYPE
+ 
+ #  ifndef __VMS

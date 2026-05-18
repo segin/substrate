@@ -1,0 +1,21 @@
+Subject: srclib/getprogname.c: add substrate branch
+
+Use __progname (weak symbol initialized by crt0) on substrate.
+Falls back to "?" if nothing has set it.
+
+---
+diff -urN a/srclib/getprogname.c b/srclib/getprogname.c
+--- a/srclib/getprogname.c
++++ b/srclib/getprogname.c
+@@ -288,6 +288,11 @@
+       close (fd);
+     }
+   return "?";
++# elif defined __substrate__
++  /* Substrate: crt0 stashes argv[0] into __progname (weak). */
++  extern const char *__progname __attribute__((weak));
++  if (__progname && *__progname) return __progname;
++  return "?";
+ # else
+ #  error "getprogname module not ported to this OS"
+ # endif

@@ -1,0 +1,20 @@
+Subject: loop_wchar.h: drop K&R mbrtowc fallback declaration
+
+The fallback `extern size_t mbrtowc ();` predates ISO prototypes
+and conflicts with substrate's <wchar.h> prototype under modern
+GCC, which now treats `()` as a strict no-args prototype rather
+than an unspecified-args declaration.  Substrate's libc declares
+mbrtowc properly, so the fallback is unnecessary.
+
+---
+diff -urN a/lib/loop_wchar.h b/lib/loop_wchar.h
+--- a/lib/loop_wchar.h
++++ b/lib/loop_wchar.h
+@@ -36,7 +36,6 @@
+ # include <wchar.h>
+ # define BUF_SIZE 64  /* assume MB_LEN_MAX <= 64 */
+   /* Some systems, like BeOS, have multibyte encodings but lack mbstate_t.  */
+-  extern size_t mbrtowc ();
+ # ifdef mbstate_t
+ #  define mbrtowc(pwc, s, n, ps) (mbrtowc)(pwc, s, n, 0)
+ #  define mbsinit(ps) 1

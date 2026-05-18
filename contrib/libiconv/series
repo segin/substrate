@@ -1,0 +1,3 @@
+0001-config-sub-substrate.patch
+0002-loop-wchar-drop-bogus-mbrtowc-decl.patch
+0003-gnulib-getprogname-substrate-branch.patch

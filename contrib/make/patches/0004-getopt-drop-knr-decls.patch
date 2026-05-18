@@ -1,0 +1,55 @@
+Subject: src/getopt.{c,h}: drop K&R-style getenv/getopt redeclarations
+
+Same family of issue as 0002-fnmatch-drop-knr-getenv-decl.patch.
+src/getopt.h had `extern int getopt ();` and src/getopt.c had
+`extern char *getenv ();` — both K&R prototypes which under
+modern GCC are treated as strict no-args declarations and clash
+with substrate's <stdlib.h> / the implementation's ISO C
+prototype.  Also include <stdlib.h> unconditionally in src/getopt.c
+so getenv has a prototype on libcs that don't define
+__GNU_LIBRARY__ (substrate doesn't).
+
+---
+diff -urN a/src/getopt.h b/src/getopt.h
+--- a/src/getopt.h
++++ b/src/getopt.h
+@@ -102,9 +102,9 @@
+    differences in the consts, in stdlib.h.  To avoid compilation
+    errors, only prototype getopt for the GNU C library.  */
+ extern int getopt (int argc, char *const *argv, const char *shortopts);
+-#else /* not __GNU_LIBRARY__ */
+-extern int getopt ();
+-#endif /* __GNU_LIBRARY__ */
++#else /* not __GNU_LIBRARY__ */
++/* getopt() declared via stdlib.h on substrate; K&R fallback removed */
++#endif /* __GNU_LIBRARY__ */
+ extern int getopt_long (int argc, char *const *argv, const char *shortopts,
+ 		        const struct option *longopts, int *longind);
+ extern int getopt_long_only (int argc, char *const *argv,
+@@ -116,9 +116,9 @@
+                              char **__getopt_nextchar);
+ 
+ #else /* not __STDC__ */
+-extern int getopt ();
+-extern int getopt_long ();
+-extern int getopt_long_only ();
++/* getopt() declared via stdlib.h on substrate; K&R fallback removed */
++/* getopt_long() in glibc-compat headers; fallback removed */
++/* getopt_long_only(); fallback removed */
+ 
+ extern int _getopt_internal ();
+ #endif /* __STDC__ */
+diff -urN a/src/getopt.c b/src/getopt.c
+--- a/src/getopt.c
++++ b/src/getopt.c
+@@ -202,8 +202,9 @@
+ /* Avoid depending on library functions or files
+    whose names are inconsistent.  */
+ 
++#include <stdlib.h>
+ #ifndef getenv
+-extern char *getenv ();
++/* getenv() via stdlib.h; fallback removed */
+ #endif
+ 
+ static char *

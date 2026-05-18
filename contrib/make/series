@@ -1,0 +1,5 @@
+# Substrate patch series for GNU make.
+0001-config-sub-substrate.patch
+0002-fnmatch-drop-knr-getenv-decl.patch
+0003-gnulib-getloadavg-substrate-branch.patch
+0004-getopt-drop-knr-decls.patch
