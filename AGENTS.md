@@ -120,6 +120,54 @@ For the full detailed changelog, see `docs/CHANGELOG.md`.
   ./build-rootfs.sh --toolchain     # overlay stage-2 toolchain
   ./build-rootfs.sh --image         # bake 4 GiB rootfs.img
   ```
+  Or the all-in-one orchestrator that drives all of the above
+  plus every contrib port in dependency order:
+  ```
+  sudo ./build.sh                   # repo-root, from clean checkout
+                                    # env knobs: SKIP_TOOLCHAIN,
+                                    # SKIP_CONTRIB, SKIP_IMAGE,
+                                    # ONLY="pkg1 pkg2 ..."
+  ```
+  After stage 1 and after each contrib build, `build.sh` mirrors
+  the produced libs + headers into the cross-toolchain sysroot at
+  `${STAGE1_PREFIX}/i386-unknown-substrate/{lib,include}` and the
+  matching gcc include-fixed snapshot, so the next layer's
+  configure probes find them.
+
+### Userland Ports (contrib/)
+
+Every third-party userland lives under `contrib/<pkg>/` as a
+patch series against an upstream tarball — never vendored
+source.  Standard layout per port: `fetch.sh` (download +
+SHA-verify + extract + apply), `build.sh` (configure + make +
+stage into `dist-<pkg>/usr/`), `patches/` series, `series`
+manifest, `README.SUBSTRATE.md`.  Current set:
+
+- **GNU make 4.4.1** (`contrib/make/`)
+- **GNU sed 4.9** (`contrib/sed/`)
+- **OpenBSD expr** (`contrib/expr/`) — single-file BSD port
+  alongside the OpenBSD tr port at `bin/tr/`.
+- **bash-equivalent shell: zsh 5.9** (`contrib/zsh/`) — system
+  `/bin/sh` is a symlink to `/usr/bin/zsh`; argv[0] detection
+  puts zsh in POSIX sh emulation when invoked that way.  The
+  in-tree `bin/sh/` is retained but disabled at the `bin/Makefile`
+  SUBDIRS level — zsh covers everything autoconf needs.
+- **ncurses 6.4** (`contrib/ncurses/`) — full terminfo backend.
+  Replaces the link-time stub `lib/curses/` (kept in-tree but
+  disabled at `lib/Makefile` SUBDIRS).  Brings tic / tput /
+  clear / reset / tset / infocmp + the 2851-entry upstream
+  terminfo database under `/usr/share/terminfo/`.  Substrate's
+  hand-rolled `bin/clear` and `bin/reset` are retained as
+  fallbacks for the no-ncurses embedded profile.
+- **bzip2 1.0.8** (`contrib/bzip2/`)
+- **gzip** (`contrib/gzip/`)
+- **libarchive 3.7.7** + bsdtar (`contrib/libarchive/`)
+- **OpenSSL 3.x** (`contrib/openssl/`)
+- **curl** (`contrib/curl/`)
+- **libiconv 1.17** (`contrib/libiconv/`)
+- **mpg123** (`contrib/mpg123/`)
+- **tzdata 2024a** (`contrib/tzdata/`)
+- **inetutils** (`contrib/inetutils/`) — telnetd, ping, etc.
 
 ### Dynamic Linking
 - `/sbin/ld.so` (Substrate native dynamic linker, `sbin/ld.so/`):

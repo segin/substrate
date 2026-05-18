@@ -8,7 +8,7 @@ include ../Makefile.inc
 #
 # kvm and proc depend on libsys + libc; placed after both are
 # guaranteed to be linkable.
-SUBDIRS = m sys c pthread dl edit usb yacc at dbm kvm proc curses
+SUBDIRS = m sys c pthread dl edit usb yacc at dbm kvm proc
 
 .PHONY: all clean install $(SUBDIRS)
 

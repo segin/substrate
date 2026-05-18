@@ -89,8 +89,17 @@ dist/        target root filesystem staging
 host_dist/   host install staging for native validation tools
 linux/       Linux-host compatibility tools (binfmt_misc runner, host bridges)
 usr.man/     manual page source tree
-contrib/     third-party components (ext2-boot bootloader, ...)
+contrib/     third-party components, each as a patch series + fetch.sh
+             + build.sh against an upstream tarball.  Current set:
+             binutils, gcc, libstdc++ (via gcc), ncurses, libiconv,
+             zsh, gnu make, gnu sed, openbsd expr, openbsd tr,
+             bzip2, gzip, libarchive, openssl, curl, inetutils,
+             tzdata, mpg123, ext2-boot.  Each lands at
+             ${SUBSTRATE_TOP}/dist-<pkg>/ which build-rootfs.sh
+             overlays onto the image.
 tools/       build and install helper scripts
+build.sh     repo-root end-to-end build (toolchain + native +
+             contrib + image).  See build.sh header for env knobs.
 ```
 
 Detailed staging rules for `dist/` are defined in `docs/specs/rootfs.md`.
@@ -136,6 +145,30 @@ Userland is split by role (essential, admin, extended) and supported by a suite 
   `readelf`, `ar`, etc.) still live under `usr.bin/` on top of
   `usr.lib/elfobj/` — see `usr.lib/elfobj/README.md` and
   `usr.lib/elfobj/ABI_POLICY.md`.
+- **System Shell:** `/bin/sh` is a symlink to `/usr/bin/zsh` from
+  `contrib/zsh/` (zsh 5.9).  zsh detects argv[0]'s basename and
+  enters POSIX `sh` emulation when invoked as `sh`.  The previous
+  hand-rolled `bin/sh/` is retained in-tree but disabled at the
+  `bin/Makefile` SUBDIRS level — zsh covers everything autoconf
+  scripts probe for (functions, `<<-` heredocs, full parameter
+  expansion, signal handling, fd redirection).
+- **Terminal Handling:** Provided by `contrib/ncurses/` (ncurses
+  6.4) — full terminfo backend with the upstream 2851-entry
+  database under `/usr/share/terminfo/`.  Replaces the earlier
+  `lib/curses/` link-time stub (which is now disabled at the
+  `lib/Makefile` SUBDIRS level).  Consumers: zsh, vi, less, top,
+  every other terminfo-aware tool.  The stub's source stays
+  in-tree for size-constrained embedded profiles.
+- **Build Orchestration:** `build.sh` at the repo root drives a
+  clean-checkout end-to-end build in four stages: (0) cross
+  toolchain via `contrib/build-toolchain.sh`, (1) native
+  substrate (`sys/`, `lib/`, `usr.lib/`, `sbin/ld.so/`, `bin/`,
+  `sbin/`, `usr.bin/`), (2) contrib ports in dependency order,
+  (3) `build-rootfs.sh` to assemble `dist/` and bake
+  `rootfs.img`.  After stage 1 and after each contrib build it
+  mirrors libs + headers into the cross-toolchain sysroot at
+  `${STAGE1_PREFIX}/i386-unknown-substrate/{lib,include}` so the
+  next layer's `configure` probes find them.
 
 ## 7. ABI and Interface Boundaries
 

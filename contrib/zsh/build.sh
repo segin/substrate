@@ -51,7 +51,7 @@ echo "==> configure"
     --disable-gdbm \
     --disable-multibyte \
     --with-tcsetpgrp \
-    CFLAGS="-O2 -g -march=i486 -mtune=i486"
+    CFLAGS="-O2 -g -march=i486 -mtune=i486 -Wno-incompatible-pointer-types"
 
 echo "==> make -j${JOBS}"
 make -j"${JOBS}"
