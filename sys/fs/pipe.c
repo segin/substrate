@@ -1,6 +1,7 @@
 #include <vfs/vfs.h>
 #include <sys/proc.h>
 #include <sys/file.h>
+#include <sys/poll.h>
 #include <kern/sched.h>
 #include <vm/vm_kmem.h>
 #include <string.h>
@@ -168,6 +169,47 @@ static size_t pipe_write(fs_node_t *node, off_t offset, size_t size, const uint8
     return written;
 }
 
+/* poll(2) callback.  Reports readability/writability of this
+ * endpoint and (if no events are ready) registers the caller on
+ * the pipe's "read-side" or "write-side" wait channel so a future
+ * pipe_read/pipe_write/pipe_close can wake it.
+ *
+ * sys_poll only tracks one wait_chan per call, so a process
+ * polling both ends of a pair (the classic bsdtar-stdin/gzip-
+ * stdout pattern) can only sleep on whichever channel poll_fs
+ * last wrote.  pipe_read/pipe_write/pipe_close already wake BOTH
+ * wait_read and wait_write when state changes, so picking either
+ * is correct.  We bias toward wait_write when the caller is the
+ * writer (no POLLOUT means buffer is full → waiter wants to know
+ * when the reader drains) and wait_read otherwise.  */
+static int pipe_poll(fs_node_t *node, void *waiter) {
+    pipe_endpoint_t *ep = (pipe_endpoint_t *)(uintptr_t)node->impl;
+    pipe_t *p = ep ? ep->pipe : NULL;
+    if (!p) return POLLERR;
+
+    mutex_lock(&p->lock);
+    int events = 0;
+    int eof = (p->writers_open == 0 && p->count == 0);
+    int no_readers = (p->readers_open == 0);
+
+    if (ep->is_writer) {
+        /* Writer side: POLLOUT when there's room (or all readers
+         * gone — write would EPIPE, but poll surfaces it as POLLERR).  */
+        if (no_readers) events |= POLLERR;
+        else if (p->count < PIPE_SIZE) events |= POLLOUT | POLLWRNORM;
+    } else {
+        /* Reader side: POLLIN when data ready, POLLHUP when EOF.  */
+        if (p->count > 0) events |= POLLIN | POLLRDNORM;
+        if (eof) events |= POLLHUP;
+    }
+
+    if (events == 0 && waiter) {
+        *(void **)waiter = ep->is_writer ? p->wait_write : p->wait_read;
+    }
+    mutex_unlock(&p->lock);
+    return events;
+}
+
 static void pipe_close(fs_node_t *node) {
     pipe_endpoint_t *ep = (pipe_endpoint_t *)(uintptr_t)node->impl;
     if (!ep || !ep->pipe) {
@@ -285,6 +327,7 @@ void pipe_create(fs_node_t **read_node, fs_node_t **write_node) {
     rn->name[sizeof(rn->name) - 1] = '\0';
     rn->flags = FS_PIPE;
     rn->read = &pipe_read;
+    rn->poll = &pipe_poll;
     rn->close = &pipe_close;
     rn->impl = (uintptr_t)read_ep;
 
@@ -293,6 +336,7 @@ void pipe_create(fs_node_t **read_node, fs_node_t **write_node) {
     wn->name[sizeof(wn->name) - 1] = '\0';
     wn->flags = FS_PIPE;
     wn->write = &pipe_write;
+    wn->poll = &pipe_poll;
     wn->close = &pipe_close;
     wn->impl = (uintptr_t)write_ep;
 
@@ -406,6 +450,7 @@ static fs_node_t *fifo_endpoint_new(fifo_reg_t *fifo, int is_writer) {
     n->flags = FS_PIPE;
     n->read  = &pipe_read;
     n->write = &pipe_write;
+    n->poll  = &pipe_poll;
     n->close = &pipe_close;
     n->impl  = (uintptr_t)ep;
     return n;
