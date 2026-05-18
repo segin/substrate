@@ -29,11 +29,14 @@ else
   PTHREAD_INC =
 endif
 
-TESTS = torture_ipc
+TESTS = torture_ipc torture_pipe
 
 all: $(TESTS)
 
 torture_ipc: torture_ipc.c
+	$(CC) $(CFLAGS) $(PTHREAD_INC) $< $(PTHREAD) -o $@
+
+torture_pipe: torture_pipe.c
 	$(CC) $(CFLAGS) $(PTHREAD_INC) $< $(PTHREAD) -o $@
 
 clean:
