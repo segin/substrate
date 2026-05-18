@@ -952,6 +952,29 @@ unsigned long vm_map_destroy_entries = 0;
 
 void vm_map_destroy(vm_map_t *map) {
     if (!map) return;
+
+    /*
+     * Single-destroyer guard.  The callers do
+     *
+     *     if (proc->vm_map) { vm_map_destroy(proc->vm_map); proc->vm_map = NULL; }
+     *
+     * but the if-then-NULL pair isn't atomic, and the same map is
+     * reachable from wait4 / proc_release_zombie_resources / exec
+     * cleanup paths.  Without this guard two of those callers can
+     * both pass the NULL check and concurrently walk the entry
+     * list; the loser then dereferences entries the winner has
+     * already returned to the slab (and which may have been
+     * recycled as user memory), producing the classic "lock xadd
+     * on a misaligned user pointer" page-fault-in-kernel signature
+     * out of the inlined vm_object_deallocate().  Atomically claim
+     * the header so only one caller proceeds.
+     */
+    vm_map_entry_t *header = __atomic_exchange_n(&map->header, NULL,
+                                                 __ATOMIC_ACQ_REL);
+    if (!header) {
+        return;
+    }
+
     __sync_fetch_and_add(&vm_map_destroy_count, 1);
 
     /*
@@ -967,22 +990,20 @@ void vm_map_destroy(vm_map_t *map) {
     }
 
     free_holes_tree(map->holes_root);
+    map->holes_root = NULL;
 
-    vm_map_entry_t *header = map->header;
-    if (header) {
-        vm_map_entry_t *cur = header->next;
-        while (cur != header) {
-            vm_map_entry_t *next = cur->next;
-            // Dereference the object if present
-            if (cur->object) {
-                vm_object_deallocate(cur->object);
-            }
-            free_entry(cur);
-            __sync_fetch_and_add(&vm_map_destroy_entries, 1);
-            cur = next;
+    vm_map_entry_t *cur = header->next;
+    while (cur != header) {
+        vm_map_entry_t *next = cur->next;
+        // Dereference the object if present
+        if (cur->object) {
+            vm_object_deallocate(cur->object);
         }
-        free_entry(header);
+        free_entry(cur);
+        __sync_fetch_and_add(&vm_map_destroy_entries, 1);
+        cur = next;
     }
+    free_entry(header);
 
     kfree(map, sizeof(vm_map_t));
 }
