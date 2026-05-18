@@ -548,8 +548,21 @@ static void fb_cb_putc(char c) {
     }
 
     bottom = vt->scroll_bottom;
+    /*
+     * pending_wrap handling — xenl ("newline ignored after wrap")
+     * semantics.  The flag is set after a printable char lands in
+     * the last column of a row.  Cursor stays "rest"-ing past the
+     * row end until either:
+     *   - a CR / explicit cursor move clears the flag (no wrap), or
+     *   - the next printable char arrives, at which point we
+     *     actually perform the newline-and-wrap and THEN print.
+     * Match xterm / linux console behaviour exactly so applications
+     * (zsh PROMPT_SP, full-screen editors, …) that depend on the
+     * terminfo `xenl` cap render correctly.
+     */
     if (c == '\n') {
         vt->col = 0;
+        vt->pending_wrap = 0;
         if (vt->row >= bottom) {
             fb_console_scroll_region_up_locked(vt, vt->scroll_top, bottom, 1);
         } else {
@@ -559,15 +572,18 @@ static void fb_cb_putc(char c) {
     }
     if (c == '\r') {
         vt->col = 0;
+        vt->pending_wrap = 0;
         return;
     }
     if (c == '\b') {
         if (vt->col > 0) {
             vt->col--;
         }
+        vt->pending_wrap = 0;
         return;
     }
     if (c == '\t') {
+        vt->pending_wrap = 0;
         vt->col = vt->col + 1;
         while (vt->col < vt_get_width() &&
                !(vt->tab_stops[vt->col / 32] & ((uint32_t)1U << (vt->col % 32)))) {
@@ -584,15 +600,27 @@ static void fb_cb_putc(char c) {
         return;
     }
 
+    /* Printable char.  Honour any pending xenl wrap from the
+     * previous put: move to the next row first, then print. */
+    if (vt->pending_wrap && vt->autowrap) {
+        vt->col = 0;
+        if (vt->row >= bottom) {
+            fb_console_scroll_region_up_locked(vt, vt->scroll_top, bottom, 1);
+        } else {
+            vt->row++;
+        }
+        vt->pending_wrap = 0;
+    }
+
     fb_console_store_cell_locked(vt, vt->col, vt->row, (unsigned char)c, vt->color, vt->attrs);
     if (++vt->col >= vt_get_width()) {
         if (vt->autowrap) {
-            vt->col = 0;
-            if (vt->row >= bottom) {
-                fb_console_scroll_region_up_locked(vt, vt->scroll_top, bottom, 1);
-            } else {
-                vt->row++;
-            }
+            /* xenl: rest at column == width, defer the actual
+             * row advance until the next printable char.  Clamp
+             * the recorded col to width-1 so any cursor query
+             * stays in-range. */
+            vt->col = vt_get_width() - 1;
+            vt->pending_wrap = 1;
         } else {
             vt->col = vt_get_width() - 1;
         }
@@ -630,6 +658,7 @@ static void fb_cb_clear_screen(void) {
     fb_console_erase_display_locked(vt, 2);
     vt->row = 0;
     vt->col = 0;
+    vt->pending_wrap = 0;
 }
 
 static void fb_cb_erase_display(int mode) {
@@ -662,6 +691,8 @@ static void fb_cb_move_cursor(int row, int col) {
     if (col >= vt_get_width()) col = vt_get_width() - 1;
     vt->row = row;
     vt->col = col;
+    /* Any explicit cursor reposition cancels the deferred xenl wrap. */
+    vt->pending_wrap = 0;
 }
 
 static void fb_cb_get_cursor(int *row, int *col) {
@@ -896,6 +927,7 @@ static void fb_cb_reset(void) {
     vt->cursor_visible = 1;
     vt->cursor_blink = 1;
     vt->autowrap = 1;
+    vt->pending_wrap = 0;
     vt->tab_width = 8;
     memset(vt->tab_stops, 0, sizeof(vt->tab_stops));
     for (int col = 8; col < vt_get_width(); col += 8) {

@@ -59,6 +59,20 @@ typedef struct vt_state {
     int cursor_key_app; // DECCKM: 0=normal (default), 1=application mode
     int origin_mode;    // DECOM: 0=absolute (default), 1=relative to scroll region
     int bracketed_paste;// DECSET 2004: 0=off (default), 1=on
+    /*
+     * Deferred-wrap flag for the `xenl` ("newline ignored after
+     * wrap") terminfo capability — required by every modern
+     * terminfo entry substrate ships (linux, xterm, ansi, ...).
+     * After printing the Nth (= width-th) character of a row the
+     * cursor doesn't immediately advance to the next row; instead
+     * this flag is set, and the actual wrap happens only on the
+     * NEXT printable character.  Carriage return / explicit
+     * cursor movement clears the flag without wrapping.  Without
+     * this, zsh's PROMPT_SP heuristic mis-renders (the marker
+     * stays visible because zsh's `\r + space + \r` overwrite
+     * sequence lands on the wrong row).
+     */
+    int pending_wrap;
     
     // Alternate screen buffer (DECSET 47/1047/1049)
     int alt_screen_active;
