@@ -28,6 +28,7 @@ CFLAGS  = -Wall -Wextra -O2 -g
 # libpthread.so.0 — same rationale as tests/lib/pthread/Makefile.
 ifneq ($(CROSS),)
   CFLAGS += -march=i486 -mtune=i486
+  LDFLAGS += -Wl,--copy-dt-needed-entries -Wl,-rpath-link,/opt/substrate/i386-unknown-substrate/lib
   PTHREAD = -L../../../lib/pthread -l:libpthread.so.0
   # -I../../../sys is needed because <sys/syscall.h> in our
   # userspace tree pulls in <arch/i386/syscall.h>, which lives at
@@ -43,7 +44,7 @@ TESTS = torture_unix
 all: $(TESTS)
 
 torture_unix: torture_unix.c
-	$(CC) $(CFLAGS) $(PTHREAD_INC) $< $(PTHREAD) -o $@
+	$(CC) $(CFLAGS) $(LDFLAGS) $(PTHREAD_INC) $< $(PTHREAD) -o $@
 
 clean:
 	rm -f $(TESTS)

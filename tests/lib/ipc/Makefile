@@ -22,6 +22,7 @@ CFLAGS  = -Wall -Wextra -O2 -g
 
 ifneq ($(CROSS),)
   CFLAGS += -march=i486 -mtune=i486
+  LDFLAGS += -Wl,--copy-dt-needed-entries -Wl,-rpath-link,/opt/substrate/i386-unknown-substrate/lib
   PTHREAD = -L../../../lib/pthread -l:libpthread.so.0
   PTHREAD_INC = -I../../../include -I../../../sys -I../../../lib/pthread
 else
@@ -34,10 +35,10 @@ TESTS = torture_ipc torture_pipe
 all: $(TESTS)
 
 torture_ipc: torture_ipc.c
-	$(CC) $(CFLAGS) $(PTHREAD_INC) $< $(PTHREAD) -o $@
+	$(CC) $(CFLAGS) $(LDFLAGS) $(PTHREAD_INC) $< $(PTHREAD) -o $@
 
 torture_pipe: torture_pipe.c
-	$(CC) $(CFLAGS) $(PTHREAD_INC) $< $(PTHREAD) -o $@
+	$(CC) $(CFLAGS) $(LDFLAGS) $(PTHREAD_INC) $< $(PTHREAD) -o $@
 
 clean:
 	rm -f $(TESTS)
