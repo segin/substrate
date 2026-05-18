@@ -392,6 +392,139 @@ test_zsh_exec_redir_pattern(void)
     close(7);
 }
 
+/*
+ * The hello-2.12/configure:560 specific sequence:
+ *
+ *   test -n "$DJDIR" || exec 7<&0 </dev/null
+ *
+ * zsh's exec.c walks the redirections in order.  For `7<&0` (a
+ * MERGEIN redir with fd1=7, fd2=0), addfd() is invoked and does
+ * movefd(7) as its first step — to save the EXISTING fd 7 (if
+ * any) out of the way before installing the new content.  The
+ * specific failure mode we're chasing reports EPERM where EBADF
+ * was expected.
+ *
+ * To reproduce: first install something at fd 7 (using dup2),
+ * then movefd it.  That hits the "fd 7 is open, dup-to-10
+ * should succeed" branch which is what the real configure
+ * environment exercises.  If substrate returns EPERM here, this
+ * is the smoking gun.
+ */
+static void
+test_movefd_open_fd7(void)
+{
+    BANNER("movefd_open_fd7  *** the real configure scenario ***");
+    ensure_closed(7);
+    if (dup2(0, 7) != 7) {
+        printf("  SKIP  could not install fd 7 (dup2 failed: %d=%s)\n",
+               errno, errno_name(errno));
+        g_skip++;
+        return;
+    }
+    errno = 0;
+    int fdN = fcntl(7, F_DUPFD, 10);
+    if (fdN >= 10) {
+        printf("  PASS  fcntl(open 7, F_DUPFD, 10) returned %d (>= 10)\n",
+               fdN);
+        g_pass++;
+        close(fdN);
+    } else {
+        printf("  FAIL  fcntl(open 7, F_DUPFD, 10) returned %d errno=%d=%s "
+               "(this is the configure bug — expected >= 10)\n",
+               fdN, errno, errno_name(errno));
+        g_fail++;
+    }
+    close(7);
+}
+
+/*
+ * Stress-test: occupy fds 7..29 (leaving only 30+ free), then
+ * fcntl(7, F_DUPFD, 10).  Should pick a free slot in [10,32).
+ */
+static void
+test_movefd_open_fd7_filled(void)
+{
+    BANNER("movefd_open_fd7_filled  (sparse fd range)");
+    ensure_closed(7);
+    /* Open fd 3 to /dev/null, dup to fds 4..29. */
+    int base = open("/dev/null", O_RDONLY);
+    if (base < 0) { printf("  SKIP  can't open /dev/null\n"); g_skip++; return; }
+    int opened[40];
+    int n = 0;
+    opened[n++] = base;
+    for (int target = 4; target <= 29; target++) {
+        if (dup2(base, target) == target) opened[n++] = target;
+    }
+    errno = 0;
+    int fdN = fcntl(7, F_DUPFD, 10);
+    if (fdN >= 10) {
+        printf("  PASS  fcntl(open 7, F_DUPFD, 10) returned %d\n", fdN);
+        g_pass++;
+        close(fdN);
+    } else {
+        printf("  FAIL  fcntl(open 7, F_DUPFD, 10) returned %d errno=%d=%s\n",
+               fdN, errno, errno_name(errno));
+        g_fail++;
+    }
+    for (int i = 0; i < n; i++) close(opened[i]);
+}
+
+/*
+ * Full literal recreation of hello-2.12 line 560:
+ *
+ *     test -n "$DJDIR" || exec 7<&0 </dev/null
+ *
+ * with fd 7 already open (because a previous exec or some
+ * inherited fd left it that way).  Mimics zsh's addfd() →
+ * movefd(7) → dup2(0,7) → open(/dev/null) → dup2(...,0) sequence.
+ */
+static void
+test_zsh_exec_redir_with_fd7_open(void)
+{
+    BANNER("zsh_exec_redir_with_fd7_open  (full hello-2.12 line 560)");
+    ensure_closed(7);
+    /* Pretend fd 7 was already open (inherited or from prior exec). */
+    int prep = dup2(0, 7);
+    if (prep != 7) {
+        printf("  SKIP  cannot prep fd 7 (dup2 -> %d errno=%d=%s)\n",
+               prep, errno, errno_name(errno));
+        g_skip++;
+        return;
+    }
+
+    /* zsh step 1: movefd(7) — save existing fd 7 to >= 10. */
+    errno = 0;
+    int save = fcntl(7, F_DUPFD, 10);
+    if (save < 0) {
+        printf("  FAIL  step 1: movefd(7) returned %d errno=%d=%s "
+               "(zsh would zerr() here, configure aborts)\n",
+               save, errno, errno_name(errno));
+        g_fail++;
+        close(7);
+        return;
+    }
+    printf("  PASS  step 1: movefd(7) returned %d\n", save);
+    g_pass++;
+
+    /* zsh step 2: dup2(0, 7). */
+    int r2 = dup2(0, 7);
+    EXPECT_RET("step 2: dup2(0,7)", r2, 7);
+
+    /* zsh step 3: open(/dev/null), then dup2 onto fd 0. */
+    int nf = open("/dev/null", O_RDONLY);
+    EXPECT_RET_GE("step 3: open /dev/null", nf, 0);
+    if (nf >= 0) {
+        /* Save fd 0 first (zsh's bookkeeping) */
+        int save0 = fcntl(0, F_DUPFD, 10);
+        if (save0 >= 0) close(save0);
+        /* Do NOT actually replace stdin in the test, just verify
+         * we COULD have. */
+        close(nf);
+    }
+    close(save);
+    close(7);
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -415,6 +548,9 @@ main(int argc, char *argv[])
     test_fcntl_getfl_closed();
     test_fcntl_setfd_closed();
     test_zsh_exec_redir_pattern();
+    test_movefd_open_fd7();
+    test_movefd_open_fd7_filled();
+    test_zsh_exec_redir_with_fd7_open();
 
     printf("\n==== %d PASS, %d FAIL, %d SKIP ====\n",
            g_pass, g_fail, g_skip);
