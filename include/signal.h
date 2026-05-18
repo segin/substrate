@@ -38,6 +38,12 @@ extern "C" {
 #define SIGWINCH 28
 #define SIGSYS  31
 
+/* NSIG is one greater than the highest valid signal number.  Many
+ * ported shells (zsh, bash) and signal-walking utilities iterate
+ * 1..NSIG-1 so the value must cover SIGSYS = 31. */
+#define NSIG    32
+#define _NSIG   NSIG
+
 typedef void (*sighandler_t)(int);
 
 #define SIG_DFL ((sighandler_t)0)
