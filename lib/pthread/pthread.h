@@ -31,10 +31,25 @@ int pthread_kill(pthread_t thread, int sig);
 int pthread_sigmask(int how, const sigset_t *set, sigset_t *oldset);
 
 typedef int pthread_mutex_t;
+typedef int pthread_mutexattr_t;
+
+#define PTHREAD_MUTEX_INITIALIZER  0
+
+#define PTHREAD_MUTEX_NORMAL     0
+#define PTHREAD_MUTEX_ERRORCHECK 1
+#define PTHREAD_MUTEX_RECURSIVE  2
+#define PTHREAD_MUTEX_DEFAULT    PTHREAD_MUTEX_NORMAL
+
 int pthread_mutex_init(pthread_mutex_t *mutex, const void *attr);
 int pthread_mutex_lock(pthread_mutex_t *mutex);
 int pthread_mutex_unlock(pthread_mutex_t *mutex);
 int pthread_mutex_destroy(pthread_mutex_t *mutex);
+int pthread_mutex_trylock(pthread_mutex_t *mutex);
+
+int pthread_mutexattr_init(pthread_mutexattr_t *attr);
+int pthread_mutexattr_destroy(pthread_mutexattr_t *attr);
+int pthread_mutexattr_settype(pthread_mutexattr_t *attr, int type);
+int pthread_mutexattr_gettype(const pthread_mutexattr_t *attr, int *type);
 
 /* ---------------- condition variables ----------------
  * Linux/glibc-style sequence-number cond_var built on top of

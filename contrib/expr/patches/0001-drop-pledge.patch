@@ -1,0 +1,20 @@
+Subject: expr.c: drop OpenBSD pledge() call
+
+pledge(2) is OpenBSD-specific.  Substrate has no equivalent
+sandboxing call; the relevant kernel-side protections are
+provided by the personality + LSM hooks elsewhere.
+
+---
+diff -urN a/expr.c b/expr.c
+--- a/expr.c
++++ b/expr.c
+@@ -495,9 +495,6 @@
+ {
+ 	struct val     *vp;
+
+-	if (pledge("stdio", NULL) == -1)
+-		err(2, "pledge");
+-
+ 	if (argc > 1 && !strcmp(argv[1], "--"))
+ 		argv++;
+

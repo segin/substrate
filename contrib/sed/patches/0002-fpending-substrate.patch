@@ -1,0 +1,21 @@
+Subject: lib/fpending.c: add substrate FILE branch
+
+Substrate's stdio FILE struct exposes `buffer` (start of buffer)
+and `pos` (current read/write cursor).  For a write stream,
+fpending == pos - buffer.  Without this branch the gnulib
+fpending.c hits the trailing `#error "Please port gnulib
+fpending.c to your platform!"`.
+
+---
+diff -urN a/lib/fpending.c b/lib/fpending.c
+--- a/lib/fpending.c
++++ b/lib/fpending.c
+@@ -56,6 +56,8 @@
+   return fp->__bufp - fp->__buffer;
+ #elif defined EPLAN9                 /* Plan9 */
+   return fp->wp - fp->buf;
++#elif defined __substrate__          /* substrate */
++  return (fp->pos && fp->buffer) ? (size_t)(fp->pos - fp->buffer) : 0;
+ #else
+ # error "Please port gnulib fpending.c to your platform!"
+   return 1;

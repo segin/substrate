@@ -1,0 +1,29 @@
+Subject: lib/fwriting.c: add substrate branch
+
+Substrate's stdio FILE struct carries the open(2) flags
+directly in fp->flags.  fwriting is true iff the stream isn't
+read-only.  Pull <fcntl.h> for O_ACCMODE / O_RDONLY.
+
+---
+--- a/lib/fwriting.c
++++ b/lib/fwriting.c
+@@ -21,6 +21,10 @@
+ 
+ #include "stdio-impl.h"
+ 
++#ifdef __substrate__
++# include <fcntl.h>  /* O_ACCMODE / O_RDONLY for the substrate branch below */
++#endif
++
+ /* This file is not used on systems that have the __fwriting function,
+    namely glibc >= 2.2, Solaris >= 7, UnixWare >= 7.1.4.MP4, Cygwin >= 1.7.34,
+    Android API >= 29, musl libc.  */
+@@ -62,6 +66,8 @@
+   if (fp->state == 0 /* CLOSED */ || fp->state == 3 /* RD */)
+     return 0;
+   return (fp->state == 4 /* WR */ && (fp->bufl == 0 || fp->wp < fp->rp));
++#elif defined __substrate__         /* substrate */
++  return (fp->flags & O_ACCMODE) != O_RDONLY;
+ #else
+ # error "Please port gnulib fwriting.c to your platform!"
+ #endif

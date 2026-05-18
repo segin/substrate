@@ -1,0 +1,53 @@
+Subject: expr.c: portability shims for substrate
+
+OpenBSD-isms not present in substrate libc:
+
+  * __dead — OpenBSD's noreturn annotation (normally from
+    <sys/cdefs.h>).  Map directly to gcc's noreturn attribute.
+
+  * strtonum(3) — OpenBSD's bounded numeric parser.
+    Substrate libc doesn't ship one yet.  Reimplement on
+    top of strtoll(3) with the documented errstr contract.
+
+---
+--- a/expr.c
++++ b/expr.c
+@@ -15,6 +15,38 @@
+ #include <unistd.h>
+ #include <regex.h>
+ #include <err.h>
++#include <errno.h>
++
++/* substrate has no <sys/cdefs.h> __dead.  Map to gcc's noreturn. */
++#ifndef __dead
++#define __dead __attribute__((noreturn))
++#endif
++
++/* substrate libc has no strtonum(3); reimplement on strtoll. */
++static long long
++strtonum(const char *numstr, long long minval, long long maxval,
++    const char **errstrp)
++{
++	char *end;
++	long long val;
++
++	errno = 0;
++	if (errstrp != NULL) *errstrp = NULL;
++	val = strtoll(numstr, &end, 10);
++	if (numstr == end || *end != '\0') {
++		if (errstrp != NULL) *errstrp = "invalid";
++		return 0;
++	}
++	if (errno == ERANGE || val < minval) {
++		if (errstrp != NULL) *errstrp = "too small";
++		return 0;
++	}
++	if (val > maxval) {
++		if (errstrp != NULL) *errstrp = "too large";
++		return 0;
++	}
++	return val;
++}
+ 
+ struct val	*make_int(int64_t);
+ struct val	*make_str(char *);
