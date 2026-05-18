@@ -77,6 +77,8 @@ static int g_pass = 0;
 static int g_fail = 0;
 static int g_skip = 0;
 
+static ssize_t read_eintr(int fd, char *buf, size_t sz);
+
 static const char *
 errno_name(int e)
 {
@@ -526,6 +528,151 @@ test_zsh_exec_redir_with_fd7_open(void)
 }
 
 /*
+ * Baseline: fork + exec /bin/sh -c "echo OK" with stdout piped.
+ * No redirections inside the shell — just verifies that the
+ * fork+exec+pipe+read chain works at all.  Runs on host too
+ * (host /bin/sh also understands echo).
+ */
+#include <sys/wait.h>
+static void
+test_sh_echo_baseline(void)
+{
+    BANNER("sh_echo_baseline  (fork+exec+pipe sanity)");
+    int pipefd[2], errfd[2];
+    if (pipe(pipefd) < 0) { printf("  SKIP  pipe failed\n"); g_skip++; return; }
+    if (pipe(errfd)  < 0) {
+        close(pipefd[0]); close(pipefd[1]);
+        printf("  SKIP  pipe failed (2)\n"); g_skip++; return;
+    }
+    pid_t pid = fork();
+    if (pid < 0) {
+        close(pipefd[0]); close(pipefd[1]);
+        close(errfd[0]);  close(errfd[1]);
+        printf("  SKIP  fork failed\n"); g_skip++; return;
+    }
+    if (pid == 0) {
+        close(pipefd[0]); close(errfd[0]);
+        dup2(pipefd[1], 1); dup2(errfd[1], 2);
+        if (pipefd[1] > 2) close(pipefd[1]);
+        if (errfd[1]  > 2) close(errfd[1]);
+        execl("/bin/sh", "/bin/sh", "-c", "echo OK", (char *)NULL);
+        _exit(127);
+    }
+    close(pipefd[1]); close(errfd[1]);
+    /* waitpid first — eliminates SIGCHLD/EINTR race on the reads. */
+    int status = 0;
+    pid_t bw;
+    do { bw = waitpid(pid, &status, 0); } while (bw < 0 && errno == EINTR);
+    char obuf[512] = {0}, ebuf[512] = {0};
+    ssize_t on = read_eintr(pipefd[0], obuf, sizeof(obuf) - 1);
+    ssize_t en = read_eintr(errfd[0],  ebuf, sizeof(ebuf) - 1);
+    if (on < 0) on = 0;
+    if (en < 0) en = 0;
+    obuf[on] = 0; ebuf[en] = 0;
+    close(pipefd[0]); close(errfd[0]);
+    if (strstr(obuf, "OK")) {
+        printf("  PASS  /bin/sh -c 'echo OK' → stdout=[%s]", obuf);
+        g_pass++;
+    } else {
+        printf("  FAIL  /bin/sh -c 'echo OK' → stdout=[%s] stderr=[%s] status=0x%x\n",
+               obuf, ebuf, status);
+        g_fail++;
+    }
+}
+
+/*
+ * Sub-diagnositcs: narrow down which part of the exec-redirection
+ * causes the silent exit.  Substrate-only (host sh isn't zsh).
+ */
+/*
+ * Read from a pipe, retrying on EINTR.  Returns bytes read (0 = EOF).
+ */
+static ssize_t
+read_eintr(int fd, char *buf, size_t sz)
+{
+    ssize_t n;
+    do {
+        n = read(fd, buf, sz);
+    } while (n < 0 && errno == EINTR);
+    return n;
+}
+
+static void
+run_sh_cmd_piped(const char *label, const char *cmd)
+{
+#ifndef __substrate__
+    printf("  SKIP  %s (host sh)\n", label);
+    g_skip++;
+    return;
+#endif
+    int pipefd[2], errfd[2];
+    if (pipe(pipefd) < 0 || pipe(errfd) < 0) {
+        printf("  SKIP  %s (pipe failed)\n", label);
+        g_skip++; return;
+    }
+    pid_t pid = fork();
+    if (pid < 0) {
+        close(pipefd[0]); close(pipefd[1]);
+        close(errfd[0]);  close(errfd[1]);
+        printf("  SKIP  %s (fork failed)\n", label);
+        g_skip++; return;
+    }
+    if (pid == 0) {
+        close(pipefd[0]); close(errfd[0]);
+        dup2(pipefd[1], 1); dup2(errfd[1], 2);
+        if (pipefd[1] > 2) close(pipefd[1]);
+        if (errfd[1]  > 2) close(errfd[1]);
+        execl("/bin/sh", "/bin/sh", "-c", cmd, (char *)NULL);
+        _exit(127);
+    }
+    close(pipefd[1]); close(errfd[1]);
+    char obuf[512] = {0}, ebuf[512] = {0};
+    /* waitpid FIRST so the child is fully done before we read —
+     * eliminates any EINTR-from-SIGCHLD race on the reads.       */
+    int status = 0;
+    pid_t w;
+    do { w = waitpid(pid, &status, 0); } while (w < 0 && errno == EINTR);
+    ssize_t on = read_eintr(pipefd[0], obuf, sizeof(obuf) - 1);
+    ssize_t en = read_eintr(errfd[0],  ebuf, sizeof(ebuf) - 1);
+    if (on < 0) on = 0;
+    if (en < 0) en = 0;
+    obuf[on] = 0; ebuf[en] = 0;
+    close(pipefd[0]); close(errfd[0]);
+    if (strstr(obuf, "OK")) {
+        printf("  PASS  %s\n", label);
+        g_pass++;
+    } else {
+        printf("  FAIL  %s → stdout=[%s] stderr=[%s] status=0x%x\n",
+               label, obuf, ebuf, status);
+        g_fail++;
+    }
+}
+
+static void
+test_zsh_exec_redir_subdiag(void)
+{
+    BANNER("zsh_exec_redir_subdiag  (isolation)");
+    /* multi-command basics — is the problem with any 2nd command? */
+    run_sh_cmd_piped("two-echo               echo A; echo OK",
+                     "echo A; echo OK");
+    run_sh_cmd_piped("true-then-echo         true; echo OK",
+                     "true; echo OK");
+    run_sh_cmd_piped("false-then-echo        false; echo OK",
+                     "false; echo OK");
+    /* exec variants */
+    run_sh_cmd_piped("exec-redir(stdin-only)    exec </dev/null; echo OK",
+                     "exec </dev/null; echo OK");
+    run_sh_cmd_piped("exec-redir(fd7-only)      exec 7<&0; echo OK",
+                     "exec 7<&0; echo OK");
+    run_sh_cmd_piped("exec-redir(both)          exec 7<&0 </dev/null; echo OK",
+                     "exec 7<&0 </dev/null; echo OK");
+    run_sh_cmd_piped("exec-redir(close-7)       exec 7<&-; echo OK",
+                     "exec 7<&-; echo OK");
+    run_sh_cmd_piped("no-exec plain redir       7<&0; echo OK",
+                     "7<&0; echo OK");
+}
+
+/*
  * The LITERAL bug repro: fork() + execve("/bin/sh", { "/bin/sh",
  * "-c", "exec 7<&0 </dev/null; echo OK" }, env).  Whatever
  * substrate code path the real ./configure traverses to reach
@@ -541,7 +688,6 @@ test_zsh_exec_redir_with_fd7_open(void)
  * Skipped on host because /bin/sh on Linux isn't zsh and won't
  * reproduce the substrate-specific issue.
  */
-#include <sys/wait.h>
 static void
 test_zsh_subshell_exec_redir(void)
 {
@@ -585,17 +731,20 @@ test_zsh_subshell_exec_redir(void)
     close(pipefd[1]);
     close(errfd[1]);
 
+    /* waitpid first so child is fully done before we read — avoids
+     * EINTR-from-SIGCHLD interrupting the blocking reads. */
+    int status = 0;
+    pid_t w;
+    do { w = waitpid(pid, &status, 0); } while (w < 0 && errno == EINTR);
+
     char obuf[512] = {0};
     char ebuf[512] = {0};
-    ssize_t on = read(pipefd[0], obuf, sizeof(obuf) - 1);
-    ssize_t en = read(errfd[0],  ebuf, sizeof(ebuf) - 1);
+    ssize_t on = read_eintr(pipefd[0], obuf, sizeof(obuf) - 1);
+    ssize_t en = read_eintr(errfd[0],  ebuf, sizeof(ebuf) - 1);
     if (on < 0) on = 0;
     if (en < 0) en = 0;
     obuf[on] = 0; ebuf[en] = 0;
     close(pipefd[0]); close(errfd[0]);
-
-    int status = 0;
-    waitpid(pid, &status, 0);
 
     int saw_ok    = (strstr(obuf, "OK") != NULL);
     int saw_eperm = (strstr(ebuf, "operation not permitted") != NULL ||
@@ -656,15 +805,17 @@ test_zsh_subshell_with_inherited_fd7(void)
     }
 
     close(pipefd[1]); close(errfd[1]);
+    /* waitpid first — eliminates SIGCHLD/EINTR race on the reads. */
+    int status = 0;
+    pid_t ww;
+    do { ww = waitpid(pid, &status, 0); } while (ww < 0 && errno == EINTR);
     char obuf[512] = {0}, ebuf[512] = {0};
-    ssize_t on = read(pipefd[0], obuf, sizeof(obuf) - 1);
-    ssize_t en = read(errfd[0],  ebuf, sizeof(ebuf) - 1);
+    ssize_t on = read_eintr(pipefd[0], obuf, sizeof(obuf) - 1);
+    ssize_t en = read_eintr(errfd[0],  ebuf, sizeof(ebuf) - 1);
     if (on < 0) on = 0;
     if (en < 0) en = 0;
     obuf[on] = 0; ebuf[en] = 0;
     close(pipefd[0]); close(errfd[0]);
-    int status = 0;
-    waitpid(pid, &status, 0);
     close(7);
 
     int saw_ok = (strstr(obuf, "OK") != NULL);
@@ -706,6 +857,8 @@ main(int argc, char *argv[])
     test_movefd_open_fd7();
     test_movefd_open_fd7_filled();
     test_zsh_exec_redir_with_fd7_open();
+    test_sh_echo_baseline();
+    test_zsh_exec_redir_subdiag();
     test_zsh_subshell_exec_redir();
     test_zsh_subshell_with_inherited_fd7();
 
