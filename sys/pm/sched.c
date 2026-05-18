@@ -195,6 +195,8 @@ thread_t *sched_alloc_thread(process_t *proc) {
 
     thread->sig_mask = current_thread ? current_thread->sig_mask : 0;
     thread->sig_pending = 0;
+    thread->sig_mask_suspend = 0;
+    thread->sig_mask_suspend_active = 0;
     thread->sig_on_stack = 0;
     memset(&thread->sig_alt_stack, 0, sizeof(thread->sig_alt_stack));
     thread->in_syscall = 0;
