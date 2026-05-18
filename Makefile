@@ -40,12 +40,9 @@ host_dist:
 	$(MAKE) -C bin NATIVE_BUILD=1 DESTDIR="$(HOST_DIST_DIR)" install
 	-$(MAKE) -C sbin clean
 	$(MAKE) -C sbin NATIVE_BUILD=1 DESTDIR="$(HOST_DIST_DIR)" install
-	-$(MAKE) -C usr.bin/cc clean
-	$(MAKE) -C usr.bin/cc NATIVE_BUILD=1 DESTDIR="$(HOST_DIST_DIR)" install
 	-$(MAKE) -C usr.bin clean
 	$(MAKE) -C usr.bin NATIVE_BUILD=1 DESTDIR="$(HOST_DIST_DIR)" install
 	$(MAKE) -C usr.man DESTDIR="$(HOST_DIST_DIR)" install
-	@test -x "$(HOST_DIST_DIR)/usr/bin/cc"
 	@echo ">>> Host tools installed to $(HOST_DIST_DIR)"
 
 native_dist: host_dist

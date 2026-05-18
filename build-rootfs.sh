@@ -303,21 +303,13 @@ install_to_dist() {
 
     echo "Installing toolchain to dist/usr/bin..."
     mkdir -p "$DIST/usr/bin"
-    # C compiler and preprocessor
-    if [ -f "$TOP/usr.bin/cc/cc" ]; then
-        cp "$TOP/usr.bin/cc/cc" "$DIST/usr/bin/"
-        ln -sf cc "$DIST/usr/bin/cpp"
-    fi
-    # Assembler
-    if [ -f "$TOP/usr.bin/as/as" ]; then
-        cp "$TOP/usr.bin/as/as" "$DIST/usr/bin/"
-    fi
-    # Linker
-    if [ -f "$TOP/usr.bin/ld/ld" ]; then
-        cp "$TOP/usr.bin/ld/ld" "$DIST/usr/bin/"
-    fi
-    # Archive tools
-    for tool in ar ranlib nm objdump objcopy readelf strip strings size addr2line elfedit; do
+    # cc, as, ld, and the rest of the C toolchain are provided by the
+    # stage-2 binutils + GCC overlay (dist-toolchain/, /tmp/gcc-stage2-staging/).
+    # Substrate's earlier hand-rolled usr.bin/cc, usr.bin/as, usr.bin/ld
+    # have been retired in favour of the GNU toolchain.
+    # Archive / binary utilities that still live under usr.bin/ — these
+    # are stand-alone tools, not part of the dropped cc/as/ld set.
+    for tool in ar nm size addr2line elfedit readelf; do
         if [ -f "$TOP/usr.bin/$tool/$tool" ]; then
             cp "$TOP/usr.bin/$tool/$tool" "$DIST/usr/bin/"
         fi
@@ -333,12 +325,6 @@ install_to_dist() {
             fi
         fi
     done
-    # CC resource directory (SIMD headers)
-    if [ -d "$TOP/usr.bin/cc/resource" ]; then
-        mkdir -p "$DIST/usr/lib/substratecc"
-        cp -r "$TOP/usr.bin/cc/resource/include" "$DIST/usr/lib/substratecc/"
-    fi
-
     # usr.lib helper libraries (libregex, libexvi, libbc, ...) are
     # DT_NEEDED'd by vi, ex, grep, find, sed, bc, dc, etc.  ld.so
     # searches /lib, /usr/lib, /usr/local/lib so install both flavours

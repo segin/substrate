@@ -22,7 +22,8 @@ Substrate is a complete Unix OS project with five first-class pillars:
   loaded-object scope so its `__ldso_*` exports are visible to libdl
   and to libc (which calls `__ldso_run_fini` as a weak hook from
   `exit()` to run destructors before the process is reaped).
-- Native toolchain (`usr.bin/cc`, `usr.bin/as`, `usr.bin/ld`, `usr.lib/elfobj`)
+- Toolchain via the GNU stage-2 port (binutils + GCC under `contrib/`),
+  installed on the image as the system `cc` / `as` / `ld` / `g++`.
 
 Primary target architecture is i386. x86_64 support is active and expanding.
 
@@ -75,9 +76,9 @@ sbin/ld.so/  Substrate native dynamic linker.  Phases 1-4f live:
              docs/design/ld.so-design.md, reloc matrix in
              docs/specs/ld.so-reloc-matrix.md, kernel ABI contract
              in docs/kernel-ldso-abi-substrate.md.
-usr.bin/     compiler/toolchain and extended user tools
-             per-tool architecture docs live beside the native toolchain entry points:
-             usr.bin/as/ARCHITECTURE.md, usr.bin/cc/ARCHITECTURE.md, usr.bin/ld/ARCHITECTURE.md
+usr.bin/     extended user tools (ar, nm, readelf, ldd, yacc, lex, ...).
+             The C toolchain (cc/as/ld/g++/cpp) comes from the GNU
+             stage-2 port under contrib/{binutils,gcc}/.
 lib/         target runtime libraries (libc/libsys/libm/libpthread/libedit/libusb...)
 usr.lib/     shared libraries for tooling/runtime support (elfobj, demangle, ...)
 include/     userspace public headers
@@ -126,7 +127,15 @@ Userland is split by role (essential, admin, extended) and supported by a suite 
 - **`ex`/`vi` Editor Stack:** The base editors remain first-class userland programs in `bin/`, with a shared implementation in `usr.lib/exvi/`, thin frontends in `bin/ex` and `bin/vi`, and an in-tree full-screen `vi` engine backed by PTY regression tests. Detailed editor design notes and backlog tracking live in `docs/specs/exvi.md`; the current standards/compatibility record lives in `docs/specs/exvi_conformance.md`; user-facing manuals are in `usr.man/man1/ex.1`, `usr.man/man1/vi.1`, and `usr.man/man1/view.1`.
 - **`lib/edit`:** Command-line editing and history library for shells and prompts. Reusable low-level pieces for the editor stack are documented in `docs/specs/exvi.md`.
 - **`find(1)`:** A multi-dialect file hierarchy walker. See `docs/find/architecture.md`.
-- **Native Toolchain:** Integrated compiler, assembler, linker, and shared ELF support library. Language and behavior specs live in `docs/specs/as_spec.md`, `usr.bin/cc/SPEC.md`, and `usr.bin/ld/SPEC.md`; structural docs live in `usr.bin/as/ARCHITECTURE.md`, `usr.bin/cc/ARCHITECTURE.md`, and `usr.bin/ld/ARCHITECTURE.md`. The shared ELF substrate for all three tools lives in `usr.lib/elfobj/` with API and ABI guidance in `usr.lib/elfobj/README.md` and `usr.lib/elfobj/ABI_POLICY.md`.
+- **C Toolchain:** Supplied by the GNU stage-2 port at
+  `contrib/binutils/` (binutils 2.46.0) and `contrib/gcc/` (GCC 16.1.0).
+  The cross-compiler runs on the host, the stage-2 native compiler
+  runs on substrate.  `cc` on the image is a symlink to `gcc`.  See
+  `contrib/BUILD-TOOLCHAIN.md` and `contrib/build-toolchain.sh`.
+  ELF object and symbol inspection helpers (substrate-side `nm`,
+  `readelf`, `ar`, etc.) still live under `usr.bin/` on top of
+  `usr.lib/elfobj/` — see `usr.lib/elfobj/README.md` and
+  `usr.lib/elfobj/ABI_POLICY.md`.
 
 ## 7. ABI and Interface Boundaries
 
@@ -174,7 +183,7 @@ Testing is a first-class citizen, utilizing a multi-layer approach:
   ELF runner used for host-side ABI experiments.
 - **Property and Fuzz Testing:** Ensuring robustness of parsers and ABI handlers.
 
-Native toolchain regression surfaces are split by tool under `tests/usr.bin/as/`, `tests/usr.bin/cc/`, `tests/usr.bin/ld/`, and `usr.lib/elfobj/tests/`. Userland program tests live under `tests/bin/<program>/` — all `bin/*/tests/` directories have been consolidated there; each `bin/*/Makefile` references its test sources via `$(TESTS) = ../../tests/bin/<program>`.
+ELF object/symbol helpers (`usr.lib/elfobj/`, the remaining stand-alone tools in `usr.bin/`) keep their regression surfaces under `usr.lib/elfobj/tests/` and `tests/usr.bin/<tool>/`. Userland program tests live under `tests/bin/<program>/` — all `bin/*/tests/` directories have been consolidated there; each `bin/*/Makefile` references its test sources via `$(TESTS) = ../../tests/bin/<program>`.  Toolchain (cc/as/ld/g++) regression is delegated to upstream binutils + GCC; substrate-specific patches in `contrib/{binutils,gcc}/patches/` are validated through the bootstrap orchestrator (`contrib/build-toolchain.sh`).
 
 For detailed testing policies, see `docs/specs/vm_page.md` (as a template) and the `tests/` directory.
 

@@ -1,6 +1,0 @@
-??=define TG_RET 0
-
-int ma??/
-in(void) ??<
-    return TG_RET;
-??>
