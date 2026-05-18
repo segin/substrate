@@ -13,6 +13,7 @@ SUBDIRS = \
 	chgrp \
 	chmod \
 	chown \
+	clear \
 	cp \
 	date \
 	dc \
@@ -52,6 +53,7 @@ SUBDIRS = \
 	prof \
 	ps \
 	pwd \
+	reset \
 	rm \
 	rmdir \
 	sed \
