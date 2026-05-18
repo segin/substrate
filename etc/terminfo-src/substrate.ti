@@ -1,0 +1,36 @@
+# Substrate termcap database
+#
+# Keep this intentionally small and ASCII-only. The kernel currently exports
+# TERM=linux for its text console and TERM=ansi for some compatibility paths.
+#
+
+vt100|vt100-am|dec vt100,
+	am,
+	cols#80, lines#24,
+	bel=^G, blink=\E[5m, bold=\E[1m, clear=\E[H\E[J, cr=\r,
+	cub1=^H, cud1=\n, cuf1=\E[C, cup=\E[%i%p1%d;%p2%dH,
+	cuu1=\E[A, ed=\E[J, el=\E[K, home=\E[H, ht=^I, ind=\n, kbs=^H,
+	kcub1=\EOD, kcud1=\EOB, kcuf1=\EOC, kcuu1=\EOA,
+	kdch1=\E[3~, kend=\EOF, khome=\EOH, kich1=\E[2~, knp=\E[6~,
+	kpp=\E[5~, nel=\r\n, rev=\E[7m, ri=\EM, rmso=\E[27m,
+	rmul=\E[24m, sgr0=\E[0m, smso=\E[7m, smul=\E[4m,
+
+ansi|ansi/pc-term compatible with color,
+	setab=\E[4%p1%dm, setaf=\E[3%p1%dm, use=vt100,
+
+linux|linux console,
+	am, km, mir, msgr, xenl, xon,
+	cols#80, lines#24,
+	bel=^G, blink=\E[5m, bold=\E[1m, clear=\E[H\E[J, cr=\r,
+	cub1=^H, cud1=\n, cuf1=\E[C, cup=\E[%i%p1%d;%p2%dH,
+	cuu1=\E[A, dch1=\E[P, dim=\E[2m, dl1=\E[M, ed=\E[J, el=\E[K,
+	flash=\Eg, home=\E[H, ht=^I, ich1=\E[@, il1=\E[L, ind=\n,
+	kbs=^H, kcub1=\E[D, kcud1=\E[B, kcuf1=\E[C, kcuu1=\E[A,
+	kdch1=\E[3~, kend=\E[F, khome=\E[H, kich1=\E[2~, knp=\E[6~,
+	kpp=\E[5~, nel=\r\n, op=\E[39;49m, rev=\E[7m, rmir=,
+	rmso=\E[27m, rmul=\E[24m, setab=\E[4%p1%dm,
+	setaf=\E[3%p1%dm, sgr0=\E[0m, smir=, smso=\E[7m,
+	smul=\E[4m,
+
+substrate|Substrate kernel text console,
+	use=linux,

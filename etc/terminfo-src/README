@@ -1,0 +1,35 @@
+# Substrate terminfo database
+
+Source: etc/termcap (BSD-style termcap with 4 entries — vt100,
+ansi, linux, substrate).  Compiled to the standard terminfo binary
+format via:
+
+    captoinfo ../termcap > substrate.ti
+    tic -o ../terminfo substrate.ti
+
+The compiled entries live at ../terminfo/{a,l,s,v}/* and are
+installed by build-rootfs.sh into both /etc/terminfo/ (via the
+generic etc/ copy) and /usr/share/terminfo/ (canonical location
+ncurses-style consumers check first).
+
+## Coverage
+
+  - vt100, vt100-am  — generic DEC VT100 with auto-margin
+  - ansi             — ANSI/PC-term with 16-color extension
+  - linux            — Linux console (matches what the substrate
+                       kernel exports for its text VT)
+  - substrate        — alias for linux
+
+## Caveat (2026)
+
+zsh / less / vi look up terminfo via setupterm(), which calls
+into the libcurses on the system.  Substrate currently ships a
+stub libcurses (lib/curses/) — every setupterm returns -1, every
+tigetstr returns the "absent" sentinel.  So shipping these
+binary entries is a no-op for now; they only become live once we
+port a real terminfo backend (the obvious option is NetBSD's
+libterminfo, ~5 KLOC).
+
+The binaries are still worth committing today because the
+*format* doesn't change with the runtime port — when we wire up
+real terminfo resolution later, these entries will Just Work.

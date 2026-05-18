@@ -288,6 +288,15 @@ install_to_dist() {
     echo "Installing configuration from etc/..."
     cp -r "$TOP/etc/." "$DIST/etc/"
 
+    # Mirror the precompiled terminfo database to its canonical
+    # location.  /etc/terminfo is also a path ncurses-style consumers
+    # check, but every shell/editor convention expects
+    # /usr/share/terminfo/<first-char>/<name>, so install there too.
+    if [ -d "$TOP/etc/terminfo" ]; then
+        mkdir -p "$DIST/usr/share/terminfo"
+        cp -r "$TOP/etc/terminfo/." "$DIST/usr/share/terminfo/"
+    fi
+
     # init was migrated from etc/init.sh (shell) to sbin/init (C
     # binary) in 5116c3a3.  Prefer the built C binary; only fall back
     # to the shell script if for some reason the C build was skipped.
