@@ -420,6 +420,7 @@ install_to_dist() {
     for entry in \
         "tests/lib/sockets:torture_unix" \
         "tests/lib/ipc:torture_ipc" \
+        "tests/lib/ipc:torture_pipe" \
         "tests/lib/pty:torture_pty" \
         "tests/lib/signal:torture_signal"; do
         srcdir="${entry%%:*}"
