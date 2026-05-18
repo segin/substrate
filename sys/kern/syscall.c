@@ -709,10 +709,18 @@ void file_close_ptr(file_t *f) {
 }
 
 int kern_close(int fd) {
-    if (fd < 0 || fd >= MAX_FD) return -1;
+    /*
+     * Return -EBADF, not -1.  libc's __set_errno() negates the
+     * return: a bare -1 lands as errno=1=EPERM, which zsh's
+     * movefd() reports as "operation not permitted" while it's
+     * actually a closed-fd dup attempt (caught earlier in zsh,
+     * which only wants to suppress EBADF).  POSIX requires EBADF
+     * for close() on a non-open fd.
+     */
+    if (fd < 0 || fd >= MAX_FD) return -EBADF;
     file_t *f = current_process->fds[fd];
-    if (!f) return -1;
-    
+    if (!f) return -EBADF;
+
     file_close_ptr(f);
     proc_clear_fd(current_process, fd);
 
