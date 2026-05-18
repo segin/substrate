@@ -72,6 +72,7 @@ SUBDIRS = \
 	time \
 	top \
 	touch \
+	tr \
 	true \
 	tty \
 	umount \
