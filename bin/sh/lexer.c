@@ -169,10 +169,17 @@ static token_t *lexer_scan(lexer_t *l) {
                     escape = 0;
                     continue;
                 }
-                
-                // In double quotes, only specific characters are escaped
+
+                /* Preserve the backslash AND the escaped char in
+                 * the token value.  Quote removal happens later in
+                 * expand_word_ex, which has its own escape-handling
+                 * state machine.  If we strip the backslash here,
+                 * expand sees a bare metacharacter (e.g. a literal
+                 * `\`` inside dq becomes a backtick) and treats it
+                 * as command substitution / arithmetic / etc. */
                 if (in_dq) {
                     if (c == '$' || c == '`' || c == '"' || c == '\\') {
+                        buffer_append(&buf, &cap, &len, '\\');
                         buffer_append(&buf, &cap, &len, c);
                     } else {
                         // Backslash was literal if NOT one of the above
@@ -180,10 +187,10 @@ static token_t *lexer_scan(lexer_t *l) {
                         buffer_append(&buf, &cap, &len, c);
                     }
                 } else {
-                    // Normal escape preserves character literally
+                    buffer_append(&buf, &cap, &len, '\\');
                     buffer_append(&buf, &cap, &len, c);
                 }
-                
+
                 advance(l);
                 escape = 0;
                 continue;
