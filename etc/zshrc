@@ -1,0 +1,35 @@
+# /etc/zshrc — substrate-wide zsh init.
+#
+# Sourced by every interactive zsh (login or not), including
+# zsh running as /bin/sh in POSIX-compat mode.  Per-user
+# overrides at ~/.zshrc still win.
+
+# Pull in the system-wide Bourne profile so PATH, prompt-string
+# variables, and any other distro-wide environment knobs we set
+# in /etc/profile take effect.  This keeps a single source of
+# truth — /etc/profile — for both sh and zsh sessions.
+if [ -r /etc/profile ]; then
+    . /etc/profile
+fi
+
+# zsh-specific bits below this line.  Anything that depends on
+# zsh-only builtins (setopt / unsetopt / zstyle / ...) belongs
+# here, not in /etc/profile (which has to stay POSIX-clean).
+
+# History.  Keep modest defaults; per-user .zshrc can override.
+HISTFILE=${HISTFILE:-${HOME:-/}/.zsh_history}
+HISTSIZE=${HISTSIZE:-1000}
+SAVEHIST=${SAVEHIST:-1000}
+setopt APPEND_HISTORY HIST_IGNORE_DUPS HIST_IGNORE_SPACE
+
+# When invoked as /bin/sh, zsh enters POSIX emulation and many
+# zsh-only options are off by default.  If the caller is using zsh
+# directly, turn on the conveniences most interactive users expect.
+case "${0##*/}" in
+    sh|-sh) ;;
+    *)
+        setopt AUTO_CD            # `cd` not required to switch dirs
+        setopt EXTENDED_GLOB
+        setopt NO_BEEP
+        ;;
+esac

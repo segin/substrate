@@ -525,6 +525,161 @@ test_zsh_exec_redir_with_fd7_open(void)
     close(7);
 }
 
+/*
+ * The LITERAL bug repro: fork() + execve("/bin/sh", { "/bin/sh",
+ * "-c", "exec 7<&0 </dev/null; echo OK" }, env).  Whatever
+ * substrate code path the real ./configure traverses to reach
+ * the EPERM, this should hit too — same process model
+ * (sh-as-zsh interactive with a fresh exec, redirections only,
+ * no command following them).
+ *
+ * The child writes either "OK\n" to stdout (success) or zsh's
+ * error message to stderr.  We pipe stdout, capture it, and
+ * the absence of "OK" or the appearance of the error is the
+ * smoking gun.
+ *
+ * Skipped on host because /bin/sh on Linux isn't zsh and won't
+ * reproduce the substrate-specific issue.
+ */
+#include <sys/wait.h>
+static void
+test_zsh_subshell_exec_redir(void)
+{
+    BANNER("zsh_subshell_exec_redir  (literal /bin/sh -c repro)");
+#ifndef __substrate__
+    printf("  SKIP  only meaningful on substrate (host /bin/sh isn't zsh)\n");
+    g_skip++;
+    return;
+#endif
+
+    int pipefd[2];
+    if (pipe(pipefd) < 0) { printf("  SKIP  pipe failed\n"); g_skip++; return; }
+    int errfd[2];
+    if (pipe(errfd) < 0) {
+        close(pipefd[0]); close(pipefd[1]);
+        printf("  SKIP  pipe failed (2)\n"); g_skip++; return;
+    }
+
+    pid_t pid = fork();
+    if (pid < 0) {
+        close(pipefd[0]); close(pipefd[1]);
+        close(errfd[0]); close(errfd[1]);
+        printf("  SKIP  fork failed\n"); g_skip++; return;
+    }
+    if (pid == 0) {
+        /* child: redirect stdout/err into the pipes, exec /bin/sh */
+        close(pipefd[0]);
+        close(errfd[0]);
+        dup2(pipefd[1], 1);
+        dup2(errfd[1],  2);
+        if (pipefd[1] > 2) close(pipefd[1]);
+        if (errfd[1]  > 2) close(errfd[1]);
+
+        execl("/bin/sh", "/bin/sh", "-c",
+              "exec 7<&0 </dev/null; echo OK",
+              (char *)NULL);
+        _exit(127);
+    }
+
+    /* parent: collect stdout + stderr */
+    close(pipefd[1]);
+    close(errfd[1]);
+
+    char obuf[512] = {0};
+    char ebuf[512] = {0};
+    ssize_t on = read(pipefd[0], obuf, sizeof(obuf) - 1);
+    ssize_t en = read(errfd[0],  ebuf, sizeof(ebuf) - 1);
+    if (on < 0) on = 0;
+    if (en < 0) en = 0;
+    obuf[on] = 0; ebuf[en] = 0;
+    close(pipefd[0]); close(errfd[0]);
+
+    int status = 0;
+    waitpid(pid, &status, 0);
+
+    int saw_ok    = (strstr(obuf, "OK") != NULL);
+    int saw_eperm = (strstr(ebuf, "operation not permitted") != NULL ||
+                     strstr(ebuf, "Operation not permitted") != NULL);
+    int saw_dup_err = (strstr(ebuf, "cannot duplicate fd") != NULL);
+
+    if (saw_ok && !saw_dup_err) {
+        printf("  PASS  /bin/sh exec 7<&0 </dev/null succeeded; stdout=%s",
+               obuf);
+        g_pass++;
+    } else {
+        printf("  FAIL  /bin/sh exec 7<&0 </dev/null failed\n");
+        printf("        stdout = [%s]\n", obuf);
+        printf("        stderr = [%s]\n", ebuf);
+        printf("        wait status = 0x%x\n", status);
+        if (saw_eperm)   printf("        ★ EPERM reported in error\n");
+        if (saw_dup_err) printf("        ★ 'cannot duplicate fd' present\n");
+        g_fail++;
+    }
+}
+
+/*
+ * Companion: run the same thing but with fd 7 PRE-INSTALLED open
+ * before fork.  child inherits open fd 7.  Tests whether the bug
+ * shows up only when fd 7 is open at the moment of the redir.
+ */
+static void
+test_zsh_subshell_with_inherited_fd7(void)
+{
+    BANNER("zsh_subshell_with_inherited_fd7  (parent leaks fd 7 to child)");
+#ifndef __substrate__
+    printf("  SKIP  only meaningful on substrate\n"); g_skip++; return;
+#endif
+    ensure_closed(7);
+    /* Pre-open fd 7 in parent so child inherits it open. */
+    if (dup2(0, 7) != 7) {
+        printf("  SKIP  could not prep fd 7\n"); g_skip++; return;
+    }
+
+    int pipefd[2], errfd[2];
+    if (pipe(pipefd) < 0) { close(7); printf("  SKIP  pipe failed\n"); g_skip++; return; }
+    if (pipe(errfd)  < 0) { close(pipefd[0]); close(pipefd[1]); close(7);
+        printf("  SKIP  pipe failed\n"); g_skip++; return; }
+
+    pid_t pid = fork();
+    if (pid < 0) { printf("  SKIP  fork failed\n"); g_skip++; close(7); return; }
+    if (pid == 0) {
+        close(pipefd[0]); close(errfd[0]);
+        dup2(pipefd[1], 1);
+        dup2(errfd[1],  2);
+        if (pipefd[1] > 2) close(pipefd[1]);
+        if (errfd[1]  > 2) close(errfd[1]);
+        /* fd 7 stays open (no CLOEXEC) */
+        execl("/bin/sh", "/bin/sh", "-c",
+              "exec 7<&0 </dev/null; echo OK",
+              (char *)NULL);
+        _exit(127);
+    }
+
+    close(pipefd[1]); close(errfd[1]);
+    char obuf[512] = {0}, ebuf[512] = {0};
+    ssize_t on = read(pipefd[0], obuf, sizeof(obuf) - 1);
+    ssize_t en = read(errfd[0],  ebuf, sizeof(ebuf) - 1);
+    if (on < 0) on = 0;
+    if (en < 0) en = 0;
+    obuf[on] = 0; ebuf[en] = 0;
+    close(pipefd[0]); close(errfd[0]);
+    int status = 0;
+    waitpid(pid, &status, 0);
+    close(7);
+
+    int saw_ok = (strstr(obuf, "OK") != NULL);
+    if (saw_ok) {
+        printf("  PASS  child handled inherited fd 7 fine; stdout=%s", obuf);
+        g_pass++;
+    } else {
+        printf("  FAIL  with fd 7 inherited:\n");
+        printf("        stdout = [%s]\n", obuf);
+        printf("        stderr = [%s]\n", ebuf);
+        printf("        wait status = 0x%x\n", status);
+        g_fail++;
+    }
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -551,6 +706,8 @@ main(int argc, char *argv[])
     test_movefd_open_fd7();
     test_movefd_open_fd7_filled();
     test_zsh_exec_redir_with_fd7_open();
+    test_zsh_subshell_exec_redir();
+    test_zsh_subshell_with_inherited_fd7();
 
     printf("\n==== %d PASS, %d FAIL, %d SKIP ====\n",
            g_pass, g_fail, g_skip);
