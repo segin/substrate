@@ -348,7 +348,17 @@ static char *read_heredoc(lexer_t *l, const char *delim) {
             // Check delimiter
             if (line_len == strlen(delim) && strncmp(l->input + line_start, delim, line_len) == 0) {
                 l->pos++; // Consume \n
+                /* lexer_clear_lookahead drops the NEWLINE that
+                 * parse_simple_command had already peeked as its
+                 * loop terminator — which doubles as the command
+                 * separator parse_list expects.  Restore a fresh
+                 * NEWLINE so the next command isn't seen as
+                 * unexpected trailing tokens. */
                 lexer_clear_lookahead(l);
+                token_t *nl = calloc(1, sizeof(token_t));
+                nl->type = TOKEN_NEWLINE;
+                nl->value = strdup("\n");
+                lexer_push_back(l, nl);
                 return buf;
             }
             
@@ -365,7 +375,13 @@ static char *read_heredoc(lexer_t *l, const char *delim) {
             l->pos++;
         }
     }
+    /* Hit EOF without finding delim — still restore a separator
+     * for the outer parser so it doesn't trip on stale lookahead. */
     lexer_clear_lookahead(l);
+    token_t *nl = calloc(1, sizeof(token_t));
+    nl->type = TOKEN_NEWLINE;
+    nl->value = strdup("\n");
+    lexer_push_back(l, nl);
     return buf;
 }
 
