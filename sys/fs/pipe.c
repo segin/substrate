@@ -63,6 +63,25 @@ static void fifo_reg_lock_init(void) {
     }
 }
 
+/* Wake every thread parked on `chan`, via BOTH wake mechanisms.
+ *
+ * sleepq_wake_all walks the sleepq hash — wakes threads that
+ * registered via sleepq_add / sleepq_wait (what pipe_wait does).
+ * sched_wakeup walks the global thread list checking
+ * thread->wait_chan == chan — wakes threads that landed in
+ * THREAD_BLOCKED via sched_sleep / sched_sleep_until (what
+ * sys_poll's select-multiplex path does).
+ *
+ * These two channel systems do NOT see each other.  Without
+ * calling both, a thread sleeping in poll() never gets woken by
+ * a pipe_write — visible as torture_pipe scenarios 9, 10, 13
+ * timing out and bsdtar's filter driver hanging until its
+ * internal short poll timeout re-checks. */
+static inline void pipe_wake(void *chan) {
+    sleepq_wake_all(chan);
+    sched_wakeup(chan);
+}
+
 /* Returns 0 on normal wake (data arrived, peer closed, etc.) and
  * -EINTR if psignal yanked us out via signal_interrupt_thread.
  * Order is load-bearing: set THREAD_F_INTERRUPTIBLE before letting
@@ -115,7 +134,7 @@ static size_t pipe_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buf
         p->count--;
     }
 
-    sleepq_wake_all(p->wait_write);
+    pipe_wake(p->wait_write);
     mutex_unlock(&p->lock);
     return i;
 }
@@ -134,13 +153,25 @@ static size_t pipe_write(fs_node_t *node, off_t offset, size_t size, const uint8
     while (written < size) {
         if (p->readers_open == 0) {
             mutex_unlock(&p->lock);
-            return written;
+            /* POSIX: write to a pipe whose reader has closed must
+             * raise SIGPIPE and return -EPIPE — not a short or
+             * zero count.  Preserve the partial-write byte count
+             * if we got some data through before the reader left.  */
+            if (written > 0) return written;
+            extern void psignal(process_t *, int);
+            extern process_t *current_process;
+            if (current_process) psignal(current_process, 13);   /* SIGPIPE */
+            return (size_t)-EPIPE;
         }
 
         while (p->count == PIPE_SIZE) {
             if (p->readers_open == 0) {
                 mutex_unlock(&p->lock);
-                return written;
+                if (written > 0) return written;
+                extern void psignal(process_t *, int);
+                extern process_t *current_process;
+                if (current_process) psignal(current_process, 13);   /* SIGPIPE */
+                return (size_t)-EPIPE;
             }
             if (ep->nonblock) {
                 mutex_unlock(&p->lock);
@@ -162,7 +193,7 @@ static size_t pipe_write(fs_node_t *node, off_t offset, size_t size, const uint8
             p->count++;
         }
 
-        sleepq_wake_all(p->wait_read);
+        pipe_wake(p->wait_read);
     }
 
     mutex_unlock(&p->lock);
@@ -224,12 +255,12 @@ static void pipe_close(fs_node_t *node) {
         if (p->writers_open > 0) {
             p->writers_open--;
         }
-        sleepq_wake_all(p->wait_read);
+        pipe_wake(p->wait_read);
     } else {
         if (p->readers_open > 0) {
             p->readers_open--;
         }
-        sleepq_wake_all(p->wait_write);
+        pipe_wake(p->wait_write);
     }
     int can_free_pipe = (p->readers_open == 0 && p->writers_open == 0);
     /* Anonymous pipes free as soon as both ends are gone.  FIFOs
@@ -494,7 +525,7 @@ int fifo_open(fs_node_t *inode, int oflags, fs_node_t **out) {
                 /* POSIX: open(O_WRONLY|O_NONBLOCK) on a FIFO with no
                  * reader returns ENXIO. */
                 p->writers_open--;
-                sleepq_wake_all(p->wait_read);  /* paranoia */
+                pipe_wake(p->wait_read);  /* paranoia */
                 mutex_unlock(&p->lock);
                 /* Decrement refcount + free node since open failed. */
                 mutex_lock(&g_fifo_reg_lock);
@@ -525,8 +556,8 @@ int fifo_open(fs_node_t *inode, int oflags, fs_node_t **out) {
         }
     }
     /* Wake any open() peers that may be sleeping on us. */
-    if (accmode == O_RDONLY || accmode == O_RDWR) sleepq_wake_all(p->wait_write);
-    if (accmode == O_WRONLY || accmode == O_RDWR) sleepq_wake_all(p->wait_read);
+    if (accmode == O_RDONLY || accmode == O_RDWR) pipe_wake(p->wait_write);
+    if (accmode == O_WRONLY || accmode == O_RDWR) pipe_wake(p->wait_read);
     mutex_unlock(&p->lock);
 
     pipe_endpoint_t *ep = (pipe_endpoint_t *)(uintptr_t)node->impl;
