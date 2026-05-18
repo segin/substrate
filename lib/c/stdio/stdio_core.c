@@ -304,9 +304,13 @@ size_t fread(void *ptr, size_t size, size_t nmemb, FILE *stream) {
 }
 
 size_t fwrite(const void *ptr, size_t size, size_t nmemb, FILE *stream) {
+    /* POSIX: "If size or nitems is 0, fwrite() shall return zero and the
+     * state of the stream remains unchanged."  Also guards the divisions
+     * below against SIGFPE when size=0. */
+    if (size == 0 || nmemb == 0) return 0;
     /* Reject overflow before computing total — hostile callers can pass
      * size*nmemb that wraps to a small positive value on 32-bit. */
-    if (size != 0 && nmemb > SIZE_MAX / size) {
+    if (nmemb > SIZE_MAX / size) {
         stream->error = 1;
         return 0;
     }
