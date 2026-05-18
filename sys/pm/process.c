@@ -1245,7 +1245,31 @@ void proc_exit(int code) {
     current_process->exit_code = code;
     current_process->state = SZOMB;
 
-    // 7. Notify Parent (after transition to SZOMB to avoid missed wait wakeups)
+    /*
+     * 7. Mark all of this process's threads as zombies BEFORE notifying
+     * the parent / waking waiters.  find_waitable_child gates on
+     * wait_threads_all_zombie, which iterates every thread that points
+     * at this proc and requires THREAD_ZOMBIE.  If we wake the parent
+     * first, the scheduler can run the parent's wait4 loop in the gap
+     * between the wake and this transition, see the current thread
+     * still non-zombie, conclude "not yet reapable", and re-sleep on
+     * the same channel.  Since proc_exit only fires a single wake,
+     * that race deadlocks the parent — exactly the "zsh hangs after
+     * the first child dies" symptom under PID-1 zsh + `ps`.
+     *
+     * Order now: state=SZOMB (already set), then mark threads zombie,
+     * then signal + wake.  The wake at the end is the only one that
+     * matters; by the time the parent observes it, everything the
+     * reaper needs is in place.
+     */
+    FOREACH_THREAD(thread) {
+        if (thread->proc != current_process) continue;
+        thread->state = THREAD_ZOMBIE;
+        sleepq_wake_all(thread);
+    }
+
+    // 8. Notify parent (after the SZOMB + thread-ZOMBIE transition so
+    //    the wakeup is observed only when the child is fully reapable)
     if (current_process->p_parent) {
         // Check SA_NOCLDWAIT
         int nocldwait = 0;
@@ -1266,14 +1290,15 @@ void proc_exit(int code) {
              // Notify parent as required
              extern void psignal(process_t *p, int sig);
              psignal(current_process->p_parent, SIGCHLD);
-             
+
              current_process->p_flag |= P_AUTOREAP;
              proc_remove_child(current_process->p_parent, current_process);
              current_process->p_parent = NULL;
         } else {
              extern void psignal(process_t *p, int sig);
              psignal(current_process->p_parent, SIGCHLD);
-             // Wake up waiters after child is fully waitable.
+             // Wake up waiters now that everything they need to observe
+             // (SZOMB + all threads ZOMBIE) is in place.
              sched_wakeup(&current_process->p_parent->p_children);
         }
     } else {
@@ -1283,14 +1308,7 @@ void proc_exit(int code) {
             sched_wakeup(&init->p_children);
         }
     }
-    
-    // 8. Prevent further scheduling of ALL process threads and wake joiners
-    FOREACH_THREAD(thread) {
-        if (thread->proc != current_process) continue;
-        thread->state = THREAD_ZOMBIE;
-        sleepq_wake_all(thread);
-    }
-    
+
     sched_yield();
     
     // Should not reach here
