@@ -748,16 +748,8 @@ static void cb_putc(char c) {
 
     bottom = vt->scroll_bottom;
 
-    /* xenl ("newline ignored after wrap") state machine — see the
-     * matching fb_console.c:fb_cb_putc commentary for rationale.
-     * Same contract: after a printable lands in the last column,
-     * cursor rests with pending_wrap=1 and col=width-1; the actual
-     * row advance happens on the NEXT printable.  CR / explicit
-     * cursor moves / control chars all clear the flag.
-     */
     if (c == '\n') {
         vt->col = 0;
-        vt->pending_wrap = 0;
         if (vt->row >= bottom) {
             hw_text_scroll_region_up_locked(vt, vt->scroll_top, bottom, 1);
         } else {
@@ -767,18 +759,15 @@ static void cb_putc(char c) {
     }
     if (c == '\r') {
         vt->col = 0;
-        vt->pending_wrap = 0;
         return;
     }
     if (c == '\b') {
         if (vt->col > 0) {
             vt->col--;
         }
-        vt->pending_wrap = 0;
         return;
     }
     if (c == '\t') {
-        vt->pending_wrap = 0;
         vt->col = hw_text_next_tab_stop(vt, vt->col);
         if (vt->col >= vt_get_width()) {
             vt->col = 0;
@@ -791,21 +780,15 @@ static void cb_putc(char c) {
         return;
     }
 
-    if (vt->pending_wrap && vt->autowrap) {
-        vt->col = 0;
-        if (vt->row >= bottom) {
-            hw_text_scroll_region_up_locked(vt, vt->scroll_top, bottom, 1);
-        } else {
-            vt->row++;
-        }
-        vt->pending_wrap = 0;
-    }
-
     hw_text_putentryat_locked(vt, c, vt->color, (size_t)vt->col, (size_t)vt->row);
     if (++vt->col >= vt_get_width()) {
         if (vt->autowrap) {
-            vt->col = vt_get_width() - 1;
-            vt->pending_wrap = 1;
+            vt->col = 0;
+            if (vt->row >= bottom) {
+                hw_text_scroll_region_up_locked(vt, vt->scroll_top, bottom, 1);
+            } else {
+                vt->row++;
+            }
         } else {
             vt->col = vt_get_width() - 1; /* Clamp at right margin */
         }
@@ -828,7 +811,6 @@ static void cb_clear_screen(void) {
     hw_text_erase_display_locked(vt, 2);
     vt->row = 0;
     vt->col = 0;
-    vt->pending_wrap = 0;
 
 }
 
@@ -873,7 +855,6 @@ static void cb_move_cursor(int row, int col) {
 
     vt->row = row;
     vt->col = col;
-    vt->pending_wrap = 0;  /* explicit cursor reposition cancels xenl */
     hw_text_update_cursor_locked(vt);
 }
 
