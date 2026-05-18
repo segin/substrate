@@ -22,9 +22,9 @@ ifeq ($(ARCH),i386)
 		--change-section-vma .bss-0xBFC00000
 endif
 
-.PHONY: all clean install arch_kernel core kern pm drivers fs net exec vfs exec_perso vm multiboot freebsd zimage efi tests klib floppy
+.PHONY: all clean install arch_kernel core kern pm drivers fs net exec vfs exec_perso vm multiboot zimage efi tests klib floppy
 
-all: kernel.bin kernel.efi kernel.multiboot kernel.freebsd kernel.zimage
+all: kernel.bin kernel.efi kernel.multiboot kernel.zimage
 	@echo "Kernel build complete (all formats)."
 
 kernel.bin: arch_kernel klib kern pm drivers fs net exec vfs exec_perso vm tests
@@ -80,9 +80,6 @@ kernel.bin: arch_kernel klib kern pm drivers fs net exec vfs exec_perso vm tests
 
 kernel.multiboot: kernel.bin
 	cp kernel.bin kernel.multiboot
-
-kernel.freebsd: kernel.bin
-	cp kernel.bin kernel.freebsd
 
 kernel.zimage: kernel.bin
 	@echo "Building zImage..."
@@ -229,6 +226,7 @@ clean:
 	$(MAKE) -C vm clean
 	$(MAKE) -C lib clean
 	rm -f kernel.bin kernel.zimage kernel.flp kernel.tmp kernel_efi.tmp ksyms_table.c ksyms_table.o ksyms_efi_table.c ksyms_efi_table.o kernel_efi.elf kernel.efi kernel.multiboot kernel.freebsd kern/tests_stub.o
+	# kernel.freebsd kept in the rm line so old build trees self-clean.
 	rm -f arch/$(ARCH)/floppy/stage1.bin arch/$(ARCH)/floppy/stage2.bin
 
 ifeq ($(KERNEL_TESTS),1)
