@@ -1727,6 +1727,8 @@ int kern_poll(struct pollfd *kfds, unsigned int nfds, int timeout) {
 
     while (1) {
         void *wait_chan = NULL;
+        void *first_chan = NULL;
+        int   multi_chan = 0;
 
         ready = 0;
         for (unsigned int i = 0; i < nfds; i++) {
@@ -1734,32 +1736,57 @@ int kern_poll(struct pollfd *kfds, unsigned int nfds, int timeout) {
                 kfds[i].revents = 0;
                 continue;
             }
-            
+
             file_t *f = (kfds[i].fd < MAX_FD) ? current_process->fds[kfds[i].fd] : NULL;
             short mask = 0;
-            
+            void *this_chan = NULL;
+
             if (f && f->f_data) {
-                mask = poll_fs((fs_node_t*)f->f_data, &wait_chan);
+                mask = poll_fs((fs_node_t*)f->f_data, &this_chan);
                 short ret_mask = mask & (kfds[i].events | POLLERR | POLLHUP | POLLNVAL);
                 kfds[i].revents = ret_mask;
+                if (ret_mask == 0 && this_chan) {
+                    if (first_chan == NULL) first_chan = this_chan;
+                    else if (this_chan != first_chan) multi_chan = 1;
+                    wait_chan = this_chan;
+                }
             } else {
                 kfds[i].revents = POLLNVAL;
             }
-            
+
             if (kfds[i].revents) ready++;
         }
-        
+
         if (ready > 0) break;
         if (timeout == 0) break;
 
-        if (timeout > 0) {
-            int sleep_ret = sched_sleep_until(wait_chan ? wait_chan : (void *)current_thread, deadline);
-            if (sleep_ret == -ETIMEDOUT) {
+        /* If multiple pollfds returned different wait channels, we
+         * can only sleep on one — and a wake on a DIFFERENT channel
+         * (the bsdtar/gzip pattern: poll {child-stdin write end,
+         * child-stdout read end}, gzip drains stdin first) won't
+         * reach us.  Fall back to short-interval re-polling so
+         * we re-evaluate all channels at most every ~50 ms.  Pure
+         * single-channel polls keep the sleep-until path.  */
+        uint64_t now = get_ticks();
+        uint64_t short_deadline = now + (HZ / 20 ? HZ / 20 : 1);   /* ~50 ms */
+        uint64_t sleep_deadline =
+            (timeout > 0 && deadline < short_deadline) ? deadline
+          : (multi_chan ? short_deadline : deadline);
+        void *sleep_chan;
+        if (multi_chan) {
+            sleep_chan = (void *)current_thread;  /* timeout-only wait */
+        } else {
+            sleep_chan = wait_chan ? wait_chan : (void *)current_thread;
+        }
+
+        if (timeout > 0 || multi_chan) {
+            int sleep_ret = sched_sleep_until(sleep_chan, sleep_deadline);
+            if (sleep_ret == -ETIMEDOUT && timeout > 0 && get_ticks() >= deadline) {
                 return 0;
             }
         } else {
-            if (wait_chan) {
-                sched_sleep(wait_chan);
+            if (sleep_chan != (void *)current_thread) {
+                sched_sleep(sleep_chan);
             } else {
                 sched_yield();
             }
