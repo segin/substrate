@@ -182,7 +182,7 @@ build_components() {
     # ready for install_to_dist() to drop into /tmp on the image.
     # Each Makefile follows the CROSS=PREFIX convention; the listed
     # subdirs each produce one or more standalone test programs.
-    for dir in "$TOP/tests/lib/sockets" "$TOP/tests/lib/ipc" "$TOP/tests/lib/pty" "$TOP/tests/lib/signal"; do
+    for dir in "$TOP/tests/lib/sockets" "$TOP/tests/lib/ipc" "$TOP/tests/lib/pty" "$TOP/tests/lib/signal" "$TOP/tests/lib/fcntl"; do
         if [ -f "$dir/Makefile" ]; then
             make -C "$dir" clean >/dev/null
             # Tolerant: a broken test build (e.g. cross-libc out of sync)
@@ -417,7 +417,8 @@ install_to_dist() {
         "tests/lib/ipc:torture_ipc" \
         "tests/lib/ipc:torture_pipe" \
         "tests/lib/pty:torture_pty" \
-        "tests/lib/signal:torture_signal"; do
+        "tests/lib/signal:torture_signal" \
+        "tests/lib/fcntl:torture_fcntl"; do
         srcdir="${entry%%:*}"
         binname="${entry##*:}"
         srcbin="$TOP/$srcdir/$binname"
