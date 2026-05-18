@@ -284,10 +284,15 @@ static ast_redirection_t *parse_redirections(lexer_t *l) {
         if (!t || t->type != TOKEN_OPERATOR) break;
         
         redir_type_t type;
+        int strip_tabs = 0;
         if (t->value && strcmp(t->value, "<") == 0) type = REDIR_IN;
         else if (t->value && strcmp(t->value, ">") == 0) type = REDIR_OUT;
         else if (t->value && strcmp(t->value, ">>") == 0) type = REDIR_APPEND;
         else if (t->value && strcmp(t->value, "<<") == 0) type = REDIR_HERE_DOC;
+        else if (t->value && strcmp(t->value, "<<-") == 0) {
+            type = REDIR_HERE_DOC;
+            strip_tabs = 1;
+        }
         else if (t->value && strcmp(t->value, "<&") == 0) type = REDIR_DUP_IN;
         else if (t->value && strcmp(t->value, ">&") == 0) type = REDIR_DUP_OUT;
         else break;
@@ -311,6 +316,7 @@ static ast_redirection_t *parse_redirections(lexer_t *l) {
         r->type = type;
         r->filename = strdup(file->value);
         r->quoted = file->quoted;
+        r->strip_tabs = strip_tabs;
         token_free(file);
         
         if (!head) head = r;
@@ -320,14 +326,14 @@ static ast_redirection_t *parse_redirections(lexer_t *l) {
     return head;
 }
 
-static char *read_heredoc(lexer_t *l, const char *delim) {
+static char *read_heredoc(lexer_t *l, const char *delim, int strip_tabs) {
     // Check if we need to skip the rest of the current line.
     // parse_simple_command loops until a terminator (newline, ;, etc) is peeked.
     // If the terminator was a newline, the lexer scan ALREADY advanced l->pos past it.
     token_t *t = lexer_peek(l);
     int skip = 1;
     if (t && t->type == TOKEN_NEWLINE) skip = 0;
-    
+
     if (skip) {
         while (l->pos < l->len && l->input[l->pos] != '\n') {
             l->pos++;
@@ -343,10 +349,18 @@ static char *read_heredoc(lexer_t *l, const char *delim) {
     size_t line_start = l->pos;
     while (l->pos < l->len) {
         if (l->input[l->pos] == '\n') {
-            size_t line_len = l->pos - line_start;
-            
+            /* POSIX <<- form: strip leading tabs from both the body
+             * lines AND the delimiter line before comparing. */
+            size_t cmp_start = line_start;
+            if (strip_tabs) {
+                while (cmp_start < l->pos && l->input[cmp_start] == '\t') {
+                    cmp_start++;
+                }
+            }
+            size_t line_len = l->pos - cmp_start;
+
             // Check delimiter
-            if (line_len == strlen(delim) && strncmp(l->input + line_start, delim, line_len) == 0) {
+            if (line_len == strlen(delim) && strncmp(l->input + cmp_start, delim, line_len) == 0) {
                 l->pos++; // Consume \n
                 /* lexer_clear_lookahead drops the NEWLINE that
                  * parse_simple_command had already peeked as its
@@ -361,14 +375,14 @@ static char *read_heredoc(lexer_t *l, const char *delim) {
                 lexer_push_back(l, nl);
                 return buf;
             }
-            
-            // Append line + \n
+
+            // Append line + \n (with leading-tab strip for <<-)
             while (len + line_len + 1 >= cap) cap *= 2;
             buf = realloc(buf, cap);
-            memcpy(buf + len, l->input + line_start, line_len + 1);
+            memcpy(buf + len, l->input + cmp_start, line_len + 1);
             len += line_len + 1;
             buf[len] = 0;
-            
+
             l->pos++;
             line_start = l->pos;
         } else {
@@ -473,6 +487,7 @@ static ast_node_t *parse_simple_command(lexer_t *l) {
             pending_fd = -1;
              
             redir_type_t rtype;
+            int strip_tabs = 0;
             if (strcmp(t->value, "<") == 0) {
                 rtype = REDIR_IN;
                 if (fd == -1) fd = 0;
@@ -485,6 +500,10 @@ static ast_node_t *parse_simple_command(lexer_t *l) {
             } else if (strcmp(t->value, "<<") == 0) {
                  rtype = REDIR_HERE_DOC;
                  if (fd == -1) fd = 0;
+            } else if (strcmp(t->value, "<<-") == 0) {
+                 rtype = REDIR_HERE_DOC;
+                 strip_tabs = 1;
+                 if (fd == -1) fd = 0;
             } else if (strcmp(t->value, "<&") == 0) { // Future
                  rtype = REDIR_DUP_IN;
             } else if (strcmp(t->value, ">&") == 0) { // Future
@@ -492,7 +511,7 @@ static ast_node_t *parse_simple_command(lexer_t *l) {
             } else {
                  // Unknown operator? Should have caught above.
                  token_free(t);
-                 continue; 
+                 continue;
             }
             token_free(t);
 
@@ -504,17 +523,18 @@ static ast_node_t *parse_simple_command(lexer_t *l) {
                  ast_free((ast_node_t*)cmd);
                  return NULL;
             }
-            
+
             if (rtype == REDIR_HERE_DOC) {
                 unquote_word(file->value);
             }
-             
+
             cmd_add_redir(cmd, fd, rtype, file->value);
             // We need to pass the quoted flag to cmd_add_redir or set it manually
             // Let's set it manually on the last added redirection
             ast_redirection_t *last = cmd->base.redirections;
             while (last->next) last = last->next;
             last->quoted = file->quoted;
+            last->strip_tabs = strip_tabs;
             free(file);
         }
         else {
@@ -538,7 +558,7 @@ static ast_node_t *parse_simple_command(lexer_t *l) {
         ast_redirection_t *r = cmd->base.redirections;
         while (r) {
             if (r->type == REDIR_HERE_DOC) {
-                r->heredoc_content = read_heredoc(l, r->filename);
+                r->heredoc_content = read_heredoc(l, r->filename, r->strip_tabs);
             }
             r = r->next;
         }

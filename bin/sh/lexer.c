@@ -55,7 +55,20 @@ static token_t *scan_operator(lexer_t *l) {
     // And simplistic ones like > < & | ; ( )
 
     char next = peek_n(l, 1);
-    
+    char next2 = peek_n(l, 2);
+
+    /* 3-char op: <<- (POSIX heredoc with leading-tab strip).
+     * Recognise it before the 2-char `<<` test so `<<-EOF`
+     * doesn't lex as `<<` + `-EOF`. */
+    if (c == '<' && next == '<' && next2 == '-') {
+        char val3[4] = {0};
+        val3[0] = advance(l);
+        val3[1] = advance(l);
+        val3[2] = advance(l);
+        tok->value = strdup(val3);
+        return tok;
+    }
+
     // Check 2-char ops
     if ((c == '&' && next == '&') ||
         (c == '|' && next == '|') ||
@@ -66,7 +79,7 @@ static token_t *scan_operator(lexer_t *l) {
         (c == '>' && next == '|') ||
         (c == '<' && next == '&') ||
         (c == '>' && next == '&')) {
-        
+
         val[0] = advance(l);
         val[1] = advance(l);
         tok->value = strdup(val);

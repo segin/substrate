@@ -34,6 +34,7 @@ typedef struct ast_redirection {
     char *filename;         // Target filename or word
     char *heredoc_content;  // Content for HERE_DOC
     int quoted;             // True if delimiter was quoted (for <<)
+    int strip_tabs;         // True for <<- form (POSIX tab-strip heredoc)
     redir_type_t type;
     struct ast_redirection *next;
 } ast_redirection_t;
