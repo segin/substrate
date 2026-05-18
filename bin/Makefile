@@ -55,6 +55,7 @@ SUBDIRS = \
 	rm \
 	rmdir \
 	sed \
+	sh \
 	size \
 	sleep \
 	sort \

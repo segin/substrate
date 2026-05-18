@@ -147,7 +147,7 @@ Every public library under `lib/` produces both flavors from a single source tre
 
 - **Static archive** `libX.a` — compiled with `USER_CFLAGS` (`-fno-pie`),
   what `-lX` resolves to in source-tree builds.  Used by every binary
-  that statically links today (`bin/echo`, ..., `sbin/init`).
+  that statically links today (`bin/echo`, `bin/sh`, ..., `sbin/init`).
 - **Shared object** `libX.so.0` — compiled with `SHLIB_CFLAGS`
   (`-fPIC`), linked with `-shared -Bsymbolic-functions -z now`,
   carrying the `DT_SONAME` `libX.so.0`.  Installed under
