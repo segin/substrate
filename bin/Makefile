@@ -35,7 +35,6 @@ SUBDIRS = \
 	login \
 	ls \
 	lspci \
-	make \
 	mkdir \
 	mknod \
 	more \
