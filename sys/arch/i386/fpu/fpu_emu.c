@@ -98,6 +98,20 @@ void fpu_init(void) {
         __asm__ volatile("fninit");
         if (fpu_use_fxsave) {
             kprint("FPU: Using FXSAVE/FXRSTOR context format\n");
+            /* SSE / SSE2 are gated by CR4.OSFXSR (bit 9): without it
+             * the CPU raises #UD on any SSE opcode in user mode, even
+             * if CPUID reports SSE/SSE2 support.  Also set OSXMMEXCPT
+             * (bit 10) so SIMD FP exceptions raise #XF rather than the
+             * legacy #UD fallback.  We gate this on FXSR availability
+             * because OSFXSR without FXSAVE/FXRSTOR is meaningless. */
+            if (i386_cpu_has_cr4()) {
+                uint32_t cr4;
+                __asm__ volatile("mov %%cr4, %0" : "=r"(cr4));
+                cr4 |= 0x200;   /* CR4.OSFXSR */
+                cr4 |= 0x400;   /* CR4.OSXMMEXCPT */
+                __asm__ volatile("mov %0, %%cr4" : : "r"(cr4));
+                kprint("FPU: SSE enabled (CR4.OSFXSR + OSXMMEXCPT)\n");
+            }
         } else {
             kprint("FPU: Using FNSAVE/FRSTOR context format\n");
         }
