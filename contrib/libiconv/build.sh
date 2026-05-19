@@ -37,7 +37,8 @@ echo "==> configure"
     --host=i386-unknown-substrate \
     --prefix=/usr \
     --enable-shared --enable-static \
-    --disable-nls
+    --disable-nls \
+    CFLAGS="-march=i486 -mtune=i486 -O2 -g"
 
 echo "==> make -j${JOBS}"
 make -j"${JOBS}"

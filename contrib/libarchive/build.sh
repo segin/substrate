@@ -91,7 +91,7 @@ fi
     CC=i386-unknown-substrate-gcc \
     AR=i386-unknown-substrate-ar \
     RANLIB=i386-unknown-substrate-ranlib \
-    CFLAGS="-O2 -g -fno-pie ${ARCHIVE_BACKEND_CFLAGS}" \
+    CFLAGS="-march=i486 -mtune=i486 -O2 -g -fno-pie ${ARCHIVE_BACKEND_CFLAGS}" \
     LDFLAGS="-fno-pie ${ARCHIVE_BACKEND_LDFLAGS}"
 
 make -j"${JOBS}"

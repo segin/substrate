@@ -56,7 +56,7 @@ make -j"${JOBS}" \
     CC="${CROSS_CC}" \
     AR="${CROSS_AR}" \
     RANLIB="${CROSS_RANLIB}" \
-    CFLAGS="-Wall -Winline -O2 -g -D_FILE_OFFSET_BITS=64 -fno-pie" \
+    CFLAGS="-march=i486 -mtune=i486 -Wall -Winline -O2 -g -D_FILE_OFFSET_BITS=64 -fno-pie" \
     LDFLAGS="-fno-pie" \
     libbz2.a bzip2 bzip2recover
 
@@ -65,7 +65,7 @@ echo "==> Building shared libbz2.so.1.0.8"
 make -f Makefile-libbz2_so clean >/dev/null 2>&1 || true
 make -j"${JOBS}" -f Makefile-libbz2_so \
     CC="${CROSS_CC}" \
-    CFLAGS="-fPIC -Wall -Winline -O2 -g -D_FILE_OFFSET_BITS=64"
+    CFLAGS="-march=i486 -mtune=i486 -fPIC -Wall -Winline -O2 -g -D_FILE_OFFSET_BITS=64"
 
 # Stage into DESTDIR with substrate's `/usr/{bin,lib,include}` layout.
 echo "==> Installing into ${DESTDIR}"

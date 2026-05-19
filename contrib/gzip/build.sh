@@ -45,7 +45,8 @@ echo "==> configure"
 "${TREE_DIR}/configure" \
     --host=i386-unknown-substrate \
     --prefix=/usr \
-    --disable-gcc-warnings
+    --disable-gcc-warnings \
+    CFLAGS="-march=i486 -mtune=i486 -O2 -g"
 
 echo "==> make -j${JOBS}"
 make -j"${JOBS}"

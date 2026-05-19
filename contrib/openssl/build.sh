@@ -42,10 +42,13 @@ cd "${TREE_DIR}"
 export LDFLAGS="${LDFLAGS:-} -Wl,--no-as-needed -lc"
 
 echo "==> Configure"
+# -march=i486 -mtune=i486 baseline so we don't accidentally pull in
+# SSE/SSE2 codegen via the default arch on the substrate cross gcc.
 ./Configure linux-generic32 \
     --prefix=/usr \
     --openssldir=/etc/ssl \
     --cross-compile-prefix=i386-unknown-substrate- \
+    -march=i486 -mtune=i486 \
     no-asm \
     no-engine \
     no-tests \

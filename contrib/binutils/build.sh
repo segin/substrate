@@ -173,7 +173,9 @@ EOF
         OBJCOPY="${TARGET_TRIPLE}-objcopy" \
         OBJDUMP="${TARGET_TRIPLE}-objdump" \
         RANLIB="${TARGET_TRIPLE}-ranlib" \
-        STRIP="${TARGET_TRIPLE}-strip"
+        STRIP="${TARGET_TRIPLE}-strip" \
+        CFLAGS="-march=i486 -mtune=i486 -O2 -g" \
+        CXXFLAGS="-march=i486 -mtune=i486 -O2 -g"
 
     echo "==> Building (-j $PARALLEL)"
     make -j "$PARALLEL"

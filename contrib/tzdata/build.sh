@@ -76,7 +76,7 @@ PATH="${STAGE1_PREFIX}/bin:${PATH}" \
     # libsys.so.0) without forcing every caller to spell out -lsys.
     make -j"${JOBS}" \
         CC=i386-unknown-substrate-gcc \
-        CFLAGS="-DHAVE_GETTEXT=0 -DTHREAD_SAFE=0 -DUSE_LTZ=0 -DHAVE_STRFTIME_L=0 -fno-pie" \
+        CFLAGS="-march=i486 -mtune=i486 -DHAVE_GETTEXT=0 -DTHREAD_SAFE=0 -DUSE_LTZ=0 -DHAVE_STRFTIME_L=0 -fno-pie" \
         LDFLAGS="-fno-pie -Wl,--copy-dt-needed-entries" \
         zic zdump
 

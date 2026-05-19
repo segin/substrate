@@ -78,7 +78,8 @@ echo "==> configure"
     --enable-http --enable-ftp --enable-file --enable-tftp \
     --enable-smtp --enable-pop3 --enable-imap \
     --enable-gopher --enable-dict --enable-telnet \
-    --enable-cookies --enable-progress-meter
+    --enable-cookies --enable-progress-meter \
+    CFLAGS="-march=i486 -mtune=i486 -O2 -g"
 
 echo "==> make -j${JOBS}"
 make -j"${JOBS}"

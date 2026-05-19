@@ -90,7 +90,8 @@ export LDFLAGS="${LDFLAGS:-} -Wl,--copy-dt-needed-entries"
     --disable-logger --disable-whois \
     --disable-ifconfig \
     --disable-rexec --disable-rexecd \
-    --enable-telnet --enable-telnetd
+    --enable-telnet --enable-telnetd \
+    CFLAGS="-march=i486 -mtune=i486 -O2 -g"
 
 echo "==> make -j${JOBS}"
 make -j"${JOBS}"
