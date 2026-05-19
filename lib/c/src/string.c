@@ -569,3 +569,39 @@ size_t strxfrm(char *dest, const char *src, size_t n) {
     }
     return len;
 }
+
+/*
+ * strsep — 4.3BSD-style tokeniser.  Like strtok but doesn't
+ * conflate adjacent delimiters and uses a caller-provided
+ * pointer-to-pointer for state instead of a static.  Returns
+ * the next token or NULL when *stringp is NULL.
+ */
+char *strsep(char **stringp, const char *delim) {
+    char *s = *stringp;
+    if (s == NULL) return NULL;
+    for (char *p = s; *p != '\0'; p++) {
+        for (const char *d = delim; *d != '\0'; d++) {
+            if (*p == *d) {
+                *p = '\0';
+                *stringp = p + 1;
+                return s;
+            }
+        }
+    }
+    *stringp = NULL;
+    return s;
+}
+
+/*
+ * strcasestr — case-insensitive strstr.  GNU extension.
+ */
+char *strcasestr(const char *haystack, const char *needle) {
+    if (*needle == '\0') return (char *)haystack;
+    size_t nlen = strlen(needle);
+    for (const char *p = haystack; *p != '\0'; p++) {
+        if (strncasecmp(p, needle, nlen) == 0) {
+            return (char *)p;
+        }
+    }
+    return NULL;
+}

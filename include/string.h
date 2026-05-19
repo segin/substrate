@@ -42,6 +42,8 @@ size_t strxfrm(char *dest, const char *src, size_t n);
  * #include <string.h> and expect these to be declared. */
 int strcasecmp(const char *s1, const char *s2);
 int strncasecmp(const char *s1, const char *s2, size_t n);
+char *strcasestr(const char *haystack, const char *needle);
+char *strsep(char **stringp, const char *delim);
 
 char *strchr(const char *s, int c);
 char *strrchr(const char *s, int c);

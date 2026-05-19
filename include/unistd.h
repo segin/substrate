@@ -103,6 +103,7 @@ gid_t getegid(void);
 int setuid(uid_t uid);
 int setgid(gid_t gid);
 pid_t getpgrp(void);
+pid_t getpgid(pid_t pid);
 int setpgid(pid_t pid, pid_t pgid);
 pid_t tcgetpgrp(int fd);
 int tcsetpgrp(int fd, pid_t pgrp);

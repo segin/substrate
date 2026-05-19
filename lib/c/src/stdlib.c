@@ -1571,3 +1571,46 @@ int login_tty(int fd) {
     if (fd > 2) close(fd);
     return 0;
 }
+
+/*
+ * reallocarray(ptr, nmemb, size) — realloc with overflow-safe
+ * nmemb * size multiplication.  OpenBSD extension.  Returns NULL
+ * (and leaves ptr untouched) if the multiplication would overflow.
+ */
+void *reallocarray(void *ptr, size_t nmemb, size_t size) {
+    if (size != 0 && nmemb > SIZE_MAX / size) {
+        errno = ENOMEM;
+        return NULL;
+    }
+    return realloc(ptr, nmemb * size);
+}
+
+/*
+ * mkstemps(template, suffixlen) — like mkstemp but allows a
+ * fixed-length suffix after the XXXXXX block.  e.g. "foo.XXXXXX.tmp"
+ * with suffixlen=4 randomises the XXXXXX while leaving ".tmp" intact.
+ */
+int mkstemps(char *tmpl, int suffixlen) {
+    if (tmpl == NULL || suffixlen < 0) {
+        errno = EINVAL;
+        return -1;
+    }
+    size_t tlen = strlen(tmpl);
+    if ((size_t)suffixlen + MKSTEMP_SUFFIX_LEN > tlen) {
+        errno = EINVAL;
+        return -1;
+    }
+    char *suffix = tmpl + tlen - suffixlen - MKSTEMP_SUFFIX_LEN;
+    if (strncmp(suffix, MKSTEMP_SUFFIX, MKSTEMP_SUFFIX_LEN) != 0) {
+        errno = EINVAL;
+        return -1;
+    }
+    for (int attempt = 0; attempt < 256; attempt++) {
+        fill_temp_suffix(suffix);
+        int fd = open(tmpl, O_CREAT | O_EXCL | O_RDWR, 0600);
+        if (fd >= 0) return fd;
+        if (errno != EEXIST) return -1;
+    }
+    errno = EEXIST;
+    return -1;
+}
