@@ -215,19 +215,24 @@ static struct block_meta *coalesce_block(struct block_meta *block) {
 }
 
 void *malloc(size_t size) {
-    if (size <= 0) return NULL;
+    /* POSIX: malloc(0) may return either NULL or a unique pointer
+     * that can be passed to free.  Most modern libcs (glibc/musl)
+     * return a non-NULL pointer.  Callers like mandoc_malloc treat
+     * NULL as a fatal allocation failure, so we follow the
+     * non-NULL convention to avoid false-positive OOM exits. */
+    if (size == 0) size = 1;
 
     struct block_meta *block;
     size_t aligned_size = ALIGN(size);
 
     if (!global_base) {
         block = request_space(NULL, aligned_size);
-        if (!block) return NULL;
+        if (!block) { errno = ENOMEM; return NULL; }
     } else {
         block = find_free_block(aligned_size);
         if (!block) {
             block = request_space(global_tail, aligned_size);
-            if (!block) return NULL;
+            if (!block) { errno = ENOMEM; return NULL; }
         }
     }
 
@@ -259,6 +264,7 @@ void free(void *ptr) {
 void *calloc(size_t nmemb, size_t size) {
     /* Check overflow before multiplication to prevent allocating too-small buffer. */
     if (nmemb != 0 && size > SIZE_MAX / nmemb) {
+        errno = ENOMEM;
         return NULL;
     }
 
@@ -277,7 +283,7 @@ void *realloc(void *ptr, size_t size) {
     }
 
     struct block_meta *block = payload_block(ptr);
-    if (block->magic != MAGIC) return NULL;
+    if (block->magic != MAGIC) { errno = EINVAL; return NULL; }
 
     if (block->size >= size) {
         if (block->size >= ALIGN(size) + BLOCK_META_SIZE + ALIGNMENT) {

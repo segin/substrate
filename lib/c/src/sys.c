@@ -489,8 +489,18 @@ void *mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset)
         return (void *)-1;
     }
     uint32_t pgoff = (uint32_t)(offset >> 12);
-    
-    return (void *)(uintptr_t)_syscall6(SYS_MMAP, (uintptr_t)addr, (uintptr_t)length, prot, flags, fd, (uintptr_t)pgoff);
+
+    long r = (long)_syscall6(SYS_MMAP, (uintptr_t)addr, (uintptr_t)length,
+                             prot, flags, fd, (uintptr_t)pgoff);
+    /* Kernel returns negative errno on failure.  Treat any -1..-4095
+     * value as an errno (matches Linux kernel convention) and surface
+     * via errno + MAP_FAILED.  Without this, a failed mmap returns a
+     * high-address-looking pointer that the caller may dereference. */
+    if (r < 0 && r >= -4095) {
+        errno = (int)(-r);
+        return (void *)-1;
+    }
+    return (void *)(uintptr_t)r;
 }
 
 int munmap(void *addr, size_t length) {
