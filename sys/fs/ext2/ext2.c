@@ -24,11 +24,26 @@ void bio_dev_invalidate(void *d, int64_t b) { (void)d; (void)b; }
 void bio_dev_purge(void *d)                 { (void)d; }
 #endif
 
-// Cache for dynamically created nodes
-#define EXT2_NODE_CACHE_SIZE 64
+/* Cache for in-memory inodes.
+ *
+ * Each slot pins one inode for as long as any FD on the system holds it
+ * open (pin_count > 0).  Real workloads pin a lot of slots transiently:
+ * a single gcc compile drags in cc1 + as + ld + libc.so + libgcc.a + a
+ * couple dozen header includes, and configure runs that gcc invocation
+ * inside a shell that's itself holding script-source and heredoc fds.
+ * 64 used to be enough for the in-tree test suite; configure exhausts
+ * it (alloc_node fail with pinned=63 of 64) on the first conftest run.
+ * Each cache slot is ~2 KB so 256 entries is ~512 KB static, fine on
+ * the 128 MB QEMU configuration. */
+#define EXT2_NODE_CACHE_SIZE 256
 static ext2_node_t ext2_node_cache[EXT2_NODE_CACHE_SIZE];
 static fs_node_t ext2_fs_node_cache[EXT2_NODE_CACHE_SIZE];
 static int ext2_node_cache_idx = 0;
+
+/* Forward decls — ext2_node_close needs these to complete a deferred
+ * unlink (set up by ext2_unlink when pin_count > 0).  Their full
+ * definitions live below alongside the rest of the inode allocator. */
+static int ext2_free_inode_blocks(ext2_fs_t *fs, ext2_inode_t *inode);
 
 static void ext2_node_open(fs_node_t *node) {
     if (!node) return;
@@ -43,6 +58,29 @@ static void ext2_node_close(fs_node_t *node) {
     if (!ctx) return;
     if (ctx->pin_count > 0) {
         ctx->pin_count--;
+    }
+    /* Deferred unlink: ext2_unlink saw open FDs and set ctx->orphaned
+     * instead of freeing the inode + data blocks.  Now that the last
+     * FD has closed, complete the delete the unlink path skipped. */
+    if (ctx->pin_count == 0 && ctx->orphaned && ctx->fs) {
+        (void)ext2_free_inode_blocks(ctx->fs, &ctx->inode);
+        ext2_free_inode(ctx->fs, ctx->inode_num,
+                        ctx->was_dir_at_unlink ? 1 : 0);
+        memset(&ctx->inode, 0, sizeof(ctx->inode));
+        node->length = 0;
+        ctx->orphaned = 0;
+        ctx->was_dir_at_unlink = 0;
+        /* Invalidate the cache slot.  ext2_alloc_node looks up by
+         * (fs, inode_num); if we leave those set, the next caller
+         * that asks for the now-freed inode_num (ext2_alloc_inode
+         * hands recently-freed inodes back out fast — mkstemp loops
+         * trigger this almost immediately) gets this stale slot
+         * with the zeroed inode, instead of a freshly populated one.
+         * Clearing fs/inode_num forces the alloc path to recycle
+         * this slot and copy in the on-disk inode that ext2_finddir
+         * just read.  */
+        ctx->fs = NULL;
+        ctx->inode_num = 0;
     }
 }
 
@@ -988,12 +1026,12 @@ uint32_t ext2_inode_write(ext2_node_t *node, off_t offset, uint32_t size, const 
 
     const uint8_t *buf = (const uint8_t *)buffer;
     uint32_t total_written = 0;
-    
+
     while (size > 0) {
         uint32_t block_idx = (uint32_t)(offset / fs->block_size);
         uint32_t block_offset = (uint32_t)(offset % fs->block_size);
         uint32_t block_num = ext2_get_block_num(fs, inode, block_idx, indirect, dindirect, tindirect);
-        
+
         // Allocate block if it doesn't exist
         if (block_num == 0) {
             if (ext2_alloc_inode_block(fs, inode, block_idx, indirect, dindirect, tindirect) != 0) {
@@ -1097,6 +1135,26 @@ fs_node_t *ext2_alloc_node(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_t *inod
     // 1. Search for existing node in cache
     for (int i = 0; i < EXT2_NODE_CACHE_SIZE; i++) {
         if (ext2_node_cache[i].fs == fs && ext2_node_cache[i].inode_num == inode_num) {
+            /* Stale-slot guard: if the cached inode shows i_links_count==0
+             * (deleted) but the disk inode the caller just read shows it's
+             * live again, this slot was left behind by a prior unlink/rmdir
+             * that couldn't evict because pin_count was non-zero (callers
+             * that didn't take the orphan-deferred-delete path).  The inode
+             * number has since been reallocated for a different file —
+             * possibly a different file TYPE (e.g. directory → regular
+             * file).  Returning this slot would hand back the old fs_node_t
+             * with stale flags/callbacks (no `write` for the old directory),
+             * which makes the new file unwritable.  Force the new-slot path
+             * to recycle it. */
+            if (ext2_node_cache[i].inode.i_links_count == 0 &&
+                inode->i_links_count > 0 &&
+                ext2_node_cache[i].pin_count == 0) {
+                ext2_node_cache[i].fs = NULL;
+                ext2_node_cache[i].inode_num = 0;
+                memset(&ext2_fs_node_cache[i], 0,
+                       sizeof(ext2_fs_node_cache[i]));
+                continue;
+            }
             ext2_alloc_node_hits++;
             return &ext2_fs_node_cache[i];
         }
@@ -3126,14 +3184,34 @@ int ext2_unlink(fs_node_t *dir, const char *name) {
 
     if (victim_ctx->inode.i_links_count == 0) {
         victim_ctx->inode.i_dtime = (uint32_t)get_time();
-        ret = ext2_free_inode_blocks(fs, &victim_ctx->inode);
-        if (ret != 0) return ret;
-        if (ext2_write_inode(fs, victim_ctx->inode_num, &victim_ctx->inode) != 0) {
-            return -EIO;
+        if (victim_ctx->pin_count > 0) {
+            /* POSIX unlink-while-open semantics: the directory entry
+             * is gone (already removed above) so the file is no
+             * longer reachable by name, but the inode and its data
+             * blocks must remain valid for the open FDs.  Mark the
+             * in-memory state as orphaned; ext2_node_close will free
+             * the blocks and inode once pin_count drops to 0. */
+            victim_ctx->orphaned = 1;
+            victim_ctx->was_dir_at_unlink = 0;
+            if (ext2_write_inode(fs, victim_ctx->inode_num, &victim_ctx->inode) != 0) {
+                return -EIO;
+            }
+        } else {
+            ret = ext2_free_inode_blocks(fs, &victim_ctx->inode);
+            if (ret != 0) return ret;
+            if (ext2_write_inode(fs, victim_ctx->inode_num, &victim_ctx->inode) != 0) {
+                return -EIO;
+            }
+            ext2_free_inode(fs, victim_ctx->inode_num, 0);
+            memset(&victim_ctx->inode, 0, sizeof(victim_ctx->inode));
+            victim->length = 0;
+            /* Invalidate the cache slot — see matching comment in
+             * ext2_node_close.  Same hazard: inode_num gets reused
+             * fast and the next finddir for it would otherwise hit
+             * the stale slot. */
+            victim_ctx->fs = NULL;
+            victim_ctx->inode_num = 0;
         }
-        ext2_free_inode(fs, victim_ctx->inode_num, 0);
-        memset(&victim_ctx->inode, 0, sizeof(victim_ctx->inode));
-        victim->length = 0;
     } else {
         /* Update ctime: link count changed */
         victim_ctx->inode.i_ctime = (uint32_t)get_time();

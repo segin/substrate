@@ -332,6 +332,13 @@ typedef struct {
     ext2_inode_t inode;
     uint16_t cache_slot;
     uint16_t pin_count;
+    /* Set by ext2_unlink when the dirent is removed but FDs are
+     * still open against the inode.  POSIX requires the data to
+     * remain accessible until the last close — when ext2_node_close
+     * decrements pin_count to 0 and sees this flag, it frees the
+     * on-disk blocks and inode that unlink deferred. */
+    uint8_t orphaned;
+    uint8_t was_dir_at_unlink;   /* preserved across deferred delete */
     struct dirent current_dirent; // For readdir
 
     // Readdir cache for sequential access optimization
