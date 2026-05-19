@@ -1,0 +1,82 @@
+#!/bin/sh
+# /etc/rc.d/20-network — apply per-interface config from /etc/network.conf.
+
+CONF=/etc/network.conf
+
+apply_static_v4() {
+    iface=$1
+    spec=$2
+    gw=$3
+    ip=${spec%/*}
+    prefix=${spec#*/}
+    case "$prefix" in
+        8)  mask=255.0.0.0 ;;
+        16) mask=255.255.0.0 ;;
+        24) mask=255.255.255.0 ;;
+        25) mask=255.255.255.128 ;;
+        30) mask=255.255.255.252 ;;
+        32) mask=255.255.255.255 ;;
+        *)  mask=255.255.255.0 ;;
+    esac
+    /sbin/ifconfig "$iface" "$ip" netmask "$mask"
+    [ -n "$gw" ] && /sbin/ifconfig "$iface" gateway "$gw"
+    /sbin/ifconfig "$iface" up
+}
+
+apply_static_v6() {
+    iface=$1
+    spec=$2
+    gw=$3
+    /sbin/ifconfig "$iface" inet6 add "$spec"
+    [ -n "$gw" ] && /sbin/ifconfig "$iface" inet6 gw "$gw"
+}
+
+start_one_line() {
+    iface=$1; shift
+    mode=$1;  shift
+    case "$mode" in
+        static)
+            spec=$1; shift
+            gw=
+            if [ "${1:-}" = "gateway" ]; then gw=$2; fi
+            apply_static_v4 "$iface" "$spec" "$gw"
+            ;;
+        dhcp)
+            /sbin/dhclient "$iface"
+            ;;
+        inet6)
+            if [ "$1" = "static" ]; then
+                shift
+                spec=$1; shift
+                gw=
+                if [ "${1:-}" = "gateway" ]; then gw=$2; fi
+                apply_static_v6 "$iface" "$spec" "$gw"
+            fi
+            ;;
+    esac
+}
+
+case "${1:-start}" in
+    start)
+        [ -r "$CONF" ] || { echo "no $CONF"; exit 0; }
+        while read -r iface mode rest; do
+            case "$iface" in ''|\#*) continue;; esac
+            start_one_line "$iface" "$mode" $rest
+        done < "$CONF"
+        ;;
+    stop)
+        [ -r "$CONF" ] || exit 0
+        while read -r iface rest; do
+            case "$iface" in ''|\#*) continue;; esac
+            /sbin/ifconfig "$iface" 0.0.0.0 2>/dev/null
+            /sbin/ifconfig "$iface" down 2>/dev/null
+        done < "$CONF"
+        ;;
+    status)
+        /sbin/ifconfig
+        ;;
+    restart)
+        $0 stop
+        $0 start
+        ;;
+esac

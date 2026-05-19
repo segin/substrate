@@ -1,0 +1,19 @@
+#!/bin/sh
+# /etc/rc.d/00-hostname — set the kernel hostname from /etc/hostname.
+
+case "${1:-start}" in
+    start)
+        if [ -r /etc/hostname ]; then
+            /bin/hostname -F /etc/hostname
+        fi
+        ;;
+    stop)
+        ;;
+    status)
+        /bin/hostname
+        ;;
+    restart)
+        $0 stop
+        $0 start
+        ;;
+esac

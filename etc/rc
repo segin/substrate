@@ -1,0 +1,29 @@
+#!/bin/sh
+# /etc/rc — substrate's BSD-style service runner.
+#
+# Walked once at boot by /sbin/init (well, by a /etc/rc.d/* loader
+# the init invokes).  Scripts in /etc/rc.d are sourced or executed
+# in lexicographic order, each one a self-contained "start the X
+# subsystem" hook.
+#
+# Each /etc/rc.d/<name> script must accept a single argument:
+#   start | stop | restart | status
+# and return 0 on success, non-zero otherwise.
+#
+# A leading numeric prefix in the filename controls order:
+#   /etc/rc.d/00-hostname        — runs first
+#   /etc/rc.d/10-network         — runs after hostname
+#   /etc/rc.d/50-dhclient        — runs after static network setup
+#   /etc/rc.d/90-getty           — runs last (init handles getty respawn
+#                                  separately; here it's an explicit hook
+#                                  for late services)
+
+action=${1:-start}
+
+if [ -d /etc/rc.d ]; then
+    for f in /etc/rc.d/*; do
+        [ -x "$f" ] || continue
+        echo "$f $action"
+        "$f" "$action"
+    done
+fi
