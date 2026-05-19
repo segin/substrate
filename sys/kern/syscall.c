@@ -1710,21 +1710,25 @@ int sys_fremovexattr(int fd, const char *name)           { (void)fd;   (void)nam
 
 int sys_poll(struct pollfd *fds, unsigned int nfds, int timeout) {
     if (nfds > 1024) return -22;
+    /* nfds == 0 is the "poll as sleep" idiom — kmalloc(0) returns
+     * NULL on substrate so round up to one pollfd of pad and skip
+     * the copyin/copyout. */
     size_t ksize = nfds * sizeof(struct pollfd);
-    struct pollfd *kfds = kmalloc(ksize);
+    size_t alloc_size = ksize > 0 ? ksize : sizeof(struct pollfd);
+    struct pollfd *kfds = kmalloc(alloc_size);
     if (!kfds) return -12;
-    if (copyin(fds, kfds, ksize) != 0) {
-        kfree(kfds, ksize);
+    if (ksize > 0 && copyin(fds, kfds, ksize) != 0) {
+        kfree(kfds, alloc_size);
         return -14;
     }
     int ret = kern_poll(kfds, nfds, timeout);
-    if (ret >= 0) {
+    if (ret >= 0 && ksize > 0) {
         if (copyout(kfds, fds, ksize) != 0) {
-            kfree(kfds, ksize);
+            kfree(kfds, alloc_size);
             return -14;
         }
     }
-    kfree(kfds, ksize);
+    kfree(kfds, alloc_size);
     return ret;
 }
 
@@ -1794,8 +1798,22 @@ int kern_poll(struct pollfd *kfds, unsigned int nfds, int timeout) {
             sleep_chan = wait_chan ? wait_chan : (void *)current_thread;
         }
 
+        /* Mark the sleep interruptible so signal delivery wakes us
+         * via signal_interrupt_thread() — without this the post-sleep
+         * sig_pending check below can never fire because we never
+         * leave the sleep when a signal lands. */
+        if (current_thread)
+            current_thread->flags |= THREAD_F_INTERRUPTIBLE;
+
         if (timeout > 0 || multi_chan) {
             int sleep_ret = sched_sleep_until(sleep_chan, sleep_deadline);
+            if (current_thread)
+                current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
+            if (sleep_ret == -EINTR ||
+                (current_thread &&
+                 (current_thread->sig_pending & ~current_thread->sig_mask))) {
+                return -EINTR;
+            }
             if (sleep_ret == -ETIMEDOUT && timeout > 0 && get_ticks() >= deadline) {
                 return 0;
             }
@@ -1805,10 +1823,11 @@ int kern_poll(struct pollfd *kfds, unsigned int nfds, int timeout) {
             } else {
                 sched_yield();
             }
+            if (current_thread)
+                current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
         }
 
         if (current_thread &&
-            (current_thread->flags & THREAD_F_INTERRUPTIBLE) &&
             (current_thread->sig_pending & ~current_thread->sig_mask)) {
             return -EINTR;
         }

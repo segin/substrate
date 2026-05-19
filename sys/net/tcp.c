@@ -640,7 +640,7 @@ int tcp_poll(tcp_pcb_t *p, short events, void **wait_chan) {
     if (!p) return POLLNVAL;
     if (p->state == TCP_LISTEN) {
         if ((events & POLLIN) && p->accept_count > 0) revents |= POLLIN;
-        if (wait_chan && !revents) *wait_chan = p->accept_chan;
+        if (wait_chan && !(revents & POLLIN)) *wait_chan = p->accept_chan;
         return revents;
     }
     if (p->state == TCP_SYN_SENT || p->state == TCP_SYN_RECEIVED) {
@@ -658,7 +658,14 @@ int tcp_poll(tcp_pcb_t *p, short events, void **wait_chan) {
         revents |= POLLOUT;
     }
     if (p->state == TCP_CLOSE_WAIT) revents |= POLLHUP;
-    if (wait_chan && !revents) *wait_chan = p->recv_chan;
+    /* If the caller asked for POLLIN but we don't have data yet,
+     * advertise recv_chan so the poll layer can sleep on the right
+     * queue.  Previously gated on `!revents`, which never fired
+     * because POLLOUT-always-ready left revents non-zero — caller
+     * then fell back to a different wait channel and missed the
+     * recv wakeup entirely (the inetutils-telnet symptom). */
+    if (wait_chan && (events & POLLIN) && !(revents & (POLLIN | POLLHUP)))
+        *wait_chan = p->recv_chan;
     return revents;
 }
 

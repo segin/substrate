@@ -942,24 +942,36 @@ int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds,
     int ret = (int)_syscall3(SYS_POLL, (uintptr_t)fds, poll_count, poll_timeout);
 
     if (ret > 0) {
-        /* Convert poll results back to select format */
+        /* Convert poll results back to select format and recount —
+         * POSIX select() returns the total number of bits set across
+         * all three bitmaps.  An fd that's both readable and writable
+         * (same fd in rfds and wfds) is one pollfd entry but TWO
+         * select bits, so the raw poll return value undercounts. */
         fd_set result_read, result_write, result_except;
         if (readfds) FD_ZERO(&result_read);
         if (writefds) FD_ZERO(&result_write);
         if (exceptfds) FD_ZERO(&result_except);
 
+        int bits = 0;
         for (int i = 0; i < poll_count; i++) {
             int fd = fds[i].fd;
             short revents = fds[i].revents;
 
-            if (revents & POLLIN && readfds) FD_SET(fd, &result_read);
-            if (revents & POLLOUT && writefds) FD_SET(fd, &result_write);
-            if (revents & POLLERR && exceptfds) FD_SET(fd, &result_except);
+            if ((revents & (POLLIN | POLLHUP)) && readfds) {
+                FD_SET(fd, &result_read); bits++;
+            }
+            if ((revents & POLLOUT) && writefds) {
+                FD_SET(fd, &result_write); bits++;
+            }
+            if ((revents & (POLLERR | POLLPRI)) && exceptfds) {
+                FD_SET(fd, &result_except); bits++;
+            }
         }
 
         if (readfds) *readfds = result_read;
         if (writefds) *writefds = result_write;
         if (exceptfds) *exceptfds = result_except;
+        ret = bits;
     } else if (ret == 0) {
         /* Timeout */
         if (readfds) FD_ZERO(readfds);
