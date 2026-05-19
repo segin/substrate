@@ -10,6 +10,7 @@ if [ "$1" = "--kernel" ]; then
     shift
     # Legacy mode: QEMU loads kernel directly
     qemu-system-i386 \
+      -cpu qemu32,+sse,+sse2 \
       -kernel sys/kernel.multiboot \
       -m 128M \
       -display none \
@@ -25,6 +26,7 @@ elif [ "$1" = "--grub" ]; then
         exit 1
     fi
     qemu-system-i386 \
+      -cpu qemu32,+sse,+sse2 \
       -drive file=disk.img,format=raw \
       -m 128M \
       -display none \
@@ -37,6 +39,7 @@ else
         exit 1
     fi
     qemu-system-i386 \
+      -cpu qemu32,+sse,+sse2 \
       -drive file=rootfs.img,format=raw \
       -m 128M \
       -display none \
