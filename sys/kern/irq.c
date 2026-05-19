@@ -108,13 +108,27 @@ int irq_dispatch(unsigned int irq, void *frame) {
         return 0;
     }
 
-    spinlock_acquire(&irq_lock);
+    /* No irq_lock here.
+     *
+     * irq_dispatch runs in interrupt context — the CPU has IF=0 on
+     * entry, so request_irq / free_irq (which both intr_disable()
+     * around their lock-held mutation of irq_lines[]) cannot run
+     * concurrently on this CPU.  Substrate is UP today; a future
+     * SMP port will need a real lock, but it MUST NOT be a plain
+     * spinlock — it has to be either dropped before invoking the
+     * handler chain (so a handler that re-enables IF and takes a
+     * nested IRQ doesn't re-enter irq_lock), or replaced with a
+     * read-side-lockless scheme (RCU-style).
+     *
+     * The historical bug we hit: acquiring irq_lock here meant any
+     * handler that enabled interrupts (telnet's NIC path was the
+     * trigger) and let a second IRQ fire on the same CPU deadlocked
+     * on the still-held lock and tripped the deadlock detector.  */
     curr = irq_lines[irq];
     while (curr != NULL) {
         handled |= curr->handler(irq, curr->dev_id, frame);
         curr = curr->next;
     }
-    spinlock_release(&irq_lock);
     return handled;
 }
 
