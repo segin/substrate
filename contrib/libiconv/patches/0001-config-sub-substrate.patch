@@ -4,10 +4,29 @@ Wire the substrate* OS family into the bundled config.sub so triples
 like i386-unknown-substrate stop bouncing off the unrecognised-OS
 check at configure time.
 
+libiconv ships TWO copies of config.sub: one at top-level build-aux/
+for the main configure, and a second at libcharset/build-aux/ for the
+nested libcharset subbuild that the main configure recursively
+invokes.  Both need the substrate addition or the nested configure
+dies with "Invalid configuration `i386-unknown-substrate': OS
+`substrate' not recognized".
+
 ---
 diff -urN a/build-aux/config.sub b/build-aux/config.sub
 --- a/build-aux/config.sub
 +++ b/build-aux/config.sub
+@@ -1735,7 +1735,7 @@
+ 	     | os9* | macos* | osx* | ios* \
+ 	     | mpw* | magic* | mmixware* | mon960* | lnews* \
+ 	     | amigaos* | amigados* | msdos* | newsos* | unicos* | aof* \
+-	     | aos* | aros* | cloudabi* | sortix* | twizzler* \
++	     | aos* | aros* | cloudabi* | sortix* | substrate* | twizzler* \
+ 	     | nindy* | vxsim* | vxworks* | ebmon* | hms* | mvs* \
+ 	     | clix* | riscos* | uniplus* | iris* | isc* | rtu* | xenix* \
+ 	     | mirbsd* | netbsd* | dicos* | openedition* | ose* \
+diff -urN a/libcharset/build-aux/config.sub b/libcharset/build-aux/config.sub
+--- a/libcharset/build-aux/config.sub
++++ b/libcharset/build-aux/config.sub
 @@ -1735,7 +1735,7 @@
  	     | os9* | macos* | osx* | ios* \
  	     | mpw* | magic* | mmixware* | mon960* | lnews* \
