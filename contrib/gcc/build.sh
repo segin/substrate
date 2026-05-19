@@ -88,10 +88,18 @@ if [ "$STAGE" = 1 ]; then
     cd "$BUILD_DIR"
 
     echo "==> Configuring gcc stage 1 (cross from build host)"
+    # --with-arch=i486 / --with-tune=i486 bake i486 as the default
+    # -march/-mtune for everything this gcc compiles.  Substrate's
+    # boot QEMU CPU (qemu32) has SSE/SSE2 but not the pentium-pro
+    # default GCC would otherwise pick — and we don't want SSE in
+    # the system compiler's output because it'd block running the
+    # produced binaries on a plain i486 emulation.
     "$SRC_TREE/configure" \
         --target="$TARGET_TRIPLE" \
         --prefix="$STAGE1_PREFIX" \
         --with-sysroot="$SUBSTRATE_TOP/dist" \
+        --with-arch=i486 \
+        --with-tune=i486 \
         --enable-languages="$ENABLE_LANGUAGES" \
         $DISABLES
 
@@ -154,12 +162,20 @@ if [ "$STAGE" = 2 ]; then
     # binaries (cc1, cc1plus, lto1, lto-dump, xgcc, cpp) to DT_NEEDED
     # libstdc++.so.6 + libgcc_s.so.1 at runtime — substrate ships both
     # via build-libstdcxx-shared.sh + install-stripped-to-rootfs.sh.
+    # Stage 2 is a Canadian cross — host=target=substrate, so configure
+    # tests can't run the binaries they produce.  Preset autoconf cache
+    # variables for things the substrate toolchain knows up-front: i486
+    # is little-endian, has 8-bit chars, etc.  Without ac_cv_c_bigendian
+    # the mpc subbuild dies with "configure: error: unknown endianness".
+    export ac_cv_c_bigendian=no
     "$SRC_TREE/configure" \
         --build="$BUILD_TRIPLE" \
         --host="$TARGET_TRIPLE" \
         --target="$TARGET_TRIPLE" \
         --prefix=/usr \
         --with-sysroot=/ \
+        --with-arch=i486 \
+        --with-tune=i486 \
         --enable-languages="$ENABLE_LANGUAGES" \
         $DISABLES \
         CC="${TARGET_TRIPLE}-gcc" \
@@ -172,6 +188,7 @@ if [ "$STAGE" = 2 ]; then
         STRIP="${TARGET_TRIPLE}-strip" \
         CC_FOR_BUILD=gcc \
         CXX_FOR_BUILD=g++ \
+        ac_cv_c_bigendian=no \
         LDFLAGS=""
 
     echo "==> Building (-j $PARALLEL)"
