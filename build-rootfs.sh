@@ -407,6 +407,20 @@ install_to_dist() {
         echo "  (skipped contrib/gcc stage 2: $GCC_STAGE2_STAGING does not exist)"
     fi
 
+    # /bin/sh -> /usr/bin/zsh.  Substrate's POSIX shell is zsh in
+    # sh-emulation mode; the in-tree bin/sh/ is intentionally not
+    # built (see CLAUDE.md).  Every shebang line (rc.d scripts,
+    # configure, autoconf-generated build scripts, ...) relies on
+    # this symlink existing, so create it once contrib/zsh has
+    # staged /usr/bin/zsh.
+    if [ -f "$DIST/usr/bin/zsh" ]; then
+        mkdir -p "$DIST/bin"
+        ln -sf /usr/bin/zsh "$DIST/bin/sh"
+        echo "Installed /bin/sh -> /usr/bin/zsh"
+    else
+        echo "  (skipped /bin/sh symlink: $DIST/usr/bin/zsh missing)"
+    fi
+
     echo "Installing target testsuites to /tmp on the image..."
     mkdir -p "$DIST/tmp"
     # Each entry below is "src-dir:binary-name".  The cross-built
