@@ -296,8 +296,15 @@ ssize_t kern_write(int fd, const char *buf, size_t len) {
         }
 
         return bytes;
-    } else
-        return 0;
+    } else {
+        /* No write callback on the underlying node — e.g. a directory or
+         * a fs_node_t whose backing inode was freed and the slot zeroed.
+         * Userland write loops (zsh write_loop, glibc fwrite, etc.) only
+         * check for ret<0, so returning 0 silently makes them spin
+         * forever.  -EBADF matches Linux semantics for "wrote to a
+         * descriptor that doesn't support write" and breaks the loop. */
+        return -EBADF;
+    }
 }
 
 int truncate_fs(fs_node_t *node, off_t length) {
