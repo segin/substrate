@@ -94,7 +94,8 @@ contrib/     third-party components, each as a patch series + fetch.sh
              binutils, gcc, libstdc++ (via gcc), ncurses, libiconv,
              zsh, gnu make, gnu sed, openbsd expr, openbsd tr,
              bzip2, gzip, libarchive, openssl, curl, inetutils,
-             tzdata, mpg123, ext2-boot.  Each lands at
+             tzdata, mpg123, zlib, mandoc, less, qman (deferred),
+             ext2-boot.  Each lands at
              ${SUBSTRATE_TOP}/dist-<pkg>/ which build-rootfs.sh
              overlays onto the image.
 tools/       build and install helper scripts
@@ -159,6 +160,21 @@ Userland is split by role (essential, admin, extended) and supported by a suite 
   `lib/Makefile` SUBDIRS level).  Consumers: zsh, vi, less, top,
   every other terminfo-aware tool.  The stub's source stays
   in-tree for size-constrained embedded profiles.
+- **Manual Pages:** Substrate-native pages live in
+  `usr.man/man<section>/` and install to `/usr/share/man/`.
+  `contrib/mandoc/` provides the `mandoc` / `man` / `makewhatis`
+  / `apropos` / `whatis` toolchain; the indexed database lives
+  at `/usr/share/man/mandoc.db`.  `contrib/less/` provides the
+  system pager (`/usr/bin/less` + `more` symlink), used by `man`
+  for output paging.
+- **Account Management:** `usr.sbin/{useradd,usermod,userdel,
+  groupadd,groupmod,groupdel}` and `bin/groups` provide the
+  POSIX user/group admin surface.  All share `lib/pwdb/`
+  (`libpwdb.so.0`, public header `<sys/pwdb.h>`) which centralizes
+  `/etc/passwd` / `/etc/group` / `/etc/shadow` parsing,
+  `pwdb_atomic_rewrite` (write-to-`~`-then-rename), file locking
+  via `flock`, ID allocation, name validation, and POSIX
+  day-count helpers.
 - **Build Orchestration:** `build.sh` at the repo root drives a
   clean-checkout end-to-end build in four stages: (0) cross
   toolchain via `contrib/build-toolchain.sh`, (1) native

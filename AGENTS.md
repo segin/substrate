@@ -75,6 +75,15 @@ For the full detailed changelog, see `docs/CHANGELOG.md`.
   `ntohl` (real `__builtin_bswap` impls), socket / netdb / arpa-inet
   ENOSYS stub family for link-time satisfaction pending a real
   in-kernel sockets layer.
+- libc errno hygiene: `malloc`, `calloc`, `realloc` now set
+  `errno = ENOMEM` (or `EINVAL` for corrupted-header `realloc`) on
+  failure; `malloc(0)` returns a unique 1-byte allocation rather
+  than NULL (glibc/musl convention) — mandoc's `mandoc_malloc`
+  treated NULL as fatal OOM and exited via `err(6, NULL)` printing
+  `strerror(0)="Success"`.  The libc `mmap()` wrapper now detects
+  negative-errno returns from the kernel and sets `errno` +
+  returns `(void *)-1` instead of leaking the kernel error code
+  to userspace as a pointer.
 - libpthread torture suite (`tests/lib/pthread/`): portable POSIX
   `torture_kernel.c` runs on Linux/FreeBSD/macOS/substrate alike as a
   cross-OS baseline; 8 scenarios target specific scheduler/threading
@@ -168,6 +177,21 @@ manifest, `README.SUBSTRATE.md`.  Current set:
 - **mpg123** (`contrib/mpg123/`)
 - **tzdata 2024a** (`contrib/tzdata/`)
 - **inetutils** (`contrib/inetutils/`) — telnetd, ping, etc.
+- **zlib 1.3.1** (`contrib/zlib/`) — DEFLATE/gzip runtime, pulled
+  in as a dependency of mandoc.
+- **mandoc 1.14.6** (`contrib/mandoc/`) — substrate's man-pager
+  toolchain (`mandoc`, `man`, `makewhatis`, `apropos`, `whatis`).
+  Cross-compile probe results are overridden via `configure.local`
+  (HAVE_FTS, HAVE_REALLOCARRAY, HAVE_STRSEP, HAVE_STRCASESTR,
+  HAVE_MKSTEMPS = 1; HAVE_WCHAR, HAVE_DIRENT_NAMLEN = 0).
+  Reads/writes the `mandoc.db` index at `/usr/share/man/mandoc.db`.
+- **less 692** (`contrib/less/`) — system `$PAGER` (also wired as
+  `more`).  Configured with `--with-regex=posix` against
+  libregex; tinfo/pcre auto-detection is suppressed via
+  `ac_cv_lib_*=no`.
+- **qman 1.5.1** (`contrib/qman/`) — fetched but not yet
+  buildable on substrate (needs meson, cog, libbsd, ncursesw).
+  Tracked under `contrib/qman/README.SUBSTRATE.md`.
 
 ### Dynamic Linking
 - `/sbin/ld.so` (Substrate native dynamic linker, `sbin/ld.so/`):
@@ -270,6 +294,13 @@ pmm_free_block(virt);  // CORRECT - convert first
 8.  **Memory Management:** Always prefer `AGENTS.md` over `GEMINI.md` if both are present. Ensure `GEMINI.md` is not merely a symbolic link to `AGENTS.md` before treating it as separate.
 9.  **Documentation Standards:** All new kernel subsystems, system calls (native personality only), and system library calls (libc, libdl, libm, libg, libpthread) MUST include corresponding Man Page documentation. Follow Linux `man-pages` style:
     - Store manual pages under `usr.man/man<section>/`, not `docs/man/`.
+    - On-target install path is `/usr/share/man/man<section>/`
+      (matching contrib ports and mandoc's default tree).
+      `usr.man/Makefile` installs to `$(DESTDIR)/usr/share/man/`;
+      `build-rootfs.sh install_to_dist()` runs
+      `make -C usr.man install` so the pages are staged into
+      `dist/` for `--image` to pick up.  MAN_DIRS covers
+      man1..man9 (including man8 for sysadmin tools).
     - **LIBRARY:** Required for user-mode calls.
     - **SEE ALSO:** Required section.
     - **ERRORS:** Required for APIs returning error codes via `errno`. Document separately from RETURN VALUE.
@@ -311,6 +342,14 @@ pmm_free_block(virt);  // CORRECT - convert first
     - `m/`: Math library — `libm.a` + `libm.so.0`.
     - `edit/`: Command-line editing — `libedit.a` + `libedit.so.0` (DT_NEEDED libc.so.0).
     - `pthreads/`: Threading support — `libpthread.a` + `libpthread.so.0`.
+    - `pwdb/`: passwd / group / shadow database helpers — `libpwdb.a`
+      + `libpwdb.so.0`.  Public interface in `<sys/pwdb.h>`.  Used
+      by the `useradd` / `usermod` / `userdel` / `groupadd` /
+      `groupmod` / `groupdel` admin tools under `usr.sbin/` and
+      by `bin/groups`.  Provides `pwdb_lock`, `pwdb_unlock`,
+      `pwdb_atomic_rewrite` (write to `<file>~` + rename),
+      `pwdb_next_free_id`, `pwdb_split`, `pwdb_valid_name`,
+      `pwdb_today_days`, `pwdb_require_root`, `pwdb_die`.
     - `dbm/`: Database library (currently broken upstream — missing `SEEK_SET` include in `dbm.c`).
 - `sbin/`: System binaries.
     - `ld.so/`: **Substrate native dynamic linker.**  Position-independent
