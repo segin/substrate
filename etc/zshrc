@@ -31,5 +31,10 @@ case "${0##*/}" in
         setopt AUTO_CD            # `cd` not required to switch dirs
         setopt EXTENDED_GLOB
         setopt NO_BEEP
+        # PROMPT_SP emits an inverse-video '%' + line-fill + \r before
+        # each prompt to preserve partial output lines.  On substrate's
+        # fb console this leaves a visible blank line between commands.
+        # Turn it off so prompts render cleanly.
+        unsetopt PROMPT_SP
         ;;
 esac
