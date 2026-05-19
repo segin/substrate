@@ -1,0 +1,56 @@
+.Dd May 18, 2026
+.Dt GROUPMOD 8
+.Os
+.Sh NAME
+.Nm groupmod
+.Nd modify an existing group
+.Sh SYNOPSIS
+.Nm
+.Op Fl g Ar GID Op Fl o
+.Op Fl n Ar NEW_NAME
+.Ar GROUP
+.Sh DESCRIPTION
+.Nm
+edits the
+.Pa /etc/group
+row for
+.Ar GROUP
+in place, with corresponding edits to
+.Pa /etc/gshadow
+(when present) and \(em on a GID change \(em to
+.Pa /etc/passwd
+so any user whose
+.Va pw_gid
+matched the old value is renumbered atomically.
+.Sh OPTIONS
+.Bl -tag -width Ds
+.It Fl g Ar GID
+Change the numeric GID.  Refuses an already-used GID unless
+.Fl o
+is given.
+.It Fl o
+With
+.Fl g ,
+allow non-unique GIDs.
+.It Fl n Ar NEW_NAME
+Rename the group.  Updates the group's own row in
+.Pa /etc/group
+and
+.Pa /etc/gshadow ;
+member-list references are
+.Em not
+rewritten because member lists name USERS, not groups.
+.El
+.Sh EXIT STATUS
+0 success, 2 bad usage, 3 bad value, 4 GID clash, 6 GROUP missing,
+9 NEW_NAME in use, 10 database write failed.
+.Sh SEE ALSO
+.Xr group 5 ,
+.Xr gshadow 5 ,
+.Xr groupadd 8 ,
+.Xr groupdel 8 ,
+.Xr usermod 8
+.Sh AUTHORS
+Substrate-native
+.Nm ,
+written to match the shadow-utils command-line surface.

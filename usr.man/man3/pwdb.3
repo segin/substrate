@@ -1,0 +1,264 @@
+.Dd May 18, 2026
+.Dt PWDB 3
+.Os
+.Sh NAME
+.Nm pwdb_die ,
+.Nm pwdb_valid_name ,
+.Nm pwdb_lock ,
+.Nm pwdb_unlock ,
+.Nm pwdb_atomic_rewrite ,
+.Nm pwdb_next_free_id ,
+.Nm pwdb_today_days ,
+.Nm pwdb_split ,
+.Nm pwdb_require_root
+.Nd passwd / group database helpers
+.Sh LIBRARY
+.Lb libpwdb
+.Sh SYNOPSIS
+.In sys/pwdb.h
+.Ft void
+.Fn pwdb_die "const char *progname" "const char *fmt" "..."
+.Ft int
+.Fn pwdb_valid_name "const char *name"
+.Ft int
+.Fn pwdb_lock "void"
+.Ft void
+.Fn pwdb_unlock "int fd"
+.Ft typedef int (*pwdb_write_cb)(FILE *out, void *arg);
+.Ft int
+.Fn pwdb_atomic_rewrite "const char *path" "mode_t default_mode" "pwdb_write_cb cb" "void *arg"
+.Ft long
+.Fn pwdb_next_free_id "int is_group" "long min" "long max"
+.Ft long
+.Fn pwdb_today_days "void"
+.Ft int
+.Fn pwdb_split "char *line" "char delim" "char **out" "int out_max"
+.Ft void
+.Fn pwdb_require_root "const char *progname"
+.Sh DESCRIPTION
+.Lb libpwdb
+collects the shared plumbing every substrate user/group admin tool
+needs: an atomic-rewrite helper that won't strand a half-edited
+.Pa /etc/passwd
+on a crash, a cross-tool lock, a portable name validator, and a
+.Vt UID Ns / Ns Vt GID
+allocator that walks the existing database.
+.Pp
+.Fn pwdb_die
+prints
+.Dq Fa progname : Fa fmt No \\n
+to
+.Dv stderr
+and calls
+.Xr exit 3
+with status 1.  Convenience for fatal-on-argv-error paths.
+.Pp
+.Fn pwdb_valid_name
+returns nonzero when
+.Fa name
+is a valid POSIX-portable account name: first character alphabetic
+or underscore, body
+.Bq Ar a-z0-9_- ,
+length 1..32.  Zero on any failure.
+.Pp
+.Fn pwdb_lock
+opens
+.Pa /etc/.pwd.lock
+.Pq creating it 0600 if needed
+and takes an exclusive
+.Xr fcntl 2
+.Dv F_SETLKW
+advisory lock spanning the whole file.  Returns the open file
+descriptor (which the caller passes to
+.Fn pwdb_unlock )
+or -1 with
+.Va errno
+set on failure.
+.Fn pwdb_unlock
+releases the lock and closes the descriptor.
+.Pp
+.Fn pwdb_atomic_rewrite
+implements the rename-after-fsync idiom every entry in this library
+expects callers to use for database edits:
+.Bl -enum -compact
+.It
+Open
+.Fa path Ns .new
+with
+.Dv O_CREAT|O_EXCL
+\(em fails loudly on a leftover from a previous crash.
+.It
+Call
+.Fa cb
+with the new file's
+.Vt FILE * ;
+.Fa cb
+fills it and returns 0, or returns -1 to abort.
+.It
+.Fn fflush ,
+.Fn fsync ,
+.Fn fclose .
+.It
+Preserve owner/mode from the existing
+.Fa path
+where it exists, else use
+.Fa default_mode .
+.It
+.Xr rename 2
+the temp file over
+.Fa path .
+.El
+On failure the
+.Fa path Ns .new
+file is unlinked.  Returns 0 on success, -1 with
+.Va errno
+set on failure.
+.Pp
+.Fn pwdb_next_free_id
+scans the passwd database (
+.Fa is_group No == 0
+) or the group database (
+.Fa is_group No != 0
+) and returns the lowest unused id within
+.Bq Fa min , Fa max ,
+or -1 when the range is exhausted.
+.Pp
+.Fn pwdb_today_days
+returns days since
+.Dq 1970-01-01 UTC \(em the unit the
+.Pa /etc/shadow
+lastchange / inactive / expire fields use.
+.Pp
+.Fn pwdb_split
+splits
+.Fa line
+in place on
+.Fa delim ,
+writing up to
+.Fa out_max
+NUL-terminated field pointers into
+.Fa out .
+A trailing
+.Dq \\n
+on the last field is stripped.
+Returns the number of fields actually produced.
+.Pp
+.Fn pwdb_require_root
+calls
+.Fn pwdb_die
+(and exits) when
+.Xr geteuid 2
+is non-zero.  All write-side admin tools call this immediately after
+parsing arguments.
+.Sh RETURN VALUES
+See the individual function paragraphs above.  As a class:
+.Bl -tag -width Ds
+.It Fn pwdb_lock
+.It Fn pwdb_atomic_rewrite
+.It Fn pwdb_next_free_id
+return -1 on failure with
+.Va errno
+set.
+.It Fn pwdb_valid_name
+returns 0 (invalid) or non-zero (valid).
+.It Fn pwdb_die
+.It Fn pwdb_require_root
+do not return on the error path \(em they call
+.Xr exit 3 .
+.El
+.Sh ERRORS
+.Fn pwdb_lock
+and
+.Fn pwdb_atomic_rewrite
+can fail with any
+.Va errno
+returned by
+.Xr open 2 ,
+.Xr fcntl 2 ,
+.Xr rename 2 ,
+.Xr fsync 2 ,
+.Xr stat 2 ,
+or
+.Xr chown 2 .
+Notable values:
+.Bl -tag -width Ds
+.It Bq Er EEXIST
+.Fa path Ns .new
+already exists \(em leftover from a previous crash, clean it up
+before retrying.
+.It Bq Er EACCES
+The caller lacks write permission on the database file or its
+directory.
+.It Bq Er ENAMETOOLONG
+.Fa path
+is too long to derive a sibling
+.Fa path Ns .new .
+.El
+.Sh EXAMPLES
+A minimal "remove user from /etc/passwd" tool:
+.Bd -literal -offset indent
+#include <sys/pwdb.h>
+#include <string.h>
+#include <stdio.h>
+
+struct ctx { const char *user; };
+
+static int
+strip_user(FILE *out, void *arg)
+{
+    struct ctx *c = arg;
+    FILE *in = fopen(PWDB_PASSWD, "r");
+    char  line[1024];
+    size_t nlen = strlen(c->user);
+    if (!in) return -1;
+    while (fgets(line, sizeof line, in))
+        if (strncmp(line, c->user, nlen) != 0 || line[nlen] != ':')
+            fputs(line, out);
+    fclose(in);
+    return 0;
+}
+
+int
+main(int argc, char **argv)
+{
+    pwdb_require_root("rmuser");
+    int lk = pwdb_lock();
+    struct ctx c = { .user = argv[1] };
+    int rc = pwdb_atomic_rewrite(PWDB_PASSWD, 0644, strip_user, &c);
+    pwdb_unlock(lk);
+    return rc == 0 ? 0 : 1;
+}
+.Ed
+.Sh FILES
+.Bl -tag -width Pa /etc/.pwd.lock
+.It Pa /etc/passwd
+The account database.
+.It Pa /etc/group
+The group database.
+.It Pa /etc/shadow
+The shadow password database.
+.It Pa /etc/gshadow
+The shadow group-password database.
+.It Pa /etc/.pwd.lock
+Cross-tool exclusive lock.
+.El
+.Sh SEE ALSO
+.Xr fcntl 2 ,
+.Xr fsync 2 ,
+.Xr getpwent 3 ,
+.Xr getgrent 3 ,
+.Xr group 5 ,
+.Xr passwd 5 ,
+.Xr shadow 5 ,
+.Xr groupadd 8 ,
+.Xr groupdel 8 ,
+.Xr groupmod 8 ,
+.Xr useradd 8 ,
+.Xr userdel 8 ,
+.Xr usermod 8
+.Sh HISTORY
+.Lb libpwdb
+first appeared in substrate as the shared plumbing under the
+shadow-utils-compatible admin commands.
+.Sh AUTHORS
+.An Substrate Contributors

@@ -1,0 +1,68 @@
+.Dd May 18, 2026
+.Dt GROUPS 1
+.Os
+.Sh NAME
+.Nm groups
+.Nd print group memberships for a user
+.Sh SYNOPSIS
+.Nm
+.Op Ar user ...
+.Sh DESCRIPTION
+With no operand,
+.Nm
+prints the group memberships of the calling process \(em the primary
+group (the
+.Vt egid )
+followed by every supplementary group from
+.Xr getgroups 2 ,
+each resolved to a name via
+.Xr getgrgid 3
+where possible.
+.Pp
+With one or more
+.Ar user
+operands,
+.Nm
+walks
+.Pa /etc/group
+and prints, for each user, the primary group named in
+.Pa /etc/passwd
+followed by every group that lists the user in its supplementary-member
+roll.
+.Pp
+When more than one
+.Ar user
+is given, each line is prefixed with
+.Dq Ar user No \&: .
+.Sh OUTPUT
+A single line per user, space-separated group names.  GIDs that have
+no corresponding name in
+.Pa /etc/group
+are printed as the bare integer.
+.Sh EXIT STATUS
+.Bl -tag -width Ds
+.It 0
+Success.
+.It 1
+At least one named user did not exist, or
+.Xr getgroups 2
+failed.
+.El
+.Sh FILES
+.Bl -tag -width Pa /etc/passwd
+.It Pa /etc/passwd
+Primary-group lookup.
+.It Pa /etc/group
+Supplementary-group iteration.
+.El
+.Sh SEE ALSO
+.Xr id 1 ,
+.Xr getgroups 2 ,
+.Xr getgrent 3 ,
+.Xr getpwnam 3 ,
+.Xr group 5 ,
+.Xr passwd 5
+.Sh AUTHORS
+The
+.Nm
+utility was written for substrate.

@@ -1,0 +1,99 @@
+.Dd May 18, 2026
+.Dt USERMOD 8
+.Os
+.Sh NAME
+.Nm usermod
+.Nd modify an existing user account
+.Sh SYNOPSIS
+.Nm
+.Op Fl l Ar NEW_LOGIN
+.Op Fl u Ar UID Op Fl o
+.Op Fl g Ar GROUP
+.Op Fl G Ar LIST Op Fl a
+.Op Fl d Ar HOMEDIR Op Fl m
+.Op Fl s Ar SHELL
+.Op Fl c Ar COMMENT
+.Op Fl L | Fl U
+.Ar USER
+.Sh DESCRIPTION
+.Nm
+edits the
+.Pa /etc/passwd
+entry for
+.Ar USER
+in place, with side effects in
+.Pa /etc/shadow
+(for renames and lock/unlock) and
+.Pa /etc/group
+(for primary-group changes, supplementary-group lists, and renames
+that appear in member rolls).
+.Pp
+Each affected database file is rewritten atomically; the lock file at
+.Pa /etc/.pwd.lock
+serialises against concurrent admin tools.
+.Sh OPTIONS
+.Bl -tag -width Ds
+.It Fl l Ar NEW_LOGIN
+Rename the account.  Updates
+.Pa /etc/passwd ,
+.Pa /etc/shadow ,
+and every supplementary-member reference in
+.Pa /etc/group .
+Files inside the home directory are
+.Em not
+renamed.
+.It Fl u Ar UID Op Fl o
+Change the UID.  Files in the home directory owned by the old UID are
+.Em not
+.Xr chown 2 Ns ed
+automatically.  Pass
+.Fl o
+to permit a non-unique UID.
+.It Fl g Ar GROUP
+Change the primary group (named or numeric).  Must exist.
+.It Fl G Ar LIST
+Replace the supplementary-group set with
+.Ar LIST .
+With
+.Fl a ,
+append rather than replace.
+.It Fl a
+With
+.Fl G ,
+append to the existing supplementary set instead of replacing it.
+.It Fl d Ar HOMEDIR Op Fl m
+Change the home-directory field.  With
+.Fl m ,
+attempt to rename the existing home into the new path
+.Pq same filesystem only \(em cross-fs moves are not implemented .
+.It Fl s Ar SHELL
+Change the login shell.
+.It Fl c Ar COMMENT
+Change the GECOS field.
+.It Fl L
+Lock the account by prefixing the shadow hash with
+.Sq \&! .
+.It Fl U
+Unlock the account by stripping a leading
+.Sq \&! .
+.El
+.Fl L
+and
+.Fl U
+are mutually exclusive.
+.Sh EXIT STATUS
+Same as
+.Xr useradd 8 :
+0 success, 2 bad usage, 3 bad value, 4 UID clash, 6 group missing,
+9 name in use, 10 database write failed.
+.Sh SEE ALSO
+.Xr passwd 1 ,
+.Xr passwd 5 ,
+.Xr shadow 5 ,
+.Xr useradd 8 ,
+.Xr userdel 8 ,
+.Xr groupmod 8
+.Sh AUTHORS
+Substrate-native
+.Nm ,
+written to match the shadow-utils command-line surface.

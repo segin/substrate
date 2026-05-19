@@ -1,0 +1,65 @@
+.Dd May 18, 2026
+.Dt USERDEL 8
+.Os
+.Sh NAME
+.Nm userdel
+.Nd delete a user account
+.Sh SYNOPSIS
+.Nm
+.Op Fl r
+.Op Fl f
+.Ar USER
+.Sh DESCRIPTION
+.Nm
+removes
+.Ar USER
+from
+.Pa /etc/passwd
+and
+.Pa /etc/shadow ,
+strips the user from every supplementary-member list in
+.Pa /etc/group
+(and
+.Pa /etc/gshadow ,
+when present), and \(em if the per-user group has no other members and
+the user's name matches the group's name \(em removes that primary
+group as well, matching the
+.Dv USERGROUPS_ENAB
+convention.
+.Sh OPTIONS
+.Bl -tag -width Ds
+.It Fl r
+Also remove the user's home directory (recursively) and mail spool
+.Pa ( /var/spool/mail/USER ) .
+.It Fl f
+Force deletion even if the user is "in use" \(em accepted for parity
+with shadow-utils; the live-process scan is not yet implemented in
+substrate's
+.Nm .
+.El
+.Sh EXIT STATUS
+.Bl -tag -width Ds
+.It 0
+Success.
+.It 2
+Bad usage.
+.It 6
+.Ar USER
+does not exist.
+.It 10
+Failed to update
+.Pa /etc/passwd .
+.It 12
+.Fl r
+specified but the home directory could not be removed.
+.El
+.Sh SEE ALSO
+.Xr passwd 5 ,
+.Xr shadow 5 ,
+.Xr useradd 8 ,
+.Xr usermod 8 ,
+.Xr groupdel 8
+.Sh AUTHORS
+Substrate-native
+.Nm ,
+written to match the shadow-utils command-line surface.

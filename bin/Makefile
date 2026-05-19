@@ -25,6 +25,7 @@ SUBDIRS = \
 	find \
 	getty \
 	grep \
+	groups \
 	head \
 	hostname \
 	id \

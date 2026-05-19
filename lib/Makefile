@@ -8,7 +8,7 @@ include ../Makefile.inc
 #
 # kvm and proc depend on libsys + libc; placed after both are
 # guaranteed to be linkable.
-SUBDIRS = m sys c pthread dl edit usb yacc at dbm kvm proc
+SUBDIRS = m sys c pthread dl edit usb yacc at dbm kvm proc pwdb
 
 .PHONY: all clean install $(SUBDIRS)
 
@@ -26,7 +26,7 @@ $(SUBDIRS):
 #     must exist before libc.so.0 links.
 #   - Everything else (pthreads, dl, edit, ...) depends on libc.
 c: | m sys
-pthread dl edit usb yacc at dbm: | c
+pthread dl edit usb yacc at dbm pwdb: | c
 # libkvm and libproc wrap libsys directly (and pull libc for stdlib).
 kvm proc: | c sys
 

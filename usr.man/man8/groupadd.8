@@ -1,0 +1,76 @@
+.Dd May 18, 2026
+.Dt GROUPADD 8
+.Os
+.Sh NAME
+.Nm groupadd
+.Nd create a new group
+.Sh SYNOPSIS
+.Nm
+.Op Fl g Ar GID Op Fl o
+.Op Fl r
+.Op Fl f
+.Ar GROUP
+.Sh DESCRIPTION
+.Nm
+appends a new entry to
+.Pa /etc/group
+and (if it exists) a matching locked-password row to
+.Pa /etc/gshadow .
+With no
+.Fl g ,
+the next free GID in the user range
+.Bq Dv USER_ID_MIN , Dv USER_ID_MAX
+.Pq 1000 .. 60000
+is auto-assigned; with
+.Fl r ,
+the system range
+.Bq Dv SYSTEM_ID_MIN , Dv SYSTEM_ID_MAX
+.Pq 1 .. 999
+is used instead.
+.Sh OPTIONS
+.Bl -tag -width Ds
+.It Fl g Ar GID
+Use the supplied numeric group ID.  Refuses to clobber an existing
+GID unless
+.Fl o
+is also given.
+.It Fl o
+With
+.Fl g ,
+allow non-unique GIDs.
+.It Fl r
+Allocate from the system range when auto-assigning.
+.It Fl f
+Exit 0 instead of failing if
+.Ar GROUP
+already exists.
+.El
+.Sh EXIT STATUS
+.Bl -tag -width Ds
+.It 0
+Success.
+.It 2
+Bad usage.
+.It 3
+Invalid argument value.
+.It 4
+GID already in use (without
+.Fl o ) .
+.It 9
+Group name already in use (without
+.Fl f ) .
+.It 10
+Failed to update
+.Pa /etc/group .
+.El
+.Sh SEE ALSO
+.Xr getgrent 3 ,
+.Xr group 5 ,
+.Xr gshadow 5 ,
+.Xr groupdel 8 ,
+.Xr groupmod 8 ,
+.Xr useradd 8
+.Sh AUTHORS
+Substrate-native
+.Nm ,
+written to match the shadow-utils command-line surface.

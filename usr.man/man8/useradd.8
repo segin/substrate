@@ -1,0 +1,151 @@
+.Dd May 18, 2026
+.Dt USERADD 8
+.Os
+.Sh NAME
+.Nm useradd
+.Nd create a new user account
+.Sh SYNOPSIS
+.Nm
+.Op Fl u Ar UID Op Fl o
+.Op Fl g Ar GROUP
+.Op Fl G Ar LIST
+.Op Fl d Ar HOMEDIR
+.Op Fl s Ar SHELL
+.Op Fl c Ar COMMENT
+.Op Fl m
+.Op Fl M
+.Op Fl N
+.Op Fl r
+.Ar USER
+.Sh DESCRIPTION
+.Nm
+adds a new user entry to
+.Pa /etc/passwd
+and a matching locked-account row to
+.Pa /etc/shadow .
+By default it also creates a per-user group with the same name as
+.Ar USER
+(by spawning
+.Xr groupadd 8 )
+and assigns it as the user's primary group; see
+.Fl N
+to override that behaviour.
+.Pp
+Database changes are atomic per file: each rewrite is built in
+.Pa <file>.new ,
+.Xr fsync 2 Ns 'd ,
+then renamed over the original.
+.Pa /etc/.pwd.lock
+serialises against concurrent admin tools.
+.Sh OPTIONS
+.Bl -tag -width Ds
+.It Fl u Ar UID
+Use the supplied numeric user ID instead of auto-allocating.
+Refuses to clobber an existing UID unless
+.Fl o
+is given.
+.It Fl o
+With
+.Fl u ,
+allow non-unique UIDs.
+.It Fl g Ar GROUP
+Primary group, named or numeric.  The group must already exist.
+Implies
+.Fl N
+(no per-user group is created).
+.It Fl G Ar LIST
+Comma-separated supplementary group names.  Each group must already
+exist;
+.Nm
+appends
+.Ar USER
+to every named group's member list.
+.It Fl d Ar HOMEDIR
+Home directory path recorded in
+.Pa /etc/passwd .
+Defaults to
+.Pa /home/USER
+for regular users and
+.Pa /var/empty
+for system accounts.
+.It Fl s Ar SHELL
+Login shell.  Default
+.Pa /bin/sh ,
+or
+.Pa /bin/false
+when
+.Fl r
+is in effect.
+.It Fl c Ar COMMENT
+GECOS field (full name / contact info).
+.It Fl m
+Create the home directory (mode 0700, owned by the new user).
+.It Fl M
+Do not create the home directory even if defaults would otherwise.
+Accepted for parity with shadow-utils.
+.It Fl N
+Don't auto-create a per-user group; with
+.Fl g
+this is the default.
+.It Fl r
+System account.  Allocate UID/GID from
+.Bq 1, 999 ,
+default shell
+.Pa /bin/false ,
+home
+.Pa /var/empty ,
+do not create the home directory.
+.El
+.Sh EXIT STATUS
+.Bl -tag -width Ds
+.It 0
+Success.
+.It 2
+Bad usage.
+.It 3
+Invalid argument value.
+.It 4
+UID already in use (without
+.Fl o ) .
+.It 6
+A group named via
+.Fl g
+or
+.Fl G
+does not exist.
+.It 9
+.Ar USER
+already exists.
+.It 10
+Failed to update
+.Pa /etc/passwd .
+.It 12
+Failed to create the home directory.
+.El
+.Sh FILES
+.Bl -tag -width Pa /etc/gshadow
+.It Pa /etc/passwd
+Account database.
+.It Pa /etc/shadow
+Password-hash database.
+.It Pa /etc/group
+Group database.
+.It Pa /etc/gshadow
+Group-password database (only updated if present).
+.It Pa /etc/.pwd.lock
+Cross-tool serialisation lock.
+.El
+.Sh SEE ALSO
+.Xr passwd 1 ,
+.Xr fcntl 2 ,
+.Xr getpwnam 3 ,
+.Xr pwdb_lock 3 ,
+.Xr passwd 5 ,
+.Xr shadow 5 ,
+.Xr groupadd 8 ,
+.Xr userdel 8 ,
+.Xr usermod 8
+.Sh AUTHORS
+Substrate-native
+.Nm ,
+written to match the shadow-utils command-line surface.

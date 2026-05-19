@@ -1,0 +1,59 @@
+.Dd May 18, 2026
+.Dt GROUPDEL 8
+.Os
+.Sh NAME
+.Nm groupdel
+.Nd delete a group
+.Sh SYNOPSIS
+.Nm
+.Op Fl f
+.Ar GROUP
+.Sh DESCRIPTION
+.Nm
+removes
+.Ar GROUP
+from
+.Pa /etc/group
+(and
+.Pa /etc/gshadow
+when present).  Refuses to remove a group that is the primary group
+of any user in
+.Pa /etc/passwd
+unless
+.Fl f
+is given \(em pulling the floor out from under live accounts almost
+always orphans something.
+.Sh OPTIONS
+.Bl -tag -width Ds
+.It Fl f
+Force removal even if
+.Ar GROUP
+is somebody's primary group.
+.El
+.Sh EXIT STATUS
+.Bl -tag -width Ds
+.It 0
+Success.
+.It 2
+Bad usage.
+.It 6
+.Ar GROUP
+does not exist.
+.It 8
+.Ar GROUP
+is the primary group of an existing user (without
+.Fl f ) .
+.It 10
+Failed to update
+.Pa /etc/group .
+.El
+.Sh SEE ALSO
+.Xr group 5 ,
+.Xr gshadow 5 ,
+.Xr groupadd 8 ,
+.Xr groupmod 8 ,
+.Xr userdel 8
+.Sh AUTHORS
+Substrate-native
+.Nm ,
+written to match the shadow-utils command-line surface.
