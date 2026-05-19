@@ -3731,8 +3731,12 @@ int sys_select(int nfds, void *rfds, void *wfds, void *efds, void *timeout) {
                 memset(ke, 0, lbytes);
                 if (copyin(efds, ke, bytes) != 0) { kfree(ke, lbytes); if (kw) kfree(kw, lbytes); if (kr) kfree(kr, lbytes); return -EFAULT; } }
 
-    /* Count interesting fds and build a pollfd array. */
-    struct pollfd *pfds = kmalloc(sizeof(struct pollfd) * (size_t)nfds);
+    /* Count interesting fds and build a pollfd array.  nfds == 0 is the
+     * "select as sleep" idiom — kmalloc(0) returns NULL on substrate so
+     * round up to one byte of pad rather than reject the call. */
+    size_t pfds_bytes = nfds > 0 ? (sizeof(struct pollfd) * (size_t)nfds)
+                                 : sizeof(struct pollfd);
+    struct pollfd *pfds = kmalloc(pfds_bytes);
     if (!pfds) {
         if (kr) kfree(kr, lbytes);
         if (kw) kfree(kw, lbytes);
@@ -3763,7 +3767,7 @@ int sys_select(int nfds, void *rfds, void *wfds, void *efds, void *timeout) {
     if (timeout) {
         struct timeval tv;
         if (copyin(timeout, &tv, sizeof(tv)) != 0) {
-            kfree(pfds, sizeof(struct pollfd) * (size_t)nfds);
+            kfree(pfds, pfds_bytes);
             if (kr) kfree(kr, lbytes);
             if (kw) kfree(kw, lbytes);
             if (ke) kfree(ke, lbytes);
@@ -3783,20 +3787,22 @@ int sys_select(int nfds, void *rfds, void *wfds, void *efds, void *timeout) {
 
     int ready = 0;
     if (rc > 0) {
+        /* POSIX: select() returns the total number of bits set across
+         * all three bitmaps.  An fd that's both readable AND writable
+         * (same fd in rfds and wfds) counts twice.  Previous code used
+         * a single `counted` flag per fd, undercounting such cases. */
         for (int i = 0; i < n; i++) {
             int fd = pfds[i].fd;
             short re = pfds[i].revents;
-            int counted = 0;
             if ((re & (POLLIN | POLLRDNORM | POLLHUP)) && kr) {
-                FD_SET_BIT(kr, fd); counted = 1;
+                FD_SET_BIT(kr, fd); ready++;
             }
             if ((re & (POLLOUT | POLLWRNORM)) && kw) {
-                FD_SET_BIT(kw, fd); counted = 1;
+                FD_SET_BIT(kw, fd); ready++;
             }
             if ((re & (POLLPRI | POLLERR)) && ke) {
-                FD_SET_BIT(ke, fd); counted = 1;
+                FD_SET_BIT(ke, fd); ready++;
             }
-            if (counted) ready++;
         }
     } else {
         ready = rc;
@@ -3806,7 +3812,7 @@ int sys_select(int nfds, void *rfds, void *wfds, void *efds, void *timeout) {
     if (wfds && copyout(kw, wfds, bytes) != 0) ready = -EFAULT;
     if (efds && copyout(ke, efds, bytes) != 0) ready = -EFAULT;
 
-    kfree(pfds, sizeof(struct pollfd) * (size_t)nfds);
+    kfree(pfds, pfds_bytes);
     if (kr) kfree(kr, lbytes);
     if (kw) kfree(kw, lbytes);
     if (ke) kfree(ke, lbytes);
