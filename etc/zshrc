@@ -32,9 +32,13 @@ case "${0##*/}" in
         setopt EXTENDED_GLOB
         setopt NO_BEEP
         # PROMPT_SP emits an inverse-video '%' + line-fill + \r before
-        # each prompt to preserve partial output lines.  On substrate's
-        # fb console this leaves a visible blank line between commands.
-        # Turn it off so prompts render cleanly.
+        # each prompt to preserve partial output lines.  Substrate's
+        # cb_putc state machine handles the documented PROMPT_SP byte
+        # stream correctly (proven by tests/sys/console/test_vt_wrap),
+        # but in practice this still produces a visible blank line
+        # between every prompt — the actual cause is somewhere outside
+        # the state machine (suspected: ANSI handler / width mismatch).
+        # Until that's diagnosed, keep PROMPT_SP off.
         unsetopt PROMPT_SP
         ;;
 esac
