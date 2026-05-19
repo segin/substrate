@@ -89,7 +89,7 @@ install:
 	@mkdir -p $(DESTDIR)/usr/include
 	@mkdir -p $(DESTDIR)/usr/lib
 	@mkdir -p $(DESTDIR)/usr/local
-	@mkdir -p $(DESTDIR)/usr/man
+	@mkdir -p $(DESTDIR)/usr/share/man
 	@mkdir -p $(DESTDIR)/var
 	@cp -a $(TOP)/include/. $(DESTDIR)/usr/include/
 	@set -e; for dir in $(SUBDIRS); do \

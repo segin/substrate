@@ -1,80 +1,416 @@
-.Dd March 29, 2026
+.Dd May 19, 2026
 .Dt PS 1
-.Os
+.Os Substrate
 .Sh NAME
 .Nm ps
 .Nd display process status
 .Sh SYNOPSIS
 .Nm
 .Op Ar auxleb
+.Op Fl p Ar pidlist
+.Op Fl U Ar userlist
+.Op Fl \-no\-headers
+.Op Fl \-help
+.Op Fl \-version
 .Sh DESCRIPTION
+The
 .Nm
-lists process information using Substrate's
-.Xr sys_proc_list 2
+utility lists information about processes that exist on the system.
+Process state is read through Substrate's
+.Xr sys_proc_count 2 ,
+.Xr sys_proc_list 2 ,
 and
 .Xr sys_proc_info 2
-interfaces.
-The implementation is BSD-first:
-the letters
-.Cm a ,
-.Cm u ,
-.Cm x ,
-.Cm l ,
-.Cm e ,
-and
-.Cm b
-may be given with or without a leading dash and may be clustered.
+system calls; the command name when
+.Fl e
+is given is recovered through
+.Xr sys_proc_cmdline 2 .
 .Pp
-The plain
+By default,
 .Nm
-form prints a short, terminal-oriented listing.
-.Cm ax
-widens selection to all processes.
-.Cm u
-selects a user-oriented preset.
-.Cm l
-selects a long preset.
-.Cm e
-appends environment-oriented command tail rendering when available.
-.Cm b
-is a Substrate extension that inserts a
-.Cm BITS
-column showing process bitness.
-.Sh OPTIONS
-.Bl -tag -width indent
-.It Cm a
-Include terminal-associated processes for all users.
-.It Cm u
-Use the user-oriented output preset.
-.It Cm x
-Include processes without restricting selection to the default terminal-oriented view.
-.It Cm l
-Use the long output preset.
-.It Cm e
-Append environment data after the command text when available.
-.It Cm b
-Insert a
-.Cm BITS
-column.
-Valid values are
-.Cm 16 ,
-.Cm 32 ,
+prints only processes that share the controlling terminal and effective
+user with the invoker \(em a terminal-oriented short listing.
+The selection and column layout are altered by the option letters
+described in
+.Sx OPTIONS .
+.Pp
+For compatibility with both major lineages of
+.Xr ps 1 ,
+the selection letters may be given without a leading dash and may be
+clustered, so
+.Ic ps aux ,
+.Ic ps -aux ,
 and
-.Cm 64 .
+.Ic ps -a -u -x
+are equivalent.
+The same letters are also available as GNU-style long options
+.Pq Fl \-all , Fl \-user , Fl \-long , Fl \-bitness , Fl \-environment .
+.Sh OPTIONS
+.Bl -tag -width Ds
+.It Cm a , Fl a , Fl \-all
+Include processes that own a controlling terminal but are not session
+leaders, regardless of owning user.
+Combined with
+.Cm x ,
+selects every process on the system.
+.It Cm u , Fl u , Fl \-user
+Use the user-oriented preset.
+Adds the
+.Sy USER ,
+.Sy PPID ,
+.Sy VSZ ,
+and
+.Sy RSS
+columns to the short listing.
+.It Cm x , Fl x
+Drop the controlling-terminal restriction from the default selection;
+that is, include processes detached from a tty (typical daemons), but
+still scope to the invoking user unless
+.Cm a
+is also given.
+.It Cm l , Fl l , Fl \-long
+Use the long preset, which expands the row to include
+.Sy UID , Sy PGID , Sy SID ,
+and
+.Sy NI
+along with everything in the user preset.
+.It Cm e , Fl e , Fl \-environment
+For the
+.Sy CMD
+column, render the full
+.Va argv
+recovered from the kernel command-line tail rather than the 16-byte
+short name.
+The argument vector is rendered NUL-separated as spaces.
+.It Cm b , Fl b , Fl \-bitness
+Insert a
+.Sy BITS
+column reporting the process's address-space width.
+Values are
+.Sy 16 ,
+.Sy 32 ,
+or
+.Sy 64 ;
+.Sy ?\&
+appears when the kernel does not yet populate the field.
+This is a Substrate extension.
+.It Fl p Ar pidlist , Fl \-pid Ar pidlist
+Restrict the listing to the comma-separated process IDs in
+.Ar pidlist .
+This overrides every preset-based selection rule.
+.It Fl U Ar userlist , Fl \-User Ar userlist
+Restrict the listing to processes owned by users in
+.Ar userlist .
+List elements may be numeric UIDs or login names looked up through
+.Xr getpwnam 3 ;
+unknown names are skipped silently.
+This overrides every preset-based selection rule.
+.It Fl \-no\-headers
+Suppress the column header line.
+Useful in scripts.
+.It Fl \-help
+Print a short usage summary and exit.
+.It Fl \-version
+Print the
+.Nm
+release identifier and exit.
 .El
+.Sh OUTPUT COLUMNS
+The columns that may appear are:
+.Bl -tag -width "USER" -compact
+.It Sy USER
+Login name of the effective UID (numeric UID when no
+.Pa /etc/passwd
+entry exists).
+.It Sy UID
+Numeric effective UID.
+.It Sy PID
+Process ID.
+.It Sy PPID
+Parent process ID.
+.It Sy PGID
+Process group ID.
+.It Sy SID
+Session ID.
+.It Sy NI
+Nice value, rendered as the kernel's 0..40 representation; the signed
+\-20..+19 value is
+.Sy NI \- 20 .
+.It Sy TTY
+Controlling terminal.
+PTY slaves render as
+.Pa pts/ Ns Ar N ;
+virtual consoles render as
+.Pa tty Ns Ar N ;
+processes without a controlling terminal render as
+.Sy ?\& .
+.It Sy STAT
+Process state plus modifier suffixes.
+See
+.Sx STATE CODES .
+.It Sy BITS
+Process bitness (16, 32, or 64), when
+.Cm b
+is given.
+.It Sy TIME
+Cumulative CPU time
+.Pq Sy utime No + Sy stime ,
+formatted
+.Sy HH:MM:SS .
+The conversion divides kernel-HZ ticks by
+.Fn sysconf _SC_CLK_TCK ;
+this is 128 on Substrate, not 100.
+.It Sy VSZ
+Virtual address-space size, in kilobytes.
+.It Sy RSS
+Resident set size, in kilobytes.
+.It Sy CMD
+Short command name from the kernel
+.Va comm
+field (or full
+.Va argv
+when
+.Cm e
+is given).
+.El
+.Sh STATE CODES
+The
+.Sy STAT
+column starts with a single letter from the kernel state machine:
+.Bl -tag -width "X" -compact
+.It Sy R
+Running or runnable.
+.It Sy S
+Interruptible sleep.
+.It Sy I
+Idle kernel thread.
+.It Sy T
+Stopped, typically by a job-control signal.
+.It Sy Z
+Zombie; awaiting reap by parent.
+.It Sy X
+Dying; in
+.Xr proc_exit 2
+teardown.
+.It Sy ?\&
+Unknown state.
+.El
+.Pp
+The letter is followed by zero or more procps-style suffix characters:
+.Bl -tag -width "<" -compact
+.It Sy <
+High priority
+.Pq Va nice No < 0 .
+.It Sy N
+Low priority
+.Pq Va nice No > 0 .
+.It Sy +
+The process is its own session leader and group leader \(em a
+foreground process-group hint, since
+.Xr ioctl 2
+.Cm TIOCGPGRP
+is not yet wired up to give a precise answer.
+.El
+.Sh SORT ORDER
+Rows are sorted first by
+.Sy TTY ,
+then by
+.Sy PID
+ascending.
+Processes with no controlling terminal (rendered
+.Sy ?\& )
+appear first.
+.Sh DEFAULT SELECTION
+With no options,
+.Nm
+shows only processes that satisfy both:
+.Bl -bullet -compact
+.It
+Effective UID matches the invoker's effective UID.
+.It
+Controlling terminal matches the invoker's controlling terminal.
+.El
+.Pp
+Either restriction is dropped by
+.Cm x
+(uid restriction) or
+.Cm a
+(tty restriction);
+.Cm ax
+selects everything.
+Explicit filters
+.Pq Fl p No or Fl U
+override the preset selection entirely.
 .Sh EXAMPLES
+Show processes attached to the current terminal:
 .Bd -literal -offset indent
 ps
+.Ed
+.Pp
+Every process on the system, BSD-style summary:
+.Bd -literal -offset indent
 ps ax
+.Ed
+.Pp
+Every process, user-oriented with VSZ/RSS:
+.Bd -literal -offset indent
 ps aux
-ps auxle
+.Ed
+.Pp
+Full long listing with environment-expanded
+.Sy CMD
+and the Substrate
+.Sy BITS
+column inserted:
+.Bd -literal -offset indent
 ps auxleb
 .Ed
-.Sh NOTES
-The current kernel ABI exposes a larger
-.Vt sys_procinfo_t
-than the kernel currently populates fully.
-Fields not yet populated by the kernel are rendered with stable fallbacks rather than guessed values.
-.Sh SEE ALSO
-.Xr sys_proc_info 2 ,
+.Pp
+Just init and the user-space login shell, scripted (no headers):
+.Bd -literal -offset indent
+ps --no-headers -p 1,$$
+.Ed
+.Pp
+Everyone but root:
+.Bd -literal -offset indent
+ps ax | awk '$1 != "root"'
+.Ed
+.Sh DIAGNOSTICS
+.Bl -tag -width "ps:"
+.It Sy ps: failed to query current process
+.Xr sys_proc_info 2
+returned an error for the invoking process.
+.It Sy ps: sys_proc_count failed
+The kernel rejected
+.Xr sys_proc_count 2 ;
+typically only happens during very early boot before the process
+registry is initialized.
+.It Sy ps: sys_proc_list failed
 .Xr sys_proc_list 2
+returned an error;
+.Nm
+could not enumerate the active set.
+.It Sy ps: out of memory
+.Xr malloc 3
+or
+.Xr calloc 3
+failed to allocate the per-process row buffer.
+.It Sy ps: bad -p PID list
+The argument to
+.Fl p
+contained a non-numeric token or a negative value.
+.It Sy ps: bad -U user list
+The argument to
+.Fl U
+overflowed the internal filter array.
+.It Sy ps: unexpected non-option argument
+A trailing positional argument was given.
+Selection by PID requires
+.Fl p ;
+selection by user requires
+.Fl U .
+.It Sy ps: unknown option
+A short option not in
+.Sq auxlebpU
+or an unrecognized long option was given.
+.El
+.Sh EXIT STATUS
+.Nm
+exits 0 on success or 1 on any failure to enumerate or render the
+process set.
+A non-empty listing of the requested set is not required for success;
+.Nm
+with no matching processes exits 0 and prints only the header.
+.Sh NOTES
+.Bl -bullet
+.It
+The
+.Sy STAT
+suffix
+.Sy l
+.Pq multi-threaded
+is not yet emitted; per-process thread enumeration is pending in the
+kernel ABI.
+.It
+.Xr ioctl 2
+.Cm TIOCGPGRP
+is not yet implemented, so the
+.Sy +
+suffix is derived from the
+.Sy PID No = Sy PGID No = Sy SID
+heuristic rather than from a real foreground-pgrp query.
+.It
+.Sy %CPU
+and
+.Sy %MEM
+columns are not yet supplied; the kernel does not yet ship a recent
+CPU-usage window.
+.It
+The
+.Sy CMD
+column when
+.Cm e
+is absent is capped at the kernel's 16-byte
+.Va comm
+field.
+With
+.Cm e
+the full
+.Va argv
+blob is recovered through
+.Xr sys_proc_cmdline 2 ,
+which is currently capped at 512 bytes per process.
+.It
+.Nm
+does not yet support the BSD
+.Fl O Ar fmt
+or System V
+.Fl o Ar fmt
+explicit column selectors.
+.El
+.Sh SEE ALSO
+.Xr top 1 ,
+.Xr kill 1 ,
+.Xr getpwnam 3 ,
+.Xr sysconf 3 ,
+.Xr sys_proc_count 2 ,
+.Xr sys_proc_list 2 ,
+.Xr sys_proc_info 2 ,
+.Xr sys_proc_cmdline 2 ,
+.Xr proc 5
+.Sh STANDARDS
+.Nm
+implements the option letters required by
+.St -p1003.1-2024
+and a substantial superset of the procps and BSD historical
+extensions.
+The
+.Sy BITS
+column and the
+.Cm b
+/ Fl \-bitness
+selector are Substrate extensions.
+.Sh HISTORY
+A
+.Nm
+utility appeared in Version 3 AT&T UNIX.
+The dashless BSD-cluster syntax originated with 1BSD; the
+.Sy STAT
+suffix conventions
+.Pq Sy + , Sy < , Sy N
+are from procps.
+The Substrate implementation is a clean-room rewrite atop the
+native
+.Va sys_procinfo_t
+ABI, sharing no code with either lineage.
+.Sh BUGS
+Cumulative CPU time wraps at 2\^32 ticks (about 388 days at 128 Hz)
+because the kernel reports
+.Va user_time
+and
+.Va sys_time
+as
+.Vt uint32_t
+rather than
+.Vt uint64_t .
+Long-lived daemons will reset to 00:00:00 around that boundary.

@@ -285,6 +285,9 @@ install_to_dist() {
         fi
     done
 
+    echo "Installing substrate-native man pages from usr.man/..."
+    make -C "$TOP/usr.man" install DESTDIR="$DIST" >/dev/null
+
     echo "Installing configuration from etc/..."
     cp -r "$TOP/etc/." "$DIST/etc/"
 
