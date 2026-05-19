@@ -1,0 +1,3 @@
+# No substrate-specific patches for zlib at present — the
+# hand-rolled configure accepts cross-compiler CC/AR/RANLIB
+# via environment variables.

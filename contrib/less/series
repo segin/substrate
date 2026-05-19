@@ -1,0 +1,3 @@
+# Patch series for less.  Empty — substrate-specific build overrides
+# are handled via env vars / configure flags in build.sh rather than
+# source patches.

@@ -1,0 +1,3 @@
+# Patch series for mandoc.  None required at present —
+# the substrate-specific cc/include flags are injected via
+# configure.local rather than as a source patch.

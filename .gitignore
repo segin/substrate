@@ -73,6 +73,11 @@ vgcore.*
 /dist/
 /host_dist/
 
+# Per-contrib-port DESTDIR staging — each `contrib/<pkg>/build.sh`
+# installs into $(SUBSTRATE_TOP)/dist-<pkg>/ which build-rootfs.sh
+# then overlays onto the rootfs image.
+/dist-*/
+
 # Stage-2 toolchain install staging — produced by contrib/binutils
 # stage-2 `make install DESTDIR=$(pwd)/dist-toolchain`.  Overlaid onto
 # the rootfs by build-rootfs.sh --toolchain.
@@ -111,6 +116,10 @@ dist/
 # Recursive per-directory build stamps
 /usr.bin/*/.build-mode
 /usr.lib/*/.build-mode
+
+# Unpacked upstream sources for every contrib/<pkg>/ port — `fetch.sh`
+# downloads + extracts into here.  Never vendored.
+/contrib/*/build/
 
 # Patterns formerly carried in subtree .gitignore files
 /contrib/ext2-boot/*.bin
