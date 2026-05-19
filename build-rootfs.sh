@@ -285,6 +285,15 @@ install_to_dist() {
         fi
     done
 
+    # inetutils-telnetd has /usr/bin/login compiled in as the exec
+    # target; substrate ships login at /bin/login.  Symlink so the
+    # default path resolves without needing a custom -E flag in
+    # inetd.conf.
+    mkdir -p "$DIST/usr/bin"
+    if [ ! -e "$DIST/usr/bin/login" ]; then
+        ln -sf ../../bin/login "$DIST/usr/bin/login"
+    fi
+
     echo "Installing substrate-native man pages from usr.man/..."
     make -C "$TOP/usr.man" install DESTDIR="$DIST" >/dev/null
 
