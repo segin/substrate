@@ -78,6 +78,23 @@ static int stderr_readlink(fs_node_t *node, char *buf, size_t size) {
     return len;
 }
 
+/* /dev/fd -> /proc/self/fd
+ *
+ * Standard Linux convention: a directory-valued symlink so that
+ * /dev/fd/N resolves through the link to /proc/self/fd/N, giving
+ * the calling process a dup of its own FD N.  Tools that rely on
+ * this path (autoconf-generated configure, zsh heredocs and
+ * process substitution `<(...)`, anything using POSIX /dev/fd
+ * idioms) need it to exist. */
+static int fd_readlink(fs_node_t *node, char *buf, size_t size) {
+    (void)node;
+    const char *target = "/proc/self/fd";
+    size_t len = strlen(target);
+    if (len > size) len = size;
+    memcpy(buf, target, len);
+    return len;
+}
+
 /*
  * Note: /dev/random and /dev/urandom are now registered in sys/kern/random.c
  * with a proper ChaCha20-based CSPRNG implementation.
@@ -146,4 +163,12 @@ void pseudo_init(void) {
     stderr_node.flags = FS_SYMLINK;
     stderr_node.readlink = &stderr_readlink;
     devfs_register_device(&stderr_node);
+
+    // /dev/fd -> /proc/self/fd
+    static fs_node_t fd_node;
+    memset(&fd_node, 0, sizeof(fs_node_t));
+    strlcpy(fd_node.name, "fd", sizeof(fd_node.name));
+    fd_node.flags = FS_SYMLINK;
+    fd_node.readlink = &fd_readlink;
+    devfs_register_device(&fd_node);
 }
