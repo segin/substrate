@@ -69,6 +69,9 @@ export LDFLAGS="${LDFLAGS:-} -Wl,--copy-dt-needed-entries"
 "${TREE_DIR}/configure" \
     --host="${TARGET}" \
     --prefix=/usr \
+    --sysconfdir=/etc \
+    --localstatedir=/var \
+    --libexecdir=/usr/libexec \
     --disable-shared --enable-static \
     --without-krb5 \
     --enable-authentication \
