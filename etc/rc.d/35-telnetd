@@ -1,0 +1,58 @@
+#!/bin/sh
+# /etc/rc.d/35-telnetd — substrate's standalone telnet server.
+#
+# Runs /sbin/telnetd on TCP/23 as its own daemon, NOT under inetd.
+# inetutils-telnetd has session-setup bugs on substrate that close
+# every connection mid-handshake; /etc/inetd.conf accordingly has
+# its telnet line commented out.  When the inetutils-side issues
+# are fixed, retire this script and re-enable the inetd line.
+#
+# Sequenced 35-* so it comes up between syslogd (05) and atd (30)
+# and the inetd hook (40) — order doesn't strictly matter but
+# keeps the network-services band tidy.
+
+PROG=/sbin/telnetd
+PIDFILE=/var/run/telnetd.pid
+
+is_running() {
+    [ -r "$PIDFILE" ] || return 1
+    pid=$(cat "$PIDFILE") || return 1
+    [ -n "$pid" ] || return 1
+    kill -0 "$pid" 2>/dev/null
+}
+
+case "${1:-start}" in
+    start)
+        if is_running; then
+            echo "telnetd: already running (pid $(cat $PIDFILE))"
+            exit 0
+        fi
+        # telnetd daemonizes itself and writes /var/run/telnetd.pid
+        "$PROG"
+        ;;
+    stop)
+        if is_running; then
+            pid=$(cat "$PIDFILE")
+            kill "$pid" 2>/dev/null
+            rm -f "$PIDFILE"
+            echo "telnetd: stopped (was pid $pid)"
+        else
+            echo "telnetd: not running"
+        fi
+        ;;
+    status)
+        if is_running; then
+            echo "telnetd: running (pid $(cat $PIDFILE))"
+        else
+            echo "telnetd: stopped"
+        fi
+        ;;
+    restart)
+        $0 stop
+        $0 start
+        ;;
+    *)
+        echo "usage: $0 {start|stop|status|restart}"
+        exit 2
+        ;;
+esac
