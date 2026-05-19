@@ -8,6 +8,7 @@ formatted output conversion
 .B libc
 .SH SYNOPSIS
 .B #include <stdio.h>
+.br
 .B #include <stdarg.h>
 .PP
 .BI "int printf(const char *" format ", ...);"
@@ -373,16 +374,30 @@ flag is used.
 .BR a ", " A
 The
 .B double
-argument is intended to be converted to hexadecimal floating-point notation.
-.B
-This implementation is currently a stub
-and always emits the literal text
-.B "0x1.0p+0"
+argument is converted to hexadecimal floating-point notation of the
+form
+.RB [\-]0x h . hhhh p \(+- d ,
+where one hex digit precedes the radix character and the count of
+hex digits following it is determined by the precision.
+If the precision is missing, the precision is sufficient to
+represent the value exactly (trailing zero nibbles are trimmed).
+If the precision is zero and the
+.B #
+flag is absent, no radix character appears.
+Rounding follows IEEE-754 round-to-nearest, ties-to-even.
+The leading hex digit is
+.B 1
+for normal values and
+.B 0
+for subnormals and zero.
+The binary exponent following
+.B p
 (or
-.B "0X1.0P+0"
-for
-.BR A ),
-discarding the supplied argument value.
+.B P
+for the
+.B A
+conversion) is the unbiased power of two as a signed decimal with at
+least one digit.
 .TP
 .B c
 The
@@ -578,12 +593,12 @@ The
 .BR asprintf ()
 and
 .BR vasprintf ()
-functions are GNU/BSD extensions, also implemented by Substrate libc.
+functions originated as GNU/BSD extensions and were standardized in
+POSIX.1\-2024 (IEEE Std 1003.1\-2024).
 .PP
 The
 .B a
 and
 .B A
-conversion specifiers (hexadecimal floating-point) are required by ISO
-C99 but are presently implemented as a stub in Substrate libc; do not rely
-on the value they produce.
+conversion specifiers (hexadecimal floating-point) conform to ISO
+C99.

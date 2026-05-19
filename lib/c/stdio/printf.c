@@ -173,6 +173,121 @@ static void gtoa(char *buf, size_t size, double val, int precision, int uppercas
     }
 }
 
+/*
+ * %a / %A — hexadecimal floating-point.  Emits [sign][0x]h[.hhh]p[+-]ddd
+ * where h is one hex digit (1 for normals, 0 for subnormals and zero),
+ * the fractional nibbles come from the IEEE-754 binary64 mantissa, and
+ * the binary exponent is decimal (unbiased: exp_field - 1023, or -1022
+ * for subnormals).  Precision selects the count of fractional hex
+ * digits with round-to-nearest-even; -1 means "shortest exact".
+ */
+static void atoa(char *buf, size_t size, double val, int precision,
+                 int uppercase, int alternate_form, int force_sign,
+                 int space_prefix) {
+    const char *digits = uppercase ? "0123456789ABCDEF" : "0123456789abcdef";
+    char p_char = uppercase ? 'P' : 'p';
+    char x_char = uppercase ? 'X' : 'x';
+
+    union { double d; uint64_t u; } u;
+    u.d = val;
+    int sign = (int)((u.u >> 63) & 1);
+    uint64_t exp_field = (u.u >> 52) & 0x7FF;
+    uint64_t mantissa = u.u & (((uint64_t)1 << 52) - 1);
+
+    char *o = buf;
+    size_t rem = size;
+#define APUT(c) do { if (rem > 1) { *o++ = (char)(c); rem--; } } while (0)
+
+    if (sign) APUT('-');
+    else if (force_sign) APUT('+');
+    else if (space_prefix) APUT(' ');
+
+    if (exp_field == 0x7FF) {
+        const char *s = (mantissa == 0)
+            ? (uppercase ? "INF" : "inf")
+            : (uppercase ? "NAN" : "nan");
+        while (*s) APUT(*s++);
+        if (rem > 0) *o = '\0';
+        return;
+    }
+
+    int exponent;
+    int leading_digit;
+    if (exp_field == 0) {
+        leading_digit = 0;
+        exponent = (mantissa == 0) ? 0 : -1022;
+    } else {
+        leading_digit = 1;
+        exponent = (int)exp_field - 1023;
+    }
+
+    int eff_precision;
+    if (precision < 0) {
+        /* Shortest exact: trim trailing zero nibbles. */
+        eff_precision = 13;
+        uint64_t tmp = mantissa;
+        while (eff_precision > 0 && (tmp & 0xF) == 0) {
+            tmp >>= 4;
+            eff_precision--;
+        }
+    } else if (precision < 13) {
+        int drop_bits = 52 - precision * 4;
+        uint64_t round_bit = (uint64_t)1 << (drop_bits - 1);
+        uint64_t drop_mask = ((uint64_t)1 << drop_bits) - 1;
+        uint64_t low = mantissa & drop_mask;
+        uint64_t kept = mantissa >> drop_bits;
+
+        int round_up = 0;
+        /* round-to-nearest-even: LSB of the would-be output value.  When
+         * precision == 0 there are no kept fractional bits, so the LSB is
+         * the leading hex digit itself. */
+        int lsb = (precision == 0) ? (leading_digit & 1) : (int)(kept & 1);
+        if (low > round_bit) round_up = 1;
+        else if (low == round_bit && lsb) round_up = 1;
+
+        if (round_up) {
+            kept++;
+            int field_width = precision * 4;
+            if (field_width == 0 || (kept >> field_width) != 0) {
+                leading_digit++;
+                kept = 0;
+            }
+        }
+        mantissa = kept << drop_bits;
+        eff_precision = precision;
+    } else {
+        /* precision >= 13: emit all 13 mantissa digits, pad with zeros. */
+        eff_precision = precision;
+    }
+
+    APUT('0');
+    APUT(x_char);
+    APUT(digits[leading_digit]);
+
+    if (eff_precision > 0 || alternate_form) {
+        APUT('.');
+        for (int i = 0; i < eff_precision; i++) {
+            int shift = 48 - i * 4;
+            int d = (shift >= 0) ? (int)((mantissa >> shift) & 0xF) : 0;
+            APUT(digits[d]);
+        }
+    }
+
+    APUT(p_char);
+    int e = exponent;
+    if (e >= 0) APUT('+');
+    else { APUT('-'); e = -e; }
+
+    char ebuf[16];
+    int ei = 0;
+    if (e == 0) ebuf[ei++] = '0';
+    else while (e > 0) { ebuf[ei++] = '0' + (e % 10); e /= 10; }
+    while (ei > 0) APUT(ebuf[--ei]);
+
+    if (rem > 0) *o = '\0';
+#undef APUT
+}
+
 int vsnprintf(char *str, size_t size, const char *format, va_list ap) {
     char *s = str;
     const char *f = format;
@@ -374,8 +489,12 @@ int vsnprintf(char *str, size_t size, const char *format, va_list ap) {
                 }
                 case 'a':
                 case 'A': {
-                    va_arg(ap, double);
-                    char tmp[16]; strlcpy(tmp, (*f == 'A') ? "0X1.0P+0" : "0x1.0p+0", sizeof(tmp));
+                    double val;
+                    if (length == LEN_LONG_DOUBLE) val = (double)va_arg(ap, long double);
+                    else val = va_arg(ap, double);
+                    char tmp[64];
+                    atoa(tmp, sizeof(tmp), val, precision, (*f == 'A'),
+                         alternate_form, force_sign, space_prefix);
                     int tmp_len = strlen(tmp);
                     if (width > tmp_len && !left_align) for (int i = 0; i < width - tmp_len; i++) EMIT(' ');
                     for (int i = 0; i < tmp_len; i++) EMIT(tmp[i]);
