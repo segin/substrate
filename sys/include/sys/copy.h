@@ -2,6 +2,7 @@
 #define _SYS_COPY_H
 
 #include <stddef.h>
+#include <sys/compiler.h>
 
 /*
  * User-Kernel Copy Functions
