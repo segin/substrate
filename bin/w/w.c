@@ -1,19 +1,24 @@
 /*
- * w — show who is logged on and a system summary.
+ * w — show who is logged on and what they are doing.
  *
  * Prints the standard header line (current time, uptime, logged-in
  * user count, load average) followed by one row per logged-in user
  * from /var/run/utmp.
  *
- * The IDLE / JCPU / PCPU / WHAT columns require per-tty foreground-
- * process accounting, which substrate does not expose yet; WHAT is
- * shown as "-" rather than fabricated.
+ * The WHAT column is the command the foreground process group on the
+ * user's terminal is running.  substrate has no per-tty foreground
+ * accounting in utmp, so it is recovered from /proc: a process is the
+ * foreground process of its controlling tty when its stat pgrp equals
+ * its tpgid, and the tty itself is identified by the /proc/<pid>/fd/0
+ * symlink resolving to the line's /dev node.
  */
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <time.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <dirent.h>
 #include <utmp.h>
 
 static void field(char *dst, const char *src, size_t n)
@@ -32,6 +37,88 @@ static int slurp(const char *path, char *buf, size_t cap)
     if (r < 0) return -1;
     buf[r] = '\0';
     return 0;
+}
+
+/* True if s is a non-empty run of decimal digits (a /proc pid entry). */
+static int all_digits(const char *s)
+{
+    if (!*s) return 0;
+    for (; *s; s++)
+        if (*s < '0' || *s > '9') return 0;
+    return 1;
+}
+
+/*
+ * Determine the WHAT column for a login on tty `line`: the comm of the
+ * foreground process on that terminal.  Writes "-" when nothing can be
+ * attributed.
+ */
+static void find_what(const char *line, char *out, size_t cap)
+{
+    out[0] = '-';
+    out[1] = '\0';
+
+    char devpath[UT_LINESIZE + 8];
+    snprintf(devpath, sizeof devpath, "/dev/%s", line);
+
+    DIR *d = opendir("/proc");
+    if (!d) return;
+
+    int best_is_leader = 0, found = 0;
+    struct dirent *de;
+    while ((de = readdir(d)) != NULL) {
+        if (!all_digits(de->d_name)) continue;
+
+        char path[288], buf[512];
+        snprintf(path, sizeof path, "/proc/%s/stat", de->d_name);
+        if (slurp(path, buf, sizeof buf) != 0) continue;
+
+        /* comm sits between the first '(' and the last ')'; procfs
+         * sanitizes embedded parens, so the wrapping pair is unique. */
+        char *lp = strchr(buf, '(');
+        char *rp = strrchr(buf, ')');
+        if (!lp || !rp || rp <= lp) continue;
+
+        char comm[40];
+        size_t clen = (size_t)(rp - lp - 1);
+        if (clen >= sizeof comm) clen = sizeof comm - 1;
+        memcpy(comm, lp + 1, clen);
+        comm[clen] = '\0';
+
+        /* tail after ')': state ppid pgrp session tty_nr tpgid ... */
+        char st;
+        int ppid, pgrp, session, tty_nr, tpgid;
+        if (sscanf(rp + 1, " %c %d %d %d %d %d",
+                   &st, &ppid, &pgrp, &session, &tty_nr, &tpgid) != 6)
+            continue;
+        (void)st; (void)ppid; (void)session; (void)tty_nr;
+
+        /* Foreground process of its own controlling tty. */
+        if (tpgid <= 0 || pgrp != tpgid) continue;
+
+        /* Confirm the tty is `line` via the std-fd symlinks. */
+        int matched = 0;
+        for (int fd = 0; fd <= 2 && !matched; fd++) {
+            char fdpath[288], link[128];
+            snprintf(fdpath, sizeof fdpath, "/proc/%s/fd/%d", de->d_name, fd);
+            ssize_t n = readlink(fdpath, link, sizeof link - 1);
+            if (n > 0) {
+                link[n] = '\0';
+                if (strcmp(link, devpath) == 0) matched = 1;
+            }
+        }
+        if (!matched) continue;
+
+        /* Prefer the process-group leader's command. */
+        int is_leader = (atoi(de->d_name) == pgrp);
+        if (!found || (is_leader && !best_is_leader)) {
+            strncpy(out, comm, cap - 1);
+            out[cap - 1] = '\0';
+            best_is_leader = is_leader;
+            found = 1;
+        }
+    }
+    closedir(d);
 }
 
 int main(void)
@@ -96,8 +183,11 @@ int main(void)
         struct tm *ltm = localtime(&t);
         if (ltm) strftime(lb, sizeof lb, "%H:%M", ltm);
 
+        char what[40];
+        find_what(line, what, sizeof what);
+
         printf("%-9s %-9s %-17s %-8s %s\n",
-               user, line, host[0] ? host : "-", lb, "-");
+               user, line, host[0] ? host : "-", lb, what);
     }
     endutent();
     return 0;
