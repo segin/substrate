@@ -194,7 +194,6 @@ static int tcp_xmit_queue(tcp_pcb_t *p, uint8_t flags,
     if (dlen > TCP_MSS) dlen = TCP_MSS;
     tcp_seg_t *s = (tcp_seg_t *)kmalloc(sizeof(*s) + dlen);
     if (!s) return -ENOMEM;
-    s->seq       = p->snd_nxt;
     s->flags     = flags;
     s->dlen      = (uint16_t)dlen;
     s->sent_tick = get_ticks();
@@ -202,15 +201,20 @@ static int tcp_xmit_queue(tcp_pcb_t *p, uint8_t flags,
     s->next      = NULL;
     if (dlen && data) memcpy(s->data, data, dlen);
 
-    int rc = tcp_xmit_raw(p, s->seq, flags, s->data, dlen);
-    if (rc < 0) { kfree(s, sizeof(*s) + dlen); return rc; }
-
-    /* Sequence-space advance + unacked-FIFO append under the lock —
-     * tcp_unacked_prune() walks/frees this same list from the IRQ
-     * ACK path.  kmalloc + the actual transmit above stay outside
-     * the lock: tcp_xmit_raw -> ip4_output may ARP-wait, which
-     * needs IRQs enabled to receive the reply. */
+    /* Assign the sequence number, advance snd_nxt, and link onto the
+     * unacked FIFO — all under the lock and all BEFORE the transmit.
+     *
+     * Ordering is load-bearing: on loopback tcp_xmit_raw() delivers
+     * the segment synchronously, the peer ACKs it, and that ACK is
+     * processed (tcp_unacked_prune) before tcp_xmit_raw() even
+     * returns.  If the segment were appended afterwards the ACK
+     * could never prune it — it would sit at unacked_head forever,
+     * RTO-retransmitted until ETIMEDOUT killed the connection, and
+     * its permanent presence would block the FIN_WAIT_1 -> FIN_WAIT_2
+     * transition (which requires !unacked_head), so the connection
+     * could never close cleanly either. */
     uint32_t f = tcp_lock();
+    s->seq = p->snd_nxt;
     p->snd_nxt += (uint32_t)dlen;
     if (flags & TCP_SYN) p->snd_nxt++;
     if (flags & TCP_FIN) p->snd_nxt++;
@@ -218,6 +222,12 @@ static int tcp_xmit_queue(tcp_pcb_t *p, uint8_t flags,
     else                 p->unacked_head = s;
     p->unacked_tail = s;
     tcp_unlock(f);
+
+    /* Transmit with IRQs enabled (tcp_xmit_raw -> ip4_output may
+     * ARP-wait, which needs IRQs on to receive the reply).  A failed
+     * transmit leaves the segment queued; the RTO timer retransmits
+     * it — which is the correct response to a transient send error. */
+    tcp_xmit_raw(p, s->seq, flags, s->data, dlen);
     return 0;
 }
 
