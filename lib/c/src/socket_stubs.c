@@ -230,10 +230,24 @@ int getaddrinfo(const char *node, const char *service,
     if (family == AF_INET)
         return getaddrinfo_inet(node, service, hints, res);
 
-    /* AF_UNSPEC: if it looks like an internet query (numeric port,
-     * dotted-quad node, or a service name not starting with '/'),
-     * try INET first; otherwise fall through to the AF_UNIX path. */
-    if (family == AF_UNSPEC && (node || (service && service[0] != '/'))) {
+    /* AF_UNSPEC with a non-NULL node is unambiguously an internet
+     * query — AF_UNIX has no notion of a "node" (host).  Resolve it
+     * as INET and return whatever that produces, success OR failure.
+     *
+     * The previous code fell through to the AF_UNIX branch on a
+     * failed INET lookup, where `path = service` built a bogus
+     * sockaddr_un with sun_path set to the *port string* ("22").
+     * ssh then "connected" to a garbage AF_UNIX path and printed
+     * "connect to host 22 port".  A failed hostname lookup must
+     * surface as EAI_NONAME, not a fake unix socket. */
+    if (family == AF_UNSPEC && node)
+        return getaddrinfo_inet(node, service, hints, res);
+
+    /* AF_UNSPEC, node == NULL: a service-only query.  A service that
+     * isn't a filesystem path is a passive internet bind; try INET
+     * first and only fall through to AF_UNIX if that path is taken
+     * for a genuinely path-shaped service. */
+    if (family == AF_UNSPEC && service && service[0] != '/') {
         if (getaddrinfo_inet(node, service, hints, res) == 0) return 0;
     }
 
