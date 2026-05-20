@@ -148,10 +148,30 @@ static int pty_drv_install(struct tty_driver *drv, struct tty *t) {
     return 0;
 }
 
+/*
+ * Slave close: the slave's last fd is gone — the session leader /
+ * login shell on this PTY has exited.  Mark the pair dead so the
+ * master side observes EOF: pty_master_node_poll() then reports
+ * POLLHUP|POLLIN and pty_master_node_read() returns 0.  Without this
+ * a master-side select()/read() — telnetd's socket<->pty forwarding
+ * loop — blocked forever and the network connection it was bridging
+ * was never closed.
+ */
+static void pty_slave_drv_close(struct tty *slave_tty) {
+    pty_pair_t *p = slave_tty->driver_data;
+    if (!p || p->magic != PTY_MAGIC) return;
+    spinlock_acquire(&p->lock);
+    p->slave_open = 0;
+    p->dead       = 1;
+    sched_wakeup(&p->read_wait);   /* wake a blocked master poll/read */
+    spinlock_release(&p->lock);
+}
+
 static struct tty_driver pty_slave_driver = {
     .driver_name = "ptyslave",
     .name        = "pts",
     .install     = pty_drv_install,
+    .close       = pty_slave_drv_close,
     .write       = pty_slave_drv_write,
     .write_room  = pty_slave_drv_write_room,
 };
@@ -446,7 +466,10 @@ int pty_master_node_poll(fs_node_t *node, void *waiter) {
 
     spinlock_acquire(&p->lock);
     if (p->dead) {
-        events |= POLLHUP;
+        /* A hung-up master is read-ready — read() returns 0 (EOF).
+         * Report POLLIN too so select()-based loops (telnetd's
+         * socket<->pty forwarder) wake instead of blocking forever. */
+        events |= POLLHUP | POLLIN | POLLRDNORM;
     }
     if (p->packet_mode && p->packet_status) {
         events |= POLLIN | POLLRDNORM;
