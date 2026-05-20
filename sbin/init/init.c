@@ -31,13 +31,14 @@
 #include <sys/time.h>
 #include <sys/wait.h>
 #include <termios.h>
+#include <time.h>
 #include <unistd.h>
 #include <utmp.h>
 
 struct gettyline {
     const char *tty;        /* device path */
     pid_t       pid;        /* current getty pid (0 if not running) */
-    long        last_spawn; /* serial counter used for rate-limit */
+    time_t      last_spawn; /* wall-clock seconds of last spawn */
 };
 
 /*
@@ -123,49 +124,32 @@ spawn_getty(struct gettyline *line)
 }
 
 /*
- * Reap any pids that exited and clear the matching line.pid so the
- * main loop knows to respawn.  Returns the number of children
- * reaped.
+ * Walk the line table; respawn any whose getty pid is zero.  Rate-
+ * limit using wall-clock seconds, not a loop counter — the main
+ * loop only ticks when a child exits, so a fast-failing getty whose
+ * loop-counter delta is small would stay un-respawned forever once
+ * its sibling lines settled and waitpid started blocking.  Returns
+ * 1 if any line is still rate-limited (caller should poll again
+ * soon), 0 if every dead line was respawned.
  */
 static int
-reap_zombies(void)
+respawn_dead_lines(time_t now)
 {
-    int   reaped = 0;
-    pid_t pid;
-    int   status;
-    while ((pid = waitpid(-1, &status, WNOHANG)) > 0) {
-        reaped++;
-        for (int i = 0; i < NLINES; i++) {
-            if (g_lines[i].pid == pid) {
-                g_lines[i].pid = 0;
-                break;
-            }
-        }
-    }
-    return reaped;
-}
-
-/*
- * Walk the line table; respawn any whose getty pid is zero.
- * Rate-limit by skipping the spawn if we just respawned this line
- * a moment ago — that's enough to keep a wedged getty from melting
- * the CPU without needing a real timer.
- */
-static void
-respawn_dead_lines(long now_serial)
-{
+    int rate_limited = 0;
     for (int i = 0; i < NLINES; i++) {
         if (g_lines[i].pid != 0) {
             continue;
         }
         if (g_lines[i].last_spawn != 0 &&
-            now_serial - g_lines[i].last_spawn < 2) {
-            /* respawned less than two ticks ago — wait a beat */
+            now - g_lines[i].last_spawn < 1) {
+            /* spawned this same second — wait at least one second. */
+            rate_limited = 1;
             continue;
         }
-        g_lines[i].last_spawn = now_serial;
+        g_lines[i].last_spawn = now;
         spawn_getty(&g_lines[i]);
     }
+    return rate_limited;
 }
 
 /*
@@ -347,21 +331,32 @@ main(int argc, char **argv)
         }
     }
 
-    long tick = 0;
     /* Spawn initial gettys. */
-    for (int i = 0; i < NLINES; i++) {
-        spawn_getty(&g_lines[i]);
-        g_lines[i].last_spawn = tick;
+    {
+        time_t now = time(NULL);
+        for (int i = 0; i < NLINES; i++) {
+            spawn_getty(&g_lines[i]);
+            g_lines[i].last_spawn = now;
+        }
     }
 
     while (!g_want_shutdown) {
         /*
-         * Block in waitpid for the next child exit.  SIGCHLD wakes
-         * us; the SIGTERM/SIGINT handlers wake us via EINTR.
+         * Reap exited children non-blocking, then sleep ~1s before
+         * re-checking.  We can't block in waitpid(2) forever because
+         * a fast-failing getty's last_spawn is "now", and the
+         * 1-second rate-limit in respawn_dead_lines would otherwise
+         * never resolve — there'd be no child exit to wake us, and
+         * no advance of wall-clock visibility in our control flow.
+         *
+         * sleep(1) yields the rate-limit window and is interrupted
+         * by SIGCHLD / SIGTERM, so child exits and shutdown signals
+         * still feel snappy.
          */
-        int   status;
-        pid_t pid = waitpid(-1, &status, 0);
-        if (pid > 0) {
+        for (;;) {
+            int   status;
+            pid_t pid = waitpid(-1, &status, WNOHANG);
+            if (pid <= 0) break;
             for (int i = 0; i < NLINES; i++) {
                 if (g_lines[i].pid == pid) {
                     g_lines[i].pid = 0;
@@ -369,12 +364,10 @@ main(int argc, char **argv)
                 }
             }
         }
-        /* Drain any other pending zombies non-blocking. */
-        (void)reap_zombies();
-        tick++;
-        if (!g_want_shutdown) {
-            respawn_dead_lines(tick);
-        }
+        if (g_want_shutdown) break;
+        time_t now = time(NULL);
+        (void)respawn_dead_lines(now);
+        sleep(1);
     }
 
     shutdown_sequence();
