@@ -47,6 +47,17 @@ struct sockaddr_un {
 #define SHUT_RDWR 2
 
 #define SOL_SOCKET 1
+
+/* Ancillary message types + recvmsg/sendmsg flags — kernel subset
+ * for the af_unix SCM_RIGHTS path.  Values match the user-facing
+ * include/sys/socket.h; keep both in sync. */
+#define SCM_RIGHTS       1
+#define SCM_CREDENTIALS  2
+#define MSG_CTRUNC       0x0008
+#define MSG_TRUNC        0x0020
+#define MSG_DONTWAIT     0x0040
+#define MSG_NOSIGNAL     0x4000
+
 #define SO_REUSEADDR 2
 #define SO_TYPE      3
 #define SO_ERROR     4

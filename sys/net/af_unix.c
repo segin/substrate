@@ -66,6 +66,7 @@ struct iovec_local { void *iov_base; size_t iov_len; };
 #define AFUNIX_BUF_SIZE 4096
 #define AFUNIX_PATH_MAX 108
 #define AFUNIX_BACKLOG_MAX 32
+#define AFUNIX_FDQ_MAX     16    /* maximum SCM_RIGHTS fds queued per socket */
 
 typedef struct {
     uint8_t  data[AFUNIX_BUF_SIZE];
@@ -141,6 +142,12 @@ typedef struct afunix_sock {
      *              and peer's reads return EOF once their rx is drained. */
     int             rd_closed;
     int             wr_closed;
+    /* SCM_RIGHTS-passed file references queued to be received here.
+     * Writer (sendmsg) bumps file_t refcount and enqueues; reader
+     * (recvmsg) dequeues, allocates a fresh fd slot in the receiving
+     * process, installs the file_t, drops the ref. */
+    file_t         *rx_fdq[AFUNIX_FDQ_MAX];
+    int             rx_fdq_count;
     mutex_t         lock;
 } afunix_sock_t;
 
@@ -674,8 +681,75 @@ ssize_t sys_recvfrom(int fd, void *buf, size_t len, int flags,
     return sys_recv(fd, buf, len, flags);
 }
 
+/* Kernel-side cmsghdr accessor — mirrors the user-space CMSG_*
+ * macros for parsing/building the ancillary-data area. */
+struct kcmsghdr {
+    uint32_t cmsg_len;
+    int      cmsg_level;
+    int      cmsg_type;
+};
+#define KCMSG_ALIGN(n)  (((n) + sizeof(size_t) - 1) & ~(sizeof(size_t) - 1))
+
+/* sendmsg with SCM_RIGHTS support — parse the cmsghdr area for any
+ * SCM_RIGHTS records, bump file_t refcount for each fd, queue the
+ * file_t on the peer socket's rx_fdq.  Then run the iov loop as a
+ * plain send() chain.  msg_control is read directly from the user
+ * pointer (substrate's syscall layer treats msghdr fields as already
+ * validated; tightening this is a separate audit). */
 ssize_t sys_sendmsg(int fd, const struct msghdr *msg, int flags) {
     if (!msg) return -EFAULT;
+    afunix_sock_t *s = afunix_from_fd(fd);
+
+    /* SCM_RIGHTS plumbing only applies to AF_UNIX peers.  AF_INET
+     * sockets fall through to the iov-only path below. */
+    if (s && s->peer && msg->msg_control && msg->msg_controllen > 0) {
+        const unsigned char *cmsgbuf = (const unsigned char *)msg->msg_control;
+        size_t cmsglen = msg->msg_controllen;
+        size_t off = 0;
+        while (off + sizeof(struct kcmsghdr) <= cmsglen) {
+            const struct kcmsghdr *c = (const struct kcmsghdr *)(cmsgbuf + off);
+            if (c->cmsg_len < sizeof(*c) || off + c->cmsg_len > cmsglen)
+                return -EINVAL;
+            if (c->cmsg_level == SOL_SOCKET && c->cmsg_type == SCM_RIGHTS) {
+                size_t datalen = c->cmsg_len - sizeof(*c);
+                if (datalen % sizeof(int) != 0) return -EINVAL;
+                int nfds = (int)(datalen / sizeof(int));
+                const int *fds = (const int *)(cmsgbuf + off + sizeof(*c));
+                /* Look up each fd in the sender's table.  Queue them
+                 * on the peer's rx_fdq.  All-or-nothing: if any fd is
+                 * invalid or the queue would overflow, undo previous
+                 * fref's and fail. */
+                mutex_lock(&s->peer->lock);
+                if (s->peer->rx_fdq_count + nfds > AFUNIX_FDQ_MAX) {
+                    mutex_unlock(&s->peer->lock);
+                    return -EMSGSIZE;
+                }
+                int queued = 0;
+                for (int i = 0; i < nfds; i++) {
+                    if (fds[i] < 0 || fds[i] >= MAX_FD) goto fd_fail;
+                    file_t *f = current_process->fds[fds[i]];
+                    if (!f) goto fd_fail;
+                    f->f_count++;
+                    s->peer->rx_fdq[s->peer->rx_fdq_count + queued] = f;
+                    queued++;
+                    continue;
+                fd_fail:
+                    /* Roll back. */
+                    for (int j = 0; j < queued; j++) {
+                        file_t *qf = s->peer->rx_fdq[s->peer->rx_fdq_count + j];
+                        if (qf && qf->f_count > 0) qf->f_count--;
+                        s->peer->rx_fdq[s->peer->rx_fdq_count + j] = NULL;
+                    }
+                    mutex_unlock(&s->peer->lock);
+                    return -EBADF;
+                }
+                s->peer->rx_fdq_count += queued;
+                mutex_unlock(&s->peer->lock);
+            }
+            off += KCMSG_ALIGN(c->cmsg_len);
+        }
+    }
+
     ssize_t total = 0;
     struct iovec_local *iov = (struct iovec_local *)msg->msg_iov;
     for (int i = 0; i < (int)msg->msg_iovlen; i++) {
@@ -687,6 +761,10 @@ ssize_t sys_sendmsg(int fd, const struct msghdr *msg, int flags) {
     return total;
 }
 
+/* recvmsg with SCM_RIGHTS support — run the iov reads first, then
+ * if the AF_UNIX socket has pending fds in rx_fdq, install them into
+ * the calling process's fd table and emit a SCM_RIGHTS cmsg into
+ * msg_control. */
 ssize_t sys_recvmsg(int fd, struct msghdr *msg, int flags) {
     if (!msg) return -EFAULT;
     ssize_t total = 0;
@@ -696,6 +774,63 @@ ssize_t sys_recvmsg(int fd, struct msghdr *msg, int flags) {
         if (r < 0) return total > 0 ? total : r;
         total += r;
         if ((size_t)r < iov[i].iov_len) break;
+    }
+
+    /* AF_UNIX rx_fdq drain.  Only applies once the iov loop above has
+     * pulled at least one byte (recvmsg without data wouldn't carry
+     * an SCM payload on a stream socket). */
+    afunix_sock_t *s = afunix_from_fd(fd);
+    if (s && msg->msg_control && (size_t)msg->msg_controllen >= sizeof(struct kcmsghdr)) {
+        mutex_lock(&s->lock);
+        int nfds = s->rx_fdq_count;
+        if (nfds > 0) {
+            size_t need = KCMSG_ALIGN(sizeof(struct kcmsghdr) + (size_t)nfds * sizeof(int));
+            if (need > (size_t)msg->msg_controllen) {
+                /* Truncate — fewer fds than queued — but still deliver
+                 * what fits and mark MSG_CTRUNC. */
+                nfds = (int)(((size_t)msg->msg_controllen - sizeof(struct kcmsghdr)) / sizeof(int));
+                if (nfds < 0) nfds = 0;
+                msg->msg_flags |= MSG_CTRUNC;
+            }
+            /* Allocate fds in the receiver process. */
+            int allocated[AFUNIX_FDQ_MAX];
+            int got = 0;
+            for (int i = 0; i < nfds; i++) {
+                int newfd = proc_alloc_fd(current_process);
+                if (newfd < 0) {
+                    /* Out of fds — roll back, leave undelivered in queue. */
+                    for (int j = 0; j < got; j++) {
+                        proc_set_fd(current_process, allocated[j], NULL);
+                    }
+                    nfds = got;
+                    msg->msg_flags |= MSG_CTRUNC;
+                    break;
+                }
+                proc_set_fd(current_process, newfd, s->rx_fdq[i]);
+                /* refcount was already bumped on the sender side;
+                 * proc_set_fd takes ownership of that reference, so
+                 * we do NOT bump again here. */
+                allocated[got++] = newfd;
+            }
+            /* Write the cmsg out. */
+            struct kcmsghdr *c = (struct kcmsghdr *)msg->msg_control;
+            c->cmsg_len   = sizeof(*c) + (uint32_t)got * sizeof(int);
+            c->cmsg_level = SOL_SOCKET;
+            c->cmsg_type  = SCM_RIGHTS;
+            int *outfds = (int *)((unsigned char *)msg->msg_control + sizeof(*c));
+            for (int i = 0; i < got; i++) outfds[i] = allocated[i];
+            msg->msg_controllen = (uint32_t)(sizeof(*c) + (uint32_t)got * sizeof(int));
+            /* Shift remaining unqueued fds down. */
+            for (int i = got; i < s->rx_fdq_count; i++) {
+                s->rx_fdq[i - got] = s->rx_fdq[i];
+            }
+            s->rx_fdq_count -= got;
+        } else {
+            msg->msg_controllen = 0;
+        }
+        mutex_unlock(&s->lock);
+    } else if (msg->msg_control && msg->msg_controllen > 0) {
+        msg->msg_controllen = 0;
     }
     return total;
 }
