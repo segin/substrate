@@ -143,12 +143,8 @@ struct linger {
     int l_linger;
 };
 
-#define MSG_OOB        0x01
-#define MSG_PEEK       0x02
-#define MSG_DONTROUTE  0x04
-#define MSG_DONTWAIT   0x40
-#define MSG_NOSIGNAL   0x4000
-#define MSG_WAITALL    0x100
+/* MSG_* flags are defined once, near struct cmsghdr above, under an
+ * #ifndef MSG_OOB guard. */
 
 #define SHUT_RD        0
 #define SHUT_WR        1

@@ -219,8 +219,15 @@ int getaddrinfo(const char *node, const char *service,
     if (!res) return EAI_FAIL;
     int family = hints ? hints->ai_family : AF_UNSPEC;
 
-    /* AF_INET / AF_INET6 → real internet resolver. */
-    if (family == AF_INET || family == AF_INET6)
+    /* AF_INET6 is not supported — substrate has no v6 bind/connect.
+     * Return EAI_ADDRFAMILY rather than handing back a mistyped
+     * AF_INET result, so AF_UNSPEC callers iterate to the v4 entry
+     * and AF_INET6-pinned callers get a clean failure. */
+    if (family == AF_INET6)
+        return EAI_ADDRFAMILY;
+
+    /* AF_INET → real internet resolver. */
+    if (family == AF_INET)
         return getaddrinfo_inet(node, service, hints, res);
 
     /* AF_UNSPEC: if it looks like an internet query (numeric port,
@@ -294,6 +301,9 @@ const char *gai_strerror(int errcode)
     case EAI_BADFLAGS:     return "invalid flags";
     case EAI_FAIL:         return "non-recoverable resolution failure";
     case EAI_FAMILY:       return "address family not supported";
+    case EAI_ADDRFAMILY:   return "address family for node not supported";
+    case EAI_NODATA:       return "no address associated with node";
+    case EAI_OVERFLOW:     return "argument buffer overflow";
     case EAI_MEMORY:       return "out of memory";
     case EAI_NONAME:       return "node or service not known";
     case EAI_SERVICE:      return "service not supported for socket type";

@@ -432,7 +432,14 @@ static afi_sock_t *afi_from_fd(int fd) {
 /* ------------------------------------------------------------------ */
 
 int afinet_socket(int family, int type, int protocol) {
-    if (family != AF_INET && family != AF_INET6) return -EAFNOSUPPORT;
+    /* AF_INET6 is rejected at socket() time on purpose: substrate's
+     * bind()/connect() only handle AF_INET sockaddrs, so accepting an
+     * AF_INET6 socket here just defers the EAFNOSUPPORT to connect()
+     * with a worse error path (ssh prints "connect to host  port :
+     * Address family not supported").  Refusing it now lets
+     * getaddrinfo-driven callers iterate straight to the AF_INET
+     * result.  Lift this once inet6.c grows real v6 bind/connect. */
+    if (family != AF_INET) return -EAFNOSUPPORT;
     if (type != SOCK_RAW && type != SOCK_DGRAM && type != SOCK_STREAM)
         return -EPROTONOSUPPORT;
     if (type == SOCK_DGRAM && protocol == 0) protocol = IPPROTO_UDP_NUM;

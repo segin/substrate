@@ -68,6 +68,7 @@ struct netent {
 #define EAI_SOCKTYPE   -7
 #define EAI_SYSTEM    -11
 #define EAI_OVERFLOW  -12
+#define EAI_ADDRFAMILY -9   /* address family for node not supported */
 
 struct hostent *gethostbyname(const char *name);
 struct hostent *gethostbyaddr(const void *addr, socklen_t len, int type);
