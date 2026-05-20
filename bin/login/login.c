@@ -350,14 +350,12 @@ do_login_one(const char *forced_user)
         updwtmp(WTMP_FILE, &ut);
     }
 
-    /* (DEAD_PROCESS writing on logout would require login to fork
-     * and wait for the user's shell.  That breaks tty ownership in
-     * substrate's session model — the child needs to inherit the
-     * controlling tty from getty, and an intervening fork moves
-     * the leadership to the wrong process.  Skip for now;
-     * `who -d` and `last` will show the USER_PROCESS as if the
-     * user is still active until init or a reboot writes a
-     * RUN_LVL entry to wtmp.) */
+    /* login does NOT write the DEAD_PROCESS (logout) record itself:
+     * it exec()s the user's shell and is gone, and a fork+wait here
+     * would move controlling-tty ownership to the wrong process under
+     * substrate's session model.  init writes the logout instead —
+     * it reaps the getty/login/shell session and calls
+     * record_logout() before respawning getty (sbin/init/init.c). */
 
     /* Become the user.  Order matters: setgid+initgroups BEFORE
      * setuid, otherwise we lose the privilege needed to install the

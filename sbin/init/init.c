@@ -223,6 +223,43 @@ shutdown_sequence(void)
     }
 }
 
+/*
+ * Record a logout.  When a getty/login/shell session on `tty` ends,
+ * write a DEAD_PROCESS record: utmp then shows the line free and
+ * wtmp carries the logout so `last` can pair it with the login.
+ *
+ * init is what does this — login(1) exec()s the user's shell and is
+ * gone, so it cannot fork+wait to write the close itself (and an
+ * intervening fork would move tty ownership to the wrong process).
+ * init, as the session's reaper, is the natural place.
+ */
+static void
+record_logout(const char *tty, pid_t pid)
+{
+    const char *base = strrchr(tty, '/');
+    base = base ? base + 1 : tty;
+
+    struct utmp ut;
+    memset(&ut, 0, sizeof(ut));
+    ut.ut_type = DEAD_PROCESS;
+    ut.ut_pid  = pid;
+    strncpy(ut.ut_line, base, UT_LINESIZE - 1);
+    /* ut_id must match login's USER_PROCESS record so pututline()
+     * rewrites the same utmp slot rather than appending a new one. */
+    size_t lnlen = strlen(base);
+    const char *idsrc = lnlen > 4 ? base + lnlen - 4 : base;
+    strncpy(ut.ut_id, idsrc, sizeof(ut.ut_id));
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    ut.ut_tv.tv_sec  = (int32_t)tv.tv_sec;
+    ut.ut_tv.tv_usec = (int32_t)tv.tv_usec;
+
+    setutent();
+    pututline(&ut);
+    endutent();
+    updwtmp(WTMP_FILE, &ut);
+}
+
 int
 main(int argc, char **argv)
 {
@@ -359,6 +396,9 @@ main(int argc, char **argv)
             if (pid <= 0) break;
             for (int i = 0; i < NLINES; i++) {
                 if (g_lines[i].pid == pid) {
+                    /* The session on this line ended — close the
+                     * utmp/wtmp pair before respawning getty. */
+                    record_logout(g_lines[i].tty, pid);
                     g_lines[i].pid = 0;
                     break;
                 }
