@@ -17,6 +17,10 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr,
 void pthread_exit(void *retval);
 int pthread_join(pthread_t thread, void **retval);
 
+/* Mark a thread detached: it is never joined, and its resources are
+ * reclaimed automatically when it finishes. */
+int pthread_detach(pthread_t thread);
+
 /* Current-thread identity.  Returns the kernel-assigned TID. */
 pthread_t pthread_self(void);
 

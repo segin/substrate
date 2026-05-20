@@ -1,7 +1,10 @@
 /*
  * telnetd — substrate-native telnet server.
  *
- * Binds TCP/23 (or -p <port>), accept-loops with fork-per-connection,
+ * Binds TCP/23 (or -p <port>) and accept-loops, spawning one thread
+ * per connection (not a process — the listener stays a single
+ * process, so the connection count is bounded by thread/PTY
+ * resources rather than the kernel process table).  Each connection
  * allocates a PTY pair per session, sends a minimal IAC option
  * negotiation, and execs /bin/login on the slave side.  Bytes are
  * shuttled between the socket and the master FD with IAC stripping
@@ -24,6 +27,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <pthread.h>
 #include <signal.h>
 #include <stdarg.h>
 #include <stdint.h>
@@ -96,7 +100,7 @@ static size_t strip_iac(const uint8_t *in, size_t n, uint8_t *out, size_t outcap
     return o;
 }
 
-/* Per-connection worker.  Runs in the child of the accept-loop fork. */
+/* Per-connection worker.  Runs in a dedicated thread (see main()). */
 static int handle_one_connection(int c) {
     int master, slave;
     if (openpty(&master, &slave, NULL, NULL, NULL) < 0) {
@@ -173,6 +177,15 @@ static int handle_one_connection(int c) {
     return WIFEXITED(status) ? WEXITSTATUS(status) : 1;
 }
 
+/* Thread entry: unwrap the accepted fd and service the connection.
+ * The thread is detached, so its resources are reclaimed on return
+ * with no join.  handle_one_connection() owns the fd and closes it. */
+static void *conn_thread(void *arg) {
+    int c = (int)(intptr_t)arg;
+    (void)handle_one_connection(c);
+    return NULL;
+}
+
 static void usage(const char *prog) {
     fprintf(stderr, "usage: %s [-p PORT] [-l LOGIN_PATH] [-f]\n", prog);
 }
@@ -220,9 +233,9 @@ int main(int argc, char **argv) {
         if (f) { fprintf(f, "%d\n", (int)getpid()); fclose(f); }
     }
 
-    /* Reap finished session handlers automatically. */
-    signal(SIGCHLD, SIG_IGN);
-    /* Don't die on SIGPIPE when the client drops mid-write. */
+    /* Don't die on SIGPIPE when the client drops mid-write.  SIGCHLD
+     * is left at its default: each connection thread waitpid()s its
+     * own /bin/login child, so there are no stray children to reap. */
     signal(SIGPIPE, SIG_IGN);
 
     for (;;) {
@@ -231,13 +244,14 @@ int main(int argc, char **argv) {
             if (errno == EINTR) continue;
             return 1;
         }
-        pid_t pid = fork();
-        if (pid < 0) { close(c); continue; }
-        if (pid == 0) {
-            close(s);
-            int rc = handle_one_connection(c);
-            _exit(rc);
+        pthread_t tid;
+        if (pthread_create(&tid, NULL, conn_thread,
+                           (void *)(intptr_t)c) != 0) {
+            /* Out of thread resources — drop this connection rather
+             * than wedge the accept loop. */
+            close(c);
+            continue;
         }
-        close(c);
+        pthread_detach(tid);
     }
 }

@@ -27,6 +27,8 @@
 #include <signal.h>
 #include <fcntl.h>
 #include <pty.h>
+#include <pthread.h>
+#include <stdint.h>
 #include <sys/select.h>
 #include <sys/socket.h>
 #include <sys/wait.h>
@@ -298,6 +300,79 @@ static void sc_plain_close(void)
     else                    bad("plain connection left open after child exit");
 }
 
+/*
+ * 4. The new telnetd model: thread-per-connection (not fork), and
+ *    each connection thread still fork()s a child process for the
+ *    "login".  Exercises fork() from a non-main thread plus
+ *    pthread_detach() resource recycling.
+ */
+static void *thr_worker(void *arg)
+{
+    int c = (int)(intptr_t)arg;
+    pid_t p = fork();                 /* "login" child, from a thread */
+    if (p == 0) {
+        close(c);
+        _exit(0);                     /* session ends immediately */
+    }
+    if (p > 0) waitpid(p, NULL, 0);
+    close(c);                         /* drop the connection */
+    return NULL;
+}
+
+static int g_thr_lfd;
+
+static void *thr_acceptor(void *unused)
+{
+    (void)unused;
+    for (int i = 0; i < 12; i++) {
+        int c = accept(g_thr_lfd, NULL, NULL);
+        if (c < 0) { if (errno == EINTR) { i--; continue; } break; }
+        pthread_t t;
+        if (pthread_create(&t, NULL, thr_worker, (void *)(intptr_t)c) != 0) {
+            close(c);
+            continue;
+        }
+        pthread_detach(t);
+    }
+    return NULL;
+}
+
+static void sc_threaded(void)
+{
+    hr("4. threaded server: thread-per-connection, fork() from threads");
+    const int ROUNDS = 12;
+    int lfd = make_listener(13303);
+    if (lfd < 0) { bad("listener"); return; }
+    pid_t srv = fork();
+    if (srv < 0) { bad("fork server"); close(lfd); return; }
+    if (srv == 0) {
+        /* Server process: a thread accept-loops and spawns a thread
+         * per connection — the new telnetd shape. */
+        signal(SIGPIPE, SIG_IGN);
+        g_thr_lfd = lfd;
+        pthread_t acc;
+        if (pthread_create(&acc, NULL, thr_acceptor, NULL) != 0) _exit(1);
+        pthread_join(acc, NULL);
+        _exit(0);
+    }
+    close(lfd);
+
+    int eof_seen = 0, timed_out = 0;
+    for (int i = 0; i < ROUNDS; i++) {
+        int s = connect_to(13303);
+        if (s < 0) { timed_out++; continue; }
+        int r = wait_readable(s, 3000);
+        char b[32];
+        if (r == 1 && read(s, b, sizeof b) == 0) eof_seen++;
+        else timed_out++;
+        close(s);
+    }
+    reap(srv);
+    printf("  %d rounds: clean EOF=%d  not-closed=%d\n", ROUNDS, eof_seen, timed_out);
+    if (eof_seen == ROUNDS) ok("thread-per-connection + fork-from-thread works");
+    else                    bad("threaded server failed to serve/close connections");
+}
+
 int main(void)
 {
     signal(SIGPIPE, SIG_IGN);
@@ -306,6 +381,7 @@ int main(void)
     sc_plain_close();
     sc_telnetd_close();
     sc_telnetd_session();
+    sc_threaded();
 
     printf("\ntorture_socket: %s (%d failure%s)\n",
            fails ? "FAIL" : "PASS", fails, fails == 1 ? "" : "s");

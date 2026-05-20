@@ -15,7 +15,8 @@
 struct pthread_info {
     pthread_t tid;
     void *exit_status; /* Thread exit status for join */
-    int exited;
+    int exited;        /* start_routine returned — slot is reapable */
+    int detached;      /* pthread_detach: no join; reap on exit */
     int used;
     void *stack;
     size_t stack_size;
@@ -27,22 +28,68 @@ static int thread_table_lock = 0;
 struct trampoline_args {
     void *(*start_routine)(void *);
     void *arg;
+    int   slot;        /* index into thread_table, for exit bookkeeping */
 };
+
+/*
+ * Reclaim detached threads that have finished.  A detached thread is
+ * never joined by the caller, so its 64 KiB stack and table slot
+ * would otherwise leak.  Called from pthread_create() so resources
+ * are recycled as connections (telnetd) churn.  SYS_THR_JOIN here is
+ * used purely as "block until the kernel thread is truly gone" — it
+ * is safe to free the stack only once nothing runs on it.
+ */
+static void pthread_reap_detached(void) {
+    for (int i = 0; i < MAX_PTHREADS; i++) {
+        pthread_t tid = 0;
+        void *stack = NULL;
+
+        while (__sync_lock_test_and_set(&thread_table_lock, 1));
+        struct pthread_info *ti = &thread_table[i];
+        if (ti->used && ti->detached && ti->exited) {
+            tid   = ti->tid;
+            stack = ti->stack;
+            ti->used = 0; ti->tid = 0; ti->stack = NULL;
+            ti->detached = 0; ti->exited = 0; ti->exit_status = NULL;
+        }
+        __sync_lock_release(&thread_table_lock);
+
+        if (stack) {
+            syscall(SYS_THR_JOIN, tid, 0);   /* wait until truly dead */
+            free(stack);
+        }
+    }
+}
 
 /* Thread bootstrap wrapper */
 void __pthread_trampoline(void *arg) {
     struct trampoline_args *ta = (struct trampoline_args *)arg;
     void *(*start_routine)(void *) = ta->start_routine;
     void *actual_arg = ta->arg;
+    int slot = ta->slot;
     free(ta);
 
     void *retval = start_routine(actual_arg);
+
+    /* Mark the slot finished so a detached thread's stack + slot get
+     * reclaimed by the next pthread_create() reap sweep. */
+    if (slot >= 0 && slot < MAX_PTHREADS) {
+        while (__sync_lock_test_and_set(&thread_table_lock, 1));
+        thread_table[slot].exit_status = retval;
+        thread_table[slot].exited = 1;
+        __sync_lock_release(&thread_table_lock);
+    }
+
     pthread_exit(retval);
 }
 
 int pthread_create(pthread_t *thread, const pthread_attr_t *attr,
                           void *(*start_routine) (void *), void *arg) {
     (void)attr;
+
+    /* Recycle any detached threads that have finished before we look
+     * for a slot, so churning callers don't exhaust the table. */
+    pthread_reap_detached();
 
     int slot = -1;
     while (__sync_lock_test_and_set(&thread_table_lock, 1));
@@ -59,6 +106,7 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr,
 
     struct pthread_info *ti = &thread_table[slot];
     ti->exited = 0;
+    ti->detached = 0;
     ti->exit_status = NULL;
 
     ti->stack_size = 64 * 1024;
@@ -80,6 +128,7 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr,
     }
     ta->start_routine = start_routine;
     ta->arg = arg;
+    ta->slot = slot;
 
     /* Per-thread TLS: ask ld.so to allocate a fresh block laid out
      * the same as the initial thread's, with each module's PT_TLS
@@ -144,6 +193,8 @@ int pthread_join(pthread_t thread, void **retval) {
         return ESRCH;
     }
 
+    if (thread_table[slot].detached) return EINVAL;  /* can't join detached */
+
     int ret = (int)syscall(SYS_THR_JOIN, thread, (int)(uintptr_t)retval);
     if (ret != 0) return ret;
 
@@ -169,4 +220,30 @@ int pthread_join(pthread_t thread, void **retval) {
     }
 
     return 0;
+}
+
+/*
+ * pthread_detach — mark a thread so it is never joined: when it
+ * finishes, its stack and table slot are reclaimed automatically by
+ * the reap sweep in pthread_create() (or immediately here, if it has
+ * already exited).
+ */
+int pthread_detach(pthread_t thread) {
+    int rc = ESRCH;
+    int reap_now = 0;
+
+    while (__sync_lock_test_and_set(&thread_table_lock, 1));
+    for (int i = 0; i < MAX_PTHREADS; i++) {
+        if (thread_table[i].used && thread_table[i].tid == thread) {
+            thread_table[i].detached = 1;
+            reap_now = thread_table[i].exited;
+            rc = 0;
+            break;
+        }
+    }
+    __sync_lock_release(&thread_table_lock);
+
+    /* Already finished before we detached it — reclaim it right away. */
+    if (rc == 0 && reap_now) pthread_reap_detached();
+    return rc;
 }
