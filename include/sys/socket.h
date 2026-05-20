@@ -99,6 +99,13 @@ struct cmsghdr {
 #define SOCK_RDM       4
 #define SOCK_SEQPACKET 5
 
+/* socket()/socketpair()/accept4() type flag bits — OR'd into the
+ * `type` argument.  Linux values, identical to O_NONBLOCK /
+ * O_CLOEXEC.  OpenSSH and most modern network code always set
+ * SOCK_CLOEXEC. */
+#define SOCK_NONBLOCK  0x0800
+#define SOCK_CLOEXEC   0x80000
+
 #define SOL_SOCKET     1
 #define SO_DEBUG       1     /* Linux value */
 #define SO_REUSEADDR   2

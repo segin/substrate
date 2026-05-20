@@ -25,6 +25,13 @@
 #define SOCK_DGRAM  2
 #define SOCK_RAW    3
 
+/* socket()/socketpair()/accept4() type flag bits — OR'd into the
+ * `type` argument.  Linux values; identical to O_NONBLOCK / O_CLOEXEC
+ * so the fd-side application is a straight copy. */
+#define SOCK_NONBLOCK 0x0800
+#define SOCK_CLOEXEC  0x80000
+#define SOCK_TYPE_MASK 0xFF       /* mask to recover the base type */
+
 typedef uint16_t sa_family_t;
 typedef uint32_t socklen_t;
 

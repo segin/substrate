@@ -391,20 +391,46 @@ extern size_t  afinet_node_read(fs_node_t *, off_t, size_t, uint8_t *);
 #define AF_INET6 10
 #endif
 
+/* Apply SOCK_CLOEXEC / SOCK_NONBLOCK to a freshly-created socket fd.
+ * Callers pass the original (unmasked) type so the flag bits are
+ * still visible here. */
+static void socket_apply_type_flags(int fd, int orig_type) {
+    if (fd < 0 || fd >= MAX_FD) return;
+    if (orig_type & SOCK_CLOEXEC) {
+        current_process->fd_cloexec |= (1U << fd);
+    }
+    if (orig_type & SOCK_NONBLOCK) {
+        file_t *f = current_process->fds[fd];
+        if (f) f->f_flag |= FNONBLOCK;
+    }
+}
+
 int sys_socket(int domain, int type, int protocol) {
     (void)protocol;
+    /* Strip the SOCK_CLOEXEC / SOCK_NONBLOCK flag bits before the
+     * base-type check — modern callers (OpenSSH, curl, ...) OR them
+     * into `type`, and an exact-equality compare against SOCK_STREAM
+     * would otherwise reject every CLOEXEC socket with
+     * EPROTONOSUPPORT. */
+    int base = type & SOCK_TYPE_MASK;
+    int fd;
+
     if (domain == AF_PACKET) {
-        return afpacket_socket(type, protocol);
+        fd = afpacket_socket(base, protocol);
+    } else if (domain == AF_INET || domain == AF_INET6) {
+        fd = afinet_socket(domain, base, protocol);
+    } else if (domain != AF_UNIX) {
+        return -EAFNOSUPPORT;
+    } else if (base != SOCK_STREAM) {
+        return -EPROTONOSUPPORT;
+    } else {
+        afunix_sock_t *s = afunix_alloc(base);
+        if (!s) return -ENOMEM;
+        fd = afunix_install_fd(s);
+        if (fd < 0) { kfree(s, sizeof(*s)); return -EMFILE; }
     }
-    if (domain == AF_INET || domain == AF_INET6) {
-        return afinet_socket(domain, type, protocol);
-    }
-    if (domain != AF_UNIX) { return -EAFNOSUPPORT; }
-    if (type != SOCK_STREAM) { return -EPROTONOSUPPORT; }
-    afunix_sock_t *s = afunix_alloc(type);
-    if (!s) return -ENOMEM;
-    int fd = afunix_install_fd(s);
-    if (fd < 0) { kfree(s, sizeof(*s)); return -EMFILE; }
+
+    if (fd >= 0) socket_apply_type_flags(fd, type);
     return fd;
 }
 
@@ -412,9 +438,11 @@ int sys_socketpair(int domain, int type, int protocol, int sv[2]) {
     (void)protocol;
     if (!sv) return -EFAULT;
     if (domain != AF_UNIX) return -EAFNOSUPPORT;
-    if (type != SOCK_STREAM) return -EPROTONOSUPPORT;
-    afunix_sock_t *a = afunix_alloc(type);
-    afunix_sock_t *b = afunix_alloc(type);
+    /* Strip SOCK_CLOEXEC / SOCK_NONBLOCK before the base-type check. */
+    int base = type & SOCK_TYPE_MASK;
+    if (base != SOCK_STREAM) return -EPROTONOSUPPORT;
+    afunix_sock_t *a = afunix_alloc(base);
+    afunix_sock_t *b = afunix_alloc(base);
     if (!a || !b) {
         if (a) kfree(a, sizeof(*a));
         if (b) kfree(b, sizeof(*b));
@@ -431,6 +459,8 @@ int sys_socketpair(int domain, int type, int protocol, int sv[2]) {
         kfree(b, sizeof(*b));
         return -EMFILE;
     }
+    socket_apply_type_flags(fa, type);
+    socket_apply_type_flags(fb, type);
     sv[0] = fa; sv[1] = fb;
     return 0;
 }
