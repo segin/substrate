@@ -156,6 +156,16 @@ static void init_memory(multiboot_info_t *mboot_info) {
     // Discover Cores before UMA startup so UMA can init per-CPU caches
     early_uart_print("KMAIN: smp_discover_cores(2)\n");
     smp_discover_cores();
+    /*
+     * Install the real 1004 MiB direct map and unlock all RAM above
+     * the 8 MiB PMM bootstrap window before the UMA / kmem allocators
+     * run.  pmap_bootstrap() ends by calling pmm_enable_highmem();
+     * run any later and the early UMA zones (kmem-64 especially) can
+     * drain the bootstrap pool and spew slab-allocation failures.
+     */
+    early_uart_print("KMAIN: pmap_bootstrap\n");
+    i386_cpu_init_early();
+    pmap_bootstrap();
     early_uart_print("KMAIN: uma_startup\n");
     uma_startup();    // Initialize UMA before kmem (kmem uses UMA zones)
     early_uart_print("KMAIN: kmem_init\n");
@@ -405,7 +415,8 @@ static void init_runtime_console(int serial_console) {
 }
 
 static void init_core_subsystems(multiboot_info_t *mboot_info) {
-    i386_cpu_init_early();
+    /* i386_cpu_init_early() and pmap_bootstrap() now run earlier, in
+     * init_memory(), so the full direct map is up before UMA / kmem. */
     percpu_init();
 
     gdt_init();
@@ -418,7 +429,6 @@ static void init_core_subsystems(multiboot_info_t *mboot_info) {
     fpu_init();
 
     rtc_init();
-    pmap_bootstrap();
 
     smp_discover_cores();
 
