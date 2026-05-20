@@ -60,6 +60,9 @@ extern int        tcp_poll(tcp_pcb_t *p, short events, void **wait_chan);
 extern tcp_pcb_t *tcp_accept(tcp_pcb_t *listen_p);
 extern ssize_t    tcp_send(tcp_pcb_t *p, const void *buf, size_t len);
 extern ssize_t    tcp_recv(tcp_pcb_t *p, void *buf, size_t len);
+extern void       tcp_endpoints(const tcp_pcb_t *p,
+                                uint32_t *laddr, uint16_t *lport,
+                                uint32_t *raddr, uint16_t *rport);
 extern ssize_t    tcp_recv_nb(tcp_pcb_t *p, void *buf, size_t len);
 extern int        tcp_close(tcp_pcb_t *p);
 
@@ -520,6 +523,10 @@ int afinet_listen(int fd, int backlog) {
     return tcp_listen(s->tcp, backlog);
 }
 
+static int afinet_pack_sockaddr(int family, uint16_t hport,
+                                const uint8_t addr_bytes[16],
+                                void *out, socklen_t *outlen);
+
 int afinet_accept(int fd, void *addr, socklen_t *addrlen) {
     afi_sock_t *s = afi_from_fd(fd);
     if (!s) return -ENOTSOCK;
@@ -539,6 +546,25 @@ int afinet_accept(int fd, void *addr, socklen_t *addrlen) {
     c->wait_chan = &c->count;
     c->tcp = cp;
 
+    /* Copy the established connection's endpoints from the accepted
+     * PCB into the socket so getpeername()/getsockname() work.  Both
+     * peer_addr and laddr/raddr are stored network-byte-order;
+     * lport/rport are host-order in the PCB, which is exactly what
+     * afinet_pack_sockaddr expects.  Without this the accepted
+     * socket has connected==0 and getpeername returns ENOTCONN —
+     * which broke sshd-session ("getpeername failed: Transport
+     * endpoint is not connected"). */
+    {
+        uint32_t laddr = 0, raddr = 0;
+        uint16_t lport = 0, rport = 0;
+        tcp_endpoints(cp, &laddr, &lport, &raddr, &rport);
+        c->connected  = 1;
+        c->peer_port  = rport;
+        memcpy(c->peer_addr,  &raddr, 4);
+        c->local_port = lport;
+        memcpy(c->local_addr, &laddr, 4);
+    }
+
     int newfd = afi_install_fd(c);
     if (newfd < 0) {
         if (c->ring) kfree(c->ring, sizeof(afi_pkt_t) * AFI_RING_LEN);
@@ -548,7 +574,15 @@ int afinet_accept(int fd, void *addr, socklen_t *addrlen) {
     }
     c->next = g_afi_head;
     g_afi_head = c;
-    (void)addr; (void)addrlen;
+
+    /* Fill the accept() out-param with the peer's address, BSD/POSIX
+     * convention.  addr may be NULL if the caller doesn't want it. */
+    if (addr && addrlen && *addrlen > 0) {
+        socklen_t cap = *addrlen;
+        (void)afinet_pack_sockaddr(c->family, c->peer_port, c->peer_addr,
+                                   addr, &cap);
+        *addrlen = cap;
+    }
     return newfd;
 }
 

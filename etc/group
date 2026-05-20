@@ -14,5 +14,6 @@ games:x:100:
 www:x:33:
 audio:x:29:root,substrate
 video:x:44:substrate
+sshd:x:22:
 nobody:x:65534:
 substrate:x:1000:

@@ -774,3 +774,19 @@ int tcp_close(tcp_pcb_t *p) {
     }
     return 0;
 }
+
+/*
+ * tcp_endpoints — expose a PCB's local/remote address+port to the
+ * socket layer, which only holds an opaque tcp_pcb_t pointer.
+ * laddr/raddr come out network-byte-order; lport/rport host-order.
+ * Any out-pointer may be NULL.
+ */
+void tcp_endpoints(const tcp_pcb_t *p,
+                   uint32_t *laddr, uint16_t *lport,
+                   uint32_t *raddr, uint16_t *rport) {
+    if (!p) return;
+    if (laddr) *laddr = p->laddr;
+    if (lport) *lport = p->lport;
+    if (raddr) *raddr = p->raddr;
+    if (rport) *rport = p->rport;
+}

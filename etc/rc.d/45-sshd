@@ -1,0 +1,72 @@
+#!/bin/sh
+# /etc/rc.d/45-sshd — OpenSSH server.
+#
+# Sequenced after the network band (20-network) so the listen
+# socket can bind, and after telnetd (35) / inetd (40).  On first
+# boot, host keys are generated with `ssh-keygen -A`; subsequent
+# boots reuse them.
+
+PROG=/usr/sbin/sshd
+PIDFILE=/var/run/sshd.pid
+
+is_running() {
+    [ -r "$PIDFILE" ] || return 1
+    pid=$(cat "$PIDFILE") || return 1
+    [ -n "$pid" ] || return 1
+    kill -0 "$pid" 2>/dev/null
+}
+
+generate_host_keys() {
+    # Generate Ed25519 + ECDSA host keys only.  RSA keygen does a
+    # primality search + bignum modexp that takes many minutes on
+    # substrate's emulated i486 (no hardware bignum); Ed25519/ECDSA
+    # are hash + curve ops and finish in milliseconds.  sshd_config
+    # lists only these two HostKey types to match.
+    if [ ! -f /etc/ssh/ssh_host_ed25519_key ]; then
+        echo "sshd: generating ed25519 host key (first boot)"
+        /usr/bin/ssh-keygen -t ed25519 -f /etc/ssh/ssh_host_ed25519_key -N "" -q
+    fi
+    if [ ! -f /etc/ssh/ssh_host_ecdsa_key ]; then
+        echo "sshd: generating ecdsa host key (first boot)"
+        /usr/bin/ssh-keygen -t ecdsa -f /etc/ssh/ssh_host_ecdsa_key -N "" -q
+    fi
+}
+
+case "${1:-start}" in
+    start)
+        if is_running; then
+            echo "sshd: already running (pid $(cat $PIDFILE))"
+            exit 0
+        fi
+        # /var/empty must exist for privsep chroot.
+        [ -d /var/empty ] || mkdir -p /var/empty
+        generate_host_keys
+        # sshd backgrounds itself and writes /var/run/sshd.pid.
+        "$PROG"
+        ;;
+    stop)
+        if is_running; then
+            pid=$(cat "$PIDFILE")
+            kill "$pid" 2>/dev/null
+            rm -f "$PIDFILE"
+            echo "sshd: stopped (was pid $pid)"
+        else
+            echo "sshd: not running"
+        fi
+        ;;
+    status)
+        if is_running; then
+            echo "sshd: running (pid $(cat $PIDFILE))"
+        else
+            echo "sshd: stopped"
+        fi
+        ;;
+    restart)
+        $0 stop
+        $0 start
+        ;;
+    *)
+        echo "usage: $0 {start|stop|status|restart}"
+        exit 2
+        ;;
+esac

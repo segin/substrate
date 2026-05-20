@@ -1,0 +1,43 @@
+# /etc/ssh/sshd_config — substrate OpenSSH server configuration.
+#
+# Tuned for substrate's no-PAM build: authentication goes straight
+# to /etc/passwd + /etc/shadow via crypt(3).  Privilege separation
+# uses the 'sshd' account and chroots into /var/empty.
+
+Port 22
+AddressFamily inet
+ListenAddress 0.0.0.0
+
+# Host keys — generated on first boot by /etc/rc.d/45-sshd if absent.
+# RSA is intentionally omitted: RSA keygen is minutes-slow on
+# substrate's emulated i486.  Ed25519 + ECDSA cover every modern
+# client.
+HostKey /etc/ssh/ssh_host_ed25519_key
+HostKey /etc/ssh/ssh_host_ecdsa_key
+
+# Privilege separation.  The sshd account + /var/empty must exist;
+# build-rootfs.sh provisions both.
+# (UsePrivilegeSeparation is mandatory and no longer configurable
+#  in modern OpenSSH — listed here only as documentation.)
+
+# Authentication.
+PermitRootLogin yes
+PasswordAuthentication yes
+PubkeyAuthentication yes
+KbdInteractiveAuthentication no
+# No PAM build — challenge-response and PAM are off.
+
+# Logging via substrate syslogd.
+SyslogFacility AUTH
+LogLevel INFO
+
+# Session.
+Subsystem sftp /usr/libexec/sftp-server
+PrintMotd no
+X11Forwarding no
+AcceptEnv LANG LC_*
+
+# Conservative timeouts for a small system.
+LoginGraceTime 60
+MaxAuthTries 6
+MaxSessions 10
