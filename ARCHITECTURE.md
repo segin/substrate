@@ -110,13 +110,14 @@ Detailed staging rules for `dist/` are defined in `docs/specs/rootfs.md`.
 The kernel remains monolithic and is organized into logical layers:
 - `sys/arch/`: Architecture-specific implementation (CPU/MMU/Bootstrap).
 - `sys/core/`: Early initialization and global startup.
-- `sys/kern/`: Core services (Scheduler, Signals, Time, Sync).
+- `sys/kern/`: Core services (Scheduler, Signals, Time, Sync, memtrack).
 - `sys/pm/`: Process management and lifecycle.
-- `sys/vm/`: Memory management (PMM, PMAP, VM objects).
+- `sys/vm/`: Memory management (PMM, PMAP, VM objects, demand-paged user stacks).
 - `sys/vfs/` and `sys/fs/`: Virtual Filesystem and concrete implementations.
 - `sys/drivers/`: Device driver framework and hardware drivers.
+- `sys/net/`: Network stack — TCP/IPv4, AF_INET / AF_UNIX sockets, loopback.
 - `sys/exec/`: Executable loading and execution personalities.
-- process and thread registries reserve embedded bootstrap slots for PID/TID 0 context, then grow with stable dynamically allocated slot chunks; live objects are not relocatable.
+- The process registry allocates every `process_t` dynamically and tracks live processes on a pid-hash plus an all-procs list; there is no fixed process-table cap. Live objects are not relocatable.
 
 Detailed subsystem behavior belongs in `docs/specs/`, including:
 - boot and initialization: `docs/specs/kmain_init.md`, `docs/specs/arch_i386_boot.md`, `docs/specs/bootloader_ext2_boot.md`

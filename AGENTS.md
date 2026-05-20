@@ -29,6 +29,42 @@ For the full detailed changelog, see `docs/CHANGELOG.md`.
   drove signal delivery; the new entry points expose it to libpthread
   for cancellation, naming, and parking.  `thread_t.name[16]` field
   and `THREAD_F_WAKE_PENDING` flag for race-free suspend/wake.
+- Demand-paged user stack: `exec` maps only a small region (128 KiB)
+  at the top of the stack and records `[ustack_limit, ustack_top)`
+  on the process; the page-fault handler grows the stack one page
+  at a time on access (8 MiB ceiling).  A process costs only the
+  stack it touches instead of a fixed 4 MiB reservation, so deep
+  fork/exec chains no longer exhaust RAM.
+- `memtrack` (`sys/kern/memtrack.c`): per-call-site physical-page
+  accounting — every `pmm_alloc_*` / `pmm_free_*` is charged to the
+  caller's return address, giving a pages-allocated-vs-freed table
+  per code path.  Exposed via `/proc/memtrack` and `sys_vm_slabs(2)`.
+- `psignal()` discards a signal whose effective disposition is
+  "ignore" instead of leaving it pending — a pending-but-ignored
+  signal otherwise aborts every interruptible sleep.
+
+### Networking
+- TCP/IPv4 (`sys/net/tcp.c`): three-way handshake, the full close
+  handshake (incl. in-order FIN consumption), retransmit + dup-ACK
+  fast-retransmit + zero-window persist timer, and real `snd_wnd`
+  send-side flow control — the unacked FIFO is bounded to one
+  receive window.  Closed PCBs are reaped by the retransmit-timer
+  kthread (the sole reaper), so there is no per-connection leak.
+- Sockets (`sys/net/af_inet.c`, `af_unix.c`): the BSD socket surface
+  — `socket`/`bind`/`listen`/`accept`/`connect`/`send`/`recv`,
+  `shutdown(2)`, `O_NONBLOCK` accept, accept-backlog enforcement;
+  AF_UNIX SOCK_STREAM/DGRAM with SCM_RIGHTS fd passing.
+- Loopback (`sys/net/loopback.c`): a dedicated kthread drains the
+  delivery ring so a TX never recurses into RX on the caller's
+  kernel stack.
+- `sbin/telnetd`: standalone telnet server, thread-per-connection
+  (one process, not fork-per-connection) — each connection bridges
+  the socket to a PTY running `/bin/login`.
+- Tests under `tests/lib/c/`: `test_tcp.c` (functional),
+  `torture_tcp.c` (12-scenario data-gathering deep-dive with
+  `/proc/meminfo`-based leak quantification), `torture_socket.c`
+  (telnetd-shape connection lifecycle, incl. PTY hang-up), and
+  `repro_acceptloop.c` (fork-per-connection accept-loop regression).
 
 ### Filesystems
 - VFS: link/unlink, readdir atime, chmod/chown ctime
@@ -412,10 +448,6 @@ If the kernel hangs in `hlt`, check `eflags` bit 9. If `IF=1`, the IRQ may be ma
 
 ## Next Steps
 - Refactor PMAP to dynamically allocate page tables (reduce 128KB overhead)
-- Replace the static `processes[16]` (`MAX_PROCS`) table with a
-  pid-hash + all-procs list.  26 callers across 10 files.  My new
-  `sys_thr_kill2` already routes through `proc_find()` so it'll
-  come along for free.
 - Implement mmap() syscall with personality driver integration
 - Flesh out 9P filesystem logic implementation
 - /sbin/ld.so remaining work: per-thread TLS for additional
@@ -436,16 +468,10 @@ If the kernel hangs in `hlt`, check `eflags` bit 9. If `IF=1`, the IRQ may be ma
   `ELF_OSABI_EXACT=0` in the substrate BFD vec.  Real fix is in
   `gas/config/obj-elf.c` (or a new gas/config/te-substrate.h)
   to set the OSABI byte when the target is `i386-unknown-substrate`.
-- **In-kernel sockets layer for AF_UNIX.**  GCC's sarif-sink
-  references socket/connect at link time; we provide ENOSYS stubs.
-  syslog, X11 local connections, D-Bus, and a long tail of IPC
-  users all need real UDS.  Scope: ~1500-2500 LOC kernel (generic
-  socket dispatch + af_unix SOCK_STREAM/DGRAM + buffer queues +
-  scm_rights for fd passing) + replacing the libc stubs with real
-  syscall wrappers.
-- libpthread surface expansion to match the suite:
-  `pthread_cond_*`, `pthread_kill` (wraps SYS_THR_KILL), `pthread_sigmask`,
-  `pthread_setname_np` (wraps SYS_THR_SET_NAME), `pthread_self`.
+- Record telnet/ssh pts logouts in wtmp.  Console getty logins are
+  covered — init writes the `DEAD_PROCESS` record when it reaps a
+  getty line — but telnetd/sshd sessions are supervised by those
+  daemons and would each need to write their own pts logout.
 - Build a shared `libstdc++.so.6` once a real userland is up
   (currently shipping `libstdc++.a` only — `--disable-shared`).
   Requires ld.so to handle C++ symbol versioning, vague linkage
