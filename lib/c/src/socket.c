@@ -1,14 +1,18 @@
 /*
- * socket_stubs.c — BSD-socket-family syscall wrappers + helpers.
+ * socket.c — BSD-socket-family syscall wrappers + userspace helpers.
  *
- * Substrate's in-kernel AF_UNIX implementation lives in sys/net/af_unix.c
- * and is reached via SYS_SOCKET / SYS_BIND / ... (see sys/arch/i386/syscall.h
- * for the assigned numbers).  These wrappers route the libc-level POSIX
- * calls into those syscalls.  AF_INET / IPv6 are not implemented in the
- * kernel — the kernel returns -EAFNOSUPPORT for those domains.
+ * The socket() / bind() / connect() / send() / ... wrappers route the
+ * libc-level POSIX calls into the kernel's socket syscalls (SYS_SOCKET
+ * / SYS_BIND / ...; see sys/arch/i386/syscall.h).  The kernel
+ * implements AF_UNIX (sys/net/af_unix.c) and AF_INET TCP/UDP
+ * (sys/net/af_inet.c, sys/net/tcp.c); AF_INET6 bind/connect are not
+ * wired up yet.
  *
- * The byte-order, addrinfo, and inet_pton/inet_ntop helpers below are
- * userspace-only and don't touch the kernel.
+ * getaddrinfo / getnameinfo, inet_pton / inet_ntop, and the byte-order
+ * helpers below are userspace-only and don't touch the kernel.
+ *
+ * (Formerly socket_stubs.c — these are real implementations, not
+ * stubs; the file was renamed to match its contents.)
  */
 
 #include <errno.h>

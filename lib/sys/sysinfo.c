@@ -306,10 +306,10 @@ int sys_kernel_version(sys_version_t *ver) {
 /* ===========================================================
  * Network Information API
  *
- * No socket layer is in place yet (the libc shims at
- * lib/c/src/socket_stubs.c all return ENOSYS).  The userspace surface
- * is stubbed out as a placeholder so callers compile; switch to
- * /proc/net/{dev,route,arp} parsing when the netstack lands.
+ * The socket layer is implemented (lib/c/src/socket.c over the
+ * kernel AF_UNIX / AF_INET syscalls), but this introspection
+ * surface is still a placeholder; switch to /proc/net/{dev,route,
+ * arp} parsing to report real interface/route/arp data.
  * =========================================================== */
 int sys_net_interfaces(sys_netif_t *ifs, size_t *count) {
     if (!count) { errno = EINVAL; return -1; }

@@ -15,10 +15,9 @@
  *      backed by per-family FILE* state; thread-unsafe (matches
  *      the spec, which says callers must serialize).
  *
- *   3. sys/socket.h missing entries — accept4 + sockatmark
- *      stubs (substrate has no in-kernel sockets layer yet;
- *      socket(), bind(), etc. are ENOSYS stubs in socket_stubs.c
- *      already).
+ *   3. (historical) accept4 + sockatmark used to live here; the
+ *      whole socket family now sits in src/socket.c as real
+ *      wrappers over the kernel AF_UNIX / AF_INET socket syscalls.
  *
  * Memory model for the resolver entries: each get*ent / get*by*
  * call returns a pointer to a STATIC struct + STATIC char buffers
@@ -661,7 +660,7 @@ struct netent *getnetbyaddr(uint32_t net, int type) {
     return NULL;
 }
 
-/* accept4 and sockatmark moved to socket_stubs.c — they're real
+/* accept4 and sockatmark live in src/socket.c — they're real
  * wrappers around the SYS_ACCEPT4 syscall (and a no-op return for
  * sockatmark, since AF_UNIX has no OOB data). */
 
