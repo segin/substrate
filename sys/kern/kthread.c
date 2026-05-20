@@ -16,22 +16,24 @@ int kthread_create(void (*func)(void *), void *arg, thread_t **tdp, const char *
         return -1;
     }
 
-    // 2. Allocate a kernel stack
+    // 2. Allocate a kernel stack — 16 KiB (4 PMM blocks).  Matches
+    //    the per-process kstack size; 8 KiB overflows in the deep
+    //    network TX path (see fork_kthread in pm/process.c).
     extern void *pmm_alloc_contiguous(size_t count);
     extern void pmm_free_contiguous(void *p, size_t count);
-    void *stack = pmm_alloc_contiguous(2);
+    void *stack = pmm_alloc_contiguous(4);
     if (!stack) return -1;
 
     // 3. Use scheduler to create the thread
-    thread_t *t = sched_create_thread(proc, (void (*)(void*))func, (char*)stack + 8192, arg);
-    
+    thread_t *t = sched_create_thread(proc, (void (*)(void*))func, (char*)stack + 16384, arg);
+
     if (!t) {
-        pmm_free_contiguous(stack, 2);
+        pmm_free_contiguous(stack, 4);
         return -1;
     }
 
     t->kstack_base = (uintptr_t)stack;
-    t->kstack_units = 2;
+    t->kstack_units = 4;
     t->kstack_type = THREAD_KSTACK_PMM_CONTIG;
     t->kstack_owned = 1;
 

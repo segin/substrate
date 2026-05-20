@@ -41,6 +41,26 @@
 #include <string.h>
 #include <stddef.h>
 #include <errno.h>
+#include "../arch/i386/intr.h"
+
+/*
+ * Netstack synchronisation.  tcp_segment_input() and everything it
+ * calls run in hard IRQ context (netdev RX -> ip4_input -> tcp).
+ * The socket-layer entry points (tcp_alloc/free/close/recv/accept/
+ * connect/send) run in process context and mutate the SAME state:
+ * the g_tcp_pcbs list, per-PCB rx ring + counters, accept queues,
+ * the unacked send queue.  With no mutual exclusion an RX interrupt
+ * landing mid-update corrupts the PCB — the crash class behind
+ * "tcp_close called with p=0x28" and the scattered afi_sock damage.
+ *
+ * Substrate's RX path always runs with IRQs already disabled (it's
+ * an ISR), so on a uniprocessor it's enough for the process-context
+ * critical sections to disable local IRQs for the duration: that
+ * makes them atomic against RX.  tcp_lock()/tcp_unlock() bracket
+ * those sections.  (SMP would need a real spinlock here too.)
+ */
+static inline uint32_t tcp_lock(void)   { return intr_disable(); }
+static inline void     tcp_unlock(uint32_t f) { intr_restore(f); }
 
 #define IPPROTO_TCP        6
 #define TCP_RING_LEN       (32 * 1024)
@@ -185,15 +205,19 @@ static int tcp_xmit_queue(tcp_pcb_t *p, uint8_t flags,
     int rc = tcp_xmit_raw(p, s->seq, flags, s->data, dlen);
     if (rc < 0) { kfree(s, sizeof(*s) + dlen); return rc; }
 
-    /* Sequence-space advance.  */
+    /* Sequence-space advance + unacked-FIFO append under the lock —
+     * tcp_unacked_prune() walks/frees this same list from the IRQ
+     * ACK path.  kmalloc + the actual transmit above stay outside
+     * the lock: tcp_xmit_raw -> ip4_output may ARP-wait, which
+     * needs IRQs enabled to receive the reply. */
+    uint32_t f = tcp_lock();
     p->snd_nxt += (uint32_t)dlen;
     if (flags & TCP_SYN) p->snd_nxt++;
     if (flags & TCP_FIN) p->snd_nxt++;
-
-    /* Append to unacked FIFO.  */
     if (p->unacked_tail) p->unacked_tail->next = s;
     else                 p->unacked_head = s;
     p->unacked_tail = s;
+    tcp_unlock(f);
     return 0;
 }
 
@@ -546,18 +570,26 @@ tcp_pcb_t *tcp_alloc(void) {
     p->recv_chan    = &p->rx_count;
     p->connect_chan = &p->state;
     p->accept_chan  = &p->accept_count;
+    /* Link into the global PCB list atomically vs. RX. */
+    uint32_t f = tcp_lock();
     p->next = g_tcp_pcbs;
     g_tcp_pcbs = p;
+    tcp_unlock(f);
     tcp_timer_ensure();
     return p;
 }
 
 void tcp_free(tcp_pcb_t *p) {
     if (!p) return;
+    /* Unlink under the lock so an RX interrupt can't be walking
+     * g_tcp_pcbs (or holding a pointer it just tcp_find()'d) while
+     * we splice the node out and free it. */
+    uint32_t f = tcp_lock();
     tcp_pcb_t **link = &g_tcp_pcbs;
     while (*link && *link != p) link = &(*link)->next;
     if (*link == p) *link = p->next;
     tcp_unacked_free_all(p);
+    tcp_unlock(f);
     if (p->rxbuf)    kfree(p->rxbuf, TCP_RING_LEN);
     if (p->accept_q) kfree(p->accept_q, sizeof(tcp_pcb_t *) * p->accept_cap);
     kfree(p, sizeof(*p));
@@ -671,14 +703,20 @@ int tcp_poll(tcp_pcb_t *p, short events, void **wait_chan) {
 
 tcp_pcb_t *tcp_accept(tcp_pcb_t *listen_p) {
     for (;;) {
+        /* accept_q / accept_count are appended by tcp_in_syn_received
+         * in IRQ context — dequeue with IRQs off so the shift-down
+         * can't race an enqueue. */
+        uint32_t f = tcp_lock();
         if (listen_p->accept_count > 0) {
             tcp_pcb_t *c = listen_p->accept_q[0];
             for (int i = 1; i < listen_p->accept_count; i++)
                 listen_p->accept_q[i - 1] = listen_p->accept_q[i];
             listen_p->accept_count--;
             c->parent = NULL;
+            tcp_unlock(f);
             return c;
         }
+        tcp_unlock(f);
         current_thread->flags |= THREAD_F_INTERRUPTIBLE;
         sched_sleep(listen_p->accept_chan);
         current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
@@ -703,6 +741,10 @@ ssize_t tcp_send(tcp_pcb_t *p, const void *buf, size_t len) {
 }
 
 ssize_t tcp_recv_nb(tcp_pcb_t *p, void *buf, size_t len) {
+    /* The rx ring (rxbuf, rx_head, rx_tail, rx_count) is written by
+     * tcp_in_established() in IRQ context.  Drain it with IRQs off
+     * so a segment landing mid-copy can't desync head/tail/count. */
+    uint32_t lf = tcp_lock();
     if (p->rx_count > 0) {
         size_t prev_count = p->rx_count;
         size_t n = p->rx_count < len ? p->rx_count : len;
@@ -712,6 +754,7 @@ ssize_t tcp_recv_nb(tcp_pcb_t *p, void *buf, size_t len) {
             p->rx_tail = (p->rx_tail + 1) % TCP_RING_LEN;
         }
         p->rx_count -= n;
+        tcp_unlock(lf);
         /* Window-update ACK: peer may have been throttled by our
          * shrinking window.  If we've freed at least one MSS of
          * receive space, fire a bare ACK so the peer knows it can
@@ -729,7 +772,11 @@ ssize_t tcp_recv_nb(tcp_pcb_t *p, void *buf, size_t len) {
         }
         return (ssize_t)n;
     }
-    if (p->state == TCP_CLOSE_WAIT || p->state == TCP_CLOSED) return 0;
+    if (p->state == TCP_CLOSE_WAIT || p->state == TCP_CLOSED) {
+        tcp_unlock(lf);
+        return 0;
+    }
+    tcp_unlock(lf);
     return -EAGAIN;
 }
 
@@ -754,22 +801,44 @@ int tcp_take_so_error(tcp_pcb_t *p) {
 
 int tcp_close(tcp_pcb_t *p) {
     if (!p) return 0;
-    switch (p->state) {
+    /* Defensive: a tcp_pcb_t always lives in the kernel direct map
+     * (>= 0xC0000000).  A low/garbage pointer here means the owning
+     * socket's ->tcp field was corrupted; dereferencing it would
+     * triple-fault.  Drop it instead so one bad socket can't take
+     * the kernel down.  (The corruptor itself is a separate bug —
+     * tracked via tests/lib/c/test_tcp.c, which reproduces it.) */
+    if ((uintptr_t)p < 0xC0000000u) {
+        extern int kprintf(const char *, ...);
+        kprintf("tcp_close: refusing bogus pcb %p — socket ->tcp corrupted\n", p);
+        return 0;
+    }
+    /* Snapshot + transition state under the lock so a concurrent RX
+     * (which may itself transition state or free the PCB) can't
+     * interleave.  tcp_free for the already-dead states is done
+     * inside the lock; the FIN-emitting paths drop the lock before
+     * tcp_xmit_queue, which is itself lock-bracketed. */
+    uint32_t f = tcp_lock();
+    int st = p->state;
+    switch (st) {
     case TCP_ESTABLISHED:
         p->state = TCP_FIN_WAIT_1;
+        tcp_unlock(f);
         tcp_xmit_queue(p, TCP_FIN | TCP_ACK, NULL, 0);
         break;
     case TCP_CLOSE_WAIT:
         p->state = TCP_LAST_ACK;
+        tcp_unlock(f);
         tcp_xmit_queue(p, TCP_FIN | TCP_ACK, NULL, 0);
         break;
     case TCP_LISTEN:
     case TCP_SYN_SENT:
     case TCP_SYN_RECEIVED:
     case TCP_CLOSED:
+        tcp_unlock(f);
         tcp_free(p);
         return 0;
     default:
+        tcp_unlock(f);
         break;
     }
     return 0;

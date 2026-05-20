@@ -701,22 +701,27 @@ int sched_spawn_kernel_process(void (*entry)(void*), void *arg) {
     strncpy(child->comm, "(kinit)", AC_COMM_LEN);
     child->comm[AC_COMM_LEN - 1] = '\0';
 
-    // 3. Allocate Stack (8KB) - contiguous direct-mapped RAM
-    void *stack = pmm_alloc_contiguous(2);
+    /* 3. Allocate kernel stack — 16 KiB (4 contiguous PMM blocks).
+     * 8 KiB overflowed: the network TX path nests three ~1.5 KiB
+     * stack buffers (tcp_xmit_raw buf[1480] -> ip4_output pkt[1600]
+     * -> eth_send frame[1614]) on top of the syscall call chain,
+     * ~8 KiB total — it ran off the end and corrupted adjacent
+     * memory + the saved trap frame. */
+    void *stack = pmm_alloc_contiguous(4);
     if (!stack) {
         return -1;
     }
-    void *stack_top = (uint8_t*)stack + 8192;
-    
+    void *stack_top = (uint8_t*)stack + 16384;
+
     // 4. Create Thread
     thread_t *t = sched_create_thread(child, entry, stack_top, arg);
     if (!t) {
-        pmm_free_contiguous(stack, 2);
+        pmm_free_contiguous(stack, 4);
         return -1;
     }
 
     t->kstack_base = (uintptr_t)stack;
-    t->kstack_units = 2;
+    t->kstack_units = 4;
     t->kstack_type = THREAD_KSTACK_PMM_CONTIG;
     t->kstack_owned = 1;
 
