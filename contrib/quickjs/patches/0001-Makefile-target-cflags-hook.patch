@@ -1,0 +1,65 @@
+--- a/Makefile
++++ b/Makefile
+@@ -202,7 +202,7 @@
+ endif
+ endif
+ 
+-PROGS=qjs$(EXE) qjsc$(EXE) run-test262$(EXE)
++PROGS=qjs$(EXE) qjsc$(EXE)
+ 
+ ifneq ($(CROSS_PREFIX),)
+ QJSC_CC=gcc
+@@ -254,13 +254,13 @@
+ 	mkdir -p $(OBJDIR) $(OBJDIR)/examples $(OBJDIR)/tests
+ 
+ qjs$(EXE): $(QJS_OBJS)
+-	$(CC) $(LDFLAGS) $(LDEXPORT) -o $@ $^ $(LIBS)
++	$(CC) $(LDFLAGS) $(TARGET_LDFLAGS) $(LDEXPORT) -o $@ $^ $(LIBS)
+ 
+ qjs-debug$(EXE): $(patsubst %.o, %.debug.o, $(QJS_OBJS))
+-	$(CC) $(LDFLAGS) -o $@ $^ $(LIBS)
++	$(CC) $(LDFLAGS) $(TARGET_LDFLAGS) -o $@ $^ $(LIBS)
+ 
+ qjsc$(EXE): $(OBJDIR)/qjsc.o $(QJS_LIB_OBJS)
+-	$(CC) $(LDFLAGS) -o $@ $^ $(LIBS)
++	$(CC) $(LDFLAGS) $(TARGET_LDFLAGS) -o $@ $^ $(LIBS)
+ 
+ fuzz_eval: $(OBJDIR)/fuzz_eval.o $(OBJDIR)/fuzz_common.o libquickjs.fuzz.a
+ 	$(CC) $(CFLAGS_OPT) $^ -o fuzz_eval $(LIB_FUZZING_ENGINE)
+@@ -318,15 +318,15 @@
+ endif
+ 
+ run-test262$(EXE): $(OBJDIR)/run-test262.o $(QJS_LIB_OBJS)
+-	$(CC) $(LDFLAGS) -o $@ $^ $(LIBS)
++	$(CC) $(LDFLAGS) $(TARGET_LDFLAGS) -o $@ $^ $(LIBS)
+ 
+ run-test262-debug: $(patsubst %.o, %.debug.o, $(OBJDIR)/run-test262.o $(QJS_LIB_OBJS))
+-	$(CC) $(LDFLAGS) -o $@ $^ $(LIBS)
++	$(CC) $(LDFLAGS) $(TARGET_LDFLAGS) -o $@ $^ $(LIBS)
+ 
+ # object suffix order: nolto
+ 
+ $(OBJDIR)/%.o: %.c | $(OBJDIR)
+-	$(CC) $(CFLAGS_OPT) -c -o $@ $<
++	$(CC) $(CFLAGS_OPT) $(TARGET_CFLAGS) -c -o $@ $<
+ 
+ $(OBJDIR)/fuzz_%.o: fuzz/fuzz_%.c | $(OBJDIR)
+ 	$(CC) $(CFLAGS_OPT) -c -I. -o $@ $<
+@@ -389,7 +389,7 @@
+ 	$(QJSC) -e $(HELLO_OPTS) -o $@ $(HELLO_SRCS)
+ 
+ examples/hello: $(OBJDIR)/hello.o $(QJS_LIB_OBJS)
+-	$(CC) $(LDFLAGS) -o $@ $^ $(LIBS)
++	$(CC) $(LDFLAGS) $(TARGET_LDFLAGS) -o $@ $^ $(LIBS)
+ 
+ # example of static JS compilation with modules
+ HELLO_MODULE_SRCS=examples/hello_module.js
+@@ -405,7 +405,7 @@
+ 	$(QJSC) -e -M examples/fib.so,fib -m -o $@ examples/test_fib.js
+ 
+ examples/test_fib: $(OBJDIR)/test_fib.o $(OBJDIR)/examples/fib.o libquickjs$(LTOEXT).a
+-	$(CC) $(LDFLAGS) -o $@ $^ $(LIBS)
++	$(CC) $(LDFLAGS) $(TARGET_LDFLAGS) -o $@ $^ $(LIBS)
+ 
+ examples/fib.so: $(OBJDIR)/examples/fib.pic.o
+ 	$(CC) $(LDFLAGS) -shared -o $@ $^

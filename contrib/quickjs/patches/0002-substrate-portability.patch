@@ -1,0 +1,104 @@
+--- a/quickjs.c
++++ b/quickjs.c
+@@ -28,6 +28,7 @@
+ #include <inttypes.h>
+ #include <string.h>
+ #include <assert.h>
++#include <alloca.h>
+ #include <sys/time.h>
+ #include <time.h>
+ #include <fenv.h>
+@@ -1674,8 +1675,8 @@
+ #elif defined(__linux__) || defined(__GLIBC__)
+     return malloc_usable_size((void *)ptr);
+ #else
+-    /* change this to `return 0;` if compilation fails */
+-    return malloc_usable_size((void *)ptr);
++    /* substrate libc has no malloc_usable_size; use the safe fallback */
++    return 0;
+ #endif
+ }
+ 
+--- a/qjs.c
++++ b/qjs.c
+@@ -141,8 +141,8 @@
+ #elif defined(__linux__) || defined(__GLIBC__)
+     return malloc_usable_size((void *)ptr);
+ #else
+-    /* change this to `return 0;` if compilation fails */
+-    return malloc_usable_size((void *)ptr);
++    /* substrate libc has no malloc_usable_size; use the safe fallback */
++    return 0;
+ #endif
+ }
+ 
+--- a/libregexp.c
++++ b/libregexp.c
+@@ -27,6 +27,7 @@
+ #include <inttypes.h>
+ #include <string.h>
+ #include <assert.h>
++#include <alloca.h>
+ 
+ #include "cutils.h"
+ #include "libregexp.h"
+--- a/quickjs-libc.c
++++ b/quickjs-libc.c
+@@ -46,8 +46,9 @@
+ #include <termios.h>
+ #include <sys/ioctl.h>
+ #include <sys/wait.h>
++#include <sys/select.h>
+ 
+-#if defined(__FreeBSD__)
++#if defined(__FreeBSD__) || defined(SUBSTRATE)
+ extern char **environ;
+ #endif
+ 
+@@ -2830,6 +2831,21 @@
+         JS_DefinePropertyValueStr(ctx, obj, "ctime",
+                                   JS_NewInt64(ctx, timespec_to_ms(&st.st_ctimespec)),
+                                   JS_PROP_C_W_E);
++#elif defined(SUBSTRATE)
++        /* substrate struct stat carries st_*time + st_*time_nsec
++           rather than the POSIX.1-2008 st_*tim timespec members. */
++        JS_DefinePropertyValueStr(ctx, obj, "atime",
++                                  JS_NewInt64(ctx, (int64_t)st.st_atime * 1000 +
++                                              st.st_atime_nsec / 1000000),
++                                  JS_PROP_C_W_E);
++        JS_DefinePropertyValueStr(ctx, obj, "mtime",
++                                  JS_NewInt64(ctx, (int64_t)st.st_mtime * 1000 +
++                                              st.st_mtime_nsec / 1000000),
++                                  JS_PROP_C_W_E);
++        JS_DefinePropertyValueStr(ctx, obj, "ctime",
++                                  JS_NewInt64(ctx, (int64_t)st.st_ctime * 1000 +
++                                              st.st_ctime_nsec / 1000000),
++                                  JS_PROP_C_W_E);
+ #else
+         JS_DefinePropertyValueStr(ctx, obj, "atime",
+                                   JS_NewInt64(ctx, timespec_to_ms(&st.st_atim)),
+@@ -3653,7 +3669,6 @@
+     JSRuntime *rt = JS_GetRuntime(ctx);
+     WorkerFuncArgs *args = NULL;
+     pthread_t tid;
+-    pthread_attr_t attr;
+     JSValue obj = JS_UNDEFINED;
+     int ret;
+     const char *filename = NULL, *basename;
+@@ -3702,11 +3717,11 @@
+     if (JS_IsException(obj))
+         goto fail;
+ 
+-    pthread_attr_init(&attr);
+-    /* no join at the end */
+-    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+-    ret = pthread_create(&tid, &attr, worker_func, args);
+-    pthread_attr_destroy(&attr);
++    /* substrate libpthread has no pthread_attr_*; create the worker
++       joinable and detach it immediately for the same "no join" effect. */
++    ret = pthread_create(&tid, NULL, worker_func, args);
++    if (ret == 0)
++        pthread_detach(tid);
+     if (ret != 0) {
+         JS_ThrowTypeError(ctx, "could not create worker");
+         goto fail;
