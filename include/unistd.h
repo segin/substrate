@@ -196,6 +196,12 @@ long syscall(long number, ...);
 
 long sysconf(int name);
 
+/* getpass(3) — read a password from the controlling terminal with
+ * echo suppressed.  Returns a pointer to a static buffer (overwritten
+ * by subsequent calls) on success, NULL on error.  Marked obsolete
+ * by POSIX.1-2001 but inetutils and openssh still use it. */
+char *getpass(const char *prompt);
+
 #ifdef __cplusplus
 }
 #endif

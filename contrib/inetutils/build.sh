@@ -76,7 +76,7 @@ export LDFLAGS="${LDFLAGS:-} -Wl,--copy-dt-needed-entries"
     --without-krb5 \
     --enable-authentication \
     --enable-encryption \
-    --disable-ftp --disable-ftpd \
+    --enable-ftp --disable-ftpd \
     --disable-rcp --disable-rsh --disable-rshd \
     --disable-rlogin --disable-rlogind \
     --disable-talk --disable-talkd \

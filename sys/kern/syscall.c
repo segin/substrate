@@ -2939,12 +2939,12 @@ int sys_chdir(const char *path) {
 }
 
 int kern_chdir(const char *path) {
-    if (!path) return -1;
-    
+    if (!path) return -EFAULT;
+
     fs_node_t *node = NULL;
     fs_node_t *root = current_process->root_node ? current_process->root_node : fs_root;
     fs_node_t *old_cwd = current_process->cwd_node;
-    
+
     if (path[0] == '/') {
         node = vfs_lookup(root, path);
     } else {
@@ -2952,9 +2952,9 @@ int kern_chdir(const char *path) {
         fs_node_t *cwd = current_process->cwd_node ? current_process->cwd_node : root;
         node = vfs_lookup(cwd, path);
     }
-    
-    if (!node) return -1;
-    if ((node->flags & 0x7) != FS_DIRECTORY) return -1;
+
+    if (!node) return -ENOENT;
+    if ((node->flags & 0x7) != FS_DIRECTORY) return -ENOTDIR;
 
     open_fs(node, 1, 0);
     current_process->cwd_node = node;

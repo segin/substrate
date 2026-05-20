@@ -46,6 +46,14 @@ struct sockaddr_in6 {
 #define IPPROTO_UDP  17
 #define IPPROTO_IPV6 41
 
+/* Byte-order conversions.  POSIX places these in <arpa/inet.h> but
+ * historically also via <netinet/in.h>; many ports (inetutils' ftp
+ * among them) include only the latter. */
+uint16_t htons(uint16_t hostshort);
+uint32_t htonl(uint32_t hostlong);
+uint16_t ntohs(uint16_t netshort);
+uint32_t ntohl(uint32_t netlong);
+
 #ifdef __cplusplus
 }
 #endif

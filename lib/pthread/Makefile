@@ -4,7 +4,7 @@ CFLAGS    := $(CFLAGS) -I. -I../c/include -I../../include -I../../sys
 PICFLAGS  := $(SHLIB_CFLAGS) -I. -I../c/include -I../../include -I../../sys
 LDFLAGS   := $(USER_LDFLAGS)
 
-SRCS = pthread_create.c pthread_mutex.c pthread_cond.c pthread_sig.c
+SRCS = pthread_create.c pthread_mutex.c pthread_cond.c pthread_sig.c pthread_once.c
 OBJS     = $(SRCS:.c=.o)
 PIC_OBJS = $(SRCS:.c=.pic.o)
 

@@ -72,6 +72,15 @@ int pthread_cond_wait(pthread_cond_t *cond, pthread_mutex_t *mutex);
 int pthread_cond_timedwait(pthread_cond_t *cond, pthread_mutex_t *mutex,
                            const struct timespec *abstime);
 
+/*
+ * pthread_once — one-shot initializer.  Encoded as a single int
+ * with three states: 0=not run, 1=in progress, 2=complete.  The
+ * libpthread implementation spins on sched_yield() under contention.
+ */
+typedef int pthread_once_t;
+#define PTHREAD_ONCE_INIT 0
+int pthread_once(pthread_once_t *once_control, void (*init_routine)(void));
+
 #ifdef __cplusplus
 }
 #endif

@@ -664,3 +664,47 @@ struct netent *getnetbyaddr(uint32_t net, int type) {
 /* accept4 and sockatmark moved to socket_stubs.c — they're real
  * wrappers around the SYS_ACCEPT4 syscall (and a no-op return for
  * sockatmark, since AF_UNIX has no OOB data). */
+
+/*
+ * getpass — POSIX-obsolete password prompt.  Disable echo on the
+ * controlling terminal, prompt, read up to 127 chars or newline,
+ * restore echo, return a pointer to a static buffer.  Returns NULL
+ * on any I/O or termios error.
+ */
+#include <stdio.h>
+#include <string.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <termios.h>
+
+char *getpass(const char *prompt) {
+    static char buf[128];
+    int tty = open("/dev/tty", O_RDWR);
+    int fd_in  = tty < 0 ? 0 : tty;
+    int fd_out = tty < 0 ? 2 : tty;
+
+    struct termios saved, t;
+    int have_tcio = (tcgetattr(fd_in, &saved) == 0);
+    if (have_tcio) {
+        t = saved;
+        t.c_lflag &= ~(unsigned)(ECHO | ECHOE | ECHOK | ECHONL);
+        tcsetattr(fd_in, TCSANOW, &t);
+    }
+
+    if (prompt) (void)write(fd_out, prompt, strlen(prompt));
+
+    int n = 0;
+    while (n + 1 < (int)sizeof(buf)) {
+        char c;
+        int r = read(fd_in, &c, 1);
+        if (r <= 0) { buf[0] = '\0'; break; }
+        if (c == '\n' || c == '\r') break;
+        buf[n++] = c;
+    }
+    buf[n] = '\0';
+
+    if (have_tcio) tcsetattr(fd_in, TCSANOW, &saved);
+    (void)write(fd_out, "\n", 1);
+    if (tty >= 0) close(tty);
+    return buf;
+}

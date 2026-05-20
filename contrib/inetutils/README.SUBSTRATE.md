@@ -26,19 +26,27 @@ drop everything else.
 
 Built and installed:
 
-- `telnet`   → `/usr/bin/telnet`
-- `telnetd`  → `/usr/sbin/telnetd`  (Tentative — substrate's
-  `sbin/telnetd` is purpose-built for our PTY layout and may stay
-  alongside, with the inetutils binary as `telnetd.inetutils` for
-  comparison.)
-- `ftp`      → `/usr/bin/ftp`        (canonical RFC 959 client)
-- `ftpd`     → `/usr/sbin/ftpd`      (canonical RFC 959 server)
+- `telnet`   → `/usr/bin/telnet`     (RFC 854 client)
+- `telnetd`  → `/usr/libexec/telnetd`  (RFC 854 server; currently
+  has a session-setup bug on substrate that closes every
+  connection.  Substrate's own `/sbin/telnetd` is used at boot via
+  `/etc/rc.d/35-telnetd` instead, and the inetd.conf line for
+  this binary is commented out.  Leave the binary in place so
+  diagnosis is possible.)
+- `ftp`      → `/usr/bin/ftp`        (RFC 959 client)
+- `inetd`    → `/usr/libexec/inetd`  (super-server; currently
+  spawned by `/etc/rc.d/40-telnetd` even though its only line is
+  commented out — placeholder until a non-telnet inetd-launched
+  service lands.)
 
 Disabled at configure time:
 
-- rcp, rlogin, rsh, rshd, talk, talkd, tftp, tftpd,
-  rexec, rexecd, syslogd, inetd, traceroute, hostname, uucpd,
-  whois, dnsdomainname, ifconfig, logger, ping, ping6, traceroute6
+- Servers:  ftpd, rexecd, rlogind, rshd, syslogd (substrate has its
+  own /sbin/syslogd), talkd, tftpd, uucpd
+- Clients:  dnsdomainname, hostname (substrate has its own),
+  ifconfig (substrate has its own), logger, ping (substrate has
+  its own), ping6, rcp, rexec, rlogin, rsh, talk, tftp,
+  traceroute, whois
 
 Encryption + authentication ARE built (`--enable-authentication` +
 `--enable-encryption`).  `contrib/openssl` provides libcrypto/libssl
