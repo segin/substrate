@@ -294,17 +294,48 @@ int getnameinfo(const struct sockaddr *sa, socklen_t salen,
                 char *host, socklen_t hostlen,
                 char *serv, socklen_t servlen, int flags)
 {
-    (void)flags;
     if (!sa || salen < (socklen_t)sizeof(sa_family_t)) return EAI_FAIL;
-    if (sa->sa_family != AF_UNIX && sa->sa_family != AF_LOCAL)
-        return EAI_FAMILY;
-    const struct sockaddr_un *sun = (const struct sockaddr_un *)sa;
-    if (host && hostlen > 0) {
-        strncpy(host, sun->sun_path, hostlen - 1);
-        host[hostlen - 1] = '\0';
+
+    if (sa->sa_family == AF_INET) {
+        const struct sockaddr_in *sin = (const struct sockaddr_in *)sa;
+        if (host && hostlen > 0) {
+            /* Numeric only — substrate has no reverse DNS (PTR).  If
+             * the caller demanded a name (NI_NAMEREQD) we have to
+             * fail; otherwise the numeric form is a valid answer. */
+            if ((flags & NI_NAMEREQD) && !(flags & NI_NUMERICHOST))
+                return EAI_NONAME;
+            if (!inet_ntop(AF_INET, &sin->sin_addr, host, hostlen))
+                return EAI_OVERFLOW;
+        }
+        if (serv && servlen > 0) {
+            unsigned port = (unsigned)__builtin_bswap16(sin->sin_port);
+            /* Numeric port.  Named-service reverse lookup
+             * (getservbyport) is not wired up; numeric is always
+             * correct and is what NI_NUMERICSERV asks for anyway. */
+            char tmp[16];
+            int n = 0;
+            if (port == 0) { tmp[n++] = '0'; }
+            else { char r[8]; int ri = 0;
+                   while (port) { r[ri++] = '0' + (port % 10); port /= 10; }
+                   while (ri) tmp[n++] = r[--ri]; }
+            tmp[n] = '\0';
+            if ((socklen_t)(n + 1) > servlen) return EAI_OVERFLOW;
+            for (int i = 0; i <= n; i++) serv[i] = tmp[i];
+        }
+        return 0;
     }
-    if (serv && servlen > 0) serv[0] = '\0';
-    return 0;
+
+    if (sa->sa_family == AF_UNIX || sa->sa_family == AF_LOCAL) {
+        const struct sockaddr_un *sun = (const struct sockaddr_un *)sa;
+        if (host && hostlen > 0) {
+            strncpy(host, sun->sun_path, hostlen - 1);
+            host[hostlen - 1] = '\0';
+        }
+        if (serv && servlen > 0) serv[0] = '\0';
+        return 0;
+    }
+
+    return EAI_FAMILY;
 }
 
 const char *gai_strerror(int errcode)
