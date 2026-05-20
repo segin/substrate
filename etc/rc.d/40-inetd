@@ -1,7 +1,10 @@
 #!/bin/sh
-# /etc/rc.d/40-telnetd — start inetd, which in turn launches telnetd
-# per-connection per /etc/inetd.conf.  Naming kept for compatibility
-# (renamed-to-inetd would re-order against later hooks).
+# /etc/rc.d/40-inetd — start inetd, the internet super-server, which
+# launches per-connection services listed in /etc/inetd.conf.
+#
+# inetd.conf's telnet line is commented out: substrate runs a
+# standalone telnetd from /etc/rc.d/35-telnetd instead, because
+# inetutils-telnetd has session-setup bugs on substrate.
 
 PROG=/usr/libexec/inetd
 PIDFILE=/var/run/inetd.pid

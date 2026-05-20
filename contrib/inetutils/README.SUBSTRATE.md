@@ -34,10 +34,9 @@ Built and installed:
   this binary is commented out.  Leave the binary in place so
   diagnosis is possible.)
 - `ftp`      → `/usr/bin/ftp`        (RFC 959 client)
-- `inetd`    → `/usr/libexec/inetd`  (super-server; currently
-  spawned by `/etc/rc.d/40-telnetd` even though its only line is
-  commented out — placeholder until a non-telnet inetd-launched
-  service lands.)
+- `inetd`    → `/usr/libexec/inetd`  (super-server; started by
+  `/etc/rc.d/40-inetd` — its telnet line is commented out, a
+  placeholder until a non-telnet inetd-launched service lands.)
 
 Disabled at configure time:
 

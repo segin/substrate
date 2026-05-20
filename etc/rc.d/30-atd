@@ -3,7 +3,7 @@
 #
 # atd watches /var/spool/at for `at` / `batch` jobs and runs them
 # when their scheduled time elapses.  Sits between network bring-up
-# (20-network) and the inetd hook (40-telnetd) so jobs scheduled
+# (20-network) and the inetd hook (40-inetd) so jobs scheduled
 # from telnet sessions have somewhere to land by the time the first
 # user logs in.
 #
