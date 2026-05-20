@@ -57,7 +57,10 @@ extern int        tcp_listen(tcp_pcb_t *p, int backlog);
 extern int        tcp_connect(tcp_pcb_t *p, uint32_t raddr, uint16_t rport);
 extern int        tcp_connect_nb(tcp_pcb_t *p, uint32_t raddr, uint16_t rport);
 extern int        tcp_poll(tcp_pcb_t *p, short events, void **wait_chan);
-extern tcp_pcb_t *tcp_accept(tcp_pcb_t *listen_p);
+extern tcp_pcb_t *tcp_accept(tcp_pcb_t *listen_p, int nonblock);
+extern int        tcp_is_listening(const tcp_pcb_t *p);
+extern int        tcp_shutdown_wr(tcp_pcb_t *p);
+extern int        tcp_shutdown_rd(tcp_pcb_t *p);
 extern ssize_t    tcp_send(tcp_pcb_t *p, const void *buf, size_t len);
 extern ssize_t    tcp_recv(tcp_pcb_t *p, void *buf, size_t len);
 extern void       tcp_endpoints(const tcp_pcb_t *p,
@@ -117,6 +120,7 @@ typedef struct afi_sock {
     uint32_t   head, tail, count;
     void      *wait_chan;
     int        closed;
+    int        rd_shut;     /* shutdown(SHUT_RD): reads return EOF */
 
     fs_node_t  node;
     struct afi_sock *next;
@@ -302,9 +306,15 @@ size_t afinet_node_read(fs_node_t *node, off_t off, size_t size, uint8_t *buf) {
     (void)off;
     afi_sock_t *s = (afi_sock_t *)(uintptr_t)node->impl;
     if (!s || s->closed) return 0;
+    if (s->rd_shut) return 0;            /* shutdown(SHUT_RD): EOF */
     if (s->type == SOCK_STREAM && s->tcp) {
         ssize_t n = tcp_recv(s->tcp, buf, size);
-        return n < 0 ? 0 : (size_t)n;
+        /* Propagate errors as (size_t)-errno — the read() syscall
+         * layer decodes them.  Collapsing a negative return to 0
+         * here would forge a spurious EOF: a recv interrupted by a
+         * signal (-EINTR) looked to userspace exactly like the peer
+         * closing the connection. */
+        return (size_t)n;
     }
     for (;;) {
         if (s->count > 0) {
@@ -523,6 +533,25 @@ int afinet_listen(int fd, int backlog) {
     return tcp_listen(s->tcp, backlog);
 }
 
+/* shutdown(2) for AF_INET sockets.  SHUT_RD forces recv() to EOF;
+ * SHUT_WR sends a FIN (half-close) so the peer sees EOF while this
+ * socket can still read.  Routed here from sys_shutdown(). */
+int afinet_shutdown(int fd, int how) {
+    afi_sock_t *s = afi_from_fd(fd);
+    if (!s) return -ENOTSOCK;
+    if (how != SHUT_RD && how != SHUT_WR && how != SHUT_RDWR)
+        return -EINVAL;
+    if (how == SHUT_RD || how == SHUT_RDWR) {
+        s->rd_shut = 1;
+        sched_wakeup(s->wait_chan);          /* UDP/RAW blocked readers */
+        if (s->tcp) tcp_shutdown_rd(s->tcp); /* TCP: EOF + wake reader */
+    }
+    if (how == SHUT_WR || how == SHUT_RDWR) {
+        if (s->tcp) tcp_shutdown_wr(s->tcp);
+    }
+    return 0;
+}
+
 static int afinet_pack_sockaddr(int family, uint16_t hport,
                                 const uint8_t addr_bytes[16],
                                 void *out, socklen_t *outlen);
@@ -531,8 +560,17 @@ int afinet_accept(int fd, void *addr, socklen_t *addrlen) {
     afi_sock_t *s = afi_from_fd(fd);
     if (!s) return -ENOTSOCK;
     if (!s->tcp) return -EOPNOTSUPP;
-    tcp_pcb_t *cp = tcp_accept(s->tcp);
-    if (!cp) return -EAGAIN;
+    /* accept() is only valid on a listening socket. */
+    if (!tcp_is_listening(s->tcp)) return -EINVAL;
+    /* Honour O_NONBLOCK from the listening fd: an empty accept queue
+     * then returns EAGAIN instead of blocking the caller. */
+    int nonblock = 0;
+    if (fd >= 0 && fd < MAX_FD && current_process) {
+        file_t *lf = current_process->fds[fd];
+        if (lf && (lf->f_flag & FNONBLOCK)) nonblock = 1;
+    }
+    tcp_pcb_t *cp = tcp_accept(s->tcp, nonblock);
+    if (!cp) return nonblock ? -EAGAIN : -EINTR;
 
     /* Allocate a new afi_sock_t wrapping the accepted PCB. */
     afi_sock_t *c = (afi_sock_t *)kmalloc(sizeof(*c));

@@ -534,6 +534,21 @@ void psignal(process_t *p, int sig) {
         }
     }
 
+    /* A signal whose effective disposition is "ignore" is discarded
+     * here — it must never be left pending.  sched_sleep() treats any
+     * pending unmasked signal as a reason to abort an interruptible
+     * sleep, so a pending-but-ignored signal turns every blocking
+     * read/accept/connect into a spurious -EINTR.  A child exit posts
+     * SIGCHLD (default action: ignore); leaving it pending was making
+     * a forked worker that inherited it busy-spin in read() forever.
+     * SIGCONT has already done its resume work above, so dropping its
+     * pending bit when un-handled is correct too. */
+    {
+        sig_t h = p->sig_actions[sig - 1].sa_handler;
+        if (h == SIG_IGN || (h == SIG_DFL && (sigprop[sig] & SA_IGNORE)))
+            return;
+    }
+
     /* Select best thread for delivery and set pending on all threads */
     uint32_t sig_mask = sigmask(sig);
     

@@ -70,6 +70,13 @@ static inline void     tcp_unlock(uint32_t f) { intr_restore(f); }
 #define TCP_TIMER_PERIOD   32            /* ~250ms kthread wake interval */
 #define TCP_TIME_WAIT_TICKS 128          /* 1s */
 #define TCP_DUP_ACK_FAST   3             /* fast-retx trigger */
+/* Safety-net poll interval for the blocking recv/accept/connect waits.
+ * sched_sleep() is not race-free against sched_wakeup() — a wakeup that
+ * fires between the readiness re-check and the sleep is lost.  Sleeping
+ * with this deadline guarantees the waiter re-checks even if its wakeup
+ * was missed, turning a permanent wedge into at most this much latency.
+ * ~64ms at HZ=128; the wakeup still drives the common fast path. */
+#define TCP_SLEEP_POLL     8
 
 enum tcp_state {
     TCP_CLOSED = 0,
@@ -130,6 +137,15 @@ typedef struct tcp_pcb {
     void      *recv_chan;
     void      *accept_chan;
     int        listen;
+    /* The owning socket has been closed (afinet_node_close -> tcp_close).
+     * A detached PCB has no userspace owner: once it reaches a terminal
+     * state the retransmit-timer kthread — the sole reaper — frees it,
+     * and any data arriving for it is answered with a RST since there
+     * is no socket to deliver to. */
+    int        detached;
+    /* shutdown(SHUT_RD): the receive direction is closed — recv()
+     * returns EOF even though the connection is otherwise live. */
+    int        shut_rd;
     /* Parent (for SYN_RECEIVED children before accept) */
     struct tcp_pcb *parent;
     /* Linked list */
@@ -275,17 +291,42 @@ static void tcp_retx_head(tcp_pcb_t *p) {
 /* Retransmit timer kthread                                           */
 /* ------------------------------------------------------------------ */
 
+void tcp_free(tcp_pcb_t *p);   /* forward decl — timer reaps PCBs */
+
+/* Move a PCB to CLOSED and wake anything waiting on it.  Never frees:
+ * a PCB that still has a socket is freed when that socket closes; a
+ * detached one is reaped by tcp_timer_tick().  Keeping the free out
+ * of the RX path means tcp_find() (which skips CLOSED) can never hand
+ * back a pointer that is about to be freed underneath the caller. */
 static void tcp_kill_pcb(tcp_pcb_t *p, int err) {
     p->state    = TCP_CLOSED;
     p->so_error = err;
     sched_wakeup(p->connect_chan);
     sched_wakeup(p->recv_chan);
+    sched_wakeup(p->accept_chan);
 }
 
 static void tcp_timer_tick(uint64_t now) {
-    for (tcp_pcb_t *p = g_tcp_pcbs; p; p = p->next) {
+    /* The timer kthread is the single reaper of orphaned PCBs.  Walk
+     * the list with IRQs off (tcp_lock) so an RX interrupt can't free
+     * or splice a node underneath us; collect the retransmit victims
+     * and do the actual transmits after dropping the lock, since
+     * tcp_xmit_raw -> ip4_output may need IRQs enabled (ARP wait). */
+    tcp_pcb_t *retx_list[32];
+    int nretx = 0;
+    uint32_t f = tcp_lock();
+    for (tcp_pcb_t *p = g_tcp_pcbs, *next; p; p = next) {
+        next = p->next;
+        if (p->state == TCP_CLOSED) {
+            /* Terminal.  Reap if orphaned — tcp_find() never returns a
+             * CLOSED PCB, so no RX path can be holding this pointer. */
+            if (p->detached) tcp_free(p);
+            continue;
+        }
         if (p->state == TCP_TIME_WAIT && now >= p->time_wait_until) {
-            tcp_kill_pcb(p, 0);
+            /* Drop to CLOSED now; freed on the next tick once no RX
+             * can still be matching a late segment against it. */
+            p->state = TCP_CLOSED;
             continue;
         }
         tcp_seg_t *head = p->unacked_head;
@@ -295,8 +336,10 @@ static void tcp_timer_tick(uint64_t now) {
             tcp_kill_pcb(p, ETIMEDOUT);
             continue;
         }
-        tcp_retx_head(p);
+        if (nretx < 32) retx_list[nretx++] = p;
     }
+    tcp_unlock(f);
+    for (int i = 0; i < nretx; i++) tcp_retx_head(retx_list[i]);
 }
 
 static void tcp_timer_thread(void *arg) {
@@ -365,6 +408,19 @@ static void tcp_in_listen(tcp_pcb_t *p, uint32_t saddr, uint32_t daddr,
                           uint16_t sport, uint16_t dport, uint32_t seq,
                           uint8_t flags) {
     if (!(flags & TCP_SYN)) return;
+    /* Respect the listen backlog.  Count children that already exist
+     * for this listener (handshaking SYN_RECEIVED ones plus those
+     * sitting fully-established in the accept queue); if that is at or
+     * past the backlog, drop the SYN.  The peer's SYN retransmit will
+     * get in once accept() drains a slot — and if it never does, the
+     * peer's connect() times out, which is the correct backlog-full
+     * behaviour instead of establishing an un-acceptable connection. */
+    int pending = p->accept_count;
+    for (tcp_pcb_t *q = g_tcp_pcbs; q; q = q->next)
+        if (q->parent == p && q->state == TCP_SYN_RECEIVED)
+            pending++;
+    if (pending >= p->accept_cap)
+        return;
     /* Spawn a child PCB in SYN_RECEIVED.  */
     tcp_pcb_t *c = (tcp_pcb_t *)kmalloc(sizeof(*c));
     if (!c) return;
@@ -435,6 +491,17 @@ static void tcp_in_established(tcp_pcb_t *p, uint32_t seq, uint32_t ack,
         return;
     }
 
+    /* Data for a detached PCB has nowhere to land — the owning socket
+     * is gone.  RST the peer so a process still writing to this
+     * connection fails promptly instead of having its bytes silently
+     * black-holed forever.  Pure ACK/FIN segments (dlen==0) still flow
+     * through so the close handshake can finish. */
+    if (p->detached && dlen > 0) {
+        tcp_send_ctl(p, TCP_RST | TCP_ACK);
+        tcp_kill_pcb(p, 0);
+        return;
+    }
+
     /* Accept data if seq matches rcv_nxt and we have room.  */
     if (dlen && seq == p->rcv_nxt) {
         uint32_t accept_n = dlen;
@@ -467,8 +534,15 @@ static void tcp_in_established(tcp_pcb_t *p, uint32_t seq, uint32_t ack,
         }
     }
 
-    /* Process FIN. */
-    if (flags & TCP_FIN) {
+    /* Process FIN — but only when it is in order.  A FIN occupies the
+     * sequence number right after this segment's data (seq + dlen); it
+     * may only be consumed once everything up to it has been received,
+     * i.e. seq + dlen == rcv_nxt.  Acting on an out-of-order FIN (one
+     * that raced ahead of still-in-flight data — common here because
+     * the sender has no real send-window throttle and the receiver
+     * drops ring overflow, recovered by retransmission) would tear the
+     * receive side down early and silently truncate the stream. */
+    if ((flags & TCP_FIN) && seq + (uint32_t)dlen == p->rcv_nxt) {
         p->rcv_nxt++;
         switch (p->state) {
         case TCP_ESTABLISHED:
@@ -503,6 +577,25 @@ static void tcp_in_established(tcp_pcb_t *p, uint32_t seq, uint32_t ack,
     if (p->state == TCP_FIN_WAIT_1 && (flags & TCP_ACK) &&
         ack == p->snd_nxt && !p->unacked_head) {
         p->state = TCP_FIN_WAIT_2;
+    }
+
+    /* LAST_ACK → CLOSED when the peer ACKs our FIN.  The final segment
+     * of a passive close is a bare ACK (no FIN), so this is the only
+     * path that completes LAST_ACK — without it the PCB lingered there
+     * forever and leaked. */
+    if (p->state == TCP_LAST_ACK && (flags & TCP_ACK) &&
+        ack == p->snd_nxt && !p->unacked_head) {
+        tcp_kill_pcb(p, 0);
+        return;
+    }
+
+    /* CLOSING → TIME_WAIT when the peer ACKs our FIN (simultaneous
+     * close: both sides sent FIN before either's was acknowledged). */
+    if (p->state == TCP_CLOSING && (flags & TCP_ACK) &&
+        ack == p->snd_nxt && !p->unacked_head) {
+        p->state = TCP_TIME_WAIT;
+        p->time_wait_until = get_ticks() + TCP_TIME_WAIT_TICKS;
+        return;
     }
 
     /* Always ACK in-window data. */
@@ -598,6 +691,12 @@ void tcp_free(tcp_pcb_t *p) {
     tcp_pcb_t **link = &g_tcp_pcbs;
     while (*link && *link != p) link = &(*link)->next;
     if (*link == p) *link = p->next;
+    /* If this is a listener, orphan any SYN_RECEIVED / not-yet-accepted
+     * children so a later segment for one of them can't dereference a
+     * freed parent in tcp_in_syn_received(). */
+    if (p->listen)
+        for (tcp_pcb_t *c = g_tcp_pcbs; c; c = c->next)
+            if (c->parent == p) c->parent = NULL;
     tcp_unacked_free_all(p);
     tcp_unlock(f);
     if (p->rxbuf)    kfree(p->rxbuf, TCP_RING_LEN);
@@ -661,7 +760,7 @@ int tcp_connect(tcp_pcb_t *p, uint32_t raddr, uint16_t rport) {
             return err;
         }
         current_thread->flags |= THREAD_F_INTERRUPTIBLE;
-        sched_sleep(p->connect_chan);
+        sched_sleep_until(p->connect_chan, get_ticks() + TCP_SLEEP_POLL);
         current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
         if (current_thread->sig_pending & ~current_thread->sig_mask)
             return -EINTR;
@@ -711,7 +810,17 @@ int tcp_poll(tcp_pcb_t *p, short events, void **wait_chan) {
     return revents;
 }
 
-tcp_pcb_t *tcp_accept(tcp_pcb_t *listen_p) {
+/* True iff the PCB is a listening socket — lets the socket layer
+ * reject accept() on a non-listening fd with EINVAL. */
+int tcp_is_listening(const tcp_pcb_t *p) {
+    return p && p->state == TCP_LISTEN;
+}
+
+/* Dequeue one established connection.  With nonblock set, returns NULL
+ * immediately when the queue is empty (the caller maps that to
+ * EAGAIN); otherwise blocks.  NULL from the blocking path means the
+ * wait was interrupted by a signal. */
+tcp_pcb_t *tcp_accept(tcp_pcb_t *listen_p, int nonblock) {
     for (;;) {
         /* accept_q / accept_count are appended by tcp_in_syn_received
          * in IRQ context — dequeue with IRQs off so the shift-down
@@ -727,8 +836,9 @@ tcp_pcb_t *tcp_accept(tcp_pcb_t *listen_p) {
             return c;
         }
         tcp_unlock(f);
+        if (nonblock) return NULL;
         current_thread->flags |= THREAD_F_INTERRUPTIBLE;
-        sched_sleep(listen_p->accept_chan);
+        sched_sleep_until(listen_p->accept_chan, get_ticks() + TCP_SLEEP_POLL);
         current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
         if (current_thread->sig_pending & ~current_thread->sig_mask)
             return NULL;
@@ -736,8 +846,13 @@ tcp_pcb_t *tcp_accept(tcp_pcb_t *listen_p) {
 }
 
 ssize_t tcp_send(tcp_pcb_t *p, const void *buf, size_t len) {
-    if (p->state != TCP_ESTABLISHED && p->state != TCP_CLOSE_WAIT)
-        return -ENOTCONN;
+    if (p->state != TCP_ESTABLISHED && p->state != TCP_CLOSE_WAIT) {
+        /* A connection that was up and then failed (RST -> ECONNRESET,
+         * RTO -> ETIMEDOUT) reports EPIPE, matching what a write to a
+         * broken pipe/socket gives elsewhere; a socket that was never
+         * connected reports ENOTCONN. */
+        return p->so_error ? -EPIPE : -ENOTCONN;
+    }
     const uint8_t *b = (const uint8_t *)buf;
     size_t sent = 0;
     while (sent < len) {
@@ -755,6 +870,10 @@ ssize_t tcp_recv_nb(tcp_pcb_t *p, void *buf, size_t len) {
      * tcp_in_established() in IRQ context.  Drain it with IRQs off
      * so a segment landing mid-copy can't desync head/tail/count. */
     uint32_t lf = tcp_lock();
+    if (p->shut_rd) {                /* shutdown(SHUT_RD): forced EOF */
+        tcp_unlock(lf);
+        return 0;
+    }
     if (p->rx_count > 0) {
         size_t prev_count = p->rx_count;
         size_t n = p->rx_count < len ? p->rx_count : len;
@@ -782,7 +901,11 @@ ssize_t tcp_recv_nb(tcp_pcb_t *p, void *buf, size_t len) {
         }
         return (ssize_t)n;
     }
-    if (p->state == TCP_CLOSE_WAIT || p->state == TCP_CLOSED) {
+    /* EOF once the peer has closed its send side and the ring is
+     * drained — every state reachable after the peer's FIN. */
+    if (p->state == TCP_CLOSE_WAIT || p->state == TCP_CLOSING ||
+        p->state == TCP_LAST_ACK   || p->state == TCP_TIME_WAIT ||
+        p->state == TCP_CLOSED) {
         tcp_unlock(lf);
         return 0;
     }
@@ -795,7 +918,7 @@ ssize_t tcp_recv(tcp_pcb_t *p, void *buf, size_t len) {
         ssize_t r = tcp_recv_nb(p, buf, len);
         if (r != -EAGAIN) return r;
         current_thread->flags |= THREAD_F_INTERRUPTIBLE;
-        sched_sleep(p->recv_chan);
+        sched_sleep_until(p->recv_chan, get_ticks() + TCP_SLEEP_POLL);
         current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
         if (current_thread->sig_pending & ~current_thread->sig_mask)
             return -EINTR;
@@ -828,6 +951,10 @@ int tcp_close(tcp_pcb_t *p) {
      * inside the lock; the FIN-emitting paths drop the lock before
      * tcp_xmit_queue, which is itself lock-bracketed. */
     uint32_t f = tcp_lock();
+    /* The owning socket is being destroyed — mark the PCB orphaned so
+     * the timer reaps it once it reaches CLOSED, and so any data that
+     * still arrives for it gets a RST (there is no socket to take it). */
+    p->detached = 1;
     int st = p->state;
     switch (st) {
     case TCP_ESTABLISHED:
@@ -843,14 +970,60 @@ int tcp_close(tcp_pcb_t *p) {
     case TCP_LISTEN:
     case TCP_SYN_SENT:
     case TCP_SYN_RECEIVED:
-    case TCP_CLOSED:
+        /* No established peer to FIN — drop straight to CLOSED.  The
+         * reap is deferred to the timer (rather than an inline
+         * tcp_free) so it cannot race a concurrent RX walk. */
+        p->state = TCP_CLOSED;
         tcp_unlock(f);
-        tcp_free(p);
-        return 0;
+        break;
     default:
+        /* CLOSED, or already mid-close (FIN_WAIT, CLOSING, LAST_ACK,
+         * TIME_WAIT) — the handshake finishes on its own and the
+         * detached flag now marks it for reaping once it reaches
+         * CLOSED. */
         tcp_unlock(f);
         break;
     }
+    return 0;
+}
+
+/*
+ * tcp_shutdown_wr — shutdown(fd, SHUT_WR): send a FIN to close the
+ * send direction while the socket stays open for reading.  Unlike
+ * tcp_close() the PCB is NOT detached — userspace still owns it and
+ * may keep reading until the peer closes too.
+ */
+int tcp_shutdown_wr(tcp_pcb_t *p) {
+    if (!p) return -ENOTCONN;
+    uint32_t f = tcp_lock();
+    switch (p->state) {
+    case TCP_ESTABLISHED:
+        p->state = TCP_FIN_WAIT_1;
+        tcp_unlock(f);
+        tcp_xmit_queue(p, TCP_FIN | TCP_ACK, NULL, 0);
+        return 0;
+    case TCP_CLOSE_WAIT:
+        p->state = TCP_LAST_ACK;
+        tcp_unlock(f);
+        tcp_xmit_queue(p, TCP_FIN | TCP_ACK, NULL, 0);
+        return 0;
+    default:
+        /* SYN_SENT has nothing established to FIN; the rest already
+         * sent their FIN.  Idempotent either way. */
+        tcp_unlock(f);
+        return 0;
+    }
+}
+
+/*
+ * tcp_shutdown_rd — shutdown(fd, SHUT_RD): close the receive
+ * direction.  recv() returns EOF from now on; a reader already
+ * blocked in tcp_recv() is woken so it observes the new state.
+ */
+int tcp_shutdown_rd(tcp_pcb_t *p) {
+    if (!p) return -ENOTCONN;
+    p->shut_rd = 1;
+    sched_wakeup(p->recv_chan);
     return 0;
 }
 

@@ -380,6 +380,7 @@ extern ssize_t afinet_sendto(int fd, const void *buf, size_t len, int flags,
 extern ssize_t afinet_recvfrom(int fd, void *buf, size_t len, int flags,
                                void *addr, socklen_t *addrlen);
 extern size_t  afinet_node_read(fs_node_t *, off_t, size_t, uint8_t *);
+extern int     afinet_shutdown(int fd, int how);
 
 #ifndef AF_PACKET
 #define AF_PACKET 17
@@ -644,6 +645,10 @@ ssize_t sys_send(int fd, const void *buf, size_t len, int flags) {
 }
 
 ssize_t sys_recv(int fd, void *buf, size_t len, int flags) {
+    /* A closed or out-of-range fd is EBADF — distinct from a live fd
+     * that simply is not a socket (ENOTSOCK, returned further down). */
+    if (fd < 0 || fd >= MAX_FD || !current_process || !current_process->fds[fd])
+        return -EBADF;
     if (fd >= 0 && fd < MAX_FD && current_process) {
         file_t *f = current_process->fds[fd];
         if (f && f->f_data) {
@@ -866,6 +871,15 @@ ssize_t sys_recvmsg(int fd, struct msghdr *msg, int flags) {
 }
 
 int sys_shutdown(int fd, int how) {
+    /* AF_INET first — route by fd type, same as sys_accept/sys_recv. */
+    if (fd >= 0 && fd < MAX_FD && current_process) {
+        file_t *f = current_process->fds[fd];
+        if (f && f->f_data) {
+            fs_node_t *n = (fs_node_t *)f->f_data;
+            if (n->read == (void *)afinet_node_read)
+                return afinet_shutdown(fd, how);
+        }
+    }
     afunix_sock_t *s = afunix_from_fd(fd);
     if (!s) return -ENOTSOCK;
     if (how != SHUT_RD && how != SHUT_WR && how != SHUT_RDWR) return -EINVAL;
