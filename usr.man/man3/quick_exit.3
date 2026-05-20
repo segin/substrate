@@ -1,0 +1,107 @@
+.\"
+.\" QUICK_EXIT(3) - Substrate C Library
+.\"
+.TH QUICK_EXIT 3 "May 2026" "Substrate OS" "Library Functions"
+.SH NAME
+quick_exit, at_quick_exit \- fast process termination
+.SH LIBRARY
+Standard C library (libc, \-lc)
+.SH SYNOPSIS
+.nf
+.B #include <stdlib.h>
+.PP
+.BI "int at_quick_exit(void (*" func ")(void));"
+.BI "void quick_exit(int " status ");"
+.fi
+.SH DESCRIPTION
+The
+.BR quick_exit ()
+function causes normal process termination without the cleanup that
+.BR exit (3)
+performs.
+It calls every function registered with
+.BR at_quick_exit ()
+\(em in the reverse order of their registration \(em and then calls
+.BR _Exit (3)
+with the value of
+.IR status .
+.PP
+Unlike
+.BR exit (3),
+.BR quick_exit ()
+does
+.B not
+call functions registered with
+.BR atexit (3),
+does
+.B not
+run C++ or dynamic-linker destructors, and does
+.B not
+flush or close open
+.B stdio
+streams.
+It is the minimal, predictable termination path for use when the
+state of the program is such that the normal cleanup handlers cannot
+safely run.
+.PP
+The
+.BR at_quick_exit ()
+function registers
+.I func
+to be called, without arguments, by
+.BR quick_exit ().
+The registration list maintained by
+.BR at_quick_exit ()
+is separate from the one used by
+.BR atexit (3):
+.BR quick_exit ()
+runs only the functions registered here.
+At least 32 functions can be registered.
+.PP
+If a registered function is itself registered more than once it is
+called once for each registration.
+A function registered by a handler that runs during
+.BR quick_exit ()
+processing is also called, after the handlers that had already run
+when it was registered.
+If a registered function does not return, the remaining registered
+functions are not called.
+.SH RETURN VALUE
+The
+.BR quick_exit ()
+function does not return to its caller.
+.PP
+The
+.BR at_quick_exit ()
+function returns 0 if the registration succeeds, and a non-zero
+value if it fails \(em because
+.I func
+is a null pointer, or because the registration list is already
+full.
+Neither function sets
+.IR errno .
+.SH EXAMPLE
+.nf
+#include <stdlib.h>
+#include <unistd.h>
+
+static void flush_log(void) { /* ... */ }
+
+int main(void)
+{
+    if (at_quick_exit(flush_log) != 0)
+        write(2, "registration failed\\n", 20);
+    /* ... */
+    quick_exit(EXIT_SUCCESS);
+}
+.fi
+.SH SEE ALSO
+.BR _Exit (3),
+.BR atexit (3),
+.BR exit (3),
+.BR abort (3)
+.SH STANDARDS
+.BR quick_exit ()
+and
+.BR at_quick_exit ()
+conform to C11 (ISO/IEC 9899:2011, \(sc7.22.4) and C17.

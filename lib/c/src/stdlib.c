@@ -46,6 +46,35 @@ __atexit_lock_release(void)
     atomic_store(&__atexit_lock, 0);
 }
 
+/*
+ * at_quick_exit / quick_exit (C11 §7.22.4) registration list.  This
+ * is SEPARATE from atexit's list: quick_exit runs only the handlers
+ * registered here.  C11 guarantees at least 32 registrations.
+ */
+#define ATQUICK_MAX 32
+static void (*__atquick_funcs[ATQUICK_MAX])(void);
+static int __atquick_count = 0;
+static atomic_int __atquick_lock = 0;
+
+static void
+__atquick_lock_acquire(void)
+{
+    int expected;
+
+    for (;;) {
+        expected = 0;
+        if (atomic_compare_exchange_weak(&__atquick_lock, &expected, 1)) {
+            return;
+        }
+    }
+}
+
+static void
+__atquick_lock_release(void)
+{
+    atomic_store(&__atquick_lock, 0);
+}
+
 /* Weak reference to /sbin/ld.so's destructor entry point.  Only
  * dynamically-linked binaries have it resolved; static binaries
  * see a NULL function pointer and skip the call. */
@@ -348,12 +377,58 @@ void *aligned_alloc(size_t alignment, size_t size) {
     return NULL;
 }
 
+/*
+ * quick_exit — C11 §7.22.4.7.  Runs every function registered with
+ * at_quick_exit, in reverse order of registration, then calls
+ * _Exit().  Unlike exit() it does NOT run atexit handlers, does NOT
+ * run ld.so / static destructors, and does NOT flush or close stdio
+ * streams — it is the minimal, "fast" termination path.
+ */
 void quick_exit(int status) {
-    _exit(status);
+    /*
+     * Pop each handler under the lock and call it with the lock
+     * released.  Popping (rather than snapshotting a count) means a
+     * handler that itself calls at_quick_exit has the freshly
+     * registered entry picked up on the next iteration and run
+     * before the older remaining handlers — which is exactly the
+     * ordering C11 mandates for a function registered during
+     * quick_exit processing.
+     */
+    for (;;) {
+        void (*fn)(void) = NULL;
+
+        __atquick_lock_acquire();
+        if (__atquick_count > 0) {
+            fn = __atquick_funcs[--__atquick_count];
+        }
+        __atquick_lock_release();
+
+        if (fn == NULL) {
+            break;
+        }
+        fn();
+    }
+
+    _Exit(status);
 }
 
+/*
+ * at_quick_exit — C11 §7.22.4.3.  Registers `func` to be called by
+ * quick_exit().  Returns 0 on success, nonzero if the registration
+ * could not be made (NULL function, or the list is full).
+ */
 int at_quick_exit(void (*func)(void)) {
-    (void)func;
+    if (func == NULL) {
+        return -1;
+    }
+
+    __atquick_lock_acquire();
+    if (__atquick_count >= ATQUICK_MAX) {
+        __atquick_lock_release();
+        return -1;
+    }
+    __atquick_funcs[__atquick_count++] = func;
+    __atquick_lock_release();
     return 0;
 }
 
