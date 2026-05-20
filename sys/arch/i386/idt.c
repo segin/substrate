@@ -25,6 +25,7 @@ idt_ptr_t   idt_ptr;
 #include <drivers/storage/ide/ide.h>
 #include <arch/i386/vm86.h>
 #include <arch/i386/pmap.h>
+#include <arch/i386/pmm.h>
 #include <arch/i386/gdt.h>
 #include <sys/exec.h>
 #include <arch/i386/percpu.h>
@@ -77,6 +78,37 @@ static uint32_t idt_read_cr2(void) {
     uint32_t cr2;
     __asm__ volatile("mov %%cr2, %0" : "=r"(cr2));
     return cr2;
+#endif
+}
+
+/*
+ * Demand-paged user-stack grow-down.  On a not-present page fault
+ * inside the current process's stack region [ustack_limit,
+ * ustack_top), map one fresh zeroed RW page so the stack extends on
+ * access.  exec only maps a small region at the top, so a process
+ * costs just the stack it touches.  Returns 1 if serviced, 0 to let
+ * the fault fall through (no process, fault outside the region, or
+ * genuinely out of memory).
+ */
+static int vm_grow_user_stack(uint32_t cr2) {
+#ifdef HOST_TEST
+    (void)cr2;
+    return 0;
+#else
+    process_t *p = current_process;
+    if (!p || !p->pmap || p->ustack_top == 0) return 0;
+    if (cr2 >= p->ustack_top || cr2 < p->ustack_limit) return 0;
+
+    void *pa = pmm_alloc_block();
+    if (!pa) return 0;                      /* genuine OOM */
+    uint32_t pa_phys = (uint32_t)(uintptr_t)pa - 0xC0000000u;
+    uintptr_t va = (uintptr_t)cr2 & ~0xFFFu;
+    if (pmap_enter((pmap_t)p->pmap, va, pa_phys, VM_PROT_WRITE, 0) < 0) {
+        pmm_free_block(pa);
+        return 0;
+    }
+    memset(pa, 0, 0x1000);
+    return 1;
 #endif
 }
 
@@ -263,6 +295,14 @@ void isr_handler(registers_t *regs) {
                 if (vm_fault(current_process->vm_map, cr2, fault_prot) == VM_FAULT_SUCCESS) {
                     return;
                 }
+            }
+
+            /* Demand-paged user stack: a not-present fault inside the
+             * process's stack region extends the stack one page down.
+             * Runs after vm_fault so a real mmap region in range is
+             * still serviced as a mapping, not mistaken for stack. */
+            if (!(regs->err_code & 0x01) && vm_grow_user_stack(cr2)) {
+                return;
             }
         }
 

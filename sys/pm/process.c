@@ -487,7 +487,12 @@ static int proc_fork_common(process_t *parent, void *stack, int is_vfork) {
     memcpy(child_proc->cmdline_tail, parent->cmdline_tail, sizeof(child_proc->cmdline_tail));
     child_proc->brk_start = parent->brk_start;
     child_proc->brk = parent->brk;
-    
+
+    /* Inherit the user-stack bounds so demand-paged grow-down keeps
+     * working in the child until it exec()s (which resets them). */
+    child_proc->ustack_top   = parent->ustack_top;
+    child_proc->ustack_limit = parent->ustack_limit;
+
     // Copy parent resources (FDs)
     child_proc->tty = parent->tty;
     child_proc->bitness = parent->bitness;

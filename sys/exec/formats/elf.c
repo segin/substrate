@@ -1006,14 +1006,17 @@ static int exec_setup_stack(pmap_t pmap, uint32_t *sp_out, char **k_argv, int ar
                             uint32_t *ps_strings_out) {
     uint32_t user_stack_top = 0xC0000000;
     /*
-     * 4 MiB initial user stack.  The previous 1 MiB ceiling was tight
-     * enough that usr.bin/as crashed on real input — emit_relocations
-     * does `sub $0x13021c,%esp` (1.18 MiB single-frame allocation)
-     * and there's no on-demand stack growth yet, so anything past
-     * the mapped region faults instead of extending.  Leave room for
-     * a few large frames before adding proper grow-down support.
+     * Demand-paged user stack.  Only a small region at the top is
+     * mapped up front — enough for argv/envp/auxv and the program's
+     * first few frames; the page-fault handler grows the stack
+     * downward one page at a time on access (see vm_grow_user_stack
+     * in arch/i386/idt.c), so a process only ever costs the stack it
+     * actually touches instead of a fixed multi-MiB reservation.
+     * USER_STACK_MAX caps how far it may grow.
      */
-    uint32_t user_stack_size = 1024;
+    #define USER_STACK_EAGER_PAGES 32        /* 128 KiB mapped at exec */
+    #define USER_STACK_MAX        0x800000   /* 8 MiB grow-down ceiling */
+    uint32_t user_stack_size = USER_STACK_EAGER_PAGES;
     uint32_t user_stack_base = user_stack_top - (user_stack_size * 0x1000);
 
     /*
@@ -1059,6 +1062,13 @@ static int exec_setup_stack(pmap_t pmap, uint32_t *sp_out, char **k_argv, int ar
         stack_pages[i].pa = pa;
         mapped_stack_pages++;
         memset(pa, 0, 0x1000);
+    }
+
+    /* Record the stack bounds so the page-fault handler can grow the
+     * stack on demand below the eagerly-mapped region. */
+    if (current_process) {
+        current_process->ustack_top   = user_stack_top;
+        current_process->ustack_limit = user_stack_top - USER_STACK_MAX;
     }
     
     /*

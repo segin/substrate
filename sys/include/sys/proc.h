@@ -145,6 +145,15 @@ typedef struct process {
     struct process *p_allproc_next;
     struct process *p_pidhash_next;
 
+    /* User stack bounds for demand-paged grow-down.  exec maps only a
+     * small region at ustack_top; a not-present fault anywhere in
+     * [ustack_limit, ustack_top) maps a fresh page on the fly, so a
+     * process only ever costs the stack it actually touches.  Kept at
+     * the end of the struct so adding them doesn't shift the offset
+     * of any field touched by offset-hardcoded (asm) code. */
+    uintptr_t   ustack_top;    // highest stack address (exclusive)
+    uintptr_t   ustack_limit;  // lowest address the stack may grow to
+
     // Resource limits, FDs, etc. would go here
 } process_t;
 
