@@ -39,7 +39,16 @@
 #include <stddef.h>
 #include "../arch/i386/intr.h"
 
-#define LO_RING      16
+/*
+ * Ring depth.  A TCP sender bursts up to a full receive window
+ * (TCP_RING_LEN, 32 KiB ~= 23 MSS segments) into lo_xmit() before
+ * flow control makes it block — and the echo path runs the same
+ * burst in the opposite direction, plus ACKs.  With only 16 slots
+ * the burst overflowed, frames were dropped, and the transfer
+ * crawled along on RTO retransmissions.  128 slots comfortably
+ * absorb both directions of a full window.
+ */
+#define LO_RING      128
 #define LO_FRAME_MAX 1700
 
 static uint8_t  lo_ring_buf[LO_RING][LO_FRAME_MAX];

@@ -136,6 +136,7 @@ typedef struct tcp_pcb {
     void      *connect_chan;
     void      *recv_chan;
     void      *accept_chan;
+    void      *send_chan;          /* woken when the send window opens */
     int        listen;
     /* The owning socket has been closed (afinet_node_close -> tcp_close).
      * A detached PCB has no userspace owner: once it reaches a terminal
@@ -304,6 +305,7 @@ static void tcp_kill_pcb(tcp_pcb_t *p, int err) {
     sched_wakeup(p->connect_chan);
     sched_wakeup(p->recv_chan);
     sched_wakeup(p->accept_chan);
+    sched_wakeup(p->send_chan);
 }
 
 static void tcp_timer_tick(uint64_t now) {
@@ -439,6 +441,8 @@ static void tcp_in_listen(tcp_pcb_t *p, uint32_t saddr, uint32_t daddr,
     c->rcv_wnd      = TCP_RING_LEN;
     c->recv_chan    = &c->rx_count;
     c->connect_chan = &c->state;
+    c->accept_chan  = &c->accept_count;
+    c->send_chan    = &c->snd_una;
     c->parent       = p;
     c->next         = g_tcp_pcbs;
     g_tcp_pcbs      = c;
@@ -532,6 +536,10 @@ static void tcp_in_established(tcp_pcb_t *p, uint32_t seq, uint32_t ack,
         } else {
             p->last_ack = ack;
         }
+        /* An ACK frees in-flight bytes and carries the peer's latest
+         * window (tcp_input() already stored it in snd_wnd) — wake any
+         * sender parked in tcp_send() waiting for the window to open. */
+        sched_wakeup(p->send_chan);
     }
 
     /* Process FIN — but only when it is in order.  A FIN occupies the
@@ -673,6 +681,7 @@ tcp_pcb_t *tcp_alloc(void) {
     p->recv_chan    = &p->rx_count;
     p->connect_chan = &p->state;
     p->accept_chan  = &p->accept_count;
+    p->send_chan    = &p->snd_una;
     /* Link into the global PCB list atomically vs. RX. */
     uint32_t f = tcp_lock();
     p->next = g_tcp_pcbs;
@@ -846,18 +855,51 @@ tcp_pcb_t *tcp_accept(tcp_pcb_t *listen_p, int nonblock) {
 }
 
 ssize_t tcp_send(tcp_pcb_t *p, const void *buf, size_t len) {
-    if (p->state != TCP_ESTABLISHED && p->state != TCP_CLOSE_WAIT) {
-        /* A connection that was up and then failed (RST -> ECONNRESET,
-         * RTO -> ETIMEDOUT) reports EPIPE, matching what a write to a
-         * broken pipe/socket gives elsewhere; a socket that was never
-         * connected reports ENOTCONN. */
-        return p->so_error ? -EPIPE : -ENOTCONN;
-    }
     const uint8_t *b = (const uint8_t *)buf;
     size_t sent = 0;
     while (sent < len) {
+        if (p->state != TCP_ESTABLISHED && p->state != TCP_CLOSE_WAIT) {
+            /* A connection that was up and then failed (RST ->
+             * ECONNRESET, RTO -> ETIMEDOUT) reports EPIPE; one that
+             * was never connected reports ENOTCONN. */
+            if (sent) return (ssize_t)sent;
+            return p->so_error ? -EPIPE : -ENOTCONN;
+        }
+
+        /* Flow control: the unacknowledged bytes in flight
+         * (snd_nxt - snd_una) must never exceed the receive window
+         * the peer last advertised.  Without this the sender blasted
+         * the whole buffer into the unacked FIFO at once; the peer's
+         * ring overflowed, the excess was dropped, and the transfer
+         * limped along on retransmissions. */
+        uint32_t in_flight = p->snd_nxt - p->snd_una;
+        uint32_t wnd       = p->snd_wnd;
+        uint32_t avail     = (wnd > in_flight) ? (wnd - in_flight) : 0;
+
+        if (avail == 0) {
+            if (in_flight == 0) {
+                /* Zero window, nothing outstanding — emit a one-byte
+                 * persist probe.  Its RTO retransmissions keep
+                 * prodding the peer until it re-advertises a window,
+                 * so no separate persist timer is needed. */
+                int rc = tcp_xmit_queue(p, TCP_ACK | TCP_PSH, b + sent, 1);
+                if (rc < 0) return sent ? (ssize_t)sent : rc;
+                sent += 1;
+                continue;
+            }
+            /* Data already in flight — its own retransmissions probe
+             * the peer; wait for an ACK to reopen the window. */
+            current_thread->flags |= THREAD_F_INTERRUPTIBLE;
+            sched_sleep_until(p->send_chan, get_ticks() + TCP_SLEEP_POLL);
+            current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
+            if (current_thread->sig_pending & ~current_thread->sig_mask)
+                return sent ? (ssize_t)sent : -EINTR;
+            continue;
+        }
+
         size_t chunk = len - sent;
-        if (chunk > TCP_MSS) chunk = TCP_MSS;
+        if (chunk > TCP_MSS)         chunk = TCP_MSS;
+        if (chunk > avail)           chunk = avail;
         int rc = tcp_xmit_queue(p, TCP_ACK | TCP_PSH, b + sent, chunk);
         if (rc < 0) return sent ? (ssize_t)sent : rc;
         sent += chunk;
