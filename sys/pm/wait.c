@@ -4,7 +4,15 @@
 #include <errno.h>
 #include <stddef.h>
 #include <kern/sched.h> // for sched_sleep
+#include <kern/time.h>  // for get_ticks
 #include <pm/pm.h>
+
+/* Safety-net poll interval for the blocking wait below.  proc_exit()
+ * wakes &parent->p_children, but sched_sleep/sched_wakeup is not
+ * fully race-free; a wakeup landing in the wrong window is otherwise
+ * lost forever.  Re-checking at this cadence turns that into bounded
+ * latency.  ~64ms at HZ=128. */
+#define WAIT_POLL_TICKS 8
 #include <sys/kern_syscalls.h>
 #include <arch/i386/pmap.h>
 #include <sys/ldt.h>
@@ -269,7 +277,12 @@ int kern_wait4(pid_t pid, int *status, int options, struct rusage *rusage) {
             continue;
         }
 
+        /* Block until proc_exit() wakes &p_children — but arm a
+         * deadline so a missed wakeup re-checks instead of wedging
+         * forever (this hung init at the first rc.d script). */
+        current_thread->sleep_expiry = get_ticks() + WAIT_POLL_TICKS;
         sched_yield();
+        current_thread->sleep_expiry = 0;
     }
 }
 
