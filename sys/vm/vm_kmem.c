@@ -92,17 +92,22 @@ void *kmalloc(size_t size) {
     if (size == 0) return NULL;
     if (size > KMEM_MAX_ALLOC) return NULL;
 
-    spinlock_acquire(&kmem_stats_lock);
+    /* Use IRQ-save spinlock so an IRQ landing on this CPU while we
+     * hold kmem_stats_lock can't reenter kmalloc/kfree from the
+     * handler and trip the "already held" deadlock check.  Netstack
+     * RX in particular calls kfree() from IRQ context. */
+    unsigned long _kf;
+    _kf = spinlock_acquire_irq(&kmem_stats_lock);
     kmem_stats.allocs++;
     kmem_stats.bytes_allocated += size;
     kmem_stats.bytes_outstanding += size;
-    spinlock_release(&kmem_stats_lock);
+    spinlock_release_irq(&kmem_stats_lock, _kf);
 
     /* Small allocation via UMA zone */
     int idx = kmem_zone_index(size);
     if (idx >= 0) {
         void *result = uma_zalloc(kmem_zones[idx], M_NOWAIT);
-        spinlock_acquire(&kmem_stats_lock);
+        _kf = spinlock_acquire_irq(&kmem_stats_lock);
         if (!result) {
             if (kmem_stats.bytes_outstanding >= size)
                 kmem_stats.bytes_outstanding -= size;
@@ -114,7 +119,7 @@ void *kmalloc(size_t size) {
             kmem_stats.buckets[idx].bytes_outstanding += size;
             kmem_stats.buckets[idx].objects_outstanding++;
         }
-        spinlock_release(&kmem_stats_lock);
+        spinlock_release_irq(&kmem_stats_lock, _kf);
         if (!result) {
             extern void kprint(const char*);
             kprint("kmalloc: uma_zalloc failed for zone ");
@@ -128,32 +133,32 @@ void *kmalloc(size_t size) {
     size_t total = size + sizeof(kmem_large_header_t);
     if (total < size) {
         /* Integer overflow */
-        spinlock_acquire(&kmem_stats_lock);
+        _kf = spinlock_acquire_irq(&kmem_stats_lock);
         if (kmem_stats.bytes_outstanding >= size)
             kmem_stats.bytes_outstanding -= size;
         else
             kmem_stats.bytes_outstanding = 0;
-        spinlock_release(&kmem_stats_lock);
+        spinlock_release_irq(&kmem_stats_lock, _kf);
         return NULL;
     }
     size_t pages = (total + 4095) / 4096;
 
     void *mem = pmm_alloc_contiguous(pages);
     if (!mem) {
-        spinlock_acquire(&kmem_stats_lock);
+        _kf = spinlock_acquire_irq(&kmem_stats_lock);
         if (kmem_stats.bytes_outstanding >= size)
             kmem_stats.bytes_outstanding -= size;
         else
             kmem_stats.bytes_outstanding = 0;
-        spinlock_release(&kmem_stats_lock);
+        spinlock_release_irq(&kmem_stats_lock, _kf);
         return NULL;
     }
 
-    spinlock_acquire(&kmem_stats_lock);
+    _kf = spinlock_acquire_irq(&kmem_stats_lock);
     kmem_stats.large_allocs++;
     kmem_stats.large_bytes_requested += size;
     kmem_stats.large_bytes_outstanding += size;
-    spinlock_release(&kmem_stats_lock);
+    spinlock_release_irq(&kmem_stats_lock, _kf);
     
     /* Store header */
     kmem_large_header_t *hdr = (kmem_large_header_t *)mem;
@@ -169,7 +174,9 @@ void *kmalloc(size_t size) {
 void kfree(void *ptr, size_t size) {
     if (!ptr) return;
 
-    spinlock_acquire(&kmem_stats_lock);
+    /* IRQ-save spinlock — see kmalloc() commentary. */
+    unsigned long _kf;
+    _kf = spinlock_acquire_irq(&kmem_stats_lock);
     kmem_stats.frees++;
     if (kmem_stats.bytes_outstanding >= size) {
         kmem_stats.bytes_outstanding -= size;
@@ -189,11 +196,11 @@ void kfree(void *ptr, size_t size) {
         if (kmem_stats.buckets[idx].objects_outstanding > 0) {
             kmem_stats.buckets[idx].objects_outstanding--;
         }
-        spinlock_release(&kmem_stats_lock);
+        spinlock_release_irq(&kmem_stats_lock, _kf);
         uma_zfree(kmem_zones[idx], ptr);
         return;
     }
-    spinlock_release(&kmem_stats_lock);
+    spinlock_release_irq(&kmem_stats_lock, _kf);
 
     /* Large allocation: check header and free pages */
     kmem_large_header_t *hdr = (kmem_large_header_t *)ptr - 1;
@@ -209,14 +216,14 @@ void kfree(void *ptr, size_t size) {
     /* Free pages */
     pmm_free_contiguous(hdr, pages);
 
-    spinlock_acquire(&kmem_stats_lock);
+    _kf = spinlock_acquire_irq(&kmem_stats_lock);
     kmem_stats.large_frees++;
     if (kmem_stats.large_bytes_outstanding >= hdr->size) {
         kmem_stats.large_bytes_outstanding -= hdr->size;
     } else {
         kmem_stats.large_bytes_outstanding = 0;
     }
-    spinlock_release(&kmem_stats_lock);
+    spinlock_release_irq(&kmem_stats_lock, _kf);
 }
 
 /*

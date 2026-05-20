@@ -211,7 +211,7 @@ install_to_dist() {
     # substrate pulls libstdc++ + libgcc_s (overlaid from gcc staging).
     # ld.so searches /lib, /usr/lib, /usr/local/lib — populate both
     # so resolution succeeds whichever path is hit first.
-    for libdir in c sys m pthread dl edit; do
+    for libdir in c sys m pthread dl edit resolv; do
         if [ -f "$TOP/lib/$libdir/lib$libdir.a" ]; then
             cp "$TOP/lib/$libdir/lib$libdir.a" "$DIST/usr/lib/"
         fi

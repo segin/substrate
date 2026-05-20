@@ -30,5 +30,18 @@
 #define ULLONG_MAX 18446744073709551615ULL
 
 #define PATH_MAX 4096
+#define NAME_MAX 255
+#define HOST_NAME_MAX 64
+#define LOGIN_NAME_MAX 256
+#define IOV_MAX 1024
+#define LINE_MAX 2048
+
+/* SSIZE_MAX — maximum value that fits in ssize_t.  ssize_t mirrors
+ * long on substrate (4 bytes on i386, 8 on x86_64). */
+#if __SIZEOF_LONG__ == 8
+#define SSIZE_MAX 9223372036854775807L
+#else
+#define SSIZE_MAX 2147483647L
+#endif
 
 #endif

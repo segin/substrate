@@ -18,6 +18,31 @@ bool spinlock_try_acquire(spinlock_t *lock);
 void spinlock_release(spinlock_t *lock);
 bool spinlock_is_held(spinlock_t *lock);
 
+/* IRQ-save spinlocks — required for any lock that may be touched
+ * from an interrupt handler.  Without disabling local IRQs around
+ * the critical section, an IRQ landing on a CPU that already holds
+ * the lock would re-enter spinlock_acquire on the same CPU and
+ * trip the "already held" deadlock check.  The kmem_stats_lock
+ * inside kmalloc/kfree is the canonical case — the netstack RX
+ * path runs kfree() from IRQ context.
+ *
+ * Usage:
+ *     unsigned long flags = spinlock_acquire_irq(&L);
+ *     ... critical section ...
+ *     spinlock_release_irq(&L, flags);
+ */
+static inline unsigned long spinlock_acquire_irq(spinlock_t *lock) {
+    unsigned long flags;
+    __asm__ volatile("pushfl; popl %0; cli" : "=r"(flags) :: "memory");
+    spinlock_acquire(lock);
+    return flags;
+}
+
+static inline void spinlock_release_irq(spinlock_t *lock, unsigned long flags) {
+    spinlock_release(lock);
+    __asm__ volatile("pushl %0; popfl" :: "r"(flags) : "memory", "cc");
+}
+
 struct thread;
 
 // Sleep Mutex

@@ -33,6 +33,16 @@ extern "C" {
 #define STDOUT_FILENO 1
 #define STDERR_FILENO 2
 
+/* lseek() whence values.  POSIX exposes these through <unistd.h>
+ * as well as <stdio.h>; substrate historically had them only in
+ * stdio.h, which broke BSD code (OpenSSH's bsd-flock.c, libdbm, …)
+ * that includes only fcntl.h or unistd.h. */
+#ifndef SEEK_SET
+#define SEEK_SET 0
+#define SEEK_CUR 1
+#define SEEK_END 2
+#endif
+
 typedef int pid_t;
 // off_t and ssize_t defined in sys/types.h
 
@@ -59,6 +69,7 @@ int link(const char *oldpath, const char *newpath);
 int symlink(const char *target, const char *linkpath);
 ssize_t readlink(const char *pathname, char *buf, size_t bufsiz);
 int chdir(const char *path);
+int chroot(const char *path);
 char *getcwd(char *buf, size_t size);
 
 int pipe(int pipefd[2]);
@@ -104,6 +115,8 @@ int setuid(uid_t uid);
 int setgid(gid_t gid);
 pid_t getpgrp(void);
 pid_t getpgid(pid_t pid);
+pid_t getsid(pid_t pid);
+int   initgroups(const char *user, gid_t group);
 int setpgid(pid_t pid, pid_t pgid);
 pid_t tcgetpgrp(int fd);
 int tcsetpgrp(int fd, pid_t pgrp);

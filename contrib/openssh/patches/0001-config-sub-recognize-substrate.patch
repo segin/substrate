@@ -1,0 +1,18 @@
+Add "substrate" as a recognized OS in OpenSSH's config.sub.
+
+config.sub from the autoconf-archive snapshot bundled with
+openssh-10.0p2 only knows the OSes published before substrate
+existed; without this hunk, `./configure --host=i386-unknown-
+substrate` fails with "OS `substrate' not recognized".
+
+--- a/config.sub
++++ b/config.sub
+@@ -1758,7 +1758,7 @@
+ 	     | onefs* | tirtos* | phoenix* | fuchsia* | redox* | bme* \
+ 	     | midnightbsd* | amdhsa* | unleashed* | emscripten* | wasi* \
+ 	     | nsk* | powerunix* | genode* | zvmoe* | qnx* | emx* | zephyr* \
+-	     | fiwix* | mlibc* )
++	     | fiwix* | mlibc* | substrate* )
+ 		;;
+ 	# This one is extra strict with allowed versions
+ 	sco3.2v2 | sco3.2v[4-9]* | sco3.2v[4-9]\.[0-9]*)

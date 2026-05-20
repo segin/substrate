@@ -44,6 +44,43 @@ struct cmsghdr {
     int       cmsg_type;
 };
 
+/* Ancillary-data (cmsghdr) types — SOL_SOCKET level. */
+#define SCM_RIGHTS       1   /* fd passing (Linux/BSD-compatible) */
+#define SCM_CREDENTIALS  2   /* peer pid/uid/gid */
+
+/* CMSG accessor macros.  Align to size_t (BSD convention).  These
+ * mirror glibc/BSD layouts so existing code (OpenSSH's monitor_fdpass,
+ * sftp-server, ...) doesn't need #ifdef. */
+#define CMSG_ALIGN(n)     (((n) + sizeof(size_t) - 1) & ~(sizeof(size_t) - 1))
+#define CMSG_SPACE(len)   (CMSG_ALIGN(sizeof(struct cmsghdr)) + CMSG_ALIGN(len))
+#define CMSG_LEN(len)     (CMSG_ALIGN(sizeof(struct cmsghdr)) + (len))
+#define CMSG_DATA(cmsg)   ((unsigned char *)((struct cmsghdr *)(cmsg) + 1))
+#define CMSG_FIRSTHDR(mhdr) \
+    ((mhdr)->msg_controllen >= sizeof(struct cmsghdr) \
+        ? (struct cmsghdr *)(mhdr)->msg_control : (struct cmsghdr *)0)
+#define CMSG_NXTHDR(mhdr, cmsg) \
+    (((cmsg) == NULL || (cmsg)->cmsg_len < sizeof(struct cmsghdr)) \
+        ? (struct cmsghdr *)0 \
+        : ((char *)(cmsg) + CMSG_ALIGN((cmsg)->cmsg_len) + sizeof(struct cmsghdr) \
+            > (char *)(mhdr)->msg_control + (mhdr)->msg_controllen \
+                ? (struct cmsghdr *)0 \
+                : (struct cmsghdr *)((char *)(cmsg) + CMSG_ALIGN((cmsg)->cmsg_len))))
+
+/* MSG_* flags — match Linux values so AF_UNIX cmsghdr buffers and
+ * sendmsg/recvmsg flags pass through unchanged. */
+#ifndef MSG_OOB
+#define MSG_OOB         0x0001
+#define MSG_PEEK        0x0002
+#define MSG_DONTROUTE   0x0004
+#define MSG_CTRUNC      0x0008
+#define MSG_TRUNC       0x0020
+#define MSG_DONTWAIT    0x0040
+#define MSG_EOR         0x0080
+#define MSG_WAITALL     0x0100
+#define MSG_NOSIGNAL    0x4000
+#define MSG_CMSG_CLOEXEC 0x40000000
+#endif
+
 #define AF_UNSPEC      0
 #define AF_UNIX        1
 #define AF_LOCAL       AF_UNIX
@@ -80,6 +117,17 @@ struct cmsghdr {
 #define SO_REUSEPORT   15
 #define SO_PASSCRED    16
 #define SO_PEERCRED    17
+
+/* Userspace struct ucred returned by SO_PEERCRED on AF_UNIX.  Wire-
+ * compatible with the Linux ABI; substrate's AF_UNIX layer fills it
+ * with the peer's pid/uid/gid at connect() time.  Not to be confused
+ * with the kernel-internal struct ucred in <sys/ucred.h>. */
+struct ucred {
+    pid_t pid;
+    uid_t uid;
+    gid_t gid;
+};
+
 #define SO_RCVLOWAT    18
 #define SO_SNDLOWAT    19
 #define SO_RCVTIMEO    20

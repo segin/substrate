@@ -1,0 +1,19 @@
+dns.c: include <resolv.h> for getrrsetbyname / struct rrsetinfo.
+
+OpenSSH's dns.c assumes that when HAVE_GETRRSETBYNAME is defined the
+function and its rrsetinfo type are visible via <netdb.h>, which is
+true on OpenBSD/NetBSD but not on Linux/glibc nor on substrate.
+Substrate's libresolv exports them through <resolv.h>; include that
+explicitly so HAVE_GETRRSETBYNAME=yes is enough to skip the
+openbsd-compat fallback.
+
+--- a/dns.c
++++ b/dns.c
+@@ -33,6 +33,7 @@
+ #include <sys/types.h>
+ #include <sys/socket.h>
+ #include <netdb.h>
++#include <resolv.h>
+ #include <stdarg.h>
+ #include <stdio.h>
+ #include <string.h>

@@ -27,6 +27,15 @@ extern "C" {
 #define AT_SYMLINK_NOFOLLOW 0x100
 #define AT_REMOVEDIR        0x200
 
+/* lseek() whence — POSIX allows these in <fcntl.h> alongside
+ * <stdio.h> and <unistd.h>.  BSD code (OpenSSH's bsd-flock.c)
+ * reaches for them after including only fcntl.h. */
+#ifndef SEEK_SET
+#define SEEK_SET 0
+#define SEEK_CUR 1
+#define SEEK_END 2
+#endif
+
 /* fcntl() commands */
 #define F_DUPFD     0
 #define F_GETFD     1

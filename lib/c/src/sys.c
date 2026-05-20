@@ -306,6 +306,10 @@ int chdir(const char *path) {
     return __set_errno((int)_syscall1(SYS_CHDIR, (uintptr_t)path));
 }
 
+int chroot(const char *path) {
+    return __set_errno((int)_syscall1(SYS_CHROOT, (uintptr_t)path));
+}
+
 char *getcwd(char *buf, size_t size) {
     char *out = buf;
     int allocated = 0;
