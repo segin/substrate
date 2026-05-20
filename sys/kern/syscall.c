@@ -3581,12 +3581,26 @@ int sys_reboot(int cmd) {
     }
 
     switch (cmd) {
+    case RB_POWER_OFF:
+        /*
+         * ACPI soft-off.  We don't parse the ACPI tables yet, so use
+         * the well-known emulator power-control ports: QEMU's ACPI
+         * PM1a_CNT at 0x604, Bochs / pre-2.0 QEMU at 0xB004, and
+         * VirtualBox at 0x4004.  Writing SLP_EN (the S5 sleep type)
+         * makes the virtual machine power off.  On real hardware
+         * these are unused ports and the writes are harmless; if no
+         * soft-off path works we halt the CPU rather than rebooting —
+         * a power-off request must never turn into a reboot.
+         */
+        outw(0x604,  0x2000);
+        outw(0xB004, 0x2000);
+        outw(0x4004, 0x3400);
+        __asm__ volatile("cli");
+        for (;;) __asm__ volatile("hlt");
+        return 0;                       /* not reached */
     case RB_AUTOBOOT:
     case RB_HALT_SYSTEM:
-    case RB_POWER_OFF:
-        // For now, all these perform a hard reset.
-        // In the future, we would differentiate between halt, poweroff, and reboot.
-        break;
+        break;                          /* hard reset, below */
     default:
         return -EINVAL;
     }
