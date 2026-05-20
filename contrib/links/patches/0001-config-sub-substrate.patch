@@ -1,0 +1,18 @@
+Subject: config.sub: accept substrate as an OS name
+
+i386-unknown-substrate triples bounce off the unrecognised-OS
+check otherwise.  links-2.30 ships an older config.sub whose OS
+list uses -<name>* patterns.
+
+---
+--- a/config.sub
++++ b/config.sub
+@@ -708,7 +708,7 @@
+ 	      | -*vms* | -sco* | -esix* | -isc* | -aix* | -sunos | -sunos[34]*\
+ 	      | -hpux* | -unos* | -osf* | -luna* | -dgux* | -solaris* | -sym* \
+ 	      | -amigaos* | -amigados* | -msdos* | -newsos* | -unicos* | -aof* \
+-	      | -aos* \
++	      | -aos* | -substrate* \
+ 	      | -nindy* | -vxsim* | -vxworks* | -ebmon* | -hms* | -mvs* \
+ 	      | -clix* | -riscos* | -uniplus* | -iris* | -rtu* | -xenix* \
+ 	      | -hiux* | -386bsd* | -netbsd* | -openbsd* | -freebsd* | -riscix* \
