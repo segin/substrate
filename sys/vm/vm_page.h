@@ -62,7 +62,11 @@ typedef struct vm_page {
 
     // Buddy Allocator state
     uint8_t  order;       // Power of two order (0 = 1 page)
-    
+
+    // memtrack: index of the call site that allocated this frame, so
+    // the eventual free can be charged back to it (0 = untracked).
+    uint16_t memtrack_site;
+
     // Pmap backlinks for TLB shootdown
     // Each entry tracks a (pmap, va) pair that maps this page
     struct pv_entry *pv_list;  // Head of PV entry list

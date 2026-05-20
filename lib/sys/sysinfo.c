@@ -137,10 +137,9 @@ int sys_vm_buffers(sys_bufinfo_t *buf) {
 
 int sys_vm_slabs(sys_slabinfo_t *slabs, size_t *count) {
     if (!count) { errno = EINVAL; return -1; }
-    *count = 0;
-    (void)slabs;
-    errno = ENOSYS;
-    return -1;
+    /* `*count` is the array capacity on entry, the filled count on
+     * return — the kernel reads it, then overwrites it. */
+    return syscall(SYS_VM_SLABS, slabs, count);
 }
 
 /* ===========================================================

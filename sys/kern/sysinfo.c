@@ -15,7 +15,9 @@
 #include <vm/vm_page.h>
 #include <vm/vm_swap.h>
 #include <string.h>
+#include <stdio.h>
 #include <sys/copy.h>
+#include "memtrack.h"
 
 #define PAGE_SIZE 4096
 
@@ -161,13 +163,36 @@ int sys_vm_buffers(sys_bufinfo_t *buf) {
     return 0;
 }
 
-/* sys_vm_slabs: enumerate UMA zones.  No public iterator yet;
- * return 0-count and let userland degrade gracefully (procfs
- * /proc/slabinfo will fill in once UMA grows a public walker). */
+/* sys_vm_slabs: report the per-call-site physical-page accounting
+ * table (kern/memtrack.c).  Each record maps to one sys_slabinfo_t:
+ *   name           "pc=0x........" — the allocating call site
+ *   objsize        page size (these are page-granular allocations)
+ *   total          pages allocated from this site over its lifetime
+ *   active         pages still outstanding (alloc - free) — the leak
+ *   slabs          pages freed back over the lifetime
+ * `*count` is the caller's array capacity on entry and the number of
+ * records written on return. */
 int sys_vm_slabs(sys_slabinfo_t *slabs, size_t *count) {
-    (void)slabs;
-    if (!count) return -14;
-    size_t zero = 0;
-    if (copyout(&zero, count, sizeof(zero)) != 0) return -14;
+    if (!count) return -EINVAL;
+    size_t cap = 0;
+    if (copyin(count, &cap, sizeof(cap)) != 0) return -EFAULT;
+
+    memtrack_rec_t recs[MEMTRACK_SITES];
+    size_t n = memtrack_snapshot(recs, MEMTRACK_SITES);
+
+    size_t out_n = 0;
+    for (size_t i = 0; i < n && slabs && out_n < cap; i++) {
+        sys_slabinfo_t si;
+        memset(&si, 0, sizeof(si));
+        snprintf(si.name, sizeof(si.name), "pc=0x%08x", (unsigned)recs[i].pc);
+        si.objsize        = PAGE_SIZE;
+        si.total          = (uint32_t)recs[i].pages_alloc;
+        si.active         = (uint32_t)(recs[i].pages_alloc - recs[i].pages_free);
+        si.slabs          = (uint32_t)recs[i].pages_free;
+        si.pages_per_slab = 1;
+        if (copyout(&si, &slabs[out_n], sizeof(si)) != 0) return -EFAULT;
+        out_n++;
+    }
+    if (copyout(&out_n, count, sizeof(out_n)) != 0) return -EFAULT;
     return 0;
 }

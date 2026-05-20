@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <sys/lock.h>
 #include <kern/console.h>
+#include <kern/memtrack.h>
 
 /*
  * Locking Strategy:
@@ -1044,6 +1045,10 @@ uint32_t pmm_get_free_memory(void) {
 void* pmm_alloc_block(void) {
     vm_page_t *p = vm_phys_alloc_page_below(PMM_DIRECTMAP_PHYS_LIMIT);
     if (!p) return NULL;
+    /* Charge the page to the caller's site so a later free can be
+     * attributed back to it (see kern/memtrack.c). */
+    p->memtrack_site = memtrack_record_alloc(
+        (uintptr_t)__builtin_return_address(0), 1);
     return (void*)(uintptr_t)(p->phys_addr + PMM_PHYS_VIRT_BASE);
 }
 
@@ -1059,12 +1064,22 @@ void pmm_free_block(void* p) {
         kprint("PMM: ignoring free of unknown direct-mapped page.\n");
         return;
     }
+    memtrack_record_free(page->memtrack_site, 1);
+    page->memtrack_site = 0;
     vm_phys_free_page(page);
 }
 
 void* pmm_alloc_contiguous(size_t count) {
     vm_page_t *p = vm_phys_alloc_contiguous_below(count, PMM_DIRECTMAP_PHYS_LIMIT);
     if (!p) return NULL;
+    /* Stamp every frame of the run with the caller's site so a free
+     * of the run (or any aligned sub-block) attributes correctly. */
+    uint16_t site = memtrack_record_alloc(
+        (uintptr_t)__builtin_return_address(0), (uint32_t)count);
+    for (size_t i = 0; i < count; i++) {
+        vm_page_t *q = vm_phys_paddr_to_page(p->phys_addr + i * PMM_BLOCK_SIZE);
+        if (q) q->memtrack_site = site;
+    }
     return (void*)(uintptr_t)(p->phys_addr + PMM_PHYS_VIRT_BASE);
 }
 
@@ -1098,6 +1113,11 @@ void pmm_free_contiguous(void* p, size_t count) {
      if (!page) {
          kprint("PMM: ignoring free of unknown direct-mapped range.\n");
          return;
+     }
+     memtrack_record_free(page->memtrack_site, (uint32_t)count);
+     for (size_t i = 0; i < count; i++) {
+         vm_page_t *q = vm_phys_paddr_to_page(page->phys_addr + i * PMM_BLOCK_SIZE);
+         if (q) q->memtrack_site = 0;
      }
      vm_phys_free_contiguous(page, count);
 }

@@ -24,6 +24,7 @@
 #include <stddef.h>
 #include <vm/vm_kmem.h>
 #include <vm/vm_page.h>
+#include <kern/memtrack.h>
 #include <sys/lock.h>
 #include <kern/bus.h>
 #include <kern/pci.h>
@@ -100,6 +101,40 @@ static uint32_t gen_meminfo(char *buf, size_t size, void *opaque) {
         "SwapTotal:          0 kB\n"
         "SwapFree:           0 kB\n",
         total_kb, free_kb, used_kb);
+}
+
+/* /proc/memtrack — per-call-site physical-page accounting.  One line
+ * per allocating call site: pages handed out, pages returned, and the
+ * live difference.  A site whose `live` keeps climbing is leaking. */
+static uint32_t gen_memtrack(char *buf, size_t size, void *opaque) {
+    (void)opaque;
+    memtrack_rec_t recs[MEMTRACK_SITES];
+    size_t n = memtrack_snapshot(recs, MEMTRACK_SITES);
+    size_t off = 0;
+    char line[96];
+    uint64_t total_a = 0, total_f = 0;
+
+    for (size_t i = 0; i < n; i++) {
+        total_a += recs[i].pages_alloc;
+        total_f += recs[i].pages_free;
+        int live = (int)((long)recs[i].pages_alloc - (long)recs[i].pages_free);
+        int len = snprintf(line, sizeof line,
+                           "site=0x%08x alloc=%u free=%u live=%d\n",
+                           (unsigned)recs[i].pc,
+                           (unsigned)recs[i].pages_alloc,
+                           (unsigned)recs[i].pages_free, live);
+        if (off < size) off += (size_t)snprintf(buf + off, size - off, "%s", line);
+        else            off += (size_t)len;
+    }
+    {
+        int len = snprintf(line, sizeof line,
+                           "total alloc=%u free=%u live=%d\n",
+                           (unsigned)total_a, (unsigned)total_f,
+                           (int)((long)total_a - (long)total_f));
+        if (off < size) off += (size_t)snprintf(buf + off, size - off, "%s", line);
+        else            off += (size_t)len;
+    }
+    return (uint32_t)off;
 }
 
 static uint32_t gen_uptime(char *buf, size_t size, void *opaque) {
@@ -395,6 +430,7 @@ static uint32_t gen_device_events(char *buf, size_t size, void *opaque) {
  */
 static struct procfs_runtime_entry procfs_entries[] = {
     { "meminfo",     gen_meminfo,       NULL },
+    { "memtrack",    gen_memtrack,      NULL },
     { "uptime",      gen_uptime,        NULL },
     { "cmdline",     gen_cmdline,       NULL },
     { "vmstat",      gen_vmstat,        NULL },
