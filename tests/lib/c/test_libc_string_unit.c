@@ -574,6 +574,14 @@ void run_strncasecmp_tests(void) {
     unsigned char c1[] = {0xff, '\0'};
     unsigned char c2[] = {0x7f, '\0'};
     ASSERT_TRUE(libc_strncasecmp((char*)c1, (char*)c2, 1) > 0, "0xff > 0x7f (unsigned)");
+
+    // Non-alphabetic characters
+    ASSERT_EQ(libc_strncasecmp("1234!", "1234!", 5), 0, "Non-alphabetic equal");
+    ASSERT_TRUE(libc_strncasecmp("1234!", "1234@", 5) < 0, "'!' < '@'");
+
+    // Exact identical pointers
+    const char *same = "identical";
+    ASSERT_EQ(libc_strncasecmp(same, same, 5), 0, "Identical pointers");
 }
 
 bool test_libc_strlen(void) {
