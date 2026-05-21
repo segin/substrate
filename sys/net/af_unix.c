@@ -43,6 +43,7 @@
 #include <sys/proc.h>
 #include <sys/file.h>
 #include <sys/socket.h>
+#include <sys/poll.h>
 #include <kern/console.h>
 #include <kern/sched.h>
 #include <kern/sleepq.h>
@@ -302,6 +303,63 @@ static void afunix_node_close(fs_node_t *node) {
      * now leak the struct so a stray waiter can't UAF.  Small N. */
 }
 
+/*
+ * poll(2) / select(2) readiness for an AF_UNIX socket.
+ *
+ * Without an explicit handler the generic poll_fs() treats the
+ * socket's fs_node as a regular file and reports it permanently
+ * readable+writable — so a server polling an idle listener sees a
+ * phantom connection, calls accept(), and blocks forever.
+ */
+static int afunix_node_poll(fs_node_t *node, void *waiter) {
+    afunix_sock_t *s = (afunix_sock_t *)(uintptr_t)node->impl;
+    if (!s) return POLLNVAL;
+
+    int ev = 0;
+    mutex_lock(&s->lock);
+
+    if (s->closed) {
+        mutex_unlock(&s->lock);
+        return POLLHUP;
+    }
+
+    switch (s->state) {
+    case AFUS_LISTENING:
+        /* Readable only when accept() will actually return a fd. */
+        if (s->accept_count > 0)
+            ev |= POLLIN | POLLRDNORM;
+        else if (waiter)
+            *(void **)waiter = s->accept_chan;
+        break;
+
+    case AFUS_CONNECTED: {
+        afunix_sock_t *peer = s->peer;
+        /* Readable: buffered data, or EOF — recv() returns without
+         * blocking when the peer is gone / write-closed, or this
+         * side's read half is shut down. */
+        if (s->rx.count > 0 || s->rd_closed ||
+            !peer || peer->closed || peer->wr_closed)
+            ev |= POLLIN | POLLRDNORM;
+        /* Writable: peer alive, still reading, and has buffer room. */
+        if (peer && !peer->closed && !peer->rd_closed && !s->wr_closed &&
+            peer->rx.count < AFUNIX_BUF_SIZE)
+            ev |= POLLOUT | POLLWRNORM;
+        if (!peer || peer->closed)
+            ev |= POLLHUP;
+        if (!(ev & (POLLIN | POLLRDNORM)) && waiter)
+            *(void **)waiter = s->rx_chan;
+        break;
+    }
+
+    default:    /* UNCONNECTED / BOUND / DISCONNECTED */
+        ev |= POLLHUP;
+        break;
+    }
+
+    mutex_unlock(&s->lock);
+    return ev;
+}
+
 /* ============================================================
  * Helper: create a fresh socket struct
  * ============================================================ */
@@ -328,6 +386,7 @@ static afunix_sock_t *afunix_alloc(int type) {
     s->node.read  = afunix_node_read;
     s->node.write = afunix_node_write;
     s->node.close = afunix_node_close;
+    s->node.poll  = afunix_node_poll;
     s->node.impl  = (uintptr_t)s;
     strncpy(s->node.name, "<socket>", sizeof(s->node.name) - 1);
     return s;
@@ -532,9 +591,20 @@ int sys_accept(int fd, struct sockaddr *addr, socklen_t *addrlen) {
     mutex_lock(&server->lock);
     while (server->accept_count == 0) {
         if (server->closed) { mutex_unlock(&server->lock); return -EBADF; }
+        /* Interruptible wait: a pending signal must break accept()
+         * out, otherwise a wedged server cannot be killed and holds
+         * its controlling terminal forever. */
+        if (current_thread->sig_pending & ~current_thread->sig_mask) {
+            mutex_unlock(&server->lock);
+            return -EINTR;
+        }
+        current_thread->flags |= THREAD_F_INTERRUPTIBLE;
         sleepq_add(server->accept_chan, current_thread);
         mutex_unlock(&server->lock);
         sched_yield();
+        current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
+        if (current_thread->sig_pending & ~current_thread->sig_mask)
+            return -EINTR;
         mutex_lock(&server->lock);
     }
     /* connect() already allocated and peered the server-side socket;
