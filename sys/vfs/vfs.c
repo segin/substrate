@@ -1226,3 +1226,57 @@ int vfs_unmount_legacy_flags(const char *path, int flags) {
 
     return 0;
 }
+
+/* Depth of a mount-point path: the root "/" is 0, anything else is
+ * its count of '/' separators.  Used to order unmounts so a child
+ * filesystem is always torn down before the parent it nests under. */
+static int vfs_mount_depth(const char *p) {
+    if (p[0] == '/' && p[1] == '\0') return 0;
+    int d = 0;
+    for (const char *c = p; *c; c++)
+        if (*c == '/') d++;
+    return d;
+}
+
+/*
+ * vfs_unmount_all — unmount every mounted filesystem, deepest mount
+ * point first.  Called from sys_reboot() on the way down: a nested
+ * mount is always unwound before the parent it sits on, so each
+ * backing store is left clean.  Forced, because by reboot time every
+ * process is already being killed and a lingering reference must not
+ * veto power-off.  The root "/" sorts last; vfs_unmount_legacy_flags
+ * declines to unmount it, which is fine — sync() has already flushed
+ * it and the machine is about to stop.
+ */
+void vfs_unmount_all(void) {
+    static char paths[32][128];
+    int n = 0;
+    struct mount *mp;
+
+    TAILQ_FOREACH(mp, &mountlist, mnt_list) {
+        if (n >= 32) break;
+        strncpy(paths[n], mp->mnt_stat_path, sizeof(paths[n]) - 1);
+        paths[n][sizeof(paths[n]) - 1] = '\0';
+        n++;
+    }
+
+    /* Insertion sort, deepest path first.  n is a handful of mounts. */
+    for (int i = 1; i < n; i++) {
+        char key[128];
+        strncpy(key, paths[i], sizeof(key) - 1);
+        key[sizeof(key) - 1] = '\0';
+        int j = i - 1;
+        while (j >= 0 && vfs_mount_depth(paths[j]) < vfs_mount_depth(key)) {
+            strncpy(paths[j + 1], paths[j], 128);
+            j--;
+        }
+        strncpy(paths[j + 1], key, 128);
+    }
+
+    for (int i = 0; i < n; i++) {
+        kprint("reboot: unmounting ");
+        kprint(paths[i][0] ? paths[i] : "/");
+        kprint("\n");
+        vfs_unmount_legacy_flags(paths[i], MNT_FORCE);
+    }
+}

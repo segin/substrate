@@ -192,6 +192,7 @@ filesystem_t *vfs_get_filesystems(void);
 int vfs_mount_legacy(const char *device, const char *path, const char *type, uint32_t flags, void *data);
 int vfs_unmount_legacy(const char *path);
 int vfs_unmount_legacy_flags(const char *path, int flags);
+void vfs_unmount_all(void);
 fs_node_t *vfs_lookup(fs_node_t *root, const char *path);
 fs_node_t *vfs_lookup_lstat(fs_node_t *root, const char *path);
 

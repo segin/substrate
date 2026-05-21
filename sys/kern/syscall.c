@@ -3580,6 +3580,16 @@ int sys_reboot(int cmd) {
         return -EPERM;
     }
 
+    if (cmd != (int)RB_POWER_OFF && cmd != (int)RB_AUTOBOOT &&
+        cmd != (int)RB_HALT_SYSTEM) {
+        return -EINVAL;
+    }
+
+    /* Unmount every filesystem before the machine goes down — deepest
+     * mount point first, so nested mounts unwind before the parents
+     * they sit on and each backing store is left clean. */
+    vfs_unmount_all();
+
     switch (cmd) {
     case RB_POWER_OFF:
         /*
