@@ -20,6 +20,7 @@
 
 #include "pthread.h"
 #include <unistd.h>
+#include <errno.h>
 #include <sys/syscall.h>
 
 #define FUTEX_WAIT 0
@@ -72,5 +73,51 @@ int pthread_mutex_unlock(pthread_mutex_t *m) {
 
 int pthread_mutex_destroy(pthread_mutex_t *mutex) {
     (void)mutex;
+    return 0;
+}
+
+int pthread_mutex_trylock(pthread_mutex_t *m) {
+    /* Non-blocking acquire: take the uncontended 0 -> 1 transition,
+     * or fail with EBUSY.  Never sets the CONTENDED state, so a
+     * concurrent blocking lock()'s wakeup bookkeeping is unaffected. */
+    if (__sync_val_compare_and_swap(m, M_UNLOCKED, M_LOCKED) == M_UNLOCKED)
+        return 0;
+    return EBUSY;
+}
+
+/*
+ * Mutex attributes.  pthread_mutexattr_t is a bare int holding the
+ * mutex type (PTHREAD_MUTEX_NORMAL / ERRORCHECK / RECURSIVE).
+ *
+ * Note: pthread_mutex_t is itself a single futex word with no room
+ * for an owner id or recursion count, so pthread_mutex_init() always
+ * realises a normal mutex.  The attribute type is stored and reported
+ * faithfully, but RECURSIVE / ERRORCHECK semantics are not honoured;
+ * callers needing recursion must track ownership themselves.
+ */
+int pthread_mutexattr_init(pthread_mutexattr_t *attr) {
+    if (!attr) return EINVAL;
+    *attr = PTHREAD_MUTEX_DEFAULT;
+    return 0;
+}
+
+int pthread_mutexattr_destroy(pthread_mutexattr_t *attr) {
+    (void)attr;
+    return 0;
+}
+
+int pthread_mutexattr_settype(pthread_mutexattr_t *attr, int type) {
+    if (!attr) return EINVAL;
+    if (type != PTHREAD_MUTEX_NORMAL &&
+        type != PTHREAD_MUTEX_ERRORCHECK &&
+        type != PTHREAD_MUTEX_RECURSIVE)
+        return EINVAL;
+    *attr = type;
+    return 0;
+}
+
+int pthread_mutexattr_gettype(const pthread_mutexattr_t *attr, int *type) {
+    if (!attr || !type) return EINVAL;
+    *type = *attr;
     return 0;
 }

@@ -24,6 +24,11 @@ int pthread_detach(pthread_t thread);
 /* Current-thread identity.  Returns the kernel-assigned TID. */
 pthread_t pthread_self(void);
 
+/* Compare two thread IDs for equality (POSIX pthread_equal). */
+static inline int pthread_equal(pthread_t t1, pthread_t t2) {
+    return t1 == t2;
+}
+
 /* Send signal `sig` to thread `thread` — POSIX thread-directed
  * signal delivery via SYS_THR_KILL.  `sig == 0` probes whether the
  * thread exists (returns 0/ESRCH without delivering). */
