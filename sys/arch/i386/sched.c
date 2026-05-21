@@ -113,20 +113,25 @@ int sched_fork_thread(process_t *proc, void *parent_regs) {
     if (!t) return -1;
     
     extern void *pmm_alloc_contiguous(size_t);
-    // Allocate 2 pages = 8KB contiguous kernel stack
-    void *kstack_base = pmm_alloc_contiguous(2);
+    /* Allocate 4 pages = 16 KiB contiguous kernel stack.  8 KiB
+     * overflows: a deep network TX syscall path (sys_write -> tcp_send
+     * -> ... -> rtl_xmit) can take a nested NIC IRQ that runs the whole
+     * RX -> IP -> TCP input path on the same stack; the combined depth
+     * scribbles past an 8 KiB stack into adjacent kernel heap.  Matches
+     * the kthread stack size in kern/kthread.c. */
+    void *kstack_base = pmm_alloc_contiguous(4);
     if (!kstack_base) {
         t->proc = NULL;
         t->tid = -1;
         t->state = THREAD_ZOMBIE;
         return -1;
     }
-    
-    // Stack is at top of these pages (8KB = 0x2000)
-    uint32_t *kstack = (uint32_t *)((uint32_t)kstack_base + 0x2000);
+
+    // Stack is at top of these pages (16KB = 0x4000)
+    uint32_t *kstack = (uint32_t *)((uint32_t)kstack_base + 0x4000);
     t->kstack_base = (uintptr_t)kstack_base;
     t->kstack_top = (uintptr_t)kstack;
-    t->kstack_units = 2;
+    t->kstack_units = 4;
     t->kstack_type = THREAD_KSTACK_PMM_CONTIG;
     t->kstack_owned = 1;
 
@@ -215,19 +220,20 @@ thread_t *sched_create_thread(process_t *proc, void (*entry_point)(void*), void 
         return t;
     }
 
-    /* User thread path. */
+    /* User thread path.  16 KiB kernel stack — see sched_fork_process
+     * for why 8 KiB overflows under the nested TX/RX network path. */
     extern void *pmm_alloc_contiguous(size_t);
-    void *kstack_base = pmm_alloc_contiguous(2);   /* 8 KiB */
+    void *kstack_base = pmm_alloc_contiguous(4);   /* 16 KiB */
     if (!kstack_base) {
         t->proc  = NULL;
         t->tid   = -1;
         t->state = THREAD_ZOMBIE;
         return NULL;
     }
-    uint32_t *kstack = (uint32_t *)((uint32_t)kstack_base + 0x2000);
+    uint32_t *kstack = (uint32_t *)((uint32_t)kstack_base + 0x4000);
     t->kstack_base  = (uintptr_t)kstack_base;
     t->kstack_top   = (uintptr_t)kstack;
-    t->kstack_units = 2;
+    t->kstack_units = 4;
     t->kstack_type  = THREAD_KSTACK_PMM_CONTIG;
     t->kstack_owned = 1;
 
