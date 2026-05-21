@@ -1227,11 +1227,17 @@ int vfs_unmount_legacy_flags(const char *path, int flags) {
     return 0;
 }
 
-/* Depth of a mount-point path: the root "/" is 0, anything else is
- * its count of '/' separators.  Used to order unmounts so a child
- * filesystem is always torn down before the parent it nests under. */
+/* Unmount-ordering key for a mount-point path; larger sorts first:
+ *   /dev      -> -1  : unmounted dead last, after root even, so the
+ *                      device nodes (console, boot disk) stay
+ *                      reachable through the entire teardown
+ *   /         ->  0  : root
+ *   otherwise ->  count of '/' separators (its depth)
+ * so a child filesystem is always torn down before the parent it
+ * nests under, and /dev outlives every other mount. */
 static int vfs_mount_depth(const char *p) {
-    if (p[0] == '/' && p[1] == '\0') return 0;
+    if (strcmp(p, "/dev") == 0) return -1;
+    if (p[0] == '/' && p[1] == '\0') return 0;   /* root */
     int d = 0;
     for (const char *c = p; *c; c++)
         if (*c == '/') d++;
@@ -1244,9 +1250,10 @@ static int vfs_mount_depth(const char *p) {
  * mount is always unwound before the parent it sits on, so each
  * backing store is left clean.  Forced, because by reboot time every
  * process is already being killed and a lingering reference must not
- * veto power-off.  The root "/" sorts last; vfs_unmount_legacy_flags
- * declines to unmount it, which is fine — sync() has already flushed
- * it and the machine is about to stop.
+ * veto power-off.  /dev is unmounted dead last so device nodes stay
+ * usable throughout; the root "/" is declined by
+ * vfs_unmount_legacy_flags, which is fine — sync() already flushed it
+ * and the machine is about to stop.
  */
 void vfs_unmount_all(void) {
     static char paths[32][128];
