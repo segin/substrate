@@ -21,8 +21,18 @@
 action=${1:-start}
 
 if [ -d /etc/rc.d ]; then
+    # Build the run order.  `stop` walks the scripts in reverse start
+    # order, so subsystems come down opposite to how they came up
+    # (e.g. sshd before the network, the network before the hostname).
+    order=
     for f in /etc/rc.d/*; do
         [ -x "$f" ] || continue
+        case "$action" in
+            stop)  order="$f $order" ;;
+            *)     order="$order $f" ;;
+        esac
+    done
+    for f in $order; do
         echo "$f $action"
         "$f" "$action"
     done

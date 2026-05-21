@@ -162,7 +162,30 @@ respawn_dead_lines(time_t now)
 static void
 shutdown_sequence(void)
 {
-    fprintf(stderr, "init: shutdown requested, signalling children\n");
+    fprintf(stderr, "init: shutdown requested\n");
+
+    /* Stop subsystems in reverse start order before tearing processes
+     * down: run `/etc/rc stop`, which walks the /etc/rc.d scripts
+     * backwards handing each an orderly `stop`.  Bounded wait so a
+     * wedged stop script can't stall the power-down — the blanket
+     * kill below mops up whatever the stop scripts left behind. */
+    fprintf(stderr, "init: stopping services (/etc/rc stop)\n");
+    {
+        pid_t rc_pid = fork();
+        if (rc_pid == 0) {
+            execl("/bin/sh", "sh", "/etc/rc", "stop", (char *)NULL);
+            _exit(127);
+        }
+        if (rc_pid > 0) {
+            for (int waited = 0; waited < 15; waited++) {
+                if (waitpid(rc_pid, NULL, WNOHANG) == rc_pid)
+                    break;
+                sleep(1);
+            }
+        }
+    }
+
+    fprintf(stderr, "init: signalling remaining processes\n");
 
     /* kill(-1, SIG) sends to every process the caller can signal —
      * as PID 1 that's effectively everything except init itself.
