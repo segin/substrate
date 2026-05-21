@@ -138,6 +138,11 @@ extern bool test_fuse_read(void);
 
 // Driver Tests
 extern bool test_ansi_parsing(void);
+extern bool test_font_init_builtin(void);
+extern bool test_font_get_glyph(void);
+extern bool test_psf1_parse_basic(void);
+extern bool test_psf2_parse_basic(void);
+extern bool test_psf_parse_dispatch(void);
 
 // Scheduling Properties & Fuzzing
 extern bool prop_time_is_monotonic(int iterations);
@@ -315,6 +320,11 @@ test_case_t tests[] = {
     { "nc_purgevfs", test_namecache_purgevfs },
     {"fuse_read", test_fuse_read},
     {"ansi_parsing", test_ansi_parsing},
+    {"font_init_builtin", test_font_init_builtin},
+    {"font_get_glyph", test_font_get_glyph},
+    {"psf1_parse", test_psf1_parse_basic},
+    {"psf2_parse", test_psf2_parse_basic},
+    {"psf_dispatch", test_psf_parse_dispatch},
     {"sched_prop", test_sched_properties},
     {"sched_fuzz", test_sched_fuzz},
     {"svr3_perso", test_svr3_personality_table},
