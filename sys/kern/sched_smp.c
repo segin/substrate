@@ -16,6 +16,24 @@
 static runqueue_t cpu_runqueues[MAX_CPUS];
 int num_cpus = 1;
 
+/* --- shutdown freeze ------------------------------------------------
+ * Once reboot()/poweroff() is in progress the scheduler must never run
+ * a user thread again — only kernel threads (the unmount + flush path
+ * needs them) and the very thread that invoked the syscall. */
+static volatile int g_reboot_in_progress = 0;
+static thread_t    *g_reboot_thread      = NULL;
+
+void sched_halt_userspace(thread_t *keep) {
+    g_reboot_thread      = keep;
+    g_reboot_in_progress = 1;
+}
+
+/* True if `t` is a user thread that must stay frozen for shutdown. */
+static int sched_reboot_frozen(thread_t *t) {
+    return g_reboot_in_progress && t && t != g_reboot_thread &&
+           t->proc && !t->proc->is_kernel_task;
+}
+
 // Initialize per-CPU runqueues
 void sched_smp_init(int cpu_count) {
     if (cpu_count > MAX_CPUS) cpu_count = MAX_CPUS;
@@ -44,6 +62,7 @@ runqueue_t *sched_get_current_runqueue(void) {
 void sched_enqueue(thread_t *t) {
     if (!t) return;
     if (t->on_runqueue) return;  // Already enqueued
+    if (sched_reboot_frozen(t)) return;  // userspace frozen for shutdown
     
     // Pick CPU based on affinity or load balancing
     int target_cpu = 0;
@@ -120,15 +139,21 @@ thread_t *sched_pick_next(void) {
     
     // Lock
     spinlock_acquire(&rq->lock);
-    
-    thread_t *t = runqueue_pop(rq);
-    if (t) {
+
+    thread_t *t;
+    for (;;) {
+        t = runqueue_pop(rq);
+        if (!t) break;
         t->on_runqueue = 0;
+        /* Shutdown in progress: drop user threads off the runqueue
+         * for good so not one of them is ever dispatched again. */
+        if (sched_reboot_frozen(t)) continue;
+        break;
     }
-    
+
     // Unlock
     spinlock_release(&rq->lock);
-    
+
     return t;
 }
 

@@ -66,6 +66,12 @@ int sched_fork_process(process_t *parent, void *stack);
 int sched_spawn_kernel_process(void (*entry)(void*), void *arg);
 
 void sched_yield(void);
+
+/* Freeze userspace for shutdown: after this the scheduler never
+ * dispatches a user thread again except `keep` (the reboot caller).
+ * Kernel threads keep running — the unmount/flush path needs them. */
+void sched_halt_userspace(thread_t *keep);
+
 void sched_switch(thread_t *next);
 int sched_get_current_tid(void);
 void sched_set_priority(int tid, sched_class_t cls, int prio);

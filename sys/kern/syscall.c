@@ -3585,6 +3585,11 @@ int sys_reboot(int cmd) {
         return -EINVAL;
     }
 
+    /* Freeze userspace: from here the scheduler dispatches only this
+     * thread and kernel threads, so no other process can race the
+     * teardown below or touch a filesystem mid-unmount. */
+    sched_halt_userspace(current_thread);
+
     /* Unmount every filesystem before the machine goes down — deepest
      * mount point first, so nested mounts unwind before the parents
      * they sit on and each backing store is left clean. */
