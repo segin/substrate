@@ -4,6 +4,7 @@
 #include <stddef.h>
 #include <setjmp.h>
 #include <signal.h>
+#include <stdio.h>
 
 #include <exvi.h>
 
@@ -209,5 +210,8 @@ int handle_substitute_command(buffer_t *b, const char *args, int addr1, int addr
 int handle_repeat_substitute_command(buffer_t *b, const char *args, int addr1,
     int addr2);
 int handle_shell_command(char *cmd);
+char **exvi_tokenize_command(const char *cmd);
+FILE *exvi_popen(const char *cmd, const char *mode);
+int exvi_pclose(FILE *f);
 
 #endif

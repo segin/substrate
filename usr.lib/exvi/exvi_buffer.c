@@ -445,20 +445,20 @@ buf_write_range(buffer_t *b, const char *filename, int append, int addr1, int ad
     if (filename[0] == '!') {
         FILE *f;
 
-        if (secure_mode) {
+        if (secure_mode || restricted_mode) {
             exvi_report_shell_forbidden();
             return;
         }
-        f = popen(filename + 1, "w");
+        f = exvi_popen(filename + 1, "w");
         if (!f) {
             return;
         }
         if (write_range_to_stream(b, f, addr1, addr2) != 0) {
-            pclose(f);
+            exvi_pclose(f);
             fprintf(stderr, "Invalid write range\n");
             return;
         }
-        pclose(f);
+        exvi_pclose(f);
         return;
     }
 

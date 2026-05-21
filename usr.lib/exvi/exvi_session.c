@@ -1177,13 +1177,13 @@ handle_read_command(buffer_t *b, const char *args, int addr2)
     }
 
     if (*ptr == '!') {
-        if (secure_mode) {
+        if (secure_mode || restricted_mode) {
             exvi_report_shell_forbidden();
             return 1;
         }
         is_pipe = 1;
         display_name = ptr + 1;
-        f = popen(ptr + 1, "r");
+        f = exvi_popen(ptr + 1, "r");
     } else {
         if (!*ptr) {
             ptr = b->filename;
@@ -1234,7 +1234,7 @@ handle_read_command(buffer_t *b, const char *args, int addr2)
                 if (!text) {
                     free(line);
                     if (is_pipe) {
-                        pclose(f);
+                        exvi_pclose(f);
                     } else {
                         fclose(f);
                     }
@@ -1261,7 +1261,7 @@ handle_read_command(buffer_t *b, const char *args, int addr2)
         free(line);
 
         if (is_pipe) {
-            pclose(f);
+            exvi_pclose(f);
         } else {
             fclose(f);
         }
