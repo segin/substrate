@@ -76,10 +76,27 @@ static ssize_t write_all(int fd, const void *buf, size_t n) {
     return (ssize_t)n;
 }
 
-/* Strip telnet IAC sequences from `in`; copy data bytes to `out`.
- * Returns the number of data bytes written to `out`. */
-static size_t strip_iac(const uint8_t *in, size_t n, uint8_t *out, size_t outcap) {
+/* Strip telnet IAC sequences from `in`; copy data bytes to `out`,
+ * and collapse NVT end-of-line.  A telnet carriage return arrives
+ * on the wire as CR-LF (a newline) or CR-NUL (a bare CR — the NUL
+ * is only a marker).  The trailing LF/NUL must be dropped: left in
+ * place it stays buffered in the PTY line discipline and surfaces
+ * as the first byte of the *next* read() — e.g. the NUL after the
+ * username's CR lands at the head of the password input.
+ *
+ * *cr_pending carries a CR seen at the very end of the previous
+ * chunk, so a CR/NUL pair split across two read()s is still
+ * collapsed.  Returns the number of data bytes written to `out`. */
+static size_t strip_iac(const uint8_t *in, size_t n, uint8_t *out,
+                        size_t outcap, int *cr_pending) {
     size_t i = 0, o = 0;
+
+    /* A CR ended the previous chunk — swallow a leading NUL/LF. */
+    if (*cr_pending) {
+        *cr_pending = 0;
+        if (i < n && (in[i] == '\0' || in[i] == '\n')) i++;
+    }
+
     while (i < n) {
         if (in[i] == IAC && i + 1 < n) {
             uint8_t v = in[i + 1];
@@ -92,6 +109,18 @@ static size_t strip_iac(const uint8_t *in, size_t n, uint8_t *out, size_t outcap
                 continue;
             }
             i += 2;
+            continue;
+        }
+        if (in[i] == '\r') {
+            /* Emit one CR — the PTY's ICRNL maps it to NL — and
+             * discard the paired NUL or LF that follows. */
+            if (o < outcap) out[o++] = '\r';
+            i++;
+            if (i < n) {
+                if (in[i] == '\0' || in[i] == '\n') i++;
+            } else {
+                *cr_pending = 1;   /* CR/NUL pair split across reads */
+            }
             continue;
         }
         if (o < outcap) out[o++] = in[i];
@@ -142,6 +171,7 @@ static int handle_one_connection(int c) {
 
     uint8_t in[1024], out[1024];
     int alive = 1;
+    int cr_pending = 0;   /* NVT CR carried across a read() boundary */
     while (alive) {
         fd_set rfds;
         FD_ZERO(&rfds);
@@ -154,7 +184,7 @@ static int handle_one_connection(int c) {
         if (FD_ISSET(c, &rfds)) {
             ssize_t r = read(c, in, sizeof(in));
             if (r <= 0) break;
-            size_t dn = strip_iac(in, (size_t)r, out, sizeof(out));
+            size_t dn = strip_iac(in, (size_t)r, out, sizeof(out), &cr_pending);
             if (dn > 0 && write_all(master, out, dn) < 0) break;
         }
         if (FD_ISSET(master, &rfds)) {
