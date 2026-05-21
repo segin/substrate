@@ -1,0 +1,29 @@
+--- a/meson.build
++++ b/meson.build
+@@ -701,6 +701,12 @@
+     endif
+     deps += quickjsdeps
+     deps += dep_atomic
++    # substrate keeps libpthread / libm / libdl separate from libc
++    # (unlike modern glibc); the static quickjs and sqlite3 archives
++    # pull in pthread / math / dlopen symbols that must be linked.
++    deps += compiler.find_library('pthread')
++    deps += compiler.find_library('m')
++    deps += compiler.find_library('dl', required: false)
+ endif
+ 
+ if conf_data.get('CONFIG_MUJS')
+--- a/src/osdep/osdep.c
++++ b/src/osdep/osdep.c
+@@ -12,6 +12,11 @@
+ #include <stdio.h>
+ #include <stdlib.h>
+ #include <string.h>
++
++/* substrate's <stdio.h> does not define the XSI P_tmpdir macro. */
++#ifndef P_tmpdir
++#define P_tmpdir "/tmp"
++#endif
+ #ifdef HAVE_SYS_IOCTL_H
+ #include <sys/ioctl.h>
+ #endif
