@@ -47,6 +47,7 @@ typedef struct FILE {
 
 #define BUFSIZ 1024
 #define L_tmpnam 20
+#define P_tmpdir "/tmp"        /* XSI: default directory for temp files */
 #define FILENAME_MAX 256
 #define FOPEN_MAX 16
 #define SEEK_SET 0

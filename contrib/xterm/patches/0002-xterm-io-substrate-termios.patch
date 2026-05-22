@@ -1,0 +1,20 @@
+Subject: xterm_io.h: select POSIX termios on substrate
+
+xterm_io.h's per-OS cascade has no entry for substrate, so none of
+USE_POSIX_TERMIOS / USE_SYSV_TERMIO is set and the build stops at
+"#error Neither termio or termios is enabled".  Substrate provides
+POSIX <termios.h> + tcgetattr/tcsetattr; select USE_POSIX_TERMIOS.
+
+--- a/xterm_io.h
++++ b/xterm_io.h
+@@ -110,6 +110,10 @@
+ #if defined(__osf__)
+ #define USE_POSIX_TERMIOS
+ #undef SYSV
++#endif
++
++#ifdef __substrate__
++#define USE_POSIX_TERMIOS	/* substrate provides POSIX <termios.h> */
+ #endif
+ 
+ /*
