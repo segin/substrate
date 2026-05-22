@@ -1,0 +1,217 @@
+.TH STTY 1
+.SH NAME
+stty \- get and set terminal line settings
+.SH SYNOPSIS
+.B stty
+.RB [ \-a | \-e | \-g ]
+.RB [ \-F
+.IR device " |"
+.B \-f
+.IR device ]
+.br
+.B stty
+.RB [ \-F
+.IR device " |"
+.B \-f
+.IR device ]
+.IR operand ...
+.SH DESCRIPTION
+The
+.B stty
+utility reports or changes the line settings of a terminal device.
+.PP
+With no
+.IR operand s
+and no information option,
+.B stty
+writes to standard output the subset of settings that differ from
+the
+.RB \(lq sane \(rq
+reference state.
+.PP
+With one or more
+.IR operand s,
+.B stty
+parses every operand in order into a single working
+.BR termios (3)
+value and applies that value once with
+.BR tcsetattr (3).
+.PP
+By default
+.B stty
+operates on the terminal open on standard input.
+.SH OPTIONS
+.TP
+.BR \-a ", " \-\-all
+Write all current settings to standard output in human-readable
+grouped form.
+.TP
+.B \-e
+Write all current settings in grouped form; a synonym of
+.BR \-a .
+.TP
+.BR \-g ", " \-\-save
+Write all current settings to standard output as a single
+.B gfmt1:
+token suitable for being passed back to
+.B stty
+as an operand.
+.TP
+.BR \-F " " \fIdevice\fR ", " \-\-file " " \fIdevice\fR
+Operate on
+.I device
+instead of standard input.
+.TP
+.BR \-f " " \fIdevice\fR
+Operate on
+.I device
+instead of standard input (BSD spelling).
+.TP
+.B \-\-help
+Write a usage summary to standard output and exit 0.
+.TP
+.B \-\-
+Treat all following arguments as operands.
+.SH OPERANDS
+An operand naming a boolean mode turns that mode on; the same name
+prefixed with
+.B \-
+turns it off.
+.SS Control modes
+.BR parenb ", " parodd ", " cs5 ", " cs6 ", " cs7 ", " cs8 ", "
+.BR cstopb ", " cread ", " clocal ", " hupcl " (" hup ).
+.SS Input modes
+.BR ignbrk ", " brkint ", " ignpar ", " parmrk ", " inpck ", "
+.BR istrip ", " inlcr ", " igncr ", " icrnl ", " ixon ", " ixany ", "
+.BR ixoff " (" tandem ")," " imaxbel" ", " iuclc ", " iutf8 .
+.SS Output modes
+.BR opost ", " olcuc ", " onlcr ", " ocrnl ", " onocr ", "
+.BR onlret ", " ofill ", " ofdel .
+.SS Local modes
+.BR isig ", " icanon ", " iexten ", " echo ", " echoe " (" crterase ")," " echok ,"
+.BR echonl ", " noflsh ", " tostop ", " echoctl " (" ctlecho ")," " echoprt"
+.RB "(" prterase ")," " echoke" " (" crtkill ")," " flusho" ", " pendin .
+.SS Control characters
+.BR intr ", " quit ", " erase ", " kill ", " eof ", " eol ", " eol2 ", "
+.BR swtch ", " start ", " stop ", " susp ", " reprint " (" rprnt ")," " werase ,"
+.BR lnext ", " discard " (" flush ).
+Each takes a following value:
+.B ^X
+for a control character,
+.B ^?
+for delete,
+.BR undef ", " ^\- ,
+or an empty string to disable, or a numeric value
+.RB ( 0x
+hex,
+.B 0
+octal, otherwise decimal).
+.SS Numeric and special operands
+.TP
+.I number
+Set both input and output line speed to
+.IR number .
+.TP
+.BR ispeed " " \fIn\fR ", " ospeed " " \fIn\fR
+Set the input or output line speed.
+.TP
+.B speed
+As the sole operand, print the output line speed and exit.
+.TP
+.B size
+As the sole operand, print the terminal row and column count.
+.TP
+.BR rows " " \fIn\fR ", " cols " " \fIn\fR ", " columns " " \fIn\fR
+Set the terminal window size.
+.TP
+.BR min " " \fIn\fR ", " time " " \fIn\fR
+Set the non-canonical read parameters.
+.TP
+.BR line " " \fIn\fR
+Set the line discipline number.
+.TP
+.BR drain ", " \-drain
+Apply changes after output drains
+.RB ( TCSADRAIN )
+or immediately
+.RB ( TCSANOW ).
+.SS Combination operands
+.TP
+.B sane
+Reset modes and control characters to the sane reference state.
+.TP
+.BR raw ", " \-raw ", " cooked ", " \-cooked
+Place the terminal in raw or cooked mode.
+.TP
+.BR cbreak ", " \-cbreak
+Disable or enable canonical input.
+.TP
+.BR nl ", " \-nl
+Disable or enable carriage-return / newline translation.
+.TP
+.B ek
+Reset
+.B erase
+and
+.B kill
+to their sane values.
+.TP
+.BR evenp ", " parity ", " oddp ", " \-parity
+Enable even or odd parity, or disable parity.
+.TP
+.BR crt ", " dec
+Enable display-friendly echo modes.
+.TP
+.BR pass8 ", " litout ", " decctlq
+GNU 8-bit and flow-control combination shorthands.
+.SH "EXIT STATUS"
+.TP
+.B 0
+All requested reporting and setting operations succeeded.
+.TP
+.B >0
+An operand was invalid, a device could not be opened, the target
+was not a terminal, or a setting could not be applied.
+.SH DIAGNOSTICS
+All diagnostics are written to standard error prefixed with the
+program name
+.BR stty .
+A malformed
+.B gfmt1:
+save token is rejected without modifying the terminal.
+.SH EXAMPLES
+Disable input echo, then restore it:
+.PP
+.B stty \-echo
+.br
+.B stty echo
+.PP
+Save the terminal state, change it, and restore it exactly:
+.PP
+.B saved=$(stty \-g)
+.br
+.B stty raw \-echo
+.br
+.B stty "$saved"
+.PP
+Print the terminal size:
+.PP
+.B stty size
+.SH CONFORMING TO
+POSIX.1-2024.  GNU coreutils and BSD extensions are also accepted;
+where the two extension sets conflict the BSD behaviour is used.
+Output-delay operands, hardware-flow-control flags, and the
+.BR xcase ,
+.BR extproc ,
+.BR erase2 ,
+.BR dsusp ", and " status
+operands are not supported on Substrate; see
+.B docs/specs/stty.md
+for the full conformance accounting.
+.SH SEE ALSO
+.BR reset (1),
+.BR tty (1),
+.BR tcgetattr (3),
+.BR tcsetattr (3),
+.BR termios (3),
+.BR ioctl (2)

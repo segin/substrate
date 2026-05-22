@@ -62,6 +62,7 @@ SUBDIRS = \
 	sleep \
 	sort \
 	split \
+	stty \
 	su \
 	sum \
 	sync \
