@@ -520,6 +520,19 @@ ld_u32 ld_main(ld_u32 *initial_stack) {
         }
     }
 
+    /* Final pass: R_386_COPY.  A non-PIE executable copies a DSO's
+     * data bytes into its own .bss; the copy must read the source
+     * variable's relocated value, so it has to run after every
+     * object above has been through ld_relocate().  The program is
+     * the list head and gets relocated first, so its COPY relocs
+     * would otherwise capture libraries' pre-relocation (zero)
+     * state — e.g. libXt's `sessionShellWidgetClass`. */
+    for (ld_obj_t *o = ld_obj_list(); o; o = o->next) {
+        if (ld_relocate_copy(o) != 0) {
+            ld_die("R_386_COPY relocation failed");
+        }
+    }
+
     /* Trace mode: dump the loaded-object map and exit without
      * handing control to the program.  Output format mirrors GNU
      * `ldd`: one tab-indented "soname => path (0xbase)" per line.

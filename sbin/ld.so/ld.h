@@ -309,6 +309,7 @@ typedef struct ld_obj {
      * Same concern for init/fini arrays which must fire exactly
      * once. */
     int             relocated;
+    int             copy_relocated; /* R_386_COPY final pass done */
     int             initialized;
     int             finalized;
 
@@ -364,8 +365,14 @@ ld_u32 ld_elf_hash(const char *s);
 ld_u32 ld_resolve_with_size(const char *name, const ld_obj_t *skip,
                             ld_u32 *size_out);
 
-/* Apply DT_REL and DT_JMPREL on `obj`.  Returns 0 on success. */
+/* Apply DT_REL and DT_JMPREL on `obj`, EXCEPT R_386_COPY.  Returns
+ * 0 on success. */
 int ld_relocate(ld_obj_t *obj);
+
+/* Apply the R_386_COPY relocations of `obj` only.  Must run as a
+ * final pass after every object has been through ld_relocate(), so
+ * the copy source already holds its relocated value. */
+int ld_relocate_copy(ld_obj_t *obj);
 
 /* Public head of the loaded-object list. */
 ld_obj_t *ld_obj_list(void);

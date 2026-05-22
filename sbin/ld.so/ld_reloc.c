@@ -14,9 +14,12 @@
  *   R_386_32       — *p  = S + A   (A = current contents of p)
  *   R_386_PC32     — *p  = S + A - P
  *
- * No DT_RELA on i386 by spec.  R_386_COPY is rejected (a Phase-4
- * concern; needed only for executables that copy DSO data, and
- * none of our tests trigger it).
+ * No DT_RELA on i386 by spec.  R_386_COPY copies a DSO's data
+ * bytes into a non-PIE executable's own .bss slot; it is applied
+ * in a dedicated final pass (ld_relocate_copy) AFTER every object
+ * has been through ld_relocate, because the copy reads the source
+ * variable's *relocated* value — running it while the providing
+ * library is still unrelocated copies zero.
  */
 
 #include "ld.h"
@@ -219,6 +222,11 @@ int ld_relocate(ld_obj_t *obj) {
     if (obj->rel) {
         ld_u32 n = obj->relsz / sizeof(Elf32_Rel);
         for (ld_u32 i = 0; i < n; i++) {
+            /* R_386_COPY is deferred to ld_relocate_copy: it reads
+             * the source DSO's *relocated* value, which is not yet
+             * available while libraries later in the list are still
+             * unrelocated. */
+            if (ELF32_R_TYPE(obj->rel[i].r_info) == R_386_COPY) continue;
             if (apply_one(obj, &obj->rel[i]) != 0) return -1;
         }
     }
@@ -229,5 +237,21 @@ int ld_relocate(ld_obj_t *obj) {
         }
     }
     obj->relocated = 1;
+    return 0;
+}
+
+int ld_relocate_copy(ld_obj_t *obj) {
+    /* Final pass: only R_386_COPY, only DT_REL (the PLT never
+     * carries copy relocs).  Runs once per object after every
+     * object has been through ld_relocate(). */
+    if (obj->copy_relocated) return 0;
+    if (obj->rel) {
+        ld_u32 n = obj->relsz / sizeof(Elf32_Rel);
+        for (ld_u32 i = 0; i < n; i++) {
+            if (ELF32_R_TYPE(obj->rel[i].r_info) != R_386_COPY) continue;
+            if (apply_one(obj, &obj->rel[i]) != 0) return -1;
+        }
+    }
+    obj->copy_relocated = 1;
     return 0;
 }
