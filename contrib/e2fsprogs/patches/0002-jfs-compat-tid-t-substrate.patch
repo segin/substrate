@@ -1,0 +1,21 @@
+Subject: jfs_compat.h: don't redefine tid_t on substrate
+
+Substrate's <sys/types.h> unconditionally defines tid_t (int32_t, a
+thread id).  e2fsprogs's journal layer defines its own tid_t
+(unsigned int, a transaction id); on substrate the two collide with a
+conflicting-types error.  Skip e2fsprogs's typedef when __substrate__
+is defined — the journal's tid wrap-around macros cast to int and work
+regardless of the underlying type's signedness.
+
+--- a/lib/ext2fs/jfs_compat.h
++++ b/lib/ext2fs/jfs_compat.h
+@@ -31,7 +31,9 @@
+ #define le64_to_cpu(x)	ext2fs_le64_to_cpu(x)
+ #define be64_to_cpu(x)	ext2fs_be64_to_cpu(x)
+ 
++#ifndef __substrate__	/* substrate <sys/types.h> already provides tid_t */
+ typedef unsigned int tid_t;
++#endif
+ typedef struct journal_s journal_t;
+ typedef struct kdev_s *kdev_t;
+ 

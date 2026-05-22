@@ -1,0 +1,106 @@
+Subject: drop sbrk(2) use — substrate has no sbrk
+
+e2fsprogs's resource-tracking (init/print_resource_track) calls
+sbrk(0) unconditionally to estimate memory use.  Substrate's libc
+provides no sbrk(2).  Replace sbrk(0) with a null pointer; the only
+effect is that the diagnostic "Memory used" figure reads 0.  Check
+and resize functionality is unaffected.
+
+--- a/e2fsck/util.c
++++ b/e2fsck/util.c
+@@ -375,7 +375,7 @@
+ #endif
+ 	io_stats io_start = 0;
+ 
+-	track->brk_start = sbrk(0);
++	track->brk_start = ((void *)0);
+ 	gettimeofday(&track->time_start, 0);
+ #ifdef HAVE_GETRUSAGE
+ #ifdef sun
+@@ -441,7 +441,7 @@
+ 	} else
+ #elif defined HAVE_MALLINFO
+ 	/* don't use mallinfo() if over 2GB used, since it returns "int" */
+-	if ((unsigned long)((char *)sbrk(0) - (char *)track->brk_start) <
++	if ((unsigned long)((char *)((void *)0) - (char *)track->brk_start) <
+ 	    2UL << 30) {
+ 		struct mallinfo	malloc_info = mallinfo();
+ 
+@@ -452,7 +452,7 @@
+ 	} else
+ #endif
+ 	log_out(ctx, _("Memory used: %lluk, "),
+-		kbytes(((char *)sbrk(0)) - ((char *)track->brk_start)));
++		kbytes(((char *)((void *)0)) - ((char *)track->brk_start)));
+ 
+ #ifdef HAVE_GETRUSAGE
+ 	getrusage(RUSAGE_SELF, &r);
+--- a/e2fsck/iscan.c
++++ b/e2fsck/iscan.c
+@@ -65,7 +65,7 @@
+ #endif
+ 	io_stats io_start = 0;
+ 
+-	track->brk_start = sbrk(0);
++	track->brk_start = ((void *)0);
+ 	gettimeofday(&track->time_start, 0);
+ #ifdef HAVE_GETRUSAGE
+ #ifdef sun
+@@ -120,7 +120,7 @@
+ 	} else
+ #elif defined HAVE_MALLINFO
+ 	/* don't use mallinfo() if over 2GB used, since it returns "int" */
+-	if ((unsigned long)((char *)sbrk(0) - (char *)track->brk_start) <
++	if ((unsigned long)((char *)((void *)0) - (char *)track->brk_start) <
+ 	    2UL << 30) {
+ 		struct mallinfo	malloc_info = mallinfo();
+ 
+@@ -131,7 +131,7 @@
+ 	} else
+ #endif
+ 		printf("Memory used: %lluk, ",
+-		       kbytes(((char *)sbrk(0)) - ((char *)track->brk_start)));
++		       kbytes(((char *)((void *)0)) - ((char *)track->brk_start)));
+ 
+ #ifdef HAVE_GETRUSAGE
+ 	getrusage(RUSAGE_SELF, &r);
+--- a/e2fsck/scantest.c
++++ b/e2fsck/scantest.c
+@@ -54,7 +54,7 @@
+ {
+ 	struct rusage r;
+ 
+-	track->brk_start = sbrk(0);
++	track->brk_start = ((void *)0);
+ 	gettimeofday(&track->time_start, 0);
+ 	getrusage(RUSAGE_SELF, &r);
+ 	track->user_start = r.ru_utime;
+@@ -77,7 +77,7 @@
+ 	getrusage(RUSAGE_SELF, &r);
+ 
+ 	printf(_("Memory used: %lu, elapsed time: %6.3f/%6.3f/%6.3f\n"),
+-	       (unsigned long)((char *)sbrk(0) - (char *)track->brk_start),
++	       (unsigned long)((char *)((void *)0) - (char *)track->brk_start),
+ 	       timeval_subtract(&time_end, &track->time_start),
+ 	       timeval_subtract(&r.ru_utime, &track->user_start),
+ 	       timeval_subtract(&r.ru_stime, &track->system_start));
+--- a/resize/resource_track.c
++++ b/resize/resource_track.c
+@@ -27,7 +27,7 @@
+ 	io_stats io_start = 0;
+ 
+ 	track->desc = desc;
+-	track->brk_start = sbrk(0);
++	track->brk_start = ((void *)0);
+ 	gettimeofday(&track->time_start, 0);
+ #ifdef HAVE_GETRUSAGE
+ #ifdef sun
+@@ -92,7 +92,7 @@
+ 		kbytes(malloc_info.uordblks), kbytes(malloc_info.fordblks));
+ #else
+ 	printf("Memory used: %lu, ",
+-		(unsigned long) (((char *) sbrk(0)) -
++		(unsigned long) (((char *) ((void *)0)) -
+ 				 ((char *) track->brk_start)));
+ #endif
+ #ifdef HAVE_GETRUSAGE
