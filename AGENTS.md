@@ -266,10 +266,12 @@ manifest, `README.SUBSTRATE.md`.  Current set:
   `<strings.h>`.
 - **X toolkit + xterm** — `libXext` 1.3.7, `libICE` 1.1.2,
   `libSM` 1.2.6, `libXt` 1.3.1, `libXmu` 1.3.1, `libXpm` 3.5.19,
-  `libXaw` 1.0.16 (Athena widgets) and **`xterm` 410**
-  (`contrib/xterm/`).  xterm uses the core X bitmap fonts + Athena
-  toolbar (Xft/freetype disabled).  No X server is ported — these
-  are client-side; functional use needs an X server over TCP.
+  `libXaw` 1.0.16 (Athena widgets), **`xterm` 410**
+  (`contrib/xterm/`) and **`xauth` 1.1.5** (`contrib/xauth/`, the
+  X authority / `MIT-MAGIC-COOKIE-1` tool).  xterm uses the core X
+  bitmap fonts + Athena toolbar (Xft/freetype disabled).  No X
+  server is ported — these are client-side; functional use needs
+  an X server over TCP.
 - **ext2 toolset** — `e2fsprogs` 1.47.2 (`contrib/e2fsprogs/`):
   mke2fs / e2fsck / tune2fs / debugfs / resize2fs / ... plus the
   static libext2fs / libcom_err / libe2p / libss / libuuid /

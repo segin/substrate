@@ -79,8 +79,10 @@ export STAGE1_PREFIX JOBS SUBSTRATE_TOP="$HERE"
 #   libXaw           libXmu + libXext + libXpm before libXaw.
 #   xterm          → terminal emulator — needs the whole X toolkit
 #                    chain + ncurses (already built above).
+#   xauth          → X authority tool — needs libX11/libXau/libXext/
+#                    libXmu; lets X clients authenticate to a server.
 #
-DEFAULT_CONTRIB="bzip2 libiconv openssl ncurses gzip tzdata make sed expr libarchive mpg123 curl inetutils zsh e2fsprogs e2tools xorgproto xcb-proto libXau xtrans libxcb libX11 libXext libICE libSM libXt libXmu libXpm libXaw xterm"
+DEFAULT_CONTRIB="bzip2 libiconv openssl ncurses gzip tzdata make sed expr libarchive mpg123 curl inetutils zsh e2fsprogs e2tools xorgproto xcb-proto libXau xtrans libxcb libX11 libXext libICE libSM libXt libXmu libXpm libXaw xterm xauth"
 : "${ONLY:=${DEFAULT_CONTRIB}}"
 
 #
