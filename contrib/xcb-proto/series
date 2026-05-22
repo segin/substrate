@@ -1,0 +1,5 @@
+# No substrate-specific patches for xcb-proto.  It ships no
+# config.sub (the configure script never canonicalises the host
+# triple — there is no compiled code, only XML data and the
+# xcbgen Python package), so --host=i386-unknown-substrate is
+# accepted without modification.
