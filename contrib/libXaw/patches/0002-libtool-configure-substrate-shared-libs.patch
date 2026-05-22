@@ -1,0 +1,53 @@
+Subject: configure (libtool host_os): treat substrate* like linux* for shared libs
+
+libtool's generated configure has no host_os case for substrate, so
+even with --enable-shared the build emits only static .a files.
+Add substrate* alongside linux* in every libtool dispatch.
+
+--- a/configure
++++ b/configure
+@@ -6071,7 +6071,7 @@
+   ;;
+ 
+ # This must be glibc/ELF.
+-linux* | k*bsd*-gnu | kopensolaris*-gnu | gnu*)
++linux* | k*bsd*-gnu | kopensolaris*-gnu | gnu* | substrate*)
+   lt_cv_deplibs_check_method=pass_all
+   ;;
+ 
+@@ -9177,7 +9177,7 @@
+       lt_prog_compiler_static='-non_shared'
+       ;;
+ 
+-    linux* | k*bsd*-gnu | kopensolaris*-gnu | gnu*)
++    linux* | k*bsd*-gnu | kopensolaris*-gnu | gnu* | substrate*)
+       case $cc_basename in
+       # old Intel for x86_64, which still supported -KPIC.
+       ecc*)
+@@ -9851,7 +9851,7 @@
+       archive_expsym_cmds='$SED "s|^|_|" $export_symbols >$output_objdir/$soname.expsym~$CC -shared $pic_flag $libobjs $deplibs $compiler_flags $wl-h,$soname $wl--retain-symbols-file,$output_objdir/$soname.expsym $wl--image-base,`expr ${RANDOM-$$} % 4096 / 2 \* 262144 + 1342177280` -o $lib'
+       ;;
+ 
+-    gnu* | linux* | tpf* | k*bsd*-gnu | kopensolaris*-gnu)
++    gnu* | linux* | tpf* | k*bsd*-gnu | kopensolaris*-gnu | substrate*)
+       tmp_diet=no
+       if test linux-dietlibc = "$host_os"; then
+ 	case $cc_basename in
+@@ -10620,7 +10620,7 @@
+       link_all_deplibs=yes
+       ;;
+ 
+-    linux*)
++    linux* | substrate*)
+       case $cc_basename in
+       tcc*)
+ 	# Fabrice Bellard et al's Tiny C Compiler
+@@ -11679,7 +11679,7 @@
+   ;;
+ 
+ # This must be glibc/ELF.
+-linux* | k*bsd*-gnu | kopensolaris*-gnu | gnu*)
++linux* | k*bsd*-gnu | kopensolaris*-gnu | gnu* | substrate*)
+   version_type=linux # correct to gnu/linux during the next big refactor
+   need_lib_prefix=no
+   need_version=no
