@@ -14,7 +14,9 @@ SUBDIRS = \
 	chmod \
 	chown \
 	clear \
+	comm \
 	cp \
+	cut \
 	date \
 	dc \
 	devtree \
@@ -48,6 +50,7 @@ SUBDIRS = \
 	nproc \
 	od \
 	passwd \
+	paste \
 	pgrep \
 	ping \
 	printf \
