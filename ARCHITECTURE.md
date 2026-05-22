@@ -95,8 +95,11 @@ contrib/     third-party components, each as a patch series + fetch.sh
              zsh, gnu make, gnu sed, openbsd expr, openbsd tr,
              bzip2, gzip, libarchive, openssl, curl, inetutils,
              tzdata, mpg123, zlib, mandoc, less, qman (deferred),
-             the X11 client library stack (xorgproto, xcb-proto,
-             libXau, xtrans, libxcb, libX11), ext2-boot.  Each lands at
+             openssh, the X11 client library stack (xorgproto,
+             xcb-proto, libXau, xtrans, libxcb, libX11, libXext,
+             libICE, libSM, libXt, libXmu, libXpm, libXaw) and the
+             xterm terminal emulator, the ext2 toolset (e2fsprogs,
+             e2tools), ext2-boot.  Each lands at
              ${SUBSTRATE_TOP}/dist-<pkg>/ which build-rootfs.sh
              overlays onto the image.
 tools/       build and install helper scripts

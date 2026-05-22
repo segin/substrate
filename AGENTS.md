@@ -263,8 +263,19 @@ manifest, `README.SUBSTRATE.md`.  Current set:
   All build shared + static.  Porting them added the POSIX
   `IN6_IS_ADDR_*` macros to `<netinet/in.h>`, a `pthread_key_t`
   type to `<pthread.h>`, and an `#ifndef bzero` guard in
-  `<strings.h>`.  No X server is ported — these are the client
-  libraries; functional use needs an X server over TCP.
+  `<strings.h>`.
+- **X toolkit + xterm** — `libXext` 1.3.7, `libICE` 1.1.2,
+  `libSM` 1.2.6, `libXt` 1.3.1, `libXmu` 1.3.1, `libXpm` 3.5.19,
+  `libXaw` 1.0.16 (Athena widgets) and **`xterm` 410**
+  (`contrib/xterm/`).  xterm uses the core X bitmap fonts + Athena
+  toolbar (Xft/freetype disabled).  No X server is ported — these
+  are client-side; functional use needs an X server over TCP.
+- **ext2 toolset** — `e2fsprogs` 1.47.2 (`contrib/e2fsprogs/`):
+  mke2fs / e2fsck / tune2fs / debugfs / resize2fs / ... plus the
+  static libext2fs / libcom_err / libe2p / libss / libuuid /
+  libblkid; and `e2tools` 0.1.0 (`contrib/e2tools/`) —
+  e2cp / e2ls / e2mkdir / e2rm / e2ln / e2mv / e2tail for
+  manipulating unmounted ext2/3/4 images.
 
 ### Dynamic Linking
 - `/sbin/ld.so` (Substrate native dynamic linker, `sbin/ld.so/`):
