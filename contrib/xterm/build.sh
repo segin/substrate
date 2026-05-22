@@ -69,7 +69,13 @@ export ac_cv_func_setpgrp_void=yes
 
 export PKG_CONFIG_LIBDIR="${X11ROOT}/usr/lib/pkgconfig:${X11ROOT}/usr/share/pkgconfig:${SUBSTRATE_TOP}/contrib/libxcb/pkgconfig"
 export CPPFLAGS="-I${X11ROOT}/usr/include"
-export LDFLAGS="-L${X11ROOT}/usr/lib -Wl,-rpath-link,${X11ROOT}/usr/lib -Wl,--copy-dt-needed-entries"
+# Build xterm as a PIE.  A non-PIE executable reaches shared-library
+# data (the libXt/libXaw WidgetClass globals) through R_386_COPY
+# relocations; a PIE uses R_386_GLOB_DAT instead — the path every
+# substrate bin/ program already uses.  COPY left xterm's
+# sessionShellWidgetClass NULL ("XtAppCreateShell requires non-NULL
+# widget class").
+export LDFLAGS="-L${X11ROOT}/usr/lib -Wl,-rpath-link,${X11ROOT}/usr/lib -Wl,--copy-dt-needed-entries -pie"
 
 echo "==> configure"
 "${TREE_DIR}/configure" \
@@ -88,7 +94,7 @@ echo "==> configure"
     AR=i386-unknown-substrate-ar \
     RANLIB=i386-unknown-substrate-ranlib \
     CC_FOR_BUILD=gcc \
-    CFLAGS="-march=i486 -mtune=i486 -O2 -g -fno-pie"
+    CFLAGS="-march=i486 -mtune=i486 -O2 -g -fPIE"
 
 echo "==> make -j${JOBS}"
 make -j"${JOBS}"
