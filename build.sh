@@ -71,8 +71,16 @@ export STAGE1_PREFIX JOBS SUBSTRATE_TOP="$HERE"
 #   libxcb         → libX11 (DT_NEEDED libxcb.so.1) — needs
 #                    xorgproto + xcb-proto + libXau first.
 #   libX11         → Xlib — needs xorgproto + xtrans + libxcb first.
+#   e2fsprogs      → e2tools (libext2fs + libcom_err); independent
+#                    of every other contrib port.
+#   libXext/libICE → the X toolkit chain.  Build order is
+#   libSM/libXt/     dependency-forced: libICE before libSM before
+#   libXmu/libXpm/   libXt; libXext before libXmu/libXpm; libXt +
+#   libXaw           libXmu + libXext + libXpm before libXaw.
+#   xterm          → terminal emulator — needs the whole X toolkit
+#                    chain + ncurses (already built above).
 #
-DEFAULT_CONTRIB="bzip2 libiconv openssl ncurses gzip tzdata make sed expr libarchive mpg123 curl inetutils zsh xorgproto xcb-proto libXau xtrans libxcb libX11"
+DEFAULT_CONTRIB="bzip2 libiconv openssl ncurses gzip tzdata make sed expr libarchive mpg123 curl inetutils zsh e2fsprogs e2tools xorgproto xcb-proto libXau xtrans libxcb libX11 libXext libICE libSM libXt libXmu libXpm libXaw xterm"
 : "${ONLY:=${DEFAULT_CONTRIB}}"
 
 #
