@@ -1745,10 +1745,6 @@ int kern_poll(struct pollfd *kfds, unsigned int nfds, int timeout) {
     }
 
     while (1) {
-        void *wait_chan = NULL;
-        void *first_chan = NULL;
-        int   multi_chan = 0;
-
         ready = 0;
         for (unsigned int i = 0; i < nfds; i++) {
             if (kfds[i].fd < 0) {
@@ -1757,21 +1753,16 @@ int kern_poll(struct pollfd *kfds, unsigned int nfds, int timeout) {
             }
 
             file_t *f = (kfds[i].fd < MAX_FD) ? current_process->fds[kfds[i].fd] : NULL;
-            short mask = 0;
             void *this_chan = NULL;
 
             if (f && f->f_data) {
-                mask = poll_fs((fs_node_t*)f->f_data, &this_chan);
-                short ret_mask = mask & (kfds[i].events | POLLERR | POLLHUP | POLLNVAL);
-                kfds[i].revents = ret_mask;
-                if (ret_mask == 0 && this_chan) {
-                    if (first_chan == NULL) first_chan = this_chan;
-                    else if (this_chan != first_chan) multi_chan = 1;
-                    wait_chan = this_chan;
-                }
+                short mask = poll_fs((fs_node_t*)f->f_data, &this_chan);
+                kfds[i].revents =
+                    mask & (kfds[i].events | POLLERR | POLLHUP | POLLNVAL);
             } else {
                 kfds[i].revents = POLLNVAL;
             }
+            (void)this_chan;   /* see sleep comment — wakeups not relied on */
 
             if (kfds[i].revents) ready++;
         }
@@ -1779,60 +1770,40 @@ int kern_poll(struct pollfd *kfds, unsigned int nfds, int timeout) {
         if (ready > 0) break;
         if (timeout == 0) break;
 
-        /* If multiple pollfds returned different wait channels, we
-         * can only sleep on one — and a wake on a DIFFERENT channel
-         * (the bsdtar/gzip pattern: poll {child-stdin write end,
-         * child-stdout read end}, gzip drains stdin first) won't
-         * reach us.  Fall back to short-interval re-polling so
-         * we re-evaluate all channels at most every ~50 ms.  Pure
-         * single-channel polls keep the sleep-until path.  */
-        uint64_t now = get_ticks();
-        uint64_t short_deadline = now + (HZ / 20 ? HZ / 20 : 1);   /* ~50 ms */
-        uint64_t sleep_deadline =
-            (timeout > 0 && deadline < short_deadline) ? deadline
-          : (multi_chan ? short_deadline : deadline);
-        void *sleep_chan;
-        if (multi_chan) {
-            sleep_chan = (void *)current_thread;  /* timeout-only wait */
-        } else {
-            sleep_chan = wait_chan ? wait_chan : (void *)current_thread;
-        }
+        /*
+         * Sleep briefly, then re-poll every fd.  We deliberately do
+         * NOT park on a pollable object's wait channel: objects wake
+         * pollers with sleepq_wake_all(), which does not reach a thread
+         * blocked via sched_sleep() — they are different wait
+         * primitives.  A single-fd poll that trusted that wakeup hung
+         * forever (sshd's privsep monitor stuck in poll() on its
+         * monitor socket — the interactive-login hang).  Capping the
+         * sleep and re-evaluating all fds is race-free by construction,
+         * at the cost of up to one interval of latency.
+         */
+        uint64_t interval = (HZ / 100) ? (uint64_t)(HZ / 100) : 1;  /* ~10 ms */
+        uint64_t sleep_deadline = get_ticks() + interval;
+        if (timeout > 0 && deadline < sleep_deadline)
+            sleep_deadline = deadline;
 
-        /* Mark the sleep interruptible so signal delivery wakes us
-         * via signal_interrupt_thread() — without this the post-sleep
-         * sig_pending check below can never fire because we never
-         * leave the sleep when a signal lands. */
+        /* Interruptible so signal delivery wakes the sleep and the
+         * sig_pending check below can fire. */
         if (current_thread)
             current_thread->flags |= THREAD_F_INTERRUPTIBLE;
+        int sleep_ret = sched_sleep_until((void *)current_thread, sleep_deadline);
+        if (current_thread)
+            current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
 
-        if (timeout > 0 || multi_chan) {
-            int sleep_ret = sched_sleep_until(sleep_chan, sleep_deadline);
-            if (current_thread)
-                current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
-            if (sleep_ret == -EINTR ||
-                (current_thread &&
-                 (current_thread->sig_pending & ~current_thread->sig_mask))) {
-                return -EINTR;
-            }
-            if (sleep_ret == -ETIMEDOUT && timeout > 0 && get_ticks() >= deadline) {
-                return 0;
-            }
-        } else {
-            if (sleep_chan != (void *)current_thread) {
-                sched_sleep(sleep_chan);
-            } else {
-                sched_yield();
-            }
-            if (current_thread)
-                current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
-        }
-
-        if (current_thread &&
-            (current_thread->sig_pending & ~current_thread->sig_mask)) {
+        if (sleep_ret == -EINTR ||
+            (current_thread &&
+             (current_thread->sig_pending & ~current_thread->sig_mask))) {
             return -EINTR;
         }
+        if (timeout > 0 && get_ticks() >= deadline) {
+            return 0;
+        }
     }
- 
+
     return ready;
 }
 
