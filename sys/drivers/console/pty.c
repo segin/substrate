@@ -51,6 +51,7 @@ typedef struct pty_pair {
     int             master_open;     /* fd-count proxy for master */
     int             slave_open;      /* fd-count proxy for slave */
     int             dead;            /* either side hung up */
+    int             master_nonblock; /* O_NONBLOCK on the master fd */
 
     struct tty     *master_tty;
     struct tty     *slave_tty;
@@ -423,10 +424,28 @@ size_t pty_master_node_read(fs_node_t *node, off_t offset, size_t size,
         if (n > 0) break;
         if (p->dead) break;
 
-        /* Block until something arrives (or pty closes). */
+        /* No data: a non-blocking master returns EAGAIN instead of
+         * parking.  Terminal emulators (xterm) run the master fd
+         * non-blocking and poll it through select(). */
+        if (p->master_nonblock) {
+            spinlock_release(&p->lock);
+            return (size_t)-EAGAIN;
+        }
+
+        /* Block interruptibly until data arrives, the pty closes, or
+         * a signal is delivered.  THREAD_F_INTERRUPTIBLE is required:
+         * without it psignal() cannot wake the sleeper, so a process
+         * wedged in read() on the master cannot be killed. */
         spinlock_release(&p->lock);
+        current_thread->flags |= THREAD_F_INTERRUPTIBLE;
         sched_sleep(&p->read_wait);
+        current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
         spinlock_acquire(&p->lock);
+
+        if (current_thread->sig_pending & ~current_thread->sig_mask) {
+            spinlock_release(&p->lock);
+            return (size_t)-EINTR;
+        }
     }
 
     spinlock_release(&p->lock);
@@ -657,6 +676,29 @@ static void ptmx_node_close(fs_node_t *node) {
         pty_master_node_close(master);
     }
     node->impl = 0;
+}
+
+/* Mirror a master fd's O_NONBLOCK flag down to the pair so that
+ * pty_master_node_read() can honour it — the read callback only ever
+ * sees the fs_node, never the file_t.  A posix_openpt() fd is a
+ * per-open clone of `ptmx_node` (->read == ptmx_node_read), whose
+ * ->impl points at the real per-pair master node; a directly opened
+ * master node has ->read == pty_master_node_read.  Returns 1 if
+ * `node` is a pty master, 0 otherwise (called unconditionally from
+ * the F_SETFL / FIONBIO path). */
+int pty_set_nonblock(fs_node_t *node, int on) {
+    if (!node)
+        return 0;
+    fs_node_t *master = (node->read == ptmx_node_read)
+        ? (fs_node_t *)node->impl
+        : node;
+    if (!master || master->read != pty_master_node_read)
+        return 0;
+    pty_pair_t *p = (pty_pair_t *)master->ptr;
+    if (!p || p->magic != PTY_MAGIC)
+        return 0;
+    p->master_nonblock = on ? 1 : 0;
+    return 1;
 }
 
 void pty_init(void) {

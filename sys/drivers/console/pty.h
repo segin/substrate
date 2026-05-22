@@ -47,4 +47,8 @@ size_t pty_master_node_write(struct fs_node *node, off_t off, size_t sz,
 int    pty_master_node_ioctl(struct fs_node *node, uint32_t req, void *arg);
 void   pty_master_node_close(struct fs_node *node);
 
+/* Mirror a master fd's O_NONBLOCK flag onto the pair.  Returns 1 if
+ * `node` is a pty master, 0 otherwise. */
+int    pty_set_nonblock(struct fs_node *node, int on);
+
 #endif /* _DRIVERS_CONSOLE_PTY_H */

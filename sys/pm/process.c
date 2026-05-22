@@ -799,10 +799,16 @@ static void proc_apply_status_flags(file_t *f, int flags) {
      * deadlocks because every read on the pipe still blocks. */
     if (f->f_data) {
         extern int pipe_set_nonblock(fs_node_t *, int);
+        extern int pty_set_nonblock(fs_node_t *, int);
         fs_node_t *node = (fs_node_t *)f->f_data;
+        int nb = (flags & O_NONBLOCK) ? 1 : 0;
         if ((node->flags & 0x7) == FS_PIPE) {
-            (void)pipe_set_nonblock(node, (flags & O_NONBLOCK) ? 1 : 0);
+            (void)pipe_set_nonblock(node, nb);
         }
+        /* A pty master's read callback only sees the fs_node, so the
+         * non-blocking flag must be mirrored down to the pair.  The
+         * call is a no-op for any node that is not a pty master. */
+        (void)pty_set_nonblock(node, nb);
     }
 }
 
