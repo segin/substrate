@@ -146,7 +146,7 @@ int follow_files(struct follow_file *files, int nfiles,
 				any_data = true;
 
 				if(show_headers && nfiles > 1 && fi != *last_active_idx) {
-					if(emit_header(ff->path ? ff->path : "(standard input)",
+					if(emit_header(ff->path ? ff->path : "standard input",
 					    *last_active_idx < 0) < 0)
 						return(-1);
 					*last_active_idx = fi;

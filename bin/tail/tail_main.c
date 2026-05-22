@@ -84,10 +84,10 @@ int main(int argc, char *argv[])
 				is_pipe = S_ISFIFO(st.st_mode) || S_ISSOCK(st.st_mode);
 		}
 		if(show_headers)
-			if(emit_header("(standard input)", true) < 0) return(1);
+			if(emit_header("standard input", true) < 0) return(1);
 
 		if(process_fd(STDIN_FILENO, &o) < 0) {
-			fprintf(stderr, "%s: (standard input): %s\n",
+			fprintf(stderr, "%s: standard input: %s\n",
 			    o.progname, strerror(errno));
 			exit_status = 1;
 		}
@@ -124,7 +124,7 @@ int main(int argc, char *argv[])
 		int   fd;
 
 		if(show_headers) {
-			const char *display = is_stdin ? "(standard input)" : name;
+			const char *display = is_stdin ? "standard input" : name;
 			if(emit_header(display, first) < 0) { exit_status = 1; goto next; }
 		}
 
