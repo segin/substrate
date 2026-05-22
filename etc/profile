@@ -6,5 +6,10 @@ export PATH
 PAGER=less
 export PAGER
 
+# Make every native GNU ./configure source /etc/config.site, which
+# pre-seeds the build tuple so config.guess is never run.
+CONFIG_SITE=/etc/config.site
+export CONFIG_SITE
+
 prompt='%n@%m[%T]:{%~}%% '
 

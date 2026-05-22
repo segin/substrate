@@ -1,0 +1,23 @@
+# /etc/config.site — site defaults sourced by every GNU configure
+# run natively on Substrate.
+#
+# Stock configure scripts run config.guess to determine the build
+# system.  config.guess does not recognise Substrate, so a native
+# ./configure aborts with:
+#
+#     configure: error: cannot guess build type; you must specify one
+#
+# Pre-seeding the ac_cv_build / ac_cv_host / ac_cv_target cache
+# variables makes AC_CANONICAL_BUILD/HOST/TARGET treat the value as
+# already-cached and skip config.guess (and config.sub) entirely.
+#
+# This file is consulted because /etc/profile exports
+# CONFIG_SITE=/etc/config.site; configure honours $CONFIG_SITE.
+#
+# The ': "${var=value}"' form assigns only when the variable is
+# unset, so an explicit --build=/--host= argument, or a caller-set
+# environment value, still takes precedence.
+
+: "${ac_cv_build=i386-unknown-substrate}"
+: "${ac_cv_host=i386-unknown-substrate}"
+: "${ac_cv_target=i386-unknown-substrate}"
