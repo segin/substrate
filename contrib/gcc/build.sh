@@ -16,7 +16,7 @@
 #
 # Env knobs (with defaults):
 #   STAGE1_PREFIX     /opt/substrate-toolchain
-#   STAGE2_DESTDIR    ${SUBSTRATE_TOP}/dist-toolchain
+#   STAGE2_DESTDIR    /tmp/gcc-stage2-staging
 #   PARALLEL          $(nproc)
 #   TARGET_TRIPLE     i386-unknown-substrate
 #   ENABLE_LANGUAGES  c                  (add "c,c++" once libstdc++
@@ -51,7 +51,13 @@ fi
 TARGET_TRIPLE="${TARGET_TRIPLE:-i386-unknown-substrate}"
 PARALLEL="${PARALLEL:-$(nproc 2>/dev/null || echo 4)}"
 STAGE1_PREFIX="${STAGE1_PREFIX:-/opt/substrate}"
-STAGE2_DESTDIR="${STAGE2_DESTDIR:-${SUBSTRATE_TOP}/dist-toolchain}"
+# Stage-2 GCC stages into its OWN DESTDIR, separate from binutils.
+# contrib/binutils/build.sh stages into ${SUBSTRATE_TOP}/dist-toolchain
+# and does `rm -rf` on it; if GCC used the same directory the second
+# build to run would wipe the first (the symptom: `gcc` ends up on the
+# image with no `as`/`ld`).  build-rootfs.sh --toolchain overlays BOTH
+# dist-toolchain (binutils) and /tmp/gcc-stage2-staging (gcc).
+STAGE2_DESTDIR="${STAGE2_DESTDIR:-/tmp/gcc-stage2-staging}"
 ENABLE_LANGUAGES="${ENABLE_LANGUAGES:-c}"
 
 SRC_TREE="$(ls -d "$HERE"/build/gcc-*/ 2>/dev/null | head -1 || true)"
