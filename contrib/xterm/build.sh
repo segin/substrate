@@ -68,7 +68,14 @@ cd "${BUILD_DIR}"
 export ac_cv_func_setpgrp_void=yes
 
 export PKG_CONFIG_LIBDIR="${X11ROOT}/usr/lib/pkgconfig:${X11ROOT}/usr/share/pkgconfig:${SUBSTRATE_TOP}/contrib/libxcb/pkgconfig"
-export CPPFLAGS="-I${X11ROOT}/usr/include"
+# -DHAVE_GRANTPT_PTY_ISATTY: substrate has Unix98 ptys (/dev/ptmx,
+# /dev/pts/N, posix_openpt/grantpt/unlockpt/ptsname in libc).  xterm's
+# get_pty() uses that path only when HAVE_GRANTPT_PTY_ISATTY is set,
+# but configure can only set it by *running* a probe — impossible when
+# cross-compiling, so it falls through to BSD-style pty_search() over
+# /dev/pty?? nodes that don't exist ("get_pty: not enough ptys").
+# Forcing the macro on routes get_pty() through posix_openpt()+ptsname().
+export CPPFLAGS="-I${X11ROOT}/usr/include -DHAVE_GRANTPT_PTY_ISATTY"
 # Build xterm as a PIE.  A non-PIE executable reaches shared-library
 # data (the libXt/libXaw WidgetClass globals) through R_386_COPY
 # relocations; a PIE uses R_386_GLOB_DAT instead — the path every

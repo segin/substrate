@@ -42,6 +42,14 @@ into one mini-sysroot (`build/x11root`) and points xterm's
 
 - `ac_cv_func_setpgrp_void=yes` — substrate's `setpgrp(2)` is the
   POSIX no-argument form; the probe cannot run when cross-compiling.
+- `-DHAVE_GRANTPT_PTY_ISATTY` — substrate has Unix98 ptys
+  (`/dev/ptmx`, `/dev/pts/N`, `posix_openpt`/`grantpt`/`unlockpt`/
+  `ptsname` in libc).  xterm's `get_pty()` only takes that path when
+  this macro is set, but `configure` can set it only by *running* a
+  probe — impossible cross-compiling, so it fell through to BSD-style
+  `pty_search()` over `/dev/pty??` nodes that do not exist
+  (`get_pty: not enough ptys`).  Forcing the macro routes `get_pty()`
+  through `posix_openpt()` + `ptsname()`.
 - Porting xterm completed substrate's `<termios.h>` with the POSIX
   `c_oflag` output-delay constants (`TABDLY`/`TAB0..3`, `CRDLY`,
   `NLDLY`, …) and added the XSI `P_tmpdir` to `<stdio.h>`.
