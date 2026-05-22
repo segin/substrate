@@ -38,7 +38,12 @@ typedef struct vm_object {
     struct vm_object *prev;
 
     uint16_t flags;             // Object flags
+
+    uint32_t magic;             // Use-after-free canary (VM_OBJECT_MAGIC)
 } vm_object_t;
+
+#define VM_OBJECT_MAGIC  0x564D4F42u   /* "VMOB" — live object */
+#define VM_OBJECT_DEAD   0xDEAD0B7Au   /* stamped just before free */
 
 // Object flags
 #define VM_OBJ_INTERNAL     0x01    // Internal (not file-backed)

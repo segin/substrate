@@ -48,6 +48,7 @@ typedef struct vm_page {
     #define PG_PRIVATE  0x0100 // Private mapping (no COW, copy directly)
     #define PG_WRITEBACK 0x0200 // Writeback in progress
     #define PG_NEEDSYNC  0x0400 // Needs writeback to swap/file
+    #define PG_PMM_ALLOC 0x0800 // Buddy allocator: page is handed out
 
     // Reference count (number of mappings)
     uint16_t wire_count;  // Wired down (cannot be paged out)

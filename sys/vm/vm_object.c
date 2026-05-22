@@ -2,7 +2,10 @@
 #include <vm/vm_kmem.h>
 #include <vm/vm_pager.h>
 #include <sys/lock.h>
+#include <kern/panic.h>
 #include <stddef.h>
+
+extern int kprintf(const char *fmt, ...);
 
 // Static pool for bootstrap objects (until kmalloc is ready)
 #define MAX_BOOTSTRAP_OBJECTS 32
@@ -41,6 +44,7 @@ vm_object_t *vm_object_allocate(vm_object_type_t type, size_t size) {
     obj->shadow_offset = 0;
     obj->flags = (type == VM_OBJ_TYPE_DEFAULT) ? VM_OBJ_INTERNAL : 0;
     obj->next = obj->prev = NULL;
+    obj->magic = VM_OBJECT_MAGIC;
 
     return obj;
 }
@@ -54,8 +58,23 @@ void vm_object_reference(vm_object_t *object) {
 void vm_object_deallocate(vm_object_t *object) {
     if (!object) return;
 
+    /* Tripwire: a live vm_object must carry VM_OBJECT_MAGIC.  A bad
+     * value means either a double-free (VM_OBJECT_DEAD) or that the
+     * struct has been scribbled by a stray write. */
+    if (object->magic != VM_OBJECT_MAGIC) {
+        kprintf("VM: vm_object_deallocate on dead/corrupt object %p "
+                "magic=0x%08x\n", (void *)object, object->magic);
+        panic("vm_object use-after-free");
+    }
+
     /* Atomic decrement and check */
-    if (__sync_sub_and_fetch(&object->ref_count, 1) == 0) {
+    int new_ref = __sync_sub_and_fetch(&object->ref_count, 1);
+    if (new_ref < 0) {
+        kprintf("VM: vm_object %p ref_count underflow (%d)\n",
+                (void *)object, new_ref);
+        panic("vm_object ref_count underflow");
+    }
+    if (new_ref == 0) {
         vm_page_t *pages;
 
         spinlock_acquire(&vm_object_teardown_lock);
@@ -97,6 +116,7 @@ void vm_object_deallocate(vm_object_t *object) {
         }
 
         // Free object if dynamic, otherwise mark as dead
+        object->magic = VM_OBJECT_DEAD;
         if (object >= bootstrap_objects &&
             object < bootstrap_objects + MAX_BOOTSTRAP_OBJECTS) {
             object->type = VM_OBJ_TYPE_DEAD;

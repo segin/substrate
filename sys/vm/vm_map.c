@@ -4,6 +4,41 @@
 #include <stddef.h>
 
 #include <vm/vm_kmem.h>
+#include <kern/panic.h>
+
+extern int kprintf(const char *fmt, ...);
+
+/*
+ * Tripwire: every entry->object in a map must point at a live
+ * vm_object.  A bogus pointer or a non-VM_OBJECT_MAGIC value means the
+ * map (or the object) has been corrupted by a stray write.
+ */
+void vm_map_audit(vm_map_t *map, const char *where) {
+    if (!map || !map->header) return;
+    int n = 0;
+    for (vm_map_entry_t *e = map->header->next;
+         e && e != map->header; e = e->next) {
+        if (++n > 100000) {
+            kprintf("vm_map_audit[%s]: runaway entry list\n", where);
+            panic("vm_map_audit: list loop");
+        }
+        vm_object_t *o = e->object;
+        if (!o) continue;
+        if ((uintptr_t)o < 0xC0000000u || ((uintptr_t)o & 3u)) {
+            kprintf("vm_map_audit[%s]: entry %p [%08x-%08x] bogus object %p\n",
+                    where, (void *)e, (unsigned)e->start, (unsigned)e->end,
+                    (void *)o);
+            panic("vm_map_audit: corrupt entry->object");
+        }
+        if (o->magic != VM_OBJECT_MAGIC) {
+            kprintf("vm_map_audit[%s]: entry %p [%08x-%08x] object %p "
+                    "magic=0x%08x\n",
+                    where, (void *)e, (unsigned)e->start, (unsigned)e->end,
+                    (void *)o, o->magic);
+            panic("vm_map_audit: dead/corrupt object");
+        }
+    }
+}
 
 // VM Map Hole (RB-Tree Node)
 typedef struct vm_map_hole {
@@ -812,6 +847,7 @@ int vm_map_insert(vm_map_t *map, struct vm_object *obj, uint64_t offset, uintptr
     map->nentries++;
     map->size += (end - start);
     vm_map_try_merge_entry(map, new_entry);
+    vm_map_audit(map, "vm_map_insert");
     vm_map_unlock(map);
     return 0;
 }
@@ -924,6 +960,7 @@ int vm_map_remove(vm_map_t *map, uintptr_t start, uintptr_t end) {
         
         cur = tmp;
     }
+    vm_map_audit(map, "vm_map_remove");
     vm_map_unlock(map);
     return 0;
 }
@@ -952,6 +989,7 @@ unsigned long vm_map_destroy_entries = 0;
 
 void vm_map_destroy(vm_map_t *map) {
     if (!map) return;
+    vm_map_audit(map, "vm_map_destroy");
     __sync_fetch_and_add(&vm_map_destroy_count, 1);
 
     /*
@@ -1018,6 +1056,7 @@ int vm_map_protect(vm_map_t *map, uintptr_t start, uintptr_t end, uint8_t prot) 
             continue;
         cur = vm_map_try_merge_entry(map, cur);
     }
+    vm_map_audit(map, "vm_map_protect");
     vm_map_unlock(map);
     return 0;
 }
@@ -1051,6 +1090,7 @@ int vm_map_inherit(vm_map_t *map, uintptr_t start, uintptr_t end, uint8_t inheri
         }
         cur = vm_map_try_merge_entry(map, cur);
     }
+    vm_map_audit(map, "vm_map_inherit");
     vm_map_unlock(map);
     return 0;
 }
@@ -1109,7 +1149,8 @@ vm_map_t *vm_map_fork(vm_map_t *src_map, pmap_t dst_pmap) {
     vm_map_entry_t *src_entry;
     vm_map_entry_t *header = src_map->header;
     vm_map_lock(src_map);
-    
+    vm_map_audit(src_map, "vm_map_fork-entry");
+
     for (src_entry = header->next; src_entry != header; src_entry = src_entry->next) {
         vm_object_t *obj = src_entry->object;
         
@@ -1219,7 +1260,9 @@ vm_map_t *vm_map_fork(vm_map_t *src_map, pmap_t dst_pmap) {
         }
     }
 
+    vm_map_audit(src_map, "vm_map_fork-src");
+    vm_map_audit(dst_map, "vm_map_fork-dst");
     vm_map_unlock(src_map);
-    
+
     return dst_map;
 }

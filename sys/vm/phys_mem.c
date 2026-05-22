@@ -5,6 +5,9 @@
 
 #include <intr.h>
 #include <kern/console.h>
+#include <kern/panic.h>
+
+extern int kprintf(const char *fmt, ...);
 
 // Generic PMM Data Structures
 #define PMM_MAX_ORDER 11
@@ -50,10 +53,21 @@ static void vm_phys_prepare_allocated_block(vm_page_t *page, int order) {
     size_t count = (size_t)1U << order;
     for (size_t i = 0; i < count; i++) {
         vm_page_t *p = &page[i];
+        /* Tripwire: a page about to be handed out must not already be
+         * marked allocated.  Catches buddy-allocator accounting bugs
+         * at the moment they would hand the same page out twice. */
+        if (p->flags & PG_PMM_ALLOC) {
+            kprintf("VM: buddy DOUBLE-ALLOC pfn=%u pa=0x%08x order=%d "
+                    "flags=0x%04x\n",
+                    (unsigned)(p - vm_phys_page_array),
+                    (unsigned)p->phys_addr, order, p->flags);
+            panic("vm_phys: double allocation");
+        }
         uintptr_t pa = p->phys_addr;
         vm_phys_reset_page_metadata(p);
         p->phys_addr = pa;
         p->ref_count = 1;
+        p->flags |= PG_PMM_ALLOC;
     }
 }
 
@@ -316,6 +330,14 @@ void vm_phys_free_page(vm_page_t *page) {
     if (page->ref_count > 1) {
         page->ref_count--;
     } else {
+        if (!(page->flags & PG_PMM_ALLOC)) {
+            kprintf("VM: buddy FREE of unallocated pfn=%u pa=0x%08x "
+                    "flags=0x%04x\n",
+                    (unsigned)(page - vm_phys_page_array),
+                    (unsigned)page->phys_addr, page->flags);
+            panic("vm_phys: free of unallocated page");
+        }
+        page->flags &= ~PG_PMM_ALLOC;
         page->ref_count = 0;
         vm_phys_free_locked(page, 0);
     }
@@ -377,6 +399,18 @@ void vm_phys_free_contiguous(vm_page_t *page, size_t count) {
      spinlock_acquire(&vm_phys_lock);
 
      if (!(page->flags & PG_FREE)) {
+         size_t n = (size_t)1U << order;
+         for (size_t i = 0; i < n; i++) {
+             if (!(page[i].flags & PG_PMM_ALLOC)) {
+                 kprintf("VM: buddy FREE-CONTIG unallocated pfn=%u "
+                         "pa=0x%08x (block pa=0x%08x order=%d)\n",
+                         (unsigned)(&page[i] - vm_phys_page_array),
+                         (unsigned)page[i].phys_addr,
+                         (unsigned)page->phys_addr, order);
+                 panic("vm_phys: free of unallocated page");
+             }
+             page[i].flags &= ~PG_PMM_ALLOC;
+         }
          vm_phys_free_locked(page, order);
      }
 

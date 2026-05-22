@@ -3,7 +3,23 @@
 #include <vm/vm_page.h>
 #include <vm/vm_pager.h>
 #include <arch/i386/pmap.h>
+#include <kern/panic.h>
 #include <stddef.h>
+
+extern int kprintf(const char *fmt, ...);
+
+/* Tripwire: a vm_object the fault path is about to walk must be live.
+ * A freed object kfree'd back to its kmem zone reads back as poison;
+ * catch it here with the offending pointer instead of faulting deep in
+ * a page-list walk. */
+static void vm_fault_check_object(vm_object_t *obj, vm_object_t *holder) {
+    if (obj && obj->magic != VM_OBJECT_MAGIC) {
+        kprintf("VM: vm_fault: dead vm_object %p magic=0x%08x "
+                "(referenced by %p)\n",
+                (void *)obj, obj->magic, (void *)holder);
+        panic("vm_object use-after-free");
+    }
+}
 
 typedef struct vm_fault_source {
     vm_object_t *object;
@@ -16,7 +32,9 @@ static vm_fault_source_t vm_fault_resolve_source(vm_object_t *first_obj, uint64_
     vm_object_t *obj = first_obj;
     uint64_t pindex = base_pindex;
 
+    vm_object_t *prev = NULL;
     while (obj) {
+        vm_fault_check_object(obj, prev);
         vm_page_t *page = vm_object_lookup_page(obj, pindex);
         if (page) {
             source.object = obj;
@@ -35,6 +53,7 @@ static vm_fault_source_t vm_fault_resolve_source(vm_object_t *first_obj, uint64_
         }
 
         pindex += obj->shadow_offset / 4096;
+        prev = obj;
         obj = obj->shadow;
     }
 

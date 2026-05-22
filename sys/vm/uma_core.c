@@ -16,10 +16,23 @@
 #include <sys/lock.h>
 #endif
 
+#include <kern/panic.h>
+extern int kprintf(const char *fmt, ...);
+
 static uma_zone_t *uma_zones = NULL;
 
 /* Number of CPUs (detected at runtime) */
 static int uma_ncpu = 1;
+
+/*
+ * Per-item lifecycle marker stored in slab->us_freelist[idx], used for
+ * double-free detection.  An allocated item carries UMA_ITEM_ALLOCED;
+ * an item sitting in a per-CPU / depot bucket carries UMA_ITEM_BUCKETED;
+ * an item on a slab's own free chain carries its next-index (< uz_ipers).
+ * Freeing an item whose marker is not UMA_ITEM_ALLOCED is a double-free.
+ */
+#define UMA_ITEM_ALLOCED  0xFF
+#define UMA_ITEM_BUCKETED 0xFE
 
 #define UMA_MAX_CPUS MAX_CPUS
 #define UMA_ZONE_SIZE_MAX (sizeof(uma_zone_t) + (UMA_MAX_CPUS - 1) * sizeof(uma_cache_t))
@@ -90,6 +103,7 @@ static uma_slab_t *uma_slab_alloc(uma_zone_t *zone);
 static void uma_slab_free(uma_zone_t *zone, uma_slab_t *slab);
 static void *uma_slab_alloc_item(uma_zone_t *zone, uma_slab_t *slab);
 static void uma_slab_free_item(uma_zone_t *zone, uma_slab_t *slab, void *item);
+static uint8_t *uma_item_marker(uma_zone_t *zone, void *item);
 
 /*
  * Initialize UMA subsystem
@@ -807,6 +821,10 @@ void *uma_zalloc(uma_zone_t *zone, int flags) {
 
             if (bucket->ub_cnt > 0) {
                 item = bucket->ub_bucket[--bucket->ub_cnt];
+                /* Item leaves the bucket cache — mark it allocated so a
+                 * subsequent free sees the correct state. */
+                uint8_t *am = uma_item_marker(zone, item);
+                if (am) *am = UMA_ITEM_ALLOCED;
                 cache->uc_allocs++;
                 zone->uz_allocs++;
                 zone->uz_count++;
@@ -866,9 +884,43 @@ out:
 /*
  * Free to zone
  */
+/*
+ * Resolve an item to its slab freelist marker byte (see UMA_ITEM_*).
+ * Returns NULL if the item has no on-page slab (bootstrap allocations
+ * or a stray pointer) — callers then skip the double-free check.
+ */
+static uint8_t *uma_item_marker(uma_zone_t *zone, void *item) {
+    void *base = item;
+    if (zone->uz_flags & UMA_ZONE_REDZONE) {
+        base = (void *)((uintptr_t)base - UMA_REDZONE_SIZE);
+    }
+    uma_slab_t *slab = uma_find_slab(zone, base);
+    if (!slab || !slab->us_freelist) {
+        return NULL;
+    }
+    uint32_t idx = ((uintptr_t)base -
+                    ((uintptr_t)slab->us_data + slab->us_offset)) /
+                   zone->uz_rsize;
+    if (idx >= zone->uz_ipers) {
+        return NULL;
+    }
+    return &slab->us_freelist[idx];
+}
+
 void uma_zfree(uma_zone_t *zone, void *item) {
     if (!zone || !item) return;
-    
+
+    /* Double-free guard: the item must currently be marked allocated. */
+    uint8_t *df_mark = uma_item_marker(zone, item);
+    if (df_mark) {
+        if (*df_mark != UMA_ITEM_ALLOCED) {
+            kprintf("UMA: DOUBLE-FREE in zone '%s' item %p marker=0x%02x\n",
+                    zone->uz_name, item, *df_mark);
+            panic("uma double-free");
+        }
+        *df_mark = UMA_ITEM_BUCKETED;
+    }
+
     /* Call destructor */
     if (zone->uz_dtor) {
         zone->uz_dtor(item, zone->uz_size, zone->uz_arg);

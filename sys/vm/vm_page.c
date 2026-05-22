@@ -538,7 +538,9 @@ void vm_page_free(vm_page_t *m) {
 	m->wire_count = 0;
 	m->access_count = 0;
 	m->age = 0;
-	m->flags = 0;
+	/* Preserve PG_PMM_ALLOC so vm_phys_free_page's free-of-unallocated
+	 * tripwire still sees the buddy-allocator state. */
+	m->flags &= PG_PMM_ALLOC;
 
 	// Return to generic PMM (Buddy Allocator Coalescing)
 	vm_phys_free_page(m);
