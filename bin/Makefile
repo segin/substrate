@@ -14,17 +14,21 @@ SUBDIRS = \
 	chmod \
 	chown \
 	clear \
+	cmp \
 	comm \
 	cp \
 	cut \
 	date \
 	dc \
 	devtree \
+	diff \
 	echo \
 	ed \
 	ex \
 	false \
 	find \
+	fmt \
+	fold \
 	getty \
 	grep \
 	groups \
