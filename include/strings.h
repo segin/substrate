@@ -15,7 +15,9 @@ int ffsll(long long i);
 
 /* BSD legacy: map to string.h equivalents */
 void bcopy(const void *src, void *dst, size_t n);
+#ifndef bzero   /* X11's <X11/Xfuncs.h> redefines bzero as a function-like macro */
 void bzero(void *s, size_t n);
+#endif
 int  bcmp(const void *s1, const void *s2, size_t n);
 char *index(const char *s, int c);
 char *rindex(const char *s, int c);

@@ -90,6 +90,15 @@ typedef int pthread_once_t;
 #define PTHREAD_ONCE_INIT 0
 int pthread_once(pthread_once_t *once_control, void (*init_routine)(void));
 
+/*
+ * pthread_key_t — thread-specific-data key type.  The type is
+ * declared for source compatibility (X11's <X11/Xthreads.h>
+ * typedefs xthread_key_t from it unconditionally); the TLS-key
+ * API itself (pthread_key_create / get/setspecific) is not yet
+ * implemented by libpthread, so no key functions are declared.
+ */
+typedef unsigned int pthread_key_t;
+
 #ifdef __cplusplus
 }
 #endif
