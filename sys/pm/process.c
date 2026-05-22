@@ -1,5 +1,6 @@
 #include <pm/pm.h>
 #include <sys/acct.h>
+#include <sys/copy.h>
 #include <sys/fcntl.h>
 #include <sys/file.h>
 #include <sys/lock.h>
@@ -917,6 +918,29 @@ int proc_fcntl(process_t *p, int fd, int cmd, int arg) {
         return proc_status_flags_from_file(f);
     case F_SETFL:
         proc_apply_status_flags(f, arg);
+        return 0;
+    case F_GETLK:
+        /*
+         * POSIX advisory record locks.  substrate has no
+         * record-locking layer yet; report every region as
+         * unlocked (l_type = F_UNLCK) so callers see no conflict.
+         */
+        {
+            short unlck = F_UNLCK;
+            if (arg && copyout(&unlck, (void *)(uintptr_t)(unsigned)arg,
+                               sizeof(unlck)) != 0) {
+                return -EFAULT;
+            }
+        }
+        return 0;
+    case F_SETLK:
+    case F_SETLKW:
+        /*
+         * Accept advisory locks unconditionally — they are not
+         * enforced.  This lets pwdb (useradd/usermod/...), sqlite
+         * and other fcntl-locking callers run on this single-writer
+         * system instead of failing with EINVAL.
+         */
         return 0;
     default:
         return -EINVAL;
