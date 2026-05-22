@@ -112,7 +112,7 @@ The kernel remains monolithic and is organized into logical layers:
 - `sys/core/`: Early initialization and global startup.
 - `sys/kern/`: Core services (Scheduler, Signals, Time, Sync, memtrack).
 - `sys/pm/`: Process management and lifecycle.
-- `sys/vm/`: Memory management (PMM, PMAP, VM objects, demand-paged user stacks).
+- `sys/vm/`: Memory management (PMM, PMAP, VM objects, demand-paged user stacks). Carries always-on kernel-heap corruption tripwires — a `vm_object` magic canary, a buddy-allocator double-allocation detector, a UMA per-item double-free guard, and a `vm_map` entry/object auditor — that turn silent corruption into an immediate located panic. Per-process kernel stacks are 16 KiB to absorb the deepest nested syscall + IRQ call chains (notably the network TX path interrupted by a NIC RX IRQ).
 - `sys/vfs/` and `sys/fs/`: Virtual Filesystem and concrete implementations.
 - `sys/drivers/`: Device driver framework and hardware drivers.
 - `sys/net/`: Network stack — TCP/IPv4, AF_INET / AF_UNIX sockets, loopback.

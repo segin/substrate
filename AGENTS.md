@@ -42,6 +42,20 @@ For the full detailed changelog, see `docs/CHANGELOG.md`.
 - `psignal()` discards a signal whose effective disposition is
   "ignore" instead of leaving it pending — a pending-but-ignored
   signal otherwise aborts every interruptible sleep.
+- Per-process kernel stacks are 16 KiB (4 PMM pages).  8 KiB
+  overflowed: a deep network TX syscall path (`sys_write` ->
+  `tcp_send` -> ... -> `rtl_xmit`) can take a nested NIC IRQ that
+  runs the whole RX -> IP -> TCP input path on the same stack, and
+  the combined depth scribbled the adjacent `kmem-64` slab
+  (`vm_object` / `vm_map_entry` structs) — surfacing as
+  non-deterministic SIGSEGVs and panics in unrelated processes.
+  `kern/kthread.c` stacks were already 16 KiB; `sched.c` now matches.
+- VM kernel-heap corruption tripwires (`sys/vm/`): a `vm_object`
+  magic canary (use-after-free / scribble / `ref_count` underflow),
+  a buddy-allocator double-allocation detector (`PG_PMM_ALLOC`), a
+  UMA per-item double-free guard, and `vm_map_audit` (validates every
+  `entry->object` after each map mutation).  Each converts silent
+  kernel-heap corruption into an immediate, located `panic()`.
 
 ### Networking
 - TCP/IPv4 (`sys/net/tcp.c`): three-way handshake, the full close

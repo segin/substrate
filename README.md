@@ -34,6 +34,7 @@ That original design intent remains:
 - Monolithic kernel with primary i386 support and active x86_64 work.
 - Core subsystems: VM/PMM/PMAP, scheduler, process manager, signal model, VFS, exec personalities.
 - Driver stack includes storage, input, serial, framebuffer/video, and virtualization-facing devices.
+- The VM subsystem ships always-on kernel-heap corruption tripwires (vm_object, buddy allocator, UMA, and vm_map integrity checks) that fault fast on the first detected corruption.
 
 ### Userland
 - Core Unix programs under `bin/` and `sbin/`.
