@@ -41,6 +41,28 @@ struct sockaddr_in6 {
 #define INADDR_LOOPBACK   ((in_addr_t)0x7f000001)
 #define INADDR_BROADCAST  ((in_addr_t)0xffffffff)
 
+/* IPv6 address tests — POSIX / RFC 3493.  substrate's struct
+ * in6_addr exposes only the s6_addr[16] byte array, so these are
+ * spelled against that rather than the s6_addr32 union glibc uses. */
+static inline int __in6_is_addr_loopback(const struct in6_addr *__a)
+{
+    int __i;
+    for (__i = 0; __i < 15; __i++)
+        if (__a->s6_addr[__i] != 0)
+            return 0;
+    return __a->s6_addr[15] == 1;
+}
+static inline int __in6_is_addr_v4mapped(const struct in6_addr *__a)
+{
+    int __i;
+    for (__i = 0; __i < 10; __i++)
+        if (__a->s6_addr[__i] != 0)
+            return 0;
+    return __a->s6_addr[10] == 0xff && __a->s6_addr[11] == 0xff;
+}
+#define IN6_IS_ADDR_LOOPBACK(a)  __in6_is_addr_loopback((const struct in6_addr *)(a))
+#define IN6_IS_ADDR_V4MAPPED(a)  __in6_is_addr_v4mapped((const struct in6_addr *)(a))
+
 /* Privileged port range (RFC 1340 / historical BSD).  Ports below
  * IPPORT_RESERVED traditionally require root; bind() on substrate
  * doesn't enforce this yet but the constants are part of the ABI. */

@@ -1,0 +1,5 @@
+Name: pthread-stubs
+Description: Pthread stubs not provided by native libc, but by substrate libpthread
+Version: 0.5
+Libs: -lpthread
+Cflags:
