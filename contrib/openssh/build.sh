@@ -2,10 +2,12 @@
 #
 # build.sh — Configure + build + install OpenSSH portable for substrate.
 #
-# Per the user's directive: --without-pam and --without-X.  Builds
-# both ssh client and sshd server.  Uses substrate's OpenSSL 3.x and
-# zlib ports; resolved via PKG_CONFIG_PATH overlay onto the cross
-# toolchain.
+# Builds both ssh client and sshd server.  --without-pam; X11
+# forwarding is enabled (--with-x) with the xauth program located at
+# /usr/bin/xauth on the target — set explicitly because the
+# cross-build's AC_PATH_PROG would otherwise probe the build host.
+# Uses substrate's OpenSSL 3.x and zlib ports; resolved via
+# PKG_CONFIG_PATH overlay onto the cross toolchain.
 #
 # Env overrides:
 #   STAGE1_PREFIX   substrate toolchain prefix (default /opt/substrate)
@@ -83,7 +85,8 @@ echo "==> configure"
     --with-pid-dir=/var/run \
     --with-privsep-path=/var/empty \
     --without-pam \
-    --without-x \
+    --with-x \
+    --with-xauth=/usr/bin/xauth \
     --without-selinux \
     --without-kerberos5 \
     --without-libedit \
