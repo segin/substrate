@@ -40,6 +40,7 @@
 #include <sys/stat.h>
 #include <sys/errno.h>
 #include <sys/fcntl.h>
+#include <sys/ioctl.h>
 #include <sys/random.h>
 #include <sys/reboot.h>
 #include <sys/exec.h>
@@ -1876,6 +1877,16 @@ int kern_ioctl(int fd, uint32_t request, void *arg) {
     if (fd < 0 || fd >= MAX_FD) return -1;
     file_t *f = current_process->fds[fd];
     if (!f || !f->f_data) return -1;
+
+    /* FIONBIO is a generic file-layer ioctl: toggle O_NONBLOCK on the
+     * descriptor without consulting the device driver, matching the
+     * VFS-level handling on Linux/BSD.  Devices never see it — they
+     * have no portable way to interpret it anyway. */
+    if (request == FIONBIO) {
+        int on;
+        if (copyin(arg, &on, sizeof(on)) != 0) return -EFAULT;
+        return proc_fd_set_nonblock(fd, on);
+    }
 
     if ((uintptr_t)f->f_data < KERN_BASE) {
         return -EIO;

@@ -947,6 +947,35 @@ int proc_fcntl(process_t *p, int fd, int cmd, int arg) {
     }
 }
 
+/*
+ * FIONBIO — toggle O_NONBLOCK on an open descriptor.  Defined to be
+ * equivalent to fcntl(fd, F_SETFL) flipping O_NONBLOCK, so it routes
+ * through the same status-flag path (incl. the pipe-endpoint mirror)
+ * for identical behaviour.  Called by the generic ioctl dispatch.
+ */
+int proc_fd_set_nonblock(int fd, int on) {
+    process_t *p = current_process;
+    file_t *f;
+    int flags;
+
+    if (!p || fd < 0 || fd >= MAX_FD) {
+        return -EBADF;
+    }
+    f = p->fds[fd];
+    if (!f) {
+        return -EBADF;
+    }
+
+    flags = proc_status_flags_from_file(f);
+    if (on) {
+        flags |= O_NONBLOCK;
+    } else {
+        flags &= ~O_NONBLOCK;
+    }
+    proc_apply_status_flags(f, flags);
+    return 0;
+}
+
 void proc_close_cloexec(process_t *p) {
     int fd;
 

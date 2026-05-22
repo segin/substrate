@@ -13,6 +13,10 @@ struct winsize {
 };
 #endif
 
+/* Generic file ioctl handled by the VFS ioctl dispatch itself, not
+ * by any specific device driver. */
+#define FIONBIO   0x5421   /* int *: toggle non-blocking I/O on the fd */
+
 /* Common ioctlRequest codes handled by specific subsystems */
 /* TTY */
 #define TIOCGWINSZ 0x5413
