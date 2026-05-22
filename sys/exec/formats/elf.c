@@ -1555,6 +1555,13 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
             current_process->euid = file->uid;
         if (file && (file->mask & S_ISGID))
             current_process->egid = file->gid;
+        // POSIX: on every exec the saved-set-IDs are set to the
+        // (possibly just-changed) effective IDs.  Without this a
+        // setuid program that drops privilege with seteuid() could
+        // never regain it, and setuid() from the new euid would
+        // have no saved-ID to fall back on.
+        current_process->suid = current_process->euid;
+        current_process->sgid = current_process->egid;
 
         // Extract basename
         const char *name = path;

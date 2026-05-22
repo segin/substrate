@@ -517,6 +517,16 @@ create_image() {
     debugfs -w -f "$cmdfile" "$IMAGE" > /dev/null 2>&1
     rm -f "$cmdfile"
 
+    # su(1) must be setuid-root so a non-root user can elevate.
+    # debugfs write copies the host file's mode/owner, so fix it up
+    # here: mode 0104755 = S_IFREG | S_ISUID | rwxr-xr-x, owner root.
+    if debugfs -R 'stat /bin/su' "$IMAGE" > /dev/null 2>&1; then
+        debugfs -w -R 'sif /bin/su mode 0104755' "$IMAGE" > /dev/null 2>&1
+        debugfs -w -R 'sif /bin/su uid 0'        "$IMAGE" > /dev/null 2>&1
+        debugfs -w -R 'sif /bin/su gid 0'        "$IMAGE" > /dev/null 2>&1
+        echo "su(1) marked setuid-root."
+    fi
+
     echo "Image created: $IMAGE"
 }
 
