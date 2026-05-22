@@ -64,8 +64,15 @@ export STAGE1_PREFIX JOBS SUBSTRATE_TOP="$HERE"
 #   zsh            → DT_NEEDED libiconv, libncurses → must come AFTER
 #                    libiconv + ncurses.
 #   inetutils      → uses libncurses for some clients (telnet, etc.)
+#   xorgproto      → libXau, libxcb, libX11 (X protocol headers).
+#   xcb-proto      → libxcb (build-time xcbgen Python generator).
+#   libXau         → libxcb (DT_NEEDED libXau.so.6).
+#   xtrans         → libX11 (transport .c files, header-only).
+#   libxcb         → libX11 (DT_NEEDED libxcb.so.1) — needs
+#                    xorgproto + xcb-proto + libXau first.
+#   libX11         → Xlib — needs xorgproto + xtrans + libxcb first.
 #
-DEFAULT_CONTRIB="bzip2 libiconv openssl ncurses gzip tzdata make sed expr libarchive mpg123 curl inetutils zsh"
+DEFAULT_CONTRIB="bzip2 libiconv openssl ncurses gzip tzdata make sed expr libarchive mpg123 curl inetutils zsh xorgproto xcb-proto libXau xtrans libxcb libX11"
 : "${ONLY:=${DEFAULT_CONTRIB}}"
 
 #

@@ -242,6 +242,29 @@ manifest, `README.SUBSTRATE.md`.  Current set:
 - **qman 1.5.1** (`contrib/qman/`) — fetched but not yet
   buildable on substrate (needs meson, cog, libbsd, ncursesw).
   Tracked under `contrib/qman/README.SUBSTRATE.md`.
+- **X11 client library stack** — the six packages that build
+  Xlib, in dependency order:
+  - **xorgproto 2024.1** (`contrib/xorgproto/`) — X protocol
+    headers (`X.h`, `Xproto.h`, `keysymdef.h`, extensions).
+  - **xcb-proto 1.17.0** (`contrib/xcb-proto/`) — XCB protocol
+    XML + the `xcbgen` Python generator (build-time only).
+  - **libXau 1.0.12** (`contrib/libXau/`) — X authority file
+    (`~/.Xauthority`) library; `libXau.so.6`.
+  - **xtrans 1.6.0** (`contrib/xtrans/`) — X transport-layer
+    `.c`/`.h` files compiled into libX11 (header-only port).
+  - **libxcb 1.17.0** (`contrib/libxcb/`) — X C Binding;
+    `libxcb.so.1` + 24 extension libraries.  A bundled
+    `pkgconfig/pthread-stubs.pc` resolves the pthread-stubs
+    dependency to substrate's real `-lpthread`.
+  - **libX11 1.8.12** (`contrib/libX11/`) — Xlib; `libX11.so.6`
+    + `libX11-xcb.so.1`.  Built `--enable-xthreads` (1.8 nests
+    non-threading code inside `#ifdef XTHREADS`); uses only
+    pthread mutex/cond/self, no TLS keys.
+  All build shared + static.  Porting them added the POSIX
+  `IN6_IS_ADDR_*` macros to `<netinet/in.h>`, a `pthread_key_t`
+  type to `<pthread.h>`, and an `#ifndef bzero` guard in
+  `<strings.h>`.  No X server is ported — these are the client
+  libraries; functional use needs an X server over TCP.
 
 ### Dynamic Linking
 - `/sbin/ld.so` (Substrate native dynamic linker, `sbin/ld.so/`):
