@@ -582,6 +582,13 @@ static void init_core_subsystems(multiboot_info_t *mboot_info) {
     extern void sysctl_init(void);
     sysctl_init();
 
+    /* Bring up the input subsystem before its first driver so the
+     * /dev/input/event0 devfs node exists by the time PS/2 / USB HID
+     * drivers report events into it.  input_init is idempotent
+     * w.r.t. its internal list (initializes to NULL). */
+    extern void input_init(void);
+    input_init();
+
     keyboard_init();
     /*
      * Bisect markers (i486 hang reported between keyboard_init and pci_init).

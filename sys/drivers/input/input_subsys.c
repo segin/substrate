@@ -123,13 +123,27 @@ void input_enqueue(uint16_t type, uint16_t code, int32_t value) {
 static uint32_t input_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
     (void)node;
     if (size < sizeof(input_event_t)) return 0;
-    
+
     uint64_t current_seq = offset / sizeof(input_event_t);
 
     // WaitForData
     for (;;) {
         input_lock_take();
         uint64_t snap = global_seq;
+        /* If the caller's sequence has fallen so far behind that
+         * the events they wanted have already been overwritten in
+         * the ring buffer, snap them forward to the oldest event
+         * we still have.  This is the recovery path for an evdev
+         * reader that opens /dev/input/event0 after the queue has
+         * already wrapped (e.g. a new shell-launched program when
+         * 64+ events from keyboard typing have happened first) —
+         * without this they'd get -EPERM on every read and never
+         * receive any events.  We lose history but stay live. */
+        if (snap > current_seq + INPUT_QUEUE_SIZE) {
+            current_seq = (snap > INPUT_QUEUE_SIZE)
+                              ? (snap - INPUT_QUEUE_SIZE)
+                              : 0;
+        }
         spinlock_release(&input_lock);
         if (current_seq < snap) break;
         extern void sched_sleep(void *chan);
@@ -140,10 +154,12 @@ static uint32_t input_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t
     input_event_t *out = (input_event_t*)buffer;
 
     input_lock_take();
-    /* Check for overrun under the lock so we use a consistent snapshot. */
+    /* Same snap inside the lock — a fast producer could have wrapped
+     * the ring between the wait loop and here. */
     if (global_seq > current_seq + INPUT_QUEUE_SIZE) {
-        spinlock_release(&input_lock);
-        return -1; // EOVERFLOW equivalent
+        current_seq = (global_seq > INPUT_QUEUE_SIZE)
+                          ? (global_seq - INPUT_QUEUE_SIZE)
+                          : 0;
     }
     while (current_seq < global_seq && size >= sizeof(input_event_t)) {
         uint64_t idx = current_seq % INPUT_QUEUE_SIZE;
