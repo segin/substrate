@@ -19,7 +19,18 @@ void bcopy(const void *src, void *dst, size_t n);
 void bzero(void *s, size_t n);
 #endif
 int  bcmp(const void *s1, const void *s2, size_t n);
+/* xorgproto's <X11/Xos.h> defines index / rindex as function-like
+ * macros pointing to strchr / strrchr.  If <X11/Xos.h> was included
+ * before us, declaring `char *index(...)` here parses as garbage
+ * because the macro expands inside the prototype.  Undef first so
+ * either order works. */
+#ifdef index
+#undef index
+#endif
 char *index(const char *s, int c);
+#ifdef rindex
+#undef rindex
+#endif
 char *rindex(const char *s, int c);
 
 #ifdef __cplusplus
