@@ -68,16 +68,20 @@ static void hw_text_write_vga_cell_locked(size_t x, size_t y, uint16_t entry) {
 }
 
 static void hw_text_sync_buffer_row_locked(vt_state_t *vt, int row) {
-    int x;
+    int width;
+    size_t base;
 
     if (!vt || row < 0 || row >= vt_get_height()) {
         return;
     }
 
-    for (x = 0; x < vt_get_width(); x++) {
-        hw_text_write_vga_cell_locked((size_t)x, (size_t)row,
-                                      vt->buffer[hw_text_index((size_t)x, (size_t)row)]);
-    }
+    /* vt->buffer and vga_buffer share the (y * width + x) layout —
+     * memcpy a whole row in one shot rather than 80 individual u16
+     * stores through hw_text_write_vga_cell_locked(). */
+    width = vt_get_width();
+    base = (size_t)row * (size_t)width;
+    memcpy(&vga_buffer[base], &vt->buffer[base],
+           (size_t)width * sizeof(uint16_t));
 }
 
 static void hw_text_reset_tab_stops(vt_state_t *vt,
@@ -671,11 +675,13 @@ static void hw_text_scroll_region_up_locked(vt_state_t *vt, int top, int bottom,
             vt->buffer[y * width + x] = empty;
     }
 
-    /* Sync to VGA if active */
+    /* Sync to VGA if active — single region memcpy instead of a
+     * per-row sync_buffer_row_locked call per line in the region. */
     if (vt->id == vt_get_active() && vt_get_scrollback_view(vt) == 0) {
-        for (y = top; y <= bottom; y++) {
-            hw_text_sync_buffer_row_locked(vt, y);
-        }
+        size_t base = (size_t)top * (size_t)width;
+        size_t rows = (size_t)(bottom - top + 1);
+        memcpy(&vga_buffer[base], &vt->buffer[base],
+               rows * (size_t)width * sizeof(uint16_t));
         hw_text_sync_buffer_row_locked(vt, vt_get_status_row());
     }
 }
@@ -709,9 +715,10 @@ static void hw_text_scroll_region_down_locked(vt_state_t *vt, int top, int botto
     }
 
     if (vt->id == vt_get_active() && vt_get_scrollback_view(vt) == 0) {
-        for (y = top; y <= bottom; y++) {
-            hw_text_sync_buffer_row_locked(vt, y);
-        }
+        size_t base = (size_t)top * (size_t)width;
+        size_t rows = (size_t)(bottom - top + 1);
+        memcpy(&vga_buffer[base], &vt->buffer[base],
+               rows * (size_t)width * sizeof(uint16_t));
     }
 }
 /* Status line implementation moved to vt_render_statusline() */

@@ -362,6 +362,91 @@ static int fb_console_smooth_scroll_fullscreen(uint32_t clear_color) {
     return 0;
 }
 
+/*
+ * Pixel-level scroll of a text-row region — moves pixels with
+ * fb_copyarea() and clears the vacated band with fb_fillrect()
+ * instead of issuing a per-cell glyph redraw for every row in the
+ * region (which is what made scrolling look like each character
+ * was being repainted individually).  Caller has already shifted
+ * the cell state in vt->buffer; we just propagate that move to
+ * the framebuffer in one shot.
+ *
+ * `dir` = -1 for scroll-up (newest at bottom),
+ *         +1 for scroll-down.
+ */
+static void fb_console_pixel_scroll_region_locked(int top, int bottom,
+                                                   int n, int dir,
+                                                   uint32_t clear_color) {
+    int width_px;
+    int rows_in_region;
+    int rows_to_move;
+    int top_px;
+    int bottom_px;
+    int move_h;
+    int clear_h;
+    struct fb_copyarea_info area;
+    struct fb_fillrect_info clear;
+
+    if (n <= 0 || top > bottom) return;
+    rows_in_region = bottom - top + 1;
+    if (n >= rows_in_region) {
+        /* Whole region cleared. */
+        clear.dx = 0;
+        clear.dy = (uint32_t)(top * FB_FONT_HEIGHT);
+        clear.width = (uint32_t)(vt_get_width() * FB_FONT_WIDTH);
+        clear.height = (uint32_t)(rows_in_region * FB_FONT_HEIGHT);
+        clear.color = clear_color;
+        clear.rop = ROP_COPY;
+        fb_fillrect(&clear);
+        fb_console_mark_dirty((int)clear.dx, (int)clear.dy,
+                              (int)clear.width, (int)clear.height);
+        return;
+    }
+    rows_to_move = rows_in_region - n;
+
+    width_px = vt_get_width() * FB_FONT_WIDTH;
+    top_px = top * FB_FONT_HEIGHT;
+    bottom_px = (bottom + 1) * FB_FONT_HEIGHT;
+    move_h = rows_to_move * FB_FONT_HEIGHT;
+    clear_h = n * FB_FONT_HEIGHT;
+
+    fb_console_hide_cursor();
+
+    if (dir < 0) {
+        /* Scroll up: source = (top+n)..bottom, dest = top..(bottom-n). */
+        area.dx = 0;
+        area.dy = (uint32_t)top_px;
+        area.sx = 0;
+        area.sy = (uint32_t)(top_px + clear_h);
+        area.width = (uint32_t)width_px;
+        area.height = (uint32_t)move_h;
+        fb_copyarea(&area);
+        clear.dx = 0;
+        clear.dy = (uint32_t)(bottom_px - clear_h);
+    } else {
+        /* Scroll down: source = top..(bottom-n), dest = (top+n)..bottom. */
+        area.dx = 0;
+        area.dy = (uint32_t)(top_px + clear_h);
+        area.sx = 0;
+        area.sy = (uint32_t)top_px;
+        area.width = (uint32_t)width_px;
+        area.height = (uint32_t)move_h;
+        fb_copyarea(&area);
+        clear.dx = 0;
+        clear.dy = (uint32_t)top_px;
+    }
+
+    clear.width = (uint32_t)width_px;
+    clear.height = (uint32_t)clear_h;
+    clear.color = clear_color;
+    clear.rop = ROP_COPY;
+    fb_fillrect(&clear);
+
+    fb_console_mark_dirty(0, top_px, width_px,
+                          bottom_px - top_px);
+    fb_console_show_cursor();
+}
+
 static void fb_console_erase_line_segment_locked(vt_state_t *vt,
                                                  int row,
                                                  int start_col,
@@ -493,17 +578,20 @@ static void fb_console_scroll_region_up_locked(vt_state_t *vt, int top, int bott
     }
     effective = fb_console_effective_color(vt, vt->color);
     clear_color = fb_console_palette[(effective >> 4) & 0x0FU];
-    if (vt->id == vt_get_active()) {
-        if (top == 0 && bottom == vt_get_visible_height() - 1 && n == 1 &&
-            fb_console_smooth_scroll_fullscreen(clear_color)) {
-            fb_console_sync_row(vt, vt_get_status_row());
-            return;
-        }
-        for (row = top; row <= bottom; row++) {
-            fb_console_sync_row(vt, row);
+    if (vt->id == vt_get_active() && view_y_offset == 0) {
+        /* Pixel-scroll requires a linear FB (any bpp).  fb_copyarea
+         * is a no-op for non-linear drivers (planar VGA / Hercules /
+         * CGA) — fall back to per-cell redraw on those. */
+        if (fb.putpixel == linear_fb_putpixel) {
+            fb_console_pixel_scroll_region_locked(top, bottom, n, -1, clear_color);
+        } else {
+            for (row = top; row <= bottom; row++) {
+                fb_console_sync_row(vt, row);
+            }
         }
         fb_console_sync_row(vt, vt_get_status_row());
     }
+    (void)row;
 }
 
 static void fb_console_scroll_region_down_locked(vt_state_t *vt, int top, int bottom, int n) {
@@ -531,11 +619,18 @@ static void fb_console_scroll_region_down_locked(vt_state_t *vt, int top, int bo
                 (uint16_t)' ' | (uint16_t)fb_console_effective_color(vt, vt->color) << 8;
         }
     }
-    if (vt->id == vt_get_active()) {
-        for (row = top; row <= bottom; row++) {
-            fb_console_sync_row(vt, row);
+    if (vt->id == vt_get_active() && view_y_offset == 0) {
+        uint8_t effective = fb_console_effective_color(vt, vt->color);
+        uint32_t clear_color = fb_console_palette[(effective >> 4) & 0x0FU];
+        if (fb.putpixel == linear_fb_putpixel) {
+            fb_console_pixel_scroll_region_locked(top, bottom, n, +1, clear_color);
+        } else {
+            for (row = top; row <= bottom; row++) {
+                fb_console_sync_row(vt, row);
+            }
         }
     }
+    (void)row;
 }
 
 static int fb_vt_tty_open(struct tty *tty) {
