@@ -2,6 +2,7 @@
 #include <vfs/vfs.h>
 #include <vfs/buf.h>
 #include <kern/console.h>
+#include <kern/cmdline.h>
 #include <kern/time.h>
 #include <string.h>
 #include <vm/vm_kmem.h>
@@ -9,6 +10,30 @@
 #include <sys/errno.h>
 #include <sys/stat.h>
 #include <sys/mount.h>
+
+/*
+ * ext2trace — gated on `debug=ext2trace` on the kernel command line.
+ * Aims to catch the "/bin dirent points at wtmp inode" corruption:
+ * every inode alloc, free, mode-type transition, and dirent
+ * add/remove against an interesting parent (root + immediate
+ * children of root) prints a kprintf line.  Cheap when off (one
+ * cmdline lookup per call), loud when on.
+ */
+#define EXT2_TRACE_PARENT_LIMIT 64u   /* only log dirent ops on inodes <= this — keeps the channel readable */
+static inline int ext2_trace_on(void) { return cmdline_debug_enabled("ext2trace"); }
+static const char *ext2_trace_iftype(uint16_t mode) {
+    switch (mode & S_IFMT) {
+    case S_IFREG: return "REG";
+    case S_IFDIR: return "DIR";
+    case S_IFLNK: return "LNK";
+    case S_IFCHR: return "CHR";
+    case S_IFBLK: return "BLK";
+    case S_IFIFO: return "FIFO";
+    case S_IFSOCK: return "SOCK";
+    case 0: return "ZERO";
+    default: return "???";
+    }
+}
 
 #ifdef HOST_TEST
 /*
@@ -441,6 +466,25 @@ int ext2_write_inode(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_t *inode) {
     if (ext2_read_block(fs, inode_table_block + block_offset, block_buf) != fs->block_size) {
         kfree(block_buf, fs->block_size);
         return -1;
+    }
+
+    /* ext2trace: catch the moment a live inode changes file type.
+     * S_IFREG <-> S_IFDIR (or any S_IFMT delta) on an inode whose
+     * old mode was non-zero MUST be preceded by ext2_free_inode +
+     * ext2_alloc_inode — anything else is corruption.  The first
+     * 16 bits of an ext2_inode on disk are i_mode, little-endian. */
+    if (ext2_trace_on()) {
+        uint16_t old_mode = *(uint16_t *)(block_buf + inode_offset);
+        uint16_t new_mode = inode->i_mode;
+        if (old_mode != 0 &&
+            (old_mode & S_IFMT) != (new_mode & S_IFMT)) {
+            void *caller = __builtin_return_address(0);
+            kprintf("ext2trace: TYPE FLIP inode=%u %s(mode=%#o) -> %s(mode=%#o) caller=%p\n",
+                    inode_num,
+                    ext2_trace_iftype(old_mode), old_mode,
+                    ext2_trace_iftype(new_mode), new_mode,
+                    caller);
+        }
     }
 
     /* Read-modify-write: preserve everything past sizeof(ext2_inode_t)
@@ -2354,17 +2398,25 @@ uint32_t ext2_alloc_inode(ext2_fs_t *fs, int is_dir) {
                 inode.i_atime = now;
                 
                 ext2_write_inode(fs, inode_num, &inode);
-                
+
+                if (ext2_trace_on()) {
+                    kprintf("ext2trace: IALLOC inode=%u is_dir=%d caller=%p\n",
+                            inode_num, is_dir, __builtin_return_address(0));
+                }
                 return inode_num;
             }
         }
     }
-    
+
     return 0; // No free inodes
 }
 
 // Free an inode
 void ext2_free_inode(ext2_fs_t *fs, uint32_t inode_num, int was_dir) {
+    if (ext2_trace_on()) {
+        kprintf("ext2trace: IFREE  inode=%u was_dir=%d caller=%p\n",
+                inode_num, was_dir, __builtin_return_address(0));
+    }
     if (!fs || inode_num == 0) return;
 
     /* Evict any cached fs_node_t / ext2_node_t for this inode.  The
@@ -2633,27 +2685,35 @@ static int ext2_add_entry(fs_node_t *dir, const char *name, uint32_t inode, uint
             if (slack >= required_size && de->inode != 0) {
                 // Split this entry
                 de->rec_len = actual_size;
-                
+
                 ext2_dirent_t *new_de = (ext2_dirent_t *)(block_buf + block_off + actual_size);
                 new_de->inode = inode;
                 new_de->rec_len = slack;
                 new_de->name_len = name_len;
                 new_de->file_type = file_type;
                 memcpy(new_de->name, name, name_len);
-                
+
                 ext2_write_block(fs, block_num, block_buf);
+                if (ext2_trace_on() && ctx->inode_num <= EXT2_TRACE_PARENT_LIMIT) {
+                    kprintf("ext2trace: ADD    parent=%u name='%s' child=%u ft=%u (split)\n",
+                            ctx->inode_num, name, inode, file_type);
+                }
                 result = 0;
                 goto done;
             }
-            
+
             // Can we reuse a deleted entry?
             if (de->inode == 0 && de->rec_len >= required_size) {
                 de->inode = inode;
                 de->name_len = name_len;
                 de->file_type = file_type;
                 memcpy(de->name, name, name_len);
-                
+
                 ext2_write_block(fs, block_num, block_buf);
+                if (ext2_trace_on() && ctx->inode_num <= EXT2_TRACE_PARENT_LIMIT) {
+                    kprintf("ext2trace: ADD    parent=%u name='%s' child=%u ft=%u (reuse)\n",
+                            ctx->inode_num, name, inode, file_type);
+                }
                 result = 0;
                 goto done;
             }
@@ -2681,7 +2741,7 @@ static int ext2_add_entry(fs_node_t *dir, const char *name, uint32_t inode, uint
 
     // Zero the new block
     memset(block_buf, 0, fs->block_size);
-    
+
     // Create the new entry
     ext2_dirent_t *de = (ext2_dirent_t *)block_buf;
     de->inode = inode;
@@ -2689,8 +2749,12 @@ static int ext2_add_entry(fs_node_t *dir, const char *name, uint32_t inode, uint
     de->name_len = name_len;
     de->file_type = file_type;
     memcpy(de->name, name, name_len);
-    
+
     ext2_write_block(fs, new_block, block_buf);
+    if (ext2_trace_on() && ctx->inode_num <= EXT2_TRACE_PARENT_LIMIT) {
+        kprintf("ext2trace: ADD    parent=%u name='%s' child=%u ft=%u (new block)\n",
+                ctx->inode_num, name, inode, file_type);
+    }
     
     // Update directory size and timestamps
     ctx->inode.i_size += fs->block_size;
@@ -2899,7 +2963,9 @@ static int ext2_remove_entry(fs_node_t *dir, const char *name) {
             // Is this the entry to remove?
             if (de->inode != 0 && de->name_len == name_len &&
                 memcmp(de->name, name, de->name_len) == 0) {
-                
+
+                uint32_t removed_inode = de->inode;
+
                 // Merge with previous entry if possible
                 if (prev_de) {
                     prev_de->rec_len += de->rec_len;
@@ -2907,8 +2973,13 @@ static int ext2_remove_entry(fs_node_t *dir, const char *name) {
                     // First entry in block - just mark as deleted
                     de->inode = 0;
                 }
-                
+
                 ext2_write_block(fs, block_num, block_buf);
+
+                if (ext2_trace_on() && ctx->inode_num <= EXT2_TRACE_PARENT_LIMIT) {
+                    kprintf("ext2trace: REMOVE parent=%u name='%s' child=%u\n",
+                            ctx->inode_num, name, removed_inode);
+                }
                 
                 // Update directory mtime and ctime
                 uint32_t now = (uint32_t)get_time();
