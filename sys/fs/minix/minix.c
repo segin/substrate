@@ -3,6 +3,7 @@
 #include <vm/vm_kmem.h>
 #include <vfs/vfs.h>
 #include <sys/errno.h>
+#include <sys/mount.h>
 #include <sys/stat.h>
 #include <kern/time.h>
 #include <string.h>
@@ -190,6 +191,75 @@ static int minix_zero_zone(minix_fs_t *fs, uint32_t zone) {
     if (write_fs(fs->block_device, zone * MINIX_BLOCK_SIZE, MINIX_BLOCK_SIZE, zero_buf) != MINIX_BLOCK_SIZE) {
         return -1;
     }
+    return 0;
+}
+
+/* Total/free space report.  Walks both the zone and the inode
+ * bitmaps once per call; for a typical MINIX volume those bitmaps
+ * are a handful of blocks, so this is cheap. */
+static int minix_statfs(fs_node_t *node, struct statfs *buf) {
+    if (!node || !buf) return -EINVAL;
+    minix_fs_t *fs = (minix_fs_t *)(uintptr_t)node->impl;
+    if (!fs) return -EINVAL;
+
+    uint32_t total_zones  = minix_total_zones(fs);
+    uint32_t first_data   = fs->sb.s_firstdatazone;
+    uint32_t total_inodes = fs->sb.s_ninodes;
+
+    uint8_t  bm[MINIX_BLOCK_SIZE];
+    uint32_t free_zones = 0, free_inodes = 0;
+
+    /* Zone bitmap starts after the 2 boot/super blocks and the inode
+     * bitmap.  Bit N covers zone N; only bits in
+     * [first_data .. total_zones) name real data zones. */
+    uint32_t zmap_start = 2 + fs->sb.s_imap_blocks;
+    for (uint32_t b = 0; b < fs->sb.s_zmap_blocks; b++) {
+        if (read_fs(fs->block_device,
+                    (zmap_start + b) * MINIX_BLOCK_SIZE,
+                    MINIX_BLOCK_SIZE, bm) != MINIX_BLOCK_SIZE)
+            break;
+        for (uint32_t i = 0; i < MINIX_BLOCK_SIZE * 8; i++) {
+            uint32_t zone = b * MINIX_BLOCK_SIZE * 8 + i;
+            if (zone < first_data) continue;
+            if (zone >= total_zones) goto zmap_done;
+            if (!(bm[i / 8] & (1u << (i % 8))))
+                free_zones++;
+        }
+    }
+zmap_done:;
+
+    /* Inode bitmap is right after the two boot/super blocks; bit 0 is
+     * the "no inode" sentinel, bits 1..s_ninodes are real inodes. */
+    uint32_t imap_start = 2;
+    for (uint32_t b = 0; b < fs->sb.s_imap_blocks; b++) {
+        if (read_fs(fs->block_device,
+                    (imap_start + b) * MINIX_BLOCK_SIZE,
+                    MINIX_BLOCK_SIZE, bm) != MINIX_BLOCK_SIZE)
+            break;
+        for (uint32_t i = 0; i < MINIX_BLOCK_SIZE * 8; i++) {
+            uint32_t ino = b * MINIX_BLOCK_SIZE * 8 + i;
+            if (ino < 1) continue;
+            if (ino > total_inodes) goto imap_done;
+            if (!(bm[i / 8] & (1u << (i % 8))))
+                free_inodes++;
+        }
+    }
+imap_done:;
+
+    memset(buf, 0, sizeof(*buf));
+    uint32_t zone_size = MINIX_BLOCK_SIZE << fs->sb.s_log_zone_size;
+    buf->f_bsize  = zone_size;
+    buf->f_iosize = zone_size;
+    buf->f_blocks = total_zones > first_data ? total_zones - first_data : 0;
+    buf->f_bfree  = free_zones;
+    buf->f_bavail = free_zones;
+    buf->f_files  = total_inodes;
+    buf->f_ffree  = free_inodes;
+
+    bool v2 = (fs->sb.s_magic == MINIX_V2_Magic ||
+               fs->sb.s_magic == MINIX_V2_Magic_14);
+    strncpy(buf->f_fstypename, v2 ? "minix2" : "minix",
+            sizeof(buf->f_fstypename));
     return 0;
 }
 
@@ -434,6 +504,7 @@ static int minix_read_inode(minix_fs_t *fs, uint32_t inode_num, fs_node_t *node)
 
     node->inode = inode_num;
     node->impl = (uintptr_t)fs;
+    node->statfs = minix_statfs;
     uint16_t mode;
 
     void *cache = kmalloc(sizeof(struct minix_inode_wrapper));

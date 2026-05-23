@@ -1,6 +1,8 @@
 #include <fs/fat/fat.h>
 #include <kern/console.h>
 #include <string.h>
+#include <sys/errno.h>
+#include <sys/mount.h>
 #include <vm/vm_kmem.h>
 
 // Global filesystem list is handled by VFS
@@ -441,6 +443,43 @@ struct dirent *fat_readdir(fs_node_t *node, uint64_t index) {
 }
 
 // Allocate a new node from cache
+/* Total/free space report for FAT.  Free clusters are counted by
+ * scanning the cached FAT — bounded by total_clusters; on substrate's
+ * typical FAT images this is fast since the FAT table is already
+ * resident in memory. */
+static int fat_statfs(fs_node_t *node, struct statfs *buf) {
+    if (!node || !buf) return -EINVAL;
+    fat_node_t *ctx = (fat_node_t *)(uintptr_t)node->impl;
+    if (!ctx || !ctx->fs) return -EINVAL;
+    fat_fs_t *fs = ctx->fs;
+
+    uint32_t total = fs->total_clusters;
+    uint32_t freec = 0;
+    for (uint32_t c = 2; c < total + 2; c++) {
+        if (fat_get_next_cluster(fs, c) == 0)
+            freec++;
+    }
+
+    memset(buf, 0, sizeof(*buf));
+    uint32_t bsize = fs->cluster_size ? fs->cluster_size :
+                     (fs->bpb.bytes_per_sector ?
+                      (uint32_t)fs->bpb.bytes_per_sector : 512);
+    buf->f_bsize  = bsize;
+    buf->f_iosize = bsize;
+    buf->f_blocks = total;
+    buf->f_bfree  = freec;
+    buf->f_bavail = freec;
+    buf->f_files  = 0;          /* FAT has no fixed inode count */
+    buf->f_ffree  = 0;
+
+    const char *name = "fat";
+    if (fs->fat_type == 12) name = "fat12";
+    else if (fs->fat_type == 16) name = "fat16";
+    else if (fs->fat_type == 32) name = "fat32";
+    strncpy(buf->f_fstypename, name, sizeof(buf->f_fstypename));
+    return 0;
+}
+
 static fs_node_t *fat_alloc_node(fat_fs_t *fs, const char *name, uint64_t inode,
                                  uint32_t first_cluster, uint32_t size, uint8_t attr) {
     int idx = fat_node_cache_idx++ % FAT_NODE_CACHE_SIZE;
@@ -467,7 +506,8 @@ static fs_node_t *fat_alloc_node(fat_fs_t *fs, const char *name, uint64_t inode,
     node->mask = fat_default_mask(attr);
     node->uid = 0;
     node->gid = 0;
-    
+    node->statfs = fat_statfs;
+
     if (attr & FAT_ATTR_DIRECTORY) {
         node->flags = FS_DIRECTORY;
         node->readdir = fat_readdir;
