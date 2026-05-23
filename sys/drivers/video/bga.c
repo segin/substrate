@@ -5,6 +5,7 @@
 #include <string.h>
 #include <drivers/video/fb.h>
 #include <arch/x86-common/io.h>
+#include "../../kern/resource.h"
 
 #define VBE_DISPI_IOPORT_INDEX 0x01CE
 #define VBE_DISPI_IOPORT_DATA  0x01CF
@@ -69,8 +70,27 @@ static int bga_probe_driver(void) {
 // Using PCI is safer.
 
 static uint32_t bga_lfb_addr = 0;
+static void *bga_lfb_virt = NULL;
+static size_t bga_lfb_mapped_size = 0;
 static int bga_use_lfb = 1;
 static uint16_t bga_current_bank = 0xFFFFU;
+
+/* Map the LFB physical region into the kernel address space, sized to
+ * the requested mode.  Re-uses the existing mapping when the new size
+ * fits; remaps when growing.  Returns a virtual address, or NULL on
+ * failure (in which case the caller should fall back to banked mode). */
+static void *bga_map_lfb(uint32_t phys, size_t size) {
+    if (bga_lfb_virt && size <= bga_lfb_mapped_size) {
+        return bga_lfb_virt;
+    }
+    void *va = ioremap_wc((resource_size_t)phys, size);
+    if (!va) {
+        return NULL;
+    }
+    bga_lfb_virt = va;
+    bga_lfb_mapped_size = size;
+    return va;
+}
 
 #ifdef HOST_TEST
 extern volatile uint8_t *bga_test_bank_window;
@@ -180,8 +200,28 @@ int bga_init(fb_info_t *fb_out) {
     bga_write(VBE_DISPI_INDEX_ENABLE, enable_flags);
     bga_current_bank = 0xFFFFU;
 
+    /* If using LFB, ioremap the physical aperture so the kernel can
+     * actually touch it — bga_lfb_addr is the PHYSICAL address (PCI
+     * BAR0 on the Bochs adapter), not a kernel virtual address.  Map
+     * pitch*virt_height bytes so hardware-scroll has its full virtual
+     * canvas.  If the mapping fails, fall back to banked mode. */
+    void *lfb_va = NULL;
+    if (bga_use_lfb) {
+        size_t pitch_bytes = (size_t)width * (size_t)bpp / 8U;
+        size_t lfb_size = pitch_bytes * (size_t)virt_height;
+        lfb_va = bga_map_lfb(bga_lfb_addr, lfb_size);
+        if (!lfb_va) {
+            kprint("BGA: ioremap of LFB failed, falling back to banked mode.\n");
+            bga_use_lfb = 0;
+            /* Reprogram without LFB enable. */
+            bga_write(VBE_DISPI_INDEX_ENABLE, VBE_DISPI_DISABLED);
+            bga_write(VBE_DISPI_INDEX_ENABLE, VBE_DISPI_ENABLED);
+            bga_current_bank = 0xFFFFU;
+        }
+    }
+
     // Update fb info
-    fb_out->addr = bga_use_lfb ? (uint32_t*)bga_lfb_addr
+    fb_out->addr = bga_use_lfb ? (uint32_t *)lfb_va
                                : (uint32_t *)(uintptr_t)BGA_BANK_WINDOW_VIRT;
     fb_out->width = width;
     fb_out->height = height;
@@ -268,8 +308,25 @@ static int bga_set_mode(int mode_id) {
     bga_write(VBE_DISPI_INDEX_ENABLE, enable_flags);
     bga_current_bank = 0xFFFFU;
 
+    /* Map / extend the LFB aperture into the kernel address space.  See
+     * bga_init() for the same logic.  Falls back to banked mode if the
+     * mapping can't be set up. */
+    void *lfb_va = NULL;
+    if (bga_use_lfb) {
+        size_t pitch_bytes = (size_t)width * (size_t)bpp / 8U;
+        size_t lfb_size = pitch_bytes * (size_t)virt_height;
+        lfb_va = bga_map_lfb(bga_lfb_addr, lfb_size);
+        if (!lfb_va) {
+            kprint("BGA: ioremap of LFB failed, banked mode active.\n");
+            bga_use_lfb = 0;
+            bga_write(VBE_DISPI_INDEX_ENABLE, VBE_DISPI_DISABLED);
+            bga_write(VBE_DISPI_INDEX_ENABLE, VBE_DISPI_ENABLED);
+            bga_current_bank = 0xFFFFU;
+        }
+    }
+
     /* Update global fb */
-    fb.addr = bga_use_lfb ? (uint32_t *)bga_lfb_addr
+    fb.addr = bga_use_lfb ? (uint32_t *)lfb_va
                           : (uint32_t *)(uintptr_t)BGA_BANK_WINDOW_VIRT;
     fb.width = width;
     fb.height = height;
