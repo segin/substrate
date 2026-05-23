@@ -1,0 +1,35 @@
+#!/usr/bin/zsh
+# /etc/startx — substrate's tiny X session bring-up.
+#
+# Launches Xfbdev on /dev/tty1 + matwm2 as the WM.  Intended as an
+# init= target for quick X testing:
+#
+#   qemu-system-i386 ... -append "... init=/etc/startx"
+#
+# Both processes run in the background; the script waits on Xfbdev's
+# pid so it stays alive as init.  matwm2 reaches the server via the
+# AF_UNIX path /tmp/.X11-unix/X0 — substrate's in-kernel bound-paths
+# table provides the lookup (there's no filesystem inode for the
+# socket; that's fine, AF_UNIX connect() resolves through the kernel
+# table not the VFS).
+#
+# Adjust the Xfbdev mode via `-screen WxHxBPP` if you want something
+# other than whatever fb resolution the kernel picked.
+/usr/bin/Xfbdev vt1 &
+XPID=$!
+
+# Xfbdev's XKB compilation takes a few seconds on a slow guest.
+# Spin briefly waiting for the X server to be ready; matwm2's
+# Xlib connect would error out otherwise.
+for i in $(seq 1 30); do
+    [ -e /tmp/.X11-unix/X0 ] && break
+    sleep 1
+done
+
+export DISPLAY=:0
+/usr/bin/matwm2 &
+
+# Reap whichever exits first.  When Xfbdev exits (e.g. on Ctrl+Alt+
+# Backspace if -zap was passed), the matwm2 background process gets
+# SIGHUP from the session leader exiting.
+wait $XPID
