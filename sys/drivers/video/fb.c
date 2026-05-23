@@ -638,6 +638,15 @@ static void *fb_fs_mmap(fs_node_t *node, void *addr, size_t length, int prot, in
     map = current_process->vm_map;
     if (!map) return (void *)-1;
 
+    /* The device pager treats its handle as the physical base — its
+     * vm_pager_device_phys returns handle+offset to the page-fault
+     * PTE installer.  We MUST pass fb.phys here, not fb.addr.  Older
+     * builds passed the ioremap'd kernel virtual address: the PTE
+     * then pointed at random RAM and userspace draws were invisible
+     * (page-table install of an ioremap VA as if it were a physical
+     * frame). */
+    if (fb.phys == 0) return (void *)-1;
+
     if (virt == 0 || !(flags & MAP_FIXED)) {
         if (vm_map_find_space(map, &virt, aligned_length) != 0) return (void *)-1;
     } else {
@@ -653,7 +662,7 @@ static void *fb_fs_mmap(fs_node_t *node, void *addr, size_t length, int prot, in
     obj = vm_object_allocate(VM_OBJ_TYPE_DEVICE, aligned_length);
     if (!obj) return (void *)-1;
     obj->pager = vm_pager_allocate(VM_OBJ_TYPE_DEVICE,
-                                   (void *)((uintptr_t)fb.addr + (uintptr_t)offset),
+                                   (void *)(fb.phys + (uintptr_t)offset),
                                    aligned_length,
                                    vm_prot,
                                    0);
@@ -719,6 +728,7 @@ static int mb_init(fb_info_t *info) {
     }
 
     info->addr = (uint32_t *)saved_mbi_fb_addr;
+    info->phys = (uintptr_t)fb_phys;   /* multiboot reports physical base */
     info->width = saved_mbi->framebuffer_width;
     info->height = saved_mbi->framebuffer_height;
     info->pitch = saved_mbi->framebuffer_pitch;

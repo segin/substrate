@@ -252,6 +252,10 @@ int bga_init(fb_info_t *fb_out) {
     // Update fb info
     fb_out->addr = bga_use_lfb ? (uint32_t *)lfb_va
                                : (uint32_t *)(uintptr_t)BGA_BANK_WINDOW_VIRT;
+    /* phys: what userspace mmap(/dev/fb0) PTEs must point at.  LFB
+     * mode uses the PCI BAR physical address; banked mode has no
+     * direct user-mmap path so leave phys=0 (mmap will refuse). */
+    fb_out->phys = bga_use_lfb ? (uintptr_t)bga_lfb_addr : 0;
     fb_out->width = width;
     fb_out->height = height;
     fb_out->virt_height = virt_height;

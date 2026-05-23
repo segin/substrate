@@ -6,7 +6,8 @@
 #include <arch/x86-common/multiboot.h>
 
 typedef struct {
-    uint32_t *addr;
+    uint32_t *addr;           /* kernel virtual mapping (from ioremap_wc) */
+    uintptr_t phys;           /* physical base — what userspace mmap PTEs point at */
     uint32_t width;
     uint32_t height;
     uint32_t virt_height; /* Virtual height for hardware scrolling */
