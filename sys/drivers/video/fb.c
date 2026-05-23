@@ -589,16 +589,19 @@ static int fb_fs_ioctl(fs_node_t *node, uint32_t request, void *arg) {
 
 /* Byte-stream read/write — lets `cat /dev/fb0 > snap` and
  * `cat file.raw > /dev/fb0` work for pixel scribbling.  Most consumers
- * will use mmap(), but the file-IO path is what shells expect.  No
- * special handling beyond a memcpy into fb.addr; bounds-clipped to
- * the framebuffer size so we can't run off the end. */
+ * will use mmap(), but the file-IO path is what shells expect.  The
+ * `buf` parameter is a kernel pointer (sys_read/sys_write double-buffer
+ * via kbuf before reaching the node callback) so a plain memcpy is
+ * correct — copyin/copyout would reject it as "not a user address".
+ * Bounds-clipped to the framebuffer size; returning 0 at EOF lets the
+ * caller see end-of-buffer instead of EIO. */
 static size_t fb_fs_read(fs_node_t *node, off_t off, size_t len, uint8_t *buf) {
     (void)node;
     if (!fb_active || !fb.addr) return 0;
     uint64_t fb_size = (uint64_t)fb.pitch * (uint64_t)fb.height;
     if (off < 0 || (uint64_t)off >= fb_size) return 0;
     if ((uint64_t)off + len > fb_size) len = (size_t)(fb_size - off);
-    if (copyout((uint8_t *)fb.addr + off, buf, len) != 0) return 0;
+    memcpy(buf, (uint8_t *)fb.addr + off, len);
     return len;
 }
 
@@ -608,7 +611,7 @@ static size_t fb_fs_write(fs_node_t *node, off_t off, size_t len, const uint8_t 
     uint64_t fb_size = (uint64_t)fb.pitch * (uint64_t)fb.height;
     if (off < 0 || (uint64_t)off >= fb_size) return 0;
     if ((uint64_t)off + len > fb_size) len = (size_t)(fb_size - off);
-    if (copyin(buf, (uint8_t *)fb.addr + off, len) != 0) return 0;
+    memcpy((uint8_t *)fb.addr + off, buf, len);
     return len;
 }
 
