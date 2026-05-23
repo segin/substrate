@@ -21,6 +21,7 @@
 #include "fb.h"
 #include "fb_console.h"
 #include "fb_ops.h"
+#include "fb_ops.h"
 #include "font.h"
 
 /* ==================== Constants ==================== */
@@ -199,15 +200,22 @@ static void fb_console_draw_cell_at(int cell_x,
 
     px = cell_x * FB_FONT_WIDTH;
     py = cell_y * FB_FONT_HEIGHT + view_y_offset;
-    for (y = 0; y < FB_FONT_HEIGHT; y++) {
-        for (x = 0; x < FB_FONT_WIDTH; x++) {
-            if (modified[y] & (0x80 >> x)) {
-                fb_putpixel(px + x, py + y, fg);
-            } else {
-                fb_putpixel(px + x, py + y, bg);
-            }
-        }
-    }
+
+    /* Hand the glyph to fb_imageblit — its mono-32bpp fast path
+     * detects all-fg / all-bg byte rows and writes 8 dwords at a
+     * time instead of 128 putpixel calls per cell. */
+    struct fb_image_info glyph_img = {
+        .dx = (uint32_t)px,
+        .dy = (uint32_t)py,
+        .width = FB_FONT_WIDTH,
+        .height = FB_FONT_HEIGHT,
+        .fg_color = fg,
+        .bg_color = bg,
+        .type = FB_IMAGE_MONO,
+        .data = modified,
+    };
+    fb_imageblit(&glyph_img);
+    (void)x; (void)y;
     fb_console_mark_dirty(px, py, FB_FONT_WIDTH, FB_FONT_HEIGHT);
 }
 

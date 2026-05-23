@@ -224,9 +224,64 @@ static void imageblit_mono_32bpp(uint32_t dx, uint32_t dy, uint32_t w,
     for (uint32_t y = 0; y < h; y++) {
         uint32_t *row = fb_pixel32(dx, dy + y);
         const uint8_t *src_row = data + y * row_stride;
+        uint32_t x = 0;
 
-        for (uint32_t x = 0; x < w; x++) {
-            if (src_row[x / 8] & (0x80 >> (x & 7))) {
+        /* Byte-at-a-time fast path.  Console text rendering hits this
+         * loop once per glyph row; the common cases for 8-pixel font
+         * cells are 0x00 (blank row, e.g. between characters) and
+         * 0xFF (filled row, e.g. underline / solid block).  Detecting
+         * those collapses 8 conditional dword stores into one tight
+         * unrolled fill. */
+        while (x + 8 <= w) {
+            uint8_t bits = src_row[x >> 3];
+            if (bits == 0xFF) {
+                row[x]     = fg_raw;
+                row[x + 1] = fg_raw;
+                row[x + 2] = fg_raw;
+                row[x + 3] = fg_raw;
+                row[x + 4] = fg_raw;
+                row[x + 5] = fg_raw;
+                row[x + 6] = fg_raw;
+                row[x + 7] = fg_raw;
+            } else if (bits == 0x00) {
+                if (!bg_transparent) {
+                    row[x]     = bg_raw;
+                    row[x + 1] = bg_raw;
+                    row[x + 2] = bg_raw;
+                    row[x + 3] = bg_raw;
+                    row[x + 4] = bg_raw;
+                    row[x + 5] = bg_raw;
+                    row[x + 6] = bg_raw;
+                    row[x + 7] = bg_raw;
+                }
+            } else if (bg_transparent) {
+                /* Mixed byte, transparent bg: write only set bits. */
+                if (bits & 0x80) row[x]     = fg_raw;
+                if (bits & 0x40) row[x + 1] = fg_raw;
+                if (bits & 0x20) row[x + 2] = fg_raw;
+                if (bits & 0x10) row[x + 3] = fg_raw;
+                if (bits & 0x08) row[x + 4] = fg_raw;
+                if (bits & 0x04) row[x + 5] = fg_raw;
+                if (bits & 0x02) row[x + 6] = fg_raw;
+                if (bits & 0x01) row[x + 7] = fg_raw;
+            } else {
+                /* Mixed byte, opaque bg: unconditional dword writes —
+                 * compiler turns these into cmovs, no branch penalty. */
+                row[x]     = (bits & 0x80) ? fg_raw : bg_raw;
+                row[x + 1] = (bits & 0x40) ? fg_raw : bg_raw;
+                row[x + 2] = (bits & 0x20) ? fg_raw : bg_raw;
+                row[x + 3] = (bits & 0x10) ? fg_raw : bg_raw;
+                row[x + 4] = (bits & 0x08) ? fg_raw : bg_raw;
+                row[x + 5] = (bits & 0x04) ? fg_raw : bg_raw;
+                row[x + 6] = (bits & 0x02) ? fg_raw : bg_raw;
+                row[x + 7] = (bits & 0x01) ? fg_raw : bg_raw;
+            }
+            x += 8;
+        }
+
+        /* Tail: fewer than 8 pixels remaining. */
+        for (; x < w; x++) {
+            if (src_row[x >> 3] & (0x80 >> (x & 7))) {
                 row[x] = fg_raw;
             } else if (!bg_transparent) {
                 row[x] = bg_raw;
