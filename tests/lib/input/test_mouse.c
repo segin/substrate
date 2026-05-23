@@ -48,8 +48,8 @@
 #define BTN_EXTRA  0x114
 
 typedef struct input_event {
-    uint64_t time_sec;
-    uint64_t time_usec;
+    long     time_sec;
+    long     time_usec;
     uint16_t type;
     uint16_t code;
     int32_t  value;

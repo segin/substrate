@@ -56,4 +56,14 @@ if ! grep -q 'substrate\*' configure 2>/dev/null; then
         configure
 fi
 
+# Make kdrive's OS bring-up (hw/kdrive/linux/) compile for substrate
+# too — substrate's evdev surface (/dev/input/event0 + Linux-style
+# input_event struct) is close enough that the linux kdrive backend
+# works as-is.  Without this, KDRIVELINUX stays no and the server
+# link fails with undefined OsVendorInit / KdOsAddInputDrivers etc.
+if ! grep -q '\*linux\* | \*substrate\*' configure 2>/dev/null; then
+    echo "==> Enabling kdrive Linux input backend for substrate*"
+    sed -i 's,	\*linux\*)$,	*linux* | *substrate*),' configure
+fi
+
 echo "==> xorg-server ${VERSION} ready at ${TREE_DIR}"

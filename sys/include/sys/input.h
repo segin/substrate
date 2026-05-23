@@ -24,10 +24,18 @@
 #define BTN_SIDE    0x113   /* Mouse button 4 — IntelliMouse Explorer back   */
 #define BTN_EXTRA   0x114   /* Mouse button 5 — IntelliMouse Explorer forward */
 
-// Input Event Structure (Linux compatible)
+/*
+ * Input event — wire-compatible with Linux struct input_event on
+ * i386 (16 bytes: long sec, long usec, u16 type, u16 code, s32
+ * value).  Layout-compatible was a goal from day one; the previous
+ * u64 sec / u64 usec fields surprised every port that did
+ * `read(/dev/input/event0, ...)` with sizeof(struct input_event).
+ * Kernel emits substrate-time pairs in this layout; ported software
+ * (xorg-server's kdrive evdev, libinput, evtest) works unchanged.
+ */
 typedef struct input_event {
-    uint64_t time_sec;
-    uint64_t time_usec;
+    long     time_sec;     /* matches struct timeval on i386 / x86_64 */
+    long     time_usec;
     uint16_t type;
     uint16_t code;
     int32_t  value;

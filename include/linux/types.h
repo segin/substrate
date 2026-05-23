@@ -25,4 +25,11 @@ typedef long           __kernel_off_t;
 typedef long long      __kernel_loff_t;
 typedef long           __kernel_time_t;
 typedef long           __kernel_clock_t;
+/* glibc-style internal aliases for the userland types — kdrive's
+ * linux.c uses these to spell setuid struct fields portably. */
+typedef unsigned int   __uid_t;
+typedef unsigned int   __gid_t;
+typedef int            __pid_t;
+typedef int            __ssize_t;
+typedef unsigned long  __size_t;
 #endif

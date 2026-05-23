@@ -56,7 +56,7 @@ for d in "${XORGPROTO_STAGE}" "${XTRANS_STAGE}" "${LIBX11_STAGE}" "${LIBXAU_STAG
     [ -d "${d}/usr/lib" ]     && LDFLAGS="-L${d}/usr/lib ${LDFLAGS}"
 done
 export CPPFLAGS
-export LDFLAGS="${LDFLAGS}-fno-pie"
+export LDFLAGS="${LDFLAGS}-lfontenc -fno-pie"
 
 echo "==> configure"
 "${TREE_DIR}/configure" \

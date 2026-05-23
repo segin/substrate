@@ -40,6 +40,10 @@ typedef int32_t pid_t;
 typedef int32_t tid_t;
 typedef uint32_t uid_t;
 typedef uint32_t gid_t;
+/* glibc-style internal aliases that ported code reaches for. */
+typedef uid_t __uid_t;
+typedef gid_t __gid_t;
+typedef pid_t __pid_t;
 /* off_t / ssize_t already declared at top of header via compiler
  * builtins for re-entrant safety; skip the duplicate typedefs.  */
 typedef int64_t blkcnt_t;
