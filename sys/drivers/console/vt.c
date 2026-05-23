@@ -249,6 +249,16 @@ static void vt_reconfigure_state(vt_state_t *vt,
     vt->alt_col = vt_clamp_int(vt->alt_col, 0, new_width - 1);
     vt->scrollback_view = (uint16_t)vt_clamp_int(vt->scrollback_view, 0, vt->scrollback_count);
 
+    /* If the scroll region was the full visible screen before the
+     * resize, grow it to the full visible screen after.  Without
+     * this, a default 80x25 -> 1024x768 transition leaves the scroll
+     * region clamped to rows 0..23 because scroll_bottom=23 is still
+     * "in range" of the new 47-row visible area — output past row 23
+     * never scrolls and the terminal acts 80x24. */
+    if (vt->scroll_top == 0 && vt->scroll_bottom == old_visible - 1) {
+        vt->scroll_bottom = new_visible - 1;
+    }
+
     vt_apply_geometry_to_state(vt);
 }
 
