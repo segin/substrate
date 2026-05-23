@@ -53,6 +53,12 @@ int bga_is_available(void) {
     return (id >= VBE_DISPI_ID0 && id <= VBE_DISPI_ID5);
 }
 
+/* video_driver_t.probe contract: 0 = success.  bga_is_available() uses
+ * the opposite convention (truthy = present), so we wrap it. */
+static int bga_probe_driver(void) {
+    return bga_is_available() ? 0 : -1;
+}
+
 // Fixed LFB address for BGA is usually at BAR0 of the PCI device, 
 // but traditionally for Bochs/QEMU it is at 0xE0000000 (ISA hole/high mem).
 // Ideally we should use PCI enumeration to find the device (VENDOR=0x1234, DEVICE=0x1111).
@@ -281,7 +287,7 @@ static int bga_set_mode(int mode_id) {
 static video_driver_t bga_driver = {
     .name = "bga",
     .priority = 50,
-    .probe = bga_is_available,
+    .probe = bga_probe_driver,
     .init = bga_init,
     .set_viewport = bga_set_viewport,
     .list_modes = bga_list_modes,
