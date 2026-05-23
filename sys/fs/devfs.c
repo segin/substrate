@@ -625,6 +625,15 @@ void devfs_init(void) {
     devfs_root_node_ptr = &devfs_root_node;
     vfs_register_filesystem(&devfs_fs);
     devfs_register_device(&tty_node);
+    /* Linux exposes /dev/tty0 as the "currently active VT" alias —
+     * ported software (xorg-server's kdrive linux backend opens
+     * /dev/tty0 to drive VT_GETMODE/VT_SETMODE/KDSETMODE) hard-codes
+     * the path.  Point it at /dev/tty1: /dev/tty1's node has the
+     * fb_vt_tty_ioctl handler we extended with the KD / VT ioctls.
+     * /dev/tty (the proxy that resolves to current_process->tty)
+     * doesn't reach that handler for processes without a controlling
+     * terminal (X server launched as init). */
+    (void)devfs_register_alias("tty0", "tty1");
 
     /* Replay any devices that registered before devfs_init() */
     for (int i = 0; i < devfs_deferred.count; i++) {

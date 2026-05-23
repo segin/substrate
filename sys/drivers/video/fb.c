@@ -493,6 +493,52 @@ static int fb_fs_ioctl(fs_node_t *node, uint32_t request, void *arg) {
             return -EFAULT;
         }
         return 0;
+    } else if (request == FBIOPUT_VSCREENINFO) {
+        /* Userland (xorg-server fbdev) writes back a possibly-modified
+         * mode after FBIOGET_VSCREENINFO.  Substrate's framebuffer is
+         * fixed-at-boot; accept the call and ignore the changes.  X
+         * checks the returned struct's xres/yres/bits_per_pixel and
+         * proceeds if they match what it asked for — by leaving the
+         * mode unchanged but returning success, kdrive treats this
+         * as "your requested mode equals my current mode." */
+        struct fb_var_screeninfo vi;
+        if (!arg) return -EINVAL;
+        if (copyin(arg, &vi, sizeof(vi)) != 0) return -EFAULT;
+        (void)vi;
+        return 0;
+    } else if (request == FBIOGET_FSCREENINFO) {
+        /* Linux fb_fix_screeninfo — what's static about the device.
+         * Ported software (xorg-server's kdrive/fbdev backend) hits
+         * this immediately after FBIOGET_VSCREENINFO. */
+        struct fb_fix_screeninfo fi;
+        if (!arg) return -EINVAL;
+
+        memset(&fi, 0, sizeof(fi));
+        strncpy(fi.id, "substratefb", sizeof(fi.id) - 1);
+        /* smem_start is the PHYSICAL framebuffer base.  We hand back
+         * the kernel virtual address (the consumer mmaps /dev/fb0
+         * to get a userland mapping; the absolute physical value
+         * isn't meaningful to userland but Linux puts it here for
+         * informational use). */
+        fi.smem_start = (unsigned long)(uintptr_t)fb.addr;
+        fi.smem_len = fb.pitch * fb.height;
+        /* type=PACKED_PIXELS for linear, PLANES for planar VGA.
+         * visual=TRUECOLOR for RGB linear, PSEUDOCOLOR for indexed. */
+        fi.type = 0;       /* FB_TYPE_PACKED_PIXELS */
+        fi.type_aux = 0;
+        fi.visual = (fb.bpp >= 16) ? 2 /* TRUECOLOR */ : 3 /* PSEUDOCOLOR */;
+        fi.line_length = fb.pitch;
+        fi.xpanstep = fb.virt_width > fb.width ? 1 : 0;
+        fi.ypanstep = fb.virt_height > fb.height ? 1 : 0;
+        fi.ywrapstep = 0;
+        fi.mmio_start = 0;
+        fi.mmio_len = 0;
+        fi.accel = 0;
+
+        if (copyout(&fi, arg, sizeof(fi)) != 0) {
+            return -EFAULT;
+        }
+        return 0;
     } else if (request == FBIOGET_VIDEO_MODES) {
         struct video_mode_query query;
         if (!arg) return -EINVAL;

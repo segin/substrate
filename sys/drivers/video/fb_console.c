@@ -1307,9 +1307,11 @@ static int fb_vt_tty_ioctl(struct tty *tty, uint32_t cmd, unsigned long arg) {
         }
         return 0;
     case KDSETMODE:
-        if (copyin((void *)arg, &val, sizeof(int)) != 0) {
-            return -EFAULT;
-        }
+        /* Linux KDSETMODE / KDSKBMODE pass the value directly as the
+         * ioctl argument (not as a pointer to an int).  This is the
+         * common asymmetry in the KD ioctl family: GET takes a
+         * pointer-to-int (out), SET takes int (in by value). */
+        val = (int)arg;
         if (val != KD_TEXT && val != KD_GRAPHICS) {
             return -EINVAL;
         }
@@ -1340,14 +1342,53 @@ static int fb_vt_tty_ioctl(struct tty *tty, uint32_t cmd, unsigned long arg) {
         }
         return 0;
     case KDSKBMODE:
-        if (copyin((void *)arg, &val, sizeof(int)) != 0) {
-            return -EFAULT;
-        }
+        /* Same value-by-arg convention as KDSETMODE. */
+        val = (int)arg;
         if (val != K_RAW && val != K_XLATE &&
             val != K_MEDIUMRAW && val != K_UNICODE && val != K_OFF) {
             return -EINVAL;
         }
         vt->kbd_mode = val;
+        return 0;
+    case VT_OPENQRY: {
+        /* Linux returns "first unallocated VT >= 1" — substrate
+         * doesn't ration VTs so we just return 1 (the active one
+         * the caller opened /dev/tty0 to get to). */
+        int free_vt = vt->id + 1;
+        if (copyout(&free_vt, (void *)arg, sizeof(int)) != 0) {
+            return -EFAULT;
+        }
+        return 0;
+    }
+    case VT_GETMODE: {
+        struct vt_mode mode;
+        memset(&mode, 0, sizeof(mode));
+        mode.mode = VT_AUTO;   /* substrate runs in auto VT-switch mode */
+        if (copyout(&mode, (void *)arg, sizeof(mode)) != 0) {
+            return -EFAULT;
+        }
+        return 0;
+    }
+    case VT_SETMODE:
+        /* Accept any vt_mode and ignore — substrate doesn't deliver
+         * the relsig/acqsig signal protocol but the caller proceeds
+         * as if it took.  KDSETMODE(KD_GRAPHICS) is the real switch. */
+        return 0;
+    case VT_GETSTATE: {
+        struct vt_stat st;
+        memset(&st, 0, sizeof(st));
+        st.v_active = (unsigned short)(vt_get_active() + 1);
+        st.v_state = (unsigned short)((1u << (vt->id + 1)));
+        if (copyout(&st, (void *)arg, sizeof(st)) != 0) {
+            return -EFAULT;
+        }
+        return 0;
+    }
+    case VT_ACTIVATE:
+    case VT_WAITACTIVE:
+    case VT_RELDISP:
+    case VT_DISALLOCATE:
+        /* Accept-and-ignore — see VT_SETMODE comment. */
         return 0;
     default:
         return -ENOTTY;
