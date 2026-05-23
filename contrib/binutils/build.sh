@@ -183,7 +183,14 @@ EOF
     echo "==> Staging to $STAGE2_DESTDIR"
     rm -rf "$STAGE2_DESTDIR"
     mkdir -p "$STAGE2_DESTDIR"
-    make install DESTDIR="$STAGE2_DESTDIR"
+    # The top-level binutils `install` target only walks the target-
+    # tree subdirs (libiberty/, ...) when configured Canadian-cross
+    # for substrate — it skips binutils/, gas/, ld/, libctf/ entirely
+    # and `dist-toolchain/usr/bin/` ends up missing ld, as, objcopy,
+    # objdump, readelf, strip, ar, nm, strings, c++filt, addr2line,
+    # gprof, elfedit, size, ranlib.  `install-host` explicitly walks
+    # all host subdirs and installs the binaries we actually want.
+    make install-host DESTDIR="$STAGE2_DESTDIR"
 
     echo ""
     echo "==> Stage 2 complete."
