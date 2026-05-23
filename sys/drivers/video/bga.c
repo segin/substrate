@@ -6,6 +6,7 @@
 #include <drivers/video/fb.h>
 #include <arch/x86-common/io.h>
 #include "../../kern/resource.h"
+#include "../../kern/pci.h"
 
 #define VBE_DISPI_IOPORT_INDEX 0x01CE
 #define VBE_DISPI_IOPORT_DATA  0x01CF
@@ -74,6 +75,28 @@ static void *bga_lfb_virt = NULL;
 static size_t bga_lfb_mapped_size = 0;
 static int bga_use_lfb = 1;
 static uint16_t bga_current_bank = 0xFFFFU;
+
+/* Resolve the Bochs Graphics Adapter's LFB physical address by scanning
+ * PCI config space directly.  We cannot use pci_find_device() because
+ * bga_init() runs BEFORE pci_init() during boot — the device list is
+ * empty at this point.  Do a targeted bus-0 walk for vendor=0x1234
+ * device=0x1111 (Bochs/QEMU stdvga) and read BAR0.  The hardcoded
+ * 0xE0000000 fallback only worked on specific QEMU machine types;
+ * modern qemu places the Bochs BAR at 0xFD000000 or higher, and writes
+ * to the wrong physical region silently leak into RAM (the pitch-black
+ * framebuffer we kept seeing). */
+static uint32_t bga_discover_lfb_phys(void) {
+    for (uint8_t slot = 0; slot < 32; slot++) {
+        uint32_t id = pci_read_config32(0, slot, 0, 0x00);
+        if ((id & 0xFFFFU) != 0x1234U) continue;
+        if (((id >> 16) & 0xFFFFU) != 0x1111U) continue;
+        uint32_t bar0 = pci_read_config32(0, slot, 0, 0x10);
+        /* Low 4 bits encode type/prefetch; address is the rest.
+         * Bochs adapter is always a 32-bit non-prefetch memory BAR. */
+        return bar0 & 0xFFFFFFF0U;
+    }
+    return 0;
+}
 
 /* Map the LFB physical region into the kernel address space, sized to
  * the requested mode.  Re-uses the existing mapping when the new size
@@ -170,13 +193,19 @@ int bga_init(fb_info_t *fb_out) {
         return -1;
     }
 
-    // Try to find via PCI to get accurate LFB address
-    // pci_init checks buses, but we need to scan callbacks. 
-    // Assuming pci_scan_bus is available or similar from pci.c
-    // Let's check pci.h/c definitions... wait, I can't check now inside write.
-    // I'll assume I can scan or just use default specific to QEMU/Bochs if PCI fails.
-    // Default fallback: 0xE0000000
-    bga_lfb_addr = 0xE0000000;
+    /* Locate the Bochs adapter via PCI and read BAR0 — the LFB
+     * physical address.  The previous hardcoded 0xE0000000 fallback
+     * only worked on specific QEMU machine types; modern qemu places
+     * the Bochs BAR at 0xFD000000 or higher, and writes to the wrong
+     * physical region just leak into RAM (pitch black framebuffer). */
+    uint32_t discovered = bga_discover_lfb_phys();
+    if (discovered) {
+        bga_lfb_addr = discovered;
+        kprintf("BGA: LFB physical address %#x (via PCI BAR0)\n", discovered);
+    } else {
+        bga_lfb_addr = 0xE0000000;
+        kprint("BGA: PCI enumeration miss, using fallback 0xE0000000\n");
+    }
     bga_use_lfb = bga_force_banked_mode() ? 0 : 1;
     
     // Set resolution: 1024x768x32
