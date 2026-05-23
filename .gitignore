@@ -453,3 +453,5 @@ tests/usr.lib/demangle/fuzz/corpus/
 /usr.bin/uudecode/uudecode
 /usr.bin/yacc/yacc
 rootfs.img.zst
+contrib/matwm2/build/
+contrib/matwm2/matwm2-master.tar.gz
