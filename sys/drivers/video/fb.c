@@ -796,6 +796,33 @@ void fb_init(multiboot_info_t *mbi) {
     bga_install();
     vga_install();
 
+    /* video=show — dump every mode every registered driver claims to
+     * support, then continue with normal selection.  Useful for
+     * picking a value to feed back as vga=WxH@BPP. */
+    if (have_video_arg && strcmp(vid_arg, "show") == 0) {
+        struct video_mode_info modes[32];
+        video_driver_t *drv = video_drivers;
+        kprint("Video: available modes:\n");
+        while (drv) {
+            int probed = drv->probe ? drv->probe() : 0;
+            kprintf("  %s%s:\n", drv->name,
+                    probed == 0 ? "" : " (not present)");
+            if (probed == 0 && drv->list_modes) {
+                int total = drv->list_modes(NULL, 0);
+                if (total > 32) total = 32;
+                if (total > 0) {
+                    int count = drv->list_modes(modes, total);
+                    for (int i = 0; i < count; i++) {
+                        kprintf("    %ux%u@%u (mode %u)\n",
+                                modes[i].width, modes[i].height,
+                                modes[i].bpp, modes[i].mode_id);
+                    }
+                }
+            }
+            drv = drv->next;
+        }
+    }
+
     /* Parse vga=WxH@BPP mode request */
     if (have_vga_arg) {
         if (fb_parse_vga_mode(vga_arg, &req_w, &req_h, &req_bpp) == 0) {
