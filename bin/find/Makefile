@@ -4,7 +4,7 @@ LDADD = -L$(TOP)/usr.lib/regex -l:libregex.so.0
 REGEX_LIB = $(TOP)/usr.lib/regex/libregex.a
 
 $(REGEX_LIB):
-	$(MAKE) -C $(TOP)/usr.lib/regex clean all
+	$(MAKE) -C $(TOP)/usr.lib/regex
 
 $(PROG): $(REGEX_LIB)
 

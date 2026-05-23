@@ -8,7 +8,20 @@
 include ../../Makefile.inc
 
 SRCS ?= $(PROG).c
+# Host (NATIVE_BUILD=1) and target builds must not share .o files: the
+# host produces ELFCLASS64 x86-64 objects, the target produces ELFCLASS32
+# i386.  If a test runs `make NATIVE_BUILD=1` and a later target build
+# re-enters the same directory, the stale host .o looks up-to-date vs.
+# its .c source and the target link fails with "wrong format".  Suffix
+# host objects with .host.o so the two modes coexist.
+ifdef NATIVE_BUILD
+OBJS = $(SRCS:.c=.host.o)
+else
 OBJS = $(SRCS:.c=.o)
+endif
+# Cleaning sweeps both mode suffixes — running `make clean` once should
+# leave the directory clean regardless of which mode was last used.
+ALL_MODE_OBJS = $(SRCS:.c=.o) $(SRCS:.c=.host.o)
 EXTRA_CLEAN ?=
 BUILD_RULE_DEPS = Makefile $(TOP)/Makefile.inc $(TOP)/Makefile.bin.inc
 
@@ -19,7 +32,16 @@ LIBC_DIR = $(TOP)/lib/c
 # interpreter and resolves libc / libm / etc. through the
 # dynamic linker.  The default remains static linking against
 # libc.a so bootstrap-essential binaries stay self-contained.
-ifeq ($(DYNAMIC),1)
+#
+# NATIVE_BUILD=1 overrides DYNAMIC: when building the host-side test
+# binary, /sbin/ld.so doesn't exist and the host's libc isn't at
+# $(TOP)/lib/c.  Host builds always fall through to the plain
+# USER_CFLAGS/USER_LDFLAGS path regardless of DYNAMIC.
+ifdef NATIVE_BUILD
+    # Host build — DYNAMIC is irrelevant; let host cc do its default.
+    BIN_CFLAGS  = $(USER_CFLAGS)
+    LDFLAGS    := $(USER_LDFLAGS)
+else ifeq ($(DYNAMIC),1)
     # Clean PIE flags — do NOT inherit USER_LDFLAGS' -fno-pie /
     # -no-pie or we'd get conflicting modes on the link line.
     # Deferred (=) like the static branch so per-program Makefiles
@@ -79,8 +101,11 @@ $(PROG): $(OBJS)
 %.o: %.c
 	$(CC) $(BIN_CFLAGS) -c $< -o $@
 
+%.host.o: %.c
+	$(CC) $(BIN_CFLAGS) -c $< -o $@
+
 clean:
-	rm -f $(PROG) $(OBJS) $(EXTRA_CLEAN)
+	rm -f $(PROG) $(ALL_MODE_OBJS) $(EXTRA_CLEAN)
 
 BINDIR ?= $(DESTDIR)/bin
 

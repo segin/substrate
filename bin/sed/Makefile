@@ -17,7 +17,7 @@ endif
 include $(TOP)/Makefile.bin.inc
 
 $(REGEX_LIB):
-	$(MAKE) -C $(TOP)/usr.lib/regex clean all
+	$(MAKE) -C $(TOP)/usr.lib/regex
 
 $(PROG): $(REGEX_LIB)
 

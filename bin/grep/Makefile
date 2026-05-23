@@ -6,7 +6,7 @@ REGEX_LIB = $(TOP)/usr.lib/regex/libregex.a
 USER_CFLAGS += -I$(TOP)/include -I$(TOP)/sys/include
 
 $(REGEX_LIB):
-	$(MAKE) -C $(TOP)/usr.lib/regex clean all
+	$(MAKE) -C $(TOP)/usr.lib/regex
 
 $(PROG): $(REGEX_LIB)
 

@@ -5,7 +5,7 @@ REGEX_LIB = $(TOP)/usr.lib/regex/libregex.a
 .DEFAULT_GOAL := all
 
 $(REGEX_LIB):
-	$(MAKE) -C $(TOP)/usr.lib/regex clean all
+	$(MAKE) -C $(TOP)/usr.lib/regex
 
 $(PROG): $(REGEX_LIB)
 

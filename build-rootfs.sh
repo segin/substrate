@@ -126,11 +126,11 @@ build_components() {
 
     echo "Building usr.lib helper libraries (libelfobj, libregex,"
     echo "libexvi, libbc, libdemangle, libjoin, libuu, ...)"
-    for dir in "$TOP/usr.lib"/*/ ; do
-        if [ -f "$dir/Makefile" ]; then
-            make -C "$dir" -j4
-        fi
-    done
+    # Drive the dispatch through usr.lib/Makefile so its SUBDIRS order and
+    # inter-library prereqs (libexvi.so.0 needs libregex.so.0) are honored.
+    # Iterating "usr.lib/*/" in glob order builds them alphabetically, so
+    # exvi runs before regex and fails to link.
+    make -C "$TOP/usr.lib" -j4
 
     echo "Building dynamic linker..."
     make -C "$TOP/sbin/ld.so" -j4
