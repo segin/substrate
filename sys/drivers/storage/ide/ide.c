@@ -1983,7 +1983,7 @@ static int ide_scan_controller(void) {
                 bdev->read = ide_blkdev_read;
                 bdev->write = ide_blkdev_write;
                 
-                blkdev_register(bdev);
+                blkdev_register_disk(bdev);
                 kprint("  ");
                 kprint(bdev->name);
                 kprint(": ");

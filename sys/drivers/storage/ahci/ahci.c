@@ -695,7 +695,7 @@ static void ahci_register_disk(ahci_port_t *ap) {
     ap->bdev.read          = ahci_bdev_read;
     ap->bdev.write         = ahci_bdev_write;
 
-    blkdev_register(&ap->bdev);
+    blkdev_register_disk(&ap->bdev);
 
     snprintf(buf, sizeof(buf),
              "ahci: port %d: %s (%llu sectors, %u bytes/sect) -> /dev/storage/%s\n",
