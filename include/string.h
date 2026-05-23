@@ -13,6 +13,18 @@ void *memset(void *s, int c, size_t n);
 int memcmp(const void *s1, const void *s2, size_t n);
 void *memchr(const void *s, int c, size_t n);
 
+/* ffs / ffsl / ffsll are POSIX-defined in <strings.h>, but glibc
+ * also exposes them from <string.h> as an extension.  Ported code
+ * (xorg-server, ...) relies on the glibc convention; declare here
+ * too so users don't have to chase down which header.  Definitions
+ * live in libc. */
+int ffs(int i);
+int ffsl(long i);
+int ffsll(long long i);
+
+/* POSIX.1-2008 — strerror-equivalent for signals. */
+char *strsignal(int signum);
+
 /*
  * When _SUBSTRATE_FORTIFY is defined, strcpy/strcat are marked deprecated
  * to steer callers toward the bounds-checked strlcpy/strlcat alternatives.

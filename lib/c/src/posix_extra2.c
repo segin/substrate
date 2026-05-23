@@ -202,6 +202,15 @@ void psignal(int signum, const char *s) {
     else         fprintf(stderr, "%s\n", desc);
 }
 
+/* POSIX.1-2008 — return a static signal name for log emission.
+ * Caller must not free or modify the result. */
+char *strsignal(int signum) {
+    if (signum >= 0 && signum < NSIGNAMES && sig_names[signum]) {
+        return (char *)sig_names[signum];
+    }
+    return (char *)"Unknown signal";
+}
+
 void psiginfo(const siginfo_t *si, const char *s) {
     psignal(si ? si->si_signo : 0, s);
 }
