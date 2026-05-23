@@ -63,6 +63,17 @@ typedef struct devfs_entry {
 static devfs_entry_t *root_entry = NULL;
 static struct dirent dev_dirent;
 static fs_node_t devfs_root_node;
+
+static int devfs_statfs(fs_node_t *node, struct statfs *buf)
+{
+    (void)node;
+    if (!buf) return -1;
+    memset(buf, 0, sizeof(*buf));
+    buf->f_bsize  = 4096;
+    buf->f_iosize = 4096;
+    strncpy(buf->f_fstypename, "devfs", sizeof(buf->f_fstypename));
+    return 0;
+}
 fs_node_t *devfs_root_node_ptr = NULL;
 
 /*
@@ -589,6 +600,7 @@ void devfs_init(void) {
     devfs_root_node.gid = 0;
     devfs_root_node.readdir = &devfs_dir_readdir;
     devfs_root_node.finddir = &devfs_dir_finddir;
+    devfs_root_node.statfs  = &devfs_statfs;
     devfs_refresh_timestamps(&devfs_root_node);
 
     root_entry = kmalloc(sizeof(devfs_entry_t));

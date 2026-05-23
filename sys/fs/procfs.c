@@ -842,6 +842,19 @@ static size_t procfs_generic_read(fs_node_t *node, off_t offset, size_t size, ui
 static struct dirent proc_dirent;
 static fs_node_t procfs_root_node;
 
+/* Minimal statfs so df, statvfs(), and friends see procfs as a real
+ * (zero-sized) filesystem instead of failing. */
+static int procfs_statfs(fs_node_t *node, struct statfs *buf)
+{
+    (void)node;
+    if (!buf) return -1;
+    memset(buf, 0, sizeof(*buf));
+    buf->f_bsize  = 4096;
+    buf->f_iosize = 4096;
+    strncpy(buf->f_fstypename, "procfs", sizeof(buf->f_fstypename));
+    return 0;
+}
+
 /* Helper to generate status string */
 static int proc_generate_status(char *b, size_t s, process_t *proc) {
     char comm_safe[AC_COMM_LEN + 1];
@@ -1625,6 +1638,7 @@ void procfs_init(void) {
     procfs_root_node.gid = 0;
     procfs_root_node.readdir = &procfs_readdir;
     procfs_root_node.finddir = &procfs_finddir;
+    procfs_root_node.statfs  = &procfs_statfs;
     procfs_refresh_timestamps(&procfs_root_node);
 
     vfs_register_filesystem(&procfs_fs);

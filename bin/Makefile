@@ -21,6 +21,7 @@ SUBDIRS = \
 	date \
 	dc \
 	devtree \
+	df \
 	diff \
 	echo \
 	ed \

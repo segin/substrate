@@ -36,6 +36,7 @@
 
 #include <vfs/vfs.h>
 #include <vm/vm_kmem.h>
+#include <sys/mount.h>
 #include <kern/time.h>
 #include <string.h>
 #include <stddef.h>
@@ -64,6 +65,17 @@ static fs_node_t       shmfs_root_node;
 static shmfs_inode_t  *shmfs_children = NULL;
 static struct dirent   shmfs_dirent;
 static uint64_t        shmfs_next_inode = 2;  /* 1 reserved for root */
+
+static int shmfs_statfs(fs_node_t *node, struct statfs *buf)
+{
+    (void)node;
+    if (!buf) return -EINVAL;
+    memset(buf, 0, sizeof(*buf));
+    buf->f_bsize  = 4096;
+    buf->f_iosize = 4096;
+    strncpy(buf->f_fstypename, "shmfs", sizeof(buf->f_fstypename));
+    return 0;
+}
 
 static void shmfs_refresh_timestamps(fs_node_t *node) {
     time_t now;
@@ -317,6 +329,7 @@ void shmfs_init(void) {
     shmfs_root_node.finddir = shmfs_root_finddir;
     shmfs_root_node.mknod   = shmfs_root_mknod;
     shmfs_root_node.unlink  = shmfs_root_unlink;
+    shmfs_root_node.statfs  = shmfs_statfs;
     shmfs_refresh_timestamps(&shmfs_root_node);
 
     vfs_register_filesystem(&shmfs_fs);

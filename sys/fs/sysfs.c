@@ -1,11 +1,23 @@
 #include <vfs/vfs.h>
 #include <sys/kobject.h>
+#include <sys/mount.h>
 #include <kern/time.h>
 #include <string.h>
 #include <stddef.h>
 
 static struct dirent sys_dirent;
 static fs_node_t sysfs_root_node;
+
+static int sysfs_statfs(fs_node_t *node, struct statfs *buf)
+{
+    (void)node;
+    if (!buf) return -1;
+    memset(buf, 0, sizeof(*buf));
+    buf->f_bsize  = 4096;
+    buf->f_iosize = 4096;
+    strncpy(buf->f_fstypename, "sysfs", sizeof(buf->f_fstypename));
+    return 0;
+}
 
 static void sysfs_refresh_timestamps(fs_node_t *node) {
     time_t now;
@@ -79,6 +91,7 @@ void sysfs_init(void) {
     sysfs_root_node.gid = 0;
     sysfs_root_node.readdir = &sysfs_readdir;
     sysfs_root_node.finddir = &sysfs_finddir;
+    sysfs_root_node.statfs  = &sysfs_statfs;
     sysfs_refresh_timestamps(&sysfs_root_node);
 
     vfs_register_filesystem(&sysfs_fs);
