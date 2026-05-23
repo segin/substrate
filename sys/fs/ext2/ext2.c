@@ -468,15 +468,22 @@ int ext2_write_inode(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_t *inode) {
         return -1;
     }
 
-    /* ext2trace: catch the moment a live inode changes file type.
-     * S_IFREG <-> S_IFDIR (or any S_IFMT delta) on an inode whose
-     * old mode was non-zero MUST be preceded by ext2_free_inode +
-     * ext2_alloc_inode — anything else is corruption.  The first
-     * 16 bits of an ext2_inode on disk are i_mode, little-endian. */
+    /* ext2trace: catch the moment a live inode changes file type
+     * between two VALID types (REG <-> DIR, REG <-> LNK, etc).
+     * Live-to-live transitions without an intervening free are the
+     * corruption signal.
+     *
+     * Transient zeroing (live -> mode==0) is NOT corruption: it's
+     * how ext2_alloc_inode initializes a freshly-allocated slot
+     * whose on-disk inode still carries the previous file's
+     * mode bits (ext2_free_inode only clears the bitmap, doesn't
+     * scrub the inode struct).  Similarly, alloc-init -> real mode
+     * (mode==0 -> S_IFREG/S_IFDIR/...) is the normal post-alloc
+     * mknod write that establishes the type. */
     if (ext2_trace_on()) {
         uint16_t old_mode = *(uint16_t *)(block_buf + inode_offset);
         uint16_t new_mode = inode->i_mode;
-        if (old_mode != 0 &&
+        if (old_mode != 0 && new_mode != 0 &&
             (old_mode & S_IFMT) != (new_mode & S_IFMT)) {
             void *caller = __builtin_return_address(0);
             kprintf("ext2trace: TYPE FLIP inode=%u %s(mode=%#o) -> %s(mode=%#o) caller=%p\n",
