@@ -18,6 +18,24 @@ fi
 
 MACVTAP=${MACVTAP:-macvtap0}
 
+# --gfx adds vga=1024x768@32 to the kernel cmdline and forces -vga std
+# so substrate's BGA fb driver brings up a graphical framebuffer.
+# Without --gfx the rest of the qemu command line is unchanged
+# (hardware text mode through qemu's default display).
+GFX=0
+for arg in "$@"; do
+    case "$arg" in
+        --gfx) GFX=1 ;;
+    esac
+done
+
+APPEND="root=/dev/storage/sata0 serial_debug"
+GFX_ARGS=""
+if [ "$GFX" -eq 1 ]; then
+    APPEND="$APPEND vga=1024x768@32"
+    GFX_ARGS="-vga std"
+fi
+
 cleanup() {
     sudo ip link delete "$MACVTAP" 2>/dev/null || true
 }
@@ -86,7 +104,8 @@ qemu-system-i386 -cpu qemu32,+sse,+sse2 -accel kvm \
   -netdev tap,id=n0,fd=3,vhost=off \
   -device virtio-net-pci,netdev=n0,mac="$MACADDR" \
   -kernel "$KERNEL" \
-  -append "root=/dev/storage/sata0 serial_debug" \
+  -append "$APPEND" \
+  $GFX_ARGS \
   -serial stdio \
   -audio driver=sdl,model=ac97,id=audio0 \
   3<>"$TAPDEV"
