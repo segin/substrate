@@ -6,6 +6,11 @@ extern "C" {
 #endif
 
 #include <sys/types.h>
+/* POSIX says fd_set and friends are in <sys/select.h>, but historical
+ * BSD code expects to find them via <sys/time.h>.  Linux/glibc bring
+ * them in this way too — ported software (xorg-server, ...) relies on
+ * the implicit pull-in. */
+#include <sys/select.h>
 
 struct timeval {
     time_t      tv_sec;     /* seconds */

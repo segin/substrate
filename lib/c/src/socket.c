@@ -562,3 +562,11 @@ uint16_t htons(uint16_t x) { return __builtin_bswap16(x); }
 uint32_t htonl(uint32_t x) { return __builtin_bswap32(x); }
 uint16_t ntohs(uint16_t x) { return __builtin_bswap16(x); }
 uint32_t ntohl(uint32_t x) { return __builtin_bswap32(x); }
+
+/* RFC 3493 well-known IPv6 addresses.  Declared in <netinet/in.h>;
+ * defined here as static const so they can be taken by address from
+ * userland code (xorg-server, dhcpcd, ...).  Multicast / scope-id
+ * semantics aren't meaningful on substrate's current single-stack
+ * kernel, but the symbols must exist for link-time satisfaction. */
+const struct in6_addr in6addr_any      = IN6ADDR_ANY_INIT;
+const struct in6_addr in6addr_loopback = IN6ADDR_LOOPBACK_INIT;

@@ -1,44 +1,65 @@
-# xorg-server — substrate port (WIP)
+# xorg-server 1.16.4 — substrate port (WIP — compiles, doesn't link)
 
-Pinned to 1.20.14 (last autotools-friendly release).  kdrive support
-is present but only ships the Xephyr backend; **Xfbdev was removed
-upstream in the 1.17 era**, so the substrate plan is to resurrect it
-from 1.16.4's `hw/kdrive/fbdev/` and forward-port it onto the 1.20.14
-internal APIs.
+Pinned to 1.16.4: last release that still ships `hw/kdrive/fbdev/`
+(Xfbdev) tier-1.  Forward-porting fbdev to 1.20.14's kdrive ABI was
+the alternative; staying on 1.16.4 turned out simpler given the
+substrate-userland holes were the actual blocker, not the X server
+itself.
 
-Status:
-- ✓ tarball fetched, configure / libtool patched for substrate
-- ✗ resurrection-of-Xfbdev not yet implemented
-- ✗ build.sh exists but won't produce a usable Xfbdev binary yet
+## Status
 
-## Forward-port plan
+* ✓ Fetched + config.sub / libtool patched for substrate.
+* ✓ configure passes (every X server flavor except xfbdev disabled).
+* ✓ Compiles cleanly through the whole tree with the substrate
+  cross-toolchain.  Required ~10 substrate userland additions —
+  see the commit log; all landed under include/ and lib/c/src/.
+* ✗ Link fails on:
+  - `KdOsAddInputDrivers` / `KdOsKeyboardFns` etc — kdrive expects
+    a per-OS input bring-up file (hw/kdrive/linux/{keyboard,mouse}.c
+    or similar).  Linux's version uses /dev/input/eventN evdev,
+    which substrate now also exposes.  Plan: copy hw/kdrive/linux/
+    into hw/kdrive/substrate/, patch Linux-specific paths
+    (/dev/tty, /dev/console reaches, vt-switch ioctls) over to
+    substrate's vtio.h surface.
+  - `OsVendorInit` — substrate-specific vendor init.  One-line
+    stub: drop a hw/kdrive/src/substrate_os.c with an empty
+    OsVendorInit() and add it to the kdrive sources.
+  - `FontEncIdentify / FontEncFind / ...` — libXfont references
+    libfontenc but the .so doesn't have a DT_NEEDED for it.
+    Plan: relink libXfont with `-lfontenc` explicit, or add
+    `-lfontenc` to xorg-server's link line.
+  - `___tls_get_addr` — pixman shared lib uses ELF TLS, substrate's
+    ld.so only supports initial-exec TLS.  Plan: link pixman static
+    (its libpixman-1.a is already staged) into xorg-server.
 
-1.  Drop `hw/kdrive/fbdev/{fbdev.c,fbdev.h,fbinit.c,Makefile.am}`
-    from 1.16.4 into 1.20.14's `hw/kdrive/`.
-2.  Adapt to 1.20's kdrive ABI:
-    - `KdScreenInfo` fields renamed.
-    - Input model changed (KdAddDevices vs new keyboard/mouse setup).
-    - `EnableScreen` / `DisableScreen` signatures.
-3.  Substrate-specific:
-    - replace Linux `<linux/fb.h>` ioctls (FBIOGET_VSCREENINFO,
-      FBIOGET_FSCREENINFO, FBIOPAN_DISPLAY) with substrate's
-      framebuffer ioctls (FBIOGET_*, see sys/include/sys/fb.h).
-    - input via `/dev/input/event0` evdev path that substrate
-      now supplies — kdrive's `linux` input backend should be
-      adaptable.
+## Substrate userland surface added for this port (commits before/in this branch)
 
-## Open holes surfaced during the 1.16.4 D-path probe
-(documenting so the 1.20.14 + Xfbdev attempt doesn't re-discover):
+Headers:
+- `<linux/fb.h>`, `<linux/types.h>`, `<linux/futex.h>` — compat shims
+  pointing at substrate's `<sys/fb.h>` / native types / `<sys/futex.h>`.
+- `<netinet/in.h>` — IPv6 multicast macros, in6addr_any /
+  in6addr_loopback (declared + defined in libc), IP_/IPV6_
+  multicast socket option constants, `struct ip_mreq` / `ipv6_mreq`.
+- `<sys/mman.h>` — MAP_ANON alias for MAP_ANONYMOUS.
+- `<math.h>` — M_PI / M_E / M_SQRT2 / etc.
+- `<limits.h>` — OPEN_MAX = 1024.
+- `<string.h>` — declared ffs / ffsl / ffsll / strsignal (libc had
+  the impls except strsignal; added).
+- `<signal.h>` — SIGIO alias for SIGPOLL.
+- `<fcntl.h>` — F_GETOWN/F_SETOWN (no-op accepted), FASYNC, FNDELAY,
+  O_NDELAY, O_ASYNC aliases.
+- `<sys/time.h>` — implicit `<sys/select.h>` pull-in so fd_set is
+  available via the BSD-style include path.
+- `<strings.h>` — `#undef` index/rindex before declaration so
+  xorgproto's `<X11/Xos.h>` macro definitions don't garble the
+  later prototype.
+- `<values.h>` — legacy SVID header (MAXINT etc.) — used by
+  libxshmfence.
 
-- substrate libc lacks: `in6addr_any`, `IP_MULTICAST_TTL`,
-  `IPV6_MULTICAST_HOPS`, `IN_MULTICAST` macro, `IN6_IS_ADDR_MULTICAST`
-  macro, `MAP_ANON` (substrate uses `MAP_ANONYMOUS`).  XDMCP and
-  Xtrans want these.  Either stub them in substrate's headers
-  (we already added a placeholder for IN6 macros — see
-  contrib/libX11 README) or `--disable-xdmcp` if the server build
-  permits.
-- IP_MULTICAST / IPV6 multicast functionality won't actually work
-  even with the constants stubbed — substrate's kernel networking
-  doesn't have multicast.  XDMCP discovery would always fail.
-  Static `-display :0` startup should still work.
+libc:
+- `strsignal()` — POSIX 2008, mirrors psignal name table.
+- `in6addr_any` / `in6addr_loopback` — RFC 3493 globals.
 
+Kernel (already landed in vt.c / vt branch):
+- `KDSETMODE` / `KDGETMODE` / `KDSKBMODE` / `KDGKBMODE` ioctls so
+  the X server can claim the VT.

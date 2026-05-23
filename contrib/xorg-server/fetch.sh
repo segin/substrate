@@ -3,10 +3,10 @@
 
 set -eu
 
-VERSION="1.20.14"
-TARBALL="xorg-server-${VERSION}.tar.xz"
+VERSION="1.16.4"
+TARBALL="xorg-server-${VERSION}.tar.bz2"
 URL="https://www.x.org/releases/individual/xserver/${TARBALL}"
-SHA256="5cc5b70b9be89443e2594b93656c60bd5e82cd7f01deb4ce4faf81dcf546a16b"
+SHA256="abb6e1cc9213a9915a121f48576ff6739a0b8cdb3d32796f9a7743c9a6efc871"
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 BUILD_DIR="${HERE}/build"

@@ -19,6 +19,9 @@ extern "C" {
 #define MAP_PRIVATE   0x002
 #define MAP_FIXED     0x010
 #define MAP_ANONYMOUS 0x020
+/* BSD-style alias.  Linux/glibc accept both spellings; ported
+ * software (xorg-server, mesa, ...) reaches for MAP_ANON. */
+#define MAP_ANON      MAP_ANONYMOUS
 #define MAP_32BIT     0x040
 
 // Special value for mmap errors

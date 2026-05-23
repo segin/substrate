@@ -63,6 +63,94 @@ static inline int __in6_is_addr_v4mapped(const struct in6_addr *__a)
 #define IN6_IS_ADDR_LOOPBACK(a)  __in6_is_addr_loopback((const struct in6_addr *)(a))
 #define IN6_IS_ADDR_V4MAPPED(a)  __in6_is_addr_v4mapped((const struct in6_addr *)(a))
 
+/* Multicast tests.  Substrate's networking stack doesn't actually
+ * deliver multicast traffic — these macros exist so ported software
+ * (xorg-server, mDNS clients, ...) compiles; runtime behaviour on
+ * the predicate paths is "no address is multicast", which is fine
+ * for the no-multicast world the kernel implements. */
+#define IN_MULTICAST(a)            (((in_addr_t)(a) & 0xf0000000U) == 0xe0000000U)
+#define IN_CLASSD(a)               IN_MULTICAST(a)
+#define IN_CLASSD_NET              0xf0000000U
+#define IN_CLASSD_NSHIFT           28
+#define IN_CLASSD_HOST             0x0fffffffU
+#define IN_EXPERIMENTAL(a)         (((in_addr_t)(a) & 0xf0000000U) == 0xf0000000U)
+#define IN_BADCLASS(a)             IN_EXPERIMENTAL(a)
+
+#define IN6_IS_ADDR_MULTICAST(a)   (((const struct in6_addr *)(a))->s6_addr[0] == 0xff)
+#define IN6_IS_ADDR_UNSPECIFIED(a) \
+    (((const struct in6_addr *)(a))->s6_addr[0]  == 0 && \
+     ((const struct in6_addr *)(a))->s6_addr[1]  == 0 && \
+     ((const struct in6_addr *)(a))->s6_addr[2]  == 0 && \
+     ((const struct in6_addr *)(a))->s6_addr[3]  == 0 && \
+     ((const struct in6_addr *)(a))->s6_addr[4]  == 0 && \
+     ((const struct in6_addr *)(a))->s6_addr[5]  == 0 && \
+     ((const struct in6_addr *)(a))->s6_addr[6]  == 0 && \
+     ((const struct in6_addr *)(a))->s6_addr[7]  == 0 && \
+     ((const struct in6_addr *)(a))->s6_addr[8]  == 0 && \
+     ((const struct in6_addr *)(a))->s6_addr[9]  == 0 && \
+     ((const struct in6_addr *)(a))->s6_addr[10] == 0 && \
+     ((const struct in6_addr *)(a))->s6_addr[11] == 0 && \
+     ((const struct in6_addr *)(a))->s6_addr[12] == 0 && \
+     ((const struct in6_addr *)(a))->s6_addr[13] == 0 && \
+     ((const struct in6_addr *)(a))->s6_addr[14] == 0 && \
+     ((const struct in6_addr *)(a))->s6_addr[15] == 0)
+#define IN6_IS_ADDR_LINKLOCAL(a) \
+    ((((const struct in6_addr *)(a))->s6_addr[0] == 0xfe) && \
+     ((((const struct in6_addr *)(a))->s6_addr[1] & 0xc0) == 0x80))
+#define IN6_IS_ADDR_SITELOCAL(a) \
+    ((((const struct in6_addr *)(a))->s6_addr[0] == 0xfe) && \
+     ((((const struct in6_addr *)(a))->s6_addr[1] & 0xc0) == 0xc0))
+
+/* The "any" / "loopback" addresses as compile-time constants.  Ported
+ * code uses these as initializers (e.g. `&in6addr_any`).  Substrate's
+ * libc supplies the symbols; declare here. */
+extern const struct in6_addr in6addr_any;
+extern const struct in6_addr in6addr_loopback;
+/* substrate's struct in6_addr is `struct { uint8_t s6_addr[16]; }`
+ * (no anonymous union, unlike glibc's), so the initializer wraps
+ * the array once.  Ported code that uses `(struct in6_addr)
+ * IN6ADDR_ANY_INIT` still compiles. */
+#define IN6ADDR_ANY_INIT      { { 0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0 } }
+#define IN6ADDR_LOOPBACK_INIT { { 0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,1 } }
+
+/* IPv4 / IPv6 socket-level option codes — values match Linux.
+ * substrate's network stack doesn't act on most of them yet, but
+ * setsockopt accepts them without erroring so callers compile and
+ * run. */
+#define IP_TOS                  1
+#define IP_TTL                  2
+#define IP_HDRINCL              3
+#define IP_OPTIONS              4
+#define IP_RECVOPTS             6
+#define IP_RETOPTS              7
+#define IP_MULTICAST_IF         32
+#define IP_MULTICAST_TTL        33
+#define IP_MULTICAST_LOOP       34
+#define IP_ADD_MEMBERSHIP       35
+#define IP_DROP_MEMBERSHIP      36
+#define IP_UNBLOCK_SOURCE       37
+#define IP_BLOCK_SOURCE         38
+#define IP_ADD_SOURCE_MEMBERSHIP   39
+#define IP_DROP_SOURCE_MEMBERSHIP  40
+
+#define IPV6_UNICAST_HOPS       16
+#define IPV6_MULTICAST_IF       17
+#define IPV6_MULTICAST_HOPS     18
+#define IPV6_MULTICAST_LOOP     19
+#define IPV6_ADD_MEMBERSHIP     20
+#define IPV6_DROP_MEMBERSHIP    21
+#define IPV6_V6ONLY             26
+
+struct ip_mreq {
+    struct in_addr imr_multiaddr;
+    struct in_addr imr_interface;
+};
+
+struct ipv6_mreq {
+    struct in6_addr ipv6mr_multiaddr;
+    unsigned int    ipv6mr_interface;
+};
+
 /* Privileged port range (RFC 1340 / historical BSD).  Ports below
  * IPPORT_RESERVED traditionally require root; bind() on substrate
  * doesn't enforce this yet but the constants are part of the ABI. */

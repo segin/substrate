@@ -19,6 +19,12 @@ extern "C" {
 #define O_TRUNC     0x0200
 #define O_APPEND    0x0400
 #define O_NONBLOCK  0x0800
+/* BSD-style aliases for O_NONBLOCK / async-IO.  Ported code
+ * (xorg-server's kinput.c, BSD daemons, ...) reaches for these. */
+#define FNDELAY     O_NONBLOCK
+#define O_NDELAY    O_NONBLOCK
+#define O_ASYNC     0x2000
+#define FASYNC      O_ASYNC
 #define O_DIRECTORY 0x10000
 #define O_NOFOLLOW  0x20000
 #define O_CLOEXEC   0x80000
@@ -45,6 +51,13 @@ extern "C" {
 #define F_GETLK     5
 #define F_SETLK     6
 #define F_SETLKW    7
+/* BSD-style SIGIO ownership.  Substrate's kernel doesn't deliver
+ * SIGIO yet — these are accepted by fcntl() (no-op) so ported code
+ * using async-I/O ownership compiles and runs.  Programs that
+ * depend on actually receiving SIGIO will silently never see it
+ * and should fall back to poll()/select(). */
+#define F_GETOWN    9
+#define F_SETOWN    8
 
 /* file descriptor flags */
 #define FD_CLOEXEC  1

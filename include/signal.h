@@ -31,6 +31,9 @@ extern "C" {
 #define SIGTTIN 21
 #define SIGTTOU 22
 #define SIGPOLL 23
+/* BSD-style alias — same signal under both names.  Ported software
+ * (xorg-server's kinput.c, dhclient, ...) uses SIGIO. */
+#define SIGIO   SIGPOLL
 #define SIGXCPU 24
 #define SIGXFSZ 25
 #define SIGVTALRM 26
