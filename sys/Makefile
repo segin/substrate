@@ -24,62 +24,62 @@ endif
 
 .PHONY: all clean install arch_kernel core kern pm drivers fs net exec vfs exec_perso vm multiboot zimage efi tests klib floppy
 
-all: kernel.bin kernel.efi kernel.multiboot kernel.zimage
+all: kernel.bin kernel.fb.bin kernel.efi kernel.multiboot kernel.fb.multiboot kernel.zimage
 	@echo "Kernel build complete (all formats)."
 
-kernel.bin: arch_kernel klib kern pm drivers fs net exec vfs exec_perso vm tests
-	# First pass: link kernel without ksyms
-	$(LD) -m elf_i386 -T arch/$(ARCH)/linker.ld -o kernel.tmp \
-		arch/$(ARCH)/kernel.o \
-		lib/lib.o \
-		kern/kern.o \
-		pm/pm.o \
-		drivers/video/video.o \
-		drivers/input/input.o \
-		drivers/console/console_subsys.o \
-		drivers/console/uart/uart_drv.o \
-		drivers/storage/storage.o \
-		drivers/usb/usb_drv.o \
-		drivers/audio/audio_drv.o \
-		drivers/devices/devices.o \
-		drivers/virtio/virtio_drv.o \
-		drivers/net/net_drv.o \
-		vfs/vfs_subsys.o \
-		fs/fs.o net/net.o \
-		exec/formats/exec.o \
-		exec/perso/perso.o \
-		vm/vm.o \
+# Everything except the multiboot-header variant.  Picked up by both the
+# text-mode and framebuffer-mode link rules.
+KERNEL_LINK_OBJS = \
+	arch/$(ARCH)/kernel.o \
+	lib/lib.o \
+	kern/kern.o \
+	pm/pm.o \
+	drivers/video/video.o \
+	drivers/input/input.o \
+	drivers/console/console_subsys.o \
+	drivers/console/uart/uart_drv.o \
+	drivers/storage/storage.o \
+	drivers/usb/usb_drv.o \
+	drivers/audio/audio_drv.o \
+	drivers/devices/devices.o \
+	drivers/virtio/virtio_drv.o \
+	drivers/net/net_drv.o \
+	vfs/vfs_subsys.o \
+	fs/fs.o net/net.o \
+	exec/formats/exec.o \
+	exec/perso/perso.o \
+	vm/vm.o \
 	$(TESTS_OBJ)
+
+kernel.bin: arch_kernel klib kern pm drivers fs net exec vfs exec_perso vm tests
+	# First pass: link kernel without ksyms (text-mode multiboot header)
+	$(LD) -m elf_i386 -T arch/$(ARCH)/linker.ld -o kernel.tmp \
+		arch/$(ARCH)/multiboot_hdr.o $(KERNEL_LINK_OBJS)
 	# Generate ksyms table
 	nm kernel.tmp | python3 mkksyms.py > ksyms_table.c
 	$(CC) $(KERNEL_CFLAGS) -c ksyms_table.c -o ksyms_table.o
 	# Second pass: link kernel with ksyms
 	$(LD) -m elf_i386 -T arch/$(ARCH)/linker.ld -o kernel.bin \
-		arch/$(ARCH)/kernel.o \
-		lib/lib.o \
-		kern/kern.o \
-		pm/pm.o \
-		drivers/video/video.o \
-		drivers/input/input.o \
-		drivers/console/console_subsys.o \
-		drivers/console/uart/uart_drv.o \
-		drivers/storage/storage.o \
-		drivers/usb/usb_drv.o \
-		drivers/audio/audio_drv.o \
-		drivers/devices/devices.o \
-		drivers/net/net_drv.o \
-		drivers/virtio/virtio_drv.o \
-		vfs/vfs_subsys.o \
-		fs/fs.o net/net.o \
-		exec/formats/exec.o \
-		exec/perso/perso.o \
-		vm/vm.o \
-	$(TESTS_OBJ) \
-	ksyms_table.o
-	@echo "Linked kernel.bin"
+		arch/$(ARCH)/multiboot_hdr.o $(KERNEL_LINK_OBJS) ksyms_table.o
+	@echo "Linked kernel.bin (multiboot mode_type=1, EGA text)"
+
+kernel.fb.bin: arch_kernel klib kern pm drivers fs net exec vfs exec_perso vm tests
+	# First pass: link kernel without ksyms (framebuffer multiboot header)
+	$(LD) -m elf_i386 -T arch/$(ARCH)/linker.ld -o kernel.fb.tmp \
+		arch/$(ARCH)/multiboot_hdr_fb.o $(KERNEL_LINK_OBJS)
+	# Generate ksyms table (FB variant has slightly different addresses)
+	nm kernel.fb.tmp | python3 mkksyms.py > ksyms_fb_table.c
+	$(CC) $(KERNEL_CFLAGS) -c ksyms_fb_table.c -o ksyms_fb_table.o
+	# Second pass
+	$(LD) -m elf_i386 -T arch/$(ARCH)/linker.ld -o kernel.fb.bin \
+		arch/$(ARCH)/multiboot_hdr_fb.o $(KERNEL_LINK_OBJS) ksyms_fb_table.o
+	@echo "Linked kernel.fb.bin (multiboot mode_type=0, linear FB)"
 
 kernel.multiboot: kernel.bin
 	cp kernel.bin kernel.multiboot
+
+kernel.fb.multiboot: kernel.fb.bin
+	cp kernel.fb.bin kernel.fb.multiboot
 
 kernel.zimage: kernel.bin
 	@echo "Building zImage..."
@@ -225,7 +225,7 @@ clean:
 	$(MAKE) -C exec/perso clean
 	$(MAKE) -C vm clean
 	$(MAKE) -C lib clean
-	rm -f kernel.bin kernel.zimage kernel.flp kernel.tmp kernel_efi.tmp ksyms_table.c ksyms_table.o ksyms_efi_table.c ksyms_efi_table.o kernel_efi.elf kernel.efi kernel.multiboot kernel.freebsd kern/tests_stub.o
+	rm -f kernel.bin kernel.fb.bin kernel.zimage kernel.flp kernel.tmp kernel.fb.tmp kernel_efi.tmp ksyms_table.c ksyms_table.o ksyms_fb_table.c ksyms_fb_table.o ksyms_efi_table.c ksyms_efi_table.o kernel_efi.elf kernel.efi kernel.multiboot kernel.fb.multiboot kernel.freebsd kern/tests_stub.o
 	# kernel.freebsd kept in the rm line so old build trees self-clean.
 	rm -f arch/$(ARCH)/floppy/stage1.bin arch/$(ARCH)/floppy/stage2.bin
 

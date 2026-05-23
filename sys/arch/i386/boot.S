@@ -1,28 +1,11 @@
 #define ASM_FILE 1
 #include "multiboot.h"
 
-# Multiboot Header
-.section .multiboot
-.align 4
-    # Entry point for Linux zImage loader (jumps to _start)
-    # This allows the kernel to be loaded at 0x100000 and executed from offset 0
-    jmp _start
-    .align 4
-.long MULTIBOOT_HEADER_MAGIC
-.long MULTIBOOT_HEADER_FLAGS
-.long -(MULTIBOOT_HEADER_MAGIC + MULTIBOOT_HEADER_FLAGS)
-# Address fields (offsets 12-28): unused since bit 16 is not set, but must
-# be present so that the video mode fields land at the correct offsets 32-44.
-.long 0         # header_addr  (ignored)
-.long 0         # load_addr    (ignored)
-.long 0         # load_end_addr(ignored)
-.long 0         # bss_end_addr (ignored)
-.long 0         # entry_addr   (ignored)
-# Video mode fields (offsets 32-44): used since bit 2 (VIDEO) is set.
-.long 1         # mode_type: 1 = EGA text mode
-.long 80        # width  (columns)
-.long 25        # height (rows)
-.long 0         # depth  (unused for text)
+/*
+ * The multiboot header lives in arch/i386/multiboot_hdr.S so the same
+ * boot code can be linked into either text-mode or framebuffer-mode
+ * kernels by selecting one of the two header object variants.
+ */
 
 .section .setup, "ax"
 .global _start
