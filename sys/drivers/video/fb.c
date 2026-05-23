@@ -840,6 +840,16 @@ void fb_init(multiboot_info_t *mbi) {
     video_driver_t *selected_drv = NULL;
     int selected_mode_id = -1;
 
+    /* Pass 0: if the bootloader handed us a framebuffer via the MBI
+     * (mb_driver's probe succeeds when MULTIBOOT_INFO_FRAMEBUFFER_INFO
+     * is set and it's not text mode), inherit it as-is.  Skipped when
+     * the user passed an explicit vga= or video= cmdline argument — in
+     * that case the later passes pick a fresh mode and override. */
+    if (!have_vga_arg && !have_video_arg && mb_probe() == 0) {
+        selected_drv = &mb_driver;
+        kprint("Video: Inheriting framebuffer from Multiboot info.\n");
+    }
+
     /* Pass 1: vga=WxH@BPP mode-based selection */
     if (have_vga_arg && req_w > 0 && req_h > 0) {
         if (fb_find_matching_mode(req_w, req_h, req_bpp, &selected_drv, &selected_mode_id) == 0) {
