@@ -1300,6 +1300,55 @@ static int fb_vt_tty_ioctl(struct tty *tty, uint32_t cmd, unsigned long arg) {
             fb_console_update_cursor_locked(vt);
         }
         return 0;
+    case KDGETMODE:
+        val = vt->graphics_mode ? KD_GRAPHICS : KD_TEXT;
+        if (copyout(&val, (void *)arg, sizeof(int)) != 0) {
+            return -EFAULT;
+        }
+        return 0;
+    case KDSETMODE:
+        if (copyin((void *)arg, &val, sizeof(int)) != 0) {
+            return -EFAULT;
+        }
+        if (val != KD_TEXT && val != KD_GRAPHICS) {
+            return -EINVAL;
+        }
+        if (val == KD_GRAPHICS && !vt->graphics_mode) {
+            /* Entering graphics mode: hide our cursor (so it doesn't
+             * linger over X's first frame) and stop fb writes via
+             * the graphics_mode gate.  Don't clear the framebuffer
+             * — let the X server paint over our content. */
+            vt->graphics_mode = 1;
+            FB_LOCK();
+            fb_console_hide_cursor();
+            FB_UNLOCK();
+        } else if (val == KD_TEXT && vt->graphics_mode) {
+            /* Leaving graphics mode: drop the gate, then repaint
+             * everything (cells + status bar + cursor) since the
+             * framebuffer now belongs to whatever X drew last. */
+            vt->graphics_mode = 0;
+            if (vt->id == vt_get_active()) {
+                fb_console_redraw_active();
+                vt_render_statusline(vt);
+            }
+        }
+        return 0;
+    case KDGKBMODE:
+        val = vt->kbd_mode ? vt->kbd_mode : K_XLATE;
+        if (copyout(&val, (void *)arg, sizeof(int)) != 0) {
+            return -EFAULT;
+        }
+        return 0;
+    case KDSKBMODE:
+        if (copyin((void *)arg, &val, sizeof(int)) != 0) {
+            return -EFAULT;
+        }
+        if (val != K_RAW && val != K_XLATE &&
+            val != K_MEDIUMRAW && val != K_UNICODE && val != K_OFF) {
+            return -EINVAL;
+        }
+        vt->kbd_mode = val;
+        return 0;
     default:
         return -ENOTTY;
     }
@@ -1695,6 +1744,15 @@ static void fb_console_backend_write(const char *data, size_t len) {
 
     vt = vt_get_state(vt_get_active());
     if (!vt) {
+        return;
+    }
+
+    /* X server (or any framebuffer-owning userland) has put this VT
+     * into KD_GRAPHICS mode.  Drop console writes silently so we
+     * don't paint text over its pixel output.  Output still goes to
+     * the UART backend via console_write's backend iteration, so
+     * serial logging continues to work. */
+    if (vt->graphics_mode) {
         return;
     }
 

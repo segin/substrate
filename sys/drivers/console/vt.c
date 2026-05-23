@@ -672,6 +672,12 @@ void vt_render_statusline(vt_state_t *vt) {
         return;
     }
 
+    /* In KD_GRAPHICS mode an X server owns the framebuffer; the
+     * status bar would paint over its output.  Skip silently. */
+    if (vt->graphics_mode) {
+        return;
+    }
+
     vt_compose_statusline(vt);
 
     if (vt->id == vt_get_active()) {
@@ -687,6 +693,12 @@ void vt_redraw_active(void) {
     vt_state_t *vt = vt_get_state(vt_get_active());
 
     if (!vt) {
+        return;
+    }
+
+    /* Same gate as vt_render_statusline — don't draw cells over the
+     * X server's framebuffer output. */
+    if (vt->graphics_mode) {
         return;
     }
 

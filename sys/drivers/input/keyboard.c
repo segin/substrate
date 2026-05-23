@@ -18,6 +18,7 @@
 #include <stdint.h>
 #include <string.h>
 #include <sys/vt.h>
+#include <sys/vtio.h>
 #include <sys/tty.h>
 #include <arch/i386/intr.h>
 #include <sys/lock.h>
@@ -397,6 +398,12 @@ static void keyboard_emit_char(char c) {
 
     active = vt_get_active();
     vt = vt_get_state(active);
+    /* See tty_inject_input_locked path below — when kbd_mode != XLATE
+     * the X server (or other evdev consumer) is exclusively reading
+     * /dev/input/event0; don't double-feed the TTY. */
+    if (vt && vt->kbd_mode != 0 && vt->kbd_mode != K_XLATE) {
+        return;
+    }
     if (vt && vt->tty) {
         tty_flip_buffer_push(vt->tty, c);
     } else {
@@ -426,6 +433,15 @@ static void keyboard_emit_seq(const char *seq) {
 
     active = vt_get_active();
     vt = vt_get_state(active);
+    /* When the active VT's keyboard processing mode is anything other
+     * than K_XLATE (i.e. X server has put us in K_RAW / K_MEDIUMRAW /
+     * etc.), keystrokes must only reach userland via /dev/input/event0
+     * — not the TTY line discipline.  Without this gate, typing into
+     * an X session would also fill the underlying VT's input ring.
+     * /dev/input/event0 gets fed unconditionally upstream of here. */
+    if (vt && vt->kbd_mode != 0 && vt->kbd_mode != K_XLATE) {
+        return;
+    }
     if (vt && vt->tty) {
         /* tty_inject_input_locked wants the caller to hold tty->lock
          * with interrupts disabled — same contract as

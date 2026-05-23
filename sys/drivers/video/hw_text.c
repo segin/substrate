@@ -1405,6 +1405,31 @@ static int vt_tty_ioctl(struct tty *tty, uint32_t cmd, unsigned long arg) {
             hw_text_update_cursor_locked(vt);
         }
         return 0;
+    case KDGETMODE:
+        kvalue = vt->graphics_mode ? KD_GRAPHICS : KD_TEXT;
+        if (copyout(&kvalue, (void *)arg, sizeof(int)) != 0) return -EFAULT;
+        return 0;
+    case KDSETMODE:
+        if (copyin((void *)arg, &kvalue, sizeof(int)) != 0) return -EFAULT;
+        if (kvalue != KD_TEXT && kvalue != KD_GRAPHICS) return -EINVAL;
+        vt->graphics_mode = (kvalue == KD_GRAPHICS) ? 1 : 0;
+        /* hw_text path only matters on a VGA-text console (0xB8000);
+         * an X server here would be running in VGA gfx mode 12h /
+         * 13h, which the text driver doesn't paint into anyway.
+         * Setting the flag still suppresses statusline rendering. */
+        return 0;
+    case KDGKBMODE:
+        kvalue = vt->kbd_mode ? vt->kbd_mode : K_XLATE;
+        if (copyout(&kvalue, (void *)arg, sizeof(int)) != 0) return -EFAULT;
+        return 0;
+    case KDSKBMODE:
+        if (copyin((void *)arg, &kvalue, sizeof(int)) != 0) return -EFAULT;
+        if (kvalue != K_RAW && kvalue != K_XLATE &&
+            kvalue != K_MEDIUMRAW && kvalue != K_UNICODE && kvalue != K_OFF) {
+            return -EINVAL;
+        }
+        vt->kbd_mode = kvalue;
+        return 0;
     default:
         return -1;
     }

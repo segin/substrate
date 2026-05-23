@@ -87,7 +87,27 @@ typedef struct vt_state {
     
     // Keyboard LED state for this VT (Scroll Lock, Num Lock, Caps Lock)
     uint8_t led_state;
-    
+
+    /*
+     * KD_TEXT (0) or KD_GRAPHICS (1).  Set by an X server via the
+     * KDSETMODE ioctl when it wants to claim the framebuffer.
+     * While in KD_GRAPHICS:
+     *   - the FB console backend silently drops writes (no painted
+     *     text over X's pixel output)
+     *   - the status-bar tick skips its render
+     *   - the keyboard line-discipline drops translated chars
+     *     (only /dev/input/event0 sees them) unless kbd_mode is
+     *     also reset to K_XLATE
+     */
+    int graphics_mode;
+
+    /*
+     * Keyboard processing mode.  K_XLATE (default) = cooked chars
+     * into the TTY; anything else suppresses TTY input so only
+     * evdev (/dev/input/event0) consumers see the events.
+     */
+    int kbd_mode;
+
     // Associated TTY (if any)
     struct tty *tty;
 } vt_state_t;
