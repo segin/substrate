@@ -48,14 +48,44 @@ sudo chown "$USER" "$TAPDEV"
 
 echo "run-networking.sh: $MACVTAP up on $NIC, MAC $MACADDR, $TAPDEV"
 
-exec qemu-system-i386 -cpu qemu32,+sse,+sse2 -accel kvm \
+# Prefer a kernel in the current directory; fall back to sys/.
+if [ -f kernel.bin ]; then
+    KERNEL=kernel.bin
+elif [ -f sys/kernel.bin ]; then
+    KERNEL=sys/kernel.bin
+else
+    echo "run-networking.sh: kernel.bin not found in . or sys/" >&2
+    exit 1
+fi
+
+# Find the rootfs image.  If only the compressed form (rootfs.img.zst)
+# exists, decompress it in place — the user normally distributes the
+# compressed copy via git-annex / scp / similar.  rootfs.img wins if
+# both are present (most likely just-rebuilt and not yet re-compressed).
+if [ -f rootfs.img ]; then
+    :
+elif [ -f rootfs.img.zst ]; then
+    if ! command -v zstd >/dev/null 2>&1; then
+        echo "run-networking.sh: rootfs.img.zst present but zstd not installed" >&2
+        exit 1
+    fi
+    echo "run-networking.sh: decompressing rootfs.img.zst -> rootfs.img"
+    zstd -d --keep -- rootfs.img.zst
+else
+    echo "run-networking.sh: neither rootfs.img nor rootfs.img.zst found" >&2
+    exit 1
+fi
+
+# Not exec'd: when qemu exits the script resumes and the EXIT trap
+# tears the macvtap down.
+qemu-system-i386 -cpu qemu32,+sse,+sse2 -accel kvm \
   -drive file=rootfs.img,format=raw,if=none,id=drive0 \
   -device ich9-ahci,id=sata0 \
   -device ide-hd,bus=sata0.0,unit=0,drive=drive0 \
   -device piix3-usb-uhci -device usb-kbd \
   -netdev tap,id=n0,fd=3,vhost=off \
   -device virtio-net-pci,netdev=n0,mac="$MACADDR" \
-  -kernel sys/kernel.bin \
+  -kernel "$KERNEL" \
   -append "root=/dev/storage/sata0 serial_debug" \
   -serial stdio \
   -audio driver=sdl,model=ac97,id=audio0 \
