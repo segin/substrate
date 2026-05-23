@@ -35,6 +35,11 @@
 #define LOGIN_NAME_MAX 256
 #define IOV_MAX 1024
 #define LINE_MAX 2048
+/* POSIX hint for the maximum number of file descriptors a process
+ * can have open.  Substrate's actual limit is set per-process by
+ * RLIMIT_NOFILE at runtime; OPEN_MAX is the compile-time constant
+ * POSIX-conformant code expects to find. */
+#define OPEN_MAX 1024
 
 /* SSIZE_MAX — maximum value that fits in ssize_t.  ssize_t mirrors
  * long on substrate (4 bytes on i386, 8 on x86_64). */
