@@ -116,8 +116,17 @@ apply_termios_defaults(void)
     t.c_iflag = BRKINT | ICRNL | IXON;
     t.c_oflag = OPOST | ONLCR;
     t.c_cflag = (t.c_cflag & ~CSIZE) | CS8 | CREAD | HUPCL | CLOCAL;
+    /* ECHONL — "echo NL even when ECHO is off" — must NOT be set:
+     * line editors (zsh ZLE, fish, readline, ...) clear ECHO and
+     * handle their own echo.  With ECHONL on, the line discipline
+     * still echoes the newline on Enter, and the line editor's own
+     * post-edit newline lands right behind it: two line feeds reach
+     * the terminal, displayed as a blank line between every command
+     * line and its output.  Console + xterm both showed this; ssh /
+     * telnet did not because their pty slaves were never touched by
+     * getty. */
     t.c_lflag = ISIG | ICANON | ECHO | ECHOE | ECHOK | ECHOCTL | ECHOKE
-              | ECHONL | IEXTEN;
+              | IEXTEN;
     t.c_cc[VEOF]   = 4;   /* ^D */
     t.c_cc[VEOL]   = 0;
     /* The PS/2 keyboard driver maps the Backspace key to 127 (DEL),
