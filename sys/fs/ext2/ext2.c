@@ -1230,6 +1230,30 @@ fs_node_t *ext2_alloc_node(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_t *inod
                     (unsigned long long)ext2_alloc_node_fail,
                     inode_num, pinned, locked, EXT2_NODE_CACHE_SIZE);
         }
+        /* First failure: dump every pinned slot so the leak source
+         * is visible (inode#, type, pin_count, orphaned flag).  The
+         * fingerprint usually points right at the leak — e.g. dozens
+         * of pin=1 on the same FS_FILE inode means an open-without-
+         * close path, dozens of pin=N on /sbin/init's exec path
+         * means proc_fork open_fs leaking into a non-balancing exit. */
+        if (ext2_alloc_node_fail == 1) {
+            kprintf("ext2: alloc_node fail snapshot (top pinned slots):\n");
+            int shown = 0;
+            for (int i = 0; i < EXT2_NODE_CACHE_SIZE && shown < 32; i++) {
+                if (ext2_node_cache[i].pin_count == 0) continue;
+                kprintf("  slot=%3d inode=%6u mode=%#06o pin=%u orphan=%u\n",
+                        i,
+                        ext2_node_cache[i].inode_num,
+                        ext2_node_cache[i].inode.i_mode,
+                        ext2_node_cache[i].pin_count,
+                        ext2_node_cache[i].orphaned);
+                shown++;
+            }
+            extern unsigned long fs_open_count, fs_close_count;
+            kprintf("ext2: open_fs=%lu close_fs=%lu delta=%ld\n",
+                    fs_open_count, fs_close_count,
+                    (long)(fs_open_count - fs_close_count));
+        }
         return NULL;
     }
     ext2_alloc_node_new++;
