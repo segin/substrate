@@ -1698,6 +1698,17 @@ static void fb_console_backend_write(const char *data, size_t len) {
         return;
     }
 
+    /* If the current CPU is already inside an FB-locked section,
+     * re-entering would tripwire spinlock_acquire's deadlock check
+     * (substrate's spinlocks are non-recursive).  This happens any
+     * time something under FB_LOCK calls kprint — directly, or
+     * indirectly via a panic emitter.  Drop the message rather than
+     * deadlock; the kernel keeps making progress and the operator
+     * can see the missing print in the serial log. */
+    if (spinlock_is_held(&fb_console_lock)) {
+        return;
+    }
+
     FB_LOCK();
     fb_console_write_vt_locked(vt, data, len);
     FB_UNLOCK();
