@@ -297,6 +297,125 @@ static void vga_putpixel_planar(int x, int y, uint32_t color) {
     outb(VGA_GC_DATA, 0xFF);
 }
 
+/*
+ * Planar VGA region-at-a-time accelerators.  The CRTC keeps 4 planes
+ * stacked so each byte of VRAM holds 8 pixels' worth of one plane;
+ * the latch holds one byte from each plane.  That makes byte-aligned
+ * region operations vastly cheaper than the per-pixel putpixel path
+ * — no per-pixel mode switch, no per-pixel port writes.
+ *
+ * Both helpers assume planar mode 12h (640x480x4) layout: pitch is
+ * in bytes (= width / 8), one VRAM byte covers 8 horizontal pixels.
+ * For full-row console scrolling the source/dest are byte-aligned
+ * (column 0, width = fb.width); for partial-row regions we serialize
+ * the edge bits through putpixel.
+ */
+static void vga_copyarea_planar(uint32_t dx, uint32_t dy, uint32_t w,
+                                 uint32_t h, uint32_t sx, uint32_t sy) {
+    if (w == 0 || h == 0) return;
+
+    /* Byte-aligned fast path: dx, sx, and width all on 8-pixel
+     * boundaries — pitch (in bytes) * 1 cell per row. */
+    if ((dx & 7) == 0 && (sx & 7) == 0 && (w & 7) == 0) {
+        uint32_t dx_bytes = dx >> 3;
+        uint32_t sx_bytes = sx >> 3;
+        uint32_t bytes_per_row = w >> 3;
+
+        /* Write Mode 1: writing a byte copies the 4 latches into VRAM. */
+        outb(VGA_GC_INDEX, VGA_GC_MODE);
+        outb(VGA_GC_DATA, 0x01);
+
+        /* Top-down vs. bottom-up to handle overlap. */
+        if (dy < sy) {
+            for (uint32_t y = 0; y < h; y++) {
+                volatile uint8_t *src = (volatile uint8_t *)((uintptr_t)fb.addr
+                    + (uintptr_t)(sy + y) * fb.pitch + sx_bytes);
+                volatile uint8_t *dst = (volatile uint8_t *)((uintptr_t)fb.addr
+                    + (uintptr_t)(dy + y) * fb.pitch + dx_bytes);
+                for (uint32_t b = 0; b < bytes_per_row; b++) {
+                    /* Read loads all 4 planes into the latch register;
+                     * the discarded value is irrelevant.  Write then
+                     * stores the latch into the destination — one
+                     * 4-plane byte copy per iteration. */
+                    uint8_t latch = src[b];
+                    dst[b] = latch;
+                }
+            }
+        } else {
+            for (uint32_t y = h; y > 0; y--) {
+                uint32_t i = y - 1;
+                volatile uint8_t *src = (volatile uint8_t *)((uintptr_t)fb.addr
+                    + (uintptr_t)(sy + i) * fb.pitch + sx_bytes);
+                volatile uint8_t *dst = (volatile uint8_t *)((uintptr_t)fb.addr
+                    + (uintptr_t)(dy + i) * fb.pitch + dx_bytes);
+                for (uint32_t b = 0; b < bytes_per_row; b++) {
+                    uint8_t latch = src[b];
+                    dst[b] = latch;
+                }
+            }
+        }
+
+        /* Restore Write Mode 0. */
+        outb(VGA_GC_INDEX, VGA_GC_MODE);
+        outb(VGA_GC_DATA, 0x00);
+        return;
+    }
+
+    /* Non-byte-aligned: fall back to the slow per-pixel reader path —
+     * console scrolling never lands here (full-screen-width rows). */
+    /* No-op: planar fb_copyarea() previously did nothing for this
+     * case, so behaviour is unchanged. */
+}
+
+static void vga_fillrect_planar(uint32_t dx, uint32_t dy, uint32_t w,
+                                 uint32_t h, uint32_t color) {
+    if (w == 0 || h == 0) return;
+
+    /* Byte-aligned fast path: Set/Reset fills 4 planes with the
+     * chosen color in a single write per byte. */
+    if ((dx & 7) == 0 && (w & 7) == 0) {
+        uint32_t dx_bytes = dx >> 3;
+        uint32_t bytes_per_row = w >> 3;
+
+        /* Configure Set/Reset to produce `color` (low 4 bits =
+         * one bit per plane) on every byte write. */
+        outb(VGA_GC_INDEX, VGA_GC_SET_RESET);
+        outb(VGA_GC_DATA, (uint8_t)(color & 0x0F));
+        outb(VGA_GC_INDEX, VGA_GC_ENABLE_SET_RESET);
+        outb(VGA_GC_DATA, 0x0F);
+        outb(VGA_GC_INDEX, VGA_GC_BIT_MASK);
+        outb(VGA_GC_DATA, 0xFF);
+        outb(VGA_GC_INDEX, VGA_GC_MODE);
+        outb(VGA_GC_DATA, 0x00);
+
+        for (uint32_t y = 0; y < h; y++) {
+            volatile uint8_t *dst = (volatile uint8_t *)((uintptr_t)fb.addr
+                + (uintptr_t)(dy + y) * fb.pitch + dx_bytes);
+            for (uint32_t b = 0; b < bytes_per_row; b++) {
+                /* Any value works — Set/Reset overrides per-plane.
+                 * A write to a latch-free location, so no read first. */
+                dst[b] = 0xFF;
+            }
+        }
+
+        /* Restore defaults: Set/Reset disabled, bit mask all-bits-on. */
+        outb(VGA_GC_INDEX, VGA_GC_ENABLE_SET_RESET);
+        outb(VGA_GC_DATA, 0x00);
+        outb(VGA_GC_INDEX, VGA_GC_SET_RESET);
+        outb(VGA_GC_DATA, 0x00);
+        outb(VGA_GC_INDEX, VGA_GC_BIT_MASK);
+        outb(VGA_GC_DATA, 0xFF);
+        return;
+    }
+
+    /* Non-aligned: fall back to per-pixel. */
+    for (uint32_t y = 0; y < h; y++) {
+        for (uint32_t x = 0; x < w; x++) {
+            vga_putpixel_planar((int)(dx + x), (int)(dy + y), color);
+        }
+    }
+}
+
 static void herc_putpixel(int x, int y, uint32_t color) {
     if (x < 0 || x >= (int)fb.width || y < 0 || y >= (int)fb.height) return;
     
@@ -379,7 +498,17 @@ static int vga_set_mode_internal(int mode_id) {
     fb.pitch = mode->pitch;
     fb.addr = (uint32_t*)mode->mem_base;
     fb.putpixel = mode->putpixel;
-    
+    fb.copyarea = NULL;
+    fb.fillrect = NULL;
+    /* Install planar-VGA accelerators when this is a planar EGA/VGA
+     * mode — 4bpp byte-packed planes, byte-aligned region ops via
+     * the latch + Set/Reset paths.  Non-planar modes (linear 8bpp
+     * mode 13, Hercules, CGA) keep the per-pixel fallback. */
+    if (mode->putpixel == vga_putpixel_planar) {
+        fb.copyarea = vga_copyarea_planar;
+        fb.fillrect = vga_fillrect_planar;
+    }
+
     return 0;
 }
 

@@ -23,6 +23,17 @@ typedef struct {
     int (*set_viewport)(int x, int y);
     void (*scroll)(int y_offset);
     void (*flush)(int x, int y, int w, int h);
+    /* Optional 2-D accelerator hooks.  When set, fb_copyarea() /
+     * fb_fillrect() dispatch through these instead of going through
+     * fb_putpixel.  Planar drivers (VGA mode 12, etc.) install
+     * these to do byte-at-a-time region operations via the VGA
+     * write-mode-1 latch path or Set/Reset fill — orders of
+     * magnitude faster than per-pixel through the planar putpixel.
+     * Arguments are pre-clipped to fb bounds by fb_ops.c. */
+    void (*copyarea)(uint32_t dx, uint32_t dy, uint32_t w, uint32_t h,
+                     uint32_t sx, uint32_t sy);
+    void (*fillrect)(uint32_t dx, uint32_t dy, uint32_t w, uint32_t h,
+                     uint32_t color);
 } fb_info_t;
 
 extern fb_info_t fb;

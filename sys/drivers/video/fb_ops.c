@@ -102,6 +102,13 @@ void fb_fillrect(const struct fb_fillrect_info *rect)
     if (!clip_rect(&dx, &dy, &w, &h))
         return;
 
+    /* Driver-provided accelerator (e.g. planar VGA Set/Reset fill) —
+     * only handles ROP_COPY; ROP_XOR still falls through. */
+    if (fb.fillrect && rect->rop == ROP_COPY) {
+        fb.fillrect(dx, dy, w, h, rect->color);
+        return;
+    }
+
     if (is_linear_32bpp()) {
         /* Convert color once for fast path */
         uint32_t raw = rect->color;
@@ -178,6 +185,13 @@ void fb_copyarea(const struct fb_copyarea_info *area)
 
     if (w == 0 || h == 0)
         return;
+
+    /* Driver-provided accelerator (e.g. planar VGA Write Mode 1
+     * latched copy). */
+    if (fb.copyarea) {
+        fb.copyarea(dx, dy, w, h, sx, sy);
+        return;
+    }
 
     if (is_linear_32bpp()) {
         copyarea_32bpp(dx, dy, w, h, sx, sy);

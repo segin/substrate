@@ -582,7 +582,7 @@ static void fb_console_scroll_region_up_locked(vt_state_t *vt, int top, int bott
         /* Pixel-scroll requires a linear FB (any bpp).  fb_copyarea
          * is a no-op for non-linear drivers (planar VGA / Hercules /
          * CGA) — fall back to per-cell redraw on those. */
-        if (fb.putpixel == linear_fb_putpixel) {
+        if (fb.copyarea || fb.putpixel == linear_fb_putpixel) {
             fb_console_pixel_scroll_region_locked(top, bottom, n, -1, clear_color);
         } else {
             for (row = top; row <= bottom; row++) {
@@ -622,7 +622,7 @@ static void fb_console_scroll_region_down_locked(vt_state_t *vt, int top, int bo
     if (vt->id == vt_get_active() && view_y_offset == 0) {
         uint8_t effective = fb_console_effective_color(vt, vt->color);
         uint32_t clear_color = fb_console_palette[(effective >> 4) & 0x0FU];
-        if (fb.putpixel == linear_fb_putpixel) {
+        if (fb.copyarea || fb.putpixel == linear_fb_putpixel) {
             fb_console_pixel_scroll_region_locked(top, bottom, n, +1, clear_color);
         } else {
             for (row = top; row <= bottom; row++) {
