@@ -2,8 +2,35 @@
 #define _MULTIBOOT_H
 
 #define MULTIBOOT_HEADER_MAGIC 0x1BADB002
-#define MULTIBOOT_HEADER_FLAGS 0x00000007 
+#define MULTIBOOT_HEADER_FLAGS 0x00000007
 #define MULTIBOOT_BOOTLOADER_MAGIC 0x2BADB002
+
+/* Multiboot 2 — kept side-by-side with multiboot 1 in the kernel image
+ * so EFI loaders (which can't drive the mb1 long-mode→32-bit switch
+ * reliably) can hand off via mb2 instead.  Both headers describe the
+ * same kernel; the loader picks whichever it implements. */
+#define MULTIBOOT2_HEADER_MAGIC          0xE85250D6
+#define MULTIBOOT2_BOOTLOADER_MAGIC      0x36D76289
+#define MULTIBOOT2_ARCH_I386             0
+
+#define MULTIBOOT2_HEADER_TAG_END                  0
+#define MULTIBOOT2_HEADER_TAG_INFO_REQUEST         1
+#define MULTIBOOT2_HEADER_TAG_CONSOLE_FLAGS        4
+#define MULTIBOOT2_HEADER_TAG_FRAMEBUFFER          5
+
+#define MULTIBOOT2_TAG_TYPE_END                    0
+#define MULTIBOOT2_TAG_TYPE_CMDLINE                1
+#define MULTIBOOT2_TAG_TYPE_BOOT_LOADER_NAME       2
+#define MULTIBOOT2_TAG_TYPE_MODULE                 3
+#define MULTIBOOT2_TAG_TYPE_BASIC_MEMINFO          4
+#define MULTIBOOT2_TAG_TYPE_BOOTDEV                5
+#define MULTIBOOT2_TAG_TYPE_MMAP                   6
+#define MULTIBOOT2_TAG_TYPE_FRAMEBUFFER            8
+#define MULTIBOOT2_TAG_TYPE_ELF_SECTIONS           9
+#define MULTIBOOT2_TAG_TYPE_ACPI_OLD              14
+#define MULTIBOOT2_TAG_TYPE_ACPI_NEW              15
+#define MULTIBOOT2_TAG_TYPE_EFI_MMAP              17
+#define MULTIBOOT2_TAG_TYPE_EFI64_IMAGE_HANDLE    20
 
 #define MULTIBOOT_INFO_MEMORY           0x00000001
 #define MULTIBOOT_INFO_BOOTDEV          0x00000002
@@ -81,6 +108,58 @@ typedef struct multiboot_mmap_entry {
 #define MULTIBOOT_MEMORY_BADRAM                 5
     uint32_t type;
 } __attribute__((packed)) multiboot_mmap_entry_t;
+
+/* Multiboot 2 boot-info structures (passed by loader to kernel). */
+typedef struct multiboot2_tag {
+    uint32_t type;
+    uint32_t size;
+} multiboot2_tag_t;
+
+typedef struct multiboot2_tag_string {
+    uint32_t type;
+    uint32_t size;
+    char     string[0];
+} multiboot2_tag_string_t;
+
+typedef struct multiboot2_tag_basic_meminfo {
+    uint32_t type;
+    uint32_t size;
+    uint32_t mem_lower;
+    uint32_t mem_upper;
+} multiboot2_tag_basic_meminfo_t;
+
+typedef struct multiboot2_mmap_entry {
+    uint64_t addr;
+    uint64_t len;
+    uint32_t type;
+    uint32_t zero;
+} __attribute__((packed)) multiboot2_mmap_entry_t;
+
+typedef struct multiboot2_tag_mmap {
+    uint32_t type;
+    uint32_t size;
+    uint32_t entry_size;
+    uint32_t entry_version;
+    multiboot2_mmap_entry_t entries[0];
+} multiboot2_tag_mmap_t;
+
+typedef struct multiboot2_tag_framebuffer {
+    uint32_t type;
+    uint32_t size;
+    uint64_t addr;
+    uint32_t pitch;
+    uint32_t width;
+    uint32_t height;
+    uint8_t  bpp;
+    uint8_t  fb_type;
+    uint16_t reserved;
+    uint8_t  red_field_pos;
+    uint8_t  red_mask_size;
+    uint8_t  green_field_pos;
+    uint8_t  green_mask_size;
+    uint8_t  blue_field_pos;
+    uint8_t  blue_mask_size;
+} __attribute__((packed)) multiboot2_tag_framebuffer_t;
 
 #endif
 

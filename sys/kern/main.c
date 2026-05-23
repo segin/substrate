@@ -300,6 +300,113 @@ static int root_mount_from_spec(const char *device, const char *spec) {
 static void register_boot_ramdisks(multiboot_info_t *mboot_info);
 static void init_root_fs(void);
 
+/*
+ * Translate a multiboot 2 info block into the multiboot 1 multiboot_info_t
+ * the rest of the kernel already consumes.  Loaders that hand off via mb2
+ * (notably GRUB-EFI, which can't drive the mb1 long-mode→32-bit switch
+ * reliably) deposit a tag stream at `addr`; we walk it and populate the
+ * legacy struct field-for-field so init_memory()/init_framebuffer()/etc.
+ * see no difference.
+ *
+ * Strings and arrays referenced from tags live in the same low-memory
+ * region as the tag stream itself, so we keep them in place — only the
+ * `flags` summary and direct fields are written into the fake mbi.
+ *
+ * `addr` is the virtual (KERN_BASE-relative) address of the mb2 info,
+ * matching the boot.S adjustment for mb1.
+ */
+static void parse_multiboot2(unsigned long addr, multiboot_info_t *out) {
+    memset(out, 0, sizeof(*out));
+
+    if (!addr) return;
+
+    uint32_t total_size = *(volatile uint32_t *)addr;
+    multiboot2_tag_t *tag = (multiboot2_tag_t *)(addr + 8);
+    multiboot2_tag_t *tag_end = (multiboot2_tag_t *)(addr + total_size);
+
+    while (tag < tag_end && tag->type != MULTIBOOT2_TAG_TYPE_END) {
+        switch (tag->type) {
+        case MULTIBOOT2_TAG_TYPE_CMDLINE: {
+            multiboot2_tag_string_t *s = (multiboot2_tag_string_t *)tag;
+            out->cmdline = PHYSICAL_d(s->string);
+            out->flags |= MULTIBOOT_INFO_CMDLINE;
+            break;
+        }
+        case MULTIBOOT2_TAG_TYPE_BOOT_LOADER_NAME: {
+            multiboot2_tag_string_t *s = (multiboot2_tag_string_t *)tag;
+            out->boot_loader_name = PHYSICAL_d(s->string);
+            out->flags |= MULTIBOOT_INFO_BOOT_LOADER_NAME;
+            break;
+        }
+        case MULTIBOOT2_TAG_TYPE_BASIC_MEMINFO: {
+            multiboot2_tag_basic_meminfo_t *m =
+                (multiboot2_tag_basic_meminfo_t *)tag;
+            out->mem_lower = m->mem_lower;
+            out->mem_upper = m->mem_upper;
+            out->flags |= MULTIBOOT_INFO_MEMORY;
+            break;
+        }
+        case MULTIBOOT2_TAG_TYPE_MMAP: {
+            /* mb2 mmap entries are {addr:u64, len:u64, type:u32, zero:u32}
+             * == 24 bytes.  mb1 mmap entries are {size:u32, addr:u64,
+             * len:u64, type:u32} packed == 24 bytes including the leading
+             * size field.  Rewrite in place: mb2 layout has 4 bytes of
+             * runway at the end (`zero`) we can repurpose, but the safer
+             * path is to copy into the static mboot_mmap_copy[].
+             *
+             * However the legacy code reads from mmap_addr+0 expecting a
+             * mb1-format entry.  We translate by copying into the static
+             * arena and pointing mmap_addr there. */
+            multiboot2_tag_mmap_t *m = (multiboot2_tag_mmap_t *)tag;
+            uint32_t entry_size = m->entry_size;
+            uint32_t count = (m->size - sizeof(*m)) / entry_size;
+            if (count > 64) count = 64;
+            for (uint32_t i = 0; i < count; i++) {
+                multiboot2_mmap_entry_t *src =
+                    (multiboot2_mmap_entry_t *)((uint8_t *)m->entries + i * entry_size);
+                mboot_mmap_copy[i].size = 20;
+                mboot_mmap_copy[i].addr = src->addr;
+                mboot_mmap_copy[i].len = src->len;
+                mboot_mmap_copy[i].type = src->type;
+            }
+            out->mmap_addr = PHYSICAL_d(mboot_mmap_copy);
+            out->mmap_length = count * sizeof(multiboot_mmap_entry_t);
+            out->flags |= MULTIBOOT_INFO_MEM_MAP;
+            break;
+        }
+        case MULTIBOOT2_TAG_TYPE_FRAMEBUFFER: {
+            multiboot2_tag_framebuffer_t *fb =
+                (multiboot2_tag_framebuffer_t *)tag;
+            out->framebuffer_addr = fb->addr;
+            out->framebuffer_pitch = fb->pitch;
+            out->framebuffer_width = fb->width;
+            out->framebuffer_height = fb->height;
+            out->framebuffer_bpp = fb->bpp;
+            out->framebuffer_type = fb->fb_type;
+            if (fb->fb_type == MULTIBOOT_FRAMEBUFFER_TYPE_RGB) {
+                out->framebuffer_red_field_position = fb->red_field_pos;
+                out->framebuffer_red_mask_size = fb->red_mask_size;
+                out->framebuffer_green_field_position = fb->green_field_pos;
+                out->framebuffer_green_mask_size = fb->green_mask_size;
+                out->framebuffer_blue_field_position = fb->blue_field_pos;
+                out->framebuffer_blue_mask_size = fb->blue_mask_size;
+            }
+            out->flags |= MULTIBOOT_INFO_FRAMEBUFFER_INFO;
+            break;
+        }
+        default:
+            /* Tags we don't (yet) translate: modules, ELF sections, ACPI
+             * RSDPs, EFI mmap, EFI image handle, etc.  Ignored for now —
+             * the kernel's existing code paths don't consume them. */
+            break;
+        }
+
+        /* Next tag, padded up to 8-byte boundary. */
+        uint32_t advance = (tag->size + 7) & ~7u;
+        tag = (multiboot2_tag_t *)((uint8_t *)tag + advance);
+    }
+}
+
 static multiboot_info_t *select_boot_info(unsigned long magic, unsigned long addr,
                                           char **cmdline_out) {
     multiboot_info_t *mboot_info = (multiboot_info_t *)addr;
@@ -321,6 +428,15 @@ static multiboot_info_t *select_boot_info(unsigned long magic, unsigned long add
             *cmdline_out = (char *)VIRTUAL_d(mboot_info->cmdline);
         }
         return mboot_info;
+    }
+
+    if (magic == MULTIBOOT2_BOOTLOADER_MAGIC) {
+        parse_multiboot2(addr, &fake_mbi);
+        if (cmdline_out && (fake_mbi.flags & MULTIBOOT_INFO_CMDLINE)) {
+            *cmdline_out = (char *)VIRTUAL_d(fake_mbi.cmdline);
+        }
+        kprint("Booted via Multiboot 2.\n");
+        return &fake_mbi;
     }
 
     kprint("Warning: Unknown bootloader magic, assuming raw boot.\n");
