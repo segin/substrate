@@ -55,6 +55,26 @@ void vm_object_init(void);
 vm_object_t *vm_object_allocate(vm_object_type_t type, size_t size);
 void vm_object_reference(vm_object_t *object);
 void vm_object_deallocate(vm_object_t *object);
+
+/*
+ * vm_object_try_reference - bump ref_count IFF the object is still live
+ * (magic is correct AND ref_count > 0).  Used by weak-reference caches
+ * (e.g. shared_file_objects in vm_syscalls.c) to promote a raw cache
+ * pointer to a real reference without racing against a concurrent
+ * deallocate that is between "dec to 0" and "tear down".  Returns 1
+ * on success, 0 if the object is dying or dead.
+ */
+int  vm_object_try_reference(vm_object_t *object);
+
+/*
+ * vm_syscalls_evict_shared_obj - if `object` is currently in the
+ * shared-file-object cache, unlink the entry.  Called from
+ * vm_object_deallocate at ref_count == 0 so the cache holds a weak
+ * reference (entry but no extra refcount) and concurrent lookups
+ * can't revive a dying object.
+ */
+void vm_syscalls_evict_shared_obj(vm_object_t *object);
+
 vm_object_t *vm_object_shadow(vm_object_t *source);
 int vm_object_collapse(vm_object_t *object);
 

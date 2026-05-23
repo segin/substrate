@@ -55,6 +55,23 @@ void vm_object_reference(vm_object_t *object) {
     }
 }
 
+/*
+ * Bump ref_count only if the object is still live.  Loop-CAS prevents
+ * resurrecting an object that has just dropped to 0 and is about to
+ * be torn down — that race is what made `shared_file_objects`
+ * dangerous as a weak cache.
+ */
+int vm_object_try_reference(vm_object_t *object) {
+    if (!object) return 0;
+    if (object->magic != VM_OBJECT_MAGIC) return 0;
+    for (;;) {
+        int cur = __atomic_load_n(&object->ref_count, __ATOMIC_ACQUIRE);
+        if (cur <= 0) return 0;
+        if (__sync_bool_compare_and_swap(&object->ref_count, cur, cur + 1))
+            return 1;
+    }
+}
+
 void vm_object_deallocate(vm_object_t *object) {
     if (!object) return;
 
@@ -76,6 +93,13 @@ void vm_object_deallocate(vm_object_t *object) {
     }
     if (new_ref == 0) {
         vm_page_t *pages;
+
+        /* Evict from the shared-file-object cache BEFORE teardown so a
+         * concurrent mmap_get_shared_backing_object lookup observes an
+         * unreachable entry and falls back to allocating a fresh
+         * object.  Combined with vm_object_try_reference()'s CAS, this
+         * closes the "lookup races with deallocate" window. */
+        vm_syscalls_evict_shared_obj(object);
 
         spinlock_acquire(&vm_object_teardown_lock);
 

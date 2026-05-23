@@ -82,18 +82,45 @@ typedef struct shared_file_object_entry {
 static shared_file_object_entry_t *shared_file_objects;
 static spinlock_t shared_file_objects_lock = SPINLOCK_INIT("mmap_shared_fileobj");
 
+/*
+ * Weak-reference cache.  Entries point at vm_objects without holding an
+ * extra refcount; eviction is driven from vm_object_deallocate() at
+ * ref_count == 0 (see vm_syscalls_evict_shared_obj below).  Lookups
+ * promote the weak pointer to a real reference via
+ * vm_object_try_reference() so a deallocate that has already won the
+ * dec-to-0 race cannot be resurrected.
+ *
+ * Previously this cache held an extra vm_object_reference() per entry
+ * and had no eviction path, so every file ever mmap'd accumulated a
+ * permanent pin on its fs_node_t through the cached pager — makewhatis
+ * over /usr/share/man exhausted the ext2 node cache after a few
+ * hundred man pages.
+ */
 vm_object_t *mmap_get_shared_backing_object(fs_node_t *node, size_t length,
                                              uint32_t vm_prot, uint64_t offset) {
     uint64_t page_offset = offset >> 12;
-    shared_file_object_entry_t *entry;
+    shared_file_object_entry_t *entry, *prev;
 
     spinlock_acquire(&shared_file_objects_lock);
-    for (entry = shared_file_objects; entry != NULL; entry = entry->next) {
+    prev = NULL;
+    for (entry = shared_file_objects; entry != NULL; ) {
         if (entry->node == node && entry->page_offset == page_offset) {
-            vm_object_reference(entry->object);
-            spinlock_release(&shared_file_objects_lock);
-            return entry->object;
+            if (vm_object_try_reference(entry->object)) {
+                spinlock_release(&shared_file_objects_lock);
+                return entry->object;
+            }
+            /* Object is dying — its dealloc hasn't yet reached the
+             * eviction call.  Unlink the stale entry here so we don't
+             * keep racing it, then fall through to allocate fresh. */
+            shared_file_object_entry_t *stale = entry;
+            if (prev) prev->next = entry->next;
+            else shared_file_objects = entry->next;
+            entry = entry->next;
+            kfree(stale, sizeof(shared_file_object_entry_t));
+            continue;
         }
+        prev = entry;
+        entry = entry->next;
     }
     spinlock_release(&shared_file_objects_lock);
 
@@ -120,24 +147,47 @@ vm_object_t *mmap_get_shared_backing_object(fs_node_t *node, size_t length,
     entry->object = obj;
 
     spinlock_acquire(&shared_file_objects_lock);
+    /* Recheck: another thread may have raced to allocate during our window. */
     for (shared_file_object_entry_t *cur = shared_file_objects; cur != NULL; cur = cur->next) {
         if (cur->node == node && cur->page_offset == page_offset) {
-            vm_object_reference(cur->object);
-            spinlock_release(&shared_file_objects_lock);
-            vm_object_deallocate(obj);
-            kfree(entry, sizeof(shared_file_object_entry_t));
-            return cur->object;
+            if (vm_object_try_reference(cur->object)) {
+                spinlock_release(&shared_file_objects_lock);
+                vm_object_deallocate(obj);
+                kfree(entry, sizeof(shared_file_object_entry_t));
+                return cur->object;
+            }
+            /* Lost the race AND the racer's object is dying — unusual
+             * but possible.  Fall through and replace the entry. */
         }
     }
 
     entry->next = shared_file_objects;
     shared_file_objects = entry;
 
-    /* Return a mapping reference while cache holds the original object reference. */
-    vm_object_reference(obj);
+    /* Cache holds a weak pointer only; obj's ref_count is the one the
+     * caller will own.  When that ref reaches 0 the deallocate path
+     * will call vm_syscalls_evict_shared_obj to unlink this entry. */
     spinlock_release(&shared_file_objects_lock);
 
     return obj;
+}
+
+void vm_syscalls_evict_shared_obj(vm_object_t *object) {
+    if (!object) return;
+    shared_file_object_entry_t *entry, *prev = NULL;
+
+    spinlock_acquire(&shared_file_objects_lock);
+    for (entry = shared_file_objects; entry != NULL; entry = entry->next) {
+        if (entry->object == object) {
+            if (prev) prev->next = entry->next;
+            else shared_file_objects = entry->next;
+            spinlock_release(&shared_file_objects_lock);
+            kfree(entry, sizeof(shared_file_object_entry_t));
+            return;
+        }
+        prev = entry;
+    }
+    spinlock_release(&shared_file_objects_lock);
 }
 
 static vm_object_t *mmap_create_file_object(fs_node_t *node, size_t length, uint32_t vm_prot,
