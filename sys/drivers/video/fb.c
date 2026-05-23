@@ -587,6 +587,31 @@ static int fb_fs_ioctl(fs_node_t *node, uint32_t request, void *arg) {
     return -ENOTTY;
 }
 
+/* Byte-stream read/write — lets `cat /dev/fb0 > snap` and
+ * `cat file.raw > /dev/fb0` work for pixel scribbling.  Most consumers
+ * will use mmap(), but the file-IO path is what shells expect.  No
+ * special handling beyond a memcpy into fb.addr; bounds-clipped to
+ * the framebuffer size so we can't run off the end. */
+static size_t fb_fs_read(fs_node_t *node, off_t off, size_t len, uint8_t *buf) {
+    (void)node;
+    if (!fb_active || !fb.addr) return 0;
+    uint64_t fb_size = (uint64_t)fb.pitch * (uint64_t)fb.height;
+    if (off < 0 || (uint64_t)off >= fb_size) return 0;
+    if ((uint64_t)off + len > fb_size) len = (size_t)(fb_size - off);
+    if (copyout((uint8_t *)fb.addr + off, buf, len) != 0) return 0;
+    return len;
+}
+
+static size_t fb_fs_write(fs_node_t *node, off_t off, size_t len, const uint8_t *buf) {
+    (void)node;
+    if (!fb_active || !fb.addr) return 0;
+    uint64_t fb_size = (uint64_t)fb.pitch * (uint64_t)fb.height;
+    if (off < 0 || (uint64_t)off >= fb_size) return 0;
+    if ((uint64_t)off + len > fb_size) len = (size_t)(fb_size - off);
+    if (copyin(buf, (uint8_t *)fb.addr + off, len) != 0) return 0;
+    return len;
+}
+
 static void *fb_fs_mmap(fs_node_t *node, void *addr, size_t length, int prot, int flags, off_t offset) {
     vm_object_t *obj;
     vm_map_t *map;
@@ -764,6 +789,8 @@ static void fb_register_devfs_node(int index) {
     node->flags = FS_CHARDEVICE;
     node->ioctl = fb_fs_ioctl;
     node->mmap = fb_fs_mmap;
+    node->read = fb_fs_read;
+    node->write = fb_fs_write;
     devfs_register_device(node);
     kprintf("FB: Registered /dev/%s (%ux%u@%u)\n",
             node->name, fb_devices[index].width,
