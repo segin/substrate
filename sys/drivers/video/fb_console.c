@@ -1346,12 +1346,24 @@ static int fb_vt_tty_ioctl(struct tty *tty, uint32_t cmd, unsigned long arg) {
         }
         if (val == KD_GRAPHICS && !vt->graphics_mode) {
             /* Entering graphics mode: hide our cursor (so it doesn't
-             * linger over X's first frame) and stop fb writes via
-             * the graphics_mode gate.  Don't clear the framebuffer
-             * — let the X server paint over our content. */
+             * linger over X's first frame), stop fb writes via the
+             * graphics_mode gate, and CRITICALLY reset the hardware
+             * scroll viewport back to (0,0).  After a normal boot
+             * the kernel console has scrolled, so fb.set_viewport
+             * is currently pointing at some y=N*16 into the virtual
+             * canvas.  Userland's mmap of /dev/fb0 maps to row 0 of
+             * that canvas — if we don't reset the viewport, X paints
+             * to rows that are OFFSCREEN above the visible region.
+             * fbmouse-as-init worked because the viewport hadn't
+             * scrolled; Xfbdev launched from a shell did not. */
             vt->graphics_mode = 1;
             FB_LOCK();
             fb_console_hide_cursor();
+            view_y_offset = 0;
+            if (fb.set_viewport) {
+                fb.set_viewport(0, 0);
+            }
+            (void)video_set_viewport(0, 0);
             FB_UNLOCK();
         } else if (val == KD_TEXT && vt->graphics_mode) {
             /* Leaving graphics mode: drop the gate, then repaint
