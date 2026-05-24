@@ -100,7 +100,7 @@ qemu-system-i386 -cpu qemu32,+sse,+sse2 -accel kvm \
   -drive file=rootfs.img,format=raw,if=none,id=drive0 \
   -device ich9-ahci,id=sata0 \
   -device ide-hd,bus=sata0.0,unit=0,drive=drive0 \
-  -device piix3-usb-uhci -device usb-kbd \
+  -device piix3-usb-uhci -device usb-kbd -device usb-mouse \
   -netdev tap,id=n0,fd=3,vhost=off \
   -device virtio-net-pci,netdev=n0,mac="$MACADDR" \
   -kernel "$KERNEL" \
