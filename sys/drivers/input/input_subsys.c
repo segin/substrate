@@ -9,7 +9,6 @@
 #include <kern/time.h>
 #include <sys/lock.h>
 #include <sys/errno.h>
-#include <sys/poll.h>
 
 #define INPUT_QUEUE_SIZE 64
 
@@ -165,16 +164,63 @@ static int input_ioctl(fs_node_t *node, uint32_t request, void *arg) {
     uint32_t nr = _SIOC_NR(request);
     uint32_t sz = _SIOC_SIZE(request);
 
-    /* EVIOCGBIT(ev, sz) — nr is 0x20+ev, sz is the user buffer size. */
+    /* EVIOCGBIT(ev, sz) — nr is 0x20+ev, sz is the user buffer size.
+     *
+     * Earlier this returned an all-zero bitmap which let kdrive's
+     * device-enable path past the call, but EvdevPtrMotion's inner
+     * loop iterates 0..max_rel and ISBITSET(relbits, axis) — both
+     * computed from these very bitmaps — so an empty bitmap meant
+     * read events were silently dropped and the cursor never moved.
+     *
+     * Advertise:
+     *   EVIOCGBIT(0, *)      — supported event TYPES.  Set bits for
+     *                          EV_SYN(0), EV_KEY(1), EV_REL(2), EV_ABS(3).
+     *   EVIOCGBIT(EV_REL, *) — supported relative axes.  Set REL_X(0),
+     *                          REL_Y(1), REL_WHEEL(8).
+     *   EVIOCGBIT(EV_ABS, *) — supported absolute axes.  None (substrate
+     *                          input is rel-only); return zeroes.
+     *   EVIOCGBIT(EV_KEY, *) — supported key codes.  Set the BTN_* mouse
+     *                          range (0x110..0x117) and the full keyboard
+     *                          range (1..255).  Doing this conservatively
+     *                          is fine for kdrive: ISBITSET only checks
+     *                          per-axis presence; spurious "I have this"
+     *                          bits never produce events of their own.
+     */
     if (nr >= EVIOC_NR_GBIT_BASE && nr < EVIOC_NR_GBIT_BASE + 0x20) {
         if (!arg || sz == 0 || sz > 4096) return -EINVAL;
-        uint8_t zero[256];
-        memset(zero, 0, sizeof(zero));
+        uint8_t buf[256];
+        memset(buf, 0, sizeof(buf));
+        uint32_t ev_kind = nr - EVIOC_NR_GBIT_BASE;
+        if (ev_kind == 0) {
+            /* event-type bitmap: bits 0..3 = SYN/KEY/REL/ABS */
+            if (sz >= 1) buf[0] = 0x0Fu;
+        } else if (ev_kind == 2) {
+            /* EV_REL: REL_X(0), REL_Y(1), REL_WHEEL(8) */
+            if (sz >= 1) buf[0] |= 0x03u;
+            if (sz >= 2) buf[1] |= 0x01u;
+        } else if (ev_kind == 1) {
+            /* EV_KEY: mark 1..0x2FF range present.  Linux KEY_MAX = 0x2FF
+             * so we mark 96 bytes (768 bits).  Cap by sz. */
+            uint32_t fill = sz > 96u ? 96u : sz;
+            memset(buf, 0xFFu, fill);
+            buf[0] &= ~0x01u;   /* bit 0 (key 0 = reserved) is never set */
+        }
+        /* ev_kind == 3 (EV_ABS) and others: stay zero. */
         uint32_t remaining = sz;
         uint8_t *dst = (uint8_t *)arg;
+        const uint8_t *src = buf;
+        uint8_t pad[256];
+        memset(pad, 0, sizeof(pad));
         while (remaining > 0) {
-            uint32_t chunk = remaining > sizeof(zero) ? sizeof(zero) : remaining;
-            if (copyout(zero, dst, chunk) != 0) return -EFAULT;
+            uint32_t chunk = remaining > sizeof(buf) ? sizeof(buf) : remaining;
+            if (src == buf) {
+                if (copyout(buf, dst, chunk) != 0) return -EFAULT;
+                /* Subsequent chunks (only happens if sz > 256) are
+                 * just zeros. */
+                src = pad;
+            } else {
+                if (copyout(pad, dst, chunk) != 0) return -EFAULT;
+            }
             dst += chunk;
             remaining -= chunk;
         }
@@ -214,34 +260,6 @@ static int input_ioctl(fs_node_t *node, uint32_t request, void *arg) {
     }
 
     return -ENOTTY;
-}
-
-/* POLLIN iff there are events the caller hasn't consumed yet.  The
- * caller's current_seq is f_offset / sizeof(input_event_t); compare
- * to the global producer sequence.  Substrate's kern_poll repolls
- * every ~10ms so we don't need a real wait-channel wakeup. */
-extern int kprintf(const char *, ...);
-static int input_poll(fs_node_t *node, void *waiter) {
-    (void)node;
-    (void)waiter;
-
-    int events = POLLOUT;        /* never block on write (no-op) */
-    file_t *f = current_process ? current_process->fds[0] : NULL;
-    uint64_t reader_seq = 0;
-    /* We can't introspect WHICH fd the poller used; the convention
-     * across substrate poll callbacks is to inspect the global
-     * producer state versus the reader's offset.  We pessimistically
-     * report POLLIN whenever ANY events are in the queue: callers
-     * who've consumed past global_seq will just read 0 bytes and
-     * re-poll, which is benign. */
-    (void)f;
-    (void)reader_seq;
-
-    input_lock_take();
-    int has_event = (global_seq > 0);
-    spinlock_release(&input_lock);
-    if (has_event) events |= POLLIN | POLLRDNORM;
-    return events;
 }
 
 static uint32_t input_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
@@ -304,7 +322,6 @@ void input_register_devfs(void) {
     event_node.flags = FS_CHARDEVICE;
     event_node.read = &input_read;
     event_node.ioctl = &input_ioctl;
-    event_node.poll = &input_poll;
     devfs_register_device(&event_node);
 }
 

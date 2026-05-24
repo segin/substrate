@@ -58,9 +58,17 @@
 #define EVIOCGNAME(len)  (0x80004506u | ((len) << 16))
 #define EVIOCGPHYS(len)  (0x80004507u | ((len) << 16))
 #define EVIOCGUNIQ(len)  (0x80004508u | ((len) << 16))
-#define EVIOCGBIT(ev, len) (0x80004520u | ((ev) << 8) | ((len) << 16))
+/* Linux _IOR('E', 0x20+ev, len) — the ev index lands in the nr
+ * byte (bits 0-7), not the type byte.  An earlier draft of this
+ * header OR'd `ev << 8`, which shifted ev into the type field
+ * (0x45 + ev) and turned EVIOCGBIT(EV_REL, ...) into a non-evdev
+ * ioctl — substrate's evdev shim then returned -ENOTTY and the X
+ * server bailed before reading axis bitmaps. */
+#define EVIOCGBIT(ev, len) (0x80004520u | (ev) | ((len) << 16))
 #define EVIOCGKEY(len)   (0x80004518u | ((len) << 16))
-#define EVIOCGABS(abs)   (0x80184540u | ((abs) << 8))
+/* Same bug existed for EVIOCGABS — abs went into the type byte.
+ * Correct form: nr = 0x40 + abs. */
+#define EVIOCGABS(abs)   (0x80184540u | (abs))
 
 /* Maximum event/key/relative/absolute codes Linux defines — sized
  * generously so ISBITSET arrays match Linux's expectations. */
