@@ -1,0 +1,35 @@
+From: substrate
+Subject: libXfont/builtins: add 'fixed' / '6x13' short-name aliases
+
+The 6x13 builtin font is registered under its full XLFD
+('-misc-fixed-medium-r-semicondensed--13-120-75-75-c-60-iso8859-1').
+xorg-server's main() calls SetDefaultFont(defaultTextFont) where
+defaultTextFont = "fixed"; without a fonts.alias file on disk
+mapping "fixed" → the XLFD, that lookup fails and FatalError fires
+on the first client (matwm2, xterm) connection.
+
+Register additional BuiltinDirRec entries pointing at the same
+6x13.builtin file so SetDefaultFont("fixed") and SetDefaultFont("6x13")
+both resolve directly out of the builtin FPE.
+
+--- a/src/builtins/fonts.c
++++ b/src/builtins/fonts.c
+@@ -1224,6 +1224,10 @@ static const char file_cursor[] = {
+
+ static char name_6x13[] = "-misc-fixed-medium-r-semicondensed--13-120-75-75-c-60-iso8859-1";
+ static char name_cursor[] = "cursor";
++/* substrate: short-name aliases so SetDefaultFont("fixed") and friends
++ * resolve without needing fonts.alias on disk. */
++static char name_fixed[] = "fixed";
++static char name_6x13_short[] = "6x13";
+
+ const BuiltinFileRec builtin_files[] = {
+  { "6x13.builtin", sizeof file_6x13, file_6x13, },
+@@ -1234,5 +1238,7 @@ const int builtin_files_count = sizeof (builtin_files) / sizeof (builtin_files[0]);
+
+ const BuiltinDirRec builtin_dir[] = {
+  { "6x13.builtin", name_6x13, },
++ { "6x13.builtin", name_fixed, },         /* substrate */
++ { "6x13.builtin", name_6x13_short, },    /* substrate */
+  { "cursor.builtin", name_cursor, }
+ };
