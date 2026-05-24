@@ -401,7 +401,14 @@ static void keyboard_emit_char(char c) {
     /* See tty_inject_input_locked path below — when kbd_mode != XLATE
      * the X server (or other evdev consumer) is exclusively reading
      * /dev/input/event0; don't double-feed the TTY. */
-    if (vt && vt->kbd_mode != 0 && vt->kbd_mode != K_XLATE) {
+    /* K_XLATE is the only mode that feeds the TTY line discipline.
+     * Anything else (K_RAW, K_MEDIUMRAW, K_UNICODE, K_OFF) means an
+     * exclusive evdev consumer (X server / kdrive / fbmouse) is
+     * reading raw events from /dev/input/event0 and the keystroke
+     * must NOT also reach the TTY.  K_RAW == 0, so the previous
+     * `vt->kbd_mode != 0` guard incorrectly treated explicit K_RAW
+     * as "uninitialized → default-XLATE" and double-fed the TTY. */
+    if (vt && vt->kbd_mode != K_XLATE) {
         return;
     }
     if (vt && vt->tty) {
@@ -439,7 +446,14 @@ static void keyboard_emit_seq(const char *seq) {
      * — not the TTY line discipline.  Without this gate, typing into
      * an X session would also fill the underlying VT's input ring.
      * /dev/input/event0 gets fed unconditionally upstream of here. */
-    if (vt && vt->kbd_mode != 0 && vt->kbd_mode != K_XLATE) {
+    /* K_XLATE is the only mode that feeds the TTY line discipline.
+     * Anything else (K_RAW, K_MEDIUMRAW, K_UNICODE, K_OFF) means an
+     * exclusive evdev consumer (X server / kdrive / fbmouse) is
+     * reading raw events from /dev/input/event0 and the keystroke
+     * must NOT also reach the TTY.  K_RAW == 0, so the previous
+     * `vt->kbd_mode != 0` guard incorrectly treated explicit K_RAW
+     * as "uninitialized → default-XLATE" and double-fed the TTY. */
+    if (vt && vt->kbd_mode != K_XLATE) {
         return;
     }
     if (vt && vt->tty) {

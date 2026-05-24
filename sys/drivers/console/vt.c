@@ -3,6 +3,7 @@
  */
 
 #include <sys/vt.h>
+#include <sys/vtio.h>           /* K_XLATE / K_RAW / KDSKBMODE */
 #include <drivers/video/hw_text.h>
 #include <drivers/video/fb_console.h>
 #include <drivers/input/keyboard.h>
@@ -340,6 +341,12 @@ void vt_init(void) {
         vt_states[i].cursor_blink = 1;
         vt_states[i].tab_width = 8;
         vt_states[i].autowrap = 1;         /* DECAWM on by default */
+        /* kbd_mode: K_XLATE is the canonical default (cooked
+         * keystrokes feed the TTY).  K_RAW happens to be 0 in the
+         * Linux convention, so leaving this zero-initialized would
+         * collide with an explicit KDSKBMODE(K_RAW) from userland
+         * and break the gate that decides "feed the TTY or not". */
+        vt_states[i].kbd_mode = K_XLATE;
         vt_states[i].cursor_key_app = 0;   /* Normal cursor keys */
         vt_states[i].origin_mode = 0;      /* Absolute origin */
         vt_states[i].bracketed_paste = 0;

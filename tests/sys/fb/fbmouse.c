@@ -199,6 +199,9 @@ int main(void) {
         for (;;) pause();
     }
 
+    /* Trace what comes off the wire so we can diagnose sign issues. */
+    int logfd = open("/tmp/fbmouse.log", O_WRONLY | O_CREAT | O_TRUNC, 0644);
+
     struct input_event ev[16];
     int dx_acc = 0, dy_acc = 0;
     for (;;) {
@@ -208,6 +211,20 @@ int main(void) {
         for (int i = 0; i < nevs; i++) {
             uint16_t t = ev[i].type, c = ev[i].code;
             int32_t v = ev[i].value;
+            /* Log only motion / button / sync to keep the file small,
+             * but ALWAYS fsync each line so a kill -9 still preserves
+             * the trace. */
+            if (logfd >= 0 && (t == EV_REL || t == EV_KEY || t == EV_SYN)) {
+                char buf[128];
+                int len = snprintf(buf, sizeof(buf),
+                    "ev t=%u c=%u v=%d (raw=0x%08x) acc=(%d,%d) cur=(%d,%d)\n",
+                    (unsigned)t, (unsigned)c, (int)v, (unsigned)v,
+                    dx_acc, dy_acc, cx, cy);
+                if (len > 0) {
+                    write(logfd, buf, (size_t)len);
+                    fsync(logfd);
+                }
+            }
             if (t == EV_REL) {
                 if (c == REL_X) dx_acc += v;
                 else if (c == REL_Y) dy_acc += v;
