@@ -1262,7 +1262,12 @@ static int fb_vt_tty_ioctl(struct tty *tty, uint32_t cmd, unsigned long arg) {
     vt_state_t *vt;
     int val;
 
-    if (!tty || !arg) {
+    /* NOTE: do NOT reject arg==0 up front.  KDSETMODE and KDSKBMODE
+     * pass the mode as the value of arg (not as a pointer), and
+     * KD_TEXT=0 / K_RAW=0 are perfectly valid.  Each case below
+     * validates arg as needed (pointer-ioctls check arg != 0
+     * themselves before dereferencing). */
+    if (!tty) {
         return -EINVAL;
     }
 
@@ -2071,6 +2076,13 @@ void fb_console_tick(void) {
     vt_state_t *vt = vt_get_state(vt_get_active());
 
     if (spinlock_is_held(&fb_console_lock)) {
+        return;
+    }
+    /* In KD_GRAPHICS the framebuffer belongs to a userland consumer
+     * (X server, fbmouse).  Suppress the cursor blink and the dirty-
+     * flush — both reach into the framebuffer and would paint a
+     * blinking text-mode cursor block on top of the user's pixels. */
+    if (vt && vt->graphics_mode) {
         return;
     }
     FB_LOCK();
