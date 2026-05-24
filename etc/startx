@@ -15,15 +15,21 @@
 #
 # Adjust the Xfbdev mode via `-screen WxHxBPP` if you want something
 # other than whatever fb resolution the kernel picked.
-/usr/bin/Xfbdev vt1 &
+/usr/bin/Xfbdev vt1 \
+    -mouse evdev,,device=/dev/input/event0 \
+    -keybd evdev,,device=/dev/input/event0 &
 XPID=$!
 
 # Xfbdev's XKB compilation takes a few seconds on a slow guest.
 # Spin briefly waiting for the X server to be ready; matwm2's
-# Xlib connect would error out otherwise.
-for i in $(seq 1 30); do
-    [ -e /tmp/.X11-unix/X0 ] && break
+# Xlib connect would error out otherwise.  Substrate's AF_UNIX
+# doesn't expose the socket as a filesystem inode, so check for
+# /tmp/.X0-lock (Xfbdev creates this file when it's ready) instead.
+i=0
+while [ $i -lt 30 ]; do
+    [ -e /tmp/.X0-lock ] && break
     sleep 1
+    i=$((i + 1))
 done
 
 export DISPLAY=:0

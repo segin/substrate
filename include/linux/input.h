@@ -37,13 +37,29 @@
  * device's capability bitmasks.  Substrate's /dev/input/event0
  * doesn't implement these (returns -ENOTTY); the kdrive code's
  * error path falls back to assuming standard kbd + mouse. */
+/* IMPORTANT — the base values below must NOT carry any SIZE bits.
+ * SIZE lives in ioctl bits 16-29 and is ORed in by the macro at the
+ * call site.  Earlier versions of this header had 0x81004... bases
+ * with SIZE=0x100 already set, so EVIOCGBIT(0, 4) decoded to size=260
+ * — substrate's evdev ioctl handler then copied 260 zero bytes into
+ * the caller's 4-byte stack buffer, smashing saved registers and
+ * caller arg slots and producing a delayed NULL-pointer SIGSEGV
+ * (e.g. xorg-server kdrive EvdevPtrEnable crashing at `pi->driverPrivate = ke;`
+ * because the saved `pi` on the stack had been clobbered to 0).
+ *
+ * Correct bases: DIR=READ (bits 30-31 = 10), TYPE='E' (0x45<<8),
+ * SIZE=0, NR=... .  E.g. EVIOCGNAME's base = 0x80004506:
+ *   DIR  = 0x80000000  (bits 30=1, 31=1 → DIR_READ=2)
+ *   SIZE = 0 (caller-supplied via the macro OR)
+ *   TYPE = 0x4500      ('E' << 8)
+ *   NR   = 0x06        (GNAME) */
 #define EVIOCGVERSION    0x80044501u
 #define EVIOCGID         0x80084502u
-#define EVIOCGNAME(len)  (0x81004506u | ((len) << 16))
-#define EVIOCGPHYS(len)  (0x81004507u | ((len) << 16))
-#define EVIOCGUNIQ(len)  (0x81004508u | ((len) << 16))
-#define EVIOCGBIT(ev, len) (0x81004520u | ((ev) << 8) | ((len) << 16))
-#define EVIOCGKEY(len)   (0x81004518u | ((len) << 16))
+#define EVIOCGNAME(len)  (0x80004506u | ((len) << 16))
+#define EVIOCGPHYS(len)  (0x80004507u | ((len) << 16))
+#define EVIOCGUNIQ(len)  (0x80004508u | ((len) << 16))
+#define EVIOCGBIT(ev, len) (0x80004520u | ((ev) << 8) | ((len) << 16))
+#define EVIOCGKEY(len)   (0x80004518u | ((len) << 16))
 #define EVIOCGABS(abs)   (0x80184540u | ((abs) << 8))
 
 /* Maximum event/key/relative/absolute codes Linux defines — sized
