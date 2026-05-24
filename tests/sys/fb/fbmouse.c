@@ -150,15 +150,48 @@ static void cursor_draw(int x, int y) {
 #define K_RAW       0
 #define K_XLATE     1
 
+#include <signal.h>
+
+/* Saved tty fd so atexit / signal handlers can restore the console.
+ * The kernel's fb_vt_tty_close hook only fires when the LAST tty
+ * reference goes away — but when fbmouse is launched from a shell,
+ * the shell holds tty1 open the whole time, so our close alone
+ * doesn't drop count to 0.  Userland must restore explicitly. */
+static int g_ttyfd = -1;
+
+static void restore_console(void) {
+    if (g_ttyfd < 0) return;
+    ioctl(g_ttyfd, KDSKBMODE, K_XLATE);
+    ioctl(g_ttyfd, KDSETMODE, KD_TEXT);   /* kernel redraws on this */
+    close(g_ttyfd);
+    g_ttyfd = -1;
+}
+
+static void on_signal(int sig) {
+    (void)sig;
+    restore_console();
+    _exit(128 + sig);
+}
+
 int main(void) {
     /* Take the VT into KD_GRAPHICS so the kernel fb_console stops
      * blitting text on top of us, and put the keyboard into K_RAW so
      * keystrokes don't echo onto the framebuffer behind us. */
-    int ttyfd = open("/dev/tty0", O_RDWR);
+    g_ttyfd = open("/dev/tty0", O_RDWR);
+    int ttyfd = g_ttyfd;
     if (ttyfd >= 0) {
         ioctl(ttyfd, KDSETMODE, KD_GRAPHICS);
         ioctl(ttyfd, KDSKBMODE, K_RAW);
     }
+
+    /* Restore on normal exit AND on any catchable termination. */
+    atexit(restore_console);
+    struct sigaction sa = { .sa_handler = on_signal };
+    sigemptyset(&sa.sa_mask);
+    sigaction(SIGINT,  &sa, NULL);
+    sigaction(SIGTERM, &sa, NULL);
+    sigaction(SIGHUP,  &sa, NULL);
+    sigaction(SIGQUIT, &sa, NULL);
 
     int fbfd = open("/dev/fb0", O_RDWR);
     if (fbfd < 0) { perror("open /dev/fb0"); return 1; }
