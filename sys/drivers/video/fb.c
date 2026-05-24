@@ -922,6 +922,21 @@ void fb_init(multiboot_info_t *mbi) {
         }
     }
 
+    /* Linux compat: video=WxH@BPP (or video=WxH) is the kernel
+     * cmdline form most users type.  If video= didn't match any of
+     * the keyword shortcuts above (text/off/none/ask) and looks
+     * like a mode string, treat it as if vga= had been passed. */
+    if (have_video_arg && !have_vga_arg &&
+        req_w == 0 && req_h == 0) {
+        if (fb_parse_vga_mode(vid_arg, &req_w, &req_h, &req_bpp) == 0) {
+            kprintf("Video: Requested mode %ux%u", req_w, req_h);
+            if (req_bpp)
+                kprintf("@%u", req_bpp);
+            kprint(" via video= parameter.\n");
+            have_vga_arg = 1;
+        }
+    }
+
     /* Driver Selection Logic */
     video_driver_t *selected_drv = NULL;
     int selected_mode_id = -1;

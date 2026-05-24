@@ -1,0 +1,20 @@
+#!/bin/sh
+# /etc/rc.d/02-tmp-clean — wipe transient state under /tmp at boot.
+#
+# substrate doesn't mount /tmp as tmpfs (it's the same rootfs), so
+# anything left in /tmp from a previous boot survives.  Stale X
+# server lock files (/tmp/.X0-lock, /tmp/.X11-unix/...) make a fresh
+# Xfbdev refuse to start with "Server is already active for display 0"
+# until something cleans them up.
+
+case "${1:-start}" in
+    start)
+        rm -f  /tmp/.X*-lock
+        rm -rf /tmp/.X11-unix
+        rm -rf /tmp/.ICE-unix
+        # Anything else that looks like a daemon's last-boot socket dir.
+        rm -rf /tmp/.font-unix /tmp/.Test-unix /tmp/.XIM-unix
+        ;;
+    stop)
+        ;;
+esac

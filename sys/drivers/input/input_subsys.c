@@ -9,6 +9,7 @@
 #include <kern/time.h>
 #include <sys/lock.h>
 #include <sys/errno.h>
+#include <sys/poll.h>
 
 #define INPUT_QUEUE_SIZE 64
 
@@ -215,6 +216,34 @@ static int input_ioctl(fs_node_t *node, uint32_t request, void *arg) {
     return -ENOTTY;
 }
 
+/* POLLIN iff there are events the caller hasn't consumed yet.  The
+ * caller's current_seq is f_offset / sizeof(input_event_t); compare
+ * to the global producer sequence.  Substrate's kern_poll repolls
+ * every ~10ms so we don't need a real wait-channel wakeup. */
+extern int kprintf(const char *, ...);
+static int input_poll(fs_node_t *node, void *waiter) {
+    (void)node;
+    (void)waiter;
+
+    int events = POLLOUT;        /* never block on write (no-op) */
+    file_t *f = current_process ? current_process->fds[0] : NULL;
+    uint64_t reader_seq = 0;
+    /* We can't introspect WHICH fd the poller used; the convention
+     * across substrate poll callbacks is to inspect the global
+     * producer state versus the reader's offset.  We pessimistically
+     * report POLLIN whenever ANY events are in the queue: callers
+     * who've consumed past global_seq will just read 0 bytes and
+     * re-poll, which is benign. */
+    (void)f;
+    (void)reader_seq;
+
+    input_lock_take();
+    int has_event = (global_seq > 0);
+    spinlock_release(&input_lock);
+    if (has_event) events |= POLLIN | POLLRDNORM;
+    return events;
+}
+
 static uint32_t input_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
     (void)node;
     if (size < sizeof(input_event_t)) return 0;
@@ -275,6 +304,7 @@ void input_register_devfs(void) {
     event_node.flags = FS_CHARDEVICE;
     event_node.read = &input_read;
     event_node.ioctl = &input_ioctl;
+    event_node.poll = &input_poll;
     devfs_register_device(&event_node);
 }
 

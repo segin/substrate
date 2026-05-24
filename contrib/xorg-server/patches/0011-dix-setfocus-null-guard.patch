@@ -1,0 +1,36 @@
+From: substrate
+Subject: dix: NULL-guard SetFocusIn / SetFocusOut
+
+DoFocusEvents -> CoreFocusEvents -> SetFocusOut can be reached with
+a NULL DeviceIntPtr early in a client-connect sequence (matwm2
+XGrabServer + XSelectInput on the root window) when the master
+pointer's sprite has not yet been fully wired up.  The unconditional
+`FocusWindows[dev->id] = NULL;` then dereferences NULL at offset
+0x6c (the `id` field) and the server segfaults with signal 11.
+
+Guard both helpers.  A NULL device simply has no focus state to
+clear.
+
+--- a/dix/enterleave.c
++++ b/dix/enterleave.c
+@@ -190,6 +190,8 @@ EnterLeaveSetSubFocus(DeviceIntPtr dev, WindowPtr ancestor)
+ void
+ SetFocusIn(DeviceIntPtr dev, WindowPtr win)
+ {
++    if (!dev)
++        return;
+     FocusWindows[dev->id] = win;
+ }
+
+@@ -200,6 +202,11 @@ SetFocusIn(DeviceIntPtr dev, WindowPtr win)
+ void
+ SetFocusOut(DeviceIntPtr dev)
+ {
++    /* matwm2's first XGrabServer / XSelectInput round can reach
++     * here via DoFocusEvents with a NULL device when no master
++     * pointer has been initialized for the active sprite. */
++    if (!dev)
++        return;
+     FocusWindows[dev->id] = NULL;
+ }
+
