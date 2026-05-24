@@ -2077,8 +2077,13 @@ int kern_link(const char *oldpath, const char *newpath) {
     fs_node_t *root = current_process->root_node ? current_process->root_node : fs_root;
     fs_node_t *cwd = current_process->cwd_node ? current_process->cwd_node : root;
 
-    // Resolve oldpath to source node
-    fs_node_t *source = vfs_lookup(cwd, oldpath);
+    /* vfs_lookup strips a leading '/' but walks from its first arg —
+     * so an absolute path with `cwd` as the root resolves as
+     * <cwd>/<rest>, not /<rest>.  Pick root vs cwd by leading slash
+     * the same way kern_resolve_parent_at does.  Without this, an
+     * X server running from a non-root cwd hits link("/tmp/.tX0-lock",
+     * "/tmp/.X0-lock") -> ENOENT and crashes at LockServer. */
+    fs_node_t *source = vfs_lookup(oldpath[0] == '/' ? root : cwd, oldpath);
     if (!source) return -ENOENT;
 
     // Resolve newpath to parent directory and name
