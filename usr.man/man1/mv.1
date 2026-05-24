@@ -1,0 +1,133 @@
+.TH MV 1 "May 2026" "substrate" "User Commands"
+.SH NAME
+mv \- move (rename) files
+.SH SYNOPSIS
+.B mv
+[\fIOPTION\fR]...
+[\fB\-T\fR]
+\fISOURCE\fR \fIDEST\fR
+.br
+.B mv
+[\fIOPTION\fR]...
+\fISOURCE\fR... \fIDIRECTORY\fR
+.br
+.B mv
+[\fIOPTION\fR]...
+\fB\-t\fR \fIDIRECTORY\fR \fISOURCE\fR...
+.SH DESCRIPTION
+Rename \fISOURCE\fR to \fIDEST\fR, or move \fISOURCE\fR(s) into
+\fIDIRECTORY\fR.  Implements the full POSIX.1\-2024 surface plus
+the BSD and GNU extensions enumerated below; where the two conflict,
+substrate follows the BSD behaviour.
+.PP
+With no
+.B \-T
+flag, an existing
+.I DEST
+that is a directory causes
+.I SOURCE
+to be moved
+.I into
+that directory.  With
+.B \-T
+the destination is taken as a final name even when it exists as a
+directory, allowing atomic directory replacement.
+.SH OPTIONS
+.TP
+.B \-f
+Force.  Do not prompt before overwriting.  Last of
+.BR \-f / \-i / \-n
+on the command line wins (POSIX).
+.TP
+.B \-i
+Interactive.  Prompt before overwriting an existing target.
+.TP
+.B \-n
+No\-clobber.  Refuse to overwrite an existing target, silently.
+.TP
+.B \-v
+Verbose.  Print one line per successful operation in the form
+\fBrenamed '\fISRC\fB' -> '\fIDEST\fB'\fR.
+.TP
+.B \-h
+BSD.  When \fIDEST\fR is a symbolic link to a directory, treat the
+link itself as the destination (replace the link, do not traverse
+into it).
+.TP
+.BI \-S " SUFFIX"
+Use \fISUFFIX\fR (default \fB~\fR, or \fB$SIMPLE_BACKUP_SUFFIX\fR
+if set) as the simple\-backup suffix.
+.TP
+\fB\-\-backup\fR[=\fICONTROL\fR], \fB\-b\fR
+GNU.  Make a backup of an existing target before overwriting.
+\fICONTROL\fR is one of \fBnone\fR/\fBoff\fR, \fBnumbered\fR/\fBt\fR,
+\fBexisting\fR/\fBnil\fR, or \fBsimple\fR/\fBnever\fR.  \fB\-b\fR
+alone honours \fB$VERSION_CONTROL\fR (defaulting to \fBexisting\fR).
+.TP
+.BI \-t " DIRECTORY"
+GNU.  Move all \fISOURCE\fR operands into \fIDIRECTORY\fR.  Useful
+with \fBxargs\fR.
+.TP
+.B \-T
+GNU.  Treat \fIDEST\fR as a normal file even if it is an existing
+directory.  Enables atomic directory replacement via
+.BR rename (2).
+.TP
+.B \-\-strip\-trailing\-slashes
+GNU.  Strip trailing slashes from \fISOURCE\fR operands before
+deriving their basename.
+.TP
+\fB\-\-update\fR[=\fIWHEN\fR]
+GNU.  Move only when \fISOURCE\fR is newer than \fIDEST\fR
+(\fBolder\fR, the default), never (\fBnone\fR), never with
+diagnostic (\fBnone\-fail\fR), or always (\fBall\fR).
+.TP
+.B \-\-debug
+GNU.  Implies \fB\-\-verbose\fR plus additional preservation
+diagnostics.
+.TP
+.B \-\-help
+Print a usage summary and exit \fB0\fR.
+.TP
+.B \-\-version
+Print the implementation version and exit \fB0\fR.
+.SH CROSS\-FILESYSTEM MOVES
+When
+.BR rename (2)
+fails with
+.BR EXDEV ,
+\fBmv\fR falls back to a
+.BR cp (1)\-style
+copy followed by an
+.BR rm (1)\-style
+remove of the source.  Modes, ownership, and timestamps are
+preserved where the underlying syscalls permit; symbolic links are
+moved as-is (never dereferenced).
+.SH ENVIRONMENT
+.TP
+.B SIMPLE_BACKUP_SUFFIX
+Default simple\-backup suffix, overriding the built-in \fB~\fR.
+.TP
+.B VERSION_CONTROL
+Default backup style when \fB\-b\fR is given without an explicit
+\fI\-\-backup=CONTROL\fR.
+.SH EXIT STATUS
+\fB0\fR on full success.  Non\-zero if any operand failed.
+.SH STANDARDS
+Conforms to POSIX.1-2024
+.BR mv (1).
+The
+.BR \-h ", " \-v ", " \-i ", " \-n
+options are also POSIX (the latter three were carried over from
+prior editions).  The
+.B \-h
+flag and the EXDEV fallback follow FreeBSD semantics.  The
+.BR \-b ", " \-S ", " \-t ", " \-T ", " \-\-backup ", " \-\-update ", " \-\-strip\-trailing\-slashes
+flags are GNU coreutils extensions.
+.SH SEE ALSO
+.BR cp (1),
+.BR ln (1),
+.BR rm (1),
+.BR rename (2),
+.BR renameat2 (2),
+.BR symlink (2)

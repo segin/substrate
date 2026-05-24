@@ -1,12 +1,14 @@
 #include "rm_walk.h"
 
 #include "rm_safety.h"
+#include "rm_scrub.h"
 
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 static void
@@ -350,6 +352,22 @@ rm_remove_at(struct rm_walk_state *state, int parent_fd, const char *name,
     if (prompt_result <= 0) {
         return prompt_result < 0 ? RM_WALK_FAILED : RM_WALK_SKIPPED;
     }
+
+    /* BSD -P : overwrite regular files before unlinking.  Non-regular
+     * files (sockets, FIFOs, device nodes) are unlinked without
+     * scrubbing — there's nothing to overwrite. */
+    if (state->opts->scrub && S_ISREG(target_st.st_mode) &&
+        target_st.st_size > 0) {
+        int wfd = openat(parent_fd, name, O_WRONLY | O_NOFOLLOW);
+        if (wfd >= 0) {
+            if (rm_scrub_file(wfd, target_st.st_size) != 0) {
+                rm_report_errno(state->opts, display_path, errno);
+                /* FreeBSD: continue with unlink even on scrub failure */
+            }
+            close(wfd);
+        }
+    }
+
     if (unlinkat(parent_fd, name, 0) != 0) {
         if (state->opts->force && errno == ENOENT) {
             return RM_WALK_REMOVED;

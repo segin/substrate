@@ -57,7 +57,7 @@ rm_parse_options(struct rm_options *opts, int argc, char **argv,
         { "dir", no_argument, NULL, 'd' },
         { "verbose", no_argument, NULL, 'v' },
         { "one-file-system", no_argument, NULL, RM_OPT_ONE_FILE_SYSTEM },
-        { "preserve-root", no_argument, NULL, RM_OPT_PRESERVE_ROOT },
+        { "preserve-root", optional_argument, NULL, RM_OPT_PRESERVE_ROOT },
         { "no-preserve-root", no_argument, NULL, RM_OPT_NO_PRESERVE_ROOT },
         { "help", no_argument, NULL, RM_OPT_HELP },
         { "version", no_argument, NULL, RM_OPT_VERSION },
@@ -69,7 +69,7 @@ rm_parse_options(struct rm_options *opts, int argc, char **argv,
     opterr = 0;
     optind = 1;
 
-    while ((option = getopt_long(argc, argv, "+dfiIrvR", long_options,
+    while ((option = getopt_long(argc, argv, "+dfiIPrvRx", long_options,
                 NULL)) != -1) {
         switch (option) {
         case 'd':
@@ -94,6 +94,14 @@ rm_parse_options(struct rm_options *opts, int argc, char **argv,
         case 'v':
             opts->verbose = true;
             break;
+        case 'P':
+            /* BSD: overwrite each file before unlinking. */
+            opts->scrub = true;
+            break;
+        case 'x':
+            /* BSD alias for --one-file-system. */
+            opts->one_file_system = true;
+            break;
         case RM_OPT_INTERACTIVE:
             if (parse_interactive_mode(opts, optarg, err_msg) != 0) {
                 return -1;
@@ -104,9 +112,22 @@ rm_parse_options(struct rm_options *opts, int argc, char **argv,
             break;
         case RM_OPT_PRESERVE_ROOT:
             opts->preserve_root = true;
+            /* --preserve-root=all : also refuse to cross mount points
+             * during recursion, regardless of --one-file-system. */
+            if (optarg != NULL) {
+                if (strcmp(optarg, "all") == 0) {
+                    opts->preserve_root_all = true;
+                    opts->one_file_system = true;
+                } else {
+                    *err_msg = "invalid argument to --preserve-root "
+                               "(expected: all)";
+                    return -1;
+                }
+            }
             break;
         case RM_OPT_NO_PRESERVE_ROOT:
             opts->preserve_root = false;
+            opts->preserve_root_all = false;
             break;
         case RM_OPT_HELP:
             opts->show_help = true;

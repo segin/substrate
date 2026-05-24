@@ -1,184 +1,137 @@
-#include <dirent.h>
-#include <errno.h>
+/*
+ * bin/rm/rm.c — dispatcher for POSIX.1-2024 + BSD + GNU rm(1).
+ *
+ * Heavy lifting lives in rm_opts.c (option parsing), rm_safety.c
+ * (path-safety checks, "is this /, ., .." refusal), rm_walk.c
+ * (recursive openat/unlinkat traversal), and rm_scrub.c (BSD -P
+ * 3-pass overwrite).  This file only wires them together.
+ */
+#include "rm.h"
+#include "rm_opts.h"
+#include "rm_safety.h"
+#include "rm_walk.h"
+
+#include <signal.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
 #include <unistd.h>
 
-static void
-usage(void)
+static volatile sig_atomic_t g_interrupted = 0;
+
+static void on_signal(int sig)
 {
-    fprintf(stderr, "usage: rm [-f] [-rR] file ...\n");
+    (void)sig;
+    g_interrupted = 1;
 }
 
-static void
-report_remove_error(const char *path)
+static const char *progname_from_argv0(const char *argv0)
 {
-    fprintf(stderr, "rm: cannot remove '%s': %s\n", path, strerror(errno));
+    const char *s;
+    if (argv0 == NULL || *argv0 == '\0') return "rm";
+    s = strrchr(argv0, '/');
+    return s ? s + 1 : argv0;
 }
 
-static char *
-join_path(const char *dir, const char *name)
+static void usage(const struct rm_options *opts, FILE *out)
 {
-    size_t dir_len;
-    size_t name_len;
-    size_t need_sep;
-    char *path;
+    fprintf(out,
+        "usage: %s [-dfiIPrRvx] [--interactive[=WHEN]]\n"
+        "       %s [--one-file-system] [--preserve-root[=all]]\n"
+        "       %s [--no-preserve-root] FILE...\n",
+        opts->progname, opts->progname, opts->progname);
+}
 
-    dir_len = strlen(dir);
-    name_len = strlen(name);
-    need_sep = (dir_len > 0 && dir[dir_len - 1] != '/') ? 1u : 0u;
-    path = malloc(dir_len + need_sep + name_len + 1u);
-    if (path == NULL) {
-        return NULL;
+static int rm_confirm_once(const struct rm_options *opts, int argc, int first)
+{
+    int file_count = argc - first;
+    bool need = (opts->recursive && file_count > 0) || file_count > 3;
+    int ch, first_ch = EOF;
+
+    if (!need) return 0;
+
+    fprintf(stderr,
+        "%s: remove %d argument%s%s? ",
+        opts->progname,
+        file_count,
+        file_count == 1 ? "" : "s",
+        opts->recursive ? " recursively" : "");
+    fflush(stderr);
+
+    while ((ch = getchar()) != EOF && ch != '\n') {
+        if (first_ch == EOF) first_ch = ch;
     }
-    memcpy(path, dir, dir_len);
-    if (need_sep) {
-        path[dir_len++] = '/';
-    }
-    memcpy(path + dir_len, name, name_len + 1u);
-    return path;
+    if (first_ch == 'y' || first_ch == 'Y') return 0;
+    return -1;
 }
 
-static int remove_path(const char *path, bool recursive, bool force);
-
-static int
-remove_directory(const char *path, bool force)
+int main(int argc, char *argv[])
 {
-    DIR *dir;
-    struct dirent *entry;
-    int status;
+    struct rm_options opts;
+    struct rm_walk_state state;
+    struct sigaction sa;
+    const char *err = NULL;
+    int rc = 0;
 
-    dir = opendir(path);
-    if (dir == NULL) {
-        if (force && errno == ENOENT) {
-            return 0;
+    rm_options_init(&opts, progname_from_argv0(argv[0]));
+    if (rm_parse_options(&opts, argc, argv, &err) != 0) {
+        if (err != NULL) {
+            fprintf(stderr, "%s: %s\n", opts.progname, err);
         }
-        report_remove_error(path);
+        usage(&opts, stderr);
         return 1;
     }
 
-    status = 0;
-    while ((entry = readdir(dir)) != NULL) {
-        char *child;
+    if (opts.show_help) {
+        usage(&opts, stdout);
+        return 0;
+    }
+    if (opts.show_version) {
+        printf("%s\n", RM_VERSION);
+        return 0;
+    }
 
-        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
+    if (opts.operand_start >= argc) {
+        if (opts.force) {
+            return 0;       /* POSIX: rm -f with no operands is a no-op */
+        }
+        fprintf(stderr, "%s: missing operand\n", opts.progname);
+        usage(&opts, stderr);
+        return 1;
+    }
+
+    /* -I prompt: once, before processing any operand. */
+    if (opts.prompt_mode == RM_PROMPT_ONCE) {
+        if (rm_confirm_once(&opts, argc, opts.operand_start) != 0) {
+            return 0;       /* user said no — exit 0 silently */
+        }
+    }
+
+    sa.sa_handler = on_signal;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;
+    sigaction(SIGINT, &sa, NULL);
+    sigaction(SIGTERM, &sa, NULL);
+
+    state.opts = &opts;
+    state.prompt_input = stdin;
+    state.interrupted = &g_interrupted;
+
+    for (int i = opts.operand_start; i < argc; i++) {
+        if (g_interrupted) break;
+
+        if (rm_operand_is_dot_or_dotdot(argv[i])) {
+            fprintf(stderr,
+                "%s: refusing to remove '.' or '..' directory: skipping '%s'\n",
+                opts.progname, argv[i]);
+            rc = 1;
             continue;
         }
-        child = join_path(path, entry->d_name);
-        if (child == NULL) {
-            fprintf(stderr, "rm: cannot remove '%s': out of memory\n", path);
-            status = 1;
-            continue;
+        if (rm_remove_operand(&state, argv[i]) == RM_WALK_FAILED) {
+            rc = 1;
         }
-        if (remove_path(child, true, force) != 0) {
-            status = 1;
-        }
-        free(child);
     }
 
-    if (closedir(dir) != 0) {
-        status = 1;
-    }
-    if (rmdir(path) != 0) {
-        if (!(force && errno == ENOENT)) {
-            report_remove_error(path);
-            status = 1;
-        }
-    }
-    return status;
+    return rc;
 }
-
-static int
-remove_path(const char *path, bool recursive, bool force)
-{
-    struct stat st;
-
-    if (lstat(path, &st) != 0) {
-        if (force && errno == ENOENT) {
-            return 0;
-        }
-        report_remove_error(path);
-        return 1;
-    }
-
-    if (S_ISDIR(st.st_mode)) {
-        if (!recursive) {
-            errno = EISDIR;
-            report_remove_error(path);
-            return 1;
-        }
-        return remove_directory(path, force);
-    }
-
-    if (unlink(path) != 0) {
-        if (force && errno == ENOENT) {
-            return 0;
-        }
-        report_remove_error(path);
-        return 1;
-    }
-    return 0;
-}
-
-int
-main(int argc, char *argv[])
-{
-    bool force;
-    bool recursive;
-    int first_path;
-    int status;
-    int i;
-
-    force = false;
-    recursive = false;
-    first_path = 1;
-    for (i = 1; i < argc; ++i) {
-        const char *arg;
-        size_t j;
-
-        arg = argv[i];
-        if (arg[0] != '-' || arg[1] == '\0') {
-            first_path = i;
-            break;
-        }
-        if (strcmp(arg, "--") == 0) {
-            first_path = i + 1;
-            break;
-        }
-        for (j = 1; arg[j] != '\0'; ++j) {
-            switch (arg[j]) {
-            case 'f':
-                force = true;
-                break;
-            case 'r':
-            case 'R':
-                recursive = true;
-                break;
-            default:
-                usage();
-                return 1;
-            }
-        }
-        first_path = i + 1;
-    }
-
-    if (first_path >= argc) {
-        if (force) {
-            return 0;
-        }
-        usage();
-        return 1;
-    }
-
-    status = 0;
-    for (i = first_path; i < argc; ++i) {
-        if (remove_path(argv[i], recursive, force) != 0) {
-            status = 1;
-        }
-    }
-    return status;
-}
-

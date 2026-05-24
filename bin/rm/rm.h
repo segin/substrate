@@ -21,6 +21,8 @@ struct rm_options {
     bool verbose;
     bool one_file_system;
     bool preserve_root;
+    bool preserve_root_all;   /* --preserve-root=all */
+    bool scrub;               /* BSD -P : multi-pass overwrite */
     bool show_help;
     bool show_version;
     enum rm_prompt_mode prompt_mode;

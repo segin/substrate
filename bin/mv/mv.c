@@ -1,3 +1,6 @@
+#include "mv.h"
+#include "mv_path.h"
+
 #include <errno.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -6,146 +9,134 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-static void
-usage(void)
+static const char *progname_from_argv0(const char *argv0)
 {
-    fprintf(stderr, "usage: mv [-f] source target\n       mv [-f] source ... directory\n");
+    const char *s;
+    if (argv0 == NULL || *argv0 == '\0') return "mv";
+    s = strrchr(argv0, '/');
+    return s ? s + 1 : argv0;
 }
 
-/* Strip trailing slashes in place; argv strings are modifiable per C standard. */
-static void
-strip_trailing_slashes(char *path)
+int main(int argc, char *argv[])
 {
-    size_t len = strlen(path);
-    while (len > 1u && path[len - 1u] == '/')
-        path[--len] = '\0';
-}
+    struct mv_options opts;
+    int first;
+    int rc = 0;
+    int operands;
 
-static const char *
-base_name(const char *path)
-{
-    const char *slash = strrchr(path, '/');
-    return (slash != NULL && slash[1] != '\0') ? slash + 1 : path;
-}
-
-static char *
-join_path(const char *dir, const char *name)
-{
-    size_t dir_len;
-    size_t name_len;
-    size_t need_sep;
-    char *path;
-
-    dir_len = strlen(dir);
-    name_len = strlen(name);
-    need_sep = (dir_len > 0 && dir[dir_len - 1] != '/') ? 1u : 0u;
-    path = malloc(dir_len + need_sep + name_len + 1u);
-    if (path == NULL) {
-        return NULL;
-    }
-    memcpy(path, dir, dir_len);
-    if (need_sep) {
-        path[dir_len++] = '/';
-    }
-    memcpy(path + dir_len, name, name_len + 1u);
-    return path;
-}
-
-static int
-move_one(const char *src, const char *dst)
-{
-    if (rename(src, dst) != 0) {
-        fprintf(stderr, "mv: cannot move '%s' to '%s': %s\n", src, dst, strerror(errno));
+    mv_options_init(&opts, progname_from_argv0(argv[0]));
+    if (mv_parse_options(&opts, argc, argv, &first) != 0) {
         return 1;
     }
-    return 0;
-}
 
-int
-main(int argc, char *argv[])
-{
-    int first_path;
-    int operands;
-    int status;
-    int i;
+    operands = argc - first;
 
-    first_path = 1;
-    for (i = 1; i < argc; ++i) {
-        const char *arg;
-        size_t j;
-
-        arg = argv[i];
-        if (arg[0] != '-' || arg[1] == '\0') {
-            first_path = i;
-            break;
+    /* `-t DIR src...` form: all positional args are sources. */
+    if (opts.target_directory != NULL) {
+        struct stat st;
+        if (operands < 1) {
+            fprintf(stderr,
+                "%s: missing source operand after -t '%s'\n",
+                opts.progname, opts.target_directory);
+            return 1;
         }
-        if (strcmp(arg, "--") == 0) {
-            first_path = i + 1;
-            break;
+        if (stat(opts.target_directory, &st) != 0 ||
+            !S_ISDIR(st.st_mode)) {
+            fprintf(stderr,
+                "%s: target '%s' is not a directory\n",
+                opts.progname, opts.target_directory);
+            return 1;
         }
-        for (j = 1; arg[j] != '\0'; ++j) {
-            if (arg[j] != 'f') {
-                usage();
-                return 1;
+        for (int i = first; i < argc; i++) {
+            char *dst;
+            mv_path_strip_trailing_slashes(argv[i]);
+            dst = mv_path_join(opts.target_directory,
+                               mv_path_basename(argv[i]));
+            if (dst == NULL) {
+                fprintf(stderr, "%s: out of memory\n", opts.progname);
+                rc = 1;
+                continue;
             }
+            if (mv_rename_one(argv[i], dst, &opts) != 0) rc = 1;
+            free(dst);
         }
-        first_path = i + 1;
+        return rc;
     }
 
-    operands = argc - first_path;
     if (operands < 2) {
-        usage();
+        fprintf(stderr,
+            "usage: %s [-finvhT] [-S SUFFIX] [-t DIR] "
+            "[--backup[=CTL]] [--update[=WHEN]] "
+            "SOURCE... DEST\n", opts.progname);
         return 1;
     }
 
     if (operands == 2) {
-        struct stat st;
-        const char *src = argv[first_path];
-        const char *dst = argv[first_path + 1];
+        const char *src = argv[first];
+        const char *dst = argv[first + 1];
+        struct stat dst_st;
+        bool target_is_dir;
 
-        if (stat(dst, &st) == 0 && S_ISDIR(st.st_mode)) {
-            /* POSIX: if destination is a directory, move source into it. */
-            strip_trailing_slashes(argv[first_path]);
-            char *dst_path = join_path(dst, base_name(src));
-            if (dst_path == NULL) {
-                fprintf(stderr, "mv: cannot move '%s': out of memory\n", src);
+        target_is_dir = (lstat(dst, &dst_st) == 0) &&
+                        S_ISDIR(dst_st.st_mode);
+
+        if (opts.symlink_target_as_self && target_is_dir) {
+            /* BSD -h: a symlink-to-dir destination is treated as
+             * a regular file — the symlink itself is the target. */
+            struct stat lst;
+            if (lstat(dst, &lst) == 0 && S_ISLNK(lst.st_mode)) {
+                target_is_dir = false;
+            }
+        }
+        if (opts.no_target_directory) {
+            target_is_dir = false;
+        }
+
+        if (target_is_dir) {
+            char *full;
+            mv_path_strip_trailing_slashes(argv[first]);
+            full = mv_path_join(dst, mv_path_basename(src));
+            if (full == NULL) {
+                fprintf(stderr, "%s: out of memory\n", opts.progname);
                 return 1;
             }
-            int rc = move_one(src, dst_path);
-            free(dst_path);
+            rc = (mv_rename_one(src, full, &opts) == 0) ? 0 : 1;
+            free(full);
             return rc;
         }
-        return move_one(src, dst);
+        return (mv_rename_one(src, dst, &opts) == 0) ? 0 : 1;
     }
 
+    /* operands > 2 -> last is the target directory */
     {
-        const char *dst_dir;
+        const char *dst_dir = argv[argc - 1];
         struct stat st;
 
-        dst_dir = argv[argc - 1];
-        if (stat(dst_dir, &st) != 0 || !S_ISDIR(st.st_mode)) {
-            fprintf(stderr, "mv: target '%s' is not a directory\n", dst_dir);
+        if (opts.no_target_directory) {
+            fprintf(stderr,
+                "%s: extra operand '%s' (with -T, exactly two "
+                "operands expected)\n",
+                opts.progname, argv[first + 2]);
             return 1;
         }
-
-        status = 0;
-        for (i = first_path; i < argc - 1; ++i) {
+        if (lstat(dst_dir, &st) != 0 || !S_ISDIR(st.st_mode)) {
+            fprintf(stderr,
+                "%s: target '%s' is not a directory\n",
+                opts.progname, dst_dir);
+            return 1;
+        }
+        for (int i = first; i < argc - 1; i++) {
             char *dst;
-
-            strip_trailing_slashes(argv[i]);
-            dst = join_path(dst_dir, base_name(argv[i]));
+            mv_path_strip_trailing_slashes(argv[i]);
+            dst = mv_path_join(dst_dir, mv_path_basename(argv[i]));
             if (dst == NULL) {
-                fprintf(stderr, "mv: cannot move '%s': out of memory\n", argv[i]);
-                status = 1;
+                fprintf(stderr, "%s: out of memory\n", opts.progname);
+                rc = 1;
                 continue;
             }
-            if (move_one(argv[i], dst) != 0) {
-                status = 1;
-            }
+            if (mv_rename_one(argv[i], dst, &opts) != 0) rc = 1;
             free(dst);
         }
     }
-
-    return status;
+    return rc;
 }
-

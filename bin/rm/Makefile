@@ -1,5 +1,5 @@
 PROG = rm
-SRCS = rm.c rm_opts.c rm_safety.c rm_walk.c
+SRCS = rm.c rm_opts.c rm_safety.c rm_walk.c rm_scrub.c
 
 DYNAMIC = 1
 
@@ -32,8 +32,8 @@ test_opts: $(TESTS)/test_opts.c rm_opts.c rm.h rm_opts.h
 test_safety: $(TESTS)/test_safety.c rm_safety.c rm.h rm_safety.h
 	$(CC) $(TEST_CFLAGS) -I. -o $@ $(TESTS)/test_safety.c rm_safety.c
 
-test_walk: $(TESTS)/test_walk.c rm_opts.c rm_safety.c rm_walk.c rm.h rm_opts.h rm_safety.h rm_walk.h
-	$(CC) $(TEST_CFLAGS) -I. -o $@ $(TESTS)/test_walk.c rm_opts.c rm_safety.c rm_walk.c
+test_walk: $(TESTS)/test_walk.c rm_opts.c rm_safety.c rm_walk.c rm_scrub.c rm.h rm_opts.h rm_safety.h rm_walk.h rm_scrub.h
+	$(CC) $(TEST_CFLAGS) -I. -o $@ $(TESTS)/test_walk.c rm_opts.c rm_safety.c rm_walk.c rm_scrub.c
 
 unit: $(UNIT_BINS)
 	@for t in $(UNIT_BINS); do ./$$t; done

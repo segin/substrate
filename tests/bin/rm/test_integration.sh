@@ -58,4 +58,33 @@ if "$RM_BIN" "$WORK/trailing/" 2>/dev/null; then
     fail "trailing slash on non-directory should fail"
 fi
 
+# BSD -P: overwrite-and-unlink for regular files.
+echo "secret-data-here" > "$WORK/scrub_me"
+"$RM_BIN" -P "$WORK/scrub_me"
+[ ! -e "$WORK/scrub_me" ] || fail "-P did not unlink the file"
+
+# BSD -P combined with -r over a directory tree.
+mkdir -p "$WORK/scrub_tree/sub"
+echo "leaf" > "$WORK/scrub_tree/sub/leaf"
+echo "top"  > "$WORK/scrub_tree/top"
+"$RM_BIN" -Pr "$WORK/scrub_tree"
+[ ! -e "$WORK/scrub_tree" ] || fail "-Pr did not remove the tree"
+
+# BSD -x alias for --one-file-system (smoke: just accept the flag).
+mkdir "$WORK/x_alias"
+echo "x" > "$WORK/x_alias/file"
+"$RM_BIN" -rx "$WORK/x_alias"
+[ ! -e "$WORK/x_alias" ] || fail "-x alias did not allow removal"
+
+# GNU --preserve-root=all takes 'all' arg without error.
+mkdir "$WORK/pr_all"
+echo "x" > "$WORK/pr_all/file"
+"$RM_BIN" --preserve-root=all -r "$WORK/pr_all"
+[ ! -e "$WORK/pr_all" ] || fail "--preserve-root=all blocked non-/ removal"
+
+# GNU --preserve-root rejects unknown argument.
+if "$RM_BIN" --preserve-root=bogus dummy 2>/dev/null; then
+    fail "--preserve-root=bogus should fail"
+fi
+
 echo "integration: PASS"
