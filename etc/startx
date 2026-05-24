@@ -16,6 +16,7 @@
 # Adjust the Xfbdev mode via `-screen WxHxBPP` if you want something
 # other than whatever fb resolution the kernel picked.
 /usr/bin/Xfbdev vt1 \
+    -retro \
     -mouse evdev,,device=/dev/input/event0 \
     -keybd evdev,,device=/dev/input/event0 &
 XPID=$!
