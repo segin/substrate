@@ -121,7 +121,15 @@ int vm_fault(vm_map_t *map, uintptr_t va, uint8_t prot) {
         if (!vm_pager_device_phys(first_obj->pager, pindex, &device_phys)) {
             goto out;
         }
-        if (pmap_enter(map->pmap, page_va, device_phys, enter_prot, 0) < 0) {
+        /* Device mappings (MMIO apertures like the BGA framebuffer at
+         * /dev/fb0) MUST bypass the CPU cache: PCD on the PTE.  Without
+         * it, userland writes through the mmap'd window get absorbed by
+         * the L1/L2 cache and never reach the device — the X server
+         * runs, draws frames, sees no errors, and the framebuffer
+         * aperture remains untouched (screen all black).  Devices that
+         * actually want cacheable access shouldn't be using the device
+         * pager. */
+        if (pmap_enter(map->pmap, page_va, device_phys, enter_prot, PTE_PCD) < 0) {
             goto out;
         }
 

@@ -639,7 +639,31 @@ static int fb_vt_tty_open(struct tty *tty) {
 }
 
 static void fb_vt_tty_close(struct tty *tty) {
-    (void)tty;
+    /* If the last process holding this VT had put it into KD_GRAPHICS
+     * (X server, kmscube, etc.) and exited without restoring KD_TEXT
+     * — including the crash path where it doesn't get a chance to —
+     * the framebuffer stays in graphics mode and the kernel console
+     * silently stops drawing.  The user sees a black screen with only
+     * stray new characters appearing at the cursor.
+     *
+     * Restore text mode + repaint when the tty closes.  This is the
+     * same path KDSETMODE(KD_TEXT) takes; doing it from tty close
+     * means a SEGV'd X server doesn't leave the console wedged. */
+    vt_state_t *vt;
+
+    if (!tty) return;
+    vt = (vt_state_t *)tty->driver_data;
+    if (!vt) return;
+    if (!vt->graphics_mode) return;
+
+    kprintf("fb_vt: tty close in KD_GRAPHICS (vt=%d) — restoring text + redrawing\n",
+            vt->id);
+    vt->graphics_mode = 0;
+    vt->kbd_mode = K_XLATE;
+    if (vt->id == vt_get_active()) {
+        fb_console_redraw_active();
+        vt_render_statusline(vt);
+    }
 }
 
 static void fb_cb_putc(char c) {
