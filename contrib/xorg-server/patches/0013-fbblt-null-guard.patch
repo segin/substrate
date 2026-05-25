@@ -1,0 +1,46 @@
+From: substrate
+Subject: fb: NULL-guard fbBlt against missing-font pixmaps
+
+When the X server's font path doesn't contain a font a client asks
+for, XOpenFont can return a "pixmap" whose `bits` is NULL.  The next
+attempt to draw with it dives into fbBlt and crashes the server at
+0x0 (the NULL src) or 0xc (a NULL+offset deref through one of the
+inner-loop macros).
+
+substrate currently ships only libXfont's two builtin fonts
+(6x13.builtin + cursor.builtin, with the alias patch mapping `fixed`
+to 6x13.builtin).  Clients that request anything else — and many do,
+e.g. xterm's resource defaults, matwm2's title bar font — would trip
+this every time.
+
+Log once and skip the blit instead of crashing.  Slightly visible
+artifacts beat a SIGSEGV.  Once font-misc-misc et al are ported and
+in the default path, this guard should hit ~zero in practice but
+remains as a safety net.
+
+--- a/fb/fbblt.c
++++ b/fb/fbblt.c
+@@ -57,6 +57,23 @@ fbBlt(FbBits * srcLine,
+     Bool destInvarient;
+     int startbyte, endbyte;
+
++    /* Substrate hardening: a pixmap with NULL backing storage —
++     * typically an XOpenFont that failed because the requested font
++     * isn't in our (minimal) font path — used to crash this function
++     * with a NULL deref the moment a client tried to draw with it.
++     * Log once and bail instead. */
++    if (!srcLine || !dstLine) {
++        static int warned = 0;
++        if (!warned) {
++            warned = 1;
++            ErrorF("fbBlt: NULL %s drawable (src=%p dst=%p w=%d h=%d bpp=%d) "
++                   "— likely a font/pixmap with no bits; skipping.\n",
++                   !srcLine ? "src" : "dst",
++                   (void *)srcLine, (void *)dstLine, width, height, bpp);
++        }
++        return;
++    }
++
+     FbDeclareMergeRop();
+
+     if (alu == GXcopy && pm == FB_ALLONES &&
