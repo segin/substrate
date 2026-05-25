@@ -385,6 +385,47 @@ void isr_handler(registers_t *regs) {
                             (unsigned int)regs->useresp,
                             (unsigned int)regs->ds);
                     kprint(trapbuf);
+
+                    /* Walk the user-mode frame-pointer chain.  Requires
+                     * the faulting binary was built with
+                     * -fno-omit-frame-pointer (the substrate cross
+                     * toolchain defaults are friendly here).  Bound
+                     * the walk so a corrupt ebp can't loop forever,
+                     * and copyin the words so a bad pointer faults
+                     * us cleanly rather than double-faulting the
+                     * kernel. */
+                    {
+                        extern int copyin(const void *src, void *dst, unsigned int size);
+                        uint32_t fp = (uint32_t)regs->ebp;
+                        kprint("TRAP: user backtrace:\n");
+                        for (int depth = 0; depth < 16; depth++) {
+                            char line[80];
+                            uint32_t frame[2] = {0, 0};
+                            if (fp == 0) {
+                                kprint("  (end of chain)\n");
+                                break;
+                            }
+                            if (fp & 3) {
+                                snprintf(line, sizeof(line),
+                                    "  <unaligned ebp=0x%08X>\n", fp);
+                                kprint(line);
+                                break;
+                            }
+                            if (copyin((const void *)(uintptr_t)fp,
+                                       frame, sizeof(frame)) != 0) {
+                                snprintf(line, sizeof(line),
+                                    "  <unreadable ebp=0x%08X>\n", fp);
+                                kprint(line);
+                                break;
+                            }
+                            snprintf(line, sizeof(line),
+                                "  #%d ebp=0x%08X ret=0x%08X\n",
+                                depth, fp, frame[1]);
+                            kprint(line);
+                            if (frame[0] <= fp) break;  /* sane chain */
+                            fp = frame[0];
+                        }
+                    }
                 }
                 trapsignal(current_process, sig, code);
                 signal_handle_pending(regs);
