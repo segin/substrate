@@ -364,13 +364,12 @@ void isr_handler(registers_t *regs) {
                             (unsigned int)regs->ds);
                     kprint(elks_trapbuf);
                 }
-                /* Always log user-side fatal traps to the kernel
-                 * console — they're rare enough (each delivers a
-                 * fatal signal to the process) that the volume is
-                 * fine, and having the EIP visible without needing
-                 * a separate debug= cmdline flag is invaluable when
-                 * debugging userspace crashes (X server, etc.). */
-                {
+                /* Userspace-fault tracing.  Gated behind a simple
+                 * `trap` kernel cmdline flag (not `debug=trap` — the
+                 * comma-list debug parser was a foot-gun when this
+                 * lookup mattered most).  Fires only on real fatal
+                 * signals so the log volume is intrinsically low. */
+                if (cmdline_has("trap") || cmdline_debug_enabled("trap")) {
                     char trapbuf[256];
                     snprintf(trapbuf, sizeof(trapbuf),
                             "TRAP: pid=%d (%s) exception %u -> signal %d code %d addr 0x%08X eip=0x%08X cs=0x%04X ss=0x%04X esp=0x%08X ds=0x%04X\n",
