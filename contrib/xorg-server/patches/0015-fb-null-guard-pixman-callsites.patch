@@ -1,0 +1,88 @@
+From: substrate
+Subject: fb: NULL-guard pixman_blt and pixman_fill call sites
+
+The fbBlt NULL guard from patch 0013 catches NULL drawables that flow
+THROUGH fbBlt, but it misses the pixman fast paths that fbCopyNtoN
+and fbFill take BEFORE falling back to fbBlt.  pixman_blt and
+pixman_fill walk the dst/src pointer arrays directly without their
+own NULL check and segfault at 0x0 the moment either argument is
+NULL.
+
+Symptom: first xterm/matwm2 connect → X server SIGSEGV at 0x0, no
+"fbBlt: NULL drawable" line in the log because fbBlt's fallback
+never ran.
+
+Three sites guarded:
+  - fb/fbcopy.c::fbCopyNtoN — bail before the pixman_blt fast path
+  - fb/fbfill.c::fbFill — bail before pixman_fill
+  - fb/fbfill.c::fbSolidBoxClipped — same hazard
+
+Each logs once (`static warned`) and returns cleanly via
+fbFinishAccess so the caller's lock balance is preserved.  Visible
+artifact instead of SIGSEGV.
+
+--- a/fb/fbcopy.c
++++ b/fb/fbcopy.c
+@@ -51,6 +51,23 @@ fbCopyNtoN(DrawablePtr pSrcDrawable,
+     fbGetDrawable(pSrcDrawable, src, srcStride, srcBpp, srcXoff, srcYoff);
+     fbGetDrawable(pDstDrawable, dst, dstStride, dstBpp, dstXoff, dstYoff);
+
++    /* Substrate hardening: pixman_blt (called below as the fast path)
++     * walks the src/dst pointer arrays directly and segfaults at 0x0
++     * if either is NULL.  Bypassing the fbBlt downstream guard.  Bail
++     * out cleanly here. */
++    if (!src || !dst) {
++        static int warned = 0;
++        if (!warned) {
++            warned = 1;
++            ErrorF("fbCopyNtoN: NULL %s drawable backing (src=%p dst=%p) — "
++                   "skipping copy\n",
++                   !src ? "src" : "dst", (void *)src, (void *)dst);
++        }
++        fbFinishAccess(pDstDrawable);
++        fbFinishAccess(pSrcDrawable);
++        return;
++    }
++
+     while (nbox--) {
+ #ifndef FB_ACCESS_WRAPPER       /* pixman_blt() doesn't support accessors yet */
+         if (pm == FB_ALLONES && alu == GXcopy && !reverse && !upsidedown) {
+--- a/fb/fbfill.c
++++ b/fb/fbfill.c
+@@ -37,6 +37,18 @@ fbFill(DrawablePtr pDrawable, GCPtr pGC, int x, int y, int width, int height)
+
+     fbGetDrawable(pDrawable, dst, dstStride, dstBpp, dstXoff, dstYoff);
+
++    /* Substrate hardening: pixman_fill walks the dst pointer directly
++     * and segfaults at 0x0 if dst is NULL.  Bail cleanly. */
++    if (!dst) {
++        static int warned = 0;
++        if (!warned) {
++            warned = 1;
++            ErrorF("fbFill: NULL drawable backing (drawable=%p w=%d h=%d) — "
++                   "skipping fill\n", (void *)pDrawable, width, height);
++        }
++        fbFinishAccess(pDrawable);
++        return;
++    }
++
+     switch (pGC->fillStyle) {
+     case FillSolid:
+ #ifndef FB_ACCESS_WRAPPER
+@@ -165,6 +177,16 @@ fbSolidBoxClipped(DrawablePtr pDrawable,
+
+     fbGetDrawable(pDrawable, dst, dstStride, dstBpp, dstXoff, dstYoff);
+
++    /* Substrate hardening: same pixman_fill NULL hazard as fbFill. */
++    if (!dst) {
++        static int warned = 0;
++        if (!warned) {
++            warned = 1;
++            ErrorF("fbSolidBoxClipped: NULL drawable backing — skipping\n");
++        }
++        fbFinishAccess(pDrawable);
++        return;
++    }
++
+     for (nbox = RegionNumRects(pClip), pbox = RegionRects(pClip);
+          nbox--; pbox++) {
