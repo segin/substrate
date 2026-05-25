@@ -364,10 +364,18 @@ void isr_handler(registers_t *regs) {
                             (unsigned int)regs->ds);
                     kprint(elks_trapbuf);
                 }
-                if (cmdline_debug_enabled("trap")) {
+                /* Always log user-side fatal traps to the kernel
+                 * console — they're rare enough (each delivers a
+                 * fatal signal to the process) that the volume is
+                 * fine, and having the EIP visible without needing
+                 * a separate debug= cmdline flag is invaluable when
+                 * debugging userspace crashes (X server, etc.). */
+                {
                     char trapbuf[256];
                     snprintf(trapbuf, sizeof(trapbuf),
-                            "TRAP: user exception %u -> signal %d code %d addr 0x%08X eip=0x%08X cs=0x%04X ss=0x%04X esp=0x%08X ds=0x%04X\n",
+                            "TRAP: pid=%d (%s) exception %u -> signal %d code %d addr 0x%08X eip=0x%08X cs=0x%04X ss=0x%04X esp=0x%08X ds=0x%04X\n",
+                            current_process ? (int)current_process->pid : -1,
+                            (current_process && current_process->comm[0]) ? current_process->comm : "?",
                             (unsigned int)regs->int_no,
                             sig,
                             code,
