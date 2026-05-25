@@ -9,6 +9,7 @@
 #include <kern/time.h>
 #include <sys/lock.h>
 #include <sys/errno.h>
+#include <sys/poll.h>
 
 #define INPUT_QUEUE_SIZE 64
 
@@ -262,6 +263,24 @@ static int input_ioctl(fs_node_t *node, uint32_t request, void *arg) {
     return -ENOTTY;
 }
 
+/* POLLIN iff there are events queued.  kdrive's WaitForSomething uses
+ * select(), which substrate routes through kern_poll → this callback.
+ * Without it, the fd never reports readable and EvdevPtrRead never
+ * fires; fbmouse worked because it does blocking read() directly
+ * instead of polling.  This was committed in fcbaef5e and accidentally
+ * dropped by the EVIOCGBIT-fix commit 3e857c5c; restoring it here. */
+static int input_poll(fs_node_t *node, void *waiter) {
+    (void)node;
+    (void)waiter;
+
+    int events = POLLOUT;
+    input_lock_take();
+    int has_event = (global_seq > 0);
+    spinlock_release(&input_lock);
+    if (has_event) events |= POLLIN | POLLRDNORM;
+    return events;
+}
+
 static uint32_t input_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
     (void)node;
     if (size < sizeof(input_event_t)) return 0;
@@ -322,6 +341,7 @@ void input_register_devfs(void) {
     event_node.flags = FS_CHARDEVICE;
     event_node.read = &input_read;
     event_node.ioctl = &input_ioctl;
+    event_node.poll = &input_poll;
     devfs_register_device(&event_node);
 }
 
