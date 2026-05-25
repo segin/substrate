@@ -143,7 +143,20 @@ void *memmove(void *dest, const void *src, size_t n) {
 void *memset(void *s, int c, size_t n) {
     unsigned char *p = s;
     unsigned char byte = (unsigned char)c;
-    
+
+    /* Substrate debug guard — see matching memcpy guard.  A NULL
+     * destination with n > 0 is undefined behaviour; in practice
+     * memset's word-fill loop SIGSEGVs immediately, hiding the
+     * caller.  Log the caller's return address and bail. */
+    if (__builtin_expect(!s && n > 0, 0)) {
+        extern int fprintf(void *, const char *, ...);
+        extern void *stderr;
+        fprintf(stderr,
+                "memset(NULL): s=%p c=%d n=%u caller=%p\n",
+                s, c, (unsigned)n, __builtin_return_address(0));
+        return s;
+    }
+
     /* Fill byte-by-byte until word-aligned */
     while (n && ((uintptr_t)p & 3)) {
         *p++ = byte;
