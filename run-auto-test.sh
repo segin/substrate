@@ -11,6 +11,7 @@
 set -eu
 
 INIT_PATH="${1:-/tmp/torture_ipc}"
+INITARG="${INITARG:-}"
 TIMEOUT="${TIMEOUT:-30}"
 LOG="$(mktemp -t substrate-test-XXXXXX.log)"
 trap 'rm -f "$LOG"' EXIT
@@ -46,7 +47,7 @@ timeout "$TIMEOUT" qemu-system-i386 \
     -drive file=rootfs.img,format=raw,if=none,id=rootdisk \
     -device ide-hd,drive=rootdisk,bus=ahci0.0 \
     -usb -device usb-kbd \
-    -append "serial_debug root=/dev/storage/sata0 init=$INIT_PATH" \
+    -append "serial_debug root=/dev/storage/sata0 init=$INIT_PATH${INITARG:+ initarg='$INITARG'}" \
     > "$LOG" 2>&1 || true
 
 # Strip CR (substrate's serial uses \r\n).  Print only the test-program's

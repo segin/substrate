@@ -444,7 +444,8 @@ install_to_dist() {
         "tests/lib/ipc:torture_pipe" \
         "tests/lib/pty:torture_pty" \
         "tests/lib/signal:torture_signal" \
-        "tests/lib/fcntl:torture_fcntl"; do
+        "tests/lib/fcntl:torture_fcntl" \
+        "tests/lib/c:torture_malloc"; do
         srcdir="${entry%%:*}"
         binname="${entry##*:}"
         srcbin="$TOP/$srcdir/$binname"
