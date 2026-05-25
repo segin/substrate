@@ -738,18 +738,31 @@ void vt_release_graphics_on_exit(void *exiting_process) {
     if (!exiting_process) return;
     for (int i = 0; i < VT_MAX; i++) {
         vt_state_t *vt = &vt_states[i];
+        int touched = 0;
+
         if (vt->graphics_mode && vt->graphics_owner == exiting_process) {
             vt->graphics_mode = 0;
             vt->graphics_owner = NULL;
+            touched = 1;
+        }
+        /* Restore K_XLATE independently of graphics_mode: a clean
+         * Xfbdev exit (zap) calls LinuxDisable which clears
+         * KD_GRAPHICS but DOESN'T touch KDSKBMODE, leaving the VT
+         * stuck in K_RAW with all keystrokes routed to /dev/input/
+         * event0 instead of the line discipline. */
+        if (vt->kbd_mode != K_XLATE && vt->kbd_owner == exiting_process) {
             vt->kbd_mode = K_XLATE;
-            if (vt->id == vt_get_active()) {
-                if (fb_console_active()) {
-                    fb_console_redraw_active();
-                } else {
-                    hw_text_redraw_active();
-                }
-                vt_render_statusline(vt);
+            vt->kbd_owner = NULL;
+            touched = 1;
+        }
+
+        if (touched && vt->id == vt_get_active()) {
+            if (fb_console_active()) {
+                fb_console_redraw_active();
+            } else {
+                hw_text_redraw_active();
             }
+            vt_render_statusline(vt);
         }
     }
 }

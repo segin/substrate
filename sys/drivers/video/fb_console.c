@@ -1393,6 +1393,11 @@ static int fb_vt_tty_ioctl(struct tty *tty, uint32_t cmd, unsigned long arg) {
             return -EINVAL;
         }
         vt->kbd_mode = val;
+        /* Track who put this VT into a non-XLATE mode so we can
+         * restore K_XLATE on that process's exit even if it didn't
+         * call KDSKBMODE(K_XLATE) itself (the X server doesn't —
+         * LinuxDisable only resets KD_GRAPHICS, leaving K_RAW). */
+        vt->kbd_owner = (val == K_XLATE) ? NULL : (void *)current_process;
         return 0;
     case VT_OPENQRY: {
         /* Linux returns "first unallocated VT >= 1" — substrate

@@ -114,10 +114,22 @@ typedef struct vt_state {
      * process_t into this header; the fb_console code casts.  When
      * a process exits, the proc_exit hook walks every VT, and if
      * graphics_owner matches the exiting process, force-restores
-     * KD_TEXT + K_XLATE — otherwise an X server crash leaves the
-     * framebuffer wedged in graphics mode forever.
+     * KD_TEXT — otherwise an X server crash leaves the framebuffer
+     * wedged in graphics mode forever.
      */
     void *graphics_owner;
+
+    /*
+     * Process that set this VT into a non-K_XLATE kbd_mode (X server
+     * calling KDSKBMODE(K_RAW), etc.).  Tracked separately from
+     * graphics_owner because the X server clears KD_GRAPHICS at
+     * teardown (via KDSETMODE(KD_TEXT)) but DOESN'T restore K_XLATE
+     * — leaving tty1 stuck in K_RAW with no way for the line
+     * discipline to see keystrokes.  proc_exit's cleanup hook
+     * restores K_XLATE for every VT whose kbd_owner is the exiting
+     * process.
+     */
+    void *kbd_owner;
 
     // Associated TTY (if any)
     struct tty *tty;
