@@ -720,3 +720,36 @@ void vt_redraw_active(void) {
 void vt_tick_1hz(void) {
     vt_render_statusline(vt_get_state(vt_get_active()));
 }
+
+/*
+ * Process-exit cleanup hook.  Called from proc_exit before any of the
+ * exiting process's fds are closed.  If the process owns a VT in
+ * KD_GRAPHICS mode (i.e. it was the X server that called KDSETMODE),
+ * we tear the graphics state down so the console returns to text mode
+ * and the keyboard returns to K_XLATE — regardless of whether other
+ * processes still hold open file descriptors on the VT.
+ *
+ * Without this, a SEGV'd X server leaves the framebuffer wedged in
+ * graphics mode and the keyboard in K_RAW: tty1 looks black and won't
+ * receive any keyboard input, even though sibling shells on other VTs
+ * are perfectly alive.
+ */
+void vt_release_graphics_on_exit(void *exiting_process) {
+    if (!exiting_process) return;
+    for (int i = 0; i < VT_MAX; i++) {
+        vt_state_t *vt = &vt_states[i];
+        if (vt->graphics_mode && vt->graphics_owner == exiting_process) {
+            vt->graphics_mode = 0;
+            vt->graphics_owner = NULL;
+            vt->kbd_mode = K_XLATE;
+            if (vt->id == vt_get_active()) {
+                if (fb_console_active()) {
+                    fb_console_redraw_active();
+                } else {
+                    hw_text_redraw_active();
+                }
+                vt_render_statusline(vt);
+            }
+        }
+    }
+}

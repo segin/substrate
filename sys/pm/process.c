@@ -1114,6 +1114,15 @@ void proc_exit(int code) {
         }
     }
 
+    /* Release any VT we put into KD_GRAPHICS (X server crash, etc.)
+     * before tearing down fds.  Without this, a SEGV'd X server leaves
+     * the framebuffer wedged in graphics mode and the keyboard in
+     * K_RAW even though all sibling VTs are alive. */
+    {
+        extern void vt_release_graphics_on_exit(void *);
+        vt_release_graphics_on_exit((void *)current_process);
+    }
+
     /* Leak instrumentation.  When booted with `debug=vm_leak` print
      * a one-line snapshot at every proc_exit so we can watch the
      * vnode-pager / vm_map / vnode-stat counters drift relative to

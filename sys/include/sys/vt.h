@@ -108,6 +108,17 @@ typedef struct vt_state {
      */
     int kbd_mode;
 
+    /*
+     * Process that set this VT into KD_GRAPHICS (typically the X
+     * server's PID).  Kept as `void *` to avoid leaking the kernel
+     * process_t into this header; the fb_console code casts.  When
+     * a process exits, the proc_exit hook walks every VT, and if
+     * graphics_owner matches the exiting process, force-restores
+     * KD_TEXT + K_XLATE — otherwise an X server crash leaves the
+     * framebuffer wedged in graphics mode forever.
+     */
+    void *graphics_owner;
+
     // Associated TTY (if any)
     struct tty *tty;
 } vt_state_t;
@@ -117,6 +128,11 @@ void vt_init(void);
 void vt_activate(int n);
 int vt_get_active(void);
 vt_state_t *vt_get_state(int n);
+
+/* Restore KD_TEXT + K_XLATE on every VT owned by the exiting process.
+ * Called from proc_exit so a SEGV'd X server doesn't leave the
+ * framebuffer wedged in graphics mode and the keyboard in K_RAW. */
+void vt_release_graphics_on_exit(void *exiting_process);
 struct tty *vt_get_active_tty(void);
 int vt_set_geometry(int cols, int rows);
 int vt_refresh_geometry_from_terminal(void);

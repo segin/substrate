@@ -17,6 +17,7 @@
 #include <sys/vtio.h>
 #include <sys/copy.h>
 #include <sys/errno.h>
+#include <sys/proc.h>
 #include <arch/i386/intr.h>
 #include "fb.h"
 #include "fb_console.h"
@@ -1357,6 +1358,7 @@ static int fb_vt_tty_ioctl(struct tty *tty, uint32_t cmd, unsigned long arg) {
              * fbmouse-as-init worked because the viewport hadn't
              * scrolled; Xfbdev launched from a shell did not. */
             vt->graphics_mode = 1;
+            vt->graphics_owner = (void *)current_process;
             FB_LOCK();
             fb_console_hide_cursor();
             view_y_offset = 0;
@@ -1370,6 +1372,7 @@ static int fb_vt_tty_ioctl(struct tty *tty, uint32_t cmd, unsigned long arg) {
              * everything (cells + status bar + cursor) since the
              * framebuffer now belongs to whatever X drew last. */
             vt->graphics_mode = 0;
+            vt->graphics_owner = NULL;
             if (vt->id == vt_get_active()) {
                 fb_console_redraw_active();
                 vt_render_statusline(vt);
