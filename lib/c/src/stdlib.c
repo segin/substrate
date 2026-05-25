@@ -189,16 +189,12 @@ static struct block_meta *find_free_block(size_t size) {
          * was causing this loop to deref NULL or run forever.
          * Bail safely instead. */
         if (current == NULL) {
-            extern int fprintf(void *, const char *, ...);
-            extern void *stderr;
             fprintf(stderr, "find_free_block: NULL current "
                     "(heap corrupt) — global_base=%p search_hint=%p\n",
                     (void *)global_base, (void *)search_hint);
             return NULL;
         }
         if (spins++ > SPIN_CAP) {
-            extern int fprintf(void *, const char *, ...);
-            extern void *stderr;
             fprintf(stderr, "find_free_block: spin cap exceeded "
                     "(free list cycle, heap corrupt)\n");
             return NULL;

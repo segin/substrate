@@ -69,6 +69,12 @@ typedef	struct fd_set {
 		_p->fds_bits[--_n] = 0; \
 } while (0)
 
+/* Forward-declare struct timeval so the select() prototype below
+ * compiles even when this header is included BEFORE sys/time.h's
+ * struct timeval declaration — happens via sys/wait.h pulling in
+ * sys/resource.h -> sys/time.h -> sys/select.h. */
+struct timeval;
+
 __BEGIN_DECLS
 int	select(int, fd_set * __restrict, fd_set * __restrict, fd_set * __restrict,
 	    struct timeval * __restrict);
