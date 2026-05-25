@@ -1,0 +1,59 @@
+From: substrate
+Subject: kdrive/evdev: bounds-check rel/abs codes from kernel events
+
+EvdevPtrRead reads input events and dispatches by event.type, but
+the code field is used unchecked as an array index into Kevdev's
+fixed-size rel[REL_MAX+1] / abs[ABS_MAX+1] arrays.
+
+substrate's kernel input layer occasionally produces events with
+codes outside this range (or partial-event reads misalign the
+buffer).  The out-of-range index reaches into junk memory and
+SIGSEGVs.
+
+Bounds-check before indexing; log once on first drop so the
+underlying kernel issue stays visible.
+
+--- a/hw/kdrive/linux/evdev.c
++++ b/hw/kdrive/linux/evdev.c
+@@ -177,16 +177,35 @@ EvdevPtrRead(int evdevPort, void *closure)
+     n /= sizeof(struct input_event);
+     for (i = 0; i < n; i++) {
++        unsigned int code = events[i].code;
+         switch (events[i].type) {
+         case EV_SYN:
+             break;
+         case EV_KEY:
+             EvdevPtrBtn(pi, &events[i]);
+             break;
+         case EV_REL:
+-            ke->rel[events[i].code] += events[i].value;
+-            EvdevPtrMotion(pi, &events[i]);
++            if (code <= REL_MAX) {
++                ke->rel[code] += events[i].value;
++                EvdevPtrMotion(pi, &events[i]);
++            } else {
++                static int warned_rel = 0;
++                if (!warned_rel) {
++                    warned_rel = 1;
++                    ErrorF("EvdevPtrRead: dropping EV_REL code=%u "
++                           "(REL_MAX=%d)\n", code, REL_MAX);
++                }
++            }
+             break;
+         case EV_ABS:
+-            ke->abs[events[i].code] = events[i].value;
+-            EvdevPtrMotion(pi, &events[i]);
++            if (code <= ABS_MAX) {
++                ke->abs[code] = events[i].value;
++                EvdevPtrMotion(pi, &events[i]);
++            } else {
++                static int warned_abs = 0;
++                if (!warned_abs) {
++                    warned_abs = 1;
++                    ErrorF("EvdevPtrRead: dropping EV_ABS code=%u "
++                           "(ABS_MAX=%d)\n", code, ABS_MAX);
++                }
++            }
+             break;
+         }
+     }
