@@ -66,4 +66,18 @@ if ! grep -q '\*linux\* | \*substrate\*' configure 2>/dev/null; then
     sed -i 's,	\*linux\*)$,	*linux* | *substrate*),' configure
 fi
 
+# Apply substrate patch series.  Idempotent — patch's --dry-run -N
+# short-circuits if the hunk is already in place.
+if [ -d "${HERE}/patches" ]; then
+    for p in "${HERE}/patches"/*.patch; do
+        [ -f "${p}" ] || continue
+        if patch -p1 -N --dry-run --silent <"${p}" >/dev/null 2>&1; then
+            echo "==> Applying $(basename "${p}")"
+            patch -p1 -N --silent <"${p}"
+        else
+            echo "==> Skipping $(basename "${p}") (already applied)"
+        fi
+    done
+fi
+
 echo "==> xorg-server ${VERSION} ready at ${TREE_DIR}"

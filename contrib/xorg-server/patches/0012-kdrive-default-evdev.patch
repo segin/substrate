@@ -1,0 +1,30 @@
+From: substrate
+Subject: kdrive: default to evdev on /dev/input/event0
+
+Plain `Xfbdev vt1 -retro` launched with no -mouse/-keybd leaves
+kdConfigPointers and kdConfigKeyboards empty, so KdInitInput's loops
+add no devices and the X server runs without input.  On substrate the
+only working input path is the evdev backend on /dev/input/event0;
+make that the default when the user didn't ask for anything else.
+
+Anyone who *does* pass -mouse/-keybd keeps full control: the fallback
+only fires when the config-device lists are empty.
+
+--- a/hw/kdrive/src/kinput.c
++++ b/hw/kdrive/src/kinput.c
+@@ -1265,6 +1265,15 @@ KdInitInput(void)
+
+     kdInputEnabled = TRUE;
+
++    /* substrate default: if the user didn't pass -mouse / -keybd, wire
++     * up the evdev driver on /dev/input/event0 so a bare `Xfbdev vt1
++     * -retro` actually has working input.  Without this, kdConfigPointers
++     * and kdConfigKeyboards are empty and the X server runs deviceless. */
++    if (!kdConfigPointers)
++        KdAddConfigPointer("evdev,,device=/dev/input/event0");
++    if (!kdConfigKeyboards)
++        KdAddConfigKeyboard("evdev,,device=/dev/input/event0");
++
+     for (dev = kdConfigPointers; dev; dev = dev->next) {
+         pi = KdParsePointer(dev->line);
+         if (!pi)
