@@ -69,6 +69,17 @@ fi
     echo "==> generated fonts.dir with ${n} entries"
 }
 
+# Pending: substrate's BDF parser (libXfont/src/bitmap/bdfread.c) crashes
+# at bdfReadBitmap:162 while loading any of these BDFs.  Until the parser
+# is fixed (likely a substrate-side sscanf / malloc interaction),
+# DISABLE the FontFile FPE for this directory by NOT shipping fonts.dir.
+# X server falls through to libXfont's built-in FPE (6x13.builtin), which
+# satisfies SetDefaultFont("fixed") via the alias patch.
+if [ -n "${SUBSTRATE_BDF_DISABLED:-1}" ]; then
+    rm -f "${DST}/fonts.dir" "${DST}/fonts.alias" "${DST}/fonts.scale"
+    echo "==> stripped fonts.dir/alias/scale (BDF parser broken on substrate)"
+fi
+
 # Emit fonts.alias mapping the common short names X clients ask for
 # (fixed, 6x13, 9x15, 10x20, ...) to the actual XLFDs in fonts.dir.
 # Without this, X clients calling XLoadFont("fixed") get a NULL font,
