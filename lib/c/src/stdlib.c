@@ -174,13 +174,36 @@ static struct block_meta *request_space(struct block_meta *last, size_t size) {
 static struct block_meta *find_free_block(size_t size) {
     struct block_meta *start;
     struct block_meta *current;
+    int spins = 0;
+    const int SPIN_CAP = 100000;
 
     if (global_base == NULL) {
         return NULL;
     }
     start = search_hint != NULL ? search_hint : global_base;
+    if (start == NULL) return NULL;  /* defensive */
     current = start;
     do {
+        /* Substrate hardening: heap corruption observed in this
+         * session (search_hint or current->next set to garbage)
+         * was causing this loop to deref NULL or run forever.
+         * Bail safely instead. */
+        if (current == NULL) {
+            extern int fprintf(void *, const char *, ...);
+            extern void *stderr;
+            fprintf(stderr, "find_free_block: NULL current "
+                    "(heap corrupt) — global_base=%p search_hint=%p\n",
+                    (void *)global_base, (void *)search_hint);
+            return NULL;
+        }
+        if (spins++ > SPIN_CAP) {
+            extern int fprintf(void *, const char *, ...);
+            extern void *stderr;
+            fprintf(stderr, "find_free_block: spin cap exceeded "
+                    "(free list cycle, heap corrupt)\n");
+            return NULL;
+        }
+
         if (current->free && current->size >= size) {
             return current;
         }
