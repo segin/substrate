@@ -29,7 +29,7 @@ for arg in "$@"; do
     esac
 done
 
-APPEND="root=/dev/storage/sata0 serial_debug"
+APPEND="root=/dev/storage/sata0 trap serial_debug"
 GFX_ARGS=""
 if [ "$GFX" -eq 1 ]; then
     APPEND="$APPEND vga=1024x768@32"

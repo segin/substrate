@@ -455,3 +455,4 @@ tests/usr.lib/demangle/fuzz/corpus/
 rootfs.img.zst
 contrib/matwm2/build/
 contrib/matwm2/matwm2-master.tar.gz
+tests/sys/fb/fbmouse

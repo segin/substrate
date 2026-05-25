@@ -1,42 +1,21 @@
 #!/usr/bin/zsh
-# /etc/startx — substrate's tiny X session bring-up.
-#
-# Launches Xfbdev on /dev/tty1 + matwm2 as the WM.  Intended as an
-# init= target for quick X testing:
-#
-#   qemu-system-i386 ... -append "... init=/etc/startx"
-#
-# Both processes run in the background; the script waits on Xfbdev's
-# pid so it stays alive as init.  matwm2 reaches the server via the
-# AF_UNIX path /tmp/.X11-unix/X0 — substrate's in-kernel bound-paths
-# table provides the lookup (there's no filesystem inode for the
-# socket; that's fine, AF_UNIX connect() resolves through the kernel
-# table not the VFS).
-#
-# Adjust the Xfbdev mode via `-screen WxHxBPP` if you want something
-# other than whatever fb resolution the kernel picked.
-/usr/bin/Xfbdev vt1 \
+# Init=/etc/startx variant designed to survive a hard qemu power-off
+# AND clean up stale X locks unconditionally.
+mkdir -p /var/log
+
+# Unconditionally remove any leftover server lock from a prior boot.
+# /tmp on substrate persists across boots (it's a real ext2 directory,
+# not tmpfs), so stale .X0-lock files survive and block a fresh start.
+rm -f /tmp/.X0-lock /tmp/.tX0-lock
+rm -rf /tmp/.X11-unix
+
+: >/var/log/Xfbdev.log
+
+# Periodic syncer — survives the exec below since it's a forked process.
+( while true; do /bin/sync; sleep 2; done ) &
+
+exec /usr/bin/Xfbdev vt1 \
     -retro \
     -mouse evdev,,device=/dev/input/event0 \
-    -keybd evdev,,device=/dev/input/event0 &
-XPID=$!
-
-# Xfbdev's XKB compilation takes a few seconds on a slow guest.
-# Spin briefly waiting for the X server to be ready; matwm2's
-# Xlib connect would error out otherwise.  Substrate's AF_UNIX
-# doesn't expose the socket as a filesystem inode, so check for
-# /tmp/.X0-lock (Xfbdev creates this file when it's ready) instead.
-i=0
-while [ $i -lt 30 ]; do
-    [ -e /tmp/.X0-lock ] && break
-    sleep 1
-    i=$((i + 1))
-done
-
-export DISPLAY=:0
-/usr/bin/matwm2 &
-
-# Reap whichever exits first.  When Xfbdev exits (e.g. on Ctrl+Alt+
-# Backspace if -zap was passed), the matwm2 background process gets
-# SIGHUP from the session leader exiting.
-wait $XPID
+    -keybd evdev,,device=/dev/input/event0 \
+    2>/var/log/Xfbdev.log
