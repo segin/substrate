@@ -326,6 +326,21 @@ char *strdup(const char *s) {
         return NULL;
     }
 
+    /* Substrate debug guard: reject pointers in the low-memory junk
+     * range (< 0x10000).  Real strings always come from malloc / .data
+     * / .rodata / stack, all well above this.  Log the actual pointer
+     * value and the caller's return address so we can resolve which
+     * caller is passing junk; return NULL with errno=EFAULT instead
+     * of SIGSEGV'ing in strlen. */
+    if ((uintptr_t)s < 0x10000) {
+        extern int fprintf(void *, const char *, ...);
+        extern void *stderr;
+        fprintf(stderr, "strdup: junk arg s=%p caller=%p\n",
+                (void *)s, __builtin_return_address(0));
+        errno = EFAULT;
+        return NULL;
+    }
+
     size_t len = strlen(s) + 1;
     char *new_s = malloc(len);
     if (new_s) {
