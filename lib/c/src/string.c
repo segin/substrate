@@ -42,13 +42,29 @@ char *strfry(char *string) {
 void *memcpy(void *dest, const void *src, size_t n) {
     unsigned char *d = dest;
     const unsigned char *s = src;
-    
+
+    /* Substrate debug guard: a NULL source or destination with n>0 is
+     * undefined behaviour in standard C but in practice memcpy()'s
+     * word-copy loop just SIGSEGVs immediately, with the user-side
+     * backtrace lost.  Instead, log the caller's return address
+     * (which the kernel's TRAP log can resolve via addr2line) and
+     * bail.  Caller continues with the destination unmodified — a
+     * visible corruption beats a process kill. */
+    if (__builtin_expect((!src || !dest) && n > 0, 0)) {
+        extern int fprintf(void *, const char *, ...);
+        extern void *stderr;
+        fprintf(stderr,
+                "memcpy(NULL): dest=%p src=%p n=%u caller=%p\n",
+                dest, src, (unsigned)n, __builtin_return_address(0));
+        return dest;
+    }
+
     /* Copy byte-by-byte until destination is word-aligned */
     while (n && ((uintptr_t)d & 3)) {
         *d++ = *s++;
         n--;
     }
-    
+
     /* Copy words (4 bytes at a time) */
     uint32_t *dw = (uint32_t *)d;
     const uint32_t *sw = (const uint32_t *)s;
@@ -56,14 +72,14 @@ void *memcpy(void *dest, const void *src, size_t n) {
         *dw++ = *sw++;
         n -= 4;
     }
-    
+
     /* Copy remaining bytes */
     d = (unsigned char *)dw;
     s = (const unsigned char *)sw;
     while (n--) {
         *d++ = *s++;
     }
-    
+
     return dest;
 }
 
