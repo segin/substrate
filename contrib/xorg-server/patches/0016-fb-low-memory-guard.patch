@@ -1,48 +1,70 @@
 From: substrate
-Subject: fb: widen NULL guards to also reject low-memory junk pointers
+Subject: fb: reject low-memory junk pointers throughout the blit/fill path
 
-Patches 0013 and 0015 guard against literally-NULL src/dst pointers,
-but the actual crash hits with src/dst at 0x00001000 — a non-NULL but
-manifestly-junk address (the first 64 KiB are never legitimate
-pixmap storage on substrate; every PixmapRec.devPrivate.ptr comes
-from malloc and lives well above that).
+Multiple SIGSEGVs landed inside fbBlt's inlined-memcpy with dst
+pointers like 0x00001000 — non-NULL but obviously junk (substrate
+pixmap backings come from malloc and live well above 64 KiB).
 
-Widen the guards in fbBlt / fbCopyNtoN / fbFill / fbSolidBoxClipped
-to reject anything below 0x10000.  Trap details for the bug this
-fixes:
-    TRAP: pid=44 (Xfbdev) exception 14 -> signal 11 code 1
-          addr 0x00001000 eip=0x080C1471
-which resolved to fb/fbblt.c:99 MEMCPY_WRAPPED in the inlined memcpy
-that writes through dst_byte.
+Three layers of guard:
+
+  1. fbBlt entry — reject srcLine/dstLine < 0x10000.
+  2. fbBlt's inner computed src_byte/dst_byte — reject if dstX or
+     srcX is negative enough to push the computed pointer into
+     low memory.
+  3. fbCopyNtoN / fbFill / fbSolidBoxClipped — reject before
+     calling pixman_blt / pixman_fill (which walk the pointer
+     directly with no NULL check of their own).
+
+Each logs once and returns cleanly via fbFinishAccess so the
+caller's lock balance is preserved.  Visible draw artifact instead
+of full X server abort, and the log line tells us which drawable
+was bad.
 
 --- a/fb/fbblt.c
 +++ b/fb/fbblt.c
-@@ -57,15 +57,22 @@ fbBlt(FbBits * srcLine,
+@@ -57,15 +57,40 @@ fbBlt(FbBits * srcLine,
      Bool destInvarient;
      int startbyte, endbyte;
 
--    if (!srcLine || !dstLine) {
-+    /* Reject NULL and low-memory junk pointers (< 64 KiB).  All legit
-+     * pixmap backings come from malloc and live above that. */
 +#define FBBLT_VALID_PTR(p) ((uintptr_t)(p) >= 0x10000)
 +    if (!FBBLT_VALID_PTR(srcLine) || !FBBLT_VALID_PTR(dstLine)) {
-         static int warned = 0;
-         if (!warned) {
-             warned = 1;
--            ErrorF("fbBlt: NULL %s drawable (src=%p dst=%p w=%d h=%d bpp=%d) "
--                   ...
-+            ErrorF("fbBlt: bogus %s drawable (src=%p dst=%p w=%d h=%d bpp=%d) "
-+                   "— likely a font/pixmap with no bits; skipping.\n",
++        static int warned = 0;
++        if (!warned) {
++            warned = 1;
++            ErrorF("fbBlt: bogus %s drawable (src=%p dst=%p ...) — skipping\n",
 +                   !FBBLT_VALID_PTR(srcLine) ? "src" : "dst",
-+                   (void *)srcLine, (void *)dstLine, width, height, bpp);
-         }
-         return;
-     }
++                   (void *)srcLine, (void *)dstLine);
++        }
++        return;
++    }
 +#undef FBBLT_VALID_PTR
++
+     FbDeclareMergeRop();
+
+     if (alu == GXcopy && pm == FB_ALLONES &&
+@@ -88,6 +88,21 @@
+         FbStride        dst_byte_stride = dstStride << (FB_SHIFT - 3);
+         int             width_byte = (width >> 3);
+
++        if ((uintptr_t)src_byte < 0x10000 ||
++            (uintptr_t)dst_byte < 0x10000) {
++            static int warned = 0;
++            if (!warned) {
++                warned = 1;
++                ErrorF("fbBlt: computed src/dst in junk range "
++                       "(src_byte=%p dst_byte=%p srcLine=%p dstLine=%p "
++                       "srcX=%d dstX=%d w=%d h=%d) — skipping\n",
++                       (void *)src_byte, (void *)dst_byte,
++                       (void *)srcLine, (void *)dstLine,
++                       srcX, dstX, width, height);
++            }
++            return;
++        }
++
 
 --- a/fb/fbcopy.c
 +++ b/fb/fbcopy.c
-@@ -55,11 +55,12 @@ fbCopyNtoN(...)
+@@ -55,7 +55,7 @@ fbCopyNtoN(...)
 -    if (!src || !dst) {
 +    if ((uintptr_t)src < 0x10000 || (uintptr_t)dst < 0x10000) {
          ...
