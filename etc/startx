@@ -16,6 +16,16 @@ rm -rf /tmp/.X11-unix
 
 exec /usr/bin/Xfbdev vt1 \
     -retro \
+    -ac \
     -mouse evdev,,device=/dev/input/event0 \
     -keybd evdev,,device=/dev/input/event0 \
     2>/var/log/Xfbdev.log
+# -ac disables host-based access control.  Substrate doesn't run an
+# xauth or xdm-style cookie service, so without -ac every client
+# connect goes through ClientAuthorized -> CheckAuthorization,
+# hits no matching MIT-MAGIC-COOKIE-1 entry, and the server slams
+# the socket shut before the failure reply lands cleanly at the
+# client — Xlib reads 0 bytes and exits with "X IO ERROR: display
+# closed (server died?)".  Symptom prior to this flag: clients
+# insta-die on connect, X server hangs in the main dispatch loop
+# accepting and rejecting forever.
