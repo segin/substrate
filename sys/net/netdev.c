@@ -97,18 +97,28 @@ typedef struct netdev_sub {
     uint32_t        count;
     uint64_t        dropped;
     void           *wait_chan;      /* address of self for sleep/wake */
-    mutex_t         lock;
+    /* Spinlock, NOT mutex.  netdev_rx() is invoked from NIC IRQ
+     * context (rtl8139 / loopback / virtio-net all call it from
+     * their hard-IRQ handlers), so any lock guarding a sub's ring
+     * must be safe to acquire with IRQs disabled — a mutex panics
+     * with "Deadlock: recursive mutex_lock" when an IRQ lands on a
+     * CPU that already owns the same mutex via a syscall-context
+     * netdev_sub_recv().  Critical sections are pure ring math, no
+     * sleeping, so a spinlock is appropriate. */
+    spinlock_t      lock;
     int             lock_inited;
     struct netdev_sub *next;
 } netdev_sub_t;
 
 static netdev_sub_t *g_sub_head;
-static mutex_t       g_sub_lock;
+/* g_sub_lock guards the global subscriber list.  Same IRQ rule
+ * applies — netdev_rx() walks the list from IRQ context. */
+static spinlock_t    g_sub_lock;
 static int           g_sub_lock_init;
 
 static void sub_lock_init(void) {
     if (!g_sub_lock_init) {
-        mutex_init(&g_sub_lock, "netdev_sub");
+        spinlock_init(&g_sub_lock, "netdev_sub");
         g_sub_lock_init = 1;
     }
 }
@@ -122,23 +132,23 @@ netdev_sub_t *netdev_subscribe(uint32_t ifindex) {
     if (!s->ring) { kfree(s, sizeof(*s)); return NULL; }
     s->ifindex_filter = ifindex;
     s->wait_chan = &s->count;
-    mutex_init(&s->lock, "netdev_sub_q");
+    spinlock_init(&s->lock, "netdev_sub_q");
     s->lock_inited = 1;
 
-    mutex_lock(&g_sub_lock);
+    unsigned long fl = spinlock_acquire_irq(&g_sub_lock);
     s->next = g_sub_head;
     g_sub_head = s;
-    mutex_unlock(&g_sub_lock);
+    spinlock_release_irq(&g_sub_lock, fl);
     return s;
 }
 
 void netdev_unsubscribe(netdev_sub_t *sub) {
     if (!sub) return;
-    mutex_lock(&g_sub_lock);
+    unsigned long fl = spinlock_acquire_irq(&g_sub_lock);
     netdev_sub_t **link = &g_sub_head;
     while (*link && *link != sub) link = &(*link)->next;
     if (*link == sub) *link = sub->next;
-    mutex_unlock(&g_sub_lock);
+    spinlock_release_irq(&g_sub_lock, fl);
     if (sub->ring) kfree(sub->ring, sizeof(netdev_frame_t) * NETDEV_SUB_RING_FRAMES);
     kfree(sub, sizeof(*sub));
 }
@@ -157,15 +167,16 @@ void netdev_rx(netdev_t *dev, const void *frame, size_t len) {
 
     sub_lock_init();
     /* Walk subscribers under the registry lock; per-sub queue mutates
-     * under its own lock so we don't hold g_sub_lock while copying. */
-    mutex_lock(&g_sub_lock);
+     * under its own lock so we don't hold g_sub_lock while copying.
+     * IRQ-safe — see netdev_sub_t.lock comment. */
+    unsigned long fl_g = spinlock_acquire_irq(&g_sub_lock);
     for (netdev_sub_t *s = g_sub_head; s; s = s->next) {
         if (s->ifindex_filter && s->ifindex_filter != dev->ifindex) continue;
-        mutex_lock(&s->lock);
+        unsigned long fl_s = spinlock_acquire_irq(&s->lock);
         if (s->count >= NETDEV_SUB_RING_FRAMES) {
             s->dropped++;
             dev->rx_dropped++;
-            mutex_unlock(&s->lock);
+            spinlock_release_irq(&s->lock, fl_s);
             continue;
         }
         netdev_frame_t *slot = &s->ring[s->head];
@@ -174,23 +185,23 @@ void netdev_rx(netdev_t *dev, const void *frame, size_t len) {
         memcpy(slot->data, frame, len);
         s->head = (s->head + 1) % NETDEV_SUB_RING_FRAMES;
         s->count++;
-        mutex_unlock(&s->lock);
+        spinlock_release_irq(&s->lock, fl_s);
         sched_wakeup(s->wait_chan);
     }
-    mutex_unlock(&g_sub_lock);
+    spinlock_release_irq(&g_sub_lock, fl_g);
 }
 
 ssize_t netdev_sub_recv(netdev_sub_t *sub, void *buf, size_t size, uint32_t *out_ifindex) {
     if (!sub) return -EINVAL;
-    mutex_lock(&sub->lock);
-    if (sub->count == 0) { mutex_unlock(&sub->lock); return 0; }
+    unsigned long fl = spinlock_acquire_irq(&sub->lock);
+    if (sub->count == 0) { spinlock_release_irq(&sub->lock, fl); return 0; }
     netdev_frame_t *slot = &sub->ring[sub->tail];
     size_t n = slot->len < size ? slot->len : size;
     if (buf) memcpy(buf, slot->data, n);
     if (out_ifindex) *out_ifindex = slot->ifindex;
     sub->tail = (sub->tail + 1) % NETDEV_SUB_RING_FRAMES;
     sub->count--;
-    mutex_unlock(&sub->lock);
+    spinlock_release_irq(&sub->lock, fl);
     return (ssize_t)n;
 }
 
