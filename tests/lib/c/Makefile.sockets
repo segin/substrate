@@ -39,7 +39,8 @@ else
   PTHREAD_INC =
 endif
 
-TESTS = torture_unix torture_afunix_poll torture_malloc torture_evdev
+TESTS = torture_unix torture_afunix_poll torture_malloc torture_evdev \
+        torture_x11_shape
 
 all: $(TESTS)
 
@@ -56,6 +57,13 @@ torture_malloc: torture_malloc.c
 
 # evdev /dev/input/event0 ioctl + grab/ungrab torture.  No pthread.
 torture_evdev: torture_evdev.c
+	$(CC) $(CFLAGS) $(LDFLAGS) $< -o $@
+
+# Minimal X-server-shape AF_UNIX handshake torture (mimics the
+# Xfbdev <-> xtrace dance — listen, poll, accept, read setup
+# request, write reply, close).  Useful for ruling out the
+# kernel poll/accept layer when X-server-side issues are suspected.
+torture_x11_shape: torture_x11_shape.c
 	$(CC) $(CFLAGS) $(LDFLAGS) $< -o $@
 
 clean:
