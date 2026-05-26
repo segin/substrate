@@ -292,7 +292,32 @@ void isr_handler(registers_t *regs) {
                 uint8_t fault_prot = VM_PROT_READ;
                 if (regs->err_code & 0x02) fault_prot |= VM_PROT_WRITE;
                 if (regs->err_code & 0x10) fault_prot |= VM_PROT_EXEC;
-                if (vm_fault(current_process->vm_map, cr2, fault_prot) == VM_FAULT_SUCCESS) {
+                int vfr = vm_fault(current_process->vm_map, cr2, fault_prot);
+                if (vfr == VM_FAULT_SUCCESS) {
+                    return;
+                }
+                /* OOM (no free pages / no page-table page) — distinct
+                 * from a "real" SEGV.  Substrate has no swap, so this
+                 * is fatal to the process, but we send SIGBUS (not
+                 * SIGSEGV) and emit a clear kernel diagnostic so the
+                 * operator sees this is a system-resource shortage,
+                 * not a userland-pointer bug.  trap_addr=cr2 so the
+                 * trace tells you which page couldn't be backed. */
+                if (vfr == VM_FAULT_OOM && is_usermode && current_process) {
+                    char oombuf[160];
+                    snprintf(oombuf, sizeof(oombuf),
+                        "VM: OOM at fault: pid=%d (%s) eip=0x%08X cr2=0x%08X "
+                        "(no free page) -> SIGBUS\n",
+                        (int)current_process->pid,
+                        current_process->comm[0] ? current_process->comm : "?",
+                        (unsigned int)regs->eip,
+                        (unsigned int)cr2);
+                    kprint(oombuf);
+                    if (current_thread && current_thread->proc == current_process) {
+                        current_thread->trap_addr = cr2;
+                    }
+                    trapsignal(current_process, SIGBUS, BUS_OBJERR);
+                    signal_handle_pending(regs);
                     return;
                 }
             }

@@ -110,11 +110,18 @@ int coredump(process_t *p) {
         return -1;
     }
 
+    /* Only initialize metadata once per record.  An earlier
+     * core_capture_trapframe() already filled trap_addr / trap_code
+     * from current_thread; by the time we get here the synchronous
+     * signal-delivery path has cleared that context (via
+     * signal_clear_trap_context), so re-running fill_process_metadata
+     * would overwrite the valid trap_addr with 0 — leading to the
+     * misleading "trap_addr=0x00000000" in every userspace CORE
+     * dump.  Reset + re-fill only if this is a fresh record. */
     if (!last_core_record.valid || last_core_record.pid != p->pid) {
         core_reset_record(&last_core_record);
+        core_fill_process_metadata(&last_core_record, p);
     }
-
-    core_fill_process_metadata(&last_core_record, p);
     core_fill_elks_segments(&last_core_record, p);
 
     char msg[256];

@@ -74,6 +74,11 @@ int vm_fault(vm_map_t *map, uintptr_t va, uint8_t prot) {
     uintptr_t page_va = va & ~0xFFF;
     int result = VM_FAULT_ERROR;
     vm_map_entry_t *entry = NULL;
+    /* OOM bookkeeping: any allocator-failure path along this fault
+     * flips this to 1 so the caller learns the failure was a
+     * resource shortage, not a programmer error.  Set only at the
+     * exact failure site; the trailing `goto out` uses it. */
+    int oom = 0;
     
     // 1. Find the map entry
     vm_map_lock_read(map);
@@ -148,6 +153,7 @@ int vm_fault(vm_map_t *map, uintptr_t va, uint8_t prot) {
 
         m = vm_page_alloc(fill_obj, fill_pindex, 0);
         if (!m) {
+            oom = 1;
             goto out;
         }
 
@@ -209,6 +215,7 @@ int vm_fault(vm_map_t *map, uintptr_t va, uint8_t prot) {
         (obj != first_obj || obj->ref_count > 1)) {
         vm_page_t *new_m = vm_page_alloc(first_obj, offset / 4096, 0);
         if (!new_m) {
+            oom = 1;
             goto out;
         }
 
@@ -233,6 +240,10 @@ int vm_fault(vm_map_t *map, uintptr_t va, uint8_t prot) {
 
     int err = pmap_enter(map->pmap, page_va, m->phys_addr, enter_prot, 0);
     if (err < 0) {
+        /* pmap_enter only returns < 0 when a page-table page can't be
+         * allocated.  Treat it as OOM (same kernel-resource-shortage
+         * class as vm_page_alloc failure). */
+        oom = 1;
         goto out;
     }
 
@@ -243,5 +254,8 @@ int vm_fault(vm_map_t *map, uintptr_t va, uint8_t prot) {
     result = VM_FAULT_SUCCESS;
 out:
     vm_map_unlock_read(map);
+    if (result != VM_FAULT_SUCCESS && oom) {
+        return VM_FAULT_OOM;
+    }
     return result;
 }

@@ -91,7 +91,13 @@ typedef struct {
 #define SEGV_MAPERR    1
 #define SEGV_ACCERR    2
 
-#define BUS_ADRALN     1
+/* si_code values for SIGBUS — POSIX.1-2024. */
+#define BUS_ADRALN     1   /* invalid address alignment */
+#define BUS_ADRERR     2   /* non-existent physical address */
+#define BUS_OBJERR     3   /* object-specific hardware error (substrate:
+                              also used for "no free physical page at
+                              fault time" — kernel resource shortage,
+                              not a userland-pointer bug) */
 
 #define TRAP_BRKPT     1
 #define TRAP_TRACE     2

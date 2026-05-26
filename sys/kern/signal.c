@@ -646,11 +646,17 @@ void trapsignal(process_t *p, int sig, int code) {
     /* For trap signals, deliver to current thread specifically.
      * current_thread is the faulting thread that caused the exception. */
     if (current_thread && current_thread->proc == p) {
-        /* Store trap info in thread's pending siginfo for later delivery */
+        /* Store trap info in thread's pending siginfo for later
+         * delivery.  trap_addr is the caller's responsibility — the
+         * trap dispatch site has cr2 / instruction pointer / etc.
+         * Do NOT zero it here: every caller already assigns
+         * trap_addr before invoking us, and unconditionally
+         * clobbering it was making userspace CORE dumps always
+         * show trap_addr=0x00000000. */
         current_thread->trap_signo = sig;
         current_thread->trap_code = code;
-        current_thread->trap_addr = 0;
-        
+
+
         /* Set signal pending on this specific thread (atomic — psignal
          * may also be modifying sig_pending from another CPU) */
         __sync_fetch_and_or(&current_thread->sig_pending, sigmask(sig));
