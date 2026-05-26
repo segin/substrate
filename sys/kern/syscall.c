@@ -400,12 +400,18 @@ ssize_t sys_read(int fd, char *buf, size_t len) {
     if (!kbuf) return -12; // ENOMEM
 
     ssize_t total_read = 0;
+    /* Expose the file_t to driver read callbacks via the thread —
+     * they only get an fs_node_t* in the read_fs API, so per-fd
+     * state like O_NONBLOCK and the current offset isn't reachable
+     * otherwise.  Cleared on every return path. */
+    if (current_thread) current_thread->io_file = f;
     while (len > 0) {
         size_t to_read = (len > 4096) ? 4096 : len;
         ssize_t bytes = (ssize_t)read_fs((fs_node_t*)f->f_data, f->f_offset, to_read, (uint8_t*)kbuf);
         if (bytes <= 0) {
             if (total_read == 0) {
                 kfree(kbuf, 4096);
+                if (current_thread) current_thread->io_file = NULL;
                 return bytes;
             }
             break;
@@ -413,6 +419,7 @@ ssize_t sys_read(int fd, char *buf, size_t len) {
 
         if (copyout(kbuf, buf + total_read, bytes) != 0) {
             kfree(kbuf, 4096);
+            if (current_thread) current_thread->io_file = NULL;
             if (total_read > 0) return total_read;
             return -14; // EFAULT
         }
@@ -423,6 +430,7 @@ ssize_t sys_read(int fd, char *buf, size_t len) {
         if ((size_t)bytes < to_read) break;
     }
     kfree(kbuf, 4096);
+    if (current_thread) current_thread->io_file = NULL;
     return total_read;
 }
 
@@ -1757,7 +1765,13 @@ int kern_poll(struct pollfd *kfds, unsigned int nfds, int timeout) {
             void *this_chan = NULL;
 
             if (f && f->f_data) {
+                /* Per-fd poll context: expose the file_t so drivers
+                 * that need offset/flags (input_subsys) can consult
+                 * it.  Cleared after the call so cross-iteration
+                 * stale state doesn't leak. */
+                if (current_thread) current_thread->io_file = f;
                 short mask = poll_fs((fs_node_t*)f->f_data, &this_chan);
+                if (current_thread) current_thread->io_file = NULL;
                 kfds[i].revents =
                     mask & (kfds[i].events | POLLERR | POLLHUP | POLLNVAL);
             } else {

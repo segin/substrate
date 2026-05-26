@@ -237,7 +237,19 @@ typedef struct thread {
     
     void         *wait_chan; // Channel thread is sleeping on
     const char   *wait_reason; // Description of wait event
-    
+
+    /* Currently-active file for read / poll on this thread.  Drivers
+     * that need per-fd state (f_offset, f_flag) but only get an
+     * fs_node_t* in their callback can consult this, set by
+     * sys_read / kern_poll across the driver invocation.  The
+     * canonical motivating case is the input_subsys: its global
+     * event queue needs to know each reader's current sequence to
+     * decide POLLIN vs nothing, and each reader's O_NONBLOCK flag
+     * to decide block-vs-EAGAIN.  Cleared back to NULL by the
+     * caller when the driver returns so a deeper-stack driver
+     * call doesn't see a stale outer-call file. */
+    struct file  *io_file;
+
     // Sleep Timeout
     uint64_t      sleep_expiry; // Absolute tick count when sleep expires (0 = none)
     int           sleep_status; // Return status of sleep (e.g., -ETIMEDOUT)

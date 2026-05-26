@@ -263,20 +263,37 @@ static int input_ioctl(fs_node_t *node, uint32_t request, void *arg) {
     return -ENOTTY;
 }
 
-/* POLLIN iff there are events queued.  kdrive's WaitForSomething uses
- * select(), which substrate routes through kern_poll → this callback.
- * Without it, the fd never reports readable and EvdevPtrRead never
- * fires; fbmouse worked because it does blocking read() directly
- * instead of polling.  This was committed in fcbaef5e and accidentally
- * dropped by the EVIOCGBIT-fix commit 3e857c5c; restoring it here. */
+/* POLLIN iff there are events queued PAST THE CALLING FD'S CURRENT
+ * READ POSITION.  Substrate's evdev queue is global, but each
+ * reader's progress is tracked via f_offset.  Earlier this just
+ * checked `global_seq > 0` — true forever after the first event —
+ * so kdrive's WaitForSomething loop reported the evdev fd readable
+ * on every iteration, called read(), and the read parked because
+ * there were no unread events for that fd.  Net effect: X server
+ * hung on internal client connects until a fresh input event
+ * unblocked the read, because select() returned readable on the
+ * evdev fd but the read consumed nothing and EvdevPtrRead never
+ * came back to look at the socket fds.
+ *
+ * We pull the fd's current offset out of current_thread->io_file
+ * (set by kern_poll across this call); without io_file we fall
+ * back to "anything ever" so unfamiliar callers don't regress. */
 static int input_poll(fs_node_t *node, void *waiter) {
     (void)node;
     (void)waiter;
 
     int events = POLLOUT;
+    uint64_t caller_seq = 0;
+    int caller_has_pos = 0;
+    if (current_thread && current_thread->io_file) {
+        caller_seq = (uint64_t)current_thread->io_file->f_offset
+                     / sizeof(input_event_t);
+        caller_has_pos = 1;
+    }
     input_lock_take();
-    int has_event = (global_seq > 0);
+    uint64_t snap = global_seq;
     spinlock_release(&input_lock);
+    int has_event = caller_has_pos ? (caller_seq < snap) : (snap > 0);
     if (has_event) events |= POLLIN | POLLRDNORM;
     return events;
 }
@@ -286,6 +303,16 @@ static uint32_t input_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t
     if (size < sizeof(input_event_t)) return 0;
 
     uint64_t current_seq = offset / sizeof(input_event_t);
+
+    /* O_NONBLOCK honoring — substrate's input_read used to park
+     * unconditionally, ignoring the per-fd flag.  X server probes
+     * its evdev fds with poll() + read() and depends on read
+     * returning EAGAIN when the queue is empty for this fd. */
+    int nonblock = 0;
+    if (current_thread && current_thread->io_file &&
+        (current_thread->io_file->f_flag & FNONBLOCK)) {
+        nonblock = 1;
+    }
 
     // WaitForData
     for (;;) {
@@ -307,8 +334,39 @@ static uint32_t input_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t
         }
         spinlock_release(&input_lock);
         if (current_seq < snap) break;
+
+        if (nonblock) return (uint32_t)-EAGAIN;
+
+        /* Pre-sleep signal check — don't park if a fatal signal is
+         * already pending or we'll wedge waiting for an event that
+         * may never come.  Same race-free pattern as tty_read. */
+        if (current_thread &&
+            (current_thread->sig_pending & ~current_thread->sig_mask)) {
+            return (uint32_t)-EINTR;
+        }
+
+        /* Mark the sleep interruptible so psignal() will kick us out
+         * of sched_sleep when a signal lands.  Without this flag,
+         * kill -9 on a process stuck in read() of /dev/input/event0
+         * couldn't reap it — which is exactly the substrate gap the
+         * tty layer fixed earlier. */
         extern void sched_sleep(void *chan);
+        if (current_thread) {
+            current_thread->flags |= THREAD_F_INTERRUPTIBLE;
+            current_thread->wait_chan = &global_event_log;
+        }
         sched_sleep(&global_event_log);
+        if (current_thread) {
+            current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
+            current_thread->wait_chan = NULL;
+        }
+
+        /* Woken by a signal?  Return EINTR (or whatever partial data
+         * we have — but for this path we haven't read anything yet). */
+        if (current_thread &&
+            (current_thread->sig_pending & ~current_thread->sig_mask)) {
+            return (uint32_t)-EINTR;
+        }
     }
 
     int read_count = 0;

@@ -47,6 +47,7 @@
 #include <sys/stat.h>
 #include <time.h>
 #include <signal.h>
+#include <poll.h>
 
 /*
  * Hard-coded Linux evdev ioctl values, computed once here so the test
@@ -337,6 +338,99 @@ static int scenario_nonblock(void) {
     return 0;
 }
 
+/*
+ * interruptible: a child opens /dev/input/event0 in blocking mode,
+ * enters read() with no events available, and we send it SIGTERM
+ * after a short pause.  The child must wake from the read with
+ * either:
+ *   - read() == -1 errno=EINTR
+ *   - or be killed by the signal (WIFSIGNALED && SIGTERM)
+ *
+ * Pre-fix substrate parked uninterruptibly, so SIGTERM accumulated
+ * but never woke the read — the child was unreapable until input
+ * happened to arrive.  Run with a wait timeout so the test itself
+ * doesn't hang if the fix regresses.
+ */
+static int scenario_interruptible(void) {
+    pid_t pid = fork();
+    if (pid < 0) {
+        fprintf(stderr, "  interruptible: fork failed: %s\n", strerror(errno));
+        return 1;
+    }
+    if (pid == 0) {
+        /* Child: block on read */
+        signal(SIGTERM, SIG_DFL);  /* default = terminate */
+        int fd = open_evdev(O_RDONLY);
+        if (fd < 0) _exit(20);
+        char buf[256];
+        ssize_t n = read(fd, buf, sizeof(buf));
+        int e = errno;
+        close(fd);
+        if (n < 0 && e == EINTR) _exit(0);     /* clean EINTR return */
+        if (n > 0) _exit(1);                   /* unexpected real read */
+        _exit(2);                              /* any other failure */
+    }
+
+    /* Parent: give child time to enter read(), then signal. */
+    sleep(1);
+    kill(pid, SIGTERM);
+
+    /* Blocking wait — if the kernel regresses and the child stays
+     * uninterruptibly parked, the outer test-suite timeout fires
+     * and surfaces it as a FAIL. */
+    int st = 0;
+    int reaped = 0;
+    pid_t r = waitpid(pid, &st, 0);
+    if (r == pid) reaped = 1;
+    if (!reaped) {
+        fprintf(stderr,
+            "  interruptible: child %d never reaped — "
+            "input_read sleep not interruptible\n", pid);
+        kill(pid, SIGKILL);
+        waitpid(pid, &st, 0);
+        stats.checks_fail++;
+        return 1;
+    }
+    int ok = (WIFEXITED(st) && WEXITSTATUS(st) == 0) ||
+             (WIFSIGNALED(st) && WTERMSIG(st) == SIGTERM);
+    CHECK(ok, "child %d reaped with %s (status 0x%x)",
+          pid,
+          WIFEXITED(st) ? "exit" : (WIFSIGNALED(st) ? "signal" : "?"),
+          st);
+    return ok ? 0 : 1;
+}
+
+/*
+ * poll_tracks_pos: after a read drains all queued events, poll()
+ * must NOT report POLLIN until a new event arrives.  Pre-fix
+ * substrate's input_poll checked `global_seq > 0` and reported
+ * readable forever after the first event, so the X server's
+ * select+read loop spun on read() that immediately parked.
+ */
+static int scenario_poll_tracks_pos(void) {
+    int fd = open_evdev(O_RDONLY | O_NONBLOCK);
+    if (fd < 0) return 1;
+
+    /* Drain anything pending. */
+    char drain[1024];
+    for (int i = 0; i < 16; i++) {
+        ssize_t n = read(fd, drain, sizeof(drain));
+        if (n <= 0) break;
+    }
+
+    /* Now poll — should NOT say POLLIN (no events past our offset).
+     * Use a struct pollfd directly so we don't take a syscall
+     * dependency on select. */
+    struct pollfd pfd = { .fd = fd, .events = POLLIN };
+    int rc = poll(&pfd, 1, 0);  /* timeout=0: just sample */
+    CHECK(rc >= 0, "poll rc=%d errno=%d", rc, errno);
+    CHECK(!(pfd.revents & POLLIN),
+          "poll must not report POLLIN with empty queue past offset "
+          "(revents=0x%x)", pfd.revents);
+    close(fd);
+    return 0;
+}
+
 static int scenario_parallel(int iters) {
     pid_t children[4];
     int N = (int)(sizeof(children)/sizeof(children[0]));
@@ -399,6 +493,10 @@ static int sc_eviocgbit(void)       { return scenario_eviocgbit(); }
 static int sc_bad_fd(void)          { return scenario_bad_fd(); }
 static int sc_bad_ioctl(void)       { return scenario_bad_ioctl(); }
 static int sc_nonblock(void)        { return scenario_nonblock(); }
+static int scenario_interruptible(void);
+static int scenario_poll_tracks_pos(void);
+static int sc_interruptible(void)   { return scenario_interruptible(); }
+static int sc_poll_tracks_pos(void) { return scenario_poll_tracks_pos(); }
 static int sc_parallel(void)        { return scenario_parallel(200); }
 
 static struct scenario scenarios[] = {
@@ -410,7 +508,9 @@ static struct scenario scenarios[] = {
     { "eviocgbit",        sc_eviocgbit,        1 },
     { "bad_fd",           sc_bad_fd,           1 },
     { "bad_ioctl",        sc_bad_ioctl,        1 },
-    { "nonblock",         sc_nonblock,         0 },
+    { "nonblock",         sc_nonblock,         1 },
+    { "interruptible",    sc_interruptible,    1 },
+    { "poll_tracks_pos",  sc_poll_tracks_pos,  1 },
     { "parallel",         sc_parallel,         1 },
 };
 
