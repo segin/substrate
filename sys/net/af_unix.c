@@ -45,6 +45,7 @@
 #include <sys/socket.h>
 #include <sys/poll.h>
 #include <kern/console.h>
+#include <kern/cmdline.h>
 #include <kern/sched.h>
 #include <kern/sleepq.h>
 #include <kern/file.h>
@@ -54,6 +55,23 @@
 #include <stdint.h>
 #include <sys/lock.h>
 #include <errno.h>
+
+/* X-server fd-lifecycle trace, gated behind the `xfd` kernel cmdline
+ * flag (or `debug=xfd`).  Logs accept/connect/read/write/close on
+ * AF_UNIX sockets so a hang in the X-server <-> xtrace handshake
+ * is visible from the kernel side without having to instrument
+ * Xfbdev.  Off by default — `xfd` cmdline keyword enables. */
+static int xfd_trace_cached = -1;
+static inline int xfd_trace(void) {
+    if (xfd_trace_cached < 0) {
+        xfd_trace_cached =
+            (cmdline_has("xfd") || cmdline_debug_enabled("xfd")) ? 1 : 0;
+    }
+    return xfd_trace_cached;
+}
+#define XFD(fmt, ...) do { \
+    if (xfd_trace()) kprintf("xfd: " fmt "\n", ##__VA_ARGS__); \
+} while (0)
 
 /* Substrate uses BSD-style msghdr; mirror the user-visible field set
  * for the iov walk in sys_send/recvmsg.  Kernel socket.h has a
@@ -224,6 +242,11 @@ static afunix_sock_t *afunix_find_bound(const char *path, int len) {
 static size_t afunix_node_read(fs_node_t *node, off_t off, size_t size, uint8_t *buf) {
     (void)off;
     afunix_sock_t *s = (afunix_sock_t *)(uintptr_t)node->impl;
+    XFD("node_read pid=%d s=%p closed=%d rx.count=%u size=%u",
+        current_process ? (int)current_process->pid : -1,
+        s, s ? s->closed : -1,
+        s ? (unsigned)s->rx.count : 0,
+        (unsigned)size);
     if (!s || s->closed) return 0;
     mutex_lock(&s->lock);
     /* Self-side SHUT_RD: every read is EOF, even with bytes in rx. */
@@ -252,6 +275,11 @@ static size_t afunix_node_read(fs_node_t *node, off_t off, size_t size, uint8_t 
 static size_t afunix_node_write(fs_node_t *node, off_t off, size_t size, const uint8_t *buf) {
     (void)off;
     afunix_sock_t *s = (afunix_sock_t *)(uintptr_t)node->impl;
+    XFD("node_write pid=%d s=%p closed=%d peer=%p size=%u",
+        current_process ? (int)current_process->pid : -1,
+        s, s ? s->closed : -1,
+        s ? s->peer : NULL,
+        (unsigned)size);
     if (!s || s->closed || !s->peer) return 0;
     /* Own SHUT_WR: no more writes from us. */
     if (s->wr_closed) return 0;
@@ -281,6 +309,13 @@ static size_t afunix_node_write(fs_node_t *node, off_t off, size_t size, const u
 
 static void afunix_node_close(fs_node_t *node) {
     afunix_sock_t *s = (afunix_sock_t *)(uintptr_t)node->impl;
+    XFD("node_close pid=%d s=%p refcount=%d state=%d closed=%d peer=%p",
+        current_process ? (int)current_process->pid : -1,
+        s,
+        s ? s->refcount : -1,
+        s ? (int)s->state : -1,
+        s ? s->closed : -1,
+        s ? s->peer : NULL);
     if (!s) return;
     mutex_lock(&s->lock);
     if (--s->refcount > 0) { mutex_unlock(&s->lock); return; }
@@ -526,6 +561,13 @@ int sys_socketpair(int domain, int type, int protocol, int sv[2]) {
 }
 
 int sys_bind(int fd, const struct sockaddr *addr, socklen_t addrlen) {
+    if (addr && addr->sa_family == AF_UNIX) {
+        const char *p = ((const struct sockaddr_un *)addr)->sun_path;
+        XFD("sys_bind pid=%d fd=%d af_unix path='%.*s'",
+            current_process ? (int)current_process->pid : -1, fd,
+            (int)(addrlen >= 2 ? addrlen - 2 : 0),
+            p ? p : "(null)");
+    }
     if (!addr || addrlen < 2) return -EINVAL;
     if (addr->sa_family == AF_PACKET) {
         return afpacket_bind(fd, addr, addrlen);
@@ -553,6 +595,8 @@ int sys_bind(int fd, const struct sockaddr *addr, socklen_t addrlen) {
 }
 
 int sys_listen(int fd, int backlog) {
+    XFD("sys_listen pid=%d fd=%d backlog=%d",
+        current_process ? (int)current_process->pid : -1, fd, backlog);
     /* Try AF_INET TCP first. */
     if (fd >= 0 && fd < MAX_FD && current_process) {
         file_t *f = current_process->fds[fd];
@@ -575,6 +619,8 @@ int sys_listen(int fd, int backlog) {
 }
 
 int sys_accept(int fd, struct sockaddr *addr, socklen_t *addrlen) {
+    XFD("sys_accept ENTER pid=%d fd=%d",
+        current_process ? (int)current_process->pid : -1, fd);
     /* AF_INET TCP first. */
     if (fd >= 0 && fd < MAX_FD && current_process) {
         file_t *f = current_process->fds[fd];
@@ -585,8 +631,11 @@ int sys_accept(int fd, struct sockaddr *addr, socklen_t *addrlen) {
         }
     }
     afunix_sock_t *server = afunix_from_fd(fd);
-    if (!server) return -ENOTSOCK;
-    if (server->state != AFUS_LISTENING) return -EINVAL;
+    if (!server) { XFD("sys_accept fd=%d ENOTSOCK", fd); return -ENOTSOCK; }
+    if (server->state != AFUS_LISTENING) {
+        XFD("sys_accept fd=%d not LISTENING (state=%d)", fd, server->state);
+        return -EINVAL;
+    }
 
     mutex_lock(&server->lock);
     while (server->accept_count == 0) {
@@ -616,6 +665,7 @@ int sys_accept(int fd, struct sockaddr *addr, socklen_t *addrlen) {
 
     int newfd = afunix_install_fd(server_side);
     if (newfd < 0) {
+        XFD("sys_accept fd=%d install_fd failed (EMFILE)", fd);
         /* Tear down: detach from peer and free the orphan. */
         if (server_side->peer) server_side->peer->peer = NULL;
         kfree(server_side, sizeof(*server_side));
@@ -627,10 +677,15 @@ int sys_accept(int fd, struct sockaddr *addr, socklen_t *addrlen) {
         ((struct sockaddr_un *)addr)->sun_path[0] = '\0';
         *addrlen = 2;
     }
+    XFD("sys_accept fd=%d -> newfd=%d server_side=%p peer=%p",
+        fd, newfd, server_side, server_side->peer);
     return newfd;
 }
 
 int sys_connect(int fd, const struct sockaddr *addr, socklen_t addrlen) {
+    XFD("sys_connect ENTER pid=%d fd=%d family=%d",
+        current_process ? (int)current_process->pid : -1,
+        fd, addr ? addr->sa_family : -1);
     if (!addr || addrlen < 2) return -EINVAL;
     if (addr->sa_family == AF_INET || addr->sa_family == AF_INET6) {
         return afinet_connect(fd, addr, addrlen);
@@ -684,6 +739,8 @@ int sys_connect(int fd, const struct sockaddr *addr, socklen_t addrlen) {
     server->accept_count++;
     sleepq_wake_all(server->accept_chan);
     mutex_unlock(&server->lock);
+    XFD("sys_connect fd=%d OK client=%p server_side=%p accept_count=%d",
+        fd, client, server_side, server->accept_count);
     return 0;
 }
 
