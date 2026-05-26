@@ -8,9 +8,15 @@ typedef struct {
     uint32_t locked;
     uint32_t cpu_id;
     const char *name;
+    /* Last successful acquire site (caller's return address).  When
+     * the "Spinlock already held by current CPU" deadlock panic
+     * fires this tells you which code path took the lock and never
+     * released it — without it, the deadlock report can only say
+     * "current CPU owns it somewhere", which is nearly useless. */
+    uintptr_t last_acquire_eip;
 } spinlock_t;
 
-#define SPINLOCK_INIT(name) { 0, 0xFFFFFFFF, (name) }
+#define SPINLOCK_INIT(name) { 0, 0xFFFFFFFF, (name), 0 }
 
 void spinlock_init(spinlock_t *lock, const char *name);
 void spinlock_acquire(spinlock_t *lock);

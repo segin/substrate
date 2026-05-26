@@ -8,12 +8,27 @@ void spinlock_init(spinlock_t *lock, const char *name) {
     lock->locked = 0;
     lock->cpu_id = 0xFFFFFFFF;
     lock->name = name;
+    lock->last_acquire_eip = 0;
 }
 
 void spinlock_acquire(spinlock_t *lock) {
     uint32_t id = lapic_get_id();
 
     if (spinlock_is_held(lock)) {
+        /* Recursive acquire on the same CPU — we never release a
+         * spinlock implicitly, so this means either (a) we acquired
+         * it earlier in this call chain and forgot to release, or
+         * (b) an interrupt handler took it without restoring before
+         * returning.  Print the EIP of the *original* acquire so
+         * scripts/resolve-trap.sh (or a manual addr2line) maps to
+         * the exact line that left it held.  Lock name + that EIP
+         * are usually enough to pin down the bug without a repro. */
+        extern void kprintf(const char *, ...);
+        kprintf("Deadlock: spinlock '%s' already held by CPU %u "
+                "(acquired at eip=0x%08x)\n",
+                lock->name ? lock->name : "<unnamed>",
+                (unsigned)id,
+                (unsigned)lock->last_acquire_eip);
         panic("Deadlock: Spinlock already held by current CPU");
     }
 
@@ -27,8 +42,9 @@ void spinlock_acquire(spinlock_t *lock) {
         }
     }
 
-    /* Set cpu_id atomically after acquisition. */
+    /* Set cpu_id and acquire-site atomically after acquisition. */
     __atomic_store_n(&lock->cpu_id, id, __ATOMIC_RELEASE);
+    lock->last_acquire_eip = (uintptr_t)__builtin_return_address(0);
 }
 
 bool spinlock_try_acquire(spinlock_t *lock) {
@@ -41,6 +57,7 @@ bool spinlock_try_acquire(spinlock_t *lock) {
     /* Try once to acquire the lock */
     if (__atomic_exchange_n(&lock->locked, 1, __ATOMIC_ACQUIRE) == 0) {
         __atomic_store_n(&lock->cpu_id, id, __ATOMIC_RELEASE);
+        lock->last_acquire_eip = (uintptr_t)__builtin_return_address(0);
         return true;
     }
 
