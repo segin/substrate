@@ -9,7 +9,7 @@ mkdir -p /var/log
 rm -f /tmp/.X0-lock /tmp/.tX0-lock
 rm -rf /tmp/.X11-unix
 
-: >/var/log/Xfbdev.log
+: >/var/log/xlog.txt
 
 # Periodic syncer — survives the exec below since it's a forked process.
 ( while true; do /bin/sync; sleep 2; done ) &
@@ -19,7 +19,7 @@ exec /usr/bin/Xfbdev vt1 \
     -ac \
     -mouse evdev,,device=/dev/input/event0 \
     -keybd evdev,,device=/dev/input/event0 \
-    2>/var/log/Xfbdev.log
+    2>/var/log/xlog.txt
 # -ac disables host-based access control.  Substrate doesn't run an
 # xauth or xdm-style cookie service, so without -ac every client
 # connect goes through ClientAuthorized -> CheckAuthorization,
