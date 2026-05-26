@@ -36,7 +36,7 @@ Two fixes:
 
 --- a/hw/kdrive/linux/evdev.c
 +++ b/hw/kdrive/linux/evdev.c
-@@ -150,11 +150,21 @@ EvdevPtrRead(int evdevPort, void *closure)
+@@ -150,11 +150,29 @@ EvdevPtrRead(int evdevPort, void *closure)
  {
      KdPointerInfo *pi = closure;
 -    Kevdev *ke = pi->driverPrivate;
@@ -47,13 +47,21 @@ Two fixes:
 
 +    /* Defensive — see EvdevPtrEnable's note about install ordering.
 +     * Even with the ordering fix, EvdevPtrDisable may have cleared
-+     * driverPrivate while a pending wakeup was still in flight. */
-+    if (!pi || !pi->driverPrivate) {
++     * driverPrivate while a pending wakeup was still in flight.
++     *
++     * Substrate-specific: pi->driverPrivate has been observed coming
++     * back as a low-junk pointer (e.g. 0x343E) after the X server's
++     * evdev grab/ungrab dance fails — the substrate kernel's evdev
++     * EVIOCGRAB ioctl returns "error 1" and the device gets left in
++     * a half-attached state.  Treat any pointer below 0x10000 the
++     * same as NULL — there's nothing user-mappable in the first
++     * 64 KiB of the address space, so anything that small is junk. */
++    ke = pi ? pi->driverPrivate : NULL;
++    if (!pi || (uintptr_t)ke < 0x10000) {
 +        char drain[64];
 +        (void)read(evdevPort, drain, sizeof(drain));
 +        return;
 +    }
-+    ke = pi->driverPrivate;
 +
      n = read(evdevPort, &events, NUM_EVENTS * sizeof(struct input_event));
 
