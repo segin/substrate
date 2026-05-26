@@ -5,6 +5,7 @@
 #include <assert.h>
 #include <errno.h>
 #include <stdarg.h>
+#include <setjmp.h>
 
 // Rename to avoid conflict with system headers
 #define pthread_t       my_pthread_t
@@ -21,9 +22,10 @@
 // Mock infrastructure
 int mock_malloc_calls = 0;
 int mock_free_calls = 0;
-int mock_thr_new_calls = 0;
-int mock_thr_join_calls = 0;
-int mock_next_tid = 1;
+int mock_thr_exit_calls = 0;
+int mock_exit_calls = 0;
+void *last_exit_retval = NULL;
+jmp_buf exit_jmp_buf;
 
 // Forward declarations
 void *mock_malloc(size_t size);
@@ -38,7 +40,7 @@ void mock_exit(int status);
 #define _exit mock_exit
 
 // Include the source file
-#include "../pthread.c"
+#include "../../../../lib/pthread/pthread_create.c"
 
 // Undefine so we can implement mocks using real libc
 #undef malloc
@@ -65,71 +67,57 @@ long mock_syscall(long num, ...) {
     va_list args;
     va_start(args, num);
     long arg1 = va_arg(args, long);
-    // long arg2 = va_arg(args, long);
     va_end(args);
 
-    if (num == SYS_THR_NEW) {
-        mock_thr_new_calls++;
-        struct thr_param *param = (struct thr_param *)arg1;
-        if (param->child_tid) *(param->child_tid) = mock_next_tid++;
-        return 0;
-    }
-    if (num == SYS_THR_JOIN) {
-        mock_thr_join_calls++;
-        return 0;
-    }
     if (num == SYS_THR_EXIT) {
+        mock_thr_exit_calls++;
+        last_exit_retval = (void *)(uintptr_t)arg1;
         return 0;
     }
     return -1;
 }
 
 void mock_exit(int status) {
-    exit(status);
+    mock_exit_calls++;
+    longjmp(exit_jmp_buf, 1);
+}
+
+int my_start_routine_calls = 0;
+void *last_start_routine_arg = NULL;
+void *start_routine_retval = (void *)0x12345678;
+
+void *my_start_routine(void *arg) {
+    my_start_routine_calls++;
+    last_start_routine_arg = arg;
+    return start_routine_retval;
 }
 
 int main() {
-    printf("Running host_test_join...\n");
+    printf("Running host_test_trampoline...\n");
 
-    my_pthread_t t1;
-    int ret;
+    struct trampoline_args *ta = calloc(1, sizeof(struct trampoline_args));
+    ta->start_routine = my_start_routine;
+    ta->arg = (void *)(uintptr_t)0xDEADBEEF;
 
-    // 1. Create a thread
-    mock_malloc_calls = 0;
-    mock_free_calls = 0;
-    mock_thr_new_calls = 0;
-
-    ret = my_pthread_create(&t1, NULL, NULL, NULL);
-    assert(ret == 0);
-    assert(mock_thr_new_calls == 1);
-    // 1 malloc for stack, 1 for args
-    assert(mock_malloc_calls == 2);
-
-    // 2. Join the thread
-    mock_thr_join_calls = 0;
-    mock_free_calls = 0;
-
-    ret = my_pthread_join(t1, NULL);
-    assert(ret == 0);
-    assert(mock_thr_join_calls == 1);
-
-    // Should have freed the stack (1 call)
-    // Args are NOT freed because thread didn't run.
-    assert(mock_free_calls == 1);
-
-    // 3. Verify slot reuse
-    // We already used 1 slot and freed it.
-    // If we run MAX_PTHREADS more times, we should be fine.
-
-    for (int i = 0; i < MAX_PTHREADS + 10; i++) {
-        my_pthread_t t;
-        ret = my_pthread_create(&t, NULL, NULL, NULL);
-        assert(ret == 0);
-
-        ret = my_pthread_join(t, NULL);
-        assert(ret == 0);
+    if (setjmp(exit_jmp_buf) == 0) {
+        __pthread_trampoline(ta);
+        // Should not be reached
+        assert(0);
     }
 
-    printf("host_test_join PASSED\n");
+    assert(my_start_routine_calls == 1);
+    assert(last_start_routine_arg == (void *)(uintptr_t)0xDEADBEEF);
+
+    // ta should be freed
+    assert(mock_free_calls == 1);
+
+    // thr_exit should have been called
+    assert(mock_thr_exit_calls == 1);
+    assert(last_exit_retval == (void *)0x12345678);
+
+    // exit should have been called
+    assert(mock_exit_calls == 1);
+
+    printf("host_test_trampoline PASSED\n");
     return 0;
 }

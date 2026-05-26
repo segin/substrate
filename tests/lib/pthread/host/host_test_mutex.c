@@ -44,7 +44,7 @@ void mock_sync_lock_release(int *ptr);
 #define __sync_lock_release mock_sync_lock_release
 
 // Include the source file
-#include "../pthread.c"
+#include "../../../../lib/pthread/pthread_mutex.c"
 
 // Undefine so we can implement mocks using real libc
 #undef malloc
