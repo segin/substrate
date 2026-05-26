@@ -18,6 +18,54 @@ string_ptr_is_null(const void *ptr)
     return ptr == NULL;
 }
 
+/*
+ * Substrate-libc shared frame-pointer-chain backtrace.  Walks the
+ * saved-ebp chain on i386 starting from the passed-in fp and prints
+ * up to 16 frames to stderr.  Bounded for safety: stops on NULL ebp,
+ * unaligned ebp, or a non-monotonic chain (saved_ebp <= current ebp
+ * means we've fallen off the real frames into garbage).
+ *
+ * Each frame is printed BEFORE dereferencing the *next* one, so even
+ * if the chain ends in junk we still surface what we got before a
+ * recursive fault wipes us out.
+ *
+ * The guard caller passes __builtin_frame_address(0), so frame #0 in
+ * the output is the libc function itself (memcpy / memset / strdup),
+ * frame #1 is its direct caller, and so on.  Output format mirrors
+ * the kernel TRAP backtrace so scripts/resolve-trap.sh resolves it
+ * with no special-casing.
+ */
+__attribute__((noinline, used))
+static void
+__substrate_libc_backtrace(uintptr_t fp)
+{
+    extern int fprintf(void *, const char *, ...);
+    extern void *stderr;
+
+    fprintf(stderr, "  user backtrace:\n");
+    for (int depth = 0; depth < 16; depth++) {
+        if (fp == 0) {
+            fprintf(stderr, "    (end of chain)\n");
+            return;
+        }
+        if (fp & 3) {
+            fprintf(stderr, "    <unaligned ebp=0x%08lx>\n",
+                    (unsigned long)fp);
+            return;
+        }
+        const uintptr_t *frame = (const uintptr_t *)fp;
+        fprintf(stderr, "    #%d ebp=0x%08lx ret=0x%08lx\n",
+                depth, (unsigned long)fp, (unsigned long)frame[1]);
+        uintptr_t next = frame[0];
+        if (next <= fp) {
+            fprintf(stderr, "    (chain ends: saved_ebp=0x%08lx)\n",
+                    (unsigned long)next);
+            return;
+        }
+        fp = next;
+    }
+}
+
 char *strfry(char *string) {
     if (!string) return NULL;
     size_t len = strlen(string);
@@ -54,8 +102,9 @@ void *memcpy(void *dest, const void *src, size_t n) {
         extern int fprintf(void *, const char *, ...);
         extern void *stderr;
         fprintf(stderr,
-                "memcpy(NULL): dest=%p src=%p n=%u caller=%p\n",
-                dest, src, (unsigned)n, __builtin_return_address(0));
+                "memcpy(NULL): dest=%p src=%p n=%u\n",
+                dest, src, (unsigned)n);
+        __substrate_libc_backtrace((uintptr_t)__builtin_frame_address(0));
         return dest;
     }
 
@@ -152,8 +201,9 @@ void *memset(void *s, int c, size_t n) {
         extern int fprintf(void *, const char *, ...);
         extern void *stderr;
         fprintf(stderr,
-                "memset(NULL): s=%p c=%d n=%u caller=%p\n",
-                s, c, (unsigned)n, __builtin_return_address(0));
+                "memset(NULL): s=%p c=%d n=%u\n",
+                s, c, (unsigned)n);
+        __substrate_libc_backtrace((uintptr_t)__builtin_frame_address(0));
         return s;
     }
 
@@ -348,8 +398,8 @@ char *strdup(const char *s) {
     if ((uintptr_t)s < 0x10000) {
         extern int fprintf(void *, const char *, ...);
         extern void *stderr;
-        fprintf(stderr, "strdup: junk arg s=%p caller=%p\n",
-                (void *)s, __builtin_return_address(0));
+        fprintf(stderr, "strdup: junk arg s=%p\n", (void *)s);
+        __substrate_libc_backtrace((uintptr_t)__builtin_frame_address(0));
         errno = EFAULT;
         return NULL;
     }

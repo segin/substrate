@@ -9,6 +9,16 @@ include ../../Makefile.inc
 
 CFLAGS    := $(USER_CFLAGS) -Iinclude -I../../include -I$(TOP)/sys
 PICFLAGS  := $(SHLIB_CFLAGS) -Iinclude -I../../include -I$(TOP)/sys
+
+# Keep frame pointers in libc.  Debug guards in src/string.c walk the
+# saved-ebp chain to produce a multi-frame user backtrace when memcpy
+# / memset / strdup are called with junk args; that walk only works
+# if gcc preserves the push %ebp / mov %esp, %ebp prologue.  Default
+# -O0 already does, but make it explicit so a future opt-level bump
+# doesn't silently disable it.
+CFLAGS    += -fno-omit-frame-pointer
+PICFLAGS  += -fno-omit-frame-pointer
+
 LDFLAGS   := $(USER_LDFLAGS)
 # libc.so.0 declares DT_NEEDED libm.so.0 (for feraiseexcept and
 # friends) and DT_NEEDED libsys.so.0 (libsys is the canonical raw
