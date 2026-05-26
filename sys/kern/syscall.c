@@ -1874,9 +1874,16 @@ int sys_ioctl(int fd, uint32_t request, void *arg) {
 }
 
 int kern_ioctl(int fd, uint32_t request, void *arg) {
-    if (fd < 0 || fd >= MAX_FD) return -1;
+    /* Substrate convention: kernel syscalls return -errno on
+     * failure, libc negates that into errno.  Bare -1 here came
+     * back to userland as errno=EPERM, which masked the actual
+     * failure mode — most visibly in xorg-server's evdev backend
+     * logging "Ungrabbing evdev mouse device failed: error 1"
+     * when the real cause was a stale fd, not a permission
+     * violation. */
+    if (fd < 0 || fd >= MAX_FD) return -EBADF;
     file_t *f = current_process->fds[fd];
-    if (!f || !f->f_data) return -1;
+    if (!f || !f->f_data) return -EBADF;
 
     /* FIONBIO is a generic file-layer ioctl: toggle O_NONBLOCK on the
      * descriptor without consulting the device driver, matching the
@@ -1900,8 +1907,9 @@ int kern_ioctl(int fd, uint32_t request, void *arg) {
         }
         return node->ioctl(node, request, arg);
     }
-    
-    return -1;
+
+    /* No driver ioctl handler — Linux/BSD use ENOTTY for this. */
+    return -ENOTTY;
 }
 
 /* sys_setsid is now implemented in pm/pgrp.c */
