@@ -23,8 +23,13 @@ rm -f /tmp/.X0-lock /tmp/.X11-unix/X0
   echo "xterm exit $?" >> /var/log/xterm.txt
 ) &
 
-echo "=== Xfbdev launching (LD_PRELOAD=/lib/nosegvhandler.so) ==="
-LD_PRELOAD=/lib/nosegvhandler.so Xfbdev -ac -retro -zap vt1 :0 > /var/log/xlog.txt 2>&1
+echo "=== Xfbdev launching (-dumbsched) ==="
+# -dumbsched disables X's smart-scheduler SIGALRM.  Workaround
+# for a substrate-side bug where SIGALRM delivery to X corrupts
+# state (causes startup/shutdown crashes).  Reproducer in
+# tests/lib/c/torture_sigalrm passes for simpler programs, so
+# the bug is specific to X's signal context.
+Xfbdev -ac -retro -zap -dumbSched vt1 :0 > /var/log/xlog.txt 2>&1
 XEXIT=$?
 echo "=== Xfbdev exited $XEXIT ==="
 
