@@ -1,0 +1,48 @@
+From: substrate
+Subject: xkb: guard _XkbCreateIndicatorMap against junk sli->names/maps
+
+Running `reset(1)` from an xterm asks XKB to reset indicator maps,
+which routes through _XkbSetNamedIndicator -> _XkbCreateIndicatorMap.
+The function calls XkbFindSrvLedInfo, checks the returned pointer
+non-NULL, and then walks sli->names[] / sli->maps[] without
+validating that those pointers themselves are real.
+
+Substrate sometimes leaves the per-device LED info incompletely
+initialised, leaving sli->names pointing into low memory.  The
+"find first unused indicator" loop then walks off into unmapped
+pages -- seen in a kernel trap with addr=0x000010CB at
+_XkbCreateIndicatorMap+0xAC (the `mov (%edx), %ebx` inside the
+post-increment iteration).
+
+Apply the same low-pointer-reject pattern used in the fb guards:
+if either array pointer is below 0x10000, log once and return
+BadAlloc.  The client gets a clean XKB error reply instead of
+losing the X server.
+
+--- a/xkb/xkb.c
++++ b/xkb/xkb.c
+@@ -3408,6 +3408,24 @@
+     if (!sli)
+         return BadAlloc;
+ 
++    /* Substrate hardening: reject low-junk pointers in sli->names /
++     * sli->maps before the loops below walk through them.  Seen in
++     * the wild when `reset(1)` from an xterm asks XKB to reset
++     * indicator maps and the per-device LED info was incompletely
++     * initialised -- the loop ran off the end of the names array and
++     * faulted at addr=0x000010CB.  Returning BadAlloc here means the
++     * client gets an error reply instead of the server dying. */
++    if ((uintptr_t)sli->names < 0x10000u || (uintptr_t)sli->maps < 0x10000u) {
++        static int warned = 0;
++        if (!warned) {
++            warned = 1;
++            ErrorF("_XkbCreateIndicatorMap: bogus sli (names=%p maps=%p) "
++                   "-- returning BadAlloc instead of walking junk.\n",
++                   (void *)sli->names, (void *)sli->maps);
++        }
++        return BadAlloc;
++    }
++
+     map = _XkbFindNamedIndicatorMap(sli, indicator, &led);
+ 
+     if (!map) {

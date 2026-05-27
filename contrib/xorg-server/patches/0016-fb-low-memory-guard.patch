@@ -1,84 +1,44 @@
 From: substrate
-Subject: fb: reject low-memory junk pointers throughout the blit/fill path
+Subject: fb: upgrade fbBlt NULL guard to a low-memory guard
 
-Multiple SIGSEGVs landed inside fbBlt's inlined-memcpy with dst
-pointers like 0x00001000 — non-NULL but obviously junk (substrate
-pixmap backings come from malloc and live well above 64 KiB).
+Patch 0013 added an `if (!srcLine || !dstLine)` early-return so a
+pixmap with NULL backing storage stops fbBlt instead of segfaulting
+on the first deref.  In practice the bad pointers aren't always
+exactly zero -- a NULL backing that gets walked one row down through
+fbBlt's inner loop lands at dstLine + dstStride, which for a 1024-px
+wide 32 bpp scanline is exactly 0x1000.  The plain NULL test misses
+this and the X server still crashes with addr=0x00001000 inside the
+fbBlt inlined-byte-copy loop (e.g. InitRootWindow -> MapWindow ->
+miPaintWindow -> fbOddTile -> fbBlt + 0x4B1 when -retro paints the
+stipple tile and a tile pixmap has bogus backing).
 
-Three layers of guard:
-
-  1. fbBlt entry — reject srcLine/dstLine < 0x10000.
-  2. fbBlt's inner computed src_byte/dst_byte — reject if dstX or
-     srcX is negative enough to push the computed pointer into
-     low memory.
-  3. fbCopyNtoN / fbFill / fbSolidBoxClipped — reject before
-     calling pixman_blt / pixman_fill (which walk the pointer
-     directly with no NULL check of their own).
-
-Each logs once and returns cleanly via fbFinishAccess so the
-caller's lock balance is preserved.  Visible draw artifact instead
-of full X server abort, and the log line tells us which drawable
-was bad.
+Reject pointers below 0x10000 -- substrate pixmap backings come from
+malloc and live well above 64 KiB; the framebuffer mmap lives much
+higher.  Anything in low memory is junk.
 
 --- a/fb/fbblt.c
 +++ b/fb/fbblt.c
-@@ -57,15 +57,40 @@ fbBlt(FbBits * srcLine,
-     Bool destInvarient;
-     int startbyte, endbyte;
-
-+#define FBBLT_VALID_PTR(p) ((uintptr_t)(p) >= 0x10000)
-+    if (!FBBLT_VALID_PTR(srcLine) || !FBBLT_VALID_PTR(dstLine)) {
-+        static int warned = 0;
-+        if (!warned) {
-+            warned = 1;
-+            ErrorF("fbBlt: bogus %s drawable (src=%p dst=%p ...) — skipping\n",
-+                   !FBBLT_VALID_PTR(srcLine) ? "src" : "dst",
-+                   (void *)srcLine, (void *)dstLine);
-+        }
-+        return;
-+    }
-+#undef FBBLT_VALID_PTR
-+
-     FbDeclareMergeRop();
-
-     if (alu == GXcopy && pm == FB_ALLONES &&
-@@ -88,6 +88,21 @@
-         FbStride        dst_byte_stride = dstStride << (FB_SHIFT - 3);
-         int             width_byte = (width >> 3);
-
-+        if ((uintptr_t)src_byte < 0x10000 ||
-+            (uintptr_t)dst_byte < 0x10000) {
-+            static int warned = 0;
-+            if (!warned) {
-+                warned = 1;
-+                ErrorF("fbBlt: computed src/dst in junk range "
-+                       "(src_byte=%p dst_byte=%p srcLine=%p dstLine=%p "
-+                       "srcX=%d dstX=%d w=%d h=%d) — skipping\n",
-+                       (void *)src_byte, (void *)dst_byte,
-+                       (void *)srcLine, (void *)dstLine,
-+                       srcX, dstX, width, height);
-+            }
-+            return;
-+        }
-+
-
---- a/fb/fbcopy.c
-+++ b/fb/fbcopy.c
-@@ -55,7 +55,7 @@ fbCopyNtoN(...)
--    if (!src || !dst) {
-+    if ((uintptr_t)src < 0x10000 || (uintptr_t)dst < 0x10000) {
-         ...
-     }
-
---- a/fb/fbfill.c
-+++ b/fb/fbfill.c
-@@ -37,7 +37,7 @@ fbFill(...)
--    if (!dst) {
-+    if ((uintptr_t)dst < 0x10000) {
-         ...
-     }
-@@ -178,7 +178,7 @@ fbSolidBoxClipped(...)
--    if (!dst) {
-+    if ((uintptr_t)dst < 0x10000) {
-         ...
-     }
+@@ -62,13 +62,19 @@
+      * isn't in our (minimal) font path — used to crash this function
+      * with a NULL deref the moment a client tried to draw with it.
+      * Log once and bail instead. */
+-    if (!srcLine || !dstLine) {
++    /* Reject NULL AND obviously-junk low-memory pointers (e.g.
++     * dstLine == 0x1000 after some upstream pointer arithmetic on a
++     * NULL backing).  Substrate pixmap backings come from malloc
++     * (well above 64 KiB) and the framebuffer mmap lives much higher,
++     * so anything below 64 KiB is junk -- skip the blit rather than
++     * crash the server walking into low memory. */
++    if ((uintptr_t)srcLine < 0x10000u || (uintptr_t)dstLine < 0x10000u) {
+         static int warned = 0;
+         if (!warned) {
+             warned = 1;
+-            ErrorF("fbBlt: NULL %s drawable (src=%p dst=%p w=%d h=%d bpp=%d) "
+-                   "— likely a font/pixmap with no bits; skipping.\n",
+-                   !srcLine ? "src" : "dst",
++            ErrorF("fbBlt: bogus %s drawable (src=%p dst=%p w=%d h=%d bpp=%d) "
++                   "-- likely missing pixmap bits; skipping.\n",
++                   (uintptr_t)srcLine < 0x10000u ? "src" : "dst",
+                    (void *)srcLine, (void *)dstLine, width, height, bpp);
+         }
+         return;
