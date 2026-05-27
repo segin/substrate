@@ -7,6 +7,7 @@
 #include <kern/sleepq.h>
 #include <arch/i386/idt.h>
 #include <kern/console.h>
+#include <kern/cmdline.h>
 #include <kern/panic.h>
 #include <stddef.h>
 #include <pm/pm.h>
@@ -106,6 +107,24 @@ int kern_sigaction(int sig, const struct sigaction *act, struct sigaction *oact)
 int sys_sigaction(int sig, const void *act, void *oact) {
     struct sigaction kact, koact;
     struct sigaction *p_kact = NULL;
+
+    /* Diagnostic: nosigalrm cmdline flag makes sys_sigaction
+     * silently succeed for SIGALRM without actually installing
+     * a handler.  Use this to bisect whether the X server crash
+     * is in SIGALRM installation/delivery or elsewhere. */
+    if (sig == SIGALRM) {
+        static int nosigalrm_cached = -1;
+        if (nosigalrm_cached < 0)
+            nosigalrm_cached = (cmdline_has("nosigalrm") ||
+                                cmdline_debug_enabled("nosigalrm")) ? 1 : 0;
+        if (nosigalrm_cached) {
+            if (oact) {
+                struct sigaction zero = { 0 };
+                if (copyout(&zero, oact, sizeof(zero)) != 0) return -14;
+            }
+            return 0;
+        }
+    }
 
     if (act) {
         if (copyin(act, &kact, sizeof(struct sigaction)) != 0) return -14;
