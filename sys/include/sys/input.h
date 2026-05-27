@@ -4,8 +4,6 @@
 #include <stdint.h>
 #include <sys/file.h> // for fs_node_t, off_t
 #include <sys/keycodes.h>
-#include <sys/lock.h>
-#include <vfs/vfs.h>   // for fs_node_t full definition
 
 // Event Types
 #define EV_SYN 0x00
@@ -43,17 +41,6 @@ typedef struct input_event {
     int32_t  value;
 } input_event_t;
 
-/*
- * Per-device event queue size.  Each input device gets its own ring
- * — previously the subsystem shared a single global queue, which
- * meant every reader saw every other device's events.  X server
- * binds one fd to "keyboard" and another to "pointer"; if they
- * share the queue, mouse button events get truncated to keyboard
- * scancodes (BTN_LEFT 0x110 → KEY_Q 0x10) and turn into q/w/e
- * keypresses.
- */
-#define INPUT_QUEUE_SIZE 64
-
 struct input_dev;
 struct input_handle;
 
@@ -63,62 +50,14 @@ typedef struct input_dev_ops {
     int  (*poll)(struct input_dev *dev); // For polling-mode devices
 } input_dev_ops_t;
 
-/* Capability bits — used to drive the per-device EVIOCGBIT
- * response so a kdrive evdev keyboard probe sees only keys, and
- * a kdrive evdev pointer probe sees only relative axes + BTN_*.
- * Currently a bitmap of (1 << EV_*) values — kept that shape so
- * existing initializers like `.caps = (1<<EV_REL) | (1<<EV_KEY)`
- * keep working without churn. */
-
 // Input Device Representation
 typedef struct input_dev {
     char name[64];
-    uint32_t caps;                // (1<<EV_*) bitmap — populated by driver
+    uint32_t caps; // Capabilities bitmap
     input_dev_ops_t *ops;
     void *driver_data;
-
-    /*
-     * Per-device state managed by input_subsys.c — drivers do not
-     * touch these.  Initialized by input_register_device.
-     */
-    input_event_t queue[INPUT_QUEUE_SIZE];
-    uint64_t      seq;            // total events ever written
-    spinlock_t    lock;
-    int           evnum;          // index assigned at register time
-    int           registered;     // sticky once true
-    fs_node_t     devfs_node;     // /dev/input/eventN
-
     struct input_dev *next;
 } input_dev_t;
-
-/*
- * evdev ioctl request numbers.
- *
- * Substrate's input subsystem (sys/drivers/input/input_subsys.c)
- * implements a minimal evdev surface so ported software (kdrive
- * evdev, libinput, evtest) can talk to /dev/input/eventN.  Wire
- * format matches Linux's <linux/input.h> bit-for-bit, but those
- * headers belong to a different OS so substrate provides the
- * constants here -- callers `#include <sys/input.h>` and never
- * reach for <linux/...>.
- *
- * Encoding (matches the Linux ioctl ABI):
- *   bits 30-31 = direction (2=read, 1=write, 3=read/write)
- *   bits 16-29 = transfer size in bytes
- *   bits  8-15 = type byte ('E' = 0x45 for evdev)
- *   bits  0- 7 = command number
- */
-#define _EVIOC(dir, nr, size)  \
-    (((unsigned)(dir) << 30) | (((unsigned)(size) & 0x3fffu) << 16) | \
-     (0x45u << 8) | ((unsigned)(nr) & 0xffu))
-#define _EVIOC_READ   2u
-#define _EVIOC_WRITE  1u
-
-#define EVIOCGVERSION   _EVIOC(_EVIOC_READ, 0x01, sizeof(int))
-#define EVIOCGID        _EVIOC(_EVIOC_READ, 0x02, 8)
-#define EVIOCGNAME(len) _EVIOC(_EVIOC_READ, 0x06, (len))
-#define EVIOCGBIT(ev,len) _EVIOC(_EVIOC_READ, 0x20 + (ev), (len))
-#define EVIOCGRAB       _EVIOC(_EVIOC_WRITE, 0x90, sizeof(int))
 
 // API
 void input_init(void);

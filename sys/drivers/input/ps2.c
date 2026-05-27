@@ -356,10 +356,5 @@ void ps2_mouse_setup(void) {
     /* Enable data reporting. */
     if (ps2_aux_cmd(PS2_DEV_SCAN_ON) == 0) {
         kprint("PS/2: Mouse enabled\n");
-        /* Register the mouse with the input subsystem so it gets its
-         * own /dev/input/eventN.  Without this, the IRQ handler still
-         * runs and decodes packets, but input_report_*() is called on
-         * an unregistered device and the events go nowhere. */
-        mouse_init();
     }
 }

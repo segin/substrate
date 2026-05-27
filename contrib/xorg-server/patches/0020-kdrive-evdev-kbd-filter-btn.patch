@@ -1,0 +1,41 @@
+From: substrate
+Subject: kdrive/evdev: filter BTN_* codes on the keyboard fd
+
+Substrate's input layer multiplexes every device through a single
+/dev/input/event0 stream, so the kdrive evdev keyboard fd sees not
+only KEY_* presses but also BTN_LEFT / BTN_RIGHT / BTN_MIDDLE
+(0x110..0x112) when the mouse moves.
+
+EvdevKbdRead unconditionally hands every EV_KEY event to
+KdEnqueueKeyboardEvent(ki, code, ...), whose `scan_code` parameter is
+`unsigned char`.  BTN_LEFT (0x110) truncates to 0x10 == KEY_Q;
+likewise BTN_RIGHT -> KEY_W, BTN_MIDDLE -> KEY_E.  Result: mouse
+buttons type q/w/e into the focused X client.
+
+EvdevPtrBtn already filters with `code >= BTN_MOUSE && code <
+BTN_JOYSTICK`, so the pointer fd silently drops real keyboard codes.
+Mirror that on the keyboard side: only forward EV_KEY events whose
+code is below BTN_MISC (0x100) -- the entire KEY_* range -- so the
+mouse-button codes get dropped at the keyboard reader instead of
+typed.
+
+--- a/hw/kdrive/linux/evdev.c
++++ b/hw/kdrive/linux/evdev.c
+@@ -381,8 +381,16 @@
+ 
+     n /= sizeof(struct input_event);
+     for (i = 0; i < n; i++) {
+-        if (events[i].type == EV_KEY)
++        if (events[i].type == EV_KEY) {
++            /* Substrate multiplexes every device onto a single evdev
++             * stream, so BTN_* (0x100+) events reach this fd along
++             * with real KEY_* (<0x100) presses.  KdEnqueueKeyboardEvent's
++             * scan_code is `unsigned char`, so a BTN_LEFT slips through
++             * as KEY_Q.  Drop everything outside the real-key range. */
++            if (events[i].code >= BTN_MISC)
++                continue;
+             KdEnqueueKeyboardEvent(ki, events[i].code, !events[i].value);
++        }
+ /* FIXME: must implement other types of events
+         else
+             ErrorF("Event type (%d) not delivered\n", events[i].type);
