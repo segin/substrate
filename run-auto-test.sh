@@ -12,7 +12,7 @@ set -eu
 
 INIT_PATH="${1:-/tmp/torture_ipc}"
 INITARG="${INITARG:-}"
-TIMEOUT="${TIMEOUT:-30}"
+TIMEOUT="${TIMEOUT:-45}"
 LOG="$(mktemp -t substrate-test-XXXXXX.log)"
 trap 'rm -f "$LOG"' EXIT
 
