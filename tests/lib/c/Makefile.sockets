@@ -40,7 +40,8 @@ else
 endif
 
 TESTS = torture_unix torture_afunix_poll torture_malloc torture_evdev \
-        torture_x11_shape torture_sigalrm torture_heap_stdio
+        torture_x11_shape torture_sigalrm torture_heap_stdio \
+        torture_malloc_threads
 
 all: $(TESTS)
 
@@ -86,6 +87,16 @@ torture_sigalrm: torture_sigalrm.c
 # buffer fread.
 torture_heap_stdio: torture_heap_stdio.c
 	$(CC) $(CFLAGS) $(LDFLAGS) $< -o $@
+
+# Multi-threaded malloc torture.  Substrate's libc malloc has no
+# mutex around the global free list — concurrent malloc/free across
+# pthreads races on global_base / global_tail / search_hint and on
+# the per-block next/prev pointers.  This test spawns N pthreads
+# that hammer the allocator with random alloc + canary verify; if
+# substrate's libc is thread-unsafe, expect crashes or canary
+# corruption.
+torture_malloc_threads: torture_malloc_threads.c
+	$(CC) $(CFLAGS) $(LDFLAGS) $(PTHREAD_INC) $< $(PTHREAD) -o $@
 
 clean:
 	rm -f $(TESTS)

@@ -126,6 +126,46 @@ static struct block_meta *global_base = NULL;
 static struct block_meta *global_tail = NULL;
 static struct block_meta *search_hint = NULL;
 
+/*
+ * Heap mutex — single global spinlock around the malloc/free/realloc/
+ * calloc critical sections.  The free-list (global_base, global_tail,
+ * search_hint, and every block_meta's next/prev) is unsynchronized
+ * shared state across threads in a multithreaded process.  Without
+ * this, concurrent find_free_block + split_block / coalesce_block
+ * races corrupt the list pointers, eventually producing a junk
+ * `block` whose split_block dereferences a NULL/garbage pointer.
+ * Same shape as the Xfbdev/links crashes (see
+ * tests/lib/c/torture_malloc_threads).
+ *
+ * Spinlock chosen (not pthread_mutex) so the C library doesn't
+ * depend on libpthread — a libc.so must be safe to use from
+ * processes that don't link libpthread at all.  CAS pattern
+ * matches __atexit_lock above.  On contention the spinner yields
+ * via sched_yield so a preempted lock-holder can finish.
+ *
+ * Recursion: malloc may be reached from a signal handler.  If the
+ * interrupted thread already holds the lock, the handler's
+ * malloc would deadlock.  Document this as "do not call malloc
+ * from an async-signal handler" (matches glibc/musl semantics) —
+ * the X server's SmartScheduleTimer handler is a counter bump
+ * and doesn't trigger this.
+ */
+extern int sched_yield(void);
+static atomic_int __malloc_lock = 0;
+
+static void __malloc_lock_acquire(void) {
+    int expected;
+    for (;;) {
+        expected = 0;
+        if (atomic_compare_exchange_weak(&__malloc_lock, &expected, 1)) return;
+        sched_yield();
+    }
+}
+
+static void __malloc_lock_release(void) {
+    atomic_store(&__malloc_lock, 0);
+}
+
 static void *block_payload(struct block_meta *block) {
     return (void *)((char *)block + BLOCK_META_SIZE);
 }
@@ -273,14 +313,16 @@ void *malloc(size_t size) {
     struct block_meta *block;
     size_t aligned_size = ALIGN(size);
 
+    __malloc_lock_acquire();
+
     if (!global_base) {
         block = request_space(NULL, aligned_size);
-        if (!block) { errno = ENOMEM; return NULL; }
+        if (!block) { __malloc_lock_release(); errno = ENOMEM; return NULL; }
     } else {
         block = find_free_block(aligned_size);
         if (!block) {
             block = request_space(global_tail, aligned_size);
-            if (!block) { errno = ENOMEM; return NULL; }
+            if (!block) { __malloc_lock_release(); errno = ENOMEM; return NULL; }
         }
     }
 
@@ -294,7 +336,9 @@ void *malloc(size_t size) {
     if (search_hint == block) {
         search_hint = block->next != NULL ? block->next : global_base;
     }
-    return block_payload(block);
+    void *payload = block_payload(block);
+    __malloc_lock_release();
+    return payload;
 }
 
 void free(void *ptr) {
@@ -305,8 +349,10 @@ void free(void *ptr) {
         return;
     }
 
+    __malloc_lock_acquire();
     block->free = 1;
     search_hint = coalesce_block(block);
+    __malloc_lock_release();
 }
 
 void *calloc(size_t nmemb, size_t size) {
@@ -333,10 +379,16 @@ void *realloc(void *ptr, size_t size) {
     struct block_meta *block = payload_block(ptr);
     if (block->magic != MAGIC) { errno = EINVAL; return NULL; }
 
+    /* In-place / grow-into-next paths happen under the heap lock.
+     * The fallback (malloc + memcpy + free) must NOT hold the lock
+     * across the malloc/free calls — those acquire it themselves. */
+    __malloc_lock_acquire();
+
     if (block->size >= size) {
         if (block->size >= ALIGN(size) + BLOCK_META_SIZE + ALIGNMENT) {
              split_block(block, ALIGN(size));
         }
+        __malloc_lock_release();
         return ptr;
     }
 
@@ -364,13 +416,18 @@ void *realloc(void *ptr, size_t size) {
         if (block->size >= ALIGN(size) + BLOCK_META_SIZE + ALIGNMENT) {
             split_block(block, ALIGN(size));
         }
+        __malloc_lock_release();
         return ptr;
     }
 
-    // Fallback: allocate new, copy, free old
+    /* Fallback below calls malloc + free, which take the lock
+     * themselves.  Release first to avoid recursive acquire. */
+    size_t old_size = block->size;
+    __malloc_lock_release();
+
     void *new_ptr = malloc(size);
     if (!new_ptr) return NULL;
-    memcpy(new_ptr, ptr, block->size); 
+    memcpy(new_ptr, ptr, old_size);
     free(ptr);
     return new_ptr;
 }
