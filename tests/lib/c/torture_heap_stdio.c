@@ -707,6 +707,108 @@ static int sc9e_verify_on_write(void) {
     return reports > 0 ? 1 : 0;
 }
 
+/* sc9f: fill ONCE, verify-in-loop.  Allocates a large multi-page
+ * block, canary-fills it once, then re-scans every byte in a tight
+ * loop under SIGALRM.  When a mismatch is found:
+ *
+ *   1. Print the standard corruption dump.
+ *   2. Print the page-aligned VA, offset within page, and a 16-byte
+ *      hex dump centred on the bad byte from the *next* verify pass
+ *      to see if the byte is permanently changed or oscillates.
+ *   3. Bucket counts by page so we can tell whether corruption is
+ *      uniformly distributed or clustered on specific pages.
+ *   4. Do NOT rewrite the corrupted byte — leaving it as-is lets us
+ *      see whether subsequent passes re-corrupt OTHER bytes or
+ *      stabilise on this one.
+ *
+ * If corruption clusters on a specific page or specific intra-page
+ * offset, that's a VM / pmap / TLB bug signature.  If it's
+ * uniformly random across pages and offsets, it's something else. */
+static int sc9f_fill_once_verify_loop(void) {
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = sc9_handler;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;
+    if (sigaction(SIGALRM, &sa, NULL) < 0) FAIL("sigaction");
+
+    struct itimerval it = {
+        .it_value    = { .tv_sec = 0, .tv_usec = 5000 },
+        .it_interval = { .tv_sec = 0, .tv_usec = 5000 }
+    };
+    if (setitimer(ITIMER_REAL, &it, NULL) < 0) FAIL("setitimer");
+
+    /* 16 KiB = 4 pages.  Big enough that corruption distribution
+     * across pages is statistically visible after a few dozen hits. */
+    enum { BLOCK_SZ = 16 * 1024 };
+    enum { N_PAGES  = BLOCK_SZ / 4096 };
+    uint8_t *p = malloc(BLOCK_SZ);
+    if (!p) FAIL("malloc(%d)", BLOCK_SZ);
+    canary_fill(p, BLOCK_SZ);
+    fprintf(stderr, "  note: sc9f block at %p, sz=%d (4 pages: ", p, BLOCK_SZ);
+    for (int i = 0; i < N_PAGES; i++) {
+        uintptr_t page = ((uintptr_t)p + i * 4096) & ~0xFFFu;
+        fprintf(stderr, "%s0x%lx", i ? " " : "", (unsigned long)page);
+    }
+    fprintf(stderr, ")\n");
+
+    g_sc9_ticks = 0;
+    int reports = 0;
+    long passes = 0;
+    int per_page_hits[N_PAGES] = { 0 };
+    int last_off = -1;
+    uint8_t last_got = 0;
+    struct timespec t0, t1;
+    clock_gettime(CLOCK_MONOTONIC, &t0);
+    long ms = 0;
+
+    while (ms < 3000 && reports < 8) {
+        for (size_t i = 0; i < BLOCK_SZ; i++) {
+            uint8_t want = canary_byte(p, i);
+            uint8_t got  = ((volatile uint8_t *)p)[i];
+            if (got != want) {
+                uintptr_t va  = (uintptr_t)(p + i);
+                uintptr_t pg  = va & ~0xFFFu;
+                int       po  = (int)(va & 0xFFFu);
+                int       pgi = (int)i / 4096;
+                per_page_hits[pgi]++;
+
+                int oscillated = (last_off == (int)i && last_got != got);
+                fprintf(stderr,
+                    "  CORRUPT pass=%ld i=%zu va=0x%lx page=0x%lx pgoff=%d "
+                    "got=0x%02x want=0x%02x ticks=%d %s\n",
+                    passes, i, (unsigned long)va,
+                    (unsigned long)pg, po, got, want,
+                    (int)g_sc9_ticks,
+                    oscillated ? "OSCILLATED" : (last_off == (int)i ? "PERSISTENT" : ""));
+
+                last_off = (int)i;
+                last_got = got;
+                reports++;
+                if (reports >= 8) break;
+                /* Do NOT fix.  See if subsequent passes find it
+                 * still corrupt (PERSISTENT) or healed (transient). */
+            }
+        }
+        passes++;
+        if ((passes & 0xF) == 0) {
+            clock_gettime(CLOCK_MONOTONIC, &t1);
+            ms = (t1.tv_sec - t0.tv_sec) * 1000 +
+                 (t1.tv_nsec - t0.tv_nsec) / 1000000;
+        }
+    }
+    memset(&it, 0, sizeof(it));
+    setitimer(ITIMER_REAL, &it, NULL);
+    fprintf(stderr,
+        "  note: sc9f %ld passes, %d ticks, %d corruptions, "
+        "per-page hits: [%d %d %d %d]\n",
+        passes, (int)g_sc9_ticks, reports,
+        per_page_hits[0], per_page_hits[1],
+        per_page_hits[2], per_page_hits[3]);
+    free(p);
+    return reports > 0 ? 1 : 0;
+}
+
 /* sc9d: handler that calls _exit(42) on first SIGALRM.  If the
  * corruption happens during the iret-to-handler transition (i.e.
  * before the handler body runs at all), we'll still see byte
@@ -887,6 +989,7 @@ static struct sc tests[] = {
     { "sc9c_trace_mode",            sc9c_trace_mode        },
     { "sc9d_exit_in_handler",       sc9d_exit_in_handler   },
     { "sc9e_verify_on_write",       sc9e_verify_on_write   },
+    { "sc9f_fill_once_verify_loop", sc9f_fill_once_verify_loop },
     { "sc10_fragmentation_storm",   sc10_fragmentation_storm },
     { "sc11_realloc_storm",         sc11_realloc_storm     },
     { "sc12_fork_storm",            sc12_fork_storm        },
