@@ -559,6 +559,141 @@ static int sc9b_sigalrm_ign(void) {
     return r;
 }
 
+/* sc9c: minimal trace mode.  Print every malloc with the block
+ * address and size, plus a marker for each SIGALRM, so we can
+ * line up the kernel's XSIG sigframe-destination log with the
+ * userland heap layout to see whether sendsig is writing into a
+ * live allocation. */
+static void sc9c_handler(int sig) {
+    (void)sig;
+    /* Async-signal-safe: write() is on the POSIX safe list; printf
+     * is not.  Marker lines up against the kernel's xsig log. */
+    static const char marker[] = "  TICK\n";
+    write(2, marker, sizeof(marker) - 1);
+    g_sc9_ticks++;
+}
+
+static int sc9c_trace_mode(void) {
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = sc9c_handler;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;
+    if (sigaction(SIGALRM, &sa, NULL) < 0) FAIL("sigaction");
+
+    struct itimerval it = {
+        .it_value    = { .tv_sec = 0, .tv_usec = 5000 },
+        .it_interval = { .tv_sec = 0, .tv_usec = 5000 }
+    };
+    if (setitimer(ITIMER_REAL, &it, NULL) < 0) FAIL("setitimer");
+
+    /* Track every live block; print address + size for each
+     * malloc, so the kernel xsig log can be correlated. */
+    enum { LIVE_CAP = 64 };           /* small set so the log is readable */
+    void *live[LIVE_CAP] = { 0 };
+    size_t sizes[LIVE_CAP] = { 0 };
+
+    g_sc9_ticks = 0;
+    long ops = 0;
+    int reports = 0;
+    /* Stop conditions: 3 corruptions seen OR 10 ticks elapsed —
+     * we just need a small slice of data, not 2 seconds of it. */
+    while (g_sc9_ticks < 10 && reports < 3 && ops < 5000) {
+        int slot = (int)(rng_next() % LIVE_CAP);
+        if (live[slot]) {
+            uint8_t *b = live[slot];
+            size_t sz = sizes[slot];
+            int bad_off = -1;
+            uint8_t bad_got = 0, bad_want = 0;
+            for (size_t i = 0; i < sz; i++) {
+                uint8_t want = canary_byte(live[slot], i);
+                if (b[i] != want) {
+                    bad_off = (int)i; bad_got = b[i]; bad_want = want;
+                    break;
+                }
+            }
+            if (bad_off >= 0) {
+                sc9_dump_corruption(ops, slot, live[slot], sz,
+                                    bad_off, bad_got, bad_want,
+                                    (int)g_sc9_ticks);
+                reports++;
+                canary_fill(live[slot], sz);
+            }
+            fprintf(stderr, "  FREE  slot=%d ptr=%p sz=%zu\n",
+                    slot, live[slot], sz);
+            free(live[slot]); live[slot] = NULL;
+        } else {
+            size_t sz = rng_range(64, 256);
+            void *p = malloc(sz);
+            if (!p) FAIL("malloc(%zu) at op %ld", sz, ops);
+            canary_fill(p, sz);
+            fprintf(stderr, "  ALLOC slot=%d ptr=%p sz=%zu\n",
+                    slot, p, sz);
+            live[slot] = p; sizes[slot] = sz;
+        }
+        ops++;
+    }
+    memset(&it, 0, sizeof(it));
+    setitimer(ITIMER_REAL, &it, NULL);
+    for (int i = 0; i < LIVE_CAP; i++) if (live[i]) free(live[i]);
+    fprintf(stderr, "  note: sc9c did %ld ops, %d ticks, %d corruptions\n",
+            ops, (int)g_sc9_ticks, reports);
+    return reports > 0 ? 1 : 0;
+}
+
+/* sc9d: handler that calls _exit(42) on first SIGALRM.  If the
+ * corruption happens during the iret-to-handler transition (i.e.
+ * before the handler body runs at all), we'll still see byte
+ * damage in the live blocks visible to the EXIT path.  But the
+ * test's main process forked us, and we _exit from a signal
+ * handler — async-signal-safe — so the child status reflects
+ * whether we got to _exit cleanly or crashed before. */
+static void sc9d_exit_handler(int sig) {
+    (void)sig;
+    _exit(42);   /* async-signal-safe per POSIX */
+}
+
+static int sc9d_exit_in_handler(void) {
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = sc9d_exit_handler;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;
+    if (sigaction(SIGALRM, &sa, NULL) < 0) FAIL("sigaction");
+
+    struct itimerval it = {
+        .it_value    = { .tv_sec = 0, .tv_usec = 50000 },
+        .it_interval = { .tv_sec = 0, .tv_usec = 0 }
+    };
+    if (setitimer(ITIMER_REAL, &it, NULL) < 0) FAIL("setitimer");
+
+    /* Pre-allocate a block + canary it.  Then spin for >50ms so the
+     * timer fires.  The exit handler _exit(42)s the child without
+     * touching any userland state, so the parent's waitpid sees
+     * status 42 if the iret-to-handler-PC transition itself is
+     * clean.  A crash before _exit indicates iret corrupts state. */
+    void *p = malloc(512);
+    if (!p) FAIL("malloc");
+    canary_fill(p, 512);
+    fprintf(stderr, "  pre-spin: block at %p, sz=512\n", p);
+
+    /* Spin until the timer fires us out via _exit. */
+    for (volatile long i = 0; i < 100000000L; i++) {
+        if (i % 1000000 == 0) {
+            /* Sanity: are we still here? */
+            if (((volatile uint8_t *)p)[0] != canary_byte(p, 0)) {
+                fprintf(stderr, "  CORRUPT mid-spin: byte0 changed before exit\n");
+                free(p);
+                FAIL("byte0 corruption pre-exit");
+            }
+        }
+    }
+    /* If we get here, the handler never fired in 100M loop iters —
+     * means the timer didn't deliver.  Counts as a test failure. */
+    free(p);
+    FAIL("timer didn't fire — handler never invoked");
+}
+
 /* sc10: adversarial fragmentation.  Alternating big + small allocs,
  * then free every-other big to leave a sawtooth heap shape.  Forces
  * split_block to land on tiny gaps right next to live blocks. */
@@ -683,6 +818,8 @@ static struct sc tests[] = {
     { "sc8_large_buffer",           sc8_large_buffer       },
     { "sc9_sigalrm_during_alloc",   sc9_sigalrm_during_alloc },
     { "sc9b_sigalrm_ign",           sc9b_sigalrm_ign       },
+    { "sc9c_trace_mode",            sc9c_trace_mode        },
+    { "sc9d_exit_in_handler",       sc9d_exit_in_handler   },
     { "sc10_fragmentation_storm",   sc10_fragmentation_storm },
     { "sc11_realloc_storm",         sc11_realloc_storm     },
     { "sc12_fork_storm",            sc12_fork_storm        },

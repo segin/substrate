@@ -405,6 +405,19 @@ void sendsig(sig_t handler, int sig, uint32_t mask, uint32_t flags, registers_t 
     sf.retaddr = SIG_TRAMPOLINE_ADDR;  /* Return to trampoline */
     sf.sig = sig;                       /* Signal number (handler arg 1) */
     
+    /* Log the sigframe destination range so we can cross-reference
+     * against userland's live heap blocks.  If esp lands in heap
+     * (≲ 0x10000000 on substrate) instead of the user stack region
+     * (0xbfff...), we know the sigframe is being copied onto the
+     * heap and that's the corruption source. */
+    XSIG("pid=%d sigframe legacy: dst=0x%08x..0x%08x sz=%u "
+         "(saved_useresp=0x%08x)",
+         current_process ? current_process->pid : -1,
+         (uint32_t)esp,
+         (uint32_t)(esp + sizeof(struct sigframe)),
+         (unsigned)sizeof(struct sigframe),
+         (uint32_t)regs->useresp);
+
     /*
      * Copy frame to user stack
      */
