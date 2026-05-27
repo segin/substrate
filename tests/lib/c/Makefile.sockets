@@ -40,7 +40,7 @@ else
 endif
 
 TESTS = torture_unix torture_afunix_poll torture_malloc torture_evdev \
-        torture_x11_shape
+        torture_x11_shape torture_sigalrm
 
 all: $(TESTS)
 
@@ -64,6 +64,16 @@ torture_evdev: torture_evdev.c
 # request, write reply, close).  Useful for ruling out the
 # kernel poll/accept layer when X-server-side issues are suspected.
 torture_x11_shape: torture_x11_shape.c
+	$(CC) $(CFLAGS) $(LDFLAGS) $< -o $@
+
+# SIGALRM / setitimer / alarm torture.  12 scenarios covering
+# oneshot, periodic, EINTR, SA_RESTART, mask-in-handler, pending
+# coalescing, storm bound, alarm() roundtrip, getitimer, siglongjmp,
+# progress-under-storm, accept-eintr.  Designed to pin down which
+# part of substrate's signal pipeline (sendsig, sigreturn, mask
+# restore, kern_setitimer accounting) might explain Xfbdev's
+# SIGALRM-loop trace.
+torture_sigalrm: torture_sigalrm.c
 	$(CC) $(CFLAGS) $(LDFLAGS) $< -o $@
 
 clean:
