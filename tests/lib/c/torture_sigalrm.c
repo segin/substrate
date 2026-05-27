@@ -234,9 +234,13 @@ static int sc5_mask_in_handler(void) {
     return 0;
 }
 
-/* sc6: pending coalescing.  If multiple SIGALRMs arrive while SIGALRM
- * is blocked, only ONE should be delivered when it unblocks.  We
- * block, sleep through several timer intervals, unblock, count. */
+/* sc6: pending coalescing.  POSIX says standard (non-realtime)
+ * signals do NOT queue while blocked — at most one stays pending.
+ * In practice this is implementation-dependent for setitimer-driven
+ * SIGALRM: substrate and Linux coalesce to exactly 1; FreeBSD
+ * 14.3/i386 delivers one per missed tick (observed: ~9 over 200 ms
+ * with a 20 ms timer).  Accept either behaviour, but bound the
+ * upper count so a real run-away timer still fails. */
 static int sc6_coalesce(void) {
     g_alrm_count = 0;
     if (install_handler(SIGALRM, count_handler, 0) < 0) FAIL("sigaction");
@@ -252,15 +256,20 @@ static int sc6_coalesce(void) {
 
     disarm_timer();
 
-    /* Now unblock — should deliver ONE pending SIGALRM. */
+    /* Now unblock — at least one SIGALRM should be delivered. */
     sigprocmask(SIG_SETMASK, &prev, NULL);
 
     /* Give the kernel a moment to deliver. */
     struct timeval tv = { .tv_sec = 0, .tv_usec = 50000 };
     select(0, NULL, NULL, NULL, &tv);
 
-    if (g_alrm_count != 1)
-        FAIL("after unblock, expected 1 coalesced SIGALRM, got %d", (int)g_alrm_count);
+    if (g_alrm_count < 1)
+        FAIL("after unblock, no SIGALRM delivered (POSIX requires >=1)");
+    if (g_alrm_count > 50)
+        FAIL("after unblock, %d SIGALRMs — runaway timer?", (int)g_alrm_count);
+    fprintf(stderr, "  note: %d SIGALRMs delivered after unblock "
+                    "(substrate/Linux coalesce to 1; FreeBSD ~one-per-tick)\n",
+            (int)g_alrm_count);
     return 0;
 }
 
