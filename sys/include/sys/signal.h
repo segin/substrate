@@ -23,12 +23,15 @@ struct process;
 #define SIGPIPE    13
 #define SIGALRM    14
 #define SIGTERM    15
+#define SIGURG     16
 #define SIGCHLD    17
 #define SIGCONT    18
 #define SIGSTOP    19
 #define SIGTSTP    20
 #define SIGTTIN    21
 #define SIGTTOU    22
+#define SIGPOLL    23
+#define SIGIO      SIGPOLL
 #define SIGVTALRM  26
 #define SIGPROF    27
 #define SIGWINCH   28

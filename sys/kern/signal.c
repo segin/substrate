@@ -108,11 +108,21 @@ int sys_sigaction(int sig, const void *act, void *oact) {
     struct sigaction kact, koact;
     struct sigaction *p_kact = NULL;
 
-    /* Diagnostic: nosigalrm cmdline flag makes sys_sigaction
-     * silently succeed for SIGALRM without actually installing
-     * a handler.  Use this to bisect whether the X server crash
-     * is in SIGALRM installation/delivery or elsewhere. */
-    if (sig == SIGALRM) {
+    /* Diagnostic: nosigalrm cmdline flag forces SIGALRM and
+     * SIGIO to disposition SIG_IGN regardless of what userland
+     * requests.  Use this to bisect whether the X server crash
+     * is in async-signal installation/delivery or elsewhere.
+     * SIGALRM and SIGIO are the two async signals X server uses
+     * (smart scheduler and evdev input event notification
+     * respectively); both reproduce the same "value should be
+     * valid but is NULL+small" crash pattern.
+     *
+     * SIG_IGN — not "discard the install" — is the right
+     * disposition: just discarding leaves the action at its
+     * previous value (SIG_DFL = terminate for SIGIO), so the
+     * first input event would kill the process.  SIG_IGN makes
+     * psignal drop the signal silently. */
+    if (sig == SIGALRM || sig == SIGIO) {
         static int nosigalrm_cached = -1;
         if (nosigalrm_cached < 0)
             nosigalrm_cached = (cmdline_has("nosigalrm") ||
@@ -121,6 +131,11 @@ int sys_sigaction(int sig, const void *act, void *oact) {
             if (oact) {
                 struct sigaction zero = { 0 };
                 if (copyout(&zero, oact, sizeof(zero)) != 0) return -14;
+            }
+            if (current_process) {
+                struct sigaction ign = { 0 };
+                ign.sa_handler = SIG_IGN;
+                current_process->sig_actions[sig - 1] = ign;
             }
             return 0;
         }
