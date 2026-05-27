@@ -1,11 +1,11 @@
 From: substrate
 Subject: kdrive linux: put keyboard into K_RAW alongside KD_GRAPHICS
 
-Xfbdev's evdev keyboard backend reads /dev/input/event0 directly and
-never calls KDSKBMODE itself — only the legacy LinuxKeyboardDriver
+Xfbdev's evdev keyboard backend reads /dev/input/eventN directly and
+never calls KDSKBMODE itself -- only the legacy LinuxKeyboardDriver
 does.  When launched from a shell the kernel TTY line discipline
 keeps feeding keystrokes to the shell behind the X session, so
-typing echoes onto the framebuffer.
+typing echoes onto the framebuffer and never reaches X clients.
 
 Issue KDSKBMODE(K_RAW) right after KDSETMODE(KD_GRAPHICS) in
 LinuxEnable, which runs regardless of which input driver is
@@ -13,17 +13,17 @@ selected.  Non-fatal on failure (older kernels without the ioctl).
 
 --- a/hw/kdrive/linux/linux.c
 +++ b/hw/kdrive/linux/linux.c
-@@ -259,6 +259,14 @@ LinuxEnable(void)
-     LinuxSetSwitchMode(VT_PROCESS);
+@@ -260,6 +260,13 @@
      if (ioctl(LinuxConsoleFd, KDSETMODE, KD_GRAPHICS) < 0) {
          FatalError("LinuxInit: KDSETMODE KD_GRAPHICS failed\n");
      }
 +    /* Put the keyboard into K_RAW so the kernel TTY stops feeding
 +     * keystrokes to the shell that launched us.  The evdev keyboard
-+     * backend (the default on substrate via /etc/startx) reads events
-+     * directly from /dev/input/event0 and never calls KDSKBMODE itself
-+     * — only the legacy LinuxKeyboard backend does.  Without this,
-+     * every key the user types is echoed by the shell behind X. */
++     * backend reads events directly from /dev/input/eventN and does
++     * not call KDSKBMODE itself -- only the legacy LinuxKeyboard
++     * backend does.  Without this, every key the user types is
++     * echoed by the shell behind X. */
 +    (void)ioctl(LinuxConsoleFd, KDSKBMODE, K_RAW);
      enabled = TRUE;
  }
+ 
