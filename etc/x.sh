@@ -1,33 +1,45 @@
 #!/bin/sh
-# /root/x.sh — user's standard X session launcher with reproducer.
+# /root/x.sh — X-server-crash reproducer wired for run-auto-test.sh.
 #
-# Tracked here under etc/ so it follows the repo; installed to /root/
-# at image-build time.
-#
-# Flags:
-#   -ac    disable host-based access control (substrate has no xauth)
-#   -retro gray-stipple root background (matches "classic" X look)
-#   -zap   Ctrl+Alt+Backspace terminates the server
-#   vt1    take VT 1
-#   :0     advertise as display :0
-#
-# Reproducer: -listen tcp removed (AF_UNIX only).  After Xfbdev
-# starts, a backgrounded shell waits 3 s and launches xterm against
-# the AF_UNIX socket at /tmp/.X11-unix/X0.  This deterministically
-# triggers the X-server-crash-on-client-connect symptom.
-#
-# Logs:
-#   /var/log/xlog.txt    Xfbdev stderr
-#   /var/log/xterm.txt   xterm output (its stderr will show the
-#                        connection-closed error when Xfbdev dies)
+# Layout (init mode):
+#   1. Print start marker.
+#   2. Background a client launcher that waits 3 s and runs xterm
+#      against the AF_UNIX socket at /tmp/.X11-unix/X0.
+#   3. Run Xfbdev under LD_PRELOAD=/lib/nosegvhandler.so so X's
+#      OsSigHandler is NEVER installed for SIGSEGV/SIGBUS/SIGILL/
+#      SIGFPE.  The kernel's default-action then catches the
+#      first SIGSEGV and prints TRAP/CORE for the ORIGINAL call
+#      site (instead of the recursive vpnprintf/ErrorFSigSafe
+#      stack we see when OsSigHandler is active).
+#   4. After Xfbdev exits, dump captured logs and print Result.
 
-rm -f /tmp/.X0-lock
+echo "=== x.sh: reproducer mode starting ==="
+rm -f /tmp/.X0-lock /tmp/.X11-unix/X0
 
-# Backgrounded client launcher: wait for the server to come up,
-# then connect.  Output captured for post-mortem.
+# Backgrounded client launcher: waits for the server, then connects.
 ( sleep 3
+  echo "=== xterm launching ==="
   xterm -display :0.0 > /var/log/xterm.txt 2>&1
-  echo "xterm exited $? at $(date)" >> /var/log/xterm.txt
+  echo "xterm exit $?" >> /var/log/xterm.txt
 ) &
 
-Xfbdev -ac -retro -zap vt1 :0 2> /var/log/xlog.txt
+echo "=== Xfbdev launching (LD_PRELOAD=/lib/nosegvhandler.so) ==="
+LD_PRELOAD=/lib/nosegvhandler.so Xfbdev -ac -retro -zap vt1 :0 > /var/log/xlog.txt 2>&1
+XEXIT=$?
+echo "=== Xfbdev exited $XEXIT ==="
+
+# Let kernel + backgrounded xterm finalize.
+sleep 2
+sync
+
+echo "=== /var/log/xlog.txt ==="
+cat /var/log/xlog.txt 2>/dev/null || echo "(missing)"
+echo "=== /var/log/xterm.txt ==="
+cat /var/log/xterm.txt 2>/dev/null || echo "(missing)"
+echo "=== END ==="
+
+if [ "$XEXIT" -eq 0 ]; then
+    echo "Result: PASSED (Xfbdev exited cleanly, code 0)"
+else
+    echo "Result: FAILED (Xfbdev exited $XEXIT)"
+fi
