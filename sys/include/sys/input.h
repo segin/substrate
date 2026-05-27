@@ -4,6 +4,8 @@
 #include <stdint.h>
 #include <sys/file.h> // for fs_node_t, off_t
 #include <sys/keycodes.h>
+#include <sys/lock.h>
+#include <vfs/vfs.h>   // for fs_node_t full definition
 
 // Event Types
 #define EV_SYN 0x00
@@ -41,6 +43,17 @@ typedef struct input_event {
     int32_t  value;
 } input_event_t;
 
+/*
+ * Per-device event queue size.  Each input device gets its own ring
+ * — previously the subsystem shared a single global queue, which
+ * meant every reader saw every other device's events.  X server
+ * binds one fd to "keyboard" and another to "pointer"; if they
+ * share the queue, mouse button events get truncated to keyboard
+ * scancodes (BTN_LEFT 0x110 → KEY_Q 0x10) and turn into q/w/e
+ * keypresses.
+ */
+#define INPUT_QUEUE_SIZE 64
+
 struct input_dev;
 struct input_handle;
 
@@ -50,12 +63,31 @@ typedef struct input_dev_ops {
     int  (*poll)(struct input_dev *dev); // For polling-mode devices
 } input_dev_ops_t;
 
+/* Capability bits — used to drive the per-device EVIOCGBIT
+ * response so a kdrive evdev keyboard probe sees only keys, and
+ * a kdrive evdev pointer probe sees only relative axes + BTN_*.
+ * Currently a bitmap of (1 << EV_*) values — kept that shape so
+ * existing initializers like `.caps = (1<<EV_REL) | (1<<EV_KEY)`
+ * keep working without churn. */
+
 // Input Device Representation
 typedef struct input_dev {
     char name[64];
-    uint32_t caps; // Capabilities bitmap
+    uint32_t caps;                // (1<<EV_*) bitmap — populated by driver
     input_dev_ops_t *ops;
     void *driver_data;
+
+    /*
+     * Per-device state managed by input_subsys.c — drivers do not
+     * touch these.  Initialized by input_register_device.
+     */
+    input_event_t queue[INPUT_QUEUE_SIZE];
+    uint64_t      seq;            // total events ever written
+    spinlock_t    lock;
+    int           evnum;          // index assigned at register time
+    int           registered;     // sticky once true
+    fs_node_t     devfs_node;     // /dev/input/eventN
+
     struct input_dev *next;
 } input_dev_t;
 
