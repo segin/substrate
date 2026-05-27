@@ -1792,15 +1792,18 @@ int kern_poll(struct pollfd *kfds, unsigned int nfds, int timeout) {
          * a poller might care about — AF_UNIX rx/tx, accept queue,
          * pipe/tty input, evdev events — kicks us out of this sleep.
          *
-         * A long-interval deadline-driven backstop guards against a
-         * wake that never fires (driver bug, missed sleepq link), but
-         * the wake path is the fast path now.  Previous revision sat
-         * on (void *)current_thread and re-polled every 10 ms which
-         * burned CPU under any non-idle X session (matwm2 + xterms
-         * over Xnest, etc).
+         * Backstop is the rescue interval for a wake that lands in
+         * the TOCTOU window between the fd-check above and the
+         * sched_sleep_until below: in that window the thread is still
+         * RUNNING, so sched_wakeup_n won't pick it up, and the wake
+         * is lost until the timer fires.  50 ms keeps recovery quick
+         * (TCP X-client connect over a real NIC was stalling ~1 s per
+         * round-trip with a 1 s backstop) while still being 5x quieter
+         * at idle than the pre-fix 10 ms busy-spin.
          */
         extern char g_poll_wake_chan;
-        uint64_t backstop = (uint64_t)HZ; /* 1 s safety wakeup */
+        uint64_t backstop = (uint64_t)HZ / 20;          /* ~50 ms */
+        if (backstop == 0) backstop = 1;
         uint64_t sleep_deadline = get_ticks() + backstop;
         if (timeout > 0 && deadline < sleep_deadline)
             sleep_deadline = deadline;
