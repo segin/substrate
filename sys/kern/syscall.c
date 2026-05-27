@@ -1786,18 +1786,22 @@ int kern_poll(struct pollfd *kfds, unsigned int nfds, int timeout) {
         if (timeout == 0) break;
 
         /*
-         * Sleep briefly, then re-poll every fd.  We deliberately do
-         * NOT park on a pollable object's wait channel: objects wake
-         * pollers with sleepq_wake_all(), which does not reach a thread
-         * blocked via sched_sleep() — they are different wait
-         * primitives.  A single-fd poll that trusted that wakeup hung
-         * forever (sshd's privsep monitor stuck in poll() on its
-         * monitor socket — the interactive-login hang).  Capping the
-         * sleep and re-evaluating all fds is race-free by construction,
-         * at the cost of up to one interval of latency.
+         * Wait on the dedicated poll wake-channel — sched_wakeup()
+         * and sleepq_wake_all() both fan out to it (see
+         * sched_poll_wake_pollers() in sched.c), so any state change
+         * a poller might care about — AF_UNIX rx/tx, accept queue,
+         * pipe/tty input, evdev events — kicks us out of this sleep.
+         *
+         * A long-interval deadline-driven backstop guards against a
+         * wake that never fires (driver bug, missed sleepq link), but
+         * the wake path is the fast path now.  Previous revision sat
+         * on (void *)current_thread and re-polled every 10 ms which
+         * burned CPU under any non-idle X session (matwm2 + xterms
+         * over Xnest, etc).
          */
-        uint64_t interval = (HZ / 100) ? (uint64_t)(HZ / 100) : 1;  /* ~10 ms */
-        uint64_t sleep_deadline = get_ticks() + interval;
+        extern char g_poll_wake_chan;
+        uint64_t backstop = (uint64_t)HZ; /* 1 s safety wakeup */
+        uint64_t sleep_deadline = get_ticks() + backstop;
         if (timeout > 0 && deadline < sleep_deadline)
             sleep_deadline = deadline;
 
@@ -1805,7 +1809,7 @@ int kern_poll(struct pollfd *kfds, unsigned int nfds, int timeout) {
          * sig_pending check below can fire. */
         if (current_thread)
             current_thread->flags |= THREAD_F_INTERRUPTIBLE;
-        int sleep_ret = sched_sleep_until((void *)current_thread, sleep_deadline);
+        int sleep_ret = sched_sleep_until(&g_poll_wake_chan, sleep_deadline);
         if (current_thread)
             current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
 

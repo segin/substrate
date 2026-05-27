@@ -397,8 +397,38 @@ void sched_tick(void) {
     }
 }
 
+/*
+ * Dedicated wake channel for select()/poll() blockers.
+ *
+ * kern_poll() previously used (void *)current_thread as its sleep
+ * channel and slept for fixed ~10 ms intervals — a busy-poll, since
+ * neither sched_wakeup() nor sleepq_wake_all() target a per-thread
+ * private channel.  At idle, a typical X session (matwm2 + xterms
+ * + Xnest forwarding) burned measurable CPU just spinning around
+ * the 10 ms timer.
+ *
+ * Now every kern_poll sleeper uses &g_poll_wake_chan as its wait
+ * channel, and any wake path that could plausibly affect a polled
+ * fd's readiness (sched_wakeup for pipe/tty/socket/input, plus
+ * sleepq_wake_all for AF_UNIX rx/tx and accept) calls
+ * sched_poll_wake_pollers() to kick them.  The kern_poll sleeper
+ * wakes, re-polls every fd, and either returns ready or goes back
+ * to sleep — no more 10 ms timer spin.
+ */
+char g_poll_wake_chan;
+
+void sched_poll_wake_pollers(void) {
+    sched_wakeup_n(&g_poll_wake_chan, -1);
+}
+
 void sched_wakeup(void *chan) {
     sched_wakeup_n(chan, -1);
+    /* Also kick any select/poll sleepers — they may be interested
+     * in `chan` even though they're sleeping on &g_poll_wake_chan.
+     * Recursion-safe: this calls sched_wakeup_n directly, not back
+     * into sched_wakeup. */
+    if (chan != &g_poll_wake_chan)
+        sched_wakeup_n(&g_poll_wake_chan, -1);
 }
 
 void sched_wakeup_n(void *chan, int n) {

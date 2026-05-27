@@ -289,13 +289,19 @@ static thread_t *sleepq_wake_one_internal(void *chan, int type, int pid) {
 }
 
 thread_t *sleepq_wake_one(void *chan) {
-    return sleepq_wake_one_internal(chan, SLEEPQ_TYPE_SHARED, 0);
+    thread_t *t = sleepq_wake_one_internal(chan, SLEEPQ_TYPE_SHARED, 0);
+    extern void sched_poll_wake_pollers(void);
+    sched_poll_wake_pollers();
+    return t;
 }
 
 thread_t *sleepq_wake_one_private(void *chan) {
     int pid = sleepq_current_private_pid();
     if (pid < 0) return NULL;
-    return sleepq_wake_one_internal(chan, SLEEPQ_TYPE_PRIVATE, pid);
+    thread_t *t = sleepq_wake_one_internal(chan, SLEEPQ_TYPE_PRIVATE, pid);
+    extern void sched_poll_wake_pollers(void);
+    sched_poll_wake_pollers();
+    return t;
 }
 
 static int sleepq_wake_all_internal(void *chan, int type, int pid) {
@@ -332,13 +338,24 @@ static int sleepq_wake_all_internal(void *chan, int type, int pid) {
 }
 
 int sleepq_wake_all(void *chan) {
-    return sleepq_wake_all_internal(chan, SLEEPQ_TYPE_SHARED, 0);
+    int n = sleepq_wake_all_internal(chan, SLEEPQ_TYPE_SHARED, 0);
+    /* Also wake any select/poll sleepers — substrate's poll layer
+     * uses its own dedicated channel (see sched.c's
+     * sched_poll_wake_pollers) and won't otherwise hear about
+     * AF_UNIX rx/tx, accept, futex, etc.  Tiny cost (a walk over
+     * threads); large benefit: kern_poll stops 10 ms busy-spinning. */
+    extern void sched_poll_wake_pollers(void);
+    sched_poll_wake_pollers();
+    return n;
 }
 
 int sleepq_wake_all_private(void *chan) {
     int pid = sleepq_current_private_pid();
     if (pid < 0) return 0;
-    return sleepq_wake_all_internal(chan, SLEEPQ_TYPE_PRIVATE, pid);
+    int n = sleepq_wake_all_internal(chan, SLEEPQ_TYPE_PRIVATE, pid);
+    extern void sched_poll_wake_pollers(void);
+    sched_poll_wake_pollers();
+    return n;
 }
 
 static int sleepq_wake_n_internal(void *chan, int n, int type, int pid) {
