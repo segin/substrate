@@ -33,9 +33,27 @@
 #include <sys/signal.h>
 #include <sys/proc.h>
 #include <kern/console.h>
+#include <kern/cmdline.h>
 #include <arch/i386/idt.h>
 #include <arch/i386/signal_arch.h>
 #include <string.h>
+
+/* Signal-delivery trace, gated behind the `xsig` kernel cmdline flag
+ * (or `debug=xsig`).  Logs every sendsig() and sys_sigreturn() pair —
+ * sig number, handler, saved EIP/ESP/EBP, restored EIP/ESP/EBP — so
+ * a signal firing during a tight loop (e.g. fb's per-iter blt) is
+ * visible against the user-space backtrace timeline.  Off by default. */
+static int xsig_trace_cached = -1;
+static inline int xsig_trace(void) {
+    if (xsig_trace_cached < 0) {
+        xsig_trace_cached =
+            (cmdline_has("xsig") || cmdline_debug_enabled("xsig")) ? 1 : 0;
+    }
+    return xsig_trace_cached;
+}
+#define XSIG(fmt, ...) do { \
+    if (xsig_trace()) kprintf("xsig: " fmt "\n", ##__VA_ARGS__); \
+} while (0)
 
 int i386_trap_to_signal(const registers_t *regs, uint32_t cr2, int *sig,
                         int *code, uintptr_t *addr) {
@@ -225,7 +243,16 @@ void sendsig(sig_t handler, int sig, uint32_t mask, uint32_t flags, registers_t 
         kprint("sendsig: No current thread\n");
         return;
     }
-    
+
+    XSIG("pid=%d comm=%s sendsig sig=%d handler=0x%08x "
+         "saved_eip=0x%08x saved_esp=0x%08x saved_ebp=0x%08x "
+         "alt=%d flags=0x%x",
+         current_process ? current_process->pid : -1,
+         current_process ? current_process->comm : "?",
+         sig, (uint32_t)(uintptr_t)handler,
+         regs->eip, regs->useresp, regs->ebp,
+         (flags & SA_ONSTACK) ? 1 : 0, flags);
+
     uint32_t esp;
     
     /*
@@ -300,7 +327,10 @@ void sendsig(sig_t handler, int sig, uint32_t mask, uint32_t flags, registers_t 
         regs->useresp = esp;
         regs->eip = (uint32_t)handler;
         regs->eflags &= ~(1 << 10);  /* Clear DF */
-        
+
+        XSIG("pid=%d sendsig SA_SIGINFO done: new_esp=0x%08x new_eip=0x%08x sig=%d",
+             current_process ? current_process->pid : -1,
+             regs->useresp, regs->eip, sig);
         return;
     }
     
@@ -403,6 +433,10 @@ void sendsig(sig_t handler, int sig, uint32_t mask, uint32_t flags, registers_t 
      * EFLAGS bit 10 is DF
      */
     regs->eflags &= ~(1 << 10);
+
+    XSIG("pid=%d sendsig done: new_esp=0x%08x new_eip=0x%08x sig=%d",
+         current_process ? current_process->pid : -1,
+         regs->useresp, regs->eip, sig);
 }
 
 /*
@@ -515,6 +549,10 @@ int sys_sigreturn(void *scp_ptr) {
         current_thread->sig_alt_stack.ss_flags &= ~SS_ONSTACK;
     }
     
+    XSIG("pid=%d sigreturn: restored eip=0x%08x ebp=0x%08x esp=0x%08x eax=0x%08x",
+         current_process ? current_process->pid : -1,
+         sc.eip, sc.ebp, sc.user_esp, sc.eax);
+
     /*
      * Return value is EAX from saved context, not a syscall return
      *
@@ -628,6 +666,10 @@ int sys_rt_sigreturn(void *ucp_ptr) {
         current_thread->sig_alt_stack.ss_flags &= ~SS_ONSTACK;
     }
     
+    XSIG("pid=%d rt_sigreturn: restored eip=0x%08x ebp=0x%08x esp=0x%08x eax=0x%08x",
+         current_process ? current_process->pid : -1,
+         mc->mc_eip, mc->mc_ebp, mc->mc_esp, mc->mc_eax);
+
     /*
      * Return value is EAX from saved context
      */
