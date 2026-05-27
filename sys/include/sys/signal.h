@@ -46,13 +46,18 @@ struct sigaction {
     int       sa_flags;
 };
 
+/* POSIX sa_flags values — MUST match include/signal.h (the userland
+ * ABI) bit-for-bit.  Userland and kernel share the same `int sa_flags`
+ * across the sigaction() syscall boundary; any drift between the two
+ * headers turns SA_ONSTACK/SA_RESTART/SA_NODEFER/SA_RESETHAND into
+ * silent no-ops.  Caught by tests/lib/c/torture_sigalrm sc4. */
 #define SA_NOCLDSTOP 0x00000001
 #define SA_NOCLDWAIT 0x00000002
 #define SA_SIGINFO   0x00000004
-#define SA_ONSTACK   0x08000000
-#define SA_RESTART   0x10000000
-#define SA_NODEFER   0x40000000
-#define SA_RESETHAND 0x80000000
+#define SA_ONSTACK   0x00000008
+#define SA_RESTART   0x00000010
+#define SA_NODEFER   0x00000020
+#define SA_RESETHAND 0x00000040
 
 typedef struct {
     int      si_signo;    /* Signal number */
@@ -105,14 +110,20 @@ typedef struct {
 // Signal bits
 #define sigmask(sig) (1U << ((sig) - 1))
 
-/* Signal property flags for sigprop[] array */
-#define SA_KILL     0x0001  /* Default action: terminate process */
-#define SA_CORE     0x0002  /* Default action: terminate + core dump */
-#define SA_STOP     0x0004  /* Default action: stop the process */
-#define SA_IGNORE   0x0008  /* Default action: ignore the signal */
-#define SA_CONT     0x0010  /* Continue if stopped */
-#define SA_TTYSTOP  0x0020  /* Stop from TTY (can be ignored by orphan) */
-#define SA_CANTMASK 0x0040  /* Signal cannot be masked (SIGKILL, SIGSTOP) */
+/* Signal property flags for the kernel-internal sigprop[] table.
+ * These are NOT sa_flags — they classify default disposition per
+ * signal number, used only by signal-delivery code in sys/kern/.
+ * Previously named SA_KILL / SA_CORE / etc., which collided with the
+ * userland sa_flags namespace (SA_ONSTACK / SA_RESTART / SA_NODEFER /
+ * SA_RESETHAND now share the same low bits to match the userland
+ * ABI).  Renamed to PROP_* to make the distinction unambiguous. */
+#define PROP_KILL     0x0001  /* Default action: terminate process */
+#define PROP_CORE     0x0002  /* Default action: terminate + core dump */
+#define PROP_STOP     0x0004  /* Default action: stop the process */
+#define PROP_IGNORE   0x0008  /* Default action: ignore the signal */
+#define PROP_CONT     0x0010  /* Continue if stopped */
+#define PROP_TTYSTOP  0x0020  /* Stop from TTY (can be ignored by orphan) */
+#define PROP_CANTMASK 0x0040  /* Signal cannot be masked (SIGKILL, SIGSTOP) */
 
 /* Default signal properties array (defined in sigprop.c) */
 extern const uint8_t sigprop[NSIG];

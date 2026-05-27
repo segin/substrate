@@ -545,7 +545,7 @@ void psignal(process_t *p, int sig) {
      * pending bit when un-handled is correct too. */
     {
         sig_t h = p->sig_actions[sig - 1].sa_handler;
-        if (h == SIG_IGN || (h == SIG_DFL && (sigprop[sig] & SA_IGNORE)))
+        if (h == SIG_IGN || (h == SIG_DFL && (sigprop[sig] & PROP_IGNORE)))
             return;
     }
 
@@ -685,7 +685,7 @@ void trapsignal(process_t *p, int sig, int code) {
 void sigexit(process_t *p, int sig) {
     if (!p || sig <= 0 || sig > NSIG) return;
     
-    int want_core = (sigprop[sig] & SA_CORE) != 0;
+    int want_core = (sigprop[sig] & PROP_CORE) != 0;
     int dump_core = 0;
 
     if (want_core && signal_core_dump_permitted(p)) {
