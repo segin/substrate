@@ -1,5 +1,5 @@
 From: substrate
-Subject: kdrive: auto-probe /dev/input/event[0-7] and classify by EVIOCGBIT
+Subject: kdrive: auto-probe /dev/input/event[0-7] and classify by event-type bitmap
 
 Plain `Xfbdev vt1 -retro` launched with no -mouse/-keybd leaves
 kdConfigPointers and kdConfigKeyboards empty, so KdInitInput's loops
@@ -13,19 +13,22 @@ keyboard fd, where KdEnqueueKeyboardEvent truncated the code field
 to `unsigned char scan_code` -- turning mouse button presses into
 q/w/e keypresses.
 
-Substrate's kernel now gives each input device its own
-/dev/input/eventN with an EVIOCGBIT-correct capability bitmap.
-Probe event0..event7, read EVIOCGBIT(0, ...) on each, and assign:
+Substrate's kernel gives each input device its own /dev/input/eventN
+with a per-device event-type bitmap.  Probe event0..event7, read the
+EVIOCGBIT(0, ...) bitmap on each, and assign:
 
   - First device whose caps include EV_REL  -> pointer
   - First device whose caps include EV_KEY but NOT EV_REL  -> keyboard
 
-If neither classification finds a match (no devices, or all probes
-fail), fall through to /dev/input/event0 -- that keeps the old
-single-queue kernel working as a degraded mode.
+If no probe matches (no devices, or all fail), fall through to
+/dev/input/event0 for both -- harmless on a sane kernel.
 
 Anyone who *does* pass -mouse/-keybd keeps full control: the
 auto-probe only fires when the config-device lists are empty.
+
+substrate isn't Linux, so the patch uses substrate's <sys/input.h>
+for EV_* / BTN_* / REL_* / EVIOCGBIT and never reaches for
+<linux/input.h>.
 
 --- a/hw/kdrive/src/kinput.c
 +++ b/hw/kdrive/src/kinput.c
@@ -35,7 +38,7 @@ auto-probe only fires when the config-device lists are empty.
  #include <stdio.h>
 +#include <fcntl.h>
 +#include <sys/ioctl.h>
-+#include <linux/input.h>
++#include <sys/input.h>
  #ifdef sun
  #include <sys/file.h>           /* needed for FNONBLOCK & FASYNC */
  #endif
@@ -47,7 +50,7 @@ auto-probe only fires when the config-device lists are empty.
 +     * probe /dev/input/event[0-7] and route the first EV_REL device
 +     * to the pointer side and the first EV_KEY-only device to the
 +     * keyboard side.  The kernel's input subsystem gives each device
-+     * its own evdev node with a per-device EVIOCGBIT bitmap, so
++     * its own evdev node with a per-device capability bitmap, so
 +     * classification by capability is reliable.
 +     *
 +     * Without this, kdConfigPointers and kdConfigKeyboards are empty

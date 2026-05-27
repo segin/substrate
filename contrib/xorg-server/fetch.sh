@@ -66,6 +66,30 @@ if ! grep -q '\*linux\* | \*substrate\*' configure 2>/dev/null; then
     sed -i 's,	\*linux\*)$,	*linux* | *substrate*),' configure
 fi
 
+# Force KDRIVE_EVDEV / KDRIVE_KBD / KDRIVE_MOUSE to "yes" before the
+# AC_DEFINE check fires.  Upstream configure.ac has the
+# AC_DEFINE(KDRIVE_EVDEV) test BEFORE the host_os case that flips the
+# default from "auto" to "yes" for linux/substrate — so with no
+# explicit --enable flag the variables are still "auto" at define
+# time and the macros never make it into kdrive-config.h, leaving
+# `#ifdef KDRIVE_EVDEV` in linux.c false and the evdev / kbd / mouse
+# input drivers unregistered.  X then prints "Couldn't find pointer
+# driver evdev" at startup.  Inject a substrate-aware fallthrough at
+# the top of the `if test "x$KDRIVE_KBD" = xyes` block.
+if ! grep -q 'substrate kdrive defaults' configure 2>/dev/null; then
+    echo "==> Forcing KDRIVE_EVDEV/KBD/MOUSE=yes for substrate"
+    sed -i '/if test "x$KDRIVE_KBD" = xyes; then/i\
+\
+    # substrate kdrive defaults: upstream auto-detect runs too late.\
+    case $host_os in *substrate*)\
+        [ "x$KDRIVE_EVDEV" = xauto ] && KDRIVE_EVDEV=yes\
+        [ "x$KDRIVE_KBD"   = xauto ] && KDRIVE_KBD=yes\
+        [ "x$KDRIVE_MOUSE" = xauto ] && KDRIVE_MOUSE=yes\
+        ;;\
+    esac\
+' configure
+fi
+
 # Apply substrate patch series.  Idempotent — patch's --dry-run -N
 # short-circuits if the hunk is already in place.
 if [ -d "${HERE}/patches" ]; then

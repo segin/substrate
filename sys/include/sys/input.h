@@ -91,6 +91,35 @@ typedef struct input_dev {
     struct input_dev *next;
 } input_dev_t;
 
+/*
+ * evdev ioctl request numbers.
+ *
+ * Substrate's input subsystem (sys/drivers/input/input_subsys.c)
+ * implements a minimal evdev surface so ported software (kdrive
+ * evdev, libinput, evtest) can talk to /dev/input/eventN.  Wire
+ * format matches Linux's <linux/input.h> bit-for-bit, but those
+ * headers belong to a different OS so substrate provides the
+ * constants here -- callers `#include <sys/input.h>` and never
+ * reach for <linux/...>.
+ *
+ * Encoding (matches the Linux ioctl ABI):
+ *   bits 30-31 = direction (2=read, 1=write, 3=read/write)
+ *   bits 16-29 = transfer size in bytes
+ *   bits  8-15 = type byte ('E' = 0x45 for evdev)
+ *   bits  0- 7 = command number
+ */
+#define _EVIOC(dir, nr, size)  \
+    (((unsigned)(dir) << 30) | (((unsigned)(size) & 0x3fffu) << 16) | \
+     (0x45u << 8) | ((unsigned)(nr) & 0xffu))
+#define _EVIOC_READ   2u
+#define _EVIOC_WRITE  1u
+
+#define EVIOCGVERSION   _EVIOC(_EVIOC_READ, 0x01, sizeof(int))
+#define EVIOCGID        _EVIOC(_EVIOC_READ, 0x02, 8)
+#define EVIOCGNAME(len) _EVIOC(_EVIOC_READ, 0x06, (len))
+#define EVIOCGBIT(ev,len) _EVIOC(_EVIOC_READ, 0x20 + (ev), (len))
+#define EVIOCGRAB       _EVIOC(_EVIOC_WRITE, 0x90, sizeof(int))
+
 // API
 void input_init(void);
 
