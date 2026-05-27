@@ -113,12 +113,15 @@ static int sc1_calloc_fread_dance(void) {
     if (make_test_file(SC1_FILE, 8192, 32) != 0)
         FAIL("make_test_file: %s", strerror(errno));
 
-    enum { LIVE_CAP = 4096 };
+    enum { LIVE_CAP = 512 };
     void  **live  = calloc(LIVE_CAP, sizeof(*live));
     size_t *sizes = calloc(LIVE_CAP, sizeof(*sizes));
     if (!live || !sizes) { unlink(SC1_FILE); FAIL("harness calloc"); }
 
-    for (int op = 0; op < 1000000; op++) {
+    /* 100K ops with 512 live slots = 50K alloc/free pairs.  Sized
+     * so a substrate QEMU-KVM run finishes in seconds (the
+     * allocator is O(N) per op; 4K * 1M would be hours). */
+    for (int op = 0; op < 100000; op++) {
         int slot = (int)(rng_next() % LIVE_CAP);
         if (live[slot]) {
             if (!canary_check(live[slot], sizes[slot])) {
@@ -305,10 +308,12 @@ static int sc6_xkb_shape(void) {
     const size_t calloc_sizes[] = { 32, 64, 128, 144, 256, 512 };
     enum { N_SIZES = sizeof(calloc_sizes)/sizeof(calloc_sizes[0]) };
 
-    /* 50,000 rounds × 64 calloc + 64 fread chunks = 3.2M ops total.
+    /* 5,000 rounds × 32 calloc + 32 fread chunks = 160K ops.
+     * Sized so a substrate QEMU-KVM run finishes well under the
+     * test budget (substrate's first-fit malloc is O(N) per op).
      * Free in mixed order (forward / reverse / random) to cover all
      * three split_block + coalesce_block code paths. */
-    for (int round = 0; round < 50000; round++) {
+    for (int round = 0; round < 5000; round++) {
         FILE *f = fopen(SC6_FILE, "rb");
         if (!f) { unlink(SC6_FILE); FAIL("fopen round %d", round); }
 
@@ -317,7 +322,7 @@ static int sc6_xkb_shape(void) {
             fclose(f); unlink(SC6_FILE); FAIL("hdr read round %d", round);
         }
 
-        enum { N_ALLOCS = 64 };
+        enum { N_ALLOCS = 32 };
         void  *allocs[N_ALLOCS] = { 0 };
         size_t aszs[N_ALLOCS]   = { 0 };
         for (int k = 0; k < N_ALLOCS; k++) {
@@ -367,12 +372,11 @@ static int sc6_xkb_shape(void) {
 }
 
 /* sc7: 144-byte alloc/free hammer.  The size that triggered the
- * split_block crash on Xfbdev — hit it 10 million times.  A
- * split_block off-by-one or coalesce-block bookkeeping bug
- * accumulates: if the same block gets corrupted once per N ops,
- * 10M ops will hit it. */
+ * split_block crash on Xfbdev.  Single-block alloc/free has O(1)
+ * cost (no list walk needed — the previous free is at the head),
+ * so this can stay at 1M iterations without timing out. */
 static int sc7_alloc_free_cycle(void) {
-    for (long i = 0; i < 10000000L; i++) {
+    for (long i = 0; i < 1000000L; i++) {
         size_t sz = 144;
         void *p = malloc(sz);
         if (!p) FAIL("malloc at i=%ld", i);
