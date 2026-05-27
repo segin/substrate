@@ -1,42 +1,38 @@
 From: substrate
 Subject: kdrive/evdev: fix driverPrivate race between RegisterFd + assignment
 
-The kernel TRAP / backtrace pinned the first-client-connect SIGSEGV
-to evdev.c:178: `ke->rel[events[i].code] += events[i].value;` with
-CR2=0x00000000 — `ke = pi->driverPrivate` came in NULL.
+First-client-connect SIGSEGV pinned to evdev.c's
+`ke->rel[events[i].code] += events[i].value;` at CR2=0x00000000 --
+`ke = pi->driverPrivate` came in NULL.
 
-Looking at EvdevPtrEnable, the install order is wrong:
+EvdevPtrEnable installs in the wrong order:
 
     if (!KdRegisterFd(fd, EvdevPtrRead, pi))   /* fd live NOW */
         ...;
     pi->driverPrivate = ke;                    /* set LATER */
 
-The moment KdRegisterFd returns, the fd is in the X server's select
-set.  If a mouse event has been queued (substrate's poll() repolls
-every ~10 ms during boot), KdWakeupHandler can dispatch
+The moment KdRegisterFd returns the fd is in the X server's select
+set.  If a mouse event has already been queued (substrate's poll()
+repolls every ~10 ms during boot), KdWakeupHandler can dispatch
 EvdevPtrRead with closure=pi BEFORE the `pi->driverPrivate = ke`
-store completes.  EvdevPtrRead immediately dereferences
-pi->driverPrivate → 0x0 SIGSEGV.
-
-Confirmed backtrace from substrate's kernel TRAP log:
-    EvdevPtrRead at evdev.c:178
-    KdWakeupHandler at kinput.c:2010
-    WakeupHandler at dixutils.c:425
-    WaitForSomething at WaitFor.c:230
-    Dispatch / dix_main / main / _start
+store completes.  EvdevPtrRead dereferences pi->driverPrivate ->
+0x0 and the server dies.
 
 Two fixes:
 
 1. Install pi->driverPrivate BEFORE KdRegisterFd in EvdevPtrEnable.
 
-2. NULL-guard EvdevPtrRead defensively — even with the ordering fix,
-   EvdevPtrDisable clears driverPrivate, and a wakeup already in
-   flight at that point can still arrive at EvdevPtrRead with a
-   stale closure.  Drain the read() and return safely.
+2. NULL-guard EvdevPtrRead defensively -- even with the ordering
+   fix, EvdevPtrDisable clears driverPrivate, and a wakeup already
+   in flight at that point can still arrive at EvdevPtrRead with a
+   stale closure.  Also reject low-junk pointers (< 0x10000) which
+   have shown up after failed grab/ungrab cycles.  Drain the read
+   so the fd is at least quiesced.
 
 --- a/hw/kdrive/linux/evdev.c
 +++ b/hw/kdrive/linux/evdev.c
-@@ -150,11 +150,29 @@ EvdevPtrRead(int evdevPort, void *closure)
+@@ -154,11 +154,27 @@
+ EvdevPtrRead(int evdevPort, void *closure)
  {
      KdPointerInfo *pi = closure;
 -    Kevdev *ke = pi->driverPrivate;
@@ -44,17 +40,15 @@ Two fixes:
      int i;
      struct input_event events[NUM_EVENTS];
      int n;
-
-+    /* Defensive — see EvdevPtrEnable's note about install ordering.
+ 
++    /* Defensive -- see EvdevPtrEnable's note about install ordering.
 +     * Even with the ordering fix, EvdevPtrDisable may have cleared
 +     * driverPrivate while a pending wakeup was still in flight.
 +     *
 +     * Substrate-specific: pi->driverPrivate has been observed coming
 +     * back as a low-junk pointer (e.g. 0x343E) after the X server's
-+     * evdev grab/ungrab dance fails — the substrate kernel's evdev
-+     * EVIOCGRAB ioctl returns "error 1" and the device gets left in
-+     * a half-attached state.  Treat any pointer below 0x10000 the
-+     * same as NULL — there's nothing user-mappable in the first
++     * evdev grab/ungrab dance fails.  Treat any pointer below 0x10000
++     * the same as NULL -- there's nothing user-mappable in the first
 +     * 64 KiB of the address space, so anything that small is junk. */
 +    ke = pi ? pi->driverPrivate : NULL;
 +    if (!pi || (uintptr_t)ke < 0x10000) {
@@ -64,15 +58,12 @@ Two fixes:
 +    }
 +
      n = read(evdevPort, &events, NUM_EVENTS * sizeof(struct input_event));
-
-@@ -298,11 +308,18 @@ EvdevPtrEnable(KdPointerInfo * pi)
--    if (!KdRegisterFd(fd, EvdevPtrRead, pi)) {
--        free(ke);
--        close(fd);
--        return BadAlloc;
--    }
--    pi->driverPrivate = ke;
--    ke->fd = fd;
+     if (n <= 0) {
+         if (errno == ENODEV)
+@@ -297,13 +313,20 @@
+             return BadValue;
+         }
+     }
 +    /* IMPORTANT: install driverPrivate BEFORE KdRegisterFd.  The fd
 +     * is in the select set the moment KdRegisterFd returns, so an
 +     * input event arriving in the window between RegisterFd and
@@ -81,12 +72,14 @@ Two fixes:
 +     * and crashes the server at `ke->rel[...]`. */
 +    ke->fd = fd;
 +    pi->driverPrivate = ke;
-+    if (!KdRegisterFd(fd, EvdevPtrRead, pi)) {
+     if (!KdRegisterFd(fd, EvdevPtrRead, pi)) {
 +        pi->driverPrivate = NULL;
-+        free(ke);
-+        close(fd);
-+        return BadAlloc;
-+    }
-
+         free(ke);
+         close(fd);
+         return BadAlloc;
+     }
+-    pi->driverPrivate = ke;
+-    ke->fd = fd;
+ 
      return Success;
  }

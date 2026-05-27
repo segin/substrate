@@ -5,7 +5,7 @@ Upstream kdrive sets `kdAllowZap = TRUE` when `-zap` is on the
 command line but no code path ever reads it.  Ctrl+Alt+Backspace
 therefore does nothing.
 
-For the chord to actually trigger XkbSA_Terminate → GiveUp(), the
+For the chord to actually trigger XkbSA_Terminate -> GiveUp(), the
 XKB keymap has to have the `terminate:ctrl_alt_bksp` option enabled.
 xfree86 does it through xorg.conf's ServerFlags or implicit defaults;
 kdrive needs an explicit hookup.
@@ -17,7 +17,7 @@ evdev-keyboard fallback (0012) and any user-supplied -keybd line.
 
 --- a/hw/kdrive/src/kinput.c
 +++ b/hw/kdrive/src/kinput.c
-@@ -889,7 +889,28 @@ KdNewKeyboard(void)
+@@ -889,7 +889,27 @@
      ki->xkbModel = strdup(XKB_DFLT_MODEL);
      ki->xkbLayout = strdup(XKB_DFLT_LAYOUT);
      ki->xkbVariant = strdup(XKB_DFLT_VARIANT);
@@ -25,7 +25,7 @@ evdev-keyboard fallback (0012) and any user-supplied -keybd line.
 +    /* If -zap was passed on the command line, wire up the XKB
 +     * `terminate:ctrl_alt_bksp` option so Ctrl+Alt+Backspace actually
 +     * binds to XkbSA_Terminate and reaches XkbDDXTerminateServer.
-+     * Upstream kdrive sets kdAllowZap but never reads it — this is
++     * Upstream kdrive sets kdAllowZap but never reads it -- this is
 +     * the missing piece. */
 +    if (kdAllowZap) {
 +        const char *base = XKB_DFLT_OPTIONS ? XKB_DFLT_OPTIONS : "";
@@ -43,6 +43,6 @@ evdev-keyboard fallback (0012) and any user-supplied -keybd line.
 +    } else {
 +        ki->xkbOptions = strdup(XKB_DFLT_OPTIONS);
 +    }
-
+ 
      return ki;
  }

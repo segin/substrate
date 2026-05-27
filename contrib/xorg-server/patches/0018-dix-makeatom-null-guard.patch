@@ -2,9 +2,9 @@ From: substrate
 Subject: dix: MakeAtom rejects NULL/low-junk string
 
 Kernel TRAP backtrace caught Xfbdev SIGSEGVing in MakeAtom at
-dix/atom.c:85 (`fp = fp * 27 + string[i]`) with addr=0x0 — caller
-is libXfont's bdfForceMakeAtom(charName, NULL) at bdfread.c:355
-parsing a misc-fixed BDF, where `charName` came out of:
+dix/atom.c (`fp = fp * 27 + string[i]`) with addr=0x0 -- caller
+is libXfont's bdfForceMakeAtom(charName, NULL) parsing a misc-fixed
+BDF, where `charName` came out of:
 
     if (sscanf((char *)line, "STARTCHAR %99s", charName) != 1) ...
     bitmapExtra->glyphNames[ndx] = bdfForceMakeAtom(charName, NULL);
@@ -21,14 +21,15 @@ and crashing the X server.
 
 --- a/dix/atom.c
 +++ b/dix/atom.c
-@@ -76,6 +76,18 @@ MakeAtom(const char *string, unsigned len, Bool makeit)
+@@ -80,6 +80,18 @@
+     int comp;
      unsigned int fp = 0;
-
+ 
 +    /* Substrate hardening: a caller passing a NULL or low-junk
 +     * pointer (observed from libXfont's bdfForceMakeAtom when
 +     * sscanf doesn't fill the charName buffer) drives this loop
 +     * into a NULL read at string[i].  Refuse the lookup and let
-+     * the caller continue with None — visible "missing atom"
++     * the caller continue with None -- visible "missing atom"
 +     * artifact beats a SIGSEGV during font init. */
 +    if ((uintptr_t)string < 0x10000) {
 +        ErrorF("MakeAtom: refusing junk string=%p len=%u\n",
@@ -39,4 +40,3 @@ and crashing the X server.
      np = &atomRoot;
      for (i = 0; i < (len + 1) / 2; i++) {
          fp = fp * 27 + string[i];
-EOF_PATCH
