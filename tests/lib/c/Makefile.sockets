@@ -40,7 +40,7 @@ else
 endif
 
 TESTS = torture_unix torture_afunix_poll torture_malloc torture_evdev \
-        torture_x11_shape torture_sigalrm
+        torture_x11_shape torture_sigalrm torture_heap_stdio
 
 all: $(TESTS)
 
@@ -74,6 +74,17 @@ torture_x11_shape: torture_x11_shape.c
 # restore, kern_setitimer accounting) might explain Xfbdev's
 # SIGALRM-loop trace.
 torture_sigalrm: torture_sigalrm.c
+	$(CC) $(CFLAGS) $(LDFLAGS) $< -o $@
+
+# Combined libc heap + stdio stress.  Aimed at the substrate libc
+# allocator + stdio interaction that produced the Xfbdev "calloc
+# inside XkmInsureSize -> NULL deref in split_block" and the
+# "fread -> memcpy(dst=0x1)" crashes.  Eight scenarios cover the
+# split_block edge cases, fgets line reads, realloc grow/shrink,
+# fopen/fclose churn, ungetc, the XKB allocation shape, an
+# alloc-free-alloc cycle on the 144-byte size class, and a big-
+# buffer fread.
+torture_heap_stdio: torture_heap_stdio.c
 	$(CC) $(CFLAGS) $(LDFLAGS) $< -o $@
 
 clean:
