@@ -18,22 +18,35 @@ fi
 
 MACVTAP=${MACVTAP:-macvtap0}
 
-# --gfx adds vga=1024x768@32 to the kernel cmdline and forces -vga std
-# so substrate's BGA fb driver brings up a graphical framebuffer.
-# Without --gfx the rest of the qemu command line is unchanged
-# (hardware text mode through qemu's default display).
+# Flags:
+#   --gfx    add vga=1024x768@32 + -vga std so substrate's BGA fb driver
+#            brings up a graphical framebuffer.  Without --gfx, qemu's
+#            default display (hardware text mode) is used.
+#   --kvm    opt in to -accel kvm.  Default is TCG software emulation
+#            because KVM has a coherence bug on i386 that produces
+#            transient single-byte read corruption right after a
+#            SIGALRM is delivered to a userland handler (reproduced
+#            by tests/lib/c/torture_heap_stdio sc9f; passes under
+#            TCG).  Use --kvm when you specifically want speed and
+#            understand the risk; otherwise leave it off.
 GFX=0
+KVM=0
 for arg in "$@"; do
     case "$arg" in
         --gfx) GFX=1 ;;
+        --kvm) KVM=1 ;;
     esac
 done
 
 APPEND="root=/dev/storage/sata0 trap serial_debug"
 GFX_ARGS=""
+ACCEL_ARG=""
 if [ "$GFX" -eq 1 ]; then
     APPEND="$APPEND vga=1024x768@32"
     GFX_ARGS="-vga std"
+fi
+if [ "$KVM" -eq 1 ]; then
+    ACCEL_ARG="-accel kvm"
 fi
 
 cleanup() {
@@ -96,7 +109,7 @@ fi
 
 # Not exec'd: when qemu exits the script resumes and the EXIT trap
 # tears the macvtap down.
-qemu-system-i386 -cpu qemu32,+sse,+sse2 -accel kvm \
+qemu-system-i386 -cpu qemu32,+sse,+sse2 $ACCEL_ARG \
   -drive file=rootfs.img,format=raw,if=none,id=drive0 \
   -device ich9-ahci,id=sata0 \
   -device ide-hd,bus=sata0.0,unit=0,drive=drive0 \
