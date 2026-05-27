@@ -409,22 +409,68 @@ static int sc8_large_buffer(void) {
     return 0;
 }
 
-/* sc9: SIGALRM hammer during alloc/free.  Install a periodic SIGALRM
- * at 5 ms and run heavy heap churn for 2 seconds.  Signal-handler
- * entry/exit + sigreturn happens MID malloc, exercising whatever
- * race the kernel has between user-mode heap state and the
- * signal-delivery path.  If sendsig clobbers a register that
- * setjmp/malloc relies on, we'll see it. */
+/* sc9: SIGALRM during malloc/free.  Periodic 5ms timer over 2s of
+ * heap churn.  When a canary mismatch happens we want detailed
+ * forensics: which byte was wrong, what value it became, ±16 bytes
+ * of context (so we can spot sigframe-like values: saved EIP in
+ * code-segment range, segment selectors 0x1b/0x23, EFLAGS=0x202,
+ * SIGALRM=14, etc.), and the block address (to compare against the
+ * user stack range we'd expect a sigframe write to land in).  Keep
+ * running after the first hit, up to MAX_REPORTS, so we can see
+ * whether the corruption is at a consistent offset or scattered.
+ *
+ * Substrate baseline before the malloc lock: this scenario was
+ * masked by the unlocked-heap crashes.  Now that the lock is in
+ * place, the remaining bug shows: canary corruption after a couple
+ * of SIGALRMs, well inside the live[] table. */
 static volatile sig_atomic_t g_sc9_ticks;
 static void sc9_handler(int sig) { (void)sig; g_sc9_ticks++; }
 
+#define SC9_MAX_REPORTS 4
+
+static void sc9_dump_corruption(long ops, int slot, void *p, size_t sz,
+                                int off, uint8_t got, uint8_t want,
+                                int ticks)
+{
+    uint8_t *b = p;
+    fprintf(stderr,
+        "  CORRUPT: op=%ld slot=%d ticks=%d block=%p sz=%zu off=%d "
+        "got=0x%02x want=0x%02x\n",
+        ops, slot, ticks, p, sz, off, got, want);
+
+    /* Hex dump 32 bytes centred on the mismatch (clipped to block). */
+    int lo = off - 16; if (lo < 0) lo = 0;
+    int hi = off + 16; if (hi > (int)sz) hi = (int)sz;
+    fprintf(stderr, "    bytes %d..%d:", lo, hi - 1);
+    for (int i = lo; i < hi; i++) {
+        fprintf(stderr, "%s%02x", i == off ? " *" : " ", b[i]);
+    }
+    fprintf(stderr, "\n");
+
+    /* Also interpret the surrounding bytes as little-endian dwords;
+     * sigframe contents (saved EIP, segment selectors, EFLAGS) would
+     * show up here as recognizable 32-bit patterns. */
+    int dlo = (off & ~3) - 8; if (dlo < 0) dlo = 0;
+    int dhi = dlo + 24;       if (dhi > (int)sz - 3) dhi = (int)sz - 3;
+    fprintf(stderr, "    dwords @off:");
+    for (int i = dlo; i + 3 < dhi; i += 4) {
+        uint32_t v = (uint32_t)b[i]      | (uint32_t)b[i+1] << 8 |
+                     (uint32_t)b[i+2]<<16 | (uint32_t)b[i+3]<<24;
+        fprintf(stderr, " [%d]=0x%08x", i, v);
+    }
+    fprintf(stderr, "\n");
+}
+
+static int sc9_use_ign = 0;
 static int sc9_sigalrm_during_alloc(void) {
     struct sigaction sa;
     memset(&sa, 0, sizeof(sa));
-    sa.sa_handler = sc9_handler;
+    sa.sa_handler = sc9_use_ign ? SIG_IGN : sc9_handler;
     sigemptyset(&sa.sa_mask);
     sa.sa_flags = 0;
     if (sigaction(SIGALRM, &sa, NULL) < 0) FAIL("sigaction");
+    fprintf(stderr, "  note: sc9 handler = %s\n",
+            sc9_use_ign ? "SIG_IGN" : "sc9_handler");
 
     struct itimerval it = {
         .it_value    = { .tv_sec = 0, .tv_usec = 5000 },
@@ -437,16 +483,48 @@ static int sc9_sigalrm_during_alloc(void) {
     size_t *sizes = calloc(LIVE_CAP, sizeof(*sizes));
     if (!live || !sizes) FAIL("harness calloc");
 
+    fprintf(stderr, "  note: sc9 live array at %p, sizes at %p, "
+                    "g_sc9_ticks at %p\n",
+            (void *)live, (void *)sizes, (void *)&g_sc9_ticks);
+
     g_sc9_ticks = 0;
     struct timespec t0, t1;
     clock_gettime(CLOCK_MONOTONIC, &t0);
     long ops = 0;
+    int reports = 0;
     for (;;) {
         int slot = (int)(rng_next() % LIVE_CAP);
         if (live[slot]) {
-            if (!canary_check(live[slot], sizes[slot]))
-                FAIL("canary at op %ld slot %d sz=%zu ticks=%d",
-                     ops, slot, sizes[slot], (int)g_sc9_ticks);
+            /* Walk the canary manually so we get the first mismatch
+             * offset.  canary_check returns 0/1 only. */
+            uint8_t *b = live[slot];
+            size_t sz = sizes[slot];
+            int bad_off = -1;
+            uint8_t bad_got = 0, bad_want = 0;
+            for (size_t i = 0; i < sz; i++) {
+                uint8_t want = canary_byte(live[slot], i);
+                if (b[i] != want) {
+                    bad_off = (int)i; bad_got = b[i]; bad_want = want;
+                    break;
+                }
+            }
+            if (bad_off >= 0) {
+                sc9_dump_corruption(ops, slot, live[slot], sz,
+                                    bad_off, bad_got, bad_want,
+                                    (int)g_sc9_ticks);
+                if (++reports >= SC9_MAX_REPORTS) {
+                    /* Disarm timer + drain + fail */
+                    memset(&it, 0, sizeof(it));
+                    setitimer(ITIMER_REAL, &it, NULL);
+                    for (int i = 0; i < LIVE_CAP; i++) if (live[i]) free(live[i]);
+                    free(live); free(sizes);
+                    FAIL("hit SC9_MAX_REPORTS (%d) corruptions",
+                         SC9_MAX_REPORTS);
+                }
+                /* Refill so subsequent canary_check on this block
+                 * passes (we want to keep going). */
+                canary_fill(live[slot], sz);
+            }
             free(live[slot]); live[slot] = NULL;
         } else {
             size_t sz = rng_range(8, 1024);
@@ -467,9 +545,18 @@ static int sc9_sigalrm_during_alloc(void) {
     setitimer(ITIMER_REAL, &it, NULL);
     for (int i = 0; i < LIVE_CAP; i++) if (live[i]) free(live[i]);
     free(live); free(sizes);
-    fprintf(stderr, "  note: sc9 did %ld ops in 2s with %d SIGALRMs\n",
-            ops, (int)g_sc9_ticks);
-    return 0;
+    fprintf(stderr, "  note: sc9 did %ld ops in 2s with %d SIGALRMs, %d corruptions\n",
+            ops, (int)g_sc9_ticks, reports);
+    return reports > 0 ? 1 : 0;
+}
+
+/* sc9b: same as sc9 but installs SIG_IGN.  Discriminator: does the
+ * corruption persist when no user-mode handler runs? */
+static int sc9b_sigalrm_ign(void) {
+    sc9_use_ign = 1;
+    int r = sc9_sigalrm_during_alloc();
+    sc9_use_ign = 0;
+    return r;
 }
 
 /* sc10: adversarial fragmentation.  Alternating big + small allocs,
@@ -595,6 +682,7 @@ static struct sc tests[] = {
     { "sc7_alloc_free_cycle",       sc7_alloc_free_cycle   },
     { "sc8_large_buffer",           sc8_large_buffer       },
     { "sc9_sigalrm_during_alloc",   sc9_sigalrm_during_alloc },
+    { "sc9b_sigalrm_ign",           sc9b_sigalrm_ign       },
     { "sc10_fragmentation_storm",   sc10_fragmentation_storm },
     { "sc11_realloc_storm",         sc11_realloc_storm     },
     { "sc12_fork_storm",            sc12_fork_storm        },
@@ -619,9 +707,15 @@ static int run_scenario(size_t i) {
 }
 
 int main(int argc, char **argv) {
-    (void)argc; (void)argv;
+    /* Optional: argv[1] is a scenario-name substring or "all".
+     * Useful for the substrate test cycle where sc6's heavy canary
+     * work + locked allocator eats the 45s budget by itself. */
+    const char *only = (argc > 1) ? argv[1] : NULL;
+    if (only && !strcmp(only, "all")) only = NULL;
+
     int pass = 0, fail = 0, crash = 0;
     for (size_t i = 0; i < sizeof(tests)/sizeof(tests[0]); i++) {
+        if (only && !strstr(tests[i].name, only)) continue;
         fprintf(stderr, "[%s] running...\n", tests[i].name);
         int r = run_scenario(i);
         if      (r == 0) { pass++;  fprintf(stderr, "[%s] PASS\n",  tests[i].name); }
