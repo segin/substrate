@@ -641,6 +641,72 @@ static int sc9c_trace_mode(void) {
     return reports > 0 ? 1 : 0;
 }
 
+/* sc9e: verify-on-write canary fill.  After writing each byte,
+ * immediately re-read and confirm.  If the corruption is happening
+ * DURING canary_fill (because a SIGALRM lands mid-loop and
+ * something on the kernel return path zaps a byte we just wrote),
+ * we'll catch it within microseconds of the write rather than at
+ * the next canary_check long after.  If the corruption only
+ * appears LATER (between fill and check), sc9e will still PASS
+ * locally and we know it's a delayed effect. */
+static int sc9e_verify_on_write(void) {
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = sc9_handler;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;
+    if (sigaction(SIGALRM, &sa, NULL) < 0) FAIL("sigaction");
+
+    struct itimerval it = {
+        .it_value    = { .tv_sec = 0, .tv_usec = 5000 },
+        .it_interval = { .tv_sec = 0, .tv_usec = 5000 }
+    };
+    if (setitimer(ITIMER_REAL, &it, NULL) < 0) FAIL("setitimer");
+
+    g_sc9_ticks = 0;
+    int reports = 0;
+    long ops = 0;
+    /* Allocate a 1 KiB block ONCE; reuse forever.  Fill it byte by
+     * byte, verifying each write.  If the verify fails, the
+     * corruption happened in the very small window between the
+     * STORE instruction and the immediately following LOAD. */
+    uint8_t *p = malloc(1024);
+    if (!p) FAIL("malloc");
+
+    struct timespec t0, t1;
+    clock_gettime(CLOCK_MONOTONIC, &t0);
+    long ms = 0;
+    while (ms < 2000 && reports < SC9_MAX_REPORTS) {
+        for (size_t i = 0; i < 1024; i++) {
+            uint8_t want = canary_byte(p, i);
+            p[i] = want;
+            /* Read back immediately.  Use `volatile` to defeat the
+             * optimiser folding the load with the just-done store. */
+            uint8_t got = ((volatile uint8_t *)p)[i];
+            if (got != want) {
+                sc9_dump_corruption(ops, /*slot*/-1, p, 1024,
+                                    (int)i, got, want, (int)g_sc9_ticks);
+                reports++;
+                if (reports >= SC9_MAX_REPORTS) break;
+                /* Restore so we can keep going. */
+                p[i] = want;
+            }
+        }
+        ops++;
+        if ((ops & 0x3F) == 0) {
+            clock_gettime(CLOCK_MONOTONIC, &t1);
+            ms = (t1.tv_sec - t0.tv_sec) * 1000 +
+                 (t1.tv_nsec - t0.tv_nsec) / 1000000;
+        }
+    }
+    memset(&it, 0, sizeof(it));
+    setitimer(ITIMER_REAL, &it, NULL);
+    fprintf(stderr, "  note: sc9e did %ld fills (1KB each) with %d SIGALRMs, %d immediate mismatches\n",
+            ops, (int)g_sc9_ticks, reports);
+    free(p);
+    return reports > 0 ? 1 : 0;
+}
+
 /* sc9d: handler that calls _exit(42) on first SIGALRM.  If the
  * corruption happens during the iret-to-handler transition (i.e.
  * before the handler body runs at all), we'll still see byte
@@ -820,6 +886,7 @@ static struct sc tests[] = {
     { "sc9b_sigalrm_ign",           sc9b_sigalrm_ign       },
     { "sc9c_trace_mode",            sc9c_trace_mode        },
     { "sc9d_exit_in_handler",       sc9d_exit_in_handler   },
+    { "sc9e_verify_on_write",       sc9e_verify_on_write   },
     { "sc10_fragmentation_storm",   sc10_fragmentation_storm },
     { "sc11_realloc_storm",         sc11_realloc_storm     },
     { "sc12_fork_storm",            sc12_fork_storm        },
