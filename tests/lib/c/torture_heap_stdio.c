@@ -771,15 +771,28 @@ static int sc9f_fill_once_verify_loop(void) {
                 uintptr_t pg  = va & ~0xFFFu;
                 int       po  = (int)(va & 0xFFFu);
                 int       pgi = (int)i / 4096;
-                per_page_hits[pgi]++;
+                if (pgi < N_PAGES) per_page_hits[pgi]++;
+
+                /* Re-read the same byte tightly to measure self-heal
+                 * speed.  Each load goes through TLB; if a stale-page
+                 * read returns wrong data on first load but next load
+                 * picks up the correct mapping, we'll see the heal-
+                 * count immediately. */
+                int wrong_reads = 1;
+                uint8_t reread = got;
+                for (int k = 0; k < 64; k++) {
+                    reread = ((volatile uint8_t *)p)[i];
+                    if (reread == want) break;
+                    wrong_reads++;
+                }
 
                 int oscillated = (last_off == (int)i && last_got != got);
                 fprintf(stderr,
                     "  CORRUPT pass=%ld i=%zu va=0x%lx page=0x%lx pgoff=%d "
-                    "got=0x%02x want=0x%02x ticks=%d %s\n",
+                    "got=0x%02x want=0x%02x ticks=%d wrong_reads=%d %s\n",
                     passes, i, (unsigned long)va,
                     (unsigned long)pg, po, got, want,
-                    (int)g_sc9_ticks,
+                    (int)g_sc9_ticks, wrong_reads,
                     oscillated ? "OSCILLATED" : (last_off == (int)i ? "PERSISTENT" : ""));
 
                 last_off = (int)i;
