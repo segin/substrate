@@ -37,7 +37,7 @@ echo "==> Booting substrate with init=$INIT_PATH (timeout ${TIMEOUT}s)"
 #                    -no-reboot with high I/O load.
 # -append init=...   substrate honors init= in cmdline (sys/kern/main.c:712)
 timeout "$TIMEOUT" qemu-system-i386 \
-    -cpu qemu32,+sse,+sse2 \
+    -cpu qemu32,+sse,+sse2 -accel kvm \
     -kernel sys/kernel.multiboot \
     -m 128M \
     -display none \

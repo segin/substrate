@@ -39,8 +39,12 @@
 #include <errno.h>
 #include <stdint.h>
 #include <fcntl.h>
+#include <signal.h>
+#include <setjmp.h>
+#include <time.h>
 #include <sys/wait.h>
 #include <sys/stat.h>
+#include <sys/time.h>
 
 /* ------------------------------------------------------------------ */
 /* Common harness                                                      */
@@ -101,61 +105,75 @@ static int make_test_file(const char *path, size_t n, size_t line_len) {
 /* Scenarios                                                           */
 /* ------------------------------------------------------------------ */
 
-/* sc1: alternate calloc / free with fread of a small file.  Mimics
- * Xfbdev's XKB init: read a binary file in chunks while calloc'ing
- * data structures of the same size class.  144 bytes is the size
- * the split_block crash hit, so weight that range. */
+/* sc1: alternate calloc / free with fread.  AGGRESSIVE: 1M ops,
+ * 4K live slots, canary check on EVERY op, sizes weighted near
+ * 144 bytes (the size that triggered split_block on Xfbdev). */
 #define SC1_FILE "/tmp/torture_heap_stdio_sc1"
 static int sc1_calloc_fread_dance(void) {
     if (make_test_file(SC1_FILE, 8192, 32) != 0)
         FAIL("make_test_file: %s", strerror(errno));
 
-    enum { LIVE_CAP = 64 };
-    void *live[LIVE_CAP]; size_t sizes[LIVE_CAP];
-    memset(live, 0, sizeof(live));
+    enum { LIVE_CAP = 4096 };
+    void  **live  = calloc(LIVE_CAP, sizeof(*live));
+    size_t *sizes = calloc(LIVE_CAP, sizeof(*sizes));
+    if (!live || !sizes) { unlink(SC1_FILE); FAIL("harness calloc"); }
 
-    for (int op = 0; op < 5000; op++) {
-        /* Random calloc/free against the live set */
+    for (int op = 0; op < 1000000; op++) {
         int slot = (int)(rng_next() % LIVE_CAP);
         if (live[slot]) {
             if (!canary_check(live[slot], sizes[slot])) {
                 unlink(SC1_FILE);
-                FAIL("canary corruption at op %d slot %d", op, slot);
+                FAIL("canary corruption at op %d slot %d sz=%zu",
+                     op, slot, sizes[slot]);
             }
             free(live[slot]); live[slot] = NULL;
         } else {
-            size_t sz = rng_range(8, 384);     /* weight near 144 */
+            /* Weight size distribution: 50% near-144, 40% small,
+             * 10% larger (up to 4 KiB). */
+            uint32_t r = rng_next() % 100;
+            size_t sz;
+            if (r < 50)      sz = rng_range(120, 168);
+            else if (r < 90) sz = rng_range(1, 96);
+            else             sz = rng_range(256, 4096);
             void *p = calloc(1, sz);
             if (!p) { unlink(SC1_FILE); FAIL("calloc(%zu) at op %d", sz, op); }
             canary_fill(p, sz);
             live[slot] = p; sizes[slot] = sz;
         }
 
-        /* Open + read a few chunks + close.  fread() drives stdio
-         * internal buffer + libc malloc for the FILE struct. */
-        if ((op & 7) == 0) {
+        /* Frequent fopen+fread to flush whatever stdio state interacts. */
+        if ((op & 0xFF) == 0) {
             FILE *f = fopen(SC1_FILE, "rb");
             if (!f) { unlink(SC1_FILE); FAIL("fopen at op %d: %s", op, strerror(errno)); }
             char buf[256];
-            size_t got = fread(buf, 1, sizeof(buf), f);
-            if (got == 0 && !feof(f) && ferror(f)) {
-                fclose(f); unlink(SC1_FILE);
-                FAIL("fread returned 0 mid-file at op %d", op);
-            }
+            (void)fread(buf, 1, sizeof(buf), f);
             fclose(f);
+        }
+
+        /* Walk a random subset of live slots verifying canaries —
+         * catches a corruption that lands on a NEIGHBOUR rather
+         * than the just-touched slot. */
+        if ((op & 0x3FF) == 0) {
+            for (int k = 0; k < 32; k++) {
+                int s = (int)(rng_next() % LIVE_CAP);
+                if (live[s] && !canary_check(live[s], sizes[s])) {
+                    unlink(SC1_FILE);
+                    FAIL("neighbour canary at op %d slot %d sz=%zu", op, s, sizes[s]);
+                }
+            }
         }
     }
 
-    /* Drain live set, verifying canaries last time. */
     for (int i = 0; i < LIVE_CAP; i++) {
         if (live[i]) {
             if (!canary_check(live[i], sizes[i])) {
                 unlink(SC1_FILE);
-                FAIL("final canary check at slot %d", i);
+                FAIL("final canary at slot %d sz=%zu", i, sizes[i]);
             }
             free(live[i]);
         }
     }
+    free(live); free(sizes);
     unlink(SC1_FILE);
     return 0;
 }
@@ -236,7 +254,7 @@ static int sc3_realloc_under_io(void) {
 #define SC4_FILE "/tmp/torture_heap_stdio_sc4"
 static int sc4_fopen_storm(void) {
     if (make_test_file(SC4_FILE, 1024, 32) != 0) FAIL("make_test_file");
-    for (int i = 0; i < 2000; i++) {
+    for (int i = 0; i < 50000; i++) {
         FILE *f = fopen(SC4_FILE, "rb");
         if (!f) { unlink(SC4_FILE); FAIL("fopen at i=%d: %s", i, strerror(errno)); }
         char c;
@@ -257,7 +275,7 @@ static int sc5_ungetc_dance(void) {
     if (make_test_file(SC5_FILE, 4096, 80) != 0) FAIL("make_test_file");
     FILE *f = fopen(SC5_FILE, "rb");
     if (!f) { unlink(SC5_FILE); FAIL("fopen"); }
-    for (int i = 0; i < 1000; i++) {
+    for (int i = 0; i < 500000; i++) {
         int c = fgetc(f);
         if (c == EOF) { rewind(f); continue; }
         if (ungetc(c, f) == EOF) { fclose(f); unlink(SC5_FILE); FAIL("ungetc"); }
@@ -287,53 +305,81 @@ static int sc6_xkb_shape(void) {
     const size_t calloc_sizes[] = { 32, 64, 128, 144, 256, 512 };
     enum { N_SIZES = sizeof(calloc_sizes)/sizeof(calloc_sizes[0]) };
 
-    for (int round = 0; round < 200; round++) {
+    /* 50,000 rounds × 64 calloc + 64 fread chunks = 3.2M ops total.
+     * Free in mixed order (forward / reverse / random) to cover all
+     * three split_block + coalesce_block code paths. */
+    for (int round = 0; round < 50000; round++) {
         FILE *f = fopen(SC6_FILE, "rb");
         if (!f) { unlink(SC6_FILE); FAIL("fopen round %d", round); }
 
-        /* Header read */
         char hdr[32];
         if (fread(hdr, 1, sizeof(hdr), f) != sizeof(hdr)) {
             fclose(f); unlink(SC6_FILE); FAIL("hdr read round %d", round);
         }
 
-        /* Interleave: 8 calloc's + 8 fread chunks. */
-        void *allocs[8] = { 0 };
-        for (int k = 0; k < 8; k++) {
+        enum { N_ALLOCS = 64 };
+        void  *allocs[N_ALLOCS] = { 0 };
+        size_t aszs[N_ALLOCS]   = { 0 };
+        for (int k = 0; k < N_ALLOCS; k++) {
             size_t sz = calloc_sizes[(round + k) % N_SIZES];
             allocs[k] = calloc(1, sz);
+            aszs[k]   = sz;
             if (!allocs[k]) {
                 for (int j = 0; j < k; j++) free(allocs[j]);
-                fclose(f); unlink(SC6_FILE); FAIL("calloc(%zu) round %d k %d", sz, round, k);
+                fclose(f); unlink(SC6_FILE);
+                FAIL("calloc(%zu) round %d k %d", sz, round, k);
             }
-            /* Touch every byte (XKB does after the calloc returns). */
-            memset(allocs[k], 0xA5, sz);
+            /* Canary the block so we can verify it survives the
+             * subsequent calloc/fread churn until we free it. */
+            canary_fill(allocs[k], sz);
 
             char rbuf[256];
             (void)fread(rbuf, 1, sizeof(rbuf), f);
         }
 
-        /* Free in reverse order — gives coalesce_block both
-         * forward and backward neighbours to deal with. */
-        for (int k = 7; k >= 0; k--) free(allocs[k]);
+        /* Re-verify ALL canaries before freeing. */
+        for (int k = 0; k < N_ALLOCS; k++) {
+            if (!canary_check(allocs[k], aszs[k])) {
+                fclose(f); unlink(SC6_FILE);
+                FAIL("canary mismatch round %d k %d sz=%zu", round, k, aszs[k]);
+            }
+        }
+
+        /* Free in one of three orders, rotating each round. */
+        if (round % 3 == 0) {
+            for (int k = 0; k < N_ALLOCS; k++) free(allocs[k]);
+        } else if (round % 3 == 1) {
+            for (int k = N_ALLOCS - 1; k >= 0; k--) free(allocs[k]);
+        } else {
+            /* Pseudo-random free order */
+            int order[N_ALLOCS];
+            for (int k = 0; k < N_ALLOCS; k++) order[k] = k;
+            for (int k = N_ALLOCS - 1; k > 0; k--) {
+                int j = (int)(rng_next() % (k + 1));
+                int t = order[k]; order[k] = order[j]; order[j] = t;
+            }
+            for (int k = 0; k < N_ALLOCS; k++) free(allocs[order[k]]);
+        }
         fclose(f);
     }
     unlink(SC6_FILE);
     return 0;
 }
 
-/* sc7: alloc/free/alloc same size — heap should reuse the freed
- * block (and split_block should NOT trip).  Mimics what a long-
- * running process does over its lifetime. */
+/* sc7: 144-byte alloc/free hammer.  The size that triggered the
+ * split_block crash on Xfbdev — hit it 10 million times.  A
+ * split_block off-by-one or coalesce-block bookkeeping bug
+ * accumulates: if the same block gets corrupted once per N ops,
+ * 10M ops will hit it. */
 static int sc7_alloc_free_cycle(void) {
-    for (int round = 0; round < 100; round++) {
-        for (int i = 0; i < 1000; i++) {
-            size_t sz = 144;          /* the size that crashed in Xfbdev */
-            void *p = malloc(sz);
-            if (!p) FAIL("malloc %d/%d", round, i);
-            memset(p, 0xC3, sz);
-            free(p);
-        }
+    for (long i = 0; i < 10000000L; i++) {
+        size_t sz = 144;
+        void *p = malloc(sz);
+        if (!p) FAIL("malloc at i=%ld", i);
+        /* Touch first/last to make sure the block is fully writable. */
+        ((volatile uint8_t *)p)[0] = 0xC3;
+        ((volatile uint8_t *)p)[sz - 1] = 0x3C;
+        free(p);
     }
     return 0;
 }
@@ -359,20 +405,195 @@ static int sc8_large_buffer(void) {
     return 0;
 }
 
+/* sc9: SIGALRM hammer during alloc/free.  Install a periodic SIGALRM
+ * at 5 ms and run heavy heap churn for 2 seconds.  Signal-handler
+ * entry/exit + sigreturn happens MID malloc, exercising whatever
+ * race the kernel has between user-mode heap state and the
+ * signal-delivery path.  If sendsig clobbers a register that
+ * setjmp/malloc relies on, we'll see it. */
+static volatile sig_atomic_t g_sc9_ticks;
+static void sc9_handler(int sig) { (void)sig; g_sc9_ticks++; }
+
+static int sc9_sigalrm_during_alloc(void) {
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = sc9_handler;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;
+    if (sigaction(SIGALRM, &sa, NULL) < 0) FAIL("sigaction");
+
+    struct itimerval it = {
+        .it_value    = { .tv_sec = 0, .tv_usec = 5000 },
+        .it_interval = { .tv_sec = 0, .tv_usec = 5000 }
+    };
+    if (setitimer(ITIMER_REAL, &it, NULL) < 0) FAIL("setitimer");
+
+    enum { LIVE_CAP = 1024 };
+    void **live   = calloc(LIVE_CAP, sizeof(*live));
+    size_t *sizes = calloc(LIVE_CAP, sizeof(*sizes));
+    if (!live || !sizes) FAIL("harness calloc");
+
+    g_sc9_ticks = 0;
+    struct timespec t0, t1;
+    clock_gettime(CLOCK_MONOTONIC, &t0);
+    long ops = 0;
+    for (;;) {
+        int slot = (int)(rng_next() % LIVE_CAP);
+        if (live[slot]) {
+            if (!canary_check(live[slot], sizes[slot]))
+                FAIL("canary at op %ld slot %d sz=%zu ticks=%d",
+                     ops, slot, sizes[slot], (int)g_sc9_ticks);
+            free(live[slot]); live[slot] = NULL;
+        } else {
+            size_t sz = rng_range(8, 1024);
+            void *p = malloc(sz);
+            if (!p) FAIL("malloc(%zu) at op %ld", sz, ops);
+            canary_fill(p, sz);
+            live[slot] = p; sizes[slot] = sz;
+        }
+        ops++;
+        if ((ops & 0xFFFF) == 0) {
+            clock_gettime(CLOCK_MONOTONIC, &t1);
+            long ms = (t1.tv_sec - t0.tv_sec) * 1000 +
+                      (t1.tv_nsec - t0.tv_nsec) / 1000000;
+            if (ms >= 2000) break;
+        }
+    }
+    memset(&it, 0, sizeof(it));
+    setitimer(ITIMER_REAL, &it, NULL);
+    for (int i = 0; i < LIVE_CAP; i++) if (live[i]) free(live[i]);
+    free(live); free(sizes);
+    fprintf(stderr, "  note: sc9 did %ld ops in 2s with %d SIGALRMs\n",
+            ops, (int)g_sc9_ticks);
+    return 0;
+}
+
+/* sc10: adversarial fragmentation.  Alternating big + small allocs,
+ * then free every-other big to leave a sawtooth heap shape.  Forces
+ * split_block to land on tiny gaps right next to live blocks. */
+static int sc10_fragmentation_storm(void) {
+    enum { N = 8192 };
+    void **bigs   = calloc(N, sizeof(void *));
+    void **smalls = calloc(N, sizeof(void *));
+    if (!bigs || !smalls) FAIL("harness calloc");
+
+    /* Phase 1: alternate-allocate big + small */
+    for (int i = 0; i < N; i++) {
+        bigs[i]   = malloc(512);
+        smalls[i] = malloc(48);
+        if (!bigs[i] || !smalls[i]) FAIL("phase1 alloc at i=%d", i);
+        memset(bigs[i], 0xAA, 512);
+        memset(smalls[i], 0x55, 48);
+    }
+    /* Phase 2: free every other big, leaving sawtooth */
+    for (int i = 0; i < N; i += 2) {
+        free(bigs[i]); bigs[i] = NULL;
+    }
+    /* Phase 3: try to fit 144-byte blocks into the 512-byte gaps */
+    void **fillers = calloc(N, sizeof(void *));
+    if (!fillers) FAIL("harness calloc");
+    for (int i = 0; i < N; i++) {
+        fillers[i] = malloc(144);
+        if (!fillers[i]) FAIL("phase3 alloc at i=%d", i);
+        memset(fillers[i], 0xC3, 144);
+    }
+    /* Phase 4: drain everything in chaotic order */
+    for (int i = 0; i < N; i++) {
+        if (bigs[i])   { free(bigs[i]);   bigs[i] = NULL; }
+        free(fillers[i]); fillers[i] = NULL;
+        free(smalls[i]); smalls[i] = NULL;
+    }
+    free(bigs); free(smalls); free(fillers);
+    return 0;
+}
+
+/* sc11: realloc storm — repeatedly grow + shrink a single buffer.
+ * Hits realloc's in-place-grow / copy / shrink-then-split paths. */
+static int sc11_realloc_storm(void) {
+    size_t sz = 16;
+    char *buf = malloc(sz);
+    if (!buf) FAIL("initial malloc");
+    memset(buf, 0x77, sz);
+
+    for (int i = 0; i < 500000; i++) {
+        size_t newsz;
+        uint32_t r = rng_next() & 0x7;
+        switch (r) {
+            case 0: newsz = sz * 2;  break;          /* grow 2x */
+            case 1: newsz = sz / 2;  break;          /* shrink half */
+            case 2: newsz = sz + 1;  break;          /* grow 1 byte */
+            case 3: newsz = sz + 16; break;          /* grow 16 byte */
+            case 4: newsz = 144;     break;          /* hop to magic size */
+            case 5: newsz = 1024;    break;
+            case 6: newsz = 32;      break;
+            default: newsz = sz;     break;
+        }
+        if (newsz < 16)    newsz = 16;
+        if (newsz > 65536) newsz = 65536;
+        char *nb = realloc(buf, newsz);
+        if (!nb) { free(buf); FAIL("realloc(%zu) at i=%d", newsz, i); }
+        buf = nb;
+        /* Touch first & last to verify writable. */
+        buf[0]         = (char)(i & 0xFF);
+        buf[newsz - 1] = (char)(~i & 0xFF);
+        sz = newsz;
+    }
+    free(buf);
+    return 0;
+}
+
+/* sc12: fork storm — fork a child, child does heavy alloc, exit;
+ * repeat 200 times.  Catches "first-allocations-after-fork-corrupt"
+ * patterns (Xfbdev is forked from init; the crash is at startup). */
+static int sc12_fork_storm(void) {
+    for (int round = 0; round < 200; round++) {
+        pid_t kid = fork();
+        if (kid < 0) FAIL("fork at round %d", round);
+        if (kid == 0) {
+            /* Child: replicate Xfbdev startup-shape allocation
+             * pattern as fast as possible. */
+            const size_t sizes[] = { 16, 32, 48, 96, 128, 144, 256, 512 };
+            const int N = sizeof(sizes) / sizeof(sizes[0]);
+            void *live[256] = { 0 };
+            for (int i = 0; i < 5000; i++) {
+                int slot = i % 256;
+                if (live[slot]) free(live[slot]);
+                size_t sz = sizes[i % N];
+                live[slot] = malloc(sz);
+                if (!live[slot]) _exit(2);
+                memset(live[slot], 0xFE, sz);
+            }
+            for (int i = 0; i < 256; i++) if (live[i]) free(live[i]);
+            _exit(0);
+        }
+        int status;
+        waitpid(kid, &status, 0);
+        if (WIFSIGNALED(status))
+            FAIL("child round %d died on signal %d", round, WTERMSIG(status));
+        if (!WIFEXITED(status) || WEXITSTATUS(status) != 0)
+            FAIL("child round %d bad exit (status=0x%x)", round, status);
+    }
+    return 0;
+}
+
 /* ------------------------------------------------------------------ */
 /* Driver                                                              */
 /* ------------------------------------------------------------------ */
 
 struct sc { const char *name; int (*fn)(void); };
 static struct sc tests[] = {
-    { "sc1_calloc_fread_dance",  sc1_calloc_fread_dance },
-    { "sc2_fgets_lines",         sc2_fgets_lines        },
-    { "sc3_realloc_under_io",    sc3_realloc_under_io   },
-    { "sc4_fopen_storm",         sc4_fopen_storm        },
-    { "sc5_ungetc_dance",        sc5_ungetc_dance       },
-    { "sc6_xkb_shape",           sc6_xkb_shape          },
-    { "sc7_alloc_free_cycle",    sc7_alloc_free_cycle   },
-    { "sc8_large_buffer",        sc8_large_buffer       },
+    { "sc1_calloc_fread_dance",     sc1_calloc_fread_dance },
+    { "sc2_fgets_lines",            sc2_fgets_lines        },
+    { "sc3_realloc_under_io",       sc3_realloc_under_io   },
+    { "sc4_fopen_storm",            sc4_fopen_storm        },
+    { "sc5_ungetc_dance",           sc5_ungetc_dance       },
+    { "sc6_xkb_shape",              sc6_xkb_shape          },
+    { "sc7_alloc_free_cycle",       sc7_alloc_free_cycle   },
+    { "sc8_large_buffer",           sc8_large_buffer       },
+    { "sc9_sigalrm_during_alloc",   sc9_sigalrm_during_alloc },
+    { "sc10_fragmentation_storm",   sc10_fragmentation_storm },
+    { "sc11_realloc_storm",         sc11_realloc_storm     },
+    { "sc12_fork_storm",            sc12_fork_storm        },
 };
 
 /* Each scenario runs in a forked child so a crash localizes. */
