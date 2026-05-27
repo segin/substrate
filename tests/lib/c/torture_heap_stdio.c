@@ -822,6 +822,71 @@ static int sc9f_fill_once_verify_loop(void) {
     return reports > 0 ? 1 : 0;
 }
 
+/* sc9g: memset pattern, no canary function.  Fills the block with a
+ * single constant byte (0xA5), then verifies it's still 0xA5.  If
+ * any byte differs, prints the diff.  Eliminates canary_byte() as a
+ * suspect and exercises the cheapest possible comparison. */
+static int sc9g_memset_only(void) {
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = sc9_handler;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;
+    if (sigaction(SIGALRM, &sa, NULL) < 0) FAIL("sigaction");
+
+    struct itimerval it = {
+        .it_value    = { .tv_sec = 0, .tv_usec = 5000 },
+        .it_interval = { .tv_sec = 0, .tv_usec = 5000 }
+    };
+    if (setitimer(ITIMER_REAL, &it, NULL) < 0) FAIL("setitimer");
+
+    enum { BLOCK_SZ = 16 * 1024 };
+    uint8_t *p = malloc(BLOCK_SZ);
+    if (!p) FAIL("malloc");
+    memset(p, 0xA5, BLOCK_SZ);
+    fprintf(stderr, "  note: sc9g block at %p sz=%d filled with 0xA5\n",
+            p, BLOCK_SZ);
+
+    g_sc9_ticks = 0;
+    int reports = 0;
+    long passes = 0;
+    struct timespec t0, t1;
+    clock_gettime(CLOCK_MONOTONIC, &t0);
+    long ms = 0;
+    while (ms < 3000 && reports < 8) {
+        for (size_t i = 0; i < BLOCK_SZ; i++) {
+            uint8_t got = ((volatile uint8_t *)p)[i];
+            if (got != 0xA5) {
+                int wrong_reads = 1;
+                for (int k = 0; k < 64; k++) {
+                    uint8_t r = ((volatile uint8_t *)p)[i];
+                    if (r == 0xA5) break;
+                    wrong_reads++;
+                }
+                fprintf(stderr,
+                    "  CORRUPT pass=%ld i=%zu va=0x%lx got=0x%02x want=0xa5 "
+                    "ticks=%d wrong_reads=%d\n",
+                    passes, i, (unsigned long)(p + i),
+                    got, (int)g_sc9_ticks, wrong_reads);
+                reports++;
+                if (reports >= 8) break;
+            }
+        }
+        passes++;
+        if ((passes & 0xF) == 0) {
+            clock_gettime(CLOCK_MONOTONIC, &t1);
+            ms = (t1.tv_sec - t0.tv_sec) * 1000 +
+                 (t1.tv_nsec - t0.tv_nsec) / 1000000;
+        }
+    }
+    memset(&it, 0, sizeof(it));
+    setitimer(ITIMER_REAL, &it, NULL);
+    fprintf(stderr, "  note: sc9g %ld passes %d ticks %d corruptions\n",
+            passes, (int)g_sc9_ticks, reports);
+    free(p);
+    return reports > 0 ? 1 : 0;
+}
+
 /* sc9d: handler that calls _exit(42) on first SIGALRM.  If the
  * corruption happens during the iret-to-handler transition (i.e.
  * before the handler body runs at all), we'll still see byte
@@ -1003,6 +1068,7 @@ static struct sc tests[] = {
     { "sc9d_exit_in_handler",       sc9d_exit_in_handler   },
     { "sc9e_verify_on_write",       sc9e_verify_on_write   },
     { "sc9f_fill_once_verify_loop", sc9f_fill_once_verify_loop },
+    { "sc9g_memset_only",           sc9g_memset_only       },
     { "sc10_fragmentation_storm",   sc10_fragmentation_storm },
     { "sc11_realloc_storm",         sc11_realloc_storm     },
     { "sc12_fork_storm",            sc12_fork_storm        },
