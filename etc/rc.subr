@@ -1,0 +1,39 @@
+# /etc/rc.subr — shared helpers for the /etc/rc.d service scripts.
+#
+# NOT placed under /etc/rc.d (which /etc/rc executes as services) and
+# left non-executable; daemon scripts pull it in with `. /etc/rc.subr`.
+
+# pidfile_running <pidfile> <progpath>
+#
+# Returns 0 iff <pidfile> names a process that is BOTH alive AND
+# actually <progpath>.
+#
+# A plain `kill -0 $pid` is not enough: substrate keeps /var/run on the
+# persistent rootfs and hands out low PIDs deterministically each boot,
+# so a pidfile left over from a previous boot frequently names a PID
+# that the kernel has since reassigned to an unrelated process.  `kill
+# -0` then succeeds and the service is wrongly reported "already
+# running" and never starts.  Confirm identity against
+# /proc/<pid>/cmdline (the basename of <progpath> must appear there —
+# this also matches daemons like nginx that rewrite argv[0] to e.g.
+# "nginx: master process /usr/sbin/nginx").
+pidfile_running() {
+    _rc_pf=$1
+    _rc_prog=$2
+    [ -r "$_rc_pf" ] || return 1
+    _rc_pid=$(cat "$_rc_pf" 2>/dev/null) || return 1
+    [ -n "$_rc_pid" ] || return 1
+    kill -0 "$_rc_pid" 2>/dev/null || return 1
+
+    _rc_base=${_rc_prog##*/}
+    if [ -n "$_rc_base" ] && [ -r "/proc/$_rc_pid/cmdline" ]; then
+        # NUL-separated argv -> newlines so case-glob can scan it.
+        _rc_cmd=$(tr '\0' '\n' < "/proc/$_rc_pid/cmdline" 2>/dev/null)
+        case "$_rc_cmd" in
+            *"$_rc_base"*) return 0 ;;
+            *)             return 1 ;;   # PID reused by something else
+        esac
+    fi
+    # No /proc visibility — fall back to the liveness result.
+    return 0
+}

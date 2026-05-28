@@ -1,0 +1,22 @@
+#!/bin/sh
+# /etc/rc.d/01-run-clean — drop stale runtime state from /var/run.
+#
+# /var/run lives on the persistent rootfs (not a tmpfs), so a daemon's
+# pidfile survives a reboot.  Combined with substrate's deterministic
+# low PID allocation, a leftover pidfile usually names a PID that this
+# boot has handed to an unrelated process — making every daemon's
+# `kill -0`-based liveness check report a false "already running" and
+# skip startup.  Wipe the pidfiles before any daemon (05-syslogd is
+# the first) runs.  Runs at 01-* so it precedes them all.
+#
+# rc.subr's pidfile_running() is the second line of defence (it also
+# verifies process identity), but clearing the stale files outright is
+# the cheap, definitive fix for the boot case.
+
+case "${1:-start}" in
+    start)
+        rm -f /var/run/*.pid
+        ;;
+    stop)
+        ;;
+esac

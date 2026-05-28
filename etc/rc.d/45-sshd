@@ -9,12 +9,12 @@
 PROG=/usr/sbin/sshd
 PIDFILE=/var/run/sshd.pid
 
-is_running() {
-    [ -r "$PIDFILE" ] || return 1
-    pid=$(cat "$PIDFILE") || return 1
-    [ -n "$pid" ] || return 1
-    kill -0 "$pid" 2>/dev/null
-}
+. /etc/rc.subr
+
+# Stale-pidfile-safe liveness: verifies the PID is alive AND really
+# this program (see /etc/rc.subr).  A bare kill -0 reports false
+# "already running" against a previous boot's pidfile.
+is_running() { pidfile_running "$PIDFILE" "$PROG"; }
 
 generate_host_keys() {
     # Generate Ed25519 + ECDSA host keys only.  RSA keygen does a
