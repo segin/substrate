@@ -1,0 +1,58 @@
+From: substrate
+Subject: configure: assume run-tests pass when cross-building for substrate
+
+auto/feature compiles a probe and, for ngx_feature_run=yes/value/bug,
+RUNS it to decide whether the feature exists.  Cross-compiling to
+substrate can't run the probe, so every run-test reports "found but
+is not working" and the feature is disabled -- including the shared
+memory primitives (MAP_ANON / MAP_DEVZERO / SysV shm / POSIX sem)
+that nginx needs for its shared zones.
+
+When NGX_PLATFORM is substrate:*, treat a successful compile+link as
+proof the feature exists (the standard cross-compile assumption):
+  - yes  -> found
+  - value-> found, define name to ${ngx_feature_value:-1}
+  - bug  -> assume the defect is absent (not found)
+
+--- a/auto/feature
++++ b/auto/feature
+@@ -49,6 +49,39 @@
+ 
+ if [ -x $NGX_AUTOTEST ]; then
+ 
++  case "$NGX_PLATFORM" in
++    substrate:*)
++        # Cross-build: cannot execute the test binary on the host.  Treat a
++        # successful compile+link as proof the feature exists.
++        case "$ngx_feature_run" in
++            value)
++                echo " found (substrate assume)"
++                ngx_found=yes
++                cat << END >> $NGX_AUTO_CONFIG_H
++
++#ifndef $ngx_feature_name
++#define $ngx_feature_name  ${ngx_feature_value:-1}
++#endif
++
++END
++            ;;
++            bug)
++                # bug-tests look for a defect by crashing; assume no defect.
++                echo " not found"
++            ;;
++            *)
++                echo " found (substrate assume)"
++                ngx_found=yes
++                if test -n "$ngx_feature_name"; then
++                    have=$ngx_have_feature . auto/have
++                fi
++            ;;
++        esac
++        rm -rf $NGX_AUTOTEST*
++        return 0 2>/dev/null || true
++    ;;
++  esac
++
+     case "$ngx_feature_run" in
+ 
+         yes)

@@ -84,8 +84,13 @@ export STAGE1_PREFIX JOBS SUBSTRATE_TOP="$HERE"
 #   luit           → Unicode/locale ISO-2022 filter — needs libfontenc
 #                    + libiconv (no Xlib); xterm starts it via -lc to
 #                    bridge a UTF-8 locale to a legacy-encoded child.
+#   zlib           → nginx (--with-http_gzip_static_module), also a
+#                    general DEFLATE runtime.  Build before nginx.
+#   nginx          → HTTP/HTTPS server — needs zlib + openssl staged
+#                    (build.sh points -I/-L at dist-zlib + dist-openssl).
+#                    Cross-built via nginx's --crossbuild mechanism.
 #
-DEFAULT_CONTRIB="bzip2 libiconv openssl ncurses gzip tzdata make sed expr libarchive mpg123 curl inetutils zsh e2fsprogs e2tools xorgproto xcb-proto libXau xtrans libxcb libX11 libXext libICE libSM libXt libXmu libXpm libXaw xterm xauth luit"
+DEFAULT_CONTRIB="bzip2 libiconv zlib openssl ncurses gzip tzdata make sed expr libarchive mpg123 curl nginx inetutils zsh e2fsprogs e2tools xorgproto xcb-proto libXau xtrans libxcb libX11 libXext libICE libSM libXt libXmu libXpm libXaw xterm xauth luit"
 : "${ONLY:=${DEFAULT_CONTRIB}}"
 
 #

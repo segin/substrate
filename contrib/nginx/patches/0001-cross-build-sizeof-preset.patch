@@ -1,0 +1,51 @@
+From: substrate
+Subject: configure: preset type sizes when cross-building for substrate
+
+auto/types/sizeof compiles a tiny program that prints sizeof(type)
+and then RUNS it to read the answer.  Cross-compiling to substrate
+produces a substrate-i386 ELF that can't execute on the build host,
+so the run yields nothing, ngx_size stays empty, and configure dies
+with "can not detect <type> size".
+
+When NGX_PLATFORM is substrate:* (set via --crossbuild), skip the
+run entirely and use the known ILP32 sizes: int/long/void*/size_t
+= 4, long long = 8, and substrate's 64-bit off_t / time_t = 8.
+
+--- a/auto/types/sizeof
++++ b/auto/types/sizeof
+@@ -14,6 +14,27 @@
+ 
+ ngx_size=
+ 
++# substrate cross-build: the test binary is a substrate-i386 ELF and
++# cannot run on the build host, so preset the well-known ILP32 sizes
++# (64-bit off_t and time_t per the substrate ABI) instead of running.
++case "$NGX_PLATFORM" in
++    substrate:*)
++        case "$ngx_type" in
++            "int")       ngx_size=4 ;;
++            "long")      ngx_size=4 ;;
++            "long long") ngx_size=8 ;;
++            "void *")    ngx_size=4 ;;
++            "size_t")    ngx_size=4 ;;
++            "off_t")     ngx_size=8 ;;
++            "time_t")    ngx_size=8 ;;
++            *)           ngx_size=4 ;;
++        esac
++        echo " $ngx_size bytes (substrate preset)"
++    ;;
++esac
++
++if [ -z "$ngx_size" ]; then
++
+ cat << END > $NGX_AUTOTEST.c
+ 
+ #include <sys/types.h>
+@@ -44,6 +65,7 @@
+     echo " $ngx_size bytes"
+ fi
+ 
++fi
+ 
+ case $ngx_size in
+     4)
