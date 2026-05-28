@@ -1,0 +1,84 @@
+#!/bin/sh
+# /etc/rc.d/50-nginx — nginx HTTP/HTTPS server.
+#
+# Sequenced after the network band (20-network) so the listen socket
+# can bind, and after the other network daemons (telnetd 35, inetd 40,
+# sshd 45).  nginx daemonizes itself and writes /var/run/nginx.pid.
+#
+# Serves the default site (/usr/share/nginx/html) on TCP/80 from the
+# shipped /etc/nginx/nginx.conf.  Runs in the normal master+worker
+# model — substrate's fork now keeps MAP_SHARED zones shared across
+# the worker fork, so the worker comes up and accepts connections.
+
+PROG=/usr/sbin/nginx
+PIDFILE=/var/run/nginx.pid
+
+is_running() {
+    [ -r "$PIDFILE" ] || return 1
+    pid=$(cat "$PIDFILE") || return 1
+    [ -n "$pid" ] || return 1
+    kill -0 "$pid" 2>/dev/null
+}
+
+ensure_dirs() {
+    # nginx refuses to start if its log dir or the parent of a temp
+    # path is missing.  Create them idempotently (a freshly-imaged
+    # rootfs has them, but a hand-built one may not).
+    mkdir -p /var/run /var/log/nginx \
+             /var/cache/nginx/client_temp /var/cache/nginx/proxy_temp \
+             /var/cache/nginx/fastcgi_temp /var/cache/nginx/uwsgi_temp \
+             /var/cache/nginx/scgi_temp 2>/dev/null
+}
+
+case "${1:-start}" in
+    start)
+        if is_running; then
+            echo "nginx: already running (pid $(cat $PIDFILE))"
+            exit 0
+        fi
+        ensure_dirs
+        # Validate the config first; a bad config should fail loudly
+        # rather than leave a half-started server.
+        if ! "$PROG" -t >/dev/null 2>&1; then
+            echo "nginx: config test failed — not starting"
+            "$PROG" -t
+            exit 1
+        fi
+        # nginx daemonizes and writes /var/run/nginx.pid itself.
+        "$PROG" && echo "nginx: started"
+        ;;
+    stop)
+        if is_running; then
+            pid=$(cat "$PIDFILE")
+            # Graceful shutdown: finish in-flight requests, then exit.
+            "$PROG" -s quit 2>/dev/null || kill "$pid" 2>/dev/null
+            rm -f "$PIDFILE"
+            echo "nginx: stopped (was pid $pid)"
+        else
+            echo "nginx: not running"
+        fi
+        ;;
+    reload)
+        if is_running; then
+            "$PROG" -s reload && echo "nginx: reloaded"
+        else
+            echo "nginx: not running"
+            exit 1
+        fi
+        ;;
+    status)
+        if is_running; then
+            echo "nginx: running (pid $(cat $PIDFILE))"
+        else
+            echo "nginx: stopped"
+        fi
+        ;;
+    restart)
+        $0 stop
+        $0 start
+        ;;
+    *)
+        echo "usage: $0 {start|stop|reload|status|restart}"
+        exit 2
+        ;;
+esac

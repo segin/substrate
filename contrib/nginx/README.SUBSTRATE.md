@@ -78,20 +78,30 @@ port needs.  The only one that actually fires is substrate's
   index page over loopback — verified on a freshly-baked rootfs with a
   minimal in-tree TCP client.
 
-### Known limitation: master/worker
+### master/worker: works (kernel fixes landed)
 
-nginx's multi-process model does not yet bring up a worker on
-substrate.  The master forks but the child never reaches its
-`accept()` loop, so a stock master+worker config opens the listen
-socket and then never answers (only the master appears in `ps`;
-`error.log` stays empty — it dies before logging).  Root cause is on
-the substrate side (fork / master-worker channel setup), not nginx.
+Runs in nginx's normal master+worker model.  Getting there took three
+substrate kernel fixes (committed separately, with tests/lib/c/
+torture_fork.c covering the address-space half):
 
-Workaround shipped as patch 0003: the default `nginx.conf` sets
-`master_process off;`, so one process both manages and serves.  This
-is fully functional (the serving verification above runs this way).
-Drop the directive once substrate's process model supports nginx
-workers.
+- **fork() now keeps MAP_SHARED shared.**  pmap_fork() used to
+  blanket-COW every page, so nginx's MAP_SHARED|MAP_ANON worker zones
+  (slab, accept mutex) silently de-shared on the worker fork and the
+  worker's shared writes were invisible to the master.  vm_map_fork()
+  now restores writability on VM_INHERIT_SHARE ranges.
+- **ioctl(FIOASYNC)** is handled at the file layer (toggles FASYNC)
+  instead of returning ENOTTY — nginx aborts the worker spawn on any
+  error from the channel's FIOASYNC.
+- **fcntl(F_SETOWN/F_GETOWN)** are accept-and-return-0 — same spawn
+  path, same abort-on-error.
+
+(substrate doesn't deliver SIGIO yet; the FIOASYNC/F_SETOWN handlers
+just record intent.  nginx also polls the master<->worker channel in
+its event loop, so the missing signal doesn't matter.)
+
+Service management is via `/etc/rc.d/50-nginx`
+{start|stop|reload|status|restart}; nginx starts at boot after the
+network band.
 
 ## Layout
 
