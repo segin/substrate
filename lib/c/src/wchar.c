@@ -249,11 +249,17 @@ size_t wcsnlen(const wchar_t *s, size_t maxlen) {
 }
 int wcscmp(const wchar_t *s1, const wchar_t *s2) {
     while (*s1 && *s1 == *s2) { s1++; s2++; }
-    return (int)(*s1) - (int)(*s2);
+    /* Compare as unsigned code points and return -1/0/1.  Subtracting
+     * two 32-bit wchar_t as int can overflow and flip the sign (e.g.
+     * 0x10FFFF vs a small value), so don't return the difference. */
+    unsigned u1 = (unsigned)*s1, u2 = (unsigned)*s2;
+    return (u1 < u2) ? -1 : (u1 > u2) ? 1 : 0;
 }
 int wcsncmp(const wchar_t *s1, const wchar_t *s2, size_t n) {
-    while (n-- && *s1 && *s1 == *s2) { s1++; s2++; }
-    return n == (size_t)-1 ? 0 : (int)(*s1) - (int)(*s2);
+    if (n == 0) return 0;
+    while (--n && *s1 && *s1 == *s2) { s1++; s2++; }
+    unsigned u1 = (unsigned)*s1, u2 = (unsigned)*s2;
+    return (u1 < u2) ? -1 : (u1 > u2) ? 1 : 0;
 }
 wchar_t *wcschr(const wchar_t *s, wchar_t c) {
     do { if (*s == c) return (wchar_t *)s; } while (*s++);
@@ -279,9 +285,15 @@ wchar_t *wcscpy(wchar_t *dst, const wchar_t *src) {
     return dst;
 }
 wchar_t *wcsncpy(wchar_t *dst, const wchar_t *src, size_t n) {
-    wchar_t *d = dst;
-    while (n-- && (*d++ = *src++)) {}
-    while ((d > dst && d[-1] == 0) && n-- > 0) *d++ = 0;
+    /* Mirror strncpy: copy at most n cells, stopping at the source
+     * NUL, then zero-fill the remainder of the n cells.  On pure
+     * truncation (src longer than n) the result is NOT NUL-terminated,
+     * which is correct.  The previous version mis-decremented n in the
+     * loop guard and used a wrong d[-1]==0 pad condition, both
+     * over- and under-filling the destination. */
+    size_t i = 0;
+    for (; i < n && src[i]; i++) dst[i] = src[i];
+    for (; i < n; i++) dst[i] = 0;
     return dst;
 }
 wchar_t *wcscat(wchar_t *dst, const wchar_t *src) {
@@ -413,9 +425,15 @@ size_t wcsspn(const wchar_t *s, const wchar_t *accept) {
     return n;
 }
 wchar_t *wcsncat(wchar_t *dst, const wchar_t *src, size_t n) {
+    /* Append at most n cells from src, then always terminate WITHIN
+     * the reserved space.  Mirror strncat: stop on the source NUL or
+     * after n cells, then write a single terminating 0.  The previous
+     * version wrote the terminator one cell PAST the n-cell budget on
+     * full truncation (off-by-one heap overflow). */
     wchar_t *d = dst; while (*d) d++;
-    while (n-- && (*d++ = *src++)) {}
-    if (d > dst && d[-1] != 0) *d = 0;
+    size_t i = 0;
+    for (; i < n && src[i]; i++) d[i] = src[i];
+    d[i] = 0;
     return dst;
 }
 wchar_t *wcstok(wchar_t *s, const wchar_t *delim, wchar_t **ptr) {

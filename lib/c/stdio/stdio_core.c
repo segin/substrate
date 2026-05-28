@@ -234,8 +234,13 @@ int fcloseall(void) {
 }
 
 size_t fread(void *ptr, size_t size, size_t nmemb, FILE *stream) {
+    /* C99 §7.21.8.1: if size or nmemb is zero, fread returns zero and
+     * the stream is unchanged.  Guard this BEFORE the trailing
+     * `read_bytes / size` — without it, size==0 divides by zero
+     * (SIGFPE).  fwrite already had the size==0 guard; fread didn't. */
+    if (size == 0 || nmemb == 0) return 0;
     /* Overflow check before multiply — see fwrite for rationale. */
-    if (size != 0 && nmemb > SIZE_MAX / size) {
+    if (nmemb > SIZE_MAX / size) {
         stream->error = 1;
         return 0;
     }
@@ -319,10 +324,23 @@ size_t fwrite(const void *ptr, size_t size, size_t nmemb, FILE *stream) {
     const unsigned char *src = ptr;
 
     if (stream->mode == _IONBF) {
-        ssize_t ret = stdio_write(stream->fd, ptr, total);
-        if (ret >= 0) return ret / size;
-        stream->error = 1;
-        return 0;
+        /* Loop over short writes — a single write() may transfer fewer
+         * bytes than requested (signal, pipe capacity, etc.).  The old
+         * code returned ret/size after one call, silently dropping the
+         * remainder and under-reporting the element count. */
+        size_t off = 0;
+        while (off < total) {
+            ssize_t ret = stdio_write(stream->fd, src + off, total - off);
+            if (ret > 0) {
+                off += (size_t)ret;
+            } else if (ret < 0 && errno == EINTR) {
+                continue;
+            } else {
+                if (ret < 0) stream->error = 1;
+                break;
+            }
+        }
+        return off / size;
     }
 
     while (total > 0) {

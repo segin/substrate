@@ -621,24 +621,30 @@ char *strerror_l(int errnum, locale_t locale) {
     (void)locale;
     return (char *)lookup_error_string(errnum);
 }
+/* Shift the UNSIGNED value: a signed >>= 1 on a value with the sign
+ * bit set (e.g. INT_MIN / LONG_MIN) sign-extends and the loop spins
+ * forever.  ffs(INT_MIN) must return 32. */
 int ffs(int i) {
-    if (i == 0) return 0;
+    unsigned u = (unsigned)i;
+    if (u == 0) return 0;
     int bit = 1;
-    while (!(i & 1)) { i >>= 1; bit++; }
+    while (!(u & 1)) { u >>= 1; bit++; }
     return bit;
 }
 
 int ffsl(long i) {
-    if (i == 0) return 0;
+    unsigned long u = (unsigned long)i;
+    if (u == 0) return 0;
     int bit = 1;
-    while (!(i & 1)) { i >>= 1; bit++; }
+    while (!(u & 1)) { u >>= 1; bit++; }
     return bit;
 }
 
 int ffsll(long long i) {
-    if (i == 0) return 0;
+    unsigned long long u = (unsigned long long)i;
+    if (u == 0) return 0;
     int bit = 1;
-    while (!(i & 1)) { i >>= 1; bit++; }
+    while (!(u & 1)) { u >>= 1; bit++; }
     return bit;
 }
 

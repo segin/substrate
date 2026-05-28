@@ -345,11 +345,19 @@ void free(void *ptr) {
     if (!ptr) return;
 
     struct block_meta *block = payload_block(ptr);
-    if (block->magic != MAGIC) {
-        return;
-    }
 
     __malloc_lock_acquire();
+    /* Reject bad/already-freed pointers under the lock.  The magic
+     * check rejects pointers that never came from malloc; the
+     * `block->free` check catches a double free — without it, freeing
+     * the same block twice runs coalesce_block() again on a block that
+     * may already have been merged into a neighbour, corrupting the
+     * free list.  A freed block keeps its MAGIC (so realloc/free can
+     * still recognise it), so the free flag is the double-free guard. */
+    if (block->magic != MAGIC || block->free) {
+        __malloc_lock_release();
+        return;
+    }
     block->free = 1;
     search_hint = coalesce_block(block);
     __malloc_lock_release();
@@ -550,12 +558,16 @@ long strtol(const char *nptr, char **endptr, int base) {
         }
     }
     if (any < 0) {
-        acc = neg ? -2147483648L : 2147483647L;
+        /* C99 §7.22.1.4 / POSIX: on overflow, clamp to LONG_MIN/MAX
+         * AND set errno = ERANGE.  strtoull/strtoll already do this;
+         * strtol was silently dropping the errno report. */
+        acc = neg ? (unsigned long)LONG_MIN : (unsigned long)LONG_MAX;
+        errno = ERANGE;
     } else if (neg) {
         acc = -acc;
     }
     if (endptr != 0) *endptr = (char *)(any ? s - 1 : nptr);
-    return acc;
+    return (long)acc;
 }
 
 unsigned long long strtoull(const char *nptr, char **endptr, int base) {

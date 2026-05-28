@@ -323,10 +323,18 @@ int vsnprintf(char *str, size_t size, const char *format, va_list ap) {
                 if (width < 0) { left_align = 1; width = -width; }
                 f++;
             } else {
-                while (*f >= '0' && *f <= '9') { width = width * 10 + (*f - '0'); f++; }
+                /* Clamp accumulation: an unbounded width like
+                 * %999999999999d overflows int (signed overflow is UB
+                 * and yields a negative width that mishandles fill).
+                 * A field wider than any real buffer is pointless;
+                 * cap at a large sane value. */
+                while (*f >= '0' && *f <= '9') {
+                    if (width < 1000000) width = width * 10 + (*f - '0');
+                    f++;
+                }
             }
             if (left_align) pad_zero = 0;
-            
+
             int precision = -1;
             if (*f == '.') {
                 f++;
@@ -336,7 +344,10 @@ int vsnprintf(char *str, size_t size, const char *format, va_list ap) {
                     f++;
                 } else {
                     precision = 0;
-                    while (*f >= '0' && *f <= '9') { precision = precision * 10 + (*f - '0'); f++; }
+                    while (*f >= '0' && *f <= '9') {
+                        if (precision < 1000000) precision = precision * 10 + (*f - '0');
+                        f++;
+                    }
                 }
             }
 
