@@ -109,6 +109,9 @@ static void handle(int c) {
 int main(int argc, char **argv) {
     const char *port = (argc > 1) ? argv[1] : TT_PORT;
     signal(SIGPIPE, SIG_IGN);
+    /* Reap children automatically so fork-per-connection leaves no
+     * zombies. */
+    signal(SIGCHLD, SIG_IGN);
 
     int s = socket(AF_INET, SOCK_STREAM, 0);
     if (s < 0) { perror("socket"); return 1; }
@@ -129,8 +132,18 @@ int main(int argc, char **argv) {
         if (c < 0) { if (errno == EINTR) continue; perror("accept"); break; }
         int one = 1;
         setsockopt(c, IPPROTO_TCP, TCP_NODELAY, &one, sizeof one);
-        handle(c);
-        close(c);
+        /* Fork per connection: a connection whose peer vanished mid-
+         * transfer (e.g. the substrate VM was killed by the test
+         * timeout) would otherwise block the single accept loop in a
+         * read() forever, wedging the partner for all later runs. */
+        pid_t pid = fork();
+        if (pid == 0) {            /* child: handle one connection */
+            close(s);
+            handle(c);
+            close(c);
+            _exit(0);
+        }
+        close(c);                  /* parent: keep accepting */
     }
     close(s);
     return 0;

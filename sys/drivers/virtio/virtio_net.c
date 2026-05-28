@@ -204,6 +204,15 @@ int virtio_net_setup(uint8_t bus, uint8_t slot, uint8_t func) {
         }
     }
 
+    /* Enable PCI I/O decoding + bus-mastering.  Bus-master (bit 2) is
+     * mandatory: virtio is all DMA — the device reads descriptors and
+     * the avail/used rings out of guest memory and writes RX frames
+     * into our buffers.  Without it the queues never advance, so DHCP
+     * (and everything else) hangs.  rtl8139 sets the same bits. */
+    uint32_t cmd = pci_read(bus, slot, func, PCI_CONFIG_COMMAND);
+    pci_write(bus, slot, func, PCI_CONFIG_COMMAND,
+              cmd | PCI_COMMAND_IO | PCI_COMMAND_MASTER);
+
     /* 1. Reset + acknowledge + driver bits. */
     outb(vn.io_base + VIRTIO_REG_DEVICE_STATUS, 0);
     outb(vn.io_base + VIRTIO_REG_DEVICE_STATUS, 1);  /* ACKNOWLEDGE */
