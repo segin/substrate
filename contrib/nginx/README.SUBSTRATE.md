@@ -72,10 +72,26 @@ port needs.  The only one that actually fires is substrate's
 - Builds end-to-end into a substrate-i386 ELF
   (`/usr/sbin/nginx`, DT_NEEDED: libssl/libcrypto/libz/libc/libsys/libdl).
 - On target: `nginx -V` reports `nginx/1.26.2` + `OpenSSL 3.0.13` with
-  TLS SNI; `nginx -t` validates the default config; the master process
-  starts and stays resident.
-- Live request serving over loopback not yet re-verified on a clean
-  rootfs (the dev rootfs.img was debugfs-corrupted during bring-up).
+  TLS SNI; `nginx -t` validates the default config.
+- **Serves HTTP.**  A plain `nginx` (using the shipped config) binds
+  `:80`, daemonizes, and answers `GET /` with `200 OK` + the default
+  index page over loopback — verified on a freshly-baked rootfs with a
+  minimal in-tree TCP client.
+
+### Known limitation: master/worker
+
+nginx's multi-process model does not yet bring up a worker on
+substrate.  The master forks but the child never reaches its
+`accept()` loop, so a stock master+worker config opens the listen
+socket and then never answers (only the master appears in `ps`;
+`error.log` stays empty — it dies before logging).  Root cause is on
+the substrate side (fork / master-worker channel setup), not nginx.
+
+Workaround shipped as patch 0003: the default `nginx.conf` sets
+`master_process off;`, so one process both manages and serves.  This
+is fully functional (the serving verification above runs this way).
+Drop the directive once substrate's process model supports nginx
+workers.
 
 ## Layout
 

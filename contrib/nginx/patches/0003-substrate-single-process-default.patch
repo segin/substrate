@@ -1,0 +1,34 @@
+From: substrate
+Subject: conf: default to master_process off on substrate
+
+nginx's master/worker process model does not yet bring up a worker
+on substrate: the master forks but the child never reaches its
+accept() loop, so a stock master+worker config opens the listen
+socket and then never answers a request (only the master shows in
+ps; error.log stays empty).
+
+Single-process mode (master_process off) works fully -- one process
+manages and serves, daemonizes normally, and answers requests
+(verified: GET / returns 200 with the default index over loopback).
+Ship it as the default so a plain `nginx` works out of the box.
+
+Revert once substrate's fork / process-channel path supports nginx
+workers.
+
+--- a/conf/nginx.conf
++++ b/conf/nginx.conf
+@@ -2,6 +2,14 @@
+ #user  nobody;
+ worker_processes  1;
+ 
++# substrate: nginx's master/worker model does not yet spawn a worker
++# on substrate (the master forks but the child never reaches the
++# accept loop), so a default master+worker config listens but never
++# answers.  Run single-process instead: one process both manages and
++# serves.  It still daemonizes normally.  Remove this once substrate's
++# fork/process-channel path supports nginx workers.
++master_process off;
++
+ #error_log  logs/error.log;
+ #error_log  logs/error.log  notice;
+ #error_log  logs/error.log  info;

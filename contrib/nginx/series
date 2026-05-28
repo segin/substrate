@@ -1,2 +1,3 @@
 0001-cross-build-sizeof-preset.patch
 0002-cross-build-feature-assume.patch
+0003-substrate-single-process-default.patch
