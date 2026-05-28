@@ -42,7 +42,21 @@ struct session;
 struct registers;
 struct mutex;
 
-#define MAX_FD 32
+#define MAX_FD 4096
+#define FD_BITMAP_WORDS (MAX_FD / 32)
+
+/* The allocated-fd and close-on-exec sets are word-array bitmaps so
+ * they scale past 32 descriptors.  Use these accessors everywhere
+ * instead of `bm & (1U << fd)` — that only works for fd < 32. */
+static inline int fdset_test(const uint32_t *bm, int fd) {
+    return (bm[(unsigned)fd >> 5] >> ((unsigned)fd & 31)) & 1u;
+}
+static inline void fdset_set(uint32_t *bm, int fd) {
+    bm[(unsigned)fd >> 5] |= 1u << ((unsigned)fd & 31);
+}
+static inline void fdset_clear(uint32_t *bm, int fd) {
+    bm[(unsigned)fd >> 5] &= ~(1u << ((unsigned)fd & 31));
+}
 
 // FPU Context Structure
 typedef struct {
@@ -61,8 +75,8 @@ typedef struct process {
     struct personality *pers; // Pointer to personality
     file_t *fds[MAX_FD]; // File Descriptor Table
     int next_fd;         // Hint for next free FD
-    uint32_t fd_bitmap;  // Bitmap of allocated FDs
-    uint32_t fd_cloexec; // Bitmap of descriptors closed on successful exec
+    uint32_t fd_bitmap[FD_BITMAP_WORDS];  // Bitmap of allocated FDs
+    uint32_t fd_cloexec[FD_BITMAP_WORDS]; // Descriptors closed on successful exec
     fs_node_t *root_node; // Per-process root (for chroot)
     
     // Signals

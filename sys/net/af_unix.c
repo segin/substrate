@@ -492,7 +492,7 @@ extern int     afinet_shutdown(int fd, int how);
 static void socket_apply_type_flags(int fd, int orig_type) {
     if (fd < 0 || fd >= MAX_FD) return;
     if (orig_type & SOCK_CLOEXEC) {
-        current_process->fd_cloexec |= (1U << fd);
+        fdset_set(current_process->fd_cloexec, fd);
     }
     if (orig_type & SOCK_NONBLOCK) {
         file_t *f = current_process->fds[fd];

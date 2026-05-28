@@ -540,7 +540,7 @@ static int kern_open_from(const char *path, int flags, int mode, fs_node_t *root
 
     proc_set_fd(current_process, fd, f);
     if (flags & O_CLOEXEC) {
-        current_process->fd_cloexec |= (1U << fd);
+        fdset_set(current_process->fd_cloexec, fd);
     }
     open_fs(open_node, 1, 0); // Open read/write?
     if ((flags & O_TRUNC) && ((flags & O_ACCMODE) != O_RDONLY) &&
@@ -2416,7 +2416,7 @@ int sys_dup(int oldfd) {
     if (newfd == -1) return -EMFILE;
 
     proc_set_fd(current_process, newfd, f);
-    current_process->fd_cloexec &= ~(1U << newfd);
+    fdset_clear(current_process->fd_cloexec, newfd);
     f->f_count++;
     return newfd;
 }
@@ -2435,7 +2435,7 @@ int sys_dup2(int oldfd, int newfd) {
     }
 
     proc_set_fd(current_process, newfd, f);
-    current_process->fd_cloexec &= ~(1U << newfd);
+    fdset_clear(current_process->fd_cloexec, newfd);
     f->f_count++;
     return newfd;
 }
@@ -2452,7 +2452,7 @@ int sys_dup3(int oldfd, int newfd, int flags) {
     int rc = sys_dup2(oldfd, newfd);
     if (rc < 0) return rc;
     if (flags & O_CLOEXEC) {
-        current_process->fd_cloexec |= (1U << newfd);
+        fdset_set(current_process->fd_cloexec, newfd);
     }
     return rc;
 }
@@ -2469,8 +2469,8 @@ int sys_pipe2(int *fds, int flags) {
     if (ret) return ret;
 
     if (flags & O_CLOEXEC) {
-        current_process->fd_cloexec |= (1U << kfds[0]);
-        current_process->fd_cloexec |= (1U << kfds[1]);
+        fdset_set(current_process->fd_cloexec, kfds[0]);
+        fdset_set(current_process->fd_cloexec, kfds[1]);
     }
     if (flags & O_NONBLOCK) {
         for (int side = 0; side < 2; side++) {

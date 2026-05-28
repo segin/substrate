@@ -409,8 +409,8 @@ process_t *proc_create(int perso_id) {
         open_fs(proc->root_node, 1, 0);
     }
     proc->next_fd = 0;
-    proc->fd_bitmap = 0;
-    proc->fd_cloexec = 0;
+    memset(proc->fd_bitmap, 0, sizeof(proc->fd_bitmap));
+    memset(proc->fd_cloexec, 0, sizeof(proc->fd_cloexec));
     for (int j = 0; j < MAX_FD; j++) proc->fds[j] = 0;
 
     strncpy(proc->comm, "forked", AC_COMM_LEN);
@@ -499,8 +499,8 @@ static int proc_fork_common(process_t *parent, void *stack, int is_vfork) {
     child_proc->bitness = parent->bitness;
     child_proc->vfork_waiter = is_vfork ? current_thread : NULL;
 
-    child_proc->fd_bitmap = parent->fd_bitmap;
-    child_proc->fd_cloexec = parent->fd_cloexec;
+    memcpy(child_proc->fd_bitmap, parent->fd_bitmap, sizeof(child_proc->fd_bitmap));
+    memcpy(child_proc->fd_cloexec, parent->fd_cloexec, sizeof(child_proc->fd_cloexec));
     for(int j=0; j<MAX_FD; j++) {
         if (parent->fds[j]) {
             child_proc->fds[j] = parent->fds[j];
@@ -826,9 +826,9 @@ int proc_alloc_fd_from(process_t *p, int start) {
     }
 
     for (fd = start; fd < MAX_FD; fd++) {
-        if (!(p->fd_bitmap & (1U << fd))) {
-            p->fd_bitmap |= (1U << fd);
-            p->fd_cloexec &= ~(1U << fd);
+        if (!fdset_test(p->fd_bitmap, fd)) {
+            fdset_set(p->fd_bitmap, fd);
+            fdset_clear(p->fd_cloexec, fd);
             p->next_fd = (fd + 1) % MAX_FD;
             return fd;
         }
@@ -840,45 +840,54 @@ int proc_alloc_fd_from(process_t *p, int start) {
 int proc_alloc_fd(process_t *p) {
     if (!p) return -1;
 
-    uint32_t valid_mask = (MAX_FD == 32) ? 0xFFFFFFFF : ((1U << MAX_FD) - 1);
-    uint32_t free_bits = (~p->fd_bitmap) & valid_mask;
-    if (free_bits == 0) return -1;
-
     int start = p->next_fd;
     if (start < 0 || start >= MAX_FD) start = 0;
 
-    uint32_t mask = free_bits & ~((1U << start) - 1);
-    int fd = -1;
-
-    if (mask != 0) {
-        fd = __builtin_ctz(mask);
-    } else {
-        // Wrap around
-        fd = __builtin_ctz(free_bits);
-    }
-
-    if (fd != -1) {
+    /* Word-scan the allocated-fd bitmap from the next_fd hint, wrapping
+     * once.  Each 32-fd word with a free bit is resolved with ctz on
+     * its complement. */
+    for (int w = 0; w < FD_BITMAP_WORDS; w++) {
+        int word = ((start >> 5) + w) % FD_BITMAP_WORDS;
+        uint32_t free_bits = ~p->fd_bitmap[word];
+        if (w == 0) {
+            /* In the starting word, ignore bits below `start`. */
+            int off = start & 31;
+            free_bits &= ~((1u << off) - 1u);
+        }
+        if (free_bits == 0) continue;
+        int fd = word * 32 + __builtin_ctz(free_bits);
+        if (fd >= MAX_FD) continue;
+        fdset_set(p->fd_bitmap, fd);
+        fdset_clear(p->fd_cloexec, fd);
         p->next_fd = (fd + 1) % MAX_FD;
-        p->fd_bitmap |= (1U << fd); // Mark as reserved
-        p->fd_cloexec &= ~(1U << fd);
+        return fd;
     }
-
-    return fd;
+    /* The starting word's low bits (below `start`) weren't scanned by
+     * the wrap above; do a final full pass to be safe. */
+    for (int fd = 0; fd < MAX_FD; fd++) {
+        if (!fdset_test(p->fd_bitmap, fd)) {
+            fdset_set(p->fd_bitmap, fd);
+            fdset_clear(p->fd_cloexec, fd);
+            p->next_fd = (fd + 1) % MAX_FD;
+            return fd;
+        }
+    }
+    return -1;
 }
 
 void proc_set_fd(process_t *p, int fd, file_t *f) {
     if (!p || fd < 0 || fd >= MAX_FD) return;
     p->fds[fd] = f;
     if (f) {
-        p->fd_bitmap |= (1U << fd);
+        fdset_set(p->fd_bitmap, fd);
     } else {
-        p->fd_bitmap &= ~(1U << fd);
+        fdset_clear(p->fd_bitmap, fd);
     }
 }
 
 void proc_clear_fd(process_t *p, int fd) {
     if (!p || fd < 0 || fd >= MAX_FD) return;
-    p->fd_cloexec &= ~(1U << fd);
+    fdset_clear(p->fd_cloexec, fd);
     proc_set_fd(p, fd, NULL);
 }
 
@@ -908,16 +917,16 @@ int proc_fcntl(process_t *p, int fd, int cmd, int arg) {
             return -EMFILE;
         }
         proc_set_fd(p, newfd, f);
-        p->fd_cloexec &= ~(1U << newfd);
+        fdset_clear(p->fd_cloexec, newfd);
         f->f_count++;
         return newfd;
     case F_GETFD:
-        return (p->fd_cloexec & (1U << fd)) ? FD_CLOEXEC : 0;
+        return fdset_test(p->fd_cloexec, fd) ? FD_CLOEXEC : 0;
     case F_SETFD:
         if (arg & FD_CLOEXEC) {
-            p->fd_cloexec |= (1U << fd);
+            fdset_set(p->fd_cloexec, fd);
         } else {
-            p->fd_cloexec &= ~(1U << fd);
+            fdset_clear(p->fd_cloexec, fd);
         }
         return 0;
     case F_GETFL:
@@ -1005,7 +1014,7 @@ void proc_close_cloexec(process_t *p) {
     }
 
     for (fd = 0; fd < MAX_FD; fd++) {
-        if (!(p->fd_cloexec & (1U << fd))) {
+        if (!fdset_test(p->fd_cloexec, fd)) {
             continue;
         }
         if (p->fds[fd]) {

@@ -469,7 +469,11 @@ typedef struct procfs_pid_nodes {
     fs_node_t exe;
     fs_node_t cwd;
     fs_node_t fd_dir;
-    fs_node_t fd_links[MAX_FD];
+    /* Only OPEN fds are ever exposed under /proc/<pid>/fd, so we don't
+     * pre-allocate a node per possible fd (a MAX_FD-sized array would be
+     * over a megabyte per pid).  finddir repopulates this single symlink
+     * node for whichever open fd is being looked up. */
+    fs_node_t fd_link;
     fs_node_t task_dir;
 } procfs_pid_nodes_t;
 
@@ -634,21 +638,6 @@ static procfs_pid_nodes_t *procfs_get_pid_nodes(int pid) {
     nodes->fd_dir.readdir = &proc_pid_fd_readdir;
     nodes->fd_dir.finddir = &proc_pid_fd_finddir;
     procfs_refresh_timestamps(&nodes->fd_dir);
-
-    for (int fd = 0; fd < MAX_FD; fd++) {
-        fs_node_t *link = &nodes->fd_links[fd];
-
-        memset(link, 0, sizeof(*link));
-        snprintf(link->name, sizeof(link->name), "%d", fd);
-        link->flags = FS_SYMLINK;
-        link->mask = 0700;
-        link->uid = target->uid;
-        link->gid = target->gid;
-        link->inode = pid;
-        link->impl = (uintptr_t)fd;
-        link->readlink = &proc_pid_fd_readlink;
-        procfs_refresh_timestamps(link);
-    }
 
     strncpy(nodes->task_dir.name, "task", sizeof(nodes->task_dir.name) - 1);
     nodes->task_dir.flags = FS_DIRECTORY;
@@ -1172,6 +1161,7 @@ static fs_node_t *proc_pid_fd_finddir(fs_node_t *node, char *name) {
         }
         scan++;
     }
+    /* Only OPEN fds are exposed. */
     if (*scan != '\0' || !p->fds[fd]) {
         return NULL;
     }
@@ -1181,9 +1171,18 @@ static fs_node_t *proc_pid_fd_finddir(fs_node_t *node, char *name) {
         return NULL;
     }
 
-    nodes->fd_links[fd].inode = node->inode;
-    procfs_refresh_timestamps(&nodes->fd_links[fd]);
-    return &nodes->fd_links[fd];
+    /* Repopulate the single reusable symlink node for this fd. */
+    memset(&nodes->fd_link, 0, sizeof(nodes->fd_link));
+    snprintf(nodes->fd_link.name, sizeof(nodes->fd_link.name), "%d", fd);
+    nodes->fd_link.flags = FS_SYMLINK;
+    nodes->fd_link.mask = 0700;
+    nodes->fd_link.uid = p->uid;
+    nodes->fd_link.gid = p->gid;
+    nodes->fd_link.inode = node->inode;
+    nodes->fd_link.impl = (uintptr_t)fd;
+    nodes->fd_link.readlink = &proc_pid_fd_readlink;
+    procfs_refresh_timestamps(&nodes->fd_link);
+    return &nodes->fd_link;
 }
 
 /* Root /proc directory operations */
