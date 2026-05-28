@@ -1,2 +1,5 @@
 torture_net
+torture_inet
+torture_tcp_net
+tcp_partner
 *.o

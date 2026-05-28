@@ -17,6 +17,8 @@
 #include <string.h>
 #include <unistd.h>
 #include <errno.h>
+#include <fcntl.h>
+#include <poll.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -136,6 +138,195 @@ static void sc_halfclose(uint32_t len, uint32_t seed) {
     close(fd);
 }
 
+/* ---- substrate-as-server (inbound) scenarios ---------------------- */
+
+/* Bind + listen on `port` (INADDR_ANY).  Returns the listen fd or -1. */
+static int make_listener(uint16_t port, int backlog) {
+    int ls = socket(AF_INET, SOCK_STREAM, 0);
+    if (ls < 0) return -1;
+    int on = 1;
+    setsockopt(ls, SOL_SOCKET, SO_REUSEADDR, &on, sizeof on);
+    struct sockaddr_in sa;
+    memset(&sa, 0, sizeof sa);
+    sa.sin_family = AF_INET;
+    sa.sin_addr.s_addr = htonl(INADDR_ANY);
+    sa.sin_port = htons(port);
+    if (bind(ls, (struct sockaddr *)&sa, sizeof sa) < 0) { close(ls); return -1; }
+    if (listen(ls, backlog) < 0) { close(ls); return -1; }
+    return ls;
+}
+
+/* Open a control connection and ask the partner to dial back `count`
+ * times to our listener on `lport`, sending `len` bytes (seed `seed`) on
+ * each.  Returns 0 once the partner acks the fan-out launch, else -1.
+ * The control fd is closed before returning. */
+static int request_reverse(uint16_t lport, uint32_t count, uint32_t len, uint32_t seed) {
+    int cc = tt_connect();
+    if (cc < 0) return -1;
+    int rc = -1;
+    if (send_req(cc, SC_REVERSE, 0, 0, 0) == 0) {
+        struct tt_reverse rv;
+        rv.lport  = htonl(lport);
+        rv.count  = htonl(count);
+        rv.length = htonl(len);
+        rv.seed   = htonl(seed);
+        if (tt_writen(cc, &rv, sizeof rv) == (ssize_t)sizeof rv) {
+            struct tt_reply rep;
+            if (read_reply(cc, &rep) == 0) rc = 0;
+        }
+    }
+    close(cc);
+    return rc;
+}
+
+/* SC_REVERSE (count=1): partner dials in and uploads; substrate accepts
+ * and verifies — the inbound/server data path. */
+static void sc_server_recv(uint32_t len, uint32_t seed) {
+    int ls = make_listener(TT_RPORT, 4);
+    if (ls < 0) { ok("server listen", 0, strerror(errno)); return; }
+    if (request_reverse(TT_RPORT, 1, len, seed) != 0) {
+        ok("server reverse req", 0, "control"); close(ls); return;
+    }
+    int c = accept(ls, NULL, NULL);
+    if (c < 0) { ok("server accept", 0, strerror(errno)); close(ls); return; }
+    uint32_t rcv = 0;
+    long v = tt_verify_stream(c, seed, len, &rcv);
+    char d[56];
+    snprintf(d, sizeof d, "inbound %u/%u B%s", rcv, len, v > 0 ? " (mismatch)" : "");
+    ok("server inbound recv", v == 0, d);
+    close(c);
+    close(ls);
+}
+
+/* ---- concurrent connections in both directions -------------------- */
+
+typedef struct {
+    int          fd;
+    struct tt_rng rng;
+    uint32_t     n, off;
+    int          done, ok, inbound;
+} conn_t;
+
+static int set_nonblock(int fd) {
+    int fl = fcntl(fd, F_GETFL, 0);
+    if (fl < 0) return -1;
+    return fcntl(fd, F_SETFL, fl | O_NONBLOCK);
+}
+
+/* Drain whatever is readable on c->fd and verify it against the LCG
+ * stream.  Returns 1 if the connection just completed, 0 if it would
+ * block (more to come), -1 on mismatch / premature EOF / error.  Sets
+ * c->done and c->ok on completion or failure. */
+static int conn_pump(conn_t *c) {
+    unsigned char buf[4096];
+    for (;;) {
+        uint32_t want = c->n - c->off;
+        if (want > sizeof buf) want = (uint32_t)sizeof buf;
+        ssize_t r = read(c->fd, buf, want);
+        if (r > 0) {
+            for (ssize_t i = 0; i < r; i++)
+                if (buf[i] != tt_byte(&c->rng)) { c->done = 1; c->ok = 0; return -1; }
+            c->off += (uint32_t)r;
+            if (c->off >= c->n) { c->done = 1; c->ok = 1; return 1; }
+            continue;
+        }
+        if (r == 0) { c->done = 1; c->ok = 0; return -1; }   /* short EOF */
+        if (errno == EINTR) continue;
+        if (errno == EAGAIN || errno == EWOULDBLOCK) return 0;
+        c->done = 1; c->ok = 0; return -1;
+    }
+}
+
+/* Open `k_out` outbound downloads AND have the partner dial back `k_in`
+ * uploads, then drive all of them to completion at once via poll(2) —
+ * exercising many simultaneous connections in both directions.  This is
+ * only possible because MAX_FD is now far above the old 32 ceiling. */
+static void sc_concurrent(int k_out, int k_in, uint32_t len) {
+    const uint32_t seed_out = 0x8000u, seed_in = 0x9000u;
+    int total = k_out + k_in;
+
+    int ls = make_listener(TT_RPORT, k_in + 4);
+    if (ls < 0) { ok("concurrent listen", 0, strerror(errno)); return; }
+    set_nonblock(ls);
+
+    if (request_reverse(TT_RPORT, (uint32_t)k_in, len, seed_in) != 0) {
+        ok("concurrent reverse req", 0, "control"); close(ls); return;
+    }
+
+    conn_t *conns = calloc((size_t)total, sizeof *conns);
+    struct pollfd *pfd = calloc((size_t)(total + 1), sizeof *pfd);
+    int *map = calloc((size_t)(total + 1), sizeof *map);
+    if (!conns || !pfd || !map) {
+        ok("concurrent alloc", 0, "oom");
+        free(conns); free(pfd); free(map); close(ls); return;
+    }
+
+    int nconn = 0, connect_fail = 0;
+    for (int i = 0; i < k_out; i++) {
+        int fd = tt_connect();
+        if (fd < 0) { connect_fail++; continue; }
+        if (send_req(fd, SC_DOWNLOAD, len, seed_out, 0) != 0) { close(fd); connect_fail++; continue; }
+        set_nonblock(fd);
+        conn_t *cn = &conns[nconn++];
+        cn->fd = fd; cn->n = len; cn->off = 0; cn->done = 0; cn->inbound = 0;
+        tt_seed(&cn->rng, seed_out);
+    }
+
+    int in_accepted = 0, done_cnt = 0, stalls = 0;
+    while (done_cnt < nconn || in_accepted < k_in) {
+        int np = 0;
+        if (in_accepted < k_in) {
+            pfd[np].fd = ls; pfd[np].events = POLLIN; pfd[np].revents = 0;
+            map[np] = -1; np++;
+        }
+        for (int i = 0; i < nconn; i++) {
+            if (conns[i].done) continue;
+            pfd[np].fd = conns[i].fd; pfd[np].events = POLLIN; pfd[np].revents = 0;
+            map[np] = i; np++;
+        }
+        if (np == 0) break;
+
+        int pr = poll(pfd, (nfds_t)np, 8000);
+        if (pr < 0) { if (errno == EINTR) continue; break; }
+        if (pr == 0) { if (++stalls >= 2) break; else continue; }
+        stalls = 0;
+
+        for (int j = 0; j < np; j++) {
+            if (!(pfd[j].revents & (POLLIN | POLLHUP | POLLERR))) continue;
+            if (map[j] == -1) {
+                while (in_accepted < k_in) {
+                    int a = accept(ls, NULL, NULL);
+                    if (a < 0) break;
+                    set_nonblock(a);
+                    conn_t *cn = &conns[nconn++];
+                    cn->fd = a; cn->n = len; cn->off = 0; cn->done = 0; cn->inbound = 1;
+                    tt_seed(&cn->rng, seed_in);
+                    in_accepted++;
+                }
+            } else {
+                conn_t *cn = &conns[map[j]];
+                if (cn->done) continue;
+                if (conn_pump(cn) != 0) done_cnt++;
+            }
+        }
+    }
+
+    int passed = 0, failed = 0;
+    for (int i = 0; i < nconn; i++) {
+        if (conns[i].done && conns[i].ok) passed++; else failed++;
+        if (conns[i].fd >= 0) close(conns[i].fd);
+    }
+    int all_ok = (failed == 0) && (connect_fail == 0) &&
+                 (in_accepted == k_in) && (passed == nconn) && (nconn == total);
+    char d[96];
+    snprintf(d, sizeof d, "%d/%d ok (%d out + %d in live), %d connect-fail",
+             passed, nconn, k_out - connect_fail, in_accepted, connect_fail);
+    ok("concurrent both-ways", all_ok, d);
+
+    free(conns); free(pfd); free(map);
+    close(ls);
+}
+
 int main(int argc, char **argv) {
     if (argc < 2) {
         fprintf(stderr, "usage: %s <partner-host> [port]\n", argv[0]);
@@ -175,6 +366,12 @@ int main(int argc, char **argv) {
 
     printf("sc6: half-close (128 KiB then SHUT_WR)\n");
     sc_halfclose(128u * 1024, 0x6666);
+
+    printf("sc7: inbound server (partner dials in, 256 KiB upload)\n");
+    sc_server_recv(256u * 1024, 0x7777);
+
+    printf("sc8: concurrent both-ways (24 out + 24 in @ 64 KiB)\n");
+    sc_concurrent(24, 24, 64u * 1024);
 
     printf("\nResult: %s (%d failure%s)\n",
            failures ? "FAILED" : "PASSED", failures, failures == 1 ? "" : "s");

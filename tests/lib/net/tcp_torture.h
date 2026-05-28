@@ -20,6 +20,7 @@
 
 #define TT_MAGIC   0x54435054u   /* "TCPT" */
 #define TT_PORT    "5430"        /* default; override via argv */
+#define TT_RPORT   5431          /* port substrate listens on for inbound   */
 
 enum {
     SC_ECHO      = 1,  /* client sends N, partner echoes, client verifies   */
@@ -27,6 +28,9 @@ enum {
     SC_UPLOAD    = 3,  /* client sends N, partner verifies, replies status  */
     SC_SLOWREAD  = 4,  /* like UPLOAD but partner drains slowly (backpress.) */
     SC_HALFCLOSE = 5,  /* client sends N then SHUT_WR, partner drains to EOF */
+    SC_REVERSE   = 6,  /* control: partner dials BACK to substrate's listener
+                          `count` times and sends N bytes on each, so
+                          substrate exercises its inbound/server path        */
 };
 
 /* Request header, all fields network byte order. */
@@ -42,6 +46,20 @@ struct tt_req {
 struct tt_reply {
     uint32_t status;    /* 0 = all bytes matched; else (mismatch_off + 1)  */
     uint32_t received;  /* bytes the partner actually read                 */
+};
+
+/* Follows a tt_req whose scenario == SC_REVERSE.  All fields network byte
+ * order.  Tells the partner to open `count` fresh connections back to the
+ * substrate guest (whose address the partner learns from getpeername on
+ * the control connection) and send `length` LCG bytes on each.  Every
+ * dial-back stream uses the SAME `seed`, so substrate can verify each
+ * inbound connection independently without a per-connection header — it
+ * just needs to know how many to expect (`count`). */
+struct tt_reverse {
+    uint32_t lport;     /* substrate's listen port to dial back to          */
+    uint32_t count;     /* number of connections to open back to substrate  */
+    uint32_t length;    /* LCG bytes to send on each connection             */
+    uint32_t seed;      /* shared LCG seed for every dial-back stream        */
 };
 
 /* Deterministic payload byte stream — a classic LCG.  Both ends seed

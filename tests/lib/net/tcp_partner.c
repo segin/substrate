@@ -100,6 +100,48 @@ static void handle(int c) {
         tt_writen(c, &rep, sizeof rep);
         break;
     }
+    case SC_REVERSE: {
+        /* Substrate is the SERVER for this one: dial `count` fresh
+         * connections back to it and stream `length` bytes on each, so
+         * substrate's listen/accept + inbound RX path is what's under
+         * test.  We learn substrate's address from the control
+         * connection's peer. */
+        struct tt_reverse rv;
+        if (tt_readn(c, &rv, sizeof rv) != (ssize_t)sizeof rv) return;
+        uint16_t lport = (uint16_t)ntohl(rv.lport);
+        uint32_t count = ntohl(rv.count);
+        uint32_t rlen  = ntohl(rv.length);
+        uint32_t rseed = ntohl(rv.seed);
+
+        struct sockaddr_in peer;
+        socklen_t pl = sizeof peer;
+        if (getpeername(c, (struct sockaddr *)&peer, &pl) < 0) {
+            perror("partner: getpeername");
+            return;
+        }
+        peer.sin_port = htons(lport);
+
+        for (uint32_t i = 0; i < count; i++) {
+            pid_t k = fork();
+            if (k == 0) {              /* dial-back child */
+                int d = socket(AF_INET, SOCK_STREAM, 0);
+                if (d >= 0 &&
+                    connect(d, (struct sockaddr *)&peer, sizeof peer) == 0) {
+                    int one = 1;
+                    setsockopt(d, IPPROTO_TCP, TCP_NODELAY, &one, sizeof one);
+                    tt_send_stream(d, rseed, rlen);
+                }
+                if (d >= 0) close(d);
+                _exit(0);
+            }
+        }
+        /* Acknowledge that the fan-out has been launched. */
+        struct tt_reply rep;
+        rep.status   = htonl(0);
+        rep.received = htonl(count);
+        tt_writen(c, &rep, sizeof rep);
+        break;
+    }
     default:
         fprintf(stderr, "partner: unknown scenario %u\n", scen);
         break;
