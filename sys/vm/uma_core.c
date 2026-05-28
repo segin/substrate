@@ -66,15 +66,29 @@ static inline uint32_t uma_hash(void *addr) {
     return (uint32_t)(p & UMA_HASH_MASK);
 }
 
-static inline void uma_bucket_depot_acquire(void) {
+/*
+ * The bucket depot lock is taken from BOTH process context (kmalloc /
+ * kfree) and IRQ context — the network RX path frees memory from the
+ * NIC interrupt handler (netdev_rx -> ip4_input -> tcp_input -> kfree
+ * -> uma_zfree).  If an IRQ that frees lands on a CPU already holding
+ * this lock in the interrupted kmalloc/kfree, a plain spinlock
+ * re-acquire trips the "already held by current CPU" deadlock panic.
+ * Disable local IRQs while held (spinlock_acquire_irq) and thread the
+ * saved flags through to release.
+ */
+static inline unsigned long uma_bucket_depot_acquire(void) {
 #ifndef HOST_TEST
-    spinlock_acquire(&uma_bucket_depot_lock);
+    return spinlock_acquire_irq(&uma_bucket_depot_lock);
+#else
+    return 0;
 #endif
 }
 
-static inline void uma_bucket_depot_release(void) {
+static inline void uma_bucket_depot_release(unsigned long flags) {
 #ifndef HOST_TEST
-    spinlock_release(&uma_bucket_depot_lock);
+    spinlock_release_irq(&uma_bucket_depot_lock, flags);
+#else
+    (void)flags;
 #endif
 }
 
@@ -137,17 +151,17 @@ void uma_enable_dynamic_alloc(void) {
 static struct uma_bucket *uma_bucket_alloc(void) {
     struct uma_bucket *b;
 
-    uma_bucket_depot_acquire();
+    unsigned long f = uma_bucket_depot_acquire();
     if (uma_bucket_empty_depot) {
         b = uma_bucket_empty_depot;
         uma_bucket_empty_depot = b->ub_next;
-        uma_bucket_depot_release();
+        uma_bucket_depot_release(f);
         b->ub_next = NULL;
         b->ub_zone = NULL;
         b->ub_cnt = 0;
         return b;
     }
-    uma_bucket_depot_release();
+    uma_bucket_depot_release(f);
 
     if (uma_bucket_idx >= UMA_BUCKET_POOL_SIZE) {
         return NULL;
@@ -163,19 +177,19 @@ static void uma_bucket_put_empty(struct uma_bucket *bucket) {
     if (!bucket) return;
     bucket->ub_cnt = 0;
     bucket->ub_zone = NULL;
-    uma_bucket_depot_acquire();
+    unsigned long f = uma_bucket_depot_acquire();
     bucket->ub_next = uma_bucket_empty_depot;
     uma_bucket_empty_depot = bucket;
-    uma_bucket_depot_release();
+    uma_bucket_depot_release(f);
 }
 
 static void uma_bucket_put_full(uma_zone_t *zone, struct uma_bucket *bucket) {
     if (!zone || !bucket || bucket->ub_cnt == 0) return;
     bucket->ub_zone = zone;
-    uma_bucket_depot_acquire();
+    unsigned long f = uma_bucket_depot_acquire();
     bucket->ub_next = uma_bucket_full_depot;
     uma_bucket_full_depot = bucket;
-    uma_bucket_depot_release();
+    uma_bucket_depot_release(f);
 }
 
 static struct uma_bucket *uma_bucket_take_full(uma_zone_t *zone) {
@@ -184,7 +198,7 @@ static struct uma_bucket *uma_bucket_take_full(uma_zone_t *zone) {
 
     if (!zone) return NULL;
 
-    uma_bucket_depot_acquire();
+    unsigned long f = uma_bucket_depot_acquire();
     pp = &uma_bucket_full_depot;
     while (*pp) {
         if ((*pp)->ub_zone == zone) {
@@ -196,7 +210,7 @@ static struct uma_bucket *uma_bucket_take_full(uma_zone_t *zone) {
         }
         pp = &(*pp)->ub_next;
     }
-    uma_bucket_depot_release();
+    uma_bucket_depot_release(f);
     return bucket;
 }
 
@@ -206,7 +220,7 @@ static struct uma_bucket *uma_bucket_detach_full_for_zone(uma_zone_t *zone) {
 
     if (!zone) return NULL;
 
-    uma_bucket_depot_acquire();
+    unsigned long f = uma_bucket_depot_acquire();
     pp = &uma_bucket_full_depot;
     while (*pp) {
         struct uma_bucket *bucket = *pp;
@@ -219,7 +233,7 @@ static struct uma_bucket *uma_bucket_detach_full_for_zone(uma_zone_t *zone) {
         }
         pp = &(*pp)->ub_next;
     }
-    uma_bucket_depot_release();
+    uma_bucket_depot_release(f);
     return detached;
 }
 
