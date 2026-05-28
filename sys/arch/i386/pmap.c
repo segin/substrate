@@ -722,8 +722,46 @@ pmap_t pmap_fork(pmap_t src_pmap) {
     if (cr3 == src_pmap->pdir_phys) {
         pmap_shootdown_all();
     }
-    
+
     return dst_pmap;
+}
+
+/*
+ * pmap_share_range - re-grant write permission on present user PTEs in
+ * [start,end).
+ *
+ * pmap_fork() blanket-clears PTE_W on every page to arm copy-on-write,
+ * but a MAP_SHARED region must NOT be COW: parent and child have to keep
+ * writing the same physical pages.  vm_map_fork() already shares the
+ * vm_object for VM_INHERIT_SHARE entries; this restores the matching
+ * page-table writability so the first post-fork write doesn't trap into
+ * pmap_fault() and get split into a private copy.
+ *
+ * Walks page tables through the direct map (pmap->pdir + phys+KVA), the
+ * same way pmap_fork() does, so it works on a pmap that is NOT the
+ * active address space — i.e. the freshly-forked child.  The caller is
+ * responsible for any TLB flush (the parent's mappings are live).
+ */
+void pmap_share_range(pmap_t pmap, uintptr_t start, uintptr_t end) {
+    if (!pmap || !pmap->pdir) return;
+
+    uint32_t *pd = pmap->pdir;
+    uint32_t va = (uint32_t)(start & ~0xFFFUL);
+
+    for (; va < (uint32_t)end; va += 0x1000) {
+        uint32_t pdi = va >> 22;
+        uint32_t pti = (va >> 12) & 0x3FF;
+
+        if (pdi >= 768) break;                 /* user space only */
+        if (!(pd[pdi] & PTE_P)) continue;
+
+        uint32_t pt_phys = pd[pdi] & ~0xFFFu;
+        if (pt_phys >= 0x40000000) continue;   /* keep within direct map */
+        uint32_t *pt = (uint32_t *)(pt_phys + 0xC0000000);
+
+        if (!(pt[pti] & PTE_P)) continue;
+        pt[pti] |= PTE_W;                       /* genuinely shared, writable */
+    }
 }
 
 // Active pmap

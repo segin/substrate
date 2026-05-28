@@ -1162,10 +1162,30 @@ vm_map_t *vm_map_fork(vm_map_t *src_map, pmap_t dst_pmap) {
         uint64_t new_offset = src_entry->offset;
         
         if (src_entry->inheritance == VM_INHERIT_SHARE) {
-            // Shared mapping
+            // Shared mapping: parent and child must keep writing the
+            // SAME physical pages.  pmap_fork() already copied the
+            // page tables but blanket-cleared PTE_W to arm COW; for a
+            // writable shared entry that's wrong — restore writability
+            // on both sides so the first post-fork write doesn't trap
+            // into pmap_fault() and get split into a private copy
+            // (which silently breaks e.g. nginx's MAP_SHARED|MAP_ANON
+            // worker zones).
             new_obj = obj;
             if (new_obj) vm_object_reference(new_obj);
-            
+
+            if (src_entry->protection & VM_PROT_WRITE) {
+                pmap_share_range(src_map->pmap, src_entry->start, src_entry->end);
+                pmap_share_range(dst_pmap, src_entry->start, src_entry->end);
+                /* The parent address space is live; drop its stale
+                 * read-only TLB entries for this range so writes hit
+                 * the now-writable PTEs.  The child isn't active yet,
+                 * so its TLB is loaded fresh when first scheduled. */
+                for (uintptr_t va = src_entry->start; va < src_entry->end;
+                     va += 0x1000) {
+                    pmap_invalidate_page(va);
+                }
+            }
+
         } else if (src_entry->inheritance == VM_INHERIT_COPY) {
             // Copy-on-Write
             if (obj) {

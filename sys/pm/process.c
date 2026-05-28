@@ -948,6 +948,21 @@ int proc_fcntl(process_t *p, int fd, int cmd, int arg) {
          * system instead of failing with EINVAL.
          */
         return 0;
+    case F_SETOWN:
+        /*
+         * Set the pid/pgrp that receives SIGIO/SIGURG for this fd.
+         * substrate doesn't deliver SIGIO yet, so this is an
+         * accept-only no-op.  It MUST succeed, though: nginx's
+         * ngx_spawn_process() does fcntl(channel, F_SETOWN, pid) right
+         * after ioctl(FIOASYNC) and aborts the entire worker spawn
+         * (-> NGX_INVALID_PID) on any error.  Consumers that need the
+         * notification also poll the fd in their event loop, so a
+         * missing SIGIO doesn't break them.
+         */
+        return 0;
+    case F_GETOWN:
+        /* No SIGIO owner tracking — report "none". */
+        return 0;
     default:
         return -EINVAL;
     }

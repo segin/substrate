@@ -88,6 +88,12 @@ pmap_t pmap_kernel(void);        // Get kernel pmap
 void pmap_reference(pmap_t pmap); // Increment ref_count
 void pmap_release(pmap_t pmap);   // Decrement ref_count, destroy if 0
 pmap_t pmap_fork(pmap_t src_pmap); // Fork with COW
+/* Restore write permission on present user PTEs in [start,end) so a
+ * MAP_SHARED range that pmap_fork() blanket-COW'd stays genuinely
+ * shared (same physical page, both sides writable).  Walks page
+ * tables via the direct map, so it is safe on a pmap that is not the
+ * active address space (the child during fork).  Caller flushes TLB. */
+void pmap_share_range(pmap_t pmap, uintptr_t start, uintptr_t end);
 void pmap_growkernel(uintptr_t va); // Propagate new kernel PDEs to existing pmaps
 
 // Mapping Operations

@@ -1916,6 +1916,24 @@ int kern_ioctl(int fd, uint32_t request, void *arg) {
         return proc_fd_set_nonblock(fd, on);
     }
 
+    /* FIOASYNC toggles the FASYNC (O_ASYNC / SIGIO-on-ready) flag.
+     * Like FIONBIO it is a generic file-layer ioctl handled without
+     * consulting the driver — drivers have no portable way to act on
+     * it.  Substrate does not yet deliver SIGIO, so this only records
+     * the flag; consumers that also poll the fd in an event loop
+     * (e.g. nginx's master<->worker channel) work regardless.  The
+     * important part is that the ioctl SUCCEEDS: nginx aborts the
+     * worker spawn entirely (ngx_spawn_process -> NGX_INVALID_PID) if
+     * ioctl(FIOASYNC) returns an error, so a bare ENOTTY here means
+     * no worker ever comes up. */
+    if (request == FIOASYNC) {
+        int on;
+        if (copyin(arg, &on, sizeof(on)) != 0) return -EFAULT;
+        if (on) f->f_flag |= FASYNC;
+        else    f->f_flag &= ~FASYNC;
+        return 0;
+    }
+
     if ((uintptr_t)f->f_data < KERN_BASE) {
         return -EIO;
     }
