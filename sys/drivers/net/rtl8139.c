@@ -77,6 +77,7 @@ static struct {
     uint8_t *tx_buf[RTL_TX_DESCS];
     uint32_t tx_buf_phys[RTL_TX_DESCS];
     int      tx_cur;
+    uint8_t  tx_started[RTL_TX_DESCS];  /* slot has a TX in flight at least once */
     netdev_t netdev;
     int      registered;
 } rtl;
@@ -114,11 +115,35 @@ static int rtl_xmit(netdev_t *dev, const void *frame, size_t len) {
     if (len > 1792) return -EMSGSIZE;
     if (len < 60) len = 60;   /* pad short frames; ignore upper layer's len */
     int slot = rtl.tx_cur;
+
+    /* Wait for this descriptor's previous transmit to finish before
+     * reusing its DMA buffer.  The chip has only 4 TX descriptors; a
+     * sustained sender (a bulk TCP upload) wraps the ring in
+     * microseconds.  Without this wait we memcpy() a new frame over a
+     * buffer the NIC is still DMA'ing out, corrupting frames on the
+     * wire — the peer never ACKs them, substrate's RTO fires
+     * TCP_MAX_RETX times, and the connection dies with ETIMEDOUT (and
+     * the ring is left wedged, so the next connect() can't even send
+     * its SYN).  A receive-mostly workload sends only sparse ACKs and
+     * never wraps the ring, which is why bulk download worked but bulk
+     * upload didn't.  OWN (bit 13) is set by the NIC when it has
+     * finished moving the descriptor's data into the TX FIFO.  Only
+     * wait on a slot we've actually used (its initial TSD state is
+     * don't-care). */
+    if (rtl.tx_started[slot]) {
+        uint32_t spins = 0;
+        while (!(inl(rtl.io_base + R_TSD0 + slot * 4) & TSD_OWN)) {
+            if (++spins > 2000000u) return -EBUSY;   /* NIC wedged */
+            __asm__ volatile("pause");
+        }
+    }
+
     uint8_t *buf = rtl.tx_buf[slot];
     memcpy(buf, frame, len);
     if (len < 60) memset(buf + len, 0, 60 - len);
     outl(rtl.io_base + R_TSAD0 + slot * 4, rtl.tx_buf_phys[slot]);
     outl(rtl.io_base + R_TSD0  + slot * 4, (uint32_t)len);
+    rtl.tx_started[slot] = 1;
     rtl.tx_cur = (slot + 1) % RTL_TX_DESCS;
     return 0;
 }
