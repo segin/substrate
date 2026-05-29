@@ -1,0 +1,40 @@
+From: substrate
+Subject: kdrive: disable pointer acceleration (1:1 relative motion)
+
+KdEnqueuePointerEvent enqueued every relative motion with
+POINTER_ACCELERATE, so the dix "predictable" acceleration scheme
+(scheme 1) ran on it.  Measured against a USB boot mouse on substrate:
+slow motion passed 1:1, but any sustained / fast motion was multiplied
+by ~2x (e.g. a (127,127) delta became (253,253)).
+
+That 2x is wrong for this input source and produced two user-visible
+defects under a running window manager:
+  * the cursor could only land on every other pixel -> "half
+    resolution" feel on the axis being moved;
+  * fast motion over-shot into a screen edge and pinned there, so the
+    other axis still tracked while the pinned one looked "stuck".
+
+Our pointer deltas are already coarse: the boot-protocol mouse is polled
+via GET_REPORT at ~128 Hz and qemu accumulates host motion between polls,
+clamping each report to int8.  1:1 relative motion tracks the hand
+correctly; the acceleration only corrupts already-coarse deltas.  Drop
+POINTER_ACCELERATE so relative motion is passed through unscaled.
+
+--- a/hw/kdrive/src/kinput.c
++++ b/hw/kdrive/src/kinput.c
+@@ -1917,7 +1917,14 @@
+ 
+     if (flags & KD_MOUSE_DELTA) {
+         if (x || y || z) {
+-            dixflags = POINTER_RELATIVE | POINTER_ACCELERATE;
++            /* No POINTER_ACCELERATE: the predictable accel scheme doubles
++             * every delta (2x), which makes the cursor skip pixels (looks
++             * like half resolution) and over-shoot into a screen edge where
++             * it pins (looks like one axis stuck).  Our pointer deltas are
++             * already coarse (the USB boot mouse is polled at ~128 Hz and
++             * qemu accumulates+clamps to int8 between polls), so 1:1 relative
++             * motion tracks correctly; acceleration only corrupts it. */
++            dixflags = POINTER_RELATIVE;
+             _KdEnqueuePointerEvent(pi, MotionNotify, x, y, z, 0, dixflags,
+                                    FALSE);
+         }
