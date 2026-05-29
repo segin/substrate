@@ -11,7 +11,16 @@
 #include <sys/errno.h>
 #include <sys/poll.h>
 
-#define INPUT_QUEUE_SIZE 64
+/* Global input event ring.  This was 64, which is far too small for a
+ * relative pointing device: a real mouse emits X+Y(+wheel)+SYN every
+ * report, so under an X client like matwm2 that briefly stalls the
+ * server's read loop the ring overflowed and input_read() snapped the
+ * reader forward, DROPPING a chunk of events.  For a relative device a
+ * dropped chunk is lost cursor motion — the janky / "stuck on one axis"
+ * / half-resolution behaviour reported once matwm2 is running.  1024
+ * entries (16 KiB) buffers ~2.7 s at a typical report rate, absorbing
+ * those stalls. */
+#define INPUT_QUEUE_SIZE 1024
 
 // An open handle to an input device (or the multiplexer)
 typedef struct input_handle {
@@ -27,6 +36,8 @@ static input_dev_t *input_devices = NULL;
 
 static input_event_t global_event_log[INPUT_QUEUE_SIZE];
 static uint64_t global_seq = 0; // Total events written
+static uint64_t input_overflow_drops = 0; // events lost to ring overflow
+static uint64_t input_overflow_warns = 0; // rate-limit for the overflow warning
 /* Serializes the (global_event_log, global_seq) pair so a fast device
  * (especially a virtio one in a SMP guest) can't race the reader: with
  * no lock the reader can see a stale global_seq, miss events at the
@@ -327,12 +338,19 @@ static uint32_t input_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t
          * 64+ events from keyboard typing have happened first) —
          * without this they'd get -EPERM on every read and never
          * receive any events.  We lose history but stay live. */
+        int overflowed = 0;
         if (snap > current_seq + INPUT_QUEUE_SIZE) {
+            input_overflow_drops += snap - (current_seq + INPUT_QUEUE_SIZE);
             current_seq = (snap > INPUT_QUEUE_SIZE)
                               ? (snap - INPUT_QUEUE_SIZE)
                               : 0;
+            overflowed = 1;
         }
         spinlock_release(&input_lock);
+        /* Warn (rate-limited) so a too-slow reader dropping pointer
+         * motion is diagnosable rather than silent. */
+        if (overflowed && (input_overflow_warns++ & 0x3F) == 0)
+            kprint("input: event ring overflow -- pointer motion dropped\n");
         if (current_seq < snap) break;
 
         if (nonblock) return (uint32_t)-EAGAIN;

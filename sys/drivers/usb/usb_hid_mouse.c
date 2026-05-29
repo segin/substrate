@@ -17,6 +17,7 @@
 #include <sys/input.h>
 #include <sys/kthread.h>
 #include <kern/console.h>
+#include <kern/cmdline.h>
 #include <kern/time.h>
 #include <kern/sched.h>
 #include <stdio.h>
@@ -165,6 +166,17 @@ static void usb_hid_mouse_process_report(usb_hid_mouse_dev_t *mouse,
     if (usb_hid_mouse_decode_report(report, report_len, mouse->has_wheel,
             &mouse->prev_buttons, &dx, &dy, &wheel, &pressed, &released) != 0) {
         return;
+    }
+    /* `mousedbg` kernel cmdline flag: log the raw report + decoded deltas
+     * for non-idle reports, so a real-hardware stuck-axis / half-resolution
+     * problem can be localised at the driver level. */
+    if ((dx || dy || wheel || pressed || released) && cmdline_has("mousedbg")) {
+        kprintf("mouse: raw[%02x %02x %02x %02x] len=%u dx=%d dy=%d wheel=%d P=%02x R=%02x\n",
+                report[0],
+                report_len > 1 ? report[1] : 0,
+                report_len > 2 ? report[2] : 0,
+                report_len > 3 ? report[3] : 0,
+                (unsigned)report_len, dx, dy, wheel, pressed, released);
     }
     usb_hid_mouse_emit_events(mouse, dx, dy, wheel, pressed, released);
 }
