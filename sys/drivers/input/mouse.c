@@ -121,23 +121,36 @@ void mouse_handler(registers_t *regs) {
                     if (mouse_byte[3] & 0x20) buttons |= (1u << 4);   /* btn 5 */
                 }
 
+                /* Buttons that changed since the previous packet — must be
+                 * computed BEFORE updating mouse_buttons. */
+                uint8_t changed = (uint8_t)(buttons ^ mouse_buttons);
+                int reported = 0;
+
                 mouse_buttons = buttons;
                 mouse_x += dx;
                 mouse_y -= dy;  /* PS/2 Y-axis is inverted relative to screen */
 
                 mouse_q_push(dx, -dy, wheel, buttons);
 
-                input_report_rel(&mouse_dev, REL_X, dx);
-                input_report_rel(&mouse_dev, REL_Y, -dy);
-                if (wheel) input_report_rel(&mouse_dev, REL_WHEEL, wheel);
-                input_report_key(&mouse_dev, BTN_LEFT,   (buttons & 0x01) ? 1 : 0);
-                input_report_key(&mouse_dev, BTN_RIGHT,  (buttons & 0x02) ? 1 : 0);
-                input_report_key(&mouse_dev, BTN_MIDDLE, (buttons & 0x04) ? 1 : 0);
+                /* Report only what actually changed — as the Linux input
+                 * core (and substrate's USB HID mouse) already do.  Posting
+                 * the full button state plus both axes on EVERY packet (even
+                 * idle ones) floods the 64-entry input ring; once an X client
+                 * such as matwm2 consumes events the server falls behind, the
+                 * ring overflows, and real press/release transitions get
+                 * dropped — the janky motion and stuck/misread buttons seen
+                 * under matwm2. */
+                if (dx)    { input_report_rel(&mouse_dev, REL_X, dx);        reported = 1; }
+                if (dy)    { input_report_rel(&mouse_dev, REL_Y, -dy);       reported = 1; }
+                if (wheel) { input_report_rel(&mouse_dev, REL_WHEEL, wheel); reported = 1; }
+                if (changed & 0x01) { input_report_key(&mouse_dev, BTN_LEFT,   (buttons & 0x01) ? 1 : 0); reported = 1; }
+                if (changed & 0x02) { input_report_key(&mouse_dev, BTN_RIGHT,  (buttons & 0x02) ? 1 : 0); reported = 1; }
+                if (changed & 0x04) { input_report_key(&mouse_dev, BTN_MIDDLE, (buttons & 0x04) ? 1 : 0); reported = 1; }
                 if (gen == 4) {
-                    input_report_key(&mouse_dev, BTN_SIDE,  (buttons & 0x08) ? 1 : 0);
-                    input_report_key(&mouse_dev, BTN_EXTRA, (buttons & 0x10) ? 1 : 0);
+                    if (changed & 0x08) { input_report_key(&mouse_dev, BTN_SIDE,  (buttons & 0x08) ? 1 : 0); reported = 1; }
+                    if (changed & 0x10) { input_report_key(&mouse_dev, BTN_EXTRA, (buttons & 0x10) ? 1 : 0); reported = 1; }
                 }
-                input_sync(&mouse_dev);
+                if (reported) input_sync(&mouse_dev);
                 break;
             }
         }
