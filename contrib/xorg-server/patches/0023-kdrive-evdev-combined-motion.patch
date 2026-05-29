@@ -1,0 +1,145 @@
+From: substrate
+Subject: kdrive/evdev: emit one combined motion event per report
+
+EvdevPtrMotion emitted each relative move as TWO events — (dx,0) then
+(0,dy) — flushed per EV_REL.  The dix event queue coalesces consecutive
+relative motion events, so the earlier X-only event was dropped: under
+an X client such as matwm2 (which puts the server under load) the cursor
+got stuck moving only on the Y axis, intermittently and at half
+resolution.  The kernel input layer was verified correct (mousedbg shows
+every report decodes the right dx AND dy), so the loss was purely this
+double-emit colliding with motion coalescing.
+
+Accumulate REL_X/REL_Y/REL_WHEEL across a report in EvdevPtrRead and emit
+ONE combined (dx,dy) motion event on EV_SYN (plus a flush at end of each
+read batch).  A single event per report has nothing to coalesce away.
+Also drops the stray ErrorF("abs") debug spew from the absolute path.
+
+--- a/hw/kdrive/linux/evdev.c
++++ b/hw/kdrive/linux/evdev.c
+@@ -94,60 +94,49 @@
+     }
+ }
+ 
++/* Flush one report's worth of accumulated relative motion as a SINGLE
++ * combined event.  Called on EV_SYN (and at end-of-batch) by
++ * EvdevPtrRead.  `ev` is unused — all state comes from ke->rel[].
++ *
++ * The previous version emitted X and Y as two separate events
++ * (dx,0) then (0,dy) per axis.  The dix event queue coalesces
++ * consecutive relative motion events, so the earlier X-only event was
++ * dropped, leaving the cursor stuck on the Y axis at half resolution
++ * once a client (matwm2) put the server under load.  One combined
++ * (dx,dy) event per report has nothing to coalesce away. */
+ static void
+ EvdevPtrMotion(KdPointerInfo * pi, struct input_event *ev)
+ {
+     Kevdev *ke = pi->driverPrivate;
+-    int i;
+     int flags = KD_MOUSE_DELTA | pi->buttonState;
++    int dx = ke->rel[REL_X];
++    int dy = ke->rel[REL_Y];
++    int wheel = (ke->max_rel >= REL_WHEEL) ? ke->rel[REL_WHEEL] : 0;
++    int i;
++
++    (void) ev;
++
++    if (dx || dy)
++        KdEnqueuePointerEvent(pi, flags, dx, dy, 0);
++
++    /* Wheel -> buttons 4 (up) / 5 (down), one click per detent. */
++    for (i = 0; i < abs(wheel); i++) {
++        int wf = flags | (wheel > 0 ? KD_BUTTON_4 : KD_BUTTON_5);
++        KdEnqueuePointerEvent(pi, wf, 0, 0, 0);
++        KdEnqueuePointerEvent(pi, flags, 0, 0, 0);
++    }
+ 
+     for (i = 0; i <= ke->max_rel; i++)
+-        if (ke->rel[i]) {
+-            int a;
++        ke->rel[i] = 0;
+ 
+-            for (a = 0; a <= ke->max_rel; a++) {
+-                if (ISBITSET(ke->relbits, a)) {
+-                    if (a == 0)
+-                        KdEnqueuePointerEvent(pi, flags, ke->rel[a], 0, 0);
+-                    else if (a == 1)
+-                        KdEnqueuePointerEvent(pi, flags, 0, ke->rel[a], 0);
+-                }
+-                ke->rel[a] = 0;
+-            }
+-            break;
+-        }
++    /* Absolute axes (tablets): keep prevabs in sync; mice never hit this. */
+     for (i = 0; i < ke->max_abs; i++)
+         if (ke->abs[i] != ke->prevabs[i]) {
+             int a;
+-
+-            ErrorF("abs");
+-            for (a = 0; a <= ke->max_abs; a++) {
+-                if (ISBITSET(ke->absbits, a))
+-                    ErrorF(" %d=%d", a, ke->abs[a]);
++            for (a = 0; a <= ke->max_abs; a++)
+                 ke->prevabs[a] = ke->abs[a];
+-            }
+-            ErrorF("\n");
+             break;
+         }
+-
+-    if (ev->code == REL_WHEEL) {
+-        for (i = 0; i < abs(ev->value); i++) {
+-            if (ev->value > 0)
+-                flags |= KD_BUTTON_4;
+-            else
+-                flags |= KD_BUTTON_5;
+-
+-            KdEnqueuePointerEvent(pi, flags, 0, 0, 0);
+-
+-            if (ev->value > 0)
+-                flags &= ~KD_BUTTON_4;
+-            else
+-                flags &= ~KD_BUTTON_5;
+-
+-            KdEnqueuePointerEvent(pi, flags, 0, 0, 0);
+-        }
+-    }
+-
+ }
+ 
+ static void
+@@ -187,14 +176,17 @@
+         unsigned int code = events[i].code;
+         switch (events[i].type) {
+         case EV_SYN:
++            /* End of report — flush accumulated motion as one event. */
++            EvdevPtrMotion(pi, &events[i]);
+             break;
+         case EV_KEY:
+             EvdevPtrBtn(pi, &events[i]);
+             break;
+         case EV_REL:
+             if (code <= REL_MAX) {
++                /* Accumulate; flush happens on EV_SYN so X and Y from
++                 * the same report become a single combined event. */
+                 ke->rel[code] += events[i].value;
+-                EvdevPtrMotion(pi, &events[i]);
+             } else {
+                 static int warned_rel = 0;
+                 if (!warned_rel) {
+@@ -207,7 +199,6 @@
+         case EV_ABS:
+             if (code <= ABS_MAX) {
+                 ke->abs[code] = events[i].value;
+-                EvdevPtrMotion(pi, &events[i]);
+             } else {
+                 static int warned_abs = 0;
+                 if (!warned_abs) {
+@@ -219,6 +210,8 @@
+             break;
+         }
+     }
++    /* Flush any motion in a batch that didn't end on a SYN boundary. */
++    EvdevPtrMotion(pi, NULL);
+ }
+ 
+ const char *kdefaultEvdev[] = {
