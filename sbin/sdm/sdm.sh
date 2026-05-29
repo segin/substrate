@@ -11,6 +11,12 @@ export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 SGREET=/usr/sbin/sgreet
 DISP=:0
 
+# Tear the X server down on TERM/INT (e.g. `rc.d/60-sdm stop`) so we
+# don't orphan Xfbdev when the supervisor is killed.
+XPID=
+cleanup() { [ -n "$XPID" ] && kill "$XPID" 2>/dev/null; exit 0; }
+trap cleanup TERM INT
+
 while :; do
     rm -f /tmp/.X0-lock /tmp/.X11-unix/X0 2>/dev/null
     mkdir -p /tmp/.X11-unix

@@ -1,0 +1,67 @@
+#!/bin/sh
+# /etc/rc.d/60-sdm — start the substrate display manager (graphical login).
+#
+# sdm supervises an Xfbdev server + the sgreet greeter, presenting a
+# graphical "<host> login:" prompt on the framebuffer.  Sequenced 60-*
+# so it comes up last, after every network service (50-nginx).
+#
+# sdm is a foreground supervisor loop and does NOT self-daemonize, so we
+# background it with the shell and capture $! into our own pidfile —
+# same shape as 30-atd.  `stop` sends SIGTERM; sdm traps it and tears
+# down its Xfbdev before exiting.
+#
+# NOTE: sdm drives the framebuffer console (vt1).  If a getty is also
+# running on that console the two fight over the display — disable the
+# console getty when you enable the graphical login.
+
+PROG=/usr/sbin/sdm
+PIDFILE=/var/run/sdm.pid
+
+. /etc/rc.subr
+
+# Stale-pidfile-safe liveness (see /etc/rc.subr): the PID must be alive
+# AND really be this program, so a previous boot's pidfile can't report
+# a false "already running".
+is_running() { pidfile_running "$PIDFILE" "$PROG"; }
+
+case "${1:-start}" in
+    start)
+        if is_running; then
+            echo "sdm: already running (pid $(cat $PIDFILE))"
+            exit 0
+        fi
+        if [ ! -x "$PROG" ] || [ ! -x /usr/sbin/sgreet ] || [ ! -x /usr/bin/Xfbdev ]; then
+            echo "sdm: display manager or X server not installed; skipping"
+            exit 0
+        fi
+        mkdir -p /var/run /tmp/.X11-unix
+        "$PROG" >/var/log/sdm.log 2>&1 &
+        echo $! > "$PIDFILE"
+        ;;
+    stop)
+        if ! is_running; then
+            echo "sdm: not running"
+            exit 0
+        fi
+        pid=$(cat "$PIDFILE")
+        kill -TERM "$pid" 2>/dev/null
+        rm -f "$PIDFILE"
+        ;;
+    status)
+        if is_running; then
+            echo "sdm: running (pid $(cat $PIDFILE))"
+        else
+            echo "sdm: stopped"
+            exit 1
+        fi
+        ;;
+    restart)
+        $0 stop
+        sleep 1
+        $0 start
+        ;;
+    *)
+        echo "usage: $0 {start|stop|status|restart}"
+        exit 1
+        ;;
+esac
