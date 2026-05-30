@@ -28,8 +28,10 @@
 #include <pwd.h>
 #include <grp.h>
 #include <crypt.h>
+#include <signal.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <sys/reboot.h>
 
 #define MAXFIELD 128
 #define SESSION_SCRIPT "/etc/X11/Xsession"
@@ -145,6 +147,30 @@ typedef struct {
     int      line_h;
 } ui_t;
 
+/* Bottom-row action buttons.  Graceful shutdown is a signal to init
+ * (PID 1): SIGUSR2 = reboot, SIGUSR1 = power off -- the same path
+ * /sbin/reboot and /sbin/poweroff take.  If init can't be signalled we
+ * fall back to the reboot(2) syscall directly (the greeter runs as root). */
+#define NBUTTONS 2
+static const char *const btn_label[NBUTTONS]   = { "Reboot", "Power off" };
+static const int         btn_initsig[NBUTTONS] = { SIGUSR2, SIGUSR1 };
+static const int         btn_rbcmd[NBUTTONS]   = { RB_AUTOBOOT, RB_POWER_OFF };
+
+/* Pixel rectangle of button `i` within the greeter window. */
+static void button_geom(const ui_t *u, int i, int *bx, int *by, int *bw, int *bh) {
+    const int pad = 16;
+    *bw = (u->w - pad * (NBUTTONS + 1)) / NBUTTONS;
+    *bh = u->line_h + 10;
+    *by = u->h - *bh - pad;
+    *bx = pad + i * (*bw + pad);
+}
+
+static void do_power_action(int i) {
+    if (kill(1, btn_initsig[i]) == 0)
+        return;                  /* init runs the graceful shutdown_sequence */
+    reboot(btn_rbcmd[i]);        /* fallback: terminate via the kernel */
+}
+
 static void draw(ui_t *u, const char *user, int passlen, int field,
                  const char *msg) {
     int x = 24;
@@ -171,6 +197,18 @@ static void draw(ui_t *u, const char *user, int passlen, int field,
 
     if (msg && msg[0])
         XDrawString(u->dpy, u->win, u->gc, x, y, msg, (int)strlen(msg));
+
+    /* Bottom-row action buttons: outlined boxes with centered labels. */
+    for (i = 0; i < NBUTTONS; i++) {
+        int bx, by, bw, bh, tw, tx, ty;
+        button_geom(u, i, &bx, &by, &bw, &bh);
+        XDrawRectangle(u->dpy, u->win, u->gc, bx, by, bw, bh);
+        tw = XTextWidth(u->font, btn_label[i], (int)strlen(btn_label[i]));
+        tx = bx + (bw - tw) / 2;
+        ty = by + (bh + u->font->ascent - u->font->descent) / 2;
+        XDrawString(u->dpy, u->win, u->gc, tx, ty,
+                    btn_label[i], (int)strlen(btn_label[i]));
+    }
 
     XFlush(u->dpy);
 }
@@ -205,7 +243,7 @@ int main(void) {
     u.line_h = u.font->ascent + u.font->descent + 4;
 
     u.w = 360;
-    u.h = 170;
+    u.h = 215;   /* extra room for the bottom-row action buttons */
     int sw = DisplayWidth(u.dpy, screen);
     int sh = DisplayHeight(u.dpy, screen);
     int px = (sw - u.w) / 2, py = (sh - u.h) / 2;
@@ -219,7 +257,7 @@ int main(void) {
     wa.background_pixel = black;
     wa.border_pixel = white;
     wa.override_redirect = True;   /* no WM is running during the greeter */
-    wa.event_mask = KeyPressMask | ExposureMask;
+    wa.event_mask = KeyPressMask | ButtonPressMask | ExposureMask;
     u.win = XCreateWindow(u.dpy, RootWindow(u.dpy, screen), px, py, u.w, u.h,
                           2, CopyFromParent, InputOutput, CopyFromParent,
                           CWBackPixel | CWBorderPixel | CWOverrideRedirect |
@@ -253,6 +291,26 @@ int main(void) {
 
         if (ev.type == Expose) {
             draw(&u, user, plen, field, msg);
+            continue;
+        }
+        if (ev.type == ButtonPress) {
+            int i;
+            for (i = 0; i < NBUTTONS; i++) {
+                int bx, by, bw, bh;
+                button_geom(&u, i, &bx, &by, &bw, &bh);
+                if (ev.xbutton.x >= bx && ev.xbutton.x < bx + bw &&
+                    ev.xbutton.y >= by && ev.xbutton.y < by + bh) {
+                    /* Drop the keyboard grab and let init bring the
+                     * system down; do_power_action does not return on
+                     * success.  Repaint with a notice if it somehow does. */
+                    XUngrabKeyboard(u.dpy, CurrentTime);
+                    XFlush(u.dpy);
+                    do_power_action(i);
+                    msg = "Shutting down...";
+                    draw(&u, user, plen, field, msg);
+                    break;
+                }
+            }
             continue;
         }
         if (ev.type != KeyPress) continue;
