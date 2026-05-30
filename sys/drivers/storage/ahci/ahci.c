@@ -27,6 +27,7 @@
 #include <kern/resource.h>
 #include <kern/time.h>
 #include <sys/dma.h>
+#include <sys/lock.h>
 #include <drivers/storage/ahci/ahci.h>
 #include <drivers/storage/blkdev.h>
 #include <drivers/storage/scsi/scsi.h>
@@ -67,6 +68,15 @@ typedef struct ahci_port {
     /* Block device (for SATA disks) */
     blkdev_t           bdev;
     int                disk_index;  /* sata0, sata1, ... */
+
+    /* Serialises the single shared command slot / cmd_table against
+     * concurrent callers.  The AHCI engine here uses one command slot and
+     * one command table per port; with kernel preemption enabled two threads
+     * (e.g. two multi-sector reads from exec/ldd) can otherwise enter the
+     * command path at once and clobber each other's FIS/PRDT, producing
+     * corrupted or zero-filled reads.  A spinlock (not a mutex): the block
+     * cache calls ->read with its own spinlock held, so this must not sleep. */
+    spinlock_t         cmd_lock;
 } ahci_port_t;
 
 /*
@@ -217,6 +227,7 @@ static int ahci_port_init(ahci_port_t *ap, hba_port_t *port_regs, int port_num) 
     ap->port_num = port_num;
     ap->regs = port_regs;
     ap->type = AHCI_PORT_TYPE_NONE;
+    spinlock_init(&ap->cmd_lock, "ahci_cmd");
 
     /* Stop command engine */
     if (ahci_port_stop(port_regs) < 0) {
@@ -418,6 +429,11 @@ static int ahci_ata_dma_cmd(ahci_port_t *ap, uint8_t command,
     }
     byte_count = sector_count * ap->sector_size;
 
+    /* Serialise the shared command slot / table against concurrent callers
+     * (kernel preemption can otherwise interleave two reads, corrupting both).
+     * Held across issue + completion poll + data copy. */
+    spinlock_acquire(&ap->cmd_lock);
+
     /* Clear command table */
     memset(tbl, 0, sizeof(hba_cmd_table_t));
 
@@ -435,6 +451,7 @@ static int ahci_ata_dma_cmd(ahci_port_t *ap, uint8_t command,
          */
         dma_buf = ahci_dma_bounce_alloc(byte_count, &data_dma);
         if (!dma_buf) {
+            spinlock_release(&ap->cmd_lock);
             return -1;
         }
         if (is_write) {
@@ -468,6 +485,7 @@ static int ahci_ata_dma_cmd(ahci_port_t *ap, uint8_t command,
         ahci_dma_bounce_free(dma_buf, byte_count);
     }
 
+    spinlock_release(&ap->cmd_lock);
     return ret;
 }
 
@@ -746,6 +764,9 @@ static int ahci_scsi_execute(scsi_link_t *link, scsi_request_t *req) {
         return -1;
     }
 
+    /* Serialise the shared command slot / table (see ahci_ata_dma_cmd). */
+    spinlock_acquire(&ap->cmd_lock);
+
     /* Build ATAPI command via AHCI */
     tbl = ap->cmd_table;
     memset(tbl, 0, sizeof(hba_cmd_table_t));
@@ -775,6 +796,7 @@ static int ahci_scsi_execute(scsi_link_t *link, scsi_request_t *req) {
         dma_buf = ahci_dma_bounce_alloc(req->data_len, &data_dma);
         if (!dma_buf) {
             req->status = SCSI_STATUS_CHECK_CONDITION;
+            spinlock_release(&ap->cmd_lock);
             return -1;
         }
         if (req->flags & SCSI_REQ_WRITE) {
@@ -809,11 +831,13 @@ static int ahci_scsi_execute(scsi_link_t *link, scsi_request_t *req) {
 
     if (ret < 0) {
         req->status = SCSI_STATUS_CHECK_CONDITION;
+        spinlock_release(&ap->cmd_lock);
         return -1;
     }
 
     req->status = SCSI_STATUS_GOOD;
     req->data_xfer = req->data_len;
+    spinlock_release(&ap->cmd_lock);
     return 0;
 }
 
