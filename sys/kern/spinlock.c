@@ -1,4 +1,5 @@
 #include <sys/lock.h>
+#include <sys/preempt.h>
 #include <kern/panic.h>
 
 // Forward declaration for CPU ID helper (architecture specific)
@@ -32,6 +33,13 @@ void spinlock_acquire(spinlock_t *lock) {
         panic("Deadlock: Spinlock already held by current CPU");
     }
 
+    /* Disable kernel preemption BEFORE taking the lock: a thread holding a
+     * spinlock must not be involuntarily switched out (another thread could
+     * then spin on it forever / its CPU could deschedule the holder).
+     * Doing it first guarantees there is no lock-held-but-preemptible
+     * window. */
+    preempt_disable();
+
     // Spin until acquired
     while (__atomic_exchange_n(&lock->locked, 1, __ATOMIC_ACQUIRE)) {
         // TTAS: Spin on read until lock appears free
@@ -54,6 +62,8 @@ bool spinlock_try_acquire(spinlock_t *lock) {
         return false;
     }
 
+    preempt_disable();
+
     /* Try once to acquire the lock */
     if (__atomic_exchange_n(&lock->locked, 1, __ATOMIC_ACQUIRE) == 0) {
         __atomic_store_n(&lock->cpu_id, id, __ATOMIC_RELEASE);
@@ -61,6 +71,7 @@ bool spinlock_try_acquire(spinlock_t *lock) {
         return true;
     }
 
+    preempt_enable_noresched();   /* acquire failed -- undo the disable */
     return false;
 }
 
@@ -70,9 +81,15 @@ void spinlock_release(spinlock_t *lock) {
     }
 
     __atomic_store_n(&lock->cpu_id, 0xFFFFFFFF, __ATOMIC_RELAXED);
-    
+
     // Atomic release
     __atomic_store_n(&lock->locked, 0, __ATOMIC_RELEASE);
+
+    /* Re-allow preemption now that the lock is fully released.  No
+     * reschedule here -- the next timer tick (or an explicit yield) will
+     * preempt if needs_resched is set; doing it here would mean yielding
+     * from arbitrary lock-release sites, some of which are not safe. */
+    preempt_enable_noresched();
 }
 
 bool spinlock_is_held(spinlock_t *lock) {

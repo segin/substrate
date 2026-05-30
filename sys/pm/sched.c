@@ -26,6 +26,8 @@ static spinlock_t tid_lock;
 
 #include <kern/arch.h>
 #include <arch/i386/percpu.h>
+#include <arch/i386/intr.h>
+#include <sys/preempt.h>
 
 #ifdef HOST_TEST
 static thread_t *sched_storage_alloc(void) {
@@ -215,6 +217,28 @@ thread_t *sched_alloc_thread(process_t *proc) {
     return thread;
 }
 
+/*
+ * Kernel-preemption nesting counter, carried per-thread.  Every spinlock
+ * acquire raises it and every release lowers it.  preempt_disable() must
+ * run BEFORE a spinlock's atomic acquire so there is never a window where
+ * the lock is held but the count is still 0.  A timer interrupt that lands
+ * in kernel mode performs an involuntary context switch only when this is
+ * 0 -- i.e. the interrupted context holds no spinlock and is safe to leave.
+ */
+void preempt_disable(void) {
+    if (current_thread)
+        current_thread->preempt_count++;
+}
+
+void preempt_enable_noresched(void) {
+    if (current_thread && current_thread->preempt_count > 0)
+        current_thread->preempt_count--;
+}
+
+uint32_t preempt_count_get(void) {
+    return current_thread ? current_thread->preempt_count : 0;
+}
+
 static void sched_context_switch(thread_t *prev, thread_t *next) {
     if (prev && prev->state == THREAD_RUNNING) prev->state = THREAD_READY;
 
@@ -250,6 +274,14 @@ void sched_yield(void) {
 
     proc_reap_autoreap_zombies();
 
+    /* Disable interrupts across thread selection and the context switch so
+     * a timer tick cannot re-enter sched_yield (kernel preemption) and
+     * corrupt the round-robin cursor or a half-finished switch.  A newly
+     * created thread first runs with interrupts disabled here and re-enables
+     * them itself -- exactly as it already does when first scheduled from
+     * the timer-IRQ preemption path, so this changes nothing for them. */
+    uint32_t _pflags = intr_disable();
+
     extern int percpu_get_cpu_id(void);
     int cpu_id = percpu_get_cpu_id();
 
@@ -266,6 +298,7 @@ void sched_yield(void) {
     static thread_t *rr_last = NULL;
 
     if (!allthread) {
+        intr_restore(_pflags);
         return;
     }
 
@@ -313,12 +346,16 @@ void sched_yield(void) {
         if (t == start) break;
     }
 
-    if (best_thread == current_thread && current_thread->state == THREAD_RUNNING) return;
+    if (best_thread == current_thread && current_thread->state == THREAD_RUNNING) {
+        intr_restore(_pflags);
+        return;
+    }
 
     if (best_thread) {
         rr_last = best_thread;
         sched_context_switch(current_thread, best_thread);
     }
+    intr_restore(_pflags);
 }
 
 void sched_switch(thread_t *next) {
