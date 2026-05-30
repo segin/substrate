@@ -1,0 +1,29 @@
+.TH FGREP 1 "May 2026" "Substrate" "User Commands"
+.SH NAME
+fgrep \- print lines matching a fixed string
+.SH SYNOPSIS
+.B fgrep
+.RI [ OPTION ...]
+.I PATTERN
+.RI [ FILE ...]
+.SH DESCRIPTION
+.B fgrep
+is equivalent to
+.BR "grep \-F" .
+It interprets each
+.I PATTERN
+as a fixed string to be matched literally, with no regular-expression
+metacharacters.  It is provided as a symbolic link to
+.BR grep (1)
+and accepts all of the same options.
+.PP
+.B fgrep
+is deprecated by POSIX; new scripts should use
+.B grep \-F
+instead.
+.SH "EXIT STATUS"
+See
+.BR grep (1).
+.SH SEE ALSO
+.BR grep (1),
+.BR egrep (1)

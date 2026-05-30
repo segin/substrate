@@ -1,0 +1,29 @@
+.TH EGREP 1 "May 2026" "Substrate" "User Commands"
+.SH NAME
+egrep \- print lines matching an extended regular expression
+.SH SYNOPSIS
+.B egrep
+.RI [ OPTION ...]
+.I PATTERN
+.RI [ FILE ...]
+.SH DESCRIPTION
+.B egrep
+is equivalent to
+.BR "grep \-E" .
+It interprets
+.I PATTERN
+as a POSIX extended regular expression (ERE).  It is provided as a symbolic
+link to
+.BR grep (1)
+and accepts all of the same options.
+.PP
+.B egrep
+is deprecated by POSIX; new scripts should use
+.B grep \-E
+instead.
+.SH "EXIT STATUS"
+See
+.BR grep (1).
+.SH SEE ALSO
+.BR grep (1),
+.BR fgrep (1)

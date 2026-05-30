@@ -62,6 +62,29 @@ Detailed record of major implementation milestones. For current system status, s
 - **libsys Library:** Created `lib/sys/` syscall wrapper library with `syscall.S` (raw i386 int 0x80), `syscall.h` (SYS_* constants), and typed wrappers (`vm86()`). Supports mmap, munmap, mprotect, brk syscalls.
 - **Kernel Library Refactor:** Modularized `sys/kern/lib.c` into `sys/lib/string.c`, `printf.c`, and `div64.c`.
 - **Kernel sprintf Enhancements:** Added printf flags: `-`, `+`, ` `, `#`, `0`, numeric width, and conversions: d/i/u/o/x/X/p/s/c.
+- **grep / egrep / fgrep (POSIX.1-2024 + GNU/BSD):** Rewrote `bin/grep/` as a
+  multi-file implementation (`grep.c`, `grep_opts.c`, `grep_pattern.c`,
+  `grep.h`) conformant with POSIX.1-2024, with the common GNU/BSD extensions
+  (BSD wins on conflict): dialects `-E`/`-F`/`-G` plus `egrep`/`fgrep` via
+  `argv[0]`; `-e`/`-f` pattern sources; `-i`/`-v`/`-w`/`-x`; output control
+  `-c`/`-l`/`-L`/`-m`/`-o`/`-q`/`-s`; prefixes `-n`/`-b`/`-H`/`-h`/`--label`;
+  context `-A`/`-B`/`-C`/`-NUM` with `--` group separators; recursion
+  `-r`/`-R` with `-d` and `--include`/`--exclude`; binary handling
+  `-a`/`-I`/`--binary-files`; `-z` NUL data; and `--color`.  POSIX bracket
+  character classes (`[[:alpha:]]` etc.) are translated to ASCII member sets
+  at the grep layer since the engine lacks them; `-w`/`-x` are enforced via
+  match offsets / anchored wrapping.  Spec with EARS requirements + user
+  stories in `docs/specs/grep-spec.md`; man pages `grep.1`/`egrep.1`/`fgrep.1`;
+  host + ASAN test suite under `tests/bin/grep/` (86 cases).  Back-references
+  (BRE `\1`) remain the only unimplemented POSIX feature, pending engine
+  support.
+- **regex engine (`usr.lib/regex`):** Fixed a correctness bug whereby a
+  compiled pattern matched the first input string and then never again — the
+  per-thread visited marker (`nfa_state.last_list_id`) lives on the shared NFA
+  program but the match-time `list_id` counter restarts each call, so stale
+  stamps from a prior match suppressed the new match's threads.
+  `nfa_capture_match()` now clears the stamps at the start of every match.
+  This affected every consumer of the engine (including the previous grep).
 
 ## Build & Testing
 - **Build System:** Root filesystem generation in `dist/`. Fixed `dist` directory generation to include standard Unix hierarchy.

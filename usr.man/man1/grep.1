@@ -1,0 +1,265 @@
+.TH GREP 1 "May 2026" "Substrate" "User Commands"
+.SH NAME
+grep, egrep, fgrep \- print lines matching a pattern
+.SH SYNOPSIS
+.B grep
+.RI [ OPTION ...]
+.I PATTERN
+.RI [ FILE ...]
+.br
+.B grep
+.RI [ OPTION ...]
+.BR \-e " " \fIPATTERN\fR " ... "
+.RI [ FILE ...]
+.br
+.B grep
+.RI [ OPTION ...]
+.BR \-f " " \fIPATTERN_FILE\fR " ... "
+.RI [ FILE ...]
+.SH DESCRIPTION
+.B grep
+searches the named input
+.IR FILE s
+for lines containing a match to the given
+.IR PATTERN .
+If no
+.I FILE
+is given, or when
+.I FILE
+is
+.BR \- ,
+.B grep
+reads standard input.
+By default,
+.B grep
+prints the matching lines.
+.PP
+Two related programs are provided as symbolic links to
+.BR grep ,
+and select a pattern dialect by their name:
+.BR egrep
+behaves as
+.B grep \-E
+(extended regular expressions) and
+.B fgrep
+behaves as
+.B grep \-F
+(fixed strings).
+Both are deprecated by POSIX but retained for compatibility.
+.SH OPTIONS
+.SS Pattern selection and interpretation
+.TP
+.BR \-E ", " \-\-extended\-regexp
+Interpret
+.I PATTERN
+as a POSIX extended regular expression (ERE).
+.TP
+.BR \-F ", " \-\-fixed\-strings
+Interpret
+.I PATTERN
+as a set of fixed strings, separated by newlines, any of which is to be
+matched.
+.TP
+.BR \-G ", " \-\-basic\-regexp
+Interpret
+.I PATTERN
+as a POSIX basic regular expression (BRE).  This is the default.
+.TP
+.BR \-e " " \fIPATTERN\fR ", " \-\-regexp= \fIPATTERN\fR
+Use
+.I PATTERN
+as the pattern.  May be repeated; a line matches if any pattern matches.
+.TP
+.BR \-f " " \fIFILE\fR ", " \-\-file= \fIFILE\fR
+Obtain patterns from
+.IR FILE ,
+one per line.  An empty file contains no patterns and matches nothing.
+.TP
+.BR \-i ", " \-\-ignore\-case
+Ignore case distinctions in both the pattern and the input.
+.TP
+.BR \-w ", " \-\-word\-regexp
+Select only lines containing matches that form whole words.
+.TP
+.BR \-x ", " \-\-line\-regexp
+Select only matches that exactly cover a whole line.
+.TP
+.BR \-v ", " \-\-invert\-match
+Select non-matching lines.
+.SS Bracket expressions
+.B grep
+supports POSIX bracket character classes
+.RB ( [:alpha:] ", " [:digit:] ", " [:alnum:] ", " [:upper:] ", " [:lower:] ,
+.BR [:space:] ", " [:blank:] ", " [:punct:] ", " [:cntrl:] ", " [:graph:] ,
+.BR [:print:] ", " [:xdigit:] )
+inside bracket expressions, evaluated as ASCII.
+Collating symbols
+.RB ( [[.ch.]] )
+and equivalence classes
+.RB ( [[=a=]] )
+are not supported.
+.SS General output control
+.TP
+.BR \-c ", " \-\-count
+Suppress normal output; instead print a count of selected lines per file.
+.TP
+.BR \-l ", " \-\-files\-with\-matches
+Suppress normal output; instead print the name of each input file from which
+output would normally have been printed.
+.TP
+.BR \-L ", " \-\-files\-without\-match
+Print the name of each input file from which no output would normally have
+been printed.
+.TP
+.BR \-m " " \fINUM\fR ", " \-\-max\-count= \fINUM\fR
+Stop reading a file after
+.I NUM
+selected lines.
+.TP
+.BR \-o ", " \-\-only\-matching
+Print only the matched (non-empty) parts of a matching line, with each such
+part on a separate output line.
+.TP
+.BR \-q ", " \-\-quiet ", " \-\-silent
+Quiet; write nothing to standard output.  Exit immediately with zero status
+if any match is found.
+.TP
+.BR \-s ", " \-\-no\-messages
+Suppress error messages about nonexistent or unreadable files.
+.SS Output line prefix control
+.TP
+.BR \-b ", " \-\-byte\-offset
+Print the 0-based byte offset within the input file before each output line
+(or, with
+.BR \-o ,
+before each matched part).
+.TP
+.BR \-H ", " \-\-with\-filename
+Print the file name for each match.  This is the default with more than one
+file.
+.TP
+.BR \-h ", " \-\-no\-filename
+Suppress the prefixing of file names on output.
+.TP
+.BR \-n ", " \-\-line\-number
+Prefix each line of output with its 1-based line number within its file.
+.TP
+.BI \-\-label= LABEL
+Display input actually coming from standard input as input coming from file
+.IR LABEL .
+.SS Context line control
+.TP
+.BR \-A " " \fINUM\fR ", " \-\-after\-context= \fINUM\fR
+Print
+.I NUM
+lines of trailing context after matching lines.
+.TP
+.BR \-B " " \fINUM\fR ", " \-\-before\-context= \fINUM\fR
+Print
+.I NUM
+lines of leading context before matching lines.
+.TP
+.BR \-C " " \fINUM\fR ", " \-\-context= \fINUM\fR ", " \-\fINUM\fR
+Print
+.I NUM
+lines of output context.  Groups separated by intervening non-context lines
+are delimited by a line containing
+.BR \-\- .
+.SS File and directory selection
+.TP
+.BR \-r ", " \-R ", " \-\-recursive
+Read all files under each directory, recursively.  With no
+.I FILE
+operand, search the working directory.
+.TP
+.BI \-\-include= GLOB
+During recursive search, examine only files whose base name matches
+.IR GLOB .
+.TP
+.BI \-\-exclude= GLOB
+During recursive search, skip files whose base name matches
+.IR GLOB .
+.TP
+.BR \-d " " \fIACTION\fR ", " \-\-directories= \fIACTION\fR
+If an input file is a directory, use
+.IR ACTION " (" read ", " skip ", or " recurse )
+to process it.  The default is
+.BR skip .
+.SS Binary file handling
+.TP
+.BR \-a ", " \-\-text
+Process a binary file as if it were text.
+.TP
+.B \-I
+Process a binary file as if it contained no matching data.
+.TP
+.BI \-\-binary\-files= TYPE
+Assume binary files are of the given
+.IR TYPE :
+.BR binary " (default; report a match with a single line)," " text" ", or"
+.BR without\-match .
+.SS Other options
+.TP
+.BR \-z ", " \-\-null\-data
+Treat input and output as sequences of lines terminated by a NUL byte instead
+of a newline.
+.TP
+.BR \-\-color [ =\fIWHEN\fR ], \-\-colour [ =\fIWHEN\fR ]
+Surround matched text with an ANSI color escape.
+.I WHEN
+is
+.BR auto ", " always ", or " never .
+.TP
+.B \-\-help
+Display a usage summary and exit.
+.TP
+.BR \-V ", " \-\-version
+Display version information and exit.
+.SH "EXIT STATUS"
+.TP
+.B 0
+One or more lines were selected.
+.TP
+.B 1
+No lines were selected.
+.TP
+.B 2
+An error occurred (an invalid option, an invalid pattern, or an unreadable
+file).  Under
+.BR \-q ,
+a successful match always yields status 0 even if an error also occurred.
+.SH EXAMPLES
+Find every occurrence of
+.I foo
+with file name and line number across a tree:
+.PP
+.RS
+.B grep \-rn foo .
+.RE
+.PP
+Print just the numbers found in a file:
+.PP
+.RS
+.B grep \-oE '[[:digit:]]+' file
+.RE
+.PP
+Use
+.B grep
+as a test in a script:
+.PP
+.RS
+.B if grep \-q PATTERN file; then ...; fi
+.RE
+.SH CONFORMING TO
+IEEE Std 1003.1-2024 (POSIX.1-2024).  The GNU and BSD extensions documented
+above are also supported; where the two disagree the BSD (FreeBSD) behavior is
+used.  Back-references in basic regular expressions
+.RB ( \e1 .. \e9 )
+are not supported by the underlying regular-expression engine and are the only
+POSIX feature absent.
+.SH SEE ALSO
+.BR sed (1),
+.BR regex (3),
+.BR fnmatch (3)
+.SH AUTHORS
+The Substrate Project.
