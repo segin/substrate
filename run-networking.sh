@@ -38,7 +38,7 @@ for arg in "$@"; do
     esac
 done
 
-APPEND="root=/dev/storage/sata0 trap mousedbg serial_debug"
+APPEND="root=/dev/storage/sata0 trap serial_debug"
 GFX_ARGS=""
 ACCEL_ARG=""
 if [ "$GFX" -eq 1 ]; then
