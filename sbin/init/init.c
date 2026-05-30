@@ -11,8 +11,9 @@
  *      cycle) so a fast-failing getty can't drive a runaway fork
  *      loop.
  *   4. On SIGTERM / SIGINT / SIGQUIT, initiate orderly shutdown:
- *      stop respawning, signal every other process, give them a
- *      grace period, then SIGKILL, sync(), and idle-halt.
+ *      stop respawning, kill the interactive user login sessions,
+ *      run /etc/rc stop, then signal every remaining process, give
+ *      them a grace period, SIGKILL the stragglers, sync(), and halt.
  *
  * The terminal table is statically configured.  A proper
  * /etc/inittab parser is a later step — the current rootfs only
@@ -153,16 +154,86 @@ respawn_dead_lines(time_t now)
 }
 
 /*
+ * Tear down the interactive login sessions init manages before the rc.d
+ * services are stopped.  Each getty setsid()'d, so its pid is the session /
+ * process-group id and the login + shell (+ anything they started, e.g. an X
+ * server via startx) live in that session.  Hang it up, terminate it, give a
+ * short grace, then SIGKILL whatever ignored the signals — a wedged session
+ * (a cooked X server, a shell stuck in an uninterruptible read) must not be
+ * left alive to fight the orderly `/etc/rc stop` that runs next.
+ */
+static void
+terminate_login_sessions(void)
+{
+    int any = 0;
+
+    for (int i = 0; i < NLINES; i++) {
+        pid_t pid = g_lines[i].pid;
+        if (pid == 0) {
+            continue;
+        }
+        /* Signal the whole process group (negative pid) and the session
+         * leader itself; the leader's death also makes the kernel SIGHUP
+         * the controlling terminal's foreground group. */
+        kill(-pid, SIGHUP);
+        kill(-pid, SIGTERM);
+        kill(pid, SIGHUP);
+        kill(pid, SIGTERM);
+        any = 1;
+    }
+    if (!any) {
+        return;
+    }
+
+    fprintf(stderr, "init: terminating user login sessions\n");
+
+    /* Up to ~3 s of grace, exiting early once every managed session leader
+     * is gone. */
+    for (int waited = 0; waited < 3; waited++) {
+        int alive = 0;
+        while (waitpid(-1, NULL, WNOHANG) > 0) { }
+        for (int i = 0; i < NLINES; i++) {
+            if (g_lines[i].pid != 0 && kill(g_lines[i].pid, 0) == 0) {
+                alive = 1;
+            }
+        }
+        if (!alive) {
+            break;
+        }
+        sleep(1);
+    }
+
+    /* Force-kill any session that ignored the hangup so it can't hold the
+     * console / a device busy while the stop scripts run. */
+    for (int i = 0; i < NLINES; i++) {
+        pid_t pid = g_lines[i].pid;
+        if (pid != 0) {
+            kill(-pid, SIGKILL);
+            kill(pid, SIGKILL);
+            g_lines[i].pid = 0;
+        }
+    }
+    while (waitpid(-1, NULL, WNOHANG) > 0) { }
+}
+
+/*
  * Best-effort shutdown.  We've already stopped respawning; now:
- *   - SIGTERM everything, give it ~2 seconds to drain
- *   - SIGKILL anything still alive
+ *   - kill the interactive user login sessions
+ *   - run /etc/rc stop to halt services in reverse start order
+ *   - SIGHUP/SIGTERM everything still alive, give it a grace period
+ *   - SIGKILL the stragglers
  *   - sync()
- *   - idle forever (the kernel will halt once nothing is runnable)
+ *   - reboot()/halt (or idle forever if that somehow returns)
  */
 static void
 shutdown_sequence(void)
 {
     fprintf(stderr, "init: shutdown requested\n");
+
+    /* Kill user login sessions FIRST, before stopping services: a live
+     * (possibly wedged) login or X session must not be left racing the
+     * rc.d stop scripts for the console and devices. */
+    terminate_login_sessions();
 
     /* Stop subsystems in reverse start order before tearing processes
      * down: run `/etc/rc stop`, which walks the /etc/rc.d scripts
