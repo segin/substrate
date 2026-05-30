@@ -1,0 +1,164 @@
+.TH PAGEDAEMON 7 "May 2026" "Substrate" "Miscellaneous Information Manual"
+.SH NAME
+pagedaemon \- kernel page-replacement (pageout) daemon
+.SH SYNOPSIS
+.B pagedaemon
+.RI ( kernel\ process )
+.SH DESCRIPTION
+.B pagedaemon
+is a kernel process that keeps the supply of free physical pages above a
+set of watermarks by reclaiming pages that are not in active use.  It is the
+agent of Substrate's demand-paged virtual memory: when memory runs low it
+ages pages out of the active working set, writes dirty pages to backing
+store, and frees clean pages back to the physical allocator.
+.PP
+The daemon runs as a dedicated kernel thread with no user address space.  It
+appears in the process table with the command name
+.B pagedaemon
+and is flagged as a kernel task; its PID is assigned dynamically at boot.  It
+runs in the time-sharing scheduling class at a low priority (just above the
+idle class), so it yields readily to user and interactive work and only
+consumes CPU when reclamation is actually needed.
+.PP
+The daemon is spawned once, late in boot, from
+.B vm_page_late_init()
+(see
+.BR FILES ).
+Until it has been spawned, reclamation requests are serviced from the idle
+loop of the swapper (PID 0) instead, so the system can make forward progress
+under memory pressure before the daemon exists.
+.SS Operation
+The daemon sleeps until it is needed and wakes on either of two events:
+an explicit wakeup when the free-page count falls toward the low watermark,
+or a periodic timeout (roughly once per second).  On each wake cycle it:
+.IP \(bu 3
+optionally ages pages when the approximate-LRU replacement policy is active;
+.IP \(bu 3
+runs the pageout pass if a shortage is signalled or if its own heuristic
+.RB ( vm_page_should_pageout() )
+judges that the free pool is below target or that too many dirty pages have
+accumulated;
+.IP \(bu 3
+voluntarily yields the CPU.
+.PP
+The pageout pass itself proceeds in stages, escalating only as far as is
+needed to reach the free-page target:
+.IP "1. Cache drain" 4
+The slab/UMA caches are asked to return unused backing pages
+.RB ( uma_reclaim() ).
+.IP "2. Reclaim clean inactive pages" 4
+Pages on the inactive queue that are not dirty are freed immediately.
+.IP "3. Launder dirty inactive pages" 4
+Dirty inactive pages are moved to the laundry queue and written back through
+their object's pager (the swap pager for anonymous memory, the vnode pager
+for file-backed memory).  A page that writes back successfully is marked
+clean and becomes reclaimable; a page whose writeback fails is reactivated so
+the daemon does not spin on it.
+.IP "4. Age active pages" 4
+The active queue is scanned and unreferenced pages are demoted to the
+inactive queue, replenishing the pool of eviction candidates.  Under the
+default CLOCK policy the scan consults each page's hardware reference bit
+(via the pmap layer) and gives referenced pages a second chance; under the
+approximate-LRU policy it maintains a small per-page age counter instead.
+.PP
+If the system is critically short of memory and reclamation cannot meet the
+target, the pageout path invokes an out-of-memory victim selection as a last
+resort.
+.SS Page queues
+Every managed physical page sits on exactly one queue:
+.TP
+.B active
+Recently referenced pages forming the working set.
+.TP
+.B inactive
+Aged pages that are the primary eviction candidates.
+.TP
+.B laundry
+A transient queue holding dirty pages while their writeback is in flight.
+.TP
+.B wired
+Pinned pages (kernel memory, DMA buffers, anything with a non-zero wire
+count) that are exempt from paging.
+.PP
+Free pages are not queued here; they are returned to the buddy physical
+allocator (see
+.BR HISTORY ).
+The daemon drives pages between queues by manipulating per-page state flags
+including the active, inactive, dirty, writeback-in-progress, and busy
+indicators.
+.SS Watermarks
+Reclamation is governed by free-page watermarks, expressed in pages.  Their
+boot defaults are scaled up at startup in proportion to installed RAM
+.RB ( vm_page_tune_thresholds() ),
+taking the larger of the default and the RAM-derived value:
+.TP
+.B free_reserved
+Pages held in reserve for kernel emergency allocations (default 8).
+.TP
+.B free_min
+The critical floor; dropping below it is treated as a hard shortage
+(default 16).
+.TP
+.B free_target
+The level the daemon reclaims up to before going back to sleep
+(default 64).
+.TP
+.B inactive_target
+The desired size of the inactive queue, i.e. how many eviction candidates to
+keep staged (default 128).
+.SS Backing store
+Anonymous (non-file-backed) pages are laundered to a swap area through the
+swap pager.  Swap is activated against a file or block device and tracked
+with a bitmap-based block allocator.  File-backed pages are written back
+through the vnode pager to their originating file.  A page that has been
+written to swap is tagged accordingly so a later fault can read it back in.
+.SS Tuning and control
+The replacement policy can be switched between CLOCK (the default) and
+approximate-LRU at run time
+.RB ( vm_page_set_policy() ).
+The daemon can also be suspended, in which case it wakes, observes the
+suspend flag, and immediately yields without reclaiming \(em useful for
+debugging memory behavior.
+.SH FILES
+.TP
+.B /proc/vmstat
+Live VM counters maintained as the daemon and fault handler run: free,
+active, inactive, wired and laundry page counts, plus cumulative pageins,
+pageouts, faults, copy-on-write faults, reactivations and zero-filled pages.
+.TP
+.B /proc/meminfo
+Summary of total, free and used physical memory.
+.TP
+.B /proc/memtrack
+Per-call-site physical-page allocation accounting.
+.TP
+.B sys/vm/vm_page.c
+Daemon entry point
+.RB ( vm_pagedaemon() ),
+the pageout pass
+.RB ( vm_pageout() ),
+queue management and the watermark definitions.
+.TP
+.B sys/vm/vm_swap.c
+Swap pager and swap-area management.
+.TP
+.B sys/vm/vm_pager.c
+Pager abstraction shared by the swap, vnode and device pagers.
+.SH NOTES
+The page laundering step performs its writeback synchronously while the
+daemon holds the page, so a slow or wedged backing store can stall
+reclamation; this is mitigated by reactivating pages whose writeback fails.
+Because the daemon runs below interactive priority, sustained heavy paging is
+visible as the daemon competing for CPU only when free memory is genuinely
+scarce.
+.SH HISTORY
+The page daemon is part of Substrate's BSD-style virtual memory subsystem,
+which layers a vm_object/pager model and active/inactive page queues over a
+buddy physical-memory allocator and a UMA-backed kernel heap.
+.SH SEE ALSO
+.BR mmap (2),
+.BR reboot (2),
+.BR proc (5),
+.BR init (8)
+.SH AUTHORS
+The Substrate Project.
