@@ -38,7 +38,7 @@ for arg in "$@"; do
     esac
 done
 
-APPEND="root=/dev/storage/sata0 trap serial_debug"
+APPEND="root=/dev/storage/sata0 trap mousedbg serial_debug"
 GFX_ARGS=""
 ACCEL_ARG=""
 if [ "$GFX" -eq 1 ]; then
@@ -109,7 +109,14 @@ fi
 
 # Not exec'd: when qemu exits the script resumes and the EXIT trap
 # tears the macvtap down.
+#
+# i8042=off disables the emulated PS/2 controller (both keyboard and
+# mouse).  The PS/2 mouse path is janky/glitchy under substrate, and we
+# supply usb-kbd + usb-mouse below, so dropping PS/2 leaves a single,
+# clean USB pointer feeding /dev/input/event0 instead of an aggregate of
+# a good USB mouse and a flaky PS/2 one.
 qemu-system-i386 -cpu qemu32,+sse,+sse2 $ACCEL_ARG \
+  -machine pc,i8042=off \
   -drive file=rootfs.img,format=raw,if=none,id=drive0 \
   -device ich9-ahci,id=sata0 \
   -device ide-hd,bus=sata0.0,unit=0,drive=drive0 \
