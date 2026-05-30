@@ -1716,6 +1716,16 @@ static ssize_t nfa_capture_match(nfa_prog *prog, const regex_t *re, const char *
         caps_init[i] = (size_t)-1;
     }
     caps_init[0] = start_pos;
+    /* The per-thread visited marker (nfa_state.last_list_id) lives on the
+     * shared NFA program, but list_id is a per-call counter that restarts at
+     * 1 every match.  Without clearing the stamps left by a previous match on
+     * this same compiled regex, the new call's low list_id values collide with
+     * those stale stamps and add_state() drops the threads -- so a regex would
+     * match the first input string and then never again.  Reset the stamps so
+     * each match starts clean. */
+    for (size_t gi = 0; gi < prog->state_count; ++gi) {
+        prog->states[gi]->last_list_id = 0;
+    }
     thread_list_clear(&clist);
     thread_list_clear(&nlist);
     list_id++;
