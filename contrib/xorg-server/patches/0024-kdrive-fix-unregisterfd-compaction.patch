@@ -1,0 +1,53 @@
+From: substrate
+Subject: kdrive: fix off-by-one in KdUnregisterFd array compaction
+
+KdUnregisterFd removes an input-fd handler from kdInputFds[] and then
+compacts the array.  The shift loop bound was off by one:
+
+    kdNumInputFds--;
+    for (j = i; j < (kdNumInputFds - 1); j++)   /* stops one short */
+        kdInputFds[j] = kdInputFds[j + 1];
+
+After the decrement, moving entries [i+1 .. old-1] into [i .. old-2]
+requires j to run i .. kdNumInputFds-1.  The `- 1` stopped one early,
+so when a NON-last entry was removed the final handler was never
+shifted down -- it stayed in the array as a stale duplicate pointing at
+the device that was just disabled/freed.
+
+This bites on X server reset.  In the display-manager flow the greeter
+(sgreet) is the sole client; when it disconnects at login the server
+regenerates: every input device is disabled (KdUnregisterFd, fd closed,
+driverPrivate NULLed) and re-enabled as a brand-new KdPointerInfo on the
+same reused fd.  The off-by-one left the OLD pointer's handler in
+kdInputFds[], so KdProcessInputEvents kept invoking EvdevPtrRead with the
+stale KdPointerInfo.  Its driverPrivate was NULL, so EvdevPtrRead's
+defensive guard drained-and-discarded every report -- the mouse froze the
+instant the window manager came up, which had been worked around with
+-dumbSched and the driverPrivate junk-pointer guard.
+
+Use the correct bound `j < kdNumInputFds`.
+
+--- a/hw/kdrive/src/kinput.c
++++ b/hw/kdrive/src/kinput.c
+@@ -221,7 +221,20 @@
+             if (do_close)
+                 close(kdInputFds[i].fd);
+             kdNumInputFds--;
+-            for (j = i; j < (kdNumInputFds - 1); j++)
++            /* Shift the tail down over the removed slot.  Bound must be
++             * the (already-decremented) count: to move entries
++             * [i+1 .. old_count-1] into [i .. old_count-2] we iterate
++             * j = i .. kdNumInputFds-1 and copy [j+1].  The old
++             * `j < kdNumInputFds - 1` stopped one short, leaving the
++             * last handler un-shifted -- a stale duplicate that still
++             * pointed at a freed/disabled device.  On X server reset
++             * (the greeter client disconnecting) that stale entry kept
++             * firing EvdevPtrRead with the old KdPointerInfo whose
++             * driverPrivate had been NULLed, so every pointer read hit
++             * the "junk driverPrivate" guard and DRAINED all mouse
++             * motion -- the cursor froze the moment the window manager
++             * connected. */
++            for (j = i; j < kdNumInputFds; j++)
+                 kdInputFds[j] = kdInputFds[j + 1];
+             break;
+         }
