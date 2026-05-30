@@ -33,6 +33,7 @@ typedef struct vm_device_pager {
     uintptr_t phys_base;
     size_t size;
     uint8_t prot;
+    uint8_t cache_mode;   /* VM_PAGER_CACHE_UC (default) or _WC */
 } vm_device_pager_t;
 
 vm_pager_t *vm_pager_allocate(vm_object_type_t type, void *handle, size_t size, uint8_t prot, uint64_t offset) {
@@ -121,6 +122,7 @@ static struct vm_pager *device_alloc(void *handle, size_t size, uint8_t prot, ui
     pager->phys_base = (uintptr_t)handle + (uintptr_t)offset;
     pager->size = size;
     pager->prot = prot;
+    pager->cache_mode = VM_PAGER_CACHE_UC;   /* strict MMIO by default */
     return &pager->base;
 }
 
@@ -147,6 +149,20 @@ bool vm_pager_device_phys(vm_pager_t *pager, uint64_t pindex, uintptr_t *phys_ou
 
     *phys_out = device->phys_base + ((uintptr_t)pindex * 4096);
     return true;
+}
+
+void vm_pager_set_cache_mode(vm_pager_t *pager, uint8_t mode) {
+    if (!pager || pager->ops != &device_pager_ops) {
+        return;
+    }
+    ((vm_device_pager_t *)pager)->cache_mode = mode;
+}
+
+uint8_t vm_pager_device_cache_mode(vm_pager_t *pager) {
+    if (!pager || pager->ops != &device_pager_ops) {
+        return VM_PAGER_CACHE_UC;
+    }
+    return ((vm_device_pager_t *)pager)->cache_mode;
 }
 
 // VNode Pager: File-backed memory mapping

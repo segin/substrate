@@ -35,6 +35,15 @@ int vm_pager_put_pages(vm_pager_t *pager, vm_page_t **m, int count, bool sync);
 bool vm_pager_has_page(vm_pager_t *pager, uint64_t pindex);
 bool vm_pager_device_phys(vm_pager_t *pager, uint64_t pindex, uintptr_t *phys_out);
 
+/* Device-pager cache mode -- selects the fault-time PTE cache attributes.
+ * UC (the default) maps strict MMIO uncached (PCD); WC maps a linear
+ * framebuffer aperture write-combining so blits are not one serialized
+ * uncached store per pixel. */
+#define VM_PAGER_CACHE_UC  0
+#define VM_PAGER_CACHE_WC  1
+void    vm_pager_set_cache_mode(vm_pager_t *pager, uint8_t mode);
+uint8_t vm_pager_device_cache_mode(vm_pager_t *pager);
+
 /* VNode pager helpers (REQ-04-0168/0169) */
 int vnode_pager_getpages(vm_pager_t *pager, vm_page_t **pages, int count, bool sync);
 int vnode_pager_putpages(vm_pager_t *pager, vm_page_t **pages, int count, bool sync);

@@ -670,6 +670,12 @@ static void *fb_fs_mmap(fs_node_t *node, void *addr, size_t length, int prot, in
         vm_object_deallocate(obj);
         return (void *)-1;
     }
+    /* The framebuffer is a linear pixel aperture, not strict MMIO
+     * registers: map it write-combining so the X server's blits coalesce
+     * into burst writes instead of one serialized uncached store per
+     * pixel.  Falls back to uncached automatically when the CPU has no
+     * PAT/WC (see vm_fault's device path). */
+    vm_pager_set_cache_mode(obj->pager, VM_PAGER_CACHE_WC);
     if (vm_map_insert(map, obj, 0, virt, virt + aligned_length, vm_prot, vm_prot, VM_INHERIT_NONE) != 0) {
         vm_object_deallocate(obj);
         return (void *)-1;

@@ -3,6 +3,7 @@
 #include <vm/vm_page.h>
 #include <vm/vm_pager.h>
 #include <arch/i386/pmap.h>
+#include <arch/i386/cpu.h>
 #include <kern/panic.h>
 #include <stddef.h>
 
@@ -126,15 +127,22 @@ int vm_fault(vm_map_t *map, uintptr_t va, uint8_t prot) {
         if (!vm_pager_device_phys(first_obj->pager, pindex, &device_phys)) {
             goto out;
         }
-        /* Device mappings (MMIO apertures like the BGA framebuffer at
-         * /dev/fb0) MUST bypass the CPU cache: PCD on the PTE.  Without
-         * it, userland writes through the mmap'd window get absorbed by
-         * the L1/L2 cache and never reach the device — the X server
-         * runs, draws frames, sees no errors, and the framebuffer
-         * aperture remains untouched (screen all black).  Devices that
-         * actually want cacheable access shouldn't be using the device
-         * pager. */
-        if (pmap_enter(map->pmap, page_va, device_phys, enter_prot, PTE_PCD) < 0) {
+        /* Device mappings must not be plain write-back cacheable, or
+         * userland writes through the mmap'd window get absorbed by the
+         * L1/L2 cache and never reach the device (X draws frames, sees no
+         * errors, screen stays black).  Strict MMIO registers map fully
+         * uncached (PCD).  A linear framebuffer aperture, however, wants
+         * WRITE-COMBINING: stores still reach the device but coalesce into
+         * bursts instead of one serialized uncached transaction per pixel
+         * -- the difference between a usable and a crawling X server.  The
+         * pager carries the cache-mode hint (set by /dev/fb0's mmap); WC
+         * needs PAT, so fall back to PCD when it isn't available. */
+        uint32_t cache_flags = PTE_PCD;
+        if (vm_pager_device_cache_mode(first_obj->pager) == VM_PAGER_CACHE_WC &&
+            i386_cpu_pat_wc_enabled()) {
+            cache_flags = PTE_PAT | PTE_PWT;
+        }
+        if (pmap_enter(map->pmap, page_va, device_phys, enter_prot, cache_flags) < 0) {
             goto out;
         }
 
