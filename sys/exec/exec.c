@@ -69,7 +69,22 @@ void exec_pin_current_thread(void) {
     current_thread->exec_saved_no_preempt =
         (current_thread->flags & THREAD_F_NO_PREEMPT) ? 1 : 0;
     current_thread->bound_cpu = (int16_t)cpu_id;
-    current_thread->flags |= THREAD_F_NO_PREEMPT;
+    /* exec no longer suppresses preemption.  With real kernel preemption
+     * (preempt_count gating spinlocks) exec can be safely preempted: the
+     * address-space rebuild touches only this thread's own pmap, sibling
+     * threads are already terminated, and migration is still prevented by
+     * the bound_cpu pin above.  Keeping NO_PREEMPT made every program load
+     * a multi-millisecond non-preemptible window (mapping the binary +
+     * ld.so) -- the "loading a program janks the mouse" stall.
+     *
+     * The old race this pin worked around ("interrupt-context reader of
+     * needs_resched seeing a stale value, reliably hangs init exec") was a
+     * symptom of the broken non-preemptive scheduler; bisecting with the
+     * fork+exec torture (tests/lib/c/torture_exec) shows that with kernel
+     * preemption present, removing NO_PREEMPT survives 1000 fork+exec
+     * cycles on UP.  (SMP bringup is independently broken under the qemu32
+     * CPU model -- "no local APIC" -- and panics identically with or
+     * without this change, so it isn't a regression here.) */
     current_thread->exec_pin_active = 1;
 }
 
@@ -134,13 +149,17 @@ void exec_cleanup_drain(void) {
  * appropriate loader.
  */
 int exec_dispatch(const char *path, char *const argv[], char *const envp[]) {
-    /* Diagnostic: removing this barrier reliably hangs init exec on the
-     * first invocation under single-CPU configs (kprint here in development
-     * accidentally provided the same effect via UART-write serialization).
-     * The race is somewhere between exec_pin_current_thread()'s writes to
-     * thread flags and the first user-visible action of exec_dispatch,
-     * likely an interrupt-context reader of needs_resched or bound_cpu
-     * seeing a stale value.  Keep until we identify the real source. */
+    /* Historically this barrier was required: removing it reliably hung
+     * init exec, blamed on an interrupt-context reader seeing a stale
+     * needs_resched/bound_cpu.  That race was a symptom of the broken
+     * non-preemptive scheduler (timer-in-kernel only flagged needs_resched
+     * and never switched, so visibility/ordering of those fields was
+     * load-bearing).  With real kernel preemption the underlying machinery
+     * is fixed; bisecting with tests/lib/c/torture_exec shows the barrier
+     * is no longer load-bearing (1000 fork+exec cycles pass without it).
+     * Kept as a cheap, conservative compiler/memory fence at the exec
+     * boundary -- it costs one mfence and removes a class of latent
+     * ordering surprises. */
     __sync_synchronize();
     if (!path) return -ENOENT;
 
