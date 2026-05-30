@@ -75,9 +75,10 @@ Detailed record of major implementation milestones. For current system status, s
   at the grep layer since the engine lacks them; `-w`/`-x` are enforced via
   match offsets / anchored wrapping.  Spec with EARS requirements + user
   stories in `docs/specs/grep-spec.md`; man pages `grep.1`/`egrep.1`/`fgrep.1`;
-  host + ASAN test suite under `tests/bin/grep/` (86 cases).  Back-references
-  (BRE `\1`) remain the only unimplemented POSIX feature, pending engine
-  support.
+  host + ASAN test suite under `tests/bin/grep/` (93 cases, ASAN leak-clean).
+  POSIX BRE back-references `\1`..`\9` are supported (see the regex engine
+  entry); locale collating/equivalence classes remain the only POSIX feature
+  absent (Substrate is C/POSIX-locale, ASCII).
 - **regex engine (`usr.lib/regex`):** Fixed a correctness bug whereby a
   compiled pattern matched the first input string and then never again — the
   per-thread visited marker (`nfa_state.last_list_id`) lives on the shared NFA
@@ -85,6 +86,19 @@ Detailed record of major implementation milestones. For current system status, s
   stamps from a prior match suppressed the new match's threads.
   `nfa_capture_match()` now clears the stamps at the start of every match.
   This affected every consumer of the engine (including the previous grep).
+- **regex engine — BRE back-references:** Added POSIX `\1`..`\9` support to the
+  safe engine.  A back-reference compiles to a new `NFA_BACKREF` node; because
+  the construct is non-regular the DFA/Pike-VM path cannot model it, so
+  patterns containing a back-reference are matched by a new recursive
+  backtracking matcher (`nfa_bt`/`safe_regex_backtrack`) over the same NFA,
+  bounded by the `match_steps` budget and a recursion-depth cap (clean
+  `MATCH_TIMEOUT` on overrun, never a hang/crash).  ERE keeps `\N` literal
+  (BSD).  Also fixed capture-group numbering to follow the opening parenthesis
+  (POSIX) rather than the closing one, which nested-group captures and
+  back-references depend on.
+- **regex engine — charclass leak:** `nfa_free()` now releases the
+  `regex_charclass` owned by each `NFA_CLASS` state (transferred from the AST
+  at compile time), fixing a bounded per-pattern compile-time leak.
 
 ## Build & Testing
 - **Build System:** Root filesystem generation in `dist/`. Fixed `dist` directory generation to include standard Unix hierarchy.

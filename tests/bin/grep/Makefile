@@ -48,11 +48,8 @@ asan: $(GREP_ASAN)
 	ln -sf grep_asan egrep
 	ln -sf grep_asan fgrep
 
-# Leak checking stays on (covers grep's own allocations); a pre-existing,
-# bounded compile-time leak in the shared regex engine is suppressed via
-# lsan.supp so it does not mask grep regressions.
-ASAN_ENV = ASAN_OPTIONS=detect_leaks=1 \
-           LSAN_OPTIONS=suppressions=$(abspath lsan.supp)
+# Leak checking stays on; both grep and the regex engine are leak-clean.
+ASAN_ENV = ASAN_OPTIONS=detect_leaks=1
 
 asan-test: asan
 	$(ASAN_ENV) $(PYTHON) ./test_grep_posix.py $(GREP_ASAN)

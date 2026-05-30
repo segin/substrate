@@ -15,6 +15,7 @@ typedef enum {
     NODE_QMARK,
     NODE_REPEAT,
     NODE_GROUP,
+    NODE_BACKREF,
     NODE_BOL,
     NODE_EOL
 } node_type_t;
@@ -52,6 +53,7 @@ typedef enum {
     NFA_SPLIT,
     NFA_MATCH,
     NFA_SAVE,
+    NFA_BACKREF,
     NFA_BOL,
     NFA_EOL
 } nfa_type_t;
@@ -111,9 +113,10 @@ typedef struct dfa_prog {
 
 typedef struct safe_regex {
     nfa_prog *nfa;
-    dfa_prog *dfa;
+    dfa_prog *dfa;          /* NULL when has_backref (DFA can't model backrefs) */
     size_t capture_count;
     unsigned flags;
+    int has_backref;        /* pattern uses \1..\9; use the backtracking matcher */
 } safe_regex;
 
 typedef struct thread {
@@ -166,6 +169,7 @@ typedef struct parser {
     int extended;
     int utf8;
     size_t capture_count;
+    int has_backref;
     regex_err_t err;
 } parser;
 
@@ -354,7 +358,7 @@ static int charclass_match(const regex_charclass *cc, uint32_t cp, int icase, in
 
 static regex_node *parse_regex(parser *p);
 
-static regex_node *create_group_node(parser *p, regex_node *n) {
+static regex_node *create_group_node(parser *p, regex_node *n, size_t group_id) {
     regex_node *g = node_new(NODE_GROUP);
     if (!g) {
         node_free(n);
@@ -362,13 +366,17 @@ static regex_node *create_group_node(parser *p, regex_node *n) {
         return NULL;
     }
     g->left = n;
-    g->group_id = ++p->capture_count;
+    g->group_id = group_id;
     return g;
 }
 
 static regex_node *parse_group_extended(parser *p) {
     regex_node *n;
+    size_t group_id;
     parser_get(p);
+    /* POSIX: a group is numbered by its opening parenthesis, so the id must be
+     * assigned before its contents (which may contain nested groups). */
+    group_id = ++p->capture_count;
     n = parse_regex(p);
     if (!n) {
         return NULL;
@@ -378,13 +386,15 @@ static regex_node *parse_group_extended(parser *p) {
         p->err = REGEX_ERR_SYNTAX;
         return NULL;
     }
-    return create_group_node(p, n);
+    return create_group_node(p, n, group_id);
 }
 
 static regex_node *parse_group_basic(parser *p) {
     regex_node *n;
+    size_t group_id;
     parser_get(p);
     parser_get(p);
+    group_id = ++p->capture_count;
     n = parse_regex(p);
     if (!n) {
         return NULL;
@@ -394,7 +404,7 @@ static regex_node *parse_group_basic(parser *p) {
         p->err = REGEX_ERR_SYNTAX;
         return NULL;
     }
-    return create_group_node(p, n);
+    return create_group_node(p, n, group_id);
 }
 
 static regex_node *parse_charclass(parser *p) {
@@ -697,6 +707,34 @@ static regex_node *parse_escape(parser *p) {
             return NULL;
         }
         n->literal = cp;
+        return n;
+    case '1': case '2': case '3': case '4': case '5':
+    case '6': case '7': case '8': case '9':
+        /* Back-reference (POSIX BRE).  ERE has no back-references in the
+         * BSD/POSIX dialect, so there \N stays a literal digit. */
+        if (!p->extended) {
+            size_t group = (size_t)(c - '0');
+            if (group > p->capture_count) {
+                /* reference to a group that has not been opened */
+                p->err = REGEX_ERR_SYNTAX;
+                return NULL;
+            }
+            n = node_new(NODE_BACKREF);
+            if (!n) {
+                p->err = REGEX_ERR_NOMEM;
+                return NULL;
+            }
+            n->group_id = group;
+            p->has_backref = 1;
+            return n;
+        }
+        /* FALLTHROUGH: ERE treats \N as a literal */
+        n = node_new(NODE_LITERAL);
+        if (!n) {
+            p->err = REGEX_ERR_NOMEM;
+            return NULL;
+        }
+        n->literal = c;
         return n;
     default:
         n = node_new(NODE_LITERAL);
@@ -1065,6 +1103,16 @@ static frag frag_class(nfa_prog *prog, regex_charclass *cc) {
     return f;
 }
 
+static frag frag_backref(nfa_prog *prog, size_t group_id) {
+    frag f;
+    nfa_state *s = nfa_state_new(prog, NFA_BACKREF);
+    /* The group this back-reference reproduces; reuses save_slot storage. */
+    s->save_slot = (int)group_id;
+    f.start = s;
+    f.out = list1(&s->out);
+    return f;
+}
+
 static frag frag_anchor(nfa_prog *prog, nfa_type_t type) {
     frag f;
     nfa_state *s = nfa_state_new(prog, type);
@@ -1206,6 +1254,9 @@ static frag compile_node(nfa_prog *prog, regex_node *n) {
     case NODE_GROUP:
         f = frag_group(prog, compile_node(prog, n->left), n->group_id);
         break;
+    case NODE_BACKREF:
+        f = frag_backref(prog, n->group_id);
+        break;
     default:
         break;
     }
@@ -1219,7 +1270,17 @@ static void nfa_free(nfa_prog *prog) {
         return;
     }
     for (i = 0; i < prog->state_count; ++i) {
-        free(prog->states[i]);
+        nfa_state *s = prog->states[i];
+        if (s) {
+            /* A NFA_CLASS state owns the regex_charclass transferred from the
+             * AST (see ast->nfa conversion, which nulls the AST pointer), so
+             * it must release it here -- node_free() no longer can. */
+            if (s->charclass) {
+                free(s->charclass->ranges);
+                free(s->charclass);
+            }
+            free(s);
+        }
     }
     free(prog->states);
     free(prog);
@@ -1930,21 +1991,38 @@ static int dfa_match_span(const regex_t *re, safe_regex *sre, const char *text, 
     return 0;
 }
 
+static ssize_t safe_regex_backtrack(const regex_t *re, const char *text, size_t text_len,
+                                    size_t *capture_offsets, size_t max_captures,
+                                    regex_err_t *out_err);
+
 static ssize_t safe_regex_match_internal(const regex_t *re, const char *text, size_t text_len,
                                          size_t *capture_offsets, size_t max_captures,
                                          regex_err_t *out_err,
                                          uint8_t *scratch_set, size_t scratch_cap) {
     safe_regex *sre = (safe_regex *)re->impl;
-    size_t cap_count = sre->capture_count * 2;
+    size_t cap_count;
     size_t start_pos = 0;
     int anchored = (re->flags & REGEX_FLAG_ANCHORED) != 0;
 
-    if (!sre || !sre->dfa || !sre->nfa) {
+    if (!sre || !sre->nfa) {
         if (out_err) {
             *out_err = REGEX_ERR_INTERNAL;
         }
         return -REGEX_ERR_INTERNAL;
     }
+    /* Back-reference patterns have no DFA; route them to the backtracker so
+     * find_all() and the iterator (which call this directly) also work. */
+    if (sre->has_backref) {
+        return safe_regex_backtrack(re, text, text_len, capture_offsets,
+                                    max_captures, out_err);
+    }
+    if (!sre->dfa) {
+        if (out_err) {
+            *out_err = REGEX_ERR_INTERNAL;
+        }
+        return -REGEX_ERR_INTERNAL;
+    }
+    cap_count = sre->capture_count * 2;
 
     if (capture_offsets && max_captures >= cap_count) {
         size_t i;
@@ -1990,6 +2068,248 @@ static ssize_t safe_regex_match_internal(const regex_t *re, const char *text, si
     return -1;
 }
 
+/* -------------------------------------------------------------------------
+ * Backtracking matcher.
+ *
+ * Back-references (\1..\9) make the language non-regular, so the DFA/Pike-VM
+ * path cannot handle them.  Patterns that use a back-reference are matched by
+ * this recursive backtracker over the same compiled NFA (which carries an
+ * NFA_BACKREF state).  A global step budget (re->limits.match_steps) bounds
+ * catastrophic backtracking, and a recursion-depth cap keeps the user stack
+ * bounded on greedy loops; exceeding either yields a clean MATCH_TIMEOUT
+ * rather than a hang or crash.
+ * ---------------------------------------------------------------------- */
+#define BT_MAX_DEPTH 40000u
+
+typedef struct bt_ctx {
+    const char *text;
+    size_t len;
+    unsigned flags;
+    size_t *caps;
+    size_t ncaps;
+    size_t steps;
+    size_t max_steps;
+    int timed_out;
+} bt_ctx;
+
+static int bt_decode(bt_ctx *c, size_t pos, uint32_t *cp, size_t *adv) {
+    if (c->flags & REGEX_FLAG_UTF8) {
+        size_t i = pos;
+        if (!regex_utf8_decode(c->text, c->len, &i, cp)) {
+            return 0;
+        }
+        *adv = (i > pos) ? (i - pos) : 1;
+        return 1;
+    }
+    *cp = (uint8_t)c->text[pos];
+    *adv = 1;
+    return 1;
+}
+
+static int nfa_bt(bt_ctx *c, nfa_state *s, size_t pos, size_t depth) {
+    if (depth > BT_MAX_DEPTH) {
+        c->timed_out = 1;
+        return 0;
+    }
+    for (;;) {
+        if (c->steps++ > c->max_steps) {
+            c->timed_out = 1;
+            return 0;
+        }
+        switch (s->type) {
+        case NFA_MATCH:
+            c->caps[1] = pos;           /* end of group 0 (whole match) */
+            return 1;
+        case NFA_EPSILON:
+            s = s->out;
+            continue;
+        case NFA_CHAR: {
+            uint32_t cp;
+            size_t adv;
+            if (pos >= c->len || !bt_decode(c, pos, &cp, &adv)) {
+                return 0;
+            }
+            if (!match_char(s->ch, cp, c->flags)) {
+                return 0;
+            }
+            pos += adv;
+            s = s->out;
+            continue;
+        }
+        case NFA_DOT: {
+            uint32_t cp;
+            size_t adv;
+            if (pos >= c->len || !bt_decode(c, pos, &cp, &adv)) {
+                return 0;
+            }
+            if (!(c->flags & REGEX_FLAG_DOTALL) && regex_is_newline(cp)) {
+                return 0;
+            }
+            pos += adv;
+            s = s->out;
+            continue;
+        }
+        case NFA_CLASS: {
+            uint32_t cp;
+            size_t adv;
+            if (pos >= c->len || !bt_decode(c, pos, &cp, &adv)) {
+                return 0;
+            }
+            if (!match_class_char(s->charclass, cp, c->flags)) {
+                return 0;
+            }
+            pos += adv;
+            s = s->out;
+            continue;
+        }
+        case NFA_BOL:
+            if (pos == 0 ||
+                ((c->flags & REGEX_FLAG_MULTILINE) && c->text[pos - 1] == '\n')) {
+                s = s->out;
+                continue;
+            }
+            return 0;
+        case NFA_EOL:
+            if (pos == c->len ||
+                ((c->flags & REGEX_FLAG_MULTILINE) && c->text[pos] == '\n')) {
+                s = s->out;
+                continue;
+            }
+            return 0;
+        case NFA_SPLIT:
+            if (nfa_bt(c, s->out, pos, depth + 1)) {
+                return 1;
+            }
+            if (c->timed_out) {
+                return 0;
+            }
+            s = s->out1;
+            continue;
+        case NFA_SAVE: {
+            int slot = s->save_slot;
+            size_t saved = 0;
+            int in_range = slot >= 0 && (size_t)slot < c->ncaps;
+            if (in_range) {
+                saved = c->caps[slot];
+                c->caps[slot] = pos;
+            }
+            if (nfa_bt(c, s->out, pos, depth + 1)) {
+                return 1;
+            }
+            if (in_range) {
+                c->caps[slot] = saved;      /* restore on backtrack */
+            }
+            return 0;
+        }
+        case NFA_BACKREF: {
+            size_t g = (size_t)s->save_slot;
+            size_t so, eo, glen, k;
+            if (2 * g + 1 >= c->ncaps) {
+                return 0;
+            }
+            so = c->caps[2 * g];
+            eo = c->caps[2 * g + 1];
+            if (so == (size_t)-1 || eo == (size_t)-1 || eo < so) {
+                /* group did not participate -> matches the empty string */
+                s = s->out;
+                continue;
+            }
+            glen = eo - so;
+            if (pos + glen > c->len) {
+                return 0;
+            }
+            for (k = 0; k < glen; ++k) {
+                uint32_t a = (uint8_t)c->text[so + k];
+                uint32_t b = (uint8_t)c->text[pos + k];
+                if (c->flags & REGEX_FLAG_ICASE) {
+                    a = regex_ascii_tolower(a);
+                    b = regex_ascii_tolower(b);
+                }
+                if (a != b) {
+                    return 0;
+                }
+            }
+            pos += glen;
+            s = s->out;
+            continue;
+        }
+        default:
+            return 0;
+        }
+    }
+}
+
+static ssize_t safe_regex_backtrack(const regex_t *re, const char *text, size_t text_len,
+                                    size_t *capture_offsets, size_t max_captures,
+                                    regex_err_t *out_err) {
+    safe_regex *sre = (safe_regex *)re->impl;
+    size_t cap_count = sre->capture_count * 2;
+    size_t *caps;
+    bt_ctx c;
+    size_t start;
+    int anchored = (re->flags & REGEX_FLAG_ANCHORED) != 0;
+
+    caps = (size_t *)malloc(cap_count * sizeof(*caps));
+    if (!caps) {
+        if (out_err) {
+            *out_err = REGEX_ERR_NOMEM;
+        }
+        return -REGEX_ERR_NOMEM;
+    }
+    c.text = text;
+    c.len = text_len;
+    c.flags = re->flags;
+    c.caps = caps;
+    c.ncaps = cap_count;
+    c.steps = 0;
+    c.max_steps = re->limits.match_steps;
+    c.timed_out = 0;
+
+    for (start = 0; start <= text_len;) {
+        size_t i;
+        for (i = 0; i < cap_count; ++i) {
+            caps[i] = (size_t)-1;
+        }
+        caps[0] = start;
+        if (nfa_bt(&c, sre->nfa->start, start, 0)) {
+            if (capture_offsets && max_captures >= cap_count) {
+                memcpy(capture_offsets, caps, cap_count * sizeof(*capture_offsets));
+            }
+            free(caps);
+            if (out_err) {
+                *out_err = REGEX_OK;
+            }
+            return (ssize_t)sre->capture_count;
+        }
+        if (c.timed_out) {
+            free(caps);
+            if (out_err) {
+                *out_err = REGEX_ERR_MATCH_TIMEOUT;
+            }
+            return -REGEX_ERR_MATCH_TIMEOUT;
+        }
+        if (anchored || sre->nfa->uses_bol) {
+            break;
+        }
+        if (re->flags & REGEX_FLAG_UTF8) {
+            size_t idx = start;
+            uint32_t cp;
+            if (!regex_utf8_decode(text, text_len, &idx, &cp) || idx == start) {
+                start++;
+            } else {
+                start = idx;
+            }
+        } else {
+            start++;
+        }
+    }
+    free(caps);
+    if (out_err) {
+        *out_err = REGEX_OK;
+    }
+    return -1;
+}
+
 static ssize_t safe_regex_match(const regex_t *re, const char *text, size_t text_len,
                                 size_t *capture_offsets, size_t max_captures,
                                 regex_err_t *out_err) {
@@ -2003,6 +2323,11 @@ static ssize_t safe_regex_match(const regex_t *re, const char *text, size_t text
             *out_err = REGEX_ERR_INTERNAL;
         }
         return -REGEX_ERR_INTERNAL;
+    }
+
+    if (sre->has_backref) {
+        return safe_regex_backtrack(re, text, text_len, capture_offsets,
+                                    max_captures, out_err);
     }
 
     scratch_cap = bitset_bytes(sre->nfa->state_count);
@@ -2674,10 +2999,15 @@ static regex_err_t safe_regex_compile(regex_t *re, const char *pattern, unsigned
         return REGEX_ERR_COMPILE_LIMIT;
     }
 
-    dfa = dfa_build(prog, flags, re->limits.max_states);
-    if (!dfa) {
-        nfa_free(prog);
-        return REGEX_ERR_NOMEM;
+    /* A back-reference makes the language non-regular, so the DFA span
+     * pre-filter cannot represent it; such patterns are matched purely by the
+     * backtracking matcher (safe_regex_backtrack) and need no DFA. */
+    if (!p.has_backref) {
+        dfa = dfa_build(prog, flags, re->limits.max_states);
+        if (!dfa) {
+            nfa_free(prog);
+            return REGEX_ERR_NOMEM;
+        }
     }
 
     sre = (safe_regex *)calloc(1, sizeof(*sre));
@@ -2691,6 +3021,7 @@ static regex_err_t safe_regex_compile(regex_t *re, const char *pattern, unsigned
     sre->dfa = dfa;
     sre->capture_count = prog->capture_count;
     sre->flags = flags;
+    sre->has_backref = p.has_backref;
     re->impl = sre;
     return REGEX_OK;
 }

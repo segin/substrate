@@ -255,8 +255,13 @@ IEEE Std 1003.1-2024 (POSIX.1-2024).  The GNU and BSD extensions documented
 above are also supported; where the two disagree the BSD (FreeBSD) behavior is
 used.  Back-references in basic regular expressions
 .RB ( \e1 .. \e9 )
-are not supported by the underlying regular-expression engine and are the only
-POSIX feature absent.
+are supported; in extended regular expressions
+.B \eN
+is a literal digit, matching BSD.  Locale-specific collating symbols
+.RB ( [[.ch.]] )
+and equivalence classes
+.RB ( [[=a=]] )
+are not supported (Substrate uses the C/POSIX locale).
 .SH SEE ALSO
 .BR sed (1),
 .BR regex (3),

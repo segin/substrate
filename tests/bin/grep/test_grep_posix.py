@@ -75,6 +75,23 @@ def body(g, s):
     s.check("caret anchor", g.run(["^alpha", f])[1], "alpha\n")
     s.check("dollar anchor", g.run(["end$", f])[1], "the end\n")
 
+    # BRE back-references (REQ-GREP, POSIX BRE)
+    s.check("backref double char",
+            g.run([r"\(.\)\1"], stdin="abc\nbook\nfoo\n")[1], "book\nfoo\n")
+    s.check("backref word repeat",
+            g.run([r"\(abc\)\1"], stdin="abcabc\nabcdef\n")[1], "abcabc\n")
+    s.check("backref no match",
+            g.run([r"\(a\)\1"], stdin="ab\nba\n")[1], "")
+    s.check("backref nested groups",
+            g.run([r"\(\(a\)\(b\)\)\3\2"], stdin="abba\nabab\n")[1], "abba\n")
+    s.check("backref with -i",
+            g.run(["-i", r"\(a\)\1"], stdin="aA\nxy\n")[1], "aA\n")
+    s.check_rc("backref to absent group errors",
+               g.run([r"\1x"], stdin="z\n")[0], 2)
+    # ERE keeps \N literal (BSD: no ERE back-references)
+    s.check("ERE backslash-1 is literal",
+            g.run(["-E", r"(a)\1"], stdin="a1\naa\n")[1], "a1\n")
+
     # no final newline is still processed (REQ-127)
     dn, pn = make_files(nonl="last line no nl")
     s.check("no trailing newline",

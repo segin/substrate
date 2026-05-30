@@ -38,24 +38,26 @@ Concrete consequences of this policy are captured in §6 (Conflict Register).
 ### 1.2 Engine dependency & deviations
 
 `grep` is built on the in-tree regex engine (`usr.lib/regex`,
-`<regex.h>`/`regex_compile`/`regex_match`). The engine today supports BRE/ERE
+`<regex.h>`/`regex_compile`/`regex_match`). The engine supports BRE/ERE
 groups, intervals `{n,m}`, alternation, anchors `^`/`$`, bracket expressions
-with ranges, and the `\d`/`\w`/`\s` shorthands, with unanchored leftmost
-matching. It does **not** natively support:
+with ranges, the `\d`/`\w`/`\s` shorthands, and — as of the backreference work
+— POSIX BRE **back-references** (`\1`…`\9`), with unanchored leftmost matching.
+It does **not** natively support:
 
 - POSIX bracket **character classes** (`[[:alpha:]]`, `[[:digit:]]`, …),
   equivalence classes (`[[=a=]]`), or collating symbols (`[[.ch.]]`);
-- **back-references** (`\1`…`\9`) in BRE;
 - **word-boundary** assertions (`\<`, `\>`, `\b`).
 
 To meet POSIX requirements without modifying the shared engine, `grep`
 performs a **pattern-translation pass** (REQ-GREP-070..074) that rewrites
 POSIX character classes inside bracket expressions into explicit ASCII ranges
 before compilation, and implements `-w`/`-x` (REQ-GREP-044/045) itself using
-match offsets rather than engine assertions. Back-references and locale-based
-collating/equivalence classes are **DEFERRED** (see §7) and are the only
-POSIX BRE features not provided; this is the single conformance deviation and
-is recorded as such.
+match offsets rather than engine assertions. Back-references *are* supported:
+when a BRE pattern contains one, the engine compiles it with an `NFA_BACKREF`
+node and matches with a bounded backtracking matcher (the DFA/Pike-VM fast
+path cannot model the non-regular construct). Locale-based collating and
+equivalence classes remain **DEFERRED** (see §7); on the effectively ASCII/C
+locale of Substrate this is the only conformance deviation.
 
 ---
 
@@ -109,6 +111,9 @@ demonstration}.
 | REQ-GREP-024 | The system shall treat each `<newline>` within a `-e` argument or `-f` file as a pattern separator yielding multiple alternative patterns. | POSIX | T |
 | REQ-GREP-025 | WHERE `-F` is active, the system shall match a line if any fixed pattern occurs as a substring (subject to `-w`/`-x`). | POSIX | T |
 | REQ-GREP-026 | IF an empty pattern is supplied THEN the system shall treat it as matching every line. | POSIX | T |
+| REQ-GREP-027 | WHERE BRE is active, the system shall support back-references `\1`..`\9` matching the text most recently captured by the corresponding group. | POSIX | T |
+| REQ-GREP-028 | IF a BRE back-reference names a group that has not been opened THEN the system shall reject the pattern and exit 2. | POSIX | T |
+| REQ-GREP-029 | WHERE ERE is active, the system shall treat `\N` as the literal digit N (BSD: ERE has no back-references). | BSD | T |
 
 ### 3.3 Pattern sources
 
@@ -293,8 +298,9 @@ examined. Where they coincide the requirement cites both.)
 
 ## 7. Deferred / Out of scope
 
-- **DEFER-1: BRE back-references `\1`…`\9`.** Requires regex-engine support;
-  not provided by `usr.lib/regex`. Tracked as an engine task, not a grep task.
+- ~~**DEFER-1: BRE back-references `\1`…`\9`.**~~ **DONE** — implemented in
+  `usr.lib/regex` via an `NFA_BACKREF` node and a bounded backtracking matcher;
+  see REQ-GREP-027..029.
 - **DEFER-2: Locale collating symbols `[[.ch.]]` and equivalence classes
   `[[=a=]]`.** Substrate is effectively C/POSIX locale, ASCII; no multichar
   collation. Translation pass rejects them as unsupported.
