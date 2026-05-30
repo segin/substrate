@@ -11,6 +11,7 @@
 #include <arch/i386/fpu/fpu_emu.h>
 
 #include <sys/proc.h>
+#include <sys/preempt.h>
 #include <arch/i386/fpu/fpu_emu.h>
 
 idt_entry_t idt_entries[256] __attribute__((aligned(16)));
@@ -226,7 +227,13 @@ void isr_handler(registers_t *regs) {
         if (regs->int_no >= PIC_SLAVE_REMAP_BASE) outb(PIC_SLAVE_CMD, PIC_EOI);
         outb(PIC_MASTER_CMD, PIC_EOI);
         if (current_thread && !(current_thread->flags & THREAD_F_NO_PREEMPT)) {
-            if (is_usermode) {
+            /* Kernel preemption: preempt now when interrupted in user mode
+             * (always safe) OR in kernel mode with no spinlock held
+             * (preempt_count == 0).  A non-zero count means the interrupted
+             * context is inside a critical section, so we only flag
+             * needs_resched and let the matching release / a later tick
+             * perform the switch. */
+            if (is_usermode || preempt_count_get() == 0) {
                 current_thread->needs_resched = 0;
                 sched_yield();
             } else {
