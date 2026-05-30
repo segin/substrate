@@ -1,15 +1,16 @@
 /*
  * ac97.c - AC'97 audio controller driver.
  *
- * One-shot playback path: each audio_dev_ops_t.write() copies user data
- * into a coherent DMA buffer, builds a BDL entry, advances LVI, and
- * starts the bus master.  IRQ handler simply acks; full ring-buffered
- * streaming with per-block IOC and userspace blocking is left as a
- * TODO once mmap and per-process audio buffering arrive.
+ * Ring-buffered playback with an IRQ-driven refill: write() appends PCM to a
+ * deep software FIFO and the per-slot BCIS interrupt stages it into the BDL
+ * ring autonomously (ac97_feed), so the bus master keeps playing across
+ * scheduling jitter instead of underrunning to silence.  write() blocks only
+ * when the software FIFO fills.
  */
 
 #include "ac97.h"
 #include "audio.h"
+#include "audio_fifo.h"
 
 #include <kern/console.h>
 #include <kern/device.h>
@@ -20,6 +21,7 @@
 #include <sys/dma.h>
 #include <sys/errno.h>
 #include <sys/irq.h>
+#include <sys/lock.h>
 #include <arch/x86-common/io.h>
 #include <arch/i386/intr.h>
 #include <stdio.h>
@@ -30,6 +32,8 @@
 
 #define AC97_CHUNK_BYTES           4096U  /* per-BDL-entry buffer size */
 #define AC97_DEFAULT_RATE          48000U
+#define AC97_FIFO_BYTES            (256U * 1024U) /* deep software PCM FIFO */
+#define AC97_PREBUFFER_SLOTS       8U     /* DMA slots staged before start */
 
 /* ------------------------------------------------------------------- */
 /* Pure helpers (also reachable from host tests)                       */
@@ -107,6 +111,22 @@ typedef struct ac97_dev {
 	int             running;      /* RPBM has been asserted; don't keep
 	                               * rewriting CR every queue */
 
+	/*
+	 * Deep software PCM FIFO that decouples the write() producer from the
+	 * DMA-ring consumer.  write() appends here and blocks only when it
+	 * fills; the IRQ-driven feeder (ac97_feed) drains it into the BDL ring
+	 * autonomously, so the controller keeps playing across scheduling
+	 * jitter instead of underrunning to silence.
+	 */
+	audio_fifo_t    fifo;
+	void           *fifo_buf;
+	dma_addr_t      fifo_phys;
+
+	/* Serialises the DMA-ring feeder against itself across the IRQ
+	 * handler and the priming path (and other CPUs on SMP).  IRQ-safe:
+	 * held with local interrupts masked. */
+	spinlock_t      feed_lock;
+
 	audio_dev_t     audio;
 } ac97_dev_t;
 
@@ -149,6 +169,113 @@ static void ac97_bm_write32(ac97_dev_t *d, uint16_t reg, uint32_t val)
 }
 
 /* ------------------------------------------------------------------- */
+/* DMA-ring feeder (consumer side of the software FIFO)                */
+/* ------------------------------------------------------------------- */
+
+/*
+ * Move PCM from the software FIFO into as many free BDL slots as the ring
+ * has room for.  "Free" = in_flight (writes_queued - slots_played) below
+ * BDL_ENTRIES-1, leaving one slot for the controller's prefetch.  Programs
+ * each filled slot's BDL entry (with IOC so it raises BCIS) and advances LVI.
+ *
+ * The caller must hold d->feed_lock (IRQ-safe), which serialises this against
+ * the IRQ handler, the priming path, and other CPUs — so the FIFO read side
+ * and writes_queued/next_idx/LVI have exactly one writer at a time.
+ */
+static void ac97_feed(ac97_dev_t *d)
+{
+	if (d->chunk_buf == NULL || d->fifo_buf == NULL) {
+		return;
+	}
+	for (;;) {
+		uint32_t played = __atomic_load_n(&d->slots_played,
+		                                  __ATOMIC_ACQUIRE);
+		uint32_t in_flight = d->writes_queued - played;
+		size_t avail;
+		size_t copy_len;
+		uint8_t slot;
+		uint16_t samples;
+
+		if (in_flight >= (AC97_BDL_ENTRIES - 1)) {
+			break;                 /* ring full */
+		}
+		avail = audio_fifo_used(&d->fifo);
+		if (avail == 0) {
+			break;                 /* nothing staged to play */
+		}
+		copy_len = (avail > AC97_CHUNK_BYTES) ? AC97_CHUNK_BYTES : avail;
+
+		slot = d->next_idx;
+		(void)audio_fifo_read(&d->fifo,
+		                      (uint8_t *)d->chunk_buf +
+		                      (size_t)slot * AC97_CHUNK_BYTES, copy_len);
+
+		samples = (uint16_t)(copy_len / 2);  /* 16-bit samples */
+		ac97_build_bdl_entry(&d->bdl[slot],
+		                     (uint32_t)d->chunk_phys +
+		                     (uint32_t)slot * AC97_CHUNK_BYTES,
+		                     samples, 1 /* IOC */);
+		/* BUP: emit silence past the buffer on underrun instead of a
+		 * hard halt that would force a CR restart. */
+		d->bdl[slot].flags |= AC97_BDL_F_BUP;
+
+		/* Publish the BDL store before LVI — the BM may fetch the entry
+		 * the instant LVI changes. */
+		__sync_synchronize();
+
+		d->lvi = slot;
+		ac97_bm_write8(d, AC97_BM_PO_BASE + AC97_BM_LVI, d->lvi);
+
+		d->writes_queued++;
+		d->next_idx = (uint8_t)((slot + 1U) % AC97_BDL_ENTRIES);
+	}
+}
+
+/*
+ * Start or restart the bus master as needed.  Called from the producer with
+ * the device IRQ masked.  While running normally the IRQ feeder keeps the
+ * ring full, so this only acts on the priming and underrun-restart edges.
+ */
+static void ac97_kick(ac97_dev_t *d)
+{
+	unsigned long flags = spinlock_acquire_irq(&d->feed_lock);
+
+	if (d->running) {
+		uint16_t sr = ac97_bm_read16(d, AC97_BM_PO_BASE + AC97_BM_SR);
+		if (sr & AC97_SR_DCH) {
+			/* Underran to a halt; ack terminal bits and re-prime.
+			 * A halt means the controller drained the ring, so
+			 * resync the counters (a trailing BCIS may not have
+			 * fired) — otherwise a stale in_flight would make the
+			 * feeder think the ring is still full and never restart. */
+			ac97_bm_write16(d, AC97_BM_PO_BASE + AC97_BM_SR,
+			                AC97_SR_BCIS | AC97_SR_LVBCI |
+			                AC97_SR_FIFOE);
+			d->slots_played = d->writes_queued;
+			d->running = 0;
+		}
+	}
+
+	if (!d->running) {
+		uint32_t in_flight;
+		ac97_feed(d);
+		in_flight = d->writes_queued -
+		            __atomic_load_n(&d->slots_played, __ATOMIC_ACQUIRE);
+		/* Start once we have a prebuffer cushion, or as soon as the FIFO
+		 * is fully staged into the ring (short clips shorter than the
+		 * cushion must still play). */
+		if (in_flight >= AC97_PREBUFFER_SLOTS ||
+		    (in_flight > 0 && audio_fifo_used(&d->fifo) == 0)) {
+			ac97_bm_write8(d, AC97_BM_PO_BASE + AC97_BM_CR,
+			               AC97_CR_RPBM | AC97_CR_IOCE);
+			d->running = 1;
+		}
+	}
+
+	spinlock_release_irq(&d->feed_lock, flags);
+}
+
+/* ------------------------------------------------------------------- */
 /* IRQ                                                                 */
 /* ------------------------------------------------------------------- */
 
@@ -168,11 +295,16 @@ static int ac97_irq_handler(unsigned int irq, void *dev_id, void *frame)
 		 * with IOC=1; track it as our "slot drained" event so the
 		 * write path's back-pressure can release. */
 		if (sr & AC97_SR_BCIS) {
+			unsigned long f = spinlock_acquire_irq(&d->feed_lock);
 			__atomic_add_fetch(&d->slots_played, 1, __ATOMIC_ACQ_REL);
-			/* Wake any producer that's blocked in ac97_write
-			 * waiting for a ring slot to free up.  Cheap when
-			 * nobody is sleeping (sleepq_wake_all is a no-op
-			 * for empty channels) so safe to call every BCIS. */
+			/* Autonomously refill the freed ring slot(s) from the
+			 * software FIFO so playback continues even while the
+			 * producer thread is descheduled. */
+			ac97_feed(d);
+			spinlock_release_irq(&d->feed_lock, f);
+			/* Wake any producer blocked in ac97_write waiting for
+			 * FIFO space to free up.  Cheap when nobody is sleeping
+			 * (no-op for empty channels) so safe every BCIS. */
 			(void)sleepq_wake_all(d);
 		}
 		ac97_bm_write16(d, AC97_BM_PO_BASE + AC97_BM_SR,
@@ -215,6 +347,7 @@ static int ac97_close(audio_dev_t *adev)
 	d->next_idx      = 0;
 	d->lvi           = 0;
 	d->running       = 0;
+	audio_fifo_reset(&d->fifo);
 	return 0;
 }
 
@@ -264,135 +397,46 @@ static int ac97_write(audio_dev_t *adev, const void *buf, size_t len)
 	ac97_dev_t *d = adev->driver_data;
 	const uint8_t *src = buf;
 	size_t total_consumed = 0;
-	uint8_t  slot;
-	uint16_t samples;
-	size_t copy_len;
-	int started_or_running = 0;
 
-	if (len == 0 || d->chunk_buf == NULL) {
+	if (len == 0 || d->chunk_buf == NULL || d->fifo_buf == NULL) {
 		return (int)len;
 	}
 
 	/*
-	 * Drain as much of the userspace buffer as we can in one syscall.
-	 * Each iteration queues one BDL slot (up to AC97_CHUNK_BYTES =
-	 * 4 KB ≈ 23 ms at 44.1 kHz stereo 16-bit).  The ring holds 32
-	 * slots, so back-to-back queuing here stages ~720 ms of audio
-	 * without bouncing through a fresh write() syscall per slot —
-	 * which is what produced the choppy playback.
+	 * Producer: append PCM to the deep software FIFO and let the feeder
+	 * stage it into the DMA ring.  We block only when the FIFO itself
+	 * fills (256 KB ≈ 1.4 s at 48 kHz stereo 16-bit), so the controller
+	 * is kept fed by the IRQ even when this thread is descheduled under
+	 * load — the cause of the previous choppy playback.
 	 */
 	while (total_consumed < len) {
-		size_t remaining = len - total_consumed;
+		size_t n = audio_fifo_write(&d->fifo, src + total_consumed,
+		                            len - total_consumed);
+		total_consumed += n;
+
+		/* Stage FIFO -> ring and start/restart the bus master. While
+		 * running this is a near no-op (the IRQ feeder does the work);
+		 * it handles the priming and underrun-restart edges. */
+		ac97_kick(d);
+
+		if (total_consumed >= len) {
+			break;
+		}
 
 		/*
-		 * Back-pressure based on our own counters, not the controller's
-		 * CIV.  CIV under QEMU runs ahead of LVI in ways the spec doesn't
-		 * describe, breaking ring math; but BCIS interrupts (one per IOC
-		 * BDL entry completed) are reliable.  We track:
-		 *   writes_queued = total slots we've programmed
-		 *   slots_played  = total BCIS the IRQ handler has counted
-		 * In-flight = writes_queued - slots_played.  Cap at BDL-1 so the
-		 * controller's PIV prefetch always has a slot to grab.
+		 * FIFO full — block until the IRQ feeder drains a chunk and
+		 * frees space.  Race-free: enqueue, then re-check with acquire
+		 * ordering; if the IRQ freed space already, drop through.
 		 */
-		for (;;) {
-			uint32_t played = __atomic_load_n(&d->slots_played,
-			                                  __ATOMIC_ACQUIRE);
-			uint32_t in_flight = d->writes_queued - played;
-			if (in_flight < (AC97_BDL_ENTRIES - 1)) {
-				break;
-			}
-			/*
-			 * Ring full — block until the IRQ handler bumps
-			 * slots_played and wakes us.  We use the device
-			 * pointer as the sleep channel; the wake side is
-			 * `sleepq_wake_all(d)` in ac97_irq_handler when it
-			 * sees BCIS.
-			 *
-			 * Race-free pattern: enqueue THEN re-check the
-			 * condition with acquire ordering.  If the IRQ
-			 * fires between our enqueue and our read of
-			 * slots_played, the read sees the bumped value and
-			 * we drop straight through without sleeping.  If we
-			 * sleep, the wakeup is guaranteed to come from a
-			 * later IRQ (slots_played still has not advanced
-			 * past in_flight, so the next BCIS will).
-			 */
-			if (current_thread) {
-				sleepq_add(d, current_thread);
-				played = __atomic_load_n(&d->slots_played,
-				                         __ATOMIC_ACQUIRE);
-				in_flight = d->writes_queued - played;
-				if (in_flight < (AC97_BDL_ENTRIES - 1)) {
-					sleepq_wake_all(d);  /* dequeue */
-					break;
-				}
-				sched_sleep(d);
+		if (current_thread) {
+			sleepq_add(d, current_thread);
+			if (audio_fifo_free(&d->fifo) > 0) {
+				sleepq_wake_all(d);   /* dequeue, retry */
 			} else {
-				/* No thread context — fall back to spin. */
-				__asm__ volatile("pause");
+				sched_sleep(d);
 			}
-		}
-
-		copy_len = (remaining > AC97_CHUNK_BYTES)
-		           ? AC97_CHUNK_BYTES : remaining;
-
-		slot = d->next_idx;
-		memcpy((uint8_t *)d->chunk_buf + (size_t)slot * AC97_CHUNK_BYTES,
-		       src + total_consumed, copy_len);
-
-		samples = (uint16_t)(copy_len / 2);  /* 16-bit samples */
-		ac97_build_bdl_entry(&d->bdl[slot],
-		                     (uint32_t)d->chunk_phys +
-		                     (uint32_t)slot * AC97_CHUNK_BYTES,
-		                     samples, 1 /* IOC */);
-		/* Set BUP (Buffer Underrun Policy): if the controller drains
-		 * faster than we refill, it emits silence past the buffer
-		 * instead of hard-halting and forcing a CR restart. */
-		d->bdl[slot].flags |= AC97_BDL_F_BUP;
-
-		/* Make the BDL store globally visible BEFORE bumping LVI —
-		 * the BM may fetch this entry the instant LVI changes. */
-		__sync_synchronize();
-
-		d->lvi = slot;
-		ac97_bm_write8(d, AC97_BM_PO_BASE + AC97_BM_LVI, d->lvi);
-
-		d->writes_queued++;
-		d->next_idx = (uint8_t)((slot + 1U) % AC97_BDL_ENTRIES);
-		total_consumed += copy_len;
-		started_or_running = 1;
-	}
-
-	/* Start the bus master.  Avoid re-writing CR while RPBM=1
-	 * (perturbs the engine and broke QEMU CIV reporting in earlier
-	 * iterations) — but DO restart if the controller has halted
-	 * (DCH=1).  That happens after a previous cat finished: the BM
-	 * drains through LVI, fires LVBCI, and clears RPBM.  Without a
-	 * re-arm here the second cat queues bytes that never play. */
-	if (started_or_running && d->running) {
-		uint16_t sr = ac97_bm_read16(d, AC97_BM_PO_BASE + AC97_BM_SR);
-		if (sr & AC97_SR_DCH) {
-			/* Ack any latched terminal-reach bits before restart. */
-			ac97_bm_write16(d, AC97_BM_PO_BASE + AC97_BM_SR,
-			                AC97_SR_BCIS | AC97_SR_LVBCI |
-			                AC97_SR_FIFOE);
-			d->running = 0;
-		}
-	}
-	/* Pre-buffer before kicking the bus master so the producer has
-	 * runway.  Each BDL slot covers ~23 ms at 44.1 kHz stereo 16-bit;
-	 * waiting for AC97_PREBUFFER_SLOTS gives ~185 ms of head-start
-	 * before the controller starts draining.  Once the BM is running
-	 * (d->running stays set across writes), this branch is a no-op. */
-#define AC97_PREBUFFER_SLOTS 8U
-	if (started_or_running && !d->running) {
-		uint32_t in_flight = d->writes_queued -
-		                     __atomic_load_n(&d->slots_played,
-		                                     __ATOMIC_ACQUIRE);
-		if (in_flight >= AC97_PREBUFFER_SLOTS) {
-			ac97_bm_write8(d, AC97_BM_PO_BASE + AC97_BM_CR,
-			               AC97_CR_RPBM | AC97_CR_IOCE);
-			d->running = 1;
+		} else {
+			__asm__ volatile("pause");
 		}
 	}
 
@@ -412,6 +456,10 @@ static int ac97_flush(audio_dev_t *adev)
 	ac97_bm_write8(d, AC97_BM_PO_BASE + AC97_BM_CR, AC97_CR_RR);
 	d->next_idx = 0;
 	d->lvi = 0;
+	d->writes_queued = 0;
+	d->slots_played  = 0;
+	d->running       = 0;
+	audio_fifo_reset(&d->fifo);
 	return 0;
 }
 
@@ -469,6 +517,7 @@ static int ac97_attach(pci_device_t *pdev)
 	}
 	d = &ac97_devices[ac97_device_count];
 	memset(d, 0, sizeof(*d));
+	spinlock_init(&d->feed_lock, "ac97_feed");
 	d->pdev = pdev;
 
 	cmd = pci_read_config16(pdev->bus, pdev->slot, pdev->func,
@@ -526,6 +575,21 @@ static int ac97_attach(pci_device_t *pdev)
 		d->bdl = NULL;
 		return -ENOMEM;
 	}
+
+	/* Deep software PCM FIFO (not DMA-visible, but dma_alloc_coherent is a
+	 * convenient page-backed contiguous allocator that we know works for
+	 * buffers this size). */
+	d->fifo_buf = dma_alloc_coherent(AC97_FIFO_BYTES, &d->fifo_phys);
+	if (d->fifo_buf == NULL) {
+		dma_free_coherent(d->chunk_buf,
+		                  d->chunk_count * AC97_CHUNK_BYTES);
+		dma_free_coherent(d->bdl,
+		                  sizeof(ac97_bdl_entry_t) * AC97_BDL_ENTRIES);
+		d->chunk_buf = NULL;
+		d->bdl = NULL;
+		return -ENOMEM;
+	}
+	audio_fifo_init(&d->fifo, (uint8_t *)d->fifo_buf, AC97_FIFO_BYTES);
 
 	/*
 	 * Reset the PCM-out engine, then point it at the BDL.  RR

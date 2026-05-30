@@ -6,19 +6,21 @@
  * communication, and registers the first detected codec's audio
  * function group as an audio_dev_t.
  *
- * Like the AC'97 driver this is a one-shot playback path: the write()
- * callback copies user PCM into a coherent DMA buffer, builds a single
- * BDL entry, programs stream descriptor 0 (output stream 0 by spec
- * convention), and starts the engine.  Full ring-buffered streaming
- * with IRQ-driven refill belongs to a follow-up commit.
+ * Playback is ring-buffered with an IRQ-driven refill: write() appends PCM to
+ * a deep software FIFO and the BCIS interrupt handler stages it into the
+ * stream-descriptor-0 BDL ring autonomously (hda_feed), so the controller
+ * keeps playing across scheduling jitter instead of underrunning to silence.
  */
 
 #include "hda.h"
 #include "audio.h"
+#include "audio_fifo.h"
 
 #include <kern/console.h>
 #include <kern/device.h>
 #include <kern/pci.h>
+#include <kern/sched.h>
+#include "../../kern/sleepq.h"
 #include <sys/audioio.h>
 #include <sys/dma.h>
 #include <sys/errno.h>
@@ -35,6 +37,8 @@
 #define HDA_BDL_ENTRIES            32
 #define HDA_CHUNK_BYTES            4096U
 #define HDA_DEFAULT_RATE           48000U
+#define HDA_FIFO_BYTES             (256U * 1024U) /* deep software PCM FIFO */
+#define HDA_PREBUFFER_SLOTS        8U     /* DMA slots staged before start */
 
 /* ------------------------------------------------------------------- */
 /* Pure helpers (also reachable from host tests)                       */
@@ -168,11 +172,19 @@ typedef struct hda_dev {
 	int              running;       /* SDCTL.RUN has been set; don't
 	                                 * re-write CTL on every queue */
 
-	/* Serialises hda_write() against itself.  The IRQ handler still
-	 * touches `slots_played` lockless via __atomic_*; everything else
-	 * (next_idx, writes_queued, BDL build, MMIO sequence, running)
-	 * runs under this lock. */
-	spinlock_t       write_lock;
+	/*
+	 * Deep software PCM FIFO decoupling the write() producer from the
+	 * DMA-ring consumer (the IRQ-driven feeder), so the controller keeps
+	 * playing across scheduling jitter instead of underrunning.
+	 */
+	audio_fifo_t     fifo;
+	void            *fifo_buf;
+	dma_addr_t       fifo_phys;
+
+	/* Serialises the DMA-ring feeder (hda_feed) against the IRQ handler,
+	 * the priming path, and other CPUs.  IRQ-safe: held with local
+	 * interrupts masked. */
+	spinlock_t       feed_lock;
 
 	audio_dev_t      audio;
 } hda_dev_t;
@@ -328,6 +340,98 @@ static uint32_t hda_send_verb(hda_dev_t *d, uint8_t cad, uint8_t nid,
 }
 
 /* ------------------------------------------------------------------- */
+/* DMA-ring feeder (consumer side of the software FIFO)                */
+/* ------------------------------------------------------------------- */
+
+/*
+ * Stage PCM from the software FIFO into free BDL slots.  Caller must hold
+ * d->feed_lock (IRQ-safe), which makes this the sole writer of the ring
+ * state across the IRQ handler, the priming path, and other CPUs.
+ */
+static void hda_feed(hda_dev_t *d)
+{
+	if (d->chunk_buf == NULL || d->fifo_buf == NULL) {
+		return;
+	}
+	for (;;) {
+		uint32_t played = __atomic_load_n(&d->slots_played,
+		                                  __ATOMIC_ACQUIRE);
+		uint32_t in_flight = d->writes_queued - played;
+		size_t avail;
+		size_t copy_len;
+		uint8_t slot;
+
+		if (in_flight >= (HDA_BDL_ENTRIES - 1)) {
+			break;
+		}
+		avail = audio_fifo_used(&d->fifo);
+		if (avail == 0) {
+			break;
+		}
+		copy_len = (avail > HDA_CHUNK_BYTES) ? HDA_CHUNK_BYTES : avail;
+
+		slot = d->next_idx;
+		(void)audio_fifo_read(&d->fifo,
+		                      (uint8_t *)d->chunk_buf +
+		                      (size_t)slot * HDA_CHUNK_BYTES, copy_len);
+
+		hda_build_bdl_entry(&d->bdl[slot],
+		                    (uint64_t)d->chunk_phys +
+		                    (uint64_t)slot * HDA_CHUNK_BYTES,
+		                    (uint32_t)copy_len, 1 /* IOC */);
+
+		/* Publish the BDL store before advancing LVI. */
+		__sync_synchronize();
+		hda_write16(d, HDA_SD_BASE + HDA_SD_LVI, slot);
+
+		d->writes_queued++;
+		d->next_idx = (uint8_t)((slot + 1U) % HDA_BDL_ENTRIES);
+	}
+}
+
+/*
+ * Start or restart the output stream as needed.  Called from the producer;
+ * takes the IRQ-safe feed lock.  While running the IRQ feeder keeps the ring
+ * full, so this only acts on the priming and underrun-restart edges.
+ */
+static void hda_kick(hda_dev_t *d)
+{
+	unsigned long flags = spinlock_acquire_irq(&d->feed_lock);
+
+	if (d->running) {
+		uint32_t ctl = hda_read32(d, HDA_SD_BASE + HDA_SD_CTL);
+		if ((ctl & HDA_SDCTL_RUN) == 0) {
+			/* Halted (drained the ring): resync the counters so a
+			 * stale in_flight doesn't block the restart, then
+			 * re-prime. */
+			d->slots_played = d->writes_queued;
+			d->running = 0;
+		}
+	}
+
+	if (!d->running) {
+		uint32_t in_flight;
+		hda_feed(d);
+		in_flight = d->writes_queued -
+		            __atomic_load_n(&d->slots_played, __ATOMIC_ACQUIRE);
+		if (in_flight >= HDA_PREBUFFER_SLOTS ||
+		    (in_flight > 0 && audio_fifo_used(&d->fifo) == 0)) {
+			uint32_t ctl;
+			/* Cyclic buffer length = the full ring; the controller
+			 * wraps to BDL[0] after streaming this many bytes. */
+			hda_write32(d, HDA_SD_BASE + HDA_SD_CBL,
+			            (uint32_t)(HDA_BDL_ENTRIES * HDA_CHUNK_BYTES));
+			ctl = HDA_SDCTL_RUN | HDA_SDCTL_IOCE |
+			      ((uint32_t)d->stream_tag << HDA_SDCTL_STREAM_SHIFT);
+			hda_write32(d, HDA_SD_BASE + HDA_SD_CTL, ctl);
+			d->running = 1;
+		}
+	}
+
+	spinlock_release_irq(&d->feed_lock, flags);
+}
+
+/* ------------------------------------------------------------------- */
 /* IRQ                                                                 */
 /* ------------------------------------------------------------------- */
 
@@ -352,8 +456,14 @@ static int hda_irq_handler(unsigned int irq, void *dev_id, void *frame)
 	sdsts = hda_read8(d, HDA_SD_BASE + HDA_SD_STS);
 	if (sdsts & (HDA_SDSTS_BCIS | HDA_SDSTS_FIFOE | HDA_SDSTS_DESE)) {
 		if (sdsts & HDA_SDSTS_BCIS) {
+			unsigned long f = spinlock_acquire_irq(&d->feed_lock);
 			__atomic_add_fetch(&d->slots_played, 1,
 			                   __ATOMIC_ACQ_REL);
+			/* Autonomously refill freed ring slot(s) from the
+			 * software FIFO so playback survives producer jitter. */
+			hda_feed(d);
+			spinlock_release_irq(&d->feed_lock, f);
+			(void)sleepq_wake_all(d);
 		}
 		hda_write8(d, HDA_SD_BASE + HDA_SD_STS,
 		           sdsts & (HDA_SDSTS_BCIS | HDA_SDSTS_FIFOE |
@@ -386,6 +496,18 @@ static int hda_output_stream_init(hda_dev_t *d)
 		d->bdl = NULL;
 		return -ENOMEM;
 	}
+
+	d->fifo_buf = dma_alloc_coherent(HDA_FIFO_BYTES, &d->fifo_phys);
+	if (d->fifo_buf == NULL) {
+		dma_free_coherent(d->chunk_buf,
+		                  (size_t)HDA_BDL_ENTRIES * HDA_CHUNK_BYTES);
+		dma_free_coherent(d->bdl,
+		                  HDA_BDL_ENTRIES * sizeof(hda_bdl_entry_t));
+		d->chunk_buf = NULL;
+		d->bdl = NULL;
+		return -ENOMEM;
+	}
+	audio_fifo_init(&d->fifo, (uint8_t *)d->fifo_buf, HDA_FIFO_BYTES);
 
 	d->stream_tag = 1;   /* tag 0 is reserved per spec */
 	d->next_idx = 0;
@@ -456,6 +578,7 @@ static int hda_close(audio_dev_t *adev)
 	d->slots_played  = 0;
 	d->next_idx      = 0;
 	d->running       = 0;
+	audio_fifo_reset(&d->fifo);
 	return 0;
 }
 
@@ -473,100 +596,47 @@ static int hda_set_params(audio_dev_t *adev, audio_info_t *info)
 	return 0;
 }
 
-/* Bounded spin budget while waiting for the IRQ handler to drain a
- * slot.  Each iteration is one PAUSE — on a 1 GHz core that's ~5–10 ns,
- * so the cap below resolves to roughly tens of milliseconds in the
- * worst case.  If we exceed it the IRQ is wedged (IOCE not enabled,
- * shared IRQ, controller hung) and we return -EIO instead of hanging
- * the kernel. */
-#define HDA_WRITE_BACKPRESSURE_BUDGET  10000000U
-
 static int hda_write(audio_dev_t *adev, const void *buf, size_t len)
 {
 	hda_dev_t *d = adev->driver_data;
-	size_t copy_len;
-	uint8_t slot;
-	uint32_t ctl;
-	uint32_t spin_iters;
+	const uint8_t *src = buf;
+	size_t total_consumed = 0;
 
-	if (len == 0 || d->chunk_buf == NULL) {
+	if (len == 0 || d->chunk_buf == NULL || d->fifo_buf == NULL) {
 		return (int)len;
 	}
-	copy_len = (len > HDA_CHUNK_BYTES) ? HDA_CHUNK_BYTES : len;
-
-	spinlock_acquire(&d->write_lock);
 
 	/*
-	 * Back-pressure: cap in-flight slots at BDL_ENTRIES-1 so the
-	 * controller always has at least one new slot to prefetch.
-	 * IRQ handler bumps slots_played on each BCIS; we bump
-	 * writes_queued after committing this slot.
-	 *
-	 * Bounded loop: if we never see slots_played advance the IRQ
-	 * is wedged and we surface that as -EIO rather than hanging
-	 * the kernel in a hard spin.
+	 * Producer: append PCM to the deep software FIFO; the IRQ-driven
+	 * feeder stages it into the DMA ring.  Block only when the FIFO
+	 * fills, so the controller stays fed even while this thread is
+	 * descheduled under load.  Single-producer (one stream open at a
+	 * time), matching the framework's per-device usage.
 	 */
-	spin_iters = 0;
-	for (;;) {
-		uint32_t played = __atomic_load_n(&d->slots_played,
-		                                  __ATOMIC_ACQUIRE);
-		uint32_t queued = __atomic_load_n(&d->writes_queued,
-		                                  __ATOMIC_ACQUIRE);
-		uint32_t in_flight = queued - played;
-		if (in_flight < (HDA_BDL_ENTRIES - 1)) {
+	while (total_consumed < len) {
+		size_t n = audio_fifo_write(&d->fifo, src + total_consumed,
+		                            len - total_consumed);
+		total_consumed += n;
+
+		hda_kick(d);   /* prime / restart; no-op while IRQ feeds */
+
+		if (total_consumed >= len) {
 			break;
 		}
-		if (++spin_iters > HDA_WRITE_BACKPRESSURE_BUDGET) {
-			spinlock_release(&d->write_lock);
-			return -EIO;
-		}
-		__asm__ volatile("pause");
-	}
 
-	slot = d->next_idx;
-	memcpy((uint8_t *)d->chunk_buf + (size_t)slot * HDA_CHUNK_BYTES,
-	       buf, copy_len);
-
-	hda_build_bdl_entry(&d->bdl[slot],
-	                    (uint64_t)d->chunk_phys +
-	                    (uint64_t)slot * HDA_CHUNK_BYTES,
-	                    (uint32_t)copy_len, 1 /* IOC */);
-
-	/* Make the BDL store globally visible before LVI / CBL update —
-	 * the controller may fetch this entry the moment LVI changes. */
-	__sync_synchronize();
-
-	hda_write16(d, HDA_SD_BASE + HDA_SD_LVI, slot);
-	/* CBL is the cyclic buffer length — the total byte count the
-	 * controller streams before wrapping.  For a true ring we'd
-	 * compute the sum of all live BDL entries, but with uniform
-	 * CHUNK_BYTES slots that simplifies to entries * CHUNK_BYTES.
-	 * Use the full ring so the controller never thinks we've
-	 * "ended" mid-stream. */
-	hda_write32(d, HDA_SD_BASE + HDA_SD_CBL,
-	            (uint32_t)(HDA_BDL_ENTRIES * HDA_CHUNK_BYTES));
-
-	/* Re-arm if a previous run finished and the stream halted —
-	 * SDCTL.RUN clears when the controller hits LVI without more
-	 * data.  Without this, a second cat queues bytes that never
-	 * play. */
-	if (d->running) {
-		ctl = hda_read32(d, HDA_SD_BASE + HDA_SD_CTL);
-		if ((ctl & HDA_SDCTL_RUN) == 0) {
-			d->running = 0;
+		if (current_thread) {
+			sleepq_add(d, current_thread);
+			if (audio_fifo_free(&d->fifo) > 0) {
+				sleepq_wake_all(d);
+			} else {
+				sched_sleep(d);
+			}
+		} else {
+			__asm__ volatile("pause");
 		}
 	}
-	if (!d->running) {
-		ctl = HDA_SDCTL_RUN | HDA_SDCTL_IOCE |
-		      ((uint32_t)d->stream_tag << HDA_SDCTL_STREAM_SHIFT);
-		hda_write32(d, HDA_SD_BASE + HDA_SD_CTL, ctl);
-		d->running = 1;
-	}
 
-	__atomic_add_fetch(&d->writes_queued, 1, __ATOMIC_RELEASE);
-	d->next_idx = (uint8_t)((slot + 1U) % HDA_BDL_ENTRIES);
-	spinlock_release(&d->write_lock);
-	return (int)copy_len;
+	return (int)total_consumed;
 }
 
 static int hda_drain(audio_dev_t *adev)
@@ -578,10 +648,14 @@ static int hda_drain(audio_dev_t *adev)
 static int hda_flush(audio_dev_t *adev)
 {
 	hda_dev_t *d = adev->driver_data;
-	spinlock_acquire(&d->write_lock);
+	unsigned long flags = spinlock_acquire_irq(&d->feed_lock);
 	hda_write32(d, HDA_SD_BASE + HDA_SD_CTL, HDA_SDCTL_SRST);
-	d->next_idx = 0;
-	spinlock_release(&d->write_lock);
+	d->next_idx      = 0;
+	d->writes_queued = 0;
+	d->slots_played  = 0;
+	d->running       = 0;
+	audio_fifo_reset(&d->fifo);
+	spinlock_release_irq(&d->feed_lock, flags);
 	return 0;
 }
 
@@ -632,7 +706,7 @@ static int hda_attach(pci_device_t *pdev)
 	}
 	d = &hda_devices[hda_device_count];
 	memset(d, 0, sizeof(*d));
-	spinlock_init(&d->write_lock, "hda_write");
+	spinlock_init(&d->feed_lock, "hda_feed");
 	d->pdev = pdev;
 
 	cmd = pci_read_config16(pdev->bus, pdev->slot, pdev->func,

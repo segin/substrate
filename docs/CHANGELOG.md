@@ -100,6 +100,21 @@ Detailed record of major implementation milestones. For current system status, s
   `regex_charclass` owned by each `NFA_CLASS` state (transferred from the AST
   at compile time), fixing a bounded per-pattern compile-time leak.
 
+## Drivers
+- **AC'97 / Intel HDA — IRQ-driven ring refill:** Both audio drivers now
+  decouple the `write()` producer from the DMA-ring consumer with a deep
+  software PCM FIFO (`sys/drivers/audio/audio_fifo.h`, a single-producer /
+  single-consumer byte ring).  `write()` appends to the FIFO and blocks only
+  when it fills (256 KB ≈ 1.4 s); the per-slot completion IRQ (AC'97 BCIS /
+  HDA BCIS) stages FIFO data into the BDL ring autonomously (`ac97_feed` /
+  `hda_feed`), so the controller keeps playing across scheduling jitter under
+  CPU load instead of underrunning to silence.  The feeder is serialised by an
+  IRQ-safe `feed_lock` (held with local interrupts masked) against the IRQ
+  handler, the priming path, and other CPUs.  Underrun-to-halt resyncs the
+  in-flight counters so the stream restarts cleanly.  Verified: FIFO host unit
+  test (`tests/sys/host_test_audio_fifo`), clean target build, and boot with
+  AC'97 + intel-HDA attached with no panic/deadlock.
+
 ## Build & Testing
 - **Build System:** Root filesystem generation in `dist/`. Fixed `dist` directory generation to include standard Unix hierarchy.
 - **Test Framework:** Comprehensive kernel test runner (`tests/sys/`). Tests are **not** compiled into the kernel by default; use `make -C sys KERNEL_TESTS=1` for test builds. Host-runnable tests (`host_test_*`) are built separately with `make -C tests/sys`.

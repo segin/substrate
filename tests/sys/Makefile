@@ -155,6 +155,7 @@ HOST_TESTS += host_test_virtio_scsi
 # Drivers — audio / USB / random
 HOST_TESTS += host_test_ac97
 HOST_TESTS += host_test_audio
+HOST_TESTS += host_test_audio_fifo
 HOST_TESTS += host_test_hda
 HOST_TESTS += host_test_random_ioctl
 HOST_TESTS += host_test_sb16
@@ -356,6 +357,9 @@ host_test_sb16: host_test_sb16.c
 
 host_test_hda: host_test_hda.c
 	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_hda.c -o $@
+
+host_test_audio_fifo: host_test_audio_fifo.c ../../sys/drivers/audio/audio_fifo.h
+	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_audio_fifo.c -o $@
 
 host_test_virtio_scsi: host_test_virtio_scsi.c
 	$(CC) -m32 -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_virtio_scsi.c -o $@
