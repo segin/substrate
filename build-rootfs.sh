@@ -384,6 +384,17 @@ install_to_dist() {
         fi
     done
 
+    # sbin/sdm is the display manager: it ships sdm.sh (script) + sgreet
+    # (Xlib client) rather than a binary named "sdm", so the generic loop
+    # above misses it.  Use its Makefile install target, which lands
+    # /usr/sbin/sdm, /usr/sbin/sgreet and /etc/X11/Xsession — the exact set
+    # /etc/rc.d/60-sdm requires.  Guarded on sgreet having been built (it
+    # needs the contrib X stack, so it is skipped on no-X profiles).
+    if [ -x "$TOP/sbin/sdm/sgreet" ]; then
+        echo "Installing display manager (sdm + sgreet)..."
+        make -C "$TOP/sbin/sdm" install DESTDIR="$DIST" >/dev/null
+    fi
+
     # contrib overlays — staged trees produced by each contrib/$pkg/build.sh.
     # Inetutils ships /usr/bin/telnet + /usr/libexec/{inetd,telnetd}; OpenSSL
     # ships libssl/libcrypto + the openssl CLI under /usr/{lib,bin}; curl
