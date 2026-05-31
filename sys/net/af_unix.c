@@ -50,6 +50,7 @@
 #include <kern/sleepq.h>
 #include <kern/file.h>
 #include <vm/vm_kmem.h>
+#include <sys/copy.h>
 #include <string.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -771,30 +772,94 @@ ssize_t sys_send(int fd, const void *buf, size_t len, int flags) {
     return afunix_node_write(&s->node, 0, len, (const uint8_t *)buf);
 }
 
-ssize_t sys_recv(int fd, void *buf, size_t len, int flags) {
-    /* A closed or out-of-range fd is EBADF — distinct from a live fd
-     * that simply is not a socket (ENOTSOCK, returned further down). */
-    if (fd < 0 || fd >= MAX_FD || !current_process || !current_process->fds[fd])
-        return -EBADF;
-    if (fd >= 0 && fd < MAX_FD && current_process) {
-        file_t *f = current_process->fds[fd];
-        if (f && f->f_data) {
-            fs_node_t *n = (fs_node_t *)f->f_data;
-            extern size_t afpkt_node_read(fs_node_t *, off_t, size_t, uint8_t *);
-            if (n->read == (void *)afpkt_node_read) {
-                socklen_t zero = 0;
-                return afpacket_recvfrom(fd, buf, len, flags, NULL, &zero);
-            }
-            if (n->read == (void *)afinet_node_read) {
-                socklen_t zero = 0;
-                return afinet_recvfrom(fd, buf, len, flags, NULL, &zero);
-            }
-        }
+/* Bytes copied through the kernel bounce buffer in one recv call.  Stream
+ * recv may return short (the caller loops); UDP / RAW / AF_PACKET datagrams
+ * are <= 1500 so they always fit; only an AF_UNIX datagram larger than this
+ * would truncate, which no real caller hits.  kmalloc handles this via its
+ * large-allocation path (KMEM_MAX_ALLOC is 128 MiB). */
+#define RECV_BOUNCE_CAP (64U * 1024U)
+
+/*
+ * Deliver a received message into a KERNEL buffer, dispatching by fd type.
+ * The transport readers (tcp_recv, afinet/afpacket/afunix) write straight
+ * to the buffer they are handed; routing them through a kernel buffer here
+ * — rather than the raw userspace pointer — is what keeps a not-present or
+ * unbacked user page from taking an unrecoverable kernel page fault (the
+ * recv() OOM panic).  kaddr/kaddrlen, when non-NULL, receive the source
+ * address in kernel space for the caller to copy out.
+ */
+static ssize_t recv_into_kbuf(int fd, void *kbuf, size_t len, int flags,
+                              struct sockaddr *kaddr, socklen_t *kaddrlen) {
+    file_t *f = current_process->fds[fd];
+    if (f && f->f_data) {
+        fs_node_t *n = (fs_node_t *)f->f_data;
+        extern size_t afpkt_node_read(fs_node_t *, off_t, size_t, uint8_t *);
+        socklen_t zero = 0;
+        socklen_t *alp = kaddrlen ? kaddrlen : &zero;
+        if (n->read == (void *)afpkt_node_read)
+            return afpacket_recvfrom(fd, kbuf, len, flags, kaddr, alp);
+        if (n->read == (void *)afinet_node_read)
+            return afinet_recvfrom(fd, kbuf, len, flags, kaddr, alp);
     }
-    (void)flags;
+    if (kaddrlen) *kaddrlen = 0;       /* AF_UNIX has no source address */
     afunix_sock_t *s = afunix_from_fd(fd);
     if (!s) return -ENOTSOCK;
-    return afunix_node_read(&s->node, 0, len, (uint8_t *)buf);
+    return afunix_node_read(&s->node, 0, len, (uint8_t *)kbuf);
+}
+
+/* Common recv/recvfrom body: receive into a kernel bounce buffer, then copy
+ * the data (and any source address) out to userspace fault-safely. */
+static ssize_t do_recv(int fd, void *buf, size_t len, int flags,
+                       struct sockaddr *addr, socklen_t *addrlen) {
+    uint8_t    kaddr[128];
+    socklen_t  kaddrlen = sizeof(kaddr);
+    void      *kbuf;
+    size_t     cap;
+    ssize_t    n;
+
+    /* A closed or out-of-range fd is EBADF — distinct from a live fd that
+     * simply is not a socket (ENOTSOCK, returned by recv_into_kbuf). */
+    if (fd < 0 || fd >= MAX_FD || !current_process || !current_process->fds[fd])
+        return -EBADF;
+    if (len == 0)
+        return 0;
+    memset(kaddr, 0, sizeof(kaddr));
+
+    cap = len < RECV_BOUNCE_CAP ? len : RECV_BOUNCE_CAP;
+    kbuf = kmalloc(cap);
+    if (!kbuf)
+        return -ENOMEM;
+
+    n = recv_into_kbuf(fd, kbuf, cap, flags,
+                       addr ? (struct sockaddr *)kaddr : NULL,
+                       addr ? &kaddrlen : NULL);
+    if (n < 0) {
+        kfree(kbuf, cap);
+        return n;
+    }
+    if (n > 0 && copyout(kbuf, buf, (size_t)n) != 0) {
+        kfree(kbuf, cap);
+        return -EFAULT;
+    }
+    kfree(kbuf, cap);
+
+    if (addr && addrlen) {
+        socklen_t user_cap = 0;
+        if (copyin(addrlen, &user_cap, sizeof(user_cap)) != 0)
+            return -EFAULT;
+        if (kaddrlen > sizeof(kaddr))
+            kaddrlen = sizeof(kaddr);
+        socklen_t out = kaddrlen < user_cap ? kaddrlen : user_cap;
+        if (out > 0 && copyout(kaddr, addr, out) != 0)
+            return -EFAULT;
+        if (copyout(&kaddrlen, addrlen, sizeof(kaddrlen)) != 0)
+            return -EFAULT;
+    }
+    return n;
+}
+
+ssize_t sys_recv(int fd, void *buf, size_t len, int flags) {
+    return do_recv(fd, buf, len, flags, NULL, NULL);
 }
 
 ssize_t sys_sendto(int fd, const void *buf, size_t len, int flags,
@@ -826,21 +891,7 @@ ssize_t sys_sendto(int fd, const void *buf, size_t len, int flags,
 
 ssize_t sys_recvfrom(int fd, void *buf, size_t len, int flags,
                      struct sockaddr *addr, socklen_t *addrlen) {
-    if (fd >= 0 && fd < MAX_FD && current_process) {
-        file_t *f = current_process->fds[fd];
-        if (f && f->f_data) {
-            fs_node_t *n = (fs_node_t *)f->f_data;
-            extern size_t afpkt_node_read(fs_node_t *, off_t, size_t, uint8_t *);
-            if (n->read == (void *)afpkt_node_read) {
-                return afpacket_recvfrom(fd, buf, len, flags, addr, addrlen);
-            }
-            if (n->read == (void *)afinet_node_read) {
-                return afinet_recvfrom(fd, buf, len, flags, addr, addrlen);
-            }
-        }
-    }
-    (void)addr; (void)addrlen;
-    return sys_recv(fd, buf, len, flags);
+    return do_recv(fd, buf, len, flags, addr, addrlen);
 }
 
 /* Kernel-side cmsghdr accessor — mirrors the user-space CMSG_*
