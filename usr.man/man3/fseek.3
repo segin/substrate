@@ -180,6 +180,35 @@ for any of the errors specified for the routines
 .BR fflush (3)
 and
 .BR lseek (2).
+.SH EXAMPLES
+The following program reports the size of a file by seeking to its end
+and querying the position.
+.PP
+.RS 4
+.EX
+#include <stdio.h>
+
+int
+main(void)
+{
+    FILE *fp = fopen("/etc/hostname", "r");
+    long size;
+
+    if (fp == NULL)
+        return 1;
+    if (fseek(fp, 0L, SEEK_END) != 0) {
+        perror("fseek");
+        fclose(fp);
+        return 1;
+    }
+    size = ftell(fp);
+    printf("size = %ld bytes\en", size);
+    rewind(fp);
+    fclose(fp);
+    return 0;
+}
+.EE
+.RE
 .SH SEE ALSO
 .BR lseek (2),
 .BR clearerr (3),

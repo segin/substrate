@@ -28,6 +28,27 @@ Trailing slashes are removed. If
 does not contain a slash, "." is returned.
 .SH RETURN VALUE
 Both functions return a pointer to the result. This pointer may point to static storage or into the modified input string.
+.SH EXAMPLES
+Split a pathname into its directory and final component.
+.PP
+.RS 4
+.EX
+#include <libgen.h>
+#include <stdio.h>
+#include <string.h>
+
+int
+main(void)
+{
+    char buf1[] = "/usr/lib/libc.so";
+    char buf2[] = "/usr/lib/libc.so";
+
+    printf("dirname  = %s\en", dirname(buf1));
+    printf("basename = %s\en", basename(buf2));
+    return 0;
+}
+.EE
+.RE
 .SH SEE ALSO
 .BR basename (1),
 .BR dirname (1)

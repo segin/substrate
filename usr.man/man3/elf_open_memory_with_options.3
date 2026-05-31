@@ -29,6 +29,28 @@ Possible errors include
 .Dv ELF_ERR_STATE ,
 .Dv ELF_ERR_OOM ,
 and ELF parse/format errors.
+.Sh EXAMPLES
+Parse an in-memory image with lazy decoding enabled.
+.Bd -literal -offset indent
+#include <elfobj.h>
+#include <stdio.h>
+
+int
+parse_lazy(const void *buf, size_t size)
+{
+    elfobj_t *obj = NULL;
+    elf_err_t err;
+
+    err = elf_open_memory_with_options(buf, size,
+        ELFOBJ_OPEN_LAZY_PARSE, &obj);
+    if (err != ELF_OK)
+        return -1;
+
+    printf("sections=%zu\en", elf_section_count(obj));
+    elf_close(obj);
+    return 0;
+}
+.Ed
 .Sh SEE ALSO
 .Xr elf_open_memory 3 ,
 .Xr elf_open_memory_nocopy 3

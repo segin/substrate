@@ -268,6 +268,32 @@ Invalid state (for example, mutation after finalization).
 .It Dv ELF_ERR_UNSUPPORTED
 Requested behavior unsupported for object/target.
 .El
+.Sh EXAMPLES
+Open an object and print its top-level identity and counts.
+.Bd -literal -offset indent
+#include <elfobj.h>
+#include <stdio.h>
+
+int
+main(int argc, char **argv)
+{
+    elfobj_t *obj = NULL;
+    elf_err_t err;
+
+    err = elf_open(argv[1], &obj);
+    if (err != ELF_OK) {
+        fprintf(stderr, "%s\en", elf_errstr(err));
+        return 1;
+    }
+
+    printf("type=%u machine=%u sections=%zu symbols=%zu\en",
+        elf_type(obj), elf_machine(obj),
+        elf_section_count(obj), elf_symbol_count(obj));
+
+    elf_close(obj);
+    return 0;
+}
+.Ed
 .Sh SEE ALSO
 .Xr elf_section 3 ,
 .Xr elf_symbol 3 ,

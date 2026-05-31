@@ -29,6 +29,27 @@ code.
 Typical failures include
 .Dv ELF_ERR_STATE
 for invalid arguments and allocation/append failures.
+.Sh EXAMPLES
+Append a
+.Dv DT_NEEDED
+record (tag 1) to an object's dynamic table.
+.Bd -literal -offset indent
+#include <elfobj.h>
+#include <stdio.h>
+
+int
+main(void)
+{
+    elfobj_t *obj;
+
+    if (elf_open("a.so", &obj) != ELF_OK)
+        return 1;
+    if (elf_link_add_dynamic_entry(obj, 1 /* DT_NEEDED */, 0) != ELF_OK)
+        fprintf(stderr, "could not add .dynamic entry\en");
+    elf_close(obj);
+    return 0;
+}
+.Ed
 .Sh SEE ALSO
 .Xr elf_link_add_got_section 3 ,
 .Xr elf_link_add_plt_section 3

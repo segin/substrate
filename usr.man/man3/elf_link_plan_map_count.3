@@ -18,5 +18,27 @@ returns number of map entries currently available in
 Returns the map entry count, or 0 when
 .Fa plan
 is NULL.
+.Sh EXAMPLES
+Count the symbol-map entries produced by a completed link.
+.Bd -literal -offset indent
+#include <elfobj.h>
+#include <stdio.h>
+
+int
+main(void)
+{
+    elf_link_plan_t *plan = elf_link_plan_create();
+    elfobj_t *obj, *out = NULL;
+
+    elf_open("a.o", &obj);
+    elf_link_plan_add_input(plan, obj, "a.o");
+    if (elf_link_plan_link(plan, &out) == ELF_OK) {
+        printf("map entries = %zu\en", elf_link_plan_map_count(plan));
+        elf_close(out);
+    }
+    elf_link_plan_destroy(plan);
+    return 0;
+}
+.Ed
 .Sh SEE ALSO
 .Xr elf_link_plan_map_entry 3

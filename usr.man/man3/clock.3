@@ -17,6 +17,29 @@ to get the number of seconds used, divide by
 If the processor time used is not available or its value cannot be
 represented, the function returns the value
 .B (clock_t) \-1 .
+.SH EXAMPLES
+Measure the processor time consumed by a block of work.
+.PP
+.RS 4
+.EX
+#include <time.h>
+#include <stdio.h>
+
+int
+main(void)
+{
+    clock_t start = clock();
+    volatile long i;
+
+    for (i = 0; i < 10000000L; i++)
+        ;
+
+    printf("CPU time: %.3f s\en",
+           (double)(clock() - start) / CLOCKS_PER_SEC);
+    return 0;
+}
+.EE
+.RE
 .SH CONFORMING TO
 POSIX.1-2001, POSIX.1-2008, C89, C99.
 XSI requires that

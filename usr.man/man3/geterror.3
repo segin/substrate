@@ -19,6 +19,22 @@ function returns a pointer to a static error description string. If
 .IR errnum
 is unknown, it returns
 .BR "Unknown error" .
+.SH EXAMPLES
+The following program prints the description of an error code.
+.PP
+.RS 4
+.EX
+#include <string.h>
+#include <stdio.h>
+
+int
+main(void)
+{
+    printf("%s\en", geterror(2));
+    return 0;
+}
+.EE
+.RE
 .SH SEE ALSO
 .BR errno (3),
 .BR perror (3),

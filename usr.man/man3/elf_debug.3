@@ -104,6 +104,33 @@ Other functions return
 on success or an
 .Vt elf_err_t
 error code.
+.Sh EXAMPLES
+List the debug sections present in an opened object.
+.Bd -literal -offset indent
+#include <elfobj.h>
+#include <stdio.h>
+
+int
+main(int argc, char **argv)
+{
+    elfobj_t *obj = NULL;
+    size_t i, n;
+
+    if (elf_open(argv[1], &obj) != ELF_OK)
+        return 1;
+
+    n = elf_section_count(obj);
+    for (i = 0; i < n; i++) {
+        elf_section_t *s = elf_section_get(obj, i);
+
+        if (elf_section_is_debug(s))
+            printf("debug section: %s\en", elf_section_name(s));
+    }
+
+    elf_close(obj);
+    return 0;
+}
+.Ed
 .Sh SEE ALSO
 .Xr elf_section 3 ,
 .Xr elf_validate 3 ,

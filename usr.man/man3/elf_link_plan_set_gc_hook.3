@@ -18,5 +18,27 @@ Returns
 .Dv ELF_OK
 on success, otherwise
 .Dv ELF_ERR_STATE .
+.Sh EXAMPLES
+Install a section garbage-collection policy that keeps every section.
+.Bd -literal -offset indent
+#include <elfobj.h>
+
+static int
+keep(const elf_section_t *section, void *user)
+{
+    (void)section; (void)user;
+    return 1; /* retain as a GC root */
+}
+
+int
+main(void)
+{
+    elf_link_plan_t *plan = elf_link_plan_create();
+
+    elf_link_plan_set_gc_hook(plan, keep, NULL);
+    elf_link_plan_destroy(plan);
+    return 0;
+}
+.Ed
 .Sh SEE ALSO
 .Xr elf_link_plan_link 3

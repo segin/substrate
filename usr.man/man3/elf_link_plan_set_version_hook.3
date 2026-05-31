@@ -18,5 +18,27 @@ Returns
 .Dv ELF_OK
 on success, otherwise
 .Dv ELF_ERR_STATE .
+.Sh EXAMPLES
+Install a symbol-version policy that accepts every version.
+.Bd -literal -offset indent
+#include <elfobj.h>
+
+static int
+accept(const char *symbol, const char *version, void *user)
+{
+    (void)symbol; (void)version; (void)user;
+    return 1; /* keep this versioned symbol */
+}
+
+int
+main(void)
+{
+    elf_link_plan_t *plan = elf_link_plan_create();
+
+    elf_link_plan_set_version_hook(plan, accept, NULL);
+    elf_link_plan_destroy(plan);
+    return 0;
+}
+.Ed
 .Sh SEE ALSO
 .Xr elf_link_plan_link 3

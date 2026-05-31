@@ -80,6 +80,31 @@ The substrate shim does not consult exec / core / swap files.
 .B "out of memory"
 .BR calloc (3)
 failed allocating the descriptor.
+.SH EXAMPLES
+Open a live introspection descriptor and close it again.
+.PP
+.RS 4
+.EX
+#include <kvm.h>
+#include <fcntl.h>
+#include <stdio.h>
+
+int
+main(void)
+{
+    char errbuf[256];
+    kvm_t *kd;
+
+    kd = kvm_openfiles(NULL, NULL, NULL, O_RDONLY, errbuf);
+    if (kd == NULL) {
+        fprintf(stderr, "kvm_openfiles: %s\en", errbuf);
+        return 1;
+    }
+    kvm_close(kd);
+    return 0;
+}
+.EE
+.RE
 .SH SEE ALSO
 .BR kvm_getprocs (3),
 .BR kvm_read (3),

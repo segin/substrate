@@ -16,6 +16,29 @@ The
 .BR strerror ()
 function returns the appropriate error description string, or a generic
 "Unknown error" message if the error number is unknown.
+.SH EXAMPLES
+The following program prints the description for a failed open.
+.PP
+.RS 4
+.EX
+#include <string.h>
+#include <stdio.h>
+#include <errno.h>
+
+int
+main(void)
+{
+    FILE *fp = fopen("/nonexistent", "r");
+
+    if (fp == NULL) {
+        printf("open failed: %s\en", strerror(errno));
+        return 1;
+    }
+    fclose(fp);
+    return 0;
+}
+.EE
+.RE
 .SH SEE ALSO
 .BR perror (3),
 .BR errno (3)

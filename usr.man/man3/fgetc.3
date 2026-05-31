@@ -82,6 +82,25 @@ A successful call to
 or
 .BR rewind (3)
 discards any pushed-back character.
+.SH EXAMPLES
+The following program copies standard input to standard output one
+character at a time.
+.PP
+.RS 4
+.EX
+#include <stdio.h>
+
+int
+main(void)
+{
+    int c;
+
+    while ((c = fgetc(stdin)) != EOF)
+        fputc(c, stdout);
+    return 0;
+}
+.EE
+.RE
 .SH RETURN VALUE
 .BR fgetc (),
 .BR getc (),

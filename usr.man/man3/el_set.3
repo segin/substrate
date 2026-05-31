@@ -110,6 +110,33 @@ Operation is recognized but not supported in the active backend.
 .TP
 .B ENOMEM
 Memory allocation failed while updating internal state.
+.SH EXAMPLES
+The following program installs a prompt and selects emacs editing mode:
+.PP
+.RS 4
+.EX
+#include <histedit.h>
+#include <stdio.h>
+
+static const char *
+prompt(EditLine *el)
+{
+    (void)el;
+    return "prog$ ";
+}
+
+int
+main(void)
+{
+    EditLine *el = el_init("prog", stdin, stdout, stderr);
+
+    el_set(el, EL_PROMPT, prompt);
+    el_set(el, EL_EDITOR, "emacs");
+    el_end(el);
+    return 0;
+}
+.EE
+.RE
 .SH SEE ALSO
 .BR editline (3),
 .BR el_init (3),

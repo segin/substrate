@@ -74,6 +74,28 @@ is supplied, even when the underlying
 .BR close (2)
 or buffer flush fails; portable code should not rely on this and should
 treat any non-zero return as an error.
+.SH EXAMPLES
+The following program opens a file, then closes it and checks for errors.
+.PP
+.RS 4
+.EX
+#include <stdio.h>
+
+int
+main(void)
+{
+    FILE *fp = fopen("/etc/hostname", "r");
+
+    if (fp == NULL)
+        return 1;
+    if (fclose(fp) == EOF) {
+        perror("fclose");
+        return 1;
+    }
+    return 0;
+}
+.EE
+.RE
 .SH SEE ALSO
 .BR close (2),
 .BR fcloseall (3),

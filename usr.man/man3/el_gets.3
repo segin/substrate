@@ -82,6 +82,32 @@ Invalid UTF-8 sequence was encountered while UTF-8 mode is enabled.
 .TP
 .B ENOMEM
 Insufficient memory for line growth.
+.SH EXAMPLES
+The following program reads one line, then inserts and deletes text in it:
+.PP
+.RS 4
+.EX
+#include <histedit.h>
+#include <stdio.h>
+
+int
+main(void)
+{
+    EditLine *el = el_init("prog", stdin, stdout, stderr);
+    const char *line;
+    int count;
+
+    line = el_gets(el, &count);
+    if (line != NULL) {
+        el_insertstr(el, "prefix-");
+        el_deletestr(el, 1);
+        printf("got %d bytes\en", count);
+    }
+    el_end(el);
+    return 0;
+}
+.EE
+.RE
 .SH SEE ALSO
 .BR editline (3),
 .BR el_init (3),

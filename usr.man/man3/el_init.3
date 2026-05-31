@@ -50,6 +50,27 @@ Memory allocation failed.
 .TP
 .B ENOTTY
 The configured input stream is not a tty and terminal mode setup failed.
+.SH EXAMPLES
+The following program creates an editline session, uses it, and tears it down:
+.PP
+.RS 4
+.EX
+#include <histedit.h>
+#include <stdio.h>
+
+int
+main(void)
+{
+    EditLine *el = el_init("prog", stdin, stdout, stderr);
+
+    if (el == NULL)
+        return 1;
+    el_reset(el);
+    el_end(el);
+    return 0;
+}
+.EE
+.RE
 .SH SEE ALSO
 .BR editline (3),
 .BR el_gets (3),

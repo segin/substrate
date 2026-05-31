@@ -71,6 +71,34 @@ function returns no value.
 .PP
 These functions do not themselves set
 .IR errno .
+.SH EXAMPLES
+The following program reads a file to its end, then distinguishes
+end-of-file from a read error.
+.PP
+.RS 4
+.EX
+#include <stdio.h>
+
+int
+main(void)
+{
+    FILE *fp = fopen("/etc/hostname", "r");
+    int c;
+
+    if (fp == NULL)
+        return 1;
+    while ((c = fgetc(fp)) != EOF)
+        putchar(c);
+    if (ferror(fp))
+        fputs("read error\en", stderr);
+    else if (feof(fp))
+        fputs("reached end of file\en", stderr);
+    clearerr(fp);
+    fclose(fp);
+    return 0;
+}
+.EE
+.RE
 .SH SEE ALSO
 .BR fopen (3),
 .BR fread (3),

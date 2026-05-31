@@ -45,6 +45,28 @@ I/O error while reading the configuration file.
 .TP
 .B EPROTO
 A command line could not be parsed.
+.SH EXAMPLES
+The following program loads the default per-user
+.B .editrc
+file into a new session:
+.PP
+.RS 4
+.EX
+#include <histedit.h>
+#include <stdio.h>
+
+int
+main(void)
+{
+    EditLine *el = el_init("prog", stdin, stdout, stderr);
+
+    if (el_source(el, NULL) == -1)
+        fprintf(stderr, "no .editrc loaded\en");
+    el_end(el);
+    return 0;
+}
+.EE
+.RE
 .SH SEE ALSO
 .BR editline (3),
 .BR el_set (3),

@@ -35,6 +35,20 @@ if
 .Fa index
 is out of range,
 or if parsing fails.
+.Sh EXAMPLES
+Open a RISC-V object and print the tag of the first attribute.
+.Bd -literal -offset indent
+#include <elfobj.h>
+#include <stdio.h>
+
+elfobj_t *obj;
+
+if (elf_open("a.out", &obj) != ELF_OK)
+    errx(1, "elf_open failed");
+if (elf_riscv_attribute_count(obj) > 0)
+    printf("tag[0] = %u\en", elf_riscv_attribute_tag_at(obj, 0));
+elf_close(obj);
+.Ed
 .Sh CAVEATS
 A returned value of 0 can indicate failure or an actual attribute tag value of 0.
 Callers that need strict disambiguation should validate bounds with

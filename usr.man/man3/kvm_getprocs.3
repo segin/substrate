@@ -91,6 +91,33 @@ On failure, NULL with
 set to 0 and
 .BR kvm_geterr (3)
 populated.
+.SH EXAMPLES
+Enumerate every process and print its pid.
+.PP
+.RS 4
+.EX
+#include <kvm.h>
+#include <fcntl.h>
+#include <stdio.h>
+
+int
+main(void)
+{
+    kvm_t *kd;
+    struct kinfo_proc *procs;
+    int i, cnt;
+
+    kd = kvm_open(NULL, NULL, NULL, O_RDONLY, "example");
+    if (kd == NULL)
+        return 1;
+    procs = kvm_getprocs(kd, KERN_PROC_ALL, 0, &cnt);
+    for (i = 0; procs != NULL && i < cnt; i++)
+        printf("pid %d\en", procs[i].ki_pid);
+    kvm_close(kd);
+    return 0;
+}
+.EE
+.RE
 .SH SEE ALSO
 .BR kvm_open (3),
 .BR kvm_getvmmap (3),

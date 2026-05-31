@@ -30,6 +30,25 @@ Possible errors include
 .Dv ELF_ERR_STATE ,
 .Dv ELF_ERR_OOM ,
 and ELF format/parse errors.
+.Sh EXAMPLES
+Parse an ELF image already resident in a memory buffer.
+.Bd -literal -offset indent
+#include <elfobj.h>
+#include <stdio.h>
+
+int
+parse_image(const void *buf, size_t size)
+{
+    elfobj_t *obj = NULL;
+
+    if (elf_open_memory(buf, size, &obj) != ELF_OK)
+        return -1;
+
+    printf("sections=%zu\en", elf_section_count(obj));
+    elf_close(obj);
+    return 0;
+}
+.Ed
 .Sh SEE ALSO
 .Xr elf_open 3 ,
 .Xr elf_open_memory_nocopy 3 ,

@@ -29,6 +29,26 @@ Possible errors include
 .Dv ELF_ERR_STATE ,
 .Dv ELF_ERR_OOM ,
 and ELF parse/format errors.
+.Sh EXAMPLES
+Parse an ELF image in place without copying the backing buffer.
+The buffer must outlive the object.
+.Bd -literal -offset indent
+#include <elfobj.h>
+#include <stdio.h>
+
+int
+parse_inplace(const void *buf, size_t size)
+{
+    elfobj_t *obj = NULL;
+
+    if (elf_open_memory_nocopy(buf, size, &obj) != ELF_OK)
+        return -1;
+
+    printf("sections=%zu\en", elf_section_count(obj));
+    elf_close(obj);    /* buf must stay valid until here */
+    return 0;
+}
+.Ed
 .Sh SEE ALSO
 .Xr elf_close 3 ,
 .Xr elf_open_memory 3

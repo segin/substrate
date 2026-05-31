@@ -19,6 +19,28 @@ On success, the
 .BR strdup ()
 function returns a pointer to the duplicated string. It returns NULL if
 insufficient memory was available.
+.SH EXAMPLES
+The following program duplicates a string and then frees the copy.
+.PP
+.RS 4
+.EX
+#include <string.h>
+#include <stdio.h>
+#include <stdlib.h>
+
+int
+main(void)
+{
+    char *copy = strdup("hello, world");
+
+    if (copy == NULL)
+        return 1;
+    printf("%s\en", copy);
+    free(copy);
+    return 0;
+}
+.EE
+.RE
 .SH SEE ALSO
 .BR malloc (3),
 .BR free (3),

@@ -21,5 +21,33 @@ on success and writes decision to
 Returns
 .Dv ELF_ERR_STATE
 for invalid arguments.
+.Sh EXAMPLES
+Install an archive hook and ask the plan whether a member is needed.
+.Bd -literal -offset indent
+#include <elfobj.h>
+#include <string.h>
+#include <stdio.h>
+
+static int
+want(const char *archive, const char *member, void *user)
+{
+    (void)archive; (void)user;
+    return strstr(member, "unused") == NULL;
+}
+
+int
+main(void)
+{
+    elf_link_plan_t *plan = elf_link_plan_create();
+    int extract = 0;
+
+    elf_link_plan_set_archive_hook(plan, want, NULL);
+    elf_link_plan_consider_archive_member(plan, "libc.a",
+        "printf.o", &extract);
+    printf("extract = %d\en", extract);
+    elf_link_plan_destroy(plan);
+    return 0;
+}
+.Ed
 .Sh SEE ALSO
 .Xr elf_link_plan_set_archive_hook 3

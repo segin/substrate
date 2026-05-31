@@ -120,10 +120,32 @@ Math argument out of domain of func
 .TP
 .B ERANGE
 Math result not representable
-.SH "SEE ALSO"
+.SH EXAMPLES
+The following program inspects
+.I errno
+after a failed call.
+.PP
+.RS 4
+.EX
+#include <errno.h>
+#include <stdio.h>
+
+int
+main(void)
+{
+    FILE *fp = fopen("/nonexistent", "r");
+
+    if (fp == NULL) {
+        if (errno == ENOENT)
+            fputs("file does not exist\en", stderr);
+        return 1;
+    }
+    fclose(fp);
+    return 0;
+}
+.EE
+.RE
+.SH SEE ALSO
+.BR intro (2),
 .BR perror (3),
 .BR strerror (3)
-
-.SH SEE ALSO
-.BR intro(2),
-.BR errno(3)

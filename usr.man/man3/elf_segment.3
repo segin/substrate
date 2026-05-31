@@ -85,6 +85,35 @@ Creation functions return a segment handle on success or NULL on failure.
 Mutation functions return
 .Dv ELF_OK
 on success or an error code.
+.Sh EXAMPLES
+Add a loadable program segment to a generated object and inspect it.
+.Bd -literal -offset indent
+#include <elfobj.h>
+#include <stdio.h>
+
+int
+main(void)
+{
+    elfobj_t *obj = elf_init_i386();
+    elf_segment_t *seg;
+
+    if (obj == NULL)
+        return 1;
+
+    seg = elf_add_load_segment(obj, 0x5 /* PF_R|PF_X */, 0x1000);
+    if (seg == NULL) {
+        elf_close(obj);
+        return 1;
+    }
+
+    printf("segment type=%u flags=%#x align=%llu\en",
+        elf_segment_type(seg), elf_segment_flags(seg),
+        (unsigned long long)elf_segment_align(seg));
+
+    elf_close(obj);
+    return 0;
+}
+.Ed
 .Sh SEE ALSO
 .Xr elfobj 3 ,
 .Xr elf_section 3

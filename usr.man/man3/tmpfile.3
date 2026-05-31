@@ -143,6 +143,33 @@ A subsequent attempt to
 .BR open (2)
 the returned name may, of course, fail for any of the reasons listed in
 .BR open (2).
+.SH EXAMPLES
+The following program creates a temporary file, writes to it, rewinds,
+and reads the data back.
+.PP
+.RS 4
+.EX
+#include <stdio.h>
+
+int
+main(void)
+{
+    FILE *fp = tmpfile();
+    char buf[16];
+
+    if (fp == NULL) {
+        perror("tmpfile");
+        return 1;
+    }
+    fputs("scratch", fp);
+    rewind(fp);
+    if (fgets(buf, sizeof(buf), fp) != NULL)
+        printf("read back: %s\en", buf);
+    fclose(fp);
+    return 0;
+}
+.EE
+.RE
 .SH SEE ALSO
 .BR mkstemp (3),
 .BR mktemp (3),

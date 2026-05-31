@@ -20,6 +20,25 @@ was opened with memory mapping enabled, mapped regions are unmapped.
 Passing
 .Dv NULL
 is safe and has no effect.
+.Sh EXAMPLES
+Release an object handle when inspection is complete.
+.Bd -literal -offset indent
+#include <elfobj.h>
+
+int
+main(int argc, char **argv)
+{
+    elfobj_t *obj = NULL;
+
+    if (elf_open(argv[1], &obj) != ELF_OK)
+        return 1;
+
+    /* inspect object ... */
+
+    elf_close(obj);
+    return 0;
+}
+.Ed
 .Sh SEE ALSO
 .Xr elf_open 3 ,
 .Xr elf_open_memory 3

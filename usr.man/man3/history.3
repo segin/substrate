@@ -119,6 +119,29 @@ Requested history index is out of range.
 .TP
 .B EIO
 Load/save operation failed.
+.SH EXAMPLES
+The following program creates a history list, adds an entry, and reads it back:
+.PP
+.RS 4
+.EX
+#include <histedit.h>
+#include <stdio.h>
+
+int
+main(void)
+{
+    History *h = history_init();
+    HistEvent ev;
+
+    history(h, &ev, H_SETSIZE, 100);
+    history(h, &ev, H_ENTER, "first command");
+    if (history(h, &ev, H_FIRST) == 0)
+        printf("entry %d: %s\en", ev.num, ev.str);
+    history_end(h);
+    return 0;
+}
+.EE
+.RE
 .SH SEE ALSO
 .BR editline (3),
 .BR el_set (3),

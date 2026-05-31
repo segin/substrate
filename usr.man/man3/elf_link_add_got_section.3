@@ -21,6 +21,27 @@ and appends zero-initialized slots for
 Slot width follows ELF class (4 bytes for ELF32, 8 bytes for ELF64).
 .Sh RETURN VALUES
 Returns a section handle on success, or NULL on failure.
+.Sh EXAMPLES
+Reserve eight GOT slots on an object.
+.Bd -literal -offset indent
+#include <elfobj.h>
+#include <stdio.h>
+
+int
+main(void)
+{
+    elfobj_t *obj;
+    elf_section_t *got;
+
+    if (elf_open("a.o", &obj) != ELF_OK)
+        return 1;
+    got = elf_link_add_got_section(obj, 8);
+    if (got == NULL)
+        fprintf(stderr, "could not add .got\en");
+    elf_close(obj);
+    return 0;
+}
+.Ed
 .Sh SEE ALSO
 .Xr elf_link_add_plt_section 3 ,
 .Xr elf_section 3

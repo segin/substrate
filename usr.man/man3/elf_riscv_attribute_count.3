@@ -29,6 +29,23 @@ It returns 0 if no attributes are available or
 .Fa obj
 is
 .Dv NULL .
+.Sh EXAMPLES
+Open a RISC-V object and iterate its parsed attributes.
+.Bd -literal -offset indent
+#include <elfobj.h>
+#include <stdio.h>
+
+elfobj_t *obj;
+
+if (elf_open("a.out", &obj) != ELF_OK)
+    errx(1, "elf_open failed");
+size_t n = elf_riscv_attribute_count(obj);
+for (size_t i = 0; i < n; i++)
+    printf("tag %u = %llu\en",
+        elf_riscv_attribute_tag_at(obj, i),
+        (unsigned long long)elf_riscv_attribute_value_at(obj, i));
+elf_close(obj);
+.Ed
 .Sh SEE ALSO
 .Xr elf_riscv_attribute_tag_at 3 ,
 .Xr elf_riscv_attribute_value_at 3 ,

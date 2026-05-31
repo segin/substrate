@@ -61,6 +61,29 @@ return
 on success and
 .Vt elf_err_t
 on failure.
+.Sh EXAMPLES
+Load several inputs, resolve a symbol across them, then release them.
+.Bd -literal -offset indent
+#include <elfobj.h>
+#include <stdio.h>
+
+int
+main(void)
+{
+    const char *paths[] = { "a.o", "b.o" };
+    elfobj_t **objs = NULL;
+    size_t n = 0, idx = 0;
+    elf_symbol_t *sym;
+
+    if (elf_link_load_objects(paths, 2, &objs, &n) != ELF_OK)
+        return 1;
+    sym = elf_link_resolve_symbol(objs, n, "main", &idx);
+    if (sym != NULL)
+        printf("main defined in input %zu\en", idx);
+    elf_link_unload_objects(objs, n);
+    return 0;
+}
+.Ed
 .Sh SEE ALSO
 .Xr elf_link 3 ,
 .Xr elf_link_plan 3 ,

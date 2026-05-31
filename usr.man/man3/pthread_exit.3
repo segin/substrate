@@ -20,6 +20,35 @@ process that calls
 .BR pthread_join (3).
 .SH RETURN VALUE
 This function does not return to the caller.
+.SH EXAMPLES
+A thread returns a result to its joiner via
+.BR pthread_exit ().
+.PP
+.RS 4
+.EX
+#include <pthread.h>
+#include <stdio.h>
+
+static void *
+worker(void *arg)
+{
+    (void)arg;
+    pthread_exit((void *)42);
+}
+
+int
+main(void)
+{
+    pthread_t t;
+    void *ret;
+
+    pthread_create(&t, NULL, worker, NULL);
+    pthread_join(t, &ret);
+    printf("worker returned %ld\en", (long)ret);
+    return 0;
+}
+.EE
+.RE
 .SH SEE ALSO
 .BR pthread_create (3),
 .BR pthread_join (3),

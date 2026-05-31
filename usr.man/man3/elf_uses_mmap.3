@@ -17,5 +17,27 @@ returns whether
 is backed by a memory-mapped input image.
 .Sh RETURN VALUES
 Returns non-zero when mmap-backed, 0 otherwise.
+.Sh EXAMPLES
+Report whether an opened object is backed by a memory map.
+.Bd -literal -offset indent
+#include <elfobj.h>
+#include <stdio.h>
+
+int
+main(int argc, char **argv)
+{
+    elfobj_t *obj = NULL;
+
+    if (elf_open_with_options(argv[1],
+        ELFOBJ_OPEN_USE_MMAP, &obj) != ELF_OK)
+        return 1;
+
+    printf("mmap-backed: %s\en",
+        elf_uses_mmap(obj) ? "yes" : "no");
+
+    elf_close(obj);
+    return 0;
+}
+.Ed
 .Sh SEE ALSO
 .Xr elf_open_with_options 3

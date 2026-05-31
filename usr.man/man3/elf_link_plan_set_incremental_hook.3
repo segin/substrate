@@ -19,5 +19,29 @@ Returns
 .Dv ELF_OK
 on success, otherwise
 .Dv ELF_ERR_STATE .
+.Sh EXAMPLES
+Install an incremental-note callback that logs each event.
+.Bd -literal -offset indent
+#include <elfobj.h>
+#include <stdio.h>
+
+static void
+note(const char *key, const char *value, void *user)
+{
+    (void)user;
+    printf("incremental: %s -> %s\en", key, value);
+}
+
+int
+main(void)
+{
+    elf_link_plan_t *plan = elf_link_plan_create();
+
+    elf_link_plan_set_incremental_hook(plan, note, NULL);
+    elf_link_plan_note_incremental(plan, "changed", "main.o");
+    elf_link_plan_destroy(plan);
+    return 0;
+}
+.Ed
 .Sh SEE ALSO
 .Xr elf_link_plan_note_incremental 3

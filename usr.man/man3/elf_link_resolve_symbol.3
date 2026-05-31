@@ -24,5 +24,30 @@ If non-NULL,
 receives the winning input index.
 .Sh RETURN VALUES
 Returns a matching symbol handle, or NULL when no candidate is found.
+.Sh EXAMPLES
+Resolve a symbol across two inputs and report the winning input.
+.Bd -literal -offset indent
+#include <elfobj.h>
+#include <stdio.h>
+
+int
+main(void)
+{
+    elfobj_t *inputs[2];
+    size_t idx = 0;
+    elf_symbol_t *sym;
+
+    elf_open("a.o", &inputs[0]);
+    elf_open("b.o", &inputs[1]);
+    sym = elf_link_resolve_symbol(inputs, 2, "printf", &idx);
+    if (sym != NULL)
+        printf("printf resolved from input %zu\en", idx);
+    else
+        printf("printf unresolved\en");
+    elf_close(inputs[0]);
+    elf_close(inputs[1]);
+    return 0;
+}
+.Ed
 .Sh SEE ALSO
 .Xr elf_symbol 3

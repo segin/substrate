@@ -29,10 +29,29 @@ The function returns the cosine of
 in the range \fB[\-1, +1]\fR.
 .PP
 If x is NaN, NaN is returned.
+.SH EXAMPLES
+Compute the cosine of an angle expressed in degrees.
+.PP
+.RS 4
+.EX
+#include <math.h>
+#include <stdio.h>
+
+int
+main(void)
+{
+    double deg = 60.0;
+    double rad = deg * M_PI / 180.0;
+
+    printf("cos(%.1f deg) = %.6f\en", deg, cos(rad));
+    return 0;
+}
+.EE
+.RE
 .SH STANDARDS
 C99, POSIX.1-2001.
 .SH SEE ALSO
-.sin(3),
-.tan(3),
-.trig(3),
-.math(7)
+.BR sin (3),
+.BR tan (3),
+.BR trig (3),
+.BR math (7)

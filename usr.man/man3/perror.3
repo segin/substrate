@@ -71,3 +71,25 @@ The
 function conforms to ISO C99 and IEEE Std 1003.1-2008 (POSIX.1) in interface, but the Substrate implementation deviates by emitting the decimal
 .I errno
 value rather than a translated diagnostic string.
+.SH EXAMPLES
+The following program reports a failed open using
+.BR perror ().
+.PP
+.RS 4
+.EX
+#include <stdio.h>
+
+int
+main(void)
+{
+    FILE *fp = fopen("/nonexistent", "r");
+
+    if (fp == NULL) {
+        perror("/nonexistent");
+        return 1;
+    }
+    fclose(fp);
+    return 0;
+}
+.EE
+.RE

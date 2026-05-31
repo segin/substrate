@@ -36,6 +36,32 @@ is
 or if
 .Fa index
 is greater than or equal to the section count.
+.Sh EXAMPLES
+Walk the section table by index.
+.Bd -literal -offset indent
+#include <elfobj.h>
+#include <stdio.h>
+
+int
+main(int argc, char **argv)
+{
+    elfobj_t *obj = NULL;
+    size_t i, n;
+
+    if (elf_open(argv[1], &obj) != ELF_OK)
+        return 1;
+
+    n = elf_section_count(obj);
+    for (i = 0; i < n; i++) {
+        elf_section_t *s = elf_section_get(obj, i);
+
+        printf("[%zu] %s\en", i, elf_section_name(s));
+    }
+
+    elf_close(obj);
+    return 0;
+}
+.Ed
 .Sh SEE ALSO
 .Xr elf_section_count 3 ,
 .Xr elf_section_addr 3 ,

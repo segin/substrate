@@ -30,6 +30,31 @@ Common failures include
 .Dv ELF_ERR_OOM ,
 .Dv ELF_ERR_UNSUPPORTED ,
 and relocation/merge errors.
+.Sh EXAMPLES
+Execute a prepared plan and write the merged object to disk.
+.Bd -literal -offset indent
+#include <elfobj.h>
+#include <stdio.h>
+
+int
+main(void)
+{
+    elf_link_plan_t *plan = elf_link_plan_create();
+    elfobj_t *obj, *out = NULL;
+
+    elf_open("a.o", &obj);
+    elf_link_plan_add_input(plan, obj, "a.o");
+    if (elf_link_plan_link(plan, &out) != ELF_OK) {
+        fprintf(stderr, "link failed\en");
+        elf_link_plan_destroy(plan);
+        return 1;
+    }
+    elf_write_file(out, "out.o");
+    elf_close(out);
+    elf_link_plan_destroy(plan);
+    return 0;
+}
+.Ed
 .Sh SEE ALSO
 .Xr elf_link 3 ,
 .Xr elf_link_plan_add_input 3 ,

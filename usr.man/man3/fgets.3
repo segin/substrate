@@ -95,6 +95,25 @@ The read or write call was interrupted by a signal before any data was transferr
 .TP
 .B EIO
 A low-level I/O error occurred while accessing the underlying object.
+.SH EXAMPLES
+The following program reads standard input a line at a time and echoes
+each line to standard output.
+.PP
+.RS 4
+.EX
+#include <stdio.h>
+
+int
+main(void)
+{
+    char line[256];
+
+    while (fgets(line, sizeof(line), stdin) != NULL)
+        fputs(line, stdout);
+    return 0;
+}
+.EE
+.RE
 .SH SEE ALSO
 .BR fread (3),
 .BR fwrite (3),

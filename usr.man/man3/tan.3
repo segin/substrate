@@ -30,10 +30,28 @@ The function returns the tangent of
 If x is infinity, +infinity is returned.
 .PP
 If x is NaN, NaN is returned.
+.SH EXAMPLES
+Compute the tangent of an angle expressed in radians.
+.PP
+.RS 4
+.EX
+#include <math.h>
+#include <stdio.h>
+
+int
+main(void)
+{
+    double x = M_PI / 4.0;
+
+    printf("tan(pi/4) = %.6f\en", tan(x));
+    return 0;
+}
+.EE
+.RE
 .SH STANDARDS
 C99, POSIX.1-2001.
 .SH SEE ALSO
-.sin(3),
-.cos(3),
-.trig(3),
-.math(7)
+.BR sin (3),
+.BR cos (3),
+.BR trig (3),
+.BR math (7)

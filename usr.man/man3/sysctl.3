@@ -73,6 +73,27 @@ Insufficient memory for buffer allocation.
 .TP
 .B ENOENT
 The named parameter does not exist.
+.SH EXAMPLES
+Retrieve the kernel's host name with the typed string helper.
+.PP
+.RS 4
+.EX
+#include <sys/sysctl.h>
+#include <stdio.h>
+
+int
+main(void)
+{
+    int mib[2] = { CTL_KERN, KERN_HOSTNAME };
+    char host[256];
+    size_t len = sizeof(host);
+
+    if (sysctl_string(mib, 2, host, &len, NULL) == 0)
+        printf("hostname = %s\en", host);
+    return 0;
+}
+.EE
+.RE
 .SH NOTES
 All functions are thread-safe and reentrant.
 No static mutable state is used.

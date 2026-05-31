@@ -17,6 +17,27 @@ Release it with
 .Fn elf_link_plan_destroy .
 .Sh RETURN VALUES
 Returns a non-NULL plan on success, or NULL on allocation failure.
+.Sh EXAMPLES
+Allocate a plan, add one input, link, and release it.
+.Bd -literal -offset indent
+#include <elfobj.h>
+
+int
+main(void)
+{
+    elf_link_plan_t *plan = elf_link_plan_create();
+    elfobj_t *obj, *out = NULL;
+
+    if (plan == NULL)
+        return 1;
+    elf_open("a.o", &obj);
+    elf_link_plan_add_input(plan, obj, "a.o");
+    elf_link_plan_link(plan, &out);
+    elf_link_plan_destroy(plan);
+    elf_close(out);
+    return 0;
+}
+.Ed
 .Sh SEE ALSO
 .Xr elf_link_plan_destroy 3 ,
 .Xr elf_link_plan_link 3

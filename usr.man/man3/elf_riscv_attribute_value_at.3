@@ -35,6 +35,21 @@ if
 is out of range,
 if parsing fails,
 or when the selected attribute has no numeric payload.
+.Sh EXAMPLES
+Open a RISC-V object and print the value of the first attribute.
+.Bd -literal -offset indent
+#include <elfobj.h>
+#include <stdio.h>
+
+elfobj_t *obj;
+
+if (elf_open("a.out", &obj) != ELF_OK)
+    errx(1, "elf_open failed");
+if (elf_riscv_attribute_count(obj) > 0)
+    printf("value[0] = %llu\en",
+        (unsigned long long)elf_riscv_attribute_value_at(obj, 0));
+elf_close(obj);
+.Ed
 .Sh CAVEATS
 Because 0 is also a valid numeric attribute value, callers should use
 .Xr elf_riscv_attribute_count 3

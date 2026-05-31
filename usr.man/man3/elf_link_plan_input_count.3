@@ -18,5 +18,24 @@ returns how many input objects were added to
 Returns the input count, or 0 if
 .Fa plan
 is NULL.
+.Sh EXAMPLES
+Report how many inputs a plan holds after adding objects.
+.Bd -literal -offset indent
+#include <elfobj.h>
+#include <stdio.h>
+
+int
+main(void)
+{
+    elf_link_plan_t *plan = elf_link_plan_create();
+    elfobj_t *obj;
+
+    elf_open("a.o", &obj);
+    elf_link_plan_add_input(plan, obj, "a.o");
+    printf("inputs = %zu\en", elf_link_plan_input_count(plan));
+    elf_link_plan_destroy(plan);
+    return 0;
+}
+.Ed
 .Sh SEE ALSO
 .Xr elf_link_plan_add_input 3

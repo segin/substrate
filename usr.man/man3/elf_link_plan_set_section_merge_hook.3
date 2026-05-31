@@ -22,5 +22,28 @@ Returns
 .Dv ELF_OK
 on success, otherwise
 .Dv ELF_ERR_STATE .
+.Sh EXAMPLES
+Install a section merge policy that appends matching sections.
+.Bd -literal -offset indent
+#include <elfobj.h>
+
+static elf_link_merge_action_t
+merge(const char *name, const elf_section_t *existing,
+      const elf_section_t *incoming, void *user)
+{
+    (void)name; (void)existing; (void)incoming; (void)user;
+    return ELF_LINK_MERGE_APPEND;
+}
+
+int
+main(void)
+{
+    elf_link_plan_t *plan = elf_link_plan_create();
+
+    elf_link_plan_set_section_merge_hook(plan, merge, NULL);
+    elf_link_plan_destroy(plan);
+    return 0;
+}
+.Ed
 .Sh SEE ALSO
 .Xr elf_link_plan_link 3

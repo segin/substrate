@@ -31,6 +31,27 @@ Typically
 for invalid arguments and
 .Dv ELF_ERR_OOM
 for allocation failure.
+.Sh EXAMPLES
+Add two named inputs to a plan and confirm the input count.
+.Bd -literal -offset indent
+#include <elfobj.h>
+#include <stdio.h>
+
+int
+main(void)
+{
+    elf_link_plan_t *plan = elf_link_plan_create();
+    elfobj_t *a, *b;
+
+    elf_open("a.o", &a);
+    elf_open("b.o", &b);
+    elf_link_plan_add_input(plan, a, "a.o");
+    elf_link_plan_add_input(plan, b, "b.o");
+    printf("%zu inputs\en", elf_link_plan_input_count(plan));
+    elf_link_plan_destroy(plan);
+    return 0;
+}
+.Ed
 .Sh SEE ALSO
 .Xr elf_link_plan_input_count 3 ,
 .Xr elf_link_plan_link 3

@@ -84,11 +84,31 @@ Returns \fBNaN\fR when |x| > 1 (domain error).
 .TP
 Returns \fBNaN\fR when x is \fBNaN\fR.
 .RE
+.SH EXAMPLES
+Evaluate the pi-argument trig functions at a half turn.
+.PP
+.RS 4
+.EX
+#include <math.h>
+#include <stdio.h>
+
+int
+main(void)
+{
+    double x = 0.5;
+
+    printf("sinpi(%.1f) = %.6f\en", x, sinpi(x));
+    printf("cospi(%.1f) = %.6f\en", x, cospi(x));
+    printf("tanpi(%.1f) = %.6f\en", x, tanpi(x));
+    return 0;
+}
+.EE
+.RE
 .SH STANDARDS
 C23 (ISO/IEC 9899:2024), pi-argument trig functions (Clause 7.12.16).
 .SH SEE ALSO
-.sin(3),
-.cos(3),
-.tan(3),
-.asin(3),
-.math(7)
+.BR sin (3),
+.BR cos (3),
+.BR tan (3),
+.BR asin (3),
+.BR math (7)

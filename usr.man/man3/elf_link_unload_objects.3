@@ -18,5 +18,25 @@ on each non-NULL element in
 .Fa objs
 and then frees the array itself.
 Passing NULL is safe.
+.Sh EXAMPLES
+Release an object array previously returned by
+.Fn elf_link_load_objects .
+.Bd -literal -offset indent
+#include <elfobj.h>
+
+int
+main(void)
+{
+    const char *paths[] = { "a.o", "b.o" };
+    elfobj_t **objs = NULL;
+    size_t n = 0;
+
+    if (elf_link_load_objects(paths, 2, &objs, &n) != ELF_OK)
+        return 1;
+    /* ... use objs ... */
+    elf_link_unload_objects(objs, n);
+    return 0;
+}
+.Ed
 .Sh SEE ALSO
 .Xr elf_link_load_objects 3

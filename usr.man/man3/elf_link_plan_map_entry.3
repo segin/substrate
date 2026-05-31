@@ -20,5 +20,33 @@ Returns 1 on success.
 Returns 0 when arguments are invalid or
 .Fa index
 is out of range.
+.Sh EXAMPLES
+Iterate the symbol map and print each entry's provenance.
+.Bd -literal -offset indent
+#include <elfobj.h>
+#include <stdio.h>
+
+int
+main(void)
+{
+    elf_link_plan_t *plan = elf_link_plan_create();
+    elfobj_t *obj, *out = NULL;
+    size_t i, n;
+
+    elf_open("a.o", &obj);
+    elf_link_plan_add_input(plan, obj, "a.o");
+    if (elf_link_plan_link(plan, &out) == ELF_OK) {
+        n = elf_link_plan_map_count(plan);
+        for (i = 0; i < n; i++) {
+            elf_link_map_entry_t e;
+            if (elf_link_plan_map_entry(plan, i, &e))
+                printf("%s in %s\en", e.symbol_name, e.input_name);
+        }
+        elf_close(out);
+    }
+    elf_link_plan_destroy(plan);
+    return 0;
+}
+.Ed
 .Sh SEE ALSO
 .Xr elf_link_plan_map_count 3

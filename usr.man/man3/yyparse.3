@@ -59,6 +59,31 @@ if the entire input stream was successfully parsed according to the provided gra
 It returns
 .B 1
 if a syntax error occurred that could not be recovered from via error recovery productions, or if a memory exhaustion error occurred internally during parsing.
+.SH EXAMPLES
+A minimal driver that runs the generated parser over stdin.
+.PP
+.RS 4
+.EX
+#include "y.tab.h"
+#include <stdio.h>
+
+void
+yyerror(const char *s)
+{
+    fprintf(stderr, "parse error: %s\en", s);
+}
+
+int
+main(void)
+{
+    if (yyparse() == 0)
+        printf("input accepted\en");
+    else
+        printf("input rejected\en");
+    return 0;
+}
+.EE
+.RE
 .SH GLOBAL VARIABLES
 .TP
 .B YYSTYPE yylval

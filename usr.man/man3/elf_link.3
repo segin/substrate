@@ -36,6 +36,31 @@ code and does not modify
 .Sh ERRORS
 Common failure classes include invalid arguments, incompatible input objects,
 allocation failure, and unresolved merge state.
+.Sh EXAMPLES
+Merge two relocatable objects into a single output object.
+.Bd -literal -offset indent
+#include <elfobj.h>
+#include <stdio.h>
+
+int
+main(void)
+{
+    elfobj_t *inputs[2], *output = NULL;
+
+    if (elf_open("a.o", &inputs[0]) != ELF_OK ||
+        elf_open("b.o", &inputs[1]) != ELF_OK)
+        return 1;
+    if (elf_link(inputs, 2, &output) != ELF_OK) {
+        fprintf(stderr, "link failed\en");
+        return 1;
+    }
+    elf_write_file(output, "merged.o");
+    elf_close(output);
+    elf_close(inputs[0]);
+    elf_close(inputs[1]);
+    return 0;
+}
+.Ed
 .Sh SEE ALSO
 .Xr elf_link_plan 3 ,
 .Xr elf_link_utils 3 ,

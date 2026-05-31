@@ -18,5 +18,28 @@ Returns
 .Dv ELF_OK
 on success, otherwise
 .Dv ELF_ERR_STATE .
+.Sh EXAMPLES
+Install an archive-member extraction policy on a plan.
+.Bd -literal -offset indent
+#include <elfobj.h>
+#include <string.h>
+
+static int
+want(const char *archive, const char *member, void *user)
+{
+    (void)archive; (void)user;
+    return strstr(member, "debug") == NULL;
+}
+
+int
+main(void)
+{
+    elf_link_plan_t *plan = elf_link_plan_create();
+
+    elf_link_plan_set_archive_hook(plan, want, NULL);
+    elf_link_plan_destroy(plan);
+    return 0;
+}
+.Ed
 .Sh SEE ALSO
 .Xr elf_link_plan_consider_archive_member 3

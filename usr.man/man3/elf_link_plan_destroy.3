@@ -18,5 +18,24 @@ and all internal arrays/strings owned by the plan.
 Passing
 .Dv NULL
 is safe.
+.Sh EXAMPLES
+Release a plan once linking is complete.
+.Bd -literal -offset indent
+#include <elfobj.h>
+
+int
+main(void)
+{
+    elf_link_plan_t *plan = elf_link_plan_create();
+    elfobj_t *obj, *out = NULL;
+
+    elf_open("a.o", &obj);
+    elf_link_plan_add_input(plan, obj, "a.o");
+    elf_link_plan_link(plan, &out);
+    elf_close(out);
+    elf_link_plan_destroy(plan);
+    return 0;
+}
+.Ed
 .Sh SEE ALSO
 .Xr elf_link_plan_create 3

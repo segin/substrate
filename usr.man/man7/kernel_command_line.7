@@ -98,6 +98,33 @@ Enable ELKS Minix trap diagnostics.
 Enable ELKS synthetic
 .B /dev/kmem
 snapshot tracing, including exported task-slot order and kmem seek/read offsets.
+.TP
+.B perso:native
+Enable native-personality ELF loader/exec diagnostics.
+.TP
+.B perso:freebsd
+Enable FreeBSD-personality loader diagnostics.
+.TP
+.B syscall_stats
+Enable per-syscall statistics accounting (counts/timing) in addition to the
+.B syscall
+entry/return trace.
+.TP
+.B ext2trace
+Enable ext2 directory-operation tracing (link/unlink/rename and dirent
+add/remove), limited to low inode numbers to keep the channel readable.
+.TP
+.B vm_leak
+Enable VM page/pager leak accounting: report the running
+.BR alloc \- dealloc
+balance of vnode-pager objects at process exit so growth is visible
+(healthy steady state is zero).
+.TP
+.B xfd
+Enable extended file-descriptor lifecycle tracing.
+.TP
+.B xsig
+Enable extended signal delivery/return tracing.
 .SH COMPATIBILITY
 The following older boot flags remain supported:
 .TP

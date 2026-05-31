@@ -28,6 +28,28 @@ on success.
 On failure returns an
 .Vt elf_err_t
 code and releases partially opened inputs.
+.Sh EXAMPLES
+Open a list of input files and release them when done.
+.Bd -literal -offset indent
+#include <elfobj.h>
+#include <stdio.h>
+
+int
+main(void)
+{
+    const char *paths[] = { "a.o", "b.o", "c.o" };
+    elfobj_t **objs = NULL;
+    size_t n = 0;
+
+    if (elf_link_load_objects(paths, 3, &objs, &n) != ELF_OK) {
+        fprintf(stderr, "load failed\en");
+        return 1;
+    }
+    printf("loaded %zu objects\en", n);
+    elf_link_unload_objects(objs, n);
+    return 0;
+}
+.Ed
 .Sh SEE ALSO
 .Xr elf_link_unload_objects 3 ,
 .Xr elf_open 3

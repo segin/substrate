@@ -365,6 +365,37 @@ An
 handle is not thread-safe.
 Applications must confine each handle to one thread at a time and
 serialize external access.
+.SH EXAMPLES
+The following program reads and echoes one edited line:
+.PP
+.RS 4
+.EX
+#include <histedit.h>
+#include <stdio.h>
+
+static const char *
+prompt(EditLine *el)
+{
+    (void)el;
+    return "> ";
+}
+
+int
+main(void)
+{
+    EditLine *el = el_init("prog", stdin, stdout, stderr);
+    int count;
+    const char *line;
+
+    el_set(el, EL_PROMPT, prompt);
+    line = el_gets(el, &count);
+    if (line != NULL && count > 0)
+        printf("read: %s", line);
+    el_end(el);
+    return 0;
+}
+.EE
+.RE
 .SH SEE ALSO
 .BR el_init (3),
 .BR el_gets (3),

@@ -32,6 +32,33 @@ is
 .Sh CAVEATS
 A return value of 0 may represent either a null input or a legitimate section
 address value.
+.Sh EXAMPLES
+Print the virtual address of each section in an opened object.
+.Bd -literal -offset indent
+#include <elfobj.h>
+#include <stdio.h>
+
+int
+main(int argc, char **argv)
+{
+    elfobj_t *obj = NULL;
+    size_t i, n;
+
+    if (elf_open(argv[1], &obj) != ELF_OK)
+        return 1;
+
+    n = elf_section_count(obj);
+    for (i = 0; i < n; i++) {
+        elf_section_t *s = elf_section_get(obj, i);
+
+        printf("%s: addr=%#llx\en", elf_section_name(s),
+            (unsigned long long)elf_section_addr(s));
+    }
+
+    elf_close(obj);
+    return 0;
+}
+.Ed
 .Sh SEE ALSO
 .Xr elf_section_get 3 ,
 .Xr elf_section_type 3 ,

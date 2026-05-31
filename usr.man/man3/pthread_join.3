@@ -38,6 +38,33 @@ returns 0; on error, it returns an error number.
 No thread with the ID
 .I thread
 could be found.
+.SH EXAMPLES
+Wait for a thread to finish and collect its exit value.
+.PP
+.RS 4
+.EX
+#include <pthread.h>
+#include <stdio.h>
+
+static void *
+worker(void *arg)
+{
+    return arg;
+}
+
+int
+main(void)
+{
+    pthread_t t;
+    void *ret;
+
+    pthread_create(&t, NULL, worker, (void *)7);
+    if (pthread_join(t, &ret) == 0)
+        printf("joined; value = %ld\en", (long)ret);
+    return 0;
+}
+.EE
+.RE
 .SH SEE ALSO
 .BR pthread_create (3),
 .BR pthread_exit (3),

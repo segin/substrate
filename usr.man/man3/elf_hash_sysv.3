@@ -18,5 +18,19 @@ symbol lookup tables.
 .Sh RETURN VALUES
 Returns the hash value for
 .Fa name .
+.Sh EXAMPLES
+Compute and print the System V hash of a symbol name.
+.Bd -literal -offset indent
+#include <elfobj.h>
+#include <stdio.h>
+
+int
+main(void)
+{
+    uint32_t h = elf_hash_sysv("printf");
+    printf("sysv hash = 0x%08x\en", h);
+    return 0;
+}
+.Ed
 .Sh SEE ALSO
 .Xr elf_hash_gnu 3

@@ -150,6 +150,30 @@ at iteration end.
 returns the proc_t** array or
 .B NULL
 on allocation failure.
+.SH EXAMPLES
+Iterate over every process and print its pid and command.
+.PP
+.RS 4
+.EX
+#include <proc/readproc.h>
+#include <stdio.h>
+
+int
+main(void)
+{
+    PROCTAB *pt;
+    proc_t p;
+
+    pt = openproc(PROC_FILLCOM);
+    if (pt == NULL)
+        return 1;
+    while (readproc(pt, &p) != NULL)
+        printf("%d %s\en", p.tid, p.cmd);
+    closeproc(pt);
+    return 0;
+}
+.EE
+.RE
 .SH SEE ALSO
 .BR ps (1),
 .BR top (1),

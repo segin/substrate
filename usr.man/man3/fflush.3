@@ -74,6 +74,30 @@ The function may also fail and set
 .I errno
 for any of the errors specified for the routine
 .BR write (2).
+.SH EXAMPLES
+The following program writes a prompt without a trailing newline and
+forces it out before reading a reply.
+.PP
+.RS 4
+.EX
+#include <stdio.h>
+
+int
+main(void)
+{
+    char buf[64];
+
+    fputs("name? ", stdout);
+    if (fflush(stdout) == EOF) {
+        perror("fflush");
+        return 1;
+    }
+    if (fgets(buf, sizeof(buf), stdin) != NULL)
+        fputs(buf, stdout);
+    return 0;
+}
+.EE
+.RE
 .SH SEE ALSO
 .BR close (2),
 .BR write (2),

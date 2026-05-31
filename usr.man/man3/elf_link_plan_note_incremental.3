@@ -26,5 +26,29 @@ on success, or
 if
 .Fa plan
 is NULL.
+.Sh EXAMPLES
+Register an incremental hook and emit one note event.
+.Bd -literal -offset indent
+#include <elfobj.h>
+#include <stdio.h>
+
+static void
+note(const char *key, const char *value, void *user)
+{
+    (void)user;
+    printf("%s=%s\en", key, value);
+}
+
+int
+main(void)
+{
+    elf_link_plan_t *plan = elf_link_plan_create();
+
+    elf_link_plan_set_incremental_hook(plan, note, NULL);
+    elf_link_plan_note_incremental(plan, "rebuilt", "a.o");
+    elf_link_plan_destroy(plan);
+    return 0;
+}
+.Ed
 .Sh SEE ALSO
 .Xr elf_link_plan_set_incremental_hook 3

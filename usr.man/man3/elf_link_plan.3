@@ -78,6 +78,39 @@ Other plan APIs return
 on success and an
 .Vt elf_err_t
 code on failure.
+.Sh EXAMPLES
+Drive a full plan lifecycle: create, add inputs, link, inspect the
+symbol map, then destroy.
+.Bd -literal -offset indent
+#include <elfobj.h>
+#include <stdio.h>
+
+int
+main(void)
+{
+    elf_link_plan_t *plan = elf_link_plan_create();
+    elfobj_t *a, *b, *out = NULL;
+    size_t i, n;
+
+    if (plan == NULL)
+        return 1;
+    elf_open("a.o", &a);
+    elf_open("b.o", &b);
+    elf_link_plan_add_input(plan, a, "a.o");
+    elf_link_plan_add_input(plan, b, "b.o");
+    if (elf_link_plan_link(plan, &out) == ELF_OK) {
+        n = elf_link_plan_map_count(plan);
+        for (i = 0; i < n; i++) {
+            elf_link_map_entry_t e;
+            if (elf_link_plan_map_entry(plan, i, &e))
+                printf("%s <- %s\en", e.symbol_name, e.input_name);
+        }
+        elf_close(out);
+    }
+    elf_link_plan_destroy(plan);
+    return 0;
+}
+.Ed
 .Sh SEE ALSO
 .Xr elf_link 3 ,
 .Xr elf_link_utils 3 ,

@@ -40,5 +40,24 @@ is set appropriately.
 .B EFAULT
 .I buf
 is not valid.
+.SH EXAMPLES
+Print the kernel name, release, and machine type.
+.PP
+.RS 4
+.EX
+#include <sys/utsname.h>
+#include <stdio.h>
+
+int
+main(void)
+{
+    struct utsname u;
+
+    if (uname(&u) == 0)
+        printf("%s %s %s\en", u.sysname, u.release, u.machine);
+    return 0;
+}
+.EE
+.RE
 .SH SEE ALSO
 .BR uname (1)

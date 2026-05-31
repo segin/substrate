@@ -39,6 +39,21 @@ is
 .Dv NULL ,
 if no ABI flags section is present,
 or if the section is malformed or too short.
+.Sh EXAMPLES
+Open a MIPS object and print its decoded ISA level.
+.Bd -literal -offset indent
+#include <elfobj.h>
+#include <stdio.h>
+
+elfobj_t *obj;
+elf_mips_abiflags_t fl;
+
+if (elf_open("a.out", &obj) != ELF_OK)
+    errx(1, "elf_open failed");
+if (elf_mips_abiflags(obj, &fl))
+    printf("ISA level %u rev %u\en", fl.isa_level, fl.isa_rev);
+elf_close(obj);
+.Ed
 .Sh SEE ALSO
 .Xr elf_init_mips32 3 ,
 .Xr elf_init_mips64 3 ,

@@ -44,6 +44,17 @@ The
 function returns a pointer to a newly allocated object on success.
 On failure, it returns
 .Dv NULL .
+.Sh EXAMPLE
+This backend is normally selected internally by
+.Xr elf_open 3
+dispatch, but it may be called directly to build an object by hand.
+.Bd -literal
+elfobj_t *obj = elf_init_riscv32();
+if (obj == NULL)
+    errx(1, "elf_init_riscv32 failed");
+/* populate object */
+elf_close(obj);
+.Ed
 .Sh SEE ALSO
 .Xr elf_riscv_attribute_count 3 ,
 .Xr elf_finalize 3 ,

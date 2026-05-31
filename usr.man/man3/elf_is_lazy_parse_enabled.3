@@ -19,5 +19,19 @@ was opened with
 semantics.
 .Sh RETURN VALUES
 Returns non-zero when lazy parsing is enabled, 0 otherwise.
+.Sh EXAMPLES
+Open an object and report whether lazy parsing is in effect.
+.Bd -literal -offset indent
+#include <elfobj.h>
+#include <stdio.h>
+
+elfobj_t *obj;
+
+if (elf_open("/bin/ls", &obj) != ELF_OK)
+    errx(1, "elf_open failed");
+if (elf_is_lazy_parse_enabled(obj))
+    printf("lazy parsing enabled\en");
+elf_close(obj);
+.Ed
 .Sh SEE ALSO
 .Xr elf_open_with_options 3
