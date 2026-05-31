@@ -6,6 +6,7 @@
 #include <sys/vtio.h>           /* K_XLATE / K_RAW / KDSKBMODE */
 #include <drivers/video/hw_text.h>
 #include <drivers/video/fb_console.h>
+#include <drivers/video/fb.h>
 #include <drivers/input/keyboard.h>
 #include <kern/console.h>
 #include <string.h>
@@ -423,6 +424,17 @@ void vt_activate(int n) {
     spinlock_release(&vt_switch_lock);
     intr_restore(flags);
 
+    /* Framebuffer ownership: when leaving a graphics VT, push the X server
+     * offscreen (its /dev/fb0 mmap is redirected to a shadow buffer) so its
+     * drawing can't bleed onto the now-foreground text console; when
+     * entering a graphics VT, bring it back onscreen and present its last
+     * rendered frame.  No-op when no X framebuffer mapping is registered.
+     * Done before the redraw below so the text console owns the screen. */
+    {
+        vt_state_t *new_vt = vt_get_state(n);
+        fb_set_offscreen(new_vt && new_vt->graphics_mode ? 0 : 1);
+    }
+
     /* Redraw outside the lock — fb_console takes its own lock and we
      * don't want to nest console locks under vt_switch_lock. */
     vt_redraw_active();
@@ -736,6 +748,12 @@ void vt_tick_1hz(void) {
  */
 void vt_release_graphics_on_exit(void *exiting_process) {
     if (!exiting_process) return;
+
+    /* Drop any framebuffer-client registration this process held so a
+     * later VT switch never touches its torn-down address space, and the
+     * framebuffer reverts to onscreen for the text console. */
+    fb_client_clear(exiting_process);
+
     for (int i = 0; i < VT_MAX; i++) {
         vt_state_t *vt = &vt_states[i];
         int touched = 0;

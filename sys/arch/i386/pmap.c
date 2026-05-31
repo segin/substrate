@@ -1188,6 +1188,64 @@ void pmap_remove(pmap_t pmap, uintptr_t va) {
     pmap_reclaim_empty_pt(pmap, pdi);
 }
 
+/*
+ * Clear the 4 KiB PTEs covering [sva, eva) in an arbitrary address space —
+ * including a pmap that is NOT currently loaded on this CPU.  Unlike
+ * pmap_remove(), which reaches page tables through the recursive self-map
+ * (and therefore only works on the current pmap), this walks them through
+ * the kernel direct map (P2V of pdir_phys), so the framebuffer code can
+ * retarget a backgrounded X server's /dev/fb0 mmap while that process is
+ * not running.
+ *
+ * Scoped to device (framebuffer) mappings: it zeroes present small-page
+ * PTEs to force a re-fault and does not touch pv lists or page hold counts
+ * — a linear framebuffer aperture is a raw physical window, and the
+ * offscreen shadow it may point at is permanently kernel-owned.  A foreign
+ * pmap's stale TLB entries are flushed by the CR3 reload performed when it
+ * is next scheduled; the current pmap is invalidated per page.
+ */
+void pmap_remove_range(pmap_t pmap, uint32_t sva, uint32_t eva) {
+    uint32_t cr3;
+    uint32_t *pd;
+    int is_current;
+    uint32_t va;
+    uint32_t cleared = 0;
+
+    if (!pmap || !pmap->pdir_phys || eva <= sva) {
+        return;
+    }
+    __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
+    is_current = (pmap->pdir_phys == cr3);
+    pd = (uint32_t *)P2V(pmap->pdir_phys);
+
+    for (va = sva & ~0xFFFU; va < eva; va += 0x1000U) {
+        uint32_t pdi = PD_INDEX(va);
+        uint32_t pde = pd[pdi];
+        uint32_t *pt;
+        uint32_t pti;
+
+        if (!(pde & PTE_P) || (pde & PTE_PS)) {
+            /* Absent or large-page PDE — skip to the next 4 MiB boundary
+             * (the loop's += 0x1000 lands exactly on it). */
+            va = (va & 0xFFC00000U) + 0x00400000U - 0x1000U;
+            continue;
+        }
+        pt = (uint32_t *)P2V(pde & PTE_FRAME);
+        pti = PT_INDEX(va);
+        if (!(pt[pti] & PTE_P)) {
+            continue;
+        }
+        pt[pti] = 0;
+        cleared++;
+        if (is_current) {
+            pmap_invalidate_page(va);
+        }
+    }
+    if (cleared) {
+        pmap_count_map_remove(pmap, cleared);
+    }
+}
+
 static int pmap_page_mapping_count(vm_page_t *page) {
     int count = 0;
 

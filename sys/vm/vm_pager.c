@@ -158,6 +158,20 @@ void vm_pager_set_cache_mode(vm_pager_t *pager, uint8_t mode) {
     ((vm_device_pager_t *)pager)->cache_mode = mode;
 }
 
+/*
+ * Retarget a live device mapping at a different physical base.  The
+ * framebuffer code uses this to redirect a backgrounded X server's
+ * /dev/fb0 mmap to an offscreen shadow buffer (and back).  The caller
+ * must drop the affected PTEs (pmap_remove_range) afterwards so the
+ * fault handler reinstalls them pointing at the new base.
+ */
+void vm_pager_device_set_phys_base(vm_pager_t *pager, uintptr_t phys_base) {
+    if (!pager || pager->ops != &device_pager_ops) {
+        return;
+    }
+    ((vm_device_pager_t *)pager)->phys_base = phys_base;
+}
+
 uint8_t vm_pager_device_cache_mode(vm_pager_t *pager) {
     if (!pager || pager->ops != &device_pager_ops) {
         return VM_PAGER_CACHE_UC;

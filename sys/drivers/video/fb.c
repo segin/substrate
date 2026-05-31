@@ -25,6 +25,8 @@
 #include <vm/vm_kmem.h>
 
 #include <arch/i386/pmap.h>
+#include <arch/i386/pmm.h>
+#include <sys/lock.h>
 
 #include <drivers/video/bga.h>
 #include <drivers/video/fb.h>
@@ -615,6 +617,152 @@ static size_t fb_fs_write(fs_node_t *node, off_t off, size_t len, const uint8_t 
     return len;
 }
 
+/* ============ Framebuffer ownership: offscreen shadow buffer ============
+ *
+ * When the X server's VT is switched out of the foreground its /dev/fb0
+ * mmap must stop reaching visible video memory, or its drawing bleeds over
+ * the text console that now owns the screen.  We cannot unmap a running X
+ * server, so instead we redirect its mapping at a physically-contiguous
+ * offscreen shadow buffer: X keeps drawing (now into the shadow), and on
+ * switch-back we blit the shadow to the real framebuffer to present its
+ * last frame and redirect the mapping back to live video memory.
+ *
+ * Bounded to framebuffers that fit a single contiguous allocation
+ * (PMM_MAX_ORDER => 4 MiB, i.e. up to 1024x768x32).  Larger modes degrade
+ * gracefully to the previous behaviour: the redirect becomes a no-op and a
+ * backgrounded X keeps drawing to the real framebuffer.
+ */
+static spinlock_t fb_shadow_lock = SPINLOCK_INIT("fb_shadow");
+static void      *fb_shadow_virt;   /* kernel VA of the shadow buffer  */
+static uintptr_t  fb_shadow_phys;   /* physical base of the shadow     */
+static size_t     fb_shadow_size;   /* bytes (page-rounded)            */
+static int        fb_is_offscreen;  /* current redirect state          */
+
+static struct {
+    int          active;
+    pmap_t       pmap;       /* owning process address space            */
+    uintptr_t    va;         /* mmap base within that address space     */
+    size_t       len;        /* mapped length (page-rounded)            */
+    vm_pager_t  *pager;      /* device pager backing the mapping        */
+    uintptr_t    fb_offset;  /* byte offset into the framebuffer        */
+    void        *owner;      /* owning process (== vt graphics_owner)   */
+} fb_client;
+
+static int fb_shadow_ensure(void) {
+    size_t fb_size;
+    size_t npages;
+    void *v;
+
+    if (fb_shadow_virt) {
+        return 1;
+    }
+    if (!fb.phys || fb.pitch == 0 || fb.height == 0) {
+        return 0;
+    }
+    fb_size = (size_t)fb.pitch * (size_t)fb.height;
+    npages = (fb_size + 0xFFFU) >> 12;
+    v = pmm_alloc_contiguous(npages);
+    if (!v) {
+        kprintf("fb: offscreen shadow unavailable — a %u-page framebuffer "
+                "exceeds the contiguous allocation limit; a backgrounded X "
+                "server will keep drawing to the visible screen\n",
+                (unsigned)npages);
+        return 0;
+    }
+    memset(v, 0, npages << 12);
+    fb_shadow_virt = v;
+    fb_shadow_phys = (uintptr_t)V2P(v);
+    fb_shadow_size = npages << 12;
+    return 1;
+}
+
+/* Record a /dev/fb0 mapping as the framebuffer client (the X server).
+ * There is one visible framebuffer, hence one client of interest. */
+static void fb_client_register(pmap_t pmap, uintptr_t va, size_t len,
+                               vm_pager_t *pager, uintptr_t fb_offset,
+                               void *owner) {
+    spinlock_acquire(&fb_shadow_lock);
+    fb_client.active = 1;
+    fb_client.pmap = pmap;
+    fb_client.va = va;
+    fb_client.len = len;
+    fb_client.pager = pager;
+    fb_client.fb_offset = fb_offset;
+    fb_client.owner = owner;
+    fb_is_offscreen = 0;     /* a fresh mapping always points at real video */
+    spinlock_release(&fb_shadow_lock);
+
+    /* Allocate the shadow now — early, while contiguous memory is plentiful
+     * — instead of at the first (latency-sensitive) VT switch. */
+    (void)fb_shadow_ensure();
+}
+
+/*
+ * Redirect the framebuffer client between the real framebuffer (onscreen)
+ * and the offscreen shadow.  Called from the VT-switch path: offscreen=1
+ * when leaving the graphics VT, offscreen=0 when returning to it.
+ */
+void fb_set_offscreen(int offscreen) {
+    pmap_t pmap;
+    uintptr_t va, target;
+    size_t len;
+    vm_pager_t *pager;
+    int present;
+
+    spinlock_acquire(&fb_shadow_lock);
+    if (!fb_client.active || !fb_client.pager) {
+        spinlock_release(&fb_shadow_lock);
+        return;
+    }
+    offscreen = offscreen ? 1 : 0;
+    if (offscreen == fb_is_offscreen) {
+        spinlock_release(&fb_shadow_lock);
+        return;
+    }
+    if (offscreen && !fb_shadow_virt) {
+        /* No shadow available (alloc failed / mode too large): can't hide
+         * X, so leave it mapped to the real framebuffer. */
+        spinlock_release(&fb_shadow_lock);
+        return;
+    }
+    pmap   = fb_client.pmap;
+    va     = fb_client.va;
+    len    = fb_client.len;
+    pager  = fb_client.pager;
+    target = (offscreen ? fb_shadow_phys : fb.phys) + fb_client.fb_offset;
+    present = !offscreen;
+    vm_pager_device_set_phys_base(pager, target);
+    fb_is_offscreen = offscreen;
+    spinlock_release(&fb_shadow_lock);
+
+    /* Coming back onscreen: present the frame X accumulated offscreen. */
+    if (present && fb_shadow_virt && fb.addr) {
+        size_t n = fb_shadow_size;
+        size_t fb_size = (size_t)fb.pitch * (size_t)fb.height;
+        if (n > fb_size) n = fb_size;
+        memcpy((void *)fb.addr, fb_shadow_virt, n);
+    }
+
+    /* Drop the now-stale PTEs; the page-fault handler reinstalls them at
+     * the new physical base on the client's next access.  During a VT
+     * switch the client is not the running process, so its TLB is flushed
+     * naturally by the CR3 reload when it is next scheduled. */
+    pmap_remove_range(pmap, (uint32_t)va, (uint32_t)(va + len));
+}
+
+/* Drop the registration when the owning process exits (called from the
+ * graphics-release path).  Never touches the dying address space. */
+void fb_client_clear(void *owner) {
+    spinlock_acquire(&fb_shadow_lock);
+    if (fb_client.active && fb_client.owner == owner) {
+        fb_client.active = 0;
+        fb_client.pager = NULL;
+        fb_client.pmap = NULL;
+        fb_is_offscreen = 0;
+    }
+    spinlock_release(&fb_shadow_lock);
+}
+
 static void *fb_fs_mmap(fs_node_t *node, void *addr, size_t length, int prot, int flags, off_t offset) {
     vm_object_t *obj;
     vm_map_t *map;
@@ -680,6 +828,12 @@ static void *fb_fs_mmap(fs_node_t *node, void *addr, size_t length, int prot, in
         vm_object_deallocate(obj);
         return (void *)-1;
     }
+
+    /* Track this mapping so a VT switch can move a backgrounded X server's
+     * framebuffer offscreen.  The physical base the pager carries is
+     * fb.phys + offset; record `offset` so the redirect preserves it. */
+    fb_client_register(map->pmap, virt, aligned_length, obj->pager,
+                       (uintptr_t)offset, (void *)current_process);
 
     (void)node;
     return (void *)virt;

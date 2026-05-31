@@ -55,6 +55,13 @@ void fb_clear(uint32_t color);
 /* Register an additional framebuffer device; returns index or -1 */
 int fb_register_device(fb_info_t *info);
 
+/* Framebuffer ownership across VT switches.  fb_set_offscreen() redirects
+ * the X server's /dev/fb0 mmap to an offscreen shadow (1) or back to the
+ * real framebuffer (0); fb_client_clear() drops the registration when the
+ * owning process exits.  See fb.c for details. */
+void fb_set_offscreen(int offscreen);
+void fb_client_clear(void *owner);
+
 /* Console operations are in fb_console.h */
 #include "fb_console.h"
 

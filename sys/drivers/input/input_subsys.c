@@ -8,6 +8,8 @@
 #include <sys/time.h>
 #include <kern/time.h>
 #include <sys/lock.h>
+#include <sys/vt.h>
+#include <sys/vtio.h>
 #include <sys/errno.h>
 #include <sys/poll.h>
 
@@ -106,6 +108,23 @@ void input_notify_readers(void) {
 // Distribute event to all handles
 void input_report_event(input_dev_t *dev, uint16_t type, uint16_t code, int32_t value) {
     (void)dev; // In future, use this to filter
+
+    /*
+     * Raw input events (the evdev /dev/input/event0 ring) belong to
+     * whoever owns the foreground VT.  An X server reads them only while
+     * its VT is in the foreground; in that state the VT is in KD_GRAPHICS
+     * and/or its keyboard is in a raw mode (kbd_mode != K_XLATE).  When a
+     * text VT is foreground, the keyboard goes to its line discipline (see
+     * keyboard_emit_char) and the evdev ring must stay silent — otherwise
+     * a backgrounded X server keeps draining keystrokes and pointer motion
+     * it should no longer see.  Drop the event unless the active VT has a
+     * raw-input consumer, so X is disconnected from input the moment its
+     * VT is switched away and reconnected when it is switched back.
+     */
+    vt_state_t *avt = vt_get_state(vt_get_active());
+    if (!avt || (!avt->graphics_mode && avt->kbd_mode == K_XLATE)) {
+        return;
+    }
 
     struct timeval tv;
     sys_gettimeofday(&tv, NULL);
