@@ -691,10 +691,10 @@ static void fb_client_register(pmap_t pmap, uintptr_t va, size_t len,
     fb_client.owner = owner;
     fb_is_offscreen = 0;     /* a fresh mapping always points at real video */
     spinlock_release(&fb_shadow_lock);
-
-    /* Allocate the shadow now — early, while contiguous memory is plentiful
-     * — instead of at the first (latency-sensitive) VT switch. */
-    (void)fb_shadow_ensure();
+    /* The shadow is allocated lazily, only the first time X is actually
+     * backgrounded (see fb_set_offscreen).  Allocating it here would burn a
+     * 4 MiB contiguous block at X startup — exactly when an X session is
+     * scrambling for memory — even on a system that never switches VTs. */
 }
 
 /*
@@ -709,19 +709,28 @@ void fb_set_offscreen(int offscreen) {
     vm_pager_t *pager;
     int present;
 
+    offscreen = offscreen ? 1 : 0;
+
+    /* Allocate the shadow lazily, the first time X is actually backgrounded
+     * — done outside the lock since the contiguous allocation can scan the
+     * buddy free lists.  If it fails (no client, fragmentation, mode larger
+     * than one contiguous block) we leave X mapped to the real framebuffer
+     * rather than hide it: graceful degradation, never a crash. */
+    if (offscreen && !fb_shadow_virt && !fb_shadow_ensure()) {
+        return;
+    }
+
     spinlock_acquire(&fb_shadow_lock);
     if (!fb_client.active || !fb_client.pager) {
         spinlock_release(&fb_shadow_lock);
         return;
     }
-    offscreen = offscreen ? 1 : 0;
     if (offscreen == fb_is_offscreen) {
         spinlock_release(&fb_shadow_lock);
         return;
     }
     if (offscreen && !fb_shadow_virt) {
-        /* No shadow available (alloc failed / mode too large): can't hide
-         * X, so leave it mapped to the real framebuffer. */
+        /* Shadow vanished under us (shouldn't happen): stay onscreen. */
         spinlock_release(&fb_shadow_lock);
         return;
     }
