@@ -14,6 +14,7 @@
 #include <sys/smp.h>
 #ifndef HOST_TEST
 #include <sys/lock.h>
+#include <arch/i386/intr.h>
 #endif
 
 #include <kern/panic.h>
@@ -802,9 +803,15 @@ void *uma_zalloc(uma_zone_t *zone, int flags) {
     }
     
     void *item = NULL;
+    /* The per-CPU cache fast path below mutates this CPU's alloc bucket with
+     * no lock.  Mask interrupts (and thus preemption) across it -- the
+     * equivalent of FreeBSD UMA's critical_enter() -- so that neither a
+     * same-CPU preemptive thread switch nor an IRQ-context allocator call
+     * can interleave and hand the same item out twice (double-free). */
+    uint32_t _uflags = intr_disable();
     int cpu = uma_curcpu();
     uma_cache_t *cache = &zone->uz_cpu[cpu];
-    
+
     /* Fast path: try per-CPU cache */
     if (!(zone->uz_flags & UMA_ZONE_NOBUCKET)) {
         if (cache->uc_allocbucket == NULL) {
@@ -845,10 +852,12 @@ void *uma_zalloc(uma_zone_t *zone, int flags) {
                 if (zone->uz_count > zone->uz_max) {
                     zone->uz_max = zone->uz_count;
                 }
+                intr_restore(_uflags);
                 goto out;
             }
         }
     }
+    intr_restore(_uflags);
 
     /* Check zone limits before allocating new memory */
     if (zone->uz_limit > 0 && zone->uz_count >= zone->uz_limit) {
@@ -945,10 +954,14 @@ void uma_zfree(uma_zone_t *zone, void *item) {
     
     /* Debug: poison freed memory */
     uma_debug_poison_free(zone, item);
-    
+
+    /* Mask interrupts/preemption around the per-CPU free bucket (see the
+     * matching note in uma_zalloc) so a preemptive switch or IRQ-context
+     * free cannot corrupt this CPU's bucket counters. */
+    uint32_t _uflags = intr_disable();
     int cpu = uma_curcpu();
     uma_cache_t *cache = &zone->uz_cpu[cpu];
-    
+
     /* Fast path: try per-CPU cache */
     if (!(zone->uz_flags & UMA_ZONE_NOBUCKET)) {
         if (!cache->uc_freebucket) {
@@ -967,10 +980,12 @@ void uma_zfree(uma_zone_t *zone, void *item) {
             if (zone->uz_count > 0) {
                 zone->uz_count--;
             }
+            intr_restore(_uflags);
             return;
         }
     }
-    
+    intr_restore(_uflags);
+
     /* Slow path: free to slab */
     uma_zfree_slab(zone, item);
     zone->uz_frees++;
