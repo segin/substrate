@@ -4,13 +4,14 @@
 # the window manager is missing.
 [ -x "$HOME/.xsession" ] && exec "$HOME/.xsession"
 
-# Start the window manager in the background, then run a terminal in the
-# foreground.  When the terminal exits, the session (and the X server)
-# ends and sdm returns to the greeter.
+# Start a terminal as a background client, then exec the window manager in
+# the foreground.  matwm2 is the session leader: when it exits, the session
+# (and the X server) ends and sdm returns to the greeter.  A failing or
+# exiting xterm just closes that one client and leaves the session up.
 # xterm's default fonts are scalable Adobe families that aren't installed;
 # pin the primary font to the misc bitmap font 9x15 (which the core X font
 # path provides) or xterm exits without opening a window.  Don't set a bold
 # font (-fb): the matching 9x15B isn't registered and a failed -fb is fatal,
 # whereas with no -fb xterm just overstrikes for bold.
-matwm2 > /var/log/matwm2.txt 2>&1 &
-exec xterm -fn 9x15 -geometry 80x24+20+20 > /var/log/xterm.txt 2>&1
+xterm -fn 9x15 -geometry 80x24+20+20 > /var/log/xterm.txt 2>&1 &
+exec matwm2 > /var/log/matwm2.txt 2>&1
