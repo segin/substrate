@@ -251,6 +251,26 @@ int fb_console_active(void) {
     return fb_active;
 }
 
+/*
+ * On-screen rendering predicate for a VT's terminal emulator.
+ *
+ * The emulator only touches the framebuffer when the VT is BOTH the
+ * foreground (active) VT AND not in KD_GRAPHICS mode.  When a process
+ * (an X server, kmscube, ...) puts the VT into KD_GRAPHICS via KDSETMODE
+ * it owns the framebuffer outright: the kernel terminal driver keeps
+ * tracking every write in vt->buffer — it "renders offscreen" — but must
+ * not draw a single pixel until the VT is relinquished, whether by
+ * KD_TEXT, by the controlling tty closing, or by the owning process
+ * dying (see fb_vt_tty_close() and vt_release_graphics_on_exit()).
+ *
+ * All vt->buffer mutations stay unconditional; only the framebuffer blits
+ * are gated through this predicate, so a VT switch or KD_TEXT restore can
+ * repaint the up-to-date contents from the backing buffer.
+ */
+static inline int fb_console_vt_visible(const vt_state_t *vt) {
+    return vt && vt->id == vt_get_active() && !vt->graphics_mode;
+}
+
 void fb_console_redraw_active(void) {
     vt_state_t *vt;
     int row;
@@ -345,7 +365,7 @@ static void fb_console_store_cell_locked(vt_state_t *vt,
     effective = fb_console_effective_color(vt, color);
     index = (size_t)row * (size_t)vt_get_width() + (size_t)col;
     vt->buffer[index] = (uint16_t)c | (uint16_t)effective << 8;
-    if (vt->id == vt_get_active()) {
+    if (fb_console_vt_visible(vt)) {
         fb_console_draw_cell_at(col, row, c, effective, attrs);
     }
 }
@@ -579,7 +599,7 @@ static void fb_console_scroll_region_up_locked(vt_state_t *vt, int top, int bott
     }
     effective = fb_console_effective_color(vt, vt->color);
     clear_color = fb_console_palette[(effective >> 4) & 0x0FU];
-    if (vt->id == vt_get_active() && view_y_offset == 0) {
+    if (fb_console_vt_visible(vt) && view_y_offset == 0) {
         /* Pixel-scroll requires a linear FB (any bpp).  fb_copyarea
          * is a no-op for non-linear drivers (planar VGA / Hercules /
          * CGA) — fall back to per-cell redraw on those. */
@@ -620,7 +640,7 @@ static void fb_console_scroll_region_down_locked(vt_state_t *vt, int top, int bo
                 (uint16_t)' ' | (uint16_t)fb_console_effective_color(vt, vt->color) << 8;
         }
     }
-    if (vt->id == vt_get_active() && view_y_offset == 0) {
+    if (fb_console_vt_visible(vt) && view_y_offset == 0) {
         uint8_t effective = fb_console_effective_color(vt, vt->color);
         uint32_t clear_color = fb_console_palette[(effective >> 4) & 0x0FU];
         if (fb.copyarea || fb.putpixel == linear_fb_putpixel) {
@@ -953,7 +973,7 @@ static void fb_cb_insert_chars(int n) {
     for (x = col; x < col + n && x < width; x++) {
         vt->buffer[row * width + x] = empty;
     }
-    if (vt->id == vt_get_active()) {
+    if (fb_console_vt_visible(vt)) {
         fb_console_sync_row(vt, row);
     }
 }
@@ -978,7 +998,7 @@ static void fb_cb_delete_chars(int n) {
     for (x = width - n; x < width; x++) {
         vt->buffer[row * width + x] = empty;
     }
-    if (vt->id == vt_get_active()) {
+    if (fb_console_vt_visible(vt)) {
         fb_console_sync_row(vt, row);
     }
 }
@@ -1120,7 +1140,7 @@ static void fb_cb_set_alt_screen(int on) {
         vt->color = vt->alt_color;
         vt->attrs = vt->alt_attrs;
         vt->alt_screen_active = 0;
-        if (vt->id == vt_get_active()) {
+        if (fb_console_vt_visible(vt)) {
             for (int row = 0; row < visible_rows; row++) {
                 fb_console_sync_row(vt, row);
             }
@@ -1308,7 +1328,7 @@ static int fb_vt_tty_ioctl(struct tty *tty, uint32_t cmd, unsigned long arg) {
             return -EFAULT;
         }
         vt->cursor_visible = val ? 1 : 0;
-        if (vt->id == vt_get_active()) {
+        if (fb_console_vt_visible(vt)) {
             fb_console_update_cursor_locked(vt);
         }
         return 0;
@@ -1326,7 +1346,7 @@ static int fb_vt_tty_ioctl(struct tty *tty, uint32_t cmd, unsigned long arg) {
         if (!vt->cursor_blink) {
             cursor_blink_phase = 1;
         }
-        if (vt->id == vt_get_active()) {
+        if (fb_console_vt_visible(vt)) {
             fb_console_update_cursor_locked(vt);
         }
         return 0;
@@ -1766,6 +1786,10 @@ static int fb_console_cursor_should_be_visible(void) {
 
     if (!vt) {
         return 1;
+    }
+    if (vt->graphics_mode) {
+        /* X owns the framebuffer — never paint the text cursor over it. */
+        return 0;
     }
     if (!vt->cursor_visible) {
         return 0;
