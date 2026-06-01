@@ -3,6 +3,13 @@
 PATH=/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin
 export PATH
 
+# System locale.  Substrate's libc is UTF-8 throughout; en_US.UTF-8 is
+# the default so interactive programs (zsh, less, ncurses apps, vi,
+# xterm/luit) run in UTF-8 mode.  Override per-category with LC_* in a
+# per-user ~/.profile / ~/.zshrc if you need something else.
+LANG=en_US.UTF-8
+export LANG
+
 PAGER=less
 export PAGER
 

@@ -14,12 +14,12 @@
 # font (-fb): the matching 9x15B isn't registered and a failed -fb is fatal,
 # whereas with no -fb xterm just overstrikes for bold.
 #
-# +lc disables xterm's locale (luit) mode.  This build defaults locale mode
-# ON even in the C locale, so xterm execs luit as the child that runs the
-# shell.  luit allocates a SECOND pty for the shell, which currently fails
-# on substrate (exit 1) — and when that child dies xterm exits cleanly, so
-# the window flashes up and vanishes.  With +lc xterm runs the shell on its
-# own (working) pty directly.  Re-enable locale mode once luit's pty setup
-# works on substrate.
-xterm +lc -fn 9x15 -geometry 80x24+20+20 > /var/log/xterm.txt 2>&1 &
+# Locale (luit) mode is ON: the session runs under LANG=en_US.UTF-8 (set by
+# sgreet), so xterm execs luit as the child that runs the shell and filters
+# the byte stream through luit's UTF-8/ISO-2022 conversion.  luit allocates a
+# second pty for the shell; its setsid'd child claims that pty as its
+# controlling terminal via TIOCSCTTY.  (Both the kernel pty controlling-
+# terminal path and a UTF-8-aware libc setlocale/nl_langinfo had to land
+# first — see the tty auto-attach fix and lib/c locale support.)
+xterm -fn 9x15 -geometry 80x24+20+20 > /var/log/xterm.txt 2>&1 &
 exec matwm2 > /var/log/matwm2.txt 2>&1

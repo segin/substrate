@@ -126,6 +126,11 @@ static void exec_session(const struct passwd *pw, const char *display) {
            1);
     setenv("DISPLAY", display, 1);
     setenv("TERM", "xterm", 1);
+    /* Default the session to the system UTF-8 locale so X clients
+     * (xterm/luit) start in UTF-8 mode.  The login shell would set
+     * this from /etc/profile, but X clients are spawned before any
+     * shell runs, so seed it here too. */
+    setenv("LANG", "en_US.UTF-8", 1);
 
     if (chdir(pw->pw_dir) != 0) (void)chdir("/");
     setsid();

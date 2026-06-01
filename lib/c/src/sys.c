@@ -1042,41 +1042,197 @@ char *getlogin(void) {
 
 /* getgrouplist now lives in src/grp.c — it actually walks /etc/group. */
 
-/* --- Locale stubs --- */
+/* --- Locale support ---
+ *
+ * Substrate's libc encodes/decodes UTF-8 unconditionally (see
+ * src/wchar.c), so a "locale" here is really just a name plus the
+ * codeset it advertises.  We track a name per category, resolve the
+ * empty string ("") from the environment (POSIX precedence:
+ * LC_ALL > LC_<category> > LANG > "C"), and report the codeset via
+ * nl_langinfo(CODESET).  Programs such as ncurses, less, vim and
+ * xterm key their UTF-8 mode off CODESET == "UTF-8".
+ */
 
-char *setlocale(int category, const char *locale) {
-    (void)category;
-    (void)locale;
-    return (char *)"C";
+#include <langinfo.h>
+
+/* Storage for categories LC_COLLATE(1) .. LC_MESSAGES(6); index 0
+ * (LC_ALL) is the "apply to all" sentinel, never stored. */
+#define LOCALE_NAME_MAX 64
+static char locale_names[LC_MESSAGES + 1][LOCALE_NAME_MAX] = {
+    "C", "C", "C", "C", "C", "C", "C"
+};
+
+static int locale_name_is_utf8(const char *name) {
+    const char *p;
+    if (!name) return 0;
+    for (p = name; *p; p++) {
+        if ((p[0] == 'U' || p[0] == 'u') &&
+            (p[1] == 'T' || p[1] == 't') &&
+            (p[2] == 'F' || p[2] == 'f')) {
+            const char *q = p + 3;
+            if (*q == '-' || *q == '_') q++;
+            if (q[0] == '8') return 1;
+        }
+    }
+    return 0;
 }
 
-/* POSIX "C" locale.  Char-typed fields use CHAR_MAX (127) per spec
- * meaning "no value available".  Sufficient for any program that
- * doesn't actually rely on locale data — which is all of substrate
- * userland today, plus mpfr's vasprintf (which only consults
- * decimal_point and falls back cleanly to "." when grouping is ""). */
+/* Resolve locale string for one category.  A non-empty literal is
+ * taken verbatim; "" is resolved from the environment. */
+static const char *locale_resolve(const char *locale, int category) {
+    const char *v;
+    if (locale && locale[0] != '\0') return locale;
+
+    /* locale == "" (or NULL treated as ""): consult the environment. */
+    v = getenv("LC_ALL");
+    if (v && v[0]) return v;
+    switch (category) {
+    case LC_COLLATE:  v = getenv("LC_COLLATE");  break;
+    case LC_CTYPE:    v = getenv("LC_CTYPE");    break;
+    case LC_MONETARY: v = getenv("LC_MONETARY"); break;
+    case LC_NUMERIC:  v = getenv("LC_NUMERIC");  break;
+    case LC_TIME:     v = getenv("LC_TIME");     break;
+    case LC_MESSAGES: v = getenv("LC_MESSAGES"); break;
+    default:          v = NULL;                  break;
+    }
+    if (v && v[0]) return v;
+    v = getenv("LANG");
+    if (v && v[0]) return v;
+    return "C";
+}
+
+static void locale_store(int category, const char *name) {
+    strncpy(locale_names[category], name, LOCALE_NAME_MAX - 1);
+    locale_names[category][LOCALE_NAME_MAX - 1] = '\0';
+}
+
+char *setlocale(int category, const char *locale) {
+    static char composite[LOCALE_NAME_MAX * 6];
+    int i, all_equal;
+
+    if (category < 0 || category > LC_MESSAGES) return NULL;
+
+    if (locale != NULL) {
+        if (category == LC_ALL) {
+            for (i = LC_COLLATE; i <= LC_MESSAGES; i++)
+                locale_store(i, locale_resolve(locale, i));
+        } else {
+            locale_store(category, locale_resolve(locale, category));
+        }
+    }
+
+    /* Query (and the return value of a set): a single category yields
+     * its name; LC_ALL yields the common name if uniform, else a
+     * ';'-joined composite in category order. */
+    if (category != LC_ALL)
+        return locale_names[category];
+
+    all_equal = 1;
+    for (i = LC_COLLATE + 1; i <= LC_MESSAGES; i++)
+        if (strcmp(locale_names[i], locale_names[LC_COLLATE]) != 0)
+            all_equal = 0;
+    if (all_equal) {
+        strncpy(composite, locale_names[LC_COLLATE], sizeof(composite) - 1);
+        composite[sizeof(composite) - 1] = '\0';
+        return composite;
+    }
+    /* Non-uniform: join names in category order, separated by ';'. */
+    composite[0] = '\0';
+    for (i = LC_COLLATE; i <= LC_MESSAGES; i++) {
+        if (i != LC_COLLATE) strncat(composite, ";", sizeof(composite) - strlen(composite) - 1);
+        strncat(composite, locale_names[i], sizeof(composite) - strlen(composite) - 1);
+    }
+    return composite;
+}
+
+/* localeconv: the en_US locale differs from C only in the numeric
+ * grouping (decimal_point ".", thousands_sep ",", grouping "\3").
+ * Report those when LC_NUMERIC is an en_US* locale; otherwise the
+ * POSIX "C" values (CHAR_MAX==127 fields mean "unspecified"). */
 struct lconv *localeconv(void) {
-    static struct lconv c_locale = {
-        .decimal_point     = (char *)".",
-        .thousands_sep     = (char *)"",
-        .grouping          = (char *)"",
-        .int_curr_symbol   = (char *)"",
-        .currency_symbol   = (char *)"",
-        .mon_decimal_point = (char *)"",
-        .mon_thousands_sep = (char *)"",
-        .mon_grouping      = (char *)"",
-        .positive_sign     = (char *)"",
-        .negative_sign     = (char *)"",
-        .int_frac_digits   = 127,
-        .frac_digits       = 127,
-        .p_cs_precedes     = 127,
-        .p_sep_by_space    = 127,
-        .n_cs_precedes     = 127,
-        .n_sep_by_space    = 127,
-        .p_sign_posn       = 127,
-        .n_sign_posn       = 127,
-    };
-    return &c_locale;
+    static struct lconv lc;
+    int en_us = (strncmp(locale_names[LC_NUMERIC], "en_US", 5) == 0);
+
+    lc.decimal_point     = (char *)".";
+    lc.thousands_sep     = (char *)(en_us ? "," : "");
+    lc.grouping          = (char *)(en_us ? "\3" : "");
+    lc.int_curr_symbol   = (char *)"";
+    lc.currency_symbol   = (char *)"";
+    lc.mon_decimal_point = (char *)"";
+    lc.mon_thousands_sep = (char *)"";
+    lc.mon_grouping      = (char *)"";
+    lc.positive_sign     = (char *)"";
+    lc.negative_sign     = (char *)"";
+    lc.int_frac_digits   = 127;
+    lc.frac_digits       = 127;
+    lc.p_cs_precedes     = 127;
+    lc.p_sep_by_space    = 127;
+    lc.n_cs_precedes     = 127;
+    lc.n_sep_by_space    = 127;
+    lc.p_sign_posn       = 127;
+    lc.n_sign_posn       = 127;
+    return &lc;
+}
+
+/* nl_langinfo: CODESET reflects the active LC_CTYPE; the rest return
+ * en_US / C "POSIX" values, which match the C locale's English. */
+char *nl_langinfo(nl_item item) {
+    switch (item) {
+    case CODESET:
+        return (char *)(locale_name_is_utf8(locale_names[LC_CTYPE])
+                            ? "UTF-8" : "ANSI_X3.4-1968");
+    case D_T_FMT:    return (char *)"%a %b %e %H:%M:%S %Y";
+    case D_FMT:      return (char *)"%m/%d/%y";
+    case T_FMT:      return (char *)"%H:%M:%S";
+    case T_FMT_AMPM: return (char *)"%I:%M:%S %p";
+    case AM_STR:     return (char *)"AM";
+    case PM_STR:     return (char *)"PM";
+    case DAY_1:      return (char *)"Sunday";
+    case DAY_2:      return (char *)"Monday";
+    case DAY_3:      return (char *)"Tuesday";
+    case DAY_4:      return (char *)"Wednesday";
+    case DAY_5:      return (char *)"Thursday";
+    case DAY_6:      return (char *)"Friday";
+    case DAY_7:      return (char *)"Saturday";
+    case ABDAY_1:    return (char *)"Sun";
+    case ABDAY_2:    return (char *)"Mon";
+    case ABDAY_3:    return (char *)"Tue";
+    case ABDAY_4:    return (char *)"Wed";
+    case ABDAY_5:    return (char *)"Thu";
+    case ABDAY_6:    return (char *)"Fri";
+    case ABDAY_7:    return (char *)"Sat";
+    case MON_1:      return (char *)"January";
+    case MON_2:      return (char *)"February";
+    case MON_3:      return (char *)"March";
+    case MON_4:      return (char *)"April";
+    case MON_5:      return (char *)"May";
+    case MON_6:      return (char *)"June";
+    case MON_7:      return (char *)"July";
+    case MON_8:      return (char *)"August";
+    case MON_9:      return (char *)"September";
+    case MON_10:     return (char *)"October";
+    case MON_11:     return (char *)"November";
+    case MON_12:     return (char *)"December";
+    case ABMON_1:    return (char *)"Jan";
+    case ABMON_2:    return (char *)"Feb";
+    case ABMON_3:    return (char *)"Mar";
+    case ABMON_4:    return (char *)"Apr";
+    case ABMON_5:    return (char *)"May";
+    case ABMON_6:    return (char *)"Jun";
+    case ABMON_7:    return (char *)"Jul";
+    case ABMON_8:    return (char *)"Aug";
+    case ABMON_9:    return (char *)"Sep";
+    case ABMON_10:   return (char *)"Oct";
+    case ABMON_11:   return (char *)"Nov";
+    case ABMON_12:   return (char *)"Dec";
+    case RADIXCHAR:  return (char *)".";
+    case THOUSEP:
+        return (char *)(strncmp(locale_names[LC_NUMERIC], "en_US", 5) == 0 ? "," : "");
+    case YESEXPR:    return (char *)"^[yY]";
+    case NOEXPR:     return (char *)"^[nN]";
+    case CRNCYSTR:   return (char *)"";
+    default:         return (char *)"";
+    }
 }
 
 /* --- Wide-character stubs (ASCII-safe) --- */
