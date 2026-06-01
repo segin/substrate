@@ -457,6 +457,7 @@ install_to_dist() {
         "tests/lib/signal:torture_signal" \
         "tests/lib/fcntl:torture_fcntl" \
         "tests/lib/c:torture_malloc" \
+        "tests/lib/c:torture_procs" \
         "tests/lib/c:torture_evdev" \
         "tests/lib/c:torture_x11_shape"; do
         srcdir="${entry%%:*}"

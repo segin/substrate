@@ -14,10 +14,22 @@ CFLAGS  = -Wall -Wextra -O2 -g
 ifneq ($(CROSS),)
   CFLAGS += -march=i486 -mtune=i486
   LDFLAGS += -Wl,--copy-dt-needed-entries -Wl,-rpath-link,/opt/substrate/i386-unknown-substrate/lib
-  # No pthread dependency, but match the include path layout the
-  # other testsuites use so future extensions can pick up libpthread
-  # without restructuring.
   CFLAGS += -I../../../include -I../../../sys
+endif
+
+# torture_pty uses pthreads to drive the blocking master<->slave
+# wakeup paths from a second thread.
+# Host build (no CROSS): -pthread links the system pthreads.
+# Cross build (CROSS set): -l:libpthread.so.0 forces dynamic linking
+# against substrate's libpthread.so.0 (no `libpthread.so` symlink is
+# shipped in the source tree, so a plain -lpthread would fall through
+# to the .a and bake the weak __ldso_alloc_tls ref to address 0).
+ifeq ($(CROSS),)
+  PTHREAD = -pthread
+  PTHREAD_INC =
+else
+  PTHREAD = -L../../../lib/pthread -l:libpthread.so.0
+  PTHREAD_INC = -I../../../lib/pthread
 endif
 
 TESTS = torture_pty torture_ctty
@@ -25,7 +37,7 @@ TESTS = torture_pty torture_ctty
 all: $(TESTS)
 
 torture_pty: torture_pty.c
-	$(CC) $(CFLAGS) $(LDFLAGS) $< -o $@
+	$(CC) $(CFLAGS) $(PTHREAD_INC) $(LDFLAGS) $< $(PTHREAD) -o $@
 
 torture_ctty: torture_ctty.c
 	$(CC) $(CFLAGS) $(LDFLAGS) $< -o $@
