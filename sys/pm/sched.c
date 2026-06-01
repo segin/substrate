@@ -302,6 +302,11 @@ void sched_yield(void) {
         return;
     }
 
+rescan:
+    best_thread = NULL;
+    highest_prio = -1;
+    best_class = SCHED_IDLE;
+
     /* If rr_last has been unlinked, fall back to the head. */
     thread_t *start = NULL;
     if (rr_last && rr_last->t_allthread_next) {
@@ -346,7 +351,10 @@ void sched_yield(void) {
         if (t == start) break;
     }
 
-    if (best_thread == current_thread && current_thread->state == THREAD_RUNNING) {
+    if (best_thread == current_thread) {
+        /* We are the most-eligible runnable thread (RUNNING, or woken to
+         * READY by a wake that raced our own block) — just keep running. */
+        current_thread->state = THREAD_RUNNING;
         intr_restore(_pflags);
         return;
     }
@@ -354,8 +362,37 @@ void sched_yield(void) {
     if (best_thread) {
         rr_last = best_thread;
         sched_context_switch(current_thread, best_thread);
+        intr_restore(_pflags);
+        return;
     }
+
+    /* Nothing else is runnable.  If the current thread is itself still
+     * runnable, keep running it. */
+    if (current_thread->state == THREAD_RUNNING ||
+        current_thread->state == THREAD_READY) {
+        current_thread->state = THREAD_RUNNING;
+        intr_restore(_pflags);
+        return;
+    }
+
+    /*
+     * current_thread is BLOCKED (or a zombie) and no other thread is
+     * runnable.  NEVER fall through and return into it: a blocked thread
+     * that keeps executing re-enters its sleep path and double-registers
+     * itself on the sleepq, corrupting the queue -- and with preemption
+     * disabled inside a sleepq spinlock that spin wedges the whole box.
+     * Instead idle until an interrupt (a timer tick, a device IRQ, or a
+     * sched_tick deadline wake) makes some thread runnable, then rescan.
+     *
+     * Only reachable from a voluntary block (sched_sleep / sleepq), never
+     * from the timer-IRQ preemption path (which always calls sched_yield
+     * with current RUNNING and is handled above), so re-enabling interrupts
+     * and halting here is safe.
+     */
     intr_restore(_pflags);
+    __asm__ volatile("sti; hlt");
+    _pflags = intr_disable();
+    goto rescan;
 }
 
 void sched_switch(thread_t *next) {
@@ -390,16 +427,55 @@ void sched_set_priority(int tid, sched_class_t cls, int prio) {
 
 void sched_sleep(void *chan) {
     if (!current_thread) return;
-    
+
     // Check for pending signals before sleeping if interruptible
-    if ((current_thread->flags & THREAD_F_INTERRUPTIBLE) && 
+    if ((current_thread->flags & THREAD_F_INTERRUPTIBLE) &&
         (current_thread->sig_pending & ~current_thread->sig_mask)) {
         return;
+    }
+
+    /*
+     * Lost-wakeup safety net.
+     *
+     * The universal sleep idiom is `while (!cond) sched_sleep(chan);`: the
+     * caller tests `cond`, then calls here to register on `chan` and block.
+     * sched_wakeup() only wakes threads already BLOCKED on `chan`, so a
+     * wakeup that fires in the window between the caller's test and the
+     * `state = THREAD_BLOCKED` below targets a thread not yet on the
+     * channel and is lost — the sleeper then blocks forever.  Kernel
+     * preemption (a timer tick that switches to the waker mid-window, or a
+     * device IRQ that wakes from the window) makes this readily reachable
+     * under load and is the cause of the intermittent pipe / waitpid / pty
+     * freezes.
+     *
+     * Closing the window correctly requires every caller to register intent
+     * before testing (prepare-to-wait); there are 20+ call sites.  Instead,
+     * arm a generous fallback deadline so a lost wakeup self-heals on the
+     * next sched_tick rather than hanging.  The interval is long enough
+     * (~250 ms) that the genuine wakeup virtually always fires first, so
+     * this only triggers on an actual loss — safe even for the handful of
+     * single-shot sleepers (e.g. vfork) where a premature wake would be
+     * wrong.  Callers that set their own (shorter) deadline via
+     * sched_sleep_until() are left untouched.
+     */
+    int armed_fallback = 0;
+    if (current_thread->sleep_expiry == 0) {
+        uint32_t hz = get_hz();
+        uint64_t span = hz ? (hz / 4u) : 32u;   /* ~250 ms */
+        if (span == 0) span = 1;
+        current_thread->sleep_expiry = get_ticks() + span;
+        armed_fallback = 1;
     }
 
     current_thread->wait_chan = chan;
     current_thread->state = THREAD_BLOCKED;
     sched_yield();
+
+    /* Clear our fallback so it can't leak into the next, unrelated sleep
+     * (sched_wakeup does not touch sleep_expiry, only sched_tick does). */
+    if (armed_fallback) {
+        current_thread->sleep_expiry = 0;
+    }
 }
 
 int sched_sleep_until(void *chan, uint64_t deadline_tick) {
@@ -427,9 +503,20 @@ void sched_tick(void) {
             now >= thread->sleep_expiry) {
 
             thread->state = THREAD_READY;
-            thread->wait_chan = NULL;
             thread->sleep_status = -ETIMEDOUT;
             thread->sleep_expiry = 0;
+            /*
+             * Deliberately leave wait_chan set.  sched_tick runs in the
+             * timer IRQ and must not take the sleepq bucket lock (it is a
+             * plain spinlock; grabbing it here could deadlock against an
+             * interrupted holder), so it cannot dequeue a sleepq sleeper.
+             * A sleepq waiter that armed a fallback deadline (e.g. pipe_wait)
+             * therefore removes ITSELF from the queue on wake, using
+             * wait_chan to find its bucket -- so we must preserve it here.
+             * For plain sched_sleep sleepers wait_chan is harmless once
+             * READY (wakeups are gated on THREAD_BLOCKED) and is overwritten
+             * by their next sleep.
+             */
         }
     }
 }

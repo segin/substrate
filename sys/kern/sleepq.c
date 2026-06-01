@@ -7,6 +7,7 @@
 
 #include <sys/proc.h>
 #include <kern/sleepq.h>
+#include <sys/preempt.h>
 #include <stdint.h>
 #include <string.h>
 #include <vm/vm_kmem.h>
@@ -60,8 +61,17 @@ static inline int sleepq_current_private_pid(void) {
     return current_process->pid;
 }
 
-// Lock a hash bucket
+// Lock a hash bucket.
+//
+// Disable preemption BEFORE taking the lock (preempt.h contract: a held
+// spinlock must keep preempt_count != 0 so the timer-IRQ preemption path
+// won't switch away from the holder).  These buckets were raw test_and_set
+// spinlocks that did NOT raise preempt_count — so once kernel preemption was
+// enabled a thread could be preempted while holding a sleepq bucket, and a
+// peer that then needed the same bucket (pipe/mutex ping-pong, etc.) spun on
+// it while the holder sat un-runnable: the intermittent pipe/mutex/pty hang.
 static inline void sq_lock(int hash) {
+    preempt_disable();
     while (__sync_lock_test_and_set(&sleepq_locks[hash], 1)) {
         while (sleepq_locks[hash])
             __asm__ volatile("pause");
@@ -71,12 +81,14 @@ static inline void sq_lock(int hash) {
 // Unlock a hash bucket
 static inline void sq_unlock(int hash) {
     __sync_lock_release(&sleepq_locks[hash]);
+    preempt_enable_noresched();
 }
 
 // Allocate a sleep queue (free list first, then kmalloc)
 static sleepq_t *sleepq_alloc(void) {
     sleepq_t *sq;
 
+    preempt_disable();
     while (__sync_lock_test_and_set(&pool_lock, 1)) {
         while (pool_lock)
             __asm__ volatile("pause");
@@ -85,10 +97,12 @@ static sleepq_t *sleepq_alloc(void) {
         sq = sleepq_free_list;
         sleepq_free_list = sq->sq_next;
         __sync_lock_release(&pool_lock);
+        preempt_enable_noresched();
         memset(sq, 0, sizeof(*sq));
         return sq;
     }
     __sync_lock_release(&pool_lock);
+    preempt_enable_noresched();
 
     sq = kmalloc(sizeof(*sq));
     if (sq) {
@@ -99,6 +113,7 @@ static sleepq_t *sleepq_alloc(void) {
 
 // Return a sleep queue to the free list
 static void sleepq_free(sleepq_t *sq) {
+    preempt_disable();
     while (__sync_lock_test_and_set(&pool_lock, 1)) {
         while (pool_lock)
             __asm__ volatile("pause");
@@ -106,6 +121,7 @@ static void sleepq_free(sleepq_t *sq) {
     sq->sq_next = sleepq_free_list;
     sleepq_free_list = sq;
     __sync_lock_release(&pool_lock);
+    preempt_enable_noresched();
 }
 
 // Find sleep queue for a channel (must hold bucket lock)

@@ -8,6 +8,7 @@
 #include <stddef.h>
 #include <sys/lock.h>
 #include <kern/sleepq.h>
+#include <kern/time.h>
 #include <errno.h>
 
 #define PIPE_SIZE 4096
@@ -90,10 +91,34 @@ static inline void pipe_wake(void *chan) {
 static int pipe_wait(void *chan, mutex_t *m) {
     current_thread->flags |= THREAD_F_INTERRUPTIBLE;
     sleepq_add(chan, current_thread);
+    /*
+     * Fallback deadline against a lost sleepq wakeup.  sched_sleep /
+     * sched_wakeup (and the sleepq park here) are not race-free: under
+     * kernel preemption a wakeup can fire in the window between a peer's
+     * readiness check and our landing on the queue, and be lost -- the
+     * pipe then hangs forever (sleep_expiry == 0, no recovery).  Arm a
+     * short deadline so sched_tick re-readies us even if the wakeup was
+     * lost; we then re-check the pipe and proceed.  Pipe wakeups are
+     * normally immediate, so this only fires on an actual loss.
+     */
+    if (current_thread->sleep_expiry == 0) {
+        uint32_t hz = get_hz();
+        uint64_t span = hz ? (hz / 20u) : 8u;   /* ~50 ms */
+        if (span == 0) span = 1;
+        current_thread->sleep_expiry = get_ticks() + span;
+    }
     mutex_unlock(m);
     if (current_thread->wait_chan == chan) {
         sched_yield();
     }
+    current_thread->sleep_expiry = 0;
+    /*
+     * If sched_tick re-readied us via the deadline it left us on the
+     * sleepq (it can't dequeue from IRQ context) -- remove ourselves now,
+     * in thread context, before anyone re-adds us.  A normal wakeup already
+     * dequeued us and cleared wait_chan, so this is then a no-op.
+     */
+    sleepq_remove_thread(current_thread);
     mutex_lock(m);
     current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
     if (current_thread->sig_pending & ~current_thread->sig_mask)
