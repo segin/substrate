@@ -1117,7 +1117,7 @@ int tty_ioctl_kern(struct tty *tty, uint32_t cmd, uintptr_t arg) {
             // Arg: 0 or 1. If 1, steal from another session.
             // Must be session leader: check if p_pgrp->pg_session->s_leader == self
             int is_session_leader = 0;
-            if (current_process->p_pgrp && 
+            if (current_process->p_pgrp &&
                 current_process->p_pgrp->pg_session &&
                 current_process->p_pgrp->pg_session->s_leader == current_process) {
                 is_session_leader = 1;
@@ -1288,6 +1288,32 @@ static void tty_attach_first_opener_locked(struct tty *tty) {
     if (!tty || !p) return;
     if (tty->session != 0) return;          /* already claimed */
     if (!p->p_pgrp || !p->p_pgrp->pg_session) return;
+
+    /*
+     * Never auto-attach a pseudo-terminal.  The first-opener hack exists
+     * for real console VTs (and serial consoles) where no getty/login runs
+     * a TIOCSCTTY and ^C/^Z would otherwise be dropped.  A PTY always has a
+     * userspace owner that manages the session explicitly: the slave is
+     * claimed by its session leader via TIOCSCTTY (e.g. login, or luit's
+     * setsid'd child opening the slave O_NOCTTY then TIOCSCTTY).  If we
+     * auto-claim the slave for whichever leader opens it first — luit's
+     * PARENT opens the slave to set it up before forking — the pair is
+     * pinned to the parent's session and the child's later TIOCSCTTY fails
+     * with EPERM, so the shell never gets a controlling terminal and the
+     * xterm/luit chain dies.  Leave PTYs entirely to explicit TIOCSCTTY.
+     */
+    if (tty->driver && tty->driver->driver_name &&
+        (strcmp(tty->driver->driver_name, "ptyslave") == 0 ||
+         strcmp(tty->driver->driver_name, "ptmx") == 0)) {
+        return;
+    }
+
+    /*
+     * POSIX: a controlling terminal is acquired only by a SESSION LEADER
+     * that does not already have one.  A non-leader (e.g. Xfbdev opening
+     * its VT) must not pin the tty to its session.
+     */
+    if (p->p_pgrp->pg_session->s_leader != p) return;
 
     tty->session = p->p_pgrp->pg_session->s_sid;
     tty->pgrp    = p->p_pgrp->pg_id;
