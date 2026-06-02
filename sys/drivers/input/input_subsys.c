@@ -12,6 +12,7 @@
 #include <sys/vtio.h>
 #include <sys/errno.h>
 #include <sys/poll.h>
+#include <arch/i386/intr.h>
 
 /* Global input event ring.  This was 64, which is far too small for a
  * relative pointing device: a real mouse emits X+Y(+wheel)+SYN every
@@ -47,12 +48,35 @@ static uint64_t input_overflow_warns = 0; // rate-limit for the overflow warning
 static spinlock_t input_lock = { 0 };
 static int input_lock_init = 0;
 
-static inline void input_lock_take(void) {
+/*
+ * input_lock is shared between process context (input_read / input_poll,
+ * called from sys_read on /dev/input/event0 by the X server) and IRQ
+ * context (input_report_event, called from the PS/2 keyboard/mouse IRQ
+ * handlers).  spinlock_acquire() disables preemption but NOT interrupts,
+ * so if a reader holds input_lock and a keyboard/mouse IRQ then fires on
+ * the same CPU, the IRQ handler re-acquires input_lock on a CPU that
+ * already holds it -> spinlock_acquire's same-CPU recursive-acquire guard
+ * panics ("Deadlock: spinlock 'input' already held by CPU 0").  Under X
+ * that panic is invisible (the server owns the framebuffer) and presents
+ * as a random total freeze during the session.
+ *
+ * Make the lock IRQ-safe: disable interrupts for the whole held region so
+ * no input IRQ can land while we hold it.  Returns the saved EFLAGS to be
+ * handed back to input_lock_give().
+ */
+static inline uint32_t input_lock_take(void) {
+    uint32_t flags = intr_disable();
     if (!input_lock_init) {
         spinlock_init(&input_lock, "input");
         input_lock_init = 1;
     }
     spinlock_acquire(&input_lock);
+    return flags;
+}
+
+static inline void input_lock_give(uint32_t flags) {
+    spinlock_release(&input_lock);
+    intr_restore(flags);
 }
 
 static fs_node_t event_node;
@@ -129,7 +153,7 @@ void input_report_event(input_dev_t *dev, uint16_t type, uint16_t code, int32_t 
     struct timeval tv;
     sys_gettimeofday(&tv, NULL);
 
-    input_lock_take();
+    uint32_t __if = input_lock_take();
     uint64_t idx = global_seq % INPUT_QUEUE_SIZE;
     global_event_log[idx].time_sec = tv.tv_sec;
     global_event_log[idx].time_usec = tv.tv_usec;
@@ -137,7 +161,7 @@ void input_report_event(input_dev_t *dev, uint16_t type, uint16_t code, int32_t 
     global_event_log[idx].code = code;
     global_event_log[idx].value = value;
     global_seq++;
-    spinlock_release(&input_lock);
+    input_lock_give(__if);
 
     input_notify_readers();
 }
@@ -320,9 +344,9 @@ static int input_poll(fs_node_t *node, void *waiter) {
                      / sizeof(input_event_t);
         caller_has_pos = 1;
     }
-    input_lock_take();
+    uint32_t __if = input_lock_take();
     uint64_t snap = global_seq;
-    spinlock_release(&input_lock);
+    input_lock_give(__if);
     int has_event = caller_has_pos ? (caller_seq < snap) : (snap > 0);
     if (has_event) events |= POLLIN | POLLRDNORM;
     return events;
@@ -346,7 +370,7 @@ static uint32_t input_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t
 
     // WaitForData
     for (;;) {
-        input_lock_take();
+        uint32_t __if = input_lock_take();
         uint64_t snap = global_seq;
         /* If the caller's sequence has fallen so far behind that
          * the events they wanted have already been overwritten in
@@ -365,7 +389,7 @@ static uint32_t input_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t
                               : 0;
             overflowed = 1;
         }
-        spinlock_release(&input_lock);
+        input_lock_give(__if);
         /* Warn (rate-limited) so a too-slow reader dropping pointer
          * motion is diagnosable rather than silent. */
         if (overflowed && (input_overflow_warns++ & 0x3F) == 0)
@@ -409,7 +433,7 @@ static uint32_t input_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t
     int read_count = 0;
     input_event_t *out = (input_event_t*)buffer;
 
-    input_lock_take();
+    uint32_t __rif = input_lock_take();
     /* Same snap inside the lock — a fast producer could have wrapped
      * the ring between the wait loop and here. */
     if (global_seq > current_seq + INPUT_QUEUE_SIZE) {
@@ -425,7 +449,7 @@ static uint32_t input_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t
         current_seq++;
         size -= sizeof(input_event_t);
     }
-    spinlock_release(&input_lock);
+    input_lock_give(__rif);
 
     return read_count * sizeof(input_event_t);
 }
