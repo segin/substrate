@@ -1,22 +1,24 @@
 #!/bin/sh
-# Run substrate under qemu with the guest NIC bridged onto a real host
-# interface via macvtap.  The guest gets its own MAC on your LAN and
-# DHCP reaches your real router.  Host <-> guest traffic is NOT
-# possible with macvtap by design; use a bridge+tap setup if you need
-# that.
+# Run substrate under qemu with networking.
 #
-# Override the host NIC via $NIC (default: the interface owning the
-# default route).
+# Two networking back-ends:
+#
+#   default (macvtap): bridge the guest NIC onto a real host interface via
+#   macvtap.  The guest gets its own MAC on your LAN and DHCP reaches your
+#   real router.  Host <-> guest traffic is NOT possible with macvtap by
+#   design; use a bridge+tap setup if you need that.  Requires sudo and an
+#   Ethernet-like default-route NIC (macvtap does NOT work on wifi or on
+#   point-to-point tun/VPN devices — "RTNETLINK answers: Invalid argument").
+#
+#   --user (QEMU internal networking, slirp): the guest sits behind QEMU's
+#   built-in NAT (gateway 10.0.2.2, guest DHCP -> 10.0.2.15).  No sudo, no
+#   host NIC, no macvtap — works anywhere, including when your default route
+#   is wifi or a VPN tun.  Outbound works; inbound needs hostfwd (set
+#   $HOSTFWD, e.g. HOSTFWD=hostfwd=tcp::2222-:22).
+#
+# Override the host NIC (macvtap mode) via $NIC (default: the interface
+# owning the default route).
 set -eu
-
-NIC=${NIC:-$(ip -o route show default | awk '{print $5; exit}')}
-if [ -z "$NIC" ]; then
-    echo "run-networking.sh: could not auto-detect a default-route NIC;" \
-         "set NIC=<iface> and retry" >&2
-    exit 1
-fi
-
-MACVTAP=${MACVTAP:-macvtap0}
 
 # Flags:
 #   --gfx    add vga=1024x768@32 + -vga std so substrate's BGA fb driver
@@ -29,12 +31,16 @@ MACVTAP=${MACVTAP:-macvtap0}
 #            by tests/lib/c/torture_heap_stdio sc9f; passes under
 #            TCG).  Use --kvm when you specifically want speed and
 #            understand the risk; otherwise leave it off.
+#   --user   use QEMU internal (user-mode/slirp) networking instead of
+#            macvtap-onto-real-LAN.  No sudo, no host NIC required.
 GFX=0
 KVM=0
+USERNET=0
 for arg in "$@"; do
     case "$arg" in
-        --gfx) GFX=1 ;;
-        --kvm) KVM=1 ;;
+        --gfx)  GFX=1 ;;
+        --kvm)  KVM=1 ;;
+        --user) USERNET=1 ;;
     esac
 done
 
@@ -49,35 +55,63 @@ if [ "$KVM" -eq 1 ]; then
     ACCEL_ARG="-accel kvm"
 fi
 
-cleanup() {
+# NETDEV_ARGS holds the qemu -netdev/-device pair for the chosen back-end.
+# In macvtap mode the guest's tap is passed as fd 3 (opened with `exec`
+# below) so the same single qemu invocation works for both back-ends.
+if [ "$USERNET" -eq 1 ]; then
+    # QEMU user-mode NAT.  $HOSTFWD lets you forward host ports in, e.g.
+    #   HOSTFWD=hostfwd=tcp::2222-:22 ./run-networking.sh --user
+    HOSTFWD=${HOSTFWD:-}
+    NETDEV_ARGS="-netdev user,id=n0${HOSTFWD:+,$HOSTFWD} -device virtio-net-pci,netdev=n0"
+    echo "run-networking.sh: QEMU user-mode networking (no macvtap/sudo)"
+else
+    NIC=${NIC:-$(ip -o route show default | awk '{print $5; exit}')}
+    if [ -z "$NIC" ]; then
+        echo "run-networking.sh: could not auto-detect a default-route NIC;" \
+             "set NIC=<iface> or use --user for QEMU internal networking" >&2
+        exit 1
+    fi
+
+    MACVTAP=${MACVTAP:-macvtap0}
+
+    cleanup() {
+        sudo ip link delete "$MACVTAP" 2>/dev/null || true
+    }
+    trap cleanup EXIT INT TERM
+
+    # Tear down any leftover macvtap from a previous run before recreating.
     sudo ip link delete "$MACVTAP" 2>/dev/null || true
-}
-trap cleanup EXIT INT TERM
 
-# Tear down any leftover macvtap from a previous run before recreating.
-sudo ip link delete "$MACVTAP" 2>/dev/null || true
+    if ! sudo ip link add link "$NIC" name "$MACVTAP" type macvtap mode bridge; then
+        echo "run-networking.sh: macvtap on '$NIC' failed (wifi/tun/VPN NICs" \
+             "are not supported); use --user for QEMU internal networking" >&2
+        exit 1
+    fi
+    sudo ip link set "$MACVTAP" up
 
-sudo ip link add link "$NIC" name "$MACVTAP" type macvtap mode bridge
-sudo ip link set "$MACVTAP" up
+    TAPIDX=$(cat "/sys/class/net/$MACVTAP/ifindex")
+    MACADDR=$(cat "/sys/class/net/$MACVTAP/address")
+    TAPDEV="/dev/tap$TAPIDX"
 
-TAPIDX=$(cat "/sys/class/net/$MACVTAP/ifindex")
-MACADDR=$(cat "/sys/class/net/$MACVTAP/address")
-TAPDEV="/dev/tap$TAPIDX"
+    # udev creates /dev/tap$N a moment after the link comes up — wait for it.
+    i=0
+    while [ ! -e "$TAPDEV" ] && [ $i -lt 50 ]; do
+        sleep 0.1
+        i=$((i + 1))
+    done
+    if [ ! -e "$TAPDEV" ]; then
+        echo "run-networking.sh: $TAPDEV never appeared" >&2
+        exit 1
+    fi
 
-# udev creates /dev/tap$N a moment after the link comes up — wait for it.
-i=0
-while [ ! -e "$TAPDEV" ] && [ $i -lt 50 ]; do
-    sleep 0.1
-    i=$((i + 1))
-done
-if [ ! -e "$TAPDEV" ]; then
-    echo "run-networking.sh: $TAPDEV never appeared" >&2
-    exit 1
+    sudo chown "$USER" "$TAPDEV"
+
+    echo "run-networking.sh: $MACVTAP up on $NIC, MAC $MACADDR, $TAPDEV"
+
+    # Open the tap as fd 3 for qemu to inherit (-netdev tap,fd=3).
+    exec 3<>"$TAPDEV"
+    NETDEV_ARGS="-netdev tap,id=n0,fd=3,vhost=off -device virtio-net-pci,netdev=n0,mac=$MACADDR"
 fi
-
-sudo chown "$USER" "$TAPDEV"
-
-echo "run-networking.sh: $MACVTAP up on $NIC, MAC $MACADDR, $TAPDEV"
 
 # Prefer a kernel in the current directory; fall back to sys/.
 if [ -f kernel.bin ]; then
@@ -107,8 +141,8 @@ else
     exit 1
 fi
 
-# Not exec'd: when qemu exits the script resumes and the EXIT trap
-# tears the macvtap down.
+# Not exec'd: when qemu exits the script resumes and (macvtap mode) the
+# EXIT trap tears the macvtap down.
 #
 # i8042=off disables the emulated PS/2 controller (both keyboard and
 # mouse).  The PS/2 mouse path is janky/glitchy under substrate, and we
@@ -121,11 +155,9 @@ qemu-system-i386 -cpu qemu32,+sse,+sse2 $ACCEL_ARG \
   -device ich9-ahci,id=sata0 \
   -device ide-hd,bus=sata0.0,unit=0,drive=drive0 \
   -device piix3-usb-uhci -device usb-kbd -device usb-mouse \
-  -netdev tap,id=n0,fd=3,vhost=off \
-  -device virtio-net-pci,netdev=n0,mac="$MACADDR" \
+  $NETDEV_ARGS \
   -kernel "$KERNEL" \
   -append "$APPEND" \
   $GFX_ARGS \
   -serial stdio \
-  -audio driver=sdl,model=ac97,id=audio0 \
-  3<>"$TAPDEV"
+  -audio driver=sdl,model=ac97,id=audio0
