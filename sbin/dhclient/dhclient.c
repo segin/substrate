@@ -16,6 +16,7 @@
 
 #define _GNU_SOURCE
 #include <errno.h>
+#include <fcntl.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -48,6 +49,12 @@ struct sockaddr_ll {
     uint8_t  sll_halen;
     uint8_t  sll_addr[8];
 };
+
+/* DISCOVER retransmit policy: how many DISCOVERs to send, and how long to
+ * wait for an OFFER after each, before giving up so boot can proceed without
+ * a lease.  Bounded total wait = DHCP_DISCOVER_TRIES * DHCP_DISCOVER_WAIT. */
+#define DHCP_DISCOVER_TRIES 4
+#define DHCP_DISCOVER_WAIT  2.0
 
 /* DHCP message types (RFC 2132 §9.6) */
 #define DHCP_DISCOVER 1
@@ -359,23 +366,51 @@ int main(int argc, char **argv) {
         perror("bind"); close(pkts); return 1;
     }
 
+    /*
+     * Non-blocking recv is mandatory.  The OFFER/ACK wait loops below poll
+     * with a wall-clock deadline (usleep + recv), but a *blocking* recv on a
+     * quiet link parks indefinitely on the very first call — the deadline is
+     * never re-checked — so with no DHCP server present dhclient hangs forever
+     * instead of failing in a few seconds, stalling rc.d/20-network at boot.
+     * O_NONBLOCK makes recv return EAGAIN immediately so the loop can time out.
+     */
+    {
+        int fl = fcntl(pkts, F_GETFL, 0);
+        if (fl < 0) fl = 0;
+        if (fcntl(pkts, F_SETFL, fl | O_NONBLOCK) < 0) {
+            perror("fcntl O_NONBLOCK"); close(pkts); return 1;
+        }
+    }
+
     /* Generate a random XID. */
     srand((unsigned)now_sec());
     uint32_t xid = ((uint32_t)rand() << 16) ^ (uint32_t)rand();
 
     uint8_t pkt[1500];
 
-    /* ---- DISCOVER ---- */
-    size_t n = build_dhcp_packet(pkt, hw, xid, DHCP_DISCOVER, 0, 0);
+    /* ---- DISCOVER (retransmit a few times) ----
+     *
+     * RFC 2131 §4.1: a client that gets no response retransmits the DISCOVER.
+     * A single send is fragile — one dropped frame (common right after
+     * link-up, before the switch learns the port / finishes STP) means no
+     * lease.  Retransmit with the same xid a handful of times, each with its
+     * own short OFFER window; then give up so boot proceeds without a lease
+     * rather than stalling.  Combined with the non-blocking socket above, the
+     * total wait is bounded (DHCP_DISCOVER_TRIES * DHCP_DISCOVER_WAIT). */
+    uint32_t offered_ip = 0, server_id = 0, subnet = 0, router = 0;
+    uint8_t rxbuf[1600];
+    size_t n;
+    double deadline;
+    for (int dtry = 0; dtry < DHCP_DISCOVER_TRIES && !offered_ip; dtry++) {
+    n = build_dhcp_packet(pkt, hw, xid, DHCP_DISCOVER, 0, 0);
     if (sendto(pkts, pkt, n, 0, (struct sockaddr *)&sll, sizeof(sll)) != (ssize_t)n) {
         perror("sendto DISCOVER"); close(pkts); return 1;
     }
-    fprintf(stdout, "dhclient: DHCPDISCOVER on %s, xid=0x%08x\n", iface, xid);
+    fprintf(stdout, "dhclient: DHCPDISCOVER on %s, xid=0x%08x (try %d/%d)\n",
+            iface, xid, dtry + 1, DHCP_DISCOVER_TRIES);
 
     /* ---- await OFFER ---- */
-    uint32_t offered_ip = 0, server_id = 0, subnet = 0, router = 0;
-    double deadline = now_sec() + 5.0;
-    uint8_t rxbuf[1600];
+    deadline = now_sec() + DHCP_DISCOVER_WAIT;
     while (now_sec() < deadline) {
         usleep(5000);
         ssize_t r = recv(pkts, rxbuf, sizeof(rxbuf), 0);
@@ -414,8 +449,12 @@ int main(int argc, char **argv) {
         fprintf(stdout, "%u.%u.%u.%u\n", si[0], si[1], si[2], si[3]);
         break;
     }
+    }   /* end DISCOVER retransmit loop */
     if (!offered_ip) {
-        fprintf(stderr, "dhclient: no OFFER received within 5s\n");
+        fprintf(stderr, "dhclient: no OFFER after %d DISCOVER attempts "
+                "(%.0fs); giving up\n",
+                DHCP_DISCOVER_TRIES,
+                DHCP_DISCOVER_TRIES * DHCP_DISCOVER_WAIT);
         close(pkts);
         return 1;
     }
