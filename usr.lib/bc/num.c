@@ -222,11 +222,9 @@ void bc_print(bc_num *n) {
         return;
     }
     if (n->sign == 0 || n->len == 0) {
+        /* GNU bc always renders a zero value as a bare "0", regardless of
+         * its scale (scale=5;0.0 -> "0", not "0.00000"). */
         printf("0");
-        if (n->scale > 0) {
-            printf(".");
-            for (int i = 0; i < n->scale; i++) printf("0");
-        }
         return;
     }
     if (n->sign < 0) printf("-");

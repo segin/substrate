@@ -282,7 +282,17 @@ static void bc_div_rem(bc_num *a, bc_num *b, bc_num **q_out, bc_num **r_out, int
     if (raw_int_cmp(u, v) < 0) {
         q->scale = target_scale;
         if (q_out) *q_out = q; else bc_free(q);
-        if (r_out) *r_out = bc_dup(a); // Modulo remainder rule? POSIX: a - (a/b)*b
+        if (r_out) {
+            // Quotient is zero, so a % b == a exactly -- but the remainder is
+            // still shown at the POSIX scale max(scale(a), scale + scale(b)),
+            // padding a with trailing zeros (220.7137 % 2701.9103 -> 220.71370
+            // at scale 1).
+            bc_num *rem = bc_dup(a);
+            int want = target_scale + b->scale;
+            if (want < a->scale) want = a->scale;
+            if (rem->scale < want) shift_scale(rem, want);
+            *r_out = rem;
+        }
         bc_free(u); bc_free(v);
         return;
     }
@@ -325,17 +335,23 @@ static void bc_div_rem(bc_num *a, bc_num *b, bc_num **q_out, bc_num **r_out, int
         long long den = v->digits[n - 1];
         long long q_hat = num / den;
         long long r_hat = num % den;
-        
-        if (q_hat >= 100) q_hat = 99;
-        
-        while (n > 1) {
-           long long v_nm2 = v->digits[n - 2];
-           long long u_jnm2 = u->digits[j + n - 2];
-           if (q_hat * v_nm2 > 100 * r_hat + u_jnm2) {
-               q_hat--;
-               r_hat += den;
-               if (r_hat >= 100) break;
-           } else break;
+
+        /*
+         * Knuth Algorithm D, step D3: refine the trial digit so it is at
+         * most one too large.  The "q_hat == base" overflow case and the
+         * v[n-2] test MUST share one loop: every time q_hat is decremented
+         * r_hat has to grow by den so the two stay consistent.  An earlier
+         * version capped q_hat to 99 with a separate `if` but left r_hat at
+         * num%den (the remainder for the *uncapped* q_hat); the stale, too
+         * small r_hat then let the v[n-2] test decrement q_hat further than
+         * it should, under-counting the quotient digit for divisors whose
+         * leading two-digit estimate overflows (e.g. 1.25 / 1.1180339798).
+         */
+        while (q_hat >= 100 ||
+               (n > 1 && q_hat * v->digits[n - 2] > 100 * r_hat + u->digits[j + n - 2])) {
+            q_hat--;
+            r_hat += den;
+            if (r_hat >= 100) break;
         }
         
         int borrow = 0;
@@ -375,11 +391,18 @@ static void bc_div_rem(bc_num *a, bc_num *b, bc_num **q_out, bc_num **r_out, int
     bc_trim(q);
     q->scale = target_scale;
     
-    // Modulo remainder: posix a - (a/b)*b 
-    // calculated at max scale
+    // Modulo remainder: posix a - (a/b)*b.  The product q*b must be EXACT
+    // (scale = q.scale + b.scale); bc_mul()'s normal POSIX scale cap of
+    // min(A+B, max(scale,A,B)) would truncate it and make the remainder
+    // wrong (e.g. 7915.7597 % 3026.4668 lost its low digits).  Bump bc_scale
+    // over the cap for this one multiply so the full product survives; the
+    // remainder then carries the correct scale of max(scale(a), scale+scale(b)).
     if (r_out) {
         bc_num *tmp_q = bc_dup(q);
+        int saved_scale = bc_scale;
+        bc_scale = q->scale + b->scale;
         bc_num *tmp_mul = bc_mul(tmp_q, b);
+        bc_scale = saved_scale;
         *r_out = bc_sub(a, tmp_mul);
         bc_free(tmp_q); bc_free(tmp_mul);
     }
@@ -396,13 +419,16 @@ bc_num *bc_div(bc_num *a, bc_num *b) {
 
 bc_num *bc_mod(bc_num *a, bc_num *b) {
     bc_num *r = NULL;
-    // Modulo output scale is max(scale, a.scale, b.scale)
-    int s = bc_scale > a->scale ? bc_scale : a->scale;
-    if (b->scale > s) s = b->scale;
-    
-    // We pass division scale? Actually POSIX mod uses division at scale `bc_scale`.
+    /*
+     * POSIX/GNU define a % b = a - (a/b)*b, where a/b is taken at the current
+     * scale.  bc_div_rem computes exactly that remainder, and bc_sub already
+     * gives it the correct result scale of max(scale(a), scale + scale(b)).
+     * Do NOT overwrite r->scale afterwards: the scale field is an exponent,
+     * not a width, so relabeling it without re-scaling the digit array
+     * silently multiplies/divides the value by a power of ten (it made
+     * 30048.6967 % 53.941 print .0000040 instead of .0000039516).
+     */
     bc_div_rem(a, b, NULL, &r, bc_scale);
-    r->scale = s;
     return r;
 }
 
@@ -538,9 +564,260 @@ bc_num *bc_sqrt(bc_num *a) {
     return x;
 }
 
-bc_num *bc_math_s(bc_num *a) { (void)a; return bc_from_long(0); }
-bc_num *bc_math_c(bc_num *a) { (void)a; return bc_from_long(0); }
-bc_num *bc_math_a(bc_num *a) { (void)a; return bc_from_long(0); }
-bc_num *bc_math_l(bc_num *a) { (void)a; return bc_from_long(0); }
-bc_num *bc_math_e(bc_num *a) { (void)a; return bc_from_long(0); }
-bc_num *bc_math_j(bc_num *n, bc_num *x) { (void)n; (void)x; return bc_from_long(0); }
+/* ----------------------------------------------------------------------
+ * Transcendental functions for the -l math library.
+ *
+ * All compute at a guard scale (result scale + headroom) and truncate to the
+ * result scale at the end, matching GNU bc's truncating semantics.  The
+ * algorithms are standard series with argument reduction; nothing here is
+ * borrowed from another bc's library.
+ * -------------------------------------------------------------------- */
+
+/* Truncate n toward zero from its current scale down to rscale. */
+static void trunc_to_scale(bc_num *n, int rscale) {
+    if (n->scale <= rscale) return;
+    int drop = n->scale - rscale;
+    int b100 = drop / 2, b10 = drop % 2;
+    if (b100 > 0) {
+        if (b100 >= n->len) { n->len = 0; }
+        else { memmove(n->digits, n->digits + b100, (size_t)(n->len - b100));
+               n->len -= b100; }
+    }
+    if (b10 > 0) {
+        int rem = 0;
+        for (int i = n->len - 1; i >= 0; i--) {
+            int v = n->digits[i] + rem * 100;
+            n->digits[i] = v / 10;
+            rem = v % 10;
+        }
+    }
+    n->scale = rscale;
+    bc_trim(n);
+}
+
+static bc_num *mk_abs(bc_num *x) {
+    bc_num *r = bc_dup(x);
+    r->sign = (x->sign != 0) ? 1 : 0;
+    return r;
+}
+
+/* e(x) = exp(x): halve x until |x|<1, sum the Maclaurin series, square back. */
+bc_num *bc_math_e(bc_num *x) {
+    int rscale = bc_scale, wscale = rscale + 10, saved = bc_scale;
+    bc_scale = wscale;
+    bc_num *two = bc_from_long(2), *one = bc_from_long(1);
+    bc_num *xr = bc_dup(x);
+    int k = 0;
+    for (;;) {
+        bc_num *ax = mk_abs(xr);
+        int c = bc_compare(ax, one);
+        bc_free(ax);
+        if (c < 0 || k > 4000) break;
+        bc_num *h = bc_div(xr, two); bc_free(xr); xr = h; k++;
+    }
+    bc_num *sum = bc_from_long(1), *term = bc_from_long(1);
+    for (int n = 1; n < 100000; n++) {
+        bc_num *t1 = bc_mul(term, xr); bc_free(term);
+        bc_num *nn = bc_from_long(n);
+        term = bc_div(t1, nn); bc_free(t1); bc_free(nn);
+        bc_num *ns = bc_add(sum, term); bc_free(sum); sum = ns;
+        if (bc_is_zero(term)) break;
+    }
+    for (int i = 0; i < k; i++) {
+        bc_num *s2 = bc_mul(sum, sum); bc_free(sum);
+        trunc_to_scale(s2, wscale); sum = s2;
+    }
+    bc_free(xr); bc_free(two); bc_free(one); bc_free(term);
+    bc_scale = saved;
+    trunc_to_scale(sum, rscale);
+    return sum;
+}
+
+/* l(x) = ln(x) via 2*atanh((x-1)/(x+1)), reducing x toward 1 using ln(2). */
+static bc_num *atanh_series(bc_num *t) {       /* sum t^(2k+1)/(2k+1) */
+    bc_num *sum = bc_dup(t);
+    bc_num *t2  = bc_mul(t, t);
+    bc_num *pw  = bc_dup(t);
+    for (int k = 1; k < 100000; k++) {
+        bc_num *np = bc_mul(pw, t2); bc_free(pw); pw = np;
+        bc_num *den = bc_from_long(2 * k + 1);
+        bc_num *tk = bc_div(pw, den); bc_free(den);
+        bc_num *ns = bc_add(sum, tk); bc_free(sum); sum = ns;
+        int z = bc_is_zero(tk); bc_free(tk);
+        if (z) break;
+    }
+    bc_free(t2); bc_free(pw);
+    return sum;
+}
+
+bc_num *bc_math_l(bc_num *x) {
+    int rscale = bc_scale, wscale = rscale + 10, saved = bc_scale;
+    if (bc_is_neg(x) || bc_is_zero(x)) { bc_error("ln of non-positive number"); return bc_from_long(0); }
+    bc_scale = wscale;
+    bc_num *one = bc_from_long(1), *two = bc_from_long(2);
+    /* ln(2) via atanh(1/3) */
+    bc_num *third = bc_div(one, bc_from_long(3));
+    bc_num *ln2s = atanh_series(third); bc_free(third);
+    bc_num *ln2 = bc_mul(ln2s, two); bc_free(ln2s); trunc_to_scale(ln2, wscale);
+    /* reduce x toward [2/3, 3/2] counting powers of two */
+    bc_num *xr = bc_dup(x);
+    bc_num *threeh = bc_div(bc_from_long(3), two);   /* 1.5 */
+    bc_num *twoth  = bc_div(bc_from_long(2), bc_from_long(3)); /* .666 */
+    long e = 0;
+    while (bc_compare(xr, threeh) > 0) { bc_num *h = bc_div(xr, two); bc_free(xr); xr = h; e++; }
+    while (bc_compare(xr, twoth)  < 0) { bc_num *d = bc_mul(xr, two); bc_free(xr); xr = d; e--; }
+    bc_num *num = bc_sub(xr, one), *den = bc_add(xr, one);
+    bc_num *t = bc_div(num, den); bc_free(num); bc_free(den);
+    bc_num *as = atanh_series(t); bc_free(t);
+    bc_num *ln = bc_mul(as, two); bc_free(as);
+    bc_num *ek = bc_from_long(e);
+    bc_num *eln2 = bc_mul(ek, ln2); bc_free(ek);
+    bc_num *res = bc_add(ln, eln2); bc_free(ln); bc_free(eln2);
+    bc_free(xr); bc_free(one); bc_free(two); bc_free(threeh); bc_free(twoth); bc_free(ln2);
+    bc_scale = saved;
+    trunc_to_scale(res, rscale);
+    return res;
+}
+
+/* a(x) = atan(x).  Half-angle reduction atan(x)=2*atan(x/(1+sqrt(1+x^2)))
+ * brings |x| small for fast series convergence; works for all x. */
+bc_num *bc_math_a(bc_num *x) {
+    int rscale = bc_scale, wscale = rscale + 12, saved = bc_scale;
+    bc_scale = wscale;
+    bc_num *one = bc_from_long(1), *two = bc_from_long(2);
+    bc_num *xr = bc_dup(x);
+    int k = 0;
+    bc_num *tenth = bc_div(one, bc_from_long(10));   /* reduce until |x|<0.1 */
+    for (;;) {
+        bc_num *ax = mk_abs(xr); int c = bc_compare(ax, tenth); bc_free(ax);
+        if (c < 0 || k > 4000) break;
+        bc_num *x2 = bc_mul(xr, xr);
+        bc_num *s = bc_add(one, x2); bc_free(x2);
+        bc_num *rt = bc_sqrt(s); bc_free(s);
+        bc_num *d = bc_add(one, rt); bc_free(rt);
+        bc_num *nx = bc_div(xr, d); bc_free(d); bc_free(xr); xr = nx; k++;
+    }
+    bc_free(tenth);
+    /* series: atan(t) = sum (-1)^n t^(2n+1)/(2n+1) */
+    bc_num *sum = bc_dup(xr);
+    bc_num *t2 = bc_mul(xr, xr);
+    bc_num *pw = bc_dup(xr);
+    for (int n = 1; n < 100000; n++) {
+        bc_num *np = bc_mul(pw, t2); bc_free(pw); pw = np;
+        bc_num *den = bc_from_long(2 * n + 1);
+        bc_num *tn = bc_div(pw, den); bc_free(den);
+        bc_num *ns = (n & 1) ? bc_sub(sum, tn) : bc_add(sum, tn);
+        bc_free(sum); sum = ns;
+        int z = bc_is_zero(tn); bc_free(tn);
+        if (z) break;
+    }
+    bc_free(t2); bc_free(pw); bc_free(xr);
+    for (int i = 0; i < k; i++) { bc_num *d = bc_mul(sum, two); bc_free(sum);
+        trunc_to_scale(d, wscale); sum = d; }
+    bc_free(one); bc_free(two);
+    bc_scale = saved;
+    trunc_to_scale(sum, rscale);
+    return sum;
+}
+
+/* pi = 4*atan(1) at the current working scale. */
+static bc_num *compute_pi(void) {
+    bc_num *one = bc_from_long(1), *four = bc_from_long(4);
+    bc_num *a1 = bc_math_a(one);
+    bc_num *pi = bc_mul(a1, four);
+    bc_free(one); bc_free(four); bc_free(a1);
+    return pi;
+}
+
+/* Reduce x into (-pi, pi]; returns new bc_num. */
+static bc_num *reduce_angle(bc_num *x, bc_num *pi, bc_num *twopi) {
+    bc_num *r = bc_dup(x);
+    /* r = r - twopi*floor(r/twopi + 1/2) via mod; use bc_mod toward range */
+    bc_num *q = bc_div(r, twopi);
+    /* round q to nearest integer: trunc(q + 0.5*sign) */
+    bc_num *half = bc_div(bc_from_long(1), bc_from_long(2));
+    bc_num *adj = bc_is_neg(q) ? bc_sub(q, half) : bc_add(q, half);
+    trunc_to_scale(adj, 0);            /* floor toward zero of rounded */
+    bc_num *qt = bc_mul(adj, twopi);
+    bc_num *nr = bc_sub(r, qt);
+    bc_free(r); bc_free(q); bc_free(half); bc_free(adj); bc_free(qt);
+    (void)pi;
+    return nr;
+}
+
+/* sin/cos shared Taylor evaluator on a reduced angle. parity 0 -> sin, 1 -> cos. */
+static bc_num *bc_sincos(bc_num *x, int want_cos) {
+    int rscale = bc_scale, wscale = rscale + 12, saved = bc_scale;
+    bc_scale = wscale;
+    bc_num *pi = compute_pi();
+    bc_num *two = bc_from_long(2);
+    bc_num *twopi = bc_mul(pi, two);
+    bc_num *xr;
+    if (want_cos) {                       /* cos(x) = sin(x + pi/2) */
+        bc_num *halfpi = bc_div(pi, two);
+        bc_num *xs = bc_add(x, halfpi); bc_free(halfpi);
+        xr = reduce_angle(xs, pi, twopi); bc_free(xs);
+    } else {
+        xr = reduce_angle(x, pi, twopi);
+    }
+    /*
+     * Taylor: sin(t) = sum_{n>=0} (-1)^n t^(2n+1)/(2n+1)!  Build each term
+     * incrementally from the previous one: term_n = term_{n-1} * t^2 /
+     * ((2n)(2n+1)).  The factor (2n)(2n+1) is only the *increment* of the
+     * factorial, so it must divide the previous term (which already carries
+     * (2n-1)!), NOT the full power t^(2n+1) — dividing the full power by just
+     * (2n)(2n+1) drops the lower factorial factors and makes the series
+     * diverge for |t| around 1 (cos via +pi/2 blew up to garbage).
+     */
+    bc_num *sum = bc_dup(xr);
+    bc_num *t2 = bc_mul(xr, xr);
+    bc_num *term = bc_dup(xr);
+    for (int n = 1; n < 100000; n++) {
+        bc_num *p1 = bc_mul(term, t2); bc_free(term);
+        bc_num *d1 = bc_from_long((long long)(2 * n) * (2 * n + 1));
+        term = bc_div(p1, d1); bc_free(p1); bc_free(d1);
+        bc_num *ns = (n & 1) ? bc_sub(sum, term) : bc_add(sum, term);
+        bc_free(sum); sum = ns;
+        if (bc_is_zero(term)) break;
+    }
+    bc_free(t2); bc_free(term); bc_free(xr); bc_free(pi); bc_free(two); bc_free(twopi);
+    bc_scale = saved;
+    trunc_to_scale(sum, rscale);
+    return sum;
+}
+
+bc_num *bc_math_s(bc_num *x) { return bc_sincos(x, 0); }
+bc_num *bc_math_c(bc_num *x) { return bc_sincos(x, 1); }
+
+/* j(n,x) = Bessel J_n via its ascending series. */
+bc_num *bc_math_j(bc_num *nnum, bc_num *x) {
+    int rscale = bc_scale, wscale = rscale + 12, saved = bc_scale;
+    long n = bc_num_to_long(nnum);
+    int neg = 0;
+    if (n < 0) { n = -n; neg = (n & 1); }
+    bc_scale = wscale;
+    bc_num *two = bc_from_long(2);
+    bc_num *xh = bc_div(x, two);                 /* x/2 */
+    bc_num *xh2 = bc_mul(xh, xh);                /* (x/2)^2 */
+    /* term0 = (x/2)^n / n!  */
+    bc_num *term = bc_from_long(1);
+    for (long i = 0; i < n; i++) { bc_num *t = bc_mul(term, xh); bc_free(term); term = t; }
+    for (long i = 2; i <= n; i++) { bc_num *d = bc_from_long(i); bc_num *t = bc_div(term, d); bc_free(d); bc_free(term); term = t; }
+    trunc_to_scale(term, wscale);
+    bc_num *sum = bc_dup(term);
+    for (long m = 1; m < 100000; m++) {
+        /* term_m = -term_{m-1} * (x/2)^2 / (m*(m+n)) */
+        bc_num *t1 = bc_mul(term, xh2); bc_free(term);
+        bc_num *den = bc_from_long((long long)m * (m + n));
+        bc_num *t2 = bc_div(t1, den); bc_free(t1); bc_free(den);
+        t2->sign = -t2->sign;
+        term = t2;
+        bc_num *ns = bc_add(sum, term); bc_free(sum); sum = ns;
+        if (bc_is_zero(term)) break;
+    }
+    if (neg) sum->sign = -sum->sign;
+    bc_free(term); bc_free(two); bc_free(xh); bc_free(xh2);
+    bc_scale = saved;
+    trunc_to_scale(sum, rscale);
+    return sum;
+}

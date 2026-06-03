@@ -1260,7 +1260,23 @@ bc_num *eval_expr(ast_node_t *n) {
         case AST_CALL: {
             if (strcmp(n->call.name, "length") == 0) {
                  bc_num *arg = eval_expr(n->call.args->expr);
-                 int len = arg->len * 2;
+                 /* GNU bc length(x): number of significant decimal digits.
+                  * length(0)=1.  For |x|>=1 it is (integer digits + scale);
+                  * for a pure fraction (integer part 0) it is just the scale,
+                  * counting every fractional digit incl. leading zeros
+                  * (length(.000123)=6).  Compute D = total represented digits
+                  * from the trimmed base-100 array. */
+                 int L = arg->len;
+                 while (L > 0 && arg->digits[L - 1] == 0) L--;
+                 long len;
+                 if (L == 0) {
+                     len = 1;                     /* value is zero */
+                 } else {
+                     int msd = arg->digits[L - 1];
+                     int D = (L - 1) * 2 + (msd >= 10 ? 2 : 1);
+                     int int_digits = D - arg->scale;
+                     len = (int_digits > 0) ? D : arg->scale;
+                 }
                  bc_free(arg);
                  return bc_from_long(len);
             }
@@ -1277,6 +1293,15 @@ bc_num *eval_expr(ast_node_t *n) {
                  return res;
             }
             if (opt_l) {
+                /* j(n,x) is the only two-argument math-library function. */
+                if (strcmp(n->call.name, "j") == 0 &&
+                    n->call.args && n->call.args->next) {
+                    bc_num *nord = eval_expr(n->call.args->expr);
+                    bc_num *arg  = eval_expr(n->call.args->next->expr);
+                    bc_num *res  = bc_math_j(nord, arg);
+                    bc_free(nord); bc_free(arg);
+                    return res;
+                }
                 char m = n->call.name[0];
                 if (n->call.name[1] == '\0') {
                     bc_num *arg = eval_expr(n->call.args->expr);
@@ -1485,8 +1510,11 @@ void eval_stmt(ast_node_t *n) {
             
         default: {
             bc_num *v = eval_expr(n);
-            if (n->type != AST_ASSIGN && n->type != AST_PREINC && n->type != AST_POSTINC &&
-                n->type != AST_PREDEC && n->type != AST_POSTDEC) {
+            /* An expression used as a statement auto-prints its value; only a
+             * plain assignment is silent.  Pre/post increment and decrement
+             * ARE printing expressions in bc (++x echoes the new value, x++
+             * the old), so they must not be lumped in with assignment. */
+            if (n->type != AST_ASSIGN) {
                 bc_print_base(v, bc_obase);
                 if (bc_obase <= 16) printf("\n");
             }
