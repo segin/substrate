@@ -1512,8 +1512,13 @@ int main(int argc, char **argv) {
         }
     }
     
-    if (!opt_q) {
-        printf("bc (Substrate AST Interpreter)\n");
+    /*
+     * The startup banner is a courtesy for interactive use only.  Print it
+     * to stderr (never stdout — it must not pollute piped/redirected output)
+     * and only when standard input is a terminal.  -q suppresses it too.
+     */
+    if (!opt_q && isatty(STDIN_FILENO)) {
+        fprintf(stderr, "bc (Substrate AST Interpreter)\n");
     }
 
     if (optind < argc) {

@@ -190,6 +190,25 @@ bc_num *bc_mul(bc_num *a, bc_num *b) {
 }
 
 // Full Knuth D Division with Scale.
+/*
+ * Compare two bc_num digit arrays as raw integers (ignoring scale and sign),
+ * tolerating leading zeros.  Used inside bc_div_rem where u and v have been
+ * shifted into the integer operands for Knuth division: bc_abs_cmp() would
+ * align them by *scale* first, which is wrong here (e.g. it would pad the
+ * divisor 2 -> 2.0000 and report 1.2500 < 2.0000, making the early-out return
+ * a bogus zero quotient).
+ */
+static int raw_int_cmp(bc_num *a, bc_num *b) {
+    int al = a->len, bl = b->len;
+    while (al > 0 && a->digits[al - 1] == 0) al--;
+    while (bl > 0 && b->digits[bl - 1] == 0) bl--;
+    if (al != bl) return al > bl ? 1 : -1;
+    for (int i = al - 1; i >= 0; i--)
+        if (a->digits[i] != b->digits[i])
+            return a->digits[i] > b->digits[i] ? 1 : -1;
+    return 0;
+}
+
 static void bc_div_rem(bc_num *a, bc_num *b, bc_num **q_out, bc_num **r_out, int target_scale) {
     if (bc_is_zero(b)) {
         bc_error("divide by zero");
@@ -260,7 +279,7 @@ static void bc_div_rem(bc_num *a, bc_num *b, bc_num **q_out, bc_num **r_out, int
     // Same Knuth D as before...
     bc_num *q = bc_new();
     
-    if (bc_abs_cmp(u, v) < 0) {
+    if (raw_int_cmp(u, v) < 0) {
         q->scale = target_scale;
         if (q_out) *q_out = q; else bc_free(q);
         if (r_out) *r_out = bc_dup(a); // Modulo remainder rule? POSIX: a - (a/b)*b
@@ -462,16 +481,61 @@ int bc_compare(bc_num *a, bc_num *b) {
     return -cmp;
 }
 
-// Math stubs
+/*
+ * Square root via Newton's iteration x <- (x + a/x)/2.
+ *
+ * POSIX/GNU bc: result scale is max(scale, scale(a)).  Iterate at two guard
+ * digits of extra precision so the last reported digit is correct, then
+ * truncate to the result scale by dividing by 1 at that scale.  Newton
+ * converges quadratically for any positive start, so x0 = a is fine.
+ */
 bc_num *bc_sqrt(bc_num *a) {
     if (bc_is_neg(a)) {
-        bc_error("sqrt of negative number");
-        return bc_new();
+        bc_error("square root of negative number");
+        return bc_from_long(0);
     }
-    // Stub
-    bc_num *r = bc_from_long(0);
-    r->scale = bc_scale;
-    return r;
+    int rscale = bc_scale > a->scale ? bc_scale : a->scale;
+    if (bc_is_zero(a)) {
+        bc_num *z = bc_from_long(0);
+        z->scale = rscale;
+        return z;
+    }
+
+    int saved = bc_scale;
+    bc_scale = rscale + 2;                 /* guard digits */
+
+    bc_num *one = bc_from_long(1);
+    bc_num *two = bc_from_long(2);
+    bc_num *x   = bc_dup(a);               /* initial guess */
+
+    for (int i = 0; i < 200; i++) {
+        bc_num *adx = bc_div(a, x);        /* a / x         */
+        bc_num *sum = bc_add(x, adx);      /* x + a/x       */
+        bc_num *nx  = bc_div(sum, two);    /* (x + a/x) / 2 */
+        bc_free(adx);
+        bc_free(sum);
+        int done = (bc_compare(nx, x) == 0);
+        bc_free(x);
+        x = nx;
+        if (done) break;
+    }
+
+    /*
+     * Truncate the two guard decimal digits (one whole base-100 digit) to
+     * land on the result scale.  Done by hand rather than `bc_div(x, 1)`:
+     * bc_div() truncating a fractional-scale dividend to scale 0 currently
+     * loses the integer part.
+     */
+    if (x->scale >= rscale + 2 && x->len > 0) {
+        memmove(x->digits, x->digits + 1, (size_t)(x->len - 1));
+        x->len--;
+        x->scale -= 2;
+    }
+    bc_trim(x);
+    bc_free(one);
+    bc_free(two);
+    bc_scale = saved;
+    return x;
 }
 
 bc_num *bc_math_s(bc_num *a) { (void)a; return bc_from_long(0); }
