@@ -286,17 +286,43 @@ static void lex_set_string(const char *s) {
     lineno = 1;
 }
 
+/* Set while the string-literal lexer is consuming a "..." body, so the
+ * line-continuation handling below leaves "\<newline>" literal inside strings
+ * (matching GNU) while still joining continued lines everywhere else. */
+static int lex_in_string = 0;
+
 int next_char(void) {
     int c;
-    if (lex_string) {
-        if (*lex_string == '\0') return EOF;
-        c = (unsigned char)*lex_string++;
-    } else {
-        FILE *fp = lex_file ? lex_file : stdin;
-        c = fgetc(fp);
+    for (;;) {
+        if (lex_string) {
+            if (*lex_string == '\0') return EOF;
+            c = (unsigned char)*lex_string++;
+        } else {
+            FILE *fp = lex_file ? lex_file : stdin;
+            c = fgetc(fp);
+        }
+        if (c == '\n') lineno++;
+        /* A backslash immediately followed by a newline is a line
+         * continuation: drop both and keep reading. */
+        if (c == '\\' && !lex_in_string) {
+            int d;
+            if (lex_string) {
+                d = *lex_string ? (unsigned char)*lex_string : EOF;
+            } else {
+                FILE *fp = lex_file ? lex_file : stdin;
+                d = fgetc(fp);
+            }
+            if (d == '\n') {
+                if (lex_string) lex_string++;   /* consume the peeked newline */
+                lineno++;
+                continue;
+            }
+            if (d != EOF && !lex_string)
+                ungetc(d, lex_file ? lex_file : stdin);  /* file: push back peek */
+            return '\\';                                  /* string: peek not consumed */
+        }
+        return c;
     }
-    if (c == '\n') lineno++;
-    return c;
 }
 
 void unget_char(int c) {
@@ -425,9 +451,11 @@ int lex(void) {
         if (c == '"') {
              char buf[1024];
              int i = 0;
+             lex_in_string = 1;
              while ((c = next_char()) != '"' && c != EOF) {
                  if (i < 1023) buf[i++] = c;
              }
+             lex_in_string = 0;
              buf[i] = '\0';
              if (tok_str) free(tok_str);
              tok_str = strdup(buf);
