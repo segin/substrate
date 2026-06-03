@@ -321,6 +321,11 @@ int lex(void) {
             if (c == '/') {
                 int peek = next_char();
                 if (peek != '*') {
+                    /* Not a /* comment.  Distinguish the /= compound-assign
+                     * operator from a bare divide; the dedicated operator
+                     * scanner below is unreachable for '/' because this
+                     * comment check returns first. */
+                    if (peek == '=') return cur_tok = TOK_DIV_ASSIGN;
                     unget_char(peek);
                     return cur_tok = '/';
                 }
@@ -396,6 +401,11 @@ int lex(void) {
             if (strcmp(buf, "continue") == 0) return cur_tok = TOK_CONTINUE;
             if (strcmp(buf, "return") == 0) return cur_tok = TOK_RETURN;
             if (strcmp(buf, "halt") == 0) return cur_tok = TOK_HALT;
+            /* `quit` ends the session.  bc draws a fine distinction (quit acts
+             * at lex time, halt at run time); for normal top-level use both
+             * simply terminate, so reuse the halt path.  Without this `quit`
+             * was read as an undefined variable, printing a stray 0. */
+            if (strcmp(buf, "quit") == 0) return cur_tok = TOK_HALT;
             if (strcmp(buf, "define") == 0) return cur_tok = TOK_DEFINE;
             if (strcmp(buf, "auto") == 0) return cur_tok = TOK_AUTO;
             if (strcmp(buf, "print") == 0) {

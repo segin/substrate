@@ -603,7 +603,17 @@ static bc_num *mk_abs(bc_num *x) {
 
 /* e(x) = exp(x): halve x until |x|<1, sum the Maclaurin series, square back. */
 bc_num *bc_math_e(bc_num *x) {
-    int rscale = bc_scale, wscale = rscale + 10, saved = bc_scale;
+    int rscale = bc_scale, saved = bc_scale;
+    /*
+     * e^x has roughly |x|*log10(e) ~ 0.4343*|x| integer digits, and the k
+     * repeated squarings at the end amplify the series' relative error by
+     * about 2^k.  A fixed rscale+10 guard therefore loses the low fractional
+     * digits for large x (e(179.6) ~ 1e78 only agreed to ~25 figures).  Grow
+     * the working scale with the magnitude of the result so rscale survives.
+     */
+    long ip = bc_num_to_long(x); if (ip < 0) ip = -ip;
+    int idig = (int)((ip * 4343L) / 10000L) + 1;
+    int wscale = rscale + idig + 20;
     bc_scale = wscale;
     bc_num *two = bc_from_long(2), *one = bc_from_long(1);
     bc_num *xr = bc_dup(x);
