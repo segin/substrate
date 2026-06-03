@@ -321,7 +321,7 @@ int lex(void) {
             if (c == '/') {
                 int peek = next_char();
                 if (peek != '*') {
-                    /* Not a /* comment.  Distinguish the /= compound-assign
+                    /* Not a block comment.  Distinguish the /= compound-assign
                      * operator from a bare divide; the dedicated operator
                      * scanner below is unreachable for '/' because this
                      * comment check returns first. */
@@ -552,7 +552,11 @@ ast_node_t *parse_primary(void) {
             lex();
             n = ast_new(AST_ARRAY);
             n->arr.name = id;
-            n->arr.idx = parse_expr();
+            /* An empty subscript "name[]" is a whole-array reference, used to
+             * pass an array to / declare an array parameter of a function.
+             * A NULL idx marks it (the same convention the define-side param
+             * parser already uses). */
+            n->arr.idx = (cur_tok == ']') ? NULL : parse_expr();
             match(']');
             return n;
         } else if (cur_tok == '(') {
@@ -917,22 +921,35 @@ ast_node_t *parse_top_level(void) {
         expr_list_t **ptail = &params;
         if (cur_tok != ')') {
             while (1) {
+                /* A leading '*' marks a call-by-reference array parameter
+                 * (GNU extension: "*a[]").  Record it by prefixing the stored
+                 * name with '*'; the call binder strips and acts on it. */
+                int byref = 0;
+                if (cur_tok == '*') { byref = 1; lex(); }
                 if (cur_tok != TOK_ID) lex_error("expected param name");
                 expr_list_t *item = calloc(1, sizeof(expr_list_t));
                 ast_node_t *v = ast_new(AST_VAR);
-                v->id = strdup(tok_str);
+                if (byref) {
+                    char *nm = malloc(strlen(tok_str) + 2);
+                    nm[0] = '*'; strcpy(nm + 1, tok_str);
+                    v->id = nm;
+                } else {
+                    v->id = strdup(tok_str);
+                }
                 item->expr = v;
                 *ptail = item;
                 ptail = &item->next;
                 lex();
-                
+
                 if (cur_tok == '[') {
                     lex();
                     match(']');
-                    // Array ref parameter... ignore marker in AST for now
+                    /* Whole-array parameter.  id and arr.name alias the same
+                     * union offset, so the name pointer is already in place;
+                     * do NOT reassign id/arr.name (that would null the name).
+                     * Just retag and mark the empty subscript with idx==NULL. */
                     v->type = AST_ARRAY;
-                    v->arr.name = v->id; v->id = NULL;
-                    v->arr.idx = NULL; // indicates whole array reference
+                    v->arr.idx = NULL;
                 }
                 
                 if (cur_tok == ',') lex();
@@ -941,8 +958,10 @@ ast_node_t *parse_top_level(void) {
         }
         match(')');
         match('{');
-        
-        // optional auto
+
+        // optional auto -- may sit on its own line after the brace, so skip
+        // the intervening newline(s) before looking for the keyword.
+        while (cur_tok == '\n') lex();
         expr_list_t *autos = NULL;
         expr_list_t **atail = &autos;
         if (cur_tok == TOK_AUTO) {
@@ -960,8 +979,8 @@ ast_node_t *parse_top_level(void) {
                 if (cur_tok == '[') {
                     lex();
                     match(']');
+                    /* Whole-array auto; see the param parser note above. */
                     v->type = AST_ARRAY;
-                    v->arr.name = v->id; v->id = NULL;
                     v->arr.idx = NULL;
                 }
                 
@@ -1014,8 +1033,19 @@ typedef struct local_var {
     struct local_var *next;
 } local_var_t;
 
+/* Pass-by-reference array parameters ("*a[]", a GNU extension) are handled by
+ * copy-in/copy-out: the callee works on a private copy, and on return the copy
+ * is written back over the caller's array.  This is robust against the callee
+ * growing (reallocating) its copy, which true pointer aliasing is not. */
+typedef struct byref_bind {
+    local_var_t *local;       /* callee's working copy of the array */
+    char *srcname;            /* array name to write back to in the caller */
+    struct byref_bind *next;
+} byref_bind_t;
+
 typedef struct frame {
     local_var_t *locals;
+    byref_bind_t *byrefs;
     struct frame *prev;
 } frame_t;
 
@@ -1083,6 +1113,17 @@ bc_num *get_arr_val(const char *name, int idx) {
     }
     if (!g->array[idx]) g->array[idx] = bc_from_long(0);
     return bc_dup(g->array[idx]);
+}
+
+/* Locate an array by name in the current (caller) scope so a function call
+ * can pass it by value: returns the element vector and its length (the
+ * vector may be NULL / length 0 for a never-populated array). */
+static bc_num **find_array(const char *name, int *len_out) {
+    local_var_t *l = get_local(name);
+    if (l) { *len_out = l->array_len; return l->array; }
+    var_entry_t *g = get_global(name);
+    *len_out = g->array_len;
+    return g->array;
 }
 
 void set_var_val(const char *name, bc_num *val) {
@@ -1175,6 +1216,10 @@ bc_num *eval_expr(ast_node_t *n) {
             return get_var_val(n->id);
         }
         case AST_ARRAY: {
+            /* A whole-array reference "name[]" (idx==NULL) is only valid as a
+             * function argument, handled in AST_CALL; reaching here means it
+             * was used where a scalar value is required. */
+            if (!n->arr.idx) lex_error("array used where a number is required");
             bc_num *idx_v = eval_expr(n->arr.idx);
             int idx = bc_num_to_long(idx_v);
             bc_free(idx_v);
@@ -1312,8 +1357,15 @@ bc_num *eval_expr(ast_node_t *n) {
                     bc_free(nord); bc_free(arg);
                     return res;
                 }
+                /* Single-letter math builtins.  Only evaluate the argument
+                 * once we know the name is actually one of s/c/a/l/e -- a
+                 * user function may also have a single-letter name (e.g. p),
+                 * and its argument might be a whole-array reference that must
+                 * not be passed through eval_expr. */
                 char m = n->call.name[0];
-                if (n->call.name[1] == '\0') {
+                if (n->call.name[1] == '\0' &&
+                    (m == 's' || m == 'c' || m == 'a' || m == 'l' || m == 'e') &&
+                    n->call.args && !n->call.args->next) {
                     bc_num *arg = eval_expr(n->call.args->expr);
                     bc_num *res = NULL;
                     if (m == 's') res = bc_math_s(arg);
@@ -1332,42 +1384,62 @@ bc_num *eval_expr(ast_node_t *n) {
             }
             if (!f) lex_error("undefined function called");
             
-            // Evaluates arguments before pushing frame
-            int argc = 0;
-            int args_capacity = 0;
-            bc_num **args = NULL;
-            expr_list_t *p = n->call.args;
-            while (p) {
-                if (argc >= args_capacity) {
-                    args_capacity = args_capacity == 0 ? 16 : args_capacity * 2;
-                    args = realloc(args, args_capacity * sizeof(bc_num*));
+            // Bind parameters in the CALLER's scope, before pushing the new
+            // frame.  A scalar parameter takes the value of its argument
+            // expression; an array parameter (AST_ARRAY, idx==NULL) takes a
+            // whole-array argument "name[]" and is passed BY VALUE -- a deep
+            // copy -- per POSIX bc.  Build the locals into a temp list now so
+            // the array lookups still resolve against the caller's scope.
+            local_var_t *bound = NULL;
+            byref_bind_t *byrefs = NULL;
+            expr_list_t *fp = f->ast->func.params;
+            expr_list_t *ap = n->call.args;
+            while (fp && ap) {
+                local_var_t *l = calloc(1, sizeof(local_var_t));
+                int param_is_array = (fp->expr->type == AST_ARRAY);
+                const char *pname = param_is_array ? fp->expr->arr.name
+                                                   : fp->expr->id;
+                /* A '*' prefix marks a by-reference array parameter. */
+                int byref = (pname[0] == '*');
+                if (byref) pname++;
+                l->name = strdup(pname);
+                if (param_is_array) {
+                    if (ap->expr->type != AST_ARRAY || ap->expr->arr.idx != NULL)
+                        lex_error("array argument expected for array parameter");
+                    int slen = 0;
+                    bc_num **src = find_array(ap->expr->arr.name, &slen);
+                    if (src && slen > 0) {
+                        l->array_cap = slen < 16 ? 16 : slen;
+                        l->array_len = slen;
+                        l->array = calloc(l->array_cap, sizeof(bc_num *));
+                        for (int k = 0; k < slen; k++)
+                            if (src[k]) l->array[k] = bc_dup(src[k]);
+                    }
+                    if (byref) {
+                        /* Remember to copy the callee's working array back over
+                         * the caller's source array when the function returns. */
+                        byref_bind_t *br = calloc(1, sizeof(byref_bind_t));
+                        br->local = l;
+                        br->srcname = strdup(ap->expr->arr.name);
+                        br->next = byrefs;
+                        byrefs = br;
+                    }
+                } else {
+                    l->val = eval_expr(ap->expr); // caller scope
                 }
-                args[argc++] = eval_expr(p->expr);
-                p = p->next;
+                l->next = bound;
+                bound = l;
+                fp = fp->next;
+                ap = ap->next;
             }
-            
-            // Push Frame
+
+            // Push Frame and attach the captured parameter locals.
             frame_t *fr = calloc(1, sizeof(frame_t));
             fr->prev = call_stack;
+            fr->locals = bound;
+            fr->byrefs = byrefs;
             call_stack = fr;
-            
-            // Bind Params
-            expr_list_t *fp = f->ast->func.params;
-            int nparams = 0;
-            for (int i = 0; i < argc && fp; i++, nparams++) {
-                local_var_t *l = calloc(1, sizeof(local_var_t));
-                const char *pname = (fp->expr->type == AST_ARRAY)
-                                    ? fp->expr->arr.name : fp->expr->id;
-                l->name = strdup(pname);
-                l->val = args[i]; // ownership transfer
-                l->next = fr->locals;
-                fr->locals = l;
-                fp = fp->next;
-            }
-            // Free excess args not consumed by params
-            for (int i = nparams; i < argc; i++) bc_free(args[i]);
-            free(args);
-            
+
             // Bind Autos
             expr_list_t *fa = f->ast->func.autos;
             while (fa) {
@@ -1400,7 +1472,38 @@ bc_num *eval_expr(ast_node_t *n) {
             ret_val = old_rv;
             is_breaking = old_break;
             is_continuing = old_cont;
-            
+
+            // Copy-out for by-reference array parameters: overwrite the
+            // caller's source array (resolved in fr->prev, else global) with
+            // the callee's working copy.  Done before the frame is popped so
+            // the working arrays are still alive.
+            for (byref_bind_t *br = fr->byrefs; br; ) {
+                byref_bind_t *brn = br->next;
+                bc_num ***arrp; int *lenp; int *capp;
+                local_var_t *sl = NULL;
+                if (fr->prev)
+                    for (sl = fr->prev->locals; sl; sl = sl->next)
+                        if (strcmp(sl->name, br->srcname) == 0) break;
+                if (sl) { arrp = &sl->array; lenp = &sl->array_len; capp = &sl->array_cap; }
+                else { var_entry_t *g = get_global(br->srcname);
+                       arrp = &g->array; lenp = &g->array_len; capp = &g->array_cap; }
+                if (*arrp) {
+                    for (int i = 0; i < *lenp; i++) if ((*arrp)[i]) bc_free((*arrp)[i]);
+                    free(*arrp);
+                    *arrp = NULL; *lenp = 0; *capp = 0;
+                }
+                local_var_t *wl = br->local;
+                if (wl->array && wl->array_len > 0) {
+                    *arrp = calloc(wl->array_len, sizeof(bc_num *));
+                    for (int i = 0; i < wl->array_len; i++)
+                        if (wl->array[i]) (*arrp)[i] = bc_dup(wl->array[i]);
+                    *lenp = wl->array_len; *capp = wl->array_len;
+                }
+                free(br->srcname);
+                free(br);
+                br = brn;
+            }
+
             // Pop Frame
             local_var_t *l = fr->locals;
             while (l) {
@@ -1503,7 +1606,23 @@ void eval_stmt(ast_node_t *n) {
             expr_list_t *p = n->print_stmt.args;
             while (p) {
                 if (p->expr->type == AST_STR) {
-                    printf("%s", p->expr->str);
+                    /* The print statement interprets C-style escapes in its
+                     * string operands (\n \t \\ \q etc.); bare string
+                     * statements print literally, so this is only done here. */
+                    for (const char *s = p->expr->str; *s; s++) {
+                        if (*s != '\\' || s[1] == '\0') { putchar(*s); continue; }
+                        switch (*++s) {
+                            case 'a': putchar('\a'); break;
+                            case 'b': putchar('\b'); break;
+                            case 'f': putchar('\f'); break;
+                            case 'n': putchar('\n'); break;
+                            case 'r': putchar('\r'); break;
+                            case 't': putchar('\t'); break;
+                            case 'q': putchar('"');  break;
+                            case '\\': putchar('\\'); break;
+                            default: putchar('\\'); putchar(*s); break;
+                        }
+                    }
                 } else {
                     bc_num *v = eval_expr(p->expr);
                     bc_print_base(v, bc_obase);

@@ -526,6 +526,14 @@ bc_num *bc_sqrt(bc_num *a) {
         z->scale = rscale;
         return z;
     }
+    /* GNU bc returns its scale-0 constant 1 for sqrt of any value equal to 1
+     * (so scale=20;sqrt(1) prints "1", not "1.000...").  Match that. */
+    {
+        bc_num *one_chk = bc_from_long(1);
+        int eq1 = (bc_compare(a, one_chk) == 0);
+        bc_free(one_chk);
+        if (eq1) return bc_from_long(1);
+    }
 
     int saved = bc_scale;
     bc_scale = rscale + 2;                 /* guard digits */
