@@ -323,6 +323,18 @@ jump_to_elks:
 # user stack is rewritten in-place to look like a normal call frame
 # (return-addr 0 followed by arg) so user_entry sees `arg` at [esp+4]
 # exactly as if it had been `call`'d.
+# new_kernel_thread_trampoline - first-run entry for a kernel thread.
+# switch_to() runs under the scheduler's intr_disable() and does not
+# save/restore EFLAGS, so a freshly-scheduled kthread arrives here with
+# IF=0.  Enable interrupts, then `ret` to fall through to the thread's
+# entry_point (pushed just above this address by sched_create_thread).
+# Without this a kthread runs with interrupts masked forever — fatal for
+# any busy-poll-with-tick-timeout loop (the timer never ticks).
+.global new_kernel_thread_trampoline
+new_kernel_thread_trampoline:
+    sti
+    ret
+
 .global new_user_thread_trampoline
 new_user_thread_trampoline:
     pop %ecx                # user_entry

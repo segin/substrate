@@ -206,9 +206,23 @@ thread_t *sched_create_thread(process_t *proc, void (*entry_point)(void*), void 
         uint32_t *stk = (uint32_t*)stack;
         t->kstack_top = (uintptr_t)stk;
 
+        /*
+         * Kernel threads must begin with interrupts ENABLED.  switch_to()
+         * runs under the scheduler's intr_disable() and does not restore
+         * EFLAGS, so a kthread would otherwise inherit IF=0 and run forever
+         * with interrupts masked — fatal for any kthread that busy-polls
+         * with a timer-tick-based timeout (e.g. usb_hid_poll_thread spinning
+         * on get_uptime_ms(), which never advances because the tick IRQ is
+         * masked → total boot hang).  Land switch_to's `ret` on a tiny
+         * `sti; ret` trampoline that re-enables interrupts and then falls
+         * through to entry_point — the kernel-side analogue of what
+         * new_user_thread_trampoline does for user threads via its iret.
+         */
+        extern void new_kernel_thread_trampoline(void);
         stk--; *stk = (uint32_t)(uintptr_t)arg;
         stk--; *stk = (uint32_t)(uintptr_t)thread_exit_wrapper;
         stk--; *stk = (uint32_t)(uintptr_t)entry_point;
+        stk--; *stk = (uint32_t)(uintptr_t)&new_kernel_thread_trampoline;
         stk--; *stk = 0; // ebp
         stk--; *stk = 0; // edi
         stk--; *stk = 0; // esi
