@@ -289,8 +289,14 @@ ssize_t kern_write(int fd, const char *buf, size_t len) {
          * buf is already a kernel pointer here when called from sys_write or internal code.
          * PERFORMANCE: We pass it directly to write_fs to avoid redundant double buffering (memcpy).
          * This Zero-Copy approach improves throughput by ~8% on large writes.
+         *
+         * Expose the file_t to the write callback via the thread, mirroring
+         * the read path: socket/pipe node->write only get an fs_node_t* and
+         * otherwise can't see per-fd O_NONBLOCK.  Cleared on return.
          */
+        if (current_thread) current_thread->io_file = f;
         ssize_t bytes = (ssize_t)write_fs((fs_node_t*)f->f_data, f->f_offset, len, (const uint8_t*)buf);
+        if (current_thread) current_thread->io_file = NULL;
 
         if (bytes > 0) {
             f->f_offset += bytes;

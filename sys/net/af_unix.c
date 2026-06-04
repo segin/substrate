@@ -249,6 +249,8 @@ static size_t afunix_node_read(fs_node_t *node, off_t off, size_t size, uint8_t 
         s ? (unsigned)s->rx.count : 0,
         (unsigned)size);
     if (!s || s->closed) return 0;
+    int nonblock = current_thread && current_thread->io_file &&
+                   (current_thread->io_file->f_flag & FNONBLOCK);
     mutex_lock(&s->lock);
     /* Self-side SHUT_RD: every read is EOF, even with bytes in rx. */
     if (s->rd_closed) { mutex_unlock(&s->lock); return 0; }
@@ -259,9 +261,25 @@ static size_t afunix_node_read(fs_node_t *node, off_t off, size_t size, uint8_t 
             mutex_unlock(&s->lock);
             return 0;
         }
+        /* Empty buffer with a live peer.  Non-blocking fd: EAGAIN, don't
+         * sleep.  Otherwise sleep INTERRUPTIBLY so a signal can break the
+         * read out instead of wedging the reader forever. */
+        if (nonblock) { mutex_unlock(&s->lock); return (size_t)-EAGAIN; }
+        if (current_thread &&
+            (current_thread->sig_pending & ~current_thread->sig_mask)) {
+            mutex_unlock(&s->lock);
+            return (size_t)-EINTR;
+        }
+        if (current_thread)
+            current_thread->flags |= THREAD_F_INTERRUPTIBLE;
         sleepq_add(s->rx_chan, current_thread);
         mutex_unlock(&s->lock);
         sched_yield();
+        if (current_thread)
+            current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
+        if (current_thread &&
+            (current_thread->sig_pending & ~current_thread->sig_mask))
+            return (size_t)-EINTR;
         mutex_lock(&s->lock);
         /* Re-check the self-side flag in case shutdown(SHUT_RD) raced us. */
         if (s->rd_closed) { mutex_unlock(&s->lock); return 0; }
@@ -284,6 +302,11 @@ static size_t afunix_node_write(fs_node_t *node, off_t off, size_t size, const u
     if (!s || s->closed || !s->peer) return 0;
     /* Own SHUT_WR: no more writes from us. */
     if (s->wr_closed) return 0;
+    /* O_NONBLOCK is carried on the file_t, which only the syscall layer sees;
+     * it stashes it on the thread (current_thread->io_file) for the duration
+     * of the write so we can reach it from this fs_node callback. */
+    int nonblock = current_thread && current_thread->io_file &&
+                   (current_thread->io_file->f_flag & FNONBLOCK);
     size_t written = 0;
     while (written < size) {
         afunix_sock_t *peer = s->peer;
@@ -291,9 +314,31 @@ static size_t afunix_node_write(fs_node_t *node, off_t off, size_t size, const u
         mutex_lock(&peer->lock);
         while (peer->rx.count == AFUNIX_BUF_SIZE
                && !peer->closed && !peer->rd_closed && !s->wr_closed) {
+            /* Send buffer full.  A non-blocking fd must not sleep: hand back
+             * the partial count, or EAGAIN if nothing went out yet. */
+            if (nonblock) {
+                mutex_unlock(&peer->lock);
+                return written ? written : (size_t)-EAGAIN;
+            }
+            /* Blocking, but INTERRUPTIBLY: a pending signal has to break the
+             * write out.  Without this a peer that never drains wedges the
+             * writer in an uninterruptible sleep — the AF_UNIX X client/server
+             * deadlock that froze the desktop. */
+            if (current_thread &&
+                (current_thread->sig_pending & ~current_thread->sig_mask)) {
+                mutex_unlock(&peer->lock);
+                return written ? written : (size_t)-EINTR;
+            }
+            if (current_thread)
+                current_thread->flags |= THREAD_F_INTERRUPTIBLE;
             sleepq_add(s->tx_chan, current_thread);
             mutex_unlock(&peer->lock);
             sched_yield();
+            if (current_thread)
+                current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
+            if (current_thread &&
+                (current_thread->sig_pending & ~current_thread->sig_mask))
+                return written ? written : (size_t)-EINTR;
             mutex_lock(&peer->lock);
         }
         if (peer->closed || peer->rd_closed || s->wr_closed) {
