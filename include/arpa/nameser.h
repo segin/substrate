@@ -279,6 +279,12 @@ typedef struct __ns_rr {
     (cp) += 4; \
 } while (0)
 
+/* Legacy BIND names for the same accessors (GLib's resolver, libbind code). */
+#define GETSHORT(s, cp)  NS_GET16(s, cp)
+#define GETLONG(l, cp)   NS_GET32(l, cp)
+#define PUTSHORT(s, cp)  NS_PUT16(s, cp)
+#define PUTLONG(l, cp)   NS_PUT32(l, cp)
+
 /* Message-walking API.  All implemented in lib/resolv/ns_parse.c. */
 int  ns_initparse(const unsigned char *msg, int msglen, ns_msg *handle);
 int  ns_parserr(ns_msg *handle, ns_sect section, int rrnum, ns_rr *rr);

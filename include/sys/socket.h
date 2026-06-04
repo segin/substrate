@@ -93,6 +93,8 @@ struct cmsghdr {
 #define PF_INET        AF_INET
 #define PF_INET6       AF_INET6
 
+#define SOMAXCONN 128
+
 #define SOCK_STREAM    1
 #define SOCK_DGRAM     2
 #define SOCK_RAW       3

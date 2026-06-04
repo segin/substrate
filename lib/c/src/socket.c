@@ -477,6 +477,19 @@ static int parse_ipv6(const char *src, uint8_t out[16])
     return 1;
 }
 
+/* inet_aton — parse a dotted-quad IPv4 string into *inp.  Returns 1 on
+ * success, 0 on failure (note: NOT the -1/errno convention of inet_pton).
+ * Implemented on top of inet_pton, which is strict dotted-quad. */
+int inet_aton(const char *cp, struct in_addr *inp)
+{
+    struct in_addr tmp;
+    if (inet_pton(AF_INET, cp, &tmp) == 1) {
+        if (inp) *inp = tmp;
+        return 1;
+    }
+    return 0;
+}
+
 int inet_pton(int af, const char *src, void *dst)
 {
     if (!src || !dst) { errno = EINVAL; return -1; }

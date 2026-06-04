@@ -74,8 +74,9 @@ typedef uint64_t fsfilcnt_t;
  * pthread.h.  Keeping the typedefs duplicated here as `int32_t`
  * conflicts with the real struct shape and silently breaks any code
  * that pulls in sys/types.h *and* pthread.h. */
-typedef int32_t  pthread_rwlock_t;
-typedef int32_t  pthread_rwlockattr_t;
+/* pthread_rwlock_t / pthread_rwlockattr_t carry their real shapes in
+ * <pthread.h> (rwlock is a struct, not an int); duplicating them here as
+ * int32_t conflicts, exactly as the note above warns. */
 typedef int32_t  pthread_spinlock_t;
 typedef int32_t  pthread_barrier_t;
 typedef int32_t  pthread_barrierattr_t;

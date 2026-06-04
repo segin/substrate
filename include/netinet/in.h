@@ -77,6 +77,13 @@ static inline int __in6_is_addr_v4mapped(const struct in6_addr *__a)
 #define IN_BADCLASS(a)             IN_EXPERIMENTAL(a)
 
 #define IN6_IS_ADDR_MULTICAST(a)   (((const struct in6_addr *)(a))->s6_addr[0] == 0xff)
+/* IPv6 multicast scope tests: low nibble of the second byte is the scope. */
+#define __IN6_MC_SCOPE(a) (((const struct in6_addr *)(a))->s6_addr[1] & 0x0f)
+#define IN6_IS_ADDR_MC_NODELOCAL(a) (IN6_IS_ADDR_MULTICAST(a) && __IN6_MC_SCOPE(a) == 0x1)
+#define IN6_IS_ADDR_MC_LINKLOCAL(a) (IN6_IS_ADDR_MULTICAST(a) && __IN6_MC_SCOPE(a) == 0x2)
+#define IN6_IS_ADDR_MC_SITELOCAL(a) (IN6_IS_ADDR_MULTICAST(a) && __IN6_MC_SCOPE(a) == 0x5)
+#define IN6_IS_ADDR_MC_ORGLOCAL(a)  (IN6_IS_ADDR_MULTICAST(a) && __IN6_MC_SCOPE(a) == 0x8)
+#define IN6_IS_ADDR_MC_GLOBAL(a)    (IN6_IS_ADDR_MULTICAST(a) && __IN6_MC_SCOPE(a) == 0xe)
 #define IN6_IS_ADDR_UNSPECIFIED(a) \
     (((const struct in6_addr *)(a))->s6_addr[0]  == 0 && \
      ((const struct in6_addr *)(a))->s6_addr[1]  == 0 && \
@@ -139,11 +146,21 @@ extern const struct in6_addr in6addr_loopback;
 #define IPV6_MULTICAST_LOOP     19
 #define IPV6_ADD_MEMBERSHIP     20
 #define IPV6_DROP_MEMBERSHIP    21
+/* RFC 3493 names for the join/leave options (same values as ADD/DROP). */
+#define IPV6_JOIN_GROUP         IPV6_ADD_MEMBERSHIP
+#define IPV6_LEAVE_GROUP        IPV6_DROP_MEMBERSHIP
 #define IPV6_V6ONLY             26
 
 struct ip_mreq {
     struct in_addr imr_multiaddr;
     struct in_addr imr_interface;
+};
+
+/* Source-specific multicast request (IP_ADD_SOURCE_MEMBERSHIP &c). */
+struct ip_mreq_source {
+    struct in_addr imr_multiaddr;
+    struct in_addr imr_interface;
+    struct in_addr imr_sourceaddr;
 };
 
 struct ipv6_mreq {
