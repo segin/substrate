@@ -357,6 +357,24 @@ do_login_one(const char *forced_user)
      * it reaps the getty/login/shell session and calls
      * record_logout() before respawning getty (sbin/init/init.c). */
 
+    /* Hand the controlling terminal to the user before dropping privileges:
+     * chown it to them with group "tty" and mode 0620, exactly as standard
+     * login/getty do.  Otherwise the tty stays owned by root and the user
+     * doesn't own their own terminal — `mesg`/`write` and tools that check
+     * tty ownership misbehave.  Must run while still root. */
+    {
+        const char *ttyp = ttyname(0);
+        if (ttyp != NULL) {
+            gid_t tty_gid = pw->pw_gid;
+            struct group *tg = getgrnam("tty");
+            if (tg != NULL) {
+                tty_gid = tg->gr_gid;
+            }
+            (void)chown(ttyp, pw->pw_uid, tty_gid);
+            (void)chmod(ttyp, 0620);
+        }
+    }
+
     /* Become the user.  Order matters: setgid+initgroups BEFORE
      * setuid, otherwise we lose the privilege needed to install the
      * supplementary group list. */
