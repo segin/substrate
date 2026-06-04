@@ -1248,30 +1248,63 @@ void srandom(unsigned seed) {
 }
 
 void arc4random_buf(void *buf, size_t n) {
+    unsigned char *p = (unsigned char *)buf;
+    size_t got = 0;
+
+    /*
+     * Primary source: the getrandom(2) syscall.  It needs no file descriptor
+     * and is NOT subject to /dev/urandom's file permissions, so it works for
+     * every process regardless of uid.  (Calling it directly rather than via
+     * libsys — libc cannot depend on libsys.)
+     */
+    while (got < n) {
+        int64_t r = _syscall3(SYS_GETRANDOM, (uintptr_t)(p + got),
+                              (uintptr_t)(n - got), 0);
+        if (r <= 0) break;
+        got += (size_t)r;
+    }
+    if (got == n) return;
+
+    /*
+     * Fallback: /dev/urandom, for kernels without the syscall.  Cache the fd.
+     */
     static atomic_int urandom_fd = -1;
     int fd = atomic_load(&urandom_fd);
-
     if (fd == -1) {
         fd = open("/dev/urandom", O_RDONLY);
-        if (fd < 0) {
-            abort();
-        }
-        int expected = -1;
-        if (!atomic_compare_exchange_strong(&urandom_fd, &expected, fd)) {
-            close(fd);
-            fd = expected;
+        if (fd >= 0) {
+            int expected = -1;
+            if (!atomic_compare_exchange_strong(&urandom_fd, &expected, fd)) {
+                close(fd);
+                fd = expected;
+            }
         }
     }
-
-    char *p = (char *)buf;
-    size_t left = n;
-    while (left > 0) {
-        ssize_t r = read(fd, p, left);
-        if (r <= 0) {
-             abort();
+    if (fd >= 0) {
+        while (got < n) {
+            ssize_t r = read(fd, p + got, n - got);
+            if (r <= 0) break;
+            got += (size_t)r;
         }
-        p += r;
-        left -= r;
+        if (got == n) return;
+    }
+
+    /*
+     * Last resort: a software xorshift mixed from cheap, always-available
+     * entropy.  This is NOT cryptographically strong, but arc4random_buf must
+     * never abort or hang — bailing here (the previous behavior) killed every
+     * program that could not reach /dev/urandom, e.g. a non-root login shell.
+     */
+    uint64_t s = (uint64_t)(uintptr_t)&s * 0x9E3779B97F4A7C15ULL;
+    s ^= (uint64_t)(unsigned)getpid();
+    static atomic_int ctr;
+    s ^= (uint64_t)(unsigned)atomic_fetch_add(&ctr, 1) * 0x100000001B3ULL;
+    if (s == 0) s = 0xDEADBEEFCAFEBABEULL;
+    while (got < n) {
+        s ^= s << 13; s ^= s >> 7; s ^= s << 17;   /* xorshift64 */
+        size_t chunk = (n - got) < sizeof(s) ? (n - got) : sizeof(s);
+        memcpy(p + got, &s, chunk);
+        got += chunk;
     }
 }
 
