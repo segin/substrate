@@ -1350,9 +1350,18 @@ int sys_mkdirat(int dirfd, const char *p, int m) {
     return kern_mkdirat(dirfd, kpath, m);
 }
 
+/* Apply the calling process's file-creation mask to a user-supplied mode.
+ * Only the 9 permission bits are masked; type/other bits pass through.  The
+ * kernel-internal directory/node creators call vfs_mkdir()/vfs_mknod()
+ * directly and so are unaffected — umask is a userspace-process attribute. */
+static inline uint16_t apply_umask(int m) {
+    uint16_t mask = current_process ? current_process->umask : 0;
+    return (uint16_t)(m & ~mask);
+}
+
 int kern_mkdir(const char *p, int m) {
     if (!p) return -1;
-    return vfs_mkdir(p, (uint16_t)m);
+    return vfs_mkdir(p, apply_umask(m));
 }
 
 int kern_mkdirat(int dirfd, const char *p, int m) {
@@ -1376,7 +1385,7 @@ int kern_mkdirat(int dirfd, const char *p, int m) {
         return -EOPNOTSUPP;
     }
 
-    return parent_node->mkdir(parent_node, name, (uint16_t)m);
+    return parent_node->mkdir(parent_node, name, apply_umask(m));
 }
 
 int kern_rmdir(const char *p) {
@@ -2832,7 +2841,9 @@ int sys_mknod(const char *p, int m, int d) {
     if (copyinstr(p, kpath, sizeof(kpath), NULL) != 0) return -EFAULT;
     if (!current_process) return -EPERM;
     if ((m & S_IFMT) != S_IFIFO && current_process->euid != 0) return -EPERM;
-    return vfs_mknod(kpath, (uint16_t)m, (uint32_t)d);
+    /* POSIX: the permission bits of a mknod()/mkfifo() node are modified by
+     * the process file-creation mask. */
+    return vfs_mknod(kpath, apply_umask(m), (uint32_t)d);
 }
 
 int vfs_mount_legacy(const char *device, const char *path, const char *type, uint32_t flags, void *data);
