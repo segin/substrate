@@ -870,6 +870,12 @@ void random_init(void) {
     memset(&random_node, 0, sizeof(fs_node_t));
     strcpy(random_node.name, "random");
     random_node.flags = FS_CHARDEVICE;
+    /* 0666 (crw-rw-rw-), matching Linux and /dev/{null,zero}: every user must
+     * be able to read randomness.  Without an explicit mask the node is mode
+     * 0, so only root (which bypasses permission checks) could open it — and
+     * libc's arc4random_buf() abort()s when it can't read /dev/urandom, which
+     * killed every non-root login shell (zsh) before it printed a prompt. */
+    random_node.mask = 0666;
     random_node.read = random_dev_read;
     random_node.write = random_dev_write;
     random_node.ioctl = random_dev_ioctl;
@@ -880,6 +886,7 @@ void random_init(void) {
     memset(&urandom_node, 0, sizeof(fs_node_t));
     strcpy(urandom_node.name, "urandom");
     urandom_node.flags = FS_CHARDEVICE;
+    urandom_node.mask = 0666;
     urandom_node.read = urandom_dev_read;
     urandom_node.write = random_dev_write;
     urandom_node.ioctl = random_dev_ioctl;
