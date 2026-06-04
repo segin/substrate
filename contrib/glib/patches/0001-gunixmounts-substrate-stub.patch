@@ -1,0 +1,39 @@
+--- a/gio/gunixmounts.c	2018-12-18 09:03:26.000000000 -0600
++++ b/gio/gunixmounts.c	2026-06-03 23:05:12.929140392 -0500
+@@ -909,9 +909,18 @@
+   return return_list;
+ }
+ 
+-/* Common code {{{2 */
++/* Generic / substrate: no mount-table enumeration {{{2 */
+ #else
+-#error No _g_get_unix_mounts() implementation for system
++static const char *
++get_mtab_monitor_file (void)
++{
++  return NULL;
++}
++static GList *
++_g_get_unix_mounts (void)
++{
++  return NULL;
++}
+ #endif
+ 
+ /* GUnixMountPoints (ie: fstab) implementations {{{1 */
+@@ -1432,9 +1441,13 @@
+   return _g_get_unix_mounts ();
+ }
+ 
+-/* Common code {{{2 */
++/* Generic / substrate: no mount points {{{2 */
+ #else
+-#error No g_get_mount_table() implementation for system
++static GList *
++_g_get_unix_mount_points (void)
++{
++  return NULL;
++}
+ #endif
+ 
+ static guint64
