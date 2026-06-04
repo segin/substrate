@@ -23,8 +23,9 @@
 #define FUTEX_WAKE 1
 
 int pthread_cond_init(pthread_cond_t *cond, const pthread_condattr_t *attr) {
-    (void)attr;
     cond->seq = 0;
+    /* A condattr is just the clock id; default CLOCK_REALTIME (0). */
+    cond->clock = attr ? *attr : 0;
     return 0;
 }
 
@@ -74,7 +75,9 @@ int pthread_cond_timedwait(pthread_cond_t *cond, pthread_mutex_t *mutex,
     long rc = 0;
     for (;;) {
         struct timespec now, rel;
-        if (clock_gettime(CLOCK_REALTIME, &now) != 0) {
+        /* Measure against the clock the cond was created with (GLib's GCond
+         * uses CLOCK_MONOTONIC via pthread_condattr_setclock). */
+        if (clock_gettime(cond->clock, &now) != 0) {
             rc = -EINVAL;
             break;
         }

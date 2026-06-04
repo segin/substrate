@@ -173,6 +173,11 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr,
 }
 
 void pthread_exit(void *retval) {
+    /* Run this thread's TSD (pthread_key) destructors before it dies — both
+     * an explicit pthread_exit and a normal return through the trampoline
+     * land here. */
+    extern void __pthread_tsd_run_destructors(void);
+    __pthread_tsd_run_destructors();
     syscall(SYS_THR_EXIT, (int)(uintptr_t)retval);
     /* Should not be reached */
     _exit(0);
