@@ -3,6 +3,7 @@ include ../Makefile.inc
 # Subdirectories for core binaries.  One name per line so adding a
 # new tool is a one-line diff and `git blame` is useful.
 SUBDIRS = \
+	arch \
 	audioctl \
 	awk \
 	bas \
@@ -96,6 +97,7 @@ SUBDIRS = \
 	who \
 	whoami \
 	write \
+	xargs \
 	yes
 
 .PHONY: all clean install $(SUBDIRS)

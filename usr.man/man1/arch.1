@@ -1,0 +1,52 @@
+.TH ARCH 1 "June 2026" "Substrate OS" "User Commands"
+.SH NAME
+arch \- print machine hardware architecture
+.SH SYNOPSIS
+.B arch
+.br
+.B arch
+[\fB\-\-help\fR] [\fB\-\-version\fR]
+.SH DESCRIPTION
+The
+.B arch
+utility writes the machine hardware name to standard output, followed by a
+newline.
+It is equivalent to
+.B uname \-m
+and takes no operands.
+.PP
+On Substrate running the 32-bit x86 kernel the reported architecture is
+.BR i386 .
+.SH OPTIONS
+.TP
+.B \-\-help
+Display a usage message and exit.
+.TP
+.B \-\-version
+Output version information and exit.
+.SH EXIT STATUS
+.B arch
+exits 0 on success, and >0 if the architecture could not be determined or an
+unrecognized argument was given.
+.SH EXAMPLE
+Print the architecture:
+.PP
+.RS
+.nf
+$ arch
+i386
+.fi
+.RE
+.SH SEE ALSO
+.BR uname (1)
+.SH STANDARDS
+The
+.B arch
+utility is not part of POSIX.  Its behavior matches the GNU coreutils
+.B arch
+command, which prints the same string as
+.BR "uname \-m" .
+.SH HISTORY
+An
+.B arch
+command appeared in 4.3BSD\-Reno and in GNU coreutils.
