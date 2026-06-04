@@ -45,8 +45,15 @@ int pthread_condattr_getclock(const pthread_condattr_t *attr, int *clock_id) {
  * including the initial one — gets a private copy).  Destructors are recorded
  * and run on thread exit via __pthread_tsd_run_destructors().
  */
+/* Each key slot carries a generation counter, bumped every time the slot is
+ * (re)created.  A thread's stored value is tagged with the generation it was
+ * set under; if that doesn't match the slot's current generation the value
+ * belongs to a deleted key that happened to reuse this slot, so getspecific
+ * reports NULL.  This is how a freshly created key reads NULL in every thread
+ * (POSIX) even when the slot index is recycled. */
 static struct {
     int used;
+    unsigned gen;
     void (*dtor)(void *);
 } key_table[PTHREAD_KEYS_MAX];
 static int key_lock;
@@ -55,7 +62,7 @@ static int key_lock;
  * in this shared library fails to link.  Initial-exec resolves to a fixed
  * %gs-relative offset (no helper call) and works because libpthread is always
  * a startup DT_NEEDED, never dlopen'd. */
-static __thread void *key_values[PTHREAD_KEYS_MAX]
+static __thread struct { unsigned gen; void *val; } key_values[PTHREAD_KEYS_MAX]
     __attribute__((tls_model("initial-exec")));
 
 int pthread_key_create(pthread_key_t *key, void (*destructor)(void *)) {
@@ -64,6 +71,7 @@ int pthread_key_create(pthread_key_t *key, void (*destructor)(void *)) {
     for (unsigned i = 0; i < PTHREAD_KEYS_MAX; i++) {
         if (!key_table[i].used) {
             key_table[i].used = 1;
+            key_table[i].gen++;            /* new generation for this slot */
             key_table[i].dtor = destructor;
             __sync_lock_release(&key_lock);
             *key = i;
@@ -76,19 +84,21 @@ int pthread_key_create(pthread_key_t *key, void (*destructor)(void *)) {
 
 int pthread_key_delete(pthread_key_t key) {
     if (key >= PTHREAD_KEYS_MAX) return EINVAL;
-    key_table[key].used = 0;
+    key_table[key].used = 0;               /* gen stays; next create bumps it */
     key_table[key].dtor = NULL;
     return 0;
 }
 
 void *pthread_getspecific(pthread_key_t key) {
     if (key >= PTHREAD_KEYS_MAX) return NULL;
-    return key_values[key];
+    if (key_values[key].gen != key_table[key].gen) return NULL;  /* stale/unset */
+    return key_values[key].val;
 }
 
 int pthread_setspecific(pthread_key_t key, const void *value) {
     if (key >= PTHREAD_KEYS_MAX) return EINVAL;
-    key_values[key] = (void *)value;
+    key_values[key].gen = key_table[key].gen;
+    key_values[key].val = (void *)value;
     return 0;
 }
 
@@ -101,9 +111,10 @@ void __pthread_tsd_run_destructors(void) {
     for (int pass = 0; pass < PTHREAD_DESTRUCTOR_ITERATIONS; pass++) {
         int ran = 0;
         for (unsigned i = 0; i < PTHREAD_KEYS_MAX; i++) {
-            void *v = key_values[i];
-            if (v && key_table[i].used && key_table[i].dtor) {
-                key_values[i] = NULL;       /* clear before calling, per POSIX */
+            void *v = key_values[i].val;
+            if (v && key_table[i].used && key_table[i].dtor &&
+                key_values[i].gen == key_table[i].gen) {
+                key_values[i].val = NULL;   /* clear before calling, per POSIX */
                 key_table[i].dtor(v);
                 ran = 1;
             }
