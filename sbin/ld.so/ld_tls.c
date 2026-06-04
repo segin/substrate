@@ -61,6 +61,23 @@ static ld_u32 ld_tp = 0;
  * same layout. */
 static ld_u32 ld_tls_total = 0;
 static ld_u32 ld_tls_cursor = 0;  /* |offset| of farthest module from TP */
+static ld_u32 ld_tls_modcount = 0; /* number of PT_TLS modules (DTV length) */
+
+/* Build the Dynamic Thread Vector for a freshly-laid-out per-thread block and
+ * publish it at TCB[1] (gs:4).  DTV[0] is the module count; DTV[modid] is the
+ * base of that module's TLS block in this thread (TP - module->tls_offset).
+ * __tls_get_addr in libc reads gs:4 and returns DTV[ti_module] + ti_offset.
+ * The DTV is carved out of the block immediately above the TCB (the block was
+ * sized to leave room). */
+static void ld_fill_dtv(ld_u32 tp) {
+    ld_u32 *dtv = (ld_u32 *)(unsigned long)(tp + LD_TLS_TCB_SIZE);
+    dtv[0] = ld_tls_modcount;
+    for (ld_obj_t *o = ld_obj_list(); o; o = o->next) {
+        if (o->tls_memsz == 0) continue;
+        dtv[o->tls_modid] = tp - o->tls_offset;   /* module's TLS block base */
+    }
+    ((ld_u32 *)(unsigned long)tp)[1] = (ld_u32)(unsigned long)dtv;  /* TCB[1] */
+}
 
 int ld_setup_tls(void) {
     /* First pass: assign each PT_TLS module a negative offset from
@@ -83,6 +100,7 @@ int ld_setup_tls(void) {
         o->tls_modid  = next_modid++;
         if (align > max_align) max_align = align;
     }
+    ld_tls_modcount = next_modid - 1;
     if (cursor == 0) {
         /* No TLS-using objects.  Skip — gs:0 stays whatever the
          * kernel left it; libc that doesn't use __thread won't
@@ -99,7 +117,8 @@ int ld_setup_tls(void) {
      * mmap is happy and the TCB ends on a fixed alignment.  Stash
      * the cursor + total so __ldso_alloc_tls can replicate this
      * layout for new threads later. */
-    ld_size total = align_up(cursor + LD_TLS_TCB_SIZE, 0x1000);
+    ld_size total = align_up(cursor + LD_TLS_TCB_SIZE
+                             + (ld_tls_modcount + 1) * 4, 0x1000);
     ld_tls_cursor = cursor;
     ld_tls_total  = total;
     void *block = ld_mmap(0, total, LD_PROT_READ | LD_PROT_WRITE,
@@ -114,7 +133,7 @@ int ld_setup_tls(void) {
     ld_u32 tp = (ld_u32)(unsigned long)block + cursor;
     ld_u32 *tcb = (ld_u32 *)(unsigned long)tp;
     tcb[0] = tp;            /* self-pointer for `mov %gs:0,%eax` */
-    tcb[1] = 0;             /* DTV slot reserved */
+    ld_fill_dtv(tp);        /* TCB[1] = DTV for the GD/LD model */
 
     /* Second pass: copy each module's PT_TLS image into its slot
      * and zero-pad the BSS portion.  Slot starts at tp - tls_offset. */
@@ -181,7 +200,7 @@ static inline ld_u32 current_tp(void) {
     return tp;
 }
 
-LD_PUBLIC void *__tls_get_addr(tls_index *idx) {
+static void *ld_tls_get_addr(tls_index *idx) {
     if (!idx || idx->ti_module == 0) return 0;
     ld_u32 tp = current_tp();
     for (ld_obj_t *o = ld_obj_list(); o; o = o->next) {
@@ -190,6 +209,14 @@ LD_PUBLIC void *__tls_get_addr(tls_index *idx) {
                 (tp - o->tls_offset + idx->ti_offset);
     }
     return 0;
+}
+
+/* The normal (stack-argument) entry point.  The primary provider is libc.so.0
+ * (which defines __tls_get_addr/___tls_get_addr self-contained via the DTV at
+ * gs:4, so they resolve at link time against libc); ld.so keeps its own copy
+ * as a fallback for binaries that don't pull in libc. */
+LD_PUBLIC void *__tls_get_addr(tls_index *idx) {
+    return ld_tls_get_addr(idx);
 }
 
 /* Allocate a per-thread TLS block for pthread_create.  Mirrors the
@@ -214,7 +241,7 @@ LD_PUBLIC void *__ldso_alloc_tls(void) {
     ld_u32 tp = (ld_u32)(unsigned long)block + ld_tls_cursor;
     ld_u32 *tcb = (ld_u32 *)(unsigned long)tp;
     tcb[0] = tp;            /* variant-II self-pointer */
-    tcb[1] = 0;             /* DTV slot reserved */
+    ld_fill_dtv(tp);        /* per-thread DTV at TCB[1] */
 
     for (ld_obj_t *o = ld_obj_list(); o; o = o->next) {
         if (o->tls_memsz == 0) continue;
@@ -240,8 +267,13 @@ LD_PUBLIC void __ldso_free_tls(void *tp_ptr) {
     (void)tp_ptr;
 }
 
-/* GNU's libc historically also exports ___tls_get_addr (three
- * underscores) — same function, alternate name from the early
- * x86 PIC linker conventions.  Alias the entry. */
-LD_PUBLIC void *___tls_get_addr(tls_index *idx)
-    __attribute__((alias("__tls_get_addr")));
+/* The i386 GD/LD sequence GCC emits is:
+ *     leal  x@TLSGD(,%ebx,1), %eax
+ *     call  ___tls_get_addr@PLT
+ * i.e. the tls_index pointer is passed in %eax, NOT on the stack.  So
+ * ___tls_get_addr (three underscores) takes its argument with regparm(1);
+ * it is NOT a plain alias of the stack-convention __tls_get_addr — aliasing
+ * the two would make ___tls_get_addr read a garbage "pointer" off the stack. */
+LD_PUBLIC __attribute__((regparm(1))) void *___tls_get_addr(tls_index *idx) {
+    return ld_tls_get_addr(idx);
+}

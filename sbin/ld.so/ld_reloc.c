@@ -156,9 +156,16 @@ static int apply_one(ld_obj_t *obj, Elf32_Rel *r) {
     case R_386_TLS_TPOFF: {
         /* Resolve symbol's offset within its module's TLS image,
          * subtract the module's negative-offset-from-TP, store the
-         * result so `mov %gs:p, %eax` produces the slot address. */
+         * result so `mov %gs:p, %eax` produces the slot address.
+         *
+         * sym == 0 is a LOCAL TLS variable (initial-exec of a `static
+         * __thread` in a DSO, e.g. libpthread's TSD key vector): the
+         * offset within the module's TLS image lives in the addend (*p)
+         * and the null symbol's st_value is 0, so the same formula below
+         * computes (addend - tls_offset).  Only flag a genuinely
+         * undefined NAMED symbol. */
         Elf32_Sym *s = &obj->symtab[sym];
-        if (s->st_shndx == SHN_UNDEF) {
+        if (sym != 0 && s->st_shndx == SHN_UNDEF) {
             ld_puts("ld.so: TLS undef sym in "); ld_puts(obj->name); ld_puts("\n");
             return -1;
         }
