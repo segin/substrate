@@ -1,0 +1,2 @@
+# xkill substrate patch series (one filename per line, applied in order).
+# Empty: stock xkill cross-compiles clean against the staged X libs.
