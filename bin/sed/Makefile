@@ -5,14 +5,22 @@ PROG = sed
 SRCS = sed.c sed_util.c sed_parse.c sed_exec.c
 OBJS = $(SRCS:.c=.o)
 
+# Target: link the shared regex engine (DT_NEEDED libregex.so.0) and build a
+# PIE that loads /sbin/ld.so (DYNAMIC=1).  The host test build keeps the static
+# archive.  Without DYNAMIC=1 the link still resolves libregex.so.0 (via the
+# libregex.so symlink) but stamps the host interpreter /lib/ld-linux.so.2, so
+# the binary won't exec on substrate.
+ifdef NATIVE_BUILD
 REGEX_LIB = $(TOP)/usr.lib/regex/libregex.a
-LDADD = -L$(TOP)/usr.lib/regex -lregex
+LDADD = $(REGEX_LIB)
+USER_CFLAGS += -DNATIVE_BUILD=1 -D_GNU_SOURCE -DHAVE_MKSTEMP
+else
+REGEX_LIB = $(TOP)/usr.lib/regex/libregex.so.0
+LDADD = -L$(TOP)/usr.lib/regex -l:libregex.so.0
+DYNAMIC = 1
+endif
 
 USER_CFLAGS += -I$(TOP)/include -I$(TOP)/sys/include -I.
-
-ifdef NATIVE_BUILD
-USER_CFLAGS += -DNATIVE_BUILD=1 -D_GNU_SOURCE -DHAVE_MKSTEMP
-endif
 
 include $(TOP)/Makefile.bin.inc
 

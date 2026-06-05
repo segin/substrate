@@ -29,6 +29,9 @@ $(SHLIB): $(PIC_OBJS)
 	      -L$(TOP)/usr.lib/regex -l:libregex.so.0 \
 	      -L$(TOP)/lib/c -l:libc.so.0 \
 	      -o $@ $(PIC_OBJS)
+	# Provide the -lexvi link-time name in the source tree so in-tree consumers
+	# (ex, vi) link DT_NEEDED libexvi.so.0 instead of baking in libexvi.a.
+	@ln -sf $(SHLIB) libexvi.so
 
 $(OBJS) $(PIC_OBJS): $(MODE_STAMP)
 
@@ -51,7 +54,7 @@ $(MODE_STAMP): FORCE
 	$(CC) $(PIC_CFLAGS) -c $< -o $@
 
 clean:
-	rm -f $(OBJS) $(PIC_OBJS) $(LIB) $(SHLIB) $(MODE_STAMP)
+	rm -f $(OBJS) $(PIC_OBJS) $(LIB) $(SHLIB) libexvi.so $(MODE_STAMP)
 
 install: $(LIB) $(if $(NATIVE_BUILD),,$(SHLIB))
 	@mkdir -p $(DESTDIR)/usr/lib $(DESTDIR)/lib
@@ -61,4 +64,8 @@ install: $(LIB) $(if $(NATIVE_BUILD),,$(SHLIB))
 ifndef NATIVE_BUILD
 	install -m 755 $(SHLIB) $(DESTDIR)/lib/
 	@ln -sf $(SHLIB) $(DESTDIR)/lib/libexvi.so
+	# Stage the shared object + link symlink under /usr/lib too, so -lexvi
+	# resolves to the shared library for the sysroot and on-target builds.
+	install -m 755 $(SHLIB) $(DESTDIR)/usr/lib/
+	@ln -sf $(SHLIB) $(DESTDIR)/usr/lib/libexvi.so
 endif
