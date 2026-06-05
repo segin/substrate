@@ -1,0 +1,70 @@
+.TH READDIR_R 3
+.SH NAME
+readdir_r \- read a directory entry into a caller-supplied buffer
+.SH LIBRARY
+Standard C library
+.RI ( libc ", " \-lc )
+.SH SYNOPSIS
+.B #include <dirent.h>
+.PP
+.BI "int readdir_r(DIR *" dirp ", struct dirent *" entry ", struct dirent **" result ");"
+.SH DESCRIPTION
+The
+.B readdir_r()
+function reads the next directory entry from the directory stream
+.IR dirp ,
+storing it in the caller-supplied buffer pointed to by
+.IR entry
+and setting
+.I *result
+to point at that buffer.
+At end-of-directory
+.I *result
+is set to NULL.
+.PP
+Unlike
+.BR readdir (3),
+which returns a pointer to storage that may be overwritten by a later call,
+.B readdir_r()
+places the entry in storage owned by the caller, so the returned entry is not
+clobbered by subsequent activity on other directory streams.
+.SH RETURN VALUE
+On success
+.B readdir_r()
+returns 0; on end-of-directory it returns 0 with
+.I *result
+set to NULL.
+On error it returns a positive error number.
+.SH ERRORS
+.TP
+.B EINVAL
+.IR dirp ", " entry ", or " result
+is NULL.
+.TP
+.B EBADF
+.I dirp
+does not refer to an open directory stream.
+.SH NOTES
+.B readdir_r()
+is marked obsolescent in POSIX.1-2008; new code should prefer
+.BR readdir (3),
+which on this system already returns a pointer into per-stream storage.
+.B readdir_r()
+is provided for portability with code \(em such as the X11
+.I <X11/Xos_r.h>
+multithread-safe path \(em that calls it when
+.B _POSIX_THREAD_SAFE_FUNCTIONS
+is defined.
+.PP
+This implementation serializes against the shared per-stream read buffer rather
+than supporting concurrent reads of the same
+.IR dirp ;
+the guarantee it provides is that the returned
+.I entry
+is caller-owned.
+.SH SEE ALSO
+.BR readdir (3),
+.BR opendir (3),
+.BR closedir (3)
+.SH STANDARDS
+POSIX.1-2008 (obsolescent).

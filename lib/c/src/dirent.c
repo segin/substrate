@@ -1,6 +1,7 @@
 #include <dirent.h>
 #include <errno.h>
 #include <stddef.h>
+#include <string.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <fcntl.h>
@@ -65,6 +66,35 @@ struct dirent *readdir(DIR *dirp) {
 
     dirp->buf_pos += (int)reclen;
     return d;
+}
+
+/* POSIX readdir_r: read the next entry into the caller-owned `entry` buffer and
+ * point *result at it (or NULL at end-of-directory).  Returns 0 on success or a
+ * positive errno on error.  Like glibc's, this serializes against the shared
+ * DIR buffer rather than supporting concurrent reads of the same stream; the
+ * thread-safety it guarantees is that the returned struct is caller-owned.
+ * (readdir_r is obsolescent but still required by code such as Motif's Xos_r.h
+ * MT-safe path when _POSIX_THREAD_SAFE_FUNCTIONS is in effect.) */
+int readdir_r(DIR *dirp, struct dirent *entry, struct dirent **result) {
+    struct dirent *d;
+    size_t copylen;
+
+    if (dirp == NULL || entry == NULL || result == NULL)
+        return EINVAL;
+
+    errno = 0;
+    d = readdir(dirp);
+    if (d == NULL) {
+        *result = NULL;
+        return errno;              /* 0 at clean end-of-directory */
+    }
+
+    copylen = d->d_reclen;
+    if (copylen > sizeof(struct dirent))
+        copylen = sizeof(struct dirent);
+    memcpy(entry, d, copylen);
+    *result = entry;
+    return 0;
 }
 
 int closedir(DIR *dirp) {
