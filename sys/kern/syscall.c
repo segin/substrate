@@ -535,6 +535,7 @@ static int kern_open_from(const char *path, int flags, int mode, fs_node_t *root
             return err;
         }
         open_node = fifo_node;
+        f->f_type = DTYPE_PIPE;   /* a FIFO is not seekable (lseek -> ESPIPE) */
     }
 
     f->f_data = open_node;
@@ -758,16 +759,34 @@ int sys_close(int fd) {
 }
 
 int64_t sys_lseek(int fd, uint32_t off_lo, uint32_t off_hi, int w) {
-    if (fd < 0 || fd >= MAX_FD) return -1;
+    if (fd < 0 || fd >= MAX_FD) return -EBADF;
     file_t *f = current_process->fds[fd];
-    if (!f) return -1;
-    
+    if (!f) return -EBADF;
+
+    /*
+     * Pipes, sockets and kqueues are not seekable; POSIX requires lseek() to
+     * fail with ESPIPE on them.  The old code blindly advanced f_offset and
+     * returned it, so lseek(pipe, 0, SEEK_CUR) returned 0 instead of -1.  That
+     * made ftell() "succeed" on a pipe, which broke any program that probes
+     * seekability that way -- e.g. grep's binary-content check did
+     * fread()+fseek() on stdin, consuming a pipe it then could not rewind, so
+     * it matched nothing.
+     */
+    if (f->f_type == DTYPE_PIPE || f->f_type == DTYPE_SOCKET ||
+        f->f_type == DTYPE_KQUEUE) {
+        return -ESPIPE;
+    }
+
     off_t off = ((off_t)off_hi << 32) | off_lo;
-    
+
     if (w == 0) f->f_offset = off; // SEEK_SET
     else if (w == 1) f->f_offset += off; // SEEK_CUR
     else if (w == 2) f->f_offset = ((fs_node_t*)f->f_data)->length + off; // SEEK_END
-    
+    /* Deliberately tolerate an out-of-range whence as a no-op that returns the
+     * current offset: /sbin/ld.so's ld_lseek() calls SYS_lseek with only three
+     * arguments, so the kernel's 4th parameter (w) is an uninitialized register
+     * for that caller.  Rejecting it with EINVAL broke dynamic loading. */
+
     return f->f_offset;
 }
 
@@ -2398,6 +2417,7 @@ int kern_pipe(int *fds) {
     }
     rf->f_data = read_node;
     rf->f_flag = FREAD;
+    rf->f_type = DTYPE_PIPE;   /* so lseek/ftell report ESPIPE (not seekable) */
     file_set_path(rf, "pipe:[read]");
     proc_set_fd(current_process, f1, rf);
 
@@ -2413,6 +2433,7 @@ int kern_pipe(int *fds) {
     }
     wf->f_data = write_node;
     wf->f_flag = FWRITE;
+    wf->f_type = DTYPE_PIPE;   /* so lseek/ftell report ESPIPE (not seekable) */
     file_set_path(wf, "pipe:[write]");
     proc_set_fd(current_process, f2, wf);
 
