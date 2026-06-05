@@ -42,6 +42,9 @@ cd "${BUILD_DIR}"
 [ -f Makefile ] && make distclean >/dev/null 2>&1 || true
 CACHE="${BUILD_DIR}/substrate.cache"
 grep -v '^ac_cv_env_' "${HERE}/substrate-cross.cache" > "${CACHE}"
+# Teach Motif's libtool that substrate builds ELF shared libraries so
+# --enable-shared yields libXm.so / libMrm.so, not just the .a archives.
+sh "${HERE}/../substrate-libtool-shared.sh" ./configure
 echo "==> configure"
 ./configure \
     --host=i386-unknown-substrate \

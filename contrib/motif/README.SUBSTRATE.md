@@ -20,10 +20,13 @@ tarball.  We therefore build `lib/Xm` and `lib/Mrm` directly and skip `tools/`
 and `clients/`.  This is enough to compile and link Motif application programs
 (the substrate use case is `motifgpt`).
 
-Shared libraries are not produced: substrate's libtool host-triplet support
-reports `build_libtool_libs=no`, so only the static `.a` archives build — the
-same ecosystem-wide limitation that affects the other autotools/libtool ports.
-Motif clients static-link `libXm.a`.
+Both static and shared libraries are produced (`libXm.so.4`, `libMrm.so.4`).
+libtool's `case $host_os` has no substrate branch, so by default it sets
+`build_libtool_libs=no` and `--enable-shared` yields only `.a`; the shared
+build is enabled by applying `../substrate-libtool-shared.sh` to the generated
+`configure` (the sed equivalent of the `0002-libtool-configure-substrate-shared`
+patch the X libraries carry).  `regcomp`/`regexec` are absorbed into `libXm.so`
+from `libregex.a`, so it is self-contained for regex.
 
 ## Build-time fixups (no patch series)
 

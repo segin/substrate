@@ -60,6 +60,11 @@ export CPPFLAGS="-I${OPENSSL_STAGE}/usr/include ${CPPFLAGS:-}"
 CPPFLAGS="-include sys/select.h ${CPPFLAGS}"
 export LDFLAGS="-L${OPENSSL_STAGE}/usr/lib -Wl,--copy-dt-needed-entries ${LDFLAGS:-}"
 
+# Teach curl's libtool that substrate builds ELF shared libraries, otherwise
+# --enable-shared produces only libcurl.a (libtool's host_os case has no
+# substrate branch -> build_libtool_libs=no).
+sh "${HERE}/../substrate-libtool-shared.sh" "${TREE_DIR}/configure"
+
 echo "==> configure"
 "${TREE_DIR}/configure" \
     --host=i386-unknown-substrate \
@@ -88,5 +93,9 @@ echo "==> install into ${DESTDIR}"
 rm -rf "${DESTDIR}"
 mkdir -p "${DESTDIR}"
 make install DESTDIR="${DESTDIR}"
+# Drop libtool archives: their absolute libdir=/usr/lib makes a downstream
+# cross link resolve -lcurl to the build host's /usr/lib/libcurl.so ("file in
+# wrong format").  Cross consumers use -L/-l + the .pc instead.
+rm -f "${DESTDIR}"/usr/lib/*.la
 
 echo "==> Done.  /usr/bin/curl + libcurl staged under ${DESTDIR}"

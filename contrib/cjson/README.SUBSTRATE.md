@@ -21,8 +21,10 @@ subdirectory consumers `#include <cjson/cJSON.h>` expect.
 `pkg-config` files (`libcjson.pc`, `libcjson_utils.pc`) are hand-written, since
 upstream only generates them via CMake's `configure_file`.
 
-Static archives only, consistent with the other substrate libtool/autotools
-ports (substrate's libtool reports `build_libtool_libs=no`).
+Both static archives and shared objects are produced.  cJSON has no libtool, so
+the shared link is an explicit `-shared -Wl,-soname,libcjson.so.1` step (matching
+upstream's CMake SOVERSION 1): `libcjson.so.1 -> libcjson.so.1.7.x` plus the
+`libcjson.so` link-time symlink.
 
 ## Layout
 

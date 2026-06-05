@@ -20,15 +20,26 @@ AR=i386-unknown-substrate-ar
 RANLIB=i386-unknown-substrate-ranlib
 CFLAGS="-march=i486 -mtune=i486 -O2 -g -fno-pie -std=c89 -fPIC -Wall"
 
+# Upstream's CMake build ships the shared library as SOVERSION 1
+# (libcjson.so.1 -> libcjson.so.1.7.x); match that so client DT_NEEDED entries
+# read libcjson.so.1.
+SOVER=1
+FULLVER="${VERSION}"
+
 cd "${TREE_DIR}"
 echo "==> compile"
 ${CC} ${CFLAGS} -c cJSON.c        -o cJSON.o
 ${CC} ${CFLAGS} -c cJSON_Utils.c  -o cJSON_Utils.o
-echo "==> archive"
+echo "==> archive (static)"
 ${AR} rcs libcjson.a       cJSON.o
 ${RANLIB} libcjson.a
 ${AR} rcs libcjson_utils.a cJSON_Utils.o cJSON.o
 ${RANLIB} libcjson_utils.a
+echo "==> link (shared)"
+${CC} -shared -fPIC -Wl,-soname,libcjson.so.${SOVER} \
+      -o libcjson.so.${FULLVER} cJSON.o -lm
+${CC} -shared -fPIC -Wl,-soname,libcjson_utils.so.${SOVER} \
+      -o libcjson_utils.so.${FULLVER} cJSON_Utils.o cJSON.o -lm
 
 echo "==> install into ${DESTDIR}"
 rm -rf "${DESTDIR}"
@@ -38,6 +49,12 @@ pc="${lib}/pkgconfig"
 mkdir -p "${inc}" "${lib}" "${pc}"
 install -m 0644 cJSON.h cJSON_Utils.h "${inc}/"
 install -m 0644 libcjson.a libcjson_utils.a "${lib}/"
+# Shared objects + the version/soname/linker symlink chain.
+for base in libcjson libcjson_utils; do
+    install -m 0755 "${base}.so.${FULLVER}" "${lib}/"
+    ln -sf "${base}.so.${FULLVER}" "${lib}/${base}.so.${SOVER}"
+    ln -sf "${base}.so.${SOVER}"   "${lib}/${base}.so"
+done
 
 # Hand-written pkg-config files (consumers ask for `libcjson`; the prefix is the
 # on-target /usr where these install).

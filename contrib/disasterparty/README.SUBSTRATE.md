@@ -14,10 +14,12 @@ the `*-substrate*` triplet).
 `build.sh` then cross-configures with `PKG_CONFIG_LIBDIR` pinned at the staged
 `dist-cjson`, `dist-curl`, `dist-openssl`, and `dist-zlib` trees so the
 `libcurl`/`libcjson` probes — and the eventual link — never see host libraries.
-`--disable-shared` (substrate's libtool produces static archives only), and only
-the library, header, `.pc`, and man pages are installed; the `tests/` subdir
-links programs that talk to live API endpoints and is out of scope for a cross
-build.
+It builds both static and shared (`libdisasterparty.so.5`, which DT_NEEDEDs
+`libcurl.so.4` + `libcjson.so.1`); the libtool host-triplet fix that enables
+shared on substrate is applied via `../substrate-libtool-shared.sh` before
+configure.  Only the library, header, `.pc`, and man pages are installed; the
+`tests/` subdir links programs that talk to live API endpoints and is out of
+scope for a cross build.
 
 ## Dependencies
 

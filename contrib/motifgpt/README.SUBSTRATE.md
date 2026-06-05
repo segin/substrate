@@ -25,11 +25,22 @@ accommodations:
 
 The `motifgpt_LDADD` from configure is `-lXm -lXt -lX11 ... $LIBCURL_LIBS
 $LIBCJSON_LIBS $DISASTERPARTY_LIBS -ldl`; `LIBS` supplies the rest of libXm's
-transitive deps (`-lXmu -lXext -lXpm -lSM -lICE -liconv -lregex`).  `libXm` is
-static-linked; the X/SSL/iconv libraries resolve dynamically at run time.
+transitive deps (`-lXmu -lXext -lXpm -lSM -lICE -liconv -lregex`).  With the
+Motif stack built shared, the binary dynamically links `libXm.so.4`,
+`libcurl.so.4`, `libcjson.so.1`, and `libdisasterparty.so.5` (resolved by ld.so
+at run time).
 
 The three sample plugins (`plugins/*.so`, built by the upstream `all-local`
 rule) are staged under `/usr/lib/motifgpt/plugins`.
+
+## Verified running
+
+motifgpt runs natively on substrate against the **Xfbdev** framebuffer X server
+(`etc/x.sh`-style launch, `DISPLAY=:0`): it connects, builds its Motif widget
+tree, and enters `XtAppMainLoop`, rendering the chat window (conversation pane,
+input box, Send button, menu bar).  A guest CPU with RDRAND (`-cpu …,+rdrand`)
+is needed so the kernel entropy pool seeds — otherwise `curl_global_init`'s
+OpenSSL seeding blocks the process at startup.
 
 ## Dependencies
 
@@ -41,9 +52,9 @@ rule) are staged under `/usr/lib/motifgpt/plugins`.
 
 ## Running
 
-Like the other substrate X client ports (xterm, xedit), motifgpt is a client:
-it needs an X server reachable over the network to display.  Substrate ships no
-X server yet, so the deliverable here is the cross-built binary + plugins.
+motifgpt is an X client; it displays against substrate's Xfbdev framebuffer X
+server (see "Verified running" above) or any X server reachable over the
+network.
 
 ## Layout
 

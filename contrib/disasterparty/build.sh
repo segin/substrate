@@ -33,11 +33,14 @@ export LDFLAGS="${LDF}"
 
 cd "${TREE_DIR}"
 [ -f Makefile ] && make distclean >/dev/null 2>&1 || true
+# Teach the (autoreconf-generated) libtool that substrate builds ELF shared
+# libraries so --enable-shared yields libdisasterparty.so, not just the .a.
+sh "${HERE}/../substrate-libtool-shared.sh" ./configure
 echo "==> configure"
 ./configure \
     --host=i386-unknown-substrate \
     --prefix=/usr --libdir=/usr/lib --includedir=/usr/include \
-    --disable-shared --enable-static \
+    --enable-shared --enable-static \
     CC=i386-unknown-substrate-gcc \
     AR=i386-unknown-substrate-ar \
     RANLIB=i386-unknown-substrate-ranlib \
