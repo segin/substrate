@@ -7,6 +7,7 @@ extern "C" {
 
 #include <sys/types.h>
 #include <stddef.h>
+#include <stdio.h>
 
 struct group {
     char   *gr_name;       /* group name */
@@ -26,6 +27,10 @@ int getgrgid_r(gid_t gid, struct group *grp, char *buf, size_t buflen,
                struct group **result);
 int getgrnam_r(const char *name, struct group *grp, char *buf, size_t buflen,
                struct group **result);
+int getgrent_r(struct group *grp, char *buf, size_t buflen,
+               struct group **result);
+int fgetgrent_r(FILE *stream, struct group *grp, char *buf, size_t buflen,
+                struct group **result);
 
 /*
  * Compute the group list for `user`.  `group` is the primary group

@@ -7,6 +7,7 @@ extern "C" {
 
 #include <sys/types.h>
 #include <stddef.h>
+#include <stdio.h>
 
 struct passwd {
     char   *pw_name;       /* username */
@@ -49,6 +50,10 @@ int getpwuid_r(uid_t uid, struct passwd *pwd, char *buf, size_t buflen,
                struct passwd **result);
 int getpwnam_r(const char *name, struct passwd *pwd, char *buf, size_t buflen,
                struct passwd **result);
+int getpwent_r(struct passwd *pwd, char *buf, size_t buflen,
+               struct passwd **result);
+int fgetpwent_r(FILE *stream, struct passwd *pwd, char *buf, size_t buflen,
+                struct passwd **result);
 
 #ifdef __cplusplus
 }

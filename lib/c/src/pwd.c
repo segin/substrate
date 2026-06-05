@@ -239,3 +239,59 @@ getpwnam_r(const char *name, struct passwd *pwd, char *buf, size_t buflen,
     fclose(f);
     return rc;
 }
+
+/* Read the next entry from an arbitrary already-open passwd stream into the
+ * caller's storage.  The next valid line is taken (no key filter). */
+int
+fgetpwent_r(FILE *f, struct passwd *pwd, char *buf, size_t buflen,
+            struct passwd **result)
+{
+    char        *line = buf;
+    struct passwd local;
+
+    if (f == NULL || pwd == NULL || buf == NULL || result == NULL) {
+        if (result != NULL)
+            *result = NULL;
+        return ERANGE;
+    }
+    *result = NULL;
+
+    while (fgets(line, (int)buflen, f) != NULL) {
+        size_t len = strlen(line);
+        if (len + 1 == buflen && line[len - 1] != '\n') {
+            int c;
+            while ((c = fgetc(f)) != EOF && c != '\n')
+                ;
+            return ERANGE;
+        }
+        pw_strip_eol(line);
+        if (line[0] == '\0' || line[0] == '#')
+            continue;
+        if (pw_parse_line(line, &local) != 0)
+            continue;
+        *pwd = local;
+        *result = pwd;
+        return 0;
+    }
+    return ENOENT;      /* end of file */
+}
+
+/* Enumerate /etc/passwd via the shared internal stream used by getpwent(),
+ * but parse into the caller's storage. */
+int
+getpwent_r(struct passwd *pwd, char *buf, size_t buflen, struct passwd **result)
+{
+    if (pwd == NULL || buf == NULL || result == NULL) {
+        if (result != NULL)
+            *result = NULL;
+        return ERANGE;
+    }
+    if (pw_stream == NULL) {
+        setpwent();
+        if (pw_stream == NULL) {
+            *result = NULL;
+            return errno;
+        }
+    }
+    return fgetpwent_r(pw_stream, pwd, buf, buflen, result);
+}

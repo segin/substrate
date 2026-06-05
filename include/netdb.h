@@ -118,11 +118,46 @@ void            endservent(void);
 
 /* h_errno + values for gethostbyname-family callers. */
 extern int h_errno;
+#define NETDB_INTERNAL (-1)   /* see errno for the real error */
+#define NETDB_SUCCESS  0
 #define HOST_NOT_FOUND 1
 #define TRY_AGAIN      2
 #define NO_RECOVERY    3
 #define NO_DATA        4
 #define NO_ADDRESS     NO_DATA
+
+/*
+ * Reentrant lookups.  Each deep-copies its result into the caller's buffer and
+ * sets *result (NULL when not found); a buffer too small returns ERANGE.  The
+ * gethost* forms also write *h_errnop.
+ */
+int gethostbyname_r(const char *name, struct hostent *ret, char *buf,
+                    size_t buflen, struct hostent **result, int *h_errnop);
+int gethostbyname2_r(const char *name, int af, struct hostent *ret, char *buf,
+                     size_t buflen, struct hostent **result, int *h_errnop);
+int gethostbyaddr_r(const void *addr, socklen_t len, int type,
+                    struct hostent *ret, char *buf, size_t buflen,
+                    struct hostent **result, int *h_errnop);
+int gethostent_r(struct hostent *ret, char *buf, size_t buflen,
+                 struct hostent **result, int *h_errnop);
+int getservbyname_r(const char *name, const char *proto, struct servent *ret,
+                    char *buf, size_t buflen, struct servent **result);
+int getservbyport_r(int port, const char *proto, struct servent *ret,
+                    char *buf, size_t buflen, struct servent **result);
+int getservent_r(struct servent *ret, char *buf, size_t buflen,
+                 struct servent **result);
+int getprotobyname_r(const char *name, struct protoent *ret, char *buf,
+                     size_t buflen, struct protoent **result);
+int getprotobynumber_r(int proto, struct protoent *ret, char *buf,
+                       size_t buflen, struct protoent **result);
+int getprotoent_r(struct protoent *ret, char *buf, size_t buflen,
+                  struct protoent **result);
+int getnetbyname_r(const char *name, struct netent *ret, char *buf,
+                   size_t buflen, struct netent **result);
+int getnetbyaddr_r(uint32_t net, int type, struct netent *ret, char *buf,
+                   size_t buflen, struct netent **result);
+int getnetent_r(struct netent *ret, char *buf, size_t buflen,
+                struct netent **result);
 
 /* Decode the value of h_errno (or the eai* values).  Substrate's
  * gethostbyname is currently /etc/hosts-only so the only h_errno

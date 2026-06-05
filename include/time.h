@@ -66,6 +66,11 @@ char *ctime_r(const time_t *timer, char *buf);
 struct tm *gmtime_r(const time_t *__restrict timer, struct tm *__restrict result);
 struct tm *localtime_r(const time_t *__restrict timer, struct tm *__restrict result);
 
+/* getdate(3): parse against the $DATEMSK strptime templates.  getdate_r returns
+ * 0 or a getdate error code; the non-reentrant getdate sets getdate_err. */
+extern int getdate_err;
+int getdate_r(const char *string, struct tm *tm);
+
 clock_t clock(void);
 int clock_gettime(clockid_t clk_id, struct timespec *tp);
 int clock_settime(clockid_t clk_id, const struct timespec *tp);

@@ -270,6 +270,70 @@ getgrnam_r(const char *name, struct group *grp, char *buf, size_t buflen,
     return rc;
 }
 
+/* Read the next entry from an already-open group stream into the caller's
+ * storage.  Like the lookups, the gr_mem pointer array is carved from the tail
+ * of the caller buffer. */
+int
+fgetgrent_r(FILE *f, struct group *grp, char *buf, size_t buflen,
+            struct group **result)
+{
+    size_t pointer_area = sizeof(char *) * (GR_MEM_MAX + 1);
+    char  *line = buf;
+    size_t line_max;
+    char **mems;
+    struct group local;
+
+    if (f == NULL || grp == NULL || buf == NULL || result == NULL) {
+        if (result != NULL)
+            *result = NULL;
+        return EINVAL;
+    }
+    *result = NULL;
+    if (buflen < pointer_area + 64)
+        return ERANGE;
+    line_max = buflen - pointer_area;
+    mems = (char **)(buf + line_max);
+
+    while (fgets(line, (int)line_max, f) != NULL) {
+        size_t len = strlen(line);
+        if (len + 1 == line_max && line[len - 1] != '\n') {
+            int c;
+            while ((c = fgetc(f)) != EOF && c != '\n')
+                ;
+            return ERANGE;
+        }
+        gr_strip_eol(line);
+        if (line[0] == '\0' || line[0] == '#')
+            continue;
+        if (gr_parse_line(line, &local, mems, GR_MEM_MAX + 1) != 0)
+            continue;
+        *grp = local;
+        *result = grp;
+        return 0;
+    }
+    return ENOENT;
+}
+
+/* Enumerate /etc/group via the shared internal stream used by getgrent(),
+ * parsing into the caller's storage. */
+int
+getgrent_r(struct group *grp, char *buf, size_t buflen, struct group **result)
+{
+    if (grp == NULL || buf == NULL || result == NULL) {
+        if (result != NULL)
+            *result = NULL;
+        return EINVAL;
+    }
+    if (gr_stream == NULL) {
+        setgrent();
+        if (gr_stream == NULL) {
+            *result = NULL;
+            return errno;
+        }
+    }
+    return fgetgrent_r(gr_stream, grp, buf, buflen, result);
+}
+
 int
 getgrouplist(const char *user, gid_t group, gid_t *groups, int *ngroups)
 {

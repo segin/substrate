@@ -91,6 +91,47 @@ void srand(unsigned int seed);
 long random(void);
 void srandom(unsigned seed);
 
+/* Reentrant random(3): generator state held in a caller-supplied object and
+ * state array (see initstate_r(3)). */
+struct random_data {
+    int32_t *fptr;        /* front pointer into the state ring */
+    int32_t *rptr;        /* rear pointer into the state ring */
+    int32_t *state;       /* the state array (word [-1] holds packed type) */
+    int      rand_type;   /* TYPE_0..TYPE_4 */
+    int      rand_deg;    /* degree of the feedback polynomial */
+    int      rand_sep;    /* separation between fptr and rptr */
+    int32_t *end_ptr;     /* one past the end of the state array */
+};
+int random_r(struct random_data *buf, int32_t *result);
+int srandom_r(unsigned int seed, struct random_data *buf);
+int initstate_r(unsigned int seed, char *statebuf, size_t statelen,
+                struct random_data *buf);
+int setstate_r(char *statebuf, struct random_data *buf);
+
+/* Reentrant SVID 48-bit PRNG: state held in a caller-supplied object. */
+struct drand48_data {
+    unsigned short __x[3];       /* current 48-bit state */
+    unsigned short __old_x[3];   /* state saved by seed48_r() */
+    unsigned short __c;          /* additive constant */
+    unsigned short __init;       /* nonzero once seeded */
+    unsigned long long __a;      /* 48-bit multiplier */
+};
+int drand48_r(struct drand48_data *buffer, double *result);
+int erand48_r(unsigned short xsubi[3], struct drand48_data *buffer, double *result);
+int lrand48_r(struct drand48_data *buffer, long *result);
+int nrand48_r(unsigned short xsubi[3], struct drand48_data *buffer, long *result);
+int mrand48_r(struct drand48_data *buffer, long *result);
+int jrand48_r(unsigned short xsubi[3], struct drand48_data *buffer, long *result);
+int srand48_r(long seedval, struct drand48_data *buffer);
+int seed48_r(unsigned short seed16v[3], struct drand48_data *buffer);
+int lcong48_r(unsigned short param[7], struct drand48_data *buffer);
+
+/* Reentrant ecvt(3)/fcvt(3): write the converted digits into a caller buffer. */
+int ecvt_r(double value, int ndigit, int *decpt, int *sign, char *buf, size_t len);
+int fcvt_r(double value, int ndigit, int *decpt, int *sign, char *buf, size_t len);
+int qecvt_r(long double value, int ndigit, int *decpt, int *sign, char *buf, size_t len);
+int qfcvt_r(long double value, int ndigit, int *decpt, int *sign, char *buf, size_t len);
+
 uint32_t arc4random(void);
 void arc4random_buf(void *buf, size_t n);
 uint32_t arc4random_uniform(uint32_t upper_bound);

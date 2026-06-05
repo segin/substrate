@@ -603,6 +603,17 @@ char *tmpnam(char *s) {
 	return p;
 }
 
+/* Reentrant tmpnam(3): unlike tmpnam(NULL), tmpnam_r(NULL) returns NULL rather
+ * than using a shared static buffer.  The caller's buffer must hold at least
+ * L_tmpnam bytes. */
+char *tmpnam_r(char *s) {
+	static int counter = 0;
+	if (s == NULL)
+		return NULL;
+	snprintf(s, L_tmpnam, "/tmp/tmp.%d.%d", getpid(), counter++);
+	return s;
+}
+
 /* --- popen / pclose --- */
 #include <sys/wait.h>
 
