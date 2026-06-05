@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <sys/stat.h>
 
 static int
 buf_line_array_grow(buffer_t *b, int needed)
@@ -502,6 +503,29 @@ buf_write_range(buffer_t *b, const char *filename, int append, int addr1, int ad
             perror(tmp);
             free(tmp);
             return;
+        }
+
+        /*
+         * mkstemp() creates the temp file with mode 0600, and the rename()
+         * below replaces the original file with it -- so without this the saved
+         * file loses its permissions (a 0755 script becomes 0600 and stops
+         * being executable).  Carry the original file's mode (and, best effort,
+         * its owner) across to the replacement; for a brand-new file fall back
+         * to the normal create default, 0666 masked by the umask.
+         */
+        {
+            struct stat st;
+            if (stat(filename, &st) == 0) {
+                fchmod(fd, st.st_mode & 07777);
+                /* Best effort -- only succeeds for root / matching owner. */
+                if (fchown(fd, st.st_uid, st.st_gid) != 0) {
+                    /* ignore: not privileged to preserve ownership */
+                }
+            } else {
+                mode_t um = umask(0);
+                umask(um);
+                fchmod(fd, 0666 & ~um);
+            }
         }
 
         f = fdopen(fd, "w");
