@@ -32,6 +32,11 @@ PKGP="${PKGP}:${SUBSTRATE_TOP}/contrib/libxcb/pkgconfig"
 export PKG_CONFIG_LIBDIR="${PKGP}"
 export CPPFLAGS="${CPP} -D_POSIX_THREAD_SAFE_FUNCTIONS=200809L"
 export LDFLAGS="${LDF} -Wl,--copy-dt-needed-entries"
+# Expose libregex (substrate's POSIX regcomp/regexec) to configure's link
+# probes so the AC_CHECK_FUNCS([regcomp]) test passes.  Otherwise Motif defines
+# NO_REGCOMP and falls back to the legacy SysV regcmp/regex API, which substrate
+# does not provide -- leaving libXm with undefined regcmp/regex references.
+export LIBS="-lregex"
 
 cd "${BUILD_DIR}"
 [ -f Makefile ] && make distclean >/dev/null 2>&1 || true
