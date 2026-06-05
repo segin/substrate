@@ -1,0 +1,8 @@
+# Cross-build probe seeds for motifgpt's configure.  A cross build can't run
+# AC_PATH_XTRA's X-detection program, and the libXm/libXt AC_CHECK_LIB link
+# tests would fail because libXm.a needs the whole X chain (Xt/Xpm/Xext/X11)
+# that AC_CHECK_LIB doesn't add.  Assert the answers directly: the X stack and
+# Motif are present in the cross sysroot (seeded by build.sh).
+ac_cv_have_x=${ac_cv_have_x='have_x=yes ac_x_includes= ac_x_libraries='}
+ac_cv_lib_Xm_XmCreateLabel=${ac_cv_lib_Xm_XmCreateLabel=yes}
+ac_cv_lib_Xt_XtAppInitialize=${ac_cv_lib_Xt_XtAppInitialize=yes}
