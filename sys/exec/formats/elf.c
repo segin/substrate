@@ -1698,9 +1698,17 @@ cleanup:
             current_process->vm_map = old_vm_map;
         }
         vm_map_destroy(new_vm_map);
+        /* vm_map_destroy() owns and destroys new_vm_map->pmap, which is
+         * new_pmap (vm_map_create was handed new_pmap above).  NULL it so the
+         * standalone pmap_destroy() below does not destroy the same pmap a
+         * second time -- the double free hit the page directory and tripped
+         * "vm_phys: free of unallocated page" whenever exec failed *after* the
+         * vm_map was built (e.g. a missing PT_INTERP). */
+        new_pmap = NULL;
     }
     /* On success, old_vm_map was destroyed inline at commit (and the
-     * pointer NULL'd), so we don't need a post-commit branch here. */
+     * pointer NULL'd), so we don't need a post-commit branch here.  This frees
+     * new_pmap only when exec failed before vm_map_create took ownership. */
     if (!vm_state_committed && new_pmap) {
         pmap_destroy(new_pmap);
     }
