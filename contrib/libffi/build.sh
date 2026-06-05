@@ -17,6 +17,10 @@ fi
 PATH="${STAGE1_PREFIX}/bin:${PATH}"; export PATH
 [ -d "${TREE_DIR}" ] || { echo "build.sh: run ./fetch.sh first" >&2; exit 1; }
 rm -rf "${BUILD_DIR}"; mkdir -p "${BUILD_DIR}"; cd "${BUILD_DIR}"
+# Teach libffi's libtool that substrate builds ELF shared libraries; without this
+# --enable-shared yields only libffi.a (libtool's host_os case has no substrate
+# branch -> build_libtool_libs=no), and gobject/gio can't resolve ffi_* at load.
+sh "${HERE}/../substrate-libtool-shared.sh" "${TREE_DIR}/configure"
 echo "==> configure"
 "${TREE_DIR}/configure" \
     --host=i386-unknown-substrate \

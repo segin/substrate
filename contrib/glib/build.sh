@@ -39,6 +39,10 @@ export PKG_CONFIG_PATH=""
 # whenever CFLAGS change between runs).  Strip any ac_cv_env_* just in case.
 CACHE="${BUILD_DIR}/config.cache"
 grep -v '^ac_cv_env_' "${HERE}/substrate-cross.cache" > "${CACHE}"
+# Teach GLib's libtool that substrate builds ELF shared libraries, otherwise
+# --enable-shared yields only the .a archives (libtool's host_os case has no
+# substrate branch -> build_libtool_libs=no).
+sh "${HERE}/../substrate-libtool-shared.sh" "${TREE_DIR}/configure"
 echo "==> configure"
 "${TREE_DIR}/configure" \
     --host=i386-unknown-substrate \
@@ -68,4 +72,7 @@ printf '#!/bin/sh\nexit 0\n' > "${TREE_DIR}/py-compile"
 echo "==> install into ${DESTDIR}"
 rm -rf "${DESTDIR}"; mkdir -p "${DESTDIR}"
 make install DESTDIR="${DESTDIR}"
+# Drop libtool archives: their absolute libdir=/usr/lib makes a downstream cross
+# link resolve -lglib-2.0 to the build host's library ("file in wrong format").
+rm -f "${DESTDIR}"/usr/lib/*.la
 echo "==> Done.  Staged at ${DESTDIR}/usr/{lib/libglib-2.0*,lib/libgobject-2.0*,include/glib-2.0}"
