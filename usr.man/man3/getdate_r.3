@@ -1,0 +1,55 @@
+.TH GETDATE_R 3
+.SH NAME
+getdate_r \- reentrant conversion of a date/time string to a broken-down time
+.SH LIBRARY
+Standard C library
+.RI ( libc ", " \-lc )
+.SH SYNOPSIS
+.B #include <time.h>
+.PP
+.BI "int getdate_r(const char *" string ", struct tm *" tm ");"
+.SH DESCRIPTION
+.B getdate_r
+is the reentrant equivalent of
+.BR getdate (3).
+It converts the date/time text
+.I string
+into a broken-down time in
+.IR *tm ,
+trying in turn each
+.BR strptime (3)
+template listed in the file named by the
+.B DATEMSK
+environment variable.  Fields the matching template does not set default to the
+current local date and time.  Unlike
+.BR getdate (3),
+the result is written to the caller's
+.I tm
+and the status is the return value, so no global state is touched.
+.SH RETURN VALUE
+Returns 0 on success, or one of the
+.BR getdate (3)
+error codes on failure.
+.SH ERRORS
+.TP
+.B 1
+The
+.B DATEMSK
+environment variable is unset or empty.
+.TP
+.B 2
+The template file named by
+.B DATEMSK
+cannot be opened.
+.TP
+.B 7
+No template in the file matched
+.IR string .
+.SH SEE ALSO
+.BR getdate (3),
+.BR strptime (3),
+.BR strftime (3)
+.SH STANDARDS
+POSIX.1-2008 (the reentrant
+.B getdate_r
+itself is a GNU extension).

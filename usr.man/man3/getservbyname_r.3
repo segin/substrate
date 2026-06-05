@@ -1,0 +1,54 @@
+.TH GETSERVBYNAME_R 3
+.SH NAME
+getservbyname_r, getservbyport_r, getservent_r \- reentrant network services database lookups
+.SH LIBRARY
+Standard C library
+.RI ( libc ", " \-lc )
+.SH SYNOPSIS
+.B #include <netdb.h>
+.PP
+.BI "int getservbyname_r(const char *" name ", const char *" proto ,
+.BI "struct servent *" ret ", char *" buf ", size_t " buflen ", struct servent **" result ");"
+.br
+.BI "int getservbyport_r(int " port ", const char *" proto ,
+.BI "struct servent *" ret ", char *" buf ", size_t " buflen ", struct servent **" result ");"
+.br
+.BI "int getservent_r(struct servent *" ret ", char *" buf ", size_t " buflen ,
+.BI "struct servent **" result ");"
+.SH DESCRIPTION
+These are the reentrant equivalents of
+.BR getservbyname (3),
+.BR getservbyport (3)
+and
+.BR getservent (3).
+The matching
+.I /etc/services
+entry is copied into the caller-supplied
+.I ret
+structure and scratch buffer
+.IR buf
+(length
+.IR buflen );
+.I *result
+points at
+.I ret
+on success or is NULL when no entry matches.
+.I proto
+restricts the match to a protocol name
+.RB ( """tcp""" ", " """udp""" )
+or is NULL to match any.
+.SH RETURN VALUE
+Return 0 on success, or ERANGE if
+.I buf
+is too small.
+.SH ERRORS
+.TP
+.B ERANGE
+.I buf
+was too small to hold the result.
+.SH SEE ALSO
+.BR getservent (3),
+.BR getprotobyname_r (3),
+.BR gethostbyname_r (3)
+.SH STANDARDS
+GNU extension.

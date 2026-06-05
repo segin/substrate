@@ -1,0 +1,84 @@
+.TH RANDOM_R 3
+.SH NAME
+random_r, srandom_r, initstate_r, setstate_r \- reentrant random number generator
+.SH LIBRARY
+Standard C library
+.RI ( libc ", " \-lc )
+.SH SYNOPSIS
+.B #include <stdlib.h>
+.PP
+.BI "int random_r(struct random_data *" buf ", int32_t *" result ");"
+.br
+.BI "int srandom_r(unsigned int " seed ", struct random_data *" buf ");"
+.br
+.BI "int initstate_r(unsigned int " seed ", char *" statebuf ,
+.BI "size_t " statelen ", struct random_data *" buf ");"
+.br
+.BI "int setstate_r(char *" statebuf ", struct random_data *" buf ");"
+.SH DESCRIPTION
+These are the reentrant equivalents of the
+.BR random (3)
+family.  All state lives in the caller-supplied
+.I buf
+and the caller-supplied
+.I statebuf
+array, so independent streams and threads do not collide.
+.PP
+.B initstate_r
+binds
+.I buf
+to the
+.IR statelen -byte
+.I statebuf
+and seeds it with
+.IR seed .
+The array size selects the generator quality, exactly as
+.BR initstate (3)
+documents: 8 bytes gives a simple linear-congruential generator, while 32, 64,
+128 (the default) and 256 bytes select successively better additive-feedback
+generators of degree 7, 15, 31 and 63.
+.PP
+.B srandom_r
+re-seeds an already-initialized
+.IR buf .
+.B setstate_r
+switches
+.I buf
+to a different, previously initialized
+.IR statebuf .
+.B random_r
+stores the next value, uniformly in [0, 2^31), through
+.IR result .
+.SH RETURN VALUE
+These functions return 0 on success.  On error they return \-1 with
+.I errno
+set to
+.BR EINVAL .
+.SH ERRORS
+.TP
+.B EINVAL
+A NULL argument was supplied, the
+.I statebuf
+passed to
+.B initstate_r
+was smaller than 8 bytes, or
+.I buf
+was not properly initialized.
+.SH EXAMPLE
+.RS 4
+.EX
+struct random_data rd;
+char state[128];
+int32_t v;
+memset(&rd, 0, sizeof rd);
+initstate_r(1, state, sizeof state, &rd);
+random_r(&rd, &v);
+.EE
+.RE
+.SH SEE ALSO
+.BR random (3),
+.BR drand48_r (3),
+.BR rand (3)
+.SH STANDARDS
+GNU extension (the reentrant forms of
+.BR random (3)).

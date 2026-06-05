@@ -1,0 +1,43 @@
+.TH TMPNAM_R 3
+.SH NAME
+tmpnam_r \- reentrant generation of a temporary filename
+.SH LIBRARY
+Standard C library
+.RI ( libc ", " \-lc )
+.SH SYNOPSIS
+.B #include <stdio.h>
+.PP
+.BI "char *tmpnam_r(char *" s ");"
+.SH DESCRIPTION
+.B tmpnam_r
+is the reentrant equivalent of
+.BR tmpnam (3).
+It writes a candidate temporary-file pathname into the caller-supplied buffer
+.IR s ,
+which must hold at least
+.B L_tmpnam
+bytes, and returns
+.IR s .
+Unlike
+.BR tmpnam (3),
+passing NULL does not fall back to a shared static buffer.
+.SH RETURN VALUE
+Returns
+.IR s ,
+or NULL if
+.I s
+is NULL.
+.SH NOTES
+As with
+.BR tmpnam (3),
+there is a race between choosing the name and creating the file; prefer
+.BR mkstemp (3)
+or
+.BR tmpfile (3)
+in new code.
+.SH SEE ALSO
+.BR tmpnam (3),
+.BR mkstemp (3),
+.BR tmpfile (3)
+.SH STANDARDS
+GNU extension.

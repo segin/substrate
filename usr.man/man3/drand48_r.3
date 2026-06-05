@@ -1,0 +1,111 @@
+.TH DRAND48_R 3
+.SH NAME
+drand48_r, erand48_r, lrand48_r, nrand48_r, mrand48_r, jrand48_r, srand48_r,
+seed48_r, lcong48_r \- reentrant SVID 48-bit pseudo-random number generator
+.SH LIBRARY
+Standard C library
+.RI ( libc ", " \-lc )
+.SH SYNOPSIS
+.B #include <stdlib.h>
+.PP
+.BI "int drand48_r(struct drand48_data *" buffer ", double *" result ");"
+.br
+.BI "int erand48_r(unsigned short " xsubi[3] ", struct drand48_data *" buffer ", double *" result ");"
+.br
+.BI "int lrand48_r(struct drand48_data *" buffer ", long *" result ");"
+.br
+.BI "int nrand48_r(unsigned short " xsubi[3] ", struct drand48_data *" buffer ", long *" result ");"
+.br
+.BI "int mrand48_r(struct drand48_data *" buffer ", long *" result ");"
+.br
+.BI "int jrand48_r(unsigned short " xsubi[3] ", struct drand48_data *" buffer ", long *" result ");"
+.br
+.BI "int srand48_r(long " seedval ", struct drand48_data *" buffer ");"
+.br
+.BI "int seed48_r(unsigned short " seed16v[3] ", struct drand48_data *" buffer ");"
+.br
+.BI "int lcong48_r(unsigned short " param[7] ", struct drand48_data *" buffer ");"
+.SH DESCRIPTION
+These are the reentrant equivalents of the
+.BR drand48 (3)
+family.  All generator state is held in the caller-supplied
+.I buffer
+(or, for the
+.BR erand48_r ,
+.BR nrand48_r
+and
+.BR jrand48_r
+forms, in the caller-supplied 48-bit array
+.IR xsubi ),
+so independent streams \(em and independent threads \(em never share the hidden
+global the non-reentrant family uses.
+.PP
+The generator advances a 48-bit value
+.I X
+by
+.IR "X = (a*X + c) mod 2^48" ,
+with the SVID defaults
+.I a
+= 0x5DEECE66D and
+.I c
+= 0xB.  The result is delivered through
+.IR result :
+.B drand48_r
+and
+.B erand48_r
+return a
+.I double
+uniformly in [0.0, 1.0);
+.B lrand48_r
+and
+.B nrand48_r
+return a nonnegative
+.I long
+in [0, 2^31);
+.B mrand48_r
+and
+.B jrand48_r
+return a signed
+.I long
+in [\-2^31, 2^31).
+.PP
+.B srand48_r
+seeds
+.I buffer
+from the 32-bit
+.IR seedval ;
+.B seed48_r
+seeds it from the 48-bit
+.IR seed16v ,
+saving the previous internal state inside
+.IR buffer ;
+.B lcong48_r
+sets the state
+.IR ( param [0..2]),
+the multiplier
+.IR ( param [3..5])
+and the addend
+.IR ( param [6])
+directly.
+A
+.I buffer
+zeroed by the caller is implicitly seeded with the SVID defaults on first use.
+.SH RETURN VALUE
+All of these functions return 0.
+.SH EXAMPLE
+.RS 4
+.EX
+struct drand48_data rb;
+double x;
+srand48_r(time(NULL), &rb);
+drand48_r(&rb, &x);     /* x in [0, 1) */
+.EE
+.RE
+.SH SEE ALSO
+.BR drand48 (3),
+.BR rand (3),
+.BR random_r (3)
+.SH STANDARDS
+GNU extension (the reentrant forms of the SVID/POSIX
+.BR drand48 (3)
+family).

@@ -1,0 +1,71 @@
+.TH GETSPNAM_R 3
+.SH NAME
+getspnam_r, getspent_r, fgetspent_r, sgetspent_r \- reentrant shadow password database access
+.SH LIBRARY
+Standard C library
+.RI ( libc ", " \-lc )
+.SH SYNOPSIS
+.B #include <shadow.h>
+.PP
+.BI "int getspnam_r(const char *" name ", struct spwd *" spbuf ,
+.BI "char *" buf ", size_t " buflen ", struct spwd **" result ");"
+.br
+.BI "int getspent_r(struct spwd *" spbuf ", char *" buf ", size_t " buflen ,
+.BI "struct spwd **" result ");"
+.br
+.BI "int fgetspent_r(FILE *" stream ", struct spwd *" spbuf ,
+.BI "char *" buf ", size_t " buflen ", struct spwd **" result ");"
+.br
+.BI "int sgetspent_r(const char *" string ", struct spwd *" spbuf ,
+.BI "char *" buf ", size_t " buflen ", struct spwd **" result ");"
+.SH DESCRIPTION
+These are the reentrant equivalents of the shadow-password lookups.  Each parses
+an
+.I /etc/shadow
+entry into the caller-supplied
+.I spbuf
+structure, whose string members point into the caller-supplied scratch buffer
+.I buf
+(length
+.IR buflen ).
+On success
+.I *result
+is set to
+.IR spbuf ;
+otherwise it is NULL.
+.TP
+.B getspnam_r
+looks the entry up by login
+.IR name .
+.TP
+.B getspent_r
+returns the next entry from the stream positioned by
+.BR setspent (3)/ endspent (3).
+.TP
+.B fgetspent_r
+reads the next entry from an already-open
+.IR stream .
+.TP
+.B sgetspent_r
+parses a single shadow line passed in
+.IR string .
+.SH RETURN VALUE
+Return 0 on success, including the not-found case (where
+.I *result
+is NULL).  A nonzero error number is returned on failure.
+.SH ERRORS
+.TP
+.B ERANGE
+.I buf
+was too small to hold the entry.
+.TP
+.B EINVAL
+A NULL argument, or
+.B sgetspent_r
+was given a malformed line.
+.SH SEE ALSO
+.BR getspnam (3),
+.BR getpwnam_r (3),
+.BR shadow (5)
+.SH STANDARDS
+GNU extension.

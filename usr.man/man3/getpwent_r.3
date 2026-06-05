@@ -1,0 +1,67 @@
+.TH GETPWENT_R 3
+.SH NAME
+getpwent_r, fgetpwent_r \- reentrant enumeration of the password database
+.SH LIBRARY
+Standard C library
+.RI ( libc ", " \-lc )
+.SH SYNOPSIS
+.B #include <pwd.h>
+.PP
+.BI "int getpwent_r(struct passwd *" pwbuf ", char *" buf ", size_t " buflen ,
+.BI "struct passwd **" result ");"
+.br
+.BI "int fgetpwent_r(FILE *" stream ", struct passwd *" pwbuf ,
+.BI "char *" buf ", size_t " buflen ", struct passwd **" result ");"
+.SH DESCRIPTION
+These are the reentrant equivalents of
+.BR getpwent (3)
+and
+.BR fgetpwent (3).
+Each reads one password-database entry into the caller-supplied
+.I pwbuf
+structure, whose string members point into the caller-supplied scratch buffer
+.I buf
+(length
+.IR buflen ),
+and sets
+.I *result
+to
+.I pwbuf
+(or NULL at end of file).
+.TP
+.B getpwent_r
+returns the next entry from the internal stream positioned by
+.BR setpwent (3)/ endpwent (3).
+.TP
+.B fgetpwent_r
+reads the next entry from an already-open
+.I stream
+in
+.IR /etc/passwd
+format.
+.SH RETURN VALUE
+Return 0 on success.  At end of file
+.B fgetpwent_r
+returns ENOENT and
+.I *result
+is NULL.
+.SH ERRORS
+.TP
+.B ERANGE
+.I buf
+was too small to hold the entry.
+.TP
+.B ENOENT
+End of file (no more entries).
+.SH SEE ALSO
+.BR getpwent (3),
+.BR getpwnam_r (3),
+.BR getgrent_r (3),
+.BR passwd (5)
+.SH STANDARDS
+POSIX specifies
+.BR getpwnam_r ;
+.B getpwent_r
+and
+.B fgetpwent_r
+are GNU extensions.

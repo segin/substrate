@@ -1,0 +1,81 @@
+.TH ECVT_R 3
+.SH NAME
+ecvt_r, fcvt_r, qecvt_r, qfcvt_r \- reentrant conversion of a floating value to a digit string
+.SH LIBRARY
+Standard C library
+.RI ( libc ", " \-lc )
+.SH SYNOPSIS
+.B #include <stdlib.h>
+.PP
+.BI "int ecvt_r(double " value ", int " ndigit ", int *" decpt ,
+.BI "int *" sign ", char *" buf ", size_t " len ");"
+.br
+.BI "int fcvt_r(double " value ", int " ndigit ", int *" decpt ,
+.BI "int *" sign ", char *" buf ", size_t " len ");"
+.br
+.BI "int qecvt_r(long double " value ", int " ndigit ", int *" decpt ,
+.BI "int *" sign ", char *" buf ", size_t " len ");"
+.br
+.BI "int qfcvt_r(long double " value ", int " ndigit ", int *" decpt ,
+.BI "int *" sign ", char *" buf ", size_t " len ");"
+.SH DESCRIPTION
+These are the reentrant equivalents of the obsolete
+.BR ecvt (3)
+and
+.BR fcvt (3)
+conversions: they write the bare decimal digits of
+.I value
+into the caller-supplied
+.IR buf
+(of size
+.IR len )
+rather than into static storage.
+.PP
+For
+.B ecvt_r
+(and the long-double
+.BR qecvt_r ),
+.I ndigit
+is the total number of significant digits.  For
+.B fcvt_r
+(and
+.BR qfcvt_r )
+it is the number of digits after the decimal point.
+.PP
+The position of the decimal point relative to the start of the returned digit
+string is stored in
+.IR *decpt :
+a value of
+.I n
+means the point falls after the first
+.I n
+digits (it may be zero or negative).
+.I *sign
+is set nonzero if
+.I value
+is negative, zero otherwise.
+.SH RETURN VALUE
+These functions return 0 on success, or \-1 if
+.I buf
+is NULL or
+.I len
+is zero.
+.SH NOTES
+.BR ecvt (3)
+and
+.BR fcvt (3)
+are marked obsolete in POSIX; new code should use
+.BR snprintf (3)
+with
+.B %e
+or
+.BR %f .
+For a value whose rounding carries into an extra leading digit, the exact digit
+count may differ from other implementations by one; the represented value is the
+same.
+.SH SEE ALSO
+.BR snprintf (3),
+.BR strtod (3)
+.SH STANDARDS
+GNU extension (the reentrant forms of the SVID
+.BR ecvt (3)/ fcvt (3)).

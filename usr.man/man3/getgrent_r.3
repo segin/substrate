@@ -1,0 +1,68 @@
+.TH GETGRENT_R 3
+.SH NAME
+getgrent_r, fgetgrent_r \- reentrant enumeration of the group database
+.SH LIBRARY
+Standard C library
+.RI ( libc ", " \-lc )
+.SH SYNOPSIS
+.B #include <grp.h>
+.PP
+.BI "int getgrent_r(struct group *" grbuf ", char *" buf ", size_t " buflen ,
+.BI "struct group **" result ");"
+.br
+.BI "int fgetgrent_r(FILE *" stream ", struct group *" grbuf ,
+.BI "char *" buf ", size_t " buflen ", struct group **" result ");"
+.SH DESCRIPTION
+These are the reentrant equivalents of
+.BR getgrent (3)
+and
+.BR fgetgrent (3).
+Each reads one group-database entry into the caller-supplied
+.I grbuf
+structure; its string fields and the
+.I gr_mem
+member-name vector are carved from the caller-supplied scratch buffer
+.I buf
+(length
+.IR buflen ).
+.I *result
+is set to
+.I grbuf
+on success or NULL at end of file.
+.TP
+.B getgrent_r
+returns the next entry from the internal stream positioned by
+.BR setgrent (3)/ endgrent (3).
+.TP
+.B fgetgrent_r
+reads the next entry from an already-open
+.I stream
+in
+.IR /etc/group
+format.
+.SH RETURN VALUE
+Return 0 on success.  At end of file
+.B fgetgrent_r
+returns ENOENT and
+.I *result
+is NULL.
+.SH ERRORS
+.TP
+.B ERANGE
+.I buf
+was too small to hold the entry plus its member vector.
+.TP
+.B ENOENT
+End of file (no more entries).
+.SH SEE ALSO
+.BR getgrent (3),
+.BR getgrnam_r (3),
+.BR getpwent_r (3),
+.BR group (5)
+.SH STANDARDS
+POSIX specifies
+.BR getgrnam_r ;
+.B getgrent_r
+and
+.B fgetgrent_r
+are GNU extensions.

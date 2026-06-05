@@ -1,0 +1,57 @@
+.TH GETMNTENT_R 3
+.SH NAME
+getmntent_r \- reentrant read of a filesystem table entry
+.SH LIBRARY
+Standard C library
+.RI ( libc ", " \-lc )
+.SH SYNOPSIS
+.B #include <mntent.h>
+.PP
+.BI "struct mntent *getmntent_r(FILE *" stream ", struct mntent *" mntbuf ,
+.BI "char *" buf ", int " buflen ");"
+.SH DESCRIPTION
+.B getmntent_r
+is the reentrant equivalent of
+.BR getmntent (3).
+It reads the next entry from the filesystem-table
+.I stream
+(opened with
+.BR setmntent (3))
+and parses it into the caller-supplied
+.I mntbuf
+structure, whose string members point into the caller-supplied scratch buffer
+.I buf
+of length
+.IR buflen .
+Blank lines and
+.B #
+comments are skipped.
+The
+.I mnt_freq
+and
+.I mnt_passno
+fields default to 0 when absent.
+.SH RETURN VALUE
+Returns
+.I mntbuf
+on success, or NULL at end of file or on a usage error (NULL argument or
+non-positive
+.IR buflen ).
+.SH EXAMPLE
+.RS 4
+.EX
+FILE *fp = setmntent("/etc/fstab", "r");
+struct mntent ent;
+char buf[1024];
+while (getmntent_r(fp, &ent, buf, sizeof buf))
+    printf("%s on %s type %s\\n",
+           ent.mnt_fsname, ent.mnt_dir, ent.mnt_type);
+endmntent(fp);
+.EE
+.RE
+.SH SEE ALSO
+.BR getmntent (3),
+.BR setmntent (3),
+.BR fstab (5)
+.SH STANDARDS
+GNU extension.

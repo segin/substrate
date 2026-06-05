@@ -1,0 +1,93 @@
+.TH HSEARCH_R 3
+.SH NAME
+hcreate_r, hsearch_r, hdestroy_r \- reentrant hash-table search
+.SH LIBRARY
+Standard C library
+.RI ( libc ", " \-lc )
+.SH SYNOPSIS
+.B #include <search.h>
+.PP
+.BI "int hcreate_r(size_t " nel ", struct hsearch_data *" htab ");"
+.br
+.BI "int hsearch_r(ENTRY " item ", ACTION " action ", ENTRY **" retval ,
+.BI "struct hsearch_data *" htab ");"
+.br
+.BI "void hdestroy_r(struct hsearch_data *" htab ");"
+.SH DESCRIPTION
+These are the reentrant equivalents of
+.BR hcreate (3),
+.BR hsearch (3)
+and
+.BR hdestroy (3):
+each operates on a caller-supplied
+.IR htab ,
+so a program may hold several hash tables at once and use them from different
+threads.
+.PP
+.B hcreate_r
+allocates a table sized for at least
+.I nel
+entries.
+.B hdestroy_r
+frees it.
+.PP
+.B hsearch_r
+searches
+.I htab
+for an entry matching the key
+.IR item.key .
+If
+.I action
+is
+.BR FIND ,
+a matching entry is reported through
+.I *retval
+or the call fails if none exists.  If
+.I action
+is
+.BR ENTER ,
+.I item
+is inserted when absent (and the existing entry is reported when present).
+An
+.B ENTRY
+is a
+.RI { "char *key" ", " "void *data" }
+pair.
+.SH RETURN VALUE
+Following the glibc convention \(em the inverse of most
+.I _r
+functions \(em
+.B hcreate_r
+and
+.B hsearch_r
+return nonzero on success and 0 on error, with
+.I errno
+set.
+.SH ERRORS
+.TP
+.B ENOMEM
+.B hcreate_r
+could not allocate the table, or
+.B hsearch_r
+with
+.B ENTER
+found the table full.
+.TP
+.B ESRCH
+.B hsearch_r
+with
+.B FIND
+found no matching entry.
+.TP
+.B EINVAL
+A NULL argument, or
+.B hcreate_r
+called on a table already in use.
+.SH SEE ALSO
+.BR bsearch (3),
+.BR lsearch (3),
+.BR tsearch (3)
+.SH STANDARDS
+GNU extension (the reentrant forms of the POSIX
+.BR hsearch (3)
+family).
