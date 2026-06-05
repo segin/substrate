@@ -1152,6 +1152,68 @@ uint64_t ext2_finddir_break_block0   = 0;
  * we see after the first /bin walk. */
 uint64_t ext2_root_pin_lost          = 0;
 
+/*
+ * Populate a cached fs_node from an inode: common fields plus the type-specific
+ * flags/callbacks.  Does NOT touch ctx->pin_count, so it can be used both to
+ * build a freshly recycled slot and to refresh a still-pinned slot whose inode
+ * number was reallocated to a new (possibly different-type) file.
+ */
+static fs_node_t *ext2_node_build_from_inode(fs_node_t *node, ext2_node_t *ctx,
+        ext2_inode_t *inode, uint32_t inode_num, ext2_fs_t *fs, int idx) {
+    memset(node, 0, sizeof(fs_node_t));
+    node->inode = inode_num;
+    node->length = inode->i_size;
+    node->mask = inode->i_mode & 0xFFF;
+    node->uid = inode->i_uid;
+    node->gid = inode->i_gid;
+    node->atime = inode->i_atime;
+    node->mtime = inode->i_mtime;
+    node->ctime = inode->i_ctime;
+    node->impl = (uintptr_t)ctx;
+    node->mp = fs->mp;
+    node->open = ext2_node_open;
+    node->close = ext2_node_close;
+    node->chmod = ext2_chmod;
+    node->setattr = ext2_setattr;
+    node->getattr = ext2_getattr;
+    node->getxattr  = ext2_xattr_get;
+    node->listxattr = ext2_xattr_list;
+    ctx->cache_slot = (uint16_t)idx;
+
+    uint16_t type = inode->i_mode & 0xF000;
+    if (type == EXT2_S_IFDIR) {
+        node->flags = FS_DIRECTORY;
+        node->readdir = ext2_readdir;
+        node->finddir = ext2_finddir;
+        node->mkdir = ext2_mkdir;
+        node->mknod = ext2_mknod;
+        node->unlink = ext2_unlink;
+        node->rmdir = ext2_rmdir;
+        node->link = ext2_link;
+        node->rename = ext2_rename;
+        node->statfs = ext2_statfs;
+        node->unmount = ext2_unmount;
+        node->symlink = ext2_symlink;
+    } else if (type == EXT2_S_IFREG) {
+        node->flags = FS_FILE;
+        node->read = ext2_file_read;
+        node->write = ext2_file_write;
+        node->truncate = ext2_truncate;
+    } else if (type == EXT2_S_IFLNK) {
+        node->flags = FS_SYMLINK;
+        node->readlink = ext2_readlink;
+    } else if (type == EXT2_S_IFCHR) {
+        node->flags = FS_CHARDEVICE;
+        node->rdev = inode->i_block[0];
+    } else if (type == EXT2_S_IFBLK) {
+        node->flags = FS_BLOCKDEVICE;
+        node->rdev = inode->i_block[0];
+    } else if (type == EXT2_S_IFIFO) {
+        node->flags = FS_PIPE;
+    }
+    return node;
+}
+
 fs_node_t *ext2_alloc_node(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_t *inode) {
     int idx = -1;
 
@@ -1198,13 +1260,28 @@ fs_node_t *ext2_alloc_node(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_t *inod
              * which makes the new file unwritable.  Force the new-slot path
              * to recycle it. */
             if (ext2_node_cache[i].inode.i_links_count == 0 &&
-                inode->i_links_count > 0 &&
-                ext2_node_cache[i].pin_count == 0) {
-                ext2_node_cache[i].fs = NULL;
-                ext2_node_cache[i].inode_num = 0;
-                memset(&ext2_fs_node_cache[i], 0,
-                       sizeof(ext2_fs_node_cache[i]));
-                continue;
+                inode->i_links_count > 0) {
+                if (ext2_node_cache[i].pin_count == 0) {
+                    /* Unpinned: drop the slot and let the new-slot path below
+                     * rebuild it cleanly. */
+                    ext2_node_cache[i].fs = NULL;
+                    ext2_node_cache[i].inode_num = 0;
+                    memset(&ext2_fs_node_cache[i], 0,
+                           sizeof(ext2_fs_node_cache[i]));
+                    continue;
+                }
+                /* Still pinned by a lingering reference to the now-deleted
+                 * inode (an unbalanced close).  We cannot free the slot, so
+                 * refresh the cached inode and rebuild the fs_node's
+                 * type-specific callbacks in place -- preserving pin_count --
+                 * so the new file gets a valid `write` callback instead of
+                 * handing back the old node and making writes fail EBADF.
+                 * This was the cause of "cat: stdout: Bad file descriptor"
+                 * floods when a configure recycled conftest.c/conftest.dir. */
+                memcpy(&ext2_node_cache[i].inode, inode, sizeof(ext2_inode_t));
+                ext2_alloc_node_hits++;
+                return ext2_node_build_from_inode(&ext2_fs_node_cache[i],
+                        &ext2_node_cache[i], inode, inode_num, fs, i);
             }
             ext2_alloc_node_hits++;
             return &ext2_fs_node_cache[i];
@@ -1293,66 +1370,8 @@ fs_node_t *ext2_alloc_node(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_t *inod
     ctx->dcache_idx = 0;
     memset(ctx->dcache, 0, sizeof(ctx->dcache));
 
-    memset(node, 0, sizeof(fs_node_t));
-    node->inode = inode_num;
-    node->length = inode->i_size;
-    node->mask = inode->i_mode & 0xFFF;
-    node->uid = inode->i_uid;
-    node->gid = inode->i_gid;
-    node->atime = inode->i_atime;
-    node->mtime = inode->i_mtime;
-    node->ctime = inode->i_ctime;
-    node->impl = (uintptr_t)ctx;
-    node->mp = fs->mp; // Correctly associate with mount point!
-    node->open = ext2_node_open;
-    node->close = ext2_node_close;
-    node->chmod = ext2_chmod;
-    node->setattr = ext2_setattr;
-    node->getattr = ext2_getattr;
-    node->getxattr  = ext2_xattr_get;
-    node->listxattr = ext2_xattr_list;
-    ctx->cache_slot = (uint16_t)idx;
     ctx->pin_count = 0;
-    
-    // Set type and callbacks based on inode mode
-    uint16_t type = inode->i_mode & 0xF000;
-    if (type == EXT2_S_IFDIR) {
-        node->flags = FS_DIRECTORY;
-        node->readdir = ext2_readdir;
-        node->finddir = ext2_finddir;
-        node->mkdir = ext2_mkdir;
-        node->mknod = ext2_mknod;
-        node->unlink = ext2_unlink;
-        node->rmdir = ext2_rmdir;
-        node->link = ext2_link;
-        node->rename = ext2_rename;
-        node->statfs = ext2_statfs;
-        node->unmount = ext2_unmount;
-        node->symlink = ext2_symlink;
-    } else if (type == EXT2_S_IFREG) {
-        node->flags = FS_FILE;
-        node->read = ext2_file_read;
-        node->write = ext2_file_write;
-        node->truncate = ext2_truncate;
-    } else if (type == EXT2_S_IFLNK) {
-        node->flags = FS_SYMLINK;
-        node->readlink = ext2_readlink;
-    } else if (type == EXT2_S_IFCHR) {
-        node->flags = FS_CHARDEVICE;
-        node->rdev = inode->i_block[0];
-    } else if (type == EXT2_S_IFBLK) {
-        node->flags = FS_BLOCKDEVICE;
-        node->rdev = inode->i_block[0];
-    } else if (type == EXT2_S_IFIFO) {
-        /* Named FIFO.  The disk inode is the persistent name; the
-         * actual byte-stream buffer lives in the in-kernel FIFO
-         * registry (sys/fs/pipe.c) and is attached at open(2) time
-         * by fifo_open().  Leave node->read/write unset so a stray
-         * read/write on the inode node (rather than the FIFO
-         * endpoint shadow node) is a no-op. */
-        node->flags = FS_PIPE;
-    }
-    return node;
+    return ext2_node_build_from_inode(node, ctx, inode, inode_num, fs, idx);
 }
 
 static int ext2_chmod(fs_node_t *node, uint32_t mode) {
