@@ -1,0 +1,196 @@
+.TH WORDEXP 3
+.SH NAME
+wordexp, wordfree \- perform word expansion like a POSIX shell
+.SH LIBRARY
+Standard C library
+.RI ( libc ", " \-lc )
+.SH SYNOPSIS
+.B #include <wordexp.h>
+.PP
+.BI "int wordexp(const char *" words ", wordexp_t *" we ", int " flags ");"
+.br
+.BI "void wordfree(wordexp_t *" we ");"
+.SH DESCRIPTION
+The
+.B wordexp()
+function performs the word expansions a shell applies to a command line on the
+string
+.IR words ,
+returning the resulting list of words in the structure pointed to by
+.IR we .
+The expansions are performed in order:
+.IP \(bu 3
+.B Tilde expansion:
+a leading
+.B ~
+becomes the value of
+.BR $HOME ,
+and
+.BI ~ user
+becomes that user's home directory (looked up with
+.BR getpwnam (3)).
+.IP \(bu 3
+.B Parameter expansion:
+.BI $ name
+and
+.BI ${ name }
+are replaced with the value of the environment variable
+.IR name .
+The special parameter
+.B $$
+expands to the process ID.
+.IP \(bu 3
+.B Field splitting:
+unquoted runs of whitespace (space, tab, newline) split the input \(em and the
+result of an unquoted parameter expansion \(em into separate words.
+.IP \(bu 3
+.B Pathname expansion:
+each resulting field is passed through
+.BR glob (3);
+a field that matches no pathname is taken literally.
+.IP \(bu 3
+.B Quote removal:
+single quotes quote everything literally, double quotes suppress field and
+pathname expansion but still allow parameter expansion, and a backslash escapes
+the next character outside single quotes.
+.PP
+The
+.I we
+structure is defined in
+.I <wordexp.h>
+as:
+.PP
+.RS 4
+.EX
+typedef struct {
+    size_t   we_wordc;   /* count of expanded words */
+    char   **we_wordv;   /* the NULL-terminated word vector */
+    size_t   we_offs;    /* slots reserved at the front of we_wordv */
+} wordexp_t;
+.EE
+.RE
+.PP
+The
+.I flags
+argument is the bitwise OR of zero or more of:
+.TP
+.B WRDE_DOOFFS
+Reserve
+.I we->we_offs
+leading NULL slots at the head of
+.IR we_wordv .
+.TP
+.B WRDE_APPEND
+Append the words to the vector from a previous call rather than allocating a new
+one.
+.TP
+.B WRDE_NOCMD
+Fail with
+.B WRDE_CMDSUB
+if command substitution is requested.
+.TP
+.B WRDE_REUSE
+The
+.I we
+argument was passed to a previous successful call;
+.BR wordfree ()
+it before reuse.
+.TP
+.B WRDE_SHOWERR
+Do not suppress shell error output (no effect in this implementation).
+.TP
+.B WRDE_UNDEF
+Fail with
+.B WRDE_BADVAL
+if an undefined variable is referenced.
+.PP
+The
+.B wordfree()
+function frees the storage allocated by a successful
+.BR wordexp ()
+call.
+.SH RETURN VALUE
+On success
+.B wordexp()
+returns 0 and fills in
+.IR we .
+On failure it returns one of the nonzero error codes below and leaves
+.I we
+unchanged.
+.SH ERRORS
+.TP
+.B WRDE_NOSPACE
+Out of memory.
+.I (Note:
+on this error
+.I we_wordv
+may have been partially updated.)
+.TP
+.B WRDE_BADCHAR
+.IR words
+contains an unquoted shell metacharacter:
+one of
+.BR \(rs| ,
+.BR & ,
+.BR ; ,
+.BR < ,
+.BR > ,
+.BR ( ,
+.BR ) ,
+.BR { ,
+or
+.BR } .
+.TP
+.B WRDE_BADVAL
+An undefined variable was referenced and
+.B WRDE_UNDEF
+was set.
+.TP
+.B WRDE_CMDSUB
+Command substitution
+.RB ( `...` " or " $(...) )
+was encountered.
+This implementation never executes command substitution, so it reports this
+error whenever command substitution appears, as a shell does when
+.B WRDE_NOCMD
+is set.
+.TP
+.B WRDE_SYNTAX
+Shell syntax error, such as unbalanced quotes.
+.SH NOTES
+Command substitution and arithmetic expansion are not performed.
+Arbitrary shell word splitting on a custom
+.B IFS
+is not supported; the field separators are always space, tab, and newline.
+.SH EXAMPLES
+Expand a configuration-file path that may contain a tilde or environment
+variable.
+.PP
+.RS 4
+.EX
+#include <wordexp.h>
+#include <stdio.h>
+
+int
+main(void)
+{
+    wordexp_t we;
+    if (wordexp("~/.config/*.conf", &we, 0) == 0) {
+        for (size_t i = 0; i < we.we_wordc; i++)
+            printf("%s\(rsn", we.we_wordv[i]);
+        wordfree(&we);
+    }
+    return 0;
+}
+.EE
+.RE
+.SH SEE ALSO
+.BR glob (3),
+.BR getpwnam (3),
+.BR getenv (3),
+.BR fnmatch (3)
+.SH STANDARDS
+POSIX.1-2008.
+This implementation supports a practical subset (no command/arithmetic
+substitution, no custom
+.BR IFS ).
