@@ -74,7 +74,12 @@ int regexec(const regex_t *restrict preg, const char *restrict string,
             return REG_ESPACE;
     }
 
-    rc = regex_match(preg, string, text_len, offsets, max_captures, NULL);
+    /* regex_match() counts capture_offsets in slots (2 per group: start,end),
+     * the same unit the engine's internal callers use — not in groups.  Pass
+     * the slot count (2 * groups), matching the 2*max_captures allocation
+     * above; otherwise the engine's "did the caller provide room?" guard fails
+     * and it never writes any submatch offsets. */
+    rc = regex_match(preg, string, text_len, offsets, max_captures * 2, NULL);
 
     if (rc < 0) {
         free(offsets);

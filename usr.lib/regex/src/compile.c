@@ -64,15 +64,18 @@ regex_t *regex_compile(const char *pattern, unsigned flags, regex_err_t *out_err
     } else if (!(flags & REGEX_FLAG_SAFE_ENGINE)) {
 #ifdef REGEX_DEFAULT_ENGINE_RE2
         engine = regex_engine_re2_vtable();
-        if (!engine) {
+        if (!engine)
 #endif
-            engine = regex_engine_posix_vtable();
-#ifdef REGEX_DEFAULT_ENGINE_RE2
-        }
-#endif
-        if (!engine) {
-            engine = regex_engine_safe_vtable();
-        }
+        /*
+         * The "posix" engine is a passthrough that delegates to the host
+         * system's regcomp/regexec (engine_posix.c aliases its calls to the
+         * "regcomp"/"regexec" symbols).  That only works where a *separate*
+         * system POSIX regex exists — i.e. a glibc host.  On substrate the
+         * only regcomp is this library's own posix_compat.c, so the passthrough
+         * resolves back to itself and recurses.  The self-contained safe engine
+         * is the correct default everywhere; use it.
+         */
+        engine = regex_engine_safe_vtable();
     }
 
     if (!engine) {

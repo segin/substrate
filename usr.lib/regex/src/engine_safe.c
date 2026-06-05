@@ -302,6 +302,35 @@ static int charclass_add_range(regex_charclass *cc, uint32_t lo, uint32_t hi) {
     return 1;
 }
 
+/* Deep-copy a character class.  Needed because a NODE_CLASS subtree can be
+ * compiled more than once -- e.g. a counted repeat like [0-9]{4} re-compiles
+ * the same node for each repetition -- so the NFA_CLASS state must take an
+ * independent copy rather than steal the node's single charclass. */
+static regex_charclass *charclass_clone(const regex_charclass *src) {
+    regex_charclass *cc;
+
+    if (!src) {
+        return NULL;
+    }
+    cc = charclass_new(src->byte_mode);
+    if (!cc) {
+        return NULL;
+    }
+    cc->negated = src->negated;
+    memcpy(cc->bitmap, src->bitmap, sizeof(cc->bitmap));
+    if (src->range_count > 0) {
+        cc->ranges = (regex_range *)malloc(src->range_count * sizeof(*cc->ranges));
+        if (!cc->ranges) {
+            free(cc);
+            return NULL;
+        }
+        memcpy(cc->ranges, src->ranges, src->range_count * sizeof(*cc->ranges));
+        cc->range_count = src->range_count;
+        cc->range_cap = src->range_count;
+    }
+    return cc;
+}
+
 static int charclass_match_raw(const regex_charclass *cc, uint32_t cp) {
     size_t i;
     if (!cc) {
@@ -325,6 +354,9 @@ static int charclass_match(const regex_charclass *cc, uint32_t cp, int icase, in
     int matched;
     uint32_t alt;
 
+    if (!cc) {
+        return 0;
+    }
     matched = charclass_match_raw(cc, cp);
     if (matched) {
         return cc->negated ? 0 : 1;
@@ -1204,8 +1236,10 @@ static frag compile_node(nfa_prog *prog, regex_node *n) {
         f = frag_dot(prog);
         break;
     case NODE_CLASS:
-        f = frag_class(prog, n->charclass);
-        n->charclass = NULL;
+        /* Clone, don't steal: a NODE_CLASS under a counted repeat is compiled
+         * once per repetition, so the node must keep its master charclass for
+         * the next pass (it is freed with the node at node_free time). */
+        f = frag_class(prog, charclass_clone(n->charclass));
         break;
     case NODE_BOL:
         prog->uses_bol = 1;
