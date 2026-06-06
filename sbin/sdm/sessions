@@ -1,0 +1,17 @@
+# /etc/sdm/sessions — X sessions offered by the sgreet login chooser.
+#
+# One session per line, in the form:
+#
+#     Label = command
+#
+# `Label` is the human-readable name shown in the greeter (press F1 to
+# cycle through the list); `command` is the window manager / session
+# leader that /etc/X11/Xsession execs after starting the default xterm.
+# Blank lines and lines beginning with `#` are ignored.  The first entry
+# is the default selection.  If this file is missing or empty, the
+# greeter offers a single "Default" session and Xsession falls back to
+# matwm2.
+matwm2 = matwm2
+twm    = twm
+ctwm   = ctwm
+xterm  = xterm -fn 9x15

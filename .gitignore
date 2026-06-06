@@ -195,6 +195,7 @@ sbin/*/*
 !sbin/*/*.sh
 !sbin/*/*.txt
 !sbin/*/*.y
+!sbin/sdm/sessions
 !sbin/*/docs/
 !sbin/*/docs/**
 

@@ -35,6 +35,20 @@
 
 #define MAXFIELD 128
 #define SESSION_SCRIPT "/etc/X11/Xsession"
+#define SESSION_CONF   "/etc/sdm/sessions"
+#define MAXSESSIONS    16
+#define SESS_LABEL     64
+#define SESS_CMD       256
+
+/* Available X sessions, parsed from /etc/sdm/sessions.  `cmd` is the
+ * window-manager command line handed to Xsession via $SDM_SESSION. */
+struct session {
+    char label[SESS_LABEL];
+    char cmd[SESS_CMD];
+};
+static struct session g_sessions[MAXSESSIONS];
+static int g_nsessions = 0;
+static int g_cursess   = 0;   /* index of the currently selected session */
 
 /* Hostname for the "<host> login:" prompt, filled by load_hostname(). */
 static char g_host[64] = "substrate";
@@ -60,6 +74,49 @@ static void load_hostname(void) {
     }
     if (!g_host[0]) strncpy(g_host, "substrate", sizeof g_host - 1);
     g_host[sizeof g_host - 1] = '\0';
+}
+
+/* Trim leading and trailing ASCII whitespace in place; returns s. */
+static char *trim(char *s) {
+    char *e;
+    while (*s == ' ' || *s == '\t') s++;
+    e = s + strlen(s);
+    while (e > s && (e[-1] == ' ' || e[-1] == '\t' ||
+                     e[-1] == '\r' || e[-1] == '\n'))
+        *--e = '\0';
+    return s;
+}
+
+/* Parse /etc/sdm/sessions into g_sessions[].  Each non-comment line is
+ * "Label = command".  Missing/empty file yields one fallback entry whose
+ * empty command lets Xsession pick its own built-in default. */
+static void load_sessions(void) {
+    FILE *f = fopen(SESSION_CONF, "r");
+    char line[SESS_CMD + SESS_LABEL + 8];
+
+    g_nsessions = 0;
+    if (f) {
+        while (g_nsessions < MAXSESSIONS && fgets(line, sizeof line, f)) {
+            char *p = trim(line), *eq, *label, *cmd;
+            if (*p == '\0' || *p == '#') continue;
+            eq = strchr(p, '=');
+            if (!eq) continue;
+            *eq = '\0';
+            label = trim(p);
+            cmd   = trim(eq + 1);
+            if (*label == '\0' || *cmd == '\0') continue;
+            snprintf(g_sessions[g_nsessions].label, SESS_LABEL, "%s", label);
+            snprintf(g_sessions[g_nsessions].cmd,   SESS_CMD,   "%s", cmd);
+            g_nsessions++;
+        }
+        fclose(f);
+    }
+    if (g_nsessions == 0) {
+        snprintf(g_sessions[0].label, SESS_LABEL, "%s", "Default");
+        g_sessions[0].cmd[0] = '\0';   /* Xsession falls back to matwm2 */
+        g_nsessions = 1;
+    }
+    g_cursess = 0;
 }
 
 /* ---- authentication (mirrors bin/login/login.c) ------------------- */
@@ -108,7 +165,8 @@ static struct passwd *authenticate(const char *user, const char *pass) {
 
 /* ---- session launch ----------------------------------------------- */
 
-static void exec_session(const struct passwd *pw, const char *display) {
+static void exec_session(const struct passwd *pw, const char *display,
+                         const char *session_cmd) {
     /* setgid + initgroups BEFORE setuid, or we lose the privilege to
      * install the supplementary group list. */
     if (setgid(pw->pw_gid) != 0) _exit(1);
@@ -131,6 +189,12 @@ static void exec_session(const struct passwd *pw, const char *display) {
      * this from /etc/profile, but X clients are spawned before any
      * shell runs, so seed it here too. */
     setenv("LANG", "en_US.UTF-8", 1);
+    /* Hand the chooser's selection to Xsession, which execs it as the
+     * session leader.  Empty string => Xsession uses its own default. */
+    if (session_cmd && session_cmd[0])
+        setenv("SDM_SESSION", session_cmd, 1);
+    else
+        unsetenv("SDM_SESSION");
 
     if (chdir(pw->pw_dir) != 0) (void)chdir("/");
     setsid();
@@ -198,6 +262,16 @@ static void draw(ui_t *u, const char *user, int passlen, int field,
     for (i = 0; i < passlen && i < MAXFIELD; i++) strcat(buf, "*");
     if (field == 1) strcat(buf, "_");
     XDrawString(u->dpy, u->win, u->gc, x, y, buf, (int)strlen(buf));
+    y += u->line_h;
+
+    /* Session selector: current choice plus a hint when more than one
+     * session is configured (F1 cycles through them). */
+    if (g_nsessions > 1)
+        snprintf(buf, sizeof buf, "Session: %s  (F1 to change)",
+                 g_sessions[g_cursess].label);
+    else
+        snprintf(buf, sizeof buf, "Session: %s", g_sessions[g_cursess].label);
+    XDrawString(u->dpy, u->win, u->gc, x, y, buf, (int)strlen(buf));
     y += u->line_h * 2;
 
     if (msg && msg[0])
@@ -226,6 +300,7 @@ int main(void) {
     if (!display || !display[0]) display = ":0";
 
     load_hostname();
+    load_sessions();
 
     /* The X server may still be coming up — retry the connection. */
     u.dpy = NULL;
@@ -248,7 +323,7 @@ int main(void) {
     u.line_h = u.font->ascent + u.font->descent + 4;
 
     u.w = 360;
-    u.h = 215;   /* extra room for the bottom-row action buttons */
+    u.h = 235;   /* room for the session line + bottom-row action buttons */
     int sw = DisplayWidth(u.dpy, screen);
     int sh = DisplayHeight(u.dpy, screen);
     int px = (sw - u.w) / 2, py = (sh - u.h) / 2;
@@ -337,7 +412,7 @@ int main(void) {
 
                     pid_t kid = fork();
                     if (kid == 0) {
-                        exec_session(pw, display);
+                        exec_session(pw, display, g_sessions[g_cursess].cmd);
                         _exit(127);
                     }
                     if (kid > 0) {
@@ -358,6 +433,10 @@ int main(void) {
             else            { if (plen) pass[--plen] = '\0'; }
         } else if (ks == XK_Tab) {
             if (field == 0 && ulen > 0) field = 1;
+        } else if (ks == XK_F1) {
+            /* Cycle to the next configured session. */
+            if (g_nsessions > 1)
+                g_cursess = (g_cursess + 1) % g_nsessions;
         } else if (ks == XK_Escape) {
             memset(user, 0, sizeof user); memset(pass, 0, sizeof pass);
             ulen = plen = 0; field = 0; msg = "";

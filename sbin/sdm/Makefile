@@ -28,10 +28,11 @@ sgreet: sgreet.c
 	$(CC) $(CFLAGS) $< -o $@ $(LDADD)
 
 install: all
-	install -d $(DESTDIR)/usr/sbin $(DESTDIR)/etc/X11
+	install -d $(DESTDIR)/usr/sbin $(DESTDIR)/etc/X11 $(DESTDIR)/etc/sdm
 	install -m 0755 sgreet   $(DESTDIR)/usr/sbin/sgreet
 	install -m 0755 sdm.sh   $(DESTDIR)/usr/sbin/sdm
 	install -m 0755 Xsession $(DESTDIR)/etc/X11/Xsession
+	install -m 0644 sessions $(DESTDIR)/etc/sdm/sessions
 
 clean:
 	rm -f sgreet

@@ -4,10 +4,15 @@
 # the window manager is missing.
 [ -x "$HOME/.xsession" ] && exec "$HOME/.xsession"
 
-# Start a terminal as a background client, then exec the window manager in
-# the foreground.  matwm2 is the session leader: when it exits, the session
-# (and the X server) ends and sdm returns to the greeter.  A failing or
-# exiting xterm just closes that one client and leaves the session up.
+# The session leader is whatever sgreet's chooser selected, passed in
+# $SDM_SESSION (configured in /etc/sdm/sessions); default to matwm2 when
+# unset.  When the leader exits, the session (and the X server) ends and
+# sdm returns to the greeter.
+SESSION="${SDM_SESSION:-matwm2}"
+
+# Start a terminal as a background client, then exec the session leader in
+# the foreground.  A failing or exiting xterm just closes that one client
+# and leaves the session up.
 # xterm's default fonts are scalable Adobe families that aren't installed;
 # pin the primary font to the misc bitmap font 9x15 (which the core X font
 # path provides) or xterm exits without opening a window.  Don't set a bold
@@ -22,4 +27,4 @@
 # terminal path and a UTF-8-aware libc setlocale/nl_langinfo had to land
 # first — see the tty auto-attach fix and lib/c locale support.)
 xterm -fn 9x15 -geometry 80x24+20+20 > /var/log/xterm.txt 2>&1 &
-exec matwm2 > /var/log/matwm2.txt 2>&1
+exec $SESSION > /var/log/xsession.txt 2>&1
