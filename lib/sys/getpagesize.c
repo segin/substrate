@@ -9,6 +9,6 @@
 /*
  * getpagesize() - Return the number of bytes in a memory page
  */
-int getpagesize(void) {
+int sys_getpagesize(void) {
     return 4096;
 }

@@ -10,6 +10,6 @@
 
 long syscall(long number, ...);
 
-int stime(const time_t *t) {
+int sys_stime(const time_t *t) {
     return (int)syscall(SYS_STIME, (void *)t);
 }

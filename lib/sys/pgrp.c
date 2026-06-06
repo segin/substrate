@@ -11,16 +11,16 @@
 
 long syscall(long number, ...);
 
-int setpgid(pid_t pid, pid_t pgid) {
+int sys_setpgid(pid_t pid, pid_t pgid) {
     return (int)syscall(SYS_SETPGID, (long)pid, (long)pgid);
 }
 
-pid_t getpgid(pid_t pid) {
+pid_t sys_getpgid(pid_t pid) {
     return (pid_t)syscall(SYS_GETPGID, (long)pid);
 }
 
-pid_t getpgrp(void) {
-    return getpgid(0);
+pid_t sys_getpgrp(void) {
+    return sys_getpgid(0);
 }
 
 pid_t setsid(void) {

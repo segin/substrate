@@ -10,6 +10,6 @@
 
 long syscall(long number, ...);
 
-int sysctl(int *name, unsigned int namelen, void *oldp, size_t *oldlenp, void *newp, size_t newlen) {
+int sys_sysctl(int *name, unsigned int namelen, void *oldp, size_t *oldlenp, void *newp, size_t newlen) {
     return (int)syscall(SYS_SYSCTL, name, namelen, oldp, oldlenp, newp, newlen);
 }

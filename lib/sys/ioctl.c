@@ -11,7 +11,7 @@
 
 long syscall(long number, ...);
 
-int ioctl(int fd, unsigned long request, ...) {
+int sys_ioctl(int fd, unsigned long request, ...) {
     va_list ap;
     void *arg;
 

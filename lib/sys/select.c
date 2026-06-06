@@ -9,7 +9,7 @@
 #include <unistd.h>
 #include <errno.h>
 
-int select(int nfds, fd_set * __restrict readfds, fd_set * __restrict writefds,
+int sys_select(int nfds, fd_set * __restrict readfds, fd_set * __restrict writefds,
            fd_set * __restrict exceptfds, struct timeval * __restrict timeout) {
     /* For now, provide a minimal implementation that handles the common case
      * of reading from a single fd with timeout. This is used by readline.c

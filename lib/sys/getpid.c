@@ -10,10 +10,10 @@
 
 long syscall(long number, ...);
 
-pid_t getpid(void) {
+pid_t sys_getpid(void) {
     return (pid_t)syscall(SYS_GETPID);
 }
 
-pid_t getppid(void) {
+pid_t sys_getppid(void) {
     return (pid_t)syscall(SYS_GETPPID);
 }

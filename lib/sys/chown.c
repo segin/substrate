@@ -24,34 +24,34 @@ static int __set_errno(int rc) {
     return rc;
 }
 
-int chmod(const char *path, mode_t mode) {
+int sys_chmod(const char *path, mode_t mode) {
     return __set_errno((int)syscall(SYS_CHMOD, path, (int)mode));
 }
 
-int lchmod(const char *path, mode_t mode) {
+int sys_lchmod(const char *path, mode_t mode) {
     return __set_errno((int)syscall(SYS_LCHMOD, path, (int)mode));
 }
 
-int fchmod(int fd, mode_t mode) {
+int sys_fchmod(int fd, mode_t mode) {
     return __set_errno((int)syscall(SYS_FCHMOD, fd, (int)mode));
 }
 
-int fchmodat(int dirfd, const char *path, mode_t mode, int flags) {
+int sys_fchmodat(int dirfd, const char *path, mode_t mode, int flags) {
     return __set_errno((int)syscall(SYS_FCHMODAT, dirfd, path, (int)mode, flags));
 }
 
-int chown(const char *path, uid_t owner, gid_t group) {
+int sys_chown(const char *path, uid_t owner, gid_t group) {
     return __set_errno((int)syscall(SYS_CHOWN, path, (int)owner, (int)group));
 }
 
-int lchown(const char *path, uid_t owner, gid_t group) {
+int sys_lchown(const char *path, uid_t owner, gid_t group) {
     return __set_errno((int)syscall(SYS_LCHOWN, path, (int)owner, (int)group));
 }
 
-int fchown(int fd, uid_t owner, gid_t group) {
+int sys_fchown(int fd, uid_t owner, gid_t group) {
     return __set_errno((int)syscall(SYS_FCHOWN, fd, (int)owner, (int)group));
 }
 
-int fchownat(int dirfd, const char *path, uid_t owner, gid_t group, int flags) {
+int sys_fchownat(int dirfd, const char *path, uid_t owner, gid_t group, int flags) {
     return __set_errno((int)syscall(SYS_FCHOWNAT, dirfd, path, (int)owner, (int)group, flags));
 }

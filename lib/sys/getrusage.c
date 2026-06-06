@@ -10,6 +10,6 @@
 
 long syscall(long number, ...);
 
-int getrusage(int who, struct rusage *usage) {
+int sys_getrusage(int who, struct rusage *usage) {
     return (int)syscall(SYS_GETRUSAGE, (long)who, (void *)usage);
 }

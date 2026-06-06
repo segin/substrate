@@ -8,7 +8,7 @@
 #include <unistd.h>
 #include <errno.h>
 
-int stat(const char *path, struct stat *buf) {
+int sys_stat(const char *path, struct stat *buf) {
     int ret = (int)syscall(SYS_STAT, path, buf);
     if (ret < 0) {
         errno = -ret;
@@ -17,7 +17,7 @@ int stat(const char *path, struct stat *buf) {
     return ret;
 }
 
-int lstat(const char *path, struct stat *buf) {
+int sys_lstat(const char *path, struct stat *buf) {
     int ret = (int)syscall(SYS_LSTAT, path, buf);
     if (ret < 0) {
         errno = -ret;
