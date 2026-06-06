@@ -10,6 +10,7 @@
 #include <kern/file.h>
 #include <kern/sched.h>
 #include <kern/sleepq.h>
+#include <sys/preempt.h>
 #include <stddef.h>
 #include <string.h>
 #include <arch/i386/pmap.h>
@@ -1343,6 +1344,23 @@ void proc_exit(int code) {
     extern void rusage_finalize(process_t *p);
     rusage_finalize(current_process);
     
+    /*
+     * Become non-preemptible for the rest of exit.  The moment we publish
+     * SZOMB + THREAD_ZOMBIE below, this process is reapable by a waiting
+     * parent.  With kernel preemption enabled, a timer tick anywhere between
+     * here and the final sched_yield() could switch to the just-woken parent,
+     * whose wait4()/SIGCHLD handler would proc_destroy() us — freeing this
+     * thread's stack and storage while we are still executing on it.  That
+     * use-after-free scribbles the parent's freshly-posted SIGCHLD bit (and
+     * other kernel-heap state), so the child-exit notification is silently
+     * lost and the parent wedges forever in sigsuspend().  Pinning preemption
+     * until our own sched_yield() switches us off-CPU closes the window: the
+     * parent cannot run to reap us until we have voluntarily given up the CPU,
+     * at which point our stack is no longer live.  We never re-enable — this
+     * thread does not return.
+     */
+    preempt_disable();
+
     // 6. Record exit status and set state
     current_process->exit_code = code;
     current_process->state = SZOMB;
