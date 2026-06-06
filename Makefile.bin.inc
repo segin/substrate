@@ -85,9 +85,20 @@ else
     # DT_NEEDED libm.so.0 and ld.so resolves it at runtime.
     CRT0 = $(LIBC_DIR)/crt0.o
     ifeq ($(DYNAMIC),1)
-        LIBS = -L$(LIBC_DIR) -l:libc.so.0 $(LIBGCC)
+        # libsys.so.0 owns the raw syscall() dispatcher (libc no longer
+        # duplicates it).  libc.so.0 already DT_NEEDEDs it so it is loaded
+        # at runtime, but a binary that calls syscall() directly (e.g.
+        # ldtctl) also needs it on the link line, or ld can't resolve the
+        # object's reference (it won't follow libc's DT_NEEDED because
+        # lib/sys isn't in the search path).  Mirror the static branch.
+        LIBS = -L$(LIBC_DIR) -l:libc.so.0 -L$(TOP)/lib/sys -l:libsys.so.0 $(LIBGCC)
     else
-        LIBS = -L$(LIBC_DIR) -lc -L$(TOP)/lib/m -lm $(LIBGCC)
+        # libsys.a owns the raw syscall() dispatcher (libc no longer
+        # duplicates it), so every static binary links it.  --start-group
+        # resolves the libc<->libsys references (libc's wrappers call
+        # syscall; a pulled libsys wrapper references libc's errno)
+        # regardless of archive order.
+        LIBS = -Wl,--start-group -L$(LIBC_DIR) -lc -L$(TOP)/lib/m -lm -L$(TOP)/lib/sys -l:libsys.a -Wl,--end-group $(LIBGCC)
     endif
     BRAND_CMD = $(call BRAND_SUBSTRATE,$@)
 endif

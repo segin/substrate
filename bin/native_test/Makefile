@@ -14,6 +14,9 @@ CFLAGS_LIBC = $(CFLAGS) -I../../include -I../../sys
 LDFLAGS = -m32 -nostdlib -fno-pie -no-pie -static
 
 LIBC = ../../lib/c/libc.a
+# libsys.a owns the raw syscall() dispatcher (libc's wrappers reference it
+# but no longer define it); group with libc so the cross-references resolve.
+LIBSYS = ../../lib/sys/libsys.a
 CRT0 = ../../lib/c/crt0.o
 BRANDELF = ../../usr.bin/brandelf/brandelf
 
@@ -26,8 +29,8 @@ TARGETS = native_test native_test_standalone
 all: $(TARGETS)
 
 # Libc version
-native_test: native_test.c $(LIBC)
-	$(CC) $(CFLAGS_LIBC) $(LDFLAGS) -o $@ $(CRT0) $< $(LIBC) -lgcc
+native_test: native_test.c $(LIBC) $(LIBSYS)
+	$(CC) $(CFLAGS_LIBC) $(LDFLAGS) -o $@ $(CRT0) $< -Wl,--start-group $(LIBC) $(LIBSYS) -Wl,--end-group -lgcc
 	@if [ -x $(BRANDELF) ]; then $(BRANDELF) -t $(BRAND) $@; fi
 
 # Standalone version (raw syscalls, no libc)
