@@ -72,8 +72,19 @@ static void brk_unmap_free_pages(pmap_t pmap, uintptr_t start, uintptr_t end) {
     }
 }
 
+/*
+ * Backing-object cache key.  It MUST be a stable file identity, not the
+ * fs_node_t pointer: ext2 (and other filesystems) hand back freshly
+ * allocated / cache-recycled fs_node_t instances on each open, so keying on
+ * the pointer makes every process miss the cache and build its own private
+ * backing object -- which is why each program got a private physical copy of
+ * every shared library (≈10 MB per xterm).  (mount, inode) is stable across
+ * opens and unique across mounts, so two processes mapping the same file now
+ * share one backing object and therefore the same read-only physical pages.
+ */
 typedef struct shared_file_object_entry {
-    fs_node_t *node;
+    struct mount *mp;
+    uint64_t inode;
     uint64_t page_offset;
     vm_object_t *object;
     struct shared_file_object_entry *next;
@@ -104,7 +115,8 @@ vm_object_t *mmap_get_shared_backing_object(fs_node_t *node, size_t length,
     spinlock_acquire(&shared_file_objects_lock);
     prev = NULL;
     for (entry = shared_file_objects; entry != NULL; ) {
-        if (entry->node == node && entry->page_offset == page_offset) {
+        if (entry->mp == node->mp && entry->inode == node->inode &&
+            entry->page_offset == page_offset) {
             if (vm_object_try_reference(entry->object)) {
                 spinlock_release(&shared_file_objects_lock);
                 return entry->object;
@@ -142,14 +154,16 @@ vm_object_t *mmap_get_shared_backing_object(fs_node_t *node, size_t length,
         return NULL;
     }
 
-    entry->node = node;
+    entry->mp = node->mp;
+    entry->inode = node->inode;
     entry->page_offset = page_offset;
     entry->object = obj;
 
     spinlock_acquire(&shared_file_objects_lock);
     /* Recheck: another thread may have raced to allocate during our window. */
     for (shared_file_object_entry_t *cur = shared_file_objects; cur != NULL; cur = cur->next) {
-        if (cur->node == node && cur->page_offset == page_offset) {
+        if (cur->mp == node->mp && cur->inode == node->inode &&
+            cur->page_offset == page_offset) {
             if (vm_object_try_reference(cur->object)) {
                 spinlock_release(&shared_file_objects_lock);
                 vm_object_deallocate(obj);

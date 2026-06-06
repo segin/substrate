@@ -17,6 +17,7 @@
 #include <pm/pm.h>
 #include <vm/vm_kmem.h>
 #include <vm/uma.h>
+#include <arch/i386/pmap.h>
 #include <include/sys/thr.h>
 #include <include/sys/acct.h>
 #include <include/sys/file.h>
@@ -3297,7 +3298,9 @@ int kern_proc_info(pid_t pid, sys_procinfo_t *info) {
     info->user_time = target->utime;
     info->sys_time = target->stime;
     info->vsize = target->vm_map ? (uint32_t)target->vm_map->size : 0;
-    info->rss = target->rusage.ru_maxrss > 0 ? (uint32_t)(target->rusage.ru_maxrss / 4) : 0;
+    /* RSS = live resident page count from the pmap (the never-updated
+     * rusage.ru_maxrss always read 0, so RES showed 0 for every process). */
+    info->rss = target->pmap ? pmap_resident_count(target->pmap) : 0;
     
     strncpy(info->name, target->comm, sizeof(info->name)-1);
     return 0;
