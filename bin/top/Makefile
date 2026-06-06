@@ -7,7 +7,7 @@ clean:
 install:
 else
 PROG = top
-SRCS = top.c top_snapshot.c
+SRCS = top.c top_snapshot.c top_render.c top_sort.c
 DYNAMIC = 1
 LDADD = -L$(TOP)/lib/sys -l:libsys.so.0
 

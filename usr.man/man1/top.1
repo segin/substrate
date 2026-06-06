@@ -1,0 +1,203 @@
+.TH TOP 1 "Substrate" "Substrate General Commands Manual"
+.SH NAME
+top \- display and update sorted information about processes
+.SH SYNOPSIS
+.B top
+.RB [ \-bcHs ]
+.RB [ \-d
+.IR secs ]
+.RB [ \-n
+.IR count ]
+.RB [ \-p
+.IR pid [,\fIpid\fR...]]
+.RB [ \-u
+.IR user ]
+.SH DESCRIPTION
+.B top
+provides a dynamic real-time view of the running system: a summary
+header followed by a continuously updated, sorted list of processes.
+It is patterned on
+.Xr procps 1
+.BR top ,
+running on the Substrate process and VM introspection system calls.
+.PP
+By default
+.B top
+runs interactively, redrawing every 3 seconds, and reads single-key
+commands from the terminal.  With
+.B \-b
+it instead prints plain-text frames to standard output, one per
+iteration, suitable for logging.
+.SH OPTIONS
+.TP
+.BI \-d " secs"
+Set the refresh delay in seconds (fractional accepted).  Default 3.0.
+.TP
+.BI \-n " count"
+Exit after producing
+.I count
+frames.  Default is to run until told to quit.
+.TP
+.BI \-p " pid[,pid...]"
+Monitor only the listed process IDs (up to 20).
+.TP
+.BI \-u " user"
+Show only processes owned by
+.IR user
+(a name or numeric UID).
+.TP
+.B \-b
+Batch mode: no terminal control, no input handling.
+.TP
+.B \-s
+Secure mode: disable the
+.BR k ,
+.B r
+and configuration-changing commands.
+.TP
+.B \-H
+Start in threads view.
+.TP
+.B \-c
+Show the full command line in the COMMAND column.
+.TP
+.B \-h
+Print a usage summary and exit.
+.TP
+.B \-v
+Print the version and exit.
+.SH "SUMMARY HEADER"
+The five header lines report, in order: the current time, uptime,
+logged-in user count and load averages; task counts by state; the CPU
+time split
+.RB ( us
+user,
+.B sy
+system,
+.B id
+idle \(em the
+.BR ni ,
+.BR wa ,
+.BR hi ,
+.B si
+and
+.B st
+categories are not yet tracked by the kernel and read 0); physical
+memory; and swap.
+.SH "PROCESS COLUMNS"
+.TP
+.B PID
+Process ID.
+.TP
+.B USER
+Effective user name (or numeric UID if unresolved).
+.TP
+.B PR
+Scheduling priority (normal tasks show NI + 20).
+.TP
+.B NI
+Nice value, \-20 (highest) to 19 (lowest).
+.TP
+.B VIRT
+Virtual memory size.
+.TP
+.B RES
+Resident set size.
+.TP
+.B SHR
+Shared memory (currently always 0; not yet tracked).
+.TP
+.B S
+Process state: R running, S sleeping, T stopped, Z zombie, I idle.
+.TP
+.B %CPU
+CPU share since the previous refresh, computed from the user+system
+jiffy delta over the wall-clock delta.
+.TP
+.B %MEM
+Resident set as a percentage of total physical memory.
+.TP
+.B TIME+
+Total CPU time consumed, minutes:seconds.hundredths.
+.TP
+.B COMMAND
+Command name, or full command line under
+.B \-c
+or the
+.B c
+command.
+.SH "INTERACTIVE COMMANDS"
+.TP
+.B q
+Quit; the terminal is always restored on the way out.
+.TP
+.BR Space ", " Enter
+Refresh immediately.
+.TP
+.BR P ", " M ", " T ", " N
+Sort by %CPU, %MEM, TIME+ or PID respectively.
+.TP
+.B R
+Reverse the sort order (default is descending).
+.TP
+.B i
+Toggle hiding of idle processes (%CPU < 0.05).
+.TP
+.B c
+Toggle the COMMAND column between name and full command line.
+.TP
+.B u
+Filter to a single user; empty input clears the filter.
+.TP
+.BR d ", " s
+Change the refresh delay.
+.TP
+.B k
+Kill a process: prompts for a PID, then a signal (default 15).
+.TP
+.B r
+Renice a process: prompts for a PID, then a nice value.
+.TP
+.BR h ", " ?
+Show the interactive help screen.
+.SH FILES
+.TP
+.I ~/.toprc
+Optional configuration read at startup;
+.B key = value
+lines with
+.B #
+comments.  Recognized keys:
+.BR delay ,
+.BR sort ,
+.BR idle ,
+.BR cmdline .
+.SH EXAMPLES
+Capture three snapshots a half-second apart into a log:
+.PP
+.RS
+.nf
+top \-b \-n 3 \-d 0.5 > /var/log/top.out
+.fi
+.RE
+.PP
+Watch a single service by PID:
+.PP
+.RS
+.nf
+top \-p 1423
+.fi
+.RE
+.SH "EXIT STATUS"
+Returns 0 on a clean exit, 1 on a fatal error (such as failure to
+allocate working buffers).
+.SH "SEE ALSO"
+.Xr ps 1 ,
+.Xr kill 1 ,
+.Xr renice 8
+.SH NOTES
+The
+.BR ni / wa / hi / si / st
+CPU categories, the SHR column, and threads view are limited by what
+the current kernel exposes; they are placeholders pending kernel
+support.

@@ -1,5 +1,25 @@
 # 23. `top(1)` — Comprehensive Implementation
 
+> **Implementation status (executed).** A working procps-grade `top` is
+> built and verified on substrate (`bin/top/{top,top_snapshot,top_render,
+> top_sort}.c`).  Delivered: the full data plane (real delta-based %CPU,
+> ncpu, mem/swap, ENOMEM-retry/ESRCH-skip), the display engine (VT100 raw
+> mode with restore on every signal path, SIGWINCH resize, single-write
+> frame, alt-screen, the five-line procps header, the full default column
+> set with alignment + COMMAND truncation + sorted-column highlight), sort
+> (all comparators, stable, `P`/`M`/`T`/`N`/`R`), filtering (`u`, `i`,
+> `-p`, `-u`), the interactive loop (`poll`-driven; `q`, Space/Enter, `d`,
+> `k`, `r`, `c`, `h`), the CLI surface (`-b -n -d -p -u -s -H -c -h -v`),
+> `~/.toprc` read, the robustness bounds (4096-proc cap, 64 KiB frame cap,
+> allocate-once buffers, `?` on missing vm-stats), the `top.1` man page,
+> and host unit tests (`test_delta`, `test_sort`, both passing).
+> **Deferred** (kernel support or lower value): `o` generic filter and
+> `f`/`F` field-management screens; arrow-key decode; `H` thread expansion,
+> `1`/`t`/`m` CPU/mem display-mode cycles, `b` highlight toggle; `W` atomic
+> `.toprc` write; `-DTOP_PROFILE`; the `ni`/`wa`/`hi`/`si`/`st` CPU split
+> and `SHR` (kernel does not expose them yet); and the property/fuzz/
+> integration test trio.  Tracked here for the follow-on pass.
+
 > Greenfield task.  No prior `bin/top` exists.  Builds on the
 > sys_proc_* / sys_vm_* / sysinfo stack landed in
 > [`07-6a-system-call-wrapper-library.md`](07-6a-system-call-wrapper-library.md)
