@@ -927,18 +927,25 @@ int kern_getdents(unsigned int fd, void *dirp, unsigned int count) {
         
         if (reclen > (int)sizeof(temp_buf)) return -22; // Should not happen for normal filenames
 
+        /* Advance via the filesystem's opaque cursor: ext2 hands back a
+         * deletion-stable byte offset in d_off; index-based filesystems
+         * leave it 0, so fall back to the legacy +1 entry counter.  This
+         * keeps an interleaved readdir()+unlink() loop (rm -rf) from
+         * skipping surviving entries when deletions renumber them. */
+        uint64_t cur_off = (uint64_t)f->f_offset;
+        uint64_t next_off = (d->d_off > cur_off) ? d->d_off : cur_off + 1;
         kld->d_ino = d->d_ino;
-        kld->d_off = f->f_offset + 1; // Offset of NEXT entry
+        kld->d_off = next_off; // Stable cursor to the NEXT entry
         kld->d_reclen = reclen;
         for(int i=0; i<name_len; i++) kld->d_name[i] = d->d_name[i];
         kld->d_name[name_len] = 0;
-        
+
         memcpy((char*)dirp + bpos, kld, reclen);
-        
+
         bpos += reclen;
-        f->f_offset++;
+        f->f_offset = next_off;
     }
-    
+
     return bpos;
 }
 
@@ -971,8 +978,12 @@ int kern_getdents64(unsigned int fd, void *dirp, unsigned int count) {
 
         if (reclen > (int)sizeof(temp_buf)) return -22;
 
+        /* Stable cursor: ext2 reports a deletion-safe byte offset in d_off;
+         * index-based filesystems leave it 0 and fall back to +1. */
+        uint64_t cur_off = (uint64_t)f->f_offset;
+        uint64_t next_off = (d->d_off > cur_off) ? d->d_off : cur_off + 1;
         kld->d_ino = d->d_ino;
-        kld->d_off = (int64_t)(f->f_offset + 1);
+        kld->d_off = (int64_t)next_off;
         kld->d_reclen = (unsigned short)reclen;
         kld->d_type = d->d_type;
         for (int i = 0; i < name_len; i++) kld->d_name[i] = d->d_name[i];
@@ -981,7 +992,7 @@ int kern_getdents64(unsigned int fd, void *dirp, unsigned int count) {
         memcpy((char *)dirp + bpos, kld, (size_t)reclen);
 
         bpos += (unsigned int)reclen;
-        f->f_offset++;
+        f->f_offset = next_off;
     }
 
     return (int)bpos;
@@ -3074,17 +3085,22 @@ static char *find_name_by_inode(fs_node_t *dir, uint64_t inode) {
     // Assuming standard "readdir" semantics: index 0, 1, 2...
     // We check every entry.
 
-    // Safety limit to prevent infinite loops in broken FS
+    // `index` is the filesystem's opaque readdir cursor (a byte offset for
+    // ext2, an entry ordinal elsewhere); advance it via d_off with a +1
+    // fallback, exactly as kern_getdents does.  A separate iteration guard
+    // caps a broken FS independently of the cursor's unit.
     uint64_t index = 0;
-    while (index < 100000) {
+    for (int guard = 0; guard < 1000000; guard++) {
         struct dirent *d = readdir_fs(dir, index);
         if (!d) break; // End of directory
+
+        uint64_t next = (d->d_off > index) ? d->d_off : index + 1;
 
         if (d->d_ino == inode) {
             // Match found
             // Skip . and ..
             if (strcmp(d->d_name, ".") == 0 || strcmp(d->d_name, "..") == 0) {
-                 index++;
+                 index = next;
                  continue;
             }
 
@@ -3096,7 +3112,7 @@ static char *find_name_by_inode(fs_node_t *dir, uint64_t inode) {
             name[len] = '\0';
             return name;
         }
-        index++;
+        index = next;
     }
     return NULL;
 }

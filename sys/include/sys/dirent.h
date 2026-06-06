@@ -9,6 +9,12 @@
 
 struct dirent {
     uint64_t d_ino;       /* File serial number */
+    uint64_t d_off;       /* Opaque cursor for the NEXT entry.  A filesystem
+                           * that has a deletion-stable position (ext2 uses a
+                           * byte offset) reports it here so a reader that
+                           * unlink()s entries mid-scan never skips surviving
+                           * names; index-based filesystems leave it 0 and the
+                           * getdents layer falls back to a +1 entry counter. */
     uint16_t d_reclen;    /* Length of this record */
     uint8_t  d_type;      /* File type, see below */
     uint8_t  d_namlen;    /* Length of string in d_name */

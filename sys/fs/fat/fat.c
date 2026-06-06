@@ -301,6 +301,9 @@ struct dirent *fat_readdir(fs_node_t *node, uint64_t index) {
     fat_fs_t *fs = ctx->fs;
     
     struct dirent *dirent = &ctx->current_dirent;
+    /* FAT uses entry-index readdir; leave d_off at 0 so the getdents layer
+     * falls back to its +1 entry counter (see struct dirent in sys/dirent.h). */
+    dirent->d_off = 0;
     uint8_t *dir_buf = kmalloc(fs->cluster_size);
     if (!dir_buf) return NULL;
     char lfn_buffer[256];

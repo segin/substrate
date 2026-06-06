@@ -1542,18 +1542,20 @@ struct dirent *ext2_readdir(fs_node_t *node, uint64_t index) {
     // Lazily set mount pointer in filesystem context
     if (!fs->mp && node->mp) fs->mp = node->mp;
     
-    // Read the directory data
+    // Read the directory data.
+    //
+    // `index` is an opaque BYTE OFFSET into the directory file, not an entry
+    // ordinal (see the d_off cursor threading in kern_getdents).  Byte offsets
+    // are stable across deletion: ext2 unlink only folds a removed record's
+    // space into its predecessor's rec_len, it never moves a surviving entry,
+    // so resuming at a saved offset can never skip a live name.  The previous
+    // entry-index scheme recounted only live entries on every call, so a
+    // reader that interleaved unlink() (rm -rf) renumbered the survivors and
+    // silently skipped a batch each pass -- the "rm -rf needs several runs" bug.
     uint32_t dir_size = ctx->inode.i_size;
-    uint32_t pos = 0;
-    uint32_t cur_idx = 0;
-    
-    mutex_lock(&ctx->lock);
+    uint32_t pos = (uint32_t)index;
 
-    // Check cache for sequential access optimization
-    if (index > 0 && index == ctx->last_readdir_idx + 1) {
-        pos = ctx->last_readdir_pos;
-        cur_idx = ctx->last_readdir_idx + 1;
-    }
+    mutex_lock(&ctx->lock);
 
     // Lazy allocate
     uint32_t block_size = fs->block_size;
@@ -1589,31 +1591,26 @@ struct dirent *ext2_readdir(fs_node_t *node, uint64_t index) {
             
             if (de->rec_len < 8 || block_off + de->rec_len > fs->block_size) break;
 
+            // Return the first live entry at or after `pos`; deleted records
+            // (inode == 0) are walked over.  d_off is the byte offset of the
+            // NEXT record, which the caller hands back on the following call.
             if (de->inode != 0 && de->name_len > 0) {
-                if (cur_idx == index) {
-                    // Found it - store in context specific dirent
-                    ctx->current_dirent.d_ino = de->inode;
-                    uint32_t len = de->name_len;
-                    // Fix: Ensure name fits in buffer to prevent overflow
-                    if (len >= sizeof(ctx->current_dirent.d_name)) {
-                        len = sizeof(ctx->current_dirent.d_name) - 1;
-                    }
-                    memcpy(ctx->current_dirent.d_name, de->name, len);
-                    ctx->current_dirent.d_name[len] = '\0';
-                    ctx->current_dirent.d_namlen = (uint8_t)len;
-                    ctx->current_dirent.d_type = ext2_file_type_to_dt(de->file_type);
-                    ctx->current_dirent.d_reclen = (uint16_t)(((8 + len + 1 + 3) / 4) * 4);
-                    result = &ctx->current_dirent;
-
-                    // Update cache
-                    ctx->last_readdir_idx = index;
-                    ctx->last_readdir_pos = pos + de->rec_len;
-
-                    goto cleanup;
+                ctx->current_dirent.d_ino = de->inode;
+                uint32_t len = de->name_len;
+                // Fix: Ensure name fits in buffer to prevent overflow
+                if (len >= sizeof(ctx->current_dirent.d_name)) {
+                    len = sizeof(ctx->current_dirent.d_name) - 1;
                 }
-                cur_idx++;
+                memcpy(ctx->current_dirent.d_name, de->name, len);
+                ctx->current_dirent.d_name[len] = '\0';
+                ctx->current_dirent.d_namlen = (uint8_t)len;
+                ctx->current_dirent.d_type = ext2_file_type_to_dt(de->file_type);
+                ctx->current_dirent.d_reclen = (uint16_t)(((8 + len + 1 + 3) / 4) * 4);
+                ctx->current_dirent.d_off = pos + de->rec_len;
+                result = &ctx->current_dirent;
+                goto cleanup;
             }
-            
+
             if (de->rec_len == 0) break; // Prevent infinite loop
             block_off += de->rec_len;
             pos += de->rec_len;
@@ -3345,12 +3342,17 @@ int ext2_unlink(fs_node_t *dir, const char *name) {
 }
 
 static int ext2_dir_is_empty(fs_node_t *node) {
-    uint64_t idx = 0;
+    uint64_t off = 0;
     struct dirent *de;
 
     if (!node || (node->flags & 0x7) != FS_DIRECTORY) return 0;
 
-    while ((de = ext2_readdir(node, idx++)) != NULL) {
+    /* ext2_readdir takes an opaque BYTE OFFSET and reports the next one in
+     * d_off; advance via that, not a ++ entry counter (a bare increment lands
+     * mid-record and misparses, making a truly empty dir look non-empty and
+     * breaking rmdir/rm -rf). */
+    while ((de = ext2_readdir(node, off)) != NULL) {
+        off = (de->d_off > off) ? de->d_off : off + 1;
         if (!strcmp(de->d_name, ".") || !strcmp(de->d_name, "..")) {
             continue;
         }

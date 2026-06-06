@@ -886,6 +886,8 @@ static struct dirent *minix_readdir(fs_node_t *node, uint64_t index) {
         strncpy(wrapper->dirent.d_name, entry.name, 30);
         wrapper->dirent.d_name[30] = '\0';
         wrapper->dirent.d_ino = entry.inode;
+        /* Entry-index readdir; 0 d_off => getdents +1 fallback. */
+        wrapper->dirent.d_off = 0;
         return &wrapper->dirent;
     }
 
