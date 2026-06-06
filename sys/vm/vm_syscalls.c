@@ -9,6 +9,7 @@
 #include <stddef.h>
 #include <string.h>
 #include <arch/i386/pmm.h>
+#include <arch/i386/pmap.h>
 #include <vm/vm_kmem.h>
 #include <kern/cmdline.h>
 #include <sys/lock.h>
@@ -470,13 +471,21 @@ int sys_msync(void *addr, size_t length, int flags) {
         
         uint64_t pindex = (va - entry->start + entry->offset) / 4096;
         vm_page_t *m = vm_object_lookup_page(entry->object, pindex);
-        
-        if (m && (m->flags & PG_DIRTY)) {
+
+        /* A MAP_SHARED page is mapped writable, so a store sets only the
+         * hardware PTE dirty bit, never the software PG_DIRTY flag.  Harvest
+         * the real PTE dirty state so shared writes actually get flushed.
+         * (MAP_PRIVATE faults onto an anonymous shadow with no pager, so its
+         * dirty pages never reach the file here — correct.) */
+        int hw_dirty = pmap_is_modified(map->pmap, va);
+        if (m && ((m->flags & PG_DIRTY) || hw_dirty)) {
             // Write back via pager
             if (entry->object->pager) {
                 vm_page_t *pages[1] = { m };
                 vm_pager_put_pages(entry->object->pager, pages, 1, true);
             }
+            m->flags &= ~PG_DIRTY;
+            pmap_clear_modify(map->pmap, va);
         }
     }
 
