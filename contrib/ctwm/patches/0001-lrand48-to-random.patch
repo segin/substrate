@@ -1,0 +1,19 @@
+Subject: win_iconify: use random() instead of lrand48()
+
+substrate's libc has the rand48 *_r variants but not the plain lrand48()
+family; ctwm only uses lrand48() (unseeded) to scatter iconified windows,
+and random() has the identical [0,2^31) range and is in libc.
+
+--- a/win_iconify.c	2026-06-06 17:31:05.902550140 -0500
++++ b/win_iconify.c	2026-06-06 17:30:44.412458757 -0500
+@@ -246,8 +246,8 @@
+ 	}
+ 	for(i = 0; i < 10; i++) {
+ 		for(j = 0; j < nrects; j++) {
+-			rectangles [j].x = ((lrand48() %  width) / srect) * srect;
+-			rectangles [j].y = ((lrand48() % height) / srect) * srect;
++			rectangles [j].x = ((random() %  width) / srect) * srect;
++			rectangles [j].y = ((random() % height) / srect) * srect;
+ 		}
+ 		XFillRectangles(dpy, mask, gc, rectangles, nrects);
+ 		XShapeCombineMask(dpy, blanket, ShapeBounding, 0, 0, mask, ShapeSet);
