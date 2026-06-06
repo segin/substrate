@@ -93,6 +93,7 @@ struct buf *bio_dev_get(void *dev, int64_t blkno, size_t size);
 void bio_dev_mark_dirty(struct buf *bp);
 void bio_dev_invalidate(void *dev, int64_t blkno);
 void bio_dev_release(struct buf *bp);
+int  bio_dev_cached(void *dev, int64_t blkno);
 
 /* Reclaim clean buffers under memory pressure. Returns bytes freed. */
 size_t bio_reclaim(size_t target_bytes);

@@ -659,6 +659,26 @@ bio_dev_mark_dirty(struct buf *bp)
     bp->b_flags |= B_DELWRI;
 }
 
+/*
+ * Lock-safe presence probe: returns nonzero iff (dev, blkno) is resident,
+ * valid (B_CACHE), and not currently busy.  The verdict is computed under
+ * bio_lock and the buffer pointer never escapes, so this is safe to call
+ * speculatively (e.g. the block layer's miss-run coalescing) without the
+ * use-after-release hazard of incore().
+ */
+int
+bio_dev_cached(void *dev, int64_t blkno)
+{
+    struct buf *bp;
+    int cached;
+
+    spinlock_acquire(&bio_lock);
+    bp = bio_lookup_locked((struct vnode *)dev, blkno);
+    cached = (bp && (bp->b_flags & B_CACHE) && !(bp->b_flags & B_BUSY));
+    spinlock_release(&bio_lock);
+    return cached;
+}
+
 void
 bio_dev_invalidate(void *dev, int64_t blkno)
 {

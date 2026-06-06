@@ -1,4 +1,5 @@
 #include <drivers/storage/blkdev.h>
+#include <vfs/buf.h>
 #include <kern/geom/geom.h>
 #include <kern/console.h>
 #include <sys/errno.h>
@@ -87,134 +88,114 @@ void blkdev_unregister(blkdev_t *dev) {
     }
 
     devfs_unregister_device(&dev->node);
+
+    /* Drop every cached buffer keyed to this device so its memory is
+     * freed and a future device reusing the pointer starts clean. */
+    bio_dev_purge(dev);
+
     dev->next = NULL;
 }
 
-#define BCACHE_ENTRIES 1024
-typedef struct {
-    blkdev_t *dev;
-    uint64_t sector;
-    uint32_t flags; // 1 = valid, 2 = dirty
-    uint64_t lru_time;
-    uint8_t *data; // allocated via kmalloc
-} bcache_entry_t;
+/*
+ * Block-level buffer cache.
+ *
+ * All sector I/O funnels through blkdev_do_read / blkdev_do_write, which use
+ * the shared bio.c buffer cache keyed by (blkdev *, sector).  This is the
+ * single, transparent, driver-agnostic disk cache: any device is cached the
+ * moment it registers a blkdev_t, and no filesystem carries caching logic.
+ * Device I/O always runs with the bio buffer merely B_BUSY and the bio
+ * spinlock dropped, so a blocking driver (AHCI/IDE/NVMe) never issues I/O
+ * while holding a spinlock.
+ */
 
-static bcache_entry_t bcache[BCACHE_ENTRIES];
-static uint64_t bcache_clock = 0;
-static spinlock_t bcache_lock;
-static int bcache_initialized = 0;
-
-static void bcache_init(void) {
-    spinlock_init(&bcache_lock, "bcache");
-    memset(bcache, 0, sizeof(bcache));
-    bcache_initialized = 1;
-}
-
-static bcache_entry_t *bcache_lookup(blkdev_t *dev, uint64_t sector) {
-    for (int i = 0; i < BCACHE_ENTRIES; i++) {
-        if ((bcache[i].flags & 1) && bcache[i].dev == dev && bcache[i].sector == sector) {
-            bcache[i].lru_time = ++bcache_clock;
-            return &bcache[i];
-        }
-    }
-    return NULL;
-}
-
-static bcache_entry_t *bcache_evict(void) {
-    uint64_t oldest = UINT64_MAX;
-    int oldest_idx = 0;
-    for (int i = 0; i < BCACHE_ENTRIES; i++) {
-        if (!(bcache[i].flags & 1)) return &bcache[i];
-        if (bcache[i].lru_time < oldest) {
-            oldest = bcache[i].lru_time;
-            oldest_idx = i;
-        }
-    }
-    bcache_entry_t *entry = &bcache[oldest_idx];
-    if (entry->flags & 2) {
-        entry->dev->write(entry->dev, entry->sector, 1, entry->data);
-        entry->flags &= ~2;
-    }
-    return entry;
-}
-
-static void bcache_invalidate(blkdev_t *dev, uint64_t start_sector, uint32_t count) {
-    if (!bcache_initialized) return;
-    spinlock_acquire(&bcache_lock);
-    for (int i = 0; i < BCACHE_ENTRIES; i++) {
-        if ((bcache[i].flags & 1) && bcache[i].dev == dev && 
-            bcache[i].sector >= start_sector && bcache[i].sector < start_sector + count) {
-            if (bcache[i].flags & 2) {
-                bcache[i].dev->write(bcache[i].dev, bcache[i].sector, 1, bcache[i].data);
-            }
-            bcache[i].flags = 0;
-        }
-    }
-    spinlock_release(&bcache_lock);
-}
-
+/*
+ * Read `count` sectors at `sector` into `buffer`: serve cached sectors from
+ * the buffer cache and coalesce each maximal run of contiguous uncached
+ * sectors into one device read.  Returns 0 on success, else the driver's
+ * error.
+ */
 static int blkdev_do_read(blkdev_t *dev, uint64_t sector, uint32_t count, void *buffer) {
-    if (count > 1) {
-        bcache_invalidate(dev, sector, count);
-        return dev->read(dev, sector, count, buffer);
-    }
-    if (!bcache_initialized) bcache_init();
-    spinlock_acquire(&bcache_lock);
-    bcache_entry_t *entry = bcache_lookup(dev, sector);
-    if (entry) {
-        memcpy(buffer, entry->data, dev->sector_size);
-        spinlock_release(&bcache_lock);
-        return 0;
-    }
-    entry = bcache_evict();
-    if (!entry->data) {
-        entry->data = kmalloc(dev->sector_size);
-        if (!entry->data) {
-            spinlock_release(&bcache_lock);
-            return dev->read(dev, sector, 1, buffer);
+    uint32_t ss = dev->sector_size;
+    uint8_t *out = (uint8_t *)buffer;
+    uint32_t i = 0;
+
+    while (i < count) {
+        struct buf *bp = bio_dev_get(dev, (int64_t)(sector + i), ss);
+        if (!bp) {
+            /* Cache exhausted (low memory): read the remainder directly. */
+            return dev->read(dev, sector + i, count - i, out + (size_t)i * ss);
         }
+
+        if (bp->b_flags & B_CACHE) {            /* hit */
+            memcpy(out + (size_t)i * ss, bp->b_data, ss);
+            bio_dev_release(bp);
+            i++;
+            continue;
+        }
+
+        /* Miss at sector+i: extend the run over contiguous misses so a cold
+         * sequential read issues one device I/O instead of one per sector
+         * (BLK-12).  The probe is a heuristic; under write-through any cached
+         * sector re-read here would yield identical bytes, so a misjudged
+         * run is harmless. */
+        uint32_t run = 1;
+        while (i + run < count && !bio_dev_cached(dev, (int64_t)(sector + i + run)))
+            run++;
+
+        int ret = dev->read(dev, sector + i, run, out + (size_t)i * ss);
+        if (ret != 0) {
+            bp->b_flags |= B_INVAL;             /* never cache a failed read */
+            bio_dev_release(bp);
+            return ret;
+        }
+
+        /* Populate the cache: lead sector via the buffer we already hold,
+         * the rest one at a time -- holding only one busy buffer at a time
+         * avoids any multi-buffer lock-ordering hazard. */
+        memcpy(bp->b_data, out + (size_t)i * ss, ss);
+        bp->b_flags |= B_CACHE;
+        bio_dev_release(bp);
+
+        for (uint32_t k = 1; k < run; k++) {
+            struct buf *bk = bio_dev_get(dev, (int64_t)(sector + i + k), ss);
+            if (!bk)
+                continue;                       /* cache full: data still in `out` */
+            if (!(bk->b_flags & B_CACHE)) {
+                memcpy(bk->b_data, out + (size_t)(i + k) * ss, ss);
+                bk->b_flags |= B_CACHE;
+            }
+            bio_dev_release(bk);
+        }
+        i += run;
     }
-    int ret = dev->read(dev, sector, 1, entry->data);
-    if (ret == 0) {
-        entry->dev = dev;
-        entry->sector = sector;
-        entry->flags = 1;
-        entry->lru_time = ++bcache_clock;
-        memcpy(buffer, entry->data, dev->sector_size);
-    } else {
-        entry->flags = 0;
-    }
-    spinlock_release(&bcache_lock);
-    return ret;
+    return 0;
 }
 
+/*
+ * Write `count` sectors write-through: push to the device first, then
+ * refresh the cached copies (BLK-5).  On a failed device write, invalidate
+ * the affected cached sectors so no stale data is ever served (BLK-6).
+ */
 static int blkdev_do_write(blkdev_t *dev, uint64_t sector, uint32_t count, const void *buffer) {
-    if (count > 1) {
-        bcache_invalidate(dev, sector, count);
-        return dev->write(dev, sector, count, buffer);
+    uint32_t ss = dev->sector_size;
+    const uint8_t *in = (const uint8_t *)buffer;
+
+    int ret = dev->write(dev, sector, count, buffer);
+    if (ret != 0) {
+        for (uint32_t k = 0; k < count; k++)
+            bio_dev_invalidate(dev, (int64_t)(sector + k));
+        return ret;
     }
-    if (!bcache_initialized) bcache_init();
-    spinlock_acquire(&bcache_lock);
-    bcache_entry_t *entry = bcache_lookup(dev, sector);
-    if (!entry) {
-        entry = bcache_evict();
-        if (!entry->data) {
-            entry->data = kmalloc(dev->sector_size);
-            if (!entry->data) {
-                spinlock_release(&bcache_lock);
-                return dev->write(dev, sector, 1, buffer);
-            }
-        }
-        entry->dev = dev;
-        entry->sector = sector;
+
+    for (uint32_t k = 0; k < count; k++) {
+        struct buf *bp = bio_dev_get(dev, (int64_t)(sector + k), ss);
+        if (!bp)
+            continue;
+        memcpy(bp->b_data, in + (size_t)k * ss, ss);
+        bp->b_flags |= B_CACHE;
+        bio_dev_release(bp);
     }
-    memcpy(entry->data, buffer, dev->sector_size);
-    entry->flags = 3;
-    entry->lru_time = ++bcache_clock;
-    int ret = dev->write(dev, sector, 1, buffer);
-    entry->flags &= ~2;
-    spinlock_release(&bcache_lock);
-    return ret;
+    return 0;
 }
 
 static int blkdev_geom_read(struct geom_disk *disk, uint64_t sector, size_t count, void *buf) {
@@ -329,8 +310,8 @@ size_t blkdev_read_bytes(blkdev_t *dev, uint64_t offset, size_t size, void *buff
         if (sectors == 0) break;
         uint32_t sector_count = (uint32_t)sectors;
 
-        // Read directly into user buffer
-        if (dev->read(dev, start_sector, sector_count, buf) != 0) {
+        // Cached + coalesced read straight into the user buffer.
+        if (blkdev_do_read(dev, start_sector, sector_count, buf) != 0) {
             if (sector_buf && sector_buf != stack_buf) kfree(sector_buf, sector_size);
             return total_read;
         }
@@ -429,8 +410,8 @@ size_t blkdev_write_bytes(blkdev_t *dev, uint64_t offset, size_t size, const voi
         if (sectors == 0) break;
         uint32_t sector_count = (uint32_t)sectors;
 
-        // Write directly from user buffer
-        if (dev->write(dev, start_sector, sector_count, buf) != 0) {
+        // Write-through the cache from the user buffer.
+        if (blkdev_do_write(dev, start_sector, sector_count, buf) != 0) {
             if (sector_buf && sector_buf != stack_buf) kfree(sector_buf, sector_size);
             return total_written;
         }
