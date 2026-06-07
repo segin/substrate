@@ -183,6 +183,19 @@ int wcwidth(wchar_t c) {
     return 1;
 }
 
+/* wcswidth: total display columns of the first n wide chars of pwcs,
+ * or -1 if any is non-printable. */
+int wcswidth(const wchar_t *pwcs, size_t n) {
+    int total = 0;
+    for (size_t i = 0; i < n && pwcs[i] != L'\0'; i++) {
+        int w = wcwidth(pwcs[i]);
+        if (w < 0)
+            return -1;
+        total += w;
+    }
+    return total;
+}
+
 /* mbrlen: how many bytes does the next char take?  Substrate is
  * UTF-8 so we just dispatch through mbrtowc. */
 size_t mbrlen(const char *s, size_t n, mbstate_t *ps) {

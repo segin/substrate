@@ -35,6 +35,7 @@ int    mbsinit(const mbstate_t *ps);
 
 /* ------------------------------------------------------------ width */
 int wcwidth(wchar_t c);
+int wcswidth(const wchar_t *pwcs, size_t n);
 
 /* ------------------------------------------------------------ string */
 size_t   wcslen(const wchar_t *s);
