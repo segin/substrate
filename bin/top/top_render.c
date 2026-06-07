@@ -159,7 +159,11 @@ size_t top_render(const top_snapshot_t *s, const top_view_t *v, char *out, size_
     double id = 100.0 - us - sy;
     if (id < 0.0) id = 0.0;
     if (id > 100.0) id = 100.0;
-    sb_printf(&b, "%%Cpu(s): %5.1f us, %5.1f sy,   0.0 ni, %5.1f id,   0.0 wa,   0.0 hi,   0.0 si,   0.0 st",
+    /* No space after each comma: the %5.1f fields are right-justified to 5
+     * columns, so their own leading spaces separate the fields.  This is the
+     * procps layout and keeps the line at 79 columns (was 87 with ", "
+     * separators, overflowing an 80-column terminal). */
+    sb_printf(&b, "%%Cpu(s):%5.1f us,%5.1f sy,  0.0 ni,%5.1f id,  0.0 wa,  0.0 hi,  0.0 si,  0.0 st",
               us, sy, id);
     sb_eol(&b, v);
 
