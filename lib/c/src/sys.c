@@ -14,6 +14,7 @@
 #include <sys/syscall.h>
 #include <sys/sem.h>
 #include <sys/timeb.h>
+#include <sys/file.h>
 #include <sys/stat.h>
 #include <sys/utsname.h>
 #include <sys/time.h>
@@ -1116,6 +1117,24 @@ int eaccess(const char *pathname, int mode) {
 }
 int euidaccess(const char *pathname, int mode) {
     return access(pathname, mode);
+}
+
+/* flock(2): 4.3BSD advisory whole-file lock, implemented over POSIX
+ * fcntl(F_SETLK/F_SETLKW) record locks. */
+int flock(int fd, int operation) {
+    struct flock fl;
+    memset(&fl, 0, sizeof(fl));
+    switch (operation & ~LOCK_NB) {
+    case LOCK_SH: fl.l_type = F_RDLCK; break;
+    case LOCK_EX: fl.l_type = F_WRLCK; break;
+    case LOCK_UN: fl.l_type = F_UNLCK; break;
+    default: errno = EINVAL; return -1;
+    }
+    fl.l_whence = SEEK_SET;
+    fl.l_start  = 0;
+    fl.l_len    = 0;                 /* whole file */
+    int cmd = (operation & LOCK_NB) ? F_SETLK : F_SETLKW;
+    return fcntl(fd, cmd, &fl);
 }
 
 /* ftime(3): obsolete; fill struct timeb from gettimeofday. */
