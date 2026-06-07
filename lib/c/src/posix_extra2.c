@@ -348,17 +348,6 @@ void __sigjmp_save(sigjmp_buf env, int savemask) {
     }
 }
 
-/* ABI-compatibility shim: binaries compiled against the old function-based
- * sigsetjmp() still import this symbol.  New code uses the <setjmp.h> macro
- * (which calls setjmp() in the caller's frame, the correct behaviour); this
- * keeps already-built binaries loadable.  It carries the old wrong-frame
- * behaviour those binaries were already built with — no regression. */
-#undef sigsetjmp
-int sigsetjmp(sigjmp_buf env, int savemask) {
-    __sigjmp_save(env, savemask);
-    return setjmp(env[0].__env);
-}
-
 void siglongjmp(sigjmp_buf env, int val) {
     if (env[0].__savemask) {
         sigset_t restore = (sigset_t)env[0].__mask;
