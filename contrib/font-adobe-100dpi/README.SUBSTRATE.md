@@ -29,6 +29,16 @@ doesn't ship `bdftopcf` and the host tooling here doesn't either, so the
 BDFs are installed verbatim.  libXfont's bitmap module reads BDF
 directly.  The 1.0.4 release ships **ISO10646-1** (Unicode) BDFs.
 
+## ISO8859-1 variants (required, not optional)
+
+`build.sh` also derives an **ISO8859-1** (single-byte) copy of every
+ISO10646-1 master and ships both.  The X11 `en_US.UTF-8` locale binds
+its Latin/ASCII fontset slots (`ISO8859-1:GL`/`:GR`) to single-byte
+fonts; with only the 2-byte ISO10646-1 fonts present, libX11's
+`XmbDrawString` pairs bytes into bogus 2-byte glyph indices and renders
+tofu boxes.  See `contrib/font-adobe-75dpi/README.SUBSTRATE.md` for the
+full explanation.
+
 ## Install
 
 `build-rootfs.sh` picks the staged tree up automatically (it iterates

@@ -28,8 +28,23 @@ Result: `dist-font-adobe-75dpi/usr/share/fonts/X11/75dpi/` with each
 The upstream build runs `bdftopcf` to produce binary PCFs; substrate
 doesn't ship `bdftopcf` and the host tooling here doesn't either, so the
 BDFs are installed verbatim.  libXfont's bitmap module reads BDF
-directly.  The 1.0.4 release ships **ISO10646-1** (Unicode) BDFs, so the
-fonts slot straight into a UTF-8 fontset with full Latin coverage.
+directly.  The 1.0.4 release ships **ISO10646-1** (Unicode) BDFs.
+
+## ISO8859-1 variants (required, not optional)
+
+`build.sh` also derives an **ISO8859-1** (single-byte) copy of every
+ISO10646-1 master and ships both.  This is mandatory, not a nicety: the
+X11 `en_US.UTF-8` locale's `XLC_FONTSET` binds its Latin/ASCII slots
+(`fs0 = ISO8859-1:GL`, `fs1 = ISO8859-1:GR`) to ISO8859-1 *single-byte*
+fonts.  With only the 2-byte ISO10646-1 fonts present, libX11 drops a
+2-byte font into a 1-byte slot; the `is_xchar2b` flag then disagrees
+with the converter's single-byte output and `XmbDrawString` pairs the
+bytes into bogus `XChar2b` indices — every two characters render as one
+`.notdef` tofu box (the "twm font bug").  ISO8859-1 is row 0 of
+ISO10646-1, so the master already holds every glyph; the derivation just
+keeps the `ENCODING 0..255` subset and relabels the registry.  Upstream
+gets these for free from `bdftopcf` + fontenc recoding; we synthesize
+them in `build.sh` instead.
 
 ## Install
 
