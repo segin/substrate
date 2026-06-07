@@ -54,17 +54,27 @@ for l in c sys m pthread; do
     cp "${SUBSTRATE_TOP}/lib/${l}/lib${l}.so.0" "${SR}/usr/lib/" 2>/dev/null || true
 done
 
-BUILD_DIR="${HERE}/build/build-stage-substrate"
-rm -rf "${BUILD_DIR}"; mkdir -p "${BUILD_DIR}"; cd "${BUILD_DIR}"
+# Build IN-SOURCE.  CDE's Makefiles reference its exported Dt/* headers as
+# -I../../include (relative to the build dir), so an out-of-source build can't
+# find them — the headers live in the source tree.  Configure and make in
+# TREE_DIR directly.
+cd "${TREE_DIR}"
 
 echo "==> configure"
+# -D__linux__ -Dlinux: CDE has a Linux port and selects its modern code paths
+# (vs old SVR4/SunOS) on these; substrate is pthread + ELF + glibc-like + BSD
+# sockets, so the Linux paths are the right ones.  CDE guards on BOTH the
+# modern __linux__ and the legacy `linux` predefine (e.g. `#ifndef linux`
+# around the BSD-only SO_USELOOPBACK), and substrate's cross gcc defines
+# neither, so define both.  Without them CDE pulls in legacy declarations that
+# conflict with substrate's headers (its own extern ioctl, SO_USELOOPBACK, ...).
 # crypt lives in substrate libc — do NOT let configure add -lcrypt.
-"${TREE_DIR}/configure" \
+./configure \
     --host=i386-unknown-substrate \
     --prefix=/usr/dt \
     CC=i386-unknown-substrate-gcc \
     CXX=i386-unknown-substrate-g++ \
-    CPPFLAGS="-I${SR}/usr/include -I${SR}/usr/include/X11 -I${SR}/usr/include/tirpc" \
+    CPPFLAGS="-D__linux__ -Dlinux -I${SR}/usr/include -I${SR}/usr/include/X11 -I${SR}/usr/include/tirpc" \
     LDFLAGS="-L${SR}/usr/lib -Wl,-rpath-link,${SR}/usr/lib" \
     --with-tcl="${SR}/usr/lib"
 
