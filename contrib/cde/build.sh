@@ -121,6 +121,11 @@ for _skip in dtksh dtcm dtappbuilder ttsnoop dtinfo dtdocbook tttypes types loca
     sed -i "s/[[:space:]]${_skip}\([[:space:]]\|$\)/\1/" programs/Makefile
 done
 
+# The top-level `doc` subdir builds CDE's man pages by running dtdocbook2man,
+# which is part of the deferred dtdocbook.  Drop it (man pages are not part of
+# the desktop runtime).
+sed -i 's/^am__append_1 = doc$/am__append_1 =/' Makefile
+
 # In-tree generator tools: CDE compiles several small noinst_PROGRAMS and runs
 # them mid-build to generate source (lineToData -> TermLineData.c, ...).  The
 # cross-build compiles them for the target, so they can't execute on the build
