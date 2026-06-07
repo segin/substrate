@@ -253,20 +253,58 @@ static int sem_try(struct ksemset *s, const struct sembuf *ops, size_t n,
     return 1;
 }
 
+/* Mark this caller as a waiter on the sems its op list currently can't satisfy
+ * (op<0 short of value -> semncnt; op==0 on nonzero -> semzcnt) and record what
+ * was bumped in `wbump[i]` (1=ncnt, 2=zcnt) so it can be reversed exactly,
+ * regardless of how the values change while we sleep. */
+static void sem_waitcnt_enter(struct ksemset *s, const struct sembuf *ops,
+                              size_t n, char *wbump)
+{
+    for (size_t i = 0; i < n; i++) {
+        int num = ops[i].sem_num;
+        wbump[i] = 0;
+        if (num < 0 || num >= s->nsems)
+            continue;
+        if (ops[i].sem_op < 0 && s->sems[num].val + ops[i].sem_op < 0) {
+            s->sems[num].ncnt++; wbump[i] = 1;
+        } else if (ops[i].sem_op == 0 && s->sems[num].val != 0) {
+            s->sems[num].zcnt++; wbump[i] = 2;
+        }
+    }
+}
+
+static void sem_waitcnt_leave(struct ksemset *s, const struct sembuf *ops,
+                              size_t n, const char *wbump)
+{
+    for (size_t i = 0; i < n; i++) {
+        int num = ops[i].sem_num;
+        if (!wbump[i] || num < 0 || num >= s->nsems)
+            continue;
+        if (wbump[i] == 1) s->sems[num].ncnt--;
+        else               s->sems[num].zcnt--;
+    }
+}
+
 int kern_semop(int semid, const struct sembuf *ksops, size_t nsops)
 {
-    if (nsops == 0) return 0;
+    if (nsops == 0) return -EINVAL;     /* semop requires >= 1 op (matches Linux) */
     if (nsops > SEMOPM) return -E2BIG;
 
     sem_lazy_init();
     mutex_lock(&sem_lock);
 
     int tmp[SEMMSL];
+    int blocked = 0;        /* set once we've slept waiting on this set */
 
     for (;;) {
         int err = 0;
         struct ksemset *s = sem_lookup(semid, &err);
-        if (!s) { mutex_unlock(&sem_lock); return -err; }
+        if (!s) {
+            mutex_unlock(&sem_lock);
+            /* If we had already validated the set and then blocked, its
+             * disappearance means it was removed: report EIDRM, not EINVAL. */
+            return blocked ? -EIDRM : -err;
+        }
         if (!sem_perm_ok(s, 2)) { mutex_unlock(&sem_lock); return -EACCES; }
 
         int r = sem_try(s, ksops, nsops, tmp);
@@ -313,6 +351,9 @@ int kern_semop(int semid, const struct sembuf *ksops, size_t nsops)
             return -EINTR;
         }
         int index = (int)(s - semsets);
+        blocked = 1;                                 /* we validated the set, now we sleep */
+        char wbump[SEMOPM];
+        sem_waitcnt_enter(s, ksops, nsops, wbump);   /* count us as a waiter */
         if (current_thread)
             current_thread->flags |= THREAD_F_INTERRUPTIBLE;
         sleepq_add(&semsets[index], current_thread);
@@ -320,10 +361,19 @@ int kern_semop(int semid, const struct sembuf *ksops, size_t nsops)
         sched_yield();
         if (current_thread)
             current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
-        if (current_thread &&
-            (current_thread->sig_pending & ~current_thread->sig_mask))
-            return -EINTR;
         mutex_lock(&sem_lock);
+        /* Reverse our waiter count exactly (if the set still exists). */
+        {
+            int e2 = 0;
+            struct ksemset *s2 = sem_lookup(semid, &e2);
+            if (s2)
+                sem_waitcnt_leave(s2, ksops, nsops, wbump);
+        }
+        if (current_thread &&
+            (current_thread->sig_pending & ~current_thread->sig_mask)) {
+            mutex_unlock(&sem_lock);
+            return -EINTR;
+        }
         /* loop: re-resolve (the set may have been removed → EIDRM) */
     }
 }
@@ -515,7 +565,7 @@ int sys_semget(key_t key, int nsems, int semflg)
 int sys_semop(int semid, struct sembuf *sops, size_t nsops)
 {
     struct sembuf kops[SEMOPM];
-    if (nsops == 0) return 0;
+    if (nsops == 0) return -EINVAL;
     if (nsops > SEMOPM) return -E2BIG;
     if (copyin(sops, kops, sizeof(struct sembuf) * nsops) != 0)
         return -EFAULT;

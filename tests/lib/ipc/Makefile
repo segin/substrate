@@ -30,7 +30,7 @@ else
   PTHREAD_INC =
 endif
 
-TESTS = torture_ipc torture_pipe
+TESTS = torture_ipc torture_pipe torture_sem
 
 all: $(TESTS)
 
@@ -39,6 +39,10 @@ torture_ipc: torture_ipc.c
 
 torture_pipe: torture_pipe.c
 	$(CC) $(CFLAGS) $(LDFLAGS) $(PTHREAD_INC) $< $(PTHREAD) -o $@
+
+# torture_sem uses only fork/semop — no pthread.
+torture_sem: torture_sem.c
+	$(CC) $(CFLAGS) $(LDFLAGS) $(PTHREAD_INC) $< -o $@
 
 clean:
 	rm -f $(TESTS)

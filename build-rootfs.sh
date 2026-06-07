@@ -453,6 +453,7 @@ install_to_dist() {
         "tests/lib/sockets:torture_unix" \
         "tests/lib/ipc:torture_ipc" \
         "tests/lib/ipc:torture_pipe" \
+        "tests/lib/ipc:torture_sem" \
         "tests/lib/pty:torture_pty" \
         "tests/lib/signal:torture_signal" \
         "tests/lib/fcntl:torture_fcntl" \
