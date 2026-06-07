@@ -86,6 +86,23 @@ echo "==> configure"
     LDFLAGS="-L${SR}/usr/lib -Wl,-rpath-link,${SR}/usr/lib" \
     --with-tcl="${SR}/usr/lib"
 
+# In-tree generator tools: CDE compiles several small noinst_PROGRAMS and runs
+# them mid-build to generate source (lineToData -> TermLineData.c, ...).  The
+# cross-build compiles them for the target, so they can't execute on the build
+# host (make fails with "Error 126").  Pre-build each with the host cc; the
+# host object + binary are newer than their sources, so the subsequent cross
+# make treats them as up-to-date and skips the target rebuild.  Their objects
+# are noinst generators and never link into target artifacts, so a host object
+# sitting in the tree is harmless.
+HOST_GEN_TOOLS="
+lib/DtTerm/util:lineToData
+"
+for entry in ${HOST_GEN_TOOLS}; do
+    gdir=${entry%:*}; gtool=${entry#*:}
+    echo "==> host-build ${gdir}/${gtool}"
+    make -C "${gdir}" CC=cc CPPFLAGS= CFLAGS='-O2 -w' "${gtool}"
+done
+
 echo "==> make -j${JOBS}"
 # GENCPP: CDE expands its *.cpp config templates with util/tradcpp, but the
 # cross-build compiles that for the target (can't run on the build host).
