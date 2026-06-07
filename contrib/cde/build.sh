@@ -107,13 +107,16 @@ echo "==> configure"
 #   localized : its message-catalog generators (merge/mkcatdefs) cross-build vs
 #           host-run conflict, and it only produces translated app-defaults,
 #           not core function.
+#   dthelp  : the helptag SGML parser (canon1/pass1/pass2) runs a swarm of
+#           cross-built generators (context/fclndir/eltdef/merge/...).  The help
+#           LIBRARY (lib/DtHelp) is already built; this is the document compiler.
 # Drop them from the programs SUBDIRS (each token removed idempotently) so the
 # rest of CDE builds to completion.  This builds the CDE core desktop (dtwm,
 # dtfile, dtsession, dtterm, dtpad, dtstyle, dtcalc, dtmail, dthelp, dtprintinfo,
 # dtsearchpath, dtspcd, dtscreen, dtsr, ...); the deferred set is the App
 # Builder / ksh93 / dtinfo / ToolTalk-types / localized clusters, each tracked
 # as a separate effort.
-for _skip in dtksh dtcm dtappbuilder ttsnoop dtinfo dtdocbook tttypes types localized; do
+for _skip in dtksh dtcm dtappbuilder ttsnoop dtinfo dtdocbook tttypes types localized dthelp; do
     sed -i "s/[[:space:]]${_skip}\([[:space:]]\)/\1/" programs/Makefile
 done
 
