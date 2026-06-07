@@ -27,6 +27,10 @@
 #ifndef MAXHOSTNAMELEN
 #define MAXHOSTNAMELEN 256
 #endif
+/* Max supplementary group IDs (matches sysconf(_SC_NGROUPS_MAX)). */
+#ifndef NGROUPS
+#define NGROUPS     32
+#endif
 #ifndef MAXSYMLINKS
 #define MAXSYMLINKS 32
 #endif

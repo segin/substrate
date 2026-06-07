@@ -23,6 +23,10 @@
 #define LONG_MIN (-2147483647L - 1L)
 #define LONG_MAX 2147483647L
 #define ULONG_MAX 4294967295UL
+/* Max supplementary group IDs. */
+#ifndef NGROUPS_MAX
+#define NGROUPS_MAX 32
+#endif
 #endif
 
 #define LLONG_MIN (-9223372036854775807LL - 1LL)

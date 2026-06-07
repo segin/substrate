@@ -55,6 +55,10 @@ struct stat {
 #define S_IRUSR 00400
 #define S_IWUSR 00200
 #define S_IXUSR 00100
+/* Legacy (4.x BSD / SysV) synonyms for the owner permission bits. */
+#define S_IREAD  S_IRUSR
+#define S_IWRITE S_IWUSR
+#define S_IEXEC  S_IXUSR
 
 #define S_IRWXG 00070
 #define S_IRGRP 00040
