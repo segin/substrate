@@ -175,4 +175,12 @@ echo "==> make -j${JOBS}"
 # "-ldl -lm"; append -lsys -lstdc++.
 make -j"${JOBS}" GENCPP="${HOSTTOOLS}/tradcpp" LIBS="-ldl -lm -lsys -lstdc++ -liconv"
 
+# Stage the built desktop into dist-cde (CDE installs under /usr/dt).  -k keeps
+# going past the install-exec-hook `chown root` steps that fail in a non-root
+# build (the setuid bits are re-applied when the image is baked); without -k the
+# first chown stops the install and the later programs never stage.
+echo "==> install into ${SUBSTRATE_TOP}/dist-cde"
+rm -rf "${SUBSTRATE_TOP}/dist-cde"
+make -k install DESTDIR="${SUBSTRATE_TOP}/dist-cde" GENCPP="${HOSTTOOLS}/tradcpp" || true
+
 echo "==> CDE build complete (if you reached here, all prerequisites are in place)"
