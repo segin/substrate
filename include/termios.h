@@ -149,6 +149,7 @@ struct termios {
 #define TIOCMBIS    0x5416
 #define TIOCMBIC    0x5417
 #define TIOCMSET    0x5418
+#define TIOCCONS    0x541D  /* redirect kernel console output to this tty */
 /* Modem line bits for TIOCMGET/TIOCMSET/TIOCMBIS/TIOCMBIC (mirror of the
  * kernel's <sys/termios.h>; the userspace header had omitted them). */
 #define TIOCM_LE    0x001   /* Line Enable (DSR) */
@@ -216,6 +217,13 @@ struct winsize {
 #define B57600   0010001
 #define B115200  0010002
 #define B230400  0010003
+
+/* CBAUD/CBAUDEX: the c_cflag bit field that, on Linux-style termios, holds
+ * the encoded baud index above.  CBAUDEX (0010000) distinguishes the
+ * extended (>=57600) speeds; CBAUD masks the whole field.  Ported code
+ * (CDE's DtTerm) clears it directly: tio.c_cflag &= ~CBAUD. */
+#define CBAUDEX  0010000
+#define CBAUD    0010017
 
 #include <sys/types.h>
 

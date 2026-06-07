@@ -153,6 +153,7 @@ struct termios {
 #define FIONREAD    0x541B
 #define TIOCINQ     FIONREAD
 #define TIOCNOTTY   0x5422
+#define TIOCCONS    0x541D  /* redirect kernel console output to this tty */
 #define TIOCSBRK    0x5427  /* Set break */
 #define TIOCCBRK    0x5428  /* Clear break */
 
