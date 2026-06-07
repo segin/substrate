@@ -116,6 +116,7 @@ done
 # generated file links to an object with no symbols.
 HOST_GEN_TOOLS="
 lib/DtTerm/util:lineToData:../Term/TermLineData.c
+programs/fontaliases:mk_fonts_alias:
 "
 for entry in ${HOST_GEN_TOOLS}; do
     gdir=$(echo "${entry}" | cut -d: -f1)
