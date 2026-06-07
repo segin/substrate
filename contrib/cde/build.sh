@@ -86,6 +86,15 @@ echo "==> configure"
     LDFLAGS="-L${SR}/usr/lib -Wl,-rpath-link,${SR}/usr/lib" \
     --with-tcl="${SR}/usr/lib"
 
+# Disable dtksh (ksh93): its AST mamake/iffe build detects the BUILD host
+# (HOSTTYPE=linux.i386-64) and compiles libast/libcmd/libshell for x86-64
+# instead of the i386 cross target, so the final i386 dtksh link fails on
+# incompatible objects.  The substrate-side surface (libc symbols, libiconv
+# plain names) is in place; cross-compiling ksh93's bespoke build system is a
+# separate effort.  Drop dtksh from the programs SUBDIRS (idempotent) so the
+# rest of CDE builds.
+sed -i 's/\(^[[:space:]]*dtcalc dtaction dtspcd dtscreen \)dtksh \(dtcm\)/\1\2/' programs/Makefile
+
 # In-tree generator tools: CDE compiles several small noinst_PROGRAMS and runs
 # them mid-build to generate source (lineToData -> TermLineData.c, ...).  The
 # cross-build compiles them for the target, so they can't execute on the build
