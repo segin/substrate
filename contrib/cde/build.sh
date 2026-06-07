@@ -60,6 +60,14 @@ done
 # TREE_DIR directly.
 cd "${TREE_DIR}"
 
+# Link-order fix: ttsession lists libtt before libstt, but libstt references
+# libtt's API and both are static archives, so libtt must follow libstt.
+# Append it (idempotent).
+TTS="lib/tt/bin/ttsession/Makefile.am"
+if [ -f "${TTS}" ] && ! grep -q 'lib/.libs/libtt.a' "${TTS}"; then
+    sed -i 's@\(ttsession_LDADD = \$(LIBTT) \$(X_LIBS) \.\./\.\./slib/libstt\.a\)@\1 ../../../../lib/tt/lib/.libs/libtt.a@' "${TTS}"
+fi
+
 echo "==> configure"
 # -D__linux__ -Dlinux: CDE has a Linux port and selects its modern code paths
 # (vs old SVR4/SunOS) on these; substrate is pthread + ELF + glibc-like + BSD
@@ -74,7 +82,7 @@ echo "==> configure"
     --prefix=/usr/dt \
     CC=i386-unknown-substrate-gcc \
     CXX=i386-unknown-substrate-g++ \
-    CPPFLAGS="-D__linux__ -Dlinux -I${SR}/usr/include -I${SR}/usr/include/X11 -I${SR}/usr/include/tirpc" \
+    CPPFLAGS="-D__linux__ -Dlinux -Wno-error=incompatible-pointer-types -Wno-error=int-conversion -Wno-error=implicit-function-declaration -Wno-error=return-mismatch -Wno-error=format -I${SR}/usr/include -I${SR}/usr/include/X11 -I${SR}/usr/include/tirpc" \
     LDFLAGS="-L${SR}/usr/lib -Wl,-rpath-link,${SR}/usr/lib" \
     --with-tcl="${SR}/usr/lib"
 
