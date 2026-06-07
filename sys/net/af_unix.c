@@ -1197,6 +1197,20 @@ int sys_getsockopt(int fd, int level, int optname,
             *optlen = sizeof(int);
             return 0;
         }
+        if (optname == SO_TYPE_K) {
+            /* Report the socket's actual type (SOCK_STREAM / SOCK_DGRAM / ...).
+             * libtirpc's svc_tli_create switches on getsockopt(SO_TYPE) to pick
+             * its transport; returning 0 here made it reject every RPC server
+             * socket with "bad service type" (broke rpcbind / ToolTalk). */
+            extern int afinet_so_type(int fd);
+            afunix_sock_t *u = afunix_from_fd(fd);
+            int t = u ? u->type : afinet_so_type(fd);
+            if (t < 0)
+                return -ENOTSOCK;
+            *(int *)optval = t;
+            *optlen = sizeof(int);
+            return 0;
+        }
     }
     *(int *)optval = 0;
     *optlen = sizeof(int);

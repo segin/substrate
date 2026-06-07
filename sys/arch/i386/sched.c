@@ -111,7 +111,15 @@ int sched_fork_thread(process_t *proc, void *parent_regs) {
     
     thread_t *t = sched_alloc_thread(proc);
     if (!t) return -1;
-    
+
+    /* Inherit the parent thread's TLS base.  The GS *selector* is restored from
+     * the trap frame below, but the per-thread GS *base* (loaded into the GDT
+     * TLS slot by arch_switch_to) lives in thread_t.gs_base — a fresh child
+     * thread has 0, so without this its first %gs-relative TLS access faults.
+     * This is what broke any forked, threaded child (e.g. rpcbind's daemon). */
+    if (current_thread)
+        t->gs_base = current_thread->gs_base;
+
     extern void *pmm_alloc_contiguous(size_t);
     /* Allocate 4 pages = 16 KiB contiguous kernel stack.  8 KiB
      * overflows: a deep network TX syscall path (sys_write -> tcp_send

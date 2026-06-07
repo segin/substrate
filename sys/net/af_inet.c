@@ -669,6 +669,14 @@ int afinet_so_error(int fd) {
     return 0;
 }
 
+/* SO_TYPE for an AF_INET/AF_INET6 fd: SOCK_STREAM / SOCK_DGRAM / SOCK_RAW, or
+ * -ENOTSOCK if the fd is not one of ours. */
+int afinet_so_type(int fd) {
+    afi_sock_t *s = afi_from_fd(fd);
+    if (!s) return -ENOTSOCK;
+    return s->type;
+}
+
 int afinet_getsockname(int fd, void *addr, socklen_t *addrlen) {
     afi_sock_t *s = afi_from_fd(fd);
     if (!s) return -ENOTSOCK;

@@ -1,0 +1,26 @@
+#!/bin/sh
+# /etc/rc.d/15-rpcbind — Sun RPC portmapper.
+#
+# CDE's ToolTalk (ttsession) registers its RPC service with the portmapper via
+# pmap_set(3); without rpcbind running, ToolTalk — and thus a full CDE session
+# — fails to start ("The desktop messaging system could not be started").
+# Runs after the loopback interface (10-loopback) is up.
+
+case "${1:-start}" in
+    start)
+        if [ -x /sbin/rpcbind ]; then
+            mkdir -p /var/run
+            /sbin/rpcbind
+        fi
+        ;;
+    stop)
+        kill "$(cat /var/run/rpcbind.pid 2>/dev/null)" 2>/dev/null
+        ;;
+    status)
+        [ -S /var/run/rpcbind.sock ] && echo "rpcbind: running" || echo "rpcbind: stopped"
+        ;;
+    restart)
+        $0 stop
+        $0 start
+        ;;
+esac
