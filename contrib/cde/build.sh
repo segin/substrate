@@ -1,0 +1,62 @@
+#!/bin/sh
+#
+# contrib/cde/build.sh — cross-configure (and, as prerequisites land, build)
+# CDE for substrate.  Assembles a Motif + X11 + libXinerama sysroot and runs
+# CDE's autotools configure.  Until the remaining prerequisite ports exist
+# (libjpeg, Tcl, rpcgen, ksh, Sun RPC/ToolTalk — see README.SUBSTRATE.md),
+# configure stops at the first unmet dependency; that is expected and the
+# stop point advances as each port is added.
+#
+# Env:
+#   STAGE1_PREFIX   substrate toolchain prefix (default /opt/substrate)
+#   JOBS            parallel jobs (default `nproc`)
+
+set -eu
+
+HERE="$(cd "$(dirname "$0")" && pwd)"
+TREE_DIR="${HERE}/build/cdesktopenv/cde"
+
+if [ -z "${SUBSTRATE_TOP:-}" ]; then
+    p="${HERE}"
+    while [ "${p}" != "/" ] && [ ! -f "${p}/AGENTS.md" ] && [ ! -f "${p}/CLAUDE.md" ]; do
+        p=$(dirname "${p}")
+    done
+    SUBSTRATE_TOP="${p}"
+fi
+: "${STAGE1_PREFIX:=/opt/substrate}"
+: "${JOBS:=$(nproc 2>/dev/null || echo 4)}"
+PATH="${STAGE1_PREFIX}/bin:${PATH}"; export PATH
+
+[ -d "${TREE_DIR}" ] || { echo "build.sh: run ./fetch.sh first" >&2; exit 1; }
+
+# Assemble the mini-sysroot: Motif + the X client stack + libXinerama.
+SR="${HERE}/build/sysroot"
+rm -rf "${SR}"; mkdir -p "${SR}/usr"
+_have=0
+for d in xorgproto libXau xtrans libxcb libX11 libXext libICE libSM \
+         libXt libXmu libXpm libXaw libXinerama motif; do
+    st="${SUBSTRATE_TOP}/dist-${d}"
+    [ -d "${st}/usr" ] || continue
+    cp -a "${st}/usr/." "${SR}/usr/"
+    _have=$((_have + 1))
+done
+[ "${_have}" -ge 14 ] || { echo "build.sh: only ${_have} dist trees found — build the X stack + Motif + libXinerama first" >&2; exit 1; }
+
+BUILD_DIR="${HERE}/build/build-stage-substrate"
+rm -rf "${BUILD_DIR}"; mkdir -p "${BUILD_DIR}"; cd "${BUILD_DIR}"
+
+echo "==> configure"
+# crypt lives in substrate libc — do NOT let configure add -lcrypt.
+"${TREE_DIR}/configure" \
+    --host=i386-unknown-substrate \
+    --prefix=/usr/dt \
+    CC=i386-unknown-substrate-gcc \
+    CXX=i386-unknown-substrate-g++ \
+    CPPFLAGS="-I${SR}/usr/include -I${SR}/usr/include/X11" \
+    LDFLAGS="-L${SR}/usr/lib -Wl,-rpath-link,${SR}/usr/lib" \
+    --with-tcl=/usr/lib
+
+echo "==> make -j${JOBS}"
+make -j"${JOBS}"
+
+echo "==> CDE build complete (if you reached here, all prerequisites are in place)"
