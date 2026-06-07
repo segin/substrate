@@ -121,7 +121,33 @@ mid-layer):
 Boot parameters (`root=`, `console=`, `video=`, `debug=`, …) are documented in
 [`usr.man/man7/kernel_command_line.7`](usr.man/man7/kernel_command_line.7).
 
-## Building the toolchain
+## Building
+
+From a clean checkout the repo-root orchestrator builds everything in order —
+the Substrate-native GNU toolchain, the kernel and userland, every `contrib/`
+port in dependency order, and finally the bootable image:
+
+```sh
+sudo ./build.sh
+```
+
+`sudo` is needed only because the cross toolchain installs under
+`/opt/substrate` (override with `STAGE1_PREFIX=`). Useful env knobs:
+`SKIP_TOOLCHAIN=1`, `SKIP_CONTRIB=1`, `SKIP_IMAGE=1`, and
+`ONLY="pkg1 pkg2 ..."` to (re)build only specific contrib ports.
+
+To iterate without a full rebuild:
+
+```sh
+make -C sys                                   # just the kernel (booted via -kernel)
+./build-rootfs.sh --dist --toolchain --image  # userland + overlays + rootfs.img
+```
+
+The kernel is not stored in the image, so kernel changes need only
+`make -C sys` and a relaunch. The two stages the orchestrator drives —
+the toolchain and the root filesystem image — are detailed next.
+
+### Toolchain
 
 To produce a Substrate-native GNU toolchain — binutils + GCC patched for the
 `i386-unknown-substrate` target — and an on-target `/usr/bin/gcc`:
@@ -141,7 +167,7 @@ Each `contrib/<pkg>/build.sh` can also be run individually. Patch series live
 in `contrib/<pkg>/patches/`; nothing under `contrib/*/build/` is vendored —
 `fetch.sh` downloads and patches upstream releases.
 
-## Building the root filesystem image
+### Root filesystem image
 
 `build-rootfs.sh` stages the target tree into `dist/` and bakes `rootfs.img`:
 
@@ -153,14 +179,8 @@ in `contrib/<pkg>/patches/`; nothing under `contrib/*/build/` is vendored —
 
 `--dist` wipes and repopulates `dist/`, so re-run `--toolchain` after it to
 restore the compiler. `--toolchain` skips any staging tree that is absent
-(e.g. a no-compiler bring-up image).
-
-The all-in-one orchestrator builds the toolchain, every `contrib/` port in
-dependency order, and the image from a clean checkout:
-
-```sh
-sudo ./build.sh                    # env knobs: SKIP_TOOLCHAIN, SKIP_CONTRIB, SKIP_IMAGE, ONLY="pkg ..."
-```
+(e.g. a no-compiler bring-up image). For a clean-checkout build of all three
+stages at once, use `sudo ./build.sh` (see [Building](#building) above).
 
 ## Testing
 
