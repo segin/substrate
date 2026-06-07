@@ -13,6 +13,7 @@
 #include <locale.h>
 #include <sys/syscall.h>
 #include <sys/sem.h>
+#include <sys/timeb.h>
 #include <sys/stat.h>
 #include <sys/utsname.h>
 #include <sys/time.h>
@@ -1115,6 +1116,18 @@ int eaccess(const char *pathname, int mode) {
 }
 int euidaccess(const char *pathname, int mode) {
     return access(pathname, mode);
+}
+
+/* ftime(3): obsolete; fill struct timeb from gettimeofday. */
+int ftime(struct timeb *tp) {
+    struct timeval tv;
+    if (gettimeofday(&tv, NULL) != 0)
+        return -1;
+    tp->time     = tv.tv_sec;
+    tp->millitm  = (unsigned short)(tv.tv_usec / 1000);
+    tp->timezone = 0;
+    tp->dstflag  = 0;
+    return 0;
 }
 
 /* Real-time signal range.  Substrate's signal space is 1..31 (SIGSYS) with no
