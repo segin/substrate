@@ -136,6 +136,12 @@ extern int sys_mprotect(void*, size_t, int);
 extern int sys_msync(void*, size_t, int);
 extern void *sys_brk(void *);
 
+/* System V semaphores (sys/kern/ipc_sem.c) */
+struct sembuf;
+extern int sys_semget(key_t, int, int);
+extern int sys_semop(int, struct sembuf *, size_t);
+extern int sys_semctl(int, int, int, uintptr_t);
+
 /* Signals */
 extern int sys_kill(int, int);
 extern int sys_signal(int, void*);

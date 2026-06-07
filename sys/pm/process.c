@@ -1139,6 +1139,12 @@ void proc_exit(int code) {
         }
     }
 
+    /* Reverse this process's SEM_UNDO adjustments before it disappears. */
+    {
+        extern void sem_proc_cleanup(int pid);
+        sem_proc_cleanup(current_process->pid);
+    }
+
     /* Release any VT we put into KD_GRAPHICS (X server crash, etc.)
      * before tearing down fds.  Without this, a SEGV'd X server leaves
      * the framebuffer wedged in graphics mode and the keyboard in

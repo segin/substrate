@@ -572,6 +572,9 @@ static void init_core_subsystems(multiboot_info_t *mboot_info) {
     sched_init();
     kprint("Scheduler Initialized.\n");
 
+    extern void sem_init(void);
+    sem_init();         /* System V semaphore subsystem */
+
     hw_text_late_init();
 
     if (i386_cpu_has_apic() && smp_get_cpu_count() > 1) {

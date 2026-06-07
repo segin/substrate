@@ -203,6 +203,9 @@
 #define SYS_REMOVEXATTR 399
 #define SYS_LREMOVEXATTR 400
 #define SYS_FREMOVEXATTR 401
+#define SYS_SEMGET      402
+#define SYS_SEMOP       403
+#define SYS_SEMCTL      404
 
 void syscall_init(void);
 
