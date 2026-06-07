@@ -95,9 +95,11 @@ echo "==> configure"
 #   dtcm,
 #   dtappbuilder : need Motif's UIL (uil/UilDef.h + libUil + the uil compiler),
 #           which the Motif port does not build.
+#   ttsnoop : depends on dtappbuilder's dtcodegen generator (which pulls the
+#           whole App Builder lib chain + Motif), so it follows dtappbuilder.
 # Drop them from the programs SUBDIRS (each token removed idempotently) so the
 # rest of CDE builds to completion.
-for _skip in dtksh dtcm dtappbuilder; do
+for _skip in dtksh dtcm dtappbuilder ttsnoop; do
     sed -i "s/[[:space:]]${_skip}\([[:space:]]\)/\1/" programs/Makefile
 done
 
