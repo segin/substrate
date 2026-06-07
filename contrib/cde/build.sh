@@ -92,12 +92,14 @@ echo "==> configure"
 #           x86-64 instead of the i386 cross target; the final link fails on
 #           incompatible objects.  (Substrate side done: libc symbol surface +
 #           libiconv plain names.)
-#   dtappbuilder : links Motif's libUil, which needs Motif's WML/yacc generator
-#           chain (clients/uil/UilLexPars.h) the port doesn't build.  (dtcm only
-#           needs the uil/ public headers, now installed by the Motif port, so
-#           it is no longer deferred.)
-#   ttsnoop : depends on dtappbuilder's dtcodegen generator (which pulls the
-#           whole App Builder lib chain + Motif), so it follows dtappbuilder.
+#   dtappbuilder : builds its libs + dtcodegen fine (the Motif port now provides
+#           libUil), but src/ab then RUNS the cross-built dtcodegen to generate
+#           *_ui.h headers — and dtcodegen links Motif, so it can't execute on
+#           the build host.  Host-building it needs a host Motif (all of libXm),
+#           a separate large effort.  (dtcm only needs the uil/ public headers,
+#           now installed by the Motif port, so it builds.)
+#   ttsnoop : runs the same dtcodegen generator at build time, so it follows
+#           dtappbuilder.
 #   dtinfo,
 #   dtdocbook : need their own SGML build tooling (pmaker/Prelude.h generator,
 #           the dtdocbook parser) which is cross-built and won't run on the host.
