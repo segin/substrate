@@ -128,6 +128,17 @@ int srand48_r(long seedval, struct drand48_data *buffer);
 int seed48_r(unsigned short seed16v[3], struct drand48_data *buffer);
 int lcong48_r(unsigned short param[7], struct drand48_data *buffer);
 
+/* Non-reentrant SVID 48-bit PRNG: state held in a single hidden global. */
+double         drand48(void);
+double         erand48(unsigned short xsubi[3]);
+long           lrand48(void);
+long           nrand48(unsigned short xsubi[3]);
+long           mrand48(void);
+long           jrand48(unsigned short xsubi[3]);
+void           srand48(long seedval);
+unsigned short *seed48(unsigned short seed16v[3]);
+void           lcong48(unsigned short param[7]);
+
 /* Reentrant ecvt(3)/fcvt(3): write the converted digits into a caller buffer. */
 int ecvt_r(double value, int ndigit, int *decpt, int *sign, char *buf, size_t len);
 int fcvt_r(double value, int ndigit, int *decpt, int *sign, char *buf, size_t len);

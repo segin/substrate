@@ -132,3 +132,68 @@ lcong48_r(unsigned short param[7], struct drand48_data *buffer)
     buffer->__init = 1;
     return 0;
 }
+
+/*
+ * Non-reentrant family: the classic drand48()/lrand48()/... interface, all
+ * sharing a single hidden global state object (lazily SVID-default-seeded by
+ * the _r forms).  Not thread-safe — concurrent users want the _r forms above.
+ */
+static struct drand48_data __drand48_global;
+
+double drand48(void)
+{
+    double r;
+    drand48_r(&__drand48_global, &r);
+    return r;
+}
+
+double erand48(unsigned short xsubi[3])
+{
+    double r;
+    erand48_r(xsubi, &__drand48_global, &r);
+    return r;
+}
+
+long lrand48(void)
+{
+    long r;
+    lrand48_r(&__drand48_global, &r);
+    return r;
+}
+
+long nrand48(unsigned short xsubi[3])
+{
+    long r;
+    nrand48_r(xsubi, &__drand48_global, &r);
+    return r;
+}
+
+long mrand48(void)
+{
+    long r;
+    mrand48_r(&__drand48_global, &r);
+    return r;
+}
+
+long jrand48(unsigned short xsubi[3])
+{
+    long r;
+    jrand48_r(xsubi, &__drand48_global, &r);
+    return r;
+}
+
+void srand48(long seedval)
+{
+    srand48_r(seedval, &__drand48_global);
+}
+
+unsigned short *seed48(unsigned short seed16v[3])
+{
+    seed48_r(seed16v, &__drand48_global);
+    return __drand48_global.__old_x;
+}
+
+void lcong48(unsigned short param[7])
+{
+    lcong48_r(param, &__drand48_global);
+}
