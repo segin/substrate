@@ -90,7 +90,7 @@ export STAGE1_PREFIX JOBS SUBSTRATE_TOP="$HERE"
 #                    (build.sh points -I/-L at dist-zlib + dist-openssl).
 #                    Cross-built via nginx's --crossbuild mechanism.
 #
-DEFAULT_CONTRIB="bzip2 libiconv zlib openssl ncurses gzip tzdata make sed expr libarchive mpg123 curl nginx inetutils zsh e2fsprogs e2tools xorgproto xcb-proto libXau xtrans libxcb libX11 libXext libICE libSM libXt libXmu libXpm libXaw libXinerama libjpeg lmdb mksh xterm xauth luit"
+DEFAULT_CONTRIB="bzip2 libiconv zlib openssl ncurses gzip tzdata make sed expr libarchive mpg123 curl nginx inetutils zsh e2fsprogs e2tools xorgproto xcb-proto libXau xtrans libxcb libX11 libXext libICE libSM libXt libXmu libXpm libXaw libXinerama libjpeg lmdb mksh tcl xterm xauth luit"
 : "${ONLY:=${DEFAULT_CONTRIB}}"
 
 #

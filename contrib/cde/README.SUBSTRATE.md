@@ -32,21 +32,27 @@ through the large majority of its checks.  Resolved so far:
 - **crypt** — substrate keeps `crypt()` in libc (no separate `libcrypt`);
   configure must not be told to add `-lcrypt`.
 
-- **libjpeg** — newly ported (`contrib/libjpeg/`, IJG v9).
-- **lmdb** — newly ported (`contrib/lmdb/`).  Building it surfaced three
-  missing pieces of substrate's libc that are now fixed in-tree rather than
-  shimmed: `posix_memalign`, `O_SYNC`, and `BYTE_ORDER` via `<sys/types.h>`.
+- **libjpeg** — ported (`contrib/libjpeg/`, IJG v9).
+- **lmdb** — ported (`contrib/lmdb/`).  Surfaced `posix_memalign`, `O_SYNC`,
+  `BYTE_ORDER` (libc), and `pthread_mutexattr_setpshared` (steered onto
+  pthread mutexes, since substrate lacks the POSIX semaphores its BSD-flavoured
+  default wanted).
+- **mksh** — ported (`contrib/mksh/`) as the target `/bin/ksh`.
+- **Tcl** — ported (`contrib/tcl/`, core 8.6).  Surfaced TIOCM_* bits,
+  `IN6_ARE_ADDR_EQUAL`, `_SC_GET{PW,GR}_R_SIZE_MAX`, `pthread_attr_*scope`.
+
+With these, **`configure` now passes every library check** (jpeg, lmdb, Tcl,
+Motif, X) and stops at the host build-tool requirement below.
 
 ## Dependency roadmap (remaining, in rough priority order)
 
-Library ports (target):
-1. **Tcl** — required (`--with-tcl`); used by parts of the desktop/build.
-   Next blocker.
-
-Host build tools:
-4. **rpcgen** (`rpcsvc-proto`) — generates the ToolTalk RPC stubs at build
-   time.  The build host needs it.
-5. **ksh** (mksh or ksh93) — CDE build scripts and dtksh expect a ksh.
+Host build tools — `configure`'s current stop point requires these on the
+BUILD host: `rpcgen`, `ksh`/`ksh93`, `compress`, `sessreg`, `onsgmls`,
+`mkfontdir`, `bdftopcf`:
+1. **rpcgen** (`rpcsvc-proto`) — generates the ToolTalk RPC stubs at build time.
+2. **ksh** (host) — build scripts; build mksh for the host, or install one.
+3. **compress / sessreg / mkfontdir / bdftopcf / onsgmls** — ncompress, the
+   X session/font tools, and an SGML parser (opensp), all host-side.
 
 Target runtime subsystem — the critical path:
 6. **Sun RPC / ToolTalk.**  ToolTalk (`lib/tt`) is CDE's IPC backbone
