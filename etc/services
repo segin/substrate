@@ -38,6 +38,8 @@ http            80/tcp          www
 kerberos        88/tcp          kerberos5 krb5
 kerberos        88/udp          kerberos5 krb5
 pop3           110/tcp
+sunrpc         111/tcp          portmapper rpcbind
+sunrpc         111/udp          portmapper rpcbind
 nntp           119/tcp          readnews untp
 ntp            123/udp
 imap2          143/tcp          imap
