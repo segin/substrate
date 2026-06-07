@@ -83,19 +83,43 @@ echo "==> make -j${JOBS} libraries (lib/Xm, lib/Mrm)"
 make -j"${JOBS}" -C lib/Xm
 make -j"${JOBS}" -C lib/Mrm
 
+# libUil — the UIL library (CDE's App Builder links it).  Motif's WML
+# meta-compiler (tools/wml: wml + wmluiltok) is a build-HOST generator that
+# emits the UIL parser tables (UilSym*.h); the cross make would build it for the
+# target and it could not run on the host, so build those generators for the
+# host, generate the tables, then cross-build libUil.
+echo "==> build libUil (UIL library)"
+(
+  cd tools/wml
+  make clean >/dev/null 2>&1 || true
+  # host generators: drop the cross arch flags / substrate libs; the ~1990
+  # K&R sources need gnu89.  wml links libwml (built from wmlparse.y); wmluiltok
+  # is a flex scanner whose main comes from -lfl.
+  make wml wmluiltok CC="cc -std=gnu89" YACC="bison -y" LEX=flex \
+      CFLAGS="-O2 -w" AM_CFLAGS= LIBS= LDFLAGS= LEXLIB=-lfl wmluiltok_LDADD=-lfl
+  make Uil.c YACC="bison -y"                 # yacc the UIL grammar (Uil.c/Uil.h)
+  ln -sf Uil.h UilLexPars.h
+  ln -sf Uil.c UilLexPars.c
+  PATH=".:${PATH}" make wml-uil.mm CC="cc -std=gnu89" YACC="bison -y" \
+      CFLAGS="-O2 -w" AM_CFLAGS= LIBS= LDFLAGS=   # run wml -> UilSym*.h tables
+)
+# Modern bison defaults YYSTYPE to int — Motif's Uil.y `#define YYSTYPE yystype`
+# prologue is dropped from the generated header; -DYYSTYPE=yystype restores the
+# real (struct) value type so libUil's lexer and parser agree.
+make -C clients/uil libUil.la YACC="bison -y" DEFS="-DHAVE_CONFIG_H -DYYSTYPE=yystype"
+
 echo "==> install into ${DESTDIR}"
 rm -rf "${DESTDIR}"; mkdir -p "${DESTDIR}"
 make -C lib/Xm   install DESTDIR="${DESTDIR}"
 make -C lib/Mrm  install DESTDIR="${DESTDIR}"
 make -C bindings install DESTDIR="${DESTDIR}"   # xmbind.alias virtual-key data
 make -C bitmaps  install DESTDIR="${DESTDIR}"   # xm_hour*/xm_error/... X bitmaps (CDE DtSvc includes them)
-# UIL public headers (CDE's dtcm includes <uil/UilDef.h>).  Install only the
-# headers — building libUil itself needs Motif's WML/yacc generator chain
-# (clients/uil/UilLexPars.h), which is a separate effort; the headers are
-# shipped source + the wml-generated UilDBDef.h, which already exists.
+# UIL: the public headers (CDE's dtcm includes <uil/UilDef.h>) and libUil.a.
 mkdir -p "${DESTDIR}/usr/include/uil"
 cp clients/uil/Uil.h clients/uil/UilSymGl.h clients/uil/UilSymDef.h \
    clients/uil/UilDef.h clients/uil/XmAppl.uil tools/wml/UilDBDef.h \
    "${DESTDIR}/usr/include/uil/"
+cp clients/uil/.libs/libUil.a "${DESTDIR}/usr/lib/" 2>/dev/null || \
+   cp clients/uil/libUil.a "${DESTDIR}/usr/lib/" 2>/dev/null || true
 rm -f "${DESTDIR}"/usr/lib/*.la
 echo "==> Done.  Motif libraries staged at ${DESTDIR}/usr/{lib/lib{Xm,Mrm}.a,include/{Xm,Mrm}}"
