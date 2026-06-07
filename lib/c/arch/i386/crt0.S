@@ -76,6 +76,25 @@ _start:
 
     .size _start, . - _start
 
+/*
+ * __stack_chk_fail_local — the hidden, per-executable stack-smash handler
+ * that GCC's i386 -fstack-protector emits a call to from PIC/PIE code
+ * (instead of the interposable __stack_chk_fail, to avoid a PLT round-trip).
+ * It normally comes from the toolchain's libssp_nonshared.a, which
+ * substrate's GCC does not build; providing it here in crt0 — which every
+ * executable links — makes PIE + -fstack-protector work with no per-binary
+ * wiring.  It is terminal (tail-calls __stack_chk_fail, which _exit()s), so
+ * clobbering %ebx to reach the PLT is safe.
+ */
+    .globl __stack_chk_fail_local
+    .hidden __stack_chk_fail_local
+__stack_chk_fail_local:
+    call 1f
+1:  popl %ebx
+    addl $_GLOBAL_OFFSET_TABLE_+[.-1b], %ebx
+    jmp __stack_chk_fail@PLT
+    .size __stack_chk_fail_local, . - __stack_chk_fail_local
+
 /* Tell GNU ld the resulting executable does not need an executable
  * stack.  Without this section, ld defaults to a W+X stack and warns
  * "missing .note.GNU-stack section implies executable stack" at
