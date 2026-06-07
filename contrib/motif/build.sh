@@ -88,5 +88,6 @@ rm -rf "${DESTDIR}"; mkdir -p "${DESTDIR}"
 make -C lib/Xm   install DESTDIR="${DESTDIR}"
 make -C lib/Mrm  install DESTDIR="${DESTDIR}"
 make -C bindings install DESTDIR="${DESTDIR}"   # xmbind.alias virtual-key data
+make -C bitmaps  install DESTDIR="${DESTDIR}"   # xm_hour*/xm_error/... X bitmaps (CDE DtSvc includes them)
 rm -f "${DESTDIR}"/usr/lib/*.la
 echo "==> Done.  Motif libraries staged at ${DESTDIR}/usr/{lib/lib{Xm,Mrm}.a,include/{Xm,Mrm}}"
