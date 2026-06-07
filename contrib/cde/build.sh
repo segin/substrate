@@ -43,13 +43,13 @@ SR="${HERE}/build/sysroot"
 rm -rf "${SR}"; mkdir -p "${SR}/usr/lib"
 _have=0
 for d in xorgproto libXau xtrans libxcb libX11 libXext libICE libSM \
-         libXt libXmu libXpm libXaw libXinerama libjpeg lmdb tcl libtirpc motif; do
+         libXt libXmu libXpm libXaw libXinerama libXScrnSaver libjpeg lmdb tcl libtirpc motif; do
     st="${SUBSTRATE_TOP}/dist-${d}"
     [ -d "${st}/usr" ] || continue
     cp -a "${st}/usr/." "${SR}/usr/"
     _have=$((_have + 1))
 done
-[ "${_have}" -ge 18 ] || { echo "build.sh: only ${_have} dist trees found — build the X stack + Motif + libXinerama + libjpeg + lmdb + tcl first" >&2; exit 1; }
+[ "${_have}" -ge 19 ] || { echo "build.sh: only ${_have} dist trees found — build the X stack + Motif + libXinerama + libXScrnSaver + libjpeg + lmdb + tcl first" >&2; exit 1; }
 for l in c sys m pthread; do
     cp "${SUBSTRATE_TOP}/lib/${l}/lib${l}.so.0" "${SR}/usr/lib/" 2>/dev/null || true
 done
