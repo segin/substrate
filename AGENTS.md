@@ -336,6 +336,24 @@ manifest, `README.SUBSTRATE.md`.  Current set:
   port READMEs.
 - **luit** (`contrib/luit/`) — Unicode/locale ISO-2022 filter that
   bridges a UTF-8 locale to a legacy-encoded child; xterm spawns it.
+- **CDE** (`contrib/cde/`) — the Common Desktop Environment, cross-built
+  from the cdesktopenv tree.  `hosttools/build.sh` builds the build-host
+  programs CDE's configure/build need (rpcgen, mksh-as-ksh, compress,
+  sessreg, mkfontdir, bdftopcf, onsgmls, tradcpp); `build.sh` assembles a
+  Motif + X11 + libXinerama + libXScrnSaver + Tcl + libtirpc sysroot,
+  configures `-D__linux__`, host-builds the in-tree generator tools
+  (lineToData, mk_fonts_alias), and cross-builds.  Prerequisite ports:
+  **libXScrnSaver** (libXss), **libtirpc** (Sun RPC for ToolTalk),
+  **lmdb**, **libjpeg**, **Tcl**, **mksh**.  The CDE core desktop builds
+  end-to-end — all libraries, ToolTalk, and the programs dtwm, dtfile,
+  dtsession, dtterm, dtpad, dtstyle, dtcalc, dtmail, dtcm, dtprintinfo,
+  dtsearchpath, dtspcd, dtscreen, dtsr, dticon, dtcreate, dtlogin, ...
+  Deferred (each a separate host-tooling effort, documented in
+  `build.sh`): dtksh (ksh93 AST mamake cross-build), dtappbuilder +
+  ttsnoop (need a host Motif for dtcodegen), dtinfo + dtdocbook (SGML
+  pmaker chain), tttypes/types (host tt_type_comp), localized, dthelp
+  parser.  The Motif port (`contrib/motif/`) builds libUil via Motif's
+  WML meta-compiler (host wml/wmluiltok) and installs the uil/ headers.
 - **ext2 toolset** — `e2fsprogs` 1.47.2 (`contrib/e2fsprogs/`):
   mke2fs / e2fsck / tune2fs / debugfs / resize2fs / ... plus the
   static libext2fs / libcom_err / libe2p / libss / libuuid /
