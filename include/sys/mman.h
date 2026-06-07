@@ -37,6 +37,7 @@ int munlock(const void *addr, size_t len);
 int mlockall(int flags);
 int munlockall(void);
 int posix_madvise(void *addr, size_t length, int advice);
+int madvise(void *addr, size_t length, int advice);
 
 int shm_open(const char *name, int oflag, mode_t mode);
 int shm_unlink(const char *name);
@@ -57,6 +58,14 @@ int shm_unlink(const char *name);
 #define POSIX_MADV_SEQUENTIAL 2
 #define POSIX_MADV_WILLNEED   3
 #define POSIX_MADV_DONTNEED   4
+
+/* madvise(2) advice values (BSD/Linux spelling). */
+#define MADV_NORMAL     0
+#define MADV_RANDOM     1
+#define MADV_SEQUENTIAL 2
+#define MADV_WILLNEED   3
+#define MADV_DONTNEED   4
+#define MADV_FREE       8
 
 #ifdef __cplusplus
 }

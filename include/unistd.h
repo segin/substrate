@@ -127,6 +127,10 @@ pid_t setsid(void);
 int   daemon(int nochdir, int noclose);
 
 int access(const char *pathname, int mode);
+int eaccess(const char *pathname, int mode);
+int euidaccess(const char *pathname, int mode);
+void *sbrk(intptr_t increment);
+int   brk(void *addr);
 #define R_OK 4
 #define W_OK 2
 #define X_OK 1

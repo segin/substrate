@@ -10,6 +10,18 @@
  *   [5] eip (return address into caller)
  */
 
+/*
+ * _setjmp / _longjmp are the non-signal-mask variants.  substrate's setjmp
+ * never touches the signal mask (sigsetjmp is the masking one), so they are
+ * exact aliases.
+ */
+.globl _setjmp
+.type _setjmp, @function
+.set _setjmp, setjmp
+.globl _longjmp
+.type _longjmp, @function
+.set _longjmp, longjmp
+
 .globl setjmp
 .type setjmp, @function
 setjmp:

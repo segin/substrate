@@ -447,6 +447,12 @@ long double modfl(long double x, long double *iptr);
 long double scalbnl(long double x, int n);
 long double scalblnl(long double x, long n);
 int         ilogbl(long double x);
+
+/* BSD long-double classification + scalb (real functions, not the macros). */
+int isinfl(long double x);
+int isnanl(long double x);
+int finitel(long double x);
+long double scalbl(long double x, long double n);
 long double logbl(long double x);
 long double nextafterl(long double x, long double y);
 long double nexttowardl(long double x, long double y);

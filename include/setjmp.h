@@ -10,6 +10,9 @@ typedef int jmp_buf[6];
 
 int setjmp(jmp_buf env);
 void longjmp(jmp_buf env, int val) __attribute__((noreturn));
+/* Non-signal-mask variants (identical to setjmp/longjmp here). */
+int _setjmp(jmp_buf env);
+void _longjmp(jmp_buf env, int val) __attribute__((noreturn));
 
 /* sigjmp_buf: same shape as jmp_buf plus a signal-mask slot at the
  * tail.  sigsetjmp(env, 1) saves the current sigprocmask into env's

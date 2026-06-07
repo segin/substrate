@@ -12,6 +12,7 @@
 #include <sys/mman.h>
 #include <string.h> // For memset, memcpy
 #include <stdio.h>
+#include <malloc.h> // For struct mallinfo / memalign / valloc
 #include <stdatomic.h>
 #include <limits.h>
 #include <errno.h>
@@ -558,6 +559,63 @@ void *aligned_alloc(size_t alignment, size_t size) {
     int rc = posix_memalign(&p, alignment, size);
     if (rc) { errno = rc; return NULL; }
     return p;
+}
+
+/*
+ * memalign / valloc / pvalloc — the obsolete glibc aligned allocators, layered
+ * over posix_memalign.  Still referenced by old code (ksh93's libast vmalloc).
+ */
+void *memalign(size_t alignment, size_t size) {
+    void *p = NULL;
+    if (alignment < sizeof(void *)) alignment = sizeof(void *);
+    int rc = posix_memalign(&p, alignment, size);
+    if (rc) { errno = rc; return NULL; }
+    return p;
+}
+
+void *valloc(size_t size) {
+    return memalign(4096, size);            /* page-aligned */
+}
+
+void *pvalloc(size_t size) {
+    size_t pg = 4096;
+    size_t rounded = (size + pg - 1) & ~(pg - 1);
+    if (rounded < size) { errno = ENOMEM; return NULL; }   /* overflow */
+    return memalign(pg, rounded ? rounded : pg);
+}
+
+/*
+ * mallinfo / mallopt — glibc malloc introspection / tuning.  substrate's
+ * allocator exposes no statistics and takes no tuning parameters, so report an
+ * empty mallinfo and accept any mallopt() as a no-op success.
+ */
+struct mallinfo mallinfo(void) {
+    struct mallinfo mi;
+    memset(&mi, 0, sizeof(mi));
+    return mi;
+}
+
+int mallopt(int param, int value) {
+    (void)param; (void)value;
+    return 1;                               /* glibc: 1 == success */
+}
+
+/*
+ * GCC 16 with newer glibc headers emits __isoc23_strto{ll,ull,l,ul,...} in
+ * place of the C89 names (the C23 forms accept the 0b binary prefix).  They are
+ * ABI-identical to ours, which already accept base 2; alias them.
+ */
+long long __isoc23_strtoll(const char *nptr, char **endptr, int base) {
+    return strtoll(nptr, endptr, base);
+}
+unsigned long long __isoc23_strtoull(const char *nptr, char **endptr, int base) {
+    return strtoull(nptr, endptr, base);
+}
+long __isoc23_strtol(const char *nptr, char **endptr, int base) {
+    return strtol(nptr, endptr, base);
+}
+unsigned long __isoc23_strtoul(const char *nptr, char **endptr, int base) {
+    return strtoul(nptr, endptr, base);
 }
 
 /*

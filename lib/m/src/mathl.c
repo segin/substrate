@@ -185,3 +185,14 @@ int ufromfpxl(unsigned int *y, long double x, fenv_t *envp, int rounding_mode) {
     return ufromfpul(y, x, envp, rounding_mode);
 }
 
+
+/*
+ * BSD long-double classification + scaling entry points referenced as real
+ * symbols (function addresses) by ksh93's libast float table — they cannot be
+ * the <math.h> type-generic macros there, so provide them as functions over
+ * the __ internal forms.  scalbl is the obsolete scalb(3) for long double.
+ */
+int isinfl(long double x)  { return __isinfl(x); }
+int isnanl(long double x)  { return __isnanl(x); }
+int finitel(long double x) { return !__isinfl(x) && !__isnanl(x); }
+long double scalbl(long double x, long double n) { return scalbnl(x, (int)n); }

@@ -1077,6 +1077,51 @@ int semctl(int semid, int semnum, int cmd, ...) {
                                       (uintptr_t)semnum, (uintptr_t)cmd, arg));
 }
 
+/* ---- heap break (over SYS_BRK) ---- */
+
+void *sbrk(intptr_t incr) {
+    uintptr_t old = (uintptr_t)(long)_syscall1(SYS_BRK, 0);   /* query current */
+    if (incr == 0)
+        return (void *)old;
+    uintptr_t want = old + (uintptr_t)incr;
+    uintptr_t got  = (uintptr_t)(long)_syscall1(SYS_BRK, want);
+    if (got != want) {
+        errno = ENOMEM;
+        return (void *)-1;
+    }
+    return (void *)old;
+}
+
+int brk(void *addr) {
+    uintptr_t got = (uintptr_t)(long)_syscall1(SYS_BRK, (uintptr_t)addr);
+    if (got < (uintptr_t)addr) {
+        errno = ENOMEM;
+        return -1;
+    }
+    return 0;
+}
+
+/* madvise(2): substrate has no backing syscall; the call is purely advisory,
+ * so accept it as a successful no-op. */
+int madvise(void *addr, size_t length, int advice) {
+    (void)addr; (void)length; (void)advice;
+    return 0;
+}
+
+/* eaccess(3)/euidaccess(3): access(2) check using the effective IDs.  Substrate
+ * has a single access() that already tests against the effective credentials. */
+int eaccess(const char *pathname, int mode) {
+    return access(pathname, mode);
+}
+int euidaccess(const char *pathname, int mode) {
+    return access(pathname, mode);
+}
+
+/* Real-time signal range.  Substrate's signal space is 1..31 (SIGSYS) with no
+ * room for RT signals, so report an empty range (min > max). */
+int __libc_current_sigrtmin(void) { return 32; }
+int __libc_current_sigrtmax(void) { return 31; }
+
 int getrusage(int who, struct rusage *usage) {
     return __set_errno((int)_syscall2(SYS_GETRUSAGE, who, (uintptr_t)usage));
 }
