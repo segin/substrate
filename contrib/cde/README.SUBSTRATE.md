@@ -32,15 +32,16 @@ through the large majority of its checks.  Resolved so far:
 - **crypt** — substrate keeps `crypt()` in libc (no separate `libcrypt`);
   configure must not be told to add `-lcrypt`.
 
-Current `configure` stop point: **`libjpeg not found`**.
+- **libjpeg** — newly ported (`contrib/libjpeg/`, IJG v9).
+- **lmdb** — newly ported (`contrib/lmdb/`).  Building it surfaced three
+  missing pieces of substrate's libc that are now fixed in-tree rather than
+  shimmed: `posix_memalign`, `O_SYNC`, and `BYTE_ORDER` via `<sys/types.h>`.
 
 ## Dependency roadmap (remaining, in rough priority order)
 
 Library ports (target):
-1. **libjpeg** (or libjpeg-turbo) — hard `configure` requirement (dticon /
-   image handling).  Next immediate blocker.
-2. **Tcl** — required (`--with-tcl`); used by parts of the desktop/build.
-3. **lmdb** — optional (`AC_CHECK_LIB(lmdb, ...)`), can be skipped initially.
+1. **Tcl** — required (`--with-tcl`); used by parts of the desktop/build.
+   Next blocker.
 
 Host build tools:
 4. **rpcgen** (`rpcsvc-proto`) — generates the ToolTalk RPC stubs at build
