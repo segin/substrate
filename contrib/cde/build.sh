@@ -92,11 +92,12 @@ echo "==> configure"
 #           x86-64 instead of the i386 cross target; the final link fails on
 #           incompatible objects.  (Substrate side done: libc symbol surface +
 #           libiconv plain names.)
-#   dtcm  : needs Motif's UIL (uil/UilDef.h + libUil + the uil compiler), which
-#           the Motif port does not build.
+#   dtcm,
+#   dtappbuilder : need Motif's UIL (uil/UilDef.h + libUil + the uil compiler),
+#           which the Motif port does not build.
 # Drop them from the programs SUBDIRS (each token removed idempotently) so the
 # rest of CDE builds to completion.
-for _skip in dtksh dtcm; do
+for _skip in dtksh dtcm dtappbuilder; do
     sed -i "s/[[:space:]]${_skip}\([[:space:]]\)/\1/" programs/Makefile
 done
 
