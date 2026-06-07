@@ -112,7 +112,11 @@ echo "==> make -j${JOBS}"
 # LIBS: substrate splits the raw syscall wrappers (setsid, ...) into libsys,
 # which the CDE static libs (libDtSvc) reference.  libc.so DT_NEEDEDs libsys,
 # but ld won't resolve through a transitive DSO, so every executable must link
-# -lsys directly.  configure sets LIBS uniformly to "-ldl -lm"; append -lsys.
-make -j"${JOBS}" GENCPP="${HOSTTOOLS}/tradcpp" LIBS="-ldl -lm -lsys"
+# -lsys directly.  -lstdc++ pulls the shared C++ runtime (operator new/delete,
+# __gxx_personality_v0) that CDE's C++ objects in libDtSvc/libDtMail need — it
+# is required even for the C-driver (gcc) links like dtpad that drag those
+# objects out of the static archives.  configure sets LIBS uniformly to
+# "-ldl -lm"; append -lsys -lstdc++.
+make -j"${JOBS}" GENCPP="${HOSTTOOLS}/tradcpp" LIBS="-ldl -lm -lsys -lstdc++"
 
 echo "==> CDE build complete (if you reached here, all prerequisites are in place)"
