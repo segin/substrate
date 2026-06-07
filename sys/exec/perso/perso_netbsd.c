@@ -13,6 +13,7 @@
 #include <exec/perso/compat.h>
 #include <exec/perso/netbsd/netbsd_syscalls.h>
 #include <exec/perso/netbsd/netbsd_user.h>
+#include "perso_ipc_sem.h"
 #include <sys/resource.h>
 #include <sys/times.h>
 #include <sys/errno.h>
@@ -47,6 +48,9 @@ int netbsd_sys_getrusage(int who, struct rusage *rusage) {
 
 /* NetBSD syscall table - based on i386 column */
 static void *netbsd_syscalls[MAX_SYSCALLS] = {
+    [NETBSD_SYS_semget]         = (void *)&netbsd_sys_semget,
+    [NETBSD_SYS_semop]          = (void *)&netbsd_sys_semop,
+    [NETBSD_SYS_____semctl50]   = (void *)&netbsd_sys_semctl,
     [NETBSD_SYS_syscall]        = NULL,             /* syscall (indirect) */
     [NETBSD_SYS_exit]           = &sys_exit,
     [NETBSD_SYS_fork]           = &sys_fork,

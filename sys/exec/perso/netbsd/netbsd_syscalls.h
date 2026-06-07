@@ -183,4 +183,10 @@
 #define NETBSD_SYS_shutdown       134
 #define NETBSD_SYS_socketpair     135
 
+/* System V semaphores.  semctl is the time_t-64 "50" variant
+ * (____semctl50, syscall 442); semget/semop are unversioned. */
+#define NETBSD_SYS_semget         221
+#define NETBSD_SYS_semop          222
+#define NETBSD_SYS_____semctl50   442
+
 #endif /* _NETBSD_SYSCALLS_H */

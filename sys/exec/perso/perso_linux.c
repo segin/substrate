@@ -14,6 +14,7 @@
 #include <exec/perso/linux/linux_syscalls.h>
 #include <sys/fcntl.h>
 #include <exec/perso/linux_user.h>
+#include "perso_ipc_sem.h"
 #include <exec/perso/linux/linux_blkio.h>
 #include <exec/perso/linux/linux_errno.h>
 #include <exec/perso/linux/linux_exec.h>
@@ -1067,7 +1068,7 @@ static void *linux_syscalls[MAX_SYSCALLS] = {
     [LINUX_SYS_wait4]          = (void *)&kern_wait4,
     [LINUX_SYS_swapoff]        = NULL,
     [LINUX_SYS_sysinfo]        = (void *)&sys_sysinfo,
-    [LINUX_SYS_ipc]            = NULL,
+    [LINUX_SYS_ipc]            = (void *)&linux_sys_ipc,
     [LINUX_SYS_fsync]          = (void *)&sys_fsync,
     [LINUX_SYS_sigreturn]      = (void *)&linux_sys_sigreturn,
     [LINUX_SYS_clone]          = (void *)linux_sys_clone,
