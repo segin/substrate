@@ -94,12 +94,18 @@ int pthread_condattr_getclock(const pthread_condattr_t *attr, int *clock_id);
  * call them) -- stacksize is currently advisory. */
 #define PTHREAD_CREATE_JOINABLE 0
 #define PTHREAD_CREATE_DETACHED 1
+/* Contention scope.  Substrate threads are 1:1 with kernel threads, i.e.
+ * always system scope; process scope is not supported. */
+#define PTHREAD_SCOPE_SYSTEM    0
+#define PTHREAD_SCOPE_PROCESS   1
 int pthread_attr_init(pthread_attr_t *attr);
 int pthread_attr_destroy(pthread_attr_t *attr);
 int pthread_attr_setstacksize(pthread_attr_t *attr, size_t stacksize);
 int pthread_attr_getstacksize(const pthread_attr_t *attr, size_t *stacksize);
 int pthread_attr_setdetachstate(pthread_attr_t *attr, int detachstate);
 int pthread_attr_getdetachstate(const pthread_attr_t *attr, int *detachstate);
+int pthread_attr_setscope(pthread_attr_t *attr, int scope);
+int pthread_attr_getscope(const pthread_attr_t *attr, int *scope);
 
 /* ---------------- read/write locks ----------------
  * Built on the mutex + condvar above; writer-preferring so writers don't

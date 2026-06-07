@@ -23,6 +23,17 @@ int pthread_attr_getdetachstate(const pthread_attr_t *attr, int *state) {
     if (state) *state = attr ? *attr : PTHREAD_CREATE_JOINABLE;
     return 0;
 }
+/* Contention scope: substrate threads are always 1:1 system scope.  Accept
+ * PTHREAD_SCOPE_SYSTEM, reject PTHREAD_SCOPE_PROCESS, and always report
+ * system scope.  (The attr int holds the detach state, so scope is not
+ * stored — there is only one valid value.) */
+int pthread_attr_setscope(pthread_attr_t *attr, int scope) {
+    (void)attr;
+    return scope == PTHREAD_SCOPE_SYSTEM ? 0 : ENOTSUP;
+}
+int pthread_attr_getscope(const pthread_attr_t *attr, int *scope) {
+    (void)attr; if (scope) *scope = PTHREAD_SCOPE_SYSTEM; return 0;
+}
 
 /* ---------------- condition-variable attributes ----------------
  * A condattr is just the clock id; pthread_cond_init() copies it into the

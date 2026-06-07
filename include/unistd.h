@@ -206,6 +206,8 @@ long syscall(long number, ...);
 #define _SC_NPROCESSORS_CONF 9
 #define _SC_NPROCESSORS_ONLN 10
 #define _SC_PHYS_PAGES   11
+#define _SC_GETPW_R_SIZE_MAX 12
+#define _SC_GETGR_R_SIZE_MAX 13
 
 long sysconf(int name);
 

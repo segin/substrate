@@ -84,6 +84,10 @@ static inline int __in6_is_addr_v4mapped(const struct in6_addr *__a)
 #define IN6_IS_ADDR_MC_SITELOCAL(a) (IN6_IS_ADDR_MULTICAST(a) && __IN6_MC_SCOPE(a) == 0x5)
 #define IN6_IS_ADDR_MC_ORGLOCAL(a)  (IN6_IS_ADDR_MULTICAST(a) && __IN6_MC_SCOPE(a) == 0x8)
 #define IN6_IS_ADDR_MC_GLOBAL(a)    (IN6_IS_ADDR_MULTICAST(a) && __IN6_MC_SCOPE(a) == 0xe)
+/* Compare two IPv6 addresses for equality (POSIX/RFC 2553). */
+#define IN6_ARE_ADDR_EQUAL(a, b) \
+    (__builtin_memcmp(((const struct in6_addr *)(a))->s6_addr, \
+                      ((const struct in6_addr *)(b))->s6_addr, 16) == 0)
 #define IN6_IS_ADDR_UNSPECIFIED(a) \
     (((const struct in6_addr *)(a))->s6_addr[0]  == 0 && \
      ((const struct in6_addr *)(a))->s6_addr[1]  == 0 && \

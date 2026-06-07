@@ -149,6 +149,19 @@ struct termios {
 #define TIOCMBIS    0x5416
 #define TIOCMBIC    0x5417
 #define TIOCMSET    0x5418
+/* Modem line bits for TIOCMGET/TIOCMSET/TIOCMBIS/TIOCMBIC (mirror of the
+ * kernel's <sys/termios.h>; the userspace header had omitted them). */
+#define TIOCM_LE    0x001   /* Line Enable (DSR) */
+#define TIOCM_DTR   0x002
+#define TIOCM_RTS   0x004
+#define TIOCM_ST    0x008   /* Secondary Transmit */
+#define TIOCM_SR    0x010   /* Secondary Receive */
+#define TIOCM_CTS   0x020
+#define TIOCM_CAR   0x040   /* DCD */
+#define TIOCM_CD    TIOCM_CAR
+#define TIOCM_RNG   0x080   /* Ring */
+#define TIOCM_RI    TIOCM_RNG
+#define TIOCM_DSR   0x100
 #define TIOCGSOFTCAR 0x5419
 #define TIOCSSOFTCAR 0x541A
 #define FIONREAD    0x541B

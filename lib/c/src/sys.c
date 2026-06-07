@@ -1306,6 +1306,8 @@ long sysconf(int name) {
     case 9 /* _SC_NPROCESSORS_CONF */: return 1;
     case 10 /* _SC_NPROCESSORS_ONLN */: return 1;
     case 11 /* _SC_PHYS_PAGES */:  return 65536;
+    case 12 /* _SC_GETPW_R_SIZE_MAX */: return 1024;  /* getpw*_r buffer hint */
+    case 13 /* _SC_GETGR_R_SIZE_MAX */: return 1024;  /* getgr*_r buffer hint */
     default:                        return -1;
     }
 }
