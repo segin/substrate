@@ -125,6 +125,8 @@ done
 HOST_GEN_TOOLS="
 lib/DtTerm/util:lineToData:../Term/TermLineData.c
 programs/fontaliases:mk_fonts_alias:
+programs/localized/util:merge:
+programs/localized/util:mkcatdefs:
 "
 for entry in ${HOST_GEN_TOOLS}; do
     gdir=$(echo "${entry}" | cut -d: -f1)
