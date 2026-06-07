@@ -129,6 +129,20 @@ typedef struct afi_sock {
 static afi_sock_t *g_afi_head;
 static uint16_t    g_ephemeral_next = 49152;
 
+/* Hand out a host-order ephemeral port in the IANA dynamic range
+ * [49152, 65535], never 0.  Used by bind(port 0) so getsockname()
+ * reports a concrete port immediately (POSIX/BSD semantics) rather
+ * than 0 — Sun RPC's svc_reg() reads the port via getsockname right
+ * after bind and registers it with rpcbind, so a 0 here makes a
+ * service register port 0 and then conflict with its own real-port
+ * re-registration (CDE ToolTalk's ttsession). */
+static uint16_t afinet_alloc_ephemeral(void) {
+    if (g_ephemeral_next < 49152) g_ephemeral_next = 49152;
+    uint16_t port = g_ephemeral_next++;
+    if (g_ephemeral_next == 0) g_ephemeral_next = 49152;
+    return port;
+}
+
 /* ------------------------------------------------------------------ */
 /* SIOC* ioctls — interface configuration via an AF_INET socket fd.   */
 /* ------------------------------------------------------------------ */
@@ -499,6 +513,10 @@ int afinet_bind(int fd, const void *addr, socklen_t len) {
         const struct sin_kern *sin = (const struct sin_kern *)addr;
         if (sin->sin_family != AF_INET) return -EAFNOSUPPORT;
         s->local_port = __builtin_bswap16(sin->sin_port);
+        /* bind(port 0): assign an ephemeral port now so getsockname()
+         * reflects it (POSIX/BSD) — see afinet_alloc_ephemeral(). */
+        if (s->local_port == 0)
+            s->local_port = afinet_alloc_ephemeral();
         memcpy(s->local_addr, &sin->sin_addr, 4);
         if (s->tcp) {
             uint32_t la; memcpy(&la, s->local_addr, 4);
@@ -509,6 +527,8 @@ int afinet_bind(int fd, const void *addr, socklen_t len) {
         const struct sin6_kern *sin6 = (const struct sin6_kern *)addr;
         if (sin6->sin6_family != AF_INET6) return -EAFNOSUPPORT;
         s->local_port = __builtin_bswap16(sin6->sin6_port);
+        if (s->local_port == 0)
+            s->local_port = afinet_alloc_ephemeral();
         memcpy(s->local_addr, sin6->sin6_addr, 16);
         /* tcp_pcb_t is IPv4-only today; the v6 bind still has to
          * propagate the PORT into the PCB or the LISTEN socket

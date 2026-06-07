@@ -222,6 +222,21 @@ static void g_bound_unlink(afunix_sock_t *s) {
     mutex_unlock(&g_bound_lock);
 }
 
+/* Canonical AF_UNIX path length from a sockaddr_un addrlen.  A pathname socket
+ * is a NUL-terminated string, so callers may pass any addrlen >= the real
+ * length (SUN_LEN, or the full sizeof(sockaddr_un) with trailing padding) — bind
+ * and connect must agree, so trim at the first NUL.  An abstract socket
+ * (sun_path[0]=='\0') has no terminator; its whole addrlen-2 is significant. */
+static int afunix_canon_pathlen(const char *path, socklen_t addrlen) {
+    int max = (addrlen >= 2) ? (int)addrlen - 2 : 0;
+    if (max > AFUNIX_PATH_MAX) max = AFUNIX_PATH_MAX;
+    if (max > 0 && path[0] == '\0')
+        return max;                 /* abstract: length is significant */
+    int n = 0;
+    while (n < max && path[n] != '\0') n++;
+    return n;
+}
+
 static afunix_sock_t *afunix_find_bound(const char *path, int len) {
     g_bound_lock_init();
     mutex_lock(&g_bound_lock);
@@ -626,9 +641,8 @@ int sys_bind(int fd, const struct sockaddr *addr, socklen_t addrlen) {
     afunix_sock_t *s = afunix_from_fd(fd);
     if (!s) return -ENOTSOCK;
     if (s->state != AFUS_UNCONNECTED) return -EINVAL;
-    socklen_t pathlen = addrlen - 2;
     const char *path = ((const struct sockaddr_un *)addr)->sun_path;
-    if (pathlen > AFUNIX_PATH_MAX) pathlen = AFUNIX_PATH_MAX;
+    socklen_t pathlen = afunix_canon_pathlen(path, addrlen);
     /* Reject already-bound paths. */
     if (afunix_find_bound(path, pathlen)) return -EADDRINUSE;
     mutex_lock(&s->lock);
@@ -741,9 +755,8 @@ int sys_connect(int fd, const struct sockaddr *addr, socklen_t addrlen) {
     if (!client) return -ENOTSOCK;
     if (client->state == AFUS_CONNECTED) return -EISCONN;
 
-    socklen_t pathlen = addrlen - 2;
     const char *path = ((const struct sockaddr_un *)addr)->sun_path;
-    if (pathlen > AFUNIX_PATH_MAX) pathlen = AFUNIX_PATH_MAX;
+    socklen_t pathlen = afunix_canon_pathlen(path, addrlen);
 
     afunix_sock_t *server = afunix_find_bound(path, pathlen);
     if (!server) return -ECONNREFUSED;
