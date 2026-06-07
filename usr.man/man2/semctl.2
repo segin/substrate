@@ -1,0 +1,133 @@
+.\"
+.\" SEMCTL(2) - Substrate Native Personality
+.\"
+.TH SEMCTL 2 "June 2026" "Substrate OS" "System Calls"
+.SH NAME
+semctl \- System V semaphore control operations
+.SH LIBRARY
+Standard C library
+.RI ( libc ", " \-lc )
+.SH SYNOPSIS
+.nf
+.B #include <sys/sem.h>
+.PP
+.BI "int semctl(int " semid ", int " semnum ", int " cmd ", ... /* union semun " arg " */);
+.fi
+.SH DESCRIPTION
+.BR semctl ()
+performs the control operation
+.I cmd
+on the System V semaphore set identified by
+.IR semid ,
+or on the
+.IR semnum -th
+semaphore of that set.  Operations that need a fourth argument take a
+.IR "union semun" :
+.PP
+.in +4n
+.nf
+union semun {
+    int              val;    /* SETVAL */
+    struct semid_ds *buf;    /* IPC_STAT, IPC_SET */
+    unsigned short  *array;  /* GETALL, SETALL */
+};
+.fi
+.in
+.SH COMMANDS
+.TP
+.B IPC_STAT
+Copy the
+.I semid_ds
+of the set into
+.IR arg.buf .
+.TP
+.B IPC_SET
+Set the owner uid/gid and permission mode of the set from
+.IR arg.buf .
+.TP
+.B IPC_RMID
+Remove the set immediately; any process blocked in
+.BR semop (2)
+on it is woken with
+.BR EIDRM .
+.TP
+.B GETVAL
+Return the value of semaphore
+.IR semnum .
+.TP
+.B SETVAL
+Set the value of semaphore
+.I semnum
+to
+.IR arg.val .
+.TP
+.B GETALL
+Store all semaphore values into
+.IR arg.array .
+.TP
+.B SETALL
+Set all semaphore values from
+.IR arg.array .
+.TP
+.B GETPID
+Return the pid of the process that last operated on semaphore
+.IR semnum .
+.TP
+.B GETNCNT
+Return the number of processes waiting for semaphore
+.I semnum
+to increase.
+.TP
+.B GETZCNT
+Return the number of processes waiting for semaphore
+.I semnum
+to become zero.
+.SH RETURN VALUE
+For
+.BR GETVAL ,
+.BR GETPID ,
+.BR GETNCNT ,
+and
+.B GETZCNT
+the requested value is returned.  Other commands return 0 on success.
+On error \-1 is returned and
+.I errno
+is set.
+.SH ERRORS
+.TP
+.B EACCES
+The caller lacks the permission required for
+.IR cmd .
+.TP
+.B EFAULT
+The address pointed to by
+.I arg
+is inaccessible.
+.TP
+.B EIDRM
+The set was removed.
+.TP
+.B EINVAL
+.I semid
+or
+.I cmd
+is invalid, or
+.I semnum
+is out of range.
+.TP
+.B EPERM
+.B IPC_SET
+or
+.B IPC_RMID
+was requested by a process that is neither the owner/creator nor
+privileged.
+.TP
+.B ERANGE
+.B SETVAL
+or
+.B SETALL
+specified a value greater than
+.BR SEMVMX .
+.SH SEE ALSO
+.BR semget (2),
+.BR semop (2)

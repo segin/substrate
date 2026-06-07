@@ -56,6 +56,19 @@ For the full detailed changelog, see `docs/CHANGELOG.md`.
   UMA per-item double-free guard, and `vm_map_audit` (validates every
   `entry->object` after each map mutation).  Each converts silent
   kernel-heap corruption into an immediate, located `panic()`.
+- System V semaphores (`sys/kern/ipc_sem.c`): `semget`/`semop`/`semctl`
+  (native syscalls 402/403/404).  A fixed `SEMMNI` set table with
+  key->id lookup (per-slot sequence numbers reject stale ids),
+  `ipc_perm` checks, atomic multi-op `semop` with interruptible
+  blocking via sleepq (`IPC_NOWAIT`, `semncnt`/`semzcnt` waiter
+  tracking, `EIDRM` on remove-while-blocked), the full `semctl`
+  command set, and `SEM_UNDO` reversed at `proc_exit`.  The
+  personality-agnostic core (`kern_sem*`) is wired into the Linux
+  (`ipc(2)` multiplexer), FreeBSD (`semget`/`semop`/`__semctl`) and
+  NetBSD (`____semctl50`) personalities via
+  `sys/exec/perso/perso_ipc_sem.c`, each marshalling its own
+  `semid_ds`/`semun` ABI.  Torture suite: `tests/lib/ipc/torture_sem.c`
+  (71 scenarios; 70 pass / 1 root-skip on substrate).
 
 ### Networking
 - TCP/IPv4 (`sys/net/tcp.c`): three-way handshake, the full close

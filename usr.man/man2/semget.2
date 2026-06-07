@@ -1,0 +1,92 @@
+.\"
+.\" SEMGET(2) - Substrate Native Personality
+.\"
+.TH SEMGET 2 "June 2026" "Substrate OS" "System Calls"
+.SH NAME
+semget \- get a System V semaphore set identifier
+.SH LIBRARY
+Standard C library
+.RI ( libc ", " \-lc )
+.SH SYNOPSIS
+.nf
+.B #include <sys/sem.h>
+.PP
+.BI "int semget(key_t " key ", int " nsems ", int " semflg ");
+.fi
+.SH DESCRIPTION
+.BR semget ()
+returns the identifier of the System V semaphore set associated with
+.IR key .
+A new set of
+.I nsems
+semaphores is created if
+.I key
+has the value
+.B IPC_PRIVATE
+or if no existing set is associated with
+.I key
+and
+.B IPC_CREAT
+is set in
+.IR semflg .
+.PP
+The low 9 bits of
+.I semflg
+define the permissions of the set.  If
+.B IPC_CREAT
+and
+.B IPC_EXCL
+are both set then the call fails with
+.B EEXIST
+if a set already exists for
+.IR key .
+.PP
+On creation
+.I nsems
+must be greater than 0 and not greater than
+.BR SEMMSL .
+For access to an existing set
+.I nsems
+may be 0 (don't care) or any value not larger than the set's size.
+The semaphores in a newly created set are initialised to 0.
+.SH RETURN VALUE
+On success the semaphore set identifier (a non-negative integer) is
+returned.  On error \-1 is returned and
+.I errno
+is set to indicate the error.
+.SH ERRORS
+.TP
+.B EACCES
+A set exists for
+.I key
+but the caller lacks permission.
+.TP
+.B EEXIST
+.B IPC_CREAT
+and
+.B IPC_EXCL
+were set and a set already exists for
+.IR key .
+.TP
+.B EINVAL
+.I nsems
+is out of range for the requested operation.
+.TP
+.B ENOENT
+No set exists for
+.I key
+and
+.B IPC_CREAT
+was not set.
+.TP
+.B ENOSPC
+The system-wide limit on semaphore sets
+.RB ( SEMMNI )
+would be exceeded.
+.TP
+.B ENOMEM
+Insufficient memory to create the set.
+.SH SEE ALSO
+.BR semop (2),
+.BR semctl (2),
+.BR ftok (3)

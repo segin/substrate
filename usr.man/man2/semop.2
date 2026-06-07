@@ -1,0 +1,115 @@
+.\"
+.\" SEMOP(2) - Substrate Native Personality
+.\"
+.TH SEMOP 2 "June 2026" "Substrate OS" "System Calls"
+.SH NAME
+semop \- System V semaphore operations
+.SH LIBRARY
+Standard C library
+.RI ( libc ", " \-lc )
+.SH SYNOPSIS
+.nf
+.B #include <sys/sem.h>
+.PP
+.BI "int semop(int " semid ", struct sembuf *" sops ", size_t " nsops ");
+.fi
+.SH DESCRIPTION
+.BR semop ()
+performs operations on selected semaphores in the set indicated by
+.IR semid .
+Each of the
+.I nsops
+elements in the array
+.I sops
+specifies one operation:
+.PP
+.in +4n
+.nf
+struct sembuf {
+    unsigned short sem_num;  /* semaphore number */
+    short          sem_op;   /* semaphore operation */
+    short          sem_flg;  /* operation flags */
+};
+.fi
+.in
+.PP
+.I sem_flg
+may be
+.B IPC_NOWAIT
+and/or
+.BR SEM_UNDO .
+The set of operations is performed
+.IR atomically :
+either all operations succeed at once, or none are applied and the
+call blocks (or fails).
+.PP
+For each operation, if
+.I sem_op
+is:
+.TP
+.B positive
+its value is added to the semaphore value.
+.TP
+.B negative
+and the semaphore value is at least its absolute value, the value is
+subtracted; otherwise the call blocks until it can proceed (or returns
+.B EAGAIN
+if
+.B IPC_NOWAIT
+is set).
+.TP
+.B zero
+the call proceeds when the semaphore value is 0, otherwise it blocks
+(or returns
+.BR EAGAIN ).
+.PP
+If
+.B SEM_UNDO
+is set, the adjustment is recorded and automatically undone when the
+process exits.
+.SH RETURN VALUE
+0 on success; \-1 on error with
+.I errno
+set.
+.SH ERRORS
+.TP
+.B E2BIG
+.I nsops
+exceeds
+.BR SEMOPM .
+.TP
+.B EACCES
+The caller lacks the required permission.
+.TP
+.B EAGAIN
+An operation could not proceed and
+.B IPC_NOWAIT
+was set.
+.TP
+.B EFAULT
+.I sops
+points outside the accessible address space.
+.TP
+.B EFBIG
+A
+.I sem_num
+is out of range for the set.
+.TP
+.B EIDRM
+The set was removed while the call was blocked.
+.TP
+.B EINTR
+The call was interrupted by a signal while blocked.
+.TP
+.B EINVAL
+.I semid
+is invalid, or
+.I nsops
+is 0.
+.TP
+.B ERANGE
+An operation would make a semaphore value exceed
+.BR SEMVMX .
+.SH SEE ALSO
+.BR semget (2),
+.BR semctl (2)
