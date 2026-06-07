@@ -97,11 +97,19 @@ contrib/     third-party components, each as a patch series + fetch.sh
              tzdata, mpg123, zlib, mandoc, less, qman (deferred),
              openssh, the X11 client library stack (xorgproto,
              xcb-proto, libXau, xtrans, libxcb, libX11, libXext,
-             libICE, libSM, libXt, libXmu, libXpm, libXaw) and the
-             xterm terminal emulator, the ext2 toolset (e2fsprogs,
-             e2tools), ext2-boot.  Each lands at
-             ${SUBSTRATE_TOP}/dist-<pkg>/ which build-rootfs.sh
-             overlays onto the image.
+             libICE, libSM, libXt, libXmu, libXpm, libXaw), the
+             xterm terminal emulator, xauth, luit, the window
+             managers (matwm2, twm, ctwm), the X bitmap fonts
+             (font-misc-misc, font-adobe-75dpi, font-adobe-100dpi)
+             and the ext2 toolset (e2fsprogs, e2tools), ext2-boot.
+             Each lands at ${SUBSTRATE_TOP}/dist-<pkg>/ which
+             build-rootfs.sh overlays onto the image.  Font ports
+             ship the BDF sources verbatim (no bdftopcf on the
+             host) plus a generated fonts.dir; the adobe ports also
+             derive ISO8859-1 single-byte variants from the
+             ISO10646-1 masters, which the en_US.UTF-8 XLC_FONTSET
+             binds for its Latin slots — without them fontset
+             clients (twm) render tofu (see the port READMEs).
 tools/       build and install helper scripts
 build.sh     repo-root end-to-end build (toolchain + native +
              contrib + image).  See build.sh header for env knobs.
@@ -117,7 +125,7 @@ The kernel remains monolithic and is organized into logical layers:
 - `sys/kern/`: Core services (Scheduler, Signals, Time, Sync, memtrack).
 - `sys/pm/`: Process management and lifecycle.
 - `sys/vm/`: Memory management (PMM, PMAP, VM objects, demand-paged user stacks). Carries always-on kernel-heap corruption tripwires — a `vm_object` magic canary, a buddy-allocator double-allocation detector, a UMA per-item double-free guard, and a `vm_map` entry/object auditor — that turn silent corruption into an immediate located panic. Per-process kernel stacks are 16 KiB to absorb the deepest nested syscall + IRQ call chains (notably the network TX path interrupted by a NIC RX IRQ).
-- `sys/vfs/` and `sys/fs/`: Virtual Filesystem and concrete implementations.
+- `sys/vfs/` and `sys/fs/`: Virtual Filesystem and concrete implementations. The buffer cache (`sys/vfs/bio.c`) is keyed at the block-device layer — `blkdev_do_read`/`do_write` go through `bio_dev_get`/`release` keyed by `(struct blkdev *, sector)` with read coalescing and write-through — so caching is transparent to every storage driver and filesystem; the filesystems carry no caching logic of their own. See `docs/design/block-cache-consolidation.md`.
 - `sys/drivers/`: Device driver framework and hardware drivers.
 - `sys/net/`: Network stack — TCP/IPv4, AF_INET / AF_UNIX sockets, loopback.
 - `sys/exec/`: Executable loading and execution personalities.
@@ -180,6 +188,14 @@ Userland is split by role (essential, admin, extended) and supported by a suite 
   `pwdb_atomic_rewrite` (write-to-`~`-then-rename), file locking
   via `flock`, ID allocation, name validation, and POSIX
   day-count helpers.
+- **Display Manager:** `sbin/sdm/` supervises the graphical login —
+  `sdm` (a shell supervisor) starts an `Xfbdev` server plus the
+  `sgreet` Xlib greeter, and on session end tears X down and loops
+  back to a fresh greeter.  `sgreet` authenticates against
+  `/etc/passwd` + `/etc/shadow` (same policy as `bin/login`), offers
+  a session chooser driven by `/etc/sdm/sessions` (`Label = command`
+  entries; F1 cycles), and execs the choice via `/etc/X11/Xsession`,
+  which runs `${SDM_SESSION:-matwm2}` as the session leader.
 - **Build Orchestration:** `build.sh` at the repo root drives a
   clean-checkout end-to-end build in four stages: (0) cross
   toolchain via `contrib/build-toolchain.sh`, (1) native
@@ -213,6 +229,16 @@ Every public library under `lib/` produces both flavors from a single source tre
 Build infrastructure lives in `Makefile.inc` as `SHLIB_CFLAGS` /
 `SHLIB_LDFLAGS`.  See `docs/design/ld.so-design.md` for the full
 loader contract that `.so.0` files must honour.
+
+`libsys` is the sole owner of the raw `syscall()` dispatcher and the
+`sys_*` typed wrappers — `libc` no longer duplicates them, so there are
+no colliding symbols when both are linked.  Every binary therefore
+links `libsys`: `Makefile.bin.inc` adds `-l:libsys.a` (inside a
+`--start-group` with `libc`/`libm`) for static links and
+`-l:libsys.so.0` for dynamic ones.  A binary that calls `syscall()`
+directly (e.g. `bin/ldtctl`) needs it on the link line because ld
+won't follow `libc.so.0`'s `DT_NEEDED` to resolve an object-file
+reference.
 
 ### Native crt0
 

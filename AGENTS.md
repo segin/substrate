@@ -85,6 +85,18 @@ For the full detailed changelog, see `docs/CHANGELOG.md`.
 - ext2: timestamp fixes (write ctime, add_entry/remove_entry parent timestamps)
 - UDF: Complete read-write driver with unit tests and man pages
 - Buffer cache (bio): hash lookup, queueing, delayed write, syncer kthread
+- Block-level read cache: the buffer cache is keyed at the block-device
+  layer — `blkdev_do_read`/`do_write` (`sys/drivers/storage/blkdev.c`)
+  route through `bio_dev_get`/`release` keyed by `(struct blkdev *,
+  sector)` with read coalescing and write-through, so caching works
+  automatically for every storage driver with no driver changes and the
+  filesystems carry no caching logic.  The old per-fs `bcache[]` array is
+  gone; `blkdev_unregister` calls `bio_dev_purge`.  See
+  `docs/design/block-cache-consolidation.md`.
+- readdir/getdents byte-offset cookies: `struct dirent` carries a
+  `uint64_t d_off`; ext2 readdir is byte-offset based and getdents/
+  getdents64 advance by it — fixes `rm -rf` needing multiple passes on
+  large directories (the dir-index cookie no longer collides).
 
 ### Drivers
 - Framebuffer: linear FB, BGA, `vga=WxH@BPP` mode selection, multi-device registry
@@ -108,6 +120,13 @@ For the full detailed changelog, see `docs/CHANGELOG.md`.
 
 ### Libraries & Build
 - libsys syscall wrapper library, kernel library modularization
+- libsys is the sole owner of the raw `syscall()` dispatcher and the
+  `sys_*` typed wrappers (e.g. `sys_ioctl`, `sys_stat`, `sys_getpid`);
+  `libc` no longer duplicates them, so static + dynamic links carry no
+  colliding symbols.  `Makefile.bin.inc` links `-l:libsys.a` (in a
+  `--start-group` with libc/libm) for static binaries and
+  `-l:libsys.so.0` for dynamic ones; a binary that calls `syscall()`
+  directly (`bin/ldtctl`) needs libsys on its own link line.
 - Root filesystem staging (`dist/`), test framework (`tests/sys/`)
 - Every library under `lib/` ships both static (`libX.a`) and shared
   (`libX.so.0`) builds from a single source tree via dual `.o` /
@@ -193,6 +212,21 @@ For the full detailed changelog, see `docs/CHANGELOG.md`.
   matching gcc include-fixed snapshot, so the next layer's
   configure probes find them.
 
+### Userland Tools & Display Manager
+- `bin/top`: procps-grade `top(1)` — multi-source snapshot
+  (`top_snapshot.c`), five-line summary + sortable process table
+  (`top_render.c`), column sorting (`top_sort.c`), interactive
+  terminal control with guaranteed restore and SIGWINCH resize
+  (`top.c`).  RSS comes from `pmap_resident_count`; the `%Cpu(s)`
+  line is held to 80 columns (procps field layout).  Unit tests under
+  `tests/bin/top/`; man page `usr.man/man1/top.1`.
+- `sbin/sdm` display manager: `sdm` supervises `Xfbdev` + the
+  `sgreet` Xlib greeter; `sgreet` authenticates like `bin/login` and
+  offers a session chooser driven by `/etc/sdm/sessions`
+  (`Label = command` lines; F1 cycles).  The chosen command is
+  exported as `$SDM_SESSION`, which `/etc/X11/Xsession` execs as the
+  session leader (`${SDM_SESSION:-matwm2}`).
+
 ### Userland Ports (contrib/)
 
 Every third-party userland lives under `contrib/<pkg>/` as a
@@ -272,6 +306,23 @@ manifest, `README.SUBSTRATE.md`.  Current set:
   bitmap fonts + Athena toolbar (Xft/freetype disabled).  No X
   server is ported — these are client-side; functional use needs
   an X server over TCP.
+- **Window managers** — `matwm2` (`contrib/matwm2/`, the default
+  session leader), **`twm` 1.0.12** (`contrib/twm/`, autotools) and
+  **`ctwm` 4.1.0** (`contrib/ctwm/`, CMake; USE_JPEG/XRANDR/M4 off,
+  HAS_REGEX pre-seeded against `libregex`, `lrand48`→`random` patch).
+- **X bitmap fonts** — `font-misc-misc` 1.1.3 (the `fixed`/`9x15`
+  misc family) and **`font-adobe-75dpi` / `font-adobe-100dpi`** 1.0.4
+  (helvetica/times/courier/...).  Ports stage the `.bdf` sources
+  verbatim (substrate has no `bdftopcf`; libXfont reads BDF directly)
+  with a generated `fonts.dir`.  The adobe ports also DERIVE
+  ISO8859-1 single-byte variants from the ISO10646-1 masters: the X11
+  `en_US.UTF-8` `XLC_FONTSET` binds its Latin slots
+  (`ISO8859-1:GL`/`:GR`) to 1-byte fonts, and with only 2-byte
+  ISO10646-1 fonts present libX11's `XmbDrawString` pairs bytes into
+  bogus `XChar2b` indices → tofu boxes (the "twm font bug").  See the
+  port READMEs.
+- **luit** (`contrib/luit/`) — Unicode/locale ISO-2022 filter that
+  bridges a UTF-8 locale to a legacy-encoded child; xterm spawns it.
 - **ext2 toolset** — `e2fsprogs` 1.47.2 (`contrib/e2fsprogs/`):
   mke2fs / e2fsck / tune2fs / debugfs / resize2fs / ... plus the
   static libext2fs / libcom_err / libe2p / libss / libuuid /
