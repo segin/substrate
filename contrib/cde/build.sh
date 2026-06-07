@@ -86,14 +86,19 @@ echo "==> configure"
     LDFLAGS="-L${SR}/usr/lib -Wl,-rpath-link,${SR}/usr/lib" \
     --with-tcl="${SR}/usr/lib"
 
-# Disable dtksh (ksh93): its AST mamake/iffe build detects the BUILD host
-# (HOSTTYPE=linux.i386-64) and compiles libast/libcmd/libshell for x86-64
-# instead of the i386 cross target, so the final i386 dtksh link fails on
-# incompatible objects.  The substrate-side surface (libc symbols, libiconv
-# plain names) is in place; cross-compiling ksh93's bespoke build system is a
-# separate effort.  Drop dtksh from the programs SUBDIRS (idempotent) so the
-# rest of CDE builds.
-sed -i 's/\(^[[:space:]]*dtcalc dtaction dtspcd dtscreen \)dtksh \(dtcm\)/\1\2/' programs/Makefile
+# Deferred programs — each blocks on a separate effort, not a substrate gap:
+#   dtksh : ksh93's AST mamake/iffe detects the BUILD host
+#           (HOSTTYPE=linux.i386-64) and compiles libast/libcmd/libshell for
+#           x86-64 instead of the i386 cross target; the final link fails on
+#           incompatible objects.  (Substrate side done: libc symbol surface +
+#           libiconv plain names.)
+#   dtcm  : needs Motif's UIL (uil/UilDef.h + libUil + the uil compiler), which
+#           the Motif port does not build.
+# Drop them from the programs SUBDIRS (each token removed idempotently) so the
+# rest of CDE builds to completion.
+for _skip in dtksh dtcm; do
+    sed -i "s/[[:space:]]${_skip}\([[:space:]]\)/\1/" programs/Makefile
+done
 
 # In-tree generator tools: CDE compiles several small noinst_PROGRAMS and runs
 # them mid-build to generate source (lineToData -> TermLineData.c, ...).  The
