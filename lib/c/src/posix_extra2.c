@@ -230,6 +230,58 @@ int sigqueue(pid_t pid, int sig, const union sigval value) {
     return kill(pid, sig);
 }
 
+/* XSI/System V signal-management family, layered over sigprocmask/sigaction. */
+int sighold(int sig) {
+    sigset_t s;
+    sigemptyset(&s);
+    if (sigaddset(&s, sig) < 0) return -1;
+    return sigprocmask(SIG_BLOCK, &s, NULL);
+}
+
+int sigrelse(int sig) {
+    sigset_t s;
+    sigemptyset(&s);
+    if (sigaddset(&s, sig) < 0) return -1;
+    return sigprocmask(SIG_UNBLOCK, &s, NULL);
+}
+
+int sigignore(int sig) {
+    struct sigaction sa;
+    memset(&sa, 0, sizeof sa);
+    sa.sa_handler = SIG_IGN;
+    sigemptyset(&sa.sa_mask);
+    return sigaction(sig, &sa, NULL);
+}
+
+int sigpause(int sig) {
+    /* Remove `sig` from the current mask and suspend until a signal fires. */
+    sigset_t mask;
+    if (sigprocmask(SIG_BLOCK, NULL, &mask) < 0) return -1;
+    sigdelset(&mask, sig);
+    return sigsuspend(&mask);   /* always returns -1/EINTR */
+}
+
+sighandler_t sigset(int sig, sighandler_t disp) {
+    sigset_t s, oldmask;
+    sigemptyset(&s);
+    if (sigaddset(&s, sig) < 0) return SIG_ERR;
+
+    if (disp == SIG_HOLD) {
+        if (sigprocmask(SIG_BLOCK, &s, &oldmask) < 0) return SIG_ERR;
+        return sigismember(&oldmask, sig) ? SIG_HOLD : SIG_DFL;
+    }
+
+    struct sigaction sa, osa;
+    memset(&sa, 0, sizeof sa);
+    sa.sa_handler = disp;
+    sigemptyset(&sa.sa_mask);
+    if (sigaction(sig, &sa, &osa) < 0) return SIG_ERR;
+    /* sigset() unblocks the signal as part of establishing the disposition. */
+    if (sigprocmask(SIG_UNBLOCK, &s, &oldmask) < 0) return SIG_ERR;
+    if (sigismember(&oldmask, sig)) return SIG_HOLD;
+    return osa.sa_handler;
+}
+
 int sigtimedwait(const sigset_t *set, siginfo_t *info, const struct timespec *timeout) {
     (void)set; (void)info; (void)timeout;
     errno = ENOSYS;

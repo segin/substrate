@@ -132,6 +132,15 @@ int sigemptyset(sigset_t *set);
 int sigfillset(sigset_t *set);
 int sigaddset(sigset_t *set, int signo);
 int sigdelset(sigset_t *set, int signo);
+
+/* XSI/System V signal-management calls (built over sigprocmask/sigaction).
+ * SIG_HOLD is sigset()'s return value when the signal was previously held. */
+#define SIG_HOLD ((sighandler_t)2)
+int sighold(int sig);
+int sigrelse(int sig);
+int sigignore(int sig);
+int sigpause(int sig);
+sighandler_t sigset(int sig, sighandler_t disp);
 int sigismember(const sigset_t *set, int signo);
 
 /* POSIX extensions implemented in lib/c/src/posix_extra2.c. */
