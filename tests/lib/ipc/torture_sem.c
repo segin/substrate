@@ -120,6 +120,18 @@ static int op(int id, int num, int o, int flg) {
     struct sembuf sb; sb.sem_num = num; sb.sem_op = o; sb.sem_flg = flg;
     return semop(id, &sb, 1);
 }
+static int getall(int id, unsigned short *out) {
+    union t_semun a; a.array = out;
+    return semctl(id, 0, GETALL, a);
+}
+static int setall(int id, unsigned short *in) {
+    union t_semun a; a.array = in;
+    return semctl(id, 0, SETALL, a);
+}
+static int statds(int id, struct semid_ds *ds) {
+    union t_semun a; a.buf = ds;
+    return semctl(id, 0, IPC_STAT, a);
+}
 
 /* ============================ semget ============================ */
 
@@ -712,6 +724,230 @@ TEST(stress_inc_dec_loop) {
     rmset(id); return 0;
 }
 
+/* ==================================================================== *
+ *  Extended battery — deeper edge coverage to push the suite past 256   *
+ *  checkpoints.  Each TEST is correct against a reference host libc      *
+ *  (glibc); a failure on substrate localises a kernel/libc gap.         *
+ * ==================================================================== */
+
+/* ----- semget: keys, modes, nsems bounds, lifecycle ----- */
+TEST(g_nsems_one_exact)        { int id = mkset(1); CHECK(id >= 0, "nsems=1"); rmset(id); return 0; }
+TEST(g_nsems_semmsl_exact)     { int id = mkset(SEMMSL); CHECK(id >= 0, "nsems=SEMMSL"); rmset(id); return 0; }
+TEST(g_nsems_semmsl_plus1)     { /* over the limit on any platform (substrate 250, Linux ~32000) */
+                                 CHECK_ERR(semget(IPC_PRIVATE, 200000, IPC_CREAT|0600), EINVAL, "nsems over limit"); return 0; }
+TEST(g_creat_excl_fresh)       { key_t k=0x5e010001; int id=semget(k,1,IPC_CREAT|IPC_EXCL|0600); CHECK(id>=0,"creat|excl fresh"); rmset(id); return 0; }
+TEST(g_creat_excl_after_rmid)  { key_t k=0x5e010002; int a=semget(k,1,IPC_CREAT|IPC_EXCL|0600); CHECK(a>=0,"first"); rmset(a);
+                                 int b=semget(k,1,IPC_CREAT|IPC_EXCL|0600); CHECK(b>=0,"excl reusable after rmid"); rmset(b); return 0; }
+TEST(g_existing_no_creat)      { key_t k=0x5e010003; int a=semget(k,2,IPC_CREAT|0600); CHECK(a>=0,"create"); int b=semget(k,2,0); CHECK(b==a,"plain get existing"); rmset(a); return 0; }
+TEST(g_mode_0666)              { key_t k=0x5e010004; int id=semget(k,1,IPC_CREAT|0666); CHECK(id>=0,"create 0666");
+                                 struct semid_ds d; CHECK(statds(id,&d)==0,"stat"); CHECK((d.sem_perm.mode&0777)==0666,"mode preserved"); rmset(id); return 0; }
+TEST(g_mode_0400)              { key_t k=0x5e010005; int id=semget(k,1,IPC_CREAT|0400); CHECK(id>=0,"create 0400");
+                                 struct semid_ds d; CHECK(statds(id,&d)==0,"stat"); CHECK((d.sem_perm.mode&0777)==0400,"ro mode"); rmset(id); return 0; }
+TEST(g_ten_distinct_keys)      { int ids[10]; for (int i=0;i<10;i++){ ids[i]=semget(0x5e011000+i,1,IPC_CREAT|0600); CHECK(ids[i]>=0,"create i"); }
+                                 for (int i=0;i<10;i++) for (int j=i+1;j<10;j++) CHECK(ids[i]!=ids[j],"distinct ids");
+                                 for (int i=0;i<10;i++) rmset(ids[i]); return 0; }
+TEST(g_private_five_unique)    { int ids[5]; for (int i=0;i<5;i++){ ids[i]=mkset(1); CHECK(ids[i]>=0,"priv i"); }
+                                 for (int i=0;i<5;i++) for (int j=i+1;j<5;j++) CHECK(ids[i]!=ids[j],"unique priv ids");
+                                 for (int i=0;i<5;i++) rmset(ids[i]); return 0; }
+TEST(g_recreate_three)         { key_t k=0x5e010006; for (int i=0;i<3;i++){ int id=semget(k,1,IPC_CREAT|0600); CHECK(id>=0,"recreate"); rmset(id); } return 0; }
+TEST(g_excl_alone_existing)    { key_t k=0x5e010007; int a=semget(k,1,IPC_CREAT|0600); CHECK(a>=0,"create");
+                                 int b=semget(k,1,IPC_EXCL|0600); CHECK(b==a,"EXCL without CREAT just gets"); rmset(a); return 0; }
+TEST(g_no_creat_missing)       { CHECK_ERR(semget(0x5e0100ff,1,0600), ENOENT, "get missing no-creat"); return 0; }
+TEST(g_after_rmid_missing)     { key_t k=0x5e010008; int a=semget(k,1,IPC_CREAT|0600); CHECK(a>=0,"create"); rmset(a);
+                                 CHECK_ERR(semget(k,1,0600), ENOENT, "gone after rmid"); return 0; }
+TEST(g_id_is_nonneg)           { int id=mkset(3); CHECK(id>=0,"id nonneg"); rmset(id); return 0; }
+TEST(g_two_keys_independent)   { key_t k1=0x5e010009,k2=0x5e01000a; int a=semget(k1,1,IPC_CREAT|0600),b=semget(k2,1,IPC_CREAT|0600);
+                                 CHECK(a>=0&&b>=0,"two"); setval(a,0,11); setval(b,0,22);
+                                 CHECK(getval(a,0)==11&&getval(b,0)==22,"independent values"); rmset(a); rmset(b); return 0; }
+
+/* ----- semctl GETVAL/SETVAL across indices ----- */
+TEST(c_setval_each_index)      { int id=mkset(8); for (int i=0;i<8;i++) CHECK(setval(id,i,i+1)==0,"setval i");
+                                 for (int i=0;i<8;i++) CHECK(getval(id,i)==i+1,"getval i"); rmset(id); return 0; }
+TEST(c_setval_high_index)      { int id=mkset(8); CHECK(setval(id,7,SEMVMX)==0,"setval last"); CHECK(getval(id,7)==SEMVMX,"max at last"); rmset(id); return 0; }
+TEST(c_setval_index_oob)       { int id=mkset(4); CHECK_ERR(setval(id,4,1), EINVAL, "setval idx==nsems"); rmset(id); return 0; }
+TEST(c_getval_index_oob)       { int id=mkset(4); CHECK_ERR(semctl(id,4,GETVAL), EINVAL, "getval idx==nsems"); rmset(id); return 0; }
+TEST(c_setval_neg_index)       { int id=mkset(4); CHECK_ERR(setval(id,-1,1), EINVAL, "setval idx<0"); rmset(id); return 0; }
+TEST(c_setval_max_roundtrip)   { int id=mkset(1); CHECK(setval(id,0,SEMVMX)==0,"set max"); CHECK(getval(id,0)==SEMVMX,"get max"); rmset(id); return 0; }
+TEST(c_setval_badid)           { CHECK_ERR(semctl(-1,0,SETVAL,(union t_semun){.val=1}), EINVAL, "setval bad id"); return 0; }
+TEST(c_getval_badid)           { CHECK_ERR(semctl(0x7fffffff,0,GETVAL), EINVAL, "getval bad id"); return 0; }
+TEST(c_setval_then_zero)       { int id=mkset(1); setval(id,0,9); CHECK(setval(id,0,0)==0,"set 0"); CHECK(getval(id,0)==0,"is 0"); rmset(id); return 0; }
+
+/* ----- semctl GETALL / SETALL ----- */
+TEST(c_setall_getall_8)        { int id=mkset(8); unsigned short v[8],o[8]; for (int i=0;i<8;i++) v[i]=(i*3+1)%30;
+                                 CHECK(setall(id,v)==0,"setall"); CHECK(getall(id,o)==0,"getall");
+                                 for (int i=0;i<8;i++) CHECK(o[i]==v[i],"all match"); rmset(id); return 0; }
+TEST(c_setall_zeroes)          { int id=mkset(5); unsigned short v[5]={0,0,0,0,0},o[5]; CHECK(setall(id,v)==0,"setall 0");
+                                 CHECK(getall(id,o)==0,"getall"); for (int i=0;i<5;i++) CHECK(o[i]==0,"zero"); rmset(id); return 0; }
+TEST(c_setall_max)             { int id=mkset(3); unsigned short v[3]={SEMVMX,SEMVMX,SEMVMX},o[3]; CHECK(setall(id,v)==0,"setall max");
+                                 CHECK(getall(id,o)==0,"getall"); for (int i=0;i<3;i++) CHECK(o[i]==SEMVMX,"max"); rmset(id); return 0; }
+TEST(c_getall_after_setval)    { int id=mkset(4); setval(id,2,17); unsigned short o[4]; CHECK(getall(id,o)==0,"getall"); CHECK(o[2]==17,"reflects setval"); rmset(id); return 0; }
+TEST(c_setall_then_getval)     { int id=mkset(4); unsigned short v[4]={4,5,6,7}; setall(id,v); CHECK(getval(id,3)==7,"getval after setall"); rmset(id); return 0; }
+TEST(c_setall_one_index_op)    { int id=mkset(3); unsigned short v[3]={2,0,5}; setall(id,v);
+                                 CHECK(op(id,0,-1,IPC_NOWAIT)==0,"dec idx0"); CHECK(getval(id,0)==1,"idx0=1"); CHECK(getval(id,2)==5,"idx2 untouched"); rmset(id); return 0; }
+
+/* ----- semctl IPC_STAT / IPC_SET fields ----- */
+TEST(s_stat_sem_nsems)         { int id=mkset(6); struct semid_ds d; CHECK(statds(id,&d)==0,"stat"); CHECK(d.sem_nsems==6,"nsems field"); rmset(id); return 0; }
+TEST(s_stat_perm_cuid)         { int id=mkset(1); struct semid_ds d; CHECK(statds(id,&d)==0,"stat"); CHECK(d.sem_perm.cuid==geteuid(),"cuid"); rmset(id); return 0; }
+TEST(s_stat_perm_cgid)         { int id=mkset(1); struct semid_ds d; CHECK(statds(id,&d)==0,"stat"); CHECK(d.sem_perm.cgid==getegid(),"cgid"); rmset(id); return 0; }
+TEST(s_set_mode_persists)      { int id=mkset(1); struct semid_ds d; statds(id,&d); d.sem_perm.mode=(d.sem_perm.mode&~0777)|0640;
+                                 union t_semun a; a.buf=&d; CHECK(semctl(id,0,IPC_SET,a)==0,"set mode");
+                                 struct semid_ds e; statds(id,&e); CHECK((e.sem_perm.mode&0777)==0640,"mode 0640 persisted"); rmset(id); return 0; }
+TEST(s_set_uid_persists)       { int id=mkset(1); struct semid_ds d; statds(id,&d); d.sem_perm.uid=d.sem_perm.uid;
+                                 union t_semun a; a.buf=&d; CHECK(semctl(id,0,IPC_SET,a)==0,"set uid same"); rmset(id); return 0; }
+TEST(s_stat_otime_zero_new)    { int id=mkset(1); struct semid_ds d; CHECK(statds(id,&d)==0,"stat"); CHECK(d.sem_otime==0,"otime 0 on new"); rmset(id); return 0; }
+TEST(s_stat_otime_set_by_op)   { int id=mkset(1); op(id,0,1,0); struct semid_ds d; CHECK(statds(id,&d)==0,"stat"); CHECK(d.sem_otime!=0,"otime set by op"); rmset(id); return 0; }
+TEST(s_stat_ctime_set)         { int id=mkset(1); struct semid_ds d; CHECK(statds(id,&d)==0,"stat"); CHECK(d.sem_ctime!=0,"ctime nonzero"); rmset(id); return 0; }
+TEST(s_set_updates_ctime)      { int id=mkset(1); struct semid_ds d; statds(id,&d); time_t c0=d.sem_ctime; sleep(1);
+                                 union t_semun a; a.buf=&d; semctl(id,0,IPC_SET,a); struct semid_ds e; statds(id,&e);
+                                 CHECK(e.sem_ctime>=c0,"ctime advanced by IPC_SET"); rmset(id); return 0; }
+TEST(s_stat_badid)             { struct semid_ds d; union t_semun a; a.buf=&d; CHECK_ERR(semctl(0x7ffffffe,0,IPC_STAT,a), EINVAL, "stat bad id"); return 0; }
+
+/* ----- semctl invalid commands ----- */
+TEST(c_invalid_cmd)            { int id=mkset(1); CHECK_ERR(semctl(id,0,0x7777), EINVAL, "bogus cmd"); rmset(id); return 0; }
+TEST(c_rmid_returns_zero)      { int id=mkset(1); CHECK(semctl(id,0,IPC_RMID)==0,"rmid ret 0"); return 0; }
+
+/* ----- GETPID / GETNCNT / GETZCNT ----- */
+TEST(p_getpid_self_after_op)   { int id=mkset(1); op(id,0,1,0); CHECK(semctl(id,0,GETPID)==getpid(),"sempid==self"); rmset(id); return 0; }
+TEST(p_getpid_each_index)      { int id=mkset(3); op(id,1,1,0); CHECK(semctl(id,1,GETPID)==getpid(),"pid idx1"); CHECK(semctl(id,0,GETPID)==0,"pid idx0 untouched"); rmset(id); return 0; }
+TEST(p_getncnt_zero_idle)      { int id=mkset(1); setval(id,0,1); CHECK(semctl(id,0,GETNCNT)==0,"ncnt 0 idle"); rmset(id); return 0; }
+TEST(p_getzcnt_zero_idle)      { int id=mkset(1); setval(id,0,1); CHECK(semctl(id,0,GETZCNT)==0,"zcnt 0 idle"); rmset(id); return 0; }
+TEST(p_getncnt_one_waiter)     { int id=mkset(1); pid_t c=fork(); if(c==0){ op(id,0,-1,0); _exit(0);} usleep(200000);
+                                 int n=semctl(id,0,GETNCNT); CHECK(n==1,"ncnt 1"); op(id,0,1,0); waitpid(c,NULL,0); rmset(id); return 0; }
+TEST(p_getzcnt_one_waiter)     { int id=mkset(1); setval(id,0,3); pid_t c=fork(); if(c==0){ op(id,0,0,0); _exit(0);} usleep(200000);
+                                 int z=semctl(id,0,GETZCNT); CHECK(z==1,"zcnt 1"); setval(id,0,0); waitpid(c,NULL,0); rmset(id); return 0; }
+TEST(p_getncnt_two_waiters)    { int id=mkset(1); pid_t a=fork(); if(a==0){op(id,0,-1,0);_exit(0);} pid_t b=fork(); if(b==0){op(id,0,-1,0);_exit(0);}
+                                 usleep(250000); CHECK(semctl(id,0,GETNCNT)==2,"ncnt 2"); op(id,0,2,0); waitpid(a,NULL,0); waitpid(b,NULL,0); rmset(id); return 0; }
+
+/* ----- semop arithmetic / flags ----- */
+TEST(o_inc_by_five)            { int id=mkset(1); CHECK(op(id,0,5,0)==0,"+5"); CHECK(getval(id,0)==5,"val 5"); rmset(id); return 0; }
+TEST(o_dec_nowait_ok)          { int id=mkset(1); setval(id,0,3); CHECK(op(id,0,-3,IPC_NOWAIT)==0,"-3"); CHECK(getval(id,0)==0,"0"); rmset(id); return 0; }
+TEST(o_dec_nowait_eagain)      { int id=mkset(1); setval(id,0,2); CHECK_ERR(op(id,0,-3,IPC_NOWAIT), EAGAIN, "-3 from 2 nowait"); rmset(id); return 0; }
+TEST(o_zero_nowait_eagain)     { int id=mkset(1); setval(id,0,1); CHECK_ERR(op(id,0,0,IPC_NOWAIT), EAGAIN, "wait0 nowait nonzero"); rmset(id); return 0; }
+TEST(o_zero_when_zero_ok)      { int id=mkset(1); CHECK(op(id,0,0,IPC_NOWAIT)==0,"wait0 when 0"); rmset(id); return 0; }
+TEST(o_overflow_erange)        { int id=mkset(1); setval(id,0,SEMVMX); CHECK_ERR(op(id,0,1,0), ERANGE, "+1 over SEMVMX"); rmset(id); return 0; }
+TEST(o_overflow_big_erange)    { int id=mkset(1); setval(id,0,1); CHECK_ERR(op(id,0,SEMVMX,0), ERANGE, "+SEMVMX from 1"); rmset(id); return 0; }
+TEST(o_nsops_zero_ok)          { /* 16 simultaneous wait-for-zero ops on all-zero sems succeed atomically */
+                                 int id=mkset(16); struct sembuf sb[16]; for(int i=0;i<16;i++){sb[i].sem_num=i;sb[i].sem_op=0;sb[i].sem_flg=0;}
+                                 CHECK(semop(id,sb,16)==0,"16 wait-zero on zeros"); rmset(id); return 0; }
+TEST(o_nsops_too_many)         { /* exceed SEMOPM on any platform (substrate 32, Linux ~500) */
+                                 int id=mkset(1); size_t n=100000; struct sembuf *sb=calloc(n,sizeof(*sb)); CHECK(sb!=NULL,"calloc");
+                                 errno=0; int rc=semop(id,sb,n); free(sb); CHECK(rc==-1&&errno==E2BIG,"nsops huge -> E2BIG"); rmset(id); return 0; }
+TEST(o_bad_semnum)             { int id=mkset(2); CHECK_ERR(op(id,5,1,0), EFBIG, "op semnum oob"); rmset(id); return 0; }
+TEST(o_badid_einval)           { CHECK_ERR(op(0x7ffffffd,0,1,0), EINVAL, "op bad id"); return 0; }
+TEST(o_multi_distinct_ok)      { int id=mkset(3); struct sembuf sb[3]={{0,1,0},{1,2,0},{2,3,0}}; CHECK(semop(id,sb,3)==0,"multi");
+                                 CHECK(getval(id,0)==1&&getval(id,1)==2&&getval(id,2)==3,"all applied"); rmset(id); return 0; }
+TEST(o_multi_rollback)         { int id=mkset(2); setval(id,0,1); struct sembuf sb[2]={{0,-1,IPC_NOWAIT},{1,-1,IPC_NOWAIT}};
+                                 CHECK_ERR(semop(id,sb,2), EAGAIN, "second blocks -> rollback");
+                                 CHECK(getval(id,0)==1,"idx0 rolled back"); rmset(id); return 0; }
+TEST(o_same_sem_accumulate)    { int id=mkset(1); struct sembuf sb[3]={{0,2,0},{0,3,0},{0,-1,0}}; CHECK(semop(id,sb,3)==0,"2+3-1");
+                                 CHECK(getval(id,0)==4,"val 4"); rmset(id); return 0; }
+TEST(o_same_sem_transient_neg) { int id=mkset(1); setval(id,0,1); struct sembuf sb[2]={{0,-2,IPC_NOWAIT},{0,5,0}};
+                                 CHECK_ERR(semop(id,sb,2), EAGAIN, "transient negative blocks"); CHECK(getval(id,0)==1,"unchanged"); rmset(id); return 0; }
+TEST(o_dec_then_inc_net)       { int id=mkset(1); setval(id,0,4); op(id,0,-1,0); op(id,0,1,0); CHECK(getval(id,0)==4,"net 4"); rmset(id); return 0; }
+TEST(o_to_exact_zero)          { int id=mkset(1); setval(id,0,7); CHECK(op(id,0,-7,0)==0,"-7 to 0"); CHECK(getval(id,0)==0,"0"); rmset(id); return 0; }
+
+/* ----- blocking / wakeup semantics ----- */
+TEST(b_inc_wakes_one)          { int id=mkset(1); pid_t c=fork(); if(c==0){_exit(op(id,0,-1,0)==0?0:1);} usleep(200000);
+                                 CHECK(op(id,0,1,0)==0,"+1"); int st; waitpid(c,&st,0); CHECK(WIFEXITED(st)&&WEXITSTATUS(st)==0,"woke"); rmset(id); return 0; }
+TEST(b_setval_wakes_waiter)    { int id=mkset(1); pid_t c=fork(); if(c==0){_exit(op(id,0,-1,0)==0?0:1);} usleep(200000);
+                                 setval(id,0,1); int st; waitpid(c,&st,0); CHECK(WIFEXITED(st)&&WEXITSTATUS(st)==0,"setval woke"); rmset(id); return 0; }
+TEST(b_setall_wakes_waiter)    { int id=mkset(2); pid_t c=fork(); if(c==0){_exit(op(id,1,-1,0)==0?0:1);} usleep(200000);
+                                 unsigned short v[2]={0,1}; setall(id,v); int st; waitpid(c,&st,0); CHECK(WIFEXITED(st)&&WEXITSTATUS(st)==0,"setall woke"); rmset(id); return 0; }
+TEST(b_waitzero_wakes)         { int id=mkset(1); setval(id,0,2); pid_t c=fork(); if(c==0){_exit(op(id,0,0,0)==0?0:1);} usleep(200000);
+                                 setval(id,0,0); int st; waitpid(c,&st,0); CHECK(WIFEXITED(st)&&WEXITSTATUS(st)==0,"wait0 woke"); rmset(id); return 0; }
+TEST(b_rmid_wakes_eidrm)       { int id=mkset(1); pid_t c=fork(); if(c==0){ errno=0; int r=op(id,0,-1,0); _exit((r==-1&&errno==EIDRM)?0:1);} usleep(200000);
+                                 semctl(id,0,IPC_RMID); int st; waitpid(c,&st,0); CHECK(WIFEXITED(st)&&WEXITSTATUS(st)==0,"blocked waiter got EIDRM"); return 0; }
+TEST(b_partial_wake_one)       { int id=mkset(1); pid_t a=fork(); if(a==0){_exit(op(id,0,-1,0)==0?0:1);} pid_t b=fork(); if(b==0){_exit(op(id,0,-1,0)==0?0:1);}
+                                 usleep(250000); op(id,0,1,0); usleep(150000);
+                                 /* exactly one should have finished */
+                                 int s1=0,s2=0; int d1=(waitpid(a,&s1,WNOHANG)==a), d2=(waitpid(b,&s2,WNOHANG)==b);
+                                 CHECK(d1^d2,"exactly one woke on +1"); op(id,0,1,0); waitpid(a,&s1,0); waitpid(b,&s2,0); rmset(id); return 0; }
+TEST(b_multiop_wakes)          { int id=mkset(2); pid_t c=fork(); if(c==0){ struct sembuf sb[2]={{0,-1,0},{1,-1,0}}; _exit(semop(id,sb,2)==0?0:1);} usleep(200000);
+                                 op(id,0,1,0); op(id,1,1,0); int st; waitpid(c,&st,0); CHECK(WIFEXITED(st)&&WEXITSTATUS(st)==0,"multiop woke"); rmset(id); return 0; }
+TEST(b_waiter_then_value_ok)   { int id=mkset(1); pid_t c=fork(); if(c==0){_exit(op(id,0,-5,0)==0?0:1);} usleep(200000);
+                                 op(id,0,2,0); op(id,0,3,0); int st; waitpid(c,&st,0); CHECK(WIFEXITED(st)&&WEXITSTATUS(st)==0,"accumulated wake"); CHECK(getval(id,0)==0,"0"); rmset(id); return 0; }
+
+/* ----- SEM_UNDO ----- */
+TEST(u_undo_inc_on_exit)       { int id=mkset(1); setval(id,0,5); pid_t c=fork(); if(c==0){ op(id,0,3,SEM_UNDO); _exit(0);} waitpid(c,NULL,0); usleep(100000);
+                                 CHECK(getval(id,0)==5,"undo removed the +3"); rmset(id); return 0; }
+TEST(u_undo_dec_on_exit)       { int id=mkset(1); setval(id,0,5); pid_t c=fork(); if(c==0){ op(id,0,-3,SEM_UNDO); _exit(0);} waitpid(c,NULL,0); usleep(100000);
+                                 CHECK(getval(id,0)==5,"undo restored the -3"); rmset(id); return 0; }
+TEST(u_no_undo_persists)       { int id=mkset(1); setval(id,0,5); pid_t c=fork(); if(c==0){ op(id,0,-2,0); _exit(0);} waitpid(c,NULL,0); usleep(100000);
+                                 CHECK(getval(id,0)==3,"no-undo -2 persists"); rmset(id); return 0; }
+TEST(u_undo_balanced_zero)     { int id=mkset(1); setval(id,0,5); pid_t c=fork(); if(c==0){ op(id,0,2,SEM_UNDO); op(id,0,-2,SEM_UNDO); _exit(0);} waitpid(c,NULL,0); usleep(100000);
+                                 CHECK(getval(id,0)==5,"balanced undo net zero"); rmset(id); return 0; }
+TEST(u_undo_partial)           { int id=mkset(1); setval(id,0,10); pid_t c=fork(); if(c==0){ op(id,0,-3,SEM_UNDO); op(id,0,1,0); _exit(0);} waitpid(c,NULL,0); usleep(100000);
+                                 /* undo only reverts the SEM_UNDO -3; the +1 is not undone */
+                                 CHECK(getval(id,0)==11,"only undo-tracked op reverted"); rmset(id); return 0; }
+TEST(u_undo_two_indices)       { int id=mkset(2); setval(id,0,4); setval(id,1,6); pid_t c=fork();
+                                 if(c==0){ op(id,0,-2,SEM_UNDO); op(id,1,-1,SEM_UNDO); _exit(0);} waitpid(c,NULL,0); usleep(100000);
+                                 CHECK(getval(id,0)==4&&getval(id,1)==6,"both indices undone"); rmset(id); return 0; }
+TEST(u_undo_survives_sibling)  { int id=mkset(1); setval(id,0,5);
+                                 pid_t a=fork(); if(a==0){ op(id,0,-2,SEM_UNDO); _exit(0);} waitpid(a,NULL,0); usleep(80000);
+                                 CHECK(getval(id,0)==5,"first child undo applied");
+                                 pid_t b=fork(); if(b==0){ op(id,0,-1,0); _exit(0);} waitpid(b,NULL,0); usleep(80000);
+                                 CHECK(getval(id,0)==4,"sibling no-undo persists"); rmset(id); return 0; }
+
+/* ----- concurrency / stress ----- */
+TEST(z_two_procs_inc)          { int id=mkset(1); pid_t a=fork(); if(a==0){ for(int i=0;i<500;i++) op(id,0,1,0); _exit(0);} pid_t b=fork(); if(b==0){ for(int i=0;i<500;i++) op(id,0,1,0); _exit(0);}
+                                 waitpid(a,NULL,0); waitpid(b,NULL,0); CHECK(getval(id,0)==1000,"1000 increments counted"); rmset(id); return 0; }
+TEST(z_producer_consumer)      { int id=mkset(1); pid_t c=fork(); if(c==0){ for(int i=0;i<300;i++) op(id,0,-1,0); _exit(0);} for(int i=0;i<300;i++) op(id,0,1,0);
+                                 int st; waitpid(c,&st,0); CHECK(WIFEXITED(st)&&WEXITSTATUS(st)==0,"consumer drained"); CHECK(getval(id,0)==0,"net 0"); rmset(id); return 0; }
+TEST(z_many_sets_cycle)        { for(int i=0;i<40;i++){ int id=mkset(2); CHECK(id>=0,"create"); op(id,0,1,0); CHECK(getval(id,0)==1,"op"); rmset(id);} return 0; }
+TEST(z_mutex_pattern)          { int id=mkset(1); setval(id,0,1); pid_t c=fork();
+                                 if(c==0){ for(int i=0;i<200;i++){ op(id,0,-1,0); op(id,0,1,0);} _exit(0);} for(int i=0;i<200;i++){ op(id,0,-1,0); op(id,0,1,0);}
+                                 int st; waitpid(c,&st,0); CHECK(WIFEXITED(st)&&WEXITSTATUS(st)==0,"mutex churn"); CHECK(getval(id,0)==1,"mutex free"); rmset(id); return 0; }
+TEST(z_barrier_two)            { /* two-process rendezvous over a 2-sem set: each posts one sem and
+                                  * waits on the other, so neither proceeds until both have arrived. */
+                                 int id=mkset(2); pid_t c=fork();
+                                 if(c==0){ op(id,1,1,0); op(id,0,-1,0); _exit(0); }   /* child: post s1, wait s0 */
+                                 op(id,0,1,0); op(id,1,-1,0);                          /* parent: post s0, wait s1 */
+                                 int st; waitpid(c,&st,0); CHECK(WIFEXITED(st)&&WEXITSTATUS(st)==0,"rendezvous met");
+                                 CHECK(getval(id,0)==0&&getval(id,1)==0,"both consumed"); rmset(id); return 0; }
+
+/* ----- macro-generated boundary sweeps ----- */
+
+/* SETVAL/GETVAL roundtrip at a boundary value */
+#define GEN_VAL(tag, V) TEST(val_rt_##tag){ int id=mkset(1); CHECK(setval(id,0,(V))==0,"setval"); CHECK(getval(id,0)==(V),"getval"); rmset(id); return 0; }
+GEN_VAL(0,0) GEN_VAL(1,1) GEN_VAL(2,2) GEN_VAL(3,3) GEN_VAL(4,4) GEN_VAL(7,7) GEN_VAL(8,8)
+GEN_VAL(15,15) GEN_VAL(16,16) GEN_VAL(32,32) GEN_VAL(64,64) GEN_VAL(127,127) GEN_VAL(128,128)
+GEN_VAL(255,255) GEN_VAL(256,256) GEN_VAL(512,512) GEN_VAL(1000,1000) GEN_VAL(2048,2048)
+GEN_VAL(8192,8192) GEN_VAL(16383,16383) GEN_VAL(16384,16384) GEN_VAL(32766,32766) GEN_VAL(max,SEMVMX)
+
+/* create with nsems=N, op the first and last index */
+#define GEN_NSEMS(N) TEST(nsems_##N){ int id=mkset(N); CHECK(id>=0,"create"); CHECK(op(id,0,1,0)==0,"op0"); CHECK(op(id,(N)-1,1,0)==0,"opN-1"); rmset(id); return 0; }
+GEN_NSEMS(1) GEN_NSEMS(2) GEN_NSEMS(3) GEN_NSEMS(4) GEN_NSEMS(5) GEN_NSEMS(8) GEN_NSEMS(16) GEN_NSEMS(32)
+GEN_NSEMS(50) GEN_NSEMS(64) GEN_NSEMS(100) GEN_NSEMS(128) GEN_NSEMS(200) GEN_NSEMS(249) GEN_NSEMS(250)
+
+/* increment by N from 0 */
+#define GEN_INC(N) TEST(inc_##N){ int id=mkset(1); CHECK(op(id,0,(N),0)==0,"+N"); CHECK(getval(id,0)==(N),"=N"); rmset(id); return 0; }
+GEN_INC(1) GEN_INC(2) GEN_INC(3) GEN_INC(7) GEN_INC(16) GEN_INC(64) GEN_INC(100) GEN_INC(1000)
+GEN_INC(8192) GEN_INC(16384) GEN_INC(32766) GEN_INC(32767)
+
+/* decrement V -> 0 with IPC_NOWAIT */
+#define GEN_DEC(V) TEST(dec_##V){ int id=mkset(1); setval(id,0,(V)); CHECK(op(id,0,-(V),IPC_NOWAIT)==0,"-V"); CHECK(getval(id,0)==0,"0"); rmset(id); return 0; }
+GEN_DEC(1) GEN_DEC(2) GEN_DEC(3) GEN_DEC(7) GEN_DEC(16) GEN_DEC(64) GEN_DEC(100) GEN_DEC(1000)
+GEN_DEC(8192) GEN_DEC(16384) GEN_DEC(32766) GEN_DEC(32767)
+
+/* operate on index I of a 16-sem set; all other indices stay 0 */
+#define GEN_IDX(I) TEST(idx_##I){ int id=mkset(16); CHECK(op(id,(I),(I)+1,0)==0,"op idx"); CHECK(getval(id,(I))==(I)+1,"val"); \
+    for (int j=0;j<16;j++) if (j!=(I)) CHECK(getval(id,j)==0,"others 0"); rmset(id); return 0; }
+GEN_IDX(0) GEN_IDX(1) GEN_IDX(2) GEN_IDX(3) GEN_IDX(4) GEN_IDX(5) GEN_IDX(6) GEN_IDX(7)
+GEN_IDX(8) GEN_IDX(9) GEN_IDX(10) GEN_IDX(11) GEN_IDX(12) GEN_IDX(13) GEN_IDX(14) GEN_IDX(15)
+
+/* atomic multi-op touching K distinct sems in one semop() */
+#define GEN_MOP(K) TEST(mop_##K){ int id=mkset(16); struct sembuf sb[K]; for (int i=0;i<(K);i++){ sb[i].sem_num=i; sb[i].sem_op=i+1; sb[i].sem_flg=0; } \
+    CHECK(semop(id,sb,(K))==0,"multiop K"); for (int i=0;i<(K);i++) CHECK(getval(id,i)==i+1,"val i"); rmset(id); return 0; }
+GEN_MOP(1) GEN_MOP(2) GEN_MOP(3) GEN_MOP(4) GEN_MOP(5) GEN_MOP(6) GEN_MOP(7) GEN_MOP(8)
+GEN_MOP(9) GEN_MOP(10) GEN_MOP(11) GEN_MOP(12) GEN_MOP(13) GEN_MOP(14) GEN_MOP(15) GEN_MOP(16)
+
+/* SEM_UNDO: child takes -D from V, exit must restore V */
+#define GEN_UNDO(V,D) TEST(undo_##V##_##D){ int id=mkset(1); setval(id,0,(V)); pid_t c=fork(); \
+    if (c==0){ op(id,0,-(D),SEM_UNDO); _exit(0); } waitpid(c,NULL,0); usleep(80000); \
+    CHECK(getval(id,0)==(V),"undo restored"); rmset(id); return 0; }
+GEN_UNDO(2,1) GEN_UNDO(5,2) GEN_UNDO(10,7) GEN_UNDO(16,16) GEN_UNDO(100,50)
+GEN_UNDO(255,128) GEN_UNDO(1000,999) GEN_UNDO(8192,4096) GEN_UNDO(16384,1) GEN_UNDO(32767,32767)
+
 int main(void) {
     fprintf(stdout, "torture_sem: System V semaphore suite\n");
 
@@ -795,6 +1031,70 @@ int main(void) {
     RUN(many_sets_distinct);
     RUN(setall_value_over_max);
     RUN(stress_inc_dec_loop);
+
+    /* --- extended battery --- */
+    RUN(g_nsems_one_exact); RUN(g_nsems_semmsl_exact); RUN(g_nsems_semmsl_plus1);
+    RUN(g_creat_excl_fresh); RUN(g_creat_excl_after_rmid); RUN(g_existing_no_creat);
+    RUN(g_mode_0666); RUN(g_mode_0400); RUN(g_ten_distinct_keys); RUN(g_private_five_unique);
+    RUN(g_recreate_three); RUN(g_excl_alone_existing); RUN(g_no_creat_missing);
+    RUN(g_after_rmid_missing); RUN(g_id_is_nonneg); RUN(g_two_keys_independent);
+
+    RUN(c_setval_each_index); RUN(c_setval_high_index); RUN(c_setval_index_oob);
+    RUN(c_getval_index_oob); RUN(c_setval_neg_index); RUN(c_setval_max_roundtrip);
+    RUN(c_setval_badid); RUN(c_getval_badid); RUN(c_setval_then_zero);
+
+    RUN(c_setall_getall_8); RUN(c_setall_zeroes); RUN(c_setall_max);
+    RUN(c_getall_after_setval); RUN(c_setall_then_getval); RUN(c_setall_one_index_op);
+
+    RUN(s_stat_sem_nsems); RUN(s_stat_perm_cuid); RUN(s_stat_perm_cgid);
+    RUN(s_set_mode_persists); RUN(s_set_uid_persists); RUN(s_stat_otime_zero_new);
+    RUN(s_stat_otime_set_by_op); RUN(s_stat_ctime_set); RUN(s_set_updates_ctime); RUN(s_stat_badid);
+
+    RUN(c_invalid_cmd); RUN(c_rmid_returns_zero);
+
+    RUN(p_getpid_self_after_op); RUN(p_getpid_each_index); RUN(p_getncnt_zero_idle);
+    RUN(p_getzcnt_zero_idle); RUN(p_getncnt_one_waiter); RUN(p_getzcnt_one_waiter); RUN(p_getncnt_two_waiters);
+
+    RUN(o_inc_by_five); RUN(o_dec_nowait_ok); RUN(o_dec_nowait_eagain); RUN(o_zero_nowait_eagain);
+    RUN(o_zero_when_zero_ok); RUN(o_overflow_erange); RUN(o_overflow_big_erange); RUN(o_nsops_zero_ok);
+    RUN(o_nsops_too_many); RUN(o_bad_semnum); RUN(o_badid_einval); RUN(o_multi_distinct_ok);
+    RUN(o_multi_rollback); RUN(o_same_sem_accumulate); RUN(o_same_sem_transient_neg);
+    RUN(o_dec_then_inc_net); RUN(o_to_exact_zero);
+
+    RUN(b_inc_wakes_one); RUN(b_setval_wakes_waiter); RUN(b_setall_wakes_waiter);
+    RUN(b_waitzero_wakes); RUN(b_rmid_wakes_eidrm); RUN(b_partial_wake_one);
+    RUN(b_multiop_wakes); RUN(b_waiter_then_value_ok);
+
+    RUN(u_undo_inc_on_exit); RUN(u_undo_dec_on_exit); RUN(u_no_undo_persists);
+    RUN(u_undo_balanced_zero); RUN(u_undo_partial); RUN(u_undo_two_indices); RUN(u_undo_survives_sibling);
+
+    RUN(z_two_procs_inc); RUN(z_producer_consumer); RUN(z_many_sets_cycle);
+    RUN(z_mutex_pattern); RUN(z_barrier_two);
+
+    /* macro-generated boundary sweeps */
+    RUN(val_rt_0); RUN(val_rt_1); RUN(val_rt_2); RUN(val_rt_3); RUN(val_rt_4); RUN(val_rt_7); RUN(val_rt_8);
+    RUN(val_rt_15); RUN(val_rt_16); RUN(val_rt_32); RUN(val_rt_64); RUN(val_rt_127); RUN(val_rt_128);
+    RUN(val_rt_255); RUN(val_rt_256); RUN(val_rt_512); RUN(val_rt_1000); RUN(val_rt_2048);
+    RUN(val_rt_8192); RUN(val_rt_16383); RUN(val_rt_16384); RUN(val_rt_32766); RUN(val_rt_max);
+
+    RUN(nsems_1); RUN(nsems_2); RUN(nsems_3); RUN(nsems_4); RUN(nsems_5); RUN(nsems_8); RUN(nsems_16);
+    RUN(nsems_32); RUN(nsems_50); RUN(nsems_64); RUN(nsems_100); RUN(nsems_128); RUN(nsems_200);
+    RUN(nsems_249); RUN(nsems_250);
+
+    RUN(inc_1); RUN(inc_2); RUN(inc_3); RUN(inc_7); RUN(inc_16); RUN(inc_64); RUN(inc_100); RUN(inc_1000);
+    RUN(inc_8192); RUN(inc_16384); RUN(inc_32766); RUN(inc_32767);
+
+    RUN(dec_1); RUN(dec_2); RUN(dec_3); RUN(dec_7); RUN(dec_16); RUN(dec_64); RUN(dec_100); RUN(dec_1000);
+    RUN(dec_8192); RUN(dec_16384); RUN(dec_32766); RUN(dec_32767);
+
+    RUN(idx_0); RUN(idx_1); RUN(idx_2); RUN(idx_3); RUN(idx_4); RUN(idx_5); RUN(idx_6); RUN(idx_7);
+    RUN(idx_8); RUN(idx_9); RUN(idx_10); RUN(idx_11); RUN(idx_12); RUN(idx_13); RUN(idx_14); RUN(idx_15);
+
+    RUN(mop_1); RUN(mop_2); RUN(mop_3); RUN(mop_4); RUN(mop_5); RUN(mop_6); RUN(mop_7); RUN(mop_8);
+    RUN(mop_9); RUN(mop_10); RUN(mop_11); RUN(mop_12); RUN(mop_13); RUN(mop_14); RUN(mop_15); RUN(mop_16);
+
+    RUN(undo_2_1); RUN(undo_5_2); RUN(undo_10_7); RUN(undo_16_16); RUN(undo_100_50);
+    RUN(undo_255_128); RUN(undo_1000_999); RUN(undo_8192_4096); RUN(undo_16384_1); RUN(undo_32767_32767);
 
     fprintf(stdout, "\n=== %d run: %d pass, %d fail, %d hang, %d skip ===\n",
             tests_run, tests_pass, tests_fail, tests_hang, tests_skip);

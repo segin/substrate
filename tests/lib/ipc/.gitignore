@@ -1,2 +1,4 @@
 torture_ipc
+torture_pipe
+torture_sem
 *.o
