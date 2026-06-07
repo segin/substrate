@@ -97,9 +97,15 @@ echo "==> configure"
 #           which the Motif port does not build.
 #   ttsnoop : depends on dtappbuilder's dtcodegen generator (which pulls the
 #           whole App Builder lib chain + Motif), so it follows dtappbuilder.
+#   dtinfo,
+#   dtdocbook : need their own SGML build tooling (pmaker/Prelude.h generator,
+#           the dtdocbook parser) which is cross-built and won't run on the host.
 # Drop them from the programs SUBDIRS (each token removed idempotently) so the
-# rest of CDE builds to completion.
-for _skip in dtksh dtcm dtappbuilder ttsnoop; do
+# rest of CDE builds to completion.  This builds the CDE core desktop (dtwm,
+# dtfile, dtsession, dtterm, dtpad, dtstyle, dtcalc, dtmail, dthelp, dtprintinfo,
+# dtsearchpath, dtspcd, dtscreen, dtsr, ...); the deferred set is the App
+# Builder / ksh93 / dtinfo clusters, each tracked as a separate effort.
+for _skip in dtksh dtcm dtappbuilder ttsnoop dtinfo dtdocbook; do
     sed -i "s/[[:space:]]${_skip}\([[:space:]]\)/\1/" programs/Makefile
 done
 
