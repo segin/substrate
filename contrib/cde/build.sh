@@ -100,12 +100,20 @@ echo "==> configure"
 #   dtinfo,
 #   dtdocbook : need their own SGML build tooling (pmaker/Prelude.h generator,
 #           the dtdocbook parser) which is cross-built and won't run on the host.
+#   tttypes,
+#   types   : run the cross-built tt_type_comp (ToolTalk type compiler, which
+#           links libtt) during the build — it can't execute on the host, and
+#           host-building it needs the whole ToolTalk chain.
+#   localized : its message-catalog generators (merge/mkcatdefs) cross-build vs
+#           host-run conflict, and it only produces translated app-defaults,
+#           not core function.
 # Drop them from the programs SUBDIRS (each token removed idempotently) so the
 # rest of CDE builds to completion.  This builds the CDE core desktop (dtwm,
 # dtfile, dtsession, dtterm, dtpad, dtstyle, dtcalc, dtmail, dthelp, dtprintinfo,
 # dtsearchpath, dtspcd, dtscreen, dtsr, ...); the deferred set is the App
-# Builder / ksh93 / dtinfo clusters, each tracked as a separate effort.
-for _skip in dtksh dtcm dtappbuilder ttsnoop dtinfo dtdocbook; do
+# Builder / ksh93 / dtinfo / ToolTalk-types / localized clusters, each tracked
+# as a separate effort.
+for _skip in dtksh dtcm dtappbuilder ttsnoop dtinfo dtdocbook tttypes types localized; do
     sed -i "s/[[:space:]]${_skip}\([[:space:]]\)/\1/" programs/Makefile
 done
 
@@ -125,8 +133,6 @@ done
 HOST_GEN_TOOLS="
 lib/DtTerm/util:lineToData:../Term/TermLineData.c
 programs/fontaliases:mk_fonts_alias:
-programs/localized/util:merge:
-programs/localized/util:mkcatdefs:
 "
 for entry in ${HOST_GEN_TOOLS}; do
     gdir=$(echo "${entry}" | cut -d: -f1)
