@@ -44,15 +44,31 @@ through the large majority of its checks.  Resolved so far:
 With these, **`configure` now passes every library check** (jpeg, lmdb, Tcl,
 Motif, X) and stops at the host build-tool requirement below.
 
-## Dependency roadmap (remaining, in rough priority order)
+- **host build tools** — `hosttools/build.sh` builds, from source into a
+  self-contained prefix, every program CDE's configure requires on the BUILD
+  host: `rpcgen` (rpcsvc-proto), `ksh` (host mksh), `compress` (ncompress),
+  `sessreg` / `mkfontdir` / `bdftopcf` (X apps vs. the host's system X
+  protos), and `onsgmls` (OpenSP).  `build.sh` runs it and prepends the
+  prefix to PATH.
 
-Host build tools — `configure`'s current stop point requires these on the
-BUILD host: `rpcgen`, `ksh`/`ksh93`, `compress`, `sessreg`, `onsgmls`,
-`mkfontdir`, `bdftopcf`:
-1. **rpcgen** (`rpcsvc-proto`) — generates the ToolTalk RPC stubs at build time.
-2. **ksh** (host) — build scripts; build mksh for the host, or install one.
-3. **compress / sessreg / mkfontdir / bdftopcf / onsgmls** — ncompress, the
-   X session/font tools, and an SGML parser (opensp), all host-side.
+With all of the above, **`configure` now completes** and `make` starts
+building CDE itself.
+
+## Dependency roadmap (remaining)
+
+The build has entered the CDE source proper — the `libDt*` libraries first.
+Remaining, in rough order:
+
+1. **CDE-internal build issues** — exported `Dt/*.h` header paths, generated
+   sources, etc.  These are CDE/automake-on-substrate wrinkles, fixed as the
+   `libDt*` libraries compile.
+2. **Sun RPC / ToolTalk** (the critical path) — ToolTalk (`lib/tt`) is CDE's
+   IPC backbone and needs Sun RPC (`<rpc/rpc.h>`, XDR, `svc_register`).
+   substrate's libc has none, so this means porting **libtirpc** and wiring
+   its headers before ToolTalk, and thus most of the desktop, links.
+3. Then the `dt*` programs (dtwm, dtsession, dtfile, dtterm, ...) and
+   **dtksh** (built from CDE's bundled ksh93 93u+m) — each surfacing further
+   legacy-API gaps (SVR4/streams, `nl_types` catgets, specific ioctls).
 
 Target runtime subsystem — the critical path:
 6. **Sun RPC / ToolTalk.**  ToolTalk (`lib/tt`) is CDE's IPC backbone

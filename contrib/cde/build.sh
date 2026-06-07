@@ -25,22 +25,34 @@ if [ -z "${SUBSTRATE_TOP:-}" ]; then
 fi
 : "${STAGE1_PREFIX:=/opt/substrate}"
 : "${JOBS:=$(nproc 2>/dev/null || echo 4)}"
-PATH="${STAGE1_PREFIX}/bin:${PATH}"; export PATH
+
+# Build-host programs CDE's configure requires (rpcgen, ksh, compress,
+# sessreg, mkfontdir, bdftopcf, onsgmls).  hosttools/build.sh builds them
+# from source into hosttools/prefix; prepend it (and the cross toolchain) to
+# PATH so configure finds them.
+HOSTTOOLS="${HERE}/hosttools/prefix/bin"
+[ -x "${HOSTTOOLS}/rpcgen" ] || ( cd "${HERE}/hosttools" && ./build.sh )
+PATH="${STAGE1_PREFIX}/bin:${HOSTTOOLS}:${PATH}"; export PATH
 
 [ -d "${TREE_DIR}" ] || { echo "build.sh: run ./fetch.sh first" >&2; exit 1; }
 
-# Assemble the mini-sysroot: Motif + the X client stack + libXinerama.
+# Assemble the mini-sysroot: Motif + the X client stack + libXinerama +
+# libjpeg + lmdb + Tcl, plus substrate's core libs (lmdb DT_NEEDEDs
+# libpthread; configure link tests pull libc/libsys).
 SR="${HERE}/build/sysroot"
-rm -rf "${SR}"; mkdir -p "${SR}/usr"
+rm -rf "${SR}"; mkdir -p "${SR}/usr/lib"
 _have=0
 for d in xorgproto libXau xtrans libxcb libX11 libXext libICE libSM \
-         libXt libXmu libXpm libXaw libXinerama motif; do
+         libXt libXmu libXpm libXaw libXinerama libjpeg lmdb tcl motif; do
     st="${SUBSTRATE_TOP}/dist-${d}"
     [ -d "${st}/usr" ] || continue
     cp -a "${st}/usr/." "${SR}/usr/"
     _have=$((_have + 1))
 done
-[ "${_have}" -ge 14 ] || { echo "build.sh: only ${_have} dist trees found — build the X stack + Motif + libXinerama first" >&2; exit 1; }
+[ "${_have}" -ge 17 ] || { echo "build.sh: only ${_have} dist trees found — build the X stack + Motif + libXinerama + libjpeg + lmdb + tcl first" >&2; exit 1; }
+for l in c sys m pthread; do
+    cp "${SUBSTRATE_TOP}/lib/${l}/lib${l}.so.0" "${SR}/usr/lib/" 2>/dev/null || true
+done
 
 BUILD_DIR="${HERE}/build/build-stage-substrate"
 rm -rf "${BUILD_DIR}"; mkdir -p "${BUILD_DIR}"; cd "${BUILD_DIR}"
@@ -54,7 +66,7 @@ echo "==> configure"
     CXX=i386-unknown-substrate-g++ \
     CPPFLAGS="-I${SR}/usr/include -I${SR}/usr/include/X11" \
     LDFLAGS="-L${SR}/usr/lib -Wl,-rpath-link,${SR}/usr/lib" \
-    --with-tcl=/usr/lib
+    --with-tcl="${SR}/usr/lib"
 
 echo "==> make -j${JOBS}"
 make -j"${JOBS}"
