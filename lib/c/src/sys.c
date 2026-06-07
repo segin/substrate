@@ -12,6 +12,7 @@
 #include <limits.h>
 #include <locale.h>
 #include <sys/syscall.h>
+#include <sys/sem.h>
 #include <sys/stat.h>
 #include <sys/utsname.h>
 #include <sys/time.h>
@@ -1050,6 +1051,30 @@ pid_t wait4(pid_t pid, int *wstatus, int options, struct rusage *rusage) {
 
 pid_t wait3(int *wstatus, int options, struct rusage *rusage) {
     return wait4((pid_t)-1, wstatus, options, rusage);
+}
+
+/* ---- System V semaphores (kernel ipc_sem.c) ---- */
+
+int semget(key_t key, int nsems, int semflg) {
+    return __set_errno((int)_syscall3(SYS_SEMGET, (uintptr_t)key,
+                                      (uintptr_t)nsems, (uintptr_t)semflg));
+}
+
+int semop(int semid, struct sembuf *sops, size_t nsops) {
+    return __set_errno((int)_syscall3(SYS_SEMOP, (uintptr_t)semid,
+                                      (uintptr_t)sops, (uintptr_t)nsops));
+}
+
+int semctl(int semid, int semnum, int cmd, ...) {
+    /* The optional 4th argument is a union semun (int or pointer, one word on
+     * i386).  Commands that take no argument simply ignore it kernel-side. */
+    va_list ap;
+    uintptr_t arg;
+    va_start(ap, cmd);
+    arg = va_arg(ap, uintptr_t);
+    va_end(ap);
+    return __set_errno((int)_syscall4(SYS_SEMCTL, (uintptr_t)semid,
+                                      (uintptr_t)semnum, (uintptr_t)cmd, arg));
 }
 
 int getrusage(int who, struct rusage *usage) {
