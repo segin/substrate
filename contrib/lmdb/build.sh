@@ -38,13 +38,22 @@ RANLIB=i386-unknown-substrate-ranlib
 # at compile and -lpthread at link.  BYTE_ORDER (via <sys/types.h> ->
 # <endian.h>), O_SYNC, and posix_memalign are all provided by substrate's
 # libc/headers now, so no compat shim is needed.
-CFLAGS="-march=i486 -mtune=i486 -O2 -g -D_REENTRANT -DMDB_USE_ROBUST=0"
+# Force pthread-mutex locking (MDB_USE_POSIX_MUTEX).  substrate's headers
+# define BSD, which otherwise steers mdb.c onto POSIX named semaphores
+# (sem_open/wait/...), an API substrate does not provide; pthread mutexes it
+# does (pthread_mutexattr_setpshared lands best-effort).  MDB_USE_ROBUST=0:
+# substrate pthread has no PTHREAD_MUTEX_ROBUST recovery protocol.
+CFLAGS="-march=i486 -mtune=i486 -O2 -g -D_REENTRANT -DMDB_USE_ROBUST=0 -DMDB_USE_POSIX_MUTEX=1"
 SONAME=liblmdb.so.0
 SOFILE=liblmdb.so.0.0.0
 
 BUILD="${HERE}/build/build-stage-substrate"
 rm -rf "${BUILD}"; mkdir -p "${BUILD}"; cd "${BUILD}"
 cp "${SRC}/mdb.c" "${SRC}/midl.c" "${SRC}/midl.h" "${SRC}/lmdb.h" .
+
+# Guard the BSD->POSIX_SEM branch so an explicit -DMDB_USE_POSIX_MUTEX wins
+# (otherwise mdb.c would define both and #error on the count check).
+sed -i 's/^#elif defined(__APPLE__) || defined (BSD) || defined(__FreeBSD_kernel__)$/#elif !defined(MDB_USE_POSIX_MUTEX) \&\& (defined(__APPLE__) || defined (BSD) || defined(__FreeBSD_kernel__))/' mdb.c
 
 echo "==> compile (static + PIC objects)"
 for f in mdb midl; do

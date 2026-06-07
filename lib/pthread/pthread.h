@@ -55,10 +55,18 @@ int pthread_mutex_unlock(pthread_mutex_t *mutex);
 int pthread_mutex_destroy(pthread_mutex_t *mutex);
 int pthread_mutex_trylock(pthread_mutex_t *mutex);
 
+/* Process-shared attribute.  Substrate mutexes are best-effort across
+ * processes: setpshared accepts the flag so cross-process consumers (LMDB)
+ * link and run, but a mutex placed in shared memory is not guaranteed to be
+ * a robust inter-process lock. */
+#define PTHREAD_PROCESS_PRIVATE 0
+#define PTHREAD_PROCESS_SHARED  1
 int pthread_mutexattr_init(pthread_mutexattr_t *attr);
 int pthread_mutexattr_destroy(pthread_mutexattr_t *attr);
 int pthread_mutexattr_settype(pthread_mutexattr_t *attr, int type);
 int pthread_mutexattr_gettype(const pthread_mutexattr_t *attr, int *type);
+int pthread_mutexattr_setpshared(pthread_mutexattr_t *attr, int pshared);
+int pthread_mutexattr_getpshared(const pthread_mutexattr_t *attr, int *pshared);
 
 /* ---------------- condition variables ----------------
  * Linux/glibc-style sequence-number cond_var built on top of

@@ -116,6 +116,22 @@ int pthread_mutexattr_settype(pthread_mutexattr_t *attr, int type) {
     return 0;
 }
 
+/* Process-shared attribute.  The attr int holds the mutex type, so pshared
+ * is not stored; setpshared just validates the flag and succeeds (substrate
+ * mutexes are best-effort across processes — see <pthread.h>). */
+int pthread_mutexattr_setpshared(pthread_mutexattr_t *attr, int pshared) {
+    if (!attr) return EINVAL;
+    if (pshared != PTHREAD_PROCESS_PRIVATE && pshared != PTHREAD_PROCESS_SHARED)
+        return EINVAL;
+    return 0;
+}
+
+int pthread_mutexattr_getpshared(const pthread_mutexattr_t *attr, int *pshared) {
+    if (!attr || !pshared) return EINVAL;
+    *pshared = PTHREAD_PROCESS_PRIVATE;
+    return 0;
+}
+
 int pthread_mutexattr_gettype(const pthread_mutexattr_t *attr, int *type) {
     if (!attr || !type) return EINVAL;
     *type = *attr;
