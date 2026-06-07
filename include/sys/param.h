@@ -34,6 +34,10 @@
 #ifndef MAXSYMLINKS
 #define MAXSYMLINKS 32
 #endif
+/* Historical BSD name for the per-process open-file limit (== OPEN_MAX). */
+#ifndef NOFILE
+#define NOFILE      OPEN_MAX
+#endif
 #ifndef MAXLOGNAME
 #define MAXLOGNAME  17
 #endif
