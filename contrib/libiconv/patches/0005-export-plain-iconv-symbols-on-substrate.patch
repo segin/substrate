@@ -1,0 +1,32 @@
+From: Substrate
+Subject: [PATCH] lib/iconv.c: export plain iconv/iconv_open/iconv_close on substrate
+
+GNU libiconv normally exports only the libiconv-prefixed symbols and relies on
+its <iconv.h> macro rename (iconv->libiconv) so consumers link the prefixed
+names.  Substrate has no iconv in libc, so libiconv IS the system iconv — but
+some ports (ksh93 / libast) ship their own non-renaming <iconv.h> and reference
+the plain iconv/iconv_open/iconv_close names, which then fail to link.
+
+The library already provides plain-name strong aliases for exactly this case,
+guarded for FreeBSD (where libiconv is the native iconv).  Extend that guard to
+substrate, and give the aliases explicit default ELF visibility so they survive
+the library's -fvisibility=hidden build and are actually exported from
+libiconv.so (without this they appear only in the static archive).
+
+--- a/lib/iconv.c
++++ b/lib/iconv.c
+@@ -612,11 +612,11 @@
+
+ #endif
+
+-#if defined __FreeBSD__ && !defined __gnu_freebsd__
++#if (defined __FreeBSD__ || defined __substrate__) && !defined __gnu_freebsd__
+ /* GNU libiconv is the native FreeBSD iconv implementation since 2002.
+    It wants to define the symbols 'iconv_open', 'iconv', 'iconv_close'.  */
+ #define strong_alias(name, aliasname) _strong_alias(name, aliasname)
+ #define _strong_alias(name, aliasname) \
+-  extern __typeof (name) aliasname __attribute__ ((alias (#name)));
++  extern __typeof (name) aliasname __attribute__ ((alias (#name), __visibility__ ("default")));
+ #undef iconv_open
+ #undef iconv
+ #undef iconv_close

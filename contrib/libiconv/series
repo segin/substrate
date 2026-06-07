@@ -2,3 +2,4 @@
 0002-loop-wchar-drop-bogus-mbrtowc-decl.patch
 0003-gnulib-getprogname-substrate-branch.patch
 0004-libtool-configure-substrate-shared-libs.patch
+0005-export-plain-iconv-symbols-on-substrate.patch
