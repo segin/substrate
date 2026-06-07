@@ -12,6 +12,7 @@ void *memmove(void *dest, const void *src, size_t n);
 void *memset(void *s, int c, size_t n);
 int memcmp(const void *s1, const void *s2, size_t n);
 void *memchr(const void *s, int c, size_t n);
+void *memccpy(void *dest, const void *src, int c, size_t n);
 
 /* ffs / ffsl / ffsll are POSIX-defined in <strings.h>, but glibc
  * also exposes them from <string.h> as an extension.  Ported code

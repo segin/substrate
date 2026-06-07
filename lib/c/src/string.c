@@ -251,6 +251,16 @@ void *memchr(const void *s, int c, size_t n) {
     return NULL;
 }
 
+void *memccpy(void *dest, const void *src, int c, size_t n) {
+    unsigned char *d = dest;
+    const unsigned char *s = src;
+    while (n--) {
+        if ((*d++ = *s++) == (unsigned char)c)
+            return d;
+    }
+    return NULL;
+}
+
 char *strcpy(char *dest, const char *src) {
     char *ret = dest;
     while ((*dest++ = *src++));
