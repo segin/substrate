@@ -133,6 +133,10 @@ for entry in ${HOST_GEN_TOOLS}; do
     gtool=$(echo "${entry}" | cut -d: -f2)
     gout=$(echo "${entry}" | cut -d: -f3)
     echo "==> host-build ${gdir}/${gtool}"
+    # Remove the tool and its objects first: a stale CROSS-built (target) binary
+    # left newer than its sources by an earlier run would otherwise be "up to
+    # date" and skip the host rebuild, leaving a binary that can't run here.
+    rm -f "${gdir}/${gtool}" "${gdir}"/*.o
     make -C "${gdir}" CC=cc CPPFLAGS= CFLAGS='-O2 -w' "${gtool}"
     [ -n "${gout}" ] && rm -f "${gdir}/${gout}"
 done
