@@ -175,6 +175,8 @@ unsigned int alarm(unsigned int seconds);
 
 int gethostname(char *name, size_t len);
 int getdomainname(char *name, size_t len);
+long gethostid(void);
+int sethostid(long id);
 int sethostname(const char *name, size_t len);
 
 int chmod(const char *pathname, mode_t mode);

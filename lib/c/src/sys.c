@@ -894,6 +894,21 @@ int getdomainname(char *name, size_t len) {
     return 0;
 }
 
+/* gethostid(3): a 32-bit host identifier.  Substrate keeps no /etc/hostid, so
+ * derive a stable per-host value by hashing the hostname (ToolTalk uses it to
+ * tag the local host). */
+long gethostid(void) {
+    char h[256];
+    if (gethostname(h, sizeof h) != 0) return 0;
+    h[sizeof h - 1] = '\0';
+    unsigned long id = 5381;
+    for (const char *p = h; *p; p++)
+        id = id * 33 + (unsigned char)*p;
+    return (long)(id & 0x7fffffff);
+}
+
+int sethostid(long id) { (void)id; errno = EPERM; return -1; }
+
 int futex(int *uaddr, int op, int val, const struct timespec *timeout, int *uaddr2, int val3) {
     return __set_errno((int)_syscall6(240, (uintptr_t)uaddr, op, val, (uintptr_t)timeout, (uintptr_t)uaddr2, val3));
 }

@@ -22,6 +22,9 @@ extern "C" {
 /* Well-known mnt_type / mnt_opts values. */
 #define MNTTYPE_IGNORE  "ignore"
 #define MNTTYPE_SWAP    "swap"
+#define MNTTYPE_NFS     "nfs"
+#define MNTTYPE_RFS     "rfs"    /* SVR4 Remote File Sharing */
+#define MNTTYPE_LOFS    "lofs"   /* loopback filesystem */
 #define MNTOPT_DEFAULTS "defaults"
 #define MNTOPT_RO       "ro"
 #define MNTOPT_RW       "rw"

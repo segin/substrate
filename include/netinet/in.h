@@ -40,6 +40,7 @@ struct sockaddr_in6 {
 #define INADDR_ANY        ((in_addr_t)0x00000000)
 #define INADDR_LOOPBACK   ((in_addr_t)0x7f000001)
 #define INADDR_BROADCAST  ((in_addr_t)0xffffffff)
+#define INADDR_NONE       ((in_addr_t)0xffffffff)  /* inet_addr error return */
 
 /* IPv6 address tests — POSIX / RFC 3493.  substrate's struct
  * in6_addr exposes only the s6_addr[16] byte array, so these are

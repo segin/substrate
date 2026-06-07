@@ -39,7 +39,7 @@ SRCS = src/sys.c src/stdlib.c src/string.c src/ctype.c src/assert.c src/dirent.c
        src/fpclassify.c src/socket.c src/glob.c src/wordexp.c src/inttypes.c \
        src/rand48.c src/random_r.c src/cvt.c src/hsearch_r.c src/netdb_r.c \
        src/shadow.c src/mntent.c src/getdate.c \
-       src/posix_extra.c src/posix_extra2.c src/posix_extra3.c src/ifaddrs.c src/utmp.c \
+       src/posix_extra.c src/posix_extra2.c src/posix_extra3.c src/ifaddrs.c src/nl_types.c src/utmp.c \
        src/syslog.c src/err.c src/libintl.c src/tls.c \
        stdio/stdio_core.c stdio/stdstreams.c stdio/printf.c stdio/scanf.c src/sysctl_helpers.c
 ASM_SRCS = arch/i386/syscall.S arch/i386/crt0.S arch/i386/setjmp.S

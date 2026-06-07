@@ -4,6 +4,10 @@
 #include <sys/types.h>
 #include <sys/time.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #define RUSAGE_SELF     0
 #define RUSAGE_CHILDREN (-1)
 #define RUSAGE_THREAD   1
@@ -62,5 +66,9 @@ int setpriority(int which, id_t who, int prio);
 int getrusage(int who, struct rusage *usage);
 int getrlimit(int resource, struct rlimit *rlim);
 int setrlimit(int resource, const struct rlimit *rlim);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif
