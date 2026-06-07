@@ -15,6 +15,11 @@ struct sockaddr_un {
     char        sun_path[108];
 };
 
+/* Actual length of a filled-in sockaddr_un (offset of sun_path + the path
+ * string length).  Needs <string.h> for strlen at the use site. */
+#define SUN_LEN(ptr) \
+    ((size_t)(((struct sockaddr_un *)0)->sun_path) + strlen((ptr)->sun_path))
+
 #ifdef __cplusplus
 }
 #endif

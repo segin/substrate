@@ -97,6 +97,11 @@ typedef unsigned char       u_char;
 typedef unsigned short      u_short;
 typedef unsigned int        u_int;
 typedef unsigned long       u_long;
+/* SysV/BSD short forms (no underscore) — used by ported code (libtirpc, ...) */
+typedef unsigned char       uchar;
+typedef unsigned short      ushort;
+typedef unsigned int        uint;
+typedef unsigned long       ulong;
 typedef unsigned long long  u_quad_t;
 typedef long long           quad_t;
 typedef uint8_t             u_int8_t;

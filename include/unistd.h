@@ -174,6 +174,7 @@ int usleep(useconds_t usec);
 unsigned int alarm(unsigned int seconds);
 
 int gethostname(char *name, size_t len);
+int getdomainname(char *name, size_t len);
 int sethostname(const char *name, size_t len);
 
 int chmod(const char *pathname, mode_t mode);

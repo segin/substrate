@@ -11,6 +11,9 @@ extern "C" {
  * them in this way too — ported software (xorg-server, ...) relies on
  * the implicit pull-in. */
 #include <sys/select.h>
+/* glibc's <sys/time.h> pulls the <time.h> declarations (time(), struct tm,
+ * ...) in transitively; ported code (libtirpc) relies on that. */
+#include <time.h>
 
 struct timeval {
     time_t      tv_sec;     /* seconds */

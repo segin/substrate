@@ -14,6 +14,9 @@ extern "C" {
 #endif
 
 #include <sys/types.h>
+/* struct msghdr below references struct iovec; pull its full definition (as
+ * glibc's <sys/socket.h> does) so code that declares iovec objects compiles. */
+#include <sys/uio.h>
 
 typedef unsigned int socklen_t;
 typedef unsigned short sa_family_t;
@@ -109,6 +112,12 @@ struct cmsghdr {
 #define SOCK_CLOEXEC   0x80000
 
 #define SOL_SOCKET     1
+/* Protocol-level setsockopt levels (Linux values). */
+#define SOL_IP         0
+#define SOL_TCP        6
+#define SOL_UDP        17
+#define SOL_IPV6       41
+#define SOL_ICMPV6     58
 #define SO_DEBUG       1     /* Linux value */
 #define SO_REUSEADDR   2
 #define SO_TYPE        3

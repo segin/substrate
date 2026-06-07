@@ -88,6 +88,7 @@ ldiv_t ldiv(long numer, long denom);
 lldiv_t lldiv(long long numer, long long denom);
 
 int rand(void);
+int rand_r(unsigned int *seedp);
 void srand(unsigned int seed);
 long random(void);
 void srandom(unsigned seed);

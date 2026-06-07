@@ -201,6 +201,23 @@ struct ipv6_mreq {
 #define IPPROTO_UDP  17
 #define IPPROTO_IPV6 41
 
+/* IP / IPv6 packet-info options + ancillary-data structs (Linux values).
+ * Ported servers (libtirpc's datagram service) set these to learn which
+ * local address a datagram arrived on.  Substrate's kernel may not honour
+ * them yet; setsockopt then fails harmlessly and the info is just absent. */
+#define IP_PKTINFO       8
+#define IPV6_RECVPKTINFO 49
+#define IPV6_PKTINFO     50
+struct in_pktinfo {
+    int            ipi_ifindex;    /* interface index */
+    struct in_addr ipi_spec_dst;   /* local address */
+    struct in_addr ipi_addr;       /* header destination address */
+};
+struct in6_pktinfo {
+    struct in6_addr ipi6_addr;     /* src/dst address */
+    unsigned int    ipi6_ifindex;  /* interface index */
+};
+
 /* Byte-order conversions.  POSIX places these in <arpa/inet.h> but
  * historically also via <netinet/in.h>; many ports (inetutils' ftp
  * among them) include only the latter. */

@@ -885,6 +885,15 @@ int sethostname(const char *name, size_t len) {
                                        (uintptr_t)name, len));
 }
 
+/* getdomainname(3): substrate has no NIS/YP domain, so report an empty
+ * domain.  Ported RPC code (libtirpc/rpcdname) uses it for the default RPC
+ * domain; empty is the correct "unset" answer. */
+int getdomainname(char *name, size_t len) {
+    if (!name || len == 0) { errno = EINVAL; return -1; }
+    name[0] = '\0';
+    return 0;
+}
+
 int futex(int *uaddr, int op, int val, const struct timespec *timeout, int *uaddr2, int val3) {
     return __set_errno((int)_syscall6(240, (uintptr_t)uaddr, op, val, (uintptr_t)timeout, (uintptr_t)uaddr2, val3));
 }
