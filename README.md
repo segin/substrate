@@ -7,9 +7,22 @@ patched GNU toolchain that runs *on* Substrate, and a large set of ported
 third-party software (zsh, ncurses, OpenSSL, an X11 client stack, …).
 
 A distinguishing goal is **binary compatibility via exec personalities**: the
-kernel routes each ELF to a loader based on its OSABI byte, so native,
-Linux, and FreeBSD binaries can run on the same kernel (native is complete;
-Linux/FreeBSD are in active development).
+kernel routes each executable to a loader from its ELF OSABI byte (or, for
+a.out, its MID/flavor), so binaries built for other systems run on the same
+kernel. Current state:
+
+- **Native** — complete.
+- **ELKS** (16-bit Linux-like a.out) — done: 16-bit protected-mode execution
+  through a per-process LDT, ELKS `INT 0x80` syscall convention, signal
+  callbacks, and a synthetic `/dev/kmem` so upstream ELKS `ps`/`meminfo` run.
+- **FreeBSD** and **NetBSD** — dynamic linking is up and running: their
+  run-time linkers (`ld-elf.so.1` / `ld.elf_so`), TLS install, and libc come
+  up, so dynamically-linked ELF binaries load and execute.
+- **Linux** — active development (syscall surface and ELF/auxv process
+  setup in place).
+- **OpenBSD**, **SunOS 4.x**, and **SVR3/SVR4** — earlier-stage personalities.
+
+See `docs/specs/personality_targets.md` and `docs/specs/personality_elks.md`.
 
 ## Repository layout
 
