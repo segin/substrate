@@ -25,6 +25,13 @@ extern "C" {
 #define O_NDELAY    O_NONBLOCK
 #define O_ASYNC     0x2000
 #define FASYNC      O_ASYNC
+/* Synchronous writes.  Value matches the kernel's <sys/fcntl.h> O_SYNC
+ * (0x1000), which vnode_ops.c already honours as IO_SYNC; the userspace
+ * header had simply omitted it.  substrate has no separate data-sync
+ * (O_DSYNC) or read-sync (O_RSYNC) path, so they alias O_SYNC. */
+#define O_SYNC      0x1000
+#define O_DSYNC     O_SYNC
+#define O_RSYNC     O_SYNC
 #define O_DIRECTORY 0x10000
 #define O_NOFOLLOW  0x20000
 #define O_CLOEXEC   0x80000

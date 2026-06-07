@@ -27,6 +27,10 @@ typedef __INT64_TYPE__  off_t;
 
 #include <stdint.h>
 #include <stddef.h>
+/* BSD/glibc convention: <sys/types.h> exposes the byte-order macros
+ * (BYTE_ORDER, LITTLE_ENDIAN, ...).  Ported code (LMDB, BSD daemons)
+ * relies on them being visible after including <sys/types.h>. */
+#include <endian.h>
 
 #if defined(__x86_64__) || defined(_M_X64)
 #define SUBSTRATE_PID_MAX 9999999

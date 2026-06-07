@@ -440,25 +440,77 @@ void *realloc(void *ptr, size_t size) {
     return new_ptr;
 }
 
-void *aligned_alloc(size_t alignment, size_t size) {
-    if (alignment < sizeof(void*)) alignment = sizeof(void*);
+/*
+ * posix_memalign — POSIX.1-2001.  Returns (via *memptr) `size` bytes
+ * aligned to `alignment`, which must be a power of two and a multiple of
+ * sizeof(void*).  Returns 0 on success or EINVAL/ENOMEM (it does NOT set
+ * errno).  The result is released with plain free().
+ *
+ * Arbitrary alignment is supported, including page size — which the old
+ * aligned_alloc could not do (it returned NULL above 16 bytes).  The trick
+ * is to over-allocate and then carve a genuinely-aligned sub-block out of
+ * the oversized allocation: a real block_meta header is planted just before
+ * the aligned payload and the leading slack becomes a free block.  Because
+ * the carved block is a true allocator block — correct MAGIC, size, and
+ * next/prev links that honour physical order — free(), realloc(), and the
+ * coalescer treat it like any block returned by malloc().
+ */
+int posix_memalign(void **memptr, size_t alignment, size_t size) {
+    if (memptr == NULL)
+        return EINVAL;
+    if (alignment < sizeof(void *) || (alignment & (alignment - 1)) != 0)
+        return EINVAL;
 
-    // If requested alignment is supported by our default allocator (<= 16 bytes),
-    // we can use malloc directly after ensuring size is a multiple of alignment.
+    /* malloc payloads are already ALIGNMENT(16)-aligned. */
     if (alignment <= ALIGNMENT) {
-        if (size % alignment != 0) size = (size + alignment - 1) & ~(alignment - 1);
-        return malloc(size);
+        void *p = malloc(size);
+        if (!p) return ENOMEM;
+        *memptr = p;
+        return 0;
     }
 
-    // Supporting larger alignments (>16 bytes) requires a more complex allocator
-    // that can store the original pointer offset (e.g., in a preamble) so free()
-    // can find the block metadata. For now, we return NULL for unsupported alignments
-    // to avoid unsafe behavior or memory leaks.
-    //
-    // Note: The previous bump allocator supported arbitrary alignment but leaked memory.
-    // This implementation prioritizes correctness and memory reclamation over rare
-    // high-alignment requirements.
-    return NULL;
+    /* Over-allocate: worst-case alignment shift plus an inserted header. */
+    void *raw = malloc(ALIGN(size ? size : 1) + alignment + BLOCK_META_SIZE);
+    if (!raw) return ENOMEM;
+
+    if (((uintptr_t)raw & (alignment - 1)) == 0) {
+        /* Already aligned; the extra room is just unused tail payload. */
+        *memptr = raw;
+        return 0;
+    }
+
+    __malloc_lock_acquire();
+    struct block_meta *orig = payload_block(raw);
+    char *orig_end = (char *)raw + orig->size;            /* payload end */
+    uintptr_t ap = ((uintptr_t)raw + BLOCK_META_SIZE + alignment - 1)
+                   & ~((uintptr_t)alignment - 1);
+    struct block_meta *nb = (struct block_meta *)(ap - BLOCK_META_SIZE);
+
+    nb->magic = MAGIC;
+    nb->free  = 0;
+    nb->size  = (size_t)(orig_end - (char *)ap);
+    nb->prev  = orig;
+    nb->next  = orig->next;
+    if (nb->next)
+        nb->next->prev = nb;
+    else
+        global_tail = nb;
+
+    orig->next = nb;
+    orig->size = (size_t)((char *)nb - (char *)raw);      /* leading slack */
+    orig->free = 1;                                       /* freed back */
+    __malloc_lock_release();
+
+    *memptr = (void *)ap;
+    return 0;
+}
+
+void *aligned_alloc(size_t alignment, size_t size) {
+    void *p = NULL;
+    if (alignment < sizeof(void *)) alignment = sizeof(void *);
+    int rc = posix_memalign(&p, alignment, size);
+    if (rc) { errno = rc; return NULL; }
+    return p;
 }
 
 /*
