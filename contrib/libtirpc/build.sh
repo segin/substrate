@@ -47,6 +47,15 @@ if ! grep -q 'substrate\*' configure; then
       configure
 fi
 
+# __binddynport() opens the Linux-only sysctl /proc/sys/net/ipv4/
+# ip_local_reserved_ports and treats a failure to open it as fatal, which
+# aborts every dynamic-port RPC bind with "could not bind to anonymous port"
+# (CDE's ToolTalk ttsession).  substrate has no such file; the list is optional
+# (absent == none reserved), so make parse_reserved_ports return 0 instead of
+# -1 on a missing file.  (idempotent)
+sed -i '/ip_local_reserved_ports\.");/{n;s/^\(\s*\)return -1;/\1return 0;\t\/* substrate: file absent == none reserved *\//}' \
+    src/binddynport.c
+
 # CFLAGS notes:
 #   -D__linux__          libtirpc gates its pthread thread-abstraction
 #                        (reentrant.h) and reserved-port code on __linux__;
