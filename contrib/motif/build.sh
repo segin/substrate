@@ -89,5 +89,13 @@ make -C lib/Xm   install DESTDIR="${DESTDIR}"
 make -C lib/Mrm  install DESTDIR="${DESTDIR}"
 make -C bindings install DESTDIR="${DESTDIR}"   # xmbind.alias virtual-key data
 make -C bitmaps  install DESTDIR="${DESTDIR}"   # xm_hour*/xm_error/... X bitmaps (CDE DtSvc includes them)
+# UIL public headers (CDE's dtcm includes <uil/UilDef.h>).  Install only the
+# headers — building libUil itself needs Motif's WML/yacc generator chain
+# (clients/uil/UilLexPars.h), which is a separate effort; the headers are
+# shipped source + the wml-generated UilDBDef.h, which already exists.
+mkdir -p "${DESTDIR}/usr/include/uil"
+cp clients/uil/Uil.h clients/uil/UilSymGl.h clients/uil/UilSymDef.h \
+   clients/uil/UilDef.h clients/uil/XmAppl.uil tools/wml/UilDBDef.h \
+   "${DESTDIR}/usr/include/uil/"
 rm -f "${DESTDIR}"/usr/lib/*.la
 echo "==> Done.  Motif libraries staged at ${DESTDIR}/usr/{lib/lib{Xm,Mrm}.a,include/{Xm,Mrm}}"

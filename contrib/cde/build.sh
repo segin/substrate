@@ -92,9 +92,10 @@ echo "==> configure"
 #           x86-64 instead of the i386 cross target; the final link fails on
 #           incompatible objects.  (Substrate side done: libc symbol surface +
 #           libiconv plain names.)
-#   dtcm,
-#   dtappbuilder : need Motif's UIL (uil/UilDef.h + libUil + the uil compiler),
-#           which the Motif port does not build.
+#   dtappbuilder : links Motif's libUil, which needs Motif's WML/yacc generator
+#           chain (clients/uil/UilLexPars.h) the port doesn't build.  (dtcm only
+#           needs the uil/ public headers, now installed by the Motif port, so
+#           it is no longer deferred.)
 #   ttsnoop : depends on dtappbuilder's dtcodegen generator (which pulls the
 #           whole App Builder lib chain + Motif), so it follows dtappbuilder.
 #   dtinfo,
@@ -116,7 +117,7 @@ echo "==> configure"
 # dtsearchpath, dtspcd, dtscreen, dtsr, ...); the deferred set is the App
 # Builder / ksh93 / dtinfo / ToolTalk-types / localized clusters, each tracked
 # as a separate effort.
-for _skip in dtksh dtcm dtappbuilder ttsnoop dtinfo dtdocbook tttypes types localized dthelp; do
+for _skip in dtksh dtappbuilder ttsnoop dtinfo dtdocbook tttypes types localized dthelp; do
     # Match the token followed by whitespace OR end-of-line (last SUBDIRS entry).
     sed -i "s/[[:space:]]${_skip}\([[:space:]]\|$\)/\1/" programs/Makefile
 done
