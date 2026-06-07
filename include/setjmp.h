@@ -16,7 +16,15 @@ typedef struct {
     unsigned int __mask;
 } sigjmp_buf[1];
 
-int sigsetjmp(sigjmp_buf env, int savemask);
+/* sigsetjmp MUST be a macro, not a function: setjmp() saves the context of
+ * whoever *calls* it, so it has to run directly in the caller's frame.  A
+ * function-wrapped sigsetjmp would have setjmp() record the wrapper's frame,
+ * which is dead by the time siglongjmp() restores it — corrupting %ebp/%esp
+ * and crashing.  __sigjmp_save() only stashes the signal mask; the in-place
+ * setjmp() does the real context save. */
+void __sigjmp_save(sigjmp_buf env, int savemask);
+#define sigsetjmp(env, savemask) \
+    (__sigjmp_save((env), (savemask)), setjmp((env)[0].__env))
 void siglongjmp(sigjmp_buf env, int val) __attribute__((noreturn));
 
 #endif /* _SETJMP_H */

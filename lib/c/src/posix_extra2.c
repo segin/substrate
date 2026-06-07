@@ -330,7 +330,13 @@ int str2sig(const char *str, int *pnum) {
  * snapshot/restore the signal mask through sigprocmask.
  * ============================================================ */
 
-int sigsetjmp(sigjmp_buf env, int savemask) {
+/* __sigjmp_save — back end of the sigsetjmp() macro (see <setjmp.h>).  It
+ * only records whether/which signal mask to restore; the macro performs the
+ * actual setjmp() in the CALLER's frame so the saved context is the caller's,
+ * not this helper's.  A function-wrapped setjmp() saved this routine's frame,
+ * which is dead by the time siglongjmp() restores it — corrupting %ebp/%esp
+ * and crashing (observed as a SIGSEGV in mksh's exit unwind). */
+void __sigjmp_save(sigjmp_buf env, int savemask) {
     env[0].__savemask = savemask;
     if (savemask) {
         sigset_t curr;
@@ -340,6 +346,16 @@ int sigsetjmp(sigjmp_buf env, int savemask) {
     } else {
         env[0].__mask = 0;
     }
+}
+
+/* ABI-compatibility shim: binaries compiled against the old function-based
+ * sigsetjmp() still import this symbol.  New code uses the <setjmp.h> macro
+ * (which calls setjmp() in the caller's frame, the correct behaviour); this
+ * keeps already-built binaries loadable.  It carries the old wrong-frame
+ * behaviour those binaries were already built with — no regression. */
+#undef sigsetjmp
+int sigsetjmp(sigjmp_buf env, int savemask) {
+    __sigjmp_save(env, savemask);
     return setjmp(env[0].__env);
 }
 
