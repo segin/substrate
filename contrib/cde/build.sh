@@ -108,6 +108,11 @@ echo "==> make -j${JOBS}"
 # cross-build compiles that for the target (can't run on the build host).
 # hosttools builds a host tradcpp; point every Makefile's GENCPP at it.  A
 # command-line override propagates to all recursive sub-makes via MAKEFLAGS.
-make -j"${JOBS}" GENCPP="${HOSTTOOLS}/tradcpp"
+#
+# LIBS: substrate splits the raw syscall wrappers (setsid, ...) into libsys,
+# which the CDE static libs (libDtSvc) reference.  libc.so DT_NEEDEDs libsys,
+# but ld won't resolve through a transitive DSO, so every executable must link
+# -lsys directly.  configure sets LIBS uniformly to "-ldl -lm"; append -lsys.
+make -j"${JOBS}" GENCPP="${HOSTTOOLS}/tradcpp" LIBS="-ldl -lm -lsys"
 
 echo "==> CDE build complete (if you reached here, all prerequisites are in place)"
