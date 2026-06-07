@@ -1,0 +1,4 @@
+# Host build-tool artifacts — sources, tarballs, and the built prefix.
+# Only build.sh is tracked.
+build/
+prefix/
