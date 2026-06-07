@@ -130,6 +130,7 @@ int rename(const char *oldpath, const char *newpath);
 FILE *tmpfile(void);
 char *tmpnam(char *s);
 char *tmpnam_r(char *s);
+char *tempnam(const char *dir, const char *pfx);
 int fcloseall(void);
 FILE *popen(const char *command, const char *type);
 int pclose(FILE *stream);

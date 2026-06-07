@@ -614,6 +614,32 @@ char *tmpnam_r(char *s) {
 	return s;
 }
 
+/* tempnam(3): malloc a unique temp-file name.  Directory preference: the
+ * `dir` argument, else $TMPDIR, else P_tmpdir.  pfx (<= 5 chars) prefixes the
+ * basename.  Caller free()s the result. */
+char *tempnam(const char *dir, const char *pfx) {
+	const char *d = dir;
+	if (!d || access(d, W_OK) != 0) {
+		d = getenv("TMPDIR");
+		if (!d || access(d, W_OK) != 0)
+			d = P_tmpdir;
+	}
+	if (!pfx)
+		pfx = "tmp";
+	static int counter = 0;
+	for (int i = 0; i < 1000; i++) {
+		size_t len = strlen(d) + 1 + strlen(pfx) + 32;
+		char *name = malloc(len);
+		if (!name)
+			return NULL;
+		snprintf(name, len, "%s/%s%d.%d", d, pfx, getpid(), counter++);
+		if (access(name, F_OK) != 0)
+			return name;          /* unused name */
+		free(name);
+	}
+	return NULL;
+}
+
 /* --- popen / pclose --- */
 #include <sys/wait.h>
 

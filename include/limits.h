@@ -53,4 +53,22 @@
 #define SSIZE_MAX 2147483647L
 #endif
 
+/* POSIX minimum-acceptable values (the guaranteed floors, distinct from the
+ * actual runtime limits queried via sysconf/pathconf). */
+#ifndef _POSIX_ARG_MAX
+#define _POSIX_ARG_MAX     4096
+#define _POSIX_CHILD_MAX   25
+#define _POSIX_LINK_MAX    8
+#define _POSIX_MAX_CANON   255
+#define _POSIX_MAX_INPUT   255
+#define _POSIX_NAME_MAX    14
+#define _POSIX_NGROUPS_MAX 8
+#define _POSIX_OPEN_MAX    20
+#define _POSIX_PATH_MAX    256
+#define _POSIX_PIPE_BUF    512
+#define _POSIX_SSIZE_MAX   32767
+#define _POSIX_STREAM_MAX  8
+#define _POSIX_TZNAME_MAX  6
+#endif
+
 #endif

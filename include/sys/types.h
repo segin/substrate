@@ -114,4 +114,10 @@ typedef long                daddr_t;        /* disk address */
 #ifdef __cplusplus
 }
 #endif
+
+/* BSD/glibc(_BSD_SOURCE) convention: fd_set, FD_SET, and select() are
+ * reachable through <sys/types.h>.  Ported code (CDE) relies on it.  Included
+ * last, after the typedefs, and guard-safe against the select/time cycle. */
+#include <sys/select.h>
+
 #endif
