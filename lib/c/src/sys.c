@@ -1048,6 +1048,10 @@ pid_t wait4(pid_t pid, int *wstatus, int options, struct rusage *rusage) {
     return ret;
 }
 
+pid_t wait3(int *wstatus, int options, struct rusage *rusage) {
+    return wait4((pid_t)-1, wstatus, options, rusage);
+}
+
 int getrusage(int who, struct rusage *usage) {
     return __set_errno((int)_syscall2(SYS_GETRUSAGE, who, (uintptr_t)usage));
 }

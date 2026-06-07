@@ -32,6 +32,14 @@ struct spwd {
 void setspent(void);
 void endspent(void);
 
+/* Non-reentrant lookups (classic <shadow.h> interface): return a pointer into
+ * a single shared static buffer.  Not thread-safe — use the _r forms below
+ * when that matters. */
+struct spwd *getspnam(const char *name);
+struct spwd *getspent(void);
+struct spwd *fgetspent(FILE *stream);
+struct spwd *sgetspent(const char *string);
+
 int getspnam_r(const char *name, struct spwd *result_buf, char *buffer,
                size_t buflen, struct spwd **result);
 int getspent_r(struct spwd *result_buf, char *buffer, size_t buflen,

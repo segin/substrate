@@ -154,3 +154,48 @@ getspnam_r(const char *name, struct spwd *result_buf, char *buffer,
     fclose(f);
     return (rc == ERANGE) ? ERANGE : 0;
 }
+
+/* Non-reentrant variants: parse into one shared static struct + line buffer,
+ * the classic <shadow.h> interface.  Not thread-safe. */
+static struct spwd sp_static;
+static char        sp_static_buf[1024];
+
+struct spwd *
+getspnam(const char *name)
+{
+    struct spwd *result = NULL;
+    if (getspnam_r(name, &sp_static, sp_static_buf, sizeof sp_static_buf,
+                   &result) != 0)
+        return NULL;
+    return result;
+}
+
+struct spwd *
+getspent(void)
+{
+    struct spwd *result = NULL;
+    if (getspent_r(&sp_static, sp_static_buf, sizeof sp_static_buf,
+                   &result) != 0)
+        return NULL;
+    return result;
+}
+
+struct spwd *
+fgetspent(FILE *stream)
+{
+    struct spwd *result = NULL;
+    if (fgetspent_r(stream, &sp_static, sp_static_buf, sizeof sp_static_buf,
+                    &result) != 0)
+        return NULL;
+    return result;
+}
+
+struct spwd *
+sgetspent(const char *string)
+{
+    struct spwd *result = NULL;
+    if (sgetspent_r(string, &sp_static, sp_static_buf, sizeof sp_static_buf,
+                    &result) != 0)
+        return NULL;
+    return result;
+}
