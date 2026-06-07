@@ -101,6 +101,20 @@ if ! have bdftopcf; then
     echo "==> bdftopcf ready"
 fi
 
+# --- tradcpp: CDE's traditional C preprocessor (a build-time tool) ----------
+# CDE builds util/tradcpp and runs it during the build to expand its *.cpp
+# config templates (UNIXbindings, action/datatype dbs, app-defaults, ...).
+# Under a cross-build it gets compiled for the target and can't run on the
+# host, so build it here for the host from the same CDE sources.  config.h is
+# fully portable (compile-time OS detection only), so the in-tree one is fine.
+if ! have tradcpp; then
+    TC="${SUBSTRATE_TOP}/contrib/cde/build/cdesktopenv/cde/util/tradcpp"
+    [ -d "${TC}" ] || { echo "hosttools: CDE source tree missing — run cde/fetch.sh first" >&2; exit 1; }
+    ( cd "${TC}" && cc -O2 -w -I. -o "${PREFIX}/bin/tradcpp" \
+        array.c directive.c eval.c files.c macro.c main.c output.c place.c utils.c )
+    echo "==> tradcpp (host) ready"
+fi
+
 # --- onsgmls (OpenSP): SGML parser used by dthelp --------------------------
 if ! have onsgmls; then
     get OpenSP-1.5.2.tar.gz \

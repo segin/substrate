@@ -87,6 +87,10 @@ echo "==> configure"
     --with-tcl="${SR}/usr/lib"
 
 echo "==> make -j${JOBS}"
-make -j"${JOBS}"
+# GENCPP: CDE expands its *.cpp config templates with util/tradcpp, but the
+# cross-build compiles that for the target (can't run on the build host).
+# hosttools builds a host tradcpp; point every Makefile's GENCPP at it.  A
+# command-line override propagates to all recursive sub-makes via MAKEFLAGS.
+make -j"${JOBS}" GENCPP="${HOSTTOOLS}/tradcpp"
 
 echo "==> CDE build complete (if you reached here, all prerequisites are in place)"
