@@ -330,13 +330,14 @@ int str2sig(const char *str, int *pnum) {
  * snapshot/restore the signal mask through sigprocmask.
  * ============================================================ */
 
-/* __sigjmp_save — back end of the sigsetjmp() macro (see <setjmp.h>).  It
- * only records whether/which signal mask to restore; the macro performs the
- * actual setjmp() in the CALLER's frame so the saved context is the caller's,
- * not this helper's.  A function-wrapped setjmp() saved this routine's frame,
- * which is dead by the time siglongjmp() restores it — corrupting %ebp/%esp
- * and crashing (observed as a SIGSEGV in mksh's exit unwind). */
-void __sigjmp_save(sigjmp_buf env, int savemask) {
+/* __sigsetjmp_mask — the signal-mask back end of sigsetjmp().  The asm
+ * sigsetjmp (lib/c/arch/i386/setjmp.S) saves the caller's register context
+ * into env->__env and then tail-jumps here to finish the sigjmp_buf: this
+ * records whether/which mask to restore and returns 0 (the value sigsetjmp
+ * yields on a direct call).  Hidden so the asm reaches it with a plain
+ * PC-relative jump and it is not exported from libc. */
+__attribute__((visibility("hidden")))
+int __sigsetjmp_mask(sigjmp_buf env, int savemask) {
     env[0].__savemask = savemask;
     if (savemask) {
         sigset_t curr;
@@ -346,6 +347,7 @@ void __sigjmp_save(sigjmp_buf env, int savemask) {
     } else {
         env[0].__mask = 0;
     }
+    return 0;
 }
 
 void siglongjmp(sigjmp_buf env, int val) {
