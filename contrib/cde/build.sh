@@ -117,7 +117,8 @@ echo "==> configure"
 # Builder / ksh93 / dtinfo / ToolTalk-types / localized clusters, each tracked
 # as a separate effort.
 for _skip in dtksh dtcm dtappbuilder ttsnoop dtinfo dtdocbook tttypes types localized dthelp; do
-    sed -i "s/[[:space:]]${_skip}\([[:space:]]\)/\1/" programs/Makefile
+    # Match the token followed by whitespace OR end-of-line (last SUBDIRS entry).
+    sed -i "s/[[:space:]]${_skip}\([[:space:]]\|$\)/\1/" programs/Makefile
 done
 
 # In-tree generator tools: CDE compiles several small noinst_PROGRAMS and runs
