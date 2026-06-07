@@ -21,6 +21,7 @@
     .extern exit
     .extern environ
     .extern __stdio_init
+    .extern __init_stack_guard
 
     .text
 _start:
@@ -51,6 +52,13 @@ _start:
     pushl %edx                   /* envp */
     pushl %ecx                   /* argv */
     pushl %eax                   /* argc */
+
+    /* Seed the stack-protector canary from the AT_RANDOM auxv entry
+     * BEFORE any stack-protected C function runs.  envp is at [esp+8]. */
+    pushl 8(%esp)                /* envp argument */
+    call __init_stack_guard@PLT
+    addl $4, %esp                /* drop the argument */
+
     call __stdio_init@PLT
 
     /* main(argc, argv, envp) — args still on stack. */

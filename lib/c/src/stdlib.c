@@ -103,8 +103,55 @@ void abort(void) {
     _exit(134);
 }
 
+/*
+ * Stack-protector runtime.  GCC's -fstack-protector prologue copies
+ * __stack_chk_guard into each protected frame and the epilogue verifies it,
+ * branching to __stack_chk_fail on mismatch.  libc shipped __stack_chk_fail
+ * but not the guard symbol, so any object compiled with -fstack-protector
+ * failed to link (undefined reference to __stack_chk_guard) — which is why
+ * substrate code has had to build with -fno-stack-protector.  Providing the
+ * guard lets stack protection link and work.
+ *
+ * The initial value is a fixed "terminator canary" (low byte NUL so a naive
+ * string overflow can't cleanly overwrite it, plus CR/LF/0xFF).  It is the
+ * fallback; __init_stack_guard() replaces it at process startup with real
+ * kernel entropy from the AT_RANDOM auxv entry.
+ */
+uintptr_t __stack_chk_guard = (uintptr_t)0xff0a0d00;
+
 void __stack_chk_fail(void) {
     _exit(127);
+}
+
+/*
+ * __init_stack_guard — seed __stack_chk_guard from kernel entropy.  Called
+ * once from crt0 before any stack-protected function runs.  The kernel
+ * supplies 16 random bytes through the AT_RANDOM auxv entry (see
+ * sys/exec/formats/elf.c); we take the first pointer-sized chunk.  If
+ * AT_RANDOM is absent the fixed terminator canary above stays in effect.
+ *
+ * Marked no_stack_protector because it MUTATES the guard: a protected
+ * prologue here would save the old guard and the epilogue would compare the
+ * new global against it and spuriously fail.  (libc is already built
+ * -fno-stack-protector, so this is belt-and-suspenders.)
+ */
+#define _AT_NULL    0
+#define _AT_RANDOM  25
+__attribute__((no_stack_protector))
+void __init_stack_guard(char **envp) {
+    if (!envp) return;
+    char **p = envp;
+    while (*p) p++;            /* walk past the environment strings */
+    p++;                      /* step over the NULL terminator -> auxv */
+    uintptr_t *aux = (uintptr_t *)p;   /* { a_type, a_val } pairs */
+    for (; aux[0] != _AT_NULL; aux += 2) {
+        if (aux[0] == _AT_RANDOM && aux[1]) {
+            uintptr_t g;
+            __builtin_memcpy(&g, (const void *)aux[1], sizeof g);
+            if (g) __stack_chk_guard = g;
+            return;
+        }
+    }
 }
 
 // Allocator Implementation
