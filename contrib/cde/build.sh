@@ -125,6 +125,6 @@ echo "==> make -j${JOBS}"
 # is required even for the C-driver (gcc) links like dtpad that drag those
 # objects out of the static archives.  configure sets LIBS uniformly to
 # "-ldl -lm"; append -lsys -lstdc++.
-make -j"${JOBS}" GENCPP="${HOSTTOOLS}/tradcpp" LIBS="-ldl -lm -lsys -lstdc++"
+make -j"${JOBS}" GENCPP="${HOSTTOOLS}/tradcpp" LIBS="-ldl -lm -lsys -lstdc++ -liconv"
 
 echo "==> CDE build complete (if you reached here, all prerequisites are in place)"
