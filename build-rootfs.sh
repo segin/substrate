@@ -293,6 +293,12 @@ install_to_dist() {
     if [ ! -e "$DIST/usr/bin/login" ]; then
         ln -sf ../../bin/login "$DIST/usr/bin/login"
     fi
+    # CDE's dtsession_res (dtloadresources) hardcodes /usr/bin/tr; substrate
+    # ships tr at /bin/tr.  Without this the CDE session start logs
+    # "/usr/bin/tr: inaccessible or not found" and the X resource load fails.
+    if [ ! -e "$DIST/usr/bin/tr" ]; then
+        ln -sf ../../bin/tr "$DIST/usr/bin/tr"
+    fi
 
     echo "Installing substrate-native man pages from usr.man/..."
     make -C "$TOP/usr.man" install DESTDIR="$DIST" >/dev/null
