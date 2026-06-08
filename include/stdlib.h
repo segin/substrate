@@ -11,7 +11,17 @@ extern "C" {
 /* wchar_t comes from stddef.h above. */
 
 #define RAND_MAX 2147483647
-#define MB_CUR_MAX 4
+
+/* MB_CUR_MAX must reflect the current locale's maximum multibyte length.
+ * substrate's libc is a single-byte "C" locale (mbtowc/mblen are single-byte;
+ * __ctype_get_mb_cur_max() returns 1).  Hardcoding 4 lied about multibyte
+ * support the libc does not actually provide: wide-character-aware clients
+ * keyed on MB_CUR_MAX (notably CDE's dtterm, which then stores cells as
+ * wchar_t and draws via XwcDrawString) rendered every ASCII cell as one glyph
+ * followed by three NUL "tofu" boxes.  Use the accessor so MB_CUR_MAX tracks
+ * the real locale (and would adapt automatically if multibyte support lands). */
+extern int __ctype_get_mb_cur_max(void);
+#define MB_CUR_MAX (__ctype_get_mb_cur_max())
 
 #define EXIT_SUCCESS 0
 #define EXIT_FAILURE 1
