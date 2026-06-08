@@ -193,7 +193,7 @@ make -k install DESTDIR="${SUBSTRATE_TOP}/dist-cde" GENCPP="${HOSTTOOLS}/tradcpp
 # /bin/ksh (mksh is installed there), preserving any shebang args.
 echo "==> rewriting build-host ksh shebangs -> /bin/ksh"
 grep -rIl '^#!.*hosttools.*ksh' "${SUBSTRATE_TOP}/dist-cde" 2>/dev/null | while IFS= read -r f; do
-    sed -i '1{/^#!.*hosttools/s|^#![^ ]*ksh|#!/bin/ksh|}' "$f"
+    sed -i '1{/^#!.*hosttools/s|^#! *[^ ]*ksh|#!/bin/ksh|}' "$f"
 done
 echo "  $(grep -rIl '^#!/bin/ksh' "${SUBSTRATE_TOP}/dist-cde" 2>/dev/null | wc -l) scripts now use /bin/ksh"
 
