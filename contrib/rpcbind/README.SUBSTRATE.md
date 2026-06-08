@@ -22,13 +22,28 @@ started."**
 - Needs `struct in6_addr`'s `s6_addr32` union view (added to substrate's
   `<netinet/in.h>`).
 
-## Status — KNOWN-BROKEN AT RUNTIME (do NOT wire into rc.d yet)
-rpcbind cross-builds cleanly, but it does **not** run correctly on substrate:
-started as a child it `exit(0)`s without binding port 111 / creating the
-socket, and its daemon/session setup (it detaches the controlling terminal)
-appears to SIGHUP the init shell, after which the kernel resets — booting
-substrate into a reset loop.  This is a substrate TTY/session-handling
-interaction (controlling-terminal revocation against the session/init), not an
-rpcbind bug, and needs dedicated kernel debugging before rpcbind can be enabled
-at boot.  Until then ToolTalk (and the full CDE session) cannot start; CDE's
-"Failsafe Session" (dtwm + xterm, no ToolTalk) is the fallback.
+## Status — WORKING (wired into rc.d as 15-rpcbind)
+rpcbind runs correctly on substrate, both as a foreground server (`rpcbind -f`)
+and via the daemonized rc.d path (`/etc/rc.d/15-rpcbind`).  It binds the IPv4
+portmapper on 127.0.0.1:111 and its local `AF_UNIX` socket
+`/var/run/rpcbind.sock`, and CDE's ToolTalk (`ttsession`) registers
+successfully — `ttsession -c /bin/true` exits 0, so the full CDE session's
+messaging system starts.
+
+Getting here required several substrate fixes, all committed:
+- `getsockopt(SO_TYPE)` (libtirpc `svc_tli_create` switches on it),
+- `fork()` inheriting the per-thread TLS `gs_base` (rpcbind's `daemon(0,0)`
+  child faulted on its first `%gs` access without it),
+- `struct in6_addr`'s `s6_addr32` union view,
+- libtirpc tolerating a missing `/proc/sys/net/ipv4/ip_local_reserved_ports`,
+- `/etc/services` carrying the `sunrpc` (111) entries — without them
+  `getaddrinfo("sunrpc")` returned `EAI_SERVICE` and the IPv4 listener never
+  bound,
+- AF_INET `bind(port 0)` assigning an ephemeral port up front (POSIX), so a
+  service's `getsockname()`-derived registration uses its real port instead of
+  registering port 0 and then conflicting with its own re-registration.
+
+> An earlier note here claimed rpcbind crashed substrate into a reset loop.
+> That was a test-harness artifact: a `debugfs`-corrupted `/sbin/rpcbind`
+> binary plus running a shell as init.  Under real init via rc.d with a clean
+> binary, rpcbind is stable.
