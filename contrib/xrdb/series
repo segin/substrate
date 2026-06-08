@@ -1,0 +1,2 @@
+# xrdb substrate patch series (one filename per line, applied in order).
+# Empty: stock xrdb cross-compiles clean against the staged X libs.
