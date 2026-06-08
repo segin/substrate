@@ -61,8 +61,9 @@ static ld_u32 importer_version_hash(const ld_obj_t *obj, ld_u32 sym_idx) {
 static ld_u32 resolve_for(const ld_obj_t *obj, ld_u32 sym_idx,
                           const char *name) {
     ld_u32 vh = importer_version_hash(obj, sym_idx);
-    if (vh == 0) return ld_resolve(name);
-    return ld_resolve_versioned(name, vh, 0, 0);
+    /* Pass the requesting object so resolve_pred won't hand the program
+     * its own canonical-PLT entry (function-address equality). */
+    return ld_resolve_req(name, vh, obj);
 }
 
 static int apply_one(ld_obj_t *obj, Elf32_Rel *r) {

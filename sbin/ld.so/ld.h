@@ -175,6 +175,7 @@ typedef struct {
 #define STB_LOCAL  0
 #define STB_GLOBAL 1
 #define STB_WEAK   2
+#define STT_FUNC   2   /* ELF32_ST_TYPE: symbol names a function */
 #define STN_UNDEF  0
 #define SHN_UNDEF  0
 
@@ -340,6 +341,13 @@ ld_obj_t *ld_load_object(const char *path);
 /* Walk the loaded-object list looking for `name`.  Returns the
  * symbol's runtime address, or 0 if undefined / weak-undef. */
 ld_u32 ld_resolve(const char *name);
+
+/* Requester-aware resolve for the relocation processor: `requester` is
+ * the object being relocated, so a program's own PLT slot isn't bound to
+ * its own canonical-PLT entry (function-address equality — see
+ * ld_resolve.c resolve_pred). */
+ld_u32 ld_resolve_req(const char *name, ld_u32 vh_hash,
+                      const ld_obj_t *requester);
 
 /* Same, but skip `skip` while searching.  Used by R_386_COPY which
  * must find the source-of-truth in a SHARED library, not in the
