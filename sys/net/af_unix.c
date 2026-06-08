@@ -1011,7 +1011,22 @@ ssize_t sys_sendmsg(int fd, const struct msghdr *msg, int flags) {
     ssize_t total = 0;
     struct iovec_local *iov = (struct iovec_local *)msg->msg_iov;
     for (int i = 0; i < (int)msg->msg_iovlen; i++) {
-        ssize_t r = sys_send(fd, iov[i].iov_base, iov[i].iov_len, flags);
+        ssize_t r;
+        if (msg->msg_name && msg->msg_namelen > 0) {
+            /* Honour msg_name as the datagram destination — the mirror of
+             * the recvmsg msg_name fix.  rpcbind's libtirpc svc_dg_reply
+             * sendmsg()s its reply with msg_name set to the client it just
+             * recvmsg()'d from (on an *unconnected* UDP socket), so without
+             * this the reply is sent with no destination and silently
+             * dropped, leaving every RPC caller hanging.  sys_sendto routes
+             * AF_INET/INET6 to afinet_sendto and otherwise falls back to
+             * sys_send, so AF_UNIX traffic is unaffected. */
+            r = sys_sendto(fd, iov[i].iov_base, iov[i].iov_len, flags,
+                           (const struct sockaddr *)msg->msg_name,
+                           (socklen_t)msg->msg_namelen);
+        } else {
+            r = sys_send(fd, iov[i].iov_base, iov[i].iov_len, flags);
+        }
         if (r < 0) return total > 0 ? total : r;
         total += r;
         if ((size_t)r < iov[i].iov_len) break;
@@ -1028,7 +1043,25 @@ ssize_t sys_recvmsg(int fd, struct msghdr *msg, int flags) {
     ssize_t total = 0;
     struct iovec_local *iov = (struct iovec_local *)msg->msg_iov;
     for (int i = 0; i < (int)msg->msg_iovlen; i++) {
-        ssize_t r = sys_recv(fd, iov[i].iov_base, iov[i].iov_len, flags);
+        ssize_t r;
+        if (i == 0 && msg->msg_name && msg->msg_namelen > 0) {
+            /* Capture the datagram sender's address into msg_name on the
+             * first iov read.  Datagram RPC servers — notably rpcbind's
+             * libtirpc svc_dg, which recvmsg()s each request and sends
+             * the reply back to msg_name — depend on this.  Without it
+             * the source address stays empty and every reply is
+             * undeliverable, so e.g. CDE's ttsession/dtsession hang
+             * forever pinging an rpcbind that can never answer.  msg_name
+             * is the caller's userspace buffer and msg_namelen its
+             * capacity, exactly what sys_recvfrom/do_recv expect.  The
+             * SCM_RIGHTS path below passes msg_name == NULL, so it is
+             * unaffected. */
+            r = sys_recvfrom(fd, iov[i].iov_base, iov[i].iov_len, flags,
+                             (struct sockaddr *)msg->msg_name,
+                             (socklen_t *)&msg->msg_namelen);
+        } else {
+            r = sys_recv(fd, iov[i].iov_base, iov[i].iov_len, flags);
+        }
         if (r < 0) return total > 0 ? total : r;
         total += r;
         if ((size_t)r < iov[i].iov_len) break;
