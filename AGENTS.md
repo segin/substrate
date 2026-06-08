@@ -348,10 +348,25 @@ manifest, `README.SUBSTRATE.md`.  Current set:
   end-to-end — all libraries, ToolTalk, and the programs dtwm, dtfile,
   dtsession, dtterm, dtpad, dtstyle, dtcalc, dtmail, dtcm, dtprintinfo,
   dtsearchpath, dtspcd, dtscreen, dtsr, dticon, dtcreate, dtlogin, ...
+  The full desktop now **comes up live**: dtsession starts ToolTalk
+  (needs the kernel msg_name fix + the /etc/hosts hostname->127.0.0.1
+  mapping), dtwm decorates clients and **draws the Front Panel** (clock,
+  calendar, file manager, mail, workspace switch, trash, ...), and dtterm
+  renders cleanly.  Three substrate fixes were needed beyond the build:
+  the ld.so canonical-PLT fix (function-pointer equality — see Dynamic
+  Linking Phase 4g; dtwm's front-panel widget class otherwise aborts with
+  "Unresolved inheritance operation"), the libc `MB_CUR_MAX` fix (it was
+  hardcoded 4 while substrate is a single-byte locale, so dtterm took the
+  `wchar_t`/`XwcDrawString` path and drew each ASCII cell as a glyph + 3
+  tofu boxes), and `contrib/cde/install-localized-types.sh` (+ `cdemerge.py`,
+  a `merge(1)` replica) which expands the `%|nls|` placeholders and installs
+  the `/usr/dt/appconfig/types` Front Panel + datatype/action database that
+  the skipped `localized`/`types` clusters never staged.
   Deferred (each a separate host-tooling effort, documented in
   `build.sh`): dtksh (ksh93 AST mamake cross-build), dtappbuilder +
   ttsnoop (need a host Motif for dtcodegen), dtinfo + dtdocbook (SGML
-  pmaker chain), tttypes/types (host tt_type_comp), localized, dthelp
+  pmaker chain), tttypes/types (host tt_type_comp), the rest of
+  `localized` (only the C-locale types slice is staged), dthelp
   parser.  The Motif port (`contrib/motif/`) builds libUil via Motif's
   WML meta-compiler (host wml/wmluiltok) and installs the uil/ headers.
 - **ext2 toolset** — `e2fsprogs` 1.47.2 (`contrib/e2fsprogs/`):
@@ -396,6 +411,22 @@ manifest, `README.SUBSTRATE.md`.  Current set:
     `__ldso_run_fini` (mirror of init_arrays in REVERSE init
     order with each object's array walked backwards); libc's
     `exit()` calls it via a weak ref before _exit syscall.
+  - Phase 4g: canonical function addresses (function-pointer
+    equality across the exe/DSO boundary).  A non-PIE executable
+    that takes the *address* of a shared-library function gets a
+    PLT stub from the static linker and the symbol is emitted UND
+    but with `st_value` = that PLT entry (call-only UND funcs keep
+    `st_value` 0).  `resolve_pred` treats such a program (list-head)
+    symbol as a canonical definition at the PLT address and hands
+    it to every *other* module, so `&func` is identical everywhere;
+    the requesting object is threaded through `ld_resolve_req` so
+    the program's own JMP_SLOT still binds the real defining DSO
+    (else `GOT[f]` would point at the program's own PLT stub and a
+    call self-loops).  Without this, libXt's `XtInherit*` class-
+    method inheritance (`method == &_XtInherit`) failed for widget
+    classes compiled into a non-PIE exe — CDE's dtwm aborted the
+    whole desktop with "Unresolved inheritance operation" building
+    its front panel.
   - Per-object guards: `relocated` / `initialized` / `finalized`
     booleans on ld_obj_t prevent the non-idempotent
     R_386_RELATIVE (`*p += base`) and the run-once init/fini

@@ -18,7 +18,15 @@ Substrate is a complete Unix OS project with five first-class pillars:
   DT_FINI_ARRAY execution, per-thread TLS install (PT_TLS images
   copied into a variant-II layout and the GS base installed via the
   native `sys_set_gsbase` syscall), and runtime `dlopen` / `dlsym` /
-  `dlclose` for plugin-style loading.  ld.so registers itself in the
+  `dlclose` for plugin-style loading.  Symbol resolution honours the
+  **canonical function address** rule for non-PIE executables: when the
+  program takes the address of a shared-library function the static
+  linker emits that symbol UND-with-`st_value` (its own PLT stub), and
+  ld.so hands that PLT address to every *other* module so `&func` is
+  identical everywhere (function-pointer equality — required by Xt's
+  `XtInherit*` class-method machinery, which CDE's front panel depends
+  on).  The program's own PLT slots still bind to the real defining DSO.
+  ld.so registers itself in the
   loaded-object scope so its `__ldso_*` exports are visible to libdl
   and to libc (which calls `__ldso_run_fini` as a weak hook from
   `exit()` to run destructors before the process is reaped).
