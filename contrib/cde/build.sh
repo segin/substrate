@@ -183,4 +183,18 @@ echo "==> install into ${SUBSTRATE_TOP}/dist-cde"
 rm -rf "${SUBSTRATE_TOP}/dist-cde"
 make -k install DESTDIR="${SUBSTRATE_TOP}/dist-cde" GENCPP="${HOSTTOOLS}/tradcpp" || true
 
+# CDE's configure bakes the build-host ksh path (the hosttools mksh-as-ksh it
+# found at build time) into the `#!` line of every generated ksh script —
+# dtsession_res, dtappintegrate, dtopen, dtprintegrate, the Xsession.d/*
+# fragments, Xsetup, ...  That path does not exist on the target, so the
+# kernel's shebang handler fails with ENOENT ("exec: handler script failed for
+# /usr/dt/bin/dtsession_res (-2)") and e.g. dtsession_res can't xrdb the CDE
+# resources at session start.  Rewrite the interpreter to the target's
+# /bin/ksh (mksh is installed there), preserving any shebang args.
+echo "==> rewriting build-host ksh shebangs -> /bin/ksh"
+grep -rIl '^#!.*hosttools.*ksh' "${SUBSTRATE_TOP}/dist-cde" 2>/dev/null | while IFS= read -r f; do
+    sed -i '1{/^#!.*hosttools/s|^#![^ ]*ksh|#!/bin/ksh|}' "$f"
+done
+echo "  $(grep -rIl '^#!/bin/ksh' "${SUBSTRATE_TOP}/dist-cde" 2>/dev/null | wc -l) scripts now use /bin/ksh"
+
 echo "==> CDE build complete (if you reached here, all prerequisites are in place)"
