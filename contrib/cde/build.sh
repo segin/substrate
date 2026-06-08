@@ -197,4 +197,13 @@ grep -rIl '^#!.*hosttools.*ksh' "${SUBSTRATE_TOP}/dist-cde" 2>/dev/null | while 
 done
 echo "  $(grep -rIl '^#!/bin/ksh' "${SUBSTRATE_TOP}/dist-cde" 2>/dev/null | wc -l) scripts now use /bin/ksh"
 
+# Install the C-locale datatype/action database + dtwm Front Panel.  The
+# `localized`/`types` clusters are skipped above (their catalog generators
+# don't cross-build), so expand the %|nls| placeholders ourselves and stage
+# the tree — otherwise dtwm comes up with no Front Panel.  Requires the ld.so
+# canonical-PLT fix (function-pointer equality) or dtwm aborts building the
+# panel with "Unresolved inheritance operation".
+echo "==> installing localized CDE types (Front Panel + datatype database)"
+sh "${HERE}/install-localized-types.sh" "${TREE_DIR}" "${SUBSTRATE_TOP}/dist-cde" || true
+
 echo "==> CDE build complete (if you reached here, all prerequisites are in place)"
