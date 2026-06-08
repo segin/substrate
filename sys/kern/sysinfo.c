@@ -53,13 +53,16 @@ int do_sysinfo(struct sysinfo *info) {
     }
     kinfo.procs = procs;
 
-    // Loads (scaled by 65536, SI_LOAD_SCALE)
-    // Currently using instantaneous load as proxy
-    extern uint32_t sched_get_system_load(void);
-    unsigned long load = sched_get_system_load() * 65536;
-    kinfo.loads[0] = load;
-    kinfo.loads[1] = load;
-    kinfo.loads[2] = load;
+    // Loads: the real 1/5/15-minute exponentially-decayed averages the
+    // kernel maintains in avenrun (sched_get_loadavg), not an instantaneous
+    // proxy.  avenrun is FSHIFT=11 fixed point; sysinfo(2) reports loads
+    // scaled by SI_LOAD_SCALE = 65536 = 2^16, so shift left (16 - 11) = 5.
+    extern void sched_get_loadavg(unsigned long *loads);
+    unsigned long av[3];
+    sched_get_loadavg(av);
+    kinfo.loads[0] = av[0] << 5;
+    kinfo.loads[1] = av[1] << 5;
+    kinfo.loads[2] = av[2] << 5;
 
     // Using copyout to send result to userspace
     if (copyout(&kinfo, info, sizeof(struct sysinfo)) != 0) return -14; // EFAULT
