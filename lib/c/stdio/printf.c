@@ -343,9 +343,9 @@ static int conv_vcat(char conv, int length) {
     case 'e': case 'E': case 'f': case 'F': case 'g': case 'G':
     case 'a': case 'A':
         return (length == LEN_LONG_DOUBLE) ? VC_LDBL : VC_DBL;
-    case 'c':                            /* int, or wint_t for %lc — both int-sized */
+    case 'c': case 'C':                  /* int / wint_t (%c, %lc, %C) — int-sized */
         return VC_INT;
-    case 's': case 'p': case 'n':
+    case 's': case 'S': case 'p': case 'n':  /* %S == %ls: a (wide) string pointer */
         return VC_PTR;
     default:                             /* %m, %%, unknown: no argument */
         return VC_NONE;
@@ -558,6 +558,19 @@ static void fmt_conv(struct outbuf *o, const struct spec *sp, union argval a) {
         if (left_align && width > s_len) for (int i = 0; i < width - s_len; i++) ob_put(o, ' ');
         break;
     }
+    case 'S': {
+        /* %S == %ls: a wide string.  Substrate is a single-byte locale, so
+         * emit the low byte of each wchar_t (4 bytes on i386) until NUL,
+         * honouring precision (max chars) and width. */
+        const unsigned int *ws = (const unsigned int *)a.p;
+        if (!ws) { const char *n = "(null)"; while (*n) ob_put(o, *n++); break; }
+        int s_len = 0;
+        while (ws[s_len] && (precision == -1 || s_len < precision)) s_len++;
+        if (!left_align && width > s_len) for (int i = 0; i < width - s_len; i++) ob_put(o, ' ');
+        for (int i = 0; i < s_len; i++) ob_put(o, (char)ws[i]);
+        if (left_align && width > s_len) for (int i = 0; i < width - s_len; i++) ob_put(o, ' ');
+        break;
+    }
     case 'm': {
         /* glibc extension: strerror(errno), no argument. */
         const char *val = strerror(errno);
@@ -570,7 +583,7 @@ static void fmt_conv(struct outbuf *o, const struct spec *sp, union argval a) {
         if (left_align && width > s_len) for (int i = 0; i < width - s_len; i++) ob_put(o, ' ');
         break;
     }
-    case 'c': {
+    case 'c': case 'C': {       /* %C == %lc: low byte of the (wide) char */
         char c = (char)a.ll;
         if (!left_align && width > 1) for (int i = 0; i < width - 1; i++) ob_put(o, ' ');
         ob_put(o, c);
