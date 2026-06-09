@@ -218,7 +218,7 @@ finalize_x_fonts() {
         { printf '%d\n' "$_n"; cat "$_dst/fonts.dir.tmp"; } > "$_dst/fonts.dir"
         cp -a "$_dst/fonts.dir" "$_dst/fonts.scale"; rm -f "$_dst/fonts.dir.tmp"
         if [ -f "$_cde_alias/mixed.alias" ]; then
-            cat "$_cde_alias/mixed.alias" "$_cde_alias/fixed.alias" 2>/dev/null > "$_dst/fonts.alias" ||                 cp "$_cde_alias/mixed.alias" "$_dst/fonts.alias"
+            cat "$_cde_alias/mixed.alias" "$_cde_alias/fixed.alias" 2>/dev/null >> "$_dst/fonts.alias" ||                 cat "$_cde_alias/mixed.alias" >> "$_dst/fonts.alias"
         fi
         echo "Finalized X fonts in $_d: $_n entries + CDE -dt-* aliases"
     done
