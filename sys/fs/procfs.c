@@ -24,6 +24,8 @@
 #include <stddef.h>
 #include <vm/vm_kmem.h>
 #include <vm/vm_page.h>
+#include <vm/vm_map.h>
+#include <vm/vm_object.h>
 #include <kern/memtrack.h>
 #include <sys/lock.h>
 #include <kern/bus.h>
@@ -53,6 +55,7 @@ static size_t proc_pid_task_stat_read(fs_node_t *node, off_t offset, size_t size
 static size_t proc_pid_status_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer);
 static size_t proc_pid_stat_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer);
 static size_t proc_pid_cmdline_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer);
+static size_t proc_pid_maps_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer);
 
 static void procfs_refresh_timestamps(fs_node_t *node) {
     time_t now;
@@ -466,6 +469,7 @@ typedef struct procfs_pid_nodes {
     fs_node_t status;
     fs_node_t cmdline;
     fs_node_t stat;
+    fs_node_t maps;
     fs_node_t exe;
     fs_node_t cwd;
     fs_node_t fd_dir;
@@ -613,6 +617,14 @@ static procfs_pid_nodes_t *procfs_get_pid_nodes(int pid) {
     nodes->stat.gid = target->gid;
     nodes->stat.read = &proc_pid_stat_read;
     procfs_refresh_timestamps(&nodes->stat);
+
+    strncpy(nodes->maps.name, "maps", sizeof(nodes->maps.name) - 1);
+    nodes->maps.flags = FS_FILE;
+    nodes->maps.mask = 0444;
+    nodes->maps.uid = target->uid;
+    nodes->maps.gid = target->gid;
+    nodes->maps.read = &proc_pid_maps_read;
+    procfs_refresh_timestamps(&nodes->maps);
 
     strncpy(nodes->exe.name, "exe", sizeof(nodes->exe.name) - 1);
     nodes->exe.flags = FS_SYMLINK;
@@ -879,6 +891,94 @@ static int proc_generate_status(char *b, size_t s, process_t *proc) {
     }
 }
 
+/*
+ * /proc/<pid>/maps — Linux-compatible address-space dump.  One line per
+ * vm_map_entry:
+ *
+ *   <start>-<end> <perms> <offset> <dev> <inode> <pathname>
+ *   003e4000-00489000 r-xp 00000000 00:00 1215 libXfont.so.1.4.1
+ *
+ * <pathname> is the backing file's basename (fs_node_t.name) for
+ * vnode-backed regions, empty for anonymous ones (stack / heap / bss /
+ * MAP_ANON).  substrate has no real dev numbers here, so the dev column
+ * is a placeholder 00:00; <inode> is the backing vnode's inode.  This is
+ * enough to map a faulting userspace EIP back to a shared library +
+ * offset for addr2line.
+ */
+static int proc_generate_maps(char *b, size_t s, process_t *proc) {
+    vm_map_t *map;
+    vm_map_entry_t *e;
+    int len = 0;
+
+    if (!proc) return 0;
+    map = proc->vm_map;
+    if (!map || !map->header) return 0;
+
+    vm_map_lock_read(map);
+    for (e = map->header->next; e && e != map->header; e = e->next) {
+        const char *path = "";
+        uint64_t inode = 0;
+        int n;
+
+        /* A MAP_PRIVATE file mapping (every ld.so library segment) is an
+         * anonymous COW shadow whose ->shadow chain bottoms out at the
+         * VM_OBJ_TYPE_VNODE object that actually backs the file.  Walk down
+         * to it so the pathname/inode columns name the library, not "". */
+        vm_object_t *o = e->object;
+        int guard = 0;
+        while (o && o->type != VM_OBJ_TYPE_VNODE && o->shadow && guard++ < 32) {
+            o = o->shadow;
+        }
+        if (o && o->type == VM_OBJ_TYPE_VNODE && o->handle) {
+            fs_node_t *vn = (fs_node_t *)o->handle;
+            if (vn->name[0]) path = vn->name;
+            inode = vn->inode;
+        }
+
+        if (len >= (int)s - 1) break;
+        n = snprintf(b + len, s - len,
+            "%08lx-%08lx %c%c%cp %08llx 00:00 %llu %s\n",
+            (unsigned long)e->start, (unsigned long)e->end,
+            (e->protection & VM_PROT_READ)  ? 'r' : '-',
+            (e->protection & VM_PROT_WRITE) ? 'w' : '-',
+            (e->protection & VM_PROT_EXEC)  ? 'x' : '-',
+            (unsigned long long)e->offset,
+            (unsigned long long)inode,
+            path);
+        if (n < 0) break;
+        if (n >= (int)(s - len)) { len = (int)s - 1; break; }  /* truncated */
+        len += n;
+    }
+    vm_map_unlock_read(map);
+    return len;
+}
+
+static size_t proc_pid_maps_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
+    int pid = node->inode;
+    process_t *p = proc_find(pid);
+    if (!p) return 0;
+
+    size_t cap = 16384;
+    char *buf = kmalloc(cap);
+    if (!buf) return 0;
+
+    int len = proc_generate_maps(buf, cap, p);
+    if (len < 0) len = 0;
+    if (len >= (int)cap) len = (int)cap - 1;
+
+    size_t read_len = 0;
+    if (offset < (uint32_t)len) {
+        read_len = size;
+        if (offset + read_len > (uint32_t)len) {
+            read_len = len - offset;
+        }
+        memcpy(buffer, buf + offset, read_len);
+    }
+
+    kfree(buf, cap);
+    return read_len;
+}
+
 static size_t proc_pid_status_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
     int pid = node->inode;
     process_t *p = proc_find(pid);
@@ -1027,8 +1127,8 @@ static size_t proc_pid_cmdline_read(fs_node_t *node, off_t offset, size_t size, 
 
 static struct dirent *proc_pid_readdir(fs_node_t *node, uint64_t index) {
     (void)node;
-    const char *entries[] = { ".", "..", "status", "cmdline", "stat", "exe", "cwd", "fd", "task", NULL };
-    if (index >= 9) return NULL;
+    const char *entries[] = { ".", "..", "status", "cmdline", "stat", "maps", "exe", "cwd", "fd", "task", NULL };
+    if (index >= 10) return NULL;
     strncpy(proc_dirent.d_name, entries[index], sizeof(proc_dirent.d_name) - 1);
     proc_dirent.d_name[sizeof(proc_dirent.d_name) - 1] = '\0';
     proc_dirent.d_ino = node->inode;
@@ -1101,6 +1201,11 @@ static fs_node_t *proc_pid_finddir(fs_node_t *node, char *name) {
         nodes->stat.inode = node->inode;
         procfs_refresh_timestamps(&nodes->stat);
         return &nodes->stat;
+    }
+    if (strcmp(name, "maps") == 0) {
+        nodes->maps.inode = node->inode;
+        procfs_refresh_timestamps(&nodes->maps);
+        return &nodes->maps;
     }
     if (strcmp(name, "exe") == 0) {
         nodes->exe.inode = node->inode;
