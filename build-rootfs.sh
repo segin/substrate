@@ -204,7 +204,10 @@ finalize_x_fonts() {
     # grab -> frozen desktop), so all the referenced fonts + aliases must
     # be present.
     _cde_alias="$TOP/contrib/cde/build/cdesktopenv/cde/programs/fontaliases"
-    for _d in 100dpi 75dpi misc; do
+    # Only 100dpi + 75dpi gained fonts (adobe + B&H share them); regenerate
+    # one merged fonts.dir there.  Leave misc alone — font-misc-misc owns it
+    # (its fonts.alias gives xterm "fixed"/"9x15").
+    for _d in 100dpi 75dpi; do
         _dst="$DIST/usr/share/fonts/X11/$_d"
         [ -d "$_dst" ] || continue
         : > "$_dst/fonts.dir.tmp"; _n=0
@@ -217,11 +220,16 @@ finalize_x_fonts() {
         done
         { printf '%d\n' "$_n"; cat "$_dst/fonts.dir.tmp"; } > "$_dst/fonts.dir"
         cp -a "$_dst/fonts.dir" "$_dst/fonts.scale"; rm -f "$_dst/fonts.dir.tmp"
-        if [ -f "$_cde_alias/mixed.alias" ]; then
-            cat "$_cde_alias/mixed.alias" "$_cde_alias/fixed.alias" 2>/dev/null >> "$_dst/fonts.alias" ||                 cat "$_cde_alias/mixed.alias" >> "$_dst/fonts.alias"
-        fi
-        echo "Finalized X fonts in $_d: $_n entries + CDE -dt-* aliases"
+        echo "Finalized X fonts in $_d: $_n entries"
     done
+    # CDE -dt-* aliases in ONE dir (100dpi); X merges fonts.alias across the
+    # whole path so they resolve globally, and misc keeps its own aliases.
+    _dst="$DIST/usr/share/fonts/X11/100dpi"
+    if [ -f "$_cde_alias/mixed.alias" ] && [ -d "$_dst" ]; then
+        cat "$_cde_alias/mixed.alias" "$_cde_alias/fixed.alias" > "$_dst/fonts.alias" 2>/dev/null || \
+            cp "$_cde_alias/mixed.alias" "$_dst/fonts.alias"
+        echo "Installed CDE -dt-* font aliases in 100dpi"
+    fi
 }
 
 install_to_dist() {
