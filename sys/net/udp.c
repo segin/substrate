@@ -32,9 +32,9 @@ void udp_input(netdev_t *dev, int family,
     if (family == 2 /* AF_INET */) {
         uint32_t s = *(const uint32_t *)saddr;
         uint32_t d = *(const uint32_t *)daddr;
-        afinet_deliver_v4(s, d, IPPROTO_UDP_NUM, pkt, ulen);
+        afinet_deliver_v4(s, d, IPPROTO_UDP_NUM, pkt, ulen, /*for_dgram=*/1);
     } else if (family == 10 /* AF_INET6 */) {
         afinet_deliver_v6((const uint8_t *)saddr, (const uint8_t *)daddr,
-                          IPPROTO_UDP_NUM, pkt, ulen);
+                          IPPROTO_UDP_NUM, pkt, ulen, /*for_dgram=*/1);
     }
 }

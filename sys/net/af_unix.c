@@ -74,6 +74,14 @@ static inline int xfd_trace(void) {
     if (xfd_trace()) kprintf("xfd: " fmt "\n", ##__VA_ARGS__); \
 } while (0)
 
+/* POSIX EBADF vs ENOTSOCK: a syscall on an fd that isn't open at all is
+ * EBADF; a valid-but-not-a-socket fd is ENOTSOCK (handled downstream).
+ * The socket dispatchers check this up front so bind/listen/accept/...
+ * on a closed/garbage fd return EBADF rather than ENOTSOCK. */
+static int sock_fd_invalid(int fd) {
+    return fd < 0 || fd >= MAX_FD || !current_process || !current_process->fds[fd];
+}
+
 /* Substrate uses BSD-style msghdr; mirror the user-visible field set
  * for the iov walk in sys_send/recvmsg.  Kernel socket.h has a
  * narrower form, so cast through this struct's interpretation. */
@@ -607,6 +615,7 @@ int sys_socketpair(int domain, int type, int protocol, int sv[2]) {
 }
 
 int sys_bind(int fd, const struct sockaddr *addr, socklen_t addrlen) {
+    if (sock_fd_invalid(fd)) return -EBADF;
     if (addr && addr->sa_family == AF_UNIX) {
         const char *p = ((const struct sockaddr_un *)addr)->sun_path;
         XFD("sys_bind pid=%d fd=%d af_unix path='%.*s'",
@@ -641,6 +650,7 @@ int sys_bind(int fd, const struct sockaddr *addr, socklen_t addrlen) {
 }
 
 int sys_listen(int fd, int backlog) {
+    if (sock_fd_invalid(fd)) return -EBADF;
     XFD("sys_listen pid=%d fd=%d backlog=%d",
         current_process ? (int)current_process->pid : -1, fd, backlog);
     /* Try AF_INET TCP first. */
@@ -665,6 +675,7 @@ int sys_listen(int fd, int backlog) {
 }
 
 int sys_accept(int fd, struct sockaddr *addr, socklen_t *addrlen) {
+    if (sock_fd_invalid(fd)) return -EBADF;
     XFD("sys_accept ENTER pid=%d fd=%d",
         current_process ? (int)current_process->pid : -1, fd);
     /* AF_INET TCP first. */
@@ -729,6 +740,7 @@ int sys_accept(int fd, struct sockaddr *addr, socklen_t *addrlen) {
 }
 
 int sys_connect(int fd, const struct sockaddr *addr, socklen_t addrlen) {
+    if (sock_fd_invalid(fd)) return -EBADF;
     XFD("sys_connect ENTER pid=%d fd=%d family=%d",
         current_process ? (int)current_process->pid : -1,
         fd, addr ? addr->sa_family : -1);
@@ -798,6 +810,7 @@ int sys_connect(int fd, const struct sockaddr *addr, socklen_t addrlen) {
  * afpacket_{send,recv}to with a NULL addr (broadcast to current
  * bound ifindex).  Otherwise fall back to AF_UNIX semantics. */
 ssize_t sys_send(int fd, const void *buf, size_t len, int flags) {
+    if (sock_fd_invalid(fd)) return -EBADF;
     if (fd >= 0 && fd < MAX_FD && current_process) {
         file_t *f = current_process->fds[fd];
         if (f && f->f_data) {
@@ -856,6 +869,7 @@ static ssize_t recv_into_kbuf(int fd, void *kbuf, size_t len, int flags,
  * the data (and any source address) out to userspace fault-safely. */
 static ssize_t do_recv(int fd, void *buf, size_t len, int flags,
                        struct sockaddr *addr, socklen_t *addrlen) {
+    if (sock_fd_invalid(fd)) return -EBADF;
     uint8_t    kaddr[128];
     socklen_t  kaddrlen = sizeof(kaddr);
     void      *kbuf;
@@ -904,11 +918,13 @@ static ssize_t do_recv(int fd, void *buf, size_t len, int flags,
 }
 
 ssize_t sys_recv(int fd, void *buf, size_t len, int flags) {
+    if (sock_fd_invalid(fd)) return -EBADF;
     return do_recv(fd, buf, len, flags, NULL, NULL);
 }
 
 ssize_t sys_sendto(int fd, const void *buf, size_t len, int flags,
                    const struct sockaddr *addr, socklen_t addrlen) {
+    if (sock_fd_invalid(fd)) return -EBADF;
     /* Route by destination address family first. */
     if (addr && addrlen >= 2) {
         if (addr->sa_family == AF_PACKET)
@@ -1127,6 +1143,7 @@ ssize_t sys_recvmsg(int fd, struct msghdr *msg, int flags) {
 }
 
 int sys_shutdown(int fd, int how) {
+    if (sock_fd_invalid(fd)) return -EBADF;
     /* AF_INET first — route by fd type, same as sys_accept/sys_recv. */
     if (fd >= 0 && fd < MAX_FD && current_process) {
         file_t *f = current_process->fds[fd];
@@ -1167,6 +1184,7 @@ extern int afinet_getsockname(int fd, void *addr, socklen_t *addrlen);
 extern int afinet_getpeername(int fd, void *addr, socklen_t *addrlen);
 
 int sys_getsockname(int fd, struct sockaddr *addr, socklen_t *addrlen) {
+    if (sock_fd_invalid(fd)) return -EBADF;
     if (!addr || !addrlen) return -EINVAL;
     int rc = afinet_getsockname(fd, addr, addrlen);
     if (rc != -ENOTSOCK) return rc;
@@ -1184,6 +1202,7 @@ int sys_getsockname(int fd, struct sockaddr *addr, socklen_t *addrlen) {
 }
 
 int sys_getpeername(int fd, struct sockaddr *addr, socklen_t *addrlen) {
+    if (sock_fd_invalid(fd)) return -EBADF;
     if (!addr || !addrlen) return -EINVAL;
     int rc = afinet_getpeername(fd, addr, addrlen);
     if (rc != -ENOTSOCK) return rc;
@@ -1203,8 +1222,14 @@ int sys_getpeername(int fd, struct sockaddr *addr, socklen_t *addrlen) {
 
 int sys_setsockopt(int fd, int level, int optname,
                    const void *optval, socklen_t optlen) {
-    (void)fd; (void)level; (void)optname; (void)optval; (void)optlen;
-    /* No options honoured; accept silently. */
+    /* SO_REUSEADDR is the one option with observable behaviour — it relaxes
+     * bind()'s EADDRINUSE check — so record it on the AF_INET socket.  All
+     * other options are accepted silently. */
+    if (level == 1 /*SOL_SOCKET*/ && optname == 2 /*SO_REUSEADDR*/) {
+        extern int afinet_set_reuseaddr(int fd, int on);
+        int on = (optval && optlen >= (socklen_t)sizeof(int)) ? *(const int *)optval : 0;
+        afinet_set_reuseaddr(fd, on);   /* no-op on non-AF_INET fds */
+    }
     return 0;
 }
 
@@ -1244,7 +1269,29 @@ int sys_getsockopt(int fd, int level, int optname,
             *optlen = sizeof(int);
             return 0;
         }
+        if (optname == 2 /*SO_REUSEADDR*/) {
+            extern int afinet_get_reuseaddr(int fd);
+            int r = afinet_get_reuseaddr(fd);
+            *(int *)optval = (r < 0) ? 0 : r;
+            *optlen = sizeof(int);
+            return 0;
+        }
+        if (optname == 7 /*SO_SNDBUF*/ || optname == 8 /*SO_RCVBUF*/) {
+            *(int *)optval = 32 * 1024;    /* report a plausible buffer size */
+            *optlen = sizeof(int);
+            return 0;
+        }
+        if (optname == 6 /*SO_BROADCAST*/ || optname == 9 /*SO_KEEPALIVE*/ ||
+            optname == 15 /*SO_REUSEPORT*/ || optname == SO_ACCEPTCONN_K) {
+            *(int *)optval = 0;
+            *optlen = sizeof(int);
+            return 0;
+        }
+        /* Unknown SOL_SOCKET option — POSIX ENOPROTOOPT (was silently 0,
+         * which let bogus getsockopt() calls "succeed"). */
+        return -ENOPROTOOPT;
     }
+    /* Non-SOL_SOCKET levels (IPPROTO_TCP/IP/...): stay lenient. */
     *(int *)optval = 0;
     *optlen = sizeof(int);
     return 0;

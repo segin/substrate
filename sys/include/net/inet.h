@@ -118,10 +118,10 @@ ssize_t afinet_recvfrom(int fd, void *buf, size_t len, int flags,
  * protocol/port). */
 int afinet_deliver_v4(uint32_t saddr, uint32_t daddr,
                       uint8_t protocol,
-                      const uint8_t *pkt, size_t len);
+                      const uint8_t *pkt, size_t len, int for_dgram);
 int afinet_deliver_v6(const uint8_t saddr[16], const uint8_t daddr[16],
                       uint8_t protocol,
-                      const uint8_t *pkt, size_t len);
+                      const uint8_t *pkt, size_t len, int for_dgram);
 
 /* -- One-shot init from main.c -------------------------------------- */
 

@@ -967,6 +967,45 @@ ssize_t tcp_recv(tcp_pcb_t *p, void *buf, size_t len) {
     }
 }
 
+/* MSG_PEEK: copy up to len bytes from the rx ring WITHOUT consuming them,
+ * so a follow-up recv() still sees the same data.  Same EOF/EAGAIN
+ * signalling as tcp_recv_nb. */
+ssize_t tcp_peek_nb(tcp_pcb_t *p, void *buf, size_t len) {
+    uint32_t lf = tcp_lock();
+    if (p->shut_rd) { tcp_unlock(lf); return 0; }
+    if (p->rx_count > 0) {
+        size_t n = p->rx_count < len ? p->rx_count : len;
+        uint8_t *b = (uint8_t *)buf;
+        uint32_t tail = p->rx_tail;
+        for (size_t i = 0; i < n; i++) {
+            b[i] = p->rxbuf[tail];
+            tail = (tail + 1) % TCP_RING_LEN;
+        }
+        tcp_unlock(lf);
+        return (ssize_t)n;
+    }
+    if (p->state == TCP_CLOSE_WAIT || p->state == TCP_CLOSING ||
+        p->state == TCP_LAST_ACK   || p->state == TCP_TIME_WAIT ||
+        p->state == TCP_CLOSED) {
+        tcp_unlock(lf);
+        return 0;
+    }
+    tcp_unlock(lf);
+    return -EAGAIN;
+}
+
+ssize_t tcp_peek(tcp_pcb_t *p, void *buf, size_t len) {
+    for (;;) {
+        ssize_t r = tcp_peek_nb(p, buf, len);
+        if (r != -EAGAIN) return r;
+        current_thread->flags |= THREAD_F_INTERRUPTIBLE;
+        sched_sleep_until(p->recv_chan, get_ticks() + TCP_SLEEP_POLL);
+        current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
+        if (current_thread->sig_pending & ~current_thread->sig_mask)
+            return -EINTR;
+    }
+}
+
 int tcp_take_so_error(tcp_pcb_t *p) {
     if (!p) return 0;
     int err = p->so_error;
