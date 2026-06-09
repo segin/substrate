@@ -1,0 +1,63 @@
+#!/bin/sh
+# /etc/rc.d/16-ttdbserver — CDE ToolTalk database server + type database.
+#
+# ToolTalk clients (dtsession, dtfile, dtstyle, dtcm, ...) resolve their
+# message patterns ("ptypes") through a type database served by
+# rpc.ttdbserver and loaded by ttsession.  With neither the server running
+# NOR the CDE ptypes compiled, every ToolTalk request fails with
+# TT_ERR_NO_MATCH and the apps print "Cannot communicate with the session
+# manager" and exit.
+#
+# Runs after 15-rpcbind (rpc.ttdbserver registers its RPC service with the
+# portmapper) and before 60-sdm (so the types are loaded by the time
+# dtsession starts ttsession).
+#
+# NOTE on the compile: tt_type_comp must run with DISPLAY UNSET.  With
+# DISPLAY set but no X server up yet, its ToolTalk init blocks ~20s per
+# file trying to reach the X-display session before falling back — so
+# compiling all ptypes at boot would otherwise add minutes of dead time.
+# With DISPLAY unset it uses the host session and compiles all of them in
+# a few seconds.
+
+TTDB=/usr/dt/bin/rpc.ttdbserver
+TTC=/usr/dt/bin/tt_type_comp
+PIDFILE=/var/run/ttdbserver.pid
+TTPATH=/root/.tt
+
+case "${1:-start}" in
+    start)
+        if [ -x "$TTDB" ]; then
+            mkdir -p /var/run
+            "$TTDB" > /var/log/ttdbserver.log 2>&1 &
+            echo $! > "$PIDFILE"
+        fi
+        # Compile the CDE ptypes into the ToolTalk type DB.  tt_type_comp -m
+        # merges idempotently, so re-running each boot is cheap (a few
+        # seconds total) and avoids depending on the DB's on-disk path.
+        if [ -x "$TTC" ]; then
+            ( unset DISPLAY
+              export HOME=/root TTPATH="$TTPATH"
+              mkdir -p "$TTPATH"
+              for f in /usr/dt/appconfig/tttypes/*.ptype; do
+                  # dtinfo*.ptype use #include and don't compile; skip them.
+                  case "$f" in *dtinfo*) continue ;; esac
+                  "$TTC" -sd user -m "$f" > /dev/null 2>&1
+              done )
+        fi
+        ;;
+    stop)
+        kill "$(cat $PIDFILE 2>/dev/null)" 2>/dev/null
+        ;;
+    status)
+        if [ -x "$TTC" ] && ( unset DISPLAY; HOME=/root TTPATH="$TTPATH" \
+                "$TTC" -sd user -p 2>/dev/null | grep -q '^ptype' ); then
+            echo "ttdbserver: ToolTalk types loaded"
+        else
+            echo "ttdbserver: no types"
+        fi
+        ;;
+    restart)
+        $0 stop
+        $0 start
+        ;;
+esac
