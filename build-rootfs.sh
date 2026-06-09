@@ -195,6 +195,35 @@ build_components() {
     done
 }
 
+finalize_x_fonts() {
+    # Adobe + B&H Lucida fonts both stage into X11/100dpi and 75dpi, each
+    # with its own fonts.dir — regenerate ONE merged fonts.dir per dir from
+    # every BDF present, and install the CDE -dt-* font aliases.  dtcm (and
+    # other CDE apps) build FontSets from -dt-* / -b&h-lucida*; a font that
+    # the set can't resolve makes Xfbdev SEGFAULT (it dies holding the evdev
+    # grab -> frozen desktop), so all the referenced fonts + aliases must
+    # be present.
+    _cde_alias="$TOP/contrib/cde/build/cdesktopenv/cde/programs/fontaliases"
+    for _d in 100dpi 75dpi misc; do
+        _dst="$DIST/usr/share/fonts/X11/$_d"
+        [ -d "$_dst" ] || continue
+        : > "$_dst/fonts.dir.tmp"; _n=0
+        for _f in "$_dst"/*.bdf; do
+            [ -f "$_f" ] || continue
+            _bn=$(basename "$_f")
+            _xlfd=$(sed -n 's/^FONT[[:space:]][[:space:]]*\(.*\)$/\1/p' "$_f" | head -1)
+            [ -n "$_xlfd" ] || continue
+            printf '%s\t%s\n' "$_bn" "$_xlfd" >> "$_dst/fonts.dir.tmp"; _n=$((_n+1))
+        done
+        { printf '%d\n' "$_n"; cat "$_dst/fonts.dir.tmp"; } > "$_dst/fonts.dir"
+        cp -a "$_dst/fonts.dir" "$_dst/fonts.scale"; rm -f "$_dst/fonts.dir.tmp"
+        if [ -f "$_cde_alias/mixed.alias" ]; then
+            cat "$_cde_alias/mixed.alias" "$_cde_alias/fixed.alias" 2>/dev/null > "$_dst/fonts.alias" ||                 cp "$_cde_alias/mixed.alias" "$_dst/fonts.alias"
+        fi
+        echo "Finalized X fonts in $_d: $_n entries + CDE -dt-* aliases"
+    done
+}
+
 install_to_dist() {
     echo "Installing kernel to dist/boot and dist/vmunix..."
     cp "$TOP/sys/kernel.bin" "$DIST/boot/"
@@ -435,6 +464,8 @@ install_to_dist() {
     else
         echo "  (skipped contrib/gcc stage 2: $GCC_STAGE2_STAGING does not exist)"
     fi
+
+    finalize_x_fonts
 
     # /bin/sh -> /usr/bin/zsh.  Substrate's POSIX shell is zsh in
     # sh-emulation mode; the in-tree bin/sh/ is intentionally not
