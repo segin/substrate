@@ -2,8 +2,8 @@
  * sys/net/af_unix.c — POSIX local-IPC sockets.
  *
  * Minimum-viable AF_UNIX:
- *   - SOCK_STREAM only (datagrams + seqpacket follow the same shape
- *     once a real consumer needs them)
+ *   - SOCK_STREAM and SOCK_DGRAM (datagrams are length-framed in the rx
+ *     ring; seqpacket follows the same shape once a consumer needs it)
  *   - Filesystem-namespace paths via /run-style globals (a simple
  *     hash-of-the-path linked list; the abstract namespace and the
  *     "tied to a VFS inode" model are deferred)
@@ -34,7 +34,6 @@
  * Deferred:
  *   - SCM_RIGHTS (fd passing via cmsg)
  *   - Abstract namespace (\0-prefixed sun_path)
- *   - SOCK_DGRAM (message-oriented; would need per-write framing)
  *   - O_NONBLOCK semantics (always blocking today)
  *   - True SO_* options
  */
@@ -262,6 +261,45 @@ static size_t afunix_node_read(fs_node_t *node, off_t off, size_t size, uint8_t 
     mutex_lock(&s->lock);
     /* Self-side SHUT_RD: every read is EOF, even with bytes in rx. */
     if (s->rd_closed) { mutex_unlock(&s->lock); return 0; }
+    if (s->type == SOCK_DGRAM) {
+        /* Datagram socket: messages are framed in rx as [u16 len][payload]
+         * (written atomically), so return exactly one datagram per read and
+         * preserve message boundaries. */
+        while (s->rx.count < 2) {
+            if (!s->peer || s->peer->closed || s->peer->wr_closed) {
+                mutex_unlock(&s->lock); return 0;
+            }
+            if (nonblock) { mutex_unlock(&s->lock); return (size_t)-EAGAIN; }
+            if (current_thread &&
+                (current_thread->sig_pending & ~current_thread->sig_mask)) {
+                mutex_unlock(&s->lock); return (size_t)-EINTR;
+            }
+            if (current_thread) current_thread->flags |= THREAD_F_INTERRUPTIBLE;
+            sleepq_add(s->rx_chan, current_thread);
+            mutex_unlock(&s->lock);
+            sched_yield();
+            if (current_thread) current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
+            if (current_thread &&
+                (current_thread->sig_pending & ~current_thread->sig_mask))
+                return (size_t)-EINTR;
+            mutex_lock(&s->lock);
+            if (s->rd_closed) { mutex_unlock(&s->lock); return 0; }
+        }
+        uint8_t hdr[2];
+        afbuf_read(&s->rx, hdr, 2);
+        size_t mlen = ((size_t)hdr[0] << 8) | hdr[1];
+        size_t n = mlen < size ? mlen : size;
+        if (n) afbuf_read(&s->rx, buf, n);
+        for (size_t rem = mlen - n; rem; ) {     /* drop truncated tail */
+            uint8_t junk[128];
+            size_t d = rem < sizeof(junk) ? rem : sizeof(junk);
+            afbuf_read(&s->rx, junk, d);
+            rem -= d;
+        }
+        if (s->peer) sleepq_wake_all(s->peer->tx_chan);
+        mutex_unlock(&s->lock);
+        return n;
+    }
     while (s->rx.count == 0) {
         /* EOF conditions: peer gone, peer fully closed, or peer
          * SHUT_WR (which means peer will never produce more). */
@@ -315,6 +353,40 @@ static size_t afunix_node_write(fs_node_t *node, off_t off, size_t size, const u
      * of the write so we can reach it from this fs_node callback. */
     int nonblock = current_thread && current_thread->io_file &&
                    (current_thread->io_file->f_flag & FNONBLOCK);
+    if (s->type == SOCK_DGRAM) {
+        /* Datagram: frame the whole message as [u16 len][payload] and write
+         * it atomically so the peer's reader sees one intact datagram. */
+        if (size + 2 > AFUNIX_BUF_SIZE) return (size_t)-EMSGSIZE;
+        afunix_sock_t *peer = s->peer;
+        if (!peer || peer->closed || peer->rd_closed) return (size_t)-EPIPE;
+        mutex_lock(&peer->lock);
+        while (peer->rx.count + size + 2 > AFUNIX_BUF_SIZE
+               && !peer->closed && !peer->rd_closed && !s->wr_closed) {
+            if (nonblock) { mutex_unlock(&peer->lock); return (size_t)-EAGAIN; }
+            if (current_thread &&
+                (current_thread->sig_pending & ~current_thread->sig_mask)) {
+                mutex_unlock(&peer->lock); return (size_t)-EINTR;
+            }
+            if (current_thread) current_thread->flags |= THREAD_F_INTERRUPTIBLE;
+            sleepq_add(s->tx_chan, current_thread);
+            mutex_unlock(&peer->lock);
+            sched_yield();
+            if (current_thread) current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
+            if (current_thread &&
+                (current_thread->sig_pending & ~current_thread->sig_mask))
+                return (size_t)-EINTR;
+            mutex_lock(&peer->lock);
+        }
+        if (peer->closed || peer->rd_closed || s->wr_closed) {
+            mutex_unlock(&peer->lock); return (size_t)-EPIPE;
+        }
+        uint8_t hdr[2] = { (uint8_t)(size >> 8), (uint8_t)(size & 0xFF) };
+        afbuf_write(&peer->rx, hdr, 2);
+        if (size) afbuf_write(&peer->rx, buf, size);
+        sleepq_wake_all(peer->rx_chan);
+        mutex_unlock(&peer->lock);
+        return size;
+    }
     size_t written = 0;
     while (written < size) {
         afunix_sock_t *peer = s->peer;
@@ -570,7 +642,7 @@ int sys_socket(int domain, int type, int protocol) {
         fd = afinet_socket(domain, base, protocol);
     } else if (domain != AF_UNIX) {
         return -EAFNOSUPPORT;
-    } else if (base != SOCK_STREAM) {
+    } else if (base != SOCK_STREAM && base != SOCK_DGRAM) {
         return -EPROTONOSUPPORT;
     } else {
         afunix_sock_t *s = afunix_alloc(base);
@@ -589,7 +661,7 @@ int sys_socketpair(int domain, int type, int protocol, int sv[2]) {
     if (domain != AF_UNIX) return -EAFNOSUPPORT;
     /* Strip SOCK_CLOEXEC / SOCK_NONBLOCK before the base-type check. */
     int base = type & SOCK_TYPE_MASK;
-    if (base != SOCK_STREAM) return -EPROTONOSUPPORT;
+    if (base != SOCK_STREAM && base != SOCK_DGRAM) return -EPROTONOSUPPORT;
     afunix_sock_t *a = afunix_alloc(base);
     afunix_sock_t *b = afunix_alloc(base);
     if (!a || !b) {
