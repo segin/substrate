@@ -22,6 +22,7 @@
 #include <sys/dma.h>
 #include <sys/irq.h>
 #include <sys/lock.h>
+#include <intr.h>
 #include <vm/vm_kmem.h>
 #include <string.h>
 
@@ -409,12 +410,23 @@ static int uhci_poll_td(uhci_hc_t *hc, struct uhci_td *td,
     (void)hc;
 
     while (td && walk_budget--) {
-        /* Poll until this TD is no longer active */
+        /* Poll until this TD is no longer active.  Run the wait with
+         * interrupts ENABLED so the timer tick can preempt us.  The HID poll
+         * kthread runs with IF=0 (switch_to doesn't save/restore EFLAGS), so a
+         * bare pause-spin here is never preempted: a wedged transfer would
+         * monopolise the CPU for the full 5 s timeout and freeze the whole UI
+         * (opening dtcm reproduced it).  Enabling interrupts lets the X server
+         * and its clients keep running while the controller works. */
+        uint32_t _saved_if = intr_disable();
+        intr_enable();
         while (td->ctrl_status & UHCI_TD_CTRL_ACTIVE) {
-            if ((uint64_t)get_uptime_ms() > deadline)
+            if ((uint64_t)get_uptime_ms() > deadline) {
+                intr_restore(_saved_if);
                 return USB_XFER_TIMEOUT;
+            }
             __asm__ volatile("pause");
         }
+        intr_restore(_saved_if);
 
         /* Check for errors */
         if (td->ctrl_status & UHCI_TD_CTRL_STALLED) {

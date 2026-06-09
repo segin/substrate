@@ -242,7 +242,7 @@ void isr_handler(registers_t *regs) {
         } else if (!current_thread && is_usermode) {
             sched_yield();
         }
-        signal_handle_pending(regs);
+        if (is_usermode) signal_handle_pending(regs);  /* not for kernel-mode IRQs */
         return;
     }
 
@@ -540,5 +540,5 @@ void isr_handler(registers_t *regs) {
         outb(0x20, 0x20);
     }
 
-    signal_handle_pending(regs);
+    if (is_usermode) signal_handle_pending(regs);  /* not for kernel-mode IRQs */
 }
