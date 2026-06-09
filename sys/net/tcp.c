@@ -854,7 +854,7 @@ tcp_pcb_t *tcp_accept(tcp_pcb_t *listen_p, int nonblock) {
     }
 }
 
-ssize_t tcp_send(tcp_pcb_t *p, const void *buf, size_t len) {
+static ssize_t tcp_send_impl(tcp_pcb_t *p, const void *buf, size_t len, int nonblock) {
     const uint8_t *b = (const uint8_t *)buf;
     size_t sent = 0;
     while (sent < len) {
@@ -877,6 +877,12 @@ ssize_t tcp_send(tcp_pcb_t *p, const void *buf, size_t len) {
         uint32_t avail     = (wnd > in_flight) ? (wnd - in_flight) : 0;
 
         if (avail == 0) {
+            /* Non-blocking sender: return what we managed to send (or
+             * EAGAIN) instead of parking.  A single-threaded nonblocking
+             * pump must be able to return from write() and go read() —
+             * otherwise it can never drain the peer to reopen the window
+             * and the transfer self-deadlocks. */
+            if (nonblock) return sent ? (ssize_t)sent : -EAGAIN;
             if (in_flight == 0) {
                 /* Zero window, nothing outstanding — emit a one-byte
                  * persist probe.  Its RTO retransmissions keep
@@ -905,6 +911,13 @@ ssize_t tcp_send(tcp_pcb_t *p, const void *buf, size_t len) {
         sent += chunk;
     }
     return (ssize_t)sent;
+}
+
+ssize_t tcp_send(tcp_pcb_t *p, const void *buf, size_t len) {
+    return tcp_send_impl(p, buf, len, /*nonblock=*/0);
+}
+ssize_t tcp_send_nb(tcp_pcb_t *p, const void *buf, size_t len) {
+    return tcp_send_impl(p, buf, len, /*nonblock=*/1);
 }
 
 ssize_t tcp_recv_nb(tcp_pcb_t *p, void *buf, size_t len) {

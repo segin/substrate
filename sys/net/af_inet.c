@@ -62,6 +62,7 @@ extern int        tcp_is_listening(const tcp_pcb_t *p);
 extern int        tcp_shutdown_wr(tcp_pcb_t *p);
 extern int        tcp_shutdown_rd(tcp_pcb_t *p);
 extern ssize_t    tcp_send(tcp_pcb_t *p, const void *buf, size_t len);
+extern ssize_t    tcp_send_nb(tcp_pcb_t *p, const void *buf, size_t len);
 extern ssize_t    tcp_recv(tcp_pcb_t *p, void *buf, size_t len);
 extern void       tcp_endpoints(const tcp_pcb_t *p,
                                 uint32_t *laddr, uint16_t *lport,
@@ -320,13 +321,30 @@ static int afinet_node_poll(fs_node_t *node, void *waiter)
     return rv;
 }
 
+/* read()/write() reach the socket via the fs_node, not the fd, so
+ * O_NONBLOCK (canonicalised to FNONBLOCK) is not directly visible.  Find
+ * the current process's fd backing this node and report its flag —
+ * otherwise a non-blocking read()/write() blocks like a blocking one, and
+ * a single-threaded nonblocking-pump TCP transfer self-deadlocks. */
+static int afi_node_nonblock(const fs_node_t *node) {
+    if (!current_process) return 0;
+    for (int fd = 0; fd < MAX_FD; fd++) {
+        file_t *f = current_process->fds[fd];
+        if (f && (const void *)f->f_data == (const void *)node)
+            return (f->f_flag & FNONBLOCK) ? 1 : 0;
+    }
+    return 0;
+}
+
 size_t afinet_node_read(fs_node_t *node, off_t off, size_t size, uint8_t *buf) {
     (void)off;
     afi_sock_t *s = (afi_sock_t *)(uintptr_t)node->impl;
     if (!s || s->closed) return 0;
     if (s->rd_shut) return 0;            /* shutdown(SHUT_RD): EOF */
+    int nb = afi_node_nonblock(node);
     if (s->type == SOCK_STREAM && s->tcp) {
-        ssize_t n = tcp_recv(s->tcp, buf, size);
+        ssize_t n = nb ? tcp_recv_nb(s->tcp, buf, size)
+                       : tcp_recv(s->tcp, buf, size);
         /* Propagate errors as (size_t)-errno — the read() syscall
          * layer decodes them.  Collapsing a negative return to 0
          * here would forge a spurious EOF: a recv interrupted by a
@@ -343,6 +361,7 @@ size_t afinet_node_read(fs_node_t *node, off_t off, size_t size, uint8_t *buf) {
             s->count--;
             return n;
         }
+        if (nb) return (size_t)-EAGAIN;
         /* Make the sleep signal-interruptible so SIGINT (and friends)
          * yank ping/etc out of a blocked recv. */
         current_thread->flags |= THREAD_F_INTERRUPTIBLE;
@@ -360,8 +379,9 @@ static size_t afinet_node_write(fs_node_t *node, off_t off, size_t size, const u
     afi_sock_t *s = (afi_sock_t *)(uintptr_t)node->impl;
     if (!s || s->closed) return 0;
     if (s->type == SOCK_STREAM && s->tcp) {
-        ssize_t n = tcp_send(s->tcp, buf, size);
-        return n < 0 ? (size_t)n : (size_t)n;
+        ssize_t n = afi_node_nonblock(node) ? tcp_send_nb(s->tcp, buf, size)
+                                            : tcp_send(s->tcp, buf, size);
+        return (size_t)n;
     }
     /* write() without an address only works on a connected DGRAM socket. */
     if (!s->connected) return (size_t)-EDESTADDRREQ;
