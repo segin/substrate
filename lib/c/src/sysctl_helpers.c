@@ -5,7 +5,7 @@
 #include <string.h>
 #include <stdint.h>
 
-extern int64_t _syscall6(int, int, int, int, int, int, int);
+extern int64_t _syscall6(int, intptr_t, intptr_t, intptr_t, intptr_t, intptr_t, intptr_t);
 #define SYS_SYSCTL 243 // Matches sys/syscall.h syscall table
 
 int sysctl(int *name, unsigned int namelen, void *oldp, size_t *oldlenp, void *newp, size_t newlen) {
@@ -17,7 +17,7 @@ int sysctl(int *name, unsigned int namelen, void *oldp, size_t *oldlenp, void *n
         errno = EINVAL;
         return -1;
     }
-    int ret = (int)_syscall6(SYS_SYSCTL, (int)name, (int)namelen, (int)oldp, (int)oldlenp, (int)newp, (int)newlen);
+    int ret = (int)_syscall6(SYS_SYSCTL, (intptr_t)name, (intptr_t)namelen, (intptr_t)oldp, (intptr_t)oldlenp, (intptr_t)newp, (intptr_t)newlen);
     if (ret < 0) {
         errno = -ret;
         return -1;
