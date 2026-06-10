@@ -128,11 +128,15 @@ the Substrate-native GNU toolchain, the kernel and userland, every `contrib/`
 port in dependency order, and finally the bootable image:
 
 ```sh
-sudo ./build.sh
+./build.sh
 ```
 
-`sudo` is needed only because the cross toolchain installs under
-`/opt/substrate` (override with `STAGE1_PREFIX=`). Useful env knobs:
+No root is required: image building is fully unprivileged (mke2fs + debugfs,
+no loopback mount). The only step that writes outside the tree is the cross
+toolchain install under `/opt/substrate` — if that path is not writable by
+you, create it owned by your user once
+(`sudo install -d -o "$(id -un)" /opt/substrate`) or override with
+`STAGE1_PREFIX=` to a user-owned path. Useful env knobs:
 `SKIP_TOOLCHAIN=1`, `SKIP_CONTRIB=1`, `SKIP_IMAGE=1`, and
 `ONLY="pkg1 pkg2 ..."` to (re)build only specific contrib ports.
 
@@ -180,7 +184,7 @@ in `contrib/<pkg>/patches/`; nothing under `contrib/*/build/` is vendored —
 `--dist` wipes and repopulates `dist/`, so re-run `--toolchain` after it to
 restore the compiler. `--toolchain` skips any staging tree that is absent
 (e.g. a no-compiler bring-up image). For a clean-checkout build of all three
-stages at once, use `sudo ./build.sh` (see [Building](#building) above).
+stages at once, use `./build.sh` (see [Building](#building) above).
 
 ## Testing
 

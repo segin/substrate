@@ -214,7 +214,7 @@ For the full detailed changelog, see `docs/CHANGELOG.md`.
   Or the all-in-one orchestrator that drives all of the above
   plus every contrib port in dependency order:
   ```
-  sudo ./build.sh                   # repo-root, from clean checkout
+  ./build.sh                        # repo-root, from clean checkout (no root)
                                     # env knobs: SKIP_TOOLCHAIN,
                                     # SKIP_CONTRIB, SKIP_IMAGE,
                                     # ONLY="pkg1 pkg2 ..."

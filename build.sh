@@ -27,10 +27,21 @@
 #   ONLY="pkg1 pkg2"  build only these contrib ports (default: everything in
 #                      the order baked into this script)
 #
-# A clean run from a fresh checkout:
+# A clean run from a fresh checkout (no root required):
 #
 #   git clone … substrate && cd substrate
-#   sudo ./build.sh         # sudo: contrib/build-toolchain.sh writes to /opt/substrate
+#   ./build.sh
+#
+# Building images NEVER needs root: build-rootfs.sh bakes rootfs.img with
+# mke2fs + debugfs entirely in userspace (no loopback mount; setuid and
+# owner=root bits are set INSIDE the image via debugfs `sif`, not on the
+# host).  The only step that writes outside the source tree is the stage-1
+# toolchain install into $STAGE1_PREFIX (default /opt/substrate).  If that
+# directory is not writable by you, make it yours ONCE
+# (`sudo install -d -o "$(id -un)" /opt/substrate`) or point STAGE1_PREFIX
+# at a user-owned path — then every build, images included, runs without
+# sudo.  SKIP_TOOLCHAIN=1 skips that step when the toolchain is already
+# installed.
 #
 # Output:
 #   ./rootfs.img   bootable ext2 image
