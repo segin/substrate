@@ -42,7 +42,7 @@ rm -rf "${BUILD_DIR}"; mkdir -p "${BUILD_DIR}"; cd "${BUILD_DIR}"
     --enable-xlib --enable-xlib-xrender --enable-ft --enable-fc --enable-png \
     --disable-xcb --disable-gl --disable-gobject --disable-script \
     --disable-interpreter --disable-trace --disable-valgrind \
-    --disable-ps --disable-pdf --disable-svg \
+    --enable-ps --enable-pdf --enable-svg \
     CC=i386-unknown-substrate-gcc \
     AR=i386-unknown-substrate-ar RANLIB=i386-unknown-substrate-ranlib \
     CC_FOR_BUILD=gcc \
