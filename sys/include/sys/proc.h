@@ -286,6 +286,11 @@ typedef struct thread {
     
     // Syscall restart support (for SA_RESTART)
     uint8_t       in_syscall;     // Nonzero if thread is in a syscall
+    uint8_t       frame_replaced; // Set by sigreturn/rt_sigreturn: the trapframe
+                                  // now IS the restored user context; the syscall
+                                  // dispatcher must not write eax/edx/eflags back
+                                  // over it (the EDX writeback was clobbering a
+                                  // live user register after every SIGALRM)
     uint32_t      syscall_num;    // Syscall number for restart
     uint32_t      syscall_orig_eax; // Original EAX for restart
     

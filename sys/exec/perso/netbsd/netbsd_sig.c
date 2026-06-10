@@ -81,5 +81,8 @@ int netbsd_sys_sigreturn(void *regs_ptr) {
     regs->gs = sc.sc_gs | 3;
 
     current_thread->sig_mask = sc.sc_mask;
+    /* Trapframe is now the restored user context — the dispatcher must
+     * not apply its eax/edx/CF writebacks (see sys_sigreturn). */
+    current_thread->frame_replaced = 1;
     return regs->eax;
 }

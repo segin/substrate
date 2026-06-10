@@ -252,6 +252,9 @@ void sendsig(sig_t handler, int sig, uint32_t mask, uint32_t flags, registers_t 
          sig, (uint32_t)(uintptr_t)handler,
          regs->eip, regs->useresp, regs->ebp,
          (flags & SA_ONSTACK) ? 1 : 0, flags);
+    XSIG("pid=%d save: eax=%08x ebx=%08x ecx=%08x edx=%08x esi=%08x edi=%08x",
+         current_process ? current_process->pid : -1,
+         regs->eax, regs->ebx, regs->ecx, regs->edx, regs->esi, regs->edi);
 
     uint32_t esp;
     
@@ -565,13 +568,28 @@ int sys_sigreturn(void *scp_ptr) {
     XSIG("pid=%d sigreturn: restored eip=0x%08x ebp=0x%08x esp=0x%08x eax=0x%08x",
          current_process ? current_process->pid : -1,
          sc.eip, sc.ebp, sc.user_esp, sc.eax);
+    XSIG("pid=%d rest: eax=%08x ebx=%08x ecx=%08x edx=%08x esi=%08x edi=%08x",
+         current_process ? current_process->pid : -1,
+         sc.eax, sc.ebx, sc.ecx, sc.edx, sc.esi, sc.edi);
 
     /*
      * Return value is EAX from saved context, not a syscall return
      *
      * The calling convention expects sys_sigreturn to return normally,
      * and the iret will use the restored register values.
+     *
+     * frame_replaced tells the syscall dispatcher the trapframe now IS
+     * the restored user context: it must not apply its post-dispatch
+     * eax/edx/eflags writebacks.  The handlers are typed int64_t at the
+     * dispatch site while this function returns int, so ret's high half
+     * (EDX) is undefined kernel garbage — the dispatcher's EDX writeback
+     * was overwriting the just-restored user EDX on every signal return,
+     * corrupting any CPU-bound process whose EDX was live (Xfbdev under
+     * the SmartSchedule SIGALRM died in libXfont/sscanf this way).
      */
+    if (current_thread) {
+        current_thread->frame_replaced = 1;
+    }
     return sc.eax;
 }
 
@@ -684,7 +702,12 @@ int sys_rt_sigreturn(void *ucp_ptr) {
          mc->mc_eip, mc->mc_ebp, mc->mc_esp, mc->mc_eax);
 
     /*
-     * Return value is EAX from saved context
+     * Return value is EAX from saved context.  frame_replaced: see
+     * sys_sigreturn — the dispatcher must not write back over the
+     * restored trapframe.
      */
+    if (current_thread) {
+        current_thread->frame_replaced = 1;
+    }
     return mc->mc_eax;
 }

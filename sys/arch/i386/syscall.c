@@ -229,6 +229,7 @@ void syscall_handler(registers_t *regs) {
     // Track syscall for SA_RESTART support
     if (current_thread) {
         current_thread->in_syscall = 1;
+        current_thread->frame_replaced = 0;
         current_thread->syscall_num = syscall_num;
         current_thread->syscall_orig_eax = syscall_num;
     }
@@ -391,11 +392,21 @@ void syscall_handler(registers_t *regs) {
     
     // Check for special sigreturn handling
     if (syscall_num == 119 && p->sigreturn) {
-        regs->eax = (uint32_t)p->sigreturn(regs);
+        int sret = p->sigreturn(regs);
+        if (current_thread && current_thread->frame_replaced) {
+            current_thread->frame_replaced = 0;   /* frame restored — hands off */
+        } else {
+            regs->eax = (uint32_t)sret;           /* sigreturn failed: report it */
+        }
         goto syscall_done;
     }
     if (syscall_num == 173 && p->rt_sigreturn) {
-        regs->eax = (uint32_t)p->rt_sigreturn(regs);
+        int sret = p->rt_sigreturn(regs);
+        if (current_thread && current_thread->frame_replaced) {
+            current_thread->frame_replaced = 0;
+        } else {
+            regs->eax = (uint32_t)sret;
+        }
         goto syscall_done;
     }
     /* Native sigreturn no longer takes a fast path — sys_sigreturn(void *scp)
@@ -437,6 +448,21 @@ void syscall_handler(registers_t *regs) {
         if (s->min_cycles == 0 || dt < s->min_cycles) s->min_cycles = dt;
         if (dt > s->max_cycles) s->max_cycles = dt;
     }
+    /*
+     * sigreturn/rt_sigreturn replaced the whole trapframe with the restored
+     * user context.  Every writeback below would corrupt it: the handlers
+     * are typed int64_t here while the sigreturns return int, so ret's high
+     * half (EDX) is undefined kernel garbage — the native-branch
+     * `regs->edx = ret >> 32` was overwriting the restored user EDX on
+     * every signal return (Xfbdev died in libXfont/sscanf under the
+     * SmartSchedule SIGALRM); the BSD branch would additionally rewrite
+     * EFLAGS.CF and turn a "negative" restored EAX into an errno.
+     */
+    if (current_thread && current_thread->frame_replaced) {
+        current_thread->frame_replaced = 0;
+        goto syscall_done;
+    }
+
     if (p->id == PERS_ELKS) {
         regs->eax = (uint16_t)ret;
     } else if (p->id == PERS_FREEBSD || p->id == PERS_NETBSD || p->id == PERS_OPENBSD) {
