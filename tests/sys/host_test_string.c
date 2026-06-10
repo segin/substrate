@@ -8,6 +8,7 @@
 #define memset kernel_memset
 #define memmove kernel_memmove
 #define memcmp kernel_memcmp
+size_t kernel_strlen(const char *s);
 #define strlen kernel_strlen
 #define strcpy kernel_strcpy
 #define strncpy kernel_strncpy
@@ -15,6 +16,7 @@
 #define strcmp kernel_strcmp
 #define strncmp kernel_strncmp
 #define strchr kernel_strchr
+#define strrchr kernel_strrchr
 #define strspn kernel_strspn
 #define strcspn kernel_strcspn
 #define strpbrk kernel_strpbrk
@@ -33,6 +35,7 @@
 #undef strlcpy
 #undef strcmp
 #undef strchr
+#undef strrchr
 #undef strspn
 #undef strpbrk
 
@@ -372,6 +375,32 @@ void test_strchr_comprehensive(void) {
     printf("test_strchr_comprehensive: PASS\n");
 }
 
+void test_strrchr(void) {
+    char buf[] = "Hello World";
+
+    // Find multiple occurrences, returns last
+    ASSERT_EQ((uintptr_t)kernel_strrchr(buf, 'o'), (uintptr_t)(buf + 7), "strrchr found last 'o'");
+
+    // Find character at start
+    ASSERT_EQ((uintptr_t)kernel_strrchr(buf, 'H'), (uintptr_t)buf, "strrchr found first char");
+
+    // Find character at end
+    ASSERT_EQ((uintptr_t)kernel_strrchr(buf, 'd'), (uintptr_t)(buf + 10), "strrchr found last char");
+
+    // Find missing character
+    ASSERT_EQ((uintptr_t)kernel_strrchr(buf, 'z'), (uintptr_t)NULL, "strrchr not found");
+
+    // Find null terminator
+    ASSERT_EQ((uintptr_t)kernel_strrchr(buf, '\0'), (uintptr_t)(buf + 11), "strrchr null terminator");
+
+    // Empty string
+    char empty[] = "";
+    ASSERT_EQ((uintptr_t)kernel_strrchr(empty, 'a'), (uintptr_t)NULL, "strrchr empty string not found");
+    ASSERT_EQ((uintptr_t)kernel_strrchr(empty, '\0'), (uintptr_t)empty, "strrchr empty string null terminator");
+
+    printf("test_strrchr: PASS\n");
+}
+
 void test_strpbrk(void) {
     const char *s = "hello world";
 
@@ -453,6 +482,7 @@ int main(void) {
     test_strcspn();
     test_strchr();
     test_strchr_comprehensive();
+    test_strrchr();
     test_strpbrk();
     printf("All Tests Passed\n");
     return 0;

@@ -217,6 +217,30 @@ static void test_strchr_comprehensive(void) {
     ASSERT_EQ(strchr(multiple, 'b'), multiple + 1, "strchr comprehensive first occurrence 'b'");
 }
 
+static void test_strrchr(void) {
+    char buf[] = "Hello World";
+
+    // Find multiple occurrences, returns last
+    ASSERT_EQ(strrchr(buf, 'o'), buf + 7, "strrchr found last 'o'");
+
+    // Find character at start
+    ASSERT_EQ(strrchr(buf, 'H'), buf, "strrchr found first char");
+
+    // Find character at end
+    ASSERT_EQ(strrchr(buf, 'd'), buf + 10, "strrchr found last char");
+
+    // Find missing character
+    ASSERT_EQ(strrchr(buf, 'z'), NULL, "strrchr not found");
+
+    // Find null terminator
+    ASSERT_EQ(strrchr(buf, '\0'), buf + 11, "strrchr null terminator");
+
+    // Empty string
+    char empty[] = "";
+    ASSERT_EQ(strrchr(empty, 'a'), NULL, "strrchr empty string not found");
+    ASSERT_EQ(strrchr(empty, '\0'), empty, "strrchr empty string null terminator");
+}
+
 static void test_memcmp(void) {
     char b1[256], b2[256];
     memset(b1, 0, sizeof(b1));
@@ -279,6 +303,7 @@ void run_string_tests(void) {
     test_strchr_basic();
     test_strchr_empty();
     test_strchr_comprehensive();
+    test_strrchr();
     test_strcmp();
     test_strlen_strnlen();
     test_memcmp();

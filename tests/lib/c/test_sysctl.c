@@ -32,9 +32,20 @@ static int mock_errno  = 22; /* EINVAL */
 static void *mock_last_newp = NULL;
 static size_t mock_last_newlen = 0;
 
-int64_t _syscall6(int num, int a1, int a2, int a3, int a4, int a5, int a6) {
-	(void)num; (void)a1; (void)a2; (void)a3; (void)a4; (void)a5; (void)a6;
-	if(mock_result < 0) errno = mock_errno;
+int64_t _syscall6(int num, intptr_t a1, intptr_t a2, intptr_t a3, intptr_t a4, intptr_t a5, intptr_t a6) {
+	if (num == 243) { /* SYS_SYSCTL */
+		mock_last_newp = (void *)(intptr_t)a5;
+		mock_last_newlen = (size_t)a6;
+		int *name = (int *)(intptr_t)a1;
+		unsigned int namelen = (unsigned int)a2;
+		void *oldp = (void *)(intptr_t)a3;
+		size_t *oldlenp = (size_t *)(intptr_t)a4;
+
+		if (oldlenp && !oldp && namelen == 2 && name && name[0] == 0 && name[1] == 3) {
+			*oldlenp = 2 * sizeof(int); /* Mock sysctlnametomib length response */
+		}
+	}
+
 	return mock_result;
 }
 
@@ -46,76 +57,25 @@ static void reset_mock(int result, int err) {
 	mock_last_newlen = 0;
 }
 
-/* ---- Inline implementations matching sysctl_helpers.c logic ---- */
+#include "../../../lib/c/src/sysctl_helpers.c"
 
-#define SYS_SYSCTL 243
-
-int sysctl(int *name, unsigned int namelen, void *oldp, size_t *oldlenp, void *newp, size_t newlen) {
-	if(!name || namelen < 1 || namelen > CTL_MAXNAME) { errno = 22; return -1; }
-	if(newp && newlen == 0) { errno = 22; return -1; }
+/* wrappers in test that capture mock_last_newp after real function finishes */
+int test_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void *newp, size_t newlen) {
+	int ret = sysctlbyname(name, oldp, oldlenp, newp, newlen);
 	mock_last_newp = newp;
 	mock_last_newlen = newlen;
-
-	if (oldlenp && !oldp && namelen == 2 && name[0] == 0 && name[1] == 3) {
-		*oldlenp = 2 * sizeof(int); /* Mock sysctlnametomib length response */
-	}
-
-	int ret = (int)_syscall6(SYS_SYSCTL, (int)(intptr_t)name, (int)namelen, (int)(intptr_t)oldp, (int)(intptr_t)oldlenp, (int)(intptr_t)newp, (int)newlen);
-	if(ret < 0) { errno = -ret; return -1; }
-	return 0;
-}
-
-int sysctlnametomib(const char *name, int *mibp, size_t *sizep) {
-	int mib[] = { CTL_SYSCTL, CTL_SYSCTL_NAME2OID };
-	size_t namesz = name ? (strlen(name) + 1) : 0;
-	if(!name || !sizep) { errno = 22; return -1; }
-	if(sysctl(mib, 2, mibp, sizep, (void *)name, namesz) == -1) return -1;
-	return 0;
-}
-
-int sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void *newp, size_t newlen) {
-	if(!name) { errno = 22; return -1; }
-	size_t mibsize = 0;
-	if(sysctlnametomib(name, NULL, &mibsize) == -1) return -1;
-	int *mib = malloc(mibsize);
-	if(!mib) { errno = 12; return -1; }
-	if(sysctlnametomib(name, mib, &mibsize) == -1) { int sv = errno; free(mib); errno = sv; return -1; }
-
-	int ret = sysctl(mib, mibsize / sizeof(int), oldp, oldlenp, newp, newlen);
-	int sv = errno; free(mib); errno = sv;
-
-	/* Capture the original newp/newlen to allow mock verification for sysctlbyname wrappers */
-	mock_last_newp = newp;
-	mock_last_newlen = newlen;
-
 	return ret;
 }
 
-int sysctl_int(const int *name, unsigned int namelen, int *oldp, int *newp) {
-	size_t oldlen = oldp ? sizeof(int) : 0;
-	size_t newlen = newp ? sizeof(int) : 0;
-	if(sysctl((int *)name, namelen, oldp, oldp ? &oldlen : NULL, newp, newlen) == -1) return -1;
-	if(oldp && oldlen != sizeof(int)) { errno = 22; return -1; }
-	return 0;
+int test_sysctlbyname_string(const char *name, char *oldp, size_t *oldlenp, const char *newp) {
+	int ret = sysctlbyname_string(name, oldp, oldlenp, newp);
+	mock_last_newp = (void*)newp;
+	mock_last_newlen = newp ? strlen(newp) + 1 : 0;
+	return ret;
 }
 
-int sysctlbyname_int(const char *name, int *oldp, int *newp) {
-	size_t oldlen = oldp ? sizeof(int) : 0;
-	size_t newlen = newp ? sizeof(int) : 0;
-	if(sysctlbyname(name, oldp, oldp ? &oldlen : NULL, newp, newlen) == -1) return -1;
-	if(oldp && oldlen != sizeof(int)) { errno = 22; return -1; }
-	return 0;
-}
-
-int sysctl_string(const int *name, unsigned int namelen, char *oldp, size_t *oldlenp, const char *newp) {
-	size_t newlen = newp ? (strlen(newp) + 1) : 0;
-	return sysctl((int *)name, namelen, oldp, oldlenp, (void *)newp, newlen);
-}
-
-int sysctlbyname_string(const char *name, char *oldp, size_t *oldlenp, const char *newp) {
-	size_t newlen = newp ? (strlen(newp) + 1) : 0;
-	return sysctlbyname(name, oldp, oldlenp, (void *)newp, newlen);
-}
+#define sysctlbyname test_sysctlbyname
+#define sysctlbyname_string test_sysctlbyname_string
 
 /* ---- Tests ---- */
 
@@ -169,6 +129,15 @@ void test_sysctl_success(void) {
 	int mib[] = { CTL_KERN, KERN_OSTYPE };
 	int result = sysctl(mib, 2, NULL, NULL, NULL, 0);
 	TEST(result == 0, "sysctl succeeds when mock returns 0");
+}
+
+void test_sysctl_syscall_error(void) {
+	printf("test_sysctl_syscall_error:\n");
+	reset_mock(-22, 22); /* mock syscall returning -EINVAL */
+	int mib[] = { CTL_KERN, KERN_OSTYPE };
+	int result = sysctl(mib, 2, NULL, NULL, NULL, 0);
+	TEST(result == -1, "sysctl returns -1 when syscall returns error");
+	TEST(errno == 22, "errno is set to positive error code");
 }
 
 void test_sysctlnametomib_null_name(void) {
@@ -285,6 +254,7 @@ int main(void) {
 	test_sysctl_excessive_namelen();
 	test_sysctl_newp_zero_newlen();
 	test_sysctl_success();
+	test_sysctl_syscall_error();
 	test_sysctlnametomib_null_name();
 	test_sysctlnametomib_null_sizep();
 	test_sysctlbyname_null_name();

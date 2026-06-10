@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #include <exvi.h>
 #include "../../../usr.lib/exvi/exvi_internal.h"
@@ -913,6 +914,66 @@ test_line_array_random_access(void)
     cleanup_shared_state();
 }
 
+static void
+test_secure_command_execution(void)
+{
+    buffer_t b;
+    char cmd_inj[] = "!echo hello; touch /tmp/exvi_pwned";
+
+    reset_shared_state();
+    buf_init(&b);
+    buf_insert_after(&b, NULL, "line 1");
+
+    /* Test 1: Restricted mode should block shell commands */
+    restricted_mode = 1;
+    assert(handle_shell_command(cmd_inj) == 1);
+    assert(access("/tmp/exvi_pwned", F_OK) != 0);
+
+    /* Test 2: Secure mode should block shell commands */
+    restricted_mode = 0;
+    secure_mode = 1;
+    assert(handle_shell_command(cmd_inj) == 1);
+    assert(access("/tmp/exvi_pwned", F_OK) != 0);
+
+    /* Test 3: Normal mode should NOT interpret shell metacharacters */
+    secure_mode = 0;
+    handle_shell_command(cmd_inj);
+    assert(access("/tmp/exvi_pwned", F_OK) != 0);
+
+    /* Test 4: exvi_popen should also respect restricted/secure mode */
+    restricted_mode = 1;
+    assert(exvi_popen("echo test", "r") == NULL);
+    restricted_mode = 0;
+    secure_mode = 1;
+    assert(exvi_popen("echo test", "r") == NULL);
+
+    /* Test 5: Verify no shell metacharacters in popen */
+    secure_mode = 0;
+    FILE *f = exvi_popen("touch /tmp/exvi_metachar; touch /tmp/exvi_metachar2", "w");
+    assert(f != NULL);
+    exvi_pclose(f);
+    /* Semicolon should NOT be interpreted as command separator.
+       Touch will be called with arguments ["/tmp/exvi_metachar;", "touch", "/tmp/exvi_metachar2"]
+       It will likely fail or create a file with semicolon in name.
+       Importantly, it should NOT create /tmp/exvi_metachar2 unless the first touch created it.
+       Wait, if it was shell it would create both.
+       If it is NOT shell, it creates "/tmp/exvi_metachar;", "touch" and "/tmp/exvi_metachar2".
+       Wait, touch DOES take multiple arguments.
+       Let's use something that doesn't.
+    */
+    remove("/tmp/exvi_metachar;");
+    remove("touch");
+    remove("/tmp/exvi_metachar2");
+
+    FILE *f2 = exvi_popen("ls /tmp/exvi_nonexistent; touch /tmp/exvi_popen_pwned", "r");
+    assert(f2 != NULL);
+    exvi_pclose(f2);
+    assert(access("/tmp/exvi_popen_pwned", F_OK) != 0);
+
+    free_buffer(&b);
+    cleanup_shared_state();
+}
+
 int
 main(void)
 {
@@ -943,6 +1004,7 @@ main(void)
     test_utf8_prev_offset();
     test_quit_sets_exit_flag();
     test_line_array_random_access();
+    test_secure_command_execution();
     puts("exvi core tests: ok");
     return 0;
 }
