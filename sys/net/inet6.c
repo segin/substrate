@@ -231,5 +231,5 @@ void ip6_input(netdev_t *dev, const uint8_t *pkt, size_t len) {
         default:
             break;
     }
-    afinet_deliver_v6(h->src, h->dst, h->next_header, pkt, sizeof(*h) + plen);
+    afinet_deliver_v6(h->src, h->dst, h->next_header, pkt, sizeof(*h) + plen, /*for_dgram=*/0);
 }
