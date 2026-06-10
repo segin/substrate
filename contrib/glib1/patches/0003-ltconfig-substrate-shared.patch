@@ -1,0 +1,17 @@
+--- a/ltconfig	2026-06-10 00:20:30.819751548 -0500
++++ b/ltconfig	2026-06-10 00:20:30.865070294 -0500
+@@ -457,6 +457,14 @@
+ host_vendor=`echo $host | sed 's/^\([^-]*\)-\([^-]*\)-\(.*\)$/\2/'`
+ host_os=`echo $host | sed 's/^\([^-]*\)-\([^-]*\)-\(.*\)$/\3/'`
+ 
++# Substrate is ELF + GNU ld + Linux-like libc/dl; let this 2001-era ltconfig
++# reuse its entire linux-gnu profile (shared-lib naming, soname, version_type)
++# instead of falling through to static-only.  Mirrors what modern libtool does
++# (version_type=linux for host_os=substrate).
++case "$host_os" in
++substrate*) host=`echo $host | sed 's/-substrate/-linux-gnu/'`; host_os=linux-gnu ;;
++esac
++
+ case "$host_os" in
+ aix3*)
+   # AIX sometimes has problems with the GCC collect2 program.  For some

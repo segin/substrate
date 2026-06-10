@@ -1,0 +1,3 @@
+0001-configure-cross.patch
+0002-glib-h-modern-gcc.patch
+0003-ltconfig-substrate-shared.patch

@@ -1,0 +1,27 @@
+--- a/configure	2026-06-09 23:52:00.855117650 -0500
++++ b/configure	2026-06-10 00:15:13.675608514 -0500
+@@ -2099,7 +2099,7 @@
+ glib_save_LIBS=$LIBS
+ LIBS="$LIBS -lm"
+ if test "$cross_compiling" = yes; then
+-    { echo "configure: error: can not run test program while cross compiling" 1>&2; exit 1; }
++    echo "$ac_t""none needed (cross: assumed)" 1>&6
+ else
+   cat > conftest.$ac_ext <<EOF
+ #line 2106 "configure"
+@@ -5600,7 +5600,14 @@
+ done
+ echo "return 0; }" >>confrun.c
+ if test "$cross_compiling" = yes; then
+-    { echo "configure: error: can not run test program while cross compiling" 1>&2; exit 1; }
++    echo "$ac_t""cross: using defaults (match substrate <sys/poll.h>)" 1>&6
++    for glib_sysdef_input in POLLIN:1 POLLOUT:4 POLLPRI:2 POLLERR:8 POLLHUP:16 POLLNVAL:32 ; do
++	glib_sysdef=`echo $glib_sysdef_input | sed 's/^\([^:]*\):.*$/\1/'`
++	glib_default=`echo $glib_sysdef_input | sed 's/^[^:]*:\(.*\)$/\1/'`
++	echo "#define GLIB_SYSDEF_$glib_sysdef =$glib_default" >> $glib_sysdefso
++    done
++elif false; then
++    :
+ else
+   cat > conftest.$ac_ext <<EOF
+ #line 5607 "configure"
