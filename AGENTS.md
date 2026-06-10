@@ -362,13 +362,24 @@ manifest, `README.SUBSTRATE.md`.  Current set:
   a `merge(1)` replica) which expands the `%|nls|` placeholders and installs
   the `/usr/dt/appconfig/types` Front Panel + datatype/action database that
   the skipped `localized`/`types` clusters never staged.
-  Deferred (each a separate host-tooling effort, documented in
-  `build.sh`): dtksh (ksh93 AST mamake cross-build), dtappbuilder +
-  ttsnoop (need a host Motif for dtcodegen), dtinfo + dtdocbook (SGML
-  pmaker chain), tttypes/types (host tt_type_comp), the rest of
-  `localized` (only the C-locale types slice is staged), dthelp
-  parser.  The Motif port (`contrib/motif/`) builds libUil via Motif's
-  WML meta-compiler (host wml/wmluiltok) and installs the uil/ headers.
+  dtappbuilder (dtbuilder) + ttsnoop now build too: their `*_ui.c/_ui.h`
+  are generated at build time by RUNNING dtcodegen, which links Motif —
+  `hosttools/build.sh` builds a native `dtcodegen-host` against the
+  build host's Motif (e.g. Arch `openmotif`) in a separate native CDE
+  objdir (`hosttools/cde-host`, `-static-libtool-libs` so it is
+  relocatable), and `build.sh` swaps it over the cross-built wrapper
+  before src/ab and ttsnoop run the generator.  Static-link fixups it
+  applies: `MRESOURCELIB=-lMrm` (referenced by dtbuilder_LDADD, never
+  set by configure), libABil's yacc globals renamed (collide with
+  Motif libUil.a's), ttsnoop's local `_tt_sigset` renamed (collides
+  with libtt.a's).  Without a host Motif both programs are skipped, as
+  before.  Still deferred (each a separate host-tooling effort,
+  documented in `build.sh`): dtksh (ksh93 AST mamake cross-build),
+  dtinfo + dtdocbook (SGML pmaker chain), tttypes/types (host
+  tt_type_comp), the rest of `localized` (only the C-locale types
+  slice is staged), dthelp parser.  The Motif port (`contrib/motif/`)
+  builds libUil via Motif's WML meta-compiler (host wml/wmluiltok) and
+  installs the uil/ headers.
 - **ext2 toolset** — `e2fsprogs` 1.47.2 (`contrib/e2fsprogs/`):
   mke2fs / e2fsck / tune2fs / debugfs / resize2fs / ... plus the
   static libext2fs / libcom_err / libe2p / libss / libuuid /
