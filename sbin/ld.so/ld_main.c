@@ -566,6 +566,22 @@ ld_u32 ld_main(ld_u32 *initial_stack) {
         for (;;) {}
     }
 
+    /* glibc-rtld parity: publish `environ` BEFORE any constructor runs.
+     * crt0 only assigns it at program entry, which happens after the
+     * DT_INIT/init_array pass below — so a shared-library constructor
+     * calling getenv() (or an interposing getenv, e.g. ksh93/dtksh's
+     * sh_getenv) would otherwise walk a NULL environ and fault.
+     * ld_resolve returns the canonical symbol (the program's copy when
+     * it defines/copies one), which is the same object crt0 assigns. */
+    {
+        ld_u32 envaddr = ld_resolve("environ");
+        if (envaddr) {
+            ld_u32 argc = initial_stack[0];
+            char **envp = (char **)(initial_stack + 1 + argc + 1);
+            *(char ***)envaddr = envp;
+        }
+    }
+
     /* Run constructors in dependency order: deepest deps first
      * (= reverse of load order, since the program is at the head
      * and its deepest dependency is at the tail). */
