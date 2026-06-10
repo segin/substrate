@@ -798,10 +798,27 @@ int tcp_poll(tcp_pcb_t *p, short events, void **wait_chan) {
         return 0;
     }
     if (p->state == TCP_CLOSED) {
-        return (events & POLLOUT ? POLLOUT : 0) | POLLHUP | POLLERR;
+        return (events & POLLOUT ? POLLOUT : 0) |
+               (events & POLLIN ? POLLIN : 0) | POLLHUP | POLLERR;
     }
     if (events & POLLIN) {
-        if (p->rx_count > 0) revents |= POLLIN;
+        if (p->rx_count > 0) {
+            revents |= POLLIN;
+        } else if (p->state == TCP_CLOSE_WAIT || p->state == TCP_CLOSING ||
+                   p->state == TCP_LAST_ACK   || p->state == TCP_TIME_WAIT) {
+            /*
+             * Peer has sent FIN (receive side closed) and the receive
+             * buffer is drained: a read() returns 0 (EOF) rather than
+             * blocking, so the socket IS readable.  POSIX and Linux report
+             * POLLIN here (not just POLLHUP).  libtirpc's svc_vc read_vc
+             * loops `while ((revents & POLLIN) == 0)` and only treats a
+             * poll *timeout* as fatal, so a POLLHUP-without-POLLIN fd makes
+             * poll() return >0 forever and the RPC server spins at 100%
+             * the moment a client disconnects — wedging ttsession /
+             * rpc.ttdbserver and hanging the whole CDE/ToolTalk startup.
+             */
+            revents |= POLLIN;
+        }
     }
     if (events & POLLOUT) {
         /* No tx buffering yet; treat as always-ready.  */
