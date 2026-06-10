@@ -373,11 +373,18 @@ manifest, `README.SUBSTRATE.md`.  Current set:
   set by configure), libABil's yacc globals renamed (collide with
   Motif libUil.a's), ttsnoop's local `_tt_sigset` renamed (collides
   with libtt.a's).  Without a host Motif both programs are skipped, as
-  before.  Still deferred (each a separate host-tooling effort,
-  documented in `build.sh`): dtksh (ksh93 AST mamake cross-build),
-  dtinfo + dtdocbook (SGML pmaker chain), tttypes/types (host
-  tt_type_comp), the rest of `localized` (only the C-locale types
-  slice is staged), dthelp parser.  The Motif port (`contrib/motif/`)
+  before.  dtinfo + dtdocbook build via host-native generators (pmaker/dfiles/
+  msgsets/mkdbd in hosttools prefix/cde-tools).  dtksh builds through
+  the AST package/mamake cross harness: an INIT cc.linux.i386
+  intercept compiles with the cross gcc (-std=gnu99), mamake runs
+  natively, and iffe's output{}/run feature probes EXECUTE ON
+  SUBSTRATE via hosttools `crossexec` (boots a rootfs.img copy
+  headlessly in qemu, relays stdout/exit over @@IFFE@@-framed serial)
+  — so ksh93's FEATURE headers reflect real substrate behavior; needs
+  a baked rootfs.img (fresh checkouts: bake, re-run build.sh).
+  Still deferred: tttypes/types (host tt_type_comp), the rest of
+  `localized` (only the C-locale types slice is staged), dthelp
+  parser.  The Motif port (`contrib/motif/`)
   builds libUil via Motif's WML meta-compiler (host wml/wmluiltok) and
   installs the uil/ headers.
 - **ext2 toolset** — `e2fsprogs` 1.47.2 (`contrib/e2fsprogs/`):
@@ -399,7 +406,11 @@ manifest, `README.SUBSTRATE.md`.  Current set:
   - Phase 4a: recursive (BFS) DT_NEEDED traversal — transitive deps
     pulled in automatically.
   - Phase 4b: DT_INIT and DT_INIT_ARRAY execution in dependency
-    order (deepest deps first, program last).
+    order (deepest deps first, program last).  `environ` is published
+    (canonical symbol := envp) BEFORE the constructor pass — crt0 only
+    assigns it at program entry, and a constructor calling getenv()
+    (e.g. through dtksh/ksh93's interposed sh_getenv) otherwise walks
+    NULL (glibc-rtld parity).
   - Phase 4c: per-thread TLS — variant-II layout (TCB at TP, data
     at negative offsets), PT_TLS images copied into mmap'd block,
     GS base installed via the new native `sys_set_gsbase` syscall
