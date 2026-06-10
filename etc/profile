@@ -1,6 +1,6 @@
 # Substrate default shell profile
 
-PATH=/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin
+PATH=/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/usr/dt/bin
 export PATH
 
 # System locale.  Substrate's libc is UTF-8 throughout; en_US.UTF-8 is

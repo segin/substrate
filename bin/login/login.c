@@ -149,8 +149,8 @@ set_login_env(const struct passwd *pw, const char *inherited_term)
     setenv("PATH",
            pw->pw_uid == 0
                ? "/usr/local/sbin:/usr/local/bin:/usr/sbin:"
-                 "/usr/bin:/sbin:/bin"
-               : "/usr/local/bin:/usr/bin:/bin",
+                 "/usr/bin:/sbin:/bin:/usr/dt/bin"
+               : "/usr/local/bin:/usr/bin:/bin:/usr/dt/bin",
            1);
     if (inherited_term != NULL && inherited_term[0] != '\0') {
         setenv("TERM", inherited_term, 1);
