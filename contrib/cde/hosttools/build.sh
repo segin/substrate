@@ -200,5 +200,26 @@ if [ ! -x "${PREFIX}/cde-tools/pmaker" ]; then
     echo "==> cde-tools (pmaker dfiles msgsets mkdbd) ready"
 fi
 
+# --- crossexec: run substrate binaries during builds (AST iffe probes) ------
+# Boots a private copy of the substrate root image headlessly in qemu and
+# relays the binary's stdout/exit status over a noise-proof serial protocol.
+# The dtksh/ksh93 cross build points iffe at it (IFFEFLAGS="-x linux.i386").
+# Needs a baked rootfs.img — on a fresh checkout run build.sh again after the
+# first image bake to pick dtksh up.
+install -m755 "${HERE}/crossexec.d/crossexec" "${PREFIX}/bin/crossexec"
+EXEC_IMG="${SUBSTRATE_EXEC_IMG:-/tmp/sub-exec.img}"
+if [ ! -f "${EXEC_IMG}" ] && [ -f "${SUBSTRATE_TOP}/rootfs.img" ]; then
+    echo "==> crossexec: preparing exec image at ${EXEC_IMG}"
+    cp --reflink=auto "${SUBSTRATE_TOP}/rootfs.img" "${EXEC_IMG}"
+fi
+if [ -f "${EXEC_IMG}" ]; then
+    debugfs -w -R "rm /root/iffe-run.sh" "${EXEC_IMG}" >/dev/null 2>&1 || true
+    debugfs -w -R "write ${HERE}/crossexec.d/iffe-run.sh /root/iffe-run.sh" "${EXEC_IMG}" >/dev/null 2>&1
+    debugfs -w -R "sif /root/iffe-run.sh mode 0100755" "${EXEC_IMG}" >/dev/null 2>&1
+    echo "==> crossexec ready (exec image: ${EXEC_IMG})"
+else
+    echo "hosttools: NOTE: no rootfs.img yet — crossexec installed but unusable until an image is baked (dtksh will be skipped)" >&2
+fi
+
 echo "==> host tools ready in ${PREFIX}/bin:"
 echo "    $(cd "${PREFIX}/bin" && ls | tr '\n' ' ')"

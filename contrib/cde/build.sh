@@ -91,11 +91,10 @@ echo "==> configure"
     --with-tcl="${SR}/usr/lib"
 
 # Deferred programs — each blocks on a separate effort, not a substrate gap:
-#   dtksh : ksh93's AST mamake/iffe detects the BUILD host
-#           (HOSTTYPE=linux.i386-64) and compiles libast/libcmd/libshell for
-#           x86-64 instead of the i386 cross target; the final link fails on
-#           incompatible objects.  (Substrate side done: libc symbol surface +
-#           libiconv plain names.)
+#   dtksh : handled below via the AST cross harness (INIT cc intercept,
+#           native mamake, iffe probes run on substrate through hosttools
+#           crossexec).  Skipped until a rootfs.img exists to derive the
+#           crossexec exec image from.
 #   dtappbuilder,
 #   ttsnoop : RUN dtcodegen (links Motif) at build time to generate *_ui.h.
 #           Handled below when hosttools provides dtcodegen-host (built
@@ -265,6 +264,54 @@ else
     echo "==> no hosttools cde-tools — dtdocbook/dtinfo skipped"
 fi
 
+# --- dtksh: ksh93 (AST package/mamake) cross-harness ------------------------
+# ksh93's build system compiles AND RUNS feature probes (iffe) and one table
+# generator (lcgen).  The harness: an INIT cc.linux.i386 intercept makes
+# every compile use the substrate cross gcc (-std=gnu99: AST is K&R-era and
+# gcc16's C23 default rejects its empty-paren decls and implicit printf);
+# mamake/mamprobe run natively (bootstrapped once via `package make INIT`);
+# iffe's output{}/run probes execute ON SUBSTRATE through hosttools'
+# qemu-backed crossexec (IFFEFLAGS="-x linux.i386").  Needs a baked
+# rootfs.img-derived exec image — skipped on fresh checkouts until then.
+EXEC_IMG="${SUBSTRATE_EXEC_IMG:-/tmp/sub-exec.img}"
+if [ -x "${HOSTTOOLS}/crossexec" ] && [ -f "${EXEC_IMG}" ]; then
+    echo "==> dtksh (ksh93 via crossexec feature probes)"
+    KSHROOT="programs/dtksh/ksh93"
+    # per-HOSTTYPE compiler intercept (placeholder HOSTTYPE= line: package
+    # sed-patches it on install, and re-runs require source != installed)
+    printf 'HOSTTYPE=\nexec %s/bin/i386-unknown-substrate-gcc -std=gnu99 "$@"\n' "${STAGE1_PREFIX}" \
+        > "${KSHROOT}/src/cmd/INIT/cc.linux.i386"
+    chmod +x "${KSHROOT}/src/cmd/INIT/cc.linux.i386"
+    # purge target binaries a previous flat run may have left where the
+    # HOST must execute (bin/, and the host-arch INIT bootstrap dir)
+    for _f in "${KSHROOT}"/bin/*; do
+        file "${_f}" 2>/dev/null | grep -q 'ELF 32-bit LSB executable, Intel i386' && rm -f "${_f}"
+    done
+    # native mamake bootstrap (once): `package make INIT` errors out late
+    # (the CDE-trimmed tree has no INIT package) but builds bin/mamake first
+    _NATARCH=$(cd "${KSHROOT}" && bin/package host type 2>/dev/null || echo linux.i386-64)
+    if [ ! -x "${KSHROOT}/arch/${_NATARCH}/bin/mamake" ]; then
+        ( cd "${KSHROOT}" && PATH="${HOSTTOOLS}:/usr/bin:${PATH}" bin/package make INIT >/dev/null 2>&1 || true )
+    fi
+    [ -x "${KSHROOT}/arch/${_NATARCH}/bin/mamake" ] || \
+        { echo "build.sh: dtksh: native mamake bootstrap failed" >&2; exit 1; }
+    cp -f "${KSHROOT}/bin/package" "${KSHROOT}/arch/${_NATARCH}/bin/package"
+    # lcgen is the one self-run generator outside iffe — pre-place a host
+    # build so mamake skips the cross compile and the ./lcgen run works
+    mkdir -p "${KSHROOT}/arch/linux.i386/src/lib/libast"
+    cc -O -w -o "${KSHROOT}/arch/linux.i386/src/lib/libast/lcgen" \
+        "${KSHROOT}/src/lib/libast/port/lcgen.c"
+    _SHOPTS=$(make -C programs/dtksh -pn 2>/dev/null | grep -m1 '^KSH93_SHOPTS = ' | sed 's/^KSH93_SHOPTS = //')
+    ( cd "${KSHROOT}" && \
+      PATH="$PWD/arch/${_NATARCH}/bin:${HOSTTOOLS}:$PWD/bin:${STAGE1_PREFIX}/bin:/usr/bin:${PATH}" \
+      IFFEFLAGS="-x linux.i386" \
+      bin/package flat make HOSTTYPE=linux.i386 "CCFLAGS=${_SHOPTS}" )
+    make -C programs/dtksh -j"${JOBS}" \
+        GENCPP="${HOSTTOOLS}/tradcpp" LIBS="-ldl -lm -lsys -lstdc++ -liconv"
+else
+    echo "==> no crossexec exec image (${EXEC_IMG}) — dtksh skipped (bake an image, re-run)"
+fi
+
 # Stage the built desktop into dist-cde (CDE installs under /usr/dt).  -k keeps
 # going past the install-exec-hook `chown root` steps that fail in a non-root
 # build (the setuid bits are re-applied when the image is baked); without -k the
@@ -279,6 +326,9 @@ fi
 if [ -x "${CDETOOLS}/pmaker" ]; then
     make -k -C programs/dtdocbook install DESTDIR="${SUBSTRATE_TOP}/dist-cde" GENCPP="${HOSTTOOLS}/tradcpp" LIBS="${DOCLIBS}" || true
     make -k -C programs/dtinfo    install DESTDIR="${SUBSTRATE_TOP}/dist-cde" GENCPP="${HOSTTOOLS}/tradcpp" CFLAGS="${DTINFO_CFLAGS}" LIBS="${DOCLIBS}" || true
+fi
+if [ -x "${HOSTTOOLS}/crossexec" ] && [ -f "${EXEC_IMG}" ]; then
+    make -k -C programs/dtksh install DESTDIR="${SUBSTRATE_TOP}/dist-cde" GENCPP="${HOSTTOOLS}/tradcpp" LIBS="-ldl -lm -lsys -lstdc++ -liconv" || true
 fi
 
 # CDE's configure bakes the build-host ksh path (the hosttools mksh-as-ksh it
