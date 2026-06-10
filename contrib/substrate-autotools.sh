@@ -58,6 +58,12 @@ substrate_sysroot() {
         cp "${SUBSTRATE_TOP}/lib/${_l}/lib${_l}.so.0" "${_sr}/usr/lib/" 2>/dev/null || true
         ln -sf "lib${_l}.so.0" "${_sr}/usr/lib/lib${_l}.so" 2>/dev/null || true
     done
+    # libxcb's port ships a stub pthread-stubs.pc (substrate's pthreads are
+    # in libc/libpthread, not a separate stub lib); the X .pc Requires chain
+    # (x11 -> xcb -> pthread-stubs) needs it or `pkg-config --cflags` fails.
+    if [ -f "${SUBSTRATE_TOP}/contrib/libxcb/pkgconfig/pthread-stubs.pc" ]; then
+        cp -f "${SUBSTRATE_TOP}/contrib/libxcb/pkgconfig/"*.pc "${_sr}/usr/lib/pkgconfig/" 2>/dev/null || true
+    fi
     export PKG_CONFIG_SYSROOT_DIR="${_sr}"
     export PKG_CONFIG_LIBDIR="${_sr}/usr/lib/pkgconfig:${_sr}/usr/share/pkgconfig"
     export CPPFLAGS="-I${_sr}/usr/include${CPPFLAGS:+ ${CPPFLAGS}}"
