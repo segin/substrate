@@ -38,3 +38,28 @@ substrate_so_finalize() {
     done
     echo "  OSABI->substrate on ${_n} shared objects"
 }
+
+# Assemble a unified sysroot under $1 from the named dist trees ($2..) and
+# export PKG_CONFIG so pkg-config returns SYSROOT-prefixed -I/-L (the .pc
+# files carry prefix=/usr, i.e. on-target paths, which a cross gcc would
+# otherwise read as the build host's /usr — pulling host headers/libs of a
+# conflicting version).  Also exports CPPFLAGS/LDFLAGS pointing at the
+# sysroot.  Usage: substrate_sysroot "${SR}" glib2 libffi zlib ...
+substrate_sysroot() {
+    _sr="$1"; shift
+    rm -rf "${_sr}"; mkdir -p "${_sr}/usr/lib"
+    for _d in "$@"; do
+        _st="${SUBSTRATE_TOP}/dist-${_d}"
+        [ -d "${_st}/usr" ] || { echo "substrate_sysroot: dist-${_d} missing — build contrib/${_d} first" >&2; return 1; }
+        cp -a "${_st}/usr/." "${_sr}/usr/"
+    done
+    # substrate core libs + unversioned link names
+    for _l in c sys m pthread dl; do
+        cp "${SUBSTRATE_TOP}/lib/${_l}/lib${_l}.so.0" "${_sr}/usr/lib/" 2>/dev/null || true
+        ln -sf "lib${_l}.so.0" "${_sr}/usr/lib/lib${_l}.so" 2>/dev/null || true
+    done
+    export PKG_CONFIG_SYSROOT_DIR="${_sr}"
+    export PKG_CONFIG_LIBDIR="${_sr}/usr/lib/pkgconfig:${_sr}/usr/share/pkgconfig"
+    export CPPFLAGS="-I${_sr}/usr/include${CPPFLAGS:+ ${CPPFLAGS}}"
+    export LDFLAGS="-L${_sr}/usr/lib -Wl,-rpath-link,${_sr}/usr/lib -Wl,--copy-dt-needed-entries${LDFLAGS:+ ${LDFLAGS}}"
+}
