@@ -50,8 +50,12 @@ for d in xorgproto libXau xtrans libxcb libX11 libXext libICE libSM \
     _have=$((_have + 1))
 done
 [ "${_have}" -ge 19 ] || { echo "build.sh: only ${_have} dist trees found — build the X stack + Motif + libXinerama + libXScrnSaver + libjpeg + lmdb + tcl first" >&2; exit 1; }
-for l in c sys m pthread; do
+for l in c sys m pthread dl; do
     cp "${SUBSTRATE_TOP}/lib/${l}/lib${l}.so.0" "${SR}/usr/lib/" 2>/dev/null || true
+    # Unversioned link-time name: -l<x> won't find lib<x>.so.0 on its own,
+    # and without it ld reports "DSO missing from command line" for anything
+    # (tcl's pthread_create) resolved only through a DT_NEEDED chain.
+    ln -sf "lib${l}.so.0" "${SR}/usr/lib/lib${l}.so"
 done
 
 # Build IN-SOURCE.  CDE's Makefiles reference its exported Dt/* headers as
@@ -100,8 +104,10 @@ echo "==> configure"
 #           either way — the conditional phase after the main make builds
 #           them with the generator swapped for the host binary.
 #   dtinfo,
-#   dtdocbook : need their own SGML build tooling (pmaker/Prelude.h generator,
-#           the dtdocbook parser) which is cross-built and won't run on the host.
+#   dtdocbook : their build-time generators (pmaker/dfiles/msgsets, dtsr's
+#           mkdbd) are cross-built and can't run here.  Handled below via
+#           hosttools prefix/cde-tools (native builds of the same tools),
+#           swapped in like dtcodegen.
 #   tttypes,
 #   types   : run the cross-built tt_type_comp (ToolTalk type compiler, which
 #           links libtt) during the build — it can't execute on the host, and
@@ -138,6 +144,19 @@ grep -q 'abil_yyparse' programs/dtappbuilder/src/libABil/Makefile || \
         programs/dtappbuilder/src/libABil/Makefile
 grep -q 'ttsnoop_local_sigset' programs/ttsnoop/Makefile || \
     sed -i 's|^DEFS = |DEFS = -D_tt_sigset=ttsnoop_local_sigset |' programs/ttsnoop/Makefile
+
+# tclConfig.sh records tcl's ON-TARGET install paths (/usr/include, /usr/lib);
+# configure substitutes them verbatim into instant's Makefile, where they
+# resolve to the BUILD HOST's glibc headers/libs (instant then references
+# glibc-internal __ctype_*_loc symbols).  Point them at the sysroot.
+sed -i "s|^TCL_INCLUDE_SPEC = -I/usr/include\$|TCL_INCLUDE_SPEC = -I${SR}/usr/include|; \
+        s|^TCL_LIB_SPEC = -L/usr/lib |TCL_LIB_SPEC = -L${SR}/usr/lib |" \
+    programs/dtdocbook/instant/Makefile
+# instant_CFLAGS hardcodes -I/usr/include (for tcl.h) in Makefile.am — on the
+# build host that pulls glibc headers ahead of substrate's.  Drop it; the
+# sysroot include path is already on the compile line.
+sed -i 's|^instant_CFLAGS = \$(DT_INCDIR) -I/usr/include\$|instant_CFLAGS = $(DT_INCDIR)|' \
+    programs/dtdocbook/instant/Makefile
 
 # In-tree generator tools: CDE compiles several small noinst_PROGRAMS and runs
 # them mid-build to generate source (lineToData -> TermLineData.c, ...).  The
@@ -217,6 +236,35 @@ else
     echo "==> no hosttools dtcodegen-host — dtappbuilder/ttsnoop skipped"
 fi
 
+# --- dtdocbook + dtinfo: need their generators at build time ----------------
+# dtsr's mkdbd, dtinfo's pmaker (Prelude.h) / dfiles (.d lists) / msgsets are
+# RUN during the build; hosttools stages native ones in prefix/cde-tools.
+# Both stay out of programs/Makefile SUBDIRS; built explicitly here.
+CDETOOLS="${HERE}/hosttools/prefix/cde-tools"
+if [ -x "${CDETOOLS}/pmaker" ]; then
+    echo "==> dtdocbook + dtinfo (host generators)"
+    # tcl pulls pthread/dl/z on top of the usual LIBS.
+    DOCLIBS="-ldl -lm -lsys -lstdc++ -liconv -lpthread -lz"
+    # dtinfo's bundled Xaw-era widgets forward-declare methods with empty
+    # parens; C23 (gcc16 default) reads that as (void) and errors on the
+    # definitions — compile dtinfo as gnu99.  Keep the configure CFLAGS.
+    DTINFO_CFLAGS="-g -O2 -DOPT_TIRPC -I/usr/include/tirpc -Wno-unused-result -Wno-write-strings -fno-strict-aliasing -Wno-format-truncation -std=gnu99"
+    make -C programs/dtdocbook/dtsr mkdbd \
+        GENCPP="${HOSTTOOLS}/tradcpp" LIBS="${DOCLIBS}"
+    cp -f "${CDETOOLS}/mkdbd" programs/dtdocbook/dtsr/mkdbd
+    make -C programs/dtdocbook -j"${JOBS}" \
+        GENCPP="${HOSTTOOLS}/tradcpp" LIBS="${DOCLIBS}"
+    make -C programs/dtinfo/tools -j"${JOBS}" \
+        GENCPP="${HOSTTOOLS}/tradcpp" LIBS="${DOCLIBS}" || true
+    for t in pmaker dfiles msgsets; do
+        cp -f "${CDETOOLS}/${t}" "programs/dtinfo/tools/misc/${t}"
+    done
+    make -C programs/dtinfo -j"${JOBS}" \
+        GENCPP="${HOSTTOOLS}/tradcpp" CFLAGS="${DTINFO_CFLAGS}" LIBS="${DOCLIBS}"
+else
+    echo "==> no hosttools cde-tools — dtdocbook/dtinfo skipped"
+fi
+
 # Stage the built desktop into dist-cde (CDE installs under /usr/dt).  -k keeps
 # going past the install-exec-hook `chown root` steps that fail in a non-root
 # build (the setuid bits are re-applied when the image is baked); without -k the
@@ -227,6 +275,10 @@ make -k install DESTDIR="${SUBSTRATE_TOP}/dist-cde" GENCPP="${HOSTTOOLS}/tradcpp
 if [ -x "${HOSTTOOLS}/dtcodegen-host" ]; then
     make -k -C programs/dtappbuilder install DESTDIR="${SUBSTRATE_TOP}/dist-cde" GENCPP="${HOSTTOOLS}/tradcpp" MRESOURCELIB=-lMrm LIBS="-ldl -lm -lsys -lstdc++ -liconv" || true
     make -k -C programs/ttsnoop     install DESTDIR="${SUBSTRATE_TOP}/dist-cde" GENCPP="${HOSTTOOLS}/tradcpp" MRESOURCELIB=-lMrm LIBS="-ldl -lm -lsys -lstdc++ -liconv" || true
+fi
+if [ -x "${CDETOOLS}/pmaker" ]; then
+    make -k -C programs/dtdocbook install DESTDIR="${SUBSTRATE_TOP}/dist-cde" GENCPP="${HOSTTOOLS}/tradcpp" LIBS="${DOCLIBS}" || true
+    make -k -C programs/dtinfo    install DESTDIR="${SUBSTRATE_TOP}/dist-cde" GENCPP="${HOSTTOOLS}/tradcpp" CFLAGS="${DTINFO_CFLAGS}" LIBS="${DOCLIBS}" || true
 fi
 
 # CDE's configure bakes the build-host ksh path (the hosttools mksh-as-ksh it

@@ -137,36 +137,41 @@ fi
 # in hosttools/cde-host out of a pristine copy of the fetched source.
 # Skipped (with a warning) when no host Motif is installed — cde/build.sh
 # then leaves dtappbuilder/ttsnoop out of the build, as before.
+# --- native CDE objdir: shared by dtcodegen-host and the dtinfo/dtdocbook ---
+# build tools below.  A pristine copy of the fetched tree, configured for the
+# build host; util/ (in-tree tradcpp is lib/DtWidget's GENCPP) and lib/ are
+# built once (-k: the DtMmdb/dtinfo C++ bits fail natively and aren't needed).
+HB="${HERE}/cde-host"
+if [ ! -f "${HB}/lib/DtTerm/libDtTerm.la" ]; then
+    SRC="${SUBSTRATE_TOP}/contrib/cde/build/cdesktopenv/cde"
+    [ -d "${SRC}" ] || { echo "hosttools: CDE source tree missing — run cde/fetch.sh first" >&2; exit 1; }
+    echo "==> native CDE objdir at ${HB}"
+    rm -rf "${HB}"
+    cp -a "${SRC}" "${HB}"
+    ( cd "${HB}" && make distclean >/dev/null 2>&1 || true )
+    find "${HB}" -name '*.o' -delete
+    ( cd "${HB}" && ./configure \
+        --prefix=/nonexistent \
+        CC=gcc CXX=g++ \
+        CPPFLAGS="-I/usr/include/tirpc -Wno-error=incompatible-pointer-types -Wno-error=int-conversion -Wno-error=implicit-function-declaration -Wno-error=return-mismatch -Wno-error=format" \
+        LIBS="-ltirpc" \
+        --with-tcl=/usr/lib >/dev/null )
+    ( cd "${HB}" && make -C util -j"${JOBS}" >/dev/null )
+    ( cd "${HB}" && make -C lib -k -j"${JOBS}" >/dev/null 2>&1 || true )
+    for la in tt/lib/libtt.la DtSvc/libDtSvc.la DtWidget/libDtWidget.la \
+              DtHelp/libDtHelp.la DtTerm/libDtTerm.la; do
+        [ -f "${HB}/lib/${la}" ] || { echo "hosttools: native CDE objdir: lib/${la} failed to build" >&2; exit 1; }
+    done
+fi
+
+# --- dtcodegen: AppBuilder code generator (needs a host Motif) --------------
 if ! have dtcodegen-host; then
     if [ ! -f /usr/include/Xm/Xm.h ]; then
         echo "hosttools: WARNING: no host Motif (/usr/include/Xm/Xm.h) — skipping dtcodegen-host" >&2
         echo "hosttools:          install it (e.g. pacman -S openmotif) to enable dtappbuilder/ttsnoop" >&2
     else
-        SRC="${SUBSTRATE_TOP}/contrib/cde/build/cdesktopenv/cde"
-        [ -d "${SRC}" ] || { echo "hosttools: CDE source tree missing — run cde/fetch.sh first" >&2; exit 1; }
-        HB="${HERE}/cde-host"
         if [ ! -x "${HB}/programs/dtappbuilder/src/abmf/dtcodegen" ] || \
            ! "${HB}/programs/dtappbuilder/src/abmf/dtcodegen" </dev/null >/dev/null 2>&1; then
-            echo "==> dtcodegen-host: native CDE objdir at ${HB}"
-            rm -rf "${HB}"
-            cp -a "${SRC}" "${HB}"
-            ( cd "${HB}" && make distclean >/dev/null 2>&1 || true )
-            find "${HB}" -name '*.o' -delete
-            ( cd "${HB}" && ./configure \
-                --prefix=/nonexistent \
-                CC=gcc CXX=g++ \
-                CPPFLAGS="-I/usr/include/tirpc -Wno-error=incompatible-pointer-types -Wno-error=int-conversion -Wno-error=implicit-function-declaration -Wno-error=return-mismatch -Wno-error=format" \
-                LIBS="-ltirpc" \
-                --with-tcl=/usr/lib >/dev/null )
-            # util first (in-tree tradcpp is lib/DtWidget's GENCPP); then the
-            # libraries dtcodegen links (-k: DtMmdb/dtinfo bits fail natively
-            # and aren't needed); then the AppBuilder libs + dtcodegen.
-            ( cd "${HB}" && make -C util -j"${JOBS}" >/dev/null )
-            ( cd "${HB}" && make -C lib -k -j"${JOBS}" >/dev/null 2>&1 || true )
-            for la in tt/lib/libtt.la DtSvc/libDtSvc.la DtWidget/libDtWidget.la \
-                      DtHelp/libDtHelp.la DtTerm/libDtTerm.la; do
-                [ -f "${HB}/lib/${la}" ] || { echo "hosttools: dtcodegen-host: lib/${la} failed to build" >&2; exit 1; }
-            done
             # -static-libtool-libs: link the in-tree Dt/tt libtool libs
             # statically so the staged binary is relocatable (system Xm/Xt/
             # X11/tirpc stay dynamic); also leaves no .libs wrapper script.
@@ -176,6 +181,23 @@ if ! have dtcodegen-host; then
         install -m755 "${HB}/programs/dtappbuilder/src/abmf/dtcodegen" "${PREFIX}/bin/dtcodegen-host"
         echo "==> dtcodegen-host ready"
     fi
+fi
+
+# --- dtinfo / dtdocbook build-time generators -------------------------------
+# pmaker (Prelude.h), dfiles (.d dependency lists), msgsets, and dtsr's mkdbd
+# are RUN during the cross build of dtinfo/dtdocbook; build them natively and
+# stage into prefix/cde-tools for cde/build.sh to swap in.
+if [ ! -x "${PREFIX}/cde-tools/pmaker" ]; then
+    mkdir -p "${PREFIX}/cde-tools"
+    ( cd "${HB}" && make -C programs/dtinfo/tools -j"${JOBS}" \
+        LDFLAGS=-static-libtool-libs LIBS="-ltirpc -lstdc++" >/dev/null )
+    ( cd "${HB}" && make -C programs/dtdocbook -k -j"${JOBS}" \
+        LDFLAGS=-static-libtool-libs LIBS="-ltirpc -lstdc++" >/dev/null 2>&1 || true )
+    for t in pmaker dfiles msgsets; do
+        install -m755 "${HB}/programs/dtinfo/tools/misc/${t}" "${PREFIX}/cde-tools/${t}"
+    done
+    install -m755 "${HB}/programs/dtdocbook/dtsr/mkdbd" "${PREFIX}/cde-tools/mkdbd"
+    echo "==> cde-tools (pmaker dfiles msgsets mkdbd) ready"
 fi
 
 echo "==> host tools ready in ${PREFIX}/bin:"
