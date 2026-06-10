@@ -123,7 +123,7 @@ int ld_setup_tls(void) {
     ld_tls_total  = total;
     void *block = ld_mmap(0, total, LD_PROT_READ | LD_PROT_WRITE,
                           LD_MAP_PRIVATE | LD_MAP_ANON, -1, 0);
-    if ((long)block < 0) {
+    if (ld_mmap_failed(block)) {
         ld_puts("ld.so: TLS mmap failed\n");
         return -12; /* -ENOMEM */
     }
@@ -236,7 +236,7 @@ LD_PUBLIC void *__ldso_alloc_tls(void) {
     }
     void *block = ld_mmap(0, ld_tls_total, LD_PROT_READ | LD_PROT_WRITE,
                           LD_MAP_PRIVATE | LD_MAP_ANON, -1, 0);
-    if ((long)block < 0) return 0;
+    if (ld_mmap_failed(block)) return 0;
 
     ld_u32 tp = (ld_u32)(unsigned long)block + ld_tls_cursor;
     ld_u32 *tcb = (ld_u32 *)(unsigned long)tp;

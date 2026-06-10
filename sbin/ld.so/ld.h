@@ -262,6 +262,16 @@ long  ld_lseek(int fd, long off, int whence);
 void *ld_mmap(void *addr, ld_size len, int prot, int flags,
               int fd, ld_u32 page_off);
 
+/* True iff an mmap/syscall pointer return is an error.  The kernel returns
+ * a -errno in [-4095, -1] on failure; everything else is a valid pointer.
+ * A plain `(long)p < 0` test is WRONG on 32-bit: a successful mmap can land
+ * at a high user address (>= 0x80000000) whose sign bit is set, and would
+ * be mis-rejected as an error.  This surfaced once a large dependency graph
+ * (GTK+ 2.x: ~40 DSOs) pushed later libraries past the 2 GiB line. */
+static inline int ld_mmap_failed(void *p) {
+    return (ld_u32)(unsigned long)p >= (ld_u32)-4095;
+}
+
 /* Phase-3 surface: per-loaded-object descriptor.  Both the program
  * itself and every loaded .so get one of these.  The list is kept
  * in load order for deterministic symbol resolution. */
@@ -414,7 +424,7 @@ int ld_sys_set_gsbase(ld_u32 base);
  * Sized to match LD_MAX_OBJS in ld_load.c so it's effectively the
  * same limit, kept here so ld_main can size a stack array without
  * pulling in ld_load.c's private constants. */
-#define LD_MAX_OBJS_INIT_LIMIT 32
+#define LD_MAX_OBJS_INIT_LIMIT 192
 
 /* Phase 2 entry point from asm. */
 ld_u32 ld_main(ld_u32 *initial_stack);

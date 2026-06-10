@@ -20,7 +20,7 @@
 
 #include "ld.h"
 
-#define LD_MAX_OBJS 32
+#define LD_MAX_OBJS 192   /* was 32; a full GTK+ 2.x app loads ~40-60 DSOs */
 #define PAGE_SIZE   0x1000
 
 static ld_obj_t  ld_obj_pool[LD_MAX_OBJS];
@@ -226,7 +226,7 @@ static ld_obj_t *load_from_path(const char *path) {
     ld_size span = (ld_size)(hi - lo);
     void *base_v = ld_mmap(0, span, LD_PROT_READ,
                            LD_MAP_PRIVATE | LD_MAP_ANON, -1, 0);
-    if ((long)base_v < 0) { ld_close(fd); return 0; }
+    if (ld_mmap_failed(base_v)) { ld_close(fd); return 0; }
     ld_u32 base = (ld_u32)(unsigned long)base_v - lo;
 
     /* Map each PT_LOAD over the reserved range. */
@@ -247,7 +247,7 @@ static ld_obj_t *load_from_path(const char *path) {
                               prot | LD_PROT_WRITE,
                               LD_MAP_PRIVATE | LD_MAP_FIXED,
                               fd, fileoff_pages);
-            if ((long)r < 0 || r != (void *)vaddr) { ld_close(fd); return 0; }
+            if (ld_mmap_failed(r) || r != (void *)vaddr) { ld_close(fd); return 0; }
         }
         /* BSS handling.  Two pieces:
          *   1. Bytes from (p_vaddr + p_filesz) up to the next page
