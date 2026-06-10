@@ -1,0 +1,68 @@
+.TH CFMAKERAW 3 2026-06-09 "Substrate" "Substrate Programmer's Manual"
+.SH NAME
+cfmakeraw \- set terminal attributes structure to raw mode
+.SH LIBRARY
+Standard C library
+.RI ( libc ", " \-lc )
+.SH SYNOPSIS
+.nf
+.B #include <termios.h>
+.PP
+.BI "void cfmakeraw(struct termios *" termios_p );
+.fi
+.SH DESCRIPTION
+.BR cfmakeraw ()
+modifies the
+.I termios
+structure pointed to by
+.I termios_p
+so that a terminal configured with it via
+.BR tcsetattr (3)
+operates in \(lqraw\(rq mode: input is available byte by byte
+.RI ( "c_cc[VMIN] = 1" ,
+.IR "c_cc[VTIME] = 0" ),
+echoing, canonical line editing and signal generation are disabled, no
+input or output post-processing is performed, and characters pass through
+as 8-bit values with parity disabled.
+.PP
+Specifically, it clears
+.BR IGNBRK ,
+.BR BRKINT ,
+.BR PARMRK ,
+.BR ISTRIP ,
+.BR INLCR ,
+.BR IGNCR ,
+.BR ICRNL
+and
+.B IXON
+in
+.IR c_iflag ;
+.B OPOST
+in
+.IR c_oflag ;
+.BR ECHO ,
+.BR ECHONL ,
+.BR ICANON ,
+.B ISIG
+and
+.B IEXTEN
+in
+.IR c_lflag ;
+clears
+.B CSIZE
+and
+.B PARENB
+and sets
+.B CS8
+in
+.IR c_cflag .
+.SH RETURN VALUE
+None.
+.SH ERRORS
+None.
+.SH CONFORMING TO
+BSD; also provided by glibc and musl.  Not specified by POSIX.
+.SH SEE ALSO
+.BR tcgetattr (3),
+.BR tcsetattr (3),
+.BR termios (3)

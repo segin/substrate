@@ -48,6 +48,19 @@ int cfsetospeed(struct termios *t, speed_t speed) {
     return 0;
 }
 
+void cfmakeraw(struct termios *t) {
+    /* BSD/glibc raw mode: no input mangling, no output post-processing,
+     * no echo/canonical/signals, 8-bit chars, read returns per byte. */
+    t->c_iflag &= ~(IGNBRK | BRKINT | PARMRK | ISTRIP |
+                    INLCR | IGNCR | ICRNL | IXON);
+    t->c_oflag &= ~OPOST;
+    t->c_lflag &= ~(ECHO | ECHONL | ICANON | ISIG | IEXTEN);
+    t->c_cflag &= ~(CSIZE | PARENB);
+    t->c_cflag |= CS8;
+    t->c_cc[VMIN] = 1;
+    t->c_cc[VTIME] = 0;
+}
+
 int tcdrain(int fd) {
     /* TCSBRK with arg=1 = "drain output", per termios spec. */
     return ioctl(fd, TCSBRK, (void *)(uintptr_t)1);
