@@ -9,6 +9,7 @@
 #include <unistd.h>
 #include <sys/wait.h>
 #include <errno.h>
+#include <signal.h>
 
 #define EXVI_SUB_PRINT_PLAIN  0x01
 #define EXVI_SUB_PRINT_NUMBER 0x02
@@ -760,19 +761,189 @@ handle_repeat_substitute_command(buffer_t *b, const char *args, int addr1,
     return 1;
 }
 
+char **
+exvi_tokenize_command(const char *cmd)
+{
+    int argc = 0;
+    int capacity = 10;
+    char **argv = malloc(sizeof(char *) * (size_t)capacity);
+    const char *p = cmd;
+
+    if (!argv) {
+        return NULL;
+    }
+
+    while (*p) {
+        while (*p && isspace((unsigned char)*p)) {
+            p++;
+        }
+        if (!*p) {
+            break;
+        }
+
+        const char *start = p;
+        char *arg = NULL;
+
+        if (*p == '\'' || *p == '"') {
+            char quote = *p++;
+            start = p;
+            while (*p && *p != quote) {
+                p++;
+            }
+            arg = strndup(start, (size_t)(p - start));
+            if (*p == quote) {
+                p++;
+            }
+        } else {
+            while (*p && !isspace((unsigned char)*p)) {
+                p++;
+            }
+            arg = strndup(start, (size_t)(p - start));
+        }
+
+        if (argc >= capacity - 1) {
+            capacity *= 2;
+            char **new_argv = realloc(argv, sizeof(char *) * (size_t)capacity);
+            if (!new_argv) {
+                for (int i = 0; i < argc; i++) {
+                    free(argv[i]);
+                }
+                free(argv);
+                return NULL;
+            }
+            argv = new_argv;
+        }
+        argv[argc++] = arg;
+    }
+    argv[argc] = NULL;
+    return argv;
+}
+
+typedef struct popen_entry {
+    FILE *f;
+    pid_t pid;
+    struct popen_entry *next;
+} popen_entry_t;
+
+static popen_entry_t *popen_list = NULL;
+
+FILE *
+exvi_popen(const char *cmd, const char *mode)
+{
+    int pipe_fds[2];
+    pid_t pid;
+    FILE *f;
+    int is_read = (mode[0] == 'r');
+
+    if (secure_mode || restricted_mode) {
+        exvi_report_shell_forbidden();
+        return NULL;
+    }
+
+    if (pipe(pipe_fds) == -1) {
+        return NULL;
+    }
+
+    pid = fork();
+    if (pid == -1) {
+        close(pipe_fds[0]);
+        close(pipe_fds[1]);
+        return NULL;
+    }
+
+    if (pid == 0) {
+        char **argv = exvi_tokenize_command(cmd);
+        if (!argv || !argv[0]) {
+            exit(127);
+        }
+
+        if (is_read) {
+            close(pipe_fds[0]);
+            dup2(pipe_fds[1], STDOUT_FILENO);
+            close(pipe_fds[1]);
+        } else {
+            close(pipe_fds[1]);
+            dup2(pipe_fds[0], STDIN_FILENO);
+            close(pipe_fds[0]);
+        }
+
+        if (setgid(getgid()) == -1) {
+            exit(127);
+        }
+        if (setuid(getuid()) == -1) {
+            exit(127);
+        }
+
+        /* Bypass shell to prevent command injection */
+        execvp(argv[0], argv);
+        exit(127);
+    }
+
+    if (is_read) {
+        close(pipe_fds[1]);
+        f = fdopen(pipe_fds[0], "r");
+    } else {
+        close(pipe_fds[0]);
+        f = fdopen(pipe_fds[1], "w");
+    }
+
+    if (!f) {
+        if (is_read) close(pipe_fds[0]);
+        else close(pipe_fds[1]);
+        return NULL;
+    }
+
+    popen_entry_t *entry = malloc(sizeof(popen_entry_t));
+    if (!entry) {
+        fclose(f);
+        kill(pid, SIGKILL);
+        waitpid(pid, NULL, 0);
+        return NULL;
+    }
+    entry->f = f;
+    entry->pid = pid;
+    entry->next = popen_list;
+    popen_list = entry;
+
+    return f;
+}
+
+int
+exvi_pclose(FILE *f)
+{
+    popen_entry_t **curr = &popen_list;
+    pid_t pid = -1;
+
+    while (*curr) {
+        if ((*curr)->f == f) {
+            popen_entry_t *to_free = *curr;
+            pid = to_free->pid;
+            *curr = to_free->next;
+            free(to_free);
+            break;
+        }
+        curr = &(*curr)->next;
+    }
+
+    fclose(f);
+    if (pid != -1) {
+        int status;
+        while (waitpid(pid, &status, 0) == -1) {
+            if (errno != EINTR) return -1;
+        }
+        return status;
+    }
+    return -1;
+}
+
 int
 handle_shell_command(char *cmd)
 {
-    char *shell;
     pid_t pid;
 
-    if (secure_mode) {
+    if (secure_mode || restricted_mode) {
         exvi_report_shell_forbidden();
         return 1;
-    }
-    shell = getenv("SHELL");
-    if (!shell || !*shell) {
-        shell = "/bin/sh";
     }
     if (visual_mode) {
         exvi_visual_shell_suspend();
@@ -781,6 +952,10 @@ handle_shell_command(char *cmd)
     if (pid < 0) {
         perror("fork");
     } else if (pid == 0) {
+        char **argv = exvi_tokenize_command(cmd + 1);
+        if (!argv || !argv[0]) {
+            exit(127);
+        }
         if (setgid(getgid()) == -1) {
             perror("setgid");
             exit(127);
@@ -789,8 +964,9 @@ handle_shell_command(char *cmd)
             perror("setuid");
             exit(127);
         }
-        execl(shell, shell, "-c", cmd + 1, (char *)NULL);
-        perror("execl");
+        /* Bypass shell to prevent command injection */
+        execvp(argv[0], argv);
+        perror("execvp");
         exit(127);
     } else {
         int status;
