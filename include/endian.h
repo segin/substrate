@@ -23,9 +23,9 @@
 #define __BYTE_ORDER    __LITTLE_ENDIAN
 #define BYTE_ORDER      __BYTE_ORDER
 
-static inline uint16_t __bswap16(uint16_t x) { return __builtin_bswap16(x); }
-static inline uint32_t __bswap32(uint32_t x) { return __builtin_bswap32(x); }
-static inline uint64_t __bswap64(uint64_t x) { return __builtin_bswap64(x); }
+static __inline__ uint16_t __bswap16(uint16_t x) { return __builtin_bswap16(x); }
+static __inline__ uint32_t __bswap32(uint32_t x) { return __builtin_bswap32(x); }
+static __inline__ uint64_t __bswap64(uint64_t x) { return __builtin_bswap64(x); }
 
 #define htobe16(x) __bswap16(x)
 #define htole16(x) (x)
