@@ -1130,7 +1130,12 @@ static void print_members(char **members, int count) {
         if (strcmp(cur->name, RANLIBMAG) == 0) { cur = cur->next; continue; }
 
         bool match = (count == 0);
-        for (int i = 0; i < count; i++) if (strcmp(cur->name, members[i]) == 0) match = true;
+        for (int i = 0; i < count; i++) {
+            if (strcmp(cur->name, members[i]) == 0) {
+                match = true;
+                break;
+            }
+        }
 
         if (match) {
             if (modifiers & MOD_VERBOSE) printf("p - %s\n", cur->name);
