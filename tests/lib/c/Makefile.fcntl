@@ -1,4 +1,4 @@
-# tests/lib/fcntl/Makefile
+# tests/lib/c/Makefile.fcntl
 #
 # Pure POSIX fcntl/dup/dup2/dup3 stress.  Same conventions as
 # tests/lib/ipc/Makefile.

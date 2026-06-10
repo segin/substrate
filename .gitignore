@@ -457,3 +457,13 @@ rootfs.img.zst
 contrib/matwm2/build/
 contrib/matwm2/matwm2-master.tar.gz
 tests/sys/fb/fbmouse
+
+# tests/lib/c compiled test binaries (sources are torture_*.c / test_*.c /
+# repro_*.c; the extensionless build outputs alongside them are artifacts).
+tests/lib/c/torture_*
+!tests/lib/c/torture_*.c
+tests/lib/c/test_*
+!tests/lib/c/test_*.c
+!tests/lib/c/test_*.h
+tests/lib/c/repro_*
+!tests/lib/c/repro_*.c
