@@ -108,7 +108,15 @@ void vsyslog(int priority, const char *fmt, va_list ap)
      * wasn't called. */
     char  buf[1024];
     int   n = 0;
+    /* snprintf returns the length it WOULD have written, so n can run past
+     * sizeof(buf); left unclamped, the next `buf + n` / `sizeof(buf) - n`
+     * pair writes out of bounds (the size underflows to a huge size_t).
+     * Clamp after every append so the cursor stays inside the buffer. */
+#define SYSLOG_CLAMP() do { \
+        if (n < 0 || n >= (int)sizeof(buf)) n = (int)sizeof(buf) - 1; \
+    } while (0)
     n += snprintf(buf + n, sizeof(buf) - n, "<%d>", priority);
+    SYSLOG_CLAMP();
 
     time_t now;
     struct timeval tv;
@@ -153,6 +161,7 @@ void vsyslog(int priority, const char *fmt, va_list ap)
                       mon[tmv.tm_mon], tmv.tm_mday,
                       tmv.tm_hour, tmv.tm_min, tmv.tm_sec);
     }
+    SYSLOG_CLAMP();
 
     if (g_ident && *g_ident) {
         if (g_option & LOG_PID)
@@ -160,9 +169,11 @@ void vsyslog(int priority, const char *fmt, va_list ap)
                           g_ident, (int)getpid());
         else
             n += snprintf(buf + n, sizeof(buf) - n, "%s: ", g_ident);
+        SYSLOG_CLAMP();
     }
     n += vsnprintf(buf + n, sizeof(buf) - n, fmt, ap);
-    if (n >= (int)sizeof(buf)) n = sizeof(buf) - 1;
+    SYSLOG_CLAMP();
+#undef SYSLOG_CLAMP
     /* Trailing newline doubles as our stream-mode record delimiter
      * (substrate AF_UNIX is SOCK_STREAM only).  Daemon trims it.  */
     if (n + 1 < (int)sizeof(buf)) buf[n++] = '\n';
