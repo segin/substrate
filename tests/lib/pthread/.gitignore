@@ -1,0 +1,4 @@
+torture_kernel
+torture_pthread
+torture_recmutex
+*.o

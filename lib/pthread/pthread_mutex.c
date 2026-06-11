@@ -21,7 +21,10 @@
 #include "pthread.h"
 #include <unistd.h>
 #include <errno.h>
+#include <stdlib.h>
+#include <stdint.h>
 #include <sys/syscall.h>
+#include <sys/thr.h>
 
 #define FUTEX_WAIT 0
 #define FUTEX_WAKE 1
@@ -30,30 +33,93 @@
 #define M_LOCKED    1
 #define M_CONTENDED 2
 
+/*
+ * Recursive (and error-checking) mutexes.
+ *
+ * pthread_mutex_t is a single 32-bit word and glib heap-allocates exactly
+ * sizeof(pthread_mutex_t) for each GRecMutex, so the type cannot grow
+ * without an ABI break.  Instead, a RECURSIVE/ERRORCHECK mutex stores a
+ * TAGGED POINTER to a heap `rec_state` that carries the real futex word,
+ * the owner tid and the recursion count.  A normal mutex only ever holds
+ * 0/1/2, so the low two bits are free as a discriminator: a recursive
+ * mutex word is `(ptr | 3)` (the rec_state is at least 4-byte aligned, so
+ * its low bits are clear), and `(*m & 3) == 3` distinguishes the two.
+ * Without this, GRecMutex (used pervasively by GTK/glib) self-deadlocks
+ * on the first recursive lock — pthread_mutex_lock always realised a
+ * plain non-recursive mutex and parked forever on a re-lock.
+ */
+struct rec_state {
+    int futex;      /* 0/1/2 lock word (the actual futex)        */
+    int owner;      /* owning tid, 0 = unowned                   */
+    int count;      /* recursion depth                           */
+    int type;       /* PTHREAD_MUTEX_RECURSIVE / ERRORCHECK      */
+};
+
+#define MTX_IS_REC(v)  (((uintptr_t)(unsigned)(v) & 3u) == 3u)
+#define MTX_REC(v)     ((struct rec_state *)((uintptr_t)(unsigned)(v) & ~(uintptr_t)3))
+#define MTX_TAG(p)     ((int)((uintptr_t)(p) | 3u))
+
+static int mtx_self(void) { return (int)syscall(SYS_THR_SELF); }
+
+/* Drepper 3-state futex lock/unlock on a bare word. */
+static void mtx_lock_word(int *w) {
+    int c = __sync_val_compare_and_swap(w, M_UNLOCKED, M_LOCKED);
+    if (c == M_UNLOCKED)
+        return;
+    if (c != M_CONTENDED)
+        c = __sync_lock_test_and_set(w, M_CONTENDED);
+    while (c != M_UNLOCKED) {
+        syscall(SYS_FUTEX, (long)w, FUTEX_WAIT, M_CONTENDED, 0, 0, 0);
+        c = __sync_lock_test_and_set(w, M_CONTENDED);
+    }
+}
+static void mtx_unlock_word(int *w) {
+    if (__sync_fetch_and_sub(w, 1) != M_LOCKED) {
+        __sync_lock_release(w);   /* store 0 */
+        syscall(SYS_FUTEX, (long)w, FUTEX_WAKE, 1, 0, 0, 0);
+    }
+}
+
 int pthread_mutex_init(pthread_mutex_t *mutex, const void *attr) {
-    (void)attr;
-    *mutex = M_UNLOCKED;
+    int type = attr ? *(const pthread_mutexattr_t *)attr : PTHREAD_MUTEX_DEFAULT;
+    if (type == PTHREAD_MUTEX_RECURSIVE || type == PTHREAD_MUTEX_ERRORCHECK) {
+        struct rec_state *s = malloc(sizeof *s);
+        if (!s)
+            return ENOMEM;
+        s->futex = M_UNLOCKED;
+        s->owner = 0;
+        s->count = 0;
+        s->type  = type;
+        *mutex = MTX_TAG(s);
+    } else {
+        *mutex = M_UNLOCKED;
+    }
     return 0;
 }
 
 int pthread_mutex_lock(pthread_mutex_t *m) {
-    /* Fast path: uncontended acquire (0 -> 1).
-     * __sync_val_compare_and_swap returns the OLD value. */
-    int c = __sync_val_compare_and_swap(m, M_UNLOCKED, M_LOCKED);
-    if (c == M_UNLOCKED) {
+    int v = *m;
+    if (MTX_IS_REC(v)) {
+        struct rec_state *s = MTX_REC(v);
+        int me = mtx_self();
+        if (s->owner == me) {
+            if (s->type == PTHREAD_MUTEX_ERRORCHECK)
+                return EDEADLK;
+            s->count++;        /* recursive re-acquire — no syscall */
+            return 0;
+        }
+        mtx_lock_word(&s->futex);
+        s->owner = me;
+        s->count = 1;
         return 0;
     }
 
-    /* Slow path: someone else holds it.  Mark CONTENDED so the
-     * holder knows to wake us when they release, then park in the
-     * kernel until they do.  The xchg loop handles the race where
-     * the holder releases between our exchange and the futex_wait —
-     * if c becomes 0, we already own it (with the lock now marked
-     * CONTENDED, which is benign; the next unlock will wake one
-     * waiter that doesn't exist, costing nothing). */
-    if (c != M_CONTENDED) {
+    /* Plain mutex: the word itself is the futex.  Fast path 0 -> 1. */
+    int c = __sync_val_compare_and_swap(m, M_UNLOCKED, M_LOCKED);
+    if (c == M_UNLOCKED)
+        return 0;
+    if (c != M_CONTENDED)
         c = __sync_lock_test_and_set(m, M_CONTENDED);
-    }
     while (c != M_UNLOCKED) {
         syscall(SYS_FUTEX, (long)m, FUTEX_WAIT, M_CONTENDED, 0, 0, 0);
         c = __sync_lock_test_and_set(m, M_CONTENDED);
@@ -62,6 +128,17 @@ int pthread_mutex_lock(pthread_mutex_t *m) {
 }
 
 int pthread_mutex_unlock(pthread_mutex_t *m) {
+    int v = *m;
+    if (MTX_IS_REC(v)) {
+        struct rec_state *s = MTX_REC(v);
+        if (s->owner != mtx_self())
+            return EPERM;
+        if (--s->count == 0) {
+            s->owner = 0;
+            mtx_unlock_word(&s->futex);
+        }
+        return 0;
+    }
     /* If old was LOCKED (1) uncontended → new is 0, no waiters.
      * If old was CONTENDED (2) → new is 1, store 0 and wake one. */
     if (__sync_fetch_and_sub(m, 1) != M_LOCKED) {
@@ -71,12 +148,33 @@ int pthread_mutex_unlock(pthread_mutex_t *m) {
     return 0;
 }
 
-int pthread_mutex_destroy(pthread_mutex_t *mutex) {
-    (void)mutex;
+int pthread_mutex_destroy(pthread_mutex_t *m) {
+    int v = *m;
+    if (MTX_IS_REC(v)) {
+        free(MTX_REC(v));
+        *m = M_UNLOCKED;
+    }
     return 0;
 }
 
 int pthread_mutex_trylock(pthread_mutex_t *m) {
+    int v = *m;
+    if (MTX_IS_REC(v)) {
+        struct rec_state *s = MTX_REC(v);
+        int me = mtx_self();
+        if (s->owner == me) {
+            if (s->type == PTHREAD_MUTEX_ERRORCHECK)
+                return EDEADLK;
+            s->count++;
+            return 0;
+        }
+        if (__sync_val_compare_and_swap(&s->futex, M_UNLOCKED, M_LOCKED) == M_UNLOCKED) {
+            s->owner = me;
+            s->count = 1;
+            return 0;
+        }
+        return EBUSY;
+    }
     /* Non-blocking acquire: take the uncontended 0 -> 1 transition,
      * or fail with EBUSY.  Never sets the CONTENDED state, so a
      * concurrent blocking lock()'s wakeup bookkeeping is unaffected. */

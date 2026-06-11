@@ -41,7 +41,7 @@ else
 endif
 
 TESTS_PORTABLE = torture_kernel
-TESTS_SUBSTRATE = torture_pthread
+TESTS_SUBSTRATE = torture_pthread torture_recmutex
 
 # Default: just the portable suite.  Substrate-specific tests are
 # only built when CROSS is set.
@@ -59,6 +59,9 @@ torture_kernel: torture_kernel.c
 
 # Substrate-target only.
 torture_pthread: torture_pthread.c
+	$(CC) $(CFLAGS) $(PTHREAD_INC) $< $(PTHREAD) -o $@
+
+torture_recmutex: torture_recmutex.c
 	$(CC) $(CFLAGS) $(PTHREAD_INC) $< $(PTHREAD) -o $@
 
 clean:
