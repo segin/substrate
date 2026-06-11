@@ -172,9 +172,83 @@ float complex cpowf(float complex a, float complex b) {
     return (float complex)cpow((double complex)a, (double complex)b);
 }
 
-long double complex cexpl(long double complex z)  { return (long double complex) cexp((double complex)z); }
-long double complex clogl(long double complex z)  { return (long double complex) clog((double complex)z); }
-long double complex csqrtl(long double complex z) { return (long double complex)csqrt((double complex)z); }
+/* ============================================================
+ * long double variants — computed natively in 80-bit precision
+ * via the long-double scalar primitives (expl/logl/sinl/cosl/
+ * hypotl/atan2l/sqrtl/log1pl/copysignl).  Same special-value and
+ * branch-cut behavior as the double versions above.
+ * ============================================================ */
+
+long double complex cexpl(long double complex z) {
+    long double x = __real__ z, y = __imag__ z;
+
+    if (isnanl(x) || isnanl(y)) {
+        if (isnanl(x) && y == 0.0L) return CMPLXL(NAN, y);
+        return CMPLXL(NAN, NAN);
+    }
+    if (isinfl(x)) {
+        if (x > 0.0L) {
+            if (y == 0.0L) return CMPLXL(INFINITY, y);
+            if (isinfl(y)) return CMPLXL(INFINITY, NAN);
+            return CMPLXL(INFINITY * cosl(y), INFINITY * sinl(y));
+        } else {
+            if (isinfl(y)) return CMPLXL(0.0L, 0.0L);
+            return CMPLXL(0.0L * cosl(y), 0.0L * sinl(y));
+        }
+    }
+    long double r = expl(x);
+    return CMPLXL(r * cosl(y), r * sinl(y));
+}
+
+long double complex clogl(long double complex z) {
+    long double x = __real__ z, y = __imag__ z;
+
+    if (x == 0.0L && y == 0.0L) {
+        return CMPLXL(-INFINITY, atan2l(y, x));
+    }
+    long double re;
+    long double r2 = x * x + y * y;
+    if (r2 > 0.5L && r2 < 3.0L) {
+        re = 0.5L * log1pl(r2 - 1.0L);
+    } else {
+        re = logl(hypotl(x, y));
+    }
+    return CMPLXL(re, atan2l(y, x));
+}
+
+long double complex csqrtl(long double complex z) {
+    long double x = __real__ z, y = __imag__ z;
+
+    if (x == 0.0L && y == 0.0L) return CMPLXL(0.0L, y);
+
+    if (isinfl(x)) {
+        if (x > 0.0L) {
+            if (isnanl(y)) return CMPLXL(INFINITY, NAN);
+            return CMPLXL(INFINITY, isinfl(y) ? y : copysignl(0.0L, y));
+        }
+        if (isnanl(y)) return CMPLXL(NAN, INFINITY);
+        return CMPLXL(isinfl(y) ? INFINITY : 0.0L, copysignl(INFINITY, y));
+    }
+    if (isinfl(y)) return CMPLXL(INFINITY, y);
+    if (isnanl(x) || isnanl(y)) return CMPLXL(NAN, NAN);
+
+    long double R = hypotl(x, y);
+    if (x >= 0.0L) {
+        long double u = sqrtl(0.5L * (R + x));
+        long double v = (u == 0.0L) ? 0.0L : 0.5L * y / u;
+        return CMPLXL(u, v);
+    } else {
+        long double v_mag = sqrtl(0.5L * (R - x));
+        long double u = (v_mag == 0.0L) ? 0.0L : 0.5L * fabsl(y) / v_mag;
+        long double v = signbit(y) ? -v_mag : v_mag;
+        return CMPLXL(u, v);
+    }
+}
+
 long double complex cpowl(long double complex a, long double complex b) {
-    return (long double complex)cpow((double complex)a, (double complex)b);
+    if (__real__ a == 0.0L && __imag__ a == 0.0L &&
+        __real__ b == 0.0L && __imag__ b == 0.0L) {
+        return CMPLXL(1.0L, 0.0L);
+    }
+    return cexpl(b * clogl(a));
 }

@@ -71,9 +71,25 @@ float complex csinhf(float complex z) { return (float complex)csinh((double comp
 float complex ccoshf(float complex z) { return (float complex)ccosh((double complex)z); }
 float complex ctanhf(float complex z) { return (float complex)ctanh((double complex)z); }
 
-long double complex csinhl(long double complex z) { return (long double complex)csinh((double complex)z); }
-long double complex ccoshl(long double complex z) { return (long double complex)ccosh((double complex)z); }
-long double complex ctanhl(long double complex z) { return (long double complex)ctanh((double complex)z); }
+long double complex csinhl(long double complex z) {
+    long double x = __real__ z, y = __imag__ z;
+    return CMPLXL(sinhl(x) * cosl(y), coshl(x) * sinl(y));
+}
+
+long double complex ccoshl(long double complex z) {
+    long double x = __real__ z, y = __imag__ z;
+    return CMPLXL(coshl(x) * cosl(y), sinhl(x) * sinl(y));
+}
+
+long double complex ctanhl(long double complex z) {
+    long double x = __real__ z, y = __imag__ z;
+    if (x >  22.0L) return CMPLXL( 1.0L, 0.0L);
+    if (x < -22.0L) return CMPLXL(-1.0L, 0.0L);
+    long double two_x = 2.0L * x, two_y = 2.0L * y;
+    long double denom = coshl(two_x) + cosl(two_y);
+    if (denom == 0.0L) return CMPLXL(INFINITY, INFINITY);
+    return CMPLXL(sinhl(two_x) / denom, sinl(two_y) / denom);
+}
 
 /* ============================================================
  * casinh / cacosh / catanh
@@ -116,9 +132,28 @@ float complex casinhf(float complex z) { return (float complex)casinh((double co
 float complex cacoshf(float complex z) { return (float complex)cacosh((double complex)z); }
 float complex catanhf(float complex z) { return (float complex)catanh((double complex)z); }
 
-long double complex casinhl(long double complex z) { return (long double complex)casinh((double complex)z); }
-long double complex cacoshl(long double complex z) { return (long double complex)cacosh((double complex)z); }
-long double complex catanhl(long double complex z) { return (long double complex)catanh((double complex)z); }
+long double complex casinhl(long double complex z) {
+    /* casinh(z) = -i * casin(i*z).  i*z = -y + ix. */
+    long double complex iz = CMPLXL(-(__imag__ z), __real__ z);
+    long double complex w  = casinl(iz);
+    return CMPLXL(__imag__ w, -(__real__ w));
+}
+
+long double complex cacoshl(long double complex z) {
+    /* cacosh(z) = ±i * cacos(z), sign so Re(result) >= 0. */
+    long double complex w = cacosl(z);
+    if (__imag__ w > 0.0L) {
+        return CMPLXL(__imag__ w, -(__real__ w));   /* -i*w */
+    }
+    return CMPLXL(-(__imag__ w), __real__ w);       /* +i*w */
+}
+
+long double complex catanhl(long double complex z) {
+    /* catanh(z) = -i * catan(i*z). */
+    long double complex iz = CMPLXL(-(__imag__ z), __real__ z);
+    long double complex w  = catanl(iz);
+    return CMPLXL(__imag__ w, -(__real__ w));
+}
 
 /* ============================================================
  * cproj — projection onto the Riemann sphere.

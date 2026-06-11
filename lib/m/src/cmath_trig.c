@@ -44,6 +44,9 @@
 #ifndef M_PI_2
 #define M_PI_2   1.57079632679489661923
 #endif
+#ifndef LDBL_PI_2
+#define LDBL_PI_2 1.570796326794896619231321691639751442L
+#endif
 
 /* ============================================================
  * Projection / magnitude
@@ -58,11 +61,11 @@ long double cimagl(long double complex z) { return __imag__ z; }
 
 double      cabs (double      complex z) { return hypot(__real__ z, __imag__ z); }
 float       cabsf(float       complex z) { return (float)hypot(__real__ z, __imag__ z); }
-long double cabsl(long double complex z) { return (long double)hypot((double)(__real__ z), (double)(__imag__ z)); }
+long double cabsl(long double complex z) { return hypotl(__real__ z, __imag__ z); }
 
 double      carg (double      complex z) { return atan2(__imag__ z, __real__ z); }
 float       cargf(float       complex z) { return (float)atan2(__imag__ z, __real__ z); }
-long double cargl(long double complex z) { return (long double)atan2((double)(__imag__ z), (double)(__real__ z)); }
+long double cargl(long double complex z) { return atan2l(__imag__ z, __real__ z); }
 
 double      complex conj (double      complex z) { return CMPLX(__real__ z, -__imag__ z); }
 float       complex conjf(float       complex z) { return CMPLXF(__real__ z, -__imag__ z); }
@@ -112,13 +115,21 @@ float complex ctanf(float complex z) {
 }
 
 long double complex ccosl(long double complex z) {
-    return (long double complex)ccos((double complex)z);
+    long double x = __real__ z, y = __imag__ z;
+    return CMPLXL(cosl(x) * coshl(y), -sinl(x) * sinhl(y));
 }
 long double complex csinl(long double complex z) {
-    return (long double complex)csin((double complex)z);
+    long double x = __real__ z, y = __imag__ z;
+    return CMPLXL(sinl(x) * coshl(y), cosl(x) * sinhl(y));
 }
 long double complex ctanl(long double complex z) {
-    return (long double complex)ctan((double complex)z);
+    long double x = __real__ z, y = __imag__ z;
+    if (y >  22.0L) return CMPLXL(0.0L,  1.0L);
+    if (y < -22.0L) return CMPLXL(0.0L, -1.0L);
+    long double two_x = 2.0L * x, two_y = 2.0L * y;
+    long double denom = cosl(two_x) + coshl(two_y);
+    if (denom == 0.0L) return CMPLXL(INFINITY, INFINITY);
+    return CMPLXL(sinl(two_x) / denom, sinhl(two_y) / denom);
 }
 
 /* ============================================================
@@ -208,12 +219,57 @@ float complex catanf(float complex z) {
     return (float complex)catan((double complex)z);
 }
 
+/* long-double Hull-Fairgrieve-Tang, computed natively in 80-bit. */
+static long double clamp_unitl(long double v) {
+    if (v >  1.0L) return  1.0L;
+    if (v < -1.0L) return -1.0L;
+    return v;
+}
+
+static long double acosh_helperl(long double alpha) {
+    if (alpha < 1.0L) alpha = 1.0L;
+    if (alpha < 1.5L) {
+        long double am1 = alpha - 1.0L;
+        return log1pl(am1 + sqrtl(am1 * (alpha + 1.0L)));
+    }
+    return logl(alpha + sqrtl(alpha * alpha - 1.0L));
+}
+
 long double complex casinl(long double complex z) {
-    return (long double complex)casin((double complex)z);
+    long double x = __real__ z, y = __imag__ z;
+    long double ax = fabsl(x), ay = fabsl(y);
+
+    long double r = hypotl(ax + 1.0L, ay);
+    long double s = hypotl(ax - 1.0L, ay);
+    long double alpha = 0.5L * (r + s);
+    long double beta  = 0.5L * (r - s);
+
+    long double re = asinl(clamp_unitl(beta));
+    long double im = acosh_helperl(alpha);
+
+    if (x < 0) re = -re;
+    if (y < 0) im = -im;
+    return CMPLXL(re, im);
 }
+
 long double complex cacosl(long double complex z) {
-    return (long double complex)cacos((double complex)z);
+    /* cacos(z) = pi/2 - casin(z). */
+    long double complex s = casinl(z);
+    return CMPLXL(LDBL_PI_2 - __real__ s, -__imag__ s);
 }
+
 long double complex catanl(long double complex z) {
-    return (long double complex)catan((double complex)z);
+    long double x = __real__ z, y = __imag__ z;
+
+    if (x == 0.0L && (y == 1.0L || y == -1.0L)) {
+        return CMPLXL(0.0L, y * INFINITY);
+    }
+    long double re = 0.5L * atan2l(2.0L * x, 1.0L - x * x - y * y);
+
+    long double num = x * x + (y + 1.0L) * (y + 1.0L);
+    long double den = x * x + (y - 1.0L) * (y - 1.0L);
+    long double im;
+    if (den == 0.0L) im = INFINITY;
+    else im = 0.25L * log1pl((num - den) / den);
+    return CMPLXL(re, im);
 }
