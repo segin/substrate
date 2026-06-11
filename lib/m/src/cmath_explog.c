@@ -136,7 +136,11 @@ double complex csqrt(double complex z) {
     } else {
         double v_mag = sqrt(0.5 * (R - x));
         double u = (v_mag == 0.0) ? 0.0 : 0.5 * fabs(y) / v_mag;
-        double v = copysign(v_mag, y == 0.0 ? 1.0 : y);
+        /* The imaginary part carries the sign of y, tracked via the
+         * actual sign BIT (signbit) so that y == -0.0 maps to a
+         * negative result: C99 Annex G requires csqrt(-4 - 0i) = 0 - 2i.
+         * Using `y == 0.0 ? 1.0 : y` forced +0's sign for both ±0. */
+        double v = signbit(y) ? -v_mag : v_mag;
         return CMPLX(u, v);
     }
 }

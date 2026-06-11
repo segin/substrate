@@ -341,7 +341,15 @@ double fabs(double x) {
 
 /* Remainder functions */
 double fmod(double x, double y) {
-    if (y == 0.0) return NAN;
+    /* C99/IEEE: NaN propagation, Inf-numerator and zero-denominator are
+     * invalid (return NaN, raise FE_INVALID); Inf denominator with finite
+     * x returns x unchanged. */
+    if (isnan(x) || isnan(y)) return NAN;
+    if (isinf(x) || y == 0.0) {
+        feraiseexcept(FE_INVALID);
+        return NAN;
+    }
+    if (isinf(y)) return x;        /* finite x, infinite y: fmod = x */
     double res;
     __asm__ __volatile__(
         "fldl %2\n\t"
@@ -357,7 +365,15 @@ double fmod(double x, double y) {
 }
 
 double remainder(double x, double y) {
-    if (y == 0.0) return NAN;
+    /* C99/IEEE: NaN propagation, Inf-numerator and zero-denominator are
+     * invalid (return NaN, raise FE_INVALID); Inf denominator with finite
+     * x returns x unchanged. */
+    if (isnan(x) || isnan(y)) return NAN;
+    if (isinf(x) || y == 0.0) {
+        feraiseexcept(FE_INVALID);
+        return NAN;
+    }
+    if (isinf(y)) return x;        /* finite x, infinite y: remainder = x */
     double res;
     __asm__ __volatile__(
         "fldl %2\n\t"
@@ -400,22 +416,60 @@ double fdim(double x, double y) {
  * Returns remainder(x, y) and stores quotient sign + low 3 bits in *quo.
  */
 double remquo(double x, double y, int *quo) {
+	/* Domain / special cases: NaN, Inf numerator, zero or Inf
+	 * denominator yield a NaN remainder with *quo = 0. */
 	if(isnan(x) || isnan(y) || isinf(x) || y == 0.0) {
 		*quo = 0;
 		return NAN;
 	}
+	if(isinf(y)) {               /* finite x, infinite y: rem = x, quo = 0 */
+		*quo = 0;
+		return x;
+	}
 
-	int sign = 1;
-	double ax = x, ay = y;
-	if(ax < 0) { ax = -ax; sign = -sign; }
-	if(ay < 0) { ay = -ay; sign = -sign; }
+	int qsign = (signbit(x) != signbit(y)) ? -1 : 1;
+	double ax = fabs(x), ay = fabs(y);
 
-	/* Use repeated division to get full quotient mod 8 */
-	double q_approx = ax / ay;
-	long long q_int = (long long)rint(q_approx);
-	*quo = (int)((q_int & 0x7) * sign);
+	/* |x| < |y|: quotient is 0 (round-to-nearest may make it 1, but
+	 * the low-bit accounting below handles the final half-way step). */
+	uint32_t q = 0;
 
-	return remainder(x, y);
+	if(ax >= ay) {
+		/* Binary long-division style reduction: subtract scaled copies
+		 * of ay from ax, accumulating the integer quotient bits in q.
+		 * This never forms |x/y| as a single (possibly > 2^63) value,
+		 * so the low quotient bits stay exact regardless of magnitude.
+		 *
+		 * Find the largest n with ay*2^n <= ax (via ilogb difference),
+		 * then peel off one quotient bit per step. */
+		int ex = ilogb(ax);
+		int ey = ilogb(ay);
+		int n = ex - ey;
+		double yscaled = scalbn(ay, n);   /* ay * 2^n, may exceed ax by 1 step */
+		if(yscaled > ax) { yscaled *= 0.5; n--; }
+		for(; n >= 0; n--) {
+			q <<= 1;
+			if(ax >= yscaled) {
+				ax -= yscaled;
+				q |= 1;
+			}
+			yscaled *= 0.5;
+		}
+		/* ax now holds |x| mod |y| in [0, |y|). */
+	}
+
+	/* Round the remainder to nearest (ties to even quotient), matching
+	 * IEEE remainder(): if the residual is past the half-way point, or
+	 * exactly half with an odd quotient, step the quotient up by one. */
+	if(ax > 0.5 * ay || (ax == 0.5 * ay && (q & 1))) {
+		q++;
+		ax -= ay;        /* remainder becomes negative (|ax| < ay still) */
+	}
+
+	double r = (signbit(x) ? -ax : ax);   /* remainder carries sign of x */
+	int lo = (int)(q & 0x7);
+	*quo = qsign < 0 ? -lo : lo;
+	return r;
 }
 
 /*
@@ -624,9 +678,20 @@ double trunc(double x) {
 }
 
 double round(double x) {
-    /* C99: round-half-away-from-zero, regardless of current mode. */
-    if (isnan(x) || isinf(x)) return x;
-    return (x >= 0.0) ? floor(x + 0.5) : ceil(x - 0.5);
+    /* C99: round-half-away-from-zero, regardless of current mode.
+     *
+     * The old `floor(x + 0.5)` is wrong for the predecessor of 0.5:
+     * x = nextafter(0.5, 0) added to 0.5 rounds (to-nearest) up to
+     * exactly 1.0, so floor() returns 1 instead of the correct 0.
+     * Instead truncate toward zero and inspect the exact fractional
+     * part: a magnitude >= 0.5 rounds the integer part away from zero. */
+    if (isnan(x) || isinf(x) || x == 0.0) return x;
+
+    double t = trunc(x);          /* integer part, toward zero */
+    double frac = x - t;          /* exact: |frac| < 1 */
+    if (frac >= 0.5) return t + 1.0;
+    if (frac <= -0.5) return t - 1.0;
+    return t;                     /* preserves sign of zero via trunc */
 }
 
 /*

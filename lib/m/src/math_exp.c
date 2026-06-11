@@ -135,6 +135,10 @@ double expm1(double x) {
 
     if (__builtin_fabs(x) > 0.347) {
         if (x >  709.7827128933840) { errno = ERANGE; return INFINITY; }
+        /* For large-negative x, e^x underflows to +0 and exp() would
+         * spuriously set errno=ERANGE; but expm1(x) -> -1 is exact and
+         * in range.  Short-circuit before calling exp(). */
+        if (x < -37.0) return -1.0;
         return exp(x) - 1.0;
     }
 

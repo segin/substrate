@@ -137,32 +137,25 @@ double tan(double x) {
 }
 
 /*
- * atan(x) - Arctangent using Taylor series
- * atan(x) = x - x^3/3 + x^5/5 - ... for |x| <= 1
+ * atan(x) - Arctangent via the x87 fpatan instruction.
+ *
+ * atan(x) == atan2(x, 1), so `fld1; fldl x; fpatan` computes
+ * atan(st(0)/st(1)) = atan(x/1) to full hardware precision across the
+ * whole domain.  This replaces a 100-term Taylor series that lost
+ * accuracy near |x| = 1 (slow convergence) — and in turn improves
+ * asin/acos and the *pi variants that are built on atan.
  */
 double atan(double x) {
     if (isnan(x)) return x;
     if (isinf(x)) return (x < 0) ? -M_PI_2 : M_PI_2;
-    if (x == 0.0) return x;
+    if (x == 0.0) return x;   /* preserve sign of zero (atan is odd) */
 
-    int neg = (x < 0);
-    if (neg) x = -x;
-
-    if (x == 1.0) return (neg) ? -M_PI_4 : M_PI_4;
-    
-    int inv = (x > 1.0);
-    if (inv) x = 1.0 / x;
-    
-    /* Taylor series for |x| <= 1 */
-    double x2 = x * x;
-    double term = x, sum = x;
-    for (int i = 1; i < 100 && fabs(term) > 1e-15; i++) {
-        term *= -x2;
-        sum += term / (2 * i + 1);
-    }
-    
-    if (inv) sum = M_PI_2 - sum;
-    return neg ? -sum : sum;
+    /* fpatan computes atan(st(1)/st(0)).  Load x then 1.0 so that
+     * st(1)=x, st(0)=1 and the result is atan(x/1) = atan(x). */
+    double res;
+    __asm__ __volatile__("fldl %1; fld1; fpatan; fstpl %0"
+                         : "=m"(res) : "m"(x));
+    return res;
 }
 
 /* atan2(y, x) - Two-argument arctangent (C99 Annex F.10.1.4) */
@@ -205,8 +198,11 @@ double atan2(double y, double x) {
  */
 double asin(double x) {
     if (isnan(x)) return x;
-    if (isinf(x)) return NAN;
-    if (x < -1.0 || x > 1.0) return NAN;
+    if (isinf(x) || x < -1.0 || x > 1.0) {   /* domain error */
+        feraiseexcept(FE_INVALID);
+        errno = EDOM;
+        return NAN;
+    }
     if (x == 0.0) return x;
     if (x == 1.0) return M_PI_2;
     if (x == -1.0) return -M_PI_2;
@@ -215,7 +211,12 @@ double asin(double x) {
 
 /* acos(x) = pi/2 - asin(x) */
 double acos(double x) {
-    if (x < -1.0 || x > 1.0) return NAN;
+    if (isnan(x)) return x;
+    if (isinf(x) || x < -1.0 || x > 1.0) {   /* domain error */
+        feraiseexcept(FE_INVALID);
+        errno = EDOM;
+        return NAN;
+    }
     return M_PI_2 - asin(x);
 }
 
@@ -350,8 +351,11 @@ double tanpi(double x) {
 
 double asinpi(double x) {
     if (isnan(x)) return x;
-    if (isinf(x)) return NAN;
-    if (x < -1.0 || x > 1.0) return NAN;
+    if (isinf(x) || x < -1.0 || x > 1.0) {   /* domain error */
+        feraiseexcept(FE_INVALID);
+        errno = EDOM;
+        return NAN;
+    }
     if (x == 0.0) return x;
     if (x == 1.0) return 0.5;
     if (x == -1.0) return -0.5;
@@ -360,8 +364,11 @@ double asinpi(double x) {
 
 double acospi(double x) {
     if (isnan(x)) return x;
-    if (isinf(x)) return NAN;
-    if (x < -1.0 || x > 1.0) return NAN;
+    if (isinf(x) || x < -1.0 || x > 1.0) {   /* domain error */
+        feraiseexcept(FE_INVALID);
+        errno = EDOM;
+        return NAN;
+    }
     if (x == 1.0) return 0.0;
     if (x == 0.0) return 0.5;
     if (x == -1.0) return 1.0;
