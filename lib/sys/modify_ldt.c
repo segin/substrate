@@ -1,7 +1,10 @@
 #include <sys/ldt.h>
 #include <sys/syscall.h>
 #include <unistd.h>
+#include <errno.h>
+
+#include "sysret.h"
 
 int modify_ldt(int func, void *ptr, unsigned long bytecount) {
-    return (int)syscall(SYS_MODIFY_LDT, func, ptr, bytecount);
+    return (int)__sysret(syscall(SYS_MODIFY_LDT, func, ptr, bytecount));
 }

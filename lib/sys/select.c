@@ -81,9 +81,13 @@ int sys_select(int nfds, fd_set * __restrict readfds, fd_set * __restrict writef
         if (writefds) FD_ZERO(writefds);
         if (exceptfds) FD_ZERO(exceptfds);
     } else {
-        /* Error from poll */
-        return ret;
+        /* Error from poll: the raw syscall returns a negative errno,
+         * translate to the POSIX -1 + errno contract. */
+        if (ret < 0 && ret >= -4095) {
+            errno = -ret;
+        }
+        return -1;
     }
-    
+
     return ret;
 }

@@ -7,6 +7,9 @@
 #include <sys/syscall.h>
 #include <unistd.h>
 #include <sys/types.h>
+#include <errno.h>
+
+#include "sysret.h"
 
 long syscall(long number, ...);
 
@@ -27,9 +30,9 @@ gid_t sys_getegid(void) {
 }
 
 int sys_setuid(uid_t uid) {
-    return (int)syscall(SYS_SETUID, (long)uid);
+    return (int)__sysret(syscall(SYS_SETUID, (long)uid));
 }
 
 int sys_setgid(gid_t gid) {
-    return (int)syscall(SYS_SETGID, (long)gid);
+    return (int)__sysret(syscall(SYS_SETGID, (long)gid));
 }

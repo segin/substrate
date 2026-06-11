@@ -8,12 +8,14 @@
 #include <unistd.h>
 #include <errno.h>
 
+#include "sysret.h"
+
 long syscall(long number, ...);
 
 int mlock(const void *addr, size_t len) {
-    return syscall(SYS_mlock, addr, len);
+    return (int)__sysret(syscall(SYS_mlock, addr, len));
 }
 
 int munlock(const void *addr, size_t len) {
-    return syscall(SYS_munlock, addr, len);
+    return (int)__sysret(syscall(SYS_munlock, addr, len));
 }

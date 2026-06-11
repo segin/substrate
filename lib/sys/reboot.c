@@ -6,9 +6,12 @@
 
 #include <sys/syscall.h>
 #include <unistd.h>
+#include <errno.h>
+
+#include "sysret.h"
 
 long syscall(long number, ...);
 
 int reboot(int cmd) {
-    return (int)syscall(SYS_REBOOT, cmd);
+    return (int)__sysret(syscall(SYS_REBOOT, cmd));
 }

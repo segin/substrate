@@ -47,11 +47,13 @@
 #include <errno.h>
 #include <time.h>
 
+#include "sysret.h"
+
 /* ===========================================================
  * sysinfo(2): legacy Linux-style aggregate.
  * =========================================================== */
 int sysinfo(struct sysinfo *info) {
-    return syscall(SYS_SYSINFO, info);
+    return (int)__sysret(syscall(SYS_SYSINFO, info));
 }
 
 /* ===========================================================
@@ -101,7 +103,7 @@ int sys_vm_stats(sys_vmstat_t *stats) {
     char buf[2048];
     if (read_proc_file("/proc/meminfo", buf, sizeof(buf)) < 0) {
         /* Fall back to the kernel syscall, if registered. */
-        return syscall(SYS_VM_STATS, stats);
+        return (int)__sysret(syscall(SYS_VM_STATS, stats));
     }
     stats->total       = parse_kv_kib(buf, "MemTotal")     * 1024ULL;
     stats->free        = parse_kv_kib(buf, "MemFree")      * 1024ULL;
@@ -118,7 +120,7 @@ int sys_vm_stats(sys_vmstat_t *stats) {
 int sys_vm_info(sys_vminfo_t *info) {
     if (!info) { errno = EINVAL; return -1; }
     memset(info, 0, sizeof(*info));
-    return syscall(SYS_VM_INFO, info);
+    return (int)__sysret(syscall(SYS_VM_INFO, info));
 }
 
 int sys_vm_swap(sys_swapinfo_t *swap, size_t *count) {
@@ -132,14 +134,14 @@ int sys_vm_swap(sys_swapinfo_t *swap, size_t *count) {
 int sys_vm_buffers(sys_bufinfo_t *buf) {
     if (!buf) { errno = EINVAL; return -1; }
     memset(buf, 0, sizeof(*buf));
-    return syscall(SYS_VM_BUFFERS, buf);
+    return (int)__sysret(syscall(SYS_VM_BUFFERS, buf));
 }
 
 int sys_vm_slabs(sys_slabinfo_t *slabs, size_t *count) {
     if (!count) { errno = EINVAL; return -1; }
     /* `*count` is the array capacity on entry, the filled count on
      * return — the kernel reads it, then overwrites it. */
-    return syscall(SYS_VM_SLABS, slabs, count);
+    return (int)__sysret(syscall(SYS_VM_SLABS, slabs, count));
 }
 
 /* ===========================================================

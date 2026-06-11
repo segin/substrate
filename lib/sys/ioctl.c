@@ -8,6 +8,9 @@
 #include <sys/ioctl.h>
 #include <unistd.h>
 #include <stdarg.h>
+#include <errno.h>
+
+#include "sysret.h"
 
 long syscall(long number, ...);
 
@@ -19,5 +22,5 @@ int sys_ioctl(int fd, unsigned long request, ...) {
     arg = va_arg(ap, void *);
     va_end(ap);
 
-    return (int)syscall(SYS_IOCTL, (long)fd, (long)request, (long)arg);
+    return (int)__sysret(syscall(SYS_IOCTL, (long)fd, (long)request, (long)arg));
 }
