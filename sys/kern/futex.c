@@ -442,6 +442,32 @@ int sys_futex(int *uaddr, int op, int val, void *timeout, int *uaddr2, int val3)
             else
                 sleepq_add(key, current_thread);
 
+            /*
+             * Re-validate *uaddr now that we are on the sleep queue.  This
+             * closes the lost-wakeup race: a waker on another CPU changes
+             * *uaddr and then issues FUTEX_WAKE, which takes the same
+             * sleepq bucket lock as sleepq_add() above.  Our first read
+             * (way above) happened BEFORE we enqueued, so a wake landing in
+             * that window would have found no waiter and been lost.  By
+             * reading a second time only after sleepq_add(), we guarantee a
+             * total order: either we observe the new value here and bail
+             * with EAGAIN (we never sleep, so nothing is lost), or the
+             * value is still 'val' -- in which case the waker's change (and
+             * its wake) necessarily come after our enqueue and will find
+             * us.  The read is done unlocked so a fault just unwinds.
+             */
+            {
+                int recheck;
+                int rr = futex_read_user(uaddr, &recheck);
+                if (rr != 0 || recheck != val) {
+                    sleepq_remove_thread(current_thread);
+                    current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
+                    if (timeout)
+                        current_thread->sleep_expiry = 0;
+                    return (rr != 0) ? -EFAULT : -EAGAIN;
+                }
+            }
+
             sched_yield();
 
             current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
