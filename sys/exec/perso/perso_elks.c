@@ -1136,6 +1136,19 @@ static int elks_sys_read(uint32_t fd, uint32_t buf_off, uint32_t count,
         }
         avail = kmem_size - (size_t)current_process->fds[fd]->f_offset;
         to_copy = (size_t)count < avail ? (size_t)count : avail;
+        /* elks_ds_pointer() validated only the START offset; the copy writes
+         * to_copy bytes into the user's DS segment, so confirm the LAST byte
+         * is in-segment too (and that buf_off+to_copy doesn't wrap the 16-bit
+         * ELKS offset space).  Otherwise a large count overruns the segment
+         * into adjacent memory — an OOB write via /dev/kmem. */
+        if (to_copy > 0) {
+            uintptr_t end_linear;
+            if ((uint64_t)buf_off + to_copy > 0x10000ULL ||
+                elks_ds_pointer(buf_off + (uint32_t)to_copy - 1U, &end_linear) != 0) {
+                kfree(kmem, ELKS_KMEM_IMAGE_CAP);
+                return -EFAULT;
+            }
+        }
         memcpy((void *)(uintptr_t)linear, kmem + current_process->fds[fd]->f_offset, to_copy);
         current_process->fds[fd]->f_offset += (off_t)to_copy;
         kfree(kmem, ELKS_KMEM_IMAGE_CAP);

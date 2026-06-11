@@ -128,6 +128,15 @@ static void vnet_rx_drain(void) {
         struct vring_used_elem *u = &q->used->ring[slot];
         uint32_t desc_id = u->id;
         uint32_t total   = u->len;
+        /* desc_id comes straight from the device-owned used ring; a
+         * malicious or buggy device can put any 16-bit value here.  We only
+         * ever posted ids 0..n_bufs-1, so anything else would index
+         * q->bufs[]/q->desc[] out of bounds (kernel OOB read/write).  Drop
+         * the malformed completion instead. */
+        if (desc_id >= q->n_bufs) {
+            q->last_used_idx++;
+            continue;
+        }
         if (total > VIRTIO_NET_HDR_LEN) {
             uint8_t *buf = (uint8_t *)q->bufs[desc_id];
             /* Skip the virtio_net_hdr prefix.  Substrate's AF_PACKET

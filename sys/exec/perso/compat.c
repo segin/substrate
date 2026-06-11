@@ -8,6 +8,7 @@
 #include <sys/file.h>
 #include <sys/kern_syscalls.h>
 #include <sys/copy.h>
+#include <vm/vm_kmem.h>
 #include <sys/fcntl.h>
 #include <exec/perso/compat.h>
 #include <exec/perso/freebsd/freebsd_user.h>
@@ -380,35 +381,55 @@ int sys_cap_getmode(unsigned int *modep) {
     return copyout(&zero, modep, sizeof(zero));
 }
 
+/* IOV_MAX-sized iovec array on the KERNEL stack (the old VLA: up to
+ * 1024 * 8 = 8 KiB) overflowed the 16 KiB per-process kernel stack on a
+ * deep syscall path.  Use a small on-stack buffer for the common case and
+ * fall back to the heap for large counts. */
+#define IOV_STACK 8
+
 ssize_t sys_readv(int fd, const void *iov_user, int iovcnt) {
     if (iovcnt < 0 || iovcnt > 1024) return -EINVAL;
-    struct freebsd_iovec kiov[iovcnt];
-    if (copyin(iov_user, kiov, (size_t)iovcnt * sizeof(struct freebsd_iovec)) != 0)
+    if (iovcnt == 0) return 0;
+    struct freebsd_iovec stackbuf[IOV_STACK];
+    size_t sz = (size_t)iovcnt * sizeof(struct freebsd_iovec);
+    struct freebsd_iovec *kiov = (iovcnt <= IOV_STACK) ? stackbuf : kmalloc(sz);
+    if (!kiov) return -ENOMEM;
+    if (copyin(iov_user, kiov, sz) != 0) {
+        if (kiov != stackbuf) kfree(kiov, sz);
         return -EFAULT;
+    }
     ssize_t total = 0;
     for (int i = 0; i < iovcnt; i++) {
         if (kiov[i].iov_len == 0) continue;
         ssize_t r = sys_read(fd, kiov[i].iov_base, kiov[i].iov_len);
-        if (r < 0) return total > 0 ? total : r;
+        if (r < 0) { total = total > 0 ? total : r; break; }
         total += r;
         if ((size_t)r < kiov[i].iov_len) break;
     }
+    if (kiov != stackbuf) kfree(kiov, sz);
     return total;
 }
 
 ssize_t sys_writev(int fd, const void *iov_user, int iovcnt) {
     if (iovcnt < 0 || iovcnt > 1024) return -EINVAL;
-    struct freebsd_iovec kiov[iovcnt];
-    if (copyin(iov_user, kiov, (size_t)iovcnt * sizeof(struct freebsd_iovec)) != 0)
+    if (iovcnt == 0) return 0;
+    struct freebsd_iovec stackbuf[IOV_STACK];
+    size_t sz = (size_t)iovcnt * sizeof(struct freebsd_iovec);
+    struct freebsd_iovec *kiov = (iovcnt <= IOV_STACK) ? stackbuf : kmalloc(sz);
+    if (!kiov) return -ENOMEM;
+    if (copyin(iov_user, kiov, sz) != 0) {
+        if (kiov != stackbuf) kfree(kiov, sz);
         return -EFAULT;
+    }
     ssize_t total = 0;
     for (int i = 0; i < iovcnt; i++) {
         if (kiov[i].iov_len == 0) continue;
         ssize_t r = sys_write(fd, kiov[i].iov_base, kiov[i].iov_len);
-        if (r < 0) return total > 0 ? total : r;
+        if (r < 0) { total = total > 0 ? total : r; break; }
         total += r;
         if ((size_t)r < kiov[i].iov_len) break;
     }
+    if (kiov != stackbuf) kfree(kiov, sz);
     return total;
 }
 

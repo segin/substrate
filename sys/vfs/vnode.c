@@ -22,6 +22,7 @@
 
 #include <vfs/vnode.h>
 #include <vfs/buf.h>
+#include <sys/namei.h>
 #include <kern/console.h>
 #include <kern/panic.h>
 #include <kern/sched.h>
@@ -577,6 +578,14 @@ int vflush(struct mount *mp, struct vnode *skipvp, int flags)
  */
 void vnode_reclaim(struct vnode *vp)
 {
+    /* Drop every namecache entry that references this vnode (as either the
+     * directory or the target) BEFORE the vnode memory is freed below.  The
+     * namecache stores raw vnode pointers without a reference, so a stale
+     * entry left here would make the next cache_lookup() vref() freed
+     * memory -- a use-after-free reachable by ordinary file-access churn.
+     * cache_purge() is otherwise only called from the remove/rename paths. */
+    cache_purge(vp);
+
     /* Clean up any remaining state */
     vclean(vp, 0);
     
