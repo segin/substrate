@@ -28,6 +28,7 @@
 #include <kern/file.h>
 #include <kern/console.h>
 #include <vm/vm_kmem.h>
+#include <sys/copy.h>
 #include <string.h>
 #include <stddef.h>
 #include <errno.h>
@@ -161,21 +162,27 @@ static int afinet_ioctl(fs_node_t *node, uint32_t request, void *arg) {
     (void)node;
     if (!arg) return -EFAULT;
 
-    /* SIOCGIFCONF takes struct ifconf; everything else takes struct ifreq. */
+    /* SIOCGIFCONF takes struct ifconf; everything else takes struct ifreq.
+     * Both `arg` and (for SIOCGIFCONF) the ifc_req array it points at are
+     * user-space pointers — copy in/out rather than dereferencing them. */
     if (request == SIOCGIFCONF) {
-        struct ifconf *ifc = (struct ifconf *)arg;
-        int max = ifc->ifc_len / (int)sizeof(struct ifreq);
-        struct ifreq *out = ifc->ifc_req;
+        struct ifconf ifc;
+        if (copyin(arg, &ifc, sizeof(ifc)) != 0) return -EFAULT;
+        int max = ifc.ifc_len / (int)sizeof(struct ifreq);
+        struct ifreq *out = ifc.ifc_req;   /* user pointer */
         int n = 0;
         for (netdev_t *d = netdev_first(); d && n < max; d = netdev_next(d)) {
-            memset(&out[n], 0, sizeof(out[n]));
-            strncpy(out[n].ifr_name, d->name, IFNAMSIZ - 1);
-            struct sin_kern *sin = (struct sin_kern *)&out[n].ifr_addr;
+            struct ifreq e;
+            memset(&e, 0, sizeof(e));
+            strncpy(e.ifr_name, d->name, IFNAMSIZ - 1);
+            struct sin_kern *sin = (struct sin_kern *)&e.ifr_addr;
             sin->sin_family = AF_INET;
             sin->sin_addr   = d->ip4_addr;
+            if (!out || copyout(&e, &out[n], sizeof(e)) != 0) return -EFAULT;
             n++;
         }
-        ifc->ifc_len = n * (int)sizeof(struct ifreq);
+        ifc.ifc_len = n * (int)sizeof(struct ifreq);
+        if (copyout(&ifc, arg, sizeof(ifc)) != 0) return -EFAULT;
         return 0;
     }
 
@@ -183,7 +190,9 @@ static int afinet_ioctl(fs_node_t *node, uint32_t request, void *arg) {
      * by ifindex).  Handle them before the by-name lookup. */
     if (request == SIOCGIFADDR_IN6 || request == SIOCSIFADDR_IN6 ||
         request == SIOCDIFADDR_IN6 || request == SIOCSIFGW_IN6) {
-        struct in6_ifreq *r6 = (struct in6_ifreq *)arg;
+        struct in6_ifreq kr6;
+        if (copyin(arg, &kr6, sizeof(kr6)) != 0) return -EFAULT;
+        struct in6_ifreq *r6 = &kr6;
         netdev_t *d6 = (r6->ifr6_ifindex > 0)
             ? netdev_by_index((uint32_t)r6->ifr6_ifindex)
             : netdev_first();
@@ -192,6 +201,7 @@ static int afinet_ioctl(fs_node_t *node, uint32_t request, void *arg) {
             case SIOCGIFADDR_IN6:
                 memcpy(r6->ifr6_addr.s6_addr, d6->ip6_addr, 16);
                 r6->ifr6_prefixlen = d6->ip6_netmask_bits;
+                if (copyout(r6, arg, sizeof(*r6)) != 0) return -EFAULT;
                 return 0;
             case SIOCSIFADDR_IN6:
                 if (r6->ifr6_prefixlen > 128) return -EINVAL;
@@ -208,20 +218,27 @@ static int afinet_ioctl(fs_node_t *node, uint32_t request, void *arg) {
         }
     }
 
-    struct ifreq *r = (struct ifreq *)arg;
+    struct ifreq kr;
+    if (copyin(arg, &kr, sizeof(kr)) != 0) return -EFAULT;
+    /* Ensure the name field is NUL-terminated before using it. */
+    kr.ifr_name[IFNAMSIZ - 1] = '\0';
+    struct ifreq *r = &kr;
     netdev_t *dev = afinet_find_dev(r->ifr_name);
     if (!dev) return -ENODEV;
 
+    /* "Get" commands fill the kernel copy `kr` and fall through to the
+     * copyout at out_get; "set"/no-op commands mutate the device and
+     * return directly (nothing to hand back). */
     switch (request) {
         case SIOCGIFNAME:
             strncpy(r->ifr_name, dev->name, IFNAMSIZ - 1);
-            return 0;
+            goto out_get;
         case SIOCGIFINDEX:
             r->ifr_ifindex = (int)dev->ifindex;
-            return 0;
+            goto out_get;
         case SIOCGIFFLAGS:
             r->ifr_flags = (short)dev->flags;
-            return 0;
+            goto out_get;
         case SIOCSIFFLAGS: {
             uint32_t keep = dev->flags & ~((uint32_t)0xFFFFu);
             dev->flags = keep | ((uint16_t)r->ifr_flags & 0xFFFFu);
@@ -229,7 +246,7 @@ static int afinet_ioctl(fs_node_t *node, uint32_t request, void *arg) {
         }
         case SIOCGIFMTU:
             r->ifr_mtu = (int)dev->mtu;
-            return 0;
+            goto out_get;
         case SIOCSIFMTU:
             if (r->ifr_mtu < 68 || r->ifr_mtu > 65535) return -EINVAL;
             dev->mtu = (uint32_t)r->ifr_mtu;
@@ -237,7 +254,7 @@ static int afinet_ioctl(fs_node_t *node, uint32_t request, void *arg) {
         case SIOCGIFHWADDR:
             r->ifr_hwaddr.sa_family = 1;   /* ARPHRD_ETHER */
             memcpy(r->ifr_hwaddr.sa_data, dev->hwaddr, 6);
-            return 0;
+            goto out_get;
         case SIOCSIFHWADDR:
             memcpy(dev->hwaddr, r->ifr_hwaddr.sa_data, 6);
             return 0;
@@ -246,7 +263,7 @@ static int afinet_ioctl(fs_node_t *node, uint32_t request, void *arg) {
             sin->sin_family = AF_INET;
             sin->sin_addr   = dev->ip4_addr;
             sin->sin_port   = 0;
-            return 0;
+            goto out_get;
         }
         case SIOCSIFADDR: {
             const struct sin_kern *sin = (const struct sin_kern *)&r->ifr_addr;
@@ -258,7 +275,7 @@ static int afinet_ioctl(fs_node_t *node, uint32_t request, void *arg) {
             struct sin_kern *sin = (struct sin_kern *)&r->ifr_netmask;
             sin->sin_family = AF_INET;
             sin->sin_addr   = dev->ip4_netmask;
-            return 0;
+            goto out_get;
         }
         case SIOCSIFNETMASK: {
             const struct sin_kern *sin = (const struct sin_kern *)&r->ifr_netmask;
@@ -271,7 +288,7 @@ static int afinet_ioctl(fs_node_t *node, uint32_t request, void *arg) {
             sin->sin_family = AF_INET;
             sin->sin_addr   =
                 (dev->ip4_addr & dev->ip4_netmask) | ~dev->ip4_netmask;
-            return 0;
+            goto out_get;
         }
         case SIOCSIFBRDADDR:
             /* No-op: broadcast is derived from addr/netmask. */
@@ -280,7 +297,7 @@ static int afinet_ioctl(fs_node_t *node, uint32_t request, void *arg) {
             struct sin_kern *sin = (struct sin_kern *)&r->ifr_addr;
             sin->sin_family = AF_INET;
             sin->sin_addr   = dev->ip4_gateway;
-            return 0;
+            goto out_get;
         }
         case SIOCSIFGATEWAY: {
             const struct sin_kern *sin = (const struct sin_kern *)&r->ifr_addr;
@@ -291,6 +308,10 @@ static int afinet_ioctl(fs_node_t *node, uint32_t request, void *arg) {
         default:
             return -ENOTTY;
     }
+
+out_get:
+    if (copyout(r, arg, sizeof(*r)) != 0) return -EFAULT;
+    return 0;
 }
 
 /* ------------------------------------------------------------------ */

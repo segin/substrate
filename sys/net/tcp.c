@@ -487,10 +487,38 @@ static void tcp_in_syn_received(tcp_pcb_t *p, uint32_t ack, uint8_t flags) {
     }
 }
 
+/* True if `seq` falls inside the current receive window
+ * [rcv_nxt, rcv_nxt + rcv_wnd).  rcv_wnd is the room we last advertised
+ * (TCP_RING_LEN - rx_count); a zero window still accepts exactly rcv_nxt
+ * so a probe/RST landing on the next expected byte is recognised. */
+static int tcp_seq_in_rcv_window(const tcp_pcb_t *p, uint32_t seq) {
+    uint32_t win = (uint32_t)TCP_RING_LEN - p->rx_count;
+    if ((int32_t)(seq - p->rcv_nxt) < 0) return 0;          /* before window */
+    if (win == 0) return seq == p->rcv_nxt;
+    return (uint32_t)(seq - p->rcv_nxt) < win;              /* within window */
+}
+
 static void tcp_in_established(tcp_pcb_t *p, uint32_t seq, uint32_t ack,
                                uint8_t flags, const uint8_t *payload,
                                size_t dlen) {
     if (flags & TCP_RST) {
+        /*
+         * RFC 5961 §3.2: do not honour a RST solely because the
+         * connection matches the 4-tuple — an off-path attacker who
+         * guesses the tuple could otherwise tear down the connection
+         * (or inject) with a forged RST.  Validate the sequence number:
+         *   - outside the receive window: drop silently.
+         *   - exactly RCV.NXT: in-window and acceptable -> reset.
+         *   - in-window but not RCV.NXT: send a challenge ACK rather
+         *     than resetting; only a RST that then arrives exactly at
+         *     RCV.NXT is acted upon.
+         */
+        if (!tcp_seq_in_rcv_window(p, seq))
+            return;
+        if (seq != p->rcv_nxt) {
+            tcp_send_ctl(p, TCP_ACK);   /* challenge ACK */
+            return;
+        }
         tcp_kill_pcb(p, ECONNRESET);
         return;
     }
@@ -1078,7 +1106,40 @@ int tcp_close(tcp_pcb_t *p) {
         tcp_unlock(f);
         tcp_xmit_queue(p, TCP_FIN | TCP_ACK, NULL, 0);
         break;
-    case TCP_LISTEN:
+    case TCP_LISTEN: {
+        /* Closing a listener: every child PCB it spawned is now an
+         * orphan.  Children sitting fully-established in the accept
+         * queue (handshake completed, never accept()ed) and children
+         * still mid-handshake (SYN_RECEIVED) are owned by this parent
+         * and are NOT otherwise detached — without explicit teardown
+         * they linger forever (established ones never reach CLOSED, so
+         * the timer never reaps them) and their peers believe the
+         * connection is up.  Reset and detach each so the peer is told
+         * the connection is gone and the timer frees the PCB.
+         *
+         * RST is emitted with IRQs enabled (collect under the lock,
+         * send after unlock) since tcp_xmit_raw -> ip4_output may
+         * ARP-wait. */
+        tcp_pcb_t *rst_list[32];
+        int nrst = 0;
+        for (tcp_pcb_t *q = g_tcp_pcbs; q; q = q->next) {
+            if (q->parent != p) continue;
+            q->parent   = NULL;     /* drop the dangling back-pointer */
+            q->detached = 1;        /* timer reaps once CLOSED */
+            int qst = q->state;
+            /* Only an established/half-open child has a peer that needs
+             * telling; a CLOSED/TIME_WAIT one is already torn down. */
+            if (qst != TCP_CLOSED && qst != TCP_TIME_WAIT && nrst < 32)
+                rst_list[nrst++] = q;
+            tcp_kill_pcb(q, ECONNRESET);   /* -> CLOSED, wakes waiters */
+        }
+        p->accept_count = 0;
+        p->state = TCP_CLOSED;
+        tcp_unlock(f);
+        for (int i = 0; i < nrst; i++)
+            tcp_send_ctl(rst_list[i], TCP_RST | TCP_ACK);
+        break;
+    }
     case TCP_SYN_SENT:
     case TCP_SYN_RECEIVED:
         /* No established peer to FIN — drop straight to CLOSED.  The

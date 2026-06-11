@@ -44,16 +44,28 @@ int arp_lookup(netdev_t *dev, uint32_t ip, uint8_t mac[6]) {
     return -1;
 }
 
-void arp_insert(netdev_t *dev, uint32_t ip, const uint8_t mac[6]) {
-    if (!dev || !ip) return;
-    /* Update if already present. */
+/*
+ * Update an existing cache entry's MAC if (and only if) one is already
+ * present for (ip, ifindex).  Returns 1 if an entry was updated, 0 if
+ * none existed.  Never inserts — this is the "merge" half of the RFC 826
+ * algorithm and is safe to run for any received ARP packet.
+ */
+static int arp_update_existing(netdev_t *dev, uint32_t ip,
+                               const uint8_t mac[6]) {
     for (unsigned i = 0; i < ARP_CACHE_SIZE; i++) {
         struct arp_entry *e = &g_arp_cache[i];
         if (e->ip == ip && e->ifindex == dev->ifindex) {
             memcpy(e->mac, mac, 6);
-            return;
+            return 1;
         }
     }
+    return 0;
+}
+
+void arp_insert(netdev_t *dev, uint32_t ip, const uint8_t mac[6]) {
+    if (!dev || !ip) return;
+    /* Update if already present. */
+    if (arp_update_existing(dev, ip, mac)) return;
     struct arp_entry *slot = &g_arp_cache[g_arp_next % ARP_CACHE_SIZE];
     g_arp_next++;
     slot->ip = ip;
@@ -94,12 +106,27 @@ void arp_input(netdev_t *dev, const uint8_t *pkt, size_t len) {
     memcpy(&sender_ip, arp->ar_spa, 4);
     memcpy(&target_ip, arp->ar_tpa, 4);
 
-    /* Snoop the sender — always useful for the next outbound packet. */
-    arp_insert(dev, sender_ip, arp->ar_sha);
+    /*
+     * Anti-poisoning (RFC 826 "merge" rule): do NOT blindly insert the
+     * sender into the cache — an off-path host could otherwise overwrite
+     * any (or fill the whole) cache with a forged unsolicited reply.
+     *
+     *   - Always update an entry we already hold (a host whose MAC we are
+     *     already tracking is allowed to refresh it).
+     *   - Only INSERT a new entry when the packet is addressed to us
+     *     (ar_tpa == our IP).  That covers exactly the two solicited
+     *     cases: a reply to a request we sent (its ar_tpa is our own IP),
+     *     and a request directed at us (we are about to reply and need
+     *     the sender's MAC).  A request/reply for some other host, or a
+     *     broadcast/unsolicited reply, can refresh but never create.
+     */
+    int target_is_me = (target_ip == dev->ip4_addr && dev->ip4_addr);
+    if (!arp_update_existing(dev, sender_ip, arp->ar_sha) && target_is_me)
+        arp_insert(dev, sender_ip, arp->ar_sha);
 
     /* If a request is directed at us, reply. */
     uint16_t op = __builtin_bswap16(arp->ar_op);
-    if (op == ARPOP_REQUEST && target_ip == dev->ip4_addr && dev->ip4_addr) {
+    if (op == ARPOP_REQUEST && target_is_me) {
         struct arphdr reply;
         reply.ar_hrd = arp->ar_hrd;
         reply.ar_pro = arp->ar_pro;

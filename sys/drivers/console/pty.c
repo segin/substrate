@@ -32,6 +32,7 @@
 #include <sys/lock.h>
 #include <sys/signal.h>
 #include <sys/major.h>
+#include <sys/copy.h>
 #include <vfs/vfs.h>
 #include <vm/vm_kmem.h>
 #include <kern/sched.h>
@@ -513,14 +514,21 @@ int pty_master_node_ioctl(fs_node_t *node, uint32_t request, void *arg) {
 
     if (!p || p->magic != PTY_MAGIC) return -EIO;
 
+    /* `arg` is a user-space pointer.  The int-sized commands handled
+     * directly here copy it in/out through copyin/copyout rather than
+     * dereferencing it; the forwarded termios/winsize commands are
+     * validated by tty_ioctl. */
     switch (request) {
-    case TIOCGPTN:
+    case TIOCGPTN: {
         if (!arg) return -EINVAL;
-        *(int *)arg = p->index;
+        int v = p->index;
+        if (copyout(&v, arg, sizeof(v)) != 0) return -EFAULT;
         return 0;
+    }
     case TIOCSPTLCK: {
         if (!arg) return -EINVAL;
-        int lock = *(int *)arg;
+        int lock;
+        if (copyin(arg, &lock, sizeof(lock)) != 0) return -EFAULT;
         spinlock_acquire(&p->lock);
         int was_locked = p->locked;
         p->locked = lock ? 1 : 0;
@@ -531,22 +539,28 @@ int pty_master_node_ioctl(fs_node_t *node, uint32_t request, void *arg) {
         }
         return 0;
     }
-    case TIOCGPKT:
+    case TIOCGPKT: {
         if (!arg) return -EINVAL;
-        *(int *)arg = p->packet_mode;
+        int v = p->packet_mode;
+        if (copyout(&v, arg, sizeof(v)) != 0) return -EFAULT;
         return 0;
-    case TIOCPKT:
+    }
+    case TIOCPKT: {
         if (!arg) return -EINVAL;
+        int on;
+        if (copyin(arg, &on, sizeof(on)) != 0) return -EFAULT;
         spinlock_acquire(&p->lock);
-        p->packet_mode = *(int *)arg ? 1 : 0;
+        p->packet_mode = on ? 1 : 0;
         if (!p->packet_mode) {
             p->packet_status = 0;
         }
         spinlock_release(&p->lock);
         return 0;
+    }
     case TIOCSIG: {
         if (!arg) return -EINVAL;
-        int sig = *(int *)arg;
+        int sig;
+        if (copyin(arg, &sig, sizeof(sig)) != 0) return -EFAULT;
         if (sig <= 0 || sig > 64) return -EINVAL;
         if (p->slave_tty && p->slave_tty->pgrp > 0) {
             (void)signal_send_group(p->slave_tty->pgrp, sig);

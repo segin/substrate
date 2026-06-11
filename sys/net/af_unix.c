@@ -456,6 +456,17 @@ static void afunix_node_close(fs_node_t *node) {
         sleepq_wake_all(peer->tx_chan);
     }
     if (s->pathlen > 0) g_bound_unlink(s);
+    /* Drop any SCM_RIGHTS file references still queued on our rx_fdq:
+     * fds passed to us that were never recvmsg()'d.  Each carries a
+     * file_t reference the sender bumped; if we just freed the socket
+     * (or leaked it) those references would never be released, leaking
+     * the underlying open files forever.  Release them under the lock. */
+    for (int i = 0; i < s->rx_fdq_count; i++) {
+        file_t *qf = s->rx_fdq[i];
+        s->rx_fdq[i] = NULL;
+        if (qf) file_close_ptr(qf);
+    }
+    s->rx_fdq_count = 0;
     /* Wake any pending accept/connect waiters. */
     sleepq_wake_all(s->accept_chan);
     sleepq_wake_all(s->connect_chan);
@@ -1036,21 +1047,46 @@ struct kcmsghdr {
 };
 #define KCMSG_ALIGN(n)  (((n) + sizeof(size_t) - 1) & ~(sizeof(size_t) - 1))
 
+/* Upper bound on a copied-in control buffer: enough for the largest
+ * SCM_RIGHTS record we accept (AFUNIX_FDQ_MAX fds + header), generously
+ * rounded up.  A controllen larger than this is rejected rather than
+ * touched, which is fine — substrate has no other cmsg types. */
+#define AFUNIX_CMSG_MAX  256
+/* Cap on iov entries pulled into the kernel per sendmsg/recvmsg. */
+#define AFUNIX_IOV_MAX   64
+
 /* sendmsg with SCM_RIGHTS support — parse the cmsghdr area for any
  * SCM_RIGHTS records, bump file_t refcount for each fd, queue the
  * file_t on the peer socket's rx_fdq.  Then run the iov loop as a
- * plain send() chain.  msg_control is read directly from the user
- * pointer (substrate's syscall layer treats msghdr fields as already
- * validated; tightening this is a separate audit). */
-ssize_t sys_sendmsg(int fd, const struct msghdr *msg, int flags) {
-    if (!msg) return -EFAULT;
+ * plain send() chain.  The msghdr, its iovec array, and the control
+ * buffer are all pulled into the kernel with copyin() before use —
+ * never dereferenced straight off the user pointer. */
+ssize_t sys_sendmsg(int fd, const struct msghdr *umsg, int flags) {
+    if (!umsg) return -EFAULT;
+    struct msghdr kmsg;
+    if (copyin(umsg, &kmsg, sizeof(kmsg)) != 0) return -EFAULT;
+    struct msghdr *msg = &kmsg;
+
+    if (msg->msg_iovlen < 0 || msg->msg_iovlen > AFUNIX_IOV_MAX)
+        return -EMSGSIZE;
+    struct iovec_local kiov[AFUNIX_IOV_MAX];
+    if (msg->msg_iovlen > 0) {
+        if (!msg->msg_iov) return -EFAULT;
+        if (copyin(msg->msg_iov, kiov,
+                   (size_t)msg->msg_iovlen * sizeof(kiov[0])) != 0)
+            return -EFAULT;
+    }
+
     afunix_sock_t *s = afunix_from_fd(fd);
 
     /* SCM_RIGHTS plumbing only applies to AF_UNIX peers.  AF_INET
      * sockets fall through to the iov-only path below. */
     if (s && s->peer && msg->msg_control && msg->msg_controllen > 0) {
-        const unsigned char *cmsgbuf = (const unsigned char *)msg->msg_control;
-        size_t cmsglen = msg->msg_controllen;
+        size_t cmsglen = (size_t)msg->msg_controllen;
+        if (cmsglen > AFUNIX_CMSG_MAX) return -EINVAL;
+        unsigned char cmsgbuf[AFUNIX_CMSG_MAX];
+        if (copyin(msg->msg_control, cmsgbuf, cmsglen) != 0)
+            return -EFAULT;
         size_t off = 0;
         while (off + sizeof(struct kcmsghdr) <= cmsglen) {
             const struct kcmsghdr *c = (const struct kcmsghdr *)(cmsgbuf + off);
@@ -1097,7 +1133,9 @@ ssize_t sys_sendmsg(int fd, const struct msghdr *msg, int flags) {
     }
 
     ssize_t total = 0;
-    struct iovec_local *iov = (struct iovec_local *)msg->msg_iov;
+    /* kiov was copied in above; iov_base entries are still user pointers,
+     * but sys_send/sys_sendto copyin them on their own. */
+    struct iovec_local *iov = kiov;
     for (int i = 0; i < (int)msg->msg_iovlen; i++) {
         ssize_t r;
         if (msg->msg_name && msg->msg_namelen > 0) {
@@ -1126,10 +1164,28 @@ ssize_t sys_sendmsg(int fd, const struct msghdr *msg, int flags) {
  * if the AF_UNIX socket has pending fds in rx_fdq, install them into
  * the calling process's fd table and emit a SCM_RIGHTS cmsg into
  * msg_control. */
-ssize_t sys_recvmsg(int fd, struct msghdr *msg, int flags) {
-    if (!msg) return -EFAULT;
+ssize_t sys_recvmsg(int fd, struct msghdr *umsg, int flags) {
+    if (!umsg) return -EFAULT;
+    /* Pull the msghdr into the kernel before touching any of its fields.
+     * msg_name / iov_base / msg_control remain user pointers — the
+     * helpers they are handed (sys_recvfrom, copyout) validate them. */
+    struct msghdr kmsg;
+    if (copyin(umsg, &kmsg, sizeof(kmsg)) != 0) return -EFAULT;
+    struct msghdr *msg = &kmsg;
+
+    if (msg->msg_iovlen < 0 || msg->msg_iovlen > AFUNIX_IOV_MAX)
+        return -EMSGSIZE;
+    struct iovec_local kiov[AFUNIX_IOV_MAX];
+    if (msg->msg_iovlen > 0) {
+        if (!msg->msg_iov) return -EFAULT;
+        if (copyin(msg->msg_iov, kiov,
+                   (size_t)msg->msg_iovlen * sizeof(kiov[0])) != 0)
+            return -EFAULT;
+    }
+    msg->msg_flags = 0;
+
     ssize_t total = 0;
-    struct iovec_local *iov = (struct iovec_local *)msg->msg_iov;
+    struct iovec_local *iov = kiov;
     for (int i = 0; i < (int)msg->msg_iovlen; i++) {
         ssize_t r;
         if (i == 0 && msg->msg_name && msg->msg_namelen > 0) {
@@ -1141,12 +1197,13 @@ ssize_t sys_recvmsg(int fd, struct msghdr *msg, int flags) {
              * undeliverable, so e.g. CDE's ttsession/dtsession hang
              * forever pinging an rpcbind that can never answer.  msg_name
              * is the caller's userspace buffer and msg_namelen its
-             * capacity, exactly what sys_recvfrom/do_recv expect.  The
-             * SCM_RIGHTS path below passes msg_name == NULL, so it is
-             * unaffected. */
+             * capacity; pass the *user* msghdr's msg_namelen slot so
+             * do_recv copyin/copyout's it in place (msg_namelen and
+             * socklen_t are both 4 bytes).  The SCM_RIGHTS path below
+             * passes msg_name == NULL, so it is unaffected. */
             r = sys_recvfrom(fd, iov[i].iov_base, iov[i].iov_len, flags,
                              (struct sockaddr *)msg->msg_name,
-                             (socklen_t *)&msg->msg_namelen);
+                             (socklen_t *)&umsg->msg_namelen);
         } else {
             r = sys_recv(fd, iov[i].iov_base, iov[i].iov_len, flags);
         }
@@ -1157,17 +1214,23 @@ ssize_t sys_recvmsg(int fd, struct msghdr *msg, int flags) {
 
     /* AF_UNIX rx_fdq drain.  Only applies once the iov loop above has
      * pulled at least one byte (recvmsg without data wouldn't carry
-     * an SCM payload on a stream socket). */
+     * an SCM payload on a stream socket).  The control area is built in
+     * a kernel buffer and copyout()'d — never written through the user
+     * pointer directly. */
     afunix_sock_t *s = afunix_from_fd(fd);
+    uint32_t out_controllen = 0;
     if (s && msg->msg_control && (size_t)msg->msg_controllen >= sizeof(struct kcmsghdr)) {
+        size_t cmsgcap = (size_t)msg->msg_controllen;
+        if (cmsgcap > AFUNIX_CMSG_MAX) cmsgcap = AFUNIX_CMSG_MAX;
+        unsigned char cmsgbuf[AFUNIX_CMSG_MAX];
         mutex_lock(&s->lock);
         int nfds = s->rx_fdq_count;
         if (nfds > 0) {
             size_t need = KCMSG_ALIGN(sizeof(struct kcmsghdr) + (size_t)nfds * sizeof(int));
-            if (need > (size_t)msg->msg_controllen) {
+            if (need > cmsgcap) {
                 /* Truncate — fewer fds than queued — but still deliver
                  * what fits and mark MSG_CTRUNC. */
-                nfds = (int)(((size_t)msg->msg_controllen - sizeof(struct kcmsghdr)) / sizeof(int));
+                nfds = (int)((cmsgcap - sizeof(struct kcmsghdr)) / sizeof(int));
                 if (nfds < 0) nfds = 0;
                 msg->msg_flags |= MSG_CTRUNC;
             }
@@ -1177,11 +1240,19 @@ ssize_t sys_recvmsg(int fd, struct msghdr *msg, int flags) {
             for (int i = 0; i < nfds; i++) {
                 int newfd = proc_alloc_fd(current_process);
                 if (newfd < 0) {
-                    /* Out of fds — roll back, leave undelivered in queue. */
+                    /* Out of fds — roll back everything installed so far
+                     * and deliver nothing this call; the queued fds stay
+                     * in rx_fdq for a later recvmsg.  proc_set_fd took
+                     * ownership of the sender's reference for each slot,
+                     * so clearing the slot must also drop that reference
+                     * (proc_set_fd(...,NULL) only clears the table entry)
+                     * — otherwise every rolled-back fd leaks its file_t. */
                     for (int j = 0; j < got; j++) {
+                        file_t *rb = current_process->fds[allocated[j]];
                         proc_set_fd(current_process, allocated[j], NULL);
+                        if (rb) file_close_ptr(rb);
                     }
-                    nfds = got;
+                    got = 0;
                     msg->msg_flags |= MSG_CTRUNC;
                     break;
                 }
@@ -1191,26 +1262,41 @@ ssize_t sys_recvmsg(int fd, struct msghdr *msg, int flags) {
                  * we do NOT bump again here. */
                 allocated[got++] = newfd;
             }
-            /* Write the cmsg out. */
-            struct kcmsghdr *c = (struct kcmsghdr *)msg->msg_control;
+            /* Build the cmsg in the kernel bounce buffer. */
+            struct kcmsghdr *c = (struct kcmsghdr *)cmsgbuf;
             c->cmsg_len   = sizeof(*c) + (uint32_t)got * sizeof(int);
             c->cmsg_level = SOL_SOCKET;
             c->cmsg_type  = SCM_RIGHTS;
-            int *outfds = (int *)((unsigned char *)msg->msg_control + sizeof(*c));
+            int *outfds = (int *)(cmsgbuf + sizeof(*c));
             for (int i = 0; i < got; i++) outfds[i] = allocated[i];
-            msg->msg_controllen = (uint32_t)(sizeof(*c) + (uint32_t)got * sizeof(int));
+            out_controllen = (uint32_t)(sizeof(*c) + (uint32_t)got * sizeof(int));
             /* Shift remaining unqueued fds down. */
             for (int i = got; i < s->rx_fdq_count; i++) {
                 s->rx_fdq[i - got] = s->rx_fdq[i];
             }
             s->rx_fdq_count -= got;
+            mutex_unlock(&s->lock);
+            /* Copy the control area out to user space.  On copyout
+             * failure the fds are already installed in the receiver's
+             * table — userspace simply won't learn their numbers via the
+             * cmsg; report EFAULT (a misbehaving caller's problem). */
+            if (out_controllen &&
+                copyout(cmsgbuf, msg->msg_control, out_controllen) != 0)
+                return -EFAULT;
         } else {
-            msg->msg_controllen = 0;
+            mutex_unlock(&s->lock);
+            out_controllen = 0;
         }
-        mutex_unlock(&s->lock);
-    } else if (msg->msg_control && msg->msg_controllen > 0) {
-        msg->msg_controllen = 0;
     }
+    /* Publish the updated ancillary length and flags back to the user
+     * msghdr (msg_name / msg_namelen were already updated in place by
+     * do_recv above). */
+    if (copyout(&out_controllen, &umsg->msg_controllen,
+                sizeof(umsg->msg_controllen)) != 0)
+        return -EFAULT;
+    if (copyout(&msg->msg_flags, &umsg->msg_flags,
+                sizeof(umsg->msg_flags)) != 0)
+        return -EFAULT;
     return total;
 }
 
