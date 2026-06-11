@@ -3515,9 +3515,22 @@ int sys_proc_thr_list(pid_t pid, sys_thrinfo_t *array, size_t size_bytes) {
     return 0;
 }
 
+/*
+ * Inspecting another process's fds / memory map / argv leaks privileged
+ * information (open files, ASLR layout, secrets passed on the command
+ * line).  Permit it only for one's own processes or root, matching the
+ * usual /proc visibility model.
+ */
+static int proc_inspect_allowed(process_t *target) {
+    if (!current_process) return 1;              /* kernel/early context */
+    if (current_process->euid == 0) return 1;    /* root sees all */
+    return target->uid == current_process->euid; /* otherwise same owner */
+}
+
 int sys_proc_fds(pid_t pid, sys_fd_t *fds, size_t *count) {
     process_t *target = (pid == 0) ? current_process : proc_find(pid);
     if (!target) return -3;
+    if (!proc_inspect_allowed(target)) return -EPERM;
 
     size_t cap = 0;
     if (count && copyin(count, &cap, sizeof(cap)) != 0) return -14;
@@ -3547,6 +3560,7 @@ int sys_proc_fds(pid_t pid, sys_fd_t *fds, size_t *count) {
 int sys_proc_maps(pid_t pid, sys_map_t *maps, size_t *count) {
     process_t *target = (pid == 0) ? current_process : proc_find(pid);
     if (!target) return -3;
+    if (!proc_inspect_allowed(target)) return -EPERM;
 
     size_t cap = 0;
     if (count && copyin(count, &cap, sizeof(cap)) != 0) return -14;
@@ -3615,6 +3629,7 @@ int sys_proc_exe(pid_t pid, char *buf, size_t len) {
 int sys_proc_cmdline(pid_t pid, char **argv, size_t *argc) {
     process_t *target = (pid == 0) ? current_process : proc_find(pid);
     if (!target) return -3;
+    if (!proc_inspect_allowed(target)) return -EPERM;
 
     size_t need = (size_t)target->cmdline_tail_len;
     size_t cap = 0;

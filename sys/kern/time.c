@@ -442,7 +442,10 @@ time_t sys_time(time_t *tloc) {
 
 int sys_stime(time_t *t) {
     time_t kt;
-    if (copyin(t, &kt, sizeof(time_t)) != 0) return -14;
+    /* Setting the wall clock is privileged — otherwise any process could
+     * jump the system time (breaking timers, make, TLS validity, at/cron). */
+    if (current_process && current_process->euid != 0) return -EPERM;
+    if (copyin(t, &kt, sizeof(time_t)) != 0) return -EFAULT;
     return kern_stime(&kt);
 }
 
