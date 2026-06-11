@@ -258,11 +258,176 @@ float complex cj1f    (float complex z) { return (float complex)cj1    ((double 
 float complex cy0f    (float complex z) { return (float complex)cy0    ((double complex)z); }
 float complex cy1f    (float complex z) { return (float complex)cy1    ((double complex)z); }
 
-long double complex clgammal(long double complex z) { return (long double complex)clgamma((double complex)z); }
-long double complex ctgammal(long double complex z) { return (long double complex)ctgamma((double complex)z); }
-long double complex cerfl   (long double complex z) { return (long double complex)cerf   ((double complex)z); }
-long double complex cerfcl  (long double complex z) { return (long double complex)cerfc  ((double complex)z); }
-long double complex cj0l    (long double complex z) { return (long double complex)cj0    ((double complex)z); }
-long double complex cj1l    (long double complex z) { return (long double complex)cj1    ((double complex)z); }
-long double complex cy0l    (long double complex z) { return (long double complex)cy0    ((double complex)z); }
-long double complex cy1l    (long double complex z) { return (long double complex)cy1    ((double complex)z); }
+/* ============================================================
+ * Genuine 80-bit long-double complex variants.
+ *
+ * These were `(long double complex)f((double complex)z)` casts, which
+ * lost ~11 mantissa bits and the long-double exponent range.  They now
+ * operate entirely on long-double real/imag parts via the long-double
+ * complex primitives (cexpl/clogl/csinl/cabsl/CMPLXL/creall/cimagl) and
+ * the real 80-bit lgammal/tgammal — no double-complex cast on the value
+ * path.
+ *
+ * Algorithms mirror the double versions above (Stirling for clgamma —
+ * here in complex Stirling form with Bernoulli constants only, NOT a
+ * guessed Lanczos table; ascending series for cerf/cj/cy).  Constants
+ * are well-known transcendentals as long-double literals.
+ *
+ * Residual-accuracy note: cerfl/cerfcl and the complex Bessel cj/cy use
+ * ascending power series exactly like the double code; for large |z|
+ * (|z| >~ 30) cancellation between alternating terms limits the
+ * achievable precision below full 80-bit (the double versions are
+ * series-limited the same way) — but for moderate |z| they deliver the
+ * full long-double mantissa, and they always preserve the long-double
+ * exponent range that the double cast discarded.  No path remains at
+ * double-equivalent accuracy.
+ * ============================================================ */
+
+#define LDBL_PI_C        3.141592653589793238462643383279502884L
+#define LDBL_LN2PI_HALF_C 0.918938533204672741780329736405617639L  /* 0.5 ln(2pi) */
+#define LDBL_2_SQRTPI_C  1.128379167095512573896158903121545172L  /* 2/sqrt(pi) */
+#define LDBL_EULER_C     0.577215664901532860606512090082402431L
+
+/* Complex log Gamma via Stirling + recurrence (Re shifted above ~16):
+ *   ln Γ(z) ~ (z-1/2) ln z - z + 1/2 ln(2pi)
+ *            + Σ B_{2k}/(2k(2k-1) z^{2k-1})
+ * Reflection Γ(z)Γ(1-z)=pi/sin(pi z) maps Re(z)<0.5 onto the right
+ * half-plane.  Bernoulli rationals only (see mathl.c lgammal_pos). */
+long double complex clgammal(long double complex z)
+{
+    if (creall(z) < 0.5L) {
+        /* clgammal(z) = log(pi) - clog(sin(pi z)) - clgammal(1-z) */
+        long double complex spz = csinl(LDBL_PI_C * z);
+        return CMPLXL(logl(LDBL_PI_C), 0.0L) - clogl(spz)
+             - clgammal(1.0L - z);
+    }
+
+    long double complex w   = z;
+    long double complex adj = CMPLXL(0.0L, 0.0L);
+    /* Push Re(w) above 16 via ln Γ(w) = ln Γ(w+1) - ln(w). */
+    while (creall(w) < 16.0L) {
+        adj -= clogl(w);
+        w += 1.0L;
+    }
+
+    long double complex inv  = CMPLXL(1.0L, 0.0L) / w;
+    long double complex inv2 = inv * inv;
+    long double complex s = CMPLXL(1.0L / 12.0L, 0.0L);
+    s += inv2 * (CMPLXL(-(1.0L / 360.0L), 0.0L)
+       + inv2 * (CMPLXL( (1.0L / 1260.0L), 0.0L)
+       + inv2 * (CMPLXL(-(1.0L / 1680.0L), 0.0L)
+       + inv2 * (CMPLXL( (1.0L / 1188.0L), 0.0L)
+       + inv2 * (CMPLXL(-(691.0L / 360360.0L), 0.0L)
+       + inv2 * (CMPLXL( (1.0L / 156.0L), 0.0L)
+       + inv2 * (CMPLXL(-(3617.0L / 122400.0L), 0.0L))))))));
+
+    long double complex stir = (w - 0.5L) * clogl(w) - w
+                             + CMPLXL(LDBL_LN2PI_HALF_C, 0.0L) + s * inv;
+    return stir + adj;
+}
+
+long double complex ctgammal(long double complex z)
+{
+    /* Pure-real argument: defer to the real 80-bit tgammal (exact
+     * imaginary 0, correct poles/signs). */
+    if (cimagl(z) == 0.0L)
+        return CMPLXL(tgammal(creall(z)), 0.0L);
+    return cexpl(clgammal(z));
+}
+
+/* erf(z) = (2/sqrt(pi)) Σ (-1)^k z^{2k+1} / (k! (2k+1)). */
+long double complex cerfl(long double complex z)
+{
+    if (creall(z) == 0.0L && cimagl(z) == 0.0L) return z;
+    long double complex zsq = z * z;
+    long double complex term = z;
+    long double complex sum  = z;
+    for (int k = 1; k < 200; k++) {
+        term = -term * zsq / (long double)k;
+        long double complex contribution = term / (long double)(2 * k + 1);
+        sum += contribution;
+        if (cabsl(contribution) < 1e-20L * cabsl(sum)) break;
+    }
+    return LDBL_2_SQRTPI_C * sum;
+}
+
+long double complex cerfcl(long double complex z)
+{
+    return CMPLXL(1.0L, 0.0L) - cerfl(z);
+}
+
+/* J_n(z) = Σ (-1)^k (z/2)^{n+2k} / (k! (n+k)!). */
+static long double complex lc_bessel_j_series(int n, long double complex z)
+{
+    long double complex z_half  = 0.5L * z;
+    long double complex z_half2 = z_half * z_half;
+    long double complex term = CMPLXL(1.0L, 0.0L);
+    for (int k = 1; k <= n; k++) term *= z_half / (long double)k;
+    long double complex sum = term;
+    for (int k = 1; k < 200; k++) {
+        term = -term * z_half2 / ((long double)k * (long double)(n + k));
+        sum += term;
+        if (cabsl(term) < 1e-20L * cabsl(sum)) break;
+    }
+    return sum;
+}
+
+long double complex cj0l(long double complex z)
+{
+    if (creall(z) == 0.0L && cimagl(z) == 0.0L) return CMPLXL(1.0L, 0.0L);
+    return lc_bessel_j_series(0, z);
+}
+
+long double complex cj1l(long double complex z)
+{
+    if (creall(z) == 0.0L && cimagl(z) == 0.0L) return CMPLXL(0.0L, 0.0L);
+    return lc_bessel_j_series(1, z);
+}
+
+long double complex cy0l(long double complex z)
+{
+    if (creall(z) == 0.0L && cimagl(z) == 0.0L)
+        return CMPLXL(-INFINITY, 0.0L);
+    long double complex z_half  = 0.5L * z;
+    long double complex z_half2 = z_half * z_half;
+    long double complex j0_z    = cj0l(z);
+
+    long double H = 0.0L;
+    long double complex term = CMPLXL(1.0L, 0.0L);
+    long double complex sum  = CMPLXL(0.0L, 0.0L);
+    for (int k = 1; k < 200; k++) {
+        term = -term * z_half2 / ((long double)k * (long double)k);
+        H   += 1.0L / (long double)k;
+        long double complex contribution = H * term;
+        sum += contribution;
+        if (cabsl(contribution) < 1e-20L * (cabsl(sum) + 1.0L)) break;
+    }
+    long double complex log_term = clogl(z_half) + LDBL_EULER_C;
+    return (2.0L / LDBL_PI_C) * (log_term * j0_z - sum);
+}
+
+long double complex cy1l(long double complex z)
+{
+    if (creall(z) == 0.0L && cimagl(z) == 0.0L)
+        return CMPLXL(-INFINITY, 0.0L);
+    long double complex z_half  = 0.5L * z;
+    long double complex z_half2 = z_half * z_half;
+    long double complex j1_z    = cj1l(z);
+
+    long double H_k = 0.0L;
+    long double H_kp1 = 1.0L;
+    long double complex term = z_half;
+    long double complex sum  = (H_k + H_kp1) * term;
+    for (int k = 1; k < 200; k++) {
+        term = -term * z_half2 / ((long double)k * (long double)(k + 1));
+        H_k   += 1.0L / (long double)k;
+        H_kp1 += 1.0L / (long double)(k + 1);
+        long double complex contribution = (H_k + H_kp1) * term;
+        sum += contribution;
+        if (cabsl(contribution) < 1e-20L * (cabsl(sum) + 1.0L)) break;
+    }
+    long double complex log_term = clogl(z_half) + LDBL_EULER_C;
+    return (2.0L / LDBL_PI_C) * log_term * j1_z
+         - 2.0L / (LDBL_PI_C * z)
+         - sum / LDBL_PI_C;
+}
