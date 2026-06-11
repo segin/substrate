@@ -93,11 +93,21 @@ void *futex_get_key(uintptr_t uaddr) {
  */
 static int futex_read_user(int *uaddr, int *value) {
     if (!validate_uaddr((uintptr_t)uaddr)) return -EFAULT;
-    
+
     /* Use copyin() for safe userspace access with fault handling */
     if (copyin(uaddr, value, sizeof(int)) != 0)
         return -EFAULT;
-    
+
+    return 0;
+}
+
+static int futex_write_user(int *uaddr, int value) {
+    if (!validate_uaddr((uintptr_t)uaddr)) return -EFAULT;
+
+    /* Use copyout() for safe userspace access with fault handling */
+    if (copyout(&value, uaddr, sizeof(int)) != 0)
+        return -EFAULT;
+
     return 0;
 }
 
@@ -347,22 +357,39 @@ int sys_futex(int *uaddr, int op, int val, void *timeout, int *uaddr2, int val3)
     }
 
     switch (cmd) {
-        case FUTEX_WAIT: {
+        case FUTEX_WAIT:
+        case FUTEX_WAIT_BITSET: {
             /*
              * Atomic compare-and-sleep:
              * 1. Read current value
              * 2. If != expected val, return -EAGAIN
              * 3. Otherwise, sleep on the futex key
+             *
+             * FUTEX_WAIT_BITSET additionally registers a wait mask (val3)
+             * so a FUTEX_WAKE_BITSET only wakes us if our bits overlap its
+             * mask; its timeout is ABSOLUTE (vs FUTEX_WAIT's relative one).
+             * A plain FUTEX_WAIT registers FUTEX_BITSET_MATCH_ANY so any
+             * FUTEX_WAKE_BITSET (and every plain FUTEX_WAKE) can wake it.
              */
+            int is_bitset = (cmd == FUTEX_WAIT_BITSET);
+            uint32_t bitset = FUTEX_BITSET_MATCH_ANY;
+            if (is_bitset) {
+                bitset = (uint32_t)val3;
+                if (bitset == 0)
+                    return -EINVAL;
+            }
+
             int current_val;
             if (futex_read_user(uaddr, &current_val) != 0) {
                 return -EFAULT;
             }
-            
+
             if (current_val != val) {
                 return -EAGAIN;
             }
-            
+
+            current_thread->futex_bitset = bitset;
+
             /* Sleep on the key */
             if (timeout) {
                 struct timespec ts;
@@ -375,13 +402,40 @@ int sys_futex(int *uaddr, int op, int val, void *timeout, int *uaddr2, int val3)
                 }
 
                 uint64_t hz = get_hz();
-                uint64_t ticks = (uint64_t)ts.tv_sec * hz;
-                ticks += ((uint64_t)ts.tv_nsec * hz) / 1000000000ULL;
-
-                uint64_t deadline = get_ticks() + ticks;
+                uint64_t deadline;
+                if (is_bitset) {
+                    /*
+                     * Absolute deadline.  Convert (abs_sec, abs_nsec) into a
+                     * tick count relative to now; if already in the past the
+                     * wait times out immediately.
+                     */
+                    time_t now_sec = get_time();
+                    int64_t delta_sec = (int64_t)ts.tv_sec - (int64_t)now_sec;
+                    int64_t ticks = delta_sec * (int64_t)hz +
+                                    ((int64_t)ts.tv_nsec * (int64_t)hz) / 1000000000LL;
+                    if (ticks <= 0) {
+                        current_thread->futex_bitset = 0;
+                        return -ETIMEDOUT;
+                    }
+                    deadline = get_ticks() + (uint64_t)ticks;
+                } else {
+                    uint64_t ticks = (uint64_t)ts.tv_sec * hz;
+                    ticks += ((uint64_t)ts.tv_nsec * hz) / 1000000000ULL;
+                    deadline = get_ticks() + ticks;
+                }
                 current_thread->sleep_expiry = deadline;
                 current_thread->sleep_status = 0;
             }
+
+            /*
+             * Reset the sleep status for every wait (the timed branch above
+             * only covers timeouts) so a stale -EINTR/-ETIMEDOUT from this
+             * thread's previous sleep can't make us return spuriously, and
+             * mark the sleep interruptible so a signal aborts it (matching
+             * the sysv-semaphore wait pattern).
+             */
+            current_thread->sleep_status = 0;
+            current_thread->flags |= THREAD_F_INTERRUPTIBLE;
 
             if (private_flag)
                 sleepq_add_private(key, current_thread);
@@ -390,18 +444,38 @@ int sys_futex(int *uaddr, int op, int val, void *timeout, int *uaddr2, int val3)
 
             sched_yield();
 
+            current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
+
+            /*
+             * Self-remove from the sleepq on wake.  A real FUTEX_WAKE
+             * already dequeued us, but a timeout (sched_tick) or signal
+             * wake only flips us THREAD_READY and leaves the stale sleepq
+             * entry linked -- sched_tick runs in the timer IRQ and cannot
+             * take the bucket lock, so per the sleepq contract the waiter
+             * unlinks itself using wait_chan.  Without this, a timed-out
+             * waiter's dangling entry (keyed on this uaddr) is consumed by
+             * the next FUTEX_WAKE on the same address, which then returns
+             * "woke 1" while the real waiter is never woken and blocks for
+             * its full timeout.  Idempotent if FUTEX_WAKE already removed us.
+             */
+            sleepq_remove_thread(current_thread);
+
             if (timeout) {
                 current_thread->sleep_expiry = 0;
                 if (current_thread->sleep_status == -ETIMEDOUT)
                     return -ETIMEDOUT;
             }
 
-            /* Check for signal interruption */
-            if ((current_thread->flags & THREAD_F_INTERRUPTIBLE) &&
+            /*
+             * Signal interruption: signal_interrupt_thread() wakes us with
+             * sleep_status == -EINTR; also honour any pending unblocked
+             * signal directly (the interruptible flag was set above).
+             */
+            if (current_thread->sleep_status == -EINTR ||
                 (current_thread->sig_pending & ~current_thread->sig_mask)) {
                 return -EINTR;
             }
-            
+
             /* Return 0 on wake */
             return 0;
         }
@@ -416,6 +490,103 @@ int sys_futex(int *uaddr, int op, int val, void *timeout, int *uaddr2, int val3)
             else
                 ret = sleepq_wake_n(key, val);
             return ret;
+        }
+
+        case FUTEX_WAKE_BITSET: {
+            /*
+             * Wake up to 'val' waiters whose registered wait mask overlaps
+             * val3.  A val3 of 0 is invalid; FUTEX_BITSET_MATCH_ANY wakes
+             * every waiter (a plain FUTEX_WAIT registers MATCH_ANY).
+             */
+            uint32_t mask = (uint32_t)val3;
+            if (mask == 0)
+                return -EINVAL;
+            int ret;
+            if (private_flag)
+                ret = sleepq_wake_bitset_private(key, val, mask);
+            else
+                ret = sleepq_wake_bitset(key, val, mask);
+            return ret;
+        }
+
+        case FUTEX_WAKE_OP: {
+            /*
+             * 1. Wake up to 'val' waiters on uaddr.
+             * 2. oldval = *uaddr2; *uaddr2 = oldval <op> oparg.
+             * 3. If oldval <cmp> cmparg, additionally wake up to 'val2'
+             *    waiters on uaddr2.
+             * Returns the total number of waiters woken from both addresses.
+             * 'timeout' is repurposed as val2 (the uaddr2 wake limit).
+             */
+            if (!uaddr2 || !validate_uaddr((uintptr_t)uaddr2))
+                return -EFAULT;
+
+            int val2 = (int)(uintptr_t)timeout;
+
+            unsigned int encoded = (unsigned int)val3;
+            int op     = FUTEX_OP_OP(encoded);
+            int cmp    = FUTEX_OP_CMP(encoded);
+            int oparg  = FUTEX_OP_OPARG(encoded);
+            int cmparg = FUTEX_OP_CMPARG(encoded);
+
+            if (op & FUTEX_OP_OPARG_SHIFT) {
+                op &= ~FUTEX_OP_OPARG_SHIFT;
+                if (oparg < 0 || oparg > 31)
+                    return -EINVAL;
+                oparg = 1 << oparg;
+            }
+
+            int oldval;
+            if (futex_read_user(uaddr2, &oldval) != 0)
+                return -EFAULT;
+
+            int newval;
+            switch (op) {
+                case FUTEX_OP_SET:  newval = oparg;            break;
+                case FUTEX_OP_ADD:  newval = oldval + oparg;   break;
+                case FUTEX_OP_OR:   newval = oldval | oparg;   break;
+                case FUTEX_OP_ANDN: newval = oldval & ~oparg;  break;
+                case FUTEX_OP_XOR:  newval = oldval ^ oparg;   break;
+                default:            return -ENOSYS;
+            }
+
+            if (futex_write_user(uaddr2, newval) != 0)
+                return -EFAULT;
+
+            int cmp_result;
+            switch (cmp) {
+                case FUTEX_OP_CMP_EQ: cmp_result = (oldval == cmparg); break;
+                case FUTEX_OP_CMP_NE: cmp_result = (oldval != cmparg); break;
+                case FUTEX_OP_CMP_LT: cmp_result = (oldval <  cmparg); break;
+                case FUTEX_OP_CMP_LE: cmp_result = (oldval <= cmparg); break;
+                case FUTEX_OP_CMP_GT: cmp_result = (oldval >  cmparg); break;
+                case FUTEX_OP_CMP_GE: cmp_result = (oldval >= cmparg); break;
+                default:              return -ENOSYS;
+            }
+
+            void *key2;
+            if (private_flag) {
+                key2 = (void *)uaddr2;
+            } else {
+                key2 = futex_get_key((uintptr_t)uaddr2);
+                if (!key2)
+                    return -EFAULT;
+            }
+
+            int woken;
+            if (private_flag)
+                woken = sleepq_wake_n_private(key, val);
+            else
+                woken = sleepq_wake_n(key, val);
+
+            if (cmp_result) {
+                if (private_flag)
+                    woken += sleepq_wake_n_private(key2, val2);
+                else
+                    woken += sleepq_wake_n(key2, val2);
+            }
+
+            return woken;
         }
 
         case FUTEX_REQUEUE:

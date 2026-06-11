@@ -213,5 +213,6 @@
 #define OPENBSD_SYS_unlinkat       325
 #define OPENBSD_SYS___set_tcb      329
 #define OPENBSD_SYS___get_tcb      330
+#define OPENBSD_SYS_futex          331   /* OpenBSD 6.2+ futex(2), 5 args */
 
 #endif /* _OPENBSD_SYSCALLS_H */

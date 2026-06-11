@@ -12,6 +12,38 @@
 #include <exec/perso/openbsd/openbsd_syscalls.h>
 #include <sys/resource.h>
 #include <sys/times.h>
+#include <sys/futex.h>
+#include <sys/errno.h>
+#include <stdint.h>
+
+/*
+ * OpenBSD futex(2) (syscall 331), OpenBSD 6.2+.  Prototype:
+ *   int futex(volatile uint32_t *uaddr, int op, int val,
+ *             const struct timespec *timeout, volatile uint32_t *uaddr2);
+ * OpenBSD supports only WAIT/WAKE/REQUEUE and numbers its ops differently
+ * from Linux/native (WAIT=1, WAKE=2, REQUEUE=3; FUTEX_PRIVATE_FLAG=0x80),
+ * so remap onto the native sys_futex op space.  For REQUEUE the timeout
+ * slot already carries the requeue count as an int -- the same overload
+ * native sys_futex expects -- so it passes straight through.
+ */
+#define OPENBSD_FUTEX_WAIT          1
+#define OPENBSD_FUTEX_WAKE          2
+#define OPENBSD_FUTEX_REQUEUE       3
+#define OPENBSD_FUTEX_PRIVATE_FLAG  0x80
+
+int openbsd_sys_futex(int *uaddr, int op, int val, void *timeout, int *uaddr2) {
+    int priv = op & OPENBSD_FUTEX_PRIVATE_FLAG;
+    int cmd  = op & ~OPENBSD_FUTEX_PRIVATE_FLAG;
+    int nat_cmd;
+    switch (cmd) {
+        case OPENBSD_FUTEX_WAIT:    nat_cmd = FUTEX_WAIT;    break;
+        case OPENBSD_FUTEX_WAKE:    nat_cmd = FUTEX_WAKE;    break;
+        case OPENBSD_FUTEX_REQUEUE: nat_cmd = FUTEX_REQUEUE; break;
+        default:                    return -ENOSYS;
+    }
+    int nat_op = nat_cmd | (priv ? FUTEX_PRIVATE_FLAG : 0);
+    return sys_futex(uaddr, nat_op, val, timeout, uaddr2, 0);
+}
 
 // OpenBSD uses same logic as NetBSD for getrusage via times() wrapper if times syscall is missing
 int openbsd_sys_getrusage(int who, struct rusage *rusage) {
@@ -166,6 +198,7 @@ static void *openbsd_syscalls[MAX_SYSCALLS] = {
     [OPENBSD_SYS_sendto]         = &sys_sendto,
     [OPENBSD_SYS_shutdown]       = &sys_shutdown,
     [OPENBSD_SYS_socketpair]     = &sys_socketpair,
+    [OPENBSD_SYS_futex]          = (void *)&openbsd_sys_futex,
 };
 
 static const char *openbsd_names[MAX_SYSCALLS] = {

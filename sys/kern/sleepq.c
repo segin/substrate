@@ -423,6 +423,70 @@ int sleepq_wake_n_private(void *chan, int n) {
     return sleepq_wake_n_internal(chan, n, SLEEPQ_TYPE_PRIVATE, pid);
 }
 
+/*
+ * Bitset-filtered wake (FUTEX_WAKE_BITSET).  Wakes up to 'n' waiters
+ * whose futex_bitset shares at least one bit with 'mask'.  Unlike the
+ * plain wake, non-matching waiters must be skipped, so this walks the
+ * bucket list with a prev pointer and unlinks only the matches.
+ */
+static int sleepq_wake_bitset_internal(void *chan, int n, int type, int pid,
+                                       uint32_t mask) {
+    if (!chan || n == 0 || mask == 0)
+        return(0);
+
+    int hash = sleepq_hash_func(chan, type, pid);
+    sq_lock(hash);
+
+    sleepq_t *sq = sleepq_lookup(chan, type, pid, hash);
+    if (!sq || sq->sq_count == 0) {
+        sq_unlock(hash);
+        return(0);
+    }
+
+    int woken = 0;
+    thread_t *prev = NULL;
+    thread_t *t = sq->sq_head;
+    while (t && (n < 0 || woken < n)) {
+        thread_t *next = t->next;
+        if (t->futex_bitset & mask) {
+            /* unlink t */
+            if (prev)
+                prev->next = next;
+            else
+                sq->sq_head = next;
+            if (sq->sq_tail == t)
+                sq->sq_tail = prev;
+            sq->sq_count--;
+
+            t->next = NULL;
+            t->wait_chan = NULL;
+            if (t->state != THREAD_STOPPED)
+                t->state = THREAD_READY;
+            woken++;
+            /* prev unchanged -- t was removed */
+        } else {
+            prev = t;
+        }
+        t = next;
+    }
+
+    if (sq->sq_count == 0)
+        sleepq_remove(sq, hash);
+
+    sq_unlock(hash);
+    return(woken);
+}
+
+int sleepq_wake_bitset(void *chan, int n, uint32_t mask) {
+    return sleepq_wake_bitset_internal(chan, n, SLEEPQ_TYPE_SHARED, 0, mask);
+}
+
+int sleepq_wake_bitset_private(void *chan, int n, uint32_t mask) {
+    int pid = sleepq_current_private_pid();
+    if (pid < 0) return 0;
+    return sleepq_wake_bitset_internal(chan, n, SLEEPQ_TYPE_PRIVATE, pid, mask);
+}
+
 static int sleepq_has_waiters_internal(void *chan, int type, int pid) {
     if (!chan)
         return(0);

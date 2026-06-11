@@ -17,6 +17,8 @@
 #include <sys/resource.h>
 #include <sys/times.h>
 #include <sys/errno.h>
+#include <sys/futex.h>
+#include <stdint.h>
 #include <string.h>
 #include <errno.h>
 
@@ -42,6 +44,34 @@ int netbsd_sys_getrusage(int who, struct rusage *rusage) {
 
     if (copyout(&kr, rusage, sizeof(struct rusage)) != 0) return -14;
     return 0;
+}
+
+/*
+ * NetBSD __futex(2) (syscall 166), NetBSD 8+.  Prototype:
+ *   int __futex(int *uaddr, int op, int val, const struct timespec *timeout,
+ *               int *uaddr2, int val2, int val3);
+ * The op/flag encoding (FUTEX_WAIT/WAKE/REQUEUE/.../WAIT_BITSET, the
+ * FUTEX_PRIVATE_FLAG and FUTEX_CLOCK_REALTIME bits) matches Linux and the
+ * native sys_futex, so the only ABI difference is that val2 is an explicit
+ * argument rather than overloaded onto the timeout slot.  Repack it for the
+ * ops that consume val2 (REQUEUE / CMP_REQUEUE / WAKE_OP), where the native
+ * sys_futex reads the requeue/secondary-wake limit out of the timeout arg.
+ */
+int netbsd_sys_futex(int *uaddr, int op, int val, const struct timespec *timeout,
+                     int *uaddr2, int val2, int val3) {
+    int cmd = op & FUTEX_CMD_MASK;
+    void *to_arg;
+    switch (cmd) {
+        case FUTEX_REQUEUE:
+        case FUTEX_CMP_REQUEUE:
+        case FUTEX_WAKE_OP:
+            to_arg = (void *)(intptr_t)val2;
+            break;
+        default:
+            to_arg = (void *)timeout;
+            break;
+    }
+    return sys_futex(uaddr, op, val, to_arg, uaddr2, val3);
 }
 
 #ifndef HOST_TEST
@@ -178,6 +208,7 @@ static void *netbsd_syscalls[MAX_SYSCALLS] = {
     [NETBSD_SYS_mkdir]          = &sys_mkdir,
     [NETBSD_SYS_rmdir]          = &sys_rmdir,
     [NETBSD_SYS_uname]          = &sys_uname,     /* __sysctl - map to uname */
+    [NETBSD_SYS___futex]        = (void *)&netbsd_sys_futex,
     [NETBSD_SYS_stat]           = (void *)&netbsd_sys_stat,
     [NETBSD_SYS_fstat]          = (void *)&netbsd_sys_fstat,
     [NETBSD_SYS_lstat]          = (void *)&netbsd_sys_lstat,
@@ -338,6 +369,7 @@ static const char *netbsd_names[MAX_SYSCALLS] = {
     [NETBSD_SYS_mkdir]          = "mkdir",
     [NETBSD_SYS_rmdir]          = "rmdir",
     [NETBSD_SYS_uname]          = "uname",
+    [NETBSD_SYS___futex]        = "__futex",
     [NETBSD_SYS_stat]           = "stat",
     [NETBSD_SYS_fstat]          = "fstat",
     [NETBSD_SYS_lstat]          = "lstat",

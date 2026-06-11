@@ -29,6 +29,27 @@ static void signal_interrupt_thread(thread_t *t) {
     t->state = THREAD_READY;
 }
 
+/*
+ * Public counterpart for the directed-signal paths (thr_kill / thr_kill2):
+ * wake `t` out of an interruptible sleep so a just-posted, unmasked signal
+ * `sig` is taken now instead of only when the thread happens to return to
+ * userspace.  No-op unless the thread is interruptibly blocked with `sig`
+ * unmasked -- mirrors the wake condition psignal() uses for process-directed
+ * signals.  Without this a pthread_kill() to a thread parked in an
+ * interruptible syscall (e.g. FUTEX_WAIT) never delivers EINTR.
+ */
+void signal_wake_thread(thread_t *t, int sig) {
+    if (!t || sig <= 0 || sig >= NSIG) {
+        return;
+    }
+    uint32_t m = sigmask(sig);
+    if (t->state == THREAD_BLOCKED &&
+        (t->flags & THREAD_F_INTERRUPTIBLE) &&
+        !(t->sig_mask & m)) {
+        signal_interrupt_thread(t);
+    }
+}
+
 static void signal_stop_process_threads(process_t *p, const char *reason) {
     if (!p) {
         return;

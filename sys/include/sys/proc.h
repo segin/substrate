@@ -269,6 +269,7 @@ typedef struct thread {
     // Sleep Timeout
     uint64_t      sleep_expiry; // Absolute tick count when sleep expires (0 = none)
     int           sleep_status; // Return status of sleep (e.g., -ETIMEDOUT)
+    uint32_t      futex_bitset; // FUTEX_WAIT_BITSET wait mask (FUTEX_WAKE_BITSET filter)
 
     // Signals
     uint32_t      sig_pending;

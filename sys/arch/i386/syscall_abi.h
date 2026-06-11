@@ -5,6 +5,7 @@
 #include <string.h>
 #include <arch/i386/idt.h>
 #include <exec/perso/personality.h>
+#include <sys/copy.h>
 
 static inline void i386_extract_syscall_args(const struct personality *p,
                                              const registers_t *regs,
@@ -28,16 +29,27 @@ static inline void i386_extract_syscall_args(const struct personality *p,
          * below and saw garbage args (manifested as ld.elf_so's mmap()
          * appearing to "succeed" with bogus low addresses → SIGSEGV in
          * imalloc on first writeback). */
-        const uint32_t *user_stack = (const uint32_t *)(uintptr_t)regs->useresp;
-
-        args[0] = user_stack[1];
-        args[1] = user_stack[2];
-        args[2] = user_stack[3];
-        args[3] = user_stack[4];
-        args[4] = user_stack[5];
-        args[5] = user_stack[6];
-        args[6] = user_stack[7];
-        args[7] = user_stack[8];
+        /*
+         * Args are the cdecl-pushed words at useresp[1..8] (useresp[0] is
+         * the libc stub's return address).  Read them fault-safely via
+         * copyin: a thread whose esp sits within 0x20 of the TOP of its
+         * (pthread) stack mapping would otherwise have this unconditional
+         * 8-word read overrun the mapping and page-fault the KERNEL while
+         * extracting args -- a userspace stack state must never panic the
+         * kernel.  Real syscalls use <= 6 args, so the overrun words are
+         * unused; on the rare near-top esp the bulk read fails and we fall
+         * back to word-by-word, stopping at the first unreadable word (the
+         * remaining args stay zero from the memset above).
+         */
+        const char *sp = (const char *)(uintptr_t)regs->useresp + sizeof(uint32_t);
+        if (copyin(sp, args, 8 * sizeof(uint32_t)) != 0) {
+            memset(args, 0, sizeof(uint32_t) * 8);
+            for (int i = 0; i < 8; i++) {
+                if (copyin(sp + (size_t)i * sizeof(uint32_t),
+                           &args[i], sizeof(uint32_t)) != 0)
+                    break;
+            }
+        }
         return;
     }
 

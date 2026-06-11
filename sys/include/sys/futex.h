@@ -42,6 +42,13 @@
 #define FUTEX_REQUEUE_PRIVATE   (FUTEX_REQUEUE | FUTEX_PRIVATE_FLAG)
 
 /*
+ * Bitset match-any value for FUTEX_WAIT_BITSET / FUTEX_WAKE_BITSET.
+ * A plain FUTEX_WAIT registers with this mask so a FUTEX_WAKE_BITSET
+ * carrying any bit will match it (and plain FUTEX_WAKE matches all).
+ */
+#define FUTEX_BITSET_MATCH_ANY  0xffffffff
+
+/*
  * Robust Futex Constants
  *
  * Robust futexes handle owner death - when a thread dies holding a mutex,
@@ -83,6 +90,7 @@ struct robust_list_head {
 #define FUTEX_OP_OR         2   /* *(int *)uaddr2 |= oparg */
 #define FUTEX_OP_ANDN       3   /* *(int *)uaddr2 &= ~oparg */
 #define FUTEX_OP_XOR        4   /* *(int *)uaddr2 ^= oparg */
+#define FUTEX_OP_OPARG_SHIFT 8  /* OR'd into op: use (1 << oparg) as oparg */
 
 /* Comparison ops for FUTEX_WAKE_OP */
 #define FUTEX_OP_CMP_EQ     0   /* oldval == cmparg */

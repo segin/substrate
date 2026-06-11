@@ -126,6 +126,7 @@
 #define NETBSD_SYS_mkdir          136
 #define NETBSD_SYS_rmdir          137
 #define NETBSD_SYS_uname          164
+#define NETBSD_SYS___futex        166   /* NetBSD 8+ __futex(2), 7 args */
 #define NETBSD_SYS_stat           188
 #define NETBSD_SYS_fstat          189
 #define NETBSD_SYS_lstat          190

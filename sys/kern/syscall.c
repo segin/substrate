@@ -1186,7 +1186,10 @@ static void thr_kill_visit(thread_t *t, void *arg) {
     struct thr_kill_ctx *c = (struct thr_kill_ctx *)arg;
     if (t->proc != c->target) return;
     if (t == c->skip) return;
-    if (c->sig != 0) t->sig_pending |= sigmask(c->sig);
+    if (c->sig != 0) {
+        t->sig_pending |= sigmask(c->sig);
+        signal_wake_thread(t, c->sig);
+    }
 }
 
 int sys_thr_kill(long id, int sig) {
@@ -1202,6 +1205,7 @@ int sys_thr_kill(long id, int sig) {
     if (!t) return -3;
     if (sig == 0) return 0;
     t->sig_pending |= sigmask(sig);
+    signal_wake_thread(t, sig);
     return 0;
 }
 
@@ -1218,6 +1222,7 @@ int sys_thr_kill2(pid_t pid, long id, int sig) {
     if (!t || t->proc != target_proc) return -3;
     if (sig == 0) return 0;
     t->sig_pending |= sigmask(sig);
+    signal_wake_thread(t, sig);
     return 0;
 }
 

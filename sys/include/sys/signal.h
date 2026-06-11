@@ -7,6 +7,7 @@
 
 // Forward declaration
 struct process;
+struct thread;
 
 #define SIGHUP     1
 #define SIGINT     2
@@ -158,6 +159,7 @@ typedef struct stack {
 int sys_sigaltstack(const void *ss, void *oss);
 
 void psignal(struct process *p, int sig);
+void signal_wake_thread(struct thread *t, int sig);
 void pgsignal(int pgrp, int sig);
 void trapsignal(struct process *p, int sig, int code);
 void sigexit(struct process *p, int sig);
