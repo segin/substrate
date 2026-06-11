@@ -180,7 +180,12 @@ int linux_sys_sigreturn(void *regs_ptr) {
     regs->esi = sc.esi;
     regs->ebp = sc.ebp;
     regs->useresp = sc.esp;
-    regs->eflags = sc.eflags;
+    /* Sanitize EFLAGS: keep kernel-owned bits (IOPL/VM/RF/NT) from the
+     * interrupted frame, take only user-modifiable bits from the signal
+     * frame.  A raw assignment lets a crafted sigcontext set IOPL=3 and
+     * gain ring-3 port I/O (privilege escalation) — matches native
+     * sys_sigreturn's EFLAGS_KERNEL_MASK/USER_MASK filter. */
+    regs->eflags = (regs->eflags & 0x00033200u) | (sc.eflags & 0xFFCCCDFFu);
     regs->cs = sc.cs | 3;
     regs->ss = sc.ss | 3;
     regs->ds = sc.ds | 3;
@@ -208,7 +213,9 @@ int linux_sys_rt_sigreturn(void *regs_ptr) {
     regs->esi = uc.uc_mcontext.esi;
     regs->ebp = uc.uc_mcontext.ebp;
     regs->useresp = uc.uc_mcontext.esp;
-    regs->eflags = uc.uc_mcontext.eflags;
+    /* EFLAGS sanitize — see linux_sys_sigreturn (IOPL escalation guard). */
+    regs->eflags = (regs->eflags & 0x00033200u) |
+                   (uc.uc_mcontext.eflags & 0xFFCCCDFFu);
     regs->cs = uc.uc_mcontext.cs | 3;
     regs->ss = uc.uc_mcontext.ss | 3;
     regs->ds = uc.uc_mcontext.ds | 3;

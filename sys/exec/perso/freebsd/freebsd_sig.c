@@ -86,7 +86,10 @@ int freebsd_sys_sigreturn(void *regs_ptr) {
     regs->esi = sc.sc_esi;
     regs->ebp = sc.sc_ebp;
     regs->useresp = sc.sc_esp;
-    regs->eflags = sc.sc_efl;
+    /* EFLAGS sanitize: keep kernel-owned bits (IOPL/VM/RF/NT), take only
+     * user bits from the frame — a raw assignment is an IOPL privilege
+     * escalation.  Mirrors native sys_sigreturn. */
+    regs->eflags = (regs->eflags & 0x00033200u) | (sc.sc_efl & 0xFFCCCDFFu);
     regs->cs = sc.sc_cs | 3;
     regs->ss = sc.sc_ss | 3;
     regs->ds = sc.sc_ds | 3;
