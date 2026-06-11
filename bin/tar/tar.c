@@ -476,7 +476,13 @@ static int extract_reg(FILE *in, const char *path, off_t size) {
     int fd = -1;
     if (!(opt.no_overwrite && access(path, F_OK) == 0)) {
         if (ensure_parents(path)) return -1;
-        fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+        /* Remove any existing entry at the destination first so a
+         * pre-planted symlink (from an earlier archive member) is not
+         * followed and truncated through — the classic archive symlink
+         * traversal.  O_NOFOLLOW is belt-and-suspenders for hosts whose
+         * open(2) honours it. */
+        unlink(path);
+        fd = open(path, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW, 0666);
         if (fd < 0) return -1;
     }
     unsigned char b[TAR_BLOCK];
@@ -592,13 +598,15 @@ static int process_read(FILE *in, bool extract) {
                 break;
             case '2':
                 if (!opt.no_overwrite || access(target, F_OK)) {
-                    if (ensure_parents(target) || symlink(ps.linkpath ? ps.linkpath : h.linkname, target)) perror(target);
+                    if (ensure_parents(target)) { perror(target); }
+                    else { unlink(target); if (symlink(ps.linkpath ? ps.linkpath : h.linkname, target)) perror(target); }
                 }
                 if (skip_padded(in, hsize)) return -1;
                 break;
             case '1':
                 if (!opt.no_overwrite || access(target, F_OK)) {
-                    if (ensure_parents(target) || link(ps.linkpath ? ps.linkpath : h.linkname, target)) perror(target);
+                    if (ensure_parents(target)) { perror(target); }
+                    else { unlink(target); if (link(ps.linkpath ? ps.linkpath : h.linkname, target)) perror(target); }
                 }
                 if (skip_padded(in, hsize)) return -1;
                 break;

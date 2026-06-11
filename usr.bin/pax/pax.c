@@ -424,10 +424,10 @@ static void cmd_write(int argc, char **argv, const struct opts *o) {
     if (o->archive) fclose(f);
 }
 
-static int read_octal(const char *s, size_t n) {
+static unsigned long long read_octal(const char *s, size_t n) {
     char tmp[32];
     snprintf(tmp, sizeof(tmp), "%.*s", (int)n, s);
-    return (int)strtol(tmp, NULL, 8);
+    return strtoull(tmp, NULL, 8);
 }
 
 static void parse_pax_ext(struct pax_kv *kv, const char *buf, size_t n) {
@@ -473,7 +473,14 @@ static void extract_tar(FILE *f, const struct opts *o) {
             continue;
         }
         zeros = 0;
-        sz = (size_t)read_octal(h.size, sizeof(h.size));
+        {
+            unsigned long long raw_sz = read_octal(h.size, sizeof(h.size));
+            /* Reject a size that would wrap size_t (undersizing the
+             * malloc below) or the (sz + 511) seek rounding on this
+             * 32-bit target. */
+            if (raw_sz > (unsigned long long)(SIZE_MAX - TAR_BLOCK)) die("tar member size too large");
+            sz = (size_t)raw_sz;
+        }
         if (h.typeflag == 'x') {
             data = malloc(sz + 1); if (!data) die("malloc");
             if (!read_full(f, data, sz)) die("read pax ext");
@@ -499,6 +506,7 @@ static void extract_tar(FILE *f, const struct opts *o) {
         } else if (h.typeflag == '2') {
             const char *ln = kv.has_linkpath ? kv.linkpath : h.linkname;
             ensure_parent_dirs(path);
+            unlink(path);
             symlink(ln, path);
         } else {
             if (o->no_overwrite && access(path, F_OK) == 0) {
@@ -507,6 +515,10 @@ static void extract_tar(FILE *f, const struct opts *o) {
                 continue;
             }
             ensure_parent_dirs(path);
+            /* Remove any pre-planted symlink at the destination so the
+             * write below cannot be redirected outside the extraction
+             * tree (archive symlink traversal). */
+            unlink(path);
             out = fopen(path, "wb");
             if (!out) die("create output file");
             while (sz > 0) {
@@ -517,12 +529,12 @@ static void extract_tar(FILE *f, const struct opts *o) {
                 sz -= r;
             }
             fclose(out);
-            restore_attrs(o, path, read_octal(h.mode, sizeof(h.mode)), kv.has_uid ? kv.uid : read_octal(h.uid, sizeof(h.uid)), kv.has_gid ? kv.gid : read_octal(h.gid, sizeof(h.gid)), 0);
+            restore_attrs(o, path, (mode_t)read_octal(h.mode, sizeof(h.mode)), kv.has_uid ? kv.uid : (long)read_octal(h.uid, sizeof(h.uid)), kv.has_gid ? kv.gid : (long)read_octal(h.gid, sizeof(h.gid)), 0);
             memset(&kv, 0, sizeof(kv));
             continue;
         }
         if (sz) fseek(f, (long)((sz + 511) & ~511), SEEK_CUR);
-        restore_attrs(o, path, read_octal(h.mode, sizeof(h.mode)), kv.has_uid ? kv.uid : read_octal(h.uid, sizeof(h.uid)), kv.has_gid ? kv.gid : read_octal(h.gid, sizeof(h.gid)), 0);
+        restore_attrs(o, path, (mode_t)read_octal(h.mode, sizeof(h.mode)), kv.has_uid ? kv.uid : (long)read_octal(h.uid, sizeof(h.uid)), kv.has_gid ? kv.gid : (long)read_octal(h.gid, sizeof(h.gid)), 0);
         memset(&kv, 0, sizeof(kv));
     }
 }
@@ -556,7 +568,7 @@ static void extract_cpio_newc(FILE *f, const struct opts *o) {
             char lbuf[PATH_MAX];
             if (filesize >= sizeof(lbuf)) die("symlink too long");
             read_full(f, lbuf, filesize); lbuf[filesize] = '\0';
-            ensure_parent_dirs(path); symlink(lbuf, path);
+            ensure_parent_dirs(path); unlink(path); symlink(lbuf, path);
         } else {
             unsigned left = filesize;
             char buf[4096];
@@ -565,6 +577,9 @@ static void extract_cpio_newc(FILE *f, const struct opts *o) {
                 continue;
             }
             ensure_parent_dirs(path);
+            /* Remove any pre-planted symlink at the destination so the
+             * write cannot escape the extraction tree. */
+            unlink(path);
             out = fopen(path, "wb"); if (!out) die("create output");
             while (left) {
                 size_t r = left > sizeof(buf) ? sizeof(buf) : left;

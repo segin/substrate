@@ -57,7 +57,8 @@ char *
 __crypt_sha256(const char *key, const char *setting, char *out, size_t outsz)
 {
     sha256_ctx    ctxA, ctxB, ctxDP, ctxDS;
-    uint8_t       altA[32], P[32], S[32], temp[32];
+    uint8_t       altA[32], temp[32];
+    uint8_t      *P = NULL, *S = NULL;
     const char   *salt;
     size_t        salt_len;
     size_t        key_len;
@@ -92,6 +93,18 @@ __crypt_sha256(const char *key, const char *setting, char *out, size_t outsz)
         if (salt_len > SALT_MAX) salt_len = SALT_MAX;
     }
     key_len = strlen(key);
+
+    /* P holds key_len bytes and S holds salt_len bytes; both are
+     * unbounded with respect to a fixed buffer (the key especially),
+     * so allocate them to the real length to avoid a stack/heap
+     * overflow.  Allocate at least one byte to dodge malloc(0). */
+    P = malloc(key_len ? key_len : 1);
+    S = malloc(salt_len ? salt_len : 1);
+    if (P == NULL || S == NULL) {
+        free(P);
+        free(S);
+        return NULL;
+    }
 
     /* Drepper's reference algorithm.  Steps are numbered in the spec. */
     __sha256_init(&ctxA);
@@ -172,14 +185,14 @@ __crypt_sha256(const char *key, const char *setting, char *out, size_t outsz)
     cp = out;
     if (rounds_custom) {
         int n = snprintf(out, outsz, "$5$rounds=%u$", rounds);
-        if (n < 0 || (size_t)n >= outsz) return NULL;
+        if (n < 0 || (size_t)n >= outsz) { out = NULL; goto done; }
         cp += n;
     } else {
-        if (outsz < 4) return NULL;
+        if (outsz < 4) { out = NULL; goto done; }
         cp[0] = '$'; cp[1] = '5'; cp[2] = '$';
         cp += 3;
     }
-    if ((size_t)(cp + salt_len + 1 - out) > outsz) return NULL;
+    if ((size_t)(cp + salt_len + 1 - out) > outsz) { out = NULL; goto done; }
     memcpy(cp, salt, salt_len);
     cp += salt_len;
     *cp++ = '$';
@@ -197,17 +210,18 @@ __crypt_sha256(const char *key, const char *setting, char *out, size_t outsz)
     b64_from_24bit(&cp, out_end, altA[9],  altA[19], altA[29], 3);
     b64_from_24bit(&cp, out_end, 0,        altA[31], altA[30], 2);
 
-    if (cp >= out_end) return NULL;
+    if (cp >= out_end) { out = NULL; goto done; }
     *cp = '\0';
 
+done:
     /* Scrub. */
     memset(&ctxA, 0, sizeof(ctxA));
     memset(&ctxB, 0, sizeof(ctxB));
     memset(&ctxDP, 0, sizeof(ctxDP));
     memset(&ctxDS, 0, sizeof(ctxDS));
     memset(altA, 0, sizeof(altA));
-    memset(P, 0, sizeof(P));
-    memset(S, 0, sizeof(S));
+    if (P != NULL) { memset(P, 0, key_len ? key_len : 1); free(P); }
+    if (S != NULL) { memset(S, 0, salt_len ? salt_len : 1); free(S); }
     memset(temp, 0, sizeof(temp));
 
     return out;

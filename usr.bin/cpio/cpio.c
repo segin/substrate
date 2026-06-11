@@ -564,7 +564,11 @@ static int extract_entry(int afd, const entry_t *e, const options_t *opt, const 
         set_minor_error();
     } else {
         off_t outoff = 0;
-        fd = open(full, O_WRONLY | O_CREAT | O_TRUNC, e->mode & 07777);
+        /* Remove any pre-planted symlink at the destination so the write
+         * is not redirected outside the extraction tree (archive symlink
+         * traversal); O_NOFOLLOW guards hosts whose open(2) honours it. */
+        unlink(full);
+        fd = open(full, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW, e->mode & 07777);
         if (fd < 0) {
             perror(full);
             set_minor_error();

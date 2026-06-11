@@ -792,6 +792,16 @@ static void read_archive(const char *path) {
         if (memcmp(hdr.ar_name, "#1/", 3) == 0) {
             int name_len = atoi(hdr.ar_name + 3);
             int raw_name_len = name_len;
+            /* name_len is attacker-controlled: a negative value would
+             * make malloc()/read() wrap to a huge size_t and the
+             * m->name[name_len] terminator an out-of-bounds write, and
+             * a value exceeding the member size underflows payload_size.
+             * Reject anything not within the member's own data. */
+            if (name_len < 0 || (long)name_len > size) {
+                warnx("%s: invalid extended member name length", path);
+                free(m);
+                break;
+            }
             m->name = malloc(name_len + 1);
             if (m->name == NULL) {
                 errx(1, "out of memory");

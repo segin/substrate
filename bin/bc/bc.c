@@ -12,6 +12,17 @@
 #include <unistd.h>
 #include "num.h"
 
+/*
+ * Upper bound on an array index.  The capacity growth below computes
+ * (idx + 1) * 2 and repeatedly doubles new_cap as an int; an unbounded
+ * attacker-controlled idx overflows that arithmetic to a small or
+ * negative capacity, undersizing the allocation while array[idx] is
+ * still written — a heap out-of-bounds write.  POSIX guarantees
+ * BC_DIM_MAX >= 65535; capping well below INT_MAX keeps the doubling
+ * arithmetic from overflowing.
+ */
+#define BC_DIM_MAX 16777216  /* 2^24 elements */
+
 // Configuration
 int opt_s = 0; // POSIX strict mode
 int opt_w = 0; // Warn on extensions
@@ -1102,7 +1113,7 @@ bc_num *get_var_val(const char *name) {
 }
 
 bc_num *get_arr_val(const char *name, int idx) {
-    if (idx < 0) lex_error("array index out of bounds");
+    if (idx < 0 || idx >= BC_DIM_MAX) lex_error("array index out of bounds");
     local_var_t *l = get_local(name);
     if (l) {
         if (!l->array) {
@@ -1185,7 +1196,7 @@ void set_var_val(const char *name, bc_num *val) {
 }
 
 void set_arr_val(const char *name, int idx, bc_num *val) {
-    if (idx < 0) lex_error("array index out of bounds");
+    if (idx < 0 || idx >= BC_DIM_MAX) lex_error("array index out of bounds");
     local_var_t *l = get_local(name);
     if (l) {
         if (!l->array) {
