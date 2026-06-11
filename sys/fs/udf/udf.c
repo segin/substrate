@@ -91,10 +91,18 @@ int udf_read_tag(fs_node_t *dev, uint32_t sector, struct udf_tag *tag,
         return -1;
     }
     
-    /* Verify CRC if length > 0 */
-    if (tag->desc_crc_len > 0) {
+    /* Verify CRC if length > 0.  tag->desc_crc_len is an untrusted
+     * on-disk uint16 (up to 65535) but the CRC data lives in the
+     * caller's `size`-byte buffer after the 16-byte tag.  A crafted
+     * descriptor could claim a length far past the buffer, driving
+     * udf_crc to read tens of KiB of out-of-bounds kernel memory.
+     * Clamp to the bytes actually present in the buffer. */
+    if (tag->desc_crc_len > 0 && size > sizeof(struct udf_tag)) {
         uint8_t *data = (uint8_t *)buffer + sizeof(struct udf_tag);
-        uint16_t crc = udf_crc(data, tag->desc_crc_len);
+        uint32_t crc_len = tag->desc_crc_len;
+        uint32_t avail = size - (uint32_t)sizeof(struct udf_tag);
+        if (crc_len > avail) crc_len = avail;
+        uint16_t crc = udf_crc(data, crc_len);
         if (crc != tag->desc_crc) {
             kprint("UDF: Descriptor CRC mismatch\n");
             return -1;
@@ -303,8 +311,25 @@ uint32_t udf_read_file(struct udf_fs *fs, struct udf_fe *fe,
     uint8_t *alloc_area = ((uint8_t *)fe) + sizeof(struct udf_fe) + fe->ext_attr_length;
     
     if (ad_type == UDF_ICB_FLAG_AD_INLINE) {
-        /* Inline data - directly in the allocation area */
-        if (offset + size > fe->info_length) size = fe->info_length - offset;
+        /* Inline (embedded) data lives directly in the allocation area
+         * of the FE sector.  fe->info_length and offset/size are all
+         * untrusted: the original `fe->info_length - offset` underflowed
+         * to a near-4 GiB count when offset exceeded info_length, and
+         * `offset + size` could wrap, either way driving an enormous
+         * out-of-bounds memcpy out of the 2048-byte FE sector buffer
+         * and into the caller's buffer.  Bound everything to the bytes
+         * actually embedded in the sector. */
+        uint32_t header = (uint32_t)sizeof(struct udf_fe) + fe->ext_attr_length;
+        uint32_t avail  = (header < UDF_SECTOR_SIZE) ? (UDF_SECTOR_SIZE - header) : 0;
+        uint32_t inline_len = fe->info_length;
+        if (inline_len > avail) inline_len = avail;   /* clamp to sector */
+
+        if (offset >= inline_len) {                   /* nothing to read */
+            kfree(sector_buf, UDF_SECTOR_SIZE);
+            return 0;
+        }
+        uint32_t remain = inline_len - offset;        /* underflow-safe */
+        if (size > remain) size = remain;
         memcpy(buffer, alloc_area + offset, size);
         kfree(sector_buf, UDF_SECTOR_SIZE);
         return size;

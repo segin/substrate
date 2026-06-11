@@ -181,6 +181,21 @@ int ext2_find_next_zero_bit(void *bitmap, uint32_t total_bits, uint32_t start, u
 // serves cached sectors and coalesces misses, so this is a plain device read.
 uint32_t ext2_read_block(ext2_fs_t *fs, uint32_t block_num, void *buffer) {
     if (!fs || !fs->device || !fs->device->read) return 0;
+    /* block_num frequently originates from untrusted on-disk metadata
+     * (inode i_block[] entries, indirect/double/triple-indirect block
+     * pointers, group-descriptor table fields).  A crafted image can
+     * point these past the end of the device, turning a file read into
+     * an arbitrary device-offset read.  Reject anything outside the
+     * filesystem's data range.  Block 0 is never a valid target for
+     * this primitive (the superblock is read directly via the device);
+     * a 0 pointer in an inode means "hole" and is handled by callers
+     * before they reach here, so treat 0 as out-of-range too.  Zero the
+     * buffer so a rejected indirect-block read yields a hole rather than
+     * stale scratch contents. */
+    if (block_num == 0 || block_num >= fs->sb.s_blocks_count) {
+        if (buffer) memset(buffer, 0, fs->block_size);
+        return 0;
+    }
     off_t offset = (off_t)block_num * fs->block_size;
     return fs->device->read(fs->device, offset, fs->block_size, buffer);
 }
@@ -189,6 +204,15 @@ uint32_t ext2_read_block(ext2_fs_t *fs, uint32_t block_num, void *buffer) {
 // caches and coalesces underneath.
 uint32_t ext2_read_blocks(ext2_fs_t *fs, uint32_t block_num, uint32_t count, void *buffer) {
     if (!fs || !fs->device || !fs->device->read) return 0;
+    /* Same untrusted-block-number guard as ext2_read_block, extended to
+     * the [block_num, block_num+count) span.  Guard against overflow in
+     * the end-of-range computation as well as the start. */
+    if (count == 0 || block_num == 0 ||
+        block_num >= fs->sb.s_blocks_count ||
+        count > fs->sb.s_blocks_count - block_num) {
+        if (buffer) memset(buffer, 0, fs->block_size * count);
+        return 0;
+    }
     off_t offset = (off_t)block_num * fs->block_size;
     return fs->device->read(fs->device, offset, fs->block_size * count, buffer);
 }
@@ -1438,11 +1462,28 @@ static int ext2_getattr(fs_node_t *node, struct fs_attr *a) {
 int ext2_readlink(fs_node_t *node, char *buf, size_t size) {
     ext2_node_t *ctx = (ext2_node_t *)(uintptr_t)node->impl;
     ext2_inode_t *inode = &ctx->inode;
-    
+
+    /* A symlink target must fit in the caller's buffer with room for
+     * the NUL terminator.  Both inode->i_size (untrusted on-disk
+     * metadata) and `size` are bound here without any addition that
+     * could overflow: the previous `size < link_size + 1` test wrapped
+     * to 0 when i_size was 0xFFFFFFFF, leaving link_size enormous and
+     * driving a ~4 GiB ext2_inode_read into buf plus a wild
+     * buf[link_size] NUL write.  A 0-length caller buffer leaves no
+     * room even for the terminator. */
+    if (size == 0) return 0;
+
+    /* Cap an absurd on-disk symlink length.  A valid symlink target is
+     * at most one filesystem block (PATH_MAX-class); anything larger is
+     * corrupt.  Then bound to the caller's buffer (leaving room for the
+     * NUL).  Both clamps are subtractions/comparisons only — no
+     * additions that could wrap. */
     uint32_t link_size = inode->i_size;
-    if (size < link_size + 1) link_size = size - 1;
-    
-    // Fast symlink: if size <= 60, target is stored in i_block[]
+    if (ctx->fs && link_size > ctx->fs->block_size)
+        link_size = ctx->fs->block_size;
+    if (link_size >= size) link_size = (uint32_t)(size - 1);
+
+    // Fast symlink: if i_size <= 60, target is stored in i_block[]
     if (inode->i_size <= 60) {
         /* Clamp to sizeof(i_block) to prevent overflow (finding #26) */
         if (link_size > 60) link_size = 60;
@@ -2013,6 +2054,17 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
     fs->blocks_per_group = fs->sb.s_blocks_per_group;
     if (fs->blocks_per_group == 0) {
         kprint("EXT2: Invalid blocks_per_group\n");
+        kfree(fs, sizeof(ext2_fs_t));
+        return NULL;
+    }
+    /* s_inodes_per_group is attacker-controlled on-disk metadata and is
+     * used as a divisor in ext2_read_inode ((inode_num-1) / inodes_per_group)
+     * and as a multiplier for inode-table sizing.  Zero would trap the
+     * kernel with a divide error on the first inode read; an absurdly
+     * large value yields nonsensical group math.  Reject both. */
+    if (fs->inodes_per_group == 0 ||
+        fs->inodes_per_group > fs->sb.s_inodes_count) {
+        kprint("EXT2: Invalid inodes_per_group\n");
         kfree(fs, sizeof(ext2_fs_t));
         return NULL;
     }
