@@ -194,16 +194,31 @@ static int parse_aarch64_feature_bits(const struct elf_section *sec, uint32_t *o
     p = sec->data;
     namesz = elf__rd32(p + 0, sec->obj->endian);
     descsz = elf__rd32(p + 4, sec->obj->endian);
-    off = 12;
-    off = (off + namesz + 3u) & ~3u;
-    if (off + descsz > sec->data_size) {
+    /* namesz/descsz are attacker uint32; size_t adds wrap on 32-bit and
+     * defeat the bound. Bound each field, then compute the span in 64-bit. */
+    if ((uint64_t)namesz > (uint64_t)sec->data_size ||
+        (uint64_t)descsz > (uint64_t)sec->data_size) {
         return 0;
+    }
+    {
+        uint64_t off64;
+        uint64_t end64;
+        if (!elf__u64_add(12u, namesz, &off64)) {
+            return 0;
+        }
+        off64 = (off64 + 3u) & ~(uint64_t)3u;
+        if (!elf__u64_add(off64, descsz, &end64) || end64 > (uint64_t)sec->data_size) {
+            return 0;
+        }
+        off = (size_t)off64;
     }
     while (off + 8 <= sec->data_size && descsz >= 8) {
         uint32_t t = elf__rd32(p + off, sec->obj->endian);
         uint32_t sz = elf__rd32(p + off + 4, sec->obj->endian);
+        uint64_t item_end;
         off += 8;
-        if (off + sz > sec->data_size) {
+        if (!elf__u64_add((uint64_t)off, sz, &item_end) ||
+            item_end > (uint64_t)sec->data_size) {
             return 0;
         }
         if (t == GNU_PROPERTY_AARCH64_FEATURE_1_AND && sz >= 4) {
@@ -1242,7 +1257,15 @@ elf_section_t *elf_link_add_got_section(elfobj_t *obj, size_t entries) {
         got->addralign = obj->cls == ELFOBJ_CLASS_64 ? 8 : 4;
     }
 
-    add_sz = entries * (obj->cls == ELFOBJ_CLASS_64 ? 8 : 4);
+    {
+        uint64_t bytes;
+        /* entries is API-supplied; harden the size multiply against wrap. */
+        if (!elf__u64_mul(entries, obj->cls == ELFOBJ_CLASS_64 ? 8u : 4u, &bytes) ||
+            bytes > (uint64_t)SIZE_MAX) {
+            return NULL;
+        }
+        add_sz = (size_t)bytes;
+    }
     if (add_sz == 0) {
         return got;
     }
@@ -1280,7 +1303,14 @@ elf_section_t *elf_link_add_plt_section(elfobj_t *obj, size_t entries) {
         plt->addralign = 16;
     }
 
-    add_sz = entries * 16;
+    {
+        uint64_t bytes;
+        /* entries is API-supplied; harden the size multiply against wrap. */
+        if (!elf__u64_mul(entries, 16u, &bytes) || bytes > (uint64_t)SIZE_MAX) {
+            return NULL;
+        }
+        add_sz = (size_t)bytes;
+    }
     if (add_sz == 0) {
         return plt;
     }

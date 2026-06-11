@@ -212,18 +212,37 @@ static int validate_note_gnu_property_aarch64(validate_ctx_t *ctx, const struct 
         return report_diag(ctx, ELF_DIAG_WARNING, ELF_ERR_FORMAT, index,
                            ".note.gnu.property unexpected note type");
     }
-    off = 12;
-    off = (off + namesz + 3u) & ~3u;
-    if (off + descsz > s->data_size) {
+    /* namesz/descsz are attacker uint32; a size_t add of off+namesz or
+     * off+descsz wraps on 32-bit targets and bypasses the bound. Compute
+     * in 64-bit and reject either field individually exceeding data_size
+     * before the align-mask. */
+    if ((uint64_t)namesz > (uint64_t)s->data_size ||
+        (uint64_t)descsz > (uint64_t)s->data_size) {
         return report_diag(ctx, ELF_DIAG_WARNING, ELF_ERR_BOUNDS, index,
                            ".note.gnu.property desc out of bounds");
+    }
+    {
+        uint64_t off64;
+        uint64_t end64;
+        if (!elf__u64_add(12u, namesz, &off64)) {
+            return report_diag(ctx, ELF_DIAG_WARNING, ELF_ERR_BOUNDS, index,
+                               ".note.gnu.property desc out of bounds");
+        }
+        off64 = (off64 + 3u) & ~(uint64_t)3u;
+        if (!elf__u64_add(off64, descsz, &end64) || end64 > (uint64_t)s->data_size) {
+            return report_diag(ctx, ELF_DIAG_WARNING, ELF_ERR_BOUNDS, index,
+                               ".note.gnu.property desc out of bounds");
+        }
+        off = (size_t)off64;
     }
     while (descsz >= 8 && off + 8 <= s->data_size) {
         uint32_t pr_type = elf__rd32(s->data + off, s->obj->endian);
         uint32_t pr_datasz = elf__rd32(s->data + off + 4, s->obj->endian);
         uint32_t bits = 0;
+        uint64_t item_end;
         off += 8;
-        if (off + pr_datasz > s->data_size) {
+        if (!elf__u64_add((uint64_t)off, pr_datasz, &item_end) ||
+            item_end > (uint64_t)s->data_size) {
             return report_diag(ctx, ELF_DIAG_WARNING, ELF_ERR_BOUNDS, index,
                                ".note.gnu.property item out of bounds");
         }
@@ -290,18 +309,35 @@ static int validate_x86_gnu_property(validate_ctx_t *ctx, const struct elf_secti
             return 1;
         }
     }
-    off = 12;
-    off = (off + namesz + 3u) & ~3u;
-    if (off + descsz > s->data_size) {
+    /* namesz/descsz are attacker uint32; size_t adds wrap on 32-bit. Bound
+     * each field, then compute the desc span in 64-bit. */
+    if ((uint64_t)namesz > (uint64_t)s->data_size ||
+        (uint64_t)descsz > (uint64_t)s->data_size) {
         return report_diag(ctx, ELF_DIAG_WARNING, ELF_ERR_BOUNDS, index,
                            ".note.gnu.property desc out of bounds");
+    }
+    {
+        uint64_t off64;
+        uint64_t end64;
+        if (!elf__u64_add(12u, namesz, &off64)) {
+            return report_diag(ctx, ELF_DIAG_WARNING, ELF_ERR_BOUNDS, index,
+                               ".note.gnu.property desc out of bounds");
+        }
+        off64 = (off64 + 3u) & ~(uint64_t)3u;
+        if (!elf__u64_add(off64, descsz, &end64) || end64 > (uint64_t)s->data_size) {
+            return report_diag(ctx, ELF_DIAG_WARNING, ELF_ERR_BOUNDS, index,
+                               ".note.gnu.property desc out of bounds");
+        }
+        off = (size_t)off64;
     }
     while (descsz >= 8 && off + 8 <= s->data_size) {
         uint32_t t = elf__rd32(s->data + off, s->obj->endian);
         uint32_t sz = elf__rd32(s->data + off + 4, s->obj->endian);
         uint32_t bits = 0;
+        uint64_t item_end;
         off += 8;
-        if (off + sz > s->data_size) {
+        if (!elf__u64_add((uint64_t)off, sz, &item_end) ||
+            item_end > (uint64_t)s->data_size) {
             return report_diag(ctx, ELF_DIAG_WARNING, ELF_ERR_BOUNDS, index,
                                ".note.gnu.property item out of bounds");
         }
@@ -353,8 +389,14 @@ static int validate_eh_frame_ra(validate_ctx_t *ctx, const struct elf_section *s
         return 0;
     }
     len = elf__rd32(s->data + off, s->obj->endian);
-    if (len == 0 || off + 4 + len > s->data_size) {
-        return 0;
+    {
+        uint64_t len_end;
+        /* len is attacker uint32; off + 4 + len wraps a size_t on 32-bit. */
+        if (len == 0 ||
+            !elf__u64_add((uint64_t)off + 4u, len, &len_end) ||
+            len_end > (uint64_t)s->data_size) {
+            return 0;
+        }
     }
     cie_id = elf__rd32(s->data + off + 4, s->obj->endian);
     if (cie_id != 0) {

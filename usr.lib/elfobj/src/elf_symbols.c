@@ -238,8 +238,10 @@ elf_err_t elf_symbol_set_shndx(elf_symbol_t *symbol, uint16_t shndx) {
     if (!is_mutable_obj(symbol->obj)) {
         return ELF_ERR_STATE;
     }
+    /* Valid section indices are 0..section_count-1; >= 0xff00 is the
+     * reserved/special range and is not a section index. */
     if (shndx != SHN_UNDEF && shndx != SHN_ABS && shndx != SHN_COMMON &&
-        shndx > symbol->obj->section_count) {
+        shndx < 0xff00u && shndx >= symbol->obj->section_count) {
         return ELF_ERR_BOUNDS;
     }
     symbol->shndx = shndx;

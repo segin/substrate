@@ -354,7 +354,7 @@ static void warnf(const char *fmt, ...);
 static int view_u16(const elf_view_t *view, size_t off, uint16_t *out) {
     const uint8_t *p;
 
-    if (view == NULL || out == NULL || off + 2 > view->size) {
+    if (view == NULL || out == NULL || off > view->size || view->size - off < 2) {
         return -1;
     }
     p = view->data + off;
@@ -369,7 +369,7 @@ static int view_u16(const elf_view_t *view, size_t off, uint16_t *out) {
 static int view_u32(const elf_view_t *view, size_t off, uint32_t *out) {
     const uint8_t *p;
 
-    if (view == NULL || out == NULL || off + 4 > view->size) {
+    if (view == NULL || out == NULL || off > view->size || view->size - off < 4) {
         return -1;
     }
     p = view->data + off;
@@ -385,7 +385,7 @@ static int view_u64(const elf_view_t *view, size_t off, uint64_t *out) {
     uint32_t lo;
     uint32_t hi;
 
-    if (view == NULL || out == NULL || off + 8 > view->size) {
+    if (view == NULL || out == NULL || off > view->size || view->size - off < 8) {
         return -1;
     }
     if (view->endian == ELFOBJ_ENDIAN_BE) {
@@ -399,6 +399,26 @@ static int view_u64(const elf_view_t *view, size_t off, uint64_t *out) {
     }
     *out = ((uint64_t)hi << 32) | lo;
     return 0;
+}
+
+/*
+ * Return a C string at offset off within a string table [tab, tab+tabsz)
+ * only if a terminating NUL exists within bounds; otherwise NULL. Guards
+ * against a hostile st_name/d_val pointing at an unterminated tail, which
+ * a bare (const char *)(tab + off) would over-read in any later strlen/print.
+ */
+static const char *strtab_str(const uint8_t *tab, size_t tabsz, uint64_t off) {
+    size_t i;
+
+    if (tab == NULL || off >= (uint64_t)tabsz) {
+        return NULL;
+    }
+    for (i = (size_t)off; i < tabsz; ++i) {
+        if (tab[i] == '\0') {
+            return (const char *)(tab + (size_t)off);
+        }
+    }
+    return NULL;
 }
 
 static const char *osabi_name(uint8_t osabi) {
@@ -466,7 +486,21 @@ static int read_shdr(const elf_view_t *view, const elf_header_t *hdr, size_t ind
     if (hdr->shentsize == 0) {
         return -1;
     }
-    off = (size_t)hdr->shoff + ((size_t)hdr->shentsize * index);
+    {
+        /* shoff + shentsize*index in 32-bit size_t both multiply and add
+         * wrap on hostile input; compute in 64-bit and reject a record
+         * that does not lie wholly within the mapped view. */
+        uint64_t prod = (uint64_t)hdr->shentsize * (uint64_t)index;
+        uint64_t off64 = (uint64_t)hdr->shoff + prod;
+        if (off64 < (uint64_t)hdr->shoff) {
+            return -1;
+        }
+        if (off64 > (uint64_t)view->size ||
+            (uint64_t)view->size - off64 < (uint64_t)hdr->shentsize) {
+            return -1;
+        }
+        off = (size_t)off64;
+    }
     memset(out, 0, sizeof(*out));
 
     if (view->cls == ELFOBJ_CLASS_64) {
@@ -567,10 +601,10 @@ static void section_flags_letters(uint16_t machine, uint64_t flags, char *buf, s
 }
 
 static const char *shstr_name(const uint8_t *tab, size_t tabsz, uint32_t off) {
-    if (tab == NULL || off >= tabsz) {
-        return "<corrupt>";
-    }
-    return (const char *)(tab + off);
+    const char *s = strtab_str(tab, tabsz, off);
+    /* Require an in-bounds NUL: an off into an unterminated tail otherwise
+     * over-reads in every consumer that treats this as a C string. */
+    return s != NULL ? s : "<corrupt>";
 }
 
 static void print_section_headers(const readelf_opts_t *opts, const elf_view_t *view,
@@ -651,7 +685,21 @@ static int read_phdr(const elf_view_t *view, const elf_header_t *hdr, size_t ind
     if (view == NULL || hdr == NULL || out == NULL || hdr->phentsize == 0) {
         return -1;
     }
-    off = (size_t)hdr->phoff + ((size_t)hdr->phentsize * index);
+    {
+        /* phoff + phentsize*index: 32-bit multiply and add both wrap on
+         * hostile input; compute in 64-bit and reject a record not wholly
+         * within the mapped view. */
+        uint64_t prod = (uint64_t)hdr->phentsize * (uint64_t)index;
+        uint64_t off64 = (uint64_t)hdr->phoff + prod;
+        if (off64 < (uint64_t)hdr->phoff) {
+            return -1;
+        }
+        if (off64 > (uint64_t)view->size ||
+            (uint64_t)view->size - off64 < (uint64_t)hdr->phentsize) {
+            return -1;
+        }
+        off = (size_t)off64;
+    }
     memset(out, 0, sizeof(*out));
     if (view->cls == ELFOBJ_CLASS_64) {
         if (view_u32(view, off + 0, &out->type) != 0) return -1;
@@ -795,9 +843,16 @@ static void print_program_headers(const elf_view_t *view, const elf_header_t *hd
                    name, ph.off, ph.vaddr, ph.paddr, ph.filesz, ph.memsz, flags, ph.align);
         }
 
-        if (ph.type == PT_INTERP && ph.off < view->size && ph.off + ph.filesz <= view->size) {
-            const char *interp = (const char *)(view->data + ph.off);
-            printf("      [Requesting program interpreter: %s]\n", interp);
+        if (ph.type == PT_INTERP && ph.filesz > 0 && ph.off <= (uint64_t)view->size &&
+            ph.filesz <= (uint64_t)view->size - ph.off) {
+            const char *interp = (const char *)(view->data + (size_t)ph.off);
+            size_t len = (size_t)ph.filesz;
+            const void *nul = memchr(interp, '\0', len);
+            /* Print bounded by filesz; a missing NUL must not over-read. */
+            if (nul != NULL) {
+                len = (size_t)((const char *)nul - interp);
+            }
+            printf("      [Requesting program interpreter: %.*s]\n", (int)len, interp);
         }
     }
 
@@ -992,8 +1047,13 @@ static void print_symbol_table_section(const readelf_opts_t *opts,
             }
         }
 
-        if (st_name < strtabsz) {
-            name = (const char *)(strtab + st_name);
+        {
+            /* Require an in-bounds NUL: st_name only being < strtabsz still
+             * over-reads in strlen()/demangle() if the tail is unterminated. */
+            const char *s = strtab_str(strtab, strtabsz, st_name);
+            if (s != NULL) {
+                name = s;
+            }
         }
         print_name = name;
         if (opts->demangle_names && name[0] != '\0') {
@@ -1427,10 +1487,12 @@ static int symbol_name_value_at(const elf_view_t *view, const elf_header_t *hdr,
             return -1;
         }
     }
-    if (st_name >= strsec.size) {
-        *name_out = "<corrupt>";
-    } else {
-        *name_out = (const char *)(view->data + strsec.off + st_name);
+    {
+        /* strsec.off + strsec.size <= view->size is validated above; require
+         * an in-bounds NUL so a consumer's strlen() cannot over-read. */
+        const char *s = strtab_str(view->data + (size_t)strsec.off,
+                                   (size_t)strsec.size, st_name);
+        *name_out = s != NULL ? s : "<corrupt>";
     }
     *value_out = st_value;
     return 0;
@@ -1690,8 +1752,11 @@ static void print_dynamic(const elf_view_t *view, const elf_header_t *hdr) {
 
             printf(" 0x%016llx %-20s ", (unsigned long long)d_tag_u, name);
             if (d_tag == DT_NEEDED || d_tag == DT_SONAME || d_tag == DT_RPATH || d_tag == DT_RUNPATH) {
-                if (strtab != NULL && d_val < strsz) {
-                    printf("[%s]", (const char *)(strtab + d_val));
+                /* d_val is an attacker uint64 string-table index; require an
+                 * in-bounds NUL before printing as a C string. */
+                const char *s = strtab_str(strtab, strsz, d_val);
+                if (s != NULL) {
+                    printf("[%s]", s);
                 } else {
                     printf("<corrupt>");
                 }
@@ -1715,16 +1780,6 @@ static void print_dynamic(const elf_view_t *view, const elf_header_t *hdr) {
             printf("\n");
         }
     }
-}
-
-static size_t align_up_size(size_t v, size_t align) {
-    size_t mask;
-
-    if (align == 0) {
-        return v;
-    }
-    mask = align - 1;
-    return (v + mask) & ~mask;
 }
 
 static void print_hex_dump(const uint8_t *p, size_t n) {
@@ -1804,15 +1859,20 @@ static void decode_gnu_note(uint32_t type, const uint8_t *desc, size_t descsz, s
             uint32_t psz = desc[off + 4] | (desc[off + 5] << 8) |
                            (desc[off + 6] << 16) | (desc[off + 7] << 24);
             size_t poff = off + 8;
-            size_t nnext;
-            if (poff + psz > descsz) {
+            uint64_t nnext;
+            uint64_t align64 = align ? (uint64_t)align : 1u;
+            /* psz is attacker uint32; poff + psz size_t add wraps on 32-bit. */
+            if ((uint64_t)poff + (uint64_t)psz > (uint64_t)descsz) {
                 break;
             }
             printf("        0x%x: ", ptype);
             decode_gnu_property(ptype, desc + poff, psz);
             printf("\n");
-            nnext = poff + psz;
-            off = align_up_size(nnext, align);
+            nnext = ((uint64_t)poff + (uint64_t)psz + (align64 - 1u)) & ~(align64 - 1u);
+            if (nnext <= off || nnext > (uint64_t)descsz) {
+                break;
+            }
+            off = (size_t)nnext;
         }
     } else {
         printf("      Unknown GNU note type %u: ", type);
@@ -1825,7 +1885,7 @@ static void parse_note_blob(const elf_view_t *view, uint64_t off, uint64_t size,
                             const char *label, size_t align) {
     size_t cur = 0;
 
-    if (off + size > view->size) {
+    if (off > (uint64_t)view->size || size > (uint64_t)view->size - off) {
         return;
     }
     printf("\nDisplaying notes found in: %s\n", label);
@@ -1836,6 +1896,10 @@ static void parse_note_blob(const elf_view_t *view, uint64_t off, uint64_t size,
         size_t nh_off = (size_t)off + cur;
         size_t name_off;
         size_t desc_off;
+        uint64_t name_rel;      /* offsets relative to the note blob start */
+        uint64_t desc_rel;
+        uint64_t end_rel;
+        uint64_t align64 = align ? (uint64_t)align : 1u;
         const uint8_t *name;
         const uint8_t *desc;
 
@@ -1844,11 +1908,19 @@ static void parse_note_blob(const elf_view_t *view, uint64_t off, uint64_t size,
             view_u32(view, nh_off + 8, &type) != 0) {
             break;
         }
-        name_off = nh_off + 12;
-        desc_off = align_up_size(name_off + namesz, align);
-        if (desc_off + descsz > off + size || name_off + namesz > off + size) {
+        /* namesz/descsz are attacker uint32; every name_off+namesz /
+         * desc_off+descsz size_t add wraps on 32-bit. Compute all spans
+         * relative to the blob in 64-bit and bound by size. */
+        name_rel = (uint64_t)cur + 12u;
+        if (name_rel + (uint64_t)namesz > size) {
             break;
         }
+        desc_rel = (name_rel + (uint64_t)namesz + (align64 - 1u)) & ~(align64 - 1u);
+        if (desc_rel > size || desc_rel + (uint64_t)descsz > size) {
+            break;
+        }
+        name_off = (size_t)off + (size_t)name_rel;
+        desc_off = (size_t)off + (size_t)desc_rel;
 
         name = view->data + name_off;
         desc = view->data + desc_off;
@@ -1863,7 +1935,11 @@ static void parse_note_blob(const elf_view_t *view, uint64_t off, uint64_t size,
             printf("\n");
         }
 
-        cur = align_up_size((desc_off + descsz) - off, align);
+        end_rel = (desc_rel + (uint64_t)descsz + (align64 - 1u)) & ~(align64 - 1u);
+        if (end_rel <= cur || end_rel > size) {
+            break;  /* no forward progress or out of bounds */
+        }
+        cur = (size_t)end_rel;
     }
 }
 
@@ -1927,10 +2003,14 @@ static const char *version_name_from_index(const elf_view_t *view, const elf_hea
                 if (view_u16(&sv, off + 4, &vd_ndx) != 0 ||
                     view_u32(&sv, off + 12, &vd_aux) != 0 ||
                     view_u32(&sv, off + 16, &vd_next) != 0) break;
-                if (vd_ndx == idx && off + vd_aux + 8 <= sv.size &&
-                    view_u32(&sv, off + vd_aux, &vda_name) == 0 &&
-                    vda_name < dynstr->size) {
-                    return (const char *)(view->data + dynstr->off + vda_name);
+                if (vd_ndx == idx &&
+                    (uint64_t)off + (uint64_t)vd_aux + 8u <= (uint64_t)sv.size &&
+                    view_u32(&sv, off + vd_aux, &vda_name) == 0) {
+                    const char *s = strtab_str(view->data + (size_t)dynstr->off,
+                                               (size_t)dynstr->size, vda_name);
+                    if (s != NULL) {
+                        return s;
+                    }
                 }
                 if (vd_next == 0) break;
                 off += vd_next;
@@ -1951,16 +2031,23 @@ static const char *version_name_from_index(const elf_view_t *view, const elf_hea
                 if (view_u16(&sv, off + 2, &vn_cnt) != 0 ||
                     view_u32(&sv, off + 8, &vn_aux) != 0 ||
                     view_u32(&sv, off + 12, &vn_next) != 0) break;
-                aoff = off + vn_aux;
-                for (c = 0; c < vn_cnt && aoff + 16 <= sv.size; ++c) {
+                /* off + vn_aux is a size_t add of an attacker uint32 -> wraps
+                 * on 32-bit; compute and bound in 64-bit. */
+                if ((uint64_t)off + (uint64_t)vn_aux > (uint64_t)sv.size) break;
+                aoff = (size_t)((uint64_t)off + (uint64_t)vn_aux);
+                for (c = 0; c < vn_cnt && (uint64_t)aoff + 16u <= (uint64_t)sv.size; ++c) {
                     uint16_t vna_other = 0;
                     uint32_t vna_name = 0;
                     uint32_t vna_next = 0;
                     if (view_u16(&sv, aoff + 6, &vna_other) != 0 ||
                         view_u32(&sv, aoff + 8, &vna_name) != 0 ||
                         view_u32(&sv, aoff + 12, &vna_next) != 0) break;
-                    if ((vna_other & 0x7fff) == idx && vna_name < dynstr->size) {
-                        return (const char *)(view->data + dynstr->off + vna_name);
+                    if ((vna_other & 0x7fff) == idx) {
+                        const char *s = strtab_str(view->data + (size_t)dynstr->off,
+                                                   (size_t)dynstr->size, vna_name);
+                        if (s != NULL) {
+                            return s;
+                        }
                     }
                     if (vna_next == 0) break;
                     aoff += vna_next;
@@ -2014,9 +2101,14 @@ static void print_version_info(const elf_view_t *view, const elf_header_t *hdr) 
                 const char *name = "<corrupt>";
                 if (view_u16(&sv, off + 2, &vd_flags) != 0 || view_u16(&sv, off + 4, &vd_ndx) != 0 ||
                     view_u32(&sv, off + 12, &vd_aux) != 0 || view_u32(&sv, off + 16, &vd_next) != 0) break;
-                if (off + vd_aux + 8 <= sv.size && view_u32(&sv, off + vd_aux, &vda_name) == 0 &&
-                    dynstr != NULL && dynstr->off + dynstr->size <= view->size && vda_name < dynstr->size) {
-                    name = (const char *)(view->data + dynstr->off + vda_name);
+                if ((uint64_t)off + (uint64_t)vd_aux + 8u <= (uint64_t)sv.size &&
+                    view_u32(&sv, off + vd_aux, &vda_name) == 0 &&
+                    dynstr != NULL && dynstr->off + dynstr->size <= view->size) {
+                    const char *s = strtab_str(view->data + (size_t)dynstr->off,
+                                               (size_t)dynstr->size, vda_name);
+                    if (s != NULL) {
+                        name = s;
+                    }
                 }
                 printf("  Index: %u Flags: 0x%x Name: %s\n", vd_ndx, vd_flags, name);
                 if (vd_next == 0) break;
@@ -2035,19 +2127,29 @@ static void print_version_info(const elf_view_t *view, const elf_header_t *hdr) 
                 int c;
                 if (view_u16(&sv, off + 2, &vn_cnt) != 0 || view_u32(&sv, off + 4, &vn_file) != 0 ||
                     view_u32(&sv, off + 8, &vn_aux) != 0 || view_u32(&sv, off + 12, &vn_next) != 0) break;
-                if (dynstr != NULL && dynstr->off + dynstr->size <= view->size && vn_file < dynstr->size) {
-                    file = (const char *)(view->data + dynstr->off + vn_file);
+                if (dynstr != NULL && dynstr->off + dynstr->size <= view->size) {
+                    const char *s = strtab_str(view->data + (size_t)dynstr->off,
+                                               (size_t)dynstr->size, vn_file);
+                    if (s != NULL) {
+                        file = s;
+                    }
                 }
                 printf("  File: %s\n", file);
-                aoff = off + vn_aux;
-                for (c = 0; c < vn_cnt && aoff + 16 <= sv.size; ++c) {
+                /* off + vn_aux: size_t add of attacker uint32 wraps on 32-bit. */
+                if ((uint64_t)off + (uint64_t)vn_aux > (uint64_t)sv.size) break;
+                aoff = (size_t)((uint64_t)off + (uint64_t)vn_aux);
+                for (c = 0; c < vn_cnt && (uint64_t)aoff + 16u <= (uint64_t)sv.size; ++c) {
                     uint16_t vna_flags = 0, vna_other = 0;
                     uint32_t vna_name = 0, vna_next = 0;
                     const char *name = "<corrupt>";
                     if (view_u16(&sv, aoff + 4, &vna_flags) != 0 || view_u16(&sv, aoff + 6, &vna_other) != 0 ||
                         view_u32(&sv, aoff + 8, &vna_name) != 0 || view_u32(&sv, aoff + 12, &vna_next) != 0) break;
-                    if (dynstr != NULL && dynstr->off + dynstr->size <= view->size && vna_name < dynstr->size) {
-                        name = (const char *)(view->data + dynstr->off + vna_name);
+                    if (dynstr != NULL && dynstr->off + dynstr->size <= view->size) {
+                        const char *s = strtab_str(view->data + (size_t)dynstr->off,
+                                                   (size_t)dynstr->size, vna_name);
+                        if (s != NULL) {
+                            name = s;
+                        }
                     }
                     printf("    Name: %s Index: %u Flags: 0x%x\n", name, (unsigned)(vna_other & 0x7fff), vna_flags);
                     if (vna_next == 0) break;
@@ -2086,7 +2188,11 @@ static void print_hash_histogram(const elf_view_t *view, const elf_header_t *hdr
                 if (view_u32(&sv, 0, &nbuckets) != 0 || view_u32(&sv, 4, &nchain) != 0) {
                     continue;
                 }
-                if ((size_t)(8 + (nbuckets + nchain) * 4) > sv.size) {
+                /* 8 + (nbuckets+nchain)*4 overflows uint32/size_t on hostile
+                 * counts; bound in 64-bit without ever forming the product
+                 * past the limit. */
+                if (sv.size < 8 ||
+                    (uint64_t)nbuckets + (uint64_t)nchain > ((uint64_t)sv.size - 8u) / 4u) {
                     continue;
                 }
                 buckets = (const uint32_t *)(const void *)(base + 8);
@@ -2107,28 +2213,36 @@ static void print_hash_histogram(const elf_view_t *view, const elf_header_t *hdr
                 printf("\nSYSV hash table: nbucket=%u nchain=%u\n", nbuckets, nchain);
             } else {
                 uint32_t symndx = 0, maskwords = 0, shift2 = 0;
-                size_t bloom_bytes;
-                size_t off;
+                uint64_t bloom_bytes;
+                uint64_t off;
+                uint64_t buckets_end;
                 if (view_u32(&sv, 0, &nbuckets) != 0 || view_u32(&sv, 4, &symndx) != 0 ||
                     view_u32(&sv, 8, &maskwords) != 0 || view_u32(&sv, 12, &shift2) != 0) {
                     continue;
                 }
-                bloom_bytes = (size_t)maskwords * (view->cls == ELFOBJ_CLASS_64 ? 8 : 4);
-                off = 16 + bloom_bytes;
-                if (off + (size_t)nbuckets * 4 > sv.size) {
+                /* maskwords*word and 16+bloom_bytes+nbuckets*4 all overflow on
+                 * hostile inputs; compute every span in 64-bit. nbuckets and
+                 * maskwords are uint32 so each product fits in uint64 and the
+                 * adds cannot wrap a uint64. */
+                bloom_bytes = (uint64_t)maskwords * (view->cls == ELFOBJ_CLASS_64 ? 8u : 4u);
+                off = 16u + bloom_bytes;
+                buckets_end = off + (uint64_t)nbuckets * 4u;
+                if (buckets_end > (uint64_t)sv.size) {
                     continue;
                 }
                 {
-                    const uint32_t *buckets = (const uint32_t *)(const void *)(sv.data + off);
+                    const uint32_t *buckets = (const uint32_t *)(const void *)(sv.data + (size_t)off);
                     const uint32_t *chains = buckets + nbuckets;
-                    size_t chain_off = off + (size_t)nbuckets * 4;
+                    uint64_t chain_off = buckets_end;
                     for (b = 0; b < nbuckets; ++b) {
                         uint32_t idx = buckets[b];
                         uint32_t clen = 0;
                         if (idx < symndx) {
                             continue;
                         }
-                        while (chain_off + (size_t)(idx - symndx) * 4 + 4 <= sv.size) {
+                        /* chain_off + (idx-symndx)*4 + 4: 64-bit so the index
+                         * scale cannot wrap past sv.size. */
+                        while (chain_off + (uint64_t)(idx - symndx) * 4u + 4u <= (uint64_t)sv.size) {
                             uint32_t h = chains[idx - symndx];
                             ++clen;
                             if (h & 1u) {
@@ -2143,8 +2257,8 @@ static void print_hash_histogram(const elf_view_t *view, const elf_header_t *hdr
                         }
                     }
                 }
-                printf("\nGNU hash table: nbucket=%u symndx=%u maskwords=%u shift2=%u bloom_bytes=%zu\n",
-                       nbuckets, symndx, maskwords, shift2, bloom_bytes);
+                printf("\nGNU hash table: nbucket=%u symndx=%u maskwords=%u shift2=%u bloom_bytes=%llu\n",
+                       nbuckets, symndx, maskwords, shift2, (unsigned long long)bloom_bytes);
             }
 
             if (nonempty == 0) {
@@ -2416,7 +2530,8 @@ static void print_arm_attributes(const elf_view_t *view, const elf_header_t *hdr
             size_t vend_off = off + 4;
             size_t vend_end = vend_off;
             size_t sub_off;
-            if (sect_len == 0 || off + sect_len > size) break;
+            /* sect_len is attacker uint32; off + sect_len size_t add wraps. */
+            if (sect_len == 0 || (uint64_t)off + (uint64_t)sect_len > (uint64_t)size) break;
             while (vend_end < off + sect_len && buf[vend_end] != '\0') {
                 ++vend_end;
             }
@@ -2435,7 +2550,9 @@ static void print_arm_attributes(const elf_view_t *view, const elf_header_t *hdr
                                    ((uint32_t)buf[sub_off + 3] << 16) |
                                    ((uint32_t)buf[sub_off + 4] << 24);
                 size_t p = sub_off + 5;
-                if (sub_len < 5 || sub_off + sub_len > off + sect_len) break;
+                /* sub_len is attacker uint32; sub_off + sub_len wraps. */
+                if (sub_len < 5 ||
+                    (uint64_t)sub_off + (uint64_t)sub_len > (uint64_t)off + (uint64_t)sect_len) break;
                 printf("    Subsection tag %u\n", tag);
                 while (p < sub_off + sub_len) {
                     uint64_t atag = 0;
@@ -2445,8 +2562,13 @@ static void print_arm_attributes(const elf_view_t *view, const elf_header_t *hdr
                     name = arm_attr_tag_name(atag);
                     if (atag == 4) {
                         const char *s = (const char *)(buf + p);
-                        size_t sl = strlen(s);
-                        printf("      %s: %s\n", name ? name : "Tag", s);
+                        /* Tag_CPU_name string must terminate within the
+                         * subsection; an unbounded strlen() over-reads. */
+                        size_t avail = (sub_off + sub_len) - p;
+                        const void *nul = memchr(s, '\0', avail);
+                        size_t sl = nul ? (size_t)((const char *)nul - s) : avail;
+                        printf("      %s: %.*s\n", name ? name : "Tag", (int)sl, s);
+                        if (nul == NULL) break;
                         p += sl + 1;
                     } else {
                         const char *desc = NULL;
@@ -2680,18 +2802,36 @@ static void decode_core_note(uint32_t type, const uint8_t *desc, size_t descsz, 
             }
             printf("      count=%llu page_size=%llu\n",
                    (unsigned long long)count, (unsigned long long)page);
-            if (view->cls == ELFOBJ_CLASS_64 && descsz >= off + count * 24) {
+            /* count is an attacker uint64; count*24 and off+count*24 wrap
+             * uint64. Bound count via division, then bound the per-entry
+             * table and the name walk against descsz. */
+            if (view->cls == ELFOBJ_CLASS_64 && descsz >= off &&
+                count <= ((uint64_t)descsz - off) / 24u) {
                 uint64_t i;
+                uint64_t table_bytes = count * 24u;
                 const uint8_t *p = desc + off;
-                const char *names = (const char *)(desc + off + count * 24);
+                const char *names = (const char *)(desc + off + (size_t)table_bytes);
+                const char *names_end = (const char *)(desc + descsz);
                 for (i = 0; i < count; ++i) {
-                    uint64_t start = ((const uint64_t *)p)[0];
-                    uint64_t end = ((const uint64_t *)p)[1];
-                    uint64_t foff = ((const uint64_t *)p)[2];
-                    printf("      0x%llx-0x%llx @0x%llx %s\n",
+                    uint64_t start = ((const uint64_t *)(const void *)p)[0];
+                    uint64_t end = ((const uint64_t *)(const void *)p)[1];
+                    uint64_t foff = ((const uint64_t *)(const void *)p)[2];
+                    const void *nul;
+                    size_t nlen;
+                    /* Each name must be NUL-terminated within the desc blob;
+                     * a missing terminator otherwise over-reads. */
+                    if (names >= names_end) {
+                        break;
+                    }
+                    nul = memchr(names, '\0', (size_t)(names_end - names));
+                    if (nul == NULL) {
+                        break;
+                    }
+                    nlen = (size_t)((const char *)nul - names);
+                    printf("      0x%llx-0x%llx @0x%llx %.*s\n",
                            (unsigned long long)start, (unsigned long long)end,
-                           (unsigned long long)foff, names);
-                    names += strlen(names) + 1;
+                           (unsigned long long)foff, (int)nlen, names);
+                    names += nlen + 1;
                     p += 24;
                 }
             }
@@ -2713,19 +2853,24 @@ static void print_core_info(const elf_view_t *view, const elf_header_t *hdr) {
         program_header_t ph;
         size_t cur = 0;
         if (read_phdr(view, hdr, (size_t)i, &ph) != 0) break;
-        if (ph.type != PT_NOTE || ph.off + ph.filesz > view->size) continue;
+        if (ph.type != PT_NOTE ||
+            ph.off > (uint64_t)view->size || ph.filesz > (uint64_t)view->size - ph.off) continue;
         while (cur + 12 <= ph.filesz) {
-            elf_view_t sv = {.data = view->data + ph.off + cur, .size = (size_t)(ph.filesz - cur), .endian = view->endian};
+            elf_view_t sv = {.data = view->data + (size_t)ph.off + cur, .size = (size_t)(ph.filesz - cur), .endian = view->endian};
             uint32_t namesz = 0, descsz = 0, type = 0;
-            size_t name_off, desc_off;
+            uint64_t desc_rel, end_rel;
+            uint64_t align64 = align ? (uint64_t)align : 1u;
             const uint8_t *desc;
             if (view_u32(&sv, 0, &namesz) != 0 || view_u32(&sv, 4, &descsz) != 0 || view_u32(&sv, 8, &type) != 0) break;
-            name_off = 12;
-            desc_off = align_up_size(name_off + namesz, align);
-            if (desc_off + descsz > sv.size) break;
-            desc = sv.data + desc_off;
+            /* namesz/descsz are attacker uint32; size_t adds wrap on 32-bit. */
+            if (12u + (uint64_t)namesz > (uint64_t)sv.size) break;
+            desc_rel = (12u + (uint64_t)namesz + (align64 - 1u)) & ~(align64 - 1u);
+            if (desc_rel > (uint64_t)sv.size || desc_rel + (uint64_t)descsz > (uint64_t)sv.size) break;
+            desc = sv.data + (size_t)desc_rel;
             decode_core_note(type, desc, descsz, view);
-            cur += align_up_size(desc_off + descsz, align);
+            end_rel = (desc_rel + (uint64_t)descsz + (align64 - 1u)) & ~(align64 - 1u);
+            if (end_rel == 0 || end_rel > (uint64_t)sv.size) break;  /* forward progress + bound */
+            cur += (size_t)end_rel;
         }
     }
 }

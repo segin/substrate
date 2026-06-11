@@ -48,16 +48,25 @@ size_t elf_note_count(const elfobj_t *obj) {
         while (off + 12 <= s->data_size) {
             uint32_t namesz = elf__rd32(s->data + off + 0, obj->endian);
             uint32_t descsz = elf__rd32(s->data + off + 4, obj->endian);
-            size_t noff = off + 12;
-            size_t doff;
-            noff = (noff + namesz + 3u) & ~3u;
-            doff = noff;
-            doff = (doff + descsz + 3u) & ~3u;
-            if (doff > s->data_size) {
+            uint64_t noff;
+            uint64_t doff;
+            /* Compute the name/desc spans in 64-bit and bound-check against
+             * data_size; namesz/descsz are attacker-controlled uint32 and a
+             * naive size_t add wraps on 32-bit targets, bypassing the guard. */
+            if (!elf__u64_add((uint64_t)off + 12, namesz, &noff)) {
+                break;
+            }
+            noff = (noff + 3u) & ~(uint64_t)3u;
+            if (!elf__u64_add(noff, descsz, &doff)) {
+                break;
+            }
+            doff = (doff + 3u) & ~(uint64_t)3u;
+            if (doff > (uint64_t)s->data_size) {
                 break;
             }
             total++;
-            off = doff;
+            /* Strict forward progress: doff advances by >= 12 each step. */
+            off = (size_t)doff;
         }
     }
     return total;
@@ -80,26 +89,38 @@ int elf_note_at(const elfobj_t *obj, size_t index, elf_note_info_t *out) {
             uint32_t descsz = elf__rd32(s->data + off + 4, obj->endian);
             uint32_t type = elf__rd32(s->data + off + 8, obj->endian);
             size_t nstart = off + 12;
-            size_t nend = nstart + namesz;
-            size_t dstart;
-            size_t dend;
-            if (nend > s->data_size) {
+            uint64_t nend;
+            uint64_t dstart;
+            uint64_t dend;
+            /* 64-bit, overflow-checked span computation: namesz/descsz are
+             * attacker uint32 and wrap a size_t add on 32-bit targets. */
+            if (!elf__u64_add((uint64_t)nstart, namesz, &nend) ||
+                nend > (uint64_t)s->data_size) {
                 return 0;
             }
-            dstart = (nend + 3u) & ~3u;
-            dend = (dstart + descsz + 3u) & ~3u;
-            if (dend > s->data_size) {
+            dstart = (nend + 3u) & ~(uint64_t)3u;
+            if (!elf__u64_add(dstart, descsz, &dend)) {
+                return 0;
+            }
+            dend = (dend + 3u) & ~(uint64_t)3u;
+            if (dstart > (uint64_t)s->data_size || dend > (uint64_t)s->data_size) {
                 return 0;
             }
             if (seen == index) {
-                out->name = (const char *)(s->data + nstart);
+                /* Only expose the name if a NUL terminates it within the
+                 * declared namesz; otherwise downstream strcmp() over-reads. */
+                if (namesz != 0 &&
+                    memchr(s->data + nstart, '\0', namesz) == NULL) {
+                    return 0;
+                }
+                out->name = namesz != 0 ? (const char *)(s->data + nstart) : "";
                 out->type = type;
-                out->desc_data = s->data + dstart;
+                out->desc_data = s->data + (size_t)dstart;
                 out->desc_size = descsz;
                 return 1;
             }
             seen++;
-            off = dend;
+            off = (size_t)dend;
         }
     }
     return 0;
@@ -123,16 +144,19 @@ size_t elf_gnu_property_count(const elfobj_t *obj) {
         }
         {
             size_t off = 0;
+            uint64_t align = obj->cls == ELFOBJ_CLASS_64 ? 7u : 3u;
             while (off + 8 <= n.desc_size) {
                 uint32_t datasz = elf__rd32((const uint8_t *)n.desc_data + off + 4, obj->endian);
-                size_t next = off + 8 + datasz;
-                next = (next + (obj->cls == ELFOBJ_CLASS_64 ? 7u : 3u)) &
-                       ~(obj->cls == ELFOBJ_CLASS_64 ? 7u : 3u);
-                if (next > n.desc_size) {
+                uint64_t next;
+                if (!elf__u64_add((uint64_t)off + 8, datasz, &next)) {
+                    break;
+                }
+                next = (next + align) & ~align;
+                if (next > (uint64_t)n.desc_size || (size_t)next <= off) {
                     break;
                 }
                 total++;
-                off = next;
+                off = (size_t)next;
             }
         }
     }
@@ -156,10 +180,13 @@ int elf_gnu_property_at(const elfobj_t *obj, size_t index, elf_gnu_property_info
             uint32_t type = elf__rd32((const uint8_t *)n.desc_data + off + 0, obj->endian);
             uint32_t datasz = elf__rd32((const uint8_t *)n.desc_data + off + 4, obj->endian);
             size_t dstart = off + 8;
-            size_t next = dstart + datasz;
-            next = (next + (obj->cls == ELFOBJ_CLASS_64 ? 7u : 3u)) &
-                   ~(obj->cls == ELFOBJ_CLASS_64 ? 7u : 3u);
-            if (next > n.desc_size) {
+            uint64_t align = obj->cls == ELFOBJ_CLASS_64 ? 7u : 3u;
+            uint64_t next;
+            if (!elf__u64_add((uint64_t)dstart, datasz, &next)) {
+                return 0;
+            }
+            next = (next + align) & ~align;
+            if (next > (uint64_t)n.desc_size || (size_t)next <= off) {
                 return 0;
             }
             if (seen == index) {
@@ -169,7 +196,7 @@ int elf_gnu_property_at(const elfobj_t *obj, size_t index, elf_gnu_property_info
                 return 1;
             }
             seen++;
-            off = next;
+            off = (size_t)next;
         }
     }
     return 0;

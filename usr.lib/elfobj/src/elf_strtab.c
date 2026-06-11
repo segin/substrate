@@ -36,6 +36,12 @@ uint32_t elf__strtab_add(elf_strtab_t *tab, const char *s) {
 
     len = strlen(s) + 1;
     off = tab->size;
+    /* Guard tab->size + len against size_t wrap before using it as a target
+     * capacity (a wrapped value would under-grow the buffer, then the memcpy
+     * below would overflow it). */
+    if (len > (size_t)-1 - tab->size) {
+        return UINT32_MAX;
+    }
     if (tab->cap < tab->size + len) {
         size_t new_cap = tab->cap == 0 ? 16 : tab->cap;
         while (new_cap < tab->size + len) {

@@ -14,7 +14,10 @@ int main(void) {
     elfobj_t *reopen;
     elf_section_t *text;
     elf_symbol_t *sym;
-    unsigned char code[] = {0x90, 0xC3};
+    /* 4+ bytes so a 4-byte R_386_32 relocation at offset 0 fits within the
+     * section (nop; nop; nop; ret) — a reloc whose store overruns the
+     * section is now correctly rejected by the library. */
+    unsigned char code[] = {0x90, 0x90, 0x90, 0xC3};
     char *diag = NULL;
 
     obj = elf_create(ET_REL, EM_386, ELFOBJ_CLASS_32, ELFOBJ_ENDIAN_LE);

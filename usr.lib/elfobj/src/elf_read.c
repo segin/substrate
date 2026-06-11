@@ -925,6 +925,29 @@ static elf_err_t parse_relocations(elfobj_t *obj, symtab_index_t *maps, size_t m
                 }
                 return ELF_ERR_FORMAT;
             }
+            /* The start offset is in range, but a consumer (linker/objcopy)
+             * applying this relocation stores a value of width W at
+             * target->data + rel_offset.  Reject any reloc whose store would
+             * run past the target section end so the materialized reloc is
+             * safe to apply: an offset == target_size - 1 with a 4/8-byte
+             * write would otherwise overflow the section buffer. */
+            {
+                int relw = elf_reloc_size_for_machine(obj->machine, r_type);
+                if (relw > 0) {
+                    uint64_t rel_end;
+                    if (!elf__u64_add(rel_offset, (uint64_t)relw, &rel_end) ||
+                        rel_end > target_size) {
+                        if (trace) {
+                            fprintf(stderr,
+                                    "elfobj: reloc width out of range reloc=%s off=0x%llx width=%d target_size=0x%llx\n",
+                                    sec->name != NULL ? sec->name : "<unnamed>",
+                                    (unsigned long long)rel_offset, relw,
+                                    (unsigned long long)target_size);
+                        }
+                        return ELF_ERR_FORMAT;
+                    }
+                }
+            }
 
             rel = (struct elf_reloc *)elf__calloc(1, sizeof(*rel));
             if (rel == NULL) {

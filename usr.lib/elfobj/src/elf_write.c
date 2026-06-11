@@ -242,6 +242,9 @@ static uint8_t *build_group_data(const out_group_t *group, elfobj_endian_t endia
     if (group == NULL || out_size == NULL) {
         return NULL;
     }
+    if (group->member_count == SIZE_MAX) {
+        return NULL;
+    }
     words = 1 + group->member_count;
     data = (uint8_t *)elf__calloc(words, 4);
     if (data == NULL) {
@@ -478,7 +481,8 @@ static uint8_t *build_gnu_verdef(elfobj_endian_t e, elf_strtab_t *strtab,
                                  const ver_name_t *names, size_t name_count, size_t *out_size) {
     size_t verdef_sz = 20;
     size_t verdaux_sz = 8;
-    size_t total = name_count * (verdef_sz + verdaux_sz);
+    size_t entry_sz = verdef_sz + verdaux_sz;
+    size_t total;
     uint8_t *buf;
     size_t i;
 
@@ -489,10 +493,13 @@ static uint8_t *build_gnu_verdef(elfobj_endian_t e, elf_strtab_t *strtab,
     if (name_count == 0) {
         return NULL;
     }
-    buf = (uint8_t *)elf__calloc(1, total);
+    /* Let the overflow-checked allocator perform the multiply so a large
+     * name_count cannot wrap the size on a 32-bit target. */
+    buf = (uint8_t *)elf__calloc(name_count, entry_sz);
     if (buf == NULL) {
         return NULL;
     }
+    total = name_count * entry_sz;
     for (i = 0; i < name_count; ++i) {
         uint8_t *p = buf + (i * (verdef_sz + verdaux_sz));
         uint32_t name_off = elf__strtab_add(strtab, names[i].name ? names[i].name : "");
@@ -1347,6 +1354,14 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
                 uint64_t out_off;
                 uint64_t out_vaddr;
                 size_t j;
+
+                /* A NULL segment slot must not be dereferenced; emit a zeroed
+                 * (PT_NULL) program header so the table stays consistent. */
+                if (seg == NULL) {
+                    size_t zlen = obj->cls == ELFOBJ_CLASS_32 ? 32u : 56u;
+                    memset(p, 0, zlen);
+                    continue;
+                }
 
                 for (j = 0; j < seg->section_count; ++j) {
                     size_t sidx = seg->section_indices[j] + 1;

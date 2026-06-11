@@ -2713,6 +2713,44 @@ elf_err_t elf_add_relocation(elf_section_t *section, uint64_t offset, elf_symbol
         return ELF_ERR_STATE;
     }
 
+    /* Reject a relocation whose store width would fall outside the target
+     * section, so a later apply (linker/objcopy storing the relocated value
+     * at section->data + offset) cannot overflow the section buffer.  Use
+     * the uncompressed size for SHF_COMPRESSED sections, matching the
+     * read-side check in parse_relocations().  size==0 means the section is
+     * not sized yet (data assigned later); skip the check in that case.
+     * SHT_NOBITS sections have no bytes to patch, so any relocation against
+     * them is invalid. */
+    {
+        uint64_t target_size = section->size;
+        if (section->has_compression_hint && section->compression_size > target_size) {
+            target_size = section->compression_size;
+        }
+        if (target_size != 0) {
+            int relw;
+            if (section->type == SHT_NOBITS) {
+                elf__set_err(section->obj, ELF_ERR_BOUNDS,
+                             "relocation target is SHT_NOBITS");
+                return ELF_ERR_BOUNDS;
+            }
+            if (offset >= target_size) {
+                elf__set_err(section->obj, ELF_ERR_BOUNDS,
+                             "relocation offset out of target section");
+                return ELF_ERR_BOUNDS;
+            }
+            relw = elf_reloc_size_for_machine(section->obj->machine, type);
+            if (relw > 0) {
+                uint64_t rel_end;
+                if (!elf__u64_add(offset, (uint64_t)relw, &rel_end) ||
+                    rel_end > target_size) {
+                    elf__set_err(section->obj, ELF_ERR_BOUNDS,
+                                 "relocation store width exceeds target section");
+                    return ELF_ERR_BOUNDS;
+                }
+            }
+        }
+    }
+
     rel = (struct elf_reloc *)elf__calloc(1, sizeof(*rel));
     if (rel == NULL) {
         elf__set_err(section->obj, ELF_ERR_OOM, "alloc relocation failed");

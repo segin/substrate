@@ -298,7 +298,9 @@ static elf_err_t validate_dwarf_unit_stream(const elf_section_t *section) {
         if (!elf__u64_add((uint64_t)len_field_size, payload_size, &total_size)) {
             return ELF_ERR_BOUNDS;
         }
-        if (total_size > SIZE_MAX || off + (size_t)total_size > size) {
+        /* off <= size (loop guard); use the non-wrapping subtraction form so
+         * a near-SIZE_MAX total_size cannot overflow off + total_size. */
+        if (total_size > SIZE_MAX || (size_t)total_size > size - off) {
             return ELF_ERR_FORMAT;
         }
         off += (size_t)total_size;
