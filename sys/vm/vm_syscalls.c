@@ -243,6 +243,13 @@ void *sys_mmap(void *addr, size_t length, int prot, int flags, int fd, uint64_t 
 
     if (vm_round_page_size(length, &aligned_length) != 0) return (void *)-1;
 
+    /* POSIX EINVAL cases that otherwise feed malformed ranges into the
+     * file-object / device (/dev/mem) mmap paths: zero length, a
+     * non-page-aligned file offset, and offset+length wrapping past 2^64. */
+    if (length == 0) return (void *)-1;
+    if (!(flags & MAP_ANONYMOUS) && (offset & 0xFFF)) return (void *)-1;
+    if (offset + (uint64_t)aligned_length < offset) return (void *)-1;
+
     // Find virtual address space
     if (v_addr == 0 || !(flags & MAP_FIXED)) {
         if (vm_map_find_space(map, &v_addr, aligned_length) != 0) return (void *)-1;
