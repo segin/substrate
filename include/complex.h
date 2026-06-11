@@ -145,6 +145,14 @@ double      complex cproj (double      complex z);
 float       complex cprojf(float       complex z);
 long double complex cprojl(long double complex z);
 
+/* ---- complex base-10 logarithm (glibc extension) --------------------- *
+ * Declared under _GNU_SOURCE.  clog10(z) = clog(z) / ln(10). */
+#if defined(_GNU_SOURCE)
+double      complex clog10 (double      complex z);
+float       complex clog10f(float       complex z);
+long double complex clog10l(long double complex z);
+#endif
+
 /* ---- gamma / error / Bessel (substrate extension) ---------------------- *
  * These mirror the real tgamma/lgamma/erf/erfc/j0/j1/y0/y1 set; not part
  * of any C standard but useful when tgmath dispatches on a _Complex

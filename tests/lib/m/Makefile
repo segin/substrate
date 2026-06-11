@@ -16,9 +16,10 @@ MATH_SRCS = ../../../lib/m/src/math_exp.c \
 FENV = ../../../lib/m/src/fenv.c
 
 all: test_trig prop_trig test_fenv prop_fenv fuzz_fenv test_tgmath \
-      test_classify prop_classify test_arith prop_arith test_round prop_round \
-      test_explog prop_explog test_bessel prop_bessel \
-      test_accuracy test_x87_opt fuzz_math fuzz_mathf
+     test_classify prop_classify test_arith prop_arith test_round prop_round \
+     test_explog prop_explog test_bessel prop_bessel \
+     test_accuracy test_x87_opt fuzz_math fuzz_mathf \
+     test_libm_new prop_totalorder
 
 test_trig: unit/test_trig.c $(MATH_SRCS) $(FPCLASSIFY) $(FENV)
 	$(CC) $(CFLAGS) -fno-builtin $^ -o $@ -lm
@@ -80,6 +81,12 @@ fuzz_math: fuzz/fuzz_math.c $(MATH_SRCS) ../../../lib/m/src/mathf.c $(FPCLASSIFY
 fuzz_mathf: fuzz/fuzz_mathf.c $(MATH_SRCS) ../../../lib/m/src/mathf.c ../../../lib/m/src/mathl.c $(FPCLASSIFY) $(FENV)
 	$(CC) $(CFLAGS) -fno-builtin $^ -o $@ -lm
 
+test_libm_new: unit/test_libm_new.c $(MATH_SRCS) ../../../lib/m/src/math_obsolete.c ../../../lib/m/src/math_narrowing.c ../../../lib/m/src/math_totalorder.c ../../../lib/m/src/math_reentrant.c $(FPCLASSIFY) $(FENV)
+	$(CC) $(CFLAGS) -fno-builtin $^ -o $@ -lm
+
+prop_totalorder: property/prop_totalorder.c $(MATH_SRCS) ../../../lib/m/src/math_totalorder.c $(FPCLASSIFY) $(FENV)
+	$(CC) $(CFLAGS) -fno-builtin $^ -o $@ -lm
+
 test: all
 	./test_trig
 	./prop_trig
@@ -100,10 +107,13 @@ test: all
 	./test_x87_opt
 	./fuzz_math
 	./fuzz_mathf
+	./test_libm_new
+	./prop_totalorder
 
 clean:
 	rm -f test_trig prop_trig test_fenv prop_fenv fuzz_fenv test_tgmath \
 	      test_classify prop_classify test_arith prop_arith \
 	      test_round prop_round test_explog prop_explog \
 	      test_bessel prop_bessel \
-	      test_accuracy test_x87_opt fuzz_math fuzz_mathf
+	      test_accuracy test_x87_opt fuzz_math fuzz_mathf \
+	      test_libm_new prop_totalorder

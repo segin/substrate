@@ -469,6 +469,100 @@ long double y0l(long double x);
 long double y1l(long double x);
 long double ynl(int n, long double x);
 
+/* C23 §7.12.14 — Narrowing arithmetic (single-rounding operations). */
+double fadd(double x, double y);
+double faddl(long double x, long double y);
+double dadd(double x, double y);
+double daddl(long double x, long double y);
+double fsub(double x, double y);
+double fsubl(long double x, long double y);
+double dsub(double x, double y);
+double dsubl(long double x, long double y);
+double fmul(double x, double y);
+double fmull(long double x, long double y);
+double dmul(double x, double y);
+double dmull(long double x, long double y);
+double fdiv(double x, double y);
+double fdivl(long double x, long double y);
+double ddiv(double x, double y);
+double ddivl(long double x, long double y);
+double ffma(double x, double y, double z);
+double ffmal(long double x, long double y, long double z);
+double dfma(double x, double y, double z);
+double dfmal(long double x, long double y, long double z);
+double fsqrt(double x);
+double fsqrtl(long double x);
+double dsqrt(double x);
+double dsqrtl(long double x);
+
+/* C23 §7.12.11 — IEEE 754-2019 total order and NaN payload. */
+int totalorder(double x, double y);
+int totalorderf(float x, float y);
+int totalorderl(long double x, long double y);
+int totalordermag(double x, double y);
+int totalordermagf(float x, float y);
+int totalordermagl(long double x, long double y);
+double canonicalize(double x, double *cx);
+float canonicalizef(float x, float *cx);
+long double canonicalizel(long double x, long double *cx);
+double getpayload(double *x);
+double getpayloadf(float *x);
+double getpayloadl(long double *x);
+double setpayload(double *res, double x, int payload);
+double setpayloadf(float *res, float x, int payload);
+double setpayloadl(long double *res, long double x, int payload);
+double setpayloadsig(double *res, double x, int payload);
+double setpayloadsigf(float *res, float x, int payload);
+double setpayloadsigl(long double *res, long double x, int payload);
+
+/* Obsolescent aliases (SVID / 4.3BSD / X/Open).
+ * Declared under _DEFAULT_SOURCE / _XOPEN_SOURCE / _SVID_SOURCE / _BSD_SOURCE.
+ * Each is a thin forwarder to the standard replacement. */
+#if defined(_DEFAULT_SOURCE) || defined(_XOPEN_SOURCE) || \
+    defined(_SVID_SOURCE) || defined(_BSD_SOURCE)
+
+/* Obsolescent: scalb(x, n) — historical two-argument scaling */
+double scalb(double x, double n);
+float scalbf(float x, float n);
+
+/* Obsolescent: significand(x) — return mantissa in [1,2) */
+double significand(double x);
+float significandf(float x);
+long double significandl(long double x);
+
+/* Obsolescent: drem(x, y) — alias of remainder(x, y) */
+double drem(double x, double y);
+float dremf(float x, float y);
+
+/* Obsolescent: gamma(x) — alias of lgamma(x); sets signgam */
+double gamma(double x);
+float gammaf(float x);
+
+/* Obsolescent: pow10(x) — alias of exp10(x) */
+double pow10(double x);
+float pow10f(float x);
+long double pow10l(long double x);
+
+/* Obsolescent: matherr(x) — SVID error hook (no-op stub) */
+struct exception {
+    char   *name;
+    char   *arith;
+    char   *type;
+    double  arg1;
+    double  arg2;
+    double  retval;
+};
+int matherr(struct exception *e);
+
+#endif /* obsolescent guards */
+
+/* Reentrant gamma (glibc / 4.3BSD-Reno extension).
+ * Declared under _GNU_SOURCE / _DEFAULT_SOURCE. */
+#if defined(_GNU_SOURCE) || defined(_DEFAULT_SOURCE)
+float lgammaf_r(float x, int *signp);
+long double lgammal_r(long double x, int *signp);
+#endif /* reentrant gamma guards */
+
 /* C23: pi-argument trigonometric functions */
 double sinpi(double x);
 double cospi(double x);
