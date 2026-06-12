@@ -1,0 +1,56 @@
+From 70974d511a3f66e45cb7639e7deb36790168b912 Mon Sep 17 00:00:00 2001
+From: Kirn Gill II <segin2005@gmail.com>
+Date: Tue, 9 Jun 2026 23:41:27 -0500
+Subject: [PATCH 25/83] ld.so: publish environ before running shared-library
+ constructors
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+crt0 assigns environ at program entry — AFTER ld.so's DT_INIT/init_array
+pass.  A constructor calling getenv() therefore walked a NULL environ.
+Normally latent (libc getenv tolerates it), it became a hard fault with
+dtksh: ksh93 interposes getenv(), the canonical-PLT rule binds every
+DSO's getenv to the exe's sh_getenv, and a CDE library constructor
+calling it crashed in oldgetenv before main (TRAP backtrace: ld.so init
+chain -> lib ctor -> getenv -> sh_getenv -> oldgetenv, addr 0x0).
+
+glibc's rtld sets __environ before constructors; do the same: resolve
+the canonical `environ` and store envp (from the kernel-built stack)
+right before ld_run_init_arrays().
+
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+---
+ sbin/ld.so/ld_main.c | 16 ++++++++++++++++
+ 1 file changed, 16 insertions(+)
+
+diff --git a/sbin/ld.so/ld_main.c b/sbin/ld.so/ld_main.c
+index 11bde090..2d2181f7 100644
+--- a/sbin/ld.so/ld_main.c
++++ b/sbin/ld.so/ld_main.c
+@@ -566,6 +566,22 @@ ld_u32 ld_main(ld_u32 *initial_stack) {
+         for (;;) {}
+     }
+ 
++    /* glibc-rtld parity: publish `environ` BEFORE any constructor runs.
++     * crt0 only assigns it at program entry, which happens after the
++     * DT_INIT/init_array pass below — so a shared-library constructor
++     * calling getenv() (or an interposing getenv, e.g. ksh93/dtksh's
++     * sh_getenv) would otherwise walk a NULL environ and fault.
++     * ld_resolve returns the canonical symbol (the program's copy when
++     * it defines/copies one), which is the same object crt0 assigns. */
++    {
++        ld_u32 envaddr = ld_resolve("environ");
++        if (envaddr) {
++            ld_u32 argc = initial_stack[0];
++            char **envp = (char **)(initial_stack + 1 + argc + 1);
++            *(char ***)envaddr = envp;
++        }
++    }
++
+     /* Run constructors in dependency order: deepest deps first
+      * (= reverse of load order, since the program is at the head
+      * and its deepest dependency is at the tail). */
+-- 
+2.54.0
+

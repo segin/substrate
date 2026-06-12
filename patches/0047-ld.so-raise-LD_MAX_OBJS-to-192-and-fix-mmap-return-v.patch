@@ -1,0 +1,113 @@
+From 84db68f839c999283284ba8ee0c4e518297e3a7b Mon Sep 17 00:00:00 2001
+From: Kirn Gill II <segin2005@gmail.com>
+Date: Wed, 10 Jun 2026 13:37:49 -0500
+Subject: [PATCH 47/83] ld.so: raise LD_MAX_OBJS to 192 and fix mmap-return
+ validation
+
+Two robustness fixes a full GTK+ 2.x dependency graph (~40 DSOs) exposes:
+
+- LD_MAX_OBJS was 32; a GTK2 app loads gtk/gdk/gdk-pixbuf/pango{,cairo,
+  ft2}/atk/cairo/gobject/glib/gio/gmodule/harfbuzz/fribidi/fontconfig/
+  freetype/png/pixman/expat/ffi/z/X11/... well past 32, so a deep
+  dependency dropped its register and ld.so reported it "not found".
+  Raise to 192 (and the matching LD_MAX_OBJS_INIT_LIMIT).
+
+- The mmap-return checks used `(long)p < 0`, which mis-rejects a valid
+  user address >= 0x80000000 (sign bit set) as an error.  Only a -errno
+  in [-4095,-1] is a failure.  Add ld_mmap_failed() and use it at all
+  four sites (ld_load.c x2, ld_tls.c x2).  Latent until the address
+  space fills enough that a library lands past the 2 GiB line.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+---
+ sbin/ld.so/ld.h      | 12 +++++++++++-
+ sbin/ld.so/ld_load.c |  6 +++---
+ sbin/ld.so/ld_tls.c  |  4 ++--
+ 3 files changed, 16 insertions(+), 6 deletions(-)
+
+diff --git a/sbin/ld.so/ld.h b/sbin/ld.so/ld.h
+index 9f44a53f..bc68f7a0 100644
+--- a/sbin/ld.so/ld.h
++++ b/sbin/ld.so/ld.h
+@@ -262,6 +262,16 @@ long  ld_lseek(int fd, long off, int whence);
+ void *ld_mmap(void *addr, ld_size len, int prot, int flags,
+               int fd, ld_u32 page_off);
+ 
++/* True iff an mmap/syscall pointer return is an error.  The kernel returns
++ * a -errno in [-4095, -1] on failure; everything else is a valid pointer.
++ * A plain `(long)p < 0` test is WRONG on 32-bit: a successful mmap can land
++ * at a high user address (>= 0x80000000) whose sign bit is set, and would
++ * be mis-rejected as an error.  This surfaced once a large dependency graph
++ * (GTK+ 2.x: ~40 DSOs) pushed later libraries past the 2 GiB line. */
++static inline int ld_mmap_failed(void *p) {
++    return (ld_u32)(unsigned long)p >= (ld_u32)-4095;
++}
++
+ /* Phase-3 surface: per-loaded-object descriptor.  Both the program
+  * itself and every loaded .so get one of these.  The list is kept
+  * in load order for deterministic symbol resolution. */
+@@ -414,7 +424,7 @@ int ld_sys_set_gsbase(ld_u32 base);
+  * Sized to match LD_MAX_OBJS in ld_load.c so it's effectively the
+  * same limit, kept here so ld_main can size a stack array without
+  * pulling in ld_load.c's private constants. */
+-#define LD_MAX_OBJS_INIT_LIMIT 32
++#define LD_MAX_OBJS_INIT_LIMIT 192
+ 
+ /* Phase 2 entry point from asm. */
+ ld_u32 ld_main(ld_u32 *initial_stack);
+diff --git a/sbin/ld.so/ld_load.c b/sbin/ld.so/ld_load.c
+index 6eac4d8a..989eff65 100644
+--- a/sbin/ld.so/ld_load.c
++++ b/sbin/ld.so/ld_load.c
+@@ -20,7 +20,7 @@
+ 
+ #include "ld.h"
+ 
+-#define LD_MAX_OBJS 32
++#define LD_MAX_OBJS 192   /* was 32; a full GTK+ 2.x app loads ~40-60 DSOs */
+ #define PAGE_SIZE   0x1000
+ 
+ static ld_obj_t  ld_obj_pool[LD_MAX_OBJS];
+@@ -226,7 +226,7 @@ static ld_obj_t *load_from_path(const char *path) {
+     ld_size span = (ld_size)(hi - lo);
+     void *base_v = ld_mmap(0, span, LD_PROT_READ,
+                            LD_MAP_PRIVATE | LD_MAP_ANON, -1, 0);
+-    if ((long)base_v < 0) { ld_close(fd); return 0; }
++    if (ld_mmap_failed(base_v)) { ld_close(fd); return 0; }
+     ld_u32 base = (ld_u32)(unsigned long)base_v - lo;
+ 
+     /* Map each PT_LOAD over the reserved range. */
+@@ -247,7 +247,7 @@ static ld_obj_t *load_from_path(const char *path) {
+                               prot | LD_PROT_WRITE,
+                               LD_MAP_PRIVATE | LD_MAP_FIXED,
+                               fd, fileoff_pages);
+-            if ((long)r < 0 || r != (void *)vaddr) { ld_close(fd); return 0; }
++            if (ld_mmap_failed(r) || r != (void *)vaddr) { ld_close(fd); return 0; }
+         }
+         /* BSS handling.  Two pieces:
+          *   1. Bytes from (p_vaddr + p_filesz) up to the next page
+diff --git a/sbin/ld.so/ld_tls.c b/sbin/ld.so/ld_tls.c
+index d0c99fc3..26a69ce2 100644
+--- a/sbin/ld.so/ld_tls.c
++++ b/sbin/ld.so/ld_tls.c
+@@ -123,7 +123,7 @@ int ld_setup_tls(void) {
+     ld_tls_total  = total;
+     void *block = ld_mmap(0, total, LD_PROT_READ | LD_PROT_WRITE,
+                           LD_MAP_PRIVATE | LD_MAP_ANON, -1, 0);
+-    if ((long)block < 0) {
++    if (ld_mmap_failed(block)) {
+         ld_puts("ld.so: TLS mmap failed\n");
+         return -12; /* -ENOMEM */
+     }
+@@ -236,7 +236,7 @@ LD_PUBLIC void *__ldso_alloc_tls(void) {
+     }
+     void *block = ld_mmap(0, ld_tls_total, LD_PROT_READ | LD_PROT_WRITE,
+                           LD_MAP_PRIVATE | LD_MAP_ANON, -1, 0);
+-    if ((long)block < 0) return 0;
++    if (ld_mmap_failed(block)) return 0;
+ 
+     ld_u32 tp = (ld_u32)(unsigned long)block + ld_tls_cursor;
+     ld_u32 *tcb = (ld_u32 *)(unsigned long)tp;
+-- 
+2.54.0
+

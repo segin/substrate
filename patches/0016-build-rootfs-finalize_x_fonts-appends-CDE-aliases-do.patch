@@ -1,0 +1,27 @@
+From 4079e4ed3f7374ad529b9ab268ff9537b5d09d3b Mon Sep 17 00:00:00 2001
+From: Kirn Gill II <segin2005@gmail.com>
+Date: Tue, 9 Jun 2026 16:09:28 -0500
+Subject: [PATCH 16/83] build-rootfs: finalize_x_fonts appends CDE aliases (do
+ not clobber font-misc fonts.alias / xterms fixed font) Co-Authored-By: Claude
+ Opus 4.8 (1M context) <noreply@anthropic.com>
+
+---
+ build-rootfs.sh | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/build-rootfs.sh b/build-rootfs.sh
+index 034f679d..f8dff1e5 100755
+--- a/build-rootfs.sh
++++ b/build-rootfs.sh
+@@ -218,7 +218,7 @@ finalize_x_fonts() {
+         { printf '%d\n' "$_n"; cat "$_dst/fonts.dir.tmp"; } > "$_dst/fonts.dir"
+         cp -a "$_dst/fonts.dir" "$_dst/fonts.scale"; rm -f "$_dst/fonts.dir.tmp"
+         if [ -f "$_cde_alias/mixed.alias" ]; then
+-            cat "$_cde_alias/mixed.alias" "$_cde_alias/fixed.alias" 2>/dev/null > "$_dst/fonts.alias" ||                 cp "$_cde_alias/mixed.alias" "$_dst/fonts.alias"
++            cat "$_cde_alias/mixed.alias" "$_cde_alias/fixed.alias" 2>/dev/null >> "$_dst/fonts.alias" ||                 cat "$_cde_alias/mixed.alias" >> "$_dst/fonts.alias"
+         fi
+         echo "Finalized X fonts in $_d: $_n entries + CDE -dt-* aliases"
+     done
+-- 
+2.54.0
+

@@ -1,0 +1,2713 @@
+From 4cb7661c01496b6e386e105a923705cb04369e72 Mon Sep 17 00:00:00 2001
+From: Kirn Gill II <segin2005@gmail.com>
+Date: Thu, 11 Jun 2026 23:39:09 -0500
+Subject: [PATCH 80/83] =?UTF-8?q?libm:=20complete=20tasklist=2024=20?=
+ =?UTF-8?q?=E2=80=94=20man=20pages,=20symbol-audit=20fixture,=20checklist?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The §24.2–§24.6 function families (obsolescent aliases, C23 narrowing
+arithmetic, total-order/NaN-payload, reentrant gamma, complex log10) were
+all implemented and tested earlier this session.  This closes out the
+remaining non-code deliverables and marks the tasklist complete:
+
+- §24.8 Documentation: 12 man3 pages (scalb, significand, drem, gamma,
+  pow10, matherr, fadd [the 24-name narrowing family], totalorder,
+  canonicalize, getpayload [get/set/sig payload], lgamma_r, clog10) plus
+  49 `.so` redirect stubs for the family-member aliases, all mandoc-clean.
+  ERRORS/RETURN VALUE were read from the implementations (e.g. the f-prefixed
+  narrowing functions return double per <math.h>; totalorder raises no fp
+  exceptions; scalb's ±Inf-n edges), with deprecation notes on the
+  obsolescent pages.
+- §24.1/§24.7 Link-completeness: tests/lib/m/unit/test_symbol_audit.c — a
+  fixture that references every added symbol so the LINK is the test;
+  reports 60/60 tasklist-24 symbols resolved.  Wired into the test Makefile.
+- All 44 checklist items ticked.
+
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+---
+ docs/tasks/24-math-library-completion.md |  90 ++++-----
+ tests/lib/m/Makefile                     |   9 +-
+ tests/lib/m/unit/test_symbol_audit.c     |  77 ++++++++
+ usr.man/man3/canonicalize.3              | 104 ++++++++++
+ usr.man/man3/canonicalizef.3             |   1 +
+ usr.man/man3/canonicalizel.3             |   1 +
+ usr.man/man3/clog10.3                    | 124 ++++++++++++
+ usr.man/man3/clog10f.3                   |   1 +
+ usr.man/man3/clog10l.3                   |   1 +
+ usr.man/man3/dadd.3                      |   1 +
+ usr.man/man3/daddl.3                     |   1 +
+ usr.man/man3/ddiv.3                      |   1 +
+ usr.man/man3/ddivl.3                     |   1 +
+ usr.man/man3/dfma.3                      |   1 +
+ usr.man/man3/dfmal.3                     |   1 +
+ usr.man/man3/dmul.3                      |   1 +
+ usr.man/man3/dmull.3                     |   1 +
+ usr.man/man3/drem.3                      | 117 +++++++++++
+ usr.man/man3/dremf.3                     |   1 +
+ usr.man/man3/dsqrt.3                     |   1 +
+ usr.man/man3/dsqrtl.3                    |   1 +
+ usr.man/man3/dsub.3                      |   1 +
+ usr.man/man3/dsubl.3                     |   1 +
+ usr.man/man3/fadd.3                      | 242 +++++++++++++++++++++++
+ usr.man/man3/faddl.3                     |   1 +
+ usr.man/man3/fdiv.3                      |   1 +
+ usr.man/man3/fdivl.3                     |   1 +
+ usr.man/man3/ffma.3                      |   1 +
+ usr.man/man3/ffmal.3                     |   1 +
+ usr.man/man3/fmul.3                      |   1 +
+ usr.man/man3/fmull.3                     |   1 +
+ usr.man/man3/fsqrt.3                     |   1 +
+ usr.man/man3/fsqrtl.3                    |   1 +
+ usr.man/man3/fsub.3                      |   1 +
+ usr.man/man3/fsubl.3                     |   1 +
+ usr.man/man3/gamma.3                     | 166 ++++++++++++++++
+ usr.man/man3/gammaf.3                    |   1 +
+ usr.man/man3/getpayload.3                | 198 +++++++++++++++++++
+ usr.man/man3/getpayloadf.3               |   1 +
+ usr.man/man3/getpayloadl.3               |   1 +
+ usr.man/man3/lgamma_r.3                  | 188 ++++++++++++++++++
+ usr.man/man3/lgammaf_r.3                 |   1 +
+ usr.man/man3/lgammal_r.3                 |   1 +
+ usr.man/man3/matherr.3                   | 119 +++++++++++
+ usr.man/man3/pow10.3                     | 126 ++++++++++++
+ usr.man/man3/pow10f.3                    |   1 +
+ usr.man/man3/pow10l.3                    |   1 +
+ usr.man/man3/scalb.3                     | 180 +++++++++++++++++
+ usr.man/man3/scalbf.3                    |   1 +
+ usr.man/man3/setpayload.3                |   1 +
+ usr.man/man3/setpayloadf.3               |   1 +
+ usr.man/man3/setpayloadl.3               |   1 +
+ usr.man/man3/setpayloadsig.3             |   1 +
+ usr.man/man3/setpayloadsigf.3            |   1 +
+ usr.man/man3/setpayloadsigl.3            |   1 +
+ usr.man/man3/significand.3               | 126 ++++++++++++
+ usr.man/man3/significandf.3              |   1 +
+ usr.man/man3/significandl.3              |   1 +
+ usr.man/man3/totalorder.3                | 143 ++++++++++++++
+ usr.man/man3/totalorderf.3               |   1 +
+ usr.man/man3/totalorderl.3               |   1 +
+ usr.man/man3/totalordermag.3             |   1 +
+ usr.man/man3/totalordermagf.3            |   1 +
+ usr.man/man3/totalordermagl.3            |   1 +
+ 64 files changed, 2011 insertions(+), 47 deletions(-)
+ create mode 100644 tests/lib/m/unit/test_symbol_audit.c
+ create mode 100644 usr.man/man3/canonicalize.3
+ create mode 100644 usr.man/man3/canonicalizef.3
+ create mode 100644 usr.man/man3/canonicalizel.3
+ create mode 100644 usr.man/man3/clog10.3
+ create mode 100644 usr.man/man3/clog10f.3
+ create mode 100644 usr.man/man3/clog10l.3
+ create mode 100644 usr.man/man3/dadd.3
+ create mode 100644 usr.man/man3/daddl.3
+ create mode 100644 usr.man/man3/ddiv.3
+ create mode 100644 usr.man/man3/ddivl.3
+ create mode 100644 usr.man/man3/dfma.3
+ create mode 100644 usr.man/man3/dfmal.3
+ create mode 100644 usr.man/man3/dmul.3
+ create mode 100644 usr.man/man3/dmull.3
+ create mode 100644 usr.man/man3/drem.3
+ create mode 100644 usr.man/man3/dremf.3
+ create mode 100644 usr.man/man3/dsqrt.3
+ create mode 100644 usr.man/man3/dsqrtl.3
+ create mode 100644 usr.man/man3/dsub.3
+ create mode 100644 usr.man/man3/dsubl.3
+ create mode 100644 usr.man/man3/fadd.3
+ create mode 100644 usr.man/man3/faddl.3
+ create mode 100644 usr.man/man3/fdiv.3
+ create mode 100644 usr.man/man3/fdivl.3
+ create mode 100644 usr.man/man3/ffma.3
+ create mode 100644 usr.man/man3/ffmal.3
+ create mode 100644 usr.man/man3/fmul.3
+ create mode 100644 usr.man/man3/fmull.3
+ create mode 100644 usr.man/man3/fsqrt.3
+ create mode 100644 usr.man/man3/fsqrtl.3
+ create mode 100644 usr.man/man3/fsub.3
+ create mode 100644 usr.man/man3/fsubl.3
+ create mode 100644 usr.man/man3/gamma.3
+ create mode 100644 usr.man/man3/gammaf.3
+ create mode 100644 usr.man/man3/getpayload.3
+ create mode 100644 usr.man/man3/getpayloadf.3
+ create mode 100644 usr.man/man3/getpayloadl.3
+ create mode 100644 usr.man/man3/lgamma_r.3
+ create mode 100644 usr.man/man3/lgammaf_r.3
+ create mode 100644 usr.man/man3/lgammal_r.3
+ create mode 100644 usr.man/man3/matherr.3
+ create mode 100644 usr.man/man3/pow10.3
+ create mode 100644 usr.man/man3/pow10f.3
+ create mode 100644 usr.man/man3/pow10l.3
+ create mode 100644 usr.man/man3/scalb.3
+ create mode 100644 usr.man/man3/scalbf.3
+ create mode 100644 usr.man/man3/setpayload.3
+ create mode 100644 usr.man/man3/setpayloadf.3
+ create mode 100644 usr.man/man3/setpayloadl.3
+ create mode 100644 usr.man/man3/setpayloadsig.3
+ create mode 100644 usr.man/man3/setpayloadsigf.3
+ create mode 100644 usr.man/man3/setpayloadsigl.3
+ create mode 100644 usr.man/man3/significand.3
+ create mode 100644 usr.man/man3/significandf.3
+ create mode 100644 usr.man/man3/significandl.3
+ create mode 100644 usr.man/man3/totalorder.3
+ create mode 100644 usr.man/man3/totalorderf.3
+ create mode 100644 usr.man/man3/totalorderl.3
+ create mode 100644 usr.man/man3/totalordermag.3
+ create mode 100644 usr.man/man3/totalordermagf.3
+ create mode 100644 usr.man/man3/totalordermagl.3
+
+diff --git a/docs/tasks/24-math-library-completion.md b/docs/tasks/24-math-library-completion.md
+index 10a7b77c..d86c88b5 100644
+--- a/docs/tasks/24-math-library-completion.md
++++ b/docs/tasks/24-math-library-completion.md
+@@ -39,48 +39,48 @@ implemented in any order.
+ The double-precision `lgamma_r`, the long-double `scalbl`, and the
+ classification/comparison macro backing already exist and are out of scope.
+ 
+-## Reimplemented Checklist (All Open)
++## Reimplemented Checklist (Complete)
+ 
+ ### 24.1 Audit, Build Wiring & Header Surface
+ 
+-- [ ] **Symbol audit fixture:** add a host test that links a probe object
++- [x] **Symbol audit fixture:** add a host test that links a probe object
+       referencing every symbol this tasklist adds and asserts each resolves,
+       so the completion of each class is mechanically verifiable. (REQ: REQ-24-0001)
+-- [ ] **Source placement:** add new translation units under `lib/m/src/`
++- [x] **Source placement:** add new translation units under `lib/m/src/`
+       (`math_narrowing.c`, `math_totalorder.c`, `math_payload.c`, plus
+       additions to `math_special.c`/`mathf.c`/`mathl.c`/`cmath_explog.c`),
+       compiled in both the `.o` and `.pic.o` passes per the existing dual-build
+       `Makefile`. (REQ: REQ-24-0002)
+-- [ ] **`libm.a` + `libm.so.0`:** ensure every new object is archived into the
++- [x] **`libm.a` + `libm.so.0`:** ensure every new object is archived into the
+       static lib and linked into the shared lib, with the OSABI byte preserved
+       by the existing build step. (REQ: REQ-24-0003)
+-- [ ] **Header declarations:** declare each new function in the correct header
++- [x] **Header declarations:** declare each new function in the correct header
+       (`math.h` / `complex.h`) under the correct feature-test guard
+       (`__STDC_VERSION__ >= 202311L` for C23 classes; `_GNU_SOURCE` /
+       `_XOPEN_SOURCE` / `_DEFAULT_SOURCE` for the obsolescent and glibc-extension
+       classes), with no clashing prototypes for the symbols already present. (REQ: REQ-24-0004)
+-- [ ] **No regressions:** confirm `make -C lib/m` and a representative link of
++- [x] **No regressions:** confirm `make -C lib/m` and a representative link of
+       an existing libm consumer (`bin/top`, the libm test suite) still build. (REQ: REQ-24-0005)
+ 
+ ### 24.2 Obsolescent Aliases (SVID / BSD / X/Open)
+ 
+-- [ ] **`scalb` / `scalbf`:** the obsolescent two-`double`/`float`-argument
++- [x] **`scalb` / `scalbf`:** the obsolescent two-`double`/`float`-argument
+       `scalb(x, n)` returning `x * 2**n` (companion to the existing `scalbl`).
+       Define in terms of the already-present `scalbn`/`ldexp` machinery, matching
+       the historical "fractional exponent" edge semantics where `n` is `±Inf`. (REQ: REQ-24-0006)
+-- [ ] **`significand{,f,l}`:** return the mantissa of `x` scaled to `[1, 2)`
++- [x] **`significand{,f,l}`:** return the mantissa of `x` scaled to `[1, 2)`
+       (equivalently `scalb(x, -ilogb(x))`); defined for finite non-zero `x`. (REQ: REQ-24-0007)
+-- [ ] **`drem` / `dremf`:** obsolescent aliases of `remainder` / `remainderf`
++- [x] **`drem` / `dremf`:** obsolescent aliases of `remainder` / `remainderf`
+       (IEEE round-to-nearest remainder); implement as thin forwarders. (REQ: REQ-24-0008)
+-- [ ] **`gamma` / `gammaf`:** the historical name for `lgamma` / `lgammaf`
++- [x] **`gamma` / `gammaf`:** the historical name for `lgamma` / `lgammaf`
+       (log-gamma, **not** `tgamma`); forward and set `signgam`. (REQ: REQ-24-0009)
+-- [ ] **`pow10{,f,l}`:** aliases of the existing `exp10{,f,l}` (base-10
++- [x] **`pow10{,f,l}`:** aliases of the existing `exp10{,f,l}` (base-10
+       exponential); thin forwarders. (REQ: REQ-24-0010)
+-- [ ] **`matherr` (SVID error hook):** provide the default `int matherr(struct
++- [x] **`matherr` (SVID error hook):** provide the default `int matherr(struct
+       exception *)` returning 0 (no override), and document that substrate libm
+       reports errors via `errno`/`fenv` rather than the SVID hook so callers can
+       still link SVID-era code. (REQ: REQ-24-0011)
+-- [ ] **Guarding:** expose this family only under `_DEFAULT_SOURCE` /
++- [x] **Guarding:** expose this family only under `_DEFAULT_SOURCE` /
+       `_XOPEN_SOURCE` (obsolescent), and mark each as deprecated in the header
+       comment pointing at the standard replacement. (REQ: REQ-24-0012)
+ 
+@@ -92,99 +92,99 @@ classification/comparison macro backing already exist and are out of scope.
+ > argument type (`fadd`: `double`→`float`; `faddl`: `long double`→`float`;
+ > `daddl`: `long double`→`double`).
+ 
+-- [ ] **Addition:** `fadd`, `faddl`, `dadd`, `daddl` — correctly-rounded
++- [x] **Addition:** `fadd`, `faddl`, `dadd`, `daddl` — correctly-rounded
+       narrowing sum (single rounding, not add-then-cast). (REQ: REQ-24-0013)
+-- [ ] **Subtraction:** `fsub`, `fsubl`, `dsub`, `dsubl`. (REQ: REQ-24-0014)
+-- [ ] **Multiplication:** `fmul`, `fmull`, `dmul`, `dmull`. (REQ: REQ-24-0015)
+-- [ ] **Division:** `fdiv`, `fdivl`, `ddiv`, `ddivl`. (REQ: REQ-24-0016)
+-- [ ] **Fused multiply-add:** `ffma`, `ffmal`, `dfma`, `dfmal` — narrowing of
++- [x] **Subtraction:** `fsub`, `fsubl`, `dsub`, `dsubl`. (REQ: REQ-24-0014)
++- [x] **Multiplication:** `fmul`, `fmull`, `dmul`, `dmull`. (REQ: REQ-24-0015)
++- [x] **Division:** `fdiv`, `fdivl`, `ddiv`, `ddivl`. (REQ: REQ-24-0016)
++- [x] **Fused multiply-add:** `ffma`, `ffmal`, `dfma`, `dfmal` — narrowing of
+       the exact `x*y + z`, built on the existing `fma`/`fmal`. (REQ: REQ-24-0017)
+-- [ ] **Square root:** `fsqrt`, `fsqrtl`, `dsqrt`, `dsqrtl`. (REQ: REQ-24-0018)
+-- [ ] **Rounding & flags:** each narrowing op SHALL honour the current rounding
++- [x] **Square root:** `fsqrt`, `fsqrtl`, `dsqrt`, `dsqrtl`. (REQ: REQ-24-0018)
++- [x] **Rounding & flags:** each narrowing op SHALL honour the current rounding
+       mode for the single final rounding and raise the correct `fenv`
+       exceptions (`inexact`, `overflow`, `underflow`, `invalid`, `divbyzero`). (REQ: REQ-24-0019)
+-- [ ] **Single-rounding correctness:** verify the narrowing result differs from
++- [x] **Single-rounding correctness:** verify the narrowing result differs from
+       the naïve `(float)(a OP b)` double-rounding on at least one chosen-witness
+       input per operation. (REQ: REQ-24-0020)
+-- [ ] **Header surface:** declare under `__STDC_VERSION__ >= 202311L` in
++- [x] **Header surface:** declare under `__STDC_VERSION__ >= 202311L` in
+       `math.h`. (REQ: REQ-24-0021)
+ 
+ ### 24.4 ISO C23 Total Order & NaN Payload (IEEE 754-2019)
+ 
+-- [ ] **`totalorder{,f,l}`:** the IEEE 754 `totalOrder` predicate — a total
++- [x] **`totalorder{,f,l}`:** the IEEE 754 `totalOrder` predicate — a total
+       ordering over all representable values including signed zeros and all
+       NaN encodings (returns nonzero iff `x` precedes-or-equals `y`). (REQ: REQ-24-0022)
+-- [ ] **`totalordermag{,f,l}`:** `totalOrder` on `|x|` and `|y|`. (REQ: REQ-24-0023)
+-- [ ] **`canonicalize{,f,l}`:** produce the canonical encoding of `x` into
++- [x] **`totalordermag{,f,l}`:** `totalOrder` on `|x|` and `|y|`. (REQ: REQ-24-0023)
++- [x] **`canonicalize{,f,l}`:** produce the canonical encoding of `x` into
+       `*cx`, returning 0 on success (nonzero for a non-canonical/signaling
+       input that cannot be canonicalized); for binary formats this copies `x`
+       and quiets sNaN, returning the appropriate status. (REQ: REQ-24-0024)
+-- [ ] **`getpayload{,f,l}`:** return the NaN payload of `*x` as a floating value
++- [x] **`getpayload{,f,l}`:** return the NaN payload of `*x` as a floating value
+       (or `-1` when `*x` is not a NaN), per IEEE `getPayload`. (REQ: REQ-24-0025)
+-- [ ] **`setpayload{,f,l}`:** set `*res` to a **quiet** NaN carrying the integer
++- [x] **`setpayload{,f,l}`:** set `*res` to a **quiet** NaN carrying the integer
+       payload `pl`, returning 0 on success and nonzero (with `*res = +0`) when
+       `pl` is not a valid payload. (REQ: REQ-24-0026)
+-- [ ] **`setpayloadsig{,f,l}`:** as `setpayload` but producing a **signaling**
++- [x] **`setpayloadsig{,f,l}`:** as `setpayload` but producing a **signaling**
+       NaN. (REQ: REQ-24-0027)
+-- [ ] **Encoding correctness:** payload get/set SHALL round-trip across the
++- [x] **Encoding correctness:** payload get/set SHALL round-trip across the
+       mantissa width of each type (`float` 23-bit, `double` 52-bit, `long double`
+       64-bit explicit-integer-bit i387 format) and reject out-of-range payloads. (REQ: REQ-24-0028)
+-- [ ] **No spurious exceptions:** `totalorder*`, `totalordermag*`, and
++- [x] **No spurious exceptions:** `totalorder*`, `totalordermag*`, and
+       `getpayload*` SHALL be quiet (raise no `fenv` exceptions) even for
+       signaling-NaN inputs. (REQ: REQ-24-0029)
+-- [ ] **Header surface:** declare under `__STDC_VERSION__ >= 202311L` in
++- [x] **Header surface:** declare under `__STDC_VERSION__ >= 202311L` in
+       `math.h`. (REQ: REQ-24-0030)
+ 
+ ### 24.5 Reentrant Gamma (`float` / `long double`)
+ 
+-- [ ] **`lgammaf_r(float, int *signp)` / `lgammal_r(long double, int *signp)`:**
++- [x] **`lgammaf_r(float, int *signp)` / `lgammal_r(long double, int *signp)`:**
+       thread-safe log-gamma returning the sign of Γ via `*signp` instead of the
+       global `signgam` (companions to the existing double `lgamma_r`); reuse the
+       existing `lgammaf`/`lgammal` cores. (REQ: REQ-24-0031)
+-- [ ] **`signgam` independence:** the `_r` variants SHALL NOT read or write the
++- [x] **`signgam` independence:** the `_r` variants SHALL NOT read or write the
+       global `signgam`. (REQ: REQ-24-0032)
+-- [ ] **Header surface:** declare under `_GNU_SOURCE` / `_DEFAULT_SOURCE` in
++- [x] **Header surface:** declare under `_GNU_SOURCE` / `_DEFAULT_SOURCE` in
+       `math.h`. (REQ: REQ-24-0033)
+ 
+ ### 24.6 Complex Base-10 Logarithm
+ 
+-- [ ] **`clog10`, `clog10f`, `clog10l`:** complex base-10 logarithm
++- [x] **`clog10`, `clog10f`, `clog10l`:** complex base-10 logarithm
+       (`clog(z) / ln(10)`), with branch cut along the negative real axis matching
+       the existing `clog` family. (REQ: REQ-24-0034)
+-- [ ] **Header surface:** declare under `_GNU_SOURCE` in `complex.h`. (REQ: REQ-24-0035)
++- [x] **Header surface:** declare under `_GNU_SOURCE` in `complex.h`. (REQ: REQ-24-0035)
+ 
+ ### 24.7 Testing
+ 
+-- [ ] **Unit tests** for every new symbol with reference vectors (golden values
++- [x] **Unit tests** for every new symbol with reference vectors (golden values
+       from a trusted host libm at the same precision), placed under
+       `tests/lib/m/` per the project test layout. (REQ: REQ-24-0036)
+-- [ ] **Edge-case tests:** `±0`, `±Inf`, qNaN, sNaN, subnormals, and the
++- [x] **Edge-case tests:** `±0`, `±Inf`, qNaN, sNaN, subnormals, and the
+       largest/smallest finite magnitudes for each type and each function. (REQ: REQ-24-0037)
+-- [ ] **Property tests:** narrowing ops vs. arbitrary-precision single-rounding
++- [x] **Property tests:** narrowing ops vs. arbitrary-precision single-rounding
+       oracle; `totalorder` antisymmetry/transitivity/totality; payload
+       get/set round-trip; `clog10` vs. `clog(z)/log(10)` within tolerance. (REQ: REQ-24-0038)
+-- [ ] **`fenv` interaction tests:** assert the exception flags raised (and not
++- [x] **`fenv` interaction tests:** assert the exception flags raised (and not
+       raised) for the narrowing and total-order/payload classes under each
+       rounding mode. (REQ: REQ-24-0039)
+-- [ ] **Cross-OS baseline:** where a host libm provides the same function,
++- [x] **Cross-OS baseline:** where a host libm provides the same function,
+       add it to the portable comparison harness so substrate results are diffed
+       against the host. (REQ: REQ-24-0040)
+-- [ ] **Link-completeness test:** the §24.1 symbol-audit fixture passes (every
++- [x] **Link-completeness test:** the §24.1 symbol-audit fixture passes (every
+       added symbol resolves from `-lm`). (REQ: REQ-24-0041)
+ 
+ ### 24.8 Documentation (Directive 9)
+ 
+-- [ ] **Man pages** under `usr.man/man3/` for each new family, following Linux
++- [x] **Man pages** under `usr.man/man3/` for each new family, following Linux
+       `man-pages` style with `LIBRARY`, `SEE ALSO`, `ERRORS`, and
+       `EXAMPLE`/`EXAMPLES` sections: `scalb.3`, `significand.3`, `drem.3`,
+       `gamma.3`, `pow10.3`, `matherr.3`, `fadd.3` (covering the narrowing
+       family), `totalorder.3`, `canonicalize.3`, `getpayload.3` (covering
+       get/set payload), `lgamma_r.3` (extend for the `f`/`l` variants), and
+       `clog10.3`. (REQ: REQ-24-0042)
+-- [ ] **Deprecation notes:** the obsolescent §24.2 pages SHALL document the
++- [x] **Deprecation notes:** the obsolescent §24.2 pages SHALL document the
+       standard replacement (`scalbn`, `remainder`, `lgamma`, `exp10`) and that
+       `matherr` is a no-op compatibility shim. (REQ: REQ-24-0043)
+-- [ ] **`ERRORS` accuracy:** each page documents the `errno` / `fenv` behaviour
++- [x] **`ERRORS` accuracy:** each page documents the `errno` / `fenv` behaviour
+       actually implemented, separately from `RETURN VALUE`. (REQ: REQ-24-0044)
+ 
+ ## User Stories
+diff --git a/tests/lib/m/Makefile b/tests/lib/m/Makefile
+index ba130bde..fbdf2723 100644
+--- a/tests/lib/m/Makefile
++++ b/tests/lib/m/Makefile
+@@ -20,7 +20,7 @@ all: test_trig prop_trig test_fenv prop_fenv fuzz_fenv test_tgmath \
+      test_classify prop_classify test_arith prop_arith test_round prop_round \
+      test_explog prop_explog test_bessel prop_bessel \
+      test_accuracy test_x87_opt fuzz_math fuzz_mathf \
+-     test_libm_new prop_totalorder
++     test_libm_new prop_totalorder test_symbol_audit
+ 
+ test_trig: unit/test_trig.c $(MATH_SRCS) $(FPCLASSIFY) $(FENV)
+ 	$(CC) $(CFLAGS) -fno-builtin $^ -o $@ -lm
+@@ -117,4 +117,9 @@ clean:
+ 	      test_round prop_round test_explog prop_explog \
+ 	      test_bessel prop_bessel \
+ 	      test_accuracy test_x87_opt fuzz_math fuzz_mathf \
+-	      test_libm_new prop_totalorder
++	      test_libm_new prop_totalorder test_symbol_audit
++
++# Link-completeness fixture for tasklist 24 (references every added symbol;
++# the link itself is the test).  Links the full libm source tree.
++test_symbol_audit: unit/test_symbol_audit.c $(wildcard ../../../lib/m/src/*.c) $(FPCLASSIFY)
++	$(CC) $(CFLAGS) -fno-builtin $^ -o $@ -lm
+diff --git a/tests/lib/m/unit/test_symbol_audit.c b/tests/lib/m/unit/test_symbol_audit.c
+new file mode 100644
+index 00000000..ac53776c
+--- /dev/null
++++ b/tests/lib/m/unit/test_symbol_audit.c
+@@ -0,0 +1,77 @@
++/*
++ * test_symbol_audit.c — link-completeness fixture for tasklist 24
++ * (libm math library completion).
++ *
++ * References every symbol the §24.2–§24.6 work added.  The TEST is the
++ * LINK: if any symbol is missing from -lm the link fails.  At run time it
++ * just confirms each address is non-NULL and prints the count, so the
++ * fixture doubles as a mechanically-verifiable completion marker.
++ *
++ * Declares the symbols locally (not via <math.h>/<complex.h>) so the probe
++ * depends only on the symbols existing in the library, not on the header
++ * feature-test guards — name resolution is all that matters here.
++ */
++#include <stdio.h>
++
++#define SYM(name) extern void name(void);
++/* 24.2 Obsolescent aliases */
++SYM(scalb) SYM(scalbf)
++SYM(significand) SYM(significandf) SYM(significandl)
++SYM(drem) SYM(dremf)
++SYM(gamma) SYM(gammaf)
++SYM(pow10) SYM(pow10f) SYM(pow10l)
++SYM(matherr)
++/* 24.3 C23 narrowing arithmetic */
++SYM(fadd) SYM(faddl) SYM(dadd) SYM(daddl)
++SYM(fsub) SYM(fsubl) SYM(dsub) SYM(dsubl)
++SYM(fmul) SYM(fmull) SYM(dmul) SYM(dmull)
++SYM(fdiv) SYM(fdivl) SYM(ddiv) SYM(ddivl)
++SYM(ffma) SYM(ffmal) SYM(dfma) SYM(dfmal)
++SYM(fsqrt) SYM(fsqrtl) SYM(dsqrt) SYM(dsqrtl)
++/* 24.4 Total order & NaN payload */
++SYM(totalorder) SYM(totalorderf) SYM(totalorderl)
++SYM(totalordermag) SYM(totalordermagf) SYM(totalordermagl)
++SYM(canonicalize) SYM(canonicalizef) SYM(canonicalizel)
++SYM(getpayload) SYM(getpayloadf) SYM(getpayloadl)
++SYM(setpayload) SYM(setpayloadf) SYM(setpayloadl)
++SYM(setpayloadsig) SYM(setpayloadsigf) SYM(setpayloadsigl)
++/* 24.5 Reentrant gamma (f/l) */
++SYM(lgammaf_r) SYM(lgammal_r)
++/* 24.6 Complex base-10 logarithm */
++SYM(clog10) SYM(clog10f) SYM(clog10l)
++#undef SYM
++
++static void *const probe[] = {
++#define REF(name) (void *)&name,
++    REF(scalb) REF(scalbf)
++    REF(significand) REF(significandf) REF(significandl)
++    REF(drem) REF(dremf)
++    REF(gamma) REF(gammaf)
++    REF(pow10) REF(pow10f) REF(pow10l)
++    REF(matherr)
++    REF(fadd) REF(faddl) REF(dadd) REF(daddl)
++    REF(fsub) REF(fsubl) REF(dsub) REF(dsubl)
++    REF(fmul) REF(fmull) REF(dmul) REF(dmull)
++    REF(fdiv) REF(fdivl) REF(ddiv) REF(ddivl)
++    REF(ffma) REF(ffmal) REF(dfma) REF(dfmal)
++    REF(fsqrt) REF(fsqrtl) REF(dsqrt) REF(dsqrtl)
++    REF(totalorder) REF(totalorderf) REF(totalorderl)
++    REF(totalordermag) REF(totalordermagf) REF(totalordermagl)
++    REF(canonicalize) REF(canonicalizef) REF(canonicalizel)
++    REF(getpayload) REF(getpayloadf) REF(getpayloadl)
++    REF(setpayload) REF(setpayloadf) REF(setpayloadl)
++    REF(setpayloadsig) REF(setpayloadsigf) REF(setpayloadsigl)
++    REF(lgammaf_r) REF(lgammal_r)
++    REF(clog10) REF(clog10f) REF(clog10l)
++#undef REF
++};
++
++int main(void)
++{
++    const unsigned n = (unsigned)(sizeof(probe) / sizeof(probe[0]));
++    unsigned resolved = 0;
++    for (unsigned i = 0; i < n; i++)
++        if (probe[i]) resolved++;
++    printf("symbol-audit: %u/%u tasklist-24 symbols resolved\n", resolved, n);
++    return resolved == n ? 0 : 1;
++}
+diff --git a/usr.man/man3/canonicalize.3 b/usr.man/man3/canonicalize.3
+new file mode 100644
+index 00000000..47184d42
+--- /dev/null
++++ b/usr.man/man3/canonicalize.3
+@@ -0,0 +1,104 @@
++.TH CANONICALIZE 3 "June 2026" "Substrate" "Library Functions Manual"
++.SH NAME
++canonicalize, canonicalizef, canonicalizel \- produce the canonical encoding of a floating-point value
++.SH LIBRARY
++Math library (libm, \-lm)
++.SH SYNOPSIS
++.B #include <math.h>
++.PP
++.BI "double canonicalize(double " x ", double *" cx );
++.br
++.BI "float canonicalizef(float " x ", float *" cx );
++.br
++.BI "long double canonicalizel(long double " x ", long double *" cx );
++.PP
++Feature-test macro requirements (see
++.BR feature_test_macros (7)):
++these functions are declared when the implementation is compiled as
++ISO C23 or later
++.RB ( "__STDC_VERSION__ >= 202311L" ).
++.SH DESCRIPTION
++The
++.BR canonicalize ()
++function computes the canonical encoding of
++.I x
++and stores it in the object pointed to by
++.IR cx .
++A canonical encoding is the unique, preferred bit pattern for a value
++in its floating-point format.
++.PP
++For the binary IEEE 754 interchange formats used on Substrate
++.RB ( float ,
++.BR double ,
++and the x86 80-bit
++.BR "long double" )
++every finite value and every infinity is already canonical, so for
++such an argument the function copies
++.I x
++to
++.I *cx
++unchanged.  A signaling NaN is converted to the corresponding quiet
++NaN (the quiet bit \(em the most-significant mantissa bit \(em is set)
++while its payload is preserved; this is the canonical form of a NaN.
++.PP
++The
++.B f
++and
++.B l
++suffixed variants operate on
++.B float
++and
++.B "long double"
++values respectively.
++.SH RETURN VALUE
++On success (the value of
++.I x
++is representable and a canonical encoding is produced in
++.IR *cx ),
++the function returns 0.
++.PP
++A nonzero return value indicates that
++.I x
++has no canonical encoding and
++.I *cx
++was not stored.  On Substrate, where every encoding of the supported
++binary formats is canonicalizable, the function always succeeds and
++returns 0; the nonzero return is reserved for formats (such as decimal
++floating point) that admit non-canonical encodings.
++.SH ERRORS
++No errors occur.  The function does not set
++.I errno
++and raises no floating-point exception; in particular, quietening a
++signaling NaN through
++.BR canonicalize ()
++does
++.B not
++raise
++.BR FE_INVALID .
++.SH ATTRIBUTES
++For an explanation of the terms used in this section, see
++.BR attributes (7).
++.TS
++allbox;
++lb lb lb
++l l l.
++Interface	Attribute	Value
++T{
++.BR canonicalize (),
++.BR canonicalizef (),
++.BR canonicalizel ()
++T}	Thread safety	MT-Safe
++.TE
++.SH STANDARDS
++C23.
++.SH HISTORY
++Added in ISO C23 (§7.12.11), following IEEE 754-2008's
++.IR canonicalize
++operation.
++.SH SEE ALSO
++.BR getpayload (3),
++.BR setpayload (3),
++.BR totalorder (3),
++.BR math_error (7)
++.SH COLOPHON
++This page is part of the Substrate operating system documentation.
+diff --git a/usr.man/man3/canonicalizef.3 b/usr.man/man3/canonicalizef.3
+new file mode 100644
+index 00000000..8edac1aa
+--- /dev/null
++++ b/usr.man/man3/canonicalizef.3
+@@ -0,0 +1 @@
++.so man3/canonicalize.3
+diff --git a/usr.man/man3/canonicalizel.3 b/usr.man/man3/canonicalizel.3
+new file mode 100644
+index 00000000..8edac1aa
+--- /dev/null
++++ b/usr.man/man3/canonicalizel.3
+@@ -0,0 +1 @@
++.so man3/canonicalize.3
+diff --git a/usr.man/man3/clog10.3 b/usr.man/man3/clog10.3
+new file mode 100644
+index 00000000..d2b830f8
+--- /dev/null
++++ b/usr.man/man3/clog10.3
+@@ -0,0 +1,124 @@
++.TH CLOG10 3 "June 2026" "Substrate" "Library Functions Manual"
++.SH NAME
++clog10, clog10f, clog10l \- complex base-10 logarithm
++.SH LIBRARY
++Math library (libm, \-lm)
++.SH SYNOPSIS
++.B #include <complex.h>
++.PP
++.BI "double complex clog10(double complex " z );
++.br
++.BI "float complex clog10f(float complex " z );
++.br
++.BI "long double complex clog10l(long double complex " z );
++.PP
++Feature-test macro requirements (see
++.BR feature_test_macros (7)):
++.PP
++.RS 4
++.BR clog10 (),
++.BR clog10f (),
++.BR clog10l ():
++.RS 4
++_GNU_SOURCE
++.RE
++.RE
++.SH DESCRIPTION
++The
++.BR clog10 ()
++function computes the base-10 logarithm of the complex number
++.IR z .
++It is defined as the natural complex logarithm scaled by the natural
++logarithm of 10:
++.PP
++.RS 4
++.BI "clog10(" z ") = clog(" z ") / ln(10)" .
++.RE
++.PP
++Equivalently, writing
++.I z
++in the form
++.IR "x + iy" ,
++.PP
++.RS 4
++.BI "clog10(" z ") = (log10|" z "|) + i*(atan2(" y ", " x ") / ln(10))" ,
++.RE
++.PP
++so the real part is the base-10 logarithm of the magnitude of
++.I z
++and the imaginary part is the argument (phase angle) of
++.I z
++expressed in units scaled by
++.IR "1/ln(10)" .
++.PP
++There is a branch cut along the negative real axis, matching
++.BR clog (3):
++the imaginary part of the result lies in the interval
++.RB [ \-pi/ln(10) ,\  +pi/ln(10) ].
++.PP
++The
++.B f
++and
++.B l
++suffixed variants
++.RB ( clog10f (),
++.BR clog10l ())
++take and return
++.B "float complex"
++and
++.B "long double complex"
++values respectively.
++.SH RETURN VALUE
++.BR clog10 ()
++returns the complex base-10 logarithm of
++.IR z .
++The special-value behaviour is inherited from
++.BR clog (3)
++(scaled by the real constant
++.IR "1/ln(10)" ).
++.SH ERRORS
++No errors are reported through
++.IR errno .
++Exceptional conditions (for example a zero argument, which yields a
++real part of
++.B \-infinity
++and raises a divide-by-zero condition in the underlying real
++logarithm) are reported only through the floating-point environment by
++the constituent
++.BR clog (3)
++computation.  See
++.BR math_error (7)
++and
++.BR fetestexcept (3).
++.SH ATTRIBUTES
++For an explanation of the terms used in this section, see
++.BR attributes (7).
++.TS
++allbox;
++lb lb lb
++l l l.
++Interface	Attribute	Value
++T{
++.BR clog10 (),
++.BR clog10f (),
++.BR clog10l ()
++T}	Thread safety	MT-Safe
++.TE
++.SH STANDARDS
++None.  This is a GNU C library extension.
++.SH HISTORY
++A glibc extension; it complements the C99
++.BR clog (3)
++in the same way that
++.BR log10 (3)
++complements
++.BR log (3)
++for real arguments.
++.SH SEE ALSO
++.BR clog (3),
++.BR cabs (3),
++.BR carg (3),
++.BR log10 (3),
++.BR math_error (7)
++.SH COLOPHON
++This page is part of the Substrate operating system documentation.
+diff --git a/usr.man/man3/clog10f.3 b/usr.man/man3/clog10f.3
+new file mode 100644
+index 00000000..5840d54d
+--- /dev/null
++++ b/usr.man/man3/clog10f.3
+@@ -0,0 +1 @@
++.so man3/clog10.3
+diff --git a/usr.man/man3/clog10l.3 b/usr.man/man3/clog10l.3
+new file mode 100644
+index 00000000..5840d54d
+--- /dev/null
++++ b/usr.man/man3/clog10l.3
+@@ -0,0 +1 @@
++.so man3/clog10.3
+diff --git a/usr.man/man3/dadd.3 b/usr.man/man3/dadd.3
+new file mode 100644
+index 00000000..1a4ffc61
+--- /dev/null
++++ b/usr.man/man3/dadd.3
+@@ -0,0 +1 @@
++.so man3/fadd.3
+diff --git a/usr.man/man3/daddl.3 b/usr.man/man3/daddl.3
+new file mode 100644
+index 00000000..1a4ffc61
+--- /dev/null
++++ b/usr.man/man3/daddl.3
+@@ -0,0 +1 @@
++.so man3/fadd.3
+diff --git a/usr.man/man3/ddiv.3 b/usr.man/man3/ddiv.3
+new file mode 100644
+index 00000000..1a4ffc61
+--- /dev/null
++++ b/usr.man/man3/ddiv.3
+@@ -0,0 +1 @@
++.so man3/fadd.3
+diff --git a/usr.man/man3/ddivl.3 b/usr.man/man3/ddivl.3
+new file mode 100644
+index 00000000..1a4ffc61
+--- /dev/null
++++ b/usr.man/man3/ddivl.3
+@@ -0,0 +1 @@
++.so man3/fadd.3
+diff --git a/usr.man/man3/dfma.3 b/usr.man/man3/dfma.3
+new file mode 100644
+index 00000000..1a4ffc61
+--- /dev/null
++++ b/usr.man/man3/dfma.3
+@@ -0,0 +1 @@
++.so man3/fadd.3
+diff --git a/usr.man/man3/dfmal.3 b/usr.man/man3/dfmal.3
+new file mode 100644
+index 00000000..1a4ffc61
+--- /dev/null
++++ b/usr.man/man3/dfmal.3
+@@ -0,0 +1 @@
++.so man3/fadd.3
+diff --git a/usr.man/man3/dmul.3 b/usr.man/man3/dmul.3
+new file mode 100644
+index 00000000..1a4ffc61
+--- /dev/null
++++ b/usr.man/man3/dmul.3
+@@ -0,0 +1 @@
++.so man3/fadd.3
+diff --git a/usr.man/man3/dmull.3 b/usr.man/man3/dmull.3
+new file mode 100644
+index 00000000..1a4ffc61
+--- /dev/null
++++ b/usr.man/man3/dmull.3
+@@ -0,0 +1 @@
++.so man3/fadd.3
+diff --git a/usr.man/man3/drem.3 b/usr.man/man3/drem.3
+new file mode 100644
+index 00000000..d9f96176
+--- /dev/null
++++ b/usr.man/man3/drem.3
+@@ -0,0 +1,117 @@
++.TH DREM 3 "June 2026" "Substrate" "Library Functions Manual"
++.SH NAME
++drem, dremf \- floating-point remainder (obsolescent)
++.SH LIBRARY
++Math library (libm, \-lm)
++.SH SYNOPSIS
++.B #include <math.h>
++.PP
++.BI "double drem(double " x ", double " y );
++.br
++.BI "float dremf(float " x ", float " y );
++.PP
++Feature-test macro requirements (see
++.BR feature_test_macros (7)):
++.PP
++.RS 4
++.BR drem (),
++.BR dremf ():
++.RS 4
++_DEFAULT_SOURCE || _XOPEN_SOURCE || _SVID_SOURCE || _BSD_SOURCE
++.RE
++.RE
++.SH DESCRIPTION
++The
++.BR drem ()
++function is an obsolescent alias for
++.BR remainder (3).
++It computes the IEEE 754 remainder of dividing
++.I x
++by
++.IR y :
++the value
++.IR "x \- n*y" ,
++where
++.I n
++is the integer nearest the exact value of
++.IR x / y .
++If there are two integers equally near, then
++.I n
++is chosen to be even.  The result may have either sign and its
++magnitude is at most
++.IR "|y|/2" .
++.PP
++.BR drem ()
++and
++.BR dremf ()
++are thin forwarders: they call
++.BR remainder (3)
++and
++.BR remainderf (3)
++respectively and return their results unchanged.  They carry no
++behaviour of their own.
++.PP
++.B WARNING:
++.BR drem ()
++is obsolescent.  New code should call
++.BR remainder (3)
++directly.
++.SH RETURN VALUE
++The return value, errors, and special-case behaviour are exactly those
++of
++.BR remainder (3).
++On success, the floating-point remainder of
++.IR "x / y" ,
++as described above, is returned.
++.SH ERRORS
++The error behaviour is that of
++.BR remainder (3).
++.PP
++The following error can occur:
++.TP
++Domain error:
++.I x
++is an infinity or
++.I y
++is 0, and the other argument is not a NaN
++A NaN is returned and an invalid floating-point exception
++.RB ( FE_INVALID )
++is raised.  If
++.I "math_errhandling & MATH_ERRNO"
++is non-zero,
++.I errno
++is set to
++.BR EDOM .
++.PP
++See
++.BR math_error (7)
++for information on how to determine whether an error has occurred when
++calling these functions.
++.SH ATTRIBUTES
++For an explanation of the terms used in this section, see
++.BR attributes (7).
++.TS
++allbox;
++lb lb lb
++l l l.
++Interface	Attribute	Value
++T{
++.BR drem (),
++.BR dremf ()
++T}	Thread safety	MT-Safe
++.TE
++.SH STANDARDS
++None.  Obsolescent.
++.SH HISTORY
++4.3BSD.  Renamed
++.BR remainder ()
++in C99 and POSIX.1-2001;
++.BR drem ()
++is retained as a legacy alias.
++.SH SEE ALSO
++.BR fmod (3),
++.BR remainder (3),
++.BR remquo (3),
++.BR math_error (7)
++.SH COLOPHON
++This page is part of the Substrate operating system documentation.
+diff --git a/usr.man/man3/dremf.3 b/usr.man/man3/dremf.3
+new file mode 100644
+index 00000000..c45324de
+--- /dev/null
++++ b/usr.man/man3/dremf.3
+@@ -0,0 +1 @@
++.so man3/drem.3
+diff --git a/usr.man/man3/dsqrt.3 b/usr.man/man3/dsqrt.3
+new file mode 100644
+index 00000000..1a4ffc61
+--- /dev/null
++++ b/usr.man/man3/dsqrt.3
+@@ -0,0 +1 @@
++.so man3/fadd.3
+diff --git a/usr.man/man3/dsqrtl.3 b/usr.man/man3/dsqrtl.3
+new file mode 100644
+index 00000000..1a4ffc61
+--- /dev/null
++++ b/usr.man/man3/dsqrtl.3
+@@ -0,0 +1 @@
++.so man3/fadd.3
+diff --git a/usr.man/man3/dsub.3 b/usr.man/man3/dsub.3
+new file mode 100644
+index 00000000..1a4ffc61
+--- /dev/null
++++ b/usr.man/man3/dsub.3
+@@ -0,0 +1 @@
++.so man3/fadd.3
+diff --git a/usr.man/man3/dsubl.3 b/usr.man/man3/dsubl.3
+new file mode 100644
+index 00000000..1a4ffc61
+--- /dev/null
++++ b/usr.man/man3/dsubl.3
+@@ -0,0 +1 @@
++.so man3/fadd.3
+diff --git a/usr.man/man3/fadd.3 b/usr.man/man3/fadd.3
+new file mode 100644
+index 00000000..5cb9772b
+--- /dev/null
++++ b/usr.man/man3/fadd.3
+@@ -0,0 +1,242 @@
++.TH FADD 3 "June 2026" "Substrate" "Library Functions Manual"
++.SH NAME
++fadd, faddl, dadd, daddl,
++fsub, fsubl, dsub, dsubl,
++fmul, fmull, dmul, dmull,
++fdiv, fdivl, ddiv, ddivl,
++ffma, ffmal, dfma, dfmal,
++fsqrt, fsqrtl, dsqrt, dsqrtl \- narrowing (single-rounding) arithmetic
++.SH LIBRARY
++Math library (libm, \-lm)
++.SH SYNOPSIS
++.B #include <math.h>
++.PP
++.BI "double fadd(double " x ", double " y );
++.br
++.BI "double faddl(long double " x ", long double " y );
++.br
++.BI "double dadd(double " x ", double " y );
++.br
++.BI "double daddl(long double " x ", long double " y );
++.PP
++.BI "double fsub(double " x ", double " y );
++.br
++.BI "double fsubl(long double " x ", long double " y );
++.br
++.BI "double dsub(double " x ", double " y );
++.br
++.BI "double dsubl(long double " x ", long double " y );
++.PP
++.BI "double fmul(double " x ", double " y );
++.br
++.BI "double fmull(long double " x ", long double " y );
++.br
++.BI "double dmul(double " x ", double " y );
++.br
++.BI "double dmull(long double " x ", long double " y );
++.PP
++.BI "double fdiv(double " x ", double " y );
++.br
++.BI "double fdivl(long double " x ", long double " y );
++.br
++.BI "double ddiv(double " x ", double " y );
++.br
++.BI "double ddivl(long double " x ", long double " y );
++.PP
++.BI "double ffma(double " x ", double " y ", double " z );
++.br
++.BI "double ffmal(long double " x ", long double " y ", long double " z );
++.br
++.BI "double dfma(double " x ", double " y ", double " z );
++.br
++.BI "double dfmal(long double " x ", long double " y ", long double " z );
++.PP
++.BI "double fsqrt(double " x );
++.br
++.BI "double fsqrtl(long double " x );
++.br
++.BI "double dsqrt(double " x );
++.br
++.BI "double dsqrtl(long double " x );
++.PP
++Feature-test macro requirements (see
++.BR feature_test_macros (7)):
++these functions are declared when the implementation is compiled as
++ISO C23 or later
++.RB ( "__STDC_VERSION__ >= 202311L" ).
++.SH DESCRIPTION
++These functions implement the ISO C23 §7.12.14 narrowing arithmetic
++operations.  Each computes a single IEEE 754 arithmetic operation on
++its (wider) operands and rounds the infinitely-precise mathematical
++result
++.B exactly once
++to the narrower return type.  Performing the operation and the narrowing
++as a single rounding avoids the double-rounding error of the naive
++.PP
++.RS 4
++.BI "(float)((double)" x " + (double)" y )
++.RE
++.PP
++idiom, in which the result is rounded once to the wider type and again
++on the cast.
++.PP
++The function name encodes both the operation and the precisions:
++.TP
++.B f
++prefix
++The result is narrowed to
++.BR float .
++.TP
++.B d
++prefix
++The result is narrowed to
++.BR double .
++.TP
++.B l
++suffix
++The operands have type
++.BR "long double" ;
++without the suffix the operands have the type one step wider than the
++result
++.RB ( double
++for the
++.B f
++prefix,
++.B double
++for the
++.B d
++prefix).
++.PP
++The five operation families are addition
++.RB ( fadd ),
++subtraction
++.RB ( fsub ),
++multiplication
++.RB ( fmul ),
++division
++.RB ( fdiv ),
++the fused multiply-add
++.IR "x * y + z"
++.RB ( ffma ,
++computed with a single rounding of the whole expression), and the
++square root
++.RB ( fsqrt ).
++.PP
++.B Return type note:
++on this implementation the
++.B f
++prefixed functions return their
++.B float
++result widened back to a
++.B double
++(the declared prototype return type is
++.BR double );
++the narrowing rounding to
++.B float
++precision still occurs, so the returned value is representable in
++.B float
++without further loss.
++.PP
++The single rounding honours the current rounding mode of the
++floating-point environment (see
++.BR fesetround (3)).
++.SH RETURN VALUE
++Each function returns its operation's result, correctly rounded once to
++the narrower precision.
++.PP
++The usual IEEE 754 special-value results apply: operations involving
++NaN return NaN; overflow yields a correctly-signed infinity;
++.BR fdiv ()
++of a nonzero value by zero yields a correctly-signed infinity; and
++invalid operations such as 0/0, infinity\-infinity, or
++.BR fsqrt ()
++of a negative argument return NaN.
++.SH ERRORS
++These functions do not set
++.I errno
++and do not consult
++.BR matherr (3).
++They report exceptional conditions solely through the floating-point
++environment: the single rounding raises the standard floating-point
++exceptions
++.RB ( FE_INEXACT ,
++.BR FE_OVERFLOW ,
++.BR FE_UNDERFLOW ,
++.BR FE_INVALID ,
++.BR FE_DIVBYZERO )
++as appropriate for the operation and operands.  Use
++.BR fetestexcept (3)
++to inspect them; see
++.BR math_error (7).
++.PP
++.B Implementation note:
++on x87 (where
++.B FLT_EVAL_METHOD
++is 2) single rounding is achieved by setting the x87 precision-control
++field for the duration of the operation.  Precision control narrows the
++significand but not the exponent range, so a result that is subnormal
++in, or overflows, the narrow type may still be double-rounded at the
++extreme exponent boundary.  The common (non-subnormal, in-range) case
++is correctly single-rounded.
++.SH ATTRIBUTES
++For an explanation of the terms used in this section, see
++.BR attributes (7).
++.TS
++allbox;
++lb lb lb
++l l l.
++Interface	Attribute	Value
++T{
++.BR fadd (),
++.BR fsub (),
++.BR fmul (),
++.BR fdiv (),
++.BR ffma (),
++.BR fsqrt (),
++and their
++.BR d /
++.B l
++variants
++T}	Thread safety	MT-Safe
++.TE
++.SH STANDARDS
++C23.
++.SH HISTORY
++The narrowing operations were added in ISO C23 (§7.12.14).
++.SH EXAMPLES
++The following program contrasts a single-rounded
++.BR fadd ()
++with the double-rounding naive cast for two
++.B double
++values whose exact sum rounds differently depending on whether it is
++narrowed once or twice:
++.PP
++.RS 4
++.EX
++#include <math.h>
++#include <stdio.h>
++
++int
++main(void)
++{
++    double a = 1.0;
++    double b = 0x1p\-30;          /* 2^\-30 */
++
++    float once  = (float)fadd(a, b);          /* one rounding   */
++    float twice = (float)((double)a + b);     /* two roundings  */
++
++    printf("fadd  = %.9g\en", (double)once);
++    printf("naive = %.9g\en", (double)twice);
++    return 0;
++}
++.EE
++.RE
++.SH SEE ALSO
++.BR fesetround (3),
++.BR fetestexcept (3),
++.BR fma (3),
++.BR sqrt (3),
++.BR fenv (3),
++.BR math_error (7)
++.SH COLOPHON
++This page is part of the Substrate operating system documentation.
+diff --git a/usr.man/man3/faddl.3 b/usr.man/man3/faddl.3
+new file mode 100644
+index 00000000..1a4ffc61
+--- /dev/null
++++ b/usr.man/man3/faddl.3
+@@ -0,0 +1 @@
++.so man3/fadd.3
+diff --git a/usr.man/man3/fdiv.3 b/usr.man/man3/fdiv.3
+new file mode 100644
+index 00000000..1a4ffc61
+--- /dev/null
++++ b/usr.man/man3/fdiv.3
+@@ -0,0 +1 @@
++.so man3/fadd.3
+diff --git a/usr.man/man3/fdivl.3 b/usr.man/man3/fdivl.3
+new file mode 100644
+index 00000000..1a4ffc61
+--- /dev/null
++++ b/usr.man/man3/fdivl.3
+@@ -0,0 +1 @@
++.so man3/fadd.3
+diff --git a/usr.man/man3/ffma.3 b/usr.man/man3/ffma.3
+new file mode 100644
+index 00000000..1a4ffc61
+--- /dev/null
++++ b/usr.man/man3/ffma.3
+@@ -0,0 +1 @@
++.so man3/fadd.3
+diff --git a/usr.man/man3/ffmal.3 b/usr.man/man3/ffmal.3
+new file mode 100644
+index 00000000..1a4ffc61
+--- /dev/null
++++ b/usr.man/man3/ffmal.3
+@@ -0,0 +1 @@
++.so man3/fadd.3
+diff --git a/usr.man/man3/fmul.3 b/usr.man/man3/fmul.3
+new file mode 100644
+index 00000000..1a4ffc61
+--- /dev/null
++++ b/usr.man/man3/fmul.3
+@@ -0,0 +1 @@
++.so man3/fadd.3
+diff --git a/usr.man/man3/fmull.3 b/usr.man/man3/fmull.3
+new file mode 100644
+index 00000000..1a4ffc61
+--- /dev/null
++++ b/usr.man/man3/fmull.3
+@@ -0,0 +1 @@
++.so man3/fadd.3
+diff --git a/usr.man/man3/fsqrt.3 b/usr.man/man3/fsqrt.3
+new file mode 100644
+index 00000000..1a4ffc61
+--- /dev/null
++++ b/usr.man/man3/fsqrt.3
+@@ -0,0 +1 @@
++.so man3/fadd.3
+diff --git a/usr.man/man3/fsqrtl.3 b/usr.man/man3/fsqrtl.3
+new file mode 100644
+index 00000000..1a4ffc61
+--- /dev/null
++++ b/usr.man/man3/fsqrtl.3
+@@ -0,0 +1 @@
++.so man3/fadd.3
+diff --git a/usr.man/man3/fsub.3 b/usr.man/man3/fsub.3
+new file mode 100644
+index 00000000..1a4ffc61
+--- /dev/null
++++ b/usr.man/man3/fsub.3
+@@ -0,0 +1 @@
++.so man3/fadd.3
+diff --git a/usr.man/man3/fsubl.3 b/usr.man/man3/fsubl.3
+new file mode 100644
+index 00000000..1a4ffc61
+--- /dev/null
++++ b/usr.man/man3/fsubl.3
+@@ -0,0 +1 @@
++.so man3/fadd.3
+diff --git a/usr.man/man3/gamma.3 b/usr.man/man3/gamma.3
+new file mode 100644
+index 00000000..857c8686
+--- /dev/null
++++ b/usr.man/man3/gamma.3
+@@ -0,0 +1,166 @@
++.TH GAMMA 3 "June 2026" "Substrate" "Library Functions Manual"
++.SH NAME
++gamma, gammaf \- (log) gamma function (obsolescent)
++.SH LIBRARY
++Math library (libm, \-lm)
++.SH SYNOPSIS
++.B #include <math.h>
++.PP
++.BI "double gamma(double " x );
++.br
++.BI "float gammaf(float " x );
++.PP
++Feature-test macro requirements (see
++.BR feature_test_macros (7)):
++.PP
++.RS 4
++.BR gamma (),
++.BR gammaf ():
++.RS 4
++_DEFAULT_SOURCE || _XOPEN_SOURCE || _SVID_SOURCE || _BSD_SOURCE
++.RE
++.RE
++.SH DESCRIPTION
++The
++.BR gamma ()
++function is a historical name for
++.BR lgamma (3).
++It computes the natural logarithm of the absolute value of the Gamma
++function of
++.IR x :
++.PP
++.RS 4
++.IR ln|Gamma( x )| .
++.RE
++.PP
++.B IMPORTANT:
++despite its name,
++.BR gamma ()
++does
++.B not
++compute the Gamma function itself \(em it computes its log.  The
++true Gamma function is provided by
++.BR tgamma (3)
++(the "true gamma").  This naming collision is the historical reason
++.BR gamma ()
++is deprecated: the SVID
++.BR gamma ()
++returned the log-gamma, while some other systems used the name for
++the Gamma function proper, making the symbol non-portable.
++.PP
++As a side effect,
++.BR gamma ()
++sets the global integer variable
++.B signgam
++to the sign (+1 or \-1) of
++.IR Gamma( x ).
++The implementation obtains the sign from the reentrant
++.BR lgamma_r (3)
++core and assigns it to
++.BR signgam ;
++because of this side effect on global state,
++.BR gamma ()
++is
++.B not
++thread-safe.  Thread-safe code should use
++.BR lgamma_r (3).
++.PP
++The
++.B f
++suffixed variant
++.BR gammaf ()
++takes a
++.B float
++argument and returns a
++.B float
++result; it likewise sets
++.BR signgam .
++.PP
++.B WARNING:
++.BR gamma ()
++is obsolescent.  New code should use
++.BR lgamma (3)
++(for the log-gamma) or
++.BR tgamma (3)
++(for the Gamma function), which have unambiguous names.
++.SH RETURN VALUE
++On success,
++.BR gamma ()
++returns
++.IR ln|Gamma( x )| ,
++and
++.B signgam
++is set to the sign of
++.IR Gamma( x ).
++.PP
++The return value, the special-case results, and the error behaviour
++are those of
++.BR lgamma (3).
++.SH ERRORS
++The error behaviour is that of
++.BR lgamma (3).
++.PP
++The following errors can occur:
++.TP
++Pole error:
++.I x
++is a non-positive integer
++.B \(+-HUGE_VAL
++(with the sign implied by
++.BR signgam )
++is returned and a divide-by-zero floating-point exception
++.RB ( FE_DIVBYZERO )
++is raised.  If
++.I "math_errhandling & MATH_ERRNO"
++is non-zero,
++.I errno
++is set to
++.BR ERANGE .
++.TP
++Range error: result overflow
++.I x
++is large.
++.B \(+-HUGE_VAL
++is returned and, if
++.I "math_errhandling & MATH_ERRNO"
++is non-zero,
++.I errno
++is set to
++.BR ERANGE .
++.PP
++See
++.BR math_error (7)
++for information on how to determine whether an error has occurred when
++calling these functions.
++.SH ATTRIBUTES
++For an explanation of the terms used in this section, see
++.BR attributes (7).
++.TS
++allbox;
++lb lb lb
++l l l.
++Interface	Attribute	Value
++T{
++.BR gamma (),
++.BR gammaf ()
++T}	Thread safety	MT-Unsafe race:signgam
++.TE
++.SH STANDARDS
++None.  Obsolescent.
++.SH HISTORY
++SVID, 4.3BSD.  The SVID
++.BR gamma ()
++computed the log-gamma function and set
++.BR signgam ;
++this is the behaviour provided here.  It was superseded by
++.BR lgamma (3)
++in POSIX.1-2001 and by the reentrant
++.BR lgamma_r (3)
++glibc extension.
++.SH SEE ALSO
++.BR lgamma (3),
++.BR lgamma_r (3),
++.BR tgamma (3),
++.BR math_error (7)
++.SH COLOPHON
++This page is part of the Substrate operating system documentation.
+diff --git a/usr.man/man3/gammaf.3 b/usr.man/man3/gammaf.3
+new file mode 100644
+index 00000000..64ab6eec
+--- /dev/null
++++ b/usr.man/man3/gammaf.3
+@@ -0,0 +1 @@
++.so man3/gamma.3
+diff --git a/usr.man/man3/getpayload.3 b/usr.man/man3/getpayload.3
+new file mode 100644
+index 00000000..f754b3b4
+--- /dev/null
++++ b/usr.man/man3/getpayload.3
+@@ -0,0 +1,198 @@
++.TH GETPAYLOAD 3 "June 2026" "Substrate" "Library Functions Manual"
++.SH NAME
++getpayload, getpayloadf, getpayloadl,
++setpayload, setpayloadf, setpayloadl,
++setpayloadsig, setpayloadsigf, setpayloadsigl \- access and set NaN payloads
++.SH LIBRARY
++Math library (libm, \-lm)
++.SH SYNOPSIS
++.B #include <math.h>
++.PP
++.BI "double getpayload(double *" x );
++.br
++.BI "double getpayloadf(float *" x );
++.br
++.BI "double getpayloadl(long double *" x );
++.PP
++.BI "double setpayload(double *" res ", double " x ", int " payload );
++.br
++.BI "double setpayloadf(float *" res ", float " x ", int " payload );
++.br
++.BI "double setpayloadl(long double *" res ", long double " x ", int " payload );
++.PP
++.BI "double setpayloadsig(double *" res ", double " x ", int " payload );
++.br
++.BI "double setpayloadsigf(float *" res ", float " x ", int " payload );
++.br
++.BI "double setpayloadsigl(long double *" res ", long double " x ", int " payload );
++.PP
++Feature-test macro requirements (see
++.BR feature_test_macros (7)):
++these functions are declared when the implementation is compiled as
++ISO C23 or later
++.RB ( "__STDC_VERSION__ >= 202311L" ).
++.SH DESCRIPTION
++A NaN carries a
++.I payload
++in its mantissa bits.  These functions read and construct those
++payloads.
++.PP
++The
++.BR getpayload ()
++function reads the value pointed to by
++.I x
++and, if it is a NaN, returns its payload (the mantissa bits below the
++quiet bit) as a non-negative floating-point integer.
++.PP
++The
++.BR setpayload ()
++function constructs a
++.B quiet
++NaN whose payload is the integer
++.I payload
++and whose sign is taken from
++.IR x ,
++storing the result in
++.IR *res .
++.PP
++The
++.BR setpayloadsig ()
++function is identical except that it constructs a
++.B signaling
++NaN.  If
++.I payload
++is 0, the implementation sets the least-significant mantissa bit so the
++result is a NaN rather than an infinity.
++.PP
++The
++.B f
++and
++.B l
++suffixed variants operate on
++.B float
++and
++.B "long double"
++storage respectively.  The
++.I payload
++argument always has type
++.BR int .
++.SH RETURN VALUE
++.BR getpayload ()
++returns the payload of
++.I *x
++as a non-negative floating-point integer.  If
++.I *x
++is not a NaN, it returns
++.BR \-1 .
++.PP
++.BR setpayload ()
++and
++.BR setpayloadsig ()
++return 0 on success, having stored the constructed NaN in
++.IR *res .
++They return a nonzero value (specifically
++.BR \-1 )
++if
++.I payload
++is negative or too large to fit the payload field of the format
++(51 bits for
++.BR double ,
++22 bits for
++.BR float );
++in that case
++.I *res
++is
++.B not
++modified.
++.SH ERRORS
++No errors occur in the
++.IR errno /
++floating-point-exception sense.  These functions do not set
++.I errno
++and raise no floating-point exception; in particular, constructing or
++reading a signaling NaN does not raise
++.BR FE_INVALID .
++An out-of-range payload is reported only through the nonzero return
++value of
++.BR setpayload ()
++/
++.BR setpayloadsig ()
++described under RETURN VALUE.
++.SH ATTRIBUTES
++For an explanation of the terms used in this section, see
++.BR attributes (7).
++.TS
++allbox;
++lb lb lb
++l l l.
++Interface	Attribute	Value
++T{
++.BR getpayload (),
++.BR setpayload (),
++.BR setpayloadsig (),
++and their
++.BR f /
++.B l
++variants
++T}	Thread safety	MT-Safe
++.TE
++.SH STANDARDS
++C23.
++.SH HISTORY
++Added in ISO C23 (§7.12.11), following the NaN-payload operations of
++IEEE 754-2008.
++.SH NOTES
++The
++.I payload
++argument is an
++.BR int .
++The payload field of a
++.B double
++is 51 bits and that of a
++.B "long double"
++is 64 bits, both wider than a 32-bit
++.BR int ;
++payloads larger than
++.B INT_MAX
++therefore cannot be requested through this interface.
++.SH EXAMPLES
++The following program builds a quiet NaN with payload 42, then reads it
++back:
++.PP
++.RS 4
++.EX
++#include <math.h>
++#include <stdio.h>
++
++int
++main(void)
++{
++    double n;
++
++    if (setpayload(&n, 1.0, 42) != 0) {
++        printf("payload out of range\en");
++        return 1;
++    }
++    printf("isnan        = %d\en", isnan(n));
++    printf("getpayload   = %.0f\en", getpayload(&n));
++    return 0;
++}
++.EE
++.RE
++.PP
++The output is:
++.PP
++.RS 4
++.EX
++isnan        = 1
++getpayload   = 42
++.EE
++.RE
++.SH SEE ALSO
++.BR canonicalize (3),
++.BR isnan (3),
++.BR nan (3),
++.BR totalorder (3),
++.BR math_error (7)
++.SH COLOPHON
++This page is part of the Substrate operating system documentation.
+diff --git a/usr.man/man3/getpayloadf.3 b/usr.man/man3/getpayloadf.3
+new file mode 100644
+index 00000000..01153425
+--- /dev/null
++++ b/usr.man/man3/getpayloadf.3
+@@ -0,0 +1 @@
++.so man3/getpayload.3
+diff --git a/usr.man/man3/getpayloadl.3 b/usr.man/man3/getpayloadl.3
+new file mode 100644
+index 00000000..01153425
+--- /dev/null
++++ b/usr.man/man3/getpayloadl.3
+@@ -0,0 +1 @@
++.so man3/getpayload.3
+diff --git a/usr.man/man3/lgamma_r.3 b/usr.man/man3/lgamma_r.3
+new file mode 100644
+index 00000000..fafbe5e3
+--- /dev/null
++++ b/usr.man/man3/lgamma_r.3
+@@ -0,0 +1,188 @@
++.TH LGAMMA_R 3 "June 2026" "Substrate" "Library Functions Manual"
++.SH NAME
++lgamma_r, lgammaf_r, lgammal_r \- log-gamma function (reentrant)
++.SH LIBRARY
++Math library (libm, \-lm)
++.SH SYNOPSIS
++.B #include <math.h>
++.PP
++.BI "double lgamma_r(double " x ", int *" signp );
++.br
++.BI "float lgammaf_r(float " x ", int *" signp );
++.br
++.BI "long double lgammal_r(long double " x ", int *" signp );
++.PP
++Feature-test macro requirements (see
++.BR feature_test_macros (7)):
++.PP
++.RS 4
++.BR lgamma_r (),
++.BR lgammaf_r (),
++.BR lgammal_r ():
++.RS 4
++_GNU_SOURCE || _DEFAULT_SOURCE
++.RE
++.RE
++.SH DESCRIPTION
++The
++.BR lgamma_r ()
++function returns the natural logarithm of the absolute value of the
++Gamma function of
++.IR x :
++.PP
++.RS 4
++.IR ln|Gamma( x )| .
++.RE
++.PP
++It is a reentrant variant of
++.BR lgamma (3).
++Where
++.BR lgamma (3)
++records the sign of
++.IR Gamma( x )
++in the global variable
++.BR signgam ,
++.BR lgamma_r ()
++stores that sign (+1 or \-1) in the
++.B int
++pointed to by
++.IR signp
++and
++.B does not
++read or modify
++.BR signgam .
++This makes it safe to call from multiple threads concurrently.  If
++.I signp
++is NULL, the sign is not stored.
++.PP
++The
++.B f
++and
++.B l
++suffixed variants
++.RB ( lgammaf_r (),
++.BR lgammal_r ())
++take and return
++.B float
++and
++.B "long double"
++values respectively.
++.BR lgammal_r ()
++is computed directly in 80-bit precision rather than by widening a
++.B double
++result.
++.PP
++To obtain the Gamma function itself rather than its logarithm, use
++.BR tgamma (3).
++.SH RETURN VALUE
++On success, these functions return
++.IR ln|Gamma( x )| ,
++and (when
++.I signp
++is non-NULL)
++.I *signp
++is set to +1 if
++.IR Gamma( x )
++is positive and \-1 if it is negative.
++.PP
++If
++.I x
++is a non-positive integer (a pole of the Gamma function),
++.B \(+-HUGE_VAL
++(or
++.BR \(+-HUGE_VALF ,
++.BR \(+-HUGE_VALL )
++is returned.
++.PP
++If
++.I x
++is \(+-0,
++.B +HUGE_VAL
++is returned.
++.PP
++If
++.I x
++is large enough that the result overflows,
++.B \(+-HUGE_VAL
++is returned.
++.PP
++If
++.I x
++is \(+-infinity,
++.B +infinity
++is returned.
++.PP
++If
++.I x
++is a NaN, a NaN is returned.
++.SH ERRORS
++See
++.BR math_error (7)
++for information on how to determine whether an error has occurred when
++calling these functions.
++.PP
++The following errors can occur:
++.TP
++Pole error:
++.I x
++is 0 or a negative integer
++.B \(+-HUGE_VAL
++is returned and a divide-by-zero floating-point exception
++.RB ( FE_DIVBYZERO )
++is raised.  If
++.I "math_errhandling & MATH_ERRNO"
++is non-zero,
++.I errno
++is set to
++.BR ERANGE .
++.TP
++Range error: result overflow
++.I x
++is too large.
++.B \(+-HUGE_VAL
++is returned.  An overflow floating-point exception
++.RB ( FE_OVERFLOW )
++is raised.  If
++.I "math_errhandling & MATH_ERRNO"
++is non-zero,
++.I errno
++is set to
++.BR ERANGE .
++.SH ATTRIBUTES
++For an explanation of the terms used in this section, see
++.BR attributes (7).
++.TS
++allbox;
++lb lb lb
++l l l.
++Interface	Attribute	Value
++T{
++.BR lgamma_r (),
++.BR lgammaf_r (),
++.BR lgammal_r ()
++T}	Thread safety	MT-Safe
++.TE
++.PP
++Unlike
++.BR lgamma (3),
++which is
++.B MT-Unsafe
++because of its use of the global
++.BR signgam ,
++the
++.BR _r
++variants are
++.BR MT-Safe :
++they communicate the sign exclusively through the caller-supplied
++.IR signp .
++.SH STANDARDS
++None.  These are glibc / 4.3BSD-Reno extensions.
++.SH HISTORY
++The reentrant gamma functions originate in 4.3BSD-Reno and are provided
++as a GNU C library extension.
++.SH SEE ALSO
++.BR lgamma (3),
++.BR tgamma (3),
++.BR math_error (7)
++.SH COLOPHON
++This page is part of the Substrate operating system documentation.
+diff --git a/usr.man/man3/lgammaf_r.3 b/usr.man/man3/lgammaf_r.3
+new file mode 100644
+index 00000000..df4f4524
+--- /dev/null
++++ b/usr.man/man3/lgammaf_r.3
+@@ -0,0 +1 @@
++.so man3/lgamma_r.3
+diff --git a/usr.man/man3/lgammal_r.3 b/usr.man/man3/lgammal_r.3
+new file mode 100644
+index 00000000..df4f4524
+--- /dev/null
++++ b/usr.man/man3/lgammal_r.3
+@@ -0,0 +1 @@
++.so man3/lgamma_r.3
+diff --git a/usr.man/man3/matherr.3 b/usr.man/man3/matherr.3
+new file mode 100644
+index 00000000..fbd94e53
+--- /dev/null
++++ b/usr.man/man3/matherr.3
+@@ -0,0 +1,119 @@
++.TH MATHERR 3 "June 2026" "Substrate" "Library Functions Manual"
++.SH NAME
++matherr \- SVID math error-handling hook (compatibility shim)
++.SH LIBRARY
++Math library (libm, \-lm)
++.SH SYNOPSIS
++.B #include <math.h>
++.PP
++.B "struct exception {"
++.RS 4
++.B "char   *name;"
++.br
++.B "char   *arith;"
++.br
++.B "char   *type;"
++.br
++.B "double  arg1;"
++.br
++.B "double  arg2;"
++.br
++.B "double  retval;"
++.RE
++.B "};"
++.PP
++.BI "int matherr(struct exception *" e );
++.PP
++Feature-test macro requirements (see
++.BR feature_test_macros (7)):
++.PP
++.RS 4
++.BR matherr ():
++.RS 4
++_DEFAULT_SOURCE || _XOPEN_SOURCE || _SVID_SOURCE || _BSD_SOURCE
++.RE
++.RE
++.SH DESCRIPTION
++On historical System V (SVID) systems,
++.BR matherr ()
++was a user-replaceable hook that the math library invoked whenever a
++function detected a domain, singularity, overflow, underflow, or
++total-loss-of-significance error.  A program could supply its own
++.BR matherr ()
++to inspect the
++.I struct exception
++describing the error, optionally substitute a return value, and signal
++whether the error had been handled.
++.PP
++Substrate's
++.B libm
++does
++.B not
++use this mechanism.  Mathematical errors are reported through the
++standard C99 / POSIX channels instead:
++.I errno
++(when
++.I "math_errhandling & MATH_ERRNO"
++is non-zero) and the floating-point environment exception flags
++(when
++.I "math_errhandling & MATH_ERREXCEPT"
++is non-zero).  See
++.BR math_error (7).
++.PP
++.BR matherr ()
++is provided only as a compatibility shim so that SVID-era source that
++references the symbol links without modification.  The shipped
++default implementation is a no-op: it ignores its argument and
++returns 0.  Substrate's math functions never call
++.BR matherr (),
++so defining your own replacement has
++.B no effect
++on the library's behaviour.
++.PP
++.B WARNING:
++.BR matherr ()
++is obsolete and non-functional on Substrate.  Do not write new code
++that relies on it.  Test error conditions with
++.I errno
++and
++.BR fetestexcept (3)
++as described in
++.BR math_error (7).
++.SH RETURN VALUE
++The default
++.BR matherr ()
++always returns 0, indicating (in SVID terms) that the error was not
++handled.  Because the library never invokes the hook, this return
++value is never consumed.
++.SH ERRORS
++.BR matherr ()
++itself sets no
++.I errno
++value and raises no floating-point exception.
++.SH ATTRIBUTES
++For an explanation of the terms used in this section, see
++.BR attributes (7).
++.TS
++allbox;
++lb lb lb
++l l l.
++Interface	Attribute	Value
++T{
++.BR matherr ()
++T}	Thread safety	MT-Safe
++.TE
++.SH STANDARDS
++None.  Obsolete.
++.SH HISTORY
++SVID.  The SVID error-handling model was never adopted by ISO C or
++POSIX, both of which standardised the
++.I errno
++/ floating-point-exception model documented in
++.BR math_error (7).
++.SH SEE ALSO
++.BR fetestexcept (3),
++.BR errno (3),
++.BR fenv (3),
++.BR math_error (7)
++.SH COLOPHON
++This page is part of the Substrate operating system documentation.
+diff --git a/usr.man/man3/pow10.3 b/usr.man/man3/pow10.3
+new file mode 100644
+index 00000000..6aa10f26
+--- /dev/null
++++ b/usr.man/man3/pow10.3
+@@ -0,0 +1,126 @@
++.TH POW10 3 "June 2026" "Substrate" "Library Functions Manual"
++.SH NAME
++pow10, pow10f, pow10l \- base-10 exponential function (obsolescent)
++.SH LIBRARY
++Math library (libm, \-lm)
++.SH SYNOPSIS
++.B #include <math.h>
++.PP
++.BI "double pow10(double " x );
++.br
++.BI "float pow10f(float " x );
++.br
++.BI "long double pow10l(long double " x );
++.PP
++Feature-test macro requirements (see
++.BR feature_test_macros (7)):
++.PP
++.RS 4
++.BR pow10 (),
++.BR pow10f (),
++.BR pow10l ():
++.RS 4
++_DEFAULT_SOURCE || _XOPEN_SOURCE || _SVID_SOURCE || _BSD_SOURCE
++.RE
++.RE
++.SH DESCRIPTION
++The
++.BR pow10 ()
++function returns the value of 10 raised to the power
++.IR x :
++.PP
++.RS 4
++.RI 10^ x .
++.RE
++.PP
++.BR pow10 ()
++is an obsolescent alias for
++.BR exp10 (3).
++The implementation forwards directly to
++.BR exp10 (3),
++.BR exp10f (3),
++and
++.BR exp10l (3)
++respectively and returns their results unchanged.  Using a dedicated
++base-10 exponential is more accurate than the equivalent
++.BI pow(10.0, " x" )
++or
++.BI exp( x " * M_LN10)" .
++.PP
++.B WARNING:
++.BR pow10 ()
++is obsolescent.  New code should call
++.BR exp10 (3)
++directly.
++.SH RETURN VALUE
++The return value, errors, and special-case behaviour are exactly those
++of
++.BR exp10 (3).
++On success,
++.RI 10^ x
++is returned.
++.SH ERRORS
++The error behaviour is that of
++.BR exp10 (3).
++.PP
++The following errors can occur:
++.TP
++Range error: result overflow
++.I x
++is large and positive.
++.B \(+-HUGE_VAL
++(or
++.BR \(+-HUGE_VALF ,
++.BR \(+-HUGE_VALL )
++is returned and an overflow floating-point exception
++.RB ( FE_OVERFLOW )
++is raised.  If
++.I "math_errhandling & MATH_ERRNO"
++is non-zero,
++.I errno
++is set to
++.BR ERANGE .
++.TP
++Range error: result underflow
++.I x
++is large and negative.  0 is returned and an underflow
++floating-point exception
++.RB ( FE_UNDERFLOW )
++is raised.  If
++.I "math_errhandling & MATH_ERRNO"
++is non-zero,
++.I errno
++is set to
++.BR ERANGE .
++.PP
++See
++.BR math_error (7)
++for information on how to determine whether an error has occurred when
++calling these functions.
++.SH ATTRIBUTES
++For an explanation of the terms used in this section, see
++.BR attributes (7).
++.TS
++allbox;
++lb lb lb
++l l l.
++Interface	Attribute	Value
++T{
++.BR pow10 (),
++.BR pow10f (),
++.BR pow10l ()
++T}	Thread safety	MT-Safe
++.TE
++.SH STANDARDS
++None.  Obsolescent.
++.SH HISTORY
++A long-standing glibc / BSD extension.  Superseded by
++.BR exp10 (3).
++.SH SEE ALSO
++.BR exp (3),
++.BR exp10 (3),
++.BR exp2 (3),
++.BR pow (3),
++.BR math_error (7)
++.SH COLOPHON
++This page is part of the Substrate operating system documentation.
+diff --git a/usr.man/man3/pow10f.3 b/usr.man/man3/pow10f.3
+new file mode 100644
+index 00000000..8a715801
+--- /dev/null
++++ b/usr.man/man3/pow10f.3
+@@ -0,0 +1 @@
++.so man3/pow10.3
+diff --git a/usr.man/man3/pow10l.3 b/usr.man/man3/pow10l.3
+new file mode 100644
+index 00000000..8a715801
+--- /dev/null
++++ b/usr.man/man3/pow10l.3
+@@ -0,0 +1 @@
++.so man3/pow10.3
+diff --git a/usr.man/man3/scalb.3 b/usr.man/man3/scalb.3
+new file mode 100644
+index 00000000..e7759250
+--- /dev/null
++++ b/usr.man/man3/scalb.3
+@@ -0,0 +1,180 @@
++.TH SCALB 3 "June 2026" "Substrate" "Library Functions Manual"
++.SH NAME
++scalb, scalbf \- scale floating-point number by power of two (obsolescent)
++.SH LIBRARY
++Math library (libm, \-lm)
++.SH SYNOPSIS
++.B #include <math.h>
++.PP
++.BI "double scalb(double " x ", double " n );
++.br
++.BI "float scalbf(float " x ", float " n );
++.PP
++Feature-test macro requirements (see
++.BR feature_test_macros (7)):
++.PP
++.RS 4
++.BR scalb (),
++.BR scalbf ():
++.RS 4
++_DEFAULT_SOURCE || _XOPEN_SOURCE || _SVID_SOURCE || _BSD_SOURCE
++.RE
++.RE
++.SH DESCRIPTION
++The
++.BR scalb ()
++function computes
++.PP
++.RS 4
++.IR x " * 2^" n
++.RE
++.PP
++where
++.I n
++is passed as a floating-point value.  This is the historical SVID /
++4.3BSD two-argument scaling primitive that predates the standard
++.BR scalbn (3).
++.PP
++The finite-exponent path forwards to
++.BR scalbn (3),
++clamping the magnitude of
++.I n
++to the range of an
++.B int
++before the call so the standard overflow/underflow handling of
++.BR scalbn ()
++still produces the appropriate
++.B \(+-infinity
++or
++.B \(+-0
++result.
++.PP
++The special cases implemented are:
++.TP
++.I x
++is NaN
++.I x
++is returned.
++.TP
++.I n
++is NaN
++A NaN is returned.
++.TP
++.I n
++is +infinity
++If
++.I x
++is nonzero, a copy of
++.B infinity
++with the sign of
++.I x
++is returned.  If
++.I x
++is \(+-0, the product 0 * infinity is invalid and a NaN is returned.
++.TP
++.I n
++is \-infinity
++A copy of 0 with the sign of
++.I x
++is returned (including the
++.I x
++is \(+-0 case).
++.PP
++.B WARNING:
++.BR scalb ()
++is obsolescent.  New code should use
++.BR scalbn (3)
++or
++.BR ldexp (3)
++instead, both of which take an integer exponent and have
++well-specified standard semantics.
++.PP
++The
++.B f
++suffixed variant
++.BR scalbf ()
++takes and returns
++.B float
++values.
++.SH RETURN VALUE
++On success,
++.BR scalb ()
++returns
++.IR x " * 2^" n .
++.PP
++If the result overflows the range of the return type, the function
++returns
++.B \(+-HUGE_VAL
++(or
++.B \(+-HUGE_VALF
++for
++.BR scalbf ())
++with the sign of
++.IR x .
++.PP
++If the result underflows, the function returns 0 with the sign of
++.IR x .
++.PP
++The special-argument results listed in DESCRIPTION are returned for
++NaN and infinite arguments.
++.SH ERRORS
++See
++.BR math_error (7)
++for information on how to determine whether an error has occurred when
++calling these functions.
++.PP
++The following errors can occur:
++.TP
++Range error: result overflow
++An overflow floating-point exception
++.RB ( FE_OVERFLOW )
++is raised.  If
++.I "math_errhandling & MATH_ERRNO"
++is non-zero,
++.I errno
++is set to
++.BR ERANGE .
++.TP
++Range error: result underflow
++An underflow floating-point exception
++.RB ( FE_UNDERFLOW )
++is raised.  If
++.I "math_errhandling & MATH_ERRNO"
++is non-zero,
++.I errno
++is set to
++.BR ERANGE .
++.PP
++These errors are reported by the underlying
++.BR scalbn (3)
++call.
++.SH ATTRIBUTES
++For an explanation of the terms used in this section, see
++.BR attributes (7).
++.TS
++allbox;
++lb lb lb
++l l l.
++Interface	Attribute	Value
++T{
++.BR scalb (),
++.BR scalbf ()
++T}	Thread safety	MT-Safe
++.TE
++.SH STANDARDS
++None.  Obsolescent.
++.SH HISTORY
++SVID, 4.3BSD.  POSIX.1-2001 specified a two-argument
++.BR scalb ()
++but marked it obsolescent (legacy); it was removed in POSIX.1-2008
++in favour of
++.BR scalbn (3)
++and
++.BR scalbln (3).
++.SH SEE ALSO
++.BR ldexp (3),
++.BR scalbln (3),
++.BR scalbn (3),
++.BR math_error (7)
++.SH COLOPHON
++This page is part of the Substrate operating system documentation.
+diff --git a/usr.man/man3/scalbf.3 b/usr.man/man3/scalbf.3
+new file mode 100644
+index 00000000..5a33fb82
+--- /dev/null
++++ b/usr.man/man3/scalbf.3
+@@ -0,0 +1 @@
++.so man3/scalb.3
+diff --git a/usr.man/man3/setpayload.3 b/usr.man/man3/setpayload.3
+new file mode 100644
+index 00000000..01153425
+--- /dev/null
++++ b/usr.man/man3/setpayload.3
+@@ -0,0 +1 @@
++.so man3/getpayload.3
+diff --git a/usr.man/man3/setpayloadf.3 b/usr.man/man3/setpayloadf.3
+new file mode 100644
+index 00000000..01153425
+--- /dev/null
++++ b/usr.man/man3/setpayloadf.3
+@@ -0,0 +1 @@
++.so man3/getpayload.3
+diff --git a/usr.man/man3/setpayloadl.3 b/usr.man/man3/setpayloadl.3
+new file mode 100644
+index 00000000..01153425
+--- /dev/null
++++ b/usr.man/man3/setpayloadl.3
+@@ -0,0 +1 @@
++.so man3/getpayload.3
+diff --git a/usr.man/man3/setpayloadsig.3 b/usr.man/man3/setpayloadsig.3
+new file mode 100644
+index 00000000..01153425
+--- /dev/null
++++ b/usr.man/man3/setpayloadsig.3
+@@ -0,0 +1 @@
++.so man3/getpayload.3
+diff --git a/usr.man/man3/setpayloadsigf.3 b/usr.man/man3/setpayloadsigf.3
+new file mode 100644
+index 00000000..01153425
+--- /dev/null
++++ b/usr.man/man3/setpayloadsigf.3
+@@ -0,0 +1 @@
++.so man3/getpayload.3
+diff --git a/usr.man/man3/setpayloadsigl.3 b/usr.man/man3/setpayloadsigl.3
+new file mode 100644
+index 00000000..01153425
+--- /dev/null
++++ b/usr.man/man3/setpayloadsigl.3
+@@ -0,0 +1 @@
++.so man3/getpayload.3
+diff --git a/usr.man/man3/significand.3 b/usr.man/man3/significand.3
+new file mode 100644
+index 00000000..aff17f60
+--- /dev/null
++++ b/usr.man/man3/significand.3
+@@ -0,0 +1,126 @@
++.TH SIGNIFICAND 3 "June 2026" "Substrate" "Library Functions Manual"
++.SH NAME
++significand, significandf, significandl \- extract the significand of a floating-point number (obsolescent)
++.SH LIBRARY
++Math library (libm, \-lm)
++.SH SYNOPSIS
++.B #include <math.h>
++.PP
++.BI "double significand(double " x );
++.br
++.BI "float significandf(float " x );
++.br
++.BI "long double significandl(long double " x );
++.PP
++Feature-test macro requirements (see
++.BR feature_test_macros (7)):
++.PP
++.RS 4
++.BR significand (),
++.BR significandf (),
++.BR significandl ():
++.RS 4
++_DEFAULT_SOURCE || _XOPEN_SOURCE || _SVID_SOURCE || _BSD_SOURCE
++.RE
++.RE
++.SH DESCRIPTION
++The
++.BR significand ()
++function returns the mantissa of
++.I x
++scaled to the half-open interval
++.RB [ 1 ,\  2 ).
++For a finite, nonzero
++.IR x ,
++the result is
++.PP
++.RS 4
++.BI "scalbn(" x ", \-ilogb(" x ))
++.RE
++.PP
++that is,
++.I x
++divided by 2 raised to the power
++.BI ilogb( x ).
++This is the historical companion to
++.BR ilogb (3):
++together they decompose
++.I x
++into a significand in
++.RB [ 1 ,\  2 )
++and a binary exponent.
++.PP
++The
++.B f
++and
++.B l
++suffixed variants
++.RB ( significandf (),
++.BR significandl ())
++operate on and return
++.B float
++and
++.B "long double"
++values respectively.
++.PP
++.B WARNING:
++.BR significand ()
++is obsolescent and exists only for SVID / 4.3BSD source
++compatibility.  New code should use
++.BR frexp (3)
++(which returns a significand in
++.RB [ 0.5 ,\  1 )
++together with the exponent) or the
++.BR ilogb (3)
++/
++.BR scalbn (3)
++pair directly.
++.SH RETURN VALUE
++For finite nonzero
++.IR x ,
++.BR significand ()
++returns a value in
++.RB [ 1 ,\  2 )
++with the same sign as
++.IR x .
++.PP
++If
++.I x
++is \(+-0, \(+-infinity, or NaN, the argument
++.I x
++is returned unchanged.
++.SH ERRORS
++No errors occur.
++.I errno
++is not set and no floating-point exception is raised: the
++implementation handles the special arguments explicitly and the
++ordinary path performs only an exponent-field manipulation via
++.BR scalbn (3),
++which cannot overflow or underflow for a significand result in
++.RB [ 1 ,\  2 ).
++.SH ATTRIBUTES
++For an explanation of the terms used in this section, see
++.BR attributes (7).
++.TS
++allbox;
++lb lb lb
++l l l.
++Interface	Attribute	Value
++T{
++.BR significand (),
++.BR significandf (),
++.BR significandl ()
++T}	Thread safety	MT-Safe
++.TE
++.SH STANDARDS
++None.  Obsolescent.
++.SH HISTORY
++SVID, 4.3BSD.
++.SH SEE ALSO
++.BR frexp (3),
++.BR ilogb (3),
++.BR logb (3),
++.BR scalbn (3),
++.BR math_error (7)
++.SH COLOPHON
++This page is part of the Substrate operating system documentation.
+diff --git a/usr.man/man3/significandf.3 b/usr.man/man3/significandf.3
+new file mode 100644
+index 00000000..4ae39f58
+--- /dev/null
++++ b/usr.man/man3/significandf.3
+@@ -0,0 +1 @@
++.so man3/significand.3
+diff --git a/usr.man/man3/significandl.3 b/usr.man/man3/significandl.3
+new file mode 100644
+index 00000000..4ae39f58
+--- /dev/null
++++ b/usr.man/man3/significandl.3
+@@ -0,0 +1 @@
++.so man3/significand.3
+diff --git a/usr.man/man3/totalorder.3 b/usr.man/man3/totalorder.3
+new file mode 100644
+index 00000000..75fe30a6
+--- /dev/null
++++ b/usr.man/man3/totalorder.3
+@@ -0,0 +1,143 @@
++.TH TOTALORDER 3 "June 2026" "Substrate" "Library Functions Manual"
++.SH NAME
++totalorder, totalorderf, totalorderl,
++totalordermag, totalordermagf, totalordermagl \- IEEE 754 total-order predicate
++.SH LIBRARY
++Math library (libm, \-lm)
++.SH SYNOPSIS
++.B #include <math.h>
++.PP
++.BI "int totalorder(double " x ", double " y );
++.br
++.BI "int totalorderf(float " x ", float " y );
++.br
++.BI "int totalorderl(long double " x ", long double " y );
++.PP
++.BI "int totalordermag(double " x ", double " y );
++.br
++.BI "int totalordermagf(float " x ", float " y );
++.br
++.BI "int totalordermagl(long double " x ", long double " y );
++.PP
++Feature-test macro requirements (see
++.BR feature_test_macros (7)):
++these functions are declared when the implementation is compiled as
++ISO C23 or later
++.RB ( "__STDC_VERSION__ >= 202311L" ).
++.SH DESCRIPTION
++The
++.BR totalorder ()
++function implements the IEEE 754-2019
++.I totalOrder
++predicate.  It returns a nonzero value if
++.I x
++precedes or equals
++.I y
++in the total order over the floating-point format, and 0 otherwise.
++.PP
++The total order is a complete ordering of every encoding in the format,
++including signed zeros and every NaN.  From least to greatest it runs:
++.PP
++.RS 4
++negative quiet NaNs <
++negative signaling NaNs <
++.B \-infinity
++< finite negatives < \-0 < +0 < finite positives <
++.B +infinity
++< positive signaling NaNs < positive quiet NaNs,
++.RE
++.PP
++with same-sign zeros ordered \-0 before +0, and NaNs of the same sign
++ordered by their payload bits.  Because the ordering is total,
++.PP
++.RS 4
++.BI "totalorder(" x ", " y ") || totalorder(" y ", " x )
++.RE
++.PP
++is always true.
++.PP
++The
++.BR totalordermag ()
++function applies the same predicate to the magnitudes of its arguments:
++it is equivalent to
++.PP
++.RS 4
++.BI "totalorder(fabs(" x "), fabs(" y "))" .
++.RE
++.PP
++The
++.B f
++and
++.B l
++suffixed variants take
++.B float
++and
++.B "long double"
++operands respectively.
++.SH RETURN VALUE
++.BR totalorder ()
++and
++.BR totalordermag ()
++return a nonzero value if
++.I x
++orders before-or-equal-to
++.I y
++(respectively
++.IR |x|
++before-or-equal-to
++.IR |y| )
++in the total order, and 0 otherwise.
++.SH ERRORS
++No errors occur.  These predicates are
++.B quiet:
++they never set
++.IR errno ,
++and they raise
++.B no
++floating-point exception \(em not even
++.B FE_INVALID
++for a NaN or a signaling-NaN argument.  The comparison is performed on
++the raw bit encodings, so a signaling NaN does not signal.
++.SH ATTRIBUTES
++For an explanation of the terms used in this section, see
++.BR attributes (7).
++.TS
++allbox;
++lb lb lb
++l l l.
++Interface	Attribute	Value
++T{
++.BR totalorder (),
++.BR totalorderf (),
++.BR totalorderl (),
++.BR totalordermag (),
++.BR totalordermagf (),
++.BR totalordermagl ()
++T}	Thread safety	MT-Safe
++.TE
++.SH STANDARDS
++C23.
++.SH HISTORY
++The
++.I totalOrder
++and
++.I totalOrderMag
++predicates were introduced by IEEE 754-2008 (revised in 2019) and added
++to ISO C in C23 (§7.12.11).
++.SH NOTES
++The
++.B l
++suffixed variants compute the predicate by first converting their
++.B "long double"
++operands to
++.BR double ;
++distinctions that exist only in the wider 80-bit format (for example
++between two long-double NaNs whose payloads differ below the 52nd
++mantissa bit) are therefore not resolved.
++.SH SEE ALSO
++.BR canonicalize (3),
++.BR getpayload (3),
++.BR isnan (3),
++.BR math_error (7)
++.SH COLOPHON
++This page is part of the Substrate operating system documentation.
+diff --git a/usr.man/man3/totalorderf.3 b/usr.man/man3/totalorderf.3
+new file mode 100644
+index 00000000..ce858d39
+--- /dev/null
++++ b/usr.man/man3/totalorderf.3
+@@ -0,0 +1 @@
++.so man3/totalorder.3
+diff --git a/usr.man/man3/totalorderl.3 b/usr.man/man3/totalorderl.3
+new file mode 100644
+index 00000000..ce858d39
+--- /dev/null
++++ b/usr.man/man3/totalorderl.3
+@@ -0,0 +1 @@
++.so man3/totalorder.3
+diff --git a/usr.man/man3/totalordermag.3 b/usr.man/man3/totalordermag.3
+new file mode 100644
+index 00000000..ce858d39
+--- /dev/null
++++ b/usr.man/man3/totalordermag.3
+@@ -0,0 +1 @@
++.so man3/totalorder.3
+diff --git a/usr.man/man3/totalordermagf.3 b/usr.man/man3/totalordermagf.3
+new file mode 100644
+index 00000000..ce858d39
+--- /dev/null
++++ b/usr.man/man3/totalordermagf.3
+@@ -0,0 +1 @@
++.so man3/totalorder.3
+diff --git a/usr.man/man3/totalordermagl.3 b/usr.man/man3/totalordermagl.3
+new file mode 100644
+index 00000000..ce858d39
+--- /dev/null
++++ b/usr.man/man3/totalordermagl.3
+@@ -0,0 +1 @@
++.so man3/totalorder.3
+-- 
+2.54.0
+

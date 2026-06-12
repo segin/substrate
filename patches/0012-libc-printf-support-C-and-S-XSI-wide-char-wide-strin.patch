@@ -1,0 +1,74 @@
+From 2baee8583ee2f43493b62e86e8b537313d396856 Mon Sep 17 00:00:00 2001
+From: Kirn Gill II <segin2005@gmail.com>
+Date: Tue, 9 Jun 2026 11:23:20 -0500
+Subject: [PATCH 12/83] libc/printf: support %C and %S (XSI wide char / wide
+ string)
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The "comprehensive" printf rewrite missed the uppercase %C (== %lc) and
+%S (== %ls) conversions, so they fell through to the unknown-conversion
+default and printed literally. tt_type_comp prints ToolTalk type names a
+wide char at a time via %C, which came out as "%C%C%C..." — every ptype
+name garbled in its -p dump (display-only; the compiled types.xdr is
+XDR-encoded, not printf-formatted).
+
+%C emits the low byte of the (wide) char like %c; %S walks the wchar_t*
+emitting the low byte of each until NUL, honouring width/precision —
+correct for substrate's single-byte locale and matching glibc's C-locale
+behaviour for ASCII. Verified against glibc (%C, %C-loop, %S, %.3S).
+
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+---
+ lib/c/stdio/printf.c | 19 ++++++++++++++++---
+ 1 file changed, 16 insertions(+), 3 deletions(-)
+
+diff --git a/lib/c/stdio/printf.c b/lib/c/stdio/printf.c
+index 36710010..8d4361b4 100644
+--- a/lib/c/stdio/printf.c
++++ b/lib/c/stdio/printf.c
+@@ -343,9 +343,9 @@ static int conv_vcat(char conv, int length) {
+     case 'e': case 'E': case 'f': case 'F': case 'g': case 'G':
+     case 'a': case 'A':
+         return (length == LEN_LONG_DOUBLE) ? VC_LDBL : VC_DBL;
+-    case 'c':                            /* int, or wint_t for %lc — both int-sized */
++    case 'c': case 'C':                  /* int / wint_t (%c, %lc, %C) — int-sized */
+         return VC_INT;
+-    case 's': case 'p': case 'n':
++    case 's': case 'S': case 'p': case 'n':  /* %S == %ls: a (wide) string pointer */
+         return VC_PTR;
+     default:                             /* %m, %%, unknown: no argument */
+         return VC_NONE;
+@@ -558,6 +558,19 @@ static void fmt_conv(struct outbuf *o, const struct spec *sp, union argval a) {
+         if (left_align && width > s_len) for (int i = 0; i < width - s_len; i++) ob_put(o, ' ');
+         break;
+     }
++    case 'S': {
++        /* %S == %ls: a wide string.  Substrate is a single-byte locale, so
++         * emit the low byte of each wchar_t (4 bytes on i386) until NUL,
++         * honouring precision (max chars) and width. */
++        const unsigned int *ws = (const unsigned int *)a.p;
++        if (!ws) { const char *n = "(null)"; while (*n) ob_put(o, *n++); break; }
++        int s_len = 0;
++        while (ws[s_len] && (precision == -1 || s_len < precision)) s_len++;
++        if (!left_align && width > s_len) for (int i = 0; i < width - s_len; i++) ob_put(o, ' ');
++        for (int i = 0; i < s_len; i++) ob_put(o, (char)ws[i]);
++        if (left_align && width > s_len) for (int i = 0; i < width - s_len; i++) ob_put(o, ' ');
++        break;
++    }
+     case 'm': {
+         /* glibc extension: strerror(errno), no argument. */
+         const char *val = strerror(errno);
+@@ -570,7 +583,7 @@ static void fmt_conv(struct outbuf *o, const struct spec *sp, union argval a) {
+         if (left_align && width > s_len) for (int i = 0; i < width - s_len; i++) ob_put(o, ' ');
+         break;
+     }
+-    case 'c': {
++    case 'c': case 'C': {       /* %C == %lc: low byte of the (wide) char */
+         char c = (char)a.ll;
+         if (!left_align && width > 1) for (int i = 0; i < width - 1; i++) ob_put(o, ' ');
+         ob_put(o, c);
+-- 
+2.54.0
+

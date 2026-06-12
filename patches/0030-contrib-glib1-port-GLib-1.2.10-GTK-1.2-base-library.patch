@@ -1,0 +1,309 @@
+From 55cf5c70e9cdf6843f27bf5d0fcb998c9e18ea90 Mon Sep 17 00:00:00 2001
+From: Kirn Gill II <segin2005@gmail.com>
+Date: Wed, 10 Jun 2026 00:22:10 -0500
+Subject: [PATCH 30/83] contrib/glib1: port GLib 1.2.10 (GTK+ 1.2 base library)
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Source-only patch-series port.  fetch.sh downloads + SHA-verifies the
+GNOME tarball, borrows the substrate-patched config.sub/config.guess
+from the binutils port, and applies the series; build.sh cross-configures
+(autoconf 2.13, so cross run-tests are preseeded via env glib_cv_*/ac_cv_*)
+and stages shared + static into dist-glib1, with glib-config for the
+gtk1 port to consume.
+
+Patches:
+- 0001-configure-cross: make the "ANSI library prototypes" and "POLL*
+  sysdef" run-probes cross-safe (substrate <sys/poll.h> matches glib's
+  defaults).
+- 0002-glib-h-modern-gcc: G_GNUC_PRETTY_FUNCTION must be a string literal
+  for the g_warning("..." ...) concat (gcc16 won't concat
+  __PRETTY_FUNCTION__); drop the obsolete __asm__ __const__ qualifier
+  from the i386 byteswap macros.
+- 0003-ltconfig-substrate-shared: canonicalize host_os=substrate to
+  linux-gnu in the 2001-era ltconfig so it reuses the full linux ELF
+  shared-library profile (version_type=linux, soname, library_names)
+  instead of falling through to static-only — same effect modern
+  libtool already has for substrate.
+
+build.sh post-patches each .so's OSABI byte to ELFOSABI_SUBSTRATE (0x40),
+as the X stack ports do.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+---
+ contrib/glib1/README.SUBSTRATE.md             | 22 ++++++
+ contrib/glib1/build.sh                        | 69 +++++++++++++++++++
+ contrib/glib1/fetch.sh                        | 38 ++++++++++
+ .../glib1/patches/0001-configure-cross.patch  | 27 ++++++++
+ .../patches/0002-glib-h-modern-gcc.patch      | 38 ++++++++++
+ .../0003-ltconfig-substrate-shared.patch      | 17 +++++
+ contrib/glib1/series                          |  3 +
+ 7 files changed, 214 insertions(+)
+ create mode 100644 contrib/glib1/README.SUBSTRATE.md
+ create mode 100755 contrib/glib1/build.sh
+ create mode 100755 contrib/glib1/fetch.sh
+ create mode 100644 contrib/glib1/patches/0001-configure-cross.patch
+ create mode 100644 contrib/glib1/patches/0002-glib-h-modern-gcc.patch
+ create mode 100644 contrib/glib1/patches/0003-ltconfig-substrate-shared.patch
+ create mode 100644 contrib/glib1/series
+
+diff --git a/contrib/glib1/README.SUBSTRATE.md b/contrib/glib1/README.SUBSTRATE.md
+new file mode 100644
+index 00000000..4c5fef7c
+--- /dev/null
++++ b/contrib/glib1/README.SUBSTRATE.md
+@@ -0,0 +1,22 @@
++# glib1 (GLib 1.2.10)
++
++The base library of GTK+ 1.2.  Source-only patch-series port; `fetch.sh`
++downloads + SHA-verifies the GNOME tarball, borrows the substrate-patched
++`config.sub`/`config.guess` from the binutils port, and applies the series;
++`build.sh` cross-configures (autoconf 2.13, so cross run-tests are preseeded
++via env `glib_cv_*`/`ac_cv_*` and two `configure` run-probe branches are
++patched to use substrate defaults) and stages into `dist-glib1`.
++
++Patches:
++- `0001-configure-cross.patch` — make the "ANSI library prototypes" and
++  "POLL* sysdef" run-tests cross-safe (use substrate `<sys/poll.h>` values,
++  which match the glib defaults).
++- `0002-glib-h-modern-gcc.patch` — `G_GNUC_PRETTY_FUNCTION` must be a string
++  literal for the `g_warning(... "...")` concat (gcc16 won't concat
++  `__PRETTY_FUNCTION__`), and the i386 byteswap macros use the obsolete
++  `__asm__ __const__` qualifier (dropped; `__const__` is not a valid asm
++  qualifier in modern GCC).
++
++Threads are disabled (`--disable-threads`): GTK+ 1.2 doesn't need gthread and
++it avoids the pthread-internals sizeof probes.  Installs `glib-config`, which
++the gtk1 port's `configure` consumes.
+diff --git a/contrib/glib1/build.sh b/contrib/glib1/build.sh
+new file mode 100755
+index 00000000..ff28186e
+--- /dev/null
++++ b/contrib/glib1/build.sh
+@@ -0,0 +1,69 @@
++#!/bin/sh
++# contrib/glib1/build.sh — cross-compile GLib 1.2.10 for substrate.
++#
++# 2001-era autoconf runs test programs for several probes; the
++# glib_cv_*/ac_cv_* preseeds below supply the substrate answers
++# (i386, sane libc).  Threads are disabled: GTK+ 1.2 doesn't need
++# gthread, and that drops the pthread-internals sizeof probes.
++set -eu
++HERE="$(cd "$(dirname "$0")" && pwd)"
++VERSION="1.2.10"
++TREE_DIR="${HERE}/build/glib-${VERSION}"
++if [ -z "${SUBSTRATE_TOP:-}" ]; then
++    p="${HERE}"
++    while [ "${p}" != "/" ] && [ ! -f "${p}/AGENTS.md" ] && [ ! -f "${p}/CLAUDE.md" ]; do
++        p=$(dirname "${p}")
++    done
++    SUBSTRATE_TOP="${p}"
++fi
++: "${STAGE1_PREFIX:=/opt/substrate}"
++: "${DESTDIR:=${SUBSTRATE_TOP}/dist-glib1}"
++: "${JOBS:=$(nproc 2>/dev/null || echo 4)}"
++PATH="${STAGE1_PREFIX}/bin:${PATH}"; export PATH
++[ -d "${TREE_DIR}" ] || { echo "build.sh: run ./fetch.sh first" >&2; exit 1; }
++
++cd "${TREE_DIR}"
++[ -f Makefile ] && make distclean >/dev/null 2>&1 || true
++# autoconf-2.13: VAR=VALUE configure args are not supported — pass the
++# compiler and the cross preseeds through the environment instead.
++export CC=i386-unknown-substrate-gcc
++export CFLAGS="-O2 -std=gnu89 -w"
++export glib_cv_sane_realloc=yes
++export glib_cv_uscore=no
++export glib_cv_va_val_copy=yes
++export glib_cv_stack_grows=no
++export glib_cv_rtldglobal_broken=no
++export ac_cv_func_getpwuid_r=no
++export ac_cv_sizeof_char=1
++export ac_cv_sizeof_short=2
++export ac_cv_sizeof_int=4
++export ac_cv_sizeof_long=4
++export ac_cv_sizeof_long_long=8
++export ac_cv_sizeof_void_p=4
++export glib_cv_has__inline=yes
++export glib_cv_has__inline__=yes
++export glib_cv_hasinline=yes
++export glib_cv_va_copy=yes
++export glib_cv___va_copy=yes
++export ac_cv_func_getgrgid_r=no
++./configure \
++    --host=i386-unknown-substrate \
++    --build=x86_64-pc-linux-gnu \
++    --prefix=/usr \
++    --disable-threads \
++    --enable-shared --enable-static
++make -j"${JOBS}"
++rm -rf "${DESTDIR}"
++make install DESTDIR="${DESTDIR}"
++
++# Post-patch every produced .so OSABI byte to ELFOSABI_SUBSTRATE (0x40);
++# substrate's cross-ld stamps SYSV otherwise (same as the X stack ports).
++_n=0
++for so in "${DESTDIR}"/usr/lib/*.so.*; do
++    [ -f "${so}" ] || continue
++    [ -L "${so}" ] && continue
++    printf '\100' | dd of="${so}" bs=1 seek=7 count=1 conv=notrunc status=none
++    _n=$((_n + 1))
++done
++echo "  OSABI->substrate on ${_n} shared objects"
++echo "==> glib1 staged at ${DESTDIR}"
+diff --git a/contrib/glib1/fetch.sh b/contrib/glib1/fetch.sh
+new file mode 100755
+index 00000000..0a187cb2
+--- /dev/null
++++ b/contrib/glib1/fetch.sh
+@@ -0,0 +1,38 @@
++#!/bin/sh
++# contrib/glib1/fetch.sh — GLib 1.2.10, the GTK+ 1.2 base library.
++# Source-only fetch; build.sh cross-compiles.
++set -eu
++VERSION="1.2.10"
++TARBALL="glib-${VERSION}.tar.gz"
++URL="https://download.gnome.org/sources/glib/1.2/${TARBALL}"
++SHA256="6e1ce7eedae713b11db82f11434d455d8a1379f783a79812cd2e05fc024a8d9f"
++HERE="$(cd "$(dirname "$0")" && pwd)"
++BUILD_DIR="${HERE}/build"
++TREE_DIR="${BUILD_DIR}/glib-${VERSION}"
++mkdir -p "${BUILD_DIR}"; cd "${BUILD_DIR}"
++if [ ! -f "${TARBALL}" ]; then
++    [ "${1:-}" = "--no-network" ] && { echo "fetch.sh: tarball missing" >&2; exit 1; }
++    echo "==> Fetching ${URL}"
++    curl -fSL -o "${TARBALL}" "${URL}"
++fi
++echo "${SHA256}  ${TARBALL}" | sha256sum -c -
++[ -d "${TREE_DIR}" ] || { echo "==> Extracting"; tar xf "${TARBALL}"; }
++# 2001-era config.{sub,guess} don't know the substrate triple — borrow the
++# substrate-patched copies from the binutils port (toolchain prerequisite).
++BINU="$(ls -d "${HERE}"/../binutils/build/binutils-*/ 2>/dev/null | head -1)"
++[ -n "${BINU}" ] || { echo "fetch.sh: need contrib/binutils fetched (for config.sub)" >&2; exit 1; }
++cp -f "${BINU}/config.sub" "${BINU}/config.guess" "${TREE_DIR}/"
++
++# Apply the substrate patch series (idempotent: skip already-applied).
++if [ -f "${HERE}/series" ]; then
++    while IFS= read -r patch; do
++        [ -n "${patch}" ] || continue
++        if patch -d "${TREE_DIR}" -p1 --dry-run -R -s -f < "${HERE}/patches/${patch}" >/dev/null 2>&1; then
++            echo "    (already applied: ${patch})"
++        else
++            echo "    applying ${patch}"
++            patch -d "${TREE_DIR}" -p1 < "${HERE}/patches/${patch}"
++        fi
++    done < "${HERE}/series"
++fi
++echo "==> glib ${VERSION} ready at ${TREE_DIR}"
+diff --git a/contrib/glib1/patches/0001-configure-cross.patch b/contrib/glib1/patches/0001-configure-cross.patch
+new file mode 100644
+index 00000000..0dc32163
+--- /dev/null
++++ b/contrib/glib1/patches/0001-configure-cross.patch
+@@ -0,0 +1,27 @@
++--- a/configure	2026-06-09 23:52:00.855117650 -0500
+++++ b/configure	2026-06-10 00:15:13.675608514 -0500
++@@ -2099,7 +2099,7 @@
++ glib_save_LIBS=$LIBS
++ LIBS="$LIBS -lm"
++ if test "$cross_compiling" = yes; then
++-    { echo "configure: error: can not run test program while cross compiling" 1>&2; exit 1; }
+++    echo "$ac_t""none needed (cross: assumed)" 1>&6
++ else
++   cat > conftest.$ac_ext <<EOF
++ #line 2106 "configure"
++@@ -5600,7 +5600,14 @@
++ done
++ echo "return 0; }" >>confrun.c
++ if test "$cross_compiling" = yes; then
++-    { echo "configure: error: can not run test program while cross compiling" 1>&2; exit 1; }
+++    echo "$ac_t""cross: using defaults (match substrate <sys/poll.h>)" 1>&6
+++    for glib_sysdef_input in POLLIN:1 POLLOUT:4 POLLPRI:2 POLLERR:8 POLLHUP:16 POLLNVAL:32 ; do
+++	glib_sysdef=`echo $glib_sysdef_input | sed 's/^\([^:]*\):.*$/\1/'`
+++	glib_default=`echo $glib_sysdef_input | sed 's/^[^:]*:\(.*\)$/\1/'`
+++	echo "#define GLIB_SYSDEF_$glib_sysdef =$glib_default" >> $glib_sysdefso
+++    done
+++elif false; then
+++    :
++ else
++   cat > conftest.$ac_ext <<EOF
++ #line 5607 "configure"
+diff --git a/contrib/glib1/patches/0002-glib-h-modern-gcc.patch b/contrib/glib1/patches/0002-glib-h-modern-gcc.patch
+new file mode 100644
+index 00000000..94955efd
+--- /dev/null
++++ b/contrib/glib1/patches/0002-glib-h-modern-gcc.patch
+@@ -0,0 +1,38 @@
++--- a/glib.h	2026-06-10 00:16:28.902065606 -0500
+++++ b/glib.h	2026-06-10 00:17:31.223020335 -0500
++@@ -274,7 +274,7 @@
++  */
++ #ifdef	__GNUC__
++ #define	G_GNUC_FUNCTION		__FUNCTION__
++-#define	G_GNUC_PRETTY_FUNCTION	__PRETTY_FUNCTION__
+++#define	G_GNUC_PRETTY_FUNCTION	""
++ #else	/* !__GNUC__ */
++ #define	G_GNUC_FUNCTION		""
++ #define	G_GNUC_PRETTY_FUNCTION	""
++@@ -535,7 +535,7 @@
++ 	 if (__builtin_constant_p (val))		\
++ 	   __v = GUINT16_SWAP_LE_BE_CONSTANT (val);	\
++ 	 else						\
++-	   __asm__ __const__ ("rorw $8, %w0"		\
+++	   __asm__ ("rorw $8, %w0"		\
++ 			      : "=r" (__v)		\
++ 			      : "0" ((guint16) (val)));	\
++ 	__v; }))
++@@ -548,7 +548,7 @@
++ 	    if (__builtin_constant_p (val))			\
++ 	      __v = GUINT32_SWAP_LE_BE_CONSTANT (val);		\
++ 	  else							\
++-	    __asm__ __const__ ("rorw $8, %w0\n\t"		\
+++	    __asm__ ("rorw $8, %w0\n\t"		\
++ 			       "rorl $16, %0\n\t"		\
++ 			       "rorw $8, %w0"			\
++ 			       : "=r" (__v)			\
++@@ -561,7 +561,7 @@
++ 	    if (__builtin_constant_p (val))			\
++ 	      __v = GUINT32_SWAP_LE_BE_CONSTANT (val);		\
++ 	  else							\
++-	    __asm__ __const__ ("bswap %0"			\
+++	    __asm__ ("bswap %0"			\
++ 			       : "=r" (__v)			\
++ 			       : "0" ((guint32) (val)));	\
++ 	__v; }))
+diff --git a/contrib/glib1/patches/0003-ltconfig-substrate-shared.patch b/contrib/glib1/patches/0003-ltconfig-substrate-shared.patch
+new file mode 100644
+index 00000000..dffa026d
+--- /dev/null
++++ b/contrib/glib1/patches/0003-ltconfig-substrate-shared.patch
+@@ -0,0 +1,17 @@
++--- a/ltconfig	2026-06-10 00:20:30.819751548 -0500
+++++ b/ltconfig	2026-06-10 00:20:30.865070294 -0500
++@@ -457,6 +457,14 @@
++ host_vendor=`echo $host | sed 's/^\([^-]*\)-\([^-]*\)-\(.*\)$/\2/'`
++ host_os=`echo $host | sed 's/^\([^-]*\)-\([^-]*\)-\(.*\)$/\3/'`
++ 
+++# Substrate is ELF + GNU ld + Linux-like libc/dl; let this 2001-era ltconfig
+++# reuse its entire linux-gnu profile (shared-lib naming, soname, version_type)
+++# instead of falling through to static-only.  Mirrors what modern libtool does
+++# (version_type=linux for host_os=substrate).
+++case "$host_os" in
+++substrate*) host=`echo $host | sed 's/-substrate/-linux-gnu/'`; host_os=linux-gnu ;;
+++esac
+++
++ case "$host_os" in
++ aix3*)
++   # AIX sometimes has problems with the GCC collect2 program.  For some
+diff --git a/contrib/glib1/series b/contrib/glib1/series
+new file mode 100644
+index 00000000..29684e3d
+--- /dev/null
++++ b/contrib/glib1/series
+@@ -0,0 +1,3 @@
++0001-configure-cross.patch
++0002-glib-h-modern-gcc.patch
++0003-ltconfig-substrate-shared.patch
+-- 
+2.54.0
+

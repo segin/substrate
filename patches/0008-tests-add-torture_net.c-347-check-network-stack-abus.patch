@@ -1,0 +1,1186 @@
+From 561996caa828e48b592672a202c440f77b7e9b42 Mon Sep 17 00:00:00 2001
+From: Kirn Gill II <segin2005@gmail.com>
+Date: Mon, 8 Jun 2026 20:08:57 -0500
+Subject: [PATCH 08/83] =?UTF-8?q?tests:=20add=20torture=5Fnet.c=20?=
+ =?UTF-8?q?=E2=80=94=20347-check=20network-stack=20abuse=20suite?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Portable POSIX torture test for the BSD socket surface, in the cross-OS
+baseline style of torture_kernel.c: it runs clean on a reference kernel
+(FreeBSD/Linux) and is a conformance oracle for substrate's stack.  All
+traffic is loopback (127.0.0.1 / ::1 / a temp AF_UNIX path); nothing
+leaves the host.
+
+347 checks across: socket() domain/type/protocol matrix + error paths;
+bind (ephemeral/specific/ANY, EADDRINUSE, getsockname reflection); listen
+backlogs + EOPNOTSUPP on DGRAM; connect/accept handshake, ECONNREFUSED,
+10-way simultaneous connect storm, peer-address fill-in; TCP stream
+transfer (coalescing, MSG_PEEK, 256K integrity, ping-pong ordering);
+shutdown/close semantics (SHUT_RD/WR EOF, EPIPE on write-to-closed,
+half-close, double-close EBADF); UDP datagram boundaries + source
+addressing + connected mode + zero-length; AF_UNIX stream + SCM_RIGHTS fd
+passing + datagram boundaries; poll()/select() readiness — including a
+pending connection making a listener POLLIN-readable and a poll-drained
+listener going quiet (the accept-readiness path a poll-driven RPC server
+depends on); socket options (SO_TYPE/ERROR/REUSEADDR/buffers); IPv6
+loopback TCP+UDP; writev/readv + sendmsg/recvmsg scatter-gather; and
+varied-size TCP (100) + UDP (48) storms with content verification.  A
+SIGALRM watchdog turns any wedged blocking call into a located failure
+instead of a hang; raw-socket and IPv6 points are privilege/config
+tolerant.
+
+Verified: 347/347 pass on FreeBSD 14.3 i386 (clang, -Wall) as both an
+unprivileged user and root.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+---
+ tests/lib/c/torture_net.c | 1135 +++++++++++++++++++++++++++++++++++++
+ 1 file changed, 1135 insertions(+)
+ create mode 100644 tests/lib/c/torture_net.c
+
+diff --git a/tests/lib/c/torture_net.c b/tests/lib/c/torture_net.c
+new file mode 100644
+index 00000000..2e894ff4
+--- /dev/null
++++ b/tests/lib/c/torture_net.c
+@@ -0,0 +1,1135 @@
++/*
++ * torture_net.c — portable network-stack torture test.
++ *
++ * 300+ checks across the BSD socket surface: socket()/bind()/listen()/
++ * connect()/accept(), TCP stream transfer + shutdown/close semantics,
++ * UDP datagram boundaries + source addressing, AF_UNIX stream sockets +
++ * socketpair + SCM_RIGHTS fd passing, poll()/select() readiness (incl.
++ * the listening-socket-becomes-readable-on-pending-accept case that a
++ * poll-driven RPC server like ToolTalk's ttsession depends on), socket
++ * options, and a pile of error-path edge cases.
++ *
++ * Every assertion is standard POSIX/BSD behaviour, so the suite passes
++ * clean on FreeBSD / Linux and is a conformance oracle for substrate's
++ * stack.  All traffic is loopback (127.0.0.1 / ::1 / a temp AF_UNIX
++ * path); nothing leaves the host.  Run as a normal user — the few
++ * privileged paths (SOCK_RAW) are tolerated either way.
++ *
++ *   cc -O2 -Wall -o torture_net torture_net.c && ./torture_net
++ */
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <unistd.h>
++#include <errno.h>
++#include <fcntl.h>
++#include <signal.h>
++#include <setjmp.h>
++#include <poll.h>
++#include <time.h>
++#include <sys/socket.h>
++#include <sys/select.h>
++#include <sys/uio.h>
++#include <sys/un.h>
++#include <sys/stat.h>
++#include <netinet/in.h>
++#include <arpa/inet.h>
++
++#ifndef INADDR_LOOPBACK
++#define INADDR_LOOPBACK 0x7f000001
++#endif
++#ifndef IPPROTO_ICMP
++#define IPPROTO_ICMP 1
++#endif
++
++static int g_pass, g_fail, g_num;
++static int g_verbose = 0;
++static const char *g_cur = "init";
++
++static void ck(int cond, const char *desc) {
++    g_num++;
++    g_cur = desc;
++    if (cond) {
++        g_pass++;
++        if (g_verbose) printf("ok %d - %s\n", g_num, desc);
++    } else {
++        g_fail++;
++        printf("FAIL %d - %s (errno=%d %s)\n", g_num, desc, errno, strerror(errno));
++    }
++}
++
++/* Per-group watchdog: a wedged blocking call (a real stack bug) shouldn't
++ * sink the whole suite.  SIGALRM interrupts the stuck syscall and longjmps
++ * back to the group dispatcher, which records the hang and moves on — so a
++ * buggy stack still produces a complete failure list instead of one hang. */
++static sigjmp_buf g_jmp;
++static volatile sig_atomic_t g_in_group;
++static void on_alarm(int sig) {
++    (void)sig;
++    if (g_in_group) {
++        fprintf(stderr, "  *** WEDGED near check %d (\"%s\") — skipping rest of group\n",
++                g_num + 1, g_cur);
++        fflush(stdout);
++        siglongjmp(g_jmp, 1);
++    }
++    _exit(2);
++}
++
++#define RUN_GROUP(fn, secs) do {                       \
++        g_cur = #fn;                                   \
++        g_in_group = 1;                                \
++        if (sigsetjmp(g_jmp, 1) == 0) { alarm(secs); fn(); } \
++        else { g_fail++; g_num++; printf("FAIL %d - %s WEDGED (blocking op never returned)\n", g_num, #fn); } \
++        alarm(0);                                      \
++        g_in_group = 0;                                \
++    } while (0)
++
++/* ---- helpers --------------------------------------------------------- */
++
++static void lo4(struct sockaddr_in *a, unsigned short port) {
++    memset(a, 0, sizeof(*a));
++    a->sin_family = AF_INET;
++    a->sin_addr.s_addr = htonl(INADDR_LOOPBACK);
++    a->sin_port = htons(port);
++}
++
++static unsigned short port_of(int fd) {
++    struct sockaddr_in a;
++    socklen_t al = sizeof(a);
++    if (getsockname(fd, (struct sockaddr *)&a, &al) < 0) return 0;
++    return ntohs(a.sin_port);
++}
++
++static int set_nb(int fd, int on) {
++    int fl = fcntl(fd, F_GETFL, 0);
++    if (fl < 0) return -1;
++    return fcntl(fd, F_SETFL, on ? (fl | O_NONBLOCK) : (fl & ~O_NONBLOCK));
++}
++
++/* Build a connected loopback TCP pair in one process.  connect() to a
++ * listening socket completes the handshake in the kernel and lands on the
++ * backlog without the server having called accept() yet, so a blocking
++ * connect succeeds and the subsequent accept dequeues it. */
++static int tcp_pair(int *cfd, int *sfd) {
++    int L = socket(AF_INET, SOCK_STREAM, 0);
++    if (L < 0) return -1;
++    int one = 1;
++    setsockopt(L, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
++    struct sockaddr_in a;
++    lo4(&a, 0);
++    if (bind(L, (struct sockaddr *)&a, sizeof(a)) < 0) { close(L); return -1; }
++    socklen_t al = sizeof(a);
++    getsockname(L, (struct sockaddr *)&a, &al);
++    if (listen(L, 8) < 0) { close(L); return -1; }
++    int c = socket(AF_INET, SOCK_STREAM, 0);
++    if (c < 0) { close(L); return -1; }
++    if (connect(c, (struct sockaddr *)&a, sizeof(a)) < 0) { close(L); close(c); return -1; }
++    int s = accept(L, NULL, NULL);
++    close(L);
++    if (s < 0) { close(c); return -1; }
++    *cfd = c; *sfd = s;
++    return 0;
++}
++
++static short poll1(int fd, short events, int ms) {
++    struct pollfd p;
++    p.fd = fd; p.events = events; p.revents = 0;
++    int r = poll(&p, 1, ms);
++    return r > 0 ? p.revents : 0;
++}
++
++static int read_all(int fd, void *buf, size_t n) {
++    size_t got = 0;
++    char *p = buf;
++    while (got < n) {
++        ssize_t r = read(fd, p + got, n - got);
++        if (r <= 0) return (int)got;
++        got += (size_t)r;
++    }
++    return (int)got;
++}
++
++/* ==================================================================== */
++/* Groups                                                               */
++/* ==================================================================== */
++
++static void g_socket(void) {
++    struct { int dom, type, proto; const char *name; int priv; } cases[] = {
++        { AF_INET,  SOCK_STREAM, 0,            "AF_INET/STREAM",   0 },
++        { AF_INET,  SOCK_DGRAM,  0,            "AF_INET/DGRAM",    0 },
++        { AF_INET,  SOCK_STREAM, IPPROTO_TCP,  "AF_INET/STREAM/TCP", 0 },
++        { AF_INET,  SOCK_DGRAM,  IPPROTO_UDP,  "AF_INET/DGRAM/UDP",  0 },
++        { AF_UNIX,  SOCK_STREAM, 0,            "AF_UNIX/STREAM",   0 },
++        { AF_UNIX,  SOCK_DGRAM,  0,            "AF_UNIX/DGRAM",    0 },
++        { AF_INET6, SOCK_STREAM, 0,            "AF_INET6/STREAM",  0 },
++        { AF_INET6, SOCK_DGRAM,  0,            "AF_INET6/DGRAM",   0 },
++    };
++    for (size_t i = 0; i < sizeof(cases)/sizeof(cases[0]); i++) {
++        errno = 0;
++        int fd = socket(cases[i].dom, cases[i].type, cases[i].proto);
++        if (fd < 0 && (errno == EAFNOSUPPORT || errno == EPROTONOSUPPORT)) {
++            /* family not configured (e.g. IPv6 off) — tolerate */
++            ck(1, cases[i].name);
++            ck(1, "  (family unsupported, skipped type)");
++            continue;
++        }
++        ck(fd >= 0, cases[i].name);
++        if (fd >= 0) {
++            int type = 0; socklen_t tl = sizeof(type);
++            int r = getsockopt(fd, SOL_SOCKET, SO_TYPE, &type, &tl);
++            ck(r == 0 && type == cases[i].type, "  SO_TYPE matches request");
++            ck(close(fd) == 0, "  close()");
++        } else {
++            ck(0, "  (socket failed)");
++            ck(0, "  (no close)");
++        }
++    }
++
++    /* SOCK_RAW needs privilege — accept success OR EPERM. */
++    errno = 0;
++    int raw = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
++    ck(raw >= 0 || errno == EPERM || errno == EACCES, "AF_INET/RAW (priv-tolerant)");
++    if (raw >= 0) close(raw);
++
++    /* Invalid arguments. */
++    errno = 0;
++    ck(socket(AF_INET, 0x7fff, 0) < 0 && (errno == EINVAL || errno == EPROTOTYPE ||
++       errno == ESOCKTNOSUPPORT || errno == EPROTONOSUPPORT), "socket() bad type rejected");
++    errno = 0;
++    ck(socket(0x7fff, SOCK_STREAM, 0) < 0 && (errno == EAFNOSUPPORT || errno == EINVAL ||
++       errno == EPROTONOSUPPORT), "socket() bad domain rejected");
++    errno = 0;
++    ck(socket(AF_INET, SOCK_STREAM, 0x7fff) < 0 &&
++       (errno == EPROTONOSUPPORT || errno == EPROTOTYPE || errno == EINVAL),
++       "socket() bad protocol rejected");
++}
++
++static void g_bind(void) {
++    int fd = socket(AF_INET, SOCK_STREAM, 0);
++    ck(fd >= 0, "bind: socket()");
++    struct sockaddr_in a;
++    lo4(&a, 0);
++    ck(bind(fd, (struct sockaddr *)&a, sizeof(a)) == 0, "bind(port 0)");
++    ck(port_of(fd) != 0, "ephemeral port assigned (getsockname != 0)");
++    /* re-bind an already-bound socket fails */
++    lo4(&a, 0);
++    errno = 0;
++    ck(bind(fd, (struct sockaddr *)&a, sizeof(a)) < 0 && errno == EINVAL,
++       "re-bind already-bound -> EINVAL");
++    close(fd);
++
++    /* bind a specific free port, verify getsockname reflects it */
++    int p1 = socket(AF_INET, SOCK_STREAM, 0);
++    lo4(&a, 0);
++    bind(p1, (struct sockaddr *)&a, sizeof(a));
++    unsigned short chosen = port_of(p1);
++    close(p1);
++    int fd2 = socket(AF_INET, SOCK_STREAM, 0);
++    int one = 1; setsockopt(fd2, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
++    lo4(&a, chosen);
++    int br = bind(fd2, (struct sockaddr *)&a, sizeof(a));
++    ck(br == 0, "bind(specific port)");
++    ck(port_of(fd2) == chosen, "getsockname reflects specific port");
++
++    /* second socket binding the same port without REUSEADDR -> EADDRINUSE */
++    int fd3 = socket(AF_INET, SOCK_STREAM, 0);
++    lo4(&a, chosen);
++    errno = 0;
++    int br2 = bind(fd3, (struct sockaddr *)&a, sizeof(a));
++    ck(br2 < 0 && (errno == EADDRINUSE || errno == EACCES), "double-bind same port -> EADDRINUSE");
++    close(fd3);
++    close(fd2);
++
++    /* INADDR_ANY */
++    int fa = socket(AF_INET, SOCK_DGRAM, 0);
++    memset(&a, 0, sizeof(a));
++    a.sin_family = AF_INET; a.sin_addr.s_addr = htonl(INADDR_ANY); a.sin_port = 0;
++    ck(bind(fa, (struct sockaddr *)&a, sizeof(a)) == 0, "bind(INADDR_ANY)");
++    ck(port_of(fa) != 0, "INADDR_ANY ephemeral assigned");
++    close(fa);
++
++    /* bind on a bad fd / non-socket */
++    lo4(&a, 0);
++    errno = 0;
++    ck(bind(-1, (struct sockaddr *)&a, sizeof(a)) < 0 && errno == EBADF, "bind(bad fd) -> EBADF");
++    int devnull = open("/dev/null", O_RDWR);
++    if (devnull >= 0) {
++        errno = 0;
++        ck(bind(devnull, (struct sockaddr *)&a, sizeof(a)) < 0 && errno == ENOTSOCK,
++           "bind(non-socket) -> ENOTSOCK");
++        close(devnull);
++    } else {
++        ck(1, "bind(non-socket): /dev/null unavailable, skipped");
++    }
++
++    /* AF_UNIX bind + getsockname path */
++    char path[64];
++    snprintf(path, sizeof(path), "/tmp/tn_bind_%ld", (long)getpid());
++    unlink(path);
++    int u = socket(AF_UNIX, SOCK_STREAM, 0);
++    struct sockaddr_un un;
++    memset(&un, 0, sizeof(un));
++    un.sun_family = AF_UNIX;
++    strncpy(un.sun_path, path, sizeof(un.sun_path) - 1);
++    ck(bind(u, (struct sockaddr *)&un, sizeof(un)) == 0, "AF_UNIX bind(path)");
++    struct sockaddr_un gn;
++    memset(&gn, 0, sizeof(gn));
++    socklen_t gl = sizeof(gn);
++    ck(getsockname(u, (struct sockaddr *)&gn, &gl) == 0 && strcmp(gn.sun_path, path) == 0,
++       "AF_UNIX getsockname reflects path");
++    close(u);
++    unlink(path);
++}
++
++static void g_listen(void) {
++    int backs[] = { 0, 1, 5, 128, SOMAXCONN };
++    for (size_t i = 0; i < sizeof(backs)/sizeof(backs[0]); i++) {
++        int fd = socket(AF_INET, SOCK_STREAM, 0);
++        struct sockaddr_in a; lo4(&a, 0);
++        bind(fd, (struct sockaddr *)&a, sizeof(a));
++        char d[48]; snprintf(d, sizeof(d), "listen(backlog=%d)", backs[i]);
++        ck(listen(fd, backs[i]) == 0, d);
++        ck(port_of(fd) != 0, "  port retained after listen");
++        close(fd);
++    }
++    /* listen on a DGRAM socket -> EOPNOTSUPP */
++    int d = socket(AF_INET, SOCK_DGRAM, 0);
++    errno = 0;
++    ck(listen(d, 5) < 0 && (errno == EOPNOTSUPP || errno == ENOTSUP || errno == EINVAL),
++       "listen(DGRAM) rejected");
++    close(d);
++    /* listen on bad fd */
++    errno = 0;
++    ck(listen(-1, 5) < 0 && errno == EBADF, "listen(bad fd) -> EBADF");
++    /* accept on a non-listening socket -> EINVAL */
++    int ns = socket(AF_INET, SOCK_STREAM, 0);
++    struct sockaddr_in a; lo4(&a, 0);
++    bind(ns, (struct sockaddr *)&a, sizeof(a));
++    errno = 0;
++    ck(accept(ns, NULL, NULL) < 0 && (errno == EINVAL || errno == ENOTCONN),
++       "accept(non-listening) rejected");
++    close(ns);
++}
++
++static void g_connect_accept(void) {
++    int c, s;
++    ck(tcp_pair(&c, &s) == 0, "tcp_pair connect+accept");
++    if (g_fail == 0 || 1) {
++        /* getpeername(client) port == getsockname(server-side peer) is not
++         * generally equal; instead check client's local == server's peer. */
++        struct sockaddr_in cl, sp;
++        socklen_t l;
++        l = sizeof(cl); ck(getsockname(c, (struct sockaddr *)&cl, &l) == 0, "getsockname(client)");
++        l = sizeof(sp); ck(getpeername(s, (struct sockaddr *)&sp, &l) == 0, "getpeername(server)");
++        ck(cl.sin_port == sp.sin_port, "client local port == server peer port");
++        ck(sp.sin_addr.s_addr == htonl(INADDR_LOOPBACK), "server sees loopback peer addr");
++        close(c); close(s);
++    }
++
++    /* connect to a port nobody listens on -> ECONNREFUSED */
++    int probe = socket(AF_INET, SOCK_STREAM, 0);
++    struct sockaddr_in a; lo4(&a, 0);
++    bind(probe, (struct sockaddr *)&a, sizeof(a));
++    unsigned short dead = port_of(probe);
++    close(probe);              /* now nothing listens on `dead` */
++    int cc = socket(AF_INET, SOCK_STREAM, 0);
++    lo4(&a, dead);
++    errno = 0;
++    ck(connect(cc, (struct sockaddr *)&a, sizeof(a)) < 0 && errno == ECONNREFUSED,
++       "connect(dead port) -> ECONNREFUSED");
++    close(cc);
++
++    /* many simultaneous connections on one listener */
++    int L = socket(AF_INET, SOCK_STREAM, 0);
++    int one = 1; setsockopt(L, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
++    lo4(&a, 0);
++    bind(L, (struct sockaddr *)&a, sizeof(a));
++    socklen_t al = sizeof(a); getsockname(L, (struct sockaddr *)&a, &al);
++    listen(L, 16);
++    int clis[10], srvs[10], okc = 0, oks = 0;
++    for (int i = 0; i < 10; i++) {
++        clis[i] = socket(AF_INET, SOCK_STREAM, 0);
++        if (connect(clis[i], (struct sockaddr *)&a, sizeof(a)) == 0) okc++;
++    }
++    ck(okc == 10, "10 simultaneous connects");
++    for (int i = 0; i < 10; i++) {
++        srvs[i] = accept(L, NULL, NULL);
++        if (srvs[i] >= 0) oks++;
++    }
++    ck(oks == 10, "10 accepts");
++    /* accepted fds are all distinct */
++    int distinct = 1;
++    for (int i = 0; i < 10; i++)
++        for (int j = i + 1; j < 10; j++)
++            if (srvs[i] == srvs[j]) distinct = 0;
++    ck(distinct, "accepted fds distinct");
++    /* each pair can pass a byte end-to-end */
++    int passed = 0;
++    for (int i = 0; i < 10; i++) {
++        char x = (char)('A' + i), y = 0;
++        if (write(clis[i], &x, 1) == 1 && read(srvs[i], &y, 1) == 1 && y == x) passed++;
++    }
++    ck(passed == 10, "all 10 pairs round-trip a byte");
++    for (int i = 0; i < 10; i++) { close(clis[i]); close(srvs[i]); }
++    close(L);
++
++    /* accept() filling in the peer address */
++    int c2, s2;
++    int L2 = socket(AF_INET, SOCK_STREAM, 0);
++    setsockopt(L2, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
++    lo4(&a, 0); bind(L2, (struct sockaddr *)&a, sizeof(a));
++    al = sizeof(a); getsockname(L2, (struct sockaddr *)&a, &al);
++    listen(L2, 4);
++    c2 = socket(AF_INET, SOCK_STREAM, 0);
++    connect(c2, (struct sockaddr *)&a, sizeof(a));
++    struct sockaddr_in pa; socklen_t pl = sizeof(pa);
++    s2 = accept(L2, (struct sockaddr *)&pa, &pl);
++    ck(s2 >= 0, "accept(&addr)");
++    ck(pl >= sizeof(struct sockaddr_in) && pa.sin_family == AF_INET, "accept addr family AF_INET");
++    ck(pa.sin_addr.s_addr == htonl(INADDR_LOOPBACK), "accept addr is loopback");
++    close(c2); close(s2); close(L2);
++}
++
++static void g_tcp_data(void) {
++    int c, s;
++    if (tcp_pair(&c, &s) != 0) { ck(0, "tcp_data: pair"); return; }
++
++    /* simple send/recv */
++    const char *msg = "hello, world";
++    ck(write(c, msg, 12) == 12, "write 12 bytes");
++    char buf[64]; memset(buf, 0, sizeof(buf));
++    ck(read_all(s, buf, 12) == 12, "read 12 bytes");
++    ck(memcmp(buf, msg, 12) == 0, "content matches");
++
++    /* reverse direction */
++    ck(write(s, "PONG", 4) == 4, "server write");
++    memset(buf, 0, sizeof(buf));
++    ck(read_all(c, buf, 4) == 4 && memcmp(buf, "PONG", 4) == 0, "client read reverse");
++
++    /* MSG_PEEK leaves data in the buffer */
++    write(c, "PEEK", 4);
++    char pk[8] = {0};
++    ssize_t pr = recv(s, pk, 4, MSG_PEEK);
++    ck(pr == 4 && memcmp(pk, "PEEK", 4) == 0, "MSG_PEEK returns data");
++    memset(pk, 0, sizeof(pk));
++    ck(read_all(s, pk, 4) == 4 && memcmp(pk, "PEEK", 4) == 0, "data still readable after PEEK");
++
++    /* stream coalescing: three writes, one big read */
++    write(c, "aaa", 3); write(c, "bbb", 3); write(c, "ccc", 3);
++    memset(buf, 0, sizeof(buf));
++    int got = read_all(s, buf, 9);
++    ck(got == 9 && memcmp(buf, "aaabbbccc", 9) == 0, "stream coalesces 3 writes");
++
++    /* large transfer with content verification */
++    enum { BIG = 256 * 1024 };
++    char *out = malloc(BIG), *in = malloc(BIG);
++    for (int i = 0; i < BIG; i++) out[i] = (char)(i * 31 + 7);
++    /* nonblocking pump to avoid loopback buffer deadlock in one thread */
++    set_nb(c, 1); set_nb(s, 1);
++    int wn = 0, rn = 0;
++    while (rn < BIG) {
++        if (wn < BIG) {
++            ssize_t w = write(c, out + wn, BIG - wn);
++            if (w > 0) wn += (int)w;
++        }
++        ssize_t r = read(s, in + rn, BIG - rn);
++        if (r > 0) rn += (int)r;
++        else if (r < 0 && errno != EAGAIN && errno != EWOULDBLOCK) break;
++    }
++    set_nb(c, 0); set_nb(s, 0);
++    ck(wn == BIG, "large: wrote 256K");
++    ck(rn == BIG, "large: read 256K");
++    ck(memcmp(out, in, BIG) == 0, "large: content intact");
++    free(out); free(in);
++
++    /* ping-pong many rounds with a sequence check */
++    int rounds = 0;
++    for (int i = 0; i < 64; i++) {
++        unsigned char v = (unsigned char)i, r = 0;
++        if (write(c, &v, 1) != 1) break;
++        if (read_all(s, &r, 1) != 1 || r != v) break;
++        if (write(s, &r, 1) != 1) break;
++        if (read_all(c, &v, 1) != 1 || v != r) break;
++        rounds++;
++    }
++    ck(rounds == 64, "64 ping-pong rounds in order");
++
++    close(c); close(s);
++}
++
++static void g_shutdown_close(void) {
++    int c, s;
++
++    /* SHUT_WR -> peer reads EOF, but peer can still send back */
++    if (tcp_pair(&c, &s) == 0) {
++        ck(shutdown(c, SHUT_WR) == 0, "shutdown(SHUT_WR)");
++        char b[4];
++        ck(read(s, b, sizeof(b)) == 0, "peer reads EOF after SHUT_WR");
++        ck(write(s, "ok", 2) == 2, "peer can still write after our SHUT_WR");
++        ck(read_all(c, b, 2) == 2 && memcmp(b, "ok", 2) == 0, "we still read after SHUT_WR");
++        close(c); close(s);
++    } else { for (int i=0;i<4;i++) ck(0, "shutdown WR pair failed"); }
++
++    /* close -> peer reads EOF */
++    if (tcp_pair(&c, &s) == 0) {
++        close(c);
++        char b[4];
++        ck(read(s, b, sizeof(b)) == 0, "peer reads EOF after close");
++        close(s);
++    } else { ck(0, "close-EOF pair failed"); }
++
++    /* write to a peer that closed -> EPIPE (SIGPIPE ignored) */
++    if (tcp_pair(&c, &s) == 0) {
++        close(s);
++        /* first write may succeed (buffered) then RST; loop until EPIPE/ECONNRESET */
++        int hit = 0;
++        for (int i = 0; i < 1000; i++) {
++            errno = 0;
++            ssize_t w = write(c, "xxxx", 4);
++            if (w < 0 && (errno == EPIPE || errno == ECONNRESET)) { hit = 1; break; }
++            if (w < 0) break;
++        }
++        ck(hit, "write to closed peer -> EPIPE/ECONNRESET");
++        close(c);
++    } else { ck(0, "EPIPE pair failed"); }
++
++    /* SHUT_RD -> our recv returns EOF */
++    if (tcp_pair(&c, &s) == 0) {
++        ck(shutdown(s, SHUT_RD) == 0, "shutdown(SHUT_RD)");
++        char b[4];
++        ck(read(s, b, sizeof(b)) == 0, "recv after SHUT_RD returns EOF");
++        close(c); close(s);
++    } else { for (int i=0;i<2;i++) ck(0, "SHUT_RD pair failed"); }
++
++    /* double close -> second is EBADF */
++    int fd = socket(AF_INET, SOCK_STREAM, 0);
++    ck(close(fd) == 0, "close once");
++    errno = 0;
++    ck(close(fd) < 0 && errno == EBADF, "close twice -> EBADF");
++
++    /* shutdown on bad fd */
++    errno = 0;
++    ck(shutdown(-1, SHUT_RDWR) < 0 && errno == EBADF, "shutdown(bad fd) -> EBADF");
++    /* shutdown on unconnected socket -> ENOTCONN */
++    int us = socket(AF_INET, SOCK_STREAM, 0);
++    errno = 0;
++    ck(shutdown(us, SHUT_RDWR) < 0 && errno == ENOTCONN, "shutdown(unconnected) -> ENOTCONN");
++    close(us);
++}
++
++static void g_udp(void) {
++    int a = socket(AF_INET, SOCK_DGRAM, 0);
++    int b = socket(AF_INET, SOCK_DGRAM, 0);
++    struct sockaddr_in aa, ba;
++    lo4(&aa, 0); lo4(&ba, 0);
++    ck(bind(a, (struct sockaddr *)&aa, sizeof(aa)) == 0, "udp bind a");
++    ck(bind(b, (struct sockaddr *)&ba, sizeof(ba)) == 0, "udp bind b");
++    socklen_t l = sizeof(aa); getsockname(a, (struct sockaddr *)&aa, &l);
++    l = sizeof(ba); getsockname(b, (struct sockaddr *)&ba, &l);
++
++    /* basic sendto/recvfrom */
++    ck(sendto(b, "PING", 4, 0, (struct sockaddr *)&aa, sizeof(aa)) == 4, "udp sendto");
++    char buf[64];
++    struct sockaddr_in from; socklen_t fl = sizeof(from);
++    if (poll1(a, POLLIN, 2000) & POLLIN) {
++        ssize_t r = recvfrom(a, buf, sizeof(buf), 0, (struct sockaddr *)&from, &fl);
++        ck(r == 4 && memcmp(buf, "PING", 4) == 0, "udp recvfrom data");
++        ck(from.sin_family == AF_INET && from.sin_port == ba.sin_port, "udp recvfrom source port");
++        ck(from.sin_addr.s_addr == htonl(INADDR_LOOPBACK), "udp recvfrom source addr");
++    } else { ck(0,"udp recvfrom data (timeout)"); ck(0,"udp src port"); ck(0,"udp src addr"); }
++
++    /* datagram boundaries: three sends -> three distinct receives */
++    sendto(b, "11", 2, 0, (struct sockaddr *)&aa, sizeof(aa));
++    sendto(b, "222", 3, 0, (struct sockaddr *)&aa, sizeof(aa));
++    sendto(b, "4444", 4, 0, (struct sockaddr *)&aa, sizeof(aa));
++    int sizes[3] = { 0, 0, 0 }; int n = 0;
++    for (int i = 0; i < 3; i++) {
++        if (!(poll1(a, POLLIN, 2000) & POLLIN)) break;
++        ssize_t r = recv(a, buf, sizeof(buf), 0);
++        if (r > 0) sizes[n++] = (int)r;
++    }
++    ck(n == 3, "three datagrams received separately");
++    ck(sizes[0] == 2 && sizes[1] == 3 && sizes[2] == 4, "datagram boundaries preserved");
++
++    /* connected UDP: connect + send/recv */
++    ck(connect(a, (struct sockaddr *)&ba, sizeof(ba)) == 0, "udp connect a->b");
++    ck(connect(b, (struct sockaddr *)&aa, sizeof(aa)) == 0, "udp connect b->a");
++    ck(send(a, "CONN", 4, 0) == 4, "udp send on connected");
++    if (poll1(b, POLLIN, 2000) & POLLIN) {
++        ssize_t r = recv(b, buf, sizeof(buf), 0);
++        ck(r == 4 && memcmp(buf, "CONN", 4) == 0, "udp recv on connected");
++    } else ck(0, "udp recv on connected (timeout)");
++
++    /* zero-length datagram is a real datagram (a is connected to b) */
++    send(a, "", 0, 0);
++    if (poll1(b, POLLIN, 2000) & POLLIN) {
++        ssize_t r = recv(b, buf, sizeof(buf), 0);
++        ck(r == 0, "zero-length datagram delivered");
++    } else ck(0, "zero-length datagram (timeout)");
++
++    /* sendto with no destination on an unconnected dgram -> EDESTADDRREQ */
++    int u = socket(AF_INET, SOCK_DGRAM, 0);
++    errno = 0;
++    ck(send(u, "x", 1, 0) < 0 && (errno == EDESTADDRREQ || errno == ENOTCONN),
++       "udp send w/o dest -> EDESTADDRREQ");
++    close(u);
++
++    /* many datagrams in a tight loop (b is connected to a) */
++    int ok = 0;
++    for (int i = 0; i < 32; i++) {
++        unsigned char v = (unsigned char)i, g = 0xff;
++        send(b, &v, 1, 0);
++        if ((poll1(a, POLLIN, 1000) & POLLIN) && recv(a, &g, 1, 0) == 1 && g == v) ok++;
++    }
++    ck(ok == 32, "32 datagrams round-trip");
++
++    close(a); close(b);
++}
++
++static void g_afunix(void) {
++    /* socketpair: bidirectional stream */
++    int sp[2];
++    ck(socketpair(AF_UNIX, SOCK_STREAM, 0, sp) == 0, "socketpair(AF_UNIX/STREAM)");
++    ck(write(sp[0], "abc", 3) == 3, "socketpair write 0->1");
++    char b[16] = {0};
++    ck(read_all(sp[1], b, 3) == 3 && memcmp(b, "abc", 3) == 0, "socketpair read 1");
++    ck(write(sp[1], "wxyz", 4) == 4, "socketpair write 1->0");
++    memset(b, 0, sizeof(b));
++    ck(read_all(sp[0], b, 4) == 4 && memcmp(b, "wxyz", 4) == 0, "socketpair read 0");
++
++    /* SCM_RIGHTS: pass a fd (a pipe read end) across the pair */
++    int pfd[2];
++    ck(pipe(pfd) == 0, "pipe for SCM_RIGHTS");
++    write(pfd[1], "SECRET", 6);
++    struct msghdr mh; memset(&mh, 0, sizeof(mh));
++    char iobuf[1] = { 'F' };
++    struct iovec iov = { iobuf, 1 };
++    mh.msg_iov = &iov; mh.msg_iovlen = 1;
++    char cmsgbuf[CMSG_SPACE(sizeof(int))];
++    memset(cmsgbuf, 0, sizeof(cmsgbuf));
++    mh.msg_control = cmsgbuf; mh.msg_controllen = sizeof(cmsgbuf);
++    struct cmsghdr *cm = CMSG_FIRSTHDR(&mh);
++    cm->cmsg_level = SOL_SOCKET; cm->cmsg_type = SCM_RIGHTS; cm->cmsg_len = CMSG_LEN(sizeof(int));
++    memcpy(CMSG_DATA(cm), &pfd[0], sizeof(int));
++    ck(sendmsg(sp[0], &mh, 0) == 1, "sendmsg SCM_RIGHTS");
++
++    struct msghdr rh; memset(&rh, 0, sizeof(rh));
++    char rbuf[1] = {0};
++    struct iovec riov = { rbuf, 1 };
++    rh.msg_iov = &riov; rh.msg_iovlen = 1;
++    char rcmsg[CMSG_SPACE(sizeof(int))];
++    memset(rcmsg, 0, sizeof(rcmsg));
++    rh.msg_control = rcmsg; rh.msg_controllen = sizeof(rcmsg);
++    ssize_t rr = recvmsg(sp[1], &rh, 0);
++    ck(rr == 1 && rbuf[0] == 'F', "recvmsg payload byte");
++    struct cmsghdr *rcm = CMSG_FIRSTHDR(&rh);
++    int newfd = -1;
++    if (rcm && rcm->cmsg_level == SOL_SOCKET && rcm->cmsg_type == SCM_RIGHTS)
++        memcpy(&newfd, CMSG_DATA(rcm), sizeof(int));
++    ck(newfd >= 0, "SCM_RIGHTS delivered an fd");
++    if (newfd >= 0) {
++        char sec[8] = {0};
++        ck(read(newfd, sec, 6) == 6 && memcmp(sec, "SECRET", 6) == 0,
++           "passed fd reads the original pipe data");
++        close(newfd);
++    } else ck(0, "passed fd unusable");
++    close(pfd[0]); close(pfd[1]);
++    close(sp[0]); close(sp[1]);
++
++    /* named AF_UNIX listener + connect */
++    char path[64];
++    snprintf(path, sizeof(path), "/tmp/tn_unix_%ld", (long)getpid());
++    unlink(path);
++    int L = socket(AF_UNIX, SOCK_STREAM, 0);
++    struct sockaddr_un un; memset(&un, 0, sizeof(un));
++    un.sun_family = AF_UNIX; strncpy(un.sun_path, path, sizeof(un.sun_path) - 1);
++    ck(bind(L, (struct sockaddr *)&un, sizeof(un)) == 0, "unix bind path");
++    ck(listen(L, 4) == 0, "unix listen");
++    int c = socket(AF_UNIX, SOCK_STREAM, 0);
++    ck(connect(c, (struct sockaddr *)&un, sizeof(un)) == 0, "unix connect");
++    int s = accept(L, NULL, NULL);
++    ck(s >= 0, "unix accept");
++    write(c, "uxdata", 6);
++    memset(b, 0, sizeof(b));
++    ck(read_all(s, b, 6) == 6 && memcmp(b, "uxdata", 6) == 0, "unix stream transfer");
++    /* getpeername on a connected unix socket */
++    struct sockaddr_un pn; memset(&pn, 0, sizeof(pn)); socklen_t pl = sizeof(pn);
++    ck(getpeername(c, (struct sockaddr *)&pn, &pl) == 0, "unix getpeername");
++    close(c); close(s); close(L);
++
++    /* connect to a non-existent path */
++    int nc = socket(AF_UNIX, SOCK_STREAM, 0);
++    memset(&un, 0, sizeof(un));
++    un.sun_family = AF_UNIX; strncpy(un.sun_path, "/tmp/tn_does_not_exist_zzz", sizeof(un.sun_path) - 1);
++    errno = 0;
++    ck(connect(nc, (struct sockaddr *)&un, sizeof(un)) < 0 &&
++       (errno == ENOENT || errno == ECONNREFUSED), "unix connect(missing path) rejected");
++    close(nc);
++    unlink(path);
++}
++
++static void g_poll_select(void) {
++    /* A fresh listener is NOT readable. */
++    int L = socket(AF_INET, SOCK_STREAM, 0);
++    int one = 1; setsockopt(L, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
++    struct sockaddr_in a; lo4(&a, 0);
++    bind(L, (struct sockaddr *)&a, sizeof(a));
++    socklen_t al = sizeof(a); getsockname(L, (struct sockaddr *)&a, &al);
++    listen(L, 8);
++    ck((poll1(L, POLLIN, 100) & POLLIN) == 0, "idle listener not POLLIN");
++
++    /* A pending connection MUST make the listener POLLIN-readable — this is
++     * exactly what a poll/select-driven accept loop (e.g. an RPC server)
++     * relies on; the failure here is a wedged server that never accepts. */
++    int c = socket(AF_INET, SOCK_STREAM, 0);
++    ck(connect(c, (struct sockaddr *)&a, sizeof(a)) == 0, "connect to pollable listener");
++    ck((poll1(L, POLLIN, 2000) & POLLIN) != 0, "pending connection makes listener POLLIN");
++    /* select() must agree */
++    {
++        fd_set rfds; FD_ZERO(&rfds); FD_SET(L, &rfds);
++        struct timeval tv = { 2, 0 };
++        int sr = select(L + 1, &rfds, NULL, NULL, &tv);
++        ck(sr == 1 && FD_ISSET(L, &rfds), "select() agrees listener readable");
++    }
++    int s = accept(L, NULL, NULL);
++    ck(s >= 0, "accept the pending connection");
++    ck((poll1(L, POLLIN, 100) & POLLIN) == 0, "listener not POLLIN after accept drains it");
++
++    /* connected socket: writable now, not readable until data arrives */
++    ck((poll1(s, POLLOUT, 1000) & POLLOUT) != 0, "connected socket POLLOUT");
++    ck((poll1(s, POLLIN, 100) & POLLIN) == 0, "connected socket not POLLIN (no data)");
++    write(c, "data", 4);
++    ck((poll1(s, POLLIN, 2000) & POLLIN) != 0, "POLLIN after peer writes");
++    {
++        fd_set rfds; FD_ZERO(&rfds); FD_SET(s, &rfds);
++        struct timeval tv = { 1, 0 };
++        ck(select(s + 1, &rfds, NULL, NULL, &tv) == 1, "select() sees the data");
++    }
++    char b[8]; read(s, b, 4);
++    ck((poll1(s, POLLIN, 100) & POLLIN) == 0, "not POLLIN after draining data");
++
++    /* peer close shows up as POLLIN (read returns 0) and often POLLHUP */
++    close(c);
++    short re = poll1(s, POLLIN, 2000);
++    ck((re & (POLLIN | POLLHUP)) != 0, "peer close -> POLLIN/POLLHUP");
++    ck(read(s, b, sizeof(b)) == 0, "read after peer close returns EOF");
++    close(s); close(L);
++
++    /* poll timeout semantics: 0 returns immediately, returns 0 events */
++    int e = socket(AF_INET, SOCK_DGRAM, 0);
++    struct timespec t0, t1;
++    clock_gettime(CLOCK_MONOTONIC, &t0);
++    int pr = poll1(e, POLLIN, 0);
++    clock_gettime(CLOCK_MONOTONIC, &t1);
++    ck(pr == 0, "poll(timeout=0) no events on idle socket");
++    long ms = (t1.tv_sec - t0.tv_sec) * 1000 + (t1.tv_nsec - t0.tv_nsec) / 1000000;
++    ck(ms < 200, "poll(timeout=0) returns promptly");
++    close(e);
++
++    /* poll multiple fds: only the ready one reports */
++    int c2, s2;
++    if (tcp_pair(&c2, &s2) == 0) {
++        write(c2, "z", 1);
++        struct pollfd pfds[2];
++        pfds[0].fd = c2; pfds[0].events = POLLIN; pfds[0].revents = 0;
++        pfds[1].fd = s2; pfds[1].events = POLLIN; pfds[1].revents = 0;
++        int r = poll(pfds, 2, 2000);
++        ck(r == 1, "poll(2 fds) reports one ready");
++        ck((pfds[1].revents & POLLIN) && !(pfds[0].revents & POLLIN),
++           "only the fd with data is POLLIN");
++        close(c2); close(s2);
++    } else { ck(0,"poll multi pair"); ck(0,"poll multi which"); }
++}
++
++static void g_sockopt(void) {
++    int st = socket(AF_INET, SOCK_STREAM, 0);
++    int dg = socket(AF_INET, SOCK_DGRAM, 0);
++    int v; socklen_t l;
++
++    l = sizeof(v); ck(getsockopt(st, SOL_SOCKET, SO_TYPE, &v, &l) == 0 && v == SOCK_STREAM,
++                      "SO_TYPE STREAM");
++    l = sizeof(v); ck(getsockopt(dg, SOL_SOCKET, SO_TYPE, &v, &l) == 0 && v == SOCK_DGRAM,
++                      "SO_TYPE DGRAM");
++    l = sizeof(v); v = -1;
++    ck(getsockopt(st, SOL_SOCKET, SO_ERROR, &v, &l) == 0 && v == 0, "SO_ERROR initially 0");
++
++    v = 1;
++    ck(setsockopt(st, SOL_SOCKET, SO_REUSEADDR, &v, sizeof(v)) == 0, "set SO_REUSEADDR");
++    v = 0; l = sizeof(v);
++    ck(getsockopt(st, SOL_SOCKET, SO_REUSEADDR, &v, &l) == 0 && v != 0, "get SO_REUSEADDR back on");
++
++    l = sizeof(v); ck(getsockopt(st, SOL_SOCKET, SO_RCVBUF, &v, &l) == 0 && v > 0, "SO_RCVBUF > 0");
++    l = sizeof(v); ck(getsockopt(st, SOL_SOCKET, SO_SNDBUF, &v, &l) == 0 && v > 0, "SO_SNDBUF > 0");
++
++    v = 1;
++    ck(setsockopt(st, SOL_SOCKET, SO_KEEPALIVE, &v, sizeof(v)) == 0, "set SO_KEEPALIVE");
++
++    /* SO_ERROR after a refused nonblocking connect */
++    int probe = socket(AF_INET, SOCK_STREAM, 0);
++    struct sockaddr_in a; lo4(&a, 0);
++    bind(probe, (struct sockaddr *)&a, sizeof(a));
++    unsigned short dead = port_of(probe);
++    close(probe);
++    int nc = socket(AF_INET, SOCK_STREAM, 0);
++    set_nb(nc, 1);
++    lo4(&a, dead);
++    int cr = connect(nc, (struct sockaddr *)&a, sizeof(a));
++    int cerr = errno;
++    int verr;
++    if (cr == 0) {
++        verr = -1;                       /* unexpected immediate success */
++    } else if (cerr == EINPROGRESS) {
++        poll1(nc, POLLOUT | POLLERR | POLLHUP, 2000);
++        verr = 0; l = sizeof(verr);
++        getsockopt(nc, SOL_SOCKET, SO_ERROR, &verr, &l);
++    } else {
++        verr = cerr;                     /* loopback often refuses synchronously */
++    }
++    ck(verr == ECONNREFUSED, "SO_ERROR/connect reports ECONNREFUSED");
++    close(nc);
++
++    /* getpeername on an unconnected socket -> ENOTCONN */
++    struct sockaddr_in pa; socklen_t pl = sizeof(pa);
++    errno = 0;
++    ck(getpeername(st, (struct sockaddr *)&pa, &pl) < 0 && errno == ENOTCONN,
++       "getpeername(unconnected) -> ENOTCONN");
++
++    /* bogus getsockopt */
++    l = sizeof(v); errno = 0;
++    ck(getsockopt(st, SOL_SOCKET, 0x7fff, &v, &l) < 0, "getsockopt(bad opt) fails");
++    close(st); close(dg);
++}
++
++static void g_edge(void) {
++    char b[4] = {0};
++    struct sockaddr_in a; lo4(&a, 0);
++
++    errno = 0; ck(listen(-1, 4) < 0 && errno == EBADF, "listen(-1) EBADF");
++    errno = 0; ck(accept(-1, NULL, NULL) < 0 && errno == EBADF, "accept(-1) EBADF");
++    errno = 0; ck(connect(-1, (struct sockaddr *)&a, sizeof(a)) < 0 && errno == EBADF, "connect(-1) EBADF");
++    errno = 0; ck(send(-1, b, 4, 0) < 0 && errno == EBADF, "send(-1) EBADF");
++    errno = 0; ck(recv(-1, b, 4, 0) < 0 && errno == EBADF, "recv(-1) EBADF");
++    errno = 0; ck(getsockname(-1, (struct sockaddr *)&a, &(socklen_t){sizeof(a)}) < 0 && errno == EBADF,
++                  "getsockname(-1) EBADF");
++
++    /* non-socket fd */
++    int nf = open("/dev/null", O_RDWR);
++    if (nf >= 0) {
++        errno = 0; ck(listen(nf, 4) < 0 && errno == ENOTSOCK, "listen(non-socket) ENOTSOCK");
++        errno = 0; ck(accept(nf, NULL, NULL) < 0 && errno == ENOTSOCK, "accept(non-socket) ENOTSOCK");
++        errno = 0; ck(getpeername(nf, (struct sockaddr *)&a, &(socklen_t){sizeof(a)}) < 0 &&
++                      errno == ENOTSOCK, "getpeername(non-socket) ENOTSOCK");
++        close(nf);
++    } else { for (int i=0;i<3;i++) ck(1, "non-socket test skipped"); }
++
++    /* send on an unconnected stream socket -> ENOTCONN / EPIPE / EDESTADDRREQ */
++    int us = socket(AF_INET, SOCK_STREAM, 0);
++    errno = 0;
++    ck(send(us, b, 4, 0) < 0 && (errno == ENOTCONN || errno == EPIPE || errno == EDESTADDRREQ),
++       "send(unconnected stream) rejected");
++    close(us);
++
++    /* connect an already-connected stream -> EISCONN */
++    int c, s;
++    if (tcp_pair(&c, &s) == 0) {
++        errno = 0;
++        ck(connect(c, (struct sockaddr *)&a, sizeof(a)) < 0 && (errno == EISCONN || errno == EINVAL),
++           "connect(already-connected) -> EISCONN");
++        close(c); close(s);
++    } else ck(0, "EISCONN pair failed");
++
++    /* recv on a listening socket -> ENOTCONN / EINVAL */
++    int L = socket(AF_INET, SOCK_STREAM, 0);
++    lo4(&a, 0); bind(L, (struct sockaddr *)&a, sizeof(a)); listen(L, 1);
++    errno = 0;
++    ck(recv(L, b, 4, 0) < 0 && (errno == ENOTCONN || errno == EINVAL || errno == EAGAIN),
++       "recv(listening socket) rejected");
++    close(L);
++
++    /* O_NONBLOCK accept with no pending connection -> EAGAIN */
++    int L2 = socket(AF_INET, SOCK_STREAM, 0);
++    lo4(&a, 0); bind(L2, (struct sockaddr *)&a, sizeof(a)); listen(L2, 1);
++    set_nb(L2, 1);
++    errno = 0;
++    ck(accept(L2, NULL, NULL) < 0 && (errno == EAGAIN || errno == EWOULDBLOCK),
++       "nonblocking accept (empty) -> EAGAIN");
++    close(L2);
++
++    /* O_NONBLOCK recv with no data -> EAGAIN */
++    int c2, s2;
++    if (tcp_pair(&c2, &s2) == 0) {
++        set_nb(s2, 1);
++        errno = 0;
++        ck(recv(s2, b, 4, 0) < 0 && (errno == EAGAIN || errno == EWOULDBLOCK),
++           "nonblocking recv (empty) -> EAGAIN");
++        close(c2); close(s2);
++    } else ck(0, "nonblock recv pair failed");
++}
++
++/* ---- IPv6 (loopback ::1) --------------------------------------------- */
++
++static int v6_ok(void) {
++    int f = socket(AF_INET6, SOCK_STREAM, 0);
++    if (f < 0) return 0;
++    struct sockaddr_in6 a;
++    memset(&a, 0, sizeof(a));
++    a.sin6_family = AF_INET6;
++    a.sin6_addr = in6addr_loopback;
++    a.sin6_port = 0;
++    int ok = (bind(f, (struct sockaddr *)&a, sizeof(a)) == 0);
++    close(f);
++    return ok;
++}
++
++static void lo6(struct sockaddr_in6 *a, unsigned short port) {
++    memset(a, 0, sizeof(*a));
++    a->sin6_family = AF_INET6;
++    a->sin6_addr = in6addr_loopback;
++    a->sin6_port = htons(port);
++}
++
++static int tcp6_pair(int *cfd, int *sfd) {
++    int L = socket(AF_INET6, SOCK_STREAM, 0);
++    if (L < 0) return -1;
++    int one = 1; setsockopt(L, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
++    struct sockaddr_in6 a; lo6(&a, 0);
++    if (bind(L, (struct sockaddr *)&a, sizeof(a)) < 0) { close(L); return -1; }
++    socklen_t al = sizeof(a); getsockname(L, (struct sockaddr *)&a, &al);
++    if (listen(L, 8) < 0) { close(L); return -1; }
++    int c = socket(AF_INET6, SOCK_STREAM, 0);
++    if (connect(c, (struct sockaddr *)&a, sizeof(a)) < 0) { close(L); close(c); return -1; }
++    int s = accept(L, NULL, NULL); close(L);
++    if (s < 0) { close(c); return -1; }
++    *cfd = c; *sfd = s; return 0;
++}
++
++static void g_ipv6(void) {
++    if (!v6_ok()) {
++        for (int i = 0; i < 18; i++) ck(1, "IPv6 not configured on host — point skipped");
++        return;
++    }
++    int c, s;
++    ck(tcp6_pair(&c, &s) == 0, "IPv6 tcp pair");
++    struct sockaddr_in6 pa; socklen_t pl = sizeof(pa);
++    ck(getpeername(s, (struct sockaddr *)&pa, &pl) == 0 && pa.sin6_family == AF_INET6,
++       "IPv6 getpeername");
++    ck(memcmp(&pa.sin6_addr, &in6addr_loopback, 16) == 0, "IPv6 peer is ::1");
++    char b[32] = {0};
++    ck(write(c, "v6hello", 7) == 7, "IPv6 write");
++    ck(read_all(s, b, 7) == 7 && memcmp(b, "v6hello", 7) == 0, "IPv6 read content");
++    ck(write(s, "back", 4) == 4, "IPv6 reverse write");
++    memset(b, 0, sizeof(b));
++    ck(read_all(c, b, 4) == 4 && memcmp(b, "back", 4) == 0, "IPv6 reverse read");
++    enum { N6 = 64 * 1024 };
++    char *o = malloc(N6), *in = malloc(N6);
++    for (int i = 0; i < N6; i++) o[i] = (char)(i * 13 + 5);
++    set_nb(c, 1); set_nb(s, 1);
++    int wn = 0, rn = 0;
++    while (rn < N6) {
++        if (wn < N6) { ssize_t w = write(c, o + wn, N6 - wn); if (w > 0) wn += (int)w; }
++        ssize_t r = read(s, in + rn, N6 - rn);
++        if (r > 0) rn += (int)r;
++        else if (r < 0 && errno != EAGAIN && errno != EWOULDBLOCK) break;
++    }
++    set_nb(c, 0); set_nb(s, 0);
++    ck(wn == N6 && rn == N6 && memcmp(o, in, N6) == 0, "IPv6 64K transfer intact");
++    free(o); free(in);
++    ck((poll1(s, POLLOUT, 1000) & POLLOUT) != 0, "IPv6 connected POLLOUT");
++    write(c, "x", 1);
++    ck((poll1(s, POLLIN, 2000) & POLLIN) != 0, "IPv6 POLLIN after write");
++    read(s, b, 1);
++    ck(shutdown(c, SHUT_WR) == 0, "IPv6 shutdown(SHUT_WR)");
++    ck(read(s, b, 4) == 0, "IPv6 EOF after shutdown");
++    close(c); close(s);
++
++    int ua = socket(AF_INET6, SOCK_DGRAM, 0), ub = socket(AF_INET6, SOCK_DGRAM, 0);
++    struct sockaddr_in6 aa, bb; lo6(&aa, 0); lo6(&bb, 0);
++    ck(bind(ua, (struct sockaddr *)&aa, sizeof(aa)) == 0, "IPv6 udp bind a");
++    ck(bind(ub, (struct sockaddr *)&bb, sizeof(bb)) == 0, "IPv6 udp bind b");
++    socklen_t l6 = sizeof(aa); getsockname(ua, (struct sockaddr *)&aa, &l6);
++    ck(sendto(ub, "V6U", 3, 0, (struct sockaddr *)&aa, sizeof(aa)) == 3, "IPv6 udp sendto");
++    if (poll1(ua, POLLIN, 2000) & POLLIN) {
++        ssize_t r = recv(ua, b, sizeof(b), 0);
++        ck(r == 3 && memcmp(b, "V6U", 3) == 0, "IPv6 udp recv content");
++    } else ck(0, "IPv6 udp recv (timeout)");
++    sendto(ub, "1", 1, 0, (struct sockaddr *)&aa, sizeof(aa));
++    sendto(ub, "22", 2, 0, (struct sockaddr *)&aa, sizeof(aa));
++    int n6 = 0, sz6[2] = { 0, 0 };
++    for (int i = 0; i < 2; i++) {
++        if (!(poll1(ua, POLLIN, 2000) & POLLIN)) break;
++        ssize_t r = recv(ua, b, sizeof(b), 0); if (r > 0) sz6[n6++] = (int)r;
++    }
++    ck(n6 == 2 && sz6[0] == 1 && sz6[1] == 2, "IPv6 udp boundaries");
++    int ok6 = 0;
++    for (int i = 0; i < 16; i++) {
++        unsigned char v = (unsigned char)i, g = 0xff;
++        sendto(ub, &v, 1, 0, (struct sockaddr *)&aa, sizeof(aa));
++        if ((poll1(ua, POLLIN, 1000) & POLLIN) && recv(ua, &g, 1, 0) == 1 && g == v) ok6++;
++    }
++    ck(ok6 == 16, "IPv6 udp 16 round-trip");
++    close(ua); close(ub);
++}
++
++/* ---- scatter/gather: writev/readv + sendmsg/recvmsg ------------------ */
++
++static void g_iov(void) {
++    int c, s;
++    if (tcp_pair(&c, &s) != 0) { for (int i = 0; i < 9; i++) ck(0, "iov: pair failed"); return; }
++    struct iovec wv[3];
++    wv[0].iov_base = (void *)"AA";   wv[0].iov_len = 2;
++    wv[1].iov_base = (void *)"BBB";  wv[1].iov_len = 3;
++    wv[2].iov_base = (void *)"CCCC"; wv[2].iov_len = 4;
++    ck(writev(c, wv, 3) == 9, "writev 3 iovs = 9 bytes");
++    char tmp[9];
++    ck(read_all(s, tmp, 9) == 9, "gathered read 9 bytes");
++    ck(memcmp(tmp, "AABBBCCCC", 9) == 0, "writev content correct");
++
++    write(s, "DDEEEFFFF", 9);
++    char p0[2], p1[3], p2[4];
++    struct iovec rv[3];
++    rv[0].iov_base = p0; rv[0].iov_len = 2;
++    rv[1].iov_base = p1; rv[1].iov_len = 3;
++    rv[2].iov_base = p2; rv[2].iov_len = 4;
++    poll1(c, POLLIN, 2000);
++    ck(readv(c, rv, 3) == 9, "readv scatter 9 bytes");
++    ck(memcmp(p0, "DD", 2) == 0 && memcmp(p1, "EEE", 3) == 0 && memcmp(p2, "FFFF", 4) == 0,
++       "readv scatter content");
++
++    struct msghdr mh; memset(&mh, 0, sizeof(mh));
++    struct iovec sv[2];
++    sv[0].iov_base = (void *)"msg"; sv[0].iov_len = 3;
++    sv[1].iov_base = (void *)"hdr"; sv[1].iov_len = 3;
++    mh.msg_iov = sv; mh.msg_iovlen = 2;
++    ck(sendmsg(c, &mh, 0) == 6, "sendmsg 2 iovs = 6");
++    char m[6];
++    ck(read_all(s, m, 6) == 6 && memcmp(m, "msghdr", 6) == 0, "sendmsg content");
++
++    write(c, "recvme", 6);
++    struct msghdr rh; memset(&rh, 0, sizeof(rh));
++    char r0[3], r1[3];
++    struct iovec riv[2];
++    riv[0].iov_base = r0; riv[0].iov_len = 3;
++    riv[1].iov_base = r1; riv[1].iov_len = 3;
++    rh.msg_iov = riv; rh.msg_iovlen = 2;
++    poll1(s, POLLIN, 2000);
++    ck(recvmsg(s, &rh, 0) == 6, "recvmsg 2 iovs = 6");
++    ck(memcmp(r0, "rec", 3) == 0 && memcmp(r1, "vme", 3) == 0, "recvmsg scatter content");
++    close(c); close(s);
++}
++
++/* ---- AF_UNIX datagrams ----------------------------------------------- */
++
++static void g_dgram_unix(void) {
++    int sp[2];
++    if (socketpair(AF_UNIX, SOCK_DGRAM, 0, sp) != 0) {
++        for (int i = 0; i < 8; i++) ck(0, "AF_UNIX/DGRAM socketpair unsupported");
++        return;
++    }
++    ck(1, "socketpair(AF_UNIX/DGRAM)");
++    char b[64];
++    ck(send(sp[0], "ux-dgram", 8, 0) == 8, "unix dgram send 0->1");
++    ssize_t r = recv(sp[1], b, sizeof(b), 0);
++    ck(r == 8 && memcmp(b, "ux-dgram", 8) == 0, "unix dgram recv content");
++    ck(send(sp[1], "rev", 3, 0) == 3, "unix dgram send 1->0");
++    r = recv(sp[0], b, sizeof(b), 0);
++    ck(r == 3 && memcmp(b, "rev", 3) == 0, "unix dgram reverse content");
++    send(sp[0], "A", 1, 0);
++    send(sp[0], "BB", 2, 0);
++    int n = 0, sz[2] = { 0, 0 };
++    for (int i = 0; i < 2; i++) {
++        if (!(poll1(sp[1], POLLIN, 1000) & POLLIN)) break;
++        ssize_t q = recv(sp[1], b, sizeof(b), 0); if (q >= 0) sz[n++] = (int)q;
++    }
++    ck(n == 2 && sz[0] == 1 && sz[1] == 2, "unix dgram boundaries preserved");
++    int ok = 0;
++    for (int i = 0; i < 16; i++) {
++        unsigned char v = (unsigned char)i, g = 0xff;
++        send(sp[0], &v, 1, 0);
++        if ((poll1(sp[1], POLLIN, 1000) & POLLIN) && recv(sp[1], &g, 1, 0) == 1 && g == v) ok++;
++    }
++    ck(ok == 16, "unix dgram 16 round-trip");
++    close(sp[0]); close(sp[1]);
++}
++
++/* ---- varied-size stream storm (stress + correctness) ----------------- */
++
++static void g_tcp_storm(void) {
++    int c, s;
++    if (tcp_pair(&c, &s) != 0) { for (int i = 0; i < 100; i++) ck(0, "tcp storm pair failed"); return; }
++    set_nb(c, 1); set_nb(s, 1);
++    char *out = malloc(1500), *in = malloc(1500);
++    for (int it = 0; it < 100; it++) {
++        int len = 1 + (it * 37) % 1400;
++        for (int i = 0; i < len; i++) out[i] = (char)((it * 7 + i * 13) & 0xff);
++        int wn = 0, rn = 0, stuck = 0;
++        while (rn < len && stuck < 100000) {
++            if (wn < len) { ssize_t w = write(c, out + wn, len - wn);
++                            if (w > 0) { wn += (int)w; stuck = 0; }
++                            else if (w < 0 && errno != EAGAIN && errno != EWOULDBLOCK) break; }
++            ssize_t rd = read(s, in + rn, len - rn);
++            if (rd > 0) { rn += (int)rd; stuck = 0; }
++            else if (rd < 0 && errno != EAGAIN && errno != EWOULDBLOCK) break;
++            else stuck++;
++        }
++        ck(rn == len && memcmp(out, in, len) == 0, "tcp storm: varied-size echo intact");
++    }
++    free(out); free(in);
++    close(c); close(s);
++}
++
++/* ---- varied-size datagram storm -------------------------------------- */
++
++static void g_udp_storm(void) {
++    int a = socket(AF_INET, SOCK_DGRAM, 0);
++    int b = socket(AF_INET, SOCK_DGRAM, 0);
++    struct sockaddr_in aa, ba; lo4(&aa, 0); lo4(&ba, 0);
++    if (bind(a, (struct sockaddr *)&aa, sizeof(aa)) < 0 ||
++        bind(b, (struct sockaddr *)&ba, sizeof(ba)) < 0) {
++        for (int i = 0; i < 48; i++) ck(0, "udp storm bind failed");
++        close(a); close(b); return;
++    }
++    socklen_t l = sizeof(aa); getsockname(a, (struct sockaddr *)&aa, &l);
++    char *out = malloc(1400), *in = malloc(1400);
++    for (int it = 0; it < 48; it++) {
++        int len = 1 + (it * 29) % 1200;
++        for (int i = 0; i < len; i++) out[i] = (char)((it * 11 + i * 7) & 0xff);
++        sendto(b, out, len, 0, (struct sockaddr *)&aa, sizeof(aa));
++        int good = 0;
++        if (poll1(a, POLLIN, 1500) & POLLIN) {
++            ssize_t r = recv(a, in, 1400, 0);
++            good = (r == len && memcmp(out, in, len) == 0);
++        }
++        ck(good, "udp storm: varied-size datagram intact");
++    }
++    free(out); free(in);
++    close(a); close(b);
++}
++
++int main(int argc, char **argv) {
++    if (argc > 1 && strcmp(argv[1], "-v") == 0) g_verbose = 1;
++    signal(SIGPIPE, SIG_IGN);
++    signal(SIGALRM, on_alarm);
++
++    printf("torture_net: network-stack abuse suite\n");
++
++    RUN_GROUP(g_socket, 15);
++    RUN_GROUP(g_bind, 15);
++    RUN_GROUP(g_listen, 15);
++    RUN_GROUP(g_connect_accept, 20);
++    RUN_GROUP(g_tcp_data, 20);
++    RUN_GROUP(g_shutdown_close, 20);
++    RUN_GROUP(g_udp, 20);
++    RUN_GROUP(g_afunix, 20);
++    RUN_GROUP(g_poll_select, 20);
++    RUN_GROUP(g_sockopt, 15);
++    RUN_GROUP(g_edge, 20);
++    RUN_GROUP(g_ipv6, 20);
++    RUN_GROUP(g_iov, 15);
++    RUN_GROUP(g_dgram_unix, 15);
++    RUN_GROUP(g_tcp_storm, 30);
++    RUN_GROUP(g_udp_storm, 20);
++
++    printf("\n==== torture_net: %d checks, %d passed, %d FAILED ====\n",
++           g_num, g_pass, g_fail);
++    return g_fail ? 1 : 0;
++}
+-- 
+2.54.0
+

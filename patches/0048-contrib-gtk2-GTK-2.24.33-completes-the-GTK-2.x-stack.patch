@@ -1,0 +1,141 @@
+From 8968b80f321b7df52dea6fa86979f0df2aec80f2 Mon Sep 17 00:00:00 2001
+From: Kirn Gill II <segin2005@gmail.com>
+Date: Wed, 10 Jun 2026 13:38:09 -0500
+Subject: [PATCH 48/83] =?UTF-8?q?contrib:=20gtk2=20(GTK+=202.24.33)=20?=
+ =?UTF-8?q?=E2=80=94=20completes=20the=20GTK+=202.x=20stack?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The GTK+ 2 toolkit, cross-built via substrate_sysroot against the full
+stack (glib2/gdk-pixbuf/pango/atk/cairo + fontconfig/freetype/libpng/
+pixman + X).  Produces libgtk-x11-2.0, libgdk-x11-2.0, libgailutil +
+gtk+-2.0.pc, all OSABI-stamped.
+
+gcc16: -std=gnu11 and a -Wno-error set (GTK 2.24 predates the C23 bool
+keyword and the incompatible-pointer-types-as-error change).  SRC_SUBDIRS
+trimmed to gdk/gtk/modules (demos/tests/perf run the cross gdk-pixbuf-
+csource at build time, which can't execute on the host).
+
+This is the last of the GTK+ 2.x port chain: libpng, freetype, expat,
+libXrender, fontconfig, cairo, libffi, glib2, harfbuzz, fribidi, atk,
+pango, gdk-pixbuf, gtk2 — all built shared against the substrate stack.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+---
+ contrib/gtk2/README.SUBSTRATE.md | 18 ++++++++++++
+ contrib/gtk2/build.sh            | 50 ++++++++++++++++++++++++++++++++
+ contrib/gtk2/fetch.sh            | 19 ++++++++++++
+ 3 files changed, 87 insertions(+)
+ create mode 100644 contrib/gtk2/README.SUBSTRATE.md
+ create mode 100755 contrib/gtk2/build.sh
+ create mode 100755 contrib/gtk2/fetch.sh
+
+diff --git a/contrib/gtk2/README.SUBSTRATE.md b/contrib/gtk2/README.SUBSTRATE.md
+new file mode 100644
+index 00000000..fee3aede
+--- /dev/null
++++ b/contrib/gtk2/README.SUBSTRATE.md
+@@ -0,0 +1,18 @@
++# gtk2 (GTK+ 2.24.33 — last GTK+ 2.x)
++
++The GTK+ 2 toolkit.  Cross-built via substrate_sysroot against the full
++stack: glib2, gdk-pixbuf, pango (+harfbuzz/fribidi), atk, cairo (pdf
++backend), fontconfig/freetype/libpng/pixman and the X client libraries
++(libX11/libXext/libXrender).  Produces libgtk-x11-2.0, libgdk-x11-2.0,
++libgailutil + gtk+-2.0.pc.
++
++Build notes:
++- -std=gnu11 + a -Wno-error set: GTK 2.24 predates gcc16's promotion of
++  incompatible-pointer-types/int-conversion/etc. to hard errors.
++- SRC_SUBDIRS trimmed to `gdk gtk modules`: demos/tests/perf run the
++  cross-built gdk-pixbuf-csource to inline PNGs at build time, which can't
++  execute on the build host.
++- cairo must have the PDF backend (configure hard-checks cairo-pdf.h).
++
++Runtime note: loading a GTK2 app pulls ~40 shared objects, which needs the
++ld.so LD_MAX_OBJS bump (committed separately).
+diff --git a/contrib/gtk2/build.sh b/contrib/gtk2/build.sh
+new file mode 100755
+index 00000000..deda5317
+--- /dev/null
++++ b/contrib/gtk2/build.sh
+@@ -0,0 +1,50 @@
++#!/bin/sh
++# contrib/gtk2/build.sh — cross-compile GTK+ 2.24.33 for substrate.
++set -eu
++HERE="$(cd "$(dirname "$0")" && pwd)"
++VERSION="2.24.33"; TREE_DIR="${HERE}/build/gtk+-${VERSION}"; BUILD_DIR="${HERE}/build/build-substrate"
++if [ -z "${SUBSTRATE_TOP:-}" ]; then
++    p="${HERE}"; while [ "${p}" != "/" ] && [ ! -f "${p}/AGENTS.md" ] && [ ! -f "${p}/CLAUDE.md" ]; do p=$(dirname "${p}"); done
++    SUBSTRATE_TOP="${p}"
++fi
++: "${STAGE1_PREFIX:=/opt/substrate}"; : "${DESTDIR:=${SUBSTRATE_TOP}/dist-gtk2}"
++: "${JOBS:=$(nproc 2>/dev/null || echo 4)}"
++PATH="${STAGE1_PREFIX}/bin:${PATH}"; export PATH
++. "${HERE}/../substrate-autotools.sh"
++[ -d "${TREE_DIR}" ] || { echo "build.sh: run ./fetch.sh first" >&2; exit 1; }
++
++substrate_sysroot "${HERE}/build/sysroot" \
++    glib2 libffi zlib freetype libpng expat fontconfig harfbuzz fribidi \
++    pixman cairo pango atk gdk-pixbuf \
++    xorgproto libXau xtrans libxcb libX11 libXext libXrender
++export PYTHON=python3
++export LDFLAGS="${LDFLAGS} -ldl"
++export CFLAGS="-march=i486 -mtune=i486 -O2 -g -std=gnu11 -Wno-error=incompatible-pointer-types -Wno-error=int-conversion -Wno-error=implicit-function-declaration -Wno-error=return-mismatch -Wno-error=format -Wno-error=discarded-qualifiers"
++# gtk's gdk-pixbuf-csource embeds the stock cursors at build time; it links
++# gdk-pixbuf which needs the included-png-loader + libpng/z — handled by the
++# sysroot.  Cross run-tests + substrate malloc(0):
++export ac_cv_func_malloc_0_nonnull=yes ac_cv_func_realloc_0_nonnull=yes \
++       ac_cv_path_GDK_PIXBUF_CSOURCE="${SUBSTRATE_TOP}/dist-gdk-pixbuf/usr/bin/gdk-pixbuf-csource"
++
++substrate_libtool_fix "${TREE_DIR}/configure"
++rm -rf "${BUILD_DIR}"; mkdir -p "${BUILD_DIR}"; cd "${BUILD_DIR}"
++"${TREE_DIR}/configure" \
++    --host=i386-unknown-substrate \
++    --prefix=/usr --libdir=/usr/lib --includedir=/usr/include --sysconfdir=/etc \
++    --enable-shared --enable-static \
++    --with-x --x-includes="${HERE}/build/sysroot/usr/include" --x-libraries="${HERE}/build/sysroot/usr/lib" \
++    --disable-introspection --disable-glibtest --disable-gtk-doc --disable-cups \
++    --disable-papi --without-libjasper \
++    CC=i386-unknown-substrate-gcc \
++    AR=i386-unknown-substrate-ar RANLIB=i386-unknown-substrate-ranlib \
++    CC_FOR_BUILD=gcc
++# Drop demos/tests/perf: they run the cross-built gdk-pixbuf-csource to inline
++# PNGs at build time, which can't execute on the host.  The libraries
++# (gdk + gtk + loader modules) and translations are what we install.
++sed -i 's/^SRC_SUBDIRS = gdk gtk modules demos tests perf/SRC_SUBDIRS = gdk gtk modules/' Makefile
++make -j"${JOBS}"
++rm -rf "${DESTDIR}"; mkdir -p "${DESTDIR}"
++export PYTHONPATH="${HERE}/../automake-pyshim${PYTHONPATH:+:${PYTHONPATH}}"
++make install DESTDIR="${DESTDIR}"
++substrate_so_finalize "${DESTDIR}"
++echo "==> gtk2 staged at ${DESTDIR}"
+diff --git a/contrib/gtk2/fetch.sh b/contrib/gtk2/fetch.sh
+new file mode 100755
+index 00000000..f1cbdcb9
+--- /dev/null
++++ b/contrib/gtk2/fetch.sh
+@@ -0,0 +1,19 @@
++#!/bin/sh
++# contrib/gtk2/fetch.sh — GTK+ 2.24.33 (last GTK+ 2.x).
++set -eu
++VERSION="2.24.33"; SERIES="2.24"
++TARBALL="gtk+-${VERSION}.tar.xz"
++URL="https://download.gnome.org/sources/gtk+/${SERIES}/${TARBALL}"
++SHA256="ac2ac757f5942d318a311a54b0c80b5ef295f299c2a73c632f6bfb1ff49cc6da"
++HERE="$(cd "$(dirname "$0")" && pwd)"
++BUILD_DIR="${HERE}/build"; TREE_DIR="${BUILD_DIR}/gtk+-${VERSION}"
++mkdir -p "${BUILD_DIR}"; cd "${BUILD_DIR}"
++if [ ! -f "${TARBALL}" ]; then
++    [ "${1:-}" = "--no-network" ] && { echo "fetch.sh: tarball missing" >&2; exit 1; }
++    echo "==> Fetching ${URL}"; curl -fSL -o "${TARBALL}" "${URL}"
++fi
++echo "${SHA256}  ${TARBALL}" | sha256sum -c -
++[ -d "${TREE_DIR}" ] || { echo "==> Extracting"; tar xf "${TARBALL}"; }
++. "${HERE}/../substrate-autotools.sh"
++substrate_config_sub_fix "${TREE_DIR}"
++echo "==> gtk2 ${VERSION} ready at ${TREE_DIR}"
+-- 
+2.54.0
+

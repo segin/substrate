@@ -1,0 +1,31 @@
+From 4d0136cee4805f6ba996db4fd1159b86241bae07 Mon Sep 17 00:00:00 2001
+From: Kirn Gill II <segin2005@gmail.com>
+Date: Tue, 9 Jun 2026 20:04:44 -0500
+Subject: [PATCH 20/83] inet6: pass for_dgram=0 at ip6_input raw delivery
+ (latent compile error)
+
+afinet_deliver_v6 grew a for_dgram parameter when UDP delivery was
+split from the RAW path, but inet6.c was never rebuilt (make -C sys
+does not track header deps) so the 5-arg call slipped through until
+the next clean rebuild broke. The ip6_input tail call is the RAW-socket
+path, mirroring ip4_input: for_dgram=0.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+---
+ sys/net/inet6.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/sys/net/inet6.c b/sys/net/inet6.c
+index 362111ec..dc9ee609 100644
+--- a/sys/net/inet6.c
++++ b/sys/net/inet6.c
+@@ -231,5 +231,5 @@ void ip6_input(netdev_t *dev, const uint8_t *pkt, size_t len) {
+         default:
+             break;
+     }
+-    afinet_deliver_v6(h->src, h->dst, h->next_header, pkt, sizeof(*h) + plen);
++    afinet_deliver_v6(h->src, h->dst, h->next_header, pkt, sizeof(*h) + plen, /*for_dgram=*/0);
+ }
+-- 
+2.54.0
+

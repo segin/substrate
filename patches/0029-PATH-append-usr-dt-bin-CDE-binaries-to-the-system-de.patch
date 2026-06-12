@@ -1,0 +1,46 @@
+From 54c4e978f398e8909c26cd36d9fefdae2d2568ac Mon Sep 17 00:00:00 2001
+From: Kirn Gill II <segin2005@gmail.com>
+Date: Tue, 9 Jun 2026 23:46:19 -0500
+Subject: [PATCH 29/83] PATH: append /usr/dt/bin (CDE binaries) to the system
+ defaults
+
+etc/profile and login(1) both gain /usr/dt/bin so dtksh, dtterm, dtcm,
+dtbuilder, ttsnoop, dtinfo and friends are reachable from any shell
+without typing the full path.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+---
+ bin/login/login.c | 4 ++--
+ etc/profile       | 2 +-
+ 2 files changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/bin/login/login.c b/bin/login/login.c
+index 5baf5e46..15bbf9d0 100644
+--- a/bin/login/login.c
++++ b/bin/login/login.c
+@@ -149,8 +149,8 @@ set_login_env(const struct passwd *pw, const char *inherited_term)
+     setenv("PATH",
+            pw->pw_uid == 0
+                ? "/usr/local/sbin:/usr/local/bin:/usr/sbin:"
+-                 "/usr/bin:/sbin:/bin"
+-               : "/usr/local/bin:/usr/bin:/bin",
++                 "/usr/bin:/sbin:/bin:/usr/dt/bin"
++               : "/usr/local/bin:/usr/bin:/bin:/usr/dt/bin",
+            1);
+     if (inherited_term != NULL && inherited_term[0] != '\0') {
+         setenv("TERM", inherited_term, 1);
+diff --git a/etc/profile b/etc/profile
+index 16a07926..14ca8243 100644
+--- a/etc/profile
++++ b/etc/profile
+@@ -1,6 +1,6 @@
+ # Substrate default shell profile
+ 
+-PATH=/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin
++PATH=/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/usr/dt/bin
+ export PATH
+ 
+ # System locale.  Substrate's libc is UTF-8 throughout; en_US.UTF-8 is
+-- 
+2.54.0
+

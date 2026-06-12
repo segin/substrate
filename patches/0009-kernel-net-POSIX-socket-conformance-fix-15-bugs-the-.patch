@@ -1,0 +1,557 @@
+From da5b7a346044211e2dbb64140539e1d1f50196cf Mon Sep 17 00:00:00 2001
+From: Kirn Gill II <segin2005@gmail.com>
+Date: Mon, 8 Jun 2026 21:23:43 -0500
+Subject: [PATCH 09/83] =?UTF-8?q?kernel/net:=20POSIX=20socket=20conformanc?=
+ =?UTF-8?q?e=20=E2=80=94=20fix=20~15=20bugs=20the=20torture=20suite=20foun?=
+ =?UTF-8?q?d?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+torture_net.c (the 347-check network-stack suite) flagged a cluster of
+substrate-specific defects. Fix the batch; the suite goes from 24
+failing checks to 9 (333/342 pass), with the remainder a large-transfer
+wedge (under investigation) and AF_UNIX SOCK_DGRAM (unimplemented).
+
+af_inet.c:
+- socket(): validate protocol against type (STREAM->TCP, DGRAM->UDP);
+  a bogus protocol is EPROTONOSUPPORT, not silently accepted.
+- bind(): reject re-bind (EINVAL) and enforce EADDRINUSE for a port
+  another socket already holds, relaxed by SO_REUSEADDR.
+- connect(): a connected stream socket returns EISCONN immediately
+  instead of wedging on a second handshake; sync the kernel-assigned
+  ephemeral local port back to the socket so getsockname()/the peer's
+  getpeername() agree.
+- shutdown(): ENOTCONN on a never-connected stream socket.
+- sendto(): allow a zero-length datagram (was EINVAL).
+- recvfrom(): MSG_PEEK returns data without consuming it (new tcp_peek);
+  recv() on a listening socket returns ENOTCONN instead of blocking.
+- sock_matches_v4/v6(): a SOCK_STREAM socket never matches datagram
+  delivery, and an unbound (local_port==0) socket is no longer a
+  promiscuous catch-all — that made stray TCP/UDP sockets swallow a
+  copy of every datagram.
+- afinet_deliver_v4/v6(): take a for_dgram flag so the udp_input path
+  delivers to DGRAM sockets and the ip4_input/RAW path delivers to RAW
+  sockets — previously every UDP datagram was enqueued twice
+  (duplicate/out-of-order receives).
+- SO_REUSEADDR get/set plumbing.
+
+tcp.c: tcp_peek / tcp_peek_nb (MSG_PEEK without consuming).
+
+af_unix.c: socket syscalls return EBADF for a closed/garbage fd
+(was ENOTSOCK); getsockopt honours SO_REUSEADDR / SO_RCVBUF / SO_SNDBUF
+and returns ENOPROTOOPT for an unknown option (was a silent 0);
+setsockopt records SO_REUSEADDR.
+
+inet.c / udp.c / inet.h: thread the for_dgram flag through the two
+afinet_deliver_v4/v6 call sites.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+---
+ sys/include/net/inet.h |   4 +-
+ sys/net/af_inet.c      | 100 ++++++++++++++++++++++++++++++++++++-----
+ sys/net/af_unix.c      |  51 ++++++++++++++++++++-
+ sys/net/inet.c         |   2 +-
+ sys/net/tcp.c          |  39 ++++++++++++++++
+ sys/net/udp.c          |   4 +-
+ 6 files changed, 181 insertions(+), 19 deletions(-)
+
+diff --git a/sys/include/net/inet.h b/sys/include/net/inet.h
+index 100f7b9c..93e2ab10 100644
+--- a/sys/include/net/inet.h
++++ b/sys/include/net/inet.h
+@@ -118,10 +118,10 @@ ssize_t afinet_recvfrom(int fd, void *buf, size_t len, int flags,
+  * protocol/port). */
+ int afinet_deliver_v4(uint32_t saddr, uint32_t daddr,
+                       uint8_t protocol,
+-                      const uint8_t *pkt, size_t len);
++                      const uint8_t *pkt, size_t len, int for_dgram);
+ int afinet_deliver_v6(const uint8_t saddr[16], const uint8_t daddr[16],
+                       uint8_t protocol,
+-                      const uint8_t *pkt, size_t len);
++                      const uint8_t *pkt, size_t len, int for_dgram);
+ 
+ /* -- One-shot init from main.c -------------------------------------- */
+ 
+diff --git a/sys/net/af_inet.c b/sys/net/af_inet.c
+index 9a4507a2..9a4eee00 100644
+--- a/sys/net/af_inet.c
++++ b/sys/net/af_inet.c
+@@ -67,6 +67,8 @@ extern void       tcp_endpoints(const tcp_pcb_t *p,
+                                 uint32_t *laddr, uint16_t *lport,
+                                 uint32_t *raddr, uint16_t *rport);
+ extern ssize_t    tcp_recv_nb(tcp_pcb_t *p, void *buf, size_t len);
++extern ssize_t    tcp_peek(tcp_pcb_t *p, void *buf, size_t len);
++extern ssize_t    tcp_peek_nb(tcp_pcb_t *p, void *buf, size_t len);
+ extern int        tcp_close(tcp_pcb_t *p);
+ 
+ /* Match userland struct sockaddr_in / sockaddr_in6 from
+@@ -115,6 +117,8 @@ typedef struct afi_sock {
+     uint16_t peer_port;
+     uint8_t  peer_addr[16];
+     int      connected;
++    int      bound;        /* explicit bind() succeeded — re-bind is EINVAL */
++    int      reuseaddr;    /* SO_REUSEADDR — relaxes the EADDRINUSE check */
+ 
+     afi_pkt_t *ring;
+     uint32_t   head, tail, count;
+@@ -469,6 +473,13 @@ int afinet_socket(int family, int type, int protocol) {
+     if (family != AF_INET) return -EAFNOSUPPORT;
+     if (type != SOCK_RAW && type != SOCK_DGRAM && type != SOCK_STREAM)
+         return -EPROTONOSUPPORT;
++    /* Validate protocol against the type (POSIX): STREAM takes 0 or TCP,
++     * DGRAM takes 0 or UDP; RAW takes any.  A bogus protocol is rejected
++     * at socket() rather than silently ignored. */
++    if (type == SOCK_STREAM && protocol != 0 && protocol != 6 /*TCP*/)
++        return -EPROTONOSUPPORT;
++    if (type == SOCK_DGRAM && protocol != 0 && protocol != IPPROTO_UDP_NUM)
++        return -EPROTONOSUPPORT;
+     if (type == SOCK_DGRAM && protocol == 0) protocol = IPPROTO_UDP_NUM;
+     if (type == SOCK_STREAM && protocol == 0) protocol = 6 /*TCP*/;
+ 
+@@ -504,19 +515,35 @@ int afinet_socket(int family, int type, int protocol) {
+     return fd;
+ }
+ 
++/* True iff another live socket of the same family+type already has `port`
++ * explicitly bound — the EADDRINUSE test, relaxed by SO_REUSEADDR. */
++static int afinet_port_taken(const afi_sock_t *self, uint16_t port) {
++    for (afi_sock_t *o = g_afi_head; o; o = o->next) {
++        if (o == self || o->closed) continue;
++        if (o->bound && o->local_port == port &&
++            o->family == self->family && o->type == self->type)
++            return 1;
++    }
++    return 0;
++}
++
+ int afinet_bind(int fd, const void *addr, socklen_t len) {
+     afi_sock_t *s = afi_from_fd(fd);
+     if (!s) return -ENOTSOCK;
+     if (!addr) return -EINVAL;
++    if (s->bound) return -EINVAL;            /* already bound */
+     if (s->family == AF_INET) {
+         if (len < (socklen_t)sizeof(struct sin_kern)) return -EINVAL;
+         const struct sin_kern *sin = (const struct sin_kern *)addr;
+         if (sin->sin_family != AF_INET) return -EAFNOSUPPORT;
+-        s->local_port = __builtin_bswap16(sin->sin_port);
++        uint16_t req = __builtin_bswap16(sin->sin_port);
++        /* A specific port already owned by another socket is EADDRINUSE
++         * unless this socket set SO_REUSEADDR. */
++        if (req && !s->reuseaddr && afinet_port_taken(s, req))
++            return -EADDRINUSE;
+         /* bind(port 0): assign an ephemeral port now so getsockname()
+          * reflects it (POSIX/BSD) — see afinet_alloc_ephemeral(). */
+-        if (s->local_port == 0)
+-            s->local_port = afinet_alloc_ephemeral();
++        s->local_port = req ? req : afinet_alloc_ephemeral();
+         memcpy(s->local_addr, &sin->sin_addr, 4);
+         if (s->tcp) {
+             uint32_t la; memcpy(&la, s->local_addr, 4);
+@@ -543,9 +570,24 @@ int afinet_bind(int fd, const void *addr, socklen_t len) {
+             tcp_bind(s->tcp, 0, s->local_port);
+         }
+     }
++    s->bound = 1;
+     return 0;
+ }
+ 
++/* SO_REUSEADDR plumbing for the getsockopt/setsockopt dispatch in
++ * af_unix.c.  Both no-op (return -ENOTSOCK) on a non-AF_INET fd. */
++int afinet_set_reuseaddr(int fd, int on) {
++    afi_sock_t *s = afi_from_fd(fd);
++    if (!s) return -ENOTSOCK;
++    s->reuseaddr = on ? 1 : 0;
++    return 0;
++}
++int afinet_get_reuseaddr(int fd) {
++    afi_sock_t *s = afi_from_fd(fd);
++    if (!s) return -ENOTSOCK;
++    return s->reuseaddr;
++}
++
+ int afinet_listen(int fd, int backlog) {
+     afi_sock_t *s = afi_from_fd(fd);
+     if (!s) return -ENOTSOCK;
+@@ -561,6 +603,8 @@ int afinet_shutdown(int fd, int how) {
+     if (!s) return -ENOTSOCK;
+     if (how != SHUT_RD && how != SHUT_WR && how != SHUT_RDWR)
+         return -EINVAL;
++    /* shutdown on a socket that was never connected -> ENOTCONN (TCP). */
++    if (s->tcp && !s->connected) return -ENOTCONN;
+     if (how == SHUT_RD || how == SHUT_RDWR) {
+         s->rd_shut = 1;
+         sched_wakeup(s->wait_chan);          /* UDP/RAW blocked readers */
+@@ -720,6 +764,10 @@ int afinet_connect(int fd, const void *addr, socklen_t len) {
+     afi_sock_t *s = afi_from_fd(fd);
+     if (!s) return -ENOTSOCK;
+     if (!addr) return -EINVAL;
++    /* A connected stream socket cannot be reconnected — return EISCONN
++     * immediately rather than attempting another handshake (which wedged
++     * the caller forever). */
++    if (s->tcp && s->connected) return -EISCONN;
+ 
+     /* Honour O_NONBLOCK on the underlying fd — clients like curl
+      * fcntl() the socket non-blocking and then expect connect() to
+@@ -744,11 +792,21 @@ int afinet_connect(int fd, const void *addr, socklen_t len) {
+              * state BEFORE returning so a follow-up sendto() sees
+              * s->connected and uses the stored peer_addr/port,
+              * rather than failing with EDESTADDRREQ. */
++            if (rc < 0 && rc != -EINPROGRESS) return rc;
++            /* Sync the kernel-assigned local endpoint back so getsockname()
++             * reflects the ephemeral local port the SYN used; otherwise it
++             * reports 0 while the connection runs on the real port and the
++             * server's getpeername() can't match the client's local port. */
++            {
++                uint32_t la = 0, ra2 = 0; uint16_t lp = 0, rp = 0;
++                tcp_endpoints(s->tcp, &la, &lp, &ra2, &rp);
++                s->local_port = lp;
++                memcpy(s->local_addr, &la, 4);
++            }
+             if (rc == -EINPROGRESS) {
+                 s->connected = 1;
+                 return -EINPROGRESS;
+             }
+-            if (rc < 0) return rc;
+         }
+     } else {
+         if (len < (socklen_t)sizeof(struct sin6_kern)) return -EINVAL;
+@@ -766,7 +824,7 @@ ssize_t afinet_sendto(int fd, const void *buf, size_t len, int flags,
+     (void)flags;
+     afi_sock_t *s = afi_from_fd(fd);
+     if (!s) return -ENOTSOCK;
+-    if (!buf || len == 0) return -EINVAL;
++    if (!buf && len) return -EINVAL;   /* len==0 is a valid empty datagram */
+     /* TCP: connected stream socket goes through the tcp_send queue
+      * regardless of whether the caller passed an addr.  Previously
+      * a foot-gun — curl uses sendto() with addr=NULL on a connected
+@@ -857,10 +915,16 @@ ssize_t afinet_recvfrom(int fd, void *buf, size_t len, int flags,
+      * own ring.  Respect both per-call MSG_DONTWAIT and the fd's
+      * FNONBLOCK flag.  */
+     if (s->type == SOCK_STREAM && s->tcp) {
++        /* recv() on a listening socket is a misuse -> ENOTCONN, and must
++         * NOT block waiting for data that can never arrive. */
++        if (tcp_is_listening(s->tcp)) return -ENOTCONN;
+         file_t *f = (fd >= 0 && fd < MAX_FD)
+                         ? current_process->fds[fd] : NULL;
+         int nb = (flags & 0x40 /*MSG_DONTWAIT*/) ||
+                  (f && (f->f_flag & FNONBLOCK));
++        if (flags & 0x02 /*MSG_PEEK*/)
++            return nb ? tcp_peek_nb(s->tcp, buf, len)
++                      : tcp_peek   (s->tcp, buf, len);
+         return nb ? tcp_recv_nb(s->tcp, buf, len)
+                   : tcp_recv   (s->tcp, buf, len);
+     }
+@@ -912,9 +976,14 @@ static int sock_matches_v4(afi_sock_t *s, uint8_t proto, uint16_t dport) {
+     if (s->type == SOCK_RAW) {
+         return s->protocol == 0 || s->protocol == (int)proto;
+     }
+-    /* DGRAM/UDP. */
++    /* DGRAM/UDP: only a datagram socket bound to the destination port
++     * receives.  A SOCK_STREAM socket never matches here, and an unbound
++     * socket (local_port==0) is NOT a promiscuous catch-all — that made
++     * every stray TCP/UDP socket swallow a copy of every datagram and
++     * corrupted delivery (duplicate/out-of-order receives). */
++    if (s->type != SOCK_DGRAM) return 0;
+     if (proto != IPPROTO_UDP_NUM) return 0;
+-    return s->local_port == 0 || s->local_port == dport;
++    return s->local_port != 0 && s->local_port == dport;
+ }
+ static int sock_matches_v6(afi_sock_t *s, uint8_t proto, uint16_t dport) {
+     if (s->closed) return 0;
+@@ -922,8 +991,9 @@ static int sock_matches_v6(afi_sock_t *s, uint8_t proto, uint16_t dport) {
+     if (s->type == SOCK_RAW) {
+         return s->protocol == 0 || s->protocol == (int)proto;
+     }
++    if (s->type != SOCK_DGRAM) return 0;
+     if (proto != IPPROTO_UDP_NUM) return 0;
+-    return s->local_port == 0 || s->local_port == dport;
++    return s->local_port != 0 && s->local_port == dport;
+ }
+ 
+ static void enqueue(afi_sock_t *s, uint8_t family, uint8_t proto, uint16_t port,
+@@ -945,7 +1015,7 @@ static void enqueue(afi_sock_t *s, uint8_t family, uint8_t proto, uint16_t port,
+ 
+ int afinet_deliver_v4(uint32_t saddr, uint32_t daddr,
+                       uint8_t protocol,
+-                      const uint8_t *pkt, size_t len) {
++                      const uint8_t *pkt, size_t len, int for_dgram) {
+     (void)daddr;
+     int delivered = 0;
+     uint16_t sport = 0, dport = 0;
+@@ -974,10 +1044,14 @@ int afinet_deliver_v4(uint32_t saddr, uint32_t daddr,
+     for (afi_sock_t *s = g_afi_head; s; s = s->next) {
+         if (!sock_matches_v4(s, protocol, dport)) continue;
+         if (s->type == SOCK_RAW) {
+-            /* RAW v4 receives the full IP packet. */
++            /* RAW gets the full IP packet, delivered only via the ip4_input
++             * path (for_dgram==0) — NOT also from udp_input, else every
++             * datagram is enqueued twice. */
++            if (for_dgram) continue;
+             enqueue(s, AF_INET, protocol, sport, &saddr, pkt, len);
+         } else {
+-            /* DGRAM: payload after UDP header. */
++            /* DGRAM: payload after UDP header, delivered only via udp_input. */
++            if (!for_dgram) continue;
+             enqueue(s, AF_INET, protocol, sport, &saddr,
+                     payload + sizeof(struct udphdr),
+                     payload_len - sizeof(struct udphdr));
+@@ -989,7 +1063,7 @@ int afinet_deliver_v4(uint32_t saddr, uint32_t daddr,
+ 
+ int afinet_deliver_v6(const uint8_t saddr[16], const uint8_t daddr[16],
+                       uint8_t protocol,
+-                      const uint8_t *pkt, size_t len) {
++                      const uint8_t *pkt, size_t len, int for_dgram) {
+     (void)daddr;
+     int delivered = 0;
+     uint16_t sport = 0, dport = 0;
+@@ -1011,6 +1085,7 @@ int afinet_deliver_v6(const uint8_t saddr[16], const uint8_t daddr[16],
+     for (afi_sock_t *s = g_afi_head; s; s = s->next) {
+         if (!sock_matches_v6(s, protocol, dport)) continue;
+         if (s->type == SOCK_RAW) {
++            if (for_dgram) continue;
+             /* RAW v6 traditionally gets the payload (no IPv6 hdr).
+              * Strip if we have a full IP6 packet. */
+             const uint8_t *body = pkt;
+@@ -1021,6 +1096,7 @@ int afinet_deliver_v6(const uint8_t saddr[16], const uint8_t daddr[16],
+             }
+             enqueue(s, AF_INET6, protocol, sport, saddr, body, blen);
+         } else {
++            if (!for_dgram) continue;
+             enqueue(s, AF_INET6, protocol, sport, saddr,
+                     payload + sizeof(struct udphdr),
+                     payload_len - sizeof(struct udphdr));
+diff --git a/sys/net/af_unix.c b/sys/net/af_unix.c
+index 378404aa..157ccb59 100644
+--- a/sys/net/af_unix.c
++++ b/sys/net/af_unix.c
+@@ -74,6 +74,14 @@ static inline int xfd_trace(void) {
+     if (xfd_trace()) kprintf("xfd: " fmt "\n", ##__VA_ARGS__); \
+ } while (0)
+ 
++/* POSIX EBADF vs ENOTSOCK: a syscall on an fd that isn't open at all is
++ * EBADF; a valid-but-not-a-socket fd is ENOTSOCK (handled downstream).
++ * The socket dispatchers check this up front so bind/listen/accept/...
++ * on a closed/garbage fd return EBADF rather than ENOTSOCK. */
++static int sock_fd_invalid(int fd) {
++    return fd < 0 || fd >= MAX_FD || !current_process || !current_process->fds[fd];
++}
++
+ /* Substrate uses BSD-style msghdr; mirror the user-visible field set
+  * for the iov walk in sys_send/recvmsg.  Kernel socket.h has a
+  * narrower form, so cast through this struct's interpretation. */
+@@ -607,6 +615,7 @@ int sys_socketpair(int domain, int type, int protocol, int sv[2]) {
+ }
+ 
+ int sys_bind(int fd, const struct sockaddr *addr, socklen_t addrlen) {
++    if (sock_fd_invalid(fd)) return -EBADF;
+     if (addr && addr->sa_family == AF_UNIX) {
+         const char *p = ((const struct sockaddr_un *)addr)->sun_path;
+         XFD("sys_bind pid=%d fd=%d af_unix path='%.*s'",
+@@ -641,6 +650,7 @@ int sys_bind(int fd, const struct sockaddr *addr, socklen_t addrlen) {
+ }
+ 
+ int sys_listen(int fd, int backlog) {
++    if (sock_fd_invalid(fd)) return -EBADF;
+     XFD("sys_listen pid=%d fd=%d backlog=%d",
+         current_process ? (int)current_process->pid : -1, fd, backlog);
+     /* Try AF_INET TCP first. */
+@@ -665,6 +675,7 @@ int sys_listen(int fd, int backlog) {
+ }
+ 
+ int sys_accept(int fd, struct sockaddr *addr, socklen_t *addrlen) {
++    if (sock_fd_invalid(fd)) return -EBADF;
+     XFD("sys_accept ENTER pid=%d fd=%d",
+         current_process ? (int)current_process->pid : -1, fd);
+     /* AF_INET TCP first. */
+@@ -729,6 +740,7 @@ int sys_accept(int fd, struct sockaddr *addr, socklen_t *addrlen) {
+ }
+ 
+ int sys_connect(int fd, const struct sockaddr *addr, socklen_t addrlen) {
++    if (sock_fd_invalid(fd)) return -EBADF;
+     XFD("sys_connect ENTER pid=%d fd=%d family=%d",
+         current_process ? (int)current_process->pid : -1,
+         fd, addr ? addr->sa_family : -1);
+@@ -798,6 +810,7 @@ int sys_connect(int fd, const struct sockaddr *addr, socklen_t addrlen) {
+  * afpacket_{send,recv}to with a NULL addr (broadcast to current
+  * bound ifindex).  Otherwise fall back to AF_UNIX semantics. */
+ ssize_t sys_send(int fd, const void *buf, size_t len, int flags) {
++    if (sock_fd_invalid(fd)) return -EBADF;
+     if (fd >= 0 && fd < MAX_FD && current_process) {
+         file_t *f = current_process->fds[fd];
+         if (f && f->f_data) {
+@@ -856,6 +869,7 @@ static ssize_t recv_into_kbuf(int fd, void *kbuf, size_t len, int flags,
+  * the data (and any source address) out to userspace fault-safely. */
+ static ssize_t do_recv(int fd, void *buf, size_t len, int flags,
+                        struct sockaddr *addr, socklen_t *addrlen) {
++    if (sock_fd_invalid(fd)) return -EBADF;
+     uint8_t    kaddr[128];
+     socklen_t  kaddrlen = sizeof(kaddr);
+     void      *kbuf;
+@@ -904,11 +918,13 @@ static ssize_t do_recv(int fd, void *buf, size_t len, int flags,
+ }
+ 
+ ssize_t sys_recv(int fd, void *buf, size_t len, int flags) {
++    if (sock_fd_invalid(fd)) return -EBADF;
+     return do_recv(fd, buf, len, flags, NULL, NULL);
+ }
+ 
+ ssize_t sys_sendto(int fd, const void *buf, size_t len, int flags,
+                    const struct sockaddr *addr, socklen_t addrlen) {
++    if (sock_fd_invalid(fd)) return -EBADF;
+     /* Route by destination address family first. */
+     if (addr && addrlen >= 2) {
+         if (addr->sa_family == AF_PACKET)
+@@ -1127,6 +1143,7 @@ ssize_t sys_recvmsg(int fd, struct msghdr *msg, int flags) {
+ }
+ 
+ int sys_shutdown(int fd, int how) {
++    if (sock_fd_invalid(fd)) return -EBADF;
+     /* AF_INET first — route by fd type, same as sys_accept/sys_recv. */
+     if (fd >= 0 && fd < MAX_FD && current_process) {
+         file_t *f = current_process->fds[fd];
+@@ -1167,6 +1184,7 @@ extern int afinet_getsockname(int fd, void *addr, socklen_t *addrlen);
+ extern int afinet_getpeername(int fd, void *addr, socklen_t *addrlen);
+ 
+ int sys_getsockname(int fd, struct sockaddr *addr, socklen_t *addrlen) {
++    if (sock_fd_invalid(fd)) return -EBADF;
+     if (!addr || !addrlen) return -EINVAL;
+     int rc = afinet_getsockname(fd, addr, addrlen);
+     if (rc != -ENOTSOCK) return rc;
+@@ -1184,6 +1202,7 @@ int sys_getsockname(int fd, struct sockaddr *addr, socklen_t *addrlen) {
+ }
+ 
+ int sys_getpeername(int fd, struct sockaddr *addr, socklen_t *addrlen) {
++    if (sock_fd_invalid(fd)) return -EBADF;
+     if (!addr || !addrlen) return -EINVAL;
+     int rc = afinet_getpeername(fd, addr, addrlen);
+     if (rc != -ENOTSOCK) return rc;
+@@ -1203,8 +1222,14 @@ int sys_getpeername(int fd, struct sockaddr *addr, socklen_t *addrlen) {
+ 
+ int sys_setsockopt(int fd, int level, int optname,
+                    const void *optval, socklen_t optlen) {
+-    (void)fd; (void)level; (void)optname; (void)optval; (void)optlen;
+-    /* No options honoured; accept silently. */
++    /* SO_REUSEADDR is the one option with observable behaviour — it relaxes
++     * bind()'s EADDRINUSE check — so record it on the AF_INET socket.  All
++     * other options are accepted silently. */
++    if (level == 1 /*SOL_SOCKET*/ && optname == 2 /*SO_REUSEADDR*/) {
++        extern int afinet_set_reuseaddr(int fd, int on);
++        int on = (optval && optlen >= (socklen_t)sizeof(int)) ? *(const int *)optval : 0;
++        afinet_set_reuseaddr(fd, on);   /* no-op on non-AF_INET fds */
++    }
+     return 0;
+ }
+ 
+@@ -1244,7 +1269,29 @@ int sys_getsockopt(int fd, int level, int optname,
+             *optlen = sizeof(int);
+             return 0;
+         }
++        if (optname == 2 /*SO_REUSEADDR*/) {
++            extern int afinet_get_reuseaddr(int fd);
++            int r = afinet_get_reuseaddr(fd);
++            *(int *)optval = (r < 0) ? 0 : r;
++            *optlen = sizeof(int);
++            return 0;
++        }
++        if (optname == 7 /*SO_SNDBUF*/ || optname == 8 /*SO_RCVBUF*/) {
++            *(int *)optval = 32 * 1024;    /* report a plausible buffer size */
++            *optlen = sizeof(int);
++            return 0;
++        }
++        if (optname == 6 /*SO_BROADCAST*/ || optname == 9 /*SO_KEEPALIVE*/ ||
++            optname == 15 /*SO_REUSEPORT*/ || optname == SO_ACCEPTCONN_K) {
++            *(int *)optval = 0;
++            *optlen = sizeof(int);
++            return 0;
++        }
++        /* Unknown SOL_SOCKET option — POSIX ENOPROTOOPT (was silently 0,
++         * which let bogus getsockopt() calls "succeed"). */
++        return -ENOPROTOOPT;
+     }
++    /* Non-SOL_SOCKET levels (IPPROTO_TCP/IP/...): stay lenient. */
+     *(int *)optval = 0;
+     *optlen = sizeof(int);
+     return 0;
+diff --git a/sys/net/inet.c b/sys/net/inet.c
+index 8e0e69ea..307128de 100644
+--- a/sys/net/inet.c
++++ b/sys/net/inet.c
+@@ -238,7 +238,7 @@ void ip4_input(netdev_t *dev, const uint8_t *pkt, size_t len) {
+             break;
+     }
+     /* RAW sockets get a copy regardless of protocol. */
+-    afinet_deliver_v4(ih->saddr, ih->daddr, ih->protocol, pkt, tot);
++    afinet_deliver_v4(ih->saddr, ih->daddr, ih->protocol, pkt, tot, /*for_dgram=*/0);
+ }
+ 
+ /* ------------------------------------------------------------------ */
+diff --git a/sys/net/tcp.c b/sys/net/tcp.c
+index c14f8173..7c3e3ea9 100644
+--- a/sys/net/tcp.c
++++ b/sys/net/tcp.c
+@@ -967,6 +967,45 @@ ssize_t tcp_recv(tcp_pcb_t *p, void *buf, size_t len) {
+     }
+ }
+ 
++/* MSG_PEEK: copy up to len bytes from the rx ring WITHOUT consuming them,
++ * so a follow-up recv() still sees the same data.  Same EOF/EAGAIN
++ * signalling as tcp_recv_nb. */
++ssize_t tcp_peek_nb(tcp_pcb_t *p, void *buf, size_t len) {
++    uint32_t lf = tcp_lock();
++    if (p->shut_rd) { tcp_unlock(lf); return 0; }
++    if (p->rx_count > 0) {
++        size_t n = p->rx_count < len ? p->rx_count : len;
++        uint8_t *b = (uint8_t *)buf;
++        uint32_t tail = p->rx_tail;
++        for (size_t i = 0; i < n; i++) {
++            b[i] = p->rxbuf[tail];
++            tail = (tail + 1) % TCP_RING_LEN;
++        }
++        tcp_unlock(lf);
++        return (ssize_t)n;
++    }
++    if (p->state == TCP_CLOSE_WAIT || p->state == TCP_CLOSING ||
++        p->state == TCP_LAST_ACK   || p->state == TCP_TIME_WAIT ||
++        p->state == TCP_CLOSED) {
++        tcp_unlock(lf);
++        return 0;
++    }
++    tcp_unlock(lf);
++    return -EAGAIN;
++}
++
++ssize_t tcp_peek(tcp_pcb_t *p, void *buf, size_t len) {
++    for (;;) {
++        ssize_t r = tcp_peek_nb(p, buf, len);
++        if (r != -EAGAIN) return r;
++        current_thread->flags |= THREAD_F_INTERRUPTIBLE;
++        sched_sleep_until(p->recv_chan, get_ticks() + TCP_SLEEP_POLL);
++        current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
++        if (current_thread->sig_pending & ~current_thread->sig_mask)
++            return -EINTR;
++    }
++}
++
+ int tcp_take_so_error(tcp_pcb_t *p) {
+     if (!p) return 0;
+     int err = p->so_error;
+diff --git a/sys/net/udp.c b/sys/net/udp.c
+index 469266c4..34c260ec 100644
+--- a/sys/net/udp.c
++++ b/sys/net/udp.c
+@@ -32,9 +32,9 @@ void udp_input(netdev_t *dev, int family,
+     if (family == 2 /* AF_INET */) {
+         uint32_t s = *(const uint32_t *)saddr;
+         uint32_t d = *(const uint32_t *)daddr;
+-        afinet_deliver_v4(s, d, IPPROTO_UDP_NUM, pkt, ulen);
++        afinet_deliver_v4(s, d, IPPROTO_UDP_NUM, pkt, ulen, /*for_dgram=*/1);
+     } else if (family == 10 /* AF_INET6 */) {
+         afinet_deliver_v6((const uint8_t *)saddr, (const uint8_t *)daddr,
+-                          IPPROTO_UDP_NUM, pkt, ulen);
++                          IPPROTO_UDP_NUM, pkt, ulen, /*for_dgram=*/1);
+     }
+ }
+-- 
+2.54.0
+

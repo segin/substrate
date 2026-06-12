@@ -1,0 +1,283 @@
+From 99f4a205abedeaa9cdda794c7c97eaa77508986d Mon Sep 17 00:00:00 2001
+From: Kirn Gill II <segin2005@gmail.com>
+Date: Wed, 10 Jun 2026 13:42:32 -0500
+Subject: [PATCH 53/83] =?UTF-8?q?=F0=9F=A7=AA=20Add=20unit=20tests=20for?=
+ =?UTF-8?q?=20PSF=20font=20handling=20and=20builtin=20initialization=20(#1?=
+ =?UTF-8?q?268)?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+This commit introduces a comprehensive suite of unit tests for the PSF
+(PC Screen Font) parser and the builtin VGA font initialization logic.
+
+New test cases include:
+- test_font_init_builtin: Verifies correct initialization of font metrics.
+- test_font_get_glyph: Checks glyph data retrieval and bounds checking.
+- test_psf1_parse_basic: Tests PSF1 header parsing and metrics.
+- test_psf2_parse_basic: Tests PSF2 header parsing and metrics.
+- test_psf_parse_dispatch: Verifies the auto-detection of font formats.
+
+The tests are integrated into the central test runner and supported by
+the host test build system.
+
+Co-authored-by: google-labs-jules[bot] <161369871+google-labs-jules[bot]@users.noreply.github.com>
+Co-authored-by: segin <480709+segin@users.noreply.github.com>
+---
+ tests/Makefile                      |   9 +-
+ tests/test_runner.c                 |  10 ++
+ tests/unit/drivers/video/test_psf.c | 178 ++++++++++++++++++++++++++++
+ 3 files changed, 195 insertions(+), 2 deletions(-)
+ create mode 100644 tests/unit/drivers/video/test_psf.c
+
+diff --git a/tests/Makefile b/tests/Makefile
+index 24d35512..2bc34ec7 100644
+--- a/tests/Makefile
++++ b/tests/Makefile
+@@ -8,10 +8,10 @@ CORE_OBJS = vm_page.o vm_map_host.o vm_object.o vm_fault.o vm_syscalls.o vm_page
+             spinlock.o mutex.o semaphore.o kthread.o time.o signal.o futex.o sleepq.o \
+             string.o printf.o div64.o compat.o acct.o sysinfo.o \
+             vfs.o vfs_cache.o vfs_lookup.o vnode.o vnode_ops.o syscall.o sched_i386.o sched_pm.o process.o wait.o sched_decay.o libc_wrappers.o \
+-            pipe.o ansi_handler.o
++            pipe.o ansi_handler.o psf.o font_8x16.o
+ 
+ # Unit tests
+-UNIT_SRCS = unit/drivers/console/test_ansi.c unit/vm/test_kmem.c unit/vm/test_zone.c unit/vm/test_map.c \
++UNIT_SRCS = unit/drivers/console/test_ansi.c unit/drivers/video/test_psf.c unit/vm/test_kmem.c unit/vm/test_zone.c unit/vm/test_map.c \
+              unit/vm/test_object.c unit/vm/test_page.c unit/vm/test_fault.c \
+              unit/vm/test_user_memory.c unit/vm/test_swap.c unit/vm/test_swap_real.c unit/vm/test_cow.c \
+              unit/arch/test_trampoline.c \
+@@ -342,6 +342,9 @@ test_libc_fuzz_printf: lib/c/fuzz/fuzz_printf.c libc_stdio_prefixed.o
+ %.o: ../sys/drivers/console/%.c
+ 	$(CC) $(CFLAGS_KERN) -c $< -o $@
+ 
++%.o: ../sys/drivers/video/%.c
++	$(CC) $(CFLAGS_KERN) -c $< -o $@
++
+ sched_i386.o: ../sys/arch/i386/sched.c
+ 	$(CC) $(CFLAGS_KERN) -c $< -o $@
+ 
+@@ -362,6 +365,8 @@ vm_map_host.o: vm_map_host.c
+ 	$(CC) $(CFLAGS_TEST) -c $< -o $@
+ %.o: unit/drivers/console/%.c
+ 	$(CC) $(CFLAGS_TEST) -c $< -o $@
++%.o: unit/drivers/video/%.c
++	$(CC) $(CFLAGS_TEST) -c $< -o $@
+ %.o: unit/fs/%.c
+ 	$(CC) $(CFLAGS_TEST) -c $< -o $@
+ %.o: unit/perso/%.c
+diff --git a/tests/test_runner.c b/tests/test_runner.c
+index f4b037a8..e0155970 100644
+--- a/tests/test_runner.c
++++ b/tests/test_runner.c
+@@ -148,6 +148,11 @@ extern bool test_fuse_read(void);
+ 
+ // Driver Tests
+ extern bool test_ansi_parsing(void);
++extern bool test_font_init_builtin(void);
++extern bool test_font_get_glyph(void);
++extern bool test_psf1_parse_basic(void);
++extern bool test_psf2_parse_basic(void);
++extern bool test_psf_parse_dispatch(void);
+ 
+ // Scheduling Properties & Fuzzing
+ extern bool prop_time_is_monotonic(int iterations);
+@@ -335,6 +340,11 @@ test_case_t tests[] = {
+     { "nc_purgevfs", test_namecache_purgevfs },
+     {"fuse_read", test_fuse_read},
+     {"ansi_parsing", test_ansi_parsing},
++    {"font_init_builtin", test_font_init_builtin},
++    {"font_get_glyph", test_font_get_glyph},
++    {"psf1_parse", test_psf1_parse_basic},
++    {"psf2_parse", test_psf2_parse_basic},
++    {"psf_dispatch", test_psf_parse_dispatch},
+     {"sched_prop", test_sched_properties},
+     {"sched_fuzz", test_sched_fuzz},
+     {"svr3_perso", test_svr3_personality_table},
+diff --git a/tests/unit/drivers/video/test_psf.c b/tests/unit/drivers/video/test_psf.c
+new file mode 100644
+index 00000000..a4c47f91
+--- /dev/null
++++ b/tests/unit/drivers/video/test_psf.c
+@@ -0,0 +1,178 @@
++#include <stdbool.h>
++#include <string.h>
++#include <stdio.h>
++#include <drivers/video/psf.h>
++#include <drivers/video/font.h>
++
++bool test_font_init_builtin(void) {
++    struct font_info font;
++    font_init_builtin(&font);
++
++    if (font.type != FONT_TYPE_BUILTIN) {
++        printf("FAIL: font.type expected %d, got %d\n", FONT_TYPE_BUILTIN, font.type);
++        return false;
++    }
++
++    if (font.width != 8) {
++        printf("FAIL: font.width expected 8, got %d\n", font.width);
++        return false;
++    }
++
++    if (font.height != 16) {
++        printf("FAIL: font.height expected 16, got %d\n", font.height);
++        return false;
++    }
++
++    if (font.numglyphs != 256) {
++        printf("FAIL: font.numglyphs expected 256, got %d\n", font.numglyphs);
++        return false;
++    }
++
++    if (font.bytesperglyph != 16) {
++        printf("FAIL: font.bytesperglyph expected 16, got %d\n", font.bytesperglyph);
++        return false;
++    }
++
++    if (font.glyphs != font_8x16) {
++        printf("FAIL: font.glyphs does not match font_8x16\n");
++        return false;
++    }
++
++    if (font.unicode_table != NULL) {
++        printf("FAIL: font.unicode_table expected NULL\n");
++        return false;
++    }
++
++    return true;
++}
++
++bool test_font_get_glyph(void) {
++    struct font_info font;
++    font_init_builtin(&font);
++
++    // Test valid index
++    const uint8_t *glyph0 = font_get_glyph(&font, 0);
++    if (glyph0 != font_8x16) {
++        printf("FAIL: glyph 0 address mismatch\n");
++        return false;
++    }
++
++    const uint8_t *glyph1 = font_get_glyph(&font, 1);
++    if (glyph1 != font_8x16 + 16) {
++        printf("FAIL: glyph 1 address mismatch\n");
++        return false;
++    }
++
++    // Test out of bounds
++    const uint8_t *glyph256 = font_get_glyph(&font, 256);
++    if (glyph256 != NULL) {
++        printf("FAIL: glyph 256 should be NULL\n");
++        return false;
++    }
++
++    return true;
++}
++
++bool test_psf1_parse_basic(void) {
++    struct psf1_header hdr;
++    hdr.magic[0] = PSF1_MAGIC0;
++    hdr.magic[1] = PSF1_MAGIC1;
++    hdr.mode = PSF1_MODE256;
++    hdr.charsize = 16;
++
++    uint8_t buffer[sizeof(struct psf1_header) + 256 * 16];
++    memcpy(buffer, &hdr, sizeof(hdr));
++    memset(buffer + sizeof(hdr), 0xAA, 256 * 16);
++
++    struct font_info font;
++    if (psf1_parse(buffer, sizeof(buffer), &font) != 0) {
++        printf("FAIL: psf1_parse failed\n");
++        return false;
++    }
++
++    if (font.type != FONT_TYPE_PSF1 || font.width != 8 || font.height != 16 ||
++        font.numglyphs != 256 || font.bytesperglyph != 16) {
++        printf("FAIL: psf1_parse metrics mismatch\n");
++        return false;
++    }
++
++    if (font.glyphs != buffer + sizeof(struct psf1_header)) {
++        printf("FAIL: psf1_parse glyphs pointer mismatch\n");
++        return false;
++    }
++
++    return true;
++}
++
++bool test_psf2_parse_basic(void) {
++    struct psf2_header hdr;
++    hdr.magic[0] = PSF2_MAGIC0;
++    hdr.magic[1] = PSF2_MAGIC1;
++    hdr.magic[2] = PSF2_MAGIC2;
++    hdr.magic[3] = PSF2_MAGIC3;
++    hdr.version = 0;
++    hdr.headersize = sizeof(struct psf2_header);
++    hdr.flags = 0;
++    hdr.numglyph = 512;
++    hdr.height = 20;
++    hdr.width = 10;
++    hdr.bytesperglyph = 20 * 2; // ceil(10/8) = 2
++
++    uint8_t buffer[sizeof(struct psf2_header) + 512 * 40];
++    memcpy(buffer, &hdr, sizeof(hdr));
++
++    struct font_info font;
++    if (psf2_parse(buffer, sizeof(buffer), &font) != 0) {
++        printf("FAIL: psf2_parse failed\n");
++        return false;
++    }
++
++    if (font.type != FONT_TYPE_PSF2 || font.width != 10 || font.height != 20 ||
++        font.numglyphs != 512 || font.bytesperglyph != 40) {
++        printf("FAIL: psf2_parse metrics mismatch\n");
++        return false;
++    }
++
++    return true;
++}
++
++bool test_psf_parse_dispatch(void) {
++    struct psf1_header hdr1;
++    hdr1.magic[0] = PSF1_MAGIC0;
++    hdr1.magic[1] = PSF1_MAGIC1;
++    hdr1.mode = PSF1_MODE256;
++    hdr1.charsize = 16;
++
++    struct font_info font;
++    if (psf_parse(&hdr1, sizeof(hdr1) + 256*16, &font) != 0) {
++        printf("FAIL: psf_parse dispatch to PSF1 failed\n");
++        return false;
++    }
++    if (font.type != FONT_TYPE_PSF1) {
++         printf("FAIL: psf_parse expected PSF1\n");
++         return false;
++    }
++
++    struct psf2_header hdr2;
++    memset(&hdr2, 0, sizeof(hdr2));
++    hdr2.magic[0] = PSF2_MAGIC0;
++    hdr2.magic[1] = PSF2_MAGIC1;
++    hdr2.magic[2] = PSF2_MAGIC2;
++    hdr2.magic[3] = PSF2_MAGIC3;
++    hdr2.headersize = sizeof(hdr2);
++    hdr2.numglyph = 1;
++    hdr2.width = 8;
++    hdr2.height = 16;
++    hdr2.bytesperglyph = 16;
++
++    if (psf_parse(&hdr2, sizeof(hdr2) + 16, &font) != 0) {
++        printf("FAIL: psf_parse dispatch to PSF2 failed\n");
++        return false;
++    }
++    if (font.type != FONT_TYPE_PSF2) {
++         printf("FAIL: psf_parse expected PSF2\n");
++         return false;
++    }
++
++    return true;
++}
+-- 
+2.54.0
+

@@ -1,0 +1,87 @@
+From 4b66d6d9dd502a455268cc0f427f3b5c17eaeeef Mon Sep 17 00:00:00 2001
+From: Kirn Gill II <segin2005@gmail.com>
+Date: Thu, 11 Jun 2026 16:03:53 -0500
+Subject: [PATCH 71/83] kernel: privilege/permission checks (sys_stime, proc
+ introspection)
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+- sys_stime() set the wall clock with no privilege check — any process
+  could jump the system time (breaking timers, make, TLS validity,
+  at/cron).  Require euid 0.
+- sys_proc_fds/maps/cmdline dumped another process's open fds, memory
+  map (defeating ASLR), and argv (which may carry secrets) with no
+  owner check.  Gate them behind proc_inspect_allowed(): own processes
+  or root only, matching the usual /proc visibility model.
+
+Found by a security audit.
+
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+---
+ sys/kern/syscall.c | 15 +++++++++++++++
+ sys/kern/time.c    |  5 ++++-
+ 2 files changed, 19 insertions(+), 1 deletion(-)
+
+diff --git a/sys/kern/syscall.c b/sys/kern/syscall.c
+index 10e42fc2..873090f8 100644
+--- a/sys/kern/syscall.c
++++ b/sys/kern/syscall.c
+@@ -3515,9 +3515,22 @@ int sys_proc_thr_list(pid_t pid, sys_thrinfo_t *array, size_t size_bytes) {
+     return 0;
+ }
+ 
++/*
++ * Inspecting another process's fds / memory map / argv leaks privileged
++ * information (open files, ASLR layout, secrets passed on the command
++ * line).  Permit it only for one's own processes or root, matching the
++ * usual /proc visibility model.
++ */
++static int proc_inspect_allowed(process_t *target) {
++    if (!current_process) return 1;              /* kernel/early context */
++    if (current_process->euid == 0) return 1;    /* root sees all */
++    return target->uid == current_process->euid; /* otherwise same owner */
++}
++
+ int sys_proc_fds(pid_t pid, sys_fd_t *fds, size_t *count) {
+     process_t *target = (pid == 0) ? current_process : proc_find(pid);
+     if (!target) return -3;
++    if (!proc_inspect_allowed(target)) return -EPERM;
+ 
+     size_t cap = 0;
+     if (count && copyin(count, &cap, sizeof(cap)) != 0) return -14;
+@@ -3547,6 +3560,7 @@ int sys_proc_fds(pid_t pid, sys_fd_t *fds, size_t *count) {
+ int sys_proc_maps(pid_t pid, sys_map_t *maps, size_t *count) {
+     process_t *target = (pid == 0) ? current_process : proc_find(pid);
+     if (!target) return -3;
++    if (!proc_inspect_allowed(target)) return -EPERM;
+ 
+     size_t cap = 0;
+     if (count && copyin(count, &cap, sizeof(cap)) != 0) return -14;
+@@ -3615,6 +3629,7 @@ int sys_proc_exe(pid_t pid, char *buf, size_t len) {
+ int sys_proc_cmdline(pid_t pid, char **argv, size_t *argc) {
+     process_t *target = (pid == 0) ? current_process : proc_find(pid);
+     if (!target) return -3;
++    if (!proc_inspect_allowed(target)) return -EPERM;
+ 
+     size_t need = (size_t)target->cmdline_tail_len;
+     size_t cap = 0;
+diff --git a/sys/kern/time.c b/sys/kern/time.c
+index f3a5de96..7f91a60c 100644
+--- a/sys/kern/time.c
++++ b/sys/kern/time.c
+@@ -442,7 +442,10 @@ time_t sys_time(time_t *tloc) {
+ 
+ int sys_stime(time_t *t) {
+     time_t kt;
+-    if (copyin(t, &kt, sizeof(time_t)) != 0) return -14;
++    /* Setting the wall clock is privileged — otherwise any process could
++     * jump the system time (breaking timers, make, TLS validity, at/cron). */
++    if (current_process && current_process->euid != 0) return -EPERM;
++    if (copyin(t, &kt, sizeof(time_t)) != 0) return -EFAULT;
+     return kern_stime(&kt);
+ }
+ 
+-- 
+2.54.0
+

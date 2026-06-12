@@ -1,0 +1,38 @@
+From aa603e248864024a722d3ee6e35cc2f5ec466f69 Mon Sep 17 00:00:00 2001
+From: Kirn Gill II <segin2005@gmail.com>
+Date: Thu, 11 Jun 2026 16:18:27 -0500
+Subject: [PATCH 76/83] kernel/vm: validate mmap length/offset (audit MEDIUM)
+
+sys_mmap accepted a zero length, a non-page-aligned file offset, and an
+offset+length that wraps past 2^64, passing them into the file-object and
+device (/dev/mem) mmap paths.  Reject all three (POSIX EINVAL).  Valid
+callers (exec/ld.so map page-aligned segment offsets) are unaffected.
+
+Found by a security audit.
+
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+---
+ sys/vm/vm_syscalls.c | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/sys/vm/vm_syscalls.c b/sys/vm/vm_syscalls.c
+index 66aaf9c4..d9b9a7e1 100644
+--- a/sys/vm/vm_syscalls.c
++++ b/sys/vm/vm_syscalls.c
+@@ -243,6 +243,13 @@ void *sys_mmap(void *addr, size_t length, int prot, int flags, int fd, uint64_t
+ 
+     if (vm_round_page_size(length, &aligned_length) != 0) return (void *)-1;
+ 
++    /* POSIX EINVAL cases that otherwise feed malformed ranges into the
++     * file-object / device (/dev/mem) mmap paths: zero length, a
++     * non-page-aligned file offset, and offset+length wrapping past 2^64. */
++    if (length == 0) return (void *)-1;
++    if (!(flags & MAP_ANONYMOUS) && (offset & 0xFFF)) return (void *)-1;
++    if (offset + (uint64_t)aligned_length < offset) return (void *)-1;
++
+     // Find virtual address space
+     if (v_addr == 0 || !(flags & MAP_FIXED)) {
+         if (vm_map_find_space(map, &v_addr, aligned_length) != 0) return (void *)-1;
+-- 
+2.54.0
+

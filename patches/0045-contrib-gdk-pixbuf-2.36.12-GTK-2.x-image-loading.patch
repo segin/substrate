@@ -1,0 +1,124 @@
+From 7163d031b013ffdd868078cb2717089e6337bb59 Mon Sep 17 00:00:00 2001
+From: Kirn Gill II <segin2005@gmail.com>
+Date: Wed, 10 Jun 2026 11:47:36 -0500
+Subject: [PATCH 45/83] contrib: gdk-pixbuf 2.36.12 (GTK+ 2.x image loading)
+
+Cross-built via substrate_sysroot (glib2/libpng).  --disable-modules +
+--with-included-loaders=png builds the PNG loader in (no target
+query-loaders run); top SUBDIRS trimmed to the lib; shared-mime-info.pc
+stubbed; -ldl for libgmodule.  Produces libgdk_pixbuf-2.0.so.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+---
+ contrib/gdk-pixbuf/README.SUBSTRATE.md |  9 +++++
+ contrib/gdk-pixbuf/build.sh            | 55 ++++++++++++++++++++++++++
+ contrib/gdk-pixbuf/fetch.sh            | 19 +++++++++
+ 3 files changed, 83 insertions(+)
+ create mode 100644 contrib/gdk-pixbuf/README.SUBSTRATE.md
+ create mode 100755 contrib/gdk-pixbuf/build.sh
+ create mode 100755 contrib/gdk-pixbuf/fetch.sh
+
+diff --git a/contrib/gdk-pixbuf/README.SUBSTRATE.md b/contrib/gdk-pixbuf/README.SUBSTRATE.md
+new file mode 100644
+index 00000000..9090b98a
+--- /dev/null
++++ b/contrib/gdk-pixbuf/README.SUBSTRATE.md
+@@ -0,0 +1,9 @@
++# gdk-pixbuf (2.36.12 — last autotools)
++
++Image loading for GTK+ 2.x.  Cross-built via substrate_sysroot against glib2 +
++libpng.  --disable-modules with --with-included-loaders=png builds the PNG
++loader into the library (no separate loader .so, so no target
++gdk-pixbuf-query-loaders run at build time).  Top-level SUBDIRS trimmed to the
++library (thumbnailer needs a loaders.cache --disable-modules never makes); a
++shared-mime-info.pc stub satisfies configure.  jpeg/tiff/jasper off (no ports).
++Produces libgdk_pixbuf-2.0.so + gdk-pixbuf-2.0.pc.
+diff --git a/contrib/gdk-pixbuf/build.sh b/contrib/gdk-pixbuf/build.sh
+new file mode 100755
+index 00000000..11ab850a
+--- /dev/null
++++ b/contrib/gdk-pixbuf/build.sh
+@@ -0,0 +1,55 @@
++#!/bin/sh
++# contrib/gdk-pixbuf/build.sh — cross-compile gdk-pixbuf 2.36.12 for substrate.
++set -eu
++HERE="$(cd "$(dirname "$0")" && pwd)"
++VERSION="2.36.12"; TREE_DIR="${HERE}/build/gdk-pixbuf-${VERSION}"; BUILD_DIR="${HERE}/build/build-substrate"
++if [ -z "${SUBSTRATE_TOP:-}" ]; then
++    p="${HERE}"; while [ "${p}" != "/" ] && [ ! -f "${p}/AGENTS.md" ] && [ ! -f "${p}/CLAUDE.md" ]; do p=$(dirname "${p}"); done
++    SUBSTRATE_TOP="${p}"
++fi
++: "${STAGE1_PREFIX:=/opt/substrate}"; : "${DESTDIR:=${SUBSTRATE_TOP}/dist-gdk-pixbuf}"
++: "${JOBS:=$(nproc 2>/dev/null || echo 4)}"
++PATH="${STAGE1_PREFIX}/bin:${PATH}"; export PATH
++. "${HERE}/../substrate-autotools.sh"
++[ -d "${TREE_DIR}" ] || { echo "build.sh: run ./fetch.sh first" >&2; exit 1; }
++
++substrate_sysroot "${HERE}/build/sysroot" glib2 libffi zlib libpng
++# shared-mime-info ships only data (MIME globs) + a version .pc; gdk-pixbuf
++# checks it for content-type detection.  Stub the .pc so configure passes
++# (substrate has no shared-mime-info port; content-type calls degrade
++# gracefully without the database).
++cat > "${HERE}/build/sysroot/usr/lib/pkgconfig/shared-mime-info.pc" <<'PC'
++Name: shared-mime-info
++Description: stub (substrate has no shared-mime-info database)
++Version: 2.0
++PC
++export PYTHON=python3
++export LDFLAGS="${LDFLAGS} -ldl"
++export CFLAGS="-march=i486 -mtune=i486 -O2 -g -std=gnu11"
++
++substrate_libtool_fix "${TREE_DIR}/configure"
++rm -rf "${BUILD_DIR}"; mkdir -p "${BUILD_DIR}"; cd "${BUILD_DIR}"
++# --disable-modules builds the loaders INTO libgdk_pixbuf (no separate .so
++# loaders, so no target gdk-pixbuf-query-loaders run at build time).  PNG is
++# the loader GTK themes need; jpeg/tiff/etc. are off (no ports yet).
++"${TREE_DIR}/configure" \
++    --host=i386-unknown-substrate \
++    --prefix=/usr --libdir=/usr/lib --includedir=/usr/include \
++    --enable-shared --enable-static \
++    --disable-modules --with-included-loaders=png \
++    --disable-introspection --disable-glibtest --disable-gtk-doc \
++    --without-libtiff --without-libjpeg --without-libjasper \
++    CC=i386-unknown-substrate-gcc \
++    AR=i386-unknown-substrate-ar RANLIB=i386-unknown-substrate-ranlib \
++    CC_FOR_BUILD=gcc
++# Trim the top-level SUBDIRS to the library (+ po): thumbnailer/ needs a
++# loaders.cache that --disable-modules never produces; docs/tests/contrib
++# aren't runtime.  Edit the generated Makefile (a SUBDIRS= make override
++# would wrongly propagate into the recursive sub-makes).
++sed -i 's/^SUBDIRS = gdk-pixbuf po docs thumbnailer tests contrib win32/SUBDIRS = gdk-pixbuf po/' Makefile
++make -j"${JOBS}"
++rm -rf "${DESTDIR}"; mkdir -p "${DESTDIR}"
++export PYTHONPATH="${HERE}/../automake-pyshim${PYTHONPATH:+:${PYTHONPATH}}"
++make install DESTDIR="${DESTDIR}"
++substrate_so_finalize "${DESTDIR}"
++echo "==> gdk-pixbuf staged at ${DESTDIR}"
+diff --git a/contrib/gdk-pixbuf/fetch.sh b/contrib/gdk-pixbuf/fetch.sh
+new file mode 100755
+index 00000000..35a84cfb
+--- /dev/null
++++ b/contrib/gdk-pixbuf/fetch.sh
+@@ -0,0 +1,19 @@
++#!/bin/sh
++# contrib/gdk-pixbuf/fetch.sh — gdk-pixbuf 2.36.12 (last autotools; GTK+ 2.x images).
++set -eu
++VERSION="2.36.12"; SERIES="2.36"
++TARBALL="gdk-pixbuf-${VERSION}.tar.xz"
++URL="https://download.gnome.org/sources/gdk-pixbuf/${SERIES}/${TARBALL}"
++SHA256="fff85cf48223ab60e3c3c8318e2087131b590fd6f1737e42cb3759a3b427a334"
++HERE="$(cd "$(dirname "$0")" && pwd)"
++BUILD_DIR="${HERE}/build"; TREE_DIR="${BUILD_DIR}/gdk-pixbuf-${VERSION}"
++mkdir -p "${BUILD_DIR}"; cd "${BUILD_DIR}"
++if [ ! -f "${TARBALL}" ]; then
++    [ "${1:-}" = "--no-network" ] && { echo "fetch.sh: tarball missing" >&2; exit 1; }
++    echo "==> Fetching ${URL}"; curl -fSL -o "${TARBALL}" "${URL}"
++fi
++echo "${SHA256}  ${TARBALL}" | sha256sum -c -
++[ -d "${TREE_DIR}" ] || { echo "==> Extracting"; tar xf "${TARBALL}"; }
++. "${HERE}/../substrate-autotools.sh"
++substrate_config_sub_fix "${TREE_DIR}"
++echo "==> gdk-pixbuf ${VERSION} ready at ${TREE_DIR}"
+-- 
+2.54.0
+

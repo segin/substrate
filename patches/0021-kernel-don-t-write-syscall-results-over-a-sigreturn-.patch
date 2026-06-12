@@ -1,0 +1,218 @@
+From 86c19203c662bafcb0a6aca106694b8398c670b2 Mon Sep 17 00:00:00 2001
+From: Kirn Gill II <segin2005@gmail.com>
+Date: Tue, 9 Jun 2026 20:04:44 -0500
+Subject: [PATCH 21/83] kernel: don't write syscall results over a
+ sigreturn-restored trapframe
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Every signal delivered to a CPU-bound process corrupted one register on
+return.  The syscall dispatcher calls handlers through an int64_t-typed
+function pointer and then writes the result back into the trapframe —
+eax for everyone, plus edx = ret>>32 for the native personality (64-bit
+returns), CF+errno munging for the BSDs, edx preservation for Linux.
+sys_sigreturn/sys_rt_sigreturn return plain int, so ret's high half is
+whatever garbage the kernel left in EDX — and the frame they just
+carefully restored got its EDX overwritten with it before iret.
+
+A process blocked in a syscall takes signals with EDX dead, so almost
+nothing noticed.  Xfbdev under its SmartSchedule SIGALRM (20ms tick) is
+CPU-bound in font code where the compiler keeps live pointers in EDX —
+each signal return rolled the dice, and dtcm's font-heavy startup
+(ListFontsWithInfo -> BDF parse / ScaleBitmap, sscanf/strlen loops)
+crashed the X server within seconds, dying with the evdev grab held
+(frozen desktop).
+
+Found by elimination: A/B/C boots showed plain KVM 3/3 crash, KVM with
+-dumbSched (no SIGALRM) 0/5, TCG 5/5 crash — substrate, signal-triggered,
+accelerator-independent.  Then the (new) full-GPR xsig trace caught the
+smoking gun: across one sigreturn with zero intervening user
+instructions, the saved frame's EDX changed 0x00000000 -> 0x000003f8
+while every other register held.  strlen's loop faulted at edx+i.
+
+Fix: sigreturn/rt_sigreturn (native, FreeBSD, NetBSD personalities) set
+thread->frame_replaced after a successful full-frame restore; the
+dispatcher checks-and-clears it and skips ALL post-dispatch writebacks
+(eax/edx/eflags) — the trapframe is the user's restored context, not a
+syscall result.  The 119/173 fast paths honor it too, still reporting
+the error code when a sigreturn fails before restoring.
+
+Also: sendsig/sigreturn xsig traces now log the full GPR set
+(eax/ebx/ecx/edx/esi/edi) on both sides — this is what made the
+single-register diff visible.
+
+Verified: the xterm+dtcm repro that crashed 8/8 (KVM and TCG alike) now
+runs 4/4 clean including under an xsig-induced signal storm — X, xterm,
+and dtcm all stay up.  torture_signal 4/4; torture_procs 60/64 with the
+same 2 FAIL/1 HANG/1 SKIP on the pre-fix kernel (pre-existing, A/B'd).
+
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+---
+ sys/arch/i386/signal.c               | 25 ++++++++++++++++++++++-
+ sys/arch/i386/syscall.c              | 30 ++++++++++++++++++++++++++--
+ sys/exec/perso/freebsd/freebsd_sig.c |  3 +++
+ sys/exec/perso/netbsd/netbsd_sig.c   |  3 +++
+ sys/include/sys/proc.h               |  5 +++++
+ 5 files changed, 63 insertions(+), 3 deletions(-)
+
+diff --git a/sys/arch/i386/signal.c b/sys/arch/i386/signal.c
+index eed14e00..30a5ee3f 100644
+--- a/sys/arch/i386/signal.c
++++ b/sys/arch/i386/signal.c
+@@ -252,6 +252,9 @@ void sendsig(sig_t handler, int sig, uint32_t mask, uint32_t flags, registers_t
+          sig, (uint32_t)(uintptr_t)handler,
+          regs->eip, regs->useresp, regs->ebp,
+          (flags & SA_ONSTACK) ? 1 : 0, flags);
++    XSIG("pid=%d save: eax=%08x ebx=%08x ecx=%08x edx=%08x esi=%08x edi=%08x",
++         current_process ? current_process->pid : -1,
++         regs->eax, regs->ebx, regs->ecx, regs->edx, regs->esi, regs->edi);
+ 
+     uint32_t esp;
+     
+@@ -565,13 +568,28 @@ int sys_sigreturn(void *scp_ptr) {
+     XSIG("pid=%d sigreturn: restored eip=0x%08x ebp=0x%08x esp=0x%08x eax=0x%08x",
+          current_process ? current_process->pid : -1,
+          sc.eip, sc.ebp, sc.user_esp, sc.eax);
++    XSIG("pid=%d rest: eax=%08x ebx=%08x ecx=%08x edx=%08x esi=%08x edi=%08x",
++         current_process ? current_process->pid : -1,
++         sc.eax, sc.ebx, sc.ecx, sc.edx, sc.esi, sc.edi);
+ 
+     /*
+      * Return value is EAX from saved context, not a syscall return
+      *
+      * The calling convention expects sys_sigreturn to return normally,
+      * and the iret will use the restored register values.
++     *
++     * frame_replaced tells the syscall dispatcher the trapframe now IS
++     * the restored user context: it must not apply its post-dispatch
++     * eax/edx/eflags writebacks.  The handlers are typed int64_t at the
++     * dispatch site while this function returns int, so ret's high half
++     * (EDX) is undefined kernel garbage — the dispatcher's EDX writeback
++     * was overwriting the just-restored user EDX on every signal return,
++     * corrupting any CPU-bound process whose EDX was live (Xfbdev under
++     * the SmartSchedule SIGALRM died in libXfont/sscanf this way).
+      */
++    if (current_thread) {
++        current_thread->frame_replaced = 1;
++    }
+     return sc.eax;
+ }
+ 
+@@ -684,7 +702,12 @@ int sys_rt_sigreturn(void *ucp_ptr) {
+          mc->mc_eip, mc->mc_ebp, mc->mc_esp, mc->mc_eax);
+ 
+     /*
+-     * Return value is EAX from saved context
++     * Return value is EAX from saved context.  frame_replaced: see
++     * sys_sigreturn — the dispatcher must not write back over the
++     * restored trapframe.
+      */
++    if (current_thread) {
++        current_thread->frame_replaced = 1;
++    }
+     return mc->mc_eax;
+ }
+diff --git a/sys/arch/i386/syscall.c b/sys/arch/i386/syscall.c
+index d02afe83..86bbd910 100644
+--- a/sys/arch/i386/syscall.c
++++ b/sys/arch/i386/syscall.c
+@@ -229,6 +229,7 @@ void syscall_handler(registers_t *regs) {
+     // Track syscall for SA_RESTART support
+     if (current_thread) {
+         current_thread->in_syscall = 1;
++        current_thread->frame_replaced = 0;
+         current_thread->syscall_num = syscall_num;
+         current_thread->syscall_orig_eax = syscall_num;
+     }
+@@ -391,11 +392,21 @@ void syscall_handler(registers_t *regs) {
+     
+     // Check for special sigreturn handling
+     if (syscall_num == 119 && p->sigreturn) {
+-        regs->eax = (uint32_t)p->sigreturn(regs);
++        int sret = p->sigreturn(regs);
++        if (current_thread && current_thread->frame_replaced) {
++            current_thread->frame_replaced = 0;   /* frame restored — hands off */
++        } else {
++            regs->eax = (uint32_t)sret;           /* sigreturn failed: report it */
++        }
+         goto syscall_done;
+     }
+     if (syscall_num == 173 && p->rt_sigreturn) {
+-        regs->eax = (uint32_t)p->rt_sigreturn(regs);
++        int sret = p->rt_sigreturn(regs);
++        if (current_thread && current_thread->frame_replaced) {
++            current_thread->frame_replaced = 0;
++        } else {
++            regs->eax = (uint32_t)sret;
++        }
+         goto syscall_done;
+     }
+     /* Native sigreturn no longer takes a fast path — sys_sigreturn(void *scp)
+@@ -437,6 +448,21 @@ void syscall_handler(registers_t *regs) {
+         if (s->min_cycles == 0 || dt < s->min_cycles) s->min_cycles = dt;
+         if (dt > s->max_cycles) s->max_cycles = dt;
+     }
++    /*
++     * sigreturn/rt_sigreturn replaced the whole trapframe with the restored
++     * user context.  Every writeback below would corrupt it: the handlers
++     * are typed int64_t here while the sigreturns return int, so ret's high
++     * half (EDX) is undefined kernel garbage — the native-branch
++     * `regs->edx = ret >> 32` was overwriting the restored user EDX on
++     * every signal return (Xfbdev died in libXfont/sscanf under the
++     * SmartSchedule SIGALRM); the BSD branch would additionally rewrite
++     * EFLAGS.CF and turn a "negative" restored EAX into an errno.
++     */
++    if (current_thread && current_thread->frame_replaced) {
++        current_thread->frame_replaced = 0;
++        goto syscall_done;
++    }
++
+     if (p->id == PERS_ELKS) {
+         regs->eax = (uint16_t)ret;
+     } else if (p->id == PERS_FREEBSD || p->id == PERS_NETBSD || p->id == PERS_OPENBSD) {
+diff --git a/sys/exec/perso/freebsd/freebsd_sig.c b/sys/exec/perso/freebsd/freebsd_sig.c
+index 71bb6053..42cfd238 100644
+--- a/sys/exec/perso/freebsd/freebsd_sig.c
++++ b/sys/exec/perso/freebsd/freebsd_sig.c
+@@ -95,5 +95,8 @@ int freebsd_sys_sigreturn(void *regs_ptr) {
+     regs->gs = sc.sc_gs | 3;
+ 
+     current_thread->sig_mask = sc.sc_mask;
++    /* Trapframe is now the restored user context — the dispatcher must
++     * not apply its eax/edx/CF writebacks (see sys_sigreturn). */
++    current_thread->frame_replaced = 1;
+     return regs->eax;
+ }
+diff --git a/sys/exec/perso/netbsd/netbsd_sig.c b/sys/exec/perso/netbsd/netbsd_sig.c
+index 618b145b..d1b0b866 100644
+--- a/sys/exec/perso/netbsd/netbsd_sig.c
++++ b/sys/exec/perso/netbsd/netbsd_sig.c
+@@ -81,5 +81,8 @@ int netbsd_sys_sigreturn(void *regs_ptr) {
+     regs->gs = sc.sc_gs | 3;
+ 
+     current_thread->sig_mask = sc.sc_mask;
++    /* Trapframe is now the restored user context — the dispatcher must
++     * not apply its eax/edx/CF writebacks (see sys_sigreturn). */
++    current_thread->frame_replaced = 1;
+     return regs->eax;
+ }
+diff --git a/sys/include/sys/proc.h b/sys/include/sys/proc.h
+index fcf07b17..a6fd3370 100644
+--- a/sys/include/sys/proc.h
++++ b/sys/include/sys/proc.h
+@@ -286,6 +286,11 @@ typedef struct thread {
+     
+     // Syscall restart support (for SA_RESTART)
+     uint8_t       in_syscall;     // Nonzero if thread is in a syscall
++    uint8_t       frame_replaced; // Set by sigreturn/rt_sigreturn: the trapframe
++                                  // now IS the restored user context; the syscall
++                                  // dispatcher must not write eax/edx/eflags back
++                                  // over it (the EDX writeback was clobbering a
++                                  // live user register after every SIGALRM)
+     uint32_t      syscall_num;    // Syscall number for restart
+     uint32_t      syscall_orig_eax; // Original EAX for restart
+     
+-- 
+2.54.0
+

@@ -1,0 +1,72 @@
+From 47414753a6977a2ca632f3457f8733e1bc8350ac Mon Sep 17 00:00:00 2001
+From: Kirn Gill II <segin2005@gmail.com>
+Date: Thu, 11 Jun 2026 06:35:15 -0500
+Subject: [PATCH 65/83] libc: classify long double on the 80-bit
+ representation, not via double
+
+__fpclassifyl() and __signbitl() were implemented as __fpclassify((double)x)
+/ __signbit((double)x).  The cast to double overflows any long double above
+DBL_MAX (~1.8e308) to infinity and underflows tiny values to zero, so the
+entire long-double-only range was mis-classified: isinfl(1e2000L) returned
+true, finitel() returned false, etc.  Every libm long-double function that
+early-returns on isinfl/isnanl (e.g. hypotl, expl) was thereby broken for
+large finite inputs -- hypotl(1e2000L,1e2000L) returned inf instead of
+1.414e2000.
+
+Classify on the raw i386 80-bit x87 layout (64-bit significand with the
+explicit integer bit, 15-bit biased exponent + sign), and read the sign bit
+directly (also fixes signbit(-0.0L) and the sign of out-of-double-range
+values).  The double/float paths are unchanged.
+
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+---
+ lib/c/src/fpclassify.c | 25 ++++++++++++++++++++++---
+ 1 file changed, 22 insertions(+), 3 deletions(-)
+
+diff --git a/lib/c/src/fpclassify.c b/lib/c/src/fpclassify.c
+index e6ab2830..a152de31 100644
+--- a/lib/c/src/fpclassify.c
++++ b/lib/c/src/fpclassify.c
+@@ -43,9 +43,24 @@ int __fpclassify(double x) {
+     return FP_NORMAL;
+ }
+ 
+-/* Long double classification (same as double on i386) */
++/* Long double classification on the raw 80-bit x87 representation.
++ * Casting to double first (the old implementation) overflowed any value
++ * above DBL_MAX (~1.8e308) to infinity and underflowed tiny values to
++ * zero, so the entire long-double-only range was mis-classified -- which
++ * made isinfl()/isnanl()/finitel() wrong for large finite long doubles
++ * (e.g. hypotl/expl results) and corrupted every libm long-double
++ * function that early-returns on those tests. */
+ int __fpclassifyl(long double x) {
+-    return __fpclassify((double)x);
++    /* 64-bit significand (explicit integer bit at bit 63) + a 16-bit
++     * field holding the 15-bit biased exponent (bits 0-14) and sign. */
++    union { long double ld; struct { uint64_t mant; uint16_t se; } p; } u = { .ld = x };
++    uint16_t exp = u.p.se & 0x7FFFu;
++    uint64_t mant = u.p.mant;
++    if (exp == 0x7FFFu)
++        return ((mant & 0x7FFFFFFFFFFFFFFFULL) == 0 && (mant >> 63)) ? FP_INFINITE : FP_NAN;
++    if (exp == 0)
++        return (mant == 0) ? FP_ZERO : FP_SUBNORMAL;
++    return FP_NORMAL;
+ }
+ 
+ /* Sign bit extraction */
+@@ -60,7 +75,11 @@ int __signbit(double x) {
+ }
+ 
+ int __signbitl(long double x) {
+-    return __signbit((double)x);
++    /* Sign is bit 15 of the high 16-bit field; reading it off the raw
++     * representation also gives the correct sign of -0.0L and of values
++     * outside the double range (a (double) cast would lose both). */
++    union { long double ld; struct { uint64_t mant; uint16_t se; } p; } u = { .ld = x };
++    return (u.p.se >> 15) & 1;
+ }
+ 
+ /* NaN detection */
+-- 
+2.54.0
+

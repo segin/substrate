@@ -1,0 +1,255 @@
+From 1d2bbcb9df6f42f1e286ff43b132c387674091c5 Mon Sep 17 00:00:00 2001
+From: Kirn Gill II <segin2005@gmail.com>
+Date: Tue, 9 Jun 2026 21:52:27 -0500
+Subject: [PATCH 23/83] cde: build dtappbuilder + ttsnoop via a host-native
+ dtcodegen (openmotif)
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+dtappbuilder's src/ab and ttsnoop generate their *_ui.c/_ui.h sources at
+build time by RUNNING dtcodegen — which links Motif, so the cross-built
+one can't execute on the build host.  Both programs were deferred on
+"needs a host Motif".  The build host has one (Arch ships openmotif in
+extra), so:
+
+- hosttools/build.sh: new dtcodegen-host section.  Copies the fetched
+  CDE tree into hosttools/cde-host, configures it natively (gcc, host
+  tirpc/Xinerama/Motif), builds util (in-tree tradcpp is DtWidget's
+  GENCPP), the libraries dtcodegen links (make -C lib -k: the
+  DtMmdb/dtinfo pieces fail natively and aren't needed), and the
+  AppBuilder libs + dtcodegen with LDFLAGS=-static-libtool-libs so the
+  in-tree Dt/tt libs are linked statically — the staged binary is
+  relocatable (only system Xm/Xt/X11/tirpc are dynamic).  Skipped with
+  a warning when /usr/include/Xm/Xm.h is absent.
+
+- build.sh: when hosttools provides dtcodegen-host, a phase after the
+  main make cross-builds the AppBuilder libs + the (unrunnable) cross
+  dtcodegen, overwrites the libtool wrapper with the host binary, and
+  builds programs/dtappbuilder + programs/ttsnoop; both then install
+  into dist-cde.  dtappbuilder/ttsnoop stay out of programs/Makefile
+  SUBDIRS either way.
+
+  Static-archive fixups (upstream links these shared, where the exe's
+  copy interposes silently; substrate links them static):
+  * MRESOURCELIB=-lMrm on the make line — dtbuilder_LDADD references
+    it for the Mrm Urm* symbols libUil.a needs, but it's an Imake-era
+    variable nothing in configure ever sets.
+  * libABil's yacc globals (yyparse/yylex/yyerror/yylval/...) renamed
+    via DEFS — they collide with the same set exported by Motif's
+    libUil.a.
+  * ttsnoop.C's portable _tt_sigset renamed via DEFS — also defined
+    in libtt.
+
+Produces /usr/dt/bin/dtbuilder (16.5M), ttsnoop (10.6M) and the
+on-target dtcodegen (5.0M), staged into dist-cde for the next image.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+---
+ AGENTS.md                      | 25 ++++++++++----
+ contrib/cde/.gitignore         |  1 +
+ contrib/cde/build.sh           | 62 +++++++++++++++++++++++++++++-----
+ contrib/cde/hosttools/build.sh | 50 +++++++++++++++++++++++++++
+ 4 files changed, 123 insertions(+), 15 deletions(-)
+ create mode 100644 contrib/cde/.gitignore
+
+diff --git a/AGENTS.md b/AGENTS.md
+index 5fbc57d9..8280861a 100644
+--- a/AGENTS.md
++++ b/AGENTS.md
+@@ -362,13 +362,24 @@ manifest, `README.SUBSTRATE.md`.  Current set:
+   a `merge(1)` replica) which expands the `%|nls|` placeholders and installs
+   the `/usr/dt/appconfig/types` Front Panel + datatype/action database that
+   the skipped `localized`/`types` clusters never staged.
+-  Deferred (each a separate host-tooling effort, documented in
+-  `build.sh`): dtksh (ksh93 AST mamake cross-build), dtappbuilder +
+-  ttsnoop (need a host Motif for dtcodegen), dtinfo + dtdocbook (SGML
+-  pmaker chain), tttypes/types (host tt_type_comp), the rest of
+-  `localized` (only the C-locale types slice is staged), dthelp
+-  parser.  The Motif port (`contrib/motif/`) builds libUil via Motif's
+-  WML meta-compiler (host wml/wmluiltok) and installs the uil/ headers.
++  dtappbuilder (dtbuilder) + ttsnoop now build too: their `*_ui.c/_ui.h`
++  are generated at build time by RUNNING dtcodegen, which links Motif —
++  `hosttools/build.sh` builds a native `dtcodegen-host` against the
++  build host's Motif (e.g. Arch `openmotif`) in a separate native CDE
++  objdir (`hosttools/cde-host`, `-static-libtool-libs` so it is
++  relocatable), and `build.sh` swaps it over the cross-built wrapper
++  before src/ab and ttsnoop run the generator.  Static-link fixups it
++  applies: `MRESOURCELIB=-lMrm` (referenced by dtbuilder_LDADD, never
++  set by configure), libABil's yacc globals renamed (collide with
++  Motif libUil.a's), ttsnoop's local `_tt_sigset` renamed (collides
++  with libtt.a's).  Without a host Motif both programs are skipped, as
++  before.  Still deferred (each a separate host-tooling effort,
++  documented in `build.sh`): dtksh (ksh93 AST mamake cross-build),
++  dtinfo + dtdocbook (SGML pmaker chain), tttypes/types (host
++  tt_type_comp), the rest of `localized` (only the C-locale types
++  slice is staged), dthelp parser.  The Motif port (`contrib/motif/`)
++  builds libUil via Motif's WML meta-compiler (host wml/wmluiltok) and
++  installs the uil/ headers.
+ - **ext2 toolset** — `e2fsprogs` 1.47.2 (`contrib/e2fsprogs/`):
+   mke2fs / e2fsck / tune2fs / debugfs / resize2fs / ... plus the
+   static libext2fs / libcom_err / libe2p / libss / libuuid /
+diff --git a/contrib/cde/.gitignore b/contrib/cde/.gitignore
+new file mode 100644
+index 00000000..45dfbf95
+--- /dev/null
++++ b/contrib/cde/.gitignore
+@@ -0,0 +1 @@
++hosttools/cde-host/
+diff --git a/contrib/cde/build.sh b/contrib/cde/build.sh
+index f9d151bc..b259b491 100755
+--- a/contrib/cde/build.sh
++++ b/contrib/cde/build.sh
+@@ -92,14 +92,13 @@ echo "==> configure"
+ #           x86-64 instead of the i386 cross target; the final link fails on
+ #           incompatible objects.  (Substrate side done: libc symbol surface +
+ #           libiconv plain names.)
+-#   dtappbuilder : builds its libs + dtcodegen fine (the Motif port now provides
+-#           libUil), but src/ab then RUNS the cross-built dtcodegen to generate
+-#           *_ui.h headers — and dtcodegen links Motif, so it can't execute on
+-#           the build host.  Host-building it needs a host Motif (all of libXm),
+-#           a separate large effort.  (dtcm only needs the uil/ public headers,
+-#           now installed by the Motif port, so it builds.)
+-#   ttsnoop : runs the same dtcodegen generator at build time, so it follows
+-#           dtappbuilder.
++#   dtappbuilder,
++#   ttsnoop : RUN dtcodegen (links Motif) at build time to generate *_ui.h.
++#           Handled below when hosttools provides dtcodegen-host (built
++#           natively against the host Motif, e.g. openmotif); otherwise both
++#           are skipped here.  They stay out of programs/Makefile SUBDIRS
++#           either way — the conditional phase after the main make builds
++#           them with the generator swapped for the host binary.
+ #   dtinfo,
+ #   dtdocbook : need their own SGML build tooling (pmaker/Prelude.h generator,
+ #           the dtdocbook parser) which is cross-built and won't run on the host.
+@@ -129,6 +128,17 @@ done
+ # the desktop runtime).
+ sed -i 's/^am__append_1 = doc$/am__append_1 =/' Makefile
+ 
++# Static-archive symbol collisions (upstream links these shared, where the
++# executable's copy interposes silently; substrate links them static):
++#  - libABil (BIL parser) and Motif's libUil both export the yacc globals
++#    (yyparse/yylex/yyerror/yylval/...) — rename libABil's set.
++#  - ttsnoop.C carries its own portable _tt_sigset, also defined in libtt.
++grep -q 'abil_yyparse' programs/dtappbuilder/src/libABil/Makefile || \
++    sed -i 's|^DEFS = |DEFS = -Dyyparse=abil_yyparse -Dyylex=abil_yylex -Dyyerror=abil_yyerror -Dyylval=abil_yylval -Dyychar=abil_yychar -Dyynerrs=abil_yynerrs -Dyyin=abil_yyin -Dyyout=abil_yyout -Dyydebug=abil_yydebug |' \
++        programs/dtappbuilder/src/libABil/Makefile
++grep -q 'ttsnoop_local_sigset' programs/ttsnoop/Makefile || \
++    sed -i 's|^DEFS = |DEFS = -D_tt_sigset=ttsnoop_local_sigset |' programs/ttsnoop/Makefile
++
+ # In-tree generator tools: CDE compiles several small noinst_PROGRAMS and runs
+ # them mid-build to generate source (lineToData -> TermLineData.c, ...).  The
+ # cross-build compiles them for the target, so they can't execute on the build
+@@ -175,6 +185,38 @@ echo "==> make -j${JOBS}"
+ # "-ldl -lm"; append -lsys -lstdc++.
+ make -j"${JOBS}" GENCPP="${HOSTTOOLS}/tradcpp" LIBS="-ldl -lm -lsys -lstdc++ -liconv"
+ 
++# --- dtappbuilder + ttsnoop: need a runnable dtcodegen at build time --------
++# Their *_ui.c/_ui.h sources are generated by RUNNING dtcodegen, which links
++# target Motif and can't execute here.  hosttools builds a native one against
++# the host's Motif (dtcodegen-host); when present: cross-build the AppBuilder
++# libs + the (unrunnable) cross dtcodegen, overwrite the libtool wrapper with
++# the host binary, then build src/ab and ttsnoop — the generator now runs.
++# Without dtcodegen-host both programs stay out of the build, as before.
++if [ -x "${HOSTTOOLS}/dtcodegen-host" ]; then
++    echo "==> dtappbuilder (host dtcodegen) + ttsnoop"
++    make -C programs/dtappbuilder/src -j"${JOBS}" \
++        SUBDIRS="libAButil libABobj libABobjXm libABil abmf" \
++        GENCPP="${HOSTTOOLS}/tradcpp" LIBS="-ldl -lm -lsys -lstdc++ -liconv"
++    # Replace the cross dtcodegen (wrapper + ELF) with the host one; it is
++    # newer than its objects afterwards, so make leaves it alone.
++    cp -f "${HOSTTOOLS}/dtcodegen-host" programs/dtappbuilder/src/abmf/dtcodegen
++    cp -f "${HOSTTOOLS}/dtcodegen-host" programs/dtappbuilder/src/abmf/.libs/dtcodegen 2>/dev/null || true
++    # MRESOURCELIB (-lMrm) is referenced by dtbuilder_LDADD but never set by
++    # configure — an Imake-era variable lost in the autotools conversion.
++    make -C programs/dtappbuilder -j"${JOBS}" \
++        GENCPP="${HOSTTOOLS}/tradcpp" MRESOURCELIB=-lMrm \
++        LIBS="-ldl -lm -lsys -lstdc++ -liconv"
++    # A relink inside the dtappbuilder make can regenerate the cross
++    # dtcodegen over our host copy — restore it before ttsnoop runs it.
++    cp -f "${HOSTTOOLS}/dtcodegen-host" programs/dtappbuilder/src/abmf/dtcodegen
++    cp -f "${HOSTTOOLS}/dtcodegen-host" programs/dtappbuilder/src/abmf/.libs/dtcodegen 2>/dev/null || true
++    make -C programs/ttsnoop -j"${JOBS}" \
++        GENCPP="${HOSTTOOLS}/tradcpp" MRESOURCELIB=-lMrm \
++        LIBS="-ldl -lm -lsys -lstdc++ -liconv"
++else
++    echo "==> no hosttools dtcodegen-host — dtappbuilder/ttsnoop skipped"
++fi
++
+ # Stage the built desktop into dist-cde (CDE installs under /usr/dt).  -k keeps
+ # going past the install-exec-hook `chown root` steps that fail in a non-root
+ # build (the setuid bits are re-applied when the image is baked); without -k the
+@@ -182,6 +224,10 @@ make -j"${JOBS}" GENCPP="${HOSTTOOLS}/tradcpp" LIBS="-ldl -lm -lsys -lstdc++ -li
+ echo "==> install into ${SUBSTRATE_TOP}/dist-cde"
+ rm -rf "${SUBSTRATE_TOP}/dist-cde"
+ make -k install DESTDIR="${SUBSTRATE_TOP}/dist-cde" GENCPP="${HOSTTOOLS}/tradcpp" || true
++if [ -x "${HOSTTOOLS}/dtcodegen-host" ]; then
++    make -k -C programs/dtappbuilder install DESTDIR="${SUBSTRATE_TOP}/dist-cde" GENCPP="${HOSTTOOLS}/tradcpp" MRESOURCELIB=-lMrm LIBS="-ldl -lm -lsys -lstdc++ -liconv" || true
++    make -k -C programs/ttsnoop     install DESTDIR="${SUBSTRATE_TOP}/dist-cde" GENCPP="${HOSTTOOLS}/tradcpp" MRESOURCELIB=-lMrm LIBS="-ldl -lm -lsys -lstdc++ -liconv" || true
++fi
+ 
+ # CDE's configure bakes the build-host ksh path (the hosttools mksh-as-ksh it
+ # found at build time) into the `#!` line of every generated ksh script —
+diff --git a/contrib/cde/hosttools/build.sh b/contrib/cde/hosttools/build.sh
+index 2285f4da..c3656a8e 100755
+--- a/contrib/cde/hosttools/build.sh
++++ b/contrib/cde/hosttools/build.sh
+@@ -128,5 +128,55 @@ if ! have onsgmls; then
+     echo "==> onsgmls (OpenSP) ready"
+ fi
+ 
++# --- dtcodegen: AppBuilder code generator (a build-time tool) ---------------
++# programs/dtappbuilder/src/ab and programs/ttsnoop RUN dtcodegen during the
++# build to generate their *_ui.c/_ui.h sources.  The cross-built one links
++# target Motif and can't execute on the host, so build a native one here
++# against the host's Motif (openmotif) + Xt/X11 + tirpc.  This needs a whole
++# native objdir of the CDE tree (dtcodegen links libtt + the Dt libs), built
++# in hosttools/cde-host out of a pristine copy of the fetched source.
++# Skipped (with a warning) when no host Motif is installed — cde/build.sh
++# then leaves dtappbuilder/ttsnoop out of the build, as before.
++if ! have dtcodegen-host; then
++    if [ ! -f /usr/include/Xm/Xm.h ]; then
++        echo "hosttools: WARNING: no host Motif (/usr/include/Xm/Xm.h) — skipping dtcodegen-host" >&2
++        echo "hosttools:          install it (e.g. pacman -S openmotif) to enable dtappbuilder/ttsnoop" >&2
++    else
++        SRC="${SUBSTRATE_TOP}/contrib/cde/build/cdesktopenv/cde"
++        [ -d "${SRC}" ] || { echo "hosttools: CDE source tree missing — run cde/fetch.sh first" >&2; exit 1; }
++        HB="${HERE}/cde-host"
++        if [ ! -x "${HB}/programs/dtappbuilder/src/abmf/dtcodegen" ] || \
++           ! "${HB}/programs/dtappbuilder/src/abmf/dtcodegen" </dev/null >/dev/null 2>&1; then
++            echo "==> dtcodegen-host: native CDE objdir at ${HB}"
++            rm -rf "${HB}"
++            cp -a "${SRC}" "${HB}"
++            ( cd "${HB}" && make distclean >/dev/null 2>&1 || true )
++            find "${HB}" -name '*.o' -delete
++            ( cd "${HB}" && ./configure \
++                --prefix=/nonexistent \
++                CC=gcc CXX=g++ \
++                CPPFLAGS="-I/usr/include/tirpc -Wno-error=incompatible-pointer-types -Wno-error=int-conversion -Wno-error=implicit-function-declaration -Wno-error=return-mismatch -Wno-error=format" \
++                LIBS="-ltirpc" \
++                --with-tcl=/usr/lib >/dev/null )
++            # util first (in-tree tradcpp is lib/DtWidget's GENCPP); then the
++            # libraries dtcodegen links (-k: DtMmdb/dtinfo bits fail natively
++            # and aren't needed); then the AppBuilder libs + dtcodegen.
++            ( cd "${HB}" && make -C util -j"${JOBS}" >/dev/null )
++            ( cd "${HB}" && make -C lib -k -j"${JOBS}" >/dev/null 2>&1 || true )
++            for la in tt/lib/libtt.la DtSvc/libDtSvc.la DtWidget/libDtWidget.la \
++                      DtHelp/libDtHelp.la DtTerm/libDtTerm.la; do
++                [ -f "${HB}/lib/${la}" ] || { echo "hosttools: dtcodegen-host: lib/${la} failed to build" >&2; exit 1; }
++            done
++            # -static-libtool-libs: link the in-tree Dt/tt libtool libs
++            # statically so the staged binary is relocatable (system Xm/Xt/
++            # X11/tirpc stay dynamic); also leaves no .libs wrapper script.
++            ( cd "${HB}" && make -C programs/dtappbuilder/src -j"${JOBS}" \
++                LDFLAGS=-static-libtool-libs >/dev/null )
++        fi
++        install -m755 "${HB}/programs/dtappbuilder/src/abmf/dtcodegen" "${PREFIX}/bin/dtcodegen-host"
++        echo "==> dtcodegen-host ready"
++    fi
++fi
++
+ echo "==> host tools ready in ${PREFIX}/bin:"
+ echo "    $(cd "${PREFIX}/bin" && ls | tr '\n' ' ')"
+-- 
+2.54.0
+

@@ -1,0 +1,158 @@
+From 0d994873741056d24934048efceee8810d32bdd5 Mon Sep 17 00:00:00 2001
+From: Kirn Gill II <segin2005@gmail.com>
+Date: Wed, 10 Jun 2026 11:05:35 -0500
+Subject: [PATCH 39/83] contrib: libffi 3.4.4 (glib2 prerequisite)
+
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+---
+ contrib/libffi/README.SUBSTRATE.md | 34 +++--------------------------
+ contrib/libffi/build.sh            | 35 ++++++++++++------------------
+ contrib/libffi/fetch.sh            | 30 ++++++-------------------
+ 3 files changed, 24 insertions(+), 75 deletions(-)
+
+diff --git a/contrib/libffi/README.SUBSTRATE.md b/contrib/libffi/README.SUBSTRATE.md
+index 51a2ed76..7ab40f97 100644
+--- a/contrib/libffi/README.SUBSTRATE.md
++++ b/contrib/libffi/README.SUBSTRATE.md
+@@ -1,32 +1,4 @@
+-# libffi 3.4.6 — substrate port
++# libffi (3.4.4)
+ 
+-libffi is the foreign-function-interface backend that **GObject (GLib)**
+-requires; GLib's `configure` errors out without `ffi.h`.  i386 sysv is a
+-first-class libffi target, so this cross-builds cleanly with autotools.
+-
+-## Build
+-
+-```sh
+-./fetch.sh          # download + sha256-verify + extract + patch
+-./build.sh          # cross-compile, stage into dist-libffi/usr/
+-```
+-
+-Artifacts land in `dist-libffi/usr/`:
+-`lib/libffi.a`, `lib/libffi.la`, `include/ffi.h`, `include/ffitarget.h`.
+-
+-## Patches
+-
+-- `0001-config-sub-substrate.patch` — teach the bundled `config.sub` to
+-  accept the `i386-unknown-substrate` triple (the standard one-token
+-  insertion used across contrib).
+-
+-## Status / notes
+-
+-- **Builds:** yes. The x86 sysv FFI (`src/x86/sysv.S` + `src/x86/ffi.c`)
+-  and the generic core compile and archive for i386-substrate.
+-- **Static only:** libtool produced `libffi.a` but no `libffi.so` for the
+-  substrate host (shared-lib autodetection declined this host).  GLib links
+-  libffi statically, so this is sufficient; producing a shared
+-  `libffi.so.8` is a follow-up (likely a libtool/`--enable-shared` tweak).
+-- Consumed by `contrib/glib` via `LIBFFI_CFLAGS`/`LIBFFI_LIBS` pointing at
+-  `dist-libffi/usr`.
++Foreign-function interface — glib2 gobject closures (g_cclosure_marshal_generic)
++require it.  Plain substrate-autotools cross port; produces libffi.so + libffi.pc.
+diff --git a/contrib/libffi/build.sh b/contrib/libffi/build.sh
+index 12a398f4..6caf3db1 100755
+--- a/contrib/libffi/build.sh
++++ b/contrib/libffi/build.sh
+@@ -1,37 +1,30 @@
+ #!/bin/sh
+-# contrib/libffi/build.sh — cross-build libffi for substrate (i386).
++# contrib/libffi/build.sh — cross-compile libffi 3.4.4 for substrate.
+ set -eu
+ HERE="$(cd "$(dirname "$0")" && pwd)"
+-VERSION="3.4.6"
+-TREE_DIR="${HERE}/build/libffi-${VERSION}"
+-BUILD_DIR="${HERE}/build/build-stage-substrate"
++VERSION="3.4.4"; TREE_DIR="${HERE}/build/libffi-${VERSION}"; BUILD_DIR="${HERE}/build/build-substrate"
+ if [ -z "${SUBSTRATE_TOP:-}" ]; then
+-    p="${HERE}"
+-    while [ "${p}" != "/" ] && [ ! -f "${p}/AGENTS.md" ] && [ ! -f "${p}/CLAUDE.md" ]; do
+-        p=$(dirname "${p}"); done
++    p="${HERE}"; while [ "${p}" != "/" ] && [ ! -f "${p}/AGENTS.md" ] && [ ! -f "${p}/CLAUDE.md" ]; do p=$(dirname "${p}"); done
+     SUBSTRATE_TOP="${p}"
+ fi
+-: "${STAGE1_PREFIX:=/opt/substrate}"
+-: "${DESTDIR:=${SUBSTRATE_TOP}/dist-libffi}"
++: "${STAGE1_PREFIX:=/opt/substrate}"; : "${DESTDIR:=${SUBSTRATE_TOP}/dist-libffi}"
+ : "${JOBS:=$(nproc 2>/dev/null || echo 4)}"
+ PATH="${STAGE1_PREFIX}/bin:${PATH}"; export PATH
++. "${HERE}/../substrate-autotools.sh"
+ [ -d "${TREE_DIR}" ] || { echo "build.sh: run ./fetch.sh first" >&2; exit 1; }
++export LDFLAGS="-Wl,--copy-dt-needed-entries"
++substrate_libtool_fix "${TREE_DIR}/configure"
+ rm -rf "${BUILD_DIR}"; mkdir -p "${BUILD_DIR}"; cd "${BUILD_DIR}"
+-# Teach libffi's libtool that substrate builds ELF shared libraries; without this
+-# --enable-shared yields only libffi.a (libtool's host_os case has no substrate
+-# branch -> build_libtool_libs=no), and gobject/gio can't resolve ffi_* at load.
+-sh "${HERE}/../substrate-libtool-shared.sh" "${TREE_DIR}/configure"
+-echo "==> configure"
+ "${TREE_DIR}/configure" \
+     --host=i386-unknown-substrate \
+-    --prefix=/usr \
+-    --enable-shared --enable-static \
+-    --disable-docs \
+-    --disable-multi-os-directory \
++    --prefix=/usr --libdir=/usr/lib --includedir=/usr/include \
++    --enable-shared --enable-static --disable-docs \
++    CC=i386-unknown-substrate-gcc \
++    AR=i386-unknown-substrate-ar RANLIB=i386-unknown-substrate-ranlib \
++    CC_FOR_BUILD=gcc \
+     CFLAGS="-march=i486 -mtune=i486 -O2 -g"
+-echo "==> make -j${JOBS}"
+ make -j"${JOBS}"
+-echo "==> install into ${DESTDIR}"
+ rm -rf "${DESTDIR}"; mkdir -p "${DESTDIR}"
+ make install DESTDIR="${DESTDIR}"
+-echo "==> Done.  Staged at ${DESTDIR}/usr/{lib/libffi.*,include/ffi.h,include/ffitarget.h}"
++substrate_so_finalize "${DESTDIR}"
++echo "==> libffi staged at ${DESTDIR}"
+diff --git a/contrib/libffi/fetch.sh b/contrib/libffi/fetch.sh
+index e6408255..36be1e2d 100755
+--- a/contrib/libffi/fetch.sh
++++ b/contrib/libffi/fetch.sh
+@@ -1,35 +1,19 @@
+ #!/bin/sh
+-# contrib/libffi/fetch.sh — download + verify + extract + patch libffi.
+-# libffi is the mandatory FFI backend for GObject (GLib).  i386 sysv is a
+-# first-class libffi target, so this cross-builds cleanly with autotools.
++# contrib/libffi/fetch.sh — libffi 3.4.4 (glib2 gobject closures need it).
+ set -eu
+-VERSION="3.4.6"
++VERSION="3.4.4"
+ TARBALL="libffi-${VERSION}.tar.gz"
+ URL="https://github.com/libffi/libffi/releases/download/v${VERSION}/${TARBALL}"
+-SHA256="b0dea9df23c863a7a50e825440f3ebffabd65df1497108e5d437747843895a4e"
++SHA256="d66c56ad259a82cf2a9dfc408b32bf5da52371500b84745f7fb8b645712df676"
+ HERE="$(cd "$(dirname "$0")" && pwd)"
+-BUILD_DIR="${HERE}/build"
+-TREE_DIR="${BUILD_DIR}/libffi-${VERSION}"
++BUILD_DIR="${HERE}/build"; TREE_DIR="${BUILD_DIR}/libffi-${VERSION}"
+ mkdir -p "${BUILD_DIR}"; cd "${BUILD_DIR}"
+ if [ ! -f "${TARBALL}" ]; then
+     [ "${1:-}" = "--no-network" ] && { echo "fetch.sh: tarball missing" >&2; exit 1; }
+-    echo "==> Fetching ${URL}"
+-    if command -v curl >/dev/null 2>&1; then curl -fSL -o "${TARBALL}" "${URL}";
+-    else wget -O "${TARBALL}" "${URL}"; fi
++    echo "==> Fetching ${URL}"; curl -fSL -o "${TARBALL}" "${URL}"
+ fi
+-echo "==> Verifying ${TARBALL}"
+ echo "${SHA256}  ${TARBALL}" | sha256sum -c -
+ [ -d "${TREE_DIR}" ] || { echo "==> Extracting"; tar xf "${TARBALL}"; }
+-if [ -f "${HERE}/series" ]; then
+-    cd "${TREE_DIR}"
+-    while IFS= read -r p; do
+-        case "$p" in ''|'#'*) continue ;; esac
+-        [ -f "${HERE}/patches/${p}" ] || { echo "fetch.sh: missing patch ${p}" >&2; exit 1; }
+-        if patch -p1 --dry-run < "${HERE}/patches/${p}" >/dev/null 2>&1; then
+-            echo "==> applying ${p}"; patch -p1 < "${HERE}/patches/${p}"
+-        else
+-            echo "==> ${p} already applied (skipping)"
+-        fi
+-    done < "${HERE}/series"
+-fi
++. "${HERE}/../substrate-autotools.sh"
++substrate_config_sub_fix "${TREE_DIR}"
+ echo "==> libffi ${VERSION} ready at ${TREE_DIR}"
+-- 
+2.54.0
+

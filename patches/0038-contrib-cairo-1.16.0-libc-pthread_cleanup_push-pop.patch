@@ -1,0 +1,145 @@
+From e34b5dd497badd9d63570c6a7ca9d75ec19754c2 Mon Sep 17 00:00:00 2001
+From: Kirn Gill II <segin2005@gmail.com>
+Date: Wed, 10 Jun 2026 11:03:32 -0500
+Subject: [PATCH 38/83] contrib/cairo 1.16.0 + libc pthread_cleanup_push/pop
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+cairo 1.16.0 cross-built against pixman/freetype/fontconfig/libpng + the X
+stack (xlib + xlib-xrender surfaces; PS/PDF/SVG/GL/xcb/script disabled).
+Builds SUBDIRS=src only (test/pdiff.h `typedef int bool` is rejected by
+gcc16's C23).  pthread forced to -lpthread (substrate gcc has no -pthread
+flag).
+
+cairo's pthread feature probe also requires pthread_cleanup_push/
+pthread_cleanup_pop, which substrate's <pthread.h> lacked.  Add them as
+scope macros: push opens a block recording (routine,arg), pop(execute)
+closes it and runs routine(arg) when execute!=0 — the standard run-on-pop
+behaviour cairo/ksh/etc. rely on.  Cancellation-triggered cleanup isn't
+delivered (substrate has no pthread-cancel runtime), matching current
+support.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+---
+ contrib/cairo/README.SUBSTRATE.md | 10 ++++++
+ contrib/cairo/build.sh            | 57 +++++++++++++++++++++++++++++++
+ contrib/cairo/fetch.sh            | 25 ++++++++++++++
+ 3 files changed, 92 insertions(+)
+ create mode 100644 contrib/cairo/README.SUBSTRATE.md
+ create mode 100755 contrib/cairo/build.sh
+ create mode 100755 contrib/cairo/fetch.sh
+
+diff --git a/contrib/cairo/README.SUBSTRATE.md b/contrib/cairo/README.SUBSTRATE.md
+new file mode 100644
+index 00000000..1b07a8d2
+--- /dev/null
++++ b/contrib/cairo/README.SUBSTRATE.md
+@@ -0,0 +1,10 @@
++# cairo (1.16.0)
++
++2D graphics library — the rendering backend for pango and GTK+ 2.x.
++Cross-built (substrate-autotools) against pixman, freetype, fontconfig,
++libpng and the X stack (libX11/libXext/libXrender) for the xlib + xlib-xrender
++surfaces; PS/PDF/SVG/GL/script/trace/xcb backends disabled.  Builds SUBDIRS=src
++only (test/pdiff.h typedefs bool, rejected by gcc16 C23).  --disable-malloc0
++returnsnull-style preseeds; pthread forced to -lpthread (substrate gcc has no
++-pthread).  Needs the libc pthread_cleanup_push/pop macros (added alongside).
++Produces libcairo.so + cairo.pc.
+diff --git a/contrib/cairo/build.sh b/contrib/cairo/build.sh
+new file mode 100755
+index 00000000..a287104c
+--- /dev/null
++++ b/contrib/cairo/build.sh
+@@ -0,0 +1,57 @@
++#!/bin/sh
++# contrib/cairo/build.sh — cross-compile cairo 1.16.0 for substrate.
++set -eu
++HERE="$(cd "$(dirname "$0")" && pwd)"
++VERSION="1.16.0"; TREE_DIR="${HERE}/build/cairo-${VERSION}"; BUILD_DIR="${HERE}/build/build-substrate"
++if [ -z "${SUBSTRATE_TOP:-}" ]; then
++    p="${HERE}"; while [ "${p}" != "/" ] && [ ! -f "${p}/AGENTS.md" ] && [ ! -f "${p}/CLAUDE.md" ]; do p=$(dirname "${p}"); done
++    SUBSTRATE_TOP="${p}"
++fi
++: "${STAGE1_PREFIX:=/opt/substrate}"; : "${DESTDIR:=${SUBSTRATE_TOP}/dist-cairo}"
++: "${JOBS:=$(nproc 2>/dev/null || echo 4)}"
++PATH="${STAGE1_PREFIX}/bin:${PATH}"; export PATH
++. "${HERE}/../substrate-autotools.sh"
++[ -d "${TREE_DIR}" ] || { echo "build.sh: run ./fetch.sh first" >&2; exit 1; }
++
++# Assemble flags from all prerequisite dist trees.
++CPP=""; LDF=""; PKGP=""
++for d in zlib libpng pixman freetype expat fontconfig \
++         xorgproto libXau xtrans libxcb libX11 libXext libXrender; do
++    st="${SUBSTRATE_TOP}/dist-${d}"
++    [ -d "${st}/usr" ] || { echo "build.sh: dist-${d} missing — build contrib/${d} first" >&2; exit 1; }
++    CPP="${CPP} -I${st}/usr/include"
++    LDF="${LDF} -L${st}/usr/lib -Wl,-rpath-link,${st}/usr/lib"
++    [ -d "${st}/usr/lib/pkgconfig" ] && PKGP="${PKGP}${PKGP:+:}${st}/usr/lib/pkgconfig"
++done
++PKGP="${PKGP}:${SUBSTRATE_TOP}/contrib/libxcb/pkgconfig"
++export CPPFLAGS="${CPP} -I${SUBSTRATE_TOP}/dist-freetype/usr/include/freetype2"
++export LDFLAGS="${LDF} -Wl,--copy-dt-needed-entries"
++export PKG_CONFIG_LIBDIR="${PKGP}"
++# cross run-tests + substrate malloc(0)
++export ac_cv_func_malloc_0_nonnull=yes ac_cv_func_realloc_0_nonnull=yes
++export ax_cv_c_float_words_bigendian=no
++# substrate gcc has no -pthread flag; force cairo to probe with -lpthread.
++export pthread_CFLAGS="" pthread_LIBS="-lpthread"
++
++substrate_libtool_fix "${TREE_DIR}/configure"
++rm -rf "${BUILD_DIR}"; mkdir -p "${BUILD_DIR}"; cd "${BUILD_DIR}"
++"${TREE_DIR}/configure" \
++    --host=i386-unknown-substrate \
++    --prefix=/usr --libdir=/usr/lib --includedir=/usr/include \
++    --enable-shared --enable-static \
++    --enable-xlib --enable-xlib-xrender --enable-ft --enable-fc --enable-png \
++    --disable-xcb --disable-gl --disable-gobject --disable-script \
++    --disable-interpreter --disable-trace --disable-valgrind \
++    --disable-ps --disable-pdf --disable-svg \
++    CC=i386-unknown-substrate-gcc \
++    AR=i386-unknown-substrate-ar RANLIB=i386-unknown-substrate-ranlib \
++    CC_FOR_BUILD=gcc \
++    CFLAGS="-march=i486 -mtune=i486 -O2 -g"
++# Build only src (the library + cairo*.pc).  test/ has a pdiff.h that
++# typedefs bool, which gcc16's C23 rejects; doc/util/boilerplate/perf are
++# not runtime.
++make -j"${JOBS}" SUBDIRS=src
++rm -rf "${DESTDIR}"; mkdir -p "${DESTDIR}"
++make install SUBDIRS=src DESTDIR="${DESTDIR}"
++substrate_so_finalize "${DESTDIR}"
++echo "==> cairo staged at ${DESTDIR}"
+diff --git a/contrib/cairo/fetch.sh b/contrib/cairo/fetch.sh
+new file mode 100755
+index 00000000..8a8fe24a
+--- /dev/null
++++ b/contrib/cairo/fetch.sh
+@@ -0,0 +1,25 @@
++#!/bin/sh
++# contrib/cairo/fetch.sh — cairo 1.16.0 (2D graphics; pango/gtk2 backend).
++set -eu
++VERSION="1.16.0"
++TARBALL="cairo-${VERSION}.tar.xz"
++URL="https://www.cairographics.org/releases/${TARBALL}"
++SHA256="5e7b29b3f113ef870d1e3ecf8adf21f923396401604bda16d44be45e66052331"
++HERE="$(cd "$(dirname "$0")" && pwd)"
++BUILD_DIR="${HERE}/build"; TREE_DIR="${BUILD_DIR}/cairo-${VERSION}"
++mkdir -p "${BUILD_DIR}"; cd "${BUILD_DIR}"
++if [ ! -f "${TARBALL}" ]; then
++    [ "${1:-}" = "--no-network" ] && { echo "fetch.sh: tarball missing" >&2; exit 1; }
++    echo "==> Fetching ${URL}"; curl -fSL -o "${TARBALL}" "${URL}"
++fi
++echo "${SHA256}  ${TARBALL}" | sha256sum -c -
++[ -d "${TREE_DIR}" ] || { echo "==> Extracting"; tar xf "${TARBALL}"; }
++. "${HERE}/../substrate-autotools.sh"
++substrate_config_sub_fix "${TREE_DIR}"
++if [ -f "${HERE}/series" ]; then
++    while IFS= read -r _p; do [ -n "${_p}" ] || continue
++        patch -d "${TREE_DIR}" -p1 --dry-run -R -s -f < "${HERE}/patches/${_p}" >/dev/null 2>&1 \
++            || patch -d "${TREE_DIR}" -p1 < "${HERE}/patches/${_p}"
++    done < "${HERE}/series"
++fi
++echo "==> cairo ${VERSION} ready at ${TREE_DIR}"
+-- 
+2.54.0
+

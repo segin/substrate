@@ -1,0 +1,103 @@
+From 079cc17a1706eaade4db2aa8a6b516e6f5dccd85 Mon Sep 17 00:00:00 2001
+From: Kirn Gill II <segin2005@gmail.com>
+Date: Wed, 10 Jun 2026 16:56:54 -0500
+Subject: [PATCH 57/83] =?UTF-8?q?build:=20drop=20the=20blanket-sudo=20guid?=
+ =?UTF-8?q?ance=20=E2=80=94=20image=20builds=20need=20no=20root?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+build-rootfs.sh bakes rootfs.img entirely in userspace (mke2fs + debugfs;
+no loopback mount, and the setuid/owner=root bits are set INSIDE the image
+via debugfs `sif`, not on the host), and build.sh's body invokes no sudo or
+root checks.  The only step that writes outside the source tree is the
+stage-1 toolchain install into $STAGE1_PREFIX (default /opt/substrate).
+
+Correct the build.sh / AGENTS.md / README.md guidance: invoke `./build.sh`
+without sudo, and note that the prefix is the only thing that might need
+write access — make it user-owned once, or set STAGE1_PREFIX to a user-owned
+path, after which every build (images included) runs unprivileged.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+---
+ AGENTS.md |  2 +-
+ README.md | 12 ++++++++----
+ build.sh  | 15 +++++++++++++--
+ 3 files changed, 22 insertions(+), 7 deletions(-)
+
+diff --git a/AGENTS.md b/AGENTS.md
+index 49773daf..40e2c13c 100644
+--- a/AGENTS.md
++++ b/AGENTS.md
+@@ -214,7 +214,7 @@ For the full detailed changelog, see `docs/CHANGELOG.md`.
+   Or the all-in-one orchestrator that drives all of the above
+   plus every contrib port in dependency order:
+   ```
+-  sudo ./build.sh                   # repo-root, from clean checkout
++  ./build.sh                        # repo-root, from clean checkout (no root)
+                                     # env knobs: SKIP_TOOLCHAIN,
+                                     # SKIP_CONTRIB, SKIP_IMAGE,
+                                     # ONLY="pkg1 pkg2 ..."
+diff --git a/README.md b/README.md
+index 5f75a368..80b8bde4 100644
+--- a/README.md
++++ b/README.md
+@@ -128,11 +128,15 @@ the Substrate-native GNU toolchain, the kernel and userland, every `contrib/`
+ port in dependency order, and finally the bootable image:
+ 
+ ```sh
+-sudo ./build.sh
++./build.sh
+ ```
+ 
+-`sudo` is needed only because the cross toolchain installs under
+-`/opt/substrate` (override with `STAGE1_PREFIX=`). Useful env knobs:
++No root is required: image building is fully unprivileged (mke2fs + debugfs,
++no loopback mount). The only step that writes outside the tree is the cross
++toolchain install under `/opt/substrate` — if that path is not writable by
++you, create it owned by your user once
++(`sudo install -d -o "$(id -un)" /opt/substrate`) or override with
++`STAGE1_PREFIX=` to a user-owned path. Useful env knobs:
+ `SKIP_TOOLCHAIN=1`, `SKIP_CONTRIB=1`, `SKIP_IMAGE=1`, and
+ `ONLY="pkg1 pkg2 ..."` to (re)build only specific contrib ports.
+ 
+@@ -180,7 +184,7 @@ in `contrib/<pkg>/patches/`; nothing under `contrib/*/build/` is vendored —
+ `--dist` wipes and repopulates `dist/`, so re-run `--toolchain` after it to
+ restore the compiler. `--toolchain` skips any staging tree that is absent
+ (e.g. a no-compiler bring-up image). For a clean-checkout build of all three
+-stages at once, use `sudo ./build.sh` (see [Building](#building) above).
++stages at once, use `./build.sh` (see [Building](#building) above).
+ 
+ ## Testing
+ 
+diff --git a/build.sh b/build.sh
+index 6c1f4b7d..503bc0d4 100755
+--- a/build.sh
++++ b/build.sh
+@@ -27,10 +27,21 @@
+ #   ONLY="pkg1 pkg2"  build only these contrib ports (default: everything in
+ #                      the order baked into this script)
+ #
+-# A clean run from a fresh checkout:
++# A clean run from a fresh checkout (no root required):
+ #
+ #   git clone … substrate && cd substrate
+-#   sudo ./build.sh         # sudo: contrib/build-toolchain.sh writes to /opt/substrate
++#   ./build.sh
++#
++# Building images NEVER needs root: build-rootfs.sh bakes rootfs.img with
++# mke2fs + debugfs entirely in userspace (no loopback mount; setuid and
++# owner=root bits are set INSIDE the image via debugfs `sif`, not on the
++# host).  The only step that writes outside the source tree is the stage-1
++# toolchain install into $STAGE1_PREFIX (default /opt/substrate).  If that
++# directory is not writable by you, make it yours ONCE
++# (`sudo install -d -o "$(id -un)" /opt/substrate`) or point STAGE1_PREFIX
++# at a user-owned path — then every build, images included, runs without
++# sudo.  SKIP_TOOLCHAIN=1 skips that step when the toolchain is already
++# installed.
+ #
+ # Output:
+ #   ./rootfs.img   bootable ext2 image
+-- 
+2.54.0
+

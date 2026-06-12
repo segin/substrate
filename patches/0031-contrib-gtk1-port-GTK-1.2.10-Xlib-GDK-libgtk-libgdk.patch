@@ -1,0 +1,216 @@
+From daae59c55a9a8b7e859597ee29706d0ba28a0617 Mon Sep 17 00:00:00 2001
+From: Kirn Gill II <segin2005@gmail.com>
+Date: Wed, 10 Jun 2026 00:29:45 -0500
+Subject: [PATCH 31/83] contrib/gtk1: port GTK+ 1.2.10 (Xlib GDK; libgtk +
+ libgdk)
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The classic GTK+ toolkit.  GDK is bundled and Xlib-only (no Cairo/Pango/
+ATK), so prerequisites are just the substrate X client stack plus the
+glib1 port.  build.sh assembles a sysroot from those dist trees, relocates
+glib-config to emit sysroot paths, cross-configures (autoconf 2.13; sizeof/
+socklen run-tests preseeded via env), builds gdk+gtk only (po/ needs a
+gettext that still accepts 1999-era charset names; docs/ needs SGML tooling
+— neither is runtime), and stages dist-gtk1 with the .so OSABI patched to
+ELFOSABI_SUBSTRATE.
+
+Patch 0001-ltconfig-substrate-shared: the same host_os=substrate ->
+linux-gnu canonicalization as glib1, so the bundled 2001-era ltconfig emits
+ELF shared libraries.  Produces gtk-config, libgtk-1.2.so, libgdk-1.2.so;
+DT_NEEDED resolves entirely within the substrate stack (libgmodule/libglib,
+libX11/libXext, libdl/libm/libc).
+
+Completes the GTK+ 1.2 port (task: GTK+ 1.2 = glib1 + gtk1).
+
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+---
+ contrib/gtk1/README.SUBSTRATE.md              | 22 ++++++
+ contrib/gtk1/build.sh                         | 74 +++++++++++++++++++
+ contrib/gtk1/fetch.sh                         | 32 ++++++++
+ .../0001-ltconfig-substrate-shared.patch      | 14 ++++
+ contrib/gtk1/series                           |  1 +
+ 5 files changed, 143 insertions(+)
+ create mode 100644 contrib/gtk1/README.SUBSTRATE.md
+ create mode 100755 contrib/gtk1/build.sh
+ create mode 100755 contrib/gtk1/fetch.sh
+ create mode 100644 contrib/gtk1/patches/0001-ltconfig-substrate-shared.patch
+ create mode 100644 contrib/gtk1/series
+
+diff --git a/contrib/gtk1/README.SUBSTRATE.md b/contrib/gtk1/README.SUBSTRATE.md
+new file mode 100644
+index 00000000..dc532f50
+--- /dev/null
++++ b/contrib/gtk1/README.SUBSTRATE.md
+@@ -0,0 +1,22 @@
++# gtk1 (GTK+ 1.2.10)
++
++The classic GTK+ widget toolkit.  GDK is bundled and Xlib-only — no Cairo,
++Pango, ATK, or gdk-pixbuf — so the only prerequisites are the substrate X
++client stack (xorgproto, libXau, xtrans, libxcb, libX11, libXext) and the
++`glib1` port.
++
++`build.sh` assembles a sysroot from those dist trees, relocates a copy of
++`glib-config` so its emitted `-I`/`-L` point at the sysroot, cross-configures
++(autoconf 2.13 — sizeof/socklen run-tests preseeded via env), builds only
++`gdk` + `gtk` (po/ message catalogs need a gettext that still accepts
++1999-era charset names like `iso-8859-9e`; docs/ needs SGML tooling; neither
++is part of the runtime), and stages into `dist-gtk1`, OSABI-patching each
++`.so` to ELFOSABI_SUBSTRATE.
++
++Patch: `0001-ltconfig-substrate-shared` — same fix as glib1, canonicalizing
++`host_os=substrate` to `linux-gnu` in the bundled 2001-era ltconfig so it
++produces ELF shared libraries instead of static-only.
++
++Installs `gtk-config` (consumed by GTK+ 1.2 applications), `libgtk-1.2.so` and
++`libgdk-1.2.so`.  DT_NEEDED: libgmodule/libglib (glib1), libX11/libXext, and
++libdl/libm/libc — all in the substrate stack.
+diff --git a/contrib/gtk1/build.sh b/contrib/gtk1/build.sh
+new file mode 100755
+index 00000000..4275571e
+--- /dev/null
++++ b/contrib/gtk1/build.sh
+@@ -0,0 +1,74 @@
++#!/bin/sh
++# contrib/gtk1/build.sh — cross-compile GTK+ 1.2.10 for substrate.
++set -eu
++HERE="$(cd "$(dirname "$0")" && pwd)"
++VERSION="1.2.10"
++TREE_DIR="${HERE}/build/gtk+-${VERSION}"
++if [ -z "${SUBSTRATE_TOP:-}" ]; then
++    p="${HERE}"
++    while [ "${p}" != "/" ] && [ ! -f "${p}/AGENTS.md" ] && [ ! -f "${p}/CLAUDE.md" ]; do
++        p=$(dirname "${p}")
++    done
++    SUBSTRATE_TOP="${p}"
++fi
++: "${STAGE1_PREFIX:=/opt/substrate}"
++: "${DESTDIR:=${SUBSTRATE_TOP}/dist-gtk1}"
++: "${JOBS:=$(nproc 2>/dev/null || echo 4)}"
++PATH="${STAGE1_PREFIX}/bin:${PATH}"; export PATH
++[ -d "${TREE_DIR}" ] || { echo "build.sh: run ./fetch.sh first" >&2; exit 1; }
++
++# Assemble a sysroot from the prerequisite dist trees (X stack + glib1).
++SR="${HERE}/build/sysroot"
++rm -rf "${SR}"; mkdir -p "${SR}/usr/lib"
++for d in xorgproto libXau xtrans libxcb libX11 libXext glib1; do
++    st="${SUBSTRATE_TOP}/dist-${d}"
++    [ -d "${st}/usr" ] || { echo "build.sh: ${st} missing — build contrib/${d} first" >&2; exit 1; }
++    cp -a "${st}/usr/." "${SR}/usr/"
++done
++# substrate core libs + unversioned link names
++for l in c sys m; do
++    cp "${SUBSTRATE_TOP}/lib/${l}/lib${l}.so.0" "${SR}/usr/lib/" 2>/dev/null || true
++    ln -sf "lib${l}.so.0" "${SR}/usr/lib/lib${l}.so"
++done
++
++cd "${TREE_DIR}"
++[ -f Makefile ] && make distclean >/dev/null 2>&1 || true
++export CC=i386-unknown-substrate-gcc
++export CFLAGS="-O2 -std=gnu89 -w"
++export CPPFLAGS="-I${SR}/usr/include -I${SR}/usr/include/X11"
++export LDFLAGS="-L${SR}/usr/lib -Wl,-rpath-link,${SR}/usr/lib"
++# glib-config hardcodes prefix=/usr; relocate a copy to the sysroot so its
++# emitted -I/-L point at the cross headers/libs, and hand it to configure.
++mkdir -p "${SR}/usr/bin"
++sed "s|^prefix=/usr$|prefix=${SR}/usr|" \
++    "${SUBSTRATE_TOP}/dist-glib1/usr/bin/glib-config" > "${SR}/usr/bin/glib-config"
++chmod +x "${SR}/usr/bin/glib-config"
++export GLIB_CONFIG="${SR}/usr/bin/glib-config"
++PATH="${SR}/usr/bin:${PATH}"; export PATH
++# cross run-test preseeds (same family as glib)
++export ac_cv_sizeof_char=1 ac_cv_sizeof_short=2 ac_cv_sizeof_int=4 \
++       ac_cv_sizeof_long=4 ac_cv_sizeof_long_long=8 ac_cv_sizeof_void_p=4
++export gtk_cv_sys_socklen_t=socklen_t
++
++./configure \
++    --host=i386-unknown-substrate \
++    --build=x86_64-pc-linux-gnu \
++    --prefix=/usr \
++    --enable-shared --enable-static \
++    --x-includes="${SR}/usr/include" \
++    --x-libraries="${SR}/usr/lib"
++# Build only the libraries (gdk + gtk).  po/ (message catalogs) needs the
++# host msgfmt to accept 1999-era charset names like "iso-8859-9e" which
++# modern gettext rejects, and docs/ needs sgml tooling — neither is part of
++# the runtime.  The top-level install hooks (gtk-config, gtk.m4) still run.
++make -j"${JOBS}" SUBDIRS="gdk gtk"
++rm -rf "${DESTDIR}"
++make install DESTDIR="${DESTDIR}" SUBDIRS="gdk gtk"
++_n=0
++for so in "${DESTDIR}"/usr/lib/*.so.*; do
++    [ -f "${so}" ] || continue; [ -L "${so}" ] && continue
++    printf '\100' | dd of="${so}" bs=1 seek=7 count=1 conv=notrunc status=none
++    _n=$((_n + 1))
++done
++echo "  OSABI->substrate on ${_n} shared objects"
++echo "==> gtk1 staged at ${DESTDIR}"
+diff --git a/contrib/gtk1/fetch.sh b/contrib/gtk1/fetch.sh
+new file mode 100755
+index 00000000..f0576df4
+--- /dev/null
++++ b/contrib/gtk1/fetch.sh
+@@ -0,0 +1,32 @@
++#!/bin/sh
++# contrib/gtk1/fetch.sh — GTK+ 1.2.10 (bundled GDK; Xlib-only, no Cairo/Pango).
++set -eu
++VERSION="1.2.10"
++TARBALL="gtk+-${VERSION}.tar.gz"
++URL="https://download.gnome.org/sources/gtk+/1.2/${TARBALL}"
++SHA256="3fb843ea671c89b909fd145fa09fd2276af3312e58cbab29ed1c93b462108c34"
++HERE="$(cd "$(dirname "$0")" && pwd)"
++BUILD_DIR="${HERE}/build"
++TREE_DIR="${BUILD_DIR}/gtk+-${VERSION}"
++mkdir -p "${BUILD_DIR}"; cd "${BUILD_DIR}"
++if [ ! -f "${TARBALL}" ]; then
++    [ "${1:-}" = "--no-network" ] && { echo "fetch.sh: tarball missing" >&2; exit 1; }
++    echo "==> Fetching ${URL}"
++    curl -fSL -o "${TARBALL}" "${URL}"
++fi
++if [ "${SHA256}" != "REPLACE" ]; then echo "${SHA256}  ${TARBALL}" | sha256sum -c -; fi
++[ -d "${TREE_DIR}" ] || { echo "==> Extracting"; tar xf "${TARBALL}"; }
++BINU="$(ls -d "${HERE}"/../binutils/build/binutils-*/ 2>/dev/null | head -1)"
++[ -n "${BINU}" ] || { echo "fetch.sh: need contrib/binutils fetched (for config.sub)" >&2; exit 1; }
++cp -f "${BINU}/config.sub" "${BINU}/config.guess" "${TREE_DIR}/"
++if [ -f "${HERE}/series" ]; then
++    while IFS= read -r patch; do
++        [ -n "${patch}" ] || continue
++        if patch -d "${TREE_DIR}" -p1 --dry-run -R -s -f < "${HERE}/patches/${patch}" >/dev/null 2>&1; then
++            echo "    (already applied: ${patch})"
++        else
++            echo "    applying ${patch}"; patch -d "${TREE_DIR}" -p1 < "${HERE}/patches/${patch}"
++        fi
++    done < "${HERE}/series"
++fi
++echo "==> gtk+ ${VERSION} ready at ${TREE_DIR}"
+diff --git a/contrib/gtk1/patches/0001-ltconfig-substrate-shared.patch b/contrib/gtk1/patches/0001-ltconfig-substrate-shared.patch
+new file mode 100644
+index 00000000..7b500275
+--- /dev/null
++++ b/contrib/gtk1/patches/0001-ltconfig-substrate-shared.patch
+@@ -0,0 +1,14 @@
++--- a/ltconfig	2026-06-10 00:26:16.524448084 -0500
+++++ b/ltconfig	2026-06-10 00:26:16.559755722 -0500
++@@ -457,6 +457,11 @@
++ host_vendor=`echo $host | sed 's/^\([^-]*\)-\([^-]*\)-\(.*\)$/\2/'`
++ host_os=`echo $host | sed 's/^\([^-]*\)-\([^-]*\)-\(.*\)$/\3/'`
++ 
+++# Substrate is ELF + GNU ld + Linux-like; reuse the linux-gnu profile.
+++case "$host_os" in
+++substrate*) host=`echo $host | sed 's/-substrate/-linux-gnu/'`; host_os=linux-gnu ;;
+++esac
+++
++ case "$host_os" in
++ aix3*)
++   # AIX sometimes has problems with the GCC collect2 program.  For some
+diff --git a/contrib/gtk1/series b/contrib/gtk1/series
+new file mode 100644
+index 00000000..acd83ba1
+--- /dev/null
++++ b/contrib/gtk1/series
+@@ -0,0 +1 @@
++0001-ltconfig-substrate-shared.patch
+-- 
+2.54.0
+

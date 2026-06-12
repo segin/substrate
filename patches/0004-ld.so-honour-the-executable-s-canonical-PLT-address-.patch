@@ -1,0 +1,208 @@
+From 9acb844ea6ba62d60d0000934a3356751ef203f5 Mon Sep 17 00:00:00 2001
+From: Kirn Gill II <segin2005@gmail.com>
+Date: Mon, 8 Jun 2026 17:53:46 -0500
+Subject: [PATCH 04/83] ld.so: honour the executable's canonical PLT address
+ (function-pointer equality)
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+A non-PIE executable that takes the *address* of a shared-library function
+emits that symbol into its .dynsym as UND but with st_value set to its own PLT
+entry — the "canonical" &func.  For function-pointer equality the dynamic
+linker must hand that same PLT address to every OTHER module that references
+&func; otherwise &func differs across the exe/DSO boundary and any pointer
+comparison against it fails.
+
+ld.so's resolver skipped all SHN_UNDEF symbols, so it never saw the canonical
+and resolved such references to the DSO's own copy instead.  This broke CDE:
+libXt inherits widget class methods by comparing `class->method ==
+XtInheritInsertChild` (== &_XtInherit).  dtwm's DtPanelShell front-panel widget
+class is compiled into the non-PIE dtwm executable, so its insert_child held
+dtwm's canonical PLT &_XtInherit while libXt.so's CompositeClassPartInitialize
+compared against libXt.so's own &_XtInherit.  The mismatch left insert_child
+unresolved; the first time the panel added a child, calling the still-magic
+_XtInherit raised the Xt fatal error "Unresolved inheritance operation", which
+dtwm's WmXtErrorHandler turns into ExitWM(1) — so the whole desktop aborted to
+a bare root window.  (Widgets living in shared libs — Motif, Athena — were
+unaffected because both the class record and the comparison sit in .so's.)
+
+resolve_pred now treats an UND STT_FUNC symbol in the program (list head) with
+st_value != 0 as a canonical definition at that PLT address, but only when the
+requester is some other module: the program's own PLT JMP_SLOT must still bind
+to the real defining DSO, or GOT[f] would point back at the program's own PLT
+stub and a call through it self-loops (that hung Xfbdev for every
+address-taken-and-called function during the first cut of this fix).  The
+requester is threaded in via ld_resolve_req(); call-only UND funcs keep
+st_value 0 and are unaffected.
+
+Verified: CDE dtwm now builds and renders the full Front Panel (clock,
+calendar, file manager, mail, workspace switch, trash, ...) and decorates
+clients; Xfbdev and the rest of the dynamic userland are unchanged.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+---
+ sbin/ld.so/ld.h         |  8 +++++
+ sbin/ld.so/ld_reloc.c   |  5 +--
+ sbin/ld.so/ld_resolve.c | 70 +++++++++++++++++++++++++++++++++--------
+ 3 files changed, 68 insertions(+), 15 deletions(-)
+
+diff --git a/sbin/ld.so/ld.h b/sbin/ld.so/ld.h
+index 950c25a5..9f44a53f 100644
+--- a/sbin/ld.so/ld.h
++++ b/sbin/ld.so/ld.h
+@@ -175,6 +175,7 @@ typedef struct {
+ #define STB_LOCAL  0
+ #define STB_GLOBAL 1
+ #define STB_WEAK   2
++#define STT_FUNC   2   /* ELF32_ST_TYPE: symbol names a function */
+ #define STN_UNDEF  0
+ #define SHN_UNDEF  0
+ 
+@@ -341,6 +342,13 @@ ld_obj_t *ld_load_object(const char *path);
+  * symbol's runtime address, or 0 if undefined / weak-undef. */
+ ld_u32 ld_resolve(const char *name);
+ 
++/* Requester-aware resolve for the relocation processor: `requester` is
++ * the object being relocated, so a program's own PLT slot isn't bound to
++ * its own canonical-PLT entry (function-address equality — see
++ * ld_resolve.c resolve_pred). */
++ld_u32 ld_resolve_req(const char *name, ld_u32 vh_hash,
++                      const ld_obj_t *requester);
++
+ /* Same, but skip `skip` while searching.  Used by R_386_COPY which
+  * must find the source-of-truth in a SHARED library, not in the
+  * executable that's about to receive the copy. */
+diff --git a/sbin/ld.so/ld_reloc.c b/sbin/ld.so/ld_reloc.c
+index fdd4d4ff..96b51875 100644
+--- a/sbin/ld.so/ld_reloc.c
++++ b/sbin/ld.so/ld_reloc.c
+@@ -61,8 +61,9 @@ static ld_u32 importer_version_hash(const ld_obj_t *obj, ld_u32 sym_idx) {
+ static ld_u32 resolve_for(const ld_obj_t *obj, ld_u32 sym_idx,
+                           const char *name) {
+     ld_u32 vh = importer_version_hash(obj, sym_idx);
+-    if (vh == 0) return ld_resolve(name);
+-    return ld_resolve_versioned(name, vh, 0, 0);
++    /* Pass the requesting object so resolve_pred won't hand the program
++     * its own canonical-PLT entry (function-address equality). */
++    return ld_resolve_req(name, vh, obj);
+ }
+ 
+ static int apply_one(ld_obj_t *obj, Elf32_Rel *r) {
+diff --git a/sbin/ld.so/ld_resolve.c b/sbin/ld.so/ld_resolve.c
+index 4ec3a74b..a4a2e6d9 100644
+--- a/sbin/ld.so/ld_resolve.c
++++ b/sbin/ld.so/ld_resolve.c
+@@ -134,7 +134,10 @@ static Elf32_Sym *lookup_sysv(const ld_obj_t *o, const char *name,
+     ld_u32 hv = sysv_hash(name);
+     for (ld_u32 idx = buckets[hv % nbuckets]; idx != 0; idx = chains[idx]) {
+         Elf32_Sym *s = &o->symtab[idx];
+-        if (s->st_shndx == SHN_UNDEF) continue;
++        /* Don't blanket-skip UNDEF here: a program's canonical-PLT
++         * symbol (function-address equality, see resolve_pred) is UND
++         * but must still satisfy address lookups.  Let the predicate
++         * make that call. */
+         const char *sname = o->strtab + s->st_name;
+         if (strcmp_local(sname, name) == 0 && pred(o, idx, pred_arg))
+             return s;
+@@ -226,24 +229,57 @@ static int version_matches(const ld_obj_t *o, ld_u32 sym_index,
+  * unversioned reference and resolve_internal moves on to the next
+  * DSO — missing the default-version definition sitting one chain
+  * link later. */
++/* Arg threaded through resolve_pred: the wanted version hash plus the
++ * object that issued the reference (for the canonical-PLT rule below). */
++struct resolve_ctx { ld_u32 want; const ld_obj_t *requester; };
++
+ static int resolve_pred(const ld_obj_t *o, ld_u32 sym_idx, void *arg) {
+-    ld_u32 want = *(ld_u32 *)arg;
++    struct resolve_ctx *ctx = (struct resolve_ctx *)arg;
++    ld_u32 want = ctx->want;
+     Elf32_Sym *s = &o->symtab[sym_idx];
+-    if (s->st_shndx == SHN_UNDEF) return 0;
++    if (s->st_shndx == SHN_UNDEF) {
++        /* Canonical function address (function-pointer equality across
++         * the executable/DSO boundary).  A non-PIE executable that takes
++         * the *address* of a shared-library function emits that symbol
++         * UND but with st_value = its own PLT entry; that PLT address is
++         * the canonical &func and must be what EVERY OTHER module sees,
++         * or pointer comparisons against &func break.  CDE's dtwm hit
++         * this: libXt resolves widget class-method inheritance with
++         * `method == XtInheritInsertChild` (== &_XtInherit), but dtwm's
++         * DtPanelShell class record (compiled into the non-PIE exe) held
++         * dtwm's canonical PLT &_XtInherit while libXt.so saw its own —
++         * so insert_child never resolved, calling it raised "Unresolved
++         * inheritance operation", and dtwm aborted the desktop.
++         *
++         * Honour the canonical only for the program (the list head), only
++         * for address-taken functions (st_value != 0; call-only UND funcs
++         * keep st_value 0), and ONLY when the requester is some other
++         * module.  The program's own PLT JMP_SLOT must still bind to the
++         * real defining DSO — otherwise GOT[f] would point back at the
++         * program's own PLT stub and any call through it self-loops
++         * (which hung Xfbdev for every address-taken-and-called func). */
++        if (o == ld_obj_list() && o != ctx->requester && s->st_value != 0 &&
++            ELF32_ST_TYPE(s->st_info) == STT_FUNC)
++            return version_matches(o, sym_idx, want);
++        return 0;
++    }
+     unsigned char bind = ELF32_ST_BIND(s->st_info);
+     if (bind != STB_GLOBAL && bind != STB_WEAK) return 0;
+     return version_matches(o, sym_idx, want);
+ }
+ 
+-/* Internal: scope walk with optional skip-this-object, version
+- * filter, and a place to deposit the symbol's st_size for R_386_COPY
+- * callers. */
++/* Internal: scope walk with optional skip-this-object, version filter, a
++ * place to deposit the symbol's st_size for R_386_COPY callers, and the
++ * requesting object (so a program's own relocations don't pick up its
++ * own canonical-PLT entry — see resolve_pred). */
+ static ld_u32 resolve_internal(const char *name, ld_u32 want_ver_hash,
+-                               const ld_obj_t *skip, ld_u32 *size_out) {
++                               const ld_obj_t *skip, ld_u32 *size_out,
++                               const ld_obj_t *requester) {
++    struct resolve_ctx ctx = { want_ver_hash, requester };
+     for (ld_obj_t *o = ld_obj_list(); o; o = o->next) {
+         if (o == skip) continue;
+-        Elf32_Sym *s = lookup_gnu(o, name, resolve_pred, &want_ver_hash);
+-        if (!s) s = lookup_sysv(o, name, resolve_pred, &want_ver_hash);
++        Elf32_Sym *s = lookup_gnu(o, name, resolve_pred, &ctx);
++        if (!s) s = lookup_sysv(o, name, resolve_pred, &ctx);
+         if (!s) continue;
+         if (size_out) *size_out = s->st_size;
+         return s->st_value + o->base;
+@@ -253,19 +289,27 @@ static ld_u32 resolve_internal(const char *name, ld_u32 want_ver_hash,
+ }
+ 
+ ld_u32 ld_resolve(const char *name) {
+-    return resolve_internal(name, 0, 0, 0);
++    return resolve_internal(name, 0, 0, 0, 0);
+ }
+ 
+ ld_u32 ld_resolve_skip(const char *name, const ld_obj_t *skip) {
+-    return resolve_internal(name, 0, skip, 0);
++    return resolve_internal(name, 0, skip, 0, 0);
+ }
+ 
+ ld_u32 ld_resolve_with_size(const char *name, const ld_obj_t *skip,
+                             ld_u32 *size_out) {
+-    return resolve_internal(name, 0, skip, size_out);
++    return resolve_internal(name, 0, skip, size_out, 0);
++}
++
++/* Requester-aware resolve used by the relocation processor: `requester`
++ * is the object whose relocation is being applied, so its own canonical
++ * PLT entry is not handed back to itself. */
++ld_u32 ld_resolve_req(const char *name, ld_u32 vh_hash,
++                      const ld_obj_t *requester) {
++    return resolve_internal(name, vh_hash, 0, 0, requester);
+ }
+ 
+ ld_u32 ld_resolve_versioned(const char *name, ld_u32 vh_hash,
+                             const ld_obj_t *skip, ld_u32 *size_out) {
+-    return resolve_internal(name, vh_hash, skip, size_out);
++    return resolve_internal(name, vh_hash, skip, size_out, 0);
+ }
+-- 
+2.54.0
+

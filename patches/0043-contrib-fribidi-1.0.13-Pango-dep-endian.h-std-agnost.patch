@@ -1,0 +1,119 @@
+From 29e396010b900a2de39b5a747e08cc62ddc3ccb5 Mon Sep 17 00:00:00 2001
+From: Kirn Gill II <segin2005@gmail.com>
+Date: Wed, 10 Jun 2026 11:37:20 -0500
+Subject: [PATCH 43/83] contrib: fribidi 1.0.13 (Pango dep) + endian.h
+ std-agnostic inline
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+FriBidi 1.0.13 (Unicode bidi; required by Pango 1.42).
+
+<endian.h>: the byteswap helpers used `static inline`, which isn't a
+keyword under -std=c89/-ansi — fribidi pulls <endian.h> via <sys/types.h>
+in a strict-C translation unit and the compiler read `inline` as an unknown
+type name.  Use `static __inline__` (a GNU keyword in every -std), as glibc
+does, so the system header compiles regardless of the consumer's standard.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+---
+ contrib/fribidi/README.SUBSTRATE.md |  4 ++++
+ contrib/fribidi/build.sh            | 30 +++++++++++++++++++++++++++++
+ contrib/fribidi/fetch.sh            | 19 ++++++++++++++++++
+ include/endian.h                    |  6 +++---
+ 4 files changed, 56 insertions(+), 3 deletions(-)
+ create mode 100644 contrib/fribidi/README.SUBSTRATE.md
+ create mode 100755 contrib/fribidi/build.sh
+ create mode 100755 contrib/fribidi/fetch.sh
+
+diff --git a/contrib/fribidi/README.SUBSTRATE.md b/contrib/fribidi/README.SUBSTRATE.md
+new file mode 100644
+index 00000000..4b83d2bf
+--- /dev/null
++++ b/contrib/fribidi/README.SUBSTRATE.md
+@@ -0,0 +1,4 @@
++# fribidi (1.0.13)
++
++GNU FriBidi — Unicode bidirectional text, a hard dependency of Pango 1.42.
++Plain substrate-autotools cross port; produces libfribidi.so + fribidi.pc.
+diff --git a/contrib/fribidi/build.sh b/contrib/fribidi/build.sh
+new file mode 100755
+index 00000000..e26ad0ce
+--- /dev/null
++++ b/contrib/fribidi/build.sh
+@@ -0,0 +1,30 @@
++#!/bin/sh
++# contrib/fribidi/build.sh — cross-compile GNU FriBidi 1.0.13 for substrate.
++set -eu
++HERE="$(cd "$(dirname "$0")" && pwd)"
++VERSION="1.0.13"; TREE_DIR="${HERE}/build/fribidi-${VERSION}"; BUILD_DIR="${HERE}/build/build-substrate"
++if [ -z "${SUBSTRATE_TOP:-}" ]; then
++    p="${HERE}"; while [ "${p}" != "/" ] && [ ! -f "${p}/AGENTS.md" ] && [ ! -f "${p}/CLAUDE.md" ]; do p=$(dirname "${p}"); done
++    SUBSTRATE_TOP="${p}"
++fi
++: "${STAGE1_PREFIX:=/opt/substrate}"; : "${DESTDIR:=${SUBSTRATE_TOP}/dist-fribidi}"
++: "${JOBS:=$(nproc 2>/dev/null || echo 4)}"
++PATH="${STAGE1_PREFIX}/bin:${PATH}"; export PATH
++. "${HERE}/../substrate-autotools.sh"
++[ -d "${TREE_DIR}" ] || { echo "build.sh: run ./fetch.sh first" >&2; exit 1; }
++export LDFLAGS="-Wl,--copy-dt-needed-entries"
++substrate_libtool_fix "${TREE_DIR}/configure"
++rm -rf "${BUILD_DIR}"; mkdir -p "${BUILD_DIR}"; cd "${BUILD_DIR}"
++"${TREE_DIR}/configure" \
++    --host=i386-unknown-substrate \
++    --prefix=/usr --libdir=/usr/lib --includedir=/usr/include \
++    --enable-shared --enable-static --disable-docs \
++    CC=i386-unknown-substrate-gcc \
++    AR=i386-unknown-substrate-ar RANLIB=i386-unknown-substrate-ranlib \
++    CC_FOR_BUILD=gcc \
++    CFLAGS="-march=i486 -mtune=i486 -O2 -g"
++make -j"${JOBS}"
++rm -rf "${DESTDIR}"; mkdir -p "${DESTDIR}"
++make install DESTDIR="${DESTDIR}"
++substrate_so_finalize "${DESTDIR}"
++echo "==> fribidi staged at ${DESTDIR}"
+diff --git a/contrib/fribidi/fetch.sh b/contrib/fribidi/fetch.sh
+new file mode 100755
+index 00000000..44a55477
+--- /dev/null
++++ b/contrib/fribidi/fetch.sh
+@@ -0,0 +1,19 @@
++#!/bin/sh
++# contrib/fribidi/fetch.sh — GNU FriBidi 1.0.13 (Unicode bidi; pango dep).
++set -eu
++VERSION="1.0.13"
++TARBALL="fribidi-${VERSION}.tar.xz"
++URL="https://github.com/fribidi/fribidi/releases/download/v${VERSION}/${TARBALL}"
++SHA256="7fa16c80c81bd622f7b198d31356da139cc318a63fc7761217af4130903f54a2"
++HERE="$(cd "$(dirname "$0")" && pwd)"
++BUILD_DIR="${HERE}/build"; TREE_DIR="${BUILD_DIR}/fribidi-${VERSION}"
++mkdir -p "${BUILD_DIR}"; cd "${BUILD_DIR}"
++if [ ! -f "${TARBALL}" ]; then
++    [ "${1:-}" = "--no-network" ] && { echo "fetch.sh: tarball missing" >&2; exit 1; }
++    echo "==> Fetching ${URL}"; curl -fSL -o "${TARBALL}" "${URL}"
++fi
++echo "${SHA256}  ${TARBALL}" | sha256sum -c -
++[ -d "${TREE_DIR}" ] || { echo "==> Extracting"; tar xf "${TARBALL}"; }
++. "${HERE}/../substrate-autotools.sh"
++substrate_config_sub_fix "${TREE_DIR}"
++echo "==> fribidi ${VERSION} ready at ${TREE_DIR}"
+diff --git a/include/endian.h b/include/endian.h
+index f8a4bf54..010ded37 100644
+--- a/include/endian.h
++++ b/include/endian.h
+@@ -23,9 +23,9 @@
+ #define __BYTE_ORDER    __LITTLE_ENDIAN
+ #define BYTE_ORDER      __BYTE_ORDER
+ 
+-static inline uint16_t __bswap16(uint16_t x) { return __builtin_bswap16(x); }
+-static inline uint32_t __bswap32(uint32_t x) { return __builtin_bswap32(x); }
+-static inline uint64_t __bswap64(uint64_t x) { return __builtin_bswap64(x); }
++static __inline__ uint16_t __bswap16(uint16_t x) { return __builtin_bswap16(x); }
++static __inline__ uint32_t __bswap32(uint32_t x) { return __builtin_bswap32(x); }
++static __inline__ uint64_t __bswap64(uint64_t x) { return __builtin_bswap64(x); }
+ 
+ #define htobe16(x) __bswap16(x)
+ #define htole16(x) (x)
+-- 
+2.54.0
+

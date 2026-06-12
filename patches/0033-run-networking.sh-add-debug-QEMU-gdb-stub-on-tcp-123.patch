@@ -1,0 +1,77 @@
+From c39e311313ed544e555a9ac8553111eed7724a82 Mon Sep 17 00:00:00 2001
+From: Kirn Gill II <segin2005@gmail.com>
+Date: Wed, 10 Jun 2026 06:50:52 -0500
+Subject: [PATCH 33/83] run-networking.sh: add --debug (QEMU gdb stub on
+ tcp::1234)
+
+--debug exposes -gdb tcp::$GDBPORT (default 1234); GDBHALT=1 also adds
+-S to freeze the CPU at reset.  Prints the gdb connect line pointed at
+the symbol-bearing sys/kernel.bin.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+---
+ run-networking.sh | 30 +++++++++++++++++++++++++++---
+ 1 file changed, 27 insertions(+), 3 deletions(-)
+
+diff --git a/run-networking.sh b/run-networking.sh
+index 8270a0ac..d0d6845e 100755
+--- a/run-networking.sh
++++ b/run-networking.sh
+@@ -33,14 +33,21 @@ set -eu
+ #            understand the risk; otherwise leave it off.
+ #   --user   use QEMU internal (user-mode/slirp) networking instead of
+ #            macvtap-onto-real-LAN.  No sudo, no host NIC required.
++#   --debug  start QEMU's GDB stub listening on tcp::1234 (override the port
++#            with $GDBPORT).  By default the guest still boots normally and
++#            you attach whenever you like (e.g. to break into a hang); set
++#            GDBHALT=1 to also freeze the CPU at reset so you can set
++#            breakpoints before boot and `continue` from gdb.
+ GFX=0
+ KVM=0
+ USERNET=0
++DEBUG=0
+ for arg in "$@"; do
+     case "$arg" in
+-        --gfx)  GFX=1 ;;
+-        --kvm)  KVM=1 ;;
+-        --user) USERNET=1 ;;
++        --gfx)   GFX=1 ;;
++        --kvm)   KVM=1 ;;
++        --user)  USERNET=1 ;;
++        --debug) DEBUG=1 ;;
+     esac
+ done
+ 
+@@ -123,6 +130,22 @@ else
+     exit 1
+ fi
+ 
++# --debug: expose QEMU's GDB stub.  -gdb tcp::PORT listens; -S (GDBHALT=1)
++# additionally freezes the CPU at reset until the debugger continues.  For
++# symbols, point gdb at the kernel ELF (sys/kernel.bin carries them).
++DEBUG_ARGS=""
++if [ "$DEBUG" -eq 1 ]; then
++    GDBPORT=${GDBPORT:-1234}
++    DEBUG_ARGS="-gdb tcp::$GDBPORT"
++    HALTNOTE=""
++    if [ "${GDBHALT:-0}" = 1 ]; then
++        DEBUG_ARGS="$DEBUG_ARGS -S"
++        HALTNOTE=" (CPU halted at reset; run 'continue' in gdb to boot)"
++    fi
++    echo "run-networking.sh: GDB stub on tcp::$GDBPORT$HALTNOTE"
++    echo "    connect: gdb -ex 'symbol-file $KERNEL' -ex 'target remote :$GDBPORT'"
++fi
++
+ # Find the rootfs image.  If only the compressed form (rootfs.img.zst)
+ # exists, decompress it in place — the user normally distributes the
+ # compressed copy via git-annex / scp / similar.  rootfs.img wins if
+@@ -159,5 +182,6 @@ qemu-system-i386 -cpu qemu32,+sse,+sse2 $ACCEL_ARG \
+   -kernel "$KERNEL" \
+   -append "$APPEND" \
+   $GFX_ARGS \
++  $DEBUG_ARGS \
+   -serial stdio \
+   -audio driver=sdl,model=ac97,id=audio0
+-- 
+2.54.0
+

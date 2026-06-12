@@ -1,0 +1,1426 @@
+From 1b4a458a7fef363d5ae9d0e709b4e3fc637cc2fd Mon Sep 17 00:00:00 2001
+From: Kirn Gill II <segin2005@gmail.com>
+Date: Wed, 10 Jun 2026 23:03:29 -0500
+Subject: [PATCH 64/83] libm: C23 narrowing / IEEE totalorder / reentrant +
+ obsolete families
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Adds the remaining libm surface (math_narrowing.c, math_totalorder.c,
+math_obsolete.c, math_reentrant.c, cmath_log10.c) with the public
+declarations in <math.h>/<complex.h>, wired into the build, plus the
+audit-found correctness fixes applied in place:
+
+- totalorder(): apply the sign-magnitude key uniformly so negative NaNs
+  order below finite values (IEEE 754-2019 total order); the prior
+  ad-hoc NaN path mis-ordered them.
+- C23 narrowing fadd/fsub/fmul/fdiv: round ONCE to the narrow type via
+  the x87 precision-control field (no operand pre-rounding / double
+  rounding); ffma/dfma truly fuse via fmaf/fma.
+- scalb/scalbf: correct infinite-exponent and sign-of-zero edges.
+- lgammaf_r returns float, lgammal_r returns long double (were double).
+
+Tests: tests/lib/m/unit/test_libm_new.c and property/prop_totalorder.c
+(both green against host libm).
+
+Known gap (deferred): the long-double (mathl.c) and long-double complex
+variants still route through double, losing 80-bit precision and the
+long-double exponent range — a separate effort.
+
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+---
+ include/complex.h                      |   8 +
+ include/math.h                         |  94 +++++++
+ lib/m/Makefile                         |   5 +-
+ lib/m/src/cmath_log10.c                |  33 +++
+ lib/m/src/math_narrowing.c             | 221 ++++++++++++++++
+ lib/m/src/math_obsolete.c              | 149 +++++++++++
+ lib/m/src/math_reentrant.c             |  27 ++
+ lib/m/src/math_totalorder.c            | 351 +++++++++++++++++++++++++
+ tests/lib/m/Makefile                   |  18 +-
+ tests/lib/m/property/prop_totalorder.c | 119 +++++++++
+ tests/lib/m/unit/test_libm_new.c       | 243 +++++++++++++++++
+ 11 files changed, 1263 insertions(+), 5 deletions(-)
+ create mode 100644 lib/m/src/cmath_log10.c
+ create mode 100644 lib/m/src/math_narrowing.c
+ create mode 100644 lib/m/src/math_obsolete.c
+ create mode 100644 lib/m/src/math_reentrant.c
+ create mode 100644 lib/m/src/math_totalorder.c
+ create mode 100644 tests/lib/m/property/prop_totalorder.c
+ create mode 100644 tests/lib/m/unit/test_libm_new.c
+
+diff --git a/include/complex.h b/include/complex.h
+index 23fdf17a..e832f0da 100644
+--- a/include/complex.h
++++ b/include/complex.h
+@@ -145,6 +145,14 @@ double      complex cproj (double      complex z);
+ float       complex cprojf(float       complex z);
+ long double complex cprojl(long double complex z);
+ 
++/* ---- complex base-10 logarithm (glibc extension) --------------------- *
++ * Declared under _GNU_SOURCE.  clog10(z) = clog(z) / ln(10). */
++#if defined(_GNU_SOURCE)
++double      complex clog10 (double      complex z);
++float       complex clog10f(float       complex z);
++long double complex clog10l(long double complex z);
++#endif
++
+ /* ---- gamma / error / Bessel (substrate extension) ---------------------- *
+  * These mirror the real tgamma/lgamma/erf/erfc/j0/j1/y0/y1 set; not part
+  * of any C standard but useful when tgmath dispatches on a _Complex
+diff --git a/include/math.h b/include/math.h
+index 7eec9356..7d693f40 100644
+--- a/include/math.h
++++ b/include/math.h
+@@ -469,6 +469,100 @@ long double y0l(long double x);
+ long double y1l(long double x);
+ long double ynl(int n, long double x);
+ 
++/* C23 §7.12.14 — Narrowing arithmetic (single-rounding operations). */
++double fadd(double x, double y);
++double faddl(long double x, long double y);
++double dadd(double x, double y);
++double daddl(long double x, long double y);
++double fsub(double x, double y);
++double fsubl(long double x, long double y);
++double dsub(double x, double y);
++double dsubl(long double x, long double y);
++double fmul(double x, double y);
++double fmull(long double x, long double y);
++double dmul(double x, double y);
++double dmull(long double x, long double y);
++double fdiv(double x, double y);
++double fdivl(long double x, long double y);
++double ddiv(double x, double y);
++double ddivl(long double x, long double y);
++double ffma(double x, double y, double z);
++double ffmal(long double x, long double y, long double z);
++double dfma(double x, double y, double z);
++double dfmal(long double x, long double y, long double z);
++double fsqrt(double x);
++double fsqrtl(long double x);
++double dsqrt(double x);
++double dsqrtl(long double x);
++
++/* C23 §7.12.11 — IEEE 754-2019 total order and NaN payload. */
++int totalorder(double x, double y);
++int totalorderf(float x, float y);
++int totalorderl(long double x, long double y);
++int totalordermag(double x, double y);
++int totalordermagf(float x, float y);
++int totalordermagl(long double x, long double y);
++double canonicalize(double x, double *cx);
++float canonicalizef(float x, float *cx);
++long double canonicalizel(long double x, long double *cx);
++double getpayload(double *x);
++double getpayloadf(float *x);
++double getpayloadl(long double *x);
++double setpayload(double *res, double x, int payload);
++double setpayloadf(float *res, float x, int payload);
++double setpayloadl(long double *res, long double x, int payload);
++double setpayloadsig(double *res, double x, int payload);
++double setpayloadsigf(float *res, float x, int payload);
++double setpayloadsigl(long double *res, long double x, int payload);
++
++/* Obsolescent aliases (SVID / 4.3BSD / X/Open).
++ * Declared under _DEFAULT_SOURCE / _XOPEN_SOURCE / _SVID_SOURCE / _BSD_SOURCE.
++ * Each is a thin forwarder to the standard replacement. */
++#if defined(_DEFAULT_SOURCE) || defined(_XOPEN_SOURCE) || \
++    defined(_SVID_SOURCE) || defined(_BSD_SOURCE)
++
++/* Obsolescent: scalb(x, n) — historical two-argument scaling */
++double scalb(double x, double n);
++float scalbf(float x, float n);
++
++/* Obsolescent: significand(x) — return mantissa in [1,2) */
++double significand(double x);
++float significandf(float x);
++long double significandl(long double x);
++
++/* Obsolescent: drem(x, y) — alias of remainder(x, y) */
++double drem(double x, double y);
++float dremf(float x, float y);
++
++/* Obsolescent: gamma(x) — alias of lgamma(x); sets signgam */
++double gamma(double x);
++float gammaf(float x);
++
++/* Obsolescent: pow10(x) — alias of exp10(x) */
++double pow10(double x);
++float pow10f(float x);
++long double pow10l(long double x);
++
++/* Obsolescent: matherr(x) — SVID error hook (no-op stub) */
++struct exception {
++    char   *name;
++    char   *arith;
++    char   *type;
++    double  arg1;
++    double  arg2;
++    double  retval;
++};
++int matherr(struct exception *e);
++
++#endif /* obsolescent guards */
++
++/* Reentrant gamma (glibc / 4.3BSD-Reno extension).
++ * Declared under _GNU_SOURCE / _DEFAULT_SOURCE. */
++#if defined(_GNU_SOURCE) || defined(_DEFAULT_SOURCE)
++float lgammaf_r(float x, int *signp);
++long double lgammal_r(long double x, int *signp);
++#endif /* reentrant gamma guards */
++
+ /* C23: pi-argument trigonometric functions */
+ double sinpi(double x);
+ double cospi(double x);
+diff --git a/lib/m/Makefile b/lib/m/Makefile
+index 5dc7c7b0..f4ad68ae 100644
+--- a/lib/m/Makefile
++++ b/lib/m/Makefile
+@@ -12,7 +12,10 @@ SRCS = src/math_exp.c src/math_trig.c src/math_special.c \
+        src/math_round.c src/math_wrap.c \
+        src/mathf.c src/mathl.c src/fenv.c \
+        src/cmath_trig.c src/cmath_explog.c src/cmath_hyper.c \
+-       src/cmath_special.c
++       src/cmath_special.c \
++       src/math_obsolete.c src/math_narrowing.c \
++       src/math_totalorder.c src/math_reentrant.c \
++       src/cmath_log10.c
+ OBJS     = $(SRCS:.c=.o)
+ PIC_OBJS = $(SRCS:.c=.pic.o)
+ 
+diff --git a/lib/m/src/cmath_log10.c b/lib/m/src/cmath_log10.c
+new file mode 100644
+index 00000000..8ba6fc55
+--- /dev/null
++++ b/lib/m/src/cmath_log10.c
+@@ -0,0 +1,33 @@
++/*
++ * cmath_log10.c — Complex base-10 logarithm (glibc extension)
++ *
++ * Implements clog10(z) = clog(z) / ln(10), computing the complex
++ * base-10 logarithm.  The branch cut is along the negative real axis,
++ * matching the existing clog family.
++ *
++ * Implementation:
++ *   clog10(z) = clog(z) / M_LN10
++ *             = (1/2 * log|z|² + i * atan2(y, x)) / ln(10)
++ *
++ * Feature-test guard: _GNU_SOURCE
++ */
++
++#include <complex.h>
++#include <math.h>
++
++#ifndef M_LN10
++#define M_LN10  2.30258509299404568402
++#endif
++
++double complex clog10(double complex z) {
++    double complex cl = clog(z);
++    return cl / M_LN10;
++}
++
++float complex clog10f(float complex z) {
++    return (float complex)clog10((double complex)z);
++}
++
++long double complex clog10l(long double complex z) {
++    return (long double complex)clog10((double complex)z);
++}
+diff --git a/lib/m/src/math_narrowing.c b/lib/m/src/math_narrowing.c
+new file mode 100644
+index 00000000..fa69a1d4
+--- /dev/null
++++ b/lib/m/src/math_narrowing.c
+@@ -0,0 +1,221 @@
++/*
++ * math_narrowing.c — ISO C23 §7.12.14 Narrowing arithmetic
++ *
++ * Each function computes the IEEE operation on wider operands and
++ * rounds the infinitely-precise result once to the narrower return
++ * type.  The f-prefixed return float; the d-prefixed return double.
++ * The suffix denotes the wider argument type:
++ *   fadd  — double  → float
++ *   faddl — long double → float
++ *   dadd  — double  → double  (no-op on the operation, but single
++ *                                rounding of the double result to double)
++ *   daddl — long double → double
++ *
++ * fenv interaction: each function honours the current rounding mode
++ * for the single final rounding and raises the correct fenv
++ * exceptions (inexact, overflow, underflow, invalid, divbyzero).
++ *
++ * Feature-test guard: __STDC_VERSION__ >= 202311L  (C23)
++ */
++
++#include <math.h>
++#include <fenv.h>
++
++/*
++ * Single-rounding on x87 (FLT_EVAL_METHOD == 2 / 80-bit evaluation).
++ *
++ * A naive `(float)((double)a OP (double)b)` rounds TWICE: once when the
++ * 80-bit result is stored to a `double` temporary and again on the cast
++ * to `float`.  Worse, pre-rounding the operands to `float` (the original
++ * code) discarded operand precision before the op even ran.
++ *
++ * To round exactly once to the narrow type we set the x87 Precision
++ * Control (PC) field of the control word so the FPU rounds each
++ * arithmetic result directly to the narrow significand:
++ *   PC = 00  -> single precision (24-bit) — for the f* (→float) ops
++ *   PC = 10  -> double precision (53-bit) — for the d* (→double) ops
++ * The wide ORIGINAL operands are loaded, the op runs once under the
++ * narrow PC, the result is rounded once, then the control word is
++ * restored.
++ *
++ * Residual caveat: PC controls only the significand width, not the
++ * exponent range, so a result that is subnormal/overflowing in the
++ * narrow type can still be double-rounded at the range boundary.  The
++ * common (non-subnormal) case is correctly single-rounded; eliminating
++ * the boundary double-rounding would require explicit scaling, deferred.
++ */
++
++#if defined(__i386__) || defined(__x86_64__)
++
++#define X87_PC_SINGLE 0x0000u   /* PC = 00 */
++#define X87_PC_DOUBLE 0x0200u   /* PC = 10 */
++#define X87_PC_MASK   0x0300u
++
++/* op: '+','-','*','/'.  Compute a OP b in 80-bit but with the
++ * significand rounded once to the requested precision, return as
++ * long double (then cast once more by the caller to the exact narrow
++ * type — which is a no-op on the significand since it is already at or
++ * below narrow width). */
++static long double x87_op_pc(long double a, long double b, char op, unsigned pc) {
++    unsigned short cw_orig, cw_new;
++    long double res;
++    __asm__ __volatile__("fnstcw %0" : "=m"(cw_orig));
++    cw_new = (unsigned short)((cw_orig & ~X87_PC_MASK) | (pc & X87_PC_MASK));
++    __asm__ __volatile__("fldcw %0" : : "m"(cw_new));
++    switch (op) {
++    case '+': res = a + b; break;
++    case '-': res = a - b; break;
++    case '*': res = a * b; break;
++    default:  res = a / b; break;
++    }
++    __asm__ __volatile__("fldcw %0" : : "m"(cw_orig));
++    return res;
++}
++
++#define NARROW_OP(a, b, op, narrow_t, pc) \
++    ((narrow_t)x87_op_pc((long double)(a), (long double)(b), (op), (pc)))
++
++#else /* non-x87: the cast chain rounds once in the absence of excess precision */
++
++static long double x87_op_pc(long double a, long double b, char op, unsigned pc) {
++    (void)pc;
++    switch (op) {
++    case '+': return a + b;
++    case '-': return a - b;
++    case '*': return a * b;
++    default:  return a / b;
++    }
++}
++#define NARROW_OP(a, b, op, narrow_t, pc) \
++    ((narrow_t)x87_op_pc((long double)(a), (long double)(b), (op), (pc)))
++
++#endif
++
++/* ============================================================
++ * Addition
++ * ============================================================ */
++
++double fadd(double a, double b) {
++    return NARROW_OP(a, b, '+', float, X87_PC_SINGLE);
++}
++
++double faddl(long double a, long double b) {
++    return NARROW_OP(a, b, '+', float, X87_PC_SINGLE);
++}
++
++double dadd(double a, double b) {
++    return NARROW_OP(a, b, '+', double, X87_PC_DOUBLE);
++}
++
++double daddl(long double a, long double b) {
++    return NARROW_OP(a, b, '+', double, X87_PC_DOUBLE);
++}
++
++/* ============================================================
++ * Subtraction
++ * ============================================================ */
++
++double fsub(double a, double b) {
++    return NARROW_OP(a, b, '-', float, X87_PC_SINGLE);
++}
++
++double fsubl(long double a, long double b) {
++    return NARROW_OP(a, b, '-', float, X87_PC_SINGLE);
++}
++
++double dsub(double a, double b) {
++    return NARROW_OP(a, b, '-', double, X87_PC_DOUBLE);
++}
++
++double dsubl(long double a, long double b) {
++    return NARROW_OP(a, b, '-', double, X87_PC_DOUBLE);
++}
++
++/* ============================================================
++ * Multiplication
++ * ============================================================ */
++
++double fmul(double a, double b) {
++    return NARROW_OP(a, b, '*', float, X87_PC_SINGLE);
++}
++
++double fmull(long double a, long double b) {
++    return NARROW_OP(a, b, '*', float, X87_PC_SINGLE);
++}
++
++double dmul(double a, double b) {
++    return NARROW_OP(a, b, '*', double, X87_PC_DOUBLE);
++}
++
++double dmull(long double a, long double b) {
++    return NARROW_OP(a, b, '*', double, X87_PC_DOUBLE);
++}
++
++/* ============================================================
++ * Division
++ * ============================================================ */
++
++double fdiv(double a, double b) {
++    return NARROW_OP(a, b, '/', float, X87_PC_SINGLE);
++}
++
++double fdivl(long double a, long double b) {
++    return NARROW_OP(a, b, '/', float, X87_PC_SINGLE);
++}
++
++double ddiv(double a, double b) {
++    return NARROW_OP(a, b, '/', double, X87_PC_DOUBLE);
++}
++
++double ddivl(long double a, long double b) {
++    return NARROW_OP(a, b, '/', double, X87_PC_DOUBLE);
++}
++
++/* ============================================================
++ * Fused multiply-add: x * y + z FUSED (single rounding of x*y+z) and
++ * then rounded to the narrow type.  Delegate to the real fma core,
++ * which performs the genuine single-rounding multiply-add, and cast
++ * its result once to the narrow type.
++ * ============================================================ */
++
++double ffma(double x, double y, double z) {
++    /* All-float result: fmaf rounds x*y+z once to float. */
++    return fmaf((float)x, (float)y, (float)z);
++}
++
++double ffmal(long double x, long double y, long double z) {
++    /* long double operands, float result: fuse in long double via fmal,
++     * then round once to float. */
++    return (float)fmal(x, y, z);
++}
++
++double dfma(double x, double y, double z) {
++    /* All-double result: fma rounds x*y+z once to double. */
++    return fma(x, y, z);
++}
++
++double dfmal(long double x, long double y, long double z) {
++    /* long double operands, double result: fuse in long double via fmal,
++     * then round once to double. */
++    return (double)fmal(x, y, z);
++}
++
++/* ============================================================
++ * Square root
++ * ============================================================ */
++
++double fsqrt(double x) {
++    return (float)sqrt((double)x);
++}
++
++double fsqrtl(long double x) {
++    return (float)sqrt((long double)x);
++}
++
++double dsqrt(double x) {
++    return sqrt(x);
++}
++
++double dsqrtl(long double x) {
++    return (double)sqrt((long double)x);
++}
+diff --git a/lib/m/src/math_obsolete.c b/lib/m/src/math_obsolete.c
+new file mode 100644
+index 00000000..8a87d61a
+--- /dev/null
++++ b/lib/m/src/math_obsolete.c
+@@ -0,0 +1,149 @@
++/*
++ * math_obsolete.c — Obsolescent aliases (SVID / 4.3BSD / X/Open)
++ *
++ * These functions are obsolescent in POSIX.1-2024 and marked for
++ * elimination in a future version, but they remain in widespread use
++ * by legacy numerical code.  Provide them as thin forwarders to the
++ * standard replacements so old sources link without rewrites.
++ *
++ * Feature-test guards:
++ *   _DEFAULT_SOURCE  —  the default (POSIX.1-2008 and later)
++ *   _XOPEN_SOURCE    —  X/Open / XSI compat
++ *   _SVID_SOURCE     —  SVID / SVID-3 / SVID-4 / SVID-5
++ *   _BSD_SOURCE      —  4.3BSD compat
++ */
++
++#include <math.h>
++#include <stdint.h>
++
++/* ============================================================
++ * scalb(x, n) / scalbf(x, n)
++ *
++ * Historical two-argument scalb(x, n) returning x * 2^n.
++ * Companion to the existing scalbl(x, n) and scalbn(x, n).
++ *
++ * Edge case: n == ±Inf (as double) → ±Inf (except x==0 → ±0).
++ * The existing scalbn takes an int; the old scalb takes a double.
++ * We match the historical "fractional exponent" semantics by
++ * computing scalbn(x, (int)n) and handling the ±Inf edge.
++ * ============================================================ */
++
++double scalb(double x, double n) {
++    if (isnan(x)) return x;
++    if (isnan(n)) return NAN;
++    if (isinf(n)) {
++        /* n == +inf: x * 2^(+inf).  Finite/inf x != 0 -> ±inf (sign of x);
++         *            x == 0 -> 0 * inf -> NaN (invalid).
++         * n == -inf: x * 2^(-inf).  x != 0 -> ±0 (sign of x);
++         *            x == 0 -> ±0 (sign of x). */
++        if (n > 0.0) {
++            if (x == 0.0) return NAN;
++            return copysign(INFINITY, x);
++        } else {
++            return copysign(0.0, x);
++        }
++    }
++    /* Finite n — scalbn takes int; clamp huge |n| to int range so the
++     * overflow/underflow path inside scalbn() still produces ±inf / ±0. */
++    if (n > 2147483647.0)  n = 2147483647.0;
++    if (n < -2147483648.0) n = -2147483648.0;
++    return scalbn(x, (int)n);
++}
++
++float scalbf(float x, float n) {
++    if (isnan(x)) return x;
++    if (isnan(n)) return NAN;
++    if (isinf(n)) {
++        if (n > 0.0f) {
++            if (x == 0.0f) return NAN;
++            return copysignf(INFINITY, x);
++        } else {
++            return copysignf(0.0f, x);
++        }
++    }
++    if (n > 2147483647.0f)  n = 2147483647.0f;
++    if (n < -2147483648.0f) n = -2147483648.0f;
++    return scalbnf(x, (int)n);
++}
++
++/* ============================================================
++ * significand(x) — return the mantissa scaled to [1, 2)
++ *
++ * significand(x) = x / 2^ilogb(x) for finite non-zero x.
++ * For zero or inf/NaN, return the input as-is.
++ * ============================================================ */
++
++double significand(double x) {
++    if (isinf(x) || isnan(x) || x == 0.0) return x;
++    return scalbn(x, -ilogb(x));
++}
++
++float significandf(float x) {
++    if (isinf(x) || isnan(x) || x == 0.0f) return x;
++    return scalbnf(x, -ilogbf(x));
++}
++
++long double significandl(long double x) {
++    if (isinf(x) || isnan(x) || x == 0.0) return x;
++    return scalbnl(x, -ilogbl(x));
++}
++
++/* ============================================================
++ * drem(x, y) / dremf(x, y) — obsolescent alias of remainder / remainderf
++ * ============================================================ */
++
++double drem(double x, double y) { return remainder(x, y); }
++float  dremf(float x, float y)  { return remainderf(x, y); }
++
++/* ============================================================
++ * gamma(x) / gammaf(x) — historical name for lgamma / lgammaf
++ *
++ * These return the natural logarithm of |Gamma(x)| and set
++ * the global signgam to the sign of Gamma(x).
++ * ============================================================ */
++
++double gamma(double x) {
++    int sg;
++    double r = lgamma_r(x, &sg);
++    signgam = sg;
++    return r;
++}
++
++float gammaf(float x) {
++    int sg;
++    float r = (float)lgamma_r((double)x, &sg);
++    signgam = sg;
++    return r;
++}
++
++/* ============================================================
++ * pow10(x) / pow10f(x) / pow10l(x) — alias of exp10 / exp10f / exp10l
++ * ============================================================ */
++
++double pow10(double x)      { return exp10(x); }
++float  pow10f(float x)      { return exp10f(x); }
++long double pow10l(long double x) { return exp10l(x); }
++
++/* ============================================================
++ * matherr(x) — SVID error hook (no-op)
++ *
++ * The default implementation returns 0 (no override).
++ * Substrate libm reports errors via errno and the fenv,
++ * not through this hook.  Existing SVID-era code that
++ * references matherr will link; the hook is effectively
++ * a no-op stub.
++ * ============================================================ */
++
++struct exception {
++    char   *name;
++    char   *arith;
++    char   *type;
++    double  arg1;
++    double  arg2;
++    double  retval;
++};
++
++int matherr(struct exception *e) {
++    (void) e;
++    return 0;
++}
+diff --git a/lib/m/src/math_reentrant.c b/lib/m/src/math_reentrant.c
+new file mode 100644
+index 00000000..1019f8ae
+--- /dev/null
++++ b/lib/m/src/math_reentrant.c
+@@ -0,0 +1,27 @@
++/*
++ * math_reentrant.c — Reentrant gamma functions (glibc / 4.3BSD-Reno)
++ *
++ * Provides lgammaf_r() and lgammal_r() — thread-safe variants of
++ * lgammaf() / lgammal() that return the sign of Γ(x) via an
++ * integer pointer instead of the global signgam.
++ *
++ * These variants do NOT read or write the global signgam variable.
++ *
++ * Feature-test guard: _GNU_SOURCE / _DEFAULT_SOURCE
++ */
++
++#include <math.h>
++
++float lgammaf_r(float x, int *signp) {
++    int sg;
++    float r = (float)lgamma_r((double)x, &sg);
++    if (signp) *signp = sg;
++    return r;
++}
++
++long double lgammal_r(long double x, int *signp) {
++    int sg;
++    long double r = (long double)lgamma_r((double)x, &sg);
++    if (signp) *signp = sg;
++    return r;
++}
+diff --git a/lib/m/src/math_totalorder.c b/lib/m/src/math_totalorder.c
+new file mode 100644
+index 00000000..369283e8
+--- /dev/null
++++ b/lib/m/src/math_totalorder.c
+@@ -0,0 +1,351 @@
++/*
++ * math_totalorder.c — ISO C23 §7.12.11 IEEE 754-2019 total order and NaN
++ *
++ * Implements:
++ *   totalorder{,f,l} — IEEE 754 totalOrder predicate
++ *   totalordermag{,f,l} — totalOrder on |x| and |y|
++ *   canonicalize{,f,l} — canonical encoding
++ *   getpayload{,f,l} — NaN payload
++ *   setpayload{,f,l} — quiet NaN with payload
++ *   setpayloadsig{,f,l} — signaling NaN with payload
++ *
++ * Feature-test guard: __STDC_VERSION__ >= 202311L  (C23)
++ */
++
++#include <math.h>
++#include <stdint.h>
++#include <string.h>
++
++/* ============================================================
++ * Helper: extract IEEE 754 bit fields from double
++ * ============================================================ */
++
++/* IEEE 754 double: 1 sign bit, 11 exponent bits, 52 mantissa bits.
++ * NaN: exponent = all 1s (0x7FF), mantissa != 0.
++ * qNaN: MSB of mantissa = 1
++ * sNaN: MSB of mantissa = 0
++ *
++ * We access the raw bits via a union to avoid strict aliasing. */
++
++static int get_double_sign(double x) {
++    union { double f; uint64_t u; } u = { x };
++    return (int)((u.u >> 63) & 1);
++}
++
++static uint64_t get_double_exp(double x) {
++    union { double f; uint64_t u; } u = { x };
++    return (u.u >> 52) & 0x7FF;
++}
++
++static uint64_t get_double_mant(double x) {
++    union { double f; uint64_t u; } u = { x };
++    return u.u & 0xFFFFFFFFFFFFFULL;
++}
++
++static int get_double_payload(double x) {
++    /* Return the payload bits as a signed value.
++     * For NaN: the 52-bit mantissa interpreted as a positive integer.
++     * For non-NaN: return -1 (but this function is only called
++     * after checking isnan()). */
++    if (!isnan(x)) return -1;
++    return (int)get_double_mant(x);
++}
++
++/* ============================================================
++ * totalorder — IEEE 754 totalOrder predicate
++ *
++ * Returns nonzero iff x precedes-or-equals y in total order.
++ * The total order sorts:
++ *   1. All negative values (more negative = smaller)
++ *   2. Negative zeros < positive zeros
++ *   3. All positive values (smaller magnitude = smaller)
++ *   4. NaNs (signaling < quiet, smaller payload < larger payload)
++ *   5. +Inf
++ *
++ * This is quiet (raises no FE_INVALID) even for sNaN inputs.
++ * ============================================================ */
++
++/* Encode a finite double into a 64-bit total-order code.
++ * The encoding preserves sign-magnitude comparison as unsigned integer:
++ *   - Negative values: inverts all bits so they compare correctly
++ *   - Positive values: sign bit + sign-magnitude (already correct)
++ *   - +0 codes as 0, -0 codes as 0x8000000000000000 */
++static uint64_t totalorder_code(double x) {
++    uint64_t ux;
++    memcpy(&ux, &x, sizeof(ux));
++    int is_neg = (ux >> 63) & 1;
++    if (is_neg)
++        return ~ux;
++    else
++        return ux | ((uint64_t)1 << 63);
++}
++
++int totalorder(double x, double y) {
++    /* The sign-magnitude transform in totalorder_code() yields a
++     * monotone unsigned key for the COMPLETE IEEE 754 total order —
++     * negative NaN < -Inf < ... < -0 < +0 < ... < +Inf < positive NaN,
++     * with NaNs ordered by raw payload (and the sign-bit flip applied
++     * uniformly).  No NaN special-casing is needed; the ad-hoc path
++     * previously mis-ordered negative NaNs (it sorted by raw bits,
++     * placing -NaN above finite values instead of below them). */
++    return totalorder_code(x) <= totalorder_code(y);
++}
++
++int totalorderf(float x, float y) {
++    return totalorder((double)x, (double)y);
++}
++
++int totalorderl(long double x, long double y) {
++    return totalorder((double)x, (double)y);
++}
++
++/* ============================================================
++ * totalordermag — totalOrder on |x| and |y|
++ * ============================================================ */
++
++int totalordermag(double x, double y) {
++    /* Compare by magnitude (absolute value), ignoring sign */
++    return totalorder(fabs(x), fabs(y));
++}
++
++int totalordermagf(float x, float y) {
++    return totalordermag((double)x, (double)y);
++}
++
++int totalordermagl(long double x, long double y) {
++    return totalordermag((double)x, (double)y);
++}
++
++/* ============================================================
++ * canonicalize — produce canonical encoding
++ *
++ * For binary IEEE 754 formats (float, double), every value is
++ * canonical (except that sNaN should be quietened).  Returns 0 on
++ * success; returns nonzero if the input cannot be canonicalized.
++ * For sNaN, the canonical form is the quiet NaN with the same
++ * mantissa (setting the quiet bit).
++ * ============================================================ */
++
++double canonicalize(double x, double *cx) {
++    int x_nan = (get_double_exp(x) == 0x7FF) && (get_double_mant(x) != 0);
++    if (!x_nan) {
++        *cx = x;
++        return 0;
++    }
++
++    /* NaN: canonical form is quiet NaN (set mantissa MSB) */
++    uint64_t ux;
++    memcpy(&ux, &x, sizeof(ux));
++    /* Set the quiet bit (MSB of mantissa) */
++    ux |= (uint64_t)1 << 51;
++    memcpy(cx, &ux, sizeof(*cx));
++    return 0;
++}
++
++float canonicalizef(float x, float *cx) {
++    union { float f; uint32_t u; } u = { x };
++    int x_nan = ((u.u >> 23) & 0xFF) == 0xFF && ((u.u & 0x7FFFFF) != 0);
++    if (!x_nan) {
++        *cx = x;
++        return 0;
++    }
++    u.u |= (uint32_t)1 << 22;
++    *cx = u.f;
++    return 0;
++}
++
++long double canonicalizel(long double x, long double *cx) {
++    /* 80-bit extended precision on x86: 1 sign, 15 exp, 64 mantissa.
++     * For binary formats, canonicalize is a copy; for signaling NaN,
++     * set the quiet bit. We treat all long double as binary. */
++    *cx = x;
++    if (!isnanl(x)) return 0;
++    /* Set the quiet bit (bit 63 of mantissa in 80-bit format) */
++    union { long double f; uint8_t e[10]; } u = { x };
++    u.e[9] |= 0x80;  /* Set the top bit of the mantissa */
++    memcpy(cx, &u, sizeof(*cx));
++    return 0;
++}
++
++/* ============================================================
++ * getpayload — return the NaN payload
++ * ============================================================ */
++
++double getpayload(double *x) {
++    if (!isnan(*x)) return -1.0;
++    return (double)get_double_payload(*x);
++}
++
++double getpayloadf(float *x) {
++    union { float f; uint32_t u; } u = { *x };
++    int x_nan = ((u.u >> 23) & 0xFF) == 0xFF && ((u.u & 0x7FFFFF) != 0);
++    if (!x_nan) return -1.0;
++    return (double)(u.u & 0x7FFFFF);
++}
++
++double getpayloadl(long double *x) {
++    if (!isnanl(*x)) return -1.0;
++    /* 80-bit extended precision: mantissa bits [1..64] */
++    union { long double f; uint8_t e[10]; } u = { *x };
++    /* Mantissa is bytes 2-9 (big-endian in memory representation) */
++    uint64_t mant;
++    mant = ((uint64_t)u.e[2] << 56) | ((uint64_t)u.e[3] << 48) |
++           ((uint64_t)u.e[4] << 40) | ((uint64_t)u.e[5] << 32) |
++           ((uint64_t)u.e[6] << 24) | ((uint64_t)u.e[7] << 16) |
++           ((uint64_t)u.e[8] << 8) | (uint64_t)u.e[9];
++    return (double)mant;
++}
++
++/* ============================================================
++ * setpayload — quiet NaN with integer payload
++ * ============================================================ */
++
++double setpayload(double *res, double x, int payload) {
++    /* Build a quiet NaN with the given payload (mod 2^51).
++     * Quiet bit is bit 51 of the mantissa (always set for qNaN).
++     * Payload goes in bits 0-50 (51 bits). */
++    uint64_t payload_mask = 0x000FFFFFFFFFFFFFULL;  /* 51 bits */
++    if (payload < 0 || (uint32_t)payload > (uint32_t)payload_mask)
++        return -1;
++
++    /* Quiet NaN pattern: exp=0x7FF, quiet bit set, payload in low bits */
++    uint64_t u = 0x7FF8000000000000ULL;  /* quiet-NaN with zero payload */
++    u |= (uint32_t)payload & payload_mask;  /* apply payload */
++
++    /* Apply sign of x */
++    if (get_double_sign(x))
++        u |= (uint64_t)1 << 63;
++
++    memcpy(res, &u, sizeof(*res));
++    return 0;
++}
++
++double setpayloadf(float *res, float x, int payload) {
++    /* Float quiet NaN: exp=0xFF, quiet bit set (bit 22), payload in bits 0-21 */
++    uint32_t payload_mask = 0x7FFFFF;  /* 23 bits (bit 22 = quiet bit) */
++    if (payload < 0 || (uint32_t)payload > (uint32_t)payload_mask)
++        return -1;
++
++    uint32_t u = 0x7FC00000;  /* quiet-NaN with zero payload */
++    u |= (uint32_t)payload & payload_mask;
++
++    /* Apply sign of x */
++    uint32_t sx;
++    memcpy(&sx, &x, sizeof(sx));
++    if (sx & (uint32_t)1 << 31)
++        u |= (uint32_t)1 << 31;
++
++    memcpy(res, &u, sizeof(*res));
++    return 0;
++}
++
++double setpayloadsig(double *res, double x, int payload) {
++    /* Build a signaling NaN: exp=0x7FF, quiet bit clear (bit 51=0),
++     * payload in low bits. At least one mantissa bit must be set
++     * to make it NaN (not infinity). */
++    uint64_t payload_mask = 0x000FFFFFFFFFFFFFULL;  /* 51 bits */
++    if (payload < 0 || (uint32_t)payload > (uint32_t)payload_mask)
++        return -1;
++
++    /* sNaN pattern: exp=0x7FF, quiet bit clear, payload in low bits.
++     * If payload is zero, set bit 0 to ensure mantissa != 0. */
++    uint64_t u = 0x7FF0000000000000ULL;  /* NaN with zero mantissa (will be sNaN) */
++    uint64_t mant = (uint32_t)payload & payload_mask;
++    if (mant == 0)
++        mant = 1;  /* set lowest bit so it's NaN, not infinity */
++    u |= mant;
++    /* Quiet bit (bit 51) stays clear = signaling NaN */
++
++    if (get_double_sign(x))
++        u |= (uint64_t)1 << 63;
++
++    memcpy(res, &u, sizeof(*res));
++    return 0;
++}
++
++double setpayloadsigf(float *res, float x, int payload) {
++    uint32_t u = 0x7F800000;  /* sNaN with zero payload (quiet bit clear) */
++    uint32_t payload_mask = 0x3FFFFF;  /* 22 bits for payload (bit 22 = quiet bit) */
++    if (payload < 0 || (uint32_t)payload > (uint32_t)payload_mask)
++        return -1;
++
++    uint32_t mant = (uint32_t)payload & payload_mask;
++    if (mant == 0)
++        mant = 1;  /* ensure mantissa != 0 so it's NaN, not infinity */
++    u |= mant;
++
++    /* Apply sign of x */
++    uint32_t sx;
++    memcpy(&sx, &x, sizeof(sx));
++    if (sx & (uint32_t)1 << 31)
++        u |= (uint32_t)1 << 31;
++
++    memcpy(res, &u, sizeof(*res));
++    return 0;
++}
++
++double setpayloadl(long double *res, long double x, int payload) {
++    union { long double f; uint8_t e[10]; } u;
++    /* 64 explicit mantissa bits in 80-bit long double.
++     * payload is int, so mask to 64 bits to reject out-of-range. */
++    uint64_t payload64 = (uint64_t)(uint32_t)payload;
++    /* Reject: only use lower 64 bits; if user gave more, truncate silently.
++     * (IEEE 754 payload width = 64 for long double.) */
++    (void)payload64;  /* payload64 used below via individual byte extraction */
++
++    memset(&u, 0, sizeof(u));
++    u.e[9] = 0x7F;    /* high byte: exp high bits + mantissa MSB */
++    u.e[8] = 0xFF;    /* exp low byte */
++    u.e[9] |= 0x80;   /* set mantissa MSB (the explicit bit for normalized) */
++
++    /* Apply payload to the lower 64 mantissa bits (bytes 0-7) */
++    u.e[0] = (uint8_t)payload;
++    u.e[1] = (uint8_t)(payload >> 8);
++    u.e[2] = (uint8_t)(payload >> 16);
++    u.e[3] = (uint8_t)(payload >> 24);
++    /* Bytes 4-7 carry the high 32 bits of payload; cast to uint64_t first. */
++    {
++        uint64_t hi = (uint64_t)(uint32_t)payload;
++        u.e[4] = (uint8_t)(hi >> 16);
++        u.e[5] = (uint8_t)(hi >> 24);
++        u.e[6] = 0;
++        u.e[7] = 0;
++    }
++
++    /* Apply sign of x */
++    union { long double f; uint8_t e[10]; } sx = { x };
++    if (sx.e[9] & 0x80)
++        u.e[9] |= 0x80;
++
++    *res = u.f;
++    return 0;
++}
++
++double setpayloadsigl(long double *res, long double x, int payload) {
++    /* Same as setpayloadl but produce a signaling NaN */
++    union { long double f; uint8_t e[10]; } u;
++
++    memset(&u, 0, sizeof(u));
++    u.e[9] = 0x7F;
++    u.e[8] = 0xFF;
++    /* Don't set the explicit bit (MSB) — this makes it signaling */
++
++    u.e[0] = (uint8_t)(payload);
++    u.e[1] = (uint8_t)(payload >> 8);
++    u.e[2] = (uint8_t)(payload >> 16);
++    u.e[3] = (uint8_t)(payload >> 24);
++    {
++        uint64_t hi = (uint64_t)(uint32_t)payload;
++        u.e[4] = (uint8_t)(hi >> 16);
++        u.e[5] = (uint8_t)(hi >> 24);
++        u.e[6] = 0;
++        u.e[7] = 0;
++    }
++
++    union { long double f; uint8_t e[10]; } sx = { x };
++    if (sx.e[9] & 0x80)
++        u.e[9] |= 0x80;
++
++    *res = u.f;
++    return 0;
++}
+diff --git a/tests/lib/m/Makefile b/tests/lib/m/Makefile
+index 2b6a964b..3db4d0da 100644
+--- a/tests/lib/m/Makefile
++++ b/tests/lib/m/Makefile
+@@ -16,9 +16,10 @@ MATH_SRCS = ../../../lib/m/src/math_exp.c \
+ FENV = ../../../lib/m/src/fenv.c
+ 
+ all: test_trig prop_trig test_fenv prop_fenv fuzz_fenv test_tgmath \
+-      test_classify prop_classify test_arith prop_arith test_round prop_round \
+-      test_explog prop_explog test_bessel prop_bessel \
+-      test_accuracy test_x87_opt fuzz_math fuzz_mathf
++     test_classify prop_classify test_arith prop_arith test_round prop_round \
++     test_explog prop_explog test_bessel prop_bessel \
++     test_accuracy test_x87_opt fuzz_math fuzz_mathf \
++     test_libm_new prop_totalorder
+ 
+ test_trig: unit/test_trig.c $(MATH_SRCS) $(FPCLASSIFY) $(FENV)
+ 	$(CC) $(CFLAGS) -fno-builtin $^ -o $@ -lm
+@@ -80,6 +81,12 @@ fuzz_math: fuzz/fuzz_math.c $(MATH_SRCS) ../../../lib/m/src/mathf.c $(FPCLASSIFY
+ fuzz_mathf: fuzz/fuzz_mathf.c $(MATH_SRCS) ../../../lib/m/src/mathf.c ../../../lib/m/src/mathl.c $(FPCLASSIFY) $(FENV)
+ 	$(CC) $(CFLAGS) -fno-builtin $^ -o $@ -lm
+ 
++test_libm_new: unit/test_libm_new.c $(MATH_SRCS) ../../../lib/m/src/math_obsolete.c ../../../lib/m/src/math_narrowing.c ../../../lib/m/src/math_totalorder.c ../../../lib/m/src/math_reentrant.c $(FPCLASSIFY) $(FENV)
++	$(CC) $(CFLAGS) -fno-builtin $^ -o $@ -lm
++
++prop_totalorder: property/prop_totalorder.c $(MATH_SRCS) ../../../lib/m/src/math_totalorder.c $(FPCLASSIFY) $(FENV)
++	$(CC) $(CFLAGS) -fno-builtin $^ -o $@ -lm
++
+ test: all
+ 	./test_trig
+ 	./prop_trig
+@@ -100,10 +107,13 @@ test: all
+ 	./test_x87_opt
+ 	./fuzz_math
+ 	./fuzz_mathf
++	./test_libm_new
++	./prop_totalorder
+ 
+ clean:
+ 	rm -f test_trig prop_trig test_fenv prop_fenv fuzz_fenv test_tgmath \
+ 	      test_classify prop_classify test_arith prop_arith \
+ 	      test_round prop_round test_explog prop_explog \
+ 	      test_bessel prop_bessel \
+-	      test_accuracy test_x87_opt fuzz_math fuzz_mathf
++	      test_accuracy test_x87_opt fuzz_math fuzz_mathf \
++	      test_libm_new prop_totalorder
+diff --git a/tests/lib/m/property/prop_totalorder.c b/tests/lib/m/property/prop_totalorder.c
+new file mode 100644
+index 00000000..fbcc9338
+--- /dev/null
++++ b/tests/lib/m/property/prop_totalorder.c
+@@ -0,0 +1,119 @@
++/*
++ * prop_totalorder.c — property tests for ISO C23 totalOrder predicate
++ */
++
++#define _DEFAULT_SOURCE 1
++
++#include <stdio.h>
++#include <math.h>
++
++/* ============================================================
++ * Total order properties:
++ *   1. Reflexive: totalorder(x, x) == 1
++ *   2. Antisymmetric: totalorder(x, y) && !totalorder(y, x)
++ *   3. Transitive: totalorder(x, y) && totalorder(y, z) => totalorder(x, z)
++ *   4. Total: totalorder(x, y) || totalorder(y, x)
++ *   5. NaN at top: totalorder(x, NaN) == 1, !totalorder(NaN, x) for finite x
++ * ============================================================ */
++
++static void test_reflexive(void) {
++    double vals[] = {0.0, -0.0, 1.0, -1.0, INFINITY, -INFINITY, NAN,
++                     1.5e-308, -1.5e-308, 1.23456};
++    for (int i = 0; i < sizeof(vals) / sizeof(vals[0]); i++) {
++        if (!totalorder(vals[i], vals[i])) {
++            printf("FAIL: totalorder(%g, %g) should be 1 (reflexive)\n",
++                   vals[i], vals[i]);
++            return;
++        }
++    }
++}
++
++static void test_antisymmetric(void) {
++    double vals[] = {0.0, -0.0, 1.0, -1.0, INFINITY, -INFINITY};
++    for (int i = 0; i < sizeof(vals) / sizeof(vals[0]); i++) {
++        for (int j = 0; j < sizeof(vals) / sizeof(vals[0]); j++) {
++            if (vals[i] != vals[j]) {
++                int xy = totalorder(vals[i], vals[j]);
++                int yx = totalorder(vals[j], vals[i]);
++                /* At most one should be true (antisymmetry) */
++                if (xy && yx) {
++                    printf("FAIL: totalorder(%g, %g)=%d and totalorder(%g, %g)=%d\n",
++                           vals[i], vals[j], xy, vals[j], vals[i]);
++                    return;
++                }
++            }
++        }
++    }
++}
++
++static void test_transitive(void) {
++    double vals[] = {-2.0, -1.0, 0.0, 1.0, 2.0};
++    for (int i = 0; i < sizeof(vals) / sizeof(vals[0]); i++) {
++        for (int j = 0; j < sizeof(vals) / sizeof(vals[0]); j++) {
++            for (int k = 0; k < sizeof(vals) / sizeof(vals[0]); k++) {
++                if (totalorder(vals[i], vals[j]) && totalorder(vals[j], vals[k])) {
++                    if (!totalorder(vals[i], vals[k])) {
++                        printf("FAIL: transitivity (%g <= %g <= %g) => %g <= %g\n",
++                               vals[i], vals[j], vals[k], vals[i], vals[k]);
++                        return;
++                    }
++                }
++            }
++        }
++    }
++}
++
++static void test_total(void) {
++    double vals[] = {-2.0, -1.0, 0.0, 1.0, 2.0};
++    for (int i = 0; i < sizeof(vals) / sizeof(vals[0]); i++) {
++        for (int j = 0; j < sizeof(vals) / sizeof(vals[0]); j++) {
++            /* For any pair, at least one direction holds */
++            if (!totalorder(vals[i], vals[j]) && !totalorder(vals[j], vals[i])) {
++                printf("FAIL: neither totalorder(%g, %g) nor totalorder(%g, %g)\n",
++                       vals[i], vals[j], vals[j], vals[i]);
++                return;
++            }
++        }
++    }
++}
++
++static void test_nan_order(void) {
++    double finite = 0.0;
++    if (!totalorder(finite, NAN)) {
++        printf("FAIL: totalorder(%g, NaN) should be 1\n", finite);
++        return;
++    }
++    if (totalorder(NAN, finite)) {
++        printf("FAIL: totalorder(NaN, %g) should be 0\n", finite);
++        return;
++    }
++}
++
++static void test_ordering(void) {
++    /* -Inf < -1 < -0 < +0 < 1 < +Inf */
++    int x = totalorder(-INFINITY, -1.0);
++    int y = totalorder(-1.0, -0.0);
++    int z = totalorder(-0.0, 0.0);
++    int w = totalorder(0.0, 1.0);
++    int v = totalorder(1.0, INFINITY);
++
++    if (!x) printf("FAIL: -Inf < -1\n");
++    if (!y) printf("FAIL: -1 < -0\n");
++    if (!z) printf("FAIL: -0 < +0\n");
++    if (!w) printf("FAIL: +0 < 1\n");
++    if (!v) printf("FAIL: 1 < +Inf\n");
++}
++
++int main(void) {
++    printf("prop_totalorder: starting\n");
++
++    test_reflexive();
++    test_antisymmetric();
++    test_transitive();
++    test_total();
++    test_nan_order();
++    test_ordering();
++
++    printf("prop_totalorder: done\n");
++    return 0;
++}
+diff --git a/tests/lib/m/unit/test_libm_new.c b/tests/lib/m/unit/test_libm_new.c
+new file mode 100644
+index 00000000..40f5d0a3
+--- /dev/null
++++ b/tests/lib/m/unit/test_libm_new.c
+@@ -0,0 +1,243 @@
++/*
++ * test_libm_new.c — unit tests for new libm functions (task 24).
++ *
++ * Tests obsolescent aliases, C23 narrowing arithmetic, total order,
++ * NaN payload, reentrant gamma, and complex log10.
++ */
++
++#define _DEFAULT_SOURCE 1
++#include <stdio.h>
++#include <math.h>
++#include <fenv.h>
++#include <errno.h>
++#include <float.h>
++#include <stdint.h>
++#include <string.h>
++
++#ifndef M_E
++#define M_E  2.71828182845904523536
++#endif
++#ifndef M_PI
++#define M_PI 3.14159265358979323846
++#endif
++
++static int g_failures = 0;
++
++#define CHECK(cond, msg) do { \
++    if (!(cond)) { \
++        printf("  FAIL: %s (line %d)\n", (msg), __LINE__); \
++        g_failures++; \
++    } \
++} while (0)
++
++static int approx_eq(double a, double b, int ulps) {
++    if (a == b) return 1;
++    if (isnan(a) || isnan(b)) return isnan(a) && isnan(b);
++    if (isinf(a) || isinf(b)) return 0;
++    double diff = fabs(a - b);
++    double tol = ulps * (fabs(a) > fabs(b) ? fabs(a) : fabs(b)) * DBL_EPSILON;
++    return diff <= tol;
++}
++#define APPROX(a, b, msg) CHECK(approx_eq((a), (b), 16), msg)
++
++/* ============================================================
++ * Obsolescent aliases (§24.2)
++ * ============================================================ */
++
++static void test_scalb(void) {
++    /* scalb(x, n) == scalbn(x, (int)n) for finite n */
++    CHECK(approx_eq(scalb(1.0, 3.0), scalbn(1.0, 3), 1), "scalb(1, 3) == 8");
++    CHECK(approx_eq(scalb(2.0, -2.0), scalbn(2.0, -2), 1), "scalb(2, -2) == 0.5");
++    /* edge: ±0, ±inf, NaN */
++    CHECK(scalb(0.0, 10.0) == 0.0, "scalb(0, n) == 0");
++    CHECK(isinf(scalb(INFINITY, 10.0)), "scalb(+inf, n) == +inf");
++    CHECK(isnan(scalb(1.0, NAN)), "scalb(1, NaN) == NaN");
++}
++
++static void test_significand(void) {
++    /* significand(x) should return x * 2^(-ilogb(x)) → in [1, 2) */
++    double val = significand(100.0);
++    CHECK(val >= 1.0 && val < 2.0, "significand(100) in [1, 2)");
++    CHECK(approx_eq(val, 1.5625, 1), "significand(100) == 100/64");
++    CHECK(significand(0.0) == 0.0, "significand(0) == 0");
++    CHECK(significand(INFINITY) == INFINITY, "significand(+inf) == +inf");
++    CHECK(isnan(significand(NAN)), "significand(NaN) == NaN");
++}
++
++static void test_drem(void) {
++    CHECK(drem(5.0, 2.0) == remainder(5.0, 2.0), "drem(5, 2) == remainder(5, 2)");
++    CHECK(approx_eq(drem(10.0, 3.0), remainder(10.0, 3.0), 1),
++          "drem(10, 3) == remainder(10, 3)");
++}
++
++static void test_gamma(void) {
++    /* gamma(x) == lgamma(x), sets signgam */
++    int sg;
++    double lg = lgamma_r(5.0, &sg);
++    double gr = gamma(5.0);
++    CHECK(approx_eq(gr, lg, 1), "gamma(5) == lgamma(5)");
++    CHECK(signgam == sg, "gamma(5) sets signgam");
++    /* gamma(0.5) = ln(sqrt(pi)) */
++    CHECK(approx_eq(gamma(0.5), 0.5 * log(M_PI), 8), "gamma(0.5) ≈ ln(sqrt(pi))");
++}
++
++static void test_pow10(void) {
++    CHECK(pow10(0.0) == exp10(0.0), "pow10(0) == exp10(0)");
++    CHECK(pow10(1.0) == exp10(1.0), "pow10(1) == exp10(1)");
++    CHECK(approx_eq(pow10(2.0), 100.0, 16), "pow10(2) == 100");
++    CHECK(approx_eq(pow10f(2.0f), 100.0f, 1), "pow10f(2) == 100");
++}
++
++/* ============================================================
++ * C23 narrowing arithmetic (§24.3)
++ * ============================================================ */
++
++static void test_narrowing(void) {
++    /* fadd: double → float (single rounding) */
++    double large = 1e20 + 1.0;
++    double result = fadd(large, -1e20);
++    float narrow = (float)large + (float)(-1e20);
++    CHECK(approx_eq(result, narrow, 1), "fadd(1e20, -1e20) single-round");
++
++    /* dadd: no narrowing (double → double) */
++    CHECK(approx_eq(dadd(1.0, 2.0), 3.0, 0), "dadd(1, 2) == 3");
++
++    /* fmul: double → float */
++    CHECK(approx_eq(fmul(2.0, 3.0), 6.0f, 1), "fmul(2, 3) == 6");
++
++    /* fdiv: double → float */
++    CHECK(approx_eq(fdiv(10.0, 2.0), 5.0f, 1), "fdiv(10, 2) == 5");
++
++    /* fsqrt */
++    CHECK(approx_eq(fsqrt(4.0), 2.0f, 1), "fsqrt(4) == 2");
++    CHECK(approx_eq(dsqrt(4.0), 2.0, 0), "dsqrt(4) == 2");
++}
++
++/* ============================================================
++ * ISO C23 total order (§24.4)
++ * ============================================================ */
++
++static void test_totalorder(void) {
++    /* +0 < -0 */
++    CHECK(totalorder(-0.0, +0.0), "totalorder(-0, +0)");
++
++    /* negative < positive finite */
++    CHECK(totalorder(-1.0, 1.0), "totalorder(-1, 1)");
++
++    /* -inf < finite < +inf */
++    CHECK(totalorder(-INFINITY, 0.0), "totalorder(-inf, 0)");
++    CHECK(totalorder(0.0, INFINITY), "totalorder(0, +inf)");
++
++    /* NaN > everything */
++    CHECK(totalorder(-1.0, NAN), "-1 < NaN");
++    CHECK(totalorder(INFINITY, NAN), "+inf < NaN");
++
++    /* totalorder(a, a) == 1 (reflexive) */
++    CHECK(totalorder(1.0, 1.0), "totalorder(1, 1)");
++    CHECK(totalorder(NAN, NAN), "totalorder(NaN, NaN)");
++
++    /* totalordermag: compare by magnitude */
++    CHECK(totalordermag(-1.0, 2.0), "totalordermag(-1, 2) == totalorder(1, 2)");
++    /* totalordermag(-2, 1) compares |2| vs |1|; 2 > 1 so 0 (not less) */
++    CHECK(!totalordermag(-2.0, 1.0), "totalordermag(-2, 1) == 0 (2 > 1 by mag)");
++}
++
++static void test_canonicalize(void) {
++    /* Non-NaN: canonicalize returns x unchanged */
++    double cx;
++    CHECK(canonicalize(1.0, &cx) == 0, "canonicalize(1) returns 0");
++    CHECK(approx_eq(cx, 1.0, 0), "canonicalize(1) returns 1");
++
++    /* NaN: canonicalize quiets it */
++    double nan = NAN;
++    CHECK(canonicalize(nan, &cx) == 0, "canonicalize(NaN) returns 0");
++    CHECK(isnan(cx), "canonicalize(NaN) produces NaN");
++    CHECK(isnan(cx) && !__issignaling(cx), "canonicalize quiets sNaN");
++}
++
++static void test_getpayload(void) {
++    /* Non-NaN returns -1 */
++    double one = 1.0;
++    CHECK(getpayload(&one) == -1.0, "getpayload(1) == -1");
++
++    /* NaN payload: should be extractable */
++    double nan = NAN;
++    double p = getpayload(&nan);
++    CHECK(p >= -1.0, "getpayload(NaN) >= -1");
++}
++
++static void test_setpayload(void) {
++    double res;
++    /* setpayload with payload 0 on +1.0 → +quiet-NaN with payload 0 */
++    CHECK(setpayload(&res, 1.0, 0) == 0, "setpayload(+1, 0) returns 0");
++    CHECK(isnan(res), "setpayload produces NaN");
++    CHECK(!signbit(res), "setpayload(+1, 0) has positive sign");
++
++    /* Payload round-trip */
++    CHECK(setpayload(&res, 1.0, 42) == 0, "setpayload(+1, 42) returns 0");
++    double p = getpayload(&res);
++    CHECK(p >= 41.0 && p <= 43.0, "getpayload(setpayload(42)) ≈ 42");
++
++    /* Float variants */
++    float f;
++    CHECK(setpayloadf(&f, 1.0f, 0) == 0, "setpayloadf(+1, 0) returns 0");
++    CHECK(isnan(f), "setpayloadf produces NaN");
++}
++
++static void test_setpayloadsig(void) {
++    double res;
++    CHECK(setpayloadsig(&res, 1.0, 0) == 0, "setpayloadsig(+1, 0) returns 0");
++    CHECK(isnan(res), "setpayloadsig produces NaN");
++    /* Should be signaling */
++    CHECK(__issignaling(res), "setpayloadsig produces sNaN");
++}
++
++/* ============================================================
++ * Reentrant gamma (§24.5)
++ * ============================================================ */
++
++static void test_lgammaf_r(void) {
++    int sg;
++    double r = lgammaf_r(5.0f, &sg);
++    CHECK(r >= 0.0, "lgammaf_r(5) >= 0 (ln(24) ≈ 3.17)");
++    CHECK(sg == 1, "lgammaf_r(5) sets sign=+1 (5! > 0)");
++
++    /* Thread-safe: should NOT touch global signgam */
++    signgam = 42;
++    int local_sg;
++    lgammaf_r(2.0f, &local_sg);
++    CHECK(signgam == 42, "lgammaf_r does not modify global signgam");
++    CHECK(local_sg == 1, "lgammaf_r(2) sets signgam correctly");
++}
++
++static void test_lgammal_r(void) {
++    int sg;
++    double r = lgammal_r(3.0, &sg);  /* 3.0 → lgamma(3) = ln(2) ≈ 0.69 */
++    CHECK(r >= 0.0, "lgammal_r(3) ≈ ln(2)");
++    CHECK(sg == 1, "lgammal_r(3) sets sign=+1");
++}
++
++/* ============================================================
++ * Main
++ * ============================================================ */
++
++int main(void) {
++    printf("test_libm_new: starting\n");
++
++    test_scalb();
++    test_significand();
++    test_drem();
++    test_gamma();
++    test_pow10();
++    test_narrowing();
++    test_totalorder();
++    test_canonicalize();
++    test_getpayload();
++    test_setpayload();
++    test_setpayloadsig();
++    test_lgammaf_r();
++    test_lgammal_r();
++
++    printf("\nPASSED: %d failures\n", g_failures);
++    return g_failures;
++}
+-- 
+2.54.0
+

@@ -1,0 +1,510 @@
+From 7f6507e9f3981edc26ee7c1f247d91d8f69e675c Mon Sep 17 00:00:00 2001
+From: Kirn Gill II <segin2005@gmail.com>
+Date: Wed, 10 Jun 2026 22:48:10 -0500
+Subject: [PATCH 62/83] libsys: translate raw negative-errno returns to POSIX
+ -1/errno
+
+The native raw syscall() returns the kernel's value directly: on error a
+negative errno in [-4095,-1], without setting errno or returning -1.
+Only stat.c and chown.c handled this; every other typed wrapper leaked
+the raw negative value to callers expecting the POSIX -1+errno contract,
+so failures were silently mis-detected.  Worst case was times.c, where
+clock_t is uint32_t and a negative errno became a huge unsigned value
+indistinguishable from a valid tick count.
+
+Add lib/sys/sysret.h (__sysret: maps [-4095,-1] -> errno + -1) and apply
+it across times.c (capture signed, return (clock_t)-1), proc.c (all 14
+sys_proc_*), sysinfo.c (sysinfo + vm_* fallbacks), select.c (poll-error
+path), getrandom/mlock/reboot/stime/sysctl/getrusage/ioctl/vm86/
+modify_ldt.c, pgrp.c (setpgid/getpgid/setsid/getsid), getuid.c (setuid/
+setgid), and ptrace.c (PEEK-safe: clear errno first).
+
+Found by an audit of libsys.
+
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+---
+ lib/sys/getrandom.c  |  5 ++++-
+ lib/sys/getrusage.c  |  5 ++++-
+ lib/sys/getuid.c     |  7 +++++--
+ lib/sys/ioctl.c      |  5 ++++-
+ lib/sys/mlock.c      |  6 ++++--
+ lib/sys/modify_ldt.c |  5 ++++-
+ lib/sys/pgrp.c       | 10 ++++++----
+ lib/sys/proc.c       | 31 +++++++++++++++++--------------
+ lib/sys/ptrace.c     | 14 +++++++++++---
+ lib/sys/reboot.c     |  5 ++++-
+ lib/sys/select.c     | 10 +++++++---
+ lib/sys/stime.c      |  5 ++++-
+ lib/sys/sysctl.c     |  5 ++++-
+ lib/sys/sysinfo.c    | 12 +++++++-----
+ lib/sys/sysret.h     | 27 +++++++++++++++++++++++++++
+ lib/sys/times.c      | 12 +++++++++++-
+ lib/sys/vm86.c       |  5 ++++-
+ 17 files changed, 127 insertions(+), 42 deletions(-)
+ create mode 100644 lib/sys/sysret.h
+
+diff --git a/lib/sys/getrandom.c b/lib/sys/getrandom.c
+index 75046abf..3dc3b0ff 100644
+--- a/lib/sys/getrandom.c
++++ b/lib/sys/getrandom.c
+@@ -7,9 +7,12 @@
+ #include <sys/random.h>
+ #include <sys/syscall.h>
+ #include <unistd.h>
++#include <errno.h>
++
++#include "sysret.h"
+ 
+ long syscall(long number, ...);
+ 
+ ssize_t getrandom(void *buf, size_t buflen, unsigned int flags) {
+-    return (ssize_t)syscall(SYS_GETRANDOM, buf, buflen, flags);
++    return (ssize_t)__sysret(syscall(SYS_GETRANDOM, buf, buflen, flags));
+ }
+\ No newline at end of file
+diff --git a/lib/sys/getrusage.c b/lib/sys/getrusage.c
+index 9013e0d5..1eb94d5d 100644
+--- a/lib/sys/getrusage.c
++++ b/lib/sys/getrusage.c
+@@ -7,9 +7,12 @@
+ #include <sys/syscall.h>
+ #include <sys/resource.h>
+ #include <unistd.h>
++#include <errno.h>
++
++#include "sysret.h"
+ 
+ long syscall(long number, ...);
+ 
+ int sys_getrusage(int who, struct rusage *usage) {
+-    return (int)syscall(SYS_GETRUSAGE, (long)who, (void *)usage);
++    return (int)__sysret(syscall(SYS_GETRUSAGE, (long)who, (void *)usage));
+ }
+diff --git a/lib/sys/getuid.c b/lib/sys/getuid.c
+index 3ff66857..6a159f2b 100644
+--- a/lib/sys/getuid.c
++++ b/lib/sys/getuid.c
+@@ -7,6 +7,9 @@
+ #include <sys/syscall.h>
+ #include <unistd.h>
+ #include <sys/types.h>
++#include <errno.h>
++
++#include "sysret.h"
+ 
+ long syscall(long number, ...);
+ 
+@@ -27,9 +30,9 @@ gid_t sys_getegid(void) {
+ }
+ 
+ int sys_setuid(uid_t uid) {
+-    return (int)syscall(SYS_SETUID, (long)uid);
++    return (int)__sysret(syscall(SYS_SETUID, (long)uid));
+ }
+ 
+ int sys_setgid(gid_t gid) {
+-    return (int)syscall(SYS_SETGID, (long)gid);
++    return (int)__sysret(syscall(SYS_SETGID, (long)gid));
+ }
+diff --git a/lib/sys/ioctl.c b/lib/sys/ioctl.c
+index a8884af1..7b735e6b 100644
+--- a/lib/sys/ioctl.c
++++ b/lib/sys/ioctl.c
+@@ -8,6 +8,9 @@
+ #include <sys/ioctl.h>
+ #include <unistd.h>
+ #include <stdarg.h>
++#include <errno.h>
++
++#include "sysret.h"
+ 
+ long syscall(long number, ...);
+ 
+@@ -19,5 +22,5 @@ int sys_ioctl(int fd, unsigned long request, ...) {
+     arg = va_arg(ap, void *);
+     va_end(ap);
+ 
+-    return (int)syscall(SYS_IOCTL, (long)fd, (long)request, (long)arg);
++    return (int)__sysret(syscall(SYS_IOCTL, (long)fd, (long)request, (long)arg));
+ }
+diff --git a/lib/sys/mlock.c b/lib/sys/mlock.c
+index 8836ebf3..ad978fea 100644
+--- a/lib/sys/mlock.c
++++ b/lib/sys/mlock.c
+@@ -8,12 +8,14 @@
+ #include <unistd.h>
+ #include <errno.h>
+ 
++#include "sysret.h"
++
+ long syscall(long number, ...);
+ 
+ int mlock(const void *addr, size_t len) {
+-    return syscall(SYS_mlock, addr, len);
++    return (int)__sysret(syscall(SYS_mlock, addr, len));
+ }
+ 
+ int munlock(const void *addr, size_t len) {
+-    return syscall(SYS_munlock, addr, len);
++    return (int)__sysret(syscall(SYS_munlock, addr, len));
+ }
+diff --git a/lib/sys/modify_ldt.c b/lib/sys/modify_ldt.c
+index 6c014a5b..057f316a 100644
+--- a/lib/sys/modify_ldt.c
++++ b/lib/sys/modify_ldt.c
+@@ -1,7 +1,10 @@
+ #include <sys/ldt.h>
+ #include <sys/syscall.h>
+ #include <unistd.h>
++#include <errno.h>
++
++#include "sysret.h"
+ 
+ int modify_ldt(int func, void *ptr, unsigned long bytecount) {
+-    return (int)syscall(SYS_MODIFY_LDT, func, ptr, bytecount);
++    return (int)__sysret(syscall(SYS_MODIFY_LDT, func, ptr, bytecount));
+ }
+diff --git a/lib/sys/pgrp.c b/lib/sys/pgrp.c
+index 65b981ed..8db693cd 100644
+--- a/lib/sys/pgrp.c
++++ b/lib/sys/pgrp.c
+@@ -9,14 +9,16 @@
+ #include <sys/types.h>
+ #include <errno.h>
+ 
++#include "sysret.h"
++
+ long syscall(long number, ...);
+ 
+ int sys_setpgid(pid_t pid, pid_t pgid) {
+-    return (int)syscall(SYS_SETPGID, (long)pid, (long)pgid);
++    return (int)__sysret(syscall(SYS_SETPGID, (long)pid, (long)pgid));
+ }
+ 
+ pid_t sys_getpgid(pid_t pid) {
+-    return (pid_t)syscall(SYS_GETPGID, (long)pid);
++    return (pid_t)__sysret(syscall(SYS_GETPGID, (long)pid));
+ }
+ 
+ pid_t sys_getpgrp(void) {
+@@ -24,9 +26,9 @@ pid_t sys_getpgrp(void) {
+ }
+ 
+ pid_t setsid(void) {
+-    return (pid_t)syscall(SYS_SETSID);
++    return (pid_t)__sysret(syscall(SYS_SETSID));
+ }
+ 
+ pid_t getsid(pid_t pid) {
+-    return (pid_t)syscall(SYS_GETSID, (long)pid);
++    return (pid_t)__sysret(syscall(SYS_GETSID, (long)pid));
+ }
+diff --git a/lib/sys/proc.c b/lib/sys/proc.c
+index 1e16557c..7ddba9e3 100644
+--- a/lib/sys/proc.c
++++ b/lib/sys/proc.c
+@@ -1,56 +1,59 @@
+ #include <sys/syscall.h>
+ #include <sys/sysinfo.h>
+ #include <unistd.h>
++#include <errno.h>
++
++#include "sysret.h"
+ 
+ int sys_proc_count(void) {
+-    return (int)syscall(SYS_PROC_COUNT, 0, 0, 0, 0, 0, 0);
++    return (int)__sysret(syscall(SYS_PROC_COUNT, 0, 0, 0, 0, 0, 0));
+ }
+ 
+ int sys_proc_info(pid_t pid, sys_procinfo_t *info) {
+-    return (int)syscall(SYS_PROC_INFO, pid, (uintptr_t)info, 0, 0, 0, 0);
++    return (int)__sysret(syscall(SYS_PROC_INFO, pid, (uintptr_t)info, 0, 0, 0, 0));
+ }
+ 
+ int sys_proc_list(pid_t *pids, size_t count) {
+-    return (int)syscall(SYS_PROC_LIST, (uintptr_t)pids, count, 0, 0, 0, 0);
++    return (int)__sysret(syscall(SYS_PROC_LIST, (uintptr_t)pids, count, 0, 0, 0, 0));
+ }
+ 
+ int sys_proc_threads(pid_t pid, tid_t *tids, size_t *count) {
+-    return (int)syscall(SYS_PROC_THREADS, pid, (uintptr_t)tids, (uintptr_t)count, 0, 0, 0);
++    return (int)__sysret(syscall(SYS_PROC_THREADS, pid, (uintptr_t)tids, (uintptr_t)count, 0, 0, 0));
+ }
+ 
+ int sys_proc_thr_count(pid_t pid) {
+-    return (int)syscall(SYS_PROC_THR_COUNT, pid, 0, 0, 0, 0, 0);
++    return (int)__sysret(syscall(SYS_PROC_THR_COUNT, pid, 0, 0, 0, 0, 0));
+ }
+ 
+ int sys_proc_thr_list(pid_t pid, sys_thrinfo_t *array, size_t size_bytes) {
+-    return (int)syscall(SYS_PROC_THR_LIST, pid,
+-                        (uintptr_t)array, (uintptr_t)size_bytes, 0, 0, 0);
++    return (int)__sysret(syscall(SYS_PROC_THR_LIST, pid,
++                        (uintptr_t)array, (uintptr_t)size_bytes, 0, 0, 0));
+ }
+ 
+ int sys_proc_fds(pid_t pid, sys_fd_t *fds, size_t *count) {
+-    return (int)syscall(SYS_PROC_FDS, pid, (uintptr_t)fds, (uintptr_t)count, 0, 0, 0);
++    return (int)__sysret(syscall(SYS_PROC_FDS, pid, (uintptr_t)fds, (uintptr_t)count, 0, 0, 0));
+ }
+ 
+ int sys_proc_maps(pid_t pid, sys_map_t *maps, size_t *count) {
+-    return (int)syscall(SYS_PROC_MAPS, pid, (uintptr_t)maps, (uintptr_t)count, 0, 0, 0);
++    return (int)__sysret(syscall(SYS_PROC_MAPS, pid, (uintptr_t)maps, (uintptr_t)count, 0, 0, 0));
+ }
+ 
+ int sys_proc_cwd(pid_t pid, char *buf, size_t len) {
+-    return (int)syscall(SYS_PROC_CWD, pid, (uintptr_t)buf, len, 0, 0, 0);
++    return (int)__sysret(syscall(SYS_PROC_CWD, pid, (uintptr_t)buf, len, 0, 0, 0));
+ }
+ 
+ int sys_proc_exe(pid_t pid, char *buf, size_t len) {
+-    return (int)syscall(SYS_PROC_EXE, pid, (uintptr_t)buf, len, 0, 0, 0);
++    return (int)__sysret(syscall(SYS_PROC_EXE, pid, (uintptr_t)buf, len, 0, 0, 0));
+ }
+ 
+ int sys_proc_cmdline(pid_t pid, char **argv, size_t *argc) {
+-    return (int)syscall(SYS_PROC_CMDLINE, pid, (uintptr_t)argv, (uintptr_t)argc, 0, 0, 0);
++    return (int)__sysret(syscall(SYS_PROC_CMDLINE, pid, (uintptr_t)argv, (uintptr_t)argc, 0, 0, 0));
+ }
+ 
+ int sys_proc_environ(pid_t pid, char **envp, size_t *envc) {
+-    return (int)syscall(SYS_PROC_ENVIRON, pid, (uintptr_t)envp, (uintptr_t)envc, 0, 0, 0);
++    return (int)__sysret(syscall(SYS_PROC_ENVIRON, pid, (uintptr_t)envp, (uintptr_t)envc, 0, 0, 0));
+ }
+ 
+ int sys_proc_pers_name(int perso_id, char *buf, size_t len) {
+-    return (int)syscall(SYS_PROC_PERS_NAME, perso_id, (uintptr_t)buf, len, 0, 0, 0);
++    return (int)__sysret(syscall(SYS_PROC_PERS_NAME, perso_id, (uintptr_t)buf, len, 0, 0, 0));
+ }
+diff --git a/lib/sys/ptrace.c b/lib/sys/ptrace.c
+index 49e8ad0d..c158f8b6 100644
+--- a/lib/sys/ptrace.c
++++ b/lib/sys/ptrace.c
+@@ -7,9 +7,17 @@
+ #include <sys/syscall.h>
+ #include <sys/types.h>
+ #include <unistd.h>
+-
+-long syscall(long number, ...);
++#include <errno.h>
+ 
+ long ptrace(int request, pid_t pid, void *addr, int data) {
+-    return syscall(SYS_PTRACE, request, pid, addr, data);
++    /* For PEEK requests -1 can be a legitimate data value, so the POSIX
++     * idiom is to clear errno before the call and inspect it after.  A
++     * negative-errno raw return maps to -1 + errno. */
++    errno = 0;
++    long r = syscall(SYS_PTRACE, request, pid, addr, data);
++    if (r < 0 && r >= -4095) {
++        errno = (int)-r;
++        return -1;
++    }
++    return r;
+ }
+diff --git a/lib/sys/reboot.c b/lib/sys/reboot.c
+index 5a3d71e5..0a8d2eca 100644
+--- a/lib/sys/reboot.c
++++ b/lib/sys/reboot.c
+@@ -6,9 +6,12 @@
+ 
+ #include <sys/syscall.h>
+ #include <unistd.h>
++#include <errno.h>
++
++#include "sysret.h"
+ 
+ long syscall(long number, ...);
+ 
+ int reboot(int cmd) {
+-    return (int)syscall(SYS_REBOOT, cmd);
++    return (int)__sysret(syscall(SYS_REBOOT, cmd));
+ }
+diff --git a/lib/sys/select.c b/lib/sys/select.c
+index dc57560c..a2d72d06 100644
+--- a/lib/sys/select.c
++++ b/lib/sys/select.c
+@@ -81,9 +81,13 @@ int sys_select(int nfds, fd_set * __restrict readfds, fd_set * __restrict writef
+         if (writefds) FD_ZERO(writefds);
+         if (exceptfds) FD_ZERO(exceptfds);
+     } else {
+-        /* Error from poll */
+-        return ret;
++        /* Error from poll: the raw syscall returns a negative errno,
++         * translate to the POSIX -1 + errno contract. */
++        if (ret < 0 && ret >= -4095) {
++            errno = -ret;
++        }
++        return -1;
+     }
+-    
++
+     return ret;
+ }
+diff --git a/lib/sys/stime.c b/lib/sys/stime.c
+index 8c0945a1..da0a0680 100644
+--- a/lib/sys/stime.c
++++ b/lib/sys/stime.c
+@@ -7,9 +7,12 @@
+ #include <sys/syscall.h>
+ #include <time.h>
+ #include <unistd.h>
++#include <errno.h>
++
++#include "sysret.h"
+ 
+ long syscall(long number, ...);
+ 
+ int sys_stime(const time_t *t) {
+-    return (int)syscall(SYS_STIME, (void *)t);
++    return (int)__sysret(syscall(SYS_STIME, (void *)t));
+ }
+diff --git a/lib/sys/sysctl.c b/lib/sys/sysctl.c
+index 36acc627..29736192 100644
+--- a/lib/sys/sysctl.c
++++ b/lib/sys/sysctl.c
+@@ -7,9 +7,12 @@
+ #include <sys/syscall.h>
+ #include <sys/sysctl.h>
+ #include <stddef.h>
++#include <errno.h>
++
++#include "sysret.h"
+ 
+ long syscall(long number, ...);
+ 
+ int sys_sysctl(int *name, unsigned int namelen, void *oldp, size_t *oldlenp, void *newp, size_t newlen) {
+-    return (int)syscall(SYS_SYSCTL, name, namelen, oldp, oldlenp, newp, newlen);
++    return (int)__sysret(syscall(SYS_SYSCTL, name, namelen, oldp, oldlenp, newp, newlen));
+ }
+diff --git a/lib/sys/sysinfo.c b/lib/sys/sysinfo.c
+index 4a2d7fec..d79121e1 100644
+--- a/lib/sys/sysinfo.c
++++ b/lib/sys/sysinfo.c
+@@ -47,11 +47,13 @@
+ #include <errno.h>
+ #include <time.h>
+ 
++#include "sysret.h"
++
+ /* ===========================================================
+  * sysinfo(2): legacy Linux-style aggregate.
+  * =========================================================== */
+ int sysinfo(struct sysinfo *info) {
+-    return syscall(SYS_SYSINFO, info);
++    return (int)__sysret(syscall(SYS_SYSINFO, info));
+ }
+ 
+ /* ===========================================================
+@@ -101,7 +103,7 @@ int sys_vm_stats(sys_vmstat_t *stats) {
+     char buf[2048];
+     if (read_proc_file("/proc/meminfo", buf, sizeof(buf)) < 0) {
+         /* Fall back to the kernel syscall, if registered. */
+-        return syscall(SYS_VM_STATS, stats);
++        return (int)__sysret(syscall(SYS_VM_STATS, stats));
+     }
+     stats->total       = parse_kv_kib(buf, "MemTotal")     * 1024ULL;
+     stats->free        = parse_kv_kib(buf, "MemFree")      * 1024ULL;
+@@ -118,7 +120,7 @@ int sys_vm_stats(sys_vmstat_t *stats) {
+ int sys_vm_info(sys_vminfo_t *info) {
+     if (!info) { errno = EINVAL; return -1; }
+     memset(info, 0, sizeof(*info));
+-    return syscall(SYS_VM_INFO, info);
++    return (int)__sysret(syscall(SYS_VM_INFO, info));
+ }
+ 
+ int sys_vm_swap(sys_swapinfo_t *swap, size_t *count) {
+@@ -132,14 +134,14 @@ int sys_vm_swap(sys_swapinfo_t *swap, size_t *count) {
+ int sys_vm_buffers(sys_bufinfo_t *buf) {
+     if (!buf) { errno = EINVAL; return -1; }
+     memset(buf, 0, sizeof(*buf));
+-    return syscall(SYS_VM_BUFFERS, buf);
++    return (int)__sysret(syscall(SYS_VM_BUFFERS, buf));
+ }
+ 
+ int sys_vm_slabs(sys_slabinfo_t *slabs, size_t *count) {
+     if (!count) { errno = EINVAL; return -1; }
+     /* `*count` is the array capacity on entry, the filled count on
+      * return — the kernel reads it, then overwrites it. */
+-    return syscall(SYS_VM_SLABS, slabs, count);
++    return (int)__sysret(syscall(SYS_VM_SLABS, slabs, count));
+ }
+ 
+ /* ===========================================================
+diff --git a/lib/sys/sysret.h b/lib/sys/sysret.h
+new file mode 100644
+index 00000000..352b0595
+--- /dev/null
++++ b/lib/sys/sysret.h
+@@ -0,0 +1,27 @@
++/*
++ * lib/sys/sysret.h — internal helper for translating the raw syscall
++ * return value into the POSIX -1 + errno error contract.
++ *
++ * The native raw syscall() returns the kernel value directly: on error
++ * it returns a NEGATIVE errno in the range [-4095, -1] (it does NOT set
++ * errno or return -1).  Every typed wrapper that exposes a public
++ * POSIX/Linux function with a -1 + errno error contract must run its
++ * raw return through __sysret() (or one of the typed variants below).
++ *
++ * This header is internal to lib/sys/; it is not installed.
++ */
++#ifndef _LIBSYS_SYSRET_H
++#define _LIBSYS_SYSRET_H
++
++#include <errno.h>
++
++/* Generic translator: maps a negative-errno raw return to -1 + errno. */
++static inline long __sysret(long r) {
++    if (r < 0 && r >= -4095) {
++        errno = (int)-r;
++        return -1;
++    }
++    return r;
++}
++
++#endif /* _LIBSYS_SYSRET_H */
+diff --git a/lib/sys/times.c b/lib/sys/times.c
+index 422c5357..51e42ad7 100644
+--- a/lib/sys/times.c
++++ b/lib/sys/times.c
+@@ -7,9 +7,19 @@
+ #include <sys/syscall.h>
+ #include <sys/times.h>
+ #include <unistd.h>
++#include <errno.h>
++
++#include "sysret.h"
+ 
+ long syscall(long number, ...);
+ 
+ clock_t sys_times(struct tms *buf) {
+-    return (clock_t)syscall(SYS_TIMES, (void *)buf);
++    /* clock_t is uint32_t, so the negative-errno test must run on a
++     * signed capture before any cast back to clock_t. */
++    long r = syscall(SYS_TIMES, (void *)buf);
++    if (r < 0 && r >= -4095) {
++        errno = (int)-r;
++        return (clock_t)-1;
++    }
++    return (clock_t)r;
+ }
+diff --git a/lib/sys/vm86.c b/lib/sys/vm86.c
+index 25635e2f..d161f8c0 100644
+--- a/lib/sys/vm86.c
++++ b/lib/sys/vm86.c
+@@ -6,7 +6,10 @@
+ #include <sys/syscall.h>
+ #include <sys/vm86.h>
+ #include <unistd.h>
++#include <errno.h>
++
++#include "sysret.h"
+ 
+ int vm86(struct vm86_struct *info) {
+-    return (int)syscall(SYS_VM86, info);
++    return (int)__sysret(syscall(SYS_VM86, info));
+ }
+-- 
+2.54.0
+

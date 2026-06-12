@@ -1,0 +1,105 @@
+From 93fc02e060158e08f9ea0c633eb976dc5002bdae Mon Sep 17 00:00:00 2001
+From: Kirn Gill II <segin2005@gmail.com>
+Date: Wed, 10 Jun 2026 21:14:17 -0500
+Subject: [PATCH 60/83] libsys: fix 4-byte-per-syscall stack leak in the native
+ syscall() stub
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The native syscall() stub popped the syscall-number slot off the user
+stack and re-pushed the return address.  That satisfied the kernel ABI
+(C args land at useresp[1..]) but left esp one slot HIGH on return —
+pointing at arg0 instead of at the caller's first pushed value (the
+number slot).  Every cdecl caller then `add`ed back its full pushed
+size and overshot by 4 bytes, so each syscall() leaked 4 bytes of
+stack.
+
+A function's epilogue restores esp from ebp soon after a syscall, so
+the leak is normally erased and invisible.  But a tight loop that calls
+syscall() WITHOUT returning accumulates 4 bytes per iteration: the
+futex torture test's ping-pong (`while (turn != me) futex(WAIT)`)
+climbs esp out of the thread's 64 KiB stack after enough spins and dies
+with SIGSEGV pushing onto its own (now out-of-bounds) stack.  This was
+the pingpong/cycles/wake_op crash in tests/lib/futex.
+
+Fix: load the number without disturbing the stack, bump esp past the
+return-address slot so int $0x80 still sees the args at useresp[1..],
+then undo the bump before ret so esp lands on the number slot — a
+balanced cdecl callee, no leak.  Kernel ABI is unchanged (args still at
+useresp[1..]).  tests/lib/futex now passes 137/137 on substrate.
+
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+---
+ lib/sys/syscall.S | 45 +++++++++++++++++----------------------------
+ 1 file changed, 17 insertions(+), 28 deletions(-)
+
+diff --git a/lib/sys/syscall.S b/lib/sys/syscall.S
+index af5b7331..c0a821fd 100644
+--- a/lib/sys/syscall.S
++++ b/lib/sys/syscall.S
+@@ -1,44 +1,33 @@
+ /*
+  * syscall.S - i386 raw syscall entry point (native personality ABI)
+  *
+- * Substrate's native personality (and BSD personalities — FreeBSD,
+- * NetBSD, OpenBSD, SVR4) extract syscall arguments from the user
+- * stack at offsets `useresp[1..8]`, NOT from %ebx/%ecx/%edx/...
+- * (which is the Linux i386 convention).  See
+- * sys/arch/i386/syscall_abi.h:i386_extract_syscall_args.
+- *
+- * The Substrate convention assumes the syscall was issued from a
+- * libc stub that the user `call`ed: useresp[0] is the call's
+- * return address, useresp[1..] are the C arguments laid out in
+- * cdecl order.
+- *
+- * Strategy: rearrange the stack so `int $0x80` fires with that
+- * exact layout — pop the syscall number off into %eax, push the
+- * caller's return address back into the slot it vacated.  After
+- * the syscall returns we `ret` normally; the caller cleans up
+- * its own arguments per cdecl.
++ * The kernel extracts syscall arguments from the user stack at
++ * useresp[1..8] (see sys/arch/i386/syscall_abi.h); useresp[0] is
++ * ignored.  The number is passed in %eax.
+  *
+  *   int  syscall(int nr, ...);
+  *
+- * Inbound stack:                Outbound (during int $0x80):
+- *   [esp+0]  = ret_addr           [esp+0]  = ret_addr  (= useresp[0])
+- *   [esp+4]  = nr                 [esp+4]  = arg0      (= useresp[1])
+- *   [esp+8]  = arg0               [esp+8]  = arg1      (= useresp[2])
+- *   [esp+12] = arg1               ...
+- *   ...
++ * Constraints: at int $0x80 the C args a1.. must sit at useresp[1..];
++ * on return esp must land where a normal cdecl callee leaves it (on
++ * the caller's first pushed value) so the caller's own arg cleanup is
++ * balanced.  The previous version popped the number off and re-pushed
++ * the return address, leaving esp one slot HIGH -- so every syscall()
++ * leaked 4 bytes of stack.  A function's epilogue normally resets esp,
++ * but a tight loop that calls syscall() WITHOUT returning (a futex
++ * ping-pong) accumulates 4 bytes per call until esp climbs out of the
++ * thread stack -> SIGSEGV.  Fix: bump esp past the return-address slot
++ * for the int, then undo it before ret, leaving the stack balanced.
+  */
+ 
+ .global syscall
+ .type syscall, @function
+ 
+ syscall:
+-    popl  %ecx              /* ret_addr -> ecx; esp now points at nr   */
+-    popl  %eax              /* nr      -> eax; esp now points at arg0  */
+-    pushl %ecx              /* push ret_addr back; esp at ret_addr     */
+-
++    movl  4(%esp), %eax     /* %eax = syscall number (1st C arg) */
++    addl  $4, %esp          /* esp -> &nr: a1.. land at useresp[1..] */
+     int   $0x80
+-
+-    ret                     /* pop ret_addr, jump to caller            */
++    subl  $4, %esp          /* esp -> &ret_addr */
++    ret                     /* cdecl return; esp ends on the number slot (no leak) */
+ 
+ .size syscall, . - syscall
+ 
+-- 
+2.54.0
+

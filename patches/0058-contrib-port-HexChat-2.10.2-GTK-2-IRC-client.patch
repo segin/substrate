@@ -1,0 +1,178 @@
+From 6e6dee9d3deb15ecb778442ffd0ad7f776a7c9e1 Mon Sep 17 00:00:00 2001
+From: Kirn Gill II <segin2005@gmail.com>
+Date: Wed, 10 Jun 2026 17:14:07 -0500
+Subject: [PATCH 58/83] contrib: port HexChat 2.10.2 (GTK+ 2 IRC client)
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Cross-built against the substrate GTK+ 2.x stack via substrate_sysroot.
+2.10.2 is the last autotools HexChat (2.12+ is meson-only, and substrate has
+no meson cross harness).
+
+Harness:
+- In-source build: HexChat's generators hardcode source-relative paths
+  (make-te reads textevents.in; fe-gtk reads ../../data/*.gresource.xml),
+  which out-of-source can't resolve.
+- make-te (a noinst text-event generator the cross build compiles for the
+  target) is rebuilt with the host gcc; the GResource step uses the host
+  glib-compile-resources.
+- D-Bus/libnotify/libproxy/libcanberra/isocodes/sysinfo/NLS and the Perl/
+  Python plugin loaders are disabled (no ports); gtk/glib cross run-tests
+  disabled.
+
+SSL deferred: HexChat 2.10.2 reaches into OpenSSL 1.0 internals
+(ssl->session->sess_cert->peer_rsa_tmp, X509->cert_info->key->algor,
+X509_STORE_CTX->current_cert) that are opaque/removed in substrate's
+OpenSSL 3.x, so --disable-openssl for now.
+
+Produces /usr/bin/hexchat (2.6M); all DT_NEEDED resolve in the GTK2 stack.
+Runtime: builds + links clean and the lib chain is proven (GTK2 smoke test);
+a headless `hexchat -v` hangs in early startup (no crash) — full verification
+needs a live X server, tracked in README.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+---
+ contrib/hexchat/README.SUBSTRATE.md | 38 +++++++++++++++++++
+ contrib/hexchat/build.sh            | 57 +++++++++++++++++++++++++++++
+ contrib/hexchat/fetch.sh            | 19 ++++++++++
+ 3 files changed, 114 insertions(+)
+ create mode 100644 contrib/hexchat/README.SUBSTRATE.md
+ create mode 100755 contrib/hexchat/build.sh
+ create mode 100755 contrib/hexchat/fetch.sh
+
+diff --git a/contrib/hexchat/README.SUBSTRATE.md b/contrib/hexchat/README.SUBSTRATE.md
+new file mode 100644
+index 00000000..53eb2dc5
+--- /dev/null
++++ b/contrib/hexchat/README.SUBSTRATE.md
+@@ -0,0 +1,38 @@
++# hexchat (2.10.2 — last autotools release)
++
++The HexChat GTK+ 2 IRC client.  Cross-built via substrate_sysroot against the
++full GTK+ 2.x stack (gtk2/gdk-pixbuf/pango/atk/cairo/glib2 + X) plus libdl.
++2.12+ is meson-only (substrate has no meson cross harness), so 2.10.2 is used.
++
++Build notes:
++- **In-source build**: HexChat's generators hardcode source-relative paths
++  (`src/common/make-te` reads `textevents.in`; `src/fe-gtk` reads
++  `../../data/*.gresource.xml`), which an out-of-source build can't resolve.
++- **Host `make-te`**: the `make-te` text-event generator is a noinst program
++  that the cross build compiles for the target (can't run on the host); it is
++  rebuilt with the host gcc and touched newer than its sources so the
++  generation step runs.
++- The GResource step uses the build host's `glib-compile-resources`.
++- `--disable-gtktest`/`--disable-glibtest` (cross run-tests); D-Bus,
++  libnotify, libproxy, libcanberra, isocodes, sysinfo, NLS, and the Perl/
++  Python plugin loaders are disabled (no ports).
++
++**SSL deferred.**  HexChat 2.10.2's `src/common/ssl.c` / `server.c` reach into
++OpenSSL 1.0 internals (`ssl->session->sess_cert->peer_rsa_tmp`,
++`X509->cert_info->key->algor`, `X509_STORE_CTX->current_cert`) that are opaque
++or removed in substrate's OpenSSL 3.x.  Built `--disable-openssl` for now;
++SSL support needs the cert/SSL accessor modernization HexChat upstream did
++over later releases.
++
++## Runtime status
++
++Builds clean against the GTK+ 2.x stack; the 2.6 MB executable's DT_NEEDED
++(libgtk-x11/gdk-x11/pango/cairo/atk/glib2/gdk-pixbuf + X + libdl/pthread/c)
++all resolve in the baked image, and that shared-library chain is independently
++proven to load and run on substrate (the GTK2 smoke test).  A headless
++`hexchat -v` run did **not** crash (no SIGSEGV/TRAP) but **hung** during
++startup before printing the version — i.e. in `load_config()`/early init,
++before `gtk_init`.  Pinning that down (config init vs. fontconfig first-run
++cache build vs. the in-kernel loader relocating ~35 deep libs) and an
++interactive smoke test both need a live X server (the `sdm`/`Xfbdev` headless
++recipe), tracked as follow-up.
+diff --git a/contrib/hexchat/build.sh b/contrib/hexchat/build.sh
+new file mode 100755
+index 00000000..c88ccb59
+--- /dev/null
++++ b/contrib/hexchat/build.sh
+@@ -0,0 +1,57 @@
++#!/bin/sh
++# contrib/hexchat/build.sh — cross-compile HexChat 2.10.2 (GTK+ 2 IRC client).
++set -eu
++HERE="$(cd "$(dirname "$0")" && pwd)"
++VERSION="2.10.2"; TREE_DIR="${HERE}/build/hexchat-${VERSION}"; BUILD_DIR="${HERE}/build/build-substrate"
++if [ -z "${SUBSTRATE_TOP:-}" ]; then
++    p="${HERE}"; while [ "${p}" != "/" ] && [ ! -f "${p}/AGENTS.md" ] && [ ! -f "${p}/CLAUDE.md" ]; do p=$(dirname "${p}"); done
++    SUBSTRATE_TOP="${p}"
++fi
++: "${STAGE1_PREFIX:=/opt/substrate}"; : "${DESTDIR:=${SUBSTRATE_TOP}/dist-hexchat}"
++: "${JOBS:=$(nproc 2>/dev/null || echo 4)}"
++PATH="${STAGE1_PREFIX}/bin:${PATH}"; export PATH
++. "${HERE}/../substrate-autotools.sh"
++[ -d "${TREE_DIR}" ] || { echo "build.sh: run ./fetch.sh first" >&2; exit 1; }
++
++substrate_sysroot "${HERE}/build/sysroot" \
++    glib2 libffi zlib freetype libpng expat fontconfig harfbuzz fribidi \
++    pixman cairo pango atk gdk-pixbuf gtk2 \
++    xorgproto libXau xtrans libxcb libX11 libXext libXrender
++export PYTHON=python3
++export LDFLAGS="${LDFLAGS} -ldl"
++export CFLAGS="-march=i486 -mtune=i486 -O2 -g -std=gnu11 \
++  -Wno-error=incompatible-pointer-types -Wno-error=int-conversion \
++  -Wno-error=implicit-function-declaration -Wno-error=return-mismatch -Wno-error=format"
++
++substrate_libtool_fix "${TREE_DIR}/configure"
++# HexChat hardcodes source-relative paths for its generators
++# (src/common/make-te reads textevents.in; src/fe-gtk reads ../../data/*.xml),
++# so build IN-SOURCE.  The host glib-compile-resources (on PATH) handles the
++# GResource step.
++cd "${TREE_DIR}"
++make distclean >/dev/null 2>&1 || true
++"${TREE_DIR}/configure" \
++    --host=i386-unknown-substrate \
++    --prefix=/usr --libdir=/usr/lib --includedir=/usr/include --sysconfdir=/etc \
++    --enable-gtkfe --disable-openssl --enable-ipv6 \
++    --disable-gtktest --disable-glibtest \
++    --disable-dbus --disable-libnotify --disable-libproxy \
++    --disable-perl --disable-python --disable-plugin \
++    --disable-libcanberra --disable-isocodes --disable-nls --disable-sysinfo \
++    --disable-textfe \
++    CC=i386-unknown-substrate-gcc \
++    AR=i386-unknown-substrate-ar RANLIB=i386-unknown-substrate-ranlib \
++    CC_FOR_BUILD=gcc
++# make-te is a build-time text generator (noinst program) that the cross
++# build compiles for the target (can't run on the host) and that reads
++# textevents.in from $(srcdir).  Host-build it (self-contained C, no deps)
++# and point the rule at $(srcdir) so the generation step runs.
++( cd "${TREE_DIR}/src/common"
++  gcc -O2 -w -c make-te.c -o make-te.o
++  gcc -O2 -w -o make-te make-te.o
++  touch make-te.o make-te )
++make -j"${JOBS}"
++rm -rf "${DESTDIR}"; mkdir -p "${DESTDIR}"
++make install DESTDIR="${DESTDIR}"
++substrate_so_finalize "${DESTDIR}"
++echo "==> hexchat staged at ${DESTDIR}"
+diff --git a/contrib/hexchat/fetch.sh b/contrib/hexchat/fetch.sh
+new file mode 100755
+index 00000000..87c89a9a
+--- /dev/null
++++ b/contrib/hexchat/fetch.sh
+@@ -0,0 +1,19 @@
++#!/bin/sh
++# contrib/hexchat/fetch.sh — HexChat 2.10.2 (GTK+ 2 IRC client; last autotools release).
++set -eu
++VERSION="2.10.2"
++TARBALL="hexchat-${VERSION}.tar.xz"
++URL="https://dl.hexchat.net/hexchat/${TARBALL}"
++SHA256="87ebf365c576656fa3f23f51d319b3a6d279e4a932f2f8961d891dd5a5e1b52c"
++HERE="$(cd "$(dirname "$0")" && pwd)"
++BUILD_DIR="${HERE}/build"; TREE_DIR="${BUILD_DIR}/hexchat-${VERSION}"
++mkdir -p "${BUILD_DIR}"; cd "${BUILD_DIR}"
++if [ ! -f "${TARBALL}" ]; then
++    [ "${1:-}" = "--no-network" ] && { echo "fetch.sh: tarball missing" >&2; exit 1; }
++    echo "==> Fetching ${URL}"; curl -fSL -o "${TARBALL}" "${URL}"
++fi
++if [ "${SHA256}" != "REPLACE" ]; then echo "${SHA256}  ${TARBALL}" | sha256sum -c -; fi
++[ -d "${TREE_DIR}" ] || { echo "==> Extracting"; tar xf "${TARBALL}"; }
++. "${HERE}/../substrate-autotools.sh"
++substrate_config_sub_fix "${TREE_DIR}"
++echo "==> hexchat ${VERSION} ready at ${TREE_DIR}"
+-- 
+2.54.0
+

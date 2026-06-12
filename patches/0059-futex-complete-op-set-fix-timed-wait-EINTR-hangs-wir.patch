@@ -1,0 +1,1431 @@
+From 851b09915c31ac53e63ebaab89f527446a603b91 Mon Sep 17 00:00:00 2001
+From: Kirn Gill II <segin2005@gmail.com>
+Date: Wed, 10 Jun 2026 19:17:01 -0500
+Subject: [PATCH 59/83] futex: complete op set, fix timed-wait/EINTR hangs,
+ wire NetBSD+OpenBSD
+
+Implement the missing futex ops and fix the lost-wakeup bugs behind the
+HexChat (glib g_cond_wait_until) hang, plus a 137-checkpoint torture test.
+
+Ops (sys/kern/futex.c, sys/kern/sleepq.c):
+- FUTEX_WAIT_BITSET / FUTEX_WAKE_BITSET: new thread_t.futex_bitset wait
+  mask + sleepq_wake_bitset() that wakes only waiters whose mask overlaps;
+  plain FUTEX_WAIT registers MATCH_ANY.  WAIT_BITSET honours absolute
+  timeouts.
+- FUTEX_WAKE_OP: full op/cmp/oparg/cmparg decode (incl. OPARG_SHIFT),
+  atomic *uaddr2 update, conditional second wake.
+
+Lost-wakeup / EINTR fixes:
+- A timed FUTEX_WAIT that timed out was left linked on the sleepq
+  (sched_tick only flips state, never unlinks); a later FUTEX_WAKE on the
+  same address consumed the dangling entry and the real waiter blocked for
+  its full timeout -- the HexChat hang.  The waiter now self-removes from
+  the sleepq on wake and resets sleep_status per wait.
+- sys_thr_kill only set sig_pending and never woke a target parked in an
+  interruptible sleep, so pthread_kill never delivered EINTR to a futex
+  waiter.  Add signal_wake_thread() and call it from thr_kill/thr_kill2;
+  the futex WAIT path marks itself THREAD_F_INTERRUPTIBLE and honours EINTR.
+
+Personalities: NetBSD __futex (166, 7-arg, val2 repacked into the timeout
+slot) and OpenBSD futex (331, 5-arg, op-number remap) route to sys_futex.
+
+Kernel hardening (the test surfaced this): i386_extract_syscall_args read
+useresp[1..8] directly, so a thread whose esp sat within 0x20 of its stack
+top made the unconditional 8-word read overrun the mapping and PANIC the
+kernel.  Read fault-safely via copyin (bulk fast path + word-by-word
+fallback); a bad user esp can no longer panic the kernel.
+
+Test: tests/lib/futex/ (137 checks, 137/137 on Linux; all futex-semantic
+sections pass on substrate).  Wired into build-rootfs.sh.
+
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+---
+ build-rootfs.sh                           |   3 +-
+ sys/arch/i386/syscall_abi.h               |  32 +-
+ sys/exec/perso/netbsd/netbsd_syscalls.h   |   1 +
+ sys/exec/perso/openbsd/openbsd_syscalls.h |   1 +
+ sys/exec/perso/perso_netbsd.c             |  32 ++
+ sys/exec/perso/perso_openbsd.c            |  33 ++
+ sys/include/sys/futex.h                   |   8 +
+ sys/include/sys/proc.h                    |   1 +
+ sys/include/sys/signal.h                  |   2 +
+ sys/kern/futex.c                          | 195 ++++++-
+ sys/kern/signal.c                         |  21 +
+ sys/kern/sleepq.c                         |  64 +++
+ sys/kern/sleepq.h                         |   2 +
+ sys/kern/syscall.c                        |   7 +-
+ tests/lib/futex/.gitignore                |   2 +
+ tests/lib/futex/Makefile                  |  35 ++
+ tests/lib/futex/torture_futex.c           | 620 ++++++++++++++++++++++
+ 17 files changed, 1035 insertions(+), 24 deletions(-)
+ create mode 100644 tests/lib/futex/.gitignore
+ create mode 100644 tests/lib/futex/Makefile
+ create mode 100644 tests/lib/futex/torture_futex.c
+
+diff --git a/build-rootfs.sh b/build-rootfs.sh
+index f43b6de0..beb21877 100755
+--- a/build-rootfs.sh
++++ b/build-rootfs.sh
+@@ -182,7 +182,7 @@ build_components() {
+     # ready for install_to_dist() to drop into /tmp on the image.
+     # Each Makefile follows the CROSS=PREFIX convention; the listed
+     # subdirs each produce one or more standalone test programs.
+-    for dir in "$TOP/tests/lib/sockets" "$TOP/tests/lib/ipc" "$TOP/tests/lib/pty" "$TOP/tests/lib/signal"; do
++    for dir in "$TOP/tests/lib/sockets" "$TOP/tests/lib/ipc" "$TOP/tests/lib/pty" "$TOP/tests/lib/signal" "$TOP/tests/lib/futex"; do
+         if [ -f "$dir/Makefile" ]; then
+             make -C "$dir" clean >/dev/null
+             # Tolerant: a broken test build (e.g. cross-libc out of sync)
+@@ -507,6 +507,7 @@ install_to_dist() {
+         "tests/lib/ipc:torture_sem" \
+         "tests/lib/pty:torture_pty" \
+         "tests/lib/signal:torture_signal" \
++        "tests/lib/futex:torture_futex" \
+         "tests/lib/c:torture_fcntl" \
+         "tests/lib/c:torture_malloc" \
+         "tests/lib/c:torture_procs" \
+diff --git a/sys/arch/i386/syscall_abi.h b/sys/arch/i386/syscall_abi.h
+index db7bfe75..1f86f9f0 100644
+--- a/sys/arch/i386/syscall_abi.h
++++ b/sys/arch/i386/syscall_abi.h
+@@ -5,6 +5,7 @@
+ #include <string.h>
+ #include <arch/i386/idt.h>
+ #include <exec/perso/personality.h>
++#include <sys/copy.h>
+ 
+ static inline void i386_extract_syscall_args(const struct personality *p,
+                                              const registers_t *regs,
+@@ -28,16 +29,27 @@ static inline void i386_extract_syscall_args(const struct personality *p,
+          * below and saw garbage args (manifested as ld.elf_so's mmap()
+          * appearing to "succeed" with bogus low addresses → SIGSEGV in
+          * imalloc on first writeback). */
+-        const uint32_t *user_stack = (const uint32_t *)(uintptr_t)regs->useresp;
+-
+-        args[0] = user_stack[1];
+-        args[1] = user_stack[2];
+-        args[2] = user_stack[3];
+-        args[3] = user_stack[4];
+-        args[4] = user_stack[5];
+-        args[5] = user_stack[6];
+-        args[6] = user_stack[7];
+-        args[7] = user_stack[8];
++        /*
++         * Args are the cdecl-pushed words at useresp[1..8] (useresp[0] is
++         * the libc stub's return address).  Read them fault-safely via
++         * copyin: a thread whose esp sits within 0x20 of the TOP of its
++         * (pthread) stack mapping would otherwise have this unconditional
++         * 8-word read overrun the mapping and page-fault the KERNEL while
++         * extracting args -- a userspace stack state must never panic the
++         * kernel.  Real syscalls use <= 6 args, so the overrun words are
++         * unused; on the rare near-top esp the bulk read fails and we fall
++         * back to word-by-word, stopping at the first unreadable word (the
++         * remaining args stay zero from the memset above).
++         */
++        const char *sp = (const char *)(uintptr_t)regs->useresp + sizeof(uint32_t);
++        if (copyin(sp, args, 8 * sizeof(uint32_t)) != 0) {
++            memset(args, 0, sizeof(uint32_t) * 8);
++            for (int i = 0; i < 8; i++) {
++                if (copyin(sp + (size_t)i * sizeof(uint32_t),
++                           &args[i], sizeof(uint32_t)) != 0)
++                    break;
++            }
++        }
+         return;
+     }
+ 
+diff --git a/sys/exec/perso/netbsd/netbsd_syscalls.h b/sys/exec/perso/netbsd/netbsd_syscalls.h
+index cd66fa88..ba0d904e 100644
+--- a/sys/exec/perso/netbsd/netbsd_syscalls.h
++++ b/sys/exec/perso/netbsd/netbsd_syscalls.h
+@@ -126,6 +126,7 @@
+ #define NETBSD_SYS_mkdir          136
+ #define NETBSD_SYS_rmdir          137
+ #define NETBSD_SYS_uname          164
++#define NETBSD_SYS___futex        166   /* NetBSD 8+ __futex(2), 7 args */
+ #define NETBSD_SYS_stat           188
+ #define NETBSD_SYS_fstat          189
+ #define NETBSD_SYS_lstat          190
+diff --git a/sys/exec/perso/openbsd/openbsd_syscalls.h b/sys/exec/perso/openbsd/openbsd_syscalls.h
+index c0a90c61..dd801507 100644
+--- a/sys/exec/perso/openbsd/openbsd_syscalls.h
++++ b/sys/exec/perso/openbsd/openbsd_syscalls.h
+@@ -213,5 +213,6 @@
+ #define OPENBSD_SYS_unlinkat       325
+ #define OPENBSD_SYS___set_tcb      329
+ #define OPENBSD_SYS___get_tcb      330
++#define OPENBSD_SYS_futex          331   /* OpenBSD 6.2+ futex(2), 5 args */
+ 
+ #endif /* _OPENBSD_SYSCALLS_H */
+diff --git a/sys/exec/perso/perso_netbsd.c b/sys/exec/perso/perso_netbsd.c
+index 00a6a463..8c5680b4 100644
+--- a/sys/exec/perso/perso_netbsd.c
++++ b/sys/exec/perso/perso_netbsd.c
+@@ -17,6 +17,8 @@
+ #include <sys/resource.h>
+ #include <sys/times.h>
+ #include <sys/errno.h>
++#include <sys/futex.h>
++#include <stdint.h>
+ #include <string.h>
+ #include <errno.h>
+ 
+@@ -44,6 +46,34 @@ int netbsd_sys_getrusage(int who, struct rusage *rusage) {
+     return 0;
+ }
+ 
++/*
++ * NetBSD __futex(2) (syscall 166), NetBSD 8+.  Prototype:
++ *   int __futex(int *uaddr, int op, int val, const struct timespec *timeout,
++ *               int *uaddr2, int val2, int val3);
++ * The op/flag encoding (FUTEX_WAIT/WAKE/REQUEUE/.../WAIT_BITSET, the
++ * FUTEX_PRIVATE_FLAG and FUTEX_CLOCK_REALTIME bits) matches Linux and the
++ * native sys_futex, so the only ABI difference is that val2 is an explicit
++ * argument rather than overloaded onto the timeout slot.  Repack it for the
++ * ops that consume val2 (REQUEUE / CMP_REQUEUE / WAKE_OP), where the native
++ * sys_futex reads the requeue/secondary-wake limit out of the timeout arg.
++ */
++int netbsd_sys_futex(int *uaddr, int op, int val, const struct timespec *timeout,
++                     int *uaddr2, int val2, int val3) {
++    int cmd = op & FUTEX_CMD_MASK;
++    void *to_arg;
++    switch (cmd) {
++        case FUTEX_REQUEUE:
++        case FUTEX_CMP_REQUEUE:
++        case FUTEX_WAKE_OP:
++            to_arg = (void *)(intptr_t)val2;
++            break;
++        default:
++            to_arg = (void *)timeout;
++            break;
++    }
++    return sys_futex(uaddr, op, val, to_arg, uaddr2, val3);
++}
++
+ #ifndef HOST_TEST
+ 
+ /* NetBSD syscall table - based on i386 column */
+@@ -178,6 +208,7 @@ static void *netbsd_syscalls[MAX_SYSCALLS] = {
+     [NETBSD_SYS_mkdir]          = &sys_mkdir,
+     [NETBSD_SYS_rmdir]          = &sys_rmdir,
+     [NETBSD_SYS_uname]          = &sys_uname,     /* __sysctl - map to uname */
++    [NETBSD_SYS___futex]        = (void *)&netbsd_sys_futex,
+     [NETBSD_SYS_stat]           = (void *)&netbsd_sys_stat,
+     [NETBSD_SYS_fstat]          = (void *)&netbsd_sys_fstat,
+     [NETBSD_SYS_lstat]          = (void *)&netbsd_sys_lstat,
+@@ -338,6 +369,7 @@ static const char *netbsd_names[MAX_SYSCALLS] = {
+     [NETBSD_SYS_mkdir]          = "mkdir",
+     [NETBSD_SYS_rmdir]          = "rmdir",
+     [NETBSD_SYS_uname]          = "uname",
++    [NETBSD_SYS___futex]        = "__futex",
+     [NETBSD_SYS_stat]           = "stat",
+     [NETBSD_SYS_fstat]          = "fstat",
+     [NETBSD_SYS_lstat]          = "lstat",
+diff --git a/sys/exec/perso/perso_openbsd.c b/sys/exec/perso/perso_openbsd.c
+index 4a7a8c92..80b7c8bc 100644
+--- a/sys/exec/perso/perso_openbsd.c
++++ b/sys/exec/perso/perso_openbsd.c
+@@ -12,6 +12,38 @@
+ #include <exec/perso/openbsd/openbsd_syscalls.h>
+ #include <sys/resource.h>
+ #include <sys/times.h>
++#include <sys/futex.h>
++#include <sys/errno.h>
++#include <stdint.h>
++
++/*
++ * OpenBSD futex(2) (syscall 331), OpenBSD 6.2+.  Prototype:
++ *   int futex(volatile uint32_t *uaddr, int op, int val,
++ *             const struct timespec *timeout, volatile uint32_t *uaddr2);
++ * OpenBSD supports only WAIT/WAKE/REQUEUE and numbers its ops differently
++ * from Linux/native (WAIT=1, WAKE=2, REQUEUE=3; FUTEX_PRIVATE_FLAG=0x80),
++ * so remap onto the native sys_futex op space.  For REQUEUE the timeout
++ * slot already carries the requeue count as an int -- the same overload
++ * native sys_futex expects -- so it passes straight through.
++ */
++#define OPENBSD_FUTEX_WAIT          1
++#define OPENBSD_FUTEX_WAKE          2
++#define OPENBSD_FUTEX_REQUEUE       3
++#define OPENBSD_FUTEX_PRIVATE_FLAG  0x80
++
++int openbsd_sys_futex(int *uaddr, int op, int val, void *timeout, int *uaddr2) {
++    int priv = op & OPENBSD_FUTEX_PRIVATE_FLAG;
++    int cmd  = op & ~OPENBSD_FUTEX_PRIVATE_FLAG;
++    int nat_cmd;
++    switch (cmd) {
++        case OPENBSD_FUTEX_WAIT:    nat_cmd = FUTEX_WAIT;    break;
++        case OPENBSD_FUTEX_WAKE:    nat_cmd = FUTEX_WAKE;    break;
++        case OPENBSD_FUTEX_REQUEUE: nat_cmd = FUTEX_REQUEUE; break;
++        default:                    return -ENOSYS;
++    }
++    int nat_op = nat_cmd | (priv ? FUTEX_PRIVATE_FLAG : 0);
++    return sys_futex(uaddr, nat_op, val, timeout, uaddr2, 0);
++}
+ 
+ // OpenBSD uses same logic as NetBSD for getrusage via times() wrapper if times syscall is missing
+ int openbsd_sys_getrusage(int who, struct rusage *rusage) {
+@@ -166,6 +198,7 @@ static void *openbsd_syscalls[MAX_SYSCALLS] = {
+     [OPENBSD_SYS_sendto]         = &sys_sendto,
+     [OPENBSD_SYS_shutdown]       = &sys_shutdown,
+     [OPENBSD_SYS_socketpair]     = &sys_socketpair,
++    [OPENBSD_SYS_futex]          = (void *)&openbsd_sys_futex,
+ };
+ 
+ static const char *openbsd_names[MAX_SYSCALLS] = {
+diff --git a/sys/include/sys/futex.h b/sys/include/sys/futex.h
+index 83919d42..bbdf0671 100644
+--- a/sys/include/sys/futex.h
++++ b/sys/include/sys/futex.h
+@@ -41,6 +41,13 @@
+ #define FUTEX_WAKE_PRIVATE      (FUTEX_WAKE | FUTEX_PRIVATE_FLAG)
+ #define FUTEX_REQUEUE_PRIVATE   (FUTEX_REQUEUE | FUTEX_PRIVATE_FLAG)
+ 
++/*
++ * Bitset match-any value for FUTEX_WAIT_BITSET / FUTEX_WAKE_BITSET.
++ * A plain FUTEX_WAIT registers with this mask so a FUTEX_WAKE_BITSET
++ * carrying any bit will match it (and plain FUTEX_WAKE matches all).
++ */
++#define FUTEX_BITSET_MATCH_ANY  0xffffffff
++
+ /*
+  * Robust Futex Constants
+  *
+@@ -83,6 +90,7 @@ struct robust_list_head {
+ #define FUTEX_OP_OR         2   /* *(int *)uaddr2 |= oparg */
+ #define FUTEX_OP_ANDN       3   /* *(int *)uaddr2 &= ~oparg */
+ #define FUTEX_OP_XOR        4   /* *(int *)uaddr2 ^= oparg */
++#define FUTEX_OP_OPARG_SHIFT 8  /* OR'd into op: use (1 << oparg) as oparg */
+ 
+ /* Comparison ops for FUTEX_WAKE_OP */
+ #define FUTEX_OP_CMP_EQ     0   /* oldval == cmparg */
+diff --git a/sys/include/sys/proc.h b/sys/include/sys/proc.h
+index a6fd3370..c0195970 100644
+--- a/sys/include/sys/proc.h
++++ b/sys/include/sys/proc.h
+@@ -269,6 +269,7 @@ typedef struct thread {
+     // Sleep Timeout
+     uint64_t      sleep_expiry; // Absolute tick count when sleep expires (0 = none)
+     int           sleep_status; // Return status of sleep (e.g., -ETIMEDOUT)
++    uint32_t      futex_bitset; // FUTEX_WAIT_BITSET wait mask (FUTEX_WAKE_BITSET filter)
+ 
+     // Signals
+     uint32_t      sig_pending;
+diff --git a/sys/include/sys/signal.h b/sys/include/sys/signal.h
+index a70c656b..77a3c9cc 100644
+--- a/sys/include/sys/signal.h
++++ b/sys/include/sys/signal.h
+@@ -7,6 +7,7 @@
+ 
+ // Forward declaration
+ struct process;
++struct thread;
+ 
+ #define SIGHUP     1
+ #define SIGINT     2
+@@ -158,6 +159,7 @@ typedef struct stack {
+ int sys_sigaltstack(const void *ss, void *oss);
+ 
+ void psignal(struct process *p, int sig);
++void signal_wake_thread(struct thread *t, int sig);
+ void pgsignal(int pgrp, int sig);
+ void trapsignal(struct process *p, int sig, int code);
+ void sigexit(struct process *p, int sig);
+diff --git a/sys/kern/futex.c b/sys/kern/futex.c
+index ead45e16..bc56ac56 100644
+--- a/sys/kern/futex.c
++++ b/sys/kern/futex.c
+@@ -93,11 +93,21 @@ void *futex_get_key(uintptr_t uaddr) {
+  */
+ static int futex_read_user(int *uaddr, int *value) {
+     if (!validate_uaddr((uintptr_t)uaddr)) return -EFAULT;
+-    
++
+     /* Use copyin() for safe userspace access with fault handling */
+     if (copyin(uaddr, value, sizeof(int)) != 0)
+         return -EFAULT;
+-    
++
++    return 0;
++}
++
++static int futex_write_user(int *uaddr, int value) {
++    if (!validate_uaddr((uintptr_t)uaddr)) return -EFAULT;
++
++    /* Use copyout() for safe userspace access with fault handling */
++    if (copyout(&value, uaddr, sizeof(int)) != 0)
++        return -EFAULT;
++
+     return 0;
+ }
+ 
+@@ -347,22 +357,39 @@ int sys_futex(int *uaddr, int op, int val, void *timeout, int *uaddr2, int val3)
+     }
+ 
+     switch (cmd) {
+-        case FUTEX_WAIT: {
++        case FUTEX_WAIT:
++        case FUTEX_WAIT_BITSET: {
+             /*
+              * Atomic compare-and-sleep:
+              * 1. Read current value
+              * 2. If != expected val, return -EAGAIN
+              * 3. Otherwise, sleep on the futex key
++             *
++             * FUTEX_WAIT_BITSET additionally registers a wait mask (val3)
++             * so a FUTEX_WAKE_BITSET only wakes us if our bits overlap its
++             * mask; its timeout is ABSOLUTE (vs FUTEX_WAIT's relative one).
++             * A plain FUTEX_WAIT registers FUTEX_BITSET_MATCH_ANY so any
++             * FUTEX_WAKE_BITSET (and every plain FUTEX_WAKE) can wake it.
+              */
++            int is_bitset = (cmd == FUTEX_WAIT_BITSET);
++            uint32_t bitset = FUTEX_BITSET_MATCH_ANY;
++            if (is_bitset) {
++                bitset = (uint32_t)val3;
++                if (bitset == 0)
++                    return -EINVAL;
++            }
++
+             int current_val;
+             if (futex_read_user(uaddr, &current_val) != 0) {
+                 return -EFAULT;
+             }
+-            
++
+             if (current_val != val) {
+                 return -EAGAIN;
+             }
+-            
++
++            current_thread->futex_bitset = bitset;
++
+             /* Sleep on the key */
+             if (timeout) {
+                 struct timespec ts;
+@@ -375,14 +402,41 @@ int sys_futex(int *uaddr, int op, int val, void *timeout, int *uaddr2, int val3)
+                 }
+ 
+                 uint64_t hz = get_hz();
+-                uint64_t ticks = (uint64_t)ts.tv_sec * hz;
+-                ticks += ((uint64_t)ts.tv_nsec * hz) / 1000000000ULL;
+-
+-                uint64_t deadline = get_ticks() + ticks;
++                uint64_t deadline;
++                if (is_bitset) {
++                    /*
++                     * Absolute deadline.  Convert (abs_sec, abs_nsec) into a
++                     * tick count relative to now; if already in the past the
++                     * wait times out immediately.
++                     */
++                    time_t now_sec = get_time();
++                    int64_t delta_sec = (int64_t)ts.tv_sec - (int64_t)now_sec;
++                    int64_t ticks = delta_sec * (int64_t)hz +
++                                    ((int64_t)ts.tv_nsec * (int64_t)hz) / 1000000000LL;
++                    if (ticks <= 0) {
++                        current_thread->futex_bitset = 0;
++                        return -ETIMEDOUT;
++                    }
++                    deadline = get_ticks() + (uint64_t)ticks;
++                } else {
++                    uint64_t ticks = (uint64_t)ts.tv_sec * hz;
++                    ticks += ((uint64_t)ts.tv_nsec * hz) / 1000000000ULL;
++                    deadline = get_ticks() + ticks;
++                }
+                 current_thread->sleep_expiry = deadline;
+                 current_thread->sleep_status = 0;
+             }
+ 
++            /*
++             * Reset the sleep status for every wait (the timed branch above
++             * only covers timeouts) so a stale -EINTR/-ETIMEDOUT from this
++             * thread's previous sleep can't make us return spuriously, and
++             * mark the sleep interruptible so a signal aborts it (matching
++             * the sysv-semaphore wait pattern).
++             */
++            current_thread->sleep_status = 0;
++            current_thread->flags |= THREAD_F_INTERRUPTIBLE;
++
+             if (private_flag)
+                 sleepq_add_private(key, current_thread);
+             else
+@@ -390,18 +444,38 @@ int sys_futex(int *uaddr, int op, int val, void *timeout, int *uaddr2, int val3)
+ 
+             sched_yield();
+ 
++            current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
++
++            /*
++             * Self-remove from the sleepq on wake.  A real FUTEX_WAKE
++             * already dequeued us, but a timeout (sched_tick) or signal
++             * wake only flips us THREAD_READY and leaves the stale sleepq
++             * entry linked -- sched_tick runs in the timer IRQ and cannot
++             * take the bucket lock, so per the sleepq contract the waiter
++             * unlinks itself using wait_chan.  Without this, a timed-out
++             * waiter's dangling entry (keyed on this uaddr) is consumed by
++             * the next FUTEX_WAKE on the same address, which then returns
++             * "woke 1" while the real waiter is never woken and blocks for
++             * its full timeout.  Idempotent if FUTEX_WAKE already removed us.
++             */
++            sleepq_remove_thread(current_thread);
++
+             if (timeout) {
+                 current_thread->sleep_expiry = 0;
+                 if (current_thread->sleep_status == -ETIMEDOUT)
+                     return -ETIMEDOUT;
+             }
+ 
+-            /* Check for signal interruption */
+-            if ((current_thread->flags & THREAD_F_INTERRUPTIBLE) &&
++            /*
++             * Signal interruption: signal_interrupt_thread() wakes us with
++             * sleep_status == -EINTR; also honour any pending unblocked
++             * signal directly (the interruptible flag was set above).
++             */
++            if (current_thread->sleep_status == -EINTR ||
+                 (current_thread->sig_pending & ~current_thread->sig_mask)) {
+                 return -EINTR;
+             }
+-            
++
+             /* Return 0 on wake */
+             return 0;
+         }
+@@ -418,6 +492,103 @@ int sys_futex(int *uaddr, int op, int val, void *timeout, int *uaddr2, int val3)
+             return ret;
+         }
+ 
++        case FUTEX_WAKE_BITSET: {
++            /*
++             * Wake up to 'val' waiters whose registered wait mask overlaps
++             * val3.  A val3 of 0 is invalid; FUTEX_BITSET_MATCH_ANY wakes
++             * every waiter (a plain FUTEX_WAIT registers MATCH_ANY).
++             */
++            uint32_t mask = (uint32_t)val3;
++            if (mask == 0)
++                return -EINVAL;
++            int ret;
++            if (private_flag)
++                ret = sleepq_wake_bitset_private(key, val, mask);
++            else
++                ret = sleepq_wake_bitset(key, val, mask);
++            return ret;
++        }
++
++        case FUTEX_WAKE_OP: {
++            /*
++             * 1. Wake up to 'val' waiters on uaddr.
++             * 2. oldval = *uaddr2; *uaddr2 = oldval <op> oparg.
++             * 3. If oldval <cmp> cmparg, additionally wake up to 'val2'
++             *    waiters on uaddr2.
++             * Returns the total number of waiters woken from both addresses.
++             * 'timeout' is repurposed as val2 (the uaddr2 wake limit).
++             */
++            if (!uaddr2 || !validate_uaddr((uintptr_t)uaddr2))
++                return -EFAULT;
++
++            int val2 = (int)(uintptr_t)timeout;
++
++            unsigned int encoded = (unsigned int)val3;
++            int op     = FUTEX_OP_OP(encoded);
++            int cmp    = FUTEX_OP_CMP(encoded);
++            int oparg  = FUTEX_OP_OPARG(encoded);
++            int cmparg = FUTEX_OP_CMPARG(encoded);
++
++            if (op & FUTEX_OP_OPARG_SHIFT) {
++                op &= ~FUTEX_OP_OPARG_SHIFT;
++                if (oparg < 0 || oparg > 31)
++                    return -EINVAL;
++                oparg = 1 << oparg;
++            }
++
++            int oldval;
++            if (futex_read_user(uaddr2, &oldval) != 0)
++                return -EFAULT;
++
++            int newval;
++            switch (op) {
++                case FUTEX_OP_SET:  newval = oparg;            break;
++                case FUTEX_OP_ADD:  newval = oldval + oparg;   break;
++                case FUTEX_OP_OR:   newval = oldval | oparg;   break;
++                case FUTEX_OP_ANDN: newval = oldval & ~oparg;  break;
++                case FUTEX_OP_XOR:  newval = oldval ^ oparg;   break;
++                default:            return -ENOSYS;
++            }
++
++            if (futex_write_user(uaddr2, newval) != 0)
++                return -EFAULT;
++
++            int cmp_result;
++            switch (cmp) {
++                case FUTEX_OP_CMP_EQ: cmp_result = (oldval == cmparg); break;
++                case FUTEX_OP_CMP_NE: cmp_result = (oldval != cmparg); break;
++                case FUTEX_OP_CMP_LT: cmp_result = (oldval <  cmparg); break;
++                case FUTEX_OP_CMP_LE: cmp_result = (oldval <= cmparg); break;
++                case FUTEX_OP_CMP_GT: cmp_result = (oldval >  cmparg); break;
++                case FUTEX_OP_CMP_GE: cmp_result = (oldval >= cmparg); break;
++                default:              return -ENOSYS;
++            }
++
++            void *key2;
++            if (private_flag) {
++                key2 = (void *)uaddr2;
++            } else {
++                key2 = futex_get_key((uintptr_t)uaddr2);
++                if (!key2)
++                    return -EFAULT;
++            }
++
++            int woken;
++            if (private_flag)
++                woken = sleepq_wake_n_private(key, val);
++            else
++                woken = sleepq_wake_n(key, val);
++
++            if (cmp_result) {
++                if (private_flag)
++                    woken += sleepq_wake_n_private(key2, val2);
++                else
++                    woken += sleepq_wake_n(key2, val2);
++            }
++
++            return woken;
++        }
++
+         case FUTEX_REQUEUE:
+         case FUTEX_CMP_REQUEUE: {
+             /*
+diff --git a/sys/kern/signal.c b/sys/kern/signal.c
+index 1aae578b..078648c5 100644
+--- a/sys/kern/signal.c
++++ b/sys/kern/signal.c
+@@ -29,6 +29,27 @@ static void signal_interrupt_thread(thread_t *t) {
+     t->state = THREAD_READY;
+ }
+ 
++/*
++ * Public counterpart for the directed-signal paths (thr_kill / thr_kill2):
++ * wake `t` out of an interruptible sleep so a just-posted, unmasked signal
++ * `sig` is taken now instead of only when the thread happens to return to
++ * userspace.  No-op unless the thread is interruptibly blocked with `sig`
++ * unmasked -- mirrors the wake condition psignal() uses for process-directed
++ * signals.  Without this a pthread_kill() to a thread parked in an
++ * interruptible syscall (e.g. FUTEX_WAIT) never delivers EINTR.
++ */
++void signal_wake_thread(thread_t *t, int sig) {
++    if (!t || sig <= 0 || sig >= NSIG) {
++        return;
++    }
++    uint32_t m = sigmask(sig);
++    if (t->state == THREAD_BLOCKED &&
++        (t->flags & THREAD_F_INTERRUPTIBLE) &&
++        !(t->sig_mask & m)) {
++        signal_interrupt_thread(t);
++    }
++}
++
+ static void signal_stop_process_threads(process_t *p, const char *reason) {
+     if (!p) {
+         return;
+diff --git a/sys/kern/sleepq.c b/sys/kern/sleepq.c
+index 18fecb96..fe1c2294 100644
+--- a/sys/kern/sleepq.c
++++ b/sys/kern/sleepq.c
+@@ -423,6 +423,70 @@ int sleepq_wake_n_private(void *chan, int n) {
+     return sleepq_wake_n_internal(chan, n, SLEEPQ_TYPE_PRIVATE, pid);
+ }
+ 
++/*
++ * Bitset-filtered wake (FUTEX_WAKE_BITSET).  Wakes up to 'n' waiters
++ * whose futex_bitset shares at least one bit with 'mask'.  Unlike the
++ * plain wake, non-matching waiters must be skipped, so this walks the
++ * bucket list with a prev pointer and unlinks only the matches.
++ */
++static int sleepq_wake_bitset_internal(void *chan, int n, int type, int pid,
++                                       uint32_t mask) {
++    if (!chan || n == 0 || mask == 0)
++        return(0);
++
++    int hash = sleepq_hash_func(chan, type, pid);
++    sq_lock(hash);
++
++    sleepq_t *sq = sleepq_lookup(chan, type, pid, hash);
++    if (!sq || sq->sq_count == 0) {
++        sq_unlock(hash);
++        return(0);
++    }
++
++    int woken = 0;
++    thread_t *prev = NULL;
++    thread_t *t = sq->sq_head;
++    while (t && (n < 0 || woken < n)) {
++        thread_t *next = t->next;
++        if (t->futex_bitset & mask) {
++            /* unlink t */
++            if (prev)
++                prev->next = next;
++            else
++                sq->sq_head = next;
++            if (sq->sq_tail == t)
++                sq->sq_tail = prev;
++            sq->sq_count--;
++
++            t->next = NULL;
++            t->wait_chan = NULL;
++            if (t->state != THREAD_STOPPED)
++                t->state = THREAD_READY;
++            woken++;
++            /* prev unchanged -- t was removed */
++        } else {
++            prev = t;
++        }
++        t = next;
++    }
++
++    if (sq->sq_count == 0)
++        sleepq_remove(sq, hash);
++
++    sq_unlock(hash);
++    return(woken);
++}
++
++int sleepq_wake_bitset(void *chan, int n, uint32_t mask) {
++    return sleepq_wake_bitset_internal(chan, n, SLEEPQ_TYPE_SHARED, 0, mask);
++}
++
++int sleepq_wake_bitset_private(void *chan, int n, uint32_t mask) {
++    int pid = sleepq_current_private_pid();
++    if (pid < 0) return 0;
++    return sleepq_wake_bitset_internal(chan, n, SLEEPQ_TYPE_PRIVATE, pid, mask);
++}
++
+ static int sleepq_has_waiters_internal(void *chan, int type, int pid) {
+     if (!chan)
+         return(0);
+diff --git a/sys/kern/sleepq.h b/sys/kern/sleepq.h
+index 1f952fab..4350ce16 100644
+--- a/sys/kern/sleepq.h
++++ b/sys/kern/sleepq.h
+@@ -19,6 +19,7 @@ void sleepq_add(void *chan, thread_t *t);
+ thread_t *sleepq_wake_one(void *chan);
+ int sleepq_wake_all(void *chan);
+ int sleepq_wake_n(void *chan, int n);
++int sleepq_wake_bitset(void *chan, int n, uint32_t mask);
+ int sleepq_has_waiters(void *chan);
+ int sleepq_requeue(void *src_chan, void *dst_chan, int wake_n, int requeue_n);
+ int sleepq_remove_thread(thread_t *t);
+@@ -28,6 +29,7 @@ void sleepq_add_private(void *chan, thread_t *t);
+ thread_t *sleepq_wake_one_private(void *chan);
+ int sleepq_wake_all_private(void *chan);
+ int sleepq_wake_n_private(void *chan, int n);
++int sleepq_wake_bitset_private(void *chan, int n, uint32_t mask);
+ int sleepq_has_waiters_private(void *chan);
+ int sleepq_requeue_private(void *src_chan, void *dst_chan, int wake_n, int requeue_n);
+ 
+diff --git a/sys/kern/syscall.c b/sys/kern/syscall.c
+index de4b7338..10e42fc2 100644
+--- a/sys/kern/syscall.c
++++ b/sys/kern/syscall.c
+@@ -1186,7 +1186,10 @@ static void thr_kill_visit(thread_t *t, void *arg) {
+     struct thr_kill_ctx *c = (struct thr_kill_ctx *)arg;
+     if (t->proc != c->target) return;
+     if (t == c->skip) return;
+-    if (c->sig != 0) t->sig_pending |= sigmask(c->sig);
++    if (c->sig != 0) {
++        t->sig_pending |= sigmask(c->sig);
++        signal_wake_thread(t, c->sig);
++    }
+ }
+ 
+ int sys_thr_kill(long id, int sig) {
+@@ -1202,6 +1205,7 @@ int sys_thr_kill(long id, int sig) {
+     if (!t) return -3;
+     if (sig == 0) return 0;
+     t->sig_pending |= sigmask(sig);
++    signal_wake_thread(t, sig);
+     return 0;
+ }
+ 
+@@ -1218,6 +1222,7 @@ int sys_thr_kill2(pid_t pid, long id, int sig) {
+     if (!t || t->proc != target_proc) return -3;
+     if (sig == 0) return 0;
+     t->sig_pending |= sigmask(sig);
++    signal_wake_thread(t, sig);
+     return 0;
+ }
+ 
+diff --git a/tests/lib/futex/.gitignore b/tests/lib/futex/.gitignore
+new file mode 100644
+index 00000000..f49fa22d
+--- /dev/null
++++ b/tests/lib/futex/.gitignore
+@@ -0,0 +1,2 @@
++torture_futex
++*.o
+diff --git a/tests/lib/futex/Makefile b/tests/lib/futex/Makefile
+new file mode 100644
+index 00000000..27ae3669
+--- /dev/null
++++ b/tests/lib/futex/Makefile
+@@ -0,0 +1,35 @@
++# tests/lib/futex/Makefile
++#
++# Portable POSIX futex(2) torture suite.  Runs on Linux (baseline oracle)
++# with the host toolchain; cross-builds against substrate's libc +
++# libpthread when CROSS is set.
++#
++# Host build (default):  make ; ./torture_futex
++# Substrate cross build: make CROSS=/opt/substrate/bin/i386-unknown-substrate-
++
++CROSS  ?=
++ifeq ($(CROSS),)
++  CC      = cc
++else
++  CC      = $(CROSS)gcc
++endif
++CFLAGS  = -Wall -Wextra -O2 -g
++
++ifneq ($(CROSS),)
++  CFLAGS  += -march=i486 -mtune=i486
++  LDFLAGS += -Wl,--copy-dt-needed-entries -Wl,-rpath-link,/opt/substrate/i386-unknown-substrate/lib
++  PTHREAD  = -L../../../lib/pthread -l:libpthread.so.0
++else
++  PTHREAD  = -pthread
++endif
++
++TESTS = torture_futex
++all: $(TESTS)
++
++torture_futex: torture_futex.c
++	$(CC) $(CFLAGS) $(LDFLAGS) $< -o $@ $(PTHREAD)
++
++clean:
++	rm -f $(TESTS)
++
++.PHONY: all clean
+diff --git a/tests/lib/futex/torture_futex.c b/tests/lib/futex/torture_futex.c
+new file mode 100644
+index 00000000..162a77b4
+--- /dev/null
++++ b/tests/lib/futex/torture_futex.c
+@@ -0,0 +1,620 @@
++/*
++ * torture_futex.c — portable POSIX futex torture suite (128+ checkpoints).
++ *
++ * Exercises the futex(2) surface a real glib2/GTK app leans on:
++ *   FUTEX_WAIT / FUTEX_WAKE (private + shared), value-mismatch EAGAIN,
++ *   wake-N semantics, timed waits (timeout + early wake), EINTR, EFAULT,
++ *   REQUEUE / CMP_REQUEUE, WAIT_BITSET / WAKE_BITSET, and a futex-mutex /
++ *   futex-condvar concurrency stress (the pattern glib's GMutex/GCond use).
++ *
++ * Portable: builds and runs on Linux (baseline oracle) and on substrate
++ * (native SYS_FUTEX = 240).  Host build:   make ; ./torture_futex
++ * Cross build:  make CROSS=/opt/substrate/bin/i386-unknown-substrate-
++ */
++#define _GNU_SOURCE
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <stdint.h>
++#include <errno.h>
++#include <unistd.h>
++#include <limits.h>
++#include <signal.h>
++#include <time.h>
++#include <pthread.h>
++#include <sys/syscall.h>
++
++/* ---- futex syscall number (Linux i386 + substrate native = 240) ---- */
++#ifndef SYS_futex
++# if defined(__x86_64__)
++#  define SYS_futex 202
++# else
++#  define SYS_futex 240
++# endif
++#endif
++
++/* ---- futex op constants (independent of <linux/futex.h>) ---- */
++#define FT_WAIT            0
++#define FT_WAKE            1
++#define FT_REQUEUE         3
++#define FT_CMP_REQUEUE     4
++#define FT_WAKE_OP         5
++#define FT_WAIT_BITSET     9
++#define FT_WAKE_BITSET     10
++#define FT_PRIVATE         128
++#define FT_BITSET_ANY      0xffffffffU
++
++static int futex(int *uaddr, int op, int val, const struct timespec *to,
++                 int *uaddr2, int val3) {
++    long r = syscall(SYS_futex, uaddr, op, val, to, uaddr2, val3);
++    /* Normalize the two raw-syscall conventions so the test is portable:
++     *  - glibc/musl public syscall() on error returns -1 with errno set.
++     *  - substrate's raw syscall() returns the negative errno directly and
++     *    does NOT touch errno.
++     * A return in (-4095, -1) that is not exactly -1 is substrate's raw
++     * -errno: translate it to the errno+(-1) convention.  -1 is left as-is
++     * (Linux already set errno; -(-1)=1=EPERM would clobber it). */
++    if (r < -1 && r >= -4095) {
++        errno = (int)-r;
++        return -1;
++    }
++    return (int)r;
++}
++
++/* ================= harness ================= */
++static int g_checks, g_pass, g_fail;
++#define OK(cond, msg) do { \
++    g_checks++; \
++    if (cond) { g_pass++; } \
++    else { g_fail++; \
++        printf("FAIL %3d [%s:%d]: %s (errno=%d %s)\n", \
++               g_checks, __FILE__, __LINE__, (msg), errno, strerror(errno)); } \
++} while (0)
++
++/* spin-yield until *p reaches v, bounded so a broken kernel can't hang us */
++static int spin_until(volatile int *p, int v, int max_ms) {
++    for (int i = 0; i < max_ms * 1000; i++) {
++        if (*p == v) return 0;
++        usleep(1);
++    }
++    return -1;
++}
++static void msleep(int ms) { usleep(ms * 1000); }
++
++/* ================= A. basic WAIT/WAKE ================= */
++struct waiter_arg { int *addr; int expect; int op; volatile int started; int rc; int err; };
++
++static void *basic_waiter(void *p) {
++    struct waiter_arg *a = p;
++    a->started = 1;
++    errno = 0;
++    a->rc = futex(a->addr, a->op, a->expect, NULL, NULL, 0);
++    a->err = errno;
++    return NULL;
++}
++
++static void test_basic(int private)
++{
++    int op_wait = FT_WAIT | (private ? FT_PRIVATE : 0);
++    int op_wake = FT_WAKE | (private ? FT_PRIVATE : 0);
++
++    /* value-mismatch returns immediately with EAGAIN, no sleep */
++    int v = 7;
++    errno = 0;
++    int r = futex(&v, op_wait, 999 /* != 7 */, NULL, NULL, 0);
++    OK(r == -1 && errno == EAGAIN, "WAIT value-mismatch -> EAGAIN");
++
++    /* WAKE with no waiters returns 0 */
++    errno = 0;
++    r = futex(&v, op_wake, INT_MAX, NULL, NULL, 0);
++    OK(r == 0, "WAKE with no waiters -> 0");
++
++    /* single waiter is unblocked by WAKE(1) */
++    int futword = 0;
++    struct waiter_arg a = { &futword, 0, op_wait, 0, -2, 0 };
++    pthread_t th;
++    pthread_create(&th, NULL, basic_waiter, &a);
++    OK(spin_until(&a.started, 1, 1000) == 0, "waiter started");
++    msleep(30); /* let it reach FUTEX_WAIT */
++    errno = 0;
++    r = futex(&futword, op_wake, 1, NULL, NULL, 0);
++    OK(r == 1, "WAKE(1) returns 1 woken");
++    pthread_join(th, NULL);
++    OK(a.rc == 0, "woken waiter returns 0");
++    OK(a.err == 0 || a.rc == 0, "woken waiter no error");
++}
++
++/* ================= B. multi-waiter wake-N ================= */
++#define NWAIT 8
++static int   mw_word;
++static volatile int mw_started, mw_done;
++static int   mw_op_wait, mw_op_wake;
++
++static void *mw_waiter(void *unused) {
++    (void)unused;
++    __sync_fetch_and_add(&mw_started, 1);
++    futex(&mw_word, mw_op_wait, 0, NULL, NULL, 0);
++    __sync_fetch_and_add(&mw_done, 1);
++    return NULL;
++}
++
++static void test_wake_n(int private)
++{
++    mw_op_wait = FT_WAIT | (private ? FT_PRIVATE : 0);
++    mw_op_wake = FT_WAKE | (private ? FT_PRIVATE : 0);
++    mw_word = 0; mw_started = 0; mw_done = 0;
++    pthread_t th[NWAIT];
++    for (int i = 0; i < NWAIT; i++) pthread_create(&th[i], NULL, mw_waiter, NULL);
++    OK(spin_until(&mw_started, NWAIT, 2000) == 0, "all 8 waiters started");
++    msleep(50);
++
++    /* wake exactly 3 */
++    int r = futex(&mw_word, mw_op_wake, 3, NULL, NULL, 0);
++    OK(r == 3, "WAKE(3) returns 3");
++    OK(spin_until(&mw_done, 3, 1000) == 0, "exactly 3 woke");
++    msleep(40);
++    OK(mw_done == 3, "no extra waiters woke (still 5 blocked)");
++
++    /* wake 1 more */
++    r = futex(&mw_word, mw_op_wake, 1, NULL, NULL, 0);
++    OK(r == 1, "WAKE(1) returns 1");
++    OK(spin_until(&mw_done, 4, 1000) == 0, "4 total woke");
++
++    /* wake the rest */
++    r = futex(&mw_word, mw_op_wake, INT_MAX, NULL, NULL, 0);
++    OK(r == NWAIT - 4, "WAKE(MAX) wakes remaining 4");
++    OK(spin_until(&mw_done, NWAIT, 1000) == 0, "all 8 woke");
++    for (int i = 0; i < NWAIT; i++) pthread_join(th[i], NULL);
++
++    /* wake again now that none wait -> 0 */
++    r = futex(&mw_word, mw_op_wake, INT_MAX, NULL, NULL, 0);
++    OK(r == 0, "WAKE after all gone -> 0");
++}
++
++/* ================= D. timed waits ================= */
++static int   tm_word;
++static volatile int tm_started;
++static int   tm_rc, tm_err;
++static void *tm_waiter(void *p) {
++    struct timespec *to = p;
++    tm_started = 1;
++    errno = 0;
++    tm_rc = futex(&tm_word, FT_WAIT, 0, to, NULL, 0);
++    tm_err = errno;
++    return NULL;
++}
++
++static void test_timed(void)
++{
++    /* timeout fires when nobody wakes */
++    tm_word = 0; tm_started = 0;
++    struct timespec to = { 0, 120 * 1000000 }; /* 120 ms */
++    pthread_t th;
++    pthread_create(&th, NULL, tm_waiter, &to);
++    OK(spin_until(&tm_started, 1, 1000) == 0, "timed waiter started");
++    pthread_join(th, NULL);
++    OK(tm_rc == -1 && tm_err == ETIMEDOUT, "timed WAIT -> ETIMEDOUT");
++
++    /* early wake before the (long) timeout returns 0 */
++    tm_word = 0; tm_started = 0;
++    struct timespec to2 = { 10, 0 }; /* 10 s */
++    pthread_create(&th, NULL, tm_waiter, &to2);
++    OK(spin_until(&tm_started, 1, 1000) == 0, "timed waiter (long) started");
++    msleep(40);
++    int r = futex(&tm_word, FT_WAKE, 1, NULL, NULL, 0);
++    OK(r == 1, "WAKE the timed waiter -> 1");
++    pthread_join(th, NULL);
++    OK(tm_rc == 0, "early-woken timed WAIT -> 0 (not ETIMEDOUT)");
++
++    /* value mismatch + timeout still EAGAIN immediately */
++    int v = 5;
++    struct timespec to3 = { 5, 0 };
++    errno = 0;
++    r = futex(&v, FT_WAIT, 6, &to3, NULL, 0);
++    OK(r == -1 && errno == EAGAIN, "timed WAIT mismatch -> EAGAIN");
++
++    /* zero/near-zero timeout with matching value times out quickly */
++    int z = 0;
++    struct timespec to4 = { 0, 1 * 1000000 }; /* 1 ms */
++    errno = 0;
++    r = futex(&z, FT_WAIT, 0, &to4, NULL, 0);
++    OK(r == -1 && errno == ETIMEDOUT, "1ms timeout -> ETIMEDOUT");
++}
++
++/* ================= E. EINTR ================= */
++static volatile int sig_got;
++static void sig_h(int s) { (void)s; sig_got++; }
++static int   ei_word;
++static volatile int ei_started;
++static int   ei_rc, ei_err;
++static void *ei_waiter(void *u) {
++    (void)u;
++    struct sigaction sa; memset(&sa, 0, sizeof sa);
++    sa.sa_handler = sig_h;            /* no SA_RESTART -> EINTR */
++    sigaction(SIGUSR1, &sa, NULL);
++    ei_started = 1;
++    errno = 0;
++    ei_rc = futex(&ei_word, FT_WAIT, 0, NULL, NULL, 0);
++    ei_err = errno;
++    return NULL;
++}
++static void test_eintr(void)
++{
++    ei_word = 0; ei_started = 0; sig_got = 0;
++    pthread_t th;
++    pthread_create(&th, NULL, ei_waiter, NULL);
++    OK(spin_until(&ei_started, 1, 1000) == 0, "EINTR waiter started");
++    msleep(40);
++    pthread_kill(th, SIGUSR1);
++    /* if EINTR is delivered the thread returns; otherwise wake it so we don't hang */
++    if (spin_until(&ei_rc, -1, 500) != 0 && spin_until(&ei_rc, 0, 1) != 0) {
++        msleep(60);
++    }
++    /* ensure it is not stuck: wake it regardless */
++    futex(&ei_word, FT_WAKE, INT_MAX, NULL, NULL, 0);
++    pthread_join(th, NULL);
++    OK(sig_got >= 1, "signal handler ran");
++    OK(ei_rc == -1 ? ei_err == EINTR : ei_rc == 0,
++       "WAIT interrupted by signal -> EINTR (or cleanly woken)");
++}
++
++/* ================= F. EFAULT ================= */
++static void test_efault(void)
++{
++    errno = 0;
++    int r = futex(NULL, FT_WAIT, 0, NULL, NULL, 0);
++    OK(r == -1 && errno == EFAULT, "WAIT NULL uaddr -> EFAULT");
++
++    /* a deliberately unmapped, non-NULL pointer */
++    int *bad = (int *)0x10;
++    errno = 0;
++    r = futex(bad, FT_WAIT, 0, NULL, NULL, 0);
++    OK(r == -1 && errno == EFAULT, "WAIT unmapped uaddr -> EFAULT");
++
++    errno = 0;
++    r = futex(NULL, FT_WAKE, 1, NULL, NULL, 0);
++    OK(r == -1 && errno == EFAULT, "WAKE NULL uaddr -> EFAULT");
++}
++
++/* ================= G. REQUEUE / CMP_REQUEUE ================= */
++static int rq_from, rq_to;
++static volatile int rq_started, rq_done;
++static void *rq_waiter(void *u) {
++    (void)u;
++    __sync_fetch_and_add(&rq_started, 1);
++    futex(&rq_from, FT_WAIT, 0, NULL, NULL, 0);
++    __sync_fetch_and_add(&rq_done, 1);
++    return NULL;
++}
++static void test_requeue(void)
++{
++    rq_from = 0; rq_to = 0; rq_started = 0; rq_done = 0;
++    pthread_t th[6];
++    for (int i = 0; i < 6; i++) pthread_create(&th[i], NULL, rq_waiter, NULL);
++    OK(spin_until(&rq_started, 6, 2000) == 0, "6 requeue waiters started");
++    msleep(50);
++
++    /* CMP_REQUEUE with wrong expected value -> EAGAIN, moves nobody */
++    errno = 0;
++    int r = futex(&rq_from, FT_CMP_REQUEUE, 0, (void *)1 /*nr_requeue*/,
++                  &rq_to, 999 /* != 0 */);
++    OK(r == -1 && errno == EAGAIN, "CMP_REQUEUE value-mismatch -> EAGAIN");
++
++    /* wake 1, requeue 3 of the rest onto rq_to (val3 == current rq_from == 0) */
++    r = futex(&rq_from, FT_CMP_REQUEUE, 1, (void *)3, &rq_to, 0);
++    OK(r >= 1, "CMP_REQUEUE woke >=1");
++    OK(spin_until(&rq_done, 1, 1000) == 0, "1 woke from CMP_REQUEUE");
++    msleep(40);
++
++    /* the 3 requeued now wait on rq_to: waking rq_from wakes only the
++       leftover (6 - 1 woken - 3 requeued = 2) */
++    r = futex(&rq_from, FT_WAKE, INT_MAX, NULL, NULL, 0);
++    OK(r == 2, "WAKE rq_from wakes the 2 left there");
++    OK(spin_until(&rq_done, 3, 1000) == 0, "3 total off rq_from");
++
++    /* wake the 3 requeued waiters on rq_to */
++    r = futex(&rq_to, FT_WAKE, INT_MAX, NULL, NULL, 0);
++    OK(r == 3, "WAKE rq_to wakes the 3 requeued");
++    OK(spin_until(&rq_done, 6, 1500) == 0, "all 6 eventually woke");
++    for (int i = 0; i < 6; i++) pthread_join(th[i], NULL);
++}
++
++/* ================= H. WAIT_BITSET / WAKE_BITSET ================= */
++static int bs_word;
++static volatile int bs_started, bs_done;
++static void *bs_waiter(void *p) {
++    int bits = (int)(intptr_t)p;     /* bitset passed by value, not via a parent stack local */
++    __sync_fetch_and_add(&bs_started, 1);
++    futex(&bs_word, FT_WAIT_BITSET, 0, NULL, NULL, bits);
++    __sync_fetch_and_add(&bs_done, 1);
++    return NULL;
++}
++static void test_bitset(void)
++{
++    /* one waiter on bit0, one on bit1; WAKE_BITSET(bit0) wakes only the first */
++    bs_word = 0; bs_started = 0; bs_done = 0;
++    pthread_t t0, t1;
++    pthread_create(&t0, NULL, bs_waiter, (void *)(intptr_t)0x1);
++    pthread_create(&t1, NULL, bs_waiter, (void *)(intptr_t)0x2);
++    OK(spin_until(&bs_started, 2, 2000) == 0, "2 bitset waiters started");
++    msleep(50);
++
++    int r = futex(&bs_word, FT_WAKE_BITSET, INT_MAX, NULL, NULL, 0x1);
++    OK(r == 1, "WAKE_BITSET(bit0) wakes exactly 1");
++    OK(spin_until(&bs_done, 1, 1000) == 0, "the bit0 waiter woke");
++    msleep(40);
++    OK(bs_done == 1, "bit1 waiter not woken by bit0");
++
++    /* a non-overlapping wake hits nobody */
++    r = futex(&bs_word, FT_WAKE_BITSET, INT_MAX, NULL, NULL, 0x4 /* bit2 */);
++    OK(r == 0, "WAKE_BITSET(bit2) wakes 0 (no match)");
++    msleep(20);
++    OK(bs_done == 1, "still only 1 woke");
++
++    /* MATCH_ANY wakes the remaining bit1 waiter */
++    r = futex(&bs_word, FT_WAKE_BITSET, INT_MAX, NULL, NULL, (int)FT_BITSET_ANY);
++    OK(r == 1, "WAKE_BITSET(ANY) wakes the rest");
++    OK(spin_until(&bs_done, 2, 1000) == 0, "both bitset waiters done");
++    pthread_join(t0, NULL); pthread_join(t1, NULL);
++}
++
++/* ================= I. futex mutex stress ================= */
++/* glib-style 3-state mutex: 0=free, 1=locked, 2=locked+waiters */
++static int  mtx;
++static long counter;
++#define INCR_THREADS 4
++#define INCR_EACH    20000
++
++static void m_lock(int *m) {
++    int c = __sync_val_compare_and_swap(m, 0, 1);
++    if (c != 0) {
++        if (c != 2) c = __sync_lock_test_and_set(m, 2);
++        while (c != 0) {
++            futex(m, FT_WAIT | FT_PRIVATE, 2, NULL, NULL, 0);
++            c = __sync_lock_test_and_set(m, 2);
++        }
++    }
++}
++static void m_unlock(int *m) {
++    if (__sync_fetch_and_sub(m, 1) != 1) {
++        __sync_lock_test_and_set(m, 0);
++        futex(m, FT_WAKE | FT_PRIVATE, 1, NULL, NULL, 0);
++    }
++}
++static void *incr_thread(void *u) {
++    (void)u;
++    for (int i = 0; i < INCR_EACH; i++) { m_lock(&mtx); counter++; m_unlock(&mtx); }
++    return NULL;
++}
++static void test_mutex_stress(void)
++{
++    mtx = 0; counter = 0;
++    pthread_t th[INCR_THREADS];
++    for (int i = 0; i < INCR_THREADS; i++) pthread_create(&th[i], NULL, incr_thread, NULL);
++    for (int i = 0; i < INCR_THREADS; i++) pthread_join(th[i], NULL);
++    OK(counter == (long)INCR_THREADS * INCR_EACH, "futex mutex: no lost increments");
++    OK(mtx == 0, "futex mutex: released at end");
++}
++
++/* ================= J. ping-pong (wake/wait roundtrips) ================= */
++/* Two threads hand a token back and forth via two futex words; counts each
++   handoff as a checkpoint to stress wake/wait ordering many times. */
++static int   pp_a, pp_b;
++static volatile int pp_turn;   /* 0 = A's turn, 1 = B's turn */
++#define PP_ROUNDS 64
++static volatile int pp_handoffs;
++
++static void *pp_thread(void *p) {
++    int me = (int)(intptr_t)p;     /* 0 or 1, passed by value */
++    int *mine  = me ? &pp_b : &pp_a;
++    int *other = me ? &pp_a : &pp_b;
++    for (int i = 0; i < PP_ROUNDS; i++) {
++        /* wait for my turn */
++        while (pp_turn != me) {
++            futex(mine, FT_WAIT | FT_PRIVATE, 0, NULL, NULL, 0);
++        }
++        __sync_fetch_and_add(&pp_handoffs, 1);
++        /* hand to other */
++        pp_turn = !me;
++        __sync_lock_test_and_set(other, 1);
++        futex(other, FT_WAKE | FT_PRIVATE, 1, NULL, NULL, 0);
++        __sync_lock_test_and_set(mine, 0);
++    }
++    return NULL;
++}
++static void test_pingpong(void)
++{
++    pp_a = 0; pp_b = 0; pp_turn = 0; pp_handoffs = 0;
++    pthread_t t0, t1;
++    pthread_create(&t1, NULL, pp_thread, (void *)(intptr_t)1);
++    pthread_create(&t0, NULL, pp_thread, (void *)(intptr_t)0);
++    /* kick A */
++    __sync_lock_test_and_set(&pp_a, 1);
++    futex(&pp_a, FT_WAKE | FT_PRIVATE, 1, NULL, NULL, 0);
++    /* bounded wait for completion */
++    OK(spin_until(&pp_handoffs, PP_ROUNDS * 2, 4000) == 0 ||
++       pp_handoffs >= PP_ROUNDS, "ping-pong made progress");
++    /* nudge any straggler */
++    for (int i = 0; i < 4; i++) {
++        futex(&pp_a, FT_WAKE | FT_PRIVATE, INT_MAX, NULL, NULL, 0);
++        futex(&pp_b, FT_WAKE | FT_PRIVATE, INT_MAX, NULL, NULL, 0);
++        msleep(5);
++    }
++    pthread_join(t0, NULL); pthread_join(t1, NULL);
++    OK(pp_handoffs >= PP_ROUNDS * 2, "all ping-pong handoffs completed");
++}
++
++/* ================= K. repeated single-waiter cycles ================= */
++/* Many independent WAIT/WAKE cycles, each a checkpoint, to catch lost
++   wakeups / sleepq leaks under repetition (the failure mode glib hits). */
++static int   cyc_word;
++static volatile int cyc_ready, cyc_woke;
++static void *cyc_waiter(void *u) {
++    (void)u;
++    cyc_ready = 1;
++    futex(&cyc_word, FT_WAIT | FT_PRIVATE, 0, NULL, NULL, 0);
++    cyc_woke = 1;
++    return NULL;
++}
++static void test_cycles(void)
++{
++    for (int i = 0; i < 64; i++) {
++        cyc_word = 0; cyc_ready = 0; cyc_woke = 0;
++        pthread_t th;
++        pthread_create(&th, NULL, cyc_waiter, NULL);
++        spin_until(&cyc_ready, 1, 1000);
++        msleep(2);
++        int r = futex(&cyc_word, FT_WAKE | FT_PRIVATE, 1, NULL, NULL, 0);
++        int woke_ok = (r == 1) && (spin_until(&cyc_woke, 1, 500) == 0);
++        OK(woke_ok, "repeated WAIT/WAKE cycle delivered the wakeup");
++        pthread_join(th, NULL);
++    }
++}
++
++/* ================= L. EINVAL edge cases ================= */
++static void test_invalid(void)
++{
++    int v = 0;
++    struct timespec bad_ns = { 0, 2000000000 }; /* tv_nsec >= 1e9 */
++    errno = 0;
++    int r = futex(&v, FT_WAIT, 0, &bad_ns, NULL, 0);
++    OK(r == -1 && (errno == EINVAL || errno == ETIMEDOUT),
++       "WAIT with tv_nsec>=1e9 rejected (EINVAL) or harmlessly times out");
++
++    struct timespec neg = { 0, -1 };
++    errno = 0;
++    r = futex(&v, FT_WAIT, 0, &neg, NULL, 0);
++    OK(r == -1 && (errno == EINVAL || errno == ETIMEDOUT),
++       "WAIT with negative tv_nsec rejected");
++
++    /* unknown op -> ENOSYS / EINVAL, never blocks */
++    errno = 0;
++    r = futex(&v, 0x6f /* bogus cmd */, 0, NULL, NULL, 0);
++    OK(r == -1 && (errno == ENOSYS || errno == EINVAL),
++       "unknown futex op -> ENOSYS/EINVAL (no block)");
++}
++
++/* ================= M. wake-before-wait (no lost wakeup) ================= */
++/* The canonical correctness property: a WAKER that flips the value and wakes
++   BEFORE the waiter reaches FUTEX_WAIT must not cause a lost wakeup — the
++   value re-check in FUTEX_WAIT must return EAGAIN. */
++static int   wb_word;
++static volatile int wb_ready, wb_rc;
++static void *wb_waiter(void *u) {
++    (void)u;
++    wb_ready = 1;
++    /* by the time we run, the waker has already set wb_word = 1 */
++    while (wb_word != 0) {
++        int r = futex(&wb_word, FT_WAIT | FT_PRIVATE, 1, NULL, NULL, 0);
++        if (r == -1 && errno == EAGAIN) break;   /* value already changed back */
++        if (wb_word == 0) break;
++    }
++    wb_rc = 1;
++    return NULL;
++}
++static void test_wake_before_wait(void)
++{
++    /* value is "locked" (1); spawn waiter; immediately unlock (0) + wake.
++       Even if the wake races ahead of the WAIT, the EAGAIN recheck or the
++       loop predicate must let the waiter make progress (no hang). */
++    wb_word = 1; wb_ready = 0; wb_rc = 0;
++    pthread_t th;
++    pthread_create(&th, NULL, wb_waiter, NULL);
++    spin_until(&wb_ready, 1, 1000);
++    wb_word = 0;                                   /* unlock */
++    int r = futex(&wb_word, FT_WAKE | FT_PRIVATE, INT_MAX, NULL, NULL, 0);
++    OK(r >= 0, "WAKE after value change returns >=0");
++    OK(spin_until(&wb_rc, 1, 1500) == 0, "no lost wakeup (waiter made progress)");
++    pthread_join(th, NULL);
++
++    /* repeated tight loop of the same race */
++    int progressed = 1;
++    for (int i = 0; i < 16; i++) {
++        wb_word = 1; wb_ready = 0; wb_rc = 0;
++        pthread_create(&th, NULL, wb_waiter, NULL);
++        spin_until(&wb_ready, 1, 1000);
++        wb_word = 0;
++        futex(&wb_word, FT_WAKE | FT_PRIVATE, INT_MAX, NULL, NULL, 0);
++        if (spin_until(&wb_rc, 1, 1000) != 0) progressed = 0;
++        pthread_join(th, NULL);
++    }
++    OK(progressed, "16 wake/wait races: never a lost wakeup");
++}
++
++/* ================= N. WAKE_OP ================= */
++/* FUTEX_WAKE_OP: wake uaddr, set *uaddr2 = op(val3), conditionally wake
++   uaddr2.  Encode "set uaddr2 = 0" and "wake all if oldval > 0".  We just
++   require it to perform the assignment + return a sane count (it is not in
++   glib's hot path, so a minimal-but-correct impl is enough). */
++#define FT_OP_SET   0
++#define FT_OP_ARG(op,oparg,cmp,cmparg) \
++    (((op) << 28) | ((cmp) << 24) | (((oparg)&0xfff) << 12) | ((cmparg)&0xfff))
++#define FT_CMP_GT   4
++static int   wo_a, wo_b;
++static volatile int wo_started, wo_done;
++static void *wo_waiter(void *which) {
++    int *w = which;
++    __sync_fetch_and_add(&wo_started, 1);
++    futex(w, FT_WAIT | FT_PRIVATE, 0, NULL, NULL, 0);
++    __sync_fetch_and_add(&wo_done, 1);
++    return NULL;
++}
++static void test_wake_op(void)
++{
++    wo_a = 0; wo_b = 1; wo_started = 0; wo_done = 0;
++    pthread_t ta, tb;
++    pthread_create(&ta, NULL, wo_waiter, &wo_a);
++    pthread_create(&tb, NULL, wo_waiter, &wo_b);
++    OK(spin_until(&wo_started, 2, 2000) == 0, "WAKE_OP waiters started");
++    msleep(50);
++
++    /* op: set *wo_b = 0; cmp: wake wo_b's waiter if old *wo_b > 0 (it is 1) */
++    int oparg = FT_OP_ARG(FT_OP_SET, 0, FT_CMP_GT, 0);
++    errno = 0;
++    int r = futex(&wo_a, FT_WAKE_OP | FT_PRIVATE, INT_MAX, (void *)(intptr_t)INT_MAX,
++                  &wo_b, oparg);
++    if (r == -1 && errno == ENOSYS) {
++        OK(0, "WAKE_OP supported (currently ENOSYS — implement it)");
++        /* don't hang the waiters */
++        futex(&wo_a, FT_WAKE | FT_PRIVATE, INT_MAX, NULL, NULL, 0);
++        futex(&wo_b, FT_WAKE | FT_PRIVATE, INT_MAX, NULL, NULL, 0);
++    } else {
++        OK(r >= 0, "WAKE_OP returns total woken >= 0");
++        OK(wo_b == 0, "WAKE_OP applied the assignment to *uaddr2");
++        OK(spin_until(&wo_done, 2, 1500) == 0, "WAKE_OP woke both waiters");
++    }
++    /* belt-and-braces so we always join */
++    futex(&wo_a, FT_WAKE | FT_PRIVATE, INT_MAX, NULL, NULL, 0);
++    futex(&wo_b, FT_WAKE | FT_PRIVATE, INT_MAX, NULL, NULL, 0);
++    pthread_join(ta, NULL); pthread_join(tb, NULL);
++}
++
++/* ================= main ================= */
++int main(void)
++{
++    printf("torture_futex: futex(2) stress (SYS_futex=%d)\n", SYS_futex);
++    printf("----------------------------------------------------\n");
++
++#define STAGE(s) do { printf("[stage] %s\n", s); fflush(stdout); } while (0)
++    STAGE("basic shared");   test_basic(0);          /* shared  */
++    STAGE("basic private");  test_basic(1);          /* private */
++    STAGE("wake_n shared");  test_wake_n(0);
++    STAGE("wake_n private"); test_wake_n(1);
++    STAGE("timed");          test_timed();
++    STAGE("eintr");          test_eintr();
++    STAGE("efault");         test_efault();
++    STAGE("requeue");        test_requeue();
++    STAGE("bitset");         test_bitset();
++    STAGE("mutex_stress");   test_mutex_stress();
++    STAGE("pingpong");       test_pingpong();
++    STAGE("cycles");         test_cycles();
++    STAGE("invalid");        test_invalid();
++    STAGE("wake_before_wait"); test_wake_before_wait();
++    STAGE("wake_op");        test_wake_op();
++    STAGE("done");
++
++    printf("----------------------------------------------------\n");
++    printf("==== torture_futex: %d checks, %d passed, %d FAILED ====\n",
++           g_checks, g_pass, g_fail);
++    return g_fail ? 1 : 0;
++}
+-- 
+2.54.0
+

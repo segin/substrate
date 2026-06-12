@@ -1,0 +1,435 @@
+From 55b30364f4d5fedfde1499af60fbc61de1df77c1 Mon Sep 17 00:00:00 2001
+From: Kirn Gill II <segin2005@gmail.com>
+Date: Wed, 10 Jun 2026 07:25:49 -0500
+Subject: [PATCH 36/83] contrib: freetype 2.13.2, expat 2.6.2, libXrender
+ 0.9.11 (GTK+ 2.x leaves)
+
+The dependency-free (or X-stack-only) layer of the GTK+ 2.x stack, all via
+the substrate-autotools helpers:
+- freetype 2.13.2: font rasterizer, cross-built against dist-zlib +
+  dist-libpng (--without-harfbuzz/brotli/bzip2).
+- expat 2.6.2: XML parser (fontconfig needs it).
+- libXrender 0.9.11: X Render client lib (cairo xlib backend, GDK);
+  --disable-malloc0returnsnull, plus a 3-site BufAlloc-semicolon patch for
+  substrate's modern do-while Xlibint.h BufAlloc.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+---
+ contrib/expat/README.SUBSTRATE.md             |   4 +
+ contrib/expat/build.sh                        |  31 +++++
+ contrib/expat/fetch.sh                        |  19 +++
+ contrib/freetype/README.SUBSTRATE.md          |   5 +
+ contrib/freetype/build.sh                     |  39 +++++++
+ contrib/freetype/fetch.sh                     |  19 +++
+ contrib/libXrender/.gitignore                 |   2 +
+ contrib/libXrender/README.SUBSTRATE.md        |  12 ++
+ contrib/libXrender/build.sh                   | 108 ++++++++++++++++++
+ contrib/libXrender/fetch.sh                   |  48 ++++++++
+ .../0001-glyph-bufalloc-semicolon.patch       |  29 +++++
+ contrib/libXrender/series                     |   1 +
+ 12 files changed, 317 insertions(+)
+ create mode 100644 contrib/expat/README.SUBSTRATE.md
+ create mode 100755 contrib/expat/build.sh
+ create mode 100755 contrib/expat/fetch.sh
+ create mode 100644 contrib/freetype/README.SUBSTRATE.md
+ create mode 100755 contrib/freetype/build.sh
+ create mode 100755 contrib/freetype/fetch.sh
+ create mode 100644 contrib/libXrender/.gitignore
+ create mode 100644 contrib/libXrender/README.SUBSTRATE.md
+ create mode 100755 contrib/libXrender/build.sh
+ create mode 100755 contrib/libXrender/fetch.sh
+ create mode 100644 contrib/libXrender/patches/0001-glyph-bufalloc-semicolon.patch
+ create mode 100644 contrib/libXrender/series
+
+diff --git a/contrib/expat/README.SUBSTRATE.md b/contrib/expat/README.SUBSTRATE.md
+new file mode 100644
+index 00000000..8ab4b219
+--- /dev/null
++++ b/contrib/expat/README.SUBSTRATE.md
+@@ -0,0 +1,4 @@
++# expat (2.6.2)
++
++Expat XML parser — fontconfig reads its config XML with it.  Plain
++substrate-autotools cross port; produces libexpat.so + expat.pc.
+diff --git a/contrib/expat/build.sh b/contrib/expat/build.sh
+new file mode 100755
+index 00000000..3110f2d8
+--- /dev/null
++++ b/contrib/expat/build.sh
+@@ -0,0 +1,31 @@
++#!/bin/sh
++# contrib/expat/build.sh — cross-compile Expat 2.6.2 for substrate.
++set -eu
++HERE="$(cd "$(dirname "$0")" && pwd)"
++VERSION="2.6.2"; TREE_DIR="${HERE}/build/expat-${VERSION}"; BUILD_DIR="${HERE}/build/build-substrate"
++if [ -z "${SUBSTRATE_TOP:-}" ]; then
++    p="${HERE}"; while [ "${p}" != "/" ] && [ ! -f "${p}/AGENTS.md" ] && [ ! -f "${p}/CLAUDE.md" ]; do p=$(dirname "${p}"); done
++    SUBSTRATE_TOP="${p}"
++fi
++: "${STAGE1_PREFIX:=/opt/substrate}"; : "${DESTDIR:=${SUBSTRATE_TOP}/dist-expat}"
++: "${JOBS:=$(nproc 2>/dev/null || echo 4)}"
++PATH="${STAGE1_PREFIX}/bin:${PATH}"; export PATH
++. "${HERE}/../substrate-autotools.sh"
++[ -d "${TREE_DIR}" ] || { echo "build.sh: run ./fetch.sh first" >&2; exit 1; }
++substrate_libtool_fix "${TREE_DIR}/configure"
++export LDFLAGS="-Wl,--copy-dt-needed-entries"
++rm -rf "${BUILD_DIR}"; mkdir -p "${BUILD_DIR}"; cd "${BUILD_DIR}"
++"${TREE_DIR}/configure" \
++    --host=i386-unknown-substrate \
++    --prefix=/usr --libdir=/usr/lib --includedir=/usr/include \
++    --enable-shared --enable-static \
++    --without-docbook --without-examples --without-tests \
++    CC=i386-unknown-substrate-gcc \
++    AR=i386-unknown-substrate-ar RANLIB=i386-unknown-substrate-ranlib \
++    CC_FOR_BUILD=gcc \
++    CFLAGS="-march=i486 -mtune=i486 -O2 -g"
++make -j"${JOBS}"
++rm -rf "${DESTDIR}"; mkdir -p "${DESTDIR}"
++make install DESTDIR="${DESTDIR}"
++substrate_so_finalize "${DESTDIR}"
++echo "==> expat staged at ${DESTDIR}"
+diff --git a/contrib/expat/fetch.sh b/contrib/expat/fetch.sh
+new file mode 100755
+index 00000000..94598e6c
+--- /dev/null
++++ b/contrib/expat/fetch.sh
+@@ -0,0 +1,19 @@
++#!/bin/sh
++# contrib/expat/fetch.sh — Expat 2.6.2 (XML parser; fontconfig needs it).
++set -eu
++VERSION="2.6.2"; UND="2_6_2"
++TARBALL="expat-${VERSION}.tar.xz"
++URL="https://github.com/libexpat/libexpat/releases/download/R_${UND}/${TARBALL}"
++SHA256="ee14b4c5d8908b1bec37ad937607eab183d4d9806a08adee472c3c3121d27364"
++HERE="$(cd "$(dirname "$0")" && pwd)"
++BUILD_DIR="${HERE}/build"; TREE_DIR="${BUILD_DIR}/expat-${VERSION}"
++mkdir -p "${BUILD_DIR}"; cd "${BUILD_DIR}"
++if [ ! -f "${TARBALL}" ]; then
++    [ "${1:-}" = "--no-network" ] && { echo "fetch.sh: tarball missing" >&2; exit 1; }
++    echo "==> Fetching ${URL}"; curl -fSL -o "${TARBALL}" "${URL}"
++fi
++echo "${SHA256}  ${TARBALL}" | sha256sum -c -
++[ -d "${TREE_DIR}" ] || { echo "==> Extracting"; tar xf "${TARBALL}"; }
++. "${HERE}/../substrate-autotools.sh"
++substrate_config_sub_fix "${TREE_DIR}"
++echo "==> expat ${VERSION} ready at ${TREE_DIR}"
+diff --git a/contrib/freetype/README.SUBSTRATE.md b/contrib/freetype/README.SUBSTRATE.md
+new file mode 100644
+index 00000000..5ed2548d
+--- /dev/null
++++ b/contrib/freetype/README.SUBSTRATE.md
+@@ -0,0 +1,5 @@
++# freetype (2.13.2)
++
++Font rasterizer for cairo/pango/fontconfig.  Cross-built against dist-zlib +
++dist-libpng via the substrate-autotools helpers; --without-harfbuzz/brotli/
++bzip2.  Produces libfreetype.so + freetype2.pc.
+diff --git a/contrib/freetype/build.sh b/contrib/freetype/build.sh
+new file mode 100755
+index 00000000..1f0fec81
+--- /dev/null
++++ b/contrib/freetype/build.sh
+@@ -0,0 +1,39 @@
++#!/bin/sh
++# contrib/freetype/build.sh — cross-compile FreeType 2.13.2 for substrate.
++set -eu
++HERE="$(cd "$(dirname "$0")" && pwd)"
++VERSION="2.13.2"; TREE_DIR="${HERE}/build/freetype-${VERSION}"
++if [ -z "${SUBSTRATE_TOP:-}" ]; then
++    p="${HERE}"; while [ "${p}" != "/" ] && [ ! -f "${p}/AGENTS.md" ] && [ ! -f "${p}/CLAUDE.md" ]; do p=$(dirname "${p}"); done
++    SUBSTRATE_TOP="${p}"
++fi
++: "${STAGE1_PREFIX:=/opt/substrate}"; : "${DESTDIR:=${SUBSTRATE_TOP}/dist-freetype}"
++: "${JOBS:=$(nproc 2>/dev/null || echo 4)}"
++PATH="${STAGE1_PREFIX}/bin:${PATH}"; export PATH
++. "${HERE}/../substrate-autotools.sh"
++[ -d "${TREE_DIR}" ] || { echo "build.sh: run ./fetch.sh first" >&2; exit 1; }
++ZL="${SUBSTRATE_TOP}/dist-zlib"; PNG="${SUBSTRATE_TOP}/dist-libpng"
++for d in "${ZL}" "${PNG}"; do [ -d "${d}/usr" ] || { echo "build.sh: ${d} missing" >&2; exit 1; }; done
++
++export CPPFLAGS="-I${ZL}/usr/include -I${PNG}/usr/include"
++export LDFLAGS="-L${ZL}/usr/lib -L${PNG}/usr/lib -Wl,-rpath-link,${ZL}/usr/lib -Wl,-rpath-link,${PNG}/usr/lib -Wl,--copy-dt-needed-entries"
++export PKG_CONFIG_LIBDIR="${ZL}/usr/lib/pkgconfig:${PNG}/usr/lib/pkgconfig"
++
++substrate_libtool_fix "${TREE_DIR}/builds/unix/configure"
++# FreeType drives builds/unix/configure from the top; run it in-tree.
++cd "${TREE_DIR}"
++make distclean >/dev/null 2>&1 || true
++./configure \
++    --host=i386-unknown-substrate \
++    --prefix=/usr --libdir=/usr/lib --includedir=/usr/include \
++    --enable-shared --enable-static \
++    --with-zlib --with-png --without-harfbuzz --without-brotli --without-bzip2 \
++    CC=i386-unknown-substrate-gcc \
++    AR=i386-unknown-substrate-ar RANLIB=i386-unknown-substrate-ranlib \
++    CC_BUILD=gcc \
++    CFLAGS="-march=i486 -mtune=i486 -O2 -g"
++make -j"${JOBS}"
++rm -rf "${DESTDIR}"; mkdir -p "${DESTDIR}"
++make install DESTDIR="${DESTDIR}"
++substrate_so_finalize "${DESTDIR}"
++echo "==> freetype staged at ${DESTDIR}"
+diff --git a/contrib/freetype/fetch.sh b/contrib/freetype/fetch.sh
+new file mode 100755
+index 00000000..2658195d
+--- /dev/null
++++ b/contrib/freetype/fetch.sh
+@@ -0,0 +1,19 @@
++#!/bin/sh
++# contrib/freetype/fetch.sh — FreeType 2.13.2 (font rasterizer; cairo/pango/fontconfig).
++set -eu
++VERSION="2.13.2"
++TARBALL="freetype-${VERSION}.tar.xz"
++URL="https://download.savannah.gnu.org/releases/freetype/${TARBALL}"
++SHA256="12991c4e55c506dd7f9b765933e62fd2be2e06d421505d7950a132e4f1bb484d"
++HERE="$(cd "$(dirname "$0")" && pwd)"
++BUILD_DIR="${HERE}/build"; TREE_DIR="${BUILD_DIR}/freetype-${VERSION}"
++mkdir -p "${BUILD_DIR}"; cd "${BUILD_DIR}"
++if [ ! -f "${TARBALL}" ]; then
++    [ "${1:-}" = "--no-network" ] && { echo "fetch.sh: tarball missing" >&2; exit 1; }
++    echo "==> Fetching ${URL}"; curl -fSL -o "${TARBALL}" "${URL}"
++fi
++echo "${SHA256}  ${TARBALL}" | sha256sum -c -
++[ -d "${TREE_DIR}" ] || { echo "==> Extracting"; tar xf "${TARBALL}"; }
++. "${HERE}/../substrate-autotools.sh"
++substrate_config_sub_fix "${TREE_DIR}"
++echo "==> freetype ${VERSION} ready at ${TREE_DIR}"
+diff --git a/contrib/libXrender/.gitignore b/contrib/libXrender/.gitignore
+new file mode 100644
+index 00000000..9bd80f21
+--- /dev/null
++++ b/contrib/libXrender/.gitignore
+@@ -0,0 +1,2 @@
++build/
++build-*/
+diff --git a/contrib/libXrender/README.SUBSTRATE.md b/contrib/libXrender/README.SUBSTRATE.md
+new file mode 100644
+index 00000000..812c021f
+--- /dev/null
++++ b/contrib/libXrender/README.SUBSTRATE.md
+@@ -0,0 +1,12 @@
++# libXrender (0.9.11)
++
++X Render extension client library — cairo's xlib backend and GTK+ 2.x's GDK
++require it.  Cross-built against dist-xorgproto (renderproto) + dist-libX11
++via the substrate-autotools helpers.  `--disable-malloc0returnsnull`
++(substrate malloc(0) is non-NULL, and the xorg run-test can't execute when
++cross-compiling).
++
++Patch 0001-glyph-bufalloc-semicolon: three `BufAlloc(...)` calls in
++src/Glyph.c lack a trailing `;` — harmless with the old expression-style
++macro, but substrate's libX11 1.8 Xlibint.h uses the modern do-while
++`BufAlloc`, which needs it.
+diff --git a/contrib/libXrender/build.sh b/contrib/libXrender/build.sh
+new file mode 100755
+index 00000000..c0b98d42
+--- /dev/null
++++ b/contrib/libXrender/build.sh
+@@ -0,0 +1,108 @@
++#!/bin/sh
++#
++# contrib/libXrender/build.sh — cross-build libXrender for substrate.
++# the X11 protocol-extensions client library (shape, shm, sync, ...).
++# Produces shared + static libraries, headers and pkg-config files.
++#
++# Part of the xterm dependency chain.  Resolves every already-staged
++# X dist tree automatically, so it works whether invoked standalone
++# or from the repo-root build.sh.
++#
++# Env:
++#   STAGE1_PREFIX   substrate toolchain prefix (default /opt/substrate)
++#   DESTDIR         staging dir (default ${SUBSTRATE_TOP}/dist-libXrender)
++#   JOBS            parallel jobs (default `nproc`)
++
++set -eu
++
++HERE="$(cd "$(dirname "$0")" && pwd)"
++LIB="libXrender"
++VERSION="0.9.11"
++TREE_DIR="${HERE}/build/${LIB}-${VERSION}"
++BUILD_DIR="${HERE}/build/build-stage-substrate"
++
++if [ -z "${SUBSTRATE_TOP:-}" ]; then
++    p="${HERE}"
++    while [ "${p}" != "/" ] && [ ! -f "${p}/AGENTS.md" ] && [ ! -f "${p}/CLAUDE.md" ]; do
++        p=$(dirname "${p}")
++    done
++    SUBSTRATE_TOP="${p}"
++fi
++: "${STAGE1_PREFIX:=/opt/substrate}"
++: "${DESTDIR:=${SUBSTRATE_TOP}/dist-${LIB}}"
++: "${JOBS:=$(nproc 2>/dev/null || echo 4)}"
++
++PATH="${STAGE1_PREFIX}/bin:${PATH}"
++export PATH
++. "${HERE}/../substrate-autotools.sh"
++
++[ -d "${TREE_DIR}" ] || { echo "build.sh: run ./fetch.sh first" >&2; exit 1; }
++
++# Assemble dependency flags from every staged X dist tree.  Listing
++# the full set is harmless — a library simply does not reference the
++# dirs it has no use for.
++PKGP=""; CPP=""; LDF=""
++for d in xorgproto xcb-proto libXau xtrans libxcb libX11 \
++         libXrender libICE libSM libXt libXmu libXpm libXaw; do
++    st="${SUBSTRATE_TOP}/dist-${d}"
++    [ -d "${st}/usr" ] || continue
++    [ -d "${st}/usr/lib/pkgconfig" ] && PKGP="${PKGP}${PKGP:+:}${st}/usr/lib/pkgconfig"
++    [ -d "${st}/usr/include" ] && CPP="${CPP} -I${st}/usr/include"
++    [ -d "${st}/usr/lib" ] && LDF="${LDF} -L${st}/usr/lib -Wl,-rpath-link,${st}/usr/lib"
++done
++# pthread-stubs.pc is pulled in transitively via xcb.pc Requires.private.
++PKGP="${PKGP}:${SUBSTRATE_TOP}/contrib/libxcb/pkgconfig"
++
++export PKG_CONFIG_LIBDIR="${PKGP}"
++export CPPFLAGS="${CPP}"
++export LDFLAGS="${LDF} -Wl,--copy-dt-needed-entries"
++
++rm -rf "${BUILD_DIR}"
++mkdir -p "${BUILD_DIR}"
++cd "${BUILD_DIR}"
++
++substrate_libtool_fix "${TREE_DIR}/configure"
++echo "==> configure"
++"${TREE_DIR}/configure" \
++    --host=i386-unknown-substrate \
++    --prefix=/usr \
++    --libdir=/usr/lib \
++    --includedir=/usr/include \
++    --enable-shared \
++    --enable-static \
++    --disable-malloc0returnsnull \
++    --disable-specs \
++    --disable-docs \
++    --disable-ipv6 \
++    --without-xmlto \
++    --without-fop \
++    --without-xsltproc \
++    CC=i386-unknown-substrate-gcc \
++    AR=i386-unknown-substrate-ar \
++    RANLIB=i386-unknown-substrate-ranlib \
++    CC_FOR_BUILD=gcc \
++    CFLAGS="-march=i486 -mtune=i486 -O2 -g -fno-pie"
++
++echo "==> make -j${JOBS}"
++make -j"${JOBS}"
++
++echo "==> install into ${DESTDIR}"
++rm -rf "${DESTDIR}"
++mkdir -p "${DESTDIR}"
++make install DESTDIR="${DESTDIR}"
++
++# Drop libtool archives — substrate links against .a / .so directly.
++rm -f "${DESTDIR}"/usr/lib/*.la
++
++# Post-patch every produced .so OSABI byte to ELFOSABI_SUBSTRATE
++# (0x40); substrate's cross-ld stamps SYSV otherwise.
++_n=0
++for so in "${DESTDIR}"/usr/lib/*.so.*; do
++    [ -f "${so}" ] || continue
++    [ -L "${so}" ] && continue
++    printf '\100' | dd of="${so}" bs=1 seek=7 count=1 conv=notrunc status=none
++    _n=$((_n + 1))
++done
++echo "  OSABI->substrate on ${_n} shared objects"
++
++echo "==> Done.  ${LIB} staged under ${DESTDIR}"
+diff --git a/contrib/libXrender/fetch.sh b/contrib/libXrender/fetch.sh
+new file mode 100755
+index 00000000..5fffdb0a
+--- /dev/null
++++ b/contrib/libXrender/fetch.sh
+@@ -0,0 +1,48 @@
++#!/bin/sh
++#
++# contrib/libXrender/fetch.sh — fetch the libXrender tarball, verify, extract,
++# apply the substrate patch series.
++
++set -eu
++
++VERSION="0.9.11"
++TARBALL="libXrender-${VERSION}.tar.xz"
++URL="https://www.x.org/releases/individual/lib/${TARBALL}"
++SHA256="bc53759a3a83d1ff702fb59641b3d2f7c56e05051fa0cfa93501166fa782dc24"
++
++HERE="$(cd "$(dirname "$0")" && pwd)"
++BUILD_DIR="${HERE}/build"
++TREE_DIR="${BUILD_DIR}/libXrender-${VERSION}"
++
++mkdir -p "${BUILD_DIR}"
++cd "${BUILD_DIR}"
++
++if [ ! -f "${TARBALL}" ]; then
++    [ "${1:-}" = "--no-network" ] && { echo "fetch.sh: tarball missing" >&2; exit 1; }
++    echo "==> Fetching ${URL}"
++    if command -v curl >/dev/null 2>&1; then
++        curl -fSL -o "${TARBALL}" "${URL}"
++    else
++        wget -O "${TARBALL}" "${URL}"
++    fi
++fi
++
++echo "==> Verifying ${TARBALL}"
++echo "${SHA256}  ${TARBALL}" | sha256sum -c -
++
++if [ ! -d "${TREE_DIR}" ]; then
++    echo "==> Extracting"
++    tar xf "${TARBALL}"
++fi
++
++. "${HERE}/../substrate-autotools.sh"
++substrate_config_sub_fix "${TREE_DIR}"
++if [ -f "${HERE}/series" ]; then
++    while IFS= read -r _p; do
++        [ -n "${_p}" ] || continue
++        patch -d "${TREE_DIR}" -p1 --dry-run -R -s -f < "${HERE}/patches/${_p}" >/dev/null 2>&1 \
++            || patch -d "${TREE_DIR}" -p1 < "${HERE}/patches/${_p}"
++    done < "${HERE}/series"
++fi
++
++echo "==> libXrender ${VERSION} ready at ${TREE_DIR}"
+diff --git a/contrib/libXrender/patches/0001-glyph-bufalloc-semicolon.patch b/contrib/libXrender/patches/0001-glyph-bufalloc-semicolon.patch
+new file mode 100644
+index 00000000..1204e6cf
+--- /dev/null
++++ b/contrib/libXrender/patches/0001-glyph-bufalloc-semicolon.patch
+@@ -0,0 +1,29 @@
++--- a/src/Glyph.c	2026-06-10 07:24:55.163823583 -0500
+++++ b/src/Glyph.c	2026-06-10 07:24:55.165808609 -0500
++@@ -480,7 +480,7 @@
++ 	{
++ 	    int this_chars = nchars > MAX_8 ? MAX_8 : nchars;
++ 
++-	    BufAlloc (xGlyphElt *, elt, SIZEOF(xGlyphElt))
+++	    BufAlloc (xGlyphElt *, elt, SIZEOF(xGlyphElt));
++ 	    elt->len = (CARD8) this_chars;
++ 	    elt->deltax = (INT16) xDst;
++ 	    elt->deltay = (INT16) yDst;
++@@ -594,7 +594,7 @@
++ 	    int this_chars = nchars > MAX_16 ? MAX_16 : nchars;
++ 	    int this_bytes = this_chars * 2;
++ 
++-	    BufAlloc (xGlyphElt *, elt, SIZEOF(xGlyphElt))
+++	    BufAlloc (xGlyphElt *, elt, SIZEOF(xGlyphElt));
++ 	    elt->len = (CARD8) this_chars;
++ 	    elt->deltax = (INT16) xDst;
++ 	    elt->deltay = (INT16) yDst;
++@@ -703,7 +703,7 @@
++ 	{
++ 	    int this_chars = nchars > MAX_32 ? MAX_32 : nchars;
++ 	    int this_bytes = this_chars * 4;
++-	    BufAlloc (xGlyphElt *, elt, SIZEOF(xGlyphElt))
+++	    BufAlloc (xGlyphElt *, elt, SIZEOF(xGlyphElt));
++ 	    elt->len = (CARD8) this_chars;
++ 	    elt->deltax = (INT16) xDst;
++ 	    elt->deltay = (INT16) yDst;
+diff --git a/contrib/libXrender/series b/contrib/libXrender/series
+new file mode 100644
+index 00000000..388088a9
+--- /dev/null
++++ b/contrib/libXrender/series
+@@ -0,0 +1 @@
++0001-glyph-bufalloc-semicolon.patch
+-- 
+2.54.0
+

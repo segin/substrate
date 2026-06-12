@@ -1,0 +1,190 @@
+From 0070f33b3c2128e73b4cd55279fa66fb5ba57806 Mon Sep 17 00:00:00 2001
+From: Kirn Gill II <segin2005@gmail.com>
+Date: Thu, 11 Jun 2026 16:33:06 -0500
+Subject: [PATCH 77/83] futex: close the FUTEX_WAIT lost-wakeup race; torture
+ suite to 271 points
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+FUTEX_WAIT read *uaddr and compared it to the expected value, then later
+called sleepq_add() under the bucket lock — but the compare happened
+*outside* that lock.  On SMP a waker on another CPU could change *uaddr and
+issue FUTEX_WAKE (which takes the same sleepq bucket lock as sleepq_add) in
+the window between our compare and our enqueue; the wake found no waiter and
+was lost, leaving the waiter blocked until its timeout (or forever).
+
+Fix: after sleepq_add() enqueues us, re-read *uaddr.  Being on the queue
+before this second read gives a total order with the waker's bucket-locked
+wake — either we observe the new value here and bail with EAGAIN (we never
+sleep, nothing is lost), or the value is still 'val', in which case the
+waker's change and wake necessarily follow our enqueue and will find us.
+The re-read is unlocked so a fault just unwinds (EFAULT).
+
+tests/lib/futex/torture_futex.c: extended 137 -> 271 checkpoints, adding
+section O (lost-wakeup RACE fired concurrently with the waiter entering
+WAIT, with a timed backstop so a lost wakeup is flagged by latency rather
+than hanging) and section P (the same under multi-waiter bucket contention).
+271/271 on the Linux SMP oracle and on substrate.
+
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+---
+ sys/kern/futex.c                | 26 ++++++++++
+ tests/lib/futex/torture_futex.c | 92 ++++++++++++++++++++++++++++++++-
+ 2 files changed, 117 insertions(+), 1 deletion(-)
+
+diff --git a/sys/kern/futex.c b/sys/kern/futex.c
+index bc56ac56..e61d91a8 100644
+--- a/sys/kern/futex.c
++++ b/sys/kern/futex.c
+@@ -442,6 +442,32 @@ int sys_futex(int *uaddr, int op, int val, void *timeout, int *uaddr2, int val3)
+             else
+                 sleepq_add(key, current_thread);
+ 
++            /*
++             * Re-validate *uaddr now that we are on the sleep queue.  This
++             * closes the lost-wakeup race: a waker on another CPU changes
++             * *uaddr and then issues FUTEX_WAKE, which takes the same
++             * sleepq bucket lock as sleepq_add() above.  Our first read
++             * (way above) happened BEFORE we enqueued, so a wake landing in
++             * that window would have found no waiter and been lost.  By
++             * reading a second time only after sleepq_add(), we guarantee a
++             * total order: either we observe the new value here and bail
++             * with EAGAIN (we never sleep, so nothing is lost), or the
++             * value is still 'val' -- in which case the waker's change (and
++             * its wake) necessarily come after our enqueue and will find
++             * us.  The read is done unlocked so a fault just unwinds.
++             */
++            {
++                int recheck;
++                int rr = futex_read_user(uaddr, &recheck);
++                if (rr != 0 || recheck != val) {
++                    sleepq_remove_thread(current_thread);
++                    current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
++                    if (timeout)
++                        current_thread->sleep_expiry = 0;
++                    return (rr != 0) ? -EFAULT : -EAGAIN;
++                }
++            }
++
+             sched_yield();
+ 
+             current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
+diff --git a/tests/lib/futex/torture_futex.c b/tests/lib/futex/torture_futex.c
+index 162a77b4..997e52de 100644
+--- a/tests/lib/futex/torture_futex.c
++++ b/tests/lib/futex/torture_futex.c
+@@ -1,5 +1,5 @@
+ /*
+- * torture_futex.c — portable POSIX futex torture suite (128+ checkpoints).
++ * torture_futex.c — portable POSIX futex torture suite (256+ checkpoints).
+  *
+  * Exercises the futex(2) surface a real glib2/GTK app leans on:
+  *   FUTEX_WAIT / FUTEX_WAKE (private + shared), value-mismatch EAGAIN,
+@@ -589,6 +589,94 @@ static void test_wake_op(void)
+     pthread_join(ta, NULL); pthread_join(tb, NULL);
+ }
+ 
++/* ================= O. lost-wakeup RACE (sleepq re-check) =================
++ *
++ * Distinct from M (wake strictly BEFORE the wait): here the value flip +
++ * FUTEX_WAKE is fired *concurrently* with the waiter entering FUTEX_WAIT,
++ * so it can land in the narrow window between the kernel's value compare
++ * and its enqueue on the sleep queue.  A kernel that enqueues without
++ * re-validating *uaddr loses that wakeup and the waiter blocks until its
++ * backstop timeout.  Each waiter uses a long timed wait as a backstop so a
++ * lost wakeup can never hang the suite; a prompt wake clears in
++ * milliseconds, a lost one only at the 2 s timeout — so the per-round
++ * latency cleanly separates correct from racy.  (On Linux, the oracle,
++ * every round is prompt; this also validates the test itself.) */
++struct lw_arg { int *word; int oldv; volatile int started; volatile int woke; };
++static void *lw_waiter(void *p)
++{
++    struct lw_arg *a = p;
++    a->started = 1;
++    while (__atomic_load_n(a->word, __ATOMIC_SEQ_CST) == a->oldv) {
++        struct timespec ts = { .tv_sec = 2, .tv_nsec = 0 };
++        futex(a->word, FT_WAIT | FT_PRIVATE, a->oldv, &ts, NULL, 0);
++    }
++    a->woke = 1;
++    return NULL;
++}
++static void test_lost_wakeup_race(void)
++{
++    enum { ROUNDS = 120 };
++    int slow = 0, terminated_all = 1;
++    for (int r = 0; r < ROUNDS; r++) {
++        int word = 0;
++        struct lw_arg a = { &word, 0, 0, 0 };
++        pthread_t th;
++        pthread_create(&th, NULL, lw_waiter, &a);
++        spin_until(&a.started, 1, 1000);   /* it is about to enter WAIT */
++        /* Variable jitter so the flip+wake lands at different points of the
++         * compare->enqueue window across rounds. */
++        for (volatile int j = 0; j < (r * 37) % 211; j++) { }
++        __atomic_store_n(&word, 1, __ATOMIC_SEQ_CST);          /* flip */
++        futex(&word, FT_WAKE | FT_PRIVATE, 1, NULL, NULL, 0);  /* wake */
++        /* Prompt wake clears within ~500 ms; a lost wakeup only at the 2 s
++         * backstop. */
++        int promptly = (spin_until(&a.woke, 1, 500) == 0);
++        OK(promptly, "lost-wakeup race round woke promptly (not via timeout)");
++        if (!promptly) slow++;
++        /* Guarantee termination regardless of the outcome, then join. */
++        __atomic_store_n(&word, 1, __ATOMIC_SEQ_CST);
++        futex(&word, FT_WAKE | FT_PRIVATE, INT_MAX, NULL, NULL, 0);
++        if (spin_until(&a.woke, 1, 2500) != 0) terminated_all = 0;
++        pthread_join(th, NULL);
++    }
++    OK(slow == 0, "no round suffered a lost wakeup");
++    OK(terminated_all, "every race-round waiter terminated");
++}
++
++/* ================= P. concurrent multi-waiter race =================
++ * Several waiters park on the same word; the main thread flips the value
++ * and wakes them all, racing the wake against threads still entering WAIT.
++ * Exercises the re-check path under bucket contention (multiple threads in
++ * the same sleepq hash chain). */
++struct mw_lw { int *word; int oldv; volatile int woke; };
++static void *mw_lw_waiter(void *p)
++{
++    struct mw_lw *a = p;
++    while (__atomic_load_n(a->word, __ATOMIC_SEQ_CST) == a->oldv) {
++        struct timespec ts = { .tv_sec = 2, .tv_nsec = 0 };
++        futex(a->word, FT_WAIT | FT_PRIVATE, a->oldv, &ts, NULL, 0);
++    }
++    __atomic_fetch_add(&a->woke, 1, __ATOMIC_SEQ_CST);
++    return NULL;
++}
++static void test_multi_waiter_race(void)
++{
++    enum { NW = 8, ROUNDS = 12 };
++    for (int r = 0; r < ROUNDS; r++) {
++        int word = 0;
++        struct mw_lw a = { &word, 0, 0 };
++        pthread_t th[NW];
++        for (int i = 0; i < NW; i++)
++            pthread_create(&th[i], NULL, mw_lw_waiter, &a);
++        msleep(5);                                  /* let them all park */
++        __atomic_store_n(&word, 1, __ATOMIC_SEQ_CST);
++        futex(&word, FT_WAKE | FT_PRIVATE, INT_MAX, NULL, NULL, 0);
++        int ok = (spin_until(&a.woke, NW, 2500) == 0);
++        OK(ok, "all 8 waiters woke (no lost wakeup under contention)");
++        for (int i = 0; i < NW; i++) pthread_join(th[i], NULL);
++    }
++}
++
+ /* ================= main ================= */
+ int main(void)
+ {
+@@ -611,6 +699,8 @@ int main(void)
+     STAGE("invalid");        test_invalid();
+     STAGE("wake_before_wait"); test_wake_before_wait();
+     STAGE("wake_op");        test_wake_op();
++    STAGE("lost_wakeup_race"); test_lost_wakeup_race();
++    STAGE("multi_waiter_race"); test_multi_waiter_race();
+     STAGE("done");
+ 
+     printf("----------------------------------------------------\n");
+-- 
+2.54.0
+

@@ -1,0 +1,436 @@
+From 0d0e862f2b732cdeadd0a242827c2b13476c21fe Mon Sep 17 00:00:00 2001
+From: Kirn Gill II <segin2005@gmail.com>
+Date: Wed, 10 Jun 2026 13:42:39 -0500
+Subject: [PATCH 55/83] =?UTF-8?q?=F0=9F=94=92=20Prevent=20command=20inject?=
+ =?UTF-8?q?ion=20in=20exvi=20via=20direct=20execution=20(#1270)?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+- Replace popen/pclose with custom exvi_popen/exvi_pclose
+- Implement exvi_tokenize_command to split arguments safely
+- Use execvp instead of shell execution to bypass shell metacharacters
+- Drop privileges (setgid/setuid) in child process before execution
+- Consistently enforce secure_mode and restricted_mode
+- Add test_secure_command_execution to verify the fix
+
+Co-authored-by: google-labs-jules[bot] <161369871+google-labs-jules[bot]@users.noreply.github.com>
+Co-authored-by: segin <480709+segin@users.noreply.github.com>
+---
+ tests/usr.lib/exvi/test_main.c |  62 +++++++++++
+ usr.lib/exvi/exvi_buffer.c     |   8 +-
+ usr.lib/exvi/exvi_cmd.c        | 192 +++++++++++++++++++++++++++++++--
+ usr.lib/exvi/exvi_internal.h   |   4 +
+ usr.lib/exvi/exvi_session.c    |   8 +-
+ 5 files changed, 258 insertions(+), 16 deletions(-)
+
+diff --git a/tests/usr.lib/exvi/test_main.c b/tests/usr.lib/exvi/test_main.c
+index a86187cc..58c83563 100644
+--- a/tests/usr.lib/exvi/test_main.c
++++ b/tests/usr.lib/exvi/test_main.c
+@@ -3,6 +3,7 @@
+ #include <stdio.h>
+ #include <stdlib.h>
+ #include <string.h>
++#include <unistd.h>
+ 
+ #include <exvi.h>
+ #include "../../../usr.lib/exvi/exvi_internal.h"
+@@ -913,6 +914,66 @@ test_line_array_random_access(void)
+     cleanup_shared_state();
+ }
+ 
++static void
++test_secure_command_execution(void)
++{
++    buffer_t b;
++    char cmd_inj[] = "!echo hello; touch /tmp/exvi_pwned";
++
++    reset_shared_state();
++    buf_init(&b);
++    buf_insert_after(&b, NULL, "line 1");
++
++    /* Test 1: Restricted mode should block shell commands */
++    restricted_mode = 1;
++    assert(handle_shell_command(cmd_inj) == 1);
++    assert(access("/tmp/exvi_pwned", F_OK) != 0);
++
++    /* Test 2: Secure mode should block shell commands */
++    restricted_mode = 0;
++    secure_mode = 1;
++    assert(handle_shell_command(cmd_inj) == 1);
++    assert(access("/tmp/exvi_pwned", F_OK) != 0);
++
++    /* Test 3: Normal mode should NOT interpret shell metacharacters */
++    secure_mode = 0;
++    handle_shell_command(cmd_inj);
++    assert(access("/tmp/exvi_pwned", F_OK) != 0);
++
++    /* Test 4: exvi_popen should also respect restricted/secure mode */
++    restricted_mode = 1;
++    assert(exvi_popen("echo test", "r") == NULL);
++    restricted_mode = 0;
++    secure_mode = 1;
++    assert(exvi_popen("echo test", "r") == NULL);
++
++    /* Test 5: Verify no shell metacharacters in popen */
++    secure_mode = 0;
++    FILE *f = exvi_popen("touch /tmp/exvi_metachar; touch /tmp/exvi_metachar2", "w");
++    assert(f != NULL);
++    exvi_pclose(f);
++    /* Semicolon should NOT be interpreted as command separator.
++       Touch will be called with arguments ["/tmp/exvi_metachar;", "touch", "/tmp/exvi_metachar2"]
++       It will likely fail or create a file with semicolon in name.
++       Importantly, it should NOT create /tmp/exvi_metachar2 unless the first touch created it.
++       Wait, if it was shell it would create both.
++       If it is NOT shell, it creates "/tmp/exvi_metachar;", "touch" and "/tmp/exvi_metachar2".
++       Wait, touch DOES take multiple arguments.
++       Let's use something that doesn't.
++    */
++    remove("/tmp/exvi_metachar;");
++    remove("touch");
++    remove("/tmp/exvi_metachar2");
++
++    FILE *f2 = exvi_popen("ls /tmp/exvi_nonexistent; touch /tmp/exvi_popen_pwned", "r");
++    assert(f2 != NULL);
++    exvi_pclose(f2);
++    assert(access("/tmp/exvi_popen_pwned", F_OK) != 0);
++
++    free_buffer(&b);
++    cleanup_shared_state();
++}
++
+ int
+ main(void)
+ {
+@@ -943,6 +1004,7 @@ main(void)
+     test_utf8_prev_offset();
+     test_quit_sets_exit_flag();
+     test_line_array_random_access();
++    test_secure_command_execution();
+     puts("exvi core tests: ok");
+     return 0;
+ }
+diff --git a/usr.lib/exvi/exvi_buffer.c b/usr.lib/exvi/exvi_buffer.c
+index a72f1871..e604452a 100644
+--- a/usr.lib/exvi/exvi_buffer.c
++++ b/usr.lib/exvi/exvi_buffer.c
+@@ -451,20 +451,20 @@ buf_write_range(buffer_t *b, const char *filename, int append, int addr1, int ad
+     if (filename[0] == '!') {
+         FILE *f;
+ 
+-        if (secure_mode) {
++        if (secure_mode || restricted_mode) {
+             exvi_report_shell_forbidden();
+             return;
+         }
+-        f = popen(filename + 1, "w");
++        f = exvi_popen(filename + 1, "w");
+         if (!f) {
+             return;
+         }
+         if (write_range_to_stream(b, f, addr1, addr2) != 0) {
+-            pclose(f);
++            exvi_pclose(f);
+             fprintf(stderr, "Invalid write range\n");
+             return;
+         }
+-        pclose(f);
++        exvi_pclose(f);
+         return;
+     }
+ 
+diff --git a/usr.lib/exvi/exvi_cmd.c b/usr.lib/exvi/exvi_cmd.c
+index a49b31e3..2b3fad06 100644
+--- a/usr.lib/exvi/exvi_cmd.c
++++ b/usr.lib/exvi/exvi_cmd.c
+@@ -9,6 +9,7 @@
+ #include <unistd.h>
+ #include <sys/wait.h>
+ #include <errno.h>
++#include <signal.h>
+ 
+ #define EXVI_SUB_PRINT_PLAIN  0x01
+ #define EXVI_SUB_PRINT_NUMBER 0x02
+@@ -760,20 +761,190 @@ handle_repeat_substitute_command(buffer_t *b, const char *args, int addr1,
+     return 1;
+ }
+ 
++char **
++exvi_tokenize_command(const char *cmd)
++{
++    int argc = 0;
++    int capacity = 10;
++    char **argv = malloc(sizeof(char *) * (size_t)capacity);
++    const char *p = cmd;
++
++    if (!argv) {
++        return NULL;
++    }
++
++    while (*p) {
++        while (*p && isspace((unsigned char)*p)) {
++            p++;
++        }
++        if (!*p) {
++            break;
++        }
++
++        const char *start = p;
++        char *arg = NULL;
++
++        if (*p == '\'' || *p == '"') {
++            char quote = *p++;
++            start = p;
++            while (*p && *p != quote) {
++                p++;
++            }
++            arg = strndup(start, (size_t)(p - start));
++            if (*p == quote) {
++                p++;
++            }
++        } else {
++            while (*p && !isspace((unsigned char)*p)) {
++                p++;
++            }
++            arg = strndup(start, (size_t)(p - start));
++        }
++
++        if (argc >= capacity - 1) {
++            capacity *= 2;
++            char **new_argv = realloc(argv, sizeof(char *) * (size_t)capacity);
++            if (!new_argv) {
++                for (int i = 0; i < argc; i++) {
++                    free(argv[i]);
++                }
++                free(argv);
++                return NULL;
++            }
++            argv = new_argv;
++        }
++        argv[argc++] = arg;
++    }
++    argv[argc] = NULL;
++    return argv;
++}
++
++typedef struct popen_entry {
++    FILE *f;
++    pid_t pid;
++    struct popen_entry *next;
++} popen_entry_t;
++
++static popen_entry_t *popen_list = NULL;
++
++FILE *
++exvi_popen(const char *cmd, const char *mode)
++{
++    int pipe_fds[2];
++    pid_t pid;
++    FILE *f;
++    int is_read = (mode[0] == 'r');
++
++    if (secure_mode || restricted_mode) {
++        exvi_report_shell_forbidden();
++        return NULL;
++    }
++
++    if (pipe(pipe_fds) == -1) {
++        return NULL;
++    }
++
++    pid = fork();
++    if (pid == -1) {
++        close(pipe_fds[0]);
++        close(pipe_fds[1]);
++        return NULL;
++    }
++
++    if (pid == 0) {
++        char **argv = exvi_tokenize_command(cmd);
++        if (!argv || !argv[0]) {
++            exit(127);
++        }
++
++        if (is_read) {
++            close(pipe_fds[0]);
++            dup2(pipe_fds[1], STDOUT_FILENO);
++            close(pipe_fds[1]);
++        } else {
++            close(pipe_fds[1]);
++            dup2(pipe_fds[0], STDIN_FILENO);
++            close(pipe_fds[0]);
++        }
++
++        if (setgid(getgid()) == -1) {
++            exit(127);
++        }
++        if (setuid(getuid()) == -1) {
++            exit(127);
++        }
++
++        /* Bypass shell to prevent command injection */
++        execvp(argv[0], argv);
++        exit(127);
++    }
++
++    if (is_read) {
++        close(pipe_fds[1]);
++        f = fdopen(pipe_fds[0], "r");
++    } else {
++        close(pipe_fds[0]);
++        f = fdopen(pipe_fds[1], "w");
++    }
++
++    if (!f) {
++        if (is_read) close(pipe_fds[0]);
++        else close(pipe_fds[1]);
++        return NULL;
++    }
++
++    popen_entry_t *entry = malloc(sizeof(popen_entry_t));
++    if (!entry) {
++        fclose(f);
++        kill(pid, SIGKILL);
++        waitpid(pid, NULL, 0);
++        return NULL;
++    }
++    entry->f = f;
++    entry->pid = pid;
++    entry->next = popen_list;
++    popen_list = entry;
++
++    return f;
++}
++
++int
++exvi_pclose(FILE *f)
++{
++    popen_entry_t **curr = &popen_list;
++    pid_t pid = -1;
++
++    while (*curr) {
++        if ((*curr)->f == f) {
++            popen_entry_t *to_free = *curr;
++            pid = to_free->pid;
++            *curr = to_free->next;
++            free(to_free);
++            break;
++        }
++        curr = &(*curr)->next;
++    }
++
++    fclose(f);
++    if (pid != -1) {
++        int status;
++        while (waitpid(pid, &status, 0) == -1) {
++            if (errno != EINTR) return -1;
++        }
++        return status;
++    }
++    return -1;
++}
++
+ int
+ handle_shell_command(char *cmd)
+ {
+-    char *shell;
+     pid_t pid;
+ 
+-    if (secure_mode) {
++    if (secure_mode || restricted_mode) {
+         exvi_report_shell_forbidden();
+         return 1;
+     }
+-    shell = getenv("SHELL");
+-    if (!shell || !*shell) {
+-        shell = "/bin/sh";
+-    }
+     if (visual_mode) {
+         exvi_visual_shell_suspend();
+     }
+@@ -781,6 +952,10 @@ handle_shell_command(char *cmd)
+     if (pid < 0) {
+         perror("fork");
+     } else if (pid == 0) {
++        char **argv = exvi_tokenize_command(cmd + 1);
++        if (!argv || !argv[0]) {
++            exit(127);
++        }
+         if (setgid(getgid()) == -1) {
+             perror("setgid");
+             exit(127);
+@@ -789,8 +964,9 @@ handle_shell_command(char *cmd)
+             perror("setuid");
+             exit(127);
+         }
+-        execl(shell, shell, "-c", cmd + 1, (char *)NULL);
+-        perror("execl");
++        /* Bypass shell to prevent command injection */
++        execvp(argv[0], argv);
++        perror("execvp");
+         exit(127);
+     } else {
+         int status;
+diff --git a/usr.lib/exvi/exvi_internal.h b/usr.lib/exvi/exvi_internal.h
+index 1b7a5fa6..d88cd6e1 100644
+--- a/usr.lib/exvi/exvi_internal.h
++++ b/usr.lib/exvi/exvi_internal.h
+@@ -4,6 +4,7 @@
+ #include <stddef.h>
+ #include <setjmp.h>
+ #include <signal.h>
++#include <stdio.h>
+ 
+ #include <exvi.h>
+ 
+@@ -209,5 +210,8 @@ int handle_substitute_command(buffer_t *b, const char *args, int addr1, int addr
+ int handle_repeat_substitute_command(buffer_t *b, const char *args, int addr1,
+     int addr2);
+ int handle_shell_command(char *cmd);
++char **exvi_tokenize_command(const char *cmd);
++FILE *exvi_popen(const char *cmd, const char *mode);
++int exvi_pclose(FILE *f);
+ 
+ #endif
+diff --git a/usr.lib/exvi/exvi_session.c b/usr.lib/exvi/exvi_session.c
+index 75f13c3b..7ae2593c 100644
+--- a/usr.lib/exvi/exvi_session.c
++++ b/usr.lib/exvi/exvi_session.c
+@@ -1185,13 +1185,13 @@ handle_read_command(buffer_t *b, const char *args, int addr2)
+     }
+ 
+     if (*ptr == '!') {
+-        if (secure_mode) {
++        if (secure_mode || restricted_mode) {
+             exvi_report_shell_forbidden();
+             return 1;
+         }
+         is_pipe = 1;
+         display_name = ptr + 1;
+-        f = popen(ptr + 1, "r");
++        f = exvi_popen(ptr + 1, "r");
+     } else {
+         if (!*ptr) {
+             ptr = b->filename;
+@@ -1242,7 +1242,7 @@ handle_read_command(buffer_t *b, const char *args, int addr2)
+                 if (!text) {
+                     free(line);
+                     if (is_pipe) {
+-                        pclose(f);
++                        exvi_pclose(f);
+                     } else {
+                         fclose(f);
+                     }
+@@ -1269,7 +1269,7 @@ handle_read_command(buffer_t *b, const char *args, int addr2)
+         free(line);
+ 
+         if (is_pipe) {
+-            pclose(f);
++            exvi_pclose(f);
+         } else {
+             fclose(f);
+         }
+-- 
+2.54.0
+

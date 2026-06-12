@@ -1,0 +1,58 @@
+From d6fbd1044a036b3bdd010ca22274a0aaba1e4b14 Mon Sep 17 00:00:00 2001
+From: Kirn Gill II <segin2005@gmail.com>
+Date: Mon, 8 Jun 2026 16:51:12 -0500
+Subject: [PATCH 03/83] libc: MB_CUR_MAX must reflect the locale (1), not a
+ hardcoded 4
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+<stdlib.h> hardcoded `#define MB_CUR_MAX 4`, but substrate's libc is a
+single-byte "C" locale: __ctype_get_mb_cur_max() returns 1 and mbtowc/mblen
+are single-byte.  The constant 4 advertised multibyte support the libc does
+not provide, so wide-character-aware clients keyed on MB_CUR_MAX took their
+wchar_t path against a single-byte locale.
+
+The visible casualty was CDE's dtterm: with MB_CUR_MAX==4 it stored each
+terminal cell as a wchar_t and rendered the line via XwcDrawString, so every
+ASCII cell drew as one real glyph followed by three NUL "tofu" boxes
+("r###o###o###t###@###a###" for "root@agar").  Its menu bar was fine because
+Motif draws single-byte via XmbDrawString.
+
+Define MB_CUR_MAX as the standard accessor (__ctype_get_mb_cur_max()) so it
+tracks the real locale — now 1, so dtterm takes the single-byte XmbDrawString
+path and renders cleanly, and it would adapt automatically if substrate ever
+grows real multibyte locale support.  No substrate source uses MB_CUR_MAX in a
+constant-array context, so the function form introduces no VLA breakage.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+---
+ include/stdlib.h | 12 +++++++++++-
+ 1 file changed, 11 insertions(+), 1 deletion(-)
+
+diff --git a/include/stdlib.h b/include/stdlib.h
+index 16dbe5ff..7f7a2de5 100644
+--- a/include/stdlib.h
++++ b/include/stdlib.h
+@@ -11,7 +11,17 @@ extern "C" {
+ /* wchar_t comes from stddef.h above. */
+ 
+ #define RAND_MAX 2147483647
+-#define MB_CUR_MAX 4
++
++/* MB_CUR_MAX must reflect the current locale's maximum multibyte length.
++ * substrate's libc is a single-byte "C" locale (mbtowc/mblen are single-byte;
++ * __ctype_get_mb_cur_max() returns 1).  Hardcoding 4 lied about multibyte
++ * support the libc does not actually provide: wide-character-aware clients
++ * keyed on MB_CUR_MAX (notably CDE's dtterm, which then stores cells as
++ * wchar_t and draws via XwcDrawString) rendered every ASCII cell as one glyph
++ * followed by three NUL "tofu" boxes.  Use the accessor so MB_CUR_MAX tracks
++ * the real locale (and would adapt automatically if multibyte support lands). */
++extern int __ctype_get_mb_cur_max(void);
++#define MB_CUR_MAX (__ctype_get_mb_cur_max())
+ 
+ #define EXIT_SUCCESS 0
+ #define EXIT_FAILURE 1
+-- 
+2.54.0
+

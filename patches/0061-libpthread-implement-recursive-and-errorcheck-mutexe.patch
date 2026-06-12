@@ -1,0 +1,335 @@
+From 87f8f8c0fd7896b6fab900fa021ec70bc291a395 Mon Sep 17 00:00:00 2001
+From: Kirn Gill II <segin2005@gmail.com>
+Date: Wed, 10 Jun 2026 22:17:16 -0500
+Subject: [PATCH 61/83] libpthread: implement recursive (and errorcheck)
+ mutexes
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+pthread_mutex_lock always realised a plain non-recursive mutex and
+ignored PTHREAD_MUTEX_RECURSIVE, so a thread that re-locked a recursive
+mutex parked in FUTEX_WAIT forever.  glib's GRecMutex is exactly this —
+a PTHREAD_MUTEX_RECURSIVE mutex — and GTK/glib re-lock GRecMutexes
+pervasively, so HexChat self-deadlocked at startup on its first
+recursive lock (single-threaded process, mutex word stuck at 2,
+nobody to wake it).  Diagnosed by attaching gdb to the live instance
+and tracing the hung thread: g_rec_mutex_lock -> pthread_mutex_lock ->
+FUTEX_WAIT.
+
+pthread_mutex_t is a single 32-bit word and glib heap-allocates exactly
+sizeof(pthread_mutex_t) per GRecMutex, so the type can't grow without an
+ABI break + rebuilding the whole GTK stack.  Instead a recursive/
+errorcheck mutex stores a TAGGED POINTER to a heap rec_state {futex,
+owner, count, type}.  A normal mutex word is only ever 0/1/2, so the low
+two bits are free as a discriminator: a recursive word is (ptr | 3) and
+(*m & 3) == 3 distinguishes the two.  Recursive re-lock by the owner just
+bumps the count (no syscall); cross-thread contention runs the normal
+3-state futex slow path on rec_state.futex.  ABI-preserving — no glib
+rebuild needed.
+
+Adds tests/lib/pthread/torture_recmutex.c (recursive re-lock without
+deadlock, cross-thread contention, plain-mutex regression): 16/16 on
+substrate.
+
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+---
+ lib/pthread/pthread_mutex.c          | 132 +++++++++++++++++++++++----
+ tests/lib/pthread/.gitignore         |   4 +
+ tests/lib/pthread/Makefile           |   5 +-
+ tests/lib/pthread/torture_recmutex.c |  71 ++++++++++++++
+ 4 files changed, 194 insertions(+), 18 deletions(-)
+ create mode 100644 tests/lib/pthread/.gitignore
+ create mode 100644 tests/lib/pthread/torture_recmutex.c
+
+diff --git a/lib/pthread/pthread_mutex.c b/lib/pthread/pthread_mutex.c
+index 25b19fc3..714cdbfe 100644
+--- a/lib/pthread/pthread_mutex.c
++++ b/lib/pthread/pthread_mutex.c
+@@ -21,7 +21,10 @@
+ #include "pthread.h"
+ #include <unistd.h>
+ #include <errno.h>
++#include <stdlib.h>
++#include <stdint.h>
+ #include <sys/syscall.h>
++#include <sys/thr.h>
+ 
+ #define FUTEX_WAIT 0
+ #define FUTEX_WAKE 1
+@@ -30,30 +33,93 @@
+ #define M_LOCKED    1
+ #define M_CONTENDED 2
+ 
++/*
++ * Recursive (and error-checking) mutexes.
++ *
++ * pthread_mutex_t is a single 32-bit word and glib heap-allocates exactly
++ * sizeof(pthread_mutex_t) for each GRecMutex, so the type cannot grow
++ * without an ABI break.  Instead, a RECURSIVE/ERRORCHECK mutex stores a
++ * TAGGED POINTER to a heap `rec_state` that carries the real futex word,
++ * the owner tid and the recursion count.  A normal mutex only ever holds
++ * 0/1/2, so the low two bits are free as a discriminator: a recursive
++ * mutex word is `(ptr | 3)` (the rec_state is at least 4-byte aligned, so
++ * its low bits are clear), and `(*m & 3) == 3` distinguishes the two.
++ * Without this, GRecMutex (used pervasively by GTK/glib) self-deadlocks
++ * on the first recursive lock — pthread_mutex_lock always realised a
++ * plain non-recursive mutex and parked forever on a re-lock.
++ */
++struct rec_state {
++    int futex;      /* 0/1/2 lock word (the actual futex)        */
++    int owner;      /* owning tid, 0 = unowned                   */
++    int count;      /* recursion depth                           */
++    int type;       /* PTHREAD_MUTEX_RECURSIVE / ERRORCHECK      */
++};
++
++#define MTX_IS_REC(v)  (((uintptr_t)(unsigned)(v) & 3u) == 3u)
++#define MTX_REC(v)     ((struct rec_state *)((uintptr_t)(unsigned)(v) & ~(uintptr_t)3))
++#define MTX_TAG(p)     ((int)((uintptr_t)(p) | 3u))
++
++static int mtx_self(void) { return (int)syscall(SYS_THR_SELF); }
++
++/* Drepper 3-state futex lock/unlock on a bare word. */
++static void mtx_lock_word(int *w) {
++    int c = __sync_val_compare_and_swap(w, M_UNLOCKED, M_LOCKED);
++    if (c == M_UNLOCKED)
++        return;
++    if (c != M_CONTENDED)
++        c = __sync_lock_test_and_set(w, M_CONTENDED);
++    while (c != M_UNLOCKED) {
++        syscall(SYS_FUTEX, (long)w, FUTEX_WAIT, M_CONTENDED, 0, 0, 0);
++        c = __sync_lock_test_and_set(w, M_CONTENDED);
++    }
++}
++static void mtx_unlock_word(int *w) {
++    if (__sync_fetch_and_sub(w, 1) != M_LOCKED) {
++        __sync_lock_release(w);   /* store 0 */
++        syscall(SYS_FUTEX, (long)w, FUTEX_WAKE, 1, 0, 0, 0);
++    }
++}
++
+ int pthread_mutex_init(pthread_mutex_t *mutex, const void *attr) {
+-    (void)attr;
+-    *mutex = M_UNLOCKED;
++    int type = attr ? *(const pthread_mutexattr_t *)attr : PTHREAD_MUTEX_DEFAULT;
++    if (type == PTHREAD_MUTEX_RECURSIVE || type == PTHREAD_MUTEX_ERRORCHECK) {
++        struct rec_state *s = malloc(sizeof *s);
++        if (!s)
++            return ENOMEM;
++        s->futex = M_UNLOCKED;
++        s->owner = 0;
++        s->count = 0;
++        s->type  = type;
++        *mutex = MTX_TAG(s);
++    } else {
++        *mutex = M_UNLOCKED;
++    }
+     return 0;
+ }
+ 
+ int pthread_mutex_lock(pthread_mutex_t *m) {
+-    /* Fast path: uncontended acquire (0 -> 1).
+-     * __sync_val_compare_and_swap returns the OLD value. */
+-    int c = __sync_val_compare_and_swap(m, M_UNLOCKED, M_LOCKED);
+-    if (c == M_UNLOCKED) {
++    int v = *m;
++    if (MTX_IS_REC(v)) {
++        struct rec_state *s = MTX_REC(v);
++        int me = mtx_self();
++        if (s->owner == me) {
++            if (s->type == PTHREAD_MUTEX_ERRORCHECK)
++                return EDEADLK;
++            s->count++;        /* recursive re-acquire — no syscall */
++            return 0;
++        }
++        mtx_lock_word(&s->futex);
++        s->owner = me;
++        s->count = 1;
+         return 0;
+     }
+ 
+-    /* Slow path: someone else holds it.  Mark CONTENDED so the
+-     * holder knows to wake us when they release, then park in the
+-     * kernel until they do.  The xchg loop handles the race where
+-     * the holder releases between our exchange and the futex_wait —
+-     * if c becomes 0, we already own it (with the lock now marked
+-     * CONTENDED, which is benign; the next unlock will wake one
+-     * waiter that doesn't exist, costing nothing). */
+-    if (c != M_CONTENDED) {
++    /* Plain mutex: the word itself is the futex.  Fast path 0 -> 1. */
++    int c = __sync_val_compare_and_swap(m, M_UNLOCKED, M_LOCKED);
++    if (c == M_UNLOCKED)
++        return 0;
++    if (c != M_CONTENDED)
+         c = __sync_lock_test_and_set(m, M_CONTENDED);
+-    }
+     while (c != M_UNLOCKED) {
+         syscall(SYS_FUTEX, (long)m, FUTEX_WAIT, M_CONTENDED, 0, 0, 0);
+         c = __sync_lock_test_and_set(m, M_CONTENDED);
+@@ -62,6 +128,17 @@ int pthread_mutex_lock(pthread_mutex_t *m) {
+ }
+ 
+ int pthread_mutex_unlock(pthread_mutex_t *m) {
++    int v = *m;
++    if (MTX_IS_REC(v)) {
++        struct rec_state *s = MTX_REC(v);
++        if (s->owner != mtx_self())
++            return EPERM;
++        if (--s->count == 0) {
++            s->owner = 0;
++            mtx_unlock_word(&s->futex);
++        }
++        return 0;
++    }
+     /* If old was LOCKED (1) uncontended → new is 0, no waiters.
+      * If old was CONTENDED (2) → new is 1, store 0 and wake one. */
+     if (__sync_fetch_and_sub(m, 1) != M_LOCKED) {
+@@ -71,12 +148,33 @@ int pthread_mutex_unlock(pthread_mutex_t *m) {
+     return 0;
+ }
+ 
+-int pthread_mutex_destroy(pthread_mutex_t *mutex) {
+-    (void)mutex;
++int pthread_mutex_destroy(pthread_mutex_t *m) {
++    int v = *m;
++    if (MTX_IS_REC(v)) {
++        free(MTX_REC(v));
++        *m = M_UNLOCKED;
++    }
+     return 0;
+ }
+ 
+ int pthread_mutex_trylock(pthread_mutex_t *m) {
++    int v = *m;
++    if (MTX_IS_REC(v)) {
++        struct rec_state *s = MTX_REC(v);
++        int me = mtx_self();
++        if (s->owner == me) {
++            if (s->type == PTHREAD_MUTEX_ERRORCHECK)
++                return EDEADLK;
++            s->count++;
++            return 0;
++        }
++        if (__sync_val_compare_and_swap(&s->futex, M_UNLOCKED, M_LOCKED) == M_UNLOCKED) {
++            s->owner = me;
++            s->count = 1;
++            return 0;
++        }
++        return EBUSY;
++    }
+     /* Non-blocking acquire: take the uncontended 0 -> 1 transition,
+      * or fail with EBUSY.  Never sets the CONTENDED state, so a
+      * concurrent blocking lock()'s wakeup bookkeeping is unaffected. */
+diff --git a/tests/lib/pthread/.gitignore b/tests/lib/pthread/.gitignore
+new file mode 100644
+index 00000000..b5d7cf7a
+--- /dev/null
++++ b/tests/lib/pthread/.gitignore
+@@ -0,0 +1,4 @@
++torture_kernel
++torture_pthread
++torture_recmutex
++*.o
+diff --git a/tests/lib/pthread/Makefile b/tests/lib/pthread/Makefile
+index 9098ce8d..266fd814 100644
+--- a/tests/lib/pthread/Makefile
++++ b/tests/lib/pthread/Makefile
+@@ -41,7 +41,7 @@ else
+ endif
+ 
+ TESTS_PORTABLE = torture_kernel
+-TESTS_SUBSTRATE = torture_pthread
++TESTS_SUBSTRATE = torture_pthread torture_recmutex
+ 
+ # Default: just the portable suite.  Substrate-specific tests are
+ # only built when CROSS is set.
+@@ -61,6 +61,9 @@ torture_kernel: torture_kernel.c
+ torture_pthread: torture_pthread.c
+ 	$(CC) $(CFLAGS) $(PTHREAD_INC) $< $(PTHREAD) -o $@
+ 
++torture_recmutex: torture_recmutex.c
++	$(CC) $(CFLAGS) $(PTHREAD_INC) $< $(PTHREAD) -o $@
++
+ clean:
+ 	rm -f $(TESTS_PORTABLE) $(TESTS_SUBSTRATE)
+ 
+diff --git a/tests/lib/pthread/torture_recmutex.c b/tests/lib/pthread/torture_recmutex.c
+new file mode 100644
+index 00000000..c51d4c86
+--- /dev/null
++++ b/tests/lib/pthread/torture_recmutex.c
+@@ -0,0 +1,71 @@
++/* torture_recmutex.c — substrate-target test for recursive pthread mutexes.
++ *
++ * Exercises exactly the pattern that deadlocked HexChat: glib's GRecMutex
++ * is a PTHREAD_MUTEX_RECURSIVE mutex, and a single thread re-locks it.
++ * Before recursive support landed, the second lock parked in FUTEX_WAIT
++ * forever.  Also checks cross-thread contention on a recursive mutex (the
++ * real futex slow path) and that plain mutexes are unaffected.
++ */
++#include <pthread.h>
++#include <stdio.h>
++#include <unistd.h>
++#include <errno.h>
++
++static int g_pass, g_fail;
++#define OK(cond, msg) do { \
++    if (cond) { g_pass++; } \
++    else { g_fail++; printf("FAIL: %s (errno=%d)\n", (msg), errno); } \
++} while (0)
++
++static pthread_mutex_t rm;
++static volatile int shared;
++
++static void *contender(void *a) {
++    (void)a;
++    pthread_mutex_lock(&rm);   /* must block until main fully releases */
++    shared++;
++    pthread_mutex_unlock(&rm);
++    return NULL;
++}
++
++int main(void) {
++    printf("torture_recmutex: recursive pthread mutex\n");
++
++    pthread_mutexattr_t at;
++    pthread_mutexattr_init(&at);
++    OK(pthread_mutexattr_settype(&at, PTHREAD_MUTEX_RECURSIVE) == 0, "settype RECURSIVE");
++    OK(pthread_mutex_init(&rm, &at) == 0, "init recursive mutex");
++
++    /* The deadlock case: same thread re-locks. Must NOT hang. */
++    OK(pthread_mutex_lock(&rm) == 0, "lock depth 1");
++    OK(pthread_mutex_lock(&rm) == 0, "lock depth 2 (recursive, no deadlock)");
++    OK(pthread_mutex_lock(&rm) == 0, "lock depth 3 (recursive)");
++    OK(pthread_mutex_unlock(&rm) == 0, "unlock depth 3");
++    OK(pthread_mutex_unlock(&rm) == 0, "unlock depth 2");
++
++    /* Still held once: a second thread must block until we release. */
++    shared = 0;
++    pthread_t t;
++    pthread_create(&t, NULL, contender, NULL);
++    usleep(80000);
++    OK(shared == 0, "contender blocked while we still hold the lock");
++
++    OK(pthread_mutex_unlock(&rm) == 0, "unlock depth 1 (final release)");
++    pthread_join(t, NULL);
++    OK(shared == 1, "contender acquired after our release");
++
++    /* Plain mutex regression. */
++    pthread_mutex_t nm;
++    OK(pthread_mutex_init(&nm, NULL) == 0, "init normal mutex");
++    OK(pthread_mutex_lock(&nm) == 0, "normal lock");
++    OK(pthread_mutex_trylock(&nm) == EBUSY, "normal trylock -> EBUSY");
++    OK(pthread_mutex_unlock(&nm) == 0, "normal unlock");
++    OK(pthread_mutex_trylock(&nm) == 0, "normal trylock -> 0 after unlock");
++    OK(pthread_mutex_unlock(&nm) == 0, "normal unlock 2");
++
++    pthread_mutex_destroy(&rm);
++    pthread_mutex_destroy(&nm);
++
++    printf("==== torture_recmutex: %d passed, %d FAILED ====\n", g_pass, g_fail);
++    return g_fail ? 1 : 0;
++}
+-- 
+2.54.0
+

@@ -1,0 +1,666 @@
+From 258e8e260b242df73a498f4b4f5ab1a15a19261a Mon Sep 17 00:00:00 2001
+From: Kirn Gill II <segin2005@gmail.com>
+Date: Thu, 11 Jun 2026 16:08:29 -0500
+Subject: [PATCH 73/83] kernel/net: RFC 5961 RST, SCM_RIGHTS leaks, ioctl
+ copyin, ARP merge (audit HIGH)
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+- tcp: an incoming RST matching the 4-tuple killed the connection with no
+  sequence check (off-path reset/injection).  Add RFC 5961 §3.2: drop RSTs
+  outside the receive window, reset only on an exact rcv_nxt match, send a
+  challenge ACK otherwise.  Listener close left accept-queued ESTABLISHED
+  and SYN_RECEIVED children unreaped (leak; peers think the link is live) —
+  detach, kill to CLOSED, and RST the peers.
+- af_unix: SCM_RIGHTS in-flight fds leaked on socket close (rx_fdq never
+  drained) and on the recvmsg out-of-fds rollback (table slot cleared but
+  the ref not dropped).  Release each via file_close_ptr; rollback now
+  delivers nothing and re-queues.  sendmsg/recvmsg dereferenced the msghdr,
+  iov, and cmsg straight from user pointers (recvmsg also wrote them back) —
+  copyin the msghdr/iov/control into bounded kernel buffers, parse and build
+  there, copyout the result.
+- pty master + af_inet ioctls dereferenced the raw user `arg` (SIOCGIFCONF a
+  kernel-write-through-user-pointer); route all through copyin/copyout.
+- arp: arp_input inserted the sender of any packet (unsolicited-reply cache
+  poisoning).  RFC 826 merge rule: always refresh an existing entry, but
+  only insert when the packet is addressed to us (the solicited cases).
+
+Found by a security audit.
+
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+---
+ sys/drivers/console/pty.c |  30 +++++---
+ sys/net/af_inet.c         |  59 +++++++++++-----
+ sys/net/af_unix.c         | 142 ++++++++++++++++++++++++++++++--------
+ sys/net/arp.c             |  41 +++++++++--
+ sys/net/tcp.c             |  63 ++++++++++++++++-
+ 5 files changed, 272 insertions(+), 63 deletions(-)
+
+diff --git a/sys/drivers/console/pty.c b/sys/drivers/console/pty.c
+index 61fd418d..f34857fe 100644
+--- a/sys/drivers/console/pty.c
++++ b/sys/drivers/console/pty.c
+@@ -32,6 +32,7 @@
+ #include <sys/lock.h>
+ #include <sys/signal.h>
+ #include <sys/major.h>
++#include <sys/copy.h>
+ #include <vfs/vfs.h>
+ #include <vm/vm_kmem.h>
+ #include <kern/sched.h>
+@@ -513,14 +514,21 @@ int pty_master_node_ioctl(fs_node_t *node, uint32_t request, void *arg) {
+ 
+     if (!p || p->magic != PTY_MAGIC) return -EIO;
+ 
++    /* `arg` is a user-space pointer.  The int-sized commands handled
++     * directly here copy it in/out through copyin/copyout rather than
++     * dereferencing it; the forwarded termios/winsize commands are
++     * validated by tty_ioctl. */
+     switch (request) {
+-    case TIOCGPTN:
++    case TIOCGPTN: {
+         if (!arg) return -EINVAL;
+-        *(int *)arg = p->index;
++        int v = p->index;
++        if (copyout(&v, arg, sizeof(v)) != 0) return -EFAULT;
+         return 0;
++    }
+     case TIOCSPTLCK: {
+         if (!arg) return -EINVAL;
+-        int lock = *(int *)arg;
++        int lock;
++        if (copyin(arg, &lock, sizeof(lock)) != 0) return -EFAULT;
+         spinlock_acquire(&p->lock);
+         int was_locked = p->locked;
+         p->locked = lock ? 1 : 0;
+@@ -531,22 +539,28 @@ int pty_master_node_ioctl(fs_node_t *node, uint32_t request, void *arg) {
+         }
+         return 0;
+     }
+-    case TIOCGPKT:
++    case TIOCGPKT: {
+         if (!arg) return -EINVAL;
+-        *(int *)arg = p->packet_mode;
++        int v = p->packet_mode;
++        if (copyout(&v, arg, sizeof(v)) != 0) return -EFAULT;
+         return 0;
+-    case TIOCPKT:
++    }
++    case TIOCPKT: {
+         if (!arg) return -EINVAL;
++        int on;
++        if (copyin(arg, &on, sizeof(on)) != 0) return -EFAULT;
+         spinlock_acquire(&p->lock);
+-        p->packet_mode = *(int *)arg ? 1 : 0;
++        p->packet_mode = on ? 1 : 0;
+         if (!p->packet_mode) {
+             p->packet_status = 0;
+         }
+         spinlock_release(&p->lock);
+         return 0;
++    }
+     case TIOCSIG: {
+         if (!arg) return -EINVAL;
+-        int sig = *(int *)arg;
++        int sig;
++        if (copyin(arg, &sig, sizeof(sig)) != 0) return -EFAULT;
+         if (sig <= 0 || sig > 64) return -EINVAL;
+         if (p->slave_tty && p->slave_tty->pgrp > 0) {
+             (void)signal_send_group(p->slave_tty->pgrp, sig);
+diff --git a/sys/net/af_inet.c b/sys/net/af_inet.c
+index 48fddbb1..882300a8 100644
+--- a/sys/net/af_inet.c
++++ b/sys/net/af_inet.c
+@@ -28,6 +28,7 @@
+ #include <kern/file.h>
+ #include <kern/console.h>
+ #include <vm/vm_kmem.h>
++#include <sys/copy.h>
+ #include <string.h>
+ #include <stddef.h>
+ #include <errno.h>
+@@ -161,21 +162,27 @@ static int afinet_ioctl(fs_node_t *node, uint32_t request, void *arg) {
+     (void)node;
+     if (!arg) return -EFAULT;
+ 
+-    /* SIOCGIFCONF takes struct ifconf; everything else takes struct ifreq. */
++    /* SIOCGIFCONF takes struct ifconf; everything else takes struct ifreq.
++     * Both `arg` and (for SIOCGIFCONF) the ifc_req array it points at are
++     * user-space pointers — copy in/out rather than dereferencing them. */
+     if (request == SIOCGIFCONF) {
+-        struct ifconf *ifc = (struct ifconf *)arg;
+-        int max = ifc->ifc_len / (int)sizeof(struct ifreq);
+-        struct ifreq *out = ifc->ifc_req;
++        struct ifconf ifc;
++        if (copyin(arg, &ifc, sizeof(ifc)) != 0) return -EFAULT;
++        int max = ifc.ifc_len / (int)sizeof(struct ifreq);
++        struct ifreq *out = ifc.ifc_req;   /* user pointer */
+         int n = 0;
+         for (netdev_t *d = netdev_first(); d && n < max; d = netdev_next(d)) {
+-            memset(&out[n], 0, sizeof(out[n]));
+-            strncpy(out[n].ifr_name, d->name, IFNAMSIZ - 1);
+-            struct sin_kern *sin = (struct sin_kern *)&out[n].ifr_addr;
++            struct ifreq e;
++            memset(&e, 0, sizeof(e));
++            strncpy(e.ifr_name, d->name, IFNAMSIZ - 1);
++            struct sin_kern *sin = (struct sin_kern *)&e.ifr_addr;
+             sin->sin_family = AF_INET;
+             sin->sin_addr   = d->ip4_addr;
++            if (!out || copyout(&e, &out[n], sizeof(e)) != 0) return -EFAULT;
+             n++;
+         }
+-        ifc->ifc_len = n * (int)sizeof(struct ifreq);
++        ifc.ifc_len = n * (int)sizeof(struct ifreq);
++        if (copyout(&ifc, arg, sizeof(ifc)) != 0) return -EFAULT;
+         return 0;
+     }
+ 
+@@ -183,7 +190,9 @@ static int afinet_ioctl(fs_node_t *node, uint32_t request, void *arg) {
+      * by ifindex).  Handle them before the by-name lookup. */
+     if (request == SIOCGIFADDR_IN6 || request == SIOCSIFADDR_IN6 ||
+         request == SIOCDIFADDR_IN6 || request == SIOCSIFGW_IN6) {
+-        struct in6_ifreq *r6 = (struct in6_ifreq *)arg;
++        struct in6_ifreq kr6;
++        if (copyin(arg, &kr6, sizeof(kr6)) != 0) return -EFAULT;
++        struct in6_ifreq *r6 = &kr6;
+         netdev_t *d6 = (r6->ifr6_ifindex > 0)
+             ? netdev_by_index((uint32_t)r6->ifr6_ifindex)
+             : netdev_first();
+@@ -192,6 +201,7 @@ static int afinet_ioctl(fs_node_t *node, uint32_t request, void *arg) {
+             case SIOCGIFADDR_IN6:
+                 memcpy(r6->ifr6_addr.s6_addr, d6->ip6_addr, 16);
+                 r6->ifr6_prefixlen = d6->ip6_netmask_bits;
++                if (copyout(r6, arg, sizeof(*r6)) != 0) return -EFAULT;
+                 return 0;
+             case SIOCSIFADDR_IN6:
+                 if (r6->ifr6_prefixlen > 128) return -EINVAL;
+@@ -208,20 +218,27 @@ static int afinet_ioctl(fs_node_t *node, uint32_t request, void *arg) {
+         }
+     }
+ 
+-    struct ifreq *r = (struct ifreq *)arg;
++    struct ifreq kr;
++    if (copyin(arg, &kr, sizeof(kr)) != 0) return -EFAULT;
++    /* Ensure the name field is NUL-terminated before using it. */
++    kr.ifr_name[IFNAMSIZ - 1] = '\0';
++    struct ifreq *r = &kr;
+     netdev_t *dev = afinet_find_dev(r->ifr_name);
+     if (!dev) return -ENODEV;
+ 
++    /* "Get" commands fill the kernel copy `kr` and fall through to the
++     * copyout at out_get; "set"/no-op commands mutate the device and
++     * return directly (nothing to hand back). */
+     switch (request) {
+         case SIOCGIFNAME:
+             strncpy(r->ifr_name, dev->name, IFNAMSIZ - 1);
+-            return 0;
++            goto out_get;
+         case SIOCGIFINDEX:
+             r->ifr_ifindex = (int)dev->ifindex;
+-            return 0;
++            goto out_get;
+         case SIOCGIFFLAGS:
+             r->ifr_flags = (short)dev->flags;
+-            return 0;
++            goto out_get;
+         case SIOCSIFFLAGS: {
+             uint32_t keep = dev->flags & ~((uint32_t)0xFFFFu);
+             dev->flags = keep | ((uint16_t)r->ifr_flags & 0xFFFFu);
+@@ -229,7 +246,7 @@ static int afinet_ioctl(fs_node_t *node, uint32_t request, void *arg) {
+         }
+         case SIOCGIFMTU:
+             r->ifr_mtu = (int)dev->mtu;
+-            return 0;
++            goto out_get;
+         case SIOCSIFMTU:
+             if (r->ifr_mtu < 68 || r->ifr_mtu > 65535) return -EINVAL;
+             dev->mtu = (uint32_t)r->ifr_mtu;
+@@ -237,7 +254,7 @@ static int afinet_ioctl(fs_node_t *node, uint32_t request, void *arg) {
+         case SIOCGIFHWADDR:
+             r->ifr_hwaddr.sa_family = 1;   /* ARPHRD_ETHER */
+             memcpy(r->ifr_hwaddr.sa_data, dev->hwaddr, 6);
+-            return 0;
++            goto out_get;
+         case SIOCSIFHWADDR:
+             memcpy(dev->hwaddr, r->ifr_hwaddr.sa_data, 6);
+             return 0;
+@@ -246,7 +263,7 @@ static int afinet_ioctl(fs_node_t *node, uint32_t request, void *arg) {
+             sin->sin_family = AF_INET;
+             sin->sin_addr   = dev->ip4_addr;
+             sin->sin_port   = 0;
+-            return 0;
++            goto out_get;
+         }
+         case SIOCSIFADDR: {
+             const struct sin_kern *sin = (const struct sin_kern *)&r->ifr_addr;
+@@ -258,7 +275,7 @@ static int afinet_ioctl(fs_node_t *node, uint32_t request, void *arg) {
+             struct sin_kern *sin = (struct sin_kern *)&r->ifr_netmask;
+             sin->sin_family = AF_INET;
+             sin->sin_addr   = dev->ip4_netmask;
+-            return 0;
++            goto out_get;
+         }
+         case SIOCSIFNETMASK: {
+             const struct sin_kern *sin = (const struct sin_kern *)&r->ifr_netmask;
+@@ -271,7 +288,7 @@ static int afinet_ioctl(fs_node_t *node, uint32_t request, void *arg) {
+             sin->sin_family = AF_INET;
+             sin->sin_addr   =
+                 (dev->ip4_addr & dev->ip4_netmask) | ~dev->ip4_netmask;
+-            return 0;
++            goto out_get;
+         }
+         case SIOCSIFBRDADDR:
+             /* No-op: broadcast is derived from addr/netmask. */
+@@ -280,7 +297,7 @@ static int afinet_ioctl(fs_node_t *node, uint32_t request, void *arg) {
+             struct sin_kern *sin = (struct sin_kern *)&r->ifr_addr;
+             sin->sin_family = AF_INET;
+             sin->sin_addr   = dev->ip4_gateway;
+-            return 0;
++            goto out_get;
+         }
+         case SIOCSIFGATEWAY: {
+             const struct sin_kern *sin = (const struct sin_kern *)&r->ifr_addr;
+@@ -291,6 +308,10 @@ static int afinet_ioctl(fs_node_t *node, uint32_t request, void *arg) {
+         default:
+             return -ENOTTY;
+     }
++
++out_get:
++    if (copyout(r, arg, sizeof(*r)) != 0) return -EFAULT;
++    return 0;
+ }
+ 
+ /* ------------------------------------------------------------------ */
+diff --git a/sys/net/af_unix.c b/sys/net/af_unix.c
+index 1589b8d8..5dde0ee4 100644
+--- a/sys/net/af_unix.c
++++ b/sys/net/af_unix.c
+@@ -456,6 +456,17 @@ static void afunix_node_close(fs_node_t *node) {
+         sleepq_wake_all(peer->tx_chan);
+     }
+     if (s->pathlen > 0) g_bound_unlink(s);
++    /* Drop any SCM_RIGHTS file references still queued on our rx_fdq:
++     * fds passed to us that were never recvmsg()'d.  Each carries a
++     * file_t reference the sender bumped; if we just freed the socket
++     * (or leaked it) those references would never be released, leaking
++     * the underlying open files forever.  Release them under the lock. */
++    for (int i = 0; i < s->rx_fdq_count; i++) {
++        file_t *qf = s->rx_fdq[i];
++        s->rx_fdq[i] = NULL;
++        if (qf) file_close_ptr(qf);
++    }
++    s->rx_fdq_count = 0;
+     /* Wake any pending accept/connect waiters. */
+     sleepq_wake_all(s->accept_chan);
+     sleepq_wake_all(s->connect_chan);
+@@ -1036,21 +1047,46 @@ struct kcmsghdr {
+ };
+ #define KCMSG_ALIGN(n)  (((n) + sizeof(size_t) - 1) & ~(sizeof(size_t) - 1))
+ 
++/* Upper bound on a copied-in control buffer: enough for the largest
++ * SCM_RIGHTS record we accept (AFUNIX_FDQ_MAX fds + header), generously
++ * rounded up.  A controllen larger than this is rejected rather than
++ * touched, which is fine — substrate has no other cmsg types. */
++#define AFUNIX_CMSG_MAX  256
++/* Cap on iov entries pulled into the kernel per sendmsg/recvmsg. */
++#define AFUNIX_IOV_MAX   64
++
+ /* sendmsg with SCM_RIGHTS support — parse the cmsghdr area for any
+  * SCM_RIGHTS records, bump file_t refcount for each fd, queue the
+  * file_t on the peer socket's rx_fdq.  Then run the iov loop as a
+- * plain send() chain.  msg_control is read directly from the user
+- * pointer (substrate's syscall layer treats msghdr fields as already
+- * validated; tightening this is a separate audit). */
+-ssize_t sys_sendmsg(int fd, const struct msghdr *msg, int flags) {
+-    if (!msg) return -EFAULT;
++ * plain send() chain.  The msghdr, its iovec array, and the control
++ * buffer are all pulled into the kernel with copyin() before use —
++ * never dereferenced straight off the user pointer. */
++ssize_t sys_sendmsg(int fd, const struct msghdr *umsg, int flags) {
++    if (!umsg) return -EFAULT;
++    struct msghdr kmsg;
++    if (copyin(umsg, &kmsg, sizeof(kmsg)) != 0) return -EFAULT;
++    struct msghdr *msg = &kmsg;
++
++    if (msg->msg_iovlen < 0 || msg->msg_iovlen > AFUNIX_IOV_MAX)
++        return -EMSGSIZE;
++    struct iovec_local kiov[AFUNIX_IOV_MAX];
++    if (msg->msg_iovlen > 0) {
++        if (!msg->msg_iov) return -EFAULT;
++        if (copyin(msg->msg_iov, kiov,
++                   (size_t)msg->msg_iovlen * sizeof(kiov[0])) != 0)
++            return -EFAULT;
++    }
++
+     afunix_sock_t *s = afunix_from_fd(fd);
+ 
+     /* SCM_RIGHTS plumbing only applies to AF_UNIX peers.  AF_INET
+      * sockets fall through to the iov-only path below. */
+     if (s && s->peer && msg->msg_control && msg->msg_controllen > 0) {
+-        const unsigned char *cmsgbuf = (const unsigned char *)msg->msg_control;
+-        size_t cmsglen = msg->msg_controllen;
++        size_t cmsglen = (size_t)msg->msg_controllen;
++        if (cmsglen > AFUNIX_CMSG_MAX) return -EINVAL;
++        unsigned char cmsgbuf[AFUNIX_CMSG_MAX];
++        if (copyin(msg->msg_control, cmsgbuf, cmsglen) != 0)
++            return -EFAULT;
+         size_t off = 0;
+         while (off + sizeof(struct kcmsghdr) <= cmsglen) {
+             const struct kcmsghdr *c = (const struct kcmsghdr *)(cmsgbuf + off);
+@@ -1097,7 +1133,9 @@ ssize_t sys_sendmsg(int fd, const struct msghdr *msg, int flags) {
+     }
+ 
+     ssize_t total = 0;
+-    struct iovec_local *iov = (struct iovec_local *)msg->msg_iov;
++    /* kiov was copied in above; iov_base entries are still user pointers,
++     * but sys_send/sys_sendto copyin them on their own. */
++    struct iovec_local *iov = kiov;
+     for (int i = 0; i < (int)msg->msg_iovlen; i++) {
+         ssize_t r;
+         if (msg->msg_name && msg->msg_namelen > 0) {
+@@ -1126,10 +1164,28 @@ ssize_t sys_sendmsg(int fd, const struct msghdr *msg, int flags) {
+  * if the AF_UNIX socket has pending fds in rx_fdq, install them into
+  * the calling process's fd table and emit a SCM_RIGHTS cmsg into
+  * msg_control. */
+-ssize_t sys_recvmsg(int fd, struct msghdr *msg, int flags) {
+-    if (!msg) return -EFAULT;
++ssize_t sys_recvmsg(int fd, struct msghdr *umsg, int flags) {
++    if (!umsg) return -EFAULT;
++    /* Pull the msghdr into the kernel before touching any of its fields.
++     * msg_name / iov_base / msg_control remain user pointers — the
++     * helpers they are handed (sys_recvfrom, copyout) validate them. */
++    struct msghdr kmsg;
++    if (copyin(umsg, &kmsg, sizeof(kmsg)) != 0) return -EFAULT;
++    struct msghdr *msg = &kmsg;
++
++    if (msg->msg_iovlen < 0 || msg->msg_iovlen > AFUNIX_IOV_MAX)
++        return -EMSGSIZE;
++    struct iovec_local kiov[AFUNIX_IOV_MAX];
++    if (msg->msg_iovlen > 0) {
++        if (!msg->msg_iov) return -EFAULT;
++        if (copyin(msg->msg_iov, kiov,
++                   (size_t)msg->msg_iovlen * sizeof(kiov[0])) != 0)
++            return -EFAULT;
++    }
++    msg->msg_flags = 0;
++
+     ssize_t total = 0;
+-    struct iovec_local *iov = (struct iovec_local *)msg->msg_iov;
++    struct iovec_local *iov = kiov;
+     for (int i = 0; i < (int)msg->msg_iovlen; i++) {
+         ssize_t r;
+         if (i == 0 && msg->msg_name && msg->msg_namelen > 0) {
+@@ -1141,12 +1197,13 @@ ssize_t sys_recvmsg(int fd, struct msghdr *msg, int flags) {
+              * undeliverable, so e.g. CDE's ttsession/dtsession hang
+              * forever pinging an rpcbind that can never answer.  msg_name
+              * is the caller's userspace buffer and msg_namelen its
+-             * capacity, exactly what sys_recvfrom/do_recv expect.  The
+-             * SCM_RIGHTS path below passes msg_name == NULL, so it is
+-             * unaffected. */
++             * capacity; pass the *user* msghdr's msg_namelen slot so
++             * do_recv copyin/copyout's it in place (msg_namelen and
++             * socklen_t are both 4 bytes).  The SCM_RIGHTS path below
++             * passes msg_name == NULL, so it is unaffected. */
+             r = sys_recvfrom(fd, iov[i].iov_base, iov[i].iov_len, flags,
+                              (struct sockaddr *)msg->msg_name,
+-                             (socklen_t *)&msg->msg_namelen);
++                             (socklen_t *)&umsg->msg_namelen);
+         } else {
+             r = sys_recv(fd, iov[i].iov_base, iov[i].iov_len, flags);
+         }
+@@ -1157,17 +1214,23 @@ ssize_t sys_recvmsg(int fd, struct msghdr *msg, int flags) {
+ 
+     /* AF_UNIX rx_fdq drain.  Only applies once the iov loop above has
+      * pulled at least one byte (recvmsg without data wouldn't carry
+-     * an SCM payload on a stream socket). */
++     * an SCM payload on a stream socket).  The control area is built in
++     * a kernel buffer and copyout()'d — never written through the user
++     * pointer directly. */
+     afunix_sock_t *s = afunix_from_fd(fd);
++    uint32_t out_controllen = 0;
+     if (s && msg->msg_control && (size_t)msg->msg_controllen >= sizeof(struct kcmsghdr)) {
++        size_t cmsgcap = (size_t)msg->msg_controllen;
++        if (cmsgcap > AFUNIX_CMSG_MAX) cmsgcap = AFUNIX_CMSG_MAX;
++        unsigned char cmsgbuf[AFUNIX_CMSG_MAX];
+         mutex_lock(&s->lock);
+         int nfds = s->rx_fdq_count;
+         if (nfds > 0) {
+             size_t need = KCMSG_ALIGN(sizeof(struct kcmsghdr) + (size_t)nfds * sizeof(int));
+-            if (need > (size_t)msg->msg_controllen) {
++            if (need > cmsgcap) {
+                 /* Truncate — fewer fds than queued — but still deliver
+                  * what fits and mark MSG_CTRUNC. */
+-                nfds = (int)(((size_t)msg->msg_controllen - sizeof(struct kcmsghdr)) / sizeof(int));
++                nfds = (int)((cmsgcap - sizeof(struct kcmsghdr)) / sizeof(int));
+                 if (nfds < 0) nfds = 0;
+                 msg->msg_flags |= MSG_CTRUNC;
+             }
+@@ -1177,11 +1240,19 @@ ssize_t sys_recvmsg(int fd, struct msghdr *msg, int flags) {
+             for (int i = 0; i < nfds; i++) {
+                 int newfd = proc_alloc_fd(current_process);
+                 if (newfd < 0) {
+-                    /* Out of fds — roll back, leave undelivered in queue. */
++                    /* Out of fds — roll back everything installed so far
++                     * and deliver nothing this call; the queued fds stay
++                     * in rx_fdq for a later recvmsg.  proc_set_fd took
++                     * ownership of the sender's reference for each slot,
++                     * so clearing the slot must also drop that reference
++                     * (proc_set_fd(...,NULL) only clears the table entry)
++                     * — otherwise every rolled-back fd leaks its file_t. */
+                     for (int j = 0; j < got; j++) {
++                        file_t *rb = current_process->fds[allocated[j]];
+                         proc_set_fd(current_process, allocated[j], NULL);
++                        if (rb) file_close_ptr(rb);
+                     }
+-                    nfds = got;
++                    got = 0;
+                     msg->msg_flags |= MSG_CTRUNC;
+                     break;
+                 }
+@@ -1191,26 +1262,41 @@ ssize_t sys_recvmsg(int fd, struct msghdr *msg, int flags) {
+                  * we do NOT bump again here. */
+                 allocated[got++] = newfd;
+             }
+-            /* Write the cmsg out. */
+-            struct kcmsghdr *c = (struct kcmsghdr *)msg->msg_control;
++            /* Build the cmsg in the kernel bounce buffer. */
++            struct kcmsghdr *c = (struct kcmsghdr *)cmsgbuf;
+             c->cmsg_len   = sizeof(*c) + (uint32_t)got * sizeof(int);
+             c->cmsg_level = SOL_SOCKET;
+             c->cmsg_type  = SCM_RIGHTS;
+-            int *outfds = (int *)((unsigned char *)msg->msg_control + sizeof(*c));
++            int *outfds = (int *)(cmsgbuf + sizeof(*c));
+             for (int i = 0; i < got; i++) outfds[i] = allocated[i];
+-            msg->msg_controllen = (uint32_t)(sizeof(*c) + (uint32_t)got * sizeof(int));
++            out_controllen = (uint32_t)(sizeof(*c) + (uint32_t)got * sizeof(int));
+             /* Shift remaining unqueued fds down. */
+             for (int i = got; i < s->rx_fdq_count; i++) {
+                 s->rx_fdq[i - got] = s->rx_fdq[i];
+             }
+             s->rx_fdq_count -= got;
++            mutex_unlock(&s->lock);
++            /* Copy the control area out to user space.  On copyout
++             * failure the fds are already installed in the receiver's
++             * table — userspace simply won't learn their numbers via the
++             * cmsg; report EFAULT (a misbehaving caller's problem). */
++            if (out_controllen &&
++                copyout(cmsgbuf, msg->msg_control, out_controllen) != 0)
++                return -EFAULT;
+         } else {
+-            msg->msg_controllen = 0;
++            mutex_unlock(&s->lock);
++            out_controllen = 0;
+         }
+-        mutex_unlock(&s->lock);
+-    } else if (msg->msg_control && msg->msg_controllen > 0) {
+-        msg->msg_controllen = 0;
+     }
++    /* Publish the updated ancillary length and flags back to the user
++     * msghdr (msg_name / msg_namelen were already updated in place by
++     * do_recv above). */
++    if (copyout(&out_controllen, &umsg->msg_controllen,
++                sizeof(umsg->msg_controllen)) != 0)
++        return -EFAULT;
++    if (copyout(&msg->msg_flags, &umsg->msg_flags,
++                sizeof(umsg->msg_flags)) != 0)
++        return -EFAULT;
+     return total;
+ }
+ 
+diff --git a/sys/net/arp.c b/sys/net/arp.c
+index f639197e..1d5262b5 100644
+--- a/sys/net/arp.c
++++ b/sys/net/arp.c
+@@ -44,16 +44,28 @@ int arp_lookup(netdev_t *dev, uint32_t ip, uint8_t mac[6]) {
+     return -1;
+ }
+ 
+-void arp_insert(netdev_t *dev, uint32_t ip, const uint8_t mac[6]) {
+-    if (!dev || !ip) return;
+-    /* Update if already present. */
++/*
++ * Update an existing cache entry's MAC if (and only if) one is already
++ * present for (ip, ifindex).  Returns 1 if an entry was updated, 0 if
++ * none existed.  Never inserts — this is the "merge" half of the RFC 826
++ * algorithm and is safe to run for any received ARP packet.
++ */
++static int arp_update_existing(netdev_t *dev, uint32_t ip,
++                               const uint8_t mac[6]) {
+     for (unsigned i = 0; i < ARP_CACHE_SIZE; i++) {
+         struct arp_entry *e = &g_arp_cache[i];
+         if (e->ip == ip && e->ifindex == dev->ifindex) {
+             memcpy(e->mac, mac, 6);
+-            return;
++            return 1;
+         }
+     }
++    return 0;
++}
++
++void arp_insert(netdev_t *dev, uint32_t ip, const uint8_t mac[6]) {
++    if (!dev || !ip) return;
++    /* Update if already present. */
++    if (arp_update_existing(dev, ip, mac)) return;
+     struct arp_entry *slot = &g_arp_cache[g_arp_next % ARP_CACHE_SIZE];
+     g_arp_next++;
+     slot->ip = ip;
+@@ -94,12 +106,27 @@ void arp_input(netdev_t *dev, const uint8_t *pkt, size_t len) {
+     memcpy(&sender_ip, arp->ar_spa, 4);
+     memcpy(&target_ip, arp->ar_tpa, 4);
+ 
+-    /* Snoop the sender — always useful for the next outbound packet. */
+-    arp_insert(dev, sender_ip, arp->ar_sha);
++    /*
++     * Anti-poisoning (RFC 826 "merge" rule): do NOT blindly insert the
++     * sender into the cache — an off-path host could otherwise overwrite
++     * any (or fill the whole) cache with a forged unsolicited reply.
++     *
++     *   - Always update an entry we already hold (a host whose MAC we are
++     *     already tracking is allowed to refresh it).
++     *   - Only INSERT a new entry when the packet is addressed to us
++     *     (ar_tpa == our IP).  That covers exactly the two solicited
++     *     cases: a reply to a request we sent (its ar_tpa is our own IP),
++     *     and a request directed at us (we are about to reply and need
++     *     the sender's MAC).  A request/reply for some other host, or a
++     *     broadcast/unsolicited reply, can refresh but never create.
++     */
++    int target_is_me = (target_ip == dev->ip4_addr && dev->ip4_addr);
++    if (!arp_update_existing(dev, sender_ip, arp->ar_sha) && target_is_me)
++        arp_insert(dev, sender_ip, arp->ar_sha);
+ 
+     /* If a request is directed at us, reply. */
+     uint16_t op = __builtin_bswap16(arp->ar_op);
+-    if (op == ARPOP_REQUEST && target_ip == dev->ip4_addr && dev->ip4_addr) {
++    if (op == ARPOP_REQUEST && target_is_me) {
+         struct arphdr reply;
+         reply.ar_hrd = arp->ar_hrd;
+         reply.ar_pro = arp->ar_pro;
+diff --git a/sys/net/tcp.c b/sys/net/tcp.c
+index a1dacaa6..608b3c23 100644
+--- a/sys/net/tcp.c
++++ b/sys/net/tcp.c
+@@ -487,10 +487,38 @@ static void tcp_in_syn_received(tcp_pcb_t *p, uint32_t ack, uint8_t flags) {
+     }
+ }
+ 
++/* True if `seq` falls inside the current receive window
++ * [rcv_nxt, rcv_nxt + rcv_wnd).  rcv_wnd is the room we last advertised
++ * (TCP_RING_LEN - rx_count); a zero window still accepts exactly rcv_nxt
++ * so a probe/RST landing on the next expected byte is recognised. */
++static int tcp_seq_in_rcv_window(const tcp_pcb_t *p, uint32_t seq) {
++    uint32_t win = (uint32_t)TCP_RING_LEN - p->rx_count;
++    if ((int32_t)(seq - p->rcv_nxt) < 0) return 0;          /* before window */
++    if (win == 0) return seq == p->rcv_nxt;
++    return (uint32_t)(seq - p->rcv_nxt) < win;              /* within window */
++}
++
+ static void tcp_in_established(tcp_pcb_t *p, uint32_t seq, uint32_t ack,
+                                uint8_t flags, const uint8_t *payload,
+                                size_t dlen) {
+     if (flags & TCP_RST) {
++        /*
++         * RFC 5961 §3.2: do not honour a RST solely because the
++         * connection matches the 4-tuple — an off-path attacker who
++         * guesses the tuple could otherwise tear down the connection
++         * (or inject) with a forged RST.  Validate the sequence number:
++         *   - outside the receive window: drop silently.
++         *   - exactly RCV.NXT: in-window and acceptable -> reset.
++         *   - in-window but not RCV.NXT: send a challenge ACK rather
++         *     than resetting; only a RST that then arrives exactly at
++         *     RCV.NXT is acted upon.
++         */
++        if (!tcp_seq_in_rcv_window(p, seq))
++            return;
++        if (seq != p->rcv_nxt) {
++            tcp_send_ctl(p, TCP_ACK);   /* challenge ACK */
++            return;
++        }
+         tcp_kill_pcb(p, ECONNRESET);
+         return;
+     }
+@@ -1078,7 +1106,40 @@ int tcp_close(tcp_pcb_t *p) {
+         tcp_unlock(f);
+         tcp_xmit_queue(p, TCP_FIN | TCP_ACK, NULL, 0);
+         break;
+-    case TCP_LISTEN:
++    case TCP_LISTEN: {
++        /* Closing a listener: every child PCB it spawned is now an
++         * orphan.  Children sitting fully-established in the accept
++         * queue (handshake completed, never accept()ed) and children
++         * still mid-handshake (SYN_RECEIVED) are owned by this parent
++         * and are NOT otherwise detached — without explicit teardown
++         * they linger forever (established ones never reach CLOSED, so
++         * the timer never reaps them) and their peers believe the
++         * connection is up.  Reset and detach each so the peer is told
++         * the connection is gone and the timer frees the PCB.
++         *
++         * RST is emitted with IRQs enabled (collect under the lock,
++         * send after unlock) since tcp_xmit_raw -> ip4_output may
++         * ARP-wait. */
++        tcp_pcb_t *rst_list[32];
++        int nrst = 0;
++        for (tcp_pcb_t *q = g_tcp_pcbs; q; q = q->next) {
++            if (q->parent != p) continue;
++            q->parent   = NULL;     /* drop the dangling back-pointer */
++            q->detached = 1;        /* timer reaps once CLOSED */
++            int qst = q->state;
++            /* Only an established/half-open child has a peer that needs
++             * telling; a CLOSED/TIME_WAIT one is already torn down. */
++            if (qst != TCP_CLOSED && qst != TCP_TIME_WAIT && nrst < 32)
++                rst_list[nrst++] = q;
++            tcp_kill_pcb(q, ECONNRESET);   /* -> CLOSED, wakes waiters */
++        }
++        p->accept_count = 0;
++        p->state = TCP_CLOSED;
++        tcp_unlock(f);
++        for (int i = 0; i < nrst; i++)
++            tcp_send_ctl(rst_list[i], TCP_RST | TCP_ACK);
++        break;
++    }
+     case TCP_SYN_SENT:
+     case TCP_SYN_RECEIVED:
+         /* No established peer to FIN — drop straight to CLOSED.  The
+-- 
+2.54.0
+

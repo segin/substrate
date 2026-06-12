@@ -1,0 +1,175 @@
+From 6beecdcfa00ac4d635425f17d787149f4b3ba240 Mon Sep 17 00:00:00 2001
+From: Kirn Gill II <segin2005@gmail.com>
+Date: Wed, 10 Jun 2026 11:23:21 -0500
+Subject: [PATCH 40/83] contrib: glib2 (GLib 2.56.4) + automake-pyshim (GTK+
+ 2.x foundation)
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+GLib 2.56.4 — the last autotools GLib, chosen because its glib-genmarshal/
+glib-mkenums/glib-compile-resources are Python scripts that run on the build
+host (no target-exec generator step).  Cross-built via the substrate-autotools
+helpers against dist-zlib + dist-libffi; --with-pcre=internal (no PCRE port),
+NLS resolves to substrate libc's gettext.  Produces glib/gobject/gio/gmodule/
+gthread .so + .pc.
+
+gcc16: -std=gnu11 (GLib predates C23's `bool` keyword) and
+--enable-compile-warnings=no (drops GLib's hardcoded -Werror=format-overflow,
+which gcc16 raises on null %s args in gdbus*.c).
+
+automake-pyshim/imp.py: a tiny `imp` shim (get_tag/cache_from_source ->
+importlib) for `make install`.  2018-era automake's py-compile imports `imp`,
+removed in Python 3.12; reusable by the other GNOME ports (pango/atk).
+
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+---
+ contrib/automake-pyshim/imp.py    | 20 +++++++++++
+ contrib/glib2/README.SUBSTRATE.md | 15 ++++++++
+ contrib/glib2/build.sh            | 58 +++++++++++++++++++++++++++++++
+ contrib/glib2/fetch.sh            | 19 ++++++++++
+ 4 files changed, 112 insertions(+)
+ create mode 100644 contrib/automake-pyshim/imp.py
+ create mode 100644 contrib/glib2/README.SUBSTRATE.md
+ create mode 100755 contrib/glib2/build.sh
+ create mode 100755 contrib/glib2/fetch.sh
+
+diff --git a/contrib/automake-pyshim/imp.py b/contrib/automake-pyshim/imp.py
+new file mode 100644
+index 00000000..9a3ba9f5
+--- /dev/null
++++ b/contrib/automake-pyshim/imp.py
+@@ -0,0 +1,20 @@
++# Shim for the `imp` module that automake's py-compile (bundled in 2018-era
++# GNOME tarballs: glib 2.56, pango 1.42, atk 2.28) imports during its
++# install-*PYTHON byte-compile step.  Python 3.12 removed `imp`; forward the
++# handful of names automake uses to their importlib equivalents.
++# Put this dir on PYTHONPATH for `make install`.
++import sys
++import importlib.util as _u
++
++def get_tag():
++    return sys.implementation.cache_tag
++
++def cache_from_source(path, debug_override=None):
++    return _u.cache_from_source(path, debug_override)
++
++def source_from_cache(path):
++    return _u.source_from_cache(path)
++
++PY_SOURCE = 1
++PY_COMPILED = 2
++C_EXTENSION = 3
+diff --git a/contrib/glib2/README.SUBSTRATE.md b/contrib/glib2/README.SUBSTRATE.md
+new file mode 100644
+index 00000000..bc2f4c84
+--- /dev/null
++++ b/contrib/glib2/README.SUBSTRATE.md
+@@ -0,0 +1,15 @@
++# glib2 (GLib 2.56.4 — last autotools GLib)
++
++The foundation of the GTK+ 2.x stack (glib/gobject/gio/gmodule/gthread).
++Cross-built (substrate-autotools helpers) against dist-zlib + dist-libffi,
++--with-pcre=internal (no system PCRE port), NLS via substrate libc gettext.
++
++gcc16 notes: -std=gnu11 (glib pre-dates the C23 `bool` keyword);
++--enable-compile-warnings=no (drops glib`s hardcoded -Werror=format-overflow
++which gcc16 trips on null-format args).  PYTHON=python3.
++
++Install uses the contrib/automake-pyshim `imp` shim on PYTHONPATH:
++automake 1.16`s py-compile imports the removed-in-3.12 `imp` module
++(only for get_tag/cache_from_source, forwarded to importlib).  The codegen
++tools (glib-genmarshal, glib-mkenums, glib-compile-resources) are python
++scripts, so they run on the build host for downstream ports.
+diff --git a/contrib/glib2/build.sh b/contrib/glib2/build.sh
+new file mode 100755
+index 00000000..b451b1b5
+--- /dev/null
++++ b/contrib/glib2/build.sh
+@@ -0,0 +1,58 @@
++#!/bin/sh
++# contrib/glib2/build.sh — cross-compile GLib 2.56.4 for substrate.
++# 2.56 is the last autotools GLib; its glib-mkenums/glib-genmarshal are
++# python scripts (run on the build host), avoiding a target-exec generator.
++set -eu
++HERE="$(cd "$(dirname "$0")" && pwd)"
++VERSION="2.56.4"; TREE_DIR="${HERE}/build/glib-${VERSION}"; BUILD_DIR="${HERE}/build/build-substrate"
++if [ -z "${SUBSTRATE_TOP:-}" ]; then
++    p="${HERE}"; while [ "${p}" != "/" ] && [ ! -f "${p}/AGENTS.md" ] && [ ! -f "${p}/CLAUDE.md" ]; do p=$(dirname "${p}"); done
++    SUBSTRATE_TOP="${p}"
++fi
++: "${STAGE1_PREFIX:=/opt/substrate}"; : "${DESTDIR:=${SUBSTRATE_TOP}/dist-glib2}"
++: "${JOBS:=$(nproc 2>/dev/null || echo 4)}"
++PATH="${STAGE1_PREFIX}/bin:${PATH}"; export PATH
++. "${HERE}/../substrate-autotools.sh"
++[ -d "${TREE_DIR}" ] || { echo "build.sh: run ./fetch.sh first" >&2; exit 1; }
++ZL="${SUBSTRATE_TOP}/dist-zlib"; FFI="${SUBSTRATE_TOP}/dist-libffi"
++for d in "${ZL}" "${FFI}"; do [ -d "${d}/usr" ] || { echo "build.sh: ${d} missing" >&2; exit 1; }; done
++
++export CPPFLAGS="-I${ZL}/usr/include -I${FFI}/usr/include"
++export LDFLAGS="-L${ZL}/usr/lib -L${FFI}/usr/lib -Wl,-rpath-link,${ZL}/usr/lib -Wl,-rpath-link,${FFI}/usr/lib -Wl,--copy-dt-needed-entries"
++export PKG_CONFIG_LIBDIR="${ZL}/usr/lib/pkgconfig:${FFI}/usr/lib/pkgconfig"
++export LIBFFI_CFLAGS="-I${FFI}/usr/include"
++export LIBFFI_LIBS="-L${FFI}/usr/lib -lffi"
++export ZLIB_CFLAGS="-I${ZL}/usr/include"
++export ZLIB_LIBS="-L${ZL}/usr/lib -lz"
++export PYTHON=python3
++
++# Cross run-test cache preseeds (substrate = i386, glibc-like libc).
++export glib_cv_stack_grows=no glib_cv_uscore=no \
++       glib_cv_have_qsort_r=yes glib_cv_long_long_format=ll \
++       ac_cv_func_posix_getpwuid_r=yes ac_cv_func_posix_getgrgid_r=yes \
++       ac_cv_func_malloc_0_nonnull=yes ac_cv_func_realloc_0_nonnull=yes \
++       glib_cv_compliant_posix_memalign=1 \
++       ac_cv_func_printf_unix98=yes ac_cv_func_vsnprintf_c99=yes \
++       gl_cv_func_printf_positions=yes \
++       glib_cv_rtldglobal_broken=no glib_cv_va_val_copy=yes
++
++substrate_libtool_fix "${TREE_DIR}/configure"
++rm -rf "${BUILD_DIR}"; mkdir -p "${BUILD_DIR}"; cd "${BUILD_DIR}"
++"${TREE_DIR}/configure" \
++    --host=i386-unknown-substrate \
++    --prefix=/usr --libdir=/usr/lib --includedir=/usr/include \
++    --enable-shared --enable-static \
++    --with-pcre=internal --disable-libmount --disable-selinux \
++    --enable-compile-warnings=no \
++    --disable-dtrace --disable-systemtap --disable-fam --disable-man --disable-gtk-doc \
++    CC=i386-unknown-substrate-gcc \
++    AR=i386-unknown-substrate-ar RANLIB=i386-unknown-substrate-ranlib \
++    CC_FOR_BUILD=gcc \
++    CFLAGS="-march=i486 -mtune=i486 -O2 -g -std=gnu11"
++make -j"${JOBS}"
++rm -rf "${DESTDIR}"; mkdir -p "${DESTDIR}"
++# automake's py-compile imports the removed `imp` module; shim get_tag().
++export PYTHONPATH="${HERE}/../automake-pyshim${PYTHONPATH:+:${PYTHONPATH}}"
++make install DESTDIR="${DESTDIR}"
++substrate_so_finalize "${DESTDIR}"
++echo "==> glib2 staged at ${DESTDIR}"
+diff --git a/contrib/glib2/fetch.sh b/contrib/glib2/fetch.sh
+new file mode 100755
+index 00000000..01cf82ff
+--- /dev/null
++++ b/contrib/glib2/fetch.sh
+@@ -0,0 +1,19 @@
++#!/bin/sh
++# contrib/glib2/fetch.sh — GLib 2.56.4 (last autotools GLib; GTK+ 2.x base).
++set -eu
++VERSION="2.56.4"; SERIES="2.56"
++TARBALL="glib-${VERSION}.tar.xz"
++URL="https://download.gnome.org/sources/glib/${SERIES}/${TARBALL}"
++SHA256="27f703d125efb07f8a743666b580df0b4095c59fc8750e8890132c91d437504c"
++HERE="$(cd "$(dirname "$0")" && pwd)"
++BUILD_DIR="${HERE}/build"; TREE_DIR="${BUILD_DIR}/glib-${VERSION}"
++mkdir -p "${BUILD_DIR}"; cd "${BUILD_DIR}"
++if [ ! -f "${TARBALL}" ]; then
++    [ "${1:-}" = "--no-network" ] && { echo "fetch.sh: tarball missing" >&2; exit 1; }
++    echo "==> Fetching ${URL}"; curl -fSL -o "${TARBALL}" "${URL}"
++fi
++echo "${SHA256}  ${TARBALL}" | sha256sum -c -
++[ -d "${TREE_DIR}" ] || { echo "==> Extracting"; tar xf "${TARBALL}"; }
++. "${HERE}/../substrate-autotools.sh"
++substrate_config_sub_fix "${TREE_DIR}"
++echo "==> glib2 ${VERSION} ready at ${TREE_DIR}"
+-- 
+2.54.0
+

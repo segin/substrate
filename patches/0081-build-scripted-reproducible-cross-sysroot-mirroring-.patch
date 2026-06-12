@@ -1,0 +1,234 @@
+From d53abc70c032f29bf107e6b6c8fcf52d685bc47b Mon Sep 17 00:00:00 2001
+From: Kirn Gill II <segin2005@gmail.com>
+Date: Fri, 12 Jun 2026 08:26:37 -0500
+Subject: [PATCH 81/83] build: scripted, reproducible cross-sysroot mirroring
+ (scripts/sync-sysroot.sh)
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The libs+headers mirroring into the cross-toolchain sysroot lived inline in
+build.sh and only ran during a full contrib build, so a sysroot that was
+fresh (or whose packages were built out-of-band) was left incomplete — the
+GTK+2 stack runtime worked but its headers/libs were absent from
+/opt/substrate/i386-unknown-substrate, so the cross compiler couldn't build
+new GTK+2 apps.
+
+Extract the logic into scripts/sync-sysroot.sh: standalone and idempotent,
+it reconstructs the sysroot from the existing dist-<pkg>/ outputs (and the
+native lib/, usr.lib/, include/ trees) WITHOUT a rebuild, so CI/automation
+can run it any time.  build.sh now sources it and calls the same
+sync_to_sysroot()/sync_native_libs_to_sysroot() functions during a build —
+one source of truth, no duplication.
+
+Running it mirrors all 104 dist trees; verified the full GTK+2 stack
+(libpng/freetype/cairo/pango/atk/gdk-pixbuf/gtk-x11 + their versioned
+include subdirs) now resolves, and a cross-compile of `#include <gtk/gtk.h>`
++ gtk_init() parses through the complete glib/gobject/gio/gtk chain.
+
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+---
+ build.sh                |  76 ++++--------------------------
+ scripts/sync-sysroot.sh | 101 ++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 111 insertions(+), 66 deletions(-)
+ create mode 100755 scripts/sync-sysroot.sh
+
+diff --git a/build.sh b/build.sh
+index 503bc0d4..502b0433 100755
+--- a/build.sh
++++ b/build.sh
+@@ -105,74 +105,18 @@ DEFAULT_CONTRIB="bzip2 libiconv zlib openssl ncurses gzip tzdata make sed expr l
+ : "${ONLY:=${DEFAULT_CONTRIB}}"
+ 
+ #
+-# Helper: after each contrib build, mirror its libs + headers into
+-# the cross-toolchain sysroot so the next contrib's configure can
+-# find them with the regular -lfoo search.  Without this, configure
+-# probes for libiconv/libncurses/libssl would silently disable the
+-# corresponding features even though we just built them.
++# Mirror built libs + headers into the cross-toolchain sysroot so each
++# contrib's configure finds the previously-built ones with the regular
++# -lfoo / #include search.  Without this, configure probes for
++# libiconv/libpng/libssl/... silently disable features we just built.
+ #
+-sync_to_sysroot() {
+-    local pkg="$1"
+-    local distdir="${HERE}/dist-${pkg}"
+-    local sysroot="${STAGE1_PREFIX}/i386-unknown-substrate"
+-    if [ ! -d "$distdir/usr/lib" ] && [ ! -d "$distdir/usr/include" ]; then
+-        return 0
+-    fi
+-    if [ -d "$distdir/usr/lib" ]; then
+-        cp -a "$distdir/usr/lib/." "$sysroot/lib/"
+-    fi
+-    if [ -d "$distdir/usr/include" ]; then
+-        cp -a "$distdir/usr/include/." "$sysroot/include/"
+-        # GCC's fixincludes snapshot also wins over the sysroot, so
+-        # mirror headers there too.  Failure is non-fatal (the dir
+-        # may not exist on a fresh toolchain install).
+-        local fixinc="${STAGE1_PREFIX}/lib/gcc/i386-unknown-substrate"
+-        if [ -d "$fixinc" ]; then
+-            for ver in "$fixinc"/*/include-fixed; do
+-                [ -d "$ver" ] || continue
+-                cp -a "$distdir/usr/include/." "$ver/" 2>/dev/null || true
+-            done
+-        fi
+-    fi
+-}
+-
+-#
+-# Helper: also mirror substrate's native libs from lib/ + usr.lib/
+-# into the cross sysroot.  Same rationale as sync_to_sysroot — the
+-# cross toolchain links against the sysroot, not the source tree.
++# The logic lives in scripts/sync-sysroot.sh so it is ALSO runnable
++# standalone to reconstruct the sysroot from existing dist-* outputs
++# without a rebuild (automation: scripts/sync-sysroot.sh).  Sourcing it
++# defines sync_to_sysroot() and sync_native_libs_to_sysroot() — the same
++# names the build loop below calls — so there is one source of truth.
+ #
+-sync_native_libs_to_sysroot() {
+-    local sysroot="${STAGE1_PREFIX}/i386-unknown-substrate"
+-    [ -d "$sysroot/lib" ] || return 0
+-
+-    # lib/X/libX.so.0 + libX.a — every direct subdir of lib/.
+-    for dir in lib/*/; do
+-        local name
+-        name=$(basename "$dir")
+-        [ -f "$dir/lib$name.so.0" ] && cp "$dir/lib$name.so.0" "$sysroot/lib/" 2>/dev/null || true
+-        [ -f "$dir/lib$name.a"    ] && cp "$dir/lib$name.a"    "$sysroot/lib/" 2>/dev/null || true
+-    done
+-    # Same for usr.lib/.
+-    for dir in usr.lib/*/; do
+-        local name
+-        name=$(basename "$dir")
+-        [ -f "$dir/lib$name.so.0" ] && cp "$dir/lib$name.so.0" "$sysroot/lib/" 2>/dev/null || true
+-        [ -f "$dir/lib$name.a"    ] && cp "$dir/lib$name.a"    "$sysroot/lib/" 2>/dev/null || true
+-    done
+-
+-    # Sync top-level include/ — the source-of-truth for substrate
+-    # public headers (signal.h, fcntl.h, pthread.h, …).
+-    if [ -d include ]; then
+-        cp -a include/. "$sysroot/include/"
+-        local fixinc="${STAGE1_PREFIX}/lib/gcc/i386-unknown-substrate"
+-        if [ -d "$fixinc" ]; then
+-            for ver in "$fixinc"/*/include-fixed; do
+-                [ -d "$ver" ] || continue
+-                cp -a include/. "$ver/" 2>/dev/null || true
+-            done
+-        fi
+-    fi
+-}
++. "${HERE}/scripts/sync-sysroot.sh"
+ 
+ step() { printf '\n=========================  %s  =========================\n' "$*"; }
+ note() { printf '   %s\n' "$*"; }
+diff --git a/scripts/sync-sysroot.sh b/scripts/sync-sysroot.sh
+new file mode 100755
+index 00000000..857655ec
+--- /dev/null
++++ b/scripts/sync-sysroot.sh
+@@ -0,0 +1,101 @@
++#!/bin/sh
++#
++# sync-sysroot.sh — mirror built libraries + headers into the cross
++# toolchain sysroot so the cross compiler's regular -lfoo / #include <foo.h>
++# search finds them.
++#
++# Two sources are mirrored:
++#   1. contrib ports        — every dist-<pkg>/usr/{lib,include} at the repo
++#                             root (the staged output of contrib/<pkg>/build.sh)
++#   2. substrate native libs — lib/<X>/libX.{so.0,a}, usr.lib/<X>/libX.{so.0,a},
++#                             and the top-level include/ public headers
++#
++# Headers are mirrored both into $SYSROOT/include and into every GCC
++# include-fixed snapshot (fixincludes wins over the sysroot, so a header that
++# lives only in the sysroot is invisible to the compiler).
++#
++# Idempotent and standalone: it reconstructs the sysroot from existing dist-*
++# outputs WITHOUT a rebuild, so CI / automation can run it any time the
++# sysroot is fresh or stale.  build.sh also sources this file and calls the
++# same functions during a build, so there is a single source of truth.
++#
++# Usage:
++#   scripts/sync-sysroot.sh                # mirror ALL dist-* + native libs
++#   scripts/sync-sysroot.sh libpng cairo   # mirror only these dist-<pkg>
++#   STAGE1_PREFIX=/opt/substrate scripts/sync-sysroot.sh
++#
++# Env:
++#   STAGE1_PREFIX   cross toolchain prefix         (default /opt/substrate)
++#   SUBSTRATE_TOP   repo root                       (default: this script's ..)
++
++: "${SUBSTRATE_TOP:=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)}"
++: "${STAGE1_PREFIX:=/opt/substrate}"
++SYSROOT="${STAGE1_PREFIX}/i386-unknown-substrate"
++
++# Copy a directory tree of headers into every GCC include-fixed snapshot.
++_mirror_to_fixinc() {
++    srcinc="$1"
++    fixinc="${STAGE1_PREFIX}/lib/gcc/i386-unknown-substrate"
++    [ -d "$fixinc" ] || return 0
++    for ver in "$fixinc"/*/include-fixed; do
++        [ -d "$ver" ] || continue
++        cp -a "$srcinc/." "$ver/" 2>/dev/null || true
++    done
++}
++
++# Mirror one contrib port's dist-<pkg>/usr/{lib,include} into the sysroot.
++sync_to_sysroot() {
++    pkg="$1"
++    distdir="${SUBSTRATE_TOP}/dist-${pkg}"
++    [ -d "$distdir/usr/lib" ] || [ -d "$distdir/usr/include" ] || return 0
++    if [ -d "$distdir/usr/lib" ]; then
++        mkdir -p "$SYSROOT/lib"
++        cp -a "$distdir/usr/lib/." "$SYSROOT/lib/" 2>/dev/null || true
++    fi
++    if [ -d "$distdir/usr/include" ]; then
++        mkdir -p "$SYSROOT/include"
++        cp -a "$distdir/usr/include/." "$SYSROOT/include/" 2>/dev/null || true
++        _mirror_to_fixinc "$distdir/usr/include"
++    fi
++}
++
++# Mirror substrate's own libs (lib/, usr.lib/) and public headers (include/).
++sync_native_libs_to_sysroot() {
++    [ -d "$SYSROOT/lib" ] || return 0
++    for dir in "${SUBSTRATE_TOP}"/lib/*/ "${SUBSTRATE_TOP}"/usr.lib/*/; do
++        [ -d "$dir" ] || continue
++        name=$(basename "$dir")
++        [ -f "$dir/lib$name.so.0" ] && cp "$dir/lib$name.so.0" "$SYSROOT/lib/" 2>/dev/null || true
++        [ -f "$dir/lib$name.a"    ] && cp "$dir/lib$name.a"    "$SYSROOT/lib/" 2>/dev/null || true
++    done
++    if [ -d "${SUBSTRATE_TOP}/include" ]; then
++        cp -a "${SUBSTRATE_TOP}/include/." "$SYSROOT/include/" 2>/dev/null || true
++        _mirror_to_fixinc "${SUBSTRATE_TOP}/include"
++    fi
++}
++
++# Mirror every dist-<pkg> found at the repo root, then the native libs.
++sync_all_to_sysroot() {
++    n=0
++    for distdir in "${SUBSTRATE_TOP}"/dist-*/; do
++        [ -d "$distdir" ] || continue
++        pkg=$(basename "$distdir"); pkg=${pkg#dist-}
++        sync_to_sysroot "$pkg"
++        n=$((n + 1))
++    done
++    sync_native_libs_to_sysroot
++    echo "sync-sysroot: mirrored $n contrib dist tree(s) + native libs into $SYSROOT"
++}
++
++# Run only when executed directly (not when sourced by build.sh, where $0 is
++# build.sh).  POSIX-portable check on the invoked basename.
++case "${0##*/}" in
++sync-sysroot.sh)
++    if [ "$#" -gt 0 ]; then
++        for p in "$@"; do sync_to_sysroot "$p"; done
++        echo "sync-sysroot: mirrored $* into $SYSROOT"
++    else
++        sync_all_to_sysroot
++    fi
++    ;;
++esac
+-- 
+2.54.0
+

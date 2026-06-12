@@ -1,0 +1,201 @@
+From 7414c0a7d3e600ca5db92ebdce56af1a22315e30 Mon Sep 17 00:00:00 2001
+From: Kirn Gill II <segin2005@gmail.com>
+Date: Tue, 9 Jun 2026 15:57:04 -0500
+Subject: [PATCH 15/83] =?UTF-8?q?fonts:=20port=20B&H=20Lucida=20+=20instal?=
+ =?UTF-8?q?l=20CDE=20-dt-*=20aliases=20=E2=80=94=20fixes=20dtcm=20freezing?=
+ =?UTF-8?q?=20the=20desktop?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Opening dtcm froze the whole UI: the mouse cursor still moved but clicks
+and keystrokes were dead.  Root cause (found via gdb + the Xfbdev log):
+
+dtcm builds Motif FontSets from -b&h-lucida* and the CDE logical -dt-*
+font names.  Neither was installed — there was no font-bh port (only
+adobe + misc), and the CDE programs/fontaliases/{mixed,fixed}.alias were
+never staged.  The FontSet build fails, and drawing text with the broken
+set makes Xfbdev (the X server) SEGFAULT.  The server dies *holding the
+evdev keyboard+mouse grab*, the ungrab fails (error 9), so the input
+devices stay grabbed — cursor moves (hardware) but nothing receives
+events.  That is the "stuck, mouse moves, clicks/keys do nothing" freeze.
+
+Fix:
+- contrib/font-bh-lucida/: new port for the X.Org B&H Lucida /
+  LucidaTypewriter bitmap fonts (75 + 100 dpi), deriving ISO8859-1
+  variants like font-adobe.
+- build-rootfs.sh finalize_x_fonts(): after the contrib overlays,
+  regenerate ONE merged fonts.dir per X font dir (adobe + bh share
+  100dpi/75dpi) and install the CDE {mixed,fixed}.alias as fonts.alias so
+  -dt-* resolves to the adobe fonts.
+
+Verified headless: dtcm now starts and stays up, the "Cannot convert ...
+to type FontSet" errors are gone, and Xfbdev no longer crashes.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+---
+ build-rootfs.sh                            | 31 +++++++++++++++
+ contrib/font-bh-lucida/README.SUBSTRATE.md | 11 ++++++
+ contrib/font-bh-lucida/build.sh            | 46 ++++++++++++++++++++++
+ contrib/font-bh-lucida/fetch.sh            | 29 ++++++++++++++
+ 4 files changed, 117 insertions(+)
+ create mode 100644 contrib/font-bh-lucida/README.SUBSTRATE.md
+ create mode 100755 contrib/font-bh-lucida/build.sh
+ create mode 100755 contrib/font-bh-lucida/fetch.sh
+
+diff --git a/build-rootfs.sh b/build-rootfs.sh
+index 1b462adf..034f679d 100755
+--- a/build-rootfs.sh
++++ b/build-rootfs.sh
+@@ -195,6 +195,35 @@ build_components() {
+     done
+ }
+ 
++finalize_x_fonts() {
++    # Adobe + B&H Lucida fonts both stage into X11/100dpi and 75dpi, each
++    # with its own fonts.dir — regenerate ONE merged fonts.dir per dir from
++    # every BDF present, and install the CDE -dt-* font aliases.  dtcm (and
++    # other CDE apps) build FontSets from -dt-* / -b&h-lucida*; a font that
++    # the set can't resolve makes Xfbdev SEGFAULT (it dies holding the evdev
++    # grab -> frozen desktop), so all the referenced fonts + aliases must
++    # be present.
++    _cde_alias="$TOP/contrib/cde/build/cdesktopenv/cde/programs/fontaliases"
++    for _d in 100dpi 75dpi misc; do
++        _dst="$DIST/usr/share/fonts/X11/$_d"
++        [ -d "$_dst" ] || continue
++        : > "$_dst/fonts.dir.tmp"; _n=0
++        for _f in "$_dst"/*.bdf; do
++            [ -f "$_f" ] || continue
++            _bn=$(basename "$_f")
++            _xlfd=$(sed -n 's/^FONT[[:space:]][[:space:]]*\(.*\)$/\1/p' "$_f" | head -1)
++            [ -n "$_xlfd" ] || continue
++            printf '%s\t%s\n' "$_bn" "$_xlfd" >> "$_dst/fonts.dir.tmp"; _n=$((_n+1))
++        done
++        { printf '%d\n' "$_n"; cat "$_dst/fonts.dir.tmp"; } > "$_dst/fonts.dir"
++        cp -a "$_dst/fonts.dir" "$_dst/fonts.scale"; rm -f "$_dst/fonts.dir.tmp"
++        if [ -f "$_cde_alias/mixed.alias" ]; then
++            cat "$_cde_alias/mixed.alias" "$_cde_alias/fixed.alias" 2>/dev/null > "$_dst/fonts.alias" ||                 cp "$_cde_alias/mixed.alias" "$_dst/fonts.alias"
++        fi
++        echo "Finalized X fonts in $_d: $_n entries + CDE -dt-* aliases"
++    done
++}
++
+ install_to_dist() {
+     echo "Installing kernel to dist/boot and dist/vmunix..."
+     cp "$TOP/sys/kernel.bin" "$DIST/boot/"
+@@ -436,6 +465,8 @@ install_to_dist() {
+         echo "  (skipped contrib/gcc stage 2: $GCC_STAGE2_STAGING does not exist)"
+     fi
+ 
++    finalize_x_fonts
++
+     # /bin/sh -> /usr/bin/zsh.  Substrate's POSIX shell is zsh in
+     # sh-emulation mode; the in-tree bin/sh/ is intentionally not
+     # built (see CLAUDE.md).  Every shebang line (rc.d scripts,
+diff --git a/contrib/font-bh-lucida/README.SUBSTRATE.md b/contrib/font-bh-lucida/README.SUBSTRATE.md
+new file mode 100644
+index 00000000..e987311c
+--- /dev/null
++++ b/contrib/font-bh-lucida/README.SUBSTRATE.md
+@@ -0,0 +1,11 @@
++# font-bh-lucida (X.Org B&H Lucida bitmap fonts)
++
++Provides `-b&h-lucida*` / `-b&h-lucidatypewriter*` (75dpi + 100dpi).
++CDE's dtcm requests these as a FontSet; without them the FontSet build
++fails and drawing the broken set **segfaults Xfbdev**, which dies holding
++the evdev keyboard/mouse grab → the whole desktop freezes (cursor still
++moves, clicks/keys dead).  Source-only patch series; `fetch.sh` downloads
+++ SHA-verifies the four upstream tarballs, `build.sh` stages the BDFs
++(deriving ISO8859-1 variants, same as font-adobe).  The merged per-dir
++`fonts.dir` and the CDE `-dt-*` `fonts.alias` are installed by
++`build-rootfs.sh`'s `finalize_x_fonts` step (adobe + bh share 100dpi/75dpi).
+diff --git a/contrib/font-bh-lucida/build.sh b/contrib/font-bh-lucida/build.sh
+new file mode 100755
+index 00000000..c7bec0f3
+--- /dev/null
++++ b/contrib/font-bh-lucida/build.sh
+@@ -0,0 +1,46 @@
++#!/bin/sh
++# contrib/font-bh-lucida/build.sh — stage the B&H Lucida BDF fonts.
++# Mirrors contrib/font-adobe-100dpi: libXfont reads BDF directly (no
++# bdftopcf), and the 1.0.4 BDFs are ISO10646-1, so we derive ISO8859-1
++# single-byte variants for the en_US.UTF-8 fontset's Latin slot.  The
++# final per-directory fonts.dir is regenerated at image-assembly time
++# (build-rootfs.sh finalize_x_fonts) since adobe + bh share 100dpi/75dpi.
++set -eu
++HERE="$(cd "$(dirname "$0")" && pwd)"
++if [ -z "${SUBSTRATE_TOP:-}" ]; then
++  p="${HERE}"; while [ "${p}" != "/" ] && [ ! -f "${p}/AGENTS.md" ] && [ ! -f "${p}/CLAUDE.md" ]; do p=$(dirname "${p}"); done
++  SUBSTRATE_TOP="${p}"
++fi
++: "${DESTDIR:=${SUBSTRATE_TOP}/dist-font-bh-lucida}"
++B="${HERE}/build"
++[ -d "${B}/font-bh-100dpi-1.0.4" ] || { echo "build.sh: run ./fetch.sh first" >&2; exit 1; }
++
++derive_iso8859_1() {
++  awk '
++  function flush(){ if(buf!=""){ if(enc>=0 && enc<=255){ printf "%s", buf; n++ } buf=""; enc=-999 } }
++  BEGIN{ inchar=0; enc=-999; buf="" }
++  /^STARTCHAR/{ inchar=1; buf=$0 ORS; next }
++  inchar && /^ENCODING/{ enc=$2; buf=buf $0 ORS; next }
++  /^ENDCHAR/{ if(inchar){ buf=buf $0 ORS; flush(); inchar=0 } else print; next }
++  inchar{ buf=buf $0 ORS; next }
++  /^FONT /{ line=$0; sub(/-ISO10646-1[ \t\r]*$/,"-ISO8859-1",line); print line; next }
++  /^CHARSET_REGISTRY/{ print "CHARSET_REGISTRY \"ISO8859\""; next }
++  /^CHARSET_ENCODING/{ print "CHARSET_ENCODING \"1\""; next }
++  /^CHARS /{ print "CHARS PLACEHOLDER"; next }
++  { print }' "$1" > "$2.raw"
++  realn=$(grep -c '^STARTCHAR' "$2.raw"); sed "s/^CHARS PLACEHOLDER/CHARS ${realn}/" "$2.raw" > "$2"; rm -f "$2.raw"
++}
++
++rm -rf "${DESTDIR}"
++for dpi in 100dpi 75dpi; do
++  DST="${DESTDIR}/usr/share/fonts/X11/${dpi}"; mkdir -p "${DST}"
++  for pkg in "font-bh-${dpi}-1.0.4" "font-bh-lucidatypewriter-${dpi}-1.0.4"; do
++    for f in "${B}/${pkg}"/*.bdf; do
++      [ -f "$f" ] || continue; bn=$(basename "$f"); cp -a "$f" "${DST}/${bn}"
++      grep -qE '^FONT .*-ISO10646-1[[:space:]]*$' "${DST}/${bn}" && \
++        derive_iso8859_1 "${DST}/${bn}" "${DST}/${bn%.bdf}-iso8859-1.bdf" || true
++    done
++  done
++  echo "==> staged ${dpi}: $(ls "${DST}"/*.bdf | wc -l) BDFs"
++done
++echo "==> font-bh-lucida staged at ${DESTDIR}"
+diff --git a/contrib/font-bh-lucida/fetch.sh b/contrib/font-bh-lucida/fetch.sh
+new file mode 100755
+index 00000000..c5a5545d
+--- /dev/null
++++ b/contrib/font-bh-lucida/fetch.sh
+@@ -0,0 +1,29 @@
++#!/bin/sh
++# contrib/font-bh-lucida/fetch.sh — X.Org B&H Lucida bitmap fonts
++# (Lucida, LucidaBright, LucidaSans, LucidaTypewriter), 75dpi + 100dpi.
++# CDE's dtcm (and other CDE apps) request -b&h-lucida* fontsets; without
++# them the FontSet build fails and drawing the broken set CRASHES Xfbdev
++# (taking the evdev grab down with it -> frozen desktop).  Source-only
++# fetch; build.sh stages the BDFs.
++set -eu
++HERE="$(cd "$(dirname "$0")" && pwd)"
++BUILD_DIR="${HERE}/build"; mkdir -p "${BUILD_DIR}"; cd "${BUILD_DIR}"
++base="https://www.x.org/releases/individual/font"
++# tarball  sha256
++set -- \
++  font-bh-100dpi-1.0.4                  fd8f5efe8491faabdd2744808d3d4eafdae5c83e617017c7fddd2716d049ab1e \
++  font-bh-75dpi-1.0.4                   6026d8c073563dd3cbb4878d0076eed970debabd21423b3b61dd90441b9e7cda \
++  font-bh-lucidatypewriter-100dpi-1.0.4 76ec09eda4094a29d47b91cf59c3eba229c8f7d1ca6bae2abbb3f925e33de8f2 \
++  font-bh-lucidatypewriter-75dpi-1.0.4  864e2c39ac61f04f693fc2c8aaaed24b298c2cd40283cec12eee459c5635e8f5
++while [ $# -ge 2 ]; do
++  name="$1"; sha="$2"; shift 2
++  t="${name}.tar.xz"
++  if [ ! -f "$t" ]; then
++    [ "${1:-}" = "--no-network" ] && { echo "fetch: $t missing" >&2; exit 1; }
++    echo "==> Fetching ${base}/${t}"
++    if command -v curl >/dev/null 2>&1; then curl -fSL -o "$t" "${base}/${t}"; else wget -O "$t" "${base}/${t}"; fi
++  fi
++  echo "${sha}  ${t}" | sha256sum -c -
++  [ -d "${name}" ] || tar xf "$t"
++done
++echo "==> font-bh-lucida ready"
+-- 
+2.54.0
+

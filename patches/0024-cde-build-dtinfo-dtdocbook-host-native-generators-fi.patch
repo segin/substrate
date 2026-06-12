@@ -1,0 +1,265 @@
+From 51b9029d63cba6f08460f757f524e9c067f3243b Mon Sep 17 00:00:00 2001
+From: Kirn Gill II <segin2005@gmail.com>
+Date: Tue, 9 Jun 2026 22:14:06 -0500
+Subject: [PATCH 24/83] cde: build dtinfo + dtdocbook (host-native generators);
+ fix statfs.h C++ linkage
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The dtinfo and dtdocbook clusters were deferred on "their SGML build
+tooling is cross-built and won't run on the host".  The tooling turns
+out to be four small generators — dtinfo's pmaker (Prelude.h), dfiles
+(.d dependency lists), msgsets, and dtsr's mkdbd — handled exactly like
+dtcodegen: hosttools builds native copies (new prefix/cde-tools) out of
+the shared native CDE objdir, and build.sh swaps them over the
+cross-built ones before building the clusters.  hosttools/build.sh is
+restructured so the native objdir (cde-host) is its own ungated step,
+shared by dtcodegen-host (still Motif-gated) and the new cde-tools.
+
+Substrate/toolchain fixes this surfaced:
+- include/sys/statfs.h lacked extern "C" guards, so C++ callers
+  (DtMmdb's disk_space) emitted a mangled statfs reference nothing
+  defines.  Note the gcc include-fixed snapshot shadows the sysroot
+  header — both copies under /opt/substrate were refreshed; toolchain
+  rebuilds pick it up via the established header-mirror step.
+- The CDE sysroot now ships unversioned .so symlinks for substrate's
+  core libs (and adds libdl): -lpthread/-ldl found nothing (no .so/.a),
+  so symbols reached only through DT_NEEDED chains and ld errored with
+  "DSO missing from command line" (tcl's pthread_create/dlclose).
+
+CDE build fixes (sed'd into the generated Makefiles by build.sh):
+- instant_CFLAGS hardcodes -I/usr/include and tclConfig.sh substitutes
+  tcl's ON-TARGET install paths (-I/usr/include, -L/usr/lib) — on the
+  build host those pull glibc headers ahead of substrate's and instant
+  ends up referencing glibc-internal __ctype_*_loc.  Both now point at
+  the sysroot.
+- dtinfo is compiled -std=gnu99: its bundled Xaw-era widgets forward-
+  declare class methods with empty parens, which C23 (gcc16 default)
+  reads as (void) and then rejects the real definitions.
+- tcl's static archive needs -lpthread -lz appended to LIBS for the
+  dtdocbook/dtinfo links.
+
+Produces /usr/dt/bin/dtinfo, dtdocbook2infolib/man/sdl (+ instant and
+the infolib tool set), staged into dist-cde for the next image.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+---
+ contrib/cde/build.sh           | 58 +++++++++++++++++++++++++++--
+ contrib/cde/hosttools/build.sh | 68 ++++++++++++++++++++++------------
+ include/sys/statfs.h           |  8 ++++
+ 3 files changed, 108 insertions(+), 26 deletions(-)
+
+diff --git a/contrib/cde/build.sh b/contrib/cde/build.sh
+index b259b491..e9972fc1 100755
+--- a/contrib/cde/build.sh
++++ b/contrib/cde/build.sh
+@@ -50,8 +50,12 @@ for d in xorgproto libXau xtrans libxcb libX11 libXext libICE libSM \
+     _have=$((_have + 1))
+ done
+ [ "${_have}" -ge 19 ] || { echo "build.sh: only ${_have} dist trees found — build the X stack + Motif + libXinerama + libXScrnSaver + libjpeg + lmdb + tcl first" >&2; exit 1; }
+-for l in c sys m pthread; do
++for l in c sys m pthread dl; do
+     cp "${SUBSTRATE_TOP}/lib/${l}/lib${l}.so.0" "${SR}/usr/lib/" 2>/dev/null || true
++    # Unversioned link-time name: -l<x> won't find lib<x>.so.0 on its own,
++    # and without it ld reports "DSO missing from command line" for anything
++    # (tcl's pthread_create) resolved only through a DT_NEEDED chain.
++    ln -sf "lib${l}.so.0" "${SR}/usr/lib/lib${l}.so"
+ done
+ 
+ # Build IN-SOURCE.  CDE's Makefiles reference its exported Dt/* headers as
+@@ -100,8 +104,10 @@ echo "==> configure"
+ #           either way — the conditional phase after the main make builds
+ #           them with the generator swapped for the host binary.
+ #   dtinfo,
+-#   dtdocbook : need their own SGML build tooling (pmaker/Prelude.h generator,
+-#           the dtdocbook parser) which is cross-built and won't run on the host.
++#   dtdocbook : their build-time generators (pmaker/dfiles/msgsets, dtsr's
++#           mkdbd) are cross-built and can't run here.  Handled below via
++#           hosttools prefix/cde-tools (native builds of the same tools),
++#           swapped in like dtcodegen.
+ #   tttypes,
+ #   types   : run the cross-built tt_type_comp (ToolTalk type compiler, which
+ #           links libtt) during the build — it can't execute on the host, and
+@@ -139,6 +145,19 @@ grep -q 'abil_yyparse' programs/dtappbuilder/src/libABil/Makefile || \
+ grep -q 'ttsnoop_local_sigset' programs/ttsnoop/Makefile || \
+     sed -i 's|^DEFS = |DEFS = -D_tt_sigset=ttsnoop_local_sigset |' programs/ttsnoop/Makefile
+ 
++# tclConfig.sh records tcl's ON-TARGET install paths (/usr/include, /usr/lib);
++# configure substitutes them verbatim into instant's Makefile, where they
++# resolve to the BUILD HOST's glibc headers/libs (instant then references
++# glibc-internal __ctype_*_loc symbols).  Point them at the sysroot.
++sed -i "s|^TCL_INCLUDE_SPEC = -I/usr/include\$|TCL_INCLUDE_SPEC = -I${SR}/usr/include|; \
++        s|^TCL_LIB_SPEC = -L/usr/lib |TCL_LIB_SPEC = -L${SR}/usr/lib |" \
++    programs/dtdocbook/instant/Makefile
++# instant_CFLAGS hardcodes -I/usr/include (for tcl.h) in Makefile.am — on the
++# build host that pulls glibc headers ahead of substrate's.  Drop it; the
++# sysroot include path is already on the compile line.
++sed -i 's|^instant_CFLAGS = \$(DT_INCDIR) -I/usr/include\$|instant_CFLAGS = $(DT_INCDIR)|' \
++    programs/dtdocbook/instant/Makefile
++
+ # In-tree generator tools: CDE compiles several small noinst_PROGRAMS and runs
+ # them mid-build to generate source (lineToData -> TermLineData.c, ...).  The
+ # cross-build compiles them for the target, so they can't execute on the build
+@@ -217,6 +236,35 @@ else
+     echo "==> no hosttools dtcodegen-host — dtappbuilder/ttsnoop skipped"
+ fi
+ 
++# --- dtdocbook + dtinfo: need their generators at build time ----------------
++# dtsr's mkdbd, dtinfo's pmaker (Prelude.h) / dfiles (.d lists) / msgsets are
++# RUN during the build; hosttools stages native ones in prefix/cde-tools.
++# Both stay out of programs/Makefile SUBDIRS; built explicitly here.
++CDETOOLS="${HERE}/hosttools/prefix/cde-tools"
++if [ -x "${CDETOOLS}/pmaker" ]; then
++    echo "==> dtdocbook + dtinfo (host generators)"
++    # tcl pulls pthread/dl/z on top of the usual LIBS.
++    DOCLIBS="-ldl -lm -lsys -lstdc++ -liconv -lpthread -lz"
++    # dtinfo's bundled Xaw-era widgets forward-declare methods with empty
++    # parens; C23 (gcc16 default) reads that as (void) and errors on the
++    # definitions — compile dtinfo as gnu99.  Keep the configure CFLAGS.
++    DTINFO_CFLAGS="-g -O2 -DOPT_TIRPC -I/usr/include/tirpc -Wno-unused-result -Wno-write-strings -fno-strict-aliasing -Wno-format-truncation -std=gnu99"
++    make -C programs/dtdocbook/dtsr mkdbd \
++        GENCPP="${HOSTTOOLS}/tradcpp" LIBS="${DOCLIBS}"
++    cp -f "${CDETOOLS}/mkdbd" programs/dtdocbook/dtsr/mkdbd
++    make -C programs/dtdocbook -j"${JOBS}" \
++        GENCPP="${HOSTTOOLS}/tradcpp" LIBS="${DOCLIBS}"
++    make -C programs/dtinfo/tools -j"${JOBS}" \
++        GENCPP="${HOSTTOOLS}/tradcpp" LIBS="${DOCLIBS}" || true
++    for t in pmaker dfiles msgsets; do
++        cp -f "${CDETOOLS}/${t}" "programs/dtinfo/tools/misc/${t}"
++    done
++    make -C programs/dtinfo -j"${JOBS}" \
++        GENCPP="${HOSTTOOLS}/tradcpp" CFLAGS="${DTINFO_CFLAGS}" LIBS="${DOCLIBS}"
++else
++    echo "==> no hosttools cde-tools — dtdocbook/dtinfo skipped"
++fi
++
+ # Stage the built desktop into dist-cde (CDE installs under /usr/dt).  -k keeps
+ # going past the install-exec-hook `chown root` steps that fail in a non-root
+ # build (the setuid bits are re-applied when the image is baked); without -k the
+@@ -228,6 +276,10 @@ if [ -x "${HOSTTOOLS}/dtcodegen-host" ]; then
+     make -k -C programs/dtappbuilder install DESTDIR="${SUBSTRATE_TOP}/dist-cde" GENCPP="${HOSTTOOLS}/tradcpp" MRESOURCELIB=-lMrm LIBS="-ldl -lm -lsys -lstdc++ -liconv" || true
+     make -k -C programs/ttsnoop     install DESTDIR="${SUBSTRATE_TOP}/dist-cde" GENCPP="${HOSTTOOLS}/tradcpp" MRESOURCELIB=-lMrm LIBS="-ldl -lm -lsys -lstdc++ -liconv" || true
+ fi
++if [ -x "${CDETOOLS}/pmaker" ]; then
++    make -k -C programs/dtdocbook install DESTDIR="${SUBSTRATE_TOP}/dist-cde" GENCPP="${HOSTTOOLS}/tradcpp" LIBS="${DOCLIBS}" || true
++    make -k -C programs/dtinfo    install DESTDIR="${SUBSTRATE_TOP}/dist-cde" GENCPP="${HOSTTOOLS}/tradcpp" CFLAGS="${DTINFO_CFLAGS}" LIBS="${DOCLIBS}" || true
++fi
+ 
+ # CDE's configure bakes the build-host ksh path (the hosttools mksh-as-ksh it
+ # found at build time) into the `#!` line of every generated ksh script —
+diff --git a/contrib/cde/hosttools/build.sh b/contrib/cde/hosttools/build.sh
+index c3656a8e..2dec4090 100755
+--- a/contrib/cde/hosttools/build.sh
++++ b/contrib/cde/hosttools/build.sh
+@@ -137,36 +137,41 @@ fi
+ # in hosttools/cde-host out of a pristine copy of the fetched source.
+ # Skipped (with a warning) when no host Motif is installed — cde/build.sh
+ # then leaves dtappbuilder/ttsnoop out of the build, as before.
++# --- native CDE objdir: shared by dtcodegen-host and the dtinfo/dtdocbook ---
++# build tools below.  A pristine copy of the fetched tree, configured for the
++# build host; util/ (in-tree tradcpp is lib/DtWidget's GENCPP) and lib/ are
++# built once (-k: the DtMmdb/dtinfo C++ bits fail natively and aren't needed).
++HB="${HERE}/cde-host"
++if [ ! -f "${HB}/lib/DtTerm/libDtTerm.la" ]; then
++    SRC="${SUBSTRATE_TOP}/contrib/cde/build/cdesktopenv/cde"
++    [ -d "${SRC}" ] || { echo "hosttools: CDE source tree missing — run cde/fetch.sh first" >&2; exit 1; }
++    echo "==> native CDE objdir at ${HB}"
++    rm -rf "${HB}"
++    cp -a "${SRC}" "${HB}"
++    ( cd "${HB}" && make distclean >/dev/null 2>&1 || true )
++    find "${HB}" -name '*.o' -delete
++    ( cd "${HB}" && ./configure \
++        --prefix=/nonexistent \
++        CC=gcc CXX=g++ \
++        CPPFLAGS="-I/usr/include/tirpc -Wno-error=incompatible-pointer-types -Wno-error=int-conversion -Wno-error=implicit-function-declaration -Wno-error=return-mismatch -Wno-error=format" \
++        LIBS="-ltirpc" \
++        --with-tcl=/usr/lib >/dev/null )
++    ( cd "${HB}" && make -C util -j"${JOBS}" >/dev/null )
++    ( cd "${HB}" && make -C lib -k -j"${JOBS}" >/dev/null 2>&1 || true )
++    for la in tt/lib/libtt.la DtSvc/libDtSvc.la DtWidget/libDtWidget.la \
++              DtHelp/libDtHelp.la DtTerm/libDtTerm.la; do
++        [ -f "${HB}/lib/${la}" ] || { echo "hosttools: native CDE objdir: lib/${la} failed to build" >&2; exit 1; }
++    done
++fi
++
++# --- dtcodegen: AppBuilder code generator (needs a host Motif) --------------
+ if ! have dtcodegen-host; then
+     if [ ! -f /usr/include/Xm/Xm.h ]; then
+         echo "hosttools: WARNING: no host Motif (/usr/include/Xm/Xm.h) — skipping dtcodegen-host" >&2
+         echo "hosttools:          install it (e.g. pacman -S openmotif) to enable dtappbuilder/ttsnoop" >&2
+     else
+-        SRC="${SUBSTRATE_TOP}/contrib/cde/build/cdesktopenv/cde"
+-        [ -d "${SRC}" ] || { echo "hosttools: CDE source tree missing — run cde/fetch.sh first" >&2; exit 1; }
+-        HB="${HERE}/cde-host"
+         if [ ! -x "${HB}/programs/dtappbuilder/src/abmf/dtcodegen" ] || \
+            ! "${HB}/programs/dtappbuilder/src/abmf/dtcodegen" </dev/null >/dev/null 2>&1; then
+-            echo "==> dtcodegen-host: native CDE objdir at ${HB}"
+-            rm -rf "${HB}"
+-            cp -a "${SRC}" "${HB}"
+-            ( cd "${HB}" && make distclean >/dev/null 2>&1 || true )
+-            find "${HB}" -name '*.o' -delete
+-            ( cd "${HB}" && ./configure \
+-                --prefix=/nonexistent \
+-                CC=gcc CXX=g++ \
+-                CPPFLAGS="-I/usr/include/tirpc -Wno-error=incompatible-pointer-types -Wno-error=int-conversion -Wno-error=implicit-function-declaration -Wno-error=return-mismatch -Wno-error=format" \
+-                LIBS="-ltirpc" \
+-                --with-tcl=/usr/lib >/dev/null )
+-            # util first (in-tree tradcpp is lib/DtWidget's GENCPP); then the
+-            # libraries dtcodegen links (-k: DtMmdb/dtinfo bits fail natively
+-            # and aren't needed); then the AppBuilder libs + dtcodegen.
+-            ( cd "${HB}" && make -C util -j"${JOBS}" >/dev/null )
+-            ( cd "${HB}" && make -C lib -k -j"${JOBS}" >/dev/null 2>&1 || true )
+-            for la in tt/lib/libtt.la DtSvc/libDtSvc.la DtWidget/libDtWidget.la \
+-                      DtHelp/libDtHelp.la DtTerm/libDtTerm.la; do
+-                [ -f "${HB}/lib/${la}" ] || { echo "hosttools: dtcodegen-host: lib/${la} failed to build" >&2; exit 1; }
+-            done
+             # -static-libtool-libs: link the in-tree Dt/tt libtool libs
+             # statically so the staged binary is relocatable (system Xm/Xt/
+             # X11/tirpc stay dynamic); also leaves no .libs wrapper script.
+@@ -178,5 +183,22 @@ if ! have dtcodegen-host; then
+     fi
+ fi
+ 
++# --- dtinfo / dtdocbook build-time generators -------------------------------
++# pmaker (Prelude.h), dfiles (.d dependency lists), msgsets, and dtsr's mkdbd
++# are RUN during the cross build of dtinfo/dtdocbook; build them natively and
++# stage into prefix/cde-tools for cde/build.sh to swap in.
++if [ ! -x "${PREFIX}/cde-tools/pmaker" ]; then
++    mkdir -p "${PREFIX}/cde-tools"
++    ( cd "${HB}" && make -C programs/dtinfo/tools -j"${JOBS}" \
++        LDFLAGS=-static-libtool-libs LIBS="-ltirpc -lstdc++" >/dev/null )
++    ( cd "${HB}" && make -C programs/dtdocbook -k -j"${JOBS}" \
++        LDFLAGS=-static-libtool-libs LIBS="-ltirpc -lstdc++" >/dev/null 2>&1 || true )
++    for t in pmaker dfiles msgsets; do
++        install -m755 "${HB}/programs/dtinfo/tools/misc/${t}" "${PREFIX}/cde-tools/${t}"
++    done
++    install -m755 "${HB}/programs/dtdocbook/dtsr/mkdbd" "${PREFIX}/cde-tools/mkdbd"
++    echo "==> cde-tools (pmaker dfiles msgsets mkdbd) ready"
++fi
++
+ echo "==> host tools ready in ${PREFIX}/bin:"
+ echo "    $(cd "${PREFIX}/bin" && ls | tr '\n' ' ')"
+diff --git a/include/sys/statfs.h b/include/sys/statfs.h
+index 3192aa43..21a6bb47 100644
+--- a/include/sys/statfs.h
++++ b/include/sys/statfs.h
+@@ -30,7 +30,15 @@ struct statfs {
+     uint64_t    f_spare[4]; /* spare for later */
+ };
+ 
++#ifdef __cplusplus
++extern "C" {
++#endif
++
+ int statfs(const char *path, struct statfs *buf);
+ int fstatfs(int fd, struct statfs *buf);
+ 
++#ifdef __cplusplus
++}
++#endif
++
+ #endif /* _SYS_STATFS_H */
+-- 
+2.54.0
+

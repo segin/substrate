@@ -1,0 +1,144 @@
+From 1e6b007dd5281718659956813a297c5e0a956693 Mon Sep 17 00:00:00 2001
+From: Kirn Gill II <segin2005@gmail.com>
+Date: Wed, 10 Jun 2026 11:28:25 -0500
+Subject: [PATCH 41/83] contrib: atk 2.28.1 + substrate_sysroot helper
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+ATK 2.28.1 (GTK+ 2.x accessibility dep), glib2-only.
+
+substrate_sysroot (new helper): assembles a unified sysroot from named dist
+trees and exports PKG_CONFIG_SYSROOT_DIR + PKG_CONFIG_LIBDIR.  The .pc files
+carry prefix=/usr (on-target), so a cross gcc reads pkg-config's -I/usr/...
+as the BUILD HOST's /usr — which for glib pulled the host's glib 2.88 headers
+(g_once_init_enter_pointer/g_free_sized) against the target's 2.56 lib and
+failed to link.  Routing every dep through one sysroot with SYSROOT_DIR set
+fixes it; this is the model for pango/gtk2 too.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+---
+ contrib/atk/README.SUBSTRATE.md |  7 +++++++
+ contrib/atk/build.sh            | 35 +++++++++++++++++++++++++++++++++
+ contrib/atk/fetch.sh            | 19 ++++++++++++++++++
+ contrib/substrate-autotools.sh  | 25 +++++++++++++++++++++++
+ 4 files changed, 86 insertions(+)
+ create mode 100644 contrib/atk/README.SUBSTRATE.md
+ create mode 100755 contrib/atk/build.sh
+ create mode 100755 contrib/atk/fetch.sh
+
+diff --git a/contrib/atk/README.SUBSTRATE.md b/contrib/atk/README.SUBSTRATE.md
+new file mode 100644
+index 00000000..c423bd08
+--- /dev/null
++++ b/contrib/atk/README.SUBSTRATE.md
+@@ -0,0 +1,7 @@
++# atk (2.28.1)
++
++Accessibility toolkit — a GTK+ 2.x dependency.  glib2-only; cross-built via
++the substrate-autotools helpers, assembling a unified sysroot
++(substrate_sysroot glib2 libffi zlib) so pkg-config returns sysroot-prefixed
++-I/-L instead of the build host`s conflicting glib.  Produces libatk-1.0.so +
++atk.pc.
+diff --git a/contrib/atk/build.sh b/contrib/atk/build.sh
+new file mode 100755
+index 00000000..ab96fdcb
+--- /dev/null
++++ b/contrib/atk/build.sh
+@@ -0,0 +1,35 @@
++#!/bin/sh
++# contrib/atk/build.sh — cross-compile ATK 2.28.1 for substrate.
++set -eu
++HERE="$(cd "$(dirname "$0")" && pwd)"
++VERSION="2.28.1"; TREE_DIR="${HERE}/build/atk-${VERSION}"; BUILD_DIR="${HERE}/build/build-substrate"
++if [ -z "${SUBSTRATE_TOP:-}" ]; then
++    p="${HERE}"; while [ "${p}" != "/" ] && [ ! -f "${p}/AGENTS.md" ] && [ ! -f "${p}/CLAUDE.md" ]; do p=$(dirname "${p}"); done
++    SUBSTRATE_TOP="${p}"
++fi
++: "${STAGE1_PREFIX:=/opt/substrate}"; : "${DESTDIR:=${SUBSTRATE_TOP}/dist-atk}"
++: "${JOBS:=$(nproc 2>/dev/null || echo 4)}"
++PATH="${STAGE1_PREFIX}/bin:${PATH}"; export PATH
++. "${HERE}/../substrate-autotools.sh"
++[ -d "${TREE_DIR}" ] || { echo "build.sh: run ./fetch.sh first" >&2; exit 1; }
++
++substrate_sysroot "${HERE}/build/sysroot" glib2 libffi zlib
++export PYTHON=python3
++export CFLAGS="-march=i486 -mtune=i486 -O2 -g -std=gnu11"
++
++substrate_libtool_fix "${TREE_DIR}/configure"
++rm -rf "${BUILD_DIR}"; mkdir -p "${BUILD_DIR}"; cd "${BUILD_DIR}"
++"${TREE_DIR}/configure" \
++    --host=i386-unknown-substrate \
++    --prefix=/usr --libdir=/usr/lib --includedir=/usr/include \
++    --enable-shared --enable-static \
++    --disable-glibtest --disable-introspection \
++    CC=i386-unknown-substrate-gcc \
++    AR=i386-unknown-substrate-ar RANLIB=i386-unknown-substrate-ranlib \
++    CC_FOR_BUILD=gcc
++make -j"${JOBS}"
++rm -rf "${DESTDIR}"; mkdir -p "${DESTDIR}"
++export PYTHONPATH="${HERE}/../automake-pyshim${PYTHONPATH:+:${PYTHONPATH}}"
++make install DESTDIR="${DESTDIR}"
++substrate_so_finalize "${DESTDIR}"
++echo "==> atk staged at ${DESTDIR}"
+diff --git a/contrib/atk/fetch.sh b/contrib/atk/fetch.sh
+new file mode 100755
+index 00000000..23b03b5c
+--- /dev/null
++++ b/contrib/atk/fetch.sh
+@@ -0,0 +1,19 @@
++#!/bin/sh
++# contrib/atk/fetch.sh — ATK 2.28.1 (accessibility toolkit; GTK+ 2.x dep).
++set -eu
++VERSION="2.28.1"; SERIES="2.28"
++TARBALL="atk-${VERSION}.tar.xz"
++URL="https://download.gnome.org/sources/atk/${SERIES}/${TARBALL}"
++SHA256="cd3a1ea6ecc268a2497f0cd018e970860de24a6d42086919d6bf6c8e8d53f4fc"
++HERE="$(cd "$(dirname "$0")" && pwd)"
++BUILD_DIR="${HERE}/build"; TREE_DIR="${BUILD_DIR}/atk-${VERSION}"
++mkdir -p "${BUILD_DIR}"; cd "${BUILD_DIR}"
++if [ ! -f "${TARBALL}" ]; then
++    [ "${1:-}" = "--no-network" ] && { echo "fetch.sh: tarball missing" >&2; exit 1; }
++    echo "==> Fetching ${URL}"; curl -fSL -o "${TARBALL}" "${URL}"
++fi
++echo "${SHA256}  ${TARBALL}" | sha256sum -c -
++[ -d "${TREE_DIR}" ] || { echo "==> Extracting"; tar xf "${TARBALL}"; }
++. "${HERE}/../substrate-autotools.sh"
++substrate_config_sub_fix "${TREE_DIR}"
++echo "==> atk ${VERSION} ready at ${TREE_DIR}"
+diff --git a/contrib/substrate-autotools.sh b/contrib/substrate-autotools.sh
+index dccd376a..587cd9c6 100644
+--- a/contrib/substrate-autotools.sh
++++ b/contrib/substrate-autotools.sh
+@@ -38,3 +38,28 @@ substrate_so_finalize() {
+     done
+     echo "  OSABI->substrate on ${_n} shared objects"
+ }
++
++# Assemble a unified sysroot under $1 from the named dist trees ($2..) and
++# export PKG_CONFIG so pkg-config returns SYSROOT-prefixed -I/-L (the .pc
++# files carry prefix=/usr, i.e. on-target paths, which a cross gcc would
++# otherwise read as the build host's /usr — pulling host headers/libs of a
++# conflicting version).  Also exports CPPFLAGS/LDFLAGS pointing at the
++# sysroot.  Usage: substrate_sysroot "${SR}" glib2 libffi zlib ...
++substrate_sysroot() {
++    _sr="$1"; shift
++    rm -rf "${_sr}"; mkdir -p "${_sr}/usr/lib"
++    for _d in "$@"; do
++        _st="${SUBSTRATE_TOP}/dist-${_d}"
++        [ -d "${_st}/usr" ] || { echo "substrate_sysroot: dist-${_d} missing — build contrib/${_d} first" >&2; return 1; }
++        cp -a "${_st}/usr/." "${_sr}/usr/"
++    done
++    # substrate core libs + unversioned link names
++    for _l in c sys m pthread dl; do
++        cp "${SUBSTRATE_TOP}/lib/${_l}/lib${_l}.so.0" "${_sr}/usr/lib/" 2>/dev/null || true
++        ln -sf "lib${_l}.so.0" "${_sr}/usr/lib/lib${_l}.so" 2>/dev/null || true
++    done
++    export PKG_CONFIG_SYSROOT_DIR="${_sr}"
++    export PKG_CONFIG_LIBDIR="${_sr}/usr/lib/pkgconfig:${_sr}/usr/share/pkgconfig"
++    export CPPFLAGS="-I${_sr}/usr/include${CPPFLAGS:+ ${CPPFLAGS}}"
++    export LDFLAGS="-L${_sr}/usr/lib -Wl,-rpath-link,${_sr}/usr/lib -Wl,--copy-dt-needed-entries${LDFLAGS:+ ${LDFLAGS}}"
++}
+-- 
+2.54.0
+

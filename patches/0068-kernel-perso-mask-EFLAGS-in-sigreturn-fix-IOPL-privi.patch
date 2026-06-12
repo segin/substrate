@@ -1,0 +1,110 @@
+From c128a7db0c23f0cb66a55f6cfa1474e960c6bbf7 Mon Sep 17 00:00:00 2001
+From: Kirn Gill II <segin2005@gmail.com>
+Date: Thu, 11 Jun 2026 15:55:48 -0500
+Subject: [PATCH 68/83] kernel/perso: mask EFLAGS in sigreturn (fix IOPL
+ privilege escalation)
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+All four personality sigreturn paths restored EFLAGS straight from the
+user-supplied signal frame (`regs->eflags = sc.eflags`) with no mask, while
+the native path correctly filters it (signal.c EFLAGS_KERNEL_MASK/USER_MASK).
+A Linux/BSD-personality process — i.e. essentially all userland — could craft
+a signal frame with IOPL=3 (or VM/NT set), return through sigreturn, and gain
+ring-3 port I/O: a local privilege escalation to full hardware access.
+
+Apply the native mask (keep kernel-owned IOPL/VM/RF/NT bits from the
+interrupted frame, take only user-modifiable bits from the signal frame) at
+all five sites: linux sigreturn + rt_sigreturn, freebsd, netbsd, openbsd.
+
+Found by a security audit.
+
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+---
+ sys/exec/perso/freebsd/freebsd_sig.c |  5 ++++-
+ sys/exec/perso/linux/linux_sig.c     | 11 +++++++++--
+ sys/exec/perso/netbsd/netbsd_sig.c   |  5 ++++-
+ sys/exec/perso/openbsd/openbsd_sig.c |  5 ++++-
+ 4 files changed, 21 insertions(+), 5 deletions(-)
+
+diff --git a/sys/exec/perso/freebsd/freebsd_sig.c b/sys/exec/perso/freebsd/freebsd_sig.c
+index 42cfd238..82309f32 100644
+--- a/sys/exec/perso/freebsd/freebsd_sig.c
++++ b/sys/exec/perso/freebsd/freebsd_sig.c
+@@ -86,7 +86,10 @@ int freebsd_sys_sigreturn(void *regs_ptr) {
+     regs->esi = sc.sc_esi;
+     regs->ebp = sc.sc_ebp;
+     regs->useresp = sc.sc_esp;
+-    regs->eflags = sc.sc_efl;
++    /* EFLAGS sanitize: keep kernel-owned bits (IOPL/VM/RF/NT), take only
++     * user bits from the frame — a raw assignment is an IOPL privilege
++     * escalation.  Mirrors native sys_sigreturn. */
++    regs->eflags = (regs->eflags & 0x00033200u) | (sc.sc_efl & 0xFFCCCDFFu);
+     regs->cs = sc.sc_cs | 3;
+     regs->ss = sc.sc_ss | 3;
+     regs->ds = sc.sc_ds | 3;
+diff --git a/sys/exec/perso/linux/linux_sig.c b/sys/exec/perso/linux/linux_sig.c
+index ffc5b2fe..b3986ca6 100644
+--- a/sys/exec/perso/linux/linux_sig.c
++++ b/sys/exec/perso/linux/linux_sig.c
+@@ -180,7 +180,12 @@ int linux_sys_sigreturn(void *regs_ptr) {
+     regs->esi = sc.esi;
+     regs->ebp = sc.ebp;
+     regs->useresp = sc.esp;
+-    regs->eflags = sc.eflags;
++    /* Sanitize EFLAGS: keep kernel-owned bits (IOPL/VM/RF/NT) from the
++     * interrupted frame, take only user-modifiable bits from the signal
++     * frame.  A raw assignment lets a crafted sigcontext set IOPL=3 and
++     * gain ring-3 port I/O (privilege escalation) — matches native
++     * sys_sigreturn's EFLAGS_KERNEL_MASK/USER_MASK filter. */
++    regs->eflags = (regs->eflags & 0x00033200u) | (sc.eflags & 0xFFCCCDFFu);
+     regs->cs = sc.cs | 3;
+     regs->ss = sc.ss | 3;
+     regs->ds = sc.ds | 3;
+@@ -208,7 +213,9 @@ int linux_sys_rt_sigreturn(void *regs_ptr) {
+     regs->esi = uc.uc_mcontext.esi;
+     regs->ebp = uc.uc_mcontext.ebp;
+     regs->useresp = uc.uc_mcontext.esp;
+-    regs->eflags = uc.uc_mcontext.eflags;
++    /* EFLAGS sanitize — see linux_sys_sigreturn (IOPL escalation guard). */
++    regs->eflags = (regs->eflags & 0x00033200u) |
++                   (uc.uc_mcontext.eflags & 0xFFCCCDFFu);
+     regs->cs = uc.uc_mcontext.cs | 3;
+     regs->ss = uc.uc_mcontext.ss | 3;
+     regs->ds = uc.uc_mcontext.ds | 3;
+diff --git a/sys/exec/perso/netbsd/netbsd_sig.c b/sys/exec/perso/netbsd/netbsd_sig.c
+index d1b0b866..eddca444 100644
+--- a/sys/exec/perso/netbsd/netbsd_sig.c
++++ b/sys/exec/perso/netbsd/netbsd_sig.c
+@@ -72,7 +72,10 @@ int netbsd_sys_sigreturn(void *regs_ptr) {
+     regs->esi = sc.sc_esi;
+     regs->ebp = sc.sc_ebp;
+     regs->useresp = sc.sc_esp;
+-    regs->eflags = sc.sc_eflags;
++    /* EFLAGS sanitize: keep kernel-owned bits (IOPL/VM/RF/NT), take only
++     * user bits from the frame — a raw assignment is an IOPL privilege
++     * escalation.  Mirrors native sys_sigreturn. */
++    regs->eflags = (regs->eflags & 0x00033200u) | (sc.sc_eflags & 0xFFCCCDFFu);
+     regs->cs = sc.sc_cs | 3;
+     regs->ss = sc.sc_ss | 3;
+     regs->ds = sc.sc_ds | 3;
+diff --git a/sys/exec/perso/openbsd/openbsd_sig.c b/sys/exec/perso/openbsd/openbsd_sig.c
+index 0382ff01..d4234efe 100644
+--- a/sys/exec/perso/openbsd/openbsd_sig.c
++++ b/sys/exec/perso/openbsd/openbsd_sig.c
+@@ -72,7 +72,10 @@ int openbsd_sys_sigreturn(void *regs_ptr) {
+     regs->esi = sc.sc_esi;
+     regs->ebp = sc.sc_ebp;
+     regs->useresp = sc.sc_esp;
+-    regs->eflags = sc.sc_eflags;
++    /* EFLAGS sanitize: keep kernel-owned bits (IOPL/VM/RF/NT), take only
++     * user bits from the frame — a raw assignment is an IOPL privilege
++     * escalation.  Mirrors native sys_sigreturn. */
++    regs->eflags = (regs->eflags & 0x00033200u) | (sc.sc_eflags & 0xFFCCCDFFu);
+     regs->cs = sc.sc_cs | 3;
+     regs->ss = sc.sc_ss | 3;
+     regs->ds = sc.sc_ds | 3;
+-- 
+2.54.0
+

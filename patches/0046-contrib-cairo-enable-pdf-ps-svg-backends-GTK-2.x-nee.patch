@@ -1,0 +1,30 @@
+From 6304daabe97445a68b4954455bf8865e80e6633a Mon Sep 17 00:00:00 2001
+From: Kirn Gill II <segin2005@gmail.com>
+Date: Wed, 10 Jun 2026 13:37:49 -0500
+Subject: [PATCH 46/83] contrib/cairo: enable pdf/ps/svg backends (GTK+ 2.x
+ needs cairo-pdf.h)
+
+GTK+ 2.24 configure requires cairo built with the PDF backend (its print
+support).  Re-enable --enable-ps/pdf/svg (zlib already staged).
+
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+---
+ contrib/cairo/build.sh | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/contrib/cairo/build.sh b/contrib/cairo/build.sh
+index a287104c..28900619 100755
+--- a/contrib/cairo/build.sh
++++ b/contrib/cairo/build.sh
+@@ -42,7 +42,7 @@ rm -rf "${BUILD_DIR}"; mkdir -p "${BUILD_DIR}"; cd "${BUILD_DIR}"
+     --enable-xlib --enable-xlib-xrender --enable-ft --enable-fc --enable-png \
+     --disable-xcb --disable-gl --disable-gobject --disable-script \
+     --disable-interpreter --disable-trace --disable-valgrind \
+-    --disable-ps --disable-pdf --disable-svg \
++    --enable-ps --enable-pdf --enable-svg \
+     CC=i386-unknown-substrate-gcc \
+     AR=i386-unknown-substrate-ar RANLIB=i386-unknown-substrate-ranlib \
+     CC_FOR_BUILD=gcc \
+-- 
+2.54.0
+

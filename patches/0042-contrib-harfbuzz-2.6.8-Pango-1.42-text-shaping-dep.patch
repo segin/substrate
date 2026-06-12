@@ -1,0 +1,98 @@
+From 95b1c66ce35c9d761e86a1f45e23f11ca1a57656 Mon Sep 17 00:00:00 2001
+From: Kirn Gill II <segin2005@gmail.com>
+Date: Wed, 10 Jun 2026 11:33:12 -0500
+Subject: [PATCH 42/83] contrib: harfbuzz 2.6.8 (Pango 1.42 text-shaping dep)
+
+C++ port via substrate_sysroot (glib2/freetype); cairo/ICU/gobject off.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+---
+ contrib/harfbuzz/README.SUBSTRATE.md |  6 +++++
+ contrib/harfbuzz/build.sh            | 35 ++++++++++++++++++++++++++++
+ contrib/harfbuzz/fetch.sh            | 19 +++++++++++++++
+ 3 files changed, 60 insertions(+)
+ create mode 100644 contrib/harfbuzz/README.SUBSTRATE.md
+ create mode 100755 contrib/harfbuzz/build.sh
+ create mode 100755 contrib/harfbuzz/fetch.sh
+
+diff --git a/contrib/harfbuzz/README.SUBSTRATE.md b/contrib/harfbuzz/README.SUBSTRATE.md
+new file mode 100644
+index 00000000..5a527e50
+--- /dev/null
++++ b/contrib/harfbuzz/README.SUBSTRATE.md
+@@ -0,0 +1,6 @@
++# harfbuzz (2.6.8)
++
++Text shaping engine — a hard dependency of Pango 1.42.  C++ port (substrate
++libstdc++), cross-built via substrate_sysroot against glib2/freetype; cairo
++and ICU backends and gobject/introspection disabled.  Produces libharfbuzz.so
+++ harfbuzz.pc.
+diff --git a/contrib/harfbuzz/build.sh b/contrib/harfbuzz/build.sh
+new file mode 100755
+index 00000000..96fe91f0
+--- /dev/null
++++ b/contrib/harfbuzz/build.sh
+@@ -0,0 +1,35 @@
++#!/bin/sh
++# contrib/harfbuzz/build.sh — cross-compile HarfBuzz 2.6.8 for substrate.
++set -eu
++HERE="$(cd "$(dirname "$0")" && pwd)"
++VERSION="2.6.8"; TREE_DIR="${HERE}/build/harfbuzz-${VERSION}"; BUILD_DIR="${HERE}/build/build-substrate"
++if [ -z "${SUBSTRATE_TOP:-}" ]; then
++    p="${HERE}"; while [ "${p}" != "/" ] && [ ! -f "${p}/AGENTS.md" ] && [ ! -f "${p}/CLAUDE.md" ]; do p=$(dirname "${p}"); done
++    SUBSTRATE_TOP="${p}"
++fi
++: "${STAGE1_PREFIX:=/opt/substrate}"; : "${DESTDIR:=${SUBSTRATE_TOP}/dist-harfbuzz}"
++: "${JOBS:=$(nproc 2>/dev/null || echo 4)}"
++PATH="${STAGE1_PREFIX}/bin:${PATH}"; export PATH
++. "${HERE}/../substrate-autotools.sh"
++[ -d "${TREE_DIR}" ] || { echo "build.sh: run ./fetch.sh first" >&2; exit 1; }
++
++substrate_sysroot "${HERE}/build/sysroot" glib2 libffi zlib freetype libpng
++export CXXFLAGS="-march=i486 -mtune=i486 -O2 -g -std=gnu++14"
++export CFLAGS="-march=i486 -mtune=i486 -O2 -g"
++
++substrate_libtool_fix "${TREE_DIR}/configure"
++rm -rf "${BUILD_DIR}"; mkdir -p "${BUILD_DIR}"; cd "${BUILD_DIR}"
++"${TREE_DIR}/configure" \
++    --host=i386-unknown-substrate \
++    --prefix=/usr --libdir=/usr/lib --includedir=/usr/include \
++    --enable-shared --enable-static \
++    --with-glib=yes --with-freetype=yes --with-cairo=no --with-icu=no \
++    --without-gobject --disable-introspection \
++    CC=i386-unknown-substrate-gcc CXX=i386-unknown-substrate-g++ \
++    AR=i386-unknown-substrate-ar RANLIB=i386-unknown-substrate-ranlib \
++    CC_FOR_BUILD=gcc CXX_FOR_BUILD=g++
++make -j"${JOBS}"
++rm -rf "${DESTDIR}"; mkdir -p "${DESTDIR}"
++make install DESTDIR="${DESTDIR}"
++substrate_so_finalize "${DESTDIR}"
++echo "==> harfbuzz staged at ${DESTDIR}"
+diff --git a/contrib/harfbuzz/fetch.sh b/contrib/harfbuzz/fetch.sh
+new file mode 100755
+index 00000000..6aada8fc
+--- /dev/null
++++ b/contrib/harfbuzz/fetch.sh
+@@ -0,0 +1,19 @@
++#!/bin/sh
++# contrib/harfbuzz/fetch.sh — HarfBuzz 2.6.8 (text shaping; pango 1.42 needs it).
++set -eu
++VERSION="2.6.8"
++TARBALL="harfbuzz-${VERSION}.tar.xz"
++URL="https://github.com/harfbuzz/harfbuzz/releases/download/${VERSION}/${TARBALL}"
++SHA256="6648a571a27f186e47094121f0095e1b809e918b3037c630c7f38ffad86e3035"
++HERE="$(cd "$(dirname "$0")" && pwd)"
++BUILD_DIR="${HERE}/build"; TREE_DIR="${BUILD_DIR}/harfbuzz-${VERSION}"
++mkdir -p "${BUILD_DIR}"; cd "${BUILD_DIR}"
++if [ ! -f "${TARBALL}" ]; then
++    [ "${1:-}" = "--no-network" ] && { echo "fetch.sh: tarball missing" >&2; exit 1; }
++    echo "==> Fetching ${URL}"; curl -fSL -o "${TARBALL}" "${URL}"
++fi
++echo "${SHA256}  ${TARBALL}" | sha256sum -c -
++[ -d "${TREE_DIR}" ] || { echo "==> Extracting"; tar xf "${TARBALL}"; }
++. "${HERE}/../substrate-autotools.sh"
++substrate_config_sub_fix "${TREE_DIR}"
++echo "==> harfbuzz ${VERSION} ready at ${TREE_DIR}"
+-- 
+2.54.0
+

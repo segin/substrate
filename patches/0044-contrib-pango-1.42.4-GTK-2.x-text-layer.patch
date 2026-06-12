@@ -1,0 +1,125 @@
+From b2631362db5bb8a1d573152511ecf69c2afd5a3e Mon Sep 17 00:00:00 2001
+From: Kirn Gill II <segin2005@gmail.com>
+Date: Wed, 10 Jun 2026 11:39:42 -0500
+Subject: [PATCH 44/83] contrib: pango 1.42.4 (GTK+ 2.x text layer)
+
+Pango 1.42.4 (last autotools Pango) cross-built via substrate_sysroot against
+glib2/cairo/harfbuzz/fribidi/fontconfig/freetype + the X stack.  Produces
+libpango/libpangocairo/libpangoft2.
+
+substrate_sysroot also now seeds the sysroot pkgconfig with libxcb's stub
+pthread-stubs.pc: the X .pc Requires chain (cairo -> x11 -> xcb ->
+pthread-stubs) made `pkg-config --cflags cairo` fail outright, leaving
+CAIRO_CFLAGS empty so pango couldn't find cairo.h.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+---
+ contrib/pango/README.SUBSTRATE.md |  5 ++++
+ contrib/pango/build.sh            | 38 +++++++++++++++++++++++++++++++
+ contrib/pango/fetch.sh            | 19 ++++++++++++++++
+ contrib/substrate-autotools.sh    |  6 +++++
+ 4 files changed, 68 insertions(+)
+ create mode 100644 contrib/pango/README.SUBSTRATE.md
+ create mode 100755 contrib/pango/build.sh
+ create mode 100755 contrib/pango/fetch.sh
+
+diff --git a/contrib/pango/README.SUBSTRATE.md b/contrib/pango/README.SUBSTRATE.md
+new file mode 100644
+index 00000000..8c5da156
+--- /dev/null
++++ b/contrib/pango/README.SUBSTRATE.md
+@@ -0,0 +1,5 @@
++# pango (1.42.4 — last autotools Pango)
++
++Text layout/rendering for GTK+ 2.x.  Cross-built via substrate_sysroot against
++glib2, cairo, harfbuzz, fribidi, fontconfig, freetype and the X stack.
++Produces libpango-1.0, libpangocairo-1.0, libpangoft2-1.0 + .pc files.
+diff --git a/contrib/pango/build.sh b/contrib/pango/build.sh
+new file mode 100755
+index 00000000..0612e65a
+--- /dev/null
++++ b/contrib/pango/build.sh
+@@ -0,0 +1,38 @@
++#!/bin/sh
++# contrib/pango/build.sh — cross-compile Pango 1.42.4 for substrate.
++set -eu
++HERE="$(cd "$(dirname "$0")" && pwd)"
++VERSION="1.42.4"; TREE_DIR="${HERE}/build/pango-${VERSION}"; BUILD_DIR="${HERE}/build/build-substrate"
++if [ -z "${SUBSTRATE_TOP:-}" ]; then
++    p="${HERE}"; while [ "${p}" != "/" ] && [ ! -f "${p}/AGENTS.md" ] && [ ! -f "${p}/CLAUDE.md" ]; do p=$(dirname "${p}"); done
++    SUBSTRATE_TOP="${p}"
++fi
++: "${STAGE1_PREFIX:=/opt/substrate}"; : "${DESTDIR:=${SUBSTRATE_TOP}/dist-pango}"
++: "${JOBS:=$(nproc 2>/dev/null || echo 4)}"
++PATH="${STAGE1_PREFIX}/bin:${PATH}"; export PATH
++. "${HERE}/../substrate-autotools.sh"
++[ -d "${TREE_DIR}" ] || { echo "build.sh: run ./fetch.sh first" >&2; exit 1; }
++
++substrate_sysroot "${HERE}/build/sysroot" \
++    glib2 libffi zlib freetype libpng expat fontconfig harfbuzz fribidi pixman cairo \
++    xorgproto libXau xtrans libxcb libX11 libXext libXrender
++export PYTHON=python3
++export CFLAGS="-march=i486 -mtune=i486 -O2 -g -std=gnu11"
++export CXXFLAGS="-march=i486 -mtune=i486 -O2 -g"
++
++substrate_libtool_fix "${TREE_DIR}/configure"
++rm -rf "${BUILD_DIR}"; mkdir -p "${BUILD_DIR}"; cd "${BUILD_DIR}"
++"${TREE_DIR}/configure" \
++    --host=i386-unknown-substrate \
++    --prefix=/usr --libdir=/usr/lib --includedir=/usr/include \
++    --enable-shared --enable-static \
++    --with-cairo --disable-introspection --disable-gtk-doc --disable-installed-tests \
++    CC=i386-unknown-substrate-gcc CXX=i386-unknown-substrate-g++ \
++    AR=i386-unknown-substrate-ar RANLIB=i386-unknown-substrate-ranlib \
++    CC_FOR_BUILD=gcc
++make -j"${JOBS}"
++rm -rf "${DESTDIR}"; mkdir -p "${DESTDIR}"
++export PYTHONPATH="${HERE}/../automake-pyshim${PYTHONPATH:+:${PYTHONPATH}}"
++make install DESTDIR="${DESTDIR}"
++substrate_so_finalize "${DESTDIR}"
++echo "==> pango staged at ${DESTDIR}"
+diff --git a/contrib/pango/fetch.sh b/contrib/pango/fetch.sh
+new file mode 100755
+index 00000000..b96c6138
+--- /dev/null
++++ b/contrib/pango/fetch.sh
+@@ -0,0 +1,19 @@
++#!/bin/sh
++# contrib/pango/fetch.sh — Pango 1.42.4 (last autotools Pango; text layout).
++set -eu
++VERSION="1.42.4"; SERIES="1.42"
++TARBALL="pango-${VERSION}.tar.xz"
++URL="https://download.gnome.org/sources/pango/${SERIES}/${TARBALL}"
++SHA256="1d2b74cd63e8bd41961f2f8d952355aa0f9be6002b52c8aa7699d9f5da597c9d"
++HERE="$(cd "$(dirname "$0")" && pwd)"
++BUILD_DIR="${HERE}/build"; TREE_DIR="${BUILD_DIR}/pango-${VERSION}"
++mkdir -p "${BUILD_DIR}"; cd "${BUILD_DIR}"
++if [ ! -f "${TARBALL}" ]; then
++    [ "${1:-}" = "--no-network" ] && { echo "fetch.sh: tarball missing" >&2; exit 1; }
++    echo "==> Fetching ${URL}"; curl -fSL -o "${TARBALL}" "${URL}"
++fi
++echo "${SHA256}  ${TARBALL}" | sha256sum -c -
++[ -d "${TREE_DIR}" ] || { echo "==> Extracting"; tar xf "${TARBALL}"; }
++. "${HERE}/../substrate-autotools.sh"
++substrate_config_sub_fix "${TREE_DIR}"
++echo "==> pango ${VERSION} ready at ${TREE_DIR}"
+diff --git a/contrib/substrate-autotools.sh b/contrib/substrate-autotools.sh
+index 587cd9c6..abfcc0ee 100644
+--- a/contrib/substrate-autotools.sh
++++ b/contrib/substrate-autotools.sh
+@@ -58,6 +58,12 @@ substrate_sysroot() {
+         cp "${SUBSTRATE_TOP}/lib/${_l}/lib${_l}.so.0" "${_sr}/usr/lib/" 2>/dev/null || true
+         ln -sf "lib${_l}.so.0" "${_sr}/usr/lib/lib${_l}.so" 2>/dev/null || true
+     done
++    # libxcb's port ships a stub pthread-stubs.pc (substrate's pthreads are
++    # in libc/libpthread, not a separate stub lib); the X .pc Requires chain
++    # (x11 -> xcb -> pthread-stubs) needs it or `pkg-config --cflags` fails.
++    if [ -f "${SUBSTRATE_TOP}/contrib/libxcb/pkgconfig/pthread-stubs.pc" ]; then
++        cp -f "${SUBSTRATE_TOP}/contrib/libxcb/pkgconfig/"*.pc "${_sr}/usr/lib/pkgconfig/" 2>/dev/null || true
++    fi
+     export PKG_CONFIG_SYSROOT_DIR="${_sr}"
+     export PKG_CONFIG_LIBDIR="${_sr}/usr/lib/pkgconfig:${_sr}/usr/share/pkgconfig"
+     export CPPFLAGS="-I${_sr}/usr/include${CPPFLAGS:+ ${CPPFLAGS}}"
+-- 
+2.54.0
+

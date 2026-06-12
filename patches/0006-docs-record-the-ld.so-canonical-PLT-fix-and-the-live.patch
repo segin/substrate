@@ -1,0 +1,100 @@
+From 876a069b3a32439f42a115f916e922db8c37e604 Mon Sep 17 00:00:00 2001
+From: Kirn Gill II <segin2005@gmail.com>
+Date: Mon, 8 Jun 2026 17:59:52 -0500
+Subject: [PATCH 06/83] docs: record the ld.so canonical-PLT fix and the live
+ CDE Front Panel
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+ARCHITECTURE.md + AGENTS.md: document Dynamic Linking Phase 4g (canonical
+function addresses / function-pointer equality across the exe/DSO boundary)
+and that the CDE desktop now comes up live — dtwm draws the Front Panel, dtterm
+renders cleanly — calling out the three substrate fixes it took (ld.so
+canonical PLT, libc MB_CUR_MAX, install-localized-types.sh for the
+appconfig/types tree).
+
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+---
+ AGENTS.md       | 33 ++++++++++++++++++++++++++++++++-
+ ARCHITECTURE.md | 10 +++++++++-
+ 2 files changed, 41 insertions(+), 2 deletions(-)
+
+diff --git a/AGENTS.md b/AGENTS.md
+index f6ef99c3..5fbc57d9 100644
+--- a/AGENTS.md
++++ b/AGENTS.md
+@@ -348,10 +348,25 @@ manifest, `README.SUBSTRATE.md`.  Current set:
+   end-to-end — all libraries, ToolTalk, and the programs dtwm, dtfile,
+   dtsession, dtterm, dtpad, dtstyle, dtcalc, dtmail, dtcm, dtprintinfo,
+   dtsearchpath, dtspcd, dtscreen, dtsr, dticon, dtcreate, dtlogin, ...
++  The full desktop now **comes up live**: dtsession starts ToolTalk
++  (needs the kernel msg_name fix + the /etc/hosts hostname->127.0.0.1
++  mapping), dtwm decorates clients and **draws the Front Panel** (clock,
++  calendar, file manager, mail, workspace switch, trash, ...), and dtterm
++  renders cleanly.  Three substrate fixes were needed beyond the build:
++  the ld.so canonical-PLT fix (function-pointer equality — see Dynamic
++  Linking Phase 4g; dtwm's front-panel widget class otherwise aborts with
++  "Unresolved inheritance operation"), the libc `MB_CUR_MAX` fix (it was
++  hardcoded 4 while substrate is a single-byte locale, so dtterm took the
++  `wchar_t`/`XwcDrawString` path and drew each ASCII cell as a glyph + 3
++  tofu boxes), and `contrib/cde/install-localized-types.sh` (+ `cdemerge.py`,
++  a `merge(1)` replica) which expands the `%|nls|` placeholders and installs
++  the `/usr/dt/appconfig/types` Front Panel + datatype/action database that
++  the skipped `localized`/`types` clusters never staged.
+   Deferred (each a separate host-tooling effort, documented in
+   `build.sh`): dtksh (ksh93 AST mamake cross-build), dtappbuilder +
+   ttsnoop (need a host Motif for dtcodegen), dtinfo + dtdocbook (SGML
+-  pmaker chain), tttypes/types (host tt_type_comp), localized, dthelp
++  pmaker chain), tttypes/types (host tt_type_comp), the rest of
++  `localized` (only the C-locale types slice is staged), dthelp
+   parser.  The Motif port (`contrib/motif/`) builds libUil via Motif's
+   WML meta-compiler (host wml/wmluiltok) and installs the uil/ headers.
+ - **ext2 toolset** — `e2fsprogs` 1.47.2 (`contrib/e2fsprogs/`):
+@@ -396,6 +411,22 @@ manifest, `README.SUBSTRATE.md`.  Current set:
+     `__ldso_run_fini` (mirror of init_arrays in REVERSE init
+     order with each object's array walked backwards); libc's
+     `exit()` calls it via a weak ref before _exit syscall.
++  - Phase 4g: canonical function addresses (function-pointer
++    equality across the exe/DSO boundary).  A non-PIE executable
++    that takes the *address* of a shared-library function gets a
++    PLT stub from the static linker and the symbol is emitted UND
++    but with `st_value` = that PLT entry (call-only UND funcs keep
++    `st_value` 0).  `resolve_pred` treats such a program (list-head)
++    symbol as a canonical definition at the PLT address and hands
++    it to every *other* module, so `&func` is identical everywhere;
++    the requesting object is threaded through `ld_resolve_req` so
++    the program's own JMP_SLOT still binds the real defining DSO
++    (else `GOT[f]` would point at the program's own PLT stub and a
++    call self-loops).  Without this, libXt's `XtInherit*` class-
++    method inheritance (`method == &_XtInherit`) failed for widget
++    classes compiled into a non-PIE exe — CDE's dtwm aborted the
++    whole desktop with "Unresolved inheritance operation" building
++    its front panel.
+   - Per-object guards: `relocated` / `initialized` / `finalized`
+     booleans on ld_obj_t prevent the non-idempotent
+     R_386_RELATIVE (`*p += base`) and the run-once init/fini
+diff --git a/ARCHITECTURE.md b/ARCHITECTURE.md
+index 25f56f1a..3b1fa0e8 100644
+--- a/ARCHITECTURE.md
++++ b/ARCHITECTURE.md
+@@ -18,7 +18,15 @@ Substrate is a complete Unix OS project with five first-class pillars:
+   DT_FINI_ARRAY execution, per-thread TLS install (PT_TLS images
+   copied into a variant-II layout and the GS base installed via the
+   native `sys_set_gsbase` syscall), and runtime `dlopen` / `dlsym` /
+-  `dlclose` for plugin-style loading.  ld.so registers itself in the
++  `dlclose` for plugin-style loading.  Symbol resolution honours the
++  **canonical function address** rule for non-PIE executables: when the
++  program takes the address of a shared-library function the static
++  linker emits that symbol UND-with-`st_value` (its own PLT stub), and
++  ld.so hands that PLT address to every *other* module so `&func` is
++  identical everywhere (function-pointer equality — required by Xt's
++  `XtInherit*` class-method machinery, which CDE's front panel depends
++  on).  The program's own PLT slots still bind to the real defining DSO.
++  ld.so registers itself in the
+   loaded-object scope so its `__ldso_*` exports are visible to libdl
+   and to libc (which calls `__ldso_run_fini` as a weak hook from
+   `exit()` to run destructors before the process is reaped).
+-- 
+2.54.0
+

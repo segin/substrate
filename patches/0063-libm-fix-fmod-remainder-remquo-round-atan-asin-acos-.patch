@@ -1,0 +1,311 @@
+From 205d5a4d3fe38fa359c5bd0ef22e07b3407f4131 Mon Sep 17 00:00:00 2001
+From: Kirn Gill II <segin2005@gmail.com>
+Date: Wed, 10 Jun 2026 22:48:28 -0500
+Subject: [PATCH 63/83] libm: fix fmod/remainder/remquo, round, atan,
+ asin/acos, expm1, csqrt
+
+Audit-found correctness bugs in the committed libm core:
+
+- math_round.c: fmod/remainder dropped Inf/NaN operands straight into
+  the x87 fprem/fprem1 loop; add C99 guards (NaN->NaN, Inf numerator or
+  zero divisor -> NaN+FE_INVALID, Inf divisor -> x).  remquo computed the
+  quotient as (long long)rint(x/y), giving garbage low bits when |x/y| >
+  2^63; derive the quotient bits from the iterated remainder reduction
+  instead.  round() used floor(x+0.5), which rounds the predecessor of
+  0.5 up to 1; reimplement as trunc + exact fractional compare.
+- math_trig.c: atan used a 100-term Taylor series (~11 bits of error near
+  |x|=1, propagated to asin/acos/atan2/the *pi variants); replace with
+  x87 fpatan.  asin/acos (and *pi) now raise FE_INVALID and set EDOM on
+  |x|>1, with NaN/Inf short-circuits for acos.
+- math_exp.c: expm1 of large-negative x spuriously set errno=ERANGE via
+  the inner exp() underflow; short-circuit x < -37 to -1.0.
+- cmath_explog.c: csqrt branch on the negative real axis used y==0.0,
+  losing the -0.0 imaginary sign (Annex G csqrt(-4-0i) = 0-2i); use
+  signbit(y).
+
+Verified against host libm via tests/lib/m (round/explog/trig fixed
+functions pass; remaining failures are the pre-existing incomplete
+fromfp/sinpi/tanpi family, untouched here).
+
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+---
+ lib/m/src/cmath_explog.c |  6 ++-
+ lib/m/src/math_exp.c     |  4 ++
+ lib/m/src/math_round.c   | 93 ++++++++++++++++++++++++++++++++++------
+ lib/m/src/math_trig.c    | 63 +++++++++++++++------------
+ 4 files changed, 123 insertions(+), 43 deletions(-)
+
+diff --git a/lib/m/src/cmath_explog.c b/lib/m/src/cmath_explog.c
+index b33d774f..1cad3823 100644
+--- a/lib/m/src/cmath_explog.c
++++ b/lib/m/src/cmath_explog.c
+@@ -136,7 +136,11 @@ double complex csqrt(double complex z) {
+     } else {
+         double v_mag = sqrt(0.5 * (R - x));
+         double u = (v_mag == 0.0) ? 0.0 : 0.5 * fabs(y) / v_mag;
+-        double v = copysign(v_mag, y == 0.0 ? 1.0 : y);
++        /* The imaginary part carries the sign of y, tracked via the
++         * actual sign BIT (signbit) so that y == -0.0 maps to a
++         * negative result: C99 Annex G requires csqrt(-4 - 0i) = 0 - 2i.
++         * Using `y == 0.0 ? 1.0 : y` forced +0's sign for both ±0. */
++        double v = signbit(y) ? -v_mag : v_mag;
+         return CMPLX(u, v);
+     }
+ }
+diff --git a/lib/m/src/math_exp.c b/lib/m/src/math_exp.c
+index 3381d036..f6850174 100644
+--- a/lib/m/src/math_exp.c
++++ b/lib/m/src/math_exp.c
+@@ -135,6 +135,10 @@ double expm1(double x) {
+ 
+     if (__builtin_fabs(x) > 0.347) {
+         if (x >  709.7827128933840) { errno = ERANGE; return INFINITY; }
++        /* For large-negative x, e^x underflows to +0 and exp() would
++         * spuriously set errno=ERANGE; but expm1(x) -> -1 is exact and
++         * in range.  Short-circuit before calling exp(). */
++        if (x < -37.0) return -1.0;
+         return exp(x) - 1.0;
+     }
+ 
+diff --git a/lib/m/src/math_round.c b/lib/m/src/math_round.c
+index fbecb24f..e85bb7db 100644
+--- a/lib/m/src/math_round.c
++++ b/lib/m/src/math_round.c
+@@ -341,7 +341,15 @@ double fabs(double x) {
+ 
+ /* Remainder functions */
+ double fmod(double x, double y) {
+-    if (y == 0.0) return NAN;
++    /* C99/IEEE: NaN propagation, Inf-numerator and zero-denominator are
++     * invalid (return NaN, raise FE_INVALID); Inf denominator with finite
++     * x returns x unchanged. */
++    if (isnan(x) || isnan(y)) return NAN;
++    if (isinf(x) || y == 0.0) {
++        feraiseexcept(FE_INVALID);
++        return NAN;
++    }
++    if (isinf(y)) return x;        /* finite x, infinite y: fmod = x */
+     double res;
+     __asm__ __volatile__(
+         "fldl %2\n\t"
+@@ -357,7 +365,15 @@ double fmod(double x, double y) {
+ }
+ 
+ double remainder(double x, double y) {
+-    if (y == 0.0) return NAN;
++    /* C99/IEEE: NaN propagation, Inf-numerator and zero-denominator are
++     * invalid (return NaN, raise FE_INVALID); Inf denominator with finite
++     * x returns x unchanged. */
++    if (isnan(x) || isnan(y)) return NAN;
++    if (isinf(x) || y == 0.0) {
++        feraiseexcept(FE_INVALID);
++        return NAN;
++    }
++    if (isinf(y)) return x;        /* finite x, infinite y: remainder = x */
+     double res;
+     __asm__ __volatile__(
+         "fldl %2\n\t"
+@@ -400,22 +416,60 @@ double fdim(double x, double y) {
+  * Returns remainder(x, y) and stores quotient sign + low 3 bits in *quo.
+  */
+ double remquo(double x, double y, int *quo) {
++	/* Domain / special cases: NaN, Inf numerator, zero or Inf
++	 * denominator yield a NaN remainder with *quo = 0. */
+ 	if(isnan(x) || isnan(y) || isinf(x) || y == 0.0) {
+ 		*quo = 0;
+ 		return NAN;
+ 	}
++	if(isinf(y)) {               /* finite x, infinite y: rem = x, quo = 0 */
++		*quo = 0;
++		return x;
++	}
+ 
+-	int sign = 1;
+-	double ax = x, ay = y;
+-	if(ax < 0) { ax = -ax; sign = -sign; }
+-	if(ay < 0) { ay = -ay; sign = -sign; }
++	int qsign = (signbit(x) != signbit(y)) ? -1 : 1;
++	double ax = fabs(x), ay = fabs(y);
++
++	/* |x| < |y|: quotient is 0 (round-to-nearest may make it 1, but
++	 * the low-bit accounting below handles the final half-way step). */
++	uint32_t q = 0;
++
++	if(ax >= ay) {
++		/* Binary long-division style reduction: subtract scaled copies
++		 * of ay from ax, accumulating the integer quotient bits in q.
++		 * This never forms |x/y| as a single (possibly > 2^63) value,
++		 * so the low quotient bits stay exact regardless of magnitude.
++		 *
++		 * Find the largest n with ay*2^n <= ax (via ilogb difference),
++		 * then peel off one quotient bit per step. */
++		int ex = ilogb(ax);
++		int ey = ilogb(ay);
++		int n = ex - ey;
++		double yscaled = scalbn(ay, n);   /* ay * 2^n, may exceed ax by 1 step */
++		if(yscaled > ax) { yscaled *= 0.5; n--; }
++		for(; n >= 0; n--) {
++			q <<= 1;
++			if(ax >= yscaled) {
++				ax -= yscaled;
++				q |= 1;
++			}
++			yscaled *= 0.5;
++		}
++		/* ax now holds |x| mod |y| in [0, |y|). */
++	}
+ 
+-	/* Use repeated division to get full quotient mod 8 */
+-	double q_approx = ax / ay;
+-	long long q_int = (long long)rint(q_approx);
+-	*quo = (int)((q_int & 0x7) * sign);
++	/* Round the remainder to nearest (ties to even quotient), matching
++	 * IEEE remainder(): if the residual is past the half-way point, or
++	 * exactly half with an odd quotient, step the quotient up by one. */
++	if(ax > 0.5 * ay || (ax == 0.5 * ay && (q & 1))) {
++		q++;
++		ax -= ay;        /* remainder becomes negative (|ax| < ay still) */
++	}
+ 
+-	return remainder(x, y);
++	double r = (signbit(x) ? -ax : ax);   /* remainder carries sign of x */
++	int lo = (int)(q & 0x7);
++	*quo = qsign < 0 ? -lo : lo;
++	return r;
+ }
+ 
+ /*
+@@ -624,9 +678,20 @@ double trunc(double x) {
+ }
+ 
+ double round(double x) {
+-    /* C99: round-half-away-from-zero, regardless of current mode. */
+-    if (isnan(x) || isinf(x)) return x;
+-    return (x >= 0.0) ? floor(x + 0.5) : ceil(x - 0.5);
++    /* C99: round-half-away-from-zero, regardless of current mode.
++     *
++     * The old `floor(x + 0.5)` is wrong for the predecessor of 0.5:
++     * x = nextafter(0.5, 0) added to 0.5 rounds (to-nearest) up to
++     * exactly 1.0, so floor() returns 1 instead of the correct 0.
++     * Instead truncate toward zero and inspect the exact fractional
++     * part: a magnitude >= 0.5 rounds the integer part away from zero. */
++    if (isnan(x) || isinf(x) || x == 0.0) return x;
++
++    double t = trunc(x);          /* integer part, toward zero */
++    double frac = x - t;          /* exact: |frac| < 1 */
++    if (frac >= 0.5) return t + 1.0;
++    if (frac <= -0.5) return t - 1.0;
++    return t;                     /* preserves sign of zero via trunc */
+ }
+ 
+ /*
+diff --git a/lib/m/src/math_trig.c b/lib/m/src/math_trig.c
+index 48324cbd..14ccd631 100644
+--- a/lib/m/src/math_trig.c
++++ b/lib/m/src/math_trig.c
+@@ -137,32 +137,25 @@ double tan(double x) {
+ }
+ 
+ /*
+- * atan(x) - Arctangent using Taylor series
+- * atan(x) = x - x^3/3 + x^5/5 - ... for |x| <= 1
++ * atan(x) - Arctangent via the x87 fpatan instruction.
++ *
++ * atan(x) == atan2(x, 1), so `fld1; fldl x; fpatan` computes
++ * atan(st(0)/st(1)) = atan(x/1) to full hardware precision across the
++ * whole domain.  This replaces a 100-term Taylor series that lost
++ * accuracy near |x| = 1 (slow convergence) — and in turn improves
++ * asin/acos and the *pi variants that are built on atan.
+  */
+ double atan(double x) {
+     if (isnan(x)) return x;
+     if (isinf(x)) return (x < 0) ? -M_PI_2 : M_PI_2;
+-    if (x == 0.0) return x;
++    if (x == 0.0) return x;   /* preserve sign of zero (atan is odd) */
+ 
+-    int neg = (x < 0);
+-    if (neg) x = -x;
+-
+-    if (x == 1.0) return (neg) ? -M_PI_4 : M_PI_4;
+-    
+-    int inv = (x > 1.0);
+-    if (inv) x = 1.0 / x;
+-    
+-    /* Taylor series for |x| <= 1 */
+-    double x2 = x * x;
+-    double term = x, sum = x;
+-    for (int i = 1; i < 100 && fabs(term) > 1e-15; i++) {
+-        term *= -x2;
+-        sum += term / (2 * i + 1);
+-    }
+-    
+-    if (inv) sum = M_PI_2 - sum;
+-    return neg ? -sum : sum;
++    /* fpatan computes atan(st(1)/st(0)).  Load x then 1.0 so that
++     * st(1)=x, st(0)=1 and the result is atan(x/1) = atan(x). */
++    double res;
++    __asm__ __volatile__("fldl %1; fld1; fpatan; fstpl %0"
++                         : "=m"(res) : "m"(x));
++    return res;
+ }
+ 
+ /* atan2(y, x) - Two-argument arctangent (C99 Annex F.10.1.4) */
+@@ -205,8 +198,11 @@ double atan2(double y, double x) {
+  */
+ double asin(double x) {
+     if (isnan(x)) return x;
+-    if (isinf(x)) return NAN;
+-    if (x < -1.0 || x > 1.0) return NAN;
++    if (isinf(x) || x < -1.0 || x > 1.0) {   /* domain error */
++        feraiseexcept(FE_INVALID);
++        errno = EDOM;
++        return NAN;
++    }
+     if (x == 0.0) return x;
+     if (x == 1.0) return M_PI_2;
+     if (x == -1.0) return -M_PI_2;
+@@ -215,7 +211,12 @@ double asin(double x) {
+ 
+ /* acos(x) = pi/2 - asin(x) */
+ double acos(double x) {
+-    if (x < -1.0 || x > 1.0) return NAN;
++    if (isnan(x)) return x;
++    if (isinf(x) || x < -1.0 || x > 1.0) {   /* domain error */
++        feraiseexcept(FE_INVALID);
++        errno = EDOM;
++        return NAN;
++    }
+     return M_PI_2 - asin(x);
+ }
+ 
+@@ -350,8 +351,11 @@ double tanpi(double x) {
+ 
+ double asinpi(double x) {
+     if (isnan(x)) return x;
+-    if (isinf(x)) return NAN;
+-    if (x < -1.0 || x > 1.0) return NAN;
++    if (isinf(x) || x < -1.0 || x > 1.0) {   /* domain error */
++        feraiseexcept(FE_INVALID);
++        errno = EDOM;
++        return NAN;
++    }
+     if (x == 0.0) return x;
+     if (x == 1.0) return 0.5;
+     if (x == -1.0) return -0.5;
+@@ -360,8 +364,11 @@ double asinpi(double x) {
+ 
+ double acospi(double x) {
+     if (isnan(x)) return x;
+-    if (isinf(x)) return NAN;
+-    if (x < -1.0 || x > 1.0) return NAN;
++    if (isinf(x) || x < -1.0 || x > 1.0) {   /* domain error */
++        feraiseexcept(FE_INVALID);
++        errno = EDOM;
++        return NAN;
++    }
+     if (x == 1.0) return 0.0;
+     if (x == 0.0) return 0.5;
+     if (x == -1.0) return 1.0;
+-- 
+2.54.0
+

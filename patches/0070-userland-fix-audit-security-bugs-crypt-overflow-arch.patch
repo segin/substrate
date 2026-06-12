@@ -1,0 +1,318 @@
+From 916d1ad5285bfb1d2668aa1f5d39a86d75bd68a8 Mon Sep 17 00:00:00 2001
+From: Kirn Gill II <segin2005@gmail.com>
+Date: Thu, 11 Jun 2026 15:59:50 -0500
+Subject: [PATCH 70/83] userland: fix audit security bugs (crypt overflow,
+ archive overflow/traversal, bc)
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+- libc crypt_sha256.c: __crypt_sha256 memcpy'd strlen(key) bytes into a
+  fixed uint8_t P[32] on the stack — a password >32 bytes smashed the stack
+  of every setuid authenticator (login/su/passwd).  P and S are now malloc'd
+  to the real key/salt length with a scrub+free cleanup path.  (No $6$/
+  crypt_sha512 exists in-tree.)
+- ar(1): a `#1/N` long-name member's name_len (atoi of the header) was
+  unvalidated; negative/oversized values wrapped malloc/read sizes and wrote
+  before the buffer.  Reject name_len < 0 || name_len > member size.
+- pax(1): the tar octal size field was parsed into an int; a large/wrapping
+  value undersized malloc(sz+1) then overflowed on read.  Parse as
+  unsigned long long (strtoull) and range-check before truncating to size_t.
+- tar/pax/cpio extraction: name `..`/absolute sanitization was already
+  present, but a symlink member could redirect a later regular-file write
+  outside the tree.  unlink the destination before creating each regular
+  file and symlink (+ O_NOFOLLOW belt-and-suspenders).
+- bc(1): get_arr_val/set_arr_val bounded idx<0 but not the upper end; the
+  (idx+1)*2 / capacity-doubling overflowed int to a small/negative capacity,
+  undersizing the allocation while array[idx] was written.  Cap idx at
+  BC_DIM_MAX (16M).
+
+Found by a security audit.
+
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+---
+ bin/bc/bc.c              | 15 +++++++++++++--
+ bin/tar/tar.c            | 14 +++++++++++---
+ lib/c/src/crypt_sha256.c | 28 +++++++++++++++++++++-------
+ usr.bin/ar/ar.c          | 10 ++++++++++
+ usr.bin/cpio/cpio.c      |  6 +++++-
+ usr.bin/pax/pax.c        | 27 +++++++++++++++++++++------
+ 6 files changed, 81 insertions(+), 19 deletions(-)
+
+diff --git a/bin/bc/bc.c b/bin/bc/bc.c
+index ca330f4c..06a2d8e2 100644
+--- a/bin/bc/bc.c
++++ b/bin/bc/bc.c
+@@ -12,6 +12,17 @@
+ #include <unistd.h>
+ #include "num.h"
+ 
++/*
++ * Upper bound on an array index.  The capacity growth below computes
++ * (idx + 1) * 2 and repeatedly doubles new_cap as an int; an unbounded
++ * attacker-controlled idx overflows that arithmetic to a small or
++ * negative capacity, undersizing the allocation while array[idx] is
++ * still written — a heap out-of-bounds write.  POSIX guarantees
++ * BC_DIM_MAX >= 65535; capping well below INT_MAX keeps the doubling
++ * arithmetic from overflowing.
++ */
++#define BC_DIM_MAX 16777216  /* 2^24 elements */
++
+ // Configuration
+ int opt_s = 0; // POSIX strict mode
+ int opt_w = 0; // Warn on extensions
+@@ -1102,7 +1113,7 @@ bc_num *get_var_val(const char *name) {
+ }
+ 
+ bc_num *get_arr_val(const char *name, int idx) {
+-    if (idx < 0) lex_error("array index out of bounds");
++    if (idx < 0 || idx >= BC_DIM_MAX) lex_error("array index out of bounds");
+     local_var_t *l = get_local(name);
+     if (l) {
+         if (!l->array) {
+@@ -1185,7 +1196,7 @@ void set_var_val(const char *name, bc_num *val) {
+ }
+ 
+ void set_arr_val(const char *name, int idx, bc_num *val) {
+-    if (idx < 0) lex_error("array index out of bounds");
++    if (idx < 0 || idx >= BC_DIM_MAX) lex_error("array index out of bounds");
+     local_var_t *l = get_local(name);
+     if (l) {
+         if (!l->array) {
+diff --git a/bin/tar/tar.c b/bin/tar/tar.c
+index dd51573c..463e11e6 100644
+--- a/bin/tar/tar.c
++++ b/bin/tar/tar.c
+@@ -476,7 +476,13 @@ static int extract_reg(FILE *in, const char *path, off_t size) {
+     int fd = -1;
+     if (!(opt.no_overwrite && access(path, F_OK) == 0)) {
+         if (ensure_parents(path)) return -1;
+-        fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0666);
++        /* Remove any existing entry at the destination first so a
++         * pre-planted symlink (from an earlier archive member) is not
++         * followed and truncated through — the classic archive symlink
++         * traversal.  O_NOFOLLOW is belt-and-suspenders for hosts whose
++         * open(2) honours it. */
++        unlink(path);
++        fd = open(path, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW, 0666);
+         if (fd < 0) return -1;
+     }
+     unsigned char b[TAR_BLOCK];
+@@ -592,13 +598,15 @@ static int process_read(FILE *in, bool extract) {
+                 break;
+             case '2':
+                 if (!opt.no_overwrite || access(target, F_OK)) {
+-                    if (ensure_parents(target) || symlink(ps.linkpath ? ps.linkpath : h.linkname, target)) perror(target);
++                    if (ensure_parents(target)) { perror(target); }
++                    else { unlink(target); if (symlink(ps.linkpath ? ps.linkpath : h.linkname, target)) perror(target); }
+                 }
+                 if (skip_padded(in, hsize)) return -1;
+                 break;
+             case '1':
+                 if (!opt.no_overwrite || access(target, F_OK)) {
+-                    if (ensure_parents(target) || link(ps.linkpath ? ps.linkpath : h.linkname, target)) perror(target);
++                    if (ensure_parents(target)) { perror(target); }
++                    else { unlink(target); if (link(ps.linkpath ? ps.linkpath : h.linkname, target)) perror(target); }
+                 }
+                 if (skip_padded(in, hsize)) return -1;
+                 break;
+diff --git a/lib/c/src/crypt_sha256.c b/lib/c/src/crypt_sha256.c
+index 3eae51bc..a69ee4ff 100644
+--- a/lib/c/src/crypt_sha256.c
++++ b/lib/c/src/crypt_sha256.c
+@@ -57,7 +57,8 @@ char *
+ __crypt_sha256(const char *key, const char *setting, char *out, size_t outsz)
+ {
+     sha256_ctx    ctxA, ctxB, ctxDP, ctxDS;
+-    uint8_t       altA[32], P[32], S[32], temp[32];
++    uint8_t       altA[32], temp[32];
++    uint8_t      *P = NULL, *S = NULL;
+     const char   *salt;
+     size_t        salt_len;
+     size_t        key_len;
+@@ -93,6 +94,18 @@ __crypt_sha256(const char *key, const char *setting, char *out, size_t outsz)
+     }
+     key_len = strlen(key);
+ 
++    /* P holds key_len bytes and S holds salt_len bytes; both are
++     * unbounded with respect to a fixed buffer (the key especially),
++     * so allocate them to the real length to avoid a stack/heap
++     * overflow.  Allocate at least one byte to dodge malloc(0). */
++    P = malloc(key_len ? key_len : 1);
++    S = malloc(salt_len ? salt_len : 1);
++    if (P == NULL || S == NULL) {
++        free(P);
++        free(S);
++        return NULL;
++    }
++
+     /* Drepper's reference algorithm.  Steps are numbered in the spec. */
+     __sha256_init(&ctxA);
+     __sha256_update(&ctxA, key, key_len);     /* 2 */
+@@ -172,14 +185,14 @@ __crypt_sha256(const char *key, const char *setting, char *out, size_t outsz)
+     cp = out;
+     if (rounds_custom) {
+         int n = snprintf(out, outsz, "$5$rounds=%u$", rounds);
+-        if (n < 0 || (size_t)n >= outsz) return NULL;
++        if (n < 0 || (size_t)n >= outsz) { out = NULL; goto done; }
+         cp += n;
+     } else {
+-        if (outsz < 4) return NULL;
++        if (outsz < 4) { out = NULL; goto done; }
+         cp[0] = '$'; cp[1] = '5'; cp[2] = '$';
+         cp += 3;
+     }
+-    if ((size_t)(cp + salt_len + 1 - out) > outsz) return NULL;
++    if ((size_t)(cp + salt_len + 1 - out) > outsz) { out = NULL; goto done; }
+     memcpy(cp, salt, salt_len);
+     cp += salt_len;
+     *cp++ = '$';
+@@ -197,17 +210,18 @@ __crypt_sha256(const char *key, const char *setting, char *out, size_t outsz)
+     b64_from_24bit(&cp, out_end, altA[9],  altA[19], altA[29], 3);
+     b64_from_24bit(&cp, out_end, 0,        altA[31], altA[30], 2);
+ 
+-    if (cp >= out_end) return NULL;
++    if (cp >= out_end) { out = NULL; goto done; }
+     *cp = '\0';
+ 
++done:
+     /* Scrub. */
+     memset(&ctxA, 0, sizeof(ctxA));
+     memset(&ctxB, 0, sizeof(ctxB));
+     memset(&ctxDP, 0, sizeof(ctxDP));
+     memset(&ctxDS, 0, sizeof(ctxDS));
+     memset(altA, 0, sizeof(altA));
+-    memset(P, 0, sizeof(P));
+-    memset(S, 0, sizeof(S));
++    if (P != NULL) { memset(P, 0, key_len ? key_len : 1); free(P); }
++    if (S != NULL) { memset(S, 0, salt_len ? salt_len : 1); free(S); }
+     memset(temp, 0, sizeof(temp));
+ 
+     return out;
+diff --git a/usr.bin/ar/ar.c b/usr.bin/ar/ar.c
+index ebd302f1..c01a79fc 100644
+--- a/usr.bin/ar/ar.c
++++ b/usr.bin/ar/ar.c
+@@ -792,6 +792,16 @@ static void read_archive(const char *path) {
+         if (memcmp(hdr.ar_name, "#1/", 3) == 0) {
+             int name_len = atoi(hdr.ar_name + 3);
+             int raw_name_len = name_len;
++            /* name_len is attacker-controlled: a negative value would
++             * make malloc()/read() wrap to a huge size_t and the
++             * m->name[name_len] terminator an out-of-bounds write, and
++             * a value exceeding the member size underflows payload_size.
++             * Reject anything not within the member's own data. */
++            if (name_len < 0 || (long)name_len > size) {
++                warnx("%s: invalid extended member name length", path);
++                free(m);
++                break;
++            }
+             m->name = malloc(name_len + 1);
+             if (m->name == NULL) {
+                 errx(1, "out of memory");
+diff --git a/usr.bin/cpio/cpio.c b/usr.bin/cpio/cpio.c
+index 93da3b55..138ae0b2 100644
+--- a/usr.bin/cpio/cpio.c
++++ b/usr.bin/cpio/cpio.c
+@@ -564,7 +564,11 @@ static int extract_entry(int afd, const entry_t *e, const options_t *opt, const
+         set_minor_error();
+     } else {
+         off_t outoff = 0;
+-        fd = open(full, O_WRONLY | O_CREAT | O_TRUNC, e->mode & 07777);
++        /* Remove any pre-planted symlink at the destination so the write
++         * is not redirected outside the extraction tree (archive symlink
++         * traversal); O_NOFOLLOW guards hosts whose open(2) honours it. */
++        unlink(full);
++        fd = open(full, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW, e->mode & 07777);
+         if (fd < 0) {
+             perror(full);
+             set_minor_error();
+diff --git a/usr.bin/pax/pax.c b/usr.bin/pax/pax.c
+index 998fa9bf..22680e16 100644
+--- a/usr.bin/pax/pax.c
++++ b/usr.bin/pax/pax.c
+@@ -424,10 +424,10 @@ static void cmd_write(int argc, char **argv, const struct opts *o) {
+     if (o->archive) fclose(f);
+ }
+ 
+-static int read_octal(const char *s, size_t n) {
++static unsigned long long read_octal(const char *s, size_t n) {
+     char tmp[32];
+     snprintf(tmp, sizeof(tmp), "%.*s", (int)n, s);
+-    return (int)strtol(tmp, NULL, 8);
++    return strtoull(tmp, NULL, 8);
+ }
+ 
+ static void parse_pax_ext(struct pax_kv *kv, const char *buf, size_t n) {
+@@ -473,7 +473,14 @@ static void extract_tar(FILE *f, const struct opts *o) {
+             continue;
+         }
+         zeros = 0;
+-        sz = (size_t)read_octal(h.size, sizeof(h.size));
++        {
++            unsigned long long raw_sz = read_octal(h.size, sizeof(h.size));
++            /* Reject a size that would wrap size_t (undersizing the
++             * malloc below) or the (sz + 511) seek rounding on this
++             * 32-bit target. */
++            if (raw_sz > (unsigned long long)(SIZE_MAX - TAR_BLOCK)) die("tar member size too large");
++            sz = (size_t)raw_sz;
++        }
+         if (h.typeflag == 'x') {
+             data = malloc(sz + 1); if (!data) die("malloc");
+             if (!read_full(f, data, sz)) die("read pax ext");
+@@ -499,6 +506,7 @@ static void extract_tar(FILE *f, const struct opts *o) {
+         } else if (h.typeflag == '2') {
+             const char *ln = kv.has_linkpath ? kv.linkpath : h.linkname;
+             ensure_parent_dirs(path);
++            unlink(path);
+             symlink(ln, path);
+         } else {
+             if (o->no_overwrite && access(path, F_OK) == 0) {
+@@ -507,6 +515,10 @@ static void extract_tar(FILE *f, const struct opts *o) {
+                 continue;
+             }
+             ensure_parent_dirs(path);
++            /* Remove any pre-planted symlink at the destination so the
++             * write below cannot be redirected outside the extraction
++             * tree (archive symlink traversal). */
++            unlink(path);
+             out = fopen(path, "wb");
+             if (!out) die("create output file");
+             while (sz > 0) {
+@@ -517,12 +529,12 @@ static void extract_tar(FILE *f, const struct opts *o) {
+                 sz -= r;
+             }
+             fclose(out);
+-            restore_attrs(o, path, read_octal(h.mode, sizeof(h.mode)), kv.has_uid ? kv.uid : read_octal(h.uid, sizeof(h.uid)), kv.has_gid ? kv.gid : read_octal(h.gid, sizeof(h.gid)), 0);
++            restore_attrs(o, path, (mode_t)read_octal(h.mode, sizeof(h.mode)), kv.has_uid ? kv.uid : (long)read_octal(h.uid, sizeof(h.uid)), kv.has_gid ? kv.gid : (long)read_octal(h.gid, sizeof(h.gid)), 0);
+             memset(&kv, 0, sizeof(kv));
+             continue;
+         }
+         if (sz) fseek(f, (long)((sz + 511) & ~511), SEEK_CUR);
+-        restore_attrs(o, path, read_octal(h.mode, sizeof(h.mode)), kv.has_uid ? kv.uid : read_octal(h.uid, sizeof(h.uid)), kv.has_gid ? kv.gid : read_octal(h.gid, sizeof(h.gid)), 0);
++        restore_attrs(o, path, (mode_t)read_octal(h.mode, sizeof(h.mode)), kv.has_uid ? kv.uid : (long)read_octal(h.uid, sizeof(h.uid)), kv.has_gid ? kv.gid : (long)read_octal(h.gid, sizeof(h.gid)), 0);
+         memset(&kv, 0, sizeof(kv));
+     }
+ }
+@@ -556,7 +568,7 @@ static void extract_cpio_newc(FILE *f, const struct opts *o) {
+             char lbuf[PATH_MAX];
+             if (filesize >= sizeof(lbuf)) die("symlink too long");
+             read_full(f, lbuf, filesize); lbuf[filesize] = '\0';
+-            ensure_parent_dirs(path); symlink(lbuf, path);
++            ensure_parent_dirs(path); unlink(path); symlink(lbuf, path);
+         } else {
+             unsigned left = filesize;
+             char buf[4096];
+@@ -565,6 +577,9 @@ static void extract_cpio_newc(FILE *f, const struct opts *o) {
+                 continue;
+             }
+             ensure_parent_dirs(path);
++            /* Remove any pre-planted symlink at the destination so the
++             * write cannot escape the extraction tree. */
++            unlink(path);
+             out = fopen(path, "wb"); if (!out) die("create output");
+             while (left) {
+                 size_t r = left > sizeof(buf) ? sizeof(buf) : left;
+-- 
+2.54.0
+

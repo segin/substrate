@@ -1,0 +1,40 @@
+From 13b7350d28214e9d797f7e77c354b0205a19cd73 Mon Sep 17 00:00:00 2001
+From: Kirn Gill II <segin2005@gmail.com>
+Date: Wed, 10 Jun 2026 06:50:52 -0500
+Subject: [PATCH 32/83] bin/top: drop the custom LDADD; default static link
+ pulls libsys.a
+
+The default static link line now links libsys.a for the sys_* wrappers,
+so top no longer needs the hand-rolled "-lc ... -l:libsys.a" ordering
+that worked around libsys.a/sys.o ioctl collisions.  Still statically
+linked (the tcsetattr last-PLT-slot dynamic-linker edge case).
+
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+---
+ bin/top/Makefile | 10 ++++------
+ 1 file changed, 4 insertions(+), 6 deletions(-)
+
+diff --git a/bin/top/Makefile b/bin/top/Makefile
+index 22738024..c709ccfd 100644
+--- a/bin/top/Makefile
++++ b/bin/top/Makefile
+@@ -8,12 +8,10 @@ install:
+ else
+ PROG = top
+ SRCS = top.c top_snapshot.c top_render.c top_sort.c
+-# Statically linked: top is an always-available diagnostic tool, and the
+-# static libc avoids a dynamic-linker edge case that left the last PLT slot
+-# (tcsetattr, only reached in interactive mode) bound to NULL.  libc is
+-# listed before libsys.a so ioctl() resolves from libc's sys.o; otherwise
+-# libsys.a's standalone ioctl.o is pulled first and collides with sys.o.
+-LDADD = -L$(TOP)/lib/c -lc -L$(TOP)/lib/sys -l:libsys.a
++# Statically linked (no DYNAMIC): top is an always-available diagnostic tool,
++# and the static path avoids a dynamic-linker edge case that left the last PLT
++# slot (tcsetattr, interactive-only) bound to NULL.  No custom LDADD needed --
++# the default static link now pulls libsys.a (the syscall layer) for sys_*.
+ 
+ include $(TOP)/Makefile.inc
+ include $(TOP)/Makefile.bin.inc
+-- 
+2.54.0
+

@@ -1,0 +1,131 @@
+From 9a50eac0bfdcc2ddb564510fc82987227d8b7344 Mon Sep 17 00:00:00 2001
+From: Kirn Gill II <segin2005@gmail.com>
+Date: Tue, 9 Jun 2026 23:41:27 -0500
+Subject: [PATCH 26/83] libc: add cfmakeraw(3)
+
+BSD/glibc termios helper that configures a struct termios for raw mode
+(no input mangling, no OPOST, no echo/canonical/signals, 8-bit chars,
+VMIN=1/VTIME=0).  Needed by ksh93's pty builtin (the dtksh build) and
+common in ported software.  Man page included.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+---
+ include/termios.h        |  1 +
+ lib/c/src/posix_extra2.c | 13 ++++++++
+ usr.man/man3/cfmakeraw.3 | 68 ++++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 82 insertions(+)
+ create mode 100644 usr.man/man3/cfmakeraw.3
+
+diff --git a/include/termios.h b/include/termios.h
+index a6c1c272..8d6f21c0 100644
+--- a/include/termios.h
++++ b/include/termios.h
+@@ -234,6 +234,7 @@ speed_t cfgetispeed(const struct termios *termios_p);
+ speed_t cfgetospeed(const struct termios *termios_p);
+ int     cfsetispeed(struct termios *termios_p, speed_t speed);
+ int     cfsetospeed(struct termios *termios_p, speed_t speed);
++void    cfmakeraw(struct termios *termios_p);
+ 
+ int     tcdrain(int fd);
+ int     tcflow(int fd, int action);
+diff --git a/lib/c/src/posix_extra2.c b/lib/c/src/posix_extra2.c
+index a39fd1b8..c23c1346 100644
+--- a/lib/c/src/posix_extra2.c
++++ b/lib/c/src/posix_extra2.c
+@@ -48,6 +48,19 @@ int cfsetospeed(struct termios *t, speed_t speed) {
+     return 0;
+ }
+ 
++void cfmakeraw(struct termios *t) {
++    /* BSD/glibc raw mode: no input mangling, no output post-processing,
++     * no echo/canonical/signals, 8-bit chars, read returns per byte. */
++    t->c_iflag &= ~(IGNBRK | BRKINT | PARMRK | ISTRIP |
++                    INLCR | IGNCR | ICRNL | IXON);
++    t->c_oflag &= ~OPOST;
++    t->c_lflag &= ~(ECHO | ECHONL | ICANON | ISIG | IEXTEN);
++    t->c_cflag &= ~(CSIZE | PARENB);
++    t->c_cflag |= CS8;
++    t->c_cc[VMIN] = 1;
++    t->c_cc[VTIME] = 0;
++}
++
+ int tcdrain(int fd) {
+     /* TCSBRK with arg=1 = "drain output", per termios spec. */
+     return ioctl(fd, TCSBRK, (void *)(uintptr_t)1);
+diff --git a/usr.man/man3/cfmakeraw.3 b/usr.man/man3/cfmakeraw.3
+new file mode 100644
+index 00000000..d9f1e2f8
+--- /dev/null
++++ b/usr.man/man3/cfmakeraw.3
+@@ -0,0 +1,68 @@
++.TH CFMAKERAW 3 2026-06-09 "Substrate" "Substrate Programmer's Manual"
++.SH NAME
++cfmakeraw \- set terminal attributes structure to raw mode
++.SH LIBRARY
++Standard C library
++.RI ( libc ", " \-lc )
++.SH SYNOPSIS
++.nf
++.B #include <termios.h>
++.PP
++.BI "void cfmakeraw(struct termios *" termios_p );
++.fi
++.SH DESCRIPTION
++.BR cfmakeraw ()
++modifies the
++.I termios
++structure pointed to by
++.I termios_p
++so that a terminal configured with it via
++.BR tcsetattr (3)
++operates in \(lqraw\(rq mode: input is available byte by byte
++.RI ( "c_cc[VMIN] = 1" ,
++.IR "c_cc[VTIME] = 0" ),
++echoing, canonical line editing and signal generation are disabled, no
++input or output post-processing is performed, and characters pass through
++as 8-bit values with parity disabled.
++.PP
++Specifically, it clears
++.BR IGNBRK ,
++.BR BRKINT ,
++.BR PARMRK ,
++.BR ISTRIP ,
++.BR INLCR ,
++.BR IGNCR ,
++.BR ICRNL
++and
++.B IXON
++in
++.IR c_iflag ;
++.B OPOST
++in
++.IR c_oflag ;
++.BR ECHO ,
++.BR ECHONL ,
++.BR ICANON ,
++.B ISIG
++and
++.B IEXTEN
++in
++.IR c_lflag ;
++clears
++.B CSIZE
++and
++.B PARENB
++and sets
++.B CS8
++in
++.IR c_cflag .
++.SH RETURN VALUE
++None.
++.SH ERRORS
++None.
++.SH CONFORMING TO
++BSD; also provided by glibc and musl.  Not specified by POSIX.
++.SH SEE ALSO
++.BR tcgetattr (3),
++.BR tcsetattr (3),
++.BR termios (3)
+-- 
+2.54.0
+

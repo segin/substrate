@@ -1,0 +1,77 @@
+From ef169992ec2c5d4a2ce83c82f87d8d0e0296aaf1 Mon Sep 17 00:00:00 2001
+From: Kirn Gill II <segin2005@gmail.com>
+Date: Tue, 9 Jun 2026 21:11:07 -0500
+Subject: [PATCH 22/83] tcp: report POLLIN (EOF readable) on FIN-received
+ states, not just POLLHUP
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+tcp_poll() for a connection in CLOSE_WAIT/CLOSING/LAST_ACK/TIME_WAIT with
+a drained receive buffer returned POLLHUP without POLLIN.  POSIX and
+Linux report such a socket as readable — read() returns 0 (EOF) without
+blocking — and real software depends on that: libtirpc's svc_vc read_vc
+loops `while ((revents & POLLIN) == 0)` around poll() and treats only a
+poll *timeout* as fatal, so a POLLHUP-without-POLLIN fd makes poll()
+return >0 forever and the RPC server spins at 100% CPU the instant a
+client disconnects.  TCP_CLOSED gains POLLIN too (EOF is still readable
+after full close).
+
+Live-debugged on a wedged CDE session via the qemu gdbstub: opening dtcm
+from the Front Panel froze all X11 input — cursor moved and changed
+shape (server-side sprite tracking) but no client got events.  Thread
+walk showed ttsession and rpc.ttdbserver burning the CPU in poll
+(user-stack returns symbolized to read_vc svc_vc.c:541 ->
+fill_input_buf xdr_rec.c:669), dtcm blocked in waitpid on a ttsession it
+auto-spawned (which could never finish starting), and dtwm wedged behind
+ToolTalk — its synchronous passive button grab then froze all input
+queues.  AF_UNIX poll already had the correct readable-on-EOF semantics;
+this brings TCP in line.
+
+Verified on a copy of the live image: the same CDE+dtcm bring-up that
+wedged (ttsession+ttdbserver at ~60% CPU, triple ttsession, dtcm in
+waitpid) now idles — 16/16 on-CPU samples in swapper, single ttsession,
+dtcm and X up.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+---
+ sys/net/tcp.c | 21 +++++++++++++++++++--
+ 1 file changed, 19 insertions(+), 2 deletions(-)
+
+diff --git a/sys/net/tcp.c b/sys/net/tcp.c
+index e653e839..a1dacaa6 100644
+--- a/sys/net/tcp.c
++++ b/sys/net/tcp.c
+@@ -798,10 +798,27 @@ int tcp_poll(tcp_pcb_t *p, short events, void **wait_chan) {
+         return 0;
+     }
+     if (p->state == TCP_CLOSED) {
+-        return (events & POLLOUT ? POLLOUT : 0) | POLLHUP | POLLERR;
++        return (events & POLLOUT ? POLLOUT : 0) |
++               (events & POLLIN ? POLLIN : 0) | POLLHUP | POLLERR;
+     }
+     if (events & POLLIN) {
+-        if (p->rx_count > 0) revents |= POLLIN;
++        if (p->rx_count > 0) {
++            revents |= POLLIN;
++        } else if (p->state == TCP_CLOSE_WAIT || p->state == TCP_CLOSING ||
++                   p->state == TCP_LAST_ACK   || p->state == TCP_TIME_WAIT) {
++            /*
++             * Peer has sent FIN (receive side closed) and the receive
++             * buffer is drained: a read() returns 0 (EOF) rather than
++             * blocking, so the socket IS readable.  POSIX and Linux report
++             * POLLIN here (not just POLLHUP).  libtirpc's svc_vc read_vc
++             * loops `while ((revents & POLLIN) == 0)` and only treats a
++             * poll *timeout* as fatal, so a POLLHUP-without-POLLIN fd makes
++             * poll() return >0 forever and the RPC server spins at 100%
++             * the moment a client disconnects — wedging ttsession /
++             * rpc.ttdbserver and hanging the whole CDE/ToolTalk startup.
++             */
++            revents |= POLLIN;
++        }
+     }
+     if (events & POLLOUT) {
+         /* No tx buffering yet; treat as always-ready.  */
+-- 
+2.54.0
+

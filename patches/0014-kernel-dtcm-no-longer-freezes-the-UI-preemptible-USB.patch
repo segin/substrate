@@ -1,0 +1,103 @@
+From 217ebe72fb33cfcfe1b4a2cb943c18a436ca376c Mon Sep 17 00:00:00 2001
+From: Kirn Gill II <segin2005@gmail.com>
+Date: Tue, 9 Jun 2026 13:36:52 -0500
+Subject: [PATCH 14/83] =?UTF-8?q?kernel:=20dtcm=20no=20longer=20freezes=20?=
+ =?UTF-8?q?the=20UI=20=E2=80=94=20preemptible=20USB=20poll=20wait=20+=20gu?=
+ =?UTF-8?q?ard=20signals=20to=20user=20mode?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Opening dtcm (or any sustained activity) could freeze the entire desktop.
+gdb showed the CPU monopolised by usb_hid_poll_thread busy-spinning in
+uhci_poll_td: it pause-loops up to the 5s transfer deadline, and the HID
+poll kthread runs with interrupts DISABLED (switch_to doesn't save/restore
+EFLAGS, so a kthread that never re-enables IF stays IF=0).  With interrupts
+off the timer can't fire, nothing preempts the spin, and a wedged HID
+transfer starves the X server and its clients — dtcm/Xfbdev sit READY but
+never run.
+
+Fix, two parts:
+- uhci.c: run uhci_poll_td's completion wait with interrupts enabled
+  (intr_disable/intr_enable around the loop, intr_restore on exit) so the
+  timer tick can preempt it; the controller still completes the TD via DMA.
+- idt.c: only call signal_handle_pending() when the interrupt came from
+  user mode.  Enabling preemption of the kthread exposed a latent crash:
+  the timer IRQ would preempt the kthread, and on return the unguarded
+  signal_handle_pending(regs) ran for a kernel-mode frame whose `regs`
+  pointer had been clobbered across the sched_yield -> page-fault panic in
+  signal_handle_pending (regs->cs deref).  Signals are only ever delivered
+  on return to user mode, so the kernel-frame call was always a no-op
+  anyway; gating it on is_usermode removes both the crash and a needless
+  deref. (This is why the kthread defensively ran with IF=0 before.)
+
+Verified: dtcm opens, the desktop reaches steady state with the CPU idle
+(swapper/hlt) instead of monopolised, no panic.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+---
+ sys/arch/i386/idt.c    |  4 ++--
+ sys/drivers/usb/uhci.c | 16 ++++++++++++++--
+ 2 files changed, 16 insertions(+), 4 deletions(-)
+
+diff --git a/sys/arch/i386/idt.c b/sys/arch/i386/idt.c
+index 4633cf8b..0ab20dfa 100644
+--- a/sys/arch/i386/idt.c
++++ b/sys/arch/i386/idt.c
+@@ -242,7 +242,7 @@ void isr_handler(registers_t *regs) {
+         } else if (!current_thread && is_usermode) {
+             sched_yield();
+         }
+-        signal_handle_pending(regs);
++        if (is_usermode) signal_handle_pending(regs);  /* not for kernel-mode IRQs */
+         return;
+     }
+ 
+@@ -540,5 +540,5 @@ void isr_handler(registers_t *regs) {
+         outb(0x20, 0x20);
+     }
+ 
+-    signal_handle_pending(regs);
++    if (is_usermode) signal_handle_pending(regs);  /* not for kernel-mode IRQs */
+ }
+diff --git a/sys/drivers/usb/uhci.c b/sys/drivers/usb/uhci.c
+index 79393717..a89f2a88 100644
+--- a/sys/drivers/usb/uhci.c
++++ b/sys/drivers/usb/uhci.c
+@@ -22,6 +22,7 @@
+ #include <sys/dma.h>
+ #include <sys/irq.h>
+ #include <sys/lock.h>
++#include <intr.h>
+ #include <vm/vm_kmem.h>
+ #include <string.h>
+ 
+@@ -409,12 +410,23 @@ static int uhci_poll_td(uhci_hc_t *hc, struct uhci_td *td,
+     (void)hc;
+ 
+     while (td && walk_budget--) {
+-        /* Poll until this TD is no longer active */
++        /* Poll until this TD is no longer active.  Run the wait with
++         * interrupts ENABLED so the timer tick can preempt us.  The HID poll
++         * kthread runs with IF=0 (switch_to doesn't save/restore EFLAGS), so a
++         * bare pause-spin here is never preempted: a wedged transfer would
++         * monopolise the CPU for the full 5 s timeout and freeze the whole UI
++         * (opening dtcm reproduced it).  Enabling interrupts lets the X server
++         * and its clients keep running while the controller works. */
++        uint32_t _saved_if = intr_disable();
++        intr_enable();
+         while (td->ctrl_status & UHCI_TD_CTRL_ACTIVE) {
+-            if ((uint64_t)get_uptime_ms() > deadline)
++            if ((uint64_t)get_uptime_ms() > deadline) {
++                intr_restore(_saved_if);
+                 return USB_XFER_TIMEOUT;
++            }
+             __asm__ volatile("pause");
+         }
++        intr_restore(_saved_if);
+ 
+         /* Check for errors */
+         if (td->ctrl_status & UHCI_TD_CTRL_STALLED) {
+-- 
+2.54.0
+

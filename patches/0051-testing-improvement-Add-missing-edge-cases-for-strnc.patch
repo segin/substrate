@@ -1,0 +1,46 @@
+From 13254f1bee4acb84f00121b5d5f85872f910b898 Mon Sep 17 00:00:00 2001
+From: Kirn Gill II <segin2005@gmail.com>
+Date: Wed, 10 Jun 2026 13:42:24 -0500
+Subject: [PATCH 51/83] =?UTF-8?q?=F0=9F=A7=AA=20[testing=20improvement]=20?=
+ =?UTF-8?q?Add=20missing=20edge=20cases=20for=20strncasecmp=20tests=20(#12?=
+ =?UTF-8?q?65)?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+This adds new test assertions to `tests/lib/c/test_libc_string_unit.c`
+for `strncasecmp` to address an untested function report.
+
+🎯 What: Improve test coverage for the `strncasecmp` C library function.
+📊 Coverage: Added edge case tests for comparing non-alphabetic characters
+   and pointers pointing to exactly the same memory address.
+✨ Result: `strncasecmp` is now fully tested across various common bounds, casing, and symbol conditions.
+
+Co-authored-by: google-labs-jules[bot] <161369871+google-labs-jules[bot]@users.noreply.github.com>
+Co-authored-by: segin <480709+segin@users.noreply.github.com>
+---
+ tests/lib/c/test_libc_string_unit.c | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/tests/lib/c/test_libc_string_unit.c b/tests/lib/c/test_libc_string_unit.c
+index 2f15068b..52d76ecd 100644
+--- a/tests/lib/c/test_libc_string_unit.c
++++ b/tests/lib/c/test_libc_string_unit.c
+@@ -603,6 +603,14 @@ void run_strncasecmp_tests(void) {
+     unsigned char c1[] = {0xff, '\0'};
+     unsigned char c2[] = {0x7f, '\0'};
+     ASSERT_TRUE(libc_strncasecmp((char*)c1, (char*)c2, 1) > 0, "0xff > 0x7f (unsigned)");
++
++    // Non-alphabetic characters
++    ASSERT_EQ(libc_strncasecmp("1234!", "1234!", 5), 0, "Non-alphabetic equal");
++    ASSERT_TRUE(libc_strncasecmp("1234!", "1234@", 5) < 0, "'!' < '@'");
++
++    // Exact identical pointers
++    const char *same = "identical";
++    ASSERT_EQ(libc_strncasecmp(same, same, 5), 0, "Identical pointers");
+ }
+ 
+ bool test_libc_strlen(void) {
+-- 
+2.54.0
+

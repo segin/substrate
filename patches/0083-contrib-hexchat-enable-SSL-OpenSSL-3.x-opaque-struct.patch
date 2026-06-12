@@ -1,0 +1,169 @@
+From a2fda31db4e831b8b7ff5d8bc512acce2cbe0871 Mon Sep 17 00:00:00 2001
+From: Kirn Gill II <segin2005@gmail.com>
+Date: Fri, 12 Jun 2026 08:45:51 -0500
+Subject: [PATCH 83/83] contrib/hexchat: enable SSL (OpenSSL 3.x opaque-struct
+ migration)
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+HexChat was built --disable-openssl, so it had no SSL despite OpenSSL 3.x
+being in the stack — secure IRC (ircs://) didn't work.  Enable it:
+
+- build.sh: --disable-openssl -> --enable-openssl; add
+  -Wno-error=deprecated-declarations (OpenSSL 3.x deprecates several APIs
+  HexChat 2.10.2 still uses; they work, just warn).
+- patches/0001-openssl-1.1-3.x-compat.patch: HexChat 2.10.2 (2014) reaches
+  into SSL/SSL_CTX/SSL_SESSION/X509/X509_STORE_CTX directly, which OpenSSL
+  1.1+/3.x made opaque.  Migrate to accessors: X509_PUBKEY_get0_param +
+  X509_get_signature_nid (ssl.c cert info), unconditional
+  SSL_set_connect_state (HexChat is always an SSL client),
+  X509_STORE_CTX_get_current_cert (server.c verify cb), and
+  SSL_get_session + SSL_SESSION_get_time (server.c handshake timeout).
+- fetch.sh: apply the patch series after extraction (idempotent), matching
+  the zlib/etc. convention, so a fresh fetch.sh + build.sh reproduces the
+  SSL-enabled build.
+
+The rebuilt binary links libssl.so.3 + libcrypto.so.3 (verified), and a
+fresh pristine extract + the patch reproduces the working source
+byte-identically.  Staged into rootfs.img.
+
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+---
+ contrib/hexchat/build.sh                      |  5 +-
+ contrib/hexchat/fetch.sh                      | 17 +++++
+ .../patches/0001-openssl-1.1-3.x-compat.patch | 62 +++++++++++++++++++
+ contrib/hexchat/series                        |  1 +
+ 4 files changed, 83 insertions(+), 2 deletions(-)
+ create mode 100644 contrib/hexchat/patches/0001-openssl-1.1-3.x-compat.patch
+ create mode 100644 contrib/hexchat/series
+
+diff --git a/contrib/hexchat/build.sh b/contrib/hexchat/build.sh
+index c88ccb59..eb1ac1d3 100755
+--- a/contrib/hexchat/build.sh
++++ b/contrib/hexchat/build.sh
+@@ -21,7 +21,8 @@ export PYTHON=python3
+ export LDFLAGS="${LDFLAGS} -ldl"
+ export CFLAGS="-march=i486 -mtune=i486 -O2 -g -std=gnu11 \
+   -Wno-error=incompatible-pointer-types -Wno-error=int-conversion \
+-  -Wno-error=implicit-function-declaration -Wno-error=return-mismatch -Wno-error=format"
++  -Wno-error=implicit-function-declaration -Wno-error=return-mismatch -Wno-error=format \
++  -Wno-error=deprecated-declarations"
+ 
+ substrate_libtool_fix "${TREE_DIR}/configure"
+ # HexChat hardcodes source-relative paths for its generators
+@@ -33,7 +34,7 @@ make distclean >/dev/null 2>&1 || true
+ "${TREE_DIR}/configure" \
+     --host=i386-unknown-substrate \
+     --prefix=/usr --libdir=/usr/lib --includedir=/usr/include --sysconfdir=/etc \
+-    --enable-gtkfe --disable-openssl --enable-ipv6 \
++    --enable-gtkfe --enable-openssl --enable-ipv6 \
+     --disable-gtktest --disable-glibtest \
+     --disable-dbus --disable-libnotify --disable-libproxy \
+     --disable-perl --disable-python --disable-plugin \
+diff --git a/contrib/hexchat/fetch.sh b/contrib/hexchat/fetch.sh
+index 87c89a9a..c7491766 100755
+--- a/contrib/hexchat/fetch.sh
++++ b/contrib/hexchat/fetch.sh
+@@ -14,6 +14,23 @@ if [ ! -f "${TARBALL}" ]; then
+ fi
+ if [ "${SHA256}" != "REPLACE" ]; then echo "${SHA256}  ${TARBALL}" | sha256sum -c -; fi
+ [ -d "${TREE_DIR}" ] || { echo "==> Extracting"; tar xf "${TARBALL}"; }
++
++# Apply the substrate patch series (idempotent: skip already-applied).
++if [ -f "${HERE}/series" ]; then
++    cd "${TREE_DIR}"
++    while IFS= read -r p; do
++        case "$p" in ''|'#'*) continue ;; esac
++        if [ ! -f "${HERE}/patches/${p}" ]; then
++            echo "fetch.sh: missing patch ${p}" >&2; exit 1
++        fi
++        if patch -p1 --dry-run -s -R < "${HERE}/patches/${p}" >/dev/null 2>&1; then
++            echo "==> Patch ${p} already applied"; continue
++        fi
++        echo "==> Applying ${p}"; patch -p1 < "${HERE}/patches/${p}"
++    done < "${HERE}/series"
++    cd "${BUILD_DIR}"
++fi
++
+ . "${HERE}/../substrate-autotools.sh"
+ substrate_config_sub_fix "${TREE_DIR}"
+ echo "==> hexchat ${VERSION} ready at ${TREE_DIR}"
+diff --git a/contrib/hexchat/patches/0001-openssl-1.1-3.x-compat.patch b/contrib/hexchat/patches/0001-openssl-1.1-3.x-compat.patch
+new file mode 100644
+index 00000000..c2a334fb
+--- /dev/null
++++ b/contrib/hexchat/patches/0001-openssl-1.1-3.x-compat.patch
+@@ -0,0 +1,62 @@
++--- a/src/common/ssl.c
+++++ b/src/common/ssl.c
++@@ -177,8 +177,15 @@
++ 	broke_oneline (cert_info->subject, cert_info->subject_word);
++ 	broke_oneline (cert_info->issuer, cert_info->issuer_word);
++ 
++-	alg = OBJ_obj2nid (peer_cert->cert_info->key->algor->algorithm);
++-	sign_alg = OBJ_obj2nid (peer_cert->sig_alg->algorithm);
+++	/* OpenSSL 1.1+/3.x made X509 opaque; use accessors instead of
+++	 * reaching into ->cert_info / ->sig_alg directly. */
+++	{
+++		ASN1_OBJECT *palg = NULL;
+++		X509_PUBKEY_get0_param (&palg, NULL, NULL, NULL,
+++								X509_get_X509_PUBKEY (peer_cert));
+++		alg = OBJ_obj2nid (palg);
+++	}
+++	sign_alg = X509_get_signature_nid (peer_cert);
++ 	ASN1_TIME_snprintf (notBefore, sizeof (notBefore),
++ 							  X509_get_notBefore (peer_cert));
++ 	ASN1_TIME_snprintf (notAfter, sizeof (notAfter),
++@@ -303,10 +310,10 @@
++ 		__SSL_critical_error ("SSL_new");
++ 
++ 	SSL_set_fd (ssl, sd);
++-	if (ctx->method == SSLv23_client_method())
++-		SSL_set_connect_state (ssl);
++-	else
++-	        SSL_set_accept_state(ssl);
+++	/* SSL_CTX is opaque in OpenSSL 1.1+/3.x so we can no longer inspect
+++	 * ctx->method.  HexChat is always an SSL *client* for IRC, so always
+++	 * enter connect state. */
+++	SSL_set_connect_state (ssl);
++ 
++ 	return (ssl);
++ }
++--- a/src/common/server.c
+++++ b/src/common/server.c
++@@ -607,9 +607,11 @@
++ 	char buf[512];
++ 
++ 
++-	X509_NAME_oneline (X509_get_subject_name (ctx->current_cert), subject,
+++	X509 *current_cert = X509_STORE_CTX_get_current_cert (ctx);
+++
+++	X509_NAME_oneline (X509_get_subject_name (current_cert), subject,
++ 							 sizeof (subject));
++-	X509_NAME_oneline (X509_get_issuer_name (ctx->current_cert), issuer,
+++	X509_NAME_oneline (X509_get_issuer_name (current_cert), issuer,
++ 							 sizeof (issuer));
++ 
++ 	snprintf (buf, sizeof (buf), "* Subject: %s", subject);
++@@ -774,7 +776,9 @@
++ 		return (0);					  /* remove it (0) */
++ 	} else
++ 	{
++-		if (serv->ssl->session && serv->ssl->session->time + SSLTMOUT < time (NULL))
+++		/* SSL_SESSION is opaque in OpenSSL 1.1+/3.x; use accessors. */
+++		SSL_SESSION *sess = SSL_get_session (serv->ssl);
+++		if (sess && SSL_SESSION_get_time (sess) + SSLTMOUT < time (NULL))
++ 		{
++ 			snprintf (buf, sizeof (buf), "SSL handshake timed out");
++ 			EMIT_SIGNAL (XP_TE_CONNFAIL, serv->server_session, buf, NULL,
+diff --git a/contrib/hexchat/series b/contrib/hexchat/series
+new file mode 100644
+index 00000000..67e016e0
+--- /dev/null
++++ b/contrib/hexchat/series
+@@ -0,0 +1 @@
++0001-openssl-1.1-3.x-compat.patch
+-- 
+2.54.0
+

@@ -1,0 +1,49 @@
+From 77c3c3f84f203c2ed839b1a3e2de5025738bd1be Mon Sep 17 00:00:00 2001
+From: Kirn Gill II <segin2005@gmail.com>
+Date: Mon, 8 Jun 2026 11:07:11 -0500
+Subject: [PATCH 02/83] etc/hosts: map the hostname to 127.0.0.1, not the
+ 127.0.1.1 alias
+
+CDE's ToolTalk messaging system (ttsession) is reached by Sun-RPC at the
+local hostname (gethostname()).  substrate's loopback only fully
+round-trips 127.0.0.1: a datagram to another 127/8 address such as the
+Debian-style 127.0.1.1 alias is dropped on input (ip4_input accepts only
+the loopback device's configured 127.0.0.1), and even past that the
+reply's source address doesn't match what the connected RPC client sent
+to.  So with the default hostname "agar" mapped to 127.0.1.1, tt_open()
+failed -- dtsession put up "The desktop messaging system could not be
+started" and the desktop came up bare with the startup hourglass, while
+plain WMs (matwm2/twm/ctwm), which use no RPC, worked fine.
+
+Put the hostname on the 127.0.0.1 line and drop the 127.0.1.1 entry so
+ToolTalk's RPC stays on the address substrate's loopback fully handles.
+Together with the sys_recvmsg/sys_sendmsg msg_name fix, CDE's ToolTalk
+now starts and dtwm decorates the session.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+---
+ etc/hosts | 10 ++++++++--
+ 1 file changed, 8 insertions(+), 2 deletions(-)
+
+diff --git a/etc/hosts b/etc/hosts
+index a0445d36..013db15d 100644
+--- a/etc/hosts
++++ b/etc/hosts
+@@ -1,6 +1,12 @@
+ # /etc/hosts — substrate static host table
+-127.0.0.1       localhost localhost.localdomain
++#
++# The machine's own hostname is mapped to 127.0.0.1 (not the Debian-style
++# 127.0.1.1 alias).  CDE's ToolTalk messaging system rpc-pings ttsession at
++# the local hostname, and substrate's loopback only fully round-trips
++# 127.0.0.1 — a hostname pointing at any other 127/8 address makes tt_open()
++# fail ("The desktop messaging system could not be started") and the desktop
++# never comes up.  Keep the hostname on 127.0.0.1.
++127.0.0.1       localhost localhost.localdomain agar agar.localdomain
+ ::1             localhost localhost.localdomain ip6-localhost ip6-loopback
+ ff02::1         ip6-allnodes
+ ff02::2         ip6-allrouters
+-127.0.1.1       agar agar.localdomain
+-- 
+2.54.0
+

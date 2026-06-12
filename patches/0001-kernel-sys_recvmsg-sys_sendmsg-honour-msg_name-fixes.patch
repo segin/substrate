@@ -1,0 +1,96 @@
+From 728b1077375ce9fbf38a2c9dfc6fbefd50617d99 Mon Sep 17 00:00:00 2001
+From: Kirn Gill II <segin2005@gmail.com>
+Date: Mon, 8 Jun 2026 09:43:56 -0500
+Subject: [PATCH 01/83] kernel: sys_recvmsg/sys_sendmsg honour msg_name (fixes
+ UDP RPC, ToolTalk, CDE)
+
+sys_recvmsg() read data via sys_recv (addr=NULL) and never populated
+msg->msg_name; sys_sendmsg() sent via sys_send and ignored msg->msg_name.
+Datagram Sun-RPC depends on both: libtirpc's svc_dg recvmsg()s a request
+to learn the client address (msg_name) and svc_dg_reply sendmsg()s the
+reply back to it.  With msg_name dropped on both sides, rpcbind received
+every UDP query on port 111 but could never reply, so every RPC client
+(ttsession registering, dtsession/ttsession pinging the ToolTalk session)
+spun forever in a 5s poll-retry loop.
+
+That hung dtsession's tt_open() inside StartMsgServer(), before it ever
+reached its Xt event loop (WaitForWM) -- so it never accepted dtwm's ICE
+session-manager connection, and the whole CDE desktop froze with the
+startup hourglass, no window-manager rendering, and input blocked.  (The
+"dtwm/ICE deadlock" was a symptom downstream of this.)
+
+Fix: sys_recvmsg captures the sender's address into msg_name via
+sys_recvfrom on the first iov; sys_sendmsg sends to msg_name via
+sys_sendto.  Both gate on msg_name != NULL, so the AF_UNIX SCM_RIGHTS
+path (msg_name == NULL) is unaffected.  sys_sendto/sys_recvfrom already
+route AF_INET to the afinet path and fall back to plain send/recv for
+AF_UNIX.
+
+Verified end-to-end (instrumented dtsession + kernel traces, since
+reverted): rpcbind answers GETADDR, ttsession registers, dtsession's
+tt_open()/tt_pattern_register() return TT_OK, WaitForWM exits with
+dtwmRunning=1, and dtwm's ICE handshake completes.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+---
+ sys/net/af_unix.c | 37 +++++++++++++++++++++++++++++++++++--
+ 1 file changed, 35 insertions(+), 2 deletions(-)
+
+diff --git a/sys/net/af_unix.c b/sys/net/af_unix.c
+index f13243a1..378404aa 100644
+--- a/sys/net/af_unix.c
++++ b/sys/net/af_unix.c
+@@ -1011,7 +1011,22 @@ ssize_t sys_sendmsg(int fd, const struct msghdr *msg, int flags) {
+     ssize_t total = 0;
+     struct iovec_local *iov = (struct iovec_local *)msg->msg_iov;
+     for (int i = 0; i < (int)msg->msg_iovlen; i++) {
+-        ssize_t r = sys_send(fd, iov[i].iov_base, iov[i].iov_len, flags);
++        ssize_t r;
++        if (msg->msg_name && msg->msg_namelen > 0) {
++            /* Honour msg_name as the datagram destination — the mirror of
++             * the recvmsg msg_name fix.  rpcbind's libtirpc svc_dg_reply
++             * sendmsg()s its reply with msg_name set to the client it just
++             * recvmsg()'d from (on an *unconnected* UDP socket), so without
++             * this the reply is sent with no destination and silently
++             * dropped, leaving every RPC caller hanging.  sys_sendto routes
++             * AF_INET/INET6 to afinet_sendto and otherwise falls back to
++             * sys_send, so AF_UNIX traffic is unaffected. */
++            r = sys_sendto(fd, iov[i].iov_base, iov[i].iov_len, flags,
++                           (const struct sockaddr *)msg->msg_name,
++                           (socklen_t)msg->msg_namelen);
++        } else {
++            r = sys_send(fd, iov[i].iov_base, iov[i].iov_len, flags);
++        }
+         if (r < 0) return total > 0 ? total : r;
+         total += r;
+         if ((size_t)r < iov[i].iov_len) break;
+@@ -1028,7 +1043,25 @@ ssize_t sys_recvmsg(int fd, struct msghdr *msg, int flags) {
+     ssize_t total = 0;
+     struct iovec_local *iov = (struct iovec_local *)msg->msg_iov;
+     for (int i = 0; i < (int)msg->msg_iovlen; i++) {
+-        ssize_t r = sys_recv(fd, iov[i].iov_base, iov[i].iov_len, flags);
++        ssize_t r;
++        if (i == 0 && msg->msg_name && msg->msg_namelen > 0) {
++            /* Capture the datagram sender's address into msg_name on the
++             * first iov read.  Datagram RPC servers — notably rpcbind's
++             * libtirpc svc_dg, which recvmsg()s each request and sends
++             * the reply back to msg_name — depend on this.  Without it
++             * the source address stays empty and every reply is
++             * undeliverable, so e.g. CDE's ttsession/dtsession hang
++             * forever pinging an rpcbind that can never answer.  msg_name
++             * is the caller's userspace buffer and msg_namelen its
++             * capacity, exactly what sys_recvfrom/do_recv expect.  The
++             * SCM_RIGHTS path below passes msg_name == NULL, so it is
++             * unaffected. */
++            r = sys_recvfrom(fd, iov[i].iov_base, iov[i].iov_len, flags,
++                             (struct sockaddr *)msg->msg_name,
++                             (socklen_t *)&msg->msg_namelen);
++        } else {
++            r = sys_recv(fd, iov[i].iov_base, iov[i].iov_len, flags);
++        }
+         if (r < 0) return total > 0 ? total : r;
+         total += r;
+         if ((size_t)r < iov[i].iov_len) break;
+-- 
+2.54.0
+

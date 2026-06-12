@@ -1,0 +1,331 @@
+From 54b5e497cc9f8c05770d13ee7c3a9ce9854df434 Mon Sep 17 00:00:00 2001
+From: Kirn Gill II <segin2005@gmail.com>
+Date: Thu, 11 Jun 2026 16:38:48 -0500
+Subject: [PATCH 78/83] =?UTF-8?q?kernel:=20return=20real=20errno=20from=20?=
+ =?UTF-8?q?native=20syscalls=20(not=20bare=20-1=20=E2=86=92=20EPERM)?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+39 error returns in sys/kern/syscall.c returned a bare -1.  The kernel ABI
+returns a negative errno that libc negates into errno, so -1 became
+errno=EPERM for every one of these — a bad fd, a NULL pointer, a short
+buffer, etc. all reported "Operation not permitted".
+
+Assign the correct errno per site: -EBADF (out-of-range / unopened / un-
+backed fd in read/write/getdents/fstat/fchdir), -EFAULT (NULL user pointer
+in uname/chroot/mkdir/pipe/getcwd/proc_info/hostname), -EINVAL (undersized
+thr_param, bad getcwd/hostname length, defensive !current_process),
+-ENOTDIR (chroot/fchdir target not a directory), -EMFILE (fd-allocation
+failure in open/pipe), -ENOMEM (thread/file_t allocation failure), -ESRCH
+(proc_info target not found), -ENOENT (chroot path not found), -EINVAL
+(truncate of a non-regular file).  Non-errno -1 uses (fd==-1 comparisons,
+(void*)-1 sentinels) are untouched.  Success paths unchanged, so userland
+still sees -1 — now with the right errno.
+
+Found by a security audit (and a long-standing known regression).
+
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+---
+ sys/kern/syscall.c | 84 +++++++++++++++++++++++-----------------------
+ 1 file changed, 42 insertions(+), 42 deletions(-)
+
+diff --git a/sys/kern/syscall.c b/sys/kern/syscall.c
+index 873090f8..973f6335 100644
+--- a/sys/kern/syscall.c
++++ b/sys/kern/syscall.c
+@@ -278,11 +278,11 @@ void file_free(file_t *f) {
+ }
+ 
+ ssize_t kern_write(int fd, const char *buf, size_t len) {
+-    if (fd < 0 || fd >= MAX_FD) return -1;
++    if (fd < 0 || fd >= MAX_FD) return -EBADF;
+     if (len == 0) return 0;
+ 
+     file_t *f = current_process->fds[fd];
+-    if (!f) return -1;
++    if (!f) return -EBADF;
+     
+     // Check for node write support
+     if (f->f_data && ((fs_node_t*)f->f_data)->write) {
+@@ -325,8 +325,8 @@ int truncate_fs(fs_node_t *node, off_t length) {
+         node->length = length;
+         return 0;
+     }
+-    
+-    return -1;
++
++    return -EINVAL;
+ }
+ 
+ ssize_t sys_write(int fd, const char *buf, size_t len) {
+@@ -369,12 +369,12 @@ ssize_t sys_write(int fd, const char *buf, size_t len) {
+ }
+ 
+ ssize_t kern_read(int fd, char *buf, size_t len) {
+-    if (fd < 0 || fd >= MAX_FD) return -1;
++    if (fd < 0 || fd >= MAX_FD) return -EBADF;
+     if (len == 0) return 0;
+ 
+     file_t *f = current_process->fds[fd];
+-    if (!f) return -1;
+-    if (!f->f_data) return -1;
++    if (!f) return -EBADF;
++    if (!f->f_data) return -EBADF;
+     
+     /*
+      * buf is already a kernel pointer here when called from sys_read or internal code.
+@@ -391,8 +391,8 @@ ssize_t kern_read(int fd, char *buf, size_t len) {
+ 
+ ssize_t sys_read(int fd, char *buf, size_t len) {
+     if (len == 0) return 0;
+-    if (!current_process) return -1;
+-    if (fd < 0 || fd >= MAX_FD) return -1;
++    if (!current_process) return -EINVAL;
++    if (fd < 0 || fd >= MAX_FD) return -EBADF;
+ 
+     /* Bounds-check `buf + total_read` against pointer wrap. */
+     uintptr_t buf_end;
+@@ -401,7 +401,7 @@ ssize_t sys_read(int fd, char *buf, size_t len) {
+     }
+ 
+     file_t *f = current_process->fds[fd];
+-    if (!f || !f->f_data) return -1;
++    if (!f || !f->f_data) return -EBADF;
+ 
+     void *kbuf = kmalloc(4096);
+     if (!kbuf) return -12; // ENOMEM
+@@ -459,7 +459,7 @@ static int kern_open_from(const char *path, int flags, int mode, fs_node_t *root
+     
+     // Find free FD using hint
+     int fd = proc_alloc_fd(current_process);
+-    if (fd == -1) return -1;
++    if (fd == -1) return -EMFILE;
+ 
+     // Lookup file
+     fs_node_t *node = 0;
+@@ -799,7 +799,7 @@ int sys_umask(int newmask) {
+     mode_t oldmask;
+ 
+     if (!current_process) {
+-        return -1;
++        return -EINVAL;
+     }
+ 
+     oldmask = current_process->umask;
+@@ -850,7 +850,7 @@ struct linux_dirent64 {
+ };
+ 
+ int sys_getdents(unsigned int fd, void *dirp, unsigned int count) {
+-    if (!current_process) return -1;
++    if (!current_process) return -EINVAL;
+     if (count > 65536) count = 65536;
+     void *kdirp = kmalloc(count);
+     if (!kdirp) return -12;
+@@ -873,7 +873,7 @@ int sys_getdents(unsigned int fd, void *dirp, unsigned int count) {
+ }
+ 
+ int sys_getdents64(unsigned int fd, void *dirp, unsigned int count) {
+-    if (!current_process) return -1;
++    if (!current_process) return -EINVAL;
+     if (count > 65536) count = 65536;
+     void *kdirp = kmalloc(count);
+     if (!kdirp) return -12;
+@@ -896,9 +896,9 @@ int sys_getdents64(unsigned int fd, void *dirp, unsigned int count) {
+ }
+ 
+ int kern_getdents(unsigned int fd, void *dirp, unsigned int count) {
+-    if (fd >= MAX_FD) return -1;
++    if (fd >= MAX_FD) return -EBADF;
+     file_t *f = current_process->fds[fd];
+-    if (!f) return -1;
++    if (!f) return -EBADF;
+     
+     unsigned int bpos = 0;
+     char temp_buf[512]; // Kernel stack buffer for one entry
+@@ -951,9 +951,9 @@ int kern_getdents(unsigned int fd, void *dirp, unsigned int count) {
+ }
+ 
+ int kern_getdents64(unsigned int fd, void *dirp, unsigned int count) {
+-    if (fd >= MAX_FD) return -1;
++    if (fd >= MAX_FD) return -EBADF;
+     file_t *f = current_process->fds[fd];
+-    if (!f) return -1;
++    if (!f) return -EBADF;
+ 
+     unsigned int bpos = 0;
+     char temp_buf[512];
+@@ -1022,7 +1022,7 @@ int sys_sethostname(const char *uname, size_t len) {
+ }
+ 
+ int kern_uname(struct utsname *buf) {
+-    if (!buf) return -1;
++    if (!buf) return -EFAULT;
+ 
+     extern char kernel_hostname[MAXHOSTNAMELEN];
+     
+@@ -1057,7 +1057,7 @@ int sys__exit(int code) {
+ 
+ int sys_thr_new(struct thr_param *param, int param_size) {
+     struct thr_param kparam;
+-    if (param_size < (int)sizeof(struct thr_param)) return -1;
++    if (param_size < (int)sizeof(struct thr_param)) return -EINVAL;
+     if (copyin(param, &kparam, sizeof(struct thr_param)) != 0) return -14;
+ 
+     // We also need to handle child_tid if it is provided
+@@ -1082,11 +1082,11 @@ int sys_thr_self(void) {
+ }
+ 
+ int kern_thr_new(struct thr_param *param, int param_size) {
+-    if (!param || param_size < (int)sizeof(struct thr_param)) return -1;
++    if (!param || param_size < (int)sizeof(struct thr_param)) return -EINVAL;
+     struct thr_param p = *param;
+     void *stack_top = (char*)p.stack_base + p.stack_size;
+     thread_t *t = sched_create_thread(current_process, p.start_func, stack_top, p.arg);
+-    if (!t) return -1;
++    if (!t) return -ENOMEM;
+     if (p.child_tid) *p.child_tid = t->tid;
+     /* Per-thread TLS: caller (libpthread) allocated a fresh TLS
+      * block, computed the thread pointer (TP), and passed it in
+@@ -1350,7 +1350,7 @@ int sys_chroot(const char *path) {
+ }
+ 
+ int kern_chroot(const char *path) {
+-    if (!path) return -1;
++    if (!path) return -EFAULT;
+ 
+     /* Only root may chroot */
+     if (current_process->euid != 0) return -EPERM;
+@@ -1365,8 +1365,8 @@ int kern_chroot(const char *path) {
+         node = vfs_lookup(cwd, path);
+     }
+ 
+-    if (!node) return -1;
+-    if ((node->flags & 0x07) != FS_DIRECTORY) return -1;
++    if (!node) return -ENOENT;
++    if ((node->flags & 0x07) != FS_DIRECTORY) return -ENOTDIR;
+ 
+     current_process->root_node = node;
+     return 0;
+@@ -1396,7 +1396,7 @@ static inline uint16_t apply_umask(int m) {
+ }
+ 
+ int kern_mkdir(const char *p, int m) {
+-    if (!p) return -1;
++    if (!p) return -EFAULT;
+     return vfs_mkdir(p, apply_umask(m));
+ }
+ 
+@@ -1891,9 +1891,9 @@ int sys_fstat(int fd, struct stat *buf) {
+ 
+ 
+ int kern_fstat(int fd, struct stat *buf) {
+-    if (fd < 0 || fd >= MAX_FD || !buf) return -1;
++    if (fd < 0 || fd >= MAX_FD || !buf) return -EBADF;
+     file_t *f = current_process->fds[fd];
+-    if (!f || !f->f_data) return -1;
++    if (!f || !f->f_data) return -EBADF;
+     fill_stat(buf, (fs_node_t*)f->f_data);
+     return 0;
+ }
+@@ -2402,13 +2402,13 @@ int sys_pipe(int *fds) {
+ }
+ 
+ int kern_pipe(int *fds) {
+-    if (!fds) return -1;
++    if (!fds) return -EFAULT;
+ 
+     fs_node_t *read_node, *write_node;
+     pipe_create(&read_node, &write_node);
+ 
+     int f1 = proc_alloc_fd(current_process);
+-    if (f1 == -1) return -1;
++    if (f1 == -1) return -EMFILE;
+     int f2 = proc_alloc_fd(current_process);
+     if (f2 == -1) {
+         // No second FD, but we already "allocated" f1.
+@@ -2423,14 +2423,14 @@ int kern_pipe(int *fds) {
+         // If the second fails, we should free the first.
+         // Since we didn't set the pointer yet, we just need to clear the bit.
+         proc_clear_fd(current_process, f1);
+-        return -1;
++        return -EMFILE;
+     }
+ 
+     file_t *rf = file_alloc();
+     if (!rf) {
+         proc_clear_fd(current_process, f1);
+         proc_clear_fd(current_process, f2);
+-        return -1;
++        return -ENOMEM;
+     }
+     rf->f_data = read_node;
+     rf->f_flag = FREAD;
+@@ -2446,7 +2446,7 @@ int kern_pipe(int *fds) {
+         file_close_ptr(rf);
+         proc_clear_fd(current_process, f1);
+         proc_clear_fd(current_process, f2);
+-        return -1;
++        return -ENOMEM;
+     }
+     wf->f_data = write_node;
+     wf->f_flag = FWRITE;
+@@ -3058,13 +3058,13 @@ int kern_chdir(const char *path) {
+ }
+ 
+ int kern_fchdir(int fd) {
+-    if (fd < 0 || fd >= MAX_FD) return -1;
++    if (fd < 0 || fd >= MAX_FD) return -EBADF;
+     file_t *f = current_process->fds[fd];
+-    if (!f || !f->f_data) return -1;
+-    
++    if (!f || !f->f_data) return -EBADF;
++
+     fs_node_t *node = (fs_node_t*)f->f_data;
+     fs_node_t *old_cwd = current_process->cwd_node;
+-    if ((node->flags & 0x7) != FS_DIRECTORY) return -1;
++    if ((node->flags & 0x7) != FS_DIRECTORY) return -ENOTDIR;
+ 
+     open_fs(node, 1, 0);
+     current_process->cwd_node = node;
+@@ -3140,7 +3140,7 @@ int sys_getcwd(char *buf, size_t size) {
+ }
+ 
+ int kern_getcwd(char *buf, size_t size) {
+-    if (!buf || size < 2) return -1;
++    if (!buf || size < 2) return -EINVAL;
+ 
+     // Allocate temp kernel buffer for reverse walk
+     char *kbuf = kmalloc(4096);
+@@ -3239,7 +3239,7 @@ int sys_proc_info(pid_t pid, sys_procinfo_t *info) {
+ }
+ 
+ int kern_proc_info(pid_t pid, sys_procinfo_t *info) {
+-    if (!info) return -1;
++    if (!info) return -EFAULT;
+     
+     process_t *target = NULL;
+     if (pid == 0) {
+@@ -3248,8 +3248,8 @@ int kern_proc_info(pid_t pid, sys_procinfo_t *info) {
+         target = proc_find(pid);
+     }
+     
+-    if (!target) return -1;
+-    
++    if (!target) return -ESRCH;
++
+     memset(info, 0, sizeof(sys_procinfo_t));
+     info->pid = target->pid;
+     info->ppid = target->ppid;
+@@ -3372,7 +3372,7 @@ int sys_hostname(char *buf, size_t len) {
+ 
+ 
+ int kern_hostname(char *buf, size_t len) {
+-    if (!buf || len == 0) return -1;
++    if (!buf || len == 0) return -EINVAL;
+     extern char kernel_hostname[MAXHOSTNAMELEN];
+     
+     size_t hlen = 0;
+-- 
+2.54.0
+

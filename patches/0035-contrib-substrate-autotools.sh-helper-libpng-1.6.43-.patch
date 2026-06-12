@@ -1,0 +1,168 @@
+From 72559fae3810ffe65bb3eac2af0b0bb7e7f33167 Mon Sep 17 00:00:00 2001
+From: Kirn Gill II <segin2005@gmail.com>
+Date: Wed, 10 Jun 2026 07:15:11 -0500
+Subject: [PATCH 35/83] contrib: substrate-autotools.sh helper + libpng 1.6.43
+ (GTK+ 2.x stack)
+
+Begins the GTK+ 2.x dependency stack.  substrate-autotools.sh factors out
+the three recurring fixes every modern-autotools (libtool 2.x) port needs:
+- substrate_config_sub_fix: swap in the binutils port's substrate-aware
+  config.sub/config.guess (upstream copies reject the triple).
+- substrate_libtool_fix: add substrate* beside linux* in every libtool
+  dispatch in the generated configure, so --enable-shared actually emits
+  shared ELF instead of static-only (the X ports carry this as a patch;
+  sed'd here so it survives configure regeneration).
+- substrate_so_finalize: strip .la and patch each .so OSABI to 0x40.
+
+libpng 1.6.43: cross-built against dist-zlib via those helpers; produces
+libpng16.so.16.43.0 + libpng.pc for cairo/gdk-pixbuf.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+---
+ contrib/libpng/README.SUBSTRATE.md |  9 +++++++
+ contrib/libpng/build.sh            | 42 ++++++++++++++++++++++++++++++
+ contrib/libpng/fetch.sh            | 19 ++++++++++++++
+ contrib/substrate-autotools.sh     | 40 ++++++++++++++++++++++++++++
+ 4 files changed, 110 insertions(+)
+ create mode 100644 contrib/libpng/README.SUBSTRATE.md
+ create mode 100755 contrib/libpng/build.sh
+ create mode 100755 contrib/libpng/fetch.sh
+ create mode 100644 contrib/substrate-autotools.sh
+
+diff --git a/contrib/libpng/README.SUBSTRATE.md b/contrib/libpng/README.SUBSTRATE.md
+new file mode 100644
+index 00000000..e167228b
+--- /dev/null
++++ b/contrib/libpng/README.SUBSTRATE.md
+@@ -0,0 +1,9 @@
++# libpng (1.6.43)
++
++PNG codec for cairo and gdk-pixbuf (the GTK+ 2.x stack).  Modern-autotools
++patch-free port: `fetch.sh` downloads + SHA-verifies and swaps in the
++binutils port's substrate config.sub via `substrate_config_sub_fix`;
++`build.sh` cross-configures against `dist-zlib`, applies
++`substrate_libtool_fix` (teaches the bundled libtool that host_os=substrate
++builds shared ELF), and stages `dist-libpng` with `.so` OSABI patched to
++ELFOSABI_SUBSTRATE.  Helpers live in `contrib/substrate-autotools.sh`.
+diff --git a/contrib/libpng/build.sh b/contrib/libpng/build.sh
+new file mode 100755
+index 00000000..3093d667
+--- /dev/null
++++ b/contrib/libpng/build.sh
+@@ -0,0 +1,42 @@
++#!/bin/sh
++# contrib/libpng/build.sh — cross-compile libpng 1.6.43 for substrate.
++set -eu
++HERE="$(cd "$(dirname "$0")" && pwd)"
++VERSION="1.6.43"
++TREE_DIR="${HERE}/build/libpng-${VERSION}"
++BUILD_DIR="${HERE}/build/build-substrate"
++if [ -z "${SUBSTRATE_TOP:-}" ]; then
++    p="${HERE}"
++    while [ "${p}" != "/" ] && [ ! -f "${p}/AGENTS.md" ] && [ ! -f "${p}/CLAUDE.md" ]; do p=$(dirname "${p}"); done
++    SUBSTRATE_TOP="${p}"
++fi
++: "${STAGE1_PREFIX:=/opt/substrate}"
++: "${DESTDIR:=${SUBSTRATE_TOP}/dist-libpng}"
++: "${JOBS:=$(nproc 2>/dev/null || echo 4)}"
++PATH="${STAGE1_PREFIX}/bin:${PATH}"; export PATH
++. "${HERE}/../substrate-autotools.sh"
++[ -d "${TREE_DIR}" ] || { echo "build.sh: run ./fetch.sh first" >&2; exit 1; }
++ZL="${SUBSTRATE_TOP}/dist-zlib"
++[ -d "${ZL}/usr" ] || { echo "build.sh: dist-zlib missing — build contrib/zlib first" >&2; exit 1; }
++
++export CPPFLAGS="-I${ZL}/usr/include"
++export LDFLAGS="-L${ZL}/usr/lib -Wl,-rpath-link,${ZL}/usr/lib -Wl,--copy-dt-needed-entries"
++export PKG_CONFIG_LIBDIR="${ZL}/usr/lib/pkgconfig"
++
++substrate_libtool_fix "${TREE_DIR}/configure"
++
++rm -rf "${BUILD_DIR}"; mkdir -p "${BUILD_DIR}"; cd "${BUILD_DIR}"
++"${TREE_DIR}/configure" \
++    --host=i386-unknown-substrate \
++    --prefix=/usr --libdir=/usr/lib --includedir=/usr/include \
++    --enable-shared --enable-static \
++    --disable-tools \
++    CC=i386-unknown-substrate-gcc \
++    AR=i386-unknown-substrate-ar RANLIB=i386-unknown-substrate-ranlib \
++    CC_FOR_BUILD=gcc \
++    CFLAGS="-march=i486 -mtune=i486 -O2 -g"
++make -j"${JOBS}"
++rm -rf "${DESTDIR}"; mkdir -p "${DESTDIR}"
++make install DESTDIR="${DESTDIR}"
++substrate_so_finalize "${DESTDIR}"
++echo "==> libpng staged at ${DESTDIR}"
+diff --git a/contrib/libpng/fetch.sh b/contrib/libpng/fetch.sh
+new file mode 100755
+index 00000000..122612f0
+--- /dev/null
++++ b/contrib/libpng/fetch.sh
+@@ -0,0 +1,19 @@
++#!/bin/sh
++# contrib/libpng/fetch.sh — libpng 1.6.43 (cairo/gdk-pixbuf PNG support).
++set -eu
++VERSION="1.6.43"
++TARBALL="libpng-${VERSION}.tar.xz"
++URL="https://download.sourceforge.net/libpng/${TARBALL}"
++SHA256="6a5ca0652392a2d7c9db2ae5b40210843c0bbc081cbd410825ab00cc59f14a6c"
++HERE="$(cd "$(dirname "$0")" && pwd)"
++BUILD_DIR="${HERE}/build"; TREE_DIR="${BUILD_DIR}/libpng-${VERSION}"
++mkdir -p "${BUILD_DIR}"; cd "${BUILD_DIR}"
++if [ ! -f "${TARBALL}" ]; then
++    [ "${1:-}" = "--no-network" ] && { echo "fetch.sh: tarball missing" >&2; exit 1; }
++    echo "==> Fetching ${URL}"; curl -fSL -o "${TARBALL}" "${URL}"
++fi
++echo "${SHA256}  ${TARBALL}" | sha256sum -c -
++[ -d "${TREE_DIR}" ] || { echo "==> Extracting"; tar xf "${TARBALL}"; }
++. "${HERE}/../substrate-autotools.sh"
++substrate_config_sub_fix "${TREE_DIR}"
++echo "==> libpng ${VERSION} ready at ${TREE_DIR}"
+diff --git a/contrib/substrate-autotools.sh b/contrib/substrate-autotools.sh
+new file mode 100644
+index 00000000..dccd376a
+--- /dev/null
++++ b/contrib/substrate-autotools.sh
+@@ -0,0 +1,40 @@
++# contrib/substrate-autotools.sh — shared helpers for cross-porting modern
++# autotools (libtool 2.x) packages to substrate.  Source from a build.sh:
++#   . "$(dirname "$0")/../substrate-autotools.sh"
++#   substrate_config_sub_fix "${TREE_DIR}"     # in fetch.sh (after extract)
++#   substrate_libtool_fix    "${TREE_DIR}/configure"  # in build.sh (before configure)
++
++# Replace a tree's config.sub/config.guess with the substrate-patched pair
++# from the binutils port (the substrate triple is unknown to upstream copies).
++substrate_config_sub_fix() {
++    _tree="$1"
++    # ${HERE} (absolute port dir) is set by every contrib build/fetch script.
++    _binu="$(ls -d "${HERE}"/../binutils/build/binutils-*/ 2>/dev/null | head -1)"
++    [ -n "${_binu}" ] || { echo "substrate_config_sub_fix: contrib/binutils not fetched" >&2; return 1; }
++    for _s in config.sub config.guess; do
++        find "${_tree}" -name "${_s}" -exec cp -f "${_binu}/${_s}" {} +
++    done
++}
++
++# Teach a generated configure's bundled libtool that host_os=substrate is ELF
++# + GNU ld + linux-like, so --enable-shared actually builds shared libraries
++# (otherwise substrate falls through every dispatch to static-only).
++substrate_libtool_fix() {
++    sed -i \
++      -e 's/linux\* | k\*bsd\*-gnu | kopensolaris\*-gnu | gnu\*)/linux* | k*bsd*-gnu | kopensolaris*-gnu | gnu* | substrate*)/g' \
++      -e 's/gnu\* | linux\* | tpf\* | k\*bsd\*-gnu | kopensolaris\*-gnu)/gnu* | linux* | tpf* | k*bsd*-gnu | kopensolaris*-gnu | substrate*)/g' \
++      "$1"
++}
++
++# Strip libtool archives + patch each non-symlink .so OSABI byte to
++# ELFOSABI_SUBSTRATE (0x40); call after `make install DESTDIR=$1`.
++substrate_so_finalize() {
++    rm -f "$1"/usr/lib/*.la
++    _n=0
++    for _so in "$1"/usr/lib/*.so.*; do
++        [ -f "${_so}" ] || continue; [ -L "${_so}" ] && continue
++        printf '\100' | dd of="${_so}" bs=1 seek=7 count=1 conv=notrunc status=none
++        _n=$((_n + 1))
++    done
++    echo "  OSABI->substrate on ${_n} shared objects"
++}
+-- 
+2.54.0
+

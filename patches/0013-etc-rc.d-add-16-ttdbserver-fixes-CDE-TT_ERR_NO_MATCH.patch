@@ -1,0 +1,108 @@
+From ebb5a600508702df6d5b4cfef82bf5c568833260 Mon Sep 17 00:00:00 2001
+From: Kirn Gill II <segin2005@gmail.com>
+Date: Tue, 9 Jun 2026 11:38:26 -0500
+Subject: [PATCH 13/83] =?UTF-8?q?etc/rc.d:=20add=2016-ttdbserver=20?=
+ =?UTF-8?q?=E2=80=94=20fixes=20CDE=20TT=5FERR=5FNO=5FMATCH?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+CDE apps (dtstyle, dtcm, dtfile, ...) resolve their ToolTalk message
+patterns through a type database that ttsession loads at session start.
+Substrate started rpcbind (15-rpcbind) but never started rpc.ttdbserver
+and never compiled the CDE ptypes, so ttsession had zero ptypes
+registered: every ToolTalk request returned TT_ERR_NO_MATCH and the apps
+printed "Cannot communicate with the session manager" and exited.
+
+16-ttdbserver (sequenced after rpcbind, before 60-sdm) starts
+rpc.ttdbserver and compiles /usr/dt/appconfig/tttypes/*.ptype into the
+ToolTalk type DB so the types are live before dtsession starts.
+
+The compile runs with DISPLAY unset on purpose: with DISPLAY set but no X
+server up yet, tt_type_comp's ToolTalk init blocks ~20s per file trying to
+reach the X-display session before falling back (this is the "tt_type_comp
+hang" — it always completes, just slowly).  With DISPLAY unset it uses the
+host session and compiles all ptypes in ~3s.
+
+Verified headless: with this rc.d the type names compile correctly (the
+%C/%S printf fix makes them legible) and dtsession/dtwm/ttsession come up
+with a clean errorlog — no more NO_MATCH / "cannot communicate".
+
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+---
+ etc/rc.d/16-ttdbserver | 63 ++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 63 insertions(+)
+ create mode 100755 etc/rc.d/16-ttdbserver
+
+diff --git a/etc/rc.d/16-ttdbserver b/etc/rc.d/16-ttdbserver
+new file mode 100755
+index 00000000..ed1142ad
+--- /dev/null
++++ b/etc/rc.d/16-ttdbserver
+@@ -0,0 +1,63 @@
++#!/bin/sh
++# /etc/rc.d/16-ttdbserver — CDE ToolTalk database server + type database.
++#
++# ToolTalk clients (dtsession, dtfile, dtstyle, dtcm, ...) resolve their
++# message patterns ("ptypes") through a type database served by
++# rpc.ttdbserver and loaded by ttsession.  With neither the server running
++# NOR the CDE ptypes compiled, every ToolTalk request fails with
++# TT_ERR_NO_MATCH and the apps print "Cannot communicate with the session
++# manager" and exit.
++#
++# Runs after 15-rpcbind (rpc.ttdbserver registers its RPC service with the
++# portmapper) and before 60-sdm (so the types are loaded by the time
++# dtsession starts ttsession).
++#
++# NOTE on the compile: tt_type_comp must run with DISPLAY UNSET.  With
++# DISPLAY set but no X server up yet, its ToolTalk init blocks ~20s per
++# file trying to reach the X-display session before falling back — so
++# compiling all ptypes at boot would otherwise add minutes of dead time.
++# With DISPLAY unset it uses the host session and compiles all of them in
++# a few seconds.
++
++TTDB=/usr/dt/bin/rpc.ttdbserver
++TTC=/usr/dt/bin/tt_type_comp
++PIDFILE=/var/run/ttdbserver.pid
++TTPATH=/root/.tt
++
++case "${1:-start}" in
++    start)
++        if [ -x "$TTDB" ]; then
++            mkdir -p /var/run
++            "$TTDB" > /var/log/ttdbserver.log 2>&1 &
++            echo $! > "$PIDFILE"
++        fi
++        # Compile the CDE ptypes into the ToolTalk type DB.  tt_type_comp -m
++        # merges idempotently, so re-running each boot is cheap (a few
++        # seconds total) and avoids depending on the DB's on-disk path.
++        if [ -x "$TTC" ]; then
++            ( unset DISPLAY
++              export HOME=/root TTPATH="$TTPATH"
++              mkdir -p "$TTPATH"
++              for f in /usr/dt/appconfig/tttypes/*.ptype; do
++                  # dtinfo*.ptype use #include and don't compile; skip them.
++                  case "$f" in *dtinfo*) continue ;; esac
++                  "$TTC" -sd user -m "$f" > /dev/null 2>&1
++              done )
++        fi
++        ;;
++    stop)
++        kill "$(cat $PIDFILE 2>/dev/null)" 2>/dev/null
++        ;;
++    status)
++        if [ -x "$TTC" ] && ( unset DISPLAY; HOME=/root TTPATH="$TTPATH" \
++                "$TTC" -sd user -p 2>/dev/null | grep -q '^ptype' ); then
++            echo "ttdbserver: ToolTalk types loaded"
++        else
++            echo "ttdbserver: no types"
++        fi
++        ;;
++    restart)
++        $0 stop
++        $0 start
++        ;;
++esac
+-- 
+2.54.0
+
