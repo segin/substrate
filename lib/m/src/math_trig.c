@@ -9,7 +9,94 @@
 #include <fenv.h>
 #include <limits.h>
 #include <math.h>
+#include <stddef.h>
 #include <stdint.h>
+
+#include "math_rem_pio2.h"
+
+/*
+ * Large-argument range reduction.
+ *
+ * The x87 fsin/fcos/fptan are full-precision only when the operand is
+ * already small.  For |x| up to ~2^20*(pi/4) (~8.2e5) the bare
+ * instructions remain accurate, so the small-argument fast paths below
+ * keep using them directly.  For larger |x| an 80-bit fprem1-by-2pi
+ * reduction would lose precision (sin(1e15) wrong at the 7th digit),
+ * so we instead call __ieee754_rem_pio2() — a Payne-Hanek reduction
+ * that uses a 396-hex-digit table of 2/pi — to bring x into
+ * [-pi/4, pi/4] with the quadrant n, then evaluate fsin/fcos on the
+ * accurate reduced argument.
+ *
+ * REDUCE_THRESHOLD is the high 31 bits of the IEEE-754 double exponent
+ * field for 2^20*(pi/4) ~= 823549.  |x| with a high word at or below
+ * this stays on the fast path.  (fdlibm's e_rem_pio2 uses the same
+ * 0x413921fb boundary internally; matching it here keeps small-arg
+ * results bit-identical to the previous direct-fsin implementation.)
+ */
+#define REDUCE_THRESHOLD 0x413921fb
+
+/* High 31 bits (sign cleared) of the double x. */
+static int32_t hi_word(double x)
+{
+    int32_t hi;
+    union {
+        double d;
+        int32_t w[2];
+    } u;
+    u.d = x;
+    hi = u.w[1] & 0x7fffffff; /* little-endian / i386: high word at [1] */
+    return hi;
+}
+
+/* fsin(r) for |r| <= pi/4 — full hardware precision, no reduction. */
+static double x87_sin(double r)
+{
+    double res;
+    __asm__("fsin" : "=t"(res) : "0"(r));
+    return res;
+}
+
+/* fcos(r) for |r| <= pi/4 — full hardware precision, no reduction. */
+static double x87_cos(double r)
+{
+    double res;
+    __asm__("fcos" : "=t"(res) : "0"(r));
+    return res;
+}
+
+/*
+ * Reduce x and return sin(x) (and, if c != NULL, cos(x)) via the
+ * Payne-Hanek quadrant.  Only called for |x| above REDUCE_THRESHOLD.
+ */
+static double reduced_sincos(double x, double *c)
+{
+    double y[2];
+    int n = __ieee754_rem_pio2(x, y);
+    double r = y[0]; /* reduced argument in [-pi/4, pi/4] */
+    double s, co;
+
+    switch (n & 3) {
+    case 0:
+        s = x87_sin(r);
+        co = x87_cos(r);
+        break;
+    case 1:
+        s = x87_cos(r);
+        co = -x87_sin(r);
+        break;
+    case 2:
+        s = -x87_sin(r);
+        co = -x87_cos(r);
+        break;
+    default: /* case 3 */
+        s = -x87_cos(r);
+        co = x87_sin(r);
+        break;
+    }
+    if (c)
+        *c = co;
+    return s;
+}
 
 /* Constants (with guards to avoid redefinition) */
 #ifndef M_PI
@@ -42,24 +129,12 @@ double sin(double x) {
     if (isnan(x)) return x;
     if (isinf(x)) return NAN;
 
-    double res;
-    __asm__ __volatile__(
-        "fldl %1\n\t"
-        "1: fsin\n\t"
-        "fnstsw %%ax\n\t"
-        "sahf\n\t"
-        "jp 2f\n\t"
-        "fstpl %0\n\t"
-        "jmp 3f\n\t"
-        "2: fldpi\n\t"
-        "fadd %%st(0)\n\t"
-        "fxch %%st(1)\n\t"
-        "fprem1\n\t"
-        "fstp %%st(1)\n\t"
-        "jmp 1b\n\t"
-        "3:"
-        : "=m"(res) : "m"(x) : "ax", "cc");
-    return res;
+    /* Small |x|: bare fsin is full-precision, keep bit-for-bit. */
+    if (hi_word(x) <= REDUCE_THRESHOLD)
+        return x87_sin(x);
+
+    /* Large |x|: accurate Payne-Hanek reduction + quadrant. */
+    return reduced_sincos(x, NULL);
 }
 
 /*
@@ -70,44 +145,34 @@ double cos(double x) {
     if (isnan(x)) return x;
     if (isinf(x)) return NAN;
 
-    double res;
-    __asm__ __volatile__(
-        "fldl %1\n\t"
-        "1: fcos\n\t"
-        "fnstsw %%ax\n\t"
-        "sahf\n\t"
-        "jp 2f\n\t"
-        "fstpl %0\n\t"
-        "jmp 3f\n\t"
-        "2: fldpi\n\t"
-        "fadd %%st(0)\n\t"
-        "fxch %%st(1)\n\t"
-        "fprem1\n\t"
-        "fstp %%st(1)\n\t"
-        "jmp 1b\n\t"
-        "3:"
-        : "=m"(res) : "m"(x) : "ax", "cc");
-    return res;
+    /* Small |x|: bare fcos is full-precision, keep bit-for-bit. */
+    if (hi_word(x) <= REDUCE_THRESHOLD)
+        return x87_cos(x);
+
+    /* Large |x|: accurate Payne-Hanek reduction + quadrant. */
+    double c;
+    reduced_sincos(x, &c);
+    return c;
 }
 
 void sincos(double x, double *s, double *c) {
-    __asm__ __volatile__(
-        "fldl %2\n\t"
-        "1: fsincos\n\t"
-        "fnstsw %%ax\n\t"
-        "sahf\n\t"
-        "jp 2f\n\t"
-        "fstpl %1\n\t"
-        "fstpl %0\n\t"
-        "jmp 3f\n\t"
-        "2: fldpi\n\t"
-        "fadd %%st(0)\n\t"
-        "fxch %%st(1)\n\t"
-        "fprem1\n\t"
-        "fstp %%st(1)\n\t"
-        "jmp 1b\n\t"
-        "3:"
-        : "=m"(*s), "=m"(*c) : "m"(x) : "ax", "cc");
+    if (isnan(x)) {
+        *s = *c = x;
+        return;
+    }
+    if (isinf(x)) {
+        *s = *c = NAN;
+        return;
+    }
+
+    if (hi_word(x) <= REDUCE_THRESHOLD) {
+        /* Small |x|: single fsincos, full hardware precision. */
+        __asm__ __volatile__("fsincos" : "=t"(*c), "=u"(*s) : "0"(x));
+        return;
+    }
+
+    /* Large |x|: accurate Payne-Hanek reduction + quadrant. */
+    *s = reduced_sincos(x, c);
 }
 
 /* tan(x) = sin(x) / cos(x) */
@@ -115,25 +180,22 @@ double tan(double x) {
     if (isnan(x)) return x;
     if (isinf(x)) return NAN;
 
-    double res;
-    __asm__ __volatile__(
-        "fldl %1\n\t"
-        "1: fptan\n\t"
-        "fnstsw %%ax\n\t"
-        "sahf\n\t"
-        "jp 2f\n\t"
-        "fstp %%st(0)\n\t" // Pop the 1.0 pushed by fptan
-        "fstpl %0\n\t"
-        "jmp 3f\n\t"
-        "2: fldpi\n\t"
-        "fadd %%st(0)\n\t"
-        "fxch %%st(1)\n\t"
-        "fprem1\n\t"
-        "fstp %%st(1)\n\t"
-        "jmp 1b\n\t"
-        "3:"
-        : "=m"(res) : "m"(x) : "ax", "cc");
-    return res;
+    /* Small |x|: bare fptan is full-precision, keep bit-for-bit. */
+    if (hi_word(x) <= REDUCE_THRESHOLD) {
+        double res;
+        __asm__ __volatile__(
+            "fldl %1\n\t"
+            "fptan\n\t"
+            "fstp %%st(0)\n\t" /* Pop the 1.0 pushed by fptan */
+            "fstpl %0\n\t"
+            : "=m"(res) : "m"(x) : "cc");
+        return res;
+    }
+
+    /* Large |x|: tan = sin/cos off the same reduced argument. */
+    double c;
+    double s = reduced_sincos(x, &c);
+    return s / c;
 }
 
 /*

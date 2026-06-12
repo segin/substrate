@@ -12,7 +12,8 @@ MATH_SRCS = ../../../lib/m/src/math_exp.c \
             ../../../lib/m/src/math_trig.c \
             ../../../lib/m/src/math_special.c \
             ../../../lib/m/src/math_round.c \
-            ../../../lib/m/src/math_wrap.c
+            ../../../lib/m/src/math_wrap.c \
+            ../../../lib/m/src/math_rem_pio2.c
 FENV = ../../../lib/m/src/fenv.c
 
 all: test_trig prop_trig test_fenv prop_fenv fuzz_fenv test_tgmath \

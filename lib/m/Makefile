@@ -8,7 +8,7 @@ MATH_CFLAGS     = $(USER_CFLAGS)  -fno-builtin
 PIC_MATH_CFLAGS = $(SHLIB_CFLAGS) -fno-builtin
 endif
 
-SRCS = src/math_exp.c src/math_trig.c src/math_special.c \
+SRCS = src/math_exp.c src/math_trig.c src/math_rem_pio2.c src/math_special.c \
        src/math_round.c src/math_wrap.c \
        src/mathf.c src/mathl.c src/fenv.c \
        src/cmath_trig.c src/cmath_explog.c src/cmath_hyper.c \
