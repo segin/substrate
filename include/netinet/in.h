@@ -129,12 +129,11 @@ static inline int __in6_is_addr_v4mapped(const struct in6_addr *__a)
  * libc supplies the symbols; declare here. */
 extern const struct in6_addr in6addr_any;
 extern const struct in6_addr in6addr_loopback;
-/* substrate's struct in6_addr is `struct { uint8_t s6_addr[16]; }`
- * (no anonymous union, unlike glibc's), so the initializer wraps
- * the array once.  Ported code that uses `(struct in6_addr)
- * IN6ADDR_ANY_INIT` still compiles. */
-#define IN6ADDR_ANY_INIT      { { 0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0 } }
-#define IN6ADDR_LOOPBACK_INIT { { 0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,1 } }
+/* struct in6_addr wraps a union (__in6_u) over the 16 bytes, like glibc, so
+ * a fully-braced initializer needs THREE brace levels: struct, union, byte
+ * array.  (Two levels trips -Werror=missing-braces.) */
+#define IN6ADDR_ANY_INIT      { { { 0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0 } } }
+#define IN6ADDR_LOOPBACK_INIT { { { 0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,1 } } }
 
 /* IPv4 / IPv6 socket-level option codes — values match Linux.
  * substrate's network stack doesn't act on most of them yet, but
