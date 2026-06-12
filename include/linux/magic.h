@@ -92,4 +92,16 @@
 #define XFS_SUPER_MAGIC       0x58465342
 #endif
 
+/* Network / legacy filesystem magics referenced by ported code
+ * (e.g. libarchive's archive_read_disk_posix fs-type detection). */
+#ifndef AFS_SUPER_MAGIC
+#define AFS_SUPER_MAGIC       0x5346414F
+#endif
+#ifndef CIFS_SUPER_MAGIC
+#define CIFS_SUPER_MAGIC      0xFF534D42
+#endif
+#ifndef DEVFS_SUPER_MAGIC
+#define DEVFS_SUPER_MAGIC     0x1373
+#endif
+
 #endif /* _LINUX_MAGIC_H */
