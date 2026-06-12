@@ -65,7 +65,8 @@ echo "==> Building shared libbz2.so.1.0.8"
 make -f Makefile-libbz2_so clean >/dev/null 2>&1 || true
 make -j"${JOBS}" -f Makefile-libbz2_so \
     CC="${CROSS_CC}" \
-    CFLAGS="-march=i486 -mtune=i486 -fPIC -Wall -Winline -O2 -g -D_FILE_OFFSET_BITS=64"
+    CFLAGS="-march=i486 -mtune=i486 -fPIC -Wall -Winline -O2 -g -D_FILE_OFFSET_BITS=64" \
+    LDFLAGS="-L${STAGE1_PREFIX}/i386-unknown-substrate/lib -Wl,-rpath-link,${STAGE1_PREFIX}/i386-unknown-substrate/lib -Wl,--copy-dt-needed-entries"
 
 # Stage into DESTDIR with substrate's `/usr/{bin,lib,include}` layout.
 echo "==> Installing into ${DESTDIR}"
