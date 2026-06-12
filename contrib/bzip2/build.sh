@@ -63,10 +63,12 @@ make -j"${JOBS}" \
 # Shared library via the auxiliary Makefile.
 echo "==> Building shared libbz2.so.1.0.8"
 make -f Makefile-libbz2_so clean >/dev/null 2>&1 || true
+# Makefile-libbz2_so hardcodes its link rules without $(LDFLAGS), so inject
+# the DT_NEEDED-chain resolution flags through CC (harmless on the -c compile
+# rules, load-bearing on the bzip2-shared executable link).
 make -j"${JOBS}" -f Makefile-libbz2_so \
-    CC="${CROSS_CC}" \
-    CFLAGS="-march=i486 -mtune=i486 -fPIC -Wall -Winline -O2 -g -D_FILE_OFFSET_BITS=64" \
-    LDFLAGS="-L${STAGE1_PREFIX}/i386-unknown-substrate/lib -Wl,-rpath-link,${STAGE1_PREFIX}/i386-unknown-substrate/lib -Wl,--copy-dt-needed-entries"
+    CC="${CROSS_CC} -L${STAGE1_PREFIX}/i386-unknown-substrate/lib -Wl,-rpath-link,${STAGE1_PREFIX}/i386-unknown-substrate/lib -Wl,--copy-dt-needed-entries" \
+    CFLAGS="-march=i486 -mtune=i486 -fPIC -Wall -Winline -O2 -g -D_FILE_OFFSET_BITS=64"
 
 # Stage into DESTDIR with substrate's `/usr/{bin,lib,include}` layout.
 echo "==> Installing into ${DESTDIR}"
