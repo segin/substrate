@@ -154,6 +154,11 @@ build_components() {
 
     echo "Building sbin (init, ld.so, ...)"
     for dir in "$TOP/sbin"/*/ ; do
+        # sdm (the display manager / sgreet Xlib client) needs the contrib X
+        # stack and is cross-built + installed separately below; this generic
+        # loop passes no CROSS, so sdm's Makefile (CC=$(CROSS)gcc) would fall
+        # back to the host gcc and fail "-march=i486 without -m32".  Skip it.
+        [ "$(basename "$dir")" = sdm ] && continue
         if [ -f "$dir/Makefile" ]; then
             make -C "$dir" -j4
         fi
