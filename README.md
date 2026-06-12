@@ -151,6 +151,43 @@ The kernel is not stored in the image, so kernel changes need only
 `make -C sys` and a relaunch. The two stages the orchestrator drives —
 the toolchain and the root filesystem image — are detailed next.
 
+### Clean build from the ground up
+
+`./build.sh` runs the whole pipeline in dependency order. Its stages:
+
+| Stage | What | Skip with |
+|-------|------|-----------|
+| 0  | Substrate-native GNU toolchain (`contrib/build-toolchain.sh`) — stage-1 cross + stage-2 Canadian cross, into `/opt/substrate` | `SKIP_TOOLCHAIN=1` |
+| 1a–1f | kernel (`sys/`), runtime libs (`lib/`, `usr.lib/`), `sbin/ld.so`, base userland (`bin/`, `sbin/`), helper tools (`usr.bin/`), then mirror native libs+headers into the cross sysroot | — |
+| 2  | every `contrib/<pkg>` in dependency order — each `fetch.sh` (download + verify + extract + apply its `patches/` series) then `build.sh` (configure + cross-compile + stage into `dist-<pkg>/`); each result is mirrored into the cross sysroot so the next port's `configure` finds it | `SKIP_CONTRIB=1` |
+| 3  | `build-rootfs.sh` — assemble `dist/`, overlay the stage-2 toolchain + ports, bake `rootfs.img` | `SKIP_IMAGE=1` |
+
+For a *truly* clean build, remove the build artifacts first, then run the
+orchestrator:
+
+```sh
+make -C sys clean                     # kernel objects
+rm -rf dist dist-* contrib/*/build    # userland staging + extracted contrib trees
+./build.sh                            # rebuild everything from source
+```
+
+Removing `contrib/*/build` forces every port to re-fetch and re-extract from
+its upstream tarball (network required) and re-apply its substrate patch
+series, which is the most thorough check that the ports still build from a
+pristine source tree. To keep the validated toolchain and rebuild only the OS
+on top of it, pass `SKIP_TOOLCHAIN=1`; to rebuild a single port use
+`ONLY="<pkg>"`.
+
+The cross sysroot under `/opt/substrate/i386-unknown-substrate` is populated
+automatically during the build by `scripts/sync-sysroot.sh` (sourced by
+`build.sh`). That script is also runnable standalone and idempotent, so it can
+reconstruct the sysroot from existing `dist-<pkg>/` outputs without a rebuild —
+useful after a fresh toolchain install:
+
+```sh
+scripts/sync-sysroot.sh               # mirror all dist-* + native libs/headers
+```
+
 ### Toolchain
 
 To produce a Substrate-native GNU toolchain — binutils + GCC patched for the
