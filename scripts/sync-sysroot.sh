@@ -33,13 +33,17 @@
 SYSROOT="${STAGE1_PREFIX}/i386-unknown-substrate"
 
 # Copy a directory tree of headers into every GCC include-fixed snapshot.
+# -L dereferences symlinks: a header that is a symlink in the source tree
+# (e.g. include/pthread.h -> ../lib/pthread/pthread.h) must become a REAL
+# file in the sysroot, otherwise it lands as a dangling link the compiler
+# cannot open ("pthread.h: No such file or directory").
 _mirror_to_fixinc() {
     srcinc="$1"
     fixinc="${STAGE1_PREFIX}/lib/gcc/i386-unknown-substrate"
     [ -d "$fixinc" ] || return 0
     for ver in "$fixinc"/*/include-fixed; do
         [ -d "$ver" ] || continue
-        cp -a "$srcinc/." "$ver/" 2>/dev/null || true
+        cp -aL "$srcinc/." "$ver/" 2>/dev/null || true
     done
 }
 
@@ -54,7 +58,8 @@ sync_to_sysroot() {
     fi
     if [ -d "$distdir/usr/include" ]; then
         mkdir -p "$SYSROOT/include"
-        cp -a "$distdir/usr/include/." "$SYSROOT/include/" 2>/dev/null || true
+        # -L: materialise symlinked headers as real files (see _mirror_to_fixinc).
+        cp -aL "$distdir/usr/include/." "$SYSROOT/include/" 2>/dev/null || true
         _mirror_to_fixinc "$distdir/usr/include"
     fi
 }
@@ -69,7 +74,9 @@ sync_native_libs_to_sysroot() {
         [ -f "$dir/lib$name.a"    ] && cp "$dir/lib$name.a"    "$SYSROOT/lib/" 2>/dev/null || true
     done
     if [ -d "${SUBSTRATE_TOP}/include" ]; then
-        cp -a "${SUBSTRATE_TOP}/include/." "$SYSROOT/include/" 2>/dev/null || true
+        # -L: substrate's include/ has symlinked headers (pthread.h ->
+        # ../lib/pthread/pthread.h); materialise them as real files.
+        cp -aL "${SUBSTRATE_TOP}/include/." "$SYSROOT/include/" 2>/dev/null || true
         _mirror_to_fixinc "${SUBSTRATE_TOP}/include"
     fi
 }
