@@ -1,0 +1,104 @@
+.TH CANONICALIZE 3 "June 2026" "Substrate" "Library Functions Manual"
+.SH NAME
+canonicalize, canonicalizef, canonicalizel \- produce the canonical encoding of a floating-point value
+.SH LIBRARY
+Math library (libm, \-lm)
+.SH SYNOPSIS
+.B #include <math.h>
+.PP
+.BI "double canonicalize(double " x ", double *" cx );
+.br
+.BI "float canonicalizef(float " x ", float *" cx );
+.br
+.BI "long double canonicalizel(long double " x ", long double *" cx );
+.PP
+Feature-test macro requirements (see
+.BR feature_test_macros (7)):
+these functions are declared when the implementation is compiled as
+ISO C23 or later
+.RB ( "__STDC_VERSION__ >= 202311L" ).
+.SH DESCRIPTION
+The
+.BR canonicalize ()
+function computes the canonical encoding of
+.I x
+and stores it in the object pointed to by
+.IR cx .
+A canonical encoding is the unique, preferred bit pattern for a value
+in its floating-point format.
+.PP
+For the binary IEEE 754 interchange formats used on Substrate
+.RB ( float ,
+.BR double ,
+and the x86 80-bit
+.BR "long double" )
+every finite value and every infinity is already canonical, so for
+such an argument the function copies
+.I x
+to
+.I *cx
+unchanged.  A signaling NaN is converted to the corresponding quiet
+NaN (the quiet bit \(em the most-significant mantissa bit \(em is set)
+while its payload is preserved; this is the canonical form of a NaN.
+.PP
+The
+.B f
+and
+.B l
+suffixed variants operate on
+.B float
+and
+.B "long double"
+values respectively.
+.SH RETURN VALUE
+On success (the value of
+.I x
+is representable and a canonical encoding is produced in
+.IR *cx ),
+the function returns 0.
+.PP
+A nonzero return value indicates that
+.I x
+has no canonical encoding and
+.I *cx
+was not stored.  On Substrate, where every encoding of the supported
+binary formats is canonicalizable, the function always succeeds and
+returns 0; the nonzero return is reserved for formats (such as decimal
+floating point) that admit non-canonical encodings.
+.SH ERRORS
+No errors occur.  The function does not set
+.I errno
+and raises no floating-point exception; in particular, quietening a
+signaling NaN through
+.BR canonicalize ()
+does
+.B not
+raise
+.BR FE_INVALID .
+.SH ATTRIBUTES
+For an explanation of the terms used in this section, see
+.BR attributes (7).
+.TS
+allbox;
+lb lb lb
+l l l.
+Interface	Attribute	Value
+T{
+.BR canonicalize (),
+.BR canonicalizef (),
+.BR canonicalizel ()
+T}	Thread safety	MT-Safe
+.TE
+.SH STANDARDS
+C23.
+.SH HISTORY
+Added in ISO C23 (§7.12.11), following IEEE 754-2008's
+.IR canonicalize
+operation.
+.SH SEE ALSO
+.BR getpayload (3),
+.BR setpayload (3),
+.BR totalorder (3),
+.BR math_error (7)
+.SH COLOPHON
+This page is part of the Substrate operating system documentation.

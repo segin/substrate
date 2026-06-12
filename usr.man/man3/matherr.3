@@ -1,0 +1,119 @@
+.TH MATHERR 3 "June 2026" "Substrate" "Library Functions Manual"
+.SH NAME
+matherr \- SVID math error-handling hook (compatibility shim)
+.SH LIBRARY
+Math library (libm, \-lm)
+.SH SYNOPSIS
+.B #include <math.h>
+.PP
+.B "struct exception {"
+.RS 4
+.B "char   *name;"
+.br
+.B "char   *arith;"
+.br
+.B "char   *type;"
+.br
+.B "double  arg1;"
+.br
+.B "double  arg2;"
+.br
+.B "double  retval;"
+.RE
+.B "};"
+.PP
+.BI "int matherr(struct exception *" e );
+.PP
+Feature-test macro requirements (see
+.BR feature_test_macros (7)):
+.PP
+.RS 4
+.BR matherr ():
+.RS 4
+_DEFAULT_SOURCE || _XOPEN_SOURCE || _SVID_SOURCE || _BSD_SOURCE
+.RE
+.RE
+.SH DESCRIPTION
+On historical System V (SVID) systems,
+.BR matherr ()
+was a user-replaceable hook that the math library invoked whenever a
+function detected a domain, singularity, overflow, underflow, or
+total-loss-of-significance error.  A program could supply its own
+.BR matherr ()
+to inspect the
+.I struct exception
+describing the error, optionally substitute a return value, and signal
+whether the error had been handled.
+.PP
+Substrate's
+.B libm
+does
+.B not
+use this mechanism.  Mathematical errors are reported through the
+standard C99 / POSIX channels instead:
+.I errno
+(when
+.I "math_errhandling & MATH_ERRNO"
+is non-zero) and the floating-point environment exception flags
+(when
+.I "math_errhandling & MATH_ERREXCEPT"
+is non-zero).  See
+.BR math_error (7).
+.PP
+.BR matherr ()
+is provided only as a compatibility shim so that SVID-era source that
+references the symbol links without modification.  The shipped
+default implementation is a no-op: it ignores its argument and
+returns 0.  Substrate's math functions never call
+.BR matherr (),
+so defining your own replacement has
+.B no effect
+on the library's behaviour.
+.PP
+.B WARNING:
+.BR matherr ()
+is obsolete and non-functional on Substrate.  Do not write new code
+that relies on it.  Test error conditions with
+.I errno
+and
+.BR fetestexcept (3)
+as described in
+.BR math_error (7).
+.SH RETURN VALUE
+The default
+.BR matherr ()
+always returns 0, indicating (in SVID terms) that the error was not
+handled.  Because the library never invokes the hook, this return
+value is never consumed.
+.SH ERRORS
+.BR matherr ()
+itself sets no
+.I errno
+value and raises no floating-point exception.
+.SH ATTRIBUTES
+For an explanation of the terms used in this section, see
+.BR attributes (7).
+.TS
+allbox;
+lb lb lb
+l l l.
+Interface	Attribute	Value
+T{
+.BR matherr ()
+T}	Thread safety	MT-Safe
+.TE
+.SH STANDARDS
+None.  Obsolete.
+.SH HISTORY
+SVID.  The SVID error-handling model was never adopted by ISO C or
+POSIX, both of which standardised the
+.I errno
+/ floating-point-exception model documented in
+.BR math_error (7).
+.SH SEE ALSO
+.BR fetestexcept (3),
+.BR errno (3),
+.BR fenv (3),
+.BR math_error (7)
+.SH COLOPHON
+This page is part of the Substrate operating system documentation.

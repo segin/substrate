@@ -20,7 +20,7 @@ all: test_trig prop_trig test_fenv prop_fenv fuzz_fenv test_tgmath \
      test_classify prop_classify test_arith prop_arith test_round prop_round \
      test_explog prop_explog test_bessel prop_bessel \
      test_accuracy test_x87_opt fuzz_math fuzz_mathf \
-     test_libm_new prop_totalorder
+     test_libm_new prop_totalorder test_symbol_audit
 
 test_trig: unit/test_trig.c $(MATH_SRCS) $(FPCLASSIFY) $(FENV)
 	$(CC) $(CFLAGS) -fno-builtin $^ -o $@ -lm
@@ -117,4 +117,9 @@ clean:
 	      test_round prop_round test_explog prop_explog \
 	      test_bessel prop_bessel \
 	      test_accuracy test_x87_opt fuzz_math fuzz_mathf \
-	      test_libm_new prop_totalorder
+	      test_libm_new prop_totalorder test_symbol_audit
+
+# Link-completeness fixture for tasklist 24 (references every added symbol;
+# the link itself is the test).  Links the full libm source tree.
+test_symbol_audit: unit/test_symbol_audit.c $(wildcard ../../../lib/m/src/*.c) $(FPCLASSIFY)
+	$(CC) $(CFLAGS) -fno-builtin $^ -o $@ -lm

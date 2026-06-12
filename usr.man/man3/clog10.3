@@ -1,0 +1,124 @@
+.TH CLOG10 3 "June 2026" "Substrate" "Library Functions Manual"
+.SH NAME
+clog10, clog10f, clog10l \- complex base-10 logarithm
+.SH LIBRARY
+Math library (libm, \-lm)
+.SH SYNOPSIS
+.B #include <complex.h>
+.PP
+.BI "double complex clog10(double complex " z );
+.br
+.BI "float complex clog10f(float complex " z );
+.br
+.BI "long double complex clog10l(long double complex " z );
+.PP
+Feature-test macro requirements (see
+.BR feature_test_macros (7)):
+.PP
+.RS 4
+.BR clog10 (),
+.BR clog10f (),
+.BR clog10l ():
+.RS 4
+_GNU_SOURCE
+.RE
+.RE
+.SH DESCRIPTION
+The
+.BR clog10 ()
+function computes the base-10 logarithm of the complex number
+.IR z .
+It is defined as the natural complex logarithm scaled by the natural
+logarithm of 10:
+.PP
+.RS 4
+.BI "clog10(" z ") = clog(" z ") / ln(10)" .
+.RE
+.PP
+Equivalently, writing
+.I z
+in the form
+.IR "x + iy" ,
+.PP
+.RS 4
+.BI "clog10(" z ") = (log10|" z "|) + i*(atan2(" y ", " x ") / ln(10))" ,
+.RE
+.PP
+so the real part is the base-10 logarithm of the magnitude of
+.I z
+and the imaginary part is the argument (phase angle) of
+.I z
+expressed in units scaled by
+.IR "1/ln(10)" .
+.PP
+There is a branch cut along the negative real axis, matching
+.BR clog (3):
+the imaginary part of the result lies in the interval
+.RB [ \-pi/ln(10) ,\  +pi/ln(10) ].
+.PP
+The
+.B f
+and
+.B l
+suffixed variants
+.RB ( clog10f (),
+.BR clog10l ())
+take and return
+.B "float complex"
+and
+.B "long double complex"
+values respectively.
+.SH RETURN VALUE
+.BR clog10 ()
+returns the complex base-10 logarithm of
+.IR z .
+The special-value behaviour is inherited from
+.BR clog (3)
+(scaled by the real constant
+.IR "1/ln(10)" ).
+.SH ERRORS
+No errors are reported through
+.IR errno .
+Exceptional conditions (for example a zero argument, which yields a
+real part of
+.B \-infinity
+and raises a divide-by-zero condition in the underlying real
+logarithm) are reported only through the floating-point environment by
+the constituent
+.BR clog (3)
+computation.  See
+.BR math_error (7)
+and
+.BR fetestexcept (3).
+.SH ATTRIBUTES
+For an explanation of the terms used in this section, see
+.BR attributes (7).
+.TS
+allbox;
+lb lb lb
+l l l.
+Interface	Attribute	Value
+T{
+.BR clog10 (),
+.BR clog10f (),
+.BR clog10l ()
+T}	Thread safety	MT-Safe
+.TE
+.SH STANDARDS
+None.  This is a GNU C library extension.
+.SH HISTORY
+A glibc extension; it complements the C99
+.BR clog (3)
+in the same way that
+.BR log10 (3)
+complements
+.BR log (3)
+for real arguments.
+.SH SEE ALSO
+.BR clog (3),
+.BR cabs (3),
+.BR carg (3),
+.BR log10 (3),
+.BR math_error (7)
+.SH COLOPHON
+This page is part of the Substrate operating system documentation.

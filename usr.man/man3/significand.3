@@ -1,0 +1,126 @@
+.TH SIGNIFICAND 3 "June 2026" "Substrate" "Library Functions Manual"
+.SH NAME
+significand, significandf, significandl \- extract the significand of a floating-point number (obsolescent)
+.SH LIBRARY
+Math library (libm, \-lm)
+.SH SYNOPSIS
+.B #include <math.h>
+.PP
+.BI "double significand(double " x );
+.br
+.BI "float significandf(float " x );
+.br
+.BI "long double significandl(long double " x );
+.PP
+Feature-test macro requirements (see
+.BR feature_test_macros (7)):
+.PP
+.RS 4
+.BR significand (),
+.BR significandf (),
+.BR significandl ():
+.RS 4
+_DEFAULT_SOURCE || _XOPEN_SOURCE || _SVID_SOURCE || _BSD_SOURCE
+.RE
+.RE
+.SH DESCRIPTION
+The
+.BR significand ()
+function returns the mantissa of
+.I x
+scaled to the half-open interval
+.RB [ 1 ,\  2 ).
+For a finite, nonzero
+.IR x ,
+the result is
+.PP
+.RS 4
+.BI "scalbn(" x ", \-ilogb(" x ))
+.RE
+.PP
+that is,
+.I x
+divided by 2 raised to the power
+.BI ilogb( x ).
+This is the historical companion to
+.BR ilogb (3):
+together they decompose
+.I x
+into a significand in
+.RB [ 1 ,\  2 )
+and a binary exponent.
+.PP
+The
+.B f
+and
+.B l
+suffixed variants
+.RB ( significandf (),
+.BR significandl ())
+operate on and return
+.B float
+and
+.B "long double"
+values respectively.
+.PP
+.B WARNING:
+.BR significand ()
+is obsolescent and exists only for SVID / 4.3BSD source
+compatibility.  New code should use
+.BR frexp (3)
+(which returns a significand in
+.RB [ 0.5 ,\  1 )
+together with the exponent) or the
+.BR ilogb (3)
+/
+.BR scalbn (3)
+pair directly.
+.SH RETURN VALUE
+For finite nonzero
+.IR x ,
+.BR significand ()
+returns a value in
+.RB [ 1 ,\  2 )
+with the same sign as
+.IR x .
+.PP
+If
+.I x
+is \(+-0, \(+-infinity, or NaN, the argument
+.I x
+is returned unchanged.
+.SH ERRORS
+No errors occur.
+.I errno
+is not set and no floating-point exception is raised: the
+implementation handles the special arguments explicitly and the
+ordinary path performs only an exponent-field manipulation via
+.BR scalbn (3),
+which cannot overflow or underflow for a significand result in
+.RB [ 1 ,\  2 ).
+.SH ATTRIBUTES
+For an explanation of the terms used in this section, see
+.BR attributes (7).
+.TS
+allbox;
+lb lb lb
+l l l.
+Interface	Attribute	Value
+T{
+.BR significand (),
+.BR significandf (),
+.BR significandl ()
+T}	Thread safety	MT-Safe
+.TE
+.SH STANDARDS
+None.  Obsolescent.
+.SH HISTORY
+SVID, 4.3BSD.
+.SH SEE ALSO
+.BR frexp (3),
+.BR ilogb (3),
+.BR logb (3),
+.BR scalbn (3),
+.BR math_error (7)
+.SH COLOPHON
+This page is part of the Substrate operating system documentation.

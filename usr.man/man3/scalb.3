@@ -1,0 +1,180 @@
+.TH SCALB 3 "June 2026" "Substrate" "Library Functions Manual"
+.SH NAME
+scalb, scalbf \- scale floating-point number by power of two (obsolescent)
+.SH LIBRARY
+Math library (libm, \-lm)
+.SH SYNOPSIS
+.B #include <math.h>
+.PP
+.BI "double scalb(double " x ", double " n );
+.br
+.BI "float scalbf(float " x ", float " n );
+.PP
+Feature-test macro requirements (see
+.BR feature_test_macros (7)):
+.PP
+.RS 4
+.BR scalb (),
+.BR scalbf ():
+.RS 4
+_DEFAULT_SOURCE || _XOPEN_SOURCE || _SVID_SOURCE || _BSD_SOURCE
+.RE
+.RE
+.SH DESCRIPTION
+The
+.BR scalb ()
+function computes
+.PP
+.RS 4
+.IR x " * 2^" n
+.RE
+.PP
+where
+.I n
+is passed as a floating-point value.  This is the historical SVID /
+4.3BSD two-argument scaling primitive that predates the standard
+.BR scalbn (3).
+.PP
+The finite-exponent path forwards to
+.BR scalbn (3),
+clamping the magnitude of
+.I n
+to the range of an
+.B int
+before the call so the standard overflow/underflow handling of
+.BR scalbn ()
+still produces the appropriate
+.B \(+-infinity
+or
+.B \(+-0
+result.
+.PP
+The special cases implemented are:
+.TP
+.I x
+is NaN
+.I x
+is returned.
+.TP
+.I n
+is NaN
+A NaN is returned.
+.TP
+.I n
+is +infinity
+If
+.I x
+is nonzero, a copy of
+.B infinity
+with the sign of
+.I x
+is returned.  If
+.I x
+is \(+-0, the product 0 * infinity is invalid and a NaN is returned.
+.TP
+.I n
+is \-infinity
+A copy of 0 with the sign of
+.I x
+is returned (including the
+.I x
+is \(+-0 case).
+.PP
+.B WARNING:
+.BR scalb ()
+is obsolescent.  New code should use
+.BR scalbn (3)
+or
+.BR ldexp (3)
+instead, both of which take an integer exponent and have
+well-specified standard semantics.
+.PP
+The
+.B f
+suffixed variant
+.BR scalbf ()
+takes and returns
+.B float
+values.
+.SH RETURN VALUE
+On success,
+.BR scalb ()
+returns
+.IR x " * 2^" n .
+.PP
+If the result overflows the range of the return type, the function
+returns
+.B \(+-HUGE_VAL
+(or
+.B \(+-HUGE_VALF
+for
+.BR scalbf ())
+with the sign of
+.IR x .
+.PP
+If the result underflows, the function returns 0 with the sign of
+.IR x .
+.PP
+The special-argument results listed in DESCRIPTION are returned for
+NaN and infinite arguments.
+.SH ERRORS
+See
+.BR math_error (7)
+for information on how to determine whether an error has occurred when
+calling these functions.
+.PP
+The following errors can occur:
+.TP
+Range error: result overflow
+An overflow floating-point exception
+.RB ( FE_OVERFLOW )
+is raised.  If
+.I "math_errhandling & MATH_ERRNO"
+is non-zero,
+.I errno
+is set to
+.BR ERANGE .
+.TP
+Range error: result underflow
+An underflow floating-point exception
+.RB ( FE_UNDERFLOW )
+is raised.  If
+.I "math_errhandling & MATH_ERRNO"
+is non-zero,
+.I errno
+is set to
+.BR ERANGE .
+.PP
+These errors are reported by the underlying
+.BR scalbn (3)
+call.
+.SH ATTRIBUTES
+For an explanation of the terms used in this section, see
+.BR attributes (7).
+.TS
+allbox;
+lb lb lb
+l l l.
+Interface	Attribute	Value
+T{
+.BR scalb (),
+.BR scalbf ()
+T}	Thread safety	MT-Safe
+.TE
+.SH STANDARDS
+None.  Obsolescent.
+.SH HISTORY
+SVID, 4.3BSD.  POSIX.1-2001 specified a two-argument
+.BR scalb ()
+but marked it obsolescent (legacy); it was removed in POSIX.1-2008
+in favour of
+.BR scalbn (3)
+and
+.BR scalbln (3).
+.SH SEE ALSO
+.BR ldexp (3),
+.BR scalbln (3),
+.BR scalbn (3),
+.BR math_error (7)
+.SH COLOPHON
+This page is part of the Substrate operating system documentation.

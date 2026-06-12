@@ -1,0 +1,117 @@
+.TH DREM 3 "June 2026" "Substrate" "Library Functions Manual"
+.SH NAME
+drem, dremf \- floating-point remainder (obsolescent)
+.SH LIBRARY
+Math library (libm, \-lm)
+.SH SYNOPSIS
+.B #include <math.h>
+.PP
+.BI "double drem(double " x ", double " y );
+.br
+.BI "float dremf(float " x ", float " y );
+.PP
+Feature-test macro requirements (see
+.BR feature_test_macros (7)):
+.PP
+.RS 4
+.BR drem (),
+.BR dremf ():
+.RS 4
+_DEFAULT_SOURCE || _XOPEN_SOURCE || _SVID_SOURCE || _BSD_SOURCE
+.RE
+.RE
+.SH DESCRIPTION
+The
+.BR drem ()
+function is an obsolescent alias for
+.BR remainder (3).
+It computes the IEEE 754 remainder of dividing
+.I x
+by
+.IR y :
+the value
+.IR "x \- n*y" ,
+where
+.I n
+is the integer nearest the exact value of
+.IR x / y .
+If there are two integers equally near, then
+.I n
+is chosen to be even.  The result may have either sign and its
+magnitude is at most
+.IR "|y|/2" .
+.PP
+.BR drem ()
+and
+.BR dremf ()
+are thin forwarders: they call
+.BR remainder (3)
+and
+.BR remainderf (3)
+respectively and return their results unchanged.  They carry no
+behaviour of their own.
+.PP
+.B WARNING:
+.BR drem ()
+is obsolescent.  New code should call
+.BR remainder (3)
+directly.
+.SH RETURN VALUE
+The return value, errors, and special-case behaviour are exactly those
+of
+.BR remainder (3).
+On success, the floating-point remainder of
+.IR "x / y" ,
+as described above, is returned.
+.SH ERRORS
+The error behaviour is that of
+.BR remainder (3).
+.PP
+The following error can occur:
+.TP
+Domain error:
+.I x
+is an infinity or
+.I y
+is 0, and the other argument is not a NaN
+A NaN is returned and an invalid floating-point exception
+.RB ( FE_INVALID )
+is raised.  If
+.I "math_errhandling & MATH_ERRNO"
+is non-zero,
+.I errno
+is set to
+.BR EDOM .
+.PP
+See
+.BR math_error (7)
+for information on how to determine whether an error has occurred when
+calling these functions.
+.SH ATTRIBUTES
+For an explanation of the terms used in this section, see
+.BR attributes (7).
+.TS
+allbox;
+lb lb lb
+l l l.
+Interface	Attribute	Value
+T{
+.BR drem (),
+.BR dremf ()
+T}	Thread safety	MT-Safe
+.TE
+.SH STANDARDS
+None.  Obsolescent.
+.SH HISTORY
+4.3BSD.  Renamed
+.BR remainder ()
+in C99 and POSIX.1-2001;
+.BR drem ()
+is retained as a legacy alias.
+.SH SEE ALSO
+.BR fmod (3),
+.BR remainder (3),
+.BR remquo (3),
+.BR math_error (7)
+.SH COLOPHON
+This page is part of the Substrate operating system documentation.

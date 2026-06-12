@@ -1,0 +1,143 @@
+.TH TOTALORDER 3 "June 2026" "Substrate" "Library Functions Manual"
+.SH NAME
+totalorder, totalorderf, totalorderl,
+totalordermag, totalordermagf, totalordermagl \- IEEE 754 total-order predicate
+.SH LIBRARY
+Math library (libm, \-lm)
+.SH SYNOPSIS
+.B #include <math.h>
+.PP
+.BI "int totalorder(double " x ", double " y );
+.br
+.BI "int totalorderf(float " x ", float " y );
+.br
+.BI "int totalorderl(long double " x ", long double " y );
+.PP
+.BI "int totalordermag(double " x ", double " y );
+.br
+.BI "int totalordermagf(float " x ", float " y );
+.br
+.BI "int totalordermagl(long double " x ", long double " y );
+.PP
+Feature-test macro requirements (see
+.BR feature_test_macros (7)):
+these functions are declared when the implementation is compiled as
+ISO C23 or later
+.RB ( "__STDC_VERSION__ >= 202311L" ).
+.SH DESCRIPTION
+The
+.BR totalorder ()
+function implements the IEEE 754-2019
+.I totalOrder
+predicate.  It returns a nonzero value if
+.I x
+precedes or equals
+.I y
+in the total order over the floating-point format, and 0 otherwise.
+.PP
+The total order is a complete ordering of every encoding in the format,
+including signed zeros and every NaN.  From least to greatest it runs:
+.PP
+.RS 4
+negative quiet NaNs <
+negative signaling NaNs <
+.B \-infinity
+< finite negatives < \-0 < +0 < finite positives <
+.B +infinity
+< positive signaling NaNs < positive quiet NaNs,
+.RE
+.PP
+with same-sign zeros ordered \-0 before +0, and NaNs of the same sign
+ordered by their payload bits.  Because the ordering is total,
+.PP
+.RS 4
+.BI "totalorder(" x ", " y ") || totalorder(" y ", " x )
+.RE
+.PP
+is always true.
+.PP
+The
+.BR totalordermag ()
+function applies the same predicate to the magnitudes of its arguments:
+it is equivalent to
+.PP
+.RS 4
+.BI "totalorder(fabs(" x "), fabs(" y "))" .
+.RE
+.PP
+The
+.B f
+and
+.B l
+suffixed variants take
+.B float
+and
+.B "long double"
+operands respectively.
+.SH RETURN VALUE
+.BR totalorder ()
+and
+.BR totalordermag ()
+return a nonzero value if
+.I x
+orders before-or-equal-to
+.I y
+(respectively
+.IR |x|
+before-or-equal-to
+.IR |y| )
+in the total order, and 0 otherwise.
+.SH ERRORS
+No errors occur.  These predicates are
+.B quiet:
+they never set
+.IR errno ,
+and they raise
+.B no
+floating-point exception \(em not even
+.B FE_INVALID
+for a NaN or a signaling-NaN argument.  The comparison is performed on
+the raw bit encodings, so a signaling NaN does not signal.
+.SH ATTRIBUTES
+For an explanation of the terms used in this section, see
+.BR attributes (7).
+.TS
+allbox;
+lb lb lb
+l l l.
+Interface	Attribute	Value
+T{
+.BR totalorder (),
+.BR totalorderf (),
+.BR totalorderl (),
+.BR totalordermag (),
+.BR totalordermagf (),
+.BR totalordermagl ()
+T}	Thread safety	MT-Safe
+.TE
+.SH STANDARDS
+C23.
+.SH HISTORY
+The
+.I totalOrder
+and
+.I totalOrderMag
+predicates were introduced by IEEE 754-2008 (revised in 2019) and added
+to ISO C in C23 (§7.12.11).
+.SH NOTES
+The
+.B l
+suffixed variants compute the predicate by first converting their
+.B "long double"
+operands to
+.BR double ;
+distinctions that exist only in the wider 80-bit format (for example
+between two long-double NaNs whose payloads differ below the 52nd
+mantissa bit) are therefore not resolved.
+.SH SEE ALSO
+.BR canonicalize (3),
+.BR getpayload (3),
+.BR isnan (3),
+.BR math_error (7)
+.SH COLOPHON
+This page is part of the Substrate operating system documentation.

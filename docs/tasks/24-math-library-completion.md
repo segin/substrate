@@ -39,48 +39,48 @@ implemented in any order.
 The double-precision `lgamma_r`, the long-double `scalbl`, and the
 classification/comparison macro backing already exist and are out of scope.
 
-## Reimplemented Checklist (All Open)
+## Reimplemented Checklist (Complete)
 
 ### 24.1 Audit, Build Wiring & Header Surface
 
-- [ ] **Symbol audit fixture:** add a host test that links a probe object
+- [x] **Symbol audit fixture:** add a host test that links a probe object
       referencing every symbol this tasklist adds and asserts each resolves,
       so the completion of each class is mechanically verifiable. (REQ: REQ-24-0001)
-- [ ] **Source placement:** add new translation units under `lib/m/src/`
+- [x] **Source placement:** add new translation units under `lib/m/src/`
       (`math_narrowing.c`, `math_totalorder.c`, `math_payload.c`, plus
       additions to `math_special.c`/`mathf.c`/`mathl.c`/`cmath_explog.c`),
       compiled in both the `.o` and `.pic.o` passes per the existing dual-build
       `Makefile`. (REQ: REQ-24-0002)
-- [ ] **`libm.a` + `libm.so.0`:** ensure every new object is archived into the
+- [x] **`libm.a` + `libm.so.0`:** ensure every new object is archived into the
       static lib and linked into the shared lib, with the OSABI byte preserved
       by the existing build step. (REQ: REQ-24-0003)
-- [ ] **Header declarations:** declare each new function in the correct header
+- [x] **Header declarations:** declare each new function in the correct header
       (`math.h` / `complex.h`) under the correct feature-test guard
       (`__STDC_VERSION__ >= 202311L` for C23 classes; `_GNU_SOURCE` /
       `_XOPEN_SOURCE` / `_DEFAULT_SOURCE` for the obsolescent and glibc-extension
       classes), with no clashing prototypes for the symbols already present. (REQ: REQ-24-0004)
-- [ ] **No regressions:** confirm `make -C lib/m` and a representative link of
+- [x] **No regressions:** confirm `make -C lib/m` and a representative link of
       an existing libm consumer (`bin/top`, the libm test suite) still build. (REQ: REQ-24-0005)
 
 ### 24.2 Obsolescent Aliases (SVID / BSD / X/Open)
 
-- [ ] **`scalb` / `scalbf`:** the obsolescent two-`double`/`float`-argument
+- [x] **`scalb` / `scalbf`:** the obsolescent two-`double`/`float`-argument
       `scalb(x, n)` returning `x * 2**n` (companion to the existing `scalbl`).
       Define in terms of the already-present `scalbn`/`ldexp` machinery, matching
       the historical "fractional exponent" edge semantics where `n` is `±Inf`. (REQ: REQ-24-0006)
-- [ ] **`significand{,f,l}`:** return the mantissa of `x` scaled to `[1, 2)`
+- [x] **`significand{,f,l}`:** return the mantissa of `x` scaled to `[1, 2)`
       (equivalently `scalb(x, -ilogb(x))`); defined for finite non-zero `x`. (REQ: REQ-24-0007)
-- [ ] **`drem` / `dremf`:** obsolescent aliases of `remainder` / `remainderf`
+- [x] **`drem` / `dremf`:** obsolescent aliases of `remainder` / `remainderf`
       (IEEE round-to-nearest remainder); implement as thin forwarders. (REQ: REQ-24-0008)
-- [ ] **`gamma` / `gammaf`:** the historical name for `lgamma` / `lgammaf`
+- [x] **`gamma` / `gammaf`:** the historical name for `lgamma` / `lgammaf`
       (log-gamma, **not** `tgamma`); forward and set `signgam`. (REQ: REQ-24-0009)
-- [ ] **`pow10{,f,l}`:** aliases of the existing `exp10{,f,l}` (base-10
+- [x] **`pow10{,f,l}`:** aliases of the existing `exp10{,f,l}` (base-10
       exponential); thin forwarders. (REQ: REQ-24-0010)
-- [ ] **`matherr` (SVID error hook):** provide the default `int matherr(struct
+- [x] **`matherr` (SVID error hook):** provide the default `int matherr(struct
       exception *)` returning 0 (no override), and document that substrate libm
       reports errors via `errno`/`fenv` rather than the SVID hook so callers can
       still link SVID-era code. (REQ: REQ-24-0011)
-- [ ] **Guarding:** expose this family only under `_DEFAULT_SOURCE` /
+- [x] **Guarding:** expose this family only under `_DEFAULT_SOURCE` /
       `_XOPEN_SOURCE` (obsolescent), and mark each as deprecated in the header
       comment pointing at the standard replacement. (REQ: REQ-24-0012)
 
@@ -92,99 +92,99 @@ classification/comparison macro backing already exist and are out of scope.
 > argument type (`fadd`: `double`→`float`; `faddl`: `long double`→`float`;
 > `daddl`: `long double`→`double`).
 
-- [ ] **Addition:** `fadd`, `faddl`, `dadd`, `daddl` — correctly-rounded
+- [x] **Addition:** `fadd`, `faddl`, `dadd`, `daddl` — correctly-rounded
       narrowing sum (single rounding, not add-then-cast). (REQ: REQ-24-0013)
-- [ ] **Subtraction:** `fsub`, `fsubl`, `dsub`, `dsubl`. (REQ: REQ-24-0014)
-- [ ] **Multiplication:** `fmul`, `fmull`, `dmul`, `dmull`. (REQ: REQ-24-0015)
-- [ ] **Division:** `fdiv`, `fdivl`, `ddiv`, `ddivl`. (REQ: REQ-24-0016)
-- [ ] **Fused multiply-add:** `ffma`, `ffmal`, `dfma`, `dfmal` — narrowing of
+- [x] **Subtraction:** `fsub`, `fsubl`, `dsub`, `dsubl`. (REQ: REQ-24-0014)
+- [x] **Multiplication:** `fmul`, `fmull`, `dmul`, `dmull`. (REQ: REQ-24-0015)
+- [x] **Division:** `fdiv`, `fdivl`, `ddiv`, `ddivl`. (REQ: REQ-24-0016)
+- [x] **Fused multiply-add:** `ffma`, `ffmal`, `dfma`, `dfmal` — narrowing of
       the exact `x*y + z`, built on the existing `fma`/`fmal`. (REQ: REQ-24-0017)
-- [ ] **Square root:** `fsqrt`, `fsqrtl`, `dsqrt`, `dsqrtl`. (REQ: REQ-24-0018)
-- [ ] **Rounding & flags:** each narrowing op SHALL honour the current rounding
+- [x] **Square root:** `fsqrt`, `fsqrtl`, `dsqrt`, `dsqrtl`. (REQ: REQ-24-0018)
+- [x] **Rounding & flags:** each narrowing op SHALL honour the current rounding
       mode for the single final rounding and raise the correct `fenv`
       exceptions (`inexact`, `overflow`, `underflow`, `invalid`, `divbyzero`). (REQ: REQ-24-0019)
-- [ ] **Single-rounding correctness:** verify the narrowing result differs from
+- [x] **Single-rounding correctness:** verify the narrowing result differs from
       the naïve `(float)(a OP b)` double-rounding on at least one chosen-witness
       input per operation. (REQ: REQ-24-0020)
-- [ ] **Header surface:** declare under `__STDC_VERSION__ >= 202311L` in
+- [x] **Header surface:** declare under `__STDC_VERSION__ >= 202311L` in
       `math.h`. (REQ: REQ-24-0021)
 
 ### 24.4 ISO C23 Total Order & NaN Payload (IEEE 754-2019)
 
-- [ ] **`totalorder{,f,l}`:** the IEEE 754 `totalOrder` predicate — a total
+- [x] **`totalorder{,f,l}`:** the IEEE 754 `totalOrder` predicate — a total
       ordering over all representable values including signed zeros and all
       NaN encodings (returns nonzero iff `x` precedes-or-equals `y`). (REQ: REQ-24-0022)
-- [ ] **`totalordermag{,f,l}`:** `totalOrder` on `|x|` and `|y|`. (REQ: REQ-24-0023)
-- [ ] **`canonicalize{,f,l}`:** produce the canonical encoding of `x` into
+- [x] **`totalordermag{,f,l}`:** `totalOrder` on `|x|` and `|y|`. (REQ: REQ-24-0023)
+- [x] **`canonicalize{,f,l}`:** produce the canonical encoding of `x` into
       `*cx`, returning 0 on success (nonzero for a non-canonical/signaling
       input that cannot be canonicalized); for binary formats this copies `x`
       and quiets sNaN, returning the appropriate status. (REQ: REQ-24-0024)
-- [ ] **`getpayload{,f,l}`:** return the NaN payload of `*x` as a floating value
+- [x] **`getpayload{,f,l}`:** return the NaN payload of `*x` as a floating value
       (or `-1` when `*x` is not a NaN), per IEEE `getPayload`. (REQ: REQ-24-0025)
-- [ ] **`setpayload{,f,l}`:** set `*res` to a **quiet** NaN carrying the integer
+- [x] **`setpayload{,f,l}`:** set `*res` to a **quiet** NaN carrying the integer
       payload `pl`, returning 0 on success and nonzero (with `*res = +0`) when
       `pl` is not a valid payload. (REQ: REQ-24-0026)
-- [ ] **`setpayloadsig{,f,l}`:** as `setpayload` but producing a **signaling**
+- [x] **`setpayloadsig{,f,l}`:** as `setpayload` but producing a **signaling**
       NaN. (REQ: REQ-24-0027)
-- [ ] **Encoding correctness:** payload get/set SHALL round-trip across the
+- [x] **Encoding correctness:** payload get/set SHALL round-trip across the
       mantissa width of each type (`float` 23-bit, `double` 52-bit, `long double`
       64-bit explicit-integer-bit i387 format) and reject out-of-range payloads. (REQ: REQ-24-0028)
-- [ ] **No spurious exceptions:** `totalorder*`, `totalordermag*`, and
+- [x] **No spurious exceptions:** `totalorder*`, `totalordermag*`, and
       `getpayload*` SHALL be quiet (raise no `fenv` exceptions) even for
       signaling-NaN inputs. (REQ: REQ-24-0029)
-- [ ] **Header surface:** declare under `__STDC_VERSION__ >= 202311L` in
+- [x] **Header surface:** declare under `__STDC_VERSION__ >= 202311L` in
       `math.h`. (REQ: REQ-24-0030)
 
 ### 24.5 Reentrant Gamma (`float` / `long double`)
 
-- [ ] **`lgammaf_r(float, int *signp)` / `lgammal_r(long double, int *signp)`:**
+- [x] **`lgammaf_r(float, int *signp)` / `lgammal_r(long double, int *signp)`:**
       thread-safe log-gamma returning the sign of Γ via `*signp` instead of the
       global `signgam` (companions to the existing double `lgamma_r`); reuse the
       existing `lgammaf`/`lgammal` cores. (REQ: REQ-24-0031)
-- [ ] **`signgam` independence:** the `_r` variants SHALL NOT read or write the
+- [x] **`signgam` independence:** the `_r` variants SHALL NOT read or write the
       global `signgam`. (REQ: REQ-24-0032)
-- [ ] **Header surface:** declare under `_GNU_SOURCE` / `_DEFAULT_SOURCE` in
+- [x] **Header surface:** declare under `_GNU_SOURCE` / `_DEFAULT_SOURCE` in
       `math.h`. (REQ: REQ-24-0033)
 
 ### 24.6 Complex Base-10 Logarithm
 
-- [ ] **`clog10`, `clog10f`, `clog10l`:** complex base-10 logarithm
+- [x] **`clog10`, `clog10f`, `clog10l`:** complex base-10 logarithm
       (`clog(z) / ln(10)`), with branch cut along the negative real axis matching
       the existing `clog` family. (REQ: REQ-24-0034)
-- [ ] **Header surface:** declare under `_GNU_SOURCE` in `complex.h`. (REQ: REQ-24-0035)
+- [x] **Header surface:** declare under `_GNU_SOURCE` in `complex.h`. (REQ: REQ-24-0035)
 
 ### 24.7 Testing
 
-- [ ] **Unit tests** for every new symbol with reference vectors (golden values
+- [x] **Unit tests** for every new symbol with reference vectors (golden values
       from a trusted host libm at the same precision), placed under
       `tests/lib/m/` per the project test layout. (REQ: REQ-24-0036)
-- [ ] **Edge-case tests:** `±0`, `±Inf`, qNaN, sNaN, subnormals, and the
+- [x] **Edge-case tests:** `±0`, `±Inf`, qNaN, sNaN, subnormals, and the
       largest/smallest finite magnitudes for each type and each function. (REQ: REQ-24-0037)
-- [ ] **Property tests:** narrowing ops vs. arbitrary-precision single-rounding
+- [x] **Property tests:** narrowing ops vs. arbitrary-precision single-rounding
       oracle; `totalorder` antisymmetry/transitivity/totality; payload
       get/set round-trip; `clog10` vs. `clog(z)/log(10)` within tolerance. (REQ: REQ-24-0038)
-- [ ] **`fenv` interaction tests:** assert the exception flags raised (and not
+- [x] **`fenv` interaction tests:** assert the exception flags raised (and not
       raised) for the narrowing and total-order/payload classes under each
       rounding mode. (REQ: REQ-24-0039)
-- [ ] **Cross-OS baseline:** where a host libm provides the same function,
+- [x] **Cross-OS baseline:** where a host libm provides the same function,
       add it to the portable comparison harness so substrate results are diffed
       against the host. (REQ: REQ-24-0040)
-- [ ] **Link-completeness test:** the §24.1 symbol-audit fixture passes (every
+- [x] **Link-completeness test:** the §24.1 symbol-audit fixture passes (every
       added symbol resolves from `-lm`). (REQ: REQ-24-0041)
 
 ### 24.8 Documentation (Directive 9)
 
-- [ ] **Man pages** under `usr.man/man3/` for each new family, following Linux
+- [x] **Man pages** under `usr.man/man3/` for each new family, following Linux
       `man-pages` style with `LIBRARY`, `SEE ALSO`, `ERRORS`, and
       `EXAMPLE`/`EXAMPLES` sections: `scalb.3`, `significand.3`, `drem.3`,
       `gamma.3`, `pow10.3`, `matherr.3`, `fadd.3` (covering the narrowing
       family), `totalorder.3`, `canonicalize.3`, `getpayload.3` (covering
       get/set payload), `lgamma_r.3` (extend for the `f`/`l` variants), and
       `clog10.3`. (REQ: REQ-24-0042)
-- [ ] **Deprecation notes:** the obsolescent §24.2 pages SHALL document the
+- [x] **Deprecation notes:** the obsolescent §24.2 pages SHALL document the
       standard replacement (`scalbn`, `remainder`, `lgamma`, `exp10`) and that
       `matherr` is a no-op compatibility shim. (REQ: REQ-24-0043)
-- [ ] **`ERRORS` accuracy:** each page documents the `errno` / `fenv` behaviour
+- [x] **`ERRORS` accuracy:** each page documents the `errno` / `fenv` behaviour
       actually implemented, separately from `RETURN VALUE`. (REQ: REQ-24-0044)
 
 ## User Stories

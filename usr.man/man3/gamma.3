@@ -1,0 +1,166 @@
+.TH GAMMA 3 "June 2026" "Substrate" "Library Functions Manual"
+.SH NAME
+gamma, gammaf \- (log) gamma function (obsolescent)
+.SH LIBRARY
+Math library (libm, \-lm)
+.SH SYNOPSIS
+.B #include <math.h>
+.PP
+.BI "double gamma(double " x );
+.br
+.BI "float gammaf(float " x );
+.PP
+Feature-test macro requirements (see
+.BR feature_test_macros (7)):
+.PP
+.RS 4
+.BR gamma (),
+.BR gammaf ():
+.RS 4
+_DEFAULT_SOURCE || _XOPEN_SOURCE || _SVID_SOURCE || _BSD_SOURCE
+.RE
+.RE
+.SH DESCRIPTION
+The
+.BR gamma ()
+function is a historical name for
+.BR lgamma (3).
+It computes the natural logarithm of the absolute value of the Gamma
+function of
+.IR x :
+.PP
+.RS 4
+.IR ln|Gamma( x )| .
+.RE
+.PP
+.B IMPORTANT:
+despite its name,
+.BR gamma ()
+does
+.B not
+compute the Gamma function itself \(em it computes its log.  The
+true Gamma function is provided by
+.BR tgamma (3)
+(the "true gamma").  This naming collision is the historical reason
+.BR gamma ()
+is deprecated: the SVID
+.BR gamma ()
+returned the log-gamma, while some other systems used the name for
+the Gamma function proper, making the symbol non-portable.
+.PP
+As a side effect,
+.BR gamma ()
+sets the global integer variable
+.B signgam
+to the sign (+1 or \-1) of
+.IR Gamma( x ).
+The implementation obtains the sign from the reentrant
+.BR lgamma_r (3)
+core and assigns it to
+.BR signgam ;
+because of this side effect on global state,
+.BR gamma ()
+is
+.B not
+thread-safe.  Thread-safe code should use
+.BR lgamma_r (3).
+.PP
+The
+.B f
+suffixed variant
+.BR gammaf ()
+takes a
+.B float
+argument and returns a
+.B float
+result; it likewise sets
+.BR signgam .
+.PP
+.B WARNING:
+.BR gamma ()
+is obsolescent.  New code should use
+.BR lgamma (3)
+(for the log-gamma) or
+.BR tgamma (3)
+(for the Gamma function), which have unambiguous names.
+.SH RETURN VALUE
+On success,
+.BR gamma ()
+returns
+.IR ln|Gamma( x )| ,
+and
+.B signgam
+is set to the sign of
+.IR Gamma( x ).
+.PP
+The return value, the special-case results, and the error behaviour
+are those of
+.BR lgamma (3).
+.SH ERRORS
+The error behaviour is that of
+.BR lgamma (3).
+.PP
+The following errors can occur:
+.TP
+Pole error:
+.I x
+is a non-positive integer
+.B \(+-HUGE_VAL
+(with the sign implied by
+.BR signgam )
+is returned and a divide-by-zero floating-point exception
+.RB ( FE_DIVBYZERO )
+is raised.  If
+.I "math_errhandling & MATH_ERRNO"
+is non-zero,
+.I errno
+is set to
+.BR ERANGE .
+.TP
+Range error: result overflow
+.I x
+is large.
+.B \(+-HUGE_VAL
+is returned and, if
+.I "math_errhandling & MATH_ERRNO"
+is non-zero,
+.I errno
+is set to
+.BR ERANGE .
+.PP
+See
+.BR math_error (7)
+for information on how to determine whether an error has occurred when
+calling these functions.
+.SH ATTRIBUTES
+For an explanation of the terms used in this section, see
+.BR attributes (7).
+.TS
+allbox;
+lb lb lb
+l l l.
+Interface	Attribute	Value
+T{
+.BR gamma (),
+.BR gammaf ()
+T}	Thread safety	MT-Unsafe race:signgam
+.TE
+.SH STANDARDS
+None.  Obsolescent.
+.SH HISTORY
+SVID, 4.3BSD.  The SVID
+.BR gamma ()
+computed the log-gamma function and set
+.BR signgam ;
+this is the behaviour provided here.  It was superseded by
+.BR lgamma (3)
+in POSIX.1-2001 and by the reentrant
+.BR lgamma_r (3)
+glibc extension.
+.SH SEE ALSO
+.BR lgamma (3),
+.BR lgamma_r (3),
+.BR tgamma (3),
+.BR math_error (7)
+.SH COLOPHON
+This page is part of the Substrate operating system documentation.

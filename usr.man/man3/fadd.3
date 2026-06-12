@@ -1,0 +1,242 @@
+.TH FADD 3 "June 2026" "Substrate" "Library Functions Manual"
+.SH NAME
+fadd, faddl, dadd, daddl,
+fsub, fsubl, dsub, dsubl,
+fmul, fmull, dmul, dmull,
+fdiv, fdivl, ddiv, ddivl,
+ffma, ffmal, dfma, dfmal,
+fsqrt, fsqrtl, dsqrt, dsqrtl \- narrowing (single-rounding) arithmetic
+.SH LIBRARY
+Math library (libm, \-lm)
+.SH SYNOPSIS
+.B #include <math.h>
+.PP
+.BI "double fadd(double " x ", double " y );
+.br
+.BI "double faddl(long double " x ", long double " y );
+.br
+.BI "double dadd(double " x ", double " y );
+.br
+.BI "double daddl(long double " x ", long double " y );
+.PP
+.BI "double fsub(double " x ", double " y );
+.br
+.BI "double fsubl(long double " x ", long double " y );
+.br
+.BI "double dsub(double " x ", double " y );
+.br
+.BI "double dsubl(long double " x ", long double " y );
+.PP
+.BI "double fmul(double " x ", double " y );
+.br
+.BI "double fmull(long double " x ", long double " y );
+.br
+.BI "double dmul(double " x ", double " y );
+.br
+.BI "double dmull(long double " x ", long double " y );
+.PP
+.BI "double fdiv(double " x ", double " y );
+.br
+.BI "double fdivl(long double " x ", long double " y );
+.br
+.BI "double ddiv(double " x ", double " y );
+.br
+.BI "double ddivl(long double " x ", long double " y );
+.PP
+.BI "double ffma(double " x ", double " y ", double " z );
+.br
+.BI "double ffmal(long double " x ", long double " y ", long double " z );
+.br
+.BI "double dfma(double " x ", double " y ", double " z );
+.br
+.BI "double dfmal(long double " x ", long double " y ", long double " z );
+.PP
+.BI "double fsqrt(double " x );
+.br
+.BI "double fsqrtl(long double " x );
+.br
+.BI "double dsqrt(double " x );
+.br
+.BI "double dsqrtl(long double " x );
+.PP
+Feature-test macro requirements (see
+.BR feature_test_macros (7)):
+these functions are declared when the implementation is compiled as
+ISO C23 or later
+.RB ( "__STDC_VERSION__ >= 202311L" ).
+.SH DESCRIPTION
+These functions implement the ISO C23 §7.12.14 narrowing arithmetic
+operations.  Each computes a single IEEE 754 arithmetic operation on
+its (wider) operands and rounds the infinitely-precise mathematical
+result
+.B exactly once
+to the narrower return type.  Performing the operation and the narrowing
+as a single rounding avoids the double-rounding error of the naive
+.PP
+.RS 4
+.BI "(float)((double)" x " + (double)" y )
+.RE
+.PP
+idiom, in which the result is rounded once to the wider type and again
+on the cast.
+.PP
+The function name encodes both the operation and the precisions:
+.TP
+.B f
+prefix
+The result is narrowed to
+.BR float .
+.TP
+.B d
+prefix
+The result is narrowed to
+.BR double .
+.TP
+.B l
+suffix
+The operands have type
+.BR "long double" ;
+without the suffix the operands have the type one step wider than the
+result
+.RB ( double
+for the
+.B f
+prefix,
+.B double
+for the
+.B d
+prefix).
+.PP
+The five operation families are addition
+.RB ( fadd ),
+subtraction
+.RB ( fsub ),
+multiplication
+.RB ( fmul ),
+division
+.RB ( fdiv ),
+the fused multiply-add
+.IR "x * y + z"
+.RB ( ffma ,
+computed with a single rounding of the whole expression), and the
+square root
+.RB ( fsqrt ).
+.PP
+.B Return type note:
+on this implementation the
+.B f
+prefixed functions return their
+.B float
+result widened back to a
+.B double
+(the declared prototype return type is
+.BR double );
+the narrowing rounding to
+.B float
+precision still occurs, so the returned value is representable in
+.B float
+without further loss.
+.PP
+The single rounding honours the current rounding mode of the
+floating-point environment (see
+.BR fesetround (3)).
+.SH RETURN VALUE
+Each function returns its operation's result, correctly rounded once to
+the narrower precision.
+.PP
+The usual IEEE 754 special-value results apply: operations involving
+NaN return NaN; overflow yields a correctly-signed infinity;
+.BR fdiv ()
+of a nonzero value by zero yields a correctly-signed infinity; and
+invalid operations such as 0/0, infinity\-infinity, or
+.BR fsqrt ()
+of a negative argument return NaN.
+.SH ERRORS
+These functions do not set
+.I errno
+and do not consult
+.BR matherr (3).
+They report exceptional conditions solely through the floating-point
+environment: the single rounding raises the standard floating-point
+exceptions
+.RB ( FE_INEXACT ,
+.BR FE_OVERFLOW ,
+.BR FE_UNDERFLOW ,
+.BR FE_INVALID ,
+.BR FE_DIVBYZERO )
+as appropriate for the operation and operands.  Use
+.BR fetestexcept (3)
+to inspect them; see
+.BR math_error (7).
+.PP
+.B Implementation note:
+on x87 (where
+.B FLT_EVAL_METHOD
+is 2) single rounding is achieved by setting the x87 precision-control
+field for the duration of the operation.  Precision control narrows the
+significand but not the exponent range, so a result that is subnormal
+in, or overflows, the narrow type may still be double-rounded at the
+extreme exponent boundary.  The common (non-subnormal, in-range) case
+is correctly single-rounded.
+.SH ATTRIBUTES
+For an explanation of the terms used in this section, see
+.BR attributes (7).
+.TS
+allbox;
+lb lb lb
+l l l.
+Interface	Attribute	Value
+T{
+.BR fadd (),
+.BR fsub (),
+.BR fmul (),
+.BR fdiv (),
+.BR ffma (),
+.BR fsqrt (),
+and their
+.BR d /
+.B l
+variants
+T}	Thread safety	MT-Safe
+.TE
+.SH STANDARDS
+C23.
+.SH HISTORY
+The narrowing operations were added in ISO C23 (§7.12.14).
+.SH EXAMPLES
+The following program contrasts a single-rounded
+.BR fadd ()
+with the double-rounding naive cast for two
+.B double
+values whose exact sum rounds differently depending on whether it is
+narrowed once or twice:
+.PP
+.RS 4
+.EX
+#include <math.h>
+#include <stdio.h>
+
+int
+main(void)
+{
+    double a = 1.0;
+    double b = 0x1p\-30;          /* 2^\-30 */
+
+    float once  = (float)fadd(a, b);          /* one rounding   */
+    float twice = (float)((double)a + b);     /* two roundings  */
+
+    printf("fadd  = %.9g\en", (double)once);
+    printf("naive = %.9g\en", (double)twice);
+    return 0;
+}
+.EE
+.RE
+.SH SEE ALSO
+.BR fesetround (3),
+.BR fetestexcept (3),
+.BR fma (3),
+.BR sqrt (3),
+.BR fenv (3),
+.BR math_error (7)
+.SH COLOPHON
+This page is part of the Substrate operating system documentation.

@@ -1,0 +1,198 @@
+.TH GETPAYLOAD 3 "June 2026" "Substrate" "Library Functions Manual"
+.SH NAME
+getpayload, getpayloadf, getpayloadl,
+setpayload, setpayloadf, setpayloadl,
+setpayloadsig, setpayloadsigf, setpayloadsigl \- access and set NaN payloads
+.SH LIBRARY
+Math library (libm, \-lm)
+.SH SYNOPSIS
+.B #include <math.h>
+.PP
+.BI "double getpayload(double *" x );
+.br
+.BI "double getpayloadf(float *" x );
+.br
+.BI "double getpayloadl(long double *" x );
+.PP
+.BI "double setpayload(double *" res ", double " x ", int " payload );
+.br
+.BI "double setpayloadf(float *" res ", float " x ", int " payload );
+.br
+.BI "double setpayloadl(long double *" res ", long double " x ", int " payload );
+.PP
+.BI "double setpayloadsig(double *" res ", double " x ", int " payload );
+.br
+.BI "double setpayloadsigf(float *" res ", float " x ", int " payload );
+.br
+.BI "double setpayloadsigl(long double *" res ", long double " x ", int " payload );
+.PP
+Feature-test macro requirements (see
+.BR feature_test_macros (7)):
+these functions are declared when the implementation is compiled as
+ISO C23 or later
+.RB ( "__STDC_VERSION__ >= 202311L" ).
+.SH DESCRIPTION
+A NaN carries a
+.I payload
+in its mantissa bits.  These functions read and construct those
+payloads.
+.PP
+The
+.BR getpayload ()
+function reads the value pointed to by
+.I x
+and, if it is a NaN, returns its payload (the mantissa bits below the
+quiet bit) as a non-negative floating-point integer.
+.PP
+The
+.BR setpayload ()
+function constructs a
+.B quiet
+NaN whose payload is the integer
+.I payload
+and whose sign is taken from
+.IR x ,
+storing the result in
+.IR *res .
+.PP
+The
+.BR setpayloadsig ()
+function is identical except that it constructs a
+.B signaling
+NaN.  If
+.I payload
+is 0, the implementation sets the least-significant mantissa bit so the
+result is a NaN rather than an infinity.
+.PP
+The
+.B f
+and
+.B l
+suffixed variants operate on
+.B float
+and
+.B "long double"
+storage respectively.  The
+.I payload
+argument always has type
+.BR int .
+.SH RETURN VALUE
+.BR getpayload ()
+returns the payload of
+.I *x
+as a non-negative floating-point integer.  If
+.I *x
+is not a NaN, it returns
+.BR \-1 .
+.PP
+.BR setpayload ()
+and
+.BR setpayloadsig ()
+return 0 on success, having stored the constructed NaN in
+.IR *res .
+They return a nonzero value (specifically
+.BR \-1 )
+if
+.I payload
+is negative or too large to fit the payload field of the format
+(51 bits for
+.BR double ,
+22 bits for
+.BR float );
+in that case
+.I *res
+is
+.B not
+modified.
+.SH ERRORS
+No errors occur in the
+.IR errno /
+floating-point-exception sense.  These functions do not set
+.I errno
+and raise no floating-point exception; in particular, constructing or
+reading a signaling NaN does not raise
+.BR FE_INVALID .
+An out-of-range payload is reported only through the nonzero return
+value of
+.BR setpayload ()
+/
+.BR setpayloadsig ()
+described under RETURN VALUE.
+.SH ATTRIBUTES
+For an explanation of the terms used in this section, see
+.BR attributes (7).
+.TS
+allbox;
+lb lb lb
+l l l.
+Interface	Attribute	Value
+T{
+.BR getpayload (),
+.BR setpayload (),
+.BR setpayloadsig (),
+and their
+.BR f /
+.B l
+variants
+T}	Thread safety	MT-Safe
+.TE
+.SH STANDARDS
+C23.
+.SH HISTORY
+Added in ISO C23 (§7.12.11), following the NaN-payload operations of
+IEEE 754-2008.
+.SH NOTES
+The
+.I payload
+argument is an
+.BR int .
+The payload field of a
+.B double
+is 51 bits and that of a
+.B "long double"
+is 64 bits, both wider than a 32-bit
+.BR int ;
+payloads larger than
+.B INT_MAX
+therefore cannot be requested through this interface.
+.SH EXAMPLES
+The following program builds a quiet NaN with payload 42, then reads it
+back:
+.PP
+.RS 4
+.EX
+#include <math.h>
+#include <stdio.h>
+
+int
+main(void)
+{
+    double n;
+
+    if (setpayload(&n, 1.0, 42) != 0) {
+        printf("payload out of range\en");
+        return 1;
+    }
+    printf("isnan        = %d\en", isnan(n));
+    printf("getpayload   = %.0f\en", getpayload(&n));
+    return 0;
+}
+.EE
+.RE
+.PP
+The output is:
+.PP
+.RS 4
+.EX
+isnan        = 1
+getpayload   = 42
+.EE
+.RE
+.SH SEE ALSO
+.BR canonicalize (3),
+.BR isnan (3),
+.BR nan (3),
+.BR totalorder (3),
+.BR math_error (7)
+.SH COLOPHON
+This page is part of the Substrate operating system documentation.

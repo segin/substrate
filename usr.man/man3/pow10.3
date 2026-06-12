@@ -1,0 +1,126 @@
+.TH POW10 3 "June 2026" "Substrate" "Library Functions Manual"
+.SH NAME
+pow10, pow10f, pow10l \- base-10 exponential function (obsolescent)
+.SH LIBRARY
+Math library (libm, \-lm)
+.SH SYNOPSIS
+.B #include <math.h>
+.PP
+.BI "double pow10(double " x );
+.br
+.BI "float pow10f(float " x );
+.br
+.BI "long double pow10l(long double " x );
+.PP
+Feature-test macro requirements (see
+.BR feature_test_macros (7)):
+.PP
+.RS 4
+.BR pow10 (),
+.BR pow10f (),
+.BR pow10l ():
+.RS 4
+_DEFAULT_SOURCE || _XOPEN_SOURCE || _SVID_SOURCE || _BSD_SOURCE
+.RE
+.RE
+.SH DESCRIPTION
+The
+.BR pow10 ()
+function returns the value of 10 raised to the power
+.IR x :
+.PP
+.RS 4
+.RI 10^ x .
+.RE
+.PP
+.BR pow10 ()
+is an obsolescent alias for
+.BR exp10 (3).
+The implementation forwards directly to
+.BR exp10 (3),
+.BR exp10f (3),
+and
+.BR exp10l (3)
+respectively and returns their results unchanged.  Using a dedicated
+base-10 exponential is more accurate than the equivalent
+.BI pow(10.0, " x" )
+or
+.BI exp( x " * M_LN10)" .
+.PP
+.B WARNING:
+.BR pow10 ()
+is obsolescent.  New code should call
+.BR exp10 (3)
+directly.
+.SH RETURN VALUE
+The return value, errors, and special-case behaviour are exactly those
+of
+.BR exp10 (3).
+On success,
+.RI 10^ x
+is returned.
+.SH ERRORS
+The error behaviour is that of
+.BR exp10 (3).
+.PP
+The following errors can occur:
+.TP
+Range error: result overflow
+.I x
+is large and positive.
+.B \(+-HUGE_VAL
+(or
+.BR \(+-HUGE_VALF ,
+.BR \(+-HUGE_VALL )
+is returned and an overflow floating-point exception
+.RB ( FE_OVERFLOW )
+is raised.  If
+.I "math_errhandling & MATH_ERRNO"
+is non-zero,
+.I errno
+is set to
+.BR ERANGE .
+.TP
+Range error: result underflow
+.I x
+is large and negative.  0 is returned and an underflow
+floating-point exception
+.RB ( FE_UNDERFLOW )
+is raised.  If
+.I "math_errhandling & MATH_ERRNO"
+is non-zero,
+.I errno
+is set to
+.BR ERANGE .
+.PP
+See
+.BR math_error (7)
+for information on how to determine whether an error has occurred when
+calling these functions.
+.SH ATTRIBUTES
+For an explanation of the terms used in this section, see
+.BR attributes (7).
+.TS
+allbox;
+lb lb lb
+l l l.
+Interface	Attribute	Value
+T{
+.BR pow10 (),
+.BR pow10f (),
+.BR pow10l ()
+T}	Thread safety	MT-Safe
+.TE
+.SH STANDARDS
+None.  Obsolescent.
+.SH HISTORY
+A long-standing glibc / BSD extension.  Superseded by
+.BR exp10 (3).
+.SH SEE ALSO
+.BR exp (3),
+.BR exp10 (3),
+.BR exp2 (3),
+.BR pow (3),
+.BR math_error (7)
+.SH COLOPHON
+This page is part of the Substrate operating system documentation.
