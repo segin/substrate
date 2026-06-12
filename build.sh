@@ -159,6 +159,13 @@ make -C usr.bin
 step "Stage 1f: sync native libs + headers into cross sysroot"
 sync_native_libs_to_sysroot
 
+# Teach the cross-gcc to resolve libc.so.0's DT_NEEDED chain (libsys/libm/
+# libgcc_s) at link time, so a bare `cc main.c` — and every autoconf compiler
+# probe and bare-Makefile contrib port — links against substrate's own libc
+# without per-project flags.  Runs here, after the sysroot has the libs the
+# spec's -rpath-link points at.
+"${HERE}/scripts/install-link-specs.sh"
+
 #-----------------------------------------------------------------------
 # Stage 2: contrib ports
 #-----------------------------------------------------------------------
