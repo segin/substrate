@@ -45,13 +45,25 @@
  * ============================================================ */
 
 size_t confstr(int name, char *buf, size_t len) {
-    /* Substrate exposes no _CS_* strings yet.  POSIX permits an
-     * implementation to return 0 + leave buf untouched for every
-     * name; that's source-compat for callers and honest about the
-     * lack of data. */
-    (void)name;
-    if (buf && len > 0) buf[0] = '\0';
-    return 0;
+    const char *val;
+    switch (name) {
+    case _CS_PATH:                   val = "/usr/bin:/bin"; break;
+    case _CS_GNU_LIBC_VERSION:       val = "substrate libc"; break;
+    case _CS_GNU_LIBPTHREAD_VERSION: val = "substrate libpthread"; break;
+    default:
+        /* Unknown name: POSIX permits returning 0 with buf untouched. */
+        if (buf && len > 0) buf[0] = '\0';
+        return 0;
+    }
+    /* confstr returns the buffer size needed (string length + NUL); copies
+     * up to len-1 bytes plus a terminating NUL when buf/len allow. */
+    size_t need = strlen(val) + 1;
+    if (buf && len > 0) {
+        size_t n = (len - 1 < need - 1) ? len - 1 : need - 1;
+        memcpy(buf, val, n);
+        buf[n] = '\0';
+    }
+    return need;
 }
 
 int dup3(int oldfd, int newfd, int flags) {

@@ -80,6 +80,11 @@ int fsync(int fd);
 int fdatasync(int fd);
 int fchdir(int fd);
 
+/* confstr(3) name values (glibc-compatible subset). */
+#define _CS_PATH                    0
+#define _CS_GNU_LIBC_VERSION        2
+#define _CS_GNU_LIBPTHREAD_VERSION  3
+
 /* C99 / POSIX additions filled in by lib/c/src/posix_extra.c. */
 size_t confstr(int name, char *buf, size_t len);
 int    dup3(int oldfd, int newfd, int flags);
