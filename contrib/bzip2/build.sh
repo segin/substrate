@@ -57,7 +57,7 @@ make -j"${JOBS}" \
     AR="${CROSS_AR}" \
     RANLIB="${CROSS_RANLIB}" \
     CFLAGS="-march=i486 -mtune=i486 -Wall -Winline -O2 -g -D_FILE_OFFSET_BITS=64 -fno-pie" \
-    LDFLAGS="-fno-pie" \
+    LDFLAGS="-fno-pie -L${STAGE1_PREFIX}/i386-unknown-substrate/lib -Wl,-rpath-link,${STAGE1_PREFIX}/i386-unknown-substrate/lib -Wl,--copy-dt-needed-entries" \
     libbz2.a bzip2 bzip2recover
 
 # Shared library via the auxiliary Makefile.
