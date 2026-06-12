@@ -1,7 +1,7 @@
 From 95b1c66ce35c9d761e86a1f45e23f11ca1a57656 Mon Sep 17 00:00:00 2001
 From: Kirn Gill II <segin2005@gmail.com>
 Date: Wed, 10 Jun 2026 11:33:12 -0500
-Subject: [PATCH 42/83] contrib: harfbuzz 2.6.8 (Pango 1.42 text-shaping dep)
+Subject: [PATCH 42/98] contrib: harfbuzz 2.6.8 (Pango 1.42 text-shaping dep)
 
 C++ port via substrate_sysroot (glib2/freetype); cairo/ICU/gobject off.
 

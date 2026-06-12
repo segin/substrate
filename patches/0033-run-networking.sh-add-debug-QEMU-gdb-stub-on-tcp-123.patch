@@ -1,7 +1,7 @@
 From c39e311313ed544e555a9ac8553111eed7724a82 Mon Sep 17 00:00:00 2001
 From: Kirn Gill II <segin2005@gmail.com>
 Date: Wed, 10 Jun 2026 06:50:52 -0500
-Subject: [PATCH 33/83] run-networking.sh: add --debug (QEMU gdb stub on
+Subject: [PATCH 33/98] run-networking.sh: add --debug (QEMU gdb stub on
  tcp::1234)
 
 --debug exposes -gdb tcp::$GDBPORT (default 1234); GDBHALT=1 also adds

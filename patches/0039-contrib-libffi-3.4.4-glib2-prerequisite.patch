@@ -1,7 +1,7 @@
 From 0d994873741056d24934048efceee8810d32bdd5 Mon Sep 17 00:00:00 2001
 From: Kirn Gill II <segin2005@gmail.com>
 Date: Wed, 10 Jun 2026 11:05:35 -0500
-Subject: [PATCH 39/83] contrib: libffi 3.4.4 (glib2 prerequisite)
+Subject: [PATCH 39/98] contrib: libffi 3.4.4 (glib2 prerequisite)
 
 Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
 ---

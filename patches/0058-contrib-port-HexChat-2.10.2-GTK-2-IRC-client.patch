@@ -1,7 +1,7 @@
 From 6e6dee9d3deb15ecb778442ffd0ad7f776a7c9e1 Mon Sep 17 00:00:00 2001
 From: Kirn Gill II <segin2005@gmail.com>
 Date: Wed, 10 Jun 2026 17:14:07 -0500
-Subject: [PATCH 58/83] contrib: port HexChat 2.10.2 (GTK+ 2 IRC client)
+Subject: [PATCH 58/98] contrib: port HexChat 2.10.2 (GTK+ 2 IRC client)
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit

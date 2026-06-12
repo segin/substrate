@@ -1,0 +1,33 @@
+From 7ac7598d393baac49bad01c3b332801bc5580397 Mon Sep 17 00:00:00 2001
+From: Kirn Gill II <segin2005@gmail.com>
+Date: Fri, 12 Jun 2026 09:55:12 -0500
+Subject: [PATCH 84/98] docs: drop Xenix from the personality target list
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Microsoft Xenix and SCO Xenix are not on the near-term roadmap; remove them
+from docs/specs/personality_targets.md.  (They were never in the kernel
+personality enum or the README — this is the only place they appeared.)
+
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+---
+ docs/specs/personality_targets.md | 2 --
+ 1 file changed, 2 deletions(-)
+
+diff --git a/docs/specs/personality_targets.md b/docs/specs/personality_targets.md
+index 38a61ba5..7505597b 100644
+--- a/docs/specs/personality_targets.md
++++ b/docs/specs/personality_targets.md
+@@ -9,8 +9,6 @@ The following execution personalities are planned or implemented for Substrate:
+ - **OpenBSD**
+ - **Solaris / SVR4 family**
+ - **SunOS 4.x (Sun386i)**
+-- **Microsoft Xenix** (`MS-X/86`, `MS-X/286`, `MS-X/386`)
+-- **SCO Xenix** (`SCO-X/86`, `SCO-X/286`, `SCO-X/386`)
+ - **SCO Unix** (`SCO-U/3.2v2`, `SCO-U/ODT3`, `SCO-OSR5`)
+ - **iBCS2** compatibility targets
+ - **ELKS** (16-bit Linux-like)
+-- 
+2.54.0
+

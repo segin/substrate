@@ -1,7 +1,7 @@
 From 87f8f8c0fd7896b6fab900fa021ec70bc291a395 Mon Sep 17 00:00:00 2001
 From: Kirn Gill II <segin2005@gmail.com>
 Date: Wed, 10 Jun 2026 22:17:16 -0500
-Subject: [PATCH 61/83] libpthread: implement recursive (and errorcheck)
+Subject: [PATCH 61/98] libpthread: implement recursive (and errorcheck)
  mutexes
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

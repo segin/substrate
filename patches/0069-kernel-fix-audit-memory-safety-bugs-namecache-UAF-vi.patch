@@ -1,7 +1,7 @@
 From 77d909aa27f35ff7ca83a93de8c50546da197948 Mon Sep 17 00:00:00 2001
 From: Kirn Gill II <segin2005@gmail.com>
 Date: Thu, 11 Jun 2026 15:55:48 -0500
-Subject: [PATCH 69/83] kernel: fix audit memory-safety bugs (namecache UAF,
+Subject: [PATCH 69/98] kernel: fix audit memory-safety bugs (namecache UAF,
  virtio-net, readv, ELKS)
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

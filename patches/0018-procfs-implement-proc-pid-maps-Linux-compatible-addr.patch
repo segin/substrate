@@ -1,7 +1,7 @@
 From 3dcbfb3a17fb1eb15d0193915ed1771ccb46a146 Mon Sep 17 00:00:00 2001
 From: Kirn Gill II <segin2005@gmail.com>
 Date: Tue, 9 Jun 2026 16:51:02 -0500
-Subject: [PATCH 18/83] procfs: implement /proc/<pid>/maps (Linux-compatible
+Subject: [PATCH 18/98] procfs: implement /proc/<pid>/maps (Linux-compatible
  address-space dump)
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

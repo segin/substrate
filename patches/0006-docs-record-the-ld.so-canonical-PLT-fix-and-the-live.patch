@@ -1,7 +1,7 @@
 From 876a069b3a32439f42a115f916e922db8c37e604 Mon Sep 17 00:00:00 2001
 From: Kirn Gill II <segin2005@gmail.com>
 Date: Mon, 8 Jun 2026 17:59:52 -0500
-Subject: [PATCH 06/83] docs: record the ld.so canonical-PLT fix and the live
+Subject: [PATCH 06/98] docs: record the ld.so canonical-PLT fix and the live
  CDE Front Panel
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

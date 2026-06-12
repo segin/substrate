@@ -1,7 +1,7 @@
 From 6beecdcfa00ac4d635425f17d787149f4b3ba240 Mon Sep 17 00:00:00 2001
 From: Kirn Gill II <segin2005@gmail.com>
 Date: Wed, 10 Jun 2026 11:23:21 -0500
-Subject: [PATCH 40/83] contrib: glib2 (GLib 2.56.4) + automake-pyshim (GTK+
+Subject: [PATCH 40/98] contrib: glib2 (GLib 2.56.4) + automake-pyshim (GTK+
  2.x foundation)
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

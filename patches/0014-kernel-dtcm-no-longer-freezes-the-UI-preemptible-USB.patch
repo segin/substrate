@@ -1,7 +1,7 @@
 From 217ebe72fb33cfcfe1b4a2cb943c18a436ca376c Mon Sep 17 00:00:00 2001
 From: Kirn Gill II <segin2005@gmail.com>
 Date: Tue, 9 Jun 2026 13:36:52 -0500
-Subject: [PATCH 14/83] =?UTF-8?q?kernel:=20dtcm=20no=20longer=20freezes=20?=
+Subject: [PATCH 14/98] =?UTF-8?q?kernel:=20dtcm=20no=20longer=20freezes=20?=
  =?UTF-8?q?the=20UI=20=E2=80=94=20preemptible=20USB=20poll=20wait=20+=20gu?=
  =?UTF-8?q?ard=20signals=20to=20user=20mode?=
 MIME-Version: 1.0

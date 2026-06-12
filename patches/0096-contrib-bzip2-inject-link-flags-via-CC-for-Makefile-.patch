@@ -1,0 +1,41 @@
+From b1de4aea82a25497b08cf27ba1bf4cbd5b657a87 Mon Sep 17 00:00:00 2001
+From: Kirn Gill II <segin2005@gmail.com>
+Date: Fri, 12 Jun 2026 11:52:39 -0500
+Subject: [PATCH 96/98] contrib/bzip2: inject link flags via CC for
+ Makefile-libbz2_so
+
+Makefile-libbz2_so hardcodes its link commands without $(LDFLAGS), so the
+prior LDFLAGS= override was ignored and the bzip2-shared executable link still
+failed the libc.so.0 DT_NEEDED cascade.  Pass the -L/-rpath-link/
+--copy-dt-needed-entries flags through CC instead (harmless on the -c compile
+rules, load-bearing on the link).  Verified libbz2.so.1.0.8 + bzip2-shared
+now build.
+
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+---
+ contrib/bzip2/build.sh | 8 +++++---
+ 1 file changed, 5 insertions(+), 3 deletions(-)
+
+diff --git a/contrib/bzip2/build.sh b/contrib/bzip2/build.sh
+index abdbebe4..7675c824 100755
+--- a/contrib/bzip2/build.sh
++++ b/contrib/bzip2/build.sh
+@@ -63,10 +63,12 @@ make -j"${JOBS}" \
+ # Shared library via the auxiliary Makefile.
+ echo "==> Building shared libbz2.so.1.0.8"
+ make -f Makefile-libbz2_so clean >/dev/null 2>&1 || true
++# Makefile-libbz2_so hardcodes its link rules without $(LDFLAGS), so inject
++# the DT_NEEDED-chain resolution flags through CC (harmless on the -c compile
++# rules, load-bearing on the bzip2-shared executable link).
+ make -j"${JOBS}" -f Makefile-libbz2_so \
+-    CC="${CROSS_CC}" \
+-    CFLAGS="-march=i486 -mtune=i486 -fPIC -Wall -Winline -O2 -g -D_FILE_OFFSET_BITS=64" \
+-    LDFLAGS="-L${STAGE1_PREFIX}/i386-unknown-substrate/lib -Wl,-rpath-link,${STAGE1_PREFIX}/i386-unknown-substrate/lib -Wl,--copy-dt-needed-entries"
++    CC="${CROSS_CC} -L${STAGE1_PREFIX}/i386-unknown-substrate/lib -Wl,-rpath-link,${STAGE1_PREFIX}/i386-unknown-substrate/lib -Wl,--copy-dt-needed-entries" \
++    CFLAGS="-march=i486 -mtune=i486 -fPIC -Wall -Winline -O2 -g -D_FILE_OFFSET_BITS=64"
+ 
+ # Stage into DESTDIR with substrate's `/usr/{bin,lib,include}` layout.
+ echo "==> Installing into ${DESTDIR}"
+-- 
+2.54.0
+

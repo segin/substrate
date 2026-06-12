@@ -1,7 +1,7 @@
 From 5af3ef238f5c3ef68eda8e56dc99c98d29cd46f1 Mon Sep 17 00:00:00 2001
 From: Kirn Gill II <segin2005@gmail.com>
 Date: Tue, 9 Jun 2026 17:05:23 -0500
-Subject: [PATCH 19/83] scripts: add symbolize-trap.sh (kernel TRAP backtrace
+Subject: [PATCH 19/98] scripts: add symbolize-trap.sh (kernel TRAP backtrace
  -> source, via /proc/maps) Co-Authored-By: Claude Opus 4.8 (1M context)
  <noreply@anthropic.com>
 

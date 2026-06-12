@@ -1,0 +1,52 @@
+From 19909411e04f2a0f03719399e161dc28f80483a6 Mon Sep 17 00:00:00 2001
+From: Kirn Gill II <segin2005@gmail.com>
+Date: Fri, 12 Jun 2026 11:36:37 -0500
+Subject: [PATCH 93/98] build-rootfs: cross-compile sbin/sdm (sgreet), don't
+ fall back to host gcc
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The dist-staging step built the display manager with `make -C sbin/sdm
+install` but passed no CROSS, so sgreet's Makefile (CC=$(CROSS)gcc) used the
+host gcc — which rejects -march=i486 without -m32 ("CPU you selected does not
+support x86-64 instruction set") and produced a host binary anyway.  The old
+`[ -x sgreet ]` guard was also circular for a clean tree (the install target
+rebuilds a stale sgreet with the wrong compiler).  Guard on the contrib X
+stack (dist-libX11) instead, and pass CROSS to both the build and install.
+
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+---
+ build-rootfs.sh | 16 +++++++++++-----
+ 1 file changed, 11 insertions(+), 5 deletions(-)
+
+diff --git a/build-rootfs.sh b/build-rootfs.sh
+index beb21877..f0f1c90f 100755
+--- a/build-rootfs.sh
++++ b/build-rootfs.sh
+@@ -437,11 +437,17 @@ install_to_dist() {
+     # (Xlib client) rather than a binary named "sdm", so the generic loop
+     # above misses it.  Use its Makefile install target, which lands
+     # /usr/sbin/sdm, /usr/sbin/sgreet and /etc/X11/Xsession — the exact set
+-    # /etc/rc.d/60-sdm requires.  Guarded on sgreet having been built (it
+-    # needs the contrib X stack, so it is skipped on no-X profiles).
+-    if [ -x "$TOP/sbin/sdm/sgreet" ]; then
+-        echo "Installing display manager (sdm + sgreet)..."
+-        make -C "$TOP/sbin/sdm" install DESTDIR="$DIST" >/dev/null
++    # /etc/rc.d/60-sdm requires.  Guarded on the contrib X stack having been
++    # built (skipped on no-X profiles).  CROSS must be passed so sgreet
++    # cross-compiles — otherwise its Makefile (CC=$(CROSS)gcc) falls back to
++    # the host gcc, which rejects -march=i486 without -m32 ("CPU you selected
++    # does not support x86-64 instruction set") on a fresh/stale tree.
++    if [ -d "$TOP/dist-libX11/usr/lib" ]; then
++        echo "Building + installing display manager (sdm + sgreet)..."
++        make -C "$TOP/sbin/sdm" \
++            CROSS=/opt/substrate/bin/i386-unknown-substrate- >/dev/null
++        make -C "$TOP/sbin/sdm" install DESTDIR="$DIST" \
++            CROSS=/opt/substrate/bin/i386-unknown-substrate- >/dev/null
+     fi
+ 
+     # contrib overlays — staged trees produced by each contrib/$pkg/build.sh.
+-- 
+2.54.0
+

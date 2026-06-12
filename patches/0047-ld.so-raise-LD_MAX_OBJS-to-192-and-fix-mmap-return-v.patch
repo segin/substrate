@@ -1,7 +1,7 @@
 From 84db68f839c999283284ba8ee0c4e518297e3a7b Mon Sep 17 00:00:00 2001
 From: Kirn Gill II <segin2005@gmail.com>
 Date: Wed, 10 Jun 2026 13:37:49 -0500
-Subject: [PATCH 47/83] ld.so: raise LD_MAX_OBJS to 192 and fix mmap-return
+Subject: [PATCH 47/98] ld.so: raise LD_MAX_OBJS to 192 and fix mmap-return
  validation
 
 Two robustness fixes a full GTK+ 2.x dependency graph (~40 DSOs) exposes:

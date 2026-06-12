@@ -1,7 +1,7 @@
 From 70974d511a3f66e45cb7639e7deb36790168b912 Mon Sep 17 00:00:00 2001
 From: Kirn Gill II <segin2005@gmail.com>
 Date: Tue, 9 Jun 2026 23:41:27 -0500
-Subject: [PATCH 25/83] ld.so: publish environ before running shared-library
+Subject: [PATCH 25/98] ld.so: publish environ before running shared-library
  constructors
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

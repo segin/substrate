@@ -1,7 +1,7 @@
 From 9a50eac0bfdcc2ddb564510fc82987227d8b7344 Mon Sep 17 00:00:00 2001
 From: Kirn Gill II <segin2005@gmail.com>
 Date: Tue, 9 Jun 2026 23:41:27 -0500
-Subject: [PATCH 26/83] libc: add cfmakeraw(3)
+Subject: [PATCH 26/98] libc: add cfmakeraw(3)
 
 BSD/glibc termios helper that configures a struct termios for raw mode
 (no input mangling, no OPOST, no echo/canonical/signals, 8-bit chars,

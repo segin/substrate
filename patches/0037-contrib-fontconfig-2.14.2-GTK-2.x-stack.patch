@@ -1,7 +1,7 @@
 From 843aa8d6e8b03e8a60612342f084222fcbe97930 Mon Sep 17 00:00:00 2001
 From: Kirn Gill II <segin2005@gmail.com>
 Date: Wed, 10 Jun 2026 07:29:25 -0500
-Subject: [PATCH 37/83] contrib: fontconfig 2.14.2 (GTK+ 2.x stack)
+Subject: [PATCH 37/98] contrib: fontconfig 2.14.2 (GTK+ 2.x stack)
 
 Font config/matching for cairo + pango.  Cross-built against dist-freetype
 + dist-expat (+ dist-libpng, since freetype --with-png makes the build-time

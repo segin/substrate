@@ -1,0 +1,46 @@
+From c4c10da3414b69f8aae818c5764bbea0984790d4 Mon Sep 17 00:00:00 2001
+From: Kirn Gill II <segin2005@gmail.com>
+Date: Fri, 12 Jun 2026 10:00:18 -0500
+Subject: [PATCH 86/98] libc: fix IN6ADDR_*_INIT brace nesting (unblocks a
+ clean lib/c build)
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+struct in6_addr wraps a union (__in6_u), like glibc, so a fully-braced
+initializer needs three brace levels (struct, union, byte array).  The
+IN6ADDR_ANY_INIT / IN6ADDR_LOOPBACK_INIT macros had only two, and the
+comment wrongly claimed a flat struct — so socket.c's in6addr_any /
+in6addr_loopback definitions failed -Werror=missing-braces, breaking a
+clean lib/c build (Stage 1b of ./build.sh).
+
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+---
+ include/netinet/in.h | 11 +++++------
+ 1 file changed, 5 insertions(+), 6 deletions(-)
+
+diff --git a/include/netinet/in.h b/include/netinet/in.h
+index 908d1e92..6cf33340 100644
+--- a/include/netinet/in.h
++++ b/include/netinet/in.h
+@@ -129,12 +129,11 @@ static inline int __in6_is_addr_v4mapped(const struct in6_addr *__a)
+  * libc supplies the symbols; declare here. */
+ extern const struct in6_addr in6addr_any;
+ extern const struct in6_addr in6addr_loopback;
+-/* substrate's struct in6_addr is `struct { uint8_t s6_addr[16]; }`
+- * (no anonymous union, unlike glibc's), so the initializer wraps
+- * the array once.  Ported code that uses `(struct in6_addr)
+- * IN6ADDR_ANY_INIT` still compiles. */
+-#define IN6ADDR_ANY_INIT      { { 0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0 } }
+-#define IN6ADDR_LOOPBACK_INIT { { 0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,1 } }
++/* struct in6_addr wraps a union (__in6_u) over the 16 bytes, like glibc, so
++ * a fully-braced initializer needs THREE brace levels: struct, union, byte
++ * array.  (Two levels trips -Werror=missing-braces.) */
++#define IN6ADDR_ANY_INIT      { { { 0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0 } } }
++#define IN6ADDR_LOOPBACK_INIT { { { 0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,1 } } }
+ 
+ /* IPv4 / IPv6 socket-level option codes — values match Linux.
+  * substrate's network stack doesn't act on most of them yet, but
+-- 
+2.54.0
+

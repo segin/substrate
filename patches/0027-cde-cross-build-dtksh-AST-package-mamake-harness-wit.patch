@@ -1,7 +1,7 @@
 From 70b0f18f911fed076da8e8267b54565364197d11 Mon Sep 17 00:00:00 2001
 From: Kirn Gill II <segin2005@gmail.com>
 Date: Tue, 9 Jun 2026 23:41:27 -0500
-Subject: [PATCH 27/83] =?UTF-8?q?cde:=20cross-build=20dtksh=20=E2=80=94=20?=
+Subject: [PATCH 27/98] =?UTF-8?q?cde:=20cross-build=20dtksh=20=E2=80=94=20?=
  =?UTF-8?q?AST=20package/mamake=20harness=20with=20qemu-backed=20iffe=20pr?=
  =?UTF-8?q?obes?=
 MIME-Version: 1.0

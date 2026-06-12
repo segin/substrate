@@ -1,7 +1,7 @@
 From e34b5dd497badd9d63570c6a7ca9d75ec19754c2 Mon Sep 17 00:00:00 2001
 From: Kirn Gill II <segin2005@gmail.com>
 Date: Wed, 10 Jun 2026 11:03:32 -0500
-Subject: [PATCH 38/83] contrib/cairo 1.16.0 + libc pthread_cleanup_push/pop
+Subject: [PATCH 38/98] contrib/cairo 1.16.0 + libc pthread_cleanup_push/pop
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit

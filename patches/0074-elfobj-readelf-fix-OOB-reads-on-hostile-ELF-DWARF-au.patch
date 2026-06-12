@@ -1,7 +1,7 @@
 From 420440f689ea0a1f9243e2074bbd0bf065919786 Mon Sep 17 00:00:00 2001
 From: Kirn Gill II <segin2005@gmail.com>
 Date: Thu, 11 Jun 2026 16:15:30 -0500
-Subject: [PATCH 74/83] elfobj/readelf: fix OOB reads on hostile ELF/DWARF
+Subject: [PATCH 74/98] elfobj/readelf: fix OOB reads on hostile ELF/DWARF
  (audit)
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

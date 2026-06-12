@@ -1,7 +1,7 @@
 From 51b9029d63cba6f08460f757f524e9c067f3243b Mon Sep 17 00:00:00 2001
 From: Kirn Gill II <segin2005@gmail.com>
 Date: Tue, 9 Jun 2026 22:14:06 -0500
-Subject: [PATCH 24/83] cde: build dtinfo + dtdocbook (host-native generators);
+Subject: [PATCH 24/98] cde: build dtinfo + dtdocbook (host-native generators);
  fix statfs.h C++ linkage
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

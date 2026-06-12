@@ -1,7 +1,7 @@
 From e97ed9b5918ca603d32e63617a4f3e8954f8d7e9 Mon Sep 17 00:00:00 2001
 From: Kirn Gill II <segin2005@gmail.com>
 Date: Wed, 10 Jun 2026 13:42:28 -0500
-Subject: [PATCH 52/83] perf: short-circuit redundant loops when iterating over
+Subject: [PATCH 52/98] perf: short-circuit redundant loops when iterating over
  ar archive members (#1266)
 
 This commit short-circuits the loop in print_members within

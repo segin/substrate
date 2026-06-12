@@ -1,0 +1,129 @@
+From 42e1373e886f9bb43ce5370dcdcbc840cbcbca7b Mon Sep 17 00:00:00 2001
+From: Kirn Gill II <segin2005@gmail.com>
+Date: Fri, 12 Jun 2026 10:55:42 -0500
+Subject: [PATCH 91/98] =?UTF-8?q?libc:=20add=20the=20LFS=20*64=20aliases?=
+ =?UTF-8?q?=20=E2=80=94=20unblocks=20e2fsprogs=20in=20a=20clean=20build?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+substrate's struct stat / off_t / fpos_t are already 64-bit, but ported code
+built with _LARGEFILE64_SOURCE (e2fsprogs's blkid getsize.c, the I/O managers,
+…) expects the explicit large-file names.  Provide them as plain aliases,
+guarded by _LARGEFILE64_SOURCE/_GNU_SOURCE:
+  sys/stat.h:  stat64/fstat64/lstat64/fstatat64
+  sys/types.h: off64_t, loff_t
+  fcntl.h:     open64/openat64, O_LARGEFILE (0)
+  unistd.h:    lseek64/ftruncate64/truncate64/pread64/pwrite64
+  stdio.h:     fopen64/freopen64/fseeko64/ftello64/tmpfile64
+
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+---
+ include/fcntl.h     |  9 +++++++++
+ include/stdio.h     |  9 +++++++++
+ include/sys/stat.h  | 10 ++++++++++
+ include/sys/types.h |  6 ++++++
+ include/unistd.h    |  9 +++++++++
+ 5 files changed, 43 insertions(+)
+
+diff --git a/include/fcntl.h b/include/fcntl.h
+index 019fe543..42c99a29 100644
+--- a/include/fcntl.h
++++ b/include/fcntl.h
+@@ -84,6 +84,15 @@ struct flock {
+ 
+ int open(const char *pathname, int flags, ...);
+ int openat(int dirfd, const char *pathname, int flags, ...);
++
++/* LFS aliases — substrate's off_t is already 64-bit (O_LARGEFILE is a no-op). */
++#if defined(_LARGEFILE64_SOURCE) || defined(_GNU_SOURCE)
++#define open64   open
++#define openat64 openat
++#ifndef O_LARGEFILE
++#define O_LARGEFILE 0
++#endif
++#endif
+ int creat(const char *pathname, int mode);
+ int fcntl(int fd, int cmd, ...);
+ 
+diff --git a/include/stdio.h b/include/stdio.h
+index 6d69ba21..a4072099 100644
+--- a/include/stdio.h
++++ b/include/stdio.h
+@@ -120,6 +120,15 @@ int fsetpos(FILE *stream, const fpos_t *pos);
+ int fseeko(FILE *stream, off_t offset, int whence);
+ off_t ftello(FILE *stream);
+ 
++/* LFS aliases — substrate's off_t/fpos_t are already 64-bit. */
++#if defined(_LARGEFILE64_SOURCE) || defined(_GNU_SOURCE)
++#define fopen64   fopen
++#define freopen64 freopen
++#define fseeko64  fseeko
++#define ftello64  ftello
++#define tmpfile64 tmpfile
++#endif
++
+ void clearerr(FILE *stream);
+ int feof(FILE *stream);
+ int ferror(FILE *stream);
+diff --git a/include/sys/stat.h b/include/sys/stat.h
+index bd7bf718..f3783df6 100644
+--- a/include/sys/stat.h
++++ b/include/sys/stat.h
+@@ -76,6 +76,16 @@ int stat(const char *pathname, struct stat *statbuf);
+ int fstat(int fd, struct stat *statbuf);
+ int lstat(const char *pathname, struct stat *statbuf);
+ int fstatat(int dirfd, const char *pathname, struct stat *statbuf, int flags);
++
++/* Large-file (LFS) aliases.  substrate's struct stat / off_t are already
++ * 64-bit, so the *64 variants are plain aliases — provided for ported code
++ * (e2fsprogs, ...) that uses them under _LARGEFILE64_SOURCE/_GNU_SOURCE. */
++#if defined(_LARGEFILE64_SOURCE) || defined(_GNU_SOURCE)
++#define stat64     stat
++#define fstat64    fstat
++#define lstat64    lstat
++#define fstatat64  fstatat
++#endif
+ int mknod(const char *pathname, mode_t mode, dev_t dev);
+ int chmod(const char *pathname, mode_t mode);
+ int chown(const char *pathname, uid_t owner, gid_t group);
+diff --git a/include/sys/types.h b/include/sys/types.h
+index 418df50b..89f5fe90 100644
+--- a/include/sys/types.h
++++ b/include/sys/types.h
+@@ -25,6 +25,12 @@ typedef __INT32_TYPE__  ssize_t;
+ typedef __INT64_TYPE__  off_t;
+ #endif
+ 
++/* Large-file (LFS) type aliases — substrate's base types are already 64-bit. */
++#if defined(_LARGEFILE64_SOURCE) || defined(_GNU_SOURCE)
++typedef off_t off64_t;
++typedef off_t loff_t;
++#endif
++
+ #include <stdint.h>
+ #include <stddef.h>
+ /* BSD/glibc convention: <sys/types.h> exposes the byte-order macros
+diff --git a/include/unistd.h b/include/unistd.h
+index ac7da981..01683ac0 100644
+--- a/include/unistd.h
++++ b/include/unistd.h
+@@ -178,6 +178,15 @@ off_t lseek(int fd, off_t offset, int whence);
+ int ftruncate(int fd, off_t length);
+ int truncate(const char *path, off_t length);
+ 
++/* LFS aliases — substrate's off_t is already 64-bit. */
++#if defined(_LARGEFILE64_SOURCE) || defined(_GNU_SOURCE)
++#define lseek64     lseek
++#define ftruncate64 ftruncate
++#define truncate64  truncate
++#define pread64     pread
++#define pwrite64    pwrite
++#endif
++
+ unsigned int sleep(unsigned int seconds);
+ int usleep(useconds_t usec);
+ unsigned int alarm(unsigned int seconds);
+-- 
+2.54.0
+

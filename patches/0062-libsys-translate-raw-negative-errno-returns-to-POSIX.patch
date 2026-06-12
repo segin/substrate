@@ -1,7 +1,7 @@
 From 7f6507e9f3981edc26ee7c1f247d91d8f69e675c Mon Sep 17 00:00:00 2001
 From: Kirn Gill II <segin2005@gmail.com>
 Date: Wed, 10 Jun 2026 22:48:10 -0500
-Subject: [PATCH 62/83] libsys: translate raw negative-errno returns to POSIX
+Subject: [PATCH 62/98] libsys: translate raw negative-errno returns to POSIX
  -1/errno
 
 The native raw syscall() returns the kernel's value directly: on error a

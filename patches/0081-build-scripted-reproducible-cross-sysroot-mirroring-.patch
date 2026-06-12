@@ -1,7 +1,7 @@
 From d53abc70c032f29bf107e6b6c8fcf52d685bc47b Mon Sep 17 00:00:00 2001
 From: Kirn Gill II <segin2005@gmail.com>
 Date: Fri, 12 Jun 2026 08:26:37 -0500
-Subject: [PATCH 81/83] build: scripted, reproducible cross-sysroot mirroring
+Subject: [PATCH 81/98] build: scripted, reproducible cross-sysroot mirroring
  (scripts/sync-sysroot.sh)
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

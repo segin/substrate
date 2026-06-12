@@ -1,7 +1,7 @@
 From 47414753a6977a2ca632f3457f8733e1bc8350ac Mon Sep 17 00:00:00 2001
 From: Kirn Gill II <segin2005@gmail.com>
 Date: Thu, 11 Jun 2026 06:35:15 -0500
-Subject: [PATCH 65/83] libc: classify long double on the 80-bit
+Subject: [PATCH 65/98] libc: classify long double on the 80-bit
  representation, not via double
 
 __fpclassifyl() and __signbitl() were implemented as __fpclassify((double)x)

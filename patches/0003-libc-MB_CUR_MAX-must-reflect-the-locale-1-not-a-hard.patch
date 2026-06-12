@@ -1,7 +1,7 @@
 From d6fbd1044a036b3bdd010ca22274a0aaba1e4b14 Mon Sep 17 00:00:00 2001
 From: Kirn Gill II <segin2005@gmail.com>
 Date: Mon, 8 Jun 2026 16:51:12 -0500
-Subject: [PATCH 03/83] libc: MB_CUR_MAX must reflect the locale (1), not a
+Subject: [PATCH 03/98] libc: MB_CUR_MAX must reflect the locale (1), not a
  hardcoded 4
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

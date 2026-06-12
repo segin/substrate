@@ -1,7 +1,7 @@
 From e1c27d6ec2d51717cb238c1e44635122d795c8be Mon Sep 17 00:00:00 2001
 From: Kirn Gill II <segin2005@gmail.com>
 Date: Wed, 10 Jun 2026 06:55:14 -0500
-Subject: [PATCH 34/83] tests: fold tests/lib/fcntl into tests/lib/c
+Subject: [PATCH 34/98] tests: fold tests/lib/fcntl into tests/lib/c
 
 The fcntl/dup/dup2/dup3 stress is a libc test, so it belongs with its
 siblings in tests/lib/c (per the tests/lib/<lib>/ convention).  Move

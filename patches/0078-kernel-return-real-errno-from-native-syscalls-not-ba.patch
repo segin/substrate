@@ -1,7 +1,7 @@
 From 54b5e497cc9f8c05770d13ee7c3a9ce9854df434 Mon Sep 17 00:00:00 2001
 From: Kirn Gill II <segin2005@gmail.com>
 Date: Thu, 11 Jun 2026 16:38:48 -0500
-Subject: [PATCH 78/83] =?UTF-8?q?kernel:=20return=20real=20errno=20from=20?=
+Subject: [PATCH 78/98] =?UTF-8?q?kernel:=20return=20real=20errno=20from=20?=
  =?UTF-8?q?native=20syscalls=20(not=20bare=20-1=20=E2=86=92=20EPERM)?=
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

@@ -1,7 +1,7 @@
 From 0070f33b3c2128e73b4cd55279fa66fb5ba57806 Mon Sep 17 00:00:00 2001
 From: Kirn Gill II <segin2005@gmail.com>
 Date: Thu, 11 Jun 2026 16:33:06 -0500
-Subject: [PATCH 77/83] futex: close the FUTEX_WAIT lost-wakeup race; torture
+Subject: [PATCH 77/98] futex: close the FUTEX_WAIT lost-wakeup race; torture
  suite to 271 points
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

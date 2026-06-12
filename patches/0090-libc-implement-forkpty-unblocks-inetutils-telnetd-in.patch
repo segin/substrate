@@ -1,0 +1,62 @@
+From 02c21a46680fa817ea7f7f9f7daa785122f80729 Mon Sep 17 00:00:00 2001
+From: Kirn Gill II <segin2005@gmail.com>
+Date: Fri, 12 Jun 2026 10:38:31 -0500
+Subject: [PATCH 90/98] =?UTF-8?q?libc:=20implement=20forkpty=20=E2=80=94?=
+ =?UTF-8?q?=20unblocks=20inetutils=20telnetd=20in=20a=20clean=20build?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+<pty.h> declared forkpty and the comment claimed libc implemented it, but
+only openpty + login_tty were defined; forkpty was missing, so inetutils'
+telnetd (and any forkpty user) failed to link ("undefined reference to
+forkpty").  Add it as the standard openpty + fork + login_tty composition.
+
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+---
+ lib/c/src/stdlib.c | 29 +++++++++++++++++++++++++++++
+ 1 file changed, 29 insertions(+)
+
+diff --git a/lib/c/src/stdlib.c b/lib/c/src/stdlib.c
+index a408e5b6..fe095343 100644
+--- a/lib/c/src/stdlib.c
++++ b/lib/c/src/stdlib.c
+@@ -1925,6 +1925,35 @@ int login_tty(int fd) {
+     return 0;
+ }
+ 
++/* forkpty — openpty + fork + login_tty: the child gets the slave as its
++ * controlling tty with stdio attached and returns 0; the parent gets the
++ * master fd in *amaster and the child's pid.  Standard BSD/glibc recipe;
++ * used by telnetd/sshd-style daemons. */
++int forkpty(int *amaster, char *name,
++            const struct termios *termp, const struct winsize *winp) {
++    int master, slave;
++    if (openpty(&master, &slave, name, termp, winp) != 0)
++        return -1;
++    pid_t pid = fork();
++    if (pid < 0) {
++        close(master);
++        close(slave);
++        return -1;
++    }
++    if (pid == 0) {
++        /* child: drop the master end, adopt the slave as the ctty */
++        close(master);
++        if (login_tty(slave) != 0)
++            _exit(127);
++        return 0;
++    }
++    /* parent: hand back the master, release the slave */
++    if (amaster)
++        *amaster = master;
++    close(slave);
++    return pid;
++}
++
+ /*
+  * reallocarray(ptr, nmemb, size) — realloc with overflow-safe
+  * nmemb * size multiplication.  OpenBSD extension.  Returns NULL
+-- 
+2.54.0
+

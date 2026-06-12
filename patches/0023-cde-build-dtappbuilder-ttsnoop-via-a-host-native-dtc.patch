@@ -1,7 +1,7 @@
 From 1d2bbcb9df6f42f1e286ff43b132c387674091c5 Mon Sep 17 00:00:00 2001
 From: Kirn Gill II <segin2005@gmail.com>
 Date: Tue, 9 Jun 2026 21:52:27 -0500
-Subject: [PATCH 23/83] cde: build dtappbuilder + ttsnoop via a host-native
+Subject: [PATCH 23/98] cde: build dtappbuilder + ttsnoop via a host-native
  dtcodegen (openmotif)
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

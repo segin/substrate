@@ -1,0 +1,40 @@
+From 8aeaf173fe1812f0da12485fc9af16d325274d86 Mon Sep 17 00:00:00 2001
+From: Kirn Gill II <segin2005@gmail.com>
+Date: Fri, 12 Jun 2026 12:21:26 -0500
+Subject: [PATCH 98/98] build-rootfs: skip sdm in the generic sbin build loop
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The generic `for dir in sbin/*/` build loop ran `make -C sdm` with no CROSS
+(it relies on each Makefile defaulting to the cross compiler; sdm's
+CC=$(CROSS)gcc defaults to the host gcc) and runs before the contrib X stack
+is staged — so when sgreet's objects were stale (X headers rebuilt) it tried
+to host-compile sgreet and died "-march=i486 ... does not support x86-64".
+sdm is already cross-built + installed separately, after the X stack, by the
+dedicated block later in this file; skip it in the generic loop.
+
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+---
+ build-rootfs.sh | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/build-rootfs.sh b/build-rootfs.sh
+index f0f1c90f..4e21f651 100755
+--- a/build-rootfs.sh
++++ b/build-rootfs.sh
+@@ -154,6 +154,11 @@ build_components() {
+ 
+     echo "Building sbin (init, ld.so, ...)"
+     for dir in "$TOP/sbin"/*/ ; do
++        # sdm (the display manager / sgreet Xlib client) needs the contrib X
++        # stack and is cross-built + installed separately below; this generic
++        # loop passes no CROSS, so sdm's Makefile (CC=$(CROSS)gcc) would fall
++        # back to the host gcc and fail "-march=i486 without -m32".  Skip it.
++        [ "$(basename "$dir")" = sdm ] && continue
+         if [ -f "$dir/Makefile" ]; then
+             make -C "$dir" -j4
+         fi
+-- 
+2.54.0
+

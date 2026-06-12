@@ -1,7 +1,7 @@
 From fdd26960175324f58d921f3996ad06d9b6b9677a Mon Sep 17 00:00:00 2001
 From: Kirn Gill II <segin2005@gmail.com>
 Date: Mon, 8 Jun 2026 21:44:56 -0500
-Subject: [PATCH 11/83] kernel/net: implement AF_UNIX SOCK_DGRAM (socketpair +
+Subject: [PATCH 11/98] kernel/net: implement AF_UNIX SOCK_DGRAM (socketpair +
  framed messages)
 
 The last unimplemented surface the torture suite flagged.  socket() and

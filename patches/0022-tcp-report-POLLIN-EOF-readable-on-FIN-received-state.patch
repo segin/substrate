@@ -1,7 +1,7 @@
 From ef169992ec2c5d4a2ce83c82f87d8d0e0296aaf1 Mon Sep 17 00:00:00 2001
 From: Kirn Gill II <segin2005@gmail.com>
 Date: Tue, 9 Jun 2026 21:11:07 -0500
-Subject: [PATCH 22/83] tcp: report POLLIN (EOF readable) on FIN-received
+Subject: [PATCH 22/98] tcp: report POLLIN (EOF readable) on FIN-received
  states, not just POLLHUP
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

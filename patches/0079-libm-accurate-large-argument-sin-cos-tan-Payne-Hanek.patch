@@ -1,7 +1,7 @@
 From e4eb3a6b46ce5cdb48118cfca92345232ce60cfe Mon Sep 17 00:00:00 2001
 From: Kirn Gill II <segin2005@gmail.com>
 Date: Thu, 11 Jun 2026 23:29:37 -0500
-Subject: [PATCH 79/83] libm: accurate large-argument sin/cos/tan (Payne-Hanek
+Subject: [PATCH 79/98] libm: accurate large-argument sin/cos/tan (Payne-Hanek
  reduction)
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

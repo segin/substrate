@@ -1,0 +1,33 @@
+From 64f08382ee4e6601bbb78fd093f23e917c4e44b6 Mon Sep 17 00:00:00 2001
+From: Kirn Gill II <segin2005@gmail.com>
+Date: Fri, 12 Jun 2026 11:50:40 -0500
+Subject: [PATCH 95/98] contrib/bzip2: same DT_NEEDED-chain link flags for the
+ shared-lib make
+
+bzip2 builds libbz2.so via a second make (Makefile-libbz2_so) that also links
+against libc.so.0; it needs the same -L/-rpath-link/--copy-dt-needed-entries
+flags as the main make (previous commit), or the shared-lib build fails with
+the same libc.so.0 -> libsys.so.0 undefined-reference cascade on a clean relink.
+
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+---
+ contrib/bzip2/build.sh | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/contrib/bzip2/build.sh b/contrib/bzip2/build.sh
+index df778b4f..abdbebe4 100755
+--- a/contrib/bzip2/build.sh
++++ b/contrib/bzip2/build.sh
+@@ -65,7 +65,8 @@ echo "==> Building shared libbz2.so.1.0.8"
+ make -f Makefile-libbz2_so clean >/dev/null 2>&1 || true
+ make -j"${JOBS}" -f Makefile-libbz2_so \
+     CC="${CROSS_CC}" \
+-    CFLAGS="-march=i486 -mtune=i486 -fPIC -Wall -Winline -O2 -g -D_FILE_OFFSET_BITS=64"
++    CFLAGS="-march=i486 -mtune=i486 -fPIC -Wall -Winline -O2 -g -D_FILE_OFFSET_BITS=64" \
++    LDFLAGS="-L${STAGE1_PREFIX}/i386-unknown-substrate/lib -Wl,-rpath-link,${STAGE1_PREFIX}/i386-unknown-substrate/lib -Wl,--copy-dt-needed-entries"
+ 
+ # Stage into DESTDIR with substrate's `/usr/{bin,lib,include}` layout.
+ echo "==> Installing into ${DESTDIR}"
+-- 
+2.54.0
+

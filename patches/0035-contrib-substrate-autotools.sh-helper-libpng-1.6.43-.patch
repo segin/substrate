@@ -1,7 +1,7 @@
 From 72559fae3810ffe65bb3eac2af0b0bb7e7f33167 Mon Sep 17 00:00:00 2001
 From: Kirn Gill II <segin2005@gmail.com>
 Date: Wed, 10 Jun 2026 07:15:11 -0500
-Subject: [PATCH 35/83] contrib: substrate-autotools.sh helper + libpng 1.6.43
+Subject: [PATCH 35/98] contrib: substrate-autotools.sh helper + libpng 1.6.43
  (GTK+ 2.x stack)
 
 Begins the GTK+ 2.x dependency stack.  substrate-autotools.sh factors out

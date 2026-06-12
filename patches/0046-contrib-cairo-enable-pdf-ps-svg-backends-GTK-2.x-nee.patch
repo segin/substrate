@@ -1,7 +1,7 @@
 From 6304daabe97445a68b4954455bf8865e80e6633a Mon Sep 17 00:00:00 2001
 From: Kirn Gill II <segin2005@gmail.com>
 Date: Wed, 10 Jun 2026 13:37:49 -0500
-Subject: [PATCH 46/83] contrib/cairo: enable pdf/ps/svg backends (GTK+ 2.x
+Subject: [PATCH 46/98] contrib/cairo: enable pdf/ps/svg backends (GTK+ 2.x
  needs cairo-pdf.h)
 
 GTK+ 2.24 configure requires cairo built with the PDF backend (its print

@@ -1,7 +1,7 @@
 From 77c3c3f84f203c2ed839b1a3e2de5025738bd1be Mon Sep 17 00:00:00 2001
 From: Kirn Gill II <segin2005@gmail.com>
 Date: Mon, 8 Jun 2026 11:07:11 -0500
-Subject: [PATCH 02/83] etc/hosts: map the hostname to 127.0.0.1, not the
+Subject: [PATCH 02/98] etc/hosts: map the hostname to 127.0.0.1, not the
  127.0.1.1 alias
 
 CDE's ToolTalk messaging system (ttsession) is reached by Sun-RPC at the

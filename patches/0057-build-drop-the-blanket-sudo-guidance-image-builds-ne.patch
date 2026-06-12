@@ -1,7 +1,7 @@
 From 079cc17a1706eaade4db2aa8a6b516e6f5dccd85 Mon Sep 17 00:00:00 2001
 From: Kirn Gill II <segin2005@gmail.com>
 Date: Wed, 10 Jun 2026 16:56:54 -0500
-Subject: [PATCH 57/83] =?UTF-8?q?build:=20drop=20the=20blanket-sudo=20guid?=
+Subject: [PATCH 57/98] =?UTF-8?q?build:=20drop=20the=20blanket-sudo=20guid?=
  =?UTF-8?q?ance=20=E2=80=94=20image=20builds=20need=20no=20root?=
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

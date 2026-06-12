@@ -1,7 +1,7 @@
 From 54c4e978f398e8909c26cd36d9fefdae2d2568ac Mon Sep 17 00:00:00 2001
 From: Kirn Gill II <segin2005@gmail.com>
 Date: Tue, 9 Jun 2026 23:46:19 -0500
-Subject: [PATCH 29/83] PATH: append /usr/dt/bin (CDE binaries) to the system
+Subject: [PATCH 29/98] PATH: append /usr/dt/bin (CDE binaries) to the system
  defaults
 
 etc/profile and login(1) both gain /usr/dt/bin so dtksh, dtterm, dtcm,

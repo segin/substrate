@@ -1,0 +1,49 @@
+From 8dd5059add2e7474bf112ab6412523b473b561b9 Mon Sep 17 00:00:00 2001
+From: Kirn Gill II <segin2005@gmail.com>
+Date: Fri, 12 Jun 2026 11:11:03 -0500
+Subject: [PATCH 92/98] contrib/e2tools: link -lpthread (libext2fs uses pthread
+ mutexes)
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+e2fsprogs's libext2fs unix_io.c uses pthread mutexes for I/O-channel
+thread-safety, so e2tools — which links libext2fs externally — failed to
+link from clean ("undefined reference to pthread_mutex_unlock").  Add
+-lpthread to its LIBS.
+
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+---
+ contrib/e2tools/build.sh | 9 +++++----
+ 1 file changed, 5 insertions(+), 4 deletions(-)
+
+diff --git a/contrib/e2tools/build.sh b/contrib/e2tools/build.sh
+index 7264e96b..aac0df8d 100755
+--- a/contrib/e2tools/build.sh
++++ b/contrib/e2tools/build.sh
+@@ -56,9 +56,10 @@ export PKG_CONFIG_LIBDIR="${E2FSPROGS_STAGE}/usr/lib/pkgconfig"
+ export CPPFLAGS="-I${E2FSPROGS_STAGE}/usr/include -include alloca.h"
+ export LDFLAGS="-L${E2FSPROGS_STAGE}/usr/lib -Wl,--copy-dt-needed-entries"
+ 
+-# LIBS=-lregex: e2tools uses POSIX regex (regcomp/regexec/regfree)
+-# for filename matching.  On glibc those live in libc; on substrate
+-# they are in the separate libregex (see usr.lib/regex).
++# LIBS: -lregex for POSIX regex (regcomp/regexec/regfree — in the separate
++# libregex on substrate, see usr.lib/regex); -lpthread because libext2fs's
++# unix_io.c uses pthread mutexes for I/O-channel thread-safety, and e2tools
++# links libext2fs externally so the reference must be satisfied here.
+ echo "==> configure"
+ "${TREE_DIR}/configure" \
+     --host=i386-unknown-substrate \
+@@ -67,7 +68,7 @@ echo "==> configure"
+     AR=i386-unknown-substrate-ar \
+     RANLIB=i386-unknown-substrate-ranlib \
+     CFLAGS="-march=i486 -mtune=i486 -O2 -g -fno-pie" \
+-    LIBS="-lregex"
++    LIBS="-lregex -lpthread"
+ 
+ echo "==> make -j${JOBS}"
+ make -j"${JOBS}"
+-- 
+2.54.0
+

@@ -1,7 +1,7 @@
 From 20a5b902f11e8271e709435400f7149eecf1d41f Mon Sep 17 00:00:00 2001
 From: Kirn Gill II <segin2005@gmail.com>
 Date: Mon, 8 Jun 2026 21:39:46 -0500
-Subject: [PATCH 10/83] kernel/net: honour O_NONBLOCK on read()/write() of a
+Subject: [PATCH 10/98] kernel/net: honour O_NONBLOCK on read()/write() of a
  TCP socket
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

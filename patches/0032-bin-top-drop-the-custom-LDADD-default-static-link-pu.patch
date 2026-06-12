@@ -1,7 +1,7 @@
 From 13b7350d28214e9d797f7e77c354b0205a19cd73 Mon Sep 17 00:00:00 2001
 From: Kirn Gill II <segin2005@gmail.com>
 Date: Wed, 10 Jun 2026 06:50:52 -0500
-Subject: [PATCH 32/83] bin/top: drop the custom LDADD; default static link
+Subject: [PATCH 32/98] bin/top: drop the custom LDADD; default static link
  pulls libsys.a
 
 The default static link line now links libsys.a for the sys_* wrappers,

@@ -1,7 +1,7 @@
 From 2baee8583ee2f43493b62e86e8b537313d396856 Mon Sep 17 00:00:00 2001
 From: Kirn Gill II <segin2005@gmail.com>
 Date: Tue, 9 Jun 2026 11:23:20 -0500
-Subject: [PATCH 12/83] libc/printf: support %C and %S (XSI wide char / wide
+Subject: [PATCH 12/98] libc/printf: support %C and %S (XSI wide char / wide
  string)
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

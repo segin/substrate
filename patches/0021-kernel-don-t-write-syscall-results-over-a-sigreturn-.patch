@@ -1,7 +1,7 @@
 From 86c19203c662bafcb0a6aca106694b8398c670b2 Mon Sep 17 00:00:00 2001
 From: Kirn Gill II <segin2005@gmail.com>
 Date: Tue, 9 Jun 2026 20:04:44 -0500
-Subject: [PATCH 21/83] kernel: don't write syscall results over a
+Subject: [PATCH 21/98] kernel: don't write syscall results over a
  sigreturn-restored trapframe
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

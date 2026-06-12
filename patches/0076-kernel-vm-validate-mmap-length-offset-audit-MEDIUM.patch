@@ -1,7 +1,7 @@
 From aa603e248864024a722d3ee6e35cc2f5ec466f69 Mon Sep 17 00:00:00 2001
 From: Kirn Gill II <segin2005@gmail.com>
 Date: Thu, 11 Jun 2026 16:18:27 -0500
-Subject: [PATCH 76/83] kernel/vm: validate mmap length/offset (audit MEDIUM)
+Subject: [PATCH 76/98] kernel/vm: validate mmap length/offset (audit MEDIUM)
 
 sys_mmap accepted a zero length, a non-page-aligned file offset, and an
 offset+length that wraps past 2^64, passing them into the file-object and

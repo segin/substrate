@@ -1,7 +1,7 @@
 From a2fda31db4e831b8b7ff5d8bc512acce2cbe0871 Mon Sep 17 00:00:00 2001
 From: Kirn Gill II <segin2005@gmail.com>
 Date: Fri, 12 Jun 2026 08:45:51 -0500
-Subject: [PATCH 83/83] contrib/hexchat: enable SSL (OpenSSL 3.x opaque-struct
+Subject: [PATCH 83/98] contrib/hexchat: enable SSL (OpenSSL 3.x opaque-struct
  migration)
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

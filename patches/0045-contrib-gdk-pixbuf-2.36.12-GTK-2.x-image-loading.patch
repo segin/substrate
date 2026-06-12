@@ -1,7 +1,7 @@
 From 7163d031b013ffdd868078cb2717089e6337bb59 Mon Sep 17 00:00:00 2001
 From: Kirn Gill II <segin2005@gmail.com>
 Date: Wed, 10 Jun 2026 11:47:36 -0500
-Subject: [PATCH 45/83] contrib: gdk-pixbuf 2.36.12 (GTK+ 2.x image loading)
+Subject: [PATCH 45/98] contrib: gdk-pixbuf 2.36.12 (GTK+ 2.x image loading)
 
 Cross-built via substrate_sysroot (glib2/libpng).  --disable-modules +
 --with-included-loaders=png builds the PNG loader in (no target

@@ -1,7 +1,7 @@
 From daae59c55a9a8b7e859597ee29706d0ba28a0617 Mon Sep 17 00:00:00 2001
 From: Kirn Gill II <segin2005@gmail.com>
 Date: Wed, 10 Jun 2026 00:29:45 -0500
-Subject: [PATCH 31/83] contrib/gtk1: port GTK+ 1.2.10 (Xlib GDK; libgtk +
+Subject: [PATCH 31/98] contrib/gtk1: port GTK+ 1.2.10 (Xlib GDK; libgtk +
  libgdk)
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

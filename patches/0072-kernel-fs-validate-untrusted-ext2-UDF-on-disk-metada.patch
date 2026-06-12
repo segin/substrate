@@ -1,7 +1,7 @@
 From 5cccad1df327024a1ed21e83f384d28be50d6e2f Mon Sep 17 00:00:00 2001
 From: Kirn Gill II <segin2005@gmail.com>
 Date: Thu, 11 Jun 2026 16:08:29 -0500
-Subject: [PATCH 72/83] kernel/fs: validate untrusted ext2/UDF on-disk metadata
+Subject: [PATCH 72/98] kernel/fs: validate untrusted ext2/UDF on-disk metadata
  (audit HIGH)
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

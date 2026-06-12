@@ -1,7 +1,7 @@
 From 1b9d579bcc7da94f4462a74ac5bcb8208d4c188a Mon Sep 17 00:00:00 2001
 From: Kirn Gill II <segin2005@gmail.com>
 Date: Tue, 9 Jun 2026 16:18:39 -0500
-Subject: [PATCH 17/83] build-rootfs: finalize_x_fonts leaves misc/ alone, CDE
+Subject: [PATCH 17/98] build-rootfs: finalize_x_fonts leaves misc/ alone, CDE
  aliases only in 100dpi (fixes xterm regression) Co-Authored-By: Claude Opus
  4.8 (1M context) <noreply@anthropic.com>
 

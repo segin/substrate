@@ -1,7 +1,7 @@
 From 66b4abb7995c5180d7a4fbe84dac4aa3b3a76320 Mon Sep 17 00:00:00 2001
 From: Kirn Gill II <segin2005@gmail.com>
 Date: Fri, 12 Jun 2026 08:45:51 -0500
-Subject: [PATCH 82/83] build: dereference symlinked headers when mirroring to
+Subject: [PATCH 82/98] build: dereference symlinked headers when mirroring to
  the sysroot
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

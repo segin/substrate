@@ -1,7 +1,7 @@
 From 851b09915c31ac53e63ebaab89f527446a603b91 Mon Sep 17 00:00:00 2001
 From: Kirn Gill II <segin2005@gmail.com>
 Date: Wed, 10 Jun 2026 19:17:01 -0500
-Subject: [PATCH 59/83] futex: complete op set, fix timed-wait/EINTR hangs,
+Subject: [PATCH 59/98] futex: complete op set, fix timed-wait/EINTR hangs,
  wire NetBSD+OpenBSD
 
 Implement the missing futex ops and fix the lost-wakeup bugs behind the

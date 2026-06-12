@@ -1,7 +1,7 @@
 From 4079e4ed3f7374ad529b9ab268ff9537b5d09d3b Mon Sep 17 00:00:00 2001
 From: Kirn Gill II <segin2005@gmail.com>
 Date: Tue, 9 Jun 2026 16:09:28 -0500
-Subject: [PATCH 16/83] build-rootfs: finalize_x_fonts appends CDE aliases (do
+Subject: [PATCH 16/98] build-rootfs: finalize_x_fonts appends CDE aliases (do
  not clobber font-misc fonts.alias / xterms fixed font) Co-Authored-By: Claude
  Opus 4.8 (1M context) <noreply@anthropic.com>
 

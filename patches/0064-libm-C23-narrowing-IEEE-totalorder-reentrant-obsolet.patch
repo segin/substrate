@@ -1,7 +1,7 @@
 From 1b4a458a7fef363d5ae9d0e709b4e3fc637cc2fd Mon Sep 17 00:00:00 2001
 From: Kirn Gill II <segin2005@gmail.com>
 Date: Wed, 10 Jun 2026 23:03:29 -0500
-Subject: [PATCH 64/83] libm: C23 narrowing / IEEE totalorder / reentrant +
+Subject: [PATCH 64/98] libm: C23 narrowing / IEEE totalorder / reentrant +
  obsolete families
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

@@ -1,7 +1,7 @@
 From b2631362db5bb8a1d573152511ecf69c2afd5a3e Mon Sep 17 00:00:00 2001
 From: Kirn Gill II <segin2005@gmail.com>
 Date: Wed, 10 Jun 2026 11:39:42 -0500
-Subject: [PATCH 44/83] contrib: pango 1.42.4 (GTK+ 2.x text layer)
+Subject: [PATCH 44/98] contrib: pango 1.42.4 (GTK+ 2.x text layer)
 
 Pango 1.42.4 (last autotools Pango) cross-built via substrate_sysroot against
 glib2/cairo/harfbuzz/fribidi/fontconfig/freetype + the X stack.  Produces

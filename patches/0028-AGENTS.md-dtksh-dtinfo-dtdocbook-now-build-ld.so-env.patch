@@ -1,7 +1,7 @@
 From 1e82daa20714ec048f56954b56d70767d67d702b Mon Sep 17 00:00:00 2001
 From: Kirn Gill II <segin2005@gmail.com>
 Date: Tue, 9 Jun 2026 23:42:00 -0500
-Subject: [PATCH 28/83] AGENTS.md: dtksh/dtinfo/dtdocbook now build; ld.so
+Subject: [PATCH 28/98] AGENTS.md: dtksh/dtinfo/dtdocbook now build; ld.so
  environ-before-ctors note Co-Authored-By: Claude Opus 4.8 (1M context)
  <noreply@anthropic.com>
 

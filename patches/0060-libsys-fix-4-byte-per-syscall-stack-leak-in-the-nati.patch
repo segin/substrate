@@ -1,7 +1,7 @@
 From 93fc02e060158e08f9ea0c633eb976dc5002bdae Mon Sep 17 00:00:00 2001
 From: Kirn Gill II <segin2005@gmail.com>
 Date: Wed, 10 Jun 2026 21:14:17 -0500
-Subject: [PATCH 60/83] libsys: fix 4-byte-per-syscall stack leak in the native
+Subject: [PATCH 60/98] libsys: fix 4-byte-per-syscall stack leak in the native
  syscall() stub
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

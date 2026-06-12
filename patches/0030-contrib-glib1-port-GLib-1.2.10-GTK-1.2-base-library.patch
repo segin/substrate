@@ -1,7 +1,7 @@
 From 55cf5c70e9cdf6843f27bf5d0fcb998c9e18ea90 Mon Sep 17 00:00:00 2001
 From: Kirn Gill II <segin2005@gmail.com>
 Date: Wed, 10 Jun 2026 00:22:10 -0500
-Subject: [PATCH 30/83] contrib/glib1: port GLib 1.2.10 (GTK+ 1.2 base library)
+Subject: [PATCH 30/98] contrib/glib1: port GLib 1.2.10 (GTK+ 1.2 base library)
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit

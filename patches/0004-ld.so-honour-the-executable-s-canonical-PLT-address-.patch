@@ -1,7 +1,7 @@
 From 9acb844ea6ba62d60d0000934a3356751ef203f5 Mon Sep 17 00:00:00 2001
 From: Kirn Gill II <segin2005@gmail.com>
 Date: Mon, 8 Jun 2026 17:53:46 -0500
-Subject: [PATCH 04/83] ld.so: honour the executable's canonical PLT address
+Subject: [PATCH 04/98] ld.so: honour the executable's canonical PLT address
  (function-pointer equality)
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

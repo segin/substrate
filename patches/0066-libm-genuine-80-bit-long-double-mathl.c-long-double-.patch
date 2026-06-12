@@ -1,7 +1,7 @@
 From 13c192737efbc20686e8e66315fac37f0f9553c0 Mon Sep 17 00:00:00 2001
 From: Kirn Gill II <segin2005@gmail.com>
 Date: Thu, 11 Jun 2026 06:35:43 -0500
-Subject: [PATCH 66/83] libm: genuine 80-bit long double (mathl.c + long-double
+Subject: [PATCH 66/98] libm: genuine 80-bit long double (mathl.c + long-double
  complex)
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

@@ -1,7 +1,7 @@
 From dffdf2766f089e957a7902efd3bc71c94d192377 Mon Sep 17 00:00:00 2001
 From: Kirn Gill II <segin2005@gmail.com>
 Date: Thu, 11 Jun 2026 16:18:27 -0500
-Subject: [PATCH 75/83] libc/syslog: clamp the format cursor to avoid an OOB
+Subject: [PATCH 75/98] libc/syslog: clamp the format cursor to avoid an OOB
  stack write
 
 vsyslog built the RFC 3164 line with `n += snprintf(buf + n,

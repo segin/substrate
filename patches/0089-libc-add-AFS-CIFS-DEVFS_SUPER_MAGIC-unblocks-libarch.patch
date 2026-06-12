@@ -1,0 +1,45 @@
+From 3127a820380f16b9bcddeb0a857c615f44557860 Mon Sep 17 00:00:00 2001
+From: Kirn Gill II <segin2005@gmail.com>
+Date: Fri, 12 Jun 2026 10:23:54 -0500
+Subject: [PATCH 89/98] =?UTF-8?q?libc:=20add=20AFS/CIFS/DEVFS=5FSUPER=5FMA?=
+ =?UTF-8?q?GIC=20=E2=80=94=20unblocks=20libarchive=20in=20a=20clean=20buil?=
+ =?UTF-8?q?d?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+libarchive's archive_read_disk_posix.c uses a set of *_SUPER_MAGIC fs-type
+constants for filesystem detection; substrate's <linux/magic.h> had most but
+was missing AFS_SUPER_MAGIC, CIFS_SUPER_MAGIC, and DEVFS_SUPER_MAGIC, so the
+port failed to compile from clean.  Add them with the standard Linux values
+(guarded by #ifndef like the rest of the file).
+
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+---
+ include/linux/magic.h | 12 ++++++++++++
+ 1 file changed, 12 insertions(+)
+
+diff --git a/include/linux/magic.h b/include/linux/magic.h
+index 0defcb83..e90b6a25 100644
+--- a/include/linux/magic.h
++++ b/include/linux/magic.h
+@@ -92,4 +92,16 @@
+ #define XFS_SUPER_MAGIC       0x58465342
+ #endif
+ 
++/* Network / legacy filesystem magics referenced by ported code
++ * (e.g. libarchive's archive_read_disk_posix fs-type detection). */
++#ifndef AFS_SUPER_MAGIC
++#define AFS_SUPER_MAGIC       0x5346414F
++#endif
++#ifndef CIFS_SUPER_MAGIC
++#define CIFS_SUPER_MAGIC      0xFF534D42
++#endif
++#ifndef DEVFS_SUPER_MAGIC
++#define DEVFS_SUPER_MAGIC     0x1373
++#endif
++
+ #endif /* _LINUX_MAGIC_H */
+-- 
+2.54.0
+

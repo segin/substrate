@@ -1,7 +1,7 @@
 From a02b6c057666f398cc9b1b7ee57749b8bc9d041a Mon Sep 17 00:00:00 2001
 From: Kirn Gill II <segin2005@gmail.com>
 Date: Mon, 8 Jun 2026 17:58:15 -0500
-Subject: [PATCH 05/83] contrib/cde: install the localized datatype/action DB +
+Subject: [PATCH 05/98] contrib/cde: install the localized datatype/action DB +
  dtwm Front Panel
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

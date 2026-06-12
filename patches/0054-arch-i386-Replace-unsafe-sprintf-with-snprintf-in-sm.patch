@@ -1,7 +1,7 @@
 From 2e69e7ae9c062fea350b07a0b7d194008bae684b Mon Sep 17 00:00:00 2001
 From: Kirn Gill II <segin2005@gmail.com>
 Date: Wed, 10 Jun 2026 13:42:36 -0500
-Subject: [PATCH 54/83] arch/i386: Replace unsafe sprintf with snprintf in
+Subject: [PATCH 54/98] arch/i386: Replace unsafe sprintf with snprintf in
  smp_discovery.c (#1269)
 
 Replaced sprintf with snprintf in smp_emit_u32 to improve security

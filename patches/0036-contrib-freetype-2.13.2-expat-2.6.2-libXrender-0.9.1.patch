@@ -1,7 +1,7 @@
 From 55b30364f4d5fedfde1499af60fbc61de1df77c1 Mon Sep 17 00:00:00 2001
 From: Kirn Gill II <segin2005@gmail.com>
 Date: Wed, 10 Jun 2026 07:25:49 -0500
-Subject: [PATCH 36/83] contrib: freetype 2.13.2, expat 2.6.2, libXrender
+Subject: [PATCH 36/98] contrib: freetype 2.13.2, expat 2.6.2, libXrender
  0.9.11 (GTK+ 2.x leaves)
 
 The dependency-free (or X-stack-only) layer of the GTK+ 2.x stack, all via

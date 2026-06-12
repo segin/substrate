@@ -1,7 +1,7 @@
 From c128a7db0c23f0cb66a55f6cfa1474e960c6bbf7 Mon Sep 17 00:00:00 2001
 From: Kirn Gill II <segin2005@gmail.com>
 Date: Thu, 11 Jun 2026 15:55:48 -0500
-Subject: [PATCH 68/83] kernel/perso: mask EFLAGS in sigreturn (fix IOPL
+Subject: [PATCH 68/98] kernel/perso: mask EFLAGS in sigreturn (fix IOPL
  privilege escalation)
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

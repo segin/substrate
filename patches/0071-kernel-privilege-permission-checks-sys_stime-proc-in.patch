@@ -1,7 +1,7 @@
 From 4b66d6d9dd502a455268cc0f427f3b5c17eaeeef Mon Sep 17 00:00:00 2001
 From: Kirn Gill II <segin2005@gmail.com>
 Date: Thu, 11 Jun 2026 16:03:53 -0500
-Subject: [PATCH 71/83] kernel: privilege/permission checks (sys_stime, proc
+Subject: [PATCH 71/98] kernel: privilege/permission checks (sys_stime, proc
  introspection)
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

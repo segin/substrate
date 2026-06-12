@@ -1,7 +1,7 @@
 From 29e396010b900a2de39b5a747e08cc62ddc3ccb5 Mon Sep 17 00:00:00 2001
 From: Kirn Gill II <segin2005@gmail.com>
 Date: Wed, 10 Jun 2026 11:37:20 -0500
-Subject: [PATCH 43/83] contrib: fribidi 1.0.13 (Pango dep) + endian.h
+Subject: [PATCH 43/98] contrib: fribidi 1.0.13 (Pango dep) + endian.h
  std-agnostic inline
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

@@ -1,7 +1,7 @@
 From 916d1ad5285bfb1d2668aa1f5d39a86d75bd68a8 Mon Sep 17 00:00:00 2001
 From: Kirn Gill II <segin2005@gmail.com>
 Date: Thu, 11 Jun 2026 15:59:50 -0500
-Subject: [PATCH 70/83] userland: fix audit security bugs (crypt overflow,
+Subject: [PATCH 70/98] userland: fix audit security bugs (crypt overflow,
  archive overflow/traversal, bc)
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
