@@ -56,9 +56,10 @@ export PKG_CONFIG_LIBDIR="${E2FSPROGS_STAGE}/usr/lib/pkgconfig"
 export CPPFLAGS="-I${E2FSPROGS_STAGE}/usr/include -include alloca.h"
 export LDFLAGS="-L${E2FSPROGS_STAGE}/usr/lib -Wl,--copy-dt-needed-entries"
 
-# LIBS=-lregex: e2tools uses POSIX regex (regcomp/regexec/regfree)
-# for filename matching.  On glibc those live in libc; on substrate
-# they are in the separate libregex (see usr.lib/regex).
+# LIBS: -lregex for POSIX regex (regcomp/regexec/regfree — in the separate
+# libregex on substrate, see usr.lib/regex); -lpthread because libext2fs's
+# unix_io.c uses pthread mutexes for I/O-channel thread-safety, and e2tools
+# links libext2fs externally so the reference must be satisfied here.
 echo "==> configure"
 "${TREE_DIR}/configure" \
     --host=i386-unknown-substrate \
@@ -67,7 +68,7 @@ echo "==> configure"
     AR=i386-unknown-substrate-ar \
     RANLIB=i386-unknown-substrate-ranlib \
     CFLAGS="-march=i486 -mtune=i486 -O2 -g -fno-pie" \
-    LIBS="-lregex"
+    LIBS="-lregex -lpthread"
 
 echo "==> make -j${JOBS}"
 make -j"${JOBS}"
