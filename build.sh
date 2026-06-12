@@ -105,74 +105,18 @@ DEFAULT_CONTRIB="bzip2 libiconv zlib openssl ncurses gzip tzdata make sed expr l
 : "${ONLY:=${DEFAULT_CONTRIB}}"
 
 #
-# Helper: after each contrib build, mirror its libs + headers into
-# the cross-toolchain sysroot so the next contrib's configure can
-# find them with the regular -lfoo search.  Without this, configure
-# probes for libiconv/libncurses/libssl would silently disable the
-# corresponding features even though we just built them.
+# Mirror built libs + headers into the cross-toolchain sysroot so each
+# contrib's configure finds the previously-built ones with the regular
+# -lfoo / #include search.  Without this, configure probes for
+# libiconv/libpng/libssl/... silently disable features we just built.
 #
-sync_to_sysroot() {
-    local pkg="$1"
-    local distdir="${HERE}/dist-${pkg}"
-    local sysroot="${STAGE1_PREFIX}/i386-unknown-substrate"
-    if [ ! -d "$distdir/usr/lib" ] && [ ! -d "$distdir/usr/include" ]; then
-        return 0
-    fi
-    if [ -d "$distdir/usr/lib" ]; then
-        cp -a "$distdir/usr/lib/." "$sysroot/lib/"
-    fi
-    if [ -d "$distdir/usr/include" ]; then
-        cp -a "$distdir/usr/include/." "$sysroot/include/"
-        # GCC's fixincludes snapshot also wins over the sysroot, so
-        # mirror headers there too.  Failure is non-fatal (the dir
-        # may not exist on a fresh toolchain install).
-        local fixinc="${STAGE1_PREFIX}/lib/gcc/i386-unknown-substrate"
-        if [ -d "$fixinc" ]; then
-            for ver in "$fixinc"/*/include-fixed; do
-                [ -d "$ver" ] || continue
-                cp -a "$distdir/usr/include/." "$ver/" 2>/dev/null || true
-            done
-        fi
-    fi
-}
-
+# The logic lives in scripts/sync-sysroot.sh so it is ALSO runnable
+# standalone to reconstruct the sysroot from existing dist-* outputs
+# without a rebuild (automation: scripts/sync-sysroot.sh).  Sourcing it
+# defines sync_to_sysroot() and sync_native_libs_to_sysroot() — the same
+# names the build loop below calls — so there is one source of truth.
 #
-# Helper: also mirror substrate's native libs from lib/ + usr.lib/
-# into the cross sysroot.  Same rationale as sync_to_sysroot — the
-# cross toolchain links against the sysroot, not the source tree.
-#
-sync_native_libs_to_sysroot() {
-    local sysroot="${STAGE1_PREFIX}/i386-unknown-substrate"
-    [ -d "$sysroot/lib" ] || return 0
-
-    # lib/X/libX.so.0 + libX.a — every direct subdir of lib/.
-    for dir in lib/*/; do
-        local name
-        name=$(basename "$dir")
-        [ -f "$dir/lib$name.so.0" ] && cp "$dir/lib$name.so.0" "$sysroot/lib/" 2>/dev/null || true
-        [ -f "$dir/lib$name.a"    ] && cp "$dir/lib$name.a"    "$sysroot/lib/" 2>/dev/null || true
-    done
-    # Same for usr.lib/.
-    for dir in usr.lib/*/; do
-        local name
-        name=$(basename "$dir")
-        [ -f "$dir/lib$name.so.0" ] && cp "$dir/lib$name.so.0" "$sysroot/lib/" 2>/dev/null || true
-        [ -f "$dir/lib$name.a"    ] && cp "$dir/lib$name.a"    "$sysroot/lib/" 2>/dev/null || true
-    done
-
-    # Sync top-level include/ — the source-of-truth for substrate
-    # public headers (signal.h, fcntl.h, pthread.h, …).
-    if [ -d include ]; then
-        cp -a include/. "$sysroot/include/"
-        local fixinc="${STAGE1_PREFIX}/lib/gcc/i386-unknown-substrate"
-        if [ -d "$fixinc" ]; then
-            for ver in "$fixinc"/*/include-fixed; do
-                [ -d "$ver" ] || continue
-                cp -a include/. "$ver/" 2>/dev/null || true
-            done
-        fi
-    fi
-}
+. "${HERE}/scripts/sync-sysroot.sh"
 
 step() { printf '\n=========================  %s  =========================\n' "$*"; }
 note() { printf '   %s\n' "$*"; }
