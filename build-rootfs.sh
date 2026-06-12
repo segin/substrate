@@ -300,6 +300,27 @@ install_to_dist() {
     fi
     unset _libgcc_src
 
+    # libstdc++.so.6 is the shared C++ runtime that CDE's dtsession (and the
+    # rest of the C++ desktop) DT_NEEDED.  Like libgcc_s.so.1 it is owned by
+    # the toolchain and lives in the cross sysroot (built by
+    # contrib/gcc/build-libstdcxx-shared.sh); stage it from there so a fresh
+    # --dist — which wipes dist/lib — ALWAYS lands it, not only when a
+    # --toolchain overlay happens to carry it.  Without it ld.so fatal-errors
+    # ("libstdc++.so.6 — not found") and the CDE login loops back to sgreet.
+    _libstdcxx_src=$(ls "$STAGE1_PREFIX/i386-unknown-substrate/lib"/libstdc++.so.6.[0-9]* 2>/dev/null \
+                     | grep -v -- '-gdb.py' | head -1)
+    if [ -n "$_libstdcxx_src" ] && [ -f "$_libstdcxx_src" ]; then
+        _soname=$(basename "$_libstdcxx_src")
+        cp "$_libstdcxx_src" "$DIST/lib/$_soname"
+        cp "$_libstdcxx_src" "$DIST/usr/lib/$_soname"
+        ln -sf "$_soname" "$DIST/lib/libstdc++.so.6"
+        ln -sf "$_soname" "$DIST/usr/lib/libstdc++.so.6"
+    else
+        echo "build-rootfs: WARNING libstdc++.so.6 not found under $STAGE1_PREFIX" >&2
+        echo "build-rootfs:   CDE (dtsession) and other C++ binaries will fail to load" >&2
+    fi
+    unset _libstdcxx_src _soname
+
     # crt0.o lives next to libc.a — userland Makefiles reference it as
     # $(TOP)/lib/c/crt0.o at link time, but on-target it's expected at
     # /usr/lib/crt0.o for the substrate-native compiler.
