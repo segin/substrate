@@ -1,0 +1,62 @@
+--- a/src/common/ssl.c
++++ b/src/common/ssl.c
+@@ -177,8 +177,15 @@
+ 	broke_oneline (cert_info->subject, cert_info->subject_word);
+ 	broke_oneline (cert_info->issuer, cert_info->issuer_word);
+ 
+-	alg = OBJ_obj2nid (peer_cert->cert_info->key->algor->algorithm);
+-	sign_alg = OBJ_obj2nid (peer_cert->sig_alg->algorithm);
++	/* OpenSSL 1.1+/3.x made X509 opaque; use accessors instead of
++	 * reaching into ->cert_info / ->sig_alg directly. */
++	{
++		ASN1_OBJECT *palg = NULL;
++		X509_PUBKEY_get0_param (&palg, NULL, NULL, NULL,
++								X509_get_X509_PUBKEY (peer_cert));
++		alg = OBJ_obj2nid (palg);
++	}
++	sign_alg = X509_get_signature_nid (peer_cert);
+ 	ASN1_TIME_snprintf (notBefore, sizeof (notBefore),
+ 							  X509_get_notBefore (peer_cert));
+ 	ASN1_TIME_snprintf (notAfter, sizeof (notAfter),
+@@ -303,10 +310,10 @@
+ 		__SSL_critical_error ("SSL_new");
+ 
+ 	SSL_set_fd (ssl, sd);
+-	if (ctx->method == SSLv23_client_method())
+-		SSL_set_connect_state (ssl);
+-	else
+-	        SSL_set_accept_state(ssl);
++	/* SSL_CTX is opaque in OpenSSL 1.1+/3.x so we can no longer inspect
++	 * ctx->method.  HexChat is always an SSL *client* for IRC, so always
++	 * enter connect state. */
++	SSL_set_connect_state (ssl);
+ 
+ 	return (ssl);
+ }
+--- a/src/common/server.c
++++ b/src/common/server.c
+@@ -607,9 +607,11 @@
+ 	char buf[512];
+ 
+ 
+-	X509_NAME_oneline (X509_get_subject_name (ctx->current_cert), subject,
++	X509 *current_cert = X509_STORE_CTX_get_current_cert (ctx);
++
++	X509_NAME_oneline (X509_get_subject_name (current_cert), subject,
+ 							 sizeof (subject));
+-	X509_NAME_oneline (X509_get_issuer_name (ctx->current_cert), issuer,
++	X509_NAME_oneline (X509_get_issuer_name (current_cert), issuer,
+ 							 sizeof (issuer));
+ 
+ 	snprintf (buf, sizeof (buf), "* Subject: %s", subject);
+@@ -774,7 +776,9 @@
+ 		return (0);					  /* remove it (0) */
+ 	} else
+ 	{
+-		if (serv->ssl->session && serv->ssl->session->time + SSLTMOUT < time (NULL))
++		/* SSL_SESSION is opaque in OpenSSL 1.1+/3.x; use accessors. */
++		SSL_SESSION *sess = SSL_get_session (serv->ssl);
++		if (sess && SSL_SESSION_get_time (sess) + SSLTMOUT < time (NULL))
+ 		{
+ 			snprintf (buf, sizeof (buf), "SSL handshake timed out");
+ 			EMIT_SIGNAL (XP_TE_CONNFAIL, serv->server_session, buf, NULL,

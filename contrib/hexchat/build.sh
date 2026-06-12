@@ -21,7 +21,8 @@ export PYTHON=python3
 export LDFLAGS="${LDFLAGS} -ldl"
 export CFLAGS="-march=i486 -mtune=i486 -O2 -g -std=gnu11 \
   -Wno-error=incompatible-pointer-types -Wno-error=int-conversion \
-  -Wno-error=implicit-function-declaration -Wno-error=return-mismatch -Wno-error=format"
+  -Wno-error=implicit-function-declaration -Wno-error=return-mismatch -Wno-error=format \
+  -Wno-error=deprecated-declarations"
 
 substrate_libtool_fix "${TREE_DIR}/configure"
 # HexChat hardcodes source-relative paths for its generators
@@ -33,7 +34,7 @@ make distclean >/dev/null 2>&1 || true
 "${TREE_DIR}/configure" \
     --host=i386-unknown-substrate \
     --prefix=/usr --libdir=/usr/lib --includedir=/usr/include --sysconfdir=/etc \
-    --enable-gtkfe --disable-openssl --enable-ipv6 \
+    --enable-gtkfe --enable-openssl --enable-ipv6 \
     --disable-gtktest --disable-glibtest \
     --disable-dbus --disable-libnotify --disable-libproxy \
     --disable-perl --disable-python --disable-plugin \

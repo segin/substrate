@@ -14,6 +14,23 @@ if [ ! -f "${TARBALL}" ]; then
 fi
 if [ "${SHA256}" != "REPLACE" ]; then echo "${SHA256}  ${TARBALL}" | sha256sum -c -; fi
 [ -d "${TREE_DIR}" ] || { echo "==> Extracting"; tar xf "${TARBALL}"; }
+
+# Apply the substrate patch series (idempotent: skip already-applied).
+if [ -f "${HERE}/series" ]; then
+    cd "${TREE_DIR}"
+    while IFS= read -r p; do
+        case "$p" in ''|'#'*) continue ;; esac
+        if [ ! -f "${HERE}/patches/${p}" ]; then
+            echo "fetch.sh: missing patch ${p}" >&2; exit 1
+        fi
+        if patch -p1 --dry-run -s -R < "${HERE}/patches/${p}" >/dev/null 2>&1; then
+            echo "==> Patch ${p} already applied"; continue
+        fi
+        echo "==> Applying ${p}"; patch -p1 < "${HERE}/patches/${p}"
+    done < "${HERE}/series"
+    cd "${BUILD_DIR}"
+fi
+
 . "${HERE}/../substrate-autotools.sh"
 substrate_config_sub_fix "${TREE_DIR}"
 echo "==> hexchat ${VERSION} ready at ${TREE_DIR}"
