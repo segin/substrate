@@ -437,11 +437,17 @@ install_to_dist() {
     # (Xlib client) rather than a binary named "sdm", so the generic loop
     # above misses it.  Use its Makefile install target, which lands
     # /usr/sbin/sdm, /usr/sbin/sgreet and /etc/X11/Xsession — the exact set
-    # /etc/rc.d/60-sdm requires.  Guarded on sgreet having been built (it
-    # needs the contrib X stack, so it is skipped on no-X profiles).
-    if [ -x "$TOP/sbin/sdm/sgreet" ]; then
-        echo "Installing display manager (sdm + sgreet)..."
-        make -C "$TOP/sbin/sdm" install DESTDIR="$DIST" >/dev/null
+    # /etc/rc.d/60-sdm requires.  Guarded on the contrib X stack having been
+    # built (skipped on no-X profiles).  CROSS must be passed so sgreet
+    # cross-compiles — otherwise its Makefile (CC=$(CROSS)gcc) falls back to
+    # the host gcc, which rejects -march=i486 without -m32 ("CPU you selected
+    # does not support x86-64 instruction set") on a fresh/stale tree.
+    if [ -d "$TOP/dist-libX11/usr/lib" ]; then
+        echo "Building + installing display manager (sdm + sgreet)..."
+        make -C "$TOP/sbin/sdm" \
+            CROSS=/opt/substrate/bin/i386-unknown-substrate- >/dev/null
+        make -C "$TOP/sbin/sdm" install DESTDIR="$DIST" \
+            CROSS=/opt/substrate/bin/i386-unknown-substrate- >/dev/null
     fi
 
     # contrib overlays — staged trees produced by each contrib/$pkg/build.sh.
