@@ -178,6 +178,15 @@ off_t lseek(int fd, off_t offset, int whence);
 int ftruncate(int fd, off_t length);
 int truncate(const char *path, off_t length);
 
+/* LFS aliases — substrate's off_t is already 64-bit. */
+#if defined(_LARGEFILE64_SOURCE) || defined(_GNU_SOURCE)
+#define lseek64     lseek
+#define ftruncate64 ftruncate
+#define truncate64  truncate
+#define pread64     pread
+#define pwrite64    pwrite
+#endif
+
 unsigned int sleep(unsigned int seconds);
 int usleep(useconds_t usec);
 unsigned int alarm(unsigned int seconds);

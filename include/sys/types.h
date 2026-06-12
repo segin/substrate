@@ -25,6 +25,12 @@ typedef __INT32_TYPE__  ssize_t;
 typedef __INT64_TYPE__  off_t;
 #endif
 
+/* Large-file (LFS) type aliases — substrate's base types are already 64-bit. */
+#if defined(_LARGEFILE64_SOURCE) || defined(_GNU_SOURCE)
+typedef off_t off64_t;
+typedef off_t loff_t;
+#endif
+
 #include <stdint.h>
 #include <stddef.h>
 /* BSD/glibc convention: <sys/types.h> exposes the byte-order macros

@@ -120,6 +120,15 @@ int fsetpos(FILE *stream, const fpos_t *pos);
 int fseeko(FILE *stream, off_t offset, int whence);
 off_t ftello(FILE *stream);
 
+/* LFS aliases — substrate's off_t/fpos_t are already 64-bit. */
+#if defined(_LARGEFILE64_SOURCE) || defined(_GNU_SOURCE)
+#define fopen64   fopen
+#define freopen64 freopen
+#define fseeko64  fseeko
+#define ftello64  ftello
+#define tmpfile64 tmpfile
+#endif
+
 void clearerr(FILE *stream);
 int feof(FILE *stream);
 int ferror(FILE *stream);

@@ -84,6 +84,15 @@ struct flock {
 
 int open(const char *pathname, int flags, ...);
 int openat(int dirfd, const char *pathname, int flags, ...);
+
+/* LFS aliases — substrate's off_t is already 64-bit (O_LARGEFILE is a no-op). */
+#if defined(_LARGEFILE64_SOURCE) || defined(_GNU_SOURCE)
+#define open64   open
+#define openat64 openat
+#ifndef O_LARGEFILE
+#define O_LARGEFILE 0
+#endif
+#endif
 int creat(const char *pathname, int mode);
 int fcntl(int fd, int cmd, ...);
 

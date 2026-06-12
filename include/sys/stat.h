@@ -76,6 +76,16 @@ int stat(const char *pathname, struct stat *statbuf);
 int fstat(int fd, struct stat *statbuf);
 int lstat(const char *pathname, struct stat *statbuf);
 int fstatat(int dirfd, const char *pathname, struct stat *statbuf, int flags);
+
+/* Large-file (LFS) aliases.  substrate's struct stat / off_t are already
+ * 64-bit, so the *64 variants are plain aliases — provided for ported code
+ * (e2fsprogs, ...) that uses them under _LARGEFILE64_SOURCE/_GNU_SOURCE. */
+#if defined(_LARGEFILE64_SOURCE) || defined(_GNU_SOURCE)
+#define stat64     stat
+#define fstat64    fstat
+#define lstat64    lstat
+#define fstatat64  fstatat
+#endif
 int mknod(const char *pathname, mode_t mode, dev_t dev);
 int chmod(const char *pathname, mode_t mode);
 int chown(const char *pathname, uid_t owner, gid_t group);
