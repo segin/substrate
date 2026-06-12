@@ -1925,6 +1925,35 @@ int login_tty(int fd) {
     return 0;
 }
 
+/* forkpty — openpty + fork + login_tty: the child gets the slave as its
+ * controlling tty with stdio attached and returns 0; the parent gets the
+ * master fd in *amaster and the child's pid.  Standard BSD/glibc recipe;
+ * used by telnetd/sshd-style daemons. */
+int forkpty(int *amaster, char *name,
+            const struct termios *termp, const struct winsize *winp) {
+    int master, slave;
+    if (openpty(&master, &slave, name, termp, winp) != 0)
+        return -1;
+    pid_t pid = fork();
+    if (pid < 0) {
+        close(master);
+        close(slave);
+        return -1;
+    }
+    if (pid == 0) {
+        /* child: drop the master end, adopt the slave as the ctty */
+        close(master);
+        if (login_tty(slave) != 0)
+            _exit(127);
+        return 0;
+    }
+    /* parent: hand back the master, release the slave */
+    if (amaster)
+        *amaster = master;
+    close(slave);
+    return pid;
+}
+
 /*
  * reallocarray(ptr, nmemb, size) — realloc with overflow-safe
  * nmemb * size multiplication.  OpenBSD extension.  Returns NULL
