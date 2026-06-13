@@ -8,6 +8,8 @@
 #include <sys/proc.h>
 #include <sys/session.h>
 #include <sys/lock.h>
+#include <sys/copy.h>
+#include <sys/errno.h>
 #include <pm/pm.h>
 #include <stddef.h>
 #include <string.h>
@@ -280,6 +282,31 @@ int sys_getsid(int pid) {
     }
     
     return target->p_pgrp->pg_session->s_sid;
+}
+
+/*
+ * sys_setlogin - set the login name of the current session.
+ *
+ * FreeBSD setlogin(2) records the session login name (read back by
+ * getlogin(2)); init(8) calls setlogin("root") at startup and login(1)
+ * sets it per session.  Store it in the session's s_login.  We don't
+ * enforce FreeBSD's session-leader/root privilege checks -- a permissive
+ * store keeps the personality callers working without a full cred model.
+ */
+int sys_setlogin(const char *name) {
+    char kname[MAXLOGNAME];
+    struct session *sess;
+
+    if (copyinstr(name, kname, sizeof(kname), NULL) != 0) {
+        return -EFAULT;
+    }
+    if (!current_process->p_pgrp || !current_process->p_pgrp->pg_session) {
+        return -EPERM;
+    }
+    sess = current_process->p_pgrp->pg_session;
+    strncpy(sess->s_login, kname, sizeof(sess->s_login) - 1);
+    sess->s_login[sizeof(sess->s_login) - 1] = '\0';
+    return 0;
 }
 
 /*

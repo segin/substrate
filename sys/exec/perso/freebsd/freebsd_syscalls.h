@@ -68,6 +68,8 @@ struct freebsd13_stat;
 #define FREEBSD_SYS_setgroups  80
 #define FREEBSD_SYS_getpgrp    81
 #define FREEBSD_SYS_setpgid    82
+#define FREEBSD_SYS_setsid     147
+#define FREEBSD_SYS_getsid     310
 #define FREEBSD_SYS_setitimer  83
 #define FREEBSD_SYS_getitimer  86
 #define FREEBSD_SYS_getdtablesize 89
@@ -260,6 +262,9 @@ int sys_setrlimit(int resource, const void *rlp);
 int sys_issetugid(void);
 int sys_cap_getmode(unsigned int *modep);
 int sys_cap_nosys(void);
+int sys_setsid(void);
+int sys_getsid(int pid);
+int sys_setlogin(const char *name);
 ssize_t sys_readv(int fd, const void *iov, int iovcnt);
 ssize_t sys_writev(int fd, const void *iov, int iovcnt);
 int sys_getgroups(int gidsetsize, void *gidset);
