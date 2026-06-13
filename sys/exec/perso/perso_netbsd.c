@@ -15,6 +15,7 @@
 #include <exec/perso/netbsd/netbsd_user.h>
 #include "perso_ipc_sem.h"
 #include <sys/resource.h>
+#include <sys/time.h>
 #include <sys/times.h>
 #include <sys/errno.h>
 #include <sys/futex.h>
@@ -92,6 +93,31 @@ int netbsd_sys_wait450(int pid, int *status, int options, struct rusage *rusage)
     return ret;
 }
 
+/*
+ * NetBSD i386 struct timeval is 12 bytes ({ int64_t tv_sec; int32_t tv_usec });
+ * substrate's native timeval is 16 bytes because its suseconds_t is 64-bit.
+ * Copying the native struct out would write 4 bytes past a NetBSD caller's
+ * 12-byte buffer — e.g. libc's __time50 allocates exactly 12 bytes on the
+ * stack with the saved %ebx just above it, so the overflow zeroes the caller's
+ * PIC/GOT register and the next GOT-relative access faults.  Marshal a
+ * NetBSD-layout timeval explicitly.  (struct timespec already matches at 12
+ * bytes, so __clock_gettime50 needs no such wrapper.)
+ */
+struct netbsd_timeval { int64_t tv_sec; int32_t tv_usec; };
+
+int netbsd_sys_gettimeofday(struct netbsd_timeval *tv, struct timezone *tz) {
+    struct timeval ktv;
+    struct timezone ktz;
+    int ret = kern_gettimeofday(&ktv, tz ? &ktz : NULL);
+    if (ret != 0) return ret;
+    if (tv) {
+        struct netbsd_timeval ntv = { ktv.tv_sec, (int32_t)ktv.tv_usec };
+        if (copyout(&ntv, tv, sizeof(ntv)) != 0) return -EFAULT;
+    }
+    if (tz && copyout(&ktz, tz, sizeof(ktz)) != 0) return -EFAULT;
+    return 0;
+}
+
 #ifndef HOST_TEST
 
 /* NetBSD syscall table - based on i386 column */
@@ -112,7 +138,7 @@ static void *netbsd_syscalls[MAX_SYSCALLS] = {
     [NETBSD_SYS_readv]          = &sys_readv,
     [NETBSD_SYS_writev]         = &sys_writev,
     [NETBSD_SYS___socket30]     = &sys_socket,
-    [NETBSD_SYS___gettimeofday50] = &sys_gettimeofday,
+    [NETBSD_SYS___gettimeofday50] = (void *)&netbsd_sys_gettimeofday,
     [NETBSD_SYS___nanosleep50]  = &sys_nanosleep,
     [NETBSD_SYS___sigprocmask14] = &sys_sigprocmask,
     [NETBSD_SYS_issetugid]      = (void *)&sys_issetugid,
