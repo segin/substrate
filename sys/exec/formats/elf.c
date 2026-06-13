@@ -1208,6 +1208,7 @@ static int exec_setup_stack(pmap_t pmap, uint32_t *sp_out, char **k_argv, int ar
      * environ array), and the next getenv() walks off into the weeds. */
 
     int is_freebsd = current_process && current_process->perso_id == PERS_FREEBSD;
+    int is_netbsd  = current_process && current_process->perso_id == PERS_NETBSD;
 
     uint32_t execfn_ptr = 0;
     if (k_argv && argc > 0) execfn_ptr = (uint32_t)(uintptr_t)k_argv[0];
@@ -1236,16 +1237,39 @@ static int exec_setup_stack(pmap_t pmap, uint32_t *sp_out, char **k_argv, int ar
     sp -= 4; STACK_WRITE32(sp, at_base);
     sp -= 4; STACK_WRITE32(sp, AT_BASE);
 
-    sp -= 4; STACK_WRITE32(sp, current_process->uid);
-    sp -= 4; STACK_WRITE32(sp, AT_UID);
-    sp -= 4; STACK_WRITE32(sp, current_process->gid);
-    sp -= 4; STACK_WRITE32(sp, AT_GID);
-    sp -= 4; STACK_WRITE32(sp, current_process->euid);
-    sp -= 4; STACK_WRITE32(sp, AT_EUID);
-    sp -= 4; STACK_WRITE32(sp, current_process->egid);
-    sp -= 4; STACK_WRITE32(sp, AT_EGID);
+    /* Linux/generic credential auxv.  NetBSD numbers these differently and
+     * reuses a_type 13 for AT_STACKBASE, so it emits its own set below. */
+    if (!is_netbsd) {
+        sp -= 4; STACK_WRITE32(sp, current_process->uid);
+        sp -= 4; STACK_WRITE32(sp, AT_UID);
+        sp -= 4; STACK_WRITE32(sp, current_process->gid);
+        sp -= 4; STACK_WRITE32(sp, AT_GID);
+        sp -= 4; STACK_WRITE32(sp, current_process->euid);
+        sp -= 4; STACK_WRITE32(sp, AT_EUID);
+        sp -= 4; STACK_WRITE32(sp, current_process->egid);
+        sp -= 4; STACK_WRITE32(sp, AT_EGID);
+    }
 
-    if (is_freebsd) {
+    if (is_netbsd) {
+        /*
+         * NetBSD auxv (sys/kern/exec_elf.c): the common AT_PHDR/PHENT/PHNUM/
+         * PAGESZ/BASE/FLAGS/ENTRY above already match; NetBSD additionally
+         * wants AT_STACKBASE (the low end of the main-thread stack region,
+         * ep_minsaddr) and the Solaris-numbered credential entries.  No
+         * Linux AT_PLATFORM/RANDOM/EXECFN — NetBSD's rtld neither needs nor
+         * expects them.
+         */
+        sp -= 4; STACK_WRITE32(sp, user_stack_top - USER_STACK_MAX);
+        sp -= 4; STACK_WRITE32(sp, AT_NETBSD_STACKBASE);
+        sp -= 4; STACK_WRITE32(sp, current_process->euid);
+        sp -= 4; STACK_WRITE32(sp, AT_NETBSD_EUID);
+        sp -= 4; STACK_WRITE32(sp, current_process->uid);
+        sp -= 4; STACK_WRITE32(sp, AT_NETBSD_RUID);
+        sp -= 4; STACK_WRITE32(sp, current_process->egid);
+        sp -= 4; STACK_WRITE32(sp, AT_NETBSD_EGID);
+        sp -= 4; STACK_WRITE32(sp, current_process->gid);
+        sp -= 4; STACK_WRITE32(sp, AT_NETBSD_RGID);
+    } else if (is_freebsd) {
         /* FreeBSD-specific entries.  Order doesn't matter (rtld walks
          * the array indexing by a_type), but use BSD a_type values. */
         sp -= 4; STACK_WRITE32(sp, execfn_ptr);

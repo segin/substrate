@@ -247,6 +247,19 @@ typedef struct {
 #define AT_SYSINFO_EHDR 33
 
 /*
+ * NetBSD-specific auxv types (NetBSD sys/sys/exec_elf.h).  NetBSD reuses
+ * a_type 13 as AT_STACKBASE (NOT AT_GID) and numbers the credential entries
+ * in Solaris's 2000+ range.  The Linux AT_UID/EUID/GID/EGID block must be
+ * skipped for NetBSD and these emitted instead — otherwise ld.elf_so reads
+ * the Linux AT_GID (a_type 13) as AT_STACKBASE and faults.
+ */
+#define AT_NETBSD_STACKBASE 13
+#define AT_NETBSD_EUID      2000
+#define AT_NETBSD_RUID      2001
+#define AT_NETBSD_EGID      2002
+#define AT_NETBSD_RGID      2003
+
+/*
  * FreeBSD-specific auxv types.  Indices >=15 collide with Linux's, so the
  * kernel must select layouts based on the executing personality.  These come
  * from FreeBSD sys/sys/elf_common.h and are what FreeBSD libc/csu/rtld read.
