@@ -40,6 +40,30 @@ extern void signal_handle_pending(registers_t *regs);
 
 extern void gdt_set_gate(int num, uint32_t base, uint32_t limit, uint8_t access, uint8_t gran);
 
+/*
+ * Translate a substrate (Linux-numbered) errno to the BSD errno numbering
+ * used by the FreeBSD / NetBSD / OpenBSD personalities.  errnos 1..34 are
+ * identical, but substrate's curated set then diverges from BSD for a
+ * handful of values -- most consequentially ENOSYS, which is 38 here but 78
+ * on BSD (where 38 is ENOTSOCK).  Returning the wrong number breaks the
+ * ubiquitous "ret < 0 && errno != ENOSYS" feature/capability probe idiom
+ * (e.g. capsicum's caph_enter / caph_limit_stdio, used by echo(1) and most
+ * of the FreeBSD base utilities).
+ */
+static uint32_t bsd_errno_xlate(uint32_t e) {
+    switch (e) {
+    case EAGAIN:          return 35;  /* BSD EAGAIN == EWOULDBLOCK */
+    case EDEADLK:         return 11;
+    case ENOSYS:          return 78;
+    case ENOTEMPTY:       return 66;
+    case EOPNOTSUPP:      return 45;  /* BSD EOPNOTSUPP == ENOTSUP */
+    case ETIMEDOUT:       return 60;
+    case EOWNERDEAD:      return 96;
+    case ENOTRECOVERABLE: return 95;
+    default:              return e;   /* 1..34, ENAMETOOLONG(63), ELOOP(62) match */
+    }
+}
+
 int sys_set_thread_area(struct user_desc *u_info) {
     if (!u_info) return -14; // EFAULT
     
@@ -477,7 +501,8 @@ void syscall_handler(registers_t *regs) {
          */
         uint32_t low = (uint32_t)(ret & 0xFFFFFFFF);
         if ((int32_t)low < 0) {
-            regs->eax = (uint32_t)(-(int32_t)low); /* positive errno */
+            /* positive errno, mapped from substrate to BSD numbering */
+            regs->eax = bsd_errno_xlate((uint32_t)(-(int32_t)low));
             regs->eflags |= 1;  /* set CF */
         } else {
             regs->eax = low;
