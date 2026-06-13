@@ -2325,7 +2325,21 @@ int kern_readlinkat(int dirfd, const char *pathname, char *buf, size_t bufsiz) {
         }
     }
 
-    node = vfs_lookup_lstat((pathname[0] == '/') ? root : cwd, pathname);
+    /* Personality path translation: try <prefix><path> first (e.g.
+     * /perso/freebsd/...), falling back to the bare path on miss -- same
+     * TRYEMULROOT semantics as vfs_perso_lookup / kern_lstat, but with
+     * lstat semantics so the final symlink itself is returned, not its
+     * target. */
+    node = NULL;
+    if (pathname[0] == '/' && current_process) {
+        struct personality *pp = perso_lookup(current_process->perso_id);
+        if (pp && pp->path_prefix && pp->path_prefix[0]) {
+            char prefixed[320];
+            snprintf(prefixed, sizeof(prefixed), "%s%s", pp->path_prefix, pathname);
+            node = vfs_lookup_lstat(root, prefixed);
+        }
+    }
+    if (!node) node = vfs_lookup_lstat((pathname[0] == '/') ? root : cwd, pathname);
     if (!node) return -ENOENT;
     if ((node->flags & 0x07) != FS_SYMLINK) return -EINVAL;
     return readlink_fs(node, buf, bufsiz);
