@@ -199,6 +199,9 @@ struct freebsd13_stat;
 #define FREEBSD_SYS_lpathconf  513
 #define FREEBSD_SYS_cap_enter  516
 #define FREEBSD_SYS_cap_getmode 517
+#define FREEBSD_SYS_cap_rights_limit 533
+#define FREEBSD_SYS_cap_ioctls_limit 534
+#define FREEBSD_SYS_cap_fcntls_limit 536
 #define FREEBSD_SYS_pdfork     518
 #define FREEBSD_SYS_pdkill     519
 #define FREEBSD_SYS_pdgetpid   520
@@ -256,6 +259,7 @@ int sys_getrlimit(int resource, void *rlp);
 int sys_setrlimit(int resource, const void *rlp);
 int sys_issetugid(void);
 int sys_cap_getmode(unsigned int *modep);
+int sys_cap_nosys(void);
 ssize_t sys_readv(int fd, const void *iov, int iovcnt);
 ssize_t sys_writev(int fd, const void *iov, int iovcnt);
 int sys_getgroups(int gidsetsize, void *gidset);

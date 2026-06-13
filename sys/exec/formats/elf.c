@@ -1277,6 +1277,17 @@ static int exec_setup_stack(pmap_t pmap, uint32_t *sp_out, char **k_argv, int ar
         sp -= 4; STACK_WRITE32(sp, 8);   /* MAXPAGESIZES(2) * sizeof(u_long)(4) */
         sp -= 4; STACK_WRITE32(sp, AT_FBSD_PAGESIZESLEN);
 
+        /* Main-thread user stack bounds.  FreeBSD libthr's thr_init
+         * (__thr_get_main_stack_base / _lim) reads AT_USRSTACKBASE (the
+         * top of the user stack) and AT_USRSTACKLIM (its grow-down limit)
+         * via _elf_aux_info, falling back to a sysctl(kern.usrstack) we
+         * don't implement -- without them it aborts ("Cannot get
+         * kern.usrstack", thr_init.c).  libc only serves non-zero values. */
+        sp -= 4; STACK_WRITE32(sp, user_stack_top);     /* 0xC0000000 */
+        sp -= 4; STACK_WRITE32(sp, AT_FBSD_USRSTACKBASE);
+        sp -= 4; STACK_WRITE32(sp, USER_STACK_MAX);     /* 8 MiB ceiling */
+        sp -= 4; STACK_WRITE32(sp, AT_FBSD_USRSTACKLIM);
+
         /* PROT_READ|PROT_WRITE = 0x3 — stack protection FreeBSD libc
          * uses to refrain from setting PROT_EXEC on returns. */
         sp -= 4; STACK_WRITE32(sp, 0x3);

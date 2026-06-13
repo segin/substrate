@@ -117,6 +117,15 @@ void *freebsd_sys_mmap(void *addr, size_t len, int prot, int flags, int fd, uint
      */
     if (flags & FREEBSD_MAP_GUARD)
         kflags |= KERN_MAP_PRIVATE | KERN_MAP_ANONYMOUS;
+    /*
+     * FreeBSD permits a mapping with neither MAP_SHARED nor MAP_PRIVATE and
+     * treats it as private (copy) -- libthr's main-thread red zone uses a
+     * bare MAP_ANON for exactly this.  substrate's sys_mmap requires exactly
+     * one sharing bit (mmap_validate_flags), so default to MAP_PRIVATE when
+     * the caller named neither, instead of failing with EPERM.
+     */
+    if ((kflags & (KERN_MAP_SHARED | KERN_MAP_PRIVATE)) == 0)
+        kflags |= KERN_MAP_PRIVATE;
     return sys_mmap(addr, len, prot, kflags, fd, offset);
 }
 
@@ -380,6 +389,17 @@ int sys_cap_getmode(unsigned int *modep) {
     unsigned int zero = 0;
     return copyout(&zero, modep, sizeof(zero));
 }
+
+/*
+ * Capsicum stubs.  substrate has no capability sandbox, so report it as
+ * unavailable (ENOSYS) rather than failing with EPERM.  Base utilities call
+ * cap_enter / cap_rights_limit / cap_ioctls_limit / cap_fcntls_limit through
+ * libcapsicum's caph_enter / caph_limit_stdio, which follow the standard
+ * "cap_*() < 0 && errno != ENOSYS" idiom -- with ENOSYS they proceed
+ * unsandboxed; with EPERM (the unwired default) they err() out.  echo(1) and
+ * most of base sandbox themselves this way.
+ */
+int sys_cap_nosys(void) { return -ENOSYS; }
 
 /* IOV_MAX-sized iovec array on the KERNEL stack (the old VLA: up to
  * 1024 * 8 = 8 KiB) overflowed the 16 KiB per-process kernel stack on a
