@@ -1,0 +1,220 @@
+/*
+ * ide_atapi.c - ATAPI packet command interface.
+ *
+ * ATAPI uses SCSI command packets sent over the ATA interface.  The
+ * PACKET command (0xA0) is followed by a 12-byte CDB (Command Descriptor
+ * Block) containing the SCSI command.
+ */
+
+#include <drivers/storage/ide/ide.h>
+#include <drivers/storage/ide/ide_priv.h>
+
+#include <arch/x86-common/io.h>
+
+/* SCSI Command Codes (subset for CD-ROM) */
+#define SCSI_TEST_UNIT_READY   0x00
+#define SCSI_REQUEST_SENSE     0x03
+#define SCSI_READ_6            0x08
+#define SCSI_INQUIRY           0x12
+#define SCSI_READ_CAPACITY     0x25
+#define SCSI_READ_10           0x28
+#define SCSI_READ_12           0xA8
+#define SCSI_READ_TOC          0x43
+
+/*
+ * Send an ATAPI packet command
+ *
+ * Implements the ATAPI PIO protocol:
+ * 1. Set byte count limit (transfer size)
+ * 2. Issue PACKET command (0xA0)
+ * 3. Wait for DRQ
+ * 4. Send 12-byte CDB
+ * 5. For data transfers: wait for DRQ, read/write data
+ * 6. Check status
+ */
+int ide_atapi_packet(uint8_t channel, uint8_t drive,
+                     const uint8_t *packet, uint8_t packet_len,
+                     void *buffer, uint32_t buffer_len, int write) {
+    if (channel >= MAX_IDE_CHANNELS) return -1;
+    if (packet_len != 12) return -1;  /* ATAPI uses 12-byte CDB */
+
+    uint16_t bus = ide_channels[channel].io_base;
+
+    /* Select drive */
+    ide_select_drive(channel, drive);
+    if (ide_wait_ready(channel, IDE_TIMEOUT_PACKET_MS, "packet-select") < 0) return -1;
+
+    /* Set byte count limit (in LBA_MID and LBA_HIGH) */
+    /* This tells the device the maximum transfer size */
+    ide_write_reg(channel, ATA_REG_LBA_MID, buffer_len & 0xFF);
+    ide_write_reg(channel, ATA_REG_LBA_HIGH, (buffer_len >> 8) & 0xFF);
+
+    /* Issue PACKET command */
+    ide_write_reg(channel, ATA_REG_COMMAND, ATA_CMD_PACKET);
+
+    /* Wait for DRQ to send the command packet */
+    if (ide_wait_bsy(channel, IDE_TIMEOUT_PACKET_MS, "packet-command") < 0) {
+        return -1;
+    }
+
+    uint8_t status = ide_read_reg(channel, ATA_REG_STATUS);
+    if (status & ATA_SR_ERR) {
+        return -1;
+    }
+    if (!(status & ATA_SR_DRQ)) {
+        return -1;
+    }
+
+    /* Send the 12-byte CDB as 6 words */
+    const uint16_t *pkt = (const uint16_t *)packet;
+    for (int i = 0; i < 6; i++) {
+        outw(bus + ATA_REG_DATA, pkt[i]);
+    }
+
+    /* For non-data commands, we're done */
+    if (buffer_len == 0 || buffer == NULL) {
+        if (ide_wait_bsy(channel, IDE_TIMEOUT_PACKET_MS, "packet-nodata") < 0) {
+            return -1;
+        }
+        status = ide_read_reg(channel, ATA_REG_STATUS);
+        return (status & ATA_SR_ERR) ? -1 : 0;
+    }
+
+    /* Data transfer phase */
+    uint16_t *buf = (uint16_t *)buffer;
+    uint32_t transferred = 0;
+
+    while (transferred < buffer_len) {
+        /* Wait for DRQ or completion */
+        if (ide_wait_bsy(channel, IDE_TIMEOUT_PACKET_MS, "packet-data") < 0) {
+            return -1;
+        }
+        status = ide_read_reg(channel, ATA_REG_STATUS);
+
+        if (status & ATA_SR_ERR) {
+            return -1;
+        }
+
+        if (!(status & ATA_SR_DRQ)) {
+            /* No more data */
+            break;
+        }
+
+        /* Get transfer size from byte count */
+        uint16_t byte_count = ide_read_reg(channel, ATA_REG_LBA_MID) |
+                             (ide_read_reg(channel, ATA_REG_LBA_HIGH) << 8);
+
+        /* Transfer data */
+        uint16_t words = byte_count / 2;
+
+        /* Ensure we don't overflow the buffer */
+        if (transferred + words * 2 > buffer_len) {
+             words = (buffer_len - transferred) / 2;
+        }
+
+        if (words > 0) {
+            if (write) {
+                outsw(bus + ATA_REG_DATA, buf, words);
+            } else {
+                insw(bus + ATA_REG_DATA, buf, words);
+            }
+            buf += words;
+            transferred += words * 2;
+        } else {
+            /* No words to transfer in this chunk? (odd length/zero) */
+            break;
+        }
+    }
+
+    /* Wait for completion */
+    if (ide_wait_bsy(channel, IDE_TIMEOUT_PACKET_MS, "packet-complete") < 0) {
+        return -1;
+    }
+    status = ide_read_reg(channel, ATA_REG_STATUS);
+
+    return (status & ATA_SR_ERR) ? -1 : 0;
+}
+
+/*
+ * ATAPI Read Capacity command
+ *
+ * Returns the last LBA and block size of the media.
+ */
+int ide_atapi_read_capacity(uint8_t channel, uint8_t drive,
+                            uint32_t *lba, uint32_t *block_size) {
+    uint8_t packet[12] = {0};
+    uint8_t response[8];
+
+    packet[0] = SCSI_READ_CAPACITY;
+    /* Rest are zeros */
+
+    int ret = ide_atapi_packet(channel, drive, packet, 12,
+                               response, 8, 0);
+    if (ret < 0) return ret;
+
+    /* Response is big-endian */
+    *lba = ((uint32_t)response[0] << 24) |
+           ((uint32_t)response[1] << 16) |
+           ((uint32_t)response[2] << 8) |
+           response[3];
+
+    *block_size = ((uint32_t)response[4] << 24) |
+                  ((uint32_t)response[5] << 16) |
+                  ((uint32_t)response[6] << 8) |
+                  response[7];
+
+    return 0;
+}
+
+/*
+ * ATAPI Read Sectors (READ10/READ12)
+ *
+ * Reads sectors from ATAPI device (CD-ROM).
+ * Uses READ10 for small counts, READ12 for large.
+ */
+int ide_atapi_read_sectors(uint8_t channel, uint8_t drive,
+                           uint32_t lba, uint16_t count, void *buffer) {
+    uint8_t packet[12] = {0};
+
+    /* All uint16_t counts fit in READ10 (max 65535 sectors) */
+    /* Use READ10 - 10-byte CDB */
+    packet[0] = SCSI_READ_10;
+    packet[1] = 0;
+    /* LBA (big-endian) */
+    packet[2] = (lba >> 24) & 0xFF;
+    packet[3] = (lba >> 16) & 0xFF;
+    packet[4] = (lba >> 8) & 0xFF;
+    packet[5] = lba & 0xFF;
+    /* Reserved */
+    packet[6] = 0;
+    /* Transfer length (big-endian) */
+    packet[7] = (count >> 8) & 0xFF;
+    packet[8] = count & 0xFF;
+    packet[9] = 0;
+    /* Remaining bytes are zeros */
+
+    /* CD-ROM sectors are typically 2048 bytes */
+    uint32_t buffer_len = (uint32_t)count * 2048;
+
+    return ide_atapi_packet(channel, drive, packet, 12,
+                            buffer, buffer_len, 0);
+}
+
+/*
+ * ATAPI Read TOC (Table of Contents)
+ *
+ * Reads the CD Table of Contents for audio CD support.
+ */
+int ide_atapi_read_toc(uint8_t channel, uint8_t drive,
+                       uint8_t start_track, void *buffer, uint16_t buffer_len) {
+    uint8_t packet[12] = {0};
+
+    packet[0] = SCSI_READ_TOC;
+    packet[1] = 0x02;  /* MSF format */
+    packet[6] = start_track;
+    packet[7] = (buffer_len >> 8) & 0xFF;
+    packet[8] = buffer_len & 0xFF;
+
+    return ide_atapi_packet(channel, drive, packet, 12,
+                            buffer, buffer_len, 0);
+}

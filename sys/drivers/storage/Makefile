@@ -3,7 +3,7 @@ include ../../../Makefile.inc
 CFLAGS := $(KERNEL_CFLAGS) -I. -I../../video -I../../arch/i386 -I../../arch/x86-common
 LDFLAGS := $(FREESTANDING_LDFLAGS)
 
-SRCS = blkdev.c scsi/scsi.c scsi/scsi_dev.c scsi/scsi_ctl.c scsi/atapi_scsi.c ide/ide.c ide/ide_dma.c ide/ide_identify.c ide/ide_pci.c floppy/floppy.c floppy/floppy_geom.c ahci/ahci.c nvme/nvme.c ramdisk.c
+SRCS = blkdev.c scsi/scsi.c scsi/scsi_dev.c scsi/scsi_ctl.c scsi/atapi_scsi.c ide/ide.c ide/ide_regs.c ide/ide_wait.c ide/ide_cmd.c ide/ide_pio.c ide/ide_dma.c ide/ide_atapi.c ide/ide_probe.c ide/ide_identify.c ide/ide_pci.c floppy/floppy.c floppy/floppy_geom.c ahci/ahci.c nvme/nvme.c ramdisk.c
 OBJS = $(SRCS:.c=.o)
 
 all: storage.o
