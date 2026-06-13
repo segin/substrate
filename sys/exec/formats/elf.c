@@ -1143,6 +1143,7 @@ static int exec_setup_stack(pmap_t pmap, uint32_t *sp_out, char **k_argv, int ar
      * record their user-space pointers, then emit a clean auxv below. */
     uint32_t platform_ptr;
     PUSH_STRING("i686", platform_ptr);
+    uint32_t pagesizes_ptr = 0;   /* AT_PAGESIZES blob, filled in below */
 
     /* Random buffer used for both AT_RANDOM (Linux, first 16 bytes) and
      * AT_FBSD_CANARY (FreeBSD, all 64 bytes).  FreeBSD libc's __guard_setup
@@ -1164,6 +1165,25 @@ static int exec_setup_stack(pmap_t pmap, uint32_t *sp_out, char **k_argv, int ar
         memcpy(&val, &rand_buf[i * 4], 4);
         STACK_WRITE32(sp + i * 4, val);
     }
+
+    /* Page-sizes array for FreeBSD AT_PAGESIZES.  FreeBSD libc's
+     * getpagesizes() — called from libthr/jemalloc init (thr_malloc.c) even
+     * in statically-linked binaries — reads the supported page sizes from
+     * AT_PAGESIZES/AT_PAGESIZESLEN, falling back to a sysctl(hw.pagesizes) we
+     * don't implement.  With neither, getpagesizes() returns ENOENT and the
+     * process aborts ("Unable to read page sizes").
+     *
+     * libc reads with buflen == sizeof(u_long[MAXPAGESIZES]) and
+     * _elf_aux_info() only serves AT_PAGESIZES when AT_PAGESIZESLEN >= that
+     * buflen, so we must publish the FULL MAXPAGESIZES-slot array (unused
+     * slots zeroed; getpagesizes trims trailing zeros) and set the length to
+     * its full byte size — not just the one populated entry.  On i386
+     * MAXPAGESIZES == 2, so this is u_long[2] = {4096, 0} (8 bytes). */
+    sp -= 8;
+    pagesizes_ptr = sp;
+    STACK_WRITE32(sp,     4096);
+    STACK_WRITE32(sp + 4, 0);
+
     /* Align to 16 before the auxv array. */
     sp &= ~15;
 
@@ -1249,6 +1269,13 @@ static int exec_setup_stack(pmap_t pmap, uint32_t *sp_out, char **k_argv, int ar
 
         sp -= 4; STACK_WRITE32(sp, 1);
         sp -= 4; STACK_WRITE32(sp, AT_FBSD_NCPUS);
+
+        /* Supported page sizes (one 4 KiB u_long entry); getpagesizes()
+         * needs both the array pointer and its byte length. */
+        sp -= 4; STACK_WRITE32(sp, pagesizes_ptr);
+        sp -= 4; STACK_WRITE32(sp, AT_FBSD_PAGESIZES);
+        sp -= 4; STACK_WRITE32(sp, 8);   /* MAXPAGESIZES(2) * sizeof(u_long)(4) */
+        sp -= 4; STACK_WRITE32(sp, AT_FBSD_PAGESIZESLEN);
 
         /* PROT_READ|PROT_WRITE = 0x3 — stack protection FreeBSD libc
          * uses to refrain from setting PROT_EXEC on returns. */
