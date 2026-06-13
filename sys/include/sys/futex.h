@@ -116,6 +116,9 @@ struct robust_list_head {
 /* Main futex syscall */
 int sys_futex(int *uaddr, int op, int val, void *timeout, int *uaddr2, int val3);
 
+/* clear_child_tid registration (CLONE_CHILD_CLEARTID / set_tid_address) */
+int sys_set_tid_address(int *tidptr);
+
 /* Robust list management */
 int sys_set_robust_list(struct robust_list_head *head, size_t len);
 int sys_get_robust_list(int pid, struct robust_list_head **head_ptr, size_t *len_ptr);

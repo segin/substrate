@@ -22,6 +22,7 @@
 #include <sys/proc.h>
 #include <string.h>
 #include <sys/syscall_impl.h>
+#include <sys/futex.h>
 #include <sys/kern_syscalls.h>
 #include <vfs/vfs.h>
 #include <vm/vm_kmem.h>
@@ -888,24 +889,60 @@ static int linux_sys_oldselect(void *lsp) {
                       ls.exceptfds, ls.timeout);
 }
 
-static int __attribute__((unused)) linux_sys_clone(uint32_t flags, void *child_stack, int *parent_tidptr, void *tls, int *child_tidptr) {
-    (void)parent_tidptr;
-    (void)tls;
-    (void)child_tidptr;
+static int linux_sys_clone(uint32_t flags, void *child_stack, int *parent_tidptr, void *tls, int *child_tidptr) {
     extern int arch_fork_with_stack(void *child_stack);
+    extern int arch_clone_thread(void *child_stack, uint32_t tls_base, int *clear_child_tid);
 
     const uint32_t CLONE_SIGNAL_MASK     = 0x000000FFu;
     const uint32_t CLONE_VM              = 0x00000100u;
+    const uint32_t CLONE_FS              = 0x00000200u;
+    const uint32_t CLONE_FILES           = 0x00000400u;
+    const uint32_t CLONE_SIGHAND         = 0x00000800u;
     const uint32_t CLONE_VFORK           = 0x00004000u;
+    const uint32_t CLONE_THREAD          = 0x00010000u;
+    const uint32_t CLONE_SYSVSEM         = 0x00040000u;
     const uint32_t CLONE_SETTLS          = 0x00080000u;
     const uint32_t CLONE_PARENT_SETTID   = 0x00100000u;
     const uint32_t CLONE_CHILD_CLEARTID  = 0x00200000u;
     const uint32_t CLONE_CHILD_SETTID    = 0x01000000u;
 
+    /*
+     * NPTL thread creation: CLONE_THREAD|CLONE_VM means a new thread that
+     * shares this process's address space, fds and signal state.  Spawn it
+     * resuming from the clone trap frame on child_stack with EAX=0, applying
+     * the CLONE_SETTLS gs-base and the CHILD_CLEARTID join pointer (which the
+     * scheduler clears + futex-wakes on thread exit, the basis of
+     * pthread_join).  This is glibc/NPTL pthread_create.
+     */
+    if ((flags & CLONE_THREAD) && (flags & CLONE_VM)) {
+        uint32_t tls_base = current_thread ? current_thread->gs_base : 0;
+        if ((flags & CLONE_SETTLS) && tls) {
+            /* i386 clone's tls arg is a struct user_desc *; base_addr is the
+             * second word (after entry_number). */
+            uint32_t ud[2];
+            if (copyin(tls, ud, sizeof(ud)) != 0) return -14; /* EFAULT */
+            tls_base = ud[1];
+        }
+        int *ctid = (flags & CLONE_CHILD_CLEARTID) ? child_tidptr : NULL;
+        int tid = arch_clone_thread(child_stack, tls_base, ctid);
+        if (tid < 0) return -11; /* EAGAIN */
+        if ((flags & CLONE_PARENT_SETTID) && parent_tidptr) {
+            (void)copyout(&tid, parent_tidptr, sizeof(int));
+        }
+        if ((flags & CLONE_CHILD_SETTID) && child_tidptr) {
+            (void)copyout(&tid, child_tidptr, sizeof(int));
+        }
+        return tid;
+    }
+
     const uint32_t supported =
         CLONE_SIGNAL_MASK |
         CLONE_VM |
+        CLONE_FS |
+        CLONE_FILES |
+        CLONE_SIGHAND |
         CLONE_VFORK |
+        CLONE_SYSVSEM |
         CLONE_SETTLS |
         CLONE_PARENT_SETTID |
         CLONE_CHILD_CLEARTID |
@@ -1160,6 +1197,8 @@ static void *linux_syscalls[MAX_SYSCALLS] = {
     [LINUX_SYS_fcntl64]        = (void *)&sys_fcntl,
     [LINUX_SYS_futex]          = (void *)&sys_futex,
     [LINUX_SYS_set_thread_area] = (void *)&sys_set_thread_area,
+    [LINUX_SYS_set_tid_address] = (void *)&sys_set_tid_address,
+    [LINUX_SYS_set_robust_list] = (void *)&sys_set_robust_list,
     [LINUX_SYS_exit_group]     = (void *)&sys_exit,
     [LINUX_SYS_pipe2]          = (void *)&linux_sys_pipe2,
     [LINUX_SYS_dup3]           = (void *)&linux_sys_dup3,

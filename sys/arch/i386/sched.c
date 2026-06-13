@@ -187,6 +187,97 @@ int sched_fork_thread(process_t *proc, void *parent_regs) {
     return proc->pid;
 }
 
+/*
+ * sched_clone_thread - create a Linux clone(CLONE_THREAD) thread.
+ *
+ * Like sched_fork_thread, but the new thread joins *proc* (the caller's own
+ * process, so it shares the address space, fds and signal state) instead of a
+ * forked child, and it carries its own TLS base and CHILD_CLEARTID pointer.
+ * The child resumes from the copied trap frame with EAX=0 on its new user
+ * stack (already set in parent_regs->useresp by the caller) -- exactly the
+ * clone(2) contract: the child "returns from the syscall" on child_stack.
+ *
+ * Returns the new thread's TID, or -1 on failure.
+ */
+int sched_clone_thread(process_t *proc, void *parent_regs, uint32_t tls_base,
+                       int *clear_child_tid) {
+    typedef struct {
+        uint32_t gs;
+        uint32_t fs, es;
+        uint32_t ds;
+        uint32_t edi, esi, ebp, esp, ebx, edx, ecx, eax;
+        uint32_t int_no, err_code;
+        uint32_t eip, cs, eflags, useresp, ss;
+    } fork_regs_t;
+
+    fork_regs_t *regs = (fork_regs_t *)parent_regs;
+
+    thread_t *t = sched_alloc_thread(proc);
+    if (!t) return -1;
+
+    /* Per-thread TLS base supplied by clone(CLONE_SETTLS); arch_switch_to
+     * reloads the GDT TLS slot from this on every switch-in. */
+    t->gs_base = tls_base;
+    /* CHILD_CLEARTID: the scheduler zeroes *clear_child_tid and futex-wakes
+     * it when this thread becomes a zombie (sched_context_switch), which is
+     * how pthread_join() observes thread exit. */
+    t->exit_tid_ptr = clear_child_tid;
+
+    extern void *pmm_alloc_contiguous(size_t);
+    void *kstack_base = pmm_alloc_contiguous(4);   /* 16 KiB */
+    if (!kstack_base) {
+        t->proc = NULL;
+        t->tid = -1;
+        t->state = THREAD_ZOMBIE;
+        return -1;
+    }
+
+    uint32_t *kstack = (uint32_t *)((uint32_t)kstack_base + 0x4000);
+    t->kstack_base = (uintptr_t)kstack_base;
+    t->kstack_top = (uintptr_t)kstack;
+    t->kstack_units = 4;
+    t->kstack_type = THREAD_KSTACK_PMM_CONTIG;
+    t->kstack_owned = 1;
+
+    /* Build the IRET frame the child resumes through (mirrors
+     * sched_fork_thread): same user context as the parent at the clone
+     * call site, but EAX=0 and the new user stack. */
+    kstack--; *kstack = regs->ss;
+    kstack--; *kstack = regs->useresp;     /* child user stack */
+    kstack--; *kstack = regs->eflags;
+    kstack--; *kstack = regs->cs;
+    kstack--; *kstack = regs->eip;
+    kstack--; *kstack = regs->err_code;
+    kstack--; *kstack = regs->int_no;
+
+    kstack--; *kstack = 0;                  /* EAX = 0 (clone child return) */
+    kstack--; *kstack = regs->ecx;
+    kstack--; *kstack = regs->edx;
+    kstack--; *kstack = regs->ebx;
+    kstack--; *kstack = regs->esp;
+    kstack--; *kstack = regs->ebp;
+    kstack--; *kstack = regs->esi;
+    kstack--; *kstack = regs->edi;
+
+    kstack--; *kstack = regs->ds;
+    kstack--; *kstack = regs->es;
+    kstack--; *kstack = regs->fs;
+    kstack--; *kstack = regs->gs;
+
+    extern void fork_child_return(void);
+    kstack--; *kstack = (uint32_t)fork_child_return;
+    kstack--; *kstack = 0;  /* EBP */
+    kstack--; *kstack = 0;  /* EDI */
+    kstack--; *kstack = 0;  /* ESI */
+    kstack--; *kstack = 0;  /* EBX */
+
+    t->kstack_ptr = (uintptr_t)kstack;
+    t->instr_ptr = regs->eip;
+    t->state = THREAD_READY;
+
+    return t->tid;
+}
+
 thread_t *sched_create_thread(process_t *proc, void (*entry_point)(void*), void *stack, void *arg) {
     thread_t *t = sched_alloc_thread(proc);
     if (!t) return NULL;

@@ -1474,6 +1474,7 @@ int sys_clone(uint32_t flags, void *child_stack, int *parent_tidptr, void *tls, 
      * Minimal Linux clone support for fork-style usage:
      * - allow only CSIGNAL in low 8 bits (e.g. SIGCHLD)
      * - reject thread-sharing flags for now
+     * (The Linux personality's linux_sys_clone handles CLONE_THREAD.)
      */
     const uint32_t CLONE_SIGNAL_MASK = 0xFFu;
     if (flags & ~CLONE_SIGNAL_MASK) {

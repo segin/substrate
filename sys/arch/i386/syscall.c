@@ -566,6 +566,24 @@ int arch_fork_with_stack(void *child_stack) {
     return sched_fork_process(current_process, &regs);
 }
 
+/*
+ * arch_clone_thread - create a new thread in the current process from the
+ * live syscall trap frame, resuming on child_stack with the given TLS base
+ * and CHILD_CLEARTID pointer.  Backs Linux clone(CLONE_THREAD).  Returns the
+ * new TID.
+ */
+int arch_clone_thread(void *child_stack, uint32_t tls_base, int *clear_child_tid) {
+    extern int sched_clone_thread(process_t *proc, void *parent_regs,
+                                  uint32_t tls_base, int *clear_child_tid);
+    if (!current_thread || !current_thread->syscall_regs) return -1;
+
+    registers_t regs = *(registers_t *)current_thread->syscall_regs;
+    if (child_stack) {
+        regs.useresp = (uint32_t)(uintptr_t)child_stack;
+    }
+    return sched_clone_thread(current_process, &regs, tls_base, clear_child_tid);
+}
+
 int sys_fork(void) {
     return arch_fork_with_stack(NULL);
 }

@@ -267,6 +267,20 @@ void futex_wake_exited_thread(int *uaddr) {
 }
 
 /*
+ * sys_set_tid_address - register the calling thread's clear_child_tid.
+ *
+ * Linux returns the caller's TID; glibc reads that as the main thread's tid
+ * at startup.  The pointer is stored as exit_tid_ptr, which the scheduler
+ * zeroes and futex-wakes when the thread exits (sched_context_switch) -- the
+ * same mechanism CLONE_CHILD_CLEARTID uses for pthread_join.
+ */
+int sys_set_tid_address(int *tidptr) {
+    if (!current_thread) return 0;
+    current_thread->exit_tid_ptr = tidptr;
+    return current_thread->tid;
+}
+
+/*
  * sys_set_robust_list - Register thread's robust futex list
  */
 int sys_set_robust_list(struct robust_list_head *head, size_t len) {
