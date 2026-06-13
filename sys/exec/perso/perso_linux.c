@@ -817,7 +817,7 @@ static int __attribute__((unused)) linux_sys_uname(void *ubuf) {
     strlcpy(compat.sysname, "Linux", sizeof(compat.sysname));
     strlcpy(compat.nodename, native.nodename, sizeof(compat.nodename));
     strlcpy(compat.release, "4.4.0", sizeof(compat.release));
-    strlcpy(compat.version, native.version, sizeof(compat.version));
+    strlcpy(compat.version, "gcc@substrate-personality", sizeof(compat.version));
     strlcpy(compat.machine, native.machine, sizeof(compat.machine));
     strlcpy(compat.domainname, native.domainname, sizeof(compat.domainname));
 
@@ -842,7 +842,7 @@ static int linux_sys_olduname(void *ubuf) {
     strlcpy(compat.sysname, "Linux", sizeof(compat.sysname));
     strlcpy(compat.nodename, native.nodename, sizeof(compat.nodename));
     strlcpy(compat.release, "4.4.0", sizeof(compat.release));
-    strlcpy(compat.version, native.version, sizeof(compat.version));
+    strlcpy(compat.version, "gcc@substrate-personality", sizeof(compat.version));
     strlcpy(compat.machine, native.machine, sizeof(compat.machine));
 
     if(copyout(&compat, ubuf, sizeof(compat)) != 0)
@@ -864,7 +864,7 @@ static int linux_sys_oldolduname(void *ubuf) {
     strlcpy(compat.sysname, "Linux", sizeof(compat.sysname));
     strlcpy(compat.nodename, native.nodename, sizeof(compat.nodename));
     strlcpy(compat.release, "4.4.0", sizeof(compat.release));
-    strlcpy(compat.version, native.version, sizeof(compat.version));
+    strlcpy(compat.version, "gcc@substrate-personality", sizeof(compat.version));
     strlcpy(compat.machine, native.machine, sizeof(compat.machine));
 
     if(copyout(&compat, ubuf, sizeof(compat)) != 0)
