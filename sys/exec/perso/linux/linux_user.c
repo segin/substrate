@@ -195,7 +195,14 @@ int linux_sys_fstatat64(int dirfd, const char *path, struct linux_stat64 *buf, i
 
     if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -14;
 
-    ret = kern_fstatat(dirfd, kpath, &native, flags);
+    /* AT_EMPTY_PATH: stat dirfd itself; otherwise pass only the
+     * nofollow bit through (kern_fstatat's 4th arg is a nofollow flag,
+     * not the raw at-flags). */
+    if ((flags & LINUX_AT_EMPTY_PATH) && kpath[0] == '\0') {
+        ret = kern_fstat(dirfd, &native);
+    } else {
+        ret = kern_fstatat(dirfd, kpath, &native, flags & LINUX_AT_SYMLINK_NOFOLLOW);
+    }
     if (ret < 0) return ret;
 
     linux_fill_stat64(&kbuf, &native);
@@ -211,7 +218,18 @@ int linux_sys_statx(int dirfd, const char *path, int flags, unsigned int mask, s
 
     if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -14;
 
-    ret = kern_fstatat(dirfd, kpath, &native, flags & LINUX_AT_SYMLINK_NOFOLLOW);
+    /*
+     * AT_EMPTY_PATH with an empty path operates on dirfd itself (fstat
+     * semantics).  glibc's ld.so stats every library it opens this way:
+     *   statx(fd, "", AT_EMPTY_PATH|AT_NO_AUTOMOUNT, STATX_BASIC_STATS, &buf)
+     * Path-resolving the empty string instead returns ENOTDIR, which made
+     * ld.so abort with "cannot stat shared object" for every .so.
+     */
+    if ((flags & LINUX_AT_EMPTY_PATH) && kpath[0] == '\0') {
+        ret = kern_fstat(dirfd, &native);
+    } else {
+        ret = kern_fstatat(dirfd, kpath, &native, flags & LINUX_AT_SYMLINK_NOFOLLOW);
+    }
     if (ret < 0) return ret;
 
     linux_fill_statx(&kbuf, &native, mask);
