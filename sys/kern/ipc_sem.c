@@ -354,6 +354,11 @@ int kern_semop(int semid, const struct sembuf *ksops, size_t nsops)
         blocked = 1;                                 /* we validated the set, now we sleep */
         char wbump[SEMOPM];
         sem_waitcnt_enter(s, ksops, nsops, wbump);   /* count us as a waiter */
+        /* We validated the set and are about to sleep on it.  If it is gone
+         * when we wake (re-resolve at the loop top), that means IPC_RMID
+         * removed it -> report EIDRM, not the raw lookup error.  Without this
+         * a blocked semop woken by rmid returned EINVAL from the freed slot. */
+        blocked = 1;
         if (current_thread)
             current_thread->flags |= THREAD_F_INTERRUPTIBLE;
         sleepq_add(&semsets[index], current_thread);
