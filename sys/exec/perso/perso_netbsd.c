@@ -74,6 +74,24 @@ int netbsd_sys_futex(int *uaddr, int op, int val, const struct timespec *timeout
     return sys_futex(uaddr, op, val, to_arg, uaddr2, val3);
 }
 
+/*
+ * NetBSD __wait450(2) (syscall 449): the modern wait4 carrying a 64-bit
+ * `struct rusage`.  NetBSD 10 libc/init use this rather than the
+ * compat_50 wait4 (syscall 7, struct rusage50).  Reap through the native
+ * waitpid; when the caller supplies a rusage buffer, zero-fill it —
+ * substrate does not track per-child resource usage and NetBSD callers
+ * (init) only inspect the wait status.
+ */
+int netbsd_sys_wait450(int pid, int *status, int options, struct rusage *rusage) {
+    int ret = sys_waitpid(pid, status, options);
+    if (ret > 0 && rusage) {
+        struct rusage kr;
+        memset(&kr, 0, sizeof(kr));
+        copyout(&kr, rusage, sizeof(kr));
+    }
+    return ret;
+}
+
 #ifndef HOST_TEST
 
 /* NetBSD syscall table - based on i386 column */
@@ -88,7 +106,18 @@ static void *netbsd_syscalls[MAX_SYSCALLS] = {
     [NETBSD_SYS_write]          = &sys_write,
     [NETBSD_SYS_open]           = &sys_open,
     [NETBSD_SYS_close]          = &sys_close,
-    [NETBSD_SYS_wait4]          = &sys_waitpid,     /* wait4 */
+    [NETBSD_SYS_wait4]          = &sys_waitpid,     /* compat_50 wait4 */
+    [NETBSD_SYS___wait450]      = (void *)&netbsd_sys_wait450,  /* modern wait4 */
+    [NETBSD_SYS_setsid]         = (void *)&sys_setsid,
+    [NETBSD_SYS_readv]          = &sys_readv,
+    [NETBSD_SYS_writev]         = &sys_writev,
+    [NETBSD_SYS___socket30]     = &sys_socket,
+    [NETBSD_SYS___gettimeofday50] = &sys_gettimeofday,
+    [NETBSD_SYS___nanosleep50]  = &sys_nanosleep,
+    [NETBSD_SYS___sigprocmask14] = &sys_sigprocmask,
+    [NETBSD_SYS_issetugid]      = (void *)&sys_issetugid,
+    [NETBSD_SYS__lwp_self]      = (void *)&sys_thr_self,
+    [NETBSD_SYS___clock_gettime50] = &sys_clock_gettime,
     [NETBSD_SYS_creat]          = &sys_creat,
     [NETBSD_SYS_link]           = &sys_link,
     [NETBSD_SYS_unlink]         = &sys_unlink,
@@ -134,13 +163,18 @@ static void *netbsd_syscalls[MAX_SYSCALLS] = {
     [NETBSD_SYS_getgid]         = &sys_getgid,
     [NETBSD_SYS_sigprocmask]    = &sys_sigprocmask,
     [NETBSD_SYS___getlogin]     = NULL,            /* __getlogin */
-    [NETBSD_SYS___setlogin]     = NULL,            /* __setlogin */
+    [NETBSD_SYS___setlogin]     = (void *)&sys_setlogin,
     [NETBSD_SYS_acct]           = &sys_acct,
     [NETBSD_SYS_sigpending]     = NULL,            /* sigpending */
     [NETBSD_SYS_sigaltstack]    = &sys_sigaltstack,
-    [NETBSD_SYS_ioctl]          = &sys_ioctl,
+    /* NetBSD shares FreeBSD's 4.4BSD ioctl ABI (_IOC-encoded requests,
+     * same struct termios / c_cc layout, TIOCSCTTY=_IO('t',97)).  Route
+     * through the BSD ioctl translator instead of raw sys_ioctl, which
+     * speaks Linux flat constants — otherwise TIOCSCTTY/TIOCGETA/... never
+     * match and init can't get a controlling terminal. */
+    [NETBSD_SYS_ioctl]          = (void *)&freebsd_sys_ioctl,
     [NETBSD_SYS_oreboot]        = NULL,            /* oreboot */
-    [NETBSD_SYS_revoke]         = NULL,            /* revoke */
+    [NETBSD_SYS_revoke]         = (void *)&sys_revoke,
     [NETBSD_SYS_symlink]        = NULL,            /* symlink - not implemented */
     [NETBSD_SYS_readlink]       = &sys_readlink,
     [NETBSD_SYS_execve]         = &sys_execve,
@@ -253,6 +287,17 @@ static const char *netbsd_names[MAX_SYSCALLS] = {
     [NETBSD_SYS_open]           = "open",
     [NETBSD_SYS_close]          = "close",
     [NETBSD_SYS_wait4]          = "wait4",
+    [NETBSD_SYS___wait450]      = "__wait450",
+    [NETBSD_SYS_setsid]         = "setsid",
+    [NETBSD_SYS_readv]          = "readv",
+    [NETBSD_SYS_writev]         = "writev",
+    [NETBSD_SYS___socket30]     = "__socket30",
+    [NETBSD_SYS___gettimeofday50] = "__gettimeofday50",
+    [NETBSD_SYS___nanosleep50]  = "__nanosleep50",
+    [NETBSD_SYS___sigprocmask14] = "__sigprocmask14",
+    [NETBSD_SYS_issetugid]      = "issetugid",
+    [NETBSD_SYS__lwp_self]      = "_lwp_self",
+    [NETBSD_SYS___clock_gettime50] = "__clock_gettime50",
     [NETBSD_SYS_creat]          = "creat",
     [NETBSD_SYS_link]           = "link",
     [NETBSD_SYS_unlink]         = "unlink",
@@ -403,6 +448,17 @@ static struct syscall_fmt netbsd_fmts[MAX_SYSCALLS] = {
     [NETBSD_SYS_open]           = { 3, { ARG_STR, ARG_HEX, ARG_HEX } },
     [NETBSD_SYS_close]          = { 1, { ARG_INT } },
     [NETBSD_SYS_wait4]          = { 3, { ARG_INT, ARG_PTR, ARG_INT } },
+    [NETBSD_SYS___wait450]      = { 4, { ARG_INT, ARG_PTR, ARG_INT, ARG_PTR } },
+    [NETBSD_SYS_setsid]         = { 0, { 0 } },
+    [NETBSD_SYS_readv]          = { 3, { ARG_INT, ARG_PTR, ARG_INT } },
+    [NETBSD_SYS_writev]         = { 3, { ARG_INT, ARG_PTR, ARG_INT } },
+    [NETBSD_SYS___socket30]     = { 3, { ARG_INT, ARG_INT, ARG_INT } },
+    [NETBSD_SYS___gettimeofday50] = { 2, { ARG_PTR, ARG_PTR } },
+    [NETBSD_SYS___nanosleep50]  = { 2, { ARG_PTR, ARG_PTR } },
+    [NETBSD_SYS___sigprocmask14] = { 3, { ARG_INT, ARG_PTR, ARG_PTR } },
+    [NETBSD_SYS_issetugid]      = { 0, { 0 } },
+    [NETBSD_SYS__lwp_self]      = { 0, { 0 } },
+    [NETBSD_SYS___clock_gettime50] = { 2, { ARG_INT, ARG_PTR } },
     [NETBSD_SYS_link]           = { 2, { ARG_STR, ARG_STR } },
     [NETBSD_SYS_unlink]         = { 1, { ARG_STR } },
     [NETBSD_SYS_chdir]          = { 1, { ARG_STR } },

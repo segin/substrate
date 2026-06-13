@@ -8,7 +8,33 @@
 #define NETBSD_SYS_write          4
 #define NETBSD_SYS_open           5
 #define NETBSD_SYS_close          6
-#define NETBSD_SYS_wait4          7
+#define NETBSD_SYS_wait4          7     /* compat_50_wait4 (struct rusage50) */
+/* Modern wait4 carrying the time_t-64 `struct rusage`.  NetBSD 10 libc
+ * and init issue this, not the compat_50 wait4 at 7 — without it init
+ * spins reaping children against an ENOSYS return. */
+#define NETBSD_SYS___wait450      449
+
+/* setsid(2): init creates its session after fork. */
+#define NETBSD_SYS_setsid         147
+/* readv/writev: libc stdio + init's console output go through these;
+ * struct iovec layout matches substrate's native sys_readv/sys_writev. */
+#define NETBSD_SYS_readv          120
+#define NETBSD_SYS_writev         121
+/* Versioned syscalls NetBSD 10 libc actually issues.  The unversioned
+ * aliases (socket=97, gettimeofday=116, nanosleep=196) are the historical
+ * numbers; modern libc uses these.  The "50" variants carry 64-bit time_t
+ * timeval/timespec, which already match substrate's native layout, so they
+ * map straight onto the native handlers. */
+#define NETBSD_SYS___socket30        394
+#define NETBSD_SYS___gettimeofday50  418
+#define NETBSD_SYS___nanosleep50     430
+/* Modern variants NetBSD 10 libc/init issue: __sigprocmask14 (vs the
+ * unversioned sigprocmask=48), issetugid, _lwp_self (LWP id of the
+ * caller), and __clock_gettime50 (64-bit time_t timespec). */
+#define NETBSD_SYS___sigprocmask14   293
+#define NETBSD_SYS_issetugid         305
+#define NETBSD_SYS__lwp_self         311
+#define NETBSD_SYS___clock_gettime50 427
 #define NETBSD_SYS_creat          8
 #define NETBSD_SYS_link           9
 #define NETBSD_SYS_unlink         10
