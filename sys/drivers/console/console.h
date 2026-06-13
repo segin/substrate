@@ -40,6 +40,7 @@ void console_push_char(char c);
 
 // For /dev/tty proxy
 fs_node_t *console_get_node(void);
+int console_revoke(void);
 
 // Helper for formatted printing
 void kprint(const char *str);

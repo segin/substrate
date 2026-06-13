@@ -1438,6 +1438,28 @@ void tty_hangup(struct tty *tty) {
     TTY_UNLOCK(tty);
 }
 
+/*
+ * tty_revoke - drop a terminal's controlling-terminal ownership.
+ *
+ * revoke(2) on a tty clears its session/foreground-pgrp association so a
+ * fresh session leader can claim it with TIOCSCTTY.  Unlike tty_hangup()
+ * it does NOT signal the current owner: NetBSD init revoke()s /dev/console
+ * before spawning each single-user shell / getty, and the current owner is
+ * init (pid 1) itself — a SIGHUP there would kill the system.  Without this
+ * the console stays pinned to init's boot session and the setsid'd child is
+ * denied the controlling terminal (TIOCSCTTY -> EPERM).
+ */
+int tty_revoke(struct tty *tty) {
+    if (!tty || (unsigned long)tty < 0xC0000000UL || !tty_valid(tty)) {
+        return -ENOTTY;
+    }
+    TTY_LOCK(tty);
+    tty->session = 0;
+    tty->pgrp = 0;
+    TTY_UNLOCK(tty);
+    return 0;
+}
+
 int tty_poll(struct tty *tty, void *waiter) {
     if (!tty_valid(tty)) return POLLNVAL;
     

@@ -104,6 +104,7 @@ int tty_read(struct tty *tty, char *buf, int len);
 int tty_write(struct tty *tty, const char *buf, int len);
 int tty_ioctl(struct tty *tty, uint32_t cmd, unsigned long arg);
 int tty_ioctl_kern(struct tty *tty, uint32_t cmd, uintptr_t arg);
+int tty_revoke(struct tty *tty);
 int tty_poll(struct tty *tty, void *waiter);
 int tty_check_change(struct tty *tty);
 

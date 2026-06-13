@@ -31,6 +31,8 @@ extern int sys_wait4(pid_t, int*, int, struct rusage*);
 extern int sys_getpid(void);
 extern int sys_getppid(void);
 extern int sys_setsid(void);
+extern int sys_setlogin(const char *);
+extern int sys_revoke(const char *);
 extern int sys_getpgrp(void);
 extern int sys_setpgid(int, int);
 extern int sys_getpgid(int);

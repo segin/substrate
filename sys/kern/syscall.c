@@ -28,6 +28,7 @@
 #include <kern/file.h>
 #include <vfs/vfs.h>
 #include <drivers/console/uart/uart.h>
+#include <drivers/console/console.h>
 #include <include/sys/sysinfo.h>
 #include <sys/kern_syscalls.h>
 #include <sys/utsname.h>
@@ -3040,6 +3041,24 @@ int sys_chdir(const char *path) {
     char kpath[256];
     if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -14;
     return kern_chdir(kpath);
+}
+
+/*
+ * revoke(2) - revoke access to a terminal.  Substrate implements the part
+ * the BSD personalities need: clearing a tty's controlling-terminal
+ * ownership so a new session leader can claim it via TIOCSCTTY.  NetBSD
+ * init revoke()s /dev/console before each single-user shell / getty.
+ */
+int sys_revoke(const char *path) {
+    char kpath[256];
+    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -EFAULT;
+    fs_node_t *root = current_process->root_node ? current_process->root_node : fs_root;
+    fs_node_t *node = vfs_lookup(root, kpath);
+    if (!node) return -ENOENT;
+    /* /dev/console is a façade vnode with no struct tty in ->ptr; it
+     * resolves the live console TTY on demand. */
+    if (node == console_get_node()) return console_revoke();
+    return tty_revoke((struct tty *)node->ptr);
 }
 
 int kern_chdir(const char *path) {

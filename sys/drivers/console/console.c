@@ -243,6 +243,17 @@ fs_node_t *console_get_node(void) {
     return &console_node;
 }
 
+/*
+ * revoke(2) support for the /dev/console façade.  The vnode carries no
+ * struct tty in node->ptr (it resolves the live console TTY on demand),
+ * so a generic node->ptr revoke can't reach it — route to the resolved
+ * TTY here.  Used by sys_revoke() so NetBSD init can release the console
+ * before claiming it for a single-user shell / getty.
+ */
+int console_revoke(void) {
+    return tty_revoke(console_resolve_tty());
+}
+
 void console_register_devfs(void) {
     extern void devfs_register_device(fs_node_t *node);
     devfs_register_device(&console_node);
