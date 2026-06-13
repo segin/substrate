@@ -1026,28 +1026,79 @@ void vm_map_destroy(vm_map_t *map) {
 }
 
 // Change protection on a range of addresses
+/*
+ * Ensure an entry boundary exists at addr by splitting the entry that
+ * straddles it: the original keeps [start, addr); a fresh entry covers
+ * [addr, end).  Mirrors the split path in vm_map_remove.  Caller holds the
+ * map lock.  No-op when addr already falls on a boundary (or in a hole).
+ */
+static void vm_map_clip(vm_map_t *map, uintptr_t addr) {
+    for (vm_map_entry_t *cur = map->header->next; cur != map->header; cur = cur->next) {
+        if (cur->start >= addr)
+            break;
+        if (addr < cur->end) {           /* cur->start < addr < cur->end */
+            vm_map_entry_t *ne = alloc_entry();
+            if (!ne)
+                return;
+            ne->start = addr;
+            ne->end = cur->end;
+            ne->object = cur->object;
+            ne->offset = cur->offset + (addr - cur->start);
+            if (ne->object)
+                vm_object_reference(ne->object);
+            ne->protection = cur->protection;
+            ne->max_protection = cur->max_protection;
+            ne->inheritance = cur->inheritance;
+            ne->flags = cur->flags;
+            ne->wire_count = cur->wire_count;
+
+            ne->prev = cur;
+            ne->next = cur->next;
+            cur->next->prev = ne;
+            cur->next = ne;
+            vm_map_tree_insert(map, ne);
+
+            cur->end = addr;
+            map->nentries++;
+            return;
+        }
+    }
+}
+
 int vm_map_protect(vm_map_t *map, uintptr_t start, uintptr_t end, uint8_t prot) {
     vm_map_entry_t *header = map->header;
     vm_map_lock(map);
-    
+
+    /* Validate the whole range against max_protection first so the change
+     * is applied all-or-nothing — a later entry exceeding max must not
+     * leave earlier entries already re-protected. */
     for (vm_map_entry_t *cur = header->next; cur != header; cur = cur->next) {
         if (cur->start >= end)
             break;
         if (cur->end <= start)
             continue;
-            
-        // Check if requested protection exceeds max
         if ((prot & ~cur->max_protection) != 0) {
             vm_map_unlock(map);
             return -1;
         }
-            
+    }
+
+    /* Clip entries to the requested range so the protection change applies
+     * only to [start, end).  Without this, an mprotect() of a sub-range of
+     * a mapping widened to the whole entry — e.g. a dynamic linker making
+     * one RELRO page read-only/PROT_NONE clobbered the protection of the
+     * entire text segment, faulting every later access to it. */
+    vm_map_clip(map, start);
+    vm_map_clip(map, end);
+
+    for (vm_map_entry_t *cur = header->next; cur != header; cur = cur->next) {
+        if (cur->start >= end)
+            break;
+        if (cur->end <= start)
+            continue;
+
         cur->protection = prot;
-        
-        // Update pmap for overlapping range
-        uintptr_t rs = (cur->start > start) ? cur->start : start;
-        uintptr_t re = (cur->end < end) ? cur->end : end;
-        pmap_protect(map->pmap, rs, re, prot);
+        pmap_protect(map->pmap, cur->start, cur->end, prot);
     }
     for (vm_map_entry_t *cur = header->next; cur != header; cur = cur->next) {
         if (cur->start >= end)
