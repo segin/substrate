@@ -163,6 +163,7 @@ int sys_nice(int inc) {
  * PROT_READ=0x1, PROT_WRITE=0x2, PROT_EXEC=0x4 match VM_PROT_* values.
  */
 extern int pmap_protect(struct pmap *, uintptr_t, uintptr_t, uint32_t);
+extern int vm_map_protect(struct vm_map *, uintptr_t, uintptr_t, uint8_t);
 
 int sys_mprotect(void *addr, size_t len, int prot) {
     uintptr_t start = (uintptr_t)addr;
@@ -188,12 +189,21 @@ int sys_mprotect(void *addr, size_t len, int prot) {
     /* VM_PROT_* values match PROT_* values by design */
     uint32_t vm_prot = (uint32_t)prot & 0x7;
 
-    int ret = pmap_protect(current_process->pmap, start, end, vm_prot);
-    if (ret == -11) {
-        /* -EAGAIN from COW: need to copy page first, then retry.
-         * For now, return success - the fault handler will do COW on access. */
-        return 0;
-    }
+    if (!current_process->vm_map)
+        return -ENOMEM;
+
+    /*
+     * Update the vm_map entries' protection (not just existing PTEs):
+     * pmap_protect alone only reprotects pages already faulted in, leaving
+     * the vm_map_entry's protection stale.  A subsequent write to a
+     * not-yet-faulted page in a region just mprotect()'d to RW would then be
+     * denied by vm_fault (which checks entry->protection) -> SIGSEGV.  This
+     * is exactly how glibc builds a per-thread malloc arena: mmap(PROT_NONE)
+     * then mprotect(...PROT_READ|PROT_WRITE).  vm_map_protect updates the
+     * entry protection (clamped to max_protection) and reprotects mapped
+     * pages, so the demand fault then populates the page RW.
+     */
+    int ret = vm_map_protect(current_process->vm_map, start, end, (uint8_t)vm_prot);
     return ret < 0 ? -ENOMEM : 0;
 }
 

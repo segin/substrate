@@ -295,7 +295,16 @@ void *sys_mmap(void *addr, size_t length, int prot, int flags, int fd, uint64_t 
     // Determine inheritance based on sharing
     uint8_t inheritance = (flags & MAP_SHARED) ? VM_INHERIT_SHARE : VM_INHERIT_COPY;
 
-    if (vm_map_insert(map, obj, 0, v_addr, v_addr + aligned_length, vm_prot, vm_prot, inheritance) != 0) {
+    /*
+     * max_protection must allow a later mprotect() to raise access — POSIX/
+     * Linux let a mapping be mprotect()'d to any of R/W/X regardless of the
+     * initial prot (e.g. mmap(PROT_NONE) then mprotect(RW), as glibc does for
+     * per-thread malloc arenas).  Pinning max_protection to the initial prot
+     * (the old behavior) made that mprotect a silent no-op at the vm_map
+     * level, so the first write faulted.  Allow R/W/X as the ceiling.
+     */
+    uint8_t max_prot = VM_PROT_READ | VM_PROT_WRITE | VM_PROT_EXEC;
+    if (vm_map_insert(map, obj, 0, v_addr, v_addr + aligned_length, vm_prot, max_prot, inheritance) != 0) {
         vm_object_deallocate(obj);
         return (void *)-1;
     }
