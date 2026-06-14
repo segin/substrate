@@ -16,6 +16,8 @@
 #include "perso_ipc_sem.h"
 #include <sys/resource.h>
 #include <sys/time.h>
+#include <sys/proc.h>
+#include <sys/fcntl.h>
 #include <sys/times.h>
 #include <sys/errno.h>
 #include <sys/futex.h>
@@ -118,6 +120,78 @@ int netbsd_sys_gettimeofday(struct netbsd_timeval *tv, struct timezone *tz) {
     return 0;
 }
 
+/*
+ * NetBSD lseek(2) (syscall 199): off_t lseek(int fd, int pad, off_t offset,
+ * int whence).  The i386 ABI inserts a `pad` int before the 64-bit offset
+ * so off_t lands on an 8-byte-aligned stack slot.  Drop the pad and forward
+ * the 64-bit offset (low,high) to the native handler, which returns the
+ * resulting offset in edx:eax.
+ */
+int64_t netbsd_sys_lseek(int fd, int pad, uint32_t off_lo, uint32_t off_hi, int whence) {
+    (void)pad;
+    return sys_lseek(fd, off_lo, off_hi, whence);
+}
+
+/*
+ * NetBSD pipe(2) (syscall 42) returns the two descriptors in registers —
+ * fd[0] in eax, fd[1] in edx — and libc's pipe() stores them from there.
+ * The native sys_pipe instead copies them into a user buffer and returns 0,
+ * so a NetBSD caller reads eax/edx (0 and stale) and ends up juggling a
+ * garbage fd ("Unable to make fd 1: Bad file descriptor", then exit).
+ * Return the pair as a 64-bit value; the BSD syscall path puts the high
+ * half in edx.
+ */
+int64_t netbsd_sys_pipe(void) {
+    int fds[2];
+    int ret = kern_pipe(fds);
+    if (ret != 0) return ret;
+    return ((int64_t)(uint32_t)fds[1] << 32) | (uint32_t)fds[0];
+}
+
+/* NetBSD fcntl(2) command numbers (sys/fcntl.h) above F_SETFL. */
+#define NB_F_GETLK          7
+#define NB_F_SETLK          8
+#define NB_F_SETLKW         9
+#define NB_F_CLOSEM         10
+#define NB_F_MAXFD          11
+#define NB_F_DUPFD_CLOEXEC  12
+
+/*
+ * NetBSD fcntl(2): F_DUPFD..F_SETFL (0..4) share substrate's numbering, but
+ * the record-lock commands renumber (NetBSD 7/8/9 vs substrate 5/6/7) and
+ * NetBSD adds F_CLOSEM/F_MAXFD/F_DUPFD_CLOEXEC.  /bin/sh F_DUPFD_CLOEXEC's
+ * its script fd above 10 and exits(2) when that fails, so leaving fcntl
+ * unwired dropped init straight to single-user.  NetBSD's F_CLOSEM=10
+ * collides with FreeBSD's F_DUP2FD=10, so freebsd_sys_fcntl can't be reused.
+ */
+int netbsd_sys_fcntl(int fd, int cmd, int arg) {
+    switch (cmd) {
+    case NB_F_GETLK:  return sys_fcntl(fd, F_GETLK, arg);
+    case NB_F_SETLK:  return sys_fcntl(fd, F_SETLK, arg);
+    case NB_F_SETLKW: return sys_fcntl(fd, F_SETLKW, arg);
+    case NB_F_DUPFD_CLOEXEC: {
+        int nfd = sys_fcntl(fd, F_DUPFD, arg);
+        if (nfd >= 0)
+            sys_fcntl(nfd, F_SETFD, FD_CLOEXEC);
+        return nfd;
+    }
+    case NB_F_MAXFD: {
+        int max = -1;
+        for (int i = 0; i < MAX_FD; i++)
+            if (current_process->fds[i]) max = i;
+        return max;
+    }
+    case NB_F_CLOSEM: {
+        for (int i = (arg < 0 ? 0 : arg); i < MAX_FD; i++)
+            if (current_process->fds[i]) sys_close(i);
+        return 0;
+    }
+    default:
+        /* F_DUPFD/GETFD/SETFD/GETFL/SETFL (0..4) share numbering. */
+        return sys_fcntl(fd, cmd, arg);
+    }
+}
+
 #ifndef HOST_TEST
 
 /* NetBSD syscall table - based on i386 column */
@@ -144,6 +218,8 @@ static void *netbsd_syscalls[MAX_SYSCALLS] = {
     [NETBSD_SYS_issetugid]      = (void *)&sys_issetugid,
     [NETBSD_SYS__lwp_self]      = (void *)&sys_thr_self,
     [NETBSD_SYS___clock_gettime50] = &sys_clock_gettime,
+    [NETBSD_SYS_lseek199]       = (void *)&netbsd_sys_lseek,
+    [NETBSD_SYS_getrlimit]      = (void *)&sys_getrlimit,
     [NETBSD_SYS_creat]          = &sys_creat,
     [NETBSD_SYS_link]           = &sys_link,
     [NETBSD_SYS_unlink]         = &sys_unlink,
@@ -181,7 +257,7 @@ static void *netbsd_syscalls[MAX_SYSCALLS] = {
     [NETBSD_SYS_getppid]        = &sys_getpid,     /* getppid - maps to getpid for now */
     [NETBSD_SYS_compat_lstat]   = (void *)&netbsd_sys_compat_lstat,      /* compat_lstat */
     [NETBSD_SYS_dup]            = &sys_dup,
-    [NETBSD_SYS_pipe]           = &sys_pipe,
+    [NETBSD_SYS_pipe]           = (void *)&netbsd_sys_pipe,
     [NETBSD_SYS_getegid]        = &sys_getegid,
     [NETBSD_SYS_profil]         = NULL,            /* profil */
     [NETBSD_SYS_ktrace]         = NULL,            /* ktrace */
@@ -204,7 +280,7 @@ static void *netbsd_syscalls[MAX_SYSCALLS] = {
     [NETBSD_SYS_symlink]        = NULL,            /* symlink - not implemented */
     [NETBSD_SYS_readlink]       = &sys_readlink,
     [NETBSD_SYS_execve]         = &sys_execve,
-    [NETBSD_SYS_umask]          = NULL,            /* umask - not implemented */
+    [NETBSD_SYS_umask]          = (void *)&sys_umask,
     [NETBSD_SYS_chroot]         = &sys_chroot,
     [NETBSD_SYS_compat_fstat]   = (void *)&netbsd_sys_compat_fstat,      /* compat_fstat */
     [NETBSD_SYS_compat_getkern] = NULL,            /* compat_getkern */
@@ -236,7 +312,7 @@ static void *netbsd_syscalls[MAX_SYSCALLS] = {
     [NETBSD_SYS_getdtablesize]  = NULL,            /* getdtablesize */
     [NETBSD_SYS_dup2]           = &sys_dup2,
     [NETBSD_SYS_getdopt]        = NULL,            /* getdopt */
-    [NETBSD_SYS_fcntl]          = NULL,            /* fcntl */
+    [NETBSD_SYS_fcntl]          = (void *)&netbsd_sys_fcntl,
     [NETBSD_SYS_select]         = NULL,            /* select */
     [NETBSD_SYS_setdopt]        = NULL,            /* setdopt */
     [NETBSD_SYS_fsync]          = NULL,            /* fsync */
@@ -324,6 +400,8 @@ static const char *netbsd_names[MAX_SYSCALLS] = {
     [NETBSD_SYS_issetugid]      = "issetugid",
     [NETBSD_SYS__lwp_self]      = "_lwp_self",
     [NETBSD_SYS___clock_gettime50] = "__clock_gettime50",
+    [NETBSD_SYS_lseek199]       = "lseek",
+    [NETBSD_SYS_getrlimit]      = "getrlimit",
     [NETBSD_SYS_creat]          = "creat",
     [NETBSD_SYS_link]           = "link",
     [NETBSD_SYS_unlink]         = "unlink",
@@ -485,6 +563,8 @@ static struct syscall_fmt netbsd_fmts[MAX_SYSCALLS] = {
     [NETBSD_SYS_issetugid]      = { 0, { 0 } },
     [NETBSD_SYS__lwp_self]      = { 0, { 0 } },
     [NETBSD_SYS___clock_gettime50] = { 2, { ARG_INT, ARG_PTR } },
+    [NETBSD_SYS_lseek199]       = { 5, { ARG_INT, ARG_INT, ARG_HEX, ARG_HEX, ARG_INT } },
+    [NETBSD_SYS_getrlimit]      = { 2, { ARG_INT, ARG_PTR } },
     [NETBSD_SYS_link]           = { 2, { ARG_STR, ARG_STR } },
     [NETBSD_SYS_unlink]         = { 1, { ARG_STR } },
     [NETBSD_SYS_chdir]          = { 1, { ARG_STR } },

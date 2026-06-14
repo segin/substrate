@@ -35,6 +35,11 @@
 #define NETBSD_SYS_issetugid         305
 #define NETBSD_SYS__lwp_self         311
 #define NETBSD_SYS___clock_gettime50 427
+/* Modern lseek with the i386 off_t-alignment `pad` arg (the unversioned
+ * lseek=19 is the compat_43 32-bit-offset variant).  getrlimit for shell
+ * resource queries. */
+#define NETBSD_SYS_lseek199          199
+#define NETBSD_SYS_getrlimit         194
 #define NETBSD_SYS_creat          8
 #define NETBSD_SYS_link           9
 #define NETBSD_SYS_unlink         10
