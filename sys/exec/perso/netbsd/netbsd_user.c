@@ -329,6 +329,14 @@ extern int random_get_bytes_flags(void *, size_t, unsigned int);
 #define KP2_NLWPS  616   /* uint64 */
 #define NBSD_LSSLEEP  3  /* LWP sleeping */
 
+#define NBSD_KERN_LWP    64   /* {.., KERN_LWP, pid, esize, elemcount} */
+#define NBSD_L_SINTR  0x80    /* LWP sleep is interruptible (-> ps 'S') */
+/* struct kinfo_lwp field offsets (NetBSD 10 i386 ABI; sizeof == 128). */
+#define KL_LID     32   /* int32  LWP id */
+#define KL_FLAG    36   /* int32  L_* flags */
+#define KL_PRIO    56   /* uint8  priority */
+#define KL_STAT    58   /* int8   LS* status */
+
 #define NBSD_SYSCTL_VERSION   0x01000000u
 #define NBSD_CTLTYPE_NODE      1
 #define NBSD_CTLTYPE_INT       2
@@ -533,6 +541,40 @@ static int nb_kern_proc2(const int *kname, void *oldp, unsigned int *oldlenp) {
     return 0;
 }
 
+/* KERN_LWP (kvm_getlwps): {CTL_KERN, KERN_LWP, pid, esize, elemcount}.
+ * Substrate exposes one LWP (the main thread) per process; ps needs at
+ * least that to render a row.  Same size-probe protocol as KERN_PROC2. */
+static int nb_kern_lwp(const int *kname, void *oldp, unsigned int *oldlenp) {
+    int pid = kname[2];
+    unsigned int esize = (unsigned int)kname[3];
+    if (esize < 64 || esize > 512) return -EINVAL;
+
+    sys_procinfo_t pi;
+    int found = (kern_proc_info(pid, &pi) == 0);
+
+    unsigned int want = 0;
+    if (oldlenp && copyin(oldlenp, &want, sizeof(want)) != 0) return -EFAULT;
+
+    unsigned int copied = 0;
+    if (found && oldp != NULL && esize <= want) {
+        uint8_t buf[512];
+        memset(buf, 0, esize);
+        *(int32_t *)(buf + KL_LID)  = 1;
+        *(int32_t *)(buf + KL_FLAG) = NBSD_L_SINTR;
+        buf[KL_PRIO] = 0;
+        buf[KL_STAT] = (pi.state >= 1 && pi.state <= 5)
+                           ? (uint8_t)pi.state : NBSD_LSSLEEP;
+        if (copyout(buf, oldp, esize) != 0) return -EFAULT;
+        copied = esize;
+    }
+    if (oldlenp) {
+        unsigned int total = (oldp == NULL) ? (found ? esize : 0) : copied;
+        if (copyout(&total, oldlenp, sizeof(total)) != 0) return -EFAULT;
+    }
+    if (found && oldp != NULL && esize > want) return -ENOMEM;
+    return 0;
+}
+
 int netbsd_sys_sysctl(int *name, unsigned int namelen,
                       void *oldp, unsigned int *oldlenp,
                       void *newp, unsigned int newlen) {
@@ -575,6 +617,12 @@ int netbsd_sys_sysctl(int *name, unsigned int namelen,
     if (kname[0] == NBSD_CTL_KERN && kname[1] == NBSD_KERN_PROC2) {
         if (namelen < 6) return -EINVAL;
         return nb_kern_proc2(kname, oldp, oldlenp);
+    }
+
+    /* KERN_LWP (kvm_getlwps) -- per-process LWP list (one per process). */
+    if (kname[0] == NBSD_CTL_KERN && kname[1] == NBSD_KERN_LWP) {
+        if (namelen < 5) return -EINVAL;
+        return nb_kern_lwp(kname, oldp, oldlenp);
     }
 
     /* KERN_PROC_ARGS (kvm_getargv) -- a process's argv / argc.  Without it
