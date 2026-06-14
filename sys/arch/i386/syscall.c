@@ -522,7 +522,26 @@ void syscall_handler(registers_t *regs) {
     } else if (p->id == PERS_ELKS) {
         regs->edx = (uint16_t)regs->edx;
     } else {
-        regs->edx = (uint32_t)((ret >> 32) & 0xFFFFFFFF);
+        /*
+         * BSD ABI: edx carries the second return value (retval[1]), which the
+         * kernel initialises to 0 — only a handful of syscalls set it (pipe ->
+         * fd1, lseek -> the off_t high word).  Most handlers here are declared
+         * `int` and called through an int64 pointer, so `ret >> 32` is whatever
+         * garbage they happened to leave in edx, not 0.  That matters because
+         * libc fork()/vfork() distinguish parent from child by testing edx
+         * (parent edx==0 -> return child pid; non-zero -> return 0 as the
+         * child): a stray non-zero edx makes the PARENT believe it is the child
+         * and run the child code path.  Default edx to 0 and only propagate the
+         * high word for the syscalls that genuinely return one.
+         */
+        int edx_is_retval1 =
+            (syscall_num == 42) ||                                  /* pipe (both BSD) */
+            (p->id == PERS_NETBSD  && syscall_num == 199) ||        /* NetBSD lseek */
+            (p->id == PERS_FREEBSD && syscall_num == 478) ||        /* FreeBSD lseek */
+            (p->id == PERS_OPENBSD && syscall_num == 199);          /* OpenBSD lseek */
+        regs->edx = edx_is_retval1
+            ? (uint32_t)((ret >> 32) & 0xFFFFFFFF)
+            : 0;
     }
 
 syscall_done:
