@@ -3264,6 +3264,8 @@ int kern_getcwd(char *buf, size_t size) {
 
 // sys_proc_info - Get detailed info for a single process
 int sys_proc_info(pid_t pid, sys_procinfo_t *info) {
+    /* Syscall convention: pid 0 means "the calling process". */
+    if (pid == 0 && current_process) pid = current_process->pid;
     sys_procinfo_t kinfo;
     int ret = kern_proc_info(pid, &kinfo);
     if (ret == 0) {
@@ -3272,16 +3274,14 @@ int sys_proc_info(pid_t pid, sys_procinfo_t *info) {
     return ret;
 }
 
+/* Looks up the ACTUAL pid (pid 0 == the swapper/idle process, not "self") so
+ * that process enumeration -- e.g. ps via KERN_PROC2 -- gets the right entry.
+ * The "0 == caller" convenience lives in the syscall wrappers. */
 int kern_proc_info(pid_t pid, sys_procinfo_t *info) {
     if (!info) return -EFAULT;
-    
-    process_t *target = NULL;
-    if (pid == 0) {
-        target = current_process;
-    } else {
-        target = proc_find(pid);
-    }
-    
+
+    process_t *target = proc_find(pid);
+
     if (!target) return -ESRCH;
 
     memset(info, 0, sizeof(sys_procinfo_t));
@@ -3684,7 +3684,7 @@ int sys_proc_cmdline(pid_t pid, char **argv, size_t *argc) {
  * number of bytes written, or a negative errno.  Kernel-internal helper for
  * personality sysctls (e.g. NetBSD KERN_PROC_ARGS / kvm_getargv). */
 int kern_proc_argv(pid_t pid, char *buf, size_t buflen, int *nargv) {
-    process_t *target = (pid == 0) ? current_process : proc_find(pid);
+    process_t *target = proc_find(pid);   /* real pid (0 == swapper) */
     if (nargv) *nargv = 0;
     if (!target) return -ESRCH;
     size_t argc = 0;
