@@ -3302,6 +3302,7 @@ int kern_proc_info(pid_t pid, sys_procinfo_t *info) {
     info->state = target->state;
     info->bitness = target->bitness;
     info->perso_id = (int16_t)target->perso_id;
+    info->is_kernel = target->is_kernel_task;
     /* Encode the controlling tty as (major << 8) | minor so userland
      * can render /dev/tty<N> vs /dev/pts/<N> without a second
      * syscall.  See <sys/sysinfo.h> for the SYS_TTY_* helpers.

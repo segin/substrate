@@ -324,13 +324,15 @@ extern int random_get_bytes_flags(void *, size_t, unsigned int);
 #define KP2_GID    144   /* uint32  rgid */
 #define KP2_TDEV   220   /* uint32  controlling tty dev (NODEV = -1) */
 #define KP2_STAT   360   /* int8    LWP-derived status (LS*) */
-#define KP2_NICE   367   /* uint8 */
+#define KP2_NICE   363   /* uint8 (after p_stat/p_priority/p_usrpri) */
 #define KP2_COMM   368   /* char[24] */
 #define KP2_NLWPS  616   /* uint64 */
 #define NBSD_LSSLEEP  3  /* LWP sleeping */
 
 #define NBSD_KERN_LWP    64   /* {.., KERN_LWP, pid, esize, elemcount} */
 #define NBSD_L_SINTR  0x80    /* LWP sleep is interruptible (-> ps 'S') */
+#define NBSD_P_SYSTEM 0x200   /* P_SYSTEM == L_SYSTEM: kernel thread */
+#define NBSD_NZERO    20      /* "normal" nice; below this ps prints '<' */
 /* struct kinfo_lwp field offsets (NetBSD 10 i386 ABI; sizeof == 128). */
 #define KL_LID     32   /* int32  LWP id */
 #define KL_FLAG    36   /* int32  L_* flags */
@@ -517,6 +519,8 @@ static int nb_kern_proc2(const int *kname, void *oldp, unsigned int *oldlenp) {
         if (oldp != NULL && copied + elemsize <= want) {
             uint8_t buf[1024];
             memset(buf, 0, elemsize);
+            *(int32_t *)(buf + KP2_FLAG)  = NBSD_L_SINTR |
+                                            (pi.is_kernel ? NBSD_P_SYSTEM : 0);
             *(int32_t *)(buf + KP2_PID)   = pi.pid;
             *(int32_t *)(buf + KP2_PPID)  = pi.ppid;
             *(int32_t *)(buf + KP2_PGID)  = pi.pgid;
@@ -525,7 +529,7 @@ static int nb_kern_proc2(const int *kname, void *oldp, unsigned int *oldlenp) {
             *(uint32_t *)(buf + KP2_TDEV) = 0xFFFFFFFFu;     /* NODEV */
             buf[KP2_STAT] = (pi.state >= 1 && pi.state <= 5)
                                 ? (uint8_t)pi.state : NBSD_LSSLEEP;
-            buf[KP2_NICE] = (uint8_t)pi.nice;
+            buf[KP2_NICE] = (uint8_t)(pi.nice + NBSD_NZERO);
             *(uint64_t *)(buf + KP2_NLWPS) = 1;
             strncpy((char *)(buf + KP2_COMM), pi.name, 24 - 1);
             if (copyout(buf, (char *)oldp + copied, elemsize) != 0)
@@ -560,7 +564,8 @@ static int nb_kern_lwp(const int *kname, void *oldp, unsigned int *oldlenp) {
         uint8_t buf[512];
         memset(buf, 0, esize);
         *(int32_t *)(buf + KL_LID)  = 1;
-        *(int32_t *)(buf + KL_FLAG) = NBSD_L_SINTR;
+        *(int32_t *)(buf + KL_FLAG) = NBSD_L_SINTR |
+                                      (pi.is_kernel ? NBSD_P_SYSTEM : 0);
         buf[KL_PRIO] = 0;
         buf[KL_STAT] = (pi.state >= 1 && pi.state <= 5)
                            ? (uint8_t)pi.state : NBSD_LSSLEEP;
@@ -633,6 +638,12 @@ int netbsd_sys_sysctl(int *name, unsigned int namelen,
         int nargv = 0;
         int n = kern_proc_argv(kname[2], kbuf, sizeof(kbuf), &nargv);
         if (n < 0) return n;
+        /* Kernel threads have no userspace argv; fail the lookup so
+         * kvm_getargv() returns NULL and ps renders them as "[name]"
+         * (system process) instead of a parenthesised command. */
+        sys_procinfo_t pi;
+        if (kern_proc_info(kname[2], &pi) == 0 && pi.is_kernel)
+            return -EINVAL;
         if (kname[3] == NBSD_KERN_PROC_NARGV)
             return nbsd_sysctl_int(nargv, oldp, oldlenp);
         if (kname[3] == NBSD_KERN_PROC_ENV)

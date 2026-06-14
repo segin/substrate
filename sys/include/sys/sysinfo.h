@@ -70,6 +70,8 @@ typedef struct sys_procinfo {
     uint32_t vsize;      // Virtual memory size (bytes)
     uint32_t rss;        // Resident Set Size (pages)
 
+    uint8_t is_kernel;   // 1 if a kernel thread (no userspace), 0 otherwise
+
 } sys_procinfo_t;
 
 typedef struct sys_fd {
