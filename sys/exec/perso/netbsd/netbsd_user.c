@@ -288,25 +288,118 @@ int netbsd_sys_lwp_setprivate(uintptr_t tcb) {
     return i386_set_gsbase((uint32_t)tcb);
 }
 
-/* NetBSD MIB constants — sys/sys/sysctl.h */
-#define NBSD_CTL_KERN          1
-#define NBSD_CTL_HW            6
-/* CTL_KERN children */
-#define NBSD_KERN_OSTYPE       1   /* string */
-#define NBSD_KERN_OSRELEASE    2   /* string */
-#define NBSD_KERN_OSREV        3   /* int */
-#define NBSD_KERN_VERSION      4   /* string */
-#define NBSD_KERN_HOSTNAME    10   /* string */
-#define NBSD_KERN_ARND        81   /* opaque random bytes */
-/* CTL_HW children */
-#define NBSD_HW_MACHINE        1   /* string "i386" */
-#define NBSD_HW_MODEL          2   /* string */
-#define NBSD_HW_NCPU           3   /* int */
-#define NBSD_HW_PAGESIZE       7   /* int */
-#define NBSD_HW_MACHINE_ARCH  11   /* string "i386" */
-
+/* ===================================================================
+ * NetBSD sysctl(2) with CTL_QUERY auto-discovery.
+ *
+ * NetBSD libc resolves names (sysctlbyname / sysctlnametomib) at runtime
+ * by walking the MIB tree: it asks each node for its children via
+ * CTL_QUERY (the kernel returns an array of `struct sysctlnode`) and
+ * matches by name to learn each node's MIB number.  Without CTL_QUERY
+ * every by-name lookup fails -- "ps: sysctl kern.fscale: No such file or
+ * directory", etc.  We publish a small static tree (kern/vm/hw plus the
+ * leaves userland actually queries) and answer both the CTL_QUERY
+ * enumerations and ordinary by-number leaf reads.
+ * =================================================================== */
 extern int sys_cpu_count(void);
 extern int random_get_bytes_flags(void *, size_t, unsigned int);
+
+#define NBSD_CTL_KERN          1
+#define NBSD_CTL_VM            2
+#define NBSD_CTL_HW            6
+#define NBSD_CTL_QUERY        (-2)
+#define NBSD_KERN_ARND        81
+#define NBSD_KERN_PROC2       47
+
+#define NBSD_SYSCTL_VERSION   0x01000000u
+#define NBSD_CTLTYPE_NODE      1
+#define NBSD_CTLTYPE_INT       2
+#define NBSD_CTLTYPE_STRING    3
+#define NBSD_CTLTYPE_QUAD      4
+
+/* struct sysctlnode as NetBSD lays it out on i386: 96 bytes, with every
+ * embedded pointer/size_t padded to 8 (__sysc_pad).  A CTL_QUERY fills
+ * one per child; libc reads sysctl_flags (type), sysctl_num, sysctl_name
+ * and sysctl_ver. */
+struct nbsd_sysctlnode {
+    uint32_t sysctl_flags;
+    int32_t  sysctl_num;
+    char     sysctl_name[32];
+    uint32_t sysctl_ver;
+    uint32_t __rsvd;
+    uint8_t  sysctl_un[16];
+    uint8_t  sysctl_tail[32];
+};
+
+/* One node in our static MIB tree.  Leaves carry an immediate value (or a
+ * getter); interior nodes carry a child array. */
+struct nbnode {
+    int32_t      num;
+    const char  *name;
+    uint32_t     type;
+    int          ival;
+    const char  *sval;
+    int        (*ifn)(void);
+    const struct nbnode *kids;
+    int          nkids;
+    int        (*sfn)(char *buf, size_t len);  /* dynamic string getter */
+    uint64_t   (*qfn)(void);                    /* dynamic 64-bit getter */
+};
+
+extern uint32_t pmm_get_total_memory(void);
+
+static int nb_ncpu(void) { int n = sys_cpu_count(); return n < 1 ? 1 : n; }
+/* kern.hostname tracks the live hostname (sethostname(2)), not a constant. */
+static int nb_hostname(char *buf, size_t len) { return kern_hostname(buf, len); }
+/* hw.physmem64 -- total RAM in bytes (ps uses it for %MEM). */
+static uint64_t nb_physmem64(void) { return (uint64_t)pmm_get_total_memory(); }
+
+#define NB_INT(no,nm,v)  { (no), (nm), NBSD_CTLTYPE_INT,    (v), 0, 0, 0, 0, 0, 0 }
+#define NB_FN(no,nm,fn)  { (no), (nm), NBSD_CTLTYPE_INT,    0, 0, (fn), 0, 0, 0, 0 }
+#define NB_STR(no,nm,s)  { (no), (nm), NBSD_CTLTYPE_STRING, 0, (s), 0, 0, 0, 0, 0 }
+#define NB_SFN(no,nm,fn) { (no), (nm), NBSD_CTLTYPE_STRING, 0, 0, 0, 0, 0, (fn), 0 }
+#define NB_QUAD(no,nm,fn){ (no), (nm), NBSD_CTLTYPE_QUAD,   0, 0, 0, 0, 0, 0, (fn) }
+#define NB_NODE(no,nm,k) { (no), (nm), NBSD_CTLTYPE_NODE, 0, 0, 0, (k), \
+                           (int)(sizeof(k) / sizeof((k)[0])), 0, 0 }
+
+/* kern.* -- fixed numbers where NetBSD defines them; fscale(49)/ccpu(50)
+ * carry their KERN_* numbers, boothowto is dynamically numbered upstream
+ * so we assign our own (libc finds it by name via CTL_QUERY). */
+static const struct nbnode nb_kern[] = {
+    NB_STR(1,   "ostype",     "NetBSD"),
+    NB_STR(2,   "osrelease",  "10.1"),
+    NB_INT(3,   "osrevision", 1001000000),
+    NB_STR(4,   "version",    "Substrate (NetBSD 10.1 compat)"),
+    NB_INT(6,   "maxproc",    1000),
+    NB_SFN(10,  "hostname",   nb_hostname),
+    NB_INT(49,  "fscale",     2048),   /* FSCALE = 1 << FSHIFT(11) */
+    NB_INT(50,  "ccpu",       0),      /* %cpu decay; 0 is harmless to ps */
+    NB_INT(200, "boothowto",  0),      /* multiuser, no special flags */
+};
+static const struct nbnode nb_hw[] = {
+    NB_STR (1,  "machine",      "i386"),
+    NB_STR (2,  "model",        "Substrate i386"),
+    NB_FN  (3,  "ncpu",         nb_ncpu),
+    NB_QUAD(13, "physmem64",    nb_physmem64),  /* HW_PHYSMEM64: total RAM */
+    NB_INT (7,  "pagesize",     4096),
+    NB_STR (10, "machine_arch", "i386"),
+};
+static const struct nbnode nb_vm[] = {
+    NB_INT(9,   "maxslp", 20),      /* MAXSLP */
+    NB_INT(10,  "uspace", 8192),    /* USPACE = UPAGES * NBPG */
+};
+static const struct nbnode nb_top[] = {
+    NB_NODE(1, "kern", nb_kern),
+    NB_NODE(2, "vm",   nb_vm),
+    NB_NODE(6, "hw",   nb_hw),
+};
+#define NB_NTOP ((int)(sizeof(nb_top) / sizeof(nb_top[0])))
+
+static const struct nbnode *nb_find(const struct nbnode *t, int n, int num) {
+    for (int i = 0; i < n; i++)
+        if (t[i].num == num)
+            return &t[i];
+    return NULL;
+}
 
 static int nbsd_sysctl_string(const char *s, void *oldp, unsigned int *oldlenp) {
     size_t slen = strlen(s) + 1;
@@ -334,6 +427,43 @@ static int nbsd_sysctl_int(int val, void *oldp, unsigned int *oldlenp) {
     return 0;
 }
 
+static int nbsd_sysctl_quad(uint64_t val, void *oldp, unsigned int *oldlenp) {
+    if (oldlenp) {
+        unsigned int want = sizeof(uint64_t);
+        if (copyout(&want, oldlenp, sizeof(want)) != 0) return -EFAULT;
+    }
+    if (oldp && copyout(&val, oldp, sizeof(val)) != 0) return -EFAULT;
+    return 0;
+}
+
+/* CTL_QUERY: copy out the child nodes of a subtree as struct sysctlnode[].
+ * oldp==NULL is a size probe; a too-small buffer returns ENOMEM with the
+ * required size in *oldlenp (libc grows and retries). */
+static int nb_query(const struct nbnode *kids, int nkids,
+                    void *oldp, unsigned int *oldlenp) {
+    unsigned int need = (unsigned int)((size_t)nkids *
+                                       sizeof(struct nbsd_sysctlnode));
+    unsigned int want = 0;
+    if (oldlenp && copyin(oldlenp, &want, sizeof(want)) != 0) return -EFAULT;
+
+    if (oldp != NULL && want >= need) {
+        for (int i = 0; i < nkids; i++) {
+            struct nbsd_sysctlnode nd;
+            memset(&nd, 0, sizeof(nd));
+            nd.sysctl_flags = NBSD_SYSCTL_VERSION | kids[i].type;
+            nd.sysctl_num   = kids[i].num;
+            nd.sysctl_ver   = 1;
+            strncpy(nd.sysctl_name, kids[i].name, sizeof(nd.sysctl_name) - 1);
+            if (copyout(&nd, (char *)oldp + (size_t)i * sizeof(nd),
+                        sizeof(nd)) != 0)
+                return -EFAULT;
+        }
+    }
+    if (oldlenp && copyout(&need, oldlenp, sizeof(need)) != 0) return -EFAULT;
+    if (oldp != NULL && want < need) return -ENOMEM;
+    return 0;
+}
+
 int netbsd_sys_sysctl(int *name, unsigned int namelen,
                       void *oldp, unsigned int *oldlenp,
                       void *newp, unsigned int newlen) {
@@ -343,55 +473,63 @@ int netbsd_sys_sysctl(int *name, unsigned int namelen,
     int kname[8];
     if (copyin(name, kname, namelen * sizeof(int)) != 0) return -EFAULT;
 
-    if (kname[0] == NBSD_CTL_KERN && namelen >= 2) {
-        switch (kname[1]) {
-        case NBSD_KERN_OSTYPE:
-            return nbsd_sysctl_string("NetBSD", oldp, oldlenp);
-        case NBSD_KERN_OSRELEASE:
-            return nbsd_sysctl_string("10.1", oldp, oldlenp);
-        case NBSD_KERN_OSREV:
-            return nbsd_sysctl_int(1001000000, oldp, oldlenp);
-        case NBSD_KERN_VERSION:
-            return nbsd_sysctl_string("Substrate (NetBSD 10.1 compat)",
-                                      oldp, oldlenp);
-        case NBSD_KERN_HOSTNAME:
-            return nbsd_sysctl_string("substrate", oldp, oldlenp);
-        case NBSD_KERN_ARND: {
-            unsigned int want = 0;
-            if (oldlenp && copyin(oldlenp, &want, sizeof(want)) != 0)
-                return -EFAULT;
-            if (want == 0 || want > 4096) return -EINVAL;
-            uint8_t kbuf[256];
-            if (want > sizeof(kbuf)) want = sizeof(kbuf);
-            if (random_get_bytes_flags(kbuf, want, 0x4) != (int)want)
-                return -EIO;
-            if (oldp && copyout(kbuf, oldp, want) != 0) return -EFAULT;
-            if (oldlenp && copyout(&want, oldlenp, sizeof(want)) != 0)
-                return -EFAULT;
-            return 0;
-        }
-        }
+    /* CTL_QUERY: enumerate the children of the node named by the MIB
+     * prefix (an empty prefix == the root). */
+    if (kname[namelen - 1] == NBSD_CTL_QUERY) {
+        if (namelen == 1)
+            return nb_query(nb_top, NB_NTOP, oldp, oldlenp);
+        const struct nbnode *top = nb_find(nb_top, NB_NTOP, kname[0]);
+        if (!top || top->type != NBSD_CTLTYPE_NODE) return -ENOENT;
+        if (namelen == 2)
+            return nb_query(top->kids, top->nkids, oldp, oldlenp);
+        return -ENOENT;                 /* tree is only two levels deep */
     }
 
-    if (kname[0] == NBSD_CTL_HW && namelen >= 2) {
-        switch (kname[1]) {
-        case NBSD_HW_MACHINE:
-        case NBSD_HW_MACHINE_ARCH:
-            return nbsd_sysctl_string("i386", oldp, oldlenp);
-        case NBSD_HW_MODEL:
-            return nbsd_sysctl_string("Substrate i386", oldp, oldlenp);
-        case NBSD_HW_NCPU: {
-            int n = sys_cpu_count();
-            if (n < 1) n = 1;
-            return nbsd_sysctl_int(n, oldp, oldlenp);
-        }
-        case NBSD_HW_PAGESIZE:
-            return nbsd_sysctl_int(4096, oldp, oldlenp);
-        }
+    /* KERN_ARND -- opaque random bytes, variable length. */
+    if (namelen >= 2 && kname[0] == NBSD_CTL_KERN &&
+        kname[1] == NBSD_KERN_ARND) {
+        unsigned int want = 0;
+        if (oldlenp && copyin(oldlenp, &want, sizeof(want)) != 0)
+            return -EFAULT;
+        if (want == 0 || want > 4096) return -EINVAL;
+        uint8_t kbuf[256];
+        if (want > sizeof(kbuf)) want = sizeof(kbuf);
+        if (random_get_bytes_flags(kbuf, want, 0x4) != (int)want)
+            return -EIO;
+        if (oldp && copyout(kbuf, oldp, want) != 0) return -EFAULT;
+        if (oldlenp && copyout(&want, oldlenp, sizeof(want)) != 0)
+            return -EFAULT;
+        return 0;
     }
 
-    /* Unknown MIB — NetBSD libc treats ENOENT as "no such variable",
-     * far gentler than ENOSYS (which trips libc's static-pie startup
-     * into dereferencing an uninitialized result buffer). */
-    return -ENOENT;
+    /* KERN_PROC2 (kvm_getproc2) -- process listing not yet marshalled.
+     * Report an empty result so ps prints its header instead of aborting
+     * with "kvm_getproc2: No such file or directory". */
+    if (namelen >= 2 && kname[0] == NBSD_CTL_KERN &&
+        kname[1] == NBSD_KERN_PROC2) {
+        unsigned int zero = 0;
+        if (oldlenp && copyout(&zero, oldlenp, sizeof(zero)) != 0)
+            return -EFAULT;
+        return 0;
+    }
+
+    /* Ordinary leaf read: {top, leaf} by number. */
+    if (namelen < 2) return -ENOENT;
+    const struct nbnode *top = nb_find(nb_top, NB_NTOP, kname[0]);
+    if (!top) return -ENOENT;
+    const struct nbnode *leaf = nb_find(top->kids, top->nkids, kname[1]);
+    if (!leaf) return -ENOENT;
+    if (leaf->type == NBSD_CTLTYPE_STRING) {
+        if (leaf->sfn) {
+            char sbuf[256];
+            leaf->sfn(sbuf, sizeof(sbuf));
+            return nbsd_sysctl_string(sbuf, oldp, oldlenp);
+        }
+        return nbsd_sysctl_string(leaf->sval, oldp, oldlenp);
+    }
+    if (leaf->type == NBSD_CTLTYPE_QUAD)
+        return nbsd_sysctl_quad(leaf->qfn ? leaf->qfn() : (uint64_t)leaf->ival,
+                                oldp, oldlenp);
+    return nbsd_sysctl_int(leaf->ifn ? leaf->ifn() : leaf->ival,
+                           oldp, oldlenp);
 }

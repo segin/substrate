@@ -32,6 +32,11 @@
  * unversioned sigprocmask=48), issetugid, _lwp_self (LWP id of the
  * caller), and __clock_gettime50 (64-bit time_t timespec). */
 #define NETBSD_SYS___sigprocmask14   293
+/* Modern sigsuspend (the unversioned sigsuspend=111 predates the 128-bit
+ * sigset_t).  ksh job control blocks SIGCHLD then sigsuspend()s to wait for
+ * the foreground job; unimplemented it returns immediately and the shell
+ * spins after every command. */
+#define NETBSD_SYS___sigsuspend14    294
 #define NETBSD_SYS_issetugid         305
 #define NETBSD_SYS__lwp_self         311
 #define NETBSD_SYS___clock_gettime50 427
