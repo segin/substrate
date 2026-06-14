@@ -48,7 +48,21 @@ unsigned char sig_trampoline_code[4096] __attribute__((aligned(4096))) = {
     0xB8, 0xF7, 0x00, 0x00, 0x00, // mov $247, %eax     ; SYS_rt_sigreturn
     0xCD, 0x80,                   // int $0x80          ; Syscall
     0xEB, 0xFE,                   // jmp .              ; Halt if return
-    0x90, 0x90                    // padding (total 16 bytes)
+    0x90, 0x90,                   // padding (total 16 bytes)
+
+    /* Offset 0x20: NetBSD sigreturn trampoline.
+     *
+     * When a NetBSD signal handler returns, ESP points at the handler
+     * argument block [ sig ][ code ][ scp ] (the return address has just
+     * been popped).  netbsd_sys_sigreturn() reads the sigcontext pointer
+     * from EBX, so load it from the scp slot (ESP+8) before issuing the
+     * sigreturn syscall (119, routed to the personality .sigreturn hook).
+     */
+    0x8B, 0x5C, 0x24, 0x08,       // mov 0x8(%esp), %ebx ; ebx = scp
+    0xB8, 0x77, 0x00, 0x00, 0x00, // mov $119, %eax      ; SYS_sigreturn
+    0xCD, 0x80,                   // int $0x80           ; Syscall
+    0xEB, 0xFE,                   // jmp .               ; Halt if return
+    0x90, 0x90, 0x90              // padding (total 16 bytes)
 };
 
 unsigned int sig_trampoline_size = 4096;

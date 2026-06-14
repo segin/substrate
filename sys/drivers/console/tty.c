@@ -1083,25 +1083,29 @@ int tty_ioctl_kern(struct tty *tty, uint32_t cmd, uintptr_t arg) {
                 int new_pgrp = *(int *)arg;
 
                 /*
-                 * Background members of the controlling session must not
-                 * change the foreground pgrp unless SIGTTOU is blocked or
-                 * ignored.
+                 * tcsetpgrp(3): set the terminal's foreground process group.
+                 * This is a control operation, NOT terminal output, so it
+                 * must NOT raise SIGTTOU even when issued from a background
+                 * process group -- NetBSD, FreeBSD and Linux all permit it
+                 * without stopping the caller (only the TIOCSETA* / TIOCSTI
+                 * and write paths raise SIGTTOU).  The job-control fork/exec
+                 * dance depends on this: the child does setpgid(0,pgid) then
+                 * tcsetpgrp(tty,pgid) while still a background member of the
+                 * session (and after resetting SIGTTOU to SIG_DFL); raising
+                 * SIGTTOU here stopped the child before it could execve, so
+                 * the parent shell hung forever in sigsuspend() waiting for a
+                 * foreground job that never started -- ksh's prompt never
+                 * returned after the first external command.
+                 *
+                 * Permission: the caller must belong to the session that owns
+                 * the terminal (i.e. it is the caller's controlling tty).
                  */
                 if (current_process && current_process->p_pgrp &&
                     current_process->p_pgrp->pg_session &&
-                    tty->session == current_process->p_pgrp->pg_session->s_sid &&
-                    tty->pgrp > 0 &&
-                    current_process->p_pgrp->pg_id != tty->pgrp) {
-                    int blocked = current_thread &&
-                        (current_thread->sig_mask & sigmask(SIGTTOU));
-                    int ignored =
-                        current_process->sig_actions[SIGTTOU - 1].sa_handler == SIG_IGN;
-
-                    if (!blocked && !ignored) {
-                        psignal(current_process, SIGTTOU);
-                        ret = -1;
-                        break;
-                    }
+                    tty->session != 0 &&
+                    tty->session != current_process->p_pgrp->pg_session->s_sid) {
+                    ret = -1;   /* not our controlling terminal (EPERM) */
+                    break;
                 }
 
                 tty->pgrp = new_pgrp;

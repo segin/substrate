@@ -28,18 +28,44 @@ struct netbsd_sigcontext {
     uint32_t sc_mask;
 };
 
-/* NetBSD i386 sigframe */
+/* NetBSD i386 sigframe.
+ *
+ * Layout as seen by the handler (ESP grows down):
+ *   [ sf_ra ]   <- return address: the NetBSD sigreturn trampoline
+ *   [ sf_sig ]  <- arg1: signal number
+ *   [ sf_code ] <- arg2: code
+ *   [ sf_scp ]  <- arg3: pointer to sf_sc (the saved sigcontext)
+ *   [ sf_sc ]   <- the saved context
+ * The return address MUST be the first word: when the handler executes
+ * `ret`, it pops sf_ra and jumps to the trampoline, which calls sigreturn.
+ * (The old layout omitted sf_ra, so a returning handler popped sf_sig --
+ * the signal number -- as its return address and crashed at eip=signo.)
+ */
 struct netbsd_sigframe {
+    uint32_t sf_ra;     /* return address -> sigreturn trampoline */
     int32_t  sf_sig;
     int32_t  sf_code;
     uint32_t sf_scp;    /* struct sigcontext * */
-    uint32_t sf_handler;
     struct netbsd_sigcontext sf_sc;
 };
 
 /* NetBSD signal translation functions */
 void netbsd_sendsig(void *handler, int sig, uint32_t mask, uint32_t flags, void *regs);
 int  netbsd_sys_sigreturn(void *regs);
+
+/* NetBSD <-> native signal-number / mask translation (netbsd_sig.c). */
+int      netbsd_to_native_signo(int sig);
+int      native_to_netbsd_signo(int sig);
+uint32_t netbsd_to_native_sigmask(uint32_t m);
+uint32_t native_to_netbsd_sigmask(uint32_t m);
+
+/* NetBSD signal syscall wrappers (translate numbers/masks/flags). */
+int netbsd_sys_sigaction(int sig, const void *nsa, void *osa,
+                         const void *tramp, int vers);
+int netbsd_sys_kill(int pid, int sig);
+int netbsd_sys_sigprocmask(int how, const void *set, void *oset);
+int netbsd_sys_sigsuspend(const void *mask);
+int netbsd_sys_sigpending(void *set);
 
 
 /* NetBSD older stat structure (stat43) */

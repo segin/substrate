@@ -207,7 +207,16 @@
  * fails on Substrate (we lack a working ".." readdir from the
  * root) and reports getcwd "Operation not permitted". */
 #define NETBSD_SYS_getcwd         296
-#define NETBSD_SYS_getdents       340
+/*
+ * __sigaction_sigtramp(2): the modern sigaction.  NetBSD libc's
+ * sigaction() funnels through this -- it is syscall 340, NOT getdents.
+ * Wiring getdents at 340 (as we did) meant every ksh signal-handler
+ * install (sigaction(SIGINT/SIGCHLD/...)) was silently dispatched to the
+ * getdents handler, so no handler was ever installed and the shell hung
+ * forever in sigsuspend() after the first command.  __getdents30 is 390.
+ */
+#define NETBSD_SYS___sigaction_sigtramp 340
+#define NETBSD_SYS_getdents       390   /* __getdents30 */
 
 /* chown/chmod family.  NetBSD numbers fchown/fchmod identically to FreeBSD
  * (123/124) but lchmod=274 / lchown=275 (NetBSD swaps lchown into 275 vs
