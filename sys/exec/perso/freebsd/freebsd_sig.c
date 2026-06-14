@@ -1,12 +1,9 @@
 #include <sys/signal.h>
 #include <sys/proc.h>
+#include <sys/copy.h>
 #include <exec/perso/freebsd/freebsd_user.h>
 #include <arch/i386/idt.h>
 #include <string.h>
-
-extern int copyout(const void *src, void *dst, size_t size);
-extern int copyin(const void *src, void *dst, size_t size);
-extern int validate_user_addr(const void *addr, size_t size);
 
 void freebsd_sendsig(void *handler, int sig, uint32_t mask, uint32_t flags, void *regs_ptr) {
     (void)flags;
@@ -53,12 +50,11 @@ void freebsd_sendsig(void *handler, int sig, uint32_t mask, uint32_t flags, void
     frame.sf_sc.sc_err = regs->err_code;
     frame.sf_sc.sc_mask = mask;
 
-    /* FreeBSD doesn't typically use a kernel-mapped trampoline for legacy signals;
-       the C library provides one or the application handles it. 
-       However, for personality emulation, we can point to a generic trampoline or
-       rely on the 'sf_handler' being invoked correctly if it matches ABI. 
-       Actually, FreeBSD 4.x syscall 103 is sigreturn. */
-    
+    /*
+     * FreeBSD supplies its own signal-return trampoline from the C library
+     * (the handler returns into it and it issues sigreturn -- syscall 103
+     * on the FreeBSD 4.x ABI), so the kernel does not install one here.
+     */
     if (copyout(&frame, (void*)(uintptr_t)esp, sizeof(frame)) != 0) {
         sigexit(current_process, SIGSEGV);
         return;
@@ -70,10 +66,10 @@ void freebsd_sendsig(void *handler, int sig, uint32_t mask, uint32_t flags, void
 
 int freebsd_sys_sigreturn(void *regs_ptr) {
     registers_t *regs = (registers_t *)regs_ptr;
-    /* Arg is a pointer to sigcontext */
-    struct freebsd_sigcontext *scp_user = (struct freebsd_sigcontext *)regs->ebx; // FreeBSD passes first arg in EBX? No, stack usually.
-    // In sigreturn(scp), scp is the first argument. On i386 syscall, that's in EBX or on stack depending on variant.
-    
+    /* sigreturn(scp): the sigcontext pointer is the sole argument, passed
+     * in EBX by the trampoline that issues the syscall. */
+    struct freebsd_sigcontext *scp_user = (struct freebsd_sigcontext *)regs->ebx;
+
     struct freebsd_sigcontext sc;
     if (copyin(scp_user, &sc, sizeof(sc)) != 0) return -1;
 
