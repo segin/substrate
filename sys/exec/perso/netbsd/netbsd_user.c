@@ -310,6 +310,21 @@ extern int random_get_bytes_flags(void *, size_t, unsigned int);
 #define NBSD_KERN_ARND        81
 #define NBSD_KERN_PROC2       47
 
+/* struct kinfo_proc2 field offsets (NetBSD 10 i386 ABI; sizeof == 680).
+ * KERN_PROC2 returns an array of these; ps reads a handful of fields. */
+#define KP2_FLAG   112   /* int32   P_* flags */
+#define KP2_PID    116   /* int32 */
+#define KP2_PPID   120   /* int32 */
+#define KP2_PGID   128   /* int32 */
+#define KP2_UID    136   /* uint32  ruid */
+#define KP2_GID    144   /* uint32  rgid */
+#define KP2_TDEV   220   /* uint32  controlling tty dev (NODEV = -1) */
+#define KP2_STAT   360   /* int8    LWP-derived status (LS*) */
+#define KP2_NICE   367   /* uint8 */
+#define KP2_COMM   368   /* char[24] */
+#define KP2_NLWPS  616   /* uint64 */
+#define NBSD_LSSLEEP  3  /* LWP sleeping */
+
 #define NBSD_SYSCTL_VERSION   0x01000000u
 #define NBSD_CTLTYPE_NODE      1
 #define NBSD_CTLTYPE_INT       2
@@ -464,6 +479,56 @@ static int nb_query(const struct nbnode *kids, int nkids,
     return 0;
 }
 
+/* KERN_PROC2 (kvm_getproc2): {CTL_KERN, KERN_PROC2, op, arg, elemsize,
+ * elemcount}.  Marshal substrate's process table into struct kinfo_proc2[].
+ * oldp==NULL is a size probe; otherwise fill as many entries as fit. */
+static int nb_kern_proc2(const int *kname, void *oldp, unsigned int *oldlenp) {
+    int op = kname[2];                          /* KERN_PROC_ALL/PID/UID */
+    int arg = kname[3];
+    unsigned int elemsize = (unsigned int)kname[4];
+    if (elemsize < 96 || elemsize > 1024) return -EINVAL;
+
+    int pids[256];
+    int np = kern_proc_list(pids, 256);
+    if (np < 0) np = 0;
+
+    unsigned int want = 0;
+    if (oldlenp && copyin(oldlenp, &want, sizeof(want)) != 0) return -EFAULT;
+
+    unsigned int produced = 0, copied = 0;
+    for (int i = 0; i < np; i++) {
+        sys_procinfo_t pi;
+        if (kern_proc_info(pids[i], &pi) != 0) continue;
+        if (op == 1 && pi.pid != arg) continue;        /* KERN_PROC_PID */
+        if (op == 5 && (int)pi.uid != arg) continue;   /* KERN_PROC_UID */
+
+        if (oldp != NULL && copied + elemsize <= want) {
+            uint8_t buf[1024];
+            memset(buf, 0, elemsize);
+            *(int32_t *)(buf + KP2_PID)   = pi.pid;
+            *(int32_t *)(buf + KP2_PPID)  = pi.ppid;
+            *(int32_t *)(buf + KP2_PGID)  = pi.pgid;
+            *(uint32_t *)(buf + KP2_UID)  = pi.uid;
+            *(uint32_t *)(buf + KP2_GID)  = pi.gid;
+            *(uint32_t *)(buf + KP2_TDEV) = 0xFFFFFFFFu;     /* NODEV */
+            buf[KP2_STAT] = (pi.state >= 1 && pi.state <= 5)
+                                ? (uint8_t)pi.state : NBSD_LSSLEEP;
+            buf[KP2_NICE] = (uint8_t)pi.nice;
+            *(uint64_t *)(buf + KP2_NLWPS) = 1;
+            strncpy((char *)(buf + KP2_COMM), pi.name, 24 - 1);
+            if (copyout(buf, (char *)oldp + copied, elemsize) != 0)
+                return -EFAULT;
+            copied += elemsize;
+        }
+        produced += elemsize;
+    }
+    if (oldlenp) {
+        unsigned int total = (oldp == NULL) ? produced : copied;
+        if (copyout(&total, oldlenp, sizeof(total)) != 0) return -EFAULT;
+    }
+    return 0;
+}
+
 int netbsd_sys_sysctl(int *name, unsigned int namelen,
                       void *oldp, unsigned int *oldlenp,
                       void *newp, unsigned int newlen) {
@@ -502,15 +567,10 @@ int netbsd_sys_sysctl(int *name, unsigned int namelen,
         return 0;
     }
 
-    /* KERN_PROC2 (kvm_getproc2) -- process listing not yet marshalled.
-     * Report an empty result so ps prints its header instead of aborting
-     * with "kvm_getproc2: No such file or directory". */
-    if (namelen >= 2 && kname[0] == NBSD_CTL_KERN &&
-        kname[1] == NBSD_KERN_PROC2) {
-        unsigned int zero = 0;
-        if (oldlenp && copyout(&zero, oldlenp, sizeof(zero)) != 0)
-            return -EFAULT;
-        return 0;
+    /* KERN_PROC2 (kvm_getproc2) -- process listing for ps. */
+    if (kname[0] == NBSD_CTL_KERN && kname[1] == NBSD_KERN_PROC2) {
+        if (namelen < 6) return -EINVAL;
+        return nb_kern_proc2(kname, oldp, oldlenp);
     }
 
     /* Ordinary leaf read: {top, leaf} by number. */
