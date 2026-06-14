@@ -40,6 +40,10 @@
  * resource queries. */
 #define NETBSD_SYS_lseek199          199
 #define NETBSD_SYS_getrlimit         194
+/* Modern vfork (the unversioned vfork=66 is the pre-1.4 variant).  /bin/sh
+ * spawns every command with vfork; unimplemented, the shell takes the parent
+ * path waiting on a child that was never created — wait(-1) spins on ECHILD. */
+#define NETBSD_SYS___vfork14         282
 #define NETBSD_SYS_creat          8
 #define NETBSD_SYS_link           9
 #define NETBSD_SYS_unlink         10
