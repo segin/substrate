@@ -148,6 +148,20 @@ int64_t netbsd_sys_pipe(void) {
     return ((int64_t)(uint32_t)fds[1] << 32) | (uint32_t)fds[0];
 }
 
+/*
+ * NetBSD dup3(2) (compat_100_dup3, syscall 454).  Same as dup2 plus an
+ * atomic flag set, but NetBSD's O_CLOEXEC/O_NONBLOCK bits differ from
+ * substrate's, and the native sys_dup3 EINVALs any flag bit it doesn't
+ * recognise — translate to substrate's encoding.  /bin/sh redirects its
+ * fds with dup3(from, to, O_CLOEXEC); leaving it unwired aborts rc.
+ */
+int netbsd_sys_dup3(int oldfd, int newfd, int flags) {
+    int sflags = 0;
+    if (flags & NETBSD_O_CLOEXEC)  sflags |= O_CLOEXEC;
+    if (flags & NETBSD_O_NONBLOCK) sflags |= O_NONBLOCK;
+    return sys_dup3(oldfd, newfd, sflags);
+}
+
 /* NetBSD fcntl(2) command numbers (sys/fcntl.h) above F_SETFL. */
 #define NB_F_GETLK          7
 #define NB_F_SETLK          8
@@ -221,6 +235,7 @@ static void *netbsd_syscalls[MAX_SYSCALLS] = {
     [NETBSD_SYS_lseek199]       = (void *)&netbsd_sys_lseek,
     [NETBSD_SYS_getrlimit]      = (void *)&sys_getrlimit,
     [NETBSD_SYS___vfork14]      = &sys_vfork,
+    [NETBSD_SYS_dup3]           = (void *)&netbsd_sys_dup3,
     [NETBSD_SYS_creat]          = &sys_creat,
     [NETBSD_SYS_link]           = &sys_link,
     [NETBSD_SYS_unlink]         = &sys_unlink,
@@ -404,6 +419,7 @@ static const char *netbsd_names[MAX_SYSCALLS] = {
     [NETBSD_SYS_lseek199]       = "lseek",
     [NETBSD_SYS_getrlimit]      = "getrlimit",
     [NETBSD_SYS___vfork14]      = "__vfork14",
+    [NETBSD_SYS_dup3]           = "dup3",
     [NETBSD_SYS_creat]          = "creat",
     [NETBSD_SYS_link]           = "link",
     [NETBSD_SYS_unlink]         = "unlink",
@@ -568,6 +584,7 @@ static struct syscall_fmt netbsd_fmts[MAX_SYSCALLS] = {
     [NETBSD_SYS_lseek199]       = { 5, { ARG_INT, ARG_INT, ARG_HEX, ARG_HEX, ARG_INT } },
     [NETBSD_SYS_getrlimit]      = { 2, { ARG_INT, ARG_PTR } },
     [NETBSD_SYS___vfork14]      = { 0, { 0 } },
+    [NETBSD_SYS_dup3]           = { 3, { ARG_INT, ARG_INT, ARG_HEX } },
     [NETBSD_SYS_link]           = { 2, { ARG_STR, ARG_STR } },
     [NETBSD_SYS_unlink]         = { 1, { ARG_STR } },
     [NETBSD_SYS_chdir]          = { 1, { ARG_STR } },

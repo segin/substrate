@@ -44,6 +44,12 @@
  * spawns every command with vfork; unimplemented, the shell takes the parent
  * path waiting on a child that was never created — wait(-1) spins on ECHILD. */
 #define NETBSD_SYS___vfork14         282
+/* compat_100_dup3 — /bin/sh redirects fds with dup3(from,to,O_CLOEXEC);
+ * NetBSD O_CLOEXEC=0x400000 differs from substrate's 0x80000, so the flag
+ * needs translating (the native handler EINVALs an unknown flag bit). */
+#define NETBSD_SYS_dup3              454
+#define NETBSD_O_CLOEXEC             0x00400000
+#define NETBSD_O_NONBLOCK            0x00000004
 #define NETBSD_SYS_creat          8
 #define NETBSD_SYS_link           9
 #define NETBSD_SYS_unlink         10
