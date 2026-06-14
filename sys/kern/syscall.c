@@ -3678,6 +3678,20 @@ int sys_proc_cmdline(pid_t pid, char **argv, size_t *argc) {
     return 0;
 }
 
+/* kern_proc_argv: fill `buf` with a process's argv as NUL-separated strings
+ * (argv[0]\0argv[1]\0...).  *nargv receives the argument count.  Returns the
+ * number of bytes written, or a negative errno.  Kernel-internal helper for
+ * personality sysctls (e.g. NetBSD KERN_PROC_ARGS / kvm_getargv). */
+int kern_proc_argv(pid_t pid, char *buf, size_t buflen, int *nargv) {
+    process_t *target = (pid == 0) ? current_process : proc_find(pid);
+    if (nargv) *nargv = 0;
+    if (!target) return -ESRCH;
+    size_t argc = 0;
+    size_t n = proc_emit_cmdline(target, buf, buflen, &argc);
+    if (nargv) *nargv = (int)argc;
+    return (int)n;
+}
+
 /* sys_proc_environ: Substrate currently doesn't snapshot envp at exec
  * the way it does cmdline_tail, so this returns 0 entries.  When the
  * environ-snapshot lands, the implementation matches the cmdline path

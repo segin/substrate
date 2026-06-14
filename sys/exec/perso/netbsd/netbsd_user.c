@@ -309,6 +309,10 @@ extern int random_get_bytes_flags(void *, size_t, unsigned int);
 #define NBSD_CTL_QUERY        (-2)
 #define NBSD_KERN_ARND        81
 #define NBSD_KERN_PROC2       47
+#define NBSD_KERN_PROC_ARGS   48   /* {.., KERN_PROC_ARGS, pid, op} */
+#define NBSD_KERN_PROC_ARGV    1   /* op: argv strings */
+#define NBSD_KERN_PROC_NARGV   2   /* op: argc */
+#define NBSD_KERN_PROC_ENV     3   /* op: environ (we have none) */
 
 /* struct kinfo_proc2 field offsets (NetBSD 10 i386 ABI; sizeof == 680).
  * KERN_PROC2 returns an array of these; ps reads a handful of fields. */
@@ -571,6 +575,31 @@ int netbsd_sys_sysctl(int *name, unsigned int namelen,
     if (kname[0] == NBSD_CTL_KERN && kname[1] == NBSD_KERN_PROC2) {
         if (namelen < 6) return -EINVAL;
         return nb_kern_proc2(kname, oldp, oldlenp);
+    }
+
+    /* KERN_PROC_ARGS (kvm_getargv) -- a process's argv / argc.  Without it
+     * ps falls back to "(comm)" and treats every entry as a kernel thread. */
+    if (kname[0] == NBSD_CTL_KERN && kname[1] == NBSD_KERN_PROC_ARGS) {
+        if (namelen < 4) return -EINVAL;
+        char kbuf[512];   /* PROC_CMDLINE_MAX */
+        int nargv = 0;
+        int n = kern_proc_argv(kname[2], kbuf, sizeof(kbuf), &nargv);
+        if (n < 0) return n;
+        if (kname[3] == NBSD_KERN_PROC_NARGV)
+            return nbsd_sysctl_int(nargv, oldp, oldlenp);
+        if (kname[3] == NBSD_KERN_PROC_ENV)
+            n = 0;                         /* no environ snapshot */
+        unsigned int want = 0;
+        if (oldlenp && copyin(oldlenp, &want, sizeof(want)) != 0)
+            return -EFAULT;
+        if (oldp != NULL && want >= (unsigned int)n && n > 0 &&
+            copyout(kbuf, oldp, (unsigned int)n) != 0)
+            return -EFAULT;
+        unsigned int wrote = (unsigned int)n;
+        if (oldlenp && copyout(&wrote, oldlenp, sizeof(wrote)) != 0)
+            return -EFAULT;
+        if (oldp != NULL && want < (unsigned int)n) return -ENOMEM;
+        return 0;
     }
 
     /* Ordinary leaf read: {top, leaf} by number. */

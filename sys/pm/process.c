@@ -227,8 +227,13 @@ void proc_capture_cmdline(process_t *proc, char *const argv[]) {
         return;
     }
 
+    /* Capture the WHOLE argv (argv[0], argv[1], ...) as NUL-separated
+     * strings, not just the tail -- comm[] truncates argv[0] to 16 bytes,
+     * so a long program name (or a login shell's "-ksh", a busybox applet,
+     * etc.) was otherwise lost.  ps and /proc/<pid>/cmdline reconstruct the
+     * full command line from this blob. */
     used = 0;
-    for (i = 1; argv[i] != NULL && used < sizeof(proc->cmdline_tail); i++) {
+    for (i = 0; argv[i] != NULL && used < sizeof(proc->cmdline_tail); i++) {
         size_t avail = sizeof(proc->cmdline_tail) - used;
         size_t copy_len;
 
@@ -250,12 +255,7 @@ void proc_capture_cmdline(process_t *proc, char *const argv[]) {
 }
 
 size_t proc_emit_cmdline(const process_t *proc, char *buf, size_t buf_len, size_t *argc_out) {
-    const char *name;
     size_t limit;
-    size_t written;
-    size_t argc;
-    size_t name_len;
-    size_t cursor;
 
     if (argc_out) {
         *argc_out = 0;
@@ -269,52 +269,32 @@ size_t proc_emit_cmdline(const process_t *proc, char *buf, size_t buf_len, size_
         limit = PROC_CMDLINE_MAX;
     }
 
-    name = proc_cmdline_name(proc);
-    name_len = strnlen(name, limit - 1U);
-    memcpy(buf, name, name_len);
-    buf[name_len] = '\0';
-    written = name_len + 1U;
-    argc = 1U;
-
-    if (written >= limit) {
+    /* cmdline_tail now holds the whole argv (argv[0], argv[1], ...) as
+     * NUL-separated strings; emit it verbatim. */
+    if (proc->cmdline_tail_len > 0) {
+        size_t n = proc->cmdline_tail_len;
+        if (n > limit) {
+            n = limit;
+        }
+        memcpy(buf, proc->cmdline_tail, n);
+        buf[(n < buf_len) ? n : (buf_len - 1U)] = '\0';
         if (argc_out) {
-            *argc_out = argc;
+            *argc_out = proc->cmdline_tail_argc;
         }
-        return limit;
+        return n;
     }
 
-    cursor = 0;
-    while (cursor < proc->cmdline_tail_len && written < limit) {
-        size_t avail = limit - written;
-        size_t stored_len;
-        size_t copy_len;
-
-        if (avail <= 1U) {
-            break;
+    /* No captured argv (e.g. a kernel thread): fall back to the comm name. */
+    {
+        const char *name = proc_cmdline_name(proc);
+        size_t name_len = strnlen(name, limit - 1U);
+        memcpy(buf, name, name_len);
+        buf[name_len] = '\0';
+        if (argc_out) {
+            *argc_out = (name_len > 0) ? 1U : 0U;
         }
-
-        stored_len = strnlen(proc->cmdline_tail + cursor,
-                             (size_t)proc->cmdline_tail_len - cursor);
-        copy_len = stored_len;
-        if (copy_len > avail - 1U) {
-            copy_len = avail - 1U;
-        }
-
-        memcpy(buf + written, proc->cmdline_tail + cursor, copy_len);
-        buf[written + copy_len] = '\0';
-        written += copy_len + 1U;
-        argc++;
-
-        if (copy_len != stored_len) {
-            break;
-        }
-        cursor += stored_len + 1U;
+        return name_len + 1U;
     }
-
-    if (argc_out) {
-        *argc_out = argc;
-    }
-    return written;
 }
 
 static void proc_resource_limits_init(process_t *proc) {

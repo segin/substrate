@@ -71,6 +71,7 @@ int kern_chdir(const char *path);
 int kern_getcwd(char *buf, size_t size);
 int kern_proc_info(pid_t pid, sys_procinfo_t *info);
 int kern_proc_list(pid_t *pids, size_t count);
+int kern_proc_argv(pid_t pid, char *buf, size_t buflen, int *nargv);
 int kern_hostname(char *buf, size_t len);
 /* Time syscalls */
 time_t kern_time(time_t *tloc);
