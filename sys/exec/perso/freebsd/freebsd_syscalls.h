@@ -199,6 +199,38 @@ struct freebsd13_stat;
 #define FREEBSD_SYS_msgctl     511
 #define FREEBSD_SYS_shmctl     512
 #define FREEBSD_SYS_lpathconf  513
+/* --- Additional syscalls (numbers verified vs FreeBSD syscalls.master).
+ *     break, lpathconf, the sched_ calls and the freebsd13 pread/pwrite/
+ *     truncate macros are defined elsewhere in this header. --- */
+#define FREEBSD_SYS_chflags          34
+#define FREEBSD_SYS_fchflags         35
+#define FREEBSD_SYS_sigaltstack      53
+#define FREEBSD_SYS_reboot           55
+#define FREEBSD_SYS_revoke           56
+#define FREEBSD_SYS_chroot           61
+#define FREEBSD_SYS_setreuid         126
+#define FREEBSD_SYS_setregid         127
+#define FREEBSD_SYS_rename           128
+#define FREEBSD_SYS_flock            131
+#define FREEBSD_SYS_mkfifo           132
+#define FREEBSD_SYS_setegid          182
+#define FREEBSD_SYS_seteuid          183
+#define FREEBSD_SYS_fpathconf        192
+#define FREEBSD_SYS_mlock            203
+#define FREEBSD_SYS_munlock          204
+#define FREEBSD_SYS_getpgid          207
+#define FREEBSD_SYS_setresgid        312
+#define FREEBSD_SYS_yield            321
+#define FREEBSD_SYS_mlockall         324
+#define FREEBSD_SYS_munlockall       325
+#define FREEBSD_SYS_sched_rr_get_interval 334
+#define FREEBSD_SYS_getresuid        360
+#define FREEBSD_SYS_getresgid        361
+#define FREEBSD_SYS_eaccess          376
+#define FREEBSD_SYS_lchflags         391
+#define FREEBSD_SYS_posix_fallocate  530
+#define FREEBSD_SYS_posix_fadvise    531
+#define FREEBSD_SYS_chflagsat        540
 #define FREEBSD_SYS_cap_enter  516
 #define FREEBSD_SYS_cap_getmode 517
 #define FREEBSD_SYS_cap_rights_limit 533

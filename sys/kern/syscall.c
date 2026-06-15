@@ -1575,6 +1575,58 @@ int sys_setregid(int rgid, int egid) {
     return 0;
 }
 
+/*
+ * setresuid(2): set the real, effective and saved uid independently (-1
+ * leaves a field unchanged).  The superuser may set any value; an
+ * unprivileged process may set each field only to one of its current
+ * real, effective or saved uid.
+ */
+int sys_setresuid(int ruid, int euid, int suid) {
+    process_t *p = current_process;
+    if (p->euid != 0) {
+        uint32_t r = p->uid, e = p->euid, s = p->suid;
+        if (ruid != -1 && (uint32_t)ruid != r && (uint32_t)ruid != e && (uint32_t)ruid != s) return -EPERM;
+        if (euid != -1 && (uint32_t)euid != r && (uint32_t)euid != e && (uint32_t)euid != s) return -EPERM;
+        if (suid != -1 && (uint32_t)suid != r && (uint32_t)suid != e && (uint32_t)suid != s) return -EPERM;
+    }
+    if (ruid != -1) p->uid  = ruid;
+    if (euid != -1) p->euid = euid;
+    if (suid != -1) p->suid = suid;
+    return 0;
+}
+
+/* setresgid(2): the gid analogue of setresuid(2). */
+int sys_setresgid(int rgid, int egid, int sgid) {
+    process_t *p = current_process;
+    if (p->euid != 0) {
+        uint32_t r = p->gid, e = p->egid, s = p->sgid;
+        if (rgid != -1 && (uint32_t)rgid != r && (uint32_t)rgid != e && (uint32_t)rgid != s) return -EPERM;
+        if (egid != -1 && (uint32_t)egid != r && (uint32_t)egid != e && (uint32_t)egid != s) return -EPERM;
+        if (sgid != -1 && (uint32_t)sgid != r && (uint32_t)sgid != e && (uint32_t)sgid != s) return -EPERM;
+    }
+    if (rgid != -1) p->gid  = rgid;
+    if (egid != -1) p->egid = egid;
+    if (sgid != -1) p->sgid = sgid;
+    return 0;
+}
+
+/* getresuid(2)/getresgid(2): return the real/effective/saved id triple. */
+int sys_getresuid(uint32_t *ruid, uint32_t *euid, uint32_t *suid) {
+    process_t *p = current_process;
+    if (ruid && copyout(&p->uid,  ruid, sizeof(uint32_t)) != 0) return -EFAULT;
+    if (euid && copyout(&p->euid, euid, sizeof(uint32_t)) != 0) return -EFAULT;
+    if (suid && copyout(&p->suid, suid, sizeof(uint32_t)) != 0) return -EFAULT;
+    return 0;
+}
+
+int sys_getresgid(uint32_t *rgid, uint32_t *egid, uint32_t *sgid) {
+    process_t *p = current_process;
+    if (rgid && copyout(&p->gid,  rgid, sizeof(uint32_t)) != 0) return -EFAULT;
+    if (egid && copyout(&p->egid, egid, sizeof(uint32_t)) != 0) return -EFAULT;
+    if (sgid && copyout(&p->sgid, sgid, sizeof(uint32_t)) != 0) return -EFAULT;
+    return 0;
+}
+
 int sys_clone(uint32_t flags, void *child_stack, int *parent_tidptr, void *tls, int *child_tidptr) {
     (void)parent_tidptr;
     (void)tls;

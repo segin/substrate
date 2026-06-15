@@ -52,6 +52,10 @@ extern int sys_seteuid(int);
 extern int sys_setegid(int);
 extern int sys_setreuid(int, int);
 extern int sys_setregid(int, int);
+extern int sys_setresuid(int, int, int);
+extern int sys_setresgid(int, int, int);
+extern int sys_getresuid(uint32_t*, uint32_t*, uint32_t*);
+extern int sys_getresgid(uint32_t*, uint32_t*, uint32_t*);
 extern int sys_getsid(int);
 
 /* File I/O - NOTE: native uses 64-bit types! Foreign personalities need wrappers */

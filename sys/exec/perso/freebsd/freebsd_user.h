@@ -398,6 +398,16 @@ struct freebsd_sigframe {
 void freebsd_sendsig(void *handler, int sig, uint32_t mask, uint32_t flags, void *regs);
 int  freebsd_sys_sigreturn(void *regs);
 
+/* Additional FreeBSD syscall wrappers (freebsd_user.c). */
+int     freebsd_sys_zero(void);
+int     freebsd_sys_mkfifo(const char *path, int mode);
+int64_t freebsd_sys_pread(int fd, void *buf, size_t nbyte,
+                          uint32_t off_lo, uint32_t off_hi);
+int64_t freebsd_sys_pwrite(int fd, const void *buf, size_t nbyte,
+                           uint32_t off_lo, uint32_t off_hi);
+int     freebsd_sys_fpathconf(int fd, int name);
+int     freebsd_sys_sched_prio_max(int policy);
+int     freebsd_sys_sched_prio_min(int policy);
 
 int freebsd_sys_open(const char *path, int flags, int mode);
 int freebsd_sys_openat(int dirfd, const char *path, int flags, int mode);

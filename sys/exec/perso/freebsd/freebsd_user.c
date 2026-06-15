@@ -618,3 +618,69 @@ ssize_t freebsd_sys_getdirentries(int fd, char *buf, size_t nbytes, int64_t *bas
     kfree(kbuf, nbytes);
     return (ssize_t)bpos;
 }
+
+/* ===================================================================
+ * Additional FreeBSD syscall wrappers.  Syscall numbers verified against
+ * ~/freebsd sys/kern/syscalls.master.  FreeBSD's modern pread/pwrite/
+ * truncate carry no i386 off_t PAD argument (unlike NetBSD), so off_t is
+ * passed as (lo,hi) directly after the preceding argument.
+ * =================================================================== */
+#ifndef SEEK_SET
+#define SEEK_SET 0
+#define SEEK_CUR 1
+#endif
+
+/* No-op success for operations substrate has no backing for (file flags,
+ * memory locking, fadvise/fallocate hints, scheduler policy). */
+int freebsd_sys_zero(void) { return 0; }
+
+/* mkfifo(path, mode): mknod() with the S_IFIFO type bit. */
+int freebsd_sys_mkfifo(const char *path, int mode) {
+    return sys_mknod(path, (mode & 07777) | S_IFIFO, 0);
+}
+
+/* pread(fd, buf, nbyte, off_t offset): read at an absolute offset without
+ * moving the descriptor's file pointer. */
+int64_t freebsd_sys_pread(int fd, void *buf, size_t nbyte,
+                          uint32_t off_lo, uint32_t off_hi) {
+    int64_t saved = sys_lseek(fd, 0, 0, SEEK_CUR);
+    if (saved < 0) return saved;
+    int64_t pos = sys_lseek(fd, off_lo, off_hi, SEEK_SET);
+    if (pos < 0) return pos;
+    ssize_t n = sys_read(fd, (char *)buf, nbyte);
+    sys_lseek(fd, (uint32_t)saved, (uint32_t)((uint64_t)saved >> 32), SEEK_SET);
+    return n;
+}
+
+int64_t freebsd_sys_pwrite(int fd, const void *buf, size_t nbyte,
+                           uint32_t off_lo, uint32_t off_hi) {
+    int64_t saved = sys_lseek(fd, 0, 0, SEEK_CUR);
+    if (saved < 0) return saved;
+    int64_t pos = sys_lseek(fd, off_lo, off_hi, SEEK_SET);
+    if (pos < 0) return pos;
+    ssize_t n = sys_write(fd, (const char *)buf, nbyte);
+    sys_lseek(fd, (uint32_t)saved, (uint32_t)((uint64_t)saved >> 32), SEEK_SET);
+    return n;
+}
+
+/* fpathconf(fd, name): report fixed limits for the common names. */
+int freebsd_sys_fpathconf(int fd, int name) {
+    (void)fd;
+    switch (name) {
+    case 1:  return 32767;  /* _PC_LINK_MAX */
+    case 2:  return 255;    /* _PC_MAX_CANON */
+    case 3:  return 255;    /* _PC_MAX_INPUT */
+    case 4:  return 255;    /* _PC_NAME_MAX */
+    case 5:  return 1024;   /* _PC_PATH_MAX */
+    case 6:  return 512;    /* _PC_PIPE_BUF */
+    case 7:  return 1;      /* _PC_CHOWN_RESTRICTED */
+    case 8:  return 0;      /* _PC_NO_TRUNC */
+    case 9:  return 0;      /* _PC_VDISABLE */
+    default: return -EINVAL;
+    }
+}
+
+/* sched_get_priority_max/min(policy): substrate uses a single priority
+ * band; report a small fixed range. */
+int freebsd_sys_sched_prio_max(int policy) { (void)policy; return 31; }
+int freebsd_sys_sched_prio_min(int policy) { (void)policy; return 0; }
