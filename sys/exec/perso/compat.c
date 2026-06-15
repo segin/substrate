@@ -648,6 +648,17 @@ int freebsd_sys_sysctl(int *name, unsigned int namelen, void *oldp, size_t *oldl
             if (oldp) return copyout(&val, oldp, sizeof(int));
             return 0;
         }
+        if (kname[1] == 9) { /* KERN_SECURELVL — securelevel(7) */
+            /* Substrate has no securelevel mechanism; report -1
+             * ("permanently insecure", the normal multiuser value).
+             * Without this, FreeBSD init's getsecuritylevel() logs
+             * "cannot get kernel security level" to the console on every
+             * getty (re)spawn. */
+            int val = -1;
+            if (oldp && copyout(&val, oldp, sizeof(int)) != 0) return -EFAULT;
+            if (oldlenp) { size_t want = sizeof(int); if (copyout(&want, oldlenp, sizeof(size_t)) != 0) return -EFAULT; }
+            return 0;
+        }
         if (kname[1] == 37) { /* KERN_ARND - secure random bytes */
             extern int random_get_bytes_flags(void *, size_t, unsigned int);
             size_t want = 0;
