@@ -38,18 +38,119 @@ set -eu
 #            you attach whenever you like (e.g. to break into a hang); set
 #            GDBHALT=1 to also freeze the CPU at reset so you can set
 #            breakpoints before boot and `continue` from gdb.
+#   --drive FILE
+#            attach an additional raw disk image on the next free port of
+#            the SHARED boot AHCI controller.  Repeatable; the boot disk is
+#            sata0.0, so extra drives land on ports 1..5 and appear in the
+#            guest as /dev/storage/sata1, sata2, ... — mount them yourself
+#            during the session, e.g. `mount /dev/storage/sata1 /mnt ext2`.
+#            ICH9 AHCI has 6 ports, so at most 5 extra drives this way.
+#   --drive-ctrl FILE
+#            like --drive but put the image on its OWN ich9-ahci
+#            controller (one HBA per drive) instead of sharing the boot
+#            controller's ports.  Repeatable with no 5-disk cap (limited
+#            only by PCI slots).  Use this to exercise substrate's
+#            multiple-AHCI-controller support; the disks still appear as
+#            /dev/storage/sataN in PCI-probe order, so verify with
+#            `ls /dev/storage/` in the guest (if only the first HBA binds,
+#            they won't show up — fall back to --drive).
+#            (Images are attached raw; for qcow2 etc. edit the format= below.)
 GFX=0
 KVM=0
 USERNET=0
 DEBUG=0
-for arg in "$@"; do
-    case "$arg" in
+EXTRA_DRIVES=""
+EXTRA_CTRL_DRIVES=""
+while [ $# -gt 0 ]; do
+    case "$1" in
         --gfx)   GFX=1 ;;
         --kvm)   KVM=1 ;;
         --user)  USERNET=1 ;;
         --debug) DEBUG=1 ;;
+        --drive)
+            shift
+            [ $# -gt 0 ] || { echo "run-networking.sh: --drive needs a file argument" >&2; exit 1; }
+            EXTRA_DRIVES="$EXTRA_DRIVES
+$1" ;;
+        --drive=*)
+            EXTRA_DRIVES="$EXTRA_DRIVES
+${1#--drive=}" ;;
+        --drive-ctrl)
+            shift
+            [ $# -gt 0 ] || { echo "run-networking.sh: --drive-ctrl needs a file argument" >&2; exit 1; }
+            EXTRA_CTRL_DRIVES="$EXTRA_CTRL_DRIVES
+$1" ;;
+        --drive-ctrl=*)
+            EXTRA_CTRL_DRIVES="$EXTRA_CTRL_DRIVES
+${1#--drive-ctrl=}" ;;
+        *)
+            echo "run-networking.sh: unknown argument '$1'" >&2
+            exit 1 ;;
     esac
+    shift
 done
+
+# Build the qemu args for any --drive images.  Each extra image gets the
+# next AHCI port (1..5) on the existing ich9-ahci controller, so the guest
+# enumerates them as /dev/storage/sata1, sata2, ...  Newline-separated so
+# paths with spaces survive; an empty list yields no args.
+EXTRA_DRIVE_ARGS=""
+port=1
+OLDIFS=$IFS
+IFS='
+'
+for f in $EXTRA_DRIVES; do
+    [ -n "$f" ] || continue
+    if [ ! -f "$f" ]; then
+        echo "run-networking.sh: --drive file not found: $f" >&2
+        exit 1
+    fi
+    if [ "$port" -gt 5 ]; then
+        echo "run-networking.sh: at most 5 extra --drive images (AHCI ports 1-5);" \
+             "add a second '-device ich9-ahci' for more" >&2
+        exit 1
+    fi
+    EXTRA_DRIVE_ARGS="$EXTRA_DRIVE_ARGS -drive file=$f,format=raw,if=none,id=drive$port -device ide-hd,bus=sata0.$port,unit=0,drive=drive$port"
+    echo "run-networking.sh: extra drive $f -> sata0 port $port (guest /dev/storage/sataN)"
+    port=$((port + 1))
+done
+IFS=$OLDIFS
+
+# --drive-ctrl images: one fresh ich9-ahci HBA per image (id=ahci1, ahci2,
+# ...), each carrying a single disk on its port 0.
+#
+# substrate probes PCI slots in DESCENDING order, so the highest-slot HBA
+# enumerates first as sata0.  To keep the boot disk on sata0 we pin the
+# boot controller to the top slot (0x1f, set on the qemu line below) and
+# walk the extra controllers down from 0x1e, so the guest sees boot=sata0,
+# then the extra disks as sata1, sata2, ... in --drive-ctrl order.
+#
+# The in-kernel AHCI driver caps total HBAs at AHCI_MAX_CONTROLLERS (4), so
+# at most 3 --drive-ctrl images; raise that constant + rebuild for more.
+BOOT_AHCI_ADDR=""
+EXTRA_CTRL_ARGS=""
+cidx=1
+OLDIFS=$IFS
+IFS='
+'
+for f in $EXTRA_CTRL_DRIVES; do
+    [ -n "$f" ] || continue
+    if [ ! -f "$f" ]; then
+        echo "run-networking.sh: --drive-ctrl file not found: $f" >&2
+        exit 1
+    fi
+    if [ "$cidx" -gt 3 ]; then
+        echo "run-networking.sh: at most 3 --drive-ctrl images" \
+             "(AHCI_MAX_CONTROLLERS=4 incl. the boot HBA)" >&2
+        exit 1
+    fi
+    BOOT_AHCI_ADDR=",addr=0x1f"
+    ctrladdr=$(printf '0x%x' $((31 - cidx)))   # 0x1e, 0x1d, 0x1c
+    EXTRA_CTRL_ARGS="$EXTRA_CTRL_ARGS -drive file=$f,format=raw,if=none,id=cdrive$cidx -device ich9-ahci,id=ahci$cidx,addr=$ctrladdr -device ide-hd,bus=ahci$cidx.0,unit=0,drive=cdrive$cidx"
+    echo "run-networking.sh: extra drive $f -> own controller ahci$cidx -> guest /dev/storage/sata$cidx"
+    cidx=$((cidx + 1))
+done
+IFS=$OLDIFS
 
 APPEND="root=/dev/storage/sata0 trap serial_debug"
 GFX_ARGS=""
@@ -175,8 +276,10 @@ fi
 qemu-system-i386 -cpu qemu32,+sse,+sse2 $ACCEL_ARG \
   -machine pc,i8042=off \
   -drive file=rootfs.img,format=raw,if=none,id=drive0 \
-  -device ich9-ahci,id=sata0 \
+  -device ich9-ahci,id=sata0$BOOT_AHCI_ADDR \
   -device ide-hd,bus=sata0.0,unit=0,drive=drive0 \
+  $EXTRA_DRIVE_ARGS \
+  $EXTRA_CTRL_ARGS \
   -device piix3-usb-uhci -device usb-kbd -device usb-mouse \
   $NETDEV_ARGS \
   -kernel "$KERNEL" \
