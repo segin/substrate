@@ -525,6 +525,12 @@ ssize_t freebsd_sys_getdirentries_v11(int fd, char *buf, unsigned int nbytes, in
         struct dirent *d = readdir_fs((fs_node_t *)f->f_data, f->f_offset);
         if (!d) break;
 
+        /* readdir_fs's index is an opaque BYTE OFFSET (ext2 is byte-offset
+         * based -- see kern_getdents); advance by the entry's d_off cursor,
+         * not a fixed 1, or we re-read mid-record forever. */
+        uint64_t cur_off  = (uint64_t)f->f_offset;
+        uint64_t next_off = (d->d_off > cur_off) ? d->d_off : cur_off + 1;
+
         uint8_t namlen = (uint8_t)strnlen(d->d_name, 255);
         /* header=8 bytes + name + NUL, aligned to 4 bytes. */
         uint16_t reclen = (uint16_t)(((size_t)8 + namlen + 1 + 3) & ~(size_t)3);
@@ -544,7 +550,7 @@ ssize_t freebsd_sys_getdirentries_v11(int fd, char *buf, unsigned int nbytes, in
 
         memcpy(kbuf + bpos, &kfbd, reclen);
         bpos += reclen;
-        f->f_offset++;
+        f->f_offset = (off_t)next_off;
     }
 
     if (bpos == 0) { kfree(kbuf, nbytes); return 0; }
@@ -584,6 +590,15 @@ ssize_t freebsd_sys_getdirentries(int fd, char *buf, size_t nbytes, int64_t *bas
         struct dirent *d = readdir_fs((fs_node_t *)f->f_data, f->f_offset);
         if (!d) break;
 
+        /* readdir_fs's index is an opaque BYTE OFFSET into the directory
+         * (ext2 is byte-offset/cookie based, see kern_getdents); the next
+         * cursor is the entry's d_off, with a +1 fallback for index-based
+         * filesystems that leave d_off == 0.  Advancing by a fixed 1 lands
+         * mid-record and re-reads the same entry forever -- the FreeBSD
+         * rcorder hang reading /etc/rc.d. */
+        uint64_t cur_off  = (uint64_t)f->f_offset;
+        uint64_t next_off = (d->d_off > cur_off) ? d->d_off : cur_off + 1;
+
         uint16_t namlen = (uint16_t)strnlen(d->d_name, 255);
         /* header=24 bytes + name + NUL, aligned to 8 bytes */
         uint16_t reclen = (uint16_t)(((size_t)24 + namlen + 1 + 7) & ~(size_t)7);
@@ -595,7 +610,7 @@ ssize_t freebsd_sys_getdirentries(int fd, char *buf, size_t nbytes, int64_t *bas
 
         memset(&kfbd, 0, reclen);
         kfbd.d_fileno = d->d_ino;
-        kfbd.d_off    = (int64_t)(f->f_offset + 1);
+        kfbd.d_off    = (int64_t)next_off;
         kfbd.d_reclen = reclen;
         kfbd.d_type   = d->d_type;
         kfbd.d_pad0   = 0;
@@ -606,7 +621,7 @@ ssize_t freebsd_sys_getdirentries(int fd, char *buf, size_t nbytes, int64_t *bas
 
         memcpy(kbuf + bpos, &kfbd, reclen);
         bpos += reclen;
-        f->f_offset++;
+        f->f_offset = (off_t)next_off;
     }
 
     if (bpos == 0) { kfree(kbuf, nbytes); return 0; }
