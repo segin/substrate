@@ -5,9 +5,11 @@
 #include <sys/tty.h>
 #include <kern/time.h>
 #include <string.h>
+#include <stdio.h>
 #include <stddef.h>
 #include <vm/vm_kmem.h>
 #include <drivers/console/console.h>
+#include <exec/perso/personality.h>
 
 static size_t tty_read_proxy(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
     (void)node;
@@ -58,6 +60,16 @@ typedef struct devfs_entry {
     struct devfs_entry *next;
     uint8_t owns_node;
     char link_target[128];
+    /*
+     * Personality visibility mask.  0 = universal (visible to every
+     * process — the default for all existing nodes).  Otherwise a bitmask
+     * over personality ids 0..31 (the ELF personalities; PERS_NATIVE=0,
+     * PERS_NETBSD=2, PERS_LINUX=3, PERS_FREEBSD=9, ...): the node is only
+     * visible to a process whose perso_id bit is set.  A perso-specific
+     * entry SHADOWS a same-name universal entry for the matching process,
+     * which is how a node is "overridden" per personality.
+     */
+    uint32_t perso_mask;
 } devfs_entry_t;
 
 static devfs_entry_t *root_entry = NULL;
@@ -87,16 +99,18 @@ fs_node_t *devfs_root_node_ptr = NULL;
 #define DEVFS_DEFERRED_MAX 32
 static struct {
     fs_node_t *nodes[DEVFS_DEFERRED_MAX];
+    uint32_t   mask[DEVFS_DEFERRED_MAX];
     int count;
 } devfs_deferred = { .count = 0 };
 
 /* Same problem for aliases: drivers like the audio framework wire up
  * /dev/audio -> /dev/audio0 during pre-vfs init, so devfs_register_alias
  * also has to queue when root_entry is still NULL. */
-#define DEVFS_DEFERRED_ALIAS_MAX 16
+#define DEVFS_DEFERRED_ALIAS_MAX 32
 static struct {
     char path[DEVFS_DEFERRED_ALIAS_MAX][64];
     char target[DEVFS_DEFERRED_ALIAS_MAX][64];
+    uint32_t mask[DEVFS_DEFERRED_ALIAS_MAX];
     int count;
 } devfs_deferred_alias = { .count = 0 };
 
@@ -116,6 +130,8 @@ static void devfs_refresh_timestamps(fs_node_t *node) {
     node->ctime = get_boot_time();
 }
 
+/* Raw, personality-blind child lookup (first name match).  Used for tree
+ * construction; user-facing lookups go through devfs_present_child(). */
 static devfs_entry_t *devfs_find_child(devfs_entry_t *parent, const char *name) {
     devfs_entry_t *curr;
 
@@ -131,7 +147,73 @@ static devfs_entry_t *devfs_find_child(devfs_entry_t *parent, const char *name) 
     return NULL;
 }
 
-static devfs_entry_t *devfs_create_entry(const char *name, fs_node_t *node, devfs_entry_t *parent) {
+/* Child lookup matching both name AND personality mask — lets a universal
+ * and a perso-specific entry of the same name coexist (the override case). */
+static devfs_entry_t *devfs_find_child_mask(devfs_entry_t *parent,
+                                            const char *name, uint32_t perso_mask) {
+    devfs_entry_t *curr;
+
+    if (parent == NULL || name == NULL) {
+        return NULL;
+    }
+    for (curr = parent->child; curr; curr = curr->next) {
+        if (curr->perso_mask == perso_mask && strcmp(curr->name, name) == 0) {
+            return curr;
+        }
+    }
+    return NULL;
+}
+
+/* Is an entry visible to the calling process given its personality? */
+static int devfs_entry_visible(const devfs_entry_t *e) {
+    int pid;
+
+    if (e == NULL) return 0;
+    if (e->perso_mask == 0) return 1;            /* universal */
+    if (current_process == NULL) return 1;       /* kernel/early context sees all */
+    pid = current_process->perso_id;
+    if (pid < 0 || pid >= 32) return 0;          /* a.out personalities: universal only */
+    return (e->perso_mask & (1u << pid)) != 0;
+}
+
+/* A universal (mask 0) entry is shadowed when a same-name perso-specific
+ * entry is visible to the caller — that is how a node gets "overridden"
+ * for a personality. */
+static int devfs_entry_shadowed(devfs_entry_t *parent, const devfs_entry_t *e) {
+    devfs_entry_t *c;
+
+    if (parent == NULL || e == NULL || e->perso_mask != 0) {
+        return 0;
+    }
+    for (c = parent->child; c; c = c->next) {
+        if (c == e) continue;
+        if (c->perso_mask != 0 && strcmp(c->name, e->name) == 0 &&
+            devfs_entry_visible(c)) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* The entry that the calling process should see for `name`: a visible
+ * perso-specific match wins over a universal one. */
+static devfs_entry_t *devfs_present_child(devfs_entry_t *parent, const char *name) {
+    devfs_entry_t *curr, *universal = NULL;
+
+    if (parent == NULL || name == NULL) {
+        return NULL;
+    }
+    for (curr = parent->child; curr; curr = curr->next) {
+        if (strcmp(curr->name, name) != 0) continue;
+        if (!devfs_entry_visible(curr)) continue;
+        if (curr->perso_mask != 0) return curr;  /* perso-specific overrides */
+        universal = curr;
+    }
+    return universal;
+}
+
+static devfs_entry_t *devfs_create_entry(const char *name, fs_node_t *node,
+                                         devfs_entry_t *parent, uint32_t perso_mask) {
     devfs_entry_t *entry;
 
     if (name == NULL || node == NULL || parent == NULL) {
@@ -144,6 +226,7 @@ static devfs_entry_t *devfs_create_entry(const char *name, fs_node_t *node, devf
     strncpy(entry->name, name, sizeof(entry->name) - 1);
     entry->node = node;
     entry->parent = parent;
+    entry->perso_mask = perso_mask;
 
     entry->next = parent->child;
     parent->child = entry;
@@ -210,17 +293,16 @@ static struct dirent *devfs_dir_readdir(fs_node_t *node, uint64_t index) {
 
     if (!entry) return NULL;
 
-    child = entry->child;
-    while (child && i < index) {
-        child = child->next;
+    for (child = entry->child; child; child = child->next) {
+        if (!devfs_entry_visible(child)) continue;
+        if (devfs_entry_shadowed(entry, child)) continue;
+        if (i == index) {
+            strncpy(dev_dirent.d_name, child->name, sizeof(dev_dirent.d_name) - 1);
+            dev_dirent.d_name[sizeof(dev_dirent.d_name) - 1] = '\0';
+            dev_dirent.d_ino = (uintptr_t)child;
+            return &dev_dirent;
+        }
         i++;
-    }
-
-    if (child) {
-        strncpy(dev_dirent.d_name, child->name, sizeof(dev_dirent.d_name) - 1);
-        dev_dirent.d_name[sizeof(dev_dirent.d_name) - 1] = '\0';
-        dev_dirent.d_ino = (uintptr_t)child;
-        return &dev_dirent;
     }
     return NULL;
 }
@@ -249,7 +331,7 @@ static fs_node_t *devfs_dir_finddir(fs_node_t *node, char *name) {
         return node;   /* devfs root with no covered node — self */
     }
 
-    child = devfs_find_child(entry, name);
+    child = devfs_present_child(entry, name);
     if (child) {
         devfs_refresh_timestamps(child->node);
         return child->node;
@@ -396,7 +478,7 @@ static void devfs_remove_entry(devfs_entry_t *entry) {
     }
 }
 
-static int devfs_add_entry(const char *path, fs_node_t *node) {
+static int devfs_add_entry(const char *path, fs_node_t *node, uint32_t perso_mask) {
     devfs_entry_t *current = root_entry;
     char name_buf[128];
     const char *p = path;
@@ -418,12 +500,13 @@ static int devfs_add_entry(const char *path, fs_node_t *node) {
 
         next = devfs_find_child(current, name_buf);
         if (sep) {
+            /* Intermediate path components are always universal directories. */
             if (!next) {
                 fs_node_t *dir_node = devfs_create_dir_node(name_buf);
                 if (dir_node == NULL) {
                     return -1;
                 }
-                next = devfs_create_entry(name_buf, dir_node, current);
+                next = devfs_create_entry(name_buf, dir_node, current, 0);
             }
             if (next == NULL || (next->node->flags & 0x7) != FS_DIRECTORY) {
                 return -1;
@@ -433,6 +516,9 @@ static int devfs_add_entry(const char *path, fs_node_t *node) {
             continue;
         }
 
+        /* Leaf: match name AND mask so a universal node and a
+         * personality-specific override of the same name coexist. */
+        next = devfs_find_child_mask(current, name_buf, perso_mask);
         if (next != NULL) {
             next->node = node;
             if (!node->impl) {
@@ -441,7 +527,7 @@ static int devfs_add_entry(const char *path, fs_node_t *node) {
             return 0;
         }
 
-        return devfs_create_entry(name_buf, node, current) != NULL ? 0 : -1;
+        return devfs_create_entry(name_buf, node, current, perso_mask) != NULL ? 0 : -1;
     }
 }
 
@@ -449,12 +535,12 @@ static void devfs_create_common_dir(const char *name) {
     if (!devfs_find_child(root_entry, name)) {
         fs_node_t *dir_node = devfs_create_dir_node(name);
         if (dir_node) {
-            (void)devfs_create_entry(name, dir_node, root_entry);
+            (void)devfs_create_entry(name, dir_node, root_entry, 0);
         }
     }
 }
 
-void devfs_register_device(fs_node_t *node) {
+void devfs_register_device_perso(fs_node_t *node, uint32_t perso_mask) {
     char path[128];
 
     if (!node || !node->name[0]) {
@@ -466,6 +552,7 @@ void devfs_register_device(fs_node_t *node) {
     /* Queue for replay if devfs tree is not yet initialized */
     if (!root_entry) {
         if (devfs_deferred.count < DEVFS_DEFERRED_MAX) {
+            devfs_deferred.mask[devfs_deferred.count] = perso_mask;
             devfs_deferred.nodes[devfs_deferred.count++] = node;
         }
         return;
@@ -477,7 +564,7 @@ void devfs_register_device(fs_node_t *node) {
     }
 
     if (strchr(node->name, '/')) {
-        (void)devfs_add_entry(node->name, node);
+        (void)devfs_add_entry(node->name, node, perso_mask);
         return;
     }
 
@@ -485,11 +572,15 @@ void devfs_register_device(fs_node_t *node) {
         strncpy(path, "storage/", sizeof(path) - 1);
         path[sizeof(path) - 1] = '\0';
         strncat(path, node->name, sizeof(path) - strlen(path) - 1);
-        (void)devfs_add_entry(path, node);
+        (void)devfs_add_entry(path, node, perso_mask);
         return;
     }
 
-    (void)devfs_add_entry(node->name, node);
+    (void)devfs_add_entry(node->name, node, perso_mask);
+}
+
+void devfs_register_device(fs_node_t *node) {
+    devfs_register_device_perso(node, 0);
 }
 
 void devfs_unregister_device(fs_node_t *node) {
@@ -505,7 +596,8 @@ void devfs_unregister_device(fs_node_t *node) {
     }
 }
 
-int devfs_register_alias(const char *path, const char *target) {
+int devfs_register_alias_perso(const char *path, const char *target,
+                               uint32_t perso_mask) {
     fs_node_t *node;
     devfs_entry_t *entry;
 
@@ -523,12 +615,15 @@ int devfs_register_alias(const char *path, const char *target) {
             strncpy(devfs_deferred_alias.target[n], target,
                     sizeof(devfs_deferred_alias.target[n]) - 1);
             devfs_deferred_alias.target[n][sizeof(devfs_deferred_alias.target[n]) - 1] = '\0';
+            devfs_deferred_alias.mask[n] = perso_mask;
         }
         return 0;
     }
 
+    /* Reuse an existing entry only when its mask matches — otherwise a
+     * personality-specific alias must coexist with a universal one. */
     entry = devfs_lookup_path(path);
-    if (entry != NULL) {
+    if (entry != NULL && entry->perso_mask == perso_mask) {
         if (entry->node == NULL || (entry->node->flags & 0x7) != FS_SYMLINK) {
             return -1;
         }
@@ -550,7 +645,7 @@ int devfs_register_alias(const char *path, const char *target) {
     node->readlink = devfs_symlink_readlink;
     devfs_refresh_timestamps(node);
 
-    if (devfs_add_entry(path, node) != 0) {
+    if (devfs_add_entry(path, node, perso_mask) != 0) {
         kfree(node, sizeof(*node));
         return -1;
     }
@@ -564,6 +659,10 @@ int devfs_register_alias(const char *path, const char *target) {
     strncpy(entry->link_target, target, sizeof(entry->link_target) - 1);
     entry->link_target[sizeof(entry->link_target) - 1] = '\0';
     return 0;
+}
+
+int devfs_register_alias(const char *path, const char *target) {
+    return devfs_register_alias_perso(path, target, 0);
 }
 
 void devfs_unregister_alias(const char *path) {
@@ -635,16 +734,33 @@ void devfs_init(void) {
      * terminal (X server launched as init). */
     (void)devfs_register_alias("tty0", "tty1");
 
+    /* FreeBSD-only virtual-console aliases: FreeBSD's /etc/ttys spawns
+     * getty on ttyv0..ttyv7 (syscons VTYs), which substrate doesn't name.
+     * Expose them — visible ONLY to FreeBSD processes — as aliases onto
+     * substrate's virtual consoles (ttyv0 -> tty1, ...).  Native/Linux
+     * processes never see these nodes. */
+    {
+        const uint32_t fbsd = 1u << PERS_FREEBSD;
+        char alias[16], target[16];
+        for (int v = 0; v < 8; v++) {
+            snprintf(alias, sizeof(alias), "ttyv%d", v);
+            snprintf(target, sizeof(target), "tty%d", v + 1);
+            (void)devfs_register_alias_perso(alias, target, fbsd);
+        }
+    }
+
     /* Replay any devices that registered before devfs_init() */
     for (int i = 0; i < devfs_deferred.count; i++) {
-        devfs_register_device(devfs_deferred.nodes[i]);
+        devfs_register_device_perso(devfs_deferred.nodes[i],
+                                    devfs_deferred.mask[i]);
     }
     devfs_deferred.count = 0;
 
     /* Same for aliases queued before the tree existed. */
     for (int i = 0; i < devfs_deferred_alias.count; i++) {
-        (void)devfs_register_alias(devfs_deferred_alias.path[i],
-                                   devfs_deferred_alias.target[i]);
+        (void)devfs_register_alias_perso(devfs_deferred_alias.path[i],
+                                         devfs_deferred_alias.target[i],
+                                         devfs_deferred_alias.mask[i]);
     }
     devfs_deferred_alias.count = 0;
 }

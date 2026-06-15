@@ -213,8 +213,19 @@ void vfs_init(void);
 
 void devfs_init(void);
 void devfs_register_device(fs_node_t *node);
+/*
+ * Personality-scoped registration.  perso_mask == 0 means universal (the
+ * default; identical to the non-_perso variants).  A non-zero mask is a
+ * bitmask over personality ids 0..31 (PERS_NATIVE=0, PERS_NETBSD=2,
+ * PERS_LINUX=3, PERS_FREEBSD=9, ...): the node/alias is then visible only
+ * to a process whose perso_id bit is set, and a perso-specific entry
+ * overrides (shadows) a same-name universal one for those processes.
+ */
+void devfs_register_device_perso(fs_node_t *node, uint32_t perso_mask);
 void devfs_unregister_device(fs_node_t *node);
 int devfs_register_alias(const char *path, const char *target);
+int devfs_register_alias_perso(const char *path, const char *target,
+                               uint32_t perso_mask);
 void devfs_unregister_alias(const char *path);
 
 /* shmfs — POSIX shared-memory filesystem.  Mounted at /dev/shm
