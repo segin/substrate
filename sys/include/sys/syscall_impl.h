@@ -48,6 +48,11 @@ extern int sys_setuid(int);
 extern int sys_getgid(void);
 extern int sys_getegid(void);
 extern int sys_setgid(int);
+extern int sys_seteuid(int);
+extern int sys_setegid(int);
+extern int sys_setreuid(int, int);
+extern int sys_setregid(int, int);
+extern int sys_getsid(int);
 
 /* File I/O - NOTE: native uses 64-bit types! Foreign personalities need wrappers */
 extern ssize_t sys_read(int, char*, size_t);
@@ -121,6 +126,7 @@ extern int sys_fchmodat(int, const char*, int, int);
 extern int sys_chdir(const char*);
 extern int sys_fchdir(int);
 extern int sys_chroot(const char*);
+extern int sys_fchroot(int);
 extern int sys_access(const char*, int);
 extern int sys_utime(const char*, void*);
 extern int sys_sync(void);

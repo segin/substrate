@@ -245,4 +245,43 @@
 #define NETBSD_SYS_semop          222
 #define NETBSD_SYS_____semctl50   442
 
+/* --- Additional syscalls (numbers verified against NetBSD
+ *     sys/kern/syscalls.master).  chflags/fchflags/madvise/getgroups/
+ *     setgroups/fsync/setpriority/getpriority/symlink/__getlogin are
+ *     already #defined above; only the not-yet-numbered ones go here. --- */
+/* obreak (17, == existing NETBSD_SYS_break) and getrandom (91, == the
+ * mis-named existing NETBSD_SYS_getdopt slot) are wired via those existing
+ * macros to avoid duplicate-number defines. */
+#define NETBSD_SYS_setreuid       126
+#define NETBSD_SYS_setregid       127
+#define NETBSD_SYS_rename         128
+#define NETBSD_SYS_flock          131
+#define NETBSD_SYS_mkfifo         132
+#define NETBSD_SYS_pread          173
+#define NETBSD_SYS_pwrite         174
+#define NETBSD_SYS_setgid         181
+#define NETBSD_SYS_setegid        182
+#define NETBSD_SYS_seteuid        183
+#define NETBSD_SYS_pathconf       191
+#define NETBSD_SYS_fpathconf      192
+#define NETBSD_SYS_setrlimit      195
+#define NETBSD_SYS_truncate       200
+#define NETBSD_SYS_ftruncate      201
+#define NETBSD_SYS_mlock          203
+#define NETBSD_SYS_munlock        204
+#define NETBSD_SYS_getpgid        207
+#define NETBSD_SYS_reboot         208
+#define NETBSD_SYS_fdatasync      241
+#define NETBSD_SYS_mlockall       242
+#define NETBSD_SYS_munlockall     243
+#define NETBSD_SYS___posix_rename 270
+#define NETBSD_SYS_minherit       273
+#define NETBSD_SYS_msync          277
+#define NETBSD_SYS_getsid         286
+#define NETBSD_SYS_preadv         289
+#define NETBSD_SYS_pwritev        290
+#define NETBSD_SYS_fchroot        297
+#define NETBSD_SYS__lwp_kill      318
+#define NETBSD_SYS___getrusage50  445
+
 #endif /* _NETBSD_SYSCALLS_H */

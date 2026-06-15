@@ -307,6 +307,7 @@ extern int random_get_bytes_flags(void *, size_t, unsigned int);
 #define NBSD_CTL_VM            2
 #define NBSD_CTL_HW            6
 #define NBSD_CTL_QUERY        (-2)
+#define NBSD_KERN_CLOCKRATE   12
 #define NBSD_KERN_ARND        81
 #define NBSD_KERN_PROC2       47
 #define NBSD_KERN_PROC_ARGS   48   /* {.., KERN_PROC_ARGS, pid, op} */
@@ -618,6 +619,30 @@ int netbsd_sys_sysctl(int *name, unsigned int namelen,
         return 0;
     }
 
+    /* KERN_CLOCKRATE -- struct clockinfo { int hz, tick, tickadj, stathz,
+     * profhz; }.  NetBSD's sysconf(_SC_CLK_TCK) reads .hz from here; if it
+     * comes back zero, callers that compute CPU time as ticks/CLK_TCK
+     * (e.g. ksh's `time`/SECONDS accounting) divide by zero and take a
+     * SIGFPE.  substrate does not track per-process cpu ticks (times(2)
+     * reports zero), so the exact rate is cosmetic -- report the
+     * conventional 100 Hz. */
+    if (namelen >= 2 && kname[0] == NBSD_CTL_KERN &&
+        kname[1] == NBSD_KERN_CLOCKRATE) {
+        struct { int32_t hz, tick, tickadj, stathz, profhz; } ci =
+            { 100, 1000000 / 100, 0, 100, 100 };
+        unsigned int want = 0;
+        if (oldlenp && copyin(oldlenp, &want, sizeof(want)) != 0)
+            return -EFAULT;
+        if (oldp) {
+            unsigned int n = (want < sizeof(ci)) ? want : sizeof(ci);
+            if (copyout(&ci, oldp, n) != 0) return -EFAULT;
+        }
+        unsigned int wrote = sizeof(ci);
+        if (oldlenp && copyout(&wrote, oldlenp, sizeof(wrote)) != 0)
+            return -EFAULT;
+        return 0;
+    }
+
     /* KERN_PROC2 (kvm_getproc2) -- process listing for ps. */
     if (kname[0] == NBSD_CTL_KERN && kname[1] == NBSD_KERN_PROC2) {
         if (namelen < 6) return -EINVAL;
@@ -680,4 +705,156 @@ int netbsd_sys_sysctl(int *name, unsigned int namelen,
                                 oldp, oldlenp);
     return nbsd_sysctl_int(leaf->ifn ? leaf->ifn() : leaf->ival,
                            oldp, oldlenp);
+}
+
+/* ===================================================================
+ * Additional NetBSD syscall wrappers (ABI adaptation for syscalls that
+ * are not 1:1 with a substrate handler).  Verified syscall numbers come
+ * from NetBSD's own sys/kern/syscalls.master.
+ * =================================================================== */
+#include <sys/times.h>
+#include <sys/resource.h>
+
+#ifndef SEEK_SET
+#define SEEK_SET 0
+#define SEEK_CUR 1
+#endif
+
+/*
+ * No-op success.  For NetBSD operations substrate has no backing for --
+ * BSD file flags (chflags/fchflags), memory locking (mlock/munlock/
+ * mlockall/munlockall) and minherit -- returning 0 lets callers proceed
+ * rather than aborting on ENOSYS; substrate never pages user memory out,
+ * so "locked" is effectively always true.
+ */
+int netbsd_sys_zero(void) { return 0; }
+
+/* mkfifo(path, mode): a FIFO is mknod() with the S_IFIFO type bit. */
+int netbsd_sys_mkfifo(const char *path, int mode) {
+    return sys_mknod(path, (mode & 07777) | S_IFIFO, 0);
+}
+
+/* truncate(path, PAD, off_t length): drop the i386 off_t-alignment pad. */
+int netbsd_sys_truncate(const char *path, int pad, uint32_t lo, uint32_t hi) {
+    (void)pad;
+    return sys_truncate(path, lo, hi);
+}
+
+/* ftruncate(fd, PAD, off_t length). */
+int netbsd_sys_ftruncate(int fd, int pad, uint32_t lo, uint32_t hi) {
+    (void)pad;
+    return sys_ftruncate(fd, lo, hi);
+}
+
+/* reboot(opt, char *bootstr): substrate's reboot takes only the howto. */
+int netbsd_sys_reboot(int opt, const char *bootstr) {
+    (void)bootstr;
+    return sys_reboot(opt);
+}
+
+/* _lwp_kill(lwpid, signo): deliver a (translated) signal to one LWP. */
+int netbsd_sys_lwp_kill(int target, int signo) {
+    return sys_thr_kill(target, netbsd_to_native_signo(signo));
+}
+
+/* pread(fd, buf, nbyte, PAD, off_t offset): read at an absolute offset
+ * without disturbing the descriptor's file pointer. */
+int64_t netbsd_sys_pread(int fd, void *buf, size_t nbyte, int pad,
+                         uint32_t off_lo, uint32_t off_hi) {
+    (void)pad;
+    int64_t saved = sys_lseek(fd, 0, 0, SEEK_CUR);
+    if (saved < 0) return saved;
+    int64_t pos = sys_lseek(fd, off_lo, off_hi, SEEK_SET);
+    if (pos < 0) return pos;
+    ssize_t n = sys_read(fd, (char *)buf, nbyte);
+    sys_lseek(fd, (uint32_t)saved, (uint32_t)((uint64_t)saved >> 32), SEEK_SET);
+    return n;
+}
+
+/* pwrite(fd, buf, nbyte, PAD, off_t offset). */
+int64_t netbsd_sys_pwrite(int fd, const void *buf, size_t nbyte, int pad,
+                          uint32_t off_lo, uint32_t off_hi) {
+    (void)pad;
+    int64_t saved = sys_lseek(fd, 0, 0, SEEK_CUR);
+    if (saved < 0) return saved;
+    int64_t pos = sys_lseek(fd, off_lo, off_hi, SEEK_SET);
+    if (pos < 0) return pos;
+    ssize_t n = sys_write(fd, (const char *)buf, nbyte);
+    sys_lseek(fd, (uint32_t)saved, (uint32_t)((uint64_t)saved >> 32), SEEK_SET);
+    return n;
+}
+
+/* preadv/pwritev(fd, iov, iovcnt, PAD, off_t offset). */
+int64_t netbsd_sys_preadv(int fd, const void *iov, int iovcnt, int pad,
+                          uint32_t off_lo, uint32_t off_hi) {
+    (void)pad;
+    int64_t saved = sys_lseek(fd, 0, 0, SEEK_CUR);
+    if (saved < 0) return saved;
+    if (sys_lseek(fd, off_lo, off_hi, SEEK_SET) < 0) return -EINVAL;
+    ssize_t n = sys_readv(fd, iov, iovcnt);
+    sys_lseek(fd, (uint32_t)saved, (uint32_t)((uint64_t)saved >> 32), SEEK_SET);
+    return n;
+}
+
+int64_t netbsd_sys_pwritev(int fd, const void *iov, int iovcnt, int pad,
+                           uint32_t off_lo, uint32_t off_hi) {
+    (void)pad;
+    int64_t saved = sys_lseek(fd, 0, 0, SEEK_CUR);
+    if (saved < 0) return saved;
+    if (sys_lseek(fd, off_lo, off_hi, SEEK_SET) < 0) return -EINVAL;
+    ssize_t n = sys_writev(fd, iov, iovcnt);
+    sys_lseek(fd, (uint32_t)saved, (uint32_t)((uint64_t)saved >> 32), SEEK_SET);
+    return n;
+}
+
+/* fpathconf(fd, name): substrate keeps no per-fd config store; report the
+ * fixed system limits for the common names and reject the rest. */
+int netbsd_sys_fpathconf(int fd, int name) {
+    (void)fd;
+    switch (name) {
+    case 1:  return 32767;  /* _PC_LINK_MAX */
+    case 2:  return 255;    /* _PC_MAX_CANON */
+    case 3:  return 255;    /* _PC_MAX_INPUT */
+    case 4:  return 255;    /* _PC_NAME_MAX */
+    case 5:  return 1024;   /* _PC_PATH_MAX */
+    case 6:  return 512;    /* _PC_PIPE_BUF */
+    case 7:  return 1;      /* _PC_CHOWN_RESTRICTED */
+    case 8:  return 0;      /* _PC_NO_TRUNC */
+    case 9:  return 0;      /* _PC_VDISABLE */
+    default: return -EINVAL;
+    }
+}
+
+/*
+ * __getrusage50(who, rusage): the modern NetBSD rusage embeds 64-bit
+ * time_t timevals (12 bytes each on i386), so it cannot share substrate's
+ * native 16-byte-timeval rusage layout -- marshal it explicitly.  We only
+ * have aggregate user/system tick counts (HZ=128), so the cpu-time fields
+ * are filled and the rest zeroed.
+ */
+struct netbsd_rusage50 {
+    int64_t  ru_utime_sec;  int32_t ru_utime_usec;
+    int64_t  ru_stime_sec;  int32_t ru_stime_usec;
+    int32_t  ru_maxrss, ru_ixrss, ru_idrss, ru_isrss;
+    int32_t  ru_minflt, ru_majflt, ru_nswap;
+    int32_t  ru_inblock, ru_oublock;
+    int32_t  ru_msgsnd, ru_msgrcv, ru_nsignals;
+    int32_t  ru_nvcsw, ru_nivcsw;
+};
+
+int netbsd_sys_getrusage50(int who, void *urusage) {
+    if (who != RUSAGE_SELF && who != RUSAGE_CHILDREN) return -EINVAL;
+    struct tms t;
+    if ((clock_t)kern_times(&t) == (clock_t)-1) return -1;
+
+    struct netbsd_rusage50 r;
+    memset(&r, 0, sizeof(r));
+    clock_t ut = (who == RUSAGE_SELF) ? t.tms_utime : t.tms_cutime;
+    clock_t st = (who == RUSAGE_SELF) ? t.tms_stime : t.tms_cstime;
+    r.ru_utime_sec  = ut / 128;
+    r.ru_utime_usec = ((ut % 128) * 1000000) / 128;
+    r.ru_stime_sec  = st / 128;
+    r.ru_stime_usec = ((st % 128) * 1000000) / 128;
+    if (copyout(&r, urusage, sizeof(r)) != 0) return -EFAULT;
+    return 0;
 }

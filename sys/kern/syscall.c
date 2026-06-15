@@ -1373,6 +1373,29 @@ int kern_chroot(const char *path) {
     return 0;
 }
 
+/*
+ * fchroot(2): like chroot(2) but the new root is the directory referenced
+ * by an open file descriptor.  Restricted to the superuser; the descriptor
+ * must reference a directory.
+ */
+int kern_fchroot(int fd) {
+    if (current_process->euid != 0) return -EPERM;
+    if (fd < 0 || fd >= MAX_FD) return -EBADF;
+    file_t *f = current_process->fds[fd];
+    if (!f || !f->f_data) return -EBADF;
+
+    fs_node_t *node = (fs_node_t *)f->f_data;
+    if ((node->flags & 0x07) != FS_DIRECTORY) return -ENOTDIR;
+
+    open_fs(node, 1, 0);
+    current_process->root_node = node;
+    return 0;
+}
+
+int sys_fchroot(int fd) {
+    return kern_fchroot(fd);
+}
+
 extern int vfs_mkdir(const char *path, uint16_t permission);
 int sys_mkdir(const char *p, int m) {
     char kpath[256];
@@ -1465,6 +1488,93 @@ int sys_setgid(int g) {
     }
     return -EPERM;
 }
+
+/*
+ * seteuid(2): set only the effective uid.  An unprivileged process may set
+ * its euid to its real, effective or saved uid; the superuser to anything.
+ * Real and saved uid are unchanged.
+ */
+int sys_seteuid(int euid) {
+    process_t *p = current_process;
+    if (p->euid == 0 ||
+        (uint32_t)euid == p->uid ||
+        (uint32_t)euid == p->euid ||
+        (uint32_t)euid == p->suid) {
+        p->euid = euid;
+        return 0;
+    }
+    return -EPERM;
+}
+
+/* setegid(2): the gid analogue of seteuid(2). */
+int sys_setegid(int egid) {
+    process_t *p = current_process;
+    if (p->euid == 0 ||
+        (uint32_t)egid == p->gid ||
+        (uint32_t)egid == p->egid ||
+        (uint32_t)egid == p->sgid) {
+        p->egid = egid;
+        return 0;
+    }
+    return -EPERM;
+}
+
+/*
+ * setreuid(2): set the real and/or effective uid (-1 leaves a field
+ * unchanged).  Unprivileged rules (4.4BSD/POSIX): the real uid may become
+ * the current real or effective uid; the effective uid may become the
+ * current real, effective or saved uid.  Whenever the real uid is changed,
+ * or the effective uid is set to a value other than the previous real uid,
+ * the saved uid is set to the new effective uid.  The superuser may set
+ * either to any value.
+ */
+int sys_setreuid(int ruid, int euid) {
+    process_t *p = current_process;
+    int priv = (p->euid == 0);
+    uint32_t new_ruid = (ruid == -1) ? p->uid : (uint32_t)ruid;
+    uint32_t new_euid = (euid == -1) ? p->euid : (uint32_t)euid;
+
+    if (!priv) {
+        if (ruid != -1 &&
+            new_ruid != p->uid && new_ruid != p->euid)
+            return -EPERM;
+        if (euid != -1 &&
+            new_euid != p->uid && new_euid != p->euid && new_euid != p->suid)
+            return -EPERM;
+    }
+
+    int ruid_changed = (ruid != -1 && new_ruid != p->uid);
+    p->uid = new_ruid;
+    p->euid = new_euid;
+    if (ruid_changed || (euid != -1 && new_euid != p->uid))
+        p->suid = new_euid;
+    return 0;
+}
+
+/* setregid(2): the gid analogue of setreuid(2). */
+int sys_setregid(int rgid, int egid) {
+    process_t *p = current_process;
+    int priv = (p->euid == 0);
+    uint32_t new_rgid = (rgid == -1) ? p->gid : (uint32_t)rgid;
+    uint32_t new_egid = (egid == -1) ? p->egid : (uint32_t)egid;
+
+    if (!priv) {
+        if (rgid != -1 &&
+            new_rgid != p->gid && new_rgid != p->egid)
+            return -EPERM;
+        if (egid != -1 &&
+            new_egid != p->gid && new_egid != p->egid && new_egid != p->sgid)
+            return -EPERM;
+    }
+
+    int rgid_changed = (rgid != -1 && new_rgid != p->gid);
+    p->gid = new_rgid;
+    p->egid = new_egid;
+    if (rgid_changed || (egid != -1 && new_egid != p->gid))
+        p->sgid = new_egid;
+    return 0;
+}
+
 int sys_clone(uint32_t flags, void *child_stack, int *parent_tidptr, void *tls, int *child_tidptr) {
     (void)parent_tidptr;
     (void)tls;

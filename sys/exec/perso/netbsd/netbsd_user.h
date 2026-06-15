@@ -67,6 +67,24 @@ int netbsd_sys_sigprocmask(int how, const void *set, void *oset);
 int netbsd_sys_sigsuspend(const void *mask);
 int netbsd_sys_sigpending(void *set);
 
+/* Additional NetBSD syscall wrappers (netbsd_user.c). */
+int     netbsd_sys_zero(void);
+int     netbsd_sys_mkfifo(const char *path, int mode);
+int     netbsd_sys_truncate(const char *path, int pad, uint32_t lo, uint32_t hi);
+int     netbsd_sys_ftruncate(int fd, int pad, uint32_t lo, uint32_t hi);
+int     netbsd_sys_reboot(int opt, const char *bootstr);
+int     netbsd_sys_lwp_kill(int target, int signo);
+int64_t netbsd_sys_pread(int fd, void *buf, size_t nbyte, int pad,
+                         uint32_t off_lo, uint32_t off_hi);
+int64_t netbsd_sys_pwrite(int fd, const void *buf, size_t nbyte, int pad,
+                          uint32_t off_lo, uint32_t off_hi);
+int64_t netbsd_sys_preadv(int fd, const void *iov, int iovcnt, int pad,
+                          uint32_t off_lo, uint32_t off_hi);
+int64_t netbsd_sys_pwritev(int fd, const void *iov, int iovcnt, int pad,
+                           uint32_t off_lo, uint32_t off_hi);
+int     netbsd_sys_fpathconf(int fd, int name);
+int     netbsd_sys_getrusage50(int who, void *urusage);
+
 
 /* NetBSD older stat structure (stat43) */
 struct netbsd_stat43 {

@@ -1035,7 +1035,10 @@ void proc_reparent_children(process_t *p) {
         
         // Remove from p's list (conceptually done by iterating)
         child->p_parent = init;
-        
+        /* Keep the integer ppid in sync with the new parent so getppid(2)
+         * on an orphan returns init's pid (1), not the dead parent's. */
+        child->ppid = init->pid;
+
         // Add to init's list
         child->p_sibling = init->p_children;
         init->p_children = child;
