@@ -29,6 +29,7 @@
 #include <vfs/vfs.h>
 #include <drivers/console/uart/uart.h>
 #include <drivers/console/console.h>
+#include <drivers/console/pty.h>
 #include <include/sys/sysinfo.h>
 #include <sys/kern_syscalls.h>
 #include <sys/utsname.h>
@@ -538,6 +539,18 @@ static int kern_open_from(const char *path, int flags, int mode, fs_node_t *root
         }
         open_node = fifo_node;
         f->f_type = DTYPE_PIPE;   /* a FIFO is not seekable (lseek -> ESPIPE) */
+    }
+
+    /* BSD pty master (/dev/pty[pq][0-9a-f]): claiming it must fail with
+     * -EIO when already open so a legacy pty scan loop moves on — the
+     * void node->open callback can't report that, so claim it here. */
+    if (pty_is_bsd_master(open_node)) {
+        int err = pty_bsd_master_open(open_node);
+        if (err < 0) {
+            file_free(f);
+            proc_clear_fd(current_process, fd);
+            return err;
+        }
     }
 
     f->f_data = open_node;

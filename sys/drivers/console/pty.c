@@ -53,6 +53,8 @@ typedef struct pty_pair {
     int             slave_open;      /* fd-count proxy for slave */
     int             dead;            /* either side hung up */
     int             master_nonblock; /* O_NONBLOCK on the master fd */
+    int             is_bsd;          /* BSD-grid pair: static nodes, persistent */
+    void           *bsd_owner;       /* bsd_pty_t* when is_bsd */
 
     struct tty     *master_tty;
     struct tty     *slave_tty;
@@ -71,6 +73,30 @@ typedef struct pty_pair {
 
 static pty_pair_t *pty_pairs[PTY_MAX_PAIRS];
 static spinlock_t  pty_table_lock = SPINLOCK_INIT("pty_table");
+
+/*
+ * BSD-style PTY grid.  Unlike the Unix98 ptmx/pts pair (allocated on
+ * /dev/ptmx open, slave at the dynamic /dev/pts/N), a BSD pty is a
+ * statically-named node: master /dev/pty[pq][0-9a-f], slave the matching
+ * /dev/tty[pq][0-9a-f].  The master is claimed by opening it (EIO if it
+ * is already open); the slave opens immediately (no unlockpt).  The
+ * backing pty_pair_t is allocated lazily on first open and then kept for
+ * the node's lifetime — reused across open/close cycles — so the static
+ * fs_nodes never dangle.
+ */
+#define BSD_PTY_GROUPS  "pq"
+#define BSD_PTY_NUMS    "0123456789abcdef"
+#define BSD_PTY_NGROUP  2
+#define BSD_PTY_NNUM    16
+#define BSD_PTY_COUNT   (BSD_PTY_NGROUP * BSD_PTY_NNUM)
+
+typedef struct bsd_pty {
+    fs_node_t   master;     /* /dev/ptyXY */
+    fs_node_t   slave;      /* /dev/ttyXY */
+    pty_pair_t *pair;       /* lazily allocated, then persistent */
+} bsd_pty_t;
+
+static bsd_pty_t bsd_ptys[BSD_PTY_COUNT];
 
 /* ------------------------------------------------------------------ */
 /* Master read buffer                                                 */
@@ -245,24 +271,29 @@ static void pty_unpublish_slave_node(pty_pair_t *p) {
     }
 }
 
-int pty_alloc_pair(fs_node_t **master_node_out) {
+static void pty_destroy(pty_pair_t *p);
+
+/*
+ * Allocate the core of a PTY pair — index slot, pair struct, slave tty
+ * and master tty — but publish NO fs_node.  Shared by the Unix98
+ * (ptmx clone) and BSD (static grid) front ends, which differ only in
+ * how the master/slave nodes are named and discovered.  Returns the
+ * pair (locked=1, master_open=0) or NULL on exhaustion / OOM.
+ */
+static pty_pair_t *pty_pair_alloc_core(void) {
     int idx;
     pty_pair_t *p;
-
-    if (!master_node_out) {
-        return -EINVAL;
-    }
 
     spinlock_acquire(&pty_table_lock);
     idx = pty_alloc_index_locked();
     if (idx < 0) {
         spinlock_release(&pty_table_lock);
-        return -ENOSPC;
+        return NULL;
     }
     p = kmalloc(sizeof(*p));
     if (!p) {
         spinlock_release(&pty_table_lock);
-        return -ENOMEM;
+        return NULL;
     }
     memset(p, 0, sizeof(*p));
     p->magic  = PTY_MAGIC;
@@ -279,7 +310,7 @@ int pty_alloc_pair(fs_node_t **master_node_out) {
         pty_pairs[idx] = NULL;
         spinlock_release(&pty_table_lock);
         kfree(p, sizeof(*p));
-        return -ENOMEM;
+        return NULL;
     }
     p->slave_tty->driver_data = p;
     /* Slave runs the standard line discipline — already in tty_alloc
@@ -296,7 +327,7 @@ int pty_alloc_pair(fs_node_t **master_node_out) {
         pty_pairs[idx] = NULL;
         spinlock_release(&pty_table_lock);
         kfree(p, sizeof(*p));
-        return -ENOMEM;
+        return NULL;
     }
     memset(p->master_tty, 0, sizeof(*p->master_tty));
     p->master_tty->magic = 0x5401; /* TTY_MAGIC */
@@ -310,18 +341,29 @@ int pty_alloc_pair(fs_node_t **master_node_out) {
     p->master_tty->termios.c_oflag = 0;
     p->master_tty->termios.c_lflag = 0;
     p->master_tty->winsize = p->slave_tty->winsize;
+    return p;
+}
+
+int pty_alloc_pair(fs_node_t **master_node_out) {
+    pty_pair_t *p;
+    int idx;
+
+    if (!master_node_out) {
+        return -EINVAL;
+    }
+
+    p = pty_pair_alloc_core();
+    if (!p) {
+        return -ENOMEM;
+    }
+    idx = p->index;
 
     /* Master fs_node — published as /dev/ptm<N>, but the caller
      * (ptmx open) is the only consumer; it doesn't need to be in
      * the directory tree.  Just create it on the heap and return. */
     fs_node_t *mn = kmalloc(sizeof(fs_node_t));
     if (!mn) {
-        kfree(p->master_tty, sizeof(*p->master_tty));
-        tty_free(p->slave_tty);
-        spinlock_acquire(&pty_table_lock);
-        pty_pairs[idx] = NULL;
-        spinlock_release(&pty_table_lock);
-        kfree(p, sizeof(*p));
+        pty_destroy(p);
         return -ENOMEM;
     }
     memset(mn, 0, sizeof(*mn));
@@ -329,7 +371,6 @@ int pty_alloc_pair(fs_node_t **master_node_out) {
     mn->flags = FS_CHARDEVICE;
     mn->mask  = 0600;
     mn->ptr   = (fs_node_t *)p; /* impl pointer for master fops below */
-    extern int pty_master_node_poll(fs_node_t *node, void *waiter);
     mn->read  = pty_master_node_read;
     mn->write = pty_master_node_write;
     mn->ioctl = pty_master_node_ioctl;
@@ -345,6 +386,22 @@ int pty_alloc_pair(fs_node_t **master_node_out) {
 static void pty_destroy(pty_pair_t *p) {
     if (!p) return;
     p->magic = 0;
+    /*
+     * A BSD-grid pair owns no heap fs_nodes (master_node / slave_node
+     * stay NULL — the nodes live statically in bsd_ptys[]).  Detach the
+     * owner so a future open re-binds a fresh pair, and make sure the
+     * unpublish/kfree paths below never touch the static nodes.  (BSD
+     * pairs are normally kept persistent and never reach here; this is
+     * defensive.)
+     */
+    if (p->is_bsd && p->bsd_owner) {
+        bsd_pty_t *bp = (bsd_pty_t *)p->bsd_owner;
+        bp->pair = NULL;
+        bp->master.ptr = NULL;
+        bp->slave.ptr  = NULL;
+        p->master_node = NULL;
+        p->slave_node  = NULL;
+    }
     pty_unpublish_slave_node(p);
 
     /*
@@ -715,6 +772,169 @@ int pty_set_nonblock(fs_node_t *node, int on) {
     return 1;
 }
 
+/* ------------------------------------------------------------------ */
+/* BSD pty grid front end                                             */
+/* ------------------------------------------------------------------ */
+
+/* Bind a backing pair to a BSD node pair, wiring the static master and
+ * slave fs_nodes onto it.  Returns the pair or NULL on exhaustion. */
+static pty_pair_t *bsd_pty_ensure_pair(bsd_pty_t *bp) {
+    if (bp->pair) {
+        return bp->pair;
+    }
+    pty_pair_t *p = pty_pair_alloc_core();
+    if (!p) {
+        return NULL;
+    }
+    p->is_bsd    = 1;
+    p->bsd_owner = bp;
+    p->locked    = 0;                 /* BSD slave opens without unlockpt */
+    bp->pair = p;
+    bp->master.ptr = (fs_node_t *)p;          /* master fops dispatch via ptr */
+    bp->slave.ptr  = (fs_node_t *)p->slave_tty;
+    p->slave_tty->devnode = &bp->slave;
+    return p;
+}
+
+/* True if `node` is one of the static BSD master nodes. */
+int pty_is_bsd_master(fs_node_t *node) {
+    if (!node) {
+        return 0;
+    }
+    for (int i = 0; i < BSD_PTY_COUNT; i++) {
+        if (&bsd_ptys[i].master == node) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/*
+ * Claim a BSD master.  Called from the open(2) path (which CAN fail the
+ * open, unlike the void node->open callback) so an already-open master
+ * returns -EIO — exactly what a legacy BSD pty scan loop probes for.
+ */
+int pty_bsd_master_open(fs_node_t *node) {
+    bsd_pty_t *bp = (bsd_pty_t *)node->impl;
+    pty_pair_t *p;
+
+    if (!bp) {
+        return -ENXIO;
+    }
+    if (bp->pair && bp->pair->master_open) {
+        return -EIO;                  /* already claimed */
+    }
+    p = bsd_pty_ensure_pair(bp);
+    if (!p) {
+        return -ENOSPC;
+    }
+
+    /* (Re)initialise for this open: drop any stale buffered data and
+     * clear the hangup left by the previous close. */
+    spinlock_acquire(&p->lock);
+    pty_mr_flush(p);
+    p->dead            = 0;
+    p->master_open     = 1;
+    p->master_nonblock = 0;
+    spinlock_release(&p->lock);
+    if (p->slave_tty) {
+        spinlock_acquire(&p->slave_tty->lock);
+        p->slave_tty->hung_up = 0;
+        spinlock_release(&p->slave_tty->lock);
+    }
+    node->ptr = (fs_node_t *)p;
+    return 0;
+}
+
+/* Master close: hang up the slave but keep the pair allocated so the
+ * static node can be reopened.  (Mirrors pty_master_node_close minus the
+ * pty_destroy — BSD pairs are persistent.) */
+static void pty_bsd_master_close(fs_node_t *node) {
+    pty_pair_t *p = (pty_pair_t *)node->ptr;
+    struct tty *st;
+
+    if (!p || p->magic != PTY_MAGIC) {
+        return;
+    }
+    spinlock_acquire(&p->lock);
+    p->master_open = 0;
+    p->dead        = 1;
+    sched_wakeup(&p->read_wait);
+    st = p->slave_tty;
+    spinlock_release(&p->lock);
+
+    if (st) {
+        spinlock_acquire(&st->lock);
+        st->hung_up = 1;
+        spinlock_release(&st->lock);
+        sched_wakeup(&st->read_wait);
+        sched_wakeup(&st->poll_wait);
+    }
+}
+
+/* Slave open: ensure a pair exists (the master usually opens first, but
+ * a slave-first open must not dereference a NULL tty) then chain to the
+ * standard tty open glue. */
+static void pty_bsd_slave_open(fs_node_t *node) {
+    bsd_pty_t *bp = (bsd_pty_t *)node->impl;
+
+    if (bp && !bp->pair) {
+        (void)bsd_pty_ensure_pair(bp);
+    }
+    if (bp && bp->pair) {
+        node->ptr = (fs_node_t *)bp->pair->slave_tty;
+    }
+    if (node->ptr) {
+        tty_fs_open(node);
+    }
+}
+
+static void pty_bsd_init(void) {
+    memset(bsd_ptys, 0, sizeof(bsd_ptys));
+
+    for (int g = 0; g < BSD_PTY_NGROUP; g++) {
+        for (int n = 0; n < BSD_PTY_NNUM; n++) {
+            bsd_pty_t *bp = &bsd_ptys[g * BSD_PTY_NNUM + n];
+            char gc = BSD_PTY_GROUPS[g];
+            char nc = BSD_PTY_NUMS[n];
+
+            /* Master /dev/ptyXY.  open is handled by the open(2) hook
+             * (pty_bsd_master_open), not the void node->open. */
+            snprintf(bp->master.name, sizeof(bp->master.name), "pty%c%c", gc, nc);
+            bp->master.flags = FS_CHARDEVICE;
+            bp->master.mask  = 0666;
+            bp->master.uid   = GID_ROOT;
+            bp->master.gid   = GID_TTY;
+            bp->master.rdev  = makedev(PTY_MASTER_MAJOR,
+                                       g * BSD_PTY_NNUM + n);
+            bp->master.impl  = (uintptr_t)bp;
+            bp->master.read  = pty_master_node_read;
+            bp->master.write = pty_master_node_write;
+            bp->master.ioctl = pty_master_node_ioctl;
+            bp->master.close = pty_bsd_master_close;
+            bp->master.poll  = pty_master_node_poll;
+            devfs_register_device(&bp->master);
+
+            /* Slave /dev/ttyXY — a standard tty once the pair exists. */
+            snprintf(bp->slave.name, sizeof(bp->slave.name), "tty%c%c", gc, nc);
+            bp->slave.flags = FS_CHARDEVICE;
+            bp->slave.mask  = 0620;
+            bp->slave.uid   = GID_ROOT;
+            bp->slave.gid   = GID_TTY;
+            bp->slave.rdev  = makedev(PTY_SLAVE_MAJOR,
+                                      g * BSD_PTY_NNUM + n);
+            bp->slave.impl  = (uintptr_t)bp;
+            bp->slave.open  = pty_bsd_slave_open;
+            bp->slave.read  = tty_fs_read;
+            bp->slave.write = tty_fs_write;
+            bp->slave.ioctl = tty_fs_ioctl;
+            bp->slave.close = tty_fs_close;
+            bp->slave.poll  = tty_fs_poll;
+            devfs_register_device(&bp->slave);
+        }
+    }
+}
+
 void pty_init(void) {
     memset(pty_pairs, 0, sizeof(pty_pairs));
 
@@ -737,4 +957,7 @@ void pty_init(void) {
     ptmx_node.close = ptmx_node_close;
     ptmx_node.poll  = ptmx_node_poll;
     devfs_register_device(&ptmx_node);
+
+    /* BSD-style static pty grid (/dev/pty[pq][0-9a-f] + /dev/tty...). */
+    pty_bsd_init();
 }

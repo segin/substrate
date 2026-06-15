@@ -31,6 +31,8 @@
 #define SOUND_MAJOR        14  /* /dev/audio, /dev/audioctl, /dev/mixer */
 #define BLOCK_LOOP_MAJOR   7   /* /dev/loop0..loopN */
 #define UNIX98_PTS_MAJOR   136 /* /dev/pts/N */
+#define PTY_MASTER_MAJOR   2   /* BSD pty masters /dev/pty[pq][0-9a-f] */
+#define PTY_SLAVE_MAJOR    3   /* BSD pty slaves  /dev/tty[pq][0-9a-f] */
 
 /* Minor sub-allocations within TTY_MAJOR (4). */
 #define TTY_MINOR_VC_FIRST  1   /* /dev/tty1 */

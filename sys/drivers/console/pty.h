@@ -46,9 +46,21 @@ size_t pty_master_node_write(struct fs_node *node, off_t off, size_t sz,
                              const uint8_t *buf);
 int    pty_master_node_ioctl(struct fs_node *node, uint32_t req, void *arg);
 void   pty_master_node_close(struct fs_node *node);
+int    pty_master_node_poll(struct fs_node *node, void *waiter);
 
 /* Mirror a master fd's O_NONBLOCK flag onto the pair.  Returns 1 if
  * `node` is a pty master, 0 otherwise. */
 int    pty_set_nonblock(struct fs_node *node, int on);
+
+/*
+ * BSD-style pty grid (/dev/pty[pq][0-9a-f] master, /dev/tty[pq][0-9a-f]
+ * slave).  The open(2) path consults these so an already-open master can
+ * fail with -EIO (a busy master can't be reported from the void
+ * node->open callback).  pty_is_bsd_master() identifies a BSD master
+ * node; pty_bsd_master_open() claims it (0 on success, -errno on busy /
+ * exhaustion).
+ */
+int    pty_is_bsd_master(struct fs_node *node);
+int    pty_bsd_master_open(struct fs_node *node);
 
 #endif /* _DRIVERS_CONSOLE_PTY_H */

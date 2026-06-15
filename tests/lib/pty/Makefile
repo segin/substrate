@@ -32,7 +32,7 @@ else
   PTHREAD_INC = -I../../../lib/pthread
 endif
 
-TESTS = torture_pty torture_ctty
+TESTS = torture_pty torture_ctty torture_bsdpty
 
 all: $(TESTS)
 
@@ -40,6 +40,9 @@ torture_pty: torture_pty.c
 	$(CC) $(CFLAGS) $(PTHREAD_INC) $(LDFLAGS) $< $(PTHREAD) -o $@
 
 torture_ctty: torture_ctty.c
+	$(CC) $(CFLAGS) $(LDFLAGS) $< -o $@
+
+torture_bsdpty: torture_bsdpty.c
 	$(CC) $(CFLAGS) $(LDFLAGS) $< -o $@
 
 clean:
