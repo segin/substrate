@@ -1,0 +1,42 @@
+.Dd June 15, 2026
+.Dt DMESG 1
+.Os Substrate
+.Sh NAME
+.Nm dmesg
+.Nd print the kernel message buffer
+.Sh SYNOPSIS
+.Nm
+.Op Fl V
+.Sh DESCRIPTION
+.Nm
+prints the contents of the kernel message ring buffer, which holds the
+boot-time and runtime diagnostic output produced by the kernel
+.Fn kprintf
+path.
+The buffer is a fixed-size circular buffer; once full, the oldest
+messages are overwritten.
+.Pp
+The log is read from
+.Pa /proc/kmsg ,
+a read-only, non-consuming procfs file, so repeated invocations of
+.Nm
+all see the same (current) buffer contents.
+.Pp
+The options are as follows:
+.Bl -tag -width Ds
+.It Fl V
+Print the program version and exit.
+.El
+.Sh FILES
+.Bl -tag -width Ds
+.It Pa /proc/kmsg
+The kernel message ring buffer.
+.El
+.Sh EXIT STATUS
+.Ex -std
+.Sh SEE ALSO
+.Xr ps 1
+.Sh HISTORY
+A native
+.Nm
+appeared in Substrate.

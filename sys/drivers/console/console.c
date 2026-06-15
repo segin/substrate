@@ -259,11 +259,51 @@ void console_register_devfs(void) {
     devfs_register_device(&console_node);
 }
 
+/*
+ * Kernel message ring buffer.  Every kprint()/kprintf() byte is teed in
+ * here so userland can retrieve the boot/kernel log via /proc/kmsg (and
+ * the dmesg(1) utility).  Lock-free best-effort: a concurrent writer from
+ * IRQ context may interleave bytes (the console itself has the same
+ * property), but it can never corrupt out of bounds.
+ */
+#define KLOG_BUF_SIZE 65536
+static char     klog_buf[KLOG_BUF_SIZE];
+static uint32_t klog_head;       /* next write index */
+static int      klog_wrapped;    /* set once the ring has wrapped around */
+
+static void klog_append(const char *s, size_t len) {
+    for (size_t i = 0; i < len; i++) {
+        klog_buf[klog_head] = s[i];
+        if (++klog_head >= KLOG_BUF_SIZE) {
+            klog_head = 0;
+            klog_wrapped = 1;
+        }
+    }
+}
+
+/* Total bytes currently held in the ring (oldest .. newest). */
+size_t klog_size(void) {
+    return klog_wrapped ? KLOG_BUF_SIZE : klog_head;
+}
+
+/* Copy the ring oldest-first into dst (up to dstlen).  Returns bytes copied. */
+size_t klog_read(char *dst, size_t dstlen) {
+    size_t avail = klog_size();
+    size_t start = klog_wrapped ? klog_head : 0;
+    size_t n = 0;
+    while (n < avail && n < dstlen) {
+        dst[n] = klog_buf[(start + n) % KLOG_BUF_SIZE];
+        n++;
+    }
+    return n;
+}
+
 void kprint(const char *str) {
     if (!str) return;
     size_t len = 0;
     const char *s = str;
     while (*s++) len++;
+    klog_append(str, len);
     backend_write(str, len);
 }
 

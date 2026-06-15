@@ -14,6 +14,7 @@ SUBDIRS = \
 	chgrp \
 	chmod \
 	chown \
+	chroot \
 	clear \
 	cmp \
 	comm \
@@ -24,6 +25,7 @@ SUBDIRS = \
 	devtree \
 	df \
 	diff \
+	dmesg \
 	echo \
 	ed \
 	ex \

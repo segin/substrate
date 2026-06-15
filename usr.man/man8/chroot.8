@@ -1,0 +1,57 @@
+.Dd June 15, 2026
+.Dt CHROOT 8
+.Os Substrate
+.Sh NAME
+.Nm chroot
+.Nd change root directory and run a command
+.Sh SYNOPSIS
+.Nm
+.Ar newroot
+.Op Ar command Op Ar arg ...
+.Sh DESCRIPTION
+.Nm
+changes the root directory of the calling process to
+.Ar newroot
+with the
+.Xr chroot 2
+system call, changes the working directory to the new root
+.Pq Ic chdir Qq / ,
+and then executes
+.Ar command .
+.Pp
+If no
+.Ar command
+is given,
+.Nm
+runs an interactive shell:
+.Ev SHELL
+if set, otherwise
+.Pa /bin/sh ,
+invoked with
+.Fl i .
+.Pp
+Only the superuser may call
+.Xr chroot 2 ;
+the system call fails with
+.Er EPERM
+otherwise.
+.Sh ENVIRONMENT
+.Bl -tag -width Ds
+.It Ev SHELL
+The shell run when no
+.Ar command
+is supplied.
+.El
+.Sh EXIT STATUS
+.Nm
+exits with the status of
+.Ar command .
+If
+.Ar command
+cannot be executed, the exit status is 127.
+.Sh SEE ALSO
+.Xr chroot 2
+.Sh HISTORY
+A native
+.Nm
+appeared in Substrate.

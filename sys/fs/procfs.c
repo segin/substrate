@@ -19,6 +19,7 @@
 #include <sys/mount.h>
 #include <sys/tty.h>
 #include <sys/file.h>
+#include <drivers/console/console.h>
 #include <string.h>
 #include <stdio.h>
 #include <stddef.h>
@@ -427,6 +428,19 @@ static uint32_t gen_device_events(char *buf, size_t size, void *opaque) {
     return (uint32_t)kobject_uevent_dump(buf, size);
 }
 
+/* /proc/kmsg — the kernel message ring buffer (boot + kernel log), backing
+ * the dmesg(1) utility.  Non-consuming: each read returns the whole buffer.
+ * When the caller's buffer is too small we return the full size so the
+ * procfs read path retries with a large-enough allocation. */
+static uint32_t gen_kmsg(char *buf, size_t size, void *opaque) {
+    (void)opaque;
+    size_t total = klog_size();
+    if (size < total) {
+        return (uint32_t)total;
+    }
+    return (uint32_t)klog_read(buf, size);
+}
+
 /*
  * Entry table - Static /proc entries
  * Add new entries here for automatic registration.
@@ -434,6 +448,7 @@ static uint32_t gen_device_events(char *buf, size_t size, void *opaque) {
 static struct procfs_runtime_entry procfs_entries[] = {
     { "meminfo",     gen_meminfo,       NULL },
     { "memtrack",    gen_memtrack,      NULL },
+    { "kmsg",        gen_kmsg,          NULL },
     { "uptime",      gen_uptime,        NULL },
     { "cmdline",     gen_cmdline,       NULL },
     { "vmstat",      gen_vmstat,        NULL },

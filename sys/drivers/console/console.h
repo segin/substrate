@@ -45,6 +45,10 @@ int console_revoke(void);
 // Helper for formatted printing
 void kprint(const char *str);
 int kprintf(const char *fmt, ...);
+
+// Kernel message ring buffer (backs /proc/kmsg and dmesg(1)).
+size_t klog_size(void);
+size_t klog_read(char *dst, size_t dstlen);
 char *kasprintf(const char *fmt, ...);
 #ifndef HOST_TEST
 char *kvasprintf(const char *fmt, __builtin_va_list ap);
