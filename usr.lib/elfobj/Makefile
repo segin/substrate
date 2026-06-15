@@ -53,7 +53,7 @@ $(MODE_STAMP): FORCE
 	$(CC) $(PIC_CFLAGS) -c $< -o $@
 
 test: $(LIBNAME)
-	$(MAKE) -C tests NATIVE_BUILD=1
+	$(MAKE) -C ../../tests/usr.lib/elfobj NATIVE_BUILD=1
 
 fuzz: $(LIBNAME)
 	$(MAKE) -C fuzz NATIVE_BUILD=1
@@ -66,7 +66,7 @@ examples: $(LIBNAME)
 
 clean:
 	rm -f $(OBJS) $(PIC_OBJS) $(LIBNAME) $(SHLIB) $(MODE_STAMP)
-	$(MAKE) -C tests clean || true
+	$(MAKE) -C ../../tests/usr.lib/elfobj clean || true
 	$(MAKE) -C fuzz clean || true
 	$(MAKE) -C bench clean || true
 	$(MAKE) -C examples clean || true
