@@ -1,0 +1,233 @@
+.\" xargs(1) - substrate
+.TH XARGS 1 "2026-06-02" "Substrate" "General Commands Manual"
+.SH NAME
+xargs \- construct argument lists and invoke a utility
+.SH SYNOPSIS
+.B xargs
+.RB [ \-0oprtx ]
+.RB [ \-E
+.IR eofstr ]
+.RB [ \-e [\fIeofstr\fR]]
+.RB [ \-I
+.IR replstr ]
+.RB [ \-J
+.IR replstr ]
+.RB [ \-L
+.IR number ]
+.RB [ \-l [\fInumber\fR]]
+.RB [ \-n
+.IR number ]
+.RB [ \-P
+.IR maxprocs ]
+.RB [ \-R
+.IR replcount ]
+.RB [ \-S
+.IR replsize ]
+.RB [ \-s
+.IR size ]
+.RB [ \-a
+.IR file ]
+.RB [ \-d
+.IR delim ]
+.RI [ utility
+.RI [ argument ...]]
+.SH DESCRIPTION
+.B xargs
+reads space, tab, newline, and end-of-file delimited items from the standard
+input (or from a file given with
+.BR \-a )
+and executes
+.I utility
+with the items as additional arguments.  Blank, tab and newline characters
+separate items; single quotes, double quotes and backslash may be used to
+embed separators in an item.  If no
+.I utility
+is given,
+.B echo
+is used.  The utility is run at least once even when the input is empty,
+unless
+.B \-r
+is specified.
+.PP
+This implementation conforms to POSIX.1\-2024 and additionally provides the
+GNU and BSD extensions; where the standards conflict the BSD behavior is
+chosen.
+.SH OPTIONS
+.TP
+.BR \-0 ", " \-\-null
+Items are separated by a NUL character instead of whitespace, and quoting,
+backslash escaping and the logical EOF string are disabled.  Pairs with
+.IR find (1)
+.BR \-print0 .
+.TP
+.BI \-a " file" "\fR, \fP" \-\-arg\-file= file
+Read items from
+.I file
+rather than the standard input.  May be repeated.
+.TP
+.BI \-d " delim" "\fR, \fP" \-\-delimiter= delim
+Use
+.I delim
+as the sole item separator (a single character or a C escape such as
+.BR \en ", " \et ", " \e0 ", " \exHH );
+disables quoting and backslash processing.
+.TP
+.BI \-E " eofstr"
+Set the logical end-of-file string; the first input item equal to
+.I eofstr
+ends input.  An empty
+.I eofstr
+disables this.  There is no default EOF string.
+.TP
+.BR \-e [\fIeofstr\fR]\fR, \fP \-\-eof [=\fIeofstr\fR]
+Deprecated synonym for
+.BR \-E .
+A bare
+.B \-e
+disables the logical EOF string.
+.TP
+.BI \-I " replstr"
+Insert mode: for each input line, replace every occurrence of
+.I replstr
+in the initial arguments with the line and invoke
+.IR utility .
+Implies
+.B \-L 1
+and
+.BR \-x .
+.B \-i
+is a deprecated synonym defaulting
+.I replstr
+to
+.BR {} .
+.TP
+.BI \-J " replstr"
+Insert all collected items at the first argument containing
+.IR replstr ,
+honoring
+.B \-n
+and
+.BR \-L .
+.TP
+.BI \-L " number"
+Invoke
+.I utility
+for every
+.I number
+nonempty input lines.
+.B \-l
+is a deprecated synonym (default 1).
+.TP
+.BI \-n " number" "\fR, \fP" \-\-max\-args= number
+Use at most
+.I number
+items per invocation.
+.TP
+.BR \-o ", " \-\-open\-tty
+Reopen the child's standard input from
+.B /dev/tty
+so the invoked utility may be interactive.
+.TP
+.BI \-P " maxprocs" "\fR, \fP" \-\-max\-procs= maxprocs
+Run up to
+.I maxprocs
+invocations concurrently.
+.TP
+.BR \-p ", " \-\-interactive
+Prompt on
+.B /dev/tty
+before each invocation; only an affirmative reply runs the command.  Implies
+.BR \-t .
+.TP
+.BI \-R " replcount"
+With
+.BR \-I ,
+replace at most
+.I replcount
+occurrences of the replacement string (negative means unlimited).
+.TP
+.BR \-r ", " \-\-no\-run\-if\-empty
+Do not run the utility if there are no input items.
+.TP
+.BI \-S " replsize"
+Set the size in bytes available for replacement-string expansion under
+.B \-I
+or
+.BR \-J .
+.TP
+.BI \-s " size" "\fR, \fP" \-\-max\-chars= size
+Limit each constructed command line to
+.I size
+bytes.  The default is derived from
+.B ARG_MAX
+less the current environment, floored at
+.BR LINE_MAX .
+.TP
+.BR \-t ", " \-\-verbose
+Echo each command to the standard error before running it.
+.TP
+.BR \-x ", " \-\-exit
+Exit if a command line would exceed the
+.B \-s
+size; implied by
+.BR \-I .
+.SH "EXIT STATUS"
+.TP
+.B 0
+All invocations succeeded.
+.TP
+.B 123
+One or more invocations exited 1\-125.
+.TP
+.B 124
+An invocation exited 255;
+.B xargs
+stopped.
+.TP
+.B 125
+An invocation was killed by a signal;
+.B xargs
+stopped.
+.TP
+.B 126
+.I utility
+was found but could not be executed.
+.TP
+.B 127
+.I utility
+was not found.
+.TP
+.B 1
+.B xargs
+itself encountered an error (bad option, I/O, allocation).
+.SH EXAMPLES
+.PP
+Remove every file listed in a manifest, NUL-safe:
+.PP
+.RS
+.nf
+find . \-name '*.tmp' \-print0 | xargs \-0 rm \-f
+.fi
+.RE
+.PP
+Copy each input path into a directory, one per invocation:
+.PP
+.RS
+.nf
+ls | xargs \-I{} cp {} /backup
+.fi
+.RE
+.SH "SEE ALSO"
+.BR echo (1),
+.BR find (1),
+.BR sh (1),
+.BR execvp (3)
+.SH STANDARDS
+The
+.B xargs
+utility conforms to IEEE Std 1003.1\-2024 (POSIX.1\-2024).  The
+.BR \-0 ", " \-a ", " \-d ", " \-P ", " \-r ", " \-\-null
+and related long options are GNU extensions; the
+.BR \-J ", " \-o ", " \-R ", " \-S
+options are BSD extensions.  Where the standards conflict, the BSD behavior
+is provided.
