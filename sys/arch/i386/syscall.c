@@ -413,7 +413,7 @@ void syscall_handler(registers_t *regs) {
     }
 
     void *location = p->syscall_table[syscall_num];
-    
+
     // Check for special sigreturn handling
     if (syscall_num == 119 && p->sigreturn) {
         int sret = p->sigreturn(regs);

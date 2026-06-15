@@ -34,8 +34,7 @@ unsigned char sig_trampoline_code[4096] __attribute__((aligned(4096))) = {
     0x6A, 0x00,                   // push $0            ; Push Dummy Return Address
     0xB8, 0x77, 0x00, 0x00, 0x00, // mov $119, %eax     ; SYS_sigreturn
     0xCD, 0x80,                   // int $0x80          ; Syscall
-    0xEB, 0xFE,                   // jmp .              ; Halt if return
-    0x90, 0x90,                   // padding (total 16 bytes)
+    0xEB, 0xFE,                   // jmp .              ; Halt if return (16 bytes, ends at 0x10)
 
     /* Offset 0x10: RT sigreturn (sys_rt_sigreturn) */
     /*
@@ -47,8 +46,7 @@ unsigned char sig_trampoline_code[4096] __attribute__((aligned(4096))) = {
     0x6A, 0x00,                   // push $0            ; Push Dummy Return Address
     0xB8, 0xF7, 0x00, 0x00, 0x00, // mov $247, %eax     ; SYS_rt_sigreturn
     0xCD, 0x80,                   // int $0x80          ; Syscall
-    0xEB, 0xFE,                   // jmp .              ; Halt if return
-    0x90, 0x90,                   // padding (total 16 bytes)
+    0xEB, 0xFE,                   // jmp .              ; Halt if return (16 bytes, ends at 0x20)
 
     /* Offset 0x20: NetBSD sigreturn trampoline.
      *
