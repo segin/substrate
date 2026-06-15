@@ -10,6 +10,9 @@
 #include <sys/copy.h>
 #include <vm/vm_kmem.h>
 #include <sys/fcntl.h>
+#include <sys/tty.h>
+#include <sys/vt.h>
+#include <exec/perso/personality.h>
 #include <exec/perso/compat.h>
 #include <exec/perso/freebsd/freebsd_user.h>
 #include <exec/perso/freebsd/freebsd_syscalls.h>
@@ -704,6 +707,21 @@ struct freebsd_termios {
 #define FBSD_FIONREAD           0x4004667fU  /* _IOR('f', 127, int) */
 #define FBSD_FIONBIO            0x8004667eU  /* _IOW('f', 126, int) */
 #define FBSD_FIOASYNC           0x8004667dU  /* _IOW('f', 125, int) */
+#define FBSD_TIOCFLUSH          0x80047410U  /* _IOW('t', 16, int) */
+#define FBSD_TIOCGETD           0x4004741aU  /* _IOR('t', 26, int) line discipline */
+#define FBSD_TIOCSETD           0x8004741bU  /* _IOW('t', 27, int) */
+/* syscons virtual-terminal ioctls (group 'v') + keyboard mode (group 'K').
+ * Substrate switches VTs in-kernel (VT_AUTO), so these report sane state
+ * and accept mode requests rather than driving a userspace switch. */
+#define FBSD_VT_SETMODE         0x80087602U  /* _IOW('v', 2, vtmode_t[8]) */
+#define FBSD_VT_GETMODE         0x40087603U  /* _IOR('v', 3, vtmode_t[8]) */
+#define FBSD_VT_RELDISP         0x80047604U  /* _IOWINT('v', 4) */
+#define FBSD_VT_ACTIVATE        0x80047605U  /* _IOWINT('v', 5) */
+#define FBSD_VT_WAITACTIVE      0x80047606U  /* _IOWINT('v', 6) */
+#define FBSD_VT_GETACTIVE       0x40047607U  /* _IOR('v', 7, int) */
+#define FBSD_VT_GETINDEX        0x40047608U  /* _IOR('v', 8, int) */
+#define FBSD_KDGETMODE          0x40044b09U  /* _IOR('K', 9, int) */
+#define FBSD_KDSETMODE          0x20004b0aU  /* _IOWINT('K', 10) */
 
 /* c_cc index translation: FreeBSD index -> Substrate index, 0xFF if no
  * equivalent on the native side. */
@@ -827,12 +845,33 @@ static void native_to_freebsd_termios(const struct termios *nv,
     fb->c_ospeed = nv->c_ospeed;
 }
 
-int freebsd_sys_ioctl(int fd, uint32_t request, void *arg) {
+/*
+ * perso_tty_ioctl — BSD tty/syscons ioctl translation at the tty device
+ * node.  Called by tty_fs_ioctl() (the tty node's ioctl handler) before
+ * the native path: device-specific ioctl knowledge belongs to the device,
+ * not to a giant per-ioctl switch in the ioctl(2) syscall.  Returns the
+ * result and sets *handled when it recognised the request for the caller's
+ * (BSD) personality; otherwise leaves *handled = 0 so the node falls
+ * through to its native ioctl.
+ */
+int perso_tty_ioctl(struct tty *tp, uint32_t request, void *arg, int *handled) {
+    *handled = 0;
+    if (!tp || !current_process) {
+        return 0;
+    }
+    int pid_perso = current_process->perso_id;
+    if (pid_perso != PERS_FREEBSD && pid_perso != PERS_NETBSD &&
+        pid_perso != PERS_OPENBSD) {
+        return 0;   /* native (or non-BSD) caller — node handles it directly */
+    }
+    *handled = 1;
+
     switch (request) {
+    /* --- termios --- */
     case FBSD_TIOCGETA: {
         struct termios native;
         memset(&native, 0, sizeof(native));
-        int ret = kern_ioctl(fd, TCGETS, &native);
+        int ret = tty_ioctl(tp, TCGETS, (unsigned long)&native);
         if (ret == 0 && arg) {
             struct freebsd_termios fb;
             native_to_freebsd_termios(&native, &fb);
@@ -849,35 +888,76 @@ int freebsd_sys_ioctl(int fd, uint32_t request, void *arg) {
         struct termios native;
         freebsd_termios_to_native(&fb, &native);
         /* Native TCSETS=0x5402, TCSETSW=0x5403, TCSETSF=0x5404. */
-        uint32_t native_req = TCSETS + (request - FBSD_TIOCSETA);
-        return kern_ioctl(fd, native_req, &native);
+        return tty_ioctl(tp, TCSETS + (request - FBSD_TIOCSETA),
+                         (unsigned long)&native);
     }
-    case FBSD_TIOCGWINSZ:
-    case FBSD_TIOCSWINSZ:
-        /* struct winsize layout (4 uint16) is identical between FreeBSD and
-         * Substrate; only the request number differs. */
-        return kern_ioctl(fd,
-                          (request == FBSD_TIOCGWINSZ) ? 0x5413 : 0x5414,
-                          arg);
-    case FBSD_TIOCGPGRP:
-        return kern_ioctl(fd, 0x540F, arg);
-    case FBSD_TIOCSPGRP:
-        return kern_ioctl(fd, 0x5410, arg);
-    case FBSD_TIOCSCTTY:
-        return kern_ioctl(fd, 0x540E, NULL);
-    case FBSD_TIOCNOTTY:
-        return kern_ioctl(fd, 0x5422, NULL);
-    case FBSD_FIONREAD:
-        return kern_ioctl(fd, 0x541B, arg);
-    case FBSD_FIONBIO:
-        return kern_ioctl(fd, 0x5421, arg);
-    case FBSD_FIOASYNC:
-        return kern_ioctl(fd, 0x5452, arg);
+    /* struct winsize layout (4 uint16) is identical; only the number differs. */
+    case FBSD_TIOCGWINSZ: return tty_ioctl(tp, 0x5413, (unsigned long)arg);
+    case FBSD_TIOCSWINSZ: return tty_ioctl(tp, 0x5414, (unsigned long)arg);
+    case FBSD_TIOCGPGRP:  return tty_ioctl(tp, 0x540F, (unsigned long)arg);
+    case FBSD_TIOCSPGRP:  return tty_ioctl(tp, 0x5410, (unsigned long)arg);
+    case FBSD_TIOCSCTTY:  return tty_ioctl(tp, 0x540E, 0);
+    case FBSD_TIOCNOTTY:  return tty_ioctl(tp, 0x5422, 0);
+    case FBSD_TIOCEXCL:
+    case FBSD_TIOCNXCL:   return 0;   /* exclusive-open advisory: accept */
+    case FBSD_TIOCFLUSH:  return 0;   /* best-effort flush: accept (no-op) */
+    case FBSD_TIOCGETD: {             /* only the standard line discipline exists */
+        int ld = 0;                   /* TTYDISC / N_TTY */
+        if (arg && copyout(&ld, arg, sizeof(ld)) != 0) return -EFAULT;
+        return 0;
+    }
+    case FBSD_TIOCSETD:   return 0;   /* accept (N_TTY is the only discipline) */
+
+    /* --- syscons virtual terminals (group 'v') ---
+     * Substrate switches VTs in-kernel (effectively VT_AUTO).  getty/login
+     * on a /dev/ttyvN query these; answer so they proceed instead of dying
+     * on ENOTTY and being respawned by init. */
+    case FBSD_VT_GETACTIVE: {
+        int v = vt_get_active() + 1;          /* FreeBSD VTs are 1-based */
+        if (arg && copyout(&v, arg, sizeof(v)) != 0) return -EFAULT;
+        return 0;
+    }
+    case FBSD_VT_GETINDEX: {
+        int v = tp->index + 1;                /* this tty's VT, 1-based */
+        if (arg && copyout(&v, arg, sizeof(v)) != 0) return -EFAULT;
+        return 0;
+    }
+    case FBSD_VT_GETMODE: {
+        struct { char mode; char waitv; short relsig, acqsig, frsig; } m;
+        memset(&m, 0, sizeof(m));             /* mode = VT_AUTO (0) */
+        if (arg && copyout(&m, arg, sizeof(m)) != 0) return -EFAULT;
+        return 0;
+    }
+    case FBSD_VT_SETMODE:                      /* stay VT_AUTO; accept request */
+    case FBSD_VT_RELDISP:
+    case FBSD_VT_ACTIVATE:
+    case FBSD_VT_WAITACTIVE:                   /* don't block getty on a hidden VT */
+    case FBSD_KDSETMODE:
+        return 0;
+    case FBSD_KDGETMODE: {
+        int km = 0;                            /* KD_TEXT */
+        if (arg && copyout(&km, arg, sizeof(km)) != 0) return -EFAULT;
+        return 0;
+    }
+
     default:
-        /* Unknown ioctl: return ENOTTY rather than passing the BSD-encoded
-         * request through to native sys_ioctl, which would only confuse
-         * the underlying driver. */
-        return -ENOTTY;
+        /* Not a BSD ioctl we translate — let the node try it natively. */
+        *handled = 0;
+        return 0;
+    }
+}
+
+int freebsd_sys_ioctl(int fd, uint32_t request, void *arg) {
+    switch (request) {
+    /* Generic file-layer ioctls (same meaning on every fd) stay central. */
+    case FBSD_FIONREAD: return kern_ioctl(fd, 0x541B, arg);
+    case FBSD_FIONBIO:  return kern_ioctl(fd, 0x5421, arg);
+    case FBSD_FIOASYNC: return kern_ioctl(fd, 0x5452, arg);
+    default:
+        /* Device-specific ioctls (tty termios, syscons VT, ...) are
+         * translated by the target device node itself — pass the BSD
+         * request through unchanged. */
+        return kern_ioctl(fd, request, arg);
     }
 }
 

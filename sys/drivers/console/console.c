@@ -198,6 +198,13 @@ static int console_node_ioctl(fs_node_t *node, uint32_t request, void *arg) {
     (void)node;
     struct tty *tty = console_resolve_tty();
     if (!tty) return -1;
+    /* Same personality ioctl translation as tty_fs_ioctl: a BSD caller's
+     * tty/syscons ioctls are accepted by the device node, not the syscall. */
+    int handled = 0;
+    int r = perso_tty_ioctl(tty, request, arg, &handled);
+    if (handled) {
+        return r;
+    }
     return tty_ioctl(tty, request, (unsigned long)arg);
 }
 

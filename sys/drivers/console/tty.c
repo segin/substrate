@@ -76,6 +76,18 @@ size_t tty_fs_write(fs_node_t *node, off_t offset, size_t size, const uint8_t *b
 
 int tty_fs_ioctl(fs_node_t *node, uint32_t request, void *arg) {
     struct tty *tty = (struct tty *)node->ptr;
+    /*
+     * Offer the request to the personality translation first: a BSD
+     * process speaks FreeBSD/NetBSD tty + syscons ioctl encodings, which
+     * the device node (not the ioctl syscall) is responsible for accepting.
+     * `handled` stays 0 for native callers and for requests it doesn't
+     * recognise, so we fall through to the native ioctl path.
+     */
+    int handled = 0;
+    int r = perso_tty_ioctl(tty, request, arg, &handled);
+    if (handled) {
+        return r;
+    }
     return tty_ioctl(tty, request, (unsigned long)arg);
 }
 

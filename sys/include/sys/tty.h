@@ -104,6 +104,13 @@ int tty_read(struct tty *tty, char *buf, int len);
 int tty_write(struct tty *tty, const char *buf, int len);
 void tty_start(struct tty *tty);
 int tty_ioctl(struct tty *tty, uint32_t cmd, unsigned long arg);
+/*
+ * Personality ioctl translation for tty device nodes.  Implemented in the
+ * exec personality layer (compat.c).  Translates a BSD-personality caller's
+ * tty/syscons ioctl to native semantics on `tp`; sets *handled when it
+ * consumed the request, else leaves it 0 so the node uses tty_ioctl().
+ */
+int perso_tty_ioctl(struct tty *tp, uint32_t request, void *arg, int *handled);
 int tty_ioctl_kern(struct tty *tty, uint32_t cmd, uintptr_t arg);
 int tty_revoke(struct tty *tty);
 int tty_poll(struct tty *tty, void *waiter);
