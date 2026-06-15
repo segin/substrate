@@ -96,7 +96,18 @@ typedef struct ahci_controller {
     int             disk_count;     /* Running sata disk index */
 } ahci_controller_t;
 
-static ahci_controller_t ahci_ctrl;
+/*
+ * Substrate supports multiple AHCI HBAs (e.g. several `-device ich9-ahci`
+ * in qemu).  Each PCI controller gets its own slot so a second HBA does
+ * not clobber the first's port / blkdev state, and disk names come from a
+ * single global counter so disks enumerate sata0, sata1, sata2, ... across
+ * all controllers instead of every HBA restarting at sata0 (which would
+ * collide on /dev/storage/sata0 and wedge the root mount).
+ */
+#define AHCI_MAX_CONTROLLERS 4
+static ahci_controller_t ahci_ctrls[AHCI_MAX_CONTROLLERS];
+static int ahci_ctrl_count;     /* number of attached HBAs */
+static int ahci_disk_count;     /* global running sata%d index */
 static int ahci_initialized;
 
 static void *ahci_dma_bounce_alloc(size_t size, dma_addr_t *dma_handle) {
@@ -703,7 +714,7 @@ static int ahci_bdev_write(blkdev_t *bdev, uint64_t sector,
 static void ahci_register_disk(ahci_port_t *ap) {
     char buf[128];
 
-    ap->disk_index = ahci_ctrl.disk_count++;
+    ap->disk_index = ahci_disk_count++;
 
     memset(&ap->bdev, 0, sizeof(blkdev_t));
     snprintf(ap->bdev.name, sizeof(ap->bdev.name), "sata%d", ap->disk_index);
@@ -749,13 +760,15 @@ static int ahci_scsi_execute(scsi_link_t *link, scsi_request_t *req) {
      * Target ID is the port index in our registration order. */
     port_idx = req->device->target;
     ap = NULL;
-    for (int i = 0; i < AHCI_MAX_PORTS; i++) {
-        if (ahci_ctrl.ports[i].type == AHCI_PORT_TYPE_SATAPI) {
-            if (port_idx == 0) {
-                ap = &ahci_ctrl.ports[i];
-                break;
+    for (int c = 0; c < ahci_ctrl_count && !ap; c++) {
+        for (int i = 0; i < AHCI_MAX_PORTS; i++) {
+            if (ahci_ctrls[c].ports[i].type == AHCI_PORT_TYPE_SATAPI) {
+                if (port_idx == 0) {
+                    ap = &ahci_ctrls[c].ports[i];
+                    break;
+                }
+                port_idx--;
             }
-            port_idx--;
         }
     }
 
@@ -856,9 +869,14 @@ static int ahci_scsi_reset_bus(scsi_link_t *link) {
 static void ahci_register_satapi_devices(void) {
     int satapi_count = 0;
 
-    for (int i = 0; i < AHCI_MAX_PORTS; i++) {
-        if (ahci_ctrl.ports[i].type == AHCI_PORT_TYPE_SATAPI) {
-            satapi_count++;
+    if (ahci_scsi_registered) {
+        return;
+    }
+    for (int c = 0; c < ahci_ctrl_count; c++) {
+        for (int i = 0; i < AHCI_MAX_PORTS; i++) {
+            if (ahci_ctrls[c].ports[i].type == AHCI_PORT_TYPE_SATAPI) {
+                satapi_count++;
+            }
         }
     }
 
@@ -956,7 +974,6 @@ static void ahci_probe_ports(ahci_controller_t *ctrl) {
     char buf[128];
 
     ctrl->port_count = 0;
-    ctrl->disk_count = 0;
 
     for (port = 0; port < AHCI_MAX_PORTS; port++) {
         ahci_port_t *ap;
@@ -1013,12 +1030,11 @@ static void ahci_probe_ports(ahci_controller_t *ctrl) {
         }
     }
 
-    /* Register SATAPI devices with SCSI mid-layer */
-    ahci_register_satapi_devices();
-
     if (ctrl->port_count == 0) {
         kprint("ahci: no devices found\n");
     }
+    /* SATAPI/SCSI registration happens once, after every HBA is attached
+     * (see ahci_init), so a single SCSI link can span all controllers. */
 }
 
 /*
@@ -1063,15 +1079,23 @@ static int ahci_pci_attach(struct device *dev) {
         return -1;
     }
 
-    ahci_ctrl.abar    = (hba_mem_t *)mmio_base;
-    ahci_ctrl.pci_dev = pdev;
+    if (ahci_ctrl_count >= AHCI_MAX_CONTROLLERS) {
+        kprint("ahci: too many AHCI controllers; ignoring this one\n");
+        return -1;
+    }
 
-    if (ahci_hba_init(&ahci_ctrl) < 0) {
+    ahci_controller_t *ctrl = &ahci_ctrls[ahci_ctrl_count];
+    memset(ctrl, 0, sizeof(*ctrl));
+    ctrl->abar    = (hba_mem_t *)mmio_base;
+    ctrl->pci_dev = pdev;
+
+    if (ahci_hba_init(ctrl) < 0) {
         kprint("ahci: HBA init failed\n");
         return -1;
     }
 
-    ahci_probe_ports(&ahci_ctrl);
+    ahci_ctrl_count++;          /* commit the controller before probing */
+    ahci_probe_ports(ctrl);
     return 0;
 }
 
@@ -1098,12 +1122,20 @@ void ahci_init(void) {
         return;
     }
 
-    memset(&ahci_ctrl, 0, sizeof(ahci_ctrl));
+    ahci_ctrl_count = 0;
+    ahci_disk_count = 0;
 
     if (!pci_present()) {
         return;
     }
 
+    /* driver_register synchronously attaches every matching PCI HBA, so by
+     * the time it returns ahci_ctrls[0..ahci_ctrl_count) are all probed. */
     (void)driver_register(&ahci_pci_driver, &pci_bus_type);
+
+    /* Register SATAPI (ATAPI) devices across all controllers in one SCSI
+     * link, now that every HBA has been probed. */
+    ahci_register_satapi_devices();
+
     ahci_initialized = 1;
 }
