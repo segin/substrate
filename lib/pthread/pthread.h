@@ -155,6 +155,18 @@ int   pthread_key_delete(pthread_key_t key);
 void *pthread_getspecific(pthread_key_t key);
 int   pthread_setspecific(pthread_key_t key, const void *value);
 
+/* ---------------- cleanup handlers ----------------
+ * POSIX cancellation-cleanup stack.  substrate's libpthread has no
+ * cancellation runtime, so these are scope macros: pthread_cleanup_push
+ * opens a block recording (routine, arg); pthread_cleanup_pop(execute)
+ * closes it and, if execute is non-zero, runs routine(arg).  This gives
+ * the standard "run on pop" behaviour that the overwhelming majority of
+ * callers rely on (cairo, ksh, ...).  Cleanup triggered by an async
+ * pthread_cancel() is not delivered (there is no cancel machinery to
+ * deliver it), matching substrate's current cancellation support. */
+#define pthread_cleanup_push(routine, arg)     do {         void (*__pthread_cleanup_routine)(void *) = (routine);         void *__pthread_cleanup_arg = (arg);         {
+#define pthread_cleanup_pop(execute)         }         if (execute) __pthread_cleanup_routine(__pthread_cleanup_arg);     } while (0)
+
 #ifdef __cplusplus
 }
 #endif
