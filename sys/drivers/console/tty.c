@@ -1047,6 +1047,24 @@ int tty_write(struct tty *tty, const char *buf, int len) {
     return len;
 }
 
+/*
+ * Public output kick.  Push any buffered output to the driver and wake
+ * writability waiters.  The pty master read path calls this on the slave
+ * after it drains its ring: draining frees room the slave's pending
+ * output can now use, but nothing else re-runs the slave's start
+ * routine, so a burst larger than the ring would stall in write_buf
+ * until the next write (e.g. the user pressing a key) kicked it.  The
+ * caller MUST NOT hold tp->lock.
+ */
+void tty_start(struct tty *tty) {
+    if (!tty_valid(tty)) return;
+    TTY_LOCK(tty);
+    tty_start_locked(tty);
+    sched_wakeup(&tty->poll_wait);
+    sched_wakeup(&tty->write_wait);
+    TTY_UNLOCK(tty);
+}
+
 int tty_ioctl_kern(struct tty *tty, uint32_t cmd, uintptr_t arg) {
     if (!tty_valid(tty)) return -EIO;
     int ret = -1;

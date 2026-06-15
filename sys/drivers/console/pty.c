@@ -486,7 +486,14 @@ size_t pty_master_node_read(fs_node_t *node, off_t offset, size_t size,
          * parking.  Terminal emulators (xterm) run the master fd
          * non-blocking and poll it through select(). */
         if (p->master_nonblock) {
+            struct tty *st = p->slave_tty;
             spinlock_release(&p->lock);
+            /* The ring is empty, but the slave may have output buffered
+             * behind it (a burst larger than the ring).  Kick it so the
+             * residue flows into the ring before we return — otherwise a
+             * non-blocking reader (xterm) sees EAGAIN, parks in select(),
+             * and the tail only appears on the next unrelated wakeup. */
+            if (st) tty_start(st);
             return (size_t)-EAGAIN;
         }
 
@@ -506,7 +513,14 @@ size_t pty_master_node_read(fs_node_t *node, off_t offset, size_t size,
         }
     }
 
+    struct tty *st = p->slave_tty;
     spinlock_release(&p->lock);
+
+    /* We freed ring space — push any output the slave had buffered
+     * behind the ring so it streams to the master without waiting for
+     * the next slave write.  (tty_start takes the slave lock then the
+     * pair lock, so it must run with p->lock released.) */
+    if (n > 0 && st) tty_start(st);
     return n;
 }
 

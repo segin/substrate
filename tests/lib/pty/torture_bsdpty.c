@@ -63,6 +63,20 @@ static int read_retry(int fd, char *buf, int len) {
     return -1;
 }
 
+/* Accumulate up to `want` bytes from a non-blocking fd, tolerating
+ * EAGAIN with a brief idle spin.  No intervening writes — this exercises
+ * the read-side kick that pushes the slave's buffered output (a burst
+ * larger than the master ring) without needing another slave write. */
+static int read_all_nonblock(int fd, char *buf, int want) {
+    int total = 0, idle = 0;
+    while (total < want && idle < 200) {
+        int n = (int)read(fd, buf + total, want - total);
+        if (n > 0) { total += n; idle = 0; }
+        else { idle++; usleep(2000); }
+    }
+    return total;
+}
+
 int main(void) {
     printf("torture_bsdpty: BSD-style pty grid\n");
 
@@ -94,6 +108,27 @@ int main(void) {
         char buf[8] = {0};
         int n = read_retry(m, buf, sizeof(buf));
         CHECK(n == 3 && memcmp(buf, "xyz", 3) == 0, "master reads slave's bytes");
+    }
+
+    /* 4b. burst larger than the master ring (2048): the whole thing must
+     * stream out to the master via the read-side kick, with NO further
+     * slave write to nudge it.  Regression for output stalling in the
+     * slave's write_buf until the next keystroke. */
+    if (s >= 0) {
+        enum { BURST = 3000 };
+        char *outb = malloc(BURST);
+        char *inb  = malloc(BURST);
+        if (outb && inb) {
+            for (int i = 0; i < BURST; i++) outb[i] = (char)('A' + (i % 26));
+            ssize_t w = write(s, outb, BURST);
+            CHECK(w == BURST, "write 3000-byte burst to slave");
+            int got = read_all_nonblock(m, inb, BURST);
+            CHECK(got == BURST, "master drains whole burst without extra write");
+            CHECK(got == BURST && memcmp(inb, outb, BURST) == 0,
+                  "burst content intact and in order");
+        }
+        free(outb);
+        free(inb);
     }
 
     /* 5. busy master open fails with EIO */
