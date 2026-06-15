@@ -309,7 +309,6 @@ tests/lib/edit/test_property
 tests/lib/edit/test_tokenizer
 tests/lib/edit/test_vi
 tools/sbsh_expect.exp
-/usr.lib/elfobj/tests/test_ensure_symbols_relocs
 tests/usr.lib/exvi/test_exvi_prop
 tests/usr.lib/exvi/test_exvi_core
 **/.build-mode
@@ -467,3 +466,35 @@ tests/lib/c/test_*
 !tests/lib/c/test_*.h
 tests/lib/c/repro_*
 !tests/lib/c/repro_*.c
+
+# Kernel framebuffer-console build variants
+/sys/kernel.fb.bin
+/sys/kernel.fb.multiboot
+
+# Upstream tarballs downloaded by contrib/<pkg>/fetch.sh (never vendored)
+/contrib/*/*.tar.gz
+/contrib/*/*.tar.xz
+/contrib/*/*.tar.bz2
+/contrib/*/*.tgz
+
+# usr.sbin tool binaries (PROG matches its parent dir; sources are *.c)
+/usr.sbin/groupadd/groupadd
+/usr.sbin/groupdel/groupdel
+/usr.sbin/groupmod/groupmod
+/usr.sbin/useradd/useradd
+/usr.sbin/userdel/userdel
+/usr.sbin/usermod/usermod
+
+# usr.lib/elfobj test binaries (sources now live in tests/usr.lib/elfobj)
+tests/usr.lib/elfobj/test_*
+!tests/usr.lib/elfobj/test_*.c
+!tests/usr.lib/elfobj/test_*.sh
+
+# Assorted test / diagnostic binaries (co-located *.c sources stay tracked)
+/tests/bin/telnetd/torture_telnetd
+/tests/lib/ipc/diag_proclist
+/tests/lib/pthread/host/host_test_join
+/tests/lib/pthread/host/host_test_mutex
+/tests/lib/pthread/host/host_test_trampoline
+/tests/sys/console/test_vt_wrap
+/tests/sys/x11/xtrace
