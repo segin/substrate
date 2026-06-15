@@ -229,6 +229,9 @@ static void *freebsd_syscalls[MAX_SYSCALLS] = {
     [FREEBSD_SYS_pwrite_freebsd13] = (void *)&freebsd_sys_pwrite,
     [FREEBSD_SYS_truncate_freebsd13]  = (void *)&sys_truncate,
     [FREEBSD_SYS_ftruncate_freebsd13] = (void *)&sys_ftruncate,
+    [FREEBSD_SYS_kenv]             = (void *)&freebsd_sys_kenv,
+    [FREEBSD_SYS_nmount]           = (void *)&freebsd_sys_nmount,
+    [FREEBSD_SYS_setloginclass]    = (void *)&freebsd_sys_zero,
 };
 
 static const char *freebsd_names[MAX_SYSCALLS] = {
@@ -407,6 +410,9 @@ static const char *freebsd_names[MAX_SYSCALLS] = {
     [FREEBSD_SYS_pwrite_freebsd13] = "pwrite",
     [FREEBSD_SYS_truncate_freebsd13]  = "truncate",
     [FREEBSD_SYS_ftruncate_freebsd13] = "ftruncate",
+    [FREEBSD_SYS_kenv]             = "kenv",
+    [FREEBSD_SYS_nmount]           = "nmount",
+    [FREEBSD_SYS_setloginclass]    = "setloginclass",
 };
 
 

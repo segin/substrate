@@ -202,6 +202,8 @@ struct freebsd13_stat;
 /* --- Additional syscalls (numbers verified vs FreeBSD syscalls.master).
  *     break, lpathconf, the sched_ calls and the freebsd13 pread/pwrite/
  *     truncate macros are defined elsewhere in this header. --- */
+#define FREEBSD_SYS_nmount           378
+#define FREEBSD_SYS_kenv             390
 #define FREEBSD_SYS_chflags          34
 #define FREEBSD_SYS_fchflags         35
 #define FREEBSD_SYS_sigaltstack      53

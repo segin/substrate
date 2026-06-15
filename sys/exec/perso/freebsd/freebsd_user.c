@@ -684,3 +684,77 @@ int freebsd_sys_fpathconf(int fd, int name) {
  * band; report a small fixed range. */
 int freebsd_sys_sched_prio_max(int policy) { (void)policy; return 31; }
 int freebsd_sys_sched_prio_min(int policy) { (void)policy; return 0; }
+
+/*
+ * FreeBSD kenv(2): kernel environment accessor.  Substrate has no kernel
+ * environment (there is no boot loader stuffing tunables into kernel env),
+ * so a GET reports "not found", DUMP yields nothing, and SET/UNSET are
+ * accepted no-ops.  rc(8) reads loader vars through kenv; returning ENOENT
+ * (rather than ENOSYS) lets the scripts take their "variable unset" path.
+ */
+#define FBSD_KENV_GET    0
+#define FBSD_KENV_SET    1
+#define FBSD_KENV_UNSET  2
+int freebsd_sys_kenv(int what, const char *name, char *value, int len) {
+    (void)name; (void)value; (void)len;
+    if (what == FBSD_KENV_GET) {
+        return -ENOENT;     /* no such variable */
+    }
+    return 0;               /* SET/UNSET no-op; DUMP variants -> 0 bytes */
+}
+
+/*
+ * FreeBSD nmount(2): the modern mount(8) entry point.  Arguments arrive as
+ * an iovec array of NUL-terminated name/value pairs ("fstype", "fspath",
+ * "from", plus fs-specific options).  Pull out the three that map onto
+ * substrate's kern_mount(source, target, fstype, flags, data) and forward;
+ * fs-specific options are ignored.
+ */
+int freebsd_sys_nmount(const struct freebsd_iovec *iov, unsigned int niov,
+                       int flags) {
+    if (niov == 0 || (niov & 1) || niov > 64) {
+        return -EINVAL;
+    }
+    struct freebsd_iovec kiov[64];
+    if (copyin(iov, kiov, niov * sizeof(kiov[0])) != 0) {
+        return -EFAULT;
+    }
+
+    char fstype[32] = "";
+    char fspath[256] = "";
+    char from[256]   = "";
+
+    for (unsigned int i = 0; i + 1 < niov; i += 2) {
+        char nm[32];
+        size_t nlen = kiov[i].iov_len;
+        if (nlen == 0 || nlen > sizeof(nm)) {
+            continue;
+        }
+        if (copyin(kiov[i].iov_base, nm, nlen) != 0) {
+            continue;
+        }
+        nm[nlen - 1 < sizeof(nm) ? nlen - 1 : sizeof(nm) - 1] = '\0';
+
+        char  *dst = NULL;
+        size_t cap = 0;
+        if (strcmp(nm, "fstype") == 0)      { dst = fstype; cap = sizeof(fstype); }
+        else if (strcmp(nm, "fspath") == 0) { dst = fspath; cap = sizeof(fspath); }
+        else if (strcmp(nm, "from") == 0)   { dst = from;   cap = sizeof(from); }
+        if (!dst) {
+            continue;
+        }
+        size_t vlen = kiov[i + 1].iov_len;
+        if (vlen == 0 || vlen > cap) {
+            continue;
+        }
+        if (copyin(kiov[i + 1].iov_base, dst, vlen) == 0) {
+            dst[vlen - 1 < cap ? vlen - 1 : cap - 1] = '\0';
+        }
+    }
+
+    if (fstype[0] == '\0' || fspath[0] == '\0') {
+        return -EINVAL;
+    }
+    return kern_mount(from[0] ? from : NULL, fspath, fstype,
+                      (unsigned long)flags, NULL);
+}

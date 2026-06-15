@@ -408,6 +408,9 @@ int64_t freebsd_sys_pwrite(int fd, const void *buf, size_t nbyte,
 int     freebsd_sys_fpathconf(int fd, int name);
 int     freebsd_sys_sched_prio_max(int policy);
 int     freebsd_sys_sched_prio_min(int policy);
+int     freebsd_sys_kenv(int what, const char *name, char *value, int len);
+int     freebsd_sys_nmount(const struct freebsd_iovec *iov, unsigned int niov,
+                           int flags);
 
 int freebsd_sys_open(const char *path, int flags, int mode);
 int freebsd_sys_openat(int dirfd, const char *path, int flags, int mode);
