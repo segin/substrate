@@ -447,4 +447,42 @@ int freebsd_sys_unlinkat(int dirfd, const char *path, int flag);
 int freebsd_sys_chown(const char *path, int uid, int gid);
 int freebsd_sys_lchmod(const char *path, int mode);
 
+/*
+ * FreeBSD 12+/13 struct statfs (the layout used by the statfs/fstatfs/
+ * getfsstat _freebsd13 syscalls, 555/556/557).  Width-fixed fields only,
+ * so the layout is identical on i386 and amd64.  sizeof == 2344.
+ */
+#define FREEBSD_MFSNAMELEN  16
+#define FREEBSD_MNAMELEN    1024
+#define FREEBSD_STATFS_VERSION 0x20140518
+
+struct freebsd_statfs {
+    uint32_t f_version;
+    uint32_t f_type;
+    uint64_t f_flags;
+    uint64_t f_bsize;
+    uint64_t f_iosize;
+    uint64_t f_blocks;
+    uint64_t f_bfree;
+    int64_t  f_bavail;
+    uint64_t f_files;
+    int64_t  f_ffree;
+    uint64_t f_syncwrites;
+    uint64_t f_asyncwrites;
+    uint64_t f_syncreads;
+    uint64_t f_asyncreads;
+    uint64_t f_spare[10];
+    uint32_t f_namemax;
+    uint32_t f_owner;
+    int32_t  f_fsid[2];
+    char     f_charspare[80];
+    char     f_fstypename[FREEBSD_MFSNAMELEN];
+    char     f_mntfromname[FREEBSD_MNAMELEN];
+    char     f_mntonname[FREEBSD_MNAMELEN];
+};
+
+int freebsd_sys_statfs(const char *path, struct freebsd_statfs *buf);
+int freebsd_sys_fstatfs(int fd, struct freebsd_statfs *buf);
+int freebsd_sys_getfsstat(struct freebsd_statfs *buf, long bufsize, int mode);
+
 #endif /* _FREEBSD_USER_H */

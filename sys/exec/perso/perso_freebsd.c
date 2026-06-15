@@ -178,6 +178,10 @@ static void *freebsd_syscalls[MAX_SYSCALLS] = {
      * records, so d_name landed 4 bytes early and every filename
      * appeared shifted ("lost+found" → "+found", "test.sh" → ".sh"). */
     [FREEBSD_SYS_getdirentries_freebsd13] = (void *)&freebsd_sys_getdirentries,
+    /* statfs family (FreeBSD 12+/13 wide statfs layout). */
+    [FREEBSD_SYS_statfs_freebsd13]    = (void *)&freebsd_sys_statfs,
+    [FREEBSD_SYS_fstatfs_freebsd13]   = (void *)&freebsd_sys_fstatfs,
+    [FREEBSD_SYS_getfsstat_freebsd13] = (void *)&freebsd_sys_getfsstat,
     /* at-family wrappers (FreeBSD flag/path translation). */
     [FREEBSD_SYS_faccessat]  = (void *)&freebsd_sys_faccessat,
     [FREEBSD_SYS_fchmodat]   = (void *)&freebsd_sys_fchmodat,
@@ -365,6 +369,9 @@ static const char *freebsd_names[MAX_SYSCALLS] = {
     [FREEBSD_SYS_openat]    = "openat",
     [FREEBSD_SYS_getdirentries_freebsd13] = "getdirentries",
     [FREEBSD_SYS_freebsd11_getdirentries] = "getdirentries",
+    [FREEBSD_SYS_statfs_freebsd13]    = "statfs",
+    [FREEBSD_SYS_fstatfs_freebsd13]   = "fstatfs",
+    [FREEBSD_SYS_getfsstat_freebsd13] = "getfsstat",
     [FREEBSD_SYS_chmod]    = "chmod",
     [FREEBSD_SYS_chown]    = "chown",
     [FREEBSD_SYS_fchown]   = "fchown",
@@ -539,6 +546,9 @@ static struct syscall_fmt freebsd_fmts[MAX_SYSCALLS] = {
     [FREEBSD_SYS_openat]    = { 4, { ARG_INT, ARG_STR, ARG_HEX, ARG_HEX } },
     [FREEBSD_SYS_getdirentries_freebsd13] = { 4, { ARG_INT, ARG_PTR, ARG_INT, ARG_PTR } },
     [FREEBSD_SYS_freebsd11_getdirentries] = { 4, { ARG_INT, ARG_PTR, ARG_INT, ARG_PTR } },
+    [FREEBSD_SYS_statfs_freebsd13]    = { 2, { ARG_STR, ARG_PTR } },
+    [FREEBSD_SYS_fstatfs_freebsd13]   = { 2, { ARG_INT, ARG_PTR } },
+    [FREEBSD_SYS_getfsstat_freebsd13] = { 3, { ARG_PTR, ARG_INT, ARG_INT } },
 };
 
 extern char *strncpy(char *dest, const char *src, size_t n);

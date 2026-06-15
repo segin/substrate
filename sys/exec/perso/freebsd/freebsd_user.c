@@ -8,6 +8,7 @@
 #include <sys/fcntl.h>
 #include <sys/namei.h>
 #include <sys/errno.h>
+#include <sys/mount.h>
 #include <vfs/vfs.h>
 #include <vm/vm_kmem.h>
 #include <string.h>
@@ -772,4 +773,102 @@ int freebsd_sys_nmount(const struct freebsd_iovec *iov, unsigned int niov,
     }
     return kern_mount(from[0] ? from : NULL, fspath, fstype,
                       (unsigned long)flags, NULL);
+}
+
+/*
+ * statfs / fstatfs / getfsstat (the _freebsd13 variants, 555/556/557).
+ *
+ * FreeBSD userland enumerates mounted filesystems via getmntinfo(3) ->
+ * getfsstat(2); rc's mountcritlocal aborts the boot if that fails.  We
+ * translate the substrate native struct statfs into FreeBSD's wider,
+ * version-stamped layout.
+ */
+static void translate_statfs_to_freebsd(const struct statfs *ns,
+                                        struct freebsd_statfs *fs) {
+    memset(fs, 0, sizeof(*fs));
+    fs->f_version  = FREEBSD_STATFS_VERSION;
+    fs->f_bsize    = ns->f_bsize ? ns->f_bsize : 4096;
+    fs->f_iosize   = fs->f_bsize;
+    fs->f_blocks   = ns->f_blocks;
+    fs->f_bfree    = ns->f_bfree;
+    fs->f_bavail   = ns->f_bavail;
+    fs->f_files    = ns->f_files;
+    fs->f_ffree    = ns->f_ffree;
+    fs->f_namemax  = 255;
+    fs->f_owner    = ns->f_owner;
+    fs->f_fsid[0]  = (int32_t)ns->f_fsid;
+    fs->f_fsid[1]  = (int32_t)((uint64_t)ns->f_fsid >> 32);
+
+    const char *ty = ns->f_fstypename[0] ? ns->f_fstypename : "ufs";
+    if (strcmp(ty, "ext2") == 0) ty = "ext2fs";  /* FreeBSD module name */
+    strlcpy(fs->f_fstypename, ty, sizeof(fs->f_fstypename));
+    if (ns->f_mntonname[0])
+        strlcpy(fs->f_mntonname, ns->f_mntonname, sizeof(fs->f_mntonname));
+    if (ns->f_mntfromname[0])
+        strlcpy(fs->f_mntfromname, ns->f_mntfromname, sizeof(fs->f_mntfromname));
+}
+
+int freebsd_sys_statfs(const char *path, struct freebsd_statfs *buf) {
+    char kpath[1024];
+    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -EFAULT;
+    struct statfs ns;
+    memset(&ns, 0, sizeof(ns));
+    int err = kern_statfs(kpath, &ns);
+    if (err) return err;
+    struct freebsd_statfs fs;
+    translate_statfs_to_freebsd(&ns, &fs);
+    if (fs.f_mntonname[0] == '\0')
+        strlcpy(fs.f_mntonname, kpath, sizeof(fs.f_mntonname));
+    if (copyout(&fs, buf, sizeof(fs)) != 0) return -EFAULT;
+    return 0;
+}
+
+int freebsd_sys_fstatfs(int fd, struct freebsd_statfs *buf) {
+    struct statfs ns;
+    memset(&ns, 0, sizeof(ns));
+    int err = kern_fstatfs(fd, &ns);
+    if (err) return err;
+    struct freebsd_statfs fs;
+    translate_statfs_to_freebsd(&ns, &fs);
+    if (copyout(&fs, buf, sizeof(fs)) != 0) return -EFAULT;
+    return 0;
+}
+
+int freebsd_sys_getfsstat(struct freebsd_statfs *buf, long bufsize, int mode) {
+    struct mount *mp;
+    int count = 0;
+    long maxent = buf ? (bufsize / (long)sizeof(struct freebsd_statfs)) : 0;
+    (void)mode;  /* MNT_WAIT / MNT_NOWAIT — substrate statfs is synchronous */
+
+    TAILQ_FOREACH(mp, &mountlist, mnt_list) {
+        if (buf) {
+            if (count >= maxent) break;
+
+            struct statfs ns;
+            memset(&ns, 0, sizeof(ns));
+            if (mp->mnt_node_root)
+                statfs_fs(mp->mnt_node_root, &ns);
+
+            struct freebsd_statfs fs;
+            translate_statfs_to_freebsd(&ns, &fs);
+
+            /* The mount-point and device names live on the mount record,
+             * not in the per-fs statfs callback. */
+            const char *ty = mp->mnt_stat.f_fstypename[0]
+                           ? mp->mnt_stat.f_fstypename : "ufs";
+            if (strcmp(ty, "ext2") == 0) ty = "ext2fs";
+            strlcpy(fs.f_fstypename, ty, sizeof(fs.f_fstypename));
+            strlcpy(fs.f_mntonname,
+                    mp->mnt_stat.f_mntonname[0] ? mp->mnt_stat.f_mntonname : "/",
+                    sizeof(fs.f_mntonname));
+            strlcpy(fs.f_mntfromname,
+                    mp->mnt_stat.f_mntfromname[0] ? mp->mnt_stat.f_mntfromname
+                                                  : "/dev/root",
+                    sizeof(fs.f_mntfromname));
+
+            if (copyout(&fs, &buf[count], sizeof(fs)) != 0) return -EFAULT;
+        }
+        count++;
+    }
+    return count;
 }
