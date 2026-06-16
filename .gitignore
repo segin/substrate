@@ -502,3 +502,6 @@ tests/usr.lib/elfobj/test_*
 # TDE (Trinity) multi-sub-port: ignore each sub-port's extracted tree + tarballs
 /contrib/tde/*/build/
 /contrib/tde/*/*.tar.*
+
+/contrib/libXft/build/
+/contrib/libXft/*.tar.*
