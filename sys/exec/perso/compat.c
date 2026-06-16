@@ -608,6 +608,27 @@ int sys_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void *newp, 
  * freebsd_sys_sysctl - FreeBSD sysctl(2) via MIB
  * Translates a subset of FreeBSD MIB numbers to Substrate information.
  */
+/*
+ * Return a C string for a string-valued sysctl, honouring the (oldp,
+ * oldlenp) buffer protocol: copy as much as fits, report the full length
+ * (incl. NUL) in *oldlenp, and signal ENOMEM if the caller's buffer was
+ * too small.  uname(3) reads kern.ostype/osrelease/version/hostname and
+ * hw.machine this way and tolerates ENOMEM, so a sane string here is what
+ * makes `uname` work.
+ */
+static int fbsd_sysctl_str(const char *s, void *oldp, size_t *oldlenp) {
+    size_t need = strlen(s) + 1;          /* include the NUL */
+    size_t avail = 0;
+    if (oldlenp && copyin(oldlenp, &avail, sizeof(size_t)) != 0) return -EFAULT;
+    if (oldp) {
+        size_t n = (oldlenp && avail < need) ? avail : need;
+        if (n && copyout((void *)s, oldp, n) != 0) return -EFAULT;
+    }
+    if (oldlenp && copyout(&need, oldlenp, sizeof(size_t)) != 0) return -EFAULT;
+    if (oldp && oldlenp && avail < need) return -ENOMEM;
+    return 0;
+}
+
 int freebsd_sys_sysctl(int *name, unsigned int namelen, void *oldp, size_t *oldlenp, void *newp, size_t newlen) {
     (void)newp; (void)newlen;
     if (!name || namelen < 1) return -EINVAL;
@@ -618,6 +639,10 @@ int freebsd_sys_sysctl(int *name, unsigned int namelen, void *oldp, size_t *oldl
 
     /* CTL_KERN=1, CTL_HW=6 */
     if (kname[0] == 6 && namelen >= 2) { /* CTL_HW */
+        if (kname[1] == 1)   /* HW_MACHINE */
+            return fbsd_sysctl_str("i386", oldp, oldlenp);
+        if (kname[1] == 11)  /* HW_MACHINE_ARCH */
+            return fbsd_sysctl_str("i386", oldp, oldlenp);
         if (kname[1] == 3) { /* HW_NCPU */
             int val = sys_cpu_count();
             if (val < 1) val = 1;
@@ -642,6 +667,17 @@ int freebsd_sys_sysctl(int *name, unsigned int namelen, void *oldp, size_t *oldl
          * directories via libc's __cvt_dirents_from11, and a converter
          * mismatch with our freebsd11_getdirentries layout chopped the
          * first 4 bytes off every filename. */
+        if (kname[1] == 1)   /* KERN_OSTYPE */
+            return fbsd_sysctl_str("FreeBSD", oldp, oldlenp);
+        if (kname[1] == 2)   /* KERN_OSRELEASE */
+            return fbsd_sysctl_str("14.3-RELEASE", oldp, oldlenp);
+        if (kname[1] == 4)   /* KERN_VERSION */
+            return fbsd_sysctl_str(
+                "FreeBSD 14.3-RELEASE (Substrate personality)\n", oldp, oldlenp);
+        if (kname[1] == 10) { /* KERN_HOSTNAME */
+            extern char kernel_hostname[];
+            return fbsd_sysctl_str(kernel_hostname, oldp, oldlenp);
+        }
         if (kname[1] == 24) { /* KERN_OSRELDATE */
             int val = 1403000;
             if (oldlenp) { size_t want = sizeof(int); copyout(&want, oldlenp, sizeof(size_t)); }
