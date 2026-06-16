@@ -224,6 +224,26 @@ static inline void syscall_trace_emit(const char *s) {
     }
 }
 
+/*
+ * Signal ENOSYS for an unimplemented / out-of-range / NULL-handler syscall,
+ * honouring the calling personality's ABI.  BSD personalities report errors
+ * via the carry flag (CF=1) with a positive, BSD-numbered errno in EAX; a
+ * bare negative EAX with CF clear reads as a SUCCESSFUL return of -38 and
+ * leaves errno stale.  That breaks the ubiquitous `ret < 0 && errno ==
+ * ENOSYS` feature/capability probe — most visibly FreeBSD login's
+ * auditon(A_GETCOND) probe, which then fatally errx()s "could not determine
+ * audit condition" and bounces the user back to the login prompt.
+ */
+static void syscall_emit_enosys(registers_t *regs, struct personality *p) {
+    if (p && (p->id == PERS_FREEBSD || p->id == PERS_NETBSD ||
+              p->id == PERS_OPENBSD)) {
+        regs->eax = bsd_errno_xlate(38);   /* native ENOSYS -> BSD ENOSYS (78) */
+        regs->eflags |= 1;                 /* CF = error */
+    } else {
+        regs->eax = (uint32_t)-38;         /* Linux/native negative-errno */
+    }
+}
+
 void syscall_handler(registers_t *regs) {
     __asm__ volatile("sti");
     thread_t *cpu_thread = CURRENT_THREAD();
@@ -400,7 +420,7 @@ void syscall_handler(registers_t *regs) {
             snprintf(buf, sizeof(buf), "SYSCALL: Out of range #%u\n", (unsigned int)syscall_num);
             syscall_trace_emit(buf);
         }
-        regs->eax = -38; // ENOSYS
+        syscall_emit_enosys(regs, p);
         return;
     }
     
@@ -408,7 +428,7 @@ void syscall_handler(registers_t *regs) {
         if (trace_this) {
             syscall_trace_emit("SYSCALL: Invalid syscall table\n");
         }
-        regs->eax = -38; // ENOSYS
+        syscall_emit_enosys(regs, p);
         return;
     }
 
@@ -443,7 +463,7 @@ void syscall_handler(registers_t *regs) {
 
     if (!location) {
         if (trace_this) syscall_trace_emit("SYSCALL: Not Implemented\n");
-        regs->eax = -38; // ENOSYS
+        syscall_emit_enosys(regs, p);
         return;
     }
 
@@ -454,7 +474,7 @@ void syscall_handler(registers_t *regs) {
                     location, (unsigned int)syscall_num);
             syscall_trace_emit(buf);
         }
-        regs->eax = -38; // ENOSYS
+        syscall_emit_enosys(regs, p);
         return;
     }
     
