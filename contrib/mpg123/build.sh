@@ -84,9 +84,9 @@ fi
 SRC_TREE="${SRC_TREE%/}"
 
 BUILD_DIR="$HERE/build/build-substrate"
-# Stage into ${SUBSTRATE_TOP}/dist-mpg123 so build-rootfs.sh's
+# Stage into ${SUBSTRATE_TOP}/dist-overlay/dist-mpg123 so build-rootfs.sh's
 # contrib-overlay loop picks it up the same way the other ports do.
-INSTALL_DIR="${DESTDIR:-${SUBSTRATE_TOP}/dist-mpg123}"
+INSTALL_DIR="${DESTDIR:-${SUBSTRATE_TOP}/dist-overlay/dist-mpg123}"
 
 if [ "$DO_CLEAN" = 1 ]; then
     echo "==> Cleaning $BUILD_DIR"

@@ -110,7 +110,7 @@ contrib/     third-party components, each as a patch series + fetch.sh
              managers (matwm2, twm, ctwm), the X bitmap fonts
              (font-misc-misc, font-adobe-75dpi, font-adobe-100dpi)
              and the ext2 toolset (e2fsprogs, e2tools), ext2-boot.
-             Each lands at ${SUBSTRATE_TOP}/dist-<pkg>/ which
+             Each lands at ${SUBSTRATE_TOP}/dist-overlay/dist-<pkg>/ which
              build-rootfs.sh overlays onto the image.  Font ports
              ship the BDF sources verbatim (no bdftopcf on the
              host) plus a generated fonts.dir; the adobe ports also

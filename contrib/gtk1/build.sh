@@ -12,7 +12,7 @@ if [ -z "${SUBSTRATE_TOP:-}" ]; then
     SUBSTRATE_TOP="${p}"
 fi
 : "${STAGE1_PREFIX:=/opt/substrate}"
-: "${DESTDIR:=${SUBSTRATE_TOP}/dist-gtk1}"
+: "${DESTDIR:=${SUBSTRATE_TOP}/dist-overlay/dist-gtk1}"
 : "${JOBS:=$(nproc 2>/dev/null || echo 4)}"
 PATH="${STAGE1_PREFIX}/bin:${PATH}"; export PATH
 [ -d "${TREE_DIR}" ] || { echo "build.sh: run ./fetch.sh first" >&2; exit 1; }
@@ -21,7 +21,7 @@ PATH="${STAGE1_PREFIX}/bin:${PATH}"; export PATH
 SR="${HERE}/build/sysroot"
 rm -rf "${SR}"; mkdir -p "${SR}/usr/lib"
 for d in xorgproto libXau xtrans libxcb libX11 libXext glib1; do
-    st="${SUBSTRATE_TOP}/dist-${d}"
+    st="${SUBSTRATE_TOP}/dist-overlay/dist-${d}"
     [ -d "${st}/usr" ] || { echo "build.sh: ${st} missing — build contrib/${d} first" >&2; exit 1; }
     cp -a "${st}/usr/." "${SR}/usr/"
 done
@@ -41,7 +41,7 @@ export LDFLAGS="-L${SR}/usr/lib -Wl,-rpath-link,${SR}/usr/lib"
 # emitted -I/-L point at the cross headers/libs, and hand it to configure.
 mkdir -p "${SR}/usr/bin"
 sed "s|^prefix=/usr$|prefix=${SR}/usr|" \
-    "${SUBSTRATE_TOP}/dist-glib1/usr/bin/glib-config" > "${SR}/usr/bin/glib-config"
+    "${SUBSTRATE_TOP}/dist-overlay/dist-glib1/usr/bin/glib-config" > "${SR}/usr/bin/glib-config"
 chmod +x "${SR}/usr/bin/glib-config"
 export GLIB_CONFIG="${SR}/usr/bin/glib-config"
 PATH="${SR}/usr/bin:${PATH}"; export PATH

@@ -182,7 +182,7 @@ For the full detailed changelog, see `docs/CHANGELOG.md`.
 - **Stage 2 (Canadian cross)**: same binutils + GCC sources, but
   built with the stage-1 cross compiler to produce substrate-ELF
   binaries that run *on* substrate itself.  Installs into
-  `dist-toolchain/usr/` (binutils) and `/tmp/gcc-stage2-staging/usr/`
+  `dist-overlay/dist-toolchain/usr/` (binutils) and `/tmp/gcc-stage2-staging/usr/`
   (gcc) as `/usr/bin/{gcc,g++,ld,as,ar,nm,objdump,readelf,strip,
   ranlib,size,strings,addr2line,c++filt,elfedit,gprof,ld.bfd}`,
   `/usr/libexec/gcc/i386-unknown-substrate/16.1.0/{cc1,cc1plus,lto1,
@@ -246,7 +246,7 @@ Every third-party userland lives under `contrib/<pkg>/` as a
 patch series against an upstream tarball — never vendored
 source.  Standard layout per port: `fetch.sh` (download +
 SHA-verify + extract + apply), `build.sh` (configure + make +
-stage into `dist-<pkg>/usr/`), `patches/` series, `series`
+stage into `dist-overlay/dist-<pkg>/usr/`), `patches/` series, `series`
 manifest, `README.SUBSTRATE.md`.  Current set:
 
 - **GNU make 4.4.1** (`contrib/make/`)

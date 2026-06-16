@@ -13,7 +13,7 @@
 #
 # Env:
 #   STAGE1_PREFIX   substrate toolchain prefix (default /opt/substrate)
-#   DESTDIR         staging dir (default ${SUBSTRATE_TOP}/dist-mksh)
+#   DESTDIR         staging dir (default ${SUBSTRATE_TOP}/dist-overlay/dist-mksh)
 
 set -eu
 
@@ -28,7 +28,7 @@ if [ -z "${SUBSTRATE_TOP:-}" ]; then
     SUBSTRATE_TOP="${p}"
 fi
 : "${STAGE1_PREFIX:=/opt/substrate}"
-: "${DESTDIR:=${SUBSTRATE_TOP}/dist-mksh}"
+: "${DESTDIR:=${SUBSTRATE_TOP}/dist-overlay/dist-mksh}"
 PATH="${STAGE1_PREFIX}/bin:${PATH}"; export PATH
 
 [ -d "${TREE_DIR}" ] || { echo "build.sh: run ./fetch.sh first" >&2; exit 1; }

@@ -28,7 +28,7 @@ if [ -z "${SUBSTRATE_TOP:-}" ]; then
     SUBSTRATE_TOP="${p}"
 fi
 : "${STAGE1_PREFIX:=/opt/substrate}"
-: "${DESTDIR:=${SUBSTRATE_TOP}/dist-sqlite3}"
+: "${DESTDIR:=${SUBSTRATE_TOP}/dist-overlay/dist-sqlite3}"
 
 PATH="${STAGE1_PREFIX}/bin:${PATH}"
 export PATH

@@ -9,7 +9,7 @@ on the image up to now) with a real terminfo backend.
 - `fetch.sh` — fetch ncurses-6.4.tar.gz from invisible-island,
   SHA-verify, extract, apply the substrate patch series.
 - `build.sh` — `./configure --host=i386-unknown-substrate ...`,
-  `make`, stage into `${SUBSTRATE_TOP}/dist-ncurses/usr/`.
+  `make`, stage into `${SUBSTRATE_TOP}/dist-overlay/dist-ncurses/usr/`.
 
 ## Configure flags (rationale)
 

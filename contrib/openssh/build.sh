@@ -11,7 +11,7 @@
 #
 # Env overrides:
 #   STAGE1_PREFIX   substrate toolchain prefix (default /opt/substrate)
-#   DESTDIR         staging dir (default ${SUBSTRATE_TOP}/dist-openssh)
+#   DESTDIR         staging dir (default ${SUBSTRATE_TOP}/dist-overlay/dist-openssh)
 #   JOBS            parallel jobs (default `nproc`)
 
 set -eu
@@ -30,7 +30,7 @@ if [ -z "${SUBSTRATE_TOP:-}" ]; then
     SUBSTRATE_TOP="${p}"
 fi
 : "${STAGE1_PREFIX:=/opt/substrate}"
-: "${DESTDIR:=${SUBSTRATE_TOP}/dist-openssh}"
+: "${DESTDIR:=${SUBSTRATE_TOP}/dist-overlay/dist-openssh}"
 : "${JOBS:=$(nproc 2>/dev/null || echo 4)}"
 
 TARGET="i386-unknown-substrate"
@@ -41,8 +41,8 @@ export PATH
 
 # Stage paths for the contrib deps we link against.  OpenSSL + zlib
 # pkg-config sit under their per-package DESTDIRs.
-: "${OPENSSL_STAGE:=${SUBSTRATE_TOP}/dist-openssl}"
-: "${ZLIB_STAGE:=${SUBSTRATE_TOP}/dist-zlib}"
+: "${OPENSSL_STAGE:=${SUBSTRATE_TOP}/dist-overlay/dist-openssl}"
+: "${ZLIB_STAGE:=${SUBSTRATE_TOP}/dist-overlay/dist-zlib}"
 
 # pkg-config search path so configure finds libssl/libcrypto/zlib.
 PKGCFG=""

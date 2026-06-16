@@ -11,12 +11,12 @@ if [ -z "${SUBSTRATE_TOP:-}" ]; then
     SUBSTRATE_TOP="${p}"
 fi
 : "${STAGE1_PREFIX:=/opt/substrate}"
-: "${DESTDIR:=${SUBSTRATE_TOP}/dist-libpng}"
+: "${DESTDIR:=${SUBSTRATE_TOP}/dist-overlay/dist-libpng}"
 : "${JOBS:=$(nproc 2>/dev/null || echo 4)}"
 PATH="${STAGE1_PREFIX}/bin:${PATH}"; export PATH
 . "${HERE}/../substrate-autotools.sh"
 [ -d "${TREE_DIR}" ] || { echo "build.sh: run ./fetch.sh first" >&2; exit 1; }
-ZL="${SUBSTRATE_TOP}/dist-zlib"
+ZL="${SUBSTRATE_TOP}/dist-overlay/dist-zlib"
 [ -d "${ZL}/usr" ] || { echo "build.sh: dist-zlib missing — build contrib/zlib first" >&2; exit 1; }
 
 export CPPFLAGS="-I${ZL}/usr/include"

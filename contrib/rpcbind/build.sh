@@ -7,7 +7,7 @@
 #
 # Env:
 #   STAGE1_PREFIX   substrate toolchain prefix (default /opt/substrate)
-#   DESTDIR         staging dir (default ${SUBSTRATE_TOP}/dist-rpcbind)
+#   DESTDIR         staging dir (default ${SUBSTRATE_TOP}/dist-overlay/dist-rpcbind)
 #   JOBS            parallel jobs (default `nproc`)
 
 set -eu
@@ -24,13 +24,13 @@ if [ -z "${SUBSTRATE_TOP:-}" ]; then
     SUBSTRATE_TOP="${p}"
 fi
 : "${STAGE1_PREFIX:=/opt/substrate}"
-: "${DESTDIR:=${SUBSTRATE_TOP}/dist-rpcbind}"
+: "${DESTDIR:=${SUBSTRATE_TOP}/dist-overlay/dist-rpcbind}"
 : "${JOBS:=$(nproc 2>/dev/null || echo 4)}"
 PATH="${STAGE1_PREFIX}/bin:${PATH}"; export PATH
 
 [ -d "${TREE_DIR}" ] || { echo "build.sh: run ./fetch.sh first" >&2; exit 1; }
 
-TIRPC="${SUBSTRATE_TOP}/dist-libtirpc/usr"
+TIRPC="${SUBSTRATE_TOP}/dist-overlay/dist-libtirpc/usr"
 [ -d "${TIRPC}/include/tirpc" ] || { echo "build.sh: build contrib/libtirpc first" >&2; exit 1; }
 
 SYSLIB="${STAGE1_PREFIX}/i386-unknown-substrate/lib"

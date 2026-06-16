@@ -3,13 +3,13 @@
 # build.sh — configure + build + install curl for substrate.
 #
 # Depends on contrib/openssl being staged first (build.sh emits to
-# ${SUBSTRATE_TOP}/dist-openssl).  Disables everything that needs
+# ${SUBSTRATE_TOP}/dist-overlay/dist-openssl).  Disables everything that needs
 # a contrib package we don't have yet — see README.SUBSTRATE.md.
 #
 # Env:
 #   STAGE1_PREFIX   default /opt/substrate
-#   OPENSSL_STAGE   default ${SUBSTRATE_TOP}/dist-openssl
-#   DESTDIR         default ${SUBSTRATE_TOP}/dist-curl
+#   OPENSSL_STAGE   default ${SUBSTRATE_TOP}/dist-overlay/dist-openssl
+#   DESTDIR         default ${SUBSTRATE_TOP}/dist-overlay/dist-curl
 #   JOBS            default `nproc`
 
 set -eu
@@ -27,8 +27,8 @@ if [ -z "${SUBSTRATE_TOP:-}" ]; then
     SUBSTRATE_TOP="${p}"
 fi
 : "${STAGE1_PREFIX:=/opt/substrate}"
-: "${OPENSSL_STAGE:=${SUBSTRATE_TOP}/dist-openssl}"
-: "${DESTDIR:=${SUBSTRATE_TOP}/dist-curl}"
+: "${OPENSSL_STAGE:=${SUBSTRATE_TOP}/dist-overlay/dist-openssl}"
+: "${DESTDIR:=${SUBSTRATE_TOP}/dist-overlay/dist-curl}"
 : "${JOBS:=$(nproc 2>/dev/null || echo 4)}"
 
 PATH="${STAGE1_PREFIX}/bin:${PATH}"

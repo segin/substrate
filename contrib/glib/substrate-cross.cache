@@ -333,7 +333,7 @@ lt_cv_to_tool_file_cmd=${lt_cv_to_tool_file_cmd=func_convert_file_noop}
 lt_cv_truncate_bin=${lt_cv_truncate_bin='/usr/bin/dd bs=4096 count=1'}
 pkg_cv_DBUS1_CFLAGS=${pkg_cv_DBUS1_CFLAGS='-I/usr/include/dbus-1.0 -I/usr/lib/dbus-1.0/include'}
 pkg_cv_DBUS1_LIBS=${pkg_cv_DBUS1_LIBS=-ldbus-1}
-pkg_cv_LIBFFI_CFLAGS=${pkg_cv_LIBFFI_CFLAGS=-I/home/segin/substrate/dist-libffi/usr/include}
-pkg_cv_LIBFFI_LIBS=${pkg_cv_LIBFFI_LIBS='-L/home/segin/substrate/dist-libffi/usr/lib -lffi'}
-pkg_cv_ZLIB_CFLAGS=${pkg_cv_ZLIB_CFLAGS=-I/home/segin/substrate/dist-zlib/usr/include}
-pkg_cv_ZLIB_LIBS=${pkg_cv_ZLIB_LIBS='-L/home/segin/substrate/dist-zlib/usr/lib -lz'}
+pkg_cv_LIBFFI_CFLAGS=${pkg_cv_LIBFFI_CFLAGS=-I/home/segin/substrate/dist-overlay/dist-libffi/usr/include}
+pkg_cv_LIBFFI_LIBS=${pkg_cv_LIBFFI_LIBS='-L/home/segin/substrate/dist-overlay/dist-libffi/usr/lib -lffi'}
+pkg_cv_ZLIB_CFLAGS=${pkg_cv_ZLIB_CFLAGS=-I/home/segin/substrate/dist-overlay/dist-zlib/usr/include}
+pkg_cv_ZLIB_LIBS=${pkg_cv_ZLIB_LIBS='-L/home/segin/substrate/dist-overlay/dist-zlib/usr/lib -lz'}

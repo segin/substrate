@@ -12,7 +12,7 @@ if [ -z "${SUBSTRATE_TOP:-}" ]; then
     SUBSTRATE_TOP="${p}"
 fi
 : "${STAGE1_PREFIX:=/opt/substrate}"
-: "${DESTDIR:=${SUBSTRATE_TOP}/dist-disasterparty}"
+: "${DESTDIR:=${SUBSTRATE_TOP}/dist-overlay/dist-disasterparty}"
 : "${JOBS:=$(nproc 2>/dev/null || echo 4)}"
 PATH="${STAGE1_PREFIX}/bin:${PATH}"; export PATH
 [ -d "${TREE_DIR}" ] || { echo "build.sh: run ./fetch.sh first" >&2; exit 1; }
@@ -21,7 +21,7 @@ PATH="${STAGE1_PREFIX}/bin:${PATH}"; export PATH
 # curl/cjson probes nor the link pick up host libraries.
 PKGP=""; CPP=""; LDF=""
 for d in cjson curl openssl zlib; do
-    st="${SUBSTRATE_TOP}/dist-${d}"
+    st="${SUBSTRATE_TOP}/dist-overlay/dist-${d}"
     [ -d "${st}/usr" ] || continue
     [ -d "${st}/usr/lib/pkgconfig" ] && PKGP="${PKGP}${PKGP:+:}${st}/usr/lib/pkgconfig"
     [ -d "${st}/usr/include" ] && CPP="${CPP} -I${st}/usr/include"

@@ -21,8 +21,8 @@ if [ -z "${SUBSTRATE_TOP:-}" ]; then
     SUBSTRATE_TOP="${p}"
 fi
 : "${STAGE1_PREFIX:=/opt/substrate}"
-: "${XORGPROTO_STAGE:=${SUBSTRATE_TOP}/dist-xorgproto}"
-: "${DESTDIR:=${SUBSTRATE_TOP}/dist-libXdmcp}"
+: "${XORGPROTO_STAGE:=${SUBSTRATE_TOP}/dist-overlay/dist-xorgproto}"
+: "${DESTDIR:=${SUBSTRATE_TOP}/dist-overlay/dist-libXdmcp}"
 : "${JOBS:=$(nproc 2>/dev/null || echo 4)}"
 
 PATH="${STAGE1_PREFIX}/bin:${PATH}"

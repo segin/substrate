@@ -14,11 +14,11 @@
 #
 # Env:
 #   STAGE1_PREFIX     substrate toolchain prefix (default /opt/substrate)
-#   XORGPROTO_STAGE   default ${SUBSTRATE_TOP}/dist-xorgproto
-#   XTRANS_STAGE      default ${SUBSTRATE_TOP}/dist-xtrans
-#   LIBXAU_STAGE      default ${SUBSTRATE_TOP}/dist-libXau
-#   LIBXCB_STAGE      default ${SUBSTRATE_TOP}/dist-libxcb
-#   DESTDIR           staging dir (default ${SUBSTRATE_TOP}/dist-libX11)
+#   XORGPROTO_STAGE   default ${SUBSTRATE_TOP}/dist-overlay/dist-xorgproto
+#   XTRANS_STAGE      default ${SUBSTRATE_TOP}/dist-overlay/dist-xtrans
+#   LIBXAU_STAGE      default ${SUBSTRATE_TOP}/dist-overlay/dist-libXau
+#   LIBXCB_STAGE      default ${SUBSTRATE_TOP}/dist-overlay/dist-libxcb
+#   DESTDIR           staging dir (default ${SUBSTRATE_TOP}/dist-overlay/dist-libX11)
 #   JOBS              parallel jobs (default `nproc`)
 
 set -eu
@@ -36,11 +36,11 @@ if [ -z "${SUBSTRATE_TOP:-}" ]; then
     SUBSTRATE_TOP="${p}"
 fi
 : "${STAGE1_PREFIX:=/opt/substrate}"
-: "${XORGPROTO_STAGE:=${SUBSTRATE_TOP}/dist-xorgproto}"
-: "${XTRANS_STAGE:=${SUBSTRATE_TOP}/dist-xtrans}"
-: "${LIBXAU_STAGE:=${SUBSTRATE_TOP}/dist-libXau}"
-: "${LIBXCB_STAGE:=${SUBSTRATE_TOP}/dist-libxcb}"
-: "${DESTDIR:=${SUBSTRATE_TOP}/dist-libX11}"
+: "${XORGPROTO_STAGE:=${SUBSTRATE_TOP}/dist-overlay/dist-xorgproto}"
+: "${XTRANS_STAGE:=${SUBSTRATE_TOP}/dist-overlay/dist-xtrans}"
+: "${LIBXAU_STAGE:=${SUBSTRATE_TOP}/dist-overlay/dist-libXau}"
+: "${LIBXCB_STAGE:=${SUBSTRATE_TOP}/dist-overlay/dist-libxcb}"
+: "${DESTDIR:=${SUBSTRATE_TOP}/dist-overlay/dist-libX11}"
 : "${JOBS:=$(nproc 2>/dev/null || echo 4)}"
 
 PATH="${STAGE1_PREFIX}/bin:${PATH}"

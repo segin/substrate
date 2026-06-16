@@ -44,7 +44,7 @@ rm -rf "${SR}"; mkdir -p "${SR}/usr/lib"
 _have=0
 for d in xorgproto libXau xtrans libxcb libX11 libXext libICE libSM \
          libXt libXmu libXpm libXaw libXinerama libXScrnSaver libjpeg lmdb tcl libtirpc motif; do
-    st="${SUBSTRATE_TOP}/dist-${d}"
+    st="${SUBSTRATE_TOP}/dist-overlay/dist-${d}"
     [ -d "${st}/usr" ] || continue
     cp -a "${st}/usr/." "${SR}/usr/"
     _have=$((_have + 1))
@@ -316,19 +316,19 @@ fi
 # going past the install-exec-hook `chown root` steps that fail in a non-root
 # build (the setuid bits are re-applied when the image is baked); without -k the
 # first chown stops the install and the later programs never stage.
-echo "==> install into ${SUBSTRATE_TOP}/dist-cde"
-rm -rf "${SUBSTRATE_TOP}/dist-cde"
-make -k install DESTDIR="${SUBSTRATE_TOP}/dist-cde" GENCPP="${HOSTTOOLS}/tradcpp" || true
+echo "==> install into ${SUBSTRATE_TOP}/dist-overlay/dist-cde"
+rm -rf "${SUBSTRATE_TOP}/dist-overlay/dist-cde"
+make -k install DESTDIR="${SUBSTRATE_TOP}/dist-overlay/dist-cde" GENCPP="${HOSTTOOLS}/tradcpp" || true
 if [ -x "${HOSTTOOLS}/dtcodegen-host" ]; then
-    make -k -C programs/dtappbuilder install DESTDIR="${SUBSTRATE_TOP}/dist-cde" GENCPP="${HOSTTOOLS}/tradcpp" MRESOURCELIB=-lMrm LIBS="-ldl -lm -lsys -lstdc++ -liconv" || true
-    make -k -C programs/ttsnoop     install DESTDIR="${SUBSTRATE_TOP}/dist-cde" GENCPP="${HOSTTOOLS}/tradcpp" MRESOURCELIB=-lMrm LIBS="-ldl -lm -lsys -lstdc++ -liconv" || true
+    make -k -C programs/dtappbuilder install DESTDIR="${SUBSTRATE_TOP}/dist-overlay/dist-cde" GENCPP="${HOSTTOOLS}/tradcpp" MRESOURCELIB=-lMrm LIBS="-ldl -lm -lsys -lstdc++ -liconv" || true
+    make -k -C programs/ttsnoop     install DESTDIR="${SUBSTRATE_TOP}/dist-overlay/dist-cde" GENCPP="${HOSTTOOLS}/tradcpp" MRESOURCELIB=-lMrm LIBS="-ldl -lm -lsys -lstdc++ -liconv" || true
 fi
 if [ -x "${CDETOOLS}/pmaker" ]; then
-    make -k -C programs/dtdocbook install DESTDIR="${SUBSTRATE_TOP}/dist-cde" GENCPP="${HOSTTOOLS}/tradcpp" LIBS="${DOCLIBS}" || true
-    make -k -C programs/dtinfo    install DESTDIR="${SUBSTRATE_TOP}/dist-cde" GENCPP="${HOSTTOOLS}/tradcpp" CFLAGS="${DTINFO_CFLAGS}" LIBS="${DOCLIBS}" || true
+    make -k -C programs/dtdocbook install DESTDIR="${SUBSTRATE_TOP}/dist-overlay/dist-cde" GENCPP="${HOSTTOOLS}/tradcpp" LIBS="${DOCLIBS}" || true
+    make -k -C programs/dtinfo    install DESTDIR="${SUBSTRATE_TOP}/dist-overlay/dist-cde" GENCPP="${HOSTTOOLS}/tradcpp" CFLAGS="${DTINFO_CFLAGS}" LIBS="${DOCLIBS}" || true
 fi
 if [ -x "${HOSTTOOLS}/crossexec" ] && [ -f "${EXEC_IMG}" ]; then
-    make -k -C programs/dtksh install DESTDIR="${SUBSTRATE_TOP}/dist-cde" GENCPP="${HOSTTOOLS}/tradcpp" LIBS="-ldl -lm -lsys -lstdc++ -liconv" || true
+    make -k -C programs/dtksh install DESTDIR="${SUBSTRATE_TOP}/dist-overlay/dist-cde" GENCPP="${HOSTTOOLS}/tradcpp" LIBS="-ldl -lm -lsys -lstdc++ -liconv" || true
 fi
 
 # CDE's configure bakes the build-host ksh path (the hosttools mksh-as-ksh it
@@ -340,10 +340,10 @@ fi
 # resources at session start.  Rewrite the interpreter to the target's
 # /bin/ksh (mksh is installed there), preserving any shebang args.
 echo "==> rewriting build-host ksh shebangs -> /bin/ksh"
-grep -rIl '^#!.*hosttools.*ksh' "${SUBSTRATE_TOP}/dist-cde" 2>/dev/null | while IFS= read -r f; do
+grep -rIl '^#!.*hosttools.*ksh' "${SUBSTRATE_TOP}/dist-overlay/dist-cde" 2>/dev/null | while IFS= read -r f; do
     sed -i '1{/^#!.*hosttools/s|^#! *[^ ]*ksh|#!/bin/ksh|}' "$f"
 done
-echo "  $(grep -rIl '^#!/bin/ksh' "${SUBSTRATE_TOP}/dist-cde" 2>/dev/null | wc -l) scripts now use /bin/ksh"
+echo "  $(grep -rIl '^#!/bin/ksh' "${SUBSTRATE_TOP}/dist-overlay/dist-cde" 2>/dev/null | wc -l) scripts now use /bin/ksh"
 
 # Install the C-locale datatype/action database + dtwm Front Panel.  The
 # `localized`/`types` clusters are skipped above (their catalog generators
@@ -352,6 +352,6 @@ echo "  $(grep -rIl '^#!/bin/ksh' "${SUBSTRATE_TOP}/dist-cde" 2>/dev/null | wc -
 # canonical-PLT fix (function-pointer equality) or dtwm aborts building the
 # panel with "Unresolved inheritance operation".
 echo "==> installing localized CDE types (Front Panel + datatype database)"
-sh "${HERE}/install-localized-types.sh" "${TREE_DIR}" "${SUBSTRATE_TOP}/dist-cde" || true
+sh "${HERE}/install-localized-types.sh" "${TREE_DIR}" "${SUBSTRATE_TOP}/dist-overlay/dist-cde" || true
 
 echo "==> CDE build complete (if you reached here, all prerequisites are in place)"

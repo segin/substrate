@@ -17,7 +17,7 @@ if [ -z "${SUBSTRATE_TOP:-}" ]; then
     SUBSTRATE_TOP="${p}"
 fi
 : "${STAGE1_PREFIX:=/opt/substrate}"
-: "${DESTDIR:=${SUBSTRATE_TOP}/dist-glib1}"
+: "${DESTDIR:=${SUBSTRATE_TOP}/dist-overlay/dist-glib1}"
 : "${JOBS:=$(nproc 2>/dev/null || echo 4)}"
 PATH="${STAGE1_PREFIX}/bin:${PATH}"; export PATH
 [ -d "${TREE_DIR}" ] || { echo "build.sh: run ./fetch.sh first" >&2; exit 1; }

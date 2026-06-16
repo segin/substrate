@@ -13,11 +13,11 @@
 CROSS    ?= /opt/substrate/bin/i386-unknown-substrate-
 CC       := $(CROSS)gcc
 
-LIBX11_STAGE ?= $(CURDIR)/../../../dist-libX11
-LIBXAU_STAGE ?= $(CURDIR)/../../../dist-libXau
-LIBXCB_STAGE ?= $(CURDIR)/../../../dist-libxcb
-LIBXDMCP_STAGE ?= $(CURDIR)/../../../dist-libXdmcp
-XORGPROTO_STAGE ?= $(CURDIR)/../../../dist-xorgproto
+LIBX11_STAGE ?= $(CURDIR)/../../../dist-overlay/dist-libX11
+LIBXAU_STAGE ?= $(CURDIR)/../../../dist-overlay/dist-libXau
+LIBXCB_STAGE ?= $(CURDIR)/../../../dist-overlay/dist-libxcb
+LIBXDMCP_STAGE ?= $(CURDIR)/../../../dist-overlay/dist-libXdmcp
+XORGPROTO_STAGE ?= $(CURDIR)/../../../dist-overlay/dist-xorgproto
 
 CFLAGS   ?= -O2 -Wall -g \
             -I$(LIBX11_STAGE)/usr/include \

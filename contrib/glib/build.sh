@@ -18,14 +18,14 @@ if [ -z "${SUBSTRATE_TOP:-}" ]; then
     SUBSTRATE_TOP="${p}"
 fi
 : "${STAGE1_PREFIX:=/opt/substrate}"
-: "${DESTDIR:=${SUBSTRATE_TOP}/dist-glib}"
+: "${DESTDIR:=${SUBSTRATE_TOP}/dist-overlay/dist-glib}"
 : "${JOBS:=$(nproc 2>/dev/null || echo 4)}"
 PATH="${STAGE1_PREFIX}/bin:${PATH}"; export PATH
 [ -d "${TREE_DIR}" ] || { echo "build.sh: run ./fetch.sh first" >&2; exit 1; }
 
-FFI="${SUBSTRATE_TOP}/dist-libffi/usr"
-ZLIB="${SUBSTRATE_TOP}/dist-zlib/usr"
-ICONV="${SUBSTRATE_TOP}/dist-libiconv/usr"
+FFI="${SUBSTRATE_TOP}/dist-overlay/dist-libffi/usr"
+ZLIB="${SUBSTRATE_TOP}/dist-overlay/dist-zlib/usr"
+ICONV="${SUBSTRATE_TOP}/dist-overlay/dist-libiconv/usr"
 
 rm -rf "${BUILD_DIR}"; mkdir -p "${BUILD_DIR}"; cd "${BUILD_DIR}"
 # Constrain pkg-config to the substrate dependency trees ONLY.  Without this it

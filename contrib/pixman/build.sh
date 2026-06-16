@@ -11,7 +11,7 @@
 #
 # Env:
 #   STAGE1_PREFIX     substrate toolchain prefix (default /opt/substrate)
-#   DESTDIR           staging dir (default ${SUBSTRATE_TOP}/dist-pixman)
+#   DESTDIR           staging dir (default ${SUBSTRATE_TOP}/dist-overlay/dist-pixman)
 #   JOBS              parallel jobs (default `nproc`)
 
 set -eu
@@ -29,7 +29,7 @@ if [ -z "${SUBSTRATE_TOP:-}" ]; then
     SUBSTRATE_TOP="${p}"
 fi
 : "${STAGE1_PREFIX:=/opt/substrate}"
-: "${DESTDIR:=${SUBSTRATE_TOP}/dist-pixman}"
+: "${DESTDIR:=${SUBSTRATE_TOP}/dist-overlay/dist-pixman}"
 : "${JOBS:=$(nproc 2>/dev/null || echo 4)}"
 
 PATH="${STAGE1_PREFIX}/bin:${PATH}"

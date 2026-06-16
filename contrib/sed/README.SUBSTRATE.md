@@ -6,7 +6,7 @@ GNU sed 4.9 cross-built for substrate via the stage-1 GNU toolchain.
 - `fetch.sh` — download + SHA-verify + extract sed-4.9.tar.xz, apply
   the substrate patch series from `series`.
 - `build.sh` — `./configure --host=i386-unknown-substrate ...` +
-  `make` + stage into `${SUBSTRATE_TOP}/dist-sed/usr/`.
+  `make` + stage into `${SUBSTRATE_TOP}/dist-overlay/dist-sed/usr/`.
 
 ## Substrate-side use
 On the image, `/usr/bin/sed` is GNU sed.  Substrate's hand-rolled

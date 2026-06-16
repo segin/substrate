@@ -68,5 +68,5 @@ Configure flags (set in `build.sh`):
 under `build/openssh-10.0p1/` (yes, the p2 tarball extracts as
 p1 — upstream packaging quirk), and applies every patch in `series`.
 `build.sh` runs configure with the cross triple, builds, and
-installs into `${DESTDIR}` (default `${SUBSTRATE_TOP}/dist-openssh`)
+installs into `${DESTDIR}` (default `${SUBSTRATE_TOP}/dist-overlay/dist-openssh`)
 for the rootfs overlay.

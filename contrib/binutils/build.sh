@@ -27,7 +27,7 @@
 #   STAGE1_PREFIX        install prefix for stage 1 (default
 #                        /opt/substrate-toolchain)
 #   STAGE2_DESTDIR       DESTDIR for stage-2 staging (default
-#                        ${SUBSTRATE_TOP}/dist-toolchain)
+#                        ${SUBSTRATE_TOP}/dist-overlay/dist-toolchain)
 #   TARGET_TRIPLE        default i386-unknown-substrate
 #   PARALLEL             default $(nproc)
 #
@@ -74,7 +74,7 @@ fi
 TARGET_TRIPLE="${TARGET_TRIPLE:-i386-unknown-substrate}"
 PARALLEL="${PARALLEL:-$(nproc 2>/dev/null || echo 4)}"
 STAGE1_PREFIX="${STAGE1_PREFIX:-/opt/substrate}"
-STAGE2_DESTDIR="${STAGE2_DESTDIR:-${SUBSTRATE_TOP}/dist-toolchain}"
+STAGE2_DESTDIR="${STAGE2_DESTDIR:-${SUBSTRATE_TOP}/dist-overlay/dist-toolchain}"
 
 # Locate the patched source tree.  fetch.sh extracts to ./build/binutils-X.Y.Z/
 SRC_TREE="$(ls -d "$HERE"/build/binutils-*/ 2>/dev/null | head -1 || true)"

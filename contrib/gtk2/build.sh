@@ -7,7 +7,7 @@ if [ -z "${SUBSTRATE_TOP:-}" ]; then
     p="${HERE}"; while [ "${p}" != "/" ] && [ ! -f "${p}/AGENTS.md" ] && [ ! -f "${p}/CLAUDE.md" ]; do p=$(dirname "${p}"); done
     SUBSTRATE_TOP="${p}"
 fi
-: "${STAGE1_PREFIX:=/opt/substrate}"; : "${DESTDIR:=${SUBSTRATE_TOP}/dist-gtk2}"
+: "${STAGE1_PREFIX:=/opt/substrate}"; : "${DESTDIR:=${SUBSTRATE_TOP}/dist-overlay/dist-gtk2}"
 : "${JOBS:=$(nproc 2>/dev/null || echo 4)}"
 PATH="${STAGE1_PREFIX}/bin:${PATH}"; export PATH
 . "${HERE}/../substrate-autotools.sh"
@@ -24,7 +24,7 @@ export CFLAGS="-march=i486 -mtune=i486 -O2 -g -std=gnu11 -Wno-error=incompatible
 # gdk-pixbuf which needs the included-png-loader + libpng/z — handled by the
 # sysroot.  Cross run-tests + substrate malloc(0):
 export ac_cv_func_malloc_0_nonnull=yes ac_cv_func_realloc_0_nonnull=yes \
-       ac_cv_path_GDK_PIXBUF_CSOURCE="${SUBSTRATE_TOP}/dist-gdk-pixbuf/usr/bin/gdk-pixbuf-csource"
+       ac_cv_path_GDK_PIXBUF_CSOURCE="${SUBSTRATE_TOP}/dist-overlay/dist-gdk-pixbuf/usr/bin/gdk-pixbuf-csource"
 
 substrate_libtool_fix "${TREE_DIR}/configure"
 rm -rf "${BUILD_DIR}"; mkdir -p "${BUILD_DIR}"; cd "${BUILD_DIR}"

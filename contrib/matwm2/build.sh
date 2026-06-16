@@ -21,11 +21,11 @@ if [ -z "${SUBSTRATE_TOP:-}" ]; then
     SUBSTRATE_TOP="${p}"
 fi
 : "${STAGE1_PREFIX:=/opt/substrate}"
-: "${XORGPROTO_STAGE:=${SUBSTRATE_TOP}/dist-xorgproto}"
-: "${LIBX11_STAGE:=${SUBSTRATE_TOP}/dist-libX11}"
-: "${LIBXAU_STAGE:=${SUBSTRATE_TOP}/dist-libXau}"
-: "${LIBXCB_STAGE:=${SUBSTRATE_TOP}/dist-libxcb}"
-: "${DESTDIR:=${SUBSTRATE_TOP}/dist-matwm2}"
+: "${XORGPROTO_STAGE:=${SUBSTRATE_TOP}/dist-overlay/dist-xorgproto}"
+: "${LIBX11_STAGE:=${SUBSTRATE_TOP}/dist-overlay/dist-libX11}"
+: "${LIBXAU_STAGE:=${SUBSTRATE_TOP}/dist-overlay/dist-libXau}"
+: "${LIBXCB_STAGE:=${SUBSTRATE_TOP}/dist-overlay/dist-libxcb}"
+: "${DESTDIR:=${SUBSTRATE_TOP}/dist-overlay/dist-matwm2}"
 
 PATH="${STAGE1_PREFIX}/bin:${PATH}"
 export PATH

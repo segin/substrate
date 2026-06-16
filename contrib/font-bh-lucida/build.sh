@@ -11,7 +11,7 @@ if [ -z "${SUBSTRATE_TOP:-}" ]; then
   p="${HERE}"; while [ "${p}" != "/" ] && [ ! -f "${p}/AGENTS.md" ] && [ ! -f "${p}/CLAUDE.md" ]; do p=$(dirname "${p}"); done
   SUBSTRATE_TOP="${p}"
 fi
-: "${DESTDIR:=${SUBSTRATE_TOP}/dist-font-bh-lucida}"
+: "${DESTDIR:=${SUBSTRATE_TOP}/dist-overlay/dist-font-bh-lucida}"
 B="${HERE}/build"
 [ -d "${B}/font-bh-100dpi-1.0.4" ] || { echo "build.sh: run ./fetch.sh first" >&2; exit 1; }
 

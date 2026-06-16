@@ -13,7 +13,7 @@
 #
 # Env:
 #   STAGE1_PREFIX   substrate toolchain prefix (default /opt/substrate)
-#   DESTDIR         staging dir (default ${SUBSTRATE_TOP}/dist-xauth)
+#   DESTDIR         staging dir (default ${SUBSTRATE_TOP}/dist-overlay/dist-xauth)
 #   JOBS            parallel jobs (default `nproc`)
 
 set -eu
@@ -31,7 +31,7 @@ if [ -z "${SUBSTRATE_TOP:-}" ]; then
     SUBSTRATE_TOP="${p}"
 fi
 : "${STAGE1_PREFIX:=/opt/substrate}"
-: "${DESTDIR:=${SUBSTRATE_TOP}/dist-xauth}"
+: "${DESTDIR:=${SUBSTRATE_TOP}/dist-overlay/dist-xauth}"
 : "${JOBS:=$(nproc 2>/dev/null || echo 4)}"
 
 PATH="${STAGE1_PREFIX}/bin:${PATH}"
@@ -42,7 +42,7 @@ export PATH
 # Assemble dependency flags from every staged X dist tree.
 PKGP=""; CPP=""; LDF=""
 for d in xorgproto xcb-proto libXau xtrans libxcb libX11 libXext libXmu; do
-    st="${SUBSTRATE_TOP}/dist-${d}"
+    st="${SUBSTRATE_TOP}/dist-overlay/dist-${d}"
     [ -d "${st}/usr" ] || continue
     [ -d "${st}/usr/lib/pkgconfig" ] && PKGP="${PKGP}${PKGP:+:}${st}/usr/lib/pkgconfig"
     [ -d "${st}/usr/include" ] && CPP="${CPP} -I${st}/usr/include"

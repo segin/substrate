@@ -15,7 +15,7 @@ if [ -z "${SUBSTRATE_TOP:-}" ]; then
     SUBSTRATE_TOP="${p}"
 fi
 : "${STAGE1_PREFIX:=/opt/substrate}"
-: "${DESTDIR:=${SUBSTRATE_TOP}/dist-expr}"
+: "${DESTDIR:=${SUBSTRATE_TOP}/dist-overlay/dist-expr}"
 : "${CROSS:=${STAGE1_PREFIX}/bin/i386-unknown-substrate-}"
 
 [ -f "${BUILD_DIR}/expr.c" ] || { echo "build.sh: run ./fetch.sh first" >&2; exit 1; }

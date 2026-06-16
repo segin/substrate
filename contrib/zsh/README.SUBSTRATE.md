@@ -6,7 +6,7 @@ zsh 5.9 cross-built for substrate via the stage-1 GNU toolchain.
 - `fetch.sh` — download + extract zsh-5.9.tar.xz, apply the
   substrate patch series from `series`.
 - `build.sh` — `./configure --host=i386-unknown-substrate ...`
-  + `make` + stage into `${SUBSTRATE_TOP}/dist-zsh/usr/`.
+  + `make` + stage into `${SUBSTRATE_TOP}/dist-overlay/dist-zsh/usr/`.
 
 ## Substrate-side use
 On the image, `/bin/sh` points at `/usr/bin/zsh` (zsh detects the

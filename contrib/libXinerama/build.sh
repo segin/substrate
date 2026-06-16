@@ -6,7 +6,7 @@
 #
 # Env:
 #   STAGE1_PREFIX   substrate toolchain prefix (default /opt/substrate)
-#   DESTDIR         staging dir (default ${SUBSTRATE_TOP}/dist-libXinerama)
+#   DESTDIR         staging dir (default ${SUBSTRATE_TOP}/dist-overlay/dist-libXinerama)
 #   JOBS            parallel jobs (default `nproc`)
 
 set -eu
@@ -25,7 +25,7 @@ if [ -z "${SUBSTRATE_TOP:-}" ]; then
     SUBSTRATE_TOP="${p}"
 fi
 : "${STAGE1_PREFIX:=/opt/substrate}"
-: "${DESTDIR:=${SUBSTRATE_TOP}/dist-${LIB}}"
+: "${DESTDIR:=${SUBSTRATE_TOP}/dist-overlay/dist-${LIB}}"
 : "${JOBS:=$(nproc 2>/dev/null || echo 4)}"
 
 PATH="${STAGE1_PREFIX}/bin:${PATH}"
@@ -49,7 +49,7 @@ fi
 
 PKGP=""; CPP=""; LDF=""
 for d in xorgproto xcb-proto libXau xtrans libxcb libX11 libXext; do
-    st="${SUBSTRATE_TOP}/dist-${d}"
+    st="${SUBSTRATE_TOP}/dist-overlay/dist-${d}"
     [ -d "${st}/usr" ] || continue
     [ -d "${st}/usr/lib/pkgconfig" ] && PKGP="${PKGP}${PKGP:+:}${st}/usr/lib/pkgconfig"
     [ -d "${st}/usr/include" ] && CPP="${CPP} -I${st}/usr/include"

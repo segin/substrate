@@ -11,7 +11,7 @@
 #   SUBSTRATE_TOP    repo root (autodetected by walking up)
 #   STAGE1_PREFIX    toolchain prefix (default /opt/substrate)
 #   DESTDIR          staging dir for `make install`
-#                    (default ${SUBSTRATE_TOP}/dist-inetutils)
+#                    (default ${SUBSTRATE_TOP}/dist-overlay/dist-inetutils)
 #   JOBS             parallel jobs (default `nproc`)
 
 set -eu
@@ -29,7 +29,7 @@ if [ -z "${SUBSTRATE_TOP:-}" ]; then
     SUBSTRATE_TOP="${p}"
 fi
 : "${STAGE1_PREFIX:=/opt/substrate}"
-: "${DESTDIR:=${SUBSTRATE_TOP}/dist-inetutils}"
+: "${DESTDIR:=${SUBSTRATE_TOP}/dist-overlay/dist-inetutils}"
 : "${JOBS:=$(nproc 2>/dev/null || echo 4)}"
 
 TARGET="i386-unknown-substrate"
@@ -53,7 +53,7 @@ echo "==> configure"
 # contrib/krb5 to light it up.  OpenSSL is autodetected by the
 # configure script when its pkg-config metadata is in PKG_CONFIG_PATH;
 # we point pkg-config at substrate's staged openssl tree.
-: "${OPENSSL_STAGE:=${SUBSTRATE_TOP}/dist-openssl}"
+: "${OPENSSL_STAGE:=${SUBSTRATE_TOP}/dist-overlay/dist-openssl}"
 if [ -d "${OPENSSL_STAGE}/usr/lib/pkgconfig" ]; then
     export PKG_CONFIG_PATH="${OPENSSL_STAGE}/usr/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
 fi

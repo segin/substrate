@@ -359,7 +359,7 @@ implementations on top of `libelfobj`. Per the user's directive,
 **switch to binutils-supplied implementations** and retire the
 from-scratch plans.
 
-`dist-toolchain/usr/bin/strings` and `dist-toolchain/usr/bin/strip`
+`dist-overlay/dist-toolchain/usr/bin/strings` and `dist-overlay/dist-toolchain/usr/bin/strip`
 already exist (built by `contrib/binutils` stage 2) and overlay onto
 the rootfs via `build-rootfs.sh:install_to_dist()`. The work is to:
 

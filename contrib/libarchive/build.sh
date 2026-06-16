@@ -11,7 +11,7 @@
 #
 # Env:
 #   STAGE1_PREFIX   substrate toolchain prefix (default /opt/substrate)
-#   DESTDIR         staging dir (default ${SUBSTRATE_TOP}/dist-libarchive)
+#   DESTDIR         staging dir (default ${SUBSTRATE_TOP}/dist-overlay/dist-libarchive)
 #   JOBS            parallel jobs (default `nproc`)
 set -eu
 
@@ -28,7 +28,7 @@ if [ -z "${SUBSTRATE_TOP:-}" ]; then
     SUBSTRATE_TOP="${p}"
 fi
 : "${STAGE1_PREFIX:=/opt/substrate}"
-: "${DESTDIR:=${SUBSTRATE_TOP}/dist-libarchive}"
+: "${DESTDIR:=${SUBSTRATE_TOP}/dist-overlay/dist-libarchive}"
 : "${JOBS:=$(nproc 2>/dev/null || echo 4)}"
 
 PATH="${STAGE1_PREFIX}/bin:${PATH}"
@@ -50,10 +50,10 @@ cd "${BUILD_DIR}"
 ARCHIVE_BACKEND_CFLAGS=""
 ARCHIVE_BACKEND_LDFLAGS=""
 ARCHIVE_BZIP2_FLAG="--without-bz2lib"
-if [ -f "${SUBSTRATE_TOP}/dist-bzip2/usr/include/bzlib.h" ] &&
-   [ -f "${SUBSTRATE_TOP}/dist-bzip2/usr/lib/libbz2.so.1.0.8" ]; then
-    ARCHIVE_BACKEND_CFLAGS="${ARCHIVE_BACKEND_CFLAGS} -I${SUBSTRATE_TOP}/dist-bzip2/usr/include"
-    ARCHIVE_BACKEND_LDFLAGS="${ARCHIVE_BACKEND_LDFLAGS} -L${SUBSTRATE_TOP}/dist-bzip2/usr/lib"
+if [ -f "${SUBSTRATE_TOP}/dist-overlay/dist-bzip2/usr/include/bzlib.h" ] &&
+   [ -f "${SUBSTRATE_TOP}/dist-overlay/dist-bzip2/usr/lib/libbz2.so.1.0.8" ]; then
+    ARCHIVE_BACKEND_CFLAGS="${ARCHIVE_BACKEND_CFLAGS} -I${SUBSTRATE_TOP}/dist-overlay/dist-bzip2/usr/include"
+    ARCHIVE_BACKEND_LDFLAGS="${ARCHIVE_BACKEND_LDFLAGS} -L${SUBSTRATE_TOP}/dist-overlay/dist-bzip2/usr/lib"
     ARCHIVE_BZIP2_FLAG=""
     echo "==> bzip2 backend: ON (dist-bzip2 found)"
 else

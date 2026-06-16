@@ -83,7 +83,7 @@ downloaded tarball — useful after editing a patch.
 - **Build environment**: ports cross-build with the stage-1 toolchain
   on the Linux developer host.  `STAGE1_PREFIX` (default
   `/opt/substrate`) holds the cross gcc/binutils.  `DESTDIR` (default
-  `${SUBSTRATE_TOP}/dist-<name>`) is where the build's `make install`
+  `${SUBSTRATE_TOP}/dist-overlay/dist-<name>`) is where the build's `make install`
   stages the result.  `build-rootfs.sh --image` overlays each
   `dist-<name>/` into the rootfs image in alphabetical order.
 

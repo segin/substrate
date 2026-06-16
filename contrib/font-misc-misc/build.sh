@@ -20,7 +20,7 @@ if [ -z "${SUBSTRATE_TOP:-}" ]; then
     done
     SUBSTRATE_TOP="${p}"
 fi
-: "${DESTDIR:=${SUBSTRATE_TOP}/dist-font-misc-misc}"
+: "${DESTDIR:=${SUBSTRATE_TOP}/dist-overlay/dist-font-misc-misc}"
 
 [ -d "${TREE_DIR}" ] || { echo "build.sh: run ./fetch.sh first" >&2; exit 1; }
 

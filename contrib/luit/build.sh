@@ -19,7 +19,7 @@
 #
 # Env:
 #   STAGE1_PREFIX   substrate toolchain prefix (default /opt/substrate)
-#   DESTDIR         staging dir (default ${SUBSTRATE_TOP}/dist-luit)
+#   DESTDIR         staging dir (default ${SUBSTRATE_TOP}/dist-overlay/dist-luit)
 #   JOBS            parallel jobs (default `nproc`)
 
 set -eu
@@ -37,7 +37,7 @@ if [ -z "${SUBSTRATE_TOP:-}" ]; then
     SUBSTRATE_TOP="${p}"
 fi
 : "${STAGE1_PREFIX:=/opt/substrate}"
-: "${DESTDIR:=${SUBSTRATE_TOP}/dist-luit}"
+: "${DESTDIR:=${SUBSTRATE_TOP}/dist-overlay/dist-luit}"
 : "${JOBS:=$(nproc 2>/dev/null || echo 4)}"
 
 PATH="${STAGE1_PREFIX}/bin:${PATH}"
@@ -48,7 +48,7 @@ export PATH
 # Assemble dependency flags from staged libfontenc + libiconv.
 PKGP=""; CPP=""; LDF=""
 for d in libfontenc libiconv; do
-    st="${SUBSTRATE_TOP}/dist-${d}"
+    st="${SUBSTRATE_TOP}/dist-overlay/dist-${d}"
     [ -d "${st}/usr" ] || continue
     [ -d "${st}/usr/lib/pkgconfig" ] && PKGP="${PKGP}${PKGP:+:}${st}/usr/lib/pkgconfig"
     [ -d "${st}/usr/include" ] && CPP="${CPP} -I${st}/usr/include"

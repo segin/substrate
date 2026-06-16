@@ -50,7 +50,7 @@ _mirror_to_fixinc() {
 # Mirror one contrib port's dist-<pkg>/usr/{lib,include} into the sysroot.
 sync_to_sysroot() {
     pkg="$1"
-    distdir="${SUBSTRATE_TOP}/dist-${pkg}"
+    distdir="${SUBSTRATE_TOP}/dist-overlay/dist-${pkg}"
     [ -d "$distdir/usr/lib" ] || [ -d "$distdir/usr/include" ] || return 0
     if [ -d "$distdir/usr/lib" ]; then
         mkdir -p "$SYSROOT/lib"

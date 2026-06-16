@@ -9,12 +9,12 @@ if [ -z "${SUBSTRATE_TOP:-}" ]; then
     p="${HERE}"; while [ "${p}" != "/" ] && [ ! -f "${p}/AGENTS.md" ] && [ ! -f "${p}/CLAUDE.md" ]; do p=$(dirname "${p}"); done
     SUBSTRATE_TOP="${p}"
 fi
-: "${STAGE1_PREFIX:=/opt/substrate}"; : "${DESTDIR:=${SUBSTRATE_TOP}/dist-glib2}"
+: "${STAGE1_PREFIX:=/opt/substrate}"; : "${DESTDIR:=${SUBSTRATE_TOP}/dist-overlay/dist-glib2}"
 : "${JOBS:=$(nproc 2>/dev/null || echo 4)}"
 PATH="${STAGE1_PREFIX}/bin:${PATH}"; export PATH
 . "${HERE}/../substrate-autotools.sh"
 [ -d "${TREE_DIR}" ] || { echo "build.sh: run ./fetch.sh first" >&2; exit 1; }
-ZL="${SUBSTRATE_TOP}/dist-zlib"; FFI="${SUBSTRATE_TOP}/dist-libffi"
+ZL="${SUBSTRATE_TOP}/dist-overlay/dist-zlib"; FFI="${SUBSTRATE_TOP}/dist-overlay/dist-libffi"
 for d in "${ZL}" "${FFI}"; do [ -d "${d}/usr" ] || { echo "build.sh: ${d} missing" >&2; exit 1; }; done
 
 export CPPFLAGS="-I${ZL}/usr/include -I${FFI}/usr/include"

@@ -30,7 +30,7 @@ if [ -z "${SUBSTRATE_TOP:-}" ]; then
     SUBSTRATE_TOP="${p}"
 fi
 : "${STAGE1_PREFIX:=/opt/substrate}"
-: "${DESTDIR:=${SUBSTRATE_TOP}/dist-elinks}"
+: "${DESTDIR:=${SUBSTRATE_TOP}/dist-overlay/dist-elinks}"
 : "${JOBS:=$(nproc 2>/dev/null || echo 4)}"
 SYSROOT="${STAGE1_PREFIX}/i386-unknown-substrate"
 

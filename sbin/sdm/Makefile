@@ -14,9 +14,9 @@ TOP      ?= ../..
 CROSS    ?=
 CC        = $(CROSS)gcc
 
-X11_INC   = -I$(TOP)/dist-libX11/usr/include -I$(TOP)/dist-xorgproto/usr/include
-X11_LIB   = -L$(TOP)/dist-libX11/usr/lib -L$(TOP)/dist-libxcb/usr/lib \
-            -L$(TOP)/dist-libXau/usr/lib -L$(TOP)/dist-libXdmcp/usr/lib
+X11_INC   = -I$(TOP)/dist-overlay/dist-libX11/usr/include -I$(TOP)/dist-overlay/dist-xorgproto/usr/include
+X11_LIB   = -L$(TOP)/dist-overlay/dist-libX11/usr/lib -L$(TOP)/dist-overlay/dist-libxcb/usr/lib \
+            -L$(TOP)/dist-overlay/dist-libXau/usr/lib -L$(TOP)/dist-overlay/dist-libXdmcp/usr/lib
 
 CFLAGS   ?= -Wall -O2 -g -march=i486 -mtune=i486
 CFLAGS   += $(X11_INC)

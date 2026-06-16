@@ -7,7 +7,7 @@ if [ -z "${SUBSTRATE_TOP:-}" ]; then
     p="${HERE}"; while [ "${p}" != "/" ] && [ ! -f "${p}/AGENTS.md" ] && [ ! -f "${p}/CLAUDE.md" ]; do p=$(dirname "${p}"); done
     SUBSTRATE_TOP="${p}"
 fi
-: "${STAGE1_PREFIX:=/opt/substrate}"; : "${DESTDIR:=${SUBSTRATE_TOP}/dist-cairo}"
+: "${STAGE1_PREFIX:=/opt/substrate}"; : "${DESTDIR:=${SUBSTRATE_TOP}/dist-overlay/dist-cairo}"
 : "${JOBS:=$(nproc 2>/dev/null || echo 4)}"
 PATH="${STAGE1_PREFIX}/bin:${PATH}"; export PATH
 . "${HERE}/../substrate-autotools.sh"
@@ -17,14 +17,14 @@ PATH="${STAGE1_PREFIX}/bin:${PATH}"; export PATH
 CPP=""; LDF=""; PKGP=""
 for d in zlib libpng pixman freetype expat fontconfig \
          xorgproto libXau xtrans libxcb libX11 libXext libXrender; do
-    st="${SUBSTRATE_TOP}/dist-${d}"
+    st="${SUBSTRATE_TOP}/dist-overlay/dist-${d}"
     [ -d "${st}/usr" ] || { echo "build.sh: dist-${d} missing — build contrib/${d} first" >&2; exit 1; }
     CPP="${CPP} -I${st}/usr/include"
     LDF="${LDF} -L${st}/usr/lib -Wl,-rpath-link,${st}/usr/lib"
     [ -d "${st}/usr/lib/pkgconfig" ] && PKGP="${PKGP}${PKGP:+:}${st}/usr/lib/pkgconfig"
 done
 PKGP="${PKGP}:${SUBSTRATE_TOP}/contrib/libxcb/pkgconfig"
-export CPPFLAGS="${CPP} -I${SUBSTRATE_TOP}/dist-freetype/usr/include/freetype2"
+export CPPFLAGS="${CPP} -I${SUBSTRATE_TOP}/dist-overlay/dist-freetype/usr/include/freetype2"
 export LDFLAGS="${LDF} -Wl,--copy-dt-needed-entries"
 export PKG_CONFIG_LIBDIR="${PKGP}"
 # cross run-tests + substrate malloc(0)

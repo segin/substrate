@@ -11,7 +11,7 @@ and `expr.1` plus a substrate patch series in `patches/`.
   `series` to a working copy under `build/`.
 - `build.sh` — compiles the patched source with the stage-1 cross
   toolchain and stages the binary + man page into
-  `${SUBSTRATE_TOP}/dist-expr/usr/`.
+  `${SUBSTRATE_TOP}/dist-overlay/dist-expr/usr/`.
 
 ## Substrate adaptations
 0001-drop-pledge.patch — strip the OpenBSD `pledge("stdio")` call;

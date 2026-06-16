@@ -10,7 +10,7 @@
 #
 # Env:
 #   STAGE1_PREFIX   substrate toolchain prefix (default /opt/substrate)
-#   DESTDIR         staging dir (default ${SUBSTRATE_TOP}/dist-lmdb)
+#   DESTDIR         staging dir (default ${SUBSTRATE_TOP}/dist-overlay/dist-lmdb)
 
 set -eu
 
@@ -26,7 +26,7 @@ if [ -z "${SUBSTRATE_TOP:-}" ]; then
     SUBSTRATE_TOP="${p}"
 fi
 : "${STAGE1_PREFIX:=/opt/substrate}"
-: "${DESTDIR:=${SUBSTRATE_TOP}/dist-lmdb}"
+: "${DESTDIR:=${SUBSTRATE_TOP}/dist-overlay/dist-lmdb}"
 PATH="${STAGE1_PREFIX}/bin:${PATH}"; export PATH
 
 [ -d "${SRC}" ] || { echo "build.sh: run ./fetch.sh first" >&2; exit 1; }

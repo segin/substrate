@@ -49,7 +49,7 @@ substrate_sysroot() {
     _sr="$1"; shift
     rm -rf "${_sr}"; mkdir -p "${_sr}/usr/lib"
     for _d in "$@"; do
-        _st="${SUBSTRATE_TOP}/dist-${_d}"
+        _st="${SUBSTRATE_TOP}/dist-overlay/dist-${_d}"
         [ -d "${_st}/usr" ] || { echo "substrate_sysroot: dist-${_d} missing — build contrib/${_d} first" >&2; return 1; }
         cp -a "${_st}/usr/." "${_sr}/usr/"
     done

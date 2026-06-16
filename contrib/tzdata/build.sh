@@ -15,7 +15,7 @@
 #
 # Env:
 #   STAGE1_PREFIX   substrate toolchain prefix (default /opt/substrate)
-#   DESTDIR         staging dir (default ${SUBSTRATE_TOP}/dist-tzdata)
+#   DESTDIR         staging dir (default ${SUBSTRATE_TOP}/dist-overlay/dist-tzdata)
 #   JOBS            parallel jobs (default `nproc`)
 
 set -eu
@@ -32,7 +32,7 @@ if [ -z "${SUBSTRATE_TOP:-}" ]; then
     SUBSTRATE_TOP="${p}"
 fi
 : "${STAGE1_PREFIX:=/opt/substrate}"
-: "${DESTDIR:=${SUBSTRATE_TOP}/dist-tzdata}"
+: "${DESTDIR:=${SUBSTRATE_TOP}/dist-overlay/dist-tzdata}"
 : "${JOBS:=$(nproc 2>/dev/null || echo 4)}"
 
 [ -d "${TREE_DIR}" ] || { echo "build.sh: run ./fetch.sh first" >&2; exit 1; }

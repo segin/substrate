@@ -52,7 +52,7 @@ TARGET_TRIPLE="${TARGET_TRIPLE:-i386-unknown-substrate}"
 PARALLEL="${PARALLEL:-$(nproc 2>/dev/null || echo 4)}"
 STAGE1_PREFIX="${STAGE1_PREFIX:-/opt/substrate}"
 # Stage-2 GCC stages into its OWN DESTDIR, separate from binutils.
-# contrib/binutils/build.sh stages into ${SUBSTRATE_TOP}/dist-toolchain
+# contrib/binutils/build.sh stages into ${SUBSTRATE_TOP}/dist-overlay/dist-toolchain
 # and does `rm -rf` on it; if GCC used the same directory the second
 # build to run would wipe the first (the symptom: `gcc` ends up on the
 # image with no `as`/`ld`).  build-rootfs.sh --toolchain overlays BOTH

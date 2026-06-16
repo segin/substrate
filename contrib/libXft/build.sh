@@ -7,7 +7,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 SUBSTRATE_TOP="$(cd "$HERE/../.." && pwd)"
 LIB="libXft"; VERSION="2.3.9"
 : "${STAGE1_PREFIX:=/opt/substrate}"
-: "${DESTDIR:=${SUBSTRATE_TOP}/dist-${LIB}}"
+: "${DESTDIR:=${SUBSTRATE_TOP}/dist-overlay/dist-${LIB}}"
 : "${JOBS:=$(nproc 2>/dev/null || echo 4)}"
 PATH="${STAGE1_PREFIX}/bin:${PATH}"; export PATH
 . "${HERE}/../substrate-autotools.sh"

@@ -33,7 +33,7 @@ usage() {
 # Stage-2 toolchain staging trees are produced by contrib/build-toolchain.sh
 # under SUBSTRATE_TOP/dist-toolchain (binutils) and /tmp/gcc-stage2-staging
 # (gcc) — see contrib/{binutils,gcc}/build.sh for the canonical paths.
-DIST_TOOLCHAIN="${DIST_TOOLCHAIN:-$TOP/dist-toolchain}"
+DIST_TOOLCHAIN="${DIST_TOOLCHAIN:-$TOP/dist-overlay/dist-toolchain}"
 GCC_STAGE2_STAGING="${GCC_STAGE2_STAGING:-/tmp/gcc-stage2-staging}"
 
 overlay_toolchain() {
@@ -468,7 +468,7 @@ install_to_dist() {
     # cross-compiles — otherwise its Makefile (CC=$(CROSS)gcc) falls back to
     # the host gcc, which rejects -march=i486 without -m32 ("CPU you selected
     # does not support x86-64 instruction set") on a fresh/stale tree.
-    if [ -d "$TOP/dist-libX11/usr/lib" ]; then
+    if [ -d "$TOP/dist-overlay/dist-libX11/usr/lib" ]; then
         echo "Building + installing display manager (sdm + sgreet)..."
         make -C "$TOP/sbin/sdm" \
             CROSS=/opt/substrate/bin/i386-unknown-substrate- >/dev/null
@@ -487,7 +487,7 @@ install_to_dist() {
     # toolchain split — binutils stage 2 in dist-toolchain, gcc stage
     # 2 in /tmp/gcc-stage2-staging because gcc's build doesn't honor
     # a single DESTDIR cleanly — gets handled explicitly below.
-    for stage in "$TOP"/dist-*; do
+    for stage in "$TOP"/dist-overlay/dist-*; do
         [ -d "$stage" ] || continue
         name=$(basename "$stage")
         # Skip dist-* directories that aren't contrib outputs (none

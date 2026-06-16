@@ -12,7 +12,7 @@
 #
 # Env:
 #   STAGE1_PREFIX   default /opt/substrate
-#   DESTDIR         default ${SUBSTRATE_TOP}/dist-links
+#   DESTDIR         default ${SUBSTRATE_TOP}/dist-overlay/dist-links
 #   JOBS            default `nproc`
 
 set -eu
@@ -29,7 +29,7 @@ if [ -z "${SUBSTRATE_TOP:-}" ]; then
     SUBSTRATE_TOP="${p}"
 fi
 : "${STAGE1_PREFIX:=/opt/substrate}"
-: "${DESTDIR:=${SUBSTRATE_TOP}/dist-links}"
+: "${DESTDIR:=${SUBSTRATE_TOP}/dist-overlay/dist-links}"
 : "${JOBS:=$(nproc 2>/dev/null || echo 4)}"
 
 PATH="${STAGE1_PREFIX}/bin:${PATH}"

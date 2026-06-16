@@ -12,7 +12,7 @@
 #       toolchain-helper utilities `usr.bin/`, manuals).
 #   3.  contrib/ ports — each contrib/<pkg> with a fetch.sh +
 #       build.sh.  Built in dependency order.  Output goes into
-#       per-package ${SUBSTRATE_TOP}/dist-<pkg>/ staging trees so
+#       per-package ${SUBSTRATE_TOP}/dist-overlay/dist-<pkg>/ staging trees so
 #       partial rebuilds don't perturb each other.
 #   4.  build-rootfs.sh — assembles dist/ from `sys/`, the libs,
 #       every dist-*/ overlay, and bakes rootfs.img.
