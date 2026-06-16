@@ -54,21 +54,29 @@ sysroot already carry the X11 headers/libs.
   past the `"TQt has not been ported to this OS"` `#error` and into the
   X11 widget code.
 
-**Current blocker:** TQt3 pulls in X11 extension headers that substrate's
-X stack doesn't ship — `X11/extensions/Xrandr.h` first, then
-Xinerama/Xcursor/Xft.  `build.sh` already passes
-`-no-xrandr -no-xinerama -no-xcursor -no-xft` to configure; the next step
-is to verify those reach every `.pro` (the widget code includes some
-extension headers unconditionally) and either gate them or stage the
-extension headers/libs into the sysroot.
+The cross build now gets through OS detection, the X11 extensions
+(`-no-xrandr -no-xinerama -no-xcursor -no-xkb` in `build.sh`), and the
+**threading** code: that needed real thread-cancellation entry points,
+now added to substrate's libpthread (commit "lib/pthread: add the POSIX
+cancellation API") — `pthread_cancel`/`testcancel`/`setcancelstate`/
+`setcanceltype` as a no-op surface.
+
+**Current blocker — TQt3 requires Xft.** `qfontdatabase_x11.cpp` uses
+`FcPattern`/`XftPatternAddString`/… in code that is *not* cleanly gated
+by `TQT_NO_XFTFREETYPE` (TQt3's font database assumes antialiased fonts).
+Substrate has Xft's dependencies — fontconfig, freetype, libXrender (all
+ported, all in the cross sysroot) — but **not `libXft` itself**.  Trying
+to build `-no-xft` therefore fails on the ungated Xft references.
 
 ### Next steps
-1. Finish TQt3: clear the X-extension includes, then iterate `make` —
-   expect a tail of substrate-libc/POSIX deltas (each a small patch).
-2. Stage TQt3 into the cross sysroot and add the `tqtinterface` CMake
-   sub-port.
-3. `tdelibs`, then `tdebase` (twin + kicker + tdeinit) for a minimal
-   live desktop — the same milestone the CDE port reached.
+1. **Port `libXft`** as a `contrib/` library (fontconfig + freetype +
+   libXrender → libXft), stage it into the cross sysroot.
+2. Rebuild TQt3 **with** Xft (`-xft`) — antialiased fonts, and the font
+   database compiles.  Then iterate `make` through the remaining
+   substrate-libc/POSIX deltas to a built `libtqt`.
+3. Stage TQt3 into the sysroot; add the `tqtinterface` CMake sub-port.
+4. `tdelibs`, then `tdebase` (twin + kicker + tdeinit) for a minimal
+   live desktop — the milestone the CDE port reached.
 
 This is a long road; it is checked in incrementally so each layer's work
 is reproducible from clean sources.
