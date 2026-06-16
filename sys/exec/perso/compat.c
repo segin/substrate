@@ -12,6 +12,7 @@
 #include <sys/fcntl.h>
 #include <sys/tty.h>
 #include <sys/vt.h>
+#include <sys/sysinfo.h>
 #include <exec/perso/personality.h>
 #include <exec/perso/compat.h>
 #include <exec/perso/freebsd/freebsd_user.h>
@@ -629,6 +630,154 @@ static int fbsd_sysctl_str(const char *s, void *oldp, size_t *oldlenp) {
     return 0;
 }
 
+/*
+ * FreeBSD struct kinfo_proc (i386 ABI, sizeof == KINFO_PROC_SIZE == 768).
+ * KERN_PROC returns an array of these; libkvm/ps stride by ki_structsize.
+ * Only the fields ps renders are filled; the ABI-sensitive tail (rusage,
+ * spares) is opaque padding.  The static asserts below pin the layout —
+ * a wrong field width fails the build instead of garbling ps.
+ */
+struct fbsd_kinfo_proc {
+    int32_t  ki_structsize;     /* 0   */
+    int32_t  ki_layout;         /* 4   */
+    uint32_t ki_ptrs1[8];       /* 8   args,paddr,addr,tracep,textvp,fd,vmspace,wchan */
+    int32_t  ki_pid;            /* 40  */
+    int32_t  ki_ppid;           /* 44  */
+    int32_t  ki_pgid;           /* 48  */
+    int32_t  ki_tpgid;          /* 52  */
+    int32_t  ki_sid;            /* 56  */
+    int32_t  ki_tsid;           /* 60  */
+    int16_t  ki_jobc;           /* 64  */
+    int16_t  ki_sspare1;        /* 66  */
+    uint32_t ki_tdev_fbsd11;    /* 68  */
+    uint32_t ki_sigs[16];       /* 72  siglist/sigmask/sigignore/sigcatch */
+    uint32_t ki_uid;            /* 136 effective uid */
+    uint32_t ki_ruid;           /* 140 */
+    uint32_t ki_svuid;          /* 144 */
+    uint32_t ki_rgid;           /* 148 */
+    uint32_t ki_svgid;          /* 152 */
+    int16_t  ki_ngroups;        /* 156 */
+    int16_t  ki_sspare2;        /* 158 */
+    uint32_t ki_groups[16];     /* 160 */
+    uint32_t ki_size;           /* 224 */
+    int32_t  ki_rssize;         /* 228 */
+    int32_t  ki_swrss;          /* 232 */
+    int32_t  ki_tsize;          /* 236 */
+    int32_t  ki_dsize;          /* 240 */
+    int32_t  ki_ssize;          /* 244 */
+    uint16_t ki_xstat;          /* 248 */
+    uint16_t ki_acflag;         /* 250 */
+    uint32_t ki_pctcpu;         /* 252 */
+    uint32_t ki_estcpu;         /* 256 */
+    uint32_t ki_slptime;        /* 260 */
+    uint32_t ki_swtime;         /* 264 */
+    uint32_t ki_cow;            /* 268 */
+    uint64_t ki_runtime;        /* 272 */
+    uint8_t  ki_start[8];       /* 280 struct timeval (i386 32-bit time_t) */
+    uint8_t  ki_childtime[8];   /* 288 */
+    int32_t  ki_flag;           /* 296 */
+    int32_t  ki_kiflag;         /* 300 */
+    int32_t  ki_traceflag;      /* 304 */
+    char     ki_stat;           /* 308 */
+    int8_t   ki_nice;           /* 309 */
+    char     ki_lock;           /* 310 */
+    char     ki_rqindex;        /* 311 */
+    uint8_t  ki_oncpu_old;      /* 312 */
+    uint8_t  ki_lastcpu_old;    /* 313 */
+    char     ki_tdname[17];     /* 314 TDNAMLEN+1 */
+    char     ki_wmesg[9];       /* 331 WMESGLEN+1 */
+    char     ki_login[18];      /* 340 LOGNAMELEN+1 */
+    char     ki_lockname[9];    /* 358 LOCKNAMELEN+1 */
+    char     ki_comm[20];       /* 367 COMMLEN+1 */
+    char     ki_emul[17];       /* 387 KI_EMULNAMELEN+1 */
+    char     ki_loginclass[18]; /* 404 LOGINCLASSLEN+1 */
+    char     ki_moretdname[4];  /* 422 MAXCOMLEN-TDNAMLEN+1 */
+    char     ki_sparestrings[46];/* 426 */
+    int32_t  ki_spareints[2];   /* 472 KI_NSPARE_INT */
+    uint64_t ki_tdev;           /* 480 controlling tty dev */
+    uint8_t  ki_tail[764 - 488];/* 488 oncpu..rusage..spares (opaque) */
+    int32_t  ki_tdflags;        /* 764 TDF_* thread flags (last field) */
+};
+#define FBSD_P_INMEM   0x10000000   /* P_INMEM: loaded into memory */
+#define FBSD_TDF_SINTR 0x00000008   /* TDF_SINTR: sleep is interruptible */
+_Static_assert(sizeof(struct fbsd_kinfo_proc) == 768, "kinfo_proc must be KINFO_PROC_SIZE");
+_Static_assert(offsetof(struct fbsd_kinfo_proc, ki_pid)  == 40,  "ki_pid offset");
+_Static_assert(offsetof(struct fbsd_kinfo_proc, ki_uid)  == 136, "ki_uid offset");
+_Static_assert(offsetof(struct fbsd_kinfo_proc, ki_stat) == 308, "ki_stat offset");
+_Static_assert(offsetof(struct fbsd_kinfo_proc, ki_comm) == 367, "ki_comm offset");
+_Static_assert(offsetof(struct fbsd_kinfo_proc, ki_tdev) == 480, "ki_tdev offset");
+_Static_assert(offsetof(struct fbsd_kinfo_proc, ki_tdflags) == 764, "ki_tdflags offset");
+
+/* substrate process state (SIDL=1..SDYING=6) -> FreeBSD ki_stat (S* 1..5). */
+static char fbsd_proc_stat(uint8_t st) {
+    switch (st) {
+    case 1: return 1;  /* SIDL  */
+    case 2: return 2;  /* SRUN  */
+    case 3: return 3;  /* SSLEEP */
+    case 4: return 4;  /* SSTOP */
+    case 5: return 5;  /* SZOMB */
+    case 6: return 5;  /* SDYING -> Z */
+    default: return 3;
+    }
+}
+
+/*
+ * kern.proc (KERN_PROC): { CTL_KERN, KERN_PROC, op[, arg] }.  kvm_getprocs
+ * uses op KERN_PROC_PROC (8) / ALL (0); PID (1) and UID (5) filter by arg.
+ * oldp == NULL is a size probe; otherwise fill as many kinfo_proc as fit.
+ */
+static int fbsd_kern_proc(const int *kname, unsigned int namelen,
+                          void *oldp, size_t *oldlenp) {
+    int op  = (namelen >= 3) ? kname[2] : 0;
+    int arg = (namelen >= 4) ? kname[3] : 0;
+
+    int pids[256];
+    int np = kern_proc_list(pids, 256);
+    if (np < 0) np = 0;
+
+    size_t want = 0;
+    if (oldlenp && copyin(oldlenp, &want, sizeof(want)) != 0) return -EFAULT;
+
+    size_t produced = 0, copied = 0;
+    for (int i = 0; i < np; i++) {
+        sys_procinfo_t pi;
+        if (kern_proc_info(pids[i], &pi) != 0) continue;
+        if (op == 1 && pi.pid != arg) continue;        /* KERN_PROC_PID */
+        if (op == 5 && (int)pi.euid != arg) continue;  /* KERN_PROC_UID */
+
+        if (oldp != NULL && copied + sizeof(struct fbsd_kinfo_proc) <= want) {
+            struct fbsd_kinfo_proc kp;
+            memset(&kp, 0, sizeof(kp));
+            kp.ki_structsize = (int32_t)sizeof(kp);
+            kp.ki_pid   = pi.pid;
+            kp.ki_ppid  = pi.ppid;
+            kp.ki_pgid  = pi.pgid;
+            kp.ki_tpgid = pi.pgid;
+            kp.ki_sid   = pi.sid;
+            kp.ki_uid   = pi.euid;
+            kp.ki_ruid  = pi.uid;
+            kp.ki_svuid = pi.uid;
+            kp.ki_rgid  = pi.gid;
+            kp.ki_svgid = pi.egid;
+            kp.ki_stat  = fbsd_proc_stat(pi.state);
+            kp.ki_nice  = (int8_t)pi.nice;
+            kp.ki_flag  = FBSD_P_INMEM;            /* not swapped -> no 'W' */
+            kp.ki_tdflags = FBSD_TDF_SINTR;        /* interruptible sleep -> 'S' */
+            kp.ki_tdev  = 0xFFFFFFFFFFFFFFFFull;   /* NODEV */
+            strncpy(kp.ki_comm, pi.name, sizeof(kp.ki_comm) - 1);
+            if (copyout(&kp, (char *)oldp + copied, sizeof(kp)) != 0)
+                return -EFAULT;
+            copied += sizeof(kp);
+        }
+        produced += sizeof(struct fbsd_kinfo_proc);
+    }
+    if (oldlenp) {
+        size_t total = (oldp == NULL) ? produced : copied;
+        if (copyout(&total, oldlenp, sizeof(total)) != 0) return -EFAULT;
+    }
+    return 0;
+}
+
 int freebsd_sys_sysctl(int *name, unsigned int namelen, void *oldp, size_t *oldlenp, void *newp, size_t newlen) {
     (void)newp; (void)newlen;
     if (!name || namelen < 1) return -EINVAL;
@@ -667,6 +816,8 @@ int freebsd_sys_sysctl(int *name, unsigned int namelen, void *oldp, size_t *oldl
          * directories via libc's __cvt_dirents_from11, and a converter
          * mismatch with our freebsd11_getdirentries layout chopped the
          * first 4 bytes off every filename. */
+        if (kname[1] == 14)  /* KERN_PROC — process table (ps/kvm_getprocs) */
+            return fbsd_kern_proc(kname, namelen, oldp, oldlenp);
         if (kname[1] == 1)   /* KERN_OSTYPE */
             return fbsd_sysctl_str("FreeBSD", oldp, oldlenp);
         if (kname[1] == 2)   /* KERN_OSRELEASE */
