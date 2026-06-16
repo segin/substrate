@@ -75,7 +75,7 @@ cd "$BUILD_DIR"
     --disable-libada --disable-libphobos --disable-libcc1 \
     --disable-libstdcxx-pch --disable-libstdcxx-verbose \
     --disable-libstdcxx-filesystem-ts --disable-libstdcxx-debug \
-    --disable-libstdcxx-threads \
+    --enable-threads=posix --enable-libstdcxx-threads \
     --disable-libatomic --disable-tls
 
 # Build libgcc first (libstdc++ links against libgcc_s).

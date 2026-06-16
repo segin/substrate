@@ -31,5 +31,9 @@ typedef unsigned int   __uid_t;
 typedef unsigned int   __gid_t;
 typedef int            __pid_t;
 typedef int            __ssize_t;
-typedef unsigned long  __size_t;
+/* No __size_t: GCC's own <stddef.h> already uses `#define __size_t` as a
+ * guard once it has defined size_t, so `typedef ... __size_t;` here expands
+ * to `typedef ... ;` and fails to compile in any TU that includes both
+ * (e.g. libstdc++ random.cc).  __size_t is not a real glibc type and is
+ * unused in-tree. */
 #endif

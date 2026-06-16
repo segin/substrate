@@ -9,6 +9,28 @@ extern "C" {
 #include <fenv.h>
 
 /*
+ * C99 §7.12: float_t / double_t — the implementation's "fastest" floating
+ * types, selected by FLT_EVAL_METHOD.  Needed by <cmath> (std::float_t,
+ * std::double_t) and libstdc++'s std module.
+ */
+#ifndef __float_t_defined
+#define __float_t_defined
+# if __FLT_EVAL_METHOD__ == 0 || __FLT_EVAL_METHOD__ == 16
+typedef float       float_t;
+typedef double      double_t;
+# elif __FLT_EVAL_METHOD__ == 1
+typedef double      float_t;
+typedef double      double_t;
+# elif __FLT_EVAL_METHOD__ == 2
+typedef long double float_t;
+typedef long double double_t;
+# else
+typedef float       float_t;
+typedef double      double_t;
+# endif
+#endif
+
+/*
  * C99 Math Library Header
  * IEEE 754 floating-point support
  */

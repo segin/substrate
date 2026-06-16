@@ -3,6 +3,9 @@
 
 #include <stddef.h>
 #include <signal.h>     /* sigset_t for pthread_sigmask, pthread_kill */
+#include <sched.h>      /* sched_yield + sched_get_priority_* — POSIX makes
+                         * these visible via <pthread.h>, and libstdc++/libgcc
+                         * gthr-posix.h relies on it (matches glibc). */
 
 #ifdef __cplusplus
 extern "C" {
