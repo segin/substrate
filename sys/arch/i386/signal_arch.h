@@ -25,6 +25,7 @@
 #define SIG_TRAMPOLINE_ADDR     0xFE000000
 #define RT_SIG_TRAMPOLINE_ADDR  0xFE000010  /* For SA_SIGINFO handlers -> rt_sigreturn */
 #define NBSD_SIG_TRAMPOLINE_ADDR 0xFE000020 /* NetBSD: loads EBX=scp before sigreturn */
+#define FBSD_SIG_TRAMPOLINE_ADDR 0xFE000030 /* FreeBSD: loads EBX=scp before sigreturn */
 
 /*
  * Signal Context (sigcontext)

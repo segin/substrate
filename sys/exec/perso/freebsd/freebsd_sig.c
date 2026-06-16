@@ -3,6 +3,7 @@
 #include <sys/copy.h>
 #include <exec/perso/freebsd/freebsd_user.h>
 #include <arch/i386/idt.h>
+#include <arch/i386/signal_arch.h>
 #include <string.h>
 
 void freebsd_sendsig(void *handler, int sig, uint32_t mask, uint32_t flags, void *regs_ptr) {
@@ -21,6 +22,15 @@ void freebsd_sendsig(void *handler, int sig, uint32_t mask, uint32_t flags, void
         return;
     }
 
+    /*
+     * The handler is entered directly (eip = handler) with the stack laid
+     * out as a normal call: [ return addr ][ sig ][ code ][ scp ].  The
+     * return address must be the FreeBSD sigreturn trampoline — when the
+     * handler returns it pops sf_ra and lands there, which issues
+     * sigreturn.  Without sf_ra the handler returned into sf_sig (the
+     * signal number, e.g. 2 for SIGINT) and faulted at eip=0x2.
+     */
+    frame.sf_ra = FBSD_SIG_TRAMPOLINE_ADDR;
     frame.sf_sig = sig;
     if (sig == current_thread->trap_signo) {
         frame.sf_code = current_thread->trap_code;

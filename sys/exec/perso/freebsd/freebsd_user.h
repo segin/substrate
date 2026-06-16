@@ -387,6 +387,7 @@ struct freebsd_sigcontext {
 
 /* FreeBSD i386 sigframe (traditional) */
 struct freebsd_sigframe {
+    uint32_t sf_ra;     /* return address -> sigreturn trampoline */
     int32_t  sf_sig;
     int32_t  sf_code;
     uint32_t sf_scp;    /* struct sigcontext * */

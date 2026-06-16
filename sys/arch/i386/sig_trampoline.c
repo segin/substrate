@@ -60,6 +60,20 @@ unsigned char sig_trampoline_code[4096] __attribute__((aligned(4096))) = {
     0xB8, 0x77, 0x00, 0x00, 0x00, // mov $119, %eax      ; SYS_sigreturn
     0xCD, 0x80,                   // int $0x80           ; Syscall
     0xEB, 0xFE,                   // jmp .               ; Halt if return
+    0x90, 0x90, 0x90,             // padding (total 16 bytes)
+
+    /* Offset 0x30: FreeBSD sigreturn trampoline.
+     *
+     * Identical shape to the NetBSD slot: a FreeBSD handler is entered
+     * directly and returns here with ESP at [ sig ][ code ][ scp ] (the
+     * return address just popped).  freebsd_sys_sigreturn() reads the
+     * sigcontext pointer from EBX, so load it from the scp slot (ESP+8)
+     * and issue sigreturn (syscall 119, routed to the personality
+     * .sigreturn hook). */
+    0x8B, 0x5C, 0x24, 0x08,       // mov 0x8(%esp), %ebx ; ebx = scp
+    0xB8, 0x77, 0x00, 0x00, 0x00, // mov $119, %eax      ; SYS_sigreturn
+    0xCD, 0x80,                   // int $0x80           ; Syscall
+    0xEB, 0xFE,                   // jmp .               ; Halt if return
     0x90, 0x90, 0x90              // padding (total 16 bytes)
 };
 
