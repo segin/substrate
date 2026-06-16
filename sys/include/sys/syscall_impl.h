@@ -247,6 +247,7 @@ extern int sys_umtx_op(void*, int, unsigned long, void*, void*);
 extern int sys_clock_nanosleep(int, int, const void*, void*);
 extern int sys_pselect(int, void*, void*, void*, const void*, const void*);
 extern int sys_ppoll(void*, unsigned int, const void*, const void*);
+extern int sys_select(int, void*, void*, void*, void*);
 extern int sys_wait6(int, int, int*, int, void*, void*);
 extern int sys_fdatasync(int);
 extern int sys_accept(int, void*, int*);
