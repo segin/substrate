@@ -498,3 +498,7 @@ tests/usr.lib/elfobj/test_*
 /tests/lib/pthread/host/host_test_trampoline
 /tests/sys/console/test_vt_wrap
 /tests/sys/x11/xtrace
+
+# TDE (Trinity) multi-sub-port: ignore each sub-port's extracted tree + tarballs
+/contrib/tde/*/build/
+/contrib/tde/*/*.tar.*

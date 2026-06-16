@@ -1,0 +1,11 @@
+--- a/include/ntqglobal.h
++++ b/include/ntqglobal.h
+@@ -136,6 +136,8 @@
+ #elif defined(__svr4__) && defined(i386) /* Open UNIX 8 + GCC */
+ #  define Q_OS_UNIXWARE
+ #  define Q_OS_UNIXWARE7
++#elif defined(__substrate__)
++#  define Q_OS_LINUX		/* substrate: POSIX/ELF, Linux-like */
+ #elif defined(__MAKEDEPEND__)
+ #else
+ #  error "TQt has not been ported to this OS - talk to qt-bugs@trolltech.com"
