@@ -155,6 +155,22 @@ int   pthread_key_delete(pthread_key_t key);
 void *pthread_getspecific(pthread_key_t key);
 int   pthread_setspecific(pthread_key_t key, const void *value);
 
+/* ---------------- cancellation (API surface only) ----------------
+ * substrate has no cancellation runtime (see the cleanup-handler note
+ * below).  These provide the POSIX entry points with no-op semantics so
+ * threaded software (Qt/TQt and the rest of the desktop stack) links and
+ * runs.  pthread_cancel() does NOT stop the target thread, and
+ * pthread_testcancel() never acts on a pending cancel — there is none. */
+#define PTHREAD_CANCEL_ENABLE        0
+#define PTHREAD_CANCEL_DISABLE       1
+#define PTHREAD_CANCEL_DEFERRED      0
+#define PTHREAD_CANCEL_ASYNCHRONOUS  1
+#define PTHREAD_CANCELED             ((void *)-1)
+int  pthread_cancel(pthread_t thread);
+int  pthread_setcancelstate(int state, int *oldstate);
+int  pthread_setcanceltype(int type, int *oldtype);
+void pthread_testcancel(void);
+
 /* ---------------- cleanup handlers ----------------
  * POSIX cancellation-cleanup stack.  substrate's libpthread has no
  * cancellation runtime, so these are scope macros: pthread_cleanup_push

@@ -197,3 +197,25 @@ int pthread_rwlock_unlock(pthread_rwlock_t *rw) {
     pthread_mutex_unlock(&rw->lock);
     return 0;
 }
+
+/* ---------------- cancellation (no-op surface) ----------------
+ * substrate has no cancellation runtime; provide the POSIX entry points
+ * so threaded consumers (Qt/TQt, ...) link.  pthread_cancel() is a no-op
+ * (it does not stop the target thread); the state/type setters just
+ * report the defaults and pthread_testcancel() never has a pending
+ * cancel to act on. */
+int pthread_cancel(pthread_t thread) { (void)thread; return 0; }
+
+int pthread_setcancelstate(int state, int *oldstate) {
+    (void)state;
+    if (oldstate) *oldstate = PTHREAD_CANCEL_ENABLE;
+    return 0;
+}
+
+int pthread_setcanceltype(int type, int *oldtype) {
+    (void)type;
+    if (oldtype) *oldtype = PTHREAD_CANCEL_DEFERRED;
+    return 0;
+}
+
+void pthread_testcancel(void) { }
