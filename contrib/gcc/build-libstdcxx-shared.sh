@@ -53,6 +53,10 @@ FIXDIR="$STAGE1_PREFIX/lib/gcc/$TARGET_TRIPLE/16.1.0/include-fixed"
 mkdir -p "$FIXDIR/sys"
 cp "$SUBSTRATE_TOP/include/assert.h"        "$FIXDIR/assert.h"
 cp "$SUBSTRATE_TOP/include/sys/statvfs.h"   "$FIXDIR/sys/statvfs.h"
+# math.h gained C99 float_t/double_t after the toolchain's fixincludes
+# snapshot was taken; libstdc++ <cmath> does `using ::double_t` and fails
+# against the stale copy.  Refresh it (and the sysroot copy below).
+cp "$SUBSTRATE_TOP/include/math.h"          "$FIXDIR/math.h"
 
 # Toplevel reconfigure.  Compared to build.sh stage 1 we drop
 # --disable-libstdcxx and --disable-shared so libstdc++-v3 actually
