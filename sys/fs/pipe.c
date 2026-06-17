@@ -9,6 +9,7 @@
 #include <sys/lock.h>
 #include <kern/sleepq.h>
 #include <kern/time.h>
+#include <arch/i386/intr.h>
 #include <errno.h>
 
 #define PIPE_SIZE 4096
@@ -90,6 +91,21 @@ static inline void pipe_wake(void *chan) {
  * and actually call signal_interrupt_thread on us. */
 static int pipe_wait(void *chan, mutex_t *m) {
     current_thread->flags |= THREAD_F_INTERRUPTIBLE;
+    /*
+     * sleepq_add flips us to THREAD_BLOCKED, but we still hold the pipe
+     * mutex `m` until the mutex_unlock below.  If a timer tick preempts us
+     * in that window the scheduler deschedules us *while we hold the lock*
+     * (a BLOCKED thread is never re-selected), and the peer that needs the
+     * lock to write+wake us then deadlocks acquiring it.  For the thread
+     * ping-pong that is recovered only by the slow ~50 ms deadline below
+     * (so it crawls at ~50 ms/iter and the watchdog kills it); for the
+     * fork ping-pong it wedges the kernel.  Hold interrupts off across the
+     * register-then-release so we cannot be preempted while BLOCKED and
+     * still holding the mutex.  Once the mutex is dropped we are safe to
+     * preempt (a normal wake just flips us back to READY), so re-enable
+     * before the sched_yield, which manages its own interrupt state.
+     */
+    uint32_t _pf = intr_disable();
     sleepq_add(chan, current_thread);
     /*
      * Fallback deadline against a lost sleepq wakeup.  sched_sleep /
@@ -108,6 +124,7 @@ static int pipe_wait(void *chan, mutex_t *m) {
         current_thread->sleep_expiry = get_ticks() + span;
     }
     mutex_unlock(m);
+    intr_restore(_pf);
     if (current_thread->wait_chan == chan) {
         sched_yield();
     }
