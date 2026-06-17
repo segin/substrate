@@ -354,6 +354,16 @@ install_to_dist() {
         fi
     done
 
+    # grep is a single binary that also serves as egrep/fgrep (selected by
+    # argv[0]).  The copy loop above stages only the `grep` binary, so run
+    # grep's install target to drop the egrep/fgrep POSIX-name wrappers.
+    # They are shebang scripts, not symlinks, because debugfs populates the
+    # image from regular files but not relative symlinks (a symlinked egrep
+    # silently never landed on-target — "command not found: egrep").
+    if [ -f "$DIST/bin/grep" ]; then
+        make -C "$TOP/bin/grep" install-grep-links DESTDIR="$DIST" >/dev/null 2>&1 || true
+    fi
+
     # inetutils-telnetd has /usr/bin/login compiled in as the exec
     # target; substrate ships login at /bin/login.  Symlink so the
     # default path resolves without needing a custom -E flag in
