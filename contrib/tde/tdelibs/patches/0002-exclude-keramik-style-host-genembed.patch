@@ -1,0 +1,10 @@
+--- a/tdestyles/CMakeLists.txt
++++ b/tdestyles/CMakeLists.txt
+@@ -18,4 +18,6 @@
+ add_subdirectory( kthemestyle )
+ add_subdirectory( riscos )
+ add_subdirectory( utils )
+-add_subdirectory( keramik )
++# keramik disabled on substrate: its genembed build-tool needs a host
++# libtdefx+TQt3 to run; the style is optional (plastik/highcolor remain).
++#add_subdirectory( keramik )

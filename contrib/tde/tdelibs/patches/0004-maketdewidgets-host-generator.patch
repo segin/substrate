@@ -1,0 +1,51 @@
+--- a/tdewidgets/CMakeLists.txt
++++ b/tdewidgets/CMakeLists.txt
+@@ -34,17 +34,26 @@
+ 
+ ##### maketdewidgets ############################
+ 
+-set( target maketdewidgets )
+-
+-set( ${target}_SRCS
+-  maketdewidgets.cpp
+-)
+-
+-tde_add_executable( ${target}
+-  SOURCES ${${target}_SRCS}
+-  LINK tdecore-shared
+-  DESTINATION ${BIN_INSTALL_DIR}
+-)
++# substrate: when cross-compiling, maketdewidgets is a generator run on
++# the build host.  A cross-built (target) binary cannot execute here, so
++# allow pointing at a host-built one via MAKETDEWIDGETS_EXECUTABLE; in
++# that case we neither build nor install a target copy (which would also
++# trip cmake's install-time RPATH rewrite on the substituted binary).
++if( NOT MAKETDEWIDGETS_EXECUTABLE )
++  set( target maketdewidgets )
++
++  set( ${target}_SRCS
++    maketdewidgets.cpp
++  )
++
++  tde_add_executable( ${target}
++    SOURCES ${${target}_SRCS}
++    LINK tdecore-shared
++    DESTINATION ${BIN_INSTALL_DIR}
++  )
++  set( MAKETDEWIDGETS_EXECUTABLE ./maketdewidgets )
++  set( MAKETDEWIDGETS_DEP maketdewidgets )
++endif( )
+ 
+ ##### tdewidgets ################################
+ 
+@@ -55,8 +64,8 @@
+ )
+ 
+ add_custom_command( OUTPUT tdewidgets.cpp
+-  COMMAND ./maketdewidgets -o tdewidgets.cpp ${CMAKE_CURRENT_SOURCE_DIR}/kde.widgets
+-  DEPENDS maketdewidgets ${CMAKE_CURRENT_SOURCE_DIR}/kde.widgets
++  COMMAND ${MAKETDEWIDGETS_EXECUTABLE} -o tdewidgets.cpp ${CMAKE_CURRENT_SOURCE_DIR}/kde.widgets
++  DEPENDS ${MAKETDEWIDGETS_DEP} ${CMAKE_CURRENT_SOURCE_DIR}/kde.widgets
+ )
+ 
+ tde_add_kpart( ${target} AUTOMOC

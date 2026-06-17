@@ -1,1 +1,4 @@
 0001-loader_jpeg-libjpeg-enum-boolean.patch
+0002-exclude-keramik-style-host-genembed.patch
+0003-skip-doc-handbooks-meinproc.patch
+0004-maketdewidgets-host-generator.patch

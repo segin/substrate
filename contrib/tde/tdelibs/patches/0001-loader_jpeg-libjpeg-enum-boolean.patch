@@ -19,9 +19,38 @@ qjpegio.cpp).
 +            return FALSE;  /* I/O suspension mode */
      }
  
+     static
 @@ -310,7 +310,7 @@
+ 
      if(state == Init)
      {
 -        if(jpeg_read_header(&cinfo, true) != JPEG_SUSPENDED) {
 +        if(jpeg_read_header(&cinfo, TRUE) != JPEG_SUSPENDED) {
              // do some simple memory requirements limitations
+             // as long as we use that stupid TQt stuff
+             int s = cinfo.image_width * cinfo.image_height;
+@@ -337,9 +337,9 @@
+         tqDebug( "**** DOPROGRESSIVE: %d",  jsrc.do_progressive );
+ #endif
+         if ( jsrc.do_progressive )
+-            cinfo.buffered_image = true;
++            cinfo.buffered_image = TRUE;
+         else
+-            cinfo.buffered_image = false;
++            cinfo.buffered_image = FALSE;
+ 
+         // setup image sizes
+         jpeg_calc_output_dimensions( &cinfo );
+@@ -347,9 +347,9 @@
+         if ( cinfo.jpeg_color_space == JCS_YCbCr )
+             cinfo.out_color_space = JCS_RGB;
+ 
+-        cinfo.do_fancy_upsampling = true;
+-        cinfo.do_block_smoothing = false;
+-        cinfo.quantize_colors = false;
++        cinfo.do_fancy_upsampling = TRUE;
++        cinfo.do_block_smoothing = FALSE;
++        cinfo.quantize_colors = FALSE;
+ 
+         // false: IO suspension
+         if(jpeg_start_decompress(&cinfo)) {

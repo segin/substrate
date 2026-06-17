@@ -1,0 +1,14 @@
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -1484,7 +1484,10 @@
+ # add_subdirectory( kded_post )
+ 
+ add_subdirectory( kdoctools )
+-add_subdirectory( doc )
++# substrate: doc/ handbooks run meinproc (a cross binary that cannot run
++# on the build host) against the docbook XSL stylesheet tree.  The docs
++# are non-essential output for the library port, so skip generating them.
++#add_subdirectory( doc )
+ add_subdirectory( tdeparts )
+ add_subdirectory( tdeutils )
+ add_subdirectory( tdespell2 )
