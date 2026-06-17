@@ -48,9 +48,15 @@ grep-links: $(PROG)
 	ln -sf $(PROG) egrep
 	ln -sf $(PROG) fgrep
 
+# egrep / fgrep are installed as shebang wrapper scripts rather than
+# symlinks: the image is populated from dist/ via debugfs `write`, which
+# stages regular files reliably but not relative symlinks, so a symlinked
+# egrep silently went missing on-target (starttde: "command not found:
+# egrep").  A wrapper is a plain file and always lands.
 install-grep-links:
 	install -d $(BINDIR)
-	ln -sf $(PROG) $(BINDIR)/egrep
-	ln -sf $(PROG) $(BINDIR)/fgrep
+	printf '#!/bin/sh\n# egrep -- grep in extended-regexp mode.\nexec grep -E "$$@"\n' > $(BINDIR)/egrep
+	printf '#!/bin/sh\n# fgrep -- grep in fixed-string mode.\nexec grep -F "$$@"\n' > $(BINDIR)/fgrep
+	chmod 0755 $(BINDIR)/egrep $(BINDIR)/fgrep
 
 install: install-grep-links
