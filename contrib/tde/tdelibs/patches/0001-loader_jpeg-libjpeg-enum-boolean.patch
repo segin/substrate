@@ -1,0 +1,27 @@
+Use libjpeg's TRUE for the enum `boolean` in tdehtml's JPEG loader.
+
+substrate's IJG libjpeg (v9) defines `boolean` as an enum, so C++ refuses
+to convert the literal `true`/`false` in the libjpeg source/decompress
+callbacks.  Pass libjpeg's own TRUE/FALSE instead (same fix as TQt3's
+qjpegio.cpp).
+
+--- a/tdehtml/misc/loader_jpeg.cpp
++++ b/tdehtml/misc/loader_jpeg.cpp
+@@ -120,10 +120,10 @@
+ #ifdef BUFFER_DEBUG
+             tqDebug("...returning true!");
+ #endif
+-            return true;
++            return TRUE;
+         }
+         else
+-            return false;  /* I/O suspension mode */
++            return FALSE;  /* I/O suspension mode */
+     }
+ 
+@@ -310,7 +310,7 @@
+     if(state == Init)
+     {
+-        if(jpeg_read_header(&cinfo, true) != JPEG_SUSPENDED) {
++        if(jpeg_read_header(&cinfo, TRUE) != JPEG_SUSPENDED) {
+             // do some simple memory requirements limitations
