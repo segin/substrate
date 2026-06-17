@@ -1,0 +1,26 @@
+Skip the BSD libc resolver fallback in TQDns::doResInit() on substrate.
+
+substrate's libc declares res_init()/__res_state() in <resolv.h> but
+provides no implementation, so linking any executable against
+libtqt-mt.so failed with undefined references to res_init and
+__res_state (the latter via the _res macro = (*__res_state())).
+
+doResInit() already parses /etc/resolv.conf by hand as its primary
+source of nameservers; the libc-resolver block is only a fallback when
+that file yields nothing.  Compile that fallback out on substrate so we
+rely on the manual parse alone.
+
+--- a/src/network/qdns.cpp
++++ b/src/network/qdns.cpp
+@@ -2592,7 +2592,10 @@
+     }
+ 
+     if (ns->isEmpty()) {
+-#if defined(Q_MODERN_RES_API)
++#if defined(__substrate__)
++	/* substrate has no BSD libc resolver (res_init/res_ninit/_res);
++	   nameservers come solely from the /etc/resolv.conf parse above. */
++#elif defined(Q_MODERN_RES_API)
+ 	struct __res_state res;
+ 	/* the storage must be clean */
+ 	memset(&res, 0, sizeof(res));

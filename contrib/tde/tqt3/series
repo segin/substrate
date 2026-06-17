@@ -1,1 +1,3 @@
 0001-ntqglobal-substrate-os.patch
+0002-qjpegio-libjpeg-enum-boolean.patch
+0003-qdns-no-libc-resolver-on-substrate.patch

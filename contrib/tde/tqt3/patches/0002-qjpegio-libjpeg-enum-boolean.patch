@@ -1,0 +1,51 @@
+Use libjpeg's TRUE macro instead of C++ true in the libjpeg callbacks.
+
+substrate's system libjpeg (IJG v9) defines `boolean` as an enum
+(typedef enum { FALSE, TRUE } boolean), not the int it is on many
+platforms.  C++ then refuses to implicitly convert the bool literal
+`true` to that enum, so the libjpeg source/dest callbacks and a few
+jpeg_*() calls in qjpegio.cpp fail to compile.  Pass libjpeg's own
+TRUE constant (the UnixWare branch already uses B_TRUE for the same
+reason).  Only the libjpeg-facing literals are changed; the genuine
+C++ bools elsewhere in the file are left alone.
+
+--- a/src/kernel/qjpegio.cpp
++++ b/src/kernel/qjpegio.cpp
+@@ -124,7 +124,7 @@
+ #if defined(Q_OS_UNIXWARE)
+     return B_TRUE;
+ #else
+-    return true;
++    return TRUE;
+ #endif
+ }
+ 
+@@ -210,7 +210,7 @@
+ #if defined(Q_OS_UNIXWARE)
+ 	(void) jpeg_read_header(&cinfo, B_TRUE);
+ #else
+-	(void) jpeg_read_header(&cinfo, true);
++	(void) jpeg_read_header(&cinfo, TRUE);
+ #endif
+ 
+ 	(void) jpeg_start_decompress(&cinfo);
+@@ -402,7 +402,7 @@
+ #if defined(Q_OS_UNIXWARE)
+     return B_TRUE;
+ #else
+-    return true;
++    return TRUE;
+ #endif
+ }
+ 
+@@ -503,8 +503,8 @@
+ 	jpeg_set_quality(&cinfo, quality, B_TRUE /* limit to baseline-JPEG values */);
+ 	jpeg_start_compress(&cinfo, B_TRUE);
+ #else
+-	jpeg_set_quality(&cinfo, quality, true /* limit to baseline-JPEG values */);
+-	jpeg_start_compress(&cinfo, true);
++	jpeg_set_quality(&cinfo, quality, TRUE /* limit to baseline-JPEG values */);
++	jpeg_start_compress(&cinfo, TRUE);
+ #endif
+ 
+ 	row_pointer[0] = new uchar[cinfo.image_width*cinfo.input_components];

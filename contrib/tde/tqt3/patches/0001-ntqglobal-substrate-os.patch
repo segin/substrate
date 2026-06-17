@@ -1,6 +1,17 @@
---- a/include/ntqglobal.h
-+++ b/include/ntqglobal.h
-@@ -136,6 +136,8 @@
+Teach TQt3's OS-detection macro about substrate.
+
+ntqglobal.h #errors out ("not been ported to this OS") unless it can map
+the build's predefined compiler macros onto a Q_OS_* identity.  substrate
+is a POSIX/ELF, Linux-like target, so map __substrate__ (defined by the
+substrate-g++ mkspec via -D__substrate__) onto Q_OS_LINUX.
+
+Patch only src/tools/ntqglobal.h: include/ntqglobal.h is a symlink to it
+(patch(1) refuses to patch symlinks), and configure regenerates the
+include/ copy from src/tools during the build.
+
+--- a/src/tools/ntqglobal.h
++++ b/src/tools/ntqglobal.h
+@@ -135,6 +135,8 @@
  #elif defined(__svr4__) && defined(i386) /* Open UNIX 8 + GCC */
  #  define Q_OS_UNIXWARE
  #  define Q_OS_UNIXWARE7
