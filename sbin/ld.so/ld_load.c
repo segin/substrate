@@ -28,14 +28,30 @@ static ld_size   ld_obj_count = 0;
 static ld_obj_t *ld_obj_head = 0;
 static ld_obj_t *ld_obj_tail = 0;
 
-/* Default system search paths.  Extending the list is just adding
- * an entry — keep terminating NULL. */
+/* Built-in (trusted) system search paths, always searched first.
+ * Extending the list is just adding an entry — keep terminating NULL. */
 static const char *const ld_search_paths[] = {
     "/lib",
     "/usr/lib",
     "/usr/local/lib",
     0,
 };
+
+/*
+ * Additional search directories from /etc/ld.so.conf — the system
+ * default library path (the moral equivalent of a baked-in
+ * LD_LIBRARY_PATH).  Parsed once, lazily, on the first object load.
+ * Format: one absolute directory per line; blank lines and lines
+ * beginning with '#' are comments.  (`include` / glob directives are
+ * not supported — ld.so has no directory globbing — and are ignored.)
+ * Directory strings point into ld_conf_buf, which persists for the
+ * lifetime of the process.
+ */
+#define LD_CONF_MAX_DIRS 32
+#define LD_CONF_BUF      4096
+static char        ld_conf_buf[LD_CONF_BUF];
+static const char *ld_conf_dirs[LD_CONF_MAX_DIRS + 1];
+static int         ld_conf_loaded = 0;
 
 static ld_size ld_strlen(const char *s) {
     const char *p = s;
@@ -324,6 +340,51 @@ static ld_obj_t *load_from_path(const char *path) {
     return o;
 }
 
+/* Parse /etc/ld.so.conf into ld_conf_dirs (once).  Best effort: a
+ * missing or unreadable file simply yields no extra directories. */
+static void ld_conf_load(void) {
+    ld_conf_loaded = 1;                 /* attempt only once */
+
+    int fd = ld_open("/etc/ld.so.conf", LD_O_RDONLY);
+    if (fd < 0) return;
+
+    long total = 0;
+    for (;;) {
+        long n = ld_read(fd, ld_conf_buf + total,
+                         (ld_size)(LD_CONF_BUF - 1 - total));
+        if (n <= 0) break;
+        total += n;
+        if (total >= LD_CONF_BUF - 1) break;
+    }
+    ld_close(fd);
+    ld_conf_buf[total] = '\0';
+
+    int ndirs = 0;
+    char *p = ld_conf_buf;
+    while (*p && ndirs < LD_CONF_MAX_DIRS) {
+        while (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n')
+            p++;
+        if (!*p) break;
+        char *line = p;
+        while (*p && *p != '\n' && *p != '\r')
+            p++;
+        char *lineend = p;
+        if (*p) p++;                    /* step past the line terminator */
+        while (lineend > line &&
+               (lineend[-1] == ' ' || lineend[-1] == '\t'))
+            lineend--;
+        *lineend = '\0';
+
+        if (*line == '\0' || *line == '#')
+            continue;                   /* blank or comment */
+        if (ld_strncmp(line, "include", 7) == 0 &&
+            (line[7] == ' ' || line[7] == '\t' || line[7] == '\0'))
+            continue;                   /* globbed includes unsupported */
+        ld_conf_dirs[ndirs++] = line;
+    }
+    ld_conf_dirs[ndirs] = 0;
+}
+
 /* Resolve a soname against the search paths and load it. */
 ld_obj_t *ld_load_object(const char *soname) {
     ld_obj_t *cached = find_loaded(soname);
@@ -334,8 +395,17 @@ ld_obj_t *ld_load_object(const char *soname) {
     if (soname[0] == '/') {
         return load_from_path(soname);
     }
+    /* Built-in trusted directories first. */
     for (int i = 0; ld_search_paths[i]; i++) {
         if (ld_path_join(path, sizeof(path), ld_search_paths[i], soname) < 0)
+            continue;
+        ld_obj_t *o = load_from_path(path);
+        if (o) return o;
+    }
+    /* Then the system-default directories from /etc/ld.so.conf. */
+    if (!ld_conf_loaded) ld_conf_load();
+    for (int i = 0; ld_conf_dirs[i]; i++) {
+        if (ld_path_join(path, sizeof(path), ld_conf_dirs[i], soname) < 0)
             continue;
         ld_obj_t *o = load_from_path(path);
         if (o) return o;
