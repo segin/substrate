@@ -1183,6 +1183,8 @@ static fs_node_t *ext2_node_build_from_inode(fs_node_t *node, ext2_node_t *ctx,
         node->rdev = inode->i_block[0];
     } else if (type == EXT2_S_IFIFO) {
         node->flags = FS_PIPE;
+    } else if (type == EXT2_S_IFSOCK) {
+        node->flags = FS_SOCKET;
     }
     return node;
 }

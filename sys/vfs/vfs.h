@@ -12,7 +12,8 @@
 #define FS_BLOCKDEVICE 0x04
 #define FS_PIPE        0x05
 #define FS_SYMLINK     0x06
-#define FS_MOUNTPOINT  0x08 
+#define FS_SOCKET      0x07   /* S_IFSOCK node (named AF_UNIX socket) */
+#define FS_MOUNTPOINT  0x08
 
 struct fs_node;
 struct mount;

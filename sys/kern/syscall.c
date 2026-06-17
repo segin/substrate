@@ -1342,6 +1342,8 @@ static void fill_stat(struct stat *buf, fs_node_t *node) {
         buf->st_mode |= 0060000;  // S_IFBLK
     else if (ftype == FS_PIPE)
         buf->st_mode |= 0010000;  // S_IFIFO
+    else if (ftype == FS_SOCKET)
+        buf->st_mode |= 0140000;  // S_IFSOCK
     else
         buf->st_mode |= 0100000;  // S_IFREG
     

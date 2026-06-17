@@ -41,6 +41,7 @@
 #include <vfs/vfs.h>
 #include <sys/proc.h>
 #include <sys/file.h>
+#include <sys/stat.h>
 #include <sys/socket.h>
 #include <sys/poll.h>
 #include <kern/console.h>
@@ -297,6 +298,9 @@ static size_t afunix_node_read(fs_node_t *node, off_t off, size_t size, uint8_t 
             rem -= d;
         }
         if (s->peer) sleepq_wake_all(s->peer->tx_chan);
+        /* Also wake our own tx_chan: unconnected senders (sendto-by-path)
+         * block on the destination socket's tx_chan when its rx is full. */
+        sleepq_wake_all(s->tx_chan);
         mutex_unlock(&s->lock);
         return n;
     }
@@ -552,8 +556,10 @@ static afunix_sock_t *afunix_alloc(int type) {
     s->accept_chan  = &s->accept_q;
     s->connect_chan = &s->state;
 
-    /* fs_node adapter */
-    s->node.flags = FS_FILE;   /* not really a file but the dispatch table is uniform */
+    /* fs_node adapter.  FS_SOCKET so fstat(2) on the socket fd reports
+     * S_IFSOCK; read/write/poll/close dispatch through the node's own
+     * function pointers, not the type, so this only affects stat. */
+    s->node.flags = FS_SOCKET;
     s->node.mask  = 0666;
     s->node.read  = afunix_node_read;
     s->node.write = afunix_node_write;
@@ -723,6 +729,28 @@ int sys_bind(int fd, const struct sockaddr *addr, socklen_t addrlen) {
     if (pathlen > AFUNIX_PATH_MAX) pathlen = AFUNIX_PATH_MAX;
     /* Reject already-bound paths. */
     if (afunix_find_bound(path, pathlen)) return -EADDRINUSE;
+
+    /* Pathname (non-abstract) sockets get a real S_IFSOCK node in the
+     * filesystem, so the bound path is stat / chmod / access / unlink-able
+     * as POSIX requires.  Session managers depend on this: TDE's tdeinit
+     * binds its socket, chmod()s it 0600 and re-stat()s it, and without a
+     * filesystem node every such call returned ENOENT ("Can't set
+     * permissions on socket: error 2").  Abstract sockets (leading NUL in
+     * sun_path) and autobind (empty path) stay in the in-core name table
+     * only — they have no filesystem presence by definition. */
+    if (pathlen > 0 && path[0] != '\0') {
+        char kpath[AFUNIX_PATH_MAX + 1];
+        memcpy(kpath, path, pathlen);
+        kpath[pathlen] = '\0';
+        uint16_t nmode = (uint16_t)(S_IFSOCK |
+            (0777 & ~(current_process ? current_process->umask : 0)));
+        int mret = vfs_mknod(kpath, nmode, 0);
+        /* A pre-existing node (stale socket, or any other file) means the
+         * address is unavailable — POSIX bind() reports EADDRINUSE. */
+        if (mret == -EEXIST) return -EADDRINUSE;
+        if (mret != 0) return mret;   /* ENOENT (no dir), EACCES, ENOTDIR... */
+    }
+
     mutex_lock(&s->lock);
     memcpy(s->path, path, pathlen);
     s->pathlen = pathlen;
@@ -841,7 +869,18 @@ int sys_connect(int fd, const struct sockaddr *addr, socklen_t addrlen) {
     if (pathlen > AFUNIX_PATH_MAX) pathlen = AFUNIX_PATH_MAX;
 
     afunix_sock_t *server = afunix_find_bound(path, pathlen);
-    if (!server) return -ECONNREFUSED;
+    if (!server) {
+        /* No live binding for this name.  For a pathname socket,
+         * distinguish a path that does not exist (ENOENT) from one that
+         * exists but has no listener (ECONNREFUSED) — matching Linux. */
+        if (pathlen > 0 && path[0] != '\0') {
+            char kpath[AFUNIX_PATH_MAX + 1];
+            memcpy(kpath, path, pathlen);
+            kpath[pathlen] = '\0';
+            if (vfs_lookup(fs_root, kpath) == NULL) return -ENOENT;
+        }
+        return -ECONNREFUSED;
+    }
     if (server->state != AFUS_LISTENING) return -ECONNREFUSED;
 
     /* Allocate the server-side socket now and fully peer both halves
@@ -1005,6 +1044,43 @@ ssize_t sys_recv(int fd, void *buf, size_t len, int flags) {
     return do_recv(fd, buf, len, flags, NULL, NULL);
 }
 
+/* Deliver one datagram to a bound destination AF_UNIX SOCK_DGRAM socket,
+ * [u16 len][payload]-framed exactly like the connected path, blocking
+ * interruptibly while the destination rx buffer is full (the destination's
+ * reader wakes its own tx_chan for these connectionless senders).  Returns
+ * the byte count sent, or a negative errno. */
+static ssize_t afunix_dgram_deliver(afunix_sock_t *dst, const uint8_t *buf,
+                                    size_t size, int nonblock) {
+    if (size + 2 > AFUNIX_BUF_SIZE) return -EMSGSIZE;
+    mutex_lock(&dst->lock);
+    while (dst->rx.count + size + 2 > AFUNIX_BUF_SIZE &&
+           !dst->closed && !dst->rd_closed) {
+        if (nonblock) { mutex_unlock(&dst->lock); return -EAGAIN; }
+        if (current_thread &&
+            (current_thread->sig_pending & ~current_thread->sig_mask)) {
+            mutex_unlock(&dst->lock); return -EINTR;
+        }
+        if (current_thread) current_thread->flags |= THREAD_F_INTERRUPTIBLE;
+        sleepq_add(dst->tx_chan, current_thread);
+        mutex_unlock(&dst->lock);
+        sched_yield();
+        if (current_thread) current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
+        if (current_thread &&
+            (current_thread->sig_pending & ~current_thread->sig_mask))
+            return -EINTR;
+        mutex_lock(&dst->lock);
+    }
+    if (dst->closed || dst->rd_closed) {
+        mutex_unlock(&dst->lock); return -ECONNREFUSED;
+    }
+    uint8_t hdr[2] = { (uint8_t)(size >> 8), (uint8_t)(size & 0xFF) };
+    afbuf_write(&dst->rx, hdr, 2);
+    if (size) afbuf_write(&dst->rx, buf, size);
+    sleepq_wake_all(dst->rx_chan);
+    mutex_unlock(&dst->lock);
+    return (ssize_t)size;
+}
+
 ssize_t sys_sendto(int fd, const void *buf, size_t len, int flags,
                    const struct sockaddr *addr, socklen_t addrlen) {
     if (sock_fd_invalid(fd)) return -EBADF;
@@ -1027,6 +1103,33 @@ ssize_t sys_sendto(int fd, const void *buf, size_t len, int flags,
                 if (n->read == (void *)afinet_node_read)
                     return afinet_sendto(fd, buf, len, flags, addr, addrlen);
             }
+        }
+    }
+    /* AF_UNIX named SOCK_DGRAM: sendto() delivers to the addressed,
+     * unconnected destination (resolved by path), not a connected peer. */
+    if (addr && addrlen > 2 && addr->sa_family == AF_UNIX) {
+        afunix_sock_t *s = afunix_from_fd(fd);
+        if (s && s->type == SOCK_DGRAM) {
+            socklen_t pathlen = addrlen - 2;
+            const char *path = ((const struct sockaddr_un *)addr)->sun_path;
+            if (pathlen > AFUNIX_PATH_MAX) pathlen = AFUNIX_PATH_MAX;
+            afunix_sock_t *dst = afunix_find_bound(path, pathlen);
+            if (!dst) {
+                if (pathlen > 0 && path[0] != '\0') {
+                    char kpath[AFUNIX_PATH_MAX + 1];
+                    memcpy(kpath, path, pathlen);
+                    kpath[pathlen] = '\0';
+                    if (vfs_lookup(fs_root, kpath) == NULL) return -ENOENT;
+                }
+                return -ECONNREFUSED;
+            }
+            if (dst->type != SOCK_DGRAM) return -ECONNREFUSED;
+            int nonblock = 0;
+            if (fd >= 0 && fd < MAX_FD && current_process) {
+                file_t *ff = current_process->fds[fd];
+                if (ff && (ff->f_flag & FNONBLOCK)) nonblock = 1;
+            }
+            return afunix_dgram_deliver(dst, (const uint8_t *)buf, len, nonblock);
         }
     }
     (void)addrlen;
