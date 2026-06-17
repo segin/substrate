@@ -495,6 +495,19 @@ int revoke(const char *path) {
 }
 
 /*
+ * prctl(2) — process control.  substrate's native kernel implements no
+ * prctl syscall (only the Linux personality does), so there is nothing
+ * to forward to.  Portable callers (e.g. TDE's tdesud, which does
+ * prctl(PR_SET_DUMPABLE, 0) as best-effort hardening and ignores the
+ * result) still need the symbol; report ENOSYS rather than pretend.
+ */
+int prctl(int option, ...) {
+    (void)option;
+    errno = ENOSYS;
+    return -1;
+}
+
+/*
  * getloadavg(3) — the BSD/glibc system-load query.  Reads the three
  * load averages (1/5/15 min) from /proc/loadavg, which the kernel
  * formats Linux-style ("L1 L5 L15 run/total lastpid").  Returns the
