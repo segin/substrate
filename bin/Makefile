@@ -25,6 +25,7 @@ SUBDIRS = \
 	devtree \
 	df \
 	diff \
+	dirname \
 	dmesg \
 	echo \
 	ed \
@@ -65,6 +66,7 @@ SUBDIRS = \
 	prof \
 	ps \
 	pwd \
+	readlink \
 	reset \
 	rm \
 	rmdir \

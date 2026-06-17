@@ -1,0 +1,98 @@
+.TH READLINK 1
+.SH NAME
+readlink \- print the target of a symbolic link, optionally canonicalized
+.SH SYNOPSIS
+.B readlink
+.RB [ \-femnqsvz ]
+.RB [ \-\- ]
+.I file
+.RI [ file ...]
+.SH DESCRIPTION
+By default
+.B readlink
+prints the contents of each symbolic-link
+.IR file
+(the value returned by
+.BR readlink (2))
+to the standard output.  It is an error if
+.I file
+is not a symbolic link.
+.PP
+With one of the canonicalization options,
+.B readlink
+instead resolves
+.I file
+to an absolute pathname, following every symbolic link encountered along
+the way.  Multiple
+.I file
+operands may be given (BSD and GNU); each result is printed on its own
+line.
+.SH OPTIONS
+.TP
+.BR \-f ", " \-\-canonicalize
+Canonicalize
+.IR file ,
+following all symbolic links.  Every component except the last must
+exist (FreeBSD
+.BR realpath (3)
+semantics).
+.TP
+.BR \-e ", " \-\-canonicalize\-existing
+Like
+.BR \-f ,
+but every component, including the last, must exist.
+.TP
+.BR \-m ", " \-\-canonicalize\-missing
+Like
+.BR \-f ,
+but no component need exist; non-existent components are resolved
+lexically.
+.TP
+.BR \-n ", " \-\-no\-newline
+Do not output the trailing separator.  With several operands no
+separators are written at all.
+.TP
+.BR \-z ", " \-\-zero
+Separate output entries with a NUL byte rather than a newline.
+.TP
+.BR \-q ", " \-\-quiet ", " \-s ", " \-\-silent
+Suppress error messages.  This is the default.
+.TP
+.BR \-v ", " \-\-verbose
+Report errors.
+.TP
+.BR \-\-help
+Print a usage message and exit.
+.TP
+.BR \-\-version
+Print version information and exit.
+.PP
+Option processing stops at
+.B \-\-
+or at the first operand; unlike GNU, options are not permuted past an
+operand (BSD/POSIX behaviour).
+.SH EXIT STATUS
+.B readlink
+exits 0 if every operand was resolved successfully, and >0 otherwise.
+.SH EXAMPLES
+Read a symbolic link:
+.PP
+.B readlink /usr/bin/cc
+.PP
+Resolve a pathname to its canonical absolute form (the idiom used by
+.BR starttde (1)
+to locate its own installation):
+.PP
+.B readlink \-f \-\- "$0"
+.SH SEE ALSO
+.BR dirname (1),
+.BR basename (1),
+.BR readlink (2),
+.BR realpath (3)
+.SH STANDARDS
+The default mode is POSIX/BSD/GNU compatible.  The
+.BR \-f ", " \-e ", " \-m ", " \-z
+options follow GNU coreutils and the
+.BR \-f ", " \-n
+options follow BSD; where BSD and GNU disagree, BSD behaviour is
+preferred.

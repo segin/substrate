@@ -1,0 +1,78 @@
+.TH DIRNAME 1
+.SH NAME
+dirname \- return the directory portion of a pathname
+.SH SYNOPSIS
+.B dirname
+.RB [ \-z | \-\-zero ]
+.I string
+.RI [ string ...]
+.SH DESCRIPTION
+The
+.B dirname
+utility deletes the trailing
+.B /
+character and the last component of
+.IR string ,
+writing the remaining directory portion to the standard output.  If
+.I string
+contains no
+.B /
+characters,
+.B dirname
+prints
+.RB \(dq . \(dq
+(the current directory); a
+.I string
+that is just
+.RB \(dq / \(dq
+yields
+.RB \(dq / \(dq.
+.PP
+For source compatibility with the POSIX, BSD and GNU variants,
+.B dirname
+accepts one or more operands; each is processed independently and its
+directory portion is written on its own line.  This matches BSD when a
+single operand is given.
+.SH OPTIONS
+.TP
+.BR \-z ", " \-\-zero
+Separate output entries with a NUL byte rather than a newline.
+.TP
+.BR \-\-help
+Print a usage message and exit.
+.TP
+.BR \-\-version
+Print version information and exit.
+.PP
+Option processing stops at
+.B \-\-
+or at the first operand; unlike GNU, options are not permuted past an
+operand (BSD/POSIX behaviour).  A lone
+.B \-
+is treated as an operand.
+.SH EXIT STATUS
+.B dirname
+exits 0 on success and >0 if an error occurs.
+.SH EXAMPLES
+.B dirname /usr/bin/sort
+.br
+/usr/bin
+.PP
+.B dirname stdio.h
+.br
+.
+.PP
+.B dirname /
+.br
+/
+.SH SEE ALSO
+.BR basename (1),
+.BR readlink (1),
+.BR dirname (3)
+.SH STANDARDS
+The
+.B dirname
+utility is compatible with POSIX; the multiple-operand and
+.B \-z
+extensions follow GNU coreutils.  Where BSD and GNU disagree, BSD
+behaviour is preferred.
