@@ -39,14 +39,20 @@ else
   PTHREAD_INC =
 endif
 
-TESTS = torture_unix torture_afunix_poll torture_malloc torture_evdev \
-        torture_x11_shape torture_sigalrm torture_heap_stdio \
+TESTS = torture_unix torture_afunix torture_afunix_poll torture_malloc \
+        torture_evdev torture_x11_shape torture_sigalrm torture_heap_stdio \
         torture_malloc_threads
 
 all: $(TESTS)
 
 torture_unix: torture_unix.c
 	$(CC) $(CFLAGS) $(LDFLAGS) $(PTHREAD_INC) $< $(PTHREAD) -o $@
+
+# AF_UNIX filesystem-node + permission torture.  No pthread (single
+# process); exercises bind/stat/chmod/fchmod/unlink on socket nodes,
+# SCM_RIGHTS, named DGRAM, and the tdeinit socket-permission dance.
+torture_afunix: torture_afunix.c
+	$(CC) $(CFLAGS) $(LDFLAGS) $(PTHREAD_INC) $< -o $@
 
 torture_afunix_poll: torture_afunix_poll.c
 	$(CC) $(CFLAGS) $(LDFLAGS) $(PTHREAD_INC) $< $(PTHREAD) -o $@
