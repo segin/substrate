@@ -65,7 +65,7 @@
     else         { fprintf(stdout, "  -> FAILED\n"); tests_fail++; }  \
 } while (0)
 
-static const int TOTAL = 13;
+static const int TOTAL = 14;
 
 /* Build a unique /tmp path per scenario so a stale node never masks a
  * result and parallel runs do not collide. */
@@ -396,6 +396,47 @@ fail:
     return -1;
 }
 
+/* The server-restart idiom performed while the OLD socket is still open:
+ * bind+listen s1, unlink the path (s1 stays bound to its now-anonymous
+ * node), then bind+listen a fresh s2 on the same path.  This must succeed
+ * (the path gets a new binding, as on Linux with a new inode) and a client
+ * must reach s2.  This is exactly what TDE's tdeinit does — unlink(sock)
+ * then bind(sock) — and keying EADDRINUSE off the path table rather than
+ * the filesystem node made it spuriously fail with error 98. */
+TEST(rebind_over_live)
+{
+    struct sockaddr_un a; mkpath(&a, "relive");
+    int s1 = -1, s2 = -1, c = -1, acc = -1;
+    unlink(a.sun_path);
+    s1 = socket(AF_UNIX, SOCK_STREAM, 0);
+    MUST(s1 >= 0, "socket s1");
+    MUST(bind(s1, (struct sockaddr *)&a, sizeof(a)) == 0, "bind s1");
+    MUST(listen(s1, 4) == 0, "listen s1");
+
+    MUST(unlink(a.sun_path) == 0, "unlink while s1 still bound");
+
+    s2 = socket(AF_UNIX, SOCK_STREAM, 0);
+    MUST(s2 >= 0, "socket s2");
+    MUST(bind(s2, (struct sockaddr *)&a, sizeof(a)) == 0, "rebind over live s1");
+    MUST(listen(s2, 4) == 0, "listen s2");
+
+    c = socket(AF_UNIX, SOCK_STREAM, 0);
+    MUST(c >= 0, "client socket");
+    MUST(connect(c, (struct sockaddr *)&a, sizeof(a)) == 0, "connect to rebound path");
+    acc = accept(s2, NULL, NULL);     /* must land on s2, the fresh binding */
+    MUST(acc >= 0, "s2 (not s1) accepts the connection");
+
+    close(acc); close(c); close(s2); close(s1); unlink(a.sun_path);
+    return 0;
+fail:
+    if (acc >= 0) close(acc);
+    if (c >= 0) close(c);
+    if (s2 >= 0) close(s2);
+    if (s1 >= 0) close(s1);
+    unlink(a.sun_path);
+    return -1;
+}
+
 /* ------------------------------------------------------------------ */
 
 int main(void)
@@ -415,6 +456,7 @@ int main(void)
     RUN(connect_no_listener);
     RUN(connect_not_a_socket);
     RUN(unlink_rebind);
+    RUN(rebind_over_live);
     RUN(scm_rights_fd_passing);
     RUN(dgram_named);
     RUN(tdeinit_socket_pattern);

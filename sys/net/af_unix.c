@@ -727,28 +727,36 @@ int sys_bind(int fd, const struct sockaddr *addr, socklen_t addrlen) {
     socklen_t pathlen = addrlen - 2;
     const char *path = ((const struct sockaddr_un *)addr)->sun_path;
     if (pathlen > AFUNIX_PATH_MAX) pathlen = AFUNIX_PATH_MAX;
-    /* Reject already-bound paths. */
-    if (afunix_find_bound(path, pathlen)) return -EADDRINUSE;
 
-    /* Pathname (non-abstract) sockets get a real S_IFSOCK node in the
-     * filesystem, so the bound path is stat / chmod / access / unlink-able
-     * as POSIX requires.  Session managers depend on this: TDE's tdeinit
-     * binds its socket, chmod()s it 0600 and re-stat()s it, and without a
-     * filesystem node every such call returned ENOENT ("Can't set
-     * permissions on socket: error 2").  Abstract sockets (leading NUL in
-     * sun_path) and autobind (empty path) stay in the in-core name table
-     * only — they have no filesystem presence by definition. */
     if (pathlen > 0 && path[0] != '\0') {
+        /* Pathname socket: the filesystem node IS the binding's identity,
+         * exactly like Linux's per-inode AF_UNIX namespace.  Create a real
+         * S_IFSOCK node so the path is stat / chmod / access / unlink-able
+         * (POSIX; TDE's tdeinit binds its socket, chmod()s it 0600 and
+         * re-stat()s it — without a node those returned ENOENT, "Can't set
+         * permissions on socket: error 2").
+         *
+         * Crucially, EADDRINUSE is decided by the node's existence, NOT the
+         * in-core name table.  Servers restart with the standard
+         * unlink(path); bind(path) idiom: after the unlink the node is gone,
+         * so the rebind must succeed even though a path-keyed table entry
+         * for the still-open old socket lingers (it is harmless — g_bound_link
+         * prepends, so afunix_find_bound returns the fresh binding, and the
+         * stale entry is reaped when the old socket finally closes).  Keying
+         * EADDRINUSE off the table instead broke tdeinit's restart with a
+         * spurious "bind() failed: error 98". */
         char kpath[AFUNIX_PATH_MAX + 1];
         memcpy(kpath, path, pathlen);
         kpath[pathlen] = '\0';
         uint16_t nmode = (uint16_t)(S_IFSOCK |
             (0777 & ~(current_process ? current_process->umask : 0)));
         int mret = vfs_mknod(kpath, nmode, 0);
-        /* A pre-existing node (stale socket, or any other file) means the
-         * address is unavailable — POSIX bind() reports EADDRINUSE. */
-        if (mret == -EEXIST) return -EADDRINUSE;
-        if (mret != 0) return mret;   /* ENOENT (no dir), EACCES, ENOTDIR... */
+        if (mret == -EEXIST) return -EADDRINUSE;  /* node present -> name taken */
+        if (mret != 0) return mret;               /* ENOENT/EACCES/ENOTDIR... */
+    } else {
+        /* Abstract / autobind socket: no filesystem presence, so the in-core
+         * name table is the only arbiter of the namespace. */
+        if (afunix_find_bound(path, pathlen)) return -EADDRINUSE;
     }
 
     mutex_lock(&s->lock);
