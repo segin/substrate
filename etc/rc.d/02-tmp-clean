@@ -1,19 +1,34 @@
 #!/bin/sh
-# /etc/rc.d/02-tmp-clean — wipe transient state under /tmp at boot.
+# /etc/rc.d/02-tmp-clean — wipe transient runtime state at boot.
 #
 # substrate doesn't mount /tmp as tmpfs (it's the same rootfs), so
-# anything left in /tmp from a previous boot survives.  Stale X
-# server lock files (/tmp/.X0-lock, /tmp/.X11-unix/...) make a fresh
-# Xfbdev refuse to start with "Server is already active for display 0"
-# until something cleans them up.
+# anything left in /tmp from a previous boot survives.  On Linux /tmp is
+# usually tmpfs and is empty after a reboot, which is what desktops and X
+# assume; here we have to clear the leftovers by hand.  Stale X server
+# lock files (/tmp/.X0-lock, /tmp/.X11-unix/...) make a fresh Xfbdev
+# refuse to start ("Server is already active for display 0").  Likewise a
+# stale per-display DCOP marker (~/.DCOPserver_<host>_<display>, which
+# records the address of the last boot's dcopserver) makes a fresh
+# dcopserver abort with "It looks like dcopserver is already running",
+# and leftover tdeinit/launcher sockets make tdelauncher think another
+# instance is live — so the whole TDE session fails to come up.
 
 case "${1:-start}" in
     start)
+        # X server.
         rm -f  /tmp/.X*-lock
         rm -rf /tmp/.X11-unix
         rm -rf /tmp/.ICE-unix
         # Anything else that looks like a daemon's last-boot socket dir.
         rm -rf /tmp/.font-unix /tmp/.Test-unix /tmp/.XIM-unix
+        # TDE/DCOP: tdeinit + launcher sockets, runtime dirs, compositor
+        # availability flags.
+        rm -rf /tmp/tdesocket-* /tmp/tde-* /tmp/ksocket-* /tmp/kde-*
+        rm -f  /tmp/.*-compton-*.available
+        # Per-display DCOP "server is running" markers in every home.
+        for h in /root /home/*; do
+            [ -d "$h" ] && rm -f "$h"/.DCOPserver_* 2>/dev/null
+        done
         ;;
     stop)
         ;;
