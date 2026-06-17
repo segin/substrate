@@ -476,3 +476,20 @@ int shm_unlink(const char *name) {
     snprintf(buf, sizeof(buf), "/dev/shm/%s", name);
     return unlink(buf);
 }
+
+/*
+ * revoke(2) — invalidate all current access to a terminal/file so a
+ * fresh session can take it over.  BSD-derived code (e.g. libtdecore's
+ * KPty) calls this on a freshly-allocated pty slave before handing it
+ * to a child.  Substrate's kernel has no per-fd revocation primitive
+ * (no vhangup / TIOCVHANGUP), but a just-allocated pty has no existing
+ * openers to evict, so the operation is a no-op success.  We still
+ * validate the path so a bogus argument is reported rather than
+ * silently "succeeding".
+ */
+int revoke(const char *path) {
+    if (!path) { errno = EINVAL; return -1; }
+    if (access(path, F_OK) != 0)
+        return -1;                 /* access() set errno (ENOENT, ...) */
+    return 0;
+}

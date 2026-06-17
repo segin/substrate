@@ -183,3 +183,54 @@ void logwtmp(const char *line, const char *name, const char *host) {
     ut.ut_tv.tv_usec = (int32_t)tv.tv_usec;
     updwtmp(WTMP_FILE, &ut);
 }
+
+/*
+ * BSD login(3) / logout(3) — the convenience pair that older Unix code
+ * (e.g. libtdecore's KPty) calls directly instead of pututline/updwtmp.
+ *
+ * login() records a USER_PROCESS entry composed from the caller's
+ * partially-filled struct utmp; logout() turns the matching ut_line
+ * entry into a DEAD_PROCESS one.  Both keep utmp (current) and wtmp
+ * (history) in sync, mirroring logwtmp()'s behaviour.
+ */
+void login(const struct utmp *ut) {
+    if (!ut) return;
+    struct utmp e = *ut;
+    e.ut_type = USER_PROCESS;
+    if (e.ut_pid == 0)
+        e.ut_pid = getpid();
+    if (e.ut_tv.tv_sec == 0) {
+        struct timeval tv;
+        gettimeofday(&tv, NULL);
+        e.ut_tv.tv_sec  = (int32_t)tv.tv_sec;
+        e.ut_tv.tv_usec = (int32_t)tv.tv_usec;
+    }
+    pututline(&e);
+    updwtmp(WTMP_FILE, &e);
+    endutent();
+}
+
+int logout(const char *line) {
+    if (!line) return 0;
+    struct utmp key;
+    memset(&key, 0, sizeof(key));
+    strncpy(key.ut_line, line, UT_LINESIZE);
+    key.ut_line[UT_LINESIZE - 1] = '\0';
+
+    setutent();
+    struct utmp *found = getutline(&key);
+    if (!found) { endutent(); return 0; }
+
+    struct utmp e = *found;
+    e.ut_type = DEAD_PROCESS;
+    memset(e.ut_user, 0, sizeof(e.ut_user));
+    memset(e.ut_host, 0, sizeof(e.ut_host));
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    e.ut_tv.tv_sec  = (int32_t)tv.tv_sec;
+    e.ut_tv.tv_usec = (int32_t)tv.tv_usec;
+    pututline(&e);
+    updwtmp(WTMP_FILE, &e);
+    endutent();
+    return 1;
+}

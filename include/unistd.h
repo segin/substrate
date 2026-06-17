@@ -204,6 +204,7 @@ int fchmod(int fd, mode_t mode);
 int fchown(int fd, uid_t owner, gid_t group);
 int fchownat(int dirfd, const char *pathname, uid_t owner, gid_t group, int flag);
 char *getlogin(void);
+int revoke(const char *path);
 int getgroups(int size, gid_t list[]);
 int setgroups(int size, const gid_t *list);
 

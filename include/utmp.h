@@ -91,6 +91,13 @@ int           utmpname(const char *file);
 void          updwtmp(const char *wtmp_file, const struct utmp *ut);
 void          logwtmp(const char *line, const char *name, const char *host);
 
+/* BSD login(3)/logout(3): record/clear a session entry in both utmp and
+ * wtmp.  login() takes a partially-filled struct (line/name/host) and
+ * stamps type/pid/time; logout() flips the matching ut_line entry to
+ * DEAD_PROCESS, returning 1 if found, 0 otherwise. */
+void          login(const struct utmp *ut);
+int           logout(const char *line);
+
 #ifdef __cplusplus
 }
 #endif
