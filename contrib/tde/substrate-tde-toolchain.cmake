@@ -41,7 +41,16 @@ set(CMAKE_CXX_FLAGS_INIT "-march=i486 -mtune=i486 ${_substrate_warn}")
 # no other dependency (e.g. tdelibs' libtdefakes) can't resolve plain libc
 # symbols like errno -- and tdelibs links its shared objects with
 # -Wl,--no-undefined, turning that into a hard error.  Always link libc.
-set(_substrate_link "-L${SUBSTRATE_SYSROOT}/lib -Wl,-rpath-link,${SUBSTRATE_SYSROOT}/lib -Wl,--copy-dt-needed-entries -l:libc.so.0")
+#
+# substrate also splits the POSIX regex facility (regcomp/regexec/regfree)
+# out of libc into libregex, where glibc keeps it in libc.  TDE therefore
+# never asks for -lregex (kregexp.cpp, kjs, tdehtml all expect it in libc),
+# so -- exactly as with the pthread split -- the toolchain supplies it.
+# Linked plain (not --as-needed): CMake places these flags BEFORE the
+# object files, where --as-needed would drop the library before the
+# objects' undefined regex refs are seen.  Shared-object symbol resolution
+# is not positional, so a plain -l: resolves regcomp regardless of order.
+set(_substrate_link "-L${SUBSTRATE_SYSROOT}/lib -Wl,-rpath-link,${SUBSTRATE_SYSROOT}/lib -Wl,--copy-dt-needed-entries -l:libc.so.0 -l:libregex.so.0")
 set(CMAKE_EXE_LINKER_FLAGS_INIT    "${_substrate_link}")
 set(CMAKE_SHARED_LINKER_FLAGS_INIT "${_substrate_link}")
 

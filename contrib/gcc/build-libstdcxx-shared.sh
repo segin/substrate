@@ -57,6 +57,13 @@ cp "$SUBSTRATE_TOP/include/sys/statvfs.h"   "$FIXDIR/sys/statvfs.h"
 # snapshot was taken; libstdc++ <cmath> does `using ::double_t` and fails
 # against the stale copy.  Refresh it (and the sysroot copy below).
 cp "$SUBSTRATE_TOP/include/math.h"          "$FIXDIR/math.h"
+# unistd.h gained revoke(), utmp.h gained login()/logout() after the
+# snapshot was taken; TDE's libtdecore KPty needs all three.  Refresh.
+cp "$SUBSTRATE_TOP/include/unistd.h"        "$FIXDIR/unistd.h"
+cp "$SUBSTRATE_TOP/include/utmp.h"          "$FIXDIR/utmp.h"
+# termios.h gained extern "C" guards; without them C++ callers (TDE's
+# tdesu process.cpp) mangle tcgetattr/tcsetattr and fail to link libc.
+cp "$SUBSTRATE_TOP/include/termios.h"       "$FIXDIR/termios.h"
 
 # Toplevel reconfigure.  Compared to build.sh stage 1 we drop
 # --disable-libstdcxx and --disable-shared so libstdc++-v3 actually

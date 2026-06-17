@@ -227,6 +227,10 @@ struct winsize {
 
 #include <sys/types.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 int tcgetattr(int fd, struct termios *termios_p);
 int tcsetattr(int fd, int optional_actions, const struct termios *termios_p);
 
@@ -241,6 +245,10 @@ int     tcflow(int fd, int action);
 int     tcflush(int fd, int queue);
 pid_t   tcgetsid(int fd);
 int     tcsendbreak(int fd, int duration);
+
+#ifdef __cplusplus
+}
+#endif
 
 #define TIOCGSID 0x5429   /* substrate ioctl number, mirrors Linux */
 
