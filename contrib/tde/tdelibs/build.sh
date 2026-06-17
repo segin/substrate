@@ -72,4 +72,12 @@ echo "  OSABI->substrate on ${_n} shared objects"
 # tdelibs) so downstream ports (tdebase, ...) resolve -ltdecore et al.
 mkdir -p "${MERGED}/opt/trinity"
 cp -a "${DEST}/opt/trinity/." "${MERGED}/opt/trinity/"
+
+# tdelibs' install(EXPORT) bakes the nominal install prefix (/opt/trinity)
+# into the imported-target IMPORTED_LOCATION paths.  When cross-compiling,
+# the libraries physically live in the staged sysroot, so rewrite the
+# export to point there; downstream (tdebase) links against real files
+# while their own INSTALL_RPATH keeps the on-target /opt/trinity/lib.
+_export="${MERGED}/opt/trinity/share/cmake/tdelibs.cmake"
+[ -f "${_export}" ] && sed -i "s|\"/opt/trinity/|\"${MERGED}/opt/trinity/|g" "${_export}"
 echo "==> tdelibs staged under ${DEST}/opt/trinity and merged into ${MERGED}"

@@ -1,0 +1,41 @@
+Subject: tdeioslave: make the nfs slave optional (WITH_NFS, default off)
+
+substrate has no host rpcgen; the nfs:// ioslave (its only rpcgen user)
+is non-essential.  Gate it and its rpcgen requirement behind WITH_NFS.
+
+--- a/tdeioslave/CMakeLists.txt
++++ b/tdeioslave/CMakeLists.txt
+@@ -19,7 +19,7 @@
+ add_subdirectory( info )
+ add_subdirectory( mac )
+ add_subdirectory( man )
+-add_subdirectory( nfs )
++tde_conditional_add_subdirectory( WITH_NFS nfs )
+ add_subdirectory( nntp )
+ add_subdirectory( pop3 )
+ add_subdirectory( smtp )
+--- a/tdeioslave/ConfigureChecks.cmake
++++ b/tdeioslave/ConfigureChecks.cmake
+@@ -35,10 +35,15 @@
+   endif( )
+ endif( )
+ 
+-message( STATUS "Looking for rpcgen" )
+-find_program( RPCGEN_BINARY rpcgen )
+-if( RPCGEN_BINARY )
+-  message( STATUS "Looking for rpcgen - ${RPCGEN_BINARY}" )
+-else( RPCGEN_BINARY )
+-  tde_message_fatal( "rpcgen is required, but not found on your system" )
+-endif( RPCGEN_BINARY )
++# rpcgen is only used by the nfs ioslave.  substrate provides no host
++# rpcgen, and nfs:// browsing is non-essential, so the nfs slave is
++# optional (WITH_NFS, default OFF) and its rpcgen requirement is gated.
++if( WITH_NFS )
++  message( STATUS "Looking for rpcgen" )
++  find_program( RPCGEN_BINARY rpcgen )
++  if( RPCGEN_BINARY )
++    message( STATUS "Looking for rpcgen - ${RPCGEN_BINARY}" )
++  else( RPCGEN_BINARY )
++    tde_message_fatal( "rpcgen is required, but not found on your system" )
++  endif( RPCGEN_BINARY )
++endif( )

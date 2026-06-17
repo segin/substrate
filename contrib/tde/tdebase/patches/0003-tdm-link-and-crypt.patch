@@ -1,0 +1,40 @@
+Subject: tdm link fixes -- explicit libs + crypt-in-libc
+
+--- a/ConfigureChecks.cmake
++++ b/ConfigureChecks.cmake
+@@ -109,16 +109,17 @@
+ endif( )
+ 
+ 
+-# crypt
+-set( CRYPT_LIBRARY crypt )
+-check_library_exists( ${CRYPT_LIBRARY} crypt "" HAVE_CRYPT )
+-if( NOT HAVE_CRYPT )
++# crypt — substrate provides crypt() in libc, with no separate libcrypt.
++# Check libc first (the cross check_library_exists for -lcrypt can report a
++# false positive); only fall back to -lcrypt when libc lacks it.
++check_function_exists( crypt LIBC_HAVE_CRYPT )
++if( LIBC_HAVE_CRYPT )
+   unset( CRYPT_LIBRARY )
+-  check_function_exists( crypt LIBC_HAVE_CRYPT )
+-  if( LIBC_HAVE_CRYPT )
+-    set( HAVE_CRYPT 1 CACHE INTERNAL "" FORCE )
+-  endif( LIBC_HAVE_CRYPT )
+-endif( NOT HAVE_CRYPT )
++  set( HAVE_CRYPT 1 CACHE INTERNAL "" FORCE )
++else( )
++  set( CRYPT_LIBRARY crypt )
++  check_library_exists( ${CRYPT_LIBRARY} crypt "" HAVE_CRYPT )
++endif( )
+ 
+ 
+ # tdehwlib (drkonqi, kcontrol, kicker, ksmserver, tdeioslaves, tdm)
+--- a/tdm/backend/CMakeLists.txt
++++ b/tdm/backend/CMakeLists.txt
+@@ -54,3 +54,6 @@
+     ${PAM_LIBRARY} ${UTIL_LIBRARY} ${XDMCP_LIBRARIES}
+   DESTINATION ${BIN_INSTALL_DIR}
+ )
++
++# substrate: tde_add_executable's LINK list is dropped for this target; link explicitly.
++target_link_libraries( tdm X11 ${XAU_LIBRARIES} ${DBUS_LIBRARIES} ${CRYPT_LIBRARY} )

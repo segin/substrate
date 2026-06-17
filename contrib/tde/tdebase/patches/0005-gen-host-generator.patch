@@ -1,0 +1,42 @@
+Subject: tqt3integration: host-built binding generator (GEN_EXECUTABLE)
+
+--- a/tqt3integration/utils/CMakeLists.txt
++++ b/tqt3integration/utils/CMakeLists.txt
+@@ -25,11 +25,18 @@
+ 
+ ##### gen (internal executable) ########################
+ 
+-tde_add_executable( gen AUTOMOC
+-  SOURCES
+-    gen.cpp
+-  LINK tdecore-shared
+-)
++# substrate: gen is a build-host code generator; a cross-built (target)
++# binary cannot run here, so allow pointing at a host-built one via
++# GEN_EXECUTABLE (gen.cpp uses only TQt, so a plain host compile works).
++if( NOT GEN_EXECUTABLE )
++  tde_add_executable( gen AUTOMOC
++    SOURCES
++      gen.cpp
++    LINK tdecore-shared
++  )
++  set( GEN_EXECUTABLE ${CMAKE_CURRENT_BINARY_DIR}/gen )
++  set( GEN_DEP gen )
++endif( )
+ 
+ add_custom_command(
+   OUTPUT
+@@ -37,11 +44,11 @@
+     ${CMAKE_CURRENT_BINARY_DIR}/module_functions.cpp
+     ${CMAKE_CURRENT_BINARY_DIR}/module_functions.h
+   COMMAND mkdir -p ${CMAKE_CURRENT_BINARY_DIR}/tqt
+-  COMMAND ${CMAKE_CURRENT_BINARY_DIR}/gen ${CMAKE_CURRENT_SOURCE_DIR}/gen.txt
++  COMMAND ${GEN_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/gen.txt
+   COMMAND cat ${CMAKE_CURRENT_BINARY_DIR}/tqt/in/tqttdeintegration_x11_0.cpp ${CMAKE_CURRENT_SOURCE_DIR}/tqt/in/tqttdeintegration_x11_1.cpp ${CMAKE_CURRENT_BINARY_DIR}/tqttdeintegration_x11.cpp.gen ${CMAKE_CURRENT_SOURCE_DIR}/tqt/in/tqttdeintegration_x11_2.cpp > ${CMAKE_CURRENT_BINARY_DIR}/tqt/tqttdeintegration_x11.cpp
+   COMMAND cat ${CMAKE_CURRENT_SOURCE_DIR}/tqt/in/tqttdeintegration_x11_p_1.h ${CMAKE_CURRENT_BINARY_DIR}/tqttdeintegration_x11_p.h.gen ${CMAKE_CURRENT_SOURCE_DIR}/tqt/in/tqttdeintegration_x11_p_2.h > ${CMAKE_CURRENT_BINARY_DIR}/tqt/tqttdeintegration_x11_p.h
+   COMMAND rm -f ${CMAKE_CURRENT_BINARY_DIR}/tqttdeintegration_x11.cpp.gen ${CMAKE_CURRENT_BINARY_DIR}/tqttdeintegration_x11_p.h.gen
+-  DEPENDS gen
++  DEPENDS ${GEN_DEP}
+ )
+ 
+ add_custom_target( generate_tqt3_bindings

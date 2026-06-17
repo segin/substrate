@@ -1,0 +1,41 @@
+Subject: gate components needing host codegen / Linux-only headers
+
+--- a/kcontrol/CMakeLists.txt
++++ b/kcontrol/CMakeLists.txt
+@@ -73,7 +73,8 @@
+ 
+   if( ${CMAKE_SYSTEM_NAME} STREQUAL "Linux" )
+     tde_conditional_add_subdirectory( WITH_XRANDR iccconfig )
+-    add_subdirectory( joystick )
++    # substrate has no linux/joystick.h (no joystick driver); gate it.
++    tde_conditional_add_subdirectory( WITH_JOYSTICK joystick )
+   endif( )
+ 
+   if( ${CMAKE_SYSTEM_NAME} MATCHES "Linux|FreeBSD|NetBSD" )
+--- a/konsole/CMakeLists.txt
++++ b/konsole/CMakeLists.txt
+@@ -14,7 +14,10 @@
+ add_subdirectory( konsole )
+ add_subdirectory( other )
+ # add_subdirectory( doc )
+-add_subdirectory( fonts )
++# substrate ships no bdftopcf (its X font ports stage BDF directly), so
++# konsole's bundled BDF->PCF font compilation can't run; konsole uses
++# system X fonts regardless.  Gate it (WITH_KONSOLE_FONTS, default OFF).
++tde_conditional_add_subdirectory( WITH_KONSOLE_FONTS fonts )
+ add_subdirectory( terminalhere )
+ 
+ 
+--- a/twin/clients/CMakeLists.txt
++++ b/twin/clients/CMakeLists.txt
+@@ -12,7 +12,9 @@
+ add_subdirectory( plastik )
+ add_subdirectory( b2 )
+ add_subdirectory( default )
+-add_subdirectory( keramik )
++# keramik twin client embeds tile images via genembed (a cross binary that
++# can't run on the build host); skip it as in tdelibs' keramik style.
++#add_subdirectory( keramik )
+ add_subdirectory( laptop )
+ add_subdirectory( modernsystem )
+ add_subdirectory( quartz )

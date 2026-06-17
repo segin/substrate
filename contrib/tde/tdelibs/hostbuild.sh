@@ -23,6 +23,10 @@ HB="${TDE_TOP}/tqt3/hostbuild/tqt-trinity-${VER}"   # native TQt3 (from tqt3 hos
 MODULES="${TDE_TOP}/tde-cmake/build/tde-cmake-trinity-${VER}/modules"
 TQI_TREE="${TDE_TOP}/tqtinterface/build/tqtinterface-trinity-${VER}"
 TDE_TREE="${HERE}/build/tdelibs-trinity-${VER}"
+# tde-config bakes in its install prefix and reports it via --install; the
+# staged cross sysroot is where the target headers/libs physically live,
+# so downstream (tdebase) cross configure gets the right -I/-L paths.
+STAGED_PREFIX="${SUBSTRATE_TOP}/dist-overlay/dist-tde-sysroot/opt/trinity"
 
 [ -x "${HB}/bin/tqmoc" ] || { echo "hostbuild.sh: native TQt3 missing — build contrib/tde/tqt3 host tools first (${HB})" >&2; exit 1; }
 [ -d "${TQI_TREE}" ]    || { echo "hostbuild.sh: run contrib/tde/tqtinterface/fetch.sh first" >&2; exit 1; }
@@ -64,12 +68,15 @@ Cflags:
 PC
 fi
 
-# --- native tdelibs codegen tools
-echo "==> host tdelibs codegen tools (tdeconfig_compiler, maketdewidgets)"
+# --- native tdelibs codegen tools + tde-config
+# CMAKE_INSTALL_PREFIX is set to the staged cross sysroot so the native
+# tde-config reports the right -I/-L paths to downstream cross configures
+# (tdebase's FindTDE runs tde-config --install ... on the host).
+echo "==> host tdelibs tools (tdeconfig_compiler, maketdewidgets, tde-config)"
 OBJ="${HERE}/hostbuild/obj"
 rm -rf "${OBJ}"; mkdir -p "${OBJ}"; cd "${OBJ}"
 cmake -G "Unix Makefiles" \
-    -DCMAKE_MODULE_PATH="${MODULES}" -DCMAKE_INSTALL_PREFIX=/opt/trinity-host \
+    -DCMAKE_MODULE_PATH="${MODULES}" -DCMAKE_INSTALL_PREFIX="${STAGED_PREFIX}" \
     -DQT_PREFIX_DIR="${HB}" \
     -DMOC_EXECUTABLE="${HB}/bin/tmoc" -DUIC_EXECUTABLE="${HB}/bin/tquic" \
     -DWITH_ARTS=OFF -DWITH_ALSA=OFF -DWITH_CUPS=OFF -DWITH_XRANDR=OFF \
@@ -78,11 +85,22 @@ cmake -G "Unix Makefiles" \
     -DHAVE_GOOD_GETADDRINFO_EXITCODE=0 -DICEAUTH_PATH=/usr/bin/iceauth \
     -DINTLTOOL_MERGE_EXECUTABLE="${MODULES}/tde_l10n_merge.pl" \
     "${TDE_TREE}"
-make -j"${JOBS}" tdeconfig_compiler maketdewidgets
+make -j"${JOBS}" tdeconfig_compiler maketdewidgets tde-config
 
 # Stage the host tools next to the other host generators (build.sh adds
 # ${HB}/bin to PATH).  Their RUNPATH already points at the native build
 # trees + ${HB}/lib, so they self-resolve.
 cp -f "${OBJ}/tdecore/tdeconfig_compiler/tdeconfig_compiler" "${HB}/bin/tdeconfig_compiler"
 cp -f "${OBJ}/tdewidgets/maketdewidgets"                     "${HB}/bin/maketdewidgets"
-echo "==> host tools staged in ${HB}/bin (tdeconfig_compiler, maketdewidgets)"
+cp -f "${OBJ}/tdecore/tde-config"                            "${HB}/bin/tde-config"
+
+# meinproc is only required to EXIST for tdebase's FindTDE; docs are
+# disabled (BUILD_DOC=OFF) so it is never run.  A loud stub avoids the
+# heavy uic/tdefile dependency chain a real host meinproc would pull in.
+cat > "${HB}/bin/meinproc" <<'MEINPROC'
+#!/bin/sh
+echo "meinproc: stub invoked, but TDE docs are disabled on the substrate cross build" >&2
+exit 1
+MEINPROC
+chmod +x "${HB}/bin/meinproc"
+echo "==> host tools staged in ${HB}/bin (tdeconfig_compiler, maketdewidgets, tde-config, meinproc-stub)"

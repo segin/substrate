@@ -1,0 +1,33 @@
+Subject: source fixes -- libkonq enum var, kdesktop pthread includes
+
+--- a/libkonq/konq_sort_constants.h
++++ b/libkonq/konq_sort_constants.h
+@@ -8,6 +8,6 @@
+   UNICODE_UNMODIFIED      = 0,
+   LOCALE_UNMODIFIED       = 1,
+   UNICODE_CASEINSENSITIVE = 2,
+-} TextSortOrders;
++};
+ 
+ #endif // KONQ_SORT_CONSTANTS_H
+--- a/kdesktop/lock/lockprocess.h
++++ b/kdesktop/lock/lockprocess.h
+@@ -10,6 +10,8 @@
+ #ifndef __LOCKENG_H__
+ #define __LOCKENG_H__
+ 
++#include <pthread.h>     /* pthread_t mThreadID (not pulled in transitively on substrate) */
++
+ #include <kgreeterplugin.h>
+ #include <kprocess.h>
+ #include <kpixmap.h>
+--- a/kdesktop/lockeng.cpp
++++ b/kdesktop/lockeng.cpp
+@@ -8,6 +8,7 @@
+ 
+ #include <config.h>
+ 
++#include <pthread.h>     /* pthread_sigmask (not pulled in transitively on substrate) */
+ #include <stdlib.h>
+ #include <sys/stat.h>
+ #include <tdeglobal.h>
