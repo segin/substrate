@@ -493,3 +493,35 @@ int revoke(const char *path) {
         return -1;                 /* access() set errno (ENOENT, ...) */
     return 0;
 }
+
+/*
+ * getloadavg(3) — the BSD/glibc system-load query.  Reads the three
+ * load averages (1/5/15 min) from /proc/loadavg, which the kernel
+ * formats Linux-style ("L1 L5 L15 run/total lastpid").  Returns the
+ * number of samples stored (<= nelem, <= 3), or -1 on error.
+ */
+int getloadavg(double loadavg[], int nelem) {
+    if (nelem <= 0)
+        return nelem == 0 ? 0 : -1;
+    if (nelem > 3)
+        nelem = 3;
+
+    int fd = open("/proc/loadavg", O_RDONLY);
+    if (fd < 0)
+        return -1;
+    char buf[128];
+    ssize_t n = read(fd, buf, sizeof(buf) - 1);
+    close(fd);
+    if (n <= 0)
+        return -1;
+    buf[n] = '\0';
+
+    double v[3] = { 0, 0, 0 };
+    int got = sscanf(buf, "%lf %lf %lf", &v[0], &v[1], &v[2]);
+    if (got < 1)
+        return -1;
+    int count = got < nelem ? got : nelem;
+    for (int i = 0; i < count; i++)
+        loadavg[i] = v[i];
+    return count;
+}

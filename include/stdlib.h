@@ -70,6 +70,7 @@ int unsetenv(const char *name);
 int putenv(char *string);
 char *realpath(const char *__restrict path, char *__restrict resolved_path);
 int system(const char *command);
+int getloadavg(double loadavg[], int nelem);
 
 void quick_exit(int status);
 int at_quick_exit(void (*func)(void));
