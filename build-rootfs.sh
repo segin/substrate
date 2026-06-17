@@ -490,10 +490,15 @@ install_to_dist() {
     for stage in "$TOP"/dist-overlay/dist-*; do
         [ -d "$stage" ] || continue
         name=$(basename "$stage")
-        # Skip dist-* directories that aren't contrib outputs (none
-        # currently, but a guard for future "dist-something-else").
+        # Skip dist-* directories that aren't main-image contrib outputs.
         case "$name" in
             dist) continue ;;       # the rootfs staging itself
+            # Full foreign-OS rootfs trees for the separate FreeBSD/NetBSD
+            # personality images (freebsd.img / netbsd.img).  They carry
+            # their own /bin, /etc, /rescue, ... and must NOT be overlaid
+            # onto the native substrate image (they also collide, e.g.
+            # NetBSD's /etc/security file vs the PAM /etc/security dir).
+            dist-freebsd|dist-netbsd) continue ;;
         esac
         echo "Overlaying $name from $stage..."
         (cd "$stage" && tar -cf - .) | (cd "$DIST" && tar -xf -)
