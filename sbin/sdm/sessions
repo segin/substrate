@@ -16,6 +16,12 @@
 # Panel, and restores the saved session.  CDE bakes its /usr/dt paths in at
 # build time, so it finds its components by absolute path.
 CDE    = /usr/dt/bin/dtsession
+# TDE — the Trinity Desktop Environment.  starttde is TDE's session
+# startup script: it derives TDEDIR from its own location (/opt/trinity),
+# puts $TDEDIR/bin on PATH, and launches tdeinit + the session manager
+# (ksmserver), the window manager (twin), and the panel (kicker).  Like
+# CDE it is found by absolute path, so no extra environment is required.
+TDE    = /opt/trinity/bin/starttde
 matwm2 = matwm2
 twm    = twm
 ctwm   = ctwm
