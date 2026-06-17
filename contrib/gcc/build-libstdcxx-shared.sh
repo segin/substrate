@@ -116,7 +116,7 @@ cd "$SRCDIR"
   -Wl,-O1 -Wl,-z -Wl,relro -Wl,--gc-sections \
   -Wl,--version-script=libstdc++-symbols.ver \
   -Wl,-soname -Wl,libstdc++.so.6 \
-  -L"$SYSROOT/usr/lib" -l:libc.so.0 -lgcc_s \
+  -L"$SYSROOT/usr/lib" -Wl,--no-as-needed -l:libpthread.so.0 -l:libc.so.0 -lgcc_s \
   -o .libs/libstdc++.so.6.0.35
 
 # Install both shared libraries into the locations GCC's spec file

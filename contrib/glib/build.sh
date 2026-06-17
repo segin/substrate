@@ -75,4 +75,40 @@ make install DESTDIR="${DESTDIR}"
 # Drop libtool archives: their absolute libdir=/usr/lib makes a downstream cross
 # link resolve -lglib-2.0 to the build host's library ("file in wrong format").
 rm -f "${DESTDIR}"/usr/lib/*.la
+
+# Record proper DT_NEEDED on the glib stack.  substrate's `gcc -shared`
+# adds no implicit libc, and glib 2.56's libtool defers ALL deplibs (the
+# inter-glib .la deps AND the system libs: pthread/m/z/iconv/ffi/dl) to
+# the .la, so the installed shared objects come out with an EMPTY
+# DT_NEEDED -> ld.so cannot resolve pthread_* et al at runtime.  Relink
+# each library from its objects with explicit deps, in dependency order.
+echo "==> Relinking glib stack with explicit DT_NEEDED"
+SR="${STAGE1_PREFIX}/i386-unknown-substrate/lib"
+LD="${DESTDIR}/usr/lib"
+VER="0.5600.4"
+_glib_relink() {   # $1=basename(glib/gobject/...)  $2..=extra link args
+    _b="$1"; shift
+    _objs=$(find "${BUILD_DIR}/${_b}" -path '*/.libs/*.o' -name "lib${_b}_2_0_la-*.o")
+    i386-unknown-substrate-gcc -shared -fPIC -Wl,-z,nodelete \
+        -L"${SR}" -L"${LD}" \
+        -Wl,-soname,"lib${_b}-2.0.so.0" -o "${LD}/lib${_b}-2.0.so.${VER}" \
+        ${_objs} "$@"
+    ( cd "${LD}" && ln -sf "lib${_b}-2.0.so.${VER}" "lib${_b}-2.0.so.0" \
+                 && ln -sf "lib${_b}-2.0.so.${VER}" "lib${_b}-2.0.so" )
+}
+_glib_relink glib \
+    -Wl,--whole-archive "${BUILD_DIR}/glib/libcharset/.libs/libcharset.a" \
+                        "${BUILD_DIR}/glib/pcre/.libs/libpcre.a" -Wl,--no-whole-archive \
+    -L"${ICONV}/lib" -liconv -L"${ZLIB}/lib" -lz \
+    -Wl,--no-as-needed -l:libpthread.so.0 -lm -l:libc.so.0
+_glib_relink gthread -lglib-2.0 -l:libpthread.so.0 -l:libc.so.0
+_glib_relink gmodule -lglib-2.0 -l:libdl.so.0 -l:libc.so.0
+_glib_relink gobject -lglib-2.0 -L"${FFI}/lib" -lffi -l:libc.so.0
+_glib_relink gio     -lglib-2.0 -lgobject-2.0 -lgmodule-2.0 -L"${ZLIB}/lib" -lz -l:libc.so.0
+
+# Stamp ELFOSABI_SUBSTRATE on the relinked shared objects.
+for _so in "${LD}"/lib{glib,gobject,gio,gmodule,gthread}-2.0.so.${VER}; do
+    [ -f "${_so}" ] && printf '\100' | dd of="${_so}" bs=1 seek=7 count=1 conv=notrunc status=none
+done
+
 echo "==> Done.  Staged at ${DESTDIR}/usr/{lib/libglib-2.0*,lib/libgobject-2.0*,include/glib-2.0}"
