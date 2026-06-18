@@ -58,15 +58,24 @@ cmake -G "Unix Makefiles" \
 make -j"${JOBS}"
 rm -rf "${DEST}"; make install DESTDIR="${DEST}"
 
-# Drop libtool archives and stamp ELFOSABI_SUBSTRATE (0x40) on every
-# produced shared object — host `cc -shared` emits ELFOSABI_SYSV (0),
-# which substrate's loader rejects.
-find "${DEST}" -name '*.la' -delete
+# Stamp ELFOSABI_SUBSTRATE (0x40) on every produced shared object — host
+# `cc -shared` emits ELFOSABI_SYSV (0), which substrate's loader rejects.
 _n=0
 for so in $(find "${DEST}/opt/trinity" -name '*.so*' -type f); do
     printf '\100' | dd of="${so}" bs=1 seek=7 count=1 conv=notrunc status=none 2>/dev/null && _n=$((_n+1))
 done
 echo "  OSABI->substrate on ${_n} shared objects"
+
+# Regenerate libtool ".la" archives for plugins.  TDE's
+# KLibLoader::findLibrary() resolves a plugin given by bare name (e.g.
+# "twin3_default", "kded_kcookiejar") by appending ".la" and looking the
+# archive up under the module/lib resource dirs (tdecore/klibloader.cpp).
+# A CMake build's .la carry host build-dir paths in dependency_libs, so
+# drop those and write minimal correct stubs — without them EVERY plugin
+# fails to load (twin finds no window-decoration plugin and exits, kded
+# loads no kded_* modules, etc.).
+find "${DEST}" -name '*.la' -delete
+sh "${SUBSTRATE_TOP}/contrib/tde/gen-libtool-la.sh" "${DEST}"
 
 # Merge into the shared TDE sysroot (tqt3 + tqtinterface + dbus-1-tqt +
 # tdelibs) so downstream ports (tdebase, ...) resolve -ltdecore et al.

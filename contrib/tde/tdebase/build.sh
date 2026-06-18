@@ -77,12 +77,18 @@ cmake -G "Unix Makefiles" \
 make -j"${JOBS}"
 rm -rf "${DEST}"; make install DESTDIR="${DEST}"
 
-find "${DEST}" -name '*.la' -delete
 _n=0
 for so in $(find "${DEST}/opt/trinity" -name '*.so*' -type f); do
     printf '\100' | dd of="${so}" bs=1 seek=7 count=1 conv=notrunc status=none 2>/dev/null && _n=$((_n+1))
 done
 echo "  OSABI->substrate on ${_n} shared objects"
+
+# Regenerate libtool ".la" stubs so TDE's KLibLoader::findLibrary() can
+# resolve plugins by bare name (twin decorations, kded modules, kcm_*,
+# ...).  See contrib/tde/tdelibs/build.sh for the rationale.
+find "${DEST}" -name '*.la' -delete
+sh "${SUBSTRATE_TOP}/contrib/tde/gen-libtool-la.sh" "${DEST}"
+
 mkdir -p "${MERGED}/opt/trinity"
 cp -a "${DEST}/opt/trinity/." "${MERGED}/opt/trinity/"
 echo "==> tdebase staged under ${DEST}/opt/trinity and merged into ${MERGED}"
