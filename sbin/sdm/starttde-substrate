@@ -1,0 +1,55 @@
+#!/bin/sh
+# /etc/X11/starttde-substrate — direct-launch TDE session for substrate.
+#
+# TDE's own /opt/trinity/bin/starttde drives the desktop through tdeinit's
+# auto-launch machinery (start_tdeinit_wrapper -> tdeinit -> dcopserver/
+# tdelauncher/kded/kcminit -> ksmserver).  On substrate that path does not
+# yet come up cleanly: the tdeinit wrapper's connect to the daemon socket
+# intermittently returns ECONNREFUSED, the wrapper relaunches tdeinit, and a
+# second dcopserver then hits the first's marker ("dcopserver is already
+# running"), wedging the cascade.  Separately, every TDEUniqueApplication
+# logs "Communication problem with <app>, it probably crashed" from the
+# fork parent's newInstance() DCOP call — harmless (the forked daemon runs
+# and registers), but it derails ksmserver's session-restore.
+#
+# This launcher brings the desktop up directly instead: start dcopserver,
+# build the sycoca, then run the window manager (twin), desktop (kdesktop)
+# and panel (kicker) as plain TDEApplications — each connects to X and
+# registers with DCOP on its own.  The session ends when twin exits.
+#
+# Prerequisite: TDE plugins must be loadable, i.e. their libtool .la stubs
+# must be installed (see contrib/tde/gen-libtool-la.sh) — without them
+# KLibLoader resolves no plugin and twin exits "No window decoration
+# plugin library was found".
+
+export TDEDIR="${TDEDIR:-/opt/trinity}"
+export TDEHOME="${TDEHOME:-$HOME/.trinity}"
+: "${TDEDIRS:=$TDEDIR}"; export TDEDIRS
+PATH="$TDEDIR/bin:$PATH"; export PATH
+
+# Clear stale DCOP / tdeinit state (keyed on the hostname, so a hostname
+# change between boots otherwise leaves an unreachable marker behind).
+rm -rf "$TDEHOME"/socket-* "$TDEHOME"/tmp-* "$HOME"/.DCOPserver_* 2>/dev/null
+mkdir -p "$TDEHOME/share/config"
+
+host=$(hostname 2>/dev/null)
+
+# DCOP server (the bus the rest of the desktop registers on).
+dcopserver --nosid >"$TDEHOME/dcopserver.log" 2>&1 &
+i=0
+while [ ! -e "$HOME/.DCOPserver_${host}__0" ] && [ "$i" -lt 60 ]; do
+    sleep 1; i=$((i + 1))
+done
+
+# Service/type catalogue (twin's decoration lookup, kicker's applets, ...).
+tdebuildsycoca --noincremental >"$TDEHOME/sycoca.log" 2>&1
+
+# Desktop components, launched directly.
+twin      >"$TDEHOME/twin.log"      2>&1 &
+twin_pid=$!
+kdesktop  >"$TDEHOME/kdesktop.log"  2>&1 &
+kicker    >"$TDEHOME/kicker.log"    2>&1 &
+
+# Hold the session open on the window manager; when twin exits the session
+# (and the X server) ends and sdm returns to the greeter.
+wait "$twin_pid"
