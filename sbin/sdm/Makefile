@@ -32,6 +32,7 @@ install: all
 	install -m 0755 sgreet   $(DESTDIR)/usr/sbin/sgreet
 	install -m 0755 sdm.sh   $(DESTDIR)/usr/sbin/sdm
 	install -m 0755 Xsession $(DESTDIR)/etc/X11/Xsession
+	install -m 0755 starttde-substrate $(DESTDIR)/etc/X11/starttde-substrate
 	install -m 0644 sessions $(DESTDIR)/etc/sdm/sessions
 
 clean:
