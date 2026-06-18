@@ -865,9 +865,22 @@ int sys_accept(int fd, struct sockaddr *addr, socklen_t *addrlen) {
         return -EINVAL;
     }
 
+    /* O_NONBLOCK listener: return EAGAIN instead of blocking when no
+     * connection is queued.  The canonical poll-driven server drains with
+     * "while (accept() >= 0) ;" and relies on EAGAIN to stop; without it the
+     * server blocks on the last accept and never services its existing
+     * clients — every connected client then starves (this wedged
+     * multi-client servers entirely, the desktop included). */
+    int accept_nonblock = 0;
+    if (fd >= 0 && fd < MAX_FD && current_process) {
+        file_t *lf = current_process->fds[fd];
+        if (lf && (lf->f_flag & FNONBLOCK)) accept_nonblock = 1;
+    }
+
     mutex_lock(&server->lock);
     while (server->accept_count == 0) {
         if (server->closed) { mutex_unlock(&server->lock); return -EBADF; }
+        if (accept_nonblock) { mutex_unlock(&server->lock); return -EAGAIN; }
         /* Interruptible wait: a pending signal must break accept()
          * out, otherwise a wedged server cannot be killed and holds
          * its controlling terminal forever. */
