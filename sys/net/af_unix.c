@@ -48,6 +48,8 @@
 #include <kern/cmdline.h>
 #include <kern/sched.h>
 #include <kern/sleepq.h>
+#include <kern/time.h>
+#include <arch/i386/intr.h>
 #include <kern/file.h>
 #include <vm/vm_kmem.h>
 #include <sys/copy.h>
@@ -244,6 +246,81 @@ static afunix_sock_t *afunix_find_bound(const char *path, int len) {
     return NULL;
 }
 
+/*
+ * Normalise a pathname AF_UNIX address length.  Callers disagree on what
+ * addrlen to pass for sun_path: some pass the exact byte count
+ * (offsetof(sun_path) + strlen), others the full sizeof(struct sockaddr_un)
+ * with sun_path NUL-padded to 108 bytes.  X11 is the canonical victim — the
+ * server's Xtrans binds "/tmp/.X11-unix/X0" with pathlen 17, while libxcb
+ * connects with pathlen 108 (the whole padded buffer), so the exact-length
+ * key compare in afunix_find_bound() never matches and every client silently
+ * falls back to the TCP transport.  For a pathname socket the address IS the
+ * NUL-terminated string in sun_path, so reduce to its string length; bind and
+ * connect then produce the same key regardless of how addrlen was framed.
+ * Abstract sockets (leading NUL) carry an opaque, possibly NUL-containing
+ * name and keep their raw length.
+ */
+static socklen_t afunix_norm_pathlen(const char *path, socklen_t pathlen) {
+    if (pathlen > 0 && path[0] != '\0') {
+        socklen_t n = 0;
+        while (n < pathlen && path[n] != '\0')
+            n++;
+        return n;
+    }
+    return pathlen;
+}
+
+/*
+ * Park on `chan` until woken, dropping `m` while blocked and re-acquiring it
+ * before return.  This is the AF_UNIX twin of pipe_wait() (sys/fs/pipe.c) and
+ * exists for the same two preemption races the naive sleepq_add+sched_yield
+ * the rx/tx loops used was exposed to:
+ *
+ *   1. sleepq_add flips us to THREAD_BLOCKED while we still hold `m`.  A timer
+ *      tick in the window before mutex_unlock deschedules us *holding the
+ *      lock* (a BLOCKED thread is never re-selected), and the peer that needs
+ *      `m` to write+wake us deadlocks on it.
+ *   2. A wakeup landing in the park window can be lost outright; with no
+ *      deadline the socket then hangs forever.
+ *
+ * Both wedged X clients the moment they used the local AF_UNIX transport
+ * (xset/xterm/the whole TDE session hung).  The fix mirrors pipe_wait:
+ * interrupts off across the sleepq_add..mutex_unlock register so we cannot be
+ * preempted while BLOCKED and holding `m`; a ~50 ms fallback deadline so
+ * sched_tick re-readies us if the wake was lost; only yield while still
+ * queued; and a self-dequeue on wake (sched_tick can't remove us from IRQ
+ * context).  Returns 0, or -EINTR if a signal is pending.  Caller holds `m`
+ * on entry and exit and re-checks its own condition afterwards.
+ */
+static int afunix_wait(void *chan, mutex_t *m) {
+    if (!current_thread) {
+        mutex_unlock(m);
+        sched_yield();
+        mutex_lock(m);
+        return 0;
+    }
+    current_thread->flags |= THREAD_F_INTERRUPTIBLE;
+    uint32_t pf = intr_disable();
+    sleepq_add(chan, current_thread);
+    if (current_thread->sleep_expiry == 0) {
+        uint32_t hz = get_hz();
+        uint64_t span = hz ? (hz / 20u) : 8u;   /* ~50 ms */
+        if (span == 0) span = 1;
+        current_thread->sleep_expiry = get_ticks() + span;
+    }
+    mutex_unlock(m);
+    intr_restore(pf);
+    if (current_thread->wait_chan == chan)
+        sched_yield();
+    current_thread->sleep_expiry = 0;
+    sleepq_remove_thread(current_thread);
+    mutex_lock(m);
+    current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
+    if (current_thread->sig_pending & ~current_thread->sig_mask)
+        return -EINTR;
+    return 0;
+}
+
 /* ============================================================
  * fs_node_t adapter — so existing read(2)/write(2) work on socket fds
  * ============================================================ */
@@ -275,15 +352,9 @@ static size_t afunix_node_read(fs_node_t *node, off_t off, size_t size, uint8_t 
                 (current_thread->sig_pending & ~current_thread->sig_mask)) {
                 mutex_unlock(&s->lock); return (size_t)-EINTR;
             }
-            if (current_thread) current_thread->flags |= THREAD_F_INTERRUPTIBLE;
-            sleepq_add(s->rx_chan, current_thread);
-            mutex_unlock(&s->lock);
-            sched_yield();
-            if (current_thread) current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
-            if (current_thread &&
-                (current_thread->sig_pending & ~current_thread->sig_mask))
-                return (size_t)-EINTR;
-            mutex_lock(&s->lock);
+            if (afunix_wait(s->rx_chan, &s->lock) == -EINTR) {
+                mutex_unlock(&s->lock); return (size_t)-EINTR;
+            }
             if (s->rd_closed) { mutex_unlock(&s->lock); return 0; }
         }
         uint8_t hdr[2];
@@ -320,17 +391,10 @@ static size_t afunix_node_read(fs_node_t *node, off_t off, size_t size, uint8_t 
             mutex_unlock(&s->lock);
             return (size_t)-EINTR;
         }
-        if (current_thread)
-            current_thread->flags |= THREAD_F_INTERRUPTIBLE;
-        sleepq_add(s->rx_chan, current_thread);
-        mutex_unlock(&s->lock);
-        sched_yield();
-        if (current_thread)
-            current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
-        if (current_thread &&
-            (current_thread->sig_pending & ~current_thread->sig_mask))
+        if (afunix_wait(s->rx_chan, &s->lock) == -EINTR) {
+            mutex_unlock(&s->lock);
             return (size_t)-EINTR;
-        mutex_lock(&s->lock);
+        }
         /* Re-check the self-side flag in case shutdown(SHUT_RD) raced us. */
         if (s->rd_closed) { mutex_unlock(&s->lock); return 0; }
     }
@@ -371,15 +435,9 @@ static size_t afunix_node_write(fs_node_t *node, off_t off, size_t size, const u
                 (current_thread->sig_pending & ~current_thread->sig_mask)) {
                 mutex_unlock(&peer->lock); return (size_t)-EINTR;
             }
-            if (current_thread) current_thread->flags |= THREAD_F_INTERRUPTIBLE;
-            sleepq_add(s->tx_chan, current_thread);
-            mutex_unlock(&peer->lock);
-            sched_yield();
-            if (current_thread) current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
-            if (current_thread &&
-                (current_thread->sig_pending & ~current_thread->sig_mask))
-                return (size_t)-EINTR;
-            mutex_lock(&peer->lock);
+            if (afunix_wait(s->tx_chan, &peer->lock) == -EINTR) {
+                mutex_unlock(&peer->lock); return (size_t)-EINTR;
+            }
         }
         if (peer->closed || peer->rd_closed || s->wr_closed) {
             mutex_unlock(&peer->lock); return (size_t)-EPIPE;
@@ -413,17 +471,10 @@ static size_t afunix_node_write(fs_node_t *node, off_t off, size_t size, const u
                 mutex_unlock(&peer->lock);
                 return written ? written : (size_t)-EINTR;
             }
-            if (current_thread)
-                current_thread->flags |= THREAD_F_INTERRUPTIBLE;
-            sleepq_add(s->tx_chan, current_thread);
-            mutex_unlock(&peer->lock);
-            sched_yield();
-            if (current_thread)
-                current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
-            if (current_thread &&
-                (current_thread->sig_pending & ~current_thread->sig_mask))
+            if (afunix_wait(s->tx_chan, &peer->lock) == -EINTR) {
+                mutex_unlock(&peer->lock);
                 return written ? written : (size_t)-EINTR;
-            mutex_lock(&peer->lock);
+            }
         }
         if (peer->closed || peer->rd_closed || s->wr_closed) {
             mutex_unlock(&peer->lock);
@@ -727,6 +778,7 @@ int sys_bind(int fd, const struct sockaddr *addr, socklen_t addrlen) {
     socklen_t pathlen = addrlen - 2;
     const char *path = ((const struct sockaddr_un *)addr)->sun_path;
     if (pathlen > AFUNIX_PATH_MAX) pathlen = AFUNIX_PATH_MAX;
+    pathlen = afunix_norm_pathlen(path, pathlen);
 
     if (pathlen > 0 && path[0] != '\0') {
         /* Pathname socket: the filesystem node IS the binding's identity,
@@ -823,14 +875,10 @@ int sys_accept(int fd, struct sockaddr *addr, socklen_t *addrlen) {
             mutex_unlock(&server->lock);
             return -EINTR;
         }
-        current_thread->flags |= THREAD_F_INTERRUPTIBLE;
-        sleepq_add(server->accept_chan, current_thread);
-        mutex_unlock(&server->lock);
-        sched_yield();
-        current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
-        if (current_thread->sig_pending & ~current_thread->sig_mask)
+        if (afunix_wait(server->accept_chan, &server->lock) == -EINTR) {
+            mutex_unlock(&server->lock);
             return -EINTR;
-        mutex_lock(&server->lock);
+        }
     }
     /* connect() already allocated and peered the server-side socket;
      * we just need to install it into the caller's fd table. */
@@ -875,6 +923,7 @@ int sys_connect(int fd, const struct sockaddr *addr, socklen_t addrlen) {
     socklen_t pathlen = addrlen - 2;
     const char *path = ((const struct sockaddr_un *)addr)->sun_path;
     if (pathlen > AFUNIX_PATH_MAX) pathlen = AFUNIX_PATH_MAX;
+    pathlen = afunix_norm_pathlen(path, pathlen);
 
     afunix_sock_t *server = afunix_find_bound(path, pathlen);
     if (!server) {
@@ -954,10 +1003,27 @@ ssize_t sys_send(int fd, const void *buf, size_t len, int flags) {
             }
         }
     }
-    (void)flags;
     afunix_sock_t *s = afunix_from_fd(fd);
     if (!s) return -ENOTSOCK;
-    return afunix_node_write(&s->node, 0, len, (const uint8_t *)buf);
+    /*
+     * afunix_node_write() reads the fd's O_NONBLOCK off
+     * current_thread->io_file.  write(2) routes through kern_write() which
+     * stashes it, but send(2) reaches the node write directly and did not —
+     * so a non-blocking AF_UNIX send() was treated as blocking and wedged
+     * when the peer's rx filled.  libxcb writes every X request with send(),
+     * so under multi-client load (the server slow to drain) the client's
+     * send() blocked and deadlocked the display.  Stash it (and honour
+     * MSG_DONTWAIT), mirroring recv_into_kbuf().
+     */
+    file_t *sf = current_process ? current_process->fds[fd] : NULL;
+    file_t *saved = current_thread ? current_thread->io_file : NULL;
+    short saved_flag = sf ? sf->f_flag : 0;
+    if (sf && (flags & MSG_DONTWAIT)) sf->f_flag |= FNONBLOCK;
+    if (current_thread) current_thread->io_file = sf;
+    ssize_t r = (ssize_t)afunix_node_write(&s->node, 0, len, (const uint8_t *)buf);
+    if (current_thread) current_thread->io_file = saved;
+    if (sf && (flags & MSG_DONTWAIT)) sf->f_flag = saved_flag;
+    return r;
 }
 
 /* Bytes copied through the kernel bounce buffer in one recv call.  Stream
@@ -992,7 +1058,24 @@ static ssize_t recv_into_kbuf(int fd, void *kbuf, size_t len, int flags,
     if (kaddrlen) *kaddrlen = 0;       /* AF_UNIX has no source address */
     afunix_sock_t *s = afunix_from_fd(fd);
     if (!s) return -ENOTSOCK;
-    return afunix_node_read(&s->node, 0, len, (uint8_t *)kbuf);
+    /*
+     * afunix_node_read() reads the fd's O_NONBLOCK state off
+     * current_thread->io_file, which the read(2) syscall stashes but recv(2)
+     * did not — so a non-blocking AF_UNIX socket reached via recv() was
+     * treated as blocking and its empty-buffer read wedged forever.  Every
+     * libxcb X connection fcntl()s its fd O_NONBLOCK and then recv()s on it,
+     * so this hung the entire local X transport (xset/xterm/the TDE session
+     * froze).  Stash the file_t here too; honour MSG_DONTWAIT as well.  (The
+     * af_inet path is immune — it reads f->f_flag directly.)
+     */
+    file_t *saved = current_thread ? current_thread->io_file : NULL;
+    short saved_flag = f ? f->f_flag : 0;
+    if (f && (flags & MSG_DONTWAIT)) f->f_flag |= FNONBLOCK;
+    if (current_thread) current_thread->io_file = f;
+    ssize_t r = (ssize_t)afunix_node_read(&s->node, 0, len, (uint8_t *)kbuf);
+    if (current_thread) current_thread->io_file = saved;
+    if (f && (flags & MSG_DONTWAIT)) f->f_flag = saved_flag;
+    return r;
 }
 
 /* Common recv/recvfrom body: receive into a kernel bounce buffer, then copy
@@ -1068,15 +1151,9 @@ static ssize_t afunix_dgram_deliver(afunix_sock_t *dst, const uint8_t *buf,
             (current_thread->sig_pending & ~current_thread->sig_mask)) {
             mutex_unlock(&dst->lock); return -EINTR;
         }
-        if (current_thread) current_thread->flags |= THREAD_F_INTERRUPTIBLE;
-        sleepq_add(dst->tx_chan, current_thread);
-        mutex_unlock(&dst->lock);
-        sched_yield();
-        if (current_thread) current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
-        if (current_thread &&
-            (current_thread->sig_pending & ~current_thread->sig_mask))
-            return -EINTR;
-        mutex_lock(&dst->lock);
+        if (afunix_wait(dst->tx_chan, &dst->lock) == -EINTR) {
+            mutex_unlock(&dst->lock); return -EINTR;
+        }
     }
     if (dst->closed || dst->rd_closed) {
         mutex_unlock(&dst->lock); return -ECONNREFUSED;
@@ -1121,6 +1198,7 @@ ssize_t sys_sendto(int fd, const void *buf, size_t len, int flags,
             socklen_t pathlen = addrlen - 2;
             const char *path = ((const struct sockaddr_un *)addr)->sun_path;
             if (pathlen > AFUNIX_PATH_MAX) pathlen = AFUNIX_PATH_MAX;
+            pathlen = afunix_norm_pathlen(path, pathlen);
             afunix_sock_t *dst = afunix_find_bound(path, pathlen);
             if (!dst) {
                 if (pathlen > 0 && path[0] != '\0') {
