@@ -117,3 +117,6 @@ torture_fork64: torture_fork64.c
 
 poll_relay: poll_relay.c
 	$(CC) $(CFLAGS) $(LDFLAGS) $(PTHREAD_INC) $< $(PTHREAD) -o $@
+
+fork_sharedconn: fork_sharedconn.c
+	$(CC) $(CFLAGS) $(LDFLAGS) $(PTHREAD_INC) $< $(PTHREAD) -o $@
