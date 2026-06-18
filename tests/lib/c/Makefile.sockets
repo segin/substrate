@@ -39,7 +39,7 @@ else
   PTHREAD_INC =
 endif
 
-TESTS = torture_unix torture_afunix torture_afunix_poll torture_malloc \
+TESTS = torture_unix torture_afunix torture_afunix_poll torture_poll_mc torture_malloc \
         torture_evdev torture_x11_shape torture_sigalrm torture_heap_stdio \
         torture_malloc_threads
 
@@ -108,3 +108,6 @@ clean:
 	rm -f $(TESTS)
 
 .PHONY: all clean
+
+torture_poll_mc: torture_poll_mc.c
+	$(CC) $(CFLAGS) $(LDFLAGS) $(PTHREAD_INC) $< $(PTHREAD) -o $@
