@@ -1,5 +1,5 @@
 /* pthread_create / pthread_exit / pthread_join, plus the in-process
- * thread table and creation trampoline.  Other pthread functions live
+ * thread registry and creation trampoline.  Other pthread functions live
  * in pthread_mutex.c, pthread_cond.c, pthread_sig.c. */
 
 #include "pthread.h"
@@ -10,54 +10,76 @@
 #include <sys/thr.h>
 #include <stdint.h>
 
-#define MAX_PTHREADS 64
-
+/*
+ * Per-thread bookkeeping is a lock-protected singly-linked list of
+ * malloc'd nodes — NOT a fixed-size table.  The old thread_table[64]
+ * imposed an artificial 64-threads-per-process ceiling (the kernel has
+ * none: tids are a ~10M global space).  Heavily-threaded clients —
+ * a TDE app, an X server, a connection-per-thread daemon — blew through
+ * it and pthread_create() failed with the table full.  Nodes are
+ * malloc'd and never move, so a node pointer handed to the creation
+ * trampoline stays valid for the thread's whole life; a node is freed
+ * only after the kernel thread is provably dead (SYS_THR_JOIN), so there
+ * is no use-after-free against the still-running thread.
+ */
 struct pthread_info {
     pthread_t tid;
-    void *exit_status; /* Thread exit status for join */
-    int exited;        /* start_routine returned — slot is reapable */
-    int detached;      /* pthread_detach: no join; reap on exit */
-    int used;
+    void *exit_status;          /* return value, for join */
+    int exited;                 /* start_routine returned — reapable */
+    int detached;               /* pthread_detach: reap on exit, never joined */
     void *stack;
     size_t stack_size;
+    struct pthread_info *next;
 };
 
-static struct pthread_info thread_table[MAX_PTHREADS];
+static struct pthread_info *thread_list = NULL;   /* lock-protected */
 static int thread_table_lock = 0;
+
+#define TT_LOCK()   do { while (__sync_lock_test_and_set(&thread_table_lock, 1)) ; } while (0)
+#define TT_UNLOCK() __sync_lock_release(&thread_table_lock)
+
+/* caller holds thread_table_lock */
+static struct pthread_info *ti_find_locked(pthread_t tid) {
+    for (struct pthread_info *n = thread_list; n; n = n->next)
+        if (n->tid == tid) return n;
+    return NULL;
+}
+
+/* caller holds thread_table_lock */
+static void ti_unlink_locked(struct pthread_info *ti) {
+    struct pthread_info **pp = &thread_list;
+    while (*pp) {
+        if (*pp == ti) { *pp = ti->next; ti->next = NULL; return; }
+        pp = &(*pp)->next;
+    }
+}
 
 struct trampoline_args {
     void *(*start_routine)(void *);
     void *arg;
-    int   slot;        /* index into thread_table, for exit bookkeeping */
+    struct pthread_info *ti;     /* stable node pointer, for exit bookkeeping */
 };
 
 /*
  * Reclaim detached threads that have finished.  A detached thread is
- * never joined by the caller, so its 64 KiB stack and table slot
- * would otherwise leak.  Called from pthread_create() so resources
- * are recycled as connections (telnetd) churn.  SYS_THR_JOIN here is
- * used purely as "block until the kernel thread is truly gone" — it
- * is safe to free the stack only once nothing runs on it.
+ * never joined by the caller, so its stack and registry node would
+ * otherwise leak.  Called from pthread_create() so resources are
+ * recycled as connections (telnetd) churn.  SYS_THR_JOIN here is used
+ * purely as "block until the kernel thread is truly gone" — it is safe
+ * to free the stack only once nothing runs on it.
  */
 static void pthread_reap_detached(void) {
-    for (int i = 0; i < MAX_PTHREADS; i++) {
-        pthread_t tid = 0;
-        void *stack = NULL;
-
-        while (__sync_lock_test_and_set(&thread_table_lock, 1));
-        struct pthread_info *ti = &thread_table[i];
-        if (ti->used && ti->detached && ti->exited) {
-            tid   = ti->tid;
-            stack = ti->stack;
-            ti->used = 0; ti->tid = 0; ti->stack = NULL;
-            ti->detached = 0; ti->exited = 0; ti->exit_status = NULL;
+    for (;;) {
+        struct pthread_info *ti = NULL;
+        TT_LOCK();
+        for (struct pthread_info *n = thread_list; n; n = n->next) {
+            if (n->detached && n->exited) { ti = n; ti_unlink_locked(n); break; }
         }
-        __sync_lock_release(&thread_table_lock);
-
-        if (stack) {
-            syscall(SYS_THR_JOIN, tid, 0);   /* wait until truly dead */
-            free(stack);
-        }
+        TT_UNLOCK();
+        if (!ti) break;
+        syscall(SYS_THR_JOIN, ti->tid, 0);   /* wait until truly dead */
+        free(ti->stack);
+        free(ti);
     }
 }
 
@@ -66,19 +88,18 @@ void __pthread_trampoline(void *arg) {
     struct trampoline_args *ta = (struct trampoline_args *)arg;
     void *(*start_routine)(void *) = ta->start_routine;
     void *actual_arg = ta->arg;
-    int slot = ta->slot;
+    struct pthread_info *ti = ta->ti;
     free(ta);
 
     void *retval = start_routine(actual_arg);
 
-    /* Mark the slot finished so a detached thread's stack + slot get
-     * reclaimed by the next pthread_create() reap sweep. */
-    if (slot >= 0 && slot < MAX_PTHREADS) {
-        while (__sync_lock_test_and_set(&thread_table_lock, 1));
-        thread_table[slot].exit_status = retval;
-        thread_table[slot].exited = 1;
-        __sync_lock_release(&thread_table_lock);
-    }
+    /* Mark finished so a detached thread's stack + node get reclaimed by
+     * the next reap sweep, and a joiner can collect the status.  `ti` is
+     * a stable malloc'd node; nothing frees it until this thread is dead. */
+    TT_LOCK();
+    ti->exit_status = retval;
+    ti->exited = 1;
+    TT_UNLOCK();
 
     pthread_exit(retval);
 }
@@ -87,64 +108,45 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr,
                           void *(*start_routine) (void *), void *arg) {
     (void)attr;
 
-    /* Recycle any detached threads that have finished before we look
-     * for a slot, so churning callers don't exhaust the table. */
+    /* Recycle any detached threads that have finished, so churning
+     * callers don't accumulate dead nodes. */
     pthread_reap_detached();
 
-    int slot = -1;
-    while (__sync_lock_test_and_set(&thread_table_lock, 1));
-    for (int i = 0; i < MAX_PTHREADS; i++) {
-        if (!thread_table[i].used) {
-            slot = i;
-            thread_table[i].used = 1;
-            break;
-        }
-    }
-    __sync_lock_release(&thread_table_lock);
-
-    if (slot == -1) return -1;
-
-    struct pthread_info *ti = &thread_table[slot];
-    ti->exited = 0;
-    ti->detached = 0;
-    ti->exit_status = NULL;
+    struct pthread_info *ti = calloc(1, sizeof(*ti));
+    if (!ti) return -1;
 
     ti->stack_size = 64 * 1024;
     ti->stack = malloc(ti->stack_size);
-    if (!ti->stack) {
-        while (__sync_lock_test_and_set(&thread_table_lock, 1));
-        ti->used = 0;
-        __sync_lock_release(&thread_table_lock);
-        return -1;
-    }
+    if (!ti->stack) { free(ti); return -1; }
 
     struct trampoline_args *ta = malloc(sizeof(struct trampoline_args));
-    if (!ta) {
-        free(ti->stack);
-        while (__sync_lock_test_and_set(&thread_table_lock, 1));
-        ti->used = 0;
-        __sync_lock_release(&thread_table_lock);
-        return -1;
-    }
+    if (!ta) { free(ti->stack); free(ti); return -1; }
     ta->start_routine = start_routine;
     ta->arg = arg;
-    ta->slot = slot;
+    ta->ti = ti;
 
-    /* Per-thread TLS: ask ld.so to allocate a fresh block laid out
-     * the same as the initial thread's, with each module's PT_TLS
-     * image copied into place.  Returned pointer is the TP (= TCB
-     * address); the kernel installs it as the new thread's
-     * gs_base so `mov %gs:0, %eax` and TLS-relative loads inside
-     * the new thread find this thread's own data.
+    /* Per-thread TLS: ask ld.so to allocate a fresh block laid out the
+     * same as the initial thread's, with each module's PT_TLS image
+     * copied into place.  Returned pointer is the TP (= TCB address); the
+     * kernel installs it as the new thread's gs_base so `mov %gs:0, %eax`
+     * and TLS-relative loads inside the new thread find this thread's own
+     * data.
      *
-     * Resolved as a weak ref so a statically-linked program
-     * without ld.so (no TLS, or all TLS in the initial thread)
-     * still links — in that case __ldso_alloc_tls is NULL and we
-     * pass tls_base=NULL, which the kernel treats as "inherit / no
-     * change".  Threads in such a program don't have proper TLS,
-     * which matches the pre-this-commit behaviour. */
+     * Resolved as a weak ref so a statically-linked program without ld.so
+     * (no TLS, or all TLS in the initial thread) still links — in that
+     * case __ldso_alloc_tls is NULL and we pass tls_base=NULL, which the
+     * kernel treats as "inherit / no change". */
     extern void *__ldso_alloc_tls(void) __attribute__((weak));
     void *tp = __ldso_alloc_tls ? __ldso_alloc_tls() : NULL;
+
+    /* Link the node before spawning so a joiner/reaper can find it as
+     * soon as the kernel publishes the tid (via child_tid below).  tid is
+     * 0 until then, which no real tid matches, so an early lookup is a
+     * harmless miss. */
+    TT_LOCK();
+    ti->next = thread_list;
+    thread_list = ti;
+    TT_UNLOCK();
 
     struct thr_param param;
     param.start_func = (void(*)(void*))(uintptr_t)__pthread_trampoline;
@@ -160,11 +162,12 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr,
     int ret = (int)syscall(SYS_THR_NEW, (intptr_t)&param, sizeof(param));
 
     if (ret != 0) {
+        TT_LOCK();
+        ti_unlink_locked(ti);
+        TT_UNLOCK();
         free(ta);
         free(ti->stack);
-        while (__sync_lock_test_and_set(&thread_table_lock, 1));
-        ti->used = 0;
-        __sync_lock_release(&thread_table_lock);
+        free(ti);
         return -1;
     }
 
@@ -184,69 +187,46 @@ void pthread_exit(void *retval) {
 }
 
 int pthread_join(pthread_t thread, void **retval) {
-    /* Find the thread table entry to cleanup resources */
-    int slot = -1;
-    /* Optimistic search without lock - TID shouldn't be reused while we hold a reference/join it */
-    for (int i = 0; i < MAX_PTHREADS; i++) {
-        if (thread_table[i].used && thread_table[i].tid == thread) {
-            slot = i;
-            break;
-        }
-    }
+    /* Confirm it's one of ours (and joinable) before blocking. */
+    TT_LOCK();
+    struct pthread_info *ti = ti_find_locked(thread);
+    int detached = ti ? ti->detached : 0;
+    TT_UNLOCK();
 
-    if (slot == -1) {
-        return ESRCH;
-    }
-
-    if (thread_table[slot].detached) return EINVAL;  /* can't join detached */
+    if (!ti) return ESRCH;
+    if (detached) return EINVAL;        /* can't join a detached thread */
 
     int ret = (int)syscall(SYS_THR_JOIN, thread, (int)(uintptr_t)retval);
     if (ret != 0) return ret;
 
-    if (slot != -1) {
-        struct pthread_info *ti = &thread_table[slot];
-
-        /* Mark slot as free safely and free resources */
-        while (__sync_lock_test_and_set(&thread_table_lock, 1));
-
-        /* Re-check usage inside lock in case of race (unlikely given tid match) */
-        if (ti->used && ti->tid == thread) {
-            if (ti->stack) {
-                free(ti->stack);
-                ti->stack = NULL;
-            }
-            ti->used = 0;
-            ti->tid = 0;
-            ti->exited = 0;
-            ti->exit_status = NULL;
-        }
-
-        __sync_lock_release(&thread_table_lock);
-    }
+    /* Kernel thread is gone; unlink and free the node + stack. */
+    TT_LOCK();
+    ti = ti_find_locked(thread);        /* re-find under lock */
+    if (ti) ti_unlink_locked(ti);
+    TT_UNLOCK();
+    if (ti) { free(ti->stack); free(ti); }
 
     return 0;
 }
 
 /*
- * pthread_detach — mark a thread so it is never joined: when it
- * finishes, its stack and table slot are reclaimed automatically by
- * the reap sweep in pthread_create() (or immediately here, if it has
- * already exited).
+ * pthread_detach — mark a thread so it is never joined: when it finishes,
+ * its stack and registry node are reclaimed automatically by the reap
+ * sweep in pthread_create() (or immediately here, if it has already
+ * exited).
  */
 int pthread_detach(pthread_t thread) {
     int rc = ESRCH;
     int reap_now = 0;
 
-    while (__sync_lock_test_and_set(&thread_table_lock, 1));
-    for (int i = 0; i < MAX_PTHREADS; i++) {
-        if (thread_table[i].used && thread_table[i].tid == thread) {
-            thread_table[i].detached = 1;
-            reap_now = thread_table[i].exited;
-            rc = 0;
-            break;
-        }
+    TT_LOCK();
+    struct pthread_info *ti = ti_find_locked(thread);
+    if (ti) {
+        ti->detached = 1;
+        reap_now = ti->exited;
+        rc = 0;
     }
-    __sync_lock_release(&thread_table_lock);
+    TT_UNLOCK();
 
     /* Already finished before we detached it — reclaim it right away. */
     if (rc == 0 && reap_now) pthread_reap_detached();
