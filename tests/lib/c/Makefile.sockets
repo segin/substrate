@@ -39,7 +39,7 @@ else
   PTHREAD_INC =
 endif
 
-TESTS = torture_unix torture_afunix torture_afunix_poll torture_poll_mc torture_fork64 torture_malloc \
+TESTS = torture_unix torture_afunix torture_afunix_poll torture_poll_mc torture_fork64 poll_relay torture_malloc \
         torture_evdev torture_x11_shape torture_sigalrm torture_heap_stdio \
         torture_malloc_threads
 
@@ -113,4 +113,7 @@ torture_poll_mc: torture_poll_mc.c
 	$(CC) $(CFLAGS) $(LDFLAGS) $(PTHREAD_INC) $< $(PTHREAD) -o $@
 
 torture_fork64: torture_fork64.c
+	$(CC) $(CFLAGS) $(LDFLAGS) $(PTHREAD_INC) $< $(PTHREAD) -o $@
+
+poll_relay: poll_relay.c
 	$(CC) $(CFLAGS) $(LDFLAGS) $(PTHREAD_INC) $< $(PTHREAD) -o $@
