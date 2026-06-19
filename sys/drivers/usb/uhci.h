@@ -166,6 +166,10 @@ struct uhci_qh {
 #define UHCI_FRAME_LIST_SIZE    1024    /* Frame list entries */
 #define UHCI_MAX_TDS            2048    /* TD pool size */
 #define UHCI_MAX_QHS            32      /* QH pool size */
+/* Pause-spin iterations to wait for a TD to complete before yielding the CPU
+ * in uhci_poll_td() — long enough to catch a fast completion at low latency,
+ * short enough that a slow/wedged transfer yields instead of burning a core. */
+#define UHCI_POLL_SPIN_LIMIT    1024
 #define UHCI_NUM_PORTS          2       /* Root hub ports */
 
 /*

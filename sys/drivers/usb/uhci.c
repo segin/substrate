@@ -18,6 +18,7 @@
 #include <kern/driver.h>
 #include <kern/bus.h>
 #include <kern/time.h>
+#include <kern/sched.h>
 #include <kern/console.h>
 #include <sys/dma.h>
 #include <sys/irq.h>
@@ -419,12 +420,27 @@ static int uhci_poll_td(uhci_hc_t *hc, struct uhci_td *td,
          * and its clients keep running while the controller works. */
         uint32_t _saved_if = intr_disable();
         intr_enable();
+        /* Tight-spin a short while to catch a fast completion at low latency,
+         * then yield the CPU.  A slow or wedged transfer — e.g. a HID GET_REPORT
+         * poll that NAKs while the device is idle — would otherwise pause-spin
+         * for the whole timeout, burning a core as kernel CPU and starving the
+         * desktop (two HID poll kthreads doing this is most of the "slow but
+         * low user-CPU" stutter).  Interrupts are enabled above and sched_yield()
+         * saves/restores the caller's IF, so yielding stays preemptible and
+         * IF-safe from the IF=0 poll kthread; the controller completes the
+         * transfer in the background either way. */
+        unsigned _spins = 0;
         while (td->ctrl_status & UHCI_TD_CTRL_ACTIVE) {
             if ((uint64_t)get_uptime_ms() > deadline) {
                 intr_restore(_saved_if);
                 return USB_XFER_TIMEOUT;
             }
-            __asm__ volatile("pause");
+            if (_spins < UHCI_POLL_SPIN_LIMIT) {
+                _spins++;
+                __asm__ volatile("pause");
+            } else {
+                sched_yield();
+            }
         }
         intr_restore(_saved_if);
 
