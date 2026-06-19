@@ -113,3 +113,22 @@ file:line and a fix. Ordered by priority. P0 = desktop responsiveness
   from get_hz(); the 32 ms TCP_SLEEP_POLL backstop has the same lost-wake class.
 - [ ] MAX_SYMLINK_DEPTH=4 < POSIX min 8 (vfs.c) — move ppath off-stack, raise.
 - [ ] per-invlpg global atomic stats counter in the fault hot path (pmap.c:1553).
+
+## Completed (June 2026 follow-up round)
+
+ext2:
+- [x] CRITICAL 64-bit-desc GDT stride (ext2.c:396) — stride by fs->desc_size (commit 5fbd1c57)
+- [x] SMP/UP allocator race — per-fs alloc_lock around alloc/free (commit 5fbd1c57,
+      verified ext2_concurrent 4x40 files, 0 mismatches)
+- [x] metadata flush storm — deferred/coalesced super+bgd flush (commit 891cc9c0)
+
+VFS:
+- [x] per-component mount spinlock — skipped for non-mountpoint nodes (commit 9e18a7ca)
+- [x] ".." across a mount root — escapes to the mountpoint's parent, /proc/../etc
+      now works like Linux (commit 1b8b50a1)
+- [ ] STILL OPEN: a real finddir name cache (the biggest load-time win) — deferred;
+      needs node-lifetime handling (pin/refcount or identity+re-resolve) and
+      invalidation on unlink/rename/unmount.  High value, high risk; warrants a
+      dedicated effort + test pass rather than folding into this round.
+- [ ] STILL OPEN: the /perso/ double-walk for non-native processes (vfs.c:479) and
+      the metadata_csum recompute-on-flush (ext2.c) — both lower priority.
