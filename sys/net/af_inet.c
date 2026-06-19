@@ -348,6 +348,13 @@ static int afinet_node_poll(fs_node_t *node, void *waiter)
  * otherwise a non-blocking read()/write() blocks like a blocking one, and
  * a single-threaded nonblocking-pump TCP transfer self-deadlocks. */
 static int afi_node_nonblock(const fs_node_t *node) {
+    /* read()/write() stash the file_t on the thread (io_file) for the duration
+     * of the node op, so recover O_NONBLOCK in O(1) instead of scanning all
+     * MAX_FD (4096) fds on every TCP read/write.  Fall back to the scan only
+     * when io_file is absent or for a different node (defensive). */
+    if (current_thread && current_thread->io_file &&
+        (const void *)current_thread->io_file->f_data == (const void *)node)
+        return (current_thread->io_file->f_flag & FNONBLOCK) ? 1 : 0;
     if (!current_process) return 0;
     for (int fd = 0; fd < MAX_FD; fd++) {
         file_t *f = current_process->fds[fd];
