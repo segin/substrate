@@ -414,6 +414,59 @@ out:
     return ret;
 }
 
+/*
+ * Flush deferred metadata: every group descriptor marked dirty plus the
+ * superblock (primary + sparse backups) if its free counts changed.  Called
+ * on the dirty-op threshold, on sync(2)/fsync, and on unmount.  The block and
+ * inode bitmaps are already write-through per allocation, so this only
+ * reconciles the cached free counts — the expensive part that used to run on
+ * every alloc/free.
+ */
+int ext2_sync_meta(ext2_fs_t *fs) {
+    if (!fs) return -EINVAL;
+    if (fs->readonly) return 0;
+    int err = 0;
+    if (fs->bgd_dirty) {
+        for (uint32_t g = 0; g < fs->group_count; g++) {
+            if (fs->bgd_dirty[g >> 3] & (uint8_t)(1u << (g & 7))) {
+                if (ext2_flush_group_desc(fs, g) != 0) err = -EIO;
+                fs->bgd_dirty[g >> 3] &= (uint8_t)~(1u << (g & 7));
+            }
+        }
+    }
+    if (fs->sb_dirty) {
+        if (ext2_flush_super(fs) != 0) err = -EIO;
+        fs->sb_dirty = 0;
+    }
+    fs->meta_dirty_ops = 0;
+    return err;
+}
+
+/*
+ * Mark group `group`'s descriptor and the superblock free counts dirty,
+ * deferring the on-disk flush.  Replaces a per-alloc ext2_flush_group_desc()
+ * + ext2_flush_super() (the latter rewriting the primary super AND every
+ * sparse-super backup with a kmalloc each) — the flush storm that made file
+ * creation (tar, builds, installs) pathologically slow.  Coalesce, then
+ * flush once enough have accumulated to bound staleness.
+ */
+#define EXT2_META_FLUSH_THRESHOLD 256
+static void ext2_mark_meta_dirty(ext2_fs_t *fs, uint32_t group) {
+    if (!fs) return;
+    if (!fs->bgd_dirty) {
+        /* No deferral bitmap (allocation failed at mount) — flush immediately
+         * so group descriptors are never left unreconciled. */
+        ext2_flush_group_desc(fs, group);
+        ext2_flush_super(fs);
+        return;
+    }
+    if (group < fs->group_count)
+        fs->bgd_dirty[group >> 3] |= (uint8_t)(1u << (group & 7));
+    fs->sb_dirty = 1;
+    if (++fs->meta_dirty_ops >= EXT2_META_FLUSH_THRESHOLD)
+        ext2_sync_meta(fs);
+}
+
 // Write an inode back to disk
 int ext2_write_inode(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_t *inode) {
     if (!fs || inode_num == 0) return -1;
@@ -2103,6 +2156,16 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
     }
     memset(fs->bgd, 0, bgd_size);
 
+    /* Per-group dirty bitmap for deferred metadata flush (see ext2_fs_t).
+     * Tiny (group_count/8 bytes); if it ever fails to allocate,
+     * ext2_mark_meta_dirty() falls back to flushing immediately. */
+    {
+        uint32_t bgd_dirty_sz = (fs->group_count + 7u) / 8u;
+        if (bgd_dirty_sz == 0) bgd_dirty_sz = 1;
+        fs->bgd_dirty = kmalloc(bgd_dirty_sz);
+        if (fs->bgd_dirty) memset(fs->bgd_dirty, 0, bgd_dirty_sz);
+    }
+
     fs->last_alloc_group = 0;
     fs->last_alloc_bit = 0;
 
@@ -2321,8 +2384,7 @@ uint32_t ext2_alloc_block(ext2_fs_t *fs) {
 
             // Update superblock free blocks count
             fs->sb.s_free_blocks_count--;
-            ext2_flush_group_desc(fs, group);
-            ext2_flush_super(fs);
+            ext2_mark_meta_dirty(fs, group);
 
             // Update hints
             fs->last_alloc_group = group;
@@ -2372,8 +2434,7 @@ void ext2_free_block(ext2_fs_t *fs, uint32_t block_num) {
     
     // Update superblock
     fs->sb.s_free_blocks_count++;
-    ext2_flush_group_desc(fs, group);
-    ext2_flush_super(fs);
+    ext2_mark_meta_dirty(fs, group);
 }
 
 // Allocate an inode
@@ -2436,8 +2497,7 @@ uint32_t ext2_alloc_inode(ext2_fs_t *fs, int is_dir) {
                 
                 // Update superblock
                 fs->sb.s_free_inodes_count--;
-                ext2_flush_group_desc(fs, group);
-                ext2_flush_super(fs);
+                ext2_mark_meta_dirty(fs, group);
                 
                 // Initialize the inode
                 ext2_inode_t inode;
@@ -2540,8 +2600,7 @@ void ext2_free_inode(ext2_fs_t *fs, uint32_t inode_num, int was_dir) {
     
     // Update superblock
     fs->sb.s_free_inodes_count++;
-    ext2_flush_group_desc(fs, group);
-    ext2_flush_super(fs);
+    ext2_mark_meta_dirty(fs, group);
 }
 
 static uint8_t ext2_dirent_type_from_mode(uint16_t mode) {
@@ -3460,9 +3519,18 @@ int ext2_unmount(fs_node_t *node) {
         }
     }
 
+    /* Reconcile any deferred superblock / group-descriptor free counts to
+     * disk before tearing the in-core copies down. */
+    ext2_sync_meta(fs);
+
     if (fs->active_bg_bitmap) kfree(fs->active_bg_bitmap, fs->block_size);
     if (fs->active_inode_bg_bitmap) kfree(fs->active_inode_bg_bitmap, fs->block_size);
     if (fs->bgd) kfree(fs->bgd, fs->group_count * sizeof(ext2_group_desc_t));
+    if (fs->bgd_dirty) {
+        uint32_t sz = (fs->group_count + 7u) / 8u;
+        if (sz == 0) sz = 1;
+        kfree(fs->bgd_dirty, sz);
+    }
 
     kfree(fs, sizeof(ext2_fs_t));
     return 0;

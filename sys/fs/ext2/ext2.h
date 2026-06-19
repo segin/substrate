@@ -272,6 +272,16 @@ typedef struct {
     struct mount *mp;           // VFS mount structure
     ext2_superblock_t sb;       // Superblock
     ext2_group_desc_t *bgd;     // Block group descriptor table
+    /* Deferred metadata flush.  The block/inode bitmaps are written through
+     * per allocation (authoritative on-disk state); the much costlier
+     * superblock (primary + every sparse-super backup) and group-descriptor
+     * free-count rewrites are deferred and coalesced — flushed on a threshold
+     * of accumulated changes, on sync, and on unmount — instead of on every
+     * single alloc/free.  A crash before a flush costs only fsck-fixable
+     * free-count discrepancies, never data or allocation state. */
+    uint8_t *bgd_dirty;         // per-group dirty bitmap (group_count bits)
+    int      sb_dirty;          // superblock free counts need flushing
+    uint32_t meta_dirty_ops;    // deferred metadata ops since last flush
     uint32_t block_size;        // Block size in bytes
     uint32_t inodes_per_group;
     uint32_t blocks_per_group;
