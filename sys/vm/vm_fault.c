@@ -81,20 +81,38 @@ int vm_fault(vm_map_t *map, uintptr_t va, uint8_t prot) {
      * exact failure site; the trailing `goto out` uses it. */
     int oom = 0;
     
-    // 1. Find the map entry
+    // 1. Find the map entry.  Fast path: the splay-tree hint (last fault) or
+    //    root usually contains the faulting address for the sequential fault
+    //    patterns that dominate — demand-zero / COW sweeping a region, stack
+    //    growth — turning the O(n) entry-list walk into O(1).  Read-only here:
+    //    no splay (that would mutate the tree under the read lock).
     vm_map_lock_read(map);
-    for (vm_map_entry_t *cur = map->header->next; cur != map->header; cur = cur->next) {
-        if (va >= cur->start && va < cur->end) {
-            entry = cur;
-            break;
-        }
-        if (va < cur->start) {
-            break;
+    vm_map_entry_t *fh = map->hint;
+    if (fh && fh != map->header && va >= fh->start && va < fh->end) {
+        entry = fh;
+    } else {
+        vm_map_entry_t *fr = map->root;
+        if (fr && fr != map->header && va >= fr->start && va < fr->end) {
+            entry = fr;
+        } else {
+            for (vm_map_entry_t *cur = map->header->next; cur != map->header; cur = cur->next) {
+                if (va >= cur->start && va < cur->end) {
+                    entry = cur;
+                    break;
+                }
+                if (va < cur->start) {
+                    break;
+                }
+            }
         }
     }
     if (!entry) {
         goto out;
     }
+    /* Remember this entry so the next (typically adjacent) fault hits the fast
+     * path above instead of re-walking the list.  Single-pointer write; the
+     * allocator re-validates map->hint, so reusing it for faults is benign. */
+    map->hint = entry;
 
     // 2. Check protection
     if ((entry->max_protection & prot) != prot) {
