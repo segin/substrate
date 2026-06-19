@@ -5,7 +5,7 @@ set -e
 
 TOP="$(cd "$(dirname "$0")" && pwd)"
 DIST="$TOP/dist"
-IMAGE="$TOP/rootfs.img"
+IMAGE="${IMAGE:-$TOP/rootfs.img}"
 IMAGE_SIZE_MIB=4096
 BOOT_DIR="$TOP/sys/boot"
 EXT2BOOT_DIR="$TOP/contrib/ext2-boot"
@@ -593,44 +593,32 @@ create_image() {
         exit 1
     fi
 
-    # Create empty sparse file
+    # Create the image file
     rm -f "$IMAGE"
     truncate -s "${IMAGE_SIZE_MIB}M" "$IMAGE"
 
-    # 1. Create empty ext2 filesystem (no -d population yet)
-    mkfs.ext2 -F -b 1024 -I 128 -O ^resize_inode "$IMAGE"
+    # 1. Create AND populate the filesystem in one atomic mke2fs -d pass.
+    #
+    #    This MUST NOT regress to "empty mkfs + a debugfs batch-write": debugfs
+    #    mass-population cross-links data blocks between unrelated files — it
+    #    handed /etc/fonts (inode 17) and a CDE ToolTalk file the SAME block
+    #    (block 108), so fontconfig read CDE data as directory entries and every
+    #    font lookup failed ("finddir walk truncated"); a clean rebuild just
+    #    reproduced it.  mke2fs -d does correct, conflict-free block allocation:
+    #    the result passes `e2fsck -fn` with no multiply-claimed blocks.  It
+    #    stages dirs, regular files, and symlinks, preserving source modes (so
+    #    the /bin/su setuid fixup below is still needed).  -I 128 prints a
+    #    harmless post-2038-date warning; ext2-boot hardcodes 128-byte inodes.
+    echo "Creating + populating image from $DIST..."
+    mke2fs -F -q -b 1024 -I 128 -O ^resize_inode -d "$DIST" "$IMAGE"
 
-    # 2. Install bootloader into pristine filesystem (gets group 0 blocks)
+    # 2. Install the bootloader AFTER population: ext2-install-boot writes
+    #    stage1 to boot block 0 (always reserved by ext2, s_first_data_block=1)
+    #    and stage2 to reserved inode 5 (EXT2_BOOT_LOADER_INO) — both independent
+    #    of the populated files, so ordering no longer matters.
     if [ "$DO_BOOT" = true ]; then
         install_bootloader
     fi
-
-    # 3. Populate filesystem from dist/ via debugfs
-    echo "Populating image from $DIST..."
-    local cmdfile
-    cmdfile=$(mktemp)
-
-    # Create directories first (sorted so parents come before children)
-    (cd "$DIST" && find . -mindepth 1 -type d | sort) | while IFS= read -r d; do
-        rel="${d#./}"
-        echo "mkdir $rel"
-    done >> "$cmdfile"
-
-    # Write regular files
-    (cd "$DIST" && find . -mindepth 1 -type f) | while IFS= read -r f; do
-        rel="${f#./}"
-        echo "write $DIST/$rel $rel"
-    done >> "$cmdfile"
-
-    # Create symlinks
-    (cd "$DIST" && find . -mindepth 1 -type l) | while IFS= read -r l; do
-        rel="${l#./}"
-        target=$(readlink "$DIST/$rel")
-        echo "symlink $rel $target"
-    done >> "$cmdfile"
-
-    debugfs -w -f "$cmdfile" "$IMAGE" > /dev/null 2>&1
-    rm -f "$cmdfile"
 
     # su(1) must be setuid-root so a non-root user can elevate.
     # debugfs write copies the host file's mode/owner, so fix it up
