@@ -597,20 +597,39 @@ create_image() {
     rm -f "$IMAGE"
     truncate -s "${IMAGE_SIZE_MIB}M" "$IMAGE"
 
-    # 1. Create AND populate the filesystem in one atomic mke2fs -d pass.
+    # 1. Create AND populate the filesystem in one atomic mke2fs -d pass,
+    #    under fakeroot so the image is ROOT-OWNED.
     #
-    #    This MUST NOT regress to "empty mkfs + a debugfs batch-write": debugfs
-    #    mass-population cross-links data blocks between unrelated files — it
-    #    handed /etc/fonts (inode 17) and a CDE ToolTalk file the SAME block
-    #    (block 108), so fontconfig read CDE data as directory entries and every
-    #    font lookup failed ("finddir walk truncated"); a clean rebuild just
-    #    reproduced it.  mke2fs -d does correct, conflict-free block allocation:
-    #    the result passes `e2fsck -fn` with no multiply-claimed blocks.  It
-    #    stages dirs, regular files, and symlinks, preserving source modes (so
-    #    the /bin/su setuid fixup below is still needed).  -I 128 prints a
-    #    harmless post-2038-date warning; ext2-boot hardcodes 128-byte inodes.
-    echo "Creating + populating image from $DIST..."
-    mke2fs -F -q -b 1024 -I 128 -O ^resize_inode -d "$DIST" "$IMAGE"
+    #    Two things this replaces, both of which broke the desktop:
+    #    a) The old "empty mkfs + a single `debugfs -w -f cmdfile` batch-write"
+    #       cross-links data blocks between unrelated files — it handed
+    #       /etc/fonts (inode 17) and a CDE ToolTalk file the SAME block (108),
+    #       so fontconfig read CDE data as directory entries and every font
+    #       lookup failed ("finddir walk truncated"); a clean rebuild just
+    #       reproduced it.  mke2fs -d does correct, conflict-free block
+    #       allocation — the result passes `e2fsck -fn` with no multiply-claimed
+    #       blocks.
+    #    b) mke2fs -d takes ownership from the source files, and dist/ is owned
+    #       by the (non-root) build user, so every file would land as uid 1000.
+    #       TDE's lnusertemp/ICE refuse temp dirs not owned by root (uid 0), so
+    #       DCOP/sycoca never come up and the desktop stays blank.  fakeroot
+    #       fakes `chown -R 0:0` (without touching the real dist/) so mke2fs
+    #       records uid/gid 0 — matching what the old debugfs path produced.
+    #
+    #    su(1) is the one setuid-root binary (dist/ has no other setuid files);
+    #    chown clears the bit so it is re-set inside the fakeroot session.
+    #    -I 128 prints a harmless post-2038-date warning; ext2-boot hardcodes
+    #    128-byte inodes.
+    if ! command -v fakeroot >/dev/null 2>&1; then
+        echo "Error: fakeroot is required to bake a root-owned image. Install it." >&2
+        exit 1
+    fi
+    echo "Creating + populating image from $DIST (fakeroot -> root-owned)..."
+    fakeroot -- sh -c '
+        chown -R 0:0 "$1"
+        [ -e "$1/bin/su" ] && chmod 4755 "$1/bin/su"
+        mke2fs -F -q -b 1024 -I 128 -O ^resize_inode -d "$1" "$2"
+    ' _ "$DIST" "$IMAGE"
 
     # 2. Install the bootloader AFTER population: ext2-install-boot writes
     #    stage1 to boot block 0 (always reserved by ext2, s_first_data_block=1)
@@ -618,16 +637,6 @@ create_image() {
     #    of the populated files, so ordering no longer matters.
     if [ "$DO_BOOT" = true ]; then
         install_bootloader
-    fi
-
-    # su(1) must be setuid-root so a non-root user can elevate.
-    # debugfs write copies the host file's mode/owner, so fix it up
-    # here: mode 0104755 = S_IFREG | S_ISUID | rwxr-xr-x, owner root.
-    if debugfs -R 'stat /bin/su' "$IMAGE" > /dev/null 2>&1; then
-        debugfs -w -R 'sif /bin/su mode 0104755' "$IMAGE" > /dev/null 2>&1
-        debugfs -w -R 'sif /bin/su uid 0'        "$IMAGE" > /dev/null 2>&1
-        debugfs -w -R 'sif /bin/su gid 0'        "$IMAGE" > /dev/null 2>&1
-        echo "su(1) marked setuid-root."
     fi
 
     echo "Image created: $IMAGE"
