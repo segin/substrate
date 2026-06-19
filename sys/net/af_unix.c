@@ -422,9 +422,16 @@ static size_t afunix_node_write(fs_node_t *node, off_t off, size_t size, const u
         s, s ? s->closed : -1,
         s ? s->peer : NULL,
         (unsigned)size);
-    if (!s || s->closed || !s->peer) return 0;
+    if (!s) return 0;
+    /* Peer gone (disconnected) or our socket closed: the connection is broken,
+     * so a stream write must fail with EPIPE — NOT return 0.  A 0 return makes
+     * the writer's `while (written < len) write(...)` loop spin forever (it
+     * never advances), which is exactly what wedged the single-threaded X
+     * server when a client disconnected during CDE teardown (fd had peer=NULL,
+     * closed=0). */
+    if (s->closed || !s->peer) return (size_t)-EPIPE;
     /* Own SHUT_WR: no more writes from us. */
-    if (s->wr_closed) return 0;
+    if (s->wr_closed) return (size_t)-EPIPE;
     /* O_NONBLOCK is carried on the file_t, which only the syscall layer sees;
      * it stashes it on the thread (current_thread->io_file) for the duration
      * of the write so we can reach it from this fs_node callback. */
@@ -461,7 +468,8 @@ static size_t afunix_node_write(fs_node_t *node, off_t off, size_t size, const u
     size_t written = 0;
     while (written < size) {
         afunix_sock_t *peer = s->peer;
-        if (!peer || peer->closed || peer->rd_closed) return written;
+        if (!peer || peer->closed || peer->rd_closed)
+            return written ? written : (size_t)-EPIPE;
         mutex_lock(&peer->lock);
         while (peer->rx.count == AFUNIX_BUF_SIZE
                && !peer->closed && !peer->rd_closed && !s->wr_closed) {
@@ -487,7 +495,7 @@ static size_t afunix_node_write(fs_node_t *node, off_t off, size_t size, const u
         }
         if (peer->closed || peer->rd_closed || s->wr_closed) {
             mutex_unlock(&peer->lock);
-            return written;
+            return written ? written : (size_t)-EPIPE;
         }
         size_t w = afbuf_write(&peer->rx, buf + written, size - written);
         written += w;

@@ -123,3 +123,6 @@ fork_sharedconn: fork_sharedconn.c
 
 ipc_integrity: ipc_integrity.c
 	$(CC) $(CFLAGS) $(LDFLAGS) $(PTHREAD_INC) $< $(PTHREAD) -o $@
+
+fix_verify: fix_verify.c
+	$(CC) $(CFLAGS) $(LDFLAGS) $< -o $@
