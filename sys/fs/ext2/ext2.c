@@ -393,7 +393,13 @@ static int ext2_flush_group_desc(ext2_fs_t *fs, uint32_t group) {
     if (!fs || group >= fs->group_count) return -EINVAL;
 
     bgd_block = (fs->block_size == 1024) ? 2 : 1;
-    desc_offset = group * sizeof(ext2_group_desc_t);
+    /* On-disk descriptors are fs->desc_size apart (32 normally, 64 on an
+     * INCOMPAT_64BIT filesystem) — the GDT read at mount already strides by
+     * desc_size, so the write must too, or we'd scatter each group's 32 live
+     * bytes at the wrong offset and corrupt the descriptor table.  Only the
+     * low 32 bytes (the fields the kernel tracks) are copied; the read-modify-
+     * write below preserves the high half (64-bit pointers / csum). */
+    desc_offset = group * fs->desc_size;
     block_offset = desc_offset % fs->block_size;
     block_buf = kmalloc(fs->block_size);
     if (!block_buf) return -ENOMEM;
@@ -2165,6 +2171,7 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
         fs->bgd_dirty = kmalloc(bgd_dirty_sz);
         if (fs->bgd_dirty) memset(fs->bgd_dirty, 0, bgd_dirty_sz);
     }
+    mutex_init(&fs->alloc_lock, "ext2_alloc");
 
     fs->last_alloc_group = 0;
     fs->last_alloc_bit = 0;
@@ -2330,7 +2337,8 @@ void ext2_init(void) {
 // Allocate a block from the filesystem
 uint32_t ext2_alloc_block(ext2_fs_t *fs) {
     if (!fs) return 0;
-    
+    mutex_lock(&fs->alloc_lock);
+
     // Search each block group for a free block, starting from last allocation
     uint32_t start_group = fs->last_alloc_group;
     uint32_t group = start_group;
@@ -2390,12 +2398,14 @@ uint32_t ext2_alloc_block(ext2_fs_t *fs) {
             fs->last_alloc_group = group;
             fs->last_alloc_bit = (found_idx + 1) % bits_in_group;
 
+            mutex_unlock(&fs->alloc_lock);
             return block_num;
         }
 
         group = (group + 1) % fs->group_count;
     } while (group != start_group);
-    
+
+    mutex_unlock(&fs->alloc_lock);
     return 0; // No free blocks
 }
 
@@ -2408,16 +2418,18 @@ void ext2_free_block(ext2_fs_t *fs, uint32_t block_num) {
     uint32_t index = (block_num - fs->sb.s_first_data_block) % fs->blocks_per_group;
     
     if (group >= fs->group_count) return;
-    
+    mutex_lock(&fs->alloc_lock);
+
     // Read the block bitmap if it's not cached
     if (fs->active_bg_group != group) {
         fs->active_bg_group = (uint32_t)-1;
         if (ext2_read_block(fs, fs->bgd[group].bg_block_bitmap, fs->active_bg_bitmap) != fs->block_size) {
+            mutex_unlock(&fs->alloc_lock);
             return;
         }
         fs->active_bg_group = group;
     }
-    
+
     uint8_t *bitmap_buf = fs->active_bg_bitmap;
 
     uint32_t byte_idx = index / 8;
@@ -2435,12 +2447,14 @@ void ext2_free_block(ext2_fs_t *fs, uint32_t block_num) {
     // Update superblock
     fs->sb.s_free_blocks_count++;
     ext2_mark_meta_dirty(fs, group);
+    mutex_unlock(&fs->alloc_lock);
 }
 
 // Allocate an inode
 uint32_t ext2_alloc_inode(ext2_fs_t *fs, int is_dir) {
     if (!fs) return 0;
-    
+    mutex_lock(&fs->alloc_lock);
+
     // Search each block group for a free inode
     for (uint32_t group = 0; group < fs->group_count; group++) {
         if (fs->bgd[group].bg_free_inodes_count == 0) continue;
@@ -2513,11 +2527,13 @@ uint32_t ext2_alloc_inode(ext2_fs_t *fs, int is_dir) {
                     kprintf("ext2trace: IALLOC inode=%u is_dir=%d caller=%p\n",
                             inode_num, is_dir, __builtin_return_address(0));
                 }
+                mutex_unlock(&fs->alloc_lock);
                 return inode_num;
             }
         }
     }
 
+    mutex_unlock(&fs->alloc_lock);
     return 0; // No free inodes
 }
 
@@ -2571,16 +2587,18 @@ void ext2_free_inode(ext2_fs_t *fs, uint32_t inode_num, int was_dir) {
     uint32_t index = (inode_num - 1) % fs->inodes_per_group;
 
     if (group >= fs->group_count) return;
-    
+    mutex_lock(&fs->alloc_lock);
+
     // Read the inode bitmap if it's not cached
     if (fs->active_inode_bg_group != group) {
         fs->active_inode_bg_group = (uint32_t)-1;
         if (ext2_read_block(fs, fs->bgd[group].bg_inode_bitmap, fs->active_inode_bg_bitmap) != fs->block_size) {
+            mutex_unlock(&fs->alloc_lock);
             return;
         }
         fs->active_inode_bg_group = group;
     }
-    
+
     uint8_t *bitmap_buf = fs->active_inode_bg_bitmap;
 
     uint32_t byte_idx = index / 8;
@@ -2601,6 +2619,7 @@ void ext2_free_inode(ext2_fs_t *fs, uint32_t inode_num, int was_dir) {
     // Update superblock
     fs->sb.s_free_inodes_count++;
     ext2_mark_meta_dirty(fs, group);
+    mutex_unlock(&fs->alloc_lock);
 }
 
 static uint8_t ext2_dirent_type_from_mode(uint16_t mode) {

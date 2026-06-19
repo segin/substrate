@@ -126,3 +126,6 @@ ipc_integrity: ipc_integrity.c
 
 fix_verify: fix_verify.c
 	$(CC) $(CFLAGS) $(LDFLAGS) $< -o $@
+
+ext2_concurrent: ext2_concurrent.c
+	$(CC) $(CFLAGS) $(LDFLAGS) $(PTHREAD_INC) $< $(PTHREAD) -o $@

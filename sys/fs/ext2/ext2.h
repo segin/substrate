@@ -282,6 +282,14 @@ typedef struct {
     uint8_t *bgd_dirty;         // per-group dirty bitmap (group_count bits)
     int      sb_dirty;          // superblock free counts need flushing
     uint32_t meta_dirty_ops;    // deferred metadata ops since last flush
+    /* Serialises the block/inode allocator: ext2_alloc_block/_inode and
+     * ext2_free_block/_inode read-modify-write shared state (the cached
+     * active_bg_bitmap, bgd[] free counts, sb free counts, last_alloc hints).
+     * Two allocations interleaving — on SMP, or on UP when one sleeps on the
+     * bitmap-block I/O and another runs — can hand out the same block/inode or
+     * write a stale bitmap.  All four allocator I/O helpers are lock-free so
+     * holding this across their I/O cannot deadlock. */
+    mutex_t  alloc_lock;
     uint32_t block_size;        // Block size in bytes
     uint32_t inodes_per_group;
     uint32_t blocks_per_group;
