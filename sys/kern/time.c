@@ -26,6 +26,17 @@ time_t boot_time = 0;
 static uint64_t ticks = 0;
 
 /*
+ * Wall-clock seconds maintained incrementally from the tick, so get_time()/
+ * get_uptime() never perform a 64-bit divide (ticks / HZ).  On i386 there is
+ * no hardware 64-bit division, so `ticks / HZ` compiles to __udivdi3 (~100+
+ * cycles); get_time() is called on every VFS write (write_fs stamps mtime),
+ * so the X server's socket writes alone were spending the bulk of a CPU in
+ * software division.  uptime_secs is bumped once per HZ ticks below.
+ */
+static uint64_t uptime_secs = 0;
+static uint32_t tick_in_sec = 0;
+
+/*
  * TSC-based sub-tick interpolation.  HZ is 128 (≈7.8 ms per tick); without
  * a finer source any RTT shorter than a tick quantizes to a multiple of
  * 7.8 ms and gettimeofday's tv_usec is useless for things like ping(8).
@@ -278,7 +289,7 @@ uint64_t get_ticks(void) {
 }
 
 time_t get_time(void) {
-    return boot_time + (ticks / HZ);
+    return boot_time + (time_t)uptime_secs;   /* no 64-bit divide */
 }
 
 time_t get_boot_time(void) {
@@ -286,11 +297,17 @@ time_t get_boot_time(void) {
 }
 
 time_t get_uptime(void) {
-    return ticks / HZ;
+    return (time_t)uptime_secs;               /* no 64-bit divide */
 }
 
 int64_t get_uptime_ms(void) {
-    return (ticks * 1000) / HZ;
+    /* 1000 / HZ is exact for HZ that divides 1000 (e.g. 250 -> 4), so this is
+     * a multiply, not a 64-bit divide.  Hammered in the USB poll spin. */
+#if (1000 % HZ) == 0
+    return (int64_t)(ticks * (uint64_t)(1000 / HZ));
+#else
+    return (int64_t)((ticks * 1000) / HZ);
+#endif
 }
 
 uint32_t get_hz(void) {
@@ -526,6 +543,9 @@ void timer_tick_context(int is_usermode) {
      */
     if (cpu_id == 0) {
         ticks++;
+        /* Maintain wall-clock seconds incrementally (avoids a per-call
+         * 64-bit divide in get_time/get_uptime — see uptime_secs above). */
+        if (++tick_in_sec >= HZ) { tick_in_sec = 0; uptime_secs++; }
         if (tsc_hz != 0) tsc_at_last_tick = i386_cpu_cycle_counter();
         sched_tick();
         hw_text_tick();
