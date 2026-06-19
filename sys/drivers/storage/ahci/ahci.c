@@ -26,8 +26,15 @@
 #include <kern/driver.h>
 #include <kern/resource.h>
 #include <kern/time.h>
+#include <kern/sched.h>
 #include <sys/dma.h>
 #include <sys/lock.h>
+
+/* Pause-spin iterations to await command completion before yielding the CPU
+ * in ahci_port_issue_cmd() — long enough to catch a fast (KVM/emulated)
+ * completion at low latency, short enough that a real-latency transfer yields
+ * (cmd_lock is a mutex, so a contender sleeps rather than spins). */
+#define AHCI_POLL_SPIN_LIMIT   2048
 #include <drivers/storage/ahci/ahci.h>
 #include <drivers/storage/blkdev.h>
 #include <drivers/storage/scsi/scsi.h>
@@ -74,9 +81,12 @@ typedef struct ahci_port {
      * one command table per port; with kernel preemption enabled two threads
      * (e.g. two multi-sector reads from exec/ldd) can otherwise enter the
      * command path at once and clobber each other's FIS/PRDT, producing
-     * corrupted or zero-filled reads.  A spinlock (not a mutex): the block
-     * cache calls ->read with its own spinlock held, so this must not sleep. */
-    spinlock_t         cmd_lock;
+     * corrupted or zero-filled reads.  A mutex (not a spinlock): the block
+     * cache drops its bio spinlock before calling ->read (blkdev.c), so the
+     * I/O path is sleepable, and ahci_port_issue_cmd() yields the CPU while
+     * waiting for completion instead of pinning it (a spinlock would
+     * disable preemption across the whole DMA, freezing the scheduler). */
+    mutex_t            cmd_lock;
 } ahci_port_t;
 
 /*
@@ -238,7 +248,7 @@ static int ahci_port_init(ahci_port_t *ap, hba_port_t *port_regs, int port_num) 
     ap->port_num = port_num;
     ap->regs = port_regs;
     ap->type = AHCI_PORT_TYPE_NONE;
-    spinlock_init(&ap->cmd_lock, "ahci_cmd");
+    mutex_init(&ap->cmd_lock, "ahci_cmd");
 
     /* Stop command engine */
     if (ahci_port_stop(port_regs) < 0) {
@@ -358,6 +368,7 @@ static int ahci_port_issue_cmd(ahci_port_t *ap, uint32_t timeout_ms) {
 
     /* Poll for completion */
     deadline = ahci_time_ms() + timeout_ms;
+    unsigned spins = 0;
     while (1) {
         /* Check if slot is done */
         if ((port->ci & (1U << AHCI_CMD_SLOT)) == 0) {
@@ -388,7 +399,16 @@ static int ahci_port_issue_cmd(ahci_port_t *ap, uint32_t timeout_ms) {
             return -1;
         }
 
-        __asm__ volatile("pause");
+        /* Tight-spin briefly for a fast completion, then yield: cmd_lock is a
+         * mutex held across this wait, so a contending thread sleeps on it
+         * rather than spinning, and the scheduler is free to run other work
+         * while the controller does the DMA — no system-wide freeze. */
+        if (spins < AHCI_POLL_SPIN_LIMIT) {
+            spins++;
+            __asm__ volatile("pause");
+        } else {
+            sched_yield();
+        }
     }
 
     /* Check Task File for errors */
@@ -443,7 +463,7 @@ static int ahci_ata_dma_cmd(ahci_port_t *ap, uint8_t command,
     /* Serialise the shared command slot / table against concurrent callers
      * (kernel preemption can otherwise interleave two reads, corrupting both).
      * Held across issue + completion poll + data copy. */
-    spinlock_acquire(&ap->cmd_lock);
+    mutex_lock(&ap->cmd_lock);
 
     /* Clear command table */
     memset(tbl, 0, sizeof(hba_cmd_table_t));
@@ -462,7 +482,7 @@ static int ahci_ata_dma_cmd(ahci_port_t *ap, uint8_t command,
          */
         dma_buf = ahci_dma_bounce_alloc(byte_count, &data_dma);
         if (!dma_buf) {
-            spinlock_release(&ap->cmd_lock);
+            mutex_unlock(&ap->cmd_lock);
             return -1;
         }
         if (is_write) {
@@ -496,7 +516,7 @@ static int ahci_ata_dma_cmd(ahci_port_t *ap, uint8_t command,
         ahci_dma_bounce_free(dma_buf, byte_count);
     }
 
-    spinlock_release(&ap->cmd_lock);
+    mutex_unlock(&ap->cmd_lock);
     return ret;
 }
 
@@ -778,7 +798,7 @@ static int ahci_scsi_execute(scsi_link_t *link, scsi_request_t *req) {
     }
 
     /* Serialise the shared command slot / table (see ahci_ata_dma_cmd). */
-    spinlock_acquire(&ap->cmd_lock);
+    mutex_lock(&ap->cmd_lock);
 
     /* Build ATAPI command via AHCI */
     tbl = ap->cmd_table;
@@ -809,7 +829,7 @@ static int ahci_scsi_execute(scsi_link_t *link, scsi_request_t *req) {
         dma_buf = ahci_dma_bounce_alloc(req->data_len, &data_dma);
         if (!dma_buf) {
             req->status = SCSI_STATUS_CHECK_CONDITION;
-            spinlock_release(&ap->cmd_lock);
+            mutex_unlock(&ap->cmd_lock);
             return -1;
         }
         if (req->flags & SCSI_REQ_WRITE) {
@@ -844,13 +864,13 @@ static int ahci_scsi_execute(scsi_link_t *link, scsi_request_t *req) {
 
     if (ret < 0) {
         req->status = SCSI_STATUS_CHECK_CONDITION;
-        spinlock_release(&ap->cmd_lock);
+        mutex_unlock(&ap->cmd_lock);
         return -1;
     }
 
     req->status = SCSI_STATUS_GOOD;
     req->data_xfer = req->data_len;
-    spinlock_release(&ap->cmd_lock);
+    mutex_unlock(&ap->cmd_lock);
     return 0;
 }
 
