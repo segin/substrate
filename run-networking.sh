@@ -274,6 +274,7 @@ fi
 # clean USB pointer feeding /dev/input/event0 instead of an aggregate of
 # a good USB mouse and a flaky PS/2 one.
 qemu-system-i386 -cpu qemu32,+sse,+sse2 $ACCEL_ARG \
+  -m 512M \
   -machine pc,i8042=off \
   -drive file=rootfs.img,format=raw,if=none,id=drive0 \
   -device ich9-ahci,id=sata0$BOOT_AHCI_ADDR \
