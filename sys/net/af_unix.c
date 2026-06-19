@@ -105,24 +105,33 @@ typedef struct {
     uint32_t count;
 } afunix_buf_t;
 
+/* Ring copy with at most two memcpy()s (one when the run wraps the end of the
+ * buffer) instead of a byte-at-a-time loop with a modulo (a divide) per byte.
+ * Every X request, DCOP/ICE message and AF_UNIX byte goes through here, so
+ * the per-byte modulo was a real throughput sink on the desktop. */
 static size_t afbuf_write(afunix_buf_t *b, const uint8_t *src, size_t n) {
-    size_t i = 0;
-    while (i < n && b->count < AFUNIX_BUF_SIZE) {
-        b->data[b->head] = src[i++];
-        b->head = (b->head + 1) % AFUNIX_BUF_SIZE;
-        b->count++;
-    }
-    return i;
+    size_t space = AFUNIX_BUF_SIZE - b->count;
+    if (n > space) n = space;
+    if (n == 0) return 0;
+    size_t first = AFUNIX_BUF_SIZE - b->head;     /* contiguous run to the end */
+    if (first > n) first = n;
+    memcpy(b->data + b->head, src, first);
+    if (n > first) memcpy(b->data, src + first, n - first);
+    b->head = (uint32_t)((b->head + n) % AFUNIX_BUF_SIZE);
+    b->count += (uint32_t)n;
+    return n;
 }
 
 static size_t afbuf_read(afunix_buf_t *b, uint8_t *dst, size_t n) {
-    size_t i = 0;
-    while (i < n && b->count > 0) {
-        dst[i++] = b->data[b->tail];
-        b->tail = (b->tail + 1) % AFUNIX_BUF_SIZE;
-        b->count--;
-    }
-    return i;
+    if (n > b->count) n = b->count;
+    if (n == 0) return 0;
+    size_t first = AFUNIX_BUF_SIZE - b->tail;     /* contiguous run to the end */
+    if (first > n) first = n;
+    memcpy(dst, b->data + b->tail, first);
+    if (n > first) memcpy(dst + first, b->data, n - first);
+    b->tail = (uint32_t)((b->tail + n) % AFUNIX_BUF_SIZE);
+    b->count -= (uint32_t)n;
+    return n;
 }
 
 /* ============================================================

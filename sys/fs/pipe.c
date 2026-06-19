@@ -169,11 +169,16 @@ static size_t pipe_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buf
         }
     }
 
-    size_t i = 0;
-    while (i < size && p->count > 0) {
-        buffer[i++] = p->buffer[p->tail];
-        p->tail = (p->tail + 1) % PIPE_SIZE;
-        p->count--;
+    /* Ring copy with at most two memcpy()s instead of a byte-at-a-time loop
+     * with a per-byte modulo (a divide). */
+    size_t i = (size < p->count) ? size : p->count;
+    if (i > 0) {
+        size_t first = PIPE_SIZE - p->tail;
+        if (first > i) first = i;
+        memcpy(buffer, p->buffer + p->tail, first);
+        if (i > first) memcpy(buffer + first, p->buffer, i - first);
+        p->tail = (p->tail + i) % PIPE_SIZE;
+        p->count -= i;
     }
 
     pipe_wake(p->wait_write);
@@ -229,10 +234,19 @@ static size_t pipe_write(fs_node_t *node, off_t offset, size_t size, const uint8
             }
         }
 
-        while (written < size && p->count < PIPE_SIZE) {
-            p->buffer[p->head] = buffer[written++];
-            p->head = (p->head + 1) % PIPE_SIZE;
-            p->count++;
+        /* Ring copy with at most two memcpy()s instead of a byte-at-a-time
+         * loop with a per-byte modulo. */
+        size_t avail = PIPE_SIZE - p->count;
+        size_t chunk = size - written;
+        if (chunk > avail) chunk = avail;
+        if (chunk > 0) {
+            size_t first = PIPE_SIZE - p->head;
+            if (first > chunk) first = chunk;
+            memcpy(p->buffer + p->head, buffer + written, first);
+            if (chunk > first) memcpy(p->buffer, buffer + written + first, chunk - first);
+            p->head = (p->head + chunk) % PIPE_SIZE;
+            p->count += chunk;
+            written += chunk;
         }
 
         pipe_wake(p->wait_read);

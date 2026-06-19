@@ -120,3 +120,6 @@ poll_relay: poll_relay.c
 
 fork_sharedconn: fork_sharedconn.c
 	$(CC) $(CFLAGS) $(LDFLAGS) $(PTHREAD_INC) $< $(PTHREAD) -o $@
+
+ipc_integrity: ipc_integrity.c
+	$(CC) $(CFLAGS) $(LDFLAGS) $(PTHREAD_INC) $< $(PTHREAD) -o $@
