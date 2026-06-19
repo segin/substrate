@@ -335,7 +335,17 @@ typedef struct {
     uint32_t desc_size;
 } ext2_fs_t;
 
-#define EXT2_DCACHE_SIZE 16
+#define EXT2_DCACHE_SIZE 32
+
+/* Sentinel inode in a dcache entry: a NEGATIVE (known-absent) result.  A real
+ * ext2 inode is 1..s_inodes_count, never 0xFFFFFFFF, and 0 means "empty slot",
+ * so this never collides.  Negative entries let a repeated lookup of a name
+ * that does not exist in the directory (the dynamic linker / PATH search /
+ * /perso/ shadow walk trying many directories) skip the full linear dir scan.
+ * The existing add_entry/remove_entry invalidation clears any entry whose
+ * inode_num != 0 matching the name, so a negative entry is dropped the moment
+ * that name is created — no extra invalidation needed. */
+#define EXT2_DCACHE_NEGATIVE 0xFFFFFFFFu
 
 typedef struct {
     char name[64];

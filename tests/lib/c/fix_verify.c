@@ -66,6 +66,23 @@ int main(void){
     }
     chk(rok, "ext2_readback_300_intact");
 
+    /* 3. ext2 negative dcache: a not-found lookup is cached as absent, but
+     *    creating the file MUST invalidate that and make it findable. */
+    {
+        struct stat st;
+        unlink("/root/ncfile");                       /* ensure absent */
+        int a = stat("/root/ncfile", &st);            /* ENOENT -> caches negative */
+        int b = stat("/root/ncfile", &st);            /* ENOENT -> negative hit */
+        int fd = open("/root/ncfile", O_CREAT|O_WRONLY, 0644);
+        if (fd >= 0) { write(fd, "hi", 2); close(fd); }
+        int c = stat("/root/ncfile", &st);            /* MUST be 0: negative invalidated */
+        unlink("/root/ncfile");
+        int d = stat("/root/ncfile", &st);            /* ENOENT again */
+        chk(a < 0 && b < 0 && c == 0 && d < 0, "ext2_negcache_create_invalidates");
+        if (!(a < 0 && b < 0 && c == 0 && d < 0))
+            printf("    (absent=%d absent2=%d after_create=%d after_unlink=%d)\n", a, b, c, d);
+    }
+
     /* cleanup so a re-run / fsck sees a tidy tree */
     for (int i = 0; i < NFILES; i++) { char p[64]; snprintf(p,sizeof p,"/root/ftest/f%04d",i); unlink(p); }
     rmdir("/root/ftest");

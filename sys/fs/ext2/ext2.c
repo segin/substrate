@@ -1824,6 +1824,15 @@ fs_node_t *ext2_finddir(fs_node_t *node, char *name) {
             ctx->dcache[k].name_len == name_len &&
             memcmp(ctx->dcache[k].name, name, name_len) == 0) {
 
+            /* Negative (known-absent) entry: the name is cached as not present
+             * in this directory, so skip the full linear scan and report a
+             * miss immediately. */
+            if (ctx->dcache[k].inode_num == EXT2_DCACHE_NEGATIVE) {
+                ext2_finddir_dcache_hit++;
+                result_node = NULL;
+                goto cleanup;
+            }
+
             ext2_inode_t inode;
             if (ext2_read_inode(fs, ctx->dcache[k].inode_num, &inode) == 0) {
                 result_node = ext2_alloc_node(fs, ctx->dcache[k].inode_num, &inode);
@@ -1962,6 +1971,18 @@ fs_node_t *ext2_finddir(fs_node_t *node, char *name) {
         ext2_finddir_walk_missing++;
         if (walk_break_malformed) ext2_finddir_break_recv_malformed++;
         if (walk_break_block0)    ext2_finddir_break_block0++;
+        /* Cache the negative result so a repeated lookup of this absent name
+         * (linker/PATH/perso searching multiple dirs) skips the linear scan.
+         * Only for a clean, complete walk — a truncated/malformed walk may be
+         * hiding a real entry, so we must not record it as absent. */
+        if (!walk_break_malformed && !walk_break_block0 &&
+            name_len < sizeof(ctx->dcache[0].name)) {
+            uint32_t idx = ctx->dcache_idx++ % EXT2_DCACHE_SIZE;
+            ctx->dcache[idx].inode_num = EXT2_DCACHE_NEGATIVE;
+            ctx->dcache[idx].name_len = (uint8_t)name_len;
+            memcpy(ctx->dcache[idx].name, name, name_len);
+            ctx->dcache[idx].name[name_len] = '\0';
+        }
         if ((walk_break_malformed || walk_break_block0) &&
             (ext2_finddir_break_recv_malformed +
              ext2_finddir_break_block0) <= 4) {
