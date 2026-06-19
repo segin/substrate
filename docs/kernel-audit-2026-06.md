@@ -126,9 +126,21 @@ VFS:
 - [x] per-component mount spinlock — skipped for non-mountpoint nodes (commit 9e18a7ca)
 - [x] ".." across a mount root — escapes to the mountpoint's parent, /proc/../etc
       now works like Linux (commit 1b8b50a1)
-- [ ] STILL OPEN: a real finddir name cache (the biggest load-time win) — deferred;
-      needs node-lifetime handling (pin/refcount or identity+re-resolve) and
-      invalidation on unlink/rename/unmount.  High value, high risk; warrants a
-      dedicated effort + test pass rather than folding into this round.
+- [x] finddir name cache — the audit was wrong that there is "no live name cache":
+      ext2 has a per-directory name->inode dcache (ctx->dcache).  It cached only
+      FOUND entries, so absent-name lookups (linker/PATH probing many dirs, the
+      /perso/ shadow walk) re-ran a full linear scan every time.  Added NEGATIVE
+      caching (sentinel inode 0xFFFFFFFF; existing add/remove invalidation drops
+      it on create) + bumped 16->32 slots.  Measured on a TDE boot: hit rate
+      85% -> 94%, absent-name full scans down ~88% (commit f6f999ee).  The cache
+      lives in ext2 (node lifetime is managed there; stores inodes, not pointers),
+      sidestepping the VFS-level fs_node UAF problem entirely.
+- [ ] IMAGE (not kernel): the rootfs advertises dir_index but no directory has
+      EXT2_INDEX_FL set (Flags 0x0) — debugfs/e2tools don't build htree indexes,
+      so positive lookups in big dirs (/usr/lib, ...) are linear scans
+      (htree_hit=0).  `e2fsck -D rootfs.img` or building indexes at image
+      creation would make positive lookups O(log) — the remaining load-time win,
+      free, no kernel change.  (substrate's htree read handles single-level
+      indexes; multi-level falls back to linear.)
 - [ ] STILL OPEN: the /perso/ double-walk for non-native processes (vfs.c:479) and
       the metadata_csum recompute-on-flush (ext2.c) — both lower priority.
