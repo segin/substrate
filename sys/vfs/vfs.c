@@ -55,6 +55,16 @@ static char *vfs_strrchr(const char *s, int c);
 static fs_node_t *vfs_cross_mountpoint(fs_node_t *node) {
     if (!node) return NULL;
 
+    /* Fast path: a node without FS_MOUNTPOINT crosses to itself, so don't take
+     * the mount spinlock on every path component (this runs once per component
+     * of every lookup; the common case — ext2 files/dirs, where real crossings
+     * are already resolved by the (inode,mp) mountlist scan in the caller — is
+     * not a flagged mountpoint).  The flag is a single bit: an unlocked read
+     * either sees the pre-mount state (treat as non-mountpoint, a valid
+     * serialization) or the set bit, in which case we take the lock to read
+     * node->ptr safely. */
+    if (!(node->flags & FS_MOUNTPOINT)) return node;
+
     spinlock_acquire(&vfs_mount_lock);
     fs_node_t *target = ((node->flags & FS_MOUNTPOINT) && node->ptr)
                             ? node->ptr : node;
