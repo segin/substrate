@@ -1983,7 +1983,10 @@ int kern_poll(struct pollfd *kfds, unsigned int nfds, int timeout) {
         deadline = get_ticks() + timeout_ticks;
     }
 
+    /* Bounded re-scans to catch a wake that raced our fd-scan (see below). */
+    int rescan_budget = 4;
     while (1) {
+        uint64_t poll_seq0 = g_poll_wake_seq;   /* snapshot before scanning */
         ready = 0;
         for (unsigned int i = 0; i < nfds; i++) {
             if (kfds[i].fd < 0) {
@@ -2014,6 +2017,21 @@ int kern_poll(struct pollfd *kfds, unsigned int nfds, int timeout) {
 
         if (ready > 0) break;
         if (timeout == 0) break;
+
+        /*
+         * Lost-wakeup recovery: a wake fanned out to the poll channel while we
+         * were scanning (the thread was RUNNING, so sched_wakeup_n couldn't
+         * ready it) bumped g_poll_wake_seq.  Re-scan to catch the event now
+         * rather than sleeping ~50 ms into the backstop — this is the fix for
+         * the desktop stutter (poll round-trips that raced the scan).  Bounded
+         * so a steady wake flood (128-poller thundering herd) can't livelock
+         * the scan; once the budget is spent the backstop covers it.
+         */
+        if (g_poll_wake_seq != poll_seq0 && rescan_budget > 0) {
+            rescan_budget--;
+            continue;
+        }
+        rescan_budget = 4;
 
         /*
          * Wait on the dedicated poll wake-channel — sched_wakeup()

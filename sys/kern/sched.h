@@ -80,6 +80,19 @@ void sched_sleep(void *chan);
 int sched_sleep_until(void *chan, uint64_t deadline_tick);
 void sched_wakeup(void *chan);
 void sched_wakeup_n(void *chan, int n);
+void sched_poll_wake_pollers(void);
+
+/*
+ * poll()/select() wake channel + a monotonic counter bumped on every wake
+ * fanned out to it.  kern_poll() snapshots the counter before its fd-scan and,
+ * if it changed by the time the scan finds nothing ready, re-scans instead of
+ * sleeping into the backstop — closing the lost-wakeup window where an event
+ * arrives while the poller is RUNNING mid-scan (so sched_wakeup_n can't ready
+ * it).  Bumped unconditionally when chan == &g_poll_wake_chan, even when no
+ * poller was blocked (that IS the lost-wakeup case).
+ */
+extern char g_poll_wake_chan;
+extern volatile uint64_t g_poll_wake_seq;
 process_t *sched_create_process(struct personality *pers);
 thread_t *sched_get_thread(int tid);
 void sched_iterate_threads(void (*callback)(thread_t *t, void *arg), void *arg);

@@ -540,6 +540,7 @@ void sched_tick(void) {
  * to sleep — no more 10 ms timer spin.
  */
 char g_poll_wake_chan;
+volatile uint64_t g_poll_wake_seq = 0;
 
 void sched_poll_wake_pollers(void) {
     sched_wakeup_n(&g_poll_wake_chan, -1);
@@ -557,6 +558,15 @@ void sched_wakeup(void *chan) {
 
 void sched_wakeup_n(void *chan, int n) {
     int woken = 0;
+
+    /* Bump the poll wake-sequence on every fan-out to the poll channel —
+     * unconditionally, even if no poller is currently BLOCKED, because that
+     * (a wake arriving while the poller is RUNNING mid-scan) is exactly the
+     * lost-wakeup case kern_poll() recovers from by re-scanning.  A plain
+     * volatile increment is fine: callers only test "changed vs snapshot",
+     * so a lost increment between racing wakers still flips the value. */
+    if (chan == &g_poll_wake_chan)
+        g_poll_wake_seq++;
 
     FOREACH_THREAD(thread) {
         if (thread->state == THREAD_BLOCKED && thread->wait_chan == chan) {
