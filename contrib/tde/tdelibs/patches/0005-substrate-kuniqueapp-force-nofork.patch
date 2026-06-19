@@ -1,0 +1,35 @@
+Force TDEUniqueApplication to the no-fork startup path on substrate.
+
+KUniqueApplication::start() defaults to the fork() launch path (s_nofork =
+!--fork).  In that path the application fork()s, the child registers its DCOP
+name, and the parent exits.  On substrate the forked daemon shares the parent's
+DCOP connection; when the parent exits the dcopserver tears that shared
+connection down, so the daemon registers and then loses its connection
+silently.  kded is launched this way by tdeinit and never answers tdeinit's
+--check handshake, so starttde's auto-launch cascade collapses (relaunch ->
+duplicate dcopserver -> "Communication error with launcher. Exiting!" /
+error 111).
+
+The no-fork branch registers DCOP in-process and is reliable (kded --nofork
+works standalone), so force it unconditionally.  Verified: with this change
+`starttde` reports `Launched KDED ... result = 0` (was the communication
+failure).
+
+--- a/tdecore/kuniqueapplication.cpp
++++ b/tdecore/kuniqueapplication.cpp
+@@ -100,6 +100,14 @@
+   s_nofork = true;
+ #else
+   TDECmdLineArgs *args = TDECmdLineArgs::parsedArgs("kuniqueapp");
+-  s_nofork = !args->isSet("fork");
++  /* substrate: force the nofork path.  The fork() launch path below leaves the
++   * forked daemon sharing the parent's DCOP connection; when the parent exits
++   * the dcopserver tears that shared connection down, so the daemon registers
++   * its DCOP name and then loses the connection silently.  kded then never
++   * answers tdeinit's --check handshake, and starttde's auto-launch cascade
++   * collapses (relaunch -> duplicate dcopserver -> "communication error" 111).
++   * The nofork branch registers DCOP in-process and is reliable (kded --nofork
++   * works standalone), so take it unconditionally. */
++  s_nofork = true;
+   delete args;
+ #endif
