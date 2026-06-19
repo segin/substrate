@@ -72,6 +72,42 @@ static fs_node_t *vfs_cross_mountpoint(fs_node_t *node) {
     return target;
 }
 
+/*
+ * ".." across a mount point.  If `node` is the root of a (sub)mounted
+ * filesystem, return the mountpoint's PARENT directory so ".." escapes the
+ * mounted fs to the covered directory's parent — e.g. /proc/.. -> / , the
+ * standard POSIX behaviour (without this, ".." at a mount root stayed inside
+ * the mounted fs and /proc/../etc failed).  Returns NULL when `node` is not a
+ * sub-mount root, so the caller falls back to the normal finddir("..").
+ *
+ * Re-resolves the parent by PATH rather than dereferencing mnt_node_covered,
+ * which is documented unsafe to dereference (the covered node may have been
+ * recycled).  The recomputed parent path contains no "..", so the recursive
+ * vfs_lookup() cannot re-enter this escape — the recursion is bounded.
+ */
+static fs_node_t *vfs_mount_root_parent(fs_node_t *node) {
+    if (!node) return NULL;
+    struct mount *mnt, *found = NULL;
+    TAILQ_FOREACH(mnt, &mountlist, mnt_list) {
+        if (mnt->mnt_covered_ino != 0 && mnt->mnt_node_root &&
+            node->inode == mnt->mnt_node_root->inode &&
+            node->mp == mnt->mnt_node_root->mp) {
+            found = mnt;
+            break;
+        }
+    }
+    if (!found || found->mnt_stat_path[0] != '/') return NULL;
+
+    char ppath[128];
+    strncpy(ppath, found->mnt_stat_path, sizeof(ppath) - 1);
+    ppath[sizeof(ppath) - 1] = '\0';
+    char *slash = vfs_strrchr(ppath, '/');
+    if (!slash) return NULL;
+    if (slash == ppath) ppath[1] = '\0';   /* "/proc" -> "/"  */
+    else *slash = '\0';                     /* "/a/b"  -> "/a" */
+    return vfs_lookup(fs_root, ppath);
+}
+
 void vfs_init(void) {
     kprint("VFS: Initializing...\n");
 
@@ -539,7 +575,10 @@ fs_node_t *vfs_lookup(fs_node_t *root, const char *path) {
         }
 
         if (component[0] == '.' && component[1] == '.' && component[2] == '\0') {
-            fs_node_t *parent = finddir_fs(current, "..");
+            /* At a mount root, ".." escapes to the mountpoint's parent
+             * (e.g. /proc/.. -> /); otherwise the normal in-fs parent. */
+            fs_node_t *esc = vfs_mount_root_parent(current);
+            fs_node_t *parent = esc ? esc : finddir_fs(current, "..");
             if (parent) current = parent;
             if (*p == '/') p++;
             continue;
@@ -622,7 +661,10 @@ fs_node_t *vfs_lookup_lstat(fs_node_t *root, const char *path) {
         }
 
         if (component[0] == '.' && component[1] == '.' && component[2] == '\0') {
-            fs_node_t *parent = finddir_fs_internal(current, "..", 0, 1);
+            /* At a mount root, ".." escapes to the mountpoint's parent
+             * (e.g. /proc/.. -> /); otherwise the normal in-fs parent. */
+            fs_node_t *esc = vfs_mount_root_parent(current);
+            fs_node_t *parent = esc ? esc : finddir_fs_internal(current, "..", 0, 1);
             if (parent) current = parent;
             if (*p == '/') p++;
             continue;
