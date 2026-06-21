@@ -135,3 +135,6 @@ afunix_rebind: afunix_rebind.c
 
 afunix_backlog_leak: afunix_backlog_leak.c
 	$(CC) $(CFLAGS) $(LDFLAGS) $< -o $@
+
+socketpair_fork: socketpair_fork.c
+	$(CC) $(CFLAGS) $(LDFLAGS) $< -o $@
