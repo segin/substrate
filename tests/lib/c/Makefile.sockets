@@ -129,3 +129,9 @@ fix_verify: fix_verify.c
 
 ext2_concurrent: ext2_concurrent.c
 	$(CC) $(CFLAGS) $(LDFLAGS) $(PTHREAD_INC) $< $(PTHREAD) -o $@
+
+afunix_rebind: afunix_rebind.c
+	$(CC) $(CFLAGS) $(LDFLAGS) $< -o $@
+
+afunix_backlog_leak: afunix_backlog_leak.c
+	$(CC) $(CFLAGS) $(LDFLAGS) $< -o $@

@@ -95,7 +95,7 @@ struct iovec_local { void *iov_base; size_t iov_len; };
 
 #define AFUNIX_BUF_SIZE 4096
 #define AFUNIX_PATH_MAX 108
-#define AFUNIX_BACKLOG_MAX 32
+#define AFUNIX_BACKLOG_MAX 128
 #define AFUNIX_FDQ_MAX     16    /* maximum SCM_RIGHTS fds queued per socket */
 
 typedef struct {
@@ -160,6 +160,12 @@ typedef struct afunix_sock {
     int             accept_tail;
     int             accept_count;
     int             backlog;
+    /* For a server-side socket while it is still queued in a listener's
+     * accept_q (i.e. connect() has run but accept() has not): points at that
+     * listener so that if the connecting client closes before being accepted,
+     * close() can pull this entry out of the backlog and free the slot.  NULL
+     * once accepted (or for a non-server-side socket). */
+    struct afunix_sock *listener;
 
     /* Wait channels */
     void           *rx_chan;       /* readers wait here */
@@ -519,13 +525,50 @@ static void afunix_node_close(fs_node_t *node) {
     if (--s->refcount > 0) { mutex_unlock(&s->lock); return; }
     s->closed = 1;
     if (s->peer) {
-        /* Notify peer of our departure: wake their readers/writers
-         * so they see 0-byte read (EOF). */
         afunix_sock_t *peer = s->peer;
         s->peer = NULL;
-        peer->peer = NULL;
-        sleepq_wake_all(peer->rx_chan);
-        sleepq_wake_all(peer->tx_chan);
+        /* If the peer is a server-side socket still sitting un-accepted in a
+         * listener's backlog (we are the connecting client and the server never
+         * accept()ed us), pull it out of the listener's accept_q and free it.
+         * Otherwise an abandoned connect permanently holds a backlog slot, and
+         * once `backlog` of them accumulate the listener refuses EVERY further
+         * connect with ECONNREFUSED — which made tdeinit's clients believe it
+         * had died and respawn it in a loop, blocking the desktop.  A
+         * never-accepted server_side is owned by no fd, so we free it here. */
+        afunix_sock_t *lst = peer->listener;
+        if (lst) {
+            mutex_lock(&lst->lock);
+            if (peer->listener == lst) {
+                for (int i = 0; i < lst->accept_count; i++) {
+                    int idx = (lst->accept_tail + i) % AFUNIX_BACKLOG_MAX;
+                    if (lst->accept_q[idx] == peer) {
+                        for (int j = i; j < lst->accept_count - 1; j++) {
+                            int a = (lst->accept_tail + j) % AFUNIX_BACKLOG_MAX;
+                            int b = (lst->accept_tail + j + 1) % AFUNIX_BACKLOG_MAX;
+                            lst->accept_q[a] = lst->accept_q[b];
+                        }
+                        lst->accept_head =
+                            (lst->accept_head - 1 + AFUNIX_BACKLOG_MAX) % AFUNIX_BACKLOG_MAX;
+                        lst->accept_count--;
+                        peer->listener = NULL;
+                        mutex_unlock(&lst->lock);
+                        kfree(peer, sizeof(*peer));
+                        peer = NULL;
+                        break;
+                    }
+                }
+                if (peer) mutex_unlock(&lst->lock);
+            } else {
+                mutex_unlock(&lst->lock);
+            }
+        }
+        if (peer) {
+            /* Notify peer of our departure: wake their readers/writers
+             * so they see 0-byte read (EOF). */
+            peer->peer = NULL;
+            sleepq_wake_all(peer->rx_chan);
+            sleepq_wake_all(peer->tx_chan);
+        }
     }
     if (s->pathlen > 0) g_bound_unlink(s);
     /* Drop any SCM_RIGHTS file references still queued on our rx_fdq:
@@ -915,6 +958,7 @@ int sys_accept(int fd, struct sockaddr *addr, socklen_t *addrlen) {
     afunix_sock_t *server_side = server->accept_q[server->accept_tail];
     server->accept_tail = (server->accept_tail + 1) % AFUNIX_BACKLOG_MAX;
     server->accept_count--;
+    server_side->listener = NULL;   /* dequeued: no longer reclaimable by close() */
     mutex_unlock(&server->lock);
 
     int newfd = afunix_install_fd(server_side);
@@ -1001,6 +1045,7 @@ int sys_connect(int fd, const struct sockaddr *addr, socklen_t addrlen) {
         kfree(server_side, sizeof(*server_side));
         return -ECONNREFUSED;
     }
+    server_side->listener = server;   /* queued: close() can reclaim the slot */
     server->accept_q[server->accept_head] = server_side;
     server->accept_head = (server->accept_head + 1) % AFUNIX_BACKLOG_MAX;
     server->accept_count++;
