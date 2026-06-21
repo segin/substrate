@@ -3,3 +3,4 @@
 0003-skip-doc-handbooks-meinproc.patch
 0004-maketdewidgets-host-generator.patch
 0005-substrate-kuniqueapp-force-nofork.patch
+0006-substrate-tdeinit-no-wait-kded-death.patch
