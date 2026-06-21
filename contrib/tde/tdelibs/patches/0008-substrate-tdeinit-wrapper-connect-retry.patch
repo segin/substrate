@@ -1,0 +1,48 @@
+tdeinit wrapper: retry the connect to tdeinit before the direct-exec fallback.
+
+openSocket() (shared by tdeinit_wrapper and kwrapper) gave up on the first
+connect() failure and fell back to exec'ing the requested app directly, with no
+tdeinit — which on substrate left the launched program (e.g. ksmserver/the WM)
+with an invalid X Display.  tdeinit is launched right before the session apps
+and is often still mid-startup (dcopserver/tdelauncher/kded/kcminit) and not yet
+back in its accept loop when the first wrapper connects, so the connect can lose
+a brief race and get ECONNREFUSED.  Retry 10×300ms (~3s) before giving up.
+--- a/tdeinit/wrapper.c
++++ b/tdeinit/wrapper.c
+@@ -210,13 +210,34 @@
+   server.sun_family = AF_UNIX;
+   strcpy(server.sun_path, sock_file);
+   socklen = sizeof(server);
+-  if(connect(s, (struct sockaddr *)&server, socklen) == -1) 
++  /* substrate: retry the connect a few times before giving up.  tdeinit is
++   * launched right before ksmserver/the WM are, and is often still busy in its
++   * own launch sequence (dcopserver/tdelauncher/kded/kcminit) — not yet back in
++   * its accept loop — when the first wrapper connects, so the connect can lose
++   * a brief race and get ECONNREFUSED.  Without a retry the wrapper falls back
++   * to exec'ing the app directly (no tdeinit), which on substrate left the WM
++   * with an invalid X Display and the desktop never came up.  10 x 300ms ≈ 3s
++   * comfortably covers tdeinit settling into accept(). */
+   {
++     int tries;
++     for (tries = 0; tries < 10; tries++)
++     {
++        if (connect(s, (struct sockaddr *)&server, socklen) == 0)
++           return s;
++        if (errno != ECONNREFUSED && errno != ENOENT && errno != EAGAIN)
++           break;
++        /* fresh socket fd for each attempt: a failed connect() can leave the
++         * fd unusable for a retry. */
++        close(s);
++        usleep(300 * 1000);
++        s = socket(PF_UNIX, SOCK_STREAM, 0);
++        if (s < 0)
++           return -1;
++     }
+      perror("[tdeinit wrapper] Warning: socket connection failed: ");
+      close(s);
+      return -1;
+   }
+-  return s;
+ }
+ 
+ static pid_t kwrapper_pid;

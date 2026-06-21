@@ -4,3 +4,5 @@
 0004-maketdewidgets-host-generator.patch
 0005-substrate-kuniqueapp-force-nofork.patch
 0006-substrate-tdeinit-no-wait-kded-death.patch
+0007-substrate-tdeinit-defer-to-running.patch
+0008-substrate-tdeinit-wrapper-connect-retry.patch

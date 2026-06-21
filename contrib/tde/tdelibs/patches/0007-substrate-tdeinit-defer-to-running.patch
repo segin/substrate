@@ -1,0 +1,60 @@
+tdeinit: defer to an already-running tdeinit instead of killing it.
+
+init_tdeinit_socket(), when it finds the per-display socket already present and
+connectable, used to TERMINATE the running tdeinit and take over ("newest
+wins").  On substrate the bootstrap path is re-entered under load —
+tdeinit_phase1, kwrapper and every TDEApplication can (re)start tdeinit — so
+kill-and-takeover degenerated into an endless respawn loop: each new tdeinit
+unlink()s + rebinds the socket, a client connecting in that window gets
+ECONNREFUSED and bootstraps yet another tdeinit, which kills this one, ad
+infinitum; the desktop never settled (twin/kicker/kdesktop never registered,
+the panel never came up) and a core was pegged forever.
+
+Defer instead: a connect() success means a live tdeinit already owns the
+socket, so signal our bootstrap parent that we are "up" (start_tdeinit returns,
+the caller proceeds to use the existing tdeinit) and exit cleanly without
+disturbing its socket.  connect() only succeeds against a live listener, so a
+genuinely stale socket still falls through to the unlink()+rebind path.
+
+Verified: the upstream starttde respawn loop is gone (0 "Shutting down running
+client" vs an infinite stream).  NOTE: this removes the loop but does not by
+itself bring up the desktop — a separate, still-unsolved issue remains where
+tdeinit's whole process group dies shortly after launching TDELauncher.
+--- a/tdeinit/tdeinit.cpp
++++ b/tdeinit/tdeinit.cpp
+@@ -881,12 +881,29 @@
+ 
+      if(connect(s, (struct sockaddr *)&server, socklen) == 0)
+      {
+-        fprintf(stderr, "[tdeinit] Shutting down running client.\n");
+-        tdelauncher_header request_header;
+-        request_header.cmd = LAUNCHER_TERMINATE_TDEINIT;
+-        request_header.arg_length = 0;
+-        write(s, &request_header, sizeof(request_header));
+-        sleep(1); // Give it some time
++        /* substrate: a healthy tdeinit is already listening here.  Upstream
++         * kills it and takes over ("newest wins"), but on substrate the
++         * bootstrap path gets re-entered under load — tdeinit_phase1, kwrapper
++         * and every TDEApplication can (re)start tdeinit — so kill-and-takeover
++         * becomes an endless respawn loop: each new tdeinit unlink()s + rebinds
++         * the socket, and any client connecting in that window gets ECONNREFUSED
++         * and bootstraps yet another tdeinit, which kills this one, and so on.
++         * The desktop never settles (twin/kicker/kdesktop never come up).
++         *
++         * Instead DEFER to the running tdeinit: signal our bootstrap parent that
++         * we are "up" (so start_tdeinit returns and the caller proceeds to use
++         * the existing tdeinit) and exit cleanly without disturbing its socket.
++         * connect() only succeeds against a live listener, so a genuinely stale
++         * socket still falls through to the unlink()+rebind path below. */
++        close(s);
++        if (d.initpipe[1] != -1)
++        {
++           char c = 0;
++           write(d.initpipe[1], &c, 1);
++           close(d.initpipe[1]);
++           d.initpipe[1] = -1;
++        }
++        exit(0);
+      }
+      close(s);
+   }

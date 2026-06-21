@@ -138,3 +138,9 @@ afunix_backlog_leak: afunix_backlog_leak.c
 
 socketpair_fork: socketpair_fork.c
 	$(CC) $(CFLAGS) $(LDFLAGS) $< -o $@
+
+afunix_deadlistener: afunix_deadlistener.c
+	$(CC) $(CFLAGS) $(LDFLAGS) $< -o $@
+
+fork_close_sharedfd: fork_close_sharedfd.c
+	$(CC) $(CFLAGS) $(LDFLAGS) $< -o $@
