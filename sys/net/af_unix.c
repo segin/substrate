@@ -176,6 +176,13 @@ typedef struct afunix_sock {
     /* Path namespace */
     char            path[AFUNIX_PATH_MAX];
     int             pathlen;
+    /* For a pathname (non-abstract) binding: the inode of the filesystem
+     * socket node created at bind() time.  AF_UNIX is keyed by the file's
+     * inode on Linux, not by the literal path string — so a client that
+     * connect()s via a different but equivalent path (e.g. through a
+     * symlinked directory: ~/.trinity/socket-host -> /tmp/tdesocket-host)
+     * still reaches the same listener.  0 for abstract/unbound sockets. */
+    uint64_t        bound_inode;
 
     /* fs_node_t adapter so the fd can be read/written. */
     fs_node_t       node;
@@ -259,6 +266,31 @@ static afunix_sock_t *afunix_find_bound(const char *path, int len) {
     }
     mutex_unlock(&g_bound_lock);
     return NULL;
+}
+
+/*
+ * Find a bound pathname socket by the inode of its filesystem node.  This is
+ * the AF_UNIX-is-keyed-by-inode fallback: a literal-path-string compare misses
+ * when the client reaches the socket through an equivalent but differently
+ * spelled path (a symlinked parent directory — e.g. TDE's
+ * ~/.trinity/socket-host -> /tmp/tdesocket-host), so when the string compare
+ * fails we resolve the path to its inode and match on that instead.  A
+ * LISTENING binding is preferred over a merely-BOUND one when several share an
+ * inode (a server restarted with unlink()+bind() can briefly leave two).
+ */
+static afunix_sock_t *afunix_find_bound_by_inode(uint64_t inode) {
+    if (inode == 0) return NULL;
+    g_bound_lock_init();
+    mutex_lock(&g_bound_lock);
+    afunix_sock_t *match = NULL;
+    for (afunix_bound_node_t *n = g_bound_list; n; n = n->next) {
+        if (n->sock->bound_inode == inode) {
+            match = n->sock;
+            if (n->sock->state == AFUS_LISTENING) break;
+        }
+    }
+    mutex_unlock(&g_bound_lock);
+    return match;
 }
 
 /*
@@ -865,10 +897,15 @@ int sys_bind(int fd, const struct sockaddr *addr, socklen_t addrlen) {
         int mret = vfs_mknod(kpath, nmode, 0);
         if (mret == -EEXIST) return -EADDRINUSE;  /* node present -> name taken */
         if (mret != 0) return mret;               /* ENOENT/EACCES/ENOTDIR... */
+        /* Record the new node's inode so connect() can match this binding by
+         * the resolved file identity, not just the literal path string. */
+        fs_node_t *bnode = vfs_lookup(fs_root, kpath);
+        s->bound_inode = bnode ? bnode->inode : 0;
     } else {
         /* Abstract / autobind socket: no filesystem presence, so the in-core
          * name table is the only arbiter of the namespace. */
         if (afunix_find_bound(path, pathlen)) return -EADDRINUSE;
+        s->bound_inode = 0;
     }
 
     mutex_lock(&s->lock);
@@ -1000,17 +1037,21 @@ int sys_connect(int fd, const struct sockaddr *addr, socklen_t addrlen) {
     pathlen = afunix_norm_pathlen(path, pathlen);
 
     afunix_sock_t *server = afunix_find_bound(path, pathlen);
-    if (!server) {
-        /* No live binding for this name.  For a pathname socket,
-         * distinguish a path that does not exist (ENOENT) from one that
-         * exists but has no listener (ECONNREFUSED) — matching Linux. */
-        if (pathlen > 0 && path[0] != '\0') {
-            char kpath[AFUNIX_PATH_MAX + 1];
-            memcpy(kpath, path, pathlen);
-            kpath[pathlen] = '\0';
-            if (vfs_lookup(fs_root, kpath) == NULL) return -ENOENT;
-        }
-        return -ECONNREFUSED;
+    if (!server && pathlen > 0 && path[0] != '\0') {
+        /* Literal-path match missed.  AF_UNIX is keyed by the file's inode,
+         * not by the path text, so a client reaching the socket through an
+         * equivalent path (a symlinked parent dir — e.g. TDE's
+         * ~/.trinity/socket-host -> /tmp/tdesocket-host) must still find the
+         * listener.  Resolve the path to its node and retry by inode. */
+        char kpath[AFUNIX_PATH_MAX + 1];
+        memcpy(kpath, path, pathlen);
+        kpath[pathlen] = '\0';
+        fs_node_t *cnode = vfs_lookup(fs_root, kpath);
+        if (cnode == NULL) return -ENOENT;           /* path doesn't exist */
+        server = afunix_find_bound_by_inode(cnode->inode);
+        if (!server) return -ECONNREFUSED;           /* node exists, no listener */
+    } else if (!server) {
+        return -ECONNREFUSED;                          /* abstract name, no binding */
     }
     if (server->state != AFUS_LISTENING) return -ECONNREFUSED;
 
@@ -1275,13 +1316,17 @@ ssize_t sys_sendto(int fd, const void *buf, size_t len, int flags,
             if (pathlen > AFUNIX_PATH_MAX) pathlen = AFUNIX_PATH_MAX;
             pathlen = afunix_norm_pathlen(path, pathlen);
             afunix_sock_t *dst = afunix_find_bound(path, pathlen);
-            if (!dst) {
-                if (pathlen > 0 && path[0] != '\0') {
-                    char kpath[AFUNIX_PATH_MAX + 1];
-                    memcpy(kpath, path, pathlen);
-                    kpath[pathlen] = '\0';
-                    if (vfs_lookup(fs_root, kpath) == NULL) return -ENOENT;
-                }
+            if (!dst && pathlen > 0 && path[0] != '\0') {
+                /* inode-keyed fallback: reach the socket via an equivalent
+                 * (e.g. symlinked) path — see afunix_find_bound_by_inode. */
+                char kpath[AFUNIX_PATH_MAX + 1];
+                memcpy(kpath, path, pathlen);
+                kpath[pathlen] = '\0';
+                fs_node_t *dnode = vfs_lookup(fs_root, kpath);
+                if (dnode == NULL) return -ENOENT;
+                dst = afunix_find_bound_by_inode(dnode->inode);
+                if (!dst) return -ECONNREFUSED;
+            } else if (!dst) {
                 return -ECONNREFUSED;
             }
             if (dst->type != SOCK_DGRAM) return -ECONNREFUSED;
