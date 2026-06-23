@@ -215,6 +215,33 @@ int usb_bulk_transfer(usb_device_t *dev, usb_endpoint_t *ep,
     return ret;
 }
 
+int usb_iso_transfer(usb_device_t *dev, usb_endpoint_t *ep,
+                     void *data, uint32_t length,
+                     uint32_t *actual_length)
+{
+    usb_transfer_t xfer;
+    int ret;
+
+    if (!dev || !dev->hcd || !dev->hcd->submit || !ep)
+        return USB_XFER_ERROR;
+
+    /* The HCD submit path dispatches on ep->type, so an ISO-typed endpoint
+     * routes to the controller's isochronous handler. */
+    memset(&xfer, 0, sizeof(xfer));
+    xfer.dev = dev;
+    xfer.ep = ep;
+    xfer.is_control = 0;
+    xfer.data = data;
+    xfer.length = length;
+
+    ret = dev->hcd->submit(dev->hcd, &xfer);
+
+    if (actual_length)
+        *actual_length = xfer.actual_length;
+
+    return ret;
+}
+
 /*
  * ============================================================
  * Standard Device Requests
@@ -262,6 +289,19 @@ int usb_set_configuration(usb_device_t *dev, uint8_t config)
     }
 
     return ret;
+}
+
+int usb_set_interface(usb_device_t *dev, uint8_t iface, uint8_t alt)
+{
+    /* Standard SET_INTERFACE: selects an alternate setting, which is how a
+     * USB audio streaming interface switches from its zero-bandwidth alt 0 to
+     * an alt that exposes the isochronous endpoint. */
+    return usb_control_transfer(dev,
+                                USB_DIR_OUT | USB_TYPE_STANDARD | USB_RECIP_INTERFACE,
+                                USB_REQ_SET_INTERFACE,
+                                alt,        /* wValue = alternate setting */
+                                iface,      /* wIndex = interface number  */
+                                NULL, 0);
 }
 
 int usb_clear_halt(usb_device_t *dev, usb_endpoint_t *ep)

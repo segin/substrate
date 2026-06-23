@@ -749,7 +749,119 @@ cleanup:
 }
 
 /*
- * HCD submit callback — dispatches to control or bulk handler.
+ * Isochronous OUT transfer (synchronous, polling) — USB audio playback.
+ *
+ * A full-speed isochronous OUT endpoint takes one packet (<= wMaxPacketSize)
+ * per 1ms frame, with no handshake and no retry.  We schedule one iso TD per
+ * frame directly into the frame list (each TD links onward to the async QH so
+ * control/bulk keep running), a couple of frames ahead of the controller's
+ * current FRNUM, then poll until the controller has retired the batch and
+ * restore the frame-list slots.  Large buffers are split into batches that
+ * never wrap the 1024-entry frame list into the slot being executed.
+ */
+#define UHCI_ISO_LEAD    2U     /* schedule this many frames ahead of FRNUM */
+#define UHCI_ISO_BATCH   200U   /* max one-packet frames per poll cycle    */
+
+static int uhci_iso_out_transfer(uhci_hc_t *hc, usb_transfer_t *xfer)
+{
+    uint8_t    addr    = xfer->dev->address;
+    uint8_t    ep_num  = xfer->ep->address & USB_EP_NUM_MASK;
+    uint16_t   max_pkt = xfer->ep->max_packet ? xfer->ep->max_packet : 192;
+    uint32_t   async   = (uint32_t)hc->async_qh_dma | UHCI_TD_LINK_QH;
+    dma_addr_t data_dma;
+    uint32_t   off = 0;
+    int        result = USB_XFER_OK;
+
+    if ((xfer->ep->address & USB_EP_DIR_MASK) != USB_EP_DIR_OUT)
+        return USB_XFER_ERROR;      /* iso IN (capture) not implemented yet */
+    if (!xfer->data || xfer->length == 0)
+        return USB_XFER_ERROR;
+
+    data_dma = dma_map_single(xfer->data, xfer->length, DMA_TO_DEVICE);
+
+    while (off < xfer->length && result == USB_XFER_OK) {
+        struct uhci_td *tds[UHCI_ISO_BATCH];
+        dma_addr_t      tphys[UHCI_ISO_BATCH];
+        uint16_t        frames[UHCI_ISO_BATCH];
+        uint32_t        npkts = 0;
+        uint32_t        batch_bytes = 0;
+        uint16_t        start;
+        uint64_t        deadline;
+
+        /* Carve a batch of one-packet-per-frame iso TDs from the buffer. */
+        while (off + batch_bytes < xfer->length && npkts < UHCI_ISO_BATCH) {
+            uint32_t rem   = xfer->length - off - batch_bytes;
+            uint32_t chunk = rem > max_pkt ? max_pkt : rem;
+            dma_addr_t tp;
+            struct uhci_td *td = uhci_alloc_td(hc, &tp);
+            if (!td)
+                break;
+            td->ctrl_status = UHCI_TD_CTRL_IOS | UHCI_TD_CTRL_ACTIVE;
+            td->token  = UHCI_TD_TOKEN(UHCI_TD_PID_OUT, addr, ep_num, 0, chunk);
+            td->buffer = (uint32_t)(data_dma + off + batch_bytes);
+            td->link   = async;     /* run the async schedule after this TD */
+            tds[npkts]   = td;
+            tphys[npkts] = tp;
+            npkts++;
+            batch_bytes += chunk;
+        }
+        if (npkts == 0) {           /* TD pool exhausted */
+            result = USB_XFER_ERROR;
+            break;
+        }
+
+        /* Schedule into frames LEAD ahead of the controller's position. */
+        start = (uint16_t)((uhci_readw(hc, UHCI_FRNUM) + UHCI_ISO_LEAD)
+                           & (UHCI_FRAME_LIST_SIZE - 1));
+        for (uint32_t i = 0; i < npkts; i++)
+            frames[i] = (uint16_t)((start + i) & (UHCI_FRAME_LIST_SIZE - 1));
+
+        __sync_synchronize();       /* TD contents visible before linking */
+        for (uint32_t i = 0; i < npkts; i++)
+            hc->frame_list[frames[i]] = (uint32_t)tphys[i];   /* TD, not QH */
+
+        /* Poll until the controller retires the last frame (one packet per
+         * millisecond, so npkts ms plus generous slack).  Interrupts enabled
+         * + spin-then-yield, matching uhci_poll_td so we stay preemptible. */
+        deadline = (uint64_t)get_uptime_ms() + npkts + 50U;
+        {
+            uint32_t saved_if = intr_disable();
+            unsigned spins = 0;
+            intr_enable();
+            while (tds[npkts - 1]->ctrl_status & UHCI_TD_CTRL_ACTIVE) {
+                if ((uint64_t)get_uptime_ms() > deadline) {
+                    result = USB_XFER_TIMEOUT;
+                    break;
+                }
+                if (spins < UHCI_POLL_SPIN_LIMIT) {
+                    spins++;
+                    __asm__ volatile("pause");
+                } else {
+                    sched_yield();
+                }
+            }
+            intr_restore(saved_if);
+        }
+
+        /* Unlink from the frame list and reclaim the TDs. */
+        for (uint32_t i = 0; i < npkts; i++) {
+            hc->frame_list[frames[i]] = async;
+            uhci_free_td(hc, tds[i]);
+        }
+        __sync_synchronize();
+
+        off += batch_bytes;
+    }
+
+    dma_unmap_single(data_dma, xfer->length, DMA_TO_DEVICE);
+
+    xfer->actual_length = off;
+    xfer->status = result;
+    return result;
+}
+
+/*
+ * HCD submit callback — dispatches to control, bulk, or isochronous handler.
  */
 static int uhci_submit(usb_hcd_t *hcd, usb_transfer_t *xfer)
 {
@@ -761,6 +873,8 @@ static int uhci_submit(usb_hcd_t *hcd, usb_transfer_t *xfer)
         ret = uhci_control_transfer(hc, xfer);
     } else if (xfer->ep->type == USB_EP_TYPE_BULK) {
         ret = uhci_bulk_transfer(hc, xfer);
+    } else if (xfer->ep->type == USB_EP_TYPE_ISO) {
+        ret = uhci_iso_out_transfer(hc, xfer);
     } else {
         kprintf("uhci: unsupported transfer type %u\n", xfer->ep->type);
         ret = USB_XFER_ERROR;

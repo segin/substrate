@@ -78,9 +78,14 @@
 
 /* Device Classes */
 #define USB_CLASS_PER_INTERFACE 0x00
+#define USB_CLASS_AUDIO         0x01
 #define USB_CLASS_HID           0x03
 #define USB_CLASS_HUB           0x09
 #define USB_CLASS_MASS_STORAGE  0x08
+
+/* Audio (UAC) interface subclasses */
+#define USB_SUBCLASS_AUDIOCONTROL    0x01
+#define USB_SUBCLASS_AUDIOSTREAMING  0x02
 
 /* Mass Storage Subclasses */
 #define USB_MSC_SUBCLASS_SCSI   0x06
@@ -352,6 +357,7 @@ typedef struct usb_class_driver {
 /* Initialization */
 void usb_init(void);
 void usb_msc_init(void);
+void uac_init(void);
 void usb_hid_init(void);
 void usb_hid_mouse_init(void);
 void usb_hub_init(void);
@@ -378,11 +384,16 @@ int usb_bulk_transfer(usb_device_t *dev, usb_endpoint_t *ep,
                       void *data, uint32_t length,
                       uint32_t *actual_length);
 
+int usb_iso_transfer(usb_device_t *dev, usb_endpoint_t *ep,
+                     void *data, uint32_t length,
+                     uint32_t *actual_length);
+
 /* Standard Requests */
 int usb_get_descriptor(usb_device_t *dev, uint8_t type, uint8_t index,
                        void *buf, uint16_t size);
 int usb_set_address(usb_device_t *dev, uint8_t address);
 int usb_set_configuration(usb_device_t *dev, uint8_t config);
+int usb_set_interface(usb_device_t *dev, uint8_t iface, uint8_t alt);
 int usb_clear_halt(usb_device_t *dev, usb_endpoint_t *ep);
 
 /* Enumeration */
