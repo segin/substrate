@@ -14,6 +14,7 @@
 #include <sys/lock.h>
 #include <sys/major.h>
 #include <sys/proc.h>
+#include <kern/cmdline.h>
 #include <kern/console.h>
 #include <vfs/vfs.h>
 #include <stdio.h>
@@ -623,5 +624,14 @@ void audio_init(void)
 	hda_init();
 	ac97_init();
 	sb16_init();
-	null_audio_init();
+	/*
+	 * The null backend registers as /dev/audio0 and silently swallows
+	 * playback; when it claims the first unit it shadows a real device that
+	 * registers later (e.g. USB audio, enumerated after audio_init()), so
+	 * /dev/audio plays to the bit bucket.  Keep it off by default and gate it
+	 * behind the "audio_null" boot argument for hardware-less testing.
+	 */
+	if (cmdline_has("audio_null")) {
+		null_audio_init();
+	}
 }
