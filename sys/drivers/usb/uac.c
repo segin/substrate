@@ -380,8 +380,11 @@ typedef struct uac_parse {
 	uint8_t  ep_interval;
 	int      have_16bit;
 	uint8_t  is_uac2;
-	uint8_t  fu_ids[UAC_MAX_FU];
+	uint8_t  fu_id[UAC_MAX_FU];
+	uint8_t  fu_src[UAC_MAX_FU];   /* bSourceID of each feature unit       */
 	int      n_fu;
+	uint8_t  mic_term[UAC_MAX_FU]; /* input-terminal IDs that are NOT       */
+	int      n_mic_term;           /* USB-streaming (i.e. real-world inputs) */
 } uac_parse_t;
 
 static void uac_parse_config(usb_device_t *dev, uac_parse_t *p)
@@ -428,14 +431,21 @@ static void uac_parse_config(usb_device_t *dev, uac_parse_t *p)
 					uint16_t tt = (uint16_t)(ptr[4] | (ptr[5] << 8));
 					if (tt == UAC_TT_USB_STREAMING) {
 						p->clock_id = ptr[7];
+					} else if (p->n_mic_term < UAC_MAX_FU) {
+						/* A real-world input (microphone/headset
+						 * mic); feature units fed from it are
+						 * capture/sidetone, not playback. */
+						p->mic_term[p->n_mic_term++] = ptr[3];
 					}
 				} else if (subtype == UAC_AC_CLOCK_SOURCE && blen >= 4) {
 					if (p->clock_id == 0) {
 						p->clock_id = ptr[3];
 					}
-				} else if (subtype == UAC_AC_FEATURE_UNIT && blen >= 4) {
+				} else if (subtype == UAC_AC_FEATURE_UNIT && blen >= 5) {
 					if (p->n_fu < UAC_MAX_FU) {
-						p->fu_ids[p->n_fu++] = ptr[3]; /* bUnitID */
+						p->fu_id[p->n_fu]  = ptr[3]; /* bUnitID   */
+						p->fu_src[p->n_fu] = ptr[4]; /* bSourceID */
+						p->n_fu++;
 					}
 				}
 			} else if (cur_subclass == USB_SUBCLASS_AUDIOSTREAMING) {
@@ -487,19 +497,36 @@ static int uac_fu_set(usb_device_t *dev, int ac_iface, uint8_t fu_id,
 }
 
 /*
- * Bring a feature unit out of mute and up to an audible volume.  A USB
- * headset commonly powers up muted and/or at minimum volume, which produces
- * silence even when the stream is flowing correctly — so this runs during
- * device bring-up.  We unmute and set the loudest in-range volume (queried via
- * GET_RANGE on UAC 2.0; 0 dB on UAC 1.0) for master + left + right, ignoring
- * controls the unit does not implement (those just stall harmlessly).
+ * Configure a feature unit during bring-up.
+ *
+ *   playback != 0: this unit is on the path to the speaker/headphone output,
+ *   so unmute it and set the loudest in-range volume (GET_RANGE on UAC 2.0,
+ *   0 dB on UAC 1.0) — a headset commonly powers up muted/at-minimum, which is
+ *   silent even with the stream flowing.
+ *
+ *   playback == 0: this unit is fed from a microphone input, i.e. capture or
+ *   sidetone.  MUTE it, otherwise the device mixes the mic into the headphone
+ *   output and you hear the in-line mic instead of (or over) the USB audio.
+ *
+ * Controls a unit does not implement just stall and are ignored.
  */
 static void uac_setup_feature_unit(usb_device_t *dev, int ac_iface,
-                                   uint8_t fu_id, int is_uac2)
+                                   uint8_t fu_id, int is_uac2, int playback)
 {
+	uint8_t ch;
+
+	if (!playback) {
+		uint8_t mute = 1;
+		for (ch = 0; ch <= 2; ch++) {
+			(void)uac_fu_set(dev, ac_iface, fu_id,
+			    UAC_FU_MUTE_CONTROL, ch, &mute, 1);
+		}
+		kprintf("uac: feature unit %u (mic): muted\n", fu_id);
+		return;
+	}
+
 	uint8_t unmute = 0;
 	uint8_t vol[2] = { 0x00, 0x00 };   /* default 0 dB (S16, 1/256 dB)     */
-	uint8_t ch;
 
 	if (is_uac2) {
 		/* GET_RANGE -> wNumSubRanges, then {wMIN,wMAX,wRES}.  Use the
@@ -523,7 +550,7 @@ static void uac_setup_feature_unit(usb_device_t *dev, int ac_iface,
 		(void)uac_fu_set(dev, ac_iface, fu_id,
 		    UAC_FU_VOLUME_CONTROL, ch, vol, 2);
 	}
-	kprintf("uac: feature unit %u: unmuted, volume 0x%02x%02x\n",
+	kprintf("uac: feature unit %u (playback): unmuted, volume 0x%02x%02x\n",
 	        fu_id, vol[1], vol[0]);
 }
 
@@ -625,11 +652,19 @@ static int uac_attach(usb_device_t *dev)
 	if (p.clock_id != 0) {
 		(void)uac_set_clock_rate(dev, p.ac_iface, p.clock_id, UAC_RATE_HZ);
 	}
-	/* Unmute and raise the volume on the function's feature units — a
-	 * headset that boots muted/at-zero is silent even with the stream
-	 * flowing. */
+	/* Configure feature units: unmute/raise the playback path, but mute any
+	 * fed from a microphone input so the device does not monitor the in-line
+	 * mic into the headphone output. */
 	for (int i = 0; i < p.n_fu; i++) {
-		uac_setup_feature_unit(dev, p.ac_iface, p.fu_ids[i], p.is_uac2);
+		int playback = 1;
+		for (int j = 0; j < p.n_mic_term; j++) {
+			if (p.fu_src[i] == p.mic_term[j]) {
+				playback = 0;
+				break;
+			}
+		}
+		uac_setup_feature_unit(dev, p.ac_iface, p.fu_id[i], p.is_uac2,
+		                       playback);
 	}
 	/* Activate the streaming alt setting (brings the iso endpoint live). */
 	rc = usb_set_interface(dev, d->as_iface, d->as_alt);
