@@ -31,6 +31,12 @@ set -eu
 #            by tests/lib/c/torture_heap_stdio sc9f; passes under
 #            TCG).  Use --kvm when you specifically want speed and
 #            understand the risk; otherwise leave it off.
+#   --snapshot
+#            add qemu's -snapshot: every writable disk (rootfs.img and any
+#            --drive / --drive-ctrl images) is backed by a temporary overlay,
+#            so all guest writes are discarded on exit and the on-disk images
+#            stay byte-for-byte pristine.  Use this for throwaway / test boots
+#            so a botched session can't corrupt rootfs.img.
 #   --user   use QEMU internal (user-mode/slirp) networking instead of
 #            macvtap-onto-real-LAN.  No sudo, no host NIC required.
 #   --debug  start QEMU's GDB stub listening on tcp::1234 (override the port
@@ -38,6 +44,21 @@ set -eu
 #            you attach whenever you like (e.g. to break into a hang); set
 #            GDBHALT=1 to also freeze the CPU at reset so you can set
 #            breakpoints before boot and `continue` from gdb.
+#   --usb-audio
+#            replace the default emulated AC'97 with QEMU's USB Audio Class
+#            device (UAC 1.0) on the UHCI bus, so substrate's uac driver binds
+#            it and it becomes /dev/audio0.  Use this to exercise USB audio
+#            without real hardware.
+#   --usb-audio-host[=VID:PID]
+#            pass a REAL USB audio device through to the guest via
+#            -device usb-host (default VID:PID 05ac:110b, the Apple EarPods).
+#            The audio plays on the physical device; no host audio backend is
+#            used.  QEMU must be able to claim the device (it gets detached
+#            from its host driver), so you may need to run as root or grant
+#            access to the matching /dev/bus/usb/... node.
+#            --usb-audio and --usb-audio-host are mutually exclusive and both
+#            drop the default AC'97.  Override the emulated host backend driver
+#            with $AUDIODRV (default sdl; e.g. AUDIODRV=pa or AUDIODRV=alsa).
 #   --drive FILE
 #            attach an additional raw disk image on the next free port of
 #            the SHARED boot AHCI controller.  Repeatable; the boot disk is
@@ -59,14 +80,22 @@ GFX=0
 KVM=0
 USERNET=0
 DEBUG=0
+SNAPSHOT=0
+USB_AUDIO=0
+USB_AUDIO_HOST=0
+USB_AUDIO_ID="05ac:110b"   # default passthrough target: Apple EarPods
 EXTRA_DRIVES=""
 EXTRA_CTRL_DRIVES=""
 while [ $# -gt 0 ]; do
     case "$1" in
-        --gfx)   GFX=1 ;;
-        --kvm)   KVM=1 ;;
-        --user)  USERNET=1 ;;
-        --debug) DEBUG=1 ;;
+        --gfx)      GFX=1 ;;
+        --kvm)      KVM=1 ;;
+        --user)     USERNET=1 ;;
+        --debug)    DEBUG=1 ;;
+        --snapshot) SNAPSHOT=1 ;;
+        --usb-audio)        USB_AUDIO=1 ;;
+        --usb-audio-host)   USB_AUDIO_HOST=1 ;;
+        --usb-audio-host=*) USB_AUDIO_HOST=1; USB_AUDIO_ID="${1#--usb-audio-host=}" ;;
         --drive)
             shift
             [ $# -gt 0 ] || { echo "run-networking.sh: --drive needs a file argument" >&2; exit 1; }
@@ -161,6 +190,42 @@ if [ "$GFX" -eq 1 ]; then
 fi
 if [ "$KVM" -eq 1 ]; then
     ACCEL_ARG="-accel kvm"
+fi
+SNAPSHOT_ARG=""
+if [ "$SNAPSHOT" -eq 1 ]; then
+    SNAPSHOT_ARG="-snapshot"
+    echo "run-networking.sh: -snapshot enabled; all disk writes are temporary (on-disk images stay pristine)"
+fi
+
+# Audio device selection.  Default: emulated AC'97 with a host backend (sdl).
+#   --usb-audio       QEMU's emulated USB Audio Class device (UAC 1.0); the
+#                     uac driver binds it as /dev/audio0.
+#   --usb-audio-host  pass a real USB audio device (default the EarPods)
+#                     through; it plays on the physical hardware.
+# Both USB modes drop the AC'97 so the USB device is the only audio_dev and
+# lands on /dev/audio0.  USB devices attach to the piix3-usb-uhci below.
+AUDIODRV=${AUDIODRV:-sdl}
+if [ "$USB_AUDIO" -eq 1 ] && [ "$USB_AUDIO_HOST" -eq 1 ]; then
+    echo "run-networking.sh: --usb-audio and --usb-audio-host are mutually exclusive" >&2
+    exit 1
+fi
+if [ "$USB_AUDIO_HOST" -eq 1 ]; then
+    # Expect VID:PID (hex:hex); qemu validates the hex digits itself.
+    case "$USB_AUDIO_ID" in
+        *:*) : ;;
+        *) echo "run-networking.sh: --usb-audio-host needs VID:PID (e.g. 05ac:110b)" >&2; exit 1 ;;
+    esac
+    AUDIO_VID="0x${USB_AUDIO_ID%%:*}"
+    AUDIO_PID="0x${USB_AUDIO_ID##*:}"
+    AUDIO_ARGS="-device usb-host,vendorid=$AUDIO_VID,productid=$AUDIO_PID"
+    echo "run-networking.sh: passing real USB audio device $USB_AUDIO_ID through to the guest (plays on the physical device)"
+    echo "    note: QEMU must be able to claim it; if it fails with a permission/LIBUSB error,"
+    echo "          run as root or grant access to the device's /dev/bus/usb/BUS/DEV node."
+elif [ "$USB_AUDIO" -eq 1 ]; then
+    AUDIO_ARGS="-audiodev $AUDIODRV,id=audio0 -device usb-audio,audiodev=audio0"
+    echo "run-networking.sh: emulated USB Audio Class device (UAC 1.0) -> guest /dev/audio0"
+else
+    AUDIO_ARGS="-audio driver=$AUDIODRV,model=ac97,id=audio0"
 fi
 
 # NETDEV_ARGS holds the qemu -netdev/-device pair for the chosen back-end.
@@ -276,6 +341,7 @@ fi
 qemu-system-i386 -cpu qemu32,+sse,+sse2 $ACCEL_ARG \
   -m 512M \
   -machine pc,i8042=off \
+  $SNAPSHOT_ARG \
   -drive file=rootfs.img,format=raw,if=none,id=drive0 \
   -device ich9-ahci,id=sata0$BOOT_AHCI_ADDR \
   -device ide-hd,bus=sata0.0,unit=0,drive=drive0 \
@@ -288,4 +354,4 @@ qemu-system-i386 -cpu qemu32,+sse,+sse2 $ACCEL_ARG \
   $GFX_ARGS \
   $DEBUG_ARGS \
   -serial stdio \
-  -audio driver=sdl,model=ac97,id=audio0
+  $AUDIO_ARGS
