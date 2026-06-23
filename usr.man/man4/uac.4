@@ -48,22 +48,23 @@ streams PCM straight to the endpoint.
 .RE
 .SS Isochronous Transfer
 Audio is carried over an isochronous OUT endpoint: one packet per 1 ms
-frame at full speed, no handshake and no retry.  The
-.B uhci
-host controller driver schedules one transfer descriptor per frame
-directly into the frame list, a couple of frames ahead of the
-controller, and streams large buffers in bounded batches.  A
+frame at full speed, no handshake and no retry.  Because the endpoint is
+isochronous-synchronous (the device's DAC clock is fixed), the host must
+feed exactly one packet every frame, continuously, or playback stutters.
+The driver therefore buffers
 .BR write (2)
-of
-.I n
-bytes blocks for roughly
-.IR n / wMaxPacketSize
-milliseconds while the controller emits the buffer.
+data in a deep software FIFO and runs a feeder kernel thread that keeps a
+sliding window of iso packets scheduled a few frames ahead of the
+controller (through the host controller's
+.IR iso_schedule / iso_reclaim
+operations).  This decouples bursty writes from the steady iso clock, so
+the stream is gapless between writes and across decode jitter.
 .SS Format
 The device is presented to userland as 48 kHz, signed 16-bit
-little-endian, stereo.  Because a UAC device commonly runs a fixed
-clock, the playback rate is driven at 48 kHz regardless of the requested
-rate; feed 48 kHz S16 stereo PCM for correct pitch.
+little-endian, stereo, and runs its DAC at a fixed 48 kHz.  Source PCM at
+any sample rate is resampled to 48 kHz with a linear interpolator before
+streaming, so a 44.1 kHz source (e.g. a typical MP3) plays at the correct
+pitch.  Input is assumed to be 16-bit stereo.
 .SH HARDWARE
 The driver matches any device whose interface class is
 .B USB_CLASS_AUDIO
@@ -75,8 +76,9 @@ alternate setting 2 (16-bit/48 kHz/stereo) on isochronous OUT endpoint
 .BR 0x02 .
 .SH NOTES
 Only full-speed isochronous OUT is implemented; isochronous IN
-(capture), feedback endpoints, and explicit sample-rate conversion are
-not.  A source that is not 48 kHz is played without resampling.
+(capture) and feedback endpoints are not.  Resampling is a simple linear
+interpolator (adequate for playback, not a polyphase / band-limited
+converter), and the input is assumed to be 16-bit stereo.
 .SH FILES
 .TP
 .B /dev/audioN

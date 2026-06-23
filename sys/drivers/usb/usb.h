@@ -318,6 +318,20 @@ typedef struct usb_hcd {
     int      (*port_reset)(struct usb_hcd *hcd, uint8_t port);
     int      (*port_enable)(struct usb_hcd *hcd, uint8_t port, int enable);
 
+    /*
+     * Optional isochronous-OUT streaming ops (USB audio).  frame_number()
+     * returns the controller's current frame index; iso_schedule() arms one
+     * packet from a (coherent) DMA buffer at a future frame and returns an
+     * opaque handle; iso_reclaim() releases it once the frame has passed.  The
+     * caller keeps a window of packets scheduled a few frames ahead of
+     * frame_number() for gapless playback.  NULL if the HCD has no iso support.
+     */
+    uint16_t (*frame_number)(struct usb_hcd *hcd);
+    int      (*iso_schedule)(struct usb_hcd *hcd, usb_device_t *dev,
+                             usb_endpoint_t *ep, uint16_t frame,
+                             uint32_t buf_phys, uint16_t len, void **handle);
+    void     (*iso_reclaim)(struct usb_hcd *hcd, void *handle);
+
     /* Private HC driver data */
     void *priv;
 
@@ -387,6 +401,14 @@ int usb_bulk_transfer(usb_device_t *dev, usb_endpoint_t *ep,
 int usb_iso_transfer(usb_device_t *dev, usb_endpoint_t *ep,
                      void *data, uint32_t length,
                      uint32_t *actual_length);
+
+/* Isochronous streaming (USB audio): schedule packets a few frames ahead of
+ * usb_frame_number() and reclaim them once consumed.  buf_phys must be stable
+ * (coherent) DMA memory owned by the caller until reclaim. */
+uint16_t usb_frame_number(usb_device_t *dev);
+int      usb_iso_schedule(usb_device_t *dev, usb_endpoint_t *ep, uint16_t frame,
+                          uint32_t buf_phys, uint16_t len, void **handle);
+void     usb_iso_reclaim(usb_device_t *dev, void *handle);
 
 /* Standard Requests */
 int usb_get_descriptor(usb_device_t *dev, uint8_t type, uint8_t index,

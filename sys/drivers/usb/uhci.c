@@ -861,6 +861,75 @@ static int uhci_iso_out_transfer(uhci_hc_t *hc, usb_transfer_t *xfer)
 }
 
 /*
+ * Isochronous streaming primitives (USB audio).
+ *
+ * Unlike uhci_iso_out_transfer() (synchronous, one-shot), these let a caller
+ * keep a sliding window of one-packet iso TDs scheduled a few frames ahead of
+ * the controller for gapless playback: arm a packet at a future frame, then
+ * reclaim it once the controller has passed that frame.  The packet buffer is
+ * caller-owned coherent DMA memory (no per-packet map/unmap).  The frame slot
+ * is the only shared state with the async schedule, so a brief submit_lock
+ * keeps the TD pool and frame list consistent.
+ */
+static uint16_t uhci_hcd_frame_number(usb_hcd_t *hcd)
+{
+    uhci_hc_t *hc = hcd->priv;
+    return (uint16_t)(uhci_readw(hc, UHCI_FRNUM) & (UHCI_FRAME_LIST_SIZE - 1));
+}
+
+static int uhci_hcd_iso_schedule(usb_hcd_t *hcd, usb_device_t *dev,
+                                 usb_endpoint_t *ep, uint16_t frame,
+                                 uint32_t buf_phys, uint16_t len, void **handle)
+{
+    uhci_hc_t *hc = hcd->priv;
+    uint8_t addr = dev->address;
+    uint8_t ep_num = ep->address & USB_EP_NUM_MASK;
+    uint32_t async = (uint32_t)hc->async_qh_dma | UHCI_TD_LINK_QH;
+    dma_addr_t td_phys;
+    struct uhci_td *td;
+
+    if (handle)
+        *handle = NULL;
+    if ((ep->address & USB_EP_DIR_MASK) != USB_EP_DIR_OUT || len == 0)
+        return USB_XFER_ERROR;
+    frame &= (UHCI_FRAME_LIST_SIZE - 1);
+
+    mutex_lock(&hc->submit_lock);
+    td = uhci_alloc_td(hc, &td_phys);
+    if (!td) {
+        mutex_unlock(&hc->submit_lock);
+        return USB_XFER_ERROR;
+    }
+    td->ctrl_status = UHCI_TD_CTRL_IOS | UHCI_TD_CTRL_ACTIVE;
+    td->token  = UHCI_TD_TOKEN(UHCI_TD_PID_OUT, addr, ep_num, 0, len);
+    td->buffer = buf_phys;
+    td->link   = async;          /* run the async schedule after this packet */
+    td->_pad[0] = frame;         /* remember the slot so reclaim can restore it */
+    __sync_synchronize();
+    hc->frame_list[frame] = (uint32_t)td_phys;   /* TD, not QH */
+    mutex_unlock(&hc->submit_lock);
+
+    if (handle)
+        *handle = td;
+    return USB_XFER_OK;
+}
+
+static void uhci_hcd_iso_reclaim(usb_hcd_t *hcd, void *handle)
+{
+    uhci_hc_t *hc = hcd->priv;
+    struct uhci_td *td = handle;
+    uint32_t async = (uint32_t)hc->async_qh_dma | UHCI_TD_LINK_QH;
+
+    if (!td)
+        return;
+    mutex_lock(&hc->submit_lock);
+    hc->frame_list[td->_pad[0] & (UHCI_FRAME_LIST_SIZE - 1)] = async;
+    __sync_synchronize();
+    uhci_free_td(hc, td);
+    mutex_unlock(&hc->submit_lock);
+}
+
+/*
  * HCD submit callback — dispatches to control, bulk, or isochronous handler.
  */
 static int uhci_submit(usb_hcd_t *hcd, usb_transfer_t *xfer)
@@ -949,6 +1018,9 @@ static int uhci_pci_attach(struct device *dev)
     uhci_ctrl.hcd.port_status = uhci_port_status;
     uhci_ctrl.hcd.port_reset = uhci_port_reset;
     uhci_ctrl.hcd.port_enable = uhci_port_enable;
+    uhci_ctrl.hcd.frame_number = uhci_hcd_frame_number;
+    uhci_ctrl.hcd.iso_schedule = uhci_hcd_iso_schedule;
+    uhci_ctrl.hcd.iso_reclaim = uhci_hcd_iso_reclaim;
     uhci_ctrl.hcd.priv = &uhci_ctrl;
 
     usb_register_hcd(&uhci_ctrl.hcd);

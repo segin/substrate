@@ -215,6 +215,30 @@ int usb_bulk_transfer(usb_device_t *dev, usb_endpoint_t *ep,
     return ret;
 }
 
+uint16_t usb_frame_number(usb_device_t *dev)
+{
+    if (!dev || !dev->hcd || !dev->hcd->frame_number)
+        return 0;
+    return dev->hcd->frame_number(dev->hcd);
+}
+
+int usb_iso_schedule(usb_device_t *dev, usb_endpoint_t *ep, uint16_t frame,
+                     uint32_t buf_phys, uint16_t len, void **handle)
+{
+    if (handle)
+        *handle = NULL;
+    if (!dev || !dev->hcd || !dev->hcd->iso_schedule || !ep)
+        return USB_XFER_ERROR;
+    return dev->hcd->iso_schedule(dev->hcd, dev, ep, frame, buf_phys, len, handle);
+}
+
+void usb_iso_reclaim(usb_device_t *dev, void *handle)
+{
+    if (!dev || !dev->hcd || !dev->hcd->iso_reclaim || !handle)
+        return;
+    dev->hcd->iso_reclaim(dev->hcd, handle);
+}
+
 int usb_iso_transfer(usb_device_t *dev, usb_endpoint_t *ep,
                      void *data, uint32_t length,
                      uint32_t *actual_length)
