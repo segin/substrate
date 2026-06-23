@@ -1,0 +1,166 @@
+.TH AUDIO 4 "June 2026" "Substrate Kernel" "Kernel Interfaces"
+.SH NAME
+audio, audioctl \- Substrate audio device interface
+.SH SYNOPSIS
+.B #include <sys/audioio.h>
+.SH DESCRIPTION
+The
+.B audio
+framework provides a Sun/NetBSD-compatible PCM playback and capture
+interface.  Each registered audio device is exposed as a pair of device
+nodes under
+.BR /dev/ ,
+backed by a hardware-specific driver that plugs an ops vector into the
+common framework.
+.PP
+The framework owns parameter validation, the shared
+.BR ioctl (2)
+dispatcher, exclusive-access arbitration, and
+.BR devfs
+publication; the backends own only the data path.
+.SS Device Nodes
+.TP
+.B /dev/audioN
+The sample device for the
+.IR N -th
+audio device.  Bytes
+.BR write (2)\c
+\&-ten here are queued for playback;
+.BR read (2)
+returns captured samples on devices that support recording.
+.TP
+.B /dev/audioctlN
+The control device.  It accepts the same
+.BR ioctl (2)
+requests as
+.BR /dev/audioN
+but may be opened while the sample device is busy, so a mixer or status
+tool can inspect and adjust a stream another process is playing.
+.TP
+.B /dev/audio
+A convenience alias for
+.BR /dev/audio0 ,
+registered when the first audio device appears.  Most userland
+(and NetBSD-personality binaries) open
+.B /dev/audio
+without a unit suffix.
+.SS Sample Format
+The default and native framework format is signed 16-bit linear
+.RB ( AUDIO_ENCODING_SLINEAR_LE ),
+stereo.  Sample rate, channel count, precision, and encoding are
+negotiated per device with
+.BR AUDIO_SETINFO ;
+a backend may clamp the request to what the hardware supports and report
+the effective values back through
+.BR AUDIO_GETINFO .
+.SS Exclusive Access
+Playback is exclusive.  The per-device software FIFO and DMA path are
+single-producer; if two processes wrote concurrently the FIFO would
+corrupt and both would wedge.  The first process to
+.BR write (2)
+claims the device; a second process's
+.BR write (2)
+fails with
+.BR EBUSY .
+The claim is released when the owning process closes the device or
+exits.  A blocked
+.BR write (2)
+(FIFO full, waiting on the hardware to drain) is interruptible: a
+delivered signal breaks the wait, so a player can always be
+interrupted or killed.
+.SS Backends
+The following drivers register with the framework when their hardware is
+present:
+.RS
+.IP \(bu 4
+.B hda
+\(em Intel High Definition Audio.
+.IP \(bu 4
+.B ac97
+\(em AC'97 codecs.
+.IP \(bu 4
+.B sb16
+\(em Sound Blaster 16 (ISA).
+.IP \(bu 4
+.BR uac (4)
+\(em USB Audio Class headsets and DACs.
+.IP \(bu 4
+.B null
+\(em a bit-bucket backend for hardware-less testing (see
+.B KERNEL OPTIONS
+below).
+.RE
+.SH IOCTLS
+.TP
+.B AUDIO_GETINFO
+Retrieve the current
+.B audio_info_t
+(play and record parameters plus runtime statistics).
+.TP
+.B AUDIO_SETINFO
+Set play and/or record parameters.  Fields left at their initialized
+"no change" value
+.RB ( AUDIO_INITINFO )
+are preserved.
+.TP
+.B AUDIO_DRAIN
+Block until all queued playback samples have been emitted.
+.TP
+.B AUDIO_FLUSH
+Discard queued playback and capture samples immediately.
+.TP
+.B AUDIO_GETDEV
+Retrieve an
+.B audio_device_t
+identifying the backing hardware (name, version, config).
+.SH KERNEL OPTIONS
+.TP
+.B audio_null
+Register the
+.B null
+backend.  It is
+.I off
+by default: as a first-come device it would claim
+.B /dev/audio0
+and shadow a real device that registers later (notably
+.BR uac (4),
+which is enumerated after the built-in controllers), sending
+.B /dev/audio
+to the bit bucket.  Pass
+.B audio_null
+on the kernel command line to exercise the audio stack with no
+hardware present.
+.SH FILES
+.TP
+.B /dev/audio
+Default sample device (alias for
+.BR /dev/audio0 ).
+.TP
+.B /dev/audioN
+Sample devices.
+.TP
+.B /dev/audioctlN
+Control devices.
+.SH ERRORS
+A
+.BR write (2)
+to a sample device may fail with:
+.TP
+.B EBUSY
+Another process already holds the device for playback.
+.TP
+.B EINTR
+A signal was delivered while the write blocked waiting for the hardware
+to drain, before any data was queued.
+.SH SEE ALSO
+.BR ioctl (2),
+.BR read (2),
+.BR write (2),
+.BR uac (4)
+.SH HISTORY
+The
+.B audio
+framework follows the Sun/NetBSD
+.B audioio
+interface.  Exclusive-access arbitration and interruptible playback
+waits were added to prevent concurrent-use hangs.

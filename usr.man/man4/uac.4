@@ -1,0 +1,91 @@
+.TH UAC 4 "June 2026" "Substrate Kernel" "Kernel Interfaces"
+.SH NAME
+uac \- USB Audio Class playback driver
+.SH SYNOPSIS
+.B #include <drivers/usb/usb.h>
+.SH DESCRIPTION
+The
+.B uac
+driver binds USB Audio Class (UAC) functions and exposes their playback
+path through the
+.BR audio (4)
+framework as a
+.B /dev/audioN
+device, so the ordinary audio stack \(em
+.BR mpg123 ,
+.BR /dev/audio
+writers, the
+.B audioio
+ioctls \(em drives a USB headset or DAC.
+.PP
+The driver supports playback (host-to-device) only; capture endpoints are
+ignored.  It handles both UAC 1.0 and UAC 2.0 functions that present a
+single sample clock and a 16-bit alternate setting.
+.SS Operation
+When an audio function is enumerated, the driver:
+.RS
+.IP 1. 4
+Walks the configuration descriptor for the AudioStreaming interface's
+playback alternate setting, preferring a 16-bit format (matching the
+framework's signed-16 path), and locates its isochronous OUT endpoint and
+.IR wMaxPacketSize .
+.IP 2. 4
+Locates the clock entity feeding the USB-streaming input terminal and,
+for UAC 2.0, sets it to 48 kHz with a clock-source
+.B SET_CUR
+request.
+.IP 3. 4
+Issues
+.B SET_INTERFACE
+to activate the alternate setting, bringing the isochronous endpoint
+live.
+.IP 4. 4
+Registers an
+.BR audio (4)
+device whose
+.BR write (2)
+streams PCM straight to the endpoint.
+.RE
+.SS Isochronous Transfer
+Audio is carried over an isochronous OUT endpoint: one packet per 1 ms
+frame at full speed, no handshake and no retry.  The
+.B uhci
+host controller driver schedules one transfer descriptor per frame
+directly into the frame list, a couple of frames ahead of the
+controller, and streams large buffers in bounded batches.  A
+.BR write (2)
+of
+.I n
+bytes blocks for roughly
+.IR n / wMaxPacketSize
+milliseconds while the controller emits the buffer.
+.SS Format
+The device is presented to userland as 48 kHz, signed 16-bit
+little-endian, stereo.  Because a UAC device commonly runs a fixed
+clock, the playback rate is driven at 48 kHz regardless of the requested
+rate; feed 48 kHz S16 stereo PCM for correct pitch.
+.SH HARDWARE
+The driver matches any device whose interface class is
+.B USB_CLASS_AUDIO
+with an AudioControl interface, independent of UAC protocol version.  It
+has been developed against the Apple EarPods
+.RB ( 05ac:110b ),
+a full-speed UAC 2.0 headset whose playback path is interface 1,
+alternate setting 2 (16-bit/48 kHz/stereo) on isochronous OUT endpoint
+.BR 0x02 .
+.SH NOTES
+Only full-speed isochronous OUT is implemented; isochronous IN
+(capture), feedback endpoints, and explicit sample-rate conversion are
+not.  A source that is not 48 kHz is played without resampling.
+.SH FILES
+.TP
+.B /dev/audioN
+The audio sample device registered for the bound function.
+.SH SEE ALSO
+.BR audio (4),
+.BR write (2)
+.SH HISTORY
+The
+.B uac
+driver and the UHCI isochronous transfer path it depends on were added
+together to bring USB audio playback to Substrate.
