@@ -6,3 +6,4 @@
 0006-substrate-tdeinit-no-wait-kded-death.patch
 0007-substrate-tdeinit-defer-to-running.patch
 0008-substrate-tdeinit-wrapper-connect-retry.patch
+0009-substrate-kuniqueapp-nofork-dedup.patch

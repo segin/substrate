@@ -1,0 +1,60 @@
+Subject: TDEUniqueApplication -- defer to a running instance on the nofork path
+
+Companion to patch 0005 (force KUniqueApplication s_nofork=true).  The fork()
+launch path detects an already-running instance and hands the request to it via
+newInstance() before exiting; the nofork path did not -- it just called
+registerAs(appName, false), which for a taken name returns "<name>-2" and runs a
+duplicate.  Since patch 0005 forces every TDEUniqueApplication down the nofork
+path, any unique app launched twice (e.g. the ksmserver desktop launch AND the
+DCOP autostart both starting kdesktop/kicker) produced duplicate panels/desktops.
+
+Mirror the fork parent on the nofork path: if the app is already registered, hand
+the request to the running instance via newInstance() and exit with its return
+code, instead of registering a duplicate.
+
+--- a/tdecore/kuniqueapplication.cpp
++++ b/tdecore/kuniqueapplication.cpp
+@@ -123,6 +123,43 @@
+         appName = appName + "-" + pid;
+      }
+ 
++#ifndef TQ_WS_WIN
++     /* substrate: defer to an already-running instance instead of registering a
++      * duplicate "<name>-2".  Patch 0005 forces this nofork path for every
++      * TDEUniqueApplication, but — unlike the fork path below — it never checked
++      * whether the app was already running, so any unique app launched twice
++      * (e.g. the ksmserver workaround AND the autostart both starting
++      * kdesktop/kicker) produced duplicate panels/desktops.  Mirror the fork
++      * parent: hand the request to the running instance via newInstance() and
++      * exit with its return code. */
++     if (!s_multipleInstances && dcopClient()->isApplicationRegistered(appName))
++     {
++        TQByteArray data, reply;
++        TQDataStream ds(data, IO_WriteOnly);
++        TDECmdLineArgs::saveAppArgs(ds);
++        TQCString new_asn_id;
++#if defined TQ_WS_X11
++        TDEStartupInfoId id = TDEStartupInfo::currentStartupIdEnv();
++        if (!id.none())
++           new_asn_id = id.id();
++#endif
++        ds << new_asn_id;
++        dcopClient()->setPriorityCall(true);
++        TQCString replyType;
++        if (dcopClient()->call(appName, TDECmdLineArgs::about->appName(),
++                               "newInstance()", data, replyType, reply)
++            && (replyType == "int"))
++        {
++           TQDataStream rs(reply, IO_ReadOnly);
++           int exitCode = 0;
++           rs >> exitCode;
++           ::exit(exitCode);
++        }
++        dcopClient()->setPriorityCall(false);
++        /* newInstance failed -> fall through and register (best effort) */
++     }
++#endif
++
+      // Check to make sure that we're actually able to register with the DCOP
+      // server.
+ 
