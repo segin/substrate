@@ -3,3 +3,4 @@
 0003-tdm-link-and-crypt.patch
 0004-source-portability-fixes.patch
 0005-gen-host-generator.patch
+0006-ksmserver-direct-desktop-launch.patch

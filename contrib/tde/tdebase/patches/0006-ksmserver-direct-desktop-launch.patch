@@ -1,0 +1,79 @@
+Subject: ksmserver -- launch the desktop directly (twin/kicker/kdesktop)
+
+On substrate tdelauncher never processes incoming DCOP method calls (its DCOP
+socket notifier does not fire in the TQt event loop, although it is registered),
+so ksmserver's session bring-up silently stalls: startApplication() sends
+DCOPRef("tdelauncher").send("exec_blind", ...) which is never delivered, and the
+DCOP-driven autostart phases (DCOPRef(launcher).send("autoStart", N) plus the
+autoStartNDone() signals) never run.  The result is a bare kdesktop background
+with no window manager and no panel.
+
+Until DCOP incoming-method delivery is fixed, launch session apps directly:
+ - startApplication() forks+execvp()s the command (binaries are on $PATH under
+   /opt/trinity/bin), in addition to the original (undelivered) exec_blind;
+ - restoreSession()/startDefaultSession() also start the core desktop shell
+   (kdesktop) and panel (kicker) directly, since the autostart phases that would
+   normally do so never fire.
+
+This is exactly what the working direct-launch starttde-substrate session does;
+it makes the upstream /opt/trinity/bin/starttde bring up a full TDE desktop.
+--- a/ksmserver/server.cpp
++++ b/ksmserver/server.cpp
+@@ -121,6 +121,28 @@
+     TQValueList<TQCString> argList;
+     for ( int i=1; i < n; i++)
+        argList.append( TQCString(command[i].latin1()));
++
++    /* substrate: ksmserver normally launches session apps (the window manager,
++     * panel, desktop, ...) by an async DCOP exec_blind() to tdelauncher.  On
++     * substrate tdelauncher never processes incoming DCOP method calls — its
++     * DCOP socket notifier does not fire in the TQt event loop even though it
++     * is registered — so exec_blind is silently dropped and twin/kicker/
++     * kdesktop never start (the desktop hangs at a bare kdesktop background).
++     * Until that DCOP-delivery issue is fixed, launch directly with
++     * fork()+execvp(): the binaries are on $PATH (/opt/trinity/bin), exactly
++     * as the working direct-launch starttde-substrate session does it. */
++    pid_t pid = fork();
++    if ( pid == 0 ) {
++        setsid();
++        char **argv = (char **) malloc( ( n + 1 ) * sizeof( char * ) );
++        argv[0] = strdup( app.data() );
++        for ( int i = 1; i < n; i++ )
++            argv[i] = strdup( command[i].latin1() );
++        argv[n] = 0;
++        execvp( argv[0], argv );
++        _exit( 127 );
++    }
++    /* keep the original DCOP path too, harmless if undelivered */
+     DCOPRef( launcher ).send( "exec_blind", app, DCOPArg( argList, "TQValueList<TQCString>" ) );
+ }
+ 
+--- a/ksmserver/startup.cpp
++++ b/ksmserver/startup.cpp
+@@ -143,6 +143,15 @@
+         for (uint i = 0; i < wmCommands.count(); i++) {
+             startApplication( wmCommands[i] );
+         }
++        /* substrate: the autostart phases that normally bring up the desktop
++         * shell (kdesktop) and panel (kicker) are driven by DCOP round-trips to
++         * tdelauncher (DCOPRef(launcher).send("autoStart", N) and the
++         * autoStartNDone() signals), but tdelauncher never processes incoming
++         * DCOP method calls here, so those phases never run.  startApplication()
++         * now launches directly (see server.cpp), so launch the core desktop
++         * components ourselves to get a usable session. */
++        startApplication( TQStringList() << TQString::fromLatin1("kdesktop") );
++        startApplication( TQStringList() << TQString::fromLatin1("kicker") );
+         if ((showFancyLogin) && (!startupNotifierIPDlg)) {
+             startupNotifierIPDlg = KSMStartupIPDlg::showStartupIP();
+         }
+@@ -190,6 +199,10 @@
+     else {
+         startApplication( wm );
+     }
++    /* substrate: bring up the desktop shell + panel directly — see the matching
++     * comment in restoreSession(); the DCOP-driven autostart never runs. */
++    startApplication( TQStringList() << TQString::fromLatin1("kdesktop") );
++    startApplication( TQStringList() << TQString::fromLatin1("kicker") );
+     if ((showFancyLogin) && (!startupNotifierIPDlg)) {
+         startupNotifierIPDlg = KSMStartupIPDlg::showStartupIP();
+     }
