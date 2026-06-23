@@ -89,6 +89,15 @@ typedef struct audio_dev {
 	audio_info_t    current;       /* live state */
 	int             open_refs;
 	int             full_duplex;
+	/*
+	 * Exclusive playback owner.  The software FIFO / DMA path is
+	 * single-producer; a second process write()ing concurrently corrupts it
+	 * and both wedge in an uninterruptible D-state.  The first writer claims
+	 * the device; another process's write() returns -EBUSY.  Released when
+	 * the owner closes the device (or exits).  NULL == unclaimed; compared by
+	 * process_t* (current_thread->proc).
+	 */
+	void            *play_owner;
 	struct audio_dev *next;
 } audio_dev_t;
 

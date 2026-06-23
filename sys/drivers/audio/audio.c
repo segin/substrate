@@ -13,6 +13,7 @@
 #include <sys/errno.h>
 #include <sys/lock.h>
 #include <sys/major.h>
+#include <sys/proc.h>
 #include <kern/console.h>
 #include <vfs/vfs.h>
 #include <stdio.h>
@@ -375,15 +376,42 @@ static size_t audio_node_write(fs_node_t *node, off_t offset, size_t size,
 			       const uint8_t *buffer)
 {
 	audio_dev_t *dev = audio_dev_for_node(node);
+	void *me;
 	int rc;
 
 	(void)offset;
 	if (dev == NULL || dev->ops == NULL || dev->ops->write == NULL) {
 		return 0;
 	}
+
+	/*
+	 * Exclusive playback.  The backend's software FIFO / DMA path is a
+	 * single-producer design; two processes write()ing concurrently corrupt
+	 * the FIFO and both wedge forever in an uninterruptible D-state ("more
+	 * than one program using the audio device -> both hang, unkillable").
+	 * Claim the device for the first writer's process; a second process gets
+	 * -EBUSY (write() fails, the player exits cleanly) instead of corrupting
+	 * it.  Kernel-context writes (no thread) are not arbitrated.
+	 */
+	me = current_thread ? (void *)current_thread->proc : NULL;
+	if (me != NULL) {
+		spinlock_acquire(&audio_dev_lock);
+		if (dev->play_owner == NULL) {
+			dev->play_owner = me;
+		}
+		if (dev->play_owner != me) {
+			spinlock_release(&audio_dev_lock);
+			return (size_t)-EBUSY;
+		}
+		spinlock_release(&audio_dev_lock);
+	}
+
 	rc = dev->ops->write(dev, buffer, size);
 	if (rc < 0) {
-		return 0;
+		/* Propagate the backend errno (e.g. -EINTR from a killed wait,
+		 * -EBUSY) so write() fails instead of silently returning 0 and
+		 * spinning the caller. */
+		return (size_t)rc;
 	}
 	dev->current.play.samples += (uint32_t)rc;
 	return (size_t)rc;
@@ -446,6 +474,13 @@ static void audio_node_close(fs_node_t *node)
 	}
 	dev->open_refs--;
 	last_close = (dev->open_refs == 0);
+	/* Release the exclusive playback claim when its owner closes (covers
+	 * exit() too: proc_exit closes fds in the owner's context), or whenever
+	 * the device falls fully idle. */
+	if (last_close ||
+	    (current_thread && dev->play_owner == (void *)current_thread->proc)) {
+		dev->play_owner = NULL;
+	}
 	spinlock_release(&audio_dev_lock);
 	if (last_close && dev->ops != NULL && dev->ops->close != NULL) {
 		(void)dev->ops->close(dev);

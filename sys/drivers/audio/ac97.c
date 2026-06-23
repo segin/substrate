@@ -429,17 +429,29 @@ static int ac97_write(audio_dev_t *adev, const void *buf, size_t len)
 		 * ordering; if the IRQ freed space already, drop through.
 		 */
 		if (current_thread) {
+			/* Killable: a pending unmasked signal must break the
+			 * wait so the player can be ^C'd / kill(1)ed rather
+			 * than wedging uninterruptibly if the device stalls. */
+			if (current_thread->sig_pending & ~current_thread->sig_mask) {
+				break;
+			}
 			sleepq_add(d, current_thread);
 			if (audio_fifo_free(&d->fifo) > 0) {
 				sleepq_wake_all(d);   /* dequeue, retry */
 			} else {
+				current_thread->flags |= THREAD_F_INTERRUPTIBLE;
 				sched_sleep(d);
+				current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
 			}
 		} else {
 			__asm__ volatile("pause");
 		}
 	}
 
+	if (total_consumed == 0 && current_thread &&
+	    (current_thread->sig_pending & ~current_thread->sig_mask)) {
+		return -EINTR;
+	}
 	return (int)total_consumed;
 }
 
