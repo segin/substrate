@@ -43,12 +43,17 @@
 /* Class-specific descriptor + request constants (UAC). */
 #define UAC_CS_INTERFACE          0x24
 #define UAC_AC_INPUT_TERMINAL     0x02
+#define UAC_AC_FEATURE_UNIT       0x06
 #define UAC_AC_CLOCK_SOURCE       0x0A
 #define UAC_AS_FORMAT_TYPE        0x02
 #define UAC_TT_USB_STREAMING      0x0101  /* wTerminalType: USB streaming   */
 #define UAC_REQ_CUR               0x01    /* SET/GET CUR                    */
+#define UAC_REQ_RANGE             0x02    /* GET RANGE (UAC2)               */
 #define UAC_CS_SAM_FREQ_CONTROL   0x01    /* clock-source freq control      */
+#define UAC_FU_MUTE_CONTROL       0x01    /* feature-unit mute selector     */
+#define UAC_FU_VOLUME_CONTROL     0x02    /* feature-unit volume selector   */
 #define UAC_EP_XFER_ISO           0x01    /* bmAttributes transfer type     */
+#define UAC_MAX_FU                8
 
 /* Fixed device clock and derived packet geometry: 48 kHz, S16, stereo ==
  * 48 sample-frames * 4 bytes == 192 bytes per 1 ms USB frame. */
@@ -374,6 +379,9 @@ typedef struct uac_parse {
 	uint16_t ep_maxpkt;
 	uint8_t  ep_interval;
 	int      have_16bit;
+	uint8_t  is_uac2;
+	uint8_t  fu_ids[UAC_MAX_FU];
+	int      n_fu;
 } uac_parse_t;
 
 static void uac_parse_config(usb_device_t *dev, uac_parse_t *p)
@@ -413,6 +421,9 @@ static void uac_parse_config(usb_device_t *dev, uac_parse_t *p)
 		} else if (btype == UAC_CS_INTERFACE && blen >= 3) {
 			uint8_t subtype = ptr[2];
 			if (cur_subclass == USB_SUBCLASS_AUDIOCONTROL) {
+				if (cur_protocol == 0x20) {
+					p->is_uac2 = 1;
+				}
 				if (subtype == UAC_AC_INPUT_TERMINAL && blen >= 8) {
 					uint16_t tt = (uint16_t)(ptr[4] | (ptr[5] << 8));
 					if (tt == UAC_TT_USB_STREAMING) {
@@ -421,6 +432,10 @@ static void uac_parse_config(usb_device_t *dev, uac_parse_t *p)
 				} else if (subtype == UAC_AC_CLOCK_SOURCE && blen >= 4) {
 					if (p->clock_id == 0) {
 						p->clock_id = ptr[3];
+					}
+				} else if (subtype == UAC_AC_FEATURE_UNIT && blen >= 4) {
+					if (p->n_fu < UAC_MAX_FU) {
+						p->fu_ids[p->n_fu++] = ptr[3]; /* bUnitID */
 					}
 				}
 			} else if (cur_subclass == USB_SUBCLASS_AUDIOSTREAMING) {
@@ -456,6 +471,60 @@ static void uac_parse_config(usb_device_t *dev, uac_parse_t *p)
 
 		ptr += blen;
 	}
+}
+
+/* Feature-unit control SET_CUR (mute is 1 byte, volume is 2). */
+static int uac_fu_set(usb_device_t *dev, int ac_iface, uint8_t fu_id,
+                      uint8_t selector, uint8_t channel,
+                      const void *data, uint16_t len)
+{
+	return usb_control_transfer(dev,
+	            USB_DIR_OUT | USB_TYPE_CLASS | USB_RECIP_INTERFACE,
+	            UAC_REQ_CUR,
+	            (uint16_t)((selector << 8) | channel),
+	            (uint16_t)((fu_id << 8) | (ac_iface & 0xFF)),
+	            (void *)data, len);
+}
+
+/*
+ * Bring a feature unit out of mute and up to an audible volume.  A USB
+ * headset commonly powers up muted and/or at minimum volume, which produces
+ * silence even when the stream is flowing correctly — so this runs during
+ * device bring-up.  We unmute and set the loudest in-range volume (queried via
+ * GET_RANGE on UAC 2.0; 0 dB on UAC 1.0) for master + left + right, ignoring
+ * controls the unit does not implement (those just stall harmlessly).
+ */
+static void uac_setup_feature_unit(usb_device_t *dev, int ac_iface,
+                                   uint8_t fu_id, int is_uac2)
+{
+	uint8_t unmute = 0;
+	uint8_t vol[2] = { 0x00, 0x00 };   /* default 0 dB (S16, 1/256 dB)     */
+	uint8_t ch;
+
+	if (is_uac2) {
+		/* GET_RANGE -> wNumSubRanges, then {wMIN,wMAX,wRES}.  Use the
+		 * first subrange's wMAX as the target. */
+		uint8_t range[16];
+		int rc = usb_control_transfer(dev,
+		            USB_DIR_IN | USB_TYPE_CLASS | USB_RECIP_INTERFACE,
+		            UAC_REQ_RANGE,
+		            (uint16_t)(UAC_FU_VOLUME_CONTROL << 8) /* master */,
+		            (uint16_t)((fu_id << 8) | (ac_iface & 0xFF)),
+		            range, sizeof(range));
+		if (rc == USB_XFER_OK) {
+			vol[0] = range[4];   /* wMAX low  */
+			vol[1] = range[5];   /* wMAX high */
+		}
+	}
+
+	for (ch = 0; ch <= 2; ch++) {   /* master, left, right */
+		(void)uac_fu_set(dev, ac_iface, fu_id,
+		    UAC_FU_MUTE_CONTROL, ch, &unmute, 1);
+		(void)uac_fu_set(dev, ac_iface, fu_id,
+		    UAC_FU_VOLUME_CONTROL, ch, vol, 2);
+	}
+	kprintf("uac: feature unit %u: unmuted, volume 0x%02x%02x\n",
+	        fu_id, vol[1], vol[0]);
 }
 
 static int uac_set_clock_rate(usb_device_t *dev, int ac_iface,
@@ -552,10 +621,17 @@ static int uac_attach(usb_device_t *dev)
 		d->poll_ticks = 1;
 	}
 
-	/* Program the device clock to 48 kHz, then activate the streaming alt. */
+	/* Program the device clock to 48 kHz. */
 	if (p.clock_id != 0) {
 		(void)uac_set_clock_rate(dev, p.ac_iface, p.clock_id, UAC_RATE_HZ);
 	}
+	/* Unmute and raise the volume on the function's feature units — a
+	 * headset that boots muted/at-zero is silent even with the stream
+	 * flowing. */
+	for (int i = 0; i < p.n_fu; i++) {
+		uac_setup_feature_unit(dev, p.ac_iface, p.fu_ids[i], p.is_uac2);
+	}
+	/* Activate the streaming alt setting (brings the iso endpoint live). */
 	rc = usb_set_interface(dev, d->as_iface, d->as_alt);
 	if (rc != USB_XFER_OK) {
 		kprintf("uac: SET_INTERFACE(%u, alt %u) failed (%d)\n",

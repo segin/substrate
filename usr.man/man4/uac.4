@@ -35,11 +35,17 @@ for UAC 2.0, sets it to 48 kHz with a clock-source
 .B SET_CUR
 request.
 .IP 3. 4
+Unmutes and raises the volume on each feature unit (a headset commonly
+powers up muted or at minimum volume, which is silent even with the stream
+flowing): the loudest in-range volume from
+.B GET_RANGE
+on UAC 2.0, 0 dB on UAC 1.0, applied to master/left/right.
+.IP 4. 4
 Issues
 .B SET_INTERFACE
 to activate the alternate setting, bringing the isochronous endpoint
 live.
-.IP 4. 4
+.IP 5. 4
 Registers an
 .BR audio (4)
 device whose
