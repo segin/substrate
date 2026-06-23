@@ -197,14 +197,27 @@ if [ "$SNAPSHOT" -eq 1 ]; then
     echo "run-networking.sh: -snapshot enabled; all disk writes are temporary (on-disk images stay pristine)"
 fi
 
-# Audio device selection.  Default: emulated AC'97 with a host backend (sdl).
+# Audio device selection.  Default: emulated AC'97 with a host backend.
 #   --usb-audio       QEMU's emulated USB Audio Class device (UAC 1.0); the
 #                     uac driver binds it as /dev/audio0.
 #   --usb-audio-host  pass a real USB audio device (default the EarPods)
 #                     through; it plays on the physical hardware.
 # Both USB modes drop the AC'97 so the USB device is the only audio_dev and
 # lands on /dev/audio0.  USB devices attach to the piix3-usb-uhci below.
-AUDIODRV=${AUDIODRV:-sdl}
+#
+# Host backend ($AUDIODRV): default to QEMU's 'pa' when a PulseAudio/PipeWire
+# server is reachable (it routes to the host mixer on both), else fall back to
+# 'sdl'.  Note 'sdl' frequently does NOT feed a PipeWire host's mixer (no
+# sink-input appears), which presents as "audio is silent" even though the
+# guest is producing sound — so we avoid it when pulse/pipewire is present.
+if [ -z "${AUDIODRV:-}" ]; then
+    if command -v pactl >/dev/null 2>&1 && pactl info >/dev/null 2>&1; then
+        AUDIODRV=pa
+    else
+        AUDIODRV=sdl
+    fi
+fi
+echo "run-networking.sh: host audio backend: $AUDIODRV (override with \$AUDIODRV)"
 if [ "$USB_AUDIO" -eq 1 ] && [ "$USB_AUDIO_HOST" -eq 1 ]; then
     echo "run-networking.sh: --usb-audio and --usb-audio-host are mutually exclusive" >&2
     exit 1
