@@ -150,6 +150,15 @@ typedef struct afunix_sock {
     int             type;       /* SOCK_STREAM only for now */
     afunix_state_t  state;
 
+    /* SO_PEERCRED: the credentials of the process that owns this socket,
+     * captured at creation time from current_process.  getsockopt(2)
+     * SO_PEERCRED returns the PEER's creds (peer->cr_*), which is how
+     * libICE/DCOP's peerIsUs() decides a server is same-user and accepts
+     * its calls — without it every TDE app rejects all inter-app DCOP. */
+    uint32_t        cr_uid;
+    uint32_t        cr_gid;
+    uint32_t        cr_pid;
+
     /* For data exchange when CONNECTED */
     struct afunix_sock *peer;
     afunix_buf_t   rx;          /* writes from peer land here */
@@ -690,6 +699,14 @@ static afunix_sock_t *afunix_alloc(int type) {
     s->type = type;
     s->state = AFUS_UNCONNECTED;
     s->refcount = 1;
+    /* Record the owning process's credentials for SO_PEERCRED.  Use the
+     * effective ids (what a same-user check cares about); falls back to
+     * root/0 for kernel-context allocations where current_process is NULL. */
+    if (current_process) {
+        s->cr_uid = current_process->euid;
+        s->cr_gid = current_process->egid;
+        s->cr_pid = (uint32_t)current_process->pid;
+    }
     mutex_init(&s->lock, "af_unix_sock");
 
     /* Wait channels: just unique addresses per-socket; we use the
@@ -1066,6 +1083,12 @@ int sys_connect(int fd, const struct sockaddr *addr, socklen_t addrlen) {
     server_side->peer  = client;
     client->peer       = server_side;
     client->state      = AFUS_CONNECTED;
+    /* The accepted (server-side) socket belongs to the listener's owner,
+     * not to the connecting client that allocated it here — inherit the
+     * listener's creds so the client's SO_PEERCRED reports the server. */
+    server_side->cr_uid = server->cr_uid;
+    server_side->cr_gid = server->cr_gid;
+    server_side->cr_pid = server->cr_pid;
     /* Inherit the listener's bound path onto server_side so
      * getsockname() on the accepted fd and getpeername() on the
      * client both report the path the client connected to.
@@ -1734,6 +1757,30 @@ int sys_getsockopt(int fd, int level, int optname,
                 return -ENOTSOCK;
             *(int *)optval = t;
             *optlen = sizeof(int);
+            return 0;
+        }
+        #define SO_PEERCRED_K 17
+        if (optname == SO_PEERCRED_K) {
+            /* Report the connected peer's credentials as struct ucred
+             * { pid, uid, gid }.  libICE/DCOP's peerIsUs() uses this to
+             * confirm the dcopserver runs as the same user before it will
+             * accept incoming calls; without it accept_calls stays false
+             * and every inter-app DCOP call/send is rejected. */
+            afunix_sock_t *u = afunix_from_fd(fd);
+            if (!u)
+                return -ENOPROTOOPT;   /* not an AF_UNIX socket */
+            struct { uint32_t pid, uid, gid; } cr;
+            afunix_sock_t *p = u->peer;
+            if (p) {
+                cr.pid = p->cr_pid; cr.uid = p->cr_uid; cr.gid = p->cr_gid;
+            } else {
+                /* Unconnected (or socketpair self-query): our own creds. */
+                cr.pid = u->cr_pid; cr.uid = u->cr_uid; cr.gid = u->cr_gid;
+            }
+            socklen_t n = *optlen;
+            if (n > (socklen_t)sizeof(cr)) n = sizeof(cr);
+            memcpy(optval, &cr, n);
+            *optlen = n;
             return 0;
         }
         if (optname == 2 /*SO_REUSEADDR*/) {
