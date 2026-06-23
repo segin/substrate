@@ -50,15 +50,21 @@
 #define UAC_REQ_CUR               0x01    /* SET/GET CUR                    */
 #define UAC_REQ_RANGE             0x02    /* GET RANGE (UAC2)               */
 #define UAC_CS_SAM_FREQ_CONTROL   0x01    /* clock-source freq control      */
+#define UAC_CS_CLOCK_VALID_CONTROL 0x02   /* clock-source validity control  */
 #define UAC_FU_MUTE_CONTROL       0x01    /* feature-unit mute selector     */
 #define UAC_FU_VOLUME_CONTROL     0x02    /* feature-unit volume selector   */
 #define UAC_EP_XFER_ISO           0x01    /* bmAttributes transfer type     */
 #define UAC_MAX_FU                8
 
-/* Fixed device clock and derived packet geometry: 48 kHz, S16, stereo ==
- * 48 sample-frames * 4 bytes == 192 bytes per 1 ms USB frame. */
+/* Per 1ms USB frame at 48 kHz stereo: 48 sample-frames.  The software FIFO and
+ * resampler are 16-bit (UAC_PKT_BYTES = 48*2*2 = 192 source bytes/packet).  The
+ * device may want 16- or 24-bit samples (some — e.g. the Apple EarPods — only
+ * actually sound on their 24-bit alt), so the iso ring slots are sized for the
+ * 24-bit max (UAC_PKT_MAX = 48*2*3 = 288) and the feeder converts on the fly. */
 #define UAC_RATE_HZ               48000U
-#define UAC_PKT_BYTES             192U
+#define UAC_FRAMES_PER_PKT        48U      /* sample-frames per 1ms packet   */
+#define UAC_PKT_BYTES             192U     /* 16-bit source bytes per packet */
+#define UAC_PKT_MAX               288U     /* 24-bit device bytes per packet */
 
 /* Streaming window: keep [LEAD, WINDOW) frames scheduled ahead of the
  * controller; RING_SLOTS (> WINDOW) packet buffers cycle through it. */
@@ -78,6 +84,8 @@ typedef struct uac_dev {
 	usb_endpoint_t  iso_ep;     /* iso OUT endpoint (built from descriptors) */
 	uint8_t         as_iface;
 	uint8_t         as_alt;
+	uint8_t         sample_bytes; /* device sample width: 2 (16-bit) or 3 (24) */
+	uint16_t        pkt_bytes;    /* device bytes per iso packet (192 or 288)  */
 	audio_dev_t     audio;
 
 	/* Resampler: src_rate -> 48 kHz, 16.16 fixed-point phase between
@@ -159,21 +167,34 @@ static void uac_feeder(void *arg)
 		/* Top the window back up to WINDOW frames ahead. */
 		while ((int32_t)(d->sched - (dev_frame + UAC_WINDOW)) < 0) {
 			uint32_t slot = d->sched % UAC_RING_SLOTS;
-			uint8_t *buf = d->ring + slot * UAC_PKT_BYTES;
+			uint8_t *buf = d->ring + slot * UAC_PKT_MAX;
+			int16_t  src[UAC_FRAMES_PER_PKT * 2];  /* 16-bit stereo source */
 			size_t n;
 
 			if (d->handles[slot]) {     /* free this slot's last packet */
 				usb_iso_reclaim(d->udev, d->handles[slot]);
 				d->handles[slot] = NULL;
 			}
-			n = audio_fifo_read(&d->fifo, buf, UAC_PKT_BYTES);
+			/* Pull one packet of 16-bit source PCM from the FIFO. */
+			n = audio_fifo_read(&d->fifo, src, UAC_PKT_BYTES);
 			if (n < UAC_PKT_BYTES) {
-				memset(buf + n, 0, UAC_PKT_BYTES - n);  /* silence-pad */
+				memset((uint8_t *)src + n, 0, UAC_PKT_BYTES - n);
+			}
+			/* Convert into the device's sample width. */
+			if (d->sample_bytes == 3) {
+				/* 16-bit -> 24-bit LE: [0x00][lo][hi] per sample. */
+				for (uint32_t k = 0; k < UAC_FRAMES_PER_PKT * 2; k++) {
+					buf[k * 3 + 0] = 0;
+					buf[k * 3 + 1] = (uint8_t)(src[k] & 0xFF);
+					buf[k * 3 + 2] = (uint8_t)((src[k] >> 8) & 0xFF);
+				}
+			} else {
+				memcpy(buf, src, UAC_PKT_BYTES);
 			}
 			usb_iso_schedule(d->udev, &d->iso_ep,
 			    (uint16_t)(d->sched & (UAC_NFRAMES - 1)),
-			    (uint32_t)(d->ring_phys + slot * UAC_PKT_BYTES),
-			    UAC_PKT_BYTES, &d->handles[slot]);
+			    (uint32_t)(d->ring_phys + slot * UAC_PKT_MAX),
+			    d->pkt_bytes, &d->handles[slot]);
 			d->sched++;
 		}
 
@@ -378,13 +399,7 @@ typedef struct uac_parse {
 	uint8_t  ep_addr;
 	uint16_t ep_maxpkt;
 	uint8_t  ep_interval;
-	int      have_16bit;
-	uint8_t  is_uac2;
-	uint8_t  fu_id[UAC_MAX_FU];
-	uint8_t  fu_src[UAC_MAX_FU];   /* bSourceID of each feature unit       */
-	int      n_fu;
-	uint8_t  mic_term[UAC_MAX_FU]; /* input-terminal IDs that are NOT       */
-	int      n_mic_term;           /* USB-streaming (i.e. real-world inputs) */
+	int      chosen_bits;   /* bit resolution of the picked alt (16 or 24) */
 } uac_parse_t;
 
 static void uac_parse_config(usb_device_t *dev, uac_parse_t *p)
@@ -424,28 +439,14 @@ static void uac_parse_config(usb_device_t *dev, uac_parse_t *p)
 		} else if (btype == UAC_CS_INTERFACE && blen >= 3) {
 			uint8_t subtype = ptr[2];
 			if (cur_subclass == USB_SUBCLASS_AUDIOCONTROL) {
-				if (cur_protocol == 0x20) {
-					p->is_uac2 = 1;
-				}
 				if (subtype == UAC_AC_INPUT_TERMINAL && blen >= 8) {
 					uint16_t tt = (uint16_t)(ptr[4] | (ptr[5] << 8));
 					if (tt == UAC_TT_USB_STREAMING) {
-						p->clock_id = ptr[7];
-					} else if (p->n_mic_term < UAC_MAX_FU) {
-						/* A real-world input (microphone/headset
-						 * mic); feature units fed from it are
-						 * capture/sidetone, not playback. */
-						p->mic_term[p->n_mic_term++] = ptr[3];
+						p->clock_id = ptr[7]; /* bCSourceID */
 					}
 				} else if (subtype == UAC_AC_CLOCK_SOURCE && blen >= 4) {
 					if (p->clock_id == 0) {
 						p->clock_id = ptr[3];
-					}
-				} else if (subtype == UAC_AC_FEATURE_UNIT && blen >= 5) {
-					if (p->n_fu < UAC_MAX_FU) {
-						p->fu_id[p->n_fu]  = ptr[3]; /* bUnitID   */
-						p->fu_src[p->n_fu] = ptr[4]; /* bSourceID */
-						p->n_fu++;
 					}
 				}
 			} else if (cur_subclass == USB_SUBCLASS_AUDIOSTREAMING) {
@@ -467,91 +468,27 @@ static void uac_parse_config(usb_device_t *dev, uac_parse_t *p)
 			int is_out = (addr & USB_EP_DIR_MASK) == USB_EP_DIR_OUT;
 
 			if (is_iso && is_out) {
-				int prefer = (cur_bits == 16 && !p->have_16bit);
-				if (p->play_iface < 0 || prefer) {
+				/* Prefer 24-bit over 16-bit: some devices (Apple
+				 * EarPods) only actually sound on their native
+				 * 24-bit alt, and Linux drives them there too. */
+				int rank_new = (cur_bits == 24) ? 2 :
+				               (cur_bits == 16) ? 1 : 0;
+				int rank_cur = (p->chosen_bits == 24) ? 2 :
+				               (p->chosen_bits == 16) ? 1 : 0;
+				if (rank_new > 0 &&
+				    (p->play_iface < 0 || rank_new > rank_cur)) {
 					p->play_iface  = cur_iface;
 					p->play_alt    = cur_alt;
 					p->ep_addr     = addr;
 					p->ep_maxpkt   = mps & 0x07FF;
 					p->ep_interval = ptr[6];
-					p->have_16bit  = (cur_bits == 16);
+					p->chosen_bits = cur_bits;
 				}
 			}
 		}
 
 		ptr += blen;
 	}
-}
-
-/* Feature-unit control SET_CUR (mute is 1 byte, volume is 2). */
-static int uac_fu_set(usb_device_t *dev, int ac_iface, uint8_t fu_id,
-                      uint8_t selector, uint8_t channel,
-                      const void *data, uint16_t len)
-{
-	return usb_control_transfer(dev,
-	            USB_DIR_OUT | USB_TYPE_CLASS | USB_RECIP_INTERFACE,
-	            UAC_REQ_CUR,
-	            (uint16_t)((selector << 8) | channel),
-	            (uint16_t)((fu_id << 8) | (ac_iface & 0xFF)),
-	            (void *)data, len);
-}
-
-/*
- * Configure a feature unit during bring-up.
- *
- *   playback != 0: this unit is on the path to the speaker/headphone output,
- *   so unmute it and set the loudest in-range volume (GET_RANGE on UAC 2.0,
- *   0 dB on UAC 1.0) — a headset commonly powers up muted/at-minimum, which is
- *   silent even with the stream flowing.
- *
- *   playback == 0: this unit is fed from a microphone input, i.e. capture or
- *   sidetone.  MUTE it, otherwise the device mixes the mic into the headphone
- *   output and you hear the in-line mic instead of (or over) the USB audio.
- *
- * Controls a unit does not implement just stall and are ignored.
- */
-static void uac_setup_feature_unit(usb_device_t *dev, int ac_iface,
-                                   uint8_t fu_id, int is_uac2, int playback)
-{
-	uint8_t ch;
-
-	if (!playback) {
-		uint8_t mute = 1;
-		for (ch = 0; ch <= 2; ch++) {
-			(void)uac_fu_set(dev, ac_iface, fu_id,
-			    UAC_FU_MUTE_CONTROL, ch, &mute, 1);
-		}
-		kprintf("uac: feature unit %u (mic): muted\n", fu_id);
-		return;
-	}
-
-	uint8_t unmute = 0;
-	uint8_t vol[2] = { 0x00, 0x00 };   /* default 0 dB (S16, 1/256 dB)     */
-
-	if (is_uac2) {
-		/* GET_RANGE -> wNumSubRanges, then {wMIN,wMAX,wRES}.  Use the
-		 * first subrange's wMAX as the target. */
-		uint8_t range[16];
-		int rc = usb_control_transfer(dev,
-		            USB_DIR_IN | USB_TYPE_CLASS | USB_RECIP_INTERFACE,
-		            UAC_REQ_RANGE,
-		            (uint16_t)(UAC_FU_VOLUME_CONTROL << 8) /* master */,
-		            (uint16_t)((fu_id << 8) | (ac_iface & 0xFF)),
-		            range, sizeof(range));
-		if (rc == USB_XFER_OK) {
-			vol[0] = range[4];   /* wMAX low  */
-			vol[1] = range[5];   /* wMAX high */
-		}
-	}
-
-	for (ch = 0; ch <= 2; ch++) {   /* master, left, right */
-		(void)uac_fu_set(dev, ac_iface, fu_id,
-		    UAC_FU_MUTE_CONTROL, ch, &unmute, 1);
-		(void)uac_fu_set(dev, ac_iface, fu_id,
-		    UAC_FU_VOLUME_CONTROL, ch, vol, 2);
-	}
-	kprintf("uac: feature unit %u (playback): unmuted, volume 0x%02x%02x\n",
-	        fu_id, vol[1], vol[0]);
 }
 
 static int uac_set_clock_rate(usb_device_t *dev, int ac_iface,
@@ -606,13 +543,8 @@ static int uac_attach(usb_device_t *dev)
 
 	uac_parse_config(dev, &p);
 
-	if (p.play_iface < 0 || p.ep_maxpkt < UAC_PKT_BYTES) {
-		kprintf("uac: %04x:%04x has no usable 48k iso OUT endpoint\n",
-		        dev->vendor_id, dev->product_id);
-		return -1;
-	}
-	if (!p.have_16bit) {
-		kprintf("uac: %04x:%04x has no 16-bit playback alt; not attaching\n",
+	if (p.chosen_bits != 16 && p.chosen_bits != 24) {
+		kprintf("uac: %04x:%04x has no 16/24-bit iso OUT playback alt\n",
 		        dev->vendor_id, dev->product_id);
 		return -1;
 	}
@@ -625,18 +557,27 @@ static int uac_attach(usb_device_t *dev)
 	d->udev     = dev;
 	d->as_iface = (uint8_t)p.play_iface;
 	d->as_alt   = (uint8_t)p.play_alt;
+	d->sample_bytes = (uint8_t)(p.chosen_bits / 8);             /* 2 or 3 */
+	d->pkt_bytes    = (uint16_t)(UAC_FRAMES_PER_PKT * 2 * d->sample_bytes);
 	d->iso_ep.address    = p.ep_addr;
 	d->iso_ep.type       = USB_EP_TYPE_ISO;
 	d->iso_ep.max_packet = p.ep_maxpkt;
 	d->iso_ep.interval   = p.ep_interval;
 
+	if (p.ep_maxpkt < d->pkt_bytes) {
+		kprintf("uac: %04x:%04x iso EP too small (%u < %u)\n",
+		        dev->vendor_id, dev->product_id, p.ep_maxpkt, d->pkt_bytes);
+		d->in_use = 0;
+		return -1;
+	}
+
 	/* Allocate the FIFO and the coherent iso packet ring. */
 	d->fifo_buf = kmalloc(UAC_FIFO_BYTES);
-	d->ring = dma_alloc_coherent(UAC_RING_SLOTS * UAC_PKT_BYTES, &d->ring_phys);
+	d->ring = dma_alloc_coherent(UAC_RING_SLOTS * UAC_PKT_MAX, &d->ring_phys);
 	if (d->fifo_buf == NULL || d->ring == NULL) {
 		kprintf("uac: out of memory for FIFO/ring\n");
 		if (d->fifo_buf) kfree(d->fifo_buf, UAC_FIFO_BYTES);
-		if (d->ring) dma_free_coherent(d->ring, UAC_RING_SLOTS * UAC_PKT_BYTES);
+		if (d->ring) dma_free_coherent(d->ring, UAC_RING_SLOTS * UAC_PKT_MAX);
 		d->in_use = 0;
 		return -1;
 	}
@@ -648,23 +589,17 @@ static int uac_attach(usb_device_t *dev)
 		d->poll_ticks = 1;
 	}
 
-	/* Program the device clock to 48 kHz. */
+	/*
+	 * Program the device clock to 48 kHz, then activate the streaming alt —
+	 * and nothing else.  This matches what Linux's snd-usb-audio does to
+	 * these EarPods (verified by usbmon): it never touches the feature units.
+	 * Writing the feature units (mute/volume), in particular the microphone
+	 * units, flips the EarPods into a sticky mic-monitor mode that silences
+	 * USB playback until the device is physically re-plugged.  The power-on FU
+	 * defaults already pass USB audio to the headphone, so leave them alone.
+	 */
 	if (p.clock_id != 0) {
 		(void)uac_set_clock_rate(dev, p.ac_iface, p.clock_id, UAC_RATE_HZ);
-	}
-	/* Configure feature units: unmute/raise the playback path, but mute any
-	 * fed from a microphone input so the device does not monitor the in-line
-	 * mic into the headphone output. */
-	for (int i = 0; i < p.n_fu; i++) {
-		int playback = 1;
-		for (int j = 0; j < p.n_mic_term; j++) {
-			if (p.fu_src[i] == p.mic_term[j]) {
-				playback = 0;
-				break;
-			}
-		}
-		uac_setup_feature_unit(dev, p.ac_iface, p.fu_id[i], p.is_uac2,
-		                       playback);
 	}
 	/* Activate the streaming alt setting (brings the iso endpoint live). */
 	rc = usb_set_interface(dev, d->as_iface, d->as_alt);
@@ -672,7 +607,7 @@ static int uac_attach(usb_device_t *dev)
 		kprintf("uac: SET_INTERFACE(%u, alt %u) failed (%d)\n",
 		        d->as_iface, d->as_alt, rc);
 		kfree(d->fifo_buf, UAC_FIFO_BYTES);
-		dma_free_coherent(d->ring, UAC_RING_SLOTS * UAC_PKT_BYTES);
+		dma_free_coherent(d->ring, UAC_RING_SLOTS * UAC_PKT_MAX);
 		d->in_use = 0;
 		return -1;
 	}
@@ -683,7 +618,7 @@ static int uac_attach(usb_device_t *dev)
 		kprintf("uac: feeder kthread failed\n");
 		d->running = 0;
 		kfree(d->fifo_buf, UAC_FIFO_BYTES);
-		dma_free_coherent(d->ring, UAC_RING_SLOTS * UAC_PKT_BYTES);
+		dma_free_coherent(d->ring, UAC_RING_SLOTS * UAC_PKT_MAX);
 		d->in_use = 0;
 		return -1;
 	}
@@ -708,9 +643,9 @@ static int uac_attach(usb_device_t *dev)
 
 	dev->driver_data = d;
 	kprintf("uac: %04x:%04x playback on iface %u alt %u, iso EP 0x%02x "
-	        "(%u B/frame) -> %s, 48 kHz S16 stereo (resampling on)\n",
+	        "(%u B/frame, %u-bit) -> %s, 48 kHz stereo (resampling on)\n",
 	        dev->vendor_id, dev->product_id, d->as_iface, d->as_alt,
-	        p.ep_addr, p.ep_maxpkt, d->audio.name);
+	        p.ep_addr, d->pkt_bytes, d->sample_bytes * 8, d->audio.name);
 	return 0;
 }
 
