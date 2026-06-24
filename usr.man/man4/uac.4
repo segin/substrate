@@ -35,11 +35,16 @@ for UAC 2.0, sets it to 48 kHz with a clock-source
 .B SET_CUR
 request.
 .IP 3. 4
-Unmutes and raises the volume on each feature unit (a headset commonly
-powers up muted or at minimum volume, which is silent even with the stream
-flowing): the loudest in-range volume from
-.B GET_RANGE
-on UAC 2.0, 0 dB on UAC 1.0, applied to master/left/right.
+Leaves the device's Feature Units untouched.  Some hardware \(em notably the
+Apple EarPods \(em latches into a sticky microphone-monitor state on
+.I any
+Feature Unit write, silencing USB playback until it is physically re-plugged,
+and Linux's
+.B snd-usb-audio
+likewise programs only the clock and the alternate setting.  Playback volume is
+applied in software instead (see
+.B Volume
+below).
 .IP 4. 4
 Issues
 .B SET_INTERFACE
@@ -71,6 +76,26 @@ little-endian, stereo, and runs its DAC at a fixed 48 kHz.  Source PCM at
 any sample rate is resampled to 48 kHz with a linear interpolator before
 streaming, so a 44.1 kHz source (e.g. a typical MP3) plays at the correct
 pitch.  Input is assumed to be 16-bit stereo.
+.SS Volume
+Playback volume is applied in software, because writing the device's Feature
+Unit volume control is unsafe on some hardware (see
+.B Operation
+step 3).  The
+.BR audio (4)
+.B play.gain
+field (0\(en255, set with the
+.B AUDIO_SETINFO
+ioctl or
+.BR audioctl (1))
+scales every sample before it is sent down the wire.  The dial is mapped to the
+linear sample factor with a square-law taper \(em a fixed-point approximation of
+a logarithmic (decibel) control, since perceived loudness is logarithmic and a
+linear map would crowd the usable range into the top of the dial.  The multiply
+is performed on the 24-bit sample (after resampling and the 16-to-24-bit
+expansion) so attenuation does not discard the low bits of a 16-bit source.
+Volume defaults to full scale until
+.B play.gain
+is set.
 .SH HARDWARE
 The driver matches any device whose interface class is
 .B USB_CLASS_AUDIO

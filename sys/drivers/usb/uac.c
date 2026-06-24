@@ -113,6 +113,14 @@ typedef struct uac_dev {
 	int             started;
 	int             idle_polls;
 	uint64_t        poll_ticks;
+	/* Software playback gain (volume), Q16 fixed point (0x10000 = unity / 0 dB).
+	 * Applied per sample in the feeder AFTER resampling and AS the 16->24-bit
+	 * expansion happens, so an attenuated sample keeps its low bits instead of
+	 * truncating a 16-bit value.  Driven by AUDIO_SETINFO play.gain through a
+	 * logarithmic (square-law) taper.  We scale in software rather than writing
+	 * the device's Feature Unit volume control: on some hardware (the Apple
+	 * EarPods) any Feature Unit write sticks the device in a mic-monitor state. */
+	uint32_t        gain_q16;
 } uac_dev_t;
 
 static uac_dev_t uac_devices[UAC_MAX_DEVICES];
@@ -180,13 +188,24 @@ static void uac_feeder(void *arg)
 			if (n < UAC_PKT_BYTES) {
 				memset((uint8_t *)src + n, 0, UAC_PKT_BYTES - n);
 			}
-			/* Convert into the device's sample width. */
+			/* Convert into the device's sample width, applying the software
+			 * playback gain.  The gain multiply runs on the WIDER value
+			 * (24-bit: src*gq>>8 == (src<<8)*gq>>16), so an attenuated sample
+			 * keeps its low bits instead of truncating the 16-bit source.
+			 * gq <= 0x10000 and |src| <= 32768, so src*gq fits int32. */
+			uint32_t gq = d->gain_q16;
 			if (d->sample_bytes == 3) {
-				/* 16-bit -> 24-bit LE: [0x00][lo][hi] per sample. */
+				/* 16-bit -> 24-bit LE, gain-scaled: [lo][mid][hi] per sample. */
 				for (uint32_t k = 0; k < UAC_FRAMES_PER_PKT * 2; k++) {
-					buf[k * 3 + 0] = 0;
-					buf[k * 3 + 1] = (uint8_t)(src[k] & 0xFF);
-					buf[k * 3 + 2] = (uint8_t)((src[k] >> 8) & 0xFF);
+					int32_t s = ((int32_t)src[k] * (int32_t)gq) >> 8;
+					buf[k * 3 + 0] = (uint8_t)(s & 0xFF);
+					buf[k * 3 + 1] = (uint8_t)((s >> 8) & 0xFF);
+					buf[k * 3 + 2] = (uint8_t)((s >> 16) & 0xFF);
+				}
+			} else if (gq != 0x10000U) {
+				int16_t *dst = (int16_t *)buf;
+				for (uint32_t k = 0; k < UAC_FRAMES_PER_PKT * 2; k++) {
+					dst[k] = (int16_t)(((int32_t)src[k] * (int32_t)gq) >> 16);
 				}
 			} else {
 				memcpy(buf, src, UAC_PKT_BYTES);
@@ -240,10 +259,22 @@ static int uac_set_params(audio_dev_t *adev, audio_info_t *info)
 	if (rate > 192000) rate = 192000;
 
 	if (d) {
+		uint32_t g;
+
 		d->src_rate = rate;
 		d->rs_step = (uint32_t)(((uint64_t)rate << 16) / UAC_RATE_HZ);
 		d->rs_phase = 0;
 		d->rs_primed = 0;   /* re-prime the interpolator on the next write */
+
+		/* Map the Sun audio play.gain (0..AUDIO_MAX_GAIN) to a Q16 software
+		 * scale.  Perceived loudness is logarithmic, so a linear control packs
+		 * all the audible range into the top of the dial; use a square-law
+		 * taper instead — a float-free log approximation (each halving of the
+		 * dial is ~-12 dB), with g == AUDIO_MAX_GAIN giving unity (0x10000). */
+		g = info ? info->play.gain : AUDIO_MAX_GAIN;
+		if (g > AUDIO_MAX_GAIN) g = AUDIO_MAX_GAIN;
+		d->gain_q16 = (uint32_t)(((uint64_t)g * g * 0x10000U) /
+		              ((uint64_t)AUDIO_MAX_GAIN * AUDIO_MAX_GAIN));
 	}
 	/* Report the accepted source rate back; we resample it to 48 kHz. */
 	adev->current.play.sample_rate = rate;
@@ -584,6 +615,7 @@ static int uac_attach(usb_device_t *dev)
 	audio_fifo_init(&d->fifo, d->fifo_buf, UAC_FIFO_BYTES);
 	d->src_rate = UAC_RATE_HZ;
 	d->rs_step = 0x10000U;   /* 1:1 until set_params */
+	d->gain_q16 = 0x10000U;  /* unity (full scale) until AUDIO_SETINFO play.gain */
 	d->poll_ticks = get_hz() ? (get_hz() / 200) : 1;
 	if (d->poll_ticks == 0) {
 		d->poll_ticks = 1;
