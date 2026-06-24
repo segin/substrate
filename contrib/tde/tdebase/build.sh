@@ -77,6 +77,15 @@ cmake -G "Unix Makefiles" \
 make -j"${JOBS}"
 rm -rf "${DEST}"; make install DESTDIR="${DEST}"
 
+# substrate: the ksmserver direct-launch workaround (tdebase patch 0006) starts
+# kicker and kdesktop itself.  Their autostart .desktop entries would launch a
+# SECOND copy, which TDEUniqueApplication defers via newInstance() (tdelibs
+# patch 0009) — but kicker's newInstance reloads the panel, so the taskbar
+# visibly loads twice.  Drop the redundant entries so the workaround is the
+# sole launcher of the panel and desktop shell.
+rm -f "${DEST}/opt/trinity/share/autostart/panel.desktop" \
+      "${DEST}/opt/trinity/share/autostart/kdesktop.desktop"
+
 _n=0
 for so in $(find "${DEST}/opt/trinity" -name '*.so*' -type f); do
     printf '\100' | dd of="${so}" bs=1 seek=7 count=1 conv=notrunc status=none 2>/dev/null && _n=$((_n+1))
