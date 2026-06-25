@@ -12,6 +12,7 @@ static void vga_putpixel_linear(int x, int y, uint32_t color);
 static void vga_putpixel_planar(int x, int y, uint32_t color);
 static void herc_putpixel(int x, int y, uint32_t color);
 static void cga_putpixel(int x, int y, uint32_t color);
+static void cga_putpixel_1bpp(int x, int y, uint32_t color);
 
 /* ================== Mode Definitions ================== */
 
@@ -87,7 +88,7 @@ static const vga_regs_t regs_12h = {
 
 /* Mode 10h Register Data (EGA/VGA 640x350x16) */
 static const vga_regs_t regs_10h = {
-    .misc = VGA_MISC_CLK_28MHZ | VGA_MISC_IO_ADDR_SEL | VGA_MISC_RAM_EN | VGA_MISC_PAGE_ODD_EVEN, /* 0xA7 */
+    .misc = VGA_MISC_CLK_25MHZ | VGA_MISC_IO_ADDR_SEL | VGA_MISC_RAM_EN | VGA_MISC_PAGE_ODD_EVEN | VGA_MISC_VSYNC_NEG, /* 0xA3: 25 MHz, +H/-V (350-line) */
     .seq  = { 0x03, 0x01, 0x0F, 0x00, 0x06 },
     .crtc = { 
         0x5B, /* 00: HTotal */
@@ -111,11 +112,15 @@ static const vga_regs_t regs_10h = {
         0xA3, /* 17: ModeControl */
         0xFF  /* 18: LineCompare */
     },
-    .gc   = { 0x00, 0x00, 0x00, 0x00, 0x00, 0x10, 0x0E, 0x00, 0xFF },
+    /* Planar graphics: Mode 0, GC Misc 0x05 (graphics, map @ 0xA0000), all
+     * planes "don't care".  Was {…,0x10,0x0E,0x00,…} — alpha/text mode with
+     * odd/even chaining and the memory map at 0xB8000, which is why mode 0x10
+     * never displayed. */
+    .gc   = { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x05, 0x0F, 0xFF },
     .ac   = {
         0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x14, 0x07,
-        0x38, 0x39, 0x3A, 0x3B, 0x3C, 0x3D, 0x3E, 0x3F, 
-        0x01, 0x00, 0x0F, 0x00, 0x00 
+        0x38, 0x39, 0x3A, 0x3B, 0x3C, 0x3D, 0x3E, 0x3F,
+        0x01, 0x00, 0x0F, 0x00, 0x00
     }
 };
 
@@ -198,8 +203,41 @@ static void init_cga(void) {
        Val 0x30 = 0011 0000
     */
     outb(0x3D9, 0x30);
-    
+
     kprint("VGA: CGA Mode 4 initialized.\n");
+}
+
+static void init_cga_mode6(void) {
+    /* CGA Mode 6 (640x200x1) — same 6845 timing as mode 4, but the high-res
+     * 640-column graphics mode (mode-control bit 4 doubles the dot clock so
+     * each of the 40 "characters" is 16 dots = 640 pixels).  1bpp / 2 colours,
+     * same 2-way scanline interleave at 0xB8000. */
+    static const uint8_t regs[] = {
+        0x38, /* 00: HTotal */
+        0x28, /* 01: HDisplay (40 chars -> 640 hi-res px) */
+        0x2D, /* 02: HSyncPos */
+        0x0A, /* 03: SyncWidth */
+        0x7F, /* 04: VTotal */
+        0x06, /* 05: VAdjust */
+        0x64, /* 06: VDisplay (100 rows -> 200 lines) */
+        0x70, /* 07: VSyncPos */
+        0x02, /* 08: Interlace */
+        0x01, /* 09: MaxScan */
+        0x00, 0x00, 0x00, 0x00
+    };
+
+    /* Mode Control (0x3D8): Graphics | Video Enable | 640x200 (bit 4). */
+    outb(0x3D8, 0x1A);
+
+    for (int i = 0; i < 14; i++) {
+        outb(0x3D4, i);
+        outb(0x3D5, regs[i]);
+    }
+
+    /* Color Select (0x3D9): foreground (the set bits) = white. */
+    outb(0x3D9, 0x0F);
+
+    kprint("VGA: CGA Mode 6 (640x200x1) initialized.\n");
 }
 
 /* Mode Table */
@@ -210,7 +248,8 @@ static const vga_mode_def_t vga_modes[] = {
     { .width = 640, .height = 350, .bpp = 4, .mode_id = 10, .regs = &regs_10h, .init_func = NULL, .putpixel = vga_putpixel_planar, .mem_base = VGA_GFX_MEM_BASE, .pitch = 80 },
     /* Legacy / Special Modes */
     { .width = 720, .height = 348, .bpp = 1, .mode_id = 7,  .regs = NULL,      .init_func = init_hercules, .putpixel = herc_putpixel,       .mem_base = VGA_HERC_MEM_BASE, .pitch = 90 },
-    { .width = 320, .height = 200, .bpp = 2, .mode_id = 4,  .regs = NULL,      .init_func = init_cga,      .putpixel = cga_putpixel,        .mem_base = VGA_CGA_MEM_BASE,  .pitch = 80 }
+    { .width = 320, .height = 200, .bpp = 2, .mode_id = 4,  .regs = NULL,      .init_func = init_cga,       .putpixel = cga_putpixel,      .mem_base = VGA_CGA_MEM_BASE,  .pitch = 80 },
+    { .width = 640, .height = 200, .bpp = 1, .mode_id = 6,  .regs = NULL,      .init_func = init_cga_mode6, .putpixel = cga_putpixel_1bpp, .mem_base = VGA_CGA_MEM_BASE,  .pitch = 80 }
 };
 
 #define VGA_MODE_COUNT (sizeof(vga_modes) / sizeof(vga_modes[0]))
@@ -454,6 +493,19 @@ static void cga_putpixel(int x, int y, uint32_t color) {
     uint8_t mask = 0x03 << shift;
     
     *mem = (*mem & ~mask) | ((color & 0x03) << shift);
+}
+
+static void cga_putpixel_1bpp(int x, int y, uint32_t color) {
+    if (x < 0 || x >= (int)fb.width || y < 0 || y >= (int)fb.height) return;
+
+    /* Same 2-way scanline interleave as mode 4 (even lines at base, odd lines
+     * at base+0x2000), but 1 bit per pixel / 8 pixels per byte. */
+    uintptr_t bank_offset = (y & 1) ? 0x2000 : 0;
+    uintptr_t offset = (uintptr_t)(y >> 1) * fb.pitch + (x / 8);
+    volatile uint8_t *mem = (volatile uint8_t *)((uintptr_t)fb.addr + bank_offset + offset);
+    uint8_t mask = 1u << (7 - (x % 8));
+
+    if (color & 1) *mem |= mask; else *mem &= (uint8_t)~mask;
 }
 
 /* ================== Driver Interface ================== */
