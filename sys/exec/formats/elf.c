@@ -1105,11 +1105,15 @@ static int exec_setup_stack(pmap_t pmap, uint32_t *sp_out, char **k_argv, int ar
         } \
     } while(0)
     
+    /* Strings are packed back-to-back (no per-string alignment): byte strings
+     * have no alignment requirement, and packing keeps the argv/envp regions
+     * contiguous with single NUL separators, so /proc/<pid>/cmdline reads
+     * exactly like Linux's.  The auxv and pointer arrays below are realigned
+     * (sp &= ~15) independently. */
     #define PUSH_STRING(str, ptr_out) do { \
         const char *s = (str); \
         size_t len = strlen(s) + 1; \
         sp -= len; \
-        sp &= ~3; /* 4-byte align */ \
         ptr_out = sp; \
         for (size_t i = 0; i < len; i++) { \
             uint32_t addr = ptr_out + i; \
