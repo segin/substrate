@@ -21,9 +21,12 @@
 set -eu
 
 # Flags:
-#   --gfx    add vga=1024x768@32 + -vga std so substrate's BGA fb driver
-#            brings up a graphical framebuffer.  Without --gfx, qemu's
-#            default display (hardware text mode) is used.
+#   --gfx[=WxH@bpp]
+#            add `vga=<mode>` + -vga std so substrate's fb driver brings up a
+#            graphical framebuffer.  Bare --gfx uses 1024x768@32 (BGA linear);
+#            pass a mode to override, e.g. --gfx=640x480@4 (planar VGA) or
+#            --gfx=800x600@16.  Without --gfx at all, qemu's default display
+#            (hardware text mode) is used.
 #   --kvm    opt in to -accel kvm.  Default is TCG software emulation
 #            because KVM has a coherence bug on i386 that produces
 #            transient single-byte read corruption right after a
@@ -77,6 +80,7 @@ set -eu
 #            they won't show up — fall back to --drive).
 #            (Images are attached raw; for qcow2 etc. edit the format= below.)
 GFX=0
+GFX_MODE="1024x768@32"   # used for bare --gfx; --gfx=WxH@bpp overrides
 KVM=0
 USERNET=0
 DEBUG=0
@@ -89,6 +93,11 @@ EXTRA_CTRL_DRIVES=""
 while [ $# -gt 0 ]; do
     case "$1" in
         --gfx)      GFX=1 ;;
+        --gfx=*)    GFX=1; GFX_MODE="${1#--gfx=}"
+                    case "$GFX_MODE" in
+                        [0-9]*x[0-9]*) : ;;
+                        *) echo "run-networking.sh: --gfx needs WxH or WxH@bpp (e.g. --gfx=640x480@4)" >&2; exit 1 ;;
+                    esac ;;
         --kvm)      KVM=1 ;;
         --user)     USERNET=1 ;;
         --debug)    DEBUG=1 ;;
@@ -185,8 +194,9 @@ APPEND="root=/dev/storage/sata0 trap serial_debug"
 GFX_ARGS=""
 ACCEL_ARG=""
 if [ "$GFX" -eq 1 ]; then
-    APPEND="$APPEND vga=1024x768@32"
+    APPEND="$APPEND vga=$GFX_MODE"
     GFX_ARGS="-vga std"
+    echo "run-networking.sh: graphical framebuffer, vga=$GFX_MODE"
 fi
 if [ "$KVM" -eq 1 ]; then
     ACCEL_ARG="-accel kvm"
