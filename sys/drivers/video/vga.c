@@ -54,7 +54,7 @@ static const vga_regs_t regs_13h = {
 /* Mode 12h Register Data (VGA 640x480x16) */
 static const vga_regs_t regs_12h = {
     .misc = VGA_MISC_CLK_25MHZ | VGA_MISC_HSYNC_NEG | VGA_MISC_VSYNC_NEG | VGA_MISC_IO_ADDR_SEL | VGA_MISC_RAM_EN | VGA_MISC_PAGE_ODD_EVEN, /* 0xE3 */
-    .seq  = { 0x03, 0x01, 0x0F, 0x00, VGA_SEQ_MEM_MODE_EXT_MEM }, /* 0x02 */
+    .seq  = { 0x03, 0x01, 0x0F, 0x00, VGA_SEQ_MEM_MODE_EXT_MEM | VGA_SEQ_MEM_MODE_ODD_EVEN }, /* 0x06: planar — extended memory + odd/even addressing DISABLED */
     .crtc = {
         0x5F, /* 00: HTotal */
         0x4F, /* 01: HDisplay */
