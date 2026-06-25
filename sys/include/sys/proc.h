@@ -123,7 +123,14 @@ typedef struct process {
     uint16_t cmdline_tail_len;
     uint16_t cmdline_tail_argc;
     char cmdline_tail[PROC_CMDLINE_MAX];
-    
+    /* Live argv region on the user stack, captured by exec.  When set,
+     * /proc/<pid>/cmdline reads [arg_start, arg_end) straight out of the
+     * process's address space, so it reflects in-place argv rewrites
+     * (setproctitle) and is not capped to cmdline_tail's size.  0 = unset
+     * (kernel thread / pre-exec) -> fall back to the cmdline_tail snapshot. */
+    uint32_t arg_start;
+    uint32_t arg_end;
+
     // Memory management
     uint32_t brk;        // Program break (heap end)
     uint32_t brk_start;  // Initial program break

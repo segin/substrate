@@ -1128,6 +1128,29 @@ static size_t proc_pid_cmdline_read(fs_node_t *node, off_t offset, size_t size, 
     size_t total_len;
 
     if (!p) return 0;
+
+    /* Preferred path: read the LIVE argv region straight out of the process's
+     * address space, so the result reflects any in-place argv rewrite
+     * (setproctitle) and is bounded by the actual region, not the fixed-size
+     * cmdline_tail snapshot.  The reader supplies (offset, size), so serve the
+     * requested slice directly via the cross-pmap copy. */
+    if (p->pmap && p->arg_start && p->arg_end > p->arg_start) {
+        size_t total = (size_t)(p->arg_end - p->arg_start);
+        size_t want;
+
+        if ((size_t)offset >= total) return 0;
+        want = size;
+        if ((size_t)offset + want > total) {
+            want = total - (size_t)offset;
+        }
+        return pmap_copyin_other(p->pmap,
+                                 (uintptr_t)p->arg_start + (uintptr_t)offset,
+                                 buffer, want);
+    }
+
+    /* Fallback: the exec-time snapshot (kernel threads, pre-exec processes, a
+     * personality that doesn't lay out a standard argv region, or a torn-down
+     * address space). */
     total_len = proc_emit_cmdline(p, cmdline, sizeof(cmdline), NULL);
 
     if ((size_t)offset >= total_len) return 0;

@@ -1069,6 +1069,10 @@ static int exec_setup_stack(pmap_t pmap, uint32_t *sp_out, char **k_argv, int ar
     if (current_process) {
         current_process->ustack_top   = user_stack_top;
         current_process->ustack_limit = user_stack_top - USER_STACK_MAX;
+        /* Reset the live argv window; it is filled in below once the argv
+         * strings have been laid out at known user addresses. */
+        current_process->arg_start = 0;
+        current_process->arg_end   = 0;
     }
     
     /*
@@ -1127,10 +1131,22 @@ static int exec_setup_stack(pmap_t pmap, uint32_t *sp_out, char **k_argv, int ar
     }
 
     if (k_argv) {
+        uint32_t arg_hi = 0;
         for (int i = argc - 1; i >= 0; i--) {
             uint32_t user_ptr;
+            size_t slen = strlen(k_argv[i]) + 1;
             PUSH_STRING(k_argv[i], user_ptr);
+            /* argv[argc-1] is pushed first, so it lands at the highest argv
+             * address; its end bounds the top of the live argv region. */
+            if (i == argc - 1) arg_hi = user_ptr + (uint32_t)slen;
             k_argv[i] = (char*)(uintptr_t)user_ptr;
+        }
+        /* argv[0] is pushed last (lowest address).  Record [argv[0], end of
+         * argv[argc-1]) as the live argv region for /proc/<pid>/cmdline. */
+        if (current_process && argc > 0 &&
+            arg_hi > (uint32_t)(uintptr_t)k_argv[0]) {
+            current_process->arg_start = (uint32_t)(uintptr_t)k_argv[0];
+            current_process->arg_end   = arg_hi;
         }
     }
 

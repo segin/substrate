@@ -105,6 +105,12 @@ int pmap_enter_large(pmap_t pmap, uintptr_t va, uintptr_t pa, uint32_t prot, uin
 void pmap_remove(pmap_t pmap, uintptr_t va);
 void pmap_remove_range(pmap_t pmap, uint32_t sva, uint32_t eva);
 uintptr_t pmap_extract(pmap_t pmap, uintptr_t va); // Get PA from VA
+/* Copy `len` bytes from user vaddr `uva` in a possibly NON-active pmap into the
+ * kernel buffer `dst`, walking the target's page tables through the physical
+ * direct map (so it works on a process other than the current one, unlike
+ * pmap_extract).  Stops at the first unmapped / out-of-direct-map page; returns
+ * the number of bytes copied.  Used by procfs to read a process's live argv. */
+size_t pmap_copyin_other(pmap_t pmap, uintptr_t uva, void *dst, size_t len);
 
 // Protection flags for pmap_enter
 #define VM_PROT_READ    0x01

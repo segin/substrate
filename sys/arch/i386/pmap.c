@@ -1334,6 +1334,58 @@ uintptr_t pmap_extract(pmap_t pmap, uintptr_t va) {
     return (pt[pti] & 0xFFFFF000) + (va & 0xFFF);
 }
 
+size_t pmap_copyin_other(pmap_t pmap, uintptr_t uva, void *dst, size_t len) {
+    uint8_t *d = (uint8_t *)dst;
+    size_t got = 0;
+    uint32_t *pd;
+
+    /* The directory, the page tables, and the user pages they map are all
+     * reachable through the 0xC0000000 physical direct map: substrate runs with
+     * <= 1 GiB RAM, so every PMM-backed page sits below 0x40000000.  Reject any
+     * physical address beyond the direct map rather than dereference a wild
+     * pointer (e.g. a freed pmap whose pdir_phys is now garbage). */
+    if (!pmap || pmap->pdir_phys >= 0x40000000) {
+        return 0;
+    }
+    pd = (uint32_t *)(pmap->pdir_phys + 0xC0000000);
+
+    while (got < len) {
+        uintptr_t va = uva + got;
+        uint32_t pde = pd[PD_INDEX(va)];
+        uintptr_t pa;
+        size_t page_off, chunk;
+
+        if (!(pde & PTE_P)) {
+            break;
+        }
+        if (pde & PTE_PS) {
+            pa = (pde & 0xFFC00000) + (va & 0x3FFFFF);
+        } else {
+            uint32_t pt_phys = pde & 0xFFFFF000;
+            uint32_t pte;
+            if (pt_phys >= 0x40000000) {
+                break;
+            }
+            pte = ((uint32_t *)(pt_phys + 0xC0000000))[PT_INDEX(va)];
+            if (!(pte & PTE_P)) {
+                break;
+            }
+            pa = (pte & 0xFFFFF000) + (va & 0xFFF);
+        }
+        if (pa >= 0x40000000) {
+            break;
+        }
+        page_off = va & 0xFFF;
+        chunk = 0x1000 - page_off;
+        if (chunk > len - got) {
+            chunk = len - got;
+        }
+        memcpy(d + got, (const void *)(pa + 0xC0000000), chunk);
+        got += chunk;
+    }
+    return got;
+}
+
 // Change page protections for a virtual address range
 // Returns 0 on success, -1 on error
 int pmap_protect(pmap_t pmap, uintptr_t sva, uintptr_t eva, uint32_t prot) {

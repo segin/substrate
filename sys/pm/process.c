@@ -467,6 +467,11 @@ static int proc_fork_common(process_t *parent, void *stack, int is_vfork) {
     child_proc->cmdline_tail_len = parent->cmdline_tail_len;
     child_proc->cmdline_tail_argc = parent->cmdline_tail_argc;
     memcpy(child_proc->cmdline_tail, parent->cmdline_tail, sizeof(child_proc->cmdline_tail));
+    /* The child's COW address space places argv at the same user addresses,
+     * so the live arg region read by /proc/<pid>/cmdline carries over too
+     * (until the child exec()s and rebuilds it). */
+    child_proc->arg_start = parent->arg_start;
+    child_proc->arg_end   = parent->arg_end;
     child_proc->brk_start = parent->brk_start;
     child_proc->brk = parent->brk;
 
