@@ -11,8 +11,6 @@ extern fb_info_t fb;
 static void vga_putpixel_linear(int x, int y, uint32_t color);
 static void vga_putpixel_planar(int x, int y, uint32_t color);
 static void herc_putpixel(int x, int y, uint32_t color);
-static void cga_putpixel(int x, int y, uint32_t color);
-static void cga_putpixel_1bpp(int x, int y, uint32_t color);
 
 /* ================== Mode Definitions ================== */
 
@@ -160,86 +158,6 @@ static void init_hercules(void) {
     outb(0x3B8, 0x0A); 
 }
 
-static void init_cga(void) {
-    /* CGA Mode 4 (320x200x4) Register Values */
-    static const uint8_t regs[] = {
-        0x38, /* 00: HTotal (56 chars) */
-        0x28, /* 01: HDisplay (40 chars -> 320 px) */
-        0x2D, /* 02: HSyncPos (45) */
-        0x0A, /* 03: SyncWidth (10) */
-        0x7F, /* 04: VTotal (127 rows -> 128 typically) */
-        0x06, /* 05: VAdjust (6 scanlines) */
-        0x64, /* 06: VDisplay (100 rows -> 200 lines) */
-        0x70, /* 07: VSyncPos (112) */
-        0x02, /* 08: Interlace */
-        0x01, /* 09: MaxScan (1+1 = 2 lines/row) */
-        0x00, /* 10: CursorStart */
-        0x00, /* 11: CursorEnd */
-        0x00, /* 12: StartAddrH */
-        0x00  /* 13: StartAddrL */
-    };
-
-    /* Mode Control (0x3D8): 
-       Bit 0: 40/80 Col (0=40)
-       Bit 1: Graphics (1)
-       Bit 2: Color/BW (0=Color)
-       Bit 3: Video Enable (1)
-       Bit 4: 320/640 (0=320)
-       Bit 5: Blink
-       Val 0x0A = 0000 1010 -> Graphics | Video Enable
-    */
-    outb(0x3D8, 0x0A);
-    
-    /* Program 6845 CRT Controller */
-    for (int i = 0; i < 14; i++) {
-        outb(0x3D4, i);
-        outb(0x3D5, regs[i]);
-    }
-    
-    /* Color Select (0x3D9): 
-       Bit 0-3: Overscan/Background (0)
-       Bit 4: Intensity (1)
-       Bit 5: Palette (1 = Cyan/Magenta/White)
-       Val 0x30 = 0011 0000
-    */
-    outb(0x3D9, 0x30);
-
-    kprint("VGA: CGA Mode 4 initialized.\n");
-}
-
-static void init_cga_mode6(void) {
-    /* CGA Mode 6 (640x200x1) — same 6845 timing as mode 4, but the high-res
-     * 640-column graphics mode (mode-control bit 4 doubles the dot clock so
-     * each of the 40 "characters" is 16 dots = 640 pixels).  1bpp / 2 colours,
-     * same 2-way scanline interleave at 0xB8000. */
-    static const uint8_t regs[] = {
-        0x38, /* 00: HTotal */
-        0x28, /* 01: HDisplay (40 chars -> 640 hi-res px) */
-        0x2D, /* 02: HSyncPos */
-        0x0A, /* 03: SyncWidth */
-        0x7F, /* 04: VTotal */
-        0x06, /* 05: VAdjust */
-        0x64, /* 06: VDisplay (100 rows -> 200 lines) */
-        0x70, /* 07: VSyncPos */
-        0x02, /* 08: Interlace */
-        0x01, /* 09: MaxScan */
-        0x00, 0x00, 0x00, 0x00
-    };
-
-    /* Mode Control (0x3D8): Graphics | Video Enable | 640x200 (bit 4). */
-    outb(0x3D8, 0x1A);
-
-    for (int i = 0; i < 14; i++) {
-        outb(0x3D4, i);
-        outb(0x3D5, regs[i]);
-    }
-
-    /* Color Select (0x3D9): foreground (the set bits) = white. */
-    outb(0x3D9, 0x0F);
-
-    kprint("VGA: CGA Mode 6 (640x200x1) initialized.\n");
-}
-
 /* Mode Table */
 /* Prioritize standard VGA modes */
 static const vga_mode_def_t vga_modes[] = {
@@ -248,8 +166,6 @@ static const vga_mode_def_t vga_modes[] = {
     { .width = 640, .height = 350, .bpp = 4, .mode_id = 10, .regs = &regs_10h, .init_func = NULL, .putpixel = vga_putpixel_planar, .mem_base = VGA_GFX_MEM_BASE, .pitch = 80 },
     /* Legacy / Special Modes */
     { .width = 720, .height = 348, .bpp = 1, .mode_id = 7,  .regs = NULL,      .init_func = init_hercules, .putpixel = herc_putpixel,       .mem_base = VGA_HERC_MEM_BASE, .pitch = 90 },
-    { .width = 320, .height = 200, .bpp = 2, .mode_id = 4,  .regs = NULL,      .init_func = init_cga,       .putpixel = cga_putpixel,      .mem_base = VGA_CGA_MEM_BASE,  .pitch = 80 },
-    { .width = 640, .height = 200, .bpp = 1, .mode_id = 6,  .regs = NULL,      .init_func = init_cga_mode6, .putpixel = cga_putpixel_1bpp, .mem_base = VGA_CGA_MEM_BASE,  .pitch = 80 }
 };
 
 #define VGA_MODE_COUNT (sizeof(vga_modes) / sizeof(vga_modes[0]))
@@ -477,37 +393,6 @@ static void herc_putpixel(int x, int y, uint32_t color) {
     else       *mem &= ~bit_mask;
 }
 
-static void cga_putpixel(int x, int y, uint32_t color) {
-    if (x < 0 || x >= (int)fb.width || y < 0 || y >= (int)fb.height) return;
-    
-    /* 2-way Interleave */
-    /* Even Lines: Base + 0x0000 */
-    /* Odd Lines:  Base + 0x2000 */
-    uintptr_t bank_offset = (y & 1) ? 0x2000 : 0;
-    uintptr_t offset = (y >> 1) * fb.pitch + (x / 4);
-    
-    volatile uint8_t *mem = (volatile uint8_t *)((uintptr_t)fb.addr + bank_offset + offset);
-    
-    /* 2 bits per pixel */
-    int shift = 6 - ((x % 4) * 2);
-    uint8_t mask = 0x03 << shift;
-    
-    *mem = (*mem & ~mask) | ((color & 0x03) << shift);
-}
-
-static void cga_putpixel_1bpp(int x, int y, uint32_t color) {
-    if (x < 0 || x >= (int)fb.width || y < 0 || y >= (int)fb.height) return;
-
-    /* Same 2-way scanline interleave as mode 4 (even lines at base, odd lines
-     * at base+0x2000), but 1 bit per pixel / 8 pixels per byte. */
-    uintptr_t bank_offset = (y & 1) ? 0x2000 : 0;
-    uintptr_t offset = (uintptr_t)(y >> 1) * fb.pitch + (x / 8);
-    volatile uint8_t *mem = (volatile uint8_t *)((uintptr_t)fb.addr + bank_offset + offset);
-    uint8_t mask = 1u << (7 - (x % 8));
-
-    if (color & 1) *mem |= mask; else *mem &= (uint8_t)~mask;
-}
-
 /* ================== Driver Interface ================== */
 
 static int vga_list_modes(struct video_mode_info *modes, int max_count) {
@@ -555,7 +440,7 @@ static int vga_set_mode_internal(int mode_id) {
     /* Install planar-VGA accelerators when this is a planar EGA/VGA
      * mode — 4bpp byte-packed planes, byte-aligned region ops via
      * the latch + Set/Reset paths.  Non-planar modes (linear 8bpp
-     * mode 13, Hercules, CGA) keep the per-pixel fallback. */
+     * mode 13, Hercules) keep the per-pixel fallback. */
     if (mode->putpixel == vga_putpixel_planar) {
         fb.copyarea = vga_copyarea_planar;
         fb.fillrect = vga_fillrect_planar;
@@ -630,7 +515,7 @@ static int vga_probe(void) {
 }
 
 static int vga_init_driver(fb_info_t *info) {
-    kprint("VGA: Initializing Unified Driver [VGA/EGA/CGA/Hercules]\n");
+    kprint("VGA: Initializing Unified Driver [VGA/EGA/Hercules]\n");
     /* Default Mode 12h (640x480x16) */
     if (vga_set_mode_internal(12) == 0) {
         *info = fb; 
