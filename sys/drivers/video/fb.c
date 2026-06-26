@@ -479,10 +479,13 @@ static int fb_fs_ioctl(fs_node_t *node, uint32_t request, void *arg) {
         vi.yres = fb.height;
         vi.xres_virtual = fb.virt_width ? fb.virt_width : fb.width;
         vi.yres_virtual = fb.virt_height ? fb.virt_height : fb.height;
-        vi.bits_per_pixel = fb.bpp;
+        /* Planar VGA/EGA is exposed to userland as an 8bpp linear shim (see
+         * the /dev/fb0 mmap path); report that, not the 4bpp planar depth. */
+        vi.bits_per_pixel = (fb.blit_indexed != NULL) ? 8 : fb.bpp;
 
         fb_set_default_color_layout(&fb);
-        if (fb.red_length || fb.green_length || fb.blue_length) {
+        if (fb.blit_indexed == NULL &&
+            (fb.red_length || fb.green_length || fb.blue_length)) {
             vi.red.offset = fb.red_offset;
             vi.red.length = fb.red_length;
             vi.green.offset = fb.green_offset;
@@ -522,14 +525,21 @@ static int fb_fs_ioctl(fs_node_t *node, uint32_t request, void *arg) {
          * to get a userland mapping; the absolute physical value
          * isn't meaningful to userland but Linux puts it here for
          * informational use). */
-        fi.smem_start = (unsigned long)(uintptr_t)fb.addr;
-        fi.smem_len = fb.pitch * fb.height;
-        /* type=PACKED_PIXELS for linear, PLANES for planar VGA.
-         * visual=TRUECOLOR for RGB linear, PSEUDOCOLOR for indexed. */
+        if (fb.blit_indexed != NULL) {
+            /* Planar: report the 8bpp linear shim, not the planar aperture. */
+            fi.smem_start = 0;   /* RAM shim, allocated on first mmap */
+            fi.smem_len = (unsigned long)((size_t)fb.width * (size_t)fb.height);
+            fi.line_length = fb.width;
+        } else {
+            fi.smem_start = (unsigned long)(uintptr_t)fb.addr;
+            fi.smem_len = fb.pitch * fb.height;
+            fi.line_length = fb.pitch;
+        }
+        /* PACKED_PIXELS for both (the planar shim is linear to userland);
+         * TRUECOLOR for RGB linear, PSEUDOCOLOR for indexed (incl. planar). */
         fi.type = 0;       /* FB_TYPE_PACKED_PIXELS */
         fi.type_aux = 0;
         fi.visual = (fb.bpp >= 16) ? 2 /* TRUECOLOR */ : 3 /* PSEUDOCOLOR */;
-        fi.line_length = fb.pitch;
         fi.xpanstep = fb.virt_width > fb.width ? 1 : 0;
         fi.ypanstep = fb.virt_height > fb.height ? 1 : 0;
         fi.ywrapstep = 0;
@@ -772,6 +782,51 @@ void fb_client_clear(void *owner) {
     spinlock_release(&fb_shadow_lock);
 }
 
+/* ===== Linear /dev/fb0 shim for planar framebuffers (VGA/EGA) =====
+ *
+ * Planar VGA/EGA has no directly-mmap'able linear aperture: the 4 bit planes
+ * overlap at one 64 KB window and a pixel is addressed through the Graphics
+ * Controller.  A userspace mmap client (Xfbdev) needs a flat linear surface,
+ * so for planar modes /dev/fb0 hands out an 8bpp colour-index RAM shim (one
+ * byte/pixel, low nibble = the 16-colour index), and a periodic flush converts
+ * it to the planes via the driver's batched blit_indexed.  The text console
+ * and a graphics client never own the screen simultaneously (the KD_GRAPHICS
+ * gate), so the console shadow and this shim never fight over the planes.
+ */
+static uint8_t   *fb_ufb_virt;   /* 8bpp linear shim (kernel VA)         */
+static uintptr_t  fb_ufb_phys;   /* physical base (device-pager handle)  */
+static size_t     fb_ufb_size;   /* allocation bytes (page-rounded)      */
+
+static inline int fb_is_planar(void) { return fb.blit_indexed != NULL; }
+static inline size_t fb_ufb_pitch(void) { return (size_t)fb.width; }
+static inline size_t fb_ufb_bytes(void) { return (size_t)fb.width * (size_t)fb.height; }
+
+static int fb_ufb_ensure(void) {
+    size_t npages;
+    void *v;
+
+    if (fb_ufb_virt) return 1;
+    if (!fb_is_planar() || fb.width == 0 || fb.height == 0) return 0;
+    npages = (fb_ufb_bytes() + 0xFFFU) >> 12;
+    v = pmm_alloc_contiguous(npages);
+    if (!v) return 0;
+    memset(v, 0, npages << 12);
+    fb_ufb_virt = v;
+    fb_ufb_phys = (uintptr_t)V2P(v);
+    fb_ufb_size = npages << 12;
+    return 1;
+}
+
+/* Convert the linear shim to the planes — the planar /dev/fb0 "scanout".
+ * Called from the console tick while a graphics client owns the screen.
+ * Safe in IRQ context: blit_indexed writes fb.addr (kernel-range direct map)
+ * and reads the shim (kernel direct map), both mapped in every pmap. */
+void fb_planar_present_userfb(void) {
+    if (!fb_ufb_virt || !fb.blit_indexed) return;
+    fb.blit_indexed(fb_ufb_virt, (uint32_t)fb_ufb_pitch(),
+                    0, 0, fb.width, fb.height);
+}
+
 static void *fb_fs_mmap(fs_node_t *node, void *addr, size_t length, int prot, int flags, off_t offset) {
     vm_object_t *obj;
     vm_map_t *map;
@@ -785,7 +840,26 @@ static void *fb_fs_mmap(fs_node_t *node, void *addr, size_t length, int prot, in
      * a uint32_t lets `offset + length > fb_size` admit any window into
      * physical RAM via /dev/fb0 mmap.
      */
-    uint64_t fb_size = (uint64_t)fb.pitch * (uint64_t)fb.height;
+    /* Planar framebuffers can't be mmap'd directly (the planes overlap a
+     * 64 KB window); hand out the linear 8bpp shim instead and convert it to
+     * the planes on flush.  Linear framebuffers map their real aperture. */
+    int planar = fb_is_planar();
+    uintptr_t base_phys;
+    uint64_t fb_size;
+    if (planar) {
+        if (!fb_ufb_ensure()) return (void *)-1;
+        base_phys = fb_ufb_phys;
+        fb_size = (uint64_t)fb_ufb_bytes();
+    } else {
+        /* The device pager treats its handle as the physical base — its
+         * vm_pager_device_phys returns handle+offset to the page-fault PTE
+         * installer.  We MUST pass fb.phys here, not fb.addr (an ioremap VA
+         * would install PTEs pointing at random RAM). */
+        if (fb.phys == 0) return (void *)-1;
+        base_phys = fb.phys;
+        fb_size = (uint64_t)fb.pitch * (uint64_t)fb.height;
+    }
+
     if (offset < 0 || length == 0) return (void *)-1;
     if ((uint64_t)offset > fb_size) return (void *)-1;
     if ((uint64_t)length > fb_size - (uint64_t)offset) return (void *)-1;
@@ -794,15 +868,6 @@ static void *fb_fs_mmap(fs_node_t *node, void *addr, size_t length, int prot, in
     aligned_length = (length + 0xFFF) & ~0xFFFU;
     map = current_process->vm_map;
     if (!map) return (void *)-1;
-
-    /* The device pager treats its handle as the physical base — its
-     * vm_pager_device_phys returns handle+offset to the page-fault
-     * PTE installer.  We MUST pass fb.phys here, not fb.addr.  Older
-     * builds passed the ioremap'd kernel virtual address: the PTE
-     * then pointed at random RAM and userspace draws were invisible
-     * (page-table install of an ioremap VA as if it were a physical
-     * frame). */
-    if (fb.phys == 0) return (void *)-1;
 
     if (virt == 0 || !(flags & MAP_FIXED)) {
         if (vm_map_find_space(map, &virt, aligned_length) != 0) return (void *)-1;
@@ -819,7 +884,7 @@ static void *fb_fs_mmap(fs_node_t *node, void *addr, size_t length, int prot, in
     obj = vm_object_allocate(VM_OBJ_TYPE_DEVICE, aligned_length);
     if (!obj) return (void *)-1;
     obj->pager = vm_pager_allocate(VM_OBJ_TYPE_DEVICE,
-                                   (void *)(fb.phys + (uintptr_t)offset),
+                                   (void *)(base_phys + (uintptr_t)offset),
                                    aligned_length,
                                    vm_prot,
                                    0);

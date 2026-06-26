@@ -71,6 +71,11 @@ int fb_register_device(fb_info_t *info);
 void fb_set_offscreen(int offscreen);
 void fb_client_clear(void *owner);
 
+/* Convert the linear /dev/fb0 shim to the planes (planar VGA/EGA only); a
+ * no-op on linear framebuffers and when no userspace client has mapped it.
+ * Driven by the console tick while a graphics client owns the screen. */
+void fb_planar_present_userfb(void);
+
 /* Console operations are in fb_console.h */
 #include "fb_console.h"
 

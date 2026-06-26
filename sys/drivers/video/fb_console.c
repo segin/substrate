@@ -2427,8 +2427,17 @@ void fb_console_tick(void) {
     /* In KD_GRAPHICS the framebuffer belongs to a userland consumer
      * (X server, fbmouse).  Suppress the cursor blink and the dirty-
      * flush — both reach into the framebuffer and would paint a
-     * blinking text-mode cursor block on top of the user's pixels. */
+     * blinking text-mode cursor block on top of the user's pixels.
+     * But on planar hardware the client draws into the linear /dev/fb0
+     * shim, which we must convert to the planes here so its frames appear;
+     * rate-limited to the console flush cadence (a full-screen plane
+     * conversion is not free). */
     if (vt && vt->graphics_mode) {
+        static unsigned int gfx_present_ticks;
+        if (++gfx_present_ticks >= fb_console_flush_period_ticks()) {
+            gfx_present_ticks = 0;
+            fb_planar_present_userfb();
+        }
         return;
     }
     FB_LOCK();
