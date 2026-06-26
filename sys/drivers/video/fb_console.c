@@ -119,6 +119,12 @@ static inline int fbcon_present_safe_in_irq(void) {
     return (uintptr_t)fb.addr >= 0xC0000000U;
 }
 
+/* Planar VGA/EGA — distinguished by the batched plane-write hook.  Planar
+ * scrolls use the in-place latch copy; linear ones a full write-only present. */
+static inline int fbcon_is_planar(void) {
+    return fb.blit_indexed != NULL;
+}
+
 /* Render an 8x16 mono glyph into the shadow at pixel (px,py), opaque bg. */
 static void fbcon_shadow_glyph(int px, int py, const uint8_t *glyph,
                                uint8_t fg_idx, uint8_t bg_idx) {
@@ -644,7 +650,7 @@ static void fb_console_pixel_scroll_region_locked(int top, int bottom,
         if (fbcon_shadow_ok()) {
             fbcon_shadow_fill((int)clear.dx, (int)clear.dy,
                               (int)clear.width, (int)clear.height, clear_idx);
-            if (fbcon_present_safe_in_irq()) {
+            if (!fbcon_is_planar()) {
                 fb_console_mark_dirty((int)clear.dx, (int)clear.dy,
                                       (int)clear.width, (int)clear.height);
             } else {
@@ -700,7 +706,7 @@ static void fb_console_pixel_scroll_region_locked(int top, int bottom,
          * carries whatever is already there upward — so the framebuffer must
          * match the *pre-scroll* shadow first.  Flush pending dirty (against
          * the not-yet-scrolled shadow) before fbcon_shadow_copy() moves it. */
-        if (!fbcon_present_safe_in_irq() && dirty_valid) {
+        if (fbcon_is_planar() && dirty_valid) {
             int fx, fy, fw, fh;
             fb_console_get_dirty_rect(&fx, &fy, &fw, &fh);
             fbcon_present(fx, fy, fw, fh);
@@ -710,7 +716,7 @@ static void fb_console_pixel_scroll_region_locked(int top, int bottom,
                           (int)area.height, (int)area.sx, (int)area.sy);
         fbcon_shadow_fill((int)clear.dx, (int)clear.dy, (int)clear.width,
                           (int)clear.height, clear_idx);
-        if (fbcon_present_safe_in_irq()) {
+        if (!fbcon_is_planar()) {
             /* Linear: present the whole moved region from the shadow,
              * write-only (no slow framebuffer read-back). */
             fb_console_mark_dirty(0, top_px, width_px, bottom_px - top_px);

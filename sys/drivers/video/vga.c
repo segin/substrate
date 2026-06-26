@@ -483,7 +483,15 @@ static int vga_set_mode_internal(int mode_id) {
     fb.height = mode->height;
     fb.bpp = mode->bpp;
     fb.pitch = mode->pitch;
-    fb.addr = (uint32_t*)mode->mem_base;
+    /* Use the higher-half direct-map alias of the legacy framebuffer window
+     * (physical 0xA0000 -> 0xC00A0000, ...).  That mapping lives in the shared
+     * kernel PDEs (768+), which pmap_create() copies into every process, so
+     * the console can present from any context — including a userland process
+     * writing to its tty.  The raw low alias (0xA0000) is only in the kernel
+     * pmap; pmap_create() clears the low PDEs, so a userland pmap leaves it
+     * unmapped and userspace output would never reach the screen. */
+    fb.addr = (uint32_t*)(mode->mem_base + 0xC0000000U);
+    fb.phys = mode->mem_base;
     fb.putpixel = mode->putpixel;
     fb.copyarea = NULL;
     fb.fillrect = NULL;
