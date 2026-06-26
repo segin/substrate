@@ -35,6 +35,15 @@ typedef struct {
                      uint32_t sx, uint32_t sy);
     void (*fillrect)(uint32_t dx, uint32_t dy, uint32_t w, uint32_t h,
                      uint32_t color);
+    /* Optional indexed-blit accelerator.  When set, the fb_console shadow
+     * buffer (8bpp colour indices, 0..15) is pushed to the device through
+     * this hook instead of the generic linear conversion.  Planar VGA/EGA
+     * drivers install it to do batched plane writes — the index maps
+     * directly onto the 4 bit planes, so a whole region costs a handful of
+     * port writes instead of ~8 per pixel.  `src` is the index buffer,
+     * `src_pitch` its row stride in bytes; the rect is pre-clipped. */
+    void (*blit_indexed)(const uint8_t *src, uint32_t src_pitch,
+                         uint32_t dx, uint32_t dy, uint32_t w, uint32_t h);
 } fb_info_t;
 
 extern fb_info_t fb;

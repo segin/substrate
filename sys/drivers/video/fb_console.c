@@ -19,6 +19,7 @@
 #include <sys/errno.h>
 #include <sys/proc.h>
 #include <arch/i386/intr.h>
+#include <vm/vm_kmem.h>
 #include "fb.h"
 #include "fb_console.h"
 #include "fb_ops.h"
@@ -72,6 +73,7 @@ static int fb_console_cursor_should_be_visible(void);
 static void fb_console_mark_dirty(int x, int y, int w, int h);
 static void fb_console_hide_cursor(void);
 static void fb_console_show_cursor(void);
+static void fb_console_flush_dirty_internal(void);
 static const struct ansi_callbacks fb_ansi_cb;
 
 static const uint32_t fb_console_palette[16] = {
@@ -80,6 +82,207 @@ static const uint32_t fb_console_palette[16] = {
     0x00555555U, 0x005555FFU, 0x0055FF55U, 0x0055FFFFU,
     0x00FF5555U, 0x00FF55FFU, 0x00FFFF55U, 0x00FFFFFFU,
 };
+
+/* ==================== Shadow framebuffer ====================
+ *
+ * The console renders into an 8bpp colour-index RAM shadow (one byte per
+ * pixel, value 0..15 indexing fb_console_palette) instead of touching the
+ * framebuffer per glyph / per scroll.  Drawing in cached RAM is fast and,
+ * crucially, never reads the framebuffer back; the accumulated dirty
+ * rectangle is pushed to the real device once per flush by fbcon_present(),
+ * write-only.  This collapses two pathologies: planar VGA/EGA glyphs (~8
+ * port-I/O writes per pixel through the per-pixel putpixel) and large linear
+ * scrolls (memmove of megabytes of uncached write-combining VRAM, read side
+ * and all).
+ *
+ * If the shadow can't be allocated, fbcon_use_shadow stays 0 and every draw
+ * path falls back to the original direct-to-framebuffer code.
+ */
+static uint8_t *fbcon_shadow = NULL;
+static int fbcon_shadow_w = 0;
+static int fbcon_shadow_h = 0;
+static size_t fbcon_shadow_sz = 0;
+static int fbcon_use_shadow = 0;
+
+static inline int fbcon_shadow_ok(void) {
+    return fbcon_use_shadow && fbcon_shadow != NULL;
+}
+
+/*
+ * True when fb.addr lives in the kernel address range (>= 0xC0000000) that
+ * every pmap maps, so a present is safe to run from the 60 Hz tick / IRQ
+ * context.  Planar VGA's fb.addr is the low 0xA0000 window, which a process
+ * pmap under construction may not map — those FBs are only presented from the
+ * synchronous write path (the writing thread's context).
+ */
+static inline int fbcon_present_safe_in_irq(void) {
+    return (uintptr_t)fb.addr >= 0xC0000000U;
+}
+
+/* Render an 8x16 mono glyph into the shadow at pixel (px,py), opaque bg. */
+static void fbcon_shadow_glyph(int px, int py, const uint8_t *glyph,
+                               uint8_t fg_idx, uint8_t bg_idx) {
+    int gy;
+
+    for (gy = 0; gy < FB_FONT_HEIGHT; gy++) {
+        int sy = py + gy;
+        uint8_t bits;
+        uint8_t *srow;
+        int gx;
+
+        if (sy < 0 || sy >= fbcon_shadow_h) {
+            continue;
+        }
+        bits = glyph[gy];
+        srow = fbcon_shadow + (size_t)sy * (size_t)fbcon_shadow_w;
+        for (gx = 0; gx < FB_FONT_WIDTH; gx++) {
+            int sx = px + gx;
+            if (sx < 0 || sx >= fbcon_shadow_w) {
+                continue;
+            }
+            srow[sx] = (bits & (0x80U >> gx)) ? fg_idx : bg_idx;
+        }
+    }
+}
+
+/* Fill a pixel rectangle of the shadow with one colour index. */
+static void fbcon_shadow_fill(int x, int y, int w, int h, uint8_t idx) {
+    int r;
+
+    if (x < 0) { w += x; x = 0; }
+    if (y < 0) { h += y; y = 0; }
+    if (x + w > fbcon_shadow_w) w = fbcon_shadow_w - x;
+    if (y + h > fbcon_shadow_h) h = fbcon_shadow_h - y;
+    if (w <= 0 || h <= 0) {
+        return;
+    }
+    for (r = 0; r < h; r++) {
+        memset(fbcon_shadow + (size_t)(y + r) * (size_t)fbcon_shadow_w + x,
+               idx, (size_t)w);
+    }
+}
+
+/* Copy a pixel rectangle within the shadow (handles vertical overlap). */
+static void fbcon_shadow_copy(int dx, int dy, int w, int h, int sx, int sy) {
+    int r;
+
+    if (w <= 0 || h <= 0) {
+        return;
+    }
+    if (dy < sy) {
+        for (r = 0; r < h; r++) {
+            memmove(fbcon_shadow + (size_t)(dy + r) * (size_t)fbcon_shadow_w + dx,
+                    fbcon_shadow + (size_t)(sy + r) * (size_t)fbcon_shadow_w + sx,
+                    (size_t)w);
+        }
+    } else {
+        for (r = h - 1; r >= 0; r--) {
+            memmove(fbcon_shadow + (size_t)(dy + r) * (size_t)fbcon_shadow_w + dx,
+                    fbcon_shadow + (size_t)(sy + r) * (size_t)fbcon_shadow_w + sx,
+                    (size_t)w);
+        }
+    }
+}
+
+/* Toggle the underline-cursor band (bottom two rows of a cell) in the shadow. */
+static void fbcon_shadow_cursor_xor(int x, int y) {
+    int py;
+
+    for (py = FB_FONT_HEIGHT - 2; py < FB_FONT_HEIGHT; py++) {
+        int sy = y + py;
+        uint8_t *srow;
+        int px;
+
+        if (sy < 0 || sy >= fbcon_shadow_h) {
+            continue;
+        }
+        srow = fbcon_shadow + (size_t)sy * (size_t)fbcon_shadow_w;
+        for (px = 0; px < FB_FONT_WIDTH; px++) {
+            int sx = x + px;
+            if (sx < 0 || sx >= fbcon_shadow_w) {
+                continue;
+            }
+            srow[sx] ^= 0x0FU;
+        }
+    }
+}
+
+/*
+ * Push a dirty rectangle of the shadow to the real framebuffer, write-only.
+ * Planar drivers go through their batched blit_indexed hook; linear ones get a
+ * direct palette conversion (a fast 32bpp XRGB path plus a generic fb_putpixel
+ * fallback for other depths).  Never reads the framebuffer back.
+ */
+static void fbcon_present(int x, int y, int w, int h) {
+    int row, px;
+
+    if (!fbcon_shadow_ok()) {
+        return;
+    }
+    if (x < 0) { w += x; x = 0; }
+    if (y < 0) { h += y; y = 0; }
+    if (x + w > (int)fb.width)  w = (int)fb.width - x;
+    if (y + h > (int)fb.height) h = (int)fb.height - y;
+    if (w <= 0 || h <= 0) {
+        return;
+    }
+
+    if (fb.blit_indexed) {
+        fb.blit_indexed(fbcon_shadow, (uint32_t)fbcon_shadow_w,
+                        (uint32_t)x, (uint32_t)y, (uint32_t)w, (uint32_t)h);
+        return;
+    }
+
+    if (fb.bpp == 32 && fb.red_offset == 16 && fb.green_offset == 8 &&
+        fb.blue_offset == 0) {
+        for (row = y; row < y + h; row++) {
+            const uint8_t *srow =
+                fbcon_shadow + (size_t)row * (size_t)fbcon_shadow_w;
+            uint32_t *frow =
+                (uint32_t *)((uintptr_t)fb.addr + (size_t)row * fb.pitch);
+            for (px = x; px < x + w; px++) {
+                frow[px] = fb_console_palette[srow[px] & 0x0FU];
+            }
+        }
+    } else {
+        for (row = y; row < y + h; row++) {
+            const uint8_t *srow =
+                fbcon_shadow + (size_t)row * (size_t)fbcon_shadow_w;
+            for (px = x; px < x + w; px++) {
+                fb_putpixel(px, row, fb_console_palette[srow[px] & 0x0FU]);
+            }
+        }
+    }
+}
+
+/* (Re)allocate the shadow for the current framebuffer geometry.  Only modes we
+ * can present efficiently get a shadow: any linear putpixel, or a planar driver
+ * that exported blit_indexed.  Everything else keeps the direct path. */
+static void fbcon_shadow_setup(void) {
+    size_t sz;
+
+    fbcon_use_shadow = 0;
+    if (fbcon_shadow) {
+        kfree(fbcon_shadow, fbcon_shadow_sz);
+        fbcon_shadow = NULL;
+        fbcon_shadow_sz = 0;
+    }
+    if (!fb_active || fb.width == 0 || fb.height == 0) {
+        return;
+    }
+    if (fb.putpixel != linear_fb_putpixel && fb.blit_indexed == NULL) {
+        return;
+    }
+    sz = (size_t)fb.width * (size_t)fb.height;
+    fbcon_shadow = kzalloc(sz);
+    if (!fbcon_shadow) {
+        return;   /* OOM — fall back to direct rendering */
+    }
+    fbcon_shadow_sz = sz;
+    fbcon_shadow_w = (int)fb.width;
+    fbcon_shadow_h = (int)fb.height;
+    fbcon_use_shadow = 1;
+}
 
 static void fb_console_apply_tty_winsize(struct tty *tty) {
     if (!tty) {
@@ -202,20 +405,38 @@ static void fb_console_draw_cell_at(int cell_x,
     px = cell_x * FB_FONT_WIDTH;
     py = cell_y * FB_FONT_HEIGHT + view_y_offset;
 
-    /* Hand the glyph to fb_imageblit — its mono-32bpp fast path
-     * detects all-fg / all-bg byte rows and writes 8 dwords at a
-     * time instead of 128 putpixel calls per cell. */
-    struct fb_image_info glyph_img = {
-        .dx = (uint32_t)px,
-        .dy = (uint32_t)py,
-        .width = FB_FONT_WIDTH,
-        .height = FB_FONT_HEIGHT,
-        .fg_color = fg,
-        .bg_color = bg,
-        .type = FB_IMAGE_MONO,
-        .data = modified,
-    };
-    fb_imageblit(&glyph_img);
+    if (fbcon_shadow_ok()) {
+        /* Indexed fast path: draw into the RAM shadow; the accumulated dirty
+         * rectangle is pushed to the device once per flush.  Mirror the
+         * fg/bg attribute handling above, but on colour indices. */
+        uint8_t fg_idx = (uint8_t)(color & 0x0FU);
+        uint8_t bg_idx = (uint8_t)((color >> 4) & 0x0FU);
+        if (attrs & ANSI_ATTR_REVERSE) {
+            uint8_t t = fg_idx; fg_idx = bg_idx; bg_idx = t;
+        }
+        if (attrs & ANSI_ATTR_HIDDEN) {
+            fg_idx = bg_idx;
+        }
+        if (attrs & ANSI_ATTR_DIM) {
+            fg_idx &= 0x07U;   /* drop the bright bit as a dim approximation */
+        }
+        fbcon_shadow_glyph(px, py, modified, fg_idx, bg_idx);
+    } else {
+        /* Direct fallback: hand the glyph to fb_imageblit — its mono-32bpp
+         * fast path detects all-fg / all-bg byte rows and writes 8 dwords at
+         * a time instead of 128 putpixel calls per cell. */
+        struct fb_image_info glyph_img = {
+            .dx = (uint32_t)px,
+            .dy = (uint32_t)py,
+            .width = FB_FONT_WIDTH,
+            .height = FB_FONT_HEIGHT,
+            .fg_color = fg,
+            .bg_color = bg,
+            .type = FB_IMAGE_MONO,
+            .data = modified,
+        };
+        fb_imageblit(&glyph_img);
+    }
     (void)x; (void)y;
     fb_console_mark_dirty(px, py, FB_FONT_WIDTH, FB_FONT_HEIGHT);
 }
@@ -298,6 +519,7 @@ void fb_console_redraw_active(void) {
     }
     fb_console_sync_row(vt, vt_get_status_row());
     fb_console_update_cursor_locked(vt);
+    fb_console_flush_dirty_internal();
     FB_UNLOCK();
 }
 
@@ -397,7 +619,7 @@ static int fb_console_smooth_scroll_fullscreen(uint32_t clear_color) {
  */
 static void fb_console_pixel_scroll_region_locked(int top, int bottom,
                                                    int n, int dir,
-                                                   uint32_t clear_color) {
+                                                   uint8_t clear_idx) {
     int width_px;
     int rows_in_region;
     int rows_to_move;
@@ -407,6 +629,7 @@ static void fb_console_pixel_scroll_region_locked(int top, int bottom,
     int clear_h;
     struct fb_copyarea_info area;
     struct fb_fillrect_info clear;
+    uint32_t clear_color = fb_console_palette[clear_idx & 0x0FU];
 
     if (n <= 0 || top > bottom) return;
     rows_in_region = bottom - top + 1;
@@ -418,9 +641,21 @@ static void fb_console_pixel_scroll_region_locked(int top, int bottom,
         clear.height = (uint32_t)(rows_in_region * FB_FONT_HEIGHT);
         clear.color = clear_color;
         clear.rop = ROP_COPY;
-        fb_fillrect(&clear);
-        fb_console_mark_dirty((int)clear.dx, (int)clear.dy,
-                              (int)clear.width, (int)clear.height);
+        if (fbcon_shadow_ok()) {
+            fbcon_shadow_fill((int)clear.dx, (int)clear.dy,
+                              (int)clear.width, (int)clear.height, clear_idx);
+            if (fbcon_present_safe_in_irq()) {
+                fb_console_mark_dirty((int)clear.dx, (int)clear.dy,
+                                      (int)clear.width, (int)clear.height);
+            } else {
+                /* Planar: clear the framebuffer directly via fast Set/Reset. */
+                fb_fillrect(&clear);
+            }
+        } else {
+            fb_fillrect(&clear);
+            fb_console_mark_dirty((int)clear.dx, (int)clear.dy,
+                                  (int)clear.width, (int)clear.height);
+        }
         return;
     }
     rows_to_move = rows_in_region - n;
@@ -441,7 +676,6 @@ static void fb_console_pixel_scroll_region_locked(int top, int bottom,
         area.sy = (uint32_t)(top_px + clear_h);
         area.width = (uint32_t)width_px;
         area.height = (uint32_t)move_h;
-        fb_copyarea(&area);
         clear.dx = 0;
         clear.dy = (uint32_t)(bottom_px - clear_h);
     } else {
@@ -452,7 +686,6 @@ static void fb_console_pixel_scroll_region_locked(int top, int bottom,
         area.sy = (uint32_t)top_px;
         area.width = (uint32_t)width_px;
         area.height = (uint32_t)move_h;
-        fb_copyarea(&area);
         clear.dx = 0;
         clear.dy = (uint32_t)top_px;
     }
@@ -461,10 +694,40 @@ static void fb_console_pixel_scroll_region_locked(int top, int bottom,
     clear.height = (uint32_t)clear_h;
     clear.color = clear_color;
     clear.rop = ROP_COPY;
-    fb_fillrect(&clear);
 
-    fb_console_mark_dirty(0, top_px, width_px,
-                          bottom_px - top_px);
+    if (fbcon_shadow_ok()) {
+        /* Planar uses an in-place latch scroll of the framebuffer, which
+         * carries whatever is already there upward — so the framebuffer must
+         * match the *pre-scroll* shadow first.  Flush pending dirty (against
+         * the not-yet-scrolled shadow) before fbcon_shadow_copy() moves it. */
+        if (!fbcon_present_safe_in_irq() && dirty_valid) {
+            int fx, fy, fw, fh;
+            fb_console_get_dirty_rect(&fx, &fy, &fw, &fh);
+            fbcon_present(fx, fy, fw, fh);
+            fb_console_reset_dirty();
+        }
+        fbcon_shadow_copy((int)area.dx, (int)area.dy, (int)area.width,
+                          (int)area.height, (int)area.sx, (int)area.sy);
+        fbcon_shadow_fill((int)clear.dx, (int)clear.dy, (int)clear.width,
+                          (int)clear.height, clear_idx);
+        if (fbcon_present_safe_in_irq()) {
+            /* Linear: present the whole moved region from the shadow,
+             * write-only (no slow framebuffer read-back). */
+            fb_console_mark_dirty(0, top_px, width_px, bottom_px - top_px);
+        } else {
+            /* Planar: scroll the framebuffer in place with the fast latch
+             * copy (re-blitting the whole region would cost a VM-exit per
+             * planar VRAM write), then present only the freshly exposed band. */
+            fb_copyarea(&area);
+            fb_console_mark_dirty((int)clear.dx, (int)clear.dy,
+                                  (int)clear.width, (int)clear.height);
+        }
+    } else {
+        fb_copyarea(&area);
+        fb_fillrect(&clear);
+        fb_console_mark_dirty(0, top_px, width_px, bottom_px - top_px);
+    }
+
     fb_console_show_cursor();
 }
 
@@ -574,7 +837,7 @@ static void fb_console_scroll_region_up_locked(vt_state_t *vt, int top, int bott
     int width;
     int row;
     uint8_t effective;
-    uint32_t clear_color;
+    uint8_t clear_idx;
 
     if (!vt || top < 0 || bottom >= vt_get_visible_height() || top > bottom || n <= 0) {
         return;
@@ -598,13 +861,14 @@ static void fb_console_scroll_region_up_locked(vt_state_t *vt, int top, int bott
         }
     }
     effective = fb_console_effective_color(vt, vt->color);
-    clear_color = fb_console_palette[(effective >> 4) & 0x0FU];
+    clear_idx = (uint8_t)((effective >> 4) & 0x0FU);
     if (fb_console_vt_visible(vt) && view_y_offset == 0) {
-        /* Pixel-scroll requires a linear FB (any bpp).  fb_copyarea
-         * is a no-op for non-linear drivers (planar VGA / Hercules /
-         * CGA) — fall back to per-cell redraw on those. */
-        if (fb.copyarea || fb.putpixel == linear_fb_putpixel) {
-            fb_console_pixel_scroll_region_locked(top, bottom, n, -1, clear_color);
+        /* Region scroll goes through the shadow (or fb_copyarea for the
+         * non-shadow fallback).  Drivers with neither a linear putpixel nor
+         * a copyarea hook (Hercules) can't do a pixel move — redraw per
+         * cell on those. */
+        if (fbcon_shadow_ok() || fb.copyarea || fb.putpixel == linear_fb_putpixel) {
+            fb_console_pixel_scroll_region_locked(top, bottom, n, -1, clear_idx);
         } else {
             for (row = top; row <= bottom; row++) {
                 fb_console_sync_row(vt, row);
@@ -642,9 +906,9 @@ static void fb_console_scroll_region_down_locked(vt_state_t *vt, int top, int bo
     }
     if (fb_console_vt_visible(vt) && view_y_offset == 0) {
         uint8_t effective = fb_console_effective_color(vt, vt->color);
-        uint32_t clear_color = fb_console_palette[(effective >> 4) & 0x0FU];
-        if (fb.copyarea || fb.putpixel == linear_fb_putpixel) {
-            fb_console_pixel_scroll_region_locked(top, bottom, n, +1, clear_color);
+        uint8_t clear_idx = (uint8_t)((effective >> 4) & 0x0FU);
+        if (fbcon_shadow_ok() || fb.copyarea || fb.putpixel == linear_fb_putpixel) {
+            fb_console_pixel_scroll_region_locked(top, bottom, n, +1, clear_idx);
         } else {
             for (row = top; row <= bottom; row++) {
                 fb_console_sync_row(vt, row);
@@ -1168,6 +1432,13 @@ static void fb_console_write_vt_locked(vt_state_t *vt, const char *buf, size_t l
     }
     fb_console_update_cursor_locked(vt);
     fb_current_vt_ctx = NULL;
+    /* Present this batch synchronously, from the writing thread's context —
+     * where fb.addr is reliably mapped.  (Planar VGA's fb.addr is the low
+     * 0xA0000 window, which an arbitrary pmap in IRQ context may not map, so
+     * we cannot rely on the tick for it.)  Buffered/chunked writes — the
+     * common case via stdio — coalesce many lines into one present here.
+     * No-op when the shadow is inactive. */
+    fb_console_flush_dirty_internal();
 }
 
 static const struct ansi_callbacks fb_ansi_cb = {
@@ -1749,7 +2020,14 @@ static void fb_console_hide_cursor(void) {
         return;
     }
 
-    fb_console_restore_cursor_background();
+    if (fbcon_shadow_ok()) {
+        /* XOR is self-inverse: re-toggling the band restores the content. */
+        fbcon_shadow_cursor_xor(cursor_draw_x, cursor_draw_y);
+        fb_console_mark_dirty(cursor_draw_x, cursor_draw_y + FB_FONT_HEIGHT - 2,
+                              FB_FONT_WIDTH, 2);
+    } else {
+        fb_console_restore_cursor_background();
+    }
     cursor_drawn = 0;
 }
 
@@ -1762,8 +2040,14 @@ static void fb_console_show_cursor(void) {
 
     cursor_draw_x = cursor_x;
     cursor_draw_y = cursor_y + view_y_offset;
-    fb_console_save_cursor_background(cursor_draw_x, cursor_draw_y);
-    fb_console_toggle_cursor_at(cursor_draw_x, cursor_draw_y);
+    if (fbcon_shadow_ok()) {
+        fbcon_shadow_cursor_xor(cursor_draw_x, cursor_draw_y);
+        fb_console_mark_dirty(cursor_draw_x, cursor_draw_y + FB_FONT_HEIGHT - 2,
+                              FB_FONT_WIDTH, 2);
+    } else {
+        fb_console_save_cursor_background(cursor_draw_x, cursor_draw_y);
+        fb_console_toggle_cursor_at(cursor_draw_x, cursor_draw_y);
+    }
     cursor_drawn = 1;
 }
 
@@ -1811,6 +2095,9 @@ static void fb_console_flush_dirty_internal(void) {
     }
 
     fb_console_get_dirty_rect(&x, &y, &w, &h);
+    if (fbcon_shadow_ok()) {
+        fbcon_present(x, y, w, h);
+    }
     if (fb.flush) {
         fb.flush(x, y, w, h);
     }
@@ -1835,7 +2122,11 @@ static void fb_console_clear(void) {
     }
     cursor_x = 0;
     cursor_y = 0;
-    fb_clear(FB_COLOR_BLACK);
+    if (fbcon_shadow_ok()) {
+        memset(fbcon_shadow, 0, fbcon_shadow_sz);
+    } else {
+        fb_clear(FB_COLOR_BLACK);
+    }
     cursor_x = 0;
     cursor_y = 0;
     view_y_offset = 0;
@@ -1846,6 +2137,7 @@ static void fb_console_clear(void) {
     }
     fb_console_mark_dirty(0, 0, (int)fb.width, (int)fb.height);
     fb_console_show_cursor();
+    fb_console_flush_dirty_internal();
     FB_UNLOCK();
 }
 
@@ -1899,6 +2191,10 @@ void fb_console_init(void) {
     console_register(&fb_console_backend);
 
     (void)vt_refresh_geometry_from_terminal();
+
+    /* Allocate the RAM shadow now that the framebuffer geometry is final,
+     * before the first paint.  Falls back to direct rendering on failure. */
+    fbcon_shadow_setup();
 
     fb_console_init_ttys_once();
     fb_console_refresh_tty_winsizes();
@@ -2162,7 +2458,16 @@ void fb_console_tick(void) {
 
     dirty_ticks++;
     if (dirty_ticks >= fb_console_flush_period_ticks()) {
-        fb_console_flush_dirty_internal();
+        /* fb_console_tick() runs in IRQ context.  Only present here when
+         * fb.addr is in the always-mapped kernel range; for low-window FBs
+         * (planar VGA) the synchronous write path has already presented, so
+         * just drop any residual (cursor-blink) dirty rather than fault on an
+         * unmapped 0xA0000 under a foreign pmap. */
+        if (!fbcon_shadow_ok() || fbcon_present_safe_in_irq()) {
+            fb_console_flush_dirty_internal();
+        } else {
+            fb_console_reset_dirty();
+        }
     }
     FB_UNLOCK();
 }

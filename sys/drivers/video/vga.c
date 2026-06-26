@@ -393,6 +393,56 @@ static void herc_putpixel(int x, int y, uint32_t color) {
     else       *mem &= ~bit_mask;
 }
 
+/*
+ * Blit an 8bpp colour-index region (one byte per pixel, value 0..15) into the
+ * planar framebuffer with batched plane writes.  For each of the 4 bit planes
+ * the Map Mask is set once, then whole 8-pixel bytes are written through Write
+ * Mode 0.  This is the fb_console shadow buffer's present path for planar
+ * modes: ~9 port writes for an entire region, versus ~8 per pixel through the
+ * per-pixel vga_putpixel_planar path.  The rect is byte-aligned internally.
+ */
+static void vga_blit_indexed_planar(const uint8_t *src, uint32_t src_pitch,
+                                    uint32_t dx, uint32_t dy,
+                                    uint32_t w, uint32_t h) {
+    uint32_t x0 = dx & ~7u;
+    uint32_t x1 = (dx + w + 7u) & ~7u;
+    uint32_t y1 = dy + h;
+    int plane;
+
+    if (x1 > fb.width)  x1 = fb.width;
+    if (y1 > fb.height) y1 = fb.height;
+    if (x0 >= x1 || dy >= y1) return;
+
+    /* Clean Write Mode 0: no Set/Reset, no rotate/function, full bit mask. */
+    outb(VGA_GC_INDEX, VGA_GC_ENABLE_SET_RESET); outb(VGA_GC_DATA, 0x00);
+    outb(VGA_GC_INDEX, VGA_GC_DATA_ROTATE);      outb(VGA_GC_DATA, 0x00);
+    outb(VGA_GC_INDEX, VGA_GC_BIT_MASK);         outb(VGA_GC_DATA, 0xFF);
+    outb(VGA_GC_INDEX, VGA_GC_MODE);             outb(VGA_GC_DATA, 0x00);
+
+    for (plane = 0; plane < 4; plane++) {
+        outb(VGA_SEQ_INDEX, VGA_SEQ_MAP_MASK);
+        outb(VGA_SEQ_DATA, (uint8_t)(1u << plane));
+        for (uint32_t y = dy; y < y1; y++) {
+            const uint8_t *srow = src + (size_t)y * src_pitch;
+            volatile uint8_t *frow =
+                (volatile uint8_t *)((uintptr_t)fb.addr + (size_t)y * fb.pitch);
+            for (uint32_t bx = x0; bx < x1; bx += 8) {
+                uint8_t byte = 0;
+                for (int b = 0; b < 8; b++) {
+                    if ((srow[bx + b] >> plane) & 1u) {
+                        byte |= (uint8_t)(0x80u >> b);
+                    }
+                }
+                frow[bx >> 3] = byte;
+            }
+        }
+    }
+
+    /* Restore Map Mask = all planes. */
+    outb(VGA_SEQ_INDEX, VGA_SEQ_MAP_MASK);
+    outb(VGA_SEQ_DATA, 0x0F);
+}
+
 /* ================== Driver Interface ================== */
 
 static int vga_list_modes(struct video_mode_info *modes, int max_count) {
@@ -437,13 +487,16 @@ static int vga_set_mode_internal(int mode_id) {
     fb.putpixel = mode->putpixel;
     fb.copyarea = NULL;
     fb.fillrect = NULL;
+    fb.blit_indexed = NULL;
     /* Install planar-VGA accelerators when this is a planar EGA/VGA
      * mode — 4bpp byte-packed planes, byte-aligned region ops via
-     * the latch + Set/Reset paths.  Non-planar modes (linear 8bpp
-     * mode 13, Hercules) keep the per-pixel fallback. */
+     * the latch + Set/Reset paths, and the batched indexed-blit used by
+     * the fb_console shadow.  Non-planar modes (linear 8bpp mode 13,
+     * Hercules) keep the per-pixel fallback. */
     if (mode->putpixel == vga_putpixel_planar) {
         fb.copyarea = vga_copyarea_planar;
         fb.fillrect = vga_fillrect_planar;
+        fb.blit_indexed = vga_blit_indexed_planar;
     }
 
     return 0;
