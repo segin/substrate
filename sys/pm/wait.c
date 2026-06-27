@@ -115,8 +115,11 @@ static process_t *find_waitable_child(pid_t pid, process_t *parent, int options,
                 }
             }
             
-            // Check for stopped (WUNTRACED must be set)
-            if ((options & WUNTRACED) && child->state == SSTOP) {
+            // Report a stopped child if WUNTRACED was given, OR unconditionally
+            // for a traced child: a tracer's wait4() must see every ptrace stop
+            // regardless of WUNTRACED (gdb relies on this).
+            if (child->state == SSTOP &&
+                ((options & WUNTRACED) || (child->p_flag & P_TRACED))) {
                 // Only report if not already reported (P_WAITED not set)
                 if (!(child->p_flag & P_WAITED)) {
                     found = child;

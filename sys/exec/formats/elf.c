@@ -3,6 +3,7 @@
 #include <kern/console.h>
 #include <sys/sysinfo.h> // For BITNESS_*
 #include <sys/proc.h>
+#include <arch/i386/idt.h>   /* registers_t for the ptrace exec-stop frame */
 #include <kern/panic.h>
 #include <string.h>
 #include <vm/vm_map.h>
@@ -1756,6 +1757,27 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
          current_process->perso_id == PERS_OPENBSD)) {
         entry_ebx = ps_strings_user;
     }
+
+    /* ptrace exec-stop: a traced process parks at the new image's entry point
+     * so its tracer (gdb) can plant breakpoints before the program runs a
+     * single instruction.  Exec enters via jump_to_userspace() (not an iret),
+     * so we hand ptrace_exec_stop() a trapframe describing the entry state for
+     * the tracer's GETREGS/SETREGS, then honour any changes it makes. */
+    if (current_process && (current_process->p_flag & P_TRACED)) {
+        registers_t tf;
+        memset(&tf, 0, sizeof(tf));
+        tf.eip = entry;
+        tf.useresp = sp;
+        tf.ebx = entry_ebx;
+        tf.cs = 0x1B;                                   /* user code segment */
+        tf.ss = tf.ds = tf.es = tf.fs = tf.gs = 0x23;   /* user data segment */
+        tf.eflags = 0x202;                              /* reserved bit 1 + IF */
+        ptrace_exec_stop(&tf);
+        entry = tf.eip;
+        sp = tf.useresp;
+        entry_ebx = tf.ebx;
+    }
+
     jump_to_userspace(entry, sp, entry_ebx);
     
     // Should never reach here

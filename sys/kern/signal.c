@@ -61,6 +61,9 @@ static void signal_stop_process_threads(process_t *p, const char *reason) {
         thread->wait_reason = reason;
     }
     p->state = SSTOP;
+    /* A fresh stop is unreported: clear P_WAITED so wait4() surfaces it (each
+     * ptrace stop must be visible to the tracer, not just the first). */
+    p->p_flag &= (uint16_t)~P_WAITED;
 }
 
 void signal_resume_process_threads(process_t *p) {
@@ -95,6 +98,33 @@ void *ptrace_user_frame(process_t *p) {
     return NULL;
 }
 
+/* ptrace exec-stop.  A freshly-exec'd traced process must stop at the entry of
+ * the new image so its tracer can insert breakpoints before it runs.  Exec
+ * enters userspace via jump_to_userspace() rather than an iret, so this can't
+ * ride the normal signal-on-return path: elf_execve() hands us a trapframe it
+ * built describing the new image's entry state, we park the thread here (the
+ * frame lives on the stopped thread's kernel stack), and on resume the caller
+ * jumps to the possibly tracer-modified frame->eip/useresp.  No-op if the
+ * process isn't traced. */
+void ptrace_exec_stop(struct registers *frame) {
+    process_t *tracer;
+
+    if (!current_process || !(current_process->p_flag & P_TRACED)) {
+        return;
+    }
+    tracer = current_process->p_tracer ?
+             current_process->p_tracer : current_process->p_parent;
+    current_thread->user_frame = frame;
+    current_process->p_xsig = (uint8_t)SIGTRAP;
+    signal_stop_process_threads(current_process, "exec-stop");
+    if (tracer) {
+        psignal(tracer, SIGCHLD);
+        sched_wakeup(&tracer->p_children);
+    }
+    sched_yield();
+    current_thread->user_frame = NULL;
+}
+
 static void signal_clear_trap_context(thread_t *t, int sig) {
     if (!t || t->trap_signo != sig) {
         return;
@@ -115,8 +145,13 @@ static int signal_core_dump_permitted(process_t *p) {
 
 // Signal System Calls
 int kern_sigaction(int sig, const struct sigaction *act, struct sigaction *oact) {
-    if (sig <= 0 || sig > NSIG || sig == SIGKILL || sig == SIGSTOP) return -1;
-    
+    if (sig <= 0 || sig > NSIG) return -EINVAL;
+    /* SIGKILL/SIGSTOP can't have their action *changed*, but POSIX requires a
+     * query (act == NULL) to succeed and report the current disposition — gdb
+     * saves every signal's state this way at startup.  (Also: this used to
+     * return a bare -1, which libc maps to EPERM; the correct error is EINVAL.) */
+    if ((sig == SIGKILL || sig == SIGSTOP) && act) return -EINVAL;
+
     uint32_t mask = sigmask(sig);
     
     if (oact) *oact = current_process->sig_actions[sig - 1];

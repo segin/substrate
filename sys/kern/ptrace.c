@@ -32,6 +32,7 @@
 #include <sys/lock.h>
 #include <arch/i386/idt.h>
 #include <arch/i386/pmap.h>
+#include <vm/vm_fault.h>
 #include <pm/pm.h>
 #include <string.h>
 
@@ -77,6 +78,18 @@ static void ptrace_unlink_child(process_t *parent, process_t *child) {
 static void ptrace_link_child(process_t *parent, process_t *child) {
     child->p_sibling = parent->p_children;
     parent->p_children = child;
+}
+
+/* Make the tracee's page(s) covering [addr, addr+len) resident.  Tracee text
+ * and data are demand-paged, but pmap_copyin/out_other only walk *present*
+ * PTEs — so without this a PEEK/POKE into not-yet-touched memory (e.g. gdb
+ * planting a breakpoint in code that hasn't run) spuriously fails. */
+static void ptrace_fault_in(process_t *t, uint32_t addr, uint32_t len) {
+    if (!t || !t->vm_map) return;
+    vm_fault(t->vm_map, addr, VM_PROT_READ);
+    if (len > 1) {
+        vm_fault(t->vm_map, addr + len - 1, VM_PROT_READ);
+    }
 }
 
 /* ---- the syscall --------------------------------------------------------- */
@@ -130,6 +143,7 @@ int sys_ptrace(int req, int pid, int addr, int data) {
          * tracer's `data` pointer.  Returns 0/-errno (the libc wrapper turns
          * this back into the classic "PEEK returns the word"). */
         uint32_t word = 0;
+        ptrace_fault_in(tracee, (uint32_t)addr, sizeof(word));
         if (pmap_copyin_other(tracee->pmap, (uintptr_t)(uint32_t)addr,
                               &word, sizeof(word)) != sizeof(word)) {
             return -EFAULT;
@@ -143,6 +157,7 @@ int sys_ptrace(int req, int pid, int addr, int data) {
     case PTRACE_POKETEXT:
     case PTRACE_POKEDATA: {
         uint32_t word = (uint32_t)data;
+        ptrace_fault_in(tracee, (uint32_t)addr, sizeof(word));
         if (pmap_copyout_other(tracee->pmap, (uintptr_t)(uint32_t)addr,
                                &word, sizeof(word)) != sizeof(word)) {
             return -EFAULT;

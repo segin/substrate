@@ -398,7 +398,9 @@ extern mutex_t proctree_lock;
 void rusage_add_tick(struct process *p, int is_usermode);
 
 /* ptrace(2) support (sys/kern/ptrace.c, sys/kern/signal.c). */
+struct registers;
 void  signal_resume_process_threads(struct process *p);
 void *ptrace_user_frame(struct process *p);
+void  ptrace_exec_stop(struct registers *frame);
 
 #endif
