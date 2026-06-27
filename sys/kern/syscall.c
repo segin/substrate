@@ -1046,7 +1046,7 @@ int kern_uname(struct utsname *buf) {
     buf->sysname[255] = '\0';
     strncpy(buf->nodename, kernel_hostname, 255);
     buf->nodename[255] = '\0';
-    strncpy(buf->release, "0.1", 255);
+    strncpy(buf->release, "0.2", 255);
     buf->release[255] = '\0';
     strncpy(buf->version, "Kernel", 255);
     buf->version[255] = '\0';
