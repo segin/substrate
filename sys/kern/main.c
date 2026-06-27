@@ -976,7 +976,7 @@ void kmain(unsigned long magic, unsigned long addr) {
     init_memory(mboot_info);
     init_runtime_console(cmdline_serial_console);
 
-    kprint(OS_NAME " kernel v" OS_VERSION " (i386)\n");
+    kprint(OS_NAME " kernel v" OS_VERSION " (" OS_ARCH ")\n");
     init_core_subsystems(mboot_info);
     print_boot_diagnostics();
     init_storage_and_vfs(mboot_info);

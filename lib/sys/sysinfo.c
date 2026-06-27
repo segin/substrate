@@ -299,9 +299,9 @@ int sys_kernel_version(sys_version_t *ver) {
         }
     }
     /* Static fallback. */
-    ver->major = 0; ver->minor = 1; ver->patch = 0;
-    strcpy(ver->release, "0.1.0-dev");
-    strcpy(ver->version, "Substrate 0.1.0-dev");
+    ver->major = 0; ver->minor = 2; ver->patch = 0;
+    strcpy(ver->release, "0.2.0-dev");
+    strcpy(ver->version, "Substrate 0.2.0-dev");
     return 0;
 }
 

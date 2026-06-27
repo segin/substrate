@@ -169,7 +169,7 @@ static uint32_t gen_cmdline(char *buf, size_t size, void *opaque) {
 static uint32_t gen_version(char *buf, size_t size, void *opaque) {
     (void)opaque;
     return snprintf(buf, size,
-        "Substrate version 0.1.0 (gcc) #1 SMP PREEMPT %s\n",
+        "Substrate version 0.2.0 (gcc) #1 SMP PREEMPT %s\n",
         __DATE__);
 }
 
