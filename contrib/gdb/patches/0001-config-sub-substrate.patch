@@ -1,0 +1,18 @@
+Subject: config.sub: accept substrate as an OS name
+
+Wire the substrate* OS family into gdb's top-level config.sub so triples like
+i386-unknown-substrate / x86_64-unknown-substrate are accepted at configure
+time.  gdb-16.2's config.sub OS list differs from binutils 2.46.0's, so this is
+a separate hunk from the binutils port.
+---
+--- a/config.sub	2026-06-26 22:49:48.810836554 -0500
++++ b/config.sub	2026-06-26 22:49:14.785025708 -0500
+@@ -1760,7 +1760,7 @@
+ 	     | uxpv* | beos* | mpeix* | udk* | moxiebox* \
+ 	     | interix* | uwin* | mks* | rhapsody* | darwin* \
+ 	     | openstep* | oskit* | conix* | pw32* | nonstopux* \
+-	     | storm-chaos* | tops10* | tenex* | tops20* | its* \
++	     | storm-chaos* | substrate* | tops10* | tenex* | tops20* | its* \
+ 	     | os2* | vos* | palmos* | uclinux* | nucleus* | morphos* \
+ 	     | scout* | superux* | sysv* | rtmk* | tpf* | windiss* \
+ 	     | powermax* | dnix* | nx6 | nx7 | sei* | dragonfly* \
