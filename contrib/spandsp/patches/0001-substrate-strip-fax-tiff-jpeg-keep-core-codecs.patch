@@ -1,0 +1,170 @@
+--- a/configure	2014-06-04 09:28:14.000000000 -0500
++++ b/configure	2026-06-27 14:39:56.367060076 -0500
+@@ -20095,7 +20095,8 @@
+   LIBS="-ltiff $LIBS"
+ 
+ else
+-  as_fn_error $? "\"Cannot build without libtiff (does your system require a libtiff-devel package?)\"" "$LINENO" 5
++  { $as_echo "$as_me:${as_lineno-$LINENO}: WARNING: libtiff not found - building without FAX/T.30/T.4 support (substrate)" >&5
++$as_echo "$as_me: WARNING: libtiff not found - building without FAX/T.30/T.4 support (substrate)" >&2;}
+ fi
+ 
+ fi
+--- a/src/Makefile.in	2014-06-04 09:37:34.000000000 -0500
++++ b/src/Makefile.in	2026-06-27 14:39:56.373060195 -0500
+@@ -134,19 +134,17 @@
+ 	at_interpreter.lo awgn.lo bell_r2_mf.lo bert.lo \
+ 	bit_operations.lo bitstream.lo complex_filters.lo \
+ 	complex_vector_float.lo complex_vector_int.lo crc.lo \
+-	dds_float.lo dds_int.lo dtmf.lo echo.lo fax.lo fax_modems.lo \
++	dds_float.lo dds_int.lo dtmf.lo echo.lo fax_modems.lo \
+ 	fsk.lo g711.lo g722.lo g726.lo gsm0610_decode.lo \
+ 	gsm0610_encode.lo gsm0610_long_term.lo gsm0610_lpc.lo \
+ 	gsm0610_preprocess.lo gsm0610_rpe.lo gsm0610_short_term.lo \
+-	hdlc.lo ima_adpcm.lo image_translate.lo logging.lo \
++	hdlc.lo ima_adpcm.lo logging.lo \
+ 	lpc10_analyse.lo lpc10_decode.lo lpc10_encode.lo \
+ 	lpc10_placev.lo lpc10_voicing.lo math_fixed.lo modem_echo.lo \
+ 	modem_connect_tones.lo noise.lo oki_adpcm.lo playout.lo plc.lo \
+ 	power_meter.lo queue.lo schedule.lo sig_tone.lo silence_gen.lo \
+-	super_tone_rx.lo super_tone_tx.lo swept_tone.lo t4_rx.lo \
+-	t4_tx.lo t30.lo t30_api.lo t30_logging.lo t31.lo t35.lo \
+-	t38_core.lo t38_gateway.lo t38_non_ecm_buffer.lo \
+-	t38_terminal.lo testcpuid.lo time_scale.lo timezone.lo \
++	super_tone_rx.lo super_tone_tx.lo swept_tone.lo t35.lo \
++	t38_non_ecm_buffer.lo testcpuid.lo time_scale.lo timezone.lo \
+ 	tone_detect.lo tone_generate.lo v17rx.lo v17tx.lo v18.lo \
+ 	v22bis_rx.lo v22bis_tx.lo v27ter_rx.lo v27ter_tx.lo v29rx.lo \
+ 	v29tx.lo v42.lo v42bis.lo v8.lo vector_float.lo vector_int.lo
+@@ -446,7 +444,6 @@
+                         dds_int.c \
+                         dtmf.c \
+                         echo.c \
+-                        fax.c \
+                         fax_modems.c \
+                         fsk.c \
+                         g711.c \
+@@ -461,7 +458,6 @@
+                         gsm0610_short_term.c \
+                         hdlc.c \
+                         ima_adpcm.c \
+-                        image_translate.c \
+                         logging.c \
+                         lpc10_analyse.c \
+                         lpc10_decode.c \
+@@ -483,17 +479,8 @@
+                         super_tone_rx.c \
+                         super_tone_tx.c \
+                         swept_tone.c \
+-                        t4_rx.c \
+-                        t4_tx.c \
+-                        t30.c \
+-                        t30_api.c \
+-                        t30_logging.c \
+-                        t31.c \
+                         t35.c \
+-                        t38_core.c \
+-                        t38_gateway.c \
+                         t38_non_ecm_buffer.c \
+-                        t38_terminal.c \
+                         testcpuid.c \
+                         time_scale.c \
+                         timezone.c \
+--- a/src/Makefile.am	2014-06-04 09:36:12.000000000 -0500
++++ b/src/Makefile.am	2026-06-27 14:39:46.628115411 -0500
+@@ -104,7 +104,6 @@
+                         dds_int.c \
+                         dtmf.c \
+                         echo.c \
+-                        fax.c \
+                         fax_modems.c \
+                         fsk.c \
+                         g711.c \
+@@ -119,7 +118,6 @@
+                         gsm0610_short_term.c \
+                         hdlc.c \
+                         ima_adpcm.c \
+-                        image_translate.c \
+                         logging.c \
+                         lpc10_analyse.c \
+                         lpc10_decode.c \
+@@ -141,17 +139,8 @@
+                         super_tone_rx.c \
+                         super_tone_tx.c \
+                         swept_tone.c \
+-                        t4_rx.c \
+-                        t4_tx.c \
+-                        t30.c \
+-                        t30_api.c \
+-                        t30_logging.c \
+-                        t31.c \
+                         t35.c \
+-                        t38_core.c \
+-                        t38_gateway.c \
+                         t38_non_ecm_buffer.c \
+-                        t38_terminal.c \
+                         testcpuid.c \
+                         time_scale.c \
+                         timezone.c \
+--- a/src/spandsp.h.in	2014-06-04 09:37:21.000000000 -0500
++++ b/src/spandsp.h.in	2026-06-27 14:41:18.888694303 -0500
+@@ -40,7 +40,7 @@
+ #include <time.h>
+ @INSERT_MATH_HEADER@
+ @INSERT_STDBOOL_HEADER@
+-#include <tiffio.h>
++/* substrate: <tiffio.h> dropped — FAX/T.4/T.30 stack not built (no libtiff) */
+ 
+ #include <spandsp/telephony.h>
+ #include <spandsp/fast_convert.h>
+@@ -99,26 +99,27 @@
+ /*#include <spandsp/v34.h>*/
+ #include <spandsp/v18.h>
+ #include <spandsp/timezone.h>
+-#include <spandsp/t4_rx.h>
+-#include <spandsp/t4_tx.h>
+-#include <spandsp/image_translate.h>
+-#include <spandsp/t4_t6_decode.h>
+-#include <spandsp/t4_t6_encode.h>
++/* substrate: FAX / T.4 / T.30 / T.38 stack disabled (no libtiff) */
++/*#include <spandsp/t4_rx.h>*/
++/*#include <spandsp/t4_tx.h>*/
++/*#include <spandsp/image_translate.h>*/
++/*#include <spandsp/t4_t6_decode.h>*/
++/*#include <spandsp/t4_t6_encode.h>*/
+ /*#include <spandsp/t81_t82_arith_coding.h>*/
+ /*#include <spandsp/t85.h>*/
+-#include <spandsp/t30.h>
+-#include <spandsp/t30_api.h>
+-#include <spandsp/t30_fcf.h>
+-#include <spandsp/t30_logging.h>
++/*#include <spandsp/t30.h>*/
++/*#include <spandsp/t30_api.h>*/
++/*#include <spandsp/t30_fcf.h>*/
++/*#include <spandsp/t30_logging.h>*/
+ #include <spandsp/t35.h>
+ #include <spandsp/at_interpreter.h>
+ #include <spandsp/fax_modems.h>
+-#include <spandsp/fax.h>
+-#include <spandsp/t38_core.h>
++/*#include <spandsp/fax.h>*/
++/*#include <spandsp/t38_core.h>*/
+ #include <spandsp/t38_non_ecm_buffer.h>
+-#include <spandsp/t38_gateway.h>
+-#include <spandsp/t38_terminal.h>
+-#include <spandsp/t31.h>
++/*#include <spandsp/t38_gateway.h>*/
++/*#include <spandsp/t38_terminal.h>*/
++/*#include <spandsp/t31.h>*/
+ #include <spandsp/adsi.h>
+ #include <spandsp/ademco_contactid.h>
+ #include <spandsp/oki_adpcm.h>
+--- a/spandsp.pc.in	2013-01-26 22:57:07.000000000 -0600
++++ b/spandsp.pc.in	2026-06-27 14:39:46.985874292 -0500
+@@ -8,5 +8,5 @@
+ Requires:
+ Version: @VERSION@
+ Libs: -L${libdir} -lspandsp
+-Libs.private: -ltiff -lm
++Libs.private: -lm
+ Cflags: -I${includedir}
