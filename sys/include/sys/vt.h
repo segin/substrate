@@ -12,8 +12,15 @@ struct tty;
 #define VT_MAX 12
 #define VT_DEFAULT_WIDTH 80
 #define VT_DEFAULT_HEIGHT 25
-#define VT_MAX_WIDTH 132
-#define VT_MAX_HEIGHT 60
+/* Caps for the VT cell buffers.  The framebuffer console derives the live
+ * geometry from the resolution (width/8 cols, height/16 rows), but
+ * vt_set_geometry() *rejects* anything past these caps and keeps the previous
+ * (default 80x25) size — so they must cover the largest mode we expect to run
+ * the text console at.  240x68 spans up to 1920x1088 (e.g. 1280x720 -> 160x45,
+ * 1920x1080 -> 240x67).  These size static per-VT buffers x VT_MAX, so raising
+ * them costs BSS; a fully dynamic per-geometry allocation would avoid that. */
+#define VT_MAX_WIDTH 240
+#define VT_MAX_HEIGHT 68
 #define VT_MAX_BUF_SIZE (VT_MAX_WIDTH * VT_MAX_HEIGHT)
 #define VT_SCROLLBACK_LINES 256
 #define VT_TABSTOP_WORDS ((VT_MAX_WIDTH + 31) / 32)
