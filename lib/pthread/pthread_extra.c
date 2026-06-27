@@ -18,6 +18,28 @@ int pthread_attr_setstacksize(pthread_attr_t *attr, size_t s)    { (void)attr; (
 int pthread_attr_getstacksize(const pthread_attr_t *attr, size_t *s) {
     (void)attr; if (s) *s = 64 * 1024; return 0;       /* the fixed default */
 }
+
+/* ---------------- thread scheduling parameters ----------------
+ * substrate's MLFQ scheduler does not yet honour explicit per-thread policy or
+ * priority, so these report SCHED_OTHER / priority 0 and accept any set as a
+ * successful no-op — enough for consumers (SDL2, etc.) that politely try to
+ * bump a worker's priority and tolerate it being ignored. */
+int pthread_getschedparam(pthread_t thread, int *policy, struct sched_param *param) {
+    (void)thread;
+    if (policy) *policy = SCHED_OTHER;
+    if (param)  param->sched_priority = 0;
+    return 0;
+}
+int pthread_setschedparam(pthread_t thread, int policy,
+                          const struct sched_param *param) {
+    (void)thread; (void)policy; (void)param;
+    return 0;
+}
+int pthread_setschedprio(pthread_t thread, int prio) {
+    (void)thread; (void)prio;
+    return 0;
+}
+
 int pthread_attr_setdetachstate(pthread_attr_t *attr, int state) { if (attr) *attr = state; return 0; }
 int pthread_attr_getdetachstate(const pthread_attr_t *attr, int *state) {
     if (state) *state = attr ? *attr : PTHREAD_CREATE_JOINABLE;

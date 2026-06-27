@@ -27,6 +27,14 @@ int pthread_detach(pthread_t thread);
 /* Current-thread identity.  Returns the kernel-assigned TID. */
 pthread_t pthread_self(void);
 
+/* Thread scheduling policy/priority.  substrate's MLFQ does not yet honour an
+ * explicit per-thread policy, so get reports SCHED_OTHER/0 and set is an
+ * accepted no-op (consumers that bump worker priority tolerate it). */
+struct sched_param;
+int pthread_getschedparam(pthread_t thread, int *policy, struct sched_param *param);
+int pthread_setschedparam(pthread_t thread, int policy, const struct sched_param *param);
+int pthread_setschedprio(pthread_t thread, int prio);
+
 /* Compare two thread IDs for equality (POSIX pthread_equal). */
 static inline int pthread_equal(pthread_t t1, pthread_t t2) {
     return t1 == t2;
