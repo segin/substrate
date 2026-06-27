@@ -139,6 +139,41 @@ static size_t usbdevfs_meta_read(fs_node_t *node, off_t offset, size_t size,
     return size;
 }
 
+/* Raw descriptor blob (device descriptor + config descriptor), like Linux
+ * usbfs: a read() of the device node returns the concatenated descriptors. */
+static size_t usbdevfs_dev_read(fs_node_t *node, off_t offset, size_t size,
+                                uint8_t *buffer)
+{
+    usb_device_t *dev = (usb_device_t *)(uintptr_t)node->impl;
+    uint8_t blob[sizeof(struct usb_device_descriptor) + USB_MAX_CONFIG_SIZE];
+    size_t n, off = (size_t)offset;
+
+    if (dev == NULL) {
+        return 0;
+    }
+    memcpy(blob, &dev->dev_desc, sizeof(dev->dev_desc));
+    n = sizeof(dev->dev_desc);
+    if (dev->config_len > 0 && n + dev->config_len <= sizeof(blob)) {
+        memcpy(blob + n, dev->config_data, dev->config_len);
+        n += dev->config_len;
+    }
+    if (off >= n) {
+        return 0;
+    }
+    if (size > n - off) {
+        size = n - off;
+    }
+    memcpy(buffer, blob + off, size);
+    return size;
+}
+
+static size_t usbdevfs_dev_write(fs_node_t *node, off_t offset, size_t size,
+                                 const uint8_t *buffer)
+{
+    (void)node; (void)offset; (void)buffer;
+    return size;        /* accept and discard — only here so O_RDWR opens */
+}
+
 static fs_node_t *usbdevfs_make_node(const char *name, usb_device_t *dev)
 {
     fs_node_t *node = (fs_node_t *)kzalloc(sizeof(fs_node_t));
@@ -159,7 +194,15 @@ void usbdevfs_publish(usb_device_t *dev)
     snprintf(name, sizeof(name), "usb/bus%u/dev%u", USBDEVFS_BUS, dev->address);
     dn = usbdevfs_make_node(name, dev);
     if (dn != NULL) {
-        dn->flags = FS_CHARDEVICE;
+        /* FS_FILE, NOT FS_CHARDEVICE: a char-device open takes the tty
+         * carrier-wait path and returns ETIMEDOUT, and a type-0 node is never
+         * poll-ready (poll_fs only reports FS_FILE/FS_DIRECTORY ready).  libusb
+         * poll()s the fd before every control transfer, so the node must read
+         * as a regular file: opens cleanly, polls ready, and the ioctl stays
+         * reachable regardless of type. */
+        dn->flags = FS_FILE;
+        dn->read = usbdevfs_dev_read;
+        dn->write = usbdevfs_dev_write;
         dn->ioctl = usbdevfs_dev_ioctl;
         devfs_register_device(dn);
     }
@@ -167,7 +210,7 @@ void usbdevfs_publish(usb_device_t *dev)
     snprintf(name, sizeof(name), "usb/bus%u/dev%u.meta", USBDEVFS_BUS, dev->address);
     mn = usbdevfs_make_node(name, dev);
     if (mn != NULL) {
-        mn->flags = 0;     /* regular file */
+        mn->flags = FS_FILE;
         mn->read = usbdevfs_meta_read;
         devfs_register_device(mn);
     }
