@@ -349,6 +349,22 @@ static int bga_set_mode(int mode_id) {
         size_t pitch_bytes = (size_t)width * (size_t)bpp / 8U;
         size_t lfb_size = pitch_bytes * (size_t)virt_height;
         lfb_va = bga_map_lfb(bga_lfb_addr, lfb_size);
+        if (!lfb_va && virt_height > height) {
+            /* The doubled (hardware-scroll) aperture didn't fit the bounded
+             * ioremap pool — a high-res mode's 2x virtual height can be 7+ MiB.
+             * Retry a single buffer: still a *linear* LFB (so the console
+             * shadow and userspace /dev/fb0 mmap work and stay fast), just
+             * without the hardware vertical pan.  Far better than dropping to
+             * banked mode, which repaints the console a character at a time. */
+            virt_height = height;
+            lfb_size = pitch_bytes * (size_t)virt_height;
+            bga_write(VBE_DISPI_INDEX_VIRT_HEIGHT, virt_height);
+            lfb_va = bga_map_lfb(bga_lfb_addr, lfb_size);
+            if (lfb_va) {
+                kprint("BGA: LFB hardware-scroll aperture too large for the "
+                       "ioremap pool; using a single linear buffer.\n");
+            }
+        }
         if (!lfb_va) {
             kprint("BGA: ioremap of LFB failed, banked mode active.\n");
             bga_use_lfb = 0;
