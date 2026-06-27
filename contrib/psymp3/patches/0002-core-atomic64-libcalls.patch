@@ -1,0 +1,129 @@
+diff --git a/src/core/Makefile.am b/src/core/Makefile.am
+index 86e97b2c..cb842c4e 100644
+--- a/src/core/Makefile.am
++++ b/src/core/Makefile.am
+@@ -19,7 +19,8 @@ libpsymp3_core_a_SOURCES = \
+ 	fft_draw.cpp \
+ 	about.cpp \
+ 	persistentstorage.cpp \
+-	lyrics.cpp
++	lyrics.cpp \
++	atomic64.c
+ 
+ AM_CPPFLAGS = -I$(top_srcdir)/include $(SDL_CFLAGS) $(TAGLIB_CFLAGS) $(FREETYPE_CFLAGS) $(OPENSSL_CFLAGS) $(CURL_CFLAGS) $(DBUS_CFLAGS) $(OPUS_CFLAGS) $(VORBIS_CFLAGS) $(OGG_CFLAGS)
+ 
+diff --git a/src/core/atomic64.c b/src/core/atomic64.c
+new file mode 100644
+index 00000000..34c81a5a
+--- /dev/null
++++ b/src/core/atomic64.c
+@@ -0,0 +1,109 @@
++/*
++ * atomic64.c - 64-bit out-of-line atomic libcalls for i486 substrate targets.
++ *
++ * This file is part of PsyMP3.
++ * Copyright © 2025 Kirn Gill <segin2005@gmail.com>
++ *
++ * PsyMP3 is free software. You may redistribute and/or modify it under
++ * the terms of the ISC License <https://opensource.org/licenses/ISC>
++ *
++ * Substrate's i486 toolchain ships no libatomic and libgcc has no 64-bit
++ * atomic support (cmpxchg8b is i586+, so -march=i486 emits out-of-line
++ * __atomic_*_8 libcalls and there is nothing to satisfy them).  PsyMP3 uses
++ * std::atomic<int64_t>/<uint64_t> in a few hot paths (IOHandler offsets,
++ * HTTP byte counters), so provide the four libcalls the build references,
++ * using libatomic's lock-array strategy: a small pool of spinlocks indexed
++ * by a hash of the object address.  Correct (if not lock-free) on any CPU.
++ */
++
++#include <stdint.h>
++#include <stddef.h>
++
++/*
++ * GCC's builtin table lists __atomic_compare_exchange_8 with a 6-arg generic
++ * prototype (including "weak"), but the *sized* libcall it actually emits omits
++ * "weak" and passes only 5 args (verified by disassembling a compare_exchange).
++ * Our definition matches the emitted 5-arg ABI, which trips the builtin-vs-decl
++ * mismatch warning; silence just that one check here.
++ */
++#pragma GCC diagnostic ignored "-Wbuiltin-declaration-mismatch"
++
++/* A modest pool of locks, indexed by a hash of the address.  Power of two. */
++#define NLOCKS 64
++
++static volatile int locks[NLOCKS];
++
++static inline volatile int *lock_for(const volatile void *ptr)
++{
++    uintptr_t a = (uintptr_t)ptr;
++    /* mix the address bits a little, then mask into the pool */
++    a = (a >> 3) ^ (a >> 9);
++    return &locks[a & (NLOCKS - 1)];
++}
++
++static inline void lock_acquire(volatile int *l)
++{
++    /* __sync_lock_test_and_set is a 32-bit (xchg) op — always lock-free. */
++    while (__sync_lock_test_and_set(l, 1))
++        while (*l)
++            __builtin_ia32_pause();
++}
++
++static inline void lock_release(volatile int *l)
++{
++    __sync_lock_release(l);
++}
++
++uint64_t __atomic_load_8(const volatile void *ptr, int memorder)
++{
++    (void)memorder;
++    volatile int *l = lock_for(ptr);
++    lock_acquire(l);
++    uint64_t v = *(const volatile uint64_t *)ptr;
++    lock_release(l);
++    return v;
++}
++
++void __atomic_store_8(volatile void *ptr, uint64_t val, int memorder)
++{
++    (void)memorder;
++    volatile int *l = lock_for(ptr);
++    lock_acquire(l);
++    *(volatile uint64_t *)ptr = val;
++    lock_release(l);
++}
++
++uint64_t __atomic_fetch_add_8(volatile void *ptr, uint64_t val, int memorder)
++{
++    (void)memorder;
++    volatile int *l = lock_for(ptr);
++    lock_acquire(l);
++    uint64_t old = *(volatile uint64_t *)ptr;
++    *(volatile uint64_t *)ptr = old + val;
++    lock_release(l);
++    return old;
++}
++
++/*
++ * Note: the *sized* libcall __atomic_compare_exchange_8 takes five args
++ * (mem, expected, desired, success_memorder, failure_memorder) — there is no
++ * "weak" parameter (that only exists on the generic __atomic_compare_exchange).
++ */
++_Bool __atomic_compare_exchange_8(volatile void *ptr, void *expected,
++                                  uint64_t desired,
++                                  int success_memorder, int failure_memorder)
++{
++    (void)success_memorder;
++    (void)failure_memorder;
++    volatile int *l = lock_for(ptr);
++    lock_acquire(l);
++    uint64_t cur = *(volatile uint64_t *)ptr;
++    uint64_t exp = *(uint64_t *)expected;
++    _Bool ok = (cur == exp);
++    if (ok)
++        *(volatile uint64_t *)ptr = desired;
++    else
++        *(uint64_t *)expected = cur;
++    lock_release(l);
++    return ok;
++}
