@@ -8,8 +8,44 @@
 #include "usb.h"
 #include <kern/console.h>
 #include <kern/time.h>
+#include <kern/device.h>
+#include <kern/bus.h>
 #include <vm/vm_kmem.h>
+#include <stdio.h>
 #include <string.h>
+
+/* The USB bus in the kernel device tree (/proc/devtree).  Enumerated devices
+ * are published here so userspace can see them alongside pci/isa. */
+struct bus_type usb_bus_type = {
+    .name = "usb",
+};
+
+/* Publish an enumerated USB device into /proc/devtree (bus "usb").
+ * Best-effort: a failed registration just omits the device. */
+static void usb_publish_device(usb_device_t *dev)
+{
+    char name[24];
+    struct device *bd;
+    uint8_t cls;
+
+    snprintf(name, sizeof(name), "usb%u", dev->address);
+    bd = device_create(name, NULL);
+    if (bd == NULL) {
+        return;
+    }
+    cls = dev->dev_desc.bDeviceClass;
+    if (cls == 0) {
+        cls = dev->if_class;     /* class is defined at the interface level */
+    }
+    bd->vendor_id = dev->vendor_id;
+    bd->device_id = dev->product_id;
+    bd->class = cls;
+    bd->subclass = dev->if_subclass;
+    bd->progif = dev->if_protocol;
+    if (device_register(bd, &usb_bus_type) != 0) {
+        device_put(bd);
+    }
+}
 
 /*
  * ============================================================
@@ -634,6 +670,9 @@ static int usb_enumerate_device_inner(usb_hcd_t *hcd, uint8_t port, uint8_t spee
     /* Match and bind a class driver */
     usb_match_driver(dev);
 
+    /* Publish into the kernel device tree (/proc/devtree). */
+    usb_publish_device(dev);
+
     return 0;
 }
 
@@ -686,6 +725,8 @@ void usb_init(void)
     memset(usb_devices, 0, sizeof(usb_devices));
     memset(usb_addr_bitmap, 0, sizeof(usb_addr_bitmap));
     usb_enum_depth = 0;
+
+    bus_register_type(&usb_bus_type);
 
     kprintf("usb: subsystem initialized\n");
 
