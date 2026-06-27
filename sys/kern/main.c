@@ -172,7 +172,11 @@ static void init_memory(multiboot_info_t *mboot_info) {
     kmem_init();      // Initialize kernel memory allocator
     early_uart_print("KMAIN: vm ready\n");
     kprint("VM subsystem initialized.\n");
-    
+
+    /* Grow the kernel-log ring from its static 16 KiB to a RAM-scaled size now
+     * that kmalloc() works (mem_upper is upper memory in KiB). */
+    klog_init_dynamic((size_t)mem_upper * 1024u + 0x100000u);
+
     // Update mboot_info global copy if needed
     if (mboot_info) {
         memcpy(&mboot_copy, mboot_info, sizeof(multiboot_info_t));

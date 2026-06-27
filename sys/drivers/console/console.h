@@ -49,6 +49,8 @@ int kprintf(const char *fmt, ...);
 // Kernel message ring buffer (backs /proc/kmsg and dmesg(1)).
 size_t klog_size(void);
 size_t klog_read(char *dst, size_t dstlen);
+/* Grow the ring to a RAM-scaled size; call once after kmem_init(). */
+void klog_init_dynamic(size_t ram_bytes);
 char *kasprintf(const char *fmt, ...);
 #ifndef HOST_TEST
 char *kvasprintf(const char *fmt, __builtin_va_list ap);

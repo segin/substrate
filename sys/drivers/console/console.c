@@ -273,15 +273,25 @@ void console_register_devfs(void) {
  * IRQ context may interleave bytes (the console itself has the same
  * property), but it can never corrupt out of bounds.
  */
-#define KLOG_BUF_SIZE 65536
-static char     klog_buf[KLOG_BUF_SIZE];
+/*
+ * The ring starts on a small static 16 KiB buffer — kprint() runs long before
+ * the allocator exists — and is grown once installed RAM is known, by
+ * klog_init_dynamic() (called from kmain() after kmem_init()): 64 KiB at
+ * 128 MiB, 256 KiB at 256 MiB, quadrupling per RAM doubling, capped at 1 MiB.
+ * Small machines keep the modest 16 KiB ring.
+ */
+#define KLOG_MIN_SIZE (16u * 1024u)
+#define KLOG_MAX_SIZE (1024u * 1024u)
+static char     klog_static[KLOG_MIN_SIZE];
+static char    *klog_buf = klog_static;
+static size_t   klog_capacity = KLOG_MIN_SIZE;
 static uint32_t klog_head;       /* next write index */
 static int      klog_wrapped;    /* set once the ring has wrapped around */
 
 static void klog_append(const char *s, size_t len) {
     for (size_t i = 0; i < len; i++) {
         klog_buf[klog_head] = s[i];
-        if (++klog_head >= KLOG_BUF_SIZE) {
+        if (++klog_head >= klog_capacity) {
             klog_head = 0;
             klog_wrapped = 1;
         }
@@ -290,7 +300,7 @@ static void klog_append(const char *s, size_t len) {
 
 /* Total bytes currently held in the ring (oldest .. newest). */
 size_t klog_size(void) {
-    return klog_wrapped ? KLOG_BUF_SIZE : klog_head;
+    return klog_wrapped ? klog_capacity : klog_head;
 }
 
 /* Copy the ring oldest-first into dst (up to dstlen).  Returns bytes copied. */
@@ -299,10 +309,59 @@ size_t klog_read(char *dst, size_t dstlen) {
     size_t start = klog_wrapped ? klog_head : 0;
     size_t n = 0;
     while (n < avail && n < dstlen) {
-        dst[n] = klog_buf[(start + n) % KLOG_BUF_SIZE];
+        dst[n] = klog_buf[(start + n) % klog_capacity];
         n++;
     }
     return n;
+}
+
+/*
+ * Grow the kernel-log ring to a size scaled to installed RAM.  Called once
+ * from kmain() after kmem_init() makes kmalloc() usable.  The existing log
+ * (captured on the static ring during early boot) is preserved.  Never shrinks.
+ */
+void klog_init_dynamic(size_t ram_bytes) {
+    size_t target = KLOG_MIN_SIZE;
+    size_t cand = 64u * 1024u;
+    size_t threshold = 128u * 1024u * 1024u;
+    size_t ram;
+    char *nb;
+    uint32_t flags;
+    size_t n;
+
+    /* The allocator reports slightly less than the installed RAM (kernel image
+     * + reserved regions), so round up to a power of two: a 256 MiB box that
+     * has ~240 MiB usable still lands on the 256 MiB tier. */
+    ram = 1u;
+    while (ram < ram_bytes && ram < (1u << 31)) {
+        ram <<= 1;
+    }
+
+    while (ram >= threshold && cand <= KLOG_MAX_SIZE) {
+        target = cand;
+        cand *= 4u;
+        threshold *= 2u;
+    }
+    if (target <= klog_capacity) {
+        return;
+    }
+
+    nb = (char *)kmalloc(target);
+    if (!nb) {
+        return;                     /* stay on the static ring */
+    }
+
+    flags = intr_disable();         /* atomic swap vs. an IRQ-context writer */
+    n = klog_read(nb, target);      /* carry the early-boot log forward */
+    klog_buf = nb;
+    klog_capacity = target;
+    klog_head = (uint32_t)n;
+    klog_wrapped = 0;
+    intr_restore(flags);
+
+    kprintf("klog: ring sized to %u KiB for %u MiB RAM\n",
+            (unsigned)(target / 1024u),
+            (unsigned)(ram_bytes / (1024u * 1024u)));
 }
 
 void kprint(const char *str) {
