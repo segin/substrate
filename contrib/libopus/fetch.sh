@@ -1,8 +1,15 @@
 #!/bin/sh
-# Auto: substrate audio-codec port.  See contrib/substrate-codec.sh.
+# contrib/libopus/fetch.sh — fetch libopus, verify, extract, apply patches.
 set -eu
-HERE="$(cd "$(dirname "$0")" && pwd)"
-SUBSTRATE_TOP="$(cd "${HERE}/../.." && pwd)"
-. "${SUBSTRATE_TOP}/contrib/substrate-codec.sh"
-codec_fetch "opus-1.5.2.tar.gz" "https://downloads.xiph.org/releases/opus/opus-1.5.2.tar.gz" \
-  "78d963cd56d5504611f111e2b3606e236189a3585d65fae1ecdbec9bf4545632b1956f11824328279a2d1ea2ecf441ebc11e455fb598d20a458df15185e95da4" "opus-1.5.2"
+VERSION="1.5.2"
+TARBALL="opus-${VERSION}.tar.gz"
+URL="https://downloads.xiph.org/releases/opus/${TARBALL}"
+SHA256="65c1d2f78b9f2fb20082c38cbe47c951ad5839345876e46941612ee87f9a7ce1"
+HERE="$(cd "$(dirname "$0")" && pwd)"; BUILD_DIR="${HERE}/build"; TREE="${BUILD_DIR}/opus-${VERSION}"
+mkdir -p "${BUILD_DIR}"; cd "${BUILD_DIR}"
+[ -f "${TARBALL}" ] || { [ "${1:-}" = "--no-network" ] && { echo "missing tarball" >&2; exit 1; }; curl -fSL -o "${TARBALL}" "${URL}"; }
+echo "${SHA256}  ${TARBALL}" | sha256sum -c -
+[ -d "${TREE}" ] || tar xf "${TARBALL}"
+if [ -f "${HERE}/series" ]; then cd "${TREE}"; while IFS= read -r p; do [ -z "$p" ] && continue; case "$p" in \#*) continue;; esac
+  [ -f ".applied-$p" ] || { patch -p1 < "${HERE}/patches/$p"; touch ".applied-$p"; }; done < "${HERE}/series"; fi
+echo "libopus ${VERSION} ready"
