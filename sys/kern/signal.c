@@ -63,7 +63,7 @@ static void signal_stop_process_threads(process_t *p, const char *reason) {
     p->state = SSTOP;
 }
 
-static void signal_resume_process_threads(process_t *p) {
+void signal_resume_process_threads(process_t *p) {
     if (!p) {
         return;
     }
@@ -78,6 +78,21 @@ static void signal_resume_process_threads(process_t *p) {
     if (p->state == SSTOP) {
         p->state = SRUN;
     }
+}
+
+/* ptrace(2) helper: the saved user trapframe a stopped tracee will resume with
+ * (its first thread's user_frame, captured at the signal-delivery stop).
+ * Returns NULL if no thread of p is parked in a stop. */
+void *ptrace_user_frame(process_t *p) {
+    if (!p) {
+        return NULL;
+    }
+    FOREACH_THREAD(thread) {
+        if (thread->proc == p && thread->user_frame) {
+            return thread->user_frame;
+        }
+    }
+    return NULL;
 }
 
 static void signal_clear_trap_context(thread_t *t, int sig) {
@@ -906,6 +921,26 @@ void signal_handle_pending(registers_t *regs) {
         signal_resume_process_threads(current_process);
         sigexit(current_process, SIGKILL);
         return; // Should not reach
+    }
+
+    /* ptrace signal-delivery stop: a traced process stops on every signal
+     * except SIGKILL and reports it to its tracer, which then inspects and
+     * resumes it via ptrace(2).  The signal is consumed here; the tracer can
+     * re-request delivery through PTRACE_CONT's data argument.  user_frame is
+     * captured so PTRACE_GETREGS/SETREGS see the frame it will resume with. */
+    if ((current_process->p_flag & P_TRACED) && sig != SIGKILL) {
+        process_t *tracer = current_process->p_tracer ?
+                            current_process->p_tracer : current_process->p_parent;
+        current_thread->user_frame = regs;
+        current_process->p_xsig = (uint8_t)sig;
+        signal_stop_process_threads(current_process, "ptrace-stop");
+        if (tracer) {
+            psignal(tracer, SIGCHLD);
+            sched_wakeup(&tracer->p_children);
+        }
+        signal_clear_trap_context(current_thread, sig);
+        sched_yield();
+        return;
     }
 
     struct sigaction *act = &current_process->sig_actions[sig - 1];

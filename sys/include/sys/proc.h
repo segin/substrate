@@ -95,6 +95,12 @@ typedef struct process {
     struct process *p_children;   // Head of children list
     struct process *p_sibling;    // Next sibling (in parent's children list)
     struct thread *vfork_waiter;  // Parent thread blocked in vfork()
+
+    // ptrace(2): the tracing process (NULL if untraced; see P_TRACED).  For
+    // PTRACE_ATTACH the tracee is reparented onto the tracer so wait4() reports
+    // its stops; p_oparent remembers the real parent to restore on detach/exit.
+    struct process *p_tracer;
+    struct process *p_oparent;
     
     // Accounting & Credentials
     char comm[AC_COMM_LEN];
@@ -345,6 +351,11 @@ typedef struct thread {
     // Syscall registers (for fork/vfork)
     void *syscall_regs;
 
+    // ptrace(2): saved user-mode trapframe (registers_t*) captured when this
+    // thread stops in signal_handle_pending(), so a tracer's PTRACE_GETREGS /
+    // SETREGS can read and write the registers it will resume with.
+    void *user_frame;
+
     // Thread exit status for join/exit
     void *retval;
     // FreeBSD-style exit notification
@@ -385,5 +396,9 @@ void proc_clear_fd(process_t *p, int fd);
 extern mutex_t proctree_lock;
 
 void rusage_add_tick(struct process *p, int is_usermode);
+
+/* ptrace(2) support (sys/kern/ptrace.c, sys/kern/signal.c). */
+void  signal_resume_process_threads(struct process *p);
+void *ptrace_user_frame(struct process *p);
 
 #endif

@@ -250,7 +250,7 @@ int freebsd_sys_fcntl(int fd, int cmd, int arg) {
 }
 
 int sys_sigret(void) { return -ENOSYS; }
-int sys_ptrace(int req, int pid, int addr, int data) { (void)req; (void)pid; (void)addr; (void)data; return -ENOSYS; }
+/* sys_ptrace lives in sys/kern/ptrace.c (real implementation). */
 
 /*
  * sys_pause - Suspend until signal delivery

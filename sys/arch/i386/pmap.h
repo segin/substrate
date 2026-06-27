@@ -111,6 +111,9 @@ uintptr_t pmap_extract(pmap_t pmap, uintptr_t va); // Get PA from VA
  * pmap_extract).  Stops at the first unmapped / out-of-direct-map page; returns
  * the number of bytes copied.  Used by procfs to read a process's live argv. */
 size_t pmap_copyin_other(pmap_t pmap, uintptr_t uva, void *dst, size_t len);
+/* Mirror of pmap_copyin_other for writes — used by ptrace POKE.  Writes land on
+ * the backing physical page directly (no PTE-write check, no COW break). */
+size_t pmap_copyout_other(pmap_t pmap, uintptr_t uva, const void *src, size_t len);
 
 // Protection flags for pmap_enter
 #define VM_PROT_READ    0x01

@@ -1386,6 +1386,59 @@ size_t pmap_copyin_other(pmap_t pmap, uintptr_t uva, void *dst, size_t len) {
     return got;
 }
 
+/* Copy `len` bytes from kernel buffer `src` into user vaddr `uva` in a possibly
+ * NON-active pmap, walking the target's page tables through the physical direct
+ * map.  The write lands straight on the backing physical page (bypassing PTE
+ * write-protection), so a ptrace POKE can patch a read-only text page — it does
+ * NOT break copy-on-write, so a page still shared with a sibling is modified in
+ * place.  Stops at the first unmapped page; returns the bytes written. */
+size_t pmap_copyout_other(pmap_t pmap, uintptr_t uva, const void *src, size_t len) {
+    const uint8_t *s = (const uint8_t *)src;
+    size_t put = 0;
+    uint32_t *pd;
+
+    if (!pmap || pmap->pdir_phys >= 0x40000000) {
+        return 0;
+    }
+    pd = (uint32_t *)(pmap->pdir_phys + 0xC0000000);
+
+    while (put < len) {
+        uintptr_t va = uva + put;
+        uint32_t pde = pd[PD_INDEX(va)];
+        uintptr_t pa;
+        size_t page_off, chunk;
+
+        if (!(pde & PTE_P)) {
+            break;
+        }
+        if (pde & PTE_PS) {
+            pa = (pde & 0xFFC00000) + (va & 0x3FFFFF);
+        } else {
+            uint32_t pt_phys = pde & 0xFFFFF000;
+            uint32_t pte;
+            if (pt_phys >= 0x40000000) {
+                break;
+            }
+            pte = ((uint32_t *)(pt_phys + 0xC0000000))[PT_INDEX(va)];
+            if (!(pte & PTE_P)) {
+                break;
+            }
+            pa = (pte & 0xFFFFF000) + (va & 0xFFF);
+        }
+        if (pa >= 0x40000000) {
+            break;
+        }
+        page_off = va & 0xFFF;
+        chunk = 0x1000 - page_off;
+        if (chunk > len - put) {
+            chunk = len - put;
+        }
+        memcpy((void *)(pa + 0xC0000000), s + put, chunk);
+        put += chunk;
+    }
+    return put;
+}
+
 // Change page protections for a virtual address range
 // Returns 0 on success, -1 on error
 int pmap_protect(pmap_t pmap, uintptr_t sva, uintptr_t eva, uint32_t prot) {
