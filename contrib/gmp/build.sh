@@ -84,4 +84,13 @@ mkdir -p "${SR}/lib" "${SR}/include"
 cp -a "${DESTDIR}/usr/lib/." "${SR}/lib/" 2>/dev/null || true
 cp -a "${DESTDIR}/usr/include/." "${SR}/include/" 2>/dev/null || true
 
+# Drop the libtool archive from the cross sysroot.  Its libdir='/usr/lib' makes
+# a cross-link's libtool resolve -lgmp to the BUILD HOST's /usr/lib/libgmp.so
+# (wrong arch: "file in wrong format").  Without the .la, consumers link the
+# substrate libgmp.so directly via -L${SR}/lib and record its soname
+# (libgmp.so.10), so libgmp is used as a proper DYNAMIC library.  The image copy
+# (dist-overlay) keeps the .la, where its /usr/lib libdir is the correct target
+# path.
+rm -f "${SR}/lib/libgmp.la"
+
 echo "==> Done.  Staged at ${DESTDIR}/usr/{lib/libgmp.so*,include/gmp.h}; mirrored into ${SR}"
