@@ -119,7 +119,14 @@ strip gdb/gdb -o gdb && printf '\100' | dd of=gdb bs=1 seek=7 count=1 conv=notru
 inf-ptrace passes int/long (size-safe on i386).  The ptrace prototype is wrapped
 in `extern "C"` so the C++ caller links the libsys symbol.
 
-**Remaining:** software-breakpoint insertion into a dynamic program's
-not-yet-resident `.text` at the exec-stop (the page isn't fault-resolvable
-cross-process at that instant); capture the hand-applied tree changes as a
-patch series.
+**GDB works end-to-end** (verified June 2026): software breakpoints, `bt`,
+`info args`, repeated hits and `continue` to a clean exit all work on a dynamic
+substrate executable.  The earlier "breakpoint insertion fails" symptom was NOT
+a kernel bug — gdb DT_NEEDED `libsys.so.0` and resolves `ptrace` there, and the
+image carried a STALE `libsys.so.0` that pre-dated the PEEK→word bridge in
+`lib/sys/ptrace.c`, so PEEK passed `data=NULL` and the kernel's copyout failed
+(EFAULT → "Cannot access memory").  Rebuilding/baking the current
+`lib/sys/libsys.so.0` (which a fresh `build-rootfs --image` does) fixes it.
+
+**Remaining:** capture the hand-applied gdb-tree changes
+(bfd/configure.host/.nat/substrate-nat.c) as a committed patch series.
