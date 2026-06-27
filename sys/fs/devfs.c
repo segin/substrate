@@ -713,6 +713,7 @@ void devfs_init(void) {
         devfs_create_common_dir("comm");
         devfs_create_common_dir("storage");
         devfs_create_common_dir("input");
+        devfs_create_common_dir("usb");     /* /dev/usb/busN/devM for libusb */
         devfs_create_common_dir("by-id");
         devfs_create_common_dir("pts");
         /* Mount point for shmfs (POSIX shared memory).  Created

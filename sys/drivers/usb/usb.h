@@ -420,6 +420,9 @@ int usb_clear_halt(usb_device_t *dev, usb_endpoint_t *ep);
 
 /* Enumeration */
 int usb_enumerate_device(usb_hcd_t *hcd, uint8_t port, uint8_t speed);
+
+/* Publish a device under /dev/usb (libusb/lsusb backend). */
+void usbdevfs_publish(usb_device_t *dev);
 void usb_enumerate_bus(usb_hcd_t *hcd);
 
 /* Endpoint Lookup Helpers */

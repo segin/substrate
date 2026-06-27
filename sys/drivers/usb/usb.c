@@ -45,6 +45,7 @@ static void usb_publish_device(usb_device_t *dev)
     if (device_register(bd, &usb_bus_type) != 0) {
         device_put(bd);
     }
+    usbdevfs_publish(dev);
 }
 
 /*
