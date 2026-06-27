@@ -34,6 +34,12 @@ export PATH
 
 [ -d "${TREE_DIR}" ] || { echo "build.sh: run ./fetch.sh first" >&2; exit 1; }
 
+# substrate's /dev/audio is NetBSD-compatible: <sys/audioio.h> matches NetBSD
+# 10's audio_info (sizeof 136) with the full AUDIO_GETINFO/SETINFO/DRAIN ioctl
+# set.  SDL only wires its NetBSD audio backend for $ARCH=netbsd; route the
+# linux-style host there too so we get real audio instead of the dummy driver.
+sed -i 's/netbsd)  # Don/netbsd|linux)  # Don/' "${TREE_DIR}/configure"
+
 # Pull in every staged X dist tree plus libiconv (SDL uses iconv for text).
 PKGP=""; CPP=""; LDF=""
 for d in xorgproto xcb-proto libXau xtrans libxcb libX11 \
