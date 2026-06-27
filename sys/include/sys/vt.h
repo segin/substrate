@@ -16,11 +16,14 @@ struct tty;
  * geometry from the resolution (width/8 cols, height/16 rows), but
  * vt_set_geometry() *rejects* anything past these caps and keeps the previous
  * (default 80x25) size — so they must cover the largest mode we expect to run
- * the text console at.  240x68 spans up to 1920x1088 (e.g. 1280x720 -> 160x45,
- * 1920x1080 -> 240x67).  These size static per-VT buffers x VT_MAX, so raising
- * them costs BSS; a fully dynamic per-geometry allocation would avoid that. */
-#define VT_MAX_WIDTH 240
-#define VT_MAX_HEIGHT 68
+ * the text console at.  480x136 spans up to 3840x2176 (4K: 3840x2160 -> 480x135;
+ * e.g. 1280x720 -> 160x45, 1920x1080 -> 240x67).
+ *
+ * These size static per-VT buffers (buffer + alt_buffer + scrollback) x VT_MAX,
+ * so this is ~6 MiB of BSS at 4K.  A fully dynamic per-geometry allocation would
+ * avoid the waste and is the cleaner fix if this grows further. */
+#define VT_MAX_WIDTH 480
+#define VT_MAX_HEIGHT 136
 #define VT_MAX_BUF_SIZE (VT_MAX_WIDTH * VT_MAX_HEIGHT)
 #define VT_SCROLLBACK_LINES 256
 #define VT_TABSTOP_WORDS ((VT_MAX_WIDTH + 31) / 32)
@@ -32,9 +35,13 @@ struct tty;
 typedef struct vt_state {
     int id; // 0..VT_MAX-1
     
-    // Video Memory Buffer (Char + Attribute)
-    uint16_t buffer[VT_MAX_BUF_SIZE];
-    uint16_t scrollback[VT_SCROLLBACK_LINES][VT_MAX_WIDTH];
+    /* Cell buffers, allocated to the live geometry (vt_width x vt_height) at
+     * vt_set_geometry() rather than statically sized to VT_MAX_* — so a 4K
+     * console costs 4K of cells, an 80x25 one costs 80x25, with no per-VT BSS
+     * waste.  scrollback is a VT_SCROLLBACK_LINES x scrollback_pitch ring. */
+    uint16_t *buffer;
+    uint16_t *scrollback;
+    int       scrollback_pitch;   /* columns per scrollback line */
     uint16_t scrollback_head;
     uint16_t scrollback_count;
     uint16_t scrollback_view;
@@ -83,7 +90,7 @@ typedef struct vt_state {
     
     // Alternate screen buffer (DECSET 47/1047/1049)
     int alt_screen_active;
-    uint16_t alt_buffer[VT_MAX_BUF_SIZE];
+    uint16_t *alt_buffer;   /* allocated to the live geometry (see buffer) */
     int alt_row;
     int alt_col;
     uint8_t alt_color;

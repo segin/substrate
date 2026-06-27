@@ -16,13 +16,59 @@
 #include <kern/time.h>
 #include <arch/x86-common/rtc.h>
 #include <stdio.h>
+#include <vm/vm_kmem.h>
 
 static vt_state_t vt_states[VT_MAX];
 static int active_vt = 0;
 static int vt_width = VT_DEFAULT_WIDTH;
 static int vt_height = VT_DEFAULT_HEIGHT;
 static int vt_initialized = 0;
-static uint16_t vt_buffer_scratch[VT_MAX_BUF_SIZE];
+
+/* Per-VT cell buffers are allocated to the live geometry, not statically sized
+ * to VT_MAX_*.  These helpers keep the buffer/alt_buffer/scrollback trio in
+ * lock-step. */
+static size_t vt_buf_bytes(int cols, int rows) {
+    return (size_t)cols * (size_t)rows * sizeof(uint16_t);
+}
+static size_t vt_sb_bytes(int cols) {
+    return (size_t)VT_SCROLLBACK_LINES * (size_t)cols * sizeof(uint16_t);
+}
+
+/* Allocate the trio for a (cols x rows) geometry, pre-filled with `fill`.
+ * All-or-nothing — frees partials and returns -1 on OOM. */
+static int vt_alloc_buffers(int cols, int rows, uint16_t fill,
+                            uint16_t **out_buf, uint16_t **out_alt,
+                            uint16_t **out_sb) {
+    size_t cells = (size_t)cols * (size_t)rows;
+    size_t sb_cells = (size_t)VT_SCROLLBACK_LINES * (size_t)cols;
+    uint16_t *buf = kmalloc(cells * sizeof(uint16_t));
+    uint16_t *alt = kmalloc(cells * sizeof(uint16_t));
+    uint16_t *sb  = kmalloc(sb_cells * sizeof(uint16_t));
+    size_t i;
+
+    if (!buf || !alt || !sb) {
+        if (buf) kfree(buf, cells * sizeof(uint16_t));
+        if (alt) kfree(alt, cells * sizeof(uint16_t));
+        if (sb)  kfree(sb, sb_cells * sizeof(uint16_t));
+        return -1;
+    }
+    for (i = 0; i < cells; i++) { buf[i] = fill; alt[i] = fill; }
+    for (i = 0; i < sb_cells; i++) sb[i] = fill;
+    *out_buf = buf;
+    *out_alt = alt;
+    *out_sb = sb;
+    return 0;
+}
+
+static void vt_free_buffers(vt_state_t *vt, int cols, int rows) {
+    if (!vt) return;
+    if (vt->buffer)    kfree(vt->buffer, vt_buf_bytes(cols, rows));
+    if (vt->alt_buffer) kfree(vt->alt_buffer, vt_buf_bytes(cols, rows));
+    if (vt->scrollback) kfree(vt->scrollback, vt_sb_bytes(vt->scrollback_pitch));
+    vt->buffer = NULL;
+    vt->alt_buffer = NULL;
+    vt->scrollback = NULL;
+}
 
 /*
  * Serializes vt_activate() so a switch can't race with concurrent
@@ -102,53 +148,34 @@ static int vt_clamp_int(int value, int min_value, int max_value) {
     return value;
 }
 
-static void vt_reflow_buffer(uint16_t *buffer,
-                             int old_width,
-                             int old_height,
-                             int new_width,
-                             int new_height,
-                             uint16_t fill) {
-    int copy_rows;
-    int copy_cols;
+/* Copy the overlapping region of the old buffer into the new one.  `dst` is
+ * already blank-filled by vt_alloc_buffers(), so only surviving cells move. */
+static void vt_reflow_buffer(uint16_t *dst, const uint16_t *src,
+                             int old_width, int old_height,
+                             int new_width, int new_height) {
+    int copy_rows = old_height < new_height ? old_height : new_height;
+    int copy_cols = old_width < new_width ? old_width : new_width;
     int row;
 
-    memset(vt_buffer_scratch, 0, sizeof(vt_buffer_scratch));
-    for (row = 0; row < new_height; row++) {
-        int col;
-
-        for (col = 0; col < new_width; col++) {
-            vt_buffer_scratch[(size_t)row * (size_t)new_width + (size_t)col] = fill;
-        }
-    }
-
-    copy_rows = old_height < new_height ? old_height : new_height;
-    copy_cols = old_width < new_width ? old_width : new_width;
     for (row = 0; row < copy_rows; row++) {
-        memcpy(&vt_buffer_scratch[(size_t)row * (size_t)new_width],
-               &buffer[(size_t)row * (size_t)old_width],
+        memcpy(&dst[(size_t)row * (size_t)new_width],
+               &src[(size_t)row * (size_t)old_width],
                (size_t)copy_cols * sizeof(uint16_t));
     }
-
-    memcpy(buffer, vt_buffer_scratch, sizeof(vt_buffer_scratch));
 }
 
-static void vt_reflow_scrollback(vt_state_t *vt, int old_width, int new_width, uint16_t fill) {
-    uint16_t scratch_line[VT_MAX_WIDTH];
-    size_t copy_cols;
+/* Copy each scrollback line's surviving columns into the new ring.  `dst` is
+ * blank-filled; `src` has `src_pitch` columns per line. */
+static void vt_reflow_scrollback(uint16_t *dst, int dst_pitch,
+                                 const uint16_t *src, int src_pitch,
+                                 int old_width, int new_width) {
+    int copy_cols = old_width < new_width ? old_width : new_width;
     int i;
 
-    if (!vt || old_width == new_width) {
-        return;
-    }
-
-    copy_cols = (size_t)(old_width < new_width ? old_width : new_width);
     for (i = 0; i < VT_SCROLLBACK_LINES; i++) {
-        memset(scratch_line, 0, sizeof(scratch_line));
-        memcpy(scratch_line, vt->scrollback[i], copy_cols * sizeof(uint16_t));
-        for (int col = old_width; col < new_width; col++) {
-            scratch_line[col] = fill;
-        }
-        memcpy(vt->scrollback[i], scratch_line, sizeof(scratch_line));
+        memcpy(&dst[(size_t)i * (size_t)dst_pitch],
+               &src[(size_t)i * (size_t)src_pitch],
+               (size_t)copy_cols * sizeof(uint16_t));
     }
 }
 
@@ -216,32 +243,21 @@ static void vt_apply_geometry_to_state(vt_state_t *vt) {
     }
 }
 
+/* Re-clamp cursor / scroll-region state after a geometry change.  The buffers
+ * have already been reallocated and reflowed by vt_set_geometry(). */
 static void vt_reconfigure_state(vt_state_t *vt,
-                                 int old_width,
                                  int old_height,
                                  int new_width,
                                  int new_height) {
-    uint16_t blank;
     int old_visible;
     int new_visible;
-    int status_row;
 
     if (!vt) {
         return;
     }
 
-    blank = (uint16_t)' ' | (uint16_t)0x07U << 8;
     old_visible = old_height - 1;
     new_visible = new_height - 1;
-
-    vt_reflow_buffer(vt->buffer, old_width, old_visible, new_width, new_visible, blank);
-    vt_reflow_buffer(vt->alt_buffer, old_width, old_visible, new_width, new_visible, blank);
-    vt_reflow_scrollback(vt, old_width, new_width, blank);
-
-    status_row = new_height - 1;
-    for (int col = 0; col < new_width; col++) {
-        vt->buffer[(size_t)status_row * (size_t)new_width + (size_t)col] = blank;
-    }
 
     vt->row = vt_clamp_int(vt->row, 0, new_visible - 1);
     vt->saved_row = vt_clamp_int(vt->saved_row, 0, new_visible - 1);
@@ -265,27 +281,71 @@ static void vt_reconfigure_state(vt_state_t *vt,
 }
 
 int vt_set_geometry(int cols, int rows) {
+    uint16_t blank = (uint16_t)' ' | (uint16_t)0x07U << 8;
+    uint16_t *nbuf[VT_MAX];
+    uint16_t *nalt[VT_MAX];
+    uint16_t *nsb[VT_MAX];
     int old_width;
     int old_height;
+    int i;
 
     if (cols < 1 || cols > VT_MAX_WIDTH || rows < 2 || rows > VT_MAX_HEIGHT) {
         return -1;
     }
 
+    /* Before vt_init() the cell buffers don't exist yet — just record the
+     * geometry; vt_init() allocates the buffers for it. */
+    if (!vt_initialized) {
+        vt_width = cols;
+        vt_height = rows;
+        return 0;
+    }
+
+    if (cols == vt_width && rows == vt_height) {
+        return 0;
+    }
+
     old_width = vt_width;
     old_height = vt_height;
-    if (cols == old_width && rows == old_height) {
-        return 0;
+
+    /* Allocate every VT's new buffers up front so a mid-resize OOM leaves the
+     * existing geometry intact rather than half-resized. */
+    for (i = 0; i < VT_MAX; i++) {
+        if (vt_alloc_buffers(cols, rows, blank, &nbuf[i], &nalt[i], &nsb[i]) != 0) {
+            for (int k = 0; k < i; k++) {
+                kfree(nbuf[k], vt_buf_bytes(cols, rows));
+                kfree(nalt[k], vt_buf_bytes(cols, rows));
+                kfree(nsb[k], vt_sb_bytes(cols));
+            }
+            return -1;
+        }
+    }
+
+    /* Reflow surviving content into the new buffers, drop the old, swap in the
+     * new.  (The status row stays blank from the allocation.) */
+    for (i = 0; i < VT_MAX; i++) {
+        vt_state_t *vt = &vt_states[i];
+
+        if (vt->buffer) {
+            vt_reflow_buffer(nbuf[i], vt->buffer, old_width, old_height - 1,
+                             cols, rows - 1);
+            vt_reflow_buffer(nalt[i], vt->alt_buffer, old_width, old_height - 1,
+                             cols, rows - 1);
+            vt_reflow_scrollback(nsb[i], cols, vt->scrollback,
+                                 vt->scrollback_pitch, old_width, cols);
+            vt_free_buffers(vt, old_width, old_height);
+        }
+        vt->buffer = nbuf[i];
+        vt->alt_buffer = nalt[i];
+        vt->scrollback = nsb[i];
+        vt->scrollback_pitch = cols;
     }
 
     vt_width = cols;
     vt_height = rows;
-    if (!vt_initialized) {
-        return 0;
-    }
 
-    for (int i = 0; i < VT_MAX; i++) {
-        vt_reconfigure_state(&vt_states[i], old_width, old_height, cols, rows);
+    for (i = 0; i < VT_MAX; i++) {
+        vt_reconfigure_state(&vt_states[i], old_height, cols, rows);
     }
     return 0;
 }
@@ -356,15 +416,22 @@ void vt_init(void) {
         vt_states[i].alt_col = 0;
         vt_states[i].alt_color = 0x07;
         vt_states[i].alt_attrs = 0;
-        memset(vt_states[i].alt_buffer, 0, sizeof(vt_states[i].alt_buffer));
-        
+
+        /* Allocate the cell buffers for the current geometry (default 80x25,
+         * or whatever vt_set_geometry() recorded before init).  Pre-filled
+         * with blank, so no separate clear loop is needed.  Early-boot kmalloc
+         * (kmem_init runs long before the console) does not fail in practice. */
+        vt_states[i].scrollback_pitch = vt_width;
+        vt_states[i].buffer = NULL;
+        vt_states[i].alt_buffer = NULL;
+        vt_states[i].scrollback = NULL;
+        (void)vt_alloc_buffers(vt_width, vt_height, 0x0720,
+                               &vt_states[i].buffer, &vt_states[i].alt_buffer,
+                               &vt_states[i].scrollback);
+
         // Initialize ansi state
         ansi_init(&vt_states[i].ansi);
-        
-        // Clear buffer
-        for (int j = 0; j < VT_MAX_BUF_SIZE; j++) {
-            vt_states[i].buffer[j] = 0x0720; // Space with default attr
-        }
+
         vt_apply_geometry_to_state(&vt_states[i]);
     }
     
@@ -470,7 +537,7 @@ uint16_t vt_get_display_cell(const vt_state_t *vt, int row, int col) {
     seq_index = display_start + row;
     if (seq_index < history_count) {
         slot = vt_scrollback_slot(vt, (size_t)seq_index);
-        return vt->scrollback[slot][col];
+        return vt->scrollback[slot * (size_t)vt->scrollback_pitch + (size_t)col];
     }
 
     seq_index -= history_count;
@@ -491,8 +558,8 @@ void vt_capture_scrollback_top(vt_state_t *vt) {
 
     width = (size_t)vt_get_width();
     row_offset = vt_row_offset(0);
-    memcpy(vt->scrollback[vt->scrollback_head], &vt->buffer[row_offset],
-           width * sizeof(uint16_t));
+    memcpy(&vt->scrollback[(size_t)vt->scrollback_head * (size_t)vt->scrollback_pitch],
+           &vt->buffer[row_offset], width * sizeof(uint16_t));
     vt->scrollback_head = (uint16_t)((vt->scrollback_head + 1) % VT_SCROLLBACK_LINES);
     if (vt->scrollback_count < VT_SCROLLBACK_LINES) {
         vt->scrollback_count++;
