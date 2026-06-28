@@ -148,9 +148,25 @@ int sys_vm_slabs(sys_slabinfo_t *slabs, size_t *count) {
  * CPU Information API
  * =========================================================== */
 int sys_cpu_count(void) {
-    /* TODO: read /proc/cpuinfo and count processor entries.  Substrate
-     * exposes a single CPU today; SMP support lands per-CPU stats
-     * via /proc/stat. */
+    /* Prefer direct syscall if available; parsing /proc is slower. */
+    int count = (int)__sysret(syscall(SYS_CPU_COUNT));
+    if (count > 0) return count;
+
+    char buf[4096];
+    if (read_proc_file("/proc/stat", buf, sizeof(buf)) > 0) {
+        count = 0;
+        const char *p = buf;
+        while (*p) {
+            if (strncmp(p, "cpu", 3) == 0 && p[3] >= '0' && p[3] <= '9') {
+                count++;
+            }
+            p = strchr(p, '\n');
+            if (!p) break;
+            p++;
+        }
+        if (count > 0) return count;
+    }
+
     return 1;
 }
 
