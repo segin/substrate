@@ -9,6 +9,7 @@
 #define _FS_UDF_UDF_H
 
 #include <stdint.h>
+#include <stddef.h>   /* size_t (udf_read_label declaration) */
 
 /* UDF Constants */
 #define UDF_SECTOR_SIZE     2048
