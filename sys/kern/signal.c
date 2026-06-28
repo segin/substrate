@@ -83,6 +83,19 @@ void signal_resume_process_threads(process_t *p) {
     }
 }
 
+/* A process resumed from a job-control or ptrace stop must die at once if a
+ * SIGKILL arrived while it was stopped: psignal() resumes it specifically to
+ * deliver that kill, so it must not slip back to userspace with SIGKILL still
+ * pending.  Without this, ^Z'd (stopped) processes survived SIGKILL until a
+ * later SIGCONT finally let the long-pending signal be delivered. */
+static void signal_die_if_killed(void) {
+    if (current_thread && current_process &&
+        (current_thread->sig_pending & sigmask(SIGKILL))) {
+        signal_resume_process_threads(current_process);
+        sigexit(current_process, SIGKILL);
+    }
+}
+
 /* ptrace(2) helper: the saved user trapframe a stopped tracee will resume with
  * (its first thread's user_frame, captured at the signal-delivery stop).
  * Returns NULL if no thread of p is parked in a stop. */
@@ -122,6 +135,7 @@ void ptrace_exec_stop(struct registers *frame) {
         sched_wakeup(&tracer->p_children);
     }
     sched_yield();
+    signal_die_if_killed();
     current_thread->user_frame = NULL;
 }
 
@@ -630,6 +644,13 @@ void psignal(process_t *p, int sig) {
         }
     }
 
+    /* SIGKILL must terminate even a stopped process.  Resume its threads so
+     * they run signal_handle_pending() (and die) instead of lingering in
+     * THREAD_STOPPED until a later SIGCONT delivers the long-pending kill. */
+    if (sig == SIGKILL && p->state == SSTOP) {
+        signal_resume_process_threads(p);
+    }
+
     /* For SIGSTOP/SIGTSTP/SIGTTIN/SIGTTOU, clear SIGCONT */
     if (sig == SIGSTOP || sig == SIGTSTP || sig == SIGTTIN || sig == SIGTTOU) {
         FOREACH_THREAD(thread) {
@@ -975,6 +996,7 @@ void signal_handle_pending(registers_t *regs) {
         }
         signal_clear_trap_context(current_thread, sig);
         sched_yield();
+        signal_die_if_killed();
         return;
     }
 
@@ -1002,9 +1024,14 @@ void signal_handle_pending(registers_t *regs) {
         
         // Job Control Stops
         if (sig == SIGSTOP || sig == SIGTSTP || sig == SIGTTIN || sig == SIGTTOU) {
-             // Orphaned process groups ignore these signals
+             /* An orphaned process group discards the *terminal-generated*
+              * job-control stops (SIGTSTP/SIGTTIN/SIGTTOU) so it can't wedge
+              * itself unkillable with no shell to continue it.  SIGSTOP is
+              * never discardable (POSIX) — an explicit SIGSTOP always stops,
+              * orphaned or not. */
              extern int pgrp_is_orphaned(struct pgrp *pgrp);
-             if (current_process->p_pgrp && pgrp_is_orphaned(current_process->p_pgrp)) {
+             if (sig != SIGSTOP && current_process->p_pgrp &&
+                 pgrp_is_orphaned(current_process->p_pgrp)) {
                  return;
              }
 
@@ -1021,6 +1048,10 @@ void signal_handle_pending(registers_t *regs) {
              }
              signal_clear_trap_context(current_thread, sig);
              sched_yield();
+             /* Resumed.  A SIGKILL that landed while we were stopped resumes
+              * us here (via psignal); honour it now rather than returning to
+              * userspace with the kill still pending. */
+             signal_die_if_killed();
              return;
         }
         
