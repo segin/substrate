@@ -90,6 +90,14 @@ printf '1\n' > d1/x; printf '2\n' > d2/x
 printf 'z\n' > d1/only1
 check "-r -q recursive" "Only in d1: only1|Files d1/x and d2/x differ" \
       "$("$BIN" -r -q d1 d2 | pipe)"
+check "-r -q recursive with trailing slashes" "Only in d1/: only1|Files d1/x and d2/x differ" \
+      "$("$BIN" -r -q d1/ d2/ | pipe)"
+
+# diff files directly inside a directory to ensure path joining behaves correctly
+mkdir dir_test_1 dir_test_2
+printf "1\n" > dir_test_1/test_file.txt
+printf "2\n" > dir_test_2/test_file.txt
+check "diff identical named files in different dirs" "1c1|< 1|---|> 2" "$("$BIN" dir_test_1/test_file.txt dir_test_2/test_file.txt | pipe)"
 
 # -U with explicit context count
 check "unified -U1" "--- A|+++ B|@@ -1,3 +1,3 @@| 1|-2|+X| 3" \

@@ -665,8 +665,9 @@ static char *join(const char *d, const char *n)
 {
 	size_t ld = strlen(d);
 	bool slash = ld > 0 && d[ld - 1] == '/';
-	char *p = xmalloc(ld + strlen(n) + 2);
-	sprintf(p, "%s%s%s", d, slash ? "" : "/", n);
+	size_t len = ld + strlen(n) + 2;
+	char *p = xmalloc(len);
+	snprintf(p, len, "%s%s%s", d, slash ? "" : "/", n);
 	return p;
 }
 
