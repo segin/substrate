@@ -121,11 +121,10 @@ static int canon(const char *name, int mode, char *resolved)
 			snprintf(cand, sizeof cand, "%s/%s", result, comp);
 
 		if (missing) {		/* -m, past the first missing component */
-			if (strlen(cand) >= sizeof result) {
+			if (strlcpy(result, cand, sizeof result) >= sizeof result) {
 				errno = ENAMETOOLONG;
 				return -1;
 			}
-			strcpy(result, cand);
 			continue;
 		}
 
@@ -135,11 +134,10 @@ static int canon(const char *name, int mode, char *resolved)
 				return -1;		/* every component must exist */
 			if (mode == M_CANON_F && *rest)
 				return -1;		/* only the last may be absent */
-			if (strlen(cand) >= sizeof result) {
+			if (strlcpy(result, cand, sizeof result) >= sizeof result) {
 				errno = ENAMETOOLONG;
 				return -1;
 			}
-			strcpy(result, cand);
 			if (mode == M_CANON_M)
 				missing = 1;
 			continue;
@@ -175,11 +173,10 @@ static int canon(const char *name, int mode, char *resolved)
 		}
 
 		/* ordinary file or directory */
-		if (strlen(cand) >= sizeof result) {
+		if (strlcpy(result, cand, sizeof result) >= sizeof result) {
 			errno = ENAMETOOLONG;
 			return -1;
 		}
-		strcpy(result, cand);
 	}
 
 	snprintf(resolved, PATH_MAX, "%s", result);
