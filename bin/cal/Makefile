@@ -14,7 +14,7 @@ include ../../Makefile.bin.inc
 
 TEST_CFLAGS = -O2 -g -Wall -Wextra -D_GNU_SOURCE -idirafter ../../include
 PYTHON ?= python3
-UNIT_BINS = test_opts test_math
+UNIT_BINS = test_opts test_math test_render
 
 EXTRA_CLEAN += $(UNIT_BINS)
 
@@ -27,6 +27,9 @@ test_opts: $(TESTS)/test_opts.c cal_opts.c cal_math.c cal.h cal_opts.h cal_math.
 
 test_math: $(TESTS)/test_math.c cal_math.c cal_opts.c cal.h cal_math.h cal_opts.h
 	$(CC) $(TEST_CFLAGS) -I. -o $@ $(TESTS)/test_math.c cal_math.c cal_opts.c
+
+test_render: $(TESTS)/test_render.c cal_render.c cal_math.c cal_opts.c cal.h cal_render.h cal_math.h cal_opts.h
+	$(CC) $(TEST_CFLAGS) -I. -o $@ $(TESTS)/test_render.c cal_render.c cal_math.c cal_opts.c
 
 unit: $(UNIT_BINS)
 	@for t in $(UNIT_BINS); do ./$$t; done
