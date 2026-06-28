@@ -93,7 +93,7 @@ struct iovec_local { void *iov_base; size_t iov_len; };
  * Buffer
  * ============================================================ */
 
-#define AFUNIX_BUF_SIZE 4096
+#define AFUNIX_BUF_SIZE 262144
 #define AFUNIX_PATH_MAX 108
 #define AFUNIX_BACKLOG_MAX 128
 #define AFUNIX_FDQ_MAX     16    /* maximum SCM_RIGHTS fds queued per socket */
