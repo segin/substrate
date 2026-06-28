@@ -41,6 +41,7 @@
 #include <string.h>
 #include <stddef.h>
 #include <errno.h>
+#include <sys/proc.h>
 
 #ifndef SHMFS_NAME_MAX
 #define SHMFS_NAME_MAX 128
@@ -255,8 +256,8 @@ static int shmfs_root_mknod(fs_node_t *parent, const char *name, uint16_t mode, 
     ino->node.name[sizeof(ino->node.name) - 1] = '\0';
     ino->node.flags    = FS_FILE;
     ino->node.mask     = mode & 07777;
-    ino->node.uid      = 0;            /* TODO: pull from current_process */
-    ino->node.gid      = 0;
+    ino->node.uid      = current_process ? current_process->uid : 0;
+    ino->node.gid      = current_process ? current_process->gid : 0;
     ino->node.inode    = shmfs_next_inode++;
     ino->node.length   = 0;
     ino->node.impl     = (uintptr_t)ino;
