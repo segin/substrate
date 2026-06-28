@@ -48,6 +48,11 @@ Detailed record of major implementation milestones. For current system status, s
 - **PS/2 Subsystem:** Expanded PS/2 controller driver to support dual-channel (Mouse/Aux) operation.
 - **VirtIO Drivers:** Implemented Core VirtIO, Block Device (virtio-blk), and 9P Transport (virtio-9p) drivers.
 
+### USB
+- **USB device enumeration / `lsusb`:** USB devices are now exposed both under
+  `/proc/devtree` and as `/dev/usb` nodes via `sys/drivers/usb/usbdevfs.c`, so
+  `lsusb` enumerates attached devices end-to-end.
+
 ## Architecture & Boot
 - **FPU State Tracking:** Lazy FPU context switching with FXSAVE/FXRSTOR.
 - **Early Boot Debugging:** Added early GDT+IDT handler in `main.c` using `early_uart_print()` for exception debugging before full console is available.
@@ -114,6 +119,69 @@ Detailed record of major implementation milestones. For current system status, s
   in-flight counters so the stream restarts cleanly.  Verified: FIFO host unit
   test (`tests/sys/host_test_audio_fifo`), clean target build, and boot with
   AC'97 + intel-HDA attached with no panic/deadlock.
+- **AC'97 — restart the halted bus master from the IRQ handler:** The AC'97
+  bus master halted at LVI (the DCH "DMA controller halted" condition) under
+  QEMU, and although the BCIS completion IRQ refilled the BDL ring it never
+  restarted the halted BM — only the `write()` producer did.  Playback
+  therefore stalled after ~10 ms with PCM stuck in the FIFO, surfacing as
+  glitchy/silent audio and as applications pacing to the audio clock running
+  slow.  Factored the restart logic into `ac97_kick_locked()`
+  (`sys/drivers/audio/ac97.c`) and now call it from BOTH the producer and the
+  BCIS IRQ handler, and the feeder always refills the ring.  Verified by
+  capturing a 441 Hz tone with `qemu -audiodev wav`: continuous,
+  correctly-pitched 3.0 s playback.
+
+## Networking
+- **AF_UNIX socket buffer — 4 KiB -> 256 KiB (fixes catastrophically slow
+  local X):** `AFUNIX_BUF_SIZE` (`sys/net/af_unix.c`) was 4096, so Xlib's
+  `XPutImage` (substrate has no MIT-SHM, so SDL2 falls back to it) chopped
+  each 640x480 window update into roughly 300 buffer round-trips — about
+  2 MB/s and ~0.8 fps for an SDL UI, presenting as "the entire UI is slow,
+  not CPU-bound".  Raising the per-socket ring to 256 KiB took AF_UNIX
+  throughput from 2.0 to 134 MB/s and an SDL 640x480 frame from 1227 to
+  ~44 ms (~0.8 -> ~23 fps).
+
+## Dynamic Linking & Toolchain
+- **`dl_iterate_phdr(3)` (IN PROGRESS — toolchain rebuild pending):** Added the
+  POSIX/glibc `dl_iterate_phdr` surface to the native dynamic linker.  ld.so
+  now records each loaded object's runtime program-header table (`phdr`/`phnum`
+  in `sbin/ld.so/ld.h`, populated in `sbin/ld.so/ld_load.c` and
+  `sbin/ld.so/ld_main.c`) and exports `__ldso_dl_iterate_phdr`
+  (`sbin/ld.so/ld_dl.c`) that walks them.  A libc bridge in
+  `lib/c/src/dl_iterate_phdr.c` and a new `include/link.h` expose the standard
+  entry point.  This is the runtime half of the C++ cross-DSO exception fix
+  below; it is implemented but not yet verified end-to-end, pending the
+  matching libgcc/g++ rebuild.
+- **C++ cross-DSO exceptions — shared `libgcc_s` + PT_GNU_EH_FRAME unwinding
+  (IN PROGRESS — toolchain rebuild pending):** Root cause: substrate's gcc
+  statically linked libgcc into every module, each carrying its own DWARF FDE
+  registry, and libgcc was not built to consult `dl_iterate_phdr`, so a C++
+  exception thrown inside a shared library could not unwind back into its
+  caller — it reached `terminate()`/abort instead.  This made exceptions
+  uncatchable across the exe/DSO boundary (breaking TagLib/PsyMP3 and the
+  broader C++ desktop).  Fix being landed in
+  `contrib/gcc/patches/0010-libgcc-pt-gnu-eh-frame-substrate.patch`: define
+  `USE_PT_GNU_EH_FRAME` for `__substrate__` in libgcc
+  (`unwind-dw2-fde-dip.c`, `crtstuff.c`), add `--eh-frame-hdr` to the substrate
+  `LINK_SPEC`, and add `t-slibgcc` so g++ links the shared `libgcc_s.so` (a
+  single FDE registry shared across all modules).  Paired with the
+  `dl_iterate_phdr(3)` runtime support above.  Not yet verified — the libgcc
+  and g++ rebuild that activates it is still in progress.
+- **gdb runs natively on substrate:** The GNU debugger (`contrib/gdb/`, stripped
+  in `contrib/gdb/build.sh`) runs end-to-end on the target, backed by the libsys
+  `ptrace` PEEK bridge in `lib/sys/ptrace.c`.
+
+## Userland Ports — Multimedia
+- **SDL 2.30.9 (`contrib/sdl2/`):** Ported with the X11 video driver and the
+  NetBSD `/dev/audio` (Sun/SADA) audio backend.  Depends on FreeType2
+  (`contrib/freetype/`).
+- **PsyMP3 (`contrib/psymp3/`):** Music player, pinned to a specific upstream
+  commit with a vendored patch series.  Pulls in its codec dependencies, each a
+  standalone port: `libogg` (`contrib/libogg/`), `libvorbis`
+  (`contrib/libvorbis/`), `libopus` (`contrib/libopus/`), `speex`
+  (`contrib/speex/`), `faad2` (`contrib/faad2/`), `taglib` (`contrib/taglib/`)
+  and `spandsp` (`contrib/spandsp/`).  Together these bring audio/multimedia
+  playback to the substrate userland.
 
 ## Build & Testing
 - **Build System:** Root filesystem generation in `dist/`. Fixed `dist` directory generation to include standard Unix hierarchy.

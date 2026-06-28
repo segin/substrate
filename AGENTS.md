@@ -84,6 +84,13 @@ For the full detailed changelog, see `docs/CHANGELOG.md`.
 - Loopback (`sys/net/loopback.c`): a dedicated kthread drains the
   delivery ring so a TX never recurses into RX on the caller's
   kernel stack.
+- AF_UNIX socket buffer (`sys/net/af_unix.c`): `AFUNIX_BUF_SIZE`
+  raised from 4 KiB to 256 KiB — fixes catastrophically slow local
+  X.  At 4 KiB, Xlib's `XPutImage` (no MIT-SHM on substrate) chopped
+  each 640x480 window update into ~300 buffer round-trips (~2 MB/s,
+  ~0.8 fps for an SDL UI).  With a 256 KiB per-socket ring, AF_UNIX
+  throughput went 2.0 -> 134 MB/s and an SDL 640x480 frame 1227 ->
+  ~44 ms (~0.8 -> ~23 fps).
 - `sbin/telnetd`: standalone telnet server, thread-per-connection
   (one process, not fork-per-connection) — each connection bridges
   the socket to a PTY running `/bin/login`.
@@ -124,7 +131,18 @@ For the full detailed changelog, see `docs/CHANGELOG.md`.
   state machine and an E0-prefix path that handles both encodings
 - Intel HDA, AC'97, SB16, null audio backends (Sun-compat audio
   framework)
+- AC'97 BM restart (`sys/drivers/audio/ac97.c`): the bus master
+  halted at LVI (DCH) under QEMU and the BCIS IRQ handler refilled
+  the ring but never restarted the halted BM — only the `write()`
+  producer did, so playback stalled after ~10 ms with PCM stuck in
+  the FIFO (glitchy/silent audio; apps pacing to the audio clock ran
+  slow).  Factored the restart into `ac97_kick_locked()` and call it
+  from both the producer and the BCIS IRQ handler; the feeder always
+  refills the ring.  Verified with a 441 Hz tone captured via
+  `qemu -audiodev wav`: continuous, correctly-pitched 3.0 s playback.
 - USB HID boot-protocol mouse
+- `lsusb` works: USB devices are exposed under `/proc/devtree` and
+  as `/dev/usb` nodes (`sys/drivers/usb/usbdevfs.c`).
 
 ### Boot & Architecture
 - GRUB boot fix, early boot debugging, LAPIC identity mapping
@@ -204,6 +222,23 @@ For the full detailed changelog, see `docs/CHANGELOG.md`.
 - Patch series for both binutils and gcc lives in
   `contrib/{binutils,gcc}/patches/` and is reapplied by `fetch.sh`.
   Nothing in `contrib/*/build/` is vendored.
+- **gdb runs on substrate** end-to-end: the libsys `ptrace` PEEK
+  bridge (`lib/sys/ptrace.c`) backs the debugger's memory reads, and
+  `gdb` is stripped during its build (`contrib/gdb/build.sh`).
+- **C++ cross-DSO exceptions (IN PROGRESS — toolchain rebuild
+  pending, NOT yet verified)**: substrate's gcc statically linked
+  libgcc into every module (each with its own DWARF FDE registry)
+  and libgcc was never built to use `dl_iterate_phdr`, so a C++
+  exception thrown inside a shared library could not unwind back to
+  its caller — it hit `terminate()`/abort (breaking TagLib/PsyMP3
+  and the whole C++ desktop story).  Fix being landed:
+  `contrib/gcc/patches/0010-libgcc-pt-gnu-eh-frame-substrate.patch`
+  defines `USE_PT_GNU_EH_FRAME` for `__substrate__` in libgcc
+  (`unwind-dw2-fde-dip.c` / `crtstuff.c`), adds `--eh-frame-hdr` to
+  the substrate `LINK_SPEC`, and adds `t-slibgcc` so g++ links the
+  shared `libgcc_s.so`.  The userspace half is the new
+  `dl_iterate_phdr(3)` in ld.so + libc (see Dynamic Linking).  The
+  libgcc/g++ rebuild that puts this live is still underway.
 - Image bootstrap chain (committed end-to-end):
   ```
   contrib/build-toolchain.sh        # stage 1 cross + stage 2 native
@@ -393,6 +428,19 @@ manifest, `README.SUBSTRATE.md`.  Current set:
   libblkid; and `e2tools` 0.1.0 (`contrib/e2tools/`) —
   e2cp / e2ls / e2mkdir / e2rm / e2ln / e2mv / e2tail for
   manipulating unmounted ext2/3/4 images.
+- **gdb** (`contrib/gdb/`) — the GNU debugger, running natively on
+  substrate atop the libsys `ptrace` PEEK bridge.
+- **Multimedia / audio stack** — SDL 2.30.9 (`contrib/sdl2/`) with
+  the X11 video driver and the NetBSD `/dev/audio` (Sun/SADA) audio
+  backend, plus FreeType2 (`contrib/freetype/`).  **PsyMP3**
+  (`contrib/psymp3/`, pinned to a specific upstream commit with a
+  vendored patch series) is a music player built on it; its codec
+  dependencies each ship as their own port: `libogg`
+  (`contrib/libogg/`), `libvorbis` (`contrib/libvorbis/`),
+  `libopus` (`contrib/libopus/`), `speex` (`contrib/speex/`),
+  `faad2` (`contrib/faad2/`), `taglib` (`contrib/taglib/`) and
+  `spandsp` (`contrib/spandsp/`).  Together these bring audio /
+  multimedia playback to the userland.
 
 ### Dynamic Linking
 - `/sbin/ld.so` (Substrate native dynamic linker, `sbin/ld.so/`):
@@ -453,6 +501,17 @@ manifest, `README.SUBSTRATE.md`.  Current set:
     booleans on ld_obj_t prevent the non-idempotent
     R_386_RELATIVE (`*p += base`) and the run-once init/fini
     arrays from firing twice when dlopen re-walks the loaded list.
+  - `dl_iterate_phdr(3)` (IN PROGRESS — toolchain rebuild pending):
+    `__ldso_dl_iterate_phdr` (`sbin/ld.so/ld_dl.c`) walks the loaded
+    objects and hands each one's program-header table to the caller;
+    the runtime phdr/phnum are recorded per object in
+    `sbin/ld.so/ld.h` and populated in `ld_load.c` / `ld_main.c`.
+    A libc bridge lives in `lib/c/src/dl_iterate_phdr.c` against a
+    new `include/link.h`.  This is the substrate-side half of the
+    cross-DSO C++ exception fix (see Toolchain) — it lets libgcc's
+    `USE_PT_GNU_EH_FRAME` unwinder find every module's
+    `PT_GNU_EH_FRAME` at throw time.  Not yet verified end-to-end:
+    the matching libgcc/g++ rebuild is still landing.
 - `lib/c/arch/i386/crt0.S` is now PIC-safe (`%ebx`/GOT setup, `@PLT`
   for calls, `environ@GOT` for data) so the same `crt0.o` works for
   both static and PIE binaries.

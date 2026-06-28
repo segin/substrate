@@ -4,7 +4,16 @@ Substrate is a Unix-like operating system for x86 (32-bit i386 primary,
 x86-64 in progress). It is a whole system, not just a kernel: the tree
 contains the kernel, a C library and dynamic linker, base userland, a
 patched GNU toolchain that runs *on* Substrate, and a large set of ported
-third-party software (zsh, ncurses, OpenSSL, an X11 client stack, …).
+third-party software (zsh, ncurses, OpenSSL, an X11 client stack, SDL2 with
+an audio backend, the PsyMP3 player, gdb, …).
+
+Recent work brings up audio and multimedia playback (a Sun-compatible
+in-kernel audio stack behind AC'97 / Intel HDA backends, exposed through
+SDL2's `/dev/audio` backend and the PsyMP3 music player), substantially
+faster local X (a larger AF_UNIX socket buffer lifts an SDL UI from sub-1
+to ~23 fps), and the toolchain pieces for C++ exceptions across shared
+libraries (`dl_iterate_phdr` in the dynamic linker plus a shared `libgcc_s`;
+a final toolchain rebuild is still pending).
 
 A distinguishing goal is **binary compatibility via exec personalities**: the
 kernel routes each executable to a loader from its ELF OSABI byte (or, for

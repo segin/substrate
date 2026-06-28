@@ -29,7 +29,13 @@ Substrate is a complete Unix OS project with five first-class pillars:
   ld.so registers itself in the
   loaded-object scope so its `__ldso_*` exports are visible to libdl
   and to libc (which calls `__ldso_run_fini` as a weak hook from
-  `exit()` to run destructors before the process is reaped).
+  `exit()` to run destructors before the process is reaped).  ld.so
+  records each loaded object's runtime program-header table and
+  exports `dl_iterate_phdr(3)` (via `__ldso_dl_iterate_phdr`, bridged
+  by libc and `include/link.h`); this is the runtime support for
+  shared-`libgcc_s` C++ exception unwinding across the exe/DSO
+  boundary, which is being brought up alongside a toolchain rebuild
+  (PT_GNU_EH_FRAME-based unwinding — see §6).
 - Toolchain via the GNU stage-2 port (binutils + GCC under `contrib/`),
   installed on the image as the system `cc` / `as` / `ld` / `g++`.
 
@@ -108,8 +114,12 @@ contrib/     third-party components, each as a patch series + fetch.sh
              libICE, libSM, libXt, libXmu, libXpm, libXaw), the
              xterm terminal emulator, xauth, luit, the window
              managers (matwm2, twm, ctwm), the X bitmap fonts
-             (font-misc-misc, font-adobe-75dpi, font-adobe-100dpi)
-             and the ext2 toolset (e2fsprogs, e2tools), ext2-boot.
+             (font-misc-misc, font-adobe-75dpi, font-adobe-100dpi),
+             the ext2 toolset (e2fsprogs, e2tools), ext2-boot, gdb,
+             and the multimedia stack — SDL2 (X11 video + /dev/audio
+             SADA backend), freetype, the PsyMP3 player and its
+             codecs (libogg, libvorbis, libopus, speex, faad2,
+             taglib, spandsp).
              Each lands at ${SUBSTRATE_TOP}/dist-overlay/dist-<pkg>/ which
              build-rootfs.sh overlays onto the image.  Font ports
              ship the BDF sources verbatim (no bdftopcf on the
@@ -134,7 +144,7 @@ The kernel remains monolithic and is organized into logical layers:
 - `sys/pm/`: Process management and lifecycle.
 - `sys/vm/`: Memory management (PMM, PMAP, VM objects, demand-paged user stacks). Carries always-on kernel-heap corruption tripwires — a `vm_object` magic canary, a buddy-allocator double-allocation detector, a UMA per-item double-free guard, and a `vm_map` entry/object auditor — that turn silent corruption into an immediate located panic. Per-process kernel stacks are 16 KiB to absorb the deepest nested syscall + IRQ call chains (notably the network TX path interrupted by a NIC RX IRQ).
 - `sys/vfs/` and `sys/fs/`: Virtual Filesystem and concrete implementations. The buffer cache (`sys/vfs/bio.c`) is keyed at the block-device layer — `blkdev_do_read`/`do_write` go through `bio_dev_get`/`release` keyed by `(struct blkdev *, sector)` with read coalescing and write-through — so caching is transparent to every storage driver and filesystem; the filesystems carry no caching logic of their own. See `docs/design/block-cache-consolidation.md`.
-- `sys/drivers/`: Device driver framework and hardware drivers.
+- `sys/drivers/`: Device driver framework and hardware drivers. The audio stack (`sys/drivers/audio/`) is a Sun-compatible framework over AC'97 / Intel HDA / SB16 / null backends; each backend decouples the `write()` producer from the DMA ring via a deep software PCM FIFO refilled from the per-slot completion IRQ, and the AC'97 backend restarts a halted bus master from both the producer and the IRQ handler (`ac97_kick_locked`). USB devices are enumerated under `/proc/devtree` and as `/dev/usb` nodes (`sys/drivers/usb/usbdevfs.c`), which `lsusb` reads.
 - `sys/net/`: Network stack — TCP/IPv4, AF_INET / AF_UNIX sockets, loopback.
 - `sys/exec/`: Executable loading and execution personalities.
 - The process registry allocates every `process_t` dynamically and tracks live processes on a pid-hash plus an all-procs list; there is no fixed process-table cap. Live objects are not relocatable.
@@ -166,7 +176,16 @@ Userland is split by role (essential, admin, extended) and supported by a suite 
   ELF object and symbol inspection helpers (substrate-side `nm`,
   `readelf`, `ar`, etc.) still live under `usr.bin/` on top of
   `usr.lib/elfobj/` — see `usr.lib/elfobj/README.md` and
-  `usr.lib/elfobj/ABI_POLICY.md`.
+  `usr.lib/elfobj/ABI_POLICY.md`.  C++ cross-DSO exception unwinding
+  is being brought up via a libgcc/g++ rebuild
+  (`contrib/gcc/patches/0010-libgcc-pt-gnu-eh-frame-substrate.patch`):
+  `USE_PT_GNU_EH_FRAME`, an `--eh-frame-hdr` `LINK_SPEC`, and a shared
+  `libgcc_s.so` (`t-slibgcc`) so a single FDE registry — located at
+  throw time via the new `dl_iterate_phdr(3)` in ld.so/libc — spans
+  every loaded module instead of one static copy per DSO.  This is
+  implemented but pending the toolchain rebuild that activates it.
+  `gdb` (`contrib/gdb/`) also runs natively, atop the libsys `ptrace`
+  PEEK bridge.
 - **System Shell:** `/bin/sh` is a symlink to `/usr/bin/zsh` from
   `contrib/zsh/` (zsh 5.9).  zsh detects argv[0]'s basename and
   enters POSIX `sh` emulation when invoked as `sh`.  The previous
