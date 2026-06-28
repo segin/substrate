@@ -391,7 +391,7 @@ int main(int argc, char **argv)
     }
 
     if (gethostname(g_hostname, sizeof(g_hostname)) < 0)
-        strcpy(g_hostname, "localhost");
+        strlcpy(g_hostname, "localhost", sizeof(g_hostname));
 
     load_config();
 
