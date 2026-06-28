@@ -31,6 +31,9 @@ void blkdev_register_disk(blkdev_t *dev);
 // Get a block device by name
 blkdev_t *blkdev_get(const char *name);
 
+// First device in the registration list (walk with ->next).
+blkdev_t *blkdev_first(void);
+
 // Read from block device (byte-oriented wrapper)
 size_t blkdev_read_bytes(blkdev_t *dev, uint64_t offset, size_t size, void *buffer);
 

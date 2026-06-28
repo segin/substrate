@@ -1,5 +1,6 @@
 #include <fs/ext2/ext2.h>
 #include <vfs/vfs.h>
+#include <drivers/storage/blkdev.h>
 #include <kern/console.h>
 #include <kern/cmdline.h>
 #include <kern/time.h>
@@ -2345,9 +2346,37 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
     return root_node;
 }
 
+/*
+ * Read an ext2 volume label straight off the device, without mounting.
+ * The superblock lives at a fixed byte offset of 1024 regardless of block
+ * size; s_magic identifies the filesystem and s_volume_name[16] is the
+ * label (space- or NUL-padded, possibly empty).
+ */
+int ext2_read_label(blkdev_t *dev, char *label, size_t len) {
+    if (!dev || !label || len == 0) {
+        return -1;
+    }
+    ext2_superblock_t sb;
+    if (blkdev_read_bytes(dev, 1024, sizeof(sb), &sb) != sizeof(sb)) {
+        return -1;
+    }
+    if (sb.s_magic != EXT2_SUPER_MAGIC) {
+        return -1;  /* not an ext2/3/4 filesystem */
+    }
+    size_t i = 0;
+    while (i < sizeof(sb.s_volume_name) && i + 1 < len &&
+           sb.s_volume_name[i] != '\0') {
+        label[i] = sb.s_volume_name[i];
+        i++;
+    }
+    label[i] = '\0';
+    return 0;
+}
+
 static filesystem_t ext2_filesystem = {
     .name = "ext2",
     .mount = ext2_mount,
+    .read_label = ext2_read_label,
 };
 
 void ext2_init(void) {

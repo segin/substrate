@@ -19,6 +19,7 @@
 #include <sys/fcntl.h>
 #include <fs/ext2/ext2.h>
 #include <fs/fat/fat.h>
+#include <drivers/storage/blkdev.h>
 #include <fs/exfat/exfat.h>
 #include <fs/minix/minix.h>
 #include <fs/udf/udf.h>
@@ -158,6 +159,52 @@ filesystem_t *vfs_get_filesystems(void) {
     return filesystems;
 }
 
+/*
+ * Probe `dev` against every registered filesystem's read_label hook and
+ * return the first that recognises it and yields a non-empty label.
+ */
+int vfs_read_label(struct blkdev *dev, char *label, size_t len) {
+    if (!dev || !label || len == 0) {
+        return -EINVAL;
+    }
+    for (filesystem_t *fs = filesystems; fs; fs = fs->next) {
+        if (fs->read_label &&
+            fs->read_label(dev, label, len) == 0 && label[0] != '\0') {
+            return 0;
+        }
+    }
+    return -ENOENT;
+}
+
+/*
+ * Find a block device whose volume label is exactly `label` and write its
+ * "/dev/storage/<name>" path to `devpath`.  Backs LABEL=<name> mounts.
+ */
+int vfs_resolve_label(const char *label, char *devpath, size_t len) {
+    if (!label || !devpath || len == 0) {
+        return -EINVAL;
+    }
+    static const char prefix[] = "/dev/storage/";
+    const size_t plen = sizeof(prefix) - 1;
+    char buf[64];
+    for (blkdev_t *dev = blkdev_first(); dev; dev = dev->next) {
+        if (vfs_read_label(dev, buf, sizeof(buf)) != 0) {
+            continue;
+        }
+        if (strcmp(buf, label) != 0) {
+            continue;
+        }
+        size_t nlen = strlen(dev->name);
+        if (plen + nlen + 1 > len) {
+            return -ENAMETOOLONG;
+        }
+        memcpy(devpath, prefix, plen);
+        memcpy(devpath + plen, dev->name, nlen + 1);
+        return 0;
+    }
+    return -ENODEV;
+}
+
 int vfs_mount_legacy(const char *device, const char *path, const char *type, uint32_t flags, void *data) {
     if (!type || !path) {
         return -EINVAL;
@@ -190,6 +237,23 @@ int vfs_mount_legacy(const char *device, const char *path, const char *type, uin
         kprintf("VFS: mount(%s on %s): unknown filesystem type\n",
                 type, path);
         return -EUNKNOWNFS;
+    }
+
+    /*
+     * Translate a LABEL=<name> source into its "/dev/storage/<dev>" path by
+     * scanning block devices for a matching on-disk volume label (Linux's
+     * `mount LABEL=root /mnt`).  Everything downstream sees the device path.
+     */
+    char label_dev[80];
+    if (device && strncmp(device, "LABEL=", 6) == 0) {
+        int lr = vfs_resolve_label(device + 6, label_dev, sizeof(label_dev));
+        if (lr != 0) {
+            kprintf("VFS: mount: no filesystem with volume label '%s'\n",
+                    device + 6);
+            return lr;
+        }
+        kprintf("VFS: LABEL=%s resolved to %s\n", device + 6, label_dev);
+        device = label_dev;
     }
 
     // Lookup device node if device path is specified

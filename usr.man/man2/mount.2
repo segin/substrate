@@ -27,6 +27,19 @@ For network or virtual filesystems
 .I source
 may be NULL.
 .PP
+.I source
+may also be given as
+.BI LABEL= name
+(as on Linux): the kernel scans every block device, reads its on-disk
+volume label, and mounts the one whose label equals
+.IR name .
+This fails with
+.B ENODEV
+if no device carries that label.  Volume-label reading is provided by the
+filesystem driver (currently ext2's
+.IR s_volume_name ;
+filesystems with no label concept are skipped).
+.PP
 .I mountflags
 is a bitmask of:
 .TP

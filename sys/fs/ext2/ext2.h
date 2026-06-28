@@ -388,6 +388,9 @@ typedef struct {
 // Public functions
 void ext2_init(void);
 fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data);
+struct blkdev;
+/* Read the ext2 volume label (s_volume_name) from a raw device. */
+int ext2_read_label(struct blkdev *dev, char *label, size_t len);
 
 // Driver operations (non-static for extensibility/testing)
 int ext2_read_inode(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_t *inode);

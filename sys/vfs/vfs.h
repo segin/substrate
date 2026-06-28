@@ -142,12 +142,32 @@ typedef struct fs_node * (*mount_type_t)(const char *device, uint32_t flags, voi
 #define VFS_CAP_NETWORK         0x00000010U /* network-backed */
 #define VFS_CAP_USER_MOUNT      0x00000020U /* unprivileged users may mount */
 
+struct blkdev;
+
 typedef struct filesystem {
     char name[32];
     mount_type_t mount;
     uint32_t caps;                  /* VFS_CAP_* bitmap */
+    /*
+     * Read this filesystem's on-disk volume label from a raw block
+     * device, without mounting it.  Writes a NUL-terminated string to
+     * `label` (<= len bytes) and returns 0 if `dev` holds this kind of
+     * filesystem; returns non-zero if the device is not recognised or
+     * carries no label.  NULL for filesystems with no label concept.
+     */
+    int (*read_label)(struct blkdev *dev, char *label, size_t len);
     struct filesystem *next;
 } filesystem_t;
+
+/*
+ * Volume-label support.  vfs_read_label() probes every registered
+ * filesystem's read_label hook against a device and returns the first
+ * match.  vfs_resolve_label() scans every block device for one whose
+ * label equals `label` and writes its "/dev/storage/<name>" path to
+ * `devpath` — this is what backs LABEL=<name> mount sources.
+ */
+int vfs_read_label(struct blkdev *dev, char *label, size_t len);
+int vfs_resolve_label(const char *label, char *devpath, size_t len);
 
 typedef struct vfs_mount {
     char path[128];

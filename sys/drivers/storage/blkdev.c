@@ -250,6 +250,12 @@ blkdev_t *blkdev_get(const char *name) {
     return NULL;
 }
 
+/* First device in the registration list; walk with ->next.  Used by the
+ * VFS to scan every block device when resolving a LABEL=<name> mount. */
+blkdev_t *blkdev_first(void) {
+    return blkdev_list;
+}
+
 // Byte-oriented read - handles sector alignment
 size_t blkdev_read_bytes(blkdev_t *dev, uint64_t offset, size_t size, void *buffer) {
     if (!dev || !dev->read || dev->sector_size == 0) return 0;
