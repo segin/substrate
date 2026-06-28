@@ -236,10 +236,17 @@ static void ac97_feed(ac97_dev_t *d)
  * the device IRQ masked.  While running normally the IRQ feeder keeps the
  * ring full, so this only acts on the priming and underrun-restart edges.
  */
-static void ac97_kick(ac97_dev_t *d)
+/*
+ * Refill the ring from the FIFO and (re)start the bus master as needed.
+ * Caller must hold d->feed_lock with local IRQs masked.  Used by BOTH the
+ * producer (ac97_kick) and the BCIS IRQ handler — the latter is essential:
+ * under QEMU the BM frequently halts (DCH) at LVI before the producer writes
+ * again (or while it is blocked on a full FIFO), so if only the producer ever
+ * restarted it, playback would stall after the first slot with data still
+ * queued (observed: one BCIS, DCH set, 135 KB stuck in the FIFO).
+ */
+static void ac97_kick_locked(ac97_dev_t *d)
 {
-	unsigned long flags = spinlock_acquire_irq(&d->feed_lock);
-
 	if (d->running) {
 		uint16_t sr = ac97_bm_read16(d, AC97_BM_PO_BASE + AC97_BM_SR);
 		if (sr & AC97_SR_DCH) {
@@ -256,10 +263,11 @@ static void ac97_kick(ac97_dev_t *d)
 		}
 	}
 
+	/* Always stage freed/empty ring slots from the software FIFO. */
+	ac97_feed(d);
+
 	if (!d->running) {
-		uint32_t in_flight;
-		ac97_feed(d);
-		in_flight = d->writes_queued -
+		uint32_t in_flight = d->writes_queued -
 		            __atomic_load_n(&d->slots_played, __ATOMIC_ACQUIRE);
 		/* Start once we have a prebuffer cushion, or as soon as the FIFO
 		 * is fully staged into the ring (short clips shorter than the
@@ -271,7 +279,12 @@ static void ac97_kick(ac97_dev_t *d)
 			d->running = 1;
 		}
 	}
+}
 
+static void ac97_kick(ac97_dev_t *d)
+{
+	unsigned long flags = spinlock_acquire_irq(&d->feed_lock);
+	ac97_kick_locked(d);
 	spinlock_release_irq(&d->feed_lock, flags);
 }
 
@@ -297,10 +310,11 @@ static int ac97_irq_handler(unsigned int irq, void *dev_id, void *frame)
 		if (sr & AC97_SR_BCIS) {
 			unsigned long f = spinlock_acquire_irq(&d->feed_lock);
 			__atomic_add_fetch(&d->slots_played, 1, __ATOMIC_ACQ_REL);
-			/* Autonomously refill the freed ring slot(s) from the
-			 * software FIFO so playback continues even while the
-			 * producer thread is descheduled. */
-			ac97_feed(d);
+			/* Refill the freed ring slot(s) AND restart the bus
+			 * master if it halted at LVI — playback must continue
+			 * autonomously while the producer is descheduled or
+			 * blocked on a full FIFO, not just on the next write(). */
+			ac97_kick_locked(d);
 			spinlock_release_irq(&d->feed_lock, f);
 			/* Wake any producer blocked in ac97_write waiting for
 			 * FIFO space to free up.  Cheap when nobody is sleeping
