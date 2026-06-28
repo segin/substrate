@@ -72,7 +72,7 @@ static void load_hostname(void) {
         }
         fclose(f);
     }
-    if (!g_host[0]) strncpy(g_host, "substrate", sizeof g_host - 1);
+    if (!g_host[0]) strlcpy(g_host, "substrate", sizeof g_host);
     g_host[sizeof g_host - 1] = '\0';
 }
 
@@ -258,10 +258,19 @@ static void draw(ui_t *u, const char *user, int passlen, int field,
     y += u->line_h;
 
     /* password shown as asterisks */
-    strcpy(buf, "Password: ");
-    for (i = 0; i < passlen && i < MAXFIELD; i++) strcat(buf, "*");
-    if (field == 1) strcat(buf, "_");
-    XDrawString(u->dpy, u->win, u->gc, x, y, buf, (int)strlen(buf));
+    {
+        size_t len = strlcpy(buf, "Password: ", sizeof(buf));
+        for (i = 0; i < passlen && i < MAXFIELD; i++) {
+            if (len < sizeof(buf) - 1) {
+                buf[len++] = '*';
+            }
+        }
+        if (field == 1 && len < sizeof(buf) - 1) {
+            buf[len++] = '_';
+        }
+        buf[len] = '\0';
+        XDrawString(u->dpy, u->win, u->gc, x, y, buf, (int)len);
+    }
     y += u->line_h;
 
     /* Session selector: current choice plus a hint when more than one
