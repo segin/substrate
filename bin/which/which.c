@@ -96,10 +96,10 @@ static char *display_path(const char *path, const char *cwd, const char *home)
     if (cwd && *cwd) {
         size_t n = strlen(cwd);
         if (strncmp(path, cwd, n) == 0 && path[n] == '/') {
-            char *out = malloc(strlen(path + n) + 3);
+            size_t out_size = strlen(path + n) + 3;
+            char *out = malloc(out_size);
             if (out) {
-                strcpy(out, ".");
-                strcat(out, path + n);
+                snprintf(out, out_size, ".%s", path + n);
                 return out;
             }
         }
@@ -107,10 +107,10 @@ static char *display_path(const char *path, const char *cwd, const char *home)
     if (home && *home) {
         size_t n = strlen(home);
         if (strncmp(path, home, n) == 0 && path[n] == '/') {
-            char *out = malloc(strlen(path + n) + 3);
+            size_t out_size = strlen(path + n) + 3;
+            char *out = malloc(out_size);
             if (out) {
-                strcpy(out, "~");
-                strcat(out, path + n);
+                snprintf(out, out_size, "~%s", path + n);
                 return out;
             }
         }
