@@ -1085,12 +1085,8 @@ static void *linux_syscalls[MAX_SYSCALLS] = {
     [LINUX_SYS_fchown]         = (void *)&sys_fchown,
     [LINUX_SYS_getpriority]    = NULL,
     [LINUX_SYS_setpriority]    = NULL,
-    /* TODO: Linux struct statfs layout differs from Substrate's; a
-     * proper translation thunk should produce the Linux-format buf.
-     * Use sys_statfs/sys_fstatfs for now — they at least do the
-     * copyin correctly, even if the buf layout is BSD-shaped. */
-    [LINUX_SYS_statfs]         = (void *)&sys_statfs,
-    [LINUX_SYS_fstatfs]        = (void *)&sys_fstatfs,
+    [LINUX_SYS_statfs]         = (void *)linux_sys_statfs,
+    [LINUX_SYS_fstatfs]        = (void *)linux_sys_fstatfs,
     [LINUX_SYS_ioperm]         = NULL,
     [LINUX_SYS_socketcall]     = (void *)&linux_sys_socketcall,
     [LINUX_SYS_syslog]         = NULL,
@@ -1178,6 +1174,8 @@ static void *linux_syscalls[MAX_SYSCALLS] = {
     [LINUX_SYS_stat64]         = (void *)linux_sys_stat64,
     [LINUX_SYS_lstat64]        = (void *)linux_sys_lstat64,
     [LINUX_SYS_fstat64]        = (void *)linux_sys_fstat64,
+    [LINUX_SYS_statfs64]       = (void *)linux_sys_statfs64,
+    [LINUX_SYS_fstatfs64]      = (void *)linux_sys_fstatfs64,
     [LINUX_SYS_lchown32]       = (void *)&sys_lchown,
     [LINUX_SYS_getuid32]       = (void *)&sys_getuid,
     [LINUX_SYS_getgid32]       = (void *)&sys_getgid,

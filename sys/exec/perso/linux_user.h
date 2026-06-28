@@ -109,6 +109,42 @@ struct linux_stat64 {
     uint64_t st_ino;      /* Real 64-bit ino */
 };
 
+/*
+ * Linux i386 statfs structure (syscalls 99/100)
+ */
+struct linux_statfs {
+    uint32_t f_type;
+    uint32_t f_bsize;
+    uint32_t f_blocks;
+    uint32_t f_bfree;
+    uint32_t f_bavail;
+    uint32_t f_files;
+    uint32_t f_ffree;
+    int32_t  f_fsid[2];
+    uint32_t f_namelen;
+    uint32_t f_frsize;
+    uint32_t f_flags;
+    uint32_t f_spare[4];
+};
+
+/*
+ * Linux i386 statfs64 structure (syscalls 268/269)
+ */
+struct linux_statfs64 {
+    uint32_t f_type;
+    uint32_t f_bsize;
+    uint64_t f_blocks;
+    uint64_t f_bfree;
+    uint64_t f_bavail;
+    uint64_t f_files;
+    uint64_t f_ffree;
+    int32_t  f_fsid[2];
+    uint32_t f_namelen;
+    uint32_t f_frsize;
+    uint32_t f_flags;
+    uint32_t f_spare[4];
+};
+
 struct linux_statx_timestamp {
     int64_t  tv_sec;
     uint32_t tv_nsec;
@@ -194,6 +230,13 @@ int linux_sys_fstat(int fd, struct linux_stat *buf);
 int linux_sys_stat64(const char *path, struct linux_stat64 *buf);
 int linux_sys_lstat64(const char *path, struct linux_stat64 *buf);
 int linux_sys_fstat64(int fd, struct linux_stat64 *buf);
+
+/* Linux statfs and statfs64 translation functions */
+int linux_sys_statfs(const char *path, struct linux_statfs *buf);
+int linux_sys_fstatfs(int fd, struct linux_statfs *buf);
+int linux_sys_statfs64(const char *path, size_t sz, struct linux_statfs64 *buf);
+int linux_sys_fstatfs64(int fd, size_t sz, struct linux_statfs64 *buf);
+
 int linux_sys_fstatat64(int dirfd, const char *path, struct linux_stat64 *buf, int flags);
 int linux_sys_statx(int dirfd, const char *path, int flags, unsigned int mask, struct linux_statx *buf);
 int linux_sys_getcwd(char *buf, size_t size);
