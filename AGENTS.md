@@ -225,20 +225,24 @@ For the full detailed changelog, see `docs/CHANGELOG.md`.
 - **gdb runs on substrate** end-to-end: the libsys `ptrace` PEEK
   bridge (`lib/sys/ptrace.c`) backs the debugger's memory reads, and
   `gdb` is stripped during its build (`contrib/gdb/build.sh`).
-- **C++ cross-DSO exceptions (IN PROGRESS — toolchain rebuild
-  pending, NOT yet verified)**: substrate's gcc statically linked
-  libgcc into every module (each with its own DWARF FDE registry)
-  and libgcc was never built to use `dl_iterate_phdr`, so a C++
-  exception thrown inside a shared library could not unwind back to
-  its caller — it hit `terminate()`/abort (breaking TagLib/PsyMP3
-  and the whole C++ desktop story).  Fix being landed:
-  `contrib/gcc/patches/0010-libgcc-pt-gnu-eh-frame-substrate.patch`
-  defines `USE_PT_GNU_EH_FRAME` for `__substrate__` in libgcc
-  (`unwind-dw2-fde-dip.c` / `crtstuff.c`), adds `--eh-frame-hdr` to
-  the substrate `LINK_SPEC`, and adds `t-slibgcc` so g++ links the
-  shared `libgcc_s.so`.  The userspace half is the new
-  `dl_iterate_phdr(3)` in ld.so + libc (see Dynamic Linking).  The
-  libgcc/g++ rebuild that puts this live is still underway.
+- **C++ cross-DSO exceptions — FIXED + verified end-to-end**:
+  substrate's gcc statically linked libgcc into every module (each
+  with its own DWARF FDE registry) and libgcc was never built to use
+  `dl_iterate_phdr`, so a C++ exception thrown inside a shared library
+  could not unwind back to its caller — it hit `terminate()`/abort
+  (breaking TagLib/PsyMP3 and the whole C++ desktop story).  Fixed by
+  `contrib/gcc/patches/0010-libgcc-pt-gnu-eh-frame-substrate.patch`:
+  `USE_PT_GNU_EH_FRAME` for `__substrate__` in libgcc
+  (`unwind-dw2-fde-dip.c` / `crtstuff.c`), `--eh-frame-hdr` via
+  `LINK_EH_SPEC` (the canonical `%(link_eh)` hook — `LINK_SPEC` did not
+  reach ld), `t-slibgcc` so g++ links the shared `libgcc_s.so`, and
+  `thread_file=posix` so libstdc++ has `std::mutex`.  Userspace half:
+  `dl_iterate_phdr(3)` in ld.so + libc (see Dynamic Linking) +
+  `Elf32_Dyn`/`DT_*` in `<elf.h>`.  Verified: throw-in-`.so` caught in
+  the exe (rc=0), and TagLib reads a FLAC's metadata instead of
+  aborting.  Follow-up: substrate's gthr-posix uses hard (non-weak)
+  pthread refs, so C++ programs using `std::mutex` must link
+  `-lpthread` (the gcc driver should auto-link it).
 - Image bootstrap chain (committed end-to-end):
   ```
   contrib/build-toolchain.sh        # stage 1 cross + stage 2 native
@@ -501,7 +505,7 @@ manifest, `README.SUBSTRATE.md`.  Current set:
     booleans on ld_obj_t prevent the non-idempotent
     R_386_RELATIVE (`*p += base`) and the run-once init/fini
     arrays from firing twice when dlopen re-walks the loaded list.
-  - `dl_iterate_phdr(3)` (IN PROGRESS — toolchain rebuild pending):
+  - `dl_iterate_phdr(3)` (done — verified end-to-end):
     `__ldso_dl_iterate_phdr` (`sbin/ld.so/ld_dl.c`) walks the loaded
     objects and hands each one's program-header table to the caller;
     the runtime phdr/phnum are recorded per object in

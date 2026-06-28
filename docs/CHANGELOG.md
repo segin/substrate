@@ -142,7 +142,7 @@ Detailed record of major implementation milestones. For current system status, s
   ~44 ms (~0.8 -> ~23 fps).
 
 ## Dynamic Linking & Toolchain
-- **`dl_iterate_phdr(3)` (IN PROGRESS — toolchain rebuild pending):** Added the
+- **`dl_iterate_phdr(3)` (done — verified end-to-end):** Added the
   POSIX/glibc `dl_iterate_phdr` surface to the native dynamic linker.  ld.so
   now records each loaded object's runtime program-header table (`phdr`/`phnum`
   in `sbin/ld.so/ld.h`, populated in `sbin/ld.so/ld_load.c` and
@@ -153,7 +153,7 @@ Detailed record of major implementation milestones. For current system status, s
   below; it is implemented but not yet verified end-to-end, pending the
   matching libgcc/g++ rebuild.
 - **C++ cross-DSO exceptions — shared `libgcc_s` + PT_GNU_EH_FRAME unwinding
-  (IN PROGRESS — toolchain rebuild pending):** Root cause: substrate's gcc
+  (done — verified end-to-end):** Root cause: substrate's gcc
   statically linked libgcc into every module, each carrying its own DWARF FDE
   registry, and libgcc was not built to consult `dl_iterate_phdr`, so a C++
   exception thrown inside a shared library could not unwind back into its
