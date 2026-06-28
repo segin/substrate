@@ -97,6 +97,7 @@ typedef struct fat_fs {
 // FAT File/Directory Node Context
 typedef struct fat_node {
     fat_fs_t *fs;                   // Filesystem context
+    uint32_t dir_cluster;           // Parent directory cluster (0 for root)
     uint32_t first_cluster;         // Starting cluster
     uint32_t size;                  // File size in bytes
     uint32_t current_cluster;       // Current cluster (for sequential access)

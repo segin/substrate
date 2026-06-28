@@ -485,7 +485,7 @@ static int fat_statfs(fs_node_t *node, struct statfs *buf) {
 }
 
 static fs_node_t *fat_alloc_node(fat_fs_t *fs, const char *name, uint64_t inode,
-                                 uint32_t first_cluster, uint32_t size, uint8_t attr) {
+                                 uint32_t dir_cluster, uint32_t first_cluster, uint32_t size, uint8_t attr) {
     int idx = fat_node_cache_idx++ % FAT_NODE_CACHE_SIZE;
     
     fat_node_t *ctx = &fat_node_cache[idx];
@@ -497,6 +497,7 @@ static fs_node_t *fat_alloc_node(fat_fs_t *fs, const char *name, uint64_t inode,
     memset(ctx, 0, sizeof(fat_node_t));
     
     ctx->fs = fs;
+    ctx->dir_cluster = dir_cluster;
     ctx->first_cluster = first_cluster;
     ctx->size = size;
     ctx->attr = attr;
@@ -584,7 +585,7 @@ fs_node_t *fat_finddir(fs_node_t *node, char *name) {
                 if (fat_name_matches(entry_name, name)) {
                     uint32_t cluster_num = ((uint32_t)entry->cluster_high << 16) | entry->cluster_low;
                     uint64_t inode = fat_make_synth_inode(fs, 0, sector_i, i, cluster_num);
-                    fs_node_t *ret = fat_alloc_node(fs, entry_name, inode, cluster_num, entry->file_size, entry->attr);
+                    fs_node_t *ret = fat_alloc_node(fs, entry_name, inode, ctx->first_cluster, cluster_num, entry->file_size, entry->attr);
                     kfree(root_sector_buf, bytes_per_sector);
                     return ret;
                 }
@@ -660,7 +661,7 @@ fs_node_t *fat_finddir(fs_node_t *node, char *name) {
                 // Found it - create and return node
                 uint32_t cluster_num = ((uint32_t)entry->cluster_high << 16) | entry->cluster_low;
                 uint64_t inode = fat_make_synth_inode(fs, ctx->first_cluster, 0, i, cluster_num);
-                fs_node_t *ret = fat_alloc_node(fs, entry_name, inode, cluster_num, entry->file_size, entry->attr);
+                fs_node_t *ret = fat_alloc_node(fs, entry_name, inode, ctx->first_cluster, cluster_num, entry->file_size, entry->attr);
                 kfree(dir_buf, fs->cluster_size);
                 return ret;
             }
@@ -825,7 +826,7 @@ fs_node_t *fat_mount(const char *device, uint32_t flags, void *data) {
     kprint(")\n");
     
     uint32_t root_cluster = (fs->fat_type == 32) ? fs->ext_bpb.root_cluster : 0;
-    fs_node_t *root_node = fat_alloc_node(fs, "/", FAT_ROOT_INO, root_cluster, 0, FAT_ATTR_DIRECTORY);
+    fs_node_t *root_node = fat_alloc_node(fs, "/", FAT_ROOT_INO, 0, root_cluster, 0, FAT_ATTR_DIRECTORY);
     if (root_node) {
         root_node->unmount = fat_unmount;
         fs->root_node = root_node;
@@ -993,7 +994,117 @@ static int fat_free_chain(fat_fs_t *fs, uint32_t cluster) {
     return 0;
 }
 
+
+/* Update a directory entry (size and first_cluster) on disk.
+ * Searches for the node's name in its parent directory (dir_cluster). */
+
+
+/* Update a directory entry (size and first_cluster) on disk.
+ * Searches for the node's name in its parent directory (dir_cluster). */
+static int fat_update_dir_entry(fs_node_t *node) {
+    fat_node_t *ctx = (fat_node_t *)(uintptr_t)node->impl;
+    fat_fs_t *fs = ctx->fs;
+    uint32_t dir_cluster = ctx->dir_cluster;
+    const char *name = node->name;
+
+    uint8_t *dir_buf = kmalloc(fs->bpb.bytes_per_sector);
+    if (!dir_buf) {
+                kfree(dir_buf, fs->bpb.bytes_per_sector);
+                return -1;
+            }
+    char lfn_buf[256];
+    int lfn_len = 0;
+
+    int use_root_fixed = (dir_cluster == 0 && fs->fat_type != 32);
+    uint32_t cluster = use_root_fixed ? 0 : dir_cluster;
+    uint32_t visited = 0;
+    int done = 0;
+
+    while (!done) {
+        uint32_t sector_start, nsectors;
+        if (use_root_fixed) {
+            sector_start = fs->root_dir_first_sector;
+            nsectors = fs->root_dir_sectors;
+            done = 1;
+        } else {
+            if (cluster >= 0x0FFFFFF8) break;
+            if (++visited > fs->total_clusters) break;
+            sector_start = fat_cluster_to_sector(fs, cluster);
+            nsectors = fs->bpb.sectors_per_cluster;
+        }
+
+        for (uint32_t si = 0; si < nsectors; si++) {
+            uint32_t sector = sector_start + si;
+            if (fat_read_sectors(fs, sector, 1, dir_buf) != 0) {
+                kfree(dir_buf, fs->bpb.bytes_per_sector);
+                return -1;
+            }
+
+            int modified = 0;
+            for (uint32_t off = 0; off < fs->bpb.bytes_per_sector; off += 32) {
+                fat_dirent_t *de = (fat_dirent_t *)(dir_buf + off);
+                if (de->name[0] == 0x00) {
+                kfree(dir_buf, fs->bpb.bytes_per_sector);
+                return -1;
+            } /* End of directory */
+                if ((uint8_t)de->name[0] == 0xE5) {
+                    lfn_len = 0;
+                    continue;
+                }
+
+                if (de->attr == FAT_ATTR_LFN) {
+                    fat_lfn_t *lfn = (fat_lfn_t *)de;
+                    if (lfn->order & 0x40) {
+                        __builtin_memset(lfn_buf, 0, sizeof(lfn_buf));
+                        lfn_len = 0;
+                    }
+                    int ret = fat_parse_lfn(lfn, lfn_buf, (int)sizeof(lfn_buf) - 1);
+                    if (ret > lfn_len) lfn_len = ret;
+                    continue;
+                }
+
+                if (de->attr & FAT_ATTR_VOLUME_ID) { lfn_len = 0; continue; }
+
+                char entry_name[256];
+                if (lfn_len > 0) {
+                    lfn_buf[lfn_len] = '\0';
+                    __builtin_strncpy(entry_name, lfn_buf, 255);
+                    entry_name[255] = '\0';
+                } else {
+                    fat_parse_short_name(de->name, entry_name);
+                }
+
+                if (fat_name_matches(entry_name, name)) {
+                    /* Found the entry! Update size and first cluster */
+                    de->file_size = ctx->size;
+                    de->cluster_high = (uint16_t)(ctx->first_cluster >> 16);
+                    de->cluster_low  = (uint16_t)(ctx->first_cluster & 0xFFFF);
+                    modified = 1;
+                    break;
+                }
+                lfn_len = 0;
+            }
+
+            if (modified) {
+                fat_write_sectors(fs, sector, 1, dir_buf);
+                {
+                kfree(dir_buf, fs->bpb.bytes_per_sector);
+                return 0;
+            }
+            }
+        }
+
+        if (!use_root_fixed)
+            cluster = fat_get_next_cluster(fs, cluster);
+    }
+    {
+                kfree(dir_buf, fs->bpb.bytes_per_sector);
+                return -1;
+            }
+}
+
 /* Write file data */
+
 static size_t fat_file_write(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer) {
     fat_node_t *ctx = (fat_node_t *)(uintptr_t)node->impl;
     fat_fs_t *fs = ctx->fs;
@@ -1011,7 +1122,7 @@ static size_t fat_file_write(fs_node_t *node, off_t offset, size_t size, const u
         if (nc == 0) return 0;
         ctx->first_cluster = nc;
         node->inode = nc;
-        /* TODO: update directory entry cluster fields */
+        fat_update_dir_entry(node);
     }
 
     /* Walk chain, extending as needed */
@@ -1074,7 +1185,7 @@ static size_t fat_file_write(fs_node_t *node, off_t offset, size_t size, const u
     if ((uint32_t)(offset + total_written) > ctx->size) {
         ctx->size = (uint32_t)(offset + total_written);
         node->length = ctx->size;
-        /* TODO: flush directory entry */
+        fat_update_dir_entry(node);
     }
 
     return total_written;
@@ -1094,6 +1205,7 @@ static int fat_truncate(fs_node_t *node, off_t new_size) {
         ctx->first_cluster = 0;
         ctx->size = 0;
         node->length = 0;
+        fat_update_dir_entry(node);
         return 0;
     }
 
@@ -1123,6 +1235,7 @@ static int fat_truncate(fs_node_t *node, off_t new_size) {
 
     ctx->size = (uint32_t)new_size;
     node->length = new_size;
+    fat_update_dir_entry(node);
     return 0;
 }
 
