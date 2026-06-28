@@ -74,8 +74,8 @@ export PKG_CONFIG_LIBDIR="${SR}/lib/pkgconfig"
     --prefix=/usr \
     CC=i386-unknown-substrate-gcc \
     CXX=i386-unknown-substrate-g++ \
-    CFLAGS="-march=i486 -mtune=i486 -O2 -g -fno-pie -fno-stack-protector" \
-    CXXFLAGS="-march=i486 -mtune=i486 -O2 -g -fno-pie -fno-stack-protector" \
+    CFLAGS="-march=i486 -mtune=i486 -O2 -g -fPIE" \
+    CXXFLAGS="-march=i486 -mtune=i486 -O2 -g -fPIE" \
     LDFLAGS="-L${SR}/lib -Wl,-rpath-link,${SR}/lib -Wl,--allow-shlib-undefined" \
     LIBS="-lpthread" \
     --disable-mpris --disable-rapidcheck --disable-test-harness --disable-final
