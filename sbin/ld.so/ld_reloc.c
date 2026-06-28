@@ -167,8 +167,20 @@ static int apply_one(ld_obj_t *obj, Elf32_Rel *r) {
          * undefined NAMED symbol. */
         Elf32_Sym *s = &obj->symtab[sym];
         if (sym != 0 && s->st_shndx == SHN_UNDEF) {
-            ld_puts("ld.so: TLS undef sym in "); ld_puts(obj->name); ld_puts("\n");
-            return -1;
+            /* Imported TLS symbol (initial-exec referencing a __thread var
+             * defined in another module, e.g. libstdc++'s
+             * std::__once_call).  Resolve it to its defining module and
+             * apply THAT module's tls_offset. */
+            const char *nm = obj->strtab + s->st_name;
+            const ld_obj_t *def = 0;
+            ld_u32 val = ld_resolve_tls(nm, obj, &def);
+            if (!def || def->tls_memsz == 0) {
+                ld_puts("ld.so: TLS undef sym in "); ld_puts(obj->name);
+                ld_puts(": "); ld_puts(nm); ld_puts("\n");
+                return -1;
+            }
+            *p = val - def->tls_offset + *p;
+            return 0;
         }
         if (obj->tls_memsz == 0) {
             ld_puts("ld.so: TPOFF reloc but obj has no PT_TLS: ");

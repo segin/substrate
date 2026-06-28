@@ -390,6 +390,12 @@ ld_u32 ld_elf_hash(const char *s);
 ld_u32 ld_resolve_with_size(const char *name, const ld_obj_t *skip,
                             ld_u32 *size_out);
 
+/* Resolve an imported TLS symbol (initial-exec): returns the symbol's raw
+ * st_value (offset within its defining module's PT_TLS image) and the
+ * defining module via *def_out (NULL if unresolved). */
+ld_u32 ld_resolve_tls(const char *name, const ld_obj_t *requester,
+                      const ld_obj_t **def_out);
+
 /* Apply DT_REL and DT_JMPREL on `obj`, EXCEPT R_386_COPY.  Returns
  * 0 on success. */
 int ld_relocate(ld_obj_t *obj);

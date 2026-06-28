@@ -301,6 +301,26 @@ ld_u32 ld_resolve_with_size(const char *name, const ld_obj_t *skip,
     return resolve_internal(name, 0, skip, size_out, 0);
 }
 
+/* Resolve an imported TLS symbol (initial-exec model — e.g. a program
+ * referencing libstdc++'s `thread_local std::__once_call`).  Returns the
+ * symbol's RAW st_value (its offset within its DEFINING module's PT_TLS
+ * image, NOT biased by the load base) and hands that module back via
+ * *def_out, so the relocator can apply the defining module's tls_offset.
+ * *def_out is NULL when the symbol is unresolved. */
+ld_u32 ld_resolve_tls(const char *name, const ld_obj_t *requester,
+                      const ld_obj_t **def_out) {
+    struct resolve_ctx ctx = { 0, requester };
+    for (ld_obj_t *o = ld_obj_list(); o; o = o->next) {
+        Elf32_Sym *s = lookup_gnu(o, name, resolve_pred, &ctx);
+        if (!s) s = lookup_sysv(o, name, resolve_pred, &ctx);
+        if (!s) continue;
+        if (def_out) *def_out = o;
+        return s->st_value;
+    }
+    if (def_out) *def_out = 0;
+    return 0;
+}
+
 /* Requester-aware resolve used by the relocation processor: `requester`
  * is the object whose relocation is being applied, so its own canonical
  * PLT entry is not handed back to itself. */
