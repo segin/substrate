@@ -84,6 +84,42 @@ struct linux_stat {
 };
 
 /*
+ * Linux i386 statfs structure
+ */
+struct linux_statfs {
+    uint32_t f_type;
+    uint32_t f_bsize;
+    uint32_t f_blocks;
+    uint32_t f_bfree;
+    uint32_t f_bavail;
+    uint32_t f_files;
+    uint32_t f_ffree;
+    int32_t  f_fsid[2];
+    uint32_t f_namelen;
+    uint32_t f_frsize;
+    uint32_t f_flags;
+    uint32_t f_spare[4];
+};
+
+/*
+ * Linux i386 statfs64 structure
+ */
+struct linux_statfs64 {
+    uint32_t f_type;
+    uint32_t f_bsize;
+    uint64_t f_blocks;
+    uint64_t f_bfree;
+    uint64_t f_bavail;
+    uint64_t f_files;
+    uint64_t f_ffree;
+    int32_t  f_fsid[2];
+    uint32_t f_namelen;
+    uint32_t f_frsize;
+    uint32_t f_flags;
+    uint32_t f_spare[4];
+} __attribute__((packed, aligned(4)));
+
+/*
  * Linux i386 stat64 structure (syscalls 195/196/197) - ~96 bytes
  * Large File Support stat for >2GB files
  */
@@ -189,6 +225,12 @@ struct linux_winsize {
 int linux_sys_stat(const char *path, struct linux_stat *buf);
 int linux_sys_lstat(const char *path, struct linux_stat *buf);
 int linux_sys_fstat(int fd, struct linux_stat *buf);
+
+/* Linux statfs translation functions */
+int linux_sys_statfs(const char *path, struct linux_statfs *buf);
+int linux_sys_fstatfs(int fd, struct linux_statfs *buf);
+int linux_sys_statfs64(const char *path, size_t sz, struct linux_statfs64 *buf);
+int linux_sys_fstatfs64(int fd, size_t sz, struct linux_statfs64 *buf);
 
 /* Linux stat64 translation functions: native -> linux_stat64 */
 int linux_sys_stat64(const char *path, struct linux_stat64 *buf);

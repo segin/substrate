@@ -1,9 +1,11 @@
-#include "linux_user.h"
+#include "../linux_user.h"
 #include <sys/kern_syscalls.h>
 #include <sys/copy.h>
 #include <string.h>
 #include <sys/errno.h>
 #include <vm/vm_kmem.h>
+#include <sys/mount.h>
+#include <vfs/vfs.h>
 
 static void linux_fill_stat64(struct linux_stat64 *kbuf, const struct stat *native) {
     memset(kbuf, 0, sizeof(*kbuf));
@@ -143,6 +145,125 @@ int linux_sys_fstat(int fd, struct linux_stat *buf) {
     kbuf.st_ctime = (uint32_t)(native.st_ctime & 0xFFFFFFFF);
     kbuf.st_ctime_nsec = native.st_ctime_nsec;
     
+    if (copyout(&kbuf, buf, sizeof(kbuf)) != 0) return -14;
+    return 0;
+}
+
+static void linux_fill_statfs(struct linux_statfs *kbuf, const struct statfs *native) {
+    memset(kbuf, 0, sizeof(*kbuf));
+
+    /* Try to deduce filesystem magic based on fstypename if possible,
+     * else fall back to a generic fallback. For now we map natively or fallback.
+     */
+    kbuf->f_type = native->f_type ? native->f_type : 0xEF53; /* ext2/3/4 magic fallback */
+    if (strncmp(native->f_fstypename, "ext2", 4) == 0) {
+        kbuf->f_type = 0xEF53; /* EXT2_SUPER_MAGIC */
+    } else if (strncmp(native->f_fstypename, "fat", 3) == 0) {
+        kbuf->f_type = 0x4d44; /* MSDOS_SUPER_MAGIC */
+    } else if (strncmp(native->f_fstypename, "procfs", 6) == 0) {
+        kbuf->f_type = 0x9fa0; /* PROC_SUPER_MAGIC */
+    } else if (strncmp(native->f_fstypename, "sysfs", 5) == 0) {
+        kbuf->f_type = 0x62656572; /* SYSFS_MAGIC */
+    } else if (strncmp(native->f_fstypename, "devfs", 5) == 0) {
+        kbuf->f_type = 0x1373; /* DEVFS_SUPER_MAGIC */
+    } else if (strncmp(native->f_fstypename, "tmpfs", 5) == 0) {
+        kbuf->f_type = 0x01021994; /* TMPFS_MAGIC */
+    }
+
+    kbuf->f_bsize = native->f_bsize;
+    kbuf->f_blocks = (uint32_t)native->f_blocks;
+    kbuf->f_bfree = (uint32_t)native->f_bfree;
+    kbuf->f_bavail = (uint32_t)native->f_bavail;
+    kbuf->f_files = (uint32_t)native->f_files;
+    kbuf->f_ffree = (uint32_t)native->f_ffree;
+    kbuf->f_fsid[0] = (int32_t)native->f_fsid;
+    kbuf->f_fsid[1] = (int32_t)((uint64_t)native->f_fsid >> 32);
+    kbuf->f_namelen = 255; /* Common default */
+    kbuf->f_frsize = native->f_bsize; /* Typically same as bsize */
+    kbuf->f_flags = native->f_flags;
+}
+
+static void linux_fill_statfs64(struct linux_statfs64 *kbuf, const struct statfs *native) {
+    memset(kbuf, 0, sizeof(*kbuf));
+
+    kbuf->f_type = native->f_type ? native->f_type : 0xEF53;
+    if (strncmp(native->f_fstypename, "ext2", 4) == 0) {
+        kbuf->f_type = 0xEF53; /* EXT2_SUPER_MAGIC */
+    } else if (strncmp(native->f_fstypename, "fat", 3) == 0) {
+        kbuf->f_type = 0x4d44; /* MSDOS_SUPER_MAGIC */
+    } else if (strncmp(native->f_fstypename, "procfs", 6) == 0) {
+        kbuf->f_type = 0x9fa0; /* PROC_SUPER_MAGIC */
+    } else if (strncmp(native->f_fstypename, "sysfs", 5) == 0) {
+        kbuf->f_type = 0x62656572; /* SYSFS_MAGIC */
+    } else if (strncmp(native->f_fstypename, "devfs", 5) == 0) {
+        kbuf->f_type = 0x1373; /* DEVFS_SUPER_MAGIC */
+    } else if (strncmp(native->f_fstypename, "tmpfs", 5) == 0) {
+        kbuf->f_type = 0x01021994; /* TMPFS_MAGIC */
+    }
+
+    kbuf->f_bsize = native->f_bsize;
+    kbuf->f_blocks = native->f_blocks;
+    kbuf->f_bfree = native->f_bfree;
+    kbuf->f_bavail = native->f_bavail;
+    kbuf->f_files = native->f_files;
+    kbuf->f_ffree = native->f_ffree;
+    kbuf->f_fsid[0] = (int32_t)native->f_fsid;
+    kbuf->f_fsid[1] = (int32_t)((uint64_t)native->f_fsid >> 32);
+    kbuf->f_namelen = 255;
+    kbuf->f_frsize = native->f_bsize;
+    kbuf->f_flags = native->f_flags;
+}
+
+int linux_sys_statfs(const char *path, struct linux_statfs *buf) {
+    char kpath[256];
+    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -14; /* -EFAULT */
+
+    struct statfs native;
+    int ret = kern_statfs(kpath, &native);
+    if (ret < 0) return ret;
+
+    struct linux_statfs kbuf;
+    linux_fill_statfs(&kbuf, &native);
+    if (copyout(&kbuf, buf, sizeof(kbuf)) != 0) return -14;
+    return 0;
+}
+
+int linux_sys_fstatfs(int fd, struct linux_statfs *buf) {
+    struct statfs native;
+    int ret = kern_fstatfs(fd, &native);
+    if (ret < 0) return ret;
+
+    struct linux_statfs kbuf;
+    linux_fill_statfs(&kbuf, &native);
+    if (copyout(&kbuf, buf, sizeof(kbuf)) != 0) return -14;
+    return 0;
+}
+
+int linux_sys_statfs64(const char *path, size_t sz, struct linux_statfs64 *buf) {
+    if (sz != sizeof(struct linux_statfs64)) return -22; /* -EINVAL */
+
+    char kpath[256];
+    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -14;
+
+    struct statfs native;
+    int ret = kern_statfs(kpath, &native);
+    if (ret < 0) return ret;
+
+    struct linux_statfs64 kbuf;
+    linux_fill_statfs64(&kbuf, &native);
+    if (copyout(&kbuf, buf, sizeof(kbuf)) != 0) return -14;
+    return 0;
+}
+
+int linux_sys_fstatfs64(int fd, size_t sz, struct linux_statfs64 *buf) {
+    if (sz != sizeof(struct linux_statfs64)) return -22; /* -EINVAL */
+
+    struct statfs native;
+    int ret = kern_fstatfs(fd, &native);
+    if (ret < 0) return ret;
+
+    struct linux_statfs64 kbuf;
+    linux_fill_statfs64(&kbuf, &native);
     if (copyout(&kbuf, buf, sizeof(kbuf)) != 0) return -14;
     return 0;
 }
