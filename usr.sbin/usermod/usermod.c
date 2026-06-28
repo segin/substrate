@@ -293,17 +293,40 @@ write_group(FILE *out, void *arg)
     return 0;
 }
 
+static int
+spawn_cmd(char *const argv[])
+{
+    pid_t pid = fork();
+    if (pid < 0) return -1;
+    if (pid == 0) {
+        execvp(argv[0], argv);
+        _exit(127);
+    }
+    int status;
+    if (waitpid(pid, &status, 0) < 0) return -1;
+    if (WIFEXITED(status) && WEXITSTATUS(status) == 0) return 0;
+    return -1;
+}
+
 /* Recursive move-merge of `src` into `dst`.  Used by -d -m. */
 static int
 move_tree(const char *src, const char *dst)
 {
     /* If both are on the same filesystem, rename(2) handles the
      * whole tree in one syscall.  Fall back to copy-rm if rename
-     * fails with EXDEV.  Keep it simple: only the rename path for
-     * now; cross-fs copy is left as a TODO. */
+     * fails with EXDEV. */
     if (rename(src, dst) == 0) return 0;
     if (errno == EXDEV) {
-        errno = ENOSYS; /* cross-fs move not implemented */
+        char *const cp_args[] = { "cp", "-a", "--", (char *)src, (char *)dst, NULL };
+        if (spawn_cmd(cp_args) != 0) {
+            errno = EIO;
+            return -1;
+        }
+        char *const rm_args[] = { "rm", "-rf", "--", (char *)src, NULL };
+        if (spawn_cmd(rm_args) != 0) {
+            fprintf(stderr, "usermod: warning: could not completely remove old home '%s'\n", src);
+        }
+        return 0;
     }
     return -1;
 }
