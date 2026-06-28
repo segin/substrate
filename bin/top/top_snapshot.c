@@ -94,7 +94,9 @@ int top_snapshot_take(top_snapshot_t *s) {
         s->swap_total = vm.swap_total;
         s->swap_free  = vm.swap_free;
     }
-    s->ncpu = 1; /* TODO: pull from sys_cpu_count when SMP-aware */
+
+    int ncpu = sys_cpu_count();
+    s->ncpu = ncpu > 0 ? ncpu : 1;
 
     /* Per-process detail.  -ESRCH on any pid is normal (race
      * between list and info — REQ-23-0015 makes that silent). */
