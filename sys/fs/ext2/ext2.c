@@ -875,7 +875,16 @@ static int ext4_extent_alloc_inode_block(ext2_fs_t *fs, ext2_inode_t *inode,
     uint8_t *h = (uint8_t *)inode->i_block;
     ext4_extent_header_t *eh = (ext4_extent_header_t *)h;
     if (eh->eh_magic != EXT4_EXT_MAGIC)             return -1;
-    if (eh->eh_depth != 0)                          return -1;   /* multi-level: TODO */
+    if (eh->eh_depth != 0) {
+        /*
+         * Implementing ext4 multi-level extent tree updates is complex and bug-prone,
+         * requiring traversing and splitting extent index blocks. It is deliberately
+         * unsupported.
+         */
+        extern int kprintf(const char *, ...);
+        kprintf("ext2: multi-level extent tree updates are unsupported\n");
+        return -1;
+    }
     uint32_t sectors_per_block = fs->block_size / 512;
 
     ext4_extent_t *exts = (ext4_extent_t *)(h + sizeof(*eh));
