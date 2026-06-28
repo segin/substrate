@@ -137,11 +137,12 @@ static char *next_numbered_backup(const char *target)
     }
     free(dir);
 
-    out = malloc(strlen(target) + 32);
+    size_t alloc_sz = strlen(target) + 32;
+    out = malloc(alloc_sz);
     if (out == NULL) {
         return NULL;
     }
-    sprintf(out, "%s.~%lu~", target, highest + 1u);
+    snprintf(out, alloc_sz, "%s.~%lu~", target, highest + 1u);
     return out;
 }
 
