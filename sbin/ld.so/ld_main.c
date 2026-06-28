@@ -270,6 +270,11 @@ ld_u32 ld_main(ld_u32 *initial_stack) {
         prog_obj.load_end   = bias + hi;
     }
     prog_obj.dynamic    = dyn;
+    /* AT_PHDR is the program's own runtime phdr table; record it for
+     * dl_iterate_phdr(3) so libgcc's unwinder can find the executable's
+     * .eh_frame_hdr (needed for C++ exceptions thrown into main()). */
+    prog_obj.phdr       = (const void *)(unsigned long)a.phdr;
+    prog_obj.phnum      = a.phnum;
     prog_obj.strtab     = 0;
     prog_obj.symtab     = 0;
     prog_obj.strsz      = 0;

@@ -8,3 +8,4 @@
 0006-libstdcxx-config-os-substrate.patch
 0007-libstdcxx-configure-host.patch
 0008-libstdcxx-crossconfig.patch
+0010-libgcc-pt-gnu-eh-frame-substrate.patch

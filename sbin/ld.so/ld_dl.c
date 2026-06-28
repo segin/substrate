@@ -348,3 +348,36 @@ ld_u32 ld_lookup_in_obj(const ld_obj_t *o, const char *name) {
     }
     return 0;
 }
+
+/*
+ * dl_iterate_phdr(3) — walk every loaded object (the executable plus all
+ * shared libraries) and hand each one's program headers to the callback.
+ * libgcc's DWARF unwinder, when built with USE_PT_GNU_EH_FRAME, calls this
+ * to locate each module's PT_GNU_EH_FRAME (.eh_frame_hdr); it is what lets
+ * a C++ exception unwind across shared-library boundaries.  The struct
+ * layout matches the first four members of glibc's `struct dl_phdr_info`,
+ * and we report the base size so the unwinder does not read the
+ * dlpi_adds/dlpi_subs cache fields we don't maintain.
+ */
+struct ld_dl_phdr_info {
+    ld_u32        dlpi_addr;
+    const char   *dlpi_name;
+    const void   *dlpi_phdr;
+    ld_u16        dlpi_phnum;
+};
+
+LD_PUBLIC int __ldso_dl_iterate_phdr(
+        int (*cb)(struct ld_dl_phdr_info *, ld_size, void *), void *data) {
+    int ret = 0;
+    for (ld_obj_t *o = ld_obj_list(); o; o = o->next) {
+        struct ld_dl_phdr_info info;
+        info.dlpi_addr  = o->base;
+        info.dlpi_name  = o->name;
+        info.dlpi_phdr  = o->phdr;
+        info.dlpi_phnum = (ld_u16)o->phnum;
+        ret = cb(&info, sizeof(info), data);
+        if (ret)
+            break;
+    }
+    return ret;
+}

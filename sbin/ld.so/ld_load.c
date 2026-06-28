@@ -316,6 +316,11 @@ static ld_obj_t *load_from_path(const char *path) {
 
     ld_obj_t *o = &ld_obj_pool[ld_obj_count++];
     o->base       = base;
+    /* Runtime program-header address + count, for dl_iterate_phdr(3).
+     * The phdrs sit at e_phoff inside the first PT_LOAD (which maps file
+     * offset 0), so their mapped address is base + e_phoff. */
+    o->phdr       = (const void *)(unsigned long)(base + eh.e_phoff);
+    o->phnum      = eh.e_phnum;
     /* [load_start, load_end) covers every PT_LOAD page-aligned to
      * the span we just mmap'd.  Used by __ldso_dladdr to figure out
      * which DSO owns an address and by RTLD_NEXT-style scope walks

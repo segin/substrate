@@ -282,6 +282,13 @@ typedef struct ld_obj {
     ld_u32          load_end;   /* high end of PT_LOAD span (absolute) */
     Elf32_Dyn      *dynamic;    /* PT_DYNAMIC pointer (already biased) */
 
+    /* In-memory program-header table, for dl_iterate_phdr(3) — which
+     * libgcc's DWARF unwinder uses (USE_PT_GNU_EH_FRAME) to locate each
+     * loaded object's PT_GNU_EH_FRAME / .eh_frame_hdr.  Without this,
+     * C++ exceptions can't unwind across DSO boundaries. */
+    const void     *phdr;       /* runtime address of the Elf32_Phdr[] */
+    ld_u32          phnum;       /* number of program headers */
+
     /* Cached dynamic-table pointers (all already biased). */
     const char     *strtab;
     Elf32_Sym      *symtab;
