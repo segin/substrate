@@ -58,9 +58,8 @@ launch_vi(int argc, char **argv)
         size_t prefix_len = (size_t)(slash - argv[0]);
 
         if (prefix_len + strlen("/../vi/vi") < sizeof(sibling_path)) {
-            memcpy(sibling_path, argv[0], prefix_len);
-            sibling_path[prefix_len] = '\0';
-            strcat(sibling_path, "/../vi/vi");
+            strlcpy(sibling_path, argv[0], prefix_len + 1);
+            strlcat(sibling_path, "/../vi/vi", sizeof(sibling_path));
             execv(sibling_path, vi_argv);
         }
     }
