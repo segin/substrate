@@ -93,7 +93,7 @@ int main() {
     udf_ctx.partition_start = 0;
 
     // Initialize global bitmap pointers
-    udf_read_space_bitmap(&mock_dev, 0, 0, sizeof(struct udf_space_bitmap) + 128);
+    udf_read_space_bitmap(&udf_ctx, 0, sizeof(struct udf_space_bitmap) + 128);
 
     // Create FE at sector 1
     uint8_t fe_buf[UDF_SECTOR_SIZE];
@@ -116,7 +116,7 @@ int main() {
 
     // 1. Test Expansion (2048 -> 8192)
     printf("Testing Expansion: 2048 -> 8192\n");
-    if (udf_truncate(&mock_dev, fe_ptr, 1, 8192) != 0) {
+    if (udf_truncate_file(&udf_ctx, fe_ptr, 1, 8192) != 0) {
         printf("FAILED: udf_truncate expansion returned error\n");
         return 1;
     }
@@ -132,7 +132,7 @@ int main() {
 
     // 2. Test Shrinking (8192 -> 1024)
     printf("Testing Shrinking: 8192 -> 1024\n");
-    if (udf_truncate(&mock_dev, fe_ptr, 1, 1024) != 0) {
+    if (udf_truncate_file(&udf_ctx, fe_ptr, 1, 1024) != 0) {
         printf("FAILED: udf_truncate shrinking returned error\n");
         return 1;
     }

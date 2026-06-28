@@ -84,7 +84,7 @@ int main() {
     udf_ctx.partition_start = 0;
 
     // Initialize global bitmap pointers in udf_write.c
-    udf_read_space_bitmap(&mock_dev, 0, 0, sizeof(struct udf_space_bitmap) + 8);
+    udf_read_space_bitmap(&udf_ctx, 0, sizeof(struct udf_space_bitmap) + 8);
 
     // Create FE at sector 1
     struct udf_fe fe;
@@ -99,7 +99,7 @@ int main() {
     for (int i = 0; i < 4096; i++) large_data[i] = (uint8_t)(i % 256);
 
     // Attempt write
-    int res = udf_write_file(&mock_dev, &fe, 1, 0, 4096, large_data);
+    int res = udf_write_file(&udf_ctx, &fe, 1, 0, 4096, large_data);
 
     if (res != 0) {
         printf("FAILED: udf_write_file returned %d\n", res);

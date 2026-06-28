@@ -24,11 +24,7 @@ int getnewvnode(const char *tag, struct mount *mp, struct vnodeops *vops, struct
 struct process *current_process = NULL;
 
 // Stub out externals
-int udf_read_space_bitmap(fs_node_t *dev, uint32_t partition_start, uint32_t bitmap_loc, uint32_t bitmap_len) { return 0; }
-uint32_t udf_alloc_block(void) { return 0; }
-void udf_free_block(uint32_t block) { }
-int udf_create_fe(fs_node_t *dev, uint32_t block, uint8_t file_type, uint32_t uid, uint32_t gid, uint32_t permissions) { return 0; }
-int udf_add_fid(fs_node_t *dev, struct udf_fe *dir_fe, uint32_t dir_block, const char *name, struct udf_long_ad *icb, uint8_t characteristics) { return 0; }
+#include "udf_host_stubs.h"
 
 // Include the source
 #include "../../sys/fs/udf/udf.c"
