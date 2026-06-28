@@ -35,6 +35,14 @@ uint32_t pci_config_address(uint8_t bus, uint8_t slot, uint8_t func, uint16_t of
 uint32_t pci_read(uint8_t bus, uint8_t slot, uint8_t func, uint16_t offset) { return pci_read_config32(bus, slot, func, offset); }
 void pci_write(uint8_t bus, uint8_t slot, uint8_t func, uint16_t offset, uint32_t val) { pci_write_config32(bus, slot, func, offset, val); }
 
+struct fs_node;
+void kobject_uevent(const char *action, const char *subsystem, const char *name) { (void)action; (void)subsystem; (void)name; }
+void devfs_register_device(struct fs_node *node) { (void)node; }
+void devfs_unregister_device(struct fs_node *node) { (void)node; }
+int devfs_register_alias(const char *path, const char *target) { (void)path; (void)target; return 0; }
+void devfs_unregister_alias(const char *path) { (void)path; }
+int i386_cpu_pat_wc_enabled(void) { return 0; }
+
 #define HOST_TEST 1
 #include "../../sys/kern/bus.c"
 #include "../../sys/kern/driver.c"

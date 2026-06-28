@@ -25,6 +25,11 @@ void vfs_register_filesystem(filesystem_t *fs) {
 
 #include "../../sys/fs/fat/fat.c"
 
+size_t blkdev_read_bytes(blkdev_t *dev, uint64_t offset, size_t size, void *buffer) {
+    (void)dev; (void)offset; (void)size; (void)buffer;
+    return 0;
+}
+
 int main(void) {
     fat_fs_t fs;
     uint64_t root_slot_a;

@@ -442,13 +442,22 @@ host_test_udf_find_avdp: host_test_udf_find_avdp.c
 	$(CC) -g -Wall -I../../sys -I. -Ivuln_mocks -idirafter ../../sys/include -idirafter ../../include host_test_udf_find_avdp.c -o $@
 
 host_test_ext2_read_block: host_test_ext2_read_block.c
-	$(CC) -g -Wall -DHOST_TEST -I../../sys -I. -idirafter ../../sys/include -idirafter ../../include host_test_ext2_read_block.c -o $@
+	$(CC) -g -Wall -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_ext2_read_block.c -o $@
+
+host_test_ext2_alloc_inode_block: host_test_ext2_alloc_inode_block.c
+	$(CC) -g -Wall -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_ext2_alloc_inode_block.c -o $@
+
+host_test_ext2_get_block_num: host_test_ext2_get_block_num.c
+	$(CC) -g -Wall -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_ext2_get_block_num.c -o $@
+
+host_test_ext2_get_blocks_extent: host_test_ext2_get_blocks_extent.c
+	$(CC) -g -Wall -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_ext2_get_blocks_extent.c ../../sys/fs/ext2/ext2.c -o $@
 
 host_test_ext2_free_block: test_ext2_free_block.c
 	$(CC) -g -Wall -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. test_ext2_free_block.c -o $@
 
 host_test_ext2_readlink: host_test_ext2_readlink.c
-	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys -I. -idirafter ../../sys/include -idirafter ../../include host_test_ext2_readlink.c -o $@
+	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_ext2_readlink.c -o $@
 
 host_test_fat_get_next_cluster: host_test_fat_get_next_cluster.c
 	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_fat_get_next_cluster.c -o $@
@@ -519,7 +528,7 @@ host_test_fat_file_read: host_test_fat_file_read.c
 	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_fat_file_read.c -o $@
 
 host_test_vm_kmem: host_test_vm_kmem.c
-	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_vm_kmem.c -o $@
+	$(CC) -g -Wall -Wextra -DHOST_TEST -Ivm_kmem_mocks -I../../sys/include -I../../include -I../../sys -I. host_test_vm_kmem.c -o $@
 
 host_test_smp_discovery: host_test_smp_discovery.c
 	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_smp_discovery.c -o $@

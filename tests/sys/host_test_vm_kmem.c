@@ -3,6 +3,7 @@
 #include <string.h>
 #include <stdint.h>
 
+#include <sys/lock.h>
 #include <vm/uma.h>
 #include <vm/vm_kmem.h>
 
@@ -54,6 +55,11 @@ static size_t alloc_rec_get(alloc_rec_t *table, size_t table_len, void *ptr) {
 void kprint(const char *msg) {
     (void)msg;
 }
+
+/* vm_kmem.c now guards its stats with a spinlock; stub the lock
+ * primitives for the single-threaded host harness. */
+void spinlock_acquire(spinlock_t *lock) { (void)lock; }
+void spinlock_release(spinlock_t *lock) { (void)lock; }
 
 uma_zone_t *uma_zcreate(const char *name, size_t size, uma_ctor ctor, uma_dtor dtor,
                         uma_init init, uma_fini fini, int align, uint32_t flags) {

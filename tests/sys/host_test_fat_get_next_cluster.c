@@ -26,6 +26,11 @@ void vfs_register_filesystem(filesystem_t *fs) {
 
 #include "../../sys/fs/fat/fat.c"
 
+size_t blkdev_read_bytes(blkdev_t *dev, uint64_t offset, size_t size, void *buffer) {
+    (void)dev; (void)offset; (void)size; (void)buffer;
+    return 0;
+}
+
 static uint8_t mock_device_data[4096];
 static size_t mock_device_size = 0;
 static int mock_device_read_fails = 0;

@@ -47,6 +47,9 @@ void pmm_free_contiguous(void *p, size_t pages) {
 int smp_get_cpu_count(void) { return 1; }
 int smp_get_cpu_id(void) { return 0; }
 
+uint32_t intr_disable(void) { return 0; }
+void intr_restore(uint32_t flags) { (void)flags; }
+
 void *kzalloc(size_t size) {
     return calloc(1, size);
 }

@@ -111,6 +111,13 @@ int pmap_enter(pmap_t pmap, uintptr_t va, uintptr_t pa, uint32_t prot, uint32_t 
 }
 void pmap_kremove(uintptr_t va) { (void)va; }
 
+struct fs_node;
+void devfs_register_device(struct fs_node *node) { (void)node; }
+void devfs_unregister_device(struct fs_node *node) { (void)node; }
+int devfs_register_alias(const char *path, const char *target) { (void)path; (void)target; return 0; }
+void devfs_unregister_alias(const char *path) { (void)path; }
+int i386_cpu_pat_wc_enabled(void) { return 0; }
+
 #include "../../sys/kern/bus.c"
 #include "../../sys/kern/driver.c"
 #include "../../sys/kern/device.c"

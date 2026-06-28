@@ -55,6 +55,45 @@ void mutex_init(mutex_t *m, const char *name) { (void)m; (void)name; }
 void mutex_lock(mutex_t *m) { (void)m; }
 void mutex_unlock(mutex_t *m) { (void)m; }
 
+// ==========================================
+// Stubs for kernel subsystems ext2.c grew calls into
+// ==========================================
+int kprintf(const char *fmt, ...) { (void)fmt; return 0; }
+int cmdline_debug_enabled(const char *channel) { (void)channel; return 0; }
+
+#include <crc32c.h>
+uint32_t crc32c_update(uint32_t crc, const void *buf, size_t len) {
+    (void)buf; (void)len; return crc;
+}
+
+#include <drivers/storage/blkdev.h>
+size_t blkdev_read_bytes(blkdev_t *dev, uint64_t offset, size_t size, void *buffer) {
+    (void)dev; (void)offset; (void)size; (void)buffer; return 0;
+}
+
+#include <fs/ext2/ext2.h>
+int ext2_htree_hash(const char *name, int len, const uint32_t *hash_seed,
+                    int hash_version, uint32_t *hash_major, uint32_t *hash_minor) {
+    (void)name; (void)len; (void)hash_seed; (void)hash_version;
+    if (hash_major) *hash_major = 0;
+    if (hash_minor) *hash_minor = 0;
+    return 0;
+}
+int ext2_xattr_get(fs_node_t *node, const char *full_name,
+                   void *out, size_t out_size, size_t *result_size) {
+    (void)node; (void)full_name; (void)out; (void)out_size;
+    if (result_size) *result_size = 0;
+    return -1; /* miss; xattr path is not exercised by this test */
+}
+int ext2_xattr_list(fs_node_t *node, void *out, size_t out_size, size_t *result_size) {
+    (void)node; (void)out; (void)out_size;
+    if (result_size) *result_size = 0;
+    return 0;
+}
+
+unsigned long fs_open_count;
+unsigned long fs_close_count;
+
 // Device Mock
 size_t mock_device_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
     (void)node; (void)offset; (void)size;

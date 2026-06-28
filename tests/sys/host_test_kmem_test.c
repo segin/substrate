@@ -74,7 +74,7 @@ int main() {
             failed++;
         }
 
-        char *end_msg = "KMEM_TEST_END: End of buffer.";
+        char *end_msg = "KMEM_TEST_END.\n";
         char *end_ptr = (char*)kmem_test_buffer + kmem_test_size - strlen(end_msg) - 1;
         if (strcmp(end_ptr, end_msg) == 0) {
             printf("[OK] Buffer ends with known string\n");
@@ -92,10 +92,4 @@ int main() {
 
     printf("\nTest Summary: %d passed, %d failed\n", passed, failed);
     return failed > 0 ? 1 : 0;
-}
-
-// Mock missing sysctl variables and functions to allow linking
-struct sysctl_oid_list sysctl_debug_children;
-int sysctl_handle_int(struct sysctl_oid *oidp, void *arg1, int arg2, struct sysctl_req *req) {
-    return 0;
 }
