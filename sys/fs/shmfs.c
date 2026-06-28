@@ -38,6 +38,7 @@
 #include <vm/vm_kmem.h>
 #include <sys/mount.h>
 #include <kern/time.h>
+#include <sys/proc.h>
 #include <string.h>
 #include <stddef.h>
 #include <errno.h>
@@ -255,8 +256,8 @@ static int shmfs_root_mknod(fs_node_t *parent, const char *name, uint16_t mode, 
     ino->node.name[sizeof(ino->node.name) - 1] = '\0';
     ino->node.flags    = FS_FILE;
     ino->node.mask     = mode & 07777;
-    ino->node.uid      = 0;            /* TODO: pull from current_process */
-    ino->node.gid      = 0;
+    ino->node.uid      = current_process ? current_process->euid : 0;
+    ino->node.gid      = current_process ? current_process->egid : 0;
     ino->node.inode    = shmfs_next_inode++;
     ino->node.length   = 0;
     ino->node.impl     = (uintptr_t)ino;
