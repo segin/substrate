@@ -180,6 +180,7 @@ HOST_TESTS += host_test_printf_specifiers
 HOST_TESTS += host_test_printf_vsnprintf
 HOST_TESTS += host_test_rwlock
 HOST_TESTS += host_test_string
+HOST_TESTS += host_test_vfs_mount_legacy
 
 host_test_pci_config: host_test_pci_config.c
 	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_pci_config.c -o $@
@@ -586,3 +587,6 @@ host_test_compat_stat: host_test_compat_stat.c
 
 host_test_rwlock: host_test_rwlock.c
 	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_rwlock.c -o $@
+
+host_test_vfs_mount_legacy: host_test_vfs_mount_legacy.c
+	$(CC) -g -Wall -Wextra -Werror -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_vfs_mount_legacy.c -o $@
