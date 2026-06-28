@@ -28,6 +28,8 @@
 #include <vm/vm_map.h>
 #include <vm/vm_object.h>
 #include <kern/memtrack.h>
+#include <arch/i386/percpu.h>
+#include <arch/i386/smp.h>
 #include <sys/lock.h>
 #include <kern/bus.h>
 #include <kern/pci.h>
@@ -189,6 +191,42 @@ static uint32_t gen_loadavg(char *buf, size_t size, void *opaque) {
         LOAD_INT(loads[1]), LOAD_FRAC(loads[1]),
         LOAD_INT(loads[2]), LOAD_FRAC(loads[2]),
         runnable, total, last_pid);
+}
+
+static uint32_t gen_stat(char *buf, size_t size, void *opaque) {
+    (void)opaque;
+    uint64_t total_user = 0, total_system = 0, total_idle = 0;
+    int cpus = cpu_count > 0 ? cpu_count : 1;
+
+    for (int i = 0; i < cpus; i++) {
+        struct percpu_data *pcpu = percpu_get_cpu(i);
+        if (pcpu) {
+            total_user += pcpu->user_ticks;
+            total_system += pcpu->system_ticks;
+            total_idle += pcpu->idle_ticks;
+        }
+    }
+
+    size_t off = 0;
+    int n = snprintf(buf + off, size - off, "cpu  %llu 0 %llu %llu 0 0 0 0 0 0\n",
+                     (unsigned long long)total_user,
+                     (unsigned long long)total_system,
+                     (unsigned long long)total_idle);
+    if (n > 0) off += n;
+
+    for (int i = 0; i < cpus; i++) {
+        struct percpu_data *pcpu = percpu_get_cpu(i);
+        if (pcpu && off < size) {
+            n = snprintf(buf + off, size - off, "cpu%d %llu 0 %llu %llu 0 0 0 0 0 0\n",
+                         i,
+                         (unsigned long long)pcpu->user_ticks,
+                         (unsigned long long)pcpu->system_ticks,
+                         (unsigned long long)pcpu->idle_ticks);
+            if (n > 0) off += n;
+        }
+    }
+
+    return (uint32_t)off;
 }
 
 static uint32_t gen_vmstat(char *buf, size_t size, void *opaque) {
@@ -454,6 +492,7 @@ static struct procfs_runtime_entry procfs_entries[] = {
     { "vmstat",      gen_vmstat,        NULL },
     { "version",     gen_version,       NULL },
     { "loadavg",     gen_loadavg,       NULL },
+    { "stat",        gen_stat,          NULL },
     { "cow_stats",   gen_cow_stats,     NULL },
     { "pmap_stats",  proc_pmap_stats_read, NULL },
     { "filesystems", gen_filesystems,   NULL },

@@ -9,6 +9,7 @@
 #define _FS_UDF_UDF_H
 
 #include <stdint.h>
+#include <stddef.h>
 
 /* UDF Constants */
 #define UDF_SECTOR_SIZE     2048

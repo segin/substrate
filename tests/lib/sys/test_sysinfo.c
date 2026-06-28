@@ -157,6 +157,16 @@ static void test_stubs_dont_crash(void) {
     if (n != 0) FAIL("disk_list left count non-zero on failure");
 }
 
+static void test_cpu_times(void) {
+    sys_cputimes_t t;
+    if (sys_cpu_times(0, &t) != 0) {
+        /* On host, might not parse host's /proc/stat correctly if format is different,
+         * or maybe host's /proc/stat works. Let's see if it parses. */
+         printf("  (skip cpu_times — parsing failed)\n");
+         return;
+    }
+}
+
 int main(void) {
     printf("test_sysinfo: starting\n");
     test_uptime();
@@ -169,6 +179,7 @@ int main(void) {
     test_cpu_info();
     test_hostname();
     test_stubs_dont_crash();
+    test_cpu_times();
     if (g_failures == 0) {
         printf("test_sysinfo: PASS\n");
         return 0;

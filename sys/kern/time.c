@@ -565,6 +565,17 @@ void timer_tick_context(int is_usermode) {
         }
     }
 
+    struct percpu_data *pcpu = percpu_get_cpu(cpu_id);
+    if (pcpu) {
+        if (current_thread && current_thread->sched_class == SCHED_IDLE) {
+            pcpu->idle_ticks++;
+        } else if (is_usermode) {
+            pcpu->user_ticks++;
+        } else {
+            pcpu->system_ticks++;
+        }
+    }
+
     if (current_process && current_process->pid != -1 && !current_process->is_kernel_task) {
         /* CPU accounting: charge this tick to user or system time of
          * the running process.  utime/stime are uint32_t in HZ ticks
