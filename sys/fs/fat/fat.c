@@ -1010,8 +1010,25 @@ static size_t fat_file_write(fs_node_t *node, off_t offset, size_t size, const u
         uint32_t nc = fat_alloc_cluster(fs);
         if (nc == 0) return 0;
         ctx->first_cluster = nc;
+        uint64_t old_inode = node->inode;
         node->inode = nc;
-        /* TODO: update directory entry cluster fields */
+
+        if ((old_inode & FAT_SYNTH_INO_BASE) == FAT_SYNTH_INO_BASE) {
+            uint32_t slot = (uint32_t)(old_inode & ~FAT_SYNTH_INO_BASE);
+            uint32_t sector = slot >> 16;
+            uint32_t entry_off = (slot & 0xFFFF) * sizeof(fat_dirent_t);
+
+            uint8_t *sector_buf = kmalloc(fs->bpb.bytes_per_sector);
+            if (sector_buf) {
+                if (fat_read_sectors(fs, sector, 1, sector_buf) == 0) {
+                    fat_dirent_t *de = (fat_dirent_t *)(sector_buf + entry_off);
+                    de->cluster_high = (uint16_t)(nc >> 16);
+                    de->cluster_low  = (uint16_t)(nc & 0xFFFF);
+                    fat_write_sectors(fs, sector, 1, sector_buf);
+                }
+                kfree(sector_buf, fs->bpb.bytes_per_sector);
+            }
+        }
     }
 
     /* Walk chain, extending as needed */
