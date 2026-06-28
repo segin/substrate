@@ -627,8 +627,7 @@ static void afunix_node_close(fs_node_t *node) {
     sleepq_wake_all(s->accept_chan);
     sleepq_wake_all(s->connect_chan);
     mutex_unlock(&s->lock);
-    /* TODO: kfree(s) when refcount reaches 0 AND no waiters.  For
-     * now leak the struct so a stray waiter can't UAF.  Small N. */
+    kfree(s, sizeof(*s));
 }
 
 /*
