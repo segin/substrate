@@ -232,20 +232,20 @@ static void print_row(const struct row *r)
 			snprintf(b, sizeof b, "%llu", (unsigned long long)r->iused);
 			snprintf(c, sizeof c, "%llu", (unsigned long long)r->ifree);
 		} else {
-			strcpy(a, "-"); strcpy(b, "-"); strcpy(c, "-");
+			strlcpy(a, "-", sizeof a); strlcpy(b, "-", sizeof b); strlcpy(c, "-", sizeof c);
 		}
 		if (r->have && r->inodes > 0) snprintf(cap, sizeof cap, "%u%%", r->icap);
-		else                          strcpy(cap, "-");
+		else                          strlcpy(cap, "-", sizeof cap);
 	} else {
 		if (r->have) {
 			fmt_blocks(r->blocks, r->bsize, a, sizeof a);
 			fmt_blocks(r->used,   r->bsize, b, sizeof b);
 			fmt_blocks(r->avail,  r->bsize, c, sizeof c);
 		} else {
-			strcpy(a, "-"); strcpy(b, "-"); strcpy(c, "-");
+			strlcpy(a, "-", sizeof a); strlcpy(b, "-", sizeof b); strlcpy(c, "-", sizeof c);
 		}
 		if (r->have && r->blocks > 0) snprintf(cap, sizeof cap, "%u%%", r->cap);
-		else                          strcpy(cap, "-");
+		else                          strlcpy(cap, "-", sizeof cap);
 	}
 
 	if (opt_T)
