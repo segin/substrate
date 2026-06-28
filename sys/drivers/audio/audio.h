@@ -14,6 +14,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <sys/types.h>
 #include <sys/audioio.h>
 
 #define AUDIO_MAX_DEVICES        4
@@ -79,6 +80,18 @@ typedef struct audio_dev_ops {
 	 * Return the AUDIO_PROP_* bitmap for this backend.
 	 */
 	int (*get_props)(struct audio_dev *dev);
+
+	/*
+	 * Optional: map the backend's playback DMA buffer into the calling
+	 * process for zero-copy (OSS/SADA-style) mmap playback.  Mirrors the
+	 * fs_node_t.mmap contract: returns the user virtual address on success
+	 * or (void *)-1 on failure.  Backends that implement this typically
+	 * switch into a continuous-loop DMA mode where the controller cycles
+	 * the whole buffer and plays whatever userspace writes into the
+	 * mapping, bypassing the write()/FIFO path.
+	 */
+	void *(*mmap)(struct audio_dev *dev, void *addr, size_t length,
+		      int prot, int flags, off_t offset);
 } audio_dev_ops_t;
 
 typedef struct audio_dev {

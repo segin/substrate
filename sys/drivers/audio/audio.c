@@ -443,6 +443,17 @@ static int audio_node_ioctl(fs_node_t *node, uint32_t request, void *arg)
 	return audio_ioctl_dispatch(dev, request, arg);
 }
 
+static void *audio_node_mmap(fs_node_t *node, void *addr, size_t length,
+			     int prot, int flags, off_t offset)
+{
+	audio_dev_t *dev = audio_dev_for_node(node);
+
+	if (dev == NULL || dev->ops == NULL || dev->ops->mmap == NULL) {
+		return (void *)-1;
+	}
+	return dev->ops->mmap(dev, addr, length, prot, flags, offset);
+}
+
 static void audio_node_open(fs_node_t *node)
 {
 	audio_dev_t *dev = audio_dev_for_node(node);
@@ -547,6 +558,7 @@ int audio_register_device(audio_dev_t *dev)
 	audio_n->read  = audio_node_read;
 	audio_n->write = audio_node_write;
 	audio_n->ioctl = audio_node_ioctl;
+	audio_n->mmap  = audio_node_mmap;
 	audio_n->open  = audio_node_open;
 	audio_n->close = audio_node_close;
 	audio_n->impl = (uintptr_t)dev;

@@ -22,6 +22,12 @@
 #include <sys/errno.h>
 #include <sys/irq.h>
 #include <sys/lock.h>
+#include <sys/mman.h>
+#include <sys/proc.h>
+#include <vm/vm_map.h>
+#include <vm/vm_object.h>
+#include <vm/vm_pager.h>
+#include <arch/i386/pmap.h>
 #include <arch/x86-common/io.h>
 #include <arch/i386/intr.h>
 #include <stdio.h>
@@ -112,6 +118,15 @@ typedef struct ac97_dev {
 	                               * rewriting CR every queue */
 
 	/*
+	 * Zero-copy mmap playback mode.  When a process mmap()s the chunk
+	 * pool, the whole BDL is armed as a circular ring over chunk_buf and
+	 * the bus master loops it continuously, playing whatever userspace
+	 * writes into the mapping.  The write()/software-FIFO path is gated
+	 * off while this is set so the two producers don't fight over the BDL.
+	 */
+	int             mmap_mode;
+
+	/*
 	 * Deep software PCM FIFO that decouples the write() producer from the
 	 * DMA-ring consumer.  write() appends here and blocks only when it
 	 * fills; the IRQ-driven feeder (ac97_feed) drains it into the BDL ring
@@ -185,6 +200,12 @@ static void ac97_bm_write32(ac97_dev_t *d, uint16_t reg, uint32_t val)
 static void ac97_feed(ac97_dev_t *d)
 {
 	if (d->chunk_buf == NULL || d->fifo_buf == NULL) {
+		return;
+	}
+	/* In mmap mode the BDL is a self-looping ring over the whole chunk
+	 * pool that userspace fills directly; the software-FIFO feeder must
+	 * not touch the BDL or it would corrupt the in-flight DMA ring. */
+	if (d->mmap_mode) {
 		return;
 	}
 	for (;;) {
@@ -304,6 +325,31 @@ static int ac97_irq_handler(unsigned int irq, void *dev_id, void *frame)
 	}
 	sr = ac97_bm_read16(d, AC97_BM_PO_BASE + AC97_BM_SR);
 	if (sr & (AC97_SR_BCIS | AC97_SR_LVBCI | AC97_SR_FIFOE)) {
+		/*
+		 * mmap mode: the whole chunk pool is a circular BDL ring that
+		 * userspace fills directly.  Keep LVI chasing one slot behind
+		 * the controller's current index so it never catches LVI and
+		 * halts (DCH) — the ring plays continuously.  If it did halt
+		 * (e.g. a long descheduled stretch), re-assert RPBM.
+		 */
+		if (d->mmap_mode) {
+			unsigned long f = spinlock_acquire_irq(&d->feed_lock);
+			uint8_t civ = inb((uint16_t)(d->nabmbar +
+			              AC97_BM_PO_BASE + AC97_BM_CIV));
+			uint8_t n = (uint8_t)d->chunk_count;
+			d->lvi = (uint8_t)((civ + n - 1U) % n);
+			ac97_bm_write8(d, AC97_BM_PO_BASE + AC97_BM_LVI,
+			               d->lvi);
+			if (sr & AC97_SR_DCH) {
+				ac97_bm_write8(d, AC97_BM_PO_BASE + AC97_BM_CR,
+				               AC97_CR_RPBM | AC97_CR_IOCE);
+			}
+			ac97_bm_write16(d, AC97_BM_PO_BASE + AC97_BM_SR,
+			                sr & (AC97_SR_BCIS | AC97_SR_LVBCI |
+			                      AC97_SR_FIFOE));
+			spinlock_release_irq(&d->feed_lock, f);
+			return 1;
+		}
 		/* Ack the latched status bits.  BCIS fires once per BDL slot
 		 * with IOC=1; track it as our "slot drained" event so the
 		 * write path's back-pressure can release. */
@@ -361,6 +407,7 @@ static int ac97_close(audio_dev_t *adev)
 	d->next_idx      = 0;
 	d->lvi           = 0;
 	d->running       = 0;
+	d->mmap_mode     = 0;
 	audio_fifo_reset(&d->fifo);
 	return 0;
 }
@@ -413,6 +460,16 @@ static int ac97_write(audio_dev_t *adev, const void *buf, size_t len)
 	size_t total_consumed = 0;
 
 	if (len == 0 || d->chunk_buf == NULL || d->fifo_buf == NULL) {
+		return (int)len;
+	}
+
+	/*
+	 * In mmap mode the controller loops the chunk pool autonomously and
+	 * userspace feeds it through the mapping; the write()/FIFO path is
+	 * disabled so the two producers don't fight over the BDL ring.  Treat
+	 * a write() as a no-op that consumes the buffer.
+	 */
+	if (d->mmap_mode) {
 		return (int)len;
 	}
 
@@ -485,6 +542,7 @@ static int ac97_flush(audio_dev_t *adev)
 	d->writes_queued = 0;
 	d->slots_played  = 0;
 	d->running       = 0;
+	d->mmap_mode     = 0;
 	audio_fifo_reset(&d->fifo);
 	return 0;
 }
@@ -505,7 +563,130 @@ static int ac97_get_props(audio_dev_t *adev)
 {
 	(void)adev;
 	return AUDIO_PROP_PLAYBACK | AUDIO_PROP_CAPTURE |
-	       AUDIO_PROP_FULLDUPLEX | AUDIO_PROP_INDEPENDENT;
+	       AUDIO_PROP_FULLDUPLEX | AUDIO_PROP_INDEPENDENT |
+	       AUDIO_PROP_MMAP;
+}
+
+/*
+ * Zero-copy playback: map the contiguous chunk pool (chunk_count *
+ * AC97_CHUNK_BYTES) into the calling process and arm the whole BDL as a
+ * circular ring over it.  The bus master then loops the ring continuously,
+ * playing whatever userspace writes into the mapping (OSS/SADA mmap model).
+ *
+ * The mapping MUST be coherent/uncached (NOT write-combining): the DMA engine
+ * reads it concurrently with the CPU's stores, so WC's deferred/reordered
+ * write buffer would let the controller fetch stale samples.  We therefore
+ * leave the device pager at its default uncached cache mode (unlike the
+ * framebuffer, which opts into WC).
+ */
+static void *ac97_mmap(audio_dev_t *adev, void *addr, size_t length,
+		       int prot, int flags, off_t offset)
+{
+	ac97_dev_t *d = adev->driver_data;
+	vm_object_t *obj;
+	vm_map_t *map;
+	uintptr_t virt = (uintptr_t)addr;
+	uint64_t pool_size;
+	size_t aligned_length;
+	uint32_t vm_prot = 0;
+	unsigned long f;
+	uint8_t i;
+
+	if (d->chunk_buf == NULL || d->chunk_count == 0) {
+		return (void *)-1;
+	}
+	pool_size = (uint64_t)d->chunk_count * (uint64_t)AC97_CHUNK_BYTES;
+
+	if (offset < 0 || length == 0) return (void *)-1;
+	if ((uint64_t)offset > pool_size) return (void *)-1;
+	if ((uint64_t)length > pool_size - (uint64_t)offset) return (void *)-1;
+	if ((offset & 0xFFF) != 0) return (void *)-1;
+
+	aligned_length = (length + 0xFFF) & ~0xFFFU;
+	if (current_process == NULL) return (void *)-1;
+	map = current_process->vm_map;
+	if (map == NULL) return (void *)-1;
+
+	if (virt == 0 || !(flags & MAP_FIXED)) {
+		if (vm_map_find_space(map, &virt, aligned_length) != 0)
+			return (void *)-1;
+	} else {
+		if ((virt & 0xFFF) != 0) return (void *)-1;
+		if (vm_map_remove(map, virt, virt + aligned_length) != 0)
+			return (void *)-1;
+	}
+
+	if (prot & VM_PROT_READ)  vm_prot |= VM_PROT_READ;
+	if (prot & VM_PROT_WRITE) vm_prot |= VM_PROT_WRITE;
+	if (prot & VM_PROT_EXEC)  vm_prot |= VM_PROT_EXEC;
+	vm_prot |= VM_PROT_USER;
+
+	obj = vm_object_allocate(VM_OBJ_TYPE_DEVICE, aligned_length);
+	if (obj == NULL) return (void *)-1;
+	obj->pager = vm_pager_allocate(VM_OBJ_TYPE_DEVICE,
+	                               (void *)((uintptr_t)d->chunk_phys +
+	                                        (uintptr_t)offset),
+	                               aligned_length, (uint8_t)vm_prot, 0);
+	if (obj->pager == NULL) {
+		vm_object_deallocate(obj);
+		return (void *)-1;
+	}
+	/* Deliberately NOT VM_PAGER_CACHE_WC: audio DMA needs the mapping to
+	 * be coherent/uncached so the BM never reads stale samples. */
+	if (vm_map_insert(map, obj, 0, virt, virt + aligned_length,
+	                  (uint8_t)vm_prot, (uint8_t)vm_prot,
+	                  VM_INHERIT_NONE) != 0) {
+		vm_object_deallocate(obj);
+		return (void *)-1;
+	}
+
+	/*
+	 * Arm the whole BDL as a circular ring over the chunk pool and start
+	 * the bus master.  Done under feed_lock (IRQ-masked) so the IRQ
+	 * handler's mmap re-arm path can't race the initial program.
+	 */
+	f = spinlock_acquire_irq(&d->feed_lock);
+
+	/* Reset the PCM-out engine and clear any latched status. */
+	ac97_bm_write8(d, AC97_BM_PO_BASE + AC97_BM_CR, AC97_CR_RR);
+	for (int spin = 0; spin < 100000; spin++) {
+		uint8_t cr = inb((uint16_t)(d->nabmbar +
+		             AC97_BM_PO_BASE + AC97_BM_CR));
+		if ((cr & AC97_CR_RR) == 0) break;
+	}
+	ac97_bm_write16(d, AC97_BM_PO_BASE + AC97_BM_SR,
+	                AC97_SR_BCIS | AC97_SR_LVBCI | AC97_SR_FIFOE);
+
+	/* Program every BDL slot to a successive chunk, IOC set so each
+	 * completion raises BCIS (where we re-chase LVI to keep looping). */
+	for (i = 0; i < (uint8_t)d->chunk_count; i++) {
+		ac97_build_bdl_entry(&d->bdl[i],
+		                     (uint32_t)d->chunk_phys +
+		                     (uint32_t)i * AC97_CHUNK_BYTES,
+		                     (uint16_t)(AC97_CHUNK_BYTES / 2),
+		                     1 /* IOC */);
+		/* BUP: emit silence rather than hard-halt if the BM ever
+		 * outruns LVI before the IRQ re-chases it. */
+		d->bdl[i].flags |= AC97_BDL_F_BUP;
+	}
+	d->lvi      = (uint8_t)(d->chunk_count - 1U);
+	d->next_idx = 0;
+	d->writes_queued = 0;
+	d->slots_played  = 0;
+	d->mmap_mode = 1;
+	d->running   = 1;
+
+	/* BDL must be visible before BDBAR/LVI point the engine at it. */
+	__sync_synchronize();
+	ac97_bm_write32(d, AC97_BM_PO_BASE + AC97_BM_BDBAR,
+	                (uint32_t)d->bdl_phys);
+	ac97_bm_write8(d, AC97_BM_PO_BASE + AC97_BM_LVI, d->lvi);
+	ac97_bm_write8(d, AC97_BM_PO_BASE + AC97_BM_CR,
+	               AC97_CR_RPBM | AC97_CR_IOCE);
+
+	spinlock_release_irq(&d->feed_lock, f);
+
+	return (void *)virt;
 }
 
 static audio_dev_ops_t ac97_ops = {
@@ -518,6 +699,7 @@ static audio_dev_ops_t ac97_ops = {
 	.flush       = ac97_flush,
 	.get_devinfo = ac97_get_devinfo,
 	.get_props   = ac97_get_props,
+	.mmap        = ac97_mmap,
 };
 
 /* ------------------------------------------------------------------- */
