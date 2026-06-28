@@ -1,5 +1,7 @@
 #include <assert.h>
 #include <fcntl.h>
+
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 #include <locale.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -112,12 +114,14 @@ static int run_ls_capture(const ls_config_t *cfg, char **paths, int npaths,
         tmpbase = "/tmp";
     }
 
-    out_tpl = (char *)malloc(strlen(tmpbase) + 1 + strlen("ls_out_XXXXXX") + 1);
-    err_tpl = (char *)malloc(strlen(tmpbase) + 1 + strlen("ls_err_XXXXXX") + 1);
+    size_t out_tpl_sz = strlen(tmpbase) + 1 + strlen("ls_out_XXXXXX") + 1;
+    size_t err_tpl_sz = strlen(tmpbase) + 1 + strlen("ls_err_XXXXXX") + 1;
+    out_tpl = (char *)malloc(out_tpl_sz);
+    err_tpl = (char *)malloc(err_tpl_sz);
     assert(out_tpl != NULL && err_tpl != NULL);
 
-    sprintf(out_tpl, "%s/%s", tmpbase, "ls_out_XXXXXX");
-    sprintf(err_tpl, "%s/%s", tmpbase, "ls_err_XXXXXX");
+    snprintf(out_tpl, out_tpl_sz, "%s/%s", tmpbase, "ls_out_XXXXXX");
+    snprintf(err_tpl, err_tpl_sz, "%s/%s", tmpbase, "ls_err_XXXXXX");
 
     out_fd = mkstemp(out_tpl);
     err_fd = mkstemp(err_tpl);
@@ -837,9 +841,10 @@ static void test_recursive_one_file_system(void) {
     assert(run_ls_capture(&cfg, argv, 1, &out, &err) == LS_EXIT_OK);
     assert(strstr(out, "local:") != NULL);
 
-    foreign_hdr = (char *)malloc(strlen(foreign) + 3);
+    size_t foreign_hdr_sz = strlen(foreign) + 3;
+    foreign_hdr = (char *)malloc(foreign_hdr_sz);
     assert(foreign_hdr != NULL);
-    sprintf(foreign_hdr, "%s:\n", foreign);
+    snprintf(foreign_hdr, foreign_hdr_sz, "%s:\n", foreign);
     assert(strstr(out, foreign_hdr) == NULL);
     free(foreign_hdr);
 

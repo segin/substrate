@@ -5,6 +5,8 @@
  */
 
 #include <kern/console.h>
+
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 #include <drivers/storage/scsi/scsi.h>
 #include <stdio.h>
 #include <string.h>
@@ -100,7 +102,7 @@ void test_scsi(void) {
             kprint("PASS: CDB READ(10) big-endian\n");
             pass++;
         } else {
-            sprintf(buf, "FAIL: CDB READ(10) [%02x %02x %02x %02x %02x %02x]\n",
+            snprintf(buf, sizeof(buf), "FAIL: CDB READ(10) [%02x %02x %02x %02x %02x %02x]\n",
                     cdb[2], cdb[3], cdb[4], cdb[5], cdb[7], cdb[8]);
             kprint(buf);
             fail++;
@@ -136,7 +138,7 @@ void test_scsi(void) {
             kprint("PASS: scsi_be16/be32\n");
             pass++;
         } else {
-            sprintf(buf, "FAIL: scsi_be16=%04x scsi_be32=%08x\n", v16, (unsigned)v32);
+            snprintf(buf, sizeof(buf), "FAIL: scsi_be16=%04x scsi_be32=%08x\n", v16, (unsigned)v32);
             kprint(buf);
             fail++;
         }
@@ -259,7 +261,7 @@ void test_scsi(void) {
             kprint("PASS: scsi_device_register duplicate detection\n");
             pass++;
         } else {
-            sprintf(buf, "FAIL: duplicate register ret1=%d ret2=%d\n", ret1, ret2);
+            snprintf(buf, sizeof(buf), "FAIL: duplicate register ret1=%d ret2=%d\n", ret1, ret2);
             kprint(buf);
             fail++;
         }
@@ -283,7 +285,7 @@ void test_scsi(void) {
             sense[2] = (uint8_t)expected;
             if (scsi_sense_key(sense, sizeof(sense)) != expected) {
                 keys_ok = 0;
-                sprintf(buf, "FAIL: sense key decode expected=%d got=%d\n",
+                snprintf(buf, sizeof(buf), "FAIL: sense key decode expected=%d got=%d\n",
                         expected, scsi_sense_key(sense, sizeof(sense)));
                 kprint(buf);
                 break;
@@ -296,7 +298,7 @@ void test_scsi(void) {
             kprint("PASS: Sense parsing (fixed format)\n");
             pass++;
         } else if (keys_ok) {
-            sprintf(buf, "FAIL: Sense parsing key=%d asc=%02x ascq=%02x\n", key, asc, ascq);
+            snprintf(buf, sizeof(buf), "FAIL: Sense parsing key=%d asc=%02x ascq=%02x\n", key, asc, ascq);
             kprint(buf);
             fail++;
         } else {
@@ -319,17 +321,17 @@ void test_scsi(void) {
 
         int ok = 1;
         if (strcmp(str1, "Medium Error") != 0) {
-            sprintf(buf, "FAIL: scsi_sense_string(key=3, 0, 0) returned '%s'\n", str1);
+            snprintf(buf, sizeof(buf), "FAIL: scsi_sense_string(key=3, 0, 0) returned '%s'\n", str1);
             kprint(buf);
             ok = 0;
         }
         if (strcmp(str2, "Invalid field in CDB") != 0) {
-            sprintf(buf, "FAIL: scsi_sense_string(key=5, 0x24, 0) returned '%s'\n", str2);
+            snprintf(buf, sizeof(buf), "FAIL: scsi_sense_string(key=5, 0x24, 0) returned '%s'\n", str2);
             kprint(buf);
             ok = 0;
         }
         if (strcmp(str3, "Power on, reset, or bus device reset occurred") != 0) {
-            sprintf(buf, "FAIL: scsi_sense_string(key=6, 0x29, 0) returned '%s'\n", str3);
+            snprintf(buf, sizeof(buf), "FAIL: scsi_sense_string(key=6, 0x29, 0) returned '%s'\n", str3);
             kprint(buf);
             ok = 0;
         }
@@ -354,7 +356,7 @@ void test_scsi(void) {
             reqs[i] = scsi_request_alloc();
             if (reqs[i] == NULL) {
                 ok = 0;
-                sprintf(buf, "FAIL: request alloc returned NULL at slot %d\n", i);
+                snprintf(buf, sizeof(buf), "FAIL: request alloc returned NULL at slot %d\n", i);
                 kprint(buf);
                 break;
             }
@@ -410,7 +412,7 @@ void test_scsi(void) {
             kprint("PASS: scsi_execute_sync\n");
             pass++;
         } else {
-            sprintf(buf, "FAIL: scsi_execute_sync ret=%d calls=%d\n", ret, mock_execute_calls);
+            snprintf(buf, sizeof(buf), "FAIL: scsi_execute_sync ret=%d calls=%d\n", ret, mock_execute_calls);
             kprint(buf);
             fail++;
         }
@@ -420,7 +422,7 @@ void test_scsi(void) {
     }
     
     /* Summary */
-    sprintf(buf, "=== SCSI Tests: %d passed, %d failed ===\n", pass, fail);
+    snprintf(buf, sizeof(buf), "=== SCSI Tests: %d passed, %d failed ===\n", pass, fail);
     kprint(buf);
 }
 

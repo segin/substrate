@@ -6,6 +6,8 @@
  */
 
 #include <stdint.h>
+
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 #include <stdio.h>
 #include <kern/console.h>
 
@@ -195,6 +197,6 @@ void test_pte_user(void) {
     test_specific_addresses();
     
     char buf[64];
-    sprintf(buf, "PTE_USER tests: %d passed, %d failed\n", tests_passed, tests_failed);
+    snprintf(buf, sizeof(buf), "PTE_USER tests: %d passed, %d failed\n", tests_passed, tests_failed);
     kprint(buf);
 }

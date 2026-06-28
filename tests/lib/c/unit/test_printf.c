@@ -5,6 +5,7 @@
 // test binary calls Substrate libc routines (e.g. mys_sprintf) without
 // colliding with host glibc.
 
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

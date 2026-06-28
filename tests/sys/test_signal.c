@@ -1,5 +1,7 @@
 #include <sys/types.h>
 #include <sys/signal.h>
+
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 #include <sys/proc.h>
 #include <kern/sched.h>
 #include <kern/console.h>
@@ -34,14 +36,14 @@ static int test_sys_kill_errors(void) {
     // 1. Invalid signal number
     int ret = sys_kill(1, -1);
     if (ret != -EINVAL) {
-        sprintf(buf, "FAIL: sys_kill(-1) returned %d, expected %d (-EINVAL)\n", ret, -EINVAL);
+        snprintf(buf, sizeof(buf), "FAIL: sys_kill(-1) returned %d, expected %d (-EINVAL)\n", ret, -EINVAL);
         kprint(buf);
         return -1;
     }
 
     ret = sys_kill(1, NSIG + 1);
     if (ret != -EINVAL) {
-        sprintf(buf, "FAIL: sys_kill(NSIG+1) returned %d, expected %d (-EINVAL)\n", ret, -EINVAL);
+        snprintf(buf, sizeof(buf), "FAIL: sys_kill(NSIG+1) returned %d, expected %d (-EINVAL)\n", ret, -EINVAL);
         kprint(buf);
         return -1;
     }
@@ -50,7 +52,7 @@ static int test_sys_kill_errors(void) {
     // Use a large PID unlikely to exist
     ret = sys_kill(9999, 0);
     if (ret != -ESRCH) {
-        sprintf(buf, "FAIL: sys_kill(9999) returned %d, expected %d (-ESRCH)\n", ret, -ESRCH);
+        snprintf(buf, sizeof(buf), "FAIL: sys_kill(9999) returned %d, expected %d (-ESRCH)\n", ret, -ESRCH);
         kprint(buf);
         return -1;
     }

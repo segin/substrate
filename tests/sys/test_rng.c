@@ -1,5 +1,7 @@
 #include <sys/random.h>
 #include <kern/console.h>
+
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 #include <string.h>
 #include <stdio.h>
 
@@ -39,7 +41,7 @@ void run_rng_tests(void) {
     
     // Dump first few bytes for visual inspection
     char msg[128];
-    sprintf(msg, "INFO: Random bytes: %02X %02X %02X %02X ...\n", 
+    snprintf(msg, sizeof(msg), "INFO: Random bytes: %02X %02X %02X %02X ...\n",
             buf1[0], buf1[1], buf1[2], buf1[3]);
     kprint(msg);
 

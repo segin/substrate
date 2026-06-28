@@ -1,8 +1,11 @@
 #include <stdint.h>
 #include <arch/i386/pmap.h>
+
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 #include <kern/console.h>
 #include "tests.h"
 #include <string.h>
+extern int snprintf(char *str, size_t size, const char *format, ...);
 
 // Hardware Mapping Unit Test
 void test_pmap_hw_mappings(void) {
@@ -16,8 +19,8 @@ void test_pmap_hw_mappings(void) {
         kprint("  LAPIC Identity Mapping: PASS\n");
     } else {
         char buf[64];
-        extern int sprintf(char *str, const char *format, ...);
-        sprintf(buf, "  LAPIC Identity Mapping: FAIL (Ex: %08x)\n", extracted_pa);
+
+        snprintf(buf, sizeof(buf), "  LAPIC Identity Mapping: FAIL (Ex: %08x)\n", extracted_pa);
         kprint(buf);
     }
 }
@@ -40,8 +43,8 @@ void property_pmap_kernel_consistency(void) {
         kprint("  Kernel 0-4MB Identity: PASS\n");
     } else {
         char buf[64];
-        extern int sprintf(char *str, const char *format, ...);
-        sprintf(buf, "  Kernel 0-4MB Identity: FAIL (%d errors)\n", leaks);
+
+        snprintf(buf, sizeof(buf), "  Kernel 0-4MB Identity: FAIL (%d errors)\n", leaks);
         kprint(buf);
     }
 }
@@ -72,8 +75,8 @@ void fuzz_pmap_enter(void) {
             pmap_enter(pmap, va, pa, VM_PROT_READ | VM_PROT_WRITE, 0);
             if (pmap_extract(pmap, va) != pa) {
                 char buf[64];
-                extern int sprintf(char *str, const char *format, ...);
-                sprintf(buf, "  Fuzzing FAIL: VA %08x PA %08x\n", va, pa);
+
+                snprintf(buf, sizeof(buf), "  Fuzzing FAIL: VA %08x PA %08x\n", va, pa);
                 kprint(buf);
             }
         }

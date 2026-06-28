@@ -1,5 +1,7 @@
 #include <stdio.h>
 #include <string.h>
+
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 #include <assert.h>
 #include <stdlib.h>
 #include <time.h>
@@ -52,9 +54,9 @@ void property_test_random_strings() {
     
     for (int i = 0; i < 100; i++) {
         // Generate random key/value
-        sprintf(key, "k%d", rand() % 100);
-        sprintf(val, "v%d", rand() % 100);
-        sprintf(cmd, "junk=1 %s=%s other=2", key, val);
+        snprintf(key, sizeof(key), "k%d", rand() % 100);
+        snprintf(val, sizeof(val), "v%d", rand() % 100);
+        snprintf(cmd, sizeof(cmd), "junk=1 %s=%s other=2", key, val);
         
         cmdline_init(cmd);
         

@@ -2,6 +2,8 @@
  * test_pmm_buddy.c - Unit tests for PMM buddy arithmetic helpers
  */
 #include <stdio.h>
+
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 #include <stdint.h>
 #include <kern/console.h>
 
@@ -85,6 +87,6 @@ void test_pmm_buddy(void) {
     test_split_logic();
 
     char buf[64];
-    sprintf(buf, "=== pmm_buddy tests: %d passed, %d failed ===\n", passed, failed);
+    snprintf(buf, sizeof(buf), "=== pmm_buddy tests: %d passed, %d failed ===\n", passed, failed);
     kprint(buf);
 }

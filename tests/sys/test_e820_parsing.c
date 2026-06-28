@@ -8,6 +8,8 @@
  * - Empty map handling
  */
 #include <stdio.h>
+
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 #include <stdint.h>
 #include <kern/console.h>
 #include <arch/i386/pmm.h>
@@ -212,6 +214,6 @@ void test_e820_parsing(void) {
     test_e820_mixed_types();
     
     char buf[64];
-    sprintf(buf, "=== e820 tests: %d passed, %d failed ===\n", passed, failed);
+    snprintf(buf, sizeof(buf), "=== e820 tests: %d passed, %d failed ===\n", passed, failed);
     kprint(buf);
 }

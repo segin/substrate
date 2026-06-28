@@ -8,6 +8,8 @@
  * - Double-free protection
  */
 #include <stdio.h>
+
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 #include <stdint.h>
 #include <kern/console.h>
 #include <arch/i386/pmm.h>
@@ -511,7 +513,7 @@ void test_vm_phys(void) {
     test_vm_phys_add_range();
     
     char buf[64];
-    sprintf(buf, "=== vm_phys tests: %d passed, %d failed ===\n", passed, failed);
+    snprintf(buf, sizeof(buf), "=== vm_phys tests: %d passed, %d failed ===\n", passed, failed);
     kprint(buf);
 }
 

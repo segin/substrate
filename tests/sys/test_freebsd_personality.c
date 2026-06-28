@@ -1,5 +1,7 @@
 #include <exec/perso/personality.h>
 #include <exec/perso/freebsd/freebsd_syscalls.h>
+
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 #include <sys/syscall_impl.h>
 #include <kern/console.h>
 #include <stdio.h>
@@ -31,7 +33,7 @@ void test_freebsd_personality(void) {
     freebsd = perso_lookup(PERS_FREEBSD);
     test_assert(freebsd != NULL, "FreeBSD personality lookup succeeds");
     if (!freebsd) {
-        sprintf(buf, "FreeBSD personality tests: %d passed, %d failed\n",
+        snprintf(buf, sizeof(buf), "FreeBSD personality tests: %d passed, %d failed\n",
                 tests_passed, tests_failed);
         kprint(buf);
         return;
@@ -48,7 +50,7 @@ void test_freebsd_personality(void) {
                     freebsd->syscall_fmts[FREEBSD_SYS_getrandom].arg_types[2] == ARG_HEX,
                 "FreeBSD getrandom trace format matches ABI");
 
-    sprintf(buf, "FreeBSD personality tests: %d passed, %d failed\n",
+    snprintf(buf, sizeof(buf), "FreeBSD personality tests: %d passed, %d failed\n",
             tests_passed, tests_failed);
     kprint(buf);
 }

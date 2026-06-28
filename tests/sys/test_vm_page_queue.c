@@ -9,6 +9,8 @@
  * - Eviction candidate detection
  */
 #include <stdio.h>
+
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 #include <stdint.h>
 #include <string.h>
 #include <kern/console.h>
@@ -524,6 +526,6 @@ void test_vm_page_queue(void) {
     test_vm_page_late_init();
     
     char buf[64];
-    sprintf(buf, "=== vm_page tests: %d passed, %d failed ===\n", passed, failed);
+    snprintf(buf, sizeof(buf), "=== vm_page tests: %d passed, %d failed ===\n", passed, failed);
     kprint(buf);
 }

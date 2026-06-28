@@ -5,6 +5,8 @@
  */
 
 #include <stdint.h>
+
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 #include <stdio.h>
 #include <kern/console.h>
 #include <kern/stacktrace.h>
@@ -99,6 +101,6 @@ void test_stacktrace(void) {
     test_stack_trace_from_regs();
     
     char buf[64];
-    sprintf(buf, "\nStack trace tests: %d passed, %d failed\n", tests_passed, tests_failed);
+    snprintf(buf, sizeof(buf), "\nStack trace tests: %d passed, %d failed\n", tests_passed, tests_failed);
     kprint(buf);
 }

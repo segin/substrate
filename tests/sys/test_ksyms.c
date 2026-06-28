@@ -3,6 +3,8 @@
  */
 
 #include <stdint.h>
+
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 #include <stdio.h>
 #include <string.h>
 #include <kern/console.h>
@@ -93,6 +95,6 @@ void test_ksyms(void) {
     test_ksym_unknown();
     
     char buf[64];
-    sprintf(buf, "\nKernel symbol tests: %d passed, %d failed\n", tests_passed, tests_failed);
+    snprintf(buf, sizeof(buf), "\nKernel symbol tests: %d passed, %d failed\n", tests_passed, tests_failed);
     kprint(buf);
 }
