@@ -148,10 +148,19 @@ int sys_vm_slabs(sys_slabinfo_t *slabs, size_t *count) {
  * CPU Information API
  * =========================================================== */
 int sys_cpu_count(void) {
-    /* TODO: read /proc/cpuinfo and count processor entries.  Substrate
-     * exposes a single CPU today; SMP support lands per-CPU stats
-     * via /proc/stat. */
-    return 1;
+    FILE *f = fopen("/proc/cpuinfo", "r");
+    if (!f) return 1; /* Fallback to 1 if procfs is unavailable */
+
+    int count = 0;
+    char line[256];
+    while (fgets(line, sizeof(line), f)) {
+        if (strncmp(line, "processor", 9) == 0) {
+            count++;
+        }
+    }
+    fclose(f);
+
+    return count > 0 ? count : 1;
 }
 
 int sys_cpu_info(int cpu, sys_cpuinfo_t *info) {

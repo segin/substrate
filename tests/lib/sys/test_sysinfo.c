@@ -157,6 +157,11 @@ static void test_stubs_dont_crash(void) {
     if (n != 0) FAIL("disk_list left count non-zero on failure");
 }
 
+static void test_cpu_count(void) {
+    int count = sys_cpu_count();
+    if (count <= 0) FAIL("cpu_count <= 0");
+}
+
 int main(void) {
     printf("test_sysinfo: starting\n");
     test_uptime();
@@ -169,6 +174,7 @@ int main(void) {
     test_cpu_info();
     test_hostname();
     test_stubs_dont_crash();
+    test_cpu_count();
     if (g_failures == 0) {
         printf("test_sysinfo: PASS\n");
         return 0;
