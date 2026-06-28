@@ -7,7 +7,9 @@
 #include <arch/i386/percpu.h>
 #include <arch/i386/pmap.h>
 
-process_t processes[MAX_PROCS];
+/* Kernel allocates procs dynamically now; this is a scratch fixture. */
+#define NTEST_PROCS 64
+process_t processes[NTEST_PROCS];
 process_t *current_process;
 thread_t *current_thread;
 fs_node_t *fs_root;
@@ -35,7 +37,7 @@ void ldt_activate(process_t *proc) { last_ldt_proc = proc; }
 void pmap_activate(pmap_t pmap) { last_pmap = pmap; }
 void switch_to(thread_t *prev, thread_t *next) { switched_prev = prev; switched_next = next; }
 void set_kernel_stack(uint32_t stack) { (void)stack; }
-uint32_t get_time(void) { return 0; }
+time_t get_time(void) { return 0; }
 thread_t *sched_alloc_thread(process_t *proc) { static thread_t t; memset(&t, 0, sizeof(t)); t.proc = proc; return &t; }
 void sched_init_generic(void) {}
 void sched_smp_init(int cpus) { (void)cpus; }
@@ -43,6 +45,11 @@ void sched_yield(void) {}
 void *pmm_alloc_contiguous(size_t pages) { (void)pages; return (void *)0x00100000U; }
 void fork_child_return(void) {}
 pmap_t pmap_kernel(void) { return (pmap_t)0xCAFEB000U; }
+process_t *kernel_process;
+void i386_load_gs_for_thread(thread_t *t) { (void)t; }
+process_t *proc_bootstrap_kernel(int pid, int perso_id) { (void)pid; (void)perso_id; return NULL; }
+void new_kernel_thread_trampoline(void) {}
+void new_user_thread_trampoline(void) {}
 
 #include "../../sys/arch/i386/sched.c"
 

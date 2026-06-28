@@ -3,6 +3,10 @@
 #include <stdio.h>
 #include <string.h>
 
+/* The stack-based ABI path in syscall_abi.h calls copyin; ELKS extracts
+ * args from registers and never reaches it, so a trivial stub suffices. */
+int copyin(const void *src, void *dst, size_t size) { memcpy(dst, src, size); return 0; }
+
 int main(void) {
     struct personality p;
     registers_t regs;

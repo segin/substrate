@@ -63,8 +63,17 @@ static void panic_serial_hex32(uint32_t v) {
 }
 
 static int panic_addr_is_kernel_text(uintptr_t va) {
+#ifdef HOST_TEST
+    /* Host unit tests have no kernel address space; never treat a host
+     * pointer as directly-readable kernel memory.  The raw memcpy() guarded
+     * by this predicate would otherwise fault intermittently on a garbage
+     * trap-frame esp that happens to land in the kernel range. */
+    (void)va;
+    return 0;
+#else
     /* Conservative: kernel virtual addresses live in [KERN_BASE, 0xFF000000). */
     return va >= KERN_BASE && va < 0xFF000000U;
+#endif
 }
 
 static void panic_dump_bytes_at(uintptr_t va, int is_user) {

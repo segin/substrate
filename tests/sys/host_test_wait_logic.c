@@ -10,10 +10,14 @@
 #include <arch/i386/pmap.h>
 #include <vm/vm_map.h>
 
-process_t processes[MAX_PROCS];
+/* Kernel allocates procs/threads dynamically now; these are scratch
+ * fixtures for the unit tests below. */
+#define NTEST_PROCS   64
+#define NTEST_THREADS 64
+process_t processes[NTEST_PROCS];
 process_t *current_process;
 thread_t *current_thread;
-thread_t threads[MAX_THREADS];
+thread_t threads[NTEST_THREADS];
 mutex_t proctree_lock;
 
 static process_t mock_parent;
@@ -58,15 +62,30 @@ void sched_reap_process_threads(process_t *proc) {
     (void)proc;
 }
 
-size_t sched_thread_slot_count(void) {
-    return MAX_THREADS;
+/* wait.c now enumerates threads via FOREACH_THREAD / thread_first /
+ * thread_next (the dynamic allthread list) instead of the old fixed
+ * sched_thread_slot() table.  Walk the live entries of the scratch
+ * threads[] array in slot order so the test fixtures still drive the
+ * reap logic. */
+thread_t *thread_first(void) {
+    for (int i = 0; i < NTEST_THREADS; i++) {
+        if (threads[i].tid != -1) {
+            return &threads[i];
+        }
+    }
+    return NULL;
 }
 
-thread_t *sched_thread_slot(size_t index) {
-    if (index >= MAX_THREADS) {
+thread_t *thread_next(thread_t *t) {
+    if (!t) {
         return NULL;
     }
-    return &threads[index];
+    for (int i = (int)(t - threads) + 1; i < NTEST_THREADS; i++) {
+        if (threads[i].tid != -1) {
+            return &threads[i];
+        }
+    }
+    return NULL;
 }
 
 void vm_map_destroy(vm_map_t *map) {
@@ -91,6 +110,15 @@ void ldt_free_process(process_t *proc) {
 void sched_sleep(void *chan) {
     (void)chan;
     sched_sleep_calls++;
+}
+
+/* The blocking wait path no longer calls sched_sleep(); it arms a
+ * deadline and calls sched_yield() in a recheck loop.  Drive the
+ * fixture state transitions from the yield hook so the same scenarios
+ * (child exits / a signal arrives while blocked) still exercise the
+ * loop. */
+void sched_yield(void) {
+    sched_sleep_calls++;
     if (sched_sleep_mode == 0) {
         if (mock_child2.pid == 102 && mock_child2.state == SRUN) {
             mock_child2.state = SZOMB;
@@ -98,6 +126,20 @@ void sched_sleep(void *chan) {
         }
     } else if (sched_sleep_mode == 1) {
         current_thread->sig_pending = sigmask(SIGUSR1);
+    }
+}
+
+uint64_t get_ticks(void) { return 0; }
+void procfs_release_pid_nodes(int pid) { (void)pid; }
+
+/* The reap path now calls proc_destroy() (which unlinks from allproc +
+ * pid_hash and frees the storage) instead of stamping pid = -1 in a
+ * static table.  For these static-fixture procs, mark the slot dead so
+ * the test can confirm the child was fully reaped. */
+void proc_destroy(process_t *p) {
+    if (p) {
+        p->pid = -1;
+        p->state = 0;
     }
 }
 
@@ -113,8 +155,8 @@ static void setup_mocks(void) {
     memset(&mock_pg2, 0, sizeof(mock_pg2));
     memset(&mock_thread, 0, sizeof(mock_thread));
 
-    for (int i = 0; i < MAX_PROCS; i++) processes[i].pid = -1;
-    for (int i = 0; i < MAX_THREADS; i++) threads[i].tid = -1;
+    for (int i = 0; i < NTEST_PROCS; i++) processes[i].pid = -1;
+    for (int i = 0; i < NTEST_THREADS; i++) threads[i].tid = -1;
 
     threads[0].tid = 1001;
     threads[0].proc = &mock_child1;

@@ -141,6 +141,11 @@ int copyin(const void *src, void *dst, size_t size) {
 #include <sys/proc.h>
 #include <vfs/vfs.h>
 #include <vm/vm_map.h> // for vm_map_create declaration
+#include <vm/vm_object.h> // for vm_object_* stubs
+#include <vm/vm_page.h>   // for vm_page_* stubs
+#include <vm/phys_mem.h>  // for vm_phys_paddr_to_page stub
+#include <arch/i386/idt.h> // for registers_t (ptrace_exec_stop)
+#include <exec/perso/personality.h> // for perso_lookup
 #include <arch/i386/pmap.h> // for pmap_t
 #include <exec/formats/elf.h> // For Elf32_Ehdr
 
@@ -265,6 +270,34 @@ pmap_t pmap_kernel(void) { return (pmap_t)0xCAFEBABE; }
 vm_map_t *vm_map_create(pmap_t pmap, uintptr_t min, uintptr_t max) { return NULL; }
 void vm_map_destroy(vm_map_t *map) {}
 
+// Stub VM object / page / pmap cleanup helpers added to elf.c.  The
+// happy-path TOCTOU test never exercises the file-backed mmap branch
+// these guard, so trivial stubs suffice.
+int vm_map_insert(vm_map_t *map, struct vm_object *obj, uint64_t offset,
+                  uintptr_t start, uintptr_t end, uint8_t prot,
+                  uint8_t max_prot, uint8_t inheritance) {
+    (void)map; (void)obj; (void)offset; (void)start; (void)end;
+    (void)prot; (void)max_prot; (void)inheritance;
+    return 0;
+}
+vm_object_t *vm_object_allocate(vm_object_type_t type, size_t size) {
+    (void)type; (void)size; return NULL;
+}
+void vm_object_deallocate(vm_object_t *object) { (void)object; }
+void vm_page_insert(vm_page_t *page, struct vm_object *object, uint64_t pindex) {
+    (void)page; (void)object; (void)pindex;
+}
+vm_page_t *vm_phys_paddr_to_page(uintptr_t pa) { (void)pa; return NULL; }
+vm_object_t *mmap_get_shared_backing_object(struct fs_node *node, size_t length,
+                                            uint32_t vm_prot, uint64_t offset) {
+    (void)node; (void)length; (void)vm_prot; (void)offset; return NULL;
+}
+void pmap_remove(pmap_t pmap, uintptr_t va) { (void)pmap; (void)va; }
+void pmm_free_block(void *p) { (void)p; }
+struct personality *perso_lookup(int id) { (void)id; return NULL; }
+void ptrace_exec_stop(struct registers *frame) { (void)frame; }
+int kprintf(const char *fmt, ...) { (void)fmt; return 0; }
+
 // Stub random
 int random_get_bytes(void *buf, size_t len) { return 0; }
 int random_get_bytes_flags(void *buf, size_t len, unsigned int flags) {
@@ -298,7 +331,8 @@ void pmap_destroy(pmap_t pmap) {
 }
 
 // Stub jump_to_userspace
-void jump_to_userspace(uint32_t entry, uint32_t stack) {
+void jump_to_userspace(uint32_t entry, uint32_t stack, uint32_t ebx) {
+    (void)ebx;
     // Verify that copyinstr was called exactly once for the attack string
     if (copyinstr_call_count != 1) {
         printf("FAILED: copyinstr called %d times for attack string, expected 1 (Single Pass)\n", copyinstr_call_count);
@@ -511,7 +545,7 @@ static void test_exec_setup_stack_uses_call_specific_execfn(void) {
 
     reset_host_mappings();
     assert(exec_setup_stack((pmap_t)0xDEADBEEF, &sp, argv_a, 1, NULL, 0,
-                            0x08048000u, 0, image.at_phdr, &image) == 0);
+                            0x08048000u, 0, image.at_phdr, &image, NULL) == 0);
     execfn_ptr = host_find_auxv_value(sp, AT_EXECFN);
     assert(execfn_ptr != 0);
     host_user_read_cstr(execfn_ptr, execfn, sizeof(execfn));
@@ -519,7 +553,7 @@ static void test_exec_setup_stack_uses_call_specific_execfn(void) {
 
     reset_host_mappings();
     assert(exec_setup_stack((pmap_t)0xDEADBEEF, &sp, argv_b, 1, NULL, 0,
-                            0x08048000u, 0, image.at_phdr, &image) == 0);
+                            0x08048000u, 0, image.at_phdr, &image, NULL) == 0);
     execfn_ptr = host_find_auxv_value(sp, AT_EXECFN);
     assert(execfn_ptr != 0);
     host_user_read_cstr(execfn_ptr, execfn, sizeof(execfn));
@@ -543,7 +577,7 @@ static void test_exec_setup_stack_linux_auxv_uses_main_entry(void) {
     assert(exec_setup_stack((pmap_t)0xDEADBEEF, &sp, argv, 1, NULL, 0,
                             0x080496e0u, 0x40000000u,
                             elf_runtime_phdr_addr(&image, ELF_ET_DYN_LOAD_BASE_I386),
-                            &image) == 0);
+                            &image, NULL) == 0);
     assert(host_find_auxv_value(sp, AT_ENTRY) == 0x080496e0u);
     assert(host_find_auxv_value(sp, AT_BASE) == 0x40000000u);
     assert(host_find_auxv_value(sp, AT_PHDR) == 0x08048034u);

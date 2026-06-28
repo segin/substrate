@@ -181,9 +181,6 @@ HOST_TESTS += host_test_printf_vsnprintf
 HOST_TESTS += host_test_rwlock
 HOST_TESTS += host_test_string
 
-host_test_rwlock: host_test_rwlock.c
-	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_rwlock.c -o $@
-
 host_test_pci_config: host_test_pci_config.c
 	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_pci_config.c -o $@
 
@@ -246,9 +243,6 @@ host_test_i386_sched_ldt: host_test_i386_sched_ldt.c
 
 host_test_proc_fcntl: host_test_proc_fcntl.c
 	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_proc_fcntl.c -o $@
-
-host_test_rwlock: host_test_rwlock.c
-	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_rwlock.c -o $@
 
 host_test_elks_load_plan: host_test_elks_load_plan.c
 	$(CC) -g -Wall -Wextra -DHOST_TEST -I../../sys/include -I../../include -I../../sys -I. host_test_elks_load_plan.c -o $@

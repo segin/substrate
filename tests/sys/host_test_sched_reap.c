@@ -32,6 +32,7 @@ void arch_switch_to(thread_t *prev, thread_t *next) { (void)prev; (void)next; }
 void pmap_activate(void *pmap) { (void)pmap; }
 void futex_wake_exited_thread(int *uaddr) { (void)uaddr; }
 uint64_t get_ticks(void) { return 0; }
+uint32_t get_hz(void) { return 100; }
 
 struct percpu_data *percpu_get(void) { return &cpu0; }
 struct percpu_data *percpu_get_cpu(int cpu_id) { (void)cpu_id; return &cpu0; }
@@ -55,6 +56,14 @@ void pmm_free_contiguous(void *p, size_t count) {
     last_pmm_contig_ptr = p;
     last_pmm_contig_count = count;
 }
+
+/* The real <arch/i386/intr.h> uses 32-bit inline asm (pushfl/popfl) that
+ * won't assemble in this 64-bit host build.  Pre-claim its include guard
+ * and supply host-safe no-op intr_disable/intr_restore (the only two
+ * symbols sched.c needs from it). */
+#define _ARCH_I386_INTR_H
+static inline uint32_t intr_disable(void) { return 0; }
+static inline void intr_restore(uint32_t f) { (void)f; }
 
 #include "../../sys/pm/sched.c"
 
@@ -123,10 +132,14 @@ static void test_reap_process_threads_frees_owned_stacks(void) {
     assert(last_kfree_ptr == (void *)(uintptr_t)0xC0300000u);
     assert(last_kfree_size == 4096);
 
-    assert(block_thread->tid == -1);
-    assert(contig_thread->tid == -1);
-    assert(kmem_thread->tid == -1);
-    assert(borrowed_thread->tid == -1);
+    /* The kernel now allocates threads dynamically and frees them on
+     * reap (sched_storage_free) rather than marking a static-pool slot
+     * with tid == -1.  So instead of inspecting the (now-freed) thread
+     * structs, verify every thread owned by the process was unlinked
+     * from the live allthread list. */
+    for (thread_t *t = thread_first(); t; t = thread_next(t)) {
+        assert(t->proc != &proc);
+    }
 }
 
 static void test_sched_alloc_thread_wraps_tid_at_arch_limit(void) {

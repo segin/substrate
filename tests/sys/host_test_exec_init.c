@@ -93,8 +93,11 @@ int kern_read(int fd, char *buf, size_t count) {
     return 0;
 }
 
-int vfs_check_permissions(fs_node_t *node, uint32_t uid, uint32_t gid, int mode) {
+int vfs_check_permissions_groups(fs_node_t *node, uint32_t uid, uint32_t gid,
+                                 const uint32_t *groups, int ngroups, int mode) {
     (void)node;
+    (void)groups;
+    (void)ngroups;
     last_perm_uid = uid;
     last_perm_gid = gid;
     last_perm_mode = mode;

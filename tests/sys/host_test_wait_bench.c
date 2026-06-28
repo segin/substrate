@@ -13,11 +13,12 @@
 // Mock Kernel Types before they are needed
 typedef int mutex_t;
 typedef int spinlock_t;
+typedef int rwlock_t;   // vm_map.h now embeds an rwlock_t; lock.h is mocked out below
 
 // Mock kernel-specific defines
 #define AC_COMM_LEN 16
 #define NSIG 32
-#define MAX_FD 32
+// MAX_FD is defined by sys/proc.h (4096); do not redefine it here.
 #define MAX_THREADS 64
 
 // Mock Forward Declarations
@@ -71,6 +72,18 @@ void sched_sleep(void *chan);
 process_t *current_process = NULL;
 thread_t *current_thread = NULL;
 
+// wait.c now enumerates threads via FOREACH_THREAD / thread_first /
+// thread_next (the dynamic allthread list) instead of a fixed table.
+// This benchmark has no live threads, so iteration is empty and
+// wait_threads_all_zombie() trivially returns 1.
+thread_t *thread_first(void) { return NULL; }
+thread_t *thread_next(thread_t *t) { (void)t; return NULL; }
+#define FOREACH_THREAD(var) \
+    for (thread_t *var = thread_first(); (var) != NULL; (var) = thread_next(var))
+
+void sched_yield(void) {}
+void sched_reap_process_threads(process_t *proc) { (void)proc; }
+
 // Mock Functions
 void kprint(const char *msg) {
     (void)msg;
@@ -122,6 +135,16 @@ int copyout(const void *kaddr, void *uaddr, size_t len) {
 
 // Include the implementation
 #include "../../sys/pm/wait.c"
+
+// Reap-path mocks (pmap_t / vm_map_t are now in scope from the headers
+// wait.c pulled in above).
+pmap_t pmap_kernel(void) { return (pmap_t)0xABCDEF00; }
+void pmap_release(pmap_t pmap) { (void)pmap; }
+void vm_map_destroy(vm_map_t *map) { (void)map; }
+void ldt_free_process(struct process *proc) { (void)proc; }
+void procfs_release_pid_nodes(int pid) { (void)pid; }
+void proc_destroy(process_t *p) { free(p); }
+uint64_t get_ticks(void) { return 0; }
 
 // Helpers for benchmark
 process_t *create_mock_process(int pid) {

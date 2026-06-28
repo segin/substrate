@@ -5,12 +5,31 @@
 #include <string.h>
 #include <sys/mman.h>
 
+/*
+ * idt.c carries its own `extern int copyin(const void *, void *,
+ * unsigned int)` decl.  On the 32-bit target that matches <sys/copy.h>'s
+ * size_t prototype exactly, but on this 64-bit host size_t is wider, so
+ * the two collide.  Suppress copy.h's declarations (idt.c only ever calls
+ * copyin, via its own local extern) by claiming its include guard, then
+ * provide host stubs with the host-matching signatures.
+ */
+#define _SYS_COPY_H
+#include <stddef.h>
+int validate_user_addr(const void *addr, size_t size);
+int copyout(const void *src, void *dst, size_t size);
+int copyinstr(const void *src, void *dst, size_t maxlen, size_t *len);
+int copyin(const void *src, void *dst, unsigned int size) {
+    memcpy(dst, src, size);
+    return 0;
+}
+
 #include <arch/i386/percpu.h>
 #include <arch/i386/idt.h>
 #include <arch/i386/pmap.h>
 #include <sys/proc.h>
 #include <sys/exec.h>
 #include <exec/perso/personality.h>
+#include <vm/vm_fault.h>
 
 static char outbuf[8192];
 static size_t outlen;
@@ -100,6 +119,16 @@ void vm86_gpf_handler(registers_t *regs) {
     vm86_dispatch_count++;
     regs->eip += 1;
 }
+
+int irq_dispatch(unsigned int irq, void *frame) { (void)irq; (void)frame; return 0; }
+uint32_t preempt_count_get(void) { return 0; }
+int vm_fault(vm_map_t *map, uintptr_t va, uint8_t prot) {
+    (void)map; (void)va; (void)prot; return -1;
+}
+void panic_with_regs(const char *msg, const registers_t *regs) {
+    (void)regs; panic_msg = msg;
+}
+void isr_panic_ipi(void) {}
 
 #define DECL_ISR(n) void isr##n(void) {}
 DECL_ISR(0) DECL_ISR(1) DECL_ISR(2) DECL_ISR(3) DECL_ISR(4) DECL_ISR(5) DECL_ISR(6) DECL_ISR(7)

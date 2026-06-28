@@ -37,6 +37,12 @@ typedef struct thread {
     uint32_t flags;
     uint32_t sig_pending;
     uint32_t sig_mask;
+
+    /* Added for futex tests: user-fault recovery landing pad, CLONE
+     * child-tid clear pointer, and FUTEX_WAIT_BITSET wait mask. */
+    uintptr_t on_fault;
+    int *exit_tid_ptr;
+    uint32_t futex_bitset;
 } thread_t;
 
 extern process_t *current_process;

@@ -45,6 +45,23 @@ clock_t kern_times(struct tms *buf) {
     return mock_kern_times_ret;
 }
 
+/*
+ * perso_netbsd.c routes many syscalls through to the native kernel
+ * implementation; the getrusage path under test reaches none of them, so
+ * trivial stubs satisfy the linker.  (These NetBSD entry points are thin
+ * wrappers the dispatch table points at — only netbsd_sys_getrusage is
+ * exercised here.)
+ */
+process_t *current_process;
+int sys_futex(int *u, int op, int val, void *ts, int *u2, int v3) { (void)u; (void)op; (void)val; (void)ts; (void)u2; (void)v3; return 0; }
+int sys_waitpid(int pid, int *status, int options) { (void)pid; (void)status; (void)options; return 0; }
+int kern_gettimeofday(struct timeval *tv, struct timezone *tz) { (void)tv; (void)tz; return 0; }
+int64_t sys_lseek(int fd, uint32_t lo, uint32_t hi, int whence) { (void)fd; (void)lo; (void)hi; (void)whence; return 0; }
+int kern_pipe(int *fds) { (void)fds; return 0; }
+int sys_dup3(int o, int n, int f) { (void)o; (void)n; (void)f; return n; }
+int sys_fcntl(int fd, int cmd, int arg) { (void)fd; (void)cmd; (void)arg; return 0; }
+int sys_close(int fd) { (void)fd; return 0; }
+
 void test_getrusage_invalid_who() {
     printf("Test: netbsd_sys_getrusage invalid who...\n");
     struct rusage ru;

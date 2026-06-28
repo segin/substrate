@@ -48,13 +48,27 @@ fs_node_t *vfs_lookup_lstat(fs_node_t *root, const char *path) {
     return &found_node;
 }
 
-int vfs_check_permissions(fs_node_t *node, uint32_t uid, uint32_t gid, int mode) {
+/*
+ * kern_access now resolves through vfs_perso_lookup() (which falls back to
+ * vfs_lookup when the process has no personality prefix) and checks access
+ * via vfs_check_permissions_groups() instead of the old
+ * vfs_check_permissions().  Mock the new entry points; provide link stubs
+ * for the personality/debug helpers vfs_perso_lookup references.
+ */
+int vfs_check_permissions_groups(fs_node_t *node, uint32_t uid, uint32_t gid,
+                                 const uint32_t *groups, int ngroups, int mode) {
     (void)node;
     (void)uid;
     (void)gid;
+    (void)groups;
+    (void)ngroups;
     (void)mode;
     return vfs_perm_result;
 }
+
+struct personality *perso_lookup(int id) { (void)id; return NULL; }
+int cmdline_debug_enabled(const char *channel) { (void)channel; return 0; }
+int kprintf(const char *fmt, ...) { (void)fmt; return 0; }
 
 extern int kern_access(const char *path, int mode);
 extern int sys_access(const char *path, int mode);

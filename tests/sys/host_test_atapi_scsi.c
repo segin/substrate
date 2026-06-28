@@ -32,6 +32,18 @@ static int present_map[2][2];
 
 void kprint(const char *str) { (void)str; }
 
+/*
+ * The device/bus reset paths busy-wait on get_uptime_ms() for their
+ * post-SRST settle delays.  Return a value that advances every call so
+ * the `while (get_uptime_ms() < until)` spins terminate instead of
+ * hanging.  atapi_scsi.c declares its own `extern uint64_t
+ * get_uptime_ms(void)`, so match that return type.
+ */
+uint64_t get_uptime_ms(void) {
+    static uint64_t now;
+    return now += 100;
+}
+
 static void fill_model(uint16_t *buf, const char *model) {
     char padded[40];
     size_t len = strlen(model);

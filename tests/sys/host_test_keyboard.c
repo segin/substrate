@@ -6,6 +6,7 @@
 #include <drivers/input/ps2.h>
 #include <sys/input.h>
 #include <sys/vt.h>
+#include <sys/lock.h>
 
 static uint8_t mock_scancode;
 static int mock_ps2_init_rc;
@@ -64,6 +65,22 @@ void tty_flip_buffer_push(struct tty *tty, char c) {
     assert(mock_tty_chars_len < (int)sizeof(mock_tty_chars));
     mock_tty_chars[mock_tty_chars_len++] = c;
 }
+/*
+ * The escape-sequence path now feeds the TTY via tty_inject_input_locked()
+ * under the tty's spinlock (single chars still go through
+ * tty_flip_buffer_push above).  Capture the injected byte run into the
+ * same buffer the assertions read.
+ */
+size_t tty_inject_input_locked(struct tty *tty, const char *buf, size_t len) {
+    (void)tty;
+    for (size_t i = 0; i < len; i++) {
+        assert(mock_tty_chars_len < (int)sizeof(mock_tty_chars));
+        mock_tty_chars[mock_tty_chars_len++] = buf[i];
+    }
+    return len;
+}
+void spinlock_acquire(spinlock_t *lock) { (void)lock; }
+void spinlock_release(spinlock_t *lock) { (void)lock; }
 void console_push_char(char c) {
     assert(mock_console_chars_len < (int)sizeof(mock_console_chars));
     mock_console_chars[mock_console_chars_len++] = c;
@@ -92,6 +109,18 @@ static inline uint8_t inb(uint16_t port) {
     return mock_scancode;
 }
 
+/*
+ * keyboard.c now wraps its scancode-table swap in intr_disable()/
+ * intr_restore() from <arch/i386/intr.h>, whose inlines use 32-bit
+ * privileged asm (pushfl/popfl/cli) that the host assembler rejects.
+ * Claim the header guard and provide no-op host equivalents.
+ */
+#define _ARCH_I386_INTR_H
+static inline uint32_t intr_disable(void) { return 0; }
+static inline void intr_restore(uint32_t flags) { (void)flags; }
+static inline void intr_enable(void) {}
+static inline void wait_for_interrupt(void) {}
+
 #include "../../sys/drivers/input/keyboard.c"
 
 static void reset_state(void) {
@@ -101,6 +130,10 @@ static void reset_state(void) {
     memset(mock_input_events, 0, sizeof(mock_input_events));
     memset(&mock_tty, 0, sizeof(mock_tty));
     memset(&mock_vt, 0, sizeof(mock_vt));
+    /* keyboard.c now only delivers cooked chars to the tty when the vt is
+     * in K_XLATE mode (K_RAW == 0 means an evdev consumer owns the input);
+     * the memset above leaves kbd_mode == K_RAW, so select XLATE here. */
+    mock_vt.kbd_mode = K_XLATE;
 
     kbd_head = 0;
     kbd_tail = 0;

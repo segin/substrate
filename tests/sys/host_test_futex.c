@@ -5,7 +5,9 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <sys/mman.h>
 #include <sys/types.h>
 
 #define MAX_THREADS 64
@@ -34,6 +36,11 @@ thread_t threads[MAX_THREADS];
 static mock_waitq_t waitqs[MAX_WAITQS];
 static int waitq_count = 0;
 static yield_hook_t yield_hook = NULL;
+
+/* Robust-list `next` link fields whose 4-byte copyin reads must be
+ * zero-extended (see copyin below). */
+static const void *robust_link_lo;
+static const void *robust_link_hi;
 
 static mock_waitq_t *waitq_lookup(void *chan, int private_flag, int pid, int create) {
     int i;
@@ -87,6 +94,8 @@ static void reset_env(void) {
     current_thread = NULL;
     current_process = NULL;
     yield_hook = NULL;
+    robust_link_lo = NULL;
+    robust_link_hi = NULL;
 }
 
 static void setup_thread(int index, int tid, int uid, int pid, int priority, process_t *proc) {
@@ -104,6 +113,36 @@ static void setup_thread(int index, int tid, int uid, int pid, int priority, pro
 uintptr_t pmap_extract(void *pmap, uintptr_t va) {
     (void)pmap;
     return va;
+}
+
+/* futex.c now reads/writes user memory through copyin/copyout (with an
+ * on_fault recovery landing pad) instead of direct dereferences.  In the
+ * host test the "user" pointers are plain host addresses, so a memcpy
+ * faithfully models a successful access.
+ *
+ * One wrinkle: futex.c's robust-list walk reads each entry's `next` LINK
+ * with a target-pointer-width (4-byte) copyin into a host pointer
+ * variable.  On the real 32-bit target a pointer is 4 bytes; on this
+ * 64-bit host the destination is 8 bytes, so a plain 4-byte memcpy
+ * leaves the high half uninitialised and the traversal dereferences a
+ * corrupt pointer.  The robust structures are placed in MAP_32BIT low
+ * memory (see test_futex_robust_cleanup_on_exit), so when a 4-byte read
+ * targets an 8-byte-aligned destination we zero-extend it — faithfully
+ * reconstructing the low-memory link as a valid host pointer. */
+int copyin(const void *uaddr, void *kdst, size_t len) {
+    if (len == sizeof(int) &&
+        (uaddr == robust_link_lo || uaddr == robust_link_hi)) {
+        /* Reading a robust-list `next` link: zero-extend the (low-memory)
+         * 32-bit pointer into the 8-byte host destination. */
+        *(uintptr_t *)kdst = 0;
+    }
+    memcpy(kdst, uaddr, len);
+    return 0;
+}
+
+int copyout(const void *ksrc, void *uaddr, size_t len) {
+    memcpy(uaddr, ksrc, len);
+    return 0;
 }
 
 void sched_wakeup(void *chan) {
@@ -256,6 +295,66 @@ static int sleepq_requeue_internal(void *src_chan, void *dst_chan, int private_f
     return woken;
 }
 
+/* Bitset-filtered wake: futex.c now routes FUTEX_WAKE_BITSET (and plain
+ * FUTEX_WAKE, with mask=FUTEX_BITSET_MATCH_ANY) through these.  Wake up to
+ * n waiters whose registered futex_bitset intersects the mask. */
+static int sleepq_wake_bitset_internal(void *chan, int private_flag, int pid, int n, uint32_t mask) {
+    mock_waitq_t *q = waitq_lookup(chan, private_flag, pid, 0);
+    int woken = 0;
+    int i;
+
+    if (!q || q->count == 0 || n == 0) {
+        return 0;
+    }
+
+    for (i = 0; i < q->count && (n < 0 || woken < n); ) {
+        if (q->waiters[i] && (q->waiters[i]->futex_bitset & mask) != 0) {
+            memmove(&q->waiters[i], &q->waiters[i + 1],
+                    sizeof(q->waiters[0]) * (q->count - i - 1));
+            q->count--;
+            woken++;
+        } else {
+            i++;
+        }
+    }
+
+    waitq_remove_if_empty(q);
+    return woken;
+}
+
+int sleepq_wake_bitset(void *chan, int n, uint32_t mask) {
+    return sleepq_wake_bitset_internal(chan, 0, 0, n, mask);
+}
+
+int sleepq_wake_bitset_private(void *chan, int n, uint32_t mask) {
+    assert(current_process != NULL);
+    return sleepq_wake_bitset_internal(chan, 1, current_process->pid, n, mask);
+}
+
+/* Remove a specific thread from whatever wait queue it is parked on
+ * (used by futex timeout/EINTR paths to dequeue current_thread). */
+int sleepq_remove_thread(thread_t *t) {
+    int qi, i;
+
+    for (qi = 0; qi < waitq_count; qi++) {
+        mock_waitq_t *q = &waitqs[qi];
+        for (i = 0; i < q->count; i++) {
+            if (q->waiters[i] == t) {
+                memmove(&q->waiters[i], &q->waiters[i + 1],
+                        sizeof(q->waiters[0]) * (q->count - i - 1));
+                q->count--;
+                waitq_remove_if_empty(q);
+                return 1;
+            }
+        }
+    }
+    return 0;
+}
+
+time_t get_time(void) { return 1000; }
+void *kmalloc(size_t size) { return calloc(1, size); }
+void kfree(void *ptr, size_t size) { (void)size; free(ptr); }
+
 int sleepq_requeue(void *src_chan, void *dst_chan, int wake_n, int requeue_n) {
     return sleepq_requeue_internal(src_chan, dst_chan, 0, 0, wake_n, requeue_n);
 }
@@ -402,8 +501,9 @@ struct robust_node {
 static void test_futex_robust_cleanup_on_exit(void) {
     process_t owner_proc;
     process_t waiter_proc;
-    struct robust_list_head head;
-    struct robust_node node;
+    struct robust_list_head *head;
+    struct robust_node *node;
+    void *low;
 
     reset_env();
     setup_thread(0, 100, 1000, 10, 20, &owner_proc);
@@ -411,23 +511,42 @@ static void test_futex_robust_cleanup_on_exit(void) {
     current_thread = &threads[0];
     current_process = &owner_proc;
 
-    memset(&head, 0, sizeof(head));
-    memset(&node, 0, sizeof(node));
-    head.list.next = &node.list;
-    head.futex_offset = offsetof(struct robust_node, futex);
-    node.list.next = &head.list;
-    node.futex = threads[0].tid;
-    threads[0].robust_list = &head;
-    threads[0].robust_list_len = sizeof(head);
+    /* The robust-list walk in futex.c reads each entry's `next` link with a
+     * pointer-width (target = 4-byte) access via copyin().  On a 32-bit
+     * target a pointer is 4 bytes; on this 64-bit host build it is 8, so the
+     * link pointers must live below 4 GiB or the truncated read corrupts the
+     * traversal.  MAP_32BIT keeps head/node in low memory, faithfully
+     * modelling the 32-bit target's pointer width. */
+    low = mmap(NULL, 4096, PROT_READ | PROT_WRITE,
+               MAP_PRIVATE | MAP_ANONYMOUS | MAP_32BIT, -1, 0);
+    assert(low != MAP_FAILED);
+    head = (struct robust_list_head *)low;
+    node = (struct robust_node *)((char *)low + sizeof(*head));
 
-    sleepq_add((void *)(uintptr_t)&node.futex, &threads[1]);
-    assert(sleepq_has_waiters((void *)(uintptr_t)&node.futex));
+    memset(head, 0, sizeof(*head));
+    memset(node, 0, sizeof(*node));
+    head->list.next = &node->list;
+    head->futex_offset = offsetof(struct robust_node, futex);
+    node->list.next = &head->list;
+    node->futex = threads[0].tid;
+    threads[0].robust_list = head;
+    threads[0].robust_list_len = sizeof(*head);
+
+    /* Tell copyin() which `next` link fields to zero-extend (see the
+     * comment on copyin above). */
+    robust_link_lo = &node->list.next;
+    robust_link_hi = &head->list.next;
+
+    sleepq_add((void *)(uintptr_t)&node->futex, &threads[1]);
+    assert(sleepq_has_waiters((void *)(uintptr_t)&node->futex));
 
     futex_thread_exit(&threads[0]);
 
-    assert((node.futex & FUTEX_OWNER_DIED) != 0);
-    assert((node.futex & FUTEX_TID_MASK) == 0);
-    assert(!sleepq_has_waiters((void *)(uintptr_t)&node.futex));
+    assert((node->futex & FUTEX_OWNER_DIED) != 0);
+    assert((node->futex & FUTEX_TID_MASK) == 0);
+    assert(!sleepq_has_waiters((void *)(uintptr_t)&node->futex));
+
+    munmap(low, 4096);
 }
 
 static void unlock_pi_from_owner(void) {

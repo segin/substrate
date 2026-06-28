@@ -2,12 +2,15 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <stdbool.h>
 
 #include <pm/pm.h>
 #include <sys/time.h>
 #include <sys/signal.h>
 
-process_t processes[MAX_PROCS];
+/* Kernel allocates procs dynamically now; this is a scratch fixture. */
+#define NTEST_PROCS 64
+process_t processes[NTEST_PROCS];
 process_t *current_process;
 thread_t *current_thread;
 
@@ -44,6 +47,27 @@ int percpu_get_cpu_id(void) { return current_cpu; }
 void hw_text_tick(void) {}
 void hw_text_tick_1hz(void) {}
 
+/* The real <arch/i386/intr.h> uses 32-bit inline asm (pushfl/popfl) that
+ * won't assemble in this 64-bit host build.  Pre-claim its include guard
+ * and supply host-safe no-op intr_disable/intr_restore (the only two
+ * symbols time.c needs from it). */
+#define _ARCH_I386_INTR_H
+static inline uint32_t intr_disable(void) { return 0; }
+static inline void intr_restore(uint32_t f) { (void)f; }
+
+int kprintf(const char *fmt, ...) { (void)fmt; return 0; }
+uint64_t i386_cpu_cycle_counter(void) { return 0; }
+int i386_cpu_has_tsc(void) { return 0; }
+void fb_console_tick(void) {}
+void floppy_poll(void) {}
+void vt_tick_1hz(void) {}
+bool spinlock_try_acquire(spinlock_t *lock) { (void)lock; return true; }
+
+/* allproc iteration: the test keeps a single live process in slot 0
+ * (current_process), so the ITIMER_REAL scan visits exactly it. */
+process_t *proc_first(void) { return current_process; }
+process_t *proc_next(process_t *p) { (void)p; return NULL; }
+
 #include "../../sys/kern/time.c"
 
 static void reset_env(void) {
@@ -54,7 +78,7 @@ static void reset_env(void) {
     current_process->state = SRUN;
     current_process->is_kernel_task = 0;
     proc_timers_init(current_process);
-    for (int i = 1; i < MAX_PROCS; i++) {
+    for (int i = 1; i < NTEST_PROCS; i++) {
         processes[i].pid = -1;
     }
     sched_tick_calls = 0;

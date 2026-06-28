@@ -4,6 +4,49 @@
 #include <string.h>
 
 #include <drivers/storage/ide/ide.h>
+#include <drivers/storage/ide/ide_priv.h>
+#include <arch/i386/pmap.h>
+
+/*
+ * ide_prdt_build_entries lives in ide_dma.c (compiled in by the Makefile
+ * rule), which also pulls in the rest of the DMA path.  Those other
+ * functions are never called from this test but still have to link, so
+ * provide the shared state + leaf-helper stubs they reference.
+ */
+ide_channel_t ide_channels[MAX_IDE_CHANNELS];
+prdt_entry_t ide_prdts[MAX_IDE_CHANNELS][MAX_PRD_ENTRIES];
+volatile int ide_irq_complete[MAX_IDE_CHANNELS];
+const char *const ide_channel_labels[MAX_IDE_CHANNELS] = {0};
+
+int ide_debug_enabled(void) { return 0; }
+void ide_bm_write8(uint8_t channel, uint8_t reg, uint8_t data) {
+    (void)channel; (void)reg; (void)data;
+}
+uint8_t ide_bm_read8(uint8_t channel, uint8_t reg) {
+    (void)channel; (void)reg; return 0;
+}
+void ide_bm_write32(uint8_t channel, uint8_t reg, uint32_t data) {
+    (void)channel; (void)reg; (void)data;
+}
+uint8_t ide_read_reg(uint8_t channel, uint8_t reg) {
+    (void)channel; (void)reg; return 0;
+}
+void ide_write_reg(uint8_t channel, uint8_t reg, uint8_t data) {
+    (void)channel; (void)reg; (void)data;
+}
+void ide_select_drive(uint8_t channel, uint8_t drive) {
+    (void)channel; (void)drive;
+}
+int ide_wait_ready(uint8_t channel, int timeout_ms, const char *op) {
+    (void)channel; (void)timeout_ms; (void)op; return 0;
+}
+int ide_wait_irq_completion(uint8_t channel, uint32_t timeout_ms,
+                            const char *op) {
+    (void)channel; (void)timeout_ms; (void)op; return 0;
+}
+int kprintf(const char *fmt, ...) { (void)fmt; return 0; }
+uintptr_t pmap_extract(pmap_t pmap, uintptr_t va) { (void)pmap; return va; }
+pmap_t pmap_kernel(void) { return NULL; }
 
 static void test_single_entry(void) {
     prdt_entry_t prdt[MAX_PRD_ENTRIES];

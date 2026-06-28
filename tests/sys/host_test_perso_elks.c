@@ -23,9 +23,10 @@
 #include <exec/formats/elks_aout.h>
 #include <vfs/vfs.h>
 
+#define NTEST_PROCS 64
 process_t *current_process;
 thread_t *current_thread;
-process_t processes[MAX_PROCS];
+process_t processes[NTEST_PROCS];
 struct mountlist mountlist;
 
 static const char *last_name;
@@ -131,8 +132,11 @@ typedef int32_t elks_time_t;
 int stub_sys_exit(int a) { last_name = "exit"; last_i0 = a; return 11; }
 int stub_sys_fork(void) { last_name = "fork"; return 12; }
 int stub_sys_vfork(void) { last_name = "vfork"; return 13; }
-int stub_sys_read(int a, char *b, int c) { last_name = "read"; last_i0 = a; last_ptr = (uintptr_t)b; last_i1 = c; return 22; }
-int stub_sys_write(int a, const char *b, int c) { last_name = "write"; last_i0 = a; last_ptr = (uintptr_t)b; last_i1 = c; return 33; }
+/* Signatures match the current kernel prototypes (ssize_t/size_t); the
+ * #define-redirect above makes sys/syscall_impl.h declare them under these
+ * stub names, so the definitions must agree. */
+ssize_t stub_sys_read(int a, char *b, size_t c) { last_name = "read"; last_i0 = a; last_ptr = (uintptr_t)b; last_i1 = (int)c; return 22; }
+ssize_t stub_sys_write(int a, const char *b, size_t c) { last_name = "write"; last_i0 = a; last_ptr = (uintptr_t)b; last_i1 = (int)c; return 33; }
 int stub_sys_open(const char *a, int b, int c) { last_name = "open"; last_ptr = (uintptr_t)a; last_i0 = b; last_i1 = c; return 44; }
 int stub_sys_close(int a) { last_name = "close"; last_i0 = a; return 55; }
 int stub_kern_open(const char *a, int b, int c) {
@@ -259,16 +263,19 @@ clock_t stub_sys_times(struct tms *a) {
     }
     return 57;
 }
-int stub_sys_brk(uint32_t a) {
+/* sys_brk is now void *(void *); perso_elks.c calls it as
+ * sys_brk((void *)linear) and casts the result back to uintptr_t. */
+void *stub_sys_brk(void *p) {
+    uint32_t a = (uint32_t)(uintptr_t)p;
     last_name = "brk";
     last_ptr = a;
     if (current_process) {
         if (a >= current_process->brk_start) {
             current_process->brk = a;
         }
-        return (int)current_process->brk;
+        return (void *)(uintptr_t)current_process->brk;
     }
-    return (int)a;
+    return (void *)(uintptr_t)a;
 }
 int stub_sys_setgid(int a) { (void)a; return -1; }
 int stub_sys_getgid(void) { return 223; }
@@ -468,6 +475,40 @@ size_t proc_emit_cmdline(const process_t *p, char *buf, size_t buf_len, size_t *
 
 #include "../../sys/exec/perso/perso_elks.c"
 
+/*
+ * perso_elks.c now reads the process registry via proc_find / proc_first /
+ * proc_next (e.g. elks_swapper_process() == proc_find(0), and the /dev/kmem
+ * task-window enumeration).  Back them with this test's own processes[] table
+ * (used slots have pid >= 0; the setup memsets the rest to pid -1).
+ */
+process_t *proc_find(int pid) {
+    for (int i = 0; i < NTEST_PROCS; i++) {
+        if (processes[i].pid >= 0 && processes[i].pid == pid)
+            return &processes[i];
+    }
+    return NULL;
+}
+process_t *proc_first(void) {
+    for (int i = 0; i < NTEST_PROCS; i++) {
+        if (processes[i].pid >= 0)
+            return &processes[i];
+    }
+    return NULL;
+}
+process_t *proc_next(process_t *p) {
+    if (!p) return NULL;
+    int idx = (int)(p - processes);
+    for (int i = idx + 1; i < NTEST_PROCS; i++) {
+        if (processes[i].pid >= 0)
+            return &processes[i];
+    }
+    return NULL;
+}
+
+/* exec cleanup stack — not exercised by these emulation paths. */
+int exec_cleanup_push(void (*free_fn)(void *), void *ptr) { (void)free_fn; (void)ptr; return 0; }
+void exec_cleanup_drain(void) {}
+
 static file_t stub_file;
 static file_t stub_kmem_file;
 static fs_node_t stub_dir_node;
@@ -599,7 +640,7 @@ int main(void) {
     memset(processes, 0, sizeof(processes));
     memset(&root_mount, 0, sizeof(root_mount));
     memset(&dev_mount, 0, sizeof(dev_mount));
-    for (int i = 0; i < MAX_PROCS; i++) {
+    for (int i = 0; i < NTEST_PROCS; i++) {
         processes[i].pid = -1;
     }
     setup_ds(&proc, ldt, ds_mem_size);
@@ -755,8 +796,11 @@ int main(void) {
         return 1;
     }
     memset(ds_mem + 0x152, 0, 16);
+    /* GETMAXTASKS now reports ELKS_KMEM_MAX_EXPORTED (the count of task
+     * slots exported through the emulated /dev/kmem window), not the old
+     * kernel-global MAX_PROCS which no longer exists. */
     if (fn(4, ELKS_MEM_GETMAXTASKS, 0x152, 0, 0, 0, 0, 0) != 0 ||
-        *(uint16_t *)(void *)(ds_mem + 0x152) != MAX_PROCS) {
+        *(uint16_t *)(void *)(ds_mem + 0x152) != ELKS_KMEM_MAX_EXPORTED) {
         fprintf(stderr, "FAIL: ELKS MEM_GETMAXTASKS emulation wrong\n");
         return 1;
     }

@@ -22,6 +22,16 @@ void kfree(void *ptr, size_t size) {
     free(ptr);
 }
 
+/*
+ * minix.c grew a minix_statfs() that uses substrate's `struct statfs`
+ * from <sys/mount.h>.  This test builds with -idirafter ../../sys/include,
+ * so a bare <sys/mount.h> resolves to the host's glibc header (which has
+ * no struct statfs).  Pull substrate's header in explicitly by path first;
+ * it claims the _SYS_MOUNT_H guard so the host header that minix.c reaches
+ * for later is a no-op.
+ */
+#include "../../sys/include/sys/mount.h"
+
 // Include VFS header to get types
 #include <vfs/vfs.h>
 

@@ -20,6 +20,24 @@ void console_write(const char *buf, size_t len) {
     outbuf[outlen] = '\0';
 }
 
+/* panic.c now routes its text through kprint(); capture it into the
+ * same buffer the assertions inspect. */
+void kprint(const char *s) {
+    if (!s) return;
+    console_write(s, strlen(s));
+}
+
+/* Recursive-panic emergency path writes raw bytes to the COM port. */
+void uart_panic_write(const char *s, size_t len) {
+    console_write(s, len);
+}
+
+/* User-pointer copy helper referenced by the register-dump path. */
+int copyin(const void *src, void *dst, unsigned int size) {
+    (void)src; (void)dst; (void)size;
+    return -1; /* never "user" mapped on the host */
+}
+
 void stack_trace(void) {
     stack_trace_called = 1;
     console_write("<stack trace>\n", 14);

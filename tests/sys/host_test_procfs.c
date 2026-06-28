@@ -21,10 +21,14 @@
 #include <sys/lock.h>
 #include <sys/mount.h>
 #include <kern/resource.h>
+#include <vm/vm_map.h>
+#include <kern/memtrack.h>
 
 /* Mocks for externals used in procfs.c */
 
-process_t processes[MAX_PROCS];
+/* Kernel allocates procs dynamically now; this is a scratch fixture. */
+#define NTEST_PROCS 64
+process_t processes[NTEST_PROCS];
 process_t *current_process;
 mutex_t proctree_lock;
 struct mountlist mountlist;
@@ -115,11 +119,64 @@ size_t proc_emit_cmdline(const process_t *proc, char *buf, size_t buf_len, size_
 }
 
 process_t *proc_find(int pid) {
-    for (int i = 0; i < MAX_PROCS; i++) {
+    for (int i = 0; i < NTEST_PROCS; i++) {
         if (processes[i].pid == pid) return &processes[i];
     }
     return NULL;
 }
+
+/* allproc iteration: procfs.c now walks the process list via
+ * proc_first/proc_next instead of indexing a fixed table.  Walk the live
+ * (pid != -1) entries of the scratch processes[] array. */
+process_t *proc_first(void) {
+    for (int i = 0; i < NTEST_PROCS; i++) {
+        if (processes[i].pid != -1) return &processes[i];
+    }
+    return NULL;
+}
+
+process_t *proc_next(process_t *p) {
+    if (!p) return NULL;
+    for (int i = (int)(p - processes) + 1; i < NTEST_PROCS; i++) {
+        if (processes[i].pid != -1) return &processes[i];
+    }
+    return NULL;
+}
+
+/* procfs.c enumerates threads via this callback walker now; the fixture
+ * has no live threads, so iterate over nothing. */
+void sched_iterate_threads(void (*callback)(thread_t *t, void *arg), void *arg) {
+    (void)callback;
+    (void)arg;
+}
+
+void spinlock_init(spinlock_t *lock, const char *name) { (void)lock; (void)name; }
+void spinlock_acquire(spinlock_t *lock) { (void)lock; }
+void spinlock_release(spinlock_t *lock) { (void)lock; }
+
+void vm_map_lock_read(vm_map_t *map) { (void)map; }
+void vm_map_unlock_read(vm_map_t *map) { (void)map; }
+
+size_t pmap_copyin_other(pmap_t pmap, uintptr_t uva, void *dst, size_t len) {
+    (void)pmap; (void)uva; (void)dst;
+    return len;
+}
+
+time_t get_uptime(void) { return 12345; }
+size_t klog_size(void) { return 0; }
+size_t klog_read(char *dst, size_t dstlen) { (void)dst; (void)dstlen; return 0; }
+size_t memtrack_snapshot(memtrack_rec_t *out, size_t max) { (void)out; (void)max; return 0; }
+
+/* pmap COW/destroy debug counters consumed by /proc/cow_stats. */
+uint64_t pmap_destroy_calls;
+uint64_t pmap_destroy_anon_freed;
+uint64_t pmap_destroy_anon_skipped;
+uint64_t pmap_destroy_anon_rc0;
+uint64_t pmap_destroy_anon_rc2;
+uint64_t pmap_destroy_anon_rc_big;
+uint64_t pmap_destroy_skip_refcnt;
+uint64_t pmap_destroy_skip_wired;
+uint64_t pmap_destroy_skip_obj;
 
 struct personality default_pers = { "Substrate" };
 struct personality linux_pers = { "Linux" };
@@ -182,7 +239,7 @@ static uint32_t mock_large_runtime_gen(char *buf, size_t size, void *opaque) {
 
 void setup_processes() {
     memset(processes, 0, sizeof(processes));
-    for(int i=0; i<MAX_PROCS; i++) processes[i].pid = -1;
+    for(int i=0; i<NTEST_PROCS; i++) processes[i].pid = -1;
     memset(&proc_fd3, 0, sizeof(proc_fd3));
     memset(&proc_fd7, 0, sizeof(proc_fd7));
 

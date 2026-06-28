@@ -3,6 +3,15 @@
 #include <stdio.h>
 #include <string.h>
 
+/*
+ * Suppress <sys/copy.h>'s prototypes.  The kernel's canonical copyin is
+ * size_t, but sys/kern/core.c carries a stale local
+ * `extern int copyin(const void *, void *, unsigned int)`.  On the 32-bit
+ * target the two are identical; on this 64-bit host they conflict.  We
+ * provide our own copyin/copyout stubs that match core.c's local extern.
+ */
+#define _SYS_COPY_H
+
 #include <sys/core.h>
 #include <sys/proc.h>
 #include <sys/ldt.h>
@@ -15,15 +24,17 @@
 #include <pm/pm.h>
 #include <kern/sched.h>
 
-thread_t threads[MAX_THREADS];
-process_t processes[MAX_PROCS];
+#define NTEST_THREADS 64
+#define NTEST_PROCS   64
+thread_t threads[NTEST_THREADS];
+process_t processes[NTEST_PROCS];
 process_t *current_process;
 thread_t *current_thread;
 mutex_t proctree_lock;
 
 static int proc_exit_called;
 static int proc_exit_status;
-static char last_log[160];
+static char last_log[1024];
 
 void mutex_init(mutex_t *m, const char *name) { (void)m; (void)name; }
 void mutex_lock(mutex_t *m) { (void)m; }
@@ -35,8 +46,16 @@ int sleepq_remove_thread(thread_t *t) { (void)t; return 0; }
 void panic(const char *msg) { (void)msg; assert(!"panic"); }
 uint64_t get_ticks(void) { return 0; }
 uint32_t get_hz(void) { return 128; }
-int copyin(const void *src, void *dst, size_t size) { memcpy(dst, src, size); return 0; }
+/*
+ * coredump() peeks the (synthetic) user stack/code via copyin to dump
+ * them.  Those user addresses (useresp=0x0FF0, eip=0x1234) are not backed
+ * by host memory, so emulate the real copyin's EFAULT-on-bad-address
+ * behaviour: report failure so coredump skips the dump (memcpy'ing from
+ * 0xFF0 would segfault the host test).
+ */
+int copyin(const void *src, void *dst, unsigned int size) { (void)src; (void)dst; (void)size; return -1; }
 int copyout(const void *src, void *dst, size_t size) { memcpy(dst, src, size); return 0; }
+int kprintf(const char *fmt, ...) { (void)fmt; return 0; }
 struct personality *perso_lookup(int id) { (void)id; return NULL; }
 const char *perso_name(int id) { (void)id; return "test"; }
 struct pgrp *pgrp_find(int pgid) { (void)pgid; return NULL; }
@@ -46,12 +65,23 @@ void sendsig(sig_t handler, int sig, uint32_t mask, uint32_t flags, registers_t 
     (void)handler; (void)sig; (void)mask; (void)flags; (void)regs;
 }
 void proc_exit(int status) { proc_exit_called = 1; proc_exit_status = status; }
+thread_t *thread_first(void) { return NULL; }
+thread_t *thread_next(thread_t *t) { (void)t; return NULL; }
+process_t *proc_find(int pid) { (void)pid; return NULL; }
+process_t *proc_first(void) { return NULL; }
+process_t *proc_next(process_t *p) { (void)p; return NULL; }
+int cmdline_has(const char *key) { (void)key; return 0; }
+int cmdline_debug_enabled(const char *channel) { (void)channel; return 0; }
 void kprint(const char *msg) {
-    strncpy(last_log, msg ? msg : "", sizeof(last_log) - 1U);
+    /* Accumulate: coredump() emits several kprint() lines and the test
+     * matches against an early one, so the buffer must retain history
+     * rather than only the most recent message. */
+    size_t used = strlen(last_log);
+    strncpy(last_log + used, msg ? msg : "", sizeof(last_log) - used - 1U);
     last_log[sizeof(last_log) - 1U] = '\0';
 }
 const uint8_t sigprop[NSIG] = {
-    [SIGSEGV] = SA_KILL | SA_CORE,
+    [SIGSEGV] = PROP_KILL | PROP_CORE,
 };
 
 #include "../../sys/kern/core.c"

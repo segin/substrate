@@ -19,6 +19,13 @@ const uint8_t font_8x8[256 * 8] = {0};
 int fb_active = 0;
 
 static uint16_t mock_vga_cells[VT_MAX_BUF_SIZE];
+/*
+ * vt_state_t.buffer / .alt_buffer are now `uint16_t *` pointers allocated
+ * to the live geometry instead of inline arrays.  Provide static backing
+ * storage and point the mock vt at it (see reset_state()).
+ */
+static uint16_t mock_vt_cells[VT_MAX_BUF_SIZE];
+static uint16_t mock_vt_alt_cells[VT_MAX_BUF_SIZE];
 static vt_state_t mock_vt;
 static int mock_active_vt;
 static int mock_vt_width;
@@ -124,6 +131,15 @@ void console_set_tty(struct tty *tty) {
     (void)tty;
 }
 
+/* hw_text.c's ANSI response path injects bytes back into the owning tty
+ * via tty_inject_input_locked(); the render tests don't drive that path,
+ * so a counting stub is enough to satisfy the link. */
+size_t tty_inject_input_locked(struct tty *tty, const char *buf, size_t len) {
+    (void)tty;
+    (void)buf;
+    return len;
+}
+
 void console_register(console_backend_t *backend) {
     registered_backend = backend;
 }
@@ -163,6 +179,10 @@ void vt_init(void) {
     int col;
 
     memset(&mock_vt, 0, sizeof(mock_vt));
+    /* buffer/alt_buffer are pointers now; the memset above cleared them, so
+     * re-point at the static backing storage before the fill loop below. */
+    mock_vt.buffer = mock_vt_cells;
+    mock_vt.alt_buffer = mock_vt_alt_cells;
     mock_vt.id = 0;
     mock_vt.color = 0x07;
     mock_vt.attrs = 0;
@@ -256,6 +276,11 @@ static void reset_state(void) {
     memset(mock_crtc_regs, 0, sizeof(mock_crtc_regs));
     memset(mock_ac_regs, 0, sizeof(mock_ac_regs));
     memset(&mock_vt, 0, sizeof(mock_vt));
+    memset(mock_vt_cells, 0, sizeof(mock_vt_cells));
+    memset(mock_vt_alt_cells, 0, sizeof(mock_vt_alt_cells));
+    /* buffer/alt_buffer are pointers now — back them with static storage. */
+    mock_vt.buffer = mock_vt_cells;
+    mock_vt.alt_buffer = mock_vt_alt_cells;
     registered_backend = NULL;
     mock_active_vt = 0;
     mock_vt_width = 80;
@@ -263,7 +288,8 @@ static void reset_state(void) {
     vga_buffer = mock_vga_cells;
     hw_text_active = 1;
     current_vt_ctx = NULL;
-    hw_text_status_epoch = 0;
+    /* hw_text_status_epoch was removed from hw_text.c; nothing references
+     * it any more. */
     hw_text_tty_count = 0;
     hw_text_blink_enabled = 0;
     mock_last_crtc_index = 0;

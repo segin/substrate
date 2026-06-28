@@ -9,13 +9,18 @@
 #include <arch/i386/pmap.h>
 #include <sys/fcntl.h>
 #include <sys/file.h>
+#include <vfs/buf.h>
 
-process_t processes[MAX_PROCS];
+/* Kernel allocates procs/threads dynamically now; these are just
+ * scratch fixtures for the unit tests below. */
+#define NTEST_PROCS   64
+#define NTEST_THREADS 64
+process_t processes[NTEST_PROCS];
 process_t *current_process;
 thread_t *current_thread;
 process_t *kernel_process;
 mutex_t proctree_lock;
-thread_t threads[MAX_THREADS];
+thread_t threads[NTEST_THREADS];
 fs_node_t *fs_root;
 
 static int file_close_calls;
@@ -73,6 +78,47 @@ void sched_reap_process_threads(process_t *proc) { (void)proc; }
 void ldt_init_process(process_t *proc) { memset(&proc->ldt_lock, 0, sizeof(proc->ldt_lock)); }
 int ldt_clone_process(process_t *child, const process_t *parent) { (void)child; (void)parent; return 0; }
 void ldt_free_process(process_t *proc) { (void)proc; }
+int cmdline_debug_enabled(const char *channel) { (void)channel; return 0; }
+void random_reseed_on_fork(int child_pid) { (void)child_pid; }
+int pipe_set_nonblock(fs_node_t *n, int nb) { (void)n; (void)nb; return 0; }
+int pty_set_nonblock(fs_node_t *n, int nb) { (void)n; (void)nb; return 0; }
+int copyout(const void *src, void *dst, size_t size) { memcpy(dst, src, size); return 0; }
+thread_t *thread_first(void) { return NULL; }
+thread_t *thread_next(thread_t *t) { (void)t; return NULL; }
+int kprintf(const char *fmt, ...) { (void)fmt; return 0; }
+void preempt_disable(void) {}
+void psignal(struct process *p, int sig) { (void)p; (void)sig; }
+void sem_proc_cleanup(int pid) { (void)pid; }
+void syscall_stats_dump(int reset) { (void)reset; }
+void vt_release_graphics_on_exit(void *exiting_process) { (void)exiting_process; }
+void bio_get_stats(struct bio_stats *st) { if (st) memset(st, 0, sizeof(*st)); }
+
+/* Debug-counter globals referenced by the proc_exit vm_leak dump path
+ * (gated behind cmdline_debug_enabled, never taken at runtime here). */
+unsigned long vm_pager_vnode_alloc_count;
+unsigned long vm_pager_vnode_dealloc_count;
+unsigned long vm_map_destroy_count;
+unsigned long vm_map_destroy_entries;
+unsigned long fs_open_count;
+unsigned long fs_close_count;
+uint64_t      pmap_create_calls;
+uint64_t      pmap_destroy_calls;
+unsigned long namecache_enter_count;
+unsigned long namecache_evict_count;
+unsigned long namecache_purge_count;
+int           vfs_cache_count;
+uint64_t      ext2_alloc_node_hits;
+uint64_t      ext2_alloc_node_new;
+uint64_t      ext2_alloc_node_fail;
+uint64_t      ext2_alloc_node_fail_pinned;
+uint64_t      ext2_alloc_node_fail_locked;
+uint64_t      ext2_finddir_calls;
+uint64_t      ext2_finddir_dcache_hit;
+uint64_t      ext2_finddir_walk_found;
+uint64_t      ext2_finddir_walk_missing;
+uint64_t      ext2_finddir_break_recv_malformed;
+uint64_t      ext2_finddir_break_block0;
+uint64_t      ext2_root_pin_lost;
 void open_fs(fs_node_t *node, uint8_t read, uint8_t write) {
     (void)node;
     (void)read;
@@ -95,10 +141,10 @@ static void reset_env(void) {
     fs_root = NULL;
     file_close_calls = 0;
 
-    for (int i = 0; i < MAX_PROCS; i++) {
+    for (int i = 0; i < NTEST_PROCS; i++) {
         processes[i].pid = -1;
     }
-    for (int i = 0; i < MAX_THREADS; i++) {
+    for (int i = 0; i < NTEST_THREADS; i++) {
         threads[i].tid = -1;
     }
     pm_init();
@@ -123,7 +169,7 @@ static void test_proc_fcntl_status_and_dup(void) {
     file.f_flag = FREAD | FWRITE | FAPPEND;
 
     proc->fds[3] = &file;
-    proc->fd_bitmap = (1U << 3);
+    proc->fd_bitmap[0] = (1U << 3);
     proc->next_fd = 0;
 
     assert(proc_fcntl(proc, 3, F_GETFL, 0) == (O_RDWR | O_APPEND));
@@ -137,7 +183,7 @@ static void test_proc_fcntl_status_and_dup(void) {
     assert(proc_fcntl(proc, 3, F_GETFD, 0) == 0);
     assert(proc_fcntl(proc, 3, F_SETFD, FD_CLOEXEC) == 0);
     assert(proc_fcntl(proc, 3, F_GETFD, 0) == FD_CLOEXEC);
-    assert((proc->fd_cloexec & (1U << 3)) != 0);
+    assert((proc->fd_cloexec[0] & (1U << 3)) != 0);
 
     assert(proc_fcntl(proc, 3, F_DUPFD, 5) == 5);
     assert(proc->fds[5] == &file);
@@ -163,8 +209,8 @@ static void test_proc_close_cloexec(void) {
 
     proc->fds[1] = &clo_file;
     proc->fds[4] = &keep_file;
-    proc->fd_bitmap = (1U << 1) | (1U << 4);
-    proc->fd_cloexec = (1U << 1);
+    proc->fd_bitmap[0] = (1U << 1) | (1U << 4);
+    proc->fd_cloexec[0] = (1U << 1);
     proc->next_fd = 7;
 
     proc_close_cloexec(proc);
@@ -172,9 +218,9 @@ static void test_proc_close_cloexec(void) {
     assert(file_close_calls == 1);
     assert(proc->fds[1] == NULL);
     assert(proc->fds[4] == &keep_file);
-    assert((proc->fd_bitmap & (1U << 1)) == 0);
-    assert((proc->fd_bitmap & (1U << 4)) != 0);
-    assert((proc->fd_cloexec & (1U << 1)) == 0);
+    assert((proc->fd_bitmap[0] & (1U << 1)) == 0);
+    assert((proc->fd_bitmap[0] & (1U << 4)) != 0);
+    assert((proc->fd_cloexec[0] & (1U << 1)) == 0);
     assert(proc->next_fd == 1);
 }
 

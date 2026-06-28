@@ -15,6 +15,8 @@
  */
 #include <sys/audioio.h>
 #include <vfs/vfs.h>
+#include <sys/proc.h>
+#include <sys/lock.h>
 
 static int devfs_register_calls;
 void devfs_register_device(fs_node_t *node) {
@@ -39,6 +41,20 @@ int kprintf(const char *fmt, ...) { (void)fmt; return 0; }
 void ac97_init(void) {}
 void sb16_init(void) {}
 void hda_init(void) {}
+
+/*
+ * audio.c now arbitrates /dev/audio ownership per writing process under a
+ * spinlock, and registers short-name devfs aliases.  current_thread == NULL
+ * means "kernel context" — the ownership check is skipped, which is what we
+ * want for the framework-level tests here.
+ */
+thread_t *current_thread = NULL;
+void spinlock_acquire(spinlock_t *lock) { (void)lock; }
+void spinlock_release(spinlock_t *lock) { (void)lock; }
+int cmdline_has(const char *key) { (void)key; return 0; }
+int devfs_register_alias(const char *path, const char *target) {
+	(void)path; (void)target; return 0;
+}
 
 /*
  * audio.c includes "audio.h" with a relative path; we point the include

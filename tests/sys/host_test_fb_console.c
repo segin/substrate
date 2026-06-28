@@ -32,6 +32,14 @@ static int flush_h;
 static int scroll_calls;
 static int last_scroll_offset;
 static vt_state_t test_vts[VT_MAX];
+/*
+ * vt_state_t.buffer / .alt_buffer are `uint16_t *` pointers now (allocated
+ * to the live geometry) rather than inline arrays.  Back each mock VT with
+ * static cell storage sized to the test's 80x25 geometry.
+ */
+#define TEST_VT_CELLS (80 * 25)
+static uint16_t test_vt_cells[VT_MAX][TEST_VT_CELLS];
+static uint16_t test_vt_alt_cells[VT_MAX][TEST_VT_CELLS];
 static struct tty test_ttys[VT_MAX];
 static int tty_alloc_count;
 static int tty_register_count;
@@ -177,8 +185,52 @@ void sched_wakeup(void *chan) {
     (void)chan;
 }
 
+/*
+ * fb_console.c's FB_LOCK/FB_UNLOCK macros call intr_disable()/intr_restore()
+ * from <arch/i386/intr.h>, whose inlines use 32-bit privileged asm
+ * (pushfl/popfl/cli) the host assembler rejects.  Claim the header guard and
+ * supply no-op host equivalents.
+ */
+#define _ARCH_I386_INTR_H
+static inline uint32_t intr_disable(void) { return 0; }
+static inline void intr_restore(uint32_t flags) { (void)flags; }
+static inline void intr_enable(void) {}
+static inline void wait_for_interrupt(void) {}
+
 #include "../../sys/drivers/console/ansi_handler.c"
 #include "../../sys/drivers/video/fb_console.c"
+
+/*
+ * Glue fb_console.c grew over time: a kmem allocator for the
+ * scrollback/shadow buffers, the fb_ops 2-D blitters and the linear/planar
+ * present paths, the per-process current_process (used by the KD_*MODE
+ * ioctl owner checks), and tty input injection.  None of these paths are
+ * exercised by the rendering assertions, so minimal stubs satisfy the link.
+ * Defined after the fb_console.c include so the fb_ops / vm_kmem / proc
+ * struct types are already in scope.
+ */
+process_t *current_process = NULL;
+
+void *kzalloc(size_t size) { (void)size; return NULL; }
+void kfree(void *ptr, size_t size) { (void)ptr; (void)size; }
+int kprintf(const char *fmt, ...) { (void)fmt; return 0; }
+
+/*
+ * fb_console_draw_cell_at() now renders cells through fb_imageblit() (and
+ * scroll/clear through fb_copyarea()/fb_fillrect()) instead of poking
+ * fb_putpixel directly.  Pull in the real fb_ops.c so those blitters
+ * actually paint fb_mem; its linear 32bpp fast path keys off
+ * fb.putpixel == linear_fb_putpixel, which reset_state() wires up.
+ */
+void linear_fb_putpixel(int x, int y, uint32_t color) {
+    fb_mem[(size_t)y * TEST_FB_WIDTH + (size_t)x] = color;
+}
+void fb_planar_present_userfb(void) {}
+size_t tty_inject_input_locked(struct tty *tty, const char *buf, size_t len) {
+    (void)tty; (void)buf; return len;
+}
+
+#include "../../sys/drivers/video/fb_ops.c"
 
 static void reset_state(void) {
     memset(&fb, 0, sizeof(fb));
@@ -189,6 +241,8 @@ static void reset_state(void) {
     fb.pitch = TEST_FB_WIDTH * 4;
     fb.bpp = 32;
     fb.addr = fb_mem;
+    /* fb_ops.c's linear 32bpp fast path requires this exact putpixel. */
+    fb.putpixel = linear_fb_putpixel;
     fb_active = 1;
     registered_backend = NULL;
     viewport_x = -1;
@@ -206,10 +260,14 @@ static void reset_state(void) {
     tty_register_count = 0;
     memset(tty_registered_names, 0, sizeof(tty_registered_names));
     console_tty = NULL;
+    memset(test_vt_cells, 0, sizeof(test_vt_cells));
+    memset(test_vt_alt_cells, 0, sizeof(test_vt_alt_cells));
     for (int i = 0; i < VT_MAX; i++) {
         test_vts[i].id = i;
         test_vts[i].cursor_visible = 1;
         test_vts[i].cursor_blink = 1;
+        test_vts[i].buffer = test_vt_cells[i];
+        test_vts[i].alt_buffer = test_vt_alt_cells[i];
     }
     cursor_x = 0;
     cursor_y = 0;
@@ -340,20 +398,22 @@ static void test_tty_winsize_tracks_framebuffer_geometry(void) {
 }
 
 static void test_clear_marks_full_screen_dirty(void) {
-    int x;
-    int y;
-    int w;
-    int h;
-
     reset_state();
+    /*
+     * fb_console_clear() now marks the full screen dirty and flushes it
+     * immediately (RAM-shadow present path), resetting the dirty state — so
+     * observe the full-screen rectangle through the flush callback instead
+     * of a leftover pending dirty rect.
+     */
+    fb.flush = mock_flush;
     fb_console_clear();
 
-    assert(fb_console_dirty_pending() == 1);
-    fb_console_get_dirty_rect(&x, &y, &w, &h);
-    assert(x == 0);
-    assert(y == 0);
-    assert(w == 640);
-    assert(h == 480);
+    assert(flush_calls == 1);
+    assert(flush_x == 0);
+    assert(flush_y == 0);
+    assert(flush_w == 640);
+    assert(flush_h == 480);
+    assert(fb_console_dirty_pending() == 0);
     assert(viewport_x == 0);
     assert(viewport_y == 0);
 }

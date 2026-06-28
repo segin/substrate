@@ -147,9 +147,25 @@ void lapic_send_ipi_all_excl_self(uint8_t vector) {
 }
 
 struct process *current_process = NULL;
-thread_t threads[MAX_THREADS];
+/* Kernel allocates threads dynamically now; this is a scratch fixture. */
+#define NTEST_THREADS 64
+thread_t threads[NTEST_THREADS];
 unsigned char sig_trampoline_code[1];
 unsigned int sig_trampoline_size = 0;
+
+/* CPU feature probes and the kmem/vm-page helpers pmap.c now calls on
+ * paths the shootdown tests don't exercise — minimal stubs so it links. */
+int i386_cpu_has_pae(void) { return 0; }
+int i386_cpu_has_pcid(void) { return 0; }
+int i386_cpu_has_pge(void) { return 0; }
+int i386_cpu_has_pse(void) { return 0; }
+void vm_page_hold(vm_page_t *m) { (void)m; }
+void vm_page_unhold(vm_page_t *m) { (void)m; }
+void *kmalloc(size_t size) { return calloc(1, size); }
+void kfree(void *ptr, size_t size) { (void)size; free(ptr); }
+int kprintf(const char *fmt, ...) { (void)fmt; return 0; }
+thread_t *thread_first(void) { return NULL; }
+thread_t *thread_next(thread_t *t) { (void)t; return NULL; }
 
 #include "../../sys/arch/i386/pmap.c"
 

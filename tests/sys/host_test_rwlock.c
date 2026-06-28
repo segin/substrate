@@ -9,7 +9,9 @@
 #include <sys/proc.h>
 #include <kern/sched.h>
 
-thread_t threads[MAX_THREADS];
+/* Kernel allocates threads dynamically now; this is a scratch fixture. */
+#define NTEST_THREADS 64
+thread_t threads[NTEST_THREADS];
 thread_t *current_thread;
 process_t *current_process;
 
@@ -51,7 +53,7 @@ void panic(const char *msg) {
 
 static void reset_env(void) {
     memset(threads, 0, sizeof(threads));
-    for (int i = 0; i < MAX_THREADS; i++) {
+    for (int i = 0; i < NTEST_THREADS; i++) {
         threads[i].tid = -1;
     }
     last_panic = NULL;

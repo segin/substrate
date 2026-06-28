@@ -31,10 +31,15 @@ void spinlock_release(spinlock_t *lock) {
     lock->cpu_id = 0xFFFFFFFFu;
 }
 
-void panic(const char *fmt, ...) {
-    (void)fmt;
+void panic(const char *msg) {
+    (void)msg;
     abort();
 }
+
+void preempt_disable(void) {}
+void preempt_enable_noresched(void) {}
+void sched_poll_wake_pollers(void) {}
+void *kmalloc(size_t size) { return malloc(size); }
 
 #include "../../sys/kern/runqueue.c"
 #include "../../sys/kern/turnstile.c"
