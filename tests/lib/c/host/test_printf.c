@@ -5,6 +5,7 @@
  * host libc for a battery of directives.  Integer/string/char/pointer/
  * positional cases are strict; float cases are informational (the float
  * formatter is unchanged by this work and may differ from glibc rounding). */
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>

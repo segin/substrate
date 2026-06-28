@@ -3,6 +3,8 @@
  */
 
 #include <stdint.h>
+
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 #include <vm/vm_map.h>
 #include <vm/vm_object.h>
 #include <arch/i386/pmap.h>
@@ -243,7 +245,7 @@ void test_vm_map_benchmark(void) {
     uint64_t total_cycles = end_cycles - start_cycles;
 
     char buf[128];
-    sprintf(buf, "  Benchmark: %d lookups took %u cycles (avg %u)\n",
+    snprintf(buf, sizeof(buf), "  Benchmark: %d lookups took %u cycles (avg %u)\n",
             iterations * entries, (uint32_t)total_cycles, (uint32_t)(total_cycles / (iterations * entries)));
     kprint(buf);
 
