@@ -298,7 +298,7 @@ int main(int argc, char **argv)
             if (need > lc) { lc = need + 64; line = realloc(line, lc);
                              if (!line) xa_fatal("realloc"); }
             if (ll) line[ll++] = ' ';
-            strcpy(line + ll, item); ll += strlen(item);
+            strlcpy(line + ll, item, lc - ll); ll += strlen(line + ll);
             free(item);
             if (eol) { run_replace_line(&o, line ? line : ""); ll = 0; if (line) line[0] = '\0'; }
         }
