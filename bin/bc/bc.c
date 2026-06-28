@@ -969,8 +969,10 @@ ast_node_t *parse_top_level(void) {
                 expr_list_t *item = calloc(1, sizeof(expr_list_t));
                 ast_node_t *v = ast_new(AST_VAR);
                 if (byref) {
-                    char *nm = malloc(strlen(tok_str) + 2);
-                    nm[0] = '*'; strcpy(nm + 1, tok_str);
+                    size_t nm_len = strlen(tok_str) + 2;
+                    char *nm = malloc(nm_len);
+                    if (!nm) { perror("malloc"); exit(1); }
+                    snprintf(nm, nm_len, "*%s", tok_str);
                     v->id = nm;
                 } else {
                     v->id = strdup(tok_str);
