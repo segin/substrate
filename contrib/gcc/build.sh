@@ -58,7 +58,7 @@ STAGE1_PREFIX="${STAGE1_PREFIX:-/opt/substrate}"
 # image with no `as`/`ld`).  build-rootfs.sh --toolchain overlays BOTH
 # dist-toolchain (binutils) and /tmp/gcc-stage2-staging (gcc).
 STAGE2_DESTDIR="${STAGE2_DESTDIR:-/tmp/gcc-stage2-staging}"
-ENABLE_LANGUAGES="${ENABLE_LANGUAGES:-c}"
+ENABLE_LANGUAGES="${ENABLE_LANGUAGES:-c,c++}"
 
 SRC_TREE="$(ls -d "$HERE"/build/gcc-*/ 2>/dev/null | head -1 || true)"
 SRC_TREE="${SRC_TREE%/}"
@@ -74,10 +74,10 @@ echo "==> ENABLE_LANGUAGES   = $ENABLE_LANGUAGES"
 
 DISABLES="\
   --disable-multilib --disable-nls --disable-bootstrap \
-  --disable-libstdcxx --disable-libgomp --disable-libitm \
+  --disable-libgomp --disable-libitm \
   --disable-libsanitizer --disable-libquadmath --disable-libvtv \
   --disable-libssp --disable-libada --disable-libphobos \
-  --disable-libcc1 --disable-shared"
+  --disable-libcc1 --enable-shared"
 
 if [ "$STAGE" = 1 ]; then
     # Stage-1 cross-toolchain.  Needs binutils stage 1 already
@@ -106,6 +106,7 @@ if [ "$STAGE" = 1 ]; then
         --with-sysroot="$SUBSTRATE_TOP/dist" \
         --with-arch=i486 \
         --with-tune=i486 \
+        --enable-threads=posix \
         --enable-languages="$ENABLE_LANGUAGES" \
         $DISABLES
 
@@ -182,6 +183,7 @@ if [ "$STAGE" = 2 ]; then
         --with-sysroot=/ \
         --with-arch=i486 \
         --with-tune=i486 \
+        --enable-threads=posix \
         --enable-languages="$ENABLE_LANGUAGES" \
         $DISABLES \
         CC="${TARGET_TRIPLE}-gcc" \

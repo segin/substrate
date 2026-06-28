@@ -170,6 +170,45 @@
 #define PT_ARM_EXIDX    0x70000001
 #define PT_AARCH64_MEMTAG_MTE 0x70000002
 
+/* Dynamic-section entry tags (PT_DYNAMIC array). */
+#define DT_NULL         0
+#define DT_NEEDED       1
+#define DT_PLTRELSZ     2
+#define DT_PLTGOT       3
+#define DT_HASH         4
+#define DT_STRTAB       5
+#define DT_SYMTAB       6
+#define DT_RELA         7
+#define DT_RELASZ       8
+#define DT_RELAENT      9
+#define DT_STRSZ        10
+#define DT_SYMENT       11
+#define DT_INIT         12
+#define DT_FINI         13
+#define DT_SONAME       14
+#define DT_RPATH        15
+#define DT_SYMBOLIC     16
+#define DT_REL          17
+#define DT_RELSZ        18
+#define DT_RELENT       19
+#define DT_PLTREL       20
+#define DT_DEBUG        21
+#define DT_TEXTREL      22
+#define DT_JMPREL       23
+#define DT_BIND_NOW     24
+#define DT_INIT_ARRAY   25
+#define DT_FINI_ARRAY   26
+#define DT_INIT_ARRAYSZ 27
+#define DT_FINI_ARRAYSZ 28
+#define DT_RUNPATH      29
+#define DT_FLAGS        30
+#define DT_GNU_HASH     0x6ffffef5
+#define DT_VERSYM       0x6ffffff0
+#define DT_VERDEF       0x6ffffffc
+#define DT_VERDEFNUM    0x6ffffffd
+#define DT_VERNEED      0x6ffffffe
+#define DT_VERNEEDNUM   0x6fffffff
+
 /* Segment flags */
 #define PF_X    0x1
 #define PF_W    0x2
@@ -282,6 +321,15 @@ typedef struct {
     Elf32_Word  p_flags;
     Elf32_Word  p_align;
 } Elf32_Phdr;
+
+/* ELF32 dynamic-section entry */
+typedef struct {
+    Elf32_Sword d_tag;
+    union {
+        Elf32_Word  d_val;
+        Elf32_Addr  d_ptr;
+    } d_un;
+} Elf32_Dyn;
 
 /* ELF64 program header */
 typedef struct {

@@ -6,58 +6,66 @@ __register_frame_info registry, and libgcc never used dl_iterate_phdr to
 find another DSO's .eh_frame.  A throw inside a .so therefore reached
 std::terminate -> abort instead of the caller's catch.
 
-Four changes mirror what a stock GNU/Linux toolchain does:
+Mirror what a stock GNU/Linux toolchain does:
 
  * libgcc/unwind-dw2-fde-dip.c, libgcc/crtstuff.c: define
    USE_PT_GNU_EH_FRAME for __substrate__ so the DWARF unwinder locates
    each loaded object's PT_GNU_EH_FRAME via dl_iterate_phdr(3) (provided
    by substrate's ld.so + libc) and crtbegin stops using the per-module
    frame registry.
- * gcc/config/i386/substrate.h: pass --eh-frame-hdr so ld emits the
-   PT_GNU_EH_FRAME segment the unwinder reads.
+ * gcc/config/i386/substrate.h: define LINK_EH_SPEC ("--eh-frame-hdr")
+   so ld emits the PT_GNU_EH_FRAME segment (the canonical hook expanded
+   by gcc's default LINK_COMMAND_SPEC via %(link_eh)).
  * gcc/config.gcc: add t-slibgcc to the driver tmake_file so g++ links
-   the shared libgcc_s.so (one unwinder/registry across all modules) and
-   honours -shared-libgcc.
+   the shared libgcc_s.so (one unwinder/registry across all modules),
+   and select thread_file=posix so libstdc++ gets std::mutex etc.
 
 --- a/gcc/config/i386/substrate.h
 +++ b/gcc/config/i386/substrate.h
-@@ -19,6 +19,7 @@
- #undef  LINK_SPEC
- #define LINK_SPEC                                                       \
-   "-m " LINK_EMULATION " "                                              \
-+  "--eh-frame-hdr "                                                     \
-   "%{shared:-shared} "                                                  \
-   "%{!shared:                                                           \
-     %{!static:                                                          \
+@@ -26,6 +26,14 @@
+       -dynamic-linker " GLIBC_DYNAMIC_LINKER "}                         \
+     %{static:-static}}"
+ 
++/* Emit the PT_GNU_EH_FRAME (.eh_frame_hdr) segment so libgcc's unwinder
++   can find each module's exception frames via dl_iterate_phdr — required
++   for C++ exceptions to unwind across shared libraries.  This is the
++   canonical hook (gcc's default LINK_COMMAND_SPEC expands %(link_eh));
++   putting it in LINK_SPEC did not reach ld. */
++#undef  LINK_EH_SPEC
++#define LINK_EH_SPEC "%{!static:--eh-frame-hdr} "
++
+ /* startfile / endfile specs — mirror the substrate userland layout.
+    Substrate's crt0.o + crt1.o live in lib/c/ at build time and are
+    installed as /usr/lib/crt0.o (the entry point) and the standard
 --- a/libgcc/unwind-dw2-fde-dip.c
 +++ b/libgcc/unwind-dw2-fde-dip.c
-@@ -83,6 +83,10 @@
+@@ -80,6 +80,10 @@
+ #if !defined(inhibit_libc) && defined(HAVE_LD_EH_FRAME_HDR) \
+     && defined(TARGET_DL_ITERATE_PHDR) \
+     && defined(__sun__) && defined(__svr4__)
++# define USE_PT_GNU_EH_FRAME
++#endif
++
++#if !defined(inhibit_libc) && defined(__substrate__)
  # define USE_PT_GNU_EH_FRAME
  #endif
  
-+#if !defined(inhibit_libc) && defined(__substrate__)
-+# define USE_PT_GNU_EH_FRAME
-+#endif
-+
- #if defined(USE_PT_GNU_EH_FRAME)
- 
- #include <link.h>
 --- a/libgcc/crtstuff.c
 +++ b/libgcc/crtstuff.c
-@@ -85,6 +85,10 @@
+@@ -83,6 +83,10 @@
+ #if defined(TARGET_DL_ITERATE_PHDR) && \
+    (defined(__DragonFly__) || defined(__FreeBSD__) || defined(__NetBSD__))
  #define BSD_DL_ITERATE_PHDR_AVAILABLE
- #endif
- 
-+#if !defined(inhibit_libc) && defined(__substrate__)
-+# define USE_PT_GNU_EH_FRAME
 +#endif
 +
++#if !defined(inhibit_libc) && defined(__substrate__)
++# define USE_PT_GNU_EH_FRAME
+ #endif
+ 
  #if defined(OBJECT_FORMAT_ELF) \
-     && !defined(OBJECT_FORMAT_FLAT) \
-     && defined(HAVE_LD_EH_FRAME_HDR) \
 --- a/gcc/config.gcc
 +++ b/gcc/config.gcc
-@@ -2040,7 +2040,7 @@
+@@ -2040,9 +2040,12 @@
  	# i386/substrate.h carries the i386-specific link/specs glue
  	# (dynamic linker is /sbin/ld.so, crt0 is in /usr/lib).
  	tm_file="${tm_file} i386/unix.h i386/att.h elfos.h glibc-stdint.h substrate.h i386/substrate.h"
@@ -65,4 +73,9 @@ Four changes mirror what a stock GNU/Linux toolchain does:
 +	tmake_file="${tmake_file} i386/t-crtstuff t-slibgcc"
  	gas=yes
  	gnu_ld=yes
++	case ${enable_threads} in
++	  "" | yes | posix) thread_file='posix' ;;
++	esac
  	;;
+ i[34567]86-*-freebsd*)
+ 	tm_file="${tm_file} i386/unix.h i386/att.h elfos.h ${fbsd_tm_file} i386/freebsd.h"

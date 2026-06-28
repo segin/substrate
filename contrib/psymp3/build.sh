@@ -77,6 +77,7 @@ export PKG_CONFIG_LIBDIR="${SR}/lib/pkgconfig"
     CFLAGS="-march=i486 -mtune=i486 -O2 -g -fno-pie -fno-stack-protector" \
     CXXFLAGS="-march=i486 -mtune=i486 -O2 -g -fno-pie -fno-stack-protector" \
     LDFLAGS="-L${SR}/lib -Wl,-rpath-link,${SR}/lib -Wl,--allow-shlib-undefined" \
+    LIBS="-lpthread" \
     --disable-mpris --disable-rapidcheck --disable-test-harness --disable-final
 
 # --- 3. Build --------------------------------------------------------------
