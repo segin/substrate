@@ -36,9 +36,13 @@ volume label, and mounts the one whose label equals
 This fails with
 .B ENODEV
 if no device carries that label.  Volume-label reading is provided by the
-filesystem driver (currently ext2's
-.IR s_volume_name ;
-filesystems with no label concept are skipped).
+filesystem driver: ext2
+.RI ( s_volume_name ),
+FAT
+.RI ( "root-dir volume-label entry, else BS_VolLab" ),
+and UDF
+.RI ( "LVD logical volume identifier" ).
+Filesystems with no label concept are skipped.
 .PP
 .I mountflags
 is a bitmask of:

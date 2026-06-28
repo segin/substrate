@@ -1,4 +1,5 @@
 #include <fs/fat/fat.h>
+#include <drivers/storage/blkdev.h>
 #include <kern/console.h>
 #include <string.h>
 #include <sys/errno.h>
@@ -1571,9 +1572,92 @@ static int fat_rename(fs_node_t *old_parent, const char *old_name,
     return 0;
 }
 
+/*
+ * Copy an 11-byte FAT label (8.3, space-padded) into `label`, trimming
+ * trailing spaces.  Rejects empty labels and the mkfs "NO NAME" default.
+ */
+static int fat_copy_label(const char *src, char *label, size_t len) {
+    size_t n = 0;
+    for (int i = 0; i < 11 && n + 1 < len; i++) {
+        label[n++] = src[i];
+    }
+    while (n > 0 && label[n - 1] == ' ') n--;
+    label[n] = '\0';
+    if (n == 0 || strncmp(label, "NO NAME", 7) == 0) return -1;
+    return 0;
+}
+
+/*
+ * Read a FAT volume label off the raw device without mounting.  The
+ * authoritative label is a root-directory entry with ATTR_VOLUME_ID set;
+ * the boot sector's BS_VolLab is a (sometimes stale) copy used as a
+ * fallback.  The BPB and 0x55AA boot signature are validated so an
+ * arbitrary device is not mistaken for FAT.
+ */
+int fat_read_label(blkdev_t *dev, char *label, size_t len) {
+    if (!dev || !label || len == 0) return -1;
+    uint8_t boot[512];
+    if (blkdev_read_bytes(dev, 0, sizeof(boot), boot) != sizeof(boot)) return -1;
+    if (boot[510] != 0x55 || boot[511] != 0xAA) return -1;
+
+    fat_bpb_t *bpb = (fat_bpb_t *)boot;
+    uint32_t bps = bpb->bytes_per_sector;
+    if (bps < 512 || bps > 4096 || (bps & (bps - 1)) != 0) return -1;
+    if (bpb->sectors_per_cluster == 0 ||
+        (bpb->sectors_per_cluster & (bpb->sectors_per_cluster - 1)) != 0 ||
+        bpb->fat_count == 0 || bpb->reserved_sectors == 0) return -1;
+
+    uint32_t root_dir_sectors =
+        ((uint32_t)bpb->root_entries * 32 + bps - 1) / bps;
+    uint32_t fat_size = bpb->fat_size_16;
+    const char *bs_label;
+    uint32_t first_root_sector, scan_sectors;
+
+    if (fat_size == 0) {
+        /* FAT32: ext BPB carries fat_size_32, root_cluster, BS_VolLab. */
+        fat32_ext_bpb_t *ext = (fat32_ext_bpb_t *)(boot + sizeof(fat_bpb_t));
+        fat_size = ext->fat_size_32;
+        bs_label = ext->volume_label;
+        if (fat_size == 0) return -1;
+        uint32_t first_data = bpb->reserved_sectors +
+            (uint32_t)bpb->fat_count * fat_size + root_dir_sectors;
+        if (ext->root_cluster < 2)
+            return fat_copy_label(bs_label, label, len);
+        first_root_sector = first_data +
+            (ext->root_cluster - 2) * bpb->sectors_per_cluster;
+        scan_sectors = bpb->sectors_per_cluster;
+    } else {
+        /* FAT12/16: fixed root directory; BS_VolLab at boot offset 43. */
+        bs_label = (const char *)(boot + sizeof(fat_bpb_t) + 7);
+        first_root_sector =
+            bpb->reserved_sectors + (uint32_t)bpb->fat_count * fat_size;
+        scan_sectors = root_dir_sectors;
+    }
+
+    if (scan_sectors > 16) scan_sectors = 16;   /* bound the probe */
+    uint8_t buf[4096];
+    for (uint32_t s = 0; s < scan_sectors; s++) {
+        if (blkdev_read_bytes(dev, (uint64_t)(first_root_sector + s) * bps,
+                              bps, buf) != bps)
+            break;
+        for (uint32_t off = 0; off + 32 <= bps; off += 32) {
+            fat_dirent_t *de = (fat_dirent_t *)(buf + off);
+            uint8_t c0 = (uint8_t)de->name[0];
+            if (c0 == 0x00) { s = scan_sectors; break; }  /* end of directory */
+            if (c0 == 0xE5) continue;                      /* deleted entry */
+            if ((de->attr & 0x0F) == 0x0F) continue;       /* long-name slot */
+            if (de->attr & FAT_ATTR_VOLUME_ID) {
+                if (fat_copy_label(de->name, label, len) == 0) return 0;
+            }
+        }
+    }
+    return fat_copy_label(bs_label, label, len);
+}
+
 static filesystem_t fat_filesystem = {
     .name = "fat",
     .mount = fat_mount,
+    .read_label = fat_read_label,
 };
 
 void fat_init(void) {

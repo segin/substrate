@@ -13,6 +13,7 @@
 #include <fs/udf/udf.h>
 #include <sys/proc.h>
 #include <string.h>
+#include <drivers/storage/blkdev.h>
 
 /* UDF filesystem structure registration */
 static filesystem_t udf_filesystem;
@@ -766,9 +767,93 @@ static int udf_unmount(fs_node_t *root) {
 }
 
 /* VFS filesystem structure */
+/*
+ * Decode a UDF dstring (ECMA-167 1/7.2.12) into an ASCII label.  The
+ * field's last byte holds the used length (the compression-id byte plus
+ * the character bytes); byte 0 is the compression id (8 = 8-bit, 16 =
+ * 16-bit big-endian).  Non-ASCII code points become '?'.
+ */
+static int udf_decode_dstring(const char *field, size_t field_len,
+                              char *out, size_t out_len) {
+    if (out_len == 0) return -1;
+    out[0] = '\0';
+    uint8_t complen = (uint8_t)field[field_len - 1];
+    if (complen < 1 || complen > field_len) return -1;
+    uint8_t comp = (uint8_t)field[0];
+    size_t n = 0;
+    if (comp == 8) {
+        for (size_t i = 1; i < complen && n + 1 < out_len; i++) {
+            unsigned char c = (unsigned char)field[i];
+            out[n++] = (c >= 0x20 && c < 0x7f) ? (char)c : '?';
+        }
+    } else if (comp == 16) {
+        for (size_t i = 1; i + 1 < complen && n + 1 < out_len; i += 2) {
+            unsigned int c = ((unsigned char)field[i] << 8) |
+                             (unsigned char)field[i + 1];
+            out[n++] = (c >= 0x20 && c < 0x7f) ? (char)c : '?';
+        }
+    } else {
+        return -1;
+    }
+    while (n > 0 && out[n - 1] == ' ') n--;
+    out[n] = '\0';
+    return n > 0 ? 0 : -1;
+}
+
+/*
+ * Read a UDF volume label off the raw device without mounting: locate the
+ * Anchor VDP at sector 256, walk the main Volume Descriptor Sequence to the
+ * Logical Volume Descriptor, and decode its logical_volume_id.  Tag
+ * checksums gate recognition so a non-UDF device is rejected.
+ */
+int udf_read_label(blkdev_t *dev, char *label, size_t len) {
+    if (!dev || !label || len == 0) return -1;
+    uint8_t *buf = kmalloc(UDF_SECTOR_SIZE);
+    if (!buf) return -1;
+    int rc = -1;
+    struct udf_avdp *avdp;
+    uint32_t vds_start, vds_count, i;
+
+    if (blkdev_read_bytes(dev, (uint64_t)UDF_AVDP_SECTOR * UDF_SECTOR_SIZE,
+                          UDF_SECTOR_SIZE, buf) != UDF_SECTOR_SIZE)
+        goto out;
+    avdp = (struct udf_avdp *)buf;
+    if (avdp->tag.tag_id != UDF_TAG_ANCHOR_VDP ||
+        avdp->tag.tag_location != UDF_AVDP_SECTOR ||
+        udf_tag_checksum(&avdp->tag) != avdp->tag.tag_checksum)
+        goto out;   /* not a UDF volume */
+
+    vds_start = avdp->main_vds_extent.location;
+    vds_count = avdp->main_vds_extent.length / UDF_SECTOR_SIZE;
+    if (vds_count > 64) vds_count = 64;   /* bound the scan */
+
+    for (i = 0; i < vds_count; i++) {
+        struct udf_tag *tag;
+        if (blkdev_read_bytes(dev, (uint64_t)(vds_start + i) * UDF_SECTOR_SIZE,
+                              UDF_SECTOR_SIZE, buf) != UDF_SECTOR_SIZE)
+            continue;
+        tag = (struct udf_tag *)buf;
+        if (tag->tag_location != vds_start + i ||
+            udf_tag_checksum(tag) != tag->tag_checksum)
+            continue;
+        if (tag->tag_id == UDF_TAG_TERMINATING) break;
+        if (tag->tag_id == UDF_TAG_LOGICAL_VD) {
+            struct udf_lvd *lvd = (struct udf_lvd *)buf;
+            rc = udf_decode_dstring(lvd->logical_volume_id,
+                                    sizeof(lvd->logical_volume_id), label, len);
+            break;
+        }
+    }
+
+out:
+    kfree(buf, UDF_SECTOR_SIZE);
+    return rc;
+}
+
 static filesystem_t udf_filesystem = {
     .name = "udf",
     .mount = udf_mount,
+    .read_label = udf_read_label,
 };
 
 /*

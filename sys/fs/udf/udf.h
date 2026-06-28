@@ -54,6 +54,10 @@ struct udf_tag {
 /* Driver initialization */
 void udf_init(void);
 
+struct blkdev;
+/* Read the UDF volume label (LVD logical_volume_id) from a raw device. */
+int udf_read_label(struct blkdev *dev, char *label, size_t len);
+
 /*
  * Extent Descriptor (ECMA-167 3/7.1)
  * Describes location and length of an extent.

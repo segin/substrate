@@ -112,6 +112,9 @@ void fat_init(void);
 
 // Public declarations
 fs_node_t *fat_mount(const char *device, uint32_t flags, void *data);
+struct blkdev;
+/* Read the FAT volume label (root-dir ATTR_VOLUME_ID, or BS_VolLab). */
+int fat_read_label(struct blkdev *dev, char *label, size_t len);
 size_t fat_file_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer);
 struct dirent *fat_readdir(fs_node_t *node, uint64_t index);
 fs_node_t *fat_finddir(fs_node_t *node, char *name);
