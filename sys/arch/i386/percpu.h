@@ -30,6 +30,8 @@ struct percpu_data {
     // Statistics
     uint64_t ticks;             // Timer ticks since boot
     uint64_t idle_ticks;        // Ticks spent idle
+    uint64_t user_ticks;        // Ticks spent in user mode
+    uint64_t system_ticks;      // Ticks spent in kernel mode
     
     // Locking
     volatile uint32_t lock;     // Per-CPU lock

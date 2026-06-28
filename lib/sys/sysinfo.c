@@ -197,8 +197,42 @@ int sys_cpu_info(int cpu, sys_cpuinfo_t *info) {
 int sys_cpu_times(int cpu, sys_cputimes_t *times) {
     if (!times || cpu < 0) { errno = EINVAL; return -1; }
     memset(times, 0, sizeof(*times));
-    /* TODO: parse /proc/stat once substrate procfs emits it. */
-    errno = ENOSYS;
+
+    char buf[4096];
+    if (read_proc_file("/proc/stat", buf, sizeof(buf)) < 0) {
+        errno = ENOSYS;
+        return -1;
+    }
+
+    char target[32];
+    snprintf(target, sizeof(target), "cpu%d ", cpu);
+    size_t target_len = strlen(target);
+
+    char *line = buf;
+    while (line && *line) {
+        char *next_line = strchr(line, '\n');
+        if (next_line) {
+            *next_line = '\0';
+            next_line++;
+        }
+
+        if (strncmp(line, target, target_len) == 0) {
+            unsigned long long user = 0, nice = 0, system = 0, idle = 0, iowait = 0, irq = 0, softirq = 0;
+            int n = sscanf(line + target_len, "%llu %llu %llu %llu %llu %llu %llu",
+                           &user, &nice, &system, &idle, &iowait, &irq, &softirq);
+            if (n >= 4) {
+                times->system  = system;
+                times->idle    = idle;
+                times->iowait  = iowait;
+                times->irq     = irq;
+                times->softirq = softirq;
+                return 0;
+            }
+        }
+        line = next_line;
+    }
+
+    errno = ENOENT;
     return -1;
 }
 
