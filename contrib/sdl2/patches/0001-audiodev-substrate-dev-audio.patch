@@ -1,0 +1,32 @@
+Subject: [PATCH] audio: use /dev/audio on substrate (Sun/SADA device path)
+
+Substrate's audio device is the Sun/NetBSD-style /dev/audio (alias to
+/dev/audio0), not the OSS /dev/dsp.  SDL's NetBSD audio backend is the
+one compiled in for substrate (the build routes the linux host case to
+it), but SDL_audiodev.c only maps _PATH_DEV_DSP to "/dev/audio" when
+__NETBSD__ / __OPENBSD__ is defined.  The substrate cross compiler
+defines __substrate__, not __NETBSD__, so _PATH_DEV_DSP fell back to
+"/dev/dsp" — which does not exist on substrate.
+
+SDL_EnumUnixAudioDevices() therefore found zero output devices, and
+NETBSDAUDIO_OpenDevice() (called with devname == NULL by
+SDL_OpenAudioDevice(NULL, ...)) resolved the default device name via
+SDL_GetAudioDeviceName(0), got NULL, and failed with
+"No such audio device".  Every SDL application (PsyMP3) then opened no
+audio device, no audio thread/callback ran, and the playback clock —
+which PsyMP3 advances from the SDL callback — stayed stuck at 0:00.
+
+Add __substrate__ to the condition so the default device path is
+/dev/audio, matching the NetBSD/OpenBSD branch.
+
+--- a/src/audio/SDL_audiodev.c
++++ b/src/audio/SDL_audiodev.c
+@@ -33,7 +33,7 @@
+ #include "SDL_audiodev_c.h"
+
+ #ifndef _PATH_DEV_DSP
+-#if defined(__NETBSD__) || defined(__OPENBSD__)
++#if defined(__NETBSD__) || defined(__OPENBSD__) || defined(__substrate__)
+ #define _PATH_DEV_DSP "/dev/audio"
+ #else
+ #define _PATH_DEV_DSP "/dev/dsp"

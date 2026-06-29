@@ -8,8 +8,11 @@ Cross-build of **SDL 2.30.9** as a patch series against the upstream release
 
 - **Video:** X11 (substrate's Xlib client stack) + dummy + offscreen.
   wayland / kmsdrm / vulkan / opengl(es) / directfb are off (no driver on target).
-- **Audio:** dummy + disk only — substrate's `/dev/audio` is Sun-SADA, not OSS,
-  so a native audio backend is follow-up work.
+- **Audio:** the **NetBSD `audio(4)` backend** drives substrate's Sun/SADA
+  `/dev/audio` (`SDL_AUDIO_DRIVER_NETBSD`), plus dummy + disk.  `build.sh`
+  routes SDL's `netbsd`-only audio case onto the linux host case (a one-line
+  `sed`) so the backend is compiled in, and substrate's `<sys/audioio.h>`
+  matches NetBSD 10's `audio_info` (sizeof 136) ioctl ABI byte-for-byte.
 - **Threads:** pthreads (libpthread, which gained `pthread_get/setschedparam`).
   **loadso:** dlopen (libdl).
 - joystick / haptic / sensor / power / libudev / dbus / hidapi are disabled
@@ -30,5 +33,14 @@ Cross-build of **SDL 2.30.9** as a patch series against the upstream release
   `SDL_INPUT_LINUXKD` from the generated `SDL_config.h`.
 - Added `linux/tiocl.h` to substrate's headers (the console `TIOCLINUX`
   sub-commands) — SDL's evdev keyboard referenced it; useful generally.
+- **`/dev/audio` device path** (`patches/0001-audiodev-substrate-dev-audio.patch`).
+  `SDL_audiodev.c` only maps the default device path to `/dev/audio` when
+  `__NETBSD__` / `__OPENBSD__` is defined; the substrate cross gcc defines
+  `__substrate__`, so it fell back to the OSS `/dev/dsp` (absent on substrate),
+  `SDL_EnumUnixAudioDevices()` found zero devices, and
+  `SDL_OpenAudioDevice(NULL, ...)` failed with "No such audio device".  The
+  patch adds `__substrate__` to that condition.  Symptom it fixed: PsyMP3
+  opened no audio device, no callback ran, and its playback clock stayed at
+  0:00.
 
 Build: `./fetch.sh && ./build.sh`.

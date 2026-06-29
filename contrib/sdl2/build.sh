@@ -4,8 +4,8 @@
 #
 # Video:   X11 (substrate ships the Xlib client stack) + the dummy driver.
 #          wayland/kmsdrm/vulkan/opengl/opengles are off (no driver on target).
-# Audio:   dummy + disk for now (substrate's /dev/audio is Sun-SADA, not OSS;
-#          a real backend is follow-up work).
+# Audio:   the NetBSD audio(4) backend on substrate's Sun-SADA /dev/audio
+#          (routed in via the sed below), plus dummy + disk.
 # Threads: pthreads (libpthread).  loadso: dlopen (libdl).
 #
 # Env: STAGE1_PREFIX (default /opt/substrate), DESTDIR, JOBS.
