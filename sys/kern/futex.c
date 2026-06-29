@@ -65,26 +65,43 @@ static int futex_read_timespec(void *uaddr, struct timespec *out) {
 }
 
 /*
- * Get physical address key for a user virtual address
+ * Get the key for a user virtual address.
  *
- * Futexes use physical addresses as keys so that shared memory
- * futexes work correctly across processes. Private futexes
- * could optimize by using (process_id, vaddr) tuple.
+ * IMPORTANT: the key is the VIRTUAL address, NOT the physical address.
  *
- * Returns NULL if page is not mapped.
+ * History / why this changed: futexes used to key on the physical address
+ * (pmap_extract), the idea being that a futex word in MAP_SHARED memory
+ * would resolve to the same key in every process that maps it.  But a
+ * physical key is NOT STABLE in substrate: anonymous user pages can change
+ * their backing physical frame underneath a parked waiter (COW fault, page
+ * migration, mmap/munmap frame reuse).  When that happens, the waiter is
+ * enqueued on the sleepq under the OLD physical frame while any subsequent
+ * FUTEX_WAKE computes the NEW physical frame (or 0 if the page is transiently
+ * unmapped) and finds no waiter -- the wakeup is permanently lost and the
+ * thread sleeps forever.  This deadlocked every std::mutex / std::condition_
+ * variable / std::shared_mutex heavy multithreaded program (PsyMP3's TagLib
+ * metadata path hung with all threads parked, never woken).
+ *
+ * The fix: key on the virtual address and scope the sleepq by PID (the
+ * private-futex path).  A virtual address is stable for the life of a wait
+ * regardless of how the page's physical backing moves, so a waiter and its
+ * waker -- which run in the same address space with the same uaddr -- always
+ * compute the same key.  Cross-process MAP_SHARED futexes (which the old
+ * physical scheme aimed at but never actually worked for, since the physical
+ * key was unstable anyway) are not used by anything in substrate; if needed
+ * they would require pinning the page for the wait's duration.
+ *
+ * Returns NULL only if the futex word is not currently accessible.
  */
 void *futex_get_key(uintptr_t uaddr) {
     if (!current_process || !current_process->pmap) return NULL;
 
-    /* Use pmap_extract to get physical address */
-    uintptr_t pa = pmap_extract(current_process->pmap, uaddr);
+    /* The page must be present (mapped) at wait/wake time, but we key on the
+     * virtual address, not the frame, so the key stays valid even if the
+     * frame is later remapped. */
+    if (pmap_extract(current_process->pmap, uaddr) == 0) return NULL;
 
-    /* Page must be present */
-    if (pa == 0) return NULL;
-
-    /* pmap_extract returns the exact physical address (including offset).
-       We use it directly as the key. */
-    return (void *)pa;
+    return (void *)uaddr;
 }
 
 /*
@@ -176,7 +193,10 @@ static void futex_handle_dead_owner(int *uaddr) {
         */
         void *key = futex_get_key((uintptr_t)uaddr);
         if (key) {
-            sleepq_wake_n(key, 1);
+            /* Futexes are keyed by virtual address and scoped per-process
+             * (see futex_get_key / sys_futex); wake on the matching private
+             * sleepq so robust-list cleanup actually reaches the waiter. */
+            sleepq_wake_n_private(key, 1);
         }
     }
 }
@@ -262,8 +282,11 @@ void futex_wake_exited_thread(int *uaddr) {
     /* Write 1 to signify exit */
     *uaddr = 1;
 
-    /* Wake all waiters (should only be one, but safe) */
-    sleepq_wake_all(key);
+    /* Wake all waiters on the per-process private sleepq (futexes key by
+     * virtual address scoped to the process — see futex_get_key/sys_futex).
+     * This is the join / CLONE_CHILD_CLEARTID wakeup; using the shared
+     * sleepq here would miss the joiner now that waiters park private. */
+    sleepq_wake_all_private(key);
 }
 
 /*
@@ -358,16 +381,28 @@ int sys_futex(int *uaddr, int op, int val, void *timeout, int *uaddr2, int val3)
 
     /* Extract operation and flags */
     int cmd = op & FUTEX_CMD_MASK;
-    int private_flag = (op & FUTEX_PRIVATE_FLAG) != 0;
 
-    void *key;
-    if (private_flag) {
-        key = (void *)uaddr;
-    } else {
-        key = futex_get_key((uintptr_t)uaddr);
-        if (!key) {
+    /*
+     * Every futex is keyed by VIRTUAL address and scoped to the calling
+     * process (i.e. always the "private" sleepq path), whether or not the
+     * caller set FUTEX_PRIVATE_FLAG.  A virtual key is stable across physical
+     * page remaps (see futex_get_key); a physical key is not, and an unstable
+     * key silently loses wakeups.  Scoping by PID keeps two processes that use
+     * the same virtual address from colliding on one sleepq.  True
+     * cross-process MAP_SHARED futexes are not used in substrate; were they
+     * needed, the shared page would have to be pinned for the wait.
+     */
+    int private_flag = 1;
+
+    /* key is the virtual address; futex_get_key validates the page is mapped
+     * for WAIT-class ops (WAKE doesn't strictly need it, but the check is
+     * cheap and rejects garbage addresses early).  WAKE on an unmapped word
+     * legitimately finds no waiters, so don't hard-fail it on a NULL key. */
+    void *key = (void *)uaddr;
+    if (cmd == FUTEX_WAIT || cmd == FUTEX_WAIT_BITSET ||
+        cmd == FUTEX_LOCK_PI || cmd == FUTEX_TRYLOCK_PI) {
+        if (!futex_get_key((uintptr_t)uaddr))
             return -EFAULT;
-        }
     }
 
     switch (cmd) {

@@ -1503,6 +1503,8 @@ struct procfs_tid_lookup {
     uint32_t sig_mask;
     int bound_cpu;
     uint32_t flags;
+    uintptr_t wait_chan;
+    uint64_t  sleep_expiry;
 };
 
 static void procfs_tid_lookup_visit(thread_t *t, void *arg) {
@@ -1520,6 +1522,8 @@ static void procfs_tid_lookup_visit(thread_t *t, void *arg) {
     l->sig_mask    = t->sig_mask;
     l->bound_cpu   = t->bound_cpu;
     l->flags       = t->flags;
+    l->wait_chan   = (uintptr_t)t->wait_chan;
+    l->sleep_expiry = t->sleep_expiry;
 }
 
 /* Linux-style single-character thread state. */
@@ -1694,11 +1698,14 @@ static size_t proc_pid_task_status_read(fs_node_t *node, off_t offset, size_t si
         "SigBlk:\t%08x\n"
         "Cpus_allowed:\t%08x\n"
         "BoundCpu:\t%d\n"
-        "Flags:\t%08x\n",
+        "Flags:\t%08x\n"
+        "WaitChan:\t%08x\n"
+        "SleepExp:\t%llu\n",
         l.name, l.pid, l.want_tid,
         procfs_thread_state_char(l.state),
         l.priority, l.sig_pending, l.sig_mask,
-        0u, l.bound_cpu, l.flags);
+        0u, l.bound_cpu, l.flags,
+        (unsigned)l.wait_chan, (unsigned long long)l.sleep_expiry);
     return procfs_emit_slice(buf, len, offset, size, buffer);
 }
 

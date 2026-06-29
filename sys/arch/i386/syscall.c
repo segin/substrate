@@ -3,6 +3,7 @@
 #include <arch/i386/syscall.h>
 #include <arch/i386/idt.h>
 #include <arch/i386/syscall_abi.h>
+#include <arch/i386/intr.h>
 
 /* NetBSD-style kernel internal includes */
 #include <kern/sched.h>
@@ -216,12 +217,17 @@ extern void uart_write(const char *data, size_t size);
 extern size_t strlen(const char *);
 
 static inline void syscall_trace_emit(const char *s) {
+    /* Serialize the whole write against other CPUs/threads and IRQs so
+     * concurrent tracers don't interleave bytes mid-line (the trace is the
+     * only place several threads hammer the UART at once). */
+    uint32_t f = intr_disable();
     if (syscall_trace_serial) {
         uart_write(s, strlen(s));
     } else {
         extern void kprint(const char *);
         kprint(s);
     }
+    intr_restore(f);
 }
 
 /*
@@ -294,7 +300,9 @@ void syscall_handler(registers_t *regs) {
         // Print Header
         // "SYSCALL: PID=1, Personality=Linux"
         char *pers_name = p->name ? (char*)p->name : "Unknown";
-        snprintf(buf, sizeof(buf), "SYSCALL: PID=%d, Personality=%s\n", current_process->pid, pers_name);
+        snprintf(buf, sizeof(buf), "SYSCALL: PID=%d TID=%d, Personality=%s\n",
+                 current_process->pid,
+                 current_thread ? current_thread->tid : -1, pers_name);
         syscall_trace_emit(buf);
 
         // Print Call start
