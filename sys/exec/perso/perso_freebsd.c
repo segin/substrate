@@ -11,6 +11,7 @@
 #include <sys/copy.h>
 #include <string.h>
 #include "perso_ipc_sem.h"
+#include "perso_ipc_shm.h"
 
 /* Personality Signal Hooks */
 extern void freebsd_sendsig(void *handler, int sig, uint32_t mask, uint32_t flags, void *regs);
@@ -20,6 +21,10 @@ static void *freebsd_syscalls[MAX_SYSCALLS] = {
     [FREEBSD_SYS_semget]   = (void *)&freebsd_sys_semget,
     [FREEBSD_SYS_semop]    = (void *)&freebsd_sys_semop,
     [FREEBSD_SYS_semctl]   = (void *)&freebsd_sys___semctl,
+    [FREEBSD_SYS_shmget]   = (void *)&freebsd_sys_shmget,
+    [FREEBSD_SYS_shmat]    = (void *)&freebsd_sys_shmat,
+    [FREEBSD_SYS_shmdt]    = (void *)&freebsd_sys_shmdt,
+    [FREEBSD_SYS_shmctl]   = (void *)&freebsd_sys_shmctl,
     [FREEBSD_SYS_exit]     = &sys_exit,
     [FREEBSD_SYS_fork]     = &sys_fork,
     [FREEBSD_SYS_read]     = &sys_read,

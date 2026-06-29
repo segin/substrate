@@ -156,9 +156,14 @@ int vm_fault(vm_map_t *map, uintptr_t va, uint8_t prot) {
          * pager carries the cache-mode hint (set by /dev/fb0's mmap); WC
          * needs PAT, so fall back to PCD when it isn't available. */
         uint32_t cache_flags = PTE_PCD;
-        if (vm_pager_device_cache_mode(first_obj->pager) == VM_PAGER_CACHE_WC &&
-            i386_cpu_pat_wc_enabled()) {
+        uint8_t cmode = vm_pager_device_cache_mode(first_obj->pager);
+        if (cmode == VM_PAGER_CACHE_WC && i386_cpu_pat_wc_enabled()) {
             cache_flags = PTE_PAT | PTE_PWT;
+        } else if (cmode == VM_PAGER_CACHE_WB) {
+            /* Plain write-back cacheable RAM (System V shared memory).  Not
+             * MMIO: leave all cache-control bits clear so the shared pages are
+             * fully cached and cross-process coherence is the CPU's job. */
+            cache_flags = 0;
         }
         if (pmap_enter(map->pmap, page_va, device_phys, enter_prot, cache_flags) < 0) {
             goto out;

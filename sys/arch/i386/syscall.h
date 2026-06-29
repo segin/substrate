@@ -208,6 +208,10 @@
 #define SYS_SEMGET      402
 #define SYS_SEMOP       403
 #define SYS_SEMCTL      404
+#define SYS_SHMGET      405
+#define SYS_SHMAT       406
+#define SYS_SHMDT       407
+#define SYS_SHMCTL      408
 
 void syscall_init(void);
 

@@ -1,0 +1,105 @@
+.\"
+.\" SHMAT(2) - Substrate Native Personality
+.\"
+.TH SHMAT 2 "June 2026" "Substrate OS" "System Calls"
+.SH NAME
+shmat, shmdt \- attach and detach a System V shared memory segment
+.SH LIBRARY
+Standard C library
+.RI ( libc ", " \-lc )
+.SH SYNOPSIS
+.nf
+.B #include <sys/ipc.h>
+.B #include <sys/shm.h>
+.PP
+.BI "void *shmat(int " shmid ", const void *" shmaddr ", int " shmflg ");
+.BI "int shmdt(const void *" shmaddr ");
+.fi
+.SH DESCRIPTION
+.BR shmat ()
+attaches the shared memory segment identified by
+.I shmid
+to the address space of the calling process and returns the address at
+which it is mapped.  Every process that attaches the same segment maps the
+same physical pages, so a write by one attacher is immediately visible to
+all the others (this is a genuinely shared mapping, not copy-on-write).
+.PP
+If
+.I shmaddr
+is NULL the kernel chooses a free, page-aligned address.  Otherwise the
+segment is attached at
+.IR shmaddr ,
+which must be page-aligned unless
+.B SHM_RND
+is set in
+.IR shmflg ,
+in which case it is rounded down to the nearest multiple of
+.BR SHMLBA .
+.PP
+The following flags may be ORed into
+.IR shmflg :
+.TP
+.B SHM_RDONLY
+Attach the segment read-only.  Without this flag the segment is attached
+read/write (write permission is still required).
+.TP
+.B SHM_RND
+Round
+.I shmaddr
+down to a
+.B SHMLBA
+boundary instead of requiring exact page alignment.
+.TP
+.B SHM_EXEC
+Attach the segment with execute permission.
+.PP
+.BR shmdt ()
+detaches the segment attached at
+.I shmaddr
+(which must be an address returned by a previous
+.BR shmat ())
+from the calling process.  When the last attachment of a segment that has
+been marked for removal with
+.BR shmctl (2)
+.B IPC_RMID
+is detached, the segment's backing pages are freed.  All of a process's
+attachments are detached automatically when it exits.
+.SH RETURN VALUE
+On success
+.BR shmat ()
+returns the address of the attached segment;
+.BR shmdt ()
+returns 0.  On error
+.BR shmat ()
+returns
+.RB ( void
+.BR * )\-1
+and
+.BR shmdt ()
+returns \-1, with
+.I errno
+set to indicate the error.
+.SH ERRORS
+.TP
+.B EACCES
+The caller lacks the permission required for the requested attach mode.
+.TP
+.B EINVAL
+.I shmid
+is not a valid identifier,
+.I shmaddr
+is misaligned (and
+.B SHM_RND
+was not given), or (for
+.BR shmdt ())
+no segment is attached at
+.IR shmaddr .
+.TP
+.B EIDRM
+The segment was removed.
+.TP
+.B ENOMEM
+No free address-space region of the required size could be found.
+.SH SEE ALSO
+.BR shmget (2),
+.BR shmctl (2)

@@ -1,9 +1,10 @@
 /*
- * <sys/shm.h> — System V shared memory (substrate stubs).
+ * <sys/shm.h> — System V shared memory.
  *
- * Every entry returns -1 with errno = ENOSYS.  POSIX shared memory
- * via shm_open(3) is what substrate actually implements (backed by
- * shmfs at /dev/shm); System V shm is here only for source-compat.
+ * Substrate implements System V shared memory natively in the kernel
+ * (sys/kern/ipc_shm.c, native syscalls SYS_SHMGET/SHMAT/SHMDT/SHMCTL).
+ * A segment owns shared physical pages; shmat() maps them into the
+ * caller's address space so writes are visible across every attacher.
  */
 
 #ifndef _SYS_SHM_H
@@ -11,18 +12,36 @@
 
 #include <sys/ipc.h>
 #include <sys/types.h>
+#include <stddef.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#define SHM_RDONLY 010000
-#define SHM_RND    020000
-#define SHM_REMAP  040000
-#define SHM_EXEC   0100000
+/* shmat(2) flags (in shmflg). */
+#define SHM_RDONLY 010000     /* attach read-only */
+#define SHM_RND    020000     /* round shmaddr down to SHMLBA */
+#define SHM_REMAP  040000     /* take over an existing mapping */
+#define SHM_EXEC   0100000    /* attach executable */
 
-#define SHM_LOCK   11
-#define SHM_UNLOCK 12
+/* shmctl(2) commands (in addition to IPC_RMID/IPC_SET/IPC_STAT from <ipc.h>). */
+#define SHM_LOCK   11         /* lock segment in memory */
+#define SHM_UNLOCK 12         /* unlock segment */
+#define SHM_STAT   13         /* stat by slot index (ipcs) */
+#define SHM_INFO   14         /* system-wide info (ipcs) */
+
+/* shm_perm.mode flags reported in IPC_STAT. */
+#define SHM_DEST    01000     /* segment will be destroyed on last detach */
+#define SHM_LOCKED  02000     /* segment locked in memory */
+
+/* Attach boundary: shmaddr with SHM_RND is rounded down to a multiple. */
+#define SHMLBA     4096
+
+/* Implementation limits. */
+#define SHMMIN     1                  /* min segment size (bytes) */
+#define SHMMAX     (8 * 1024 * 1024)  /* max segment size (bytes) */
+#define SHMMNI     128                /* max segments system-wide */
+#define SHMSEG     SHMMNI             /* max attaches per process */
 
 typedef unsigned long shmatt_t;
 

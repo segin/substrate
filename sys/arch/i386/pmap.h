@@ -104,6 +104,10 @@ int pmap_enter_batch(pmap_t pmap, uintptr_t va_start, int count, uintptr_t *pa_l
 int pmap_enter_large(pmap_t pmap, uintptr_t va, uintptr_t pa, uint32_t prot, uint32_t flags);
 void pmap_remove(pmap_t pmap, uintptr_t va);
 void pmap_remove_range(pmap_t pmap, uint32_t sva, uint32_t eva);
+/* Release the COW PTE clones pmap_fork() left over a VM_INHERIT_NONE range in
+ * a freshly-forked child pmap (drops the pv + hold pmap_fork added, zeros the
+ * PTE).  Safe on a not-current pmap.  Called from vm_map_fork(). */
+void pmap_fork_clear_range(pmap_t pmap, uint32_t sva, uint32_t eva);
 uintptr_t pmap_extract(pmap_t pmap, uintptr_t va); // Get PA from VA
 /* Copy `len` bytes from user vaddr `uva` in a possibly NON-active pmap into the
  * kernel buffer `dst`, walking the target's page tables through the physical

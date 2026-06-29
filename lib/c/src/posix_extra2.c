@@ -25,6 +25,7 @@
 #include <sys/resource.h>
 #include <sys/shm.h>
 #include <sys/stat.h>
+#include <sys/syscall.h>
 #include <sys/time.h>
 #include <termios.h>
 #include <time.h>
@@ -138,18 +139,35 @@ int msgsnd(int msqid, const void *msgp, size_t msgsz, int msgflg) {
     errno = ENOSYS; return -1;
 }
 
+/* System V shared memory — backed by the native kernel implementation
+ * (sys/kern/ipc_shm.c).  shmat mirrors mmap's error convention: the kernel
+ * returns a small negative errno value in place of the address. */
+
 int shmget(key_t key, size_t size, int shmflg) {
-    (void)key; (void)size; (void)shmflg; errno = ENOSYS; return -1;
+    long r = syscall(SYS_SHMGET, (long)key, (long)size, (long)shmflg);
+    if (r < 0) { errno = (int)(-r); return -1; }
+    return (int)r;
 }
+
 void *shmat(int shmid, const void *shmaddr, int shmflg) {
-    (void)shmid; (void)shmaddr; (void)shmflg;
-    errno = ENOSYS; return (void *)-1;
+    long r = syscall(SYS_SHMAT, (long)shmid, (uintptr_t)shmaddr, (long)shmflg);
+    if (r < 0 && r >= -4095) {
+        errno = (int)(-r);
+        return (void *)-1;
+    }
+    return (void *)(uintptr_t)r;
 }
+
 int shmdt(const void *shmaddr) {
-    (void)shmaddr; errno = ENOSYS; return -1;
+    long r = syscall(SYS_SHMDT, (uintptr_t)shmaddr);
+    if (r < 0) { errno = (int)(-r); return -1; }
+    return 0;
 }
+
 int shmctl(int shmid, int cmd, struct shmid_ds *buf) {
-    (void)shmid; (void)cmd; (void)buf; errno = ENOSYS; return -1;
+    long r = syscall(SYS_SHMCTL, (long)shmid, (long)cmd, (uintptr_t)buf);
+    if (r < 0) { errno = (int)(-r); return -1; }
+    return (int)r;
 }
 
 /* ============================================================

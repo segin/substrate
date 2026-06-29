@@ -1133,6 +1133,15 @@ void proc_exit(int code) {
         sem_proc_cleanup(current_process->pid);
     }
 
+    /* Detach every System V shared-memory segment this process still holds
+     * (frees a segment's backing pages if this was its last attach and it was
+     * marked IPC_RMID).  Runs while vm_map is still live so vm_map_remove can
+     * tear down the mappings. */
+    {
+        extern void shm_proc_cleanup(int pid);
+        shm_proc_cleanup(current_process->pid);
+    }
+
     /* Release any VT we put into KD_GRAPHICS (X server crash, etc.)
      * before tearing down fds.  Without this, a SEGV'd X server leaves
      * the framebuffer wedged in graphics mode and the keyboard in

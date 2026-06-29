@@ -1,0 +1,113 @@
+.\"
+.\" SHMCTL(2) - Substrate Native Personality
+.\"
+.TH SHMCTL 2 "June 2026" "Substrate OS" "System Calls"
+.SH NAME
+shmctl \- System V shared memory control operations
+.SH LIBRARY
+Standard C library
+.RI ( libc ", " \-lc )
+.SH SYNOPSIS
+.nf
+.B #include <sys/ipc.h>
+.B #include <sys/shm.h>
+.PP
+.BI "int shmctl(int " shmid ", int " cmd ", struct shmid_ds *" buf ");
+.fi
+.SH DESCRIPTION
+.BR shmctl ()
+performs the control operation
+.I cmd
+on the System V shared memory segment identified by
+.IR shmid .
+.PP
+The
+.I shmid_ds
+structure is defined in
+.I <sys/shm.h>
+as:
+.PP
+.in +4n
+.EX
+struct shmid_ds {
+    struct ipc_perm shm_perm;   /* ownership and permissions */
+    size_t   shm_segsz;         /* size of segment in bytes */
+    time_t   shm_atime;         /* last attach time */
+    time_t   shm_dtime;         /* last detach time */
+    time_t   shm_ctime;         /* last change time */
+    pid_t    shm_cpid;          /* pid of creator */
+    pid_t    shm_lpid;          /* pid of last shmat(2)/shmdt(2) */
+    shmatt_t shm_nattch;        /* number of current attaches */
+};
+.EE
+.in
+.PP
+Valid values for
+.I cmd
+are:
+.TP
+.B IPC_STAT
+Copy the
+.I shmid_ds
+structure of the segment into
+.IR buf .
+The caller must have read permission.
+.TP
+.B IPC_SET
+Set the
+.IR shm_perm.uid ,
+.IR shm_perm.gid ,
+and the low 9 bits of
+.I shm_perm.mode
+from
+.IR buf .
+The caller must be the owner, the creator, or privileged.
+.TP
+.B IPC_RMID
+Mark the segment to be destroyed.  The segment is removed from the key
+namespace immediately; its backing pages are freed once the last process
+detaches it.  If no process is attached the pages are freed at once.
+The caller must be the owner, the creator, or privileged.
+.TP
+.B SHM_LOCK
+Mark the segment as locked in memory.  Substrate never pages out shared
+memory backing, so this only sets the advisory
+.B SHM_LOCKED
+flag reported by
+.BR IPC_STAT .
+.TP
+.B SHM_UNLOCK
+Clear the locked flag.
+.SH RETURN VALUE
+On success 0 is returned.  On error \-1 is returned and
+.I errno
+is set to indicate the error.
+.SH ERRORS
+.TP
+.B EACCES
+.B IPC_STAT
+was requested but the caller lacks read permission.
+.TP
+.B EFAULT
+.I buf
+points outside the accessible address space.
+.TP
+.B EIDRM
+The segment was removed.
+.TP
+.B EINVAL
+.I shmid
+is not a valid identifier, or
+.I cmd
+is not a recognised operation.
+.TP
+.B EPERM
+.B IPC_SET
+or
+.B IPC_RMID
+was requested but the caller is neither the owner, the creator, nor
+privileged.
+.SH SEE ALSO
+.BR shmget (2),
+.BR shmat (2),
+.BR shmdt (2)

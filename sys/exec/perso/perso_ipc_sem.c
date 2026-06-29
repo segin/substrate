@@ -22,6 +22,7 @@
 #include <errno.h>
 #include <string.h>
 #include <stdint.h>
+#include "perso_ipc_shm.h"
 
 /* native semctl command numbers (from <sys/sem.h>): GETPID=11 GETVAL=12
  * GETALL=13 GETNCNT=14 GETZCNT=15 SETVAL=16 SETALL=17.  Linux uses the same
@@ -191,7 +192,9 @@ int linux_sys_ipc(unsigned call, int first, int second, int third,
     case LINUX_SEMCTL:
         return linux_semctl(first, second, third, ptr);
     default:
-        return -ENOSYS;
+        /* Not a semaphore subcall — try the shared-memory dispatcher
+         * (SHMAT/SHMDT/SHMGET/SHMCTL live in perso_ipc_shm.c). */
+        return linux_sys_ipc_shm(call, first, second, third, ptr, fifth);
     }
 }
 

@@ -1252,6 +1252,66 @@ void pmap_remove_range(pmap_t pmap, uint32_t sva, uint32_t eva) {
     }
 }
 
+/*
+ * Undo the COW PTE clones pmap_fork() made over [sva, eva) in a freshly-forked
+ * child pmap.  pmap_fork() blindly copies every present parent PTE (write-bit
+ * cleared, with a pv_insert + vm_page_hold per page).  vm_map_fork() then drops
+ * VM_INHERIT_NONE entries from the child's vm_map — but the cloned PTEs are
+ * left behind, so the first child access faults COW and forks a PRIVATE copy
+ * instead of sharing.  That silently breaks System V shared memory: a child
+ * that re-attaches an inherited-but-not-tracked segment wrote to its own COW
+ * copy and the parent never saw it.
+ *
+ * This releases the exact pv + hold pmap_fork() added and zeros the PTE so the
+ * range is genuinely absent in the child (a later vm_map_insert + fault then
+ * installs the real device/shared mapping).  Works on a NOT-current pmap via
+ * the direct map; the child's TLB is loaded fresh when it is first scheduled.
+ */
+void pmap_fork_clear_range(pmap_t pmap, uint32_t sva, uint32_t eva) {
+    uint32_t cr3;
+    uint32_t *pd;
+    int is_current;
+    uint32_t va;
+    uint32_t cleared = 0;
+
+    if (!pmap || !pmap->pdir_phys || eva <= sva) {
+        return;
+    }
+    __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
+    is_current = (pmap->pdir_phys == cr3);
+    pd = (uint32_t *)P2V(pmap->pdir_phys);
+
+    for (va = sva & ~0xFFFU; va < eva; va += 0x1000U) {
+        uint32_t pdi = PD_INDEX(va);
+        uint32_t pde = pd[pdi];
+        uint32_t *pt;
+        uint32_t pti;
+
+        if (!(pde & PTE_P) || (pde & PTE_PS)) {
+            va = (va & 0xFFC00000U) + 0x00400000U - 0x1000U;
+            continue;
+        }
+        pt = (uint32_t *)P2V(pde & PTE_FRAME);
+        pti = PT_INDEX(va);
+        if (!(pt[pti] & PTE_P)) {
+            continue;
+        }
+        vm_page_t *page = pmm_get_page(pt[pti] & PTE_FRAME);
+        if (page) {
+            pv_remove(page, pmap, va);
+            vm_page_unhold(page);
+        }
+        pt[pti] = 0;
+        cleared++;
+        if (is_current) {
+            pmap_invalidate_page(va);
+        }
+    }
+    if (cleared) {
+        pmap_count_map_remove(pmap, cleared);
+    }
+}
+
 static int pmap_page_mapping_count(vm_page_t *page) {
     int count = 0;
 

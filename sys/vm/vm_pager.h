@@ -38,9 +38,12 @@ bool vm_pager_device_phys(vm_pager_t *pager, uint64_t pindex, uintptr_t *phys_ou
 /* Device-pager cache mode -- selects the fault-time PTE cache attributes.
  * UC (the default) maps strict MMIO uncached (PCD); WC maps a linear
  * framebuffer aperture write-combining so blits are not one serialized
- * uncached store per pixel. */
+ * uncached store per pixel; WB maps ordinary write-back cacheable RAM
+ * (System V shared memory: it is plain RAM, not MMIO, so it must be cached
+ * for the shared mapping to perform). */
 #define VM_PAGER_CACHE_UC  0
 #define VM_PAGER_CACHE_WC  1
+#define VM_PAGER_CACHE_WB  2
 void    vm_pager_set_cache_mode(vm_pager_t *pager, uint8_t mode);
 uint8_t vm_pager_device_cache_mode(vm_pager_t *pager);
 void    vm_pager_device_set_phys_base(vm_pager_t *pager, uintptr_t phys_base);

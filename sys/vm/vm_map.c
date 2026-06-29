@@ -1206,8 +1206,17 @@ vm_map_t *vm_map_fork(vm_map_t *src_map, pmap_t dst_pmap) {
         vm_object_t *obj = src_entry->object;
         
         // Determine inheritance behavior
-        if (src_entry->inheritance == VM_INHERIT_NONE)
+        if (src_entry->inheritance == VM_INHERIT_NONE) {
+            /* The child must NOT keep this mapping.  pmap_fork() already
+             * COW-cloned the parent's PTEs for this range into the child;
+             * leaving them behind makes the child's first access fault into
+             * a private copy instead of seeing absent memory.  For a device /
+             * shared-RAM mapping (System V shm) that breaks sharing outright,
+             * so explicitly tear the cloned PTEs back out of the child pmap. */
+            pmap_fork_clear_range(dst_pmap, (uint32_t)src_entry->start,
+                                  (uint32_t)src_entry->end);
             continue;
+        }
             
         vm_object_t *new_obj = NULL;
         uint64_t new_offset = src_entry->offset;

@@ -579,6 +579,9 @@ static void init_core_subsystems(multiboot_info_t *mboot_info) {
     extern void sem_init(void);
     sem_init();         /* System V semaphore subsystem */
 
+    extern void shm_init(void);
+    shm_init();         /* System V shared memory subsystem */
+
     hw_text_late_init();
 
     if (i386_cpu_has_apic() && smp_get_cpu_count() > 1) {

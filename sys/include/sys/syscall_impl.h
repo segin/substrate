@@ -154,6 +154,13 @@ extern int sys_semget(key_t, int, int);
 extern int sys_semop(int, struct sembuf *, size_t);
 extern int sys_semctl(int, int, int, uintptr_t);
 
+/* System V shared memory (sys/kern/ipc_shm.c) */
+struct shmid_ds;
+extern int   sys_shmget(key_t, size_t, int);
+extern void *sys_shmat(int, const void *, int);
+extern int   sys_shmdt(const void *);
+extern int   sys_shmctl(int, int, struct shmid_ds *);
+
 /* Signals */
 extern int sys_kill(int, int);
 extern int sys_signal(int, void*);
