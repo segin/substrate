@@ -151,6 +151,31 @@ void vm_object_deallocate(vm_object_t *object) {
 }
 
 void vm_object_add_page(vm_object_t *object, vm_page_t *page) {
+    /*
+     * Enforce the one-page-per-pindex invariant.  A vm_object must hold
+     * at most one page for any given offset; the lookup/fault paths all
+     * assume the first match in the list IS the page for that pindex.
+     *
+     * The copy-on-write path in vm_fault() allocates a fresh replacement
+     * page for an offset that may ALREADY be resident in this object
+     * (the "object shared via ref_count > 1" case: the faulted page lives
+     * in `first_obj` itself, and the COW copy is written back into the
+     * same object at the same pindex).  Without this guard the old page
+     * stays linked into the list, shadowed by the new head but never
+     * looked up again and never reclaimed until the object is torn down
+     * at process exit.  A workload that repeatedly write-faults a large
+     * shared anonymous region (e.g. the X server's heap servicing big
+     * XPutImage requests) then leaks one physical page per distinct
+     * offset touched — unbounded growth of resident memory with no growth
+     * of the virtual address space.  Drop the stale page here so the
+     * replacement is the sole occupant of its pindex.
+     */
+    vm_page_t *stale = vm_object_lookup_page(object, page->pindex);
+    if (stale && stale != page) {
+        vm_object_remove_page(object, stale);
+        vm_page_free(stale);
+    }
+
     page->object = object;
 
     // Add to head of object's page list (using obj_next/obj_prev so this
