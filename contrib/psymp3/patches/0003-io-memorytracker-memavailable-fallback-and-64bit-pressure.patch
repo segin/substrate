@@ -1,0 +1,49 @@
+diff --git a/src/io/MemoryTracker.cpp b/src/io/MemoryTracker.cpp
+index bc78897c..ef68c3eb 100644
+--- a/src/io/MemoryTracker.cpp
++++ b/src/io/MemoryTracker.cpp
+@@ -90,20 +90,41 @@ void MemoryTracker::update() {
+     FILE* file = fopen("/proc/meminfo", "r");
+     if (file) {
+         char line[128];
++        size_t mem_free = 0;
++        bool have_available = false;
+         while (fgets(line, sizeof(line), file)) {
+             if (strncmp(line, "MemTotal:", 9) == 0) {
+                 new_stats.total_physical_memory = static_cast<size_t>(std::stoll(line + 9) * 1024);
+             } else if (strncmp(line, "MemAvailable:", 13) == 0) {
+                 new_stats.available_physical_memory = static_cast<size_t>(std::stoll(line + 13) * 1024);
++                have_available = true;
++            } else if (strncmp(line, "MemFree:", 8) == 0) {
++                mem_free = static_cast<size_t>(std::stoll(line + 8) * 1024);
+             }
+         }
+         fclose(file);
+-        
++
++        // Not every kernel exposes MemAvailable (e.g. older Linux, or a
++        // minimal /proc that only emits MemTotal/MemFree).  Falling back
++        // to MemFree keeps the pressure calculation sane; otherwise
++        // available stays 0 and pressure pins to 100%, which makes the
++        // pool manager reject every large allocation and breaks reads.
++        if (!have_available) {
++            new_stats.available_physical_memory = mem_free;
++        }
++
+         if (new_stats.total_physical_memory > 0) {
+-            new_pressure_level = static_cast<int>(100 - (new_stats.available_physical_memory * 100 / new_stats.total_physical_memory));
++            // Use 64-bit math: on a 32-bit target size_t is 32 bits, and
++            // available_physical_memory * 100 overflows for any machine
++            // with more than ~43 MiB free (e.g. 500 MiB free * 100 wraps
++            // uint32_t), which made a nearly-idle system report ~94%
++            // pressure and the pool manager refuse large reads.
++            uint64_t avail = new_stats.available_physical_memory;
++            uint64_t total = new_stats.total_physical_memory;
++            new_pressure_level = static_cast<int>(100 - (avail * 100 / total));
+         }
+     }
+-    
++
+     // Get process memory usage
+     file = fopen("/proc/self/statm", "r");
+     if (file) {

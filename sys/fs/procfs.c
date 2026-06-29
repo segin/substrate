@@ -95,16 +95,26 @@ static uint32_t gen_meminfo(char *buf, size_t size, void *opaque) {
     uint32_t total_kb = pmm_get_total_memory() / 1024;
     uint32_t free_kb = pmm_get_free_memory() / 1024;
     uint32_t used_kb = total_kb - free_kb;
-    
+
+    /* MemAvailable is a standard /proc/meminfo field (Linux 3.14+) that
+     * callers use as the canonical "how much can I allocate" figure.
+     * Without it, software that computes "available = MemAvailable"
+     * sees 0 and concludes the system is out of memory — e.g. PsyMP3's
+     * MemoryTracker parses MemTotal/MemAvailable, computes a pressure
+     * level of 100% when MemAvailable is absent, and then refuses every
+     * buffer allocation larger than 64 KiB (TagLib's metadata-block reads
+     * fail outright).  Substrate has no reclaimable page cache or swap,
+     * so the best estimate of available memory is simply MemFree. */
     return snprintf(buf, size,
         "MemTotal:    %8u kB\n"
         "MemFree:     %8u kB\n"
+        "MemAvailable:%8u kB\n"
         "MemUsed:     %8u kB\n"
         "Buffers:            0 kB\n"
         "Cached:             0 kB\n"
         "SwapTotal:          0 kB\n"
         "SwapFree:           0 kB\n",
-        total_kb, free_kb, used_kb);
+        total_kb, free_kb, free_kb, used_kb);
 }
 
 /* /proc/memtrack — per-call-site physical-page accounting.  One line
