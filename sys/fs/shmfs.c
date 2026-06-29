@@ -36,9 +36,15 @@
 
 #include <vfs/vfs.h>
 #include <vm/vm_kmem.h>
+#include <vm/vm_map.h>
+#include <vm/vm_object.h>
+#include <vm/vm_pager.h>
 #include <sys/mount.h>
+#include <sys/mman.h>
 #include <kern/time.h>
 #include <sys/proc.h>
+#include <arch/i386/pmap.h>
+#include <arch/i386/pmm.h>
 #include <string.h>
 #include <stddef.h>
 #include <errno.h>
@@ -52,8 +58,9 @@
  * -------------------------------------------------------------- */
 typedef struct shmfs_inode {
     char     name[SHMFS_NAME_MAX];
-    uint8_t *data;
-    size_t   data_cap;        /* allocated bytes */
+    uint8_t *data;            /* kernel direct-map VA of the backing pages */
+    uintptr_t data_phys;      /* physical base of the backing pages       */
+    size_t   data_cap;        /* allocated bytes (always page-multiple)    */
     int      refcount;        /* open fd count; freed when 0 + unlinked */
     int      unlinked;        /* set true after directory removal */
     fs_node_t node;
@@ -91,20 +98,37 @@ static void shmfs_refresh_timestamps(fs_node_t *node) {
  * Buffer management: grow `inode->data` to at least `want` bytes.
  * Bytes between old_cap and want are zeroed (POSIX shm objects
  * read as zeroes past their length).
+ *
+ * The backing store is page-aligned, physically-contiguous RAM
+ * (pmm_alloc_contiguous) rather than a kmalloc heap buffer, because
+ * shmfs_node_mmap exposes those exact physical frames to userspace
+ * via a device pager (which needs a contiguous physical base and
+ * page-aligned mappings).  inode->data stays a kernel direct-map VA
+ * for the in-kernel read/write/grow paths; inode->data_phys is the
+ * physical base the pager hands to the page-fault PTE installer.
+ *
+ * NOTE: growing reallocates to a fresh physical base and copies the
+ * old contents over.  Per POSIX, an object must be sized with
+ * ftruncate(2) BEFORE it is mmap'd; shmfs_node_mmap also pre-grows to
+ * cover the requested window so that the common shm_open -> ftruncate
+ * -> mmap sequence never reallocates a buffer that already has live
+ * user mappings aliasing it.
  * -------------------------------------------------------------- */
 static int shmfs_grow(shmfs_inode_t *inode, size_t want) {
     if (want <= inode->data_cap) return 0;
-    /* Round up to a 4 KiB page boundary to amortise kmalloc churn. */
+    /* Round up to a 4 KiB page boundary — the allocation unit is the page. */
     size_t newcap = (want + 4095) & ~(size_t)4095;
-    uint8_t *nb = (uint8_t *)kmalloc(newcap);
+    size_t npages = newcap >> 12;
+    uint8_t *nb = (uint8_t *)pmm_alloc_contiguous(npages);
     if (!nb) return -ENOMEM;
     if (inode->data && inode->data_cap > 0) {
         memcpy(nb, inode->data, inode->data_cap);
-        kfree(inode->data, inode->data_cap);
+        pmm_free_contiguous(inode->data, inode->data_cap >> 12);
     }
     memset(nb + (inode->data_cap), 0, newcap - inode->data_cap);
-    inode->data     = nb;
-    inode->data_cap = newcap;
+    inode->data      = nb;
+    inode->data_phys = (uintptr_t)V2P(nb);
+    inode->data_cap  = newcap;
     return 0;
 }
 
@@ -140,7 +164,9 @@ static size_t shmfs_write(fs_node_t *node, off_t off, size_t sz, const uint8_t *
  * -------------------------------------------------------------- */
 static void shmfs_free_inode(shmfs_inode_t *inode) {
     if (!inode) return;
-    if (inode->data) kfree(inode->data, inode->data_cap);
+    if (inode->data && inode->data_cap > 0) {
+        pmm_free_contiguous(inode->data, inode->data_cap >> 12);
+    }
     kfree(inode, sizeof(*inode));
 }
 
@@ -160,35 +186,101 @@ static void shmfs_node_close(fs_node_t *node) {
 }
 
 /* --------------------------------------------------------------
- * mmap — return the kernel-VA pointer at which the inode's
- * backing buffer already lives.  The shmfs buffer is allocated
- * with kmalloc (kernel heap), so it's reachable from any process
- * via the kernel direct-map region.  For a real userspace mapping
- * we'd allocate physical pages and pmap_enter them into the caller's
- * vm_map; sys/vm/vm_syscalls.c's sys_mmap calls this hook and
- * publishes the returned address as-is, so callers do get a
- * usable pointer — though one that aliases the kernel buffer and
- * is therefore only safe to dereference from a kernel-aware path.
+ * mmap — map the inode's backing pages into the CALLING process's
+ * address space and return a USER virtual address.
  *
- * The important guarantee shmfs provides for now: every process
- * that opens the same inode shares the same buffer (refcounted
- * above), so write-through visibility between fd holders is
- * automatic for read/write callers.  Direct userspace mmap with
- * usermode page tables is queued.
+ * The backing store is page-aligned, physically-contiguous RAM
+ * (see shmfs_grow).  We expose those exact physical frames to the
+ * caller through a device pager rooted at inode->data_phys + offset
+ * and insert the mapping into current_process->vm_map with
+ * VM_INHERIT_SHARE.  Because every mapping of the object — in this
+ * process, in another process that shm_open()s the same name, or in
+ * a forked child — resolves to the SAME physical frames (MAP_SHARED,
+ * not copy-on-write), a write through any one mapping is immediately
+ * visible through all the others.
+ *
+ * The device object holds no vm_page_t structures of its own, so its
+ * teardown at munmap/exit (vm_object_deallocate) frees only the
+ * mapping bookkeeping — never the shmfs frames.  Those frames are
+ * owned solely by the inode and are released by shmfs_free_inode once
+ * the object is unlinked and its last fd is closed.  No leak, no
+ * early free / use-after-free.
+ *
+ * This mirrors the established device-mmap pattern in fb_fs_mmap
+ * (sys/drivers/video/fb.c) and ac97_mmap (sys/drivers/audio/ac97.c).
  * -------------------------------------------------------------- */
 static void *shmfs_node_mmap(fs_node_t *node, void *addr, size_t length,
                              int prot, int flags, off_t offset) {
-    (void)addr; (void)prot; (void)flags;
     shmfs_inode_t *inode = (shmfs_inode_t *)(uintptr_t)node->impl;
-    if (!inode || offset < 0) return (void *)-1;
+    vm_object_t *obj;
+    vm_map_t *map;
+    uintptr_t virt = (uintptr_t)addr;
+    size_t aligned_length;
+    uint32_t vm_prot = 0;
 
+    if (!inode) return (void *)-1;
+    if (offset < 0 || length == 0) return (void *)-1;
+    /* The offset selects which page of the object to start at, so it
+     * must be page-aligned (the device pager indexes by page). */
+    if ((offset & 0xFFF) != 0) return (void *)-1;
+
+    /* Size the object to cover the requested window BEFORE we build the
+     * mapping.  After this, the backing physical base is stable for the
+     * life of these mappings: a later shmfs_grow only reallocates when it
+     * needs MORE than data_cap, and a MAP_SHARED user has already pinned
+     * its slice via ftruncate per POSIX. */
     size_t end = (size_t)offset + length;
     if (shmfs_grow(inode, end) != 0) return (void *)-1;
-    /* Extend logical length so subsequent read/write past the
-     * pre-mmap length still sees the mapped region as live. */
+    /* Extend logical length so subsequent read/write past the pre-mmap
+     * length still sees the mapped region as live. */
     if ((uint64_t)end > (uint64_t)node->length) node->length = (off_t)end;
 
-    return (void *)(inode->data + (size_t)offset);
+    aligned_length = (length + 0xFFF) & ~(size_t)0xFFF;
+
+    if (current_process == NULL) return (void *)-1;
+    map = current_process->vm_map;
+    if (map == NULL) return (void *)-1;
+
+    if (virt == 0 || !(flags & MAP_FIXED)) {
+        if (vm_map_find_space(map, &virt, aligned_length) != 0)
+            return (void *)-1;
+    } else {
+        if ((virt & 0xFFF) != 0) return (void *)-1;
+        if (vm_map_remove(map, virt, virt + aligned_length) != 0)
+            return (void *)-1;
+    }
+
+    if (prot & VM_PROT_READ)  vm_prot |= VM_PROT_READ;
+    if (prot & VM_PROT_WRITE) vm_prot |= VM_PROT_WRITE;
+    if (prot & VM_PROT_EXEC)  vm_prot |= VM_PROT_EXEC;
+    vm_prot |= VM_PROT_USER;
+
+    obj = vm_object_allocate(VM_OBJ_TYPE_DEVICE, aligned_length);
+    if (obj == NULL) return (void *)-1;
+    obj->pager = vm_pager_allocate(VM_OBJ_TYPE_DEVICE,
+                                   (void *)(inode->data_phys + (uintptr_t)offset),
+                                   aligned_length, (uint8_t)vm_prot, 0);
+    if (obj->pager == NULL) {
+        vm_object_deallocate(obj);
+        return (void *)-1;
+    }
+    /* Shared anonymous RAM (not strict MMIO registers): map it
+     * write-combining so userland stores coalesce into bursts instead
+     * of one serialized uncached transaction each.  Falls back to
+     * uncached automatically when the CPU has no PAT/WC. */
+    vm_pager_set_cache_mode(obj->pager, VM_PAGER_CACHE_WC);
+
+    /* VM_INHERIT_SHARE: a fork must share — not copy — these frames, so
+     * parent and child observe each other's writes (POSIX MAP_SHARED). */
+    if (vm_map_insert(map, obj, 0, virt, virt + aligned_length,
+                      (uint8_t)vm_prot, (uint8_t)vm_prot,
+                      VM_INHERIT_SHARE) != 0) {
+        vm_object_deallocate(obj);
+        return (void *)-1;
+    }
+
+    (void)node;
+    return (void *)virt;
 }
 
 static int shmfs_truncate(fs_node_t *node, off_t len) {
