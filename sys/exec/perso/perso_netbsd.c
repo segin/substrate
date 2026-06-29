@@ -14,6 +14,7 @@
 #include <exec/perso/netbsd/netbsd_syscalls.h>
 #include <exec/perso/netbsd/netbsd_user.h>
 #include "perso_ipc_sem.h"
+#include "perso_ipc_shm.h"
 #include <sys/resource.h>
 #include <sys/time.h>
 #include <sys/proc.h>
@@ -213,6 +214,10 @@ static void *netbsd_syscalls[MAX_SYSCALLS] = {
     [NETBSD_SYS_semget]         = (void *)&netbsd_sys_semget,
     [NETBSD_SYS_semop]          = (void *)&netbsd_sys_semop,
     [NETBSD_SYS_____semctl50]   = (void *)&netbsd_sys_semctl,
+    [NETBSD_SYS_shmget]         = (void *)&netbsd_sys_shmget,
+    [NETBSD_SYS_shmat]          = (void *)&netbsd_sys_shmat,
+    [NETBSD_SYS_shmdt]          = (void *)&netbsd_sys_shmdt,
+    [NETBSD_SYS_____shmctl50]   = (void *)&netbsd_sys_shmctl,
     [NETBSD_SYS_syscall]        = NULL,             /* syscall (indirect) */
     [NETBSD_SYS_exit]           = &sys_exit,
     [NETBSD_SYS_fork]           = &sys_fork,
@@ -598,6 +603,10 @@ static const char *netbsd_names[MAX_SYSCALLS] = {
     [NETBSD_SYS_sendto]         = "sendto",
     [NETBSD_SYS_shutdown]       = "shutdown",
     [NETBSD_SYS_socketpair]     = "socketpair",
+    [NETBSD_SYS_shmget]         = "shmget",
+    [NETBSD_SYS_shmat]          = "shmat",
+    [NETBSD_SYS_shmdt]          = "shmdt",
+    [NETBSD_SYS_____shmctl50]   = "____shmctl50",
     [NETBSD_SYS_setreuid]       = "setreuid",
     [NETBSD_SYS_setregid]       = "setregid",
     [NETBSD_SYS_rename]         = "rename",

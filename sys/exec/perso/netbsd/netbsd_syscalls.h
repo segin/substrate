@@ -245,6 +245,14 @@
 #define NETBSD_SYS_semop          222
 #define NETBSD_SYS_____semctl50   442
 
+/* System V shared memory.  shmat/shmdt/shmget are unversioned; shmctl is the
+ * time_t-64 "50" variant (____shmctl50, syscall 512).  The legacy shmctl (224)
+ * is compat_14_shmctl and is not provided. */
+#define NETBSD_SYS_shmat          228
+#define NETBSD_SYS_shmdt          230
+#define NETBSD_SYS_shmget         231
+#define NETBSD_SYS_____shmctl50   512
+
 /* --- Additional syscalls (numbers verified against NetBSD
  *     sys/kern/syscalls.master).  chflags/fchflags/madvise/getgroups/
  *     setgroups/fsync/setpriority/getpriority/symlink/__getlogin are

@@ -234,3 +234,97 @@ int freebsd_sys_shmctl(int shmid, int cmd, uint32_t buf)
         return -EINVAL;
     }
 }
+
+/* ======================================================================
+ * NetBSD  (i386: shmat=228, shmdt=230, shmget=231, ____shmctl50=512)
+ *   shmat(shmid, addr, flag) returns the address directly.
+ *   ____shmctl50(shmid, cmd, struct shmid_ds *buf) — the time_t-64 ("50")
+ *   ABI; cmd values match FreeBSD/native (IPC_RMID=0, IPC_SET=1, IPC_STAT=2,
+ *   SHM_LOCK=3, SHM_UNLOCK=4).
+ * ====================================================================== */
+
+struct netbsd_ipc_perm32_shm {  /* netbsd32_ipc_perm */
+    uint32_t cuid;
+    uint32_t cgid;
+    uint32_t uid;
+    uint32_t gid;
+    uint16_t mode;
+    uint16_t _seq;
+    uint32_t _key;
+};
+
+struct netbsd_shmid_ds32 {      /* netbsd32_shmid_ds (____shmctl50: time_t-64) */
+    struct netbsd_ipc_perm32_shm shm_perm;
+    uint32_t shm_segsz;         /* size_t on i386 */
+    int32_t  shm_lpid;
+    int32_t  shm_cpid;
+    uint32_t shm_nattch;        /* shmatt_t (unsigned int on NetBSD) */
+    int64_t  shm_atime;
+    int64_t  shm_dtime;
+    int64_t  shm_ctime;
+    uint32_t _shm_internal;     /* netbsd32_voidp */
+};
+
+int netbsd_sys_shmget(key_t key, size_t size, int shmflg)
+{
+    return kern_shmget(key, size, shmflg);
+}
+
+void *netbsd_sys_shmat(int shmid, uint32_t shmaddr, int shmflg)
+{
+    int err = 0;
+    void *r = kern_shmat(shmid, (const void *)(uintptr_t)shmaddr, shmflg, &err);
+    if (r == (void *)-1)
+        return (void *)(intptr_t)(-err);   /* libc errno bridge */
+    return r;
+}
+
+int netbsd_sys_shmdt(uint32_t shmaddr)
+{
+    return kern_shmdt((const void *)(uintptr_t)shmaddr);
+}
+
+int netbsd_sys_shmctl(int shmid, int cmd, uint32_t buf)
+{
+    switch (cmd) {
+    case IPC_RMID:
+        return kern_shm_rmid(shmid);
+    case SHM_LOCK:
+        return kern_shm_lock(shmid, 1);
+    case SHM_UNLOCK:
+        return kern_shm_lock(shmid, 0);
+    case IPC_STAT: {
+        struct shmid_ds nds;
+        int r = kern_shm_stat(shmid, &nds);
+        if (r < 0) return r;
+        struct netbsd_shmid_ds32 ds;
+        memset(&ds, 0, sizeof(ds));
+        ds.shm_perm.cuid = nds.shm_perm.cuid;
+        ds.shm_perm.cgid = nds.shm_perm.cgid;
+        ds.shm_perm.uid  = nds.shm_perm.uid;
+        ds.shm_perm.gid  = nds.shm_perm.gid;
+        ds.shm_perm.mode = (uint16_t)nds.shm_perm.mode;
+        ds.shm_perm._seq = nds.shm_perm.__seq;
+        ds.shm_perm._key = (uint32_t)nds.shm_perm.__key;
+        ds.shm_segsz     = (uint32_t)nds.shm_segsz;
+        ds.shm_lpid      = (int32_t)nds.shm_lpid;
+        ds.shm_cpid      = (int32_t)nds.shm_cpid;
+        ds.shm_nattch    = (uint32_t)nds.shm_nattch;
+        ds.shm_atime     = (int64_t)nds.shm_atime;
+        ds.shm_dtime     = (int64_t)nds.shm_dtime;
+        ds.shm_ctime     = (int64_t)nds.shm_ctime;
+        if (copyout(&ds, (void *)(uintptr_t)buf, sizeof(ds)) != 0)
+            return -EFAULT;
+        return 0;
+    }
+    case IPC_SET: {
+        struct netbsd_shmid_ds32 ds;
+        if (copyin((void *)(uintptr_t)buf, &ds, sizeof(ds)) != 0)
+            return -EFAULT;
+        return kern_shm_setperm(shmid, ds.shm_perm.uid, ds.shm_perm.gid,
+                                ds.shm_perm.mode);
+    }
+    default:
+        return -EINVAL;
+    }
+}
