@@ -8,6 +8,7 @@
 #include <sys/file.h>
 #include <sys/kern_syscalls.h>
 #include <sys/copy.h>
+#include <sys/umtx.h>
 #include <vm/vm_kmem.h>
 #include <sys/fcntl.h>
 #include <sys/tty.h>
@@ -95,6 +96,16 @@ int64_t freebsd_sys_lseek13(int fd, uint32_t off_lo, uint32_t off_hi, int whence
  * HASSEMAPHORE=0x200, EXCL=0x4000, NOCORE=0x20000, etc.) are stripped.
  * MAP_SHARED=0x001, MAP_PRIVATE=0x002, MAP_FIXED=0x010 have the same values.
  */
+#define FREEBSD_MAP_FIXED   0x0010  /* same value as KERN_MAP_FIXED */
+#define FREEBSD_MAP_STACK   0x0400  /* grows-down region; implies anonymous
+                                      * memory.  libthr's create_stack ->
+                                      * _thr_stack_alloc maps every pthread
+                                      * stack with PROT_RW|MAP_STACK and fd=-1
+                                      * (no MAP_ANON bit), so without this the
+                                      * mapping fell through to the file-backed
+                                      * path with fd -1 and failed -> libthr's
+                                      * create_stack returned EAGAIN and every
+                                      * pthread_create()/std::thread failed. */
 #define FREEBSD_MAP_ANON    0x1000
 #define FREEBSD_MAP_GUARD   0x2000   /* PROT_NONE reservation; rtld uses since
                                       * osreldate 1200035 (FreeBSD 12.0) */
@@ -122,6 +133,14 @@ void *freebsd_sys_mmap(void *addr, size_t len, int prot, int flags, int fd, uint
     if (flags & FREEBSD_MAP_GUARD)
         kflags |= KERN_MAP_PRIVATE | KERN_MAP_ANONYMOUS;
     /*
+     * MAP_STACK is an anonymous, zero-filled, grows-down region; FreeBSD's
+     * VM treats it as anonymous memory and libthr passes fd=-1 with neither
+     * MAP_ANON nor MAP_PRIVATE set.  Map it to MAP_PRIVATE|MAP_ANONYMOUS so
+     * the kernel takes the anonymous path instead of the (fd -1) file path.
+     */
+    if (flags & FREEBSD_MAP_STACK)
+        kflags |= KERN_MAP_PRIVATE | KERN_MAP_ANONYMOUS;
+    /*
      * FreeBSD permits a mapping with neither MAP_SHARED nor MAP_PRIVATE and
      * treats it as private (copy) -- libthr's main-thread red zone uses a
      * bare MAP_ANON for exactly this.  substrate's sys_mmap requires exactly
@@ -130,6 +149,33 @@ void *freebsd_sys_mmap(void *addr, size_t len, int prot, int flags, int fd, uint
      */
     if ((kflags & (KERN_MAP_SHARED | KERN_MAP_PRIVATE)) == 0)
         kflags |= KERN_MAP_PRIVATE;
+
+    /*
+     * MAP_ALIGNED(n): the result must be aligned to a 2^n boundary.  libthr's
+     * thread allocator maps each thread's stack with MAP_ALIGNED(21) (2 MiB)
+     * and then finds the owning `struct pthread` by masking the stack pointer
+     * down to that boundary — so a misaligned result makes libthr compute a
+     * bogus TCB pointer and the new thread page-faults on first use.  Native
+     * sys_mmap only guarantees page (4 KiB) alignment, so honour the request
+     * here by over-allocating and trimming the slack.  (high byte of flags =
+     * the alignment shift; MAP_ALIGNMENT_SHIFT = 24 on FreeBSD.)
+     */
+    unsigned align_shift = ((unsigned)flags >> 24) & 0xff;
+    if (align_shift > 12 && !(flags & FREEBSD_MAP_FIXED)) {
+        size_t align = (size_t)1 << align_shift;
+        size_t over  = len + align;
+        char *base = (char *)sys_mmap(NULL, over, prot, kflags, fd, offset);
+        if (base == (char *)-1 || (uintptr_t)base > (uintptr_t)-4096)
+            return (void *)-1;
+        uintptr_t raw     = (uintptr_t)base;
+        uintptr_t aligned = (raw + align - 1) & ~(uintptr_t)(align - 1);
+        size_t head = aligned - raw;
+        size_t tail = over - head - len;
+        if (head) sys_munmap(base, head);
+        if (tail) sys_munmap((void *)(aligned + len), tail);
+        return (void *)aligned;
+    }
+
     return sys_mmap(addr, len, prot, kflags, fd, offset);
 }
 
@@ -520,8 +566,115 @@ int sys_getlogin(char *namebuf, unsigned int namelen) {
  * personalities dispatch to it. */
 
 int sys_umtx_op(void *obj, int op, unsigned long val, void *uaddr, void *uaddr2) {
-    (void)obj; (void)op; (void)val; (void)uaddr; (void)uaddr2;
-    return -ENOSYS;
+    /*
+     * FreeBSD's libthr drives thread join, mutex contention, condition
+     * variables and rwlocks through _umtx_op(2).  kern_umtx_op() implements
+     * the blocking primitives on substrate's private sleepq (see
+     * sys/kern/umtx.c).  Was previously stubbed -ENOSYS, which made libthr
+     * busy-spin and deadlock every blocking pthread operation.
+     */
+    return kern_umtx_op(obj, op, val, uaddr, uaddr2);
+}
+
+/*
+ * FreeBSD clockid -> substrate native clockid.  FreeBSD numbers
+ * CLOCK_MONOTONIC as 4 (and has a family of _FAST/_PRECISE/UPTIME variants),
+ * whereas substrate's native sys_clock_gettime only knows CLOCK_REALTIME=0
+ * and CLOCK_MONOTONIC=1.  Without translation a FreeBSD steady_clock::now()
+ * (clockid 4) fell through to the native "unknown clock -> -1" path, so
+ * libc++'s std::chrono::steady_clock threw std::system_error at static-init
+ * time (e.g. PsyMP3's CurlLifecycleManager / s_last_pool_cleanup global ctor
+ * in io/http/HTTPClient.cpp aborted the whole program before main()).
+ */
+#define FBSD_CLOCK_REALTIME          0
+#define FBSD_CLOCK_VIRTUAL           1
+#define FBSD_CLOCK_PROF              2
+#define FBSD_CLOCK_MONOTONIC         4
+#define FBSD_CLOCK_UPTIME            5
+#define FBSD_CLOCK_UPTIME_PRECISE    7
+#define FBSD_CLOCK_UPTIME_FAST       8
+#define FBSD_CLOCK_REALTIME_PRECISE  9
+#define FBSD_CLOCK_REALTIME_FAST     10
+#define FBSD_CLOCK_MONOTONIC_PRECISE 11
+#define FBSD_CLOCK_MONOTONIC_FAST    12
+#define FBSD_CLOCK_SECOND            13
+#define FBSD_CLOCK_THREAD_CPUTIME_ID 14
+#define FBSD_CLOCK_PROCESS_CPUTIME_ID 15
+
+#define NATIVE_CLOCK_REALTIME   0
+#define NATIVE_CLOCK_MONOTONIC  1
+
+static int freebsd_clockid_to_native(int fbsd_clk) {
+    switch (fbsd_clk) {
+    case FBSD_CLOCK_REALTIME:
+    case FBSD_CLOCK_REALTIME_PRECISE:
+    case FBSD_CLOCK_REALTIME_FAST:
+    case FBSD_CLOCK_SECOND:
+        return NATIVE_CLOCK_REALTIME;
+    case FBSD_CLOCK_MONOTONIC:
+    case FBSD_CLOCK_MONOTONIC_PRECISE:
+    case FBSD_CLOCK_MONOTONIC_FAST:
+    case FBSD_CLOCK_UPTIME:
+    case FBSD_CLOCK_UPTIME_PRECISE:
+    case FBSD_CLOCK_UPTIME_FAST:
+        return NATIVE_CLOCK_MONOTONIC;
+    case FBSD_CLOCK_THREAD_CPUTIME_ID:
+    case FBSD_CLOCK_PROCESS_CPUTIME_ID:
+    case FBSD_CLOCK_PROF:
+    case FBSD_CLOCK_VIRTUAL:
+        /* No per-thread/per-process CPU clock — approximate with the
+         * monotonic clock so callers (e.g. profiling timers) get a
+         * monotonically increasing value instead of an error. */
+        return NATIVE_CLOCK_MONOTONIC;
+    default:
+        return -1;
+    }
+}
+
+int freebsd_sys_clock_gettime(int clk_id, void *tp) {
+    int native = freebsd_clockid_to_native(clk_id);
+    if (native < 0) return -EINVAL;
+    return sys_clock_gettime(native, (struct timespec *)tp);
+}
+
+int freebsd_sys_rtprio_thread(int function, long lwpid, void *rtp) {
+    /*
+     * rtprio_thread(2): query/set a thread's realtime/idle scheduling class.
+     * substrate's scheduler has no FreeBSD rtprio classes; libthr calls this
+     * only when an explicit pthread scheduling policy is requested (RTP_SET)
+     * or to read one back (RTP_LOOKUP).  Accept-and-succeed: RTP_SET is a
+     * no-op (we already run threads at the normal class), and for RTP_LOOKUP
+     * we report the timesharing class (RTP_PRIO_NORMAL=0) with a mid priority
+     * so libthr's _rtp_to_schedparam yields SCHED_OTHER.  Returning ENOSYS
+     * here made libthr's pthread_attr scheduling path fail.
+     */
+    #define RTP_SET    1
+    #define RTP_PRIO_NORMAL 0
+    if (function == 0 /* RTP_LOOKUP */ && rtp) {
+        struct { uint16_t type; uint16_t prio; } r = { RTP_PRIO_NORMAL, 0 };
+        (void)copyout(&r, rtp, sizeof(r));
+    }
+    (void)lwpid;
+    return 0;
+}
+
+int freebsd_sys_thr_exit(long *state) {
+    /*
+     * FreeBSD's thr_exit(2) publishes the thread's death to a pthread_join()
+     * waiter before tearing the thread down: it writes TID_TERMINATED (1) to
+     * *state (which libthr sets to &curthread->tid) and wakes every umtx
+     * waiter parked on that word.  The joiner's loop —
+     *   while (tid != TID_TERMINATED) _umtx_op(&tid, UMTX_OP_WAIT, tid, ...)
+     * — then observes the new value and returns.  Without this the joiner
+     * sleeps on the tid word forever (the native sys_thr_exit only wakes
+     * native thread-object joiners).
+     */
+    if (state) {
+        long terminated = 1;            /* TID_TERMINATED */
+        (void)copyout(&terminated, state, sizeof(long));
+        kern_umtx_wake(state, 0x7fffffff);
+    }
+    return sys_thr_exit((void *)0);
 }
 
 int sys_clock_nanosleep(int clockid, int flags, const void *rqtp, void *rmtp) {

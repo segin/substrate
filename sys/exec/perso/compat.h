@@ -25,6 +25,22 @@ void *freebsd_sys_mmap(void *addr, size_t len, int prot, int flags, int fd, uint
 int freebsd_sys_ioctl(int fd, uint32_t request, void *arg);
 int freebsd_sys_fcntl(int fd, int cmd, int arg);
 
+/*
+ * FreeBSD thr_exit(long *state): write TID_TERMINATED (1) into *state and
+ * umtx-wake any pthread_join() waiter parked on it, then terminate the
+ * thread.  libthr passes &curthread->tid; the native sys_thr_exit only wakes
+ * native (thread-object) joiners, not the umtx word a FreeBSD joiner sleeps on.
+ */
+int freebsd_sys_thr_exit(long *state);
+
+/* rtprio_thread(2): thread realtime/idle scheduling class — accepted as a
+ * no-op (substrate has no rtprio classes; libthr only needs it not to fail). */
+int freebsd_sys_rtprio_thread(int function, long lwpid, void *rtp);
+
+/* clock_gettime(2) with FreeBSD clockid translation (CLOCK_MONOTONIC=4 etc.
+ * -> substrate native 0/1).  std::chrono::steady_clock depends on this. */
+int freebsd_sys_clock_gettime(int clk_id, void *tp);
+
 /* execv wrapper for ancient NetBSD/SunOS binaries */
 int sys_compat_execv(const char *path, char **argv);
 

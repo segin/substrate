@@ -158,9 +158,12 @@ struct freebsd13_stat;
 #define FREEBSD_SYS_thr_exit   431
 #define FREEBSD_SYS_thr_self   432
 #define FREEBSD_SYS_thr_kill   433
+#define FREEBSD_SYS_thr_suspend 442
+#define FREEBSD_SYS_thr_wake   443
 #define FREEBSD_SYS__umtx_op   454
 #define FREEBSD_SYS_thr_new    455
 #define FREEBSD_SYS_sigqueue   456
+#define FREEBSD_SYS_rtprio_thread 466
 #define FREEBSD_SYS_pread_freebsd13      475
 #define FREEBSD_SYS_pwrite_freebsd13     476
 #define FREEBSD_SYS_mmap_freebsd13       477
