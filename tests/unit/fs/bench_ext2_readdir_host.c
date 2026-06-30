@@ -187,7 +187,7 @@ void run_ext2_readdir_bench(void) {
     int entry_count = 2000;
     char name[32];
     for (int i = 0; i < entry_count; i++) {
-        sprintf(name, "file_%d", i);
+        snprintf(name, sizeof(name), "file_%d", i);
         // We use dummy inode 100+i for entries
         ext2_add_entry(dir, name, 100 + i, 1); // 1 = EXT2_FT_REG_FILE
     }

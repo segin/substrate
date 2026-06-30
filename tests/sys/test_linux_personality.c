@@ -31,7 +31,7 @@ void test_linux_personality(void) {
     linux = perso_lookup(PERS_LINUX);
     test_assert(linux != NULL, "Linux personality lookup succeeds");
     if (!linux) {
-        sprintf(buf, "Linux personality tests: %d passed, %d failed\n",
+        snprintf(buf, sizeof(buf), "Linux personality tests: %d passed, %d failed\n",
                 tests_passed, tests_failed);
         kprint(buf);
         return;
@@ -137,7 +137,7 @@ void test_linux_personality(void) {
                     linux->syscall_fmts[LINUX_SYS_modify_ldt].arg_types[2] == ARG_LONG,
                 "Linux modify_ldt trace format matches ABI");
 
-    sprintf(buf, "Linux personality tests: %d passed, %d failed\n",
+    snprintf(buf, sizeof(buf), "Linux personality tests: %d passed, %d failed\n",
             tests_passed, tests_failed);
     kprint(buf);
 }

@@ -82,7 +82,7 @@ void run_brk_tests(void) {
     test_brk_below_start();
 
     char buf[64];
-    extern int sprintf(char *, const char *, ...);
-    sprintf(buf, "Passed: %d, Failed: %d\n", tests_passed, tests_failed);
+    extern int snprintf(char *str, size_t size, const char *format, ...);
+    snprintf(buf, sizeof(buf), "Passed: %d, Failed: %d\n", tests_passed, tests_failed);
     kprint(buf);
 }

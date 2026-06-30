@@ -31,7 +31,7 @@ void test_native_personality(void) {
     native = perso_lookup(PERS_NATIVE);
     test_assert(native != NULL, "Native personality lookup succeeds");
     if (!native) {
-        sprintf(buf, "Native personality tests: %d passed, %d failed\n",
+        snprintf(buf, sizeof(buf), "Native personality tests: %d passed, %d failed\n",
                 tests_passed, tests_failed);
         kprint(buf);
         return;
@@ -88,7 +88,7 @@ void test_native_personality(void) {
                     native->syscall_fmts[SYS_GETRANDOM].arg_types[2] == ARG_HEX,
                 "Native getrandom trace format matches ABI");
 
-    sprintf(buf, "Native personality tests: %d passed, %d failed\n",
+    snprintf(buf, sizeof(buf), "Native personality tests: %d passed, %d failed\n",
             tests_passed, tests_failed);
     kprint(buf);
 }

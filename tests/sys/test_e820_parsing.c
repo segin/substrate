@@ -212,6 +212,6 @@ void test_e820_parsing(void) {
     test_e820_mixed_types();
     
     char buf[64];
-    sprintf(buf, "=== e820 tests: %d passed, %d failed ===\n", passed, failed);
+    snprintf(buf, sizeof(buf), "=== e820 tests: %d passed, %d failed ===\n", passed, failed);
     kprint(buf);
 }

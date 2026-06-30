@@ -12,7 +12,7 @@ void run_ps2_tests(void) {
      */
     uint8_t status = inb(PS2_COMMAND_PORT);
     char buf[64];
-    sprintf(buf, "PS/2 Status Register: 0x%02X\n", status);
+    snprintf(buf, sizeof(buf), "PS/2 Status Register: 0x%02X\n", status);
     kprint(buf);
     
     /* 

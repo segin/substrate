@@ -93,18 +93,18 @@ void test_cow_perf(void) {
     // Actually, I can use helper print_dec.
 
     // For now, I'll assume I can sprintf.
-    extern int sprintf(char * str, const char * format, ...);
+    extern int snprintf(char *str, size_t size, const char *format, ...);
 
-    sprintf(buf, "Method A (Baseline):  %u cycles\n", (uint32_t)cycles_a);
+    snprintf(buf, sizeof(buf), "Method A (Baseline):  %u cycles\n", (uint32_t)cycles_a);
     kprint(buf);
 
-    sprintf(buf, "Method B (Optimized): %u cycles\n", (uint32_t)cycles_b);
+    snprintf(buf, sizeof(buf), "Method B (Optimized): %u cycles\n", (uint32_t)cycles_b);
     kprint(buf);
 
     if (cycles_a > cycles_b) {
         uint32_t diff = cycles_a - cycles_b;
         uint32_t pct = (diff * 100) / cycles_a;
-        sprintf(buf, "Improvement: %u cycles (%u%%)\n", diff, pct);
+        snprintf(buf, sizeof(buf), "Improvement: %u cycles (%u%%)\n", diff, pct);
         kprint(buf);
     } else {
         kprint("WARNING: No improvement measured.\n");

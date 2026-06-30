@@ -511,7 +511,7 @@ void test_vm_phys(void) {
     test_vm_phys_add_range();
     
     char buf[64];
-    sprintf(buf, "=== vm_phys tests: %d passed, %d failed ===\n", passed, failed);
+    snprintf(buf, sizeof(buf), "=== vm_phys tests: %d passed, %d failed ===\n", passed, failed);
     kprint(buf);
 }
 

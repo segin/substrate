@@ -211,6 +211,6 @@ void test_mmap_parsing(void) {
     test_acpi_reclaimable_included();
     
     char buf[64];
-    sprintf(buf, "=== mmap tests: %d passed, %d failed ===\n", passed, failed);
+    snprintf(buf, sizeof(buf), "=== mmap tests: %d passed, %d failed ===\n", passed, failed);
     kprint(buf);
 }

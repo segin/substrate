@@ -8,25 +8,25 @@ void test_printf_plus_flag(void) {
     char buf[64];
     
     // Unit tests
-    sprintf(buf, "%+d", 42);
+    snprintf(buf, sizeof(buf), "%+d", 42);
     if (strcmp(buf, "+42") != 0) panic("test_printf_plus_flag: positive number");
     
-    sprintf(buf, "%+d", -42);
+    snprintf(buf, sizeof(buf), "%+d", -42);
     if (strcmp(buf, "-42") != 0) panic("test_printf_plus_flag: negative number");
     
-    sprintf(buf, "%+d", 0);
+    snprintf(buf, sizeof(buf), "%+d", 0);
     if (strcmp(buf, "+0") != 0) panic("test_printf_plus_flag: zero");
     
     // Property test: all positive ints should have + prefix
     for (int i = 1; i < 100; i++) {
-        sprintf(buf, "%+d", i);
+        snprintf(buf, sizeof(buf), "%+d", i);
         if (buf[0] != '+') panic("test_printf_plus_flag: property test positive");
     }
     
     // Fuzzing test: random values
     int test_vals[] = {1, -1, 999, -999, 2147483647, -2147483647};
     for (unsigned i = 0; i < sizeof(test_vals)/sizeof(test_vals[0]); i++) {
-        sprintf(buf, "%+d", test_vals[i]);
+        snprintf(buf, sizeof(buf), "%+d", test_vals[i]);
         if (test_vals[i] >= 0 && buf[0] != '+') {
             panic("test_printf_plus_flag: fuzz positive");
         }

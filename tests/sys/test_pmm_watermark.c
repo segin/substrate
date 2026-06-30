@@ -97,6 +97,6 @@ void test_pmm_watermark(void) {
     test_watermark_lowmem_clamp();
 
     char buf[80];
-    sprintf(buf, "=== watermark tests: %d passed, %d failed ===\n", passed, failed);
+    snprintf(buf, sizeof(buf), "=== watermark tests: %d passed, %d failed ===\n", passed, failed);
     kprint(buf);
 }
