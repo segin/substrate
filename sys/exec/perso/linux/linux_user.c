@@ -4,6 +4,41 @@
 #include <string.h>
 #include <sys/errno.h>
 #include <vm/vm_kmem.h>
+#include <sys/mount.h>
+#include <sys/kern_syscalls.h>
+
+
+static void linux_fill_statfs(struct linux_statfs *kbuf, const struct statfs *native) {
+    memset(kbuf, 0, sizeof(*kbuf));
+    kbuf->f_type = native->f_type;
+    kbuf->f_bsize = native->f_bsize;
+    kbuf->f_blocks = (uint32_t)(native->f_blocks & 0xFFFFFFFF);
+    kbuf->f_bfree = (uint32_t)(native->f_bfree & 0xFFFFFFFF);
+    kbuf->f_bavail = (uint32_t)(native->f_bavail & 0xFFFFFFFF);
+    kbuf->f_files = (uint32_t)(native->f_files & 0xFFFFFFFF);
+    kbuf->f_ffree = (uint32_t)(native->f_ffree & 0xFFFFFFFF);
+    kbuf->f_fsid[0] = (uint32_t)(native->f_fsid & 0xFFFFFFFF);
+    kbuf->f_fsid[1] = (uint32_t)((native->f_fsid >> 32) & 0xFFFFFFFF);
+    kbuf->f_namelen = 255; /* Common max length */
+    kbuf->f_frsize = native->f_bsize;
+    kbuf->f_flags = native->f_flags;
+}
+
+static void linux_fill_statfs64(struct linux_statfs64 *kbuf, const struct statfs *native) {
+    memset(kbuf, 0, sizeof(*kbuf));
+    kbuf->f_type = native->f_type;
+    kbuf->f_bsize = native->f_bsize;
+    kbuf->f_blocks = native->f_blocks;
+    kbuf->f_bfree = native->f_bfree;
+    kbuf->f_bavail = native->f_bavail;
+    kbuf->f_files = native->f_files;
+    kbuf->f_ffree = native->f_ffree;
+    kbuf->f_fsid[0] = (uint32_t)(native->f_fsid & 0xFFFFFFFF);
+    kbuf->f_fsid[1] = (uint32_t)((native->f_fsid >> 32) & 0xFFFFFFFF);
+    kbuf->f_namelen = 255; /* Common max length */
+    kbuf->f_frsize = native->f_bsize;
+    kbuf->f_flags = native->f_flags;
+}
 
 static void linux_fill_stat64(struct linux_stat64 *kbuf, const struct stat *native) {
     memset(kbuf, 0, sizeof(*kbuf));
@@ -59,7 +94,7 @@ static void linux_fill_statx(struct linux_statx *kbuf, const struct stat *native
 /* Linux stat translation: native -> linux_stat */
 int linux_sys_stat(const char *path, struct linux_stat *buf) {
     char kpath[256];
-    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -14;
+    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -EFAULT;
     
     struct stat native;
     int ret = kern_stat(kpath, &native);
@@ -84,13 +119,13 @@ int linux_sys_stat(const char *path, struct linux_stat *buf) {
     kbuf.st_ctime = (uint32_t)(native.st_ctime & 0xFFFFFFFF);
     kbuf.st_ctime_nsec = native.st_ctime_nsec;
     
-    if (copyout(&kbuf, buf, sizeof(kbuf)) != 0) return -14;
+    if (copyout(&kbuf, buf, sizeof(kbuf)) != 0) return -EFAULT;
     return 0;
 }
 
 int linux_sys_lstat(const char *path, struct linux_stat *buf) {
     char kpath[256];
-    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -14;
+    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -EFAULT;
 
     struct stat native;
     int ret = kern_lstat(kpath, &native);
@@ -115,7 +150,7 @@ int linux_sys_lstat(const char *path, struct linux_stat *buf) {
     kbuf.st_ctime = (uint32_t)(native.st_ctime & 0xFFFFFFFF);
     kbuf.st_ctime_nsec = native.st_ctime_nsec;
     
-    if (copyout(&kbuf, buf, sizeof(kbuf)) != 0) return -14;
+    if (copyout(&kbuf, buf, sizeof(kbuf)) != 0) return -EFAULT;
     return 0;
 }
 
@@ -143,14 +178,14 @@ int linux_sys_fstat(int fd, struct linux_stat *buf) {
     kbuf.st_ctime = (uint32_t)(native.st_ctime & 0xFFFFFFFF);
     kbuf.st_ctime_nsec = native.st_ctime_nsec;
     
-    if (copyout(&kbuf, buf, sizeof(kbuf)) != 0) return -14;
+    if (copyout(&kbuf, buf, sizeof(kbuf)) != 0) return -EFAULT;
     return 0;
 }
 
 /* Linux stat64 translation: native -> linux_stat64 */
 int linux_sys_stat64(const char *path, struct linux_stat64 *buf) {
     char kpath[256];
-    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -14;
+    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -EFAULT;
 
     struct stat native;
     int ret = kern_stat(kpath, &native);
@@ -158,13 +193,13 @@ int linux_sys_stat64(const char *path, struct linux_stat64 *buf) {
     
     struct linux_stat64 kbuf;
     linux_fill_stat64(&kbuf, &native);
-    if (copyout(&kbuf, buf, sizeof(kbuf)) != 0) return -14;
+    if (copyout(&kbuf, buf, sizeof(kbuf)) != 0) return -EFAULT;
     return 0;
 }
 
 int linux_sys_lstat64(const char *path, struct linux_stat64 *buf) {
     char kpath[256];
-    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -14;
+    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -EFAULT;
 
     struct stat native;
     int ret = kern_lstat(kpath, &native);
@@ -172,7 +207,7 @@ int linux_sys_lstat64(const char *path, struct linux_stat64 *buf) {
     
     struct linux_stat64 kbuf;
     linux_fill_stat64(&kbuf, &native);
-    if (copyout(&kbuf, buf, sizeof(kbuf)) != 0) return -14;
+    if (copyout(&kbuf, buf, sizeof(kbuf)) != 0) return -EFAULT;
     return 0;
 }
 
@@ -183,7 +218,7 @@ int linux_sys_fstat64(int fd, struct linux_stat64 *buf) {
     
     struct linux_stat64 kbuf;
     linux_fill_stat64(&kbuf, &native);
-    if (copyout(&kbuf, buf, sizeof(kbuf)) != 0) return -14;
+    if (copyout(&kbuf, buf, sizeof(kbuf)) != 0) return -EFAULT;
     return 0;
 }
 
@@ -193,7 +228,7 @@ int linux_sys_fstatat64(int dirfd, const char *path, struct linux_stat64 *buf, i
     struct linux_stat64 kbuf;
     int ret;
 
-    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -14;
+    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -EFAULT;
 
     /* AT_EMPTY_PATH: stat dirfd itself; otherwise pass only the
      * nofollow bit through (kern_fstatat's 4th arg is a nofollow flag,
@@ -206,7 +241,7 @@ int linux_sys_fstatat64(int dirfd, const char *path, struct linux_stat64 *buf, i
     if (ret < 0) return ret;
 
     linux_fill_stat64(&kbuf, &native);
-    if (copyout(&kbuf, buf, sizeof(kbuf)) != 0) return -14;
+    if (copyout(&kbuf, buf, sizeof(kbuf)) != 0) return -EFAULT;
     return 0;
 }
 
@@ -216,7 +251,7 @@ int linux_sys_statx(int dirfd, const char *path, int flags, unsigned int mask, s
     struct linux_statx kbuf;
     int ret;
 
-    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -14;
+    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -EFAULT;
 
     /*
      * AT_EMPTY_PATH with an empty path operates on dirfd itself (fstat
@@ -233,7 +268,7 @@ int linux_sys_statx(int dirfd, const char *path, int flags, unsigned int mask, s
     if (ret < 0) return ret;
 
     linux_fill_statx(&kbuf, &native, mask);
-    if (copyout(&kbuf, buf, sizeof(kbuf)) != 0) return -14;
+    if (copyout(&kbuf, buf, sizeof(kbuf)) != 0) return -EFAULT;
     return 0;
 }
 
@@ -242,12 +277,12 @@ int linux_sys_getcwd(char *buf, size_t size) {
     size_t len;
     int ret;
 
-    if (!buf) return -14;
-    if (size == 0) return -22;
+    if (!buf) return -EFAULT;
+    if (size == 0) return -EINVAL;
     if (size > 4096) size = 4096;
 
     kbuf = kmalloc(size);
-    if (!kbuf) return -12;
+    if (!kbuf) return -ENOMEM;
 
     ret = kern_getcwd(kbuf, size);
     if (ret < 0) {
@@ -258,13 +293,91 @@ int linux_sys_getcwd(char *buf, size_t size) {
     len = strlen(kbuf) + 1;
     if (len > size) {
         kfree(kbuf, size);
-        return -34;
+        return -ERANGE;
     }
     if (copyout(kbuf, buf, len) != 0) {
         kfree(kbuf, size);
-        return -14;
+        return -EFAULT;
     }
 
     kfree(kbuf, size);
     return (int)len;
+}
+
+
+int linux_sys_statfs(const char *path, struct linux_statfs *buf) {
+    char *kpath = kmalloc(4096);
+    if (!kpath) return -ENOMEM;
+    int err = copyinstr(path, kpath, 4096, NULL);
+    if (err != 0) {
+        kfree(kpath, 4096);
+        return -err;
+    }
+
+    struct statfs native;
+    int ret = kern_statfs(kpath, &native);
+    kfree(kpath, 4096);
+    if (ret != 0) {
+        if (ret > 0) return -ret;
+        return ret;
+    }
+
+    struct linux_statfs kbuf;
+    linux_fill_statfs(&kbuf, &native);
+    if (copyout(&kbuf, buf, sizeof(kbuf)) != 0) return -EFAULT;
+    return 0;
+}
+
+int linux_sys_fstatfs(int fd, struct linux_statfs *buf) {
+    struct statfs native;
+    int ret = kern_fstatfs(fd, &native);
+    if (ret != 0) {
+        if (ret > 0) return -ret;
+        return ret;
+    }
+
+    struct linux_statfs kbuf;
+    linux_fill_statfs(&kbuf, &native);
+    if (copyout(&kbuf, buf, sizeof(kbuf)) != 0) return -EFAULT;
+    return 0;
+}
+
+int linux_sys_statfs64(const char *path, size_t sz, struct linux_statfs64 *buf) {
+    if (sz != sizeof(struct linux_statfs64)) return -EINVAL;
+
+    char *kpath = kmalloc(4096);
+    if (!kpath) return -ENOMEM;
+    int err = copyinstr(path, kpath, 4096, NULL);
+    if (err != 0) {
+        kfree(kpath, 4096);
+        return -err;
+    }
+
+    struct statfs native;
+    int ret = kern_statfs(kpath, &native);
+    kfree(kpath, 4096);
+    if (ret != 0) {
+        if (ret > 0) return -ret;
+        return ret;
+    }
+
+    struct linux_statfs64 kbuf;
+    linux_fill_statfs64(&kbuf, &native);
+    if (copyout(&kbuf, buf, sizeof(kbuf)) != 0) return -EFAULT;
+    return 0;
+}
+
+int linux_sys_fstatfs64(int fd, size_t sz, struct linux_statfs64 *buf) {
+    if (sz != sizeof(struct linux_statfs64)) return -EINVAL;
+    struct statfs native;
+    int ret = kern_fstatfs(fd, &native);
+    if (ret != 0) {
+        if (ret > 0) return -ret;
+        return ret;
+    }
+
+    struct linux_statfs64 kbuf;
+    linux_fill_statfs64(&kbuf, &native);
+    if (copyout(&kbuf, buf, sizeof(kbuf)) != 0) return -EFAULT;
+    return 0;
 }

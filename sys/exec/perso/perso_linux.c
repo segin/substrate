@@ -1085,12 +1085,8 @@ static void *linux_syscalls[MAX_SYSCALLS] = {
     [LINUX_SYS_fchown]         = (void *)&sys_fchown,
     [LINUX_SYS_getpriority]    = NULL,
     [LINUX_SYS_setpriority]    = NULL,
-    /* TODO: Linux struct statfs layout differs from Substrate's; a
-     * proper translation thunk should produce the Linux-format buf.
-     * Use sys_statfs/sys_fstatfs for now — they at least do the
-     * copyin correctly, even if the buf layout is BSD-shaped. */
-    [LINUX_SYS_statfs]         = (void *)&sys_statfs,
-    [LINUX_SYS_fstatfs]        = (void *)&sys_fstatfs,
+    [LINUX_SYS_statfs]         = (void *)&linux_sys_statfs,
+    [LINUX_SYS_fstatfs]        = (void *)&linux_sys_fstatfs,
     [LINUX_SYS_ioperm]         = NULL,
     [LINUX_SYS_socketcall]     = (void *)&linux_sys_socketcall,
     [LINUX_SYS_syslog]         = NULL,
@@ -1202,6 +1198,8 @@ static void *linux_syscalls[MAX_SYSCALLS] = {
     [LINUX_SYS_exit_group]     = (void *)&sys_exit,
     [LINUX_SYS_pipe2]          = (void *)&linux_sys_pipe2,
     [LINUX_SYS_dup3]           = (void *)&linux_sys_dup3,
+    [LINUX_SYS_statfs64]       = (void *)&linux_sys_statfs64,
+    [LINUX_SYS_fstatfs64]      = (void *)&linux_sys_fstatfs64,
     [LINUX_SYS_getrandom]      = (void *)&sys_getrandom,
     [LINUX_SYS_statx]          = (void *)linux_sys_statx,
     [LINUX_SYS_fchmodat]       = (void *)&sys_fchmodat,
