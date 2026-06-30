@@ -16,6 +16,7 @@
 #include <kern/device.h>
 #include <kern/pci.h>
 #include <kern/sched.h>
+#include <kern/time.h>
 #include "../../kern/sleepq.h"
 #include <sys/audioio.h>
 #include <sys/dma.h>
@@ -40,6 +41,17 @@
 #define AC97_DEFAULT_RATE          48000U
 #define AC97_FIFO_BYTES            (256U * 1024U) /* deep software PCM FIFO */
 #define AC97_PREBUFFER_SLOTS       8U     /* DMA slots staged before start */
+
+/*
+ * Drain polling.  ac97_drain() plays out everything still queued (software
+ * FIFO + DMA ring) before returning.  It polls in ~10 ms steps while the IRQ
+ * feeder keeps the bus master running; it stops as soon as the queue empties,
+ * after a stretch with no playback progress (the controller is wedged), or at
+ * a generous hard ceiling — so it can never wedge close()/exit().
+ */
+#define AC97_DRAIN_POLL_MS         10U
+#define AC97_DRAIN_STALL_POLLS     150U   /* ~1.5 s of no progress -> give up */
+#define AC97_DRAIN_POLL_MAX        6000U  /* ~60 s absolute ceiling          */
 
 /* ------------------------------------------------------------------- */
 /* Pure helpers (also reachable from host tests)                       */
@@ -385,9 +397,21 @@ static int ac97_open(audio_dev_t *adev, int mode)
 	return 0;
 }
 
+static int ac97_drain(audio_dev_t *adev);
+
 static int ac97_close(audio_dev_t *adev)
 {
 	ac97_dev_t *d = adev->driver_data;
+
+	/*
+	 * POSIX/OSS semantics: close() plays out queued audio before the device
+	 * goes idle.  Without this, a program that does write();close() (or just
+	 * exits after writing) loses everything still buffered in the software
+	 * FIFO + DMA ring — up to a couple of seconds — because the bus master is
+	 * stopped immediately below.  ac97_drain() is bounded and interruptible,
+	 * so a killed writer (pending signal) skips the wait and exits promptly.
+	 */
+	(void)ac97_drain(adev);
 
 	/* Stop the bus master if anything was running. */
 	ac97_bm_write8(d, AC97_BM_PO_BASE + AC97_BM_CR, 0);
@@ -526,9 +550,74 @@ static int ac97_write(audio_dev_t *adev, const void *buf, size_t len)
 	return (int)total_consumed;
 }
 
+/*
+ * Block until in-flight playback drains: keep the bus master fed and running
+ * and wait until the software FIFO is empty AND the DMA ring has played out
+ * (in_flight == 0).  Backs AUDIO_DRAIN / SNDCTL_DSP_SYNC and is also called
+ * from ac97_close() so the standard write();close() idiom plays its tail
+ * instead of having it discarded when the bus master is stopped.
+ *
+ * Bounded and interruptible: it returns early on a pending unmasked signal
+ * (so a killed writer never wedges here), after AC97_DRAIN_STALL_POLLS polls
+ * with no progress (a stuck controller), or at the AC97_DRAIN_POLL_MAX ceiling.
+ */
 static int ac97_drain(audio_dev_t *adev)
 {
-	(void)adev;
+	ac97_dev_t *d = adev->driver_data;
+	uint32_t poll;
+	uint32_t stall = 0;
+	uint32_t last_remaining = 0xFFFFFFFFu;
+	uint32_t hz = get_hz();
+	uint64_t step = hz ? (hz * AC97_DRAIN_POLL_MS) / 1000U : 1U;
+
+	if (d == NULL || d->fifo_buf == NULL || d->mmap_mode) {
+		return 0;
+	}
+	if (step == 0) {
+		step = 1;
+	}
+
+	for (poll = 0; poll < AC97_DRAIN_POLL_MAX; poll++) {
+		unsigned long f;
+		uint32_t in_flight;
+		size_t used;
+		uint32_t remaining;
+
+		/* Stage any FIFO remainder into the ring and (re)start the BM so
+		 * the queue actually moves while we wait. */
+		ac97_kick(d);
+
+		f = spinlock_acquire_irq(&d->feed_lock);
+		used = audio_fifo_used(&d->fifo);
+		in_flight = d->writes_queued -
+		            __atomic_load_n(&d->slots_played, __ATOMIC_ACQUIRE);
+		spinlock_release_irq(&d->feed_lock, f);
+
+		if (used == 0 && in_flight == 0) {
+			break;                 /* fully drained */
+		}
+		if (current_thread &&
+		    (current_thread->sig_pending & ~current_thread->sig_mask)) {
+			break;                 /* interrupted — drop the tail */
+		}
+
+		/* Bytes still to play; a monotonically decreasing progress metric. */
+		remaining = (uint32_t)used + in_flight * AC97_CHUNK_BYTES;
+		if (remaining < last_remaining) {
+			last_remaining = remaining;
+			stall = 0;
+		} else if (++stall >= AC97_DRAIN_STALL_POLLS) {
+			break;                 /* controller wedged — don't hang */
+		}
+
+		if (current_thread) {
+			(void)sched_sleep_until((void *)d, get_ticks() + step);
+		} else {
+			for (volatile int i = 0; i < 200000; i++) {
+				__asm__ volatile("pause");
+			}
+		}
+	}
 	return 0;
 }
 
