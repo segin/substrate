@@ -11,9 +11,11 @@
 #include <arch/i386/pmm.h>
 #include <arch/i386/pmap.h>
 #include <vm/vm_kmem.h>
+#include <vm/vm_commit.h>
 #include <kern/cmdline.h>
 #include <sys/lock.h>
 #include <sys/param.h>
+#include <sys/errno.h>
 
 // mman.h flag definitions (duplicated here for kernel use)
 #define PROT_NONE  0x0
@@ -25,6 +27,7 @@
 #define MAP_PRIVATE   0x002
 #define MAP_FIXED     0x010
 #define MAP_ANONYMOUS 0x020
+#define MAP_NORESERVE 0x0040  /* FreeBSD historical value */
 
 static int mmap_validate_flags(int flags) {
     int sharing = flags & (MAP_SHARED | MAP_PRIVATE);
@@ -282,6 +285,32 @@ void *sys_mmap(void *addr, size_t length, int prot, int flags, int fd, uint64_t 
         return ((fs_node_t*)file->f_data)->mmap((fs_node_t*)file->f_data, addr, length, prot, flags, offset);
     }
 
+    /*
+     * Strict commit accounting (no overcommit).  An anonymous PRIVATE
+     * mapping grows the address space lazily and is demand-paged, so we
+     * must RESERVE its pages now -- otherwise malloc() returns non-NULL
+     * with no memory behind it and the process dies on first touch with
+     * a non-portable signal.  Charge the whole span against the global
+     * commit limit; if it would exceed the limit, fail the mmap with
+     * ENOMEM (-> MAP_FAILED in userspace) per POSIX.  MAP_NORESERVE opts
+     * out (caller accepts overcommit).  Shared and file-backed mappings
+     * are not charged here: SHARED|ANON is shm (its own accounting model)
+     * and file-backed pages are reclaimable from their vnode.
+     */
+    int commit_charged = 0;
+    size_t commit_pages = aligned_length / 0x1000;
+    int is_anon_private = (flags & MAP_ANONYMOUS) && !(flags & MAP_SHARED) &&
+                          !(flags & MAP_NORESERVE) && !file;
+    if (is_anon_private) {
+        if (vm_commit_charge(commit_pages) != 0) {
+            /* Return a negative errno (not bare -1, which the libc mmap
+             * wrapper would surface as EPERM); POSIX mandates ENOMEM when
+             * memory cannot be committed. */
+            return (void *)(intptr_t)(-ENOMEM);
+        }
+        commit_charged = 1;
+    }
+
     // Create VM object for tracking
     vm_object_t *obj;
     if (file) {
@@ -290,7 +319,10 @@ void *sys_mmap(void *addr, size_t length, int prot, int flags, int fd, uint64_t 
     } else {
         obj = vm_object_allocate(VM_OBJ_TYPE_DEFAULT, aligned_length);
     }
-    if (!obj) return (void *)-1;
+    if (!obj) {
+        if (commit_charged) vm_commit_uncharge(commit_pages);
+        return (void *)-1;
+    }
 
     // Determine inheritance based on sharing
     uint8_t inheritance = (flags & MAP_SHARED) ? VM_INHERIT_SHARE : VM_INHERIT_COPY;
@@ -306,7 +338,24 @@ void *sys_mmap(void *addr, size_t length, int prot, int flags, int fd, uint64_t 
     uint8_t max_prot = VM_PROT_READ | VM_PROT_WRITE | VM_PROT_EXEC;
     if (vm_map_insert(map, obj, 0, v_addr, v_addr + aligned_length, vm_prot, max_prot, inheritance) != 0) {
         vm_object_deallocate(obj);
+        if (commit_charged) vm_commit_uncharge(commit_pages);
         return (void *)-1;
+    }
+
+    /*
+     * Mark the entry so its teardown (vm_map_remove / vm_map_destroy)
+     * uncharges exactly (end-start)/PAGE pages.  A private anonymous
+     * object is unique per mmap, so this entry never merges with a
+     * neighbour (vm_map_entries_mergeable compares object pointers) --
+     * the looked-up entry is exactly the one inserted, span == length.
+     */
+    if (commit_charged) {
+        vm_map_lock(map);
+        vm_map_entry_t *e = vm_map_lookup(map, v_addr);
+        if (e) {
+            e->flags |= VME_COMMITTED;
+        }
+        vm_map_unlock(map);
     }
 
     return (void *)v_addr;
@@ -379,6 +428,23 @@ void *sys_brk(void *addr) {
 
 
     if (new_page_end > old_page_end) {
+        /*
+         * Strict commit accounting: reserve the heap pages we are about
+         * to grow into BEFORE allocating them.  If the reservation would
+         * exceed the commit limit, refuse to grow and return the old
+         * break -- glibc/musl malloc treats "brk did not advance" as
+         * ENOMEM and returns NULL, which is the POSIX-correct behaviour.
+         */
+        size_t grow_pages = (new_page_end - old_page_end) / 0x1000;
+        if (vm_commit_charge(grow_pages) != 0) {
+            extern int syscall_trace_enabled;
+            if (syscall_trace_enabled || cmdline_debug_enabled("vm:brk")) {
+                extern void kprint(const char*);
+                kprint("BRK: commit limit reached -> ENOMEM\n");
+            }
+            return (void *)(uintptr_t)old_brk;
+        }
+
         // Allocate and map new pages in batches
         #define BRK_BATCH_SIZE 256
         uintptr_t pa_batch[BRK_BATCH_SIZE];
@@ -398,6 +464,7 @@ void *sys_brk(void *addr) {
                          pmm_free_block((void*)(pa_batch[k] + 0xC0000000));
                      }
                      brk_unmap_free_pages(brk_pmap, old_page_end, batch_va_start);
+                     vm_commit_uncharge(grow_pages); /* grow aborted */
                      extern int syscall_trace_enabled;
                      if (syscall_trace_enabled || cmdline_debug_enabled("vm:brk")) {
                          extern void kprint(const char*);
@@ -425,6 +492,7 @@ void *sys_brk(void *addr) {
                      pmm_free_block((void *)(pa_batch[k] + KERN_BASE));
                  }
                  brk_unmap_free_pages(brk_pmap, old_page_end, batch_va_start);
+                 vm_commit_uncharge(grow_pages); /* grow aborted */
                  extern int syscall_trace_enabled;
                  if (syscall_trace_enabled || cmdline_debug_enabled("vm:brk")) {
                      extern void kprint(const char*);
@@ -434,8 +502,29 @@ void *sys_brk(void *addr) {
             }
         }
     }
-    // If shrinking, we leak pages for now (lazy unmap). 
-    // This is safe for stability, just wasteful.
+
+    /*
+     * Keep the strict-commit accounting in step with the heap span.
+     *   - grow: the charge was already taken (and the pages allocated)
+     *     in the grow block above; record it in brk_committed.
+     *   - shrink: release both the commit reservation AND the physical
+     *     pages for the range we are giving back.  The old code "leaked"
+     *     shrunk pages (lazy unmap); under strict accounting that double-
+     *     counts memory, so we now actually unmap+free them and uncharge.
+     */
+    if (new_page_end > old_page_end) {
+        current_process->brk_committed += (new_page_end - old_page_end) / 0x1000;
+    } else if (new_page_end < old_page_end) {
+        size_t shrink_pages = (old_page_end - new_page_end) / 0x1000;
+        pmap_t brk_pmap = current_process->pmap ? (pmap_t)current_process->pmap
+                                                : pmap_kernel();
+        brk_unmap_free_pages(brk_pmap, new_page_end, old_page_end);
+        vm_commit_uncharge(shrink_pages);
+        if (current_process->brk_committed >= shrink_pages)
+            current_process->brk_committed -= shrink_pages;
+        else
+            current_process->brk_committed = 0;
+    }
 
     current_process->brk = (uint32_t)new_brk;
     

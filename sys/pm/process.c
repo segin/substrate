@@ -17,6 +17,7 @@
 #include <sys/ldt.h>
 #include <arch/i386/intr.h>
 #include <vm/vm_map.h>
+#include <vm/vm_commit.h>
 #include <exec/perso/personality.h>
 #include <kern/time.h>
 #include <sys/types.h>
@@ -1078,6 +1079,18 @@ static int proc_threads_all_zombie(process_t *proc, thread_t *skip_thread) {
 static void proc_release_zombie_resources(process_t *proc) {
     if (!proc) {
         return;
+    }
+
+    /*
+     * Release the heap (brk) commit reservation.  Heap pages are mapped
+     * directly into the pmap, not via vm_map entries, so vm_map_destroy
+     * does not account for them -- uncharge here so exit balances the
+     * global commit counter exactly.  (Anonymous-mmap reservations are
+     * uncharged by vm_map_destroy via VME_COMMITTED.)
+     */
+    if (proc->brk_committed) {
+        vm_commit_uncharge(proc->brk_committed);
+        proc->brk_committed = 0;
     }
 
     if (proc->vm_map) {

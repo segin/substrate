@@ -303,18 +303,25 @@ void isr_handler(registers_t *regs) {
                 if (vfr == VM_FAULT_SUCCESS) {
                     return;
                 }
-                /* OOM (no free pages / no page-table page) — distinct
-                 * from a "real" SEGV.  Substrate has no swap, so this
-                 * is fatal to the process, but we send SIGBUS (not
-                 * SIGSEGV) and emit a clear kernel diagnostic so the
-                 * operator sees this is a system-resource shortage,
-                 * not a userland-pointer bug.  trap_addr=cr2 so the
-                 * trace tells you which page couldn't be backed. */
+                /* OOM (no free pages / no page-table page).  With strict
+                 * commit accounting (vm_commit_charge at mmap/brk time)
+                 * this is now a DEFENSIVE BACKSTOP: a correctly-charged
+                 * page is always backable at fault time, so reaching here
+                 * means either an uncharged path (COW/stack -- a documented
+                 * follow-up) ran the system genuinely dry, or a true
+                 * page-table allocation failure.  Substrate has no swap,
+                 * so it is fatal to the process.  We deliver SIGSEGV
+                 * (SEGV_MAPERR), NOT SIGBUS: SIGBUS for an anonymous-memory
+                 * OOM matches no real OS (Linux/BSD raise SIGSEGV or invoke
+                 * the OOM killer), and a portable program that installs a
+                 * SIGSEGV handler should see it.  The kernel diagnostic is
+                 * kept so the operator can tell a resource shortage from a
+                 * userland-pointer bug.  trap_addr=cr2 names the page. */
                 if (vfr == VM_FAULT_OOM && is_usermode && current_process) {
                     char oombuf[160];
                     snprintf(oombuf, sizeof(oombuf),
                         "VM: OOM at fault: pid=%d (%s) eip=0x%08X cr2=0x%08X "
-                        "(no free page) -> SIGBUS\n",
+                        "(no free page) -> SIGSEGV\n",
                         (int)current_process->pid,
                         current_process->comm[0] ? current_process->comm : "?",
                         (unsigned int)regs->eip,
@@ -323,7 +330,7 @@ void isr_handler(registers_t *regs) {
                     if (current_thread && current_thread->proc == current_process) {
                         current_thread->trap_addr = cr2;
                     }
-                    trapsignal(current_process, SIGBUS, BUS_OBJERR);
+                    trapsignal(current_process, SIGSEGV, SEGV_MAPERR);
                     signal_handle_pending(regs);
                     return;
                 }

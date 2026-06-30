@@ -1,5 +1,6 @@
 #include <vm/vm_map.h>
 #include <vm/vm_object.h>
+#include <vm/vm_commit.h>
 #include <arch/i386/pmap.h>
 #include <stddef.h>
 
@@ -7,6 +8,23 @@
 #include <kern/panic.h>
 
 extern int kprintf(const char *fmt, ...);
+
+/*
+ * Release the strict-commit reservation a map entry holds over the
+ * byte range [from, to).  An entry charged at mmap time (VME_COMMITTED)
+ * always holds exactly (end-start)/PAGE pages of commit; whenever such
+ * an entry is removed, split, or trimmed we uncharge precisely the
+ * pages covered by the affected sub-range so the global counter stays
+ * balanced.  No-op for entries that were never charged.
+ */
+static void vm_map_entry_uncommit_range(vm_map_entry_t *entry,
+                                        uintptr_t from, uintptr_t to) {
+    if (!entry || !(entry->flags & VME_COMMITTED))
+        return;
+    if (to <= from)
+        return;
+    vm_commit_uncharge((size_t)((to - from) / 0x1000));
+}
 
 /*
  * Tripwire: every entry->object in a map must point at a live
@@ -875,6 +893,7 @@ int vm_map_remove(vm_map_t *map, uintptr_t start, uintptr_t end) {
         
         if (cur->start >= start && cur->end <= end) {
             // Entirely within range, remove it
+            vm_map_entry_uncommit_range(cur, cur->start, cur->end);
             vm_map_pmap_remove_range(map, cur->start, cur->end);
             if (map->hint == cur) map->hint = cur->prev;
             cur->prev->next = cur->next;
@@ -898,6 +917,10 @@ int vm_map_remove(vm_map_t *map, uintptr_t start, uintptr_t end) {
                 return -1;
             }
 
+            // Only the middle [start, end) is being unmapped; both the
+            // left (cur) and right (new_entry) halves keep VME_COMMITTED
+            // (copied below), so uncharge exactly the removed middle.
+            vm_map_entry_uncommit_range(cur, start, end);
             vm_map_pmap_remove_range(map, start, end);
 
             // Initialize new entry (right part)
@@ -943,6 +966,7 @@ int vm_map_remove(vm_map_t *map, uintptr_t start, uintptr_t end) {
             if (cur->start < start) {
                 // Trimming right side of entry
                 uintptr_t old_end = cur->end;
+                vm_map_entry_uncommit_range(cur, start, old_end);
                 vm_map_pmap_remove_range(map, start, old_end);
                 map->size -= (old_end - start);
                 cur->end = start;
@@ -950,6 +974,7 @@ int vm_map_remove(vm_map_t *map, uintptr_t start, uintptr_t end) {
             } else {
                 // Trimming left side of entry
                 uintptr_t old_start = cur->start;
+                vm_map_entry_uncommit_range(cur, old_start, end);
                 vm_map_pmap_remove_range(map, old_start, end);
                 map->size -= (end - old_start);
                 cur->offset += (end - old_start);
@@ -1011,6 +1036,9 @@ void vm_map_destroy(vm_map_t *map) {
         vm_map_entry_t *cur = header->next;
         while (cur != header) {
             vm_map_entry_t *next = cur->next;
+            // Release this entry's strict-commit reservation (if any) so
+            // exec teardown and process exit both balance the counter.
+            vm_map_entry_uncommit_range(cur, cur->start, cur->end);
             // Dereference the object if present
             if (cur->object) {
                 vm_object_deallocate(cur->object);
@@ -1333,10 +1361,16 @@ vm_map_t *vm_map_fork(vm_map_t *src_map, pmap_t dst_pmap) {
             return NULL;
         }
         
-        // Copy flags (excluding wired state)
+        // Copy flags (excluding wired state).  Also strip VME_COMMITTED:
+        // the parent already holds the commit charge for this anonymous
+        // range and the child shares those pages copy-on-write without a
+        // separate reservation (COW commit charging is a documented
+        // follow-up).  If the child inherited the flag, its later teardown
+        // would uncharge a reservation it never made and unbalance the
+        // global counter.
         vm_map_entry_t *dst_entry = vm_map_lookup(dst_map, src_entry->start);
         if (dst_entry) {
-            dst_entry->flags = src_entry->flags & ~VME_WIRED; 
+            dst_entry->flags = src_entry->flags & ~(VME_WIRED | VME_COMMITTED);
         }
     }
 

@@ -27,6 +27,7 @@
 #include <vm/vm_page.h>
 #include <vm/vm_map.h>
 #include <vm/vm_object.h>
+#include <vm/vm_commit.h>
 #include <kern/memtrack.h>
 #include <sys/lock.h>
 #include <kern/bus.h>
@@ -96,6 +97,15 @@ static uint32_t gen_meminfo(char *buf, size_t size, void *opaque) {
     uint32_t free_kb = pmm_get_free_memory() / 1024;
     uint32_t used_kb = total_kb - free_kb;
 
+    /* Strict-commit accounting (no overcommit).  CommitLimit is the
+     * total commitable address space (usable RAM - kernel reserve +
+     * swap; swap is 0); Committed_AS is how much is currently promised
+     * to userspace (anonymous private mmap + grown brk heap).  These let
+     * userspace observe the no-overcommit budget that decides whether the
+     * next malloc/mmap/brk succeeds.  4 KiB pages -> kB is pages * 4. */
+    uint32_t commit_limit_kb = (uint32_t)(vm_commit_limit() * 4);
+    uint32_t committed_kb    = (uint32_t)(vm_commit_current() * 4);
+
     /* MemAvailable is a standard /proc/meminfo field (Linux 3.14+) that
      * callers use as the canonical "how much can I allocate" figure.
      * Without it, software that computes "available = MemAvailable"
@@ -113,8 +123,11 @@ static uint32_t gen_meminfo(char *buf, size_t size, void *opaque) {
         "Buffers:            0 kB\n"
         "Cached:             0 kB\n"
         "SwapTotal:          0 kB\n"
-        "SwapFree:           0 kB\n",
-        total_kb, free_kb, free_kb, used_kb);
+        "SwapFree:           0 kB\n"
+        "CommitLimit: %8u kB\n"
+        "Committed_AS:%8u kB\n",
+        total_kb, free_kb, free_kb, used_kb,
+        commit_limit_kb, committed_kb);
 }
 
 /* /proc/memtrack — per-call-site physical-page accounting.  One line

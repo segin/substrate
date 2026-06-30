@@ -140,6 +140,9 @@ typedef struct process {
     // Memory management
     uint32_t brk;        // Program break (heap end)
     uint32_t brk_start;  // Initial program break
+    uint32_t brk_committed; // Pages of heap charged to the strict commit
+                            // counter (vm_commit_charge); released on brk
+                            // shrink, exec, and process exit.
     uint64_t itimer_value_ticks[PROC_ITIMER_COUNT];
     uint64_t itimer_interval_ticks[PROC_ITIMER_COUNT];
     spinlock_t itimer_lock;

@@ -22,6 +22,10 @@ struct vm_map_hole;
 #define VME_NEEDS_COPY  0x02    // Copy-on-write pending
 #define VME_IS_SUB_MAP  0x04    // Entry is a submap
 #define VME_NEEDS_ZERO  0x08    // Zero before first access
+#define VME_COMMITTED   0x10    // Pages charged to the strict commit
+                                // counter (vm_commit_charge); the entry
+                                // teardown (remove/destroy) must uncharge
+                                // exactly (end-start)/PAGE_SIZE pages.
 
 // VM Map Entry: Represents a contiguous range of virtual addresses.
 typedef struct vm_map_entry {

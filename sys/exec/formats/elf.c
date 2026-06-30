@@ -10,6 +10,7 @@
 #include <vm/vm_object.h>
 #include <vm/vm_kmem.h>
 #include <vm/vm_page.h>
+#include <vm/vm_commit.h>
 #include <vm/phys_mem.h>
 #include <exec/perso/personality.h>
 #include <exec/perso/linux/linux_exec.h>
@@ -1690,6 +1691,18 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
      * goto cleanup does not try to double-free.
      */
     if (old_vm_map) {
+        /*
+         * The old heap (brk) pages live in old_vm_map's pmap, not in a
+         * vm_map entry, so vm_map_destroy won't uncharge them.  Release
+         * the old image's brk commit reservation here -- elf_load already
+         * reset brk/brk_start for the new image (whose heap is empty), so
+         * brk_committed still reflects the OLD heap.  Zero it for the new
+         * image.
+         */
+        if (current_process) {
+            vm_commit_uncharge(current_process->brk_committed);
+            current_process->brk_committed = 0;
+        }
         vm_map_destroy(old_vm_map);
         old_vm_map = NULL;
     }

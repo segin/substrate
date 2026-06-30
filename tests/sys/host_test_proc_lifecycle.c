@@ -93,6 +93,7 @@ thread_t *sched_create_thread(process_t *proc, void (*entry_point)(void *), void
 
 int copyout(const void *src, void *dst, size_t len) { memcpy(dst, src, len); return 0; }
 void vm_map_destroy(vm_map_t *map) { (void)map; vm_map_destroy_calls++; }
+void vm_commit_uncharge(size_t npages) { (void)npages; }
 void sched_wakeup(void *chan) { (void)chan; }
 void sched_sleep(void *chan) { (void)chan; }
 void sched_yield(void) { yielded = 1; longjmp(exit_jmp, 1); }

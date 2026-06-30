@@ -77,6 +77,7 @@ void futex_thread_exit(thread_t *t) { (void)t; futex_exit_calls++; }
 void acct_process(int code) { (void)code; acct_calls++; }
 void close_fs(fs_node_t *node) { (void)node; close_fs_calls++; }
 void vm_map_destroy(struct vm_map *map) { (void)map; vm_map_destroy_calls++; }
+void vm_commit_uncharge(size_t npages) { (void)npages; }
 void rusage_finalize(process_t *p) { (void)p; rusage_finalize_calls++; }
 void file_close_ptr(file_t *f) { (void)f; file_close_calls++; }
 int mutex_release_owned_by_thread(thread_t *owner) {

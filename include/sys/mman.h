@@ -22,7 +22,16 @@ extern "C" {
 /* BSD-style alias.  Linux/glibc accept both spellings; ported
  * software (xorg-server, mesa, ...) reaches for MAP_ANON. */
 #define MAP_ANON      MAP_ANONYMOUS
-#define MAP_32BIT     0x040
+/* MAP_NORESERVE: do not reserve (charge) commit for this mapping.  The
+ * kernel uses strict commit accounting (no overcommit) by default, so an
+ * anonymous private mapping is charged against the commit limit at mmap()
+ * time and fails with ENOMEM if it would exceed it.  MAP_NORESERVE opts a
+ * mapping out of that charge, at the cost of a possible SIGSEGV on first
+ * touch if memory is exhausted.  Value matches FreeBSD's historical
+ * MAP_NORESERVE (sys/sys/mman.h), not the Linux 0x4000. */
+#define MAP_NORESERVE 0x0040
+/* FreeBSD MAP_32BIT value (LP64-only there; defined here for ABI parity). */
+#define MAP_32BIT     0x00080000
 
 // Special value for mmap errors
 #define MAP_FAILED ((void *)-1)

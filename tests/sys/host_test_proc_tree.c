@@ -64,6 +64,7 @@ void host_wait_for_interrupt(void) {}
 void kprint(const char *msg) { (void)msg; }
 void tty_hangup(struct tty *tty) { (void)tty; }
 void vm_map_destroy(struct vm_map *map) { (void)map; }
+void vm_commit_uncharge(size_t npages) { (void)npages; }
 void pgrp_remove_proc(struct process *proc) { (void)proc; }
 void sched_reap_process_threads(process_t *proc) { (void)proc; }
 void ldt_init_process(process_t *proc) {
