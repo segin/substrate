@@ -373,7 +373,7 @@ int audio_ioctl_dispatch(audio_dev_t *dev, uint32_t request, void *arg)
 /* fs_node_t glue                                                    */
 /* ----------------------------------------------------------------- */
 
-static size_t audio_node_write(fs_node_t *node, off_t offset, size_t size,
+size_t audio_node_write(fs_node_t *node, off_t offset, size_t size,
 			       const uint8_t *buffer)
 {
 	audio_dev_t *dev = audio_dev_for_node(node);
@@ -418,7 +418,7 @@ static size_t audio_node_write(fs_node_t *node, off_t offset, size_t size,
 	return (size_t)rc;
 }
 
-static size_t audio_node_read(fs_node_t *node, off_t offset, size_t size,
+size_t audio_node_read(fs_node_t *node, off_t offset, size_t size,
 			      uint8_t *buffer)
 {
 	audio_dev_t *dev = audio_dev_for_node(node);
@@ -443,7 +443,7 @@ static int audio_node_ioctl(fs_node_t *node, uint32_t request, void *arg)
 	return audio_ioctl_dispatch(dev, request, arg);
 }
 
-static void *audio_node_mmap(fs_node_t *node, void *addr, size_t length,
+void *audio_node_mmap(fs_node_t *node, void *addr, size_t length,
 			     int prot, int flags, off_t offset)
 {
 	audio_dev_t *dev = audio_dev_for_node(node);
@@ -454,7 +454,7 @@ static void *audio_node_mmap(fs_node_t *node, void *addr, size_t length,
 	return dev->ops->mmap(dev, addr, length, prot, flags, offset);
 }
 
-static void audio_node_open(fs_node_t *node)
+void audio_node_open(fs_node_t *node)
 {
 	audio_dev_t *dev = audio_dev_for_node(node);
 	int first_open = 0;
@@ -471,7 +471,7 @@ static void audio_node_open(fs_node_t *node)
 	}
 }
 
-static void audio_node_close(fs_node_t *node)
+void audio_node_close(fs_node_t *node)
 {
 	audio_dev_t *dev = audio_dev_for_node(node);
 	int last_close = 0;
@@ -593,6 +593,15 @@ int audio_register_device(audio_dev_t *dev)
 		(void)devfs_register_alias("audio", "audio0");
 		(void)devfs_register_alias("audioctl", "audioctl0");
 	}
+
+	/*
+	 * Publish the OSS frontend (/dev/dspN, plus the /dev/dsp alias for
+	 * unit 0) over the same backend.  This is personality-agnostic: the
+	 * node is visible to native, Linux, and FreeBSD programs alike, and
+	 * its ioctl dispatch matches OSS commands by group+number so every
+	 * personality's _IOWR encoding routes correctly.
+	 */
+	oss_register_device(dev, unit);
 
 	return 0;
 }

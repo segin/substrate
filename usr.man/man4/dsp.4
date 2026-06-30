@@ -1,0 +1,194 @@
+.TH DSP 4 "June 2026" "Substrate Kernel" "Kernel Interfaces"
+.SH NAME
+dsp \- OSS (Open Sound System) audio device interface
+.SH SYNOPSIS
+.B #include <sys/soundcard.h>
+.SH DESCRIPTION
+The
+.B dsp
+device is an OSS-compatible frontend onto the same audio backend that
+drives the Sun/SADA
+.BR audio (4)
+nodes.  It lets programs written for the Open Sound System \(em native,
+Linux, or FreeBSD \(em play PCM through Substrate's hardware drivers
+without modification.
+.PP
+.B /dev/dsp
+shares the backend with
+.B /dev/audio
+completely:
+.BR open (2)
+opens the backend,
+.BR write (2)
+queues PCM for playback, and
+.BR close (2)
+releases it.  Only the
+.BR ioctl (2)
+ABI differs \(em
+.B dsp
+speaks the OSS
+.B SNDCTL_DSP_*
+command set instead of the Sun/SADA
+.B AUDIO_*
+set.  The two frontends share the same exclusive-playback arbitration:
+the first process to
+.BR write (2)
+either node claims the device, and a second process's
+.BR write (2)
+fails with
+.BR EBUSY .
+.SS Device Nodes
+.TP
+.B /dev/dspN
+The OSS sample device for the
+.IR N -th
+audio device.
+.TP
+.B /dev/dsp
+A convenience alias for
+.BR /dev/dsp0 ,
+registered when the first audio device appears.
+.SS Default Configuration
+On
+.BR open (2)
+the device is configured to the OSS convention of 8000 Hz,
+.BR AFMT_U8 ,
+mono.  Programs normally override this immediately with
+.BR SNDCTL_DSP_SETFMT ,
+.BR SNDCTL_DSP_CHANNELS ,
+and
+.BR SNDCTL_DSP_SPEED .
+.SS Sample Formats
+The OSS
+.B AFMT_*
+formats map onto the framework encodings as follows:
+.RS
+.IP \(bu 4
+.B AFMT_S16_LE
+\(em signed 16-bit little-endian.
+.IP \(bu 4
+.B AFMT_S16_BE
+\(em signed 16-bit big-endian.
+.IP \(bu 4
+.B AFMT_U8
+\(em unsigned 8-bit.
+.IP \(bu 4
+.B AFMT_S8
+\(em signed 8-bit.
+.IP \(bu 4
+.B AFMT_MU_LAW
+\(em 8-bit \(*m-law.
+.IP \(bu 4
+.B AFMT_A_LAW
+\(em 8-bit A-law.
+.RE
+.SS Cross-personality Dispatch
+OSS programs from different operating-system personalities encode
+.B SNDCTL_DSP_*
+with their own
+.B _IOWR
+macros, so the direction and size bits in the high half of the request
+word vary.  The
+.B dsp
+ioctl dispatch matches a command by its OSS group
+.RB ( \(aqP\(aq )
+and command number alone, ignoring those high bits, so every
+personality's OSS ioctls reach the correct handler.
+.SH IOCTLS
+.TP
+.B SNDCTL_DSP_SPEED
+Set the sample rate (arg: pointer to
+.BR int ).
+The actual rate the hardware accepted is written back.
+.TP
+.B SNDCTL_DSP_SETFMT
+Set the sample format to one of the
+.B AFMT_*
+values, or query the current format with
+.BR AFMT_QUERY .
+The format actually set is written back.
+.TP
+.B SNDCTL_DSP_CHANNELS
+Set the channel count; the value used is written back.
+.TP
+.B SNDCTL_DSP_STEREO
+Select mono (0) or stereo (1).
+.TP
+.B SNDCTL_DSP_GETFMTS
+Return a bitmask of the supported
+.B AFMT_*
+formats.
+.TP
+.B SNDCTL_DSP_GETOSPACE
+Fill a
+.B struct audio_buf_info
+describing the playback FIFO's free space (fragment size, total
+fragments, free fragments, free bytes).
+.TP
+.B SNDCTL_DSP_GETISPACE
+Fill a
+.B struct audio_buf_info
+for the capture buffer.
+.TP
+.B SNDCTL_DSP_GETBLKSIZE
+Return the fragment size in bytes.
+.TP
+.B SNDCTL_DSP_SETFRAGMENT
+Hint the desired fragmentation (accepted and echoed back).
+.TP
+.B SNDCTL_DSP_GETCAPS
+Return the device capability bits
+.RB ( DSP_CAP_* ).
+.TP
+.B SNDCTL_DSP_SYNC
+Drain queued playback (block until emitted).
+.TP
+.B SNDCTL_DSP_RESET
+Discard queued playback immediately.
+.TP
+.B SNDCTL_DSP_POST
+Mark a playback boundary (no-op kick).
+.TP
+.B SNDCTL_DSP_GETODELAY
+Return the number of bytes still queued for playback.
+.SH FILES
+.TP
+.B /dev/dsp
+Default OSS sample device (alias for
+.BR /dev/dsp0 ).
+.TP
+.B /dev/dspN
+OSS sample devices.
+.SH ERRORS
+.TP
+.B EBUSY
+Another process already holds the device for playback.
+.TP
+.B EINTR
+A signal was delivered while a
+.BR write (2)
+blocked waiting for the hardware to drain, before any data was queued.
+.TP
+.B EINVAL
+An unsupported
+.B SNDCTL_DSP_*
+command number, or an invalid parameter.
+.SH SEE ALSO
+.BR ioctl (2),
+.BR write (2),
+.BR audio (4),
+.BR uac (4)
+.SH HISTORY
+The
+.B dsp
+OSS frontend was added so OSS-targeted software (including FreeBSD SDL2
+audio) could play through Substrate's audio drivers.  It is additive to
+the Sun/SADA
+.BR audio (4)
+interface and shares its backend.
+.SH BUGS
+The interface is playback-oriented;
+.BR read (2)
+capture through
+.B /dev/dsp
+depends on the backing driver and is not implemented by all backends.

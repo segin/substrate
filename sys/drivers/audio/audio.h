@@ -92,6 +92,20 @@ typedef struct audio_dev_ops {
 	 */
 	void *(*mmap)(struct audio_dev *dev, void *addr, size_t length,
 		      int prot, int flags, off_t offset);
+
+	/*
+	 * Optional: report the playback FIFO's current occupancy for the OSS
+	 * SNDCTL_DSP_GETOSPACE ioctl.  On success returns 0 and fills:
+	 *   *fragsize        — bytes per fragment (the DMA chunk size)
+	 *   *fragstotal      — total fragments the output buffer holds
+	 *   *fragments_avail — fragments currently free for writing
+	 *   *bytes_avail     — free bytes currently writable without blocking
+	 * Backends that don't implement it let the OSS frontend synthesize a
+	 * value from the framework-level blocksize/hiwat.  Returns -errno on
+	 * failure.
+	 */
+	int (*get_ospace)(struct audio_dev *dev, int *fragsize, int *fragstotal,
+			  int *fragments_avail, int *bytes_avail);
 } audio_dev_ops_t;
 
 typedef struct audio_dev {
@@ -152,5 +166,31 @@ int audio_validate_info(audio_info_t *info);
  * non-static so host tests can call it without devfs.
  */
 int audio_ioctl_dispatch(audio_dev_t *dev, uint32_t request, void *arg);
+
+/*
+ * Shared fs_node_t callbacks implemented by the framework (audio.c).  The
+ * Sun/SADA /dev/audioN nodes and the OSS /dev/dspN nodes both point their
+ * read/write/open/close/mmap callbacks at these — only the ioctl callback
+ * differs (Sun/SADA vs OSS).  Both node families set node->impl to the
+ * shared audio_dev_t, so exclusive-playback arbitration and the backend
+ * write path are common to every frontend.
+ */
+struct fs_node;
+size_t audio_node_write(struct fs_node *node, off_t offset, size_t size,
+			const uint8_t *buffer);
+size_t audio_node_read(struct fs_node *node, off_t offset, size_t size,
+		       uint8_t *buffer);
+void   audio_node_open(struct fs_node *node);
+void   audio_node_close(struct fs_node *node);
+void  *audio_node_mmap(struct fs_node *node, void *addr, size_t length,
+		       int prot, int flags, off_t offset);
+
+/*
+ * OSS (/dev/dsp) frontend, implemented in oss.c.  audio_register_device()
+ * calls oss_register_device() so every backend that publishes /dev/audioN
+ * also publishes the matching /dev/dspN with the OSS ioctl ABI.
+ */
+void oss_register_device(audio_dev_t *dev, int unit);
+int  oss_ioctl_dispatch(audio_dev_t *dev, uint32_t request, void *arg);
 
 #endif /* _DRIVERS_AUDIO_H */

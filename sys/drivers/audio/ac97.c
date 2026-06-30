@@ -568,6 +568,28 @@ static int ac97_get_props(audio_dev_t *adev)
 }
 
 /*
+ * Report the software PCM FIFO's free space for OSS SNDCTL_DSP_GETOSPACE.
+ * A "fragment" maps to one DMA chunk (AC97_CHUNK_BYTES); the buffer holds
+ * AC97_FIFO_BYTES / AC97_CHUNK_BYTES fragments total.
+ */
+static int ac97_get_ospace(audio_dev_t *adev, int *fragsize, int *fragstotal,
+			   int *fragments, int *bytes)
+{
+	ac97_dev_t *d = adev->driver_data;
+	size_t freeb;
+
+	if (d->fifo_buf == NULL) {
+		return -EINVAL;
+	}
+	freeb = audio_fifo_free(&d->fifo);
+	*fragsize   = (int)AC97_CHUNK_BYTES;
+	*fragstotal = (int)(AC97_FIFO_BYTES / AC97_CHUNK_BYTES);
+	*fragments  = (int)(freeb / AC97_CHUNK_BYTES);
+	*bytes      = (int)freeb;
+	return 0;
+}
+
+/*
  * Zero-copy playback: map the contiguous chunk pool (chunk_count *
  * AC97_CHUNK_BYTES) into the calling process and arm the whole BDL as a
  * circular ring over it.  The bus master then loops the ring continuously,
@@ -700,6 +722,7 @@ static audio_dev_ops_t ac97_ops = {
 	.get_devinfo = ac97_get_devinfo,
 	.get_props   = ac97_get_props,
 	.mmap        = ac97_mmap,
+	.get_ospace  = ac97_get_ospace,
 };
 
 /* ------------------------------------------------------------------- */
