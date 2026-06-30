@@ -1490,6 +1490,7 @@ elf_err_t elf_eh_frame_stats(const elf_section_t *section, size_t *cie_count_out
                              size_t *fde_count_out);
 elf_err_t elf_debug_validate(elfobj_t *obj, char **diagnostics);
 elf_err_t elf_debug_sort_sections(elfobj_t *obj);
+elf_err_t elf_dwarf_get_line_info(elfobj_t *obj, uint64_t addr, char **out_file, int *out_line);
 
 size_t elf_arm_attribute_count(const elfobj_t *obj);
 uint32_t elf_arm_attribute_tag_at(const elfobj_t *obj, size_t index);

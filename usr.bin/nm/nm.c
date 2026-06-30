@@ -83,6 +83,7 @@ static struct {
     int radix;
     int special_syms;
     int print_armap;
+    int print_line;
 } opts;
 
 static const char *progname = "nm";
@@ -440,7 +441,7 @@ static const char *display_name(const nm_sym_t *sym)
 
 /* (format_value removed — all output uses inline printf with radix) */
 
-static void print_bsd_line(const nm_sym_t *sym, elfobj_class_t cls, const char *file)
+static void print_bsd_line(const nm_sym_t *sym, elfobj_class_t cls, const char *file, elfobj_t *obj)
 {
     int w = (cls == ELFOBJ_CLASS_64) ? 16 : 8;
     const char *name = display_name(sym);
@@ -468,10 +469,19 @@ static void print_bsd_line(const nm_sym_t *sym, elfobj_class_t cls, const char *
             printf(" %*llu", w, (unsigned long long)sym->sz);
     }
 
-    printf(" %s\n", name);
+    printf(" %s", name);
+    if (opts.print_line && obj && sym->shndx != SHN_UNDEF) {
+        char *dwarf_file = NULL;
+        int dwarf_line = 0;
+        if (elf_dwarf_get_line_info(obj, sym->value, &dwarf_file, &dwarf_line) == ELF_OK && dwarf_file) {
+            printf("\t%s:%d", dwarf_file, dwarf_line);
+            free(dwarf_file);
+        }
+    }
+    printf("\n");
 }
 
-static void print_posix_line(const nm_sym_t *sym, elfobj_class_t cls, const char *file)
+static void print_posix_line(const nm_sym_t *sym, elfobj_class_t cls, const char *file, elfobj_t *obj)
 {
     const char *name = display_name(sym);
     int w = (cls == ELFOBJ_CLASS_64) ? 16 : 8;
@@ -494,6 +504,14 @@ static void print_posix_line(const nm_sym_t *sym, elfobj_class_t cls, const char
             printf("%s %c %*llu %*llu", name, sym->type_char,
                    w, (unsigned long long)sym->value,
                    w, (unsigned long long)sym->sz);
+        }
+    }
+    if (opts.print_line && obj && sym->shndx != SHN_UNDEF) {
+        char *dwarf_file = NULL;
+        int dwarf_line = 0;
+        if (elf_dwarf_get_line_info(obj, sym->value, &dwarf_file, &dwarf_line) == ELF_OK && dwarf_file) {
+            printf("\t%s:%d", dwarf_file, dwarf_line);
+            free(dwarf_file);
         }
     }
     printf("\n");
@@ -519,7 +537,7 @@ static const char *stt_name(uint8_t stype)
     }
 }
 
-static void print_sysv_line(const nm_sym_t *sym, elfobj_class_t cls, const char *file)
+static void print_sysv_line(const nm_sym_t *sym, elfobj_class_t cls, const char *file, elfobj_t *obj)
 {
     const char *name = display_name(sym);
     int w = (cls == ELFOBJ_CLASS_64) ? 16 : 8;
@@ -545,13 +563,22 @@ static void print_sysv_line(const nm_sym_t *sym, elfobj_class_t cls, const char 
         }
     }
 
-    printf("%-20s|%*s|  %c  |%-8s|%*s|     |%s\n",
+    printf("%-20s|%*s|  %c  |%-8s|%*s|     |%s",
            name,
            w, vbuf,
            sym->type_char,
            stt_name(sym->stype),
            w, sbuf,
            sec);
+    if (opts.print_line && obj && sym->shndx != SHN_UNDEF) {
+        char *dwarf_file = NULL;
+        int dwarf_line = 0;
+        if (elf_dwarf_get_line_info(obj, sym->value, &dwarf_file, &dwarf_line) == ELF_OK && dwarf_file) {
+            printf("\t%s:%d", dwarf_file, dwarf_line);
+            free(dwarf_file);
+        }
+    }
+    printf("\n");
 }
 
 /* ------------------------------------------------------------------ */
@@ -780,13 +807,13 @@ static int process_elf(elfobj_t *obj, const char *display_name_str)
 
         switch (opts.format) {
         case FMT_POSIX:
-            print_posix_line(&tab.syms[i], cls, display_name_str);
+            print_posix_line(&tab.syms[i], cls, display_name_str, obj);
             break;
         case FMT_SYSV:
-            print_sysv_line(&tab.syms[i], cls, display_name_str);
+            print_sysv_line(&tab.syms[i], cls, display_name_str, obj);
             break;
         default:
-            print_bsd_line(&tab.syms[i], cls, display_name_str);
+            print_bsd_line(&tab.syms[i], cls, display_name_str, obj);
             break;
         }
         printed++;
@@ -1326,7 +1353,7 @@ int main(int argc, char **argv)
                 case 'D': opts.dynamic = 1; break;
                 case 'g': opts.extern_only = 1; break;
                 case 'h': usage(stdout); return 0;
-                case 'l': /* line numbers — TODO: needs DWARF */ break;
+                case 'l': opts.print_line = 1; break;
                 case 'n': opts.sort_mode = SORT_NUMERIC; break;
                 case 'o': opts.print_file = 1; break;
                 case 'p': opts.sort_mode = SORT_NONE; break;
