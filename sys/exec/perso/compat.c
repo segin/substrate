@@ -723,6 +723,31 @@ int freebsd_sys_thr_exit(long *state) {
     return sys_thr_exit((void *)0);
 }
 
+int freebsd_sys_thr_self(long *id) {
+    /*
+     * FreeBSD thr_self(2) ABI: int thr_self(long *id).  The kernel WRITES the
+     * caller-thread id through *id (suword_lwpid) and returns 0 — it does NOT
+     * return the tid in the syscall return register.  The native sys_thr_self
+     * uses the opposite convention (returns the tid, ignores the argument), so
+     * routing FreeBSD's thr_self straight at it left libthr's
+     *   thr_self(&thread->tid);          (init_main_thread, thr_init.c)
+     * with thread->tid never written — it stayed 0 (the _thr_alloc-zeroed
+     * value).  A zero main-thread tid is catastrophic for libthr's owned-mutex
+     * bookkeeping: TID(curthread) == 0 == UMUTEX_UNOWNED, so every main-thread
+     * lock leaves m_lock.m_owner reading "unowned", ownership/self-deadlock
+     * detection is defeated, and a mutex gets enqueued onto the owned list
+     * twice — tripping mutex_assert_not_owned ("mutex %p own 0x0 is on list")
+     * in thr_mutex.c.  Honor the real out-pointer ABI so the main thread gets
+     * its true, non-zero tid.  FreeBSD i386 long is 4 bytes.
+     */
+    if (id) {
+        long tid = sched_get_current_tid();
+        if (copyout(&tid, id, sizeof(tid)) != 0)
+            return -EFAULT;
+    }
+    return 0;
+}
+
 int sys_clock_nanosleep(int clockid, int flags, const void *rqtp, void *rmtp) {
     (void)clockid; (void)flags;
     return sys_nanosleep((void *)rqtp, rmtp);

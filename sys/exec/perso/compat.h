@@ -33,6 +33,15 @@ int freebsd_sys_fcntl(int fd, int cmd, int arg);
  */
 int freebsd_sys_thr_exit(long *state);
 
+/*
+ * FreeBSD thr_self(long *id): the kernel writes the calling thread's id through
+ * *id and returns 0 (suword_lwpid).  Native sys_thr_self returns the tid in the
+ * return register and ignores the pointer — using it for FreeBSD left libthr's
+ * main-thread tid 0, which collides with UMUTEX_UNOWNED and corrupts owned-mutex
+ * bookkeeping.  This honors the real out-pointer ABI.
+ */
+int freebsd_sys_thr_self(long *id);
+
 /* rtprio_thread(2): thread realtime/idle scheduling class — accepted as a
  * no-op (substrate has no rtprio classes; libthr only needs it not to fail). */
 int freebsd_sys_rtprio_thread(int function, long lwpid, void *rtp);
