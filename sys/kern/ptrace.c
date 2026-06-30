@@ -148,6 +148,15 @@ int sys_ptrace(int req, int pid, int addr, int data) {
                               &word, sizeof(word)) != sizeof(word)) {
             return -EFAULT;
         }
+        /* gdb's inf-ptrace reads memory the classic BSD PT_READ_I way:
+         * data == NULL, and the word comes back as the syscall return value.
+         * The Linux/modern form instead passes a non-NULL out-pointer and
+         * reads 0/-errno.  Honour both — without the NULL case the kernel
+         * copied the word to address 0, returned EFAULT, and gdb saw every
+         * memory read fail (so it could not insert a breakpoint). */
+        if ((void *)(uint32_t)data == NULL) {
+            return (int)word;
+        }
         if (copyout(&word, (void *)(uint32_t)data, sizeof(word)) != 0) {
             return -EFAULT;
         }
