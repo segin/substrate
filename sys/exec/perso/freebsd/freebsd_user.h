@@ -24,6 +24,40 @@
 #define FREEBSD_KI_EMULNAMELEN  16
 #define FREEBSD_LOGINCLASSLEN   17
 
+/*
+ * FreeBSD i386 TLS TCB (variant II), from sys/i386/include/tls.h:
+ *
+ *   struct tcb {
+ *       struct tcb     *tcb_self;    // offset 0  (%gs:0) -- required by rtld
+ *       uintptr_t      *tcb_dtv;     // offset 4  (%gs:4) -- required by rtld
+ *       struct pthread *tcb_thread;  // offset 8  (%gs:8) -- libthr's curthread
+ *   };
+ *
+ * %gs points at the TCB (TLS_TP_OFFSET == 0, TLS_DTV_OFFSET == 0).  libthr
+ * reads "curthread" from %gs:8 (tcb_thread) and immediately dereferences it
+ * (e.g. __pthread_cleanup_push_imp touches curthread->cleanup at +0x188).
+ * FreeBSD's csu/rtld seeds this slot from the *previous* gsbase TCB when it
+ * allocates the program's TLS (rtld allocate_tls() memcpy's TLS_TCB_SIZE
+ * bytes of the old TCB forward, then fixes tcb_self), so the kernel must
+ * install an initial TCB at exec whose tcb_thread points at a valid (zeroed)
+ * pthread-sized block — otherwise the very first libthr call faults on a
+ * near-NULL curthread before libthr's _thr_init runs.
+ */
+#define FREEBSD_TCB_SELF_OFFSET    0
+#define FREEBSD_TCB_DTV_OFFSET     4
+#define FREEBSD_TCB_THREAD_OFFSET  8
+#define FREEBSD_TCB_SIZE          12   /* sizeof(struct tcb), 3 pointers */
+
+/*
+ * Size of the placeholder main-thread struct pthread the kernel zero-fills
+ * and points tcb_thread at.  The real FreeBSD 14.3 i386 struct pthread is
+ * ~0x228 bytes (libthr copies that many into the initial-thread template) and
+ * the highest field libthr touches before its own init runs is curthread->
+ * cleanup at +0x188.  Round up generously so any early field access lands in
+ * the zeroed block.
+ */
+#define FREEBSD_INIT_PTHREAD_SIZE  0x400
+
 typedef int32_t  freebsd_pid_t;
 typedef uint32_t freebsd_uid_t;
 typedef uint32_t freebsd_gid_t;

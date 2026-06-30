@@ -9,6 +9,8 @@
 #include <arch/i386/percpu.h>
 #include <arch/i386/gdt.h>
 #include <arch/i386/idt.h>  /* registers_t */
+#include <exec/perso/personality.h>            /* PERS_FREEBSD */
+#include <exec/perso/freebsd/freebsd_user.h>   /* FREEBSD_TCB_THREAD_OFFSET */
 
 extern int vm86_init_bsd(void *args);
 extern void gdt_set_gate(int num, uint32_t base, uint32_t limit, uint8_t access, uint8_t gran);
@@ -72,6 +74,46 @@ static int get_gsbase(uint32_t *out) {
     return copyout(&base, out, sizeof(base));
 }
 
+/*
+ * freebsd_tls_seed_tcb_thread - give a freshly installed FreeBSD TCB a valid
+ * "curthread" before libthr has one.
+ *
+ * FreeBSD's variant-II i386 TCB keeps curthread (the struct pthread *) in
+ * tcb_thread at %gs:8.  libthr reads it and dereferences it from its very
+ * first call (e.g. __pthread_cleanup_push_imp touches curthread->cleanup at
+ * +0x188) — before libthr's own _thr_init has populated it.  The rtld/csu
+ * install the program's TLS via sysarch(I386_SET_GSBASE) with a fresh TCB
+ * whose tcb_thread is NULL, so without help that first libthr call faults on
+ * a near-NULL curthread (SIGSEGV at ~0x188).
+ *
+ * exec recorded a zeroed, permanently-mapped placeholder pthread for the main
+ * thread (current_thread->fbsd_init_curthread).  When a FreeBSD process
+ * installs a TCB whose tcb_thread slot is still NULL, point it at that
+ * placeholder.  Once libthr stores the real main-thread pthread (a non-NULL
+ * tcb_thread), this becomes a no-op and the real pointer is preserved.  New
+ * (pthread_create) threads set tcb_thread before their sysarch call, so they
+ * are untouched.  Best-effort: any copyin/out failure leaves the TCB as built.
+ */
+static void freebsd_tls_seed_tcb_thread(uint32_t new_base) {
+    if (!current_process || current_process->perso_id != PERS_FREEBSD)
+        return;
+    if (!current_thread || current_thread->fbsd_init_curthread == 0)
+        return;
+    if (new_base == 0)
+        return;
+
+    uint32_t new_thr = 0;
+    if (copyin((void *)(uintptr_t)(new_base + FREEBSD_TCB_THREAD_OFFSET),
+               &new_thr, sizeof(new_thr)) != 0)
+        return;
+    if (new_thr == 0) {
+        uint32_t seed = current_thread->fbsd_init_curthread;
+        (void)copyout(&seed,
+                      (void *)(uintptr_t)(new_base + FREEBSD_TCB_THREAD_OFFSET),
+                      sizeof(seed));
+    }
+}
+
 int sys_sysarch(int op, void *parms) {
     switch (op) {
         case I386_VM86:
@@ -81,6 +123,10 @@ int sys_sysarch(int op, void *parms) {
             uint32_t base;
             if (copyin(parms, &base, sizeof(base)) != 0)
                 return -EFAULT;
+            /* Seed the FreeBSD main-thread pointer (tcb_thread, %gs:8) into
+             * this TCB if the rtld/csu left it NULL, so curthread is valid for
+             * libthr's earliest calls before its own _thr_init runs. */
+            freebsd_tls_seed_tcb_thread(base);
             return set_gsbase(base);
         }
 

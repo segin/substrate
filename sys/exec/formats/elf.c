@@ -1405,6 +1405,30 @@ static int exec_setup_stack(pmap_t pmap, uint32_t *sp_out, char **k_argv, int ar
         STACK_WRITE32(ps_strings_addr + 12, (uint32_t)envc);
     }
 
+    /*
+     * FreeBSD initial main-thread "curthread" placeholder.
+     *
+     * FreeBSD libthr reads curthread from %gs:8 (tcb_thread) and dereferences
+     * it during very early startup — before its own _thr_init runs — e.g.
+     * __pthread_cleanup_push_imp touches curthread->cleanup at +0x188.  The
+     * rtld/csu install the program's TLS via sysarch(I386_SET_GSBASE) with a
+     * fresh TCB whose tcb_thread is NULL, so that read returns NULL and the
+     * first libthr call faults (SIGSEGV at addr ~0x188).
+     *
+     * We do NOT touch %gs at exec (static libc and the rtld both set up their
+     * own TLS and assume %gs starts cleared — seeding it makes static libc's
+     * __libc_setup_tls dereference a NULL DTV).  Instead, reserve a zeroed,
+     * permanently-mapped placeholder "struct pthread" at the base of the eager
+     * stack region (page 0 is already memset(0) above) and record its address;
+     * the sysarch handler injects it into tcb_thread when the installed TCB has
+     * none yet.  It sits far below the initial %esp/argv/auxv and is dead once
+     * libthr stores the real curthread.
+     */
+    if (current_thread && current_process &&
+        current_process->perso_id == PERS_FREEBSD) {
+        current_thread->fbsd_init_curthread = user_stack_base;  /* zeroed block */
+    }
+
     #undef STACK_WRITE32
     #undef PUSH_STRING
 

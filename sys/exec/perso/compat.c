@@ -1,6 +1,7 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <errno.h>
+#include <sys/param.h>
 #include <sys/syscall_impl.h>
 #include <sys/stat.h>
 #include <sys/proc.h>
@@ -635,6 +636,28 @@ int freebsd_sys_clock_gettime(int clk_id, void *tp) {
     int native = freebsd_clockid_to_native(clk_id);
     if (native < 0) return -EINVAL;
     return sys_clock_gettime(native, (struct timespec *)tp);
+}
+
+/*
+ * freebsd_sys_clock_getres - clock_getres(2) with FreeBSD clockid translation.
+ *
+ * substrate has no native sys_clock_getres, so synthesize the result here.
+ * Every clock substrate exposes is driven by the same tick counter (HZ), so
+ * the resolution is 1/HZ seconds for all of them.  We still validate the
+ * clockid through the same FreeBSD->native map so an unknown FreeBSD clock
+ * reports EINVAL exactly as clock_gettime would, and libc/libc++ that probe
+ * a clock's resolution (some libc++ versions query steady_clock's resolution)
+ * get a sane non-error answer instead of falling through to the native
+ * passthrough's "unknown clock -> -1 -> EPERM".
+ */
+int freebsd_sys_clock_getres(int clk_id, void *res) {
+    int native = freebsd_clockid_to_native(clk_id);
+    if (native < 0) return -EINVAL;
+    if (!res) return 0;
+    struct timespec r;
+    r.tv_sec  = 0;
+    r.tv_nsec = (long)(1000000000UL / HZ);
+    return copyout(&r, res, sizeof(r));
 }
 
 int freebsd_sys_rtprio_thread(int function, long lwpid, void *rtp) {

@@ -233,7 +233,7 @@ typedef struct thread {
      * (manifesting as SEGV in libc's TLS-relative loads — e.g. jemalloc
      * __free reads %gs:0 which becomes 0 when the slot is empty). */
     uint32_t  gs_base;
-    
+
     // Scheduling - Basic
     int           priority;
     int           base_priority;
@@ -385,6 +385,17 @@ typedef struct thread {
      */
     struct thread *t_allthread_next;
     struct thread *t_tidhash_next;
+
+    /* FreeBSD initial-thread bootstrap pointer (a zeroed, mapped placeholder
+     * "struct pthread").  exec records it for FreeBSD images; the sysarch
+     * I386_SET_GSBASE handler injects it into the freshly installed TCB's
+     * tcb_thread slot (%gs:8) when that slot is NULL, so libthr's early calls
+     * (e.g. __pthread_cleanup_push_imp, which dereferences curthread at
+     * +0x188) see a valid curthread before libthr's own _thr_init runs.
+     * Zero for non-FreeBSD threads.  Kept at the END of the struct: adding a
+     * field earlier shifts every later field's offset and breaks the
+     * offset-hardcoded asm paths (see the same note on process_t). */
+    uint32_t  fbsd_init_curthread;
 } thread_t;
 
 // Globals
