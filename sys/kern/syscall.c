@@ -14,6 +14,7 @@
 #include <kern/console.h>
 #include <kern/cmdline.h>
 #include <exec/perso/personality.h>
+#include <exec/formats/elf.h>
 #include <pm/pm.h>
 #include <vm/vm_kmem.h>
 #include <vm/uma.h>
@@ -149,32 +150,149 @@ static void file_build_path(char *out, size_t out_sz, const char *path, const ch
 }
 
 /*
+ * vfs_node_is_substrate_object - true if `node` is a substrate-native ELF
+ * shared object / executable.
+ *
+ * A foreign-personality (Linux/FreeBSD/NetBSD/...) process must never load a
+ * substrate-native object: substrate libraries issue substrate (Linux-style)
+ * syscalls, and the foreign personality's syscall table misroutes those
+ * numbers.  Concretely, substrate libc's mmap is syscall #90, which the
+ * FreeBSD table dispatches as dup2(#90); the call "succeeds" returning a tiny
+ * errno-shaped value (9) that FreeBSD's jemalloc then dereferences as the
+ * freshly-mapped base block -> SIGSEGV near NULL.  See vfs_perso_lookup.
+ *
+ * Two markers identify a substrate object:
+ *   1. EI_OSABI == ELFOSABI_SUBSTRATE  (substrate's own libc/libm/libsys and
+ *      every port that had its OSABI byte patched).
+ *   2. a DT_NEEDED on "libc.so.0" or "libsys.so.0"  (substrate's libc / libsys
+ *      SONAMEs -- some contrib ports keep EI_OSABI = SYSV(0) but still link the
+ *      substrate C library, so the OSABI byte alone misses them; e.g. substrate
+ *      libcurl is OSABI 0 yet NEEDED libc.so.0).
+ * No foreign (FreeBSD/Linux/...) library ever links libc.so.0 / libsys.so.0,
+ * so the DT_NEEDED test never rejects a legitimate foreign library.
+ */
+static int elf_dt_needs_substrate_libc(fs_node_t *node, const Elf32_Ehdr *eh) {
+    Elf32_Phdr ph[32];
+    unsigned char dyn[2048];           /* up to 256 Elf32_Dyn entries */
+    uint16_t phnum = eh->e_phnum;
+    uint32_t dyn_off = 0, dyn_sz = 0, strtab_va = 0, strtab_off = 0;
+    size_t phbytes;
+
+    if (eh->e_phentsize != sizeof(Elf32_Phdr) || phnum == 0 || phnum > 32)
+        return 0;
+    phbytes = (size_t)phnum * sizeof(Elf32_Phdr);
+    if (read_fs(node, eh->e_phoff, phbytes, (uint8_t *)ph) < phbytes)
+        return 0;
+
+    for (uint16_t i = 0; i < phnum; i++) {
+        if (ph[i].p_type == PT_DYNAMIC) {
+            dyn_off = ph[i].p_offset;
+            dyn_sz  = ph[i].p_filesz;
+        }
+    }
+    if (!dyn_off || dyn_sz < sizeof(Elf32_Dyn))
+        return 0;
+    if (dyn_sz > sizeof(dyn))
+        dyn_sz = sizeof(dyn);
+    if (read_fs(node, dyn_off, dyn_sz, dyn) < dyn_sz)
+        return 0;
+
+    /* First pass: locate DT_STRTAB (a virtual address) and map it to a file
+     * offset through the PT_LOAD that backs it. */
+    uint32_t ndyn = dyn_sz / sizeof(Elf32_Dyn);
+    for (uint32_t i = 0; i < ndyn; i++) {
+        Elf32_Dyn *d = (Elf32_Dyn *)(dyn + i * sizeof(Elf32_Dyn));
+        if (d->d_tag == DT_NULL) break;
+        if (d->d_tag == DT_STRTAB) { strtab_va = d->d_un.d_ptr; break; }
+    }
+    if (!strtab_va)
+        return 0;
+    for (uint16_t i = 0; i < phnum; i++) {
+        if (ph[i].p_type == PT_LOAD &&
+            strtab_va >= ph[i].p_vaddr &&
+            strtab_va <  ph[i].p_vaddr + ph[i].p_filesz) {
+            strtab_off = strtab_va - ph[i].p_vaddr + ph[i].p_offset;
+            break;
+        }
+    }
+    if (!strtab_off)
+        return 0;
+
+    /* Second pass: every DT_NEEDED soname. */
+    for (uint32_t i = 0; i < ndyn; i++) {
+        Elf32_Dyn *d = (Elf32_Dyn *)(dyn + i * sizeof(Elf32_Dyn));
+        if (d->d_tag == DT_NULL) break;
+        if (d->d_tag != DT_NEEDED) continue;
+        char soname[24];
+        if (read_fs(node, strtab_off + d->d_un.d_val, sizeof(soname) - 1,
+                    (uint8_t *)soname) == 0)
+            continue;
+        soname[sizeof(soname) - 1] = '\0';
+        if (strcmp(soname, "libc.so.0") == 0 ||
+            strcmp(soname, "libsys.so.0") == 0)
+            return 1;
+    }
+    return 0;
+}
+
+static int vfs_node_is_substrate_object(fs_node_t *node) {
+    unsigned char hdr[sizeof(Elf32_Ehdr)];
+    const Elf32_Ehdr *eh = (const Elf32_Ehdr *)hdr;
+    if (!node || (node->flags & 0x7) != FS_FILE)
+        return 0;
+    if (read_fs(node, 0, sizeof(hdr), hdr) < sizeof(hdr))
+        return 0;
+    if (hdr[0] != 0x7f || hdr[1] != 'E' || hdr[2] != 'L' || hdr[3] != 'F')
+        return 0;
+    if (hdr[EI_OSABI] == ELFOSABI_SUBSTRATE)
+        return 1;
+    return elf_dt_needs_substrate_libc(node, eh);
+}
+
+/*
  * vfs_perso_lookup - personality-aware VFS path lookup.
  *
  * For absolute paths, if the current process's personality has a path_prefix,
  * try <prefix><path> first (e.g. /perso/freebsd/lib/libc.so.7), then fall
  * back to <path> directly.  This mirrors NetBSD's TRYEMULROOT mechanism.
  * Relative paths are always resolved against cwd without prefix.
+ *
+ * The bare-path fallback reaches into the substrate-native tree (e.g. the
+ * native /lib), which can contain substrate-native shared objects whose
+ * SONAMEs collide with a foreign library the rtld is searching for (libgcc_s,
+ * libiconv, ...).  Loading such an object into a foreign process is fatal --
+ * its substrate-numbered syscalls are misrouted by the foreign personality
+ * (see vfs_node_is_substrate_object).  So, for a foreign personality, the
+ * fallback refuses substrate-native objects and reports "not found", letting
+ * the foreign rtld keep searching its own tree.
  */
 fs_node_t *vfs_perso_lookup(fs_node_t *root, fs_node_t *cwd, const char *path) {
     if (!path) return NULL;
 
     if (path[0] == '/' && current_process) {
         struct personality *p = perso_lookup(current_process->perso_id);
-        if (p && p->path_prefix && p->path_prefix[0]) {
+        int foreign = (p && p->path_prefix && p->path_prefix[0]);
+        if (foreign) {
             char prefixed[320];
             snprintf(prefixed, sizeof(prefixed), "%s%s", p->path_prefix, path);
             fs_node_t *node = vfs_lookup(root, prefixed);
             if (node) {
                 if (cmdline_debug_enabled("perso_lookup")) {
-                    extern int kprintf(const char *, ...);
                     kprintf("PERSO_LOOKUP: %s -> %s : node=%p flags=%x len=%d\n",
                         path, prefixed, node, node->flags, (int)node->length);
                 }
                 return node;
             }
         }
-        return vfs_lookup(root, path);
+        fs_node_t *bare = vfs_lookup(root, path);
+        if (bare && foreign && vfs_node_is_substrate_object(bare)) {
+            if (cmdline_debug_enabled("perso_lookup")) {
+                kprintf("PERSO_LOOKUP: %s : refusing substrate-native object for foreign perso %d\n",
+                        path, current_process->perso_id);
+            }
+            return NULL;
+        }
+        return bare;
     }
 
     return vfs_lookup(cwd ? cwd : root, path);
