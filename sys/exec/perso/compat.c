@@ -635,7 +635,28 @@ static int freebsd_clockid_to_native(int fbsd_clk) {
 int freebsd_sys_clock_gettime(int clk_id, void *tp) {
     int native = freebsd_clockid_to_native(clk_id);
     if (native < 0) return -EINVAL;
-    return sys_clock_gettime(native, (struct timespec *)tp);
+    /*
+     * FreeBSD i386 (non-LP64) has a 32-bit time_t, so its `struct timespec`
+     * is 8 bytes (int32 tv_sec + 32-bit long tv_nsec).  Substrate's native
+     * time_t is 64-bit, so the native `struct timespec` is 12 bytes.  Passing
+     * the caller's 8-byte buffer straight to sys_clock_gettime() lets the
+     * native copyout write 12 bytes and overrun it by 4 -- which lands on the
+     * 4-byte slot immediately above the timespec.  In libc/jemalloc's
+     * nstime_update() that slot is the stack-protector canary: the overrun
+     * trips __stack_chk_fail() -> syslog() -> vfprintf() -> malloc(), and that
+     * malloc re-enters the still-running jemalloc bootstrap, recursing until
+     * the address space is exhausted (every dynamic FreeBSD binary aborted in
+     * libc init before reaching main).  Marshal into the 8-byte FreeBSD layout
+     * explicitly instead.
+     */
+    struct timespec kts;
+    int ret = kern_clock_gettime(native, &kts);
+    if (ret != 0) return ret;
+    struct freebsd_timespec fts;
+    fts.tv_sec  = (int32_t)kts.tv_sec;
+    fts.tv_nsec = (int32_t)kts.tv_nsec;
+    if (copyout(&fts, tp, sizeof(fts)) != 0) return -EFAULT;
+    return 0;
 }
 
 /*
@@ -654,9 +675,11 @@ int freebsd_sys_clock_getres(int clk_id, void *res) {
     int native = freebsd_clockid_to_native(clk_id);
     if (native < 0) return -EINVAL;
     if (!res) return 0;
-    struct timespec r;
+    /* 8-byte FreeBSD i386 timespec (see freebsd_sys_clock_gettime); a native
+     * 12-byte timespec would overrun the caller's buffer. */
+    struct freebsd_timespec r;
     r.tv_sec  = 0;
-    r.tv_nsec = (long)(1000000000UL / HZ);
+    r.tv_nsec = (int32_t)(1000000000UL / HZ);
     return copyout(&r, res, sizeof(r));
 }
 
