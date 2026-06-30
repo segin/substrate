@@ -624,11 +624,17 @@ static void afunix_node_close(fs_node_t *node) {
     }
     s->rx_fdq_count = 0;
     /* Wake any pending accept/connect waiters. */
+    int has_waiters = sleepq_has_waiters(s->rx_chan) ||
+                      sleepq_has_waiters(s->tx_chan) ||
+                      sleepq_has_waiters(s->accept_chan) ||
+                      sleepq_has_waiters(s->connect_chan);
     sleepq_wake_all(s->accept_chan);
     sleepq_wake_all(s->connect_chan);
     mutex_unlock(&s->lock);
-    /* TODO: kfree(s) when refcount reaches 0 AND no waiters.  For
-     * now leak the struct so a stray waiter can't UAF.  Small N. */
+
+    if (!has_waiters) {
+        kfree(s, sizeof(*s));
+    }
 }
 
 /*
