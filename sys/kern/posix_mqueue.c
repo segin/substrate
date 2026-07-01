@@ -758,8 +758,9 @@ int sys_mq_open(const char *uname, int oflag, mode_t mode,
 {
     char kname[MQ_NAME_MAX + 1];
     size_t got = 0;
-    if (copyinstr(uname, kname, sizeof(kname), &got) != 0)
-        return -EFAULT;
+    int nrc = copyinstr(uname, kname, sizeof(kname), &got);
+    if (nrc != 0)
+        return -nrc;   /* ENAMETOOLONG on an over-long name, EFAULT on a bad pointer */
 
     struct mq_attr kattr;
     const struct mq_attr *attrp = NULL;
@@ -780,8 +781,9 @@ int sys_mq_unlink(const char *uname)
 {
     char kname[MQ_NAME_MAX + 1];
     size_t got = 0;
-    if (copyinstr(uname, kname, sizeof(kname), &got) != 0)
-        return -EFAULT;
+    int nrc = copyinstr(uname, kname, sizeof(kname), &got);
+    if (nrc != 0)
+        return -nrc;   /* ENAMETOOLONG on an over-long name, EFAULT on a bad pointer */
     return kern_mq_unlink(kname);
 }
 
