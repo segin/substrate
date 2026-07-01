@@ -227,6 +227,14 @@ int sem_timedwait(sem_t *restrict sem, const struct timespec *restrict abs_timeo
             continue;
         }
         if (abs_timeout != NULL) {
+            /* About to block on a malformed timeout — POSIX requires EINVAL
+             * (sem_timedwait/6-1,6-2,9-1).  Checked only here, on the
+             * blocking path; a nonblocking decrement never consults it. */
+            if (abs_timeout->tv_nsec < 0 ||
+                abs_timeout->tv_nsec >= 1000000000L) {
+                errno = EINVAL;
+                return -1;
+            }
             struct timespec now, rel;
             if (clock_gettime(CLOCK_REALTIME, &now) == 0) {
                 rel.tv_sec = abs_timeout->tv_sec - now.tv_sec;

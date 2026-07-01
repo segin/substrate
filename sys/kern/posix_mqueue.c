@@ -485,6 +485,15 @@ int kern_mq_send(int mqd, const char *msg, size_t len, unsigned prio,
             mutex_unlock(&mq_lock);
             return -EAGAIN;
         }
+        /* About to block: POSIX requires EINVAL for a malformed absolute
+         * timeout (tv_nsec outside [0,1e9)).  Checked only on the blocking
+         * path — a non-blocking completion never consults abs_timeout
+         * (mq_timedsend/19-1, mq_timedreceive/17-1,17-2,17-3). */
+        if (abstime && (abstime->tv_nsec < 0 ||
+                        abstime->tv_nsec >= 1000000000L)) {
+            mutex_unlock(&mq_lock);
+            return -EINVAL;
+        }
         if (deadline) {
             if (expired || get_ticks() >= deadline) {
                 mutex_unlock(&mq_lock);
@@ -587,6 +596,15 @@ ssize_t kern_mq_receive(int mqd, char *msg, size_t len, unsigned *prio,
         if (d->oflag & O_NONBLOCK) {
             mutex_unlock(&mq_lock);
             return -EAGAIN;
+        }
+        /* About to block: POSIX requires EINVAL for a malformed absolute
+         * timeout (tv_nsec outside [0,1e9)).  Checked only on the blocking
+         * path — a non-blocking completion never consults abs_timeout
+         * (mq_timedsend/19-1, mq_timedreceive/17-1,17-2,17-3). */
+        if (abstime && (abstime->tv_nsec < 0 ||
+                        abstime->tv_nsec >= 1000000000L)) {
+            mutex_unlock(&mq_lock);
+            return -EINVAL;
         }
         if (deadline) {
             if (expired || get_ticks() >= deadline) {
