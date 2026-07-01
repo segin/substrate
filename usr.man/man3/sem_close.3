@@ -1,0 +1,64 @@
+.\"
+.\" SEM_CLOSE(3) - Substrate Pthreads Library
+.\"
+.TH SEM_CLOSE 3 "June 2026" "Substrate OS" "Library Functions"
+.SH NAME
+sem_close \- close a named semaphore
+.SH LIBRARY
+POSIX threads library
+.RI ( libpthread ", " \-lpthread )
+.SH SYNOPSIS
+.nf
+.B #include <semaphore.h>
+.PP
+.BI "int sem_close(sem_t *" sem ");"
+.fi
+.SH DESCRIPTION
+.BR sem_close ()
+closes the named semaphore referred to by
+.I sem
+and releases the resources the process allocated for it in
+.BR sem_open (3).
+The underlying kernel object (see
+.BR ksem_close (2))
+is not destroyed until the semaphore has also been removed with
+.BR sem_unlink (3)
+and every process that opened it has closed it.
+.PP
+.I sem
+must have been returned by
+.BR sem_open (3).
+Passing an unnamed
+.RB ( sem_init (3))
+semaphore is an error; use
+.BR sem_destroy (3)
+for those.  Using
+.I sem
+after
+.BR sem_close ()
+returns is undefined.
+.SH RETURN VALUE
+Returns 0 on success.  On failure it returns \-1 and sets
+.I errno
+to indicate the error.
+.SH ERRORS
+.TP
+.B EINVAL
+.I sem
+is not a valid named semaphore descriptor.
+.SH EXAMPLE
+.RS 4
+.EX
+sem_t *s = sem_open("/example", O_CREAT | O_RDWR, 0666, 1);
+if (s == SEM_FAILED) { perror("sem_open"); return 1; }
+/* ... use the semaphore ... */
+sem_close(s);
+.EE
+.RE
+.SH SEE ALSO
+.BR sem_open (3),
+.BR sem_unlink (3),
+.BR sem_destroy (3),
+.BR ksem_close (2)
+.SH STANDARDS
+POSIX.1-2017.

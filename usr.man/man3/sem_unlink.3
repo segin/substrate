@@ -1,0 +1,62 @@
+.\"
+.\" SEM_UNLINK(3) - Substrate Pthreads Library
+.\"
+.TH SEM_UNLINK 3 "June 2026" "Substrate OS" "Library Functions"
+.SH NAME
+sem_unlink \- remove a named semaphore
+.SH LIBRARY
+POSIX threads library
+.RI ( libpthread ", " \-lpthread )
+.SH SYNOPSIS
+.nf
+.B #include <semaphore.h>
+.PP
+.BI "int sem_unlink(const char *" name ");"
+.fi
+.SH DESCRIPTION
+.BR sem_unlink ()
+removes the name
+.I name
+that was created by
+.BR sem_open (3).
+The name is immediately unavailable to later
+.BR sem_open (3)
+calls, but the semaphore object itself continues to exist \(em and any
+process that already has it open keeps using it \(em until the last open
+descriptor is closed with
+.BR sem_close (3),
+at which point it is destroyed.
+.PP
+.I name
+must begin with a slash
+.RB ( / )
+followed by one or more characters.
+.SH RETURN VALUE
+Returns 0 on success.  On failure it returns \-1 and sets
+.I errno
+to indicate the error.
+.SH ERRORS
+.TP
+.B EACCES
+The caller lacks permission to remove the semaphore.
+.TP
+.B EINVAL
+.I name
+does not begin with a slash followed by at least one character.
+.TP
+.B ENOENT
+There is no semaphore with the given
+.IR name .
+.SH EXAMPLE
+.RS 4
+.EX
+if (sem_unlink("/example") == -1 && errno != ENOENT)
+    perror("sem_unlink");
+.EE
+.RE
+.SH SEE ALSO
+.BR sem_open (3),
+.BR sem_close (3),
+.BR ksem_unlink (2)
+.SH STANDARDS
+POSIX.1-2017.

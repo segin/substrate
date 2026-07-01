@@ -1,0 +1,160 @@
+.\"
+.\" SEM_OPEN(3) - Substrate Pthreads Library
+.\"
+.TH SEM_OPEN 3 "June 2026" "Substrate OS" "Library Functions"
+.SH NAME
+sem_open \- open (create or attach to) a named semaphore
+.SH LIBRARY
+POSIX threads library
+.RI ( libpthread ", " \-lpthread )
+.SH SYNOPSIS
+.nf
+.B #include <fcntl.h>
+.B #include <sys/stat.h>
+.B #include <semaphore.h>
+.PP
+.BI "sem_t *sem_open(const char *" name ", int " oflag ");"
+.BI "sem_t *sem_open(const char *" name ", int " oflag ,
+.BI "                mode_t " mode ", unsigned int " value ");"
+.fi
+.SH DESCRIPTION
+.BR sem_open ()
+creates a new POSIX named semaphore or opens an existing one, returning a
+.I sem_t
+pointer usable with
+.BR sem_wait (3),
+.BR sem_post (3),
+.BR sem_getvalue (3),
+and closed with
+.BR sem_close (3).
+.PP
+On Substrate a named semaphore is backed by a real kernel object (a
+.IR ksem ,
+see
+.BR ksem_open (2)),
+so it synchronises correctly across unrelated processes.  This is different
+from an unnamed
+.BR sem_init (3)
+semaphore with
+.I pshared
+equal to 0, which is a fast process-local futex word.
+.PP
+.I name
+identifies the semaphore system-wide and must begin with a slash
+.RB ( / )
+followed by one or more characters, e.g.
+.IR /mysem .
+.PP
+.I oflag
+selects the mode of operation:
+.TP
+.B O_CREAT
+Create the semaphore if it does not exist.  When
+.B O_CREAT
+is set,
+.I mode
+and
+.I value
+must be supplied:
+.I mode
+sets the permission bits (modified by the process umask) and
+.I value
+is the initial count (0 through
+.BR SEM_VALUE_MAX ).
+If the semaphore already exists,
+.B O_CREAT
+without
+.B O_EXCL
+simply attaches to it and
+.I mode
+and
+.I value
+are ignored.
+.TP
+.B O_EXCL
+Together with
+.BR O_CREAT ,
+require that the semaphore not already exist; fail with
+.B EEXIST
+otherwise.
+.PP
+Each successful
+.BR sem_open ()
+adds one open reference.  The semaphore persists until it is removed with
+.BR sem_unlink (3)
+.I and
+every open descriptor has been closed with
+.BR sem_close (3),
+matching POSIX persistence semantics.
+.SH RETURN VALUE
+On success
+.BR sem_open ()
+returns a pointer to the semaphore.  On failure it returns
+.B SEM_FAILED
+and sets
+.I errno
+to indicate the error.
+.SH ERRORS
+.TP
+.B EACCES
+The semaphore exists but the caller lacks permission to open it.
+.TP
+.B EEXIST
+.B O_CREAT
+and
+.B O_EXCL
+were both set but the semaphore already exists.
+.TP
+.B EINVAL
+.I name
+does not begin with a slash followed by at least one character, or
+.I value
+exceeds
+.BR SEM_VALUE_MAX .
+.TP
+.B ENAMETOOLONG
+.I name
+is too long.
+.TP
+.B ENOENT
+.B O_CREAT
+was not set and the named semaphore does not exist.
+.TP
+.B ENOMEM
+Insufficient memory to allocate the semaphore handle.
+.TP
+.B ENOSPC
+The system limit on the number of named semaphores would be exceeded.
+.SH EXAMPLE
+Two processes rendezvous through a named semaphore:
+.PP
+.RS 4
+.EX
+#include <fcntl.h>
+#include <semaphore.h>
+#include <stdio.h>
+
+int main(void)
+{
+    sem_t *s = sem_open("/example", O_CREAT | O_RDWR, 0666, 0);
+    if (s == SEM_FAILED) { perror("sem_open"); return 1; }
+
+    /* ... a peer process opens "/example" and calls sem_post() ... */
+    sem_wait(s);            /* blocks until the peer posts */
+
+    sem_close(s);
+    sem_unlink("/example"); /* remove the name once done */
+    return 0;
+}
+.EE
+.RE
+.SH SEE ALSO
+.BR sem_close (3),
+.BR sem_unlink (3),
+.BR sem_wait (3),
+.BR sem_post (3),
+.BR sem_getvalue (3),
+.BR sem_init (3),
+.BR ksem_open (2)
+.SH STANDARDS
+POSIX.1-2017.

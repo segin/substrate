@@ -4,6 +4,7 @@
 #include <sys/fcntl.h>
 #include <sys/file.h>
 #include <sys/lock.h>
+#include <sys/posix_sem.h>
 #include <sys/random.h>
 #include <sys/session.h>
 #include <kern/console.h>
@@ -1154,6 +1155,11 @@ void proc_exit(int code) {
         extern void shm_proc_cleanup(int pid);
         shm_proc_cleanup(current_process->pid);
     }
+
+    /* Drop any POSIX named / process-shared semaphore descriptors this
+     * process still holds open (frees the ksem object if this was its last
+     * descriptor and it was unlinked or anonymous). */
+    ksem_proc_cleanup(current_process->pid);
 
     /* Release any VT we put into KD_GRAPHICS (X server crash, etc.)
      * before tearing down fds.  Without this, a SEGV'd X server leaves

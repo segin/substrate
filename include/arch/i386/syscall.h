@@ -211,6 +211,21 @@
 #define SYS_SHMDT       407
 #define SYS_SHMCTL      408
 
+/* POSIX named / kernel semaphores (ksem) — sys/kern/posix_sem.c.
+ * These back sem_open/sem_close/sem_unlink and process-shared sem_init.
+ * Numbers deliberately sit in a high, clearly-unused 500-block to steer
+ * clear of the SysV sem/shm (402-408) and thr_* (431-481) ranges AND of a
+ * concurrently-landing SYS_MQ_* message-queue block (which sits just above
+ * the thr_* range); reconcile at merge if they ever overlap. */
+#define SYS_KSEM_OPEN       500
+#define SYS_KSEM_CLOSE      501
+#define SYS_KSEM_UNLINK     502
+#define SYS_KSEM_WAIT       503
+#define SYS_KSEM_TRYWAIT    504
+#define SYS_KSEM_TIMEDWAIT  505
+#define SYS_KSEM_POST       506
+#define SYS_KSEM_GETVALUE   507
+
 void syscall_init(void);
 
 // GDT TLS entries

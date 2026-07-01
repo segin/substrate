@@ -30,11 +30,15 @@ else
   PTHREAD_INC =
 endif
 
-TESTS = torture_ipc torture_pipe torture_sem torture_shm
+TESTS = torture_ipc torture_pipe torture_sem torture_shm torture_ksem
 
 all: $(TESTS)
 
 torture_ipc: torture_ipc.c
+	$(CC) $(CFLAGS) $(LDFLAGS) $(PTHREAD_INC) $< $(PTHREAD) -o $@
+
+# torture_ksem uses sem_open/sem_*/sem_init(pshared) — needs libpthread.
+torture_ksem: torture_ksem.c
 	$(CC) $(CFLAGS) $(LDFLAGS) $(PTHREAD_INC) $< $(PTHREAD) -o $@
 
 torture_pipe: torture_pipe.c

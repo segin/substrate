@@ -161,6 +161,17 @@ extern void *sys_shmat(int, const void *, int);
 extern int   sys_shmdt(const void *);
 extern int   sys_shmctl(int, int, struct shmid_ds *);
 
+/* POSIX named / kernel semaphores (sys/kern/posix_sem.c) */
+struct timespec;
+extern int sys_ksem_open(const char *, int, mode_t, unsigned int);
+extern int sys_ksem_close(int);
+extern int sys_ksem_unlink(const char *);
+extern int sys_ksem_wait(int);
+extern int sys_ksem_trywait(int);
+extern int sys_ksem_timedwait(int, const struct timespec *);
+extern int sys_ksem_post(int);
+extern int sys_ksem_getvalue(int, int *);
+
 /* Signals */
 extern int sys_kill(int, int);
 extern int sys_signal(int, void*);

@@ -4,6 +4,7 @@
 #include <stddef.h>
 #include <sys/proc.h>
 #include <sys/input.h>
+#include <sys/posix_sem.h>
 #include <arch/i386/early_boot.h>
 #include <arch/i386/intr.h>
 
@@ -581,6 +582,8 @@ static void init_core_subsystems(multiboot_info_t *mboot_info) {
 
     extern void shm_init(void);
     shm_init();         /* System V shared memory subsystem */
+
+    ksem_init();        /* POSIX named / kernel semaphore subsystem */
 
     hw_text_late_init();
 

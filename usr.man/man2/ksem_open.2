@@ -1,0 +1,171 @@
+.\"
+.\" KSEM_OPEN(2) - Substrate Native Personality
+.\"
+.TH KSEM_OPEN 2 "June 2026" "Substrate OS" "System Calls"
+.SH NAME
+ksem_open, ksem_close, ksem_unlink, ksem_wait, ksem_trywait, ksem_timedwait,
+ksem_post, ksem_getvalue \- kernel-backed POSIX semaphore objects
+.SH LIBRARY
+Standard C library
+.RI ( libc ", " \-lc )
+.SH SYNOPSIS
+.nf
+.B #include <sys/syscall.h>
+.B #include <semaphore.h>
+.PP
+.BI "int syscall(SYS_KSEM_OPEN, const char *" name ", int " oflag ,
+.BI "            mode_t " mode ", unsigned int " value ");"
+.BI "int syscall(SYS_KSEM_CLOSE, int " id ");"
+.BI "int syscall(SYS_KSEM_UNLINK, const char *" name ");"
+.BI "int syscall(SYS_KSEM_WAIT, int " id ");"
+.BI "int syscall(SYS_KSEM_TRYWAIT, int " id ");"
+.BI "int syscall(SYS_KSEM_TIMEDWAIT, int " id ", const struct timespec *" abstime ");"
+.BI "int syscall(SYS_KSEM_POST, int " id ");"
+.BI "int syscall(SYS_KSEM_GETVALUE, int " id ", int *" sval ");"
+.fi
+.SH DESCRIPTION
+The
+.B ksem
+system calls implement kernel-backed POSIX counting semaphores.  They are the
+Substrate-native primitives beneath the
+.BR sem_open (3)
+family and beneath process-shared
+.BR sem_init (3)
+(pshared != 0).  A semaphore lives as a system-wide kernel object rather than a
+word in user memory, so it synchronises correctly across unrelated processes \(em
+Substrate's futex is keyed by a per-process virtual address and never crosses an
+address space, so a genuinely shared semaphore has to live in the kernel.  The
+model mirrors FreeBSD's
+.IR ksem .
+.PP
+.BR ksem_open ()
+creates or attaches to a semaphore and returns a non-negative
+.I id
+(a descriptor) used by every other call.  If
+.I name
+is
+.B NULL
+an anonymous, unnamed object is created (this backs process-shared
+.BR sem_init (3));
+otherwise
+.I name
+must begin with a slash
+.RB ( / )
+followed by one or more characters.
+.I oflag
+may contain
+.B O_CREAT
+(create if absent, using
+.I mode
+and
+.IR value )
+and
+.B O_EXCL
+(with
+.BR O_CREAT ,
+fail if the name already exists).  Each open adds one reference.
+.PP
+.BR ksem_close ()
+drops one reference held by the calling process.  When the last reference is
+dropped and the object has been unlinked (or is anonymous), it is destroyed.
+.PP
+.BR ksem_unlink ()
+removes
+.I name
+so later opens miss it; existing descriptors keep working until closed.
+.PP
+.BR ksem_wait ()
+decrements the value, blocking interruptibly while it is zero.
+.BR ksem_trywait ()
+is the non-blocking form.
+.BR ksem_timedwait ()
+blocks only until the absolute
+.B CLOCK_REALTIME
+deadline
+.IR abstime .
+.BR ksem_post ()
+increments the value and wakes one waiter.
+.BR ksem_getvalue ()
+stores the current value in
+.IR *sval .
+.PP
+A process's still-open descriptors are dropped automatically when it exits.
+.SH RETURN VALUE
+.BR ksem_open ()
+returns a non-negative descriptor.  The others return 0.  All return a negative
+errno value on failure (the C library negates it into
+.I errno
+and returns \-1).
+.SH ERRORS
+.TP
+.B EACCES
+Permission to open or unlink the semaphore is denied.
+.TP
+.B EAGAIN
+.RB ( ksem_trywait ())
+The value is zero.
+.TP
+.B EEXIST
+.B O_CREAT
+and
+.B O_EXCL
+were set but the name already exists.
+.TP
+.B EINVAL
+Bad
+.IR id ;
+.I name
+does not begin with a slash and a character; or
+.I value
+exceeds the maximum.
+.TP
+.B EINTR
+A blocking wait was interrupted by a signal.
+.TP
+.B ENAMETOOLONG
+.I name
+is too long.
+.TP
+.B ENOENT
+.B O_CREAT
+was not set and the name does not exist.
+.TP
+.B ENOSPC
+The system-wide limit on ksem objects would be exceeded.
+.TP
+.B ERANGE
+.RB ( ksem_post ())
+The increment would raise the value past
+.BR SEM_VALUE_MAX .
+.TP
+.B ETIMEDOUT
+.RB ( ksem_timedwait ())
+The deadline elapsed before the semaphore could be locked.
+.SH NOTES
+These calls are Substrate-specific and are normally reached through the POSIX
+.BR sem_open (3)
+wrappers rather than
+.BR syscall (2)
+directly.
+.SH EXAMPLE
+.RS 4
+.EX
+#include <sys/syscall.h>
+#include <fcntl.h>
+
+int id = syscall(SYS_KSEM_OPEN, "/demo", O_CREAT | O_RDWR, 0666, 0);
+if (id < 0) { /* -id is the errno */ }
+syscall(SYS_KSEM_POST, id);
+syscall(SYS_KSEM_WAIT, id);
+syscall(SYS_KSEM_CLOSE, id);
+syscall(SYS_KSEM_UNLINK, "/demo");
+.EE
+.RE
+.SH SEE ALSO
+.BR sem_open (3),
+.BR sem_close (3),
+.BR sem_unlink (3),
+.BR sem_wait (3),
+.BR sem_post (3),
+.BR sem_getvalue (3),
+.BR semop (2)
