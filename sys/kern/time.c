@@ -367,7 +367,9 @@ int kern_clock_gettime(clockid_t clk_id, struct timespec *tp) {
     } else if (clk_id == CLOCK_MONOTONIC) {
         sec_base = (time_t)(ticks / HZ);
     } else {
-        return -1;
+        /* Unknown clock id: POSIX requires EINVAL (a bare -1 would become
+         * EPERM in libc — see OPTS clock_gettime/8-1,8-2). */
+        return -EINVAL;
     }
 
     uint64_t nsec = ((ticks % HZ) * 1000000000ULL) / HZ;

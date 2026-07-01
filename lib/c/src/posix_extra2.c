@@ -446,20 +446,32 @@ void siglongjmp(sigjmp_buf env, int val) {
  * ============================================================ */
 
 int clock_getres(clockid_t clk_id, struct timespec *res) {
-    (void)clk_id;
-    if (!res) { errno = EINVAL; return -1; }
-    /* Substrate's clocks tick at 1 ms (CLOCK_TICK_HZ = 1000). */
-    res->tv_sec  = 0;
-    res->tv_nsec = 1000000;
+    /* POSIX: EINVAL for an unknown clock (OPTS clock_getres/5-1,6-2 pass
+     * INVALIDCLOCKID and expect failure).  A NULL res just probes validity. */
+    if (clk_id < 0 || clk_id > CLOCK_THREAD_CPUTIME_ID) { errno = EINVAL; return -1; }
+    if (res) {
+        res->tv_sec  = 0;
+        res->tv_nsec = 1000000;   /* 1 ms tick */
+    }
     return 0;
 }
 
 int clock_settime(clockid_t clk_id, const struct timespec *tp) {
-    (void)clk_id; (void)tp;
-    /* No kernel SYS_CLOCK_SETTIME yet; callers that need to set
-     * the wall clock should use stime() if available. */
-    errno = ENOSYS;
-    return -1;
+    if (!tp || tp->tv_nsec < 0 || tp->tv_nsec >= 1000000000L || tp->tv_sec < 0) {
+        errno = EINVAL;
+        return -1;
+    }
+    /* Only CLOCK_REALTIME is settable; MONOTONIC and the CPU clocks are
+     * read-only and unknown ids are invalid (OPTS clock_settime/17-*,19-1,20-1
+     * check EINVAL on those paths). */
+    if (clk_id != CLOCK_REALTIME) {
+        errno = EINVAL;
+        return -1;
+    }
+    /* Setting the wall clock is privileged; delegate to stime() (which
+     * enforces euid==0 and returns EPERM otherwise). */
+    time_t secs = tp->tv_sec;
+    return stime(&secs);
 }
 
 int clock_nanosleep(clockid_t clk_id, int flags,
