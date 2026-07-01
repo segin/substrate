@@ -6,6 +6,7 @@
 #include "pthread.h"
 #include <errno.h>
 #include <sched.h>
+#include <time.h>
 
 /* ---------------- thread attributes ----------------
  * pthread_attr_t is an int.  pthread_create currently ignores the attribute
@@ -40,9 +41,37 @@ int pthread_setschedprio(pthread_t thread, int prio) {
     return 0;
 }
 
-int pthread_attr_setdetachstate(pthread_attr_t *attr, int state) { if (attr) *attr = state; return 0; }
+/*
+ * pthread_attr_t is a bare int (4-byte ABI, unchanged for already-compiled
+ * consumers) with two bit-packed fields:
+ *   bit 0 — detach state  (PTHREAD_CREATE_JOINABLE / DETACHED)
+ *   bit 1 — inherit sched (PTHREAD_INHERIT_SCHED / EXPLICIT_SCHED)
+ */
+#define AT_DETACH_MASK   0x1
+#define AT_INHERIT_MASK  0x2
+#define AT_INHERIT_SHIFT 1
+
+int pthread_attr_setdetachstate(pthread_attr_t *attr, int state) {
+    if (attr) *attr = (*attr & ~AT_DETACH_MASK) | (state & AT_DETACH_MASK);
+    return 0;
+}
 int pthread_attr_getdetachstate(const pthread_attr_t *attr, int *state) {
-    if (state) *state = attr ? *attr : PTHREAD_CREATE_JOINABLE;
+    if (state) *state = attr ? (*attr & AT_DETACH_MASK) : PTHREAD_CREATE_JOINABLE;
+    return 0;
+}
+/* inherit-sched: stored and reported faithfully, but substrate's scheduler
+ * treats INHERIT and EXPLICIT alike (no per-thread policy honoured yet). */
+int pthread_attr_setinheritsched(pthread_attr_t *attr, int inheritsched) {
+    if (!attr) return EINVAL;
+    if (inheritsched != PTHREAD_INHERIT_SCHED &&
+        inheritsched != PTHREAD_EXPLICIT_SCHED)
+        return EINVAL;
+    *attr = (*attr & ~AT_INHERIT_MASK) | (inheritsched << AT_INHERIT_SHIFT);
+    return 0;
+}
+int pthread_attr_getinheritsched(const pthread_attr_t *attr, int *inheritsched) {
+    if (!attr || !inheritsched) return EINVAL;
+    *inheritsched = (*attr & AT_INHERIT_MASK) >> AT_INHERIT_SHIFT;
     return 0;
 }
 /* Contention scope: substrate threads are always 1:1 system scope.  Accept
@@ -216,6 +245,71 @@ int pthread_rwlock_unlock(pthread_rwlock_t *rw) {
     if (rw->readers < 0) rw->readers = 0;      /* drop the writer */
     else if (rw->readers > 0) rw->readers--;   /* drop one reader */
     pthread_cond_broadcast(&rw->cond);         /* waiters re-check the predicate */
+    pthread_mutex_unlock(&rw->lock);
+    return 0;
+}
+
+/* Has the absolute CLOCK_REALTIME deadline genuinely passed?  The kernel
+ * futex timeout has coarse (tick) granularity and can fire a hair early, so
+ * an ETIMEDOUT from pthread_cond_timedwait is only honoured once now has
+ * actually reached abstime — otherwise it is treated as a spurious wake and
+ * the predicate is re-checked (POSIX forbids returning ETIMEDOUT early). */
+static int rwlock_deadline_passed(const struct timespec *abstime) {
+    struct timespec now;
+    if (clock_gettime(CLOCK_REALTIME, &now) != 0)
+        return 1;
+    return now.tv_sec > abstime->tv_sec ||
+           (now.tv_sec == abstime->tv_sec && now.tv_nsec >= abstime->tv_nsec);
+}
+
+/* Timed read-lock: block on the writer-preferring predicate until the read
+ * lock is granted or the absolute CLOCK_REALTIME deadline lapses.  The
+ * rwlock's condvar is CLOCK_REALTIME (init'd with a NULL condattr), which is
+ * the clock POSIX specifies for these calls. */
+int pthread_rwlock_timedrdlock(pthread_rwlock_t *rw, const struct timespec *abstime) {
+    pthread_mutex_lock(&rw->lock);
+    while (rw->readers < 0 || rw->waiting_writers > 0) {
+        int rc = pthread_cond_timedwait(&rw->cond, &rw->lock, abstime);
+        if (rc == ETIMEDOUT) {
+            if (rwlock_deadline_passed(abstime)) {
+                pthread_mutex_unlock(&rw->lock);
+                return ETIMEDOUT;
+            }
+            /* fired early — re-check the predicate and keep waiting */
+        } else if (rc != 0) {
+            pthread_mutex_unlock(&rw->lock);
+            return rc;
+        }
+    }
+    rw->readers++;
+    pthread_mutex_unlock(&rw->lock);
+    return 0;
+}
+
+/* Timed write-lock: same, but on a genuine timeout stop counting as a waiting
+ * writer and wake any readers we were blocking. */
+int pthread_rwlock_timedwrlock(pthread_rwlock_t *rw, const struct timespec *abstime) {
+    pthread_mutex_lock(&rw->lock);
+    rw->waiting_writers++;
+    while (rw->readers != 0) {
+        int rc = pthread_cond_timedwait(&rw->cond, &rw->lock, abstime);
+        if (rc == ETIMEDOUT) {
+            if (rwlock_deadline_passed(abstime)) {
+                rw->waiting_writers--;
+                pthread_cond_broadcast(&rw->cond);
+                pthread_mutex_unlock(&rw->lock);
+                return ETIMEDOUT;
+            }
+            /* fired early — re-check the predicate and keep waiting */
+        } else if (rc != 0) {
+            rw->waiting_writers--;
+            pthread_cond_broadcast(&rw->cond);
+            pthread_mutex_unlock(&rw->lock);
+            return rc;
+        }
+    }
+    rw->waiting_writers--;
+    rw->readers = -1;
     pthread_mutex_unlock(&rw->lock);
     return 0;
 }

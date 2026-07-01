@@ -23,11 +23,26 @@
 #include <errno.h>
 #include <stdlib.h>
 #include <stdint.h>
+#include <time.h>
 #include <sys/syscall.h>
 #include <sys/thr.h>
 
 #define FUTEX_WAIT 0
 #define FUTEX_WAKE 1
+
+/*
+ * pthread_mutexattr_t is a bare int and must stay 4 bytes so the ABI is
+ * unchanged for already-compiled consumers.  Its fields are bit-packed:
+ *   [0:1] type        (PTHREAD_MUTEX_NORMAL/ERRORCHECK/RECURSIVE)
+ *   [3:4] protocol    (PTHREAD_PRIO_NONE/INHERIT/PROTECT)
+ *   [8:15] prioceiling
+ * (pshared is not stored — see pthread_mutexattr_setpshared below.)
+ */
+#define MA_TYPE_MASK   0x0003
+#define MA_PROTO_MASK  0x0018
+#define MA_PROTO_SHIFT 3
+#define MA_CEIL_MASK   0xff00
+#define MA_CEIL_SHIFT  8
 
 #define M_UNLOCKED  0
 #define M_LOCKED    1
@@ -81,7 +96,8 @@ static void mtx_unlock_word(int *w) {
 }
 
 int pthread_mutex_init(pthread_mutex_t *mutex, const void *attr) {
-    int type = attr ? *(const pthread_mutexattr_t *)attr : PTHREAD_MUTEX_DEFAULT;
+    int type = attr ? (*(const pthread_mutexattr_t *)attr & MA_TYPE_MASK)
+                    : PTHREAD_MUTEX_DEFAULT;
     if (type == PTHREAD_MUTEX_RECURSIVE || type == PTHREAD_MUTEX_ERRORCHECK) {
         struct rec_state *s = malloc(sizeof *s);
         if (!s)
@@ -184,6 +200,66 @@ int pthread_mutex_trylock(pthread_mutex_t *m) {
 }
 
 /*
+ * Timed variant of mtx_lock_word: block on the futex word until it is
+ * acquired or the absolute CLOCK_REALTIME deadline `abstime` passes.
+ * Substrate's FUTEX_WAIT takes a RELATIVE timespec, so we convert
+ * abstime - now on every parking attempt (see pthread_cond_timedwait).
+ * Returns 0 on acquire, ETIMEDOUT on deadline, EINVAL on a malformed
+ * timeout.
+ */
+static int mtx_timedlock_word(int *w, const struct timespec *abstime) {
+    int c = __sync_val_compare_and_swap(w, M_UNLOCKED, M_LOCKED);
+    if (c == M_UNLOCKED)
+        return 0;
+    if (!abstime ||
+        abstime->tv_nsec < 0 || abstime->tv_nsec >= 1000000000L)
+        return EINVAL;
+    if (c != M_CONTENDED)
+        c = __sync_lock_test_and_set(w, M_CONTENDED);
+    while (c != M_UNLOCKED) {
+        struct timespec now, rel;
+        if (clock_gettime(CLOCK_REALTIME, &now) != 0)
+            return EINVAL;
+        rel.tv_sec  = abstime->tv_sec  - now.tv_sec;
+        rel.tv_nsec = abstime->tv_nsec - now.tv_nsec;
+        if (rel.tv_nsec < 0) { rel.tv_sec -= 1; rel.tv_nsec += 1000000000L; }
+        if (rel.tv_sec < 0 || (rel.tv_sec == 0 && rel.tv_nsec <= 0))
+            return ETIMEDOUT;
+        syscall(SYS_FUTEX, (long)w, FUTEX_WAIT, M_CONTENDED,
+                (long)&rel, 0, 0);
+        c = __sync_lock_test_and_set(w, M_CONTENDED);
+        if (c == M_UNLOCKED)
+            return 0;
+        /* Any wake (timeout, EAGAIN, EINTR, real) loops back to the top,
+         * which recomputes the delta and only reports ETIMEDOUT once the
+         * ABSOLUTE deadline has genuinely passed — the kernel futex timeout
+         * has coarse (tick) granularity and can fire a hair early. */
+    }
+    return 0;
+}
+
+int pthread_mutex_timedlock(pthread_mutex_t *m, const struct timespec *abstime) {
+    int v = *m;
+    if (MTX_IS_REC(v)) {
+        struct rec_state *s = MTX_REC(v);
+        int me = mtx_self();
+        if (s->owner == me) {
+            if (s->type == PTHREAD_MUTEX_ERRORCHECK)
+                return EDEADLK;
+            s->count++;
+            return 0;
+        }
+        int rc = mtx_timedlock_word(&s->futex, abstime);
+        if (rc != 0)
+            return rc;
+        s->owner = me;
+        s->count = 1;
+        return 0;
+    }
+    return mtx_timedlock_word(m, abstime);
+}
+
+/*
  * Mutex attributes.  pthread_mutexattr_t is a bare int holding the
  * mutex type (PTHREAD_MUTEX_NORMAL / ERRORCHECK / RECURSIVE).
  *
@@ -210,7 +286,7 @@ int pthread_mutexattr_settype(pthread_mutexattr_t *attr, int type) {
         type != PTHREAD_MUTEX_ERRORCHECK &&
         type != PTHREAD_MUTEX_RECURSIVE)
         return EINVAL;
-    *attr = type;
+    *attr = (*attr & ~MA_TYPE_MASK) | type;      /* preserve packed protocol/ceiling */
     return 0;
 }
 
@@ -232,6 +308,43 @@ int pthread_mutexattr_getpshared(const pthread_mutexattr_t *attr, int *pshared) 
 
 int pthread_mutexattr_gettype(const pthread_mutexattr_t *attr, int *type) {
     if (!attr || !type) return EINVAL;
-    *type = *attr;
+    *type = *attr & MA_TYPE_MASK;
+    return 0;
+}
+
+/*
+ * Priority protocol + ceiling.  Substrate does not implement priority-
+ * inheritance mutexes, so these only store and report the requested value
+ * (bit-packed into the attr int); they do not change scheduling.
+ */
+int pthread_mutexattr_setprotocol(pthread_mutexattr_t *attr, int protocol) {
+    if (!attr) return EINVAL;
+    if (protocol != PTHREAD_PRIO_NONE &&
+        protocol != PTHREAD_PRIO_INHERIT &&
+        protocol != PTHREAD_PRIO_PROTECT)
+        return EINVAL;
+    *attr = (*attr & ~MA_PROTO_MASK) | (protocol << MA_PROTO_SHIFT);
+    return 0;
+}
+
+int pthread_mutexattr_getprotocol(const pthread_mutexattr_t *attr, int *protocol) {
+    if (!attr || !protocol) return EINVAL;
+    *protocol = (*attr & MA_PROTO_MASK) >> MA_PROTO_SHIFT;
+    return 0;
+}
+
+int pthread_mutexattr_setprioceiling(pthread_mutexattr_t *attr, int prioceiling) {
+    if (!attr) return EINVAL;
+    /* Accept any priority in the SCHED_FIFO range substrate reports
+     * (sched_get_priority_min/max == 0..99). */
+    if (prioceiling < 0 || prioceiling > 0xff)
+        return EINVAL;
+    *attr = (*attr & ~MA_CEIL_MASK) | ((prioceiling & 0xff) << MA_CEIL_SHIFT);
+    return 0;
+}
+
+int pthread_mutexattr_getprioceiling(const pthread_mutexattr_t *attr, int *prioceiling) {
+    if (!attr || !prioceiling) return EINVAL;
+    *prioceiling = (*attr & MA_CEIL_MASK) >> MA_CEIL_SHIFT;
     return 0;
 }

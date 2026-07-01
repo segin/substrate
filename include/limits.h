@@ -35,6 +35,11 @@
 
 #define PATH_MAX 4096
 #define NAME_MAX 255
+/* POSIX message-queue priority ceiling: valid msg_prio is 0 .. MQ_PRIO_MAX-1.
+ * Matches the in-kernel limit (sys/kern/posix_mqueue.c) and <mqueue.h>. */
+#ifndef MQ_PRIO_MAX
+#define MQ_PRIO_MAX 64
+#endif
 #define HOST_NAME_MAX 64
 #define LOGIN_NAME_MAX 256
 #define IOV_MAX 1024

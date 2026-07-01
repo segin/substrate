@@ -87,8 +87,29 @@ void _exit(int status) {
     while(1);
 }
 
+/*
+ * fork() runs the pthread_atfork(3) handlers around the actual fork.  The
+ * hooks are provided by libpthread and resolved as weak references, so a
+ * program that never links libpthread keeps the bare syscall (all three
+ * pointers are NULL) — same idiom as exit()'s __ldso_run_fini hook.
+ */
+extern void __pthread_atfork_prepare(void) __attribute__((weak));
+extern void __pthread_atfork_parent(void)  __attribute__((weak));
+extern void __pthread_atfork_child(void)   __attribute__((weak));
+
 int fork(void) {
-    return __set_errno((int)_syscall0(SYS_FORK));
+    if (__pthread_atfork_prepare) __pthread_atfork_prepare();
+
+    int r = (int)_syscall0(SYS_FORK);
+
+    if (r == 0) {
+        /* Child. */
+        if (__pthread_atfork_child) __pthread_atfork_child();
+        return 0;
+    }
+    /* Parent — on success (pid) and on failure (-errno), fork returns here. */
+    if (__pthread_atfork_parent) __pthread_atfork_parent();
+    return __set_errno(r);
 }
 
 ssize_t read(int fd, void *buf, size_t count) {
@@ -1455,6 +1476,9 @@ long sysconf(int name) {
     case 11 /* _SC_PHYS_PAGES */:  return 65536;
     case 12 /* _SC_GETPW_R_SIZE_MAX */: return 1024;  /* getpw*_r buffer hint */
     case 13 /* _SC_GETGR_R_SIZE_MAX */: return 1024;  /* getgr*_r buffer hint */
+    case 14 /* _SC_ASYNCHRONOUS_IO */:
+        /* POSIX asynchronous I/O (aio_*) is supported via librt. */
+        return _POSIX_VERSION;
     default:                        return -1;
     }
 }

@@ -230,6 +230,9 @@ long syscall(long number, ...);
 #define _SC_PHYS_PAGES   11
 #define _SC_GETPW_R_SIZE_MAX 12
 #define _SC_GETGR_R_SIZE_MAX 13
+/* POSIX asynchronous I/O option — substrate supports aio_* via librt, so
+ * sysconf(_SC_ASYNCHRONOUS_IO) reports a positive value. */
+#define _SC_ASYNCHRONOUS_IO  14
 
 long sysconf(int name);
 

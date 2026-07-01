@@ -41,7 +41,7 @@ else
 endif
 
 TESTS_PORTABLE = torture_kernel
-TESTS_SUBSTRATE = torture_pthread torture_recmutex
+TESTS_SUBSTRATE = torture_pthread torture_recmutex torture_pthread_ext
 
 # Default: just the portable suite.  Substrate-specific tests are
 # only built when CROSS is set.
@@ -62,6 +62,10 @@ torture_pthread: torture_pthread.c
 	$(CC) $(CFLAGS) $(PTHREAD_INC) $< $(PTHREAD) -o $@
 
 torture_recmutex: torture_recmutex.c
+	$(CC) $(CFLAGS) $(PTHREAD_INC) $< $(PTHREAD) -o $@
+
+# Substrate-target only: barrier / spinlock / timedlock / atfork surface.
+torture_pthread_ext: torture_pthread_ext.c
 	$(CC) $(CFLAGS) $(PTHREAD_INC) $< $(PTHREAD) -o $@
 
 clean:

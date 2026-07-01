@@ -60,11 +60,16 @@ typedef int pthread_mutexattr_t;
 #define PTHREAD_MUTEX_RECURSIVE  2
 #define PTHREAD_MUTEX_DEFAULT    PTHREAD_MUTEX_NORMAL
 
+struct timespec;
+
 int pthread_mutex_init(pthread_mutex_t *mutex, const void *attr);
 int pthread_mutex_lock(pthread_mutex_t *mutex);
 int pthread_mutex_unlock(pthread_mutex_t *mutex);
 int pthread_mutex_destroy(pthread_mutex_t *mutex);
 int pthread_mutex_trylock(pthread_mutex_t *mutex);
+/* Timed lock: acquire the mutex, or fail with ETIMEDOUT once the
+ * absolute CLOCK_REALTIME deadline `abstime` has passed. */
+int pthread_mutex_timedlock(pthread_mutex_t *mutex, const struct timespec *abstime);
 
 /* Process-shared attribute.  Substrate mutexes are best-effort across
  * processes: setpshared accepts the flag so cross-process consumers (LMDB)
@@ -78,6 +83,19 @@ int pthread_mutexattr_settype(pthread_mutexattr_t *attr, int type);
 int pthread_mutexattr_gettype(const pthread_mutexattr_t *attr, int *type);
 int pthread_mutexattr_setpshared(pthread_mutexattr_t *attr, int pshared);
 int pthread_mutexattr_getpshared(const pthread_mutexattr_t *attr, int *pshared);
+
+/* Priority-inheritance protocol + priority ceiling.  Substrate's MLFQ
+ * scheduler does not implement PTHREAD_PRIO_INHERIT / PTHREAD_PRIO_PROTECT
+ * mutexes, so these store and faithfully report the requested value in the
+ * attribute object (PTHREAD_PRIO_NONE / ceiling 0 by default) but do not
+ * change actual scheduling behaviour. */
+#define PTHREAD_PRIO_NONE     0
+#define PTHREAD_PRIO_INHERIT  1
+#define PTHREAD_PRIO_PROTECT  2
+int pthread_mutexattr_setprotocol(pthread_mutexattr_t *attr, int protocol);
+int pthread_mutexattr_getprotocol(const pthread_mutexattr_t *attr, int *protocol);
+int pthread_mutexattr_setprioceiling(pthread_mutexattr_t *attr, int prioceiling);
+int pthread_mutexattr_getprioceiling(const pthread_mutexattr_t *attr, int *prioceiling);
 
 /* ---------------- condition variables ----------------
  * Linux/glibc-style sequence-number cond_var built on top of
@@ -117,6 +135,12 @@ int pthread_condattr_getclock(const pthread_condattr_t *attr, int *clock_id);
  * always system scope; process scope is not supported. */
 #define PTHREAD_SCOPE_SYSTEM    0
 #define PTHREAD_SCOPE_PROCESS   1
+/* inherit-scheduling attribute: whether a created thread takes its
+ * scheduling parameters from the creating thread (INHERIT) or from the
+ * attribute object (EXPLICIT).  Stored/reported in the attr; substrate's
+ * scheduler treats both alike. */
+#define PTHREAD_INHERIT_SCHED   0
+#define PTHREAD_EXPLICIT_SCHED  1
 int pthread_attr_init(pthread_attr_t *attr);
 int pthread_attr_destroy(pthread_attr_t *attr);
 int pthread_attr_setstacksize(pthread_attr_t *attr, size_t stacksize);
@@ -125,6 +149,8 @@ int pthread_attr_setdetachstate(pthread_attr_t *attr, int detachstate);
 int pthread_attr_getdetachstate(const pthread_attr_t *attr, int *detachstate);
 int pthread_attr_setscope(pthread_attr_t *attr, int scope);
 int pthread_attr_getscope(const pthread_attr_t *attr, int *scope);
+int pthread_attr_setinheritsched(pthread_attr_t *attr, int inheritsched);
+int pthread_attr_getinheritsched(const pthread_attr_t *attr, int *inheritsched);
 
 /* ---------------- read/write locks ----------------
  * Built on the mutex + condvar above; writer-preferring so writers don't
@@ -144,6 +170,10 @@ int pthread_rwlock_tryrdlock(pthread_rwlock_t *rw);
 int pthread_rwlock_wrlock(pthread_rwlock_t *rw);
 int pthread_rwlock_trywrlock(pthread_rwlock_t *rw);
 int pthread_rwlock_unlock(pthread_rwlock_t *rw);
+/* Timed lock acquisition: block until the lock is granted or the absolute
+ * CLOCK_REALTIME deadline `abstime` lapses (ETIMEDOUT). */
+int pthread_rwlock_timedrdlock(pthread_rwlock_t *rw, const struct timespec *abstime);
+int pthread_rwlock_timedwrlock(pthread_rwlock_t *rw, const struct timespec *abstime);
 
 /*
  * pthread_once — one-shot initializer.  Encoded as a single int
@@ -193,6 +223,53 @@ void pthread_testcancel(void);
  * deliver it), matching substrate's current cancellation support. */
 #define pthread_cleanup_push(routine, arg)     do {         void (*__pthread_cleanup_routine)(void *) = (routine);         void *__pthread_cleanup_arg = (arg);         {
 #define pthread_cleanup_pop(execute)         }         if (execute) __pthread_cleanup_routine(__pthread_cleanup_arg);     } while (0)
+
+/* ---------------- barriers ----------------
+ * A rendezvous barrier for `count` threads, built on the mutex + condvar
+ * above.  The (count)th thread to arrive releases the rest and is the one
+ * that gets PTHREAD_BARRIER_SERIAL_THREAD; every other waiter gets 0.  The
+ * barrier auto-recycles for the next round.  The body is public only
+ * because callers embed it by value. */
+typedef struct { int pshared; } pthread_barrierattr_t;
+typedef struct {
+    pthread_mutex_t lock;
+    pthread_cond_t  cond;
+    unsigned int    count;    /* number of threads that must rendezvous */
+    unsigned int    left;     /* still-to-arrive in the current round   */
+    unsigned int    cycle;    /* round generation, for auto-reuse        */
+} pthread_barrier_t;
+
+#define PTHREAD_BARRIER_SERIAL_THREAD (-1)
+
+int pthread_barrier_init(pthread_barrier_t *barrier,
+                         const pthread_barrierattr_t *attr, unsigned int count);
+int pthread_barrier_destroy(pthread_barrier_t *barrier);
+int pthread_barrier_wait(pthread_barrier_t *barrier);
+
+int pthread_barrierattr_init(pthread_barrierattr_t *attr);
+int pthread_barrierattr_destroy(pthread_barrierattr_t *attr);
+int pthread_barrierattr_getpshared(const pthread_barrierattr_t *attr, int *pshared);
+int pthread_barrierattr_setpshared(pthread_barrierattr_t *attr, int pshared);
+
+/* ---------------- spin locks ----------------
+ * A plain atomic test-and-set spinlock.  The lock word is embedded by
+ * value, so a lock placed in shared memory works across processes
+ * (PTHREAD_PROCESS_SHARED); the contended waiter yields the CPU so a
+ * single-CPU holder can make progress. */
+typedef volatile int pthread_spinlock_t;
+int pthread_spin_init(pthread_spinlock_t *lock, int pshared);
+int pthread_spin_destroy(pthread_spinlock_t *lock);
+int pthread_spin_lock(pthread_spinlock_t *lock);
+int pthread_spin_trylock(pthread_spinlock_t *lock);
+int pthread_spin_unlock(pthread_spinlock_t *lock);
+
+/* ---------------- fork handlers ----------------
+ * Register prepare/parent/child handlers run around fork(3): prepare
+ * before the fork (in reverse registration order), parent afterwards in
+ * the parent, child afterwards in the child (both in registration order).
+ * libc's fork() invokes these through weak hooks that libpthread exports. */
+int pthread_atfork(void (*prepare)(void), void (*parent)(void),
+                   void (*child)(void));
 
 #ifdef __cplusplus
 }

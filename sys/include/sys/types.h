@@ -70,12 +70,9 @@ typedef uint64_t fsblkcnt_t;
 typedef uint64_t fsfilcnt_t;
 
 /* Pthread types live in <pthread.h>; this header used to declare
- * them as opaque int32_t which conflicts with the real struct
- * shape (pthread_cond_t carries a futex-backed seq counter, etc.).
- * Code that needs the types should #include <pthread.h>. */
-typedef int32_t  pthread_spinlock_t;
-typedef int32_t  pthread_barrier_t;
-typedef int32_t  pthread_barrierattr_t;
+ * them as opaque int32_t which conflicts with the real shapes there
+ * (pthread_cond_t / pthread_barrier_t are structs, pthread_spinlock_t is
+ * a volatile int, etc.).  Code that needs the types #includes <pthread.h>. */
 
 // BSD/Legacy
 typedef uint32_t vm_offset_t;

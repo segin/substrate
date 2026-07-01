@@ -22,6 +22,12 @@ extern "C" {
  */
 typedef int mqd_t;
 
+/* Number of distinct message priorities: valid msg_prio is 0 .. MQ_PRIO_MAX-1.
+ * Matches the in-kernel POSIX message-queue limit (sys/kern/posix_mqueue.c). */
+#ifndef MQ_PRIO_MAX
+#define MQ_PRIO_MAX 64
+#endif
+
 struct mq_attr {
     long mq_flags;    /* message queue flags (O_NONBLOCK) */
     long mq_maxmsg;   /* max number of messages */
