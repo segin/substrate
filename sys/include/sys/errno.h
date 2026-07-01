@@ -46,6 +46,7 @@
 #define ELOOP        62 /* Too many symbolic links encountered */
 #define EOPNOTSUPP   95 /* Operation not supported on transport endpoint */
 #define ENOTSUP      EOPNOTSUPP
+#define EOVERFLOW    75 /* Value too large for defined data type */
 #define EDEFER      517 /* Driver probe should be retried later */
 #define EUNKNOWNFS   514 /* Unknown filesystem type (sys_mount diagnostic) */
 

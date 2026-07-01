@@ -244,14 +244,16 @@ void *sys_mmap(void *addr, size_t length, int prot, int flags, int fd, uint64_t 
     uintptr_t v_addr = (uintptr_t)addr;
     size_t aligned_length;
 
+    /* Zero length is EINVAL and must be caught before page-rounding, which
+     * also rejects 0 but would surface as a bare -1 == EPERM (OPTS mmap/32-1). */
+    if (length == 0) return (void *)(intptr_t)(-EINVAL);
     if (vm_round_page_size(length, &aligned_length) != 0) return (void *)-1;
 
     /* POSIX EINVAL cases that otherwise feed malformed ranges into the
      * file-object / device (/dev/mem) mmap paths: zero length, a
      * non-page-aligned file offset, and offset+length wrapping past 2^64. */
-    if (length == 0) return (void *)-1;
-    if (!(flags & MAP_ANONYMOUS) && (offset & 0xFFF)) return (void *)-1;
-    if (offset + (uint64_t)aligned_length < offset) return (void *)-1;
+    if (!(flags & MAP_ANONYMOUS) && (offset & 0xFFF)) return (void *)(intptr_t)(-EINVAL);
+    if (offset + (uint64_t)aligned_length < offset) return (void *)(intptr_t)(-EOVERFLOW);
 
     // Find virtual address space
     if (v_addr == 0 || !(flags & MAP_FIXED)) {
@@ -277,7 +279,9 @@ void *sys_mmap(void *addr, size_t length, int prot, int flags, int fd, uint64_t 
     if (!(flags & MAP_ANONYMOUS) && fd >= 0 && fd < MAX_FD) {
         file = p->fds[fd];
     }
-    if (!(flags & MAP_ANONYMOUS) && (!file || !file->f_data)) return (void *)-1;
+    /* A file-backed mmap with no valid open descriptor is EBADF, not the
+     * bare -1 (EPERM) the caller would otherwise see (OPTS mmap/19-1). */
+    if (!(flags & MAP_ANONYMOUS) && (!file || !file->f_data)) return (void *)(intptr_t)(-EBADF);
 
     // Check for device-specific mmap handler
     if (file && file->f_data && ((fs_node_t*)file->f_data)->mmap) {
