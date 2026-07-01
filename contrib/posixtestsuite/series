@@ -1,0 +1,10 @@
+# Substrate patch series for the Open POSIX Test Suite.
+#
+# None at present.  The build driver (build.sh) compiles each test
+# individually and records the ones that fail to compile against
+# substrate's headers/libs (missing POSIX symbols such as
+# _SC_ASYNCHRONOUS_IO, SIGRTMIN, siginfo si_value, MQ_PRIO_MAX, and
+# assorted pthread_* timed/barrier/spin APIs) as build failures rather
+# than patching them away — a build failure on a missing interface is
+# itself a legitimate conformance-baseline datapoint, and we deliberately
+# do NOT hack substrate's libc/headers just to make a test compile.
