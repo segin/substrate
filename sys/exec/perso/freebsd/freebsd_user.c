@@ -696,6 +696,23 @@ int freebsd_sys_fpathconf(int fd, int name) {
     }
 }
 
+/* pathconf(path, name): FreeBSD's _PC_* constants differ from substrate's
+ * native numbering (_PC_PATH_MAX is 5 on FreeBSD, 4 on substrate), so route
+ * through the FreeBSD-numbered fpathconf translator above instead of straight
+ * to native sys_pathconf — which otherwise sees a foreign _PC_ value and
+ * returns EINVAL.  That EINVAL breaks libc++'s std::filesystem::current_path()
+ * (it sizes its getcwd buffer via pathconf(_PC_PATH_MAX)), which in turn makes
+ * weakly_canonical() throw ENOENT on every relative path (e.g. PsyMP3's
+ * path validation).  Validate the path first so a bad one still reports
+ * ENOENT/EACCES rather than a bogus limit. */
+int freebsd_sys_pathconf(const char *path, int name) {
+    char kpath[256];
+    if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -EFAULT;
+    int r = kern_access(kpath, 0 /* F_OK */);
+    if (r != 0) return r;
+    return freebsd_sys_fpathconf(-1, name);
+}
+
 /* sched_get_priority_max/min(policy): substrate uses a single priority
  * band; report a small fixed range. */
 int freebsd_sys_sched_prio_max(int policy) { (void)policy; return 31; }

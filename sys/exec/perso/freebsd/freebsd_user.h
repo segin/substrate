@@ -567,6 +567,7 @@ int64_t freebsd_sys_pread(int fd, void *buf, size_t nbyte,
 int64_t freebsd_sys_pwrite(int fd, const void *buf, size_t nbyte,
                            uint32_t off_lo, uint32_t off_hi);
 int     freebsd_sys_fpathconf(int fd, int name);
+int     freebsd_sys_pathconf(const char *path, int name);
 int     freebsd_sys_sched_prio_max(int policy);
 int     freebsd_sys_sched_prio_min(int policy);
 int     freebsd_sys_kenv(int what, const char *name, char *value, int len);
