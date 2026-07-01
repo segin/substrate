@@ -70,6 +70,12 @@ inject_lib() {   # inject_lib <hostfile> <name>
     debugfs -w -R "sif /lib/$2 mode 0100755" "${ROOTCOPY}" >/dev/null 2>&1
     echo "   refreshed /lib/$2"
 }
+# libc.so.0 too: the clock/sched error-path (EINVAL on bad clock/priority),
+# the sigqueue/RT-signal and pthread_atfork fixes live in libc — not only in
+# libpthread — so the disposable boot copy must carry the freshly built libc
+# or the dynamically-linked tests bind the stale on-image libc and the fixes
+# do not take effect.  Injected into the throwaway sparse copy only.
+inject_lib "${SUBSTRATE_TOP}/lib/c/libc.so.0" libc.so.0
 inject_lib "${SUBSTRATE_TOP}/lib/pthread/libpthread.so.0" libpthread.so.0
 inject_lib "${SUBSTRATE_TOP}/lib/rt/librt.so.0" librt.so.0
 

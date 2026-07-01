@@ -4,6 +4,11 @@ First on-substrate OPTS conformance run.  This baseline is **step 1 toward
 passing the suite**: every FAIL / TIMEOUT / CRASH / kernel-PANIC below is a
 substrate conformance gap and a roadmap item.
 
+> **Run 2 (kernel `07ecdb34`) is at the bottom of this file** — a
+> re-measurement after the clock / mqueue / SCHED / signals-RT / pthread-timed
+> rounds merged.  Everything from here through "Notable clusters / observations"
+> is **Run 1** (kernel `5100a8e6`); the Run 2 section supersedes it.
+
 - Suite: Open POSIX Test Suite (from LTP, commit `01d0eecd`), conformance +
   functional tests.
 - Kernel: `sys/kernel.multiboot` at `main` = `5100a8e6` (POSIX mqueue + ksem
@@ -270,3 +275,250 @@ message_queues/mq_close       1 FAIL : mq_close test plan: 1. Create pipes to co
   `mq_timedsend` TIMEOUT.
 - **semaphores**: 59 / 73 PASS including named `sem_open`/`close`/`unlink`;
   the 3 PANICs are process-shared / named-sem edge cases.
+
+---
+
+# Run 2 — kernel `07ecdb34`
+
+Second on-substrate OPTS run, after a large round of conformance fixes merged
+on `main`.  Same suite (LTP `01d0eecd`), same harness, same toolchain
+(`i386-unknown-substrate-gcc` 16.1.0, tests linked `-lrt -lpthread -lsys -lm`).
+
+- Kernel: `sys/kernel.multiboot` at `main` = `07ecdb34` (clean
+  `make -C sys clean && make -C sys`).
+- Libs: `libc.so.0`, `libpthread.so.0`, `librt.so.0` rebuilt at HEAD and
+  mirrored into the sysroot + gcc `include-fixed` (`signal.h` / `pthread.h` /
+  `mqueue.h` / `aio.h` / `semaphore.h`) so tests build+link against the new
+  surface.  **All three shared objects** (not just libpthread/librt) are
+  injected into the disposable boot copy's `/lib` — the clock / sched
+  error-path, `sigqueue` / RT-signal and `pthread_atfork` fixes live in
+  `libc.so.0`, so `run-baseline.sh` now injects it too (harness change).
+- Accelerator: **`ACCEL=tcg`** (correct).  A stray `ACCEL=kvm` run that
+  collided mid-measurement was discarded — under KVM the documented i386
+  post-signal coherence bug manufactured spurious stalls (e.g.
+  `timers/clock_settime/17-1`, a plain FAIL, reported as a kernel PANIC).
+  The numbers below are the TCG run only.
+- Boots: **8** (one clean pass + 7 panic-resume reboots — see PANIC list).
+
+## Fixes merged since Run 1 (context)
+
+`clock_*` EINVAL error-paths (`c991e688`); `mq_open`/`mq_unlink` ENAMETOOLONG
+(`26628883`); real validating SCHED syscalls 416–422 (`01e610f4`,`2f05b87e`);
+`sigaction` assertion #4/#23, `sigpending`, RT signals (`SIGRTMIN`=29/
+`SIGRTMAX`=30) + `si_value` + `sigqueue(2)` (`0afb92fc`); pthread barriers /
+spinlocks / timed locks / atfork / inherit-sched + `MQ_PRIO_MAX` /
+`_SC_ASYNCHRONOUS_IO` (`07ecdb34`).
+
+## Build coverage (1452 build-OK / 133 build-fail of 1585; runnable 1451)
+
+Build-fails dropped **294 → 133**.  Per area (Run 1 → Run 2 build-fail):
+
+```
+AREA             BUILD-OK  BFAIL(R1→R2)
+threads               277  154 → 81
+signals               624   41 → 30
+semaphores             73    1 →  1
+timers                 95    7 →  7
+mmap                   94    0 →  0
+sched                  65    3 →  3
+message_queues        121   10 →  0
+aio                    67   72 →  5
+other                  36    6 →  6
+```
+
+`aio` (0 → 67 runnable) and `message_queues` (10 → 0 fails) unblocked wholesale
+by `_SC_ASYNCHRONOUS_IO` / `MQ_PRIO_MAX`; `threads` and `signals` shrank as the
+pthread-timed/barrier/spin and RT-signal headers landed.  The remaining 133 are
+still real, un-patched substrate gaps, dominated by missing `<unistd.h>`
+sysconf constants (`_SC_REALTIME_SIGNALS` ×28, `_SC_THREAD_STACK_MIN` ×16,
+`_SC_THREAD_PROCESS_SHARED` ×14, `_SC_CPUTIME`/`_SC_MONOTONIC_CLOCK`/
+`_SC_CLOCK_SELECTION`/`_SC_PRIORITIZED_IO`/`_SC_AIO_MAX`/`_SC_SIGQUEUE_MAX`/
+`_SC_SEM_NSEMS_MAX`/`_SC_MAPPED_FILES`), missing pthread decls
+(`pthread_attr_set/getschedpolicy`, `pthread_rwlockattr_init`,
+`pthread_condattr_set/getpshared`, `pthread_attr_getstack`,
+`pthread_getattr_np`, `pthread_getcpuclockid`), `PTHREAD_STACK_MIN`, and
+`_POSIX_SPORADIC_SERVER` (SCHED_SPORADIC).
+
+## Per-area result
+
+```
+AREA           PASS  FAIL UNRES UNSUP UNTST TMOUT CRASH PANIC  TOTAL
+threads         223    26     2     8     0    13     1     3    276
+signals         509    20    91     0     0     3     0     1    624
+semaphores       63     3     5     0     1     0     0     1     73
+timers           41     9    37     5     1     2     0     0     95
+mmap             39     9    31     4     5     1     4     1     94
+sched            41     1     4    19     0     0     0     0     65
+message_queues  117     2     1     0     0     1     0     0    121
+aio              41    20     0     0     2     3     0     1     67
+other            29     4     2     0     0     1     0     0     36
+------------------------------------------------------------------------
+TOTAL ran=1451  PASS=1103 FAIL=94 UNRESOLVED=173 UNSUPPORTED=36 UNTESTED=9 TIMEOUT=24 CRASH=5 PANIC=7
+```
+
+## Delta vs Run 1
+
+```
+                Run 1    Run 2    delta
+PASS              818     1103     +285
+FAIL              187       94      -93
+UNRESOLVED        206      173      -33
+UNSUPPORTED        28       36       +8
+UNTESTED            7        9       +2
+TIMEOUT            22       24       +2
+CRASH               6        5       -1
+PANIC              15        7       -8
+build-fails       294      133     -161
+runnable         1289     1451     +162
+```
+
+Per-area PASS climb: threads 163→223 (+60), signals 406→509 (+103),
+semaphores 59→63 (+4), timers 28→41 (+13), mmap 35→39 (+4), **sched 2→41
+(+39)**, message_queues 101→117 (+16), **aio 0→41 (+41)**, other 24→29 (+5).
+
+Headline confirmations (direct row checks): `signals/sigaction` FAIL **78 → 0**
+(the assertion-#4/#23 mask-during-handler fix); `signals/sigpending` CRASH
+**2 → 0**; the `sched` query family (`sched_getscheduler`/`getparam`/
+`get_priority_min`/`get_priority_max`) FAIL **16 → 0**; `sched` PANIC
+**7 → 0**; `aio` PASS **0 → 41**.
+
+## PANIC 15 → 7 (kernel wedges)
+
+Of Run 1's 15 panics, **12 no longer wedge the kernel**: 4 now PASS
+(`other/fork/17-1`, `semaphores/sem_getvalue/2-1`, `semaphores/sem_unlink/4-2`,
+`signals/sigaction/22-26` — the `SA_NODEFER` case), 7 `sched` panics now return
+cleanly as UNSUPPORTED (`sched_setparam/20-1`,`21-1`,`21-2`;
+`sched_setscheduler/15-2`,`17-2`,`22-1`,`22-2` — the range-check no longer
+triple-faults), and 1 downgraded to FAIL (`threads/pthread_setcanceltype/2-1`).
+
+**3 carry over unchanged** and **4 are new** (all in code that only started
+building this run — aio, pthread spin/mutex):
+
+```
+  aio/aio_error/2-1          [PANIC] NEW  : aio_error while an aio_read is in progress
+  threads/pthread_mutex_lock/4-1 [PANIC] NEW : (newly-buildable mutex path)
+  threads/pthread_spin_init/2-1  [PANIC] NEW : pthread_spin_init (spinlocks now build)
+  threads/pthread_spin_lock/3-1  [PANIC] NEW : pthread_spin_lock (deterministic wedge)
+  semaphores/sem_init/3-1    [PANIC] carry: pshared sem shared between processes
+  mmap/shm_open/23-1         [PANIC] carry: shm_open existence+creation atomicity
+  signals/sigaction/10-1     [PANIC] carry: SIGCHLD sent to parent on child stop
+```
+
+The aio/threads wedges are partly **non-deterministic** (a discarded early run
+wedged at `pthread_condattr_init/3-1` and `aio_suspend/4-1` instead) — a
+timing-dependent corruption in the newly-reachable pthread-primitive / aio
+kernel paths, so the attributed culprit is the first test after the wedge, not
+necessarily the sole cause.  `sem_init/3-1`, `shm_open/23-1` and
+`sigaction/10-1` reproduce at the same points as Run 1 (deterministic).
+
+## Test-process CRASHes (5)
+
+```
+  mmap/shm_open/1-1          [CRASH] carry : shm_open connects object <-> fd
+  mmap/shm_open/14-2         [CRASH] carry : O_RDWR open-for-read
+  mmap/shm_open/28-1         [CRASH] carry : shm object persists until unlink
+  mmap/shm_open/28-3         [CRASH] carry : shm object persists until last close
+  threads/pthread_atfork/3-2 [CRASH] NEW   : atfork handler ordering (now builds)
+```
+
+The two Run 1 `signals/sigpending` crashes (`1-2`,`1-3`) are **gone** (now PASS).
+
+## Watchdog TIMEOUTs (24)
+
+```
+  threads/pthread_mutex_init      1-2 3-2 5-1
+  threads/pthread_cancel          1-1 2-1 3-1
+  signals/sigpause                1-2 2-1 4-1
+  threads/pthread_atfork          1-1 2-1        (NEW area)
+  aio/aio_suspend                 1-1 4-1        (NEW area)
+  threads/pthread_setcanceltype   1-1
+  threads/pthread_rwlock_wrlock   3-1
+  threads/pthread_join            3-1
+  threads/pthread_cond_init       4-1
+  threads/pthread_cleanup_push    1-2
+  timers/nanosleep                10000-1
+  timers/clock                    1-1
+  other/fork                      8-1
+  mmap/mmap                       24-1
+  message_queues/mq_timedsend     16-1
+  aio/lio_listio                  1-1            (NEW area)
+```
+
+## FAIL roadmap — every failing test, grouped by interface (94)
+
+```
+aio/aio_cancel                    7 : 2-1 3-1 5-1 6-1 7-1 9-1 10-1
+aio/lio_listio                    6 : 4-1 5-1 7-1 13-1 14-1 15-1
+mmap/mmap                         5 : 7-3 18-1 23-1 24-2 31-1
+signals/sigwait                   4 : 1-1 2-1 6-1 8-1
+aio/aio_write                     4 : 2-1 8-2 9-1 9-2
+timers/timer_create               3 : 1-1 3-1 16-1
+threads/pthread_setschedparam     3 : 1-1 1-2 4-1
+threads/pthread_cancel            3 : 1-3 2-2 2-3
+signals/sigwaitinfo               3 : 2-1 5-1 9-1
+signals/sigtimedwait              3 : 1-1 4-1 6-1
+signals/signal                    3 : 5-1 6-1 7-1
+signals/sigaltstack               3 : 10-1 11-1 12-1
+timers/clock_settime              2 : 7-1 7-2
+timers/clock_nanosleep            2 : 1-5 13-1
+threads/pthread_setcanceltype     2 : 1-2 2-1
+threads/pthread_setcancelstate    2 : 1-1 2-1
+threads/pthread_attr_setinheritsched 2 : 2-3 2-4
+threads/pthread_attr_setdetachstate  2 : 2-1 4-1
+other/strftime                    2 : 1-1 2-1
+other/fork                        2 : 11-1 16-1
+mmap/shm_open                     2 : 5-1 11-1
+aio/aio_read                      2 : 11-1 11-2
+timers/nanosleep                  1 : 3-2
+timers/functional/timers/clocks   1 : invaliddates
+threads/pthread_testcancel        1 : 1-1
+threads/pthread_rwlock_timedwrlock 1 : 6-2
+threads/pthread_rwlock_timedrdlock 1 : 6-2
+threads/pthread_mutexattr_getpshared 1 : 1-2
+threads/pthread_mutexattr_getprioceiling 1 : 1-1
+threads/pthread_getschedparam     1 : 1-2
+threads/pthread_exit              1 : 2-1
+threads/pthread_detach            1 : 4-1
+threads/pthread_create            1 : 1-3
+threads/pthread_cleanup_push      1 : 1-1
+threads/pthread_barrierattr_getpshared 1 : 2-1
+threads/pthread_attr_setscope     1 : 4-1
+signals/sigsuspend                1 : 3-1
+signals/sigqueue                  1 : 4-1
+signals/sigpause                  1 : 3-1
+signals/pthread_sigmask           1 : 9-1
+semaphores/sem_unlink             1 : 4-1
+semaphores/sem_timedwait          1 : 9-1
+semaphores/sem_open               1 : 15-1
+sched/sched_setparam              1 : 9-1
+mmap/munmap                       1 : 8-1
+mmap/mlock                        1 : 12-1
+message_queues/mq_timedreceive    1 : 8-1
+message_queues/mq_close           1 : 2-1
+aio/aio_fsync                     1 : 12-1
+```
+
+## Cycle-2 roadmap (highest leverage first)
+
+- **aio is the new frontier**: 41 PASS / 20 FAIL of 67 on its first run.  The
+  `aio_cancel` (7), `aio_write` (4), `lio_listio` (6) error/completion paths
+  fail, `aio_suspend`/`lio_listio` block (3 TIMEOUT), and `aio_error/2-1`
+  wedges the kernel.  Whole area was unmeasurable in Run 1.
+- **pthread synchronisation primitives wedge the kernel**: `pthread_spin_*`,
+  `pthread_mutex_lock/4-1` PANIC (partly non-deterministic → likely a real
+  kernel memory-corruption bug in the newly-reachable path); `pthread_atfork`
+  CRASH/TIMEOUT; several `pthread_cancel`/`cleanup`/`mutex_init` TIMEOUTs.
+  Now that these compile, they are the biggest remaining kernel-stability risk.
+- **sched flipped from broken to strong** (2→41 PASS): the query family and
+  range-checks work; the residue is 19 UNSUPPORTED (SCHED_SPORADIC) and one
+  `sched_setparam/9-1` FAIL.
+- **signals is now mostly conformant** (509/624, sigaction 0 FAIL): residual
+  FAILs are `sigwait`/`sigwaitinfo`/`sigtimedwait`/`sigaltstack`/`signal`
+  return-value edge cases; 91 UNRESOLVED are RT-signal tests that bail before
+  asserting; `sigpause` still TIMEOUTs (3).
+- **mmap/shm_open remains fragile**: 4 CRASH + 1 PANIC + 2 FAIL — POSIX shared
+  memory objects are the single most crash-prone interface.
+- **Build coverage**: add the ~13 missing `_SC_*` sysconf constants and the
+  handful of pthread attr/schedpolicy/rwlockattr/condattr-pshared declarations
+  to unblock the remaining 133 build-fails (mostly `threads`/`signals`).
+
