@@ -450,10 +450,14 @@ int msync(void *addr, size_t len, int flags) {
 }
 
 int mlockall(int flags) {
-    /* Memory locking isn't enforced on substrate.  Returning 0
-     * matches a system where everything is already non-swappable
-     * (we have no swap), which is the user-visible truth. */
-    (void)flags;
+    /* Memory locking isn't enforced on substrate (no swap, so everything is
+     * already non-swappable — the user-visible truth is "locked").  POSIX
+     * still requires EINVAL when flags is 0 or carries bits other than
+     * MCL_CURRENT/MCL_FUTURE (mlockall/13-1, 13-2). */
+    if (flags == 0 || (flags & ~(MCL_CURRENT | MCL_FUTURE))) {
+        errno = EINVAL;
+        return -1;
+    }
     return 0;
 }
 
