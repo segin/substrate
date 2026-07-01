@@ -295,6 +295,8 @@ int kern_sigprocmask(int how, const uint32_t *set, uint32_t *oset) {
         if (how == 1)      current_thread->sig_mask |= new_set;     // SIG_BLOCK
         else if (how == 2) current_thread->sig_mask &= ~new_set;    // SIG_UNBLOCK
         else if (how == 3) current_thread->sig_mask = new_set;      // SIG_SETMASK
+        else return -EINVAL;   /* invalid 'how' when changing the mask
+                                * (sigprocmask/17-1, pthread_sigmask/16-1) */
     }
     return 0;
 }
