@@ -65,6 +65,23 @@ static inline int __set_errno(int r) {
     return r;
 }
 
+/* Like __set_errno(), but also clears errno to 0 on success.  POSIX
+ * leaves errno unspecified after a successful call unless a function
+ * documents otherwise, so clearing it is conformant.  Used by the
+ * sched_* query wrappers: the Open POSIX Test Suite checks
+ * `errno == 0` after a successful sched_get_priority_max() /
+ * sched_getparam() / etc., and substrate's process startup can leave a
+ * stale errno (e.g. ENOENT from ld.so's library search) that would
+ * otherwise fail those assertions even though the call succeeded. */
+static inline int __set_errno_ok(int r) {
+    if (r < 0) {
+        errno = -r;
+        return -1;
+    }
+    errno = 0;
+    return r;
+}
+
 void _exit(int status) {
     _syscall1(SYS_EXIT, status);
     while(1);
@@ -1560,25 +1577,25 @@ int sched_yield(void) {
  * kernel validates policy/priority/pid and returns a negative errno on
  * failure, so these are thin wrappers over the raw syscalls. */
 int sched_getscheduler(pid_t pid) {
-    return __set_errno((int)_syscall1(SYS_SCHED_GETSCHEDULER, pid));
+    return __set_errno_ok((int)_syscall1(SYS_SCHED_GETSCHEDULER, pid));
 }
 int sched_setscheduler(pid_t pid, int policy, const struct sched_param *p) {
-    return __set_errno((int)_syscall3(SYS_SCHED_SETSCHEDULER, pid, policy,
-                                      (uintptr_t)p));
+    return __set_errno_ok((int)_syscall3(SYS_SCHED_SETSCHEDULER, pid, policy,
+                                         (uintptr_t)p));
 }
 int sched_getparam(pid_t pid, struct sched_param *p) {
-    return __set_errno((int)_syscall2(SYS_SCHED_GETPARAM, pid, (uintptr_t)p));
+    return __set_errno_ok((int)_syscall2(SYS_SCHED_GETPARAM, pid, (uintptr_t)p));
 }
 int sched_setparam(pid_t pid, const struct sched_param *p) {
-    return __set_errno((int)_syscall2(SYS_SCHED_SETPARAM, pid, (uintptr_t)p));
+    return __set_errno_ok((int)_syscall2(SYS_SCHED_SETPARAM, pid, (uintptr_t)p));
 }
 int sched_get_priority_min(int policy) {
-    return __set_errno((int)_syscall1(SYS_SCHED_GET_PRIORITY_MIN, policy));
+    return __set_errno_ok((int)_syscall1(SYS_SCHED_GET_PRIORITY_MIN, policy));
 }
 int sched_get_priority_max(int policy) {
-    return __set_errno((int)_syscall1(SYS_SCHED_GET_PRIORITY_MAX, policy));
+    return __set_errno_ok((int)_syscall1(SYS_SCHED_GET_PRIORITY_MAX, policy));
 }
 int sched_rr_get_interval(pid_t pid, struct timespec *t) {
-    return __set_errno((int)_syscall2(SYS_SCHED_RR_GET_INTERVAL, pid,
-                                      (uintptr_t)t));
+    return __set_errno_ok((int)_syscall2(SYS_SCHED_RR_GET_INTERVAL, pid,
+                                         (uintptr_t)t));
 }
