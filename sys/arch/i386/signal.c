@@ -160,6 +160,16 @@ static void populate_siginfo(siginfo_t *info, int sig, int code) {
         info->si_addr = NULL;
     }
     info->si_status = 0;
+
+    /* A signal posted via sigqueue(2) carries a union sigval payload and is
+     * reported with si_code == SI_QUEUE.  Consume the stored value here so a
+     * later, non-queued instance of the same signal does not re-deliver it. */
+    if (current_process && sig >= 1 && sig <= NSIG &&
+        (current_process->sig_qpend & sigmask(sig))) {
+        info->si_value = current_process->sig_qval[sig - 1];
+        info->si_code = SI_QUEUE;
+        current_process->sig_qpend &= ~sigmask(sig);
+    }
 }
 
 /*

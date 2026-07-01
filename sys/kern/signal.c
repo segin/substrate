@@ -312,7 +312,14 @@ int sys_sigprocmask(int how, const void *set, void *oset) {
 }
 
 int kern_sigpending(uint32_t *set) {
-    if (set) *set = current_thread->sig_pending & ~current_thread->sig_mask;
+    /* POSIX: sigpending(2) reports the set of signals pending on the
+     * calling thread (or process), INCLUDING those currently blocked.
+     * It must NOT be filtered by the signal mask — the whole purpose of
+     * sigpending is to observe signals raised while blocked (OPTS
+     * sigpending/1-1..1-3, and sigaction/23-* which raise a signal
+     * inside its own handler, where it is masked, and expect
+     * sigpending() to report it). */
+    if (set) *set = current_thread->sig_pending;
     return 0;
 }
 
@@ -671,8 +678,27 @@ void psignal(process_t *p, int sig) {
      * pending bit when un-handled is correct too. */
     {
         sig_t h = p->sig_actions[sig - 1].sa_handler;
-        if (h == SIG_IGN || (h == SIG_DFL && (sigprop[sig] & PROP_IGNORE)))
-            return;
+        int ignored = (h == SIG_IGN ||
+                       (h == SIG_DFL && (sigprop[sig] & PROP_IGNORE)));
+        if (ignored) {
+            /* An ignored signal is normally discarded rather than left
+             * pending (see above: a pending-but-ignored signal aborts
+             * every interruptible sleep).  BUT POSIX requires a *blocked*
+             * signal to remain pending until it is unblocked — even when
+             * its disposition is ignore — so sigpending(2) can report it.
+             * OPTS sigpending/1-2,1-3 raise a blocked SIGCONT inside a
+             * handler and expect it pending.  So: discard only when some
+             * thread of the target can take the signal now (has it
+             * unblocked); if every thread blocks it, keep it pending. */
+            uint32_t m = sigmask(sig);
+            int deliverable_now = 0;
+            FOREACH_THREAD(t) {
+                if (t->proc != p) continue;
+                if (!(t->sig_mask & m)) { deliverable_now = 1; break; }
+            }
+            if (deliverable_now)
+                return;
+        }
     }
 
     /* Select best thread for delivery and set pending on all threads */
@@ -947,6 +973,33 @@ int signal_send_group(int pgrp, int sig) {
     return 0;
 }
 
+/*
+ * sys_sigqueue - Queue a signal with an accompanying data value (sigqueue(2)).
+ *
+ * Sends `sig` to process `pid`, recording the `sival` payload so that an
+ * SA_SIGINFO handler receives it as siginfo.si_value with si_code SI_QUEUE.
+ * Substrate's pending set is a bitmask (signals do not truly queue), so the
+ * payload is stored one-per-signal-number on the target process; the most
+ * recent queued value wins if the same signal is queued repeatedly before
+ * delivery.  sig == 0 performs only the permission/existence check.
+ */
+int sys_sigqueue(int pid, int sig, uintptr_t sival) {
+    if (sig < 0 || sig > NSIG) return -EINVAL;
+    /* POSIX sigqueue() addresses a single process by (positive) pid. */
+    if (pid <= 0) return -EINVAL;
+
+    process_t *target = proc_find(pid);
+    if (!target) return -ESRCH;
+    if (!signal_can_send(current_process, target)) return -EPERM;
+
+    if (sig != 0) {
+        target->sig_qval[sig - 1].sival_ptr = (void *)sival;
+        __sync_fetch_and_or(&target->sig_qpend, sigmask(sig));
+        psignal(target, sig);
+    }
+    return 0;
+}
+
 void signal_handle_pending(registers_t *regs) {
     if (!current_thread || !current_process) return;
 
@@ -1093,6 +1146,14 @@ void signal_handle_pending(registers_t *regs) {
     if (!(flags & SA_NODEFER)) {
         new_mask |= sigmask(sig);
     }
+    /* SIGKILL and SIGSTOP can never be blocked — not even transiently
+     * while a handler runs.  A caught signal's sa_mask may legitimately
+     * name them (OPTS sigaction/4-*: install a handler with SIGKILL /
+     * SIGSTOP in sa_mask, raise it, then raise SIGKILL/SIGSTOP from
+     * inside the handler and expect the process to be killed/stopped).
+     * Strip them from the during-handler mask so such a signal is still
+     * delivered. */
+    new_mask &= ~(sigmask(SIGKILL) | sigmask(SIGSTOP));
     current_thread->sig_mask = new_mask;
 
     // SA_RESETHAND: Reset to SIG_DFL

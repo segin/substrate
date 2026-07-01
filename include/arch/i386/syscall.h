@@ -249,6 +249,10 @@
 #define SYS_SCHED_GET_PRIORITY_MAX  420
 #define SYS_SCHED_GET_PRIORITY_MIN  421
 #define SYS_SCHED_RR_GET_INTERVAL   422
+/* sigqueue(2): send a signal together with a union sigval payload, delivered
+ * to an SA_SIGINFO handler as siginfo.si_value with si_code == SI_QUEUE.
+ * Next free number after the ksem 500-block. */
+#define SYS_SIGQUEUE        508
 
 void syscall_init(void);
 

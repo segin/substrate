@@ -256,9 +256,13 @@ int sigaltstack(const stack_t *ss, stack_t *oss) {
 }
 
 int sigqueue(pid_t pid, int sig, const union sigval value) {
-    /* No real-time-signal queue today; degrade to kill(). */
-    (void)value;
-    return kill(pid, sig);
+    /* Carry the union sigval payload to the kernel; it surfaces in an
+     * SA_SIGINFO handler as siginfo.si_value (si_code == SI_QUEUE). */
+    extern int64_t _syscall3(int, uintptr_t, uintptr_t, uintptr_t);
+    int64_t r = _syscall3(SYS_SIGQUEUE, (uintptr_t)pid, (uintptr_t)sig,
+                          (uintptr_t)value.sival_ptr);
+    if (r < 0) { errno = (int)-r; return -1; }
+    return 0;
 }
 
 /* XSI/System V signal-management family, layered over sigprocmask/sigaction. */

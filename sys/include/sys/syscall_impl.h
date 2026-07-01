@@ -187,6 +187,7 @@ extern int     sys_mq_getsetattr(int, const struct mq_attr *, struct mq_attr *);
 
 /* Signals */
 extern int sys_kill(int, int);
+extern int sys_sigqueue(int, int, uintptr_t);
 extern int sys_signal(int, void*);
 extern int sys_sigaction(int, const void*, void*);
 extern int sys_sigprocmask(int, const void*, void*);

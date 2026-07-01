@@ -84,6 +84,12 @@ typedef struct process {
     void *linux_sig_restorer[NSIG];
     uint32_t sig_catch;   // Bitmask: signals with custom handlers (not SIG_DFL/SIG_IGN)
     uint32_t sig_ignore;  // Bitmask: signals set to SIG_IGN
+    /* sigqueue(2) payloads.  Substrate's pending set is a bitmask (signals do
+     * not truly queue), so one union sigval slot per signal number carries the
+     * value of the most recent queued instance; sig_qpend marks which slots
+     * hold a value to deliver as siginfo.si_value with si_code == SI_QUEUE. */
+    uint32_t sig_qpend;
+    union sigval sig_qval[NSIG];
     
     // Process State
     uint8_t state; // process_state_t
