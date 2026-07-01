@@ -4222,7 +4222,7 @@ int sys_yield(void) {
 
 int sys_fsync(int fd) {
     (void)fd;
-    return 0; // Stub
+    return 0; // Stub (unwired; fsync validation lives in libc, see posix_extra.c)
 }
 
 /*

@@ -99,10 +99,17 @@ int fdatasync(int fd) {
 }
 
 int fsync(int fd) {
-    /* No kernel SYS_FSYNC.  Substrate's VFS writes are currently
-     * synchronous, so the call is a no-op (and returning 0 is the
-     * right answer when there's nothing buffered). */
-    (void)fd;
+    /* No kernel SYS_FSYNC — substrate's VFS writes are synchronous, so the
+     * flush itself is a no-op.  POSIX still requires EBADF for an invalid
+     * descriptor (fsync/5-1) and EINVAL for a descriptor that cannot be
+     * synced, e.g. a pipe (fsync/7-1); derive both from fstat. */
+    struct stat st;
+    if (fstat(fd, &st) != 0)
+        return -1;                 /* fstat set errno (EBADF) */
+    if (S_ISFIFO(st.st_mode) || S_ISSOCK(st.st_mode)) {
+        errno = EINVAL;
+        return -1;
+    }
     return 0;
 }
 
