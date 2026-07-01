@@ -429,9 +429,135 @@ struct freebsd_sigframe {
     struct freebsd_sigcontext sf_sc;
 };
 
+/*
+ * Modern FreeBSD i386 signal-delivery ABI.
+ *
+ * The traditional 3-argument sigframe above (sf_sig/sf_code/sf_scp) is the
+ * pre-FreeBSD-4 layout.  Every current FreeBSD/i386 binary -- and, crucially,
+ * libthr -- installs its handlers expecting the modern layout:
+ *
+ *     void handler(int signum, siginfo_t *info, ucontext_t *uc);
+ *
+ * libthr *always* installs its thr_sighandler wrapper with SA_SIGINFO, so it
+ * unconditionally dereferences the kernel-supplied `info` pointer (its
+ * handle_signal() reads info->si_code / info->si_addr when re-dispatching a
+ * non-SA_SIGINFO user handler such as SDL's SIGINT/SIGTERM catcher).  A NULL
+ * `info` faults at addr 0x18 (offsetof si_addr).  The kernel therefore has to
+ * build a real siginfo_t + ucontext_t on the user stack.
+ *
+ * Layouts below match FreeBSD 12+/13/14 i386:
+ *   sys/i386/include/ucontext.h   (mcontext_t, sizeof == 640)
+ *   sys/sys/_ucontext.h           (ucontext_t)
+ *   sys/sys/signal.h              (struct __siginfo, struct sigaction)
+ * All __register_t are 32-bit on i386.
+ */
+
+/* Real 128-bit FreeBSD sigset_t (the simplified freebsd_sigset_t above is a
+ * 32-bit stand-in used by the kinfo_proc layout only). */
+struct freebsd_sigset {
+    uint32_t __bits[4];
+};
+
+struct freebsd_mcontext {
+    int32_t mc_onstack;
+    int32_t mc_gs;
+    int32_t mc_fs;
+    int32_t mc_es;
+    int32_t mc_ds;
+    int32_t mc_edi;
+    int32_t mc_esi;
+    int32_t mc_ebp;
+    int32_t mc_isp;
+    int32_t mc_ebx;
+    int32_t mc_edx;
+    int32_t mc_ecx;
+    int32_t mc_eax;
+    int32_t mc_trapno;
+    int32_t mc_err;
+    int32_t mc_eip;
+    int32_t mc_cs;
+    int32_t mc_eflags;
+    int32_t mc_esp;
+    int32_t mc_ss;
+    int32_t mc_len;            /* sizeof(mcontext_t) == 640 */
+    int32_t mc_fpformat;
+    int32_t mc_ownedfp;
+    int32_t mc_flags;
+    int32_t mc_fpstate[128];   /* 512 bytes; 16-aligned in FreeBSD */
+    int32_t mc_fsbase;
+    int32_t mc_gsbase;
+    int32_t mc_xfpustate;
+    int32_t mc_xfpustate_len;
+    int32_t mc_spare2[4];
+};
+
+#define FREEBSD_MC_LEN            640      /* sizeof(struct freebsd_mcontext) */
+#define FREEBSD_MC_FPFMT_NODEV    0x10000  /* _MC_FPFMT_NODEV  */
+#define FREEBSD_MC_FPOWNED_NONE   0x20000  /* _MC_FPOWNED_NONE */
+
+struct freebsd_ucontext {
+    struct freebsd_sigset   uc_sigmask;   /* 16 bytes */
+    struct freebsd_mcontext uc_mcontext;  /* offset 16 */
+    uint32_t                uc_link;      /* struct __ucontext *   */
+    uint32_t                uc_stack_ss_sp;
+    uint32_t                uc_stack_ss_size;
+    int32_t                 uc_stack_ss_flags;
+    int32_t                 uc_flags;
+    int32_t                 __spare__[4];
+};
+
+struct freebsd_siginfo {
+    int32_t  si_signo;
+    int32_t  si_errno;
+    int32_t  si_code;
+    int32_t  si_pid;
+    uint32_t si_uid;
+    int32_t  si_status;
+    uint32_t si_addr;         /* offset 24 (0x18) */
+    uint32_t si_value;        /* union sigval */
+    int32_t  _reason[8];      /* union _reason (32 bytes) */
+};
+
+/* Frame the kernel builds on the user stack.  The handler is entered directly
+ * (eip = handler) with the stack laid out as a normal call:
+ *   [ sf_ra ][ signum ][ siginfo ][ ucontext ][ addr ][ ahu ] ...
+ * When the handler returns it pops sf_ra and lands in the FreeBSD sigreturn
+ * trampoline (0xFE000030), which loads EBX = [esp+8] = sf_ucontext (&sf_uc)
+ * and issues sigreturn. */
+struct freebsd_rt_sigframe {
+    uint32_t sf_ra;            /* return address -> sigreturn trampoline */
+    int32_t  sf_signum;        /* arg1 */
+    uint32_t sf_siginfo;       /* arg2: &sf_si (SA_SIGINFO) or integer code */
+    uint32_t sf_ucontext;      /* arg3: &sf_uc */
+    uint32_t sf_addr;          /* arg4: fault address (undocumented) */
+    uint32_t sf_ahu;           /* handler ptr (kept for layout parity) */
+    struct freebsd_ucontext sf_uc;
+    struct freebsd_siginfo  sf_si;
+};
+
+/* FreeBSD i386 struct sigaction { handler; int sa_flags; sigset_t sa_mask; }.
+ * Note the member order differs from substrate-native (handler; mask; flags),
+ * so the raw native sys_sigaction misreads flags/mask -- freebsd_sys_sigaction
+ * marshals the layout and translates the sa_flags/sa_mask bits. */
+struct freebsd_sigaction {
+    uint32_t sa_handler;       /* void (*)(int) or void (*)(int,siginfo_t*,void*) */
+    int32_t  sa_flags;
+    struct freebsd_sigset sa_mask;
+};
+
+/* FreeBSD sa_flags bits (sys/sys/signal.h) -- different values from native. */
+#define FBSD_SA_ONSTACK    0x0001
+#define FBSD_SA_RESTART    0x0002
+#define FBSD_SA_RESETHAND  0x0004
+#define FBSD_SA_NOCLDSTOP  0x0008
+#define FBSD_SA_NODEFER    0x0010
+#define FBSD_SA_NOCLDWAIT  0x0020
+#define FBSD_SA_SIGINFO    0x0040
+
 /* FreeBSD signal translation functions */
 void freebsd_sendsig(void *handler, int sig, uint32_t mask, uint32_t flags, void *regs);
 int  freebsd_sys_sigreturn(void *regs);
+int  freebsd_sys_sigaction(int sig, const void *act, void *oact);
 
 /* Additional FreeBSD syscall wrappers (freebsd_user.c). */
 int     freebsd_sys_zero(void);
