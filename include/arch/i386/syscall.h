@@ -225,6 +225,19 @@
 #define SYS_KSEM_TIMEDWAIT  505
 #define SYS_KSEM_POST       506
 #define SYS_KSEM_GETVALUE   507
+/* POSIX message queues (sys/kern/posix_mqueue.c).  Native mqd_t is a small
+ * integer descriptor from the kernel table; the librt wrappers marshal the
+ * POSIX <mqueue.h> ABI on top of these six primitives.  409-414 sit in the
+ * free block between SysV shm (405-408) and thr_* (431-). */
+#define SYS_MQ_OPEN         409
+#define SYS_MQ_UNLINK       410
+#define SYS_MQ_TIMEDSEND    411
+#define SYS_MQ_TIMEDRECEIVE 412
+#define SYS_MQ_NOTIFY       413
+#define SYS_MQ_GETSETATTR   414
+/* mqd_t is an opaque kernel descriptor drawn from a table, so it needs an
+ * explicit release primitive that the POSIX 6-syscall set omits. */
+#define SYS_MQ_CLOSE        415
 
 void syscall_init(void);
 

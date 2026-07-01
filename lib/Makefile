@@ -8,7 +8,7 @@ include ../Makefile.inc
 #
 # kvm and proc depend on libsys + libc; placed after both are
 # guaranteed to be linkable.
-SUBDIRS = m sys c pthread dl edit usb yacc at dbm kvm proc pwdb resolv
+SUBDIRS = m sys c pthread rt dl edit usb yacc at dbm kvm proc pwdb resolv
 
 .PHONY: all clean install $(SUBDIRS)
 
@@ -27,6 +27,9 @@ $(SUBDIRS):
 #   - Everything else (pthreads, dl, edit, ...) depends on libc.
 c: | m sys
 pthread dl edit usb yacc at dbm pwdb resolv: | c
+# librt's shared object DT_NEEDEDs libpthread.so.0 and libc.so.0 (the aio
+# worker pool), so both must be linkable before librt.so.0 links.
+rt: | c pthread
 # libkvm and libproc wrap libsys directly (and pull libc for stdlib).
 kvm proc: | c sys
 

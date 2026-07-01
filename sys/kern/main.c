@@ -584,6 +584,8 @@ static void init_core_subsystems(multiboot_info_t *mboot_info) {
     shm_init();         /* System V shared memory subsystem */
 
     ksem_init();        /* POSIX named / kernel semaphore subsystem */
+    extern void mq_init(void);
+    mq_init();          /* POSIX message queue subsystem */
 
     hw_text_late_init();
 

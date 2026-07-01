@@ -1,0 +1,155 @@
+.\"
+.\" MQ_OPEN(2) - Substrate Native Personality
+.\"
+.TH MQ_OPEN 2 "July 2026" "Substrate OS" "System Calls"
+.SH NAME
+mq_open, mq_close, mq_unlink, mq_timedsend, mq_timedreceive, mq_notify,
+mq_getsetattr \- POSIX message-queue system calls (native personality)
+.SH SYNOPSIS
+.nf
+.B #include <sys/syscall.h>
+.B #include <mqueue.h>
+.PP
+.BI "int     syscall(SYS_MQ_OPEN, const char *" name ", int " oflag ", mode_t " mode ", struct mq_attr *" attr );
+.BI "int     syscall(SYS_MQ_CLOSE, int " mqd );
+.BI "int     syscall(SYS_MQ_UNLINK, const char *" name );
+.BI "int     syscall(SYS_MQ_TIMEDSEND, int " mqd ", const char *" msg ", size_t " len ", unsigned " prio ", const struct timespec *" abstime );
+.BI "ssize_t syscall(SYS_MQ_TIMEDRECEIVE, int " mqd ", char *" msg ", size_t " len ", unsigned *" prio ", const struct timespec *" abstime );
+.BI "int     syscall(SYS_MQ_NOTIFY, int " mqd ", const struct sigevent *" sev );
+.BI "int     syscall(SYS_MQ_GETSETATTR, int " mqd ", const struct mq_attr *" newattr ", struct mq_attr *" oldattr );
+.fi
+.SH DESCRIPTION
+These are the native Substrate system calls that back the POSIX message-queue
+library functions in librt (see
+.BR mq_open (3)).
+POSIX message queues are named, cross-process kernel objects held in a fixed
+table (see
+.BR sys/kern/posix_mqueue.c ).
+Application code normally uses the librt wrappers rather than invoking these
+directly; the numbers are assigned in
+.BR <arch/i386/syscall.h> :
+.B SYS_MQ_OPEN
+(409),
+.B SYS_MQ_UNLINK
+(410),
+.B SYS_MQ_TIMEDSEND
+(411),
+.B SYS_MQ_TIMEDRECEIVE
+(412),
+.B SYS_MQ_NOTIFY
+(413),
+.B SYS_MQ_GETSETATTR
+(414), and
+.B SYS_MQ_CLOSE
+(415).
+.PP
+.B SYS_MQ_OPEN
+creates or opens the queue
+.I name
+(a leading-slash POSIX name) and returns an opaque message-queue descriptor
+.RB ( mqd_t )
+drawn from a per-open kernel table.  With
+.B O_CREAT
+the
+.I attr
+argument supplies
+.I mq_maxmsg
+and
+.IR mq_msgsize ;
+a NULL
+.I attr
+selects the kernel defaults.  The descriptor encodes a slot index and a
+sequence number so a stale (closed and reused) descriptor is rejected.
+.PP
+.B SYS_MQ_CLOSE
+releases the descriptor's reference; the queue is destroyed once its last
+descriptor closes and its name has been unlinked.
+.B SYS_MQ_UNLINK
+removes the name (and wakes any thread blocked on the queue, which then fails
+with
+.BR EIDRM ).
+.PP
+.B SYS_MQ_TIMEDSEND
+and
+.B SYS_MQ_TIMEDRECEIVE
+enqueue and dequeue a message.  Messages are ordered by decreasing priority,
+FIFO within a priority.  A blocking call honours
+.B O_NONBLOCK
+.RB ( EAGAIN )
+and, when
+.I abstime
+is non-NULL, an absolute
+.B CLOCK_REALTIME
+deadline
+.RB ( ETIMEDOUT );
+a NULL
+.I abstime
+blocks indefinitely.  Blocking uses an interruptible sleep queue
+.RB ( EINTR ).
+.PP
+.B SYS_MQ_NOTIFY
+registers or clears a single-shot notification (see
+.BR mq_notify (3)).
+.B SYS_MQ_GETSETATTR
+retrieves the queue attributes and, when
+.I newattr
+is non-NULL, updates the per-descriptor
+.B O_NONBLOCK
+flag; the previous attributes are stored in
+.I oldattr
+if non-NULL.
+.SH RETURN VALUE
+The kernel returns a non-negative value on success (a descriptor for
+.BR SYS_MQ_OPEN ,
+a byte count for
+.BR SYS_MQ_TIMEDRECEIVE ,
+0 otherwise) or a negative
+.I errno
+on failure.  The librt wrappers translate the negative value into the POSIX
+.B \-1
++
+.I errno
+convention.
+.SH ERRORS
+.TP
+.B EACCES
+The caller lacks permission for the queue.
+.TP
+.B EAGAIN
+A non-blocking send/receive could not proceed (queue full/empty).
+.TP
+.B EBADF
+The descriptor is invalid or not open in the required direction.
+.TP
+.B EEXIST
+.B O_CREAT | O_EXCL
+was given for a queue that already exists.
+.TP
+.B EIDRM
+The queue was unlinked while the call was blocked.
+.TP
+.B EINTR
+A signal interrupted a blocked call.
+.TP
+.B EINVAL
+A malformed name, invalid attributes, or an out-of-range priority.
+.TP
+.B EMSGSIZE
+The message length exceeds the queue's
+.IR mq_msgsize .
+.TP
+.B ENOENT
+The queue does not exist and
+.B O_CREAT
+was not given.
+.TP
+.B ETIMEDOUT
+An absolute timeout expired.
+.SH SEE ALSO
+.BR mq_open (3),
+.BR mq_send (3),
+.BR mq_receive (3),
+.BR mq_notify (3),
+.BR mq_getattr (3)
+.SH NOTES
+These entry points exist only in the native Substrate personality.

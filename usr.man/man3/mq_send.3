@@ -1,0 +1,105 @@
+.TH MQ_SEND 3 "July 2026" "Substrate" "Library Functions Manual"
+.SH NAME
+mq_send, mq_timedsend \- send a message to a POSIX message queue
+.SH LIBRARY
+Realtime library (librt, \-lrt)
+.SH SYNOPSIS
+.B #include <mqueue.h>
+.PP
+.BI "int mq_send(mqd_t " mqdes ", const char *" msg_ptr ", size_t " msg_len ", unsigned " msg_prio );
+.br
+.BI "int mq_timedsend(mqd_t " mqdes ", const char *" msg_ptr ", size_t " msg_len ,
+.br
+.BI "                 unsigned " msg_prio ", const struct timespec *" abs_timeout );
+.SH DESCRIPTION
+.BR mq_send ()
+adds the message pointed to by
+.I msg_ptr,
+of length
+.I msg_len
+bytes, to the message queue
+.IR mqdes .
+The
+.I msg_len
+must not exceed the queue's
+.I mq_msgsize
+attribute.
+.PP
+.I msg_prio
+is a non-negative priority less than
+.BR MQ_PRIO_MAX .
+Messages are queued in decreasing priority order; messages of equal priority
+are delivered in the order they were sent (FIFO within a priority).
+.PP
+If the queue is full and
+.B O_NONBLOCK
+is not set for the descriptor,
+.BR mq_send ()
+blocks until space becomes available or the call is interrupted by a signal.
+.BR mq_timedsend ()
+behaves identically except that if the queue is full it blocks only until the
+absolute time
+.RB * abs_timeout
+(a
+.B CLOCK_REALTIME
+.BR "struct timespec" ),
+after which it fails with
+.BR ETIMEDOUT .
+A NULL
+.I abs_timeout
+makes
+.BR mq_timedsend ()
+block indefinitely, exactly like
+.BR mq_send ().
+.SH RETURN VALUE
+On success, 0 is returned.  On error, \-1 is returned and
+.I errno
+is set.
+.SH ERRORS
+.TP
+.B EAGAIN
+The queue was full and
+.B O_NONBLOCK
+was set for the descriptor.
+.TP
+.B EBADF
+.I mqdes
+is not a valid descriptor open for writing.
+.TP
+.B EINTR
+The call was interrupted by a signal.
+.TP
+.B EINVAL
+.I msg_prio
+is not less than
+.BR MQ_PRIO_MAX ,
+or
+.RB ( mq_timedsend )
+.RB * abs_timeout
+is invalid.
+.TP
+.B EMSGSIZE
+.I msg_len
+is greater than the queue's
+.I mq_msgsize
+attribute.
+.TP
+.B ETIMEDOUT
+.RB ( mq_timedsend )
+The queue remained full until the timeout expired.
+.TP
+.B EIDRM
+The queue was removed with
+.BR mq_unlink (3)
+while the call was blocked.
+.SH EXAMPLE
+.nf
+const char *m = "hello";
+if (mq_send(q, m, 6, 3) == \-1)
+        perror("mq_send");
+.fi
+.SH SEE ALSO
+.BR mq_receive (3),
+.BR mq_open (3),
+.BR mq_getattr (3),
+.BR mq_open (2)

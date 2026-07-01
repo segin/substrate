@@ -1,0 +1,98 @@
+.TH AIO_WRITE 3 "July 2026" "Substrate" "Library Functions Manual"
+.SH NAME
+aio_write, aio_fsync \- asynchronous write and file synchronization
+.SH LIBRARY
+Realtime library (librt, \-lrt)
+.SH SYNOPSIS
+.B #include <aio.h>
+.PP
+.BI "int aio_write(struct aiocb *" aiocbp );
+.br
+.BI "int aio_fsync(int " op ", struct aiocb *" aiocbp );
+.SH DESCRIPTION
+.BR aio_write ()
+queues an asynchronous write request described by
+.RB * aiocbp
+and returns immediately.  It writes
+.I aio_nbytes
+bytes from the buffer
+.I aio_buf
+to the file descriptor
+.I aio_fildes
+starting at offset
+.IR aio_offset .
+See
+.BR aio_read (3)
+for the layout of
+.BR "struct aiocb" .
+.PP
+.BR aio_fsync ()
+queues an asynchronous
+.BR fsync (2)
+of
+.IR aio_fildes .
+.I op
+must be
+.B O_SYNC
+or
+.BR O_DSYNC .
+The remaining
+.B aiocb
+fields other than
+.I aio_fildes
+and
+.I aio_sigevent
+are ignored.
+.PP
+Both operations deliver completion notification as described by
+.IR aio_sigevent ,
+and their status is retrieved with
+.BR aio_error (3)
+and
+.BR aio_return (3).
+The underlying I/O runs on a librt worker-thread pool, so the calling thread
+is never blocked.
+.SH RETURN VALUE
+On success 0 is returned (the request was queued).  On error \-1 is returned
+and
+.I errno
+is set.
+.SH ERRORS
+.TP
+.B EAGAIN
+Insufficient resources to queue the request.
+.TP
+.B EINVAL
+.I aiocbp
+is NULL, or
+.RB ( aio_fsync )
+.I op
+is neither
+.B O_SYNC
+nor
+.BR O_DSYNC .
+.PP
+Errors from the underlying
+.BR pwrite (2)
+or
+.BR fsync (2)
+are reported asynchronously and retrieved with
+.BR aio_error (3).
+.SH EXAMPLE
+.nf
+struct aiocb cb = { 0 };
+cb.aio_fildes = fd;
+cb.aio_buf    = "data";
+cb.aio_nbytes = 4;
+cb.aio_sigevent.sigev_notify = SIGEV_NONE;
+aio_write(&cb);
+const struct aiocb *l[1] = { &cb };
+aio_suspend(l, 1, NULL);
+if (aio_error(&cb) == 0)
+        printf("wrote %zd bytes\\n", aio_return(&cb));
+.fi
+.SH SEE ALSO
+.BR aio_read (3),
+.BR aio_suspend (3),
+.BR aio_error (3),
+.BR aio_return (3)

@@ -1,0 +1,139 @@
+.TH AIO_SUSPEND 3 "July 2026" "Substrate" "Library Functions Manual"
+.SH NAME
+aio_suspend, aio_error, aio_return, aio_cancel, lio_listio \- await and
+inspect asynchronous I/O
+.SH LIBRARY
+Realtime library (librt, \-lrt)
+.SH SYNOPSIS
+.B #include <aio.h>
+.PP
+.BI "int aio_suspend(const struct aiocb *const " list "[], int " nent ", const struct timespec *" timeout );
+.br
+.BI "int aio_error(const struct aiocb *" aiocbp );
+.br
+.BI "ssize_t aio_return(struct aiocb *" aiocbp );
+.br
+.BI "int aio_cancel(int " fildes ", struct aiocb *" aiocbp );
+.br
+.BI "int lio_listio(int " mode ", struct aiocb *const " list "[], int " nent ", struct sigevent *" sig );
+.SH DESCRIPTION
+.BR aio_suspend ()
+blocks the calling thread until at least one of the
+.I nent
+requests in
+.I list
+completes, until a signal is delivered, or (if
+.I timeout
+is non-NULL) until the relative time interval
+.RB * timeout
+elapses.  NULL entries in
+.I list
+are ignored.
+.PP
+.BR aio_error ()
+returns the error status of the request
+.RB * aiocbp :
+.B EINPROGRESS
+if the request has not completed, 0 if it completed successfully,
+.B ECANCELED
+if it was cancelled, or the
+.I errno
+of the failed underlying operation.
+.PP
+.BR aio_return ()
+returns the final return value of a
+.I completed
+request \(em the byte count that the equivalent synchronous
+.BR pread (2)/ pwrite (2)
+would have returned, or \-1 on failure \(em and then releases the internal
+state associated with the request.  It must be called exactly once per
+completed request and only after
+.BR aio_error ()
+reports something other than
+.BR EINPROGRESS .
+.PP
+.BR aio_cancel ()
+attempts to cancel outstanding requests for
+.IR fildes .
+If
+.I aiocbp
+is non-NULL only that request is considered; otherwise all requests for the
+descriptor are.  Requests that have not yet started are cancelled; requests
+already running to completion cannot be interrupted.
+.PP
+.BR lio_listio ()
+submits the list of
+.I nent
+requests, each with
+.I aio_lio_opcode
+set to
+.BR LIO_READ ,
+.BR LIO_WRITE ,
+or
+.BR LIO_NOP .
+If
+.I mode
+is
+.BR LIO_WAIT ,
+the call blocks until all operations complete.  If
+.I mode
+is
+.BR LIO_NOWAIT ,
+the call returns immediately and, when every operation has completed, the
+notification in
+.RB * sig
+(if non-NULL) is delivered.
+.SH RETURN VALUE
+.BR aio_suspend ()
+returns 0 if a request completed, or \-1 with
+.I errno
+set to
+.B EAGAIN
+on timeout or
+.B EINTR
+on a signal.
+.BR aio_error ()
+returns an error number (or 0), or \-1 on a bad control block.
+.BR aio_return ()
+returns the request's return value, or \-1.
+.BR aio_cancel ()
+returns
+.BR AIO_CANCELED ,
+.BR AIO_NOTCANCELED ,
+or
+.BR AIO_ALLDONE .
+.BR lio_listio ()
+returns 0 on success or \-1 on error.
+.SH ERRORS
+.TP
+.B EAGAIN
+.RB ( aio_suspend )
+The timeout elapsed before any request completed.
+.TP
+.B EINTR
+.RB ( aio_suspend )
+A signal interrupted the wait.
+.TP
+.B EINVAL
+A control block pointer is invalid, or
+.RB ( lio_listio )
+.I mode
+is neither
+.B LIO_WAIT
+nor
+.BR LIO_NOWAIT .
+.TP
+.B EINPROGRESS
+.RB ( aio_return )
+The request has not yet completed.
+.SH EXAMPLE
+.nf
+struct aiocb a, b;
+/* ... fill in a and b with LIO_WRITE opcodes ... */
+struct aiocb *l[2] = { &a, &b };
+lio_listio(LIO_WAIT, l, 2, NULL);   /* submit both, wait for completion */
+printf("a=%zd b=%zd\\n", aio_return(&a), aio_return(&b));
+.fi
+.SH SEE ALSO
+.BR aio_read (3),
+.BR aio_write (3)

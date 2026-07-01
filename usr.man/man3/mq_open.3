@@ -1,0 +1,143 @@
+.TH MQ_OPEN 3 "July 2026" "Substrate" "Library Functions Manual"
+.SH NAME
+mq_open, mq_close, mq_unlink \- open, close, and remove a POSIX message queue
+.SH LIBRARY
+Realtime library (librt, \-lrt)
+.SH SYNOPSIS
+.B #include <mqueue.h>
+.PP
+.BI "mqd_t mq_open(const char *" name ", int " oflag );
+.br
+.BI "mqd_t mq_open(const char *" name ", int " oflag ", mode_t " mode ", struct mq_attr *" attr );
+.br
+.BI "int mq_close(mqd_t " mqdes );
+.br
+.BI "int mq_unlink(const char *" name );
+.SH DESCRIPTION
+.BR mq_open ()
+creates a new POSIX message queue or opens an existing one.  The queue is
+identified by
+.IR name ,
+a string that must begin with a slash
+.RB ( / )
+and contain no other slash (for example
+.BR /myqueue ).
+The
+.I oflag
+argument is a bitwise-or of an access mode
+.RB ( O_RDONLY ,
+.BR O_WRONLY ,
+or
+.BR O_RDWR )
+and any of the flags
+.BR O_CREAT ,
+.BR O_EXCL ,
+and
+.BR O_NONBLOCK .
+.PP
+When
+.B O_CREAT
+is set, two further arguments are supplied: a
+.I mode
+(the permission bits, modified by the process umask) and a pointer to a
+.B struct mq_attr
+that specifies
+.I mq_maxmsg
+(maximum number of messages) and
+.I mq_msgsize
+(maximum message size in bytes).  A NULL
+.I attr
+selects the implementation defaults.  The other
+.B mq_attr
+fields are ignored on creation.
+.PP
+.BR mq_open ()
+returns a message-queue descriptor
+.RB ( mqd_t )
+that refers to the open queue.  The descriptor is used by all the other
+.B mq_*
+functions.  Substrate implements the queue in the kernel; the descriptor is
+an opaque small integer drawn from a per-open table.
+.PP
+.BR mq_close ()
+closes the descriptor
+.IR mqdes ,
+releasing the reference the calling process holds on the queue.  Any
+notification request the process registered with
+.BR mq_notify (3)
+on this descriptor is removed.
+.PP
+.BR mq_unlink ()
+removes the queue
+.IR name .
+The name is removed immediately, but the queue itself is destroyed only once
+every descriptor referring to it has been closed.
+.SH RETURN VALUE
+On success,
+.BR mq_open ()
+returns a message-queue descriptor (a non-negative
+.BR mqd_t ).
+.BR mq_close ()
+and
+.BR mq_unlink ()
+return 0.  On error all three return
+.RB ( mqd_t )
+.B \-1
+and set
+.IR errno .
+.SH ERRORS
+.TP
+.B EACCES
+The queue exists but the caller lacks the requested permission, or
+.I name
+contains more than one slash.
+.TP
+.B EEXIST
+Both
+.B O_CREAT
+and
+.B O_EXCL
+were set but the queue already exists.
+.TP
+.B EINVAL
+.I name
+is malformed, or
+.B O_CREAT
+was set with an invalid
+.I attr
+.RB ( mq_maxmsg
+or
+.I mq_msgsize
+out of range).
+.TP
+.B EMFILE
+The system-wide table of open message-queue descriptors is full.
+.TP
+.B ENOENT
+.B O_CREAT
+was not set and the named queue does not exist, or
+.BR mq_unlink ()
+was called on a name that does not exist.
+.TP
+.B ENOSPC
+No space is left in the system-wide message-queue table.
+.TP
+.B EBADF
+.RB ( mq_close )
+.I mqdes
+is not a valid open message-queue descriptor.
+.SH EXAMPLE
+.nf
+struct mq_attr attr = { 0, 8, 64, 0 };   /* 8 msgs, 64 bytes each */
+mqd_t q = mq_open("/myqueue", O_CREAT | O_RDWR, 0644, &attr);
+if (q == (mqd_t)\-1) { perror("mq_open"); return 1; }
+/* ... mq_send() / mq_receive() ... */
+mq_close(q);
+mq_unlink("/myqueue");
+.fi
+.SH SEE ALSO
+.BR mq_send (3),
+.BR mq_receive (3),
+.BR mq_notify (3),
+.BR mq_getattr (3),
+.BR mq_open (2)

@@ -1,0 +1,91 @@
+.TH AIO_READ 3 "July 2026" "Substrate" "Library Functions Manual"
+.SH NAME
+aio_read \- asynchronous read
+.SH LIBRARY
+Realtime library (librt, \-lrt)
+.SH SYNOPSIS
+.B #include <aio.h>
+.PP
+.BI "int aio_read(struct aiocb *" aiocbp );
+.SH DESCRIPTION
+.BR aio_read ()
+queues an asynchronous read request described by
+.RB * aiocbp
+and returns immediately.  The operation reads
+.I aio_nbytes
+bytes from the file descriptor
+.I aio_fildes
+starting at offset
+.I aio_offset
+into the buffer
+.IR aio_buf .
+.PP
+The control block is:
+.PP
+.nf
+struct aiocb {
+    int             aio_fildes;    /* file descriptor */
+    off_t           aio_offset;    /* file offset */
+    volatile void  *aio_buf;       /* buffer */
+    size_t          aio_nbytes;    /* transfer length */
+    int             aio_reqprio;   /* request priority (advisory) */
+    struct sigevent aio_sigevent;  /* completion notification */
+    int             aio_lio_opcode;/* used by lio_listio() */
+};
+.fi
+.PP
+When the operation completes, notification is delivered as described by
+.IR aio_sigevent :
+.B SIGEV_NONE
+(none),
+.B SIGEV_SIGNAL
+(a signal), or
+.B SIGEV_THREAD
+(a function call in a new thread).  Progress and results are retrieved with
+.BR aio_error (3)
+and
+.BR aio_return (3);
+completion may be awaited with
+.BR aio_suspend (3).
+.PP
+On Substrate, asynchronous I/O is implemented by a userspace worker-thread
+pool (in librt) that performs the underlying
+.BR pread (2);
+the calling thread is never blocked by
+.BR aio_read ().
+.SH RETURN VALUE
+On success 0 is returned (the request was queued).  On error \-1 is returned
+and
+.I errno
+is set.
+.SH ERRORS
+.TP
+.B EAGAIN
+Insufficient resources to queue the request.
+.TP
+.B EINVAL
+.I aiocbp
+is NULL.
+.PP
+Errors from the underlying
+.BR pread (2)
+are reported asynchronously and retrieved with
+.BR aio_error (3).
+.SH EXAMPLE
+.nf
+char buf[512];
+struct aiocb cb = { 0 };
+cb.aio_fildes = fd;
+cb.aio_buf    = buf;
+cb.aio_nbytes = sizeof(buf);
+cb.aio_sigevent.sigev_notify = SIGEV_NONE;
+aio_read(&cb);
+const struct aiocb *l[1] = { &cb };
+aio_suspend(l, 1, NULL);
+ssize_t n = aio_return(&cb);
+.fi
+.SH SEE ALSO
+.BR aio_write (3),
+.BR aio_suspend (3),
+.BR aio_error (3),
+.BR aio_return (3)

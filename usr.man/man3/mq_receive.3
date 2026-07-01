@@ -1,0 +1,95 @@
+.TH MQ_RECEIVE 3 "July 2026" "Substrate" "Library Functions Manual"
+.SH NAME
+mq_receive, mq_timedreceive \- receive a message from a POSIX message queue
+.SH LIBRARY
+Realtime library (librt, \-lrt)
+.SH SYNOPSIS
+.B #include <mqueue.h>
+.PP
+.BI "ssize_t mq_receive(mqd_t " mqdes ", char *" msg_ptr ", size_t " msg_len ", unsigned *" msg_prio );
+.br
+.BI "ssize_t mq_timedreceive(mqd_t " mqdes ", char *" msg_ptr ", size_t " msg_len ,
+.br
+.BI "                        unsigned *" msg_prio ", const struct timespec *" abs_timeout );
+.SH DESCRIPTION
+.BR mq_receive ()
+removes the oldest message of the highest priority from the queue
+.I mqdes
+and copies it into the buffer
+.IR msg_ptr .
+The buffer length
+.I msg_len
+must be at least as large as the queue's
+.I mq_msgsize
+attribute (see
+.BR mq_getattr (3)).
+If
+.I msg_prio
+is not NULL, the priority of the received message is stored at
+.RB * msg_prio .
+.PP
+If the queue is empty and
+.B O_NONBLOCK
+is not set for the descriptor,
+.BR mq_receive ()
+blocks until a message arrives or the call is interrupted by a signal.
+.BR mq_timedreceive ()
+behaves identically except that it blocks only until the absolute time
+.RB * abs_timeout
+(a
+.B CLOCK_REALTIME
+.BR "struct timespec" ),
+after which it fails with
+.BR ETIMEDOUT .
+A NULL
+.I abs_timeout
+makes
+.BR mq_timedreceive ()
+block indefinitely, exactly like
+.BR mq_receive ().
+.SH RETURN VALUE
+On success the number of bytes in the received message is returned.  On error
+\-1 is returned and
+.I errno
+is set.
+.SH ERRORS
+.TP
+.B EAGAIN
+The queue was empty and
+.B O_NONBLOCK
+was set for the descriptor.
+.TP
+.B EBADF
+.I mqdes
+is not a valid descriptor open for reading.
+.TP
+.B EINTR
+The call was interrupted by a signal.
+.TP
+.B EMSGSIZE
+.I msg_len
+is less than the queue's
+.I mq_msgsize
+attribute.
+.TP
+.B ETIMEDOUT
+.RB ( mq_timedreceive )
+The queue remained empty until the timeout expired.
+.TP
+.B EIDRM
+The queue was removed with
+.BR mq_unlink (3)
+while the call was blocked.
+.SH EXAMPLE
+.nf
+char buf[64];
+unsigned prio;
+ssize_t n = mq_receive(q, buf, sizeof(buf), &prio);
+if (n == \-1) perror("mq_receive");
+else printf("got %zd bytes at priority %u\\n", n, prio);
+.fi
+.SH SEE ALSO
+.BR mq_send (3),
+.BR mq_open (3),
+.BR mq_getattr (3),
+.BR mq_open (2)

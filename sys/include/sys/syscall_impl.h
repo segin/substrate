@@ -171,6 +171,19 @@ extern int sys_ksem_trywait(int);
 extern int sys_ksem_timedwait(int, const struct timespec *);
 extern int sys_ksem_post(int);
 extern int sys_ksem_getvalue(int, int *);
+/* POSIX message queues (sys/kern/posix_mqueue.c) */
+struct mq_attr;
+struct sigevent;
+struct timespec;
+extern int     sys_mq_open(const char *, int, mode_t, const struct mq_attr *);
+extern int     sys_mq_close(int);
+extern int     sys_mq_unlink(const char *);
+extern int     sys_mq_timedsend(int, const char *, size_t, unsigned,
+                                const struct timespec *);
+extern ssize_t sys_mq_timedreceive(int, char *, size_t, unsigned *,
+                                   const struct timespec *);
+extern int     sys_mq_notify(int, const struct sigevent *);
+extern int     sys_mq_getsetattr(int, const struct mq_attr *, struct mq_attr *);
 
 /* Signals */
 extern int sys_kill(int, int);

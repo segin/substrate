@@ -158,6 +158,31 @@ typedef struct stack {
 
 int sys_sigaltstack(const void *ss, void *oss);
 
+/*
+ * POSIX asynchronous-event notification (struct sigevent) — the kernel only
+ * consumes this for mq_notify(2), so it needs the SIGEV_SIGNAL fields.  Layout
+ * MUST match the userland <signal.h> copy: it crosses the syscall boundary.
+ */
+#ifndef __sigval_t_defined
+#define __sigval_t_defined 1
+union sigval {
+    int   sival_int;
+    void *sival_ptr;
+};
+#endif
+
+#define SIGEV_SIGNAL  0    /* notify via signal */
+#define SIGEV_NONE    1    /* no notification */
+#define SIGEV_THREAD  2    /* notify by spawning a thread (userspace only) */
+
+struct sigevent {
+    int            sigev_notify;               /* SIGEV_* */
+    int            sigev_signo;                /* signal number (SIGEV_SIGNAL) */
+    union sigval   sigev_value;                /* value passed to handler/thread */
+    void         (*sigev_notify_function)(union sigval); /* SIGEV_THREAD */
+    void          *sigev_notify_attributes;    /* pthread_attr_t * (SIGEV_THREAD) */
+};
+
 void psignal(struct process *p, int sig);
 void signal_wake_thread(struct thread *t, int sig);
 void pgsignal(int pgrp, int sig);

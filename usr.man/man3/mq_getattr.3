@@ -1,0 +1,62 @@
+.TH MQ_GETATTR 3 "July 2026" "Substrate" "Library Functions Manual"
+.SH NAME
+mq_getattr, mq_setattr \- get and set POSIX message-queue attributes
+.SH LIBRARY
+Realtime library (librt, \-lrt)
+.SH SYNOPSIS
+.B #include <mqueue.h>
+.PP
+.BI "int mq_getattr(mqd_t " mqdes ", struct mq_attr *" attr );
+.br
+.BI "int mq_setattr(mqd_t " mqdes ", const struct mq_attr *" newattr ", struct mq_attr *" oldattr );
+.SH DESCRIPTION
+.BR mq_getattr ()
+stores the attributes of the queue
+.I mqdes
+in
+.RB * attr :
+.PP
+.nf
+struct mq_attr {
+    long mq_flags;    /* 0 or O_NONBLOCK (per descriptor) */
+    long mq_maxmsg;   /* max messages on the queue */
+    long mq_msgsize;  /* max message size (bytes) */
+    long mq_curmsgs;  /* messages currently queued */
+};
+.fi
+.PP
+.BR mq_setattr ()
+sets the queue-description flags from
+.IR newattr\->mq_flags .
+Only the
+.B O_NONBLOCK
+bit can be changed; the
+.IR mq_maxmsg ,
+.IR mq_msgsize ,
+and
+.I mq_curmsgs
+fields of
+.I newattr
+are ignored (they are fixed when the queue is created).  If
+.I oldattr
+is not NULL, the attributes in effect before the change are stored there.
+.SH RETURN VALUE
+On success 0 is returned.  On error \-1 is returned and
+.I errno
+is set.
+.SH ERRORS
+.TP
+.B EBADF
+.I mqdes
+is not a valid message-queue descriptor.
+.SH EXAMPLE
+.nf
+struct mq_attr a;
+mq_getattr(q, &a);
+a.mq_flags |= O_NONBLOCK;      /* switch to non-blocking */
+mq_setattr(q, &a, NULL);
+.fi
+.SH SEE ALSO
+.BR mq_open (3),
+.BR mq_send (3),
+.BR mq_receive (3)

@@ -1,0 +1,88 @@
+.TH MQ_NOTIFY 3 "July 2026" "Substrate" "Library Functions Manual"
+.SH NAME
+mq_notify \- register for notification when a message arrives on an empty queue
+.SH LIBRARY
+Realtime library (librt, \-lrt)
+.SH SYNOPSIS
+.B #include <mqueue.h>
+.PP
+.BI "int mq_notify(mqd_t " mqdes ", const struct sigevent *" sevp );
+.SH DESCRIPTION
+.BR mq_notify ()
+arranges for the calling process to be notified when a message is delivered
+to the empty queue
+.IR mqdes .
+Only one process may be registered for notification on a queue at a time.
+.PP
+The notification is described by
+.RB * sevp ,
+a
+.B struct sigevent
+whose
+.I sigev_notify
+member is one of:
+.TP
+.B SIGEV_SIGNAL
+Deliver the signal
+.I sigev_signo
+to the process when a message arrives on the previously empty queue.
+.TP
+.B SIGEV_THREAD
+Invoke
+.I sigev_notify_function
+in a new thread.  (Realized in librt by an internal helper.)
+.TP
+.B SIGEV_NONE
+Register the process without delivering any notification.
+.PP
+Notification occurs only when the queue transitions from empty to non-empty
+.I and
+no other process is blocked in
+.BR mq_receive (3)
+on the queue at that moment: a waiting receiver takes the message instead.
+The registration is one-shot \(em it is removed as soon as notification is
+delivered, when the registered process closes the descriptor, or when the
+queue is unlinked.  A subsequent
+.BR mq_notify ()
+must be issued to re-register.
+.PP
+If
+.I sevp
+is NULL and the calling process is currently registered, its registration is
+removed.
+.SH RETURN VALUE
+On success 0 is returned.  On error \-1 is returned and
+.I errno
+is set.
+.SH ERRORS
+.TP
+.B EBADF
+.I mqdes
+is not a valid message-queue descriptor.
+.TP
+.B EBUSY
+Another process is already registered for notification on the queue.
+.TP
+.B EINVAL
+.I sigev_notify
+is
+.B SIGEV_SIGNAL
+with an invalid
+.IR sigev_signo .
+.SH EXAMPLE
+.nf
+static volatile sig_atomic_t got;
+static void handler(int s) { (void)s; got = 1; }
+
+signal(SIGUSR1, handler);
+struct sigevent sev = { 0 };
+sev.sigev_notify = SIGEV_SIGNAL;
+sev.sigev_signo  = SIGUSR1;
+mq_notify(q, &sev);
+/* got becomes 1 once a message arrives on the empty queue */
+.fi
+.SH SEE ALSO
+.BR mq_open (3),
+.BR mq_send (3),
+.BR mq_receive (3),
+.BR sigevent (3)

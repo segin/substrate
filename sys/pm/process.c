@@ -1160,6 +1160,12 @@ void proc_exit(int code) {
      * process still holds open (frees the ksem object if this was its last
      * descriptor and it was unlinked or anonymous). */
     ksem_proc_cleanup(current_process->pid);
+    /* Close any POSIX message-queue descriptors this process still holds and
+     * drop any mq_notify registration it owned. */
+    {
+        extern void mq_proc_cleanup(int pid);
+        mq_proc_cleanup(current_process->pid);
+    }
 
     /* Release any VT we put into KD_GRAPHICS (X server crash, etc.)
      * before tearing down fds.  Without this, a SEGV'd X server leaves

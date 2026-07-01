@@ -163,6 +163,26 @@ union sigval {
 };
 #endif
 
+/*
+ * POSIX asynchronous-event notification.  Used by POSIX message queues
+ * (mq_notify) and POSIX AIO (aio_sigevent).  Layout MUST match the kernel
+ * <sys/signal.h> copy — mq_notify() crosses the syscall boundary with it.
+ */
+#ifndef __sigevent_defined
+#define __sigevent_defined 1
+#define SIGEV_SIGNAL  0    /* notify via signal */
+#define SIGEV_NONE    1    /* no notification */
+#define SIGEV_THREAD  2    /* notify by spawning a thread */
+
+struct sigevent {
+    int            sigev_notify;               /* SIGEV_* */
+    int            sigev_signo;                /* signal number (SIGEV_SIGNAL) */
+    union sigval   sigev_value;                /* data passed with notification */
+    void         (*sigev_notify_function)(union sigval); /* SIGEV_THREAD entry */
+    void          *sigev_notify_attributes;    /* pthread_attr_t * (SIGEV_THREAD) */
+};
+#endif
+
 struct timespec;     /* forward — full def in <time.h> */
 int killpg(pid_t pgrp, int sig);
 void psignal(int signum, const char *s);
