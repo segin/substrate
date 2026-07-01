@@ -406,6 +406,11 @@ process_t *proc_create(int perso_id) {
     proc->suid = current_process ? current_process->suid : 0;
     proc->sgid = current_process ? current_process->sgid : 0;
     proc->umask = current_process ? current_process->umask : 022;
+    /* POSIX: a child created by fork() inherits the parent's scheduling
+     * policy and priority (sched_setscheduler(2)).  First process gets
+     * the SCHED_OTHER/0 default. */
+    proc->sched_policy      = current_process ? current_process->sched_policy : 0;
+    proc->sched_rt_priority = current_process ? current_process->sched_rt_priority : 0;
     proc_resource_limits_init(proc);
 
     extern void rusage_init(process_t *p);

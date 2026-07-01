@@ -231,6 +231,15 @@ extern int sys_thr_suspend(const struct timespec *);
 extern int sys_thr_wake(long);
 extern int sys_thr_set_name(long, const char *);
 extern int sys_yield(void);
+/* POSIX process scheduling (sys/kern/sched_posix.c). */
+struct sched_param;
+extern int sys_sched_setparam(pid_t, const struct sched_param *);
+extern int sys_sched_getparam(pid_t, struct sched_param *);
+extern int sys_sched_setscheduler(pid_t, int, const struct sched_param *);
+extern int sys_sched_getscheduler(pid_t);
+extern int sys_sched_get_priority_max(int);
+extern int sys_sched_get_priority_min(int);
+extern int sys_sched_rr_get_interval(pid_t, struct timespec *);
 struct pmap_stats;
 extern int sys_pmap_stats(struct pmap_stats*);
 extern int sys_proc_info(pid_t, sys_procinfo_t*);

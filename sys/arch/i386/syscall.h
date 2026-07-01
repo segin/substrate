@@ -213,6 +213,18 @@
 #define SYS_SHMDT       407
 #define SYS_SHMCTL      408
 
+/* POSIX process scheduling (sys/kern/sched_posix.c).  Kept in sync with
+ * include/arch/i386/syscall.h — the build actually resolves
+ * <arch/i386/syscall.h> to that userland copy, but mirror the numbers
+ * here so this header stays a faithful reference. */
+#define SYS_SCHED_SETPARAM          416
+#define SYS_SCHED_GETPARAM          417
+#define SYS_SCHED_SETSCHEDULER      418
+#define SYS_SCHED_GETSCHEDULER      419
+#define SYS_SCHED_GET_PRIORITY_MAX  420
+#define SYS_SCHED_GET_PRIORITY_MIN  421
+#define SYS_SCHED_RR_GET_INTERVAL   422
+
 void syscall_init(void);
 
 // GDT TLS entries

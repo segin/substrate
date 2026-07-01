@@ -239,6 +239,17 @@
  * explicit release primitive that the POSIX 6-syscall set omits. */
 #define SYS_MQ_CLOSE        415
 
+/* POSIX process scheduling (sys/kern/sched_posix.c).  sched_yield already
+ * lives at 298; these cover the rest of the sched_* surface.  416-422 sit
+ * in the free block between SYS_MQ_CLOSE (415) and thr_* (431-). */
+#define SYS_SCHED_SETPARAM          416
+#define SYS_SCHED_GETPARAM          417
+#define SYS_SCHED_SETSCHEDULER      418
+#define SYS_SCHED_GETSCHEDULER      419
+#define SYS_SCHED_GET_PRIORITY_MAX  420
+#define SYS_SCHED_GET_PRIORITY_MIN  421
+#define SYS_SCHED_RR_GET_INTERVAL   422
+
 void syscall_init(void);
 
 // GDT TLS entries

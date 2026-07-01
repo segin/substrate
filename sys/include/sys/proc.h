@@ -184,6 +184,16 @@ typedef struct process {
     uintptr_t   ustack_top;    // highest stack address (exclusive)
     uintptr_t   ustack_limit;  // lowest address the stack may grow to
 
+    /* POSIX scheduling policy + priority (sched_setscheduler(2) /
+     * sched_setparam(2)).  Stored and reported for conformance; the
+     * substrate MLFQ/SMP scheduler is not perturbed by these values.
+     * Zero-initialized process => SCHED_OTHER (0), priority 0, which is
+     * the correct POSIX default.  Inherited by fork() in proc_create().
+     * Kept at the END of the struct so the offset of no asm-referenced
+     * field shifts (see the same note on the fields above). */
+    int         sched_policy;       // POSIX_SCHED_* (see <sys/sched.h>)
+    int         sched_rt_priority;  // sched_param.sched_priority
+
     // Resource limits, FDs, etc. would go here
 } process_t;
 

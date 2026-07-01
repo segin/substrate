@@ -1556,19 +1556,29 @@ int sched_yield(void) {
     return 0;
 }
 
-/* The full sched_* surface beyond yield isn't kernel-backed yet —
- * stub the rest as ENOSYS so callers link cleanly. */
-int sched_getscheduler(pid_t pid) { (void)pid; errno = ENOSYS; return -1; }
-int sched_setscheduler(pid_t pid, int policy, const struct sched_param *p)
-{ (void)pid; (void)policy; (void)p; errno = ENOSYS; return -1; }
-int sched_getparam(pid_t pid, struct sched_param *p)
-{ (void)pid; (void)p; errno = ENOSYS; return -1; }
-int sched_setparam(pid_t pid, const struct sched_param *p)
-{ (void)pid; (void)p; errno = ENOSYS; return -1; }
-int sched_get_priority_min(int policy) { (void)policy; return 0; }
-int sched_get_priority_max(int policy) { (void)policy; return policy == SCHED_FIFO || policy == SCHED_RR ? 99 : 0; }
+/* The sched_* surface is kernel-backed (sys/kern/sched_posix.c): the
+ * kernel validates policy/priority/pid and returns a negative errno on
+ * failure, so these are thin wrappers over the raw syscalls. */
+int sched_getscheduler(pid_t pid) {
+    return __set_errno((int)_syscall1(SYS_SCHED_GETSCHEDULER, pid));
+}
+int sched_setscheduler(pid_t pid, int policy, const struct sched_param *p) {
+    return __set_errno((int)_syscall3(SYS_SCHED_SETSCHEDULER, pid, policy,
+                                      (uintptr_t)p));
+}
+int sched_getparam(pid_t pid, struct sched_param *p) {
+    return __set_errno((int)_syscall2(SYS_SCHED_GETPARAM, pid, (uintptr_t)p));
+}
+int sched_setparam(pid_t pid, const struct sched_param *p) {
+    return __set_errno((int)_syscall2(SYS_SCHED_SETPARAM, pid, (uintptr_t)p));
+}
+int sched_get_priority_min(int policy) {
+    return __set_errno((int)_syscall1(SYS_SCHED_GET_PRIORITY_MIN, policy));
+}
+int sched_get_priority_max(int policy) {
+    return __set_errno((int)_syscall1(SYS_SCHED_GET_PRIORITY_MAX, policy));
+}
 int sched_rr_get_interval(pid_t pid, struct timespec *t) {
-    (void)pid;
-    if (t) { t->tv_sec = 0; t->tv_nsec = 10000000; /* 10 ms */ }
-    return 0;
+    return __set_errno((int)_syscall2(SYS_SCHED_RR_GET_INTERVAL, pid,
+                                      (uintptr_t)t));
 }
