@@ -295,7 +295,15 @@ void sendsig(sig_t handler, int sig, uint32_t mask, uint32_t flags, registers_t 
      * The stack pointer comes from the interrupted user context.
      * We need to check for alternate signal stack usage.
      */
-    if ((flags & SA_ONSTACK) && 
+    /* SA_ONSTACK uses the alternate signal stack ONLY if one is actually
+     * established.  A thread that never called sigaltstack() has a zeroed
+     * sig_alt_stack (ss_sp==NULL, ss_size==0, ss_flags==0 -- so SS_DISABLE is
+     * NOT set), and POSIX requires the signal be delivered on the interrupted
+     * stack in that case.  Checking SS_DISABLE alone would build the frame at
+     * NULL and SIGSEGV (OPTS sigaction/12-27..52). */
+    if ((flags & SA_ONSTACK) &&
+        current_thread->sig_alt_stack.ss_sp != NULL &&
+        current_thread->sig_alt_stack.ss_size > 0 &&
         (current_thread->sig_alt_stack.ss_flags & SS_DISABLE) == 0 &&
         !current_thread->sig_on_stack) {
         /*
