@@ -34,15 +34,20 @@
  * pthread_mutexattr_t is a bare int and must stay 4 bytes so the ABI is
  * unchanged for already-compiled consumers.  Its fields are bit-packed:
  *   [0:1] type        (PTHREAD_MUTEX_NORMAL/ERRORCHECK/RECURSIVE)
+ *   [2]   pshared     (PTHREAD_PROCESS_PRIVATE/SHARED)
  *   [3:4] protocol    (PTHREAD_PRIO_NONE/INHERIT/PROTECT)
  *   [8:15] prioceiling
- * (pshared is not stored — see pthread_mutexattr_setpshared below.)
  */
-#define MA_TYPE_MASK   0x0003
-#define MA_PROTO_MASK  0x0018
-#define MA_PROTO_SHIFT 3
-#define MA_CEIL_MASK   0xff00
-#define MA_CEIL_SHIFT  8
+#define MA_TYPE_MASK    0x0003
+#define MA_PSHARED_MASK 0x0004
+#define MA_PROTO_MASK   0x0018
+#define MA_PROTO_SHIFT  3
+#define MA_CEIL_MASK    0xff00
+#define MA_CEIL_SHIFT   8
+/* Default priority ceiling: the top of substrate's SCHED_FIFO range (1..99),
+ * so a freshly-initialised attr reports a ceiling within the legal priority
+ * bounds (POSIX requires it to be in range for SCHED_FIFO). */
+#define MA_CEIL_DEFAULT 99
 
 #define M_UNLOCKED  0
 #define M_LOCKED    1
@@ -271,7 +276,8 @@ int pthread_mutex_timedlock(pthread_mutex_t *m, const struct timespec *abstime) 
  */
 int pthread_mutexattr_init(pthread_mutexattr_t *attr) {
     if (!attr) return EINVAL;
-    *attr = PTHREAD_MUTEX_DEFAULT;
+    /* Default type, private, PRIO_NONE, and an in-range default ceiling. */
+    *attr = PTHREAD_MUTEX_DEFAULT | (MA_CEIL_DEFAULT << MA_CEIL_SHIFT);
     return 0;
 }
 
@@ -290,19 +296,21 @@ int pthread_mutexattr_settype(pthread_mutexattr_t *attr, int type) {
     return 0;
 }
 
-/* Process-shared attribute.  The attr int holds the mutex type, so pshared
- * is not stored; setpshared just validates the flag and succeeds (substrate
- * mutexes are best-effort across processes — see <pthread.h>). */
+/* Process-shared attribute.  Stored in bit 2 and reported faithfully (POSIX
+ * round-trip); substrate mutexes are best-effort across processes — the flag
+ * does not make a mutex a guaranteed inter-process lock (see <pthread.h>). */
 int pthread_mutexattr_setpshared(pthread_mutexattr_t *attr, int pshared) {
     if (!attr) return EINVAL;
     if (pshared != PTHREAD_PROCESS_PRIVATE && pshared != PTHREAD_PROCESS_SHARED)
         return EINVAL;
+    *attr = (*attr & ~MA_PSHARED_MASK) | (pshared ? MA_PSHARED_MASK : 0);
     return 0;
 }
 
 int pthread_mutexattr_getpshared(const pthread_mutexattr_t *attr, int *pshared) {
     if (!attr || !pshared) return EINVAL;
-    *pshared = PTHREAD_PROCESS_PRIVATE;
+    *pshared = (*attr & MA_PSHARED_MASK) ? PTHREAD_PROCESS_SHARED
+                                         : PTHREAD_PROCESS_PRIVATE;
     return 0;
 }
 
