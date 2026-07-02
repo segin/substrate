@@ -125,6 +125,8 @@ struct rtsig_entry {
     int16_t      rt_code;    /* si_code (SI_USER / SI_QUEUE)            */
     uint32_t     rt_seq;     /* FIFO ordering key (per-process)        */
     union sigval rt_value;   /* si_value payload delivered to handler  */
+    int32_t      rt_pid;     /* sending process pid   (siginfo si_pid) */
+    uint32_t     rt_uid;     /* sending process ruid  (siginfo si_uid) */
 };
 
 /*

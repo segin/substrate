@@ -480,6 +480,19 @@ typedef struct thread {
     uint8_t      rtsig_deliver_active;
     int          rtsig_deliver_code;
     union sigval rtsig_deliver_value;
+    int          rtsig_deliver_pid;   /* sender pid of the delivered RT instance  */
+    uint32_t     rtsig_deliver_uid;   /* sender uid of the delivered RT instance  */
+
+    /* Set of signals this thread is synchronously waiting for in
+     * sigwait(2)/sigtimedwait(2) (0 = not in a synchronous wait).  A signal
+     * posted to a thread with a matching bit here must wake it even when the
+     * signal is masked in sig_mask — the whole point of sigwait is to accept
+     * a normally-blocked signal.  Without this, psignal()/thr_kill() only
+     * wake a blocked thread whose signal is UNMASKED, so a sigtimedwait()
+     * waiter (which masks the very signals it awaits) slept the full timeout
+     * instead of returning on arrival.  Kept at the END of thread_t — see the
+     * offset-stability note above. */
+    uint32_t     sig_wait_mask;
 } thread_t;
 
 // Globals
