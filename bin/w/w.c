@@ -112,8 +112,7 @@ static void find_what(const char *line, char *out, size_t cap)
         /* Prefer the process-group leader's command. */
         int is_leader = (atoi(de->d_name) == pgrp);
         if (!found || (is_leader && !best_is_leader)) {
-            strncpy(out, comm, cap - 1);
-            out[cap - 1] = '\0';
+            strlcpy(out, comm, cap);
             best_is_leader = is_leader;
             found = 1;
         }

@@ -318,7 +318,7 @@ static int emit_header(FILE *out, const char *path, const struct stat *st, char 
     }
 
     h.typeflag = type;
-    if (link) strncpy(h.linkname, link, sizeof(h.linkname) - 1);
+    if (link) strlcpy(h.linkname, link, sizeof(h.linkname));
     memcpy(h.magic, "ustar", 5);
     memcpy(h.version, "00", 2);
     checksum(&h);
@@ -442,7 +442,7 @@ static int write_eoa(FILE *out) {
 }
 
 static int ensure_parents(const char *path) {
-    char tmp[PATH_MAX]; strncpy(tmp, path, sizeof(tmp) - 1); tmp[sizeof(tmp) - 1] = 0;
+    char tmp[PATH_MAX]; strlcpy(tmp, path, sizeof(tmp));
     for (char *p = tmp + 1; *p; p++) if (*p == '/') {
         *p = 0;
         struct stat st;
