@@ -251,7 +251,7 @@ int virtio_net_setup(uint8_t bus, uint8_t slot, uint8_t func) {
     vnet_rx_publish_all();
 
     /* 8. Register the netdev. */
-    strncpy(vn.netdev.name, "eth0", NETDEV_NAME_MAX - 1);
+    strlcpy(vn.netdev.name, "eth0", NETDEV_NAME_MAX);
     vn.netdev.mtu = 1500;
     vn.netdev.flags = NETDEV_IFF_UP | NETDEV_IFF_BROADCAST | NETDEV_IFF_RUNNING;
     vn.netdev.ops = &vnet_ops;
