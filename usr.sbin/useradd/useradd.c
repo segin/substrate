@@ -144,8 +144,7 @@ write_group_with_supp(FILE *out, void *arg)
     while (fgets(line, sizeof(line), in) != NULL) {
         char  copy[1024];
         char *fields[4];
-        strncpy(copy, line, sizeof(copy) - 1);
-        copy[sizeof(copy) - 1] = '\0';
+        strlcpy(copy, line, sizeof(copy));
         int n = pwdb_split(copy, ':', fields, 4);
         if (n < 4) {
             if (fputs(line, out) == EOF) { fclose(in); return -1; }
