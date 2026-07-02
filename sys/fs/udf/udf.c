@@ -567,7 +567,7 @@ static struct dirent *udf_vfs_readdir(fs_node_t *node, uint64_t index) {
         if (!(fid->characteristics & UDF_FID_DELETED)) {
             if (cur_idx == index) {
                 if (fid->characteristics & UDF_FID_PARENT) {
-                    strncpy(udf_dirent.d_name, "..", sizeof(udf_dirent.d_name) - 1);
+                    strlcpy(udf_dirent.d_name, "..", sizeof(udf_dirent.d_name));
                     udf_dirent.d_name[sizeof(udf_dirent.d_name) - 1] = '\0';
                 } else {
                     /* Extract filename (after impl_use) */
@@ -650,7 +650,7 @@ static fs_node_t *udf_vfs_finddir(fs_node_t *node, char *name) {
                 if (udf_read_fe_sector(ctx->fs, &fid->icb, fe_sec) == 0) {
                     fs_node_t *result = udf_alloc_node(ctx->fs, &fid->icb, fe_sec);
                     /* Ensure null-termination and prevent buffer overflow by truncating if necessary */
-                    strncpy(result->name, fname, sizeof(result->name) - 1);
+                    strlcpy(result->name, fname, sizeof(result->name));
                     result->name[sizeof(result->name) - 1] = '\0';
                     kfree(dir_buf, buf_size);
                     return result;
@@ -931,7 +931,7 @@ static fs_node_t *udf_mount(const char *device, uint32_t flags, void *data) {
         return NULL;
     }
     
-    strncpy(root_node->name, "/", sizeof(root_node->name) - 1);
+    strlcpy(root_node->name, "/", sizeof(root_node->name));
     root_node->name[sizeof(root_node->name) - 1] = '\0';
     root_node->unmount = udf_unmount;
     

@@ -311,12 +311,12 @@ static int shmfs_truncate(fs_node_t *node, off_t len) {
  * -------------------------------------------------------------- */
 static struct dirent *shmfs_root_readdir(fs_node_t *node, uint64_t index) {
     (void)node;
-    if (index == 0) { strcpy(shmfs_dirent.d_name, ".");  return &shmfs_dirent; }
-    if (index == 1) { strcpy(shmfs_dirent.d_name, ".."); return &shmfs_dirent; }
+    if (index == 0) { strlcpy(shmfs_dirent.d_name, ".", sizeof(shmfs_dirent.d_name));  return &shmfs_dirent; }
+    if (index == 1) { strlcpy(shmfs_dirent.d_name, "..", sizeof(shmfs_dirent.d_name)); return &shmfs_dirent; }
     uint64_t i = 2;
     for (shmfs_inode_t *e = shmfs_children; e; e = e->next, i++) {
         if (i == index) {
-            strncpy(shmfs_dirent.d_name, e->name, sizeof(shmfs_dirent.d_name) - 1);
+            strlcpy(shmfs_dirent.d_name, e->name, sizeof(shmfs_dirent.d_name));
             shmfs_dirent.d_name[sizeof(shmfs_dirent.d_name) - 1] = '\0';
             return &shmfs_dirent;
         }
@@ -345,11 +345,11 @@ static int shmfs_root_mknod(fs_node_t *parent, const char *name, uint16_t mode, 
     shmfs_inode_t *ino = (shmfs_inode_t *)kmalloc(sizeof(*ino));
     if (!ino) return -ENOMEM;
     memset(ino, 0, sizeof(*ino));
-    strncpy(ino->name, name, sizeof(ino->name) - 1);
+    strlcpy(ino->name, name, sizeof(ino->name));
     ino->name[sizeof(ino->name) - 1] = '\0';
 
     /* fs_node_t reflects what callers see via stat. */
-    strncpy(ino->node.name, name, sizeof(ino->node.name) - 1);
+    strlcpy(ino->node.name, name, sizeof(ino->node.name));
     ino->node.name[sizeof(ino->node.name) - 1] = '\0';
     ino->node.flags    = FS_FILE;
     ino->node.mask     = mode & 07777;
@@ -416,7 +416,7 @@ static filesystem_t shmfs_fs = {
 
 void shmfs_init(void) {
     memset(&shmfs_root_node, 0, sizeof(shmfs_root_node));
-    strncpy(shmfs_root_node.name, "shm", sizeof(shmfs_root_node.name) - 1);
+    strlcpy(shmfs_root_node.name, "shm", sizeof(shmfs_root_node.name));
     shmfs_root_node.name[sizeof(shmfs_root_node.name) - 1] = '\0';
     shmfs_root_node.flags   = FS_DIRECTORY;
     shmfs_root_node.mask    = 01777;    /* sticky world-writable, like /tmp */

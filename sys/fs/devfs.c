@@ -223,7 +223,7 @@ static devfs_entry_t *devfs_create_entry(const char *name, fs_node_t *node,
     entry = kmalloc(sizeof(devfs_entry_t));
     if (!entry) return NULL;
     memset(entry, 0, sizeof(devfs_entry_t));
-    strncpy(entry->name, name, sizeof(entry->name) - 1);
+    strlcpy(entry->name, name, sizeof(entry->name));
     entry->node = node;
     entry->parent = parent;
     entry->perso_mask = perso_mask;
@@ -254,7 +254,7 @@ static fs_node_t *devfs_create_dir_node(const char *name) {
     fs_node_t *node = kmalloc(sizeof(fs_node_t));
     if (!node) return NULL;
     memset(node, 0, sizeof(fs_node_t));
-    strncpy(node->name, name, sizeof(node->name) - 1);
+    strlcpy(node->name, name, sizeof(node->name));
     node->flags = FS_DIRECTORY;
     node->mask = 0755;
     node->uid = 0;
@@ -297,7 +297,7 @@ static struct dirent *devfs_dir_readdir(fs_node_t *node, uint64_t index) {
         if (!devfs_entry_visible(child)) continue;
         if (devfs_entry_shadowed(entry, child)) continue;
         if (i == index) {
-            strncpy(dev_dirent.d_name, child->name, sizeof(dev_dirent.d_name) - 1);
+            strlcpy(dev_dirent.d_name, child->name, sizeof(dev_dirent.d_name));
             dev_dirent.d_name[sizeof(dev_dirent.d_name) - 1] = '\0';
             dev_dirent.d_ino = (uintptr_t)child;
             return &dev_dirent;
@@ -569,7 +569,7 @@ void devfs_register_device_perso(fs_node_t *node, uint32_t perso_mask) {
     }
 
     if ((node->flags & 0x7) == FS_BLOCKDEVICE) {
-        strncpy(path, "storage/", sizeof(path) - 1);
+        strlcpy(path, "storage/", sizeof(path));
         path[sizeof(path) - 1] = '\0';
         strncat(path, node->name, sizeof(path) - strlen(path) - 1);
         (void)devfs_add_entry(path, node, perso_mask);
@@ -609,11 +609,11 @@ int devfs_register_alias_perso(const char *path, const char *target,
     if (!root_entry) {
         if (devfs_deferred_alias.count < DEVFS_DEFERRED_ALIAS_MAX) {
             int n = devfs_deferred_alias.count++;
-            strncpy(devfs_deferred_alias.path[n], path,
-                    sizeof(devfs_deferred_alias.path[n]) - 1);
+            strlcpy(devfs_deferred_alias.path[n], path,
+                    sizeof(devfs_deferred_alias.path[n]));
             devfs_deferred_alias.path[n][sizeof(devfs_deferred_alias.path[n]) - 1] = '\0';
-            strncpy(devfs_deferred_alias.target[n], target,
-                    sizeof(devfs_deferred_alias.target[n]) - 1);
+            strlcpy(devfs_deferred_alias.target[n], target,
+                    sizeof(devfs_deferred_alias.target[n]));
             devfs_deferred_alias.target[n][sizeof(devfs_deferred_alias.target[n]) - 1] = '\0';
             devfs_deferred_alias.mask[n] = perso_mask;
         }
@@ -627,7 +627,7 @@ int devfs_register_alias_perso(const char *path, const char *target,
         if (entry->node == NULL || (entry->node->flags & 0x7) != FS_SYMLINK) {
             return -1;
         }
-        strncpy(entry->link_target, target, sizeof(entry->link_target) - 1);
+        strlcpy(entry->link_target, target, sizeof(entry->link_target));
         entry->link_target[sizeof(entry->link_target) - 1] = '\0';
         return 0;
     }
@@ -637,7 +637,7 @@ int devfs_register_alias_perso(const char *path, const char *target,
         return -1;
     }
     memset(node, 0, sizeof(*node));
-    strncpy(node->name, path, sizeof(node->name) - 1);
+    strlcpy(node->name, path, sizeof(node->name));
     node->flags = FS_SYMLINK;
     node->mask = 0777;
     node->uid = 0;
@@ -656,7 +656,7 @@ int devfs_register_alias_perso(const char *path, const char *target,
         return -1;
     }
     entry->owns_node = 1;
-    strncpy(entry->link_target, target, sizeof(entry->link_target) - 1);
+    strlcpy(entry->link_target, target, sizeof(entry->link_target));
     entry->link_target[sizeof(entry->link_target) - 1] = '\0';
     return 0;
 }
@@ -691,7 +691,7 @@ static filesystem_t devfs_fs = {
 
 void devfs_init(void) {
     memset(&devfs_root_node, 0, sizeof(fs_node_t));
-    strncpy(devfs_root_node.name, "dev", sizeof(devfs_root_node.name) - 1);
+    strlcpy(devfs_root_node.name, "dev", sizeof(devfs_root_node.name));
     devfs_root_node.name[sizeof(devfs_root_node.name) - 1] = '\0';
     devfs_root_node.flags = FS_DIRECTORY;
     devfs_root_node.mask = 0755;
@@ -705,7 +705,7 @@ void devfs_init(void) {
     root_entry = kmalloc(sizeof(devfs_entry_t));
     if (root_entry) {
         memset(root_entry, 0, sizeof(devfs_entry_t));
-        strncpy(root_entry->name, "dev", sizeof(root_entry->name) - 1);
+        strlcpy(root_entry->name, "dev", sizeof(root_entry->name));
         root_entry->name[sizeof(root_entry->name) - 1] = '\0';
         root_entry->node = &devfs_root_node;
         devfs_root_node.impl = (uintptr_t)root_entry;

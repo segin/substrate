@@ -2345,7 +2345,7 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
         return NULL;
     }
 
-    strncpy(root_node->name, "/", sizeof(root_node->name) - 1);
+    strlcpy(root_node->name, "/", sizeof(root_node->name));
     root_node->name[sizeof(root_node->name) - 1] = '\0';
     
     ext2_node_t *root_ctx = (ext2_node_t *)(uintptr_t)root_node->impl;

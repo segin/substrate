@@ -410,7 +410,7 @@ void pipe_create(fs_node_t **read_node, fs_node_t **write_node) {
         return;
     }
     memset(rn, 0, sizeof(fs_node_t));
-    strncpy(rn->name, "pipe_read", sizeof(rn->name) - 1);
+    strlcpy(rn->name, "pipe_read", sizeof(rn->name));
     rn->name[sizeof(rn->name) - 1] = '\0';
     rn->flags = FS_PIPE;
     rn->read = &pipe_read;
@@ -419,7 +419,7 @@ void pipe_create(fs_node_t **read_node, fs_node_t **write_node) {
     rn->impl = (uintptr_t)read_ep;
 
     memset(wn, 0, sizeof(fs_node_t));
-    strncpy(wn->name, "pipe_write", sizeof(wn->name) - 1);
+    strlcpy(wn->name, "pipe_write", sizeof(wn->name));
     wn->name[sizeof(wn->name) - 1] = '\0';
     wn->flags = FS_PIPE;
     wn->write = &pipe_write;
@@ -531,8 +531,8 @@ static fs_node_t *fifo_endpoint_new(fifo_reg_t *fifo, int is_writer) {
     ep->pipe      = fifo->pipe;
     ep->is_writer = is_writer ? 1 : 0;
     ep->fifo      = fifo;
-    strncpy(n->name, is_writer ? "fifo_write" : "fifo_read",
-            sizeof(n->name) - 1);
+    strlcpy(n->name, is_writer ? "fifo_write" : "fifo_read",
+            sizeof(n->name));
     n->name[sizeof(n->name) - 1] = '\0';
     n->flags = FS_PIPE;
     n->read  = &pipe_read;
