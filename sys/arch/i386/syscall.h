@@ -235,6 +235,12 @@
 #define SYS_TIMER_DELETE            512
 #define SYS_TIMER_GETOVERRUN        513
 
+/* Synchronous signal wait — mirror of the userland <arch/i386/syscall.h>
+ * numbers (the build resolves the header to the userland copy; kept here so
+ * this reference stays faithful). */
+#define SYS_SIGWAIT                 524
+#define SYS_SIGTIMEDWAIT            525
+
 void syscall_init(void);
 
 // GDT TLS entries

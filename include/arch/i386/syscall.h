@@ -278,6 +278,14 @@
 #define SYS_TIMER_DELETE     512
 #define SYS_TIMER_GETOVERRUN 513
 
+/* Synchronous signal wait (sys/kern/signal.c: sys_sigwait / sys_sigtimedwait).
+ * The kernel drains the RT-signal queue and fills siginfo si_value; the libc
+ * sigwait/sigtimedwait/sigwaitinfo wrappers marshal the POSIX ABI on top
+ * (sigwaitinfo == sigtimedwait with a NULL timeout).  Next free numbers after
+ * SYS_SETEUID (523). */
+#define SYS_SIGWAIT          524
+#define SYS_SIGTIMEDWAIT     525
+
 void syscall_init(void);
 
 // GDT TLS entries
