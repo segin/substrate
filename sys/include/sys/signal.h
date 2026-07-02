@@ -6,13 +6,28 @@
 #define NSIG 32
 
 /*
- * Real-time signals.  With a 32-bit sigset and NSIG=32, signals 29 and
- * 30 are the only unassigned slots, so substrate exposes a minimal
- * two-signal RT range there (see include/signal.h).  Kept in sync with
- * the userland header.
+ * Real-time signals.  With a 32-bit sigset_t and NSIG=32 the signal
+ * number space is 1..31; signals 29 and 30 are the only slots not
+ * already assigned a standard signal, so the RT range is [29,30] (see
+ * include/signal.h — kept in sync with the userland header).  This is a
+ * hard ABI constraint: a Linux-style [34,63] range would require a
+ * 64-bit sigset_t, i.e. a whole-userland ABI break (every binary's
+ * sigset_t / sigaction sa_mask / sigprocmask argument changes size), so
+ * it is deliberately out of scope.
+ *
+ * Within [SIGRTMIN,SIGRTMAX] signals genuinely QUEUE: each sigqueue(2)
+ * or kill()/psignal() of an RT signal enqueues a distinct instance
+ * (carrying its own si_value/si_code), delivered one per handler
+ * invocation, lowest signo first and FIFO within a signo, bounded at
+ * RTSIG_QUEUE_MAX (see struct rtsig_entry below and the per-process
+ * rtsig_q[] in <sys/proc.h>).  Standard signals keep the sig_pending
+ * bitmask (POSIX permits non-queueing there).
  */
 #define SIGRTMIN 29
 #define SIGRTMAX 30
+
+/* True for a queueing real-time signal number. */
+#define SIG_IS_RT(s) ((s) >= SIGRTMIN && (s) <= SIGRTMAX)
 
 // Forward declaration
 struct process;
@@ -92,6 +107,25 @@ typedef struct {
     // Padding to 128 bytes usually
     int      _pad[25];
 } siginfo_t;
+
+/*
+ * POSIX real-time signal queue (per process — see rtsig_q[] in proc.h).
+ *
+ * RTSIG_QUEUE_MAX bounds the number of simultaneously-queued RT-signal
+ * instances a process may hold; sigqueue(2) returns EAGAIN once it is
+ * reached (>= _POSIX_SIGQUEUE_MAX = 32).  Each occupied slot is one
+ * pending instance carrying its own si_value/si_code.  rt_signo == 0
+ * marks a free slot; rt_seq is a per-process monotonic FIFO key so the
+ * oldest instance of a given signo is delivered first.
+ */
+#define RTSIG_QUEUE_MAX 64
+
+struct rtsig_entry {
+    uint16_t     rt_signo;   /* 0 = free slot, else the signal number  */
+    int16_t      rt_code;    /* si_code (SI_USER / SI_QUEUE)            */
+    uint32_t     rt_seq;     /* FIFO ordering key (per-process)        */
+    union sigval rt_value;   /* si_value payload delivered to handler  */
+};
 
 /*
  * Native Substrate siginfo si_code contract.
