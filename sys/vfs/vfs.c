@@ -100,7 +100,7 @@ static fs_node_t *vfs_mount_root_parent(fs_node_t *node) {
     if (!found || found->mnt_stat_path[0] != '/') return NULL;
 
     char ppath[128];
-    strncpy(ppath, found->mnt_stat_path, sizeof(ppath) - 1);
+    strlcpy(ppath, found->mnt_stat_path, sizeof(ppath));
     ppath[sizeof(ppath) - 1] = '\0';
     char *slash = vfs_strrchr(ppath, '/');
     if (!slash) return NULL;
@@ -353,19 +353,19 @@ int vfs_mount_legacy(const char *device, const char *path, const char *type, uin
         memset(mp, 0, sizeof(struct mount));
 
         // Populate mount structure
-        strncpy(mp->mnt_stat_path, path, sizeof(mp->mnt_stat_path));
+        strlcpy(mp->mnt_stat_path, path, sizeof(mp->mnt_stat_path));
         mp->mnt_stat_path[sizeof(mp->mnt_stat_path)-1] = '\0';
 
-        strncpy(mp->mnt_stat.f_mntonname, path, sizeof(mp->mnt_stat.f_mntonname));
+        strlcpy(mp->mnt_stat.f_mntonname, path, sizeof(mp->mnt_stat.f_mntonname));
         mp->mnt_stat.f_mntonname[sizeof(mp->mnt_stat.f_mntonname)-1] = '\0';
 
         if (device) {
-            strncpy(mp->mnt_stat.f_mntfromname, device, sizeof(mp->mnt_stat.f_mntfromname));
+            strlcpy(mp->mnt_stat.f_mntfromname, device, sizeof(mp->mnt_stat.f_mntfromname));
             mp->mnt_stat.f_mntfromname[sizeof(mp->mnt_stat.f_mntfromname)-1] = '\0';
         }
 
         if (type) {
-            strncpy(mp->mnt_stat.f_fstypename, type, sizeof(mp->mnt_stat.f_fstypename));
+            strlcpy(mp->mnt_stat.f_fstypename, type, sizeof(mp->mnt_stat.f_fstypename));
             mp->mnt_stat.f_fstypename[sizeof(mp->mnt_stat.f_fstypename)-1] = '\0';
         }
 
@@ -1252,7 +1252,7 @@ int vfs_unmount_legacy_flags(const char *path, int flags) {
      */
     
     char path_buf[256];
-    strncpy(path_buf, path, sizeof(path_buf));
+    strlcpy(path_buf, path, sizeof(path_buf));
     path_buf[255] = '\0';
     
     // Split path
@@ -1378,7 +1378,7 @@ void vfs_unmount_all(void) {
 
     TAILQ_FOREACH(mp, &mountlist, mnt_list) {
         if (n >= 32) break;
-        strncpy(paths[n], mp->mnt_stat_path, sizeof(paths[n]) - 1);
+        strlcpy(paths[n], mp->mnt_stat_path, sizeof(paths[n]));
         paths[n][sizeof(paths[n]) - 1] = '\0';
         n++;
     }
@@ -1386,14 +1386,14 @@ void vfs_unmount_all(void) {
     /* Insertion sort, deepest path first.  n is a handful of mounts. */
     for (int i = 1; i < n; i++) {
         char key[128];
-        strncpy(key, paths[i], sizeof(key) - 1);
+        strlcpy(key, paths[i], sizeof(key));
         key[sizeof(key) - 1] = '\0';
         int j = i - 1;
         while (j >= 0 && vfs_mount_depth(paths[j]) < vfs_mount_depth(key)) {
-            strncpy(paths[j + 1], paths[j], 128);
+            strlcpy(paths[j + 1], paths[j], sizeof(paths[j + 1]));
             j--;
         }
-        strncpy(paths[j + 1], key, 128);
+        strlcpy(paths[j + 1], key, sizeof(paths[j + 1]));
     }
 
     for (int i = 0; i < n; i++) {
