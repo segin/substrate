@@ -18,6 +18,107 @@
 #include <kern/time.h>
 #include <sys/kern_syscalls.h>
 
+/*
+ * POSIX real-time signal queue (the per-process rtsig_q[] in sys/proc.h).
+ * Signals in [SIGRTMIN,SIGRTMAX] queue as distinct instances rather than
+ * collapsing into the sig_pending bitmask.  These two helpers are the only
+ * code that mutates rtsig_q[]/rtsig_count/rtsig_seq; both take rtsig_lock
+ * with local IRQs disabled because psignal() (hence rtsig_enqueue) may run
+ * from an interrupt handler — e.g. a TTY ^C posting SIGINT is fine, but the
+ * same path posts RT signals too, and an IRQ landing on a CPU already
+ * holding the lock would trip the spinlock deadlock check.
+ */
+
+/*
+ * rtsig_enqueue - queue one real-time signal instance on process `p`.
+ *
+ * Returns 0 on success, or -EAGAIN if the queue is full (RTSIG_QUEUE_MAX
+ * instances already pending) — the POSIX sigqueue(2) overflow error.
+ */
+static int rtsig_enqueue(process_t *p, int sig, int code, union sigval val) {
+    int ret = -EAGAIN;
+    unsigned long fl = spinlock_acquire_irq(&p->rtsig_lock);
+    if (p->rtsig_count < RTSIG_QUEUE_MAX) {
+        for (int i = 0; i < RTSIG_QUEUE_MAX; i++) {
+            if (p->rtsig_q[i].rt_signo == 0) {
+                p->rtsig_q[i].rt_signo = (uint16_t)sig;
+                p->rtsig_q[i].rt_code  = (int16_t)code;
+                /* Per-process monotonic FIFO key.  ++ before use so an
+                 * occupied slot's rt_seq is never 0 (0xFFFFFFFF wrap would
+                 * take 4 billion RT posts in one process — not a concern). */
+                p->rtsig_q[i].rt_seq   = ++p->rtsig_seq;
+                p->rtsig_q[i].rt_value = val;
+                p->rtsig_count++;
+                ret = 0;
+                break;
+            }
+        }
+    }
+    spinlock_release_irq(&p->rtsig_lock, fl);
+    return ret;
+}
+
+/*
+ * rtsig_dequeue - remove the oldest queued instance of `sig` from `p`.
+ *
+ * On success fills *code / *val from that instance, returns 1, and sets
+ * *more nonzero iff another instance of the SAME signo remains queued (so
+ * the caller knows whether to keep the per-thread pending bit set).  FIFO
+ * within a signo is enforced by picking the lowest rt_seq.  Returns 0 when
+ * the queue holds nothing for `sig` — the benign race where another thread
+ * of a multithreaded process drained the last instance first.
+ */
+static int rtsig_dequeue(process_t *p, int sig, int *code,
+                         union sigval *val, int *more) {
+    int found = -1;
+    uint32_t best_seq = 0xFFFFFFFFu;
+    int remaining = 0;
+
+    unsigned long fl = spinlock_acquire_irq(&p->rtsig_lock);
+    for (int i = 0; i < RTSIG_QUEUE_MAX; i++) {
+        if (p->rtsig_q[i].rt_signo == (uint16_t)sig &&
+            p->rtsig_q[i].rt_seq < best_seq) {
+            best_seq = p->rtsig_q[i].rt_seq;
+            found = i;
+        }
+    }
+    if (found >= 0) {
+        if (code) *code = p->rtsig_q[found].rt_code;
+        if (val)  *val  = p->rtsig_q[found].rt_value;
+        p->rtsig_q[found].rt_signo = 0;
+        if (p->rtsig_count > 0) p->rtsig_count--;
+        for (int i = 0; i < RTSIG_QUEUE_MAX; i++) {
+            if (p->rtsig_q[i].rt_signo == (uint16_t)sig) { remaining = 1; break; }
+        }
+    }
+    spinlock_release_irq(&p->rtsig_lock, fl);
+
+    if (more) *more = remaining;
+    return found >= 0;
+}
+
+/*
+ * sigwait_consume - synchronously consume one pending instance of `sig`.
+ *
+ * Used by sigwait(2)/sigtimedwait(2), which accept a signal without running
+ * its handler.  For a real-time signal this dequeues one rtsig_q[] instance
+ * (reporting its si_code/si_value through the code and val out-params when
+ * non-NULL) and leaves the pending bit set while more instances remain, so a later
+ * sigwait returns the next one instead of blocking — and the queue slot is
+ * freed rather than leaked.  For any other signal (or a timer notification)
+ * it just clears the per-thread pending bit, preserving prior behaviour.
+ */
+static void sigwait_consume(int sig, int *code, union sigval *val) {
+    if (SIG_IS_RT(sig) &&
+        !(current_process->sig_timer_pend & sigmask(sig))) {
+        int more = 0;
+        if (rtsig_dequeue(current_process, sig, code, val, &more) && more) {
+            return;   /* keep the pending bit set for the next instance */
+        }
+    }
+    __sync_fetch_and_and(&current_thread->sig_pending, ~sigmask(sig));
+}
+
 static void signal_interrupt_thread(thread_t *t) {
     if (!t) {
         return;
@@ -464,7 +565,7 @@ int kern_sigwait(const uint32_t *set, int *sig) {
             for (int i = 0; i < NSIG; i++) {
                 if (deliverable & (1 << i)) {
                     int signal = i + 1;
-                    __sync_fetch_and_and(&current_thread->sig_pending, ~sigmask(signal));
+                    sigwait_consume(signal, NULL, NULL);
                     *sig = signal;
                     current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
                     return 0;
@@ -580,50 +681,65 @@ int kern_sigtimedwait(const uint32_t *set, siginfo_t *info,
     
     if (signal == 0) return -22; // Should not happen
 
-    // Remove from pending (consume it)
-    __sync_fetch_and_and(&current_thread->sig_pending, ~sigmask(signal));
-    
+    /* Consume one instance.  For a real-time signal this dequeues one
+     * rtsig_q[] node, reporting its si_code/si_value below, and keeps the
+     * pending bit set if more instances remain. */
+    int rt_code = 0;
+    union sigval rt_val = { .sival_int = 0 };
+    sigwait_consume(signal, &rt_code, &rt_val);
+
     // Fill siginfo if provided
     if (info) {
         info->si_signo = signal;
         info->si_errno = 0;
-        info->si_code = 0;        // Unknown source (synchronous wait)
+        info->si_code = SIG_IS_RT(signal) ? rt_code : 0;
         info->si_pid = 0;         // Unknown sender
         info->si_uid = 0;
         info->si_addr = NULL;
         info->si_status = 0;
+        info->si_value = rt_val;
     }
-    
+
     return signal; // Return signal number on success
 }
 
 /*
- * psignal - Send signal to a process
+ * psignal_info - Send signal to a process, carrying siginfo (si_code/value).
  *
- * Delivers signal to the target process following POSIX/BSD semantics:
+ * The workhorse behind both psignal() (si_code SI_USER, no payload) and the
+ * sigqueue(2) SI_QUEUE path.  Delivers `sig` to `p` following POSIX/BSD
+ * semantics:
  * 1. Validates process pointer and signal number
  * 2. Protects init (PID 1) from fatal signals
  * 3. For SIGCONT, resumes stopped process/threads
- * 4. Sets pending bit on all threads (signal is process-directed)
- * 5. Selects best thread for immediate delivery (one not masking the signal)
- * 6. Wakes interruptibly-sleeping threads
+ * 4. For a real-time signal ([SIGRTMIN,SIGRTMAX]) that is not a pending
+ *    timer notification, enqueues a distinct instance on rtsig_q[]
+ * 5. Sets pending bit on all threads (signal is process-directed)
+ * 6. Selects best thread for immediate delivery (one not masking the signal)
+ * 7. Wakes interruptibly-sleeping threads
+ *
+ * Returns 0 normally; -EAGAIN only when an SI_QUEUE enqueue overflows the
+ * RT queue (so sigqueue(2) can report it).  A full queue on the SI_USER
+ * (kill) path is best-effort: the signal still posts (the already-queued
+ * instances will deliver), and 0 is returned.
  */
-void psignal(process_t *p, int sig) {
+static int psignal_info(process_t *p, int sig, int si_code,
+                        const union sigval *valp) {
     /* Validate process pointer and signal number */
-    if (!p || sig <= 0 || sig > NSIG) return;
+    if (!p || sig <= 0 || sig > NSIG) return 0;
 
     /* Ignore signals if process is already exiting or a zombie */
     if (p->state == SDYING || p->state == SZOMB) {
-        return;
+        return 0;
     }
-    
+
     /* Init Protection: Block SIGKILL/SIGTERM/SIGSTOP to PID 1 */
     if (p->pid == 1 && (sig == SIGKILL || sig == SIGTERM || sig == SIGSTOP)) {
         // Allow delivery if explicit handler is installed (not SIG_DFL)
         // Note: SIGKILL/SIGSTOP cannot usually be caught, so they remain blocked here
         // unless sys_sigaction laws change. SIGTERM can be caught.
         if (p->sig_actions[sig - 1].sa_handler == SIG_DFL) {
-            return;
+            return 0;
         }
     }
 
@@ -699,8 +815,28 @@ void psignal(process_t *p, int sig) {
                 if (!(t->sig_mask & m)) { deliverable_now = 1; break; }
             }
             if (deliverable_now)
-                return;
+                return 0;
         }
+    }
+
+    /* Real-time signal: enqueue a distinct instance so it does not
+     * coalesce into the single sig_pending bit.  Skip when this signo
+     * already carries a pending timer notification (sig_timer_pend set by
+     * time.c before calling psignal) — the timer path owns that delivery
+     * via sig_qval/SI_TIMER and must not be shadowed by a queued node.
+     * The pending bit(s) set by the loop below stay set until the queue
+     * drains (see signal_handle_pending), which is what makes each queued
+     * instance deliver exactly once. */
+    if (SIG_IS_RT(sig) && !(p->sig_timer_pend & sigmask(sig))) {
+        union sigval v = valp ? *valp : (union sigval){ .sival_int = 0 };
+        int enq = rtsig_enqueue(p, sig, si_code, v);
+        if (enq != 0 && si_code == SI_QUEUE) {
+            /* sigqueue(2) overflow: report EAGAIN and do NOT post — the
+             * caller (sys_sigqueue) turns this into the userspace error. */
+            return -EAGAIN;
+        }
+        /* enq != 0 on the kill/SI_USER path: queue full, fall through and
+         * post the pending bit anyway (best effort). */
     }
 
     /* Select best thread for delivery and set pending on all threads */
@@ -757,11 +893,21 @@ void psignal(process_t *p, int sig) {
     }
     
     /* If we found a best thread and it's blocked, wake it */
-    if (best_thread && best_thread->state == THREAD_BLOCKED && 
+    if (best_thread && best_thread->state == THREAD_BLOCKED &&
         best_priority > 0 &&
         (best_thread->flags & THREAD_F_INTERRUPTIBLE)) {
         signal_interrupt_thread(best_thread);
     }
+    return 0;
+}
+
+/*
+ * psignal - Send signal to a process (si_code SI_USER, no sigqueue payload).
+ * Thin wrapper over psignal_info(); this is the process-directed entry point
+ * used everywhere in the kernel (kill, TTY, timers, child-exit, ...).
+ */
+void psignal(process_t *p, int sig) {
+    (void)psignal_info(p, sig, SI_USER, NULL);
 }
 
 // Send signal to process group
@@ -980,10 +1126,14 @@ int signal_send_group(int pgrp, int sig) {
  *
  * Sends `sig` to process `pid`, recording the `sival` payload so that an
  * SA_SIGINFO handler receives it as siginfo.si_value with si_code SI_QUEUE.
- * Substrate's pending set is a bitmask (signals do not truly queue), so the
- * payload is stored one-per-signal-number on the target process; the most
- * recent queued value wins if the same signal is queued repeatedly before
- * delivery.  sig == 0 performs only the permission/existence check.
+ *
+ * A real-time signal ([SIGRTMIN,SIGRTMAX]) truly QUEUES: every call enqueues
+ * a distinct instance on the target's rtsig_q[], delivered in order, each
+ * carrying its own si_value; the call returns EAGAIN if the queue is full
+ * (RTSIG_QUEUE_MAX).  A standard signal cannot queue (32-bit bitmask pending
+ * set), so its payload is stored one-per-signal-number and the most recent
+ * value wins if it is queued repeatedly before delivery.  sig == 0 performs
+ * only the permission/existence check.
  */
 int sys_sigqueue(int pid, int sig, uintptr_t sival) {
     if (sig < 0 || sig > NSIG) return -EINVAL;
@@ -995,7 +1145,16 @@ int sys_sigqueue(int pid, int sig, uintptr_t sival) {
     if (!signal_can_send(current_process, target)) return -EPERM;
 
     if (sig != 0) {
-        target->sig_qval[sig - 1].sival_ptr = (void *)sival;
+        union sigval v;
+        v.sival_ptr = (void *)sival;
+        if (SIG_IS_RT(sig)) {
+            /* Real queuing: psignal_info enqueues the instance (SI_QUEUE +
+             * payload) and posts it, or returns -EAGAIN if the queue is
+             * full — propagate that to userspace unchanged. */
+            return psignal_info(target, sig, SI_QUEUE, &v);
+        }
+        /* Standard signal: last-value-wins slot + bitmask, as before. */
+        target->sig_qval[sig - 1] = v;
         __sync_fetch_and_or(&target->sig_qpend, sigmask(sig));
         psignal(target, sig);
     }
@@ -1007,13 +1166,17 @@ void signal_handle_pending(registers_t *regs) {
 
     // Only deliver signals when returning to user mode
     // (Assuming Ring 3 is 0x1B or similar, but for now we check if cs != 0x08)
-    if (regs->cs == 0x08) return; 
- 
+    if (regs->cs == 0x08) return;
+
+    /* Reset the per-thread RT-delivery scratch.  It is set below only when
+     * we actually dequeue a queued RT instance, and is read by the arch
+     * populate_siginfo() during this same delivery pass. */
+    current_thread->rtsig_deliver_active = 0;
 
     uint32_t pending = current_thread->sig_pending & ~current_thread->sig_mask;
     if (pending == 0) return;
 
-    // Find the first pending signal
+    // Find the first pending signal (lowest number wins)
     int sig = 0;
     for (int i = 0; i < NSIG; i++) {
         if (pending & (1 << i)) {
@@ -1024,8 +1187,45 @@ void signal_handle_pending(registers_t *regs) {
 
     if (sig == 0) return;
 
-    // Clear pending bit (atomic — concurrent psignal may set bits)
-    __sync_fetch_and_and(&current_thread->sig_pending, ~sigmask(sig));
+    /*
+     * Clear the pending state for the selected signal.
+     *
+     * A real-time signal ([SIGRTMIN,SIGRTMAX]) that is NOT a pending timer
+     * notification is backed by the process rtsig_q[]: dequeue exactly ONE
+     * instance and stash its si_code/si_value for populate_siginfo.  Each
+     * delivering thread clears only its OWN pending bit, and only when it
+     * takes the LAST queued instance (rt_more == 0); while instances remain
+     * the bit stays set so this thread's next return-to-userspace delivers
+     * the next one — one instance per handler invocation, no coalescing.
+     *
+     * This is race-free without a cross-thread lock: an enqueue always sets
+     * the pending bit on every thread (psignal_info's selection loop), so a
+     * queued instance can never be orphaned by a concurrent drain; and a
+     * sibling thread left holding a stale bit after the queue drains simply
+     * hits the empty-dequeue path below and clears its own bit (a no-op
+     * delivery).  That same path also absorbs a bit a timer set on all
+     * threads once the timer notification has been consumed.
+     */
+    if (SIG_IS_RT(sig) && !(current_process->sig_timer_pend & sigmask(sig))) {
+        int rt_code = SI_USER, rt_more = 0;
+        union sigval rt_val = { .sival_int = 0 };
+        if (!rtsig_dequeue(current_process, sig, &rt_code, &rt_val, &rt_more)) {
+            /* Nothing queued for this signo — clear this thread's bit, stop. */
+            __sync_fetch_and_and(&current_thread->sig_pending, ~sigmask(sig));
+            return;
+        }
+        current_thread->rtsig_deliver_active = 1;
+        current_thread->rtsig_deliver_code = rt_code;
+        current_thread->rtsig_deliver_value = rt_val;
+        if (!rt_more) {
+            /* Took the last instance: clear this thread's bit. */
+            __sync_fetch_and_and(&current_thread->sig_pending, ~sigmask(sig));
+        }
+        /* else: leave this thread's bit set to deliver the next instance. */
+    } else {
+        // Standard signal (or timer notification): clear this thread's bit.
+        __sync_fetch_and_and(&current_thread->sig_pending, ~sigmask(sig));
+    }
 
     /* POSIX.1b timer overrun: this signal is now being accepted/delivered,
      * so latch the overrun count of any per-process timer that generated it

@@ -161,11 +161,21 @@ static void populate_siginfo(siginfo_t *info, int sig, int code) {
     }
     info->si_status = 0;
 
+    /* A queued real-time signal instance ([SIGRTMIN,SIGRTMAX]): the kernel
+     * dequeued exactly one instance in signal_handle_pending() and stashed
+     * its si_code/si_value on the current thread.  This carries the correct
+     * per-instance payload (SI_QUEUE with the sigqueue(2) value, or SI_USER
+     * for a kill()/psignal()-generated instance) and takes precedence over
+     * the timer / last-value-wins paths below. */
+    if (current_thread && current_thread->rtsig_deliver_active) {
+        info->si_value = current_thread->rtsig_deliver_value;
+        info->si_code  = current_thread->rtsig_deliver_code;
+    }
     /* A POSIX.1b timer expiration carries the sigev_value payload and is
      * reported with si_code == SI_TIMER.  Checked before the sigqueue path
      * so a timer-driven signal is labelled correctly; the marker (parallel
      * to sig_qpend) is consumed so a later instance is not mislabelled. */
-    if (current_process && sig >= 1 && sig <= NSIG &&
+    else if (current_process && sig >= 1 && sig <= NSIG &&
         (current_process->sig_timer_pend & sigmask(sig))) {
         info->si_value = current_process->sig_qval[sig - 1];
         info->si_code = SI_TIMER;
@@ -173,7 +183,8 @@ static void populate_siginfo(siginfo_t *info, int sig, int code) {
     }
     /* A signal posted via sigqueue(2) carries a union sigval payload and is
      * reported with si_code == SI_QUEUE.  Consume the stored value here so a
-     * later, non-queued instance of the same signal does not re-deliver it. */
+     * later, non-queued instance of the same signal does not re-deliver it.
+     * (Standard signals only — real-time signals took the branch above.) */
     else if (current_process && sig >= 1 && sig <= NSIG &&
         (current_process->sig_qpend & sigmask(sig))) {
         info->si_value = current_process->sig_qval[sig - 1];
