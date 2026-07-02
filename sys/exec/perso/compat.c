@@ -191,19 +191,28 @@ void *freebsd_sys_mmap(void *addr, size_t len, int prot, int flags, int fd, uint
  * Only root can decrease nice value (increase priority).
  */
 int sys_nice(int inc) {
-    int old_nice = current_thread->base_priority;
+    /* base_priority is the scheduler priority in [1,40] (higher == more CPU);
+     * the POSIX nice value is 20 - base_priority in [-20,19] (lower == more
+     * CPU).  Convert to nice, apply the increment, clamp, and convert back --
+     * matching sys_setpriority()'s mapping so nice(2) and setpriority(2) agree
+     * (previously this conflated base_priority with nice, corrupting the
+     * scheduler priority into the [-20,19] range). */
+    int old_nice = 20 - current_thread->base_priority;
     int new_nice = old_nice + inc;
 
-    /* Clamp to valid range */
+    /* Clamp to the valid nice range */
     if (new_nice < -20) new_nice = -20;
     if (new_nice > 19) new_nice = 19;
 
-    /* Only root can increase priority (lower nice value) */
+    /* Only root can lower the nice value (raise priority / take more CPU) */
     if (new_nice < old_nice && current_process->euid != 0)
         return -EPERM;
 
-    current_thread->base_priority = new_nice;
-    current_thread->priority = new_nice;
+    int new_base = 20 - new_nice;               /* back to the [1,40] scale */
+    if (new_base < 1) new_base = 1;
+    if (new_base > 40) new_base = 40;
+    current_thread->base_priority = new_base;
+    current_thread->priority = new_base;
     return new_nice;
 }
 

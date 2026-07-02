@@ -147,7 +147,8 @@ void ps_derive_row(ps_row_t *row, const ps_options_t *opts) {
     format_i32(row->ppid, sizeof(row->ppid), row->info.ppid);
     format_i32(row->pgid, sizeof(row->pgid), row->info.pgid);
     format_i32(row->sid, sizeof(row->sid), row->info.sid);
-    format_u32(row->ni, sizeof(row->ni), row->info.nice);
+    /* NI shows the signed nice; info.nice is the 0..40 PRI_USER form (20==0). */
+    format_i32(row->ni, sizeof(row->ni), (int)row->info.nice - 20);
     render_tty(row->info.tty, row->tty, sizeof(row->tty));
     snprintf(row->stat, sizeof(row->stat), "%s", state_to_stat(row->info.state));
     append_stat_suffix(row->stat, sizeof(row->stat), &row->info);

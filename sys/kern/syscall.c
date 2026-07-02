@@ -3710,7 +3710,22 @@ int kern_proc_info(pid_t pid, sys_procinfo_t *info) {
             info->tty = SYS_TTY_MAKE(SYS_TTY_MAJ_VT, idx + 1);
         }
     }
-    info->nice = 0;
+    /* Report the real nice value in the 0..40 PRI_USER convention (20 ==
+     * neutral, 0 == nice -20, 39 == nice +19) so ps(1)/top(1) display it and
+     * reflect renice(1).  The scheduler stores base_priority in [1,40] where
+     * higher == more CPU, so nice == 20 - base_priority and thus the reported
+     * field == 40 - base_priority.  All threads of a process share the nice,
+     * so the first one found is representative. */
+    {
+        int base = 20;   /* default == nice 0 when no thread is found */
+        FOREACH_THREAD(thr) {
+            if (thr->proc == target) { base = thr->base_priority; break; }
+        }
+        int n = 40 - base;
+        if (n < 0) n = 0;
+        if (n > 40) n = 40;
+        info->nice = (uint16_t)n;
+    }
     info->start_time = target->start_time;
     info->user_time = target->utime;
     info->sys_time = target->stime;
