@@ -1479,6 +1479,15 @@ long sysconf(int name) {
     case 14 /* _SC_ASYNCHRONOUS_IO */:
         /* POSIX asynchronous I/O (aio_*) is supported via librt. */
         return _POSIX_VERSION;
+    case 15 /* _SC_MONOTONIC_CLOCK */:
+        /* clock_gettime(CLOCK_MONOTONIC) is implemented. */
+        return _POSIX_VERSION;
+    case 16 /* _SC_CPUTIME */:
+        /* clock_gettime(CLOCK_PROCESS_CPUTIME_ID) is implemented. */
+        return _POSIX_VERSION;
+    case 17 /* _SC_THREAD_CPUTIME */:
+        /* clock_gettime(CLOCK_THREAD_CPUTIME_ID) is implemented. */
+        return _POSIX_VERSION;
     default:                        return -1;
     }
 }

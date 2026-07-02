@@ -24,6 +24,22 @@ extern "C" {
 #define _POSIX2_VERSION  200809L
 #define _XOPEN_VERSION   700
 
+/*
+ * POSIX.1b clock/timer options.  Substrate implements the per-process
+ * interval timers (timer_create(2)), the monotonic clock, and the
+ * process/thread CPU-time clocks (clock_gettime(CLOCK_PROCESS_CPUTIME_ID
+ * / CLOCK_THREAD_CPUTIME_ID) is backed by per-process rusage), so the
+ * corresponding option macros advertise support at the current POSIX
+ * level.  Third-party code and the OPTS conformance tests gate whole
+ * code paths on `#if !defined(_POSIX_CPUTIME) || _POSIX_CPUTIME == -1`,
+ * so leaving these undefined silently disables the feature at compile
+ * time even though the runtime supports it.
+ */
+#define _POSIX_TIMERS            200809L
+#define _POSIX_MONOTONIC_CLOCK   200809L
+#define _POSIX_CPUTIME           200809L
+#define _POSIX_THREAD_CPUTIME    200809L
+
 /* POSIX-2017 §11.1.7: a c_cc[] slot set to _POSIX_VDISABLE disables
  * the associated special-character function.  Substrate matches the
  * Linux/glibc value of 0 (0xff is the BSD convention).  */
@@ -233,6 +249,12 @@ long syscall(long number, ...);
 /* POSIX asynchronous I/O option — substrate supports aio_* via librt, so
  * sysconf(_SC_ASYNCHRONOUS_IO) reports a positive value. */
 #define _SC_ASYNCHRONOUS_IO  14
+/* POSIX.1b clock options — sysconf() reports a positive value (200809L)
+ * for each because substrate implements the monotonic clock and the
+ * process/thread CPU-time clocks (see clock_gettime(2)). */
+#define _SC_MONOTONIC_CLOCK  15
+#define _SC_CPUTIME          16
+#define _SC_THREAD_CPUTIME   17
 
 long sysconf(int name);
 

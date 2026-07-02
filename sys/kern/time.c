@@ -386,6 +386,29 @@ int kern_gettimeofday(struct timeval *tv, struct timezone *tz) {
 int kern_clock_gettime(clockid_t clk_id, struct timespec *tp) {
     if (!tp) return -1;
 
+    /*
+     * CPU-time clocks.  CLOCK_PROCESS_CPUTIME_ID is the total (user +
+     * system) CPU time consumed by the calling process, accumulated in
+     * per-process rusage by rusage_add_tick() on every timer tick.
+     * Substrate does not keep a separate per-thread CPU accounting, so
+     * CLOCK_THREAD_CPUTIME_ID reports the same process total (matching
+     * getrusage(RUSAGE_THREAD)).  These clocks are read-only.
+     */
+    if (clk_id == CLOCK_PROCESS_CPUTIME_ID ||
+        clk_id == CLOCK_THREAD_CPUTIME_ID) {
+        if (!current_process) return -EINVAL;
+        uint32_t fl = intr_disable();
+        struct timeval u = current_process->rusage.ru_utime;
+        struct timeval s = current_process->rusage.ru_stime;
+        intr_restore(fl);
+        time_t sec = u.tv_sec + s.tv_sec;
+        long   usec = u.tv_usec + s.tv_usec;
+        if (usec >= 1000000) { sec += usec / 1000000; usec %= 1000000; }
+        tp->tv_sec  = sec;
+        tp->tv_nsec = usec * 1000;
+        return 0;
+    }
+
     time_t sec_base;
     if (clk_id == CLOCK_REALTIME) {
         sec_base = boot_time + (ticks / HZ);

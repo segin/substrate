@@ -661,16 +661,16 @@ size_t strftime(char *__restrict s, size_t maxsize, const char *__restrict forma
 }
 
 clock_t clock(void) {
-    struct tms buf;
-    if (times(&buf) == (clock_t)-1) {
+    /* POSIX: clock() returns the process CPU time used, in CLOCKS_PER_SEC
+     * units.  Read it straight from the process CPU-time clock rather than
+     * scaling times()'s tms ticks — CLOCK_PROCESS_CPUTIME_ID is nanosecond
+     * resolution and needs no _SC_CLK_TCK round-trip. */
+    struct timespec ts;
+    if (clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &ts) != 0) {
         return (clock_t)-1;
     }
-
-    const unsigned long tickrate = 100;
-
-    unsigned long long total_ticks = (unsigned long long)buf.tms_utime + buf.tms_stime;
-
-    return (clock_t)((total_ticks * CLOCKS_PER_SEC) / tickrate);
+    return (clock_t)((unsigned long long)ts.tv_sec * CLOCKS_PER_SEC +
+                     (unsigned long long)ts.tv_nsec / (1000000000ULL / CLOCKS_PER_SEC));
 }
 
 double difftime(time_t time1, time_t time0) {
