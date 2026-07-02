@@ -26,6 +26,7 @@
 #include <limits.h>
 #include <stdarg.h>
 #include <stdlib.h>
+#include <string.h>
 #include <time.h>
 #include <sys/syscall.h>
 
@@ -92,6 +93,35 @@ int sem_destroy(sem_t *sem)
     return 0;   /* __SEM_LOCAL: nothing to release */
 }
 
+/*
+ * Per-process table of open named semaphores, keyed by the KERNEL ksem id.
+ *
+ * POSIX requires that repeated sem_open() calls for the same open object
+ * return the SAME sem_t address (OPTS sem_open/15-1), so we hand back one heap
+ * sem_t per kernel id, reference-counted by the number of outstanding
+ * sem_open() calls that map to it.  We still issue one SYS_KSEM_OPEN per
+ * sem_open() and one SYS_KSEM_CLOSE per sem_close() (identical kernel
+ * open/close accounting to the un-deduped path) — the table only decides which
+ * sem_t POINTER to return and when to free it.
+ *
+ * Keying by id (not by name) is essential: after sem_unlink() the name is
+ * gone, so a later sem_open() without O_CREAT must fail at the kernel, and a
+ * sem_open() with O_CREAT gets a NEW kernel id and hence a NEW, distinct sem_t
+ * (OPTS sem_unlink/6-1).  A name-keyed cache would wrongly resurrect the stale
+ * mapping.
+ */
+struct named_sem {
+    int               id;
+    sem_t            *sem;
+    int               refcount;
+    struct named_sem *next;
+};
+static struct named_sem *named_sems;
+static volatile int      named_sems_lock;
+
+static void nsem_lock(void)   { while (__sync_lock_test_and_set(&named_sems_lock, 1)) { } }
+static void nsem_unlock(void) { __sync_lock_release(&named_sems_lock); }
+
 sem_t *sem_open(const char *name, int oflag, ...)
 {
     mode_t       mode = 0;
@@ -109,12 +139,27 @@ sem_t *sem_open(const char *name, int oflag, ...)
         va_end(ap);
     }
 
+    /* Always open the kernel object: this honours O_CREAT/O_EXCL/ENOENT/perms
+     * exactly and yields the stable per-object id we dedup on. */
     long id = syscall(SYS_KSEM_OPEN, (long)name, (long)oflag,
                       (long)mode, (long)value);
     if (id < 0) {
         errno = (int)-id;
         return SEM_FAILED;
     }
+
+    /* Already have a sem_t for this id in this process?  Return it (bump the
+     * userspace refcount); the KSEM_OPEN above accounts for the kernel ref. */
+    nsem_lock();
+    for (struct named_sem *e = named_sems; e; e = e->next) {
+        if (e->id == (int)id) {
+            e->refcount++;
+            sem_t *r = e->sem;
+            nsem_unlock();
+            return r;
+        }
+    }
+    nsem_unlock();
 
     sem_t *sem = (sem_t *)malloc(sizeof(*sem));
     if (sem == NULL) {
@@ -125,6 +170,34 @@ sem_t *sem_open(const char *name, int oflag, ...)
     sem->__sem_kind = __SEM_KNAMED;
     sem->__sem_id   = (int)id;
     sem->__sem_pad[0] = sem->__sem_pad[1] = 0;
+
+    struct named_sem *e = (struct named_sem *)malloc(sizeof(*e));
+    if (e == NULL) {
+        /* Out of memory for the dedup entry: still return a working sem_t
+         * (the same-address guarantee just won't hold for this id). */
+        return sem;
+    }
+    e->id = (int)id;
+    e->sem = sem;
+    e->refcount = 1;
+
+    nsem_lock();
+    /* Re-check: another thread may have added this id concurrently.  If so,
+     * adopt its sem_t and keep our extra kernel ref (counted by refcount++);
+     * do NOT KSEM_CLOSE here — the shared sem_t's closes will balance it. */
+    for (struct named_sem *cur = named_sems; cur; cur = cur->next) {
+        if (cur->id == (int)id) {
+            cur->refcount++;
+            sem_t *r = cur->sem;
+            nsem_unlock();
+            free(e);
+            free(sem);
+            return r;
+        }
+    }
+    e->next = named_sems;
+    named_sems = e;
+    nsem_unlock();
     return sem;
 }
 
@@ -134,8 +207,26 @@ int sem_close(sem_t *sem)
         errno = EINVAL;
         return -1;
     }
+
+    /* One KSEM_CLOSE per sem_close() balances the KSEM_OPEN each sem_open()
+     * issued.  The sem_t itself is freed only when the last outstanding
+     * sem_open() for this id is closed. */
+    nsem_lock();
+    struct named_sem **pp = &named_sems, *found = NULL;
+    while (*pp) {
+        if ((*pp)->sem == sem) { found = *pp; break; }
+        pp = &(*pp)->next;
+    }
+    int last = 1;
+    if (found) {
+        if (--found->refcount > 0) last = 0;
+        else *pp = found->next;        /* last reference: unlink */
+    }
+    nsem_unlock();
+
     int r = ksem_ret(syscall(SYS_KSEM_CLOSE, (long)sem->__sem_id));
-    free(sem);                                     /* sem_open malloc'd it */
+    if (found && last) free(found);
+    if (last) free(sem);               /* sem_open malloc'd it */
     return r;
 }
 

@@ -284,8 +284,17 @@ int kern_ksem_close(int id)
 int kern_ksem_unlink(const char *kname)
 {
     ksem_lazy_init();
-    if (!kname || kname[0] != '/' || kname[1] == '\0')
+    if (!kname)
         return -EINVAL;
+    /*
+     * A name that isn't a well-formed "/something" cannot name any existing
+     * semaphore, so the semaphore "does not exist": POSIX lists ENOENT (not
+     * EINVAL) as the sem_unlink error for a missing name (OPTS
+     * sem_unlink/4-1 passes an uninitialized/garbage name and expects
+     * ENOENT).
+     */
+    if (kname[0] != '/' || kname[1] == '\0')
+        return -ENOENT;
 
     mutex_lock(&ksem_lock);
     struct kposix_sem *s = NULL;
