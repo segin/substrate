@@ -196,12 +196,15 @@ int   pthread_key_delete(pthread_key_t key);
 void *pthread_getspecific(pthread_key_t key);
 int   pthread_setspecific(pthread_key_t key, const void *value);
 
-/* ---------------- cancellation (API surface only) ----------------
- * substrate has no cancellation runtime (see the cleanup-handler note
- * below).  These provide the POSIX entry points with no-op semantics so
- * threaded software (Qt/TQt and the rest of the desktop stack) links and
- * runs.  pthread_cancel() does NOT stop the target thread, and
- * pthread_testcancel() never acts on a pending cancel — there is none. */
+/* ---------------- cancellation ----------------
+ * Real deferred + asynchronous cancellation.  Per-thread cancel state
+ * (PTHREAD_CANCEL_ENABLE/DISABLE) and type (DEFERRED/ASYNCHRONOUS) live in
+ * TLS.  pthread_cancel() posts a cancel to the target thread; a deferred
+ * cancel is acted upon at the next cancellation point (pthread_testcancel,
+ * pthread_join, pthread_cond_wait/timedwait, sem_wait/timedwait, sleep via
+ * the cancel signal), an asynchronous cancel is acted upon immediately.
+ * Acting on a cancel runs the thread's cleanup stack and TSD destructors and
+ * terminates the thread with PTHREAD_CANCELED. */
 #define PTHREAD_CANCEL_ENABLE        0
 #define PTHREAD_CANCEL_DISABLE       1
 #define PTHREAD_CANCEL_DEFERRED      0
@@ -213,16 +216,26 @@ int  pthread_setcanceltype(int type, int *oldtype);
 void pthread_testcancel(void);
 
 /* ---------------- cleanup handlers ----------------
- * POSIX cancellation-cleanup stack.  substrate's libpthread has no
- * cancellation runtime, so these are scope macros: pthread_cleanup_push
- * opens a block recording (routine, arg); pthread_cleanup_pop(execute)
- * closes it and, if execute is non-zero, runs routine(arg).  This gives
- * the standard "run on pop" behaviour that the overwhelming majority of
- * callers rely on (cairo, ksh, ...).  Cleanup triggered by an async
- * pthread_cancel() is not delivered (there is no cancel machinery to
- * deliver it), matching substrate's current cancellation support. */
-#define pthread_cleanup_push(routine, arg)     do {         void (*__pthread_cleanup_routine)(void *) = (routine);         void *__pthread_cleanup_arg = (arg);         {
-#define pthread_cleanup_pop(execute)         }         if (execute) __pthread_cleanup_routine(__pthread_cleanup_arg);     } while (0)
+ * POSIX cancellation-cleanup stack.  pthread_cleanup_push records
+ * (routine, arg) on a per-thread runtime stack; pthread_cleanup_pop removes
+ * the top entry and, if execute is non-zero, runs it.  Handlers still on the
+ * stack when the thread terminates (an explicit pthread_exit, a return from
+ * the start routine, or a cancellation acted upon at a cancellation point)
+ * are run automatically in last-in-first-out order, per POSIX.  push/pop must
+ * be paired within the same lexical scope (the buffer is a block local). */
+struct __pthread_cleanup {
+    void (*__routine)(void *);
+    void  *__arg;
+    struct __pthread_cleanup *__next;
+};
+void __pthread_cleanup_push(struct __pthread_cleanup *__buf,
+                            void (*__routine)(void *), void *__arg);
+void __pthread_cleanup_pop(struct __pthread_cleanup *__buf, int __execute);
+#define pthread_cleanup_push(routine, arg) \
+    do { struct __pthread_cleanup __pthread_cleanup_buf; \
+         __pthread_cleanup_push(&__pthread_cleanup_buf, (routine), (arg));
+#define pthread_cleanup_pop(execute) \
+         __pthread_cleanup_pop(&__pthread_cleanup_buf, (execute)); } while (0)
 
 /* ---------------- barriers ----------------
  * A rendezvous barrier for `count` threads, built on the mutex + condvar

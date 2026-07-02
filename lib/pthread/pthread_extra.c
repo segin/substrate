@@ -9,10 +9,9 @@
 #include <time.h>
 
 /* ---------------- thread attributes ----------------
- * pthread_attr_t is an int.  pthread_create currently ignores the attribute
- * object (fixed stack, always joinable), so these record only what fits and
- * are otherwise no-ops that return success — enough for callers that build an
- * attr, set a stack size / detach state, and create a thread. */
+ * pthread_attr_t is a bare int.  pthread_create honours the detach-state bit
+ * (see pthread_create.c); stack size is advisory (fixed 64 KiB) and the other
+ * fields are stored/reported for source compatibility. */
 int pthread_attr_init(pthread_attr_t *attr)            { if (attr) *attr = PTHREAD_CREATE_JOINABLE; return 0; }
 int pthread_attr_destroy(pthread_attr_t *attr)         { (void)attr; return 0; }
 int pthread_attr_setstacksize(pthread_attr_t *attr, size_t s)    { (void)attr; (void)s; return 0; }
@@ -20,26 +19,8 @@ int pthread_attr_getstacksize(const pthread_attr_t *attr, size_t *s) {
     (void)attr; if (s) *s = 64 * 1024; return 0;       /* the fixed default */
 }
 
-/* ---------------- thread scheduling parameters ----------------
- * substrate's MLFQ scheduler does not yet honour explicit per-thread policy or
- * priority, so these report SCHED_OTHER / priority 0 and accept any set as a
- * successful no-op — enough for consumers (SDL2, etc.) that politely try to
- * bump a worker's priority and tolerate it being ignored. */
-int pthread_getschedparam(pthread_t thread, int *policy, struct sched_param *param) {
-    (void)thread;
-    if (policy) *policy = SCHED_OTHER;
-    if (param)  param->sched_priority = 0;
-    return 0;
-}
-int pthread_setschedparam(pthread_t thread, int policy,
-                          const struct sched_param *param) {
-    (void)thread; (void)policy; (void)param;
-    return 0;
-}
-int pthread_setschedprio(pthread_t thread, int prio) {
-    (void)thread; (void)prio;
-    return 0;
-}
+/* pthread_get/setschedparam / pthread_setschedprio live in pthread_create.c,
+ * beside the per-thread registry that stores the round-trip policy/priority. */
 
 /*
  * pthread_attr_t is a bare int (4-byte ABI, unchanged for already-compiled
@@ -52,7 +33,10 @@ int pthread_setschedprio(pthread_t thread, int prio) {
 #define AT_INHERIT_SHIFT 1
 
 int pthread_attr_setdetachstate(pthread_attr_t *attr, int state) {
-    if (attr) *attr = (*attr & ~AT_DETACH_MASK) | (state & AT_DETACH_MASK);
+    if (!attr) return EINVAL;
+    if (state != PTHREAD_CREATE_JOINABLE && state != PTHREAD_CREATE_DETACHED)
+        return EINVAL;
+    *attr = (*attr & ~AT_DETACH_MASK) | (state & AT_DETACH_MASK);
     return 0;
 }
 int pthread_attr_getdetachstate(const pthread_attr_t *attr, int *state) {
@@ -75,12 +59,15 @@ int pthread_attr_getinheritsched(const pthread_attr_t *attr, int *inheritsched) 
     return 0;
 }
 /* Contention scope: substrate threads are always 1:1 system scope.  Accept
- * PTHREAD_SCOPE_SYSTEM, reject PTHREAD_SCOPE_PROCESS, and always report
- * system scope.  (The attr int holds the detach state, so scope is not
- * stored — there is only one valid value.) */
+ * PTHREAD_SCOPE_SYSTEM, reject the valid-but-unsupported PTHREAD_SCOPE_PROCESS
+ * with ENOTSUP, and reject any other (invalid) value with EINVAL.  Always
+ * report system scope.  (The attr int holds the detach state, so scope is not
+ * stored — there is only one supported value.) */
 int pthread_attr_setscope(pthread_attr_t *attr, int scope) {
     (void)attr;
-    return scope == PTHREAD_SCOPE_SYSTEM ? 0 : ENOTSUP;
+    if (scope == PTHREAD_SCOPE_SYSTEM) return 0;
+    if (scope == PTHREAD_SCOPE_PROCESS) return ENOTSUP;
+    return EINVAL;
 }
 int pthread_attr_getscope(const pthread_attr_t *attr, int *scope) {
     (void)attr; if (scope) *scope = PTHREAD_SCOPE_SYSTEM; return 0;
@@ -314,24 +301,5 @@ int pthread_rwlock_timedwrlock(pthread_rwlock_t *rw, const struct timespec *abst
     return 0;
 }
 
-/* ---------------- cancellation (no-op surface) ----------------
- * substrate has no cancellation runtime; provide the POSIX entry points
- * so threaded consumers (Qt/TQt, ...) link.  pthread_cancel() is a no-op
- * (it does not stop the target thread); the state/type setters just
- * report the defaults and pthread_testcancel() never has a pending
- * cancel to act on. */
-int pthread_cancel(pthread_t thread) { (void)thread; return 0; }
-
-int pthread_setcancelstate(int state, int *oldstate) {
-    (void)state;
-    if (oldstate) *oldstate = PTHREAD_CANCEL_ENABLE;
-    return 0;
-}
-
-int pthread_setcanceltype(int type, int *oldtype) {
-    (void)type;
-    if (oldtype) *oldtype = PTHREAD_CANCEL_DEFERRED;
-    return 0;
-}
-
-void pthread_testcancel(void) { }
+/* Cancellation (pthread_cancel / setcancelstate / setcanceltype /
+ * testcancel) and the cleanup-handler stack live in pthread_cancel.c. */
