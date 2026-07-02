@@ -1027,6 +1027,11 @@ void signal_handle_pending(registers_t *regs) {
     // Clear pending bit (atomic — concurrent psignal may set bits)
     __sync_fetch_and_and(&current_thread->sig_pending, ~sigmask(sig));
 
+    /* POSIX.1b timer overrun: this signal is now being accepted/delivered,
+     * so latch the overrun count of any per-process timer that generated it
+     * (timer_getoverrun(2)).  Cheap no-op when the process has no timers. */
+    ptimer_signal_delivered(current_process, sig);
+
     // Special Handling: SIGKILL always terminates immediately
     if (sig == SIGKILL) {
         signal_resume_process_threads(current_process);

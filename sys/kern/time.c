@@ -20,6 +20,7 @@
 #include <drivers/video/hw_text.h>
 #include <sys/vt.h>
 #include <sys/kern_syscalls.h>
+#include <kern/time.h>
 
 time_t boot_time = 0;
 
@@ -244,6 +245,29 @@ void proc_timers_init(process_t *p) {
     memset(p->itimer_value_ticks, 0, sizeof(p->itimer_value_ticks));
     memset(p->itimer_interval_ticks, 0, sizeof(p->itimer_interval_ticks));
     spinlock_init(&p->itimer_lock, "itimer");
+    /* POSIX timers are per-process and NOT inherited across fork() —
+     * proc_create() (used for both the initial process and fork children)
+     * calls us, so clearing the table here gives every child an empty set. */
+    proc_ptimers_clear(p);
+}
+
+/*
+ * proc_ptimers_clear - Disarm and free every POSIX per-process timer.
+ *
+ * Used at process creation (incl. fork children, so timers are not
+ * inherited), at exec() (POSIX: timers are deleted across exec), and at
+ * exit().  Safe to call before itimer_lock is initialized (process
+ * creation path) because it does not take the lock; the fork child is not
+ * yet visible to the tick.
+ */
+void proc_ptimers_clear(process_t *p) {
+    if (!p) {
+        return;
+    }
+    memset(p->ptimers, 0, sizeof(p->ptimers));
+    p->n_ptimers = 0;
+    p->n_ptimers_armed = 0;
+    p->sig_timer_pend = 0;
 }
 
 void proc_timers_cancel(process_t *p) {
@@ -259,6 +283,7 @@ void proc_timers_cancel(process_t *p) {
     spinlock_acquire(&p->itimer_lock);
     memset(p->itimer_value_ticks, 0, sizeof(p->itimer_value_ticks));
     memset(p->itimer_interval_ticks, 0, sizeof(p->itimer_interval_ticks));
+    proc_ptimers_clear(p);
     spinlock_release(&p->itimer_lock);
     intr_restore(flags);
 }
@@ -451,6 +476,456 @@ int kern_setitimer(int which, const struct itimerval *new_value, struct itimerva
     return 0;
 }
 
+/* ============================================================
+ * POSIX.1b per-process interval timers (timer_create(2)).
+ *
+ * Each process owns a fixed table of timers (process_t.ptimers[]); the
+ * timer_t handed to userspace is the slot index.  A timer's next expiry is
+ * kept as an absolute nanosecond deadline in its clock domain
+ * (CLOCK_REALTIME / CLOCK_MONOTONIC) and evaluated once per tick in
+ * proc_ptimers_fire().  Because the deadline is stored in real nanoseconds
+ * (not tick counts), the overrun count reflects true elapsed time even
+ * though the kernel tick (HZ) is coarse.
+ *
+ * Overrun accounting follows POSIX: the first expiry of an idle timer
+ * generates the signal; further expiries while that signal is still pending
+ * accumulate in overrun_pending.  When the signal is accepted/delivered
+ * (ptimer_signal_delivered) the accumulated value is latched into overrun
+ * for timer_getoverrun(2).
+ * ============================================================ */
+
+#define NS_PER_SEC 1000000000ULL
+
+static uint64_t timespec_to_ns(const struct timespec *ts) {
+    if (ts->tv_sec < 0) {
+        return 0;
+    }
+    uint64_t sec = (uint64_t)ts->tv_sec;
+    if (sec > UINT64_MAX / NS_PER_SEC) {
+        return UINT64_MAX;
+    }
+    uint64_t ns = sec * NS_PER_SEC;
+    uint64_t frac = (ts->tv_nsec > 0) ? (uint64_t)ts->tv_nsec : 0;
+    if (ns > UINT64_MAX - frac) {
+        return UINT64_MAX;
+    }
+    return ns + frac;
+}
+
+static void ns_to_timespec(uint64_t ns, struct timespec *ts) {
+    ts->tv_sec = (time_t)(ns / NS_PER_SEC);
+    ts->tv_nsec = (long)(ns % NS_PER_SEC);
+}
+
+/* POSIX field validity for timer_settime: sec >= 0 and 0 <= nsec < 1e9. */
+static int timespec_field_valid(const struct timespec *ts) {
+    return ts->tv_sec >= 0 && ts->tv_nsec >= 0 && ts->tv_nsec < (long)NS_PER_SEC;
+}
+
+/* Absolute "now" in nanoseconds for the timer's clock domain. */
+static uint64_t ptimer_now_ns(int clockid) {
+    struct timespec ts;
+    if (kern_clock_gettime((clockid_t)clockid, &ts) != 0) {
+        return 0;
+    }
+    return timespec_to_ns(&ts);
+}
+
+/* Report the remaining time (it_value) and reload (it_interval) of timer t.
+ * Caller holds itimer_lock. */
+static void ptimer_gettime_locked(process_t *p, struct posix_timer *t,
+                                  struct itimerspec *out) {
+    (void)p;
+    memset(out, 0, sizeof(*out));
+    ns_to_timespec(t->interval_ns, &out->it_interval);
+    if (t->armed) {
+        uint64_t now = ptimer_now_ns(t->clockid);
+        uint64_t rem = (t->next_ns > now) ? (t->next_ns - now) : 0;
+        ns_to_timespec(rem, &out->it_value);
+    }
+    /* A disarmed timer reports it_value == {0,0} (POSIX). */
+}
+
+int kern_timer_create(int clockid, struct sigevent *ev, int *timerid) {
+    if (!current_process || !timerid) {
+        return -EINVAL;
+    }
+    /* Substrate backs CLOCK_REALTIME and CLOCK_MONOTONIC; the CPU-time
+     * clocks and any bogus id are EINVAL (POSIX). */
+    if (clockid != CLOCK_REALTIME && clockid != CLOCK_MONOTONIC) {
+        return -EINVAL;
+    }
+
+    int notify = SIGEV_SIGNAL;
+    int signo = SIGALRM;
+    union sigval value;
+    value.sival_int = 0;
+
+    if (ev) {
+        notify = ev->sigev_notify;
+        if (notify == SIGEV_SIGNAL) {
+            signo = ev->sigev_signo;
+            value = ev->sigev_value;
+            if (signo < 1 || signo > NSIG) {
+                return -EINVAL;
+            }
+        } else if (notify == SIGEV_NONE) {
+            signo = 0;
+        } else {
+            /* SIGEV_THREAD is realized by libc, never by the kernel. */
+            return -EINVAL;
+        }
+    }
+
+    uint32_t fl = intr_disable();
+    spinlock_acquire(&current_process->itimer_lock);
+    int id = -1;
+    for (int i = 0; i < POSIX_TIMER_MAX; i++) {
+        if (!current_process->ptimers[i].used) {
+            id = i;
+            break;
+        }
+    }
+    if (id < 0) {
+        spinlock_release(&current_process->itimer_lock);
+        intr_restore(fl);
+        return -EAGAIN;   /* per-process timer table full */
+    }
+    struct posix_timer *t = &current_process->ptimers[id];
+    memset(t, 0, sizeof(*t));
+    t->used = 1;
+    t->clockid = clockid;
+    t->notify = (uint8_t)notify;
+    t->signo = signo;
+    t->value = value;
+    /* POSIX: a NULL sigevent defaults sigev_value to the timer id. */
+    if (!ev) {
+        t->value.sival_int = id;
+    }
+    current_process->n_ptimers++;
+    spinlock_release(&current_process->itimer_lock);
+    intr_restore(fl);
+
+    *timerid = id;
+    return 0;
+}
+
+int kern_timer_settime(int id, int flags, const struct itimerspec *nv,
+                       struct itimerspec *ov) {
+    if (!current_process) {
+        return -EINVAL;
+    }
+    if (id < 0 || id >= POSIX_TIMER_MAX || !nv) {
+        return -EINVAL;
+    }
+    if (!timespec_field_valid(&nv->it_value) ||
+        !timespec_field_valid(&nv->it_interval)) {
+        return -EINVAL;
+    }
+
+    uint32_t fl = intr_disable();
+    spinlock_acquire(&current_process->itimer_lock);
+    struct posix_timer *t = &current_process->ptimers[id];
+    if (!t->used) {
+        spinlock_release(&current_process->itimer_lock);
+        intr_restore(fl);
+        return -EINVAL;
+    }
+
+    if (ov) {
+        ptimer_gettime_locked(current_process, t, ov);
+    }
+
+    uint64_t value_ns = timespec_to_ns(&nv->it_value);
+    uint64_t interval_ns = timespec_to_ns(&nv->it_interval);
+    int was_armed = t->armed;
+
+    if (value_ns == 0) {
+        /* it_value == 0 disarms the timer (POSIX). */
+        t->armed = 0;
+        t->next_ns = 0;
+        t->interval_ns = 0;
+        if (was_armed && current_process->n_ptimers_armed > 0) {
+            current_process->n_ptimers_armed--;
+        }
+    } else {
+        uint64_t now = ptimer_now_ns(t->clockid);
+        if (flags & TIMER_ABSTIME) {
+            /* Absolute deadline; a time already in the past fires ASAP. */
+            t->next_ns = (value_ns > now) ? value_ns : now;
+        } else {
+            t->next_ns = (now > UINT64_MAX - value_ns) ? UINT64_MAX
+                                                       : now + value_ns;
+        }
+        t->interval_ns = interval_ns;
+        if (!was_armed) {
+            current_process->n_ptimers_armed++;
+        }
+        t->armed = 1;
+    }
+
+    /* Re-arming (or disarming) resets the timer: drop any stale overrun
+     * accounting and pending SI_TIMER signal for a clean next expiry. */
+    t->overrun = 0;
+    t->overrun_pending = 0;
+    t->sig_outstanding = 0;
+    if (t->notify == SIGEV_SIGNAL && t->signo >= 1 && t->signo <= NSIG) {
+        current_process->sig_timer_pend &= ~sigmask(t->signo);
+    }
+
+    spinlock_release(&current_process->itimer_lock);
+    intr_restore(fl);
+    return 0;
+}
+
+int kern_timer_gettime(int id, struct itimerspec *curr) {
+    if (!current_process || !curr) {
+        return -EINVAL;
+    }
+    if (id < 0 || id >= POSIX_TIMER_MAX) {
+        return -EINVAL;
+    }
+    uint32_t fl = intr_disable();
+    spinlock_acquire(&current_process->itimer_lock);
+    struct posix_timer *t = &current_process->ptimers[id];
+    if (!t->used) {
+        spinlock_release(&current_process->itimer_lock);
+        intr_restore(fl);
+        return -EINVAL;
+    }
+    ptimer_gettime_locked(current_process, t, curr);
+    spinlock_release(&current_process->itimer_lock);
+    intr_restore(fl);
+    return 0;
+}
+
+int kern_timer_delete(int id) {
+    if (!current_process) {
+        return -EINVAL;
+    }
+    if (id < 0 || id >= POSIX_TIMER_MAX) {
+        return -EINVAL;
+    }
+    uint32_t fl = intr_disable();
+    spinlock_acquire(&current_process->itimer_lock);
+    struct posix_timer *t = &current_process->ptimers[id];
+    if (!t->used) {
+        spinlock_release(&current_process->itimer_lock);
+        intr_restore(fl);
+        return -EINVAL;
+    }
+    if (t->armed && current_process->n_ptimers_armed > 0) {
+        current_process->n_ptimers_armed--;
+    }
+    if (current_process->n_ptimers > 0) {
+        current_process->n_ptimers--;
+    }
+    if (t->notify == SIGEV_SIGNAL && t->signo >= 1 && t->signo <= NSIG) {
+        current_process->sig_timer_pend &= ~sigmask(t->signo);
+    }
+    memset(t, 0, sizeof(*t));
+    spinlock_release(&current_process->itimer_lock);
+    intr_restore(fl);
+    return 0;
+}
+
+int kern_timer_getoverrun(int id) {
+    if (!current_process) {
+        return -EINVAL;
+    }
+    if (id < 0 || id >= POSIX_TIMER_MAX) {
+        return -EINVAL;
+    }
+    uint32_t fl = intr_disable();
+    spinlock_acquire(&current_process->itimer_lock);
+    struct posix_timer *t = &current_process->ptimers[id];
+    if (!t->used) {
+        spinlock_release(&current_process->itimer_lock);
+        intr_restore(fl);
+        return -EINVAL;
+    }
+    int ov = t->overrun;
+    spinlock_release(&current_process->itimer_lock);
+    intr_restore(fl);
+    return ov;
+}
+
+/*
+ * proc_ptimers_fire - Evaluate a process's POSIX timers against the tick.
+ *
+ * Called from the timer ISR (CPU 0) for every non-kernel process.  Uses
+ * spinlock_try_acquire like the itimer path: a syscall on another CPU may
+ * hold itimer_lock, in which case this tick is skipped (the absolute
+ * deadline means no expiry is lost — the next tick picks it up).  psignal()
+ * is deferred until after the lock is dropped.
+ */
+void proc_ptimers_fire(process_t *p) {
+    if (!p || p->n_ptimers_armed == 0) {
+        return;
+    }
+    if (p->state == SDYING || p->state == SZOMB) {
+        return;
+    }
+    if (!spinlock_try_acquire(&p->itimer_lock)) {
+        return;
+    }
+
+    int fire[POSIX_TIMER_MAX];
+    int nfire = 0;
+
+    for (int i = 0; i < POSIX_TIMER_MAX; i++) {
+        struct posix_timer *t = &p->ptimers[i];
+        if (!t->used || !t->armed) {
+            continue;
+        }
+        uint64_t now = ptimer_now_ns(t->clockid);
+        if (now < t->next_ns) {
+            continue;
+        }
+
+        /* How many expirations have actually occurred by now (>= 1). */
+        uint64_t nexp;
+        if (t->interval_ns == 0) {
+            nexp = 1;
+            t->armed = 0;
+            t->next_ns = 0;
+            if (p->n_ptimers_armed > 0) {
+                p->n_ptimers_armed--;
+            }
+        } else {
+            nexp = (now - t->next_ns) / t->interval_ns + 1;
+            t->next_ns += nexp * t->interval_ns;
+        }
+
+        if (!t->sig_outstanding) {
+            /* Generate the notification; extra expirations are overruns. */
+            t->sig_outstanding = 1;
+            t->overrun_pending = (int)(nexp - 1);
+            if (t->notify == SIGEV_SIGNAL && t->signo >= 1 && t->signo <= NSIG) {
+                p->sig_qval[t->signo - 1] = t->value;
+                __sync_fetch_and_or(&p->sig_timer_pend, sigmask(t->signo));
+                if (nfire < POSIX_TIMER_MAX) {
+                    fire[nfire++] = t->signo;
+                }
+            }
+        } else {
+            /* The previous notification is still pending: all of these
+             * expirations count as overruns. */
+            t->overrun_pending += (int)nexp;
+        }
+    }
+    spinlock_release(&p->itimer_lock);
+
+    for (int i = 0; i < nfire; i++) {
+        psignal(p, fire[i]);
+    }
+}
+
+/*
+ * ptimer_signal_delivered - Latch timer overrun at signal acceptance.
+ *
+ * Called from signal_handle_pending() when a signal is dequeued for
+ * delivery/acceptance.  For each timer of this process whose outstanding
+ * notification uses this signal, the accumulated overrun_pending is latched
+ * into overrun (visible to timer_getoverrun) and the generation state is
+ * reset so the next expiry starts a fresh count.
+ */
+void ptimer_signal_delivered(process_t *p, int sig) {
+    if (!p || sig < 1 || sig > NSIG) {
+        return;
+    }
+    if (p->n_ptimers == 0) {
+        return;
+    }
+    uint32_t fl = intr_disable();
+    spinlock_acquire(&p->itimer_lock);
+    for (int i = 0; i < POSIX_TIMER_MAX; i++) {
+        struct posix_timer *t = &p->ptimers[i];
+        if (!t->used || t->notify != SIGEV_SIGNAL || t->signo != sig) {
+            continue;
+        }
+        if (!t->sig_outstanding) {
+            continue;
+        }
+        t->overrun = t->overrun_pending;
+        t->overrun_pending = 0;
+        t->sig_outstanding = 0;
+    }
+    /* When the signal is not caught (SIG_DFL/SIG_IGN) no siginfo is built,
+     * so drop the SI_TIMER marker now to keep a stale si_value from bleeding
+     * into a later, unrelated instance of the same signal. */
+    {
+        sig_t h = p->sig_actions[sig - 1].sa_handler;
+        if (h == SIG_DFL || h == SIG_IGN) {
+            p->sig_timer_pend &= ~sigmask(sig);
+        }
+    }
+    spinlock_release(&p->itimer_lock);
+    intr_restore(fl);
+}
+
+int sys_timer_create(int clockid, struct sigevent *sevp, int *timerid) {
+    struct sigevent kev;
+    struct sigevent *evp = NULL;
+    int kid = -1;
+
+    if (!timerid) {
+        return -EFAULT;
+    }
+    if (sevp) {
+        if (copyin(sevp, &kev, sizeof(kev)) != 0) {
+            return -EFAULT;
+        }
+        evp = &kev;
+    }
+    int r = kern_timer_create(clockid, evp, &kid);
+    if (r != 0) {
+        return r;
+    }
+    if (copyout(&kid, timerid, sizeof(int)) != 0) {
+        return -EFAULT;
+    }
+    return 0;
+}
+
+int sys_timer_settime(int id, int flags, const struct itimerspec *nv,
+                      struct itimerspec *ov) {
+    struct itimerspec knv, kov;
+
+    if (!nv) {
+        return -EINVAL;
+    }
+    if (copyin(nv, &knv, sizeof(knv)) != 0) {
+        return -EFAULT;
+    }
+    int r = kern_timer_settime(id, flags, &knv, ov ? &kov : NULL);
+    if (r == 0 && ov && copyout(&kov, ov, sizeof(kov)) != 0) {
+        return -EFAULT;
+    }
+    return r;
+}
+
+int sys_timer_gettime(int id, struct itimerspec *curr) {
+    struct itimerspec k;
+
+    if (!curr) {
+        return -EFAULT;
+    }
+    int r = kern_timer_gettime(id, &k);
+    if (r == 0 && copyout(&k, curr, sizeof(k)) != 0) {
+        return -EFAULT;
+    }
+    return r;
+}
+
+int sys_timer_delete(int id) {
+    return kern_timer_delete(id);
+}
+
+int sys_timer_getoverrun(int id) {
+    return kern_timer_getoverrun(id);
+}
+
 time_t sys_time(time_t *tloc) {
     time_t t = kern_time(NULL);
     if (tloc) {
@@ -564,6 +1039,7 @@ void timer_tick_context(int is_usermode) {
                 continue;
             }
             proc_timer_fire(p, ITIMER_REAL);
+            proc_ptimers_fire(p);
         }
     }
 

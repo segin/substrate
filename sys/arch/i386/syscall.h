@@ -225,6 +225,16 @@
 #define SYS_SCHED_GET_PRIORITY_MIN  421
 #define SYS_SCHED_RR_GET_INTERVAL   422
 
+/* sigqueue(2) and POSIX.1b per-process timers — mirror of the userland
+ * <arch/i386/syscall.h> numbers (the build resolves the header to the
+ * userland copy; kept here so this reference stays faithful). */
+#define SYS_SIGQUEUE                508
+#define SYS_TIMER_CREATE            509
+#define SYS_TIMER_SETTIME           510
+#define SYS_TIMER_GETTIME           511
+#define SYS_TIMER_DELETE            512
+#define SYS_TIMER_GETOVERRUN        513
+
 void syscall_init(void);
 
 // GDT TLS entries

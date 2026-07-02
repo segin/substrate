@@ -46,4 +46,25 @@ struct process;
 void proc_timers_init(struct process *p);
 void proc_timers_cancel(struct process *p);
 
+/* POSIX.1b per-process interval timers (timer_create(2)). */
+struct sigevent;
+struct itimerspec;
+void proc_ptimers_clear(struct process *p);      /* create/fork/exec/exit reset */
+void proc_ptimers_fire(struct process *p);       /* per-tick expiry evaluation */
+void ptimer_signal_delivered(struct process *p, int sig); /* latch overrun */
+
+int kern_timer_create(int clockid, struct sigevent *ev, int *timerid);
+int kern_timer_settime(int timerid, int flags,
+                       const struct itimerspec *newval, struct itimerspec *oldval);
+int kern_timer_gettime(int timerid, struct itimerspec *curr);
+int kern_timer_delete(int timerid);
+int kern_timer_getoverrun(int timerid);
+
+int sys_timer_create(int clockid, struct sigevent *sevp, int *timerid);
+int sys_timer_settime(int timerid, int flags,
+                      const struct itimerspec *newval, struct itimerspec *oldval);
+int sys_timer_gettime(int timerid, struct itimerspec *curr);
+int sys_timer_delete(int timerid);
+int sys_timer_getoverrun(int timerid);
+
 #endif

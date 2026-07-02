@@ -507,19 +507,41 @@ int clock_getcpuclockid(pid_t pid, clockid_t *clock_id) {
     return 0;
 }
 
-/* timer_* — POSIX 1003.1b per-process timers.  No kernel support yet. */
+/* timer_* — POSIX 1003.1b per-process timers, backed by the native kernel
+ * timer table (sys/kern/time.c; syscalls SYS_TIMER_CREATE..GETOVERRUN).
+ * sevp is passed straight through: the kernel handles SIGEV_SIGNAL and
+ * SIGEV_NONE (SIGEV_THREAD would be realized here in libc, but no substrate
+ * consumer needs it yet). */
 
 int timer_create(clockid_t clk_id, void *sevp, timer_t *timerid) {
-    (void)clk_id; (void)sevp; (void)timerid;
-    errno = ENOSYS; return -1;
+    long r = syscall(SYS_TIMER_CREATE, (long)clk_id, (uintptr_t)sevp,
+                     (uintptr_t)timerid);
+    if (r < 0) { errno = (int)-r; return -1; }
+    return 0;
 }
-int timer_delete(timer_t timerid) { (void)timerid; errno = ENOSYS; return -1; }
-int timer_getoverrun(timer_t t) { (void)t; errno = ENOSYS; return -1; }
+
+int timer_delete(timer_t timerid) {
+    long r = syscall(SYS_TIMER_DELETE, (long)timerid);
+    if (r < 0) { errno = (int)-r; return -1; }
+    return 0;
+}
+
+int timer_getoverrun(timer_t t) {
+    long r = syscall(SYS_TIMER_GETOVERRUN, (long)t);
+    if (r < 0) { errno = (int)-r; return -1; }
+    return (int)r;
+}
+
 int timer_gettime(timer_t t, struct itimerspec *c) {
-    (void)t; (void)c; errno = ENOSYS; return -1;
+    long r = syscall(SYS_TIMER_GETTIME, (long)t, (uintptr_t)c);
+    if (r < 0) { errno = (int)-r; return -1; }
+    return 0;
 }
+
 int timer_settime(timer_t t, int flags,
                   const struct itimerspec *new_value, struct itimerspec *old_value) {
-    (void)t; (void)flags; (void)new_value; (void)old_value;
-    errno = ENOSYS; return -1;
+    long r = syscall(SYS_TIMER_SETTIME, (long)t, (long)flags,
+                     (uintptr_t)new_value, (uintptr_t)old_value);
+    if (r < 0) { errno = (int)-r; return -1; }
+    return 0;
 }
