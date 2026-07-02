@@ -4,13 +4,20 @@
  * Substrate has no kernel AIO; this implements the POSIX aio_* surface as a
  * userspace worker-thread pool over libpthread — the same model glibc's librt
  * uses.  Submitted requests are queued and a small pool of worker threads runs
- * the blocking pread/pwrite/fsync, then records the result on a per-request
+ * the blocking read/write/fsync, then records the result on a per-request
  * object hung off the aiocb (aiocb.__aio_impl).  aio_error / aio_return /
  * aio_suspend / aio_cancel read that state; completion notification
- * (SIGEV_SIGNAL / SIGEV_THREAD) fires from the worker.
+ * (SIGEV_SIGNAL / SIGEV_THREAD) fires from the worker (or, for a request that
+ * is cancelled while still queued, from aio_cancel).
+ *
+ * Per-fd serialization: at most one worker runs I/O for a given file
+ * descriptor at a time and same-fd requests run in submission (FIFO) order —
+ * matching glibc.  This is what makes aio_cancel's "some done, one blocked,
+ * the rest cancelable" model deterministic, keeps O_APPEND writes ordered, and
+ * avoids a swarm of workers hammering one inode concurrently.
  *
  * All shared state is protected by a single mutex g_lock.  g_work_cv wakes a
- * worker when a request is queued; g_done_cv wakes aio_suspend when any
+ * worker when a request becomes runnable; g_done_cv wakes aio_suspend when any
  * request completes.
  */
 #include <aio.h>
@@ -55,6 +62,37 @@ static pthread_once_t  g_once  = PTHREAD_ONCE_INIT;
 
 static struct aio_req *g_q_head, *g_q_tail;   /* pending work FIFO */
 static struct aio_req *g_all;                 /* every live request */
+
+/* Set of fds currently being serviced by a worker.  At most AIO_NWORKERS can
+ * be active at once (one per busy worker), and a given fd appears at most once
+ * (a fd is not re-dispatched while active), so a fixed array suffices.  All
+ * accesses hold g_lock. */
+static int g_active_fd[AIO_NWORKERS];
+static int g_nactive;
+
+static int fd_is_active(int fd)
+{
+    for (int i = 0; i < g_nactive; i++)
+        if (g_active_fd[i] == fd)
+            return 1;
+    return 0;
+}
+
+static void fd_mark_active(int fd)
+{
+    if (g_nactive < AIO_NWORKERS)
+        g_active_fd[g_nactive++] = fd;
+}
+
+static void fd_clear_active(int fd)
+{
+    for (int i = 0; i < g_nactive; i++) {
+        if (g_active_fd[i] == fd) {
+            g_active_fd[i] = g_active_fd[--g_nactive];
+            return;
+        }
+    }
+}
 
 /* ---- notification ---- */
 
@@ -130,6 +168,53 @@ static struct sigevent *aio_group_complete(struct aio_req *r)
     return out;
 }
 
+/* ---- the blocking I/O itself ---- */
+
+/*
+ * Run the request's I/O synchronously and return the byte count (errno set on
+ * failure, as for read/write/fsync).
+ *
+ * substrate has no pread/pwrite syscall — libc emulates them with
+ * lseek+read/write, which fails ESPIPE on a non-seekable descriptor (socket,
+ * pipe, FIFO).  For those we fall back to plain read/write, where the offset
+ * is meaningless anyway.  O_APPEND writes ignore aio_offset and append at EOF
+ * (per-fd serialization keeps the seek+write pair race-free); a write to a
+ * descriptor not open for writing reports EBADF.
+ */
+static ssize_t aio_run_io(int op, struct aiocb *cb)
+{
+    int      fd     = cb->aio_fildes;
+    void    *buf    = (void *)cb->aio_buf;
+    size_t   nbytes = cb->aio_nbytes;
+    off_t    offset = cb->aio_offset;
+    ssize_t  res;
+
+    if (op == OP_FSYNC)
+        return fsync(fd);
+
+    if (op == OP_READ) {
+        res = pread(fd, buf, nbytes, offset);
+        if (res < 0 && errno == ESPIPE)      /* non-seekable: socket/pipe */
+            res = read(fd, buf, nbytes);
+        return res;
+    }
+
+    /* OP_WRITE */
+    int fl = fcntl(fd, F_GETFL);
+    if (fl >= 0 && (fl & O_ACCMODE) == O_RDONLY) {
+        errno = EBADF;                       /* descriptor not open for writing */
+        return -1;
+    }
+    if (fl >= 0 && (fl & O_APPEND)) {
+        lseek(fd, 0, SEEK_END);              /* append; aio_offset ignored */
+        return write(fd, buf, nbytes);
+    }
+    res = pwrite(fd, buf, nbytes, offset);
+    if (res < 0 && errno == ESPIPE)          /* non-seekable: socket/pipe */
+        res = write(fd, buf, nbytes);
+    return res;
+}
+
 /* ---- worker pool ---- */
 
 static void *aio_worker(void *arg)
@@ -137,40 +222,50 @@ static void *aio_worker(void *arg)
     (void)arg;
     for (;;) {
         pthread_mutex_lock(&g_lock);
-        while (!g_q_head)
+
+        /* Pick the first queued request whose fd is not already being
+         * serviced by another worker (per-fd serialization, FIFO order). */
+        struct aio_req *r = NULL;
+        for (;;) {
+            struct aio_req **pp = &g_q_head;
+            struct aio_req  *prev = NULL;
+            while (*pp) {
+                if (!fd_is_active((*pp)->cb->aio_fildes))
+                    break;
+                prev = *pp;
+                pp = &(*pp)->q_next;
+            }
+            if (*pp) {
+                r = *pp;
+                *pp = r->q_next;
+                if (g_q_tail == r)
+                    g_q_tail = prev;
+                break;
+            }
             pthread_cond_wait(&g_work_cv, &g_lock);
-        struct aio_req *r = g_q_head;
-        g_q_head = r->q_next;
-        if (!g_q_head)
-            g_q_tail = NULL;
+        }
+
         r->queued = 0;
         r->q_next = NULL;
         struct aiocb *cb = r->cb;
         int op = r->op;
+        fd_mark_active(cb->aio_fildes);
         pthread_mutex_unlock(&g_lock);
 
         /* Run the blocking I/O. */
-        ssize_t res = 0;
-        int e = 0;
-        if (op == OP_READ) {
-            res = pread(cb->aio_fildes, (void *)cb->aio_buf,
-                        cb->aio_nbytes, cb->aio_offset);
-            if (res < 0) e = errno;
-        } else if (op == OP_WRITE) {
-            res = pwrite(cb->aio_fildes, (const void *)cb->aio_buf,
-                         cb->aio_nbytes, cb->aio_offset);
-            if (res < 0) e = errno;
-        } else { /* OP_FSYNC */
-            res = fsync(cb->aio_fildes);
-            if (res < 0) e = errno;
-        }
+        errno = 0;
+        ssize_t res = aio_run_io(op, cb);
+        int e = (res < 0) ? errno : 0;
 
         pthread_mutex_lock(&g_lock);
         r->ret   = res;
         r->err   = (res < 0) ? e : 0;
         r->state = REQ_DONE;
+        fd_clear_active(cb->aio_fildes);
         struct sigevent *gsev = aio_group_complete(r);
         pthread_cond_broadcast(&g_done_cv);
+        /* Freeing this fd may make a queued same-fd request runnable. */
+        pthread_cond_broadcast(&g_work_cv);
         pthread_mutex_unlock(&g_lock);
 
         /* Per-request notification, then any group notification. */
@@ -212,14 +307,15 @@ static void aio_enqueue(struct aio_req *r)
     g_all = r;
 }
 
-static int aio_submit(struct aiocb *cb, int op, struct aio_group *group)
+/* Allocate + initialise a request for cb and enqueue it (caller holds g_lock).
+ * Returns the request, or NULL on OOM (errno=EAGAIN). */
+static struct aio_req *aio_new_req(struct aiocb *cb, int op,
+                                   struct aio_group *group)
 {
-    pthread_once(&g_once, aio_pool_init);
-
     struct aio_req *r = calloc(1, sizeof(*r));
     if (!r) {
         errno = EAGAIN;
-        return -1;
+        return NULL;
     }
     r->cb    = cb;
     r->op    = op;
@@ -228,17 +324,29 @@ static int aio_submit(struct aiocb *cb, int op, struct aio_group *group)
     r->err   = EINPROGRESS;
     r->group = group;
     cb->__aio_impl = r;
+    aio_enqueue(r);
+    return r;
+}
+
+static int aio_submit(struct aiocb *cb, int op, struct aio_group *group)
+{
+    pthread_once(&g_once, aio_pool_init);
 
     pthread_mutex_lock(&g_lock);
-    aio_enqueue(r);
-    pthread_cond_signal(&g_work_cv);
+    struct aio_req *r = aio_new_req(cb, op, group);
+    if (r)
+        pthread_cond_broadcast(&g_work_cv);
     pthread_mutex_unlock(&g_lock);
-    return 0;
+    return r ? 0 : -1;
 }
 
 int aio_read(struct aiocb *aiocbp)
 {
     if (!aiocbp) { errno = EINVAL; return -1; }
+    if (aiocbp->aio_reqprio < 0 || aiocbp->aio_offset < 0) {
+        errno = EINVAL;
+        return -1;
+    }
     aiocbp->aio_lio_opcode = LIO_READ;
     return aio_submit(aiocbp, OP_READ, NULL);
 }
@@ -246,6 +354,10 @@ int aio_read(struct aiocb *aiocbp)
 int aio_write(struct aiocb *aiocbp)
 {
     if (!aiocbp) { errno = EINVAL; return -1; }
+    if (aiocbp->aio_reqprio < 0 || aiocbp->aio_offset < 0) {
+        errno = EINVAL;
+        return -1;
+    }
     aiocbp->aio_lio_opcode = LIO_WRITE;
     return aio_submit(aiocbp, OP_WRITE, NULL);
 }
@@ -254,6 +366,8 @@ int aio_fsync(int op, struct aiocb *aiocbp)
 {
     if (!aiocbp) { errno = EINVAL; return -1; }
     if (op != O_SYNC && op != O_DSYNC) { errno = EINVAL; return -1; }
+    /* POSIX: fail with EBADF if aio_fildes is not a valid descriptor. */
+    if (fcntl(aiocbp->aio_fildes, F_GETFL) == -1) { errno = EBADF; return -1; }
     return aio_submit(aiocbp, OP_FSYNC, NULL);
 }
 
@@ -351,11 +465,20 @@ int aio_suspend(const struct aiocb *const list[], int nent,
 
 int aio_cancel(int fildes, struct aiocb *aiocbp)
 {
+    /* EBADF if fildes is not a valid descriptor. */
+    if (fcntl(fildes, F_GETFL) == -1) {
+        errno = EBADF;
+        return -1;
+    }
+
     int canceled = 0, notcanceled = 0, alldone = 0;
-    /* Group notifications are deferred to after the scan so we never drop the
-     * lock mid-iteration (which could invalidate the g_all cursor). */
-    struct sigevent *defer[16];
-    int ndefer = 0;
+    /* Notifications are deferred to after the scan so we never drop the lock
+     * mid-iteration (which could invalidate the g_all cursor).  A cancelled
+     * request must still deliver its completion notification (POSIX). */
+    struct sigevent *gdefer[64];
+    int ngdefer = 0;
+    struct aiocb   *cbnotify[64];
+    int ncbnotify = 0;
 
     pthread_mutex_lock(&g_lock);
     for (struct aio_req *r = g_all; r; r = r->all_next) {
@@ -380,8 +503,10 @@ int aio_cancel(int fildes, struct aiocb *aiocbp)
             r->err    = ECANCELED;
             r->ret    = -1;
             struct sigevent *gsev = aio_group_complete(r);
-            if (gsev && ndefer < (int)(sizeof(defer)/sizeof(defer[0])))
-                defer[ndefer++] = gsev;
+            if (gsev && ngdefer < (int)(sizeof(gdefer)/sizeof(gdefer[0])))
+                gdefer[ngdefer++] = gsev;
+            if (ncbnotify < (int)(sizeof(cbnotify)/sizeof(cbnotify[0])))
+                cbnotify[ncbnotify++] = r->cb;
             canceled++;
         } else if (r->state == REQ_INPROGRESS) {
             notcanceled++;      /* running — cannot interrupt blocking I/O */
@@ -393,15 +518,19 @@ int aio_cancel(int fildes, struct aiocb *aiocbp)
         pthread_cond_broadcast(&g_done_cv);
     pthread_mutex_unlock(&g_lock);
 
-    for (int i = 0; i < ndefer; i++) {
-        aio_do_notify(defer[i]);
-        free(defer[i]);
+    /* Per-request notifications for successfully cancelled requests, then any
+     * lio_listio group notifications that the cancel completed. */
+    for (int i = 0; i < ncbnotify; i++)
+        aio_do_notify(&cbnotify[i]->aio_sigevent);
+    for (int i = 0; i < ngdefer; i++) {
+        aio_do_notify(gdefer[i]);
+        free(gdefer[i]);
     }
 
     if (notcanceled > 0)
         return AIO_NOTCANCELED;
     if (canceled > 0)
-        return REQ_CANCELED;
+        return AIO_CANCELED;
     (void)alldone;
     return AIO_ALLDONE;
 }
@@ -415,12 +544,24 @@ int lio_listio(int mode, struct aiocb *const restrict list[restrict],
         errno = EINVAL;
         return -1;
     }
+    pthread_once(&g_once, aio_pool_init);
 
-    /* Count the real operations. */
+    int had_err = 0;      /* an entry could not be queued -> EIO */
+
+    /* Count the real operations and flag invalid opcodes up front. */
     int nops = 0;
     for (int i = 0; i < nent; i++) {
-        if (list[i] && list[i]->aio_lio_opcode != LIO_NOP)
-            nops++;
+        struct aiocb *cb = list[i];
+        if (!cb)
+            continue;
+        int oc = cb->aio_lio_opcode;
+        if (oc == LIO_NOP)
+            continue;
+        if (oc != LIO_READ && oc != LIO_WRITE) {
+            had_err = 1;        /* invalid opcode */
+            continue;
+        }
+        nops++;
     }
 
     struct aio_group *group = NULL;
@@ -432,33 +573,45 @@ int lio_listio(int mode, struct aiocb *const restrict list[restrict],
         }
     }
 
-    int err = 0;
+    /* Submit every valid op under one lock hold so per-fd ordering across the
+     * batch is FIFO and no worker can decrement the group counter mid-submit. */
+    pthread_mutex_lock(&g_lock);
+    int submitted = 0;
     for (int i = 0; i < nent; i++) {
         struct aiocb *cb = list[i];
-        if (!cb || cb->aio_lio_opcode == LIO_NOP)
+        if (!cb)
             continue;
-        int op;
-        if (cb->aio_lio_opcode == LIO_READ)  op = OP_READ;
-        else if (cb->aio_lio_opcode == LIO_WRITE) op = OP_WRITE;
-        else { err = EINVAL; continue; }
-        if (aio_submit(cb, op, group) != 0)
-            err = errno;
+        int oc = cb->aio_lio_opcode;
+        if (oc != LIO_READ && oc != LIO_WRITE)   /* LIO_NOP or invalid */
+            continue;
+        int op = (oc == LIO_READ) ? OP_READ : OP_WRITE;
+        if (aio_new_req(cb, op, group))
+            submitted++;
+        else
+            had_err = 1;        /* OOM: this op could not be queued */
     }
+    if (group) {
+        group->remaining = submitted;   /* correct for any failed submits */
+        if (submitted == 0) { free(group); group = NULL; }
+    }
+    if (submitted)
+        pthread_cond_broadcast(&g_work_cv);
+    pthread_mutex_unlock(&g_lock);
 
     if (mode == LIO_WAIT) {
         /* Block until every submitted op completes. */
         for (int i = 0; i < nent; i++) {
             struct aiocb *cb = list[i];
-            if (!cb || cb->aio_lio_opcode == LIO_NOP || !cb->__aio_impl)
+            if (!cb || !cb->__aio_impl)
                 continue;
             const struct aiocb *one[1] = { cb };
             aio_suspend(one, 1, NULL);
         }
-        if (err) { errno = err; return -1; }
+        if (had_err) { errno = EIO; return -1; }
         return 0;
     }
 
     /* LIO_NOWAIT. */
-    if (err) { errno = err; return -1; }
+    if (had_err) { errno = EIO; return -1; }
     return 0;
 }

@@ -1791,7 +1791,18 @@ int sys_getsockopt(int fd, int level, int optname,
             return 0;
         }
         if (optname == 7 /*SO_SNDBUF*/ || optname == 8 /*SO_RCVBUF*/) {
-            *(int *)optval = 32 * 1024;    /* report a plausible buffer size */
+            /* Report a buffer size consistent with when a send actually
+             * blocks.  A SOCK_DGRAM send blocks once the peer's rx ring
+             * (AFUNIX_BUF_SIZE = 256 KiB) is full.  POSIX aio_cancel
+             * conformance derives a per-message size of SO_SNDBUF/2 and
+             * expects two such messages to fill the buffer (so the third
+             * blocks and stays cancelable).  Report 192 KiB: two 96 KiB
+             * messages fit the 256 KiB ring (with headroom for the write
+             * path's per-4KiB-chunk datagram framing) and a third does not. */
+            afunix_sock_t *us = afunix_from_fd(fd);
+            *(int *)optval = (us && us->type == SOCK_DGRAM)
+                                 ? (192 * 1024)
+                                 : 32 * 1024;
             *optlen = sizeof(int);
             return 0;
         }
