@@ -726,7 +726,7 @@ static afunix_sock_t *afunix_alloc(int type) {
     s->node.close = afunix_node_close;
     s->node.poll  = afunix_node_poll;
     s->node.impl  = (uintptr_t)s;
-    strncpy(s->node.name, "<socket>", sizeof(s->node.name) - 1);
+    strlcpy(s->node.name, "<socket>", sizeof(s->node.name));
     return s;
 }
 

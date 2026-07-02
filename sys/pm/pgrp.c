@@ -304,7 +304,7 @@ int sys_setlogin(const char *name) {
         return -EPERM;
     }
     sess = current_process->p_pgrp->pg_session;
-    strncpy(sess->s_login, kname, sizeof(sess->s_login) - 1);
+    strlcpy(sess->s_login, kname, sizeof(sess->s_login));
     sess->s_login[sizeof(sess->s_login) - 1] = '\0';
     return 0;
 }

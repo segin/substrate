@@ -117,7 +117,7 @@ static void lo_thread(void *arg) {
 
 void loopback_init(void) {
     if (lo_netdev.ifindex) return;
-    strncpy(lo_netdev.name, "lo", NETDEV_NAME_MAX - 1);
+    strlcpy(lo_netdev.name, "lo", NETDEV_NAME_MAX);
     /* Use a recognisable zero MAC.  Real loopback doesn't have one. */
     memset(lo_netdev.hwaddr, 0, NETDEV_HWADDR_LEN);
     lo_netdev.mtu   = 16384;

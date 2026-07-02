@@ -7,6 +7,7 @@
 #include <arch/i386/percpu.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 #include "pmap.h"
 
 // Arch-Specific Externs
@@ -76,8 +77,7 @@ void sched_init(void) {
     kernel_process->root_node = fs_root;
     kernel_process->pmap = pmap_kernel();
     ldt_init_process(kernel_process);
-    extern char *strcpy(char *, const char *);
-    strcpy(kernel_process->comm, "swapper");
+    strlcpy(kernel_process->comm, "swapper", sizeof(kernel_process->comm));
 
     thread_t *t = sched_alloc_thread(kernel_process);
     t->state = THREAD_RUNNING;

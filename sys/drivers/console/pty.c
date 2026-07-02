@@ -953,7 +953,7 @@ void pty_init(void) {
     memset(pty_pairs, 0, sizeof(pty_pairs));
 
     memset(&ptmx_node, 0, sizeof(ptmx_node));
-    strncpy(ptmx_node.name, "ptmx", sizeof(ptmx_node.name) - 1);
+    strlcpy(ptmx_node.name, "ptmx", sizeof(ptmx_node.name));
     ptmx_node.flags = FS_CHARDEVICE;
     /*
      * /dev/ptmx is the clone-device entry point: anyone may open()

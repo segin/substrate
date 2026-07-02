@@ -224,7 +224,7 @@ int rtl8139_setup(pci_device_t *pdev) {
     if (rtl.irq) request_irq(rtl.irq, rtl_irq, 0, "rtl8139", &rtl);
 
     /* Register. */
-    strncpy(rtl.netdev.name, "eth0", NETDEV_NAME_MAX - 1);
+    strlcpy(rtl.netdev.name, "eth0", NETDEV_NAME_MAX);
     rtl.netdev.mtu = 1500;
     rtl.netdev.flags = NETDEV_IFF_UP | NETDEV_IFF_BROADCAST | NETDEV_IFF_RUNNING;
     rtl.netdev.ops = &rtl_ops;

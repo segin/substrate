@@ -38,7 +38,7 @@ static fs_node_t fuse_device_node;
 
 void fuse_init(void) {
     memset(&fuse_device_node, 0, sizeof(fs_node_t));
-    strncpy(fuse_device_node.name, "fuse", sizeof(fuse_device_node.name) - 1);
+    strlcpy(fuse_device_node.name, "fuse", sizeof(fuse_device_node.name));
     fuse_device_node.name[sizeof(fuse_device_node.name) - 1] = '\0';
     fuse_device_node.flags = FS_CHARDEVICE;
     fuse_device_node.read = &fuse_dev_read;

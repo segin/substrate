@@ -260,7 +260,7 @@ static int root_mount_from_spec(const char *device, const char *spec) {
         return root_mount_auto(device);
     }
 
-    strncpy(spec_buf, spec, sizeof(spec_buf) - 1);
+    strlcpy(spec_buf, spec, sizeof(spec_buf));
     spec_buf[sizeof(spec_buf) - 1] = '\0';
     cursor = spec_buf;
 

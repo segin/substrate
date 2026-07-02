@@ -38,7 +38,7 @@ int request_irq(unsigned int irq, irq_handler_t handler, unsigned long flags,
     action->dev_id = dev_id;
     action->flags = flags;
     if (name != NULL) {
-        strncpy(action->name, name, sizeof(action->name) - 1);
+        strlcpy(action->name, name, sizeof(action->name));
     }
 
     /* irq_lock is also taken from interrupt context by irq_dispatch().

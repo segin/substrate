@@ -54,7 +54,7 @@ void blkdev_register(blkdev_t *dev) {
 
     // Setup VFS node
     memset(&dev->node, 0, sizeof(fs_node_t));
-    strncpy(dev->node.name, dev->name, sizeof(dev->node.name) - 1);
+    strlcpy(dev->node.name, dev->name, sizeof(dev->node.name));
     dev->node.flags = FS_BLOCKDEVICE;
     dev->node.length = dev->total_sectors * dev->sector_size;
     dev->node.impl = (uint32_t)(uintptr_t)dev;
@@ -223,7 +223,7 @@ void blkdev_scan_partitions(blkdev_t *dev) {
 
     memset(provider, 0, sizeof(*provider));
     provider->blkdev = dev;
-    strncpy(provider->disk.name, dev->name, sizeof(provider->disk.name) - 1);
+    strlcpy(provider->disk.name, dev->name, sizeof(provider->disk.name));
     provider->disk.name[sizeof(provider->disk.name) - 1] = '\0';
     provider->disk.priv = provider;
     provider->disk.read = blkdev_geom_read;

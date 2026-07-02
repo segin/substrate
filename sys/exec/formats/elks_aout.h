@@ -218,10 +218,10 @@ static inline void elks_apply_exec_state(process_t *proc,
         }
     }
 
-    strncpy(proc->comm, name, sizeof(proc->comm) - 1);
+    strlcpy(proc->comm, name, sizeof(proc->comm));
     proc->comm[sizeof(proc->comm) - 1] = '\0';
     if (path) {
-        strncpy(proc->exec_path, path, sizeof(proc->exec_path) - 1);
+        strlcpy(proc->exec_path, path, sizeof(proc->exec_path));
         proc->exec_path[sizeof(proc->exec_path) - 1] = '\0';
     } else {
         proc->exec_path[0] = '\0';

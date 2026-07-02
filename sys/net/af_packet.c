@@ -129,7 +129,7 @@ static int afpkt_install_fd(afpkt_sock_t *s) {
     s->node.write = afpkt_node_write;
     s->node.close = afpkt_node_close;
     s->node.impl  = (uintptr_t)s;
-    strncpy(s->node.name, "<af_packet>", sizeof(s->node.name) - 1);
+    strlcpy(s->node.name, "<af_packet>", sizeof(s->node.name));
     f->f_data = &s->node;
     f->f_type = DTYPE_VNODE;
     f->f_flag = FREAD | FWRITE;

@@ -174,7 +174,7 @@ static int afinet_ioctl(fs_node_t *node, uint32_t request, void *arg) {
         for (netdev_t *d = netdev_first(); d && n < max; d = netdev_next(d)) {
             struct ifreq e;
             memset(&e, 0, sizeof(e));
-            strncpy(e.ifr_name, d->name, IFNAMSIZ - 1);
+            strlcpy(e.ifr_name, d->name, IFNAMSIZ);
             struct sin_kern *sin = (struct sin_kern *)&e.ifr_addr;
             sin->sin_family = AF_INET;
             sin->sin_addr   = d->ip4_addr;
@@ -231,7 +231,7 @@ static int afinet_ioctl(fs_node_t *node, uint32_t request, void *arg) {
      * return directly (nothing to hand back). */
     switch (request) {
         case SIOCGIFNAME:
-            strncpy(r->ifr_name, dev->name, IFNAMSIZ - 1);
+            strlcpy(r->ifr_name, dev->name, IFNAMSIZ);
             goto out_get;
         case SIOCGIFINDEX:
             r->ifr_ifindex = (int)dev->ifindex;
@@ -488,7 +488,7 @@ static int afi_install_fd(afi_sock_t *s) {
     s->node.ioctl = afinet_ioctl;
     s->node.poll  = afinet_node_poll;
     s->node.impl  = (uintptr_t)s;
-    strncpy(s->node.name, "<af_inet>", sizeof(s->node.name) - 1);
+    strlcpy(s->node.name, "<af_inet>", sizeof(s->node.name));
     f->f_data = &s->node;
     f->f_type = DTYPE_VNODE;
     f->f_flag = FREAD | FWRITE;

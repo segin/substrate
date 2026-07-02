@@ -116,7 +116,7 @@ static void file_set_path(file_t *f, const char *path) {
         f->f_path[0] = '\0';
         return;
     }
-    strncpy(f->f_path, path, sizeof(f->f_path) - 1);
+    strlcpy(f->f_path, path, sizeof(f->f_path));
     f->f_path[sizeof(f->f_path) - 1] = '\0';
 }
 
@@ -131,7 +131,7 @@ static void file_build_path(char *out, size_t out_sz, const char *path, const ch
     }
 
     if (path[0] == '/') {
-        strncpy(out, path, out_sz - 1);
+        strlcpy(out, path, out_sz);
         out[out_sz - 1] = '\0';
         return;
     }
@@ -145,7 +145,7 @@ static void file_build_path(char *out, size_t out_sz, const char *path, const ch
         return;
     }
 
-    strncpy(out, path, out_sz - 1);
+    strlcpy(out, path, out_sz);
     out[out_sz - 1] = '\0';
 }
 
@@ -1164,15 +1164,15 @@ int kern_uname(struct utsname *buf) {
     
     memset(buf, 0, sizeof(struct utsname));
     
-    strncpy(buf->sysname, "Substrate", 255);
+    strlcpy(buf->sysname, "Substrate", sizeof(buf->sysname));
     buf->sysname[255] = '\0';
-    strncpy(buf->nodename, kernel_hostname, 255);
+    strlcpy(buf->nodename, kernel_hostname, sizeof(buf->nodename));
     buf->nodename[255] = '\0';
-    strncpy(buf->release, "0.2", 255);
+    strlcpy(buf->release, "0.2", sizeof(buf->release));
     buf->release[255] = '\0';
-    strncpy(buf->version, "Kernel", 255);
+    strlcpy(buf->version, "Kernel", sizeof(buf->version));
     buf->version[255] = '\0';
-    strncpy(buf->machine, "i386", 255);
+    strlcpy(buf->machine, "i386", sizeof(buf->machine));
     buf->machine[255] = '\0';
     buf->domainname[0] = '\0';
     
@@ -3447,7 +3447,7 @@ int kern_chdir(const char *path) {
     open_fs(node, 1, 0);
     current_process->cwd_node = node;
     if (kern_getcwd(current_process->cwd_path, sizeof(current_process->cwd_path)) != 0) {
-        strncpy(current_process->cwd_path, "/", sizeof(current_process->cwd_path) - 1);
+        strlcpy(current_process->cwd_path, "/", sizeof(current_process->cwd_path));
         current_process->cwd_path[sizeof(current_process->cwd_path) - 1] = '\0';
     }
     if (old_cwd && old_cwd != node) {
@@ -3468,7 +3468,7 @@ int kern_fchdir(int fd) {
     open_fs(node, 1, 0);
     current_process->cwd_node = node;
     if (kern_getcwd(current_process->cwd_path, sizeof(current_process->cwd_path)) != 0) {
-        strncpy(current_process->cwd_path, "/", sizeof(current_process->cwd_path) - 1);
+        strlcpy(current_process->cwd_path, "/", sizeof(current_process->cwd_path));
         current_process->cwd_path[sizeof(current_process->cwd_path) - 1] = '\0';
     }
     if (old_cwd && old_cwd != node) {
@@ -3707,7 +3707,7 @@ int kern_proc_info(pid_t pid, sys_procinfo_t *info) {
      * rusage.ru_maxrss always read 0, so RES showed 0 for every process). */
     info->rss = target->pmap ? pmap_resident_count(target->pmap) : 0;
     
-    strncpy(info->name, target->comm, sizeof(info->name)-1);
+    strlcpy(info->name, target->comm, sizeof(info->name));
     return 0;
 }
 

@@ -28,9 +28,9 @@ static void core_fill_process_metadata(struct core_record *rec, process_t *p) {
     rec->trap_addr = current_thread && current_thread->proc == p ? current_thread->trap_addr : 0;
     rec->trap_code = current_thread && current_thread->proc == p ? current_thread->trap_code : 0;
 
-    strncpy(rec->comm, p->comm, sizeof(rec->comm) - 1U);
+    strlcpy(rec->comm, p->comm, sizeof(rec->comm));
     rec->comm[sizeof(rec->comm) - 1U] = '\0';
-    strncpy(rec->exec_path, p->exec_path, sizeof(rec->exec_path) - 1U);
+    strlcpy(rec->exec_path, p->exec_path, sizeof(rec->exec_path));
     rec->exec_path[sizeof(rec->exec_path) - 1U] = '\0';
 }
 

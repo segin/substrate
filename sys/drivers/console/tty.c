@@ -121,7 +121,7 @@ void tty_register_device(struct tty *tty, char *name) {
     if (!node) return;
     
     memset(node, 0, sizeof(fs_node_t));
-    strncpy(node->name, name, sizeof(node->name) - 1);
+    strlcpy(node->name, name, sizeof(node->name));
     node->flags = FS_CHARDEVICE;
     /*
      * Standard Unix: VCs are 0620 root:tty.  login(1) chowns the

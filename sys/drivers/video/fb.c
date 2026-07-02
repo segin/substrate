@@ -519,7 +519,7 @@ static int fb_fs_ioctl(fs_node_t *node, uint32_t request, void *arg) {
         if (!arg) return -EINVAL;
 
         memset(&fi, 0, sizeof(fi));
-        strncpy(fi.id, "substratefb", sizeof(fi.id) - 1);
+        strlcpy(fi.id, "substratefb", sizeof(fi.id));
         /* smem_start is the PHYSICAL framebuffer base.  We hand back
          * the kernel virtual address (the consumer mmaps /dev/fb0
          * to get a userland mapping; the absolute physical value

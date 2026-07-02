@@ -502,7 +502,7 @@ static fs_node_t *fat_alloc_node(fat_fs_t *fs, const char *name, uint64_t inode,
     ctx->attr = attr;
     
     memset(node, 0, sizeof(fs_node_t));
-    strncpy(node->name, name, 127);
+    strlcpy(node->name, name, sizeof(node->name));
     node->name[127] = '\0';
     node->impl = (uint32_t)(uintptr_t)ctx;
     node->inode = inode;
@@ -575,7 +575,7 @@ fs_node_t *fat_finddir(fs_node_t *node, char *name) {
                 char entry_name[128];
                 if (lfn_len > 0) {
                     lfn_buffer[lfn_len] = '\0';
-                    strncpy(entry_name, lfn_buffer, 127);
+                    strlcpy(entry_name, lfn_buffer, sizeof(entry_name));
                     entry_name[127] = '\0';
                 } else {
                     fat_parse_short_name(entry->name, entry_name);
@@ -650,7 +650,7 @@ fs_node_t *fat_finddir(fs_node_t *node, char *name) {
             char entry_name[128];
             if (lfn_len > 0) {
                 lfn_buffer[lfn_len] = '\0';
-                strncpy(entry_name, lfn_buffer, 127);
+                strlcpy(entry_name, lfn_buffer, sizeof(entry_name));
                 entry_name[127] = '\0';
             } else {
                 fat_parse_short_name(entry->name, entry_name);

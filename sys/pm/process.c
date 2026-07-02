@@ -472,9 +472,9 @@ static int proc_fork_common(process_t *parent, void *stack, int is_vfork) {
     if (child_proc->cwd_node) {
         open_fs(child_proc->cwd_node, 1, 0);
     }
-    strncpy(child_proc->cwd_path, parent->cwd_path, sizeof(child_proc->cwd_path) - 1);
+    strlcpy(child_proc->cwd_path, parent->cwd_path, sizeof(child_proc->cwd_path));
     child_proc->cwd_path[sizeof(child_proc->cwd_path) - 1] = '\0';
-    strncpy(child_proc->exec_path, parent->exec_path, sizeof(child_proc->exec_path) - 1);
+    strlcpy(child_proc->exec_path, parent->exec_path, sizeof(child_proc->exec_path));
     child_proc->exec_path[sizeof(child_proc->exec_path) - 1] = '\0';
     child_proc->cmdline_tail_len = parent->cmdline_tail_len;
     child_proc->cmdline_tail_argc = parent->cmdline_tail_argc;

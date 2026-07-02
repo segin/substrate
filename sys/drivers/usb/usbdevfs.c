@@ -180,7 +180,7 @@ static fs_node_t *usbdevfs_make_node(const char *name, usb_device_t *dev)
     if (node == NULL) {
         return NULL;
     }
-    strncpy(node->name, name, sizeof(node->name) - 1);
+    strlcpy(node->name, name, sizeof(node->name));
     node->impl = (uintptr_t)dev;
     return node;
 }

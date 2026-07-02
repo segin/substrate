@@ -36,7 +36,7 @@ static void sysfs_refresh_timestamps(fs_node_t *node) {
  * d_name buffers are zero-initialized today so it works, but make it
  * explicit so a future memset removal doesn't silently break things. */
 #define SYSFS_NAME_SET(dst, src) do {                           \
-    strncpy((dst), (src), sizeof(dst) - 1);                     \
+    strlcpy((dst), (src), sizeof(dst));                     \
     (dst)[sizeof(dst) - 1] = '\0';                              \
 } while (0)
 
@@ -58,7 +58,7 @@ static fs_node_t *sysfs_finddir(fs_node_t *node, char *name) {
     if (strcmp(name, "bus") == 0 || strcmp(name, "class") == 0 || strcmp(name, "devices") == 0) {
         static fs_node_t sub_node;
         memset(&sub_node, 0, sizeof(fs_node_t));
-        strncpy(sub_node.name, name, sizeof(sub_node.name) - 1);
+        strlcpy(sub_node.name, name, sizeof(sub_node.name));
         sub_node.flags = FS_DIRECTORY;
         sub_node.mask = 0555;
         sub_node.uid = 0;
