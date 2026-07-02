@@ -247,12 +247,12 @@ void psiginfo(const siginfo_t *si, const char *s) {
 }
 
 int sigaltstack(const stack_t *ss, stack_t *oss) {
-    /* No alt-stack support yet — accept the disable case so
-     * callers can use the default stack. */
-    (void)ss;
-    if (oss) { oss->ss_sp = 0; oss->ss_flags = SS_DISABLE; oss->ss_size = 0; }
-    errno = ENOSYS;
-    return -1;
+    /* The kernel's sys_sigaltstack (SYS_SIGALTSTACK) is fully implemented
+     * and wired, so forward to it instead of stubbing.  The old ENOSYS stub
+     * made all 78 sigaction/12-* (SA_ONSTACK) tests bail UNRESOLVED at setup. */
+    long r = syscall(SYS_SIGALTSTACK, (long)(uintptr_t)ss, (long)(uintptr_t)oss);
+    if (r < 0 && r >= -4095) { errno = (int)-r; return -1; }
+    return (int)r;
 }
 
 int sigqueue(pid_t pid, int sig, const union sigval value) {
