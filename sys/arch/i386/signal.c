@@ -170,6 +170,10 @@ static void populate_siginfo(siginfo_t *info, int sig, int code) {
     if (current_thread && current_thread->rtsig_deliver_active) {
         info->si_value = current_thread->rtsig_deliver_value;
         info->si_code  = current_thread->rtsig_deliver_code;
+        /* si_pid/si_uid must be the SENDER (recorded at enqueue), not the
+         * receiver filled in above. */
+        info->si_pid   = current_thread->rtsig_deliver_pid;
+        info->si_uid   = current_thread->rtsig_deliver_uid;
     }
     /* A POSIX.1b timer expiration carries the sigev_value payload and is
      * reported with si_code == SI_TIMER.  Checked before the sigqueue path
@@ -179,7 +183,10 @@ static void populate_siginfo(siginfo_t *info, int sig, int code) {
         (current_process->sig_timer_pend & sigmask(sig))) {
         info->si_value = current_process->sig_qval[sig - 1];
         info->si_code = SI_TIMER;
-        current_process->sig_timer_pend &= ~sigmask(sig);
+        /* Atomic clear: the timer tick sets this bit from IRQ context via
+         * __sync_fetch_and_or; a plain RMW here could lose a concurrent set of
+         * a DIFFERENT signo's bit. */
+        __sync_fetch_and_and(&current_process->sig_timer_pend, ~sigmask(sig));
     }
     /* A signal posted via sigqueue(2) carries a union sigval payload and is
      * reported with si_code == SI_QUEUE.  Consume the stored value here so a

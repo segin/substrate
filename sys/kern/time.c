@@ -256,18 +256,28 @@ void proc_timers_init(process_t *p) {
  *
  * Used at process creation (incl. fork children, so timers are not
  * inherited), at exec() (POSIX: timers are deleted across exec), and at
- * exit().  Safe to call before itimer_lock is initialized (process
- * creation path) because it does not take the lock; the fork child is not
- * yet visible to the tick.
+ * exit().  Takes itimer_lock with IRQs disabled: the timer tick reads/writes
+ * this table under the same lock from IRQ context, so an unlocked clear on a
+ * LIVE, tick-visible process (the exec path — exec_reset_signals) could race
+ * the tick into a torn read and fire a stale timer signal into the new image.
+ * proc_timers_init() always spinlock_init()s itimer_lock before calling us, so
+ * the lock is valid on every caller.  Callers that already hold itimer_lock
+ * (proc_timers_cancel) must NOT call this — they inline the clear instead.
  */
 void proc_ptimers_clear(process_t *p) {
+    uint32_t flags;
+
     if (!p) {
         return;
     }
+    flags = intr_disable();
+    spinlock_acquire(&p->itimer_lock);
     memset(p->ptimers, 0, sizeof(p->ptimers));
     p->n_ptimers = 0;
     p->n_ptimers_armed = 0;
     p->sig_timer_pend = 0;
+    spinlock_release(&p->itimer_lock);
+    intr_restore(flags);
 }
 
 void proc_timers_cancel(process_t *p) {
@@ -283,7 +293,12 @@ void proc_timers_cancel(process_t *p) {
     spinlock_acquire(&p->itimer_lock);
     memset(p->itimer_value_ticks, 0, sizeof(p->itimer_value_ticks));
     memset(p->itimer_interval_ticks, 0, sizeof(p->itimer_interval_ticks));
-    proc_ptimers_clear(p);
+    /* Inline the POSIX-timer clear rather than calling proc_ptimers_clear():
+     * we already hold itimer_lock and it now takes the lock itself. */
+    memset(p->ptimers, 0, sizeof(p->ptimers));
+    p->n_ptimers = 0;
+    p->n_ptimers_armed = 0;
+    p->sig_timer_pend = 0;
     spinlock_release(&p->itimer_lock);
     intr_restore(flags);
 }
@@ -589,7 +604,10 @@ int kern_timer_create(int clockid, struct sigevent *ev, int *timerid) {
         if (notify == SIGEV_SIGNAL) {
             signo = ev->sigev_signo;
             value = ev->sigev_value;
-            if (signo < 1 || signo > NSIG) {
+            /* Valid signal numbers are 1..NSIG-1 (sigmask/sigprop are sized
+             * NSIG); reject signo == NSIG so a timer can't target a bit that
+             * psignal()/sigprop[] treat as out of range. */
+            if (signo < 1 || signo >= NSIG) {
                 return -EINVAL;
             }
         } else if (notify == SIGEV_NONE) {
@@ -854,7 +872,7 @@ void proc_ptimers_fire(process_t *p) {
  * reset so the next expiry starts a fresh count.
  */
 void ptimer_signal_delivered(process_t *p, int sig) {
-    if (!p || sig < 1 || sig > NSIG) {
+    if (!p || sig < 1 || sig >= NSIG) {
         return;
     }
     if (p->n_ptimers == 0) {
