@@ -249,6 +249,14 @@ static void sched_context_switch(thread_t *prev, thread_t *next) {
     }
 
     next->state = THREAD_RUNNING;
+    /* Maintain the BSD process-level state for ps(1)/procfs: a process with a
+     * running thread is SRUN.  Preserve stop/zombie/dying (set explicitly
+     * elsewhere) so scheduling never clobbers them. */
+    if (next->proc) {
+        uint8_t pst = next->proc->state;
+        if (pst != SSTOP && pst != SZOMB && pst != SDYING)
+            next->proc->state = SRUN;
+    }
 
     THIS_CPU()->current = next;
     current_thread = next;
@@ -469,6 +477,13 @@ void sched_sleep(void *chan) {
 
     current_thread->wait_chan = chan;
     current_thread->state = THREAD_BLOCKED;
+    /* Reflect the block in the process-level state for ps(1)/procfs (this is
+     * the timed-wait path used by nanosleep/sleep, distinct from sleepq). */
+    if (current_thread->proc) {
+        uint8_t pst = current_thread->proc->state;
+        if (pst != SSTOP && pst != SZOMB && pst != SDYING)
+            current_thread->proc->state = SSLEEP;
+    }
     sched_yield();
 
     /* Clear our fallback so it can't leak into the next, unrelated sleep

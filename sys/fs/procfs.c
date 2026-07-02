@@ -1067,7 +1067,7 @@ static char proc_linux_state(process_t *proc) {
         case SSTOP:  return 'T';
         case SZOMB:  return 'Z';
         case SDYING: return 'X';
-        default:     return 'R';
+        default:     return 'S';
     }
 }
 

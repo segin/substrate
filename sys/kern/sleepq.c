@@ -250,7 +250,15 @@ static void sleepq_add_internal(void *chan, thread_t *t, int type, int pid) {
     // Mark thread as blocked
     t->wait_chan = chan;
     t->state = THREAD_BLOCKED;
-    
+    /* Reflect the block in the BSD process-level state for ps(1)/procfs: a
+     * thread going to sleep makes its process SSLEEP, unless it is explicitly
+     * stopped/zombie/dying. */
+    if (t->proc) {
+        uint8_t pst = t->proc->state;
+        if (pst != SSTOP && pst != SZOMB && pst != SDYING)
+            t->proc->state = SSLEEP;
+    }
+
     sq_unlock(hash);
 }
 

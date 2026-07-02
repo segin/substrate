@@ -3674,7 +3674,9 @@ int kern_proc_info(pid_t pid, sys_procinfo_t *info) {
     info->gid = target->gid;
     info->euid = target->euid;
     info->egid = target->egid;
-    info->state = target->state;
+    /* Default an unmaintained (0) process state to SLEEP for ps(1): most
+     * processes are blocked/waiting, matching foreign ps output. */
+    info->state = target->state ? target->state : SSLEEP;
     info->bitness = target->bitness;
     info->perso_id = (int16_t)target->perso_id;
     info->is_kernel = target->is_kernel_task;

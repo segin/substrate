@@ -58,7 +58,10 @@ static void proc_storage_free(process_t *p) { free(p); }
 #else
 static process_t *proc_storage_alloc(void) {
     process_t *p = kmalloc(sizeof(*p));
-    if (p) memset(p, 0, sizeof(*p));
+    if (p) {
+        memset(p, 0, sizeof(*p));
+        p->state = SSLEEP;   /* default S until scheduled/blocked (for ps) */
+    }
     return p;
 }
 static void proc_storage_free(process_t *p) {
