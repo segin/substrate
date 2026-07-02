@@ -1,0 +1,34 @@
+Subject: main.c: issue TIOCSCTTY on substrate to acquire the pty ctty
+
+Substrate's kernel deliberately does NOT auto-acquire a controlling
+terminal when a session leader opens a pty slave: tty_attach_first_opener
+excludes ptyslave/ptmx so that luit's parent cannot steal the pair before
+the setsid'd child claims it.  A PTY controlling terminal is therefore
+established ONLY by an explicit TIOCSCTTY.
+
+xterm's success-path TIOCSCTTY (issued right after opening the slave, in
+the child that has already setsid'd) is gated behind
+((__GLIBC__ && __FreeBSD_kernel__) || __GNU__) && TIOCSCTTY -- none of
+which substrate matches -- so the shell was left with no controlling
+terminal: `tty` still worked (it reads the fd) but `ps` reported the tty
+as '?' and job control was half-broken.  The only TIOCSCTTY xterm reached
+on substrate was the one in the open-failure path, too late to help.
+
+Add __substrate__ (a substrate-gcc built-in) to the guard.
+
+--- a/main.c
++++ b/main.c
+@@ -4556,7 +4556,11 @@
+ 			/* make /dev/tty work */
+ 			ioctl(ttyfd, TCSETCTTY, 0);
+ #endif
+-#if ((defined(__GLIBC__) && defined(__FreeBSD_kernel__)) || defined(__GNU__)) && defined(TIOCSCTTY)
+-			/* make /dev/tty work */
++#if ((defined(__GLIBC__) && defined(__FreeBSD_kernel__)) || defined(__GNU__) || defined(__substrate__)) && defined(TIOCSCTTY)
++			/* make /dev/tty work.  Substrate: PTYs never auto-acquire
++			 * a controlling terminal on open (kernel excludes ptyslave
++			 * from tty_attach_first_opener), so the setsid'd child must
++			 * issue TIOCSCTTY here in the success path or the shell runs
++			 * with no ctty (ps shows tty '?', job control half-broken). */
+ 			ioctl(ttyfd, TIOCSCTTY, 0);
+ #endif
