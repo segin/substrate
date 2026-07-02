@@ -166,6 +166,9 @@ int vm_fault(vm_map_t *map, uintptr_t va, uint8_t prot) {
              * fully cached and cross-process coherence is the CPU's job. */
             cache_flags = 0;
         }
+        /* Sample the existing mapping BEFORE pmap_enter so we can tell a
+         * fresh insertion from a re-fault of an already-present device page. */
+        uintptr_t prev_pa = pmap_extract(map->pmap, page_va);
         if (pmap_enter(map->pmap, page_va, device_phys, enter_prot, cache_flags) < 0) {
             goto out;
         }
@@ -177,8 +180,16 @@ int vm_fault(vm_map_t *map, uintptr_t va, uint8_t prot) {
          * early (double-free vs shmfs_free_inode, and it panics when the object
          * is mmap'd more than once -- OPTS shm_open/1-1,14-2,28-*).  An
          * unmanaged aperture (a linear framebuffer above RAM) has no vm_page_t,
-         * so pmm_get_page() is NULL and hold/unhold are both skipped. */
-        {
+         * so pmm_get_page() is NULL and hold/unhold are both skipped.
+         *
+         * Take the hold ONLY when pmap_enter actually installed a NEW mapping
+         * (old_pa != new_pa, mirroring pmap.c).  A re-fault of an
+         * already-present device page -- ptrace PEEK routed through vm_fault,
+         * an SMP stale-TLB spurious #PF -- leaves old_pa == new_pa, so
+         * pmap_enter neither holds nor unholds; holding again here would leak a
+         * ref per spurious fault and walk the uint16_t ref_count toward wrap
+         * (a latent double-free). */
+        if ((prev_pa & ~(uintptr_t)0xFFF) != (device_phys & ~(uintptr_t)0xFFF)) {
             vm_page_t *dp = pmm_get_page(device_phys);
             if (dp) vm_page_hold(dp);
         }

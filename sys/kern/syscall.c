@@ -858,6 +858,16 @@ kern_resolve_parent_dirfd(int dirfd, const char *path, fs_node_t **parent_out, c
 // Helper for internal use (and userspace via sys_close)
 void file_close_ptr(file_t *f) {
     if (!f) return;
+    /*
+     * Release the calling process's advisory record locks on this description
+     * NOW, before dropping the reference.  POSIX drops a process's locks when
+     * it closes a descriptor for the file (or exits), even if fork()/dup()
+     * left the description shared with another referrer (f_count stays > 0, so
+     * the final-drop advlock_release_file below would not fire).  This path is
+     * driven both by close(2) and, per open fd, by fd_close_all() at exit.
+     */
+    if (current_process)
+        advlock_release_by_owner(f, current_process->pid);
     f->f_count--;
     if (f->f_count <= 0) {
         close_fs((fs_node_t*)f->f_data);
