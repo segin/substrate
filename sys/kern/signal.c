@@ -10,6 +10,7 @@
 #include <kern/cmdline.h>
 #include <kern/panic.h>
 #include <stddef.h>
+#include <string.h>
 #include <pm/pm.h>
 #include <exec/perso/personality.h>
 #include <sys/core.h>
@@ -595,6 +596,10 @@ int sys_sigtimedwait(const uint32_t *set, siginfo_t *info,
     uint32_t kset;
     siginfo_t kinfo;
     struct timespec kts;
+    /* kern_sigtimedwait fills only the named siginfo_t fields; zero the whole
+     * struct (incl. _pad[25]) so the full-sizeof copyout below cannot leak
+     * uninitialized kernel stack to userspace. */
+    memset(&kinfo, 0, sizeof(kinfo));
     if (copyin(set, &kset, sizeof(uint32_t)) != 0) return -14;
     if (timeout) {
         if (copyin(timeout, &kts, sizeof(struct timespec)) != 0) return -14;
@@ -1334,6 +1339,16 @@ void signal_handle_pending(registers_t *regs) {
          * child).
          */
         if (sigprop[sig] & PROP_KILL) {
+            /* PID 1 (init) must survive every default-action terminate
+             * signal, or the whole system halts with no init.  This mirrors
+             * the SIGKILL/SIGTERM guard in psignal_info() and the explicit
+             * SIGINT/SIGTERM block above; extend it across the entire
+             * sigprop[] terminate path (SIGHUP/QUIT/ABRT/USR1/USR2/PIPE/
+             * ALRM/XCPU/XFSZ/VTALRM/PROF/SYS all reach here now). */
+            if (current_process->pid == 1) {
+                signal_clear_trap_context(current_thread, sig);
+                return;
+            }
             signal_clear_trap_context(current_thread, sig);
             sigexit(current_process, sig);
             return;
