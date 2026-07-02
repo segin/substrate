@@ -1,4 +1,4 @@
-.Dd March 13, 2026
+.Dd July 2, 2026
 .Dt FLOPPY 4
 .Os
 .Sh NAME
@@ -33,6 +33,35 @@ Transfers use ISA DMA channel 2 through a low-memory bounce buffer below
 16MB.
 The current implementation performs sector I/O through CHS translation and
 retries failed transfers after recalibration.
+.Sh BOOTABLE FLOPPY IMAGES
+A bootable floppy is built by
+.Pa sys/arch/i386/floppy/mkfloppy.py
+from a kernel
+.Ar zimage
+(a setup header followed by the kernel body).
+Each floppy is a 1.44M image of 2880 512-byte sectors.
+Disk 1 holds a 512-byte boot sector
+.Pq Pa stage1.bin ,
+the real-mode loader
+.Pq Pa stage2.bin ,
+and as much of the kernel as fits before the end of the disk.
+.Pp
+A kernel too large for a single 1.44M floppy is split across several disks.
+Disk 1 is filled to its end with the leading kernel sectors and the remainder
+is written to companion files with a numeric suffix
+.Pq Pa .2 , Pa .3 , No ... ,
+each a raw kernel continuation of 2880 sectors, the last zero-padded to a
+full image.
+The setup image always remains on disk 1.
+.Pp
+At boot the loader streams the kernel to physical address 0x00100000, printing
+.Dq Loading kernel
+followed by one progress dot per chunk read.
+When the current disk is exhausted and kernel data remains, it prints
+.Dq Please insert boot disk N and press any key to continue... ,
+waits for a keypress, resets the drive, and resumes reading from the first
+sector of the next disk.
+A kernel that fits on one floppy never prompts for a disk swap.
 .Sh FILES
 .Bl -tag -width "/dev/storage/fd0"
 .It Pa /dev/storage/fd0
