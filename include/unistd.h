@@ -255,6 +255,36 @@ long syscall(long number, ...);
 #define _SC_MONOTONIC_CLOCK  15
 #define _SC_CPUTIME          16
 #define _SC_THREAD_CPUTIME   17
+/* POSIX.1b real-time signals — substrate implements SIGRTMIN..SIGRTMAX,
+ * sigqueue(2) with an si_value payload, and a per-process RT-signal queue
+ * (sys/include/sys/signal.h: RTSIG_QUEUE_MAX), so this option is present. */
+#define _SC_REALTIME_SIGNALS 18
+/* Minimum thread-stack size a substrate thread is actually created with.
+ * libpthread uses a fixed 64 KiB stack (see PTHREAD_STACK_MIN); sysconf()
+ * reports the same value at runtime. */
+#define _SC_THREAD_STACK_MIN 19
+/* Process-shared mutex/cond attribute.  Substrate's futex-backed locks are
+ * best-effort across processes but NOT a guaranteed robust inter-process
+ * lock (see <pthread.h>), so this option reports "unsupported" (-1).  The
+ * PTHREAD_PROCESS_SHARED enum still exists for compile-time reference. */
+#define _SC_THREAD_PROCESS_SHARED 20
+/* Clock-selection option — clock_nanosleep(2) and pthread_condattr_setclock()
+ * are implemented, so the option is present. */
+#define _SC_CLOCK_SELECTION  21
+/* Prioritized asynchronous I/O.  substrate's librt aio worker pool does not
+ * honour per-request priorities (aio_reqprio is ignored), so unsupported. */
+#define _SC_PRIORITIZED_IO   22
+/* Maximum number of outstanding async I/O operations.  librt queues aio
+ * requests on an unbounded (memory-limited) FIFO with no fixed ceiling, so
+ * no maximum can be determined — reported as -1 (glibc convention). */
+#define _SC_AIO_MAX          23
+/* Maximum number of simultaneously queued real-time signals per process
+ * (kernel RTSIG_QUEUE_MAX). */
+#define _SC_SIGQUEUE_MAX     24
+/* Maximum number of POSIX semaphores available (kernel ksem table, KSEM_MAX). */
+#define _SC_SEM_NSEMS_MAX    25
+/* Memory-mapped files — substrate implements mmap(2), so the option is present. */
+#define _SC_MAPPED_FILES     26
 
 long sysconf(int name);
 
