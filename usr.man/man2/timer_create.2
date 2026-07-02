@@ -1,0 +1,142 @@
+.\" Process this file with
+.\" groff -man -Tascii timer_create.2
+.\"
+.TH TIMER_CREATE 2 "July 2026" "Substrate Kernel" "System Calls Manual"
+.SH NAME
+timer_create \- create a POSIX per-process interval timer
+.SH LIBRARY
+Standard C library (libc, -lc)
+.SH SYNOPSIS
+.B #include <signal.h>
+.br
+.B #include <time.h>
+.PP
+.BI "int timer_create(clockid_t " clockid ", struct sigevent *" sevp ,
+.BI "                 timer_t *" timerid ");"
+.SH DESCRIPTION
+.BR timer_create ()
+creates a new per-process interval timer, initially disarmed, and stores its
+identifier in
+.IR *timerid .
+The timer is armed and queried with
+.BR timer_settime (2)
+and
+.BR timer_gettime (2).
+.PP
+The
+.I clockid
+argument selects the clock the timer is measured against.  Substrate
+supports:
+.TP
+.B CLOCK_REALTIME
+A settable, system-wide wall-clock timer.
+.TP
+.B CLOCK_MONOTONIC
+A non-settable clock that measures time since an unspecified epoch and is not
+affected by changes to the wall clock.
+.PP
+The
+.I sevp
+argument points to a
+.B struct sigevent
+that specifies how the caller is notified when the timer expires:
+.TP
+.B SIGEV_SIGNAL
+The signal
+.I sevp\->sigev_signo
+is generated for the process on each expiration.  If a handler is installed
+with
+.BR SA_SIGINFO ,
+the accompanying
+.B siginfo_t
+has
+.I si_code
+set to
+.B SI_TIMER
+and
+.I si_value
+set to
+.IR sevp\->sigev_value .
+.TP
+.B SIGEV_NONE
+No notification is delivered; the timer may still be queried with
+.BR timer_gettime (2).
+.PP
+If
+.I sevp
+is NULL, the timer behaves as if
+.I sigev_notify
+were
+.BR SIGEV_SIGNAL ,
+.I sigev_signo
+were
+.BR SIGALRM ,
+and
+.I sigev_value
+were the timer id.
+.PP
+Timers are
+.B not
+inherited by a child created with
+.BR fork (2)
+and are disarmed and deleted upon
+.BR execve (2).
+.SH RETURN VALUE
+On success,
+.BR timer_create ()
+returns 0 and the timer id is written to
+.IR *timerid .
+On error, \-1 is returned and
+.I errno
+is set to indicate the error.
+.SH ERRORS
+.TP
+.B EINVAL
+The clock id
+.I clockid
+is not supported, or the requested
+.I sigev_notify
+(for example
+.BR SIGEV_THREAD ,
+which is realized in the C library) is not supported by the kernel, or
+.I sevp\->sigev_signo
+is not a valid signal.
+.TP
+.B EAGAIN
+The per-process timer table is full (the kernel could not allocate a new
+timer).
+.TP
+.B EFAULT
+.I sevp
+or
+.I timerid
+points outside the accessible address space.
+.SH EXAMPLE
+.nf
+struct sigevent ev;
+timer_t tid;
+struct itimerspec its;
+
+ev.sigev_notify = SIGEV_SIGNAL;
+ev.sigev_signo  = SIGALRM;
+if (timer_create(CLOCK_MONOTONIC, &ev, &tid) != 0)
+        perror("timer_create");
+
+its.it_value.tv_sec = 2;     its.it_value.tv_nsec = 0;
+its.it_interval.tv_sec = 0;  its.it_interval.tv_nsec = 0;
+timer_settime(tid, 0, &its, NULL);
+.fi
+.SH SEE ALSO
+.BR clock_gettime (2),
+.BR timer_settime (2),
+.BR timer_gettime (2),
+.BR timer_delete (2),
+.BR timer_getoverrun (2),
+.BR sigaction (2),
+.BR sigevent (3type)
+.SH STANDARDS
+POSIX.1-2008.
+.SH NOTES
+Timer expiry is evaluated against the kernel tick, so the effective
+resolution is bounded by the system clock granularity (see
+.BR clock_getres (3)).

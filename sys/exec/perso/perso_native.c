@@ -247,6 +247,11 @@ static void *native_syscalls[MAX_SYSCALLS] = {
     [SYS_SETITIMER] = &sys_setitimer,
     [SYS_GETITIMER] = &sys_getitimer,
     [SYS_CLOCK_GETTIME] = &sys_clock_gettime,
+    [SYS_TIMER_CREATE]     = (void *)&sys_timer_create,
+    [SYS_TIMER_SETTIME]    = (void *)&sys_timer_settime,
+    [SYS_TIMER_GETTIME]    = (void *)&sys_timer_gettime,
+    [SYS_TIMER_DELETE]     = (void *)&sys_timer_delete,
+    [SYS_TIMER_GETOVERRUN] = (void *)&sys_timer_getoverrun,
     [SYS_GETRANDOM] = &sys_getrandom,
 };
 
@@ -422,6 +427,11 @@ static const char *native_names[MAX_SYSCALLS] = {
     [SYS_SETITIMER] = "setitimer",
     [SYS_GETITIMER] = "getitimer",
     [SYS_CLOCK_GETTIME] = "clock_gettime",
+    [SYS_TIMER_CREATE]     = "timer_create",
+    [SYS_TIMER_SETTIME]    = "timer_settime",
+    [SYS_TIMER_GETTIME]    = "timer_gettime",
+    [SYS_TIMER_DELETE]     = "timer_delete",
+    [SYS_TIMER_GETOVERRUN] = "timer_getoverrun",
     [SYS_GETRANDOM] = "getrandom",
 };
 
@@ -597,6 +607,11 @@ static struct syscall_fmt native_fmts[MAX_SYSCALLS] = {
     [SYS_SETITIMER] = { 3, { ARG_INT, ARG_PTR, ARG_PTR } },
     [SYS_GETITIMER] = { 2, { ARG_INT, ARG_PTR } },
     [SYS_CLOCK_GETTIME] = { 2, { ARG_INT, ARG_PTR } },
+    [SYS_TIMER_CREATE]     = { 3, { ARG_INT, ARG_PTR, ARG_PTR } },
+    [SYS_TIMER_SETTIME]    = { 4, { ARG_INT, ARG_INT, ARG_PTR, ARG_PTR } },
+    [SYS_TIMER_GETTIME]    = { 2, { ARG_INT, ARG_PTR } },
+    [SYS_TIMER_DELETE]     = { 1, { ARG_INT } },
+    [SYS_TIMER_GETOVERRUN] = { 1, { ARG_INT } },
     [SYS_GETRANDOM] = { 3, { ARG_PTR, ARG_INT, ARG_HEX } },
 };
 

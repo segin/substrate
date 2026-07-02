@@ -1,0 +1,58 @@
+.\" Process this file with
+.\" groff -man -Tascii timer_getoverrun.2
+.\"
+.TH TIMER_GETOVERRUN 2 "July 2026" "Substrate Kernel" "System Calls Manual"
+.SH NAME
+timer_getoverrun \- get the overrun count of a POSIX per-process timer
+.SH LIBRARY
+Standard C library (libc, -lc)
+.SH SYNOPSIS
+.B #include <time.h>
+.PP
+.BI "int timer_getoverrun(timer_t " timerid ");"
+.SH DESCRIPTION
+.BR timer_getoverrun ()
+returns the overrun count for the timer
+.IR timerid ,
+that is, the number of
+.I additional
+timer expirations that occurred between the time the last expiration signal
+was generated and the time it was accepted or delivered.
+.PP
+Because a substrate signal is not queued more than once per signal number, a
+periodic timer that expires while its previous notification signal is still
+pending (for example because the signal is blocked) records each such extra
+expiration as an overrun.  When that signal is finally accepted or delivered,
+the accumulated count becomes the value returned by
+.BR timer_getoverrun ().
+A value of 0 means the notification was delivered before the next
+expiration.
+.PP
+The returned value refers to the most recently delivered expiration signal.
+Arming the timer with
+.BR timer_settime (2)
+resets the overrun count.
+.SH RETURN VALUE
+On success,
+.BR timer_getoverrun ()
+returns the timer overrun count (a non-negative integer).  On error, \-1 is
+returned and
+.I errno
+is set to indicate the error.
+.SH ERRORS
+.TP
+.B EINVAL
+.I timerid
+is not a valid, live timer.
+.SH SEE ALSO
+.BR timer_create (2),
+.BR timer_settime (2),
+.BR timer_gettime (2),
+.BR timer_delete (2)
+.SH STANDARDS
+POSIX.1-2008.
+.SH NOTES
+Timer expiry is sampled at the kernel tick, but the overrun count is computed
+from the real elapsed time (using the timer's absolute nanosecond deadline),
+so it reflects the number of interval periods that actually elapsed rather
+than the number of ticks observed.

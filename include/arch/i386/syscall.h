@@ -254,6 +254,17 @@
  * Next free number after the ksem 500-block. */
 #define SYS_SIGQUEUE        508
 
+/* POSIX.1b per-process interval timers (sys/kern/time.c).  timer_create
+ * allocates a small fixed per-process timer table (id == slot index);
+ * settime/gettime/delete/getoverrun operate on it.  On expiry a
+ * SIGEV_SIGNAL timer posts its signal with si_code == SI_TIMER, reusing
+ * the sigqueue si_value machinery.  Next free block after SYS_SIGQUEUE. */
+#define SYS_TIMER_CREATE     509
+#define SYS_TIMER_SETTIME    510
+#define SYS_TIMER_GETTIME    511
+#define SYS_TIMER_DELETE     512
+#define SYS_TIMER_GETOVERRUN 513
+
 void syscall_init(void);
 
 // GDT TLS entries

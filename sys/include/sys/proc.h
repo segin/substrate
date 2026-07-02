@@ -26,6 +26,30 @@
 #define PROC_ITIMER_COUNT 3
 #define PROC_CMDLINE_MAX  512
 
+/*
+ * POSIX.1b per-process interval timers (timer_create(2)).  A small fixed
+ * table lives at the tail of process_t; the timer_t handed to userspace is
+ * the slot index.  Expiry is evaluated against the kernel tick in
+ * proc_ptimers_fire() using absolute nanoseconds in the timer's clock
+ * domain, so overrun counts reflect real elapsed time rather than tick
+ * granularity.  Timers are NOT inherited across fork() and are disarmed +
+ * deleted on exec().
+ */
+#define POSIX_TIMER_MAX 32
+struct posix_timer {
+    uint8_t  used;            /* slot allocated by timer_create()          */
+    uint8_t  armed;           /* it_value != 0 (counting toward next_ns)   */
+    uint8_t  notify;          /* SIGEV_SIGNAL / SIGEV_NONE                 */
+    uint8_t  sig_outstanding; /* a signal was generated, not yet accepted  */
+    int      signo;           /* signal delivered on expiry (SIGEV_SIGNAL) */
+    int      clockid;         /* CLOCK_REALTIME / CLOCK_MONOTONIC          */
+    union sigval value;       /* sigev_value (delivered as SI_TIMER value) */
+    uint64_t next_ns;         /* absolute clock-ns of next expiry (0=off)  */
+    uint64_t interval_ns;     /* periodic reload in ns (0 = one-shot)      */
+    int      overrun;         /* overrun count latched at last delivery    */
+    int      overrun_pending; /* overruns accrued since signal generation  */
+};
+
 typedef uint8_t process_state_t;
 
 // Forward declarations
@@ -199,6 +223,16 @@ typedef struct process {
      * field shifts (see the same note on the fields above). */
     int         sched_policy;       // POSIX_SCHED_* (see <sys/sched.h>)
     int         sched_rt_priority;  // sched_param.sched_priority
+
+    /* POSIX.1b per-process timers (timer_create(2)).  Kept at the END of
+     * the struct — see the offset-stability note above.  Guarded by the
+     * existing itimer_lock; the tick fast-paths on n_ptimers_armed == 0.
+     * sig_timer_pend marks signal numbers whose pending instance carries an
+     * SI_TIMER si_value in sig_qval[] (parallel to sig_qpend for SI_QUEUE). */
+    struct posix_timer ptimers[POSIX_TIMER_MAX];
+    uint8_t     n_ptimers;          // allocated (used) timer slots
+    uint8_t     n_ptimers_armed;    // armed timer slots (tick fast-path guard)
+    uint32_t    sig_timer_pend;     // bitmask: signals pending as SI_TIMER
 
     // Resource limits, FDs, etc. would go here
 } process_t;

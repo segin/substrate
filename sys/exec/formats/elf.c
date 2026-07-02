@@ -17,6 +17,7 @@
 #include <sys/exec.h>
 #include <sys/random.h>
 #include <sys/signal.h> // For copyin/copyout
+#include <kern/time.h>  // proc_ptimers_clear (timers deleted across exec)
 #include <sys/kern_syscalls.h>
 #include <sys/file.h>
 #include <sys/errno.h>
@@ -323,10 +324,13 @@ static void exec_reset_signals(void) {
 
     memset(current_process->linux_sig_restorer, 0,
            sizeof(current_process->linux_sig_restorer));
-    
+
     // Clear sig_catch bitmask since all caught signals are now SIG_DFL
     current_process->sig_catch = 0;
     // sig_ignore remains unchanged - ignored signals stay ignored
+
+    /* POSIX: per-process timers are disarmed and deleted across exec(). */
+    proc_ptimers_clear(current_process);
 }
 
 static int is_linux_ldso_path(const char *interp_path) {

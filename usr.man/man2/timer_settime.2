@@ -1,0 +1,105 @@
+.\" Process this file with
+.\" groff -man -Tascii timer_settime.2
+.\"
+.TH TIMER_SETTIME 2 "July 2026" "Substrate Kernel" "System Calls Manual"
+.SH NAME
+timer_settime, timer_gettime \- arm/disarm and fetch a POSIX per-process timer
+.SH LIBRARY
+Standard C library (libc, -lc)
+.SH SYNOPSIS
+.B #include <time.h>
+.PP
+.BI "int timer_settime(timer_t " timerid ", int " flags ,
+.BI "                  const struct itimerspec *" new_value ,
+.BI "                  struct itimerspec *" old_value ");"
+.br
+.BI "int timer_gettime(timer_t " timerid ", struct itimerspec *" curr_value ");"
+.SH DESCRIPTION
+.BR timer_settime ()
+arms or disarms the timer
+.IR timerid .
+.PP
+The
+.I new_value
+argument points to a
+.B struct itimerspec
+with two fields:
+.TP
+.I it_value
+The time until the next expiration.  If both of its members are zero the
+timer is disarmed.
+.TP
+.I it_interval
+The reload value.  If non-zero, the timer is periodic and re-arms with this
+interval after each expiration; if zero, the timer fires once.
+.PP
+By default
+.I it_value
+is interpreted relative to the timer's clock at the moment of the call.  If
+.B TIMER_ABSTIME
+is set in
+.IR flags ,
+.I it_value
+is an absolute time on the timer's clock; an absolute value already in the
+past causes the timer to expire as soon as possible.
+.PP
+If
+.I old_value
+is not NULL, the previous
+.I it_value
+(time that had been remaining) and
+.I it_interval
+are stored there, exactly as
+.BR timer_gettime ()
+would report them immediately before the call.
+.PP
+.BR timer_gettime ()
+stores in
+.I *curr_value
+the time until the next expiration
+.RI ( it_value )
+and the reload interval
+.RI ( it_interval ).
+If the timer is disarmed,
+.I it_value
+is zero.  The reported
+.I it_value
+counts down; for an absolute timer it is still returned as a relative
+remaining time.
+.SH RETURN VALUE
+On success, 0 is returned.  On error, \-1 is returned and
+.I errno
+is set to indicate the error.
+.SH ERRORS
+.TP
+.B EINVAL
+.I timerid
+is not a valid timer, or (for
+.BR timer_settime ())
+a
+.I new_value
+field has a
+.I tv_nsec
+value outside [0, 999999999] or a negative
+.IR tv_sec .
+.TP
+.B EFAULT
+.IR new_value ,
+.IR old_value ,
+or
+.I curr_value
+points outside the accessible address space.
+.SH SEE ALSO
+.BR timer_create (2),
+.BR timer_delete (2),
+.BR timer_getoverrun (2),
+.BR clock_gettime (2),
+.BR clock_getres (3)
+.SH STANDARDS
+POSIX.1-2008.
+.SH NOTES
+A
+.BR timer_settime ()
+call resets the timer's overrun accounting (see
+.BR timer_getoverrun (2))
+and discards any not-yet-accepted expiration signal for the timer.
