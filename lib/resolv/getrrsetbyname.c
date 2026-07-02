@@ -75,7 +75,7 @@ int getrrsetbyname(const char *hostname, unsigned int rdclass,
         if (rr.type == rdtype) {
             nrdatas++;
             if (rrname[0] == '\0') {
-                strncpy(rrname, rr.name, sizeof(rrname) - 1);
+                strlcpy(rrname, rr.name, sizeof(rrname));
                 ttl = rr.ttl;
             }
         } else if (rr.type == ns_t_rrsig && rr.rdlength >= 18) {

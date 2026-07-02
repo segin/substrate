@@ -269,7 +269,7 @@ int getaddrinfo(const char *node, const char *service,
     if (!sun) { free(ai); return EAI_MEMORY; }
     memset(sun, 0, sizeof(*sun));
     sun->sun_family = AF_UNIX;
-    strncpy(sun->sun_path, path, sizeof(sun->sun_path) - 1);
+    strlcpy(sun->sun_path, path, sizeof(sun->sun_path));
 
     memset(ai, 0, sizeof(*ai));
     ai->ai_family   = AF_UNIX;
@@ -332,8 +332,7 @@ int getnameinfo(const struct sockaddr *sa, socklen_t salen,
     if (sa->sa_family == AF_UNIX || sa->sa_family == AF_LOCAL) {
         const struct sockaddr_un *sun = (const struct sockaddr_un *)sa;
         if (host && hostlen > 0) {
-            strncpy(host, sun->sun_path, hostlen - 1);
-            host[hostlen - 1] = '\0';
+            strlcpy(host, sun->sun_path, hostlen);
         }
         if (serv && servlen > 0) serv[0] = '\0';
         return 0;

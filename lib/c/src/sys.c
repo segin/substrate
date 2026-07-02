@@ -831,8 +831,7 @@ static int ttyname_scan_dir(const char *dir, dev_t rdev,
         if (stat(path, &st) != 0) continue;
 
         if (S_ISCHR(st.st_mode) && st.st_rdev == rdev) {
-            strncpy(out, path, out_sz - 1);
-            out[out_sz - 1] = '\0';
+            strlcpy(out, path, out_sz);
             closedir(dp);
             return 0;
         }
@@ -916,8 +915,7 @@ int gethostname(char *name, size_t len) {
     /* If the host name doesn't fit, glibc/POSIX behaviour differ —
      * Linux returns -1/ENAMETOOLONG, but for compatibility with
      * existing callers we truncate and force-terminate. */
-    strncpy(name, u.nodename, len);
-    name[len - 1] = '\0';
+    strlcpy(name, u.nodename, len);
     return 0;
 }
 
@@ -1270,8 +1268,7 @@ static const char *locale_resolve(const char *locale, int category) {
 }
 
 static void locale_store(int category, const char *name) {
-    strncpy(locale_names[category], name, LOCALE_NAME_MAX - 1);
-    locale_names[category][LOCALE_NAME_MAX - 1] = '\0';
+    strlcpy(locale_names[category], name, sizeof(locale_names[category]));
 }
 
 char *setlocale(int category, const char *locale) {
@@ -1300,8 +1297,7 @@ char *setlocale(int category, const char *locale) {
         if (strcmp(locale_names[i], locale_names[LC_COLLATE]) != 0)
             all_equal = 0;
     if (all_equal) {
-        strncpy(composite, locale_names[LC_COLLATE], sizeof(composite) - 1);
-        composite[sizeof(composite) - 1] = '\0';
+        strlcpy(composite, locale_names[LC_COLLATE], sizeof(composite));
         return composite;
     }
     /* Non-uniform: join names in category order, separated by ';'. */

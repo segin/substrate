@@ -166,16 +166,13 @@ void logwtmp(const char *line, const char *name, const char *host) {
     ut.ut_pid  = getpid();
     ut.ut_type = (name && name[0]) ? USER_PROCESS : DEAD_PROCESS;
     if (line) {
-        strncpy(ut.ut_line, line, UT_LINESIZE);
-        ut.ut_line[UT_LINESIZE - 1] = '\0';
+        strlcpy(ut.ut_line, line, sizeof(ut.ut_line));
     }
     if (name) {
-        strncpy(ut.ut_user, name, UT_NAMESIZE);
-        ut.ut_user[UT_NAMESIZE - 1] = '\0';
+        strlcpy(ut.ut_user, name, sizeof(ut.ut_user));
     }
     if (host) {
-        strncpy(ut.ut_host, host, UT_HOSTSIZE);
-        ut.ut_host[UT_HOSTSIZE - 1] = '\0';
+        strlcpy(ut.ut_host, host, sizeof(ut.ut_host));
     }
     struct timeval tv;
     gettimeofday(&tv, NULL);
@@ -214,8 +211,7 @@ int logout(const char *line) {
     if (!line) return 0;
     struct utmp key;
     memset(&key, 0, sizeof(key));
-    strncpy(key.ut_line, line, UT_LINESIZE);
-    key.ut_line[UT_LINESIZE - 1] = '\0';
+    strlcpy(key.ut_line, line, sizeof(key.ut_line));
 
     setutent();
     struct utmp *found = getutline(&key);
