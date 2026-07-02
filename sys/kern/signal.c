@@ -1315,7 +1315,31 @@ void signal_handle_pending(registers_t *regs) {
              return;
         }
         
-        // Ignore others by default (like SIGCHLD, SIGCONT if not stopped)
+        /*
+         * All remaining signals: consult the sigprop[] default-action
+         * table (SIGSEGV/ILL/FPE/BUS/TRAP and SIGINT/SIGTERM were handled
+         * explicitly above; SIGSTOP-family just above; SIGKILL earlier).
+         * PROP_KILL terminates the process — sigexit() adds a core dump
+         * when PROP_CORE is set and dumping is permitted.  Everything else
+         * (PROP_IGNORE: SIGCHLD, SIGCONT-when-not-stopped, SIGURG,
+         * SIGWINCH) is ignored.
+         *
+         * Without this, every signal whose default action is "terminate"
+         * but which is NOT in the hardcoded list above — SIGABRT, SIGHUP,
+         * SIGQUIT, SIGUSR1, SIGUSR2, SIGPIPE, SIGALRM, SIGXCPU, SIGXFSZ,
+         * SIGVTALRM, SIGPROF, SIGSYS — fell through to the "ignore" path
+         * and was silently dropped.  So e.g. kill(child, SIGABRT) never
+         * terminated a child with the default disposition (OPTS
+         * mq_timedreceive/8-1: the parent could not abort a sleeping
+         * child).
+         */
+        if (sigprop[sig] & PROP_KILL) {
+            signal_clear_trap_context(current_thread, sig);
+            sigexit(current_process, sig);
+            return;
+        }
+
+        // Ignore by default (SIGCHLD, SIGCONT-if-not-stopped, SIGURG, SIGWINCH)
         signal_clear_trap_context(current_thread, sig);
         return;
     }
