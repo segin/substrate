@@ -48,6 +48,10 @@ struct aio_req {
     int              queued;      /* still on the work queue (cancelable) */
     int              err;         /* errno result (0 = success) */
     ssize_t          ret;         /* bytes transferred, or -1 */
+    struct sigevent  sev;         /* completion notification, copied at submit
+                                   * time so we never deref cb once the request
+                                   * is done/cancelled (the app may have freed
+                                   * or reused the aiocb by then). */
     struct aio_group *group;
     struct aio_req  *q_next;      /* work-queue FIFO link */
     struct aio_req  *all_next;    /* g_all list link */
@@ -262,6 +266,10 @@ static void *aio_worker(void *arg)
         r->err   = (res < 0) ? e : 0;
         r->state = REQ_DONE;
         fd_clear_active(cb->aio_fildes);
+        /* Snapshot the notification while we still hold the lock: once we
+         * release it and REQ_DONE becomes observable, aio_return() may free
+         * r and the app may free/reuse cb, so neither may be touched after. */
+        struct sigevent notify_sev = r->sev;
         struct sigevent *gsev = aio_group_complete(r);
         pthread_cond_broadcast(&g_done_cv);
         /* Freeing this fd may make a queued same-fd request runnable. */
@@ -269,7 +277,7 @@ static void *aio_worker(void *arg)
         pthread_mutex_unlock(&g_lock);
 
         /* Per-request notification, then any group notification. */
-        aio_do_notify(&cb->aio_sigevent);
+        aio_do_notify(&notify_sev);
         if (gsev) {
             aio_do_notify(gsev);
             free(gsev);
@@ -322,6 +330,11 @@ static struct aio_req *aio_new_req(struct aiocb *cb, int op,
     r->state = REQ_INPROGRESS;
     r->ret   = -1;
     r->err   = EINPROGRESS;
+    /* Snapshot the completion event now, while cb is guaranteed live.  The
+     * worker (and aio_cancel) notify from this copy after the request is
+     * observably done — at which point a conforming app may already have
+     * freed/reused the aiocb, so cb must not be dereferenced. */
+    r->sev   = cb->aio_sigevent;
     r->group = group;
     cb->__aio_impl = r;
     aio_enqueue(r);
@@ -463,6 +476,33 @@ int aio_suspend(const struct aiocb *const list[], int nent,
 
 /* ---- cancel ---- */
 
+/*
+ * A small growable vector of sigevents.  aio_cancel defers completion
+ * notifications past its g_lock-held scan (so it never drops the lock mid-
+ * iteration and invalidates the g_all cursor).  A fixed array would silently
+ * drop notifications — and leak the malloc'd group sigevent — once an app
+ * cancels more matching requests than the array holds; this grows instead.
+ */
+struct sev_vec {
+    struct sigevent *v;
+    unsigned         n, cap;
+};
+
+/* Append a copy of *s.  On OOM the notification is dropped (best-effort, as
+ * aio_do_notify already is when pthread_create/malloc fail) — never leaked. */
+static void sev_vec_push(struct sev_vec *sv, const struct sigevent *s)
+{
+    if (sv->n == sv->cap) {
+        unsigned ncap = sv->cap ? sv->cap * 2u : 8u;
+        struct sigevent *nv = realloc(sv->v, (size_t)ncap * sizeof(*nv));
+        if (!nv)
+            return;
+        sv->v = nv;
+        sv->cap = ncap;
+    }
+    sv->v[sv->n++] = *s;
+}
+
 int aio_cancel(int fildes, struct aiocb *aiocbp)
 {
     /* EBADF if fildes is not a valid descriptor. */
@@ -474,11 +514,12 @@ int aio_cancel(int fildes, struct aiocb *aiocbp)
     int canceled = 0, notcanceled = 0, alldone = 0;
     /* Notifications are deferred to after the scan so we never drop the lock
      * mid-iteration (which could invalidate the g_all cursor).  A cancelled
-     * request must still deliver its completion notification (POSIX). */
-    struct sigevent *gdefer[64];
-    int ngdefer = 0;
-    struct aiocb   *cbnotify[64];
-    int ncbnotify = 0;
+     * request must still deliver its completion notification (POSIX).  Only
+     * sigevent *values* are collected: once the cancel is observable the app
+     * may free/reuse the aiocb (and aio_return may free r), so neither cb nor
+     * r may be dereferenced after the lock is dropped. */
+    struct sev_vec reqsev = {0};   /* per-request completion events */
+    struct sev_vec grpsev = {0};   /* lio_listio group events */
 
     pthread_mutex_lock(&g_lock);
     for (struct aio_req *r = g_all; r; r = r->all_next) {
@@ -502,11 +543,12 @@ int aio_cancel(int fildes, struct aiocb *aiocbp)
             r->state  = REQ_CANCELED;
             r->err    = ECANCELED;
             r->ret    = -1;
+            sev_vec_push(&reqsev, &r->sev);
             struct sigevent *gsev = aio_group_complete(r);
-            if (gsev && ngdefer < (int)(sizeof(gdefer)/sizeof(gdefer[0])))
-                gdefer[ngdefer++] = gsev;
-            if (ncbnotify < (int)(sizeof(cbnotify)/sizeof(cbnotify[0])))
-                cbnotify[ncbnotify++] = r->cb;
+            if (gsev) {
+                sev_vec_push(&grpsev, gsev);
+                free(gsev);          /* copied by value; free now (no leak) */
+            }
             canceled++;
         } else if (r->state == REQ_INPROGRESS) {
             notcanceled++;      /* running — cannot interrupt blocking I/O */
@@ -520,12 +562,12 @@ int aio_cancel(int fildes, struct aiocb *aiocbp)
 
     /* Per-request notifications for successfully cancelled requests, then any
      * lio_listio group notifications that the cancel completed. */
-    for (int i = 0; i < ncbnotify; i++)
-        aio_do_notify(&cbnotify[i]->aio_sigevent);
-    for (int i = 0; i < ngdefer; i++) {
-        aio_do_notify(gdefer[i]);
-        free(gdefer[i]);
-    }
+    for (unsigned i = 0; i < reqsev.n; i++)
+        aio_do_notify(&reqsev.v[i]);
+    for (unsigned i = 0; i < grpsev.n; i++)
+        aio_do_notify(&grpsev.v[i]);
+    free(reqsev.v);
+    free(grpsev.v);
 
     if (notcanceled > 0)
         return AIO_NOTCANCELED;
@@ -541,6 +583,11 @@ int lio_listio(int mode, struct aiocb *const restrict list[restrict],
                int nent, struct sigevent *restrict sig)
 {
     if (mode != LIO_WAIT && mode != LIO_NOWAIT) {
+        errno = EINVAL;
+        return -1;
+    }
+    /* POSIX: EINVAL if nent is negative or greater than {AIO_LISTIO_MAX}. */
+    if (nent < 0 || nent > AIO_LISTIO_MAX) {
         errno = EINVAL;
         return -1;
     }

@@ -26,6 +26,14 @@ extern "C" {
 #define LIO_WAIT   0
 #define LIO_NOWAIT 1
 
+/*
+ * Maximum number of operations a single lio_listio() call may submit.  POSIX
+ * only requires {_POSIX_AIO_LISTIO_MAX} (== 2); substrate's worker-pool AIO
+ * has no hard limit but bounds one batch to a sane value (matching FreeBSD).
+ * lio_listio() fails with EINVAL when nent is negative or exceeds this.
+ */
+#define AIO_LISTIO_MAX 16
+
 /* aio_cancel() return values. */
 #define AIO_CANCELED    0
 #define AIO_NOTCANCELED 1

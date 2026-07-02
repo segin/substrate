@@ -45,6 +45,13 @@ static void notify_fn(union sigval v)
     g_thread_notified = 1;
 }
 
+static volatile int g_cancel_notified;
+static void cancel_notify_fn(union sigval v)
+{
+    (void)v;
+    __sync_fetch_and_add(&g_cancel_notified, 1);
+}
+
 int main(void)
 {
     printf("aiotest: POSIX AIO functional test\n");
@@ -155,6 +162,115 @@ int main(void)
         nanosleep(&s, NULL);
     }
     ok(g_thread_notified, "SIGEV_THREAD notification fired");
+
+    /* 7. lio_listio nent validation (EINVAL for nent<0 and nent>AIO_LISTIO_MAX). */
+    {
+        struct aiocb dummy;
+        memset(&dummy, 0, sizeof(dummy));
+        dummy.aio_fildes = fd;
+        dummy.aio_lio_opcode = LIO_NOP;
+        dummy.aio_sigevent.sigev_notify = SIGEV_NONE;
+        struct aiocb *one[1] = { &dummy };
+        errno = 0;
+        int rc = lio_listio(LIO_NOWAIT, one, -1, NULL);
+        ok(rc == -1 && errno == EINVAL, "lio_listio nent<0 -> EINVAL");
+        errno = 0;
+        rc = lio_listio(LIO_NOWAIT, one, AIO_LISTIO_MAX + 1, NULL);
+        ok(rc == -1 && errno == EINVAL, "lio_listio nent>AIO_LISTIO_MAX -> EINVAL");
+    }
+
+    /*
+     * 8. aio_cancel of MANY queued requests.  A completion notification must
+     * still fire even for a request that falls PAST the old fixed 64-entry
+     * defer array (fix #2) — and it must survive the aiocb (fix #1: the
+     * sigevent is snapshotted at submit, not read off cb after the cancel is
+     * observable).  All four worker threads are first parked in a blocking
+     * pipe read so the file writes cannot start and stay queued (cancelable).
+     *
+     * Only the FIRST-submitted N_NOTIFY requests carry SIGEV_THREAD; aio_cancel
+     * walks the newest-first g_all list, so those are processed LAST — i.e.
+     * beyond index 64.  The old code stored only the first 64 cb pointers and
+     * dropped the rest, so it fired 0 of these; the fix fires all N_NOTIFY.
+     * (Keeping N_NOTIFY small avoids conflating the fix with substrate's
+     * thread-spawn throughput.)
+     */
+#define NCANCEL   80
+#define N_NOTIFY  12
+    {
+        int pf[4][2];
+        static char rb[4][8];
+        struct aiocb blk[4];
+        int made = 0;
+        memset(blk, 0, sizeof(blk));
+        for (int i = 0; i < 4; i++) {
+            if (pipe(pf[i]) != 0) break;
+            blk[i].aio_fildes = pf[i][0];
+            blk[i].aio_buf    = rb[i];
+            blk[i].aio_nbytes = 1;
+            blk[i].aio_sigevent.sigev_notify = SIGEV_NONE;
+            aio_read(&blk[i]);           /* parks a worker in read() */
+            made++;
+        }
+        struct timespec settle = { 0, 150000000 };  /* 150 ms: park all workers */
+        nanosleep(&settle, NULL);
+
+        static struct aiocb cc[NCANCEL];
+        static char cbuf[NCANCEL][8];
+        g_cancel_notified = 0;
+        for (int i = 0; i < NCANCEL; i++) {
+            memset(&cc[i], 0, sizeof(cc[i]));
+            cc[i].aio_fildes = fd;
+            cc[i].aio_offset = 1000 + (off_t)i * 8;
+            cc[i].aio_buf    = cbuf[i];
+            cc[i].aio_nbytes = sizeof(cbuf[i]);
+            if (i < N_NOTIFY) {          /* first submitted -> cancelled last */
+                cc[i].aio_sigevent.sigev_notify = SIGEV_THREAD;
+                cc[i].aio_sigevent.sigev_notify_function = cancel_notify_fn;
+                cc[i].aio_sigevent.sigev_notify_attributes = NULL;
+            } else {
+                cc[i].aio_sigevent.sigev_notify = SIGEV_NONE;
+            }
+            aio_write(&cc[i]);
+        }
+        int cr = aio_cancel(fd, NULL);
+        ok(made == 4 && (cr == AIO_CANCELED || cr == AIO_NOTCANCELED),
+           "aio_cancel(many queued) returns CANCELED/NOTCANCELED");
+
+        int ncanceled = 0, notify_canceled = 0;
+        for (int i = 0; i < NCANCEL; i++)
+            if (aio_error(&cc[i]) == ECANCELED) {
+                ncanceled++;
+                if (i < N_NOTIFY) notify_canceled++;
+            }
+        ok(ncanceled > 64, "more than 64 requests actually cancelled");
+        /* The SIGEV_THREAD ones must have stayed queued (workers parked), so
+         * they were cancelled — not drained+completed by a stray worker. */
+        ok(notify_canceled == N_NOTIFY,
+           "the SIGEV_THREAD requests were queued+cancelled");
+
+        /* The first-submitted (hence last-cancelled, index > 64) SIGEV_THREAD
+         * requests must all still notify — the old 64-slot array fired none. */
+        for (int k = 0; k < 1500 && g_cancel_notified < N_NOTIFY; k++) {
+            struct timespec s = { 0, 2000000 };   /* 2 ms */
+            nanosleep(&s, NULL);
+        }
+        ok(g_cancel_notified == N_NOTIFY,
+           "notifications past the old 64-entry cap all fired");
+
+        for (int i = 0; i < NCANCEL; i++) aio_return(&cc[i]);
+        for (int i = 0; i < made; i++) {
+            char one = 'x';
+            if (write(pf[i][1], &one, 1) < 0) { /* ignore */ }
+        }
+        for (int i = 0; i < made; i++) {
+            const struct aiocb *bl[1] = { &blk[i] };
+            struct timespec to = { 2, 0 };
+            aio_suspend(bl, 1, &to);
+            aio_return(&blk[i]);
+            close(pf[i][0]);
+            close(pf[i][1]);
+        }
+    }
 
     close(fd);
     unlink(FNAME);

@@ -948,19 +948,30 @@ static int advlock_range(file_t *f, const struct kflock *fl,
     case 0: base = 0; break;                                   /* SEEK_SET */
     case 1: base = f->f_offset; break;                         /* SEEK_CUR */
     case 2:                                                    /* SEEK_END */
-        base = f->f_data ? ((fs_node_t *)f->f_data)->length : 0;
+        /* Only a regular file has a meaningful size to seek relative to; a
+         * socket / pipe / device f_data is not a length-bearing fs_node, so
+         * SEEK_END against one is EINVAL rather than a bogus base offset. */
+        if (!f->f_data || (((fs_node_t *)f->f_data)->flags & 0x07) != FS_FILE)
+            return -EINVAL;
+        base = ((fs_node_t *)f->f_data)->length;
         break;
     default: return -EINVAL;
     }
-    off_t start = base + fl->l_start;
+    /* Reject offset arithmetic that overflows off_t (EINVAL) instead of
+     * wrapping into a bogus [start,end) that would mis-order the lock list. */
+    off_t start;
+    if (__builtin_add_overflow(base, fl->l_start, &start))
+        return -EINVAL;
     off_t end;
     if (fl->l_len == 0) {
         end = ADVLOCK_EOF;
     } else if (fl->l_len > 0) {
-        end = start + fl->l_len;
+        if (__builtin_add_overflow(start, fl->l_len, &end))
+            return -EINVAL;
     } else {                       /* negative len: region [start+len, start) */
         end = start;
-        start = start + fl->l_len;
+        if (__builtin_add_overflow(start, fl->l_len, &start))
+            return -EINVAL;
     }
     if (start < 0) return -EINVAL;
     *out_start = start;
@@ -968,20 +979,61 @@ static int advlock_range(file_t *f, const struct kflock *fl,
     return 0;
 }
 
-/* Unlink this owner's locks overlapping [start,end); return the removed
- * chain (threaded on ->next) for the caller to free outside the lock. */
-static struct advlock *advlock_unlink_owner_range(file_t *f, int owner,
-                                                  off_t start, off_t end) {
+/*
+ * Clip this owner's lock coverage over [start,end).  A lock entirely inside
+ * the range is unlinked and returned on the removed chain (freed by the caller
+ * outside the lock).  A lock that extends past the range on one side is
+ * trimmed in place (type preserved); a lock that strictly contains [start,end)
+ * is split into a leading [l->start,start) fragment (the reused node) and a
+ * trailing [end,l->end) fragment (the pre-allocated *spare, set NULL once
+ * consumed).  This makes a partial F_UNLCK — or a same-owner F_SETLK that
+ * replaces only part of a bigger lock — preserve the surrounding regions
+ * instead of destroying the whole overlapping lock wholesale.
+ */
+static struct advlock *advlock_clip_owner_range(file_t *f, int owner,
+                                                off_t start, off_t end,
+                                                struct advlock **spare) {
     struct advlock *removed = NULL;
     struct advlock **pp = (struct advlock **)&f->f_advlock;
     while (*pp) {
         struct advlock *l = *pp;
-        if (l->owner == owner && advlock_overlap(l->start, l->end, start, end)) {
+        if (l->owner != owner || !advlock_overlap(l->start, l->end, start, end)) {
+            pp = &l->next;
+            continue;
+        }
+        int keep_lead  = l->start < start;   /* preserve [l->start, start) */
+        int keep_trail = l->end   > end;     /* preserve [end,      l->end) */
+        if (keep_lead && keep_trail) {
+            /* [start,end) lies strictly inside l: split into leading (reuse l)
+             * and trailing (spare) fragments, both keeping l's type. */
+            struct advlock *t = *spare;
+            if (t) {
+                *spare   = NULL;
+                t->start = end;
+                t->end   = l->end;
+                t->type  = l->type;
+                t->owner = owner;
+                t->next  = l->next;
+                l->next  = t;
+                l->end   = start;
+                pp = &t->next;
+            } else {
+                /* No spare (the caller pre-allocates one, so unreachable in
+                 * practice): degrade to keeping only the leading fragment. */
+                l->end = start;
+                pp = &l->next;
+            }
+        } else if (keep_lead) {
+            l->end = start;          /* trim the overlapping tail */
+            pp = &l->next;
+        } else if (keep_trail) {
+            l->start = end;          /* trim the overlapping head */
+            pp = &l->next;
+        } else {
+            /* Fully covered: unlink + collect for freeing outside the lock. */
             *pp = l->next;
             l->next = removed;
             removed = l;
-        } else {
-            pp = &l->next;
         }
     }
     return removed;
@@ -1004,6 +1056,37 @@ void advlock_release_file(file_t *f) {
     f->f_advlock = NULL;
     spinlock_release(&advlock_lock);
     advlock_free_chain(l);
+}
+
+/*
+ * Release just `owner`'s record locks on this open file description, leaving
+ * any held by other owners intact.  POSIX requires a process's locks on a
+ * file to be dropped when it closes a descriptor for that file OR when it
+ * exits — NOT deferred to the last close of a description that fork()/dup()
+ * left shared.  advlock_release_file() only fires at the final f_count==0
+ * drop, so without this a process that closes its fd (or exits) while a
+ * fork-shared referrer still holds the description would leave its locks
+ * lingering under its (soon-reused) pid, wrongly blocking other lockers.
+ * Called from the close path (even when f_count > 0) and, via fd_close_all,
+ * for every descriptor an exiting process still holds open.
+ */
+void advlock_release_by_owner(file_t *f, int owner) {
+    if (!f) return;
+    struct advlock *removed = NULL;
+    spinlock_acquire(&advlock_lock);
+    struct advlock **pp = (struct advlock **)&f->f_advlock;
+    while (*pp) {
+        struct advlock *l = *pp;
+        if (l->owner == owner) {
+            *pp = l->next;
+            l->next = removed;
+            removed = l;
+        } else {
+            pp = &l->next;
+        }
+    }
+    spinlock_release(&advlock_lock);
+    advlock_free_chain(removed);
 }
 
 /* fcntl F_GETLK: report a conflicting lock owned by another process, or
@@ -1056,12 +1139,20 @@ static int advlock_setlk(process_t *p, file_t *f, int arg) {
     int r = advlock_range(f, &fl, &s, &e);
     if (r) return r;
 
-    /* Allocate the replacement node up front so kmalloc never runs under
-     * the spinlock (it may sleep / take other locks). */
+    /* Allocate the nodes up front so kmalloc never runs under the spinlock
+     * (it may sleep / take other locks):
+     *   nl    — the replacement lock to insert (F_SETLK/F_SETLKW only).
+     *   split — a spare fragment consumed only when clipping must cut an
+     *           existing lock that strictly contains [s,e) into two pieces. */
     struct advlock *nl = NULL;
     if (fl.l_type != F_UNLCK) {
         nl = kmalloc(sizeof(*nl));
         if (!nl) return -ENOMEM;
+    }
+    struct advlock *split = kmalloc(sizeof(*split));
+    if (!split) {
+        kfree(nl, sizeof(*nl));      /* kfree(NULL) is a no-op */
+        return -ENOMEM;
     }
 
     spinlock_acquire(&advlock_lock);
@@ -1072,6 +1163,7 @@ static int advlock_setlk(process_t *p, file_t *f, int arg) {
                 advlock_conflict(fl.l_type, l->type)) {
                 spinlock_release(&advlock_lock);
                 kfree(nl, sizeof(*nl));
+                kfree(split, sizeof(*split));
                 /* F_SETLKW blocking is not implemented; a conflict is only
                  * reachable when processes share the SAME open file
                  * description (fork/dup) — reported as EAGAIN either way. */
@@ -1079,7 +1171,10 @@ static int advlock_setlk(process_t *p, file_t *f, int arg) {
             }
         }
     }
-    struct advlock *removed = advlock_unlink_owner_range(f, p->pid, s, e);
+    /* Clip this owner's coverage of [s,e): partial overlaps are trimmed/split
+     * (surrounding fragments preserved), fully-covered locks are returned for
+     * freeing outside the lock.  For F_UNLCK this is the whole operation. */
+    struct advlock *removed = advlock_clip_owner_range(f, p->pid, s, e, &split);
     if (nl) {
         nl->start = s;
         nl->end   = e;
@@ -1090,6 +1185,7 @@ static int advlock_setlk(process_t *p, file_t *f, int arg) {
     }
     spinlock_release(&advlock_lock);
     advlock_free_chain(removed);
+    if (split) kfree(split, sizeof(*split));   /* spare fragment unused */
     return 0;
 }
 

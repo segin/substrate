@@ -58,6 +58,11 @@ int proc_fcntl(process_t *p, int fd, int cmd, int arg);
 /* Release all POSIX advisory record locks on an open file description
  * (called from file_free when the last reference is dropped). */
 void advlock_release_file(struct file *f);
+/* Release only `owner`'s advisory record locks on an open file description,
+ * leaving other owners' locks intact.  Called on the close path (even when
+ * the description stays alive via a fork/dup share) and for every open fd of
+ * an exiting process, so a process's locks never outlive its use of the file. */
+void advlock_release_by_owner(struct file *f, int owner);
 int proc_fd_set_nonblock(int fd, int on);
 void proc_close_cloexec(process_t *p);
 

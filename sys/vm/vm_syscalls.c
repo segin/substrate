@@ -280,6 +280,34 @@ void *sys_mmap(void *addr, size_t length, int prot, int flags, int fd, uint64_t 
         (uint64_t)aligned_length > (uint64_t)p->rlim_memlock_cur)
         return (void *)(intptr_t)(-EAGAIN);
 
+    /*
+     * Validate the descriptor BEFORE touching the address space.  A MAP_FIXED
+     * request must leave the caller's existing mappings untouched when it
+     * fails (POSIX), so the fd validity (EBADF) and type (ENODEV) checks are
+     * hoisted above the MAP_FIXED vm_map_remove below -- otherwise
+     * mmap(MAP_FIXED, badfd) would destroy the old mapping and then error.
+     */
+    file_t *file = NULL;
+    if (!(flags & MAP_ANONYMOUS) && fd >= 0 && fd < MAX_FD) {
+        file = p->fds[fd];
+    }
+    /* A file-backed mmap with no valid open descriptor is EBADF, not the
+     * bare -1 (EPERM) the caller would otherwise see (OPTS mmap/19-1). */
+    if (!(flags & MAP_ANONYMOUS) && (!file || !file->f_data)) return (void *)(intptr_t)(-EBADF);
+
+    /*
+     * A pipe or socket is a file type mmap() does not support; POSIX
+     * mandates ENODEV (OPTS mmap/23-1).  These node types never carry an
+     * ->mmap handler, so this only rejects what would otherwise fall
+     * through to the (meaningless) vnode-pager path.  The low 3 bits of
+     * fs_node.flags hold the node type (FS_PIPE=5, FS_SOCKET=7).
+     */
+    if (file && file->f_data) {
+        uint32_t ntype = ((fs_node_t *)file->f_data)->flags & 0x07;
+        if (ntype == FS_PIPE || ntype == FS_SOCKET)
+            return (void *)(intptr_t)(-ENODEV);
+    }
+
     // Find virtual address space
     if (v_addr == 0 || !(flags & MAP_FIXED)) {
         /* Insufficient room in the address space is ENOMEM, not the bare -1
@@ -306,27 +334,9 @@ void *sys_mmap(void *addr, size_t length, int prot, int flags, int fd, uint64_t 
     if (prot & PROT_WRITE) vm_prot |= VM_PROT_WRITE;
     if (prot & PROT_EXEC)  vm_prot |= VM_PROT_EXEC;
 
-    // Determine if file-backed or anonymous
-    file_t *file = NULL;
-    if (!(flags & MAP_ANONYMOUS) && fd >= 0 && fd < MAX_FD) {
-        file = p->fds[fd];
-    }
-    /* A file-backed mmap with no valid open descriptor is EBADF, not the
-     * bare -1 (EPERM) the caller would otherwise see (OPTS mmap/19-1). */
-    if (!(flags & MAP_ANONYMOUS) && (!file || !file->f_data)) return (void *)(intptr_t)(-EBADF);
-
-    /*
-     * A pipe or socket is a file type mmap() does not support; POSIX
-     * mandates ENODEV (OPTS mmap/23-1).  These node types never carry an
-     * ->mmap handler, so this only rejects what would otherwise fall
-     * through to the (meaningless) vnode-pager path.  The low 3 bits of
-     * fs_node.flags hold the node type (FS_PIPE=5, FS_SOCKET=7).
-     */
-    if (file && file->f_data) {
-        uint32_t ntype = ((fs_node_t *)file->f_data)->flags & 0x07;
-        if (ntype == FS_PIPE || ntype == FS_SOCKET)
-            return (void *)(intptr_t)(-ENODEV);
-    }
+    /* `file` (and the EBADF / ENODEV validation on it) is resolved above,
+     * before the MAP_FIXED unmap, so a bad-fd request cannot destroy the
+     * caller's existing mappings. */
 
     /*
      * Device-specific mmap handler.
