@@ -251,7 +251,12 @@ static void *shmfs_node_mmap(fs_node_t *node, void *addr, size_t length,
     }
 
     if (prot & VM_PROT_READ)  vm_prot |= VM_PROT_READ;
-    if (prot & VM_PROT_WRITE) vm_prot |= VM_PROT_WRITE;
+    /* x86 has no write-only page: any present page is readable, so a
+     * PROT_WRITE mapping must also carry READ or it maps read-only and a
+     * store SIGSEGVs.  POSIX explicitly permits treating PROT_WRITE as
+     * PROT_READ|PROT_WRITE (OPTS shm_open/1-1,14-2,28-1,28-3 mmap PROT_WRITE
+     * alone, then write). */
+    if (prot & VM_PROT_WRITE) vm_prot |= VM_PROT_READ | VM_PROT_WRITE;
     if (prot & VM_PROT_EXEC)  vm_prot |= VM_PROT_EXEC;
     vm_prot |= VM_PROT_USER;
 

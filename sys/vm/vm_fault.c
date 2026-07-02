@@ -3,6 +3,7 @@
 #include <vm/vm_page.h>
 #include <vm/vm_pager.h>
 #include <arch/i386/pmap.h>
+#include <arch/i386/pmm.h>
 #include <arch/i386/cpu.h>
 #include <kern/panic.h>
 #include <stddef.h>
@@ -167,6 +168,19 @@ int vm_fault(vm_map_t *map, uintptr_t va, uint8_t prot) {
         }
         if (pmap_enter(map->pmap, page_va, device_phys, enter_prot, cache_flags) < 0) {
             goto out;
+        }
+        /* pmap_remove() unconditionally vm_page_unhold()s whatever vm_page_t
+         * backs the PTE.  A device mapping of a MANAGED (buddy) frame -- e.g.
+         * System V shm, whose pages are pmm_alloc_contiguous'd and have a
+         * vm_page_t -- must take a matching hold here, else each unmap drives
+         * the frame's hold below its shmfs-owned baseline and it is buddy-freed
+         * early (double-free vs shmfs_free_inode, and it panics when the object
+         * is mmap'd more than once -- OPTS shm_open/1-1,14-2,28-*).  An
+         * unmanaged aperture (a linear framebuffer above RAM) has no vm_page_t,
+         * so pmm_get_page() is NULL and hold/unhold are both skipped. */
+        {
+            vm_page_t *dp = pmm_get_page(device_phys);
+            if (dp) vm_page_hold(dp);
         }
 
         result = VM_FAULT_SUCCESS;
