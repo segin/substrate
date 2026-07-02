@@ -868,7 +868,7 @@ void random_init(void) {
     extern void devfs_register_device(fs_node_t *node);
     
     memset(&random_node, 0, sizeof(fs_node_t));
-    strcpy(random_node.name, "random");
+    strlcpy(random_node.name, "random", sizeof(random_node.name));
     random_node.flags = FS_CHARDEVICE;
     /* 0666 (crw-rw-rw-), matching Linux and /dev/{null,zero}: every user must
      * be able to read randomness.  Without an explicit mask the node is mode
@@ -884,7 +884,7 @@ void random_init(void) {
 
     /* Register /dev/urandom */
     memset(&urandom_node, 0, sizeof(fs_node_t));
-    strcpy(urandom_node.name, "urandom");
+    strlcpy(urandom_node.name, "urandom", sizeof(urandom_node.name));
     urandom_node.flags = FS_CHARDEVICE;
     urandom_node.mask = 0666;
     urandom_node.read = urandom_dev_read;

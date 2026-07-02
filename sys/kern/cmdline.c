@@ -122,7 +122,7 @@ void cmdline_init(const char *cmdline) {
         return;
     }
 
-    strncpy(kernel_cmdline, cmdline, sizeof(kernel_cmdline));
+    strlcpy(kernel_cmdline, cmdline, sizeof(kernel_cmdline));
     kernel_cmdline[sizeof(kernel_cmdline) - 1] = 0;
     initialized = 1;
 
@@ -226,7 +226,7 @@ int cmdline_debug_enabled(const char *channel) {
 
 int cmdline_get_full(char *buf, size_t buf_len) {
     if (!initialized || !buf || buf_len == 0) return -1;
-    strncpy(buf, kernel_cmdline, buf_len);
+    strlcpy(buf, kernel_cmdline, buf_len);
     buf[buf_len - 1] = 0;
     return 0;
 }

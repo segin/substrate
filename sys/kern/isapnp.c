@@ -271,7 +271,7 @@ static int isapnp_parse_payload(isapnp_device_t *card, const uint8_t *data, size
             logical->vendor_id = isapnp_low16(eisa_id);
             logical->device_id = isapnp_decode_device(isapnp_high16(eisa_id));
             isapnp_eisa_id_to_string(eisa_id, logical->id);
-            strncpy(logical->name, logical->id, sizeof(logical->name) - 1);
+            strlcpy(logical->name, logical->id, sizeof(logical->name));
             logical->name[sizeof(logical->name) - 1] = '\0';
             skip_dependent = 0;
             saw_dependent = 0;
@@ -463,7 +463,7 @@ static int isapnp_parse_payload(isapnp_device_t *card, const uint8_t *data, size
     }
 
     if (card->name[0] == '\0') {
-        strncpy(card->name, card->id, sizeof(card->name) - 1);
+        strlcpy(card->name, card->id, sizeof(card->name));
         card->name[sizeof(card->name) - 1] = '\0';
     }
     return 0;

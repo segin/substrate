@@ -61,7 +61,7 @@ void i386_cpu_init_early(void) {
     }
 
     memset(&cpu_features, 0, sizeof(cpu_features));
-    strcpy(cpu_features.vendor, "unknown");
+    strlcpy(cpu_features.vendor, "unknown", sizeof(cpu_features.vendor));
 
     cpu_features.is_486_or_newer = i386_eflags_bit_toggle_supported(1u << 18);
     cpu_features.has_cpuid = i386_eflags_bit_toggle_supported(1u << 21);
@@ -122,10 +122,10 @@ void i386_cpu_init_early(void) {
         }
     } else if (cpu_features.is_486_or_newer) {
         cpu_features.family = 4;
-        strcpy(cpu_features.vendor, "i486");
+        strlcpy(cpu_features.vendor, "i486", sizeof(cpu_features.vendor));
     } else {
         cpu_features.family = 3;
-        strcpy(cpu_features.vendor, "i386");
+        strlcpy(cpu_features.vendor, "i386", sizeof(cpu_features.vendor));
     }
 
     i386_cpu_enable_pat_wc();

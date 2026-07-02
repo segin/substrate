@@ -131,7 +131,7 @@ geom_partition_t *geom_add_partition(geom_disk_t *disk, const char *name,
     memset(part, 0, sizeof(*part));
     
     /* Fill in fields */
-    strncpy(part->name, name, sizeof(part->name) - 1);
+    strlcpy(part->name, name, sizeof(part->name));
     part->disk = disk;
     part->start_lba = start;
     part->size_sectors = size;
@@ -144,7 +144,7 @@ geom_partition_t *geom_add_partition(geom_disk_t *disk, const char *name,
     }
     
     if (type_name) {
-        strncpy(part->type_name, type_name, sizeof(part->type_name) - 1);
+        strlcpy(part->type_name, type_name, sizeof(part->type_name));
     }
     
     /* Add to disk's partition list */
@@ -164,7 +164,7 @@ geom_partition_t *geom_add_partition(geom_disk_t *disk, const char *name,
     blkdev_t *bdev = kmalloc(sizeof(blkdev_t));
     if (bdev) {
         memset(bdev, 0, sizeof(*bdev));
-        strncpy(bdev->name, name, sizeof(bdev->name) - 1);
+        strlcpy(bdev->name, name, sizeof(bdev->name));
         bdev->sector_size = disk->sector_size;
         bdev->total_sectors = size;
         bdev->priv = part;

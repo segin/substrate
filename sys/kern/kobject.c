@@ -13,7 +13,7 @@ static spinlock_t kobject_event_lock = SPINLOCK_INIT("kobject_events");
 
 void kobject_init(struct kobject *kobj, const char *name) {
     memset(kobj, 0, sizeof(struct kobject));
-    strncpy(kobj->name, name, 31);
+    strlcpy(kobj->name, name, sizeof(kobj->name));
     kobj->refcount = 1;
 }
 

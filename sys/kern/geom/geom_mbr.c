@@ -105,7 +105,7 @@ static int parse_extended(geom_disk_t *disk, uint64_t ext_start, uint64_t ext_si
                 logical->flags = GEOM_PART_CONTAINER;
             }
 
-            strncpy(logical->name, part_name, sizeof(logical->name) - 1);
+            strlcpy(logical->name, part_name, sizeof(logical->name));
             logical->start = part_start;
             logical->size = part_size;
             logical->type = entry->type;

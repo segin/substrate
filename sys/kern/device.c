@@ -66,7 +66,7 @@ static void device_publish_current(struct device *dev) {
         return;
     }
 
-    strncpy(dev->devnode->name, dev->devfs_path, sizeof(dev->devnode->name) - 1);
+    strlcpy(dev->devnode->name, dev->devfs_path, sizeof(dev->devnode->name));
     dev->devnode->name[sizeof(dev->devnode->name) - 1] = '\0';
     devfs_register_device(dev->devnode);
 
@@ -121,7 +121,7 @@ struct device *device_create(const char *name, struct device *parent) {
 
     /* Initialize identity */
     if (name) {
-        strncpy(dev->name, name, sizeof(dev->name) - 1);
+        strlcpy(dev->name, name, sizeof(dev->name));
         dev->name[sizeof(dev->name) - 1] = '\0';
     }
 
@@ -307,7 +307,7 @@ int device_publish(struct device *dev, fs_node_t *node, const char *path) {
     }
 
     dev->devnode = node;
-    strncpy(dev->devfs_path, path, sizeof(dev->devfs_path) - 1);
+    strlcpy(dev->devfs_path, path, sizeof(dev->devfs_path));
     dev->devfs_path[sizeof(dev->devfs_path) - 1] = '\0';
     dev->devfs_alias[0] = '\0';
 
