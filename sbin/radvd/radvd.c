@@ -83,7 +83,7 @@ int main(int argc, char **argv) {
     int s4 = socket(AF_INET, SOCK_DGRAM, 0);
     struct ifreq r;
     memset(&r, 0, sizeof(r));
-    strncpy(r.ifr_name, iface, IFNAMSIZ - 1);
+    strlcpy(r.ifr_name, iface, sizeof(r.ifr_name));
     if (ioctl(s4, SIOCGIFHWADDR, &r) < 0) { perror("SIOCGIFHWADDR"); return 1; }
     uint8_t mac[6];
     memcpy(mac, r.ifr_hwaddr.sa_data, 6);

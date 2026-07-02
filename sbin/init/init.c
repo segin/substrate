@@ -290,8 +290,8 @@ shutdown_sequence(void)
         struct utmp ut;
         memset(&ut, 0, sizeof(ut));
         ut.ut_type = RUN_LVL;
-        strncpy(ut.ut_line, "~", UT_LINESIZE - 1);
-        strncpy(ut.ut_user, "shutdown", UT_NAMESIZE - 1);
+        strlcpy(ut.ut_line, "~", sizeof(ut.ut_line));
+        strlcpy(ut.ut_user, "shutdown", sizeof(ut.ut_user));
         struct timeval tv;
         gettimeofday(&tv, NULL);
         ut.ut_tv.tv_sec  = (int32_t)tv.tv_sec;
@@ -337,7 +337,7 @@ record_logout(const char *tty, pid_t pid)
     memset(&ut, 0, sizeof(ut));
     ut.ut_type = DEAD_PROCESS;
     ut.ut_pid  = pid;
-    strncpy(ut.ut_line, base, UT_LINESIZE - 1);
+    strlcpy(ut.ut_line, base, sizeof(ut.ut_line));
     /* ut_id must match login's USER_PROCESS record so pututline()
      * rewrites the same utmp slot rather than appending a new one. */
     size_t lnlen = strlen(base);
@@ -419,8 +419,8 @@ main(int argc, char **argv)
         memset(&ut, 0, sizeof(ut));
         ut.ut_type = BOOT_TIME;
         ut.ut_pid  = 0;
-        strncpy(ut.ut_line, "~", UT_LINESIZE - 1);
-        strncpy(ut.ut_user, "reboot", UT_NAMESIZE - 1);
+        strlcpy(ut.ut_line, "~", sizeof(ut.ut_line));
+        strlcpy(ut.ut_user, "reboot", sizeof(ut.ut_user));
         struct timeval tv;
         gettimeofday(&tv, NULL);
         ut.ut_tv.tv_sec  = (int32_t)tv.tv_sec;

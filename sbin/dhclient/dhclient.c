@@ -146,7 +146,7 @@ static void get_hw_addr(const char *iface, uint8_t mac[6], int *ifindex) {
     if (s < 0) { perror("socket"); exit(1); }
     struct ifreq r;
     memset(&r, 0, sizeof(r));
-    strncpy(r.ifr_name, iface, IFNAMSIZ - 1);
+    strlcpy(r.ifr_name, iface, sizeof(r.ifr_name));
     if (ioctl(s, SIOCGIFHWADDR, &r) < 0) { perror("SIOCGIFHWADDR"); exit(1); }
     memcpy(mac, r.ifr_hwaddr.sa_data, 6);
     if (ioctl(s, SIOCGIFINDEX, &r) < 0) { perror("SIOCGIFINDEX"); exit(1); }
@@ -159,7 +159,7 @@ static void set_ipv4(const char *iface, unsigned long req, uint32_t addr) {
     if (s < 0) { perror("socket"); exit(1); }
     struct ifreq r;
     memset(&r, 0, sizeof(r));
-    strncpy(r.ifr_name, iface, IFNAMSIZ - 1);
+    strlcpy(r.ifr_name, iface, sizeof(r.ifr_name));
     struct sockaddr_in *sin = (struct sockaddr_in *)&r.ifr_addr;
     sin->sin_family = AF_INET;
     sin->sin_addr.s_addr = addr;
