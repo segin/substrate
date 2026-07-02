@@ -53,6 +53,7 @@ struct file {
     char            f_path[256];    /* best-effort procfs/readlink path */
     void            *f_data;        /* vnode/socket/pipe/etc. */
     struct file     *f_next;        /* next file in global list */
+    void            *f_advlock;     /* POSIX advisory record locks (struct advlock *) */
 };
 
 typedef struct file file_t;

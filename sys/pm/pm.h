@@ -55,6 +55,9 @@ void proc_capture_cmdline(process_t *p, char *const argv[]);
 size_t proc_emit_cmdline(const process_t *p, char *buf, size_t buf_len, size_t *argc_out);
 int proc_alloc_fd_from(process_t *p, int start);
 int proc_fcntl(process_t *p, int fd, int cmd, int arg);
+/* Release all POSIX advisory record locks on an open file description
+ * (called from file_free when the last reference is dropped). */
+void advlock_release_file(struct file *f);
 int proc_fd_set_nonblock(int fd, int on);
 void proc_close_cloexec(process_t *p);
 

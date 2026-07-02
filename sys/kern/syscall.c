@@ -394,6 +394,10 @@ file_t *file_alloc(void) {
 
 void file_free(file_t *f) {
     if (!f) return;
+    /* Drop any POSIX advisory record locks held on this open file
+     * description before the struct is recycled (POSIX: locks are released
+     * when the last descriptor referring to the description is closed). */
+    advlock_release_file(f);
     uma_zfree(file_zone, f);
 }
 
