@@ -331,14 +331,14 @@ do_login_one(const char *forced_user)
         ut.ut_type = USER_PROCESS;
         ut.ut_pid  = getpid();
         if (line_name) {
-            strncpy(ut.ut_line, line_name, UT_LINESIZE - 1);
+            strlcpy(ut.ut_line, line_name, sizeof(ut.ut_line));
             /* ut_id is the last 2..4 chars of the line — convention. */
             size_t lnlen = strlen(line_name);
             const char *idsrc = lnlen > 4 ? line_name + lnlen - 4 : line_name;
             strncpy(ut.ut_id, idsrc, sizeof(ut.ut_id));
         }
-        strncpy(ut.ut_user, pw->pw_name, UT_NAMESIZE - 1);
-        if (remote) strncpy(ut.ut_host, remote, UT_HOSTSIZE - 1);
+        strlcpy(ut.ut_user, pw->pw_name, sizeof(ut.ut_user));
+        if (remote) strlcpy(ut.ut_host, remote, sizeof(ut.ut_host));
         struct timeval tv;
         gettimeofday(&tv, NULL);
         ut.ut_tv.tv_sec  = (int32_t)tv.tv_sec;

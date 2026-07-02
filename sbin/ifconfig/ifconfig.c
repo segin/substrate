@@ -94,7 +94,7 @@ static void show_iface(const char *name) {
     int s = sock_open(AF_INET);
     struct ifreq r;
     memset(&r, 0, sizeof(r));
-    strncpy(r.ifr_name, name, IFNAMSIZ - 1);
+    strlcpy(r.ifr_name, name, sizeof(r.ifr_name));
 
     /* Flags + MTU + HW addr + addrs + gateway + v6 */
     if (ioctl(s, SIOCGIFFLAGS, &r) < 0) {
@@ -120,7 +120,7 @@ static void show_iface(const char *name) {
 
     /* HW addr */
     memset(&r, 0, sizeof(r));
-    strncpy(r.ifr_name, name, IFNAMSIZ - 1);
+    strlcpy(r.ifr_name, name, sizeof(r.ifr_name));
     if (ioctl(s, SIOCGIFHWADDR, &r) == 0) {
         unsigned char *m = (unsigned char *)r.ifr_hwaddr.sa_data;
         printf("        ether %02x:%02x:%02x:%02x:%02x:%02x\n",
@@ -129,7 +129,7 @@ static void show_iface(const char *name) {
 
     /* IPv4 addr / netmask / broadcast */
     memset(&r, 0, sizeof(r));
-    strncpy(r.ifr_name, name, IFNAMSIZ - 1);
+    strlcpy(r.ifr_name, name, sizeof(r.ifr_name));
     if (ioctl(s, SIOCGIFADDR, &r) == 0) {
         struct sockaddr_in *sin = (struct sockaddr_in *)&r.ifr_addr;
         uint32_t addr = sin->sin_addr.s_addr;
@@ -154,7 +154,7 @@ static void show_iface(const char *name) {
 
     /* IPv4 gateway (substrate ext) */
     memset(&r, 0, sizeof(r));
-    strncpy(r.ifr_name, name, IFNAMSIZ - 1);
+    strlcpy(r.ifr_name, name, sizeof(r.ifr_name));
     if (ioctl(s, SIOCGIFGATEWAY, &r) == 0) {
         struct sockaddr_in *sin = (struct sockaddr_in *)&r.ifr_addr;
         if (sin->sin_addr.s_addr) {
@@ -168,7 +168,7 @@ static void show_iface(const char *name) {
     struct in6_ifreq r6;
     memset(&r6, 0, sizeof(r6));
     memset(&r, 0, sizeof(r));
-    strncpy(r.ifr_name, name, IFNAMSIZ - 1);
+    strlcpy(r.ifr_name, name, sizeof(r.ifr_name));
     if (ioctl(s, SIOCGIFINDEX, &r) == 0) {
         r6.ifr6_ifindex = r.ifr_ifindex;
         if (ioctl(s, SIOCGIFADDR_IN6, &r6) == 0) {
@@ -209,7 +209,7 @@ static void set_flag(const char *name, int set, short flag) {
     int s = sock_open(AF_INET);
     struct ifreq r;
     memset(&r, 0, sizeof(r));
-    strncpy(r.ifr_name, name, IFNAMSIZ - 1);
+    strlcpy(r.ifr_name, name, sizeof(r.ifr_name));
     if (ioctl(s, SIOCGIFFLAGS, &r) < 0) {
         fprintf(stderr, "%s: SIOCGIFFLAGS: %s\n", name, strerror(errno));
         close(s); exit(1);
@@ -227,7 +227,7 @@ static void set_ipv4(const char *name, unsigned long req, const char *val) {
     int s = sock_open(AF_INET);
     struct ifreq r;
     memset(&r, 0, sizeof(r));
-    strncpy(r.ifr_name, name, IFNAMSIZ - 1);
+    strlcpy(r.ifr_name, name, sizeof(r.ifr_name));
     struct sockaddr_in *sin = (struct sockaddr_in *)&r.ifr_addr;
     sin->sin_family = AF_INET;
     if (parse_ip4(val, &sin->sin_addr.s_addr) < 0) {
@@ -245,7 +245,7 @@ static void set_mtu(const char *name, const char *val) {
     int s = sock_open(AF_INET);
     struct ifreq r;
     memset(&r, 0, sizeof(r));
-    strncpy(r.ifr_name, name, IFNAMSIZ - 1);
+    strlcpy(r.ifr_name, name, sizeof(r.ifr_name));
     r.ifr_mtu = atoi(val);
     if (ioctl(s, SIOCSIFMTU, &r) < 0) {
         fprintf(stderr, "%s: SIOCSIFMTU: %s\n", name, strerror(errno));
@@ -258,7 +258,7 @@ static void set_hwaddr(const char *name, const char *val) {
     int s = sock_open(AF_INET);
     struct ifreq r;
     memset(&r, 0, sizeof(r));
-    strncpy(r.ifr_name, name, IFNAMSIZ - 1);
+    strlcpy(r.ifr_name, name, sizeof(r.ifr_name));
     if (parse_mac(val, (uint8_t *)r.ifr_hwaddr.sa_data) < 0) {
         fprintf(stderr, "ifconfig: invalid MAC: %s\n", val);
         close(s); exit(1);
@@ -273,8 +273,7 @@ static void set_hwaddr(const char *name, const char *val) {
 
 static int parse_ip6(const char *s, uint8_t out[16], unsigned *prefix_out) {
     char buf[64];
-    strncpy(buf, s, sizeof(buf) - 1);
-    buf[sizeof(buf) - 1] = '\0';
+    strlcpy(buf, s, sizeof(buf));
     char *slash = strchr(buf, '/');
     if (slash) {
         *slash = '\0';
@@ -290,7 +289,7 @@ static void v6_addr(const char *name, unsigned long req, const char *val) {
     int s = sock_open(AF_INET);
     struct ifreq ifr;
     memset(&ifr, 0, sizeof(ifr));
-    strncpy(ifr.ifr_name, name, IFNAMSIZ - 1);
+    strlcpy(ifr.ifr_name, name, sizeof(ifr.ifr_name));
     if (ioctl(s, SIOCGIFINDEX, &ifr) < 0) {
         fprintf(stderr, "%s: %s\n", name, strerror(errno));
         close(s); exit(1);

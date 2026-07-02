@@ -78,8 +78,7 @@ int res_init(void) {
             } else if (strcmp(kw, "domain") == 0) {
                 char *dom = next_token(&cur);
                 if (dom) {
-                    strncpy(r->defdname, dom, sizeof(r->defdname) - 1);
-                    r->defdname[sizeof(r->defdname) - 1] = '\0';
+                    strlcpy(r->defdname, dom, sizeof(r->defdname));
                 }
             } else if (strcmp(kw, "search") == 0) {
                 int n = 0;

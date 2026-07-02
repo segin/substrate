@@ -63,8 +63,7 @@ write_group(FILE *out, void *arg)
             /* The target group itself: rewrite name and/or gid. */
             char *fields[4];
             char  copy[1024];
-            strncpy(copy, line, sizeof(copy) - 1);
-            copy[sizeof(copy) - 1] = '\0';
+            strlcpy(copy, line, sizeof(copy));
             int n = pwdb_split(copy, ':', fields, 4);
             if (n < 4) {
                 /* Malformed line — preserve as-is. */
@@ -104,8 +103,7 @@ write_passwd(FILE *out, void *arg)
         char  copy[1024];
         char *fields[7];
 
-        strncpy(copy, line, sizeof(copy) - 1);
-        copy[sizeof(copy) - 1] = '\0';
+        strlcpy(copy, line, sizeof(copy));
 
         int n = pwdb_split(copy, ':', fields, 7);
         if (n < 7) {

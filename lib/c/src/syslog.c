@@ -58,7 +58,7 @@ static int try_connect(const char *path)
     struct sockaddr_un sun;
     memset(&sun, 0, sizeof(sun));
     sun.sun_family = AF_UNIX;
-    strncpy(sun.sun_path, path, sizeof(sun.sun_path) - 1);
+    strlcpy(sun.sun_path, path, sizeof(sun.sun_path));
     if (connect(fd, (struct sockaddr *)&sun, sizeof(sun)) < 0) {
         close(fd);
         return -1;

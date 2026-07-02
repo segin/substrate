@@ -127,8 +127,7 @@ write_group_strip(FILE *out, void *arg)
     while (fgets(line, sizeof(line), in) != NULL) {
         char  copy[1024];
         char *fields[4];
-        strncpy(copy, line, sizeof(copy) - 1);
-        copy[sizeof(copy) - 1] = '\0';
+        strlcpy(copy, line, sizeof(copy));
         int n = pwdb_split(copy, ':', fields, 4);
         if (n < 4) {
             if (fputs(line, out) == EOF) { fclose(in); return -1; }
@@ -143,8 +142,7 @@ write_group_strip(FILE *out, void *arg)
             continue;
         }
         char members[1024];
-        strncpy(members, fields[3], sizeof(members) - 1);
-        members[sizeof(members) - 1] = '\0';
+        strlcpy(members, fields[3], sizeof(members));
         strip_member(members, ctx->name);
         if (fprintf(out, "%s:%s:%s:%s\n",
                     fields[0], fields[1], fields[2], members) < 0) {
@@ -168,8 +166,7 @@ write_gshadow_strip(FILE *out, void *arg)
     while (fgets(line, sizeof(line), in) != NULL) {
         char  copy[1024];
         char *fields[4];
-        strncpy(copy, line, sizeof(copy) - 1);
-        copy[sizeof(copy) - 1] = '\0';
+        strlcpy(copy, line, sizeof(copy));
         int n = pwdb_split(copy, ':', fields, 4);
         if (n < 4) {
             if (fputs(line, out) == EOF) { fclose(in); return -1; }
@@ -181,10 +178,8 @@ write_gshadow_strip(FILE *out, void *arg)
             continue;
         }
         char admins[1024], members[1024];
-        strncpy(admins,  fields[2], sizeof(admins)  - 1);
-        admins[sizeof(admins) - 1] = '\0';
-        strncpy(members, fields[3], sizeof(members) - 1);
-        members[sizeof(members) - 1] = '\0';
+        strlcpy(admins, fields[2], sizeof(admins));
+        strlcpy(members, fields[3], sizeof(members));
         strip_member(admins,  ctx->name);
         strip_member(members, ctx->name);
         if (fprintf(out, "%s:%s:%s:%s\n",
@@ -277,8 +272,7 @@ main(int argc, char *argv[])
         return 6;
     }
     char   home[256];
-    strncpy(home, pw->pw_dir ? pw->pw_dir : "", sizeof(home) - 1);
-    home[sizeof(home) - 1] = '\0';
+    strlcpy(home, pw->pw_dir ? pw->pw_dir : "", sizeof(home));
     struct userdel_ctx ctx = {
         .name        = name,
         .primary_gid = pw->pw_gid,

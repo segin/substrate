@@ -84,7 +84,7 @@ sgetspent_r(const char *string, struct spwd *result_buf, char *buffer,
         return EINVAL;
     if (strlen(string) + 1 > buflen)
         return ERANGE;
-    strcpy(buffer, string);
+    strlcpy(buffer, string, buflen);
     sp_strip_eol(buffer);
     if (sp_parse(buffer, result_buf) != 0)
         return EINVAL;

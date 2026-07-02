@@ -170,8 +170,7 @@ get_hostname(char *out, size_t out_sz)
             fclose(f);
         }
     }
-    strncpy(out, "substrate", out_sz - 1);
-    out[out_sz - 1] = '\0';
+    strlcpy(out, "substrate", out_sz);
 }
 
 /* Stream /etc/issue to stdout with BSD-style escape expansion:

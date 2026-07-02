@@ -52,12 +52,12 @@ int getifaddrs(struct ifaddrs **ifap)
 
         struct ifreq req;
         memset(&req, 0, sizeof req);
-        strncpy(req.ifr_name, list[i].ifr_name, IFNAMSIZ - 1);
+        strlcpy(req.ifr_name, list[i].ifr_name, sizeof(req.ifr_name));
         if (ioctl(fd, SIOCGIFNETMASK, &req) == 0)
             ifa->ifa_netmask = dup_sa(&req.ifr_netmask);
 
         memset(&req, 0, sizeof req);
-        strncpy(req.ifr_name, list[i].ifr_name, IFNAMSIZ - 1);
+        strlcpy(req.ifr_name, list[i].ifr_name, sizeof(req.ifr_name));
         if (ioctl(fd, SIOCGIFFLAGS, &req) == 0)
             ifa->ifa_flags = (unsigned int)(unsigned short)req.ifr_flags;
 
@@ -77,7 +77,7 @@ unsigned int if_nametoindex(const char *ifname)
     if (fd < 0) return 0;
     struct ifreq ifr;
     memset(&ifr, 0, sizeof ifr);
-    strncpy(ifr.ifr_name, ifname, IFNAMSIZ - 1);
+    strlcpy(ifr.ifr_name, ifname, sizeof(ifr.ifr_name));
     unsigned int idx = 0;
     if (ioctl(fd, SIOCGIFINDEX, &ifr) == 0)
         idx = (unsigned int)ifr.ifr_ifindex;
@@ -95,7 +95,7 @@ char *if_indextoname(unsigned int ifindex, char *ifname)
     ifr.ifr_ifindex = (int)ifindex;
     char *ret = NULL;
     if (ioctl(fd, SIOCGIFNAME, &ifr) == 0) {
-        strncpy(ifname, ifr.ifr_name, IFNAMSIZ);
+        strlcpy(ifname, ifr.ifr_name, IFNAMSIZ);
         ret = ifname;
     }
     close(fd);

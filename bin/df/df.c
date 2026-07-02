@@ -336,8 +336,7 @@ int main(int argc, char **argv)
 		for (int i = optind; i < argc; i++) {
 			char resolved[1024];
 			if (!realpath(argv[i], resolved)) {
-				strncpy(resolved, argv[i], sizeof resolved - 1);
-				resolved[sizeof resolved - 1] = '\0';
+				strlcpy(resolved, argv[i], sizeof resolved);
 			}
 			int m = mount_for(resolved);
 			if (m < 0) {

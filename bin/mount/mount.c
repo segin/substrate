@@ -36,8 +36,7 @@ static unsigned long parse_options(const char *opts) {
     if (!opts || !*opts) return 0;
 
     char buf[256];
-    strncpy(buf, opts, sizeof(buf) - 1);
-    buf[sizeof(buf) - 1] = '\0';
+    strlcpy(buf, opts, sizeof(buf));
 
     char *save = NULL;
     for (char *tok = strtok_r(buf, ",", &save); tok;

@@ -202,7 +202,7 @@ int sys_cpu_info(int cpu, sys_cpuinfo_t *info) {
         }
         info->model[48] = '\0';
     } else {
-        strcpy(info->model, "Generic x86");
+        strlcpy(info->model, "Generic x86", sizeof(info->model));
     }
     (void)cpu;
     /* MHz / cache sizes are tougher without ACPI/MP-table parsing.
@@ -303,7 +303,7 @@ int sys_kernel_version(sys_version_t *ver) {
     if (n > 0) {
         /* Strip trailing newline. */
         while (n > 0 && (buf[n-1] == '\n' || buf[n-1] == '\r')) buf[--n] = '\0';
-        strncpy(ver->version, buf, sizeof(ver->version) - 1);
+        strlcpy(ver->version, buf, sizeof(ver->version));
         /* Try to extract X.Y.Z from somewhere in the string. */
         for (const char *p = buf; *p; p++) {
             int M, m, p2;
@@ -316,8 +316,8 @@ int sys_kernel_version(sys_version_t *ver) {
     }
     /* Static fallback. */
     ver->major = 0; ver->minor = 2; ver->patch = 0;
-    strcpy(ver->release, "0.2.0-dev");
-    strcpy(ver->version, "Substrate 0.2.0-dev");
+    strlcpy(ver->release, "0.2.0-dev", sizeof(ver->release));
+    strlcpy(ver->version, "Substrate 0.2.0-dev", sizeof(ver->version));
     return 0;
 }
 

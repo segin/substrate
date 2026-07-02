@@ -167,12 +167,10 @@ static void add_default_rules(void)
     for (size_t i = 0; i < sizeof(d)/sizeof(d[0]) && g_n_rules < MAX_RULES; i++) {
         struct rule *r = &g_rules[g_n_rules];
         char tmp[64];
-        strncpy(tmp, d[i].sel, sizeof(tmp) - 1);
-        tmp[sizeof(tmp)-1] = '\0';
+        strlcpy(tmp, d[i].sel, sizeof(tmp));
         if (parse_one_selector(tmp, &r->sels[0]) < 0) continue;
         r->n_sels = 1;
-        strncpy(r->target, d[i].tgt, sizeof(r->target) - 1);
-        r->target[sizeof(r->target)-1] = '\0';
+        strlcpy(r->target, d[i].tgt, sizeof(r->target));
         g_n_rules++;
     }
 }
@@ -219,8 +217,7 @@ static void load_config(void)
         }
         if (r->n_sels == 0) continue;
 
-        strncpy(r->target, ws, sizeof(r->target) - 1);
-        r->target[sizeof(r->target)-1] = '\0';
+        strlcpy(r->target, ws, sizeof(r->target));
         g_n_rules++;
     }
     fclose(f);
@@ -344,7 +341,7 @@ static int open_socket(void)
     struct sockaddr_un sun;
     memset(&sun, 0, sizeof(sun));
     sun.sun_family = AF_UNIX;
-    strncpy(sun.sun_path, SOCK_PATH, sizeof(sun.sun_path) - 1);
+    strlcpy(sun.sun_path, SOCK_PATH, sizeof(sun.sun_path));
     if (bind(fd, (struct sockaddr *)&sun, sizeof(sun)) < 0) {
         close(fd);
         return -1;

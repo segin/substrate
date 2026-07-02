@@ -74,8 +74,7 @@ write_passwd(FILE *out, void *arg)
         if (strncmp(line, ctx->old_name, nlen) == 0 && line[nlen] == ':') {
             char  copy[1024];
             char *fields[7];
-            strncpy(copy, line, sizeof(copy) - 1);
-            copy[sizeof(copy) - 1] = '\0';
+            strlcpy(copy, line, sizeof(copy));
             int n = pwdb_split(copy, ':', fields, 7);
             if (n < 7) {
                 if (fputs(line, out) == EOF) { fclose(in); return -1; }
@@ -117,8 +116,7 @@ write_shadow(FILE *out, void *arg)
         if (strncmp(line, ctx->old_name, nlen) == 0 && line[nlen] == ':') {
             char  copy[1024];
             char *fields[9];
-            strncpy(copy, line, sizeof(copy) - 1);
-            copy[sizeof(copy) - 1] = '\0';
+            strlcpy(copy, line, sizeof(copy));
             int n = pwdb_split(copy, ':', fields, 9);
             if (n < 9) {
                 if (fputs(line, out) == EOF) { fclose(in); return -1; }
@@ -126,8 +124,7 @@ write_shadow(FILE *out, void *arg)
             }
             const char *name_o = ctx->new_name ? ctx->new_name : fields[0];
             char        hash[512];
-            strncpy(hash, fields[1], sizeof(hash) - 2);
-            hash[sizeof(hash) - 1] = '\0';
+            strlcpy(hash, fields[1], sizeof(hash) - 1);
             if (ctx->lock_account && hash[0] != '!') {
                 /* Prepend ! to the existing hash. */
                 memmove(hash + 1, hash, strlen(hash) + 1);
@@ -231,8 +228,7 @@ list_replace(char *list, size_t list_sz, const char *old, const char *neu)
         p = comma + 1;
     }
     tmp[out] = '\0';
-    strncpy(list, tmp, list_sz - 1);
-    list[list_sz - 1] = '\0';
+    strlcpy(list, tmp, list_sz);
 }
 
 static int
@@ -246,16 +242,14 @@ write_group(FILE *out, void *arg)
     while (fgets(line, sizeof(line), in) != NULL) {
         char  copy[1024];
         char *fields[4];
-        strncpy(copy, line, sizeof(copy) - 1);
-        copy[sizeof(copy) - 1] = '\0';
+        strlcpy(copy, line, sizeof(copy));
         int n = pwdb_split(copy, ':', fields, 4);
         if (n < 4) {
             if (fputs(line, out) == EOF) { fclose(in); return -1; }
             continue;
         }
         char members[1024];
-        strncpy(members, fields[3], sizeof(members) - 1);
-        members[sizeof(members) - 1] = '\0';
+        strlcpy(members, fields[3], sizeof(members));
 
         /* Rename existing references. */
         if (ctx->new_name != NULL && list_contains(members, ctx->old_name)) {
@@ -492,8 +486,7 @@ main(int argc, char *argv[])
     };
 
     char old_home[256];
-    strncpy(old_home, pw->pw_dir ? pw->pw_dir : "", sizeof(old_home) - 1);
-    old_home[sizeof(old_home) - 1] = '\0';
+    strlcpy(old_home, pw->pw_dir ? pw->pw_dir : "", sizeof(old_home));
 
     if (pwdb_atomic_rewrite(PWDB_PASSWD, 0644, write_passwd, &ctx) < 0) {
         pwdb_unlock(lockfd);
