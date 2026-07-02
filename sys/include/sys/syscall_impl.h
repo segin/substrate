@@ -276,6 +276,10 @@ extern int sys_madvise(void*, size_t, int);
 extern int sys_minherit(void*, size_t, int);
 extern int sys_getrlimit(int, void*);
 extern int sys_setrlimit(int, const void*);
+/* Native-ABI resource limits + mlockall (sys/kern/syscall.c). */
+extern int sys_native_getrlimit(int, void*);
+extern int sys_native_setrlimit(int, const void*);
+extern int sys_native_mlockall(int);
 extern int sys_issetugid(void);
 extern int sys_cap_getmode(unsigned int*);
 extern ssize_t sys_readv(int, const void*, int);

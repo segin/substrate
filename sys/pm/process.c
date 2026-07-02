@@ -306,6 +306,11 @@ static void proc_resource_limits_init(process_t *proc) {
 
     proc->rlimits[RLIMIT_CORE].rlim_cur = RLIM_INFINITY;
     proc->rlimits[RLIMIT_CORE].rlim_max = RLIM_INFINITY;
+
+    /* No memlock limit and no mlockall() by default. */
+    proc->rlim_memlock_cur = RLIM_INFINITY;
+    proc->rlim_memlock_max = RLIM_INFINITY;
+    proc->mlockall_flags   = 0;
 }
 
 void pm_init(void) {
@@ -524,6 +529,11 @@ static int proc_fork_common(process_t *parent, void *stack, int is_vfork) {
     child_proc->sig_catch = parent->sig_catch;
     child_proc->sig_ignore = parent->sig_ignore;
     memcpy(child_proc->rlimits, parent->rlimits, sizeof(parent->rlimits));
+    /* Resource limits are inherited across fork(); memory locks are not, so
+     * the child starts with no mlockall() in effect. */
+    child_proc->rlim_memlock_cur = parent->rlim_memlock_cur;
+    child_proc->rlim_memlock_max = parent->rlim_memlock_max;
+    child_proc->mlockall_flags   = 0;
     child_proc->umask = parent->umask;
     /* Supplementary group list inherits across fork. */
     memcpy(child_proc->supp_groups, parent->supp_groups,
@@ -884,6 +894,205 @@ void proc_clear_fd(process_t *p, int fd) {
     proc_set_fd(p, fd, NULL);
 }
 
+/* ------------------------------------------------------------------
+ * POSIX advisory record locks (fcntl F_GETLK / F_SETLK / F_SETLKW).
+ *
+ * Locks hang off the open file description (struct file.f_advlock), so
+ * they are shared by dup() and fork() (which share the file_t) yet remain
+ * owned by a specific pid.  A forked child therefore sees the parent's
+ * lock as belonging to ANOTHER owner: locks are NOT inherited across
+ * fork() even though the mapping/fd is (OPTS fork/11-1).  The list is
+ * freed with the last reference to the description (file_free() ->
+ * advlock_release_file()).  Enforcement is scoped to a single shared
+ * description, so two independent open()s of the same file keep separate
+ * lists and never contend — preserving substrate's historical
+ * single-writer no-op behaviour for pwdb/sqlite/... that never share a
+ * locked fd across processes.
+ *
+ * kmalloc()/kfree() must not run under the spinlock, so nodes are
+ * allocated before it is taken and freed after it is released.
+ * ------------------------------------------------------------------ */
+struct advlock {
+    off_t          start;
+    off_t          end;        /* exclusive; ADVLOCK_EOF == to end of file */
+    short          type;       /* F_RDLCK / F_WRLCK */
+    int            owner;      /* owning pid */
+    struct advlock *next;
+};
+#define ADVLOCK_EOF ((off_t)0x7fffffffffffffffLL)
+
+/* Mirrors the userspace <fcntl.h> struct flock (i386 layout: int64 off_t
+ * is 4-byte aligned, so the struct is 24 bytes with no trailing pad). */
+struct kflock {
+    int16_t l_type;
+    int16_t l_whence;
+    int64_t l_start;
+    int64_t l_len;
+    int32_t l_pid;
+};
+
+static spinlock_t advlock_lock = SPINLOCK_INIT("fcntl_advlock");
+
+static int advlock_overlap(off_t s1, off_t e1, off_t s2, off_t e2) {
+    return s1 < e2 && s2 < e1;
+}
+static int advlock_conflict(short a, short b) {
+    return a == F_WRLCK || b == F_WRLCK;
+}
+
+/* Resolve a struct flock's l_whence/l_start/l_len to an absolute [start,end). */
+static int advlock_range(file_t *f, const struct kflock *fl,
+                         off_t *out_start, off_t *out_end) {
+    off_t base;
+    switch (fl->l_whence) {
+    case 0: base = 0; break;                                   /* SEEK_SET */
+    case 1: base = f->f_offset; break;                         /* SEEK_CUR */
+    case 2:                                                    /* SEEK_END */
+        base = f->f_data ? ((fs_node_t *)f->f_data)->length : 0;
+        break;
+    default: return -EINVAL;
+    }
+    off_t start = base + fl->l_start;
+    off_t end;
+    if (fl->l_len == 0) {
+        end = ADVLOCK_EOF;
+    } else if (fl->l_len > 0) {
+        end = start + fl->l_len;
+    } else {                       /* negative len: region [start+len, start) */
+        end = start;
+        start = start + fl->l_len;
+    }
+    if (start < 0) return -EINVAL;
+    *out_start = start;
+    *out_end = end;
+    return 0;
+}
+
+/* Unlink this owner's locks overlapping [start,end); return the removed
+ * chain (threaded on ->next) for the caller to free outside the lock. */
+static struct advlock *advlock_unlink_owner_range(file_t *f, int owner,
+                                                  off_t start, off_t end) {
+    struct advlock *removed = NULL;
+    struct advlock **pp = (struct advlock **)&f->f_advlock;
+    while (*pp) {
+        struct advlock *l = *pp;
+        if (l->owner == owner && advlock_overlap(l->start, l->end, start, end)) {
+            *pp = l->next;
+            l->next = removed;
+            removed = l;
+        } else {
+            pp = &l->next;
+        }
+    }
+    return removed;
+}
+
+static void advlock_free_chain(struct advlock *l) {
+    while (l) {
+        struct advlock *n = l->next;
+        kfree(l, sizeof(*l));
+        l = n;
+    }
+}
+
+/* Called from file_free() when the last reference to an open file
+ * description is dropped: release every record lock it carries. */
+void advlock_release_file(file_t *f) {
+    if (!f) return;
+    spinlock_acquire(&advlock_lock);
+    struct advlock *l = (struct advlock *)f->f_advlock;
+    f->f_advlock = NULL;
+    spinlock_release(&advlock_lock);
+    advlock_free_chain(l);
+}
+
+/* fcntl F_GETLK: report a conflicting lock owned by another process, or
+ * F_UNLCK if the requested region is grantable. */
+static int advlock_getlk(process_t *p, file_t *f, int arg) {
+    struct kflock fl;
+    if (!arg) return -EFAULT;
+    if (copyin((void *)(uintptr_t)(unsigned)arg, &fl, sizeof(fl)) != 0)
+        return -EFAULT;
+    if (fl.l_type != F_RDLCK && fl.l_type != F_WRLCK) return -EINVAL;
+    off_t s, e;
+    int r = advlock_range(f, &fl, &s, &e);
+    if (r) return r;
+
+    spinlock_acquire(&advlock_lock);
+    struct advlock *hit = NULL;
+    for (struct advlock *l = (struct advlock *)f->f_advlock; l; l = l->next) {
+        if (l->owner != p->pid &&
+            advlock_overlap(l->start, l->end, s, e) &&
+            advlock_conflict(fl.l_type, l->type)) {
+            hit = l;
+            break;
+        }
+    }
+    if (hit) {
+        fl.l_type   = hit->type;
+        fl.l_whence = 0;   /* SEEK_SET */
+        fl.l_start  = hit->start;
+        fl.l_len    = (hit->end == ADVLOCK_EOF) ? 0 : (hit->end - hit->start);
+        fl.l_pid    = hit->owner;
+    } else {
+        fl.l_type = F_UNLCK;
+    }
+    spinlock_release(&advlock_lock);
+
+    if (copyout(&fl, (void *)(uintptr_t)(unsigned)arg, sizeof(fl)) != 0)
+        return -EFAULT;
+    return 0;
+}
+
+/* fcntl F_SETLK / F_SETLKW. */
+static int advlock_setlk(process_t *p, file_t *f, int arg) {
+    struct kflock fl;
+    if (!arg) return -EFAULT;
+    if (copyin((void *)(uintptr_t)(unsigned)arg, &fl, sizeof(fl)) != 0)
+        return -EFAULT;
+    if (fl.l_type != F_RDLCK && fl.l_type != F_WRLCK && fl.l_type != F_UNLCK)
+        return -EINVAL;
+    off_t s, e;
+    int r = advlock_range(f, &fl, &s, &e);
+    if (r) return r;
+
+    /* Allocate the replacement node up front so kmalloc never runs under
+     * the spinlock (it may sleep / take other locks). */
+    struct advlock *nl = NULL;
+    if (fl.l_type != F_UNLCK) {
+        nl = kmalloc(sizeof(*nl));
+        if (!nl) return -ENOMEM;
+    }
+
+    spinlock_acquire(&advlock_lock);
+    if (fl.l_type != F_UNLCK) {
+        for (struct advlock *l = (struct advlock *)f->f_advlock; l; l = l->next) {
+            if (l->owner != p->pid &&
+                advlock_overlap(l->start, l->end, s, e) &&
+                advlock_conflict(fl.l_type, l->type)) {
+                spinlock_release(&advlock_lock);
+                kfree(nl, sizeof(*nl));
+                /* F_SETLKW blocking is not implemented; a conflict is only
+                 * reachable when processes share the SAME open file
+                 * description (fork/dup) — reported as EAGAIN either way. */
+                return -EAGAIN;
+            }
+        }
+    }
+    struct advlock *removed = advlock_unlink_owner_range(f, p->pid, s, e);
+    if (nl) {
+        nl->start = s;
+        nl->end   = e;
+        nl->type  = fl.l_type;
+        nl->owner = p->pid;
+        nl->next  = (struct advlock *)f->f_advlock;
+        f->f_advlock = nl;
+    }
+    spinlock_release(&advlock_lock);
+    advlock_free_chain(removed);
+    return 0;
+}
+
 int proc_fcntl(process_t *p, int fd, int cmd, int arg) {
     file_t *f;
     int newfd;
@@ -928,28 +1137,10 @@ int proc_fcntl(process_t *p, int fd, int cmd, int arg) {
         proc_apply_status_flags(f, arg);
         return 0;
     case F_GETLK:
-        /*
-         * POSIX advisory record locks.  substrate has no
-         * record-locking layer yet; report every region as
-         * unlocked (l_type = F_UNLCK) so callers see no conflict.
-         */
-        {
-            short unlck = F_UNLCK;
-            if (arg && copyout(&unlck, (void *)(uintptr_t)(unsigned)arg,
-                               sizeof(unlck)) != 0) {
-                return -EFAULT;
-            }
-        }
-        return 0;
+        return advlock_getlk(p, f, arg);
     case F_SETLK:
     case F_SETLKW:
-        /*
-         * Accept advisory locks unconditionally — they are not
-         * enforced.  This lets pwdb (useradd/usermod/...), sqlite
-         * and other fcntl-locking callers run on this single-writer
-         * system instead of failing with EINVAL.
-         */
-        return 0;
+        return advlock_setlk(p, f, arg);
     case F_SETOWN:
         /*
          * Set the pid/pgrp that receives SIGIO/SIGURG for this fd.

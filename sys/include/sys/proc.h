@@ -151,7 +151,12 @@ typedef struct process {
     uint8_t  is_kernel_task; // 1 if kernel thread, 0 if user process
     uint8_t  bitness;        // Process execution mode (16/32/64)
     struct rlimit rlimits[RLIM_NLIMITS];
-    
+    /* RLIMIT_MEMLOCK soft/hard limit, tracked directly (rlimits[] is only
+     * sized for RLIMIT_CORE).  RLIM_INFINITY == "unset/no limit". */
+    rlim_t   rlim_memlock_cur;
+    rlim_t   rlim_memlock_max;
+    uint32_t mlockall_flags;   /* MCL_CURRENT/MCL_FUTURE from mlockall(2) */
+
     struct tty *tty;      // Controlling Terminal
     fs_node_t *cwd_node; // Current working directory
     char exec_path[256];

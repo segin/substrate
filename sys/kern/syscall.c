@@ -394,6 +394,10 @@ file_t *file_alloc(void) {
 
 void file_free(file_t *f) {
     if (!f) return;
+    /* Drop any POSIX advisory record locks held on this open file
+     * description before the struct is recycled (POSIX: locks are released
+     * when the last descriptor referring to the description is closed). */
+    advlock_release_file(f);
     uma_zfree(file_zone, f);
 }
 
@@ -2692,10 +2696,15 @@ int kern_access(const char *path, int mode) {
 }
 
 int sys_mlock(const void *addr, size_t len) {
-    // Stub implementation: always succeed
-    // In the future, this should wire pages in the PMAP to prevent swapping.
     (void)addr;
     (void)len;
+    /* substrate does not swap, so memory is effectively always resident and
+     * mlock is a no-op -- EXCEPT that POSIX requires EPERM when an
+     * unprivileged process whose RLIMIT_MEMLOCK soft limit is 0 tries to
+     * lock memory (OPTS mlock/12-1). */
+    if (current_process && current_process->euid != 0 &&
+        current_process->rlim_memlock_cur == 0)
+        return -EPERM;
     return 0;
 }
 
@@ -2703,6 +2712,49 @@ int sys_munlock(const void *addr, size_t len) {
     // Stub implementation: always succeed
     (void)addr;
     (void)len;
+    return 0;
+}
+
+/*
+ * Native resource limits + mlockall.  substrate only tracks the state POSIX
+ * needs to return the mlock/mmap privilege errors; other limits report
+ * RLIM_INFINITY (no enforcement).  These use the substrate <sys/resource.h>
+ * ABI (rlim_t == unsigned long) and are distinct from the FreeBSD-ABI
+ * sys_getrlimit/sys_setrlimit in exec/perso/compat.c.
+ */
+int sys_native_getrlimit(int resource, void *rlp) {
+    if (!current_process) return -EINVAL;
+    if (!rlp) return -EFAULT;
+    struct rlimit k;
+    if (resource == RLIMIT_MEMLOCK) {
+        k.rlim_cur = current_process->rlim_memlock_cur;
+        k.rlim_max = current_process->rlim_memlock_max;
+    } else {
+        k.rlim_cur = RLIM_INFINITY;
+        k.rlim_max = RLIM_INFINITY;
+    }
+    if (copyout(&k, rlp, sizeof(k)) != 0) return -EFAULT;
+    return 0;
+}
+
+int sys_native_setrlimit(int resource, const void *rlp) {
+    if (!current_process) return -EINVAL;
+    if (!rlp) return -EFAULT;
+    struct rlimit k;
+    if (copyin(rlp, &k, sizeof(k)) != 0) return -EFAULT;
+    if (resource == RLIMIT_MEMLOCK) {
+        current_process->rlim_memlock_cur = k.rlim_cur;
+        current_process->rlim_memlock_max = k.rlim_max;
+    }
+    /* Other resources are accepted but not enforced (as before). */
+    return 0;
+}
+
+int sys_native_mlockall(int flags) {
+    if (!current_process) return -EINVAL;
+    /* Flag validation happens in libc; record the request so a subsequent
+     * mmap() can apply the MCL_FUTURE memlock-limit check. */
+    current_process->mlockall_flags = (uint32_t)flags;
     return 0;
 }
 

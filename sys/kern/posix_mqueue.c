@@ -676,7 +676,12 @@ int kern_mq_notify(int mqd, const struct sigevent *sev)
         q->notify.signo  = 0;
         q->notify.value  = sev->sigev_value;
     } else if (sev->sigev_notify == SIGEV_SIGNAL) {
-        if (sev->sigev_signo <= 0 || sev->sigev_signo > NSIG) {
+        /* Signal 0 (the null signal) is a valid sigev_signo: it registers a
+         * notification that delivers no signal, matching Linux do_mq_notify()
+         * (which rejects only signo < 0 or > SIGRTMAX).  psignal(_, 0) is a
+         * safe no-op, so a fired signo-0 notification harms nothing.  OPTS
+         * mq_close/2-1 re-registers with sigev_signo == 0 after a close. */
+        if (sev->sigev_signo < 0 || sev->sigev_signo > NSIG) {
             mutex_unlock(&mq_lock);
             return -EINVAL;
         }

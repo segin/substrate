@@ -187,7 +187,13 @@ int setegid(gid_t egid) {
 }
 
 int seteuid(uid_t euid) {
-    return setuid(euid);
+    /* Change ONLY the effective uid via the kernel's sys_seteuid.  Falling
+     * back to setuid() (as before) also changed the real and saved uids, so a
+     * privileged process that dropped its euid could never restore it
+     * (OPTS mmap/18-1's seteuid(0) after seteuid(non-root)). */
+    long r = syscall(SYS_SETEUID, (long)euid);
+    if (r < 0) { errno = (int)-r; return -1; }
+    return 0;
 }
 
 int setpgrp(void) {
@@ -458,6 +464,11 @@ int mlockall(int flags) {
         errno = EINVAL;
         return -1;
     }
+    /* Record the request in the kernel so a later mmap() can enforce the
+     * RLIMIT_MEMLOCK ceiling for an unprivileged process (MCL_FUTURE ->
+     * EAGAIN, OPTS mmap/18-1). */
+    long r = syscall(SYS_MLOCKALL, flags);
+    if (r < 0) { errno = (int)-r; return -1; }
     return 0;
 }
 

@@ -525,47 +525,138 @@ char *ctime(const time_t *timer) {
     return ctime_r(timer, buf);
 }
 
+/* Weekday of 31 December of ISO year y (0=Sun); used to count ISO weeks. */
+static int strftime_p_iso(int y) {
+    int r = (y + y / 4 - y / 100 + y / 400) % 7;
+    return r < 0 ? r + 7 : r;
+}
+static int strftime_iso_weeks_in_year(int y) {
+    return (strftime_p_iso(y) == 4 || strftime_p_iso(y - 1) == 3) ? 53 : 52;
+}
+/* ISO 8601 week number (1..53); *iso_year_out (if non-NULL) receives the
+ * corresponding week-based year, which can differ from the calendar year
+ * around 1 January / 31 December. */
+static int strftime_iso_week(const struct tm *tp, int *iso_year_out) {
+    int year = tp->tm_year + 1900;
+    int wday_mon = ((tp->tm_wday % 7) + 6) % 7;      /* Mon=0 .. Sun=6 */
+    int week = (tp->tm_yday - wday_mon + 10) / 7;
+    if (week < 1) {
+        year--;
+        week = strftime_iso_weeks_in_year(year);
+    } else if (week > strftime_iso_weeks_in_year(year)) {
+        week = 1;
+        year++;
+    }
+    if (iso_year_out) *iso_year_out = year;
+    return week;
+}
+
 size_t strftime(char *__restrict s, size_t maxsize, const char *__restrict format, const struct tm *__restrict tp) {
-    // Minimal implementation
-    static const char mon_name[][4] = {
+    static const char *const wday_abbr[] = {
+        "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" };
+    static const char *const wday_full[] = {
+        "Sunday", "Monday", "Tuesday", "Wednesday",
+        "Thursday", "Friday", "Saturday" };
+    static const char *const mon_abbr[] = {
         "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-        "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
-    };
+        "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
+    static const char *const mon_full[] = {
+        "January", "February", "March", "April", "May", "June", "July",
+        "August", "September", "October", "November", "December" };
+
+    if (maxsize == 0) return 0;
+
     size_t count = 0;
     for (const char *p = format; *p; p++) {
+        char tmp[64];
+        tmp[0] = '\0';
+
         if (*p != '%') {
-            if (count < maxsize - 1) s[count++] = *p;
+            if (count + 1 >= maxsize) return 0;
+            s[count++] = *p;
             continue;
         }
-        
+
         p++;
-        char tmp[64];
+        /* The E and O modifiers select locale-alternative representations;
+         * the "C"/POSIX locale has none, so process the base specifier
+         * (OPTS strftime/2-1 checks the E- and O-modified forms match the
+         * plain ones). */
+        if (*p == 'E' || *p == 'O') p++;
+        if (*p == '\0') break;
+
+        int wday = (tp->tm_wday >= 0 && tp->tm_wday <= 6) ? tp->tm_wday : 0;
+        int mon  = (tp->tm_mon  >= 0 && tp->tm_mon  <= 11) ? tp->tm_mon : 0;
+        int year = tp->tm_year + 1900;
+        int hour12 = tp->tm_hour % 12;
+        if (hour12 == 0) hour12 = 12;
+
         switch (*p) {
+            case 'a': snprintf(tmp, sizeof(tmp), "%s", wday_abbr[wday]); break;
+            case 'A': snprintf(tmp, sizeof(tmp), "%s", wday_full[wday]); break;
             case 'b':
-                if (tp->tm_mon < 0 || tp->tm_mon > 11) {
-                    tmp[0] = 0;
-                } else {
-                    snprintf(tmp, sizeof(tmp), "%s", mon_name[tp->tm_mon]);
-                }
-                break;
-            case 'e': snprintf(tmp, sizeof(tmp), "%2d", tp->tm_mday); break;
-            case 'Y': snprintf(tmp, sizeof(tmp), "%d", tp->tm_year + 1900); break;
-            case 'm': snprintf(tmp, sizeof(tmp), "%.2d", tp->tm_mon + 1); break;
+            case 'h': snprintf(tmp, sizeof(tmp), "%s", mon_abbr[mon]); break;
+            case 'B': snprintf(tmp, sizeof(tmp), "%s", mon_full[mon]); break;
+            case 'c': snprintf(tmp, sizeof(tmp), "%s %s %2d %.2d:%.2d:%.2d %d",
+                               wday_abbr[wday], mon_abbr[mon], tp->tm_mday,
+                               tp->tm_hour, tp->tm_min, tp->tm_sec, year); break;
+            case 'C': snprintf(tmp, sizeof(tmp), "%.2d", year / 100); break;
             case 'd': snprintf(tmp, sizeof(tmp), "%.2d", tp->tm_mday); break;
+            case 'D': snprintf(tmp, sizeof(tmp), "%.2d/%.2d/%.2d",
+                               mon + 1, tp->tm_mday, year % 100); break;
+            case 'e': snprintf(tmp, sizeof(tmp), "%2d", tp->tm_mday); break;
+            case 'F': snprintf(tmp, sizeof(tmp), "%d-%.2d-%.2d",
+                               year, mon + 1, tp->tm_mday); break;
+            case 'G': { int iy; strftime_iso_week(tp, &iy);
+                        snprintf(tmp, sizeof(tmp), "%d", iy); break; }
+            case 'g': { int iy; strftime_iso_week(tp, &iy);
+                        snprintf(tmp, sizeof(tmp), "%.2d", iy % 100); break; }
             case 'H': snprintf(tmp, sizeof(tmp), "%.2d", tp->tm_hour); break;
+            case 'I': snprintf(tmp, sizeof(tmp), "%.2d", hour12); break;
+            case 'j': snprintf(tmp, sizeof(tmp), "%.3d", tp->tm_yday + 1); break;
+            case 'm': snprintf(tmp, sizeof(tmp), "%.2d", mon + 1); break;
             case 'M': snprintf(tmp, sizeof(tmp), "%.2d", tp->tm_min); break;
+            case 'n': tmp[0] = '\n'; tmp[1] = '\0'; break;
+            case 'p': snprintf(tmp, sizeof(tmp), "%s",
+                               tp->tm_hour < 12 ? "AM" : "PM"); break;
+            case 'P': snprintf(tmp, sizeof(tmp), "%s",
+                               tp->tm_hour < 12 ? "am" : "pm"); break;
+            case 'r': snprintf(tmp, sizeof(tmp), "%.2d:%.2d:%.2d %s", hour12,
+                               tp->tm_min, tp->tm_sec,
+                               tp->tm_hour < 12 ? "AM" : "PM"); break;
+            case 'R': snprintf(tmp, sizeof(tmp), "%.2d:%.2d",
+                               tp->tm_hour, tp->tm_min); break;
             case 'S': snprintf(tmp, sizeof(tmp), "%.2d", tp->tm_sec); break;
-            case '%': strlcpy(tmp, "%", sizeof(tmp)); break;
-            default: tmp[0] = 0; break;
+            case 't': tmp[0] = '\t'; tmp[1] = '\0'; break;
+            case 'T': snprintf(tmp, sizeof(tmp), "%.2d:%.2d:%.2d",
+                               tp->tm_hour, tp->tm_min, tp->tm_sec); break;
+            case 'u': snprintf(tmp, sizeof(tmp), "%d", wday == 0 ? 7 : wday); break;
+            case 'U': snprintf(tmp, sizeof(tmp), "%.2d",
+                               (tp->tm_yday + 7 - wday) / 7); break;
+            case 'V': snprintf(tmp, sizeof(tmp), "%.2d",
+                               strftime_iso_week(tp, NULL)); break;
+            case 'w': snprintf(tmp, sizeof(tmp), "%d", wday); break;
+            case 'W': snprintf(tmp, sizeof(tmp), "%.2d",
+                               (tp->tm_yday + 7 - ((wday + 6) % 7)) / 7); break;
+            case 'x': snprintf(tmp, sizeof(tmp), "%.2d/%.2d/%.2d",
+                               mon + 1, tp->tm_mday, year % 100); break;
+            case 'X': snprintf(tmp, sizeof(tmp), "%.2d:%.2d:%.2d",
+                               tp->tm_hour, tp->tm_min, tp->tm_sec); break;
+            case 'y': snprintf(tmp, sizeof(tmp), "%.2d", year % 100); break;
+            case 'Y': snprintf(tmp, sizeof(tmp), "%d", year); break;
+            /* substrate keeps wall-clock in UTC; report a fixed +0000 offset. */
+            case 'z': snprintf(tmp, sizeof(tmp), "+0000"); break;
+            case 'Z': snprintf(tmp, sizeof(tmp), "UTC"); break;
+            case '%': tmp[0] = '%'; tmp[1] = '\0'; break;
+            default: tmp[0] = '\0'; break;
         }
-        
+
         size_t len = strlen(tmp);
-        if (count + len < maxsize - 1) {
-            strlcpy(s + count, tmp, maxsize - count);
-            count += len;
-        }
+        if (count + len >= maxsize) return 0;
+        memcpy(s + count, tmp, len);
+        count += len;
     }
-    s[count] = 0;
+    s[count] = '\0';
     return count;
 }
 

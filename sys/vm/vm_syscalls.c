@@ -29,6 +29,8 @@
 #define MAP_ANONYMOUS 0x020
 #define MAP_NORESERVE 0x0040  /* FreeBSD historical value */
 
+#define MCL_FUTURE    0x02    /* mlockall(2): lock future mappings */
+
 static int mmap_validate_flags(int flags) {
     int sharing = flags & (MAP_SHARED | MAP_PRIVATE);
     return sharing == MAP_SHARED || sharing == MAP_PRIVATE;
@@ -255,18 +257,48 @@ void *sys_mmap(void *addr, size_t length, int prot, int flags, int fd, uint64_t 
     if (!(flags & MAP_ANONYMOUS) && (offset & 0xFFF)) return (void *)(intptr_t)(-EINVAL);
     if (offset + (uint64_t)aligned_length < offset) return (void *)(intptr_t)(-EOVERFLOW);
 
+    /*
+     * A file-backed mapping whose (page-offset + page-length) overflows the
+     * 32-bit page-index the mmap(2) ABI carries exceeds the file's offset
+     * maximum: POSIX mandates EOVERFLOW (OPTS mmap/31-1).  offset is page-
+     * aligned and reaches the kernel as a 32-bit page count shifted up, so
+     * offset>>12 is bounded by 0xFFFFFFFF; the sum is what can overflow.
+     */
+    if (!(flags & MAP_ANONYMOUS) &&
+        (offset >> 12) + ((uint64_t)aligned_length >> 12) > 0xFFFFFFFFULL)
+        return (void *)(intptr_t)(-EOVERFLOW);
+
+    /*
+     * mlockall(MCL_FUTURE) requests that every future mapping be locked in
+     * memory.  substrate does not swap (so the lock is a no-op), but POSIX
+     * requires EAGAIN when an unprivileged process's mapping cannot be locked
+     * because it would exceed RLIMIT_MEMLOCK (OPTS mmap/18-1).  Only
+     * unprivileged processes that have called mlockall(MCL_FUTURE) are
+     * affected; root and processes without MCL_FUTURE skip this entirely.
+     */
+    if ((p->mlockall_flags & MCL_FUTURE) && p->euid != 0 &&
+        (uint64_t)aligned_length > (uint64_t)p->rlim_memlock_cur)
+        return (void *)(intptr_t)(-EAGAIN);
+
     // Find virtual address space
     if (v_addr == 0 || !(flags & MAP_FIXED)) {
-        if (vm_map_find_space(map, &v_addr, aligned_length) != 0) return (void *)-1;
+        /* Insufficient room in the address space is ENOMEM, not the bare -1
+         * (EPERM) the caller would otherwise see. */
+        if (vm_map_find_space(map, &v_addr, aligned_length) != 0)
+            return (void *)(intptr_t)(-ENOMEM);
     } else {
-        if (v_addr & 0xFFF) return (void *)-1;
-        if (vm_user_range_valid(v_addr, aligned_length) != 0) return (void *)-1;
+        /* MAP_FIXED with a misaligned address is EINVAL; a range that runs
+         * past the process address space is ENOMEM (OPTS mmap/24-2). */
+        if (v_addr & 0xFFF) return (void *)(intptr_t)(-EINVAL);
+        if (vm_user_range_valid(v_addr, aligned_length) != 0)
+            return (void *)(intptr_t)(-ENOMEM);
         // MAP_FIXED: Unmap existing mappings in the range
         if (vm_map_remove(map, v_addr, v_addr + aligned_length) != 0) {
-            return (void *)-1;
+            return (void *)(intptr_t)(-ENOMEM);
         }
     }
-    if (vm_user_range_valid(v_addr, aligned_length) != 0) return (void *)-1;
+    if (vm_user_range_valid(v_addr, aligned_length) != 0)
+        return (void *)(intptr_t)(-ENOMEM);
 
     // Translate prot to VM_PROT_* flags
     uint32_t vm_prot = 0;
@@ -283,10 +315,40 @@ void *sys_mmap(void *addr, size_t length, int prot, int flags, int fd, uint64_t 
      * bare -1 (EPERM) the caller would otherwise see (OPTS mmap/19-1). */
     if (!(flags & MAP_ANONYMOUS) && (!file || !file->f_data)) return (void *)(intptr_t)(-EBADF);
 
-    // Check for device-specific mmap handler
-    if (file && file->f_data && ((fs_node_t*)file->f_data)->mmap) {
-        // Delegate to device driver (e.g. /dev/mem)
-        return ((fs_node_t*)file->f_data)->mmap((fs_node_t*)file->f_data, addr, length, prot, flags, offset);
+    /*
+     * A pipe or socket is a file type mmap() does not support; POSIX
+     * mandates ENODEV (OPTS mmap/23-1).  These node types never carry an
+     * ->mmap handler, so this only rejects what would otherwise fall
+     * through to the (meaningless) vnode-pager path.  The low 3 bits of
+     * fs_node.flags hold the node type (FS_PIPE=5, FS_SOCKET=7).
+     */
+    if (file && file->f_data) {
+        uint32_t ntype = ((fs_node_t *)file->f_data)->flags & 0x07;
+        if (ntype == FS_PIPE || ntype == FS_SOCKET)
+            return (void *)(intptr_t)(-ENODEV);
+    }
+
+    /*
+     * Device-specific mmap handler.
+     *
+     * A MAP_PRIVATE mapping of a shared-memory object (an FS_FILE node that
+     * ALSO exposes an ->mmap handler, i.e. shmfs) must be copy-on-write: the
+     * caller's writes stay private and must NOT reach the underlying object,
+     * and after fork() the child's writes must be invisible to the parent
+     * (POSIX; OPTS mmap/7-3, fork/16-1).  The device ->mmap handler maps the
+     * object's physical frames SHARED, so for MAP_PRIVATE of such a node we
+     * fall through to the generic shadow-over-vnode-pager path below, which
+     * demand-pages from the object via ->read and copies on write.  Genuine
+     * device nodes (framebuffer, /dev/mem, audio) are not FS_FILE and always
+     * delegate, exactly as before.
+     */
+    {
+        fs_node_t *dnode = file ? (fs_node_t *)file->f_data : NULL;
+        int private_shm = dnode && (flags & MAP_PRIVATE) &&
+                          (dnode->flags & 0x07) == FS_FILE;
+        if (dnode && dnode->mmap && !private_shm) {
+            return dnode->mmap(dnode, addr, length, prot, flags, offset);
+        }
     }
 
     /*
@@ -366,16 +428,20 @@ void *sys_mmap(void *addr, size_t length, int prot, int flags, int fd, uint64_t 
 }
 
 int sys_munmap(void *addr, size_t length) {
-    if (!current_process || !current_process->vm_map) return -1;
+    if (!current_process || !current_process->vm_map) return -EINVAL;
     size_t aligned_len;
-    if (vm_round_page_size(length, &aligned_len) != 0) return -1;
+    /* POSIX EINVAL: len == 0 (or a length that overflows page rounding). */
+    if (vm_round_page_size(length, &aligned_len) != 0) return -EINVAL;
 
     uintptr_t start = (uintptr_t)addr;
 
-    if (vm_user_range_valid(start, aligned_len) != 0) return -1;
+    /* POSIX EINVAL: addr not page-aligned, or [addr,addr+len) lies outside
+     * the process address space (OPTS munmap/8-1 passes addr == (void *)-1). */
+    if (start & 0xFFF) return -EINVAL;
+    if (vm_user_range_valid(start, aligned_len) != 0) return -EINVAL;
 
     if (vm_map_remove(current_process->vm_map, start, start + aligned_len) != 0) {
-        return -1;
+        return -EINVAL;
     }
     return 0;
 }

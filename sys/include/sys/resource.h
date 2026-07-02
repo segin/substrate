@@ -22,6 +22,11 @@ typedef unsigned long rlim_t;
 #define RLIMIT_CORE 0
 #define RLIM_NLIMITS 1
 
+/* Index matching the userspace <sys/resource.h> value; used only as a
+ * selector for the memlock soft limit tracked directly on process_t
+ * (proc->rlim_memlock_*), not as an index into rlimits[]. */
+#define RLIMIT_MEMLOCK 6
+
 struct rlimit {
     rlim_t rlim_cur;
     rlim_t rlim_max;
