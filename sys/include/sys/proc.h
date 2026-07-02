@@ -493,6 +493,15 @@ typedef struct thread {
      * instead of returning on arrival.  Kept at the END of thread_t — see the
      * offset-stability note above. */
     uint32_t     sig_wait_mask;
+
+    /* CFS-style virtual runtime for weighted fair-share scheduling of the
+     * SCHED_TIMESHARE class.  Each tick a running timeshare thread accrues
+     * vruntime scaled inversely by its nice weight, so a niced-down thread's
+     * vruntime climbs faster and it is picked less often -- CPU share ends up
+     * proportional to weight, and nobody starves because the pick always
+     * chooses the lowest vruntime.  Kept at the END of thread_t -- see the
+     * offset-stability note above. */
+    uint64_t     vruntime;
 } thread_t;
 
 // Globals

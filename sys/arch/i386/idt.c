@@ -222,6 +222,12 @@ void isr_handler(registers_t *regs) {
         if (current_process) {
             rusage_add_tick(current_process, is_usermode);
         }
+        /* Advance the running thread's weighted vruntime for fair-share
+         * scheduling (the sched_interactivity per-tick hook is dead code, so
+         * this is the live accrual point). */
+        if (current_thread) {
+            sched_vruntime_tick(current_thread);
+        }
         
         (void)irq_dispatch(0, regs);
         if (regs->int_no >= PIC_SLAVE_REMAP_BASE) outb(PIC_SLAVE_CMD, PIC_EOI);

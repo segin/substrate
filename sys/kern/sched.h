@@ -52,6 +52,15 @@ thread_t *thread_next(thread_t *t);
 #define STARVATION_LIMIT    500     /* Ticks before boosting starved thread */
 #define STARVATION_BOOST    5       /* Priority boost for starved thread */
 
+/* Weighted fair-share (CFS-style vruntime) for the SCHED_TIMESHARE class.
+ * A running timeshare thread accrues vruntime each tick, scaled inversely by
+ * its nice weight (see sched_interactivity.c); the pick chooses the lowest
+ * vruntime, so CPU time ends up proportional to weight with no starvation.
+ * sched_min_vruntime is the minimum across ready timeshare threads, published
+ * by the pick; a waking or newly-created thread is rebased to it so a long
+ * sleep (or a stale zero) can't let it monopolise the CPU. */
+extern uint64_t sched_min_vruntime;
+
 /* Scheduler API */
 void sched_init(void);
 void sched_smp_init(int cpu_count);
@@ -76,6 +85,7 @@ void sched_switch(thread_t *next);
 int sched_get_current_tid(void);
 void sched_set_priority(int tid, sched_class_t cls, int prio);
 void sched_tick(void);
+void sched_vruntime_tick(thread_t *t);   /* per-tick weighted fair-share vruntime advance */
 void sched_sleep(void *chan);
 int sched_sleep_until(void *chan, uint64_t deadline_tick);
 void sched_wakeup(void *chan);

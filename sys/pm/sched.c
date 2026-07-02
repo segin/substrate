@@ -15,6 +15,42 @@
 
 thread_t *current_thread = NULL;
 
+/* CFS-style minimum vruntime across ready SCHED_TIMESHARE threads, republished
+ * by the pick (declared in sched.h).  Waking and newly-created timeshare
+ * threads rebase to it so none starts with an unfair CPU credit. */
+uint64_t sched_min_vruntime = 0;
+
+/* Weighted fair-share (CFS) weights, indexed by nice -20..+19 as the array
+ * position (40 - base_priority).  Standard geometric ~1.25x-per-level table:
+ * each nice step changes CPU share ~10%, nice 0 outweighs nice +19 ~68x, and
+ * nice -20 outweighs nice 0 ~87x. */
+#define NICE_0_WEIGHT   1024   /* == sched_prio_to_weight[nice 0] */
+#define VRUNTIME_SHIFT  20     /* fixed-point scale for the per-tick delta */
+static const uint32_t sched_prio_to_weight[40] = {
+    /* -20 */ 88761, 71755, 56483, 46273, 36291,
+    /* -15 */ 29154, 23254, 18705, 14949, 11916,
+    /* -10 */  9548,  7620,  6100,  4904,  3906,
+    /*  -5 */  3121,  2501,  1991,  1586,  1277,
+    /*   0 */  1024,   820,   655,   526,   423,
+    /*   5 */   335,   272,   215,   172,   137,
+    /*  10 */   110,    87,    70,    56,    45,
+    /*  15 */    36,    29,    23,    18,    15,
+};
+
+/* Advance a running timeshare thread's weighted virtual runtime.  Called once
+ * per timer tick for the current thread from the IRQ path.  A niced-down thread
+ * (small weight) accrues vruntime fast and is picked less; a niced-up thread
+ * accrues slowly and runs more, so CPU time ends up proportional to weight
+ * without starving anyone. */
+void sched_vruntime_tick(thread_t *t) {
+    if (!t || t->sched_class != SCHED_TIMESHARE) return;
+    int idx = 40 - t->base_priority;
+    if (idx < 0) idx = 0;
+    if (idx > 39) idx = 39;
+    uint32_t w = sched_prio_to_weight[idx];   /* always >= 15, never 0 */
+    t->vruntime += ((uint64_t)NICE_0_WEIGHT << VRUNTIME_SHIFT) / w;
+}
+
 #define TID_HASH_SIZE 64
 #define TID_HASH(tid) ((unsigned)(tid) & (TID_HASH_SIZE - 1))
 
@@ -185,6 +221,10 @@ thread_t *sched_alloc_thread(process_t *proc) {
     thread->sleep_expiry = 0;
     thread->priority = current_thread ? current_thread->priority : 20;
     thread->base_priority = current_thread ? current_thread->base_priority : 20;
+    /* Start a new timeshare thread at the current minimum vruntime so it is
+     * scheduled fairly against existing threads -- neither an unfair head start
+     * from a zero vruntime nor starvation from a stale-high one. */
+    thread->vruntime = sched_min_vruntime;
     thread->sched_class = current_thread ? current_thread->sched_class : SCHED_TIMESHARE;
     thread->kstack_base = 0;
     thread->kstack_units = 0;
@@ -333,13 +373,32 @@ rescan:
             if (candidate->state != THREAD_READY) break;
             if (!sched_can_run_on_cpu(candidate, cpu_id)) break;
 
+            /* Rebase a timeshare thread that has fallen behind the minimum
+             * (e.g. just woke from a sleep with a stale-low vruntime) up to the
+             * current minimum, so it rejoins fairly instead of monopolising the
+             * core until its virtual clock catches up.  Doing it here in the
+             * pick covers every wake path in one spot; the scan runs with
+             * interrupts disabled, so mutating vruntime is safe. */
+            if (candidate->sched_class == SCHED_TIMESHARE &&
+                candidate->vruntime < sched_min_vruntime) {
+                candidate->vruntime = sched_min_vruntime;
+            }
+
             bool better = false;
             if (!best_thread) {
                 better = true;
             } else if (candidate->sched_class < best_class) {
                 better = true;
             } else if (candidate->sched_class == best_class) {
-                if (candidate->priority > highest_prio) {
+                if (candidate->sched_class == SCHED_TIMESHARE) {
+                    /* Weighted fair-share: pick the lowest vruntime.  A tie
+                     * keeps the earlier-scanned thread, so the rr_last cursor
+                     * still round-robins equal-vruntime threads. */
+                    if (candidate->vruntime < best_thread->vruntime) {
+                        better = true;
+                    }
+                } else if (candidate->priority > highest_prio) {
+                    /* Real-time / idle: strict highest priority. */
                     better = true;
                 }
             }
@@ -357,6 +416,13 @@ rescan:
             wrapped = true;
         }
         if (t == start) break;
+    }
+
+    /* Publish the minimum vruntime (the picked timeshare thread is the lowest,
+     * i.e. the CFS leftmost) so waking/new timeshare threads can rebase to it
+     * and neither starve nor monopolise the core. */
+    if (best_thread && best_thread->sched_class == SCHED_TIMESHARE) {
+        sched_min_vruntime = best_thread->vruntime;
     }
 
     if (best_thread == current_thread) {
