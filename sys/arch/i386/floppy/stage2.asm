@@ -10,6 +10,13 @@ ORG 0
 %ifndef KERNEL_SETUP_SECTORS
 %define KERNEL_SETUP_SECTORS 0
 %endif
+; Sectors per physical floppy.  mkfloppy.py splits a kernel that will not
+; fit on a single disk across several floppies of this size; the loader
+; prompts for the next disk when the current one is exhausted.  Defaults to
+; a 1.44M floppy so single-disk builds assemble byte-for-byte unchanged.
+%ifndef FLOPPY_DISK_SECTORS
+%define FLOPPY_DISK_SECTORS 2880
+%endif
 
 %define FLOPPY_SPT 18
 %define FLOPPY_HEADS 2
@@ -206,6 +213,8 @@ load_setup_image:
 load_kernel_body:
     mov al, 'L'
     out 0xE9, al
+    mov si, load_msg
+    call puts
     mov word [kernel_lba], KERNEL_LBA + KERNEL_SETUP_SECTORS
     mov word [kernel_remaining], KERNEL_SECTORS - KERNEL_SETUP_SECTORS
     mov dword [kernel_dest], KERNEL_LOAD_ADDR
@@ -213,6 +222,14 @@ load_kernel_body:
     cmp word [kernel_remaining], 0
     je .done
 
+    ; If the current disk is exhausted and kernel sectors still remain,
+    ; prompt for the next floppy.  swap_disk rewinds [kernel_lba] to 0 so
+    ; reads resume at the start of the freshly inserted media.  A kernel
+    ; that fits on one disk never reaches this boundary.
+    cmp word [kernel_lba], FLOPPY_DISK_SECTORS
+    jb .disk_ok
+    call swap_disk
+.disk_ok:
     mov ax, [kernel_lba]
     xor dx, dx
     mov bx, FLOPPY_SPT
@@ -221,8 +238,16 @@ load_kernel_body:
     sub al, dl
     xor ah, ah
     cmp ax, [kernel_remaining]
-    jbe .chunk_ready
+    jbe .cap_disk
     mov ax, [kernel_remaining]
+.cap_disk:
+    ; Cap the chunk so a single read never crosses the current disk's
+    ; boundary (in addition to the track-boundary cap computed above).
+    mov bx, FLOPPY_DISK_SECTORS
+    sub bx, [kernel_lba]
+    cmp ax, bx
+    jbe .chunk_ready
+    mov ax, bx
 .chunk_ready:
     mov [io_sector_count], al
     mov al, 'k'
@@ -267,6 +292,9 @@ load_kernel_body:
     sub word [kernel_remaining], ax
     mov al, 'c'
     out 0xE9, al
+    ; one dot of on-screen progress per chunk successfully copied
+    mov al, '.'
+    call putc
     jmp .next_sector
 
 .fail_pop:
@@ -277,6 +305,11 @@ load_kernel_body:
 .done:
     mov ax, STAGE2_SEG
     mov ds, ax
+    ; terminate the progress-dot line before "Booting kernel..."
+    mov al, 13
+    call putc
+    mov al, 10
+    call putc
     clc
     ret
 
@@ -344,6 +377,67 @@ halt:
     hlt
     jmp .hlt
 
+; swap_disk - the current floppy is exhausted but kernel sectors remain.
+; Prompt the operator to insert the next disk, wait for a keypress, reset
+; the drive so the controller re-reads the new media, and rewind the
+; current-disk LBA to 0.  DS is forced to STAGE2_SEG so the loop's memory
+; accesses keep working, and restored on return.
+swap_disk:
+    push ds
+    push ax
+    push si
+    push dx
+    mov ax, STAGE2_SEG
+    mov ds, ax
+    mov al, 'W'
+    out 0xE9, al
+    inc byte [cur_disk]
+    mov si, swap_msg1
+    call puts
+    mov al, [cur_disk]
+    call print_dec
+    mov si, swap_msg2
+    call puts
+    xor ah, ah
+    int 0x16
+    xor ax, ax
+    mov dl, [boot_drive]
+    int 0x13
+    mov word [kernel_lba], 0
+    mov al, 'D'
+    out 0xE9, al
+    pop dx
+    pop si
+    pop ax
+    pop ds
+    ret
+
+; print_dec - print AL (0..255) as a decimal number via the BIOS teletype.
+; Builds the digits backwards into dec_buf and hands the result to puts, so
+; it never relies on a register surviving a BIOS call.
+print_dec:
+    push ax
+    push bx
+    push dx
+    push si
+    xor ah, ah
+    mov si, dec_buf_end
+    mov bx, 10
+.split:
+    xor dx, dx
+    div bx
+    add dl, '0'
+    dec si
+    mov [si], dl
+    test ax, ax
+    jnz .split
+    call puts
+    pop si
+    pop dx
+    pop bx
+    pop ax
+    ret
+
 enter_unreal:
     cli
     mov al, 'g'
@@ -401,12 +495,19 @@ cmdline_ptr_value: dd 0
 kernel_dest: dd 0
 kernel_lba: dw 0
 kernel_remaining: dw 0
+cur_disk: db 1
 
 banner: db 13, 10, 'Substrate floppy loader', 13, 10, 0
 prompt: db 'boot [Enter=default]: ', 0
 cpu_msg: db 'Substrate requires an i386 or newer CPU.', 13, 10, 0
 disk_msg: db 'Kernel load failed.', 13, 10, 0
 boot_msg: db 'Booting kernel...', 13, 10, 0
+load_msg: db 'Loading kernel ', 0
+swap_msg1: db 13, 10, 'Please insert boot disk ', 0
+swap_msg2: db ' and press any key to continue...', 13, 10, 0
 default_cmdline: db 'serial_debug root=/dev/storage/ide0 rootfstype=ext2 init=/bin/sh', 0
+
+dec_buf: times 6 db 0
+dec_buf_end: db 0
 
 cmdline_buf: times CMDLINE_MAX db 0
