@@ -58,6 +58,14 @@
 #define SSIZE_MAX 2147483647L
 #endif
 
+/* PTHREAD_STACK_MIN — minimum size in bytes of a thread stack.  POSIX
+ * places this in <limits.h>; <pthread.h> mirrors it.  libpthread creates
+ * every thread with a fixed 64 KiB stack (pthread_attr_setstacksize is
+ * advisory), so this is the real per-thread minimum on substrate. */
+#ifndef PTHREAD_STACK_MIN
+#define PTHREAD_STACK_MIN 65536
+#endif
+
 /* POSIX minimum-acceptable values (the guaranteed floors, distinct from the
  * actual runtime limits queried via sysconf/pathconf). */
 #ifndef _POSIX_ARG_MAX

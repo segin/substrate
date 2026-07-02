@@ -1484,6 +1484,34 @@ long sysconf(int name) {
     case 17 /* _SC_THREAD_CPUTIME */:
         /* clock_gettime(CLOCK_THREAD_CPUTIME_ID) is implemented. */
         return _POSIX_VERSION;
+    case 18 /* _SC_REALTIME_SIGNALS */:
+        /* SIGRTMIN..SIGRTMAX + sigqueue(2) + the per-process RT-signal
+         * queue are implemented. */
+        return _POSIX_VERSION;
+    case 19 /* _SC_THREAD_STACK_MIN */:
+        /* libpthread creates every thread with a fixed 64 KiB stack. */
+        return PTHREAD_STACK_MIN;
+    case 20 /* _SC_THREAD_PROCESS_SHARED */:
+        /* Best-effort only, not a guaranteed robust inter-process lock. */
+        return -1;
+    case 21 /* _SC_CLOCK_SELECTION */:
+        /* clock_nanosleep(2) and pthread_condattr_setclock() are present. */
+        return _POSIX_VERSION;
+    case 22 /* _SC_PRIORITIZED_IO */:
+        /* librt aio has no per-request priorities. */
+        return -1;
+    case 23 /* _SC_AIO_MAX */:
+        /* Unbounded (memory-limited) aio request queue — no fixed maximum. */
+        return -1;
+    case 24 /* _SC_SIGQUEUE_MAX */:
+        /* Kernel RTSIG_QUEUE_MAX pending queued real-time signals. */
+        return 64;
+    case 25 /* _SC_SEM_NSEMS_MAX */:
+        /* Kernel ksem table size (KSEM_MAX). */
+        return 128;
+    case 26 /* _SC_MAPPED_FILES */:
+        /* mmap(2) is implemented. */
+        return _POSIX_VERSION;
     default:                        return -1;
     }
 }

@@ -141,6 +141,13 @@ int pthread_condattr_getclock(const pthread_condattr_t *attr, int *clock_id);
  * scheduler treats both alike. */
 #define PTHREAD_INHERIT_SCHED   0
 #define PTHREAD_EXPLICIT_SCHED  1
+/* Minimum thread-stack size (bytes).  POSIX also exposes this via <limits.h>;
+ * both headers agree.  libpthread's per-thread stack is a fixed 64 KiB, so a
+ * stacksize below this floor gains nothing.  The guard lets a translation unit
+ * include both <pthread.h> and <limits.h> without a redefinition warning. */
+#ifndef PTHREAD_STACK_MIN
+#define PTHREAD_STACK_MIN 65536
+#endif
 int pthread_attr_init(pthread_attr_t *attr);
 int pthread_attr_destroy(pthread_attr_t *attr);
 int pthread_attr_setstacksize(pthread_attr_t *attr, size_t stacksize);
