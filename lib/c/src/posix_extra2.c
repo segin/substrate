@@ -321,45 +321,32 @@ sighandler_t sigset(int sig, sighandler_t disp) {
 }
 
 int sigtimedwait(const sigset_t *set, siginfo_t *info, const struct timespec *timeout) {
-    (void)set; (void)info; (void)timeout;
-    errno = ENOSYS;
-    return -1;
-}
-
-int sigwait(const sigset_t *set, int *sig) {
-    /* Block until one of `set` is delivered, write it to *sig,
-     * return 0.  Substrate has no kernel sigwait yet — synthesise
-     * with sigsuspend on the complement (block all OTHER signals,
-     * unblock those in `set`, suspend, recover which fired).  This
-     * is racy if multiple set-members fire; documented limitation. */
-    if (!set || !sig) { errno = EINVAL; return EINVAL; }
-    sigset_t inv;
-    sigfillset(&inv);
-    /* Remove `set` bits from `inv` so only set-members are unblocked. */
-    for (int i = 1; i < 32; i++) {
-        if (sigismember(set, i)) sigdelset(&inv, i);
-    }
-    /* sigsuspend returns -1/EINTR after a non-ignored signal fires. */
-    sigsuspend(&inv);
-    /* Best effort: find which is pending. */
-    sigset_t pending;
-    sigpending(&pending);
-    for (int i = 1; i < 32; i++) {
-        if (sigismember(set, i) && sigismember(&pending, i)) {
-            *sig = i;
-            return 0;
-        }
-    }
-    *sig = 0;
-    return 0;
+    /* Kernel sys_sigtimedwait (sys/kern/signal.c) blocks until one of `set`
+     * is pending, drains the RT-signal queue for it, and fills siginfo
+     * (si_value/si_code).  It returns the signal number on success or a
+     * negative errno (-EAGAIN on timeout, -EINTR, -EINVAL, -EFAULT). */
+    extern int64_t _syscall3(int, uintptr_t, uintptr_t, uintptr_t);
+    int64_t r = _syscall3(SYS_SIGTIMEDWAIT, (uintptr_t)set, (uintptr_t)info,
+                          (uintptr_t)timeout);
+    if (r < 0) { errno = (int)-r; return -1; }
+    return (int)r;   /* accepted signal number */
 }
 
 int sigwaitinfo(const sigset_t *set, siginfo_t *info) {
-    int sig;
-    int r = sigwait(set, &sig);
-    if (r != 0) return -1;
-    if (info) { memset(info, 0, sizeof(*info)); info->si_signo = sig; }
-    return sig;
+    /* Identical to sigtimedwait() with an infinite (NULL) timeout. */
+    return sigtimedwait(set, info, NULL);
+}
+
+int sigwait(const sigset_t *set, int *sig) {
+    /* Kernel sys_sigwait consumes one pending signal from `set` and stores
+     * it in *sig.  POSIX sigwait() returns 0 on success and the error
+     * NUMBER (not -1/errno) on failure; the kernel returns 0 / a positive
+     * POSIX error, or a negative errno for a bad pointer. */
+    if (!set || !sig) return EINVAL;
+    extern int64_t _syscall2(int, uintptr_t, uintptr_t);
+    int64_t r = _syscall2(SYS_SIGWAIT, (uintptr_t)set, (uintptr_t)sig);
+    if (r < 0) return (int)-r;   /* normalize -errno (e.g. EFAULT) */
+    return (int)r;               /* 0 on success, else positive POSIX error */
 }
 
 /* sig2str / str2sig (POSIX 2024).  Tables of signal name <-> number. */
