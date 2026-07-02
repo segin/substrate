@@ -988,7 +988,7 @@ static int fbsd_kern_proc(const int *kname, unsigned int namelen,
             kp.ki_flag  = FBSD_P_INMEM;            /* not swapped -> no 'W' */
             kp.ki_tdflags = FBSD_TDF_SINTR;        /* interruptible sleep -> 'S' */
             kp.ki_tdev  = 0xFFFFFFFFFFFFFFFFull;   /* NODEV */
-            strncpy(kp.ki_comm, pi.name, sizeof(kp.ki_comm) - 1);
+            strlcpy(kp.ki_comm, pi.name, sizeof(kp.ki_comm));
             if (copyout(&kp, (char *)oldp + copied, sizeof(kp)) != 0)
                 return -EFAULT;
             copied += sizeof(kp);

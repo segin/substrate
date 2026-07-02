@@ -483,7 +483,7 @@ static int nb_query(const struct nbnode *kids, int nkids,
             nd.sysctl_flags = NBSD_SYSCTL_VERSION | kids[i].type;
             nd.sysctl_num   = kids[i].num;
             nd.sysctl_ver   = 1;
-            strncpy(nd.sysctl_name, kids[i].name, sizeof(nd.sysctl_name) - 1);
+            strlcpy(nd.sysctl_name, kids[i].name, sizeof(nd.sysctl_name));
             if (copyout(&nd, (char *)oldp + (size_t)i * sizeof(nd),
                         sizeof(nd)) != 0)
                 return -EFAULT;
@@ -532,7 +532,7 @@ static int nb_kern_proc2(const int *kname, void *oldp, unsigned int *oldlenp) {
                                 ? (uint8_t)pi.state : NBSD_LSSLEEP;
             buf[KP2_NICE] = (uint8_t)(pi.nice + NBSD_NZERO);
             *(uint64_t *)(buf + KP2_NLWPS) = 1;
-            strncpy((char *)(buf + KP2_COMM), pi.name, 24 - 1);
+            strlcpy((char *)(buf + KP2_COMM), pi.name, 24);
             if (copyout(buf, (char *)oldp + copied, elemsize) != 0)
                 return -EFAULT;
             copied += elemsize;

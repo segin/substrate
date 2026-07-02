@@ -1680,9 +1680,9 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
         for (const char *p = path; *p; p++) {
             if (*p == '/') name = p + 1;
         }
-        strncpy(current_process->comm, name, sizeof(current_process->comm) - 1);
+        strlcpy(current_process->comm, name, sizeof(current_process->comm));
         current_process->comm[sizeof(current_process->comm) - 1] = '\0';
-        strncpy(current_process->exec_path, path, sizeof(current_process->exec_path) - 1);
+        strlcpy(current_process->exec_path, path, sizeof(current_process->exec_path));
         current_process->exec_path[sizeof(current_process->exec_path) - 1] = '\0';
         proc_capture_cmdline(current_process, k_argv);
         /*
