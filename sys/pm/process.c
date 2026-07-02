@@ -306,6 +306,11 @@ static void proc_resource_limits_init(process_t *proc) {
 
     proc->rlimits[RLIMIT_CORE].rlim_cur = RLIM_INFINITY;
     proc->rlimits[RLIMIT_CORE].rlim_max = RLIM_INFINITY;
+
+    /* No memlock limit and no mlockall() by default. */
+    proc->rlim_memlock_cur = RLIM_INFINITY;
+    proc->rlim_memlock_max = RLIM_INFINITY;
+    proc->mlockall_flags   = 0;
 }
 
 void pm_init(void) {
@@ -524,6 +529,11 @@ static int proc_fork_common(process_t *parent, void *stack, int is_vfork) {
     child_proc->sig_catch = parent->sig_catch;
     child_proc->sig_ignore = parent->sig_ignore;
     memcpy(child_proc->rlimits, parent->rlimits, sizeof(parent->rlimits));
+    /* Resource limits are inherited across fork(); memory locks are not, so
+     * the child starts with no mlockall() in effect. */
+    child_proc->rlim_memlock_cur = parent->rlim_memlock_cur;
+    child_proc->rlim_memlock_max = parent->rlim_memlock_max;
+    child_proc->mlockall_flags   = 0;
     child_proc->umask = parent->umask;
     /* Supplementary group list inherits across fork. */
     memcpy(child_proc->supp_groups, parent->supp_groups,

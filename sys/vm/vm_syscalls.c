@@ -29,6 +29,8 @@
 #define MAP_ANONYMOUS 0x020
 #define MAP_NORESERVE 0x0040  /* FreeBSD historical value */
 
+#define MCL_FUTURE    0x02    /* mlockall(2): lock future mappings */
+
 static int mmap_validate_flags(int flags) {
     int sharing = flags & (MAP_SHARED | MAP_PRIVATE);
     return sharing == MAP_SHARED || sharing == MAP_PRIVATE;
@@ -265,6 +267,18 @@ void *sys_mmap(void *addr, size_t length, int prot, int flags, int fd, uint64_t 
     if (!(flags & MAP_ANONYMOUS) &&
         (offset >> 12) + ((uint64_t)aligned_length >> 12) > 0xFFFFFFFFULL)
         return (void *)(intptr_t)(-EOVERFLOW);
+
+    /*
+     * mlockall(MCL_FUTURE) requests that every future mapping be locked in
+     * memory.  substrate does not swap (so the lock is a no-op), but POSIX
+     * requires EAGAIN when an unprivileged process's mapping cannot be locked
+     * because it would exceed RLIMIT_MEMLOCK (OPTS mmap/18-1).  Only
+     * unprivileged processes that have called mlockall(MCL_FUTURE) are
+     * affected; root and processes without MCL_FUTURE skip this entirely.
+     */
+    if ((p->mlockall_flags & MCL_FUTURE) && p->euid != 0 &&
+        (uint64_t)aligned_length > (uint64_t)p->rlim_memlock_cur)
+        return (void *)(intptr_t)(-EAGAIN);
 
     // Find virtual address space
     if (v_addr == 0 || !(flags & MAP_FIXED)) {

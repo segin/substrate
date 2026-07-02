@@ -88,21 +88,24 @@ int tcsendbreak(int fd, int duration) {
 }
 
 /* ============================================================
- * sys/resource.h — rlimit (stubs).
+ * sys/resource.h — rlimit.
+ *
+ * The kernel tracks RLIMIT_MEMLOCK (for mlock/mmap privilege checks) and
+ * reports RLIM_INFINITY for everything else; substrate does not otherwise
+ * enforce resource limits.
  * ============================================================ */
 
 int getrlimit(int resource, struct rlimit *rlim) {
-    (void)resource;
     if (!rlim) { errno = EINVAL; return -1; }
-    /* No enforcement on substrate; report no limit. */
-    rlim->rlim_cur = RLIM_INFINITY;
-    rlim->rlim_max = RLIM_INFINITY;
+    long r = syscall(SYS_GETRLIMIT, resource, (uintptr_t)rlim);
+    if (r < 0) { errno = (int)-r; return -1; }
     return 0;
 }
 
 int setrlimit(int resource, const struct rlimit *rlim) {
-    (void)resource; (void)rlim;
-    /* Accepting silently keeps callers happy; we just don't enforce. */
+    if (!rlim) { errno = EINVAL; return -1; }
+    long r = syscall(SYS_SETRLIMIT, resource, (uintptr_t)rlim);
+    if (r < 0) { errno = (int)-r; return -1; }
     return 0;
 }
 

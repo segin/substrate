@@ -253,6 +253,19 @@
  * to an SA_SIGINFO handler as siginfo.si_value with si_code == SI_QUEUE.
  * Next free number after the ksem 500-block. */
 #define SYS_SIGQUEUE        508
+/* Resource limits + memory locking.  substrate does not swap, so mlock/
+ * mlockall are user-visible no-ops, but setrlimit(RLIMIT_MEMLOCK)/mlockall
+ * state is kept per-process so mlock(2)/mmap(2) can return the POSIX
+ * EPERM/EAGAIN privilege errors (OPTS mlock/12-1, mmap/18-1).  520-522 sit
+ * clear of the 509-513 range a concurrently-landing timer block may use. */
+#define SYS_GETRLIMIT       520
+#define SYS_SETRLIMIT       521
+#define SYS_MLOCKALL        522
+/* seteuid(2): change ONLY the effective uid (kernel sys_seteuid), so a
+ * privileged process can drop and later restore its effective uid.  libc's
+ * seteuid previously fell back to setuid(), which changed the real+saved uid
+ * too and made the restore impossible (OPTS mmap/18-1 seteuid(0) restore). */
+#define SYS_SETEUID         523
 
 void syscall_init(void);
 
