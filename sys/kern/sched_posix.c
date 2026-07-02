@@ -87,6 +87,28 @@ static int may_control(process_t *t)
     return t->uid == current_process->euid;
 }
 
+/*
+ * Privilege check for a real-time scheduling request.  Obtaining or
+ * raising a SCHED_FIFO/SCHED_RR priority requires privilege: Linux models
+ * this with RLIMIT_RTPRIO (default 0), under which an unprivileged process
+ * "may only lower the priority, or switch to a non-real-time policy" — it
+ * can neither switch to an RT policy nor raise an RT priority.  Substrate
+ * has no RLIMIT_RTPRIO, so root (euid 0) may set any RT priority and every
+ * other caller is held to that default-limit rule.  `new_policy`/`new_prio`
+ * are the requested settings; `t` is the target, whose current effective
+ * RT priority bounds a permitted lowering.
+ */
+static int rt_priv_ok(int new_policy, int new_prio, process_t *t)
+{
+    if (!current_process)           return 1;   /* early/kernel context */
+    if (current_process->euid == 0) return 1;   /* privileged           */
+    if (!policy_is_rt(new_policy))  return 1;   /* non-RT: unrestricted */
+
+    /* Effective current RT priority of the target (0 when not RT). */
+    int cur = policy_is_rt(t->sched_policy) ? t->sched_rt_priority : 0;
+    return new_prio <= cur;                     /* may only keep/lower  */
+}
+
 int sys_sched_get_priority_max(int policy)
 {
     if (!policy_valid(policy)) return -EINVAL;
@@ -134,6 +156,7 @@ int sys_sched_setscheduler(pid_t pid, int policy,
     process_t *t = sched_target(pid);
     if (!t) return -ESRCH;
     if (!may_control(t)) return -EPERM;
+    if (!rt_priv_ok(policy, kp.sched_priority, t)) return -EPERM;
 
     int old_policy = t->sched_policy;
     t->sched_policy      = policy;
@@ -152,6 +175,7 @@ int sys_sched_setparam(pid_t pid, const struct sched_param *uparam)
     if (!t) return -ESRCH;
     if (!may_control(t)) return -EPERM;
     if (!prio_in_range(t->sched_policy, kp.sched_priority)) return -EINVAL;
+    if (!rt_priv_ok(t->sched_policy, kp.sched_priority, t)) return -EPERM;
 
     t->sched_rt_priority = kp.sched_priority;
     return 0;
