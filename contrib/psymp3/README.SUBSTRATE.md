@@ -5,7 +5,7 @@ FFT spectrum visualizer, by Kirn Gill II (segin).  This port cross-builds it
 for substrate (i386, ELFOSABI_SUBSTRATE).
 
 * Upstream: <https://github.com/segin/psymp3>
-* Pinned commit: `cf1619fd05139ca866fb39454d53302327b85c9d`
+* Pinned commit: `5e92082de0102785b612b9e9a87d41f49abd1f69`
 * License: ISC
 
 ## Build
@@ -86,8 +86,13 @@ git-apply-able against the pinned tree.  Rationale is in the patch headers.
   are used, `<sys/prctl.h>` / `<SDL_syswm.h>` are **not** included, and
   `System::setThisThreadName()` is a no-op.  This is exactly the behaviour we
   want — no Linux-only syscalls are referenced.
-* configure injects `-fstack-protector-strong -fPIE` (in `PSYMP3_CXXFLAGS`) and
-  `-pie -Wl,-z,relro,-z,now` (in `LDFLAGS`).  These all work on the substrate
-  toolchain — the substrate `ld.so` loads PIE binaries, and libc provides the
-  stack-protector symbols — so the produced `psymp3` is a PIE with
-  `PT_INTERP=/sbin/ld.so`.
+* `build.sh` sets `-fPIE` in `CFLAGS`/`CXXFLAGS` (position-independent *code*),
+  but as of upstream `f45a10af` (`Build: Auto-disable PIE on i386 …`) `configure`
+  drops the `-pie` *link* flag on i386 — the gate keys on `host_cpu`, added to work
+  around a non-PIC *host* TagLib (`ld: relocation R_386_32 in .eh_frame`).  With
+  PIC code but a non-PIE link, the substrate `psymp3` is a **non-PIE `ET_EXEC`**
+  dynamic binary (`PT_INTERP=/sbin/ld.so`, OSABI 0x40 — verified with `readelf`).
+  It still gets `-fstack-protector-strong` (libc provides the symbols) and
+  `-pthread`.  The one substrate-specific link need — 64-bit atomic libcalls,
+  which neither libgcc nor a (non-existent) libatomic supplies on the i486 target
+  — is met by patch `0002` (`src/core/atomic64.c`).

@@ -2,7 +2,7 @@
 # contrib/psymp3/fetch.sh — clone PsyMP3 pinned to a specific commit, apply patches.
 set -eu
 REPO="https://github.com/segin/psymp3"
-COMMIT="cf1619fd05139ca866fb39454d53302327b85c9d"
+COMMIT="5e92082de0102785b612b9e9a87d41f49abd1f69"
 HERE="$(cd "$(dirname "$0")" && pwd)"; BUILD_DIR="${HERE}/build"; TREE="${BUILD_DIR}/psymp3"
 mkdir -p "${BUILD_DIR}"
 if [ ! -d "${TREE}/.git" ]; then
