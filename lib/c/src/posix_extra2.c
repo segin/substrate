@@ -488,11 +488,24 @@ int clock_nanosleep(clockid_t clk_id, int flags,
 }
 
 int clock_getcpuclockid(pid_t pid, clockid_t *clock_id) {
-    if (!clock_id) { errno = EINVAL; return EINVAL; }
-    /* Self: process CPU-time.  Other pid: substrate has no per-pid
-     * CPU clock yet, so we degrade to the process clock; not racy
-     * because nothing actually reads it. */
-    (void)pid;
+    /* POSIX: on error an error number is RETURNED (errno is not set). */
+    if (!clock_id) return EINVAL;
+    if (pid < 0) return ESRCH;   /* no such process (OPTS 6-1: pid -2 must fail) */
+
+    /* For a process other than the caller, validate existence and that we
+     * are permitted to observe it.  kill(pid, 0) performs exactly the POSIX
+     * existence + permission probe (ESRCH / EPERM); non-root callers reading
+     * a process they do not own get EPERM (OPTS clock_getcpuclockid/5-1).
+     * pid 0 means "the calling process" and must NOT go through kill(2),
+     * which would address the whole process group. */
+    if (pid != 0 && pid != getpid()) {
+        if (kill(pid, 0) != 0)
+            return errno;   /* ESRCH or EPERM from the permission check */
+    }
+
+    /* Substrate keeps CPU time per process (not per (pid) clock encoding),
+     * so the identifier is the process CPU-time clock.  clock_gettime() on
+     * it reads the caller's own accumulated CPU time. */
     *clock_id = CLOCK_PROCESS_CPUTIME_ID;
     return 0;
 }
