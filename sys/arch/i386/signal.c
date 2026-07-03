@@ -198,6 +198,17 @@ static void populate_siginfo(siginfo_t *info, int sig, int code) {
         info->si_code = SI_QUEUE;
         current_process->sig_qpend &= ~sigmask(sig);
     }
+    /* SIGCHLD child status change (stop / continue / exit).  The generating
+     * path stashed the CLD_* code and the child's pid/uid/status on this
+     * process via sigchld_notify(); report it and consume the marker so a
+     * later, non-child-status SIGCHLD is not mislabelled. */
+    else if (current_process && sig == SIGCHLD && current_process->sigchld_pend) {
+        info->si_code   = current_process->sigchld_code;
+        info->si_pid    = current_process->sigchld_cpid;
+        info->si_uid    = current_process->sigchld_cuid;
+        info->si_status = current_process->sigchld_status;
+        current_process->sigchld_pend = 0;
+    }
 }
 
 /*
