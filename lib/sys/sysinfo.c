@@ -152,19 +152,6 @@ int sys_cpu_count(void) {
     int count = (int)__sysret(syscall(SYS_CPU_COUNT));
     if (count > 0) return count;
 
-    FILE *f = fopen("/proc/cpuinfo", "r");
-    if (f) {
-        char line[256];
-        count = 0;
-        while (fgets(line, sizeof(line), f)) {
-            if (strncmp(line, "processor", 9) == 0 && (line[9] == '\t' || line[9] == ' ' || line[9] == ':')) {
-                count++;
-            }
-        }
-        fclose(f);
-        if (count > 0) return count;
-    }
-
     char buf[4096];
     if (read_proc_file("/proc/stat", buf, sizeof(buf)) > 0) {
         count = 0;
