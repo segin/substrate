@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <unistd.h>
+#include <errno.h>
 
 FILE *stdin;
 FILE *stdout;
@@ -25,10 +26,22 @@ FILE *stderr;
  */
 __attribute__((constructor))
 void __stdio_init(void) {
+	/*
+	 * This runs before main().  Nothing it does is an error the program
+	 * should observe, but isatty(1) issues a TCGETS ioctl that FAILS with
+	 * ENOTTY whenever stdout is not a terminal (e.g. redirected to a file
+	 * or a pipe) -- and the isatty() wrapper leaves that errno behind.  A
+	 * program that inspects errno before making its own failing call would
+	 * then see a stale ENOTTY (POSIX conformance tests that check
+	 * `if (errno)` right after startup break this way).  Save errno across
+	 * startup and restore it so main() begins with a pristine value.
+	 */
+	int saved_errno = errno;
 	if (!stdin)  stdin  = fdopen(0, "r");
 	if (!stdout) stdout = fdopen(1, "w");
 	if (!stderr) stderr = fdopen(2, "w");
 	if(stdin) stdin->mode = _IOLBF;  // Line buffered input
 	if(stdout) stdout->mode = isatty(1) ? _IOLBF : _IOFBF;
 	if(stderr) stderr->mode = _IONBF; // Unbuffered error
+	errno = saved_errno;
 }

@@ -2781,20 +2781,50 @@ int ext2_truncate(fs_node_t *node, off_t length) {
     fs = ctx->fs;
     if (EXT2_RO_REFUSE(fs)) return -EROFS;
 
-    if (length == (off_t)ctx->inode.i_size) {
+    /* i_size is tracked as a 32-bit field throughout this driver, so refuse
+     * a truncation that could not be represented rather than silently wrap. */
+    if ((uint64_t)length > 0xFFFFFFFFULL) return -EFBIG;
+
+    off_t old_size = (off_t)ctx->inode.i_size;
+    if (length == old_size) {
         return 0;
-    }
-    if (length != 0) {
-        return -EOPNOTSUPP;
     }
 
     mutex_lock(&ctx->lock);
-    int ret = ext2_free_inode_blocks(fs, &ctx->inode);
+    int ret = 0;
+
+    if (length == 0) {
+        /* Release every data block; ext2_free_inode_blocks also clears
+         * i_size and i_blocks. */
+        ret = ext2_free_inode_blocks(fs, &ctx->inode);
+    } else if (length > old_size) {
+        /*
+         * Grow.  ext2 stores files sparsely: the region between the old and
+         * the new end-of-file is a hole that reads back as zeros
+         * (ext2_get_block_num returns 0 for an unmapped logical block and
+         * ext2_read_block zero-fills it).  So growing is just a matter of
+         * publishing the larger size -- data blocks are allocated lazily by
+         * the write path on first store.  This is exactly what ftruncate(2)
+         * on a freshly created (empty) file does, the precondition for most
+         * of the mmap(2) conformance tests.
+         */
+        ctx->inode.i_size = (uint32_t)length;
+    } else {
+        /*
+         * Shrink to a smaller, non-zero length.  Correctly releasing only the
+         * data blocks wholly past the new end-of-file (and collapsing
+         * now-empty indirect blocks) is not implemented; refuse rather than
+         * risk leaking or double-freeing blocks.  Shrink-to-0 takes the fast
+         * path above.
+         */
+        ret = -EOPNOTSUPP;
+    }
+
     if (ret == 0) {
         uint32_t now = (uint32_t)get_time();
         ctx->inode.i_mtime = now;
         ctx->inode.i_ctime = now;
-        node->length = 0;
+        node->length = (uint32_t)length;
         ret = ext2_write_inode(fs, ctx->inode_num, &ctx->inode);
         if (ret != 0) {
             ret = -EIO;
