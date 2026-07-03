@@ -240,7 +240,10 @@ static vm_object_t *mmap_create_file_object(fs_node_t *node, size_t length, uint
 void *sys_mmap(void *addr, size_t length, int prot, int flags, int fd, uint64_t offset) {
     process_t *p = current_process;
     if (!p || !p->vm_map) return (void *)-1;
-    if (!mmap_validate_flags(flags)) return (void *)-1;
+    /* Invalid flags word (neither -- or both -- of MAP_SHARED/MAP_PRIVATE)
+     * is EINVAL.  Returning a bare (void *)-1 would be negated by the libc
+     * mmap wrapper into errno=EPERM instead (OPTS mmap/21-1). */
+    if (!mmap_validate_flags(flags)) return (void *)(intptr_t)(-EINVAL);
 
     vm_map_t *map = p->vm_map;
     uintptr_t v_addr = (uintptr_t)addr;
@@ -306,6 +309,23 @@ void *sys_mmap(void *addr, size_t length, int prot, int flags, int fd, uint64_t 
         uint32_t ntype = ((fs_node_t *)file->f_data)->flags & 0x07;
         if (ntype == FS_PIPE || ntype == FS_SOCKET)
             return (void *)(intptr_t)(-ENODEV);
+    }
+
+    /*
+     * POSIX EACCES: the descriptor must be open for reading -- mmap() always
+     * reads the object to populate its pages -- and a MAP_SHARED mapping that
+     * requests PROT_WRITE additionally requires it be open for writing
+     * (OPTS mmap/6-4, mmap/6-6).  A MAP_PRIVATE PROT_WRITE mapping of a
+     * read-only descriptor stays allowed: its writes go to the private copy,
+     * never back to the file (OPTS mmap/6-5).  Skipped for anonymous maps,
+     * which have no backing descriptor.
+     */
+    if (file && file->f_data) {
+        if (!(file->f_flag & FREAD))
+            return (void *)(intptr_t)(-EACCES);
+        if ((prot & PROT_WRITE) && (flags & MAP_SHARED) &&
+            !(file->f_flag & FWRITE))
+            return (void *)(intptr_t)(-EACCES);
     }
 
     // Find virtual address space
