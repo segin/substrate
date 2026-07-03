@@ -867,7 +867,7 @@ static int psignal_info(process_t *p, int sig, int si_code,
             /* Notify parent if not SA_NOCLDSTOP */
             if (p->p_parent &&
                 !(p->p_parent->sig_actions[SIGCHLD-1].sa_flags & SA_NOCLDSTOP)) {
-                psignal(p->p_parent, SIGCHLD);
+                sigchld_notify(p->p_parent, CLD_CONTINUED, p->pid, p->uid, SIGCONT);
             }
             if (p->p_parent) {
                 sched_wakeup(&p->p_parent->p_children);
@@ -1025,6 +1025,28 @@ static int psignal_info(process_t *p, int sig, int si_code,
  */
 void psignal(process_t *p, int sig) {
     (void)psignal_info(p, sig, SI_USER, NULL);
+}
+
+/*
+ * sigchld_notify - post SIGCHLD to a parent carrying child-status siginfo.
+ *
+ * SIGCHLD is a standard (coalescing) signal, so like the sigqueue payload it
+ * cannot carry per-instance siginfo through the pending bitmask alone.  We
+ * stash the CLD_* code plus the child's pid/uid/status on the PARENT process;
+ * populate_siginfo() reads it back when it builds the SA_SIGINFO frame and then
+ * clears sigchld_pend.  Without this, a stop/continue-generated SIGCHLD reached
+ * the parent's handler with si_code == SI_USER, so job-control monitors (OPTS
+ * signals/sigaction/10-1) never saw CLD_STOPPED / CLD_CONTINUED.
+ */
+void sigchld_notify(process_t *parent, int code, int cpid,
+                    unsigned int cuid, int status) {
+    if (!parent) return;
+    parent->sigchld_code   = code;
+    parent->sigchld_cpid   = cpid;
+    parent->sigchld_cuid   = cuid;
+    parent->sigchld_status = status;
+    parent->sigchld_pend   = 1;
+    psignal(parent, SIGCHLD);
 }
 
 // Send signal to process group
@@ -1426,7 +1448,8 @@ void signal_handle_pending(registers_t *regs) {
              // Notify parent if not SA_NOCLDSTOP
              if (current_process->p_parent &&
                  !(current_process->p_parent->sig_actions[SIGCHLD-1].sa_flags & SA_NOCLDSTOP)) {
-                 psignal(current_process->p_parent, SIGCHLD);
+                 sigchld_notify(current_process->p_parent, CLD_STOPPED,
+                                current_process->pid, current_process->uid, sig);
              }
              if (current_process->p_parent) {
                  sched_wakeup(&current_process->p_parent->p_children);

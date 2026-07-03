@@ -114,7 +114,18 @@ typedef struct process {
      * hold a value to deliver as siginfo.si_value with si_code == SI_QUEUE. */
     uint32_t sig_qpend;
     union sigval sig_qval[NSIG];
-    
+
+    /* Pending SIGCHLD siginfo.  SIGCHLD coalesces into a single pending bit,
+     * so — like sig_qval — this records the most recent child status change
+     * (stop / continue / exit) so a parent's SA_SIGINFO handler sees the right
+     * si_code (CLD_*) and si_pid/si_uid/si_status.  sigchld_pend != 0 marks it
+     * valid; populate_siginfo() consumes it.  Set via sigchld_notify(). */
+    uint32_t sigchld_pend;
+    int      sigchld_code;
+    int      sigchld_cpid;
+    uint32_t sigchld_cuid;
+    int      sigchld_status;
+
     // Process State
     uint8_t state; // process_state_t
     uint8_t p_xsig; // Signal that stopped this process (for WSTOPSIG)
