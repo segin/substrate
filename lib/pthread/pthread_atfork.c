@@ -47,14 +47,41 @@ int pthread_atfork(void (*prepare)(void), void (*parent)(void),
     return 0;
 }
 
-/* Run parent/child handlers oldest-first (FIFO) by recursing to the tail. */
+/*
+ * Run parent/child handlers oldest-first (FIFO).  The list is kept
+ * newest-first, so we reverse it in place, walk it head->tail, then reverse it
+ * back to restore the original order.  This is O(1) stack — the previous
+ * implementation recursed once per handler, so a program that registers many
+ * atfork handlers (OPTS pthread_atfork/3-2 registers 10000) overflowed the
+ * caller's 64 KiB thread stack and crashed inside fork().  The caller holds
+ * af_lock (parent) or is single-threaded (child), so the transient in-place
+ * mutation is not observable by any other thread.
+ */
 static void run_fifo(struct atfork_handler *h, int child) {
-    if (!h)
-        return;
-    run_fifo(h->next, child);
-    void (*fn)(void) = child ? h->child : h->parent;
-    if (fn)
-        fn();
+    struct atfork_handler *prev = NULL, *cur = h, *next;
+
+    /* Reverse newest-first -> oldest-first. */
+    while (cur) {
+        next = cur->next;
+        cur->next = prev;
+        prev = cur;
+        cur = next;
+    }
+    /* Walk oldest-first, invoking each parent/child handler. */
+    for (cur = prev; cur; cur = cur->next) {
+        void (*fn)(void) = child ? cur->child : cur->parent;
+        if (fn)
+            fn();
+    }
+    /* Reverse back to restore the newest-first order for the next fork(). */
+    cur = prev;
+    prev = NULL;
+    while (cur) {
+        next = cur->next;
+        cur->next = prev;
+        prev = cur;
+        cur = next;
+    }
 }
 
 /* Called by libc fork() before forking — prepare handlers, LIFO. */
