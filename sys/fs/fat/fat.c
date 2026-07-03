@@ -22,6 +22,7 @@ static uint32_t fat_cluster_to_sector(fat_fs_t *fs, uint32_t cluster);
 /* Write support forward declarations */
 static size_t fat_file_write(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer);
 static int fat_truncate(fs_node_t *node, off_t new_size);
+static int fat_update_dirent(fat_fs_t *fs, uint64_t inode, uint32_t new_size, uint32_t first_cluster);
 static int fat_mkdir_vfs(fs_node_t *parent, const char *name, uint16_t permission);
 static int fat_unlink(fs_node_t *parent, const char *name);
 static int fat_rmdir_vfs(fs_node_t *parent, const char *name);
@@ -55,10 +56,6 @@ static uint64_t fat_make_synth_inode(fat_fs_t *fs, uint32_t dir_cluster,
                                      uint32_t sector_index,
                                      uint32_t entry_offset,
                                      uint32_t first_cluster) {
-    if (first_cluster != 0) {
-        return (uint64_t)first_cluster;
-    }
-
     if (dir_cluster == 0 && fs->fat_type != 32) {
         uint64_t slot = ((uint64_t)(fs->root_dir_first_sector + sector_index) << 16) |
                         (uint64_t)(entry_offset / sizeof(fat_dirent_t));
@@ -1010,8 +1007,7 @@ static size_t fat_file_write(fs_node_t *node, off_t offset, size_t size, const u
         uint32_t nc = fat_alloc_cluster(fs);
         if (nc == 0) return 0;
         ctx->first_cluster = nc;
-        node->inode = nc;
-        /* TODO: update directory entry cluster fields */
+        fat_update_dirent(fs, node->inode, (uint32_t)-1, nc);
     }
 
     /* Walk chain, extending as needed */
@@ -1074,7 +1070,7 @@ static size_t fat_file_write(fs_node_t *node, off_t offset, size_t size, const u
     if ((uint32_t)(offset + total_written) > ctx->size) {
         ctx->size = (uint32_t)(offset + total_written);
         node->length = ctx->size;
-        /* TODO: flush directory entry */
+        fat_update_dirent(fs, node->inode, ctx->size, (uint32_t)-1);
     }
 
     return total_written;
@@ -1094,6 +1090,7 @@ static int fat_truncate(fs_node_t *node, off_t new_size) {
         ctx->first_cluster = 0;
         ctx->size = 0;
         node->length = 0;
+        fat_update_dirent(fs, node->inode, 0, 0);
         return 0;
     }
 
@@ -1123,7 +1120,31 @@ static int fat_truncate(fs_node_t *node, off_t new_size) {
 
     ctx->size = (uint32_t)new_size;
     node->length = new_size;
+    fat_update_dirent(fs, node->inode, ctx->size, (uint32_t)-1);
     return 0;
+}
+
+/* Update directory entry on disk */
+static int fat_update_dirent(fat_fs_t *fs, uint64_t inode, uint32_t new_size, uint32_t first_cluster) {
+    if ((inode & FAT_SYNTH_INO_BASE) == 0) return -1;
+
+    uint64_t slot = inode & ~FAT_SYNTH_INO_BASE;
+    uint32_t sector = (uint32_t)(slot >> 16);
+    uint32_t entry_offset = (uint32_t)(slot & 0xFFFF) * sizeof(fat_dirent_t);
+
+    if (fs->bpb.bytes_per_sector > 4096) return -1; // Sanity check
+    uint8_t sector_buf[4096];
+
+    if (fat_read_sectors(fs, sector, 1, sector_buf) != 0) return -1;
+
+    fat_dirent_t *de = (fat_dirent_t *)(sector_buf + entry_offset);
+    if (new_size != (uint32_t)-1) de->file_size = new_size;
+    if (first_cluster != (uint32_t)-1) {
+        de->cluster_high = (uint16_t)(first_cluster >> 16);
+        de->cluster_low = (uint16_t)(first_cluster & 0xFFFF);
+    }
+
+    return fat_write_sectors(fs, sector, 1, sector_buf);
 }
 
 /* Generate a short (8.3) name from a long name.
