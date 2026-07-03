@@ -247,6 +247,17 @@ typedef struct process {
     int         sched_policy;       // POSIX_SCHED_* (see <sys/sched.h>)
     int         sched_rt_priority;  // sched_param.sched_priority
 
+    /* SCHED_SPORADIC sporadic-server parameters (sched_param.sched_ss_*).
+     * Stored and validated for POSIX conformance; the substrate scheduler
+     * runs a SCHED_SPORADIC thread like SCHED_FIFO at sched_rt_priority
+     * (no runtime budget replenishment).  Zero-initialized by proc_create's
+     * memset; inherited by fork().  struct timespec via <sys/resource.h> ->
+     * <sys/time.h>. */
+    int              sched_ss_low_priority; // low scheduling priority
+    struct timespec  sched_ss_repl_period;  // replenishment period
+    struct timespec  sched_ss_init_budget;  // initial execution budget
+    int              sched_ss_max_repl;     // max pending replenishments
+
     /* POSIX.1b per-process timers (timer_create(2)).  Kept at the END of
      * the struct — see the offset-stability note above.  Guarded by the
      * existing itimer_lock; the tick fast-paths on n_ptimers_armed == 0.

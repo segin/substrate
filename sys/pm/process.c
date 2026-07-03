@@ -421,6 +421,16 @@ process_t *proc_create(int perso_id) {
      * the SCHED_OTHER/0 default. */
     proc->sched_policy      = current_process ? current_process->sched_policy : 0;
     proc->sched_rt_priority = current_process ? current_process->sched_rt_priority : 0;
+    /* SCHED_SPORADIC parameters are likewise inherited across fork().  The
+     * proc struct is memset(0) at allocation, so the first process starts
+     * with all-zero sporadic params (sched_getparam normalizes the reported
+     * sched_ss_max_repl into [1, SS_REPL_MAX] for round-trip validity). */
+    if (current_process) {
+        proc->sched_ss_low_priority = current_process->sched_ss_low_priority;
+        proc->sched_ss_repl_period  = current_process->sched_ss_repl_period;
+        proc->sched_ss_init_budget  = current_process->sched_ss_init_budget;
+        proc->sched_ss_max_repl     = current_process->sched_ss_max_repl;
+    }
     proc_resource_limits_init(proc);
 
     extern void rusage_init(process_t *p);
