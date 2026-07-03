@@ -1350,6 +1350,11 @@ int sys_thr_kill(long id, int sig) {
     thread_t *t = thr_lookup_in_proc(id, current_process);
     if (!t) return -3;
     if (sig == 0) return 0;
+    /* A real-time signal queues a distinct instance even when directed at a
+     * specific thread (POSIX), mirroring the process-directed kill() path;
+     * this also sets the pending bits, so the OR below is idempotent.  No-op
+     * for standard signals, which coalesce. */
+    signal_rt_post(current_process, sig);
     t->sig_pending |= sigmask(sig);
     signal_wake_thread(t, sig);
     return 0;
@@ -1367,6 +1372,9 @@ int sys_thr_kill2(pid_t pid, long id, int sig) {
     thread_t *t = sched_get_thread((int)id);
     if (!t || t->proc != target_proc) return -3;
     if (sig == 0) return 0;
+    /* Real-time signals queue a distinct instance (POSIX); no-op for standard
+     * signals.  Also sets the pending bits, so the OR below is idempotent. */
+    signal_rt_post(target_proc, sig);
     t->sig_pending |= sigmask(sig);
     signal_wake_thread(t, sig);
     return 0;
@@ -3214,11 +3222,23 @@ int sys_creat(const char *path, int mode) {
 }
 
 int sys_signal(int sig, void *handler) {
-    struct sigaction act;
+    struct sigaction act, oact;
     memset(&act, 0, sizeof(act));
+    memset(&oact, 0, sizeof(oact));
     act.sa_handler = (sig_t)handler;
+    /* Preserve the prior signal() delivery semantics (sa_flags == 0): the
+     * handler stays installed and syscall-restart behaviour is unchanged.
+     * POSIX leaves signal()'s SA_RESTART/SA_RESETHAND choice unspecified, so
+     * we only fix the two conformance bugs here — the return value and errno —
+     * without altering how the installed handler is delivered. */
     act.sa_flags = 0;
-    return kern_sigaction(sig, &act, NULL);
+    int r = kern_sigaction(sig, &act, &oact);
+    if (r < 0)
+        return r;   /* -EINVAL for an invalid or uncatchable (KILL/STOP) signo */
+    /* signal() returns the PREVIOUS disposition: SIG_DFL (0), SIG_IGN (1) or
+     * the prior handler pointer.  These are all userspace addresses (or 0/1),
+     * never in the -4095..-1 kernel-error window, so libc reads them cleanly. */
+    return (int)(uintptr_t)oact.sa_handler;
 }
 
 int sys_waitpid(int pid, int *status, int options) {

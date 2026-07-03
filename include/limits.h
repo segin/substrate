@@ -44,6 +44,10 @@
 #define LOGIN_NAME_MAX 256
 #define IOV_MAX 1024
 #define LINE_MAX 2048
+/* Maximum number of POSIX semaphores a single process may have (sem_init /
+ * sem_open).  POSIX requires this to be at least _POSIX_SEM_NSEMS_MAX (256);
+ * sem_init()/sem_open() report ENOSPC once it is reached (sem_init/7-1). */
+#define SEM_NSEMS_MAX 256
 /* POSIX hint for the maximum number of file descriptors a process
  * can have open.  Substrate's actual limit is set per-process by
  * RLIMIT_NOFILE at runtime; OPEN_MAX is the compile-time constant

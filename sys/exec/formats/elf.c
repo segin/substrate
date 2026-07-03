@@ -329,6 +329,16 @@ static void exec_reset_signals(void) {
     current_process->sig_catch = 0;
     // sig_ignore remains unchanged - ignored signals stay ignored
 
+    /* POSIX: an alternate signal stack established with sigaltstack(2) is NOT
+     * preserved across exec() — the new image starts with no alternate stack
+     * (sigaltstack/9-1).  Reset the calling thread's alt-stack to SS_DISABLE. */
+    if (current_thread) {
+        current_thread->sig_alt_stack.ss_sp    = NULL;
+        current_thread->sig_alt_stack.ss_size  = 0;
+        current_thread->sig_alt_stack.ss_flags = SS_DISABLE;
+        current_thread->sig_on_stack           = 0;
+    }
+
     /* POSIX: per-process timers are disarmed and deleted across exec(). */
     proc_ptimers_clear(current_process);
 }

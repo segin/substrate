@@ -264,6 +264,9 @@ void sigchld_notify(struct process *parent, int code, int cpid,
  * pending job-control stop is honoured in place, ignored signals discarded). */
 int signal_sleep_interrupted(void);
 void signal_wake_thread(struct thread *t, int sig);
+/* Queue one thread-directed real-time-signal instance (thr_kill/pthread_kill);
+ * no-op for standard signals.  Returns 0 or -EAGAIN if the RT queue is full. */
+int signal_rt_post(struct process *p, int sig);
 void pgsignal(int pgrp, int sig);
 void trapsignal(struct process *p, int sig, int code);
 void sigexit(struct process *p, int sig);

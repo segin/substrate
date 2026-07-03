@@ -459,11 +459,26 @@ int kill(pid_t pid, int sig) {
 }
 
 int raise(int sig) {
-    return kill(getpid(), sig);
+    /* POSIX: in a multi-threaded process raise(sig) is equivalent to
+     * pthread_kill(pthread_self(), sig) — the signal is directed at the
+     * CALLING thread, not the whole process.  Deliver it thread-directed so a
+     * signal a thread raises for itself lands on itself even when sibling
+     * threads have different signal masks (pthread_sigmask/9-1).  For a
+     * single-threaded process this is equivalent to kill(getpid(), sig). */
+    int tid = (int)_syscall0(SYS_THR_SELF);
+    int ret = (int)_syscall2(SYS_THR_KILL, tid, sig);
+    if (ret < 0) { errno = -ret; return -1; }
+    return 0;
 }
 
 sighandler_t signal(int signum, sighandler_t handler) {
-    return (sighandler_t)(uintptr_t)_syscall2(SYS_SIGNAL, signum, (uintptr_t)handler);
+    /* The kernel returns the previous disposition on success, or a negative
+     * errno for an invalid or uncatchable signal.  Detect the -4095..-1 error
+     * window and report SIG_ERR + errno (signal/6-1, 7-1); otherwise the value
+     * is the previous handler / SIG_DFL / SIG_IGN (signal/1-1, 2-1, 5-1). */
+    long r = (long)_syscall2(SYS_SIGNAL, signum, (uintptr_t)handler);
+    if (r < 0 && r >= -4095) { errno = (int)-r; return SIG_ERR; }
+    return (sighandler_t)(uintptr_t)r;
 }
 
 int sigaction(int sig, const struct sigaction *act, struct sigaction *oact) {
@@ -1507,8 +1522,11 @@ long sysconf(int name) {
         /* Kernel RTSIG_QUEUE_MAX pending queued real-time signals. */
         return 64;
     case 25 /* _SC_SEM_NSEMS_MAX */:
-        /* Kernel ksem table size (KSEM_MAX). */
-        return 128;
+        /* POSIX bounds the number of semaphores a process may have by
+         * SEM_NSEMS_MAX (>= 256); sem_init()/sem_open() report ENOSPC once it
+         * is reached.  Report the concrete limit rather than -1 so the count
+         * is determinate and enforced (sem_init/7-1). */
+        return SEM_NSEMS_MAX;
     case 26 /* _SC_MAPPED_FILES */:
         /* mmap(2) is implemented. */
         return _POSIX_VERSION;

@@ -292,6 +292,10 @@ int sigignore(int sig) {
 }
 
 int sigpause(int sig) {
+    /* XSI sigpause(): an invalid signal number is -1/EINVAL (sigpause/4-1).
+     * Without this guard sigdelset() below fails silently and sigsuspend()
+     * blocks forever on the unchanged (full) mask — the test times out. */
+    if (sig <= 0 || sig >= NSIG) { errno = EINVAL; return -1; }
     /* Remove `sig` from the current mask and suspend until a signal fires. */
     sigset_t mask;
     if (sigprocmask(SIG_BLOCK, NULL, &mask) < 0) return -1;
