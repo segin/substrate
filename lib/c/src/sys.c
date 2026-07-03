@@ -750,8 +750,21 @@ int uname(struct utsname *buf) {
     return __set_errno((int)_syscall1(SYS_UNAME, (uintptr_t)buf));
 }
 
+/* pthread_testcancel is a POSIX cancellation point provided by libpthread; the
+ * weak reference resolves to it when the program links -lpthread, and is NULL
+ * in a pure-libc program (in which case nanosleep is simply not a cancellation
+ * point).  Cheap when no cancel is pending. */
+extern void pthread_testcancel(void) __attribute__((weak));
+
 int nanosleep(const struct timespec *req, struct timespec *rem) {
-    return __set_errno((int)_syscall2(SYS_NANOSLEEP, (uintptr_t)req, (uintptr_t)rem));
+    /* nanosleep is a cancellation point (POSIX): honour a pending cancel both
+     * before parking and after the sleep returns — the latter catches the
+     * EINTR from the directed SIGCANCEL that libpthread's pthread_cancel
+     * raises to interrupt a blocked thread. */
+    if (pthread_testcancel) pthread_testcancel();
+    int r = __set_errno((int)_syscall2(SYS_NANOSLEEP, (uintptr_t)req, (uintptr_t)rem));
+    if (pthread_testcancel) pthread_testcancel();
+    return r;
 }
 
 unsigned int sleep(unsigned int seconds) {

@@ -26,6 +26,10 @@ typedef unsigned long rlim_t;
  * selector for the memlock soft limit tracked directly on process_t
  * (proc->rlim_memlock_*), not as an index into rlimits[]. */
 #define RLIMIT_MEMLOCK 6
+/* Address-space limit — same selector value as userspace RLIMIT_VMEM/AS,
+ * tracked directly on process_t (proc->rlim_as_*) and enforced in sys_mmap. */
+#define RLIMIT_VMEM    10
+#define RLIMIT_AS      RLIMIT_VMEM
 
 struct rlimit {
     rlim_t rlim_cur;

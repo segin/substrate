@@ -169,6 +169,10 @@ typedef struct process {
      * sized for RLIMIT_CORE).  RLIM_INFINITY == "unset/no limit". */
     rlim_t   rlim_memlock_cur;
     rlim_t   rlim_memlock_max;
+    /* RLIMIT_AS (address-space) soft/hard limit, enforced against
+     * vm_map->size in sys_mmap.  RLIM_INFINITY == no limit. */
+    rlim_t   rlim_as_cur;
+    rlim_t   rlim_as_max;
     uint32_t mlockall_flags;   /* MCL_CURRENT/MCL_FUTURE from mlockall(2) */
 
     struct tty *tty;      // Controlling Terminal
@@ -516,6 +520,14 @@ typedef struct thread {
      * chooses the lowest vruntime.  Kept at the END of thread_t -- see the
      * offset-stability note above. */
     uint64_t     vruntime;
+
+    /* Per-thread monotonic CPU-time accounting for CLOCK_THREAD_CPUTIME_ID,
+     * counted in HZ ticks by rusage_add_tick() (which charges current_thread
+     * each timer tick).  A new thread starts at 0 so its CPU clock reads ~0
+     * right after creation (pthread_create/11-1).  Appended at the very end to
+     * preserve every existing (offset-hardcoded) field position. */
+    uint32_t     cpu_utime;
+    uint32_t     cpu_stime;
 } thread_t;
 
 // Globals

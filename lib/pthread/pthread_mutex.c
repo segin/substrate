@@ -184,8 +184,12 @@ int pthread_mutex_trylock(pthread_mutex_t *m) {
         struct rec_state *s = MTX_REC(v);
         int me = mtx_self();
         if (s->owner == me) {
+            /* POSIX: pthread_mutex_trylock on a mutex already locked by the
+             * caller returns EBUSY — EDEADLK is only for the blocking lock().
+             * A RECURSIVE mutex re-acquires; an ERRORCHECK one is EBUSY
+             * (pthread_mutex_trylock/4-3). */
             if (s->type == PTHREAD_MUTEX_ERRORCHECK)
-                return EDEADLK;
+                return EBUSY;
             s->count++;
             return 0;
         }

@@ -14,7 +14,14 @@
  * fields are stored/reported for source compatibility. */
 int pthread_attr_init(pthread_attr_t *attr)            { if (attr) *attr = PTHREAD_CREATE_JOINABLE; return 0; }
 int pthread_attr_destroy(pthread_attr_t *attr)         { (void)attr; return 0; }
-int pthread_attr_setstacksize(pthread_attr_t *attr, size_t s)    { (void)attr; (void)s; return 0; }
+int pthread_attr_setstacksize(pthread_attr_t *attr, size_t s) {
+    if (!attr) return EINVAL;
+    /* POSIX: EINVAL if the requested size is below PTHREAD_STACK_MIN.  The
+     * per-thread stack is a fixed 64 KiB (== PTHREAD_STACK_MIN); a request at
+     * or above the floor is accepted but remains advisory. */
+    if (s < (size_t)PTHREAD_STACK_MIN) return EINVAL;
+    return 0;
+}
 int pthread_attr_getstacksize(const pthread_attr_t *attr, size_t *s) {
     (void)attr; if (s) *s = 64 * 1024; return 0;       /* the fixed default */
 }
@@ -80,6 +87,12 @@ int pthread_condattr_init(pthread_condattr_t *attr)    { if (attr) *attr = 0 /*C
 int pthread_condattr_destroy(pthread_condattr_t *attr) { (void)attr; return 0; }
 int pthread_condattr_setclock(pthread_condattr_t *attr, int clock_id) {
     if (!attr) return EINVAL;
+    /* POSIX: the clock must be one that can time a condition wait; a CPU-time
+     * clock (CLOCK_PROCESS_CPUTIME_ID / CLOCK_THREAD_CPUTIME_ID, which is what
+     * clock_getcpuclockid returns) is not permitted and must fail with EINVAL
+     * (pthread_condattr_setclock/1-3). */
+    if (clock_id != CLOCK_REALTIME && clock_id != CLOCK_MONOTONIC)
+        return EINVAL;
     *attr = clock_id;
     return 0;
 }
@@ -176,6 +189,39 @@ void __pthread_tsd_run_destructors(void) {
  * A writer-preferring rwlock over the mutex + condvar.  readers: >0 = that
  * many read holders, -1 = a single write holder, 0 = free.  waiting_writers
  * blocks new readers so writers can't starve. */
+
+/*
+ * Per-thread set of rwlocks this thread holds for WRITING.  Used to detect a
+ * self-deadlock: a thread that re-locks (for writing or reading) a write lock
+ * it already owns would otherwise block forever on its own hold.  POSIX
+ * permits pthread_rwlock_wr/rdlock to fail with EDEADLK in that case.
+ *
+ * Kept in libpthread TLS rather than in pthread_rwlock_t, whose layout is
+ * fixed for already-compiled consumers (growing it would corrupt their
+ * by-value allocations).  Initial-exec TLS model — libpthread is a startup
+ * DT_NEEDED, never dlopen'd.  Best-effort: a thread holding more than
+ * RW_WR_HELD_MAX write locks simply isn't tracked past the cap (the EDEADLK
+ * detection is a "may fail", so a missed entry only reverts to the old
+ * block-forever behaviour for that unusual case).
+ */
+#define RW_WR_HELD_MAX 32
+static __thread pthread_rwlock_t *rw_wr_held[RW_WR_HELD_MAX]
+    __attribute__((tls_model("initial-exec")));
+
+static int rw_wr_owned(pthread_rwlock_t *rw) {
+    for (int i = 0; i < RW_WR_HELD_MAX; i++)
+        if (rw_wr_held[i] == rw) return 1;
+    return 0;
+}
+static void rw_wr_add(pthread_rwlock_t *rw) {
+    for (int i = 0; i < RW_WR_HELD_MAX; i++)
+        if (!rw_wr_held[i]) { rw_wr_held[i] = rw; return; }
+}
+static void rw_wr_del(pthread_rwlock_t *rw) {
+    for (int i = 0; i < RW_WR_HELD_MAX; i++)
+        if (rw_wr_held[i] == rw) { rw_wr_held[i] = NULL; return; }
+}
+
 int pthread_rwlock_init(pthread_rwlock_t *rw, const pthread_rwlockattr_t *attr) {
     (void)attr;
     pthread_mutex_init(&rw->lock, NULL);
@@ -209,12 +255,17 @@ int pthread_rwlock_tryrdlock(pthread_rwlock_t *rw) {
 }
 
 int pthread_rwlock_wrlock(pthread_rwlock_t *rw) {
+    /* Re-locking a write lock the calling thread already holds would block
+     * forever waiting for itself to release; report the deadlock instead. */
+    if (rw_wr_owned(rw))
+        return EDEADLK;
     pthread_mutex_lock(&rw->lock);
     rw->waiting_writers++;
     while (rw->readers != 0)
         pthread_cond_wait(&rw->cond, &rw->lock);
     rw->waiting_writers--;
     rw->readers = -1;
+    rw_wr_add(rw);
     pthread_mutex_unlock(&rw->lock);
     return 0;
 }
@@ -224,12 +275,13 @@ int pthread_rwlock_trywrlock(pthread_rwlock_t *rw) {
     int ok = (rw->readers == 0);
     if (ok) rw->readers = -1;
     pthread_mutex_unlock(&rw->lock);
+    if (ok) rw_wr_add(rw);
     return ok ? 0 : EBUSY;
 }
 
 int pthread_rwlock_unlock(pthread_rwlock_t *rw) {
     pthread_mutex_lock(&rw->lock);
-    if (rw->readers < 0) rw->readers = 0;      /* drop the writer */
+    if (rw->readers < 0) { rw->readers = 0; rw_wr_del(rw); }  /* drop the writer */
     else if (rw->readers > 0) rw->readers--;   /* drop one reader */
     pthread_cond_broadcast(&rw->cond);         /* waiters re-check the predicate */
     pthread_mutex_unlock(&rw->lock);
@@ -257,16 +309,23 @@ int pthread_rwlock_timedrdlock(pthread_rwlock_t *rw, const struct timespec *abst
     pthread_mutex_lock(&rw->lock);
     while (rw->readers < 0 || rw->waiting_writers > 0) {
         int rc = pthread_cond_timedwait(&rw->cond, &rw->lock, abstime);
-        if (rc == ETIMEDOUT) {
-            if (rwlock_deadline_passed(abstime)) {
+        if (rc == ETIMEDOUT && rwlock_deadline_passed(abstime)) {
+            /* Deadline genuinely passed.  Re-check the predicate one last
+             * time before timing out: while we were parked a signal handler
+             * may have run and the lock may have been released — POSIX says
+             * the wait resumes "as if it was not interrupted", so a lock that
+             * is now available must be granted rather than spuriously timing
+             * out (pthread_rwlock_timedrdlock/6-2). */
+            if (rw->readers < 0 || rw->waiting_writers > 0) {
                 pthread_mutex_unlock(&rw->lock);
                 return ETIMEDOUT;
             }
-            /* fired early — re-check the predicate and keep waiting */
-        } else if (rc != 0) {
+            break;   /* lock available — fall through to acquire */
+        } else if (rc != 0 && rc != ETIMEDOUT) {
             pthread_mutex_unlock(&rw->lock);
             return rc;
         }
+        /* early timeout / spurious wake / signal: loop re-checks the predicate */
     }
     rw->readers++;
     pthread_mutex_unlock(&rw->lock);
@@ -276,27 +335,33 @@ int pthread_rwlock_timedrdlock(pthread_rwlock_t *rw, const struct timespec *abst
 /* Timed write-lock: same, but on a genuine timeout stop counting as a waiting
  * writer and wake any readers we were blocking. */
 int pthread_rwlock_timedwrlock(pthread_rwlock_t *rw, const struct timespec *abstime) {
+    if (rw_wr_owned(rw))
+        return EDEADLK;
     pthread_mutex_lock(&rw->lock);
     rw->waiting_writers++;
     while (rw->readers != 0) {
         int rc = pthread_cond_timedwait(&rw->cond, &rw->lock, abstime);
-        if (rc == ETIMEDOUT) {
-            if (rwlock_deadline_passed(abstime)) {
+        if (rc == ETIMEDOUT && rwlock_deadline_passed(abstime)) {
+            /* Re-check before timing out — the lock may have been released
+             * while a signal handler ran (pthread_rwlock_timedwrlock/6-2). */
+            if (rw->readers != 0) {
                 rw->waiting_writers--;
                 pthread_cond_broadcast(&rw->cond);
                 pthread_mutex_unlock(&rw->lock);
                 return ETIMEDOUT;
             }
-            /* fired early — re-check the predicate and keep waiting */
-        } else if (rc != 0) {
+            break;   /* lock free now — fall through to acquire */
+        } else if (rc != 0 && rc != ETIMEDOUT) {
             rw->waiting_writers--;
             pthread_cond_broadcast(&rw->cond);
             pthread_mutex_unlock(&rw->lock);
             return rc;
         }
+        /* early timeout / spurious wake / signal: loop re-checks the predicate */
     }
     rw->waiting_writers--;
     rw->readers = -1;
+    rw_wr_add(rw);
     pthread_mutex_unlock(&rw->lock);
     return 0;
 }

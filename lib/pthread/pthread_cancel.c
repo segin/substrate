@@ -1,29 +1,39 @@
 /*
  * pthread_cancel.c — POSIX thread cancellation + the cleanup-handler stack.
  *
- * substrate previously stubbed cancellation as a no-op.  This provides a real
- * implementation that does NOT depend on signal delivery:
+ * Cancellation is signal-driven (a directed SIGCANCEL), backed by a per-thread
+ * pending flag on the registry node:
  *
  *   - A cancel is POSTED by setting a `cancel_pending` flag on the target
- *     thread's registry node (shared, lock-protected — see pthread_create.c).
- *     This works cross-thread without a signal, so it is unaffected by the
- *     kernel's lack of handler-running thread-directed signal delivery (a
- *     pthread_kill to a secondary thread sets the pending bit but does not run
- *     that thread's handler) and by the qemu/KVM post-signal coherence bug.
+ *     thread's registry node (shared, lock-protected — see pthread_create.c)
+ *     AND by delivering a directed SIGCANCEL to the target's kernel tid via
+ *     thr_kill(2).  The signal (a) wakes the target out of an interruptible
+ *     blocking syscall (sleep/nanosleep, mutex/cond/rwlock futex wait, ...)
+ *     with EINTR and (b) runs the target thread's handler on its return to
+ *     userspace — so an ASYNCHRONOUS cancel is acted on *while the target is
+ *     blocked*, and a DEFERRED cancel makes the interrupted cancellation point
+ *     act.  (Thread-directed signal delivery works in this kernel: thr_kill
+ *     sets the target thread's sig_pending and signal_handle_pending() runs on
+ *     that thread's syscall return.)
  *
  *   - Per-thread cancel state (ENABLE/DISABLE) and type (DEFERRED/ASYNC) and
  *     the cleanup stack live in TLS (initial-exec model — libpthread is a
  *     startup DT_NEEDED, never dlopen'd).
  *
- *   - A DEFERRED cancel is acted upon at the next cancellation point
- *     (pthread_testcancel, and the state/type setters when re-enabling or
- *     switching to async with a cancel already pending).  Acting on a cancel
- *     runs the thread's cleanup stack (LIFO) and TSD destructors and
- *     terminates the thread with PTHREAD_CANCELED (via pthread_exit).
+ *   - A DEFERRED cancel is acted upon at the next cancellation point:
+ *     pthread_testcancel, the state/type setters (re-enable / switch-to-async
+ *     with a cancel already pending), and the sleep/nanosleep cancellation
+ *     points (libc calls the weak pthread_testcancel after the syscall
+ *     returns EINTR).  Acting on a cancel runs the thread's cleanup stack
+ *     (LIFO) and TSD destructors and terminates the thread with
+ *     PTHREAD_CANCELED (via pthread_exit).
  *
- * Limitation: because substrate blocking calls (sleep, read, ...) are not
- * cancellation points and thread-directed signals do not interrupt+dispatch,
- * a cancel is only observed once the target reaches a cancellation point.
+ * The SIGCANCEL handler is installed LAZILY on the first pthread_cancel(), not
+ * in a library constructor: every substrate binary that links -lpthread would
+ * otherwise hijack SIGRTMIN process-wide, swallowing the RT signal from
+ * programs (and OPTS signals-area tests) that use it directly.  A program that
+ * actually calls pthread_cancel() is a cancellation user and does not also use
+ * SIGRTMIN for messaging.
  *
  * Other pthread functions live in pthread_create.c, pthread_mutex.c,
  * pthread_cond.c, pthread_extra.c, pthread_barrier.c, pthread_spin.c.
@@ -31,6 +41,16 @@
 #include "pthread.h"
 #include "pthread_internal.h"
 #include <errno.h>
+#include <signal.h>
+#include <unistd.h>
+#include <sys/syscall.h>
+#include <sys/thr.h>
+
+/* Directed cancellation signal.  substrate's RT range is {SIGRTMIN=29,
+ * SIGRTMAX=30}; SIGCANCEL borrows SIGRTMIN (glibc convention). */
+#ifndef SIGCANCEL
+#define SIGCANCEL SIGRTMIN
+#endif
 
 /* Per-thread cancellation state.  Zero-initialised TLS gives the POSIX
  * defaults: cancel_state = PTHREAD_CANCEL_ENABLE (0), cancel_type =
@@ -113,7 +133,61 @@ int pthread_setcanceltype(int type, int *oldtype) {
     return 0;
 }
 
+/*
+ * SIGCANCEL handler — runs in the *target* thread's context after thr_kill
+ * wakes it and signal_handle_pending() delivers on its return to userspace.
+ * SIGCANCEL is a dedicated internal signal only ever raised by pthread_cancel,
+ * so its arrival means a cancel was requested for this thread; we consult only
+ * the TLS cancel state/type (never the registry lock — a signal handler must
+ * not spin on a lock the interrupted context may hold).
+ */
+static void cancel_signal_handler(int sig) {
+    (void)sig;
+    if (in_cancel)
+        return;                         /* already unwinding */
+    if (cancel_state != PTHREAD_CANCEL_ENABLE)
+        return;                         /* disabled: cancel stays pending */
+    if (cancel_type == PTHREAD_CANCEL_ASYNCHRONOUS)
+        do_cancel();                    /* act now — never returns */
+    /* DEFERRED: return.  The registry pending flag is already set (below), so
+     * the interrupted cancellation point acts: the blocking syscall returns
+     * EINTR and sleep/nanosleep's testcancel hook (or an explicit
+     * pthread_testcancel) calls do_cancel(). */
+}
+
+/* Install the SIGCANCEL handler once, process-wide.  sa_flags = 0 (no
+ * SA_RESTART) so the signal interrupts the target's blocking syscall with
+ * EINTR instead of restarting it. */
+static volatile int cancel_handler_installed;
+static int cancel_install_lock;
+static void ensure_cancel_handler(void) {
+    if (cancel_handler_installed)
+        return;
+    while (__sync_lock_test_and_set(&cancel_install_lock, 1))
+        ;
+    if (!cancel_handler_installed) {
+        struct sigaction sa;
+        sa.sa_handler = cancel_signal_handler;
+        sa.sa_flags   = 0;
+        sigemptyset(&sa.sa_mask);
+        sigaction(SIGCANCEL, &sa, NULL);
+        cancel_handler_installed = 1;
+    }
+    __sync_lock_release(&cancel_install_lock);
+}
+
 int pthread_cancel(pthread_t thread) {
-    /* Post the cancel to the target thread's registry node (no signal). */
-    return __pthread_post_cancel(thread);
+    ensure_cancel_handler();
+    /* Record the request on the target's registry node.  This survives even
+     * if the target is not currently in an interruptible syscall, and is what
+     * a DEFERRED cancellation point later reads. */
+    int rc = __pthread_post_cancel(thread);
+    if (rc != 0)
+        return rc;                      /* ESRCH: no such thread */
+    /* Nudge the target with a directed SIGCANCEL: wakes it out of an
+     * interruptible block (EINTR) and runs cancel_signal_handler() on its
+     * return to userspace.  Best-effort — if the thread already exited the
+     * post above still recorded the request for a joiner. */
+    syscall(SYS_THR_KILL, (long)thread, SIGCANCEL);
+    return 0;
 }

@@ -284,6 +284,21 @@ void *sys_mmap(void *addr, size_t length, int prot, int flags, int fd, uint64_t 
         return (void *)(intptr_t)(-EAGAIN);
 
     /*
+     * RLIMIT_AS: reject a mapping that would push the process address space
+     * over its soft limit.  Only active when a finite limit has been set
+     * (default RLIM_INFINITY, no enforcement); enforced against the map's
+     * current byte size so an explicit small RLIMIT_AS makes malloc()'s mmap
+     * fail with ENOMEM once the limit is reached, instead of consuming all of
+     * RAM (OPTS pthread_cond_init/4-1, pthread_mutex_init/5-1).  Internal
+     * growth (demand-paged stack, COW) does not pass through here, so it is
+     * unaffected.
+     */
+    if (p->rlim_as_cur != RLIM_INFINITY && p->vm_map &&
+        (uint64_t)p->vm_map->size + (uint64_t)aligned_length >
+            (uint64_t)p->rlim_as_cur)
+        return (void *)(intptr_t)(-ENOMEM);
+
+    /*
      * Validate the descriptor BEFORE touching the address space.  A MAP_FIXED
      * request must leave the caller's existing mappings untouched when it
      * fails (POSIX), so the fd validity (EBADF) and type (ENODEV) checks are

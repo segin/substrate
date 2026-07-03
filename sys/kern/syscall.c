@@ -1332,10 +1332,8 @@ static void thr_kill_visit(thread_t *t, void *arg) {
     struct thr_kill_ctx *c = (struct thr_kill_ctx *)arg;
     if (t->proc != c->target) return;
     if (t == c->skip) return;
-    if (c->sig != 0) {
-        t->sig_pending |= sigmask(c->sig);
-        signal_wake_thread(t, c->sig);
-    }
+    if (c->sig != 0)
+        signal_post_thread(t, c->sig);
 }
 
 int sys_thr_kill(long id, int sig) {
@@ -1350,8 +1348,7 @@ int sys_thr_kill(long id, int sig) {
     thread_t *t = thr_lookup_in_proc(id, current_process);
     if (!t) return -3;
     if (sig == 0) return 0;
-    t->sig_pending |= sigmask(sig);
-    signal_wake_thread(t, sig);
+    signal_post_thread(t, sig);
     return 0;
 }
 
@@ -1367,8 +1364,7 @@ int sys_thr_kill2(pid_t pid, long id, int sig) {
     thread_t *t = sched_get_thread((int)id);
     if (!t || t->proc != target_proc) return -3;
     if (sig == 0) return 0;
-    t->sig_pending |= sigmask(sig);
-    signal_wake_thread(t, sig);
+    signal_post_thread(t, sig);
     return 0;
 }
 
@@ -2739,6 +2735,9 @@ int sys_native_getrlimit(int resource, void *rlp) {
     if (resource == RLIMIT_MEMLOCK) {
         k.rlim_cur = current_process->rlim_memlock_cur;
         k.rlim_max = current_process->rlim_memlock_max;
+    } else if (resource == RLIMIT_AS) {
+        k.rlim_cur = current_process->rlim_as_cur;
+        k.rlim_max = current_process->rlim_as_max;
     } else {
         k.rlim_cur = RLIM_INFINITY;
         k.rlim_max = RLIM_INFINITY;
@@ -2755,6 +2754,12 @@ int sys_native_setrlimit(int resource, const void *rlp) {
     if (resource == RLIMIT_MEMLOCK) {
         current_process->rlim_memlock_cur = k.rlim_cur;
         current_process->rlim_memlock_max = k.rlim_max;
+    } else if (resource == RLIMIT_AS) {
+        /* Enforced against the process address-space size (vm_map->size) in
+         * sys_mmap so an explicit RLIMIT_AS makes malloc() fail with ENOMEM
+         * (OPTS pthread_cond_init/4-1, pthread_mutex_init/5-1). */
+        current_process->rlim_as_cur = k.rlim_cur;
+        current_process->rlim_as_max = k.rlim_max;
     }
     /* Other resources are accepted but not enforced (as before). */
     return 0;

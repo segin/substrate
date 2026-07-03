@@ -28,6 +28,16 @@ int pthread_barrier_init(pthread_barrier_t *b,
 int pthread_barrier_destroy(pthread_barrier_t *b) {
     if (!b)
         return EINVAL;
+    /* POSIX permits EBUSY when the barrier is still in use (a thread is
+     * blocked in pthread_barrier_wait).  Some threads have arrived and are
+     * waiting for the rest exactly when fewer than `count` slots remain, i.e.
+     * left != count (pthread_barrier_destroy/2-1). */
+    pthread_mutex_lock(&b->lock);
+    if (b->left != b->count) {
+        pthread_mutex_unlock(&b->lock);
+        return EBUSY;
+    }
+    pthread_mutex_unlock(&b->lock);
     pthread_cond_destroy(&b->cond);
     pthread_mutex_destroy(&b->lock);
     return 0;

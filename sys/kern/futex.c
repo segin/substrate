@@ -517,6 +517,26 @@ int sys_futex(int *uaddr, int op, int val, void *timeout, int *uaddr2, int val3)
                 }
             }
 
+            /*
+             * A signal already pending (unmasked) before we sleep must abort
+             * the wait now — otherwise we park forever.  This closes a
+             * signal-before-block race: a directed signal (thr_kill /
+             * pthread_cancel's SIGCANCEL) posted after the caller's user-space
+             * lock-word check but before this point sets the pending bit and
+             * runs signal_wake_thread() while we are NOT yet blocked, so no
+             * wake is delivered.  Returning EINTR here lets the syscall-return
+             * path run the handler (e.g. async cancel of a mutex/cond futex
+             * waiter).  Only pending UNMASKED signals trip this, so the normal
+             * (no-signal) fast path is unaffected.
+             */
+            if (current_thread->sig_pending & ~current_thread->sig_mask) {
+                sleepq_remove_thread(current_thread);
+                current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
+                if (timeout)
+                    current_thread->sleep_expiry = 0;
+                return -EINTR;
+            }
+
             sched_yield();
 
             current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;

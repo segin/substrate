@@ -402,15 +402,11 @@ int kern_clock_gettime(clockid_t clk_id, struct timespec *tp) {
     if (!tp) return -1;
 
     /*
-     * CPU-time clocks.  CLOCK_PROCESS_CPUTIME_ID is the total (user +
-     * system) CPU time consumed by the calling process, accumulated in
+     * CPU-time clocks (read-only).  CLOCK_PROCESS_CPUTIME_ID is the total
+     * (user + system) CPU time consumed by the calling process, accumulated in
      * per-process rusage by rusage_add_tick() on every timer tick.
-     * Substrate does not keep a separate per-thread CPU accounting, so
-     * CLOCK_THREAD_CPUTIME_ID reports the same process total (matching
-     * getrusage(RUSAGE_THREAD)).  These clocks are read-only.
      */
-    if (clk_id == CLOCK_PROCESS_CPUTIME_ID ||
-        clk_id == CLOCK_THREAD_CPUTIME_ID) {
+    if (clk_id == CLOCK_PROCESS_CPUTIME_ID) {
         if (!current_process) return -EINVAL;
         uint32_t fl = intr_disable();
         struct timeval u = current_process->rusage.ru_utime;
@@ -421,6 +417,23 @@ int kern_clock_gettime(clockid_t clk_id, struct timespec *tp) {
         if (usec >= 1000000) { sec += usec / 1000000; usec %= 1000000; }
         tp->tv_sec  = sec;
         tp->tv_nsec = usec * 1000;
+        return 0;
+    }
+
+    /*
+     * CLOCK_THREAD_CPUTIME_ID reports the CALLING THREAD's CPU time, charged
+     * per timer tick to current_thread->utime/stime (HZ ticks) by
+     * rusage_add_tick().  A freshly created thread's counters start at 0, so
+     * its clock reads ~0 immediately after creation (pthread_create/11-1).
+     */
+    if (clk_id == CLOCK_THREAD_CPUTIME_ID) {
+        if (!current_thread) return -EINVAL;
+        uint32_t fl = intr_disable();
+        uint32_t tticks = current_thread->cpu_utime + current_thread->cpu_stime;
+        intr_restore(fl);
+        uint64_t usec = (uint64_t)tticks * (uint64_t)USEC_PER_TICK;
+        tp->tv_sec  = (time_t)(usec / 1000000ULL);
+        tp->tv_nsec = (long)((usec % 1000000ULL) * 1000ULL);
         return 0;
     }
 
