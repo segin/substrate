@@ -470,21 +470,64 @@ int clock_settime(clockid_t clk_id, const struct timespec *tp) {
 
 int clock_nanosleep(clockid_t clk_id, int flags,
                     const struct timespec *req, struct timespec *rem) {
-    (void)clk_id;
-    if (!req) { errno = EINVAL; return EINVAL; }
-    if (flags & TIMER_ABSTIME) {
-        /* Convert absolute → relative against current time. */
-        struct timespec now;
-        if (clock_gettime(clk_id, &now) != 0) return errno;
-        struct timespec relreq = {
-            .tv_sec  = req->tv_sec  - now.tv_sec,
-            .tv_nsec = req->tv_nsec - now.tv_nsec,
-        };
-        if (relreq.tv_nsec < 0) { relreq.tv_sec--; relreq.tv_nsec += 1000000000; }
-        if (relreq.tv_sec  < 0) return 0;
-        return nanosleep(&relreq, rem) == 0 ? 0 : errno;
+    /* POSIX: on error clock_nanosleep RETURNS the error number (errno is not
+     * set) and returns 0 on success. */
+    if (!req)
+        return EINVAL;
+    if (req->tv_sec < 0 || req->tv_nsec < 0 || req->tv_nsec >= 1000000000L)
+        return EINVAL;
+    /* Only the wall-clock and monotonic clocks are sleepable here; an unknown
+     * (or CPU-time) clock id is EINVAL (OPTS clock_nanosleep/13-1). */
+    if (clk_id != CLOCK_REALTIME && clk_id != CLOCK_MONOTONIC)
+        return EINVAL;
+    /* TIMER_ABSTIME is the only defined flag. */
+    if (flags & ~TIMER_ABSTIME)
+        return EINVAL;
+
+    if (!(flags & TIMER_ABSTIME)) {
+        /* Relative sleep: a plain interval, immune to clock_settime(2). */
+        return nanosleep(req, rem) == 0 ? 0 : errno;
     }
-    return nanosleep(req, rem) == 0 ? 0 : errno;
+
+    /* Absolute deadline.  rem is unused for the absolute form (POSIX). */
+    if (clk_id == CLOCK_MONOTONIC) {
+        /* CLOCK_MONOTONIC cannot be stepped, so one abs->rel conversion is
+         * exact. */
+        struct timespec now, rel;
+        if (clock_gettime(CLOCK_MONOTONIC, &now) != 0)
+            return errno;
+        rel.tv_sec  = req->tv_sec  - now.tv_sec;
+        rel.tv_nsec = req->tv_nsec - now.tv_nsec;
+        if (rel.tv_nsec < 0) { rel.tv_sec--; rel.tv_nsec += 1000000000L; }
+        if (rel.tv_sec < 0)
+            return 0;                       /* deadline already past */
+        return nanosleep(&rel, NULL) == 0 ? 0 : errno;
+    }
+
+    /*
+     * CLOCK_REALTIME absolute: the target is a wall-clock instant that
+     * clock_settime(2) may move while we sleep, and POSIX requires the sleep
+     * to track such a change (a step forward wakes us promptly; a step back
+     * extends the wait).  Re-derive the remaining interval from the live clock
+     * each pass and cap every chunk so a step is noticed within ~0.5 s.
+     * (OPTS clock_settime/7-1, 7-2.)
+     */
+    for (;;) {
+        struct timespec now, rel;
+        if (clock_gettime(CLOCK_REALTIME, &now) != 0)
+            return errno;
+        rel.tv_sec  = req->tv_sec  - now.tv_sec;
+        rel.tv_nsec = req->tv_nsec - now.tv_nsec;
+        if (rel.tv_nsec < 0) { rel.tv_sec--; rel.tv_nsec += 1000000000L; }
+        if (rel.tv_sec < 0 || (rel.tv_sec == 0 && rel.tv_nsec == 0))
+            return 0;                       /* deadline reached */
+        if (rel.tv_sec > 0 || rel.tv_nsec > 500000000L) {
+            rel.tv_sec  = 0;
+            rel.tv_nsec = 500000000L;       /* poll cap */
+        }
+        if (nanosleep(&rel, NULL) != 0)
+            return errno;                   /* EINTR (abs form: rem unused) */
+    }
 }
 
 int clock_getcpuclockid(pid_t pid, clockid_t *clock_id) {

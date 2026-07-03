@@ -577,7 +577,7 @@ static void ptimer_gettime_locked(process_t *p, struct posix_timer *t,
     memset(out, 0, sizeof(*out));
     ns_to_timespec(t->interval_ns, &out->it_interval);
     if (t->armed) {
-        uint64_t now = ptimer_now_ns(t->clockid);
+        uint64_t now = ptimer_now_ns(t->abs_real ? CLOCK_REALTIME : CLOCK_MONOTONIC);
         uint64_t rem = (t->next_ns > now) ? (t->next_ns - now) : 0;
         ns_to_timespec(rem, &out->it_value);
     }
@@ -686,19 +686,31 @@ int kern_timer_settime(int id, int flags, const struct itimerspec *nv,
         t->armed = 0;
         t->next_ns = 0;
         t->interval_ns = 0;
+        t->abs_real = 0;
         if (was_armed && current_process->n_ptimers_armed > 0) {
             current_process->n_ptimers_armed--;
         }
     } else {
-        uint64_t now = ptimer_now_ns(t->clockid);
+        /*
+         * Only an ABSOLUTE CLOCK_REALTIME timer tracks the wall clock and so
+         * must follow a clock_settime(2) step (OPTS clock_settime/4-1).  A
+         * RELATIVE arming — and every CLOCK_MONOTONIC timer — measures an
+         * interval and must be immune to clock steps (OPTS clock_settime/5-1),
+         * so anchor it to the monotonic base.  next_ns is thereafter always in
+         * the domain named by t->abs_real.
+         */
+        int abs_real = (t->clockid == CLOCK_REALTIME) && (flags & TIMER_ABSTIME);
+        uint64_t now = ptimer_now_ns(abs_real ? CLOCK_REALTIME : CLOCK_MONOTONIC);
         if (flags & TIMER_ABSTIME) {
-            /* Absolute deadline; a time already in the past fires ASAP. */
+            /* Absolute deadline in the timer's own clock domain; a time
+             * already in the past fires ASAP. */
             t->next_ns = (value_ns > now) ? value_ns : now;
         } else {
             t->next_ns = (now > UINT64_MAX - value_ns) ? UINT64_MAX
                                                        : now + value_ns;
         }
         t->interval_ns = interval_ns;
+        t->abs_real = (uint8_t)abs_real;
         if (!was_armed) {
             current_process->n_ptimers_armed++;
         }
@@ -819,7 +831,7 @@ void proc_ptimers_fire(process_t *p) {
         if (!t->used || !t->armed) {
             continue;
         }
-        uint64_t now = ptimer_now_ns(t->clockid);
+        uint64_t now = ptimer_now_ns(t->abs_real ? CLOCK_REALTIME : CLOCK_MONOTONIC);
         if (now < t->next_ns) {
             continue;
         }

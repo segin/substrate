@@ -256,6 +256,13 @@ void psignal(struct process *p, int sig);
  * SA_SIGINFO SIGCHLD handler sees the correct code (POSIX). */
 void sigchld_notify(struct process *parent, int code, int cpid,
                     unsigned int cuid, int status);
+
+/* POSIX interruption policy for a self-restarting interruptible sleep
+ * (nanosleep/clock_nanosleep): call after an early wake with signals pending.
+ * Returns nonzero iff the sleep must abort with EINTR (a caught or terminating
+ * signal is pending); returns 0 when the caller should resume sleeping (any
+ * pending job-control stop is honoured in place, ignored signals discarded). */
+int signal_sleep_interrupted(void);
 void signal_wake_thread(struct thread *t, int sig);
 void pgsignal(int pgrp, int sig);
 void trapsignal(struct process *p, int sig, int code);

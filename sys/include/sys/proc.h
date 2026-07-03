@@ -41,6 +41,9 @@ struct posix_timer {
     uint8_t  armed;           /* it_value != 0 (counting toward next_ns)   */
     uint8_t  notify;          /* SIGEV_SIGNAL / SIGEV_NONE                 */
     uint8_t  sig_outstanding; /* a signal was generated, not yet accepted  */
+    uint8_t  abs_real;        /* next_ns is an absolute CLOCK_REALTIME time
+                               * (follows clock_settime); else it is in the
+                               * clock-step-immune monotonic base           */
     int      signo;           /* signal delivered on expiry (SIGEV_SIGNAL) */
     int      clockid;         /* CLOCK_REALTIME / CLOCK_MONOTONIC          */
     union sigval value;       /* sigev_value (delivered as SI_TIMER value) */

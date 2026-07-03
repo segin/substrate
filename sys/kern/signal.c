@@ -810,6 +810,86 @@ int kern_sigtimedwait(const uint32_t *set, siginfo_t *info,
 }
 
 /*
+ * signal_sleep_interrupted - POSIX interruption policy for a self-restarting
+ * interruptible sleep (nanosleep/clock_nanosleep).
+ *
+ * The caller was woken early from an interruptible sleep with one or more
+ * signals pending.  Per POSIX, such a sleep is interrupted only by a signal
+ * that is caught (a handler runs) or whose default action terminates the
+ * process.  A job-control stop must suspend the sleeper in place and let the
+ * sleep resume when it is continued; a signal that will simply be ignored is
+ * not an interruption at all.
+ *
+ * Returns nonzero iff the sleep must abort with EINTR (a caught or terminating
+ * signal is pending — left in place so signal_handle_pending() delivers it on
+ * the syscall-return path).  Returns 0 when the caller should resume sleeping:
+ * a pending stop has been honoured here (the thread blocks until SIGCONT/kill),
+ * and any pending ignore-disposition signal has been discarded so it will not
+ * immediately re-wake the caller's retry loop.
+ */
+int signal_sleep_interrupted(void) {
+    if (!current_thread || !current_process) {
+        return 1;
+    }
+    uint32_t pending = current_thread->sig_pending & ~current_thread->sig_mask;
+    if (pending == 0) {
+        return 0;   /* spurious wake (e.g. lost-wakeup fallback): resume */
+    }
+
+    int stop_sig = 0;
+    for (int i = 0; i < NSIG; i++) {
+        if (!(pending & (1u << i))) {
+            continue;
+        }
+        int sig = i + 1;
+        if (sig == SIGKILL) {
+            return 1;   /* terminates */
+        }
+        sig_t h = current_process->sig_actions[sig - 1].sa_handler;
+        if (h != SIG_DFL && h != SIG_IGN) {
+            return 1;   /* caught: a handler will run -> EINTR */
+        }
+        if (h == SIG_IGN || (sigprop[sig] & PROP_IGNORE)) {
+            /* Ignored disposition: discard so the caller's retry loop can
+             * re-block instead of spinning on a permanently-pending bit. */
+            __sync_fetch_and_and(&current_thread->sig_pending, ~sigmask(sig));
+            continue;
+        }
+        if (sigprop[sig] & PROP_STOP) {
+            if (!stop_sig) {
+                stop_sig = sig;
+            }
+            continue;
+        }
+        return 1;       /* default action terminates the process */
+    }
+
+    if (stop_sig) {
+        /* An orphaned process group discards terminal-generated stops
+         * (TSTP/TTIN/TTOU) so it cannot wedge itself unkillable; an explicit
+         * SIGSTOP always stops.  Mirrors signal_handle_pending(). */
+        extern int pgrp_is_orphaned(struct pgrp *pgrp);
+        __sync_fetch_and_and(&current_thread->sig_pending, ~sigmask(stop_sig));
+        if (stop_sig != SIGSTOP && current_process->p_pgrp &&
+            pgrp_is_orphaned(current_process->p_pgrp)) {
+            return 0;
+        }
+        current_process->p_xsig = (uint8_t)stop_sig;
+        signal_stop_process_threads(current_process, "nanosleep");
+        if (current_process->p_parent &&
+            !(current_process->p_parent->sig_actions[SIGCHLD - 1].sa_flags & SA_NOCLDSTOP)) {
+            psignal(current_process->p_parent, SIGCHLD);
+        }
+        if (current_process->p_parent) {
+            sched_wakeup(&current_process->p_parent->p_children);
+        }
+        sched_yield();               /* blocks until SIGCONT sets us READY */
+        signal_die_if_killed();      /* a kill that landed while stopped */
+    }
+    return 0;
+}
+
+/*
  * psignal_info - Send signal to a process, carrying siginfo (si_code/value).
  *
  * The workhorse behind both psignal() (si_code SI_USER, no payload) and the

@@ -3379,36 +3379,60 @@ int sys_nanosleep(void *req, void *rem) {
 
     uint64_t now = get_ticks();
     uint64_t deadline;
-    if (ticks > UINT64_MAX - now) {
+    /*
+     * +1 tick: `now` is already part-way through the current tick, so waking
+     * at now+ticks would count that partial tick as a whole one and sleep for
+     * LESS than requested.  POSIX requires nanosleep to sleep for AT LEAST the
+     * requested interval, so target one extra tick boundary (over-sleep is
+     * bounded by a single tick).  (OPTS clock_nanosleep/1-1, timer_gettime/1-3.)
+     */
+    if (ticks > UINT64_MAX - now - 1) {
         deadline = UINT64_MAX;
     } else {
-        deadline = now + ticks;
+        deadline = now + ticks + 1;
     }
 
-    current_thread->flags |= THREAD_F_INTERRUPTIBLE;
-    int ret = sched_sleep_until(&current_thread->sig_pending, deadline);
-    current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
+    for (;;) {
+        current_thread->flags |= THREAD_F_INTERRUPTIBLE;
+        int ret = sched_sleep_until(&current_thread->sig_pending, deadline);
+        current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
 
-    if (ret == -ETIMEDOUT) {
-        return 0;
-    }
-
-    // Interrupted by signal (ret == 0)
-    if (rem) {
-        now = get_ticks();
-        if (now < deadline) {
-             uint64_t diff = deadline - now;
-             struct timespec remaining;
-             remaining.tv_sec = diff / hz;
-             remaining.tv_nsec = ((diff % hz) * 1000000000) / hz;
-             if (copyout(&remaining, rem, sizeof(struct timespec)) != 0) return -EFAULT;
-        } else {
-             // Deadline passed but we were woken up? Treat as success.
-             return 0;
+        if (ret == -ETIMEDOUT) {
+            return 0;   /* full interval elapsed */
         }
-    }
 
-    return -EINTR;
+        now = get_ticks();
+        if (now >= deadline) {
+            return 0;   /* woken at/after the deadline: the sleep is complete */
+        }
+
+        /*
+         * Woken early with a signal pending.  Only a caught signal or one
+         * whose default action terminates the process actually interrupts a
+         * sleep (POSIX); a job-control stop is honoured in place and the
+         * sleep then resumes, and a to-be-ignored signal is not an
+         * interruption at all.  signal_sleep_interrupted() does that
+         * bookkeeping and returns nonzero only for a real interruption.
+         * (OPTS nanosleep/3-2, clock_nanosleep/1-5.)
+         */
+        if (signal_sleep_interrupted()) {
+            if (rem) {
+                now = get_ticks();
+                if (now < deadline) {
+                    uint64_t diff = deadline - now;
+                    struct timespec remaining;
+                    remaining.tv_sec = diff / hz;
+                    remaining.tv_nsec = ((diff % hz) * 1000000000) / hz;
+                    if (copyout(&remaining, rem, sizeof(struct timespec)) != 0)
+                        return -EFAULT;
+                } else {
+                    return 0;
+                }
+            }
+            return -EINTR;
+        }
+        /* Not a real interruption — resume sleeping toward the same deadline. */
+    }
 }
 
 // Current working directory per-process
