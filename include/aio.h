@@ -28,9 +28,10 @@ extern "C" {
 
 /*
  * Maximum number of operations a single lio_listio() call may submit.  POSIX
- * only requires {_POSIX_AIO_LISTIO_MAX} (== 2); substrate's worker-pool AIO
- * has no hard limit but bounds one batch to a sane value (matching FreeBSD).
- * lio_listio() fails with EINVAL when nent is negative or exceeds this.
+ * only requires {_POSIX_AIO_LISTIO_MAX} (== 2); substrate bounds one batch to
+ * a sane value (matching FreeBSD).  lio_listio() fails with EINVAL when nent
+ * is negative or exceeds this.  The total number of concurrently outstanding
+ * asynchronous operations is separately bounded by {AIO_MAX} (<limits.h>).
  */
 #define AIO_LISTIO_MAX 16
 

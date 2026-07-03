@@ -60,17 +60,33 @@ is set.
 .SH ERRORS
 .TP
 .B EAGAIN
-Insufficient resources to queue the request.
+Insufficient resources to queue the request, or the number of outstanding
+asynchronous I/O operations would exceed
+.BR {AIO_MAX} ,
+the limit reported by
+.BR sysconf (_SC_AIO_MAX).
+An operation is outstanding from submission until its status is retrieved
+with
+.BR aio_return (3).
 .TP
 .B EINVAL
 .I aiocbp
-is NULL, or
+is NULL;
+.I aio_reqprio
+or
+.I aio_offset
+is negative; or
 .RB ( aio_fsync )
 .I op
 is neither
 .B O_SYNC
 nor
 .BR O_DSYNC .
+When prioritized I/O is supported
+.RB ( sysconf (_SC_PRIORITIZED_IO)),
+a lower
+.I aio_reqprio
+is a higher priority and its request is serviced first.
 .PP
 Errors from the underlying
 .BR pwrite (2)
