@@ -296,10 +296,22 @@ static thread_t *sleepq_wake_one_internal(void *chan, int type, int pid) {
 
     t->next = NULL;
     t->wait_chan = NULL;
-    /* A SIGTSTP'd thread can still be on a sleepq if signal_stop ran
-     * after it queued.  Don't resurrect it to READY here — its state
-     * stays THREAD_STOPPED until SIGCONT.  Same in every wake path. */
-    if (t->state != THREAD_STOPPED) {
+    /* Dequeue-but-don't-resurrect guards.  A wake unlinks the waiter from
+     * the queue unconditionally, but only flips it back to READY if it was
+     * genuinely sleeping:
+     *   - THREAD_STOPPED: a SIGTSTP raced the enqueue; it stays stopped
+     *     until SIGCONT.
+     *   - THREAD_ZOMBIE: the waiter's process is exiting.  A thread killed
+     *     while parked in an interruptible sleepq wait (e.g. a looping
+     *     FUTEX_WAIT, or a pipe read) can re-block on a sleepq during its
+     *     own teardown and then be marked THREAD_ZOMBIE by proc_exit while
+     *     still linked here.  Resurrecting a dead thread to READY makes the
+     *     scheduler pick it, arch_switch_to returns into proc_exit()'s
+     *     post-sched_yield while(1), and — with preemption disabled there —
+     *     the CPU busy-spins forever.  Under a storm of concurrent SIGKILL
+     *     reaps (a busy long-running system) this wedges the whole guest.
+     *     Same guard in every wake path below. */
+    if (t->state != THREAD_STOPPED && t->state != THREAD_ZOMBIE) {
         t->state = THREAD_READY;
     }
 
@@ -347,7 +359,7 @@ static int sleepq_wake_all_internal(void *chan, int type, int pid) {
         thread_t *next = t->next;
         t->next = NULL;
         t->wait_chan = NULL;
-        if (t->state != THREAD_STOPPED) {
+        if (t->state != THREAD_STOPPED && t->state != THREAD_ZOMBIE) {
             t->state = THREAD_READY;
         }
         woken++;
@@ -407,7 +419,7 @@ static int sleepq_wake_n_internal(void *chan, int n, int type, int pid) {
 
         t->next = NULL;
         t->wait_chan = NULL;
-        if (t->state != THREAD_STOPPED) {
+        if (t->state != THREAD_STOPPED && t->state != THREAD_ZOMBIE) {
             t->state = THREAD_READY;
         }
         woken++;
@@ -468,7 +480,7 @@ static int sleepq_wake_bitset_internal(void *chan, int n, int type, int pid,
 
             t->next = NULL;
             t->wait_chan = NULL;
-            if (t->state != THREAD_STOPPED)
+            if (t->state != THREAD_STOPPED && t->state != THREAD_ZOMBIE)
                 t->state = THREAD_READY;
             woken++;
             /* prev unchanged -- t was removed */
@@ -551,7 +563,7 @@ static int sleepq_requeue_internal(void *src_chan, void *dst_chan, int wake_n, i
             
             t->next = NULL;
             t->wait_chan = NULL;
-            if (t->state != THREAD_STOPPED) {
+            if (t->state != THREAD_STOPPED && t->state != THREAD_ZOMBIE) {
                 t->state = THREAD_READY;
             }
             woken_count++;
