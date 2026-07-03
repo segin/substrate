@@ -313,6 +313,8 @@ static void proc_resource_limits_init(process_t *proc) {
     /* No memlock limit and no mlockall() by default. */
     proc->rlim_memlock_cur = RLIM_INFINITY;
     proc->rlim_memlock_max = RLIM_INFINITY;
+    proc->rlim_as_cur      = RLIM_INFINITY;
+    proc->rlim_as_max      = RLIM_INFINITY;
     proc->mlockall_flags   = 0;
 }
 
@@ -536,6 +538,8 @@ static int proc_fork_common(process_t *parent, void *stack, int is_vfork) {
      * the child starts with no mlockall() in effect. */
     child_proc->rlim_memlock_cur = parent->rlim_memlock_cur;
     child_proc->rlim_memlock_max = parent->rlim_memlock_max;
+    child_proc->rlim_as_cur      = parent->rlim_as_cur;
+    child_proc->rlim_as_max      = parent->rlim_as_max;
     child_proc->mlockall_flags   = 0;
     child_proc->umask = parent->umask;
     /* Supplementary group list inherits across fork. */

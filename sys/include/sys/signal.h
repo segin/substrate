@@ -264,9 +264,17 @@ void sigchld_notify(struct process *parent, int code, int cpid,
  * pending job-control stop is honoured in place, ignored signals discarded). */
 int signal_sleep_interrupted(void);
 void signal_wake_thread(struct thread *t, int sig);
-/* Queue one thread-directed real-time-signal instance (thr_kill/pthread_kill);
- * no-op for standard signals.  Returns 0 or -EAGAIN if the RT queue is full. */
+/* Queue one process-wide real-time-signal instance; no-op for standard signals.
+ * Returns 0 or -EAGAIN if the RT queue is full.  (Retained for ksyms/ABI; the
+ * thread-directed thr_kill/pthread_kill path now uses signal_post_thread, which
+ * sets the pending bit on the TARGET thread only.) */
 int signal_rt_post(struct process *p, int sig);
+/* Post `sig` to a single thread (thread-directed: pthread_kill/thr_kill), then
+ * wake it if it is interruptibly blocked.  Handles real-time signals correctly:
+ * a bare pending bit with no queued instance is dropped by the delivery path,
+ * so an RT signal is enqueued (one instance, pending bit on `t` alone) rather
+ * than merely OR'd into t->sig_pending. */
+void signal_post_thread(struct thread *t, int sig);
 void pgsignal(int pgrp, int sig);
 void trapsignal(struct process *p, int sig, int code);
 void sigexit(struct process *p, int sig);

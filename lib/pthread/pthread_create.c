@@ -71,6 +71,26 @@ static void ti_unlink_locked(struct pthread_info *ti) {
     }
 }
 
+/*
+ * Ensure the CURRENT thread has a registry node.  The initial (main) thread —
+ * and any thread not created through pthread_create — otherwise has none, so a
+ * pthread_setschedparam(pthread_self(), ...) would silently vanish and a thread
+ * created with PTHREAD_INHERIT_SCHED could not read the creator's parameters.
+ * Caller holds thread_table_lock.  Returns NULL only on OOM.
+ */
+static struct pthread_info *ti_ensure_self_locked(void) {
+    pthread_t self = pthread_self();
+    struct pthread_info *ti = ti_find_locked(self);
+    if (ti) return ti;
+    ti = calloc(1, sizeof(*ti));
+    if (!ti) return NULL;
+    ti->tid = self;
+    ti->sched_policy = SCHED_OTHER;   /* POSIX default until set */
+    ti->next = thread_list;
+    thread_list = ti;
+    return ti;
+}
+
 struct trampoline_args {
     void *(*start_routine)(void *);
     void *arg;
@@ -137,6 +157,21 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr,
     struct pthread_info *ti = calloc(1, sizeof(*ti));
     if (!ti) return EAGAIN;
     ti->detached = detached;
+
+    /* Scheduling inheritance: unless the attr requests PTHREAD_EXPLICIT_SCHED,
+     * a new thread takes the creating thread's scheduling policy and priority
+     * (PTHREAD_INHERIT_SCHED, the default).  substrate's scheduler does not act
+     * on these, but pthread_getschedparam must report them for the created
+     * thread (POSIX round-trip; pthread_attr_setinheritsched/2-3, 2-4). */
+    int inheritsched = PTHREAD_INHERIT_SCHED;
+    if (attr) pthread_attr_getinheritsched(attr, &inheritsched);
+    if (inheritsched == PTHREAD_INHERIT_SCHED) {
+        int pol;
+        struct sched_param sp;
+        pthread_getschedparam(pthread_self(), &pol, &sp);
+        ti->sched_policy   = pol;
+        ti->sched_priority = sp.sched_priority;
+    }
 
     ti->stack_size = 64 * 1024;
     ti->stack = malloc(ti->stack_size);
@@ -316,7 +351,12 @@ int pthread_setschedparam(pthread_t thread, int policy,
     /* Validation passed before any store, so a rejected request leaves the
      * thread's policy/priority unchanged (POSIX). */
     TT_LOCK();
-    struct pthread_info *ti = ti_find_locked(thread);
+    /* Setting our own parameters must persist even for the main thread, which
+     * has no node until now — otherwise pthread_getschedparam and the
+     * INHERIT_SCHED path in pthread_create would never see them. */
+    struct pthread_info *ti = (thread == pthread_self())
+                                  ? ti_ensure_self_locked()
+                                  : ti_find_locked(thread);
     if (ti) { ti->sched_policy = policy; ti->sched_priority = param->sched_priority; }
     TT_UNLOCK();
     return 0;
@@ -325,7 +365,9 @@ int pthread_setschedparam(pthread_t thread, int policy,
 int pthread_setschedprio(pthread_t thread, int prio) {
     int rc = ESRCH;
     TT_LOCK();
-    struct pthread_info *ti = ti_find_locked(thread);
+    struct pthread_info *ti = (thread == pthread_self())
+                                  ? ti_ensure_self_locked()
+                                  : ti_find_locked(thread);
     if (ti)
         rc = sched_prio_ok(ti->sched_policy, prio)
                  ? (ti->sched_priority = prio, 0)

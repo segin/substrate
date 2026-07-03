@@ -242,6 +242,11 @@ thread_t *sched_alloc_thread(process_t *proc) {
     thread->sig_on_stack = 0;
     memset(&thread->sig_alt_stack, 0, sizeof(thread->sig_alt_stack));
     thread->in_syscall = 0;
+    /* Per-thread CPU-time accounting (CLOCK_THREAD_CPUTIME_ID) starts at 0:
+     * a new thread's CPU clock must read ~0 immediately after creation
+     * (pthread_create/11-1). */
+    thread->cpu_utime = 0;
+    thread->cpu_stime = 0;
 
     spinlock_acquire(&tid_lock);
     tid = sched_alloc_tid_locked(proc);

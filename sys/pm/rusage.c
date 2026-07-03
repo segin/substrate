@@ -47,6 +47,19 @@ void rusage_add_tick(process_t *p, int is_usermode)
         tv->tv_sec++;
         tv->tv_usec -= 1000000;
     }
+
+    /*
+     * Per-thread CPU accounting (CLOCK_THREAD_CPUTIME_ID): charge the same tick
+     * to the thread that was running, counted in HZ ticks.  This runs in the
+     * timer IRQ with interrupts disabled, so current_thread is the thread the
+     * tick interrupted; kern_clock_gettime reads utime+stime under intr_disable.
+     */
+    if (current_thread) {
+        if (is_usermode)
+            current_thread->cpu_utime++;
+        else
+            current_thread->cpu_stime++;
+    }
 }
 
 /*

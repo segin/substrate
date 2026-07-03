@@ -80,16 +80,17 @@ static int rtsig_enqueue(process_t *p, int sig, int code, union sigval val) {
 }
 
 /*
- * signal_rt_post - queue one thread/pthread-directed real-time signal.
+ * signal_rt_post - queue one process-wide real-time signal.
  *
- * thr_kill(2)/pthread_kill(3) of a real-time signal must enqueue a distinct
- * instance on the target process's RT queue, exactly as the process-directed
- * kill()/psignal_info() path does (POSIX: RT signals queue however they are
- * generated).  Standard signals coalesce and need no queue, so this is a
- * no-op for them, as is a signo already owning a pending timer notification.
- * rtsig_enqueue() also sets the per-thread pending bits under rtsig_lock, so
- * the caller's own `sig_pending |= sigmask(sig)` afterwards is idempotent.
- * Returns 0 on success/no-op, -EAGAIN if the RT queue is full.
+ * Enqueues a distinct instance on the process's RT queue, exactly as the
+ * process-directed kill()/psignal_info() path does (POSIX: RT signals queue
+ * however they are generated).  Standard signals coalesce and need no queue,
+ * so this is a no-op for them, as is a signo already owning a pending timer
+ * notification.  rtsig_enqueue() sets the per-thread pending bits under
+ * rtsig_lock.  Returns 0 on success/no-op, -EAGAIN if the RT queue is full.
+ * (Retained for ksyms/ABI; the thread-directed thr_kill/pthread_kill path uses
+ * signal_post_thread below, which sets the pending bit on the target thread
+ * only via rtsig_enqueue_thread.)
  */
 int signal_rt_post(process_t *p, int sig) {
     if (!p || !SIG_IS_RT(sig))
@@ -98,6 +99,43 @@ int signal_rt_post(process_t *p, int sig) {
         return 0;
     union sigval v = { .sival_int = 0 };
     return rtsig_enqueue(p, sig, SI_USER, v);
+}
+
+/*
+ * rtsig_enqueue_thread - thread-directed real-time signal enqueue.
+ *
+ * Identical to rtsig_enqueue() except the pending bit is set on exactly ONE
+ * thread (the pthread_kill/thr_kill target) rather than every thread of the
+ * process.  Used so a directed RT signal has a queued instance for the target
+ * thread's signal_handle_pending() RT path to dequeue — a bare pending bit
+ * with no queued instance is otherwise dropped (absorbed as a stale bit).
+ */
+static int rtsig_enqueue_thread(thread_t *t, int sig, int code, union sigval val) {
+    process_t *p = t->proc;
+    int ret = -EAGAIN;
+    int32_t  s_pid = current_process ? (int32_t)current_process->pid : 0;
+    uint32_t s_uid = current_process ? current_process->uid : 0;
+    unsigned long fl = spinlock_acquire_irq(&p->rtsig_lock);
+    if (p->rtsig_count < RTSIG_QUEUE_MAX) {
+        for (int i = 0; i < RTSIG_QUEUE_MAX; i++) {
+            if (p->rtsig_q[i].rt_signo == 0) {
+                p->rtsig_q[i].rt_signo = (uint16_t)sig;
+                p->rtsig_q[i].rt_code  = (int16_t)code;
+                p->rtsig_q[i].rt_seq   = ++p->rtsig_seq;
+                p->rtsig_q[i].rt_value = val;
+                p->rtsig_q[i].rt_pid   = s_pid;
+                p->rtsig_q[i].rt_uid   = s_uid;
+                p->rtsig_count++;
+                ret = 0;
+                /* Set the pending bit on the target thread only, under the
+                 * same lock (serializes against rtsig_dequeue's clear). */
+                __sync_fetch_and_or(&t->sig_pending, sigmask(sig));
+                break;
+            }
+        }
+    }
+    spinlock_release_irq(&p->rtsig_lock, fl);
+    return ret;
 }
 
 /*
@@ -272,6 +310,31 @@ void signal_wake_thread(thread_t *t, int sig) {
         (!(t->sig_mask & m) || (t->sig_wait_mask & m))) {
         signal_interrupt_thread(t);
     }
+}
+
+/*
+ * signal_post_thread - post a thread-directed signal (pthread_kill/thr_kill)
+ * and wake the target if it is interruptibly blocked.
+ *
+ * For a standard signal, OR the bit into the target's sig_pending as before.
+ * For a REAL-TIME signal, enqueue one instance and set the bit on the target
+ * alone: signal_handle_pending()'s RT path dequeues a queued instance and drops
+ * a bit with nothing queued, so a bare OR would make a directed RT signal
+ * (e.g. pthread_kill(t, SIGRTMIN)) silently vanish instead of running the
+ * target's handler.  A timer notification for this signo (sig_timer_pend) is
+ * delivered through the plain-bit path, matching signal_handle_pending().
+ */
+void signal_post_thread(thread_t *t, int sig) {
+    if (!t || sig <= 0 || sig >= NSIG)
+        return;
+    if (SIG_IS_RT(sig) &&
+        t->proc && !(t->proc->sig_timer_pend & sigmask(sig))) {
+        union sigval v = { .sival_int = 0 };
+        rtsig_enqueue_thread(t, sig, SI_USER, v);
+    } else {
+        __sync_fetch_and_or(&t->sig_pending, sigmask(sig));
+    }
+    signal_wake_thread(t, sig);
 }
 
 static void signal_stop_process_threads(process_t *p, const char *reason) {
