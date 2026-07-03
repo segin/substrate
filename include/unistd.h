@@ -57,6 +57,17 @@ extern "C" {
 #define _POSIX_MEMORY_PROTECTION 200809L
 #define _POSIX_MEMLOCK           200809L
 
+/* POSIX sporadic-server scheduling policy (SCHED_SPORADIC + the
+ * sched_ss_* sched_param members).  Substrate accepts and validates the
+ * policy and its parameters at the sched_setscheduler(2)/sched_setparam(2)
+ * API level (sys/kern/sched_posix.c); the substrate scheduler runs a
+ * SCHED_SPORADIC thread like SCHED_FIFO at its sched_priority (no runtime
+ * budget replenishment).  OPTS gates its whole SS test group on
+ * "defined(_POSIX_SPORADIC_SERVER) && _POSIX_SPORADIC_SERVER != -1", so
+ * leaving these undefined compiles those tests out to PTS_UNSUPPORTED. */
+#define _POSIX_SPORADIC_SERVER          200809L
+#define _POSIX_THREAD_SPORADIC_SERVER   200809L
+
 /* POSIX-2017 §11.1.7: a c_cc[] slot set to _POSIX_VDISABLE disables
  * the associated special-character function.  Substrate matches the
  * Linux/glibc value of 0 (0xff is the BSD convention).  */
