@@ -8,9 +8,27 @@
 #include <sys/kern_syscalls.h>
 
 
+/* Map a substrate filesystem (by its native f_fstypename) to the Linux
+ * superblock magic that a Linux program expects in statfs.f_type.  Substrate's
+ * native f_type is an internal value a Linux binary would not recognise, so
+ * translate to the well-known Linux magics; fall back to the native value (then
+ * ext2's magic) when the type is unknown.  Grafted from PR #1301 and shared by
+ * both the statfs and statfs64 fills. */
+static uint32_t linux_fs_magic(const char *fstypename, uint32_t native_type) {
+    if (fstypename) {
+        if (strncmp(fstypename, "ext2", 4) == 0)   return 0xEF53;     /* EXT2_SUPER_MAGIC */
+        if (strncmp(fstypename, "fat", 3) == 0)     return 0x4d44;     /* MSDOS_SUPER_MAGIC */
+        if (strncmp(fstypename, "procfs", 6) == 0)  return 0x9fa0;     /* PROC_SUPER_MAGIC  */
+        if (strncmp(fstypename, "sysfs", 5) == 0)   return 0x62656572; /* SYSFS_MAGIC       */
+        if (strncmp(fstypename, "devfs", 5) == 0)   return 0x1373;     /* DEVFS_SUPER_MAGIC */
+        if (strncmp(fstypename, "tmpfs", 5) == 0)   return 0x01021994; /* TMPFS_MAGIC       */
+    }
+    return native_type ? native_type : 0xEF53;
+}
+
 static void linux_fill_statfs(struct linux_statfs *kbuf, const struct statfs *native) {
     memset(kbuf, 0, sizeof(*kbuf));
-    kbuf->f_type = native->f_type;
+    kbuf->f_type = linux_fs_magic(native->f_fstypename, native->f_type);
     kbuf->f_bsize = native->f_bsize;
     kbuf->f_blocks = (uint32_t)(native->f_blocks & 0xFFFFFFFF);
     kbuf->f_bfree = (uint32_t)(native->f_bfree & 0xFFFFFFFF);
@@ -26,7 +44,7 @@ static void linux_fill_statfs(struct linux_statfs *kbuf, const struct statfs *na
 
 static void linux_fill_statfs64(struct linux_statfs64 *kbuf, const struct statfs *native) {
     memset(kbuf, 0, sizeof(*kbuf));
-    kbuf->f_type = native->f_type;
+    kbuf->f_type = linux_fs_magic(native->f_fstypename, native->f_type);
     kbuf->f_bsize = native->f_bsize;
     kbuf->f_blocks = native->f_blocks;
     kbuf->f_bfree = native->f_bfree;
