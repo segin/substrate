@@ -68,6 +68,23 @@ extern "C" {
 #define _POSIX_SPORADIC_SERVER          200809L
 #define _POSIX_THREAD_SPORADIC_SERVER   200809L
 
+/* POSIX process- and thread-priority scheduling.  Substrate implements the
+ * SCHED_FIFO / SCHED_RR real-time policies with a 1..99 priority range at the
+ * sched_setscheduler(2)/sched_setparam(2) + pthread_setschedparam(3) API level
+ * (sys/kern/sched_posix.c, lib/pthread), sched_get_priority_min/max(2), and a
+ * priority-ordered pthread_rwlock: lib/pthread/pthread_extra.c honours the
+ * caller's scheduling priority when arbitrating rwlock acquisition (a higher-
+ * priority reader is not blocked behind a lower-priority waiting writer, and a
+ * freed lock is handed to the highest-priority waiter, writers winning ties).
+ * OPTS gates whole test groups on these option macros — the
+ * pthread_mutex_*prioceiling tests on defined(_SC_PRIORITY_SCHEDULING) +
+ * sysconf() != -1, and the pthread_rwlock priority tests on
+ * defined(_POSIX_THREAD_PRIORITY_SCHEDULING) — so leaving them undefined
+ * compiles those tests out to PTS_UNSUPPORTED even though the runtime supports
+ * the feature. */
+#define _POSIX_PRIORITY_SCHEDULING          200809L
+#define _POSIX_THREAD_PRIORITY_SCHEDULING   200809L
+
 /* POSIX-2017 §11.1.7: a c_cc[] slot set to _POSIX_VDISABLE disables
  * the associated special-character function.  Substrate matches the
  * Linux/glibc value of 0 (0xff is the BSD convention).  */
@@ -313,6 +330,13 @@ long syscall(long number, ...);
 #define _SC_SEM_NSEMS_MAX    25
 /* Memory-mapped files — substrate implements mmap(2), so the option is present. */
 #define _SC_MAPPED_FILES     26
+/* Process- and thread-priority scheduling.  Substrate implements SCHED_FIFO /
+ * SCHED_RR (see _POSIX_PRIORITY_SCHEDULING above), so sysconf() reports a
+ * positive value for each.  The OPTS pthread_mutex_*prioceiling tests probe
+ * sysconf(_SC_PRIORITY_SCHEDULING) and compile out to PTS_UNSUPPORTED when the
+ * name is undefined or returns -1. */
+#define _SC_PRIORITY_SCHEDULING         27
+#define _SC_THREAD_PRIORITY_SCHEDULING  28
 
 long sysconf(int name);
 

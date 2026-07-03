@@ -38,6 +38,18 @@ extern "C" {
 #endif
 
 /*
+ * Process- and thread-priority scheduling option constants.  Canonical in
+ * <unistd.h>; mirrored here (guarded) so a translation unit that pulls in only
+ * <sched.h> still sees the SCHED_FIFO/RR priority option advertised.
+ */
+#ifndef _POSIX_PRIORITY_SCHEDULING
+#define _POSIX_PRIORITY_SCHEDULING          200809L
+#endif
+#ifndef _POSIX_THREAD_PRIORITY_SCHEDULING
+#define _POSIX_THREAD_PRIORITY_SCHEDULING   200809L
+#endif
+
+/*
  * The sporadic-server members (sched_ss_*) are appended AFTER
  * sched_priority so the structure stays backward-compatible: code that
  * only touches sched_priority keeps working and its offset is unchanged.

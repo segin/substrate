@@ -1,0 +1,108 @@
+.\"
+.\" PTHREAD_MUTEX_GETPRIOCEILING(3) - Substrate Pthreads Library
+.\"
+.TH PTHREAD_MUTEX_GETPRIOCEILING 3 "July 2026" "Substrate OS" "Library Functions"
+.SH NAME
+pthread_mutex_getprioceiling, pthread_mutex_setprioceiling \- get and set the
+priority ceiling of a mutex
+.SH LIBRARY
+POSIX threads library (libpthread, \-lpthread)
+.SH SYNOPSIS
+.nf
+.B #include <pthread.h>
+.PP
+.BI "int pthread_mutex_getprioceiling(const pthread_mutex_t *" mutex ,
+.BI "                                 int *" prioceiling ");
+.BI "int pthread_mutex_setprioceiling(pthread_mutex_t *" mutex ", int " prioceiling ,
+.BI "                                 int *" old_ceiling ");
+.fi
+.SH DESCRIPTION
+A priority ceiling is a scheduling priority associated with a mutex that was
+initialised with the
+.B PTHREAD_PRIO_PROTECT
+protocol (see
+.BR pthread_mutexattr_setprotocol (3)).
+The ceiling is taken from the mutex attribute object at
+.BR pthread_mutex_init (3)
+time; if no ceiling was set explicitly with
+.BR pthread_mutexattr_setprioceiling (3),
+an implementation-defined default within the SCHED_FIFO priority range is used.
+.PP
+The
+.BR pthread_mutex_getprioceiling ()
+function stores the current priority ceiling of
+.I mutex
+in the location pointed to by
+.IR prioceiling .
+.PP
+The
+.BR pthread_mutex_setprioceiling ()
+function replaces the priority ceiling of
+.I mutex
+with
+.IR prioceiling
+and stores the mutex's previous ceiling in the location pointed to by
+.IR old_ceiling .
+.PP
+Both functions require that
+.I mutex
+was created with the
+.B PTHREAD_PRIO_PROTECT
+protocol; a mutex with any other protocol
+.RB ( PTHREAD_PRIO_NONE
+or
+.BR PTHREAD_PRIO_INHERIT )
+has no priority ceiling.
+.SH RETURN VALUE
+On success, both functions return 0.  On error, they return an error number.
+.SH ERRORS
+.TP
+.B EINVAL
+The protocol of
+.I mutex
+is not
+.BR PTHREAD_PRIO_PROTECT ,
+so it has no priority ceiling; or, for
+.BR pthread_mutex_setprioceiling (),
+the requested
+.I prioceiling
+is out of range; or a required pointer argument is NULL.
+.SH EXAMPLES
+Create a priority-ceiling mutex, read its ceiling, then raise it.
+.PP
+.RS 4
+.EX
+#include <pthread.h>
+#include <stdio.h>
+
+int
+main(void)
+{
+    pthread_mutexattr_t attr;
+    pthread_mutex_t m;
+    int ceil, old;
+
+    pthread_mutexattr_init(&attr);
+    pthread_mutexattr_setprotocol(&attr, PTHREAD_PRIO_PROTECT);
+    pthread_mutex_init(&m, &attr);
+
+    pthread_mutex_getprioceiling(&m, &ceil);
+    printf("ceiling = %d\en", ceil);
+
+    pthread_mutex_setprioceiling(&m, ceil + 1, &old);
+    printf("previous ceiling = %d\en", old);
+
+    pthread_mutex_destroy(&m);
+    pthread_mutexattr_destroy(&attr);
+    return 0;
+}
+.EE
+.RE
+.SH SEE ALSO
+.BR pthread_mutex_init (3),
+.BR pthread_mutexattr_setprotocol (3),
+.BR pthread_mutexattr_setprioceiling (3)
+.SH STANDARDS
+POSIX.1-2008 (the Priority Protection option).  Substrate stores and reports the
+ceiling faithfully; because its scheduler does not raise a locking thread's
+priority to the ceiling, the value is advisory.
