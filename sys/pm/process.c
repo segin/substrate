@@ -1543,6 +1543,28 @@ void proc_exit(int code) {
                 (unsigned long long)ext2_finddir_break_recv_malformed,
                 (unsigned long long)ext2_finddir_break_block0,
                 (unsigned long long)ext2_root_pin_lost);
+
+        /* Census of the two resources the counters above don't track:
+         * live thread_t (walk allthread, by state) and live process_t
+         * (walk allproc, by state).  A monotonically climbing total is a
+         * thread_t / process_t leak — and a growing allthread makes
+         * sched_yield O(n) per pick, so a leak here shows as "slows". */
+        {
+            unsigned t_total = 0, t_zomb = 0, t_blocked = 0;
+            FOREACH_THREAD(th) {
+                t_total++;
+                if (th->state == THREAD_ZOMBIE)  t_zomb++;
+                else if (th->state == THREAD_BLOCKED) t_blocked++;
+            }
+            unsigned p_total = 0, p_zomb = 0;
+            for (process_t *pp = proc_first(); pp; pp = proc_next(pp)) {
+                p_total++;
+                if (pp->state == SZOMB || pp->state == SDYING) p_zomb++;
+            }
+            kprintf("census[pid=%d]: threads=%u (zomb=%u blk=%u) procs=%u (zomb=%u)\n",
+                    current_process->pid, t_total, t_zomb, t_blocked,
+                    p_total, p_zomb);
+        }
     }
 
     /* Per-syscall cost histogram dump for the just-exited process.

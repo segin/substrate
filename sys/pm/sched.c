@@ -1,4 +1,5 @@
 #include <kern/sched.h>
+#include <kern/sleepq.h>
 #include <kern/time.h>
 #include <sys/errno.h>
 #include <sys/futex.h>
@@ -684,6 +685,14 @@ void sched_reap_process_threads(process_t *proc) {
 
 void sched_reap_thread(thread_t *t) {
     if (!t) return;
+
+    /* A thread can still be linked on a sleepq at reap time: proc_exit
+     * dequeues each thread once, but a thread killed mid-sleep can re-block
+     * (e.g. a looping FUTEX_WAIT) before it takes the fatal signal, landing
+     * back on a sleepq as it zombifies.  Freeing the thread_t while a sleepq
+     * still points at it is a use-after-free the next wake would trip over,
+     * so make sure it is off every queue before we release its storage. */
+    sleepq_remove_thread(t);
 
     sched_release_thread_storage(t);
 
