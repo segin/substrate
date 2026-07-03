@@ -99,7 +99,8 @@ char *strncpy(char *dest, const char *src, size_t n) {
     return dest;
 }
 
-int sprintf(char *str, const char *format, ...) {
+int snprintf(char *str, size_t size, const char *format, ...) {
+    (void)size;
     (void)format;
     *str = '\0';
     return 0;

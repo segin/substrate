@@ -99,6 +99,6 @@ void test_stacktrace(void) {
     test_stack_trace_from_regs();
     
     char buf[64];
-    sprintf(buf, "\nStack trace tests: %d passed, %d failed\n", tests_passed, tests_failed);
+    snprintf(buf, sizeof(buf), "\nStack trace tests: %d passed, %d failed\n", tests_passed, tests_failed);
     kprint(buf);
 }

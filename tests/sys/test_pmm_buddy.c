@@ -85,6 +85,6 @@ void test_pmm_buddy(void) {
     test_split_logic();
 
     char buf[64];
-    sprintf(buf, "=== pmm_buddy tests: %d passed, %d failed ===\n", passed, failed);
+    snprintf(buf, sizeof(buf), "=== pmm_buddy tests: %d passed, %d failed ===\n", passed, failed);
     kprint(buf);
 }

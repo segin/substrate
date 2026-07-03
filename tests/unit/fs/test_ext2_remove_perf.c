@@ -233,7 +233,7 @@ void run_ext2_remove_perf_test(void) {
 
     char name[32];
     for (int i = 0; i < num_entries; i++) {
-        sprintf(name, "file_%d", i);
+        snprintf(name, sizeof(name), "file_%d", i);
         // We use dummy inode numbers (e.g., 10 + i)
         if (ext2_add_entry(dir, name, 10 + i, EXT2_FT_REG_FILE) != 0) {
             printf("Failed to add entry %d\n", i);
@@ -243,7 +243,7 @@ void run_ext2_remove_perf_test(void) {
     printf("Entries added.\n");
 
     // Benchmark removal of the LAST added entry (worst case search)
-    sprintf(name, "file_%d", num_entries - 1);
+    snprintf(name, sizeof(name), "file_%d", num_entries - 1);
     printf("Removing entry: %s\n", name);
 
     uint64_t start_tsc = rdtsc_host();

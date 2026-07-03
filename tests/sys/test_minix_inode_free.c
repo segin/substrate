@@ -56,7 +56,8 @@ size_t strlen(const char *s) {
     return len;
 }
 
-int sprintf(char *str, const char *format, ...) {
+int snprintf(char *str, size_t size, const char *format, ...) {
+    (void)size;
     (void)format;
     *str = '\0';
     return 0;

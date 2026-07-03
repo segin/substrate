@@ -116,8 +116,8 @@ static int run_ls_capture(const ls_config_t *cfg, char **paths, int npaths,
     err_tpl = (char *)malloc(strlen(tmpbase) + 1 + strlen("ls_err_XXXXXX") + 1);
     assert(out_tpl != NULL && err_tpl != NULL);
 
-    sprintf(out_tpl, "%s/%s", tmpbase, "ls_out_XXXXXX");
-    sprintf(err_tpl, "%s/%s", tmpbase, "ls_err_XXXXXX");
+    snprintf(out_tpl, strlen(tmpbase) + 1 + strlen("ls_out_XXXXXX") + 1, "%s/%s", tmpbase, "ls_out_XXXXXX");
+    snprintf(err_tpl, strlen(tmpbase) + 1 + strlen("ls_err_XXXXXX") + 1, "%s/%s", tmpbase, "ls_err_XXXXXX");
 
     out_fd = mkstemp(out_tpl);
     err_fd = mkstemp(err_tpl);
@@ -839,7 +839,7 @@ static void test_recursive_one_file_system(void) {
 
     foreign_hdr = (char *)malloc(strlen(foreign) + 3);
     assert(foreign_hdr != NULL);
-    sprintf(foreign_hdr, "%s:\n", foreign);
+    snprintf(foreign_hdr, strlen(foreign) + 3, "%s:\n", foreign);
     assert(strstr(out, foreign_hdr) == NULL);
     free(foreign_hdr);
 

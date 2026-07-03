@@ -21,8 +21,6 @@ void kfree(void *ptr, size_t size) {
 // Rename kernel printf functions to avoid conflict with libc
 #define snprintf kernel_snprintf
 #define vsnprintf kernel_vsnprintf
-#define sprintf kernel_sprintf
-#define vsprintf kernel_vsprintf
 #define kasprintf kernel_kasprintf
 #define kvasprintf kernel_kvasprintf
 

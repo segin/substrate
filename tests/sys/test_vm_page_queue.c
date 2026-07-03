@@ -524,6 +524,6 @@ void test_vm_page_queue(void) {
     test_vm_page_late_init();
     
     char buf[64];
-    sprintf(buf, "=== vm_page tests: %d passed, %d failed ===\n", passed, failed);
+    snprintf(buf, sizeof(buf), "=== vm_page tests: %d passed, %d failed ===\n", passed, failed);
     kprint(buf);
 }
