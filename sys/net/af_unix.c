@@ -263,12 +263,104 @@ static void g_bound_unlink(afunix_sock_t *s) {
     mutex_unlock(&g_bound_lock);
 }
 
+/* ============================================================
+ * Reference counting
+ * ============================================================
+ *
+ * Every pointer that can reach an afunix_sock_t is a counted reference;
+ * the struct is freed ONLY when its refcount falls to zero, at which
+ * point — by construction — no registry entry, peer link, backlog slot,
+ * open fd, or in-flight lookup still names it.  This replaces the old
+ * deliberate leak, which existed because a naive "free on last fd close"
+ * raced with the transient references a connect()/sendto() lookup holds.
+ *
+ * THE RULE that makes acquisition race-free (the lesson of the rejected
+ * has_waiters() heuristic in PR #1303): to take a reference to a socket
+ * reached through a shared structure — the bound registry, a listener's
+ * accept_q, or a peer link — bump the refcount WHILE STILL HOLDING the
+ * lock that guards that structure, before any window in which the owner
+ * could drop the last reference and free it.
+ *
+ * Reference points (acquire site -> release site):
+ *   alloc      afunix_alloc (=1)             -> the allocating syscall, once
+ *                                               the lasting refs are wired
+ *   fd/node    afunix_install_fd             -> afunix_node_close
+ *   peer       set s->peer / client->peer    -> cleared on close / disconnect
+ *   backlog    connect enqueue (accept_q[])  -> accept dequeue / close reclaim
+ *   listener   connect (server_side->listener)-> accept / close reclaim /
+ *                                                afunix_sock_free
+ *   transient  afunix_find_bound[_by_inode]  -> caller, after use
+ *
+ * Locks: g_bound_lock guards the registry; each socket's ->lock guards its
+ * own data path AND its ->listener back-pointer.  A listener's ->lock guards
+ * its accept_q[].  Lock order is listener->lock -> server_side->lock (never
+ * the reverse); the registry lookup bumps its ref with only g_bound_lock
+ * held (an atomic inc, no socket lock), so it never inverts against
+ * afunix_node_close's socket->lock -> g_bound_lock order.
+ */
+static void afunix_sock_free(afunix_sock_t *s);
+
+static inline void afunix_ref(afunix_sock_t *s) {
+    if (s) __atomic_add_fetch(&s->refcount, 1, __ATOMIC_ACQ_REL);
+}
+
+static void afunix_unref(afunix_sock_t *s) {
+    if (!s) return;
+    int now = __atomic_sub_fetch(&s->refcount, 1, __ATOMIC_ACQ_REL);
+    if (now == 0)
+        afunix_sock_free(s);
+    /* now < 0 would be an over-release bug; leave the struct untouched
+     * rather than double-free it. */
+}
+
+/*
+ * Final teardown, run exactly once when the refcount reaches zero.  Because
+ * nothing references s any longer, this needs no lock.  It also drops any
+ * back-references s ITSELF still holds — a socket destroyed without an fd
+ * close (an un-accepted server-side reclaimed on the connecting client's
+ * close, or a half-built connection unwound on error) can still carry a
+ * ->peer / ->listener link whose reference must be released here.  For an
+ * fd-backed socket those links were already cleared by afunix_node_close,
+ * so the checks below are no-ops.
+ */
+static void afunix_sock_free(afunix_sock_t *s) {
+    afunix_sock_t *peer = s->peer;
+    s->peer = NULL;
+    if (peer) afunix_unref(peer);
+
+    afunix_sock_t *lst = s->listener;
+    s->listener = NULL;
+    if (lst) afunix_unref(lst);
+
+    /* Release any SCM_RIGHTS file references still queued but never
+     * recvmsg()'d — each carries a file_t reference the sender bumped. */
+    for (int i = 0; i < s->rx_fdq_count; i++) {
+        file_t *qf = s->rx_fdq[i];
+        s->rx_fdq[i] = NULL;
+        if (qf) file_close_ptr(qf);
+    }
+    s->rx_fdq_count = 0;
+
+    /* Defensive: for an fd-backed socket afunix_node_close already unlinked
+     * us; this only matters if a bound socket were ever freed by another
+     * path.  g_bound_unlink is a no-op when we are not in the list. */
+    if (s->pathlen > 0) g_bound_unlink(s);
+
+    kfree(s, sizeof(*s));
+}
+
 static afunix_sock_t *afunix_find_bound(const char *path, int len) {
     g_bound_lock_init();
     mutex_lock(&g_bound_lock);
     for (afunix_bound_node_t *n = g_bound_list; n; n = n->next) {
         if (n->sock->pathlen == len && memcmp(n->sock->path, path, len) == 0) {
             afunix_sock_t *s = n->sock;
+            /* Pin the socket BEFORE releasing g_bound_lock.  While it is in
+             * the registry it is alive (removal happens in afunix_node_close
+             * with the fd reference still held), so this inc can never race a
+             * free — the exact window PR #1303's has_waiters() check left
+             * open. */
+            afunix_ref(s);
             mutex_unlock(&g_bound_lock);
             return s;
         }
@@ -298,6 +390,7 @@ static afunix_sock_t *afunix_find_bound_by_inode(uint64_t inode) {
             if (n->sock->state == AFUS_LISTENING) break;
         }
     }
+    if (match) afunix_ref(match);   /* pin before releasing the lock (see above) */
     mutex_unlock(&g_bound_lock);
     return match;
 }
@@ -557,28 +650,52 @@ static void afunix_node_close(fs_node_t *node) {
     XFD("node_close pid=%d s=%p refcount=%d state=%d closed=%d peer=%p",
         current_process ? (int)current_process->pid : -1,
         s,
-        s ? s->refcount : -1,
+        s ? __atomic_load_n(&s->refcount, __ATOMIC_RELAXED) : -1,
         s ? (int)s->state : -1,
         s ? s->closed : -1,
         s ? s->peer : NULL);
     if (!s) return;
+
     mutex_lock(&s->lock);
-    if (--s->refcount > 0) { mutex_unlock(&s->lock); return; }
     s->closed = 1;
-    if (s->peer) {
-        afunix_sock_t *peer = s->peer;
-        s->peer = NULL;
-        /* If the peer is a server-side socket still sitting un-accepted in a
-         * listener's backlog (we are the connecting client and the server never
-         * accept()ed us), pull it out of the listener's accept_q and free it.
-         * Otherwise an abandoned connect permanently holds a backlog slot, and
-         * once `backlog` of them accumulate the listener refuses EVERY further
-         * connect with ECONNREFUSED — which made tdeinit's clients believe it
-         * had died and respawn it in a loop, blocking the desktop.  A
-         * never-accepted server_side is owned by no fd, so we free it here. */
-        afunix_sock_t *lst = peer->listener;
+    afunix_sock_t *peer = s->peer;
+    s->peer = NULL;                     /* we now owe unref(peer) for this link */
+    /* Wake everything blocked on THIS socket so it re-checks ->closed. */
+    sleepq_wake_all(s->rx_chan);
+    sleepq_wake_all(s->tx_chan);
+    sleepq_wake_all(s->accept_chan);
+    sleepq_wake_all(s->connect_chan);
+    mutex_unlock(&s->lock);
+
+    /* Leave the bound registry.  The fd reference is still held (dropped
+     * last, below), so a concurrent lookup either finds us alive — pinning
+     * us with its own ref — or, once we unlink, not at all.  Never a freed
+     * struct. */
+    if (s->pathlen > 0) g_bound_unlink(s);
+
+    if (peer) {
+        /* Is `peer` a server-side socket still sitting un-accepted in a
+         * listener's backlog?  Then WE are the connecting client closing
+         * before accept(): reclaim the slot and destroy `peer` (it owns no
+         * fd, so it never gets a node_close of its own).  Otherwise an
+         * abandoned connect permanently holds a backlog slot, and once
+         * `backlog` of them accumulate the listener refuses every further
+         * connect with ECONNREFUSED (which looped tdeinit respawns).
+         *
+         * peer->listener is guarded by peer->lock; pin the listener there,
+         * before touching lst->lock, so it cannot be freed underneath us
+         * (accept() clears peer->listener + drops the R4 ref under peer->lock
+         * too).  Lock order below is listener->lock -> peer->lock. */
+        afunix_sock_t *lst;
+        mutex_lock(&peer->lock);
+        lst = peer->listener;
+        if (lst) afunix_ref(lst);
+        mutex_unlock(&peer->lock);
+
+        int reclaimed = 0;
         if (lst) {
             mutex_lock(&lst->lock);
+            mutex_lock(&peer->lock);
             if (peer->listener == lst) {
                 for (int i = 0; i < lst->accept_count; i++) {
                     int idx = (lst->accept_tail + i) % AFUNIX_BACKLOG_MAX;
@@ -591,44 +708,35 @@ static void afunix_node_close(fs_node_t *node) {
                         lst->accept_head =
                             (lst->accept_head - 1 + AFUNIX_BACKLOG_MAX) % AFUNIX_BACKLOG_MAX;
                         lst->accept_count--;
-                        peer->listener = NULL;
-                        mutex_unlock(&lst->lock);
-                        kfree(peer, sizeof(*peer));
-                        peer = NULL;
+                        reclaimed = 1;   /* removed accept_q slot: owe unref(peer) for R3 */
                         break;
                     }
                 }
-                if (peer) mutex_unlock(&lst->lock);
-            } else {
-                mutex_unlock(&lst->lock);
             }
+            mutex_unlock(&peer->lock);
+            mutex_unlock(&lst->lock);
+            afunix_unref(lst);           /* drop the transient pin */
         }
-        if (peer) {
-            /* Notify peer of our departure: wake their readers/writers
-             * so they see 0-byte read (EOF). */
-            peer->peer = NULL;
+
+        if (reclaimed) {
+            /* peer held R3 (accept_q) + our peer link.  Drop both; the second
+             * reaches zero and afunix_sock_free(peer) releases peer's own
+             * back-links (peer->peer -> us, peer->listener -> lst). */
+            afunix_unref(peer);          /* R3, the reclaimed accept_q slot */
+            afunix_unref(peer);          /* our s->peer link */
+        } else {
+            /* Normal connected peer (or one already accepted): wake its
+             * waiters — they observe our ->closed and return EOF/EPIPE — then
+             * drop our peer-link reference.  We do NOT clear peer->peer: peer
+             * owns that slot and clears it on its own close.  Our ref keeps us
+             * alive until then, so peer's data path can still read ->closed. */
             sleepq_wake_all(peer->rx_chan);
             sleepq_wake_all(peer->tx_chan);
+            afunix_unref(peer);          /* our s->peer link */
         }
     }
-    if (s->pathlen > 0) g_bound_unlink(s);
-    /* Drop any SCM_RIGHTS file references still queued on our rx_fdq:
-     * fds passed to us that were never recvmsg()'d.  Each carries a
-     * file_t reference the sender bumped; if we just freed the socket
-     * (or leaked it) those references would never be released, leaking
-     * the underlying open files forever.  Release them under the lock. */
-    for (int i = 0; i < s->rx_fdq_count; i++) {
-        file_t *qf = s->rx_fdq[i];
-        s->rx_fdq[i] = NULL;
-        if (qf) file_close_ptr(qf);
-    }
-    s->rx_fdq_count = 0;
-    /* Wake any pending accept/connect waiters. */
-    sleepq_wake_all(s->accept_chan);
-    sleepq_wake_all(s->connect_chan);
-    mutex_unlock(&s->lock);
-    /* TODO: kfree(s) when refcount reaches 0 AND no waiters.  For
-     * now leak the struct so a stray waiter can't UAF.  Small N. */
+
+    afunix_unref(s);                     /* drop the fd/node reference */
 }
 
 /*
@@ -742,6 +850,7 @@ static int afunix_install_fd(afunix_sock_t *s) {
     f->f_flag = FREAD | FWRITE;
     f->f_count = 1;
     proc_set_fd(current_process, fd, f);
+    afunix_ref(s);      /* the fd / fs_node holds a reference until node_close */
     return fd;
 }
 
@@ -822,10 +931,11 @@ int sys_socket(int domain, int type, int protocol) {
     } else if (base != SOCK_STREAM && base != SOCK_DGRAM) {
         return -EPROTONOSUPPORT;
     } else {
-        afunix_sock_t *s = afunix_alloc(base);
+        afunix_sock_t *s = afunix_alloc(base);   /* alloc ref = 1 */
         if (!s) return -ENOMEM;
-        fd = afunix_install_fd(s);
-        if (fd < 0) { kfree(s, sizeof(*s)); return -EMFILE; }
+        fd = afunix_install_fd(s);               /* +fd ref on success */
+        if (fd < 0) { afunix_unref(s); return -EMFILE; }  /* drop alloc ref -> free */
+        afunix_unref(s);                         /* drop alloc ref; fd ref remains */
     }
 
     if (fd >= 0) socket_apply_type_flags(fd, type);
@@ -839,24 +949,34 @@ int sys_socketpair(int domain, int type, int protocol, int sv[2]) {
     /* Strip SOCK_CLOEXEC / SOCK_NONBLOCK before the base-type check. */
     int base = type & SOCK_TYPE_MASK;
     if (base != SOCK_STREAM && base != SOCK_DGRAM) return -EPROTONOSUPPORT;
-    afunix_sock_t *a = afunix_alloc(base);
-    afunix_sock_t *b = afunix_alloc(base);
+    afunix_sock_t *a = afunix_alloc(base);       /* alloc ref = 1 */
+    afunix_sock_t *b = afunix_alloc(base);       /* alloc ref = 1 */
     if (!a || !b) {
-        if (a) kfree(a, sizeof(*a));
-        if (b) kfree(b, sizeof(*b));
+        if (a) afunix_unref(a);
+        if (b) afunix_unref(b);
         return -ENOMEM;
     }
-    a->peer = b; b->peer = a;
-    a->state = b->state = AFUS_CONNECTED;
-    int fa = afunix_install_fd(a);
-    int fb = afunix_install_fd(b);
-    if (fa < 0 || fb < 0) {
-        if (fa >= 0) proc_clear_fd(current_process, fa);
-        if (fb >= 0) proc_clear_fd(current_process, fb);
-        kfree(a, sizeof(*a));
-        kfree(b, sizeof(*b));
+    /* Install both fds BEFORE peering, so an install failure has no peer
+     * reference to unwind — the failure paths just drop the alloc refs. */
+    int fa = afunix_install_fd(a);               /* +fd ref on a */
+    if (fa < 0) { afunix_unref(a); afunix_unref(b); return -EMFILE; }
+    int fb = afunix_install_fd(b);               /* +fd ref on b */
+    if (fb < 0) {
+        /* a is installed but unpeered: file_close_ptr runs node_close(a),
+         * dropping its fd ref, then we drop the alloc refs on both. */
+        file_close_ptr(current_process->fds[fa]);
+        proc_clear_fd(current_process, fa);
+        afunix_unref(a);
+        afunix_unref(b);
         return -EMFILE;
     }
+    /* Both installed: peer them (each ->peer link takes a reference) and drop
+     * the alloc refs, leaving each socket held by its fd + its peer link. */
+    a->peer = b; afunix_ref(b);
+    b->peer = a; afunix_ref(a);
+    a->state = b->state = AFUS_CONNECTED;
+    afunix_unref(a);
+    afunix_unref(b);
     socket_apply_type_flags(fa, type);
     socket_apply_type_flags(fb, type);
     sv[0] = fa; sv[1] = fb;
@@ -921,7 +1041,8 @@ int sys_bind(int fd, const struct sockaddr *addr, socklen_t addrlen) {
     } else {
         /* Abstract / autobind socket: no filesystem presence, so the in-core
          * name table is the only arbiter of the namespace. */
-        if (afunix_find_bound(path, pathlen)) return -EADDRINUSE;
+        afunix_sock_t *ex = afunix_find_bound(path, pathlen);   /* transient ref */
+        if (ex) { afunix_unref(ex); return -EADDRINUSE; }
         s->bound_inode = 0;
     }
 
@@ -1007,22 +1128,39 @@ int sys_accept(int fd, struct sockaddr *addr, socklen_t *addrlen) {
             return -EINTR;
         }
     }
-    /* connect() already allocated and peered the server-side socket;
-     * we just need to install it into the caller's fd table. */
+    /* connect() already allocated and peered the server-side socket; we just
+     * install it into the caller's fd table.  Dequeuing hands us the accept_q
+     * (R3) reference — keep it as our working ref so server_side cannot be
+     * freed by a racing client close() across the install below; drop it once
+     * the fd reference is in place. */
     afunix_sock_t *server_side = server->accept_q[server->accept_tail];
     server->accept_tail = (server->accept_tail + 1) % AFUNIX_BACKLOG_MAX;
     server->accept_count--;
+    mutex_lock(&server_side->lock);
+    afunix_sock_t *ss_listener = server_side->listener;
     server_side->listener = NULL;   /* dequeued: no longer reclaimable by close() */
+    mutex_unlock(&server_side->lock);
     mutex_unlock(&server->lock);
+    if (ss_listener) afunix_unref(ss_listener);   /* drop R4 (listener back-ref) */
 
-    int newfd = afunix_install_fd(server_side);
+    int newfd = afunix_install_fd(server_side);   /* +fd ref on success */
     if (newfd < 0) {
         XFD("sys_accept fd=%d install_fd failed (EMFILE)", fd);
-        /* Tear down: detach from peer and free the orphan. */
-        if (server_side->peer) server_side->peer->peer = NULL;
-        kfree(server_side, sizeof(*server_side));
+        /* Break the peer link and destroy the orphan.  We still hold the
+         * working (R3) reference, so the drops below are ordered safely. */
+        afunix_sock_t *cli = server_side->peer;
+        if (cli) {
+            cli->peer = NULL;               /* client no longer points at us */
+            sleepq_wake_all(cli->rx_chan);
+            sleepq_wake_all(cli->tx_chan);
+            afunix_unref(server_side);      /* the client->peer link ref */
+        }
+        afunix_unref(server_side);          /* working (R3) ref -> frees server_side */
         return -EMFILE;
     }
+    /* Installed: drop the working (R3) reference.  server_side is now held by
+     * its fd and its peer link — the steady-state connected pair. */
+    afunix_unref(server_side);
     if (addr && addrlen && *addrlen >= 2) {
         /* No peer address on AF_UNIX without explicit bind. */
         ((struct sockaddr_un *)addr)->sun_family = AF_UNIX;
@@ -1053,7 +1191,7 @@ int sys_connect(int fd, const struct sockaddr *addr, socklen_t addrlen) {
     if (pathlen > AFUNIX_PATH_MAX) pathlen = AFUNIX_PATH_MAX;
     pathlen = afunix_norm_pathlen(path, pathlen);
 
-    afunix_sock_t *server = afunix_find_bound(path, pathlen);
+    afunix_sock_t *server = afunix_find_bound(path, pathlen);   /* transient ref */
     if (!server && pathlen > 0 && path[0] != '\0') {
         /* Literal-path match missed.  AF_UNIX is keyed by the file's inode,
          * not by the path text, so a client reaching the socket through an
@@ -1065,23 +1203,30 @@ int sys_connect(int fd, const struct sockaddr *addr, socklen_t addrlen) {
         kpath[pathlen] = '\0';
         fs_node_t *cnode = vfs_lookup(fs_root, kpath);
         if (cnode == NULL) return -ENOENT;           /* path doesn't exist */
-        server = afunix_find_bound_by_inode(cnode->inode);
+        server = afunix_find_bound_by_inode(cnode->inode);  /* transient ref */
         if (!server) return -ECONNREFUSED;           /* node exists, no listener */
     } else if (!server) {
         return -ECONNREFUSED;                          /* abstract name, no binding */
     }
-    if (server->state != AFUS_LISTENING) return -ECONNREFUSED;
+    /* From here `server` carries a transient reference that pins it against a
+     * concurrent close(): every exit path MUST afunix_unref(server).  This is
+     * the reference PR #1303 lacked — its lookup returned a bare pointer the
+     * connector then locked, racing a free. */
+    if (server->state != AFUS_LISTENING) {
+        afunix_unref(server);
+        return -ECONNREFUSED;
+    }
 
     /* Allocate the server-side socket now and fully peer both halves
      * BEFORE returning from connect().  This matches BSD/Linux: a
      * successful connect() returns as soon as the kernel has queued
      * the connection onto the listen backlog — it does not wait for
      * the server process to actually invoke accept(). */
-    afunix_sock_t *server_side = afunix_alloc(SOCK_STREAM);
-    if (!server_side) return -ENOMEM;
+    afunix_sock_t *server_side = afunix_alloc(SOCK_STREAM);   /* alloc ref = 1 */
+    if (!server_side) { afunix_unref(server); return -ENOMEM; }
     server_side->state = AFUS_CONNECTED;
-    server_side->peer  = client;
-    client->peer       = server_side;
+    server_side->peer  = client;         afunix_ref(client);       /* SS->peer link */
+    client->peer       = server_side;    afunix_ref(server_side);  /* client->peer link */
     client->state      = AFUS_CONNECTED;
     /* The accepted (server-side) socket belongs to the listener's owner,
      * not to the connecting client that allocated it here — inherit the
@@ -1102,21 +1247,33 @@ int sys_connect(int fd, const struct sockaddr *addr, socklen_t addrlen) {
     }
 
     mutex_lock(&server->lock);
-    if (server->accept_count >= server->backlog) {
+    if (server->closed || server->state != AFUS_LISTENING ||
+        server->accept_count >= server->backlog) {
+        /* Listener raced closed, stopped listening, or its backlog is full —
+         * unwind the half-built connection. */
         mutex_unlock(&server->lock);
         client->state = AFUS_UNCONNECTED;
         client->peer  = NULL;
-        kfree(server_side, sizeof(*server_side));
+        afunix_unref(server_side);   /* client->peer link */
+        afunix_unref(server_side);   /* alloc ref -> frees server_side;
+                                      * afunix_sock_free drops SS->peer (unref client) */
+        afunix_unref(server);        /* transient */
         return -ECONNREFUSED;
     }
-    server_side->listener = server;   /* queued: close() can reclaim the slot */
+    mutex_lock(&server_side->lock);
+    server_side->listener = server;   afunix_ref(server);  /* R4: queued, close() reclaims */
+    mutex_unlock(&server_side->lock);
     server->accept_q[server->accept_head] = server_side;
+    afunix_ref(server_side);          /* R3: the accept_q slot */
     server->accept_head = (server->accept_head + 1) % AFUNIX_BACKLOG_MAX;
     server->accept_count++;
     sleepq_wake_all(server->accept_chan);
     mutex_unlock(&server->lock);
-    XFD("sys_connect fd=%d OK client=%p server_side=%p accept_count=%d",
-        fd, client, server_side, server->accept_count);
+
+    afunix_unref(server_side);   /* drop alloc ref; SS held by client->peer + accept_q */
+    afunix_unref(server);        /* drop transient ref */
+    XFD("sys_connect fd=%d OK client=%p server_side=%p",
+        fd, client, server_side);
     return 0;
 }
 
@@ -1347,18 +1504,22 @@ ssize_t sys_sendto(int fd, const void *buf, size_t len, int flags,
                 kpath[pathlen] = '\0';
                 fs_node_t *dnode = vfs_lookup(fs_root, kpath);
                 if (dnode == NULL) return -ENOENT;
-                dst = afunix_find_bound_by_inode(dnode->inode);
+                dst = afunix_find_bound_by_inode(dnode->inode);  /* transient ref */
                 if (!dst) return -ECONNREFUSED;
             } else if (!dst) {
                 return -ECONNREFUSED;
             }
-            if (dst->type != SOCK_DGRAM) return -ECONNREFUSED;
+            /* `dst` carries a transient reference pinning it against a
+             * concurrent close() while we deliver into its rx buffer. */
+            if (dst->type != SOCK_DGRAM) { afunix_unref(dst); return -ECONNREFUSED; }
             int nonblock = 0;
             if (fd >= 0 && fd < MAX_FD && current_process) {
                 file_t *ff = current_process->fds[fd];
                 if (ff && (ff->f_flag & FNONBLOCK)) nonblock = 1;
             }
-            return afunix_dgram_deliver(dst, (const uint8_t *)buf, len, nonblock);
+            ssize_t dr = afunix_dgram_deliver(dst, (const uint8_t *)buf, len, nonblock);
+            afunix_unref(dst);   /* drop transient ref */
+            return dr;
         }
     }
     (void)addrlen;
