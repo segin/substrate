@@ -57,6 +57,20 @@ extern "C" {
 #define _POSIX_MEMORY_PROTECTION 200809L
 #define _POSIX_MEMLOCK           200809L
 
+/* POSIX asynchronous + prioritized I/O.  Substrate implements the aio_*
+ * / lio_listio surface as a userspace worker-thread pool over libpthread
+ * (librt); aio_read/aio_write honour aio_reqprio (higher priority runs
+ * first) and reject an invalid negative aio_reqprio with EINVAL, and the
+ * request queue is bounded by {AIO_MAX} (EAGAIN when full).  These are
+ * advertised at the POSIX.1-2001 level — the version at which the AIO and
+ * Prioritized-I/O options were defined — because the OPTS aio tests gate
+ * exactly on `sysconf(_SC_ASYNCHRONOUS_IO) == 200112L` (an exact-match
+ * quirk) and `sysconf(_SC_PRIORITIZED_IO) < 200112L`, and leaving the
+ * option macros undefined silently disables the feature at compile time
+ * even though the runtime fully supports it. */
+#define _POSIX_ASYNCHRONOUS_IO   200112L
+#define _POSIX_PRIORITIZED_IO    200112L
+
 /* POSIX sporadic-server scheduling policy (SCHED_SPORADIC + the
  * sched_ss_* sched_param members).  Substrate accepts and validates the
  * policy and its parameters at the sched_setscheduler(2)/sched_setparam(2)

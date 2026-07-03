@@ -16,6 +16,15 @@
  * the rest cancelable" model deterministic, keeps O_APPEND writes ordered, and
  * avoids a swarm of workers hammering one inode concurrently.
  *
+ * Prioritized I/O (_POSIX_PRIORITIZED_IO): the work queue is kept in
+ * aio_reqprio order (lower value = higher priority, serviced first; FIFO
+ * among equals), so a higher-priority request overtakes lower-priority ones
+ * waiting for the same or a different fd.
+ *
+ * Bound (AIO_MAX / _SC_AIO_MAX): the number of outstanding requests
+ * (submitted but not yet reaped by aio_return) is capped; aio_read /
+ * aio_write / lio_listio fail with EAGAIN once the cap is reached.
+ *
  * All shared state is protected by a single mutex g_lock.  g_work_cv wakes a
  * worker when a request becomes runnable; g_done_cv wakes aio_suspend when any
  * request completes.
@@ -29,6 +38,7 @@
 #include <time.h>
 #include <stdlib.h>
 #include <string.h>
+#include <limits.h>     /* AIO_MAX */
 
 /* Per-request state. */
 enum { REQ_INPROGRESS, REQ_DONE, REQ_CANCELED };
@@ -66,6 +76,12 @@ static pthread_once_t  g_once  = PTHREAD_ONCE_INIT;
 
 static struct aio_req *g_q_head, *g_q_tail;   /* pending work FIFO */
 static struct aio_req *g_all;                 /* every live request */
+
+/* Number of outstanding aio requests — submitted (aio_read/aio_write/
+ * lio_listio) but not yet reaped by aio_return.  Bounded by AIO_MAX:
+ * aio_new_req refuses (EAGAIN) once the bound is reached, which is what
+ * sysconf(_SC_AIO_MAX) advertises.  All accesses hold g_lock. */
+static int g_outstanding;
 
 /* Set of fds currently being serviced by a worker.  At most AIO_NWORKERS can
  * be active at once (one per busy worker), and a given fd appears at most once
@@ -301,16 +317,27 @@ static void aio_pool_init(void)
 
 /* ---- submission ---- */
 
-/* Enqueue a request (caller holds g_lock). */
+/* Enqueue a request (caller holds g_lock).
+ *
+ * Prioritized I/O (_POSIX_PRIORITIZED_IO): the request is inserted in
+ * priority order — a lower aio_reqprio is a higher priority and is serviced
+ * first — with FIFO (submission) order preserved among equal priorities.
+ * The worker scans the queue from the head for the first request whose fd is
+ * not already active, so this ordering directly determines dispatch order.
+ * When every request shares a priority (the common case, e.g. the default
+ * aio_reqprio == 0) the insert walks to the tail and the queue stays a plain
+ * FIFO, identical to the unprioritized behaviour. */
 static void aio_enqueue(struct aio_req *r)
 {
-    r->q_next = NULL;
     r->queued = 1;
-    if (g_q_tail)
-        g_q_tail->q_next = r;
-    else
-        g_q_head = r;
-    g_q_tail = r;
+    int prio = r->cb->aio_reqprio;
+    struct aio_req **pp = &g_q_head;
+    while (*pp && (*pp)->cb->aio_reqprio <= prio)
+        pp = &(*pp)->q_next;
+    r->q_next = *pp;
+    *pp = r;
+    if (r->q_next == NULL)          /* inserted at the end -> new tail */
+        g_q_tail = r;
     r->all_next = g_all;
     g_all = r;
 }
@@ -320,6 +347,12 @@ static void aio_enqueue(struct aio_req *r)
 static struct aio_req *aio_new_req(struct aiocb *cb, int op,
                                    struct aio_group *group)
 {
+    /* POSIX: fail with EAGAIN when the AIO_MAX limit on the number of
+     * outstanding operations would be exceeded. */
+    if (g_outstanding >= AIO_MAX) {
+        errno = EAGAIN;
+        return NULL;
+    }
     struct aio_req *r = calloc(1, sizeof(*r));
     if (!r) {
         errno = EAGAIN;
@@ -338,6 +371,7 @@ static struct aio_req *aio_new_req(struct aiocb *cb, int op,
     r->group = group;
     cb->__aio_impl = r;
     aio_enqueue(r);
+    g_outstanding++;
     return r;
 }
 
@@ -388,7 +422,14 @@ int aio_fsync(int op, struct aiocb *aiocbp)
 
 int aio_error(const struct aiocb *aiocbp)
 {
-    if (!aiocbp || !aiocbp->__aio_impl) { errno = EINVAL; return -1; }
+    /* POSIX ERRORS: aio_error() may fail with [EINVAL] if aiocbp does not
+     * refer to an asynchronous operation whose return status has not yet
+     * been retrieved.  Such an aiocb carries no request object (never
+     * submitted, or already consumed by aio_return); return the error
+     * status EINVAL directly, as aio_error() reports status by return
+     * value rather than via errno. */
+    if (!aiocbp || !aiocbp->__aio_impl)
+        return EINVAL;
     struct aio_req *r = (struct aio_req *)aiocbp->__aio_impl;
     pthread_mutex_lock(&g_lock);
     int s = r->state;
@@ -411,6 +452,9 @@ ssize_t aio_return(struct aiocb *aiocbp)
     }
     ssize_t ret = r->ret;
     int e = r->err;
+    /* The operation's status is now retrieved: it is no longer outstanding. */
+    if (g_outstanding > 0)
+        g_outstanding--;
     /* Unlink from g_all and free — aio_return consumes the request. */
     struct aio_req **pp = &g_all;
     while (*pp) {

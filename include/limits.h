@@ -54,6 +54,16 @@
  * POSIX-conformant code expects to find. */
 #define OPEN_MAX 1024
 
+/* AIO_MAX — maximum number of outstanding asynchronous I/O operations.
+ * librt's worker-pool AIO enforces this: aio_read()/aio_write()/lio_listio()
+ * fail with EAGAIN once this many requests are outstanding (submitted but
+ * not yet reaped by aio_return()).  sysconf(_SC_AIO_MAX) reports the same
+ * value.  Chosen well above the largest concurrent-AIO batch substrate's
+ * own tests submit and comfortably below any single lio_listio ceiling. */
+#ifndef AIO_MAX
+#define AIO_MAX 256
+#endif
+
 /* SSIZE_MAX — maximum value that fits in ssize_t.  ssize_t mirrors
  * long on substrate (4 bytes on i386, 8 on x86_64). */
 #if __SIZEOF_LONG__ == 8
@@ -86,6 +96,8 @@
 #define _POSIX_SSIZE_MAX   32767
 #define _POSIX_STREAM_MAX  8
 #define _POSIX_TZNAME_MAX  6
+#define _POSIX_AIO_MAX     1
+#define _POSIX_AIO_LISTIO_MAX 2
 #endif
 
 #endif

@@ -1501,8 +1501,11 @@ long sysconf(int name) {
     case 12 /* _SC_GETPW_R_SIZE_MAX */: return 1024;  /* getpw*_r buffer hint */
     case 13 /* _SC_GETGR_R_SIZE_MAX */: return 1024;  /* getgr*_r buffer hint */
     case 14 /* _SC_ASYNCHRONOUS_IO */:
-        /* POSIX asynchronous I/O (aio_*) is supported via librt. */
-        return _POSIX_VERSION;
+        /* POSIX asynchronous I/O (aio_*) is supported via librt.  Reported
+         * at the POSIX.1-2001 level: every OPTS aio test gates on
+         * `sysconf(_SC_ASYNCHRONOUS_IO) < 200112L`, and aio_suspend/5-1
+         * additionally requires an exact `== 200112L`. */
+        return _POSIX_ASYNCHRONOUS_IO;
     case 15 /* _SC_MONOTONIC_CLOCK */:
         /* clock_gettime(CLOCK_MONOTONIC) is implemented. */
         return _POSIX_VERSION;
@@ -1526,11 +1529,14 @@ long sysconf(int name) {
         /* clock_nanosleep(2) and pthread_condattr_setclock() are present. */
         return _POSIX_VERSION;
     case 22 /* _SC_PRIORITIZED_IO */:
-        /* librt aio has no per-request priorities. */
-        return -1;
+        /* librt aio honours aio_reqprio (higher priority is serviced first)
+         * and rejects a negative aio_reqprio with EINVAL. */
+        return _POSIX_PRIORITIZED_IO;
     case 23 /* _SC_AIO_MAX */:
-        /* Unbounded (memory-limited) aio request queue — no fixed maximum. */
-        return -1;
+        /* Bounded aio request queue: aio_read/aio_write/lio_listio fail with
+         * EAGAIN once AIO_MAX requests are outstanding (submitted but not yet
+         * reaped by aio_return).  Report the concrete limit, not -1. */
+        return AIO_MAX;
     case 24 /* _SC_SIGQUEUE_MAX */:
         /* Kernel RTSIG_QUEUE_MAX pending queued real-time signals. */
         return 64;
