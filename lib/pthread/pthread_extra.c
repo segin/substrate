@@ -186,9 +186,19 @@ void __pthread_tsd_run_destructors(void) {
 }
 
 /* ---------------- read/write locks ----------------
- * A writer-preferring rwlock over the mutex + condvar.  readers: >0 = that
- * many read holders, -1 = a single write holder, 0 = free.  waiting_writers
- * blocks new readers so writers can't starve. */
+ * A priority-aware rwlock over the mutex + condvar.  readers: >0 = that many
+ * read holders, -1 = a single write holder, 0 = free.  waiting_writers counts
+ * blocked writers.
+ *
+ * At uniform priority (every thread SCHED_OTHER at priority 0 — the common
+ * case) it is writer-preferring: a reader blocks whenever a writer waits, so
+ * writers can't starve.  When threads run under SCHED_FIFO/SCHED_RR at distinct
+ * priorities, POSIX (_POSIX_THREAD_PRIORITY_SCHEDULING) instead orders
+ * acquisition by scheduling priority — a reader is not blocked behind a
+ * strictly-lower-priority waiting writer, and a freed lock goes to the highest-
+ * priority waiter (a writer winning ties with an equal-priority reader).  The
+ * priority logic lives in the block predicates below (rw_reader_blocks /
+ * rw_writer_blocks); see the waiter-registry comment. */
 
 /*
  * Per-thread set of rwlocks this thread holds for WRITING.  Used to detect a
@@ -222,6 +232,102 @@ static void rw_wr_del(pthread_rwlock_t *rw) {
         if (rw_wr_held[i] == rw) { rw_wr_held[i] = NULL; return; }
 }
 
+/*
+ * Priority-aware acquisition registry (POSIX Thread Execution Scheduling).
+ *
+ * substrate's kernel scheduler does not run threads strictly by SCHED_FIFO
+ * priority, and libpthread's pthread_setschedparam only records the requested
+ * policy/priority in the userspace thread registry (pthread_create.c) — so the
+ * POSIX priority ordering of rwlock acquisition is enforced HERE, by consulting
+ * that recorded priority.  Every blocked waiter publishes itself on a global
+ * list with its snapshotted priority and reader/writer kind; the block
+ * predicates consult the list to decide whether the caller must yield to a
+ * competing waiter.  A waiter node lives in the blocking thread's own TLS (a
+ * thread blocks on at most one rwlock at a time), so the list needs no
+ * allocation and scales with the thread count.  Initial-exec TLS model —
+ * libpthread is a startup DT_NEEDED, never dlopen'd.
+ *
+ * The list spinlock is a leaf: it is taken only while already holding an
+ * rwlock's internal mutex (order: rw->lock -> rw_wait_lock) and never across a
+ * blocking call, so it cannot deadlock.
+ */
+struct rw_waiter {
+    struct rw_waiter *next;
+    pthread_rwlock_t *rw;      /* the rwlock this thread is blocked on */
+    int prio;                  /* snapshotted scheduling priority       */
+    int is_writer;             /* 1 = write waiter, 0 = read waiter     */
+};
+static __thread struct rw_waiter rw_self_waiter
+    __attribute__((tls_model("initial-exec")));
+static struct rw_waiter *rw_wait_head;    /* global list of blocked waiters */
+static int rw_wait_lock;                  /* leaf spinlock guarding the list */
+
+static void rw_wait_register(pthread_rwlock_t *rw, int prio, int is_writer) {
+    struct rw_waiter *n = &rw_self_waiter;
+    while (__sync_lock_test_and_set(&rw_wait_lock, 1)) sched_yield();
+    n->rw = rw; n->prio = prio; n->is_writer = is_writer;
+    n->next = rw_wait_head; rw_wait_head = n;
+    __sync_lock_release(&rw_wait_lock);
+}
+static void rw_wait_unregister(void) {
+    struct rw_waiter *n = &rw_self_waiter;
+    while (__sync_lock_test_and_set(&rw_wait_lock, 1)) sched_yield();
+    for (struct rw_waiter **pp = &rw_wait_head; *pp; pp = &(*pp)->next)
+        if (*pp == n) { *pp = n->next; break; }
+    n->next = NULL;
+    __sync_lock_release(&rw_wait_lock);
+}
+/* Is some OTHER thread a blocked WRITER on rw with priority >= myprio?  A reader
+ * yields to a writer of equal-or-higher priority (write precedence on ties). */
+static int rw_writer_ge_waiting(pthread_rwlock_t *rw, int myprio) {
+    int found = 0;
+    while (__sync_lock_test_and_set(&rw_wait_lock, 1)) sched_yield();
+    for (struct rw_waiter *n = rw_wait_head; n; n = n->next)
+        if (n != &rw_self_waiter && n->rw == rw && n->is_writer && n->prio >= myprio) {
+            found = 1; break;
+        }
+    __sync_lock_release(&rw_wait_lock);
+    return found;
+}
+/* Is some OTHER thread a blocked waiter on rw with priority STRICTLY > myprio?
+ * A writer yields only to a strictly-higher-priority waiter (reader or writer). */
+static int rw_waiter_gt_waiting(pthread_rwlock_t *rw, int myprio) {
+    int found = 0;
+    while (__sync_lock_test_and_set(&rw_wait_lock, 1)) sched_yield();
+    for (struct rw_waiter *n = rw_wait_head; n; n = n->next)
+        if (n != &rw_self_waiter && n->rw == rw && n->prio > myprio) {
+            found = 1; break;
+        }
+    __sync_lock_release(&rw_wait_lock);
+    return found;
+}
+
+/* Calling thread's scheduling priority (0 for SCHED_OTHER), read back from the
+ * libpthread thread registry that pthread_setschedparam populates. */
+static int rw_self_priority(void) {
+    int policy = 0;
+    struct sched_param sp;
+    sp.sched_priority = 0;
+    pthread_getschedparam(pthread_self(), &policy, &sp);
+    return sp.sched_priority;
+}
+
+/* Reader block predicate: block while a writer holds the lock, or a waiting
+ * writer of equal-or-higher priority is queued.  At uniform priority this is
+ * exactly the old "readers < 0 || waiting_writers > 0" writer-preference. */
+static int rw_reader_blocks(pthread_rwlock_t *rw, int myprio) {
+    if (rw->readers < 0) return 1;
+    if (rw->waiting_writers == 0) return 0;
+    return rw_writer_ge_waiting(rw, myprio);
+}
+/* Writer block predicate: block while the lock is held, or a strictly-higher-
+ * priority waiter (reader or writer) is queued ahead.  At uniform priority this
+ * is exactly the old "readers != 0". */
+static int rw_writer_blocks(pthread_rwlock_t *rw, int myprio) {
+    if (rw->readers != 0) return 1;
+    return rw_waiter_gt_waiting(rw, myprio);
+}
+
 int pthread_rwlock_init(pthread_rwlock_t *rw, const pthread_rwlockattr_t *attr) {
     (void)attr;
     pthread_mutex_init(&rw->lock, NULL);
@@ -239,8 +345,16 @@ int pthread_rwlock_destroy(pthread_rwlock_t *rw) {
 
 int pthread_rwlock_rdlock(pthread_rwlock_t *rw) {
     pthread_mutex_lock(&rw->lock);
-    while (rw->readers < 0 || rw->waiting_writers > 0)
-        pthread_cond_wait(&rw->cond, &rw->lock);
+    /* Fast path: no writer holds and none waits — priority is irrelevant. */
+    if (rw->readers < 0 || rw->waiting_writers > 0) {
+        int myprio = rw_self_priority();
+        if (rw_reader_blocks(rw, myprio)) {
+            rw_wait_register(rw, myprio, 0);
+            do { pthread_cond_wait(&rw->cond, &rw->lock); }
+            while (rw_reader_blocks(rw, myprio));
+            rw_wait_unregister();
+        }
+    }
     rw->readers++;
     pthread_mutex_unlock(&rw->lock);
     return 0;
@@ -248,7 +362,8 @@ int pthread_rwlock_rdlock(pthread_rwlock_t *rw) {
 
 int pthread_rwlock_tryrdlock(pthread_rwlock_t *rw) {
     pthread_mutex_lock(&rw->lock);
-    int ok = !(rw->readers < 0 || rw->waiting_writers > 0);
+    int ok = (rw->readers >= 0 && rw->waiting_writers == 0) ||
+             !rw_reader_blocks(rw, rw_self_priority());
     if (ok) rw->readers++;
     pthread_mutex_unlock(&rw->lock);
     return ok ? 0 : EBUSY;
@@ -260,10 +375,18 @@ int pthread_rwlock_wrlock(pthread_rwlock_t *rw) {
     if (rw_wr_owned(rw))
         return EDEADLK;
     pthread_mutex_lock(&rw->lock);
-    rw->waiting_writers++;
-    while (rw->readers != 0)
-        pthread_cond_wait(&rw->cond, &rw->lock);
-    rw->waiting_writers--;
+    /* Fast path: lock free and no writer waiting — priority is irrelevant. */
+    if (rw->readers != 0 || rw->waiting_writers > 0) {
+        int myprio = rw_self_priority();
+        if (rw_writer_blocks(rw, myprio)) {
+            rw->waiting_writers++;
+            rw_wait_register(rw, myprio, 1);
+            do { pthread_cond_wait(&rw->cond, &rw->lock); }
+            while (rw_writer_blocks(rw, myprio));
+            rw_wait_unregister();
+            rw->waiting_writers--;
+        }
+    }
     rw->readers = -1;
     rw_wr_add(rw);
     pthread_mutex_unlock(&rw->lock);
@@ -272,7 +395,8 @@ int pthread_rwlock_wrlock(pthread_rwlock_t *rw) {
 
 int pthread_rwlock_trywrlock(pthread_rwlock_t *rw) {
     pthread_mutex_lock(&rw->lock);
-    int ok = (rw->readers == 0);
+    int ok = (rw->readers == 0 && rw->waiting_writers == 0) ||
+             !rw_writer_blocks(rw, rw_self_priority());
     if (ok) rw->readers = -1;
     pthread_mutex_unlock(&rw->lock);
     if (ok) rw_wr_add(rw);
@@ -301,31 +425,38 @@ static int rwlock_deadline_passed(const struct timespec *abstime) {
            (now.tv_sec == abstime->tv_sec && now.tv_nsec >= abstime->tv_nsec);
 }
 
-/* Timed read-lock: block on the writer-preferring predicate until the read
+/* Timed read-lock: block on the (priority-aware) read predicate until the read
  * lock is granted or the absolute CLOCK_REALTIME deadline lapses.  The
  * rwlock's condvar is CLOCK_REALTIME (init'd with a NULL condattr), which is
  * the clock POSIX specifies for these calls. */
 int pthread_rwlock_timedrdlock(pthread_rwlock_t *rw, const struct timespec *abstime) {
     pthread_mutex_lock(&rw->lock);
-    while (rw->readers < 0 || rw->waiting_writers > 0) {
-        int rc = pthread_cond_timedwait(&rw->cond, &rw->lock, abstime);
-        if (rc == ETIMEDOUT && rwlock_deadline_passed(abstime)) {
-            /* Deadline genuinely passed.  Re-check the predicate one last
-             * time before timing out: while we were parked a signal handler
-             * may have run and the lock may have been released — POSIX says
-             * the wait resumes "as if it was not interrupted", so a lock that
-             * is now available must be granted rather than spuriously timing
-             * out (pthread_rwlock_timedrdlock/6-2). */
-            if (rw->readers < 0 || rw->waiting_writers > 0) {
-                pthread_mutex_unlock(&rw->lock);
-                return ETIMEDOUT;
+    if (rw->readers < 0 || rw->waiting_writers > 0) {
+        int myprio = rw_self_priority();
+        if (rw_reader_blocks(rw, myprio)) {
+            rw_wait_register(rw, myprio, 0);
+            for (;;) {
+                int rc = pthread_cond_timedwait(&rw->cond, &rw->lock, abstime);
+                /* Lock available now?  Acquire it, even if we also timed out:
+                 * while we were parked a signal handler may have run and the
+                 * lock been released — POSIX says the wait resumes "as if it was
+                 * not interrupted", so an available lock must be granted rather
+                 * than spuriously timing out (timedrdlock/6-2). */
+                if (!rw_reader_blocks(rw, myprio))
+                    break;
+                if (rc == ETIMEDOUT && rwlock_deadline_passed(abstime)) {
+                    rw_wait_unregister();
+                    pthread_mutex_unlock(&rw->lock);
+                    return ETIMEDOUT;
+                } else if (rc != 0 && rc != ETIMEDOUT) {
+                    rw_wait_unregister();
+                    pthread_mutex_unlock(&rw->lock);
+                    return rc;
+                }
+                /* early timeout / spurious wake / signal: loop re-checks */
             }
-            break;   /* lock available — fall through to acquire */
-        } else if (rc != 0 && rc != ETIMEDOUT) {
-            pthread_mutex_unlock(&rw->lock);
-            return rc;
+            rw_wait_unregister();
         }
-        /* early timeout / spurious wake / signal: loop re-checks the predicate */
     }
     rw->readers++;
     pthread_mutex_unlock(&rw->lock);
@@ -338,28 +469,37 @@ int pthread_rwlock_timedwrlock(pthread_rwlock_t *rw, const struct timespec *abst
     if (rw_wr_owned(rw))
         return EDEADLK;
     pthread_mutex_lock(&rw->lock);
-    rw->waiting_writers++;
-    while (rw->readers != 0) {
-        int rc = pthread_cond_timedwait(&rw->cond, &rw->lock, abstime);
-        if (rc == ETIMEDOUT && rwlock_deadline_passed(abstime)) {
-            /* Re-check before timing out — the lock may have been released
-             * while a signal handler ran (pthread_rwlock_timedwrlock/6-2). */
-            if (rw->readers != 0) {
-                rw->waiting_writers--;
-                pthread_cond_broadcast(&rw->cond);
-                pthread_mutex_unlock(&rw->lock);
-                return ETIMEDOUT;
+    if (rw->readers != 0 || rw->waiting_writers > 0) {
+        int myprio = rw_self_priority();
+        if (rw_writer_blocks(rw, myprio)) {
+            rw->waiting_writers++;
+            rw_wait_register(rw, myprio, 1);
+            for (;;) {
+                int rc = pthread_cond_timedwait(&rw->cond, &rw->lock, abstime);
+                /* Lock free now?  Acquire it, even if we also timed out — the
+                 * lock may have been released while a signal handler ran
+                 * (timedwrlock/6-2). */
+                if (!rw_writer_blocks(rw, myprio))
+                    break;
+                if (rc == ETIMEDOUT && rwlock_deadline_passed(abstime)) {
+                    rw_wait_unregister();
+                    rw->waiting_writers--;
+                    pthread_cond_broadcast(&rw->cond);   /* release readers we blocked */
+                    pthread_mutex_unlock(&rw->lock);
+                    return ETIMEDOUT;
+                } else if (rc != 0 && rc != ETIMEDOUT) {
+                    rw_wait_unregister();
+                    rw->waiting_writers--;
+                    pthread_cond_broadcast(&rw->cond);
+                    pthread_mutex_unlock(&rw->lock);
+                    return rc;
+                }
+                /* early timeout / spurious wake / signal: loop re-checks */
             }
-            break;   /* lock free now — fall through to acquire */
-        } else if (rc != 0 && rc != ETIMEDOUT) {
+            rw_wait_unregister();
             rw->waiting_writers--;
-            pthread_cond_broadcast(&rw->cond);
-            pthread_mutex_unlock(&rw->lock);
-            return rc;
         }
-        /* early timeout / spurious wake / signal: loop re-checks the predicate */
     }
-    rw->waiting_writers--;
     rw->readers = -1;
     rw_wr_add(rw);
     pthread_mutex_unlock(&rw->lock);

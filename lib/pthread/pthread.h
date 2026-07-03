@@ -96,6 +96,14 @@ int pthread_mutexattr_setprotocol(pthread_mutexattr_t *attr, int protocol);
 int pthread_mutexattr_getprotocol(const pthread_mutexattr_t *attr, int *protocol);
 int pthread_mutexattr_setprioceiling(pthread_mutexattr_t *attr, int prioceiling);
 int pthread_mutexattr_getprioceiling(const pthread_mutexattr_t *attr, int *prioceiling);
+/* MUTEX-level priority-ceiling accessors (distinct from the mutexattr ones
+ * above): query, and atomically replace, the priority ceiling of a mutex that
+ * was initialised with the PTHREAD_PRIO_PROTECT protocol.  A mutex of any other
+ * protocol has no ceiling, so both fail with EINVAL.  setprioceiling reports the
+ * previous ceiling through *old_ceiling. */
+int pthread_mutex_getprioceiling(const pthread_mutex_t *mutex, int *prioceiling);
+int pthread_mutex_setprioceiling(pthread_mutex_t *mutex, int prioceiling,
+                                 int *old_ceiling);
 
 /* ---------------- condition variables ----------------
  * Linux/glibc-style sequence-number cond_var built on top of
@@ -160,8 +168,11 @@ int pthread_attr_setinheritsched(pthread_attr_t *attr, int inheritsched);
 int pthread_attr_getinheritsched(const pthread_attr_t *attr, int *inheritsched);
 
 /* ---------------- read/write locks ----------------
- * Built on the mutex + condvar above; writer-preferring so writers don't
- * starve.  The body is public only because callers embed it by value. */
+ * Built on the mutex + condvar above.  Writer-preferring at uniform priority
+ * (so writers don't starve); orders acquisition by SCHED_FIFO/RR scheduling
+ * priority when threads run at distinct priorities (POSIX
+ * _POSIX_THREAD_PRIORITY_SCHEDULING — see lib/pthread/pthread_extra.c).  The
+ * body is public only because callers embed it by value. */
 typedef int pthread_rwlockattr_t;
 typedef struct {
     pthread_mutex_t lock;

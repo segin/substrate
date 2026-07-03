@@ -1549,6 +1549,11 @@ long sysconf(int name) {
     case 26 /* _SC_MAPPED_FILES */:
         /* mmap(2) is implemented. */
         return _POSIX_VERSION;
+    case 27 /* _SC_PRIORITY_SCHEDULING */:
+    case 28 /* _SC_THREAD_PRIORITY_SCHEDULING */:
+        /* SCHED_FIFO / SCHED_RR real-time policies with a 1..99 priority range
+         * are implemented (sched_setscheduler(2)/pthread_setschedparam(3)). */
+        return _POSIX_VERSION;
     default:                        return -1;
     }
 }

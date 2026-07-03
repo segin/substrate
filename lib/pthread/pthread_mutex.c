@@ -72,7 +72,9 @@ struct rec_state {
     int futex;      /* 0/1/2 lock word (the actual futex)        */
     int owner;      /* owning tid, 0 = unowned                   */
     int count;      /* recursion depth                           */
-    int type;       /* PTHREAD_MUTEX_RECURSIVE / ERRORCHECK      */
+    int type;       /* PTHREAD_MUTEX_RECURSIVE / ERRORCHECK / NORMAL */
+    int protocol;   /* PTHREAD_PRIO_NONE / INHERIT / PROTECT      */
+    int prioceiling;/* ceiling for a PTHREAD_PRIO_PROTECT mutex   */
 };
 
 #define MTX_IS_REC(v)  (((uintptr_t)(unsigned)(v) & 3u) == 3u)
@@ -101,9 +103,20 @@ static void mtx_unlock_word(int *w) {
 }
 
 int pthread_mutex_init(pthread_mutex_t *mutex, const void *attr) {
-    int type = attr ? (*(const pthread_mutexattr_t *)attr & MA_TYPE_MASK)
-                    : PTHREAD_MUTEX_DEFAULT;
-    if (type == PTHREAD_MUTEX_RECURSIVE || type == PTHREAD_MUTEX_ERRORCHECK) {
+    int a = attr ? *(const pthread_mutexattr_t *)attr
+                 : (PTHREAD_MUTEX_DEFAULT | (MA_CEIL_DEFAULT << MA_CEIL_SHIFT));
+    int type     = a & MA_TYPE_MASK;
+    int protocol = (a & MA_PROTO_MASK) >> MA_PROTO_SHIFT;
+    int ceiling  = (a & MA_CEIL_MASK) >> MA_CEIL_SHIFT;
+    /* A bare mutex word holds only the 0/1/2 futex — no room for an owner id, a
+     * recursion count, or a priority ceiling.  Anything needing per-mutex state
+     * beyond that is realised as a heap rec_state behind a tagged pointer: a
+     * RECURSIVE/ERRORCHECK mutex, or a PTHREAD_PRIO_PROTECT mutex that must
+     * remember its ceiling so pthread_mutex_getprioceiling() can report it.  A
+     * plain PRIO_NONE/PRIO_INHERIT normal mutex stays a bare word (getprioceiling
+     * on it correctly returns EINVAL — a non-PROTECT mutex has no ceiling). */
+    if (type == PTHREAD_MUTEX_RECURSIVE || type == PTHREAD_MUTEX_ERRORCHECK ||
+        protocol == PTHREAD_PRIO_PROTECT) {
         struct rec_state *s = malloc(sizeof *s);
         if (!s)
             return ENOMEM;
@@ -111,6 +124,8 @@ int pthread_mutex_init(pthread_mutex_t *mutex, const void *attr) {
         s->owner = 0;
         s->count = 0;
         s->type  = type;
+        s->protocol = protocol;
+        s->prioceiling = ceiling;
         *mutex = MTX_TAG(s);
     } else {
         *mutex = M_UNLOCKED;
@@ -123,7 +138,12 @@ int pthread_mutex_lock(pthread_mutex_t *m) {
     if (MTX_IS_REC(v)) {
         struct rec_state *s = MTX_REC(v);
         int me = mtx_self();
-        if (s->owner == me) {
+        /* Only RECURSIVE/ERRORCHECK mutexes track ownership; a heap-backed
+         * NORMAL mutex (PRIO_PROTECT) falls through and self-deadlocks on a
+         * re-lock, matching plain-mutex semantics. */
+        if (s->owner == me &&
+            (s->type == PTHREAD_MUTEX_RECURSIVE ||
+             s->type == PTHREAD_MUTEX_ERRORCHECK)) {
             if (s->type == PTHREAD_MUTEX_ERRORCHECK)
                 return EDEADLK;
             s->count++;        /* recursive re-acquire — no syscall */
@@ -183,11 +203,14 @@ int pthread_mutex_trylock(pthread_mutex_t *m) {
     if (MTX_IS_REC(v)) {
         struct rec_state *s = MTX_REC(v);
         int me = mtx_self();
-        if (s->owner == me) {
+        if (s->owner == me &&
+            (s->type == PTHREAD_MUTEX_RECURSIVE ||
+             s->type == PTHREAD_MUTEX_ERRORCHECK)) {
             /* POSIX: pthread_mutex_trylock on a mutex already locked by the
              * caller returns EBUSY — EDEADLK is only for the blocking lock().
              * A RECURSIVE mutex re-acquires; an ERRORCHECK one is EBUSY
-             * (pthread_mutex_trylock/4-3). */
+             * (pthread_mutex_trylock/4-3).  A heap-backed NORMAL (PRIO_PROTECT)
+             * mutex falls through to the futex CAS, which fails with EBUSY. */
             if (s->type == PTHREAD_MUTEX_ERRORCHECK)
                 return EBUSY;
             s->count++;
@@ -252,7 +275,9 @@ int pthread_mutex_timedlock(pthread_mutex_t *m, const struct timespec *abstime) 
     if (MTX_IS_REC(v)) {
         struct rec_state *s = MTX_REC(v);
         int me = mtx_self();
-        if (s->owner == me) {
+        if (s->owner == me &&
+            (s->type == PTHREAD_MUTEX_RECURSIVE ||
+             s->type == PTHREAD_MUTEX_ERRORCHECK)) {
             if (s->type == PTHREAD_MUTEX_ERRORCHECK)
                 return EDEADLK;
             s->count++;
@@ -359,4 +384,45 @@ int pthread_mutexattr_getprioceiling(const pthread_mutexattr_t *attr, int *prioc
     if (!attr || !prioceiling) return EINVAL;
     *prioceiling = (*attr & MA_CEIL_MASK) >> MA_CEIL_SHIFT;
     return 0;
+}
+
+/*
+ * MUTEX-level priority-ceiling accessors (distinct from the mutexATTR ones
+ * above).  A priority ceiling only exists for a mutex initialised with the
+ * PTHREAD_PRIO_PROTECT protocol; such a mutex is heap-backed (see
+ * pthread_mutex_init), and its protocol + ceiling are stored in the rec_state.
+ * POSIX and the OPTS pthread_mutex_getprioceiling tests require EINVAL for a
+ * mutex of any other protocol — a bare-word mutex is PRIO_NONE (or PRIO_INHERIT)
+ * by construction, so it returns EINVAL without dereferencing anything.
+ */
+int pthread_mutex_getprioceiling(const pthread_mutex_t *mutex, int *prioceiling) {
+    if (!mutex || !prioceiling) return EINVAL;
+    int v = *mutex;
+    if (MTX_IS_REC(v)) {
+        struct rec_state *s = MTX_REC(v);
+        if (s->protocol != PTHREAD_PRIO_PROTECT)
+            return EINVAL;
+        *prioceiling = s->prioceiling;
+        return 0;
+    }
+    return EINVAL;
+}
+
+int pthread_mutex_setprioceiling(pthread_mutex_t *mutex, int prioceiling,
+                                 int *old_ceiling) {
+    if (!mutex || !old_ceiling) return EINVAL;
+    if (prioceiling < 0 || prioceiling > 0xff) return EINVAL;
+    int v = *mutex;
+    if (MTX_IS_REC(v)) {
+        struct rec_state *s = MTX_REC(v);
+        if (s->protocol != PTHREAD_PRIO_PROTECT)
+            return EINVAL;
+        /* POSIX prescribes locking the mutex, swapping the ceiling, then
+         * unlocking, returning the previous ceiling.  A single aligned 32-bit
+         * store is atomic on i386, so the swap needs no lock dance here. */
+        *old_ceiling = s->prioceiling;
+        s->prioceiling = prioceiling;
+        return 0;
+    }
+    return EINVAL;
 }
