@@ -46,6 +46,17 @@ extern "C" {
  * compile time even though the runtime fully supports the option. */
 #define _POSIX_SEMAPHORES        200809L
 
+/* POSIX memory-management options.  Substrate implements mmap(2) with
+ * enforced per-page protection (a write to a PROT_READ mapping faults —
+ * pmap sets PTE_W only when VM_PROT_WRITE is requested), mprotect(2), and
+ * mlockall/munlockall(2) (locking is a no-op truth: no swap, so every page
+ * is already non-swappable).  OPTS gates whole tests on these option
+ * macros — mmap/6 (memory protection) and munlockall/5 (memory locking)
+ * compile out to PTS_UNSUPPORTED when they are undefined, even though the
+ * runtime fully supports the feature. */
+#define _POSIX_MEMORY_PROTECTION 200809L
+#define _POSIX_MEMLOCK           200809L
+
 /* POSIX-2017 §11.1.7: a c_cc[] slot set to _POSIX_VDISABLE disables
  * the associated special-character function.  Substrate matches the
  * Linux/glibc value of 0 (0xff is the BSD convention).  */
