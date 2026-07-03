@@ -49,6 +49,31 @@ static int ksem_ret(long r)
     return 0;
 }
 
+/*
+ * POSIX bounds the number of semaphores a process may have by SEM_NSEMS_MAX
+ * (>= 256), and sem_init()/sem_open() report ENOSPC once it is reached.  The
+ * kernel-backed (pshared / named) semaphores are already limited by the ksem
+ * table, but an unnamed process-local semaphore (sem_init, pshared == 0) is
+ * just a memory word with no kernel object, so libc accounts for those here.
+ */
+static int local_sem_count;
+
+static int local_sem_reserve(void)
+{
+    for (;;) {
+        int n = local_sem_count;
+        if (n >= SEM_NSEMS_MAX)
+            return -1;
+        if (__sync_bool_compare_and_swap(&local_sem_count, n, n + 1))
+            return 0;
+    }
+}
+
+static void local_sem_release(void)
+{
+    __sync_fetch_and_sub(&local_sem_count, 1);
+}
+
 int sem_init(sem_t *sem, int pshared, unsigned int value)
 {
     if (sem == NULL || value > SEM_VALUE_MAX) {
@@ -71,6 +96,12 @@ int sem_init(sem_t *sem, int pshared, unsigned int value)
         return 0;
     }
 
+    /* Process-local unnamed semaphore: charge it against SEM_NSEMS_MAX.
+     * POSIX: sem_init() fails with ENOSPC once the limit is reached. */
+    if (local_sem_reserve() != 0) {
+        errno = ENOSPC;
+        return -1;
+    }
     sem->__sem_kind = __SEM_LOCAL;
     sem->__sem_id   = (int)value;
     sem->__sem_pad[0] = sem->__sem_pad[1] = 0;
@@ -90,7 +121,9 @@ int sem_destroy(sem_t *sem)
         errno = EINVAL;
         return -1;
     }
-    return 0;   /* __SEM_LOCAL: nothing to release */
+    /* __SEM_LOCAL: return its SEM_NSEMS_MAX charge (see sem_init). */
+    local_sem_release();
+    return 0;
 }
 
 /*
@@ -291,8 +324,11 @@ int sem_wait(sem_t *sem)
             }
             continue;
         }
-        /* count is 0: block until a post raises it (re-checked on wake) */
-        syscall(SYS_FUTEX, (long)&sem->__sem_id, FUTEX_WAIT, 0, 0, 0, 0);
+        /* count is 0: block until a post raises it (re-checked on wake).
+         * A signal that interrupts the wait must surface as -1/EINTR rather
+         * than silently re-blocking (POSIX; sem_timedwait/9-1). */
+        long fr = syscall(SYS_FUTEX, (long)&sem->__sem_id, FUTEX_WAIT, 0, 0, 0, 0);
+        if (fr == -EINTR) { errno = EINTR; return -1; }
     }
 }
 
@@ -332,12 +368,14 @@ int sem_timedwait(sem_t *restrict sem, const struct timespec *restrict abs_timeo
                 rel.tv_nsec = abs_timeout->tv_nsec - now.tv_nsec;
                 if (rel.tv_nsec < 0) { rel.tv_sec--; rel.tv_nsec += 1000000000L; }
                 if (rel.tv_sec < 0) { errno = ETIMEDOUT; return -1; }
-                syscall(SYS_FUTEX, (long)&sem->__sem_id, FUTEX_WAIT, 0,
-                        (long)&rel, 0, 0);
+                long fr = syscall(SYS_FUTEX, (long)&sem->__sem_id, FUTEX_WAIT, 0,
+                                  (long)&rel, 0, 0);
+                if (fr == -EINTR) { errno = EINTR; return -1; }
                 continue;
             }
         }
-        syscall(SYS_FUTEX, (long)&sem->__sem_id, FUTEX_WAIT, 0, 0, 0, 0);
+        long fr = syscall(SYS_FUTEX, (long)&sem->__sem_id, FUTEX_WAIT, 0, 0, 0, 0);
+        if (fr == -EINTR) { errno = EINTR; return -1; }
     }
 }
 

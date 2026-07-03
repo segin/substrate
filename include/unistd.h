@@ -39,6 +39,12 @@ extern "C" {
 #define _POSIX_MONOTONIC_CLOCK   200809L
 #define _POSIX_CPUTIME           200809L
 #define _POSIX_THREAD_CPUTIME    200809L
+/* POSIX unnamed + named semaphores (sem_init/sem_open/sem_wait/sem_post/...)
+ * are implemented (libc semaphore.c over the kernel ksem objects).  OPTS's
+ * functional semaphore tests compile out to PTS_UNRESOLVED under
+ * "ifndef _POSIX_SEMAPHORES", so leaving it undefined disables them at
+ * compile time even though the runtime fully supports the option. */
+#define _POSIX_SEMAPHORES        200809L
 
 /* POSIX-2017 §11.1.7: a c_cc[] slot set to _POSIX_VDISABLE disables
  * the associated special-character function.  Substrate matches the

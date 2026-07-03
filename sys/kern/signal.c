@@ -80,6 +80,27 @@ static int rtsig_enqueue(process_t *p, int sig, int code, union sigval val) {
 }
 
 /*
+ * signal_rt_post - queue one thread/pthread-directed real-time signal.
+ *
+ * thr_kill(2)/pthread_kill(3) of a real-time signal must enqueue a distinct
+ * instance on the target process's RT queue, exactly as the process-directed
+ * kill()/psignal_info() path does (POSIX: RT signals queue however they are
+ * generated).  Standard signals coalesce and need no queue, so this is a
+ * no-op for them, as is a signo already owning a pending timer notification.
+ * rtsig_enqueue() also sets the per-thread pending bits under rtsig_lock, so
+ * the caller's own `sig_pending |= sigmask(sig)` afterwards is idempotent.
+ * Returns 0 on success/no-op, -EAGAIN if the RT queue is full.
+ */
+int signal_rt_post(process_t *p, int sig) {
+    if (!p || !SIG_IS_RT(sig))
+        return 0;
+    if (p->sig_timer_pend & sigmask(sig))
+        return 0;
+    union sigval v = { .sival_int = 0 };
+    return rtsig_enqueue(p, sig, SI_USER, v);
+}
+
+/*
  * rtsig_dequeue - remove the oldest queued instance of `sig` from `p`.
  *
  * On success fills *code / *val from that instance, returns 1, and sets
@@ -193,6 +214,28 @@ static void sigwait_consume(int sig, int *code, union sigval *val,
         __sync_fetch_and_and(&current_process->sig_qpend, ~sigmask(sig));
     }
     __sync_fetch_and_and(&current_thread->sig_pending, ~sigmask(sig));
+
+    /* A standard signal is a single (coalesced) process instance, but a
+     * process-directed post (kill/raise-to-process) sets the pending bit on
+     * EVERY thread (see psignal_info) — there is no separate process-level
+     * pending set here.  So when one thread synchronously accepts the signal,
+     * clear that bit from every sibling too, so the one process-directed
+     * instance is consumed exactly once: otherwise each of several threads
+     * blocked in sigwait() sees its own copy and all wake (sigwait/6-1
+     * requires exactly one).  Clearing only the threads currently marked as
+     * waiters is not enough — a sibling that reaches sigwait() slightly later
+     * would still find the bit set and double-consume — so the clear must
+     * cover the whole process.  Standard signals coalesce (no queue), so this
+     * is consistent with a concurrent thread-directed post collapsing into the
+     * same single pending bit; a real-time signal never reaches here (it is
+     * dequeued from the process rtsig_q[] above, one instance per accept). */
+    if (current_process) {
+        uint32_t clr = ~sigmask(sig);
+        FOREACH_THREAD(t) {
+            if (t != current_thread && t->proc == current_process)
+                __sync_fetch_and_and(&t->sig_pending, clr);
+        }
+    }
 }
 
 static void signal_interrupt_thread(thread_t *t) {
@@ -550,7 +593,10 @@ int kern_sigsuspend(const uint32_t *mask) {
      */
     current_thread->sig_mask_suspend = old_mask;
     current_thread->sig_mask_suspend_active = 1;
-    return -1; /* Always returns -1 (EINTR) per POSIX */
+    /* POSIX: sigsuspend() always returns -1 with errno EINTR.  Return the
+     * negative errno so libc's __set_errno maps it to EINTR — a bare -1
+     * would become EPERM and break sigpause/2-1 (EINTR check) and 3-1. */
+    return -EINTR;
 }
 
 int kern_sigaltstack(const stack_t *ss, stack_t *oss) {
@@ -564,13 +610,20 @@ int kern_sigaltstack(const stack_t *ss, stack_t *oss) {
     }
     
     if (ss) {
-        if (current_thread->sig_on_stack) return -1; // EPERM/EINVAL
+        /* Cannot change the alternate stack while executing on it (EPERM). */
+        if (current_thread->sig_on_stack) return -EPERM;
+        /* SS_DISABLE is the only flag valid on input (0 == establish a
+         * stack); any other bit set is invalid.  sigaltstack/11-1 passes
+         * ss_flags = SS_DISABLE+1 and expects EINVAL. */
+        if (ss->ss_flags & ~(int)SS_DISABLE) return -EINVAL;
         if (ss->ss_flags & SS_DISABLE) {
              current_thread->sig_alt_stack.ss_sp = NULL;
              current_thread->sig_alt_stack.ss_size = 0;
              current_thread->sig_alt_stack.ss_flags = SS_DISABLE;
         } else {
-             if (ss->ss_size < MINSIGSTKSZ) return -1; // ENOMEM/EINVAL
+             /* An alternate stack smaller than MINSIGSTKSZ is ENOMEM
+              * (sigaltstack/12-1). */
+             if (ss->ss_size < MINSIGSTKSZ) return -ENOMEM;
              current_thread->sig_alt_stack = *ss;
              current_thread->sig_alt_stack.ss_flags &= ~(SS_DISABLE | SS_ONSTACK);
         }
