@@ -78,6 +78,12 @@ inject_lib() {   # inject_lib <hostfile> <name>
 inject_lib "${SUBSTRATE_TOP}/lib/c/libc.so.0" libc.so.0
 inject_lib "${SUBSTRATE_TOP}/lib/pthread/libpthread.so.0" libpthread.so.0
 inject_lib "${SUBSTRATE_TOP}/lib/rt/librt.so.0" librt.so.0
+# libsys.so.0 carries the raw syscall() signal-safety fix (the thunk no
+# longer strands its return address below esp across int $0x80, so a signal
+# delivered on a syscall return can't clobber it).  Without refreshing it here
+# the aio/RT-signal-heavy tests (lio_listio/3-1,4-1,10-1,14-1,15-1) still bind
+# the stale on-image libsys and SIGSEGV at EIP=0.
+inject_lib "${SUBSTRATE_TOP}/lib/sys/libsys.so.0" libsys.so.0
 
 TESTIMG="${WORK}/opts-test.img"
 
