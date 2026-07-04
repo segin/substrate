@@ -377,6 +377,27 @@ rescan:
         thread_t *candidate = t;
         do {
             if (candidate->state != THREAD_READY) break;
+            /*
+             * Never schedule a thread whose process has already exited.  A
+             * thread is set THREAD_ZOMBIE by proc_exit() and then voluntarily
+             * gives up the CPU, parked mid-proc_exit().  A stale wake that
+             * races that teardown can flip it back to THREAD_READY (the
+             * sleepq/turnstile "don't resurrect a STOPPED/ZOMBIE waiter"
+             * class): the thread's process is SZOMB but its thread state is
+             * READY, an impossible-in-steady-state combination.  Switching
+             * into such a resurrected zombie makes switch_to() return into
+             * proc_exit()'s post-yield while(1) -- a preempt-disabled spin
+             * that wedges the CPU -- or, once wait4() has reaped and freed its
+             * kernel stack, into a freed/reused stack, faulting in the kernel
+             * at a garbage EIP (observed EIP=0x282 / a thread_t address under
+             * OPTS signals/sigaction/9-1's job-control SIGSTOP/SIGCONT churn).
+             * Correct the erroneous resurrection back to ZOMBIE -- so wait4()
+             * still observes it as reapable -- and skip it.
+             */
+            if (candidate->proc && candidate->proc->state == SZOMB) {
+                candidate->state = THREAD_ZOMBIE;
+                break;
+            }
             if (!sched_can_run_on_cpu(candidate, cpu_id)) break;
 
             /* Rebase a timeshare thread that has fallen behind the minimum
