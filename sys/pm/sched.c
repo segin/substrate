@@ -60,6 +60,16 @@ static thread_t *tid_hash[TID_HASH_SIZE];
 static int next_tid = 1;
 static spinlock_t tid_lock;
 
+/*
+ * Round-robin cursor for sched_yield(): the thread picked last time, so equal-
+ * priority threads get fair turns.  It is file-scope (not a sched_yield local)
+ * precisely so sched_unlink_locked() can clear it the instant the thread it
+ * points at is unlinked/reaped — otherwise the cursor dangles at freed storage
+ * and the next pick dereferences rr_last->t_allthread_next as a use-after-free
+ * (see sched_unlink_locked and sched_yield).
+ */
+static thread_t *rr_last = NULL;
+
 
 #include <kern/arch.h>
 #include <arch/i386/percpu.h>
@@ -98,6 +108,17 @@ static void sched_link_locked(thread_t *t) {
 
 static void sched_unlink_locked(thread_t *t) {
     thread_t **link;
+
+    /* Drop the round-robin cursor if it points at the thread being unlinked.
+     * sched_reap_thread() frees t's storage immediately after this call, so a
+     * lingering rr_last would dangle: the next sched_yield() reads
+     * rr_last->t_allthread_next off freed memory.  While the freed thread_t is
+     * still pristine that read yields the NULL we store below (harmless — the
+     * pick falls back to the list head), but once the slab is recycled for
+     * another thread_t the field is arbitrary and the pick walks a wild list —
+     * a cumulative, churn-triggered use-after-free that triple-faults the box. */
+    if (rr_last == t)
+        rr_last = NULL;
 
     for (link = &allthread; *link; link = &(*link)->t_allthread_next) {
         if (*link == t) {
@@ -344,12 +365,12 @@ void sched_yield(void) {
     sched_class_t best_class = SCHED_IDLE;
 
     /*
-     * Round-robin cursor: the thread we picked last time.  We start
-     * scanning at its successor (wrapping past tail back to head) so
-     * equal-priority threads get fair turns regardless of which order
-     * they were linked in.
+     * Round-robin cursor (file-scope rr_last): the thread we picked last time.
+     * We start scanning at its successor (wrapping past tail back to head) so
+     * equal-priority threads get fair turns regardless of which order they were
+     * linked in.  sched_unlink_locked() nulls rr_last when its target is
+     * reaped, so it can never dangle at freed storage here.
      */
-    static thread_t *rr_last = NULL;
 
     if (!allthread) {
         intr_restore(_pflags);

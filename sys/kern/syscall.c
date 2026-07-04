@@ -9,6 +9,7 @@
 /* Kernel internal includes */
 #include <kern/sched.h>
 #include <kern/sleepq.h>
+#include <sys/preempt.h>
 #include <kern/version.h>
 #include <kern/panic.h>
 #include <kern/console.h>
@@ -1247,6 +1248,23 @@ int kern_thr_new(struct thr_param *param, int param_size) {
 
 int sys_thr_exit(void *retval) {
     current_thread->retval = retval;
+    /*
+     * Become non-preemptible before publishing THREAD_ZOMBIE.  The instant we
+     * mark ourselves zombie and wake our joiner, a pthread_join() waiter is
+     * eligible to run and reap us — sched_reap_thread() frees THIS thread's
+     * kernel stack and thread_t.  With kernel preemption enabled, a timer tick
+     * landing between the store below and the final sched_yield() switches to
+     * that just-woken joiner, which frees our stack/storage while we are still
+     * executing on it: a use-after-free that scribbles kernel-heap state and,
+     * under sustained thread create/join churn (the OPTS pthread-primitive and
+     * semaphore tests), non-deterministically triple-faults the guest.  This is
+     * the per-thread twin of the proc_exit() window (see sys/pm/process.c); the
+     * fix is identical.  We never re-enable — this thread does not return; the
+     * joiner that reaps us runs with its own preempt state, and the voluntary
+     * sched_yield() below still switches (preempt_count only gates the
+     * involuntary timer-IRQ path, not a voluntary yield).
+     */
+    preempt_disable();
     current_thread->state = THREAD_ZOMBIE;
     sleepq_wake_all(current_thread);
     sched_yield();
