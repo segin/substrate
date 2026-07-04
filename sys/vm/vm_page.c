@@ -612,15 +612,37 @@ void vm_page_unwire(vm_page_t *m) {
 }
 
 // Hold page (increment ref_count for mapping)
+//
+// ATOMIC: the same physical frame's ref_count is mutated concurrently by
+// fork (pmap_fork -> vm_page_hold on every shared COW page) and by exit
+// (pmap_destroy -> vm_page_unhold) across unrelated processes.  On a single
+// CPU these interleave when a timer preempt lands mid read-modify-write; on
+// SMP they race outright.  A plain `m->ref_count++/--` is a non-atomic RMW:
+// under massive concurrent fork/exit (OPTS shm_open/23-1 forks 1000 COW-
+// sharing children) a lost update drops the count below the number of live
+// mappings, so pmap_destroy's `pv_list==NULL && ref_count==1` gate fires
+// while the frame is STILL mapped elsewhere -> vm_page_free() -> the frame is
+// handed back to the buddy allocator and reused as a page table / kernel
+// object while a stale PTE still points at it -> silent memory corruption ->
+// wild control flow -> unhandled kernel exception whose panic path re-faults
+// on the corrupted state -> triple fault (hard reset, no message).  Making
+// the count atomic keeps it exactly equal to the live-mapping count so the
+// free gate can never free a mapped frame.
 void vm_page_hold(vm_page_t *m) {
 	if(!m) return;
-	m->ref_count++;
+	__sync_fetch_and_add(&m->ref_count, 1);
 }
 
-// Unhold page (decrement ref_count, free if zero and not wired)
+// Unhold page (decrement ref_count).  Saturating atomic decrement: never
+// underflow the uint16_t (a wrap to 65535 would strand the frame forever).
+// See vm_page_hold() for why this must be atomic.
 void vm_page_unhold(vm_page_t *m) {
-	if(!m || m->ref_count == 0) return;
-	m->ref_count--;
+	if(!m) return;
+	uint16_t old;
+	do {
+		old = m->ref_count;
+		if(old == 0) return;
+	} while(!__sync_bool_compare_and_swap(&m->ref_count, old, (uint16_t)(old - 1)));
 	// Note: Page is freed by vm_page_free() when no longer needed
 	// ref_count reaching 0 indicates no active mappings, but page may
 	// still be cached in inactive queue for potential reuse
