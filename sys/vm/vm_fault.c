@@ -207,6 +207,18 @@ int vm_fault(vm_map_t *map, uintptr_t va, uint8_t prot) {
         vm_object_t *fill_obj = source.object ? source.object : first_obj;
         uint64_t fill_pindex = source.object ? source.pindex : pindex;
 
+        /* A whole page beyond the end of a file-backed (vnode) object.  Its
+         * pager reports no page for this index (page_limit is derived from the
+         * file size), and it cannot be paged in — the reference lies entirely
+         * past the object, not in the partial last page (which the pager DOES
+         * report and tail-zero-fills).  POSIX requires SIGBUS here, not a
+         * silent zero-fill of out-of-object memory (mmap/11-2, 11-3). */
+        if (fill_obj->type == VM_OBJ_TYPE_VNODE && fill_obj->pager &&
+            !vm_pager_has_page(fill_obj->pager, fill_pindex)) {
+            result = VM_FAULT_SIGBUS;
+            goto out;
+        }
+
         m = vm_page_alloc(fill_obj, fill_pindex, 0);
         if (!m) {
             oom = 1;

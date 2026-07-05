@@ -340,6 +340,19 @@ void isr_handler(registers_t *regs) {
                     signal_handle_pending(regs);
                     return;
                 }
+                /* Reference to a whole page beyond the end of the memory
+                 * object backing a valid mapping (e.g. the second page of a
+                 * two-page mapping of a half-page ftruncate'd file/shm
+                 * object).  POSIX mandates SIGBUS (BUS_ADRERR), distinct from
+                 * the SIGSEGV a wild pointer gets (mmap/11-2, 11-3). */
+                if (vfr == VM_FAULT_SIGBUS && is_usermode && current_process) {
+                    if (current_thread && current_thread->proc == current_process) {
+                        current_thread->trap_addr = cr2;
+                    }
+                    trapsignal(current_process, SIGBUS, BUS_ADRERR);
+                    signal_handle_pending(regs);
+                    return;
+                }
             }
 
             /* Demand-paged user stack: a not-present fault inside the
