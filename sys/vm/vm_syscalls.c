@@ -29,7 +29,26 @@
 #define MAP_ANONYMOUS 0x020
 #define MAP_NORESERVE 0x0040  /* FreeBSD historical value */
 
+#define MCL_CURRENT   0x01    /* mlockall(2): lock current mappings */
 #define MCL_FUTURE    0x02    /* mlockall(2): lock future mappings */
+
+/*
+ * mlockall(MCL_CURRENT): lock every page already mapped into the address
+ * space by wiring every current map entry.  Substrate has no swap, so wiring
+ * changes no paging behaviour, but it is the state msync(MS_INVALIDATE) tests
+ * for when it must fail with EBUSY on a locked range (mlockall/3-6, 3-7).
+ */
+void vm_apply_mlockall(vm_map_t *map, int flags) {
+    if (!map || !(flags & MCL_CURRENT))
+        return;
+    vm_map_lock(map);
+    for (vm_map_entry_t *cur = map->header->next; cur != map->header;
+         cur = cur->next) {
+        cur->wire_count++;
+        cur->flags |= VME_WIRED;
+    }
+    vm_map_unlock(map);
+}
 
 static int mmap_validate_flags(int flags) {
     int sharing = flags & (MAP_SHARED | MAP_PRIVATE);
@@ -667,14 +686,31 @@ void *sys_brk(void *addr) {
 int sys_msync(void *addr, size_t length, int flags) {
     if (!current_process || !current_process->vm_map) return -1;
     if (length == 0) return 0;
-    
-    (void)flags;  // Treat all as synchronous for now
-    
+
     vm_map_t *map = current_process->vm_map;
     uintptr_t start = (uintptr_t)addr & ~0xFFF;
     uintptr_t end = ((uintptr_t)addr + length + 0xFFF) & ~0xFFF;
     vm_map_lock_read(map);
-    
+
+    /* MS_INVALIDATE asks to discard cached copies so a subsequent reference
+     * re-reads the object.  POSIX forbids this while any page in the range is
+     * memory-locked (mlock/mlockall) and mandates EBUSY instead — invalidating
+     * a locked page would let it be re-fetched, defeating the lock
+     * (mlockall/3-6, 3-7). */
+    if (flags & MS_INVALIDATE) {
+        for (uintptr_t va = start; va < end; va += 0x1000) {
+            vm_map_entry_t *entry = NULL;
+            for (vm_map_entry_t *cur = map->header->next; cur != map->header; cur = cur->next) {
+                if (va >= cur->start && va < cur->end) { entry = cur; break; }
+                if (va < cur->start) break;
+            }
+            if (entry && (entry->flags & VME_WIRED)) {
+                vm_map_unlock_read(map);
+                return -EBUSY;
+            }
+        }
+    }
+
     // Walk the range and flush dirty pages
     for (uintptr_t va = start; va < end; va += 0x1000) {
         vm_map_entry_t *entry = NULL;

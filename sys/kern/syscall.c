@@ -2828,6 +2828,10 @@ int sys_native_mlockall(int flags) {
     /* Flag validation happens in libc; record the request so a subsequent
      * mmap() can apply the MCL_FUTURE memlock-limit check. */
     current_process->mlockall_flags = (uint32_t)flags;
+    /* MCL_CURRENT: lock (wire) every page already mapped so a later
+     * msync(MS_INVALIDATE) over any of them fails with EBUSY (mlockall/3-6,
+     * 3-7).  The MCL_* flag interpretation lives in vm_syscalls.c. */
+    vm_apply_mlockall(current_process->vm_map, flags);
     return 0;
 }
 
