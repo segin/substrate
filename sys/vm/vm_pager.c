@@ -34,6 +34,8 @@ typedef struct vm_device_pager {
     size_t size;
     uint8_t prot;
     uint8_t cache_mode;   /* VM_PAGER_CACHE_UC (default) or _WC */
+    void (*dtor)(void *arg);  /* last-unmap callback (shmfs frame release) */
+    void *dtor_arg;
 } vm_device_pager_t;
 
 vm_pager_t *vm_pager_allocate(vm_object_type_t type, void *handle, size_t size, uint8_t prot, uint64_t offset) {
@@ -123,11 +125,28 @@ static struct vm_pager *device_alloc(void *handle, size_t size, uint8_t prot, ui
     pager->size = size;
     pager->prot = prot;
     pager->cache_mode = VM_PAGER_CACHE_UC;   /* strict MMIO by default */
+    pager->dtor = NULL;
+    pager->dtor_arg = NULL;
     return &pager->base;
 }
 
 static void device_dealloc(struct vm_pager *pager) {
+    vm_device_pager_t *device = (vm_device_pager_t *)pager;
+    /* Last mapping of the owning device object is gone (ref_count hit 0).
+     * Notify the backer (e.g. shmfs) so it can drop its mapping reference
+     * before we free the pager struct. */
+    if (device->dtor) {
+        device->dtor(device->dtor_arg);
+    }
     kfree(pager, sizeof(vm_device_pager_t));
+}
+
+void vm_pager_device_set_dtor(vm_pager_t *pager, void (*dtor)(void *), void *arg) {
+    if (!pager || pager->ops != &device_pager_ops) {
+        return;
+    }
+    ((vm_device_pager_t *)pager)->dtor = dtor;
+    ((vm_device_pager_t *)pager)->dtor_arg = arg;
 }
 
 static bool device_haspage(struct vm_pager *pager, uint64_t pindex) {
