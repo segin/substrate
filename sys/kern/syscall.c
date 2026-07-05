@@ -454,6 +454,29 @@ int truncate_fs(fs_node_t *node, off_t length) {
     return -EINVAL;
 }
 
+/*
+ * True when a SIGKILL is pending on the calling thread.  A multi-megabyte
+ * read()/write() loops over the block device one IO_CHUNK_SIZE piece at a
+ * time and can run for tens of seconds on a slow disk path (substrate's AHCI
+ * driver polls, with completion latency of ~one timer tick per 1 KiB command),
+ * all in kernel mode without returning to userspace.  Without an escape hatch
+ * a SIGKILL cannot be delivered until the whole loop finishes, so the process
+ * looks unkillable -- kill -9 has no effect for the duration.  That is exactly
+ * how the OPTS aio_suspend/{1-1,4-1} tests (which write/read 10-38 MiB) made
+ * the harness see a "kernel wedge": the per-test watchdog's kill -9 was a
+ * no-op, wait(2) never returned, and the serial log went silent (marked
+ * PANIC) even though the kernel was alive and the I/O was merely slow.
+ *
+ * psignal() sets the pending bit on *every* thread of the target process, so
+ * this catches a process-directed kill no matter which thread runs the I/O
+ * (e.g. an aio worker thread).  SIGKILL can't be caught, blocked or ignored,
+ * so a pending SIGKILL always terminates the process -- reacting to it here
+ * never changes observable behaviour for a process that is not being killed.
+ */
+static inline int io_sigkill_pending(void) {
+    return current_thread && (current_thread->sig_pending & sigmask(SIGKILL));
+}
+
 ssize_t sys_write(int fd, const char *buf, size_t len) {
     if (len == 0) return 0;
 
@@ -469,6 +492,11 @@ ssize_t sys_write(int fd, const char *buf, size_t len) {
 
     ssize_t total_written = 0;
     while (len > 0) {
+        /* Stay killable across a long write (see io_sigkill_pending). */
+        if (io_sigkill_pending()) {
+            kfree(kbuf, IO_CHUNK_SIZE);
+            return total_written > 0 ? total_written : -EINTR;
+        }
         size_t to_write = (len > IO_CHUNK_SIZE) ? IO_CHUNK_SIZE : len;
         if (copyin(buf + total_written, kbuf, to_write) != 0) {
             kfree(kbuf, IO_CHUNK_SIZE);
@@ -538,6 +566,12 @@ ssize_t sys_read(int fd, char *buf, size_t len) {
      * otherwise.  Cleared on every return path. */
     if (current_thread) current_thread->io_file = f;
     while (len > 0) {
+        /* Stay killable across a long read (see io_sigkill_pending). */
+        if (io_sigkill_pending()) {
+            kfree(kbuf, 4096);
+            if (current_thread) current_thread->io_file = NULL;
+            return total_read > 0 ? total_read : -EINTR;
+        }
         size_t to_read = (len > 4096) ? 4096 : len;
         ssize_t bytes = (ssize_t)read_fs((fs_node_t*)f->f_data, f->f_offset, to_read, (uint8_t*)kbuf);
         if (bytes <= 0) {
