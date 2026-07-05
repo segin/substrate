@@ -66,14 +66,32 @@ This needs the rare A-exits-while-B-in-lockmgr interleaving during
 file-I/O-heavy pthread tests, so it only accumulates in the full suite —
 matching "full-suite-only, after ~600 tests".
 
-## Fix (planned)
+## Fix (applied — sys/kern/turnstile.c)
 Turnstile waking is fully REDUNDANT with the sleepq (every turnstile_block
 site is immediately followed by sleepq_add; every turnstile_release site
 by sleepq_wake_all). The turnstile's real job is priority inheritance, not
-waking. So:
-- `turnstile_release()` must NOT walk waiters or touch their state/next —
-  leave waking to the guarded `sleepq_wake_all()`. This kills both the
-  resurrect and the UAF read in one stroke, no thread_t change.
-- Keep the THREAD_ZOMBIE guard parity note for defense in depth.
+waking. So `turnstile_release()` now:
+- restores the (live) owner's inherited priority, and recycles the turnstile;
+- NO LONGER walks waiters or touches waiter->state / waiter->next — waking is
+  left to the guarded `sleepq_wake_all()` (STOPPED + ZOMBIE).
+This kills BOTH the resurrect (no state write) and the UAF read of a
+zombie/freed waiter (no walk) in one place, with no thread_t change. With this
+path fixed, NO kernel wake path can flip a zombie to READY, so the
+sched-backstop's SDYING-window gap is moot (nothing resurrects to reach it).
 
-To be CONFIRMED by GDB against a live reproduction before finalizing.
+Once the turnstile no longer resurrects, every remaining wake path is safe:
+sleepq (STOPPED+ZOMBIE guarded), sched_wakeup_n (gates on THREAD_BLOCKED),
+psignal (bails on SDYING/SZOMB procs), SIGCONT/resume (only flips STOPPED).
+
+## Verification
+Rebased onto current main (7cceccd39, which carries the orthogonal
+"killable large read/write" aio fix) so BEFORE = main and AFTER = main + this
+turnstile commit differ by EXACTLY this change and neither hangs on aio.
+
+- standalone signals/sigaction/1-1, 9-1, 10-1 — PASS on the fixed kernel.
+- boot to display manager: fixed kernel boots through ext2 root mount, devfs/
+  procfs/sysfs, init(pid 1), and the whole rc.d sequence to
+  `/etc/rc.d/60-sdm start` with ZERO panics (the fs/vnode/namecache lockmgr
+  paths that use turnstiles are exercised heavily here).
+- full-prefix OPTS run (all 1333 tests up to and incl. sigaction/9-1),
+  BEFORE (buggy) vs AFTER (fixed): see run results (in progress).
