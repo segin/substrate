@@ -210,6 +210,28 @@ static int proc_timer_fire(process_t *p, int which) {
     }
 
     /*
+     * Lockless fast-path.  timer_tick_context() calls this for EVERY process
+     * (FOREACH_PROC) on every HZ tick, but the overwhelming majority have no
+     * armed ITIMER_REAL/VIRTUAL.  Taking p->itimer_lock is not free: the
+     * spinlock acquire and release each issue an MMIO LAPIC read (lapic_get_id,
+     * for the owner-cpu id), which is expensive — especially under emulation.
+     * Under a fork storm (e.g. OPTS shm_open/23-1 forks 1000 procs) that is
+     * thousands of MMIO reads per tick, so the tick handler cannot complete
+     * before the next tick fires and the machine livelocks (serial silent, no
+     * forward progress — diagnosed via the qemu gdb stub: PC pinned in
+     * lapic_read, reached from proc_timer_fire's spinlock ops, for every one of
+     * the 1000 timerless procs).  A disarmed timer has itimer_value_ticks[idx]
+     * == 0; read it locklessly and bail before the lock.  The read races only
+     * with a concurrent setitimer arming the timer, in which case the next tick
+     * picks it up — identical to the "skip this tick" behaviour of the
+     * try_acquire path below.  Mirrors the n_ptimers_armed fast-path that
+     * proc_ptimers_fire() already uses.
+     */
+    if (p->itimer_value_ticks[idx] == 0) {
+        return 0;
+    }
+
+    /*
      * Called from timer IRQ context.  If the syscall path on the SAME CPU
      * (e.g. proc_exit -> proc_timers_cancel, sys_setitimer) is mid-update
      * and holds itimer_lock, our blocking acquire would deadlock — the
