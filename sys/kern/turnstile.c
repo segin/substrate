@@ -158,38 +158,50 @@ void turnstile_block(void *lockobj, thread_t *owner) {
     ts_unlock();
 }
 
-// Called when lock holder releases lock
+// Called when lock holder releases lock.
+//
+// The turnstile exists ONLY for priority inheritance.  It deliberately does
+// NOT wake waiters: every lockmgr() waiter that calls turnstile_block() also
+// enqueues itself on the lock's sleepq (sleepq_add), and every
+// turnstile_release() caller immediately follows with sleepq_wake_all() — the
+// authoritative wake path, which already guards THREAD_STOPPED *and*
+// THREAD_ZOMBIE before flipping a waiter to THREAD_READY.
+//
+// Historically this function ALSO walked ts_waiters and forced each to
+// THREAD_READY.  That was redundant with the sleepq wake AND unsafe:
+//   - turnstile_block() links waiters through thread->next, the SAME field
+//     sleepq_add() then overwrites, so the ts_waiters chain is aliased/stale.
+//   - there is no turnstile_remove_thread(), so proc_exit() (which pulls an
+//     exiting thread off its sleepqs, sys/pm/process.c) leaves a dying thread
+//     on ts_waiters.  A later release then flipped a THREAD_ZOMBIE waiter back
+//     to READY (this walk lacked the ZOMBIE guard) or, once wait4() had reaped
+//     it, wrote through a FREED thread_t.  Either way a dead/garbage thread
+//     became THREAD_READY; the scheduler backstop only catches proc->state ==
+//     SZOMB (not the SDYING window), so it got picked and arch_switch_to()
+//     returned into a stale kernel stack / proc_exit()'s preempt-disabled
+//     post-yield spin — the silent full-suite-only wedge at OPTS
+//     signals/sigaction/9-1.  Leaving the wake to sleepq_wake_all() removes
+//     both hazards.
 void turnstile_release(void *lockobj) {
     ts_lock();
-    
+
     turnstile_t *ts = turnstile_lookup(lockobj);
     if (!ts) {
         ts_unlock();
         return;
     }
-    
-    // Restore original priority if we inherited
+
+    // Restore original priority if we inherited.  ts_owner is the releasing
+    // thread (the lock holder) running this code, so it is live.
     if (ts->ts_owner && ts->ts_inherited_prio != 0)
         ts->ts_owner->priority = ts->ts_owner->base_priority;
-    
-    // Wake all waiters
-    thread_t *waiter = ts->ts_waiters;
-    while (waiter) {
-        thread_t *next = waiter->next;
-        /* A SIGTSTP'd waiter must stay STOPPED — promoting it to READY
-         * here would resurrect a stopped thread.  Same in every
-         * sleepq/turnstile wake path. */
-        if (waiter->state != THREAD_STOPPED) {
-            waiter->state = THREAD_READY;
-        }
-        waiter->next = NULL;
-        waiter = next;
-    }
-    
-    // Remove and recycle turnstile
+
+    // Remove and recycle turnstile.  Waiters are woken by the sleepq_wake_all()
+    // lockmgr() issues immediately after this call; we intentionally do NOT
+    // touch waiter->state / waiter->next here (see comment above).
     turnstile_remove(ts);
     turnstile_free_entry(ts);
-    
+
     ts_unlock();
 }
 
