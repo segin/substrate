@@ -48,6 +48,14 @@ static int next_pid = 1;
 static int last_pid = 0;
 static spinlock_t pid_lock;
 
+/* Count of SA_NOCLDWAIT (P_AUTOREAP) exiting processes still awaiting the
+ * idle-loop autoreap sweep.  proc_reap_autoreap_zombies() runs from every
+ * sched_yield(); this lets it skip its (now pid_lock-protected) allproc scan
+ * outright in the overwhelmingly common case that there is nothing to reap,
+ * so the sweep adds no per-context-switch pid_lock traffic during a fork
+ * storm.  Bumped where P_AUTOREAP is set, dropped as each victim is reaped. */
+static volatile uint32_t autoreap_pending = 0;
+
 #ifdef HOST_TEST
 static process_t *proc_storage_alloc(void) {
     process_t *p = malloc(sizeof(*p));
@@ -1445,6 +1453,10 @@ void proc_reap_autoreap_zombies(void) {
      * preempt from recursively re-entering (bounding kernel-stack depth); the
      * outer loop still reaps everything the skipped nested call would have.
      */
+    if (autoreap_pending == 0) {
+        return;   /* fast path: nothing to reap, don't touch pid_lock */
+    }
+
     static volatile int reaping;
     if (__sync_lock_test_and_set(&reaping, 1)) {
         return;
@@ -1474,6 +1486,7 @@ void proc_reap_autoreap_zombies(void) {
         if (!victim) {
             break;
         }
+        __sync_fetch_and_sub(&autoreap_pending, 1);
 
         /* victim is unlinked and owned solely by us: the teardown may sleep,
          * but nothing can rediscover victim, and the guard blocks re-entry. */
@@ -1814,6 +1827,11 @@ void proc_exit(int code) {
              psignal(current_process->p_parent, SIGCHLD);
 
              current_process->p_flag |= P_AUTOREAP;
+             /* This SZOMB now awaits the idle-loop autoreap sweep; the counter
+              * lets that sweep skip its scan entirely until we (and any peers)
+              * are reaped.  Every thread of ours is already THREAD_ZOMBIE (set
+              * above) so we are immediately reapable. */
+             __sync_fetch_and_add(&autoreap_pending, 1);
              proc_remove_child(current_process->p_parent, current_process);
              current_process->p_parent = NULL;
         } else {
