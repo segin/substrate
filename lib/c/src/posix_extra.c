@@ -489,7 +489,10 @@ int shm_open(const char *name, int oflag, mode_t mode) {
     char buf[256];
     if (name[0] == '/') name++;
     snprintf(buf, sizeof(buf), "/dev/shm/%s", name);
-    return open(buf, oflag, mode);
+    /* POSIX: the FD_CLOEXEC flag shall be set on the file descriptor returned
+     * by shm_open() (conformance shm_open/11-1).  The kernel open() path honours
+     * O_CLOEXEC by setting the fd_cloexec bit, which fcntl(fd, F_GETFD) reports. */
+    return open(buf, oflag | O_CLOEXEC, mode);
 }
 
 int shm_unlink(const char *name) {
