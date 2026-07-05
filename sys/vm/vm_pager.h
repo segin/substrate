@@ -48,6 +48,14 @@ void    vm_pager_set_cache_mode(vm_pager_t *pager, uint8_t mode);
 uint8_t vm_pager_device_cache_mode(vm_pager_t *pager);
 void    vm_pager_device_set_phys_base(vm_pager_t *pager, uintptr_t phys_base);
 
+/* Register a destructor on a device pager, invoked once from
+ * vm_pager_deallocate() when the owning vm_object's ref_count hits zero
+ * (i.e. the last mapping of the object is torn down).  Lets a device-backed
+ * filesystem (shmfs) learn when all mmap() references to its object are gone
+ * so it can release backing frames only after both fds AND mappings close —
+ * without it, freeing on fd close alone frees frames still mapped elsewhere. */
+void    vm_pager_device_set_dtor(vm_pager_t *pager, void (*dtor)(void *), void *arg);
+
 /* VNode pager helpers (REQ-04-0168/0169) */
 int vnode_pager_getpages(vm_pager_t *pager, vm_page_t **pages, int count, bool sync);
 int vnode_pager_putpages(vm_pager_t *pager, vm_page_t **pages, int count, bool sync);
