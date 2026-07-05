@@ -305,8 +305,20 @@ int vnode_pager_putpages(vm_pager_t *base, vm_page_t **pages, int count, bool sy
         uint64_t file_pindex = base_page + src->pindex;
         uint8_t *buf = (uint8_t *)P2V(src->phys_addr);
         uint64_t file_offset = file_pindex * 4096;
-        uint32_t bytes = write_fs(pager->node, (int64_t)file_offset, 4096, buf);
-        if (bytes != 4096) {
+        /* Never write out modified bytes beyond the end of the object: the
+         * last page of a file is only partially within it, and POSIX forbids
+         * persisting the zero-fill tail past EOF (mmap/11-4).  Clamp the write
+         * to the file length; a page wholly past EOF (already filtered by
+         * page_limit) writes nothing. */
+        uint64_t flen = (uint64_t)pager->node->length;
+        if (file_offset >= flen) {
+            src->flags &= ~PG_DIRTY;
+            continue;
+        }
+        uint32_t wlen = (flen - file_offset < 4096) ? (uint32_t)(flen - file_offset)
+                                                     : 4096u;
+        uint32_t bytes = write_fs(pager->node, (int64_t)file_offset, wlen, buf);
+        if (bytes != wlen) {
             return -1;
         }
         src->flags &= ~PG_DIRTY;
