@@ -109,6 +109,30 @@ static int sporadic_params_ok(const struct sched_param *p)
     return 1;
 }
 
+/*
+ * The two sched_ss_* consistency constraints that are independent of the
+ * priority band: the replenishment period must be at least the initial
+ * budget, and the maximum pending replenishments must lie in
+ * [1, SS_REPL_MAX].  Returns 1 if both hold, 0 (=> -EINVAL) otherwise.
+ *
+ * Substrate advertises _POSIX_SPORADIC_SERVER, so sched_setparam() takes a
+ * complete sched_param carrying these members and validates them for a
+ * process whose scheduling policy is not a fixed-priority-only policy
+ * (SCHED_FIFO/SCHED_RR, whose sched_param carries no meaningful sporadic
+ * members and is validated on sched_priority alone).  A well-formed caller
+ * builds its sched_param from sched_getparam(), which reports a valid
+ * sched_ss_max_repl and zeroed period/budget, so this rejects only a
+ * deliberately out-of-range value (sched_setparam/25-3, 25-4).
+ */
+static int sporadic_repl_ok(const struct sched_param *p)
+{
+    if (timespec_lt(&p->sched_ss_repl_period, &p->sched_ss_init_budget))
+        return 0;
+    if (p->sched_ss_max_repl < 1 || p->sched_ss_max_repl > POSIX_SS_REPL_MAX)
+        return 0;
+    return 1;
+}
+
 /* pid == 0 means the calling process. */
 static process_t *sched_target(pid_t pid)
 {
@@ -243,6 +267,12 @@ int sys_sched_setparam(pid_t pid, const struct sched_param *uparam)
         if (!sporadic_params_ok(&kp)) return -EINVAL;
     } else {
         if (!prio_in_range(t->sched_policy, kp.sched_priority)) return -EINVAL;
+        /* A fixed-priority-only policy (SCHED_FIFO/SCHED_RR) carries no
+         * meaningful sporadic members and is validated on sched_priority
+         * alone; every other policy also validates the priority-independent
+         * sched_ss_* replenishment constraints (sched_setparam/25-3, 25-4). */
+        if (!policy_is_rt(t->sched_policy) && !sporadic_repl_ok(&kp))
+            return -EINVAL;
     }
     if (!rt_priv_ok(t->sched_policy, kp.sched_priority, t)) return -EPERM;
 
