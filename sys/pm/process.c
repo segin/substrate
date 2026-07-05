@@ -1421,25 +1421,68 @@ static void proc_release_zombie_resources(process_t *proc) {
 }
 
 void proc_reap_autoreap_zombies(void) {
-    process_t *proc, *next;
-
-    for (proc = proc_first(); proc; proc = next) {
-        next = proc_next(proc);
-
-        if (proc->pid <= 0 || proc->state != SZOMB || !(proc->p_flag & P_AUTOREAP)) {
-            continue;
-        }
-        if (current_thread && current_thread->proc == proc) {
-            continue;
-        }
-        if (!proc_threads_all_zombie(proc, NULL)) {
-            continue;
-        }
-
-        proc_release_zombie_resources(proc);
-        sched_reap_process_threads(proc);
-        proc_destroy(proc);
+    /*
+     * INVARIANT: this runs from sched_yield() with interrupts ENABLED (the
+     * call sits BEFORE sched_yield()'s intr_disable) and holding no lock.
+     *
+     * The old body walked `allproc` with a cached `next` cursor and freed the
+     * proc mid-walk.  A timer preempt anywhere in that walk (preempt_count==0,
+     * so a tick yields) — or a voluntary sleep inside the sleepable teardown
+     * below (vm_map_destroy -> shmfs device-pager dtor takes a mutex) — lets
+     * another thread run and reap/free a proc: either a concurrent wait4()
+     * freeing the very proc this walk cached in `proc`/`next`, or this function
+     * re-entered on the nested sched_yield() double-reaping a proc still linked
+     * mid-teardown (double vm_map_destroy -> double free).  Both dangle a
+     * pointer and silently triple-fault under mass fork/exit/reap — OPTS
+     * shm_open/23-1 forks ~1000 children, so init reaps a storm of zombies
+     * while the idle loop walks `allproc` on every yield.
+     *
+     * Fix: find ONE victim under pid_lock (preemption-safe — no tick can land
+     * mid-scan and no other CPU can mutate allproc), UNLINK it from allproc +
+     * pid_hash before the sleepable teardown so no re-entered/concurrent reaper
+     * can find or free it, then re-scan from the head so no list cursor is ever
+     * held across a preempt point.  A one-shot guard keeps a mid-teardown
+     * preempt from recursively re-entering (bounding kernel-stack depth); the
+     * outer loop still reaps everything the skipped nested call would have.
+     */
+    static volatile int reaping;
+    if (__sync_lock_test_and_set(&reaping, 1)) {
+        return;
     }
+
+    for (;;) {
+        process_t *victim = NULL;
+
+        spinlock_acquire(&pid_lock);
+        for (process_t *proc = allproc; proc; proc = proc->p_allproc_next) {
+            if (proc->pid <= 0 || proc->state != SZOMB ||
+                !(proc->p_flag & P_AUTOREAP)) {
+                continue;
+            }
+            if (current_thread && current_thread->proc == proc) {
+                continue;
+            }
+            if (!proc_threads_all_zombie(proc, NULL)) {
+                continue;
+            }
+            victim = proc;
+            proc_unlink_locked(victim);   /* out of allproc + pid_hash now */
+            break;
+        }
+        spinlock_release(&pid_lock);
+
+        if (!victim) {
+            break;
+        }
+
+        /* victim is unlinked and owned solely by us: the teardown may sleep,
+         * but nothing can rediscover victim, and the guard blocks re-entry. */
+        proc_release_zombie_resources(victim);
+        sched_reap_process_threads(victim);
+        proc_storage_free(victim);
+    }
+
+    __sync_lock_release(&reaping);
 }
 
 void proc_exit(int code) {
