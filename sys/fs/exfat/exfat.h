@@ -7,11 +7,12 @@
 /*
  * exFAT (Microsoft Extensible File Allocation Table) driver.
  *
- * This is a read-only driver: it mounts an exFAT volume and supports
- * directory traversal (readdir/finddir), file read, statfs and volume-label
- * probing.  Write support (allocation bitmap, up-case table, set checksums,
- * FAT-chain maintenance) is not implemented; the mount carries no write ops,
- * so the VFS rejects writes.
+ * Read-write driver: mounts an exFAT volume and supports directory
+ * traversal (readdir/finddir), file read/write, truncate, create
+ * (mkdir/mknod/O_CREAT), unlink, rmdir, rename, statfs and volume-label
+ * probing.  Writes maintain the allocation bitmap, the FAT cluster chains,
+ * the directory entry-set SetChecksum and NameHash, and the up-case table
+ * is loaded at mount time and used for both name comparison and NameHash.
  */
 
 /* On-disk FileAttributes (little-endian u16 in the file directory entry). */
@@ -39,6 +40,12 @@
 /* FAT-entry sentinels (32-bit entries). >= EXFAT_CLUSTER_END means end/bad. */
 #define EXFAT_FIRST_CLUSTER    2U
 #define EXFAT_CLUSTER_END      0xFFFFFFF8U
+#define EXFAT_CLUSTER_EOF      0xFFFFFFFFU  /* end-of-chain marker we write */
+
+/* VolumeFlags bits (Main Boot Sector). */
+#define EXFAT_VOLFLAG_ACTIVE_FAT  0x0001
+#define EXFAT_VOLFLAG_DIRTY       0x0002
+#define EXFAT_VOLFLAG_MEDIA_FAIL  0x0004
 
 /* Main Boot Sector header (byte offsets < 512; only the header is needed). */
 typedef struct {
@@ -125,6 +132,14 @@ typedef struct exfat_fs {
     uint32_t root_cluster;
     uint64_t volume_length;            /* sectors */
     fs_node_t *root_node;
+
+    /* Write-side metadata, loaded at mount time. */
+    uint8_t  *bitmap;                  /* allocation bitmap, in-memory copy */
+    uint32_t  bitmap_bytes;            /* bitmap size in bytes */
+    uint32_t  bitmap_cluster;          /* first cluster of the bitmap chain */
+    uint8_t   bitmap_no_fat_chain;     /* bitmap uses contiguous clusters */
+    uint16_t *upcase;                  /* 65536-entry BMP up-case fold table */
+    uint32_t  free_clusters;           /* cached clear-bit count (statfs) */
 } exfat_fs_t;
 
 /* Per-node context (attached to fs_node.impl). */
@@ -134,6 +149,16 @@ typedef struct exfat_node {
     uint64_t size;
     uint16_t attr;
     uint8_t  no_fat_chain;             /* clusters are contiguous */
+
+    /* Location of this node's own directory entry set within its parent,
+     * so writes can update the on-disk stream entry (DataLength, cluster).
+     * has_dir_entry is 0 for the synthetic root (no parent entry). */
+    uint8_t  has_dir_entry;
+    uint32_t dir_cluster;              /* parent directory first cluster */
+    uint8_t  dir_no_fat_chain;         /* parent directory chain type */
+    uint64_t primary_index;            /* 0x85 entry index within the parent */
+    uint8_t  secondary_count;          /* # of secondary entries in the set */
+
     struct dirent current_dirent;      /* per-node readdir scratch */
 } exfat_node_t;
 
