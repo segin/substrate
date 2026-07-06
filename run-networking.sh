@@ -47,21 +47,33 @@ set -eu
 #            you attach whenever you like (e.g. to break into a hang); set
 #            GDBHALT=1 to also freeze the CPU at reset so you can set
 #            breakpoints before boot and `continue` from gdb.
+#   --usb-host=SPEC
+#            pass a REAL host USB device through to the guest via
+#            -device usb-host so substrate enumerates and drives it — use this
+#            to test any real USB device (storage, HID, serial, audio, ...),
+#            not just audio.  SPEC is either VID:PID in hex (e.g.
+#            --usb-host=05ac:110b, as printed by `lsusb`) or BUS.ADDR in
+#            decimal (e.g. --usb-host=1.5, to pick one of several identical
+#            devices).  Repeatable to grab several devices.  QEMU must be able
+#            to claim each device (it gets detached from its host driver), so
+#            you may need to run as root or grant access to the matching
+#            /dev/bus/usb/BUS/DEV node.  The devices share the UHCI root hub
+#            with the emulated usb-kbd/usb-mouse, which has few ports, so grab
+#            only a couple at a time.
 #   --usb-audio
 #            replace the default emulated AC'97 with QEMU's USB Audio Class
 #            device (UAC 1.0) on the UHCI bus, so substrate's uac driver binds
 #            it and it becomes /dev/audio0.  Use this to exercise USB audio
 #            without real hardware.
 #   --usb-audio-host[=VID:PID]
-#            pass a REAL USB audio device through to the guest via
-#            -device usb-host (default VID:PID 05ac:110b, the Apple EarPods).
-#            The audio plays on the physical device; no host audio backend is
-#            used.  QEMU must be able to claim the device (it gets detached
-#            from its host driver), so you may need to run as root or grant
-#            access to the matching /dev/bus/usb/... node.
+#            shorthand for --usb-host=<dev> that ALSO drops the emulated AC'97,
+#            so a real passed-through USB audio device is the guest's only
+#            audio device (/dev/audio0).  Default VID:PID 05ac:110b (the Apple
+#            EarPods); the audio plays on the physical device, no host backend.
 #            --usb-audio and --usb-audio-host are mutually exclusive and both
 #            drop the default AC'97.  Override the emulated host backend driver
-#            with $AUDIODRV (default sdl; e.g. AUDIODRV=pa or AUDIODRV=alsa).
+#            (for the AC'97 / --usb-audio modes) with $AUDIODRV (default sdl;
+#            e.g. AUDIODRV=pa or AUDIODRV=alsa).
 #   --drive FILE
 #            attach an additional raw disk image on the next free port of
 #            the SHARED boot AHCI controller.  Repeatable; the boot disk is
@@ -87,7 +99,7 @@ DEBUG=0
 SNAPSHOT=0
 USB_AUDIO=0
 USB_AUDIO_HOST=0
-USB_AUDIO_ID="05ac:110b"   # default passthrough target: Apple EarPods
+USB_HOST_DEVICES=""        # newline-separated VID:PID / BUS.ADDR passthrough specs
 EXTRA_DRIVES=""
 EXTRA_CTRL_DRIVES=""
 while [ $# -gt 0 ]; do
@@ -103,8 +115,22 @@ while [ $# -gt 0 ]; do
         --debug)    DEBUG=1 ;;
         --snapshot) SNAPSHOT=1 ;;
         --usb-audio)        USB_AUDIO=1 ;;
-        --usb-audio-host)   USB_AUDIO_HOST=1 ;;
-        --usb-audio-host=*) USB_AUDIO_HOST=1; USB_AUDIO_ID="${1#--usb-audio-host=}" ;;
+        --usb-host)
+            shift
+            [ $# -gt 0 ] || { echo "run-networking.sh: --usb-host needs a VID:PID or BUS.ADDR argument" >&2; exit 1; }
+            USB_HOST_DEVICES="$USB_HOST_DEVICES
+$1" ;;
+        --usb-host=*)
+            USB_HOST_DEVICES="$USB_HOST_DEVICES
+${1#--usb-host=}" ;;
+        --usb-audio-host)
+            USB_AUDIO_HOST=1
+            USB_HOST_DEVICES="$USB_HOST_DEVICES
+05ac:110b" ;;
+        --usb-audio-host=*)
+            USB_AUDIO_HOST=1
+            USB_HOST_DEVICES="$USB_HOST_DEVICES
+${1#--usb-audio-host=}" ;;
         --drive)
             shift
             [ $# -gt 0 ] || { echo "run-networking.sh: --drive needs a file argument" >&2; exit 1; }
@@ -207,13 +233,60 @@ if [ "$SNAPSHOT" -eq 1 ]; then
     echo "run-networking.sh: -snapshot enabled; all disk writes are temporary (on-disk images stay pristine)"
 fi
 
+# --usb-host / --usb-audio-host: pass real host USB devices through to the guest
+# via -device usb-host, one per queued spec.  Each spec is either VID:PID in hex
+# (e.g. 05ac:110b, matched by vendor/product id) or BUS.ADDR in decimal (e.g.
+# 1.5, matched by physical bus/address — use this to pick one of several
+# identical devices).  The devices attach to the same UHCI root hub as the
+# emulated usb-kbd/usb-mouse, so substrate enumerates them the same way; that
+# hub is small, so grab only a couple at a time.
+USB_HOST_ARGS=""
+uidx=1
+OLDIFS=$IFS
+IFS='
+'
+for spec in $USB_HOST_DEVICES; do
+    [ -n "$spec" ] || continue
+    case "$spec" in
+        *:*)
+            vid="${spec%%:*}"; pid="${spec##*:}"
+            if [ -z "$vid" ] || [ -z "$pid" ]; then
+                echo "run-networking.sh: --usb-host VID:PID is incomplete: '$spec'" >&2; exit 1
+            fi
+            case "$vid$pid" in
+                *[!0-9A-Fa-f]*) echo "run-networking.sh: --usb-host VID:PID must be hex (e.g. 05ac:110b): '$spec'" >&2; exit 1 ;;
+            esac
+            match="vendorid=0x$vid,productid=0x$pid" ;;
+        *.*)
+            bus="${spec%%.*}"; addr="${spec##*.}"
+            if [ -z "$bus" ] || [ -z "$addr" ]; then
+                echo "run-networking.sh: --usb-host BUS.ADDR is incomplete: '$spec'" >&2; exit 1
+            fi
+            case "$bus$addr" in
+                *[!0-9]*) echo "run-networking.sh: --usb-host BUS.ADDR must be decimal (e.g. 1.5): '$spec'" >&2; exit 1 ;;
+            esac
+            match="hostbus=$bus,hostaddr=$addr" ;;
+        *)
+            echo "run-networking.sh: --usb-host needs VID:PID (hex, e.g. 05ac:110b) or BUS.ADDR (decimal, e.g. 1.5): '$spec'" >&2
+            exit 1 ;;
+    esac
+    USB_HOST_ARGS="$USB_HOST_ARGS -device usb-host,$match,id=usbhost$uidx"
+    echo "run-networking.sh: passing host USB device $spec through to the guest" \
+         "(claimed from the host driver; run as root or grant /dev/bus/usb access if it fails)"
+    uidx=$((uidx + 1))
+done
+IFS=$OLDIFS
+
 # Audio device selection.  Default: emulated AC'97 with a host backend.
 #   --usb-audio       QEMU's emulated USB Audio Class device (UAC 1.0); the
 #                     uac driver binds it as /dev/audio0.
-#   --usb-audio-host  pass a real USB audio device (default the EarPods)
-#                     through; it plays on the physical hardware.
-# Both USB modes drop the AC'97 so the USB device is the only audio_dev and
-# lands on /dev/audio0.  USB devices attach to the piix3-usb-uhci below.
+#   --usb-audio-host  a --usb-host passthrough (queued above) that additionally
+#                     drops the AC'97 so a real USB audio device (default the
+#                     EarPods) is the guest's only audio_dev (/dev/audio0); it
+#                     plays on the physical hardware.
+# Both USB audio modes drop the AC'97 so the USB device is the only audio_dev
+# and lands on /dev/audio0.  (Generic --usb-host passthrough is handled above
+# and does NOT touch audio.)  USB devices attach to the piix3-usb-uhci below.
 #
 # Host backend ($AUDIODRV): default to QEMU's 'pa' when a PulseAudio/PipeWire
 # server is reachable (it routes to the host mixer on both), else fall back to
@@ -233,17 +306,12 @@ if [ "$USB_AUDIO" -eq 1 ] && [ "$USB_AUDIO_HOST" -eq 1 ]; then
     exit 1
 fi
 if [ "$USB_AUDIO_HOST" -eq 1 ]; then
-    # Expect VID:PID (hex:hex); qemu validates the hex digits itself.
-    case "$USB_AUDIO_ID" in
-        *:*) : ;;
-        *) echo "run-networking.sh: --usb-audio-host needs VID:PID (e.g. 05ac:110b)" >&2; exit 1 ;;
-    esac
-    AUDIO_VID="0x${USB_AUDIO_ID%%:*}"
-    AUDIO_PID="0x${USB_AUDIO_ID##*:}"
-    AUDIO_ARGS="-device usb-host,vendorid=$AUDIO_VID,productid=$AUDIO_PID"
-    echo "run-networking.sh: passing real USB audio device $USB_AUDIO_ID through to the guest (plays on the physical device)"
-    echo "    note: QEMU must be able to claim it; if it fails with a permission/LIBUSB error,"
-    echo "          run as root or grant access to the device's /dev/bus/usb/BUS/DEV node."
+    # The real USB audio device is already queued into USB_HOST_ARGS above; here
+    # we only drop the emulated AC'97 so the passthrough device is the guest's
+    # sole audio_dev and lands on /dev/audio0.  It plays on the physical device
+    # (no host audio backend used).
+    AUDIO_ARGS=""
+    echo "run-networking.sh: real USB audio device passed through -> guest /dev/audio0 (plays on the physical device)"
 elif [ "$USB_AUDIO" -eq 1 ]; then
     AUDIO_ARGS="-audiodev $AUDIODRV,id=audio0 -device usb-audio,audiodev=audio0"
     echo "run-networking.sh: emulated USB Audio Class device (UAC 1.0) -> guest /dev/audio0"
@@ -371,6 +439,7 @@ qemu-system-i386 -cpu qemu32,+sse,+sse2 $ACCEL_ARG \
   $EXTRA_DRIVE_ARGS \
   $EXTRA_CTRL_ARGS \
   -device piix3-usb-uhci -device usb-kbd -device usb-mouse \
+  $USB_HOST_ARGS \
   $NETDEV_ARGS \
   -kernel "$KERNEL" \
   -append "$APPEND" \
