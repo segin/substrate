@@ -11,31 +11,33 @@ Substrate is a complete Unix OS project with five first-class pillars:
 - Runtime/system libraries (`lib/`, `usr.lib/`) — shipped as both static
   archives (`libX.a`) and shared objects (`libX.so.0`).
 - Native dynamic linker (`sbin/ld.so`) — loaded by the kernel at the
-  PT_INTERP base for every dynamically-linked native binary; performs
-  recursive DT_NEEDED traversal, symbol resolution (DT_GNU_HASH +
-  DT_HASH), i386 REL/JMPREL relocations (RELATIVE / GLOB_DAT /
-  JMP_SLOT / 32 / PC32 / COPY / TLS_TPOFF), DT_INIT_ARRAY +
-  DT_FINI_ARRAY execution, per-thread TLS install (PT_TLS images
-  copied into a variant-II layout and the GS base installed via the
-  native `sys_set_gsbase` syscall), and runtime `dlopen` / `dlsym` /
-  `dlclose` for plugin-style loading.  Symbol resolution honours the
-  **canonical function address** rule for non-PIE executables: when the
-  program takes the address of a shared-library function the static
-  linker emits that symbol UND-with-`st_value` (its own PLT stub), and
-  ld.so hands that PLT address to every *other* module so `&func` is
-  identical everywhere (function-pointer equality — required by Xt's
-  `XtInherit*` class-method machinery, which CDE's front panel depends
-  on).  The program's own PLT slots still bind to the real defining DSO.
-  ld.so registers itself in the
-  loaded-object scope so its `__ldso_*` exports are visible to libdl
-  and to libc (which calls `__ldso_run_fini` as a weak hook from
-  `exit()` to run destructors before the process is reaped).  ld.so
-  records each loaded object's runtime program-header table and
-  exports `dl_iterate_phdr(3)` (via `__ldso_dl_iterate_phdr`, bridged
-  by libc and `include/link.h`); this is the runtime support for
-  shared-`libgcc_s` C++ exception unwinding across the exe/DSO
-  boundary, which is being brought up alongside a toolchain rebuild
-  (PT_GNU_EH_FRAME-based unwinding — see §6).
+  PT_INTERP base for every dynamically-linked native binary.  It:
+  - performs recursive DT_NEEDED traversal, symbol resolution
+    (DT_GNU_HASH + DT_HASH), and i386 REL/JMPREL relocations
+    (RELATIVE / GLOB_DAT / JMP_SLOT / 32 / PC32 / COPY / TLS_TPOFF);
+  - runs DT_INIT_ARRAY + DT_FINI_ARRAY and installs per-thread TLS
+    (PT_TLS images copied into a variant-II layout, GS base set via the
+    native `sys_set_gsbase` syscall);
+  - offers runtime `dlopen` / `dlsym` / `dlclose` for plugin-style
+    loading;
+  - honours the **canonical function address** rule for non-PIE
+    executables: when the program takes the address of a
+    shared-library function the static linker emits that symbol
+    UND-with-`st_value` (its own PLT stub), and ld.so hands that PLT
+    address to every *other* module so `&func` is identical everywhere
+    (function-pointer equality — required by Xt's `XtInherit*`
+    class-method machinery, which CDE's front panel depends on).  The
+    program's own PLT slots still bind to the real defining DSO;
+  - registers itself in the loaded-object scope so its `__ldso_*`
+    exports are visible to libdl and to libc (which calls
+    `__ldso_run_fini` as a weak hook from `exit()` to run destructors
+    before the process is reaped);
+  - records each loaded object's runtime program-header table and
+    exports `dl_iterate_phdr(3)` (via `__ldso_dl_iterate_phdr`, bridged
+    by libc and `include/link.h`).  This is the runtime support for
+    shared-`libgcc_s` C++ exception unwinding across the exe/DSO
+    boundary (PT_GNU_EH_FRAME-based unwinding), which is done and
+    verified end-to-end — see §6.
 - Toolchain via the GNU stage-2 port (binutils + GCC under `contrib/`),
   installed on the image as the system `cc` / `as` / `ld` / `g++`.
 
@@ -75,14 +77,16 @@ sys/         kernel
 sys/boot/    Substrate BIOS bootloader (stage1 asm + stage2 C)
 bin/         base Unix userland
 sbin/        system utilities
-sbin/ld.so/  Substrate native dynamic linker.  Phases 1-4f live:
+sbin/ld.so/  Substrate native dynamic linker.  Phases 1-4g live:
              bootstrap + auxv handoff (1), self-relocate + parse
              program PT_DYNAMIC (2), recursive DT_NEEDED loading +
              REL/JMPREL relocations (3, 4a), DT_INIT_ARRAY
              execution (4b), variant-II TLS install via GS segment
              (4c), R_386_COPY relocations (4d), runtime
              dlopen/dlsym/dlclose API (4e), DT_FINI_ARRAY at
-             exit() time via libc weak hook (4f).  Per-object
+             exit() time via libc weak hook (4f), canonical
+             function-address equality for non-PIE exes (4g), plus
+             dl_iterate_phdr(3).  Per-object
              relocated/initialized/finalized guards prevent the
              non-idempotent R_386_RELATIVE and the run-once
              init/fini arrays from firing twice when dlopen
@@ -104,30 +108,15 @@ host_dist/   host install staging for native validation tools
 linux/       Linux-host compatibility tools (binfmt_misc runner, host bridges)
 usr.man/     manual page source tree
 contrib/     third-party components, each as a patch series + fetch.sh
-             + build.sh against an upstream tarball.  Current set:
-             binutils, gcc, libstdc++ (via gcc), ncurses, libiconv,
-             zsh, gnu make, gnu sed, openbsd expr, openbsd tr,
-             bzip2, gzip, libarchive, openssl, curl, inetutils,
-             tzdata, mpg123, zlib, mandoc, less, qman (deferred),
-             openssh, the X11 client library stack (xorgproto,
-             xcb-proto, libXau, xtrans, libxcb, libX11, libXext,
-             libICE, libSM, libXt, libXmu, libXpm, libXaw), the
-             xterm terminal emulator, xauth, luit, the window
-             managers (matwm2, twm, ctwm), the X bitmap fonts
-             (font-misc-misc, font-adobe-75dpi, font-adobe-100dpi),
-             the ext2 toolset (e2fsprogs, e2tools), ext2-boot, gdb,
-             and the multimedia stack — SDL2 (X11 video + /dev/audio
-             SADA backend), freetype, the PsyMP3 player and its
-             codecs (libogg, libvorbis, libopus, speex, faad2,
-             taglib, spandsp).
-             Each lands at ${SUBSTRATE_TOP}/dist-overlay/dist-<pkg>/ which
-             build-rootfs.sh overlays onto the image.  Font ports
-             ship the BDF sources verbatim (no bdftopcf on the
-             host) plus a generated fonts.dir; the adobe ports also
-             derive ISO8859-1 single-byte variants from the
-             ISO10646-1 masters, which the en_US.UTF-8 XLC_FONTSET
-             binds for its Latin slots — without them fontset
-             clients (twm) render tofu (see the port READMEs).
+             + build.sh against an upstream tarball.  The set spans the
+             toolchain (binutils, gcc), the shell (zsh), text/build
+             tools, compression/crypto/net, the man toolchain
+             (mandoc, less), the full X11 client stack + xterm +
+             window managers + bitmap fonts, CDE, e2fsprogs/e2tools,
+             gdb, and the SDL2/PsyMP3 multimedia stack.  Full catalog:
+             docs/contrib-ports.md.  Each port lands at
+             ${SUBSTRATE_TOP}/dist-overlay/dist-<pkg>/ which
+             build-rootfs.sh overlays onto the image.
 tools/       build and install helper scripts
 build.sh     repo-root end-to-end build (toolchain + native +
              contrib + image).  See build.sh header for env knobs.
@@ -140,11 +129,19 @@ Detailed staging rules for `dist/` are defined in `docs/specs/rootfs.md`.
 The kernel remains monolithic and is organized into logical layers:
 - `sys/arch/`: Architecture-specific implementation (CPU/MMU/Bootstrap).
 - `sys/core/`: Early initialization and global startup.
-- `sys/kern/`: Core services (Scheduler, Signals, Time, Sync, memtrack). Inter-process communication lives here too: System V semaphores (`ipc_sem.c`) and shared memory (`ipc_shm.c`), and POSIX message queues (`posix_mqueue.c`). The mqueue subsystem is a named, cross-process kernel object — a fixed table of queues (priority-ordered message lists, per-queue `ipc_perm`, single-registration `SIGEV_SIGNAL` notify) fronted by a per-open descriptor table (`mqd_t`), with interruptible, absolute-timeout-aware blocking on a sleep queue. Its userspace surface (`mq_*`) is in `lib/rt`.
+- `sys/kern/`: Core services (Scheduler, Signals, Time, Sync, memtrack). Inter-process communication lives here too:
+  - System V semaphores (`ipc_sem.c`) and shared memory (`ipc_shm.c`).
+  - POSIX message queues (`posix_mqueue.c`) — a named, cross-process kernel object: a fixed table of queues (priority-ordered message lists, per-queue `ipc_perm`, single-registration `SIGEV_SIGNAL` notify) fronted by a per-open descriptor table (`mqd_t`), with interruptible, absolute-timeout-aware blocking on a sleep queue. Its userspace surface (`mq_*`) is in `lib/rt`.
 - `sys/pm/`: Process management and lifecycle.
-- `sys/vm/`: Memory management (PMM, PMAP, VM objects, demand-paged user stacks). Carries always-on kernel-heap corruption tripwires — a `vm_object` magic canary, a buddy-allocator double-allocation detector, a UMA per-item double-free guard, and a `vm_map` entry/object auditor — that turn silent corruption into an immediate located panic. Per-process kernel stacks are 16 KiB to absorb the deepest nested syscall + IRQ call chains (notably the network TX path interrupted by a NIC RX IRQ).
-- `sys/vfs/` and `sys/fs/`: Virtual Filesystem and concrete implementations. The buffer cache (`sys/vfs/bio.c`) is keyed at the block-device layer — `blkdev_do_read`/`do_write` go through `bio_dev_get`/`release` keyed by `(struct blkdev *, sector)` with read coalescing and write-through — so caching is transparent to every storage driver and filesystem; the filesystems carry no caching logic of their own. See `docs/design/block-cache-consolidation.md`.
-- `sys/drivers/`: Device driver framework and hardware drivers. The audio stack (`sys/drivers/audio/`) is a Sun-compatible framework over AC'97 / Intel HDA / SB16 / null backends; each backend decouples the `write()` producer from the DMA ring via a deep software PCM FIFO refilled from the per-slot completion IRQ, and the AC'97 backend restarts a halted bus master from both the producer and the IRQ handler (`ac97_kick_locked`). USB devices are enumerated under `/proc/devtree` and as `/dev/usb` nodes (`sys/drivers/usb/usbdevfs.c`), which `lsusb` reads.
+- `sys/vm/`: Memory management (PMM, PMAP, VM objects, demand-paged user stacks).
+  - Always-on kernel-heap corruption tripwires — a `vm_object` magic canary, a buddy-allocator double-allocation detector, a UMA per-item double-free guard, and a `vm_map` entry/object auditor — turn silent corruption into an immediate located panic.
+  - Per-process kernel stacks are 16 KiB to absorb the deepest nested syscall + IRQ call chains (notably the network TX path interrupted by a NIC RX IRQ).
+- `sys/vfs/` and `sys/fs/`: Virtual Filesystem and concrete implementations.
+  - Concrete filesystems: ext2 (read-write), exFAT (`sys/fs/exfat/`, read-write: readdir/read plus write, truncate, mkdir, mknod/`O_CREAT`, unlink, rmdir, rename — maintaining the allocation bitmap, FAT chains, entry-set `SetChecksum` + `NameHash`, and an up-case table), UDF (read-write), FAT, minix, and 9P.
+  - The buffer cache (`sys/vfs/bio.c`) is keyed at the block-device layer — `blkdev_do_read`/`do_write` go through `bio_dev_get`/`release` keyed by `(struct blkdev *, sector)` with read coalescing and write-through — so caching is transparent to every storage driver and filesystem; the filesystems carry no caching logic of their own. See `docs/design/block-cache-consolidation.md`.
+- `sys/drivers/`: Device driver framework and hardware drivers.
+  - The audio stack (`sys/drivers/audio/`) is a Sun-compatible framework over AC'97 / Intel HDA / SB16 / null backends; each backend decouples the `write()` producer from the DMA ring via a deep software PCM FIFO refilled from the per-slot completion IRQ, and the AC'97 backend restarts a halted bus master from both the producer and the IRQ handler (`ac97_kick_locked`).
+  - USB devices are enumerated under `/proc/devtree` and as `/dev/usb` nodes (`sys/drivers/usb/usbdevfs.c`), which `lsusb` reads.
 - `sys/net/`: Network stack — TCP/IPv4, AF_INET / AF_UNIX sockets, loopback.
 - `sys/exec/`: Executable loading and execution personalities.
 - The process registry allocates every `process_t` dynamically and tracks live processes on a pid-hash plus an all-procs list; there is no fixed process-table cap. Live objects are not relocatable.
@@ -177,16 +174,18 @@ Userland is split by role (essential, admin, extended) and supported by a suite 
   ELF object and symbol inspection helpers (substrate-side `nm`,
   `readelf`, `ar`, etc.) still live under `usr.bin/` on top of
   `usr.lib/elfobj/` — see `usr.lib/elfobj/README.md` and
-  `usr.lib/elfobj/ABI_POLICY.md`.  C++ cross-DSO exception unwinding
-  is being brought up via a libgcc/g++ rebuild
-  (`contrib/gcc/patches/0010-libgcc-pt-gnu-eh-frame-substrate.patch`):
-  `USE_PT_GNU_EH_FRAME`, an `--eh-frame-hdr` `LINK_SPEC`, and a shared
-  `libgcc_s.so` (`t-slibgcc`) so a single FDE registry — located at
-  throw time via the new `dl_iterate_phdr(3)` in ld.so/libc — spans
-  every loaded module instead of one static copy per DSO.  This is
-  implemented but pending the toolchain rebuild that activates it.
-  `gdb` (`contrib/gdb/`) also runs natively, atop the libsys `ptrace`
-  PEEK bridge.
+  `usr.lib/elfobj/ABI_POLICY.md`.  C++ cross-DSO exception unwinding is
+  done and verified end-to-end via
+  `contrib/gcc/patches/0010-libgcc-pt-gnu-eh-frame-substrate.patch`:
+  `USE_PT_GNU_EH_FRAME`, `--eh-frame-hdr` via `LINK_EH_SPEC`, a shared
+  `libgcc_s.so` (`t-slibgcc`), and `thread_file=posix`, so a single FDE
+  registry — located at throw time via `dl_iterate_phdr(3)` in
+  ld.so/libc — spans every loaded module instead of one static copy per
+  DSO.  A throw in a `.so` is caught in the exe and TagLib reads FLAC
+  metadata; C++ apps using `std::mutex` must link `-lpthread`
+  (gthr-posix uses hard, non-weak pthread refs).  `gdb` (`contrib/gdb/`)
+  also runs natively, atop the libsys `ptrace` PEEK bridge.  See
+  `docs/toolchain.md` for the full toolchain detail.
 - **System Shell:** `/bin/sh` is a symlink to `/usr/bin/zsh` from
   `contrib/zsh/` (zsh 5.9).  zsh detects argv[0]'s basename and
   enters POSIX `sh` emulation when invoked as `sh`.  The previous

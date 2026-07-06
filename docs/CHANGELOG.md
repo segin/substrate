@@ -9,6 +9,10 @@ Detailed record of major implementation milestones. For current system status, s
 - **Per-Process Address Spaces:** Implemented `pmap_create()`, `pmap_destroy()`, `pmap_reference()`, `pmap_release()`, `pmap_fork()` with COW support. Global pmap list for TLB management. Full 3GB/1GB user/kernel split.
 - **PMM Virtual Address API:** `pmm_alloc_block()` and `pmm_alloc_contiguous()` now return kernel virtual addresses (phys + 0xC0000000) instead of physical addresses. `pmm_free_block()` and `pmm_free_contiguous()` expect virtual addresses. Updated all callers in: `pmap.c`, `elf.c`, `sched.c`, `process.c`.
 - **UMA Integration:** Integrated FreeBSD-style Universal Memory Allocator (UMA) for kernel memory allocation. `kmalloc`/`kfree` now backed by UMA zones via `vm_kmem.c`. Added `uma_startup()` before `kmem_init()`.
+- **Demand-paged user stack:** `exec` maps only a small region (128 KiB) at the top of the stack and records `[ustack_limit, ustack_top)` on the process; the page-fault handler grows the stack one page at a time on access (8 MiB ceiling). A process costs only the stack it touches instead of a fixed 4 MiB reservation, so deep fork/exec chains no longer exhaust RAM.
+- **memtrack** (`sys/kern/memtrack.c`): per-call-site physical-page accounting — every `pmm_alloc_*` / `pmm_free_*` is charged to the caller's return address, giving a pages-allocated-vs-freed table per code path. Exposed via `/proc/memtrack` and `sys_vm_slabs(2)`.
+- **16 KiB kernel stacks:** per-process kernel stacks are 16 KiB (4 PMM pages). 8 KiB overflowed: a deep network TX syscall path (`sys_write` → `tcp_send` → … → `rtl_xmit`) can take a nested NIC IRQ that runs the whole RX → IP → TCP input path on the same stack, and the combined depth scribbled the adjacent `kmem-64` slab (`vm_object` / `vm_map_entry` structs) — surfacing as non-deterministic SIGSEGVs and panics in unrelated processes. `kern/kthread.c` stacks were already 16 KiB; `sched.c` now matches.
+- **VM kernel-heap corruption tripwires** (`sys/vm/`): a `vm_object` magic canary (use-after-free / scribble / `ref_count` underflow), a buddy-allocator double-allocation detector (`PG_PMM_ALLOC`), a UMA per-item double-free guard, and `vm_map_audit` (validates every `entry->object` after each map mutation). Each converts silent kernel-heap corruption into an immediate, located `panic()`.
 
 ### Process & Scheduling
 - **Process Model Refactor:** Separated Swapper (PID 0) and Init (PID 1). Enforced `PID == Main_TID` invariant. Added Process Group (`pgrp`) and Session support.
@@ -17,6 +21,7 @@ Detailed record of major implementation milestones. For current system status, s
 - **Kernel Process:** Implemented Swapper/Idle (PID 0) with pageout daemon and idle loop responsibilities.
 - **Context Switching:** Validated FPU Lazy Save and refined PCB for thread/process separation.
 - **Init Safety:** Kernel now catches `init` process exit (e.g., from detached stdin) and enters an idle loop instead of panicking.
+- **FreeBSD-compatible thread syscall set:** `thr_new` (455), `thr_exit` (431), `thr_self` (432), `thr_kill` (433), `thr_suspend` (442), `thr_wake` (443), `thr_join` (457), `thr_set_name` (464), `thr_kill2` (481). Per-thread `sig_pending`/`sig_mask` already drove signal delivery; the new entry points expose it to libpthread for cancellation, naming, and parking. Added a `thread_t.name[16]` field and a `THREAD_F_WAKE_PENDING` flag for race-free suspend/wake.
 
 ### Synchronization
 - **Synchronization Primitives:** Implemented Turnstiles (Priority Inheritance) and Hashed Sleep Queues (O(1) lookup).
@@ -31,6 +36,9 @@ Detailed record of major implementation milestones. For current system status, s
 - **TTY Integration:** Per-process controlling terminal support.
 - **TTY Signals:** Implemented signal generation from TTY (`SIGINT`, `SIGQUIT`, `SIGTSTP`) and group signal delivery (`signal_send_group`).
 - **Syscall Tracing:** Enhanced `syscall_trace` with names, typed arguments (int/hex/ptr/str), return values, and Personality details.
+- **`psignal()` ignore-disposition discard:** a signal whose effective disposition is "ignore" is discarded rather than left pending — a pending-but-ignored signal otherwise aborts every interruptible sleep.
+- **TTY write-side flow control:** the tty write path now blocks (rather than silently dropping output) when the output buffer overflows, draining once before it would drop. Fixes truncated `dmesg` piped to a pty.
+- **PTY last-close linger buffer:** a pty delivers a writer's final bufferful across the last close via a per-pair linger buffer (`sys/drivers/console/pty.c`), so the master still reads the tail after the slave hangs up.
 
 ### Time
 - **Time System:** 64-bit time_t, RTC driver, gettimeofday/clock_gettime syscalls.
@@ -40,6 +48,9 @@ Detailed record of major implementation milestones. For current system status, s
 - **VFS Hard Link Support:** Implemented `link` in VFS and hooked up `sys_link` across native, Linux, and FreeBSD personalities. Improved ABI detection for stack-based syscalls.
 - **VFS Unlink Support:** Implemented `unlink` in VFS and hooked up `sys_unlink` across native, Linux, and FreeBSD personalities.
 - **UDF Filesystem Driver:** Complete read-write UDF (Universal Disk Format) driver per ECMA-167/OSTA spec. On-disk structures in `udf.h`, read-only support in `udf.c`, write support in `udf_write.c`, with unit tests and man pages (`udf.4`, `udf.5`).
+- **exFAT Filesystem Driver:** `sys/fs/exfat/` is a read-write exFAT driver. Read side: readdir / finddir / read with the up-case table loaded at mount for case-folded name comparison. Write side: write, truncate, mkdir, mknod / `O_CREAT`, unlink, rmdir, rename — maintaining the allocation bitmap, the FAT cluster chains, and directory entry-set `SetChecksum` + `NameHash`.
+- **Block-level read cache:** the buffer cache is keyed at the block-device layer — `blkdev_do_read`/`do_write` (`sys/drivers/storage/blkdev.c`) route through `bio_dev_get`/`release` keyed by `(struct blkdev *, sector)` with read coalescing and write-through, so caching works automatically for every storage driver with no driver changes and the filesystems carry no caching logic. The old per-fs `bcache[]` array is gone; `blkdev_unregister` calls `bio_dev_purge`. See `docs/design/block-cache-consolidation.md`.
+- **readdir/getdents byte-offset cookies:** `struct dirent` carries a `uint64_t d_off`; ext2 readdir is byte-offset based and getdents/getdents64 advance by it — fixes `rm -rf` needing multiple passes on large directories (the dir-index cookie no longer collides).
 
 ## Drivers
 
@@ -51,11 +62,15 @@ Detailed record of major implementation milestones. For current system status, s
 ### Input & Storage
 - **PS/2 Subsystem:** Expanded PS/2 controller driver to support dual-channel (Mouse/Aux) operation.
 - **VirtIO Drivers:** Implemented Core VirtIO, Block Device (virtio-blk), and 9P Transport (virtio-9p) drivers.
+- **PS/2 mouse:** IntelliMouse (3-button + wheel) and IntelliMouse Explorer (5-button + wheel) detection via the Microsoft sample-rate knock sequence; 4-byte packet decoding; `BTN_SIDE` / `BTN_EXTRA` / `REL_WHEEL` emitted on the input layer.
+- **PS/2 keyboard:** runtime-switchable Set 1 (translated XT, default) and Set 2 (AT, native) scancode decoders with a `0xF0` break-prefix state machine and an E0-prefix path that handles both encodings.
+- **Block device registration size print:** `blkdev_register` prints its size as a 64-bit value, so a 4 GiB disk no longer logs "0 bytes".
 
 ### USB
 - **USB device enumeration / `lsusb`:** USB devices are now exposed both under
   `/proc/devtree` and as `/dev/usb` nodes via `sys/drivers/usb/usbdevfs.c`, so
   `lsusb` enumerates attached devices end-to-end.
+- **USB HID mouse:** boot-protocol HID mouse support.
 
 ## Architecture & Boot
 - **FPU State Tracking:** Lazy FPU context switching with FXSAVE/FXRSTOR.
@@ -109,6 +124,49 @@ Detailed record of major implementation milestones. For current system status, s
 - **regex engine — charclass leak:** `nfa_free()` now releases the
   `regex_charclass` owned by each `NFA_CLASS` state (transferred from the AST
   at compile time), fixing a bounded per-pattern compile-time leak.
+- **libsys sole ownership of `syscall()`:** libsys owns the raw `syscall()`
+  dispatcher and the `sys_*` typed wrappers (e.g. `sys_ioctl`, `sys_stat`,
+  `sys_getpid`); `libc` no longer duplicates them, so static + dynamic links
+  carry no colliding symbols. `Makefile.bin.inc` links `-l:libsys.a` (in a
+  `--start-group` with libc/libm) for static binaries and `-l:libsys.so.0` for
+  dynamic ones; a binary that calls `syscall()` directly (`bin/ldtctl`) needs
+  libsys on its own link line.
+- **Dual static/shared library builds:** every library under `lib/` ships both
+  static (`libX.a`) and shared (`libX.so.0`) builds from a single source tree
+  via dual `.o` / `.pic.o` compile passes; `SHLIB_CFLAGS` / `SHLIB_LDFLAGS` in
+  `Makefile.inc`. The `libX.so` link-time symlink is install-only so it can't
+  shadow `libX.a` in source-tree builds.
+- **OSABI branding of shared libs:** `lib/c`, `lib/m`, `lib/sys` Makefiles
+  auto-patch the OSABI byte of every produced `libX.so.0` to
+  `ELFOSABI_SUBSTRATE` (0x40) via a one-byte `dd` post-step — host `cc -shared`
+  stamps `ELFOSABI_SYSV` (0), which substrate's cross-ld rejects as "file in
+  wrong format".
+- **libc toolchain bring-up additions:** `putenv`, `localeconv` (POSIX "C"
+  lconv), `htons`/`htonl`/`ntohs`/`ntohl` (real `__builtin_bswap` impls), and a
+  socket / netdb / arpa-inet ENOSYS stub family for link-time satisfaction.
+- **libc errno hygiene:** `malloc`/`calloc`/`realloc` set `errno = ENOMEM` (or
+  `EINVAL` for a corrupted-header `realloc`) on failure; `malloc(0)` returns a
+  unique 1-byte allocation rather than NULL (glibc/musl convention). The libc
+  `mmap()` wrapper detects negative-errno kernel returns and sets `errno` +
+  returns `(void *)-1` instead of leaking the kernel error code as a pointer.
+- **libpthread torture suite** (`tests/lib/pthread/`): portable POSIX
+  `torture_kernel.c` runs on Linux/FreeBSD/macOS/substrate as a cross-OS
+  baseline; 8 scenarios target specific scheduler/threading bug classes (storm,
+  fpu, wakeup, signals, mutex_fair, tls, massive, lockord). Plus a
+  substrate-specific `torture_pthread.c` for libpthread surface correctness.
+- **`bin/top`:** procps-grade `top(1)` — multi-source snapshot
+  (`top_snapshot.c`), five-line summary + sortable process table
+  (`top_render.c`), column sorting (`top_sort.c`), interactive terminal control
+  with guaranteed restore and SIGWINCH resize (`top.c`). RSS comes from
+  `pmap_resident_count`; the `%Cpu(s)` line is held to 80 columns. Unit tests
+  under `tests/bin/top/`; man page `usr.man/man1/top.1`.
+- **`bin/df`:** sizes its columns dynamically to the actual data (each column
+  as wide as its widest cell).
+- **`sbin/sdm` display manager:** `sdm` supervises `Xfbdev` + the `sgreet` Xlib
+  greeter; `sgreet` authenticates like `bin/login` and offers a session chooser
+  driven by `/etc/sdm/sessions` (`Label = command` lines; F1 cycles). The chosen
+  command is exported as `$SDM_SESSION`, which `/etc/X11/Xsession` execs as the
+  session leader (`${SDM_SESSION:-matwm2}`).
 
 ## Drivers
 - **AC'97 / Intel HDA — IRQ-driven ring refill:** Both audio drivers now
@@ -145,6 +203,22 @@ Detailed record of major implementation milestones. For current system status, s
   not CPU-bound".  Raising the per-socket ring to 256 KiB took AF_UNIX
   throughput from 2.0 to 134 MB/s and an SDL 640x480 frame from 1227 to
   ~44 ms (~0.8 -> ~23 fps).
+- **TCP/IPv4** (`sys/net/tcp.c`): three-way handshake, the full close handshake
+  (incl. in-order FIN consumption), retransmit + dup-ACK fast-retransmit +
+  zero-window persist timer, and real `snd_wnd` send-side flow control (the
+  unacked FIFO is bounded to one receive window). Closed PCBs are reaped by the
+  retransmit-timer kthread (the sole reaper), so there is no per-connection leak.
+- **Sockets** (`sys/net/af_inet.c`, `af_unix.c`): the BSD socket surface —
+  `socket`/`bind`/`listen`/`accept`/`connect`/`send`/`recv`, `shutdown(2)`,
+  `O_NONBLOCK` accept, accept-backlog enforcement; AF_UNIX SOCK_STREAM/DGRAM
+  with SCM_RIGHTS fd passing.
+- **Loopback** (`sys/net/loopback.c`): a dedicated kthread drains the delivery
+  ring so a TX never recurses into RX on the caller's kernel stack.
+- **`sbin/telnetd`:** standalone telnet server, thread-per-connection (one
+  process, not fork-per-connection) — each connection bridges the socket to a
+  PTY running `/bin/login`. Tests under `tests/lib/c/`: `test_tcp.c`,
+  `torture_tcp.c` (12-scenario leak deep-dive), `torture_socket.c` (telnetd-shape
+  lifecycle), and `repro_acceptloop.c` (fork-per-connection regression).
 
 ## Dynamic Linking & Toolchain
 - **`dl_iterate_phdr(3)` (done — verified end-to-end):** Added the
@@ -155,8 +229,7 @@ Detailed record of major implementation milestones. For current system status, s
   (`sbin/ld.so/ld_dl.c`) that walks them.  A libc bridge in
   `lib/c/src/dl_iterate_phdr.c` and a new `include/link.h` expose the standard
   entry point.  This is the runtime half of the C++ cross-DSO exception fix
-  below; it is implemented but not yet verified end-to-end, pending the
-  matching libgcc/g++ rebuild.
+  below, and is verified end-to-end alongside it.
 - **C++ cross-DSO exceptions — shared `libgcc_s` + PT_GNU_EH_FRAME unwinding
   (done — verified end-to-end):** Root cause: substrate's gcc
   statically linked libgcc into every module, each carrying its own DWARF FDE
@@ -164,17 +237,37 @@ Detailed record of major implementation milestones. For current system status, s
   exception thrown inside a shared library could not unwind back into its
   caller — it reached `terminate()`/abort instead.  This made exceptions
   uncatchable across the exe/DSO boundary (breaking TagLib/PsyMP3 and the
-  broader C++ desktop).  Fix being landed in
+  broader C++ desktop).  Fixed in
   `contrib/gcc/patches/0010-libgcc-pt-gnu-eh-frame-substrate.patch`: define
   `USE_PT_GNU_EH_FRAME` for `__substrate__` in libgcc
-  (`unwind-dw2-fde-dip.c`, `crtstuff.c`), add `--eh-frame-hdr` to the substrate
-  `LINK_SPEC`, and add `t-slibgcc` so g++ links the shared `libgcc_s.so` (a
-  single FDE registry shared across all modules).  Paired with the
-  `dl_iterate_phdr(3)` runtime support above.  Not yet verified — the libgcc
-  and g++ rebuild that activates it is still in progress.
+  (`unwind-dw2-fde-dip.c`, `crtstuff.c`), add `--eh-frame-hdr` via the canonical
+  `LINK_EH_SPEC` hook (`LINK_SPEC` did not reach ld), add `t-slibgcc` so g++
+  links the shared `libgcc_s.so` (a single FDE registry shared across all
+  modules), and `thread_file=posix` so libstdc++ has `std::mutex`.  Paired with
+  the `dl_iterate_phdr(3)` runtime support above.  Verified end-to-end: a throw
+  in a `.so` is caught in the exe (rc=0), and TagLib reads a FLAC's metadata
+  instead of aborting.  Follow-up: gthr-posix uses hard (non-weak) pthread refs,
+  so C++ programs using `std::mutex` must link `-lpthread`.
 - **gdb runs natively on substrate:** The GNU debugger (`contrib/gdb/`, stripped
   in `contrib/gdb/build.sh`) runs end-to-end on the target, backed by the libsys
   `ptrace` PEEK bridge in `lib/sys/ptrace.c`.
+- **`/sbin/ld.so` phase history:** the native dynamic linker (`sbin/ld.so/`)
+  landed in phases — (1) bootstrap + auxv handoff, (2) self-relocate + parse
+  program PT_DYNAMIC, (3) DT_NEEDED load via `mmap`+MAP_FIXED and REL/JMPREL
+  relocations (RELATIVE / GLOB_DAT / JMP_SLOT / 32 / PC32, eager binding,
+  DT_GNU_HASH preferred with DT_HASH fallback), (4a) recursive BFS DT_NEEDED
+  traversal, (4b) DT_INIT_ARRAY in dependency order with `environ` published
+  before the constructor pass, (4c) variant-II per-thread TLS with the GS base
+  set via `sys_set_gsbase` (274; local-exec/initial-exec only, GD/LD deferred),
+  (4d) R_386_COPY, (4e) runtime dlopen/dlsym/dlclose, (4f) DT_FINI_ARRAY at
+  `exit()` via a libc weak hook, (4g) canonical function addresses
+  (function-pointer equality across the exe/DSO boundary — required by Xt's
+  `XtInherit*` class-method machinery). Per-object relocated/initialized/
+  finalized guards keep the non-idempotent R_386_RELATIVE and the run-once
+  init/fini arrays from firing twice. `crt0.S` is PIC-safe so one `crt0.o`
+  serves both static and PIE links. Specs: `docs/design/ld.so-design.md`,
+  `docs/specs/ld.so-reloc-matrix.md`, `docs/kernel-ldso-abi-substrate.md`,
+  `docs/specs/abi-i386.md`.
 
 ## Userland Ports — Multimedia
 - **SDL 2.30.9 (`contrib/sdl2/`):** Ported with the X11 video driver and the
