@@ -114,7 +114,7 @@ boot_once() {   # boot_once <serial-log>
         >/dev/null 2>&1 &
     qpid=$!
     # Poll: finish on OPTS|DONE, on qemu exit, on stall, or host timeout.
-    start=$(date +%s); lastsize=0; laststamp=${start}
+    start=$(awk '{print int($1); exit}' /proc/uptime); lastsize=0; laststamp=${start}
     while : ; do
         sleep 3
         if ! kill -0 "${qpid}" 2>/dev/null; then echo "qemu-exited"; return 0; fi
@@ -122,7 +122,7 @@ boot_once() {   # boot_once <serial-log>
             kill -9 "${qpid}" 2>/dev/null; wait "${qpid}" 2>/dev/null || true
             echo "done"; return 0
         fi
-        now=$(date +%s)
+        now=$(awk '{print int($1); exit}' /proc/uptime)
         sz=$(wc -c < "${log}" 2>/dev/null || echo 0)
         if [ "${sz}" != "${lastsize}" ]; then lastsize=${sz}; laststamp=${now}; fi
         if [ $((now - laststamp)) -ge "${STALL}" ]; then
