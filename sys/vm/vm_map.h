@@ -85,4 +85,9 @@ vm_map_t *vm_map_fork(vm_map_t *src_map, pmap_t dst_pmap);
  * a live vm_object.  `where` identifies the calling checkpoint. */
 void vm_map_audit(vm_map_t *map, const char *where);
 
+/* mlockall(2) backend: if `flags` requests MCL_CURRENT, wire every entry
+ * currently in `map` (locks all pages already mapped).  The MCL_* flag
+ * interpretation lives with the rest of the mman flags in vm_syscalls.c. */
+void vm_apply_mlockall(vm_map_t *map, int flags);
+
 #endif
