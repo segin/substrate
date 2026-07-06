@@ -1463,6 +1463,18 @@ void tty_close(struct tty *tty) {
         }
 
         tty->lifecycle_busy = 1;
+        /*
+         * Last close: flush output still buffered in write_buf to the driver
+         * before hanging up, so a burst the consumer hadn't drained yet (a pty
+         * writer's final bufferful -- e.g. dmesg's tail when the last slave fd
+         * closes) is delivered rather than discarded.  Still holding the tty
+         * lock with driver_active set, so the driver write is valid; for a pty
+         * this pushes the residue into the master ring, which the master reads
+         * ahead of the subsequent EOF.
+         */
+        if (tty->driver_active && tty->driver &&
+            tty_driver_cb_valid((const void *)tty->driver->write))
+            tty_start_locked(tty);
         call_driver_close = tty->driver_active && tty->driver &&
                             tty_driver_cb_valid((const void *)tty->driver->close);
         tty->driver_active = 0;

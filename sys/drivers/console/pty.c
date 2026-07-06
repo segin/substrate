@@ -69,6 +69,13 @@ typedef struct pty_pair {
 
     spinlock_t      lock;
     int             read_wait;       /* opaque wait channel */
+
+    /* Output captured from the slave's write_buf at its last close when the
+     * master ring was full -- drained by the master ahead of EOF so a writer's
+     * final bufferful isn't lost when it exits with no other slave holder. */
+    char           *linger;
+    int             linger_len;
+    int             linger_pos;
 } pty_pair_t;
 
 static pty_pair_t *pty_pairs[PTY_MAX_PAIRS];
@@ -188,11 +195,45 @@ static int pty_drv_install(struct tty_driver *drv, struct tty *t) {
 static void pty_slave_drv_close(struct tty *slave_tty) {
     pty_pair_t *p = slave_tty->driver_data;
     if (!p || p->magic != PTY_MAGIC) return;
+
+    /*
+     * The tty layer flushed the slave's write_buf to us just before this
+     * close (tty_close), but the master ring may have been full, leaving a
+     * tail behind.  Capture that tail into a linger buffer so the master can
+     * still read it ahead of the EOF we raise below -- otherwise a writer's
+     * final bufferful is discarded when it exits with no other slave holder.
+     * kmalloc first (it may sleep) so the copy runs under the lock; the
+     * residue is bounded by write_buf, so one TTY_BUF_SIZE buffer suffices.
+     */
+    char *lb = kmalloc(TTY_BUF_SIZE);
+    int   ln = 0;
+    if (lb) {
+        uint32_t f = intr_disable();
+        spinlock_acquire(&slave_tty->lock);
+        tty_buffer_t *wb = &slave_tty->write_buf;
+        while (wb->count > 0 && ln < TTY_BUF_SIZE) {
+            lb[ln++] = wb->data[wb->tail];
+            wb->tail = (wb->tail + 1) % TTY_BUF_SIZE;
+            wb->count--;
+        }
+        spinlock_release(&slave_tty->lock);
+        intr_restore(f);
+    }
+
+    char *free_lb = NULL;
     spinlock_acquire(&p->lock);
+    if (lb && ln > 0) {
+        p->linger     = lb;
+        p->linger_len = ln;
+        p->linger_pos = 0;
+    } else {
+        free_lb = lb;   /* nothing captured (or alloc failed) */
+    }
     p->slave_open = 0;
     p->dead       = 1;
     sched_wakeup(&p->read_wait);   /* wake a blocked master poll/read */
     spinlock_release(&p->lock);
+    if (free_lb) kfree(free_lb, TTY_BUF_SIZE);
 }
 
 static struct tty_driver pty_slave_driver = {
@@ -423,6 +464,10 @@ static void pty_destroy(pty_pair_t *p) {
         }
     }
 
+    if (p->linger) {
+        kfree(p->linger, TTY_BUF_SIZE);
+        p->linger = NULL;
+    }
     if (p->master_tty) {
         kfree(p->master_tty, sizeof(*p->master_tty));
     }
@@ -478,6 +523,16 @@ size_t pty_master_node_read(fs_node_t *node, off_t offset, size_t size,
                 }
             }
             buffer[n++] = (uint8_t)c;
+        }
+        /* Drain any linger buffer (output captured at the slave's last close
+         * when the ring was full) after the ring, so it is delivered before
+         * the dead-pty EOF below. */
+        while (n < size && p->linger && p->linger_pos < p->linger_len) {
+            if (n == 0 && p->packet_mode) {
+                buffer[n++] = TIOCPKT_DATA;
+                if (n >= size) break;
+            }
+            buffer[n++] = (uint8_t)p->linger[p->linger_pos++];
         }
         if (n > 0) break;
         if (p->dead) break;
@@ -848,12 +903,18 @@ int pty_bsd_master_open(fs_node_t *node) {
 
     /* (Re)initialise for this open: drop any stale buffered data and
      * clear the hangup left by the previous close. */
+    char *stale_linger;
     spinlock_acquire(&p->lock);
     pty_mr_flush(p);
+    stale_linger       = p->linger;   /* undrained residue from a prior session */
+    p->linger          = NULL;
+    p->linger_len      = 0;
+    p->linger_pos      = 0;
     p->dead            = 0;
     p->master_open     = 1;
     p->master_nonblock = 0;
     spinlock_release(&p->lock);
+    if (stale_linger) kfree(stale_linger, TTY_BUF_SIZE);
     if (p->slave_tty) {
         spinlock_acquire(&p->slave_tty->lock);
         p->slave_tty->hung_up = 0;
