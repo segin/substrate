@@ -196,64 +196,105 @@ static const char *blocks_header(void)
 	return "blocks";
 }
 
-static void print_header(void)
-{
-	const char *avail = (unit == U_H || unit == U_HSI) ? "Avail" : "Available";
-	const char *cap   = opt_P ? "Capacity" : "Use%";
-	if (opt_i) {
-		const char *icap = opt_P ? "ICapacity" : "IUse%";
-		if (opt_T)
-			printf("%-20s %-8s %10s %10s %10s %9s %s\n",
-			    "Filesystem", "Type", "Inodes", "IUsed", "IFree",
-			    icap, "Mounted on");
-		else
-			printf("%-20s %10s %10s %10s %9s %s\n",
-			    "Filesystem", "Inodes", "IUsed", "IFree",
-			    icap, "Mounted on");
-		return;
-	}
-	if (opt_T)
-		printf("%-20s %-8s %10s %10s %10s %9s %s\n",
-		    "Filesystem", "Type", blocks_header(),
-		    "Used", avail, cap, "Mounted on");
-	else
-		printf("%-20s %10s %10s %10s %9s %s\n",
-		    "Filesystem", blocks_header(), "Used",
-		    avail, cap, "Mounted on");
-}
+/*
+ * Output is buffered so column widths can be sized to the actual data:
+ * each column is as wide as its widest cell (header or any row), the way
+ * coreutils/BSD df lay it out.  format_disp() renders one row's cells;
+ * emit_table() computes the widths and prints the header + all rows.
+ */
+struct disp {
+	const char *source;
+	const char *type;
+	const char *target;
+	char a[24], b[24], c[24], cap[16];
+};
 
-static void print_row(const struct row *r)
+static struct disp *disps;
+static int          ndisp;
+
+static void format_disp(const struct row *r)
 {
-	char a[16], b[16], c[16], cap[8];
+	struct disp *d = &disps[ndisp++];
+	d->source = r->source;
+	d->type   = r->type;
+	d->target = r->target;
 
 	if (opt_i) {
 		if (r->have) {
-			snprintf(a, sizeof a, "%llu", (unsigned long long)r->inodes);
-			snprintf(b, sizeof b, "%llu", (unsigned long long)r->iused);
-			snprintf(c, sizeof c, "%llu", (unsigned long long)r->ifree);
+			snprintf(d->a, sizeof d->a, "%llu", (unsigned long long)r->inodes);
+			snprintf(d->b, sizeof d->b, "%llu", (unsigned long long)r->iused);
+			snprintf(d->c, sizeof d->c, "%llu", (unsigned long long)r->ifree);
 		} else {
-			strlcpy(a, "-", sizeof a); strlcpy(b, "-", sizeof b); strlcpy(c, "-", sizeof c);
+			strlcpy(d->a, "-", sizeof d->a); strlcpy(d->b, "-", sizeof d->b); strlcpy(d->c, "-", sizeof d->c);
 		}
-		if (r->have && r->inodes > 0) snprintf(cap, sizeof cap, "%u%%", r->icap);
-		else                          strlcpy(cap, "-", sizeof cap);
+		if (r->have && r->inodes > 0) snprintf(d->cap, sizeof d->cap, "%u%%", r->icap);
+		else                          strlcpy(d->cap, "-", sizeof d->cap);
 	} else {
 		if (r->have) {
-			fmt_blocks(r->blocks, r->bsize, a, sizeof a);
-			fmt_blocks(r->used,   r->bsize, b, sizeof b);
-			fmt_blocks(r->avail,  r->bsize, c, sizeof c);
+			fmt_blocks(r->blocks, r->bsize, d->a, sizeof d->a);
+			fmt_blocks(r->used,   r->bsize, d->b, sizeof d->b);
+			fmt_blocks(r->avail,  r->bsize, d->c, sizeof d->c);
 		} else {
-			strlcpy(a, "-", sizeof a); strlcpy(b, "-", sizeof b); strlcpy(c, "-", sizeof c);
+			strlcpy(d->a, "-", sizeof d->a); strlcpy(d->b, "-", sizeof d->b); strlcpy(d->c, "-", sizeof d->c);
 		}
-		if (r->have && r->blocks > 0) snprintf(cap, sizeof cap, "%u%%", r->cap);
-		else                          strlcpy(cap, "-", sizeof cap);
+		if (r->have && r->blocks > 0) snprintf(d->cap, sizeof d->cap, "%u%%", r->cap);
+		else                          strlcpy(d->cap, "-", sizeof d->cap);
+	}
+}
+
+static int wmax(int cur, const char *s)
+{
+	int l = (int)strlen(s);
+	return l > cur ? l : cur;
+}
+
+static void emit_table(void)
+{
+	const char *avail   = (unit == U_H || unit == U_HSI) ? "Avail" : "Available";
+	const char *a_hdr, *b_hdr, *c_hdr, *cap_hdr;
+	if (opt_i) {
+		a_hdr = "Inodes"; b_hdr = "IUsed"; c_hdr = "IFree";
+		cap_hdr = opt_P ? "ICapacity" : "IUse%";
+	} else {
+		a_hdr = blocks_header(); b_hdr = "Used"; c_hdr = avail;
+		cap_hdr = opt_P ? "Capacity" : "Use%";
 	}
 
+	/* Column width = widest of the header label and every row's cell. */
+	int w_fs = wmax(0, "Filesystem"), w_ty = wmax(0, "Type");
+	int w_a  = wmax(0, a_hdr), w_b = wmax(0, b_hdr);
+	int w_c  = wmax(0, c_hdr), w_cap = wmax(0, cap_hdr);
+	for (int i = 0; i < ndisp; i++) {
+		w_fs = wmax(w_fs, disps[i].source);
+		w_ty = wmax(w_ty, disps[i].type);
+		w_a  = wmax(w_a,  disps[i].a);
+		w_b  = wmax(w_b,  disps[i].b);
+		w_c  = wmax(w_c,  disps[i].c);
+		w_cap= wmax(w_cap,disps[i].cap);
+	}
+
+	/* Filesystem/Type left-aligned, numeric columns right-aligned; the
+	 * trailing "Mounted on" needs no padding. */
 	if (opt_T)
-		printf("%-20s %-8s %10s %10s %10s %9s %s\n",
-		    r->source, r->type, a, b, c, cap, r->target);
+		printf("%-*s %-*s %*s %*s %*s %*s %s\n",
+		    w_fs, "Filesystem", w_ty, "Type",
+		    w_a, a_hdr, w_b, b_hdr, w_c, c_hdr, w_cap, cap_hdr, "Mounted on");
 	else
-		printf("%-20s %10s %10s %10s %9s %s\n",
-		    r->source, a, b, c, cap, r->target);
+		printf("%-*s %*s %*s %*s %*s %s\n",
+		    w_fs, "Filesystem",
+		    w_a, a_hdr, w_b, b_hdr, w_c, c_hdr, w_cap, cap_hdr, "Mounted on");
+
+	for (int i = 0; i < ndisp; i++) {
+		struct disp *d = &disps[i];
+		if (opt_T)
+			printf("%-*s %-*s %*s %*s %*s %*s %s\n",
+			    w_fs, d->source, w_ty, d->type,
+			    w_a, d->a, w_b, d->b, w_c, d->c, w_cap, d->cap, d->target);
+		else
+			printf("%-*s %*s %*s %*s %*s %s\n",
+			    w_fs, d->source,
+			    w_a, d->a, w_b, d->b, w_c, d->c, w_cap, d->cap, d->target);
+	}
 }
 
 /* For a file argument, find the mount entry whose `target` is the
@@ -319,7 +360,8 @@ int main(int argc, char **argv)
 	if (read_mounts() < 0)
 		return 1;
 
-	print_header();
+	/* Buffer rows so emit_table() can size columns to the actual data. */
+	disps = xrealloc(NULL, (size_t)(nmounts + argc) * sizeof(*disps));
 
 	if (optind == argc) {
 		for (int i = 0; i < nmounts; i++) {
@@ -330,7 +372,7 @@ int main(int argc, char **argv)
 			/* Skip 0-block pseudo filesystems unless -a. */
 			if (!opt_a && r.have && r.blocks == 0)
 				continue;
-			print_row(&r);
+			format_disp(&r);
 		}
 	} else {
 		for (int i = optind; i < argc; i++) {
@@ -348,9 +390,10 @@ int main(int argc, char **argv)
 				continue;
 			struct row r;
 			fill_row(&r, &mounts[m]);
-			print_row(&r);
+			format_disp(&r);
 		}
 	}
 
+	emit_table();
 	return 0;
 }
