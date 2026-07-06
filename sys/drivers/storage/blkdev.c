@@ -69,8 +69,8 @@ void blkdev_register(blkdev_t *dev) {
     dev->next = blkdev_list;
     blkdev_list = dev;
     
-    kprintf("Block device /dev/storage/%s registered (%u bytes)\n", 
-            dev->name, (uint32_t)dev->node.length);
+    kprintf("Block device /dev/storage/%s registered (%llu bytes)\n",
+            dev->name, (unsigned long long)dev->node.length);
 }
 
 void blkdev_unregister(blkdev_t *dev) {
