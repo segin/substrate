@@ -1050,8 +1050,48 @@ int tty_write(struct tty *tty, const char *buf, int len) {
         TTY_UNLOCK(tty);
         return -EINTR;
     }
-    
-    for (int i = 0; i < len; i++) {
+
+    int i;
+    for (i = 0; i < len; i++) {
+        /*
+         * Write-side flow control.  Without it, tty_output_locked() silently
+         * DROPS bytes once write_buf fills and the driver won't take more --
+         * which truncates a burst whose consumer drains slowly (e.g. `dmesg`
+         * to a pty being rendered by xterm: write() returned "all written"
+         * while ~90% was discarded).  Block until the consumer makes room.
+         *
+         * Only ptys reach the blocking path: the hardware console drivers
+         * accept every byte synchronously (write_room stays positive), so
+         * their write_buf never fills.  A pty master's read() drains its ring
+         * and calls tty_start(), which wakes write_wait; a master hangup wakes
+         * it too and sets hung_up.  Keep an 8-byte margin so a single input
+         * byte's worst-case output expansion (OXTABS tab -> up to 8 spaces,
+         * ONLCR '\n' -> "\r\n") can never overflow mid-expansion.
+         */
+        while (tty->write_buf.count > TTY_BUF_SIZE - 8) {
+            tty_start_locked(tty);                 /* push to driver / master ring */
+            if (tty->write_buf.count <= TTY_BUF_SIZE - 8)
+                break;                             /* room freed */
+            if (tty->hung_up) {                    /* peer gone: stop, don't hang */
+                TTY_UNLOCK(tty);
+                return i > 0 ? i : -EIO;
+            }
+            if (current_thread &&
+                (current_thread->sig_pending & ~current_thread->sig_mask)) {
+                TTY_UNLOCK(tty);
+                return i > 0 ? i : -EINTR;
+            }
+            /* Sleep interruptibly on write_wait -- mirrors the read path. */
+            current_thread->flags |= THREAD_F_INTERRUPTIBLE;
+            current_thread->wait_chan = &tty->write_wait;
+            current_thread->state = THREAD_BLOCKED;
+            spinlock_release(&tty->lock);
+            intr_restore(_flags);
+            sched_yield();
+            _flags = intr_disable();
+            spinlock_acquire(&tty->lock);
+            current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
+        }
         tty_output_locked(buf[i], tty);
     }
     tty_start_locked(tty);

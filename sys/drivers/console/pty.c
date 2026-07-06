@@ -683,6 +683,9 @@ void pty_master_node_close(fs_node_t *node) {
         spinlock_release(&slave_tty->lock);
         sched_wakeup(&slave_tty->read_wait);
         sched_wakeup(&slave_tty->poll_wait);
+        /* Also wake a slave writer blocked in tty_write's flow-control loop,
+         * so it observes hung_up and returns -EIO instead of hanging. */
+        sched_wakeup(&slave_tty->write_wait);
     }
 
     /* If the slave is also closed (or never opened), free everything. */
