@@ -28,6 +28,9 @@
 #include <fs/pseudofs.h>
 #include <fs/fuse.h>
 #include <fs/9p.h>
+#include <sys/kern_syscalls.h>
+#include <exec/perso/personality.h>
+#include <drivers/console/pty.h>
 #include <drivers/devices/full.h>
 #include <drivers/devices/cpuid.h>
 #include <drivers/console/pty.h>
@@ -119,10 +122,7 @@ void vfs_init(void) {
     fat_init();
     exfat_init();
     minix_init();
-    {
-        extern void sysv_init(void);
         sysv_init();
-    }
     udf_init();
     
     // Register pseudo-filesystems
@@ -136,7 +136,6 @@ void vfs_init(void) {
 
     /* PTY subsystem — depends on devfs being up so /dev/ptmx and
      * /dev/pts/ are reachable. */
-    extern void pty_init(void);
     pty_init();
     
     // Register network/special filesystems
@@ -263,7 +262,6 @@ int vfs_mount_legacy(const char *device, const char *path, const char *type, uin
         // Start from devfs if path begins with /dev/
         if (strncmp(device, "/dev/", 5) == 0) {
             // Find devfs mount
-            extern fs_node_t *devfs_root_node_ptr;
             fs_node_t *devfs_root = devfs_root_node_ptr;
             if (devfs_root) {
                 const char *subpath = device + 5; // skip "/dev/"
@@ -588,7 +586,6 @@ fs_node_t *vfs_lookup(fs_node_t *root, const char *path) {
      */
     if (current_process && current_process->perso_id != 0 && path[0] == '/' &&
         strncmp(path, "/perso/", 7) != 0) {
-        extern const char *perso_name(int id);
         const char *pname = perso_name(current_process->perso_id);
         if (pname) {
             char ppath[512];
@@ -1089,7 +1086,6 @@ int setattr_fs(fs_node_t *node, const struct fs_attr *a) {
 
     struct fs_attr eff = *a;
     if (eff.mask & (FS_ATTR_ATIME_NOW | FS_ATTR_MTIME_NOW)) {
-        extern time_t kern_time(time_t *tloc);
         int64_t now = (int64_t)kern_time(NULL);
         if (eff.mask & FS_ATTR_ATIME_NOW) {
             eff.atime = now;
