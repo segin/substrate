@@ -82,4 +82,6 @@ static inline int runqueue_empty(runqueue_t *rq) {
     return rq->bitmap_lo == 0 && rq->bitmap_hi == 0;
 }
 
+runqueue_t *sched_get_current_runqueue(void);
+
 #endif /* _KERN_RUNQUEUE_H */

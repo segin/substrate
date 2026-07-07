@@ -4,9 +4,10 @@
  * Implements sched_setaffinity/sched_getaffinity for thread CPU binding.
  */
 
-#include <kern/sched.h>
-#include <sys/proc.h>
 #include <string.h>
+
+#include <sys/proc.h>
+#include <kern/sched.h>
 #include <arch/i386/percpu.h>
 
 /* MAX_CPUS defined in sched.h */
@@ -26,16 +27,13 @@ int sched_set_affinity(int tid, uint32_t mask) {
 
     if (!t) return -1;
     
-    // Validate mask - at least one valid CPU must be set
-    if (mask == 0) return -1;
-    
-    // Check that mask only includes valid CPUs
+    // Validate mask (must allow at least one valid online CPU)
     uint32_t valid_mask = sched_valid_affinity_mask();
-    if ((mask & valid_mask) == 0) return -1;
+    if ((mask & valid_mask) == 0) {
+        return -1;
+    }
     
-    // Apply mask
     t->cpu_affinity = mask & valid_mask;
-    
     return 0;
 }
 
@@ -55,14 +53,12 @@ uint32_t sched_get_affinity(int tid) {
 
 // Set affinity for current thread
 int sched_set_affinity_self(uint32_t mask) {
-    extern thread_t *current_thread;
     if (!current_thread) return -1;
     return sched_set_affinity(current_thread->tid, mask);
 }
 
 // Get affinity for current thread
 uint32_t sched_get_affinity_self(void) {
-    extern thread_t *current_thread;
     if (!current_thread) return 0;
     return sched_get_affinity(current_thread->tid);
 }

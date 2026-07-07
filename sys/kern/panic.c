@@ -1,25 +1,17 @@
-#include <kern/panic.h>
-#include <kern/stacktrace.h>
-#include <kern/console.h>
-#include <drivers/video/vga.h>
-#include <drivers/video/hw_text.h>
-#include <drivers/video/fb.h>
-#include <drivers/console/uart/uart.h>
-#include <arch/i386/idt.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
-/* Cross-arch LAPIC IPI sender; halts other CPUs by jumping them into
- * isr_panic_ipi (vector PANIC_IPI_VECTOR = 0xFB). */
-#ifndef HOST_TEST
-extern void lapic_send_ipi_all_excl_self(uint8_t vector);
-extern int  lapic_is_initialized(void);
-#endif
-
-// Forward decls
-void vga_text_set_color(uint8_t fg, uint8_t bg);
-extern int copyin(const void *, void *, unsigned int);
+#include <sys/copy.h>
+#include <kern/console.h>
+#include <kern/panic.h>
+#include <kern/stacktrace.h>
+#include <arch/i386/idt.h>
+#include <arch/x86-common/lapic.h>
+#include <drivers/console/uart/uart.h>
+#include <drivers/video/fb.h>
+#include <drivers/video/hw_text.h>
+#include <drivers/video/vga.h>
 
 #ifdef HOST_TEST
 void panic_test_halt(void);

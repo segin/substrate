@@ -6,17 +6,14 @@
  */
 
 #include <sys/types.h>
+#include <sys/errno.h>
 #include <sys/lock.h>
 #include <sys/proc.h>
-#include <sys/errno.h>
 #include <kern/sched.h>
 #include <kern/sleepq.h>
 #include <kern/panic.h>
+#include <kern/turnstile.h>
 #include <string.h>
-
-/* Turnstile support for priority inheritance */
-extern void turnstile_block(void *lockobj, struct thread *owner);
-extern void turnstile_release(void *lockobj);
 
 /*
  * lockinit - Initialize a lockmgr lock

@@ -10,18 +10,19 @@
  * Based on designs from Linux, FreeBSD, and OpenBSD.
  */
 
-#include <sys/random.h>
+#include <string.h>
+
 #include <sys/copy.h>
 #include <sys/errno.h>
 #include <sys/proc.h>
-#include <arch/i386/cpu.h>
-#include <arch/i386/percpu.h>
-#include <kern/random.h>
-#include <kern/console.h>
-#include <kern/sched.h>
+#include <sys/random.h>
 #include <vfs/vfs.h>
 #include <vm/vm_kmem.h>
-#include <string.h>
+#include <kern/console.h>
+#include <kern/random.h>
+#include <kern/sched.h>
+#include <arch/i386/cpu.h>
+#include <arch/i386/percpu.h>
 
 /* Global RNG state */
 struct rng_state rng_state;
@@ -865,8 +866,6 @@ void random_init(void) {
     random_percpu_init();
     
     /* Register /dev/random */
-    extern void devfs_register_device(fs_node_t *node);
-    
     memset(&random_node, 0, sizeof(fs_node_t));
     strlcpy(random_node.name, "random", sizeof(random_node.name));
     random_node.flags = FS_CHARDEVICE;

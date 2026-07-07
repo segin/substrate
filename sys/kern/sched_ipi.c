@@ -4,11 +4,13 @@
  * Uses Inter-Processor Interrupts to preempt threads on remote CPUs.
  */
 
-#include <kern/sched.h>
-#include <sys/proc.h>
 #include <stdint.h>
-#include <arch/x86-common/lapic.h>
+
+#include <sys/proc.h>
+#include <kern/sched.h>
+#include <kern/runqueue.h>
 #include <arch/i386/percpu.h>
+#include <arch/x86-common/lapic.h>
 
 /* IPI vector defined in sched.h */
 
@@ -47,7 +49,6 @@ void sched_resched_cpu(int cpu_id) {
 // IPI handler for scheduler preemption
 // Called from IDT handler for SCHED_IPI_VECTOR
 void sched_ipi_handler(void) {
-    extern thread_t *current_thread;
     
     // Mark current thread as needing reschedule
     if (current_thread) {
@@ -55,20 +56,17 @@ void sched_ipi_handler(void) {
     }
     
     // Send EOI (required for LAPIC)
-    extern void lapic_send_eoi(void);
     lapic_send_eoi();
 }
 
 // Check if current thread needs reschedule
 int sched_needs_resched(void) {
-    extern thread_t *current_thread;
     if (!current_thread) return 0;
     return current_thread->needs_resched != 0;
 }
 
 // Clear reschedule flag
 void sched_clear_resched(void) {
-    extern thread_t *current_thread;
     if (current_thread) {
         current_thread->needs_resched = 0;
     }
@@ -76,12 +74,9 @@ void sched_clear_resched(void) {
 
 // Preempt current thread if higher priority thread is ready
 void sched_preempt_check(void) {
-    extern thread_t *current_thread;
     if (!current_thread) return;
     
-    // Check if there's a higher priority thread waiting
-    extern thread_t *runqueue_peek(void *rq);
-    extern void *sched_get_current_runqueue(void);
+
     
     void *rq = sched_get_current_runqueue();
     if (!rq) return;

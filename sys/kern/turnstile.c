@@ -5,11 +5,12 @@
  * Based on Solaris/FreeBSD turnstile design.
  */
 
-#include <kern/turnstile.h>
-#include <sys/proc.h>
-#include <kern/panic.h>
 #include <stdint.h>
 #include <string.h>
+
+#include <sys/proc.h>
+#include <kern/panic.h>
+#include <kern/turnstile.h>
 
 // Turnstile structure
 typedef struct turnstile {
@@ -116,7 +117,6 @@ void turnstile_init(void) {
 // lockobj: the lock being waited on
 // owner: the thread currently holding the lock
 void turnstile_block(void *lockobj, thread_t *owner) {
-    extern thread_t *current_thread;
     if (!current_thread || !owner)
         return;
     
