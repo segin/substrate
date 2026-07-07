@@ -5,15 +5,11 @@
 #include <string.h>
 #include <errno.h>
 #include <kern/console.h>
-#include <include/sys/proc.h>
+#include <sys/proc.h>
 #include <arch/i386/idt.h> 
 #include <arch/i386/pmap.h>
-#include <arch/i386/pmap.h>
-#include "vm86.h" 
+#include <arch/i386/vm86.h> 
 
-// Access to current process/thread
-extern struct process *current_process;
-extern struct thread *current_thread;
 
 /*
  * VM86 Monitor Structure (TASKS.md L578)

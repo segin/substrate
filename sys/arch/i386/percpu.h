@@ -2,7 +2,7 @@
 #define _ARCH_I386_PERCPU_H
 
 #include <stdint.h>
-#include "gdt.h"
+#include <arch/i386/gdt.h>
 
 // Forward declaration
 struct thread;

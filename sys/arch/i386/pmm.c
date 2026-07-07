@@ -1,7 +1,7 @@
 #include <arch/i386/pmm.h>
 #include <arch/x86-common/multiboot.h>
 #include <arch/x86-common/e820.h>
-#include "intr.h"
+#include <arch/i386/intr.h>
 #include <vm/vm_page.h>
 #include <vm/phys_mem.h> // Generic PMM
 #include <string.h>

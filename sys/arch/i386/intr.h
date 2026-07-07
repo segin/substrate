@@ -38,4 +38,7 @@ static inline void wait_for_interrupt(void) {
     __asm__ volatile ("sti; hlt");
 }
 
+struct thread;
+void switch_to(struct thread *prev, struct thread *next);
+
 #endif

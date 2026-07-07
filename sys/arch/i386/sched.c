@@ -8,13 +8,11 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
-#include "pmap.h"
+#include <arch/i386/pmap.h>
+#include <arch/i386/intr.h>
+#include <vfs/vfs.h>
 
-// Arch-Specific Externs
-extern void switch_to(thread_t *prev, thread_t *next);
-extern void set_kernel_stack(uint32_t stack);
 extern thread_t *current_thread; // Now defined in generic sched.c
-extern fs_node_t *fs_root;
 
 // Generic Allocation Helper
 extern thread_t *sched_alloc_thread(process_t *proc);

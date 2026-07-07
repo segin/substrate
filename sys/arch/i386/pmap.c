@@ -1747,8 +1747,6 @@ void pmap_flush_global_pages(void) {
     __sync_fetch_and_add(&global_pmap_stats.tlb_full_flush_count, 1);
 }
 
-// SMP TLB Shootdown Support
-#include "lapic.h"
 
 // Pending shootdown state (used by IPI handler)
 static volatile uint32_t shootdown_va = 0;

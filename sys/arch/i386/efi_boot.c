@@ -15,7 +15,7 @@
 #include <multiboot.h>
 
 #include <kern/main.h>
-#include "efi.h"
+#include <arch/i386/efi.h>
 
 // --------------------------------------------------------------------------------
 // Globals and Imports
