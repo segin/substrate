@@ -861,16 +861,23 @@ static int floppy_ioctl(blkdev_t *dev, uint32_t request, void *arg) {
     }
 }
 
-static int fdc_controller_dma_init(fdc_controller_t *ctlr) {
-    vm_page_t *page;
+/*
+ * ISA-DMA bounce buffers -- one per controller, static and page-aligned in the
+ * kernel image (BSS).  ISA floppy DMA needs a buffer below 16 MB that does not
+ * straddle a 64 KB boundary; a FDC_DMA_BUFFER_SIZE-aligned buffer of that size
+ * can never straddle one, and the kernel image (hence its BSS) loads well below
+ * 16 MB.  A static buffer replaces the old vm_phys_alloc_page_below(16 MB) call,
+ * which failed at boot: by the time the floppy controller probes (late in
+ * kmain), the buddy allocator has already handed out every free page below
+ * 16 MB, so the low-page allocation returned NULL, "dma init failed" was logged,
+ * and no /dev/storage/fdN node was created.
+ */
+static uint8_t fdc_dma_static[FDC_MAX_CONTROLLERS][FDC_DMA_BUFFER_SIZE]
+    __attribute__((aligned(FDC_DMA_BUFFER_SIZE)));
 
-    page = vm_phys_alloc_page_below(FDC_DMA_LIMIT);
-    if (page == NULL) {
-        return -ENOMEM;
-    }
-    ctlr->dma_page = page;
-    ctlr->dma_phys = vm_page_to_phys(page);
-    ctlr->dma_buf = (uint8_t *)(uintptr_t)(ctlr->dma_phys + KERN_BASE);
+static int fdc_controller_dma_init(fdc_controller_t *ctlr) {
+    ctlr->dma_buf = fdc_dma_static[ctlr->index];
+    ctlr->dma_phys = (uintptr_t)ctlr->dma_buf - KERN_BASE;
     memset(ctlr->dma_buf, 0, FDC_DMA_BUFFER_SIZE);
     return fdc_dma_window_valid(ctlr->dma_phys, FDC_DMA_BUFFER_SIZE) ? 0 : -EINVAL;
 }
