@@ -20,11 +20,10 @@
 #include <sys/proc.h>
 #include <arch/i386/intr.h>
 #include <vm/vm_kmem.h>
-#include "fb.h"
-#include "fb_console.h"
-#include "fb_ops.h"
-#include "fb_ops.h"
-#include "font.h"
+#include <drivers/video/fb.h>
+#include <drivers/video/fb_console.h>
+#include <drivers/video/fb_ops.h>
+#include <drivers/video/font.h>
 
 /* ==================== Constants ==================== */
 

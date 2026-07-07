@@ -10,8 +10,8 @@
 #include <stddef.h>
 #include <string.h>
 
-#include "fb.h"
-#include "fb_ops.h"
+#include <drivers/video/fb.h>
+#include <drivers/video/fb_ops.h>
 
 /* ==================== Helpers ==================== */
 

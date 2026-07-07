@@ -5,8 +5,8 @@
 #include <string.h>
 #include <drivers/video/fb.h>
 #include <arch/x86-common/io.h>
-#include "../../kern/resource.h"
-#include "../../kern/pci.h"
+#include <kern/resource.h>
+#include <kern/pci.h>
 
 #define VBE_DISPI_IOPORT_INDEX 0x01CE
 #define VBE_DISPI_IOPORT_DATA  0x01CF

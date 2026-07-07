@@ -77,7 +77,7 @@ void fb_client_clear(void *owner);
 void fb_planar_present_userfb(void);
 
 /* Console operations are in fb_console.h */
-#include "fb_console.h"
+#include <drivers/video/fb_console.h>
 
 #include <sys/fb.h>
 
