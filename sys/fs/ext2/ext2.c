@@ -10,6 +10,7 @@
 #include <sys/errno.h>
 #include <sys/stat.h>
 #include <sys/mount.h>
+#include <crc32c.h>
 
 /*
  * ext2trace — gated on `debug=ext2trace` on the kernel command line.
@@ -265,8 +266,7 @@ int ext2_read_inode(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_t *inode) {
      * If mismatch, refuse the read so callers can't act on a
      * tampered inode.  */
     if (fs->sb.s_feature_ro_compat & EXT2F_ROCOMPAT_METADATA_CKSUM) {
-        extern int kprintf(const char *, ...);
-        extern uint32_t crc32c_update(uint32_t, const void *, size_t);
+
         const uint16_t zero16 = 0;
         uint32_t le_inum = inode_num;
         uint32_t le_gen  = *(uint32_t *)(raw + 100);   /* i_generation @100 */
@@ -551,7 +551,7 @@ int ext2_write_inode(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_t *inode) {
      * valid).  Without this the next read_inode would fail csum
      * verify after any setattr/chmod/utime write.  */
     if (fs->sb.s_feature_ro_compat & EXT2F_ROCOMPAT_METADATA_CKSUM) {
-        extern uint32_t crc32c_update(uint32_t, const void *, size_t);
+
         uint8_t *raw = block_buf + inode_offset;
         const uint16_t zero16 = 0;
         /* Zero the csum bytes in the buffer before the calculation
@@ -881,7 +881,7 @@ static int ext4_extent_alloc_inode_block(ext2_fs_t *fs, ext2_inode_t *inode,
          * requiring traversing and splitting extent index blocks. It is deliberately
          * unsupported.
          */
-        extern int kprintf(const char *, ...);
+
         kprintf("ext2: multi-level extent tree updates are unsupported\n");
         return -1;
     }
@@ -1273,7 +1273,7 @@ fs_node_t *ext2_alloc_node(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_t *inod
                 ext2_node_cache[i].pin_count == 0) {
                 ext2_root_pin_lost++;
                 if (ext2_root_pin_lost <= 4) {
-                    extern int kprintf(const char *, ...);
+
                     kprintf("ext2: WARNING root slot %d pin_count=0 "
                             "(alloc_node entry, requesting inode=%u, "
                             "lost-pin event #%llu)\n",
@@ -1352,7 +1352,7 @@ fs_node_t *ext2_alloc_node(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_t *inod
         ext2_alloc_node_fail_pinned += pinned;
         ext2_alloc_node_fail_locked += locked;
         if (ext2_alloc_node_fail <= 4) {
-            extern int kprintf(const char *, ...);
+
             kprintf("ext2: alloc_node fail #%llu inode=%u "
                     "(pinned=%u locked=%u of %d)\n",
                     (unsigned long long)ext2_alloc_node_fail,
@@ -1377,7 +1377,7 @@ fs_node_t *ext2_alloc_node(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_t *inod
                         ext2_node_cache[i].orphaned);
                 shown++;
             }
-            extern unsigned long fs_open_count, fs_close_count;
+
             kprintf("ext2: open_fs=%lu close_fs=%lu delta=%ld\n",
                     fs_open_count, fs_close_count,
                     (long)(fs_open_count - fs_close_count));
@@ -1996,7 +1996,7 @@ fs_node_t *ext2_finddir(fs_node_t *node, char *name) {
         if ((walk_break_malformed || walk_break_block0) &&
             (ext2_finddir_break_recv_malformed +
              ext2_finddir_break_block0) <= 4) {
-            extern int kprintf(const char *, ...);
+
             kprintf("ext2: finddir(inode=%u, '%s') walk truncated: "
                     "malformed=%d block0=%d pos=%u dir_size=%u\n",
                     ctx->inode_num, name,
@@ -2054,7 +2054,7 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
     if (fs->sb.s_rev_level >= 1) {
         uint32_t bad_inc = fs->sb.s_feature_incompat & ~EXT2F_INCOMPAT_SUPP;
         if (bad_inc) {
-            extern int kprintf(const char *, ...);
+
             kprintf("ext2: mount refused — unsupported INCOMPAT features 0x%08x\n", bad_inc);
             if (bad_inc & EXT2F_INCOMPAT_JOURNAL_DEV)
                 kprintf("ext2:   journal device (ext3+ external journal)\n");
@@ -2071,18 +2071,18 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
         }
         uint32_t bad_ro = fs->sb.s_feature_ro_compat & ~EXT2F_ROCOMPAT_SUPP;
         if (bad_ro) {
-            extern int kprintf(const char *, ...);
+
             kprintf("ext2: mount forced read-only — unsupported ROCOMPAT 0x%08x\n",
                     bad_ro);
             fs->readonly = 1;
         }
         /* Informational: log which ext3/ext4 features are present.  */
         if (fs->sb.s_feature_compat & EXT2F_COMPAT_HASJOURNAL) {
-            extern int kprintf(const char *, ...);
+
             kprintf("ext2: ext3+ journal present (ignored — read-only journal use)\n");
         }
         if (fs->sb.s_feature_incompat & EXT2F_INCOMPAT_EXTENTS) {
-            extern int kprintf(const char *, ...);
+
             kprintf("ext2: ext4 extents enabled — extent-tree files supported\n");
         }
 
@@ -2094,8 +2094,7 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
          * (we'd start writing csum-claiming-valid blocks whose
          * derived csums use stale superblock state).  */
         if (fs->sb.s_feature_ro_compat & EXT2F_ROCOMPAT_METADATA_CKSUM) {
-            extern int kprintf(const char *, ...);
-            extern uint32_t crc32c_update(uint32_t, const void *, size_t);
+
             uint32_t want = *(uint32_t *)(sb_buf + 0x3FC);
             uint32_t got  = crc32c_update(0xFFFFFFFFu, sb_buf, 0x3FC);
             if (want != got) {
@@ -2115,8 +2114,7 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
         memcpy(fs->hash_seed, sb_buf + 236, sizeof(fs->hash_seed));
 
         if (fs->sb.s_feature_ro_compat & EXT2F_ROCOMPAT_METADATA_CKSUM) {
-            extern int kprintf(const char *, ...);
-            extern uint32_t crc32c_update(uint32_t, const void *, size_t);
+
             /* Establish the csum seed used for every other csum'd
              * object on the filesystem.  Default = crc32c(~0, uuid).
              * If the fs has INCOMPAT_CSUM_SEED set, the seed is the
@@ -2221,7 +2219,7 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
         uint16_t on_disk = *(uint16_t *)(sb_buf + 0xFE);
         if (on_disk == 0)               on_disk = 64;
         if (on_disk < 32 || on_disk > 1024 || (on_disk & 3)) {
-            extern int kprintf(const char *, ...);
+
             kprintf("ext2: implausible s_desc_size %u\n", on_disk);
             kfree(fs->bgd, bgd_size);
             kfree(fs, sizeof(ext2_fs_t));
@@ -2256,7 +2254,7 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
             uint32_t ib_hi = *(uint32_t *)(src + 36);   /* bg_inode_bitmap_hi  */
             uint32_t it_hi = *(uint32_t *)(src + 40);   /* bg_inode_table_hi   */
             if (bb_hi || ib_hi || it_hi) {
-                extern int kprintf(const char *, ...);
+
                 kprintf("ext2: bg %u uses >32-bit addresses (bb_hi=%x ib_hi=%x it_hi=%x) — refuse mount\n",
                         g, bb_hi, ib_hi, it_hi);
                 kfree(gdt_raw, on_disk_size);
@@ -2277,8 +2275,7 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
      * For 32-byte descriptors the trailing range is empty.  Any
      * mismatch refuses the mount — same argument as superblock-csum.  */
     if (fs->sb.s_feature_ro_compat & EXT2F_ROCOMPAT_METADATA_CKSUM) {
-        extern int kprintf(const char *, ...);
-        extern uint32_t crc32c_update(uint32_t, const void *, size_t);
+
         const uint16_t zero16 = 0;
         for (uint32_t g = 0; g < fs->group_count; g++) {
             uint8_t *gd = gdt_raw + g * fs->desc_size;

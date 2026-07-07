@@ -255,4 +255,6 @@ void shmfs_init(void);
 
 extern fs_node_t *fs_root; // Global root node
 
+extern unsigned long fs_open_count, fs_close_count;
+
 #endif
