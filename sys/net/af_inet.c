@@ -50,28 +50,7 @@
 #endif
 
 /* TCP PCB opaque pointer — exported by tcp.c. */
-typedef struct tcp_pcb tcp_pcb_t;
-extern tcp_pcb_t *tcp_alloc(void);
-extern void       tcp_free(tcp_pcb_t *p);
-extern int        tcp_bind(tcp_pcb_t *p, uint32_t laddr, uint16_t lport);
-extern int        tcp_listen(tcp_pcb_t *p, int backlog);
-extern int        tcp_connect(tcp_pcb_t *p, uint32_t raddr, uint16_t rport);
-extern int        tcp_connect_nb(tcp_pcb_t *p, uint32_t raddr, uint16_t rport);
-extern int        tcp_poll(tcp_pcb_t *p, short events, void **wait_chan);
-extern tcp_pcb_t *tcp_accept(tcp_pcb_t *listen_p, int nonblock);
-extern int        tcp_is_listening(const tcp_pcb_t *p);
-extern int        tcp_shutdown_wr(tcp_pcb_t *p);
-extern int        tcp_shutdown_rd(tcp_pcb_t *p);
-extern ssize_t    tcp_send(tcp_pcb_t *p, const void *buf, size_t len);
-extern ssize_t    tcp_send_nb(tcp_pcb_t *p, const void *buf, size_t len);
-extern ssize_t    tcp_recv(tcp_pcb_t *p, void *buf, size_t len);
-extern void       tcp_endpoints(const tcp_pcb_t *p,
-                                uint32_t *laddr, uint16_t *lport,
-                                uint32_t *raddr, uint16_t *rport);
-extern ssize_t    tcp_recv_nb(tcp_pcb_t *p, void *buf, size_t len);
-extern ssize_t    tcp_peek(tcp_pcb_t *p, void *buf, size_t len);
-extern ssize_t    tcp_peek_nb(tcp_pcb_t *p, void *buf, size_t len);
-extern int        tcp_close(tcp_pcb_t *p);
+
 
 /* Match userland struct sockaddr_in / sockaddr_in6 from
  * include/netinet/in.h. */
@@ -772,7 +751,7 @@ static int afinet_pack_sockaddr(int family, uint16_t hport,
  * SO_ERROR semantics: each getsockopt returns the latest error and
  * resets the slot.  For TCP we also pull the value from the PCB
  * (set by tcp_kill_pcb when the connection failed).  */
-extern int tcp_take_so_error(tcp_pcb_t *p);
+
 
 int afinet_so_error(int fd) {
     afi_sock_t *s = afi_from_fd(fd);

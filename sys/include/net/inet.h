@@ -127,4 +127,29 @@ int afinet_deliver_v6(const uint8_t saddr[16], const uint8_t daddr[16],
 
 void inet_init(void);
 
+/* -- TCP Control Block (PCB) API ------------------------------------ */
+struct tcp_pcb;
+typedef struct tcp_pcb tcp_pcb_t;
+
+tcp_pcb_t *tcp_alloc(void);
+void       tcp_free(tcp_pcb_t *p);
+int        tcp_bind(tcp_pcb_t *p, uint32_t laddr, uint16_t lport);
+int        tcp_listen(tcp_pcb_t *p, int backlog);
+int        tcp_connect(tcp_pcb_t *p, uint32_t raddr, uint16_t rport);
+int        tcp_connect_nb(tcp_pcb_t *p, uint32_t raddr, uint16_t rport);
+int        tcp_poll(tcp_pcb_t *p, short events, void **wait_chan);
+tcp_pcb_t *tcp_accept(tcp_pcb_t *listen_p, int nonblock);
+int        tcp_is_listening(const tcp_pcb_t *p);
+int        tcp_shutdown_wr(tcp_pcb_t *p);
+int        tcp_shutdown_rd(tcp_pcb_t *p);
+ssize_t    tcp_send(tcp_pcb_t *p, const void *buf, size_t len);
+ssize_t    tcp_send_nb(tcp_pcb_t *p, const void *buf, size_t len);
+ssize_t    tcp_recv(tcp_pcb_t *p, void *buf, size_t len);
+void       tcp_endpoints(const tcp_pcb_t *p, uint32_t *laddr, uint16_t *lport, uint32_t *raddr, uint16_t *rport);
+ssize_t    tcp_recv_nb(tcp_pcb_t *p, void *buf, size_t len);
+ssize_t    tcp_peek(tcp_pcb_t *p, void *buf, size_t len);
+ssize_t    tcp_peek_nb(tcp_pcb_t *p, void *buf, size_t len);
+int        tcp_close(tcp_pcb_t *p);
+int        tcp_take_so_error(tcp_pcb_t *p);
+
 #endif /* _SYS_NET_INET_H */
