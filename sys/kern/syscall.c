@@ -20,13 +20,15 @@
 #include <vm/vm_kmem.h>
 #include <vm/uma.h>
 #include <arch/i386/pmap.h>
-#include <include/sys/thr.h>
-#include <include/sys/acct.h>
-#include <include/sys/file.h>
-#include <include/sys/proc.h>
-#include <include/sys/signal.h>
-#include <include/sys/session.h>
-#include <include/sys/tty.h>
+#include <sys/thr.h>
+#include <sys/acct.h>
+#include <sys/file.h>
+#include <sys/proc.h>
+#include <sys/signal.h>
+#include <sys/session.h>
+#include <sys/tty.h>
+#include <vfs/buf.h>
+#include <kern/version.h>
 #include <kern/file.h>
 #include <vfs/vfs.h>
 #include <drivers/console/uart/uart.h>
@@ -600,8 +602,7 @@ ssize_t sys_read(int fd, char *buf, size_t len) {
     return total_read;
 }
 
-/* Forward decl — fifo_open lives in sys/fs/pipe.c. */
-extern int fifo_open(fs_node_t *inode, int oflags, fs_node_t **out);
+
 
 int sys_open(const char *path, int flags, int mode) {
     char kpath[256];
@@ -1192,7 +1193,7 @@ int sys_uname(struct utsname *buf) {
 }
 
 int sys_sethostname(const char *uname, size_t len) {
-    extern char kernel_hostname[MAXHOSTNAMELEN];
+
     if (!uname || len == 0) return -EINVAL;
     if (len >= MAXHOSTNAMELEN) len = MAXHOSTNAMELEN - 1;
     char kbuf[MAXHOSTNAMELEN];
@@ -1205,7 +1206,7 @@ int sys_sethostname(const char *uname, size_t len) {
 int kern_uname(struct utsname *buf) {
     if (!buf) return -EFAULT;
 
-    extern char kernel_hostname[MAXHOSTNAMELEN];
+
     
     memset(buf, 0, sizeof(struct utsname));
     
@@ -1224,7 +1225,7 @@ int kern_uname(struct utsname *buf) {
     return 0;
 }
 
-extern void proc_exit(int code);
+
 
 int sys_exit(int code) {
     proc_exit(code);
@@ -1497,8 +1498,7 @@ int sys_thr_set_name(long id, const char *name) {
     return 0;
 }
 
-extern int sys_vm86(void *v);
-extern int sys_sysarch(int op, void *args);
+
 
 // ...
 
@@ -1597,7 +1597,7 @@ int sys_fchroot(int fd) {
     return kern_fchroot(fd);
 }
 
-extern int vfs_mkdir(const char *path, uint16_t permission);
+
 int sys_mkdir(const char *p, int m) {
     char kpath[256];
     if (copyinstr(p, kpath, sizeof(kpath), NULL) != 0) return -14;
@@ -1832,7 +1832,7 @@ int sys_clone(uint32_t flags, void *child_stack, int *parent_tidptr, void *tls, 
     (void)parent_tidptr;
     (void)tls;
     (void)child_tidptr;
-    extern int arch_fork_with_stack(void *child_stack);
+
 
     /*
      * Minimal Linux clone support for fork-style usage:
@@ -2235,7 +2235,7 @@ int kern_poll(struct pollfd *kfds, unsigned int nfds, int timeout) {
          * round-trip with a 1 s backstop) while still being 5x quieter
          * at idle than the pre-fix 10 ms busy-spin.
          */
-        extern char g_poll_wake_chan;
+
         uint64_t backstop = (uint64_t)HZ / 20;          /* ~50 ms */
         if (backstop == 0) backstop = 1;
         uint64_t sleep_deadline = get_ticks() + backstop;
@@ -2385,8 +2385,7 @@ int kern_ioctl(int fd, uint32_t request, void *arg) {
     return -ENOTTY;
 }
 
-/* sys_setsid is now implemented in pm/pgrp.c */
-extern int sys_setsid(void);
+
 
 
 int sys_unlink(const char *path) {
@@ -2841,14 +2840,12 @@ int sys_sync(void) {
      * the cache to disk.  Crucial for power-off / fsck / hot-swap
      * scenarios where the user wants on-disk state to match what
      * stat() reports.  */
-    extern int bufsync(int freq);
+
     (void)bufsync(0);
     return 0;
 }
 
-extern int sys_stat(const char *p, struct stat *buf);
-extern void pipe_create(fs_node_t **read_node, fs_node_t **write_node);
-extern int pipe_set_nonblock(fs_node_t *node, int nonblock);
+
 
 int sys_pipe(int *fds) {
     int kfds[2];
@@ -3022,9 +3019,7 @@ int sys_chmod(const char *path, int mode) {
     return kern_chmodat(AT_FDCWD, kpath, mode, 0);
 }
 
-/* sys_fchownat is defined further down; the forward declaration lets
- * sys_chown() forward to it without restructuring the file. */
-extern int sys_fchownat(int dirfd, const char *path, int uid, int gid, int flag);
+
 
 /* POSIX chown(2) — follows symlinks.  Substrate previously only had
  * lchown (no-follow); add the canonical behaviour here for personalities
@@ -3272,8 +3267,7 @@ int sys_fcntl(int fd, int cmd, int arg) {
     return proc_fcntl(current_process, fd, cmd, arg);
 }
 
-/* sys_getpgid is now implemented in pm/pgrp.c */
-extern int sys_getpgid(int pid);
+
 
 
 int sys_creat(const char *path, int mode) {
@@ -3340,9 +3334,7 @@ int kern_execve(const char *f, char *const a[], char *const e[]) {
     return ret;
 }
 
-/* sys_fork and sys_vfork are arch-specific (need registers_t) - in arch/i386/syscall.c */
-extern int sys_fork(void);
-extern int sys_vfork(void);
+
 
 int sys_mknod(const char *p, int m, int d) {
     char kpath[256];
@@ -3903,7 +3895,7 @@ int sys_hostname(char *buf, size_t len) {
 
 int kern_hostname(char *buf, size_t len) {
     if (!buf || len == 0) return -EINVAL;
-    extern char kernel_hostname[MAXHOSTNAMELEN];
+
     
     size_t hlen = 0;
     while (kernel_hostname[hlen] && hlen < MAXHOSTNAMELEN - 1) hlen++;
@@ -4214,7 +4206,7 @@ int sys_proc_environ(pid_t pid, char **envp, size_t *envc) {
  * failure / -EINVAL if `buf` is NULL with non-zero `len`.
  */
 int sys_proc_pers_name(int perso_id, char *buf, size_t len) {
-    extern const char *perso_name(int id);
+
     const char *name = perso_name(perso_id);
     if (!name) name = "unknown";
     size_t need = strlen(name) + 1;

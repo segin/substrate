@@ -38,6 +38,7 @@ extern int sys_setpgid(int, int);
 extern int sys_getpgid(int);
 extern int sys_clone(uint32_t, void*, int*, void*, int*);
 extern int sys_ptrace(int, int, int, int);
+extern int sys_vm86(void *);
 extern int sys_ulimit(int, long);
 extern int sys_prof(void*, size_t, unsigned long, unsigned int);
 

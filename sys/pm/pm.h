@@ -93,5 +93,6 @@ void proc_reap_autoreap_zombies(void);
 
 void rusage_init(process_t *p);
 void rusage_finalize(process_t *p);
+void proc_exit(int code);
 
 #endif

@@ -90,4 +90,14 @@ int kern_sigsuspend(const uint32_t *mask);
 int kern_sigwait(const uint32_t *set, int *sig);
 int kern_sigtimedwait(const uint32_t *set, siginfo_t *info, const struct timespec *timeout);
 
+/* Native syscall implementations called directly within the kernel */
+int sys_setsid(void);
+int sys_getpgid(int pid);
+int sys_fork(void);
+int sys_vfork(void);
+int sys_vm86(void *v);
+int sys_sysarch(int op, void *args);
+int sys_stat(const char *p, struct stat *buf);
+int sys_fchownat(int dirfd, const char *path, int uid, int gid, int flag);
+
 #endif
