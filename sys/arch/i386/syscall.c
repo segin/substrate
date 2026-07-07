@@ -10,6 +10,7 @@
 #include <kern/version.h>
 #include <kern/panic.h>
 #include <kern/console.h>
+#include <kern/main.h>
 #include <exec/perso/personality.h>
 #include <pm/pm.h>
 #include <include/sys/thr.h>
@@ -138,7 +139,7 @@ int sys_set_thread_area(struct user_desc *u_info) {
     return 0;
 }
 
-extern int syscall_trace_enabled;
+
 
 /*
  * Per-syscall, per-personality cycle accounting.  Surfaces the cost

@@ -13,6 +13,8 @@
 #include <vm/vm_kmem.h>
 #include <vm/vm_commit.h>
 #include <kern/cmdline.h>
+#include <kern/console.h>
+#include <kern/main.h>
 #include <sys/lock.h>
 #include <sys/param.h>
 #include <sys/errno.h>
@@ -512,7 +514,7 @@ int sys_munmap(void *addr, size_t length) {
 
 #include <string.h>
 
-extern pmap_t pmap_kernel(void);
+
 
 void *sys_brk(void *addr) {
     if (!current_process) return NULL;
@@ -528,9 +530,7 @@ void *sys_brk(void *addr) {
     
     // If querying (addr == 0) or uninitialized
     if (!addr || !current_process->brk_start) {
-        extern int syscall_trace_enabled;
         if (syscall_trace_enabled || cmdline_debug_enabled("vm:brk")) {
-            extern void kprint(const char*);
             char buf[64];
             char *digits = "0123456789ABCDEF";
             uintptr_t val = (uintptr_t)current_process->brk;
@@ -571,9 +571,7 @@ void *sys_brk(void *addr) {
          */
         size_t grow_pages = (new_page_end - old_page_end) / 0x1000;
         if (vm_commit_charge(grow_pages) != 0) {
-            extern int syscall_trace_enabled;
             if (syscall_trace_enabled || cmdline_debug_enabled("vm:brk")) {
-                extern void kprint(const char*);
                 kprint("BRK: commit limit reached -> ENOMEM\n");
             }
             return (void *)(uintptr_t)old_brk;
@@ -599,9 +597,7 @@ void *sys_brk(void *addr) {
                      }
                      brk_unmap_free_pages(brk_pmap, old_page_end, batch_va_start);
                      vm_commit_uncharge(grow_pages); /* grow aborted */
-                     extern int syscall_trace_enabled;
                      if (syscall_trace_enabled || cmdline_debug_enabled("vm:brk")) {
-                         extern void kprint(const char*);
                          kprint("BRK: pmm_alloc failed!\n");
                      }
                      return (void *)(uintptr_t)old_brk; // Out of memory
@@ -627,9 +623,7 @@ void *sys_brk(void *addr) {
                  }
                  brk_unmap_free_pages(brk_pmap, old_page_end, batch_va_start);
                  vm_commit_uncharge(grow_pages); /* grow aborted */
-                 extern int syscall_trace_enabled;
                  if (syscall_trace_enabled || cmdline_debug_enabled("vm:brk")) {
-                     extern void kprint(const char*);
                      kprint("BRK: pmap_enter_batch failed!\n");
                  }
                  return (void *)(uintptr_t)old_brk;
@@ -663,9 +657,7 @@ void *sys_brk(void *addr) {
     current_process->brk = (uint32_t)new_brk;
     
     // Debug print for success (restored and gated)
-    extern int syscall_trace_enabled;
     if (syscall_trace_enabled || cmdline_debug_enabled("vm:brk")) {
-        extern void kprint(const char*);
         char buf[64];
         char *digits = "0123456789ABCDEF";
         uintptr_t val = (uintptr_t)new_brk;
