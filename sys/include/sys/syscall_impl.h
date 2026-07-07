@@ -322,4 +322,26 @@ extern int sys_msync(void*, size_t, int);
 extern int sys_pdfork(int*, int);
 extern int freebsd_sys_sysctl(int*, unsigned int, void*, size_t*, void*, size_t);
 
+/* Native syscall declarations for personality mapping */
+extern int sys_mlock(const void *addr, size_t len);
+extern int sys_munlock(const void *addr, size_t len);
+extern int sys_getsid(int pid);
+extern int sys_getrusage(int who, struct rusage *usage);
+extern int sys_stime(time_t *t);
+extern int sys_ioctl(int fd, uint32_t request, void *arg);
+extern int sys_reboot(int cmd);
+extern int sys_sysctl(int *name, unsigned int namelen, void *oldp, size_t *oldlenp, void *newp, size_t newlen);
+extern int sys_vm_stats(sys_vmstat_t *stats);
+extern int sys_vm_info(sys_vminfo_t *info);
+extern int sys_vm_swap(sys_swapinfo_t *swap, size_t *count);
+extern int sys_vm_buffers(sys_bufinfo_t *buf);
+extern int sys_vm_slabs(sys_slabinfo_t *slabs, size_t *count);
+extern int sys_setpriority(int which, int who, int prio);
+extern int sys_getpriority(int which, int who);
+extern int sys_sethostname(const char *name, size_t len);
+extern int sys_set_gsbase(uint32_t base);
+extern int sys_proc_pers_name(int perso_id, char *buf, size_t len);
+extern int sys_sigreturn(void *regs);
+extern int sys_rt_sigreturn(void *regs);
+
 #endif /* _SYS_SYSCALL_IMPL_H */

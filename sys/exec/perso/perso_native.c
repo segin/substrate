@@ -8,30 +8,7 @@
 #include <kern/time.h>
 #include <sys/signal.h>
 
-extern int sys_mlock(const void *addr, size_t len);
-extern int sys_munlock(const void *addr, size_t len);
-extern int sys_setsid(void);
-extern int sys_getsid(int pid);
-extern int sys_setpgid(int pid, int pgid);
-extern int sys_getpgid(int pid);
-extern int sys_getrusage(int who, struct rusage *usage);
-extern int sys_stime(time_t *t);
-extern int sys_ioctl(int fd, uint32_t request, void *arg);
-extern int sys_ptrace(int req, int pid, int addr, int data);
-extern int sys_reboot(int cmd);
-extern int sys_sysctl(int *name, unsigned int namelen, void *oldp, size_t *oldlenp, void *newp, size_t newlen);
-extern int sys_vm_stats(sys_vmstat_t *stats);
-extern int sys_vm_info(sys_vminfo_t *info);
-extern int sys_vm_swap(sys_swapinfo_t *swap, size_t *count);
-extern int sys_vm_buffers(sys_bufinfo_t *buf);
-extern int sys_vm_slabs(sys_slabinfo_t *slabs, size_t *count);
-extern int sys_setpriority(int which, int who, int prio);
-extern int sys_getpriority(int which, int who);
-extern int sys_sethostname(const char *name, size_t len);
-struct vm86_struct;  /* forward decl — defined in <sys/vm86.h> */
-extern int sys_vm86(struct vm86_struct *info);
-extern int sys_set_gsbase(uint32_t base);
-extern int sys_proc_pers_name(int perso_id, char *buf, size_t len);
+
 
 /* Native-specific syscalls are now in syscall_impl.h */
 
@@ -634,9 +611,7 @@ static struct syscall_fmt native_fmts[MAX_SYSCALLS] = {
     [SYS_GETRANDOM] = { 3, { ARG_PTR, ARG_INT, ARG_HEX } },
 };
 
-extern void sendsig(void *handler, int sig, uint32_t mask, uint32_t flags, void *regs);
-extern int sys_sigreturn(void *regs);
-extern int sys_rt_sigreturn(void *regs);
+
 
 struct personality personality_native = {
     .name = "substrate",

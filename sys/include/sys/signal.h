@@ -278,6 +278,7 @@ void signal_post_thread(struct thread *t, int sig);
 void pgsignal(int pgrp, int sig);
 void trapsignal(struct process *p, int sig, int code);
 void sigexit(struct process *p, int sig);
+void sendsig(void *handler, int sig, uint32_t mask, uint32_t flags, void *regs);
 
 #include <sys/copy.h>
 
