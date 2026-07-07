@@ -13,7 +13,7 @@
  *   USB 2.0 Specification, Chapter 11 (Hub Specification)
  */
 
-#include "usb.h"
+#include <drivers/usb/usb.h>
 #include <kern/console.h>
 #include <kern/time.h>
 #include <string.h>

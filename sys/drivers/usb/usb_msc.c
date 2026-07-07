@@ -15,7 +15,7 @@
  *   SCSI Primary Commands (SPC-3)
  */
 
-#include "usb.h"
+#include <drivers/usb/usb.h>
 #include <drivers/storage/scsi/scsi.h>
 #include <kern/console.h>
 #include <sys/dma.h>

@@ -24,7 +24,7 @@
  *      iso_schedule/reclaim ops), so the stream never gaps between writes.
  */
 
-#include "usb.h"
+#include <drivers/usb/usb.h>
 #include <drivers/audio/audio.h>
 #include <drivers/audio/audio_fifo.h>
 

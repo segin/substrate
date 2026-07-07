@@ -7,7 +7,7 @@
 #ifndef _ATAPI_SCSI_H
 #define _ATAPI_SCSI_H
 
-#include "scsi.h"
+#include <drivers/storage/scsi/scsi.h>
 
 /*
  * Initialize ATAPI SCSI transport

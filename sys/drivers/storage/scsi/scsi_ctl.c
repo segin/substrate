@@ -17,7 +17,7 @@
 #include <sys/errno.h>
 #include <sys/proc.h>
 #include <vm/vm_kmem.h>
-#include "scsi.h"
+#include <drivers/storage/scsi/scsi.h>
 
 /*
  * ============================================================

@@ -5,7 +5,7 @@
  * and class driver matching for the Substrate kernel USB subsystem.
  */
 
-#include "usb.h"
+#include <drivers/usb/usb.h>
 #include <kern/console.h>
 #include <kern/time.h>
 #include <kern/device.h>

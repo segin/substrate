@@ -13,7 +13,7 @@
  *   USB HID Usage Tables 1.12 (usb.org)
  */
 
-#include "usb.h"
+#include <drivers/usb/usb.h>
 #include <keyboard.h>
 #include <sys/input.h>
 #include <sys/keycodes.h>

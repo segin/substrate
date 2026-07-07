@@ -13,7 +13,7 @@
 #include <stdio.h>
 #include <kern/console.h>
 #include <kern/time.h>
-#include "scsi.h"
+#include <drivers/storage/scsi/scsi.h>
 
 /* Kernel time function */
 static inline uint64_t kernel_time_ms(void) {

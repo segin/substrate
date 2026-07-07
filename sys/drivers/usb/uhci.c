@@ -12,8 +12,8 @@
  *   - Root hub port status and reset
  */
 
-#include "uhci.h"
-#include "usb.h"
+#include <drivers/usb/uhci.h>
+#include <drivers/usb/usb.h>
 #include <kern/pci.h>
 #include <kern/driver.h>
 #include <kern/bus.h>

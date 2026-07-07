@@ -11,7 +11,7 @@
  *                                    backend parses.
  */
 
-#include "usb.h"
+#include <drivers/usb/usb.h>
 #include <sys/usbdevfs.h>
 #include <sys/copy.h>
 #include <sys/errno.h>
