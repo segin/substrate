@@ -7,13 +7,9 @@
 #include <kern/sched.h>
 #include <sys/proc.h>
 #include <string.h>
+#include <arch/i386/percpu.h>
 
 /* MAX_CPUS defined in sched.h */
-
-extern int num_cpus;
-extern int percpu_get_cpu_id(void);
-extern void sched_dequeue(thread_t *t);
-extern void sched_enqueue(thread_t *t);
 
 static uint32_t sched_valid_affinity_mask(void) {
     if (num_cpus >= 32) {

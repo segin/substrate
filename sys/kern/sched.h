@@ -121,6 +121,10 @@ int sched_can_run_on_cpu(thread_t *t, int cpu_id);
 int sched_bind_thread(thread_t *t, int cpu_id);
 void sched_unbind_thread(thread_t *t);
 
+extern int num_cpus;
+void sched_enqueue(thread_t *t);
+void sched_dequeue(thread_t *t);
+
 /* Load Average */
 #define SI_LOAD_SCALE 2048
 #define FSHIFT  11

@@ -357,7 +357,6 @@ void sched_yield(void) {
      * the timer-IRQ preemption path, so this changes nothing for them. */
     uint32_t _pflags = intr_disable();
 
-    extern int percpu_get_cpu_id(void);
     int cpu_id = percpu_get_cpu_id();
 
     thread_t *best_thread = NULL;

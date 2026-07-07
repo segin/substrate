@@ -7,12 +7,12 @@
 #include <kern/sched.h>
 #include <sys/proc.h>
 #include <stdint.h>
-#include "../arch/x86-common/lapic.h"
+#include <arch/x86-common/lapic.h>
+#include <arch/i386/percpu.h>
 
 /* IPI vector defined in sched.h */
 
 // Number of CPUs
-extern int num_cpus;
 
 // Send preemption IPI to a specific CPU
 void sched_send_preempt_ipi(int cpu_id) {
@@ -31,12 +31,10 @@ void sched_send_preempt_all(void) {
 
 // Request reschedule on a specific CPU
 void sched_resched_cpu(int cpu_id) {
-    extern int percpu_get_cpu_id(void);
     int my_cpu = percpu_get_cpu_id();
     
     if (cpu_id == my_cpu) {
         // Local reschedule - just set flag
-        extern thread_t *current_thread;
         if (current_thread) {
             current_thread->needs_resched = 1;
         }

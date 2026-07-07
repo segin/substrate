@@ -9,6 +9,7 @@
 #include <sys/proc.h>
 #include <sys/lock.h>
 #include <string.h>
+#include <arch/i386/percpu.h>
 
 /* MAX_CPUS defined in sched.h */
 
@@ -53,7 +54,6 @@ runqueue_t *sched_get_runqueue(int cpu_id) {
 // Get current CPU's runqueue
 runqueue_t *sched_get_current_runqueue(void) {
     // In full SMP, use percpu_get_cpu_id()
-    extern int percpu_get_cpu_id(void);
     int cpu_id = percpu_get_cpu_id();
     return sched_get_runqueue(cpu_id);
 }
@@ -226,7 +226,6 @@ thread_t *sched_steal_thread(int target_cpu) {
     
     // Steal from lowest priority (idle) queues first to minimize impact
     // Work backwards from idle queue
-    extern int percpu_get_cpu_id(void);
     int my_cpu = percpu_get_cpu_id();
 
     for (int level = RQ_TOTAL_LEVELS - 1; level >= RQ_TIMESHARE_BASE; level--) {
@@ -270,7 +269,6 @@ out:
 // Perform load balancing for current CPU
 // Returns: thread stolen, or NULL if none
 thread_t *sched_load_balance(void) {
-    extern int percpu_get_cpu_id(void);
     int my_cpu = percpu_get_cpu_id();
     
     // Find busiest CPU
@@ -290,7 +288,6 @@ thread_t *sched_load_balance(void) {
 
 // Called when a CPU becomes idle - try to find work
 thread_t *sched_idle_balance(void) {
-    extern int percpu_get_cpu_id(void);
     int my_cpu = percpu_get_cpu_id();
     
     // First, check our own runqueue
@@ -318,7 +315,6 @@ void sched_periodic_balance(void) {
     // Only rebalance occasionally to avoid overhead
     // Use per-CPU counters to avoid cache contention and race conditions
     static uint32_t balance_counters[MAX_CPUS];
-    extern int percpu_get_cpu_id(void);
     int cpu_id = percpu_get_cpu_id();
 
     if (cpu_id < 0 || cpu_id >= MAX_CPUS) return;
