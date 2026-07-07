@@ -2,7 +2,7 @@
 #define _FPU_EMU_H
 
 #include <stdint.h>
-#include "../idt.h"
+#include <arch/i386/idt.h>
 
 // FPU Status Word
 #define SW_INVALID      0x0001
