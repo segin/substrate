@@ -1,4 +1,4 @@
-#include "efi.h"
+#include <arch/x86_64/efi/efi.h>
 
 // Compiler needs to emit MS ABI for EFI entry? 
 // GCC handles this with __attribute__((ms_abi)) on x86_64.

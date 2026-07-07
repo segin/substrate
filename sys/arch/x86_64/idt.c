@@ -5,8 +5,8 @@
  * (syscalls via int 0x80 for compatibility, though syscall/sysret preferred).
  */
 
-#include "idt.h"
-#include "gdt.h"
+#include <arch/x86_64/idt.h>
+#include <arch/x86_64/gdt.h>
 #include <stdint.h>
 #include <string.h>
 

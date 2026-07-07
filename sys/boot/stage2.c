@@ -9,7 +9,7 @@
  * to the entry point with EAX=0x2BADB002 and EBX=multiboot_info pointer.
  */
 
-#include "stage2.h"
+#include <boot/stage2.h>
 
 /* ---- Global state ---- */
 static uint8_t g_drive;
