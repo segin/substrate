@@ -53,20 +53,44 @@ static struct dirent *sysfs_readdir(fs_node_t *node, uint64_t index) {
     return NULL;
 }
 
+static fs_node_t sysfs_bus_node;
+static fs_node_t sysfs_class_node;
+static fs_node_t sysfs_devices_node;
+static int sysfs_subnodes_inited = 0;
+
+static fs_node_t *sysfs_finddir(fs_node_t *node, char *name);
+
+static void sysfs_init_subnode(fs_node_t *n, const char *name) {
+    memset(n, 0, sizeof(fs_node_t));
+    strlcpy(n->name, name, sizeof(n->name));
+    n->flags = FS_DIRECTORY;
+    n->mask = 0555;
+    n->uid = 0;
+    n->gid = 0;
+    n->readdir = &sysfs_readdir;
+    n->finddir = &sysfs_finddir;
+}
+
 static fs_node_t *sysfs_finddir(fs_node_t *node, char *name) {
     (void)node;
-    if (strcmp(name, "bus") == 0 || strcmp(name, "class") == 0 || strcmp(name, "devices") == 0) {
-        static fs_node_t sub_node;
-        memset(&sub_node, 0, sizeof(fs_node_t));
-        strlcpy(sub_node.name, name, sizeof(sub_node.name));
-        sub_node.flags = FS_DIRECTORY;
-        sub_node.mask = 0555;
-        sub_node.uid = 0;
-        sub_node.gid = 0;
-        sub_node.readdir = &sysfs_readdir; // Simple reuse for proto
-        sub_node.finddir = &sysfs_finddir;
-        sysfs_refresh_timestamps(&sub_node);
-        return &sub_node;
+    if (!sysfs_subnodes_inited) {
+        sysfs_init_subnode(&sysfs_bus_node, "bus");
+        sysfs_init_subnode(&sysfs_class_node, "class");
+        sysfs_init_subnode(&sysfs_devices_node, "devices");
+        sysfs_subnodes_inited = 1;
+    }
+
+    if (strcmp(name, "bus") == 0) {
+        sysfs_refresh_timestamps(&sysfs_bus_node);
+        return &sysfs_bus_node;
+    }
+    if (strcmp(name, "class") == 0) {
+        sysfs_refresh_timestamps(&sysfs_class_node);
+        return &sysfs_class_node;
+    }
+    if (strcmp(name, "devices") == 0) {
+        sysfs_refresh_timestamps(&sysfs_devices_node);
+        return &sysfs_devices_node;
     }
     return NULL;
 }

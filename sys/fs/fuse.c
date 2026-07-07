@@ -3,6 +3,7 @@
 #include <kern/sched.h>
 #include <string.h>
 #include <stddef.h>
+#include <vm/vm_kmem.h>
 
 #define FUSE_QUEUE_SIZE 16
 static struct fuse_in_header request_queue[FUSE_QUEUE_SIZE];
@@ -56,13 +57,22 @@ static size_t fuse_vfs_read(fs_node_t *node, off_t offset, size_t size, uint8_t 
     return 0;
 }
 
+static int fuse_unmount(fs_node_t *root) {
+    if (root) {
+        kfree(root, sizeof(fs_node_t));
+    }
+    return 0;
+}
+
 static fs_node_t *fuse_mount(const char *device, uint32_t flags, void *data) {
     (void)device; (void)flags; (void)data;
-    static fs_node_t fuse_root;
-    memset(&fuse_root, 0, sizeof(fs_node_t));
-    fuse_root.flags = FS_DIRECTORY;
-    fuse_root.read = &fuse_vfs_read;
-    return &fuse_root;
+    fs_node_t *fuse_root = kmalloc(sizeof(fs_node_t));
+    if (!fuse_root) return NULL;
+    memset(fuse_root, 0, sizeof(fs_node_t));
+    fuse_root->flags = FS_DIRECTORY;
+    fuse_root->read = &fuse_vfs_read;
+    fuse_root->unmount = &fuse_unmount;
+    return fuse_root;
 }
 
 static filesystem_t fuse_fs = {
