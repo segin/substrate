@@ -91,6 +91,12 @@ set -eu
 #            `ls /dev/storage/` in the guest (if only the first HBA binds,
 #            they won't show up — fall back to --drive).
 #            (Images are attached raw; for qcow2 etc. edit the format= below.)
+#   --floppy FILE
+#            attach FILE as a floppy diskette image on the emulated floppy
+#            controller (qemu if=floppy).  Repeatable for the PC's two floppy
+#            drives: the first --floppy is fd0 (A:), the second fd1 (B:).
+#            Images are attached raw — a standard 1.44 MB diskette is 1474560
+#            bytes.  substrate's floppy driver enumerates the media.
 GFX=0
 GFX_MODE="1024x768@32"   # used for bare --gfx; --gfx=WxH@bpp overrides
 KVM=0
@@ -102,6 +108,7 @@ USB_AUDIO_HOST=0
 USB_HOST_DEVICES=""        # newline-separated VID:PID / BUS.ADDR passthrough specs
 EXTRA_DRIVES=""
 EXTRA_CTRL_DRIVES=""
+FLOPPY_IMAGES=""           # newline-separated floppy diskette images (fd0, fd1)
 while [ $# -gt 0 ]; do
     case "$1" in
         --gfx)      GFX=1 ;;
@@ -147,6 +154,14 @@ $1" ;;
         --drive-ctrl=*)
             EXTRA_CTRL_DRIVES="$EXTRA_CTRL_DRIVES
 ${1#--drive-ctrl=}" ;;
+        --floppy)
+            shift
+            [ $# -gt 0 ] || { echo "run-networking.sh: --floppy needs a file argument" >&2; exit 1; }
+            FLOPPY_IMAGES="$FLOPPY_IMAGES
+$1" ;;
+        --floppy=*)
+            FLOPPY_IMAGES="$FLOPPY_IMAGES
+${1#--floppy=}" ;;
         *)
             echo "run-networking.sh: unknown argument '$1'" >&2
             exit 1 ;;
@@ -213,6 +228,30 @@ for f in $EXTRA_CTRL_DRIVES; do
     EXTRA_CTRL_ARGS="$EXTRA_CTRL_ARGS -drive file=$f,format=raw,if=none,id=cdrive$cidx -device ich9-ahci,id=ahci$cidx,addr=$ctrladdr -device ide-hd,bus=ahci$cidx.0,unit=0,drive=cdrive$cidx"
     echo "run-networking.sh: extra drive $f -> own controller ahci$cidx -> guest /dev/storage/sata$cidx"
     cidx=$((cidx + 1))
+done
+IFS=$OLDIFS
+
+# --floppy images: attach each as a diskette on the emulated floppy controller
+# (if=floppy).  A PC has two floppy drives, so at most two images: index 0 is
+# fd0 (A:), index 1 is fd1 (B:).
+FLOPPY_ARGS=""
+fidx=0
+OLDIFS=$IFS
+IFS='
+'
+for f in $FLOPPY_IMAGES; do
+    [ -n "$f" ] || continue
+    if [ ! -f "$f" ]; then
+        echo "run-networking.sh: --floppy file not found: $f" >&2
+        exit 1
+    fi
+    if [ "$fidx" -gt 1 ]; then
+        echo "run-networking.sh: at most 2 --floppy images (drives fd0 and fd1)" >&2
+        exit 1
+    fi
+    FLOPPY_ARGS="$FLOPPY_ARGS -drive file=$f,format=raw,if=floppy,index=$fidx"
+    echo "run-networking.sh: floppy $f -> guest fd$fidx"
+    fidx=$((fidx + 1))
 done
 IFS=$OLDIFS
 
@@ -438,6 +477,7 @@ qemu-system-i386 -cpu qemu32,+sse,+sse2 $ACCEL_ARG \
   -device ide-hd,bus=sata0.0,unit=0,drive=drive0 \
   $EXTRA_DRIVE_ARGS \
   $EXTRA_CTRL_ARGS \
+  $FLOPPY_ARGS \
   -device piix3-usb-uhci -device usb-kbd -device usb-mouse \
   $USB_HOST_ARGS \
   $NETDEV_ARGS \
