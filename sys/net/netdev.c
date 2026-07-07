@@ -4,6 +4,7 @@
 
 #include <sys/netdev.h>
 #include <sys/lock.h>
+#include <net/inet.h>
 #include <kern/sched.h>
 #include <kern/console.h>
 #include <vm/vm_kmem.h>
@@ -162,7 +163,6 @@ void netdev_rx(netdev_t *dev, const void *frame, size_t len) {
     /* Hand to the IP layer first so ARP / ICMP / NS responses go out
      * before AF_PACKET sniffers see them — matters for tcpdump-style
      * tools tied up reading frames. */
-    extern void inet_eth_input(netdev_t *, const uint8_t *, size_t);
     inet_eth_input(dev, (const uint8_t *)frame, len);
 
     sub_lock_init();

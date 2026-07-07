@@ -69,6 +69,7 @@ int  eth_send(netdev_t *dev, const uint8_t dst_mac[6],
 
 /* Called from netdev_rx when ethertype == 0x0800.  pkt points at the
  * start of the IPv4 header (Ethernet header already stripped). */
+void inet_eth_input(netdev_t *dev, const uint8_t *pkt, size_t len);
 void ip4_input(netdev_t *dev, const uint8_t *pkt, size_t len);
 
 /* Build an IPv4 header for `payload` and route it out.  Saddr is
