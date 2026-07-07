@@ -22,7 +22,7 @@
  * surface as status-only reads.
  */
 
-#include "pty.h"
+#include <drivers/console/pty.h>
 
 #include <sys/tty.h>
 #include <sys/ioctl.h>

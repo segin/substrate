@@ -7,11 +7,11 @@
 #include <sys/proc.h>
 #include <vfs/vfs.h>
 #include <sys/tty.h>
-#include "null.h"
-#include "zero.h"
-#include "lpt.h"
-#include "mem.h"
-#include "kmem.h"
+#include <drivers/devices/null.h>
+#include <drivers/devices/zero.h>
+#include <drivers/devices/lpt.h>
+#include <drivers/devices/mem.h>
+#include <drivers/devices/kmem.h>
 
 // /dev/null
 // Implemented in null.c

@@ -5,7 +5,7 @@
 #include <vfs/vfs.h>
 #include <string.h>
 #include <kern/console.h>
-#include "null.h"
+#include <drivers/devices/null.h>
 
 /*
  * /dev/null Implementation
