@@ -15,7 +15,7 @@
 #include <string.h>
 
 #include <kern/console.h>
-#include "efi_runtime.h"
+#include <kern/efi_runtime.h>
 
 /* Pull in EFI types used by the saved pointer (arch-specific). */
 #include <arch/i386/efi.h>

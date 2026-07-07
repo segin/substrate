@@ -12,15 +12,15 @@
  * keeps playing across scheduling jitter instead of underrunning to silence.
  */
 
-#include "hda.h"
-#include "audio.h"
-#include "audio_fifo.h"
+#include <drivers/audio/hda.h>
+#include <drivers/audio/audio.h>
+#include <drivers/audio/audio_fifo.h>
 
 #include <kern/console.h>
 #include <kern/device.h>
 #include <kern/pci.h>
 #include <kern/sched.h>
-#include "../../kern/sleepq.h"
+#include <kern/sleepq.h>
 #include <sys/audioio.h>
 #include <sys/dma.h>
 #include <sys/errno.h>

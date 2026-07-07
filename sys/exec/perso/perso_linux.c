@@ -14,7 +14,7 @@
 #include <exec/perso/linux/linux_syscalls.h>
 #include <sys/fcntl.h>
 #include <exec/perso/linux_user.h>
-#include "perso_ipc_sem.h"
+#include <exec/perso/perso_ipc_sem.h>
 #include <exec/perso/linux/linux_blkio.h>
 #include <exec/perso/linux/linux_errno.h>
 #include <exec/perso/linux/linux_exec.h>
@@ -31,7 +31,6 @@
 extern int sys_kill(int pid, int sig);
 extern int sys_select(int n, void *r, void *w, void *e, void *t);
 extern int sys_yield(void);
-extern int sys_vm86(int func, void *ptr);
 
 /* Helpers from linux_sig.c or similar */
 extern void linux_sendsig(void *handler, int sig, uint32_t mask, uint32_t flags, void *regs_ptr);

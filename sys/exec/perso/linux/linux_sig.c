@@ -1,8 +1,8 @@
 #include <sys/signal.h>
-#include "../../../include/sys/proc.h"
-#include "linux_user.h"
-#include "../../../arch/i386/idt.h"
-#include "../../../arch/i386/signal_arch.h"   /* SIG_TRAMPOLINE_ADDR */
+#include <sys/proc.h>
+#include <exec/perso/linux/linux_user.h>
+#include <arch/i386/idt.h>
+#include <arch/i386/signal_arch.h>   /* SIG_TRAMPOLINE_ADDR */
 #include <string.h>
 #include <stddef.h>
 #include <stdint.h>

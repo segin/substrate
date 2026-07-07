@@ -1,4 +1,4 @@
-#include "netbsd_user.h"
+#include <exec/perso/netbsd/netbsd_user.h>
 #include <sys/kern_syscalls.h>
 #include <sys/syscall_impl.h>
 #include <sys/stat.h>

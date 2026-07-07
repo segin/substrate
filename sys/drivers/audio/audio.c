@@ -6,7 +6,7 @@
  * vectors plugged in via audio_register_device().
  */
 
-#include "audio.h"
+#include <drivers/audio/audio.h>
 
 #include <sys/audioio.h>
 #include <sys/copy.h>

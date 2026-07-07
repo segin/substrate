@@ -10,8 +10,8 @@
 #include <sys/kern_syscalls.h>
 #include <sys/copy.h>
 #include <string.h>
-#include "perso_ipc_sem.h"
-#include "perso_ipc_shm.h"
+#include <exec/perso/perso_ipc_sem.h>
+#include <exec/perso/perso_ipc_shm.h>
 
 /* Personality Signal Hooks */
 extern void freebsd_sendsig(void *handler, int sig, uint32_t mask, uint32_t flags, void *regs);

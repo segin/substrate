@@ -6,7 +6,7 @@
  * are a personality-specific concern.
  */
 #include <sys/errno.h>
-#include "freebsd_syscalls.h"
+#include <exec/perso/freebsd/freebsd_syscalls.h>
 
 int freebsd_sys_uname(void *ubuf) {
     (void)ubuf;

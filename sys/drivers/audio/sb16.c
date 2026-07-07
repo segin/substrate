@@ -14,8 +14,8 @@
  * to on legacy systems.
  */
 
-#include "sb16.h"
-#include "audio.h"
+#include <drivers/audio/sb16.h>
+#include <drivers/audio/audio.h>
 
 #include <kern/console.h>
 #include <kern/isa.h>

@@ -18,7 +18,7 @@
  * releases per-mount state and leaves the device alone.
  */
 
-#include "sysv.h"
+#include <fs/sysv/sysv.h>
 #include <string.h>
 #include <stdio.h>
 #include <vm/vm_kmem.h>

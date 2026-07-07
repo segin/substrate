@@ -13,8 +13,8 @@
 #include <exec/perso/compat.h>
 #include <exec/perso/netbsd/netbsd_syscalls.h>
 #include <exec/perso/netbsd/netbsd_user.h>
-#include "perso_ipc_sem.h"
-#include "perso_ipc_shm.h"
+#include <exec/perso/perso_ipc_sem.h>
+#include <exec/perso/perso_ipc_shm.h>
 #include <sys/resource.h>
 #include <sys/time.h>
 #include <sys/proc.h>

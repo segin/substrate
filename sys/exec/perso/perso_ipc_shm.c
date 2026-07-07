@@ -16,7 +16,7 @@
 #include <sys/ipc.h>
 #include <sys/types.h>
 #include <sys/copy.h>
-#include "perso_ipc_shm.h"
+#include <exec/perso/perso_ipc_shm.h>
 #include <errno.h>
 #include <string.h>
 #include <stdint.h>

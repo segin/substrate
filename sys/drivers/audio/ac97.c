@@ -8,16 +8,16 @@
  * when the software FIFO fills.
  */
 
-#include "ac97.h"
-#include "audio.h"
-#include "audio_fifo.h"
+#include <drivers/audio/ac97.h>
+#include <drivers/audio/audio.h>
+#include <drivers/audio/audio_fifo.h>
 
 #include <kern/console.h>
 #include <kern/device.h>
 #include <kern/pci.h>
 #include <kern/sched.h>
 #include <kern/time.h>
-#include "../../kern/sleepq.h"
+#include <kern/sleepq.h>
 #include <sys/audioio.h>
 #include <sys/dma.h>
 #include <sys/errno.h>

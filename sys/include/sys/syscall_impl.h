@@ -88,10 +88,11 @@ extern int sys_truncate(const char*, uint32_t, uint32_t);
 extern int sys_ftruncate(int, uint32_t, uint32_t);
 
 /* stat family - NATIVE uses 64-bit struct stat */
-extern int sys_stat(const char*, void*);
-extern int sys_lstat(const char*, void*);
-extern int sys_fstat(int, void*);
-extern int sys_fstatat(int, const char*, void*, int);
+struct stat;
+extern int sys_stat(const char*, struct stat*);
+extern int sys_lstat(const char*, struct stat*);
+extern int sys_fstat(int, struct stat*);
+extern int sys_fstatat(int, const char*, struct stat*, int);
 extern int sys_utimensat(int, const char *, const void *, int);
 extern int sys_futimens(int, const void *);
 

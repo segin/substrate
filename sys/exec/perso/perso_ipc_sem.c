@@ -22,7 +22,7 @@
 #include <errno.h>
 #include <string.h>
 #include <stdint.h>
-#include "perso_ipc_shm.h"
+#include <exec/perso/perso_ipc_shm.h>
 
 /* native semctl command numbers (from <sys/sem.h>): GETPID=11 GETVAL=12
  * GETALL=13 GETNCNT=14 GETZCNT=15 SETVAL=16 SETALL=17.  Linux uses the same

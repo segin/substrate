@@ -1,4 +1,4 @@
-#include "sunos_user.h"
+#include <exec/perso/sunos/sunos_user.h>
 #include <sys/kern_syscalls.h>
 #include <sys/stat.h>
 #include <string.h>

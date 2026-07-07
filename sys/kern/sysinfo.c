@@ -17,7 +17,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <sys/copy.h>
-#include "memtrack.h"
+#include <kern/memtrack.h>
 
 #define PAGE_SIZE 4096
 

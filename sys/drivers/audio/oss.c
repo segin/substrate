@@ -16,7 +16,7 @@
  * right handler.
  */
 
-#include "audio.h"
+#include <drivers/audio/audio.h>
 
 #include <sys/audioio.h>
 #include <sys/copy.h>

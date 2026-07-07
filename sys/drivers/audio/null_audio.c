@@ -7,7 +7,7 @@
  * hardware exists.
  */
 
-#include "audio.h"
+#include <drivers/audio/audio.h>
 
 #include <sys/audioio.h>
 #include <stdio.h>

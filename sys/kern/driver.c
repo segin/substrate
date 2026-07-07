@@ -13,9 +13,9 @@
 #include <stdio.h>
 #include <kern/console.h>
 
-#include "driver.h"
-#include "bus.h"
-#include "device.h"
+#include <kern/driver.h>
+#include <kern/bus.h>
+#include <kern/device.h>
 
 #define MAX_BLACKLIST 32
 static const char *driver_blacklist[MAX_BLACKLIST];
