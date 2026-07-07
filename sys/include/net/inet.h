@@ -19,6 +19,8 @@
 #include <sys/socket.h>   /* socklen_t */
 #include <sys/netdev.h>
 
+struct fs_node;
+
 /* -- Ethernet framing helper ---------------------------------------- */
 
 struct ether_hdr {
@@ -93,6 +95,7 @@ void icmp6_input(netdev_t *dev, const uint8_t saddr[16], const uint8_t daddr[16]
 void udp_input(netdev_t *dev, int family,
                const void *saddr, const void *daddr,
                const uint8_t *pkt, size_t len);
+void tcp_input(uint32_t saddr, uint32_t daddr, const uint8_t *pkt, size_t len);
 
 /* -- Checksums ------------------------------------------------------ */
 

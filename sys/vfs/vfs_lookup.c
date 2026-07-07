@@ -78,7 +78,6 @@ namei(struct nameidata *ndp)
     if (ndp->ni_dirp[0] == '/') {
         dp = ndp->ni_rootdir;
         if (dp == NULL) {
-            extern struct vnode *rootvnode;
             dp = rootvnode;
         }
         /* Skip leading slashes */
@@ -87,7 +86,6 @@ namei(struct nameidata *ndp)
     } else {
         dp = ndp->ni_startdir;
         if (dp == NULL) {
-            extern struct vnode *rootvnode;
             dp = rootvnode;
         }
     }
@@ -273,7 +271,6 @@ namei(struct nameidata *ndp)
                 vrele(dp);
                 dp = ndp->ni_rootdir;
                 if (dp == NULL) {
-                    extern struct vnode *rootvnode;
                     dp = rootvnode;
                 }
                 vref(dp);

@@ -448,4 +448,6 @@ int vop_strategy(struct vnode *vp, void *bp);
 int vop_pathconf(struct vnode *vp, int name, register_t *retval);
 int vop_print(struct vnode *vp);
 
+extern struct vnode *rootvnode;
+
 #endif /* _SYS_VNODE_H */

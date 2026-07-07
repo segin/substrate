@@ -7,7 +7,6 @@
 #include <string.h>
 #include <kern/console.h>
 
-extern struct vnode *rootvnode;
 
 /*
  * vfs_mount:

@@ -228,11 +228,7 @@ void ip4_input(netdev_t *dev, const uint8_t *pkt, size_t len) {
             udp_input(dev, /*AF_INET=*/2, &ih->saddr, &ih->daddr, l4, l4_len);
             break;
         case 6 /*IPPROTO_TCP*/:
-            {
-                extern void tcp_input(uint32_t, uint32_t,
-                                      const uint8_t *, size_t);
-                tcp_input(ih->saddr, ih->daddr, l4, l4_len);
-            }
+            tcp_input(ih->saddr, ih->daddr, l4, l4_len);
             break;
         default:
             break;
