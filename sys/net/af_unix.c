@@ -57,6 +57,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <sys/lock.h>
+#include <net/inet.h>
 #include <errno.h>
 
 /* X-server fd-lifecycle trace, gated behind the `xfd` kernel cmdline
@@ -867,26 +868,7 @@ static afunix_sock_t *afunix_from_fd(int fd) {
  * Syscalls
  * ============================================================ */
 
-/* Forward decls for AF_PACKET — sys/net/af_packet.c provides these. */
-extern int     afpacket_socket(int type, int protocol);
-extern int     afpacket_bind(int fd, const void *sll, socklen_t len);
-extern ssize_t afpacket_sendto(int fd, const void *buf, size_t len, int flags,
-                               const void *to, socklen_t tolen);
-extern ssize_t afpacket_recvfrom(int fd, void *buf, size_t len, int flags,
-                                 void *from, socklen_t *fromlen);
 
-/* Forward decls for AF_INET / AF_INET6 — sys/net/af_inet.c provides. */
-extern int     afinet_socket(int family, int type, int protocol);
-extern int     afinet_bind(int fd, const void *addr, socklen_t len);
-extern int     afinet_listen(int fd, int backlog);
-extern int     afinet_accept(int fd, void *addr, socklen_t *addrlen);
-extern int     afinet_connect(int fd, const void *addr, socklen_t len);
-extern ssize_t afinet_sendto(int fd, const void *buf, size_t len, int flags,
-                             const void *addr, socklen_t addrlen);
-extern ssize_t afinet_recvfrom(int fd, void *buf, size_t len, int flags,
-                               void *addr, socklen_t *addrlen);
-extern size_t  afinet_node_read(fs_node_t *, off_t, size_t, uint8_t *);
-extern int     afinet_shutdown(int fd, int how);
 
 #ifndef AF_PACKET
 #define AF_PACKET 17
@@ -1290,7 +1272,7 @@ ssize_t sys_send(int fd, const void *buf, size_t len, int flags) {
         file_t *f = current_process->fds[fd];
         if (f && f->f_data) {
             fs_node_t *n = (fs_node_t *)f->f_data;
-            extern size_t afpkt_node_read(fs_node_t *, off_t, size_t, uint8_t *);
+
             if (n->read == (void *)afpkt_node_read) {
                 return afpacket_sendto(fd, buf, len, flags, NULL, 0);
             }
@@ -1343,7 +1325,7 @@ static ssize_t recv_into_kbuf(int fd, void *kbuf, size_t len, int flags,
     file_t *f = current_process->fds[fd];
     if (f && f->f_data) {
         fs_node_t *n = (fs_node_t *)f->f_data;
-        extern size_t afpkt_node_read(fs_node_t *, off_t, size_t, uint8_t *);
+
         socklen_t zero = 0;
         socklen_t *alp = kaddrlen ? kaddrlen : &zero;
         if (n->read == (void *)afpkt_node_read)
@@ -1478,7 +1460,7 @@ ssize_t sys_sendto(int fd, const void *buf, size_t len, int flags,
         if (f && f->f_data) {
             fs_node_t *n = (fs_node_t *)f->f_data;
             if (n->read && n->read != afunix_node_read) {
-                extern size_t afpkt_node_read(fs_node_t *, off_t, size_t, uint8_t *);
+
                 if (n->read == (void *)afpkt_node_read)
                     return afpacket_sendto(fd, buf, len, flags, addr, addrlen);
                 if (n->read == (void *)afinet_node_read)
@@ -1831,8 +1813,7 @@ int sys_shutdown(int fd, int how) {
 /* AF_INET surface lives in af_inet.c.  Try it first — most callers
  * (curl, inetd, every internet daemon) are looking up AF_INET fds.
  * Fall through to AF_UNIX only on ENOTSOCK.  */
-extern int afinet_getsockname(int fd, void *addr, socklen_t *addrlen);
-extern int afinet_getpeername(int fd, void *addr, socklen_t *addrlen);
+
 
 int sys_getsockname(int fd, struct sockaddr *addr, socklen_t *addrlen) {
     if (sock_fd_invalid(fd)) return -EBADF;
@@ -1877,7 +1858,7 @@ int sys_setsockopt(int fd, int level, int optname,
      * bind()'s EADDRINUSE check — so record it on the AF_INET socket.  All
      * other options are accepted silently. */
     if (level == 1 /*SOL_SOCKET*/ && optname == 2 /*SO_REUSEADDR*/) {
-        extern int afinet_set_reuseaddr(int fd, int on);
+
         int on = (optval && optlen >= (socklen_t)sizeof(int)) ? *(const int *)optval : 0;
         afinet_set_reuseaddr(fd, on);   /* no-op on non-AF_INET fds */
     }
@@ -1888,7 +1869,7 @@ int sys_setsockopt(int fd, int level, int optname,
  * so_error so SO_ERROR can return the real connect-failure errno
  * instead of always 0 (which made curl think the connection had
  * succeeded and proceed to send into a dead PCB).  */
-extern int afinet_so_error(int fd);
+
 
 int sys_getsockopt(int fd, int level, int optname,
                    void *optval, socklen_t *optlen) {
@@ -1911,7 +1892,7 @@ int sys_getsockopt(int fd, int level, int optname,
              * libtirpc's svc_tli_create switches on getsockopt(SO_TYPE) to pick
              * its transport; returning 0 here made it reject every RPC server
              * socket with "bad service type" (broke rpcbind / ToolTalk). */
-            extern int afinet_so_type(int fd);
+
             afunix_sock_t *u = afunix_from_fd(fd);
             int t = u ? u->type : afinet_so_type(fd);
             if (t < 0)
@@ -1945,7 +1926,7 @@ int sys_getsockopt(int fd, int level, int optname,
             return 0;
         }
         if (optname == 2 /*SO_REUSEADDR*/) {
-            extern int afinet_get_reuseaddr(int fd);
+
             int r = afinet_get_reuseaddr(fd);
             *(int *)optval = (r < 0) ? 0 : r;
             *optlen = sizeof(int);

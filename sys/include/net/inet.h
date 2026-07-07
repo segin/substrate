@@ -152,4 +152,25 @@ ssize_t    tcp_peek_nb(tcp_pcb_t *p, void *buf, size_t len);
 int        tcp_close(tcp_pcb_t *p);
 int        tcp_take_so_error(tcp_pcb_t *p);
 
+/* -- AF_INET socket helper APIs -------------------------------------- */
+int     afinet_listen(int fd, int backlog);
+int     afinet_accept(int fd, void *addr, socklen_t *addrlen);
+size_t  afinet_node_read(struct fs_node *, off_t, size_t, uint8_t *);
+int     afinet_shutdown(int fd, int how);
+int     afinet_getsockname(int fd, void *addr, socklen_t *addrlen);
+int     afinet_getpeername(int fd, void *addr, socklen_t *addrlen);
+int     afinet_set_reuseaddr(int fd, int on);
+int     afinet_so_error(int fd);
+int     afinet_so_type(int fd);
+int     afinet_get_reuseaddr(int fd);
+
+/* -- AF_PACKET socket helper APIs ------------------------------------ */
+int     afpacket_socket(int type, int protocol);
+int     afpacket_bind(int fd, const void *sll, socklen_t len);
+ssize_t afpacket_sendto(int fd, const void *buf, size_t len, int flags,
+                        const void *sll, socklen_t addrlen);
+ssize_t afpacket_recvfrom(int fd, void *buf, size_t len, int flags,
+                          void *sll, socklen_t *addrlen);
+size_t  afpkt_node_read(struct fs_node *, off_t, size_t, uint8_t *);
+
 #endif /* _SYS_NET_INET_H */
