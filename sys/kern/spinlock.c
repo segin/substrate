@@ -1,9 +1,8 @@
 #include <sys/lock.h>
 #include <sys/preempt.h>
+#include <kern/console.h>
 #include <kern/panic.h>
-
-// Forward declaration for CPU ID helper (architecture specific)
-extern uint32_t lapic_get_id(void);
+#include <arch/x86-common/lapic.h>
 
 void spinlock_init(spinlock_t *lock, const char *name) {
     lock->locked = 0;
@@ -24,7 +23,6 @@ void spinlock_acquire(spinlock_t *lock) {
          * scripts/resolve-trap.sh (or a manual addr2line) maps to
          * the exact line that left it held.  Lock name + that EIP
          * are usually enough to pin down the bug without a repro. */
-        extern void kprintf(const char *, ...);
         kprintf("Deadlock: spinlock '%s' already held by CPU %u "
                 "(acquired at eip=0x%08x)\n",
                 lock->name ? lock->name : "<unnamed>",

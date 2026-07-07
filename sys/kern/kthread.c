@@ -1,15 +1,15 @@
+#include <stddef.h>
+
 #include <sys/kthread.h>
 #include <sys/proc.h>
 #include <kern/sched.h>
-#include <stddef.h>
+#include <arch/i386/pmm.h>
 
 int kthread_create(void (*func)(void *), void *arg, thread_t **tdp, const char *name) {
     // 1. Threads created by kthread_create belong to the Kernel Process (PID 0)
-    extern process_t *kernel_process;
     process_t *proc = kernel_process;
 
     if (!proc) {
-        extern process_t *swapper_get_proc(void);
         proc = swapper_get_proc();
     }
     if (!proc) {
@@ -19,8 +19,6 @@ int kthread_create(void (*func)(void *), void *arg, thread_t **tdp, const char *
     // 2. Allocate a kernel stack — 16 KiB (4 PMM blocks).  Matches
     //    the per-process kstack size; 8 KiB overflows in the deep
     //    network TX path (see fork_kthread in pm/process.c).
-    extern void *pmm_alloc_contiguous(size_t count);
-    extern void pmm_free_contiguous(void *p, size_t count);
     void *stack = pmm_alloc_contiguous(4);
     if (!stack) return -1;
 

@@ -5,12 +5,14 @@
  * Based on FreeBSD/Solaris sleep queue design.
  */
 
-#include <sys/proc.h>
-#include <kern/sleepq.h>
-#include <sys/preempt.h>
 #include <stdint.h>
 #include <string.h>
+
+#include <sys/preempt.h>
+#include <sys/proc.h>
 #include <vm/vm_kmem.h>
+#include <kern/sched.h>
+#include <kern/sleepq.h>
 
 #define SLEEPQ_TYPE_SHARED 0
 #define SLEEPQ_TYPE_PRIVATE 1
@@ -326,7 +328,6 @@ static thread_t *sleepq_wake_one_internal(void *chan, int type, int pid) {
 
 thread_t *sleepq_wake_one(void *chan) {
     thread_t *t = sleepq_wake_one_internal(chan, SLEEPQ_TYPE_SHARED, 0);
-    extern void sched_poll_wake_pollers(void);
     sched_poll_wake_pollers();
     return t;
 }
@@ -335,7 +336,6 @@ thread_t *sleepq_wake_one_private(void *chan) {
     int pid = sleepq_current_private_pid();
     if (pid < 0) return NULL;
     thread_t *t = sleepq_wake_one_internal(chan, SLEEPQ_TYPE_PRIVATE, pid);
-    extern void sched_poll_wake_pollers(void);
     sched_poll_wake_pollers();
     return t;
 }
@@ -380,7 +380,6 @@ int sleepq_wake_all(void *chan) {
      * sched_poll_wake_pollers) and won't otherwise hear about
      * AF_UNIX rx/tx, accept, futex, etc.  Tiny cost (a walk over
      * threads); large benefit: kern_poll stops 10 ms busy-spinning. */
-    extern void sched_poll_wake_pollers(void);
     sched_poll_wake_pollers();
     return n;
 }
@@ -389,7 +388,6 @@ int sleepq_wake_all_private(void *chan) {
     int pid = sleepq_current_private_pid();
     if (pid < 0) return 0;
     int n = sleepq_wake_all_internal(chan, SLEEPQ_TYPE_PRIVATE, pid);
-    extern void sched_poll_wake_pollers(void);
     sched_poll_wake_pollers();
     return n;
 }

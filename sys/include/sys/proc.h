@@ -544,6 +544,8 @@ typedef struct thread {
 // Globals
 extern thread_t *current_thread;
 extern process_t *current_process;
+extern process_t *kernel_process;
+process_t *swapper_get_proc(void);
 
 // File Descriptor Management
 int  proc_alloc_fd(process_t *p);
