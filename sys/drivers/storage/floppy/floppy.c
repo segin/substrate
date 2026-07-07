@@ -886,7 +886,7 @@ static void fdc_register_drive(fdc_drive_t *drive) {
     uint64_t total_sectors;
 
     memset(&drive->bdev, 0, sizeof(drive->bdev));
-    snprintf(drive->bdev.name, sizeof(drive->bdev.name), "fd%u", drive->device_index);
+    snprintf(drive->bdev.name, sizeof(drive->bdev.name), "floppy%u", drive->device_index);
     total_sectors = (uint64_t)drive->geom->cylinders * drive->geom->heads * drive->geom->sectors_per_track;
     drive->bdev.sector_size = 512;
     drive->bdev.total_sectors = total_sectors;
@@ -899,7 +899,7 @@ static void fdc_register_drive(fdc_drive_t *drive) {
      * spins the drive needlessly, takes seconds per probe, and on
      * QEMU's emulated FDC has wedged the controller while the drive
      * wasn't ready.  Floppy media is whole-disk filesystems
-     * (mkfs.fat /dev/fd0); there's no partition table to find.  */
+     * (mkfs.fat /dev/storage/floppy0); there's no partition table to find.  */
     blkdev_register(&drive->bdev);
     kprintf("fdc: %s %s registered (%llu sectors)\n",
             drive->bdev.name,

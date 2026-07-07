@@ -3,7 +3,7 @@
 ## Overview
 - Driver location: `sys/drivers/storage/floppy/`
 - Hardware target: ISA NEC uPD765 / Intel 82077AA compatible floppy disk controller
-- Device nodes: `/dev/storage/fd0` through `/dev/storage/fd3` for currently detected drives
+- Device nodes: `/dev/storage/floppy0` through `/dev/storage/floppy3` for currently detected drives
 
 ## Controller Model
 - Controllers are probed at legacy ISA bases:
@@ -34,7 +34,7 @@
 
 ## Drive Detection
 - CMOS register `0x10` provides drive type hints for drives `0` and `1`
-- Secondary-controller drives are enumerated as `fd2` and `fd3`; because legacy CMOS does not describe them, the driver currently falls back to the common 1.44MB geometry until richer media detection lands
+- Secondary-controller drives are enumerated as `floppy2` and `floppy3`; because legacy CMOS does not describe them, the driver currently falls back to the common 1.44MB geometry until richer media detection lands
 - Supported geometries:
   - `360K`
   - `720K`
