@@ -1,38 +1,36 @@
-#include <arch/i386/idt.h>
-#include <arch/i386/cpu.h>
-#include <drivers/video/vga.h>
-#include <arch/x86-common/io.h>
-#include <string.h>
 #include <stdio.h>
+#include <string.h>
+
+#include <sys/copy.h>
+#include <sys/exec.h>
+#include <sys/irq.h>
+#include <sys/preempt.h>
+#include <sys/proc.h>
+#include <kern/cmdline.h>
+#include <kern/console.h>
+#include <kern/debug.h>
+#include <kern/panic.h>
+#include <kern/sched.h>
+#include <kern/time.h>
+#include <arch/i386/cpu.h>
+#include <arch/i386/gdt.h>
+#include <arch/i386/idt.h>
+#include <arch/i386/percpu.h>
+#include <arch/i386/pmap.h>
+#include <arch/i386/pmm.h>
+#include <arch/i386/vm86.h>
+#include <arch/i386/fpu/fpu_emu.h>
+#include <arch/x86-common/io.h>
+#include <drivers/console/uart/uart.h>
 #include <drivers/input/keyboard.h>
 #include <drivers/input/mouse.h>
-#include <kern/console.h>
-#include <kern/panic.h>
-#include <arch/i386/fpu/fpu_emu.h>
-
-#include <sys/proc.h>
-#include <sys/preempt.h>
-#include <arch/i386/fpu/fpu_emu.h>
+#include <drivers/storage/ide/ide.h>
+#include <drivers/video/vga.h>
+#include <vm/vm_fault.h>
+#include <exec/perso/personality.h>
 
 idt_entry_t idt_entries[256] __attribute__((aligned(16)));
 idt_ptr_t   idt_ptr;
-
-#include <kern/time.h>
-#include <kern/sched.h>
-#include <kern/cmdline.h>
-#include <kern/debug.h>
-#include <sys/irq.h>
-#include <drivers/console/uart/uart.h>
-#include <drivers/storage/ide/ide.h>
-#include <arch/i386/vm86.h>
-#include <arch/i386/pmap.h>
-#include <arch/i386/pmm.h>
-#include <arch/i386/gdt.h>
-#include <sys/exec.h>
-#include <arch/i386/percpu.h>
-#include <vm/vm_fault.h>
-#include <exec/perso/personality.h>
-// isr externs are in idt.h now
 
 enum {
     IDT_VECTOR_COUNT = 256,
@@ -173,11 +171,8 @@ void idt_init(void) {
 
     /* Panic IPI (0xFB).  Handler is a bare cli;hlt loop in isr.S —
      * intentionally bypasses the common stub since we never return. */
-    {
-        extern void isr_panic_ipi(void);
         idt_set_gate(0xFB, (uint32_t)(uintptr_t)isr_panic_ipi,
                      KERNEL_CODE_SELECTOR, IDT_FLAG_KERNEL_INT_GATE);
-    }
 
     idt_flush((uint32_t)&idt_ptr);
 }
@@ -452,8 +447,6 @@ void isr_handler(registers_t *regs) {
                      * and copyin the words so a bad pointer faults
                      * us cleanly rather than double-faulting the
                      * kernel. */
-                    {
-                        extern int copyin(const void *src, void *dst, unsigned int size);
                         uint32_t fp = (uint32_t)regs->ebp;
                         kprint("TRAP: user backtrace:\n");
                         for (int depth = 0; depth < 16; depth++) {
@@ -483,7 +476,6 @@ void isr_handler(registers_t *regs) {
                             if (frame[0] <= fp) break;  /* sane chain */
                             fp = frame[0];
                         }
-                    }
                 }
                 trapsignal(current_process, sig, code);
                 signal_handle_pending(regs);
@@ -534,7 +526,7 @@ void isr_handler(registers_t *regs) {
             // User-mode crash - kill the process
             kprint("Killing user process.\n\n");
             if (current_process && current_process->pid == 1) {
-                extern int cmdline_has(const char *key);
+
                 
                 // Dump memory if procmem argument present
                 if (cmdline_has("procmem")) {

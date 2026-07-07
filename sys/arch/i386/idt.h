@@ -21,6 +21,7 @@ struct idt_ptr_struct {
 } __attribute__((packed));
 
 typedef struct idt_ptr_struct idt_ptr_t;
+extern idt_ptr_t idt_ptr;
 
 #define IDT_FLAG_PRESENT        0x80
 #define IDT_FLAG_DPL3           0x60
@@ -84,6 +85,7 @@ extern void isr46(void);  // IRQ14 (IDE Primary)
 extern void isr47(void);  // IRQ15 (IDE Secondary)
 
 extern void isr128(void); // Syscall
+extern void isr_panic_ipi(void);
 
 void idt_flush(uint32_t);
 

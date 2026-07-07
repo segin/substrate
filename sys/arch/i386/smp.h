@@ -18,4 +18,14 @@ int smp_get_cpu_count(void);
 int smp_boot_ap(uint8_t apic_id);
 void smp_boot_all_aps(void);
 
+#ifndef HOST_TEST
+void trampoline_start(void);
+void trampoline_end(void);
+void trampoline_cr3(void);
+void trampoline_cr4(void);
+void trampoline_cr0(void);
+void trampoline_stack(void);
+void trampoline_entry(void);
+#endif
+
 #endif

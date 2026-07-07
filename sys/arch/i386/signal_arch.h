@@ -166,4 +166,7 @@ struct siginfo_frame {
     ucontext_t  uc;             /* ucontext_t structure */
 };
 
+extern unsigned char sig_trampoline_code[];
+extern unsigned int sig_trampoline_size;
+
 #endif /* _ARCH_I386_SIGNAL_ARCH_H */

@@ -1,46 +1,42 @@
 
 
-#include <arch/i386/syscall.h>
-#include <arch/i386/idt.h>
-#include <arch/i386/syscall_abi.h>
-#include <arch/i386/intr.h>
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
 
-/* NetBSD-style kernel internal includes */
-#include <kern/sched.h>
-#include <kern/version.h>
-#include <kern/panic.h>
-#include <kern/console.h>
-#include <kern/main.h>
-#include <exec/perso/personality.h>
-#include <pm/pm.h>
-#include <include/sys/thr.h>
-#include <include/sys/acct.h>
-#include <include/sys/file.h>
-#include <include/sys/proc.h>
-#include <include/sys/signal.h>
-#include <include/sys/session.h>
-#include <vfs/vfs.h>
-#include <drivers/console/uart/uart.h>
-#include <include/sys/sysinfo.h>
-
-#include <sys/types.h>
+#include <sys/acct.h>
 #include <sys/copy.h>
 #include <sys/errno.h>
-#include <string.h>
-#include <stdbool.h>
-#include <stdio.h>
 #include <sys/exec.h>
+#include <sys/file.h>
+#include <sys/proc.h>
+#include <sys/session.h>
+#include <sys/signal.h>
+#include <sys/sysinfo.h>
+#include <sys/types.h>
+#include <sys/thr.h>
+#include <vfs/vfs.h>
+#include <kern/console.h>
+#include <kern/main.h>
+#include <kern/panic.h>
+#include <kern/sched.h>
+#include <kern/version.h>
+#include <pm/pm.h>
+#include <arch/i386/gdt.h>
+#include <arch/i386/idt.h>
+#include <arch/i386/intr.h>
 #include <arch/i386/percpu.h>
+#include <arch/i386/syscall.h>
+#include <arch/i386/syscall_abi.h>
+#include <drivers/console/uart/uart.h>
+#include <exec/perso/personality.h>
 
 
 /* Arch-independent syscalls are now in kern/syscall.c */
 
-extern thread_t *current_thread;
-extern process_t *current_process;
-extern void signal_handle_pending(registers_t *regs);
 
-
-extern void gdt_set_gate(int num, uint32_t base, uint32_t limit, uint8_t access, uint8_t gran);
 
 /*
  * Translate a substrate (Linux-numbered) errno to the BSD errno numbering
@@ -169,8 +165,7 @@ static inline uint64_t syscall_rdtsc(void) {
 }
 
 void syscall_stats_dump(int reset) {
-    extern int kprintf(const char *, ...);
-    extern const char *perso_name(int id);
+
     for (int p = 0; p < SCSTAT_MAX_PERSO; p++) {
         int any = 0;
         for (int n = 0; n < SCSTAT_MAX_NR; n++) {
@@ -214,8 +209,7 @@ int syscall_trace_pid = 0;
  */
 int syscall_trace_serial = 0;
 
-extern void uart_write(const char *data, size_t size);
-extern size_t strlen(const char *);
+
 
 static inline void syscall_trace_emit(const char *s) {
     /* Serialize the whole write against other CPUs/threads and IRQs so
@@ -225,7 +219,7 @@ static inline void syscall_trace_emit(const char *s) {
     if (syscall_trace_serial) {
         uart_write(s, strlen(s));
     } else {
-        extern void kprint(const char *);
+
         kprint(s);
     }
     intr_restore(f);
@@ -621,8 +615,7 @@ int arch_fork_with_stack(void *child_stack) {
  * new TID.
  */
 int arch_clone_thread(void *child_stack, uint32_t tls_base, int *clear_child_tid) {
-    extern int sched_clone_thread(process_t *proc, void *parent_regs,
-                                  uint32_t tls_base, int *clear_child_tid);
+
     if (!current_thread || !current_thread->syscall_regs) return -1;
 
     registers_t regs = *(registers_t *)current_thread->syscall_regs;

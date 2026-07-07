@@ -40,5 +40,11 @@ static inline void wait_for_interrupt(void) {
 
 struct thread;
 void switch_to(struct thread *prev, struct thread *next);
+void i386_load_gs_for_thread(struct thread *t);
+void fork_child_return(void);
+void new_kernel_thread_trampoline(void);
+void new_user_thread_trampoline(void);
+struct process;
+int sched_clone_thread(struct process *proc, void *parent_regs, uint32_t tls_base, int *clear_child_tid);
 
 #endif

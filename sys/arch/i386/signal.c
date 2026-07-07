@@ -30,13 +30,14 @@
  *   +---------------------+
  */
 
-#include <sys/signal.h>
+#include <string.h>
+
 #include <sys/proc.h>
-#include <kern/console.h>
+#include <sys/signal.h>
 #include <kern/cmdline.h>
+#include <kern/console.h>
 #include <arch/i386/idt.h>
 #include <arch/i386/signal_arch.h>
-#include <string.h>
 
 /* Signal-delivery trace, gated behind the `xsig` kernel cmdline flag
  * (or `debug=xsig`).  Logs every sendsig() and sys_sigreturn() pair —
@@ -282,7 +283,9 @@ static void populate_ucontext(ucontext_t *uc, uint32_t mask, registers_t *regs) 
  *   flags   - SA_* flags from sigaction
  *   regs    - Saved CPU registers from interrupted context
  */
-void sendsig(sig_t handler, int sig, uint32_t mask, uint32_t flags, registers_t *regs) {
+void sendsig(void *handler_ptr, int sig, uint32_t mask, uint32_t flags, void *regs_ptr) {
+    sig_t handler = (sig_t)handler_ptr;
+    registers_t *regs = (registers_t *)regs_ptr;
     if (!regs) {
         kprint("sendsig: NULL regs pointer\n");
         return;
@@ -351,8 +354,6 @@ void sendsig(sig_t handler, int sig, uint32_t mask, uint32_t flags, registers_t 
         
         /* Validate stack address */
         if (validate_user_addr((void*)(uintptr_t)esp, sizeof(struct siginfo_frame)) != 0) {
-            kprint("sendsig: SA_SIGINFO stack address out of bounds\n");
-            extern void sigexit(process_t *p, int sig);
             sigexit(current_process, SIGSEGV);
             return;
         }
@@ -377,8 +378,6 @@ void sendsig(sig_t handler, int sig, uint32_t mask, uint32_t flags, registers_t 
         
         /* Copy siginfo_frame to user stack */
         if (copyout(&sif, (void*)(uintptr_t)esp, sizeof(sif)) != 0) {
-            kprint("sendsig: Failed to copy siginfo frame to user stack\n");
-            extern void sigexit(process_t *p, int sig);
             sigexit(current_process, SIGSEGV);
             return;
         }
@@ -416,7 +415,6 @@ void sendsig(sig_t handler, int sig, uint32_t mask, uint32_t flags, registers_t 
         hex[8] = '\0';
         kprint(hex);
         kprint(" out of user space bounds\n");
-        extern void sigexit(process_t *p, int sig);
         sigexit(current_process, SIGSEGV);
         return;
     }
@@ -482,8 +480,6 @@ void sendsig(sig_t handler, int sig, uint32_t mask, uint32_t flags, registers_t 
      * Copy frame to user stack
      */
     if (copyout(&sf, (void*)(uintptr_t)esp, sizeof(sf)) != 0) {
-        kprint("sendsig: Failed to copy signal frame to user stack\n");
-        extern void sigexit(process_t *p, int sig);
         sigexit(current_process, SIGSEGV);
         return;
     }

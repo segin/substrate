@@ -1,26 +1,19 @@
-#include <kern/sched.h>
-#include <kern/time.h>
-#include <sys/smp.h>
-#include <pm/pm.h>
-#include <sys/acct.h>
-#include <exec/perso/personality.h>
-#include <arch/i386/percpu.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
-#include <arch/i386/pmap.h>
-#include <arch/i386/intr.h>
-#include <vfs/vfs.h>
 
-extern thread_t *current_thread; // Now defined in generic sched.c
-
-// Generic Allocation Helper
-extern thread_t *sched_alloc_thread(process_t *proc);
-extern void sched_init_generic(void);
-
+#include <sys/acct.h>
 #include <sys/ldt.h>
-
-extern void i386_load_gs_for_thread(thread_t *t);
+#include <sys/smp.h>
+#include <vfs/vfs.h>
+#include <kern/sched.h>
+#include <kern/time.h>
+#include <pm/pm.h>
+#include <arch/i386/intr.h>
+#include <arch/i386/percpu.h>
+#include <arch/i386/pmap.h>
+#include <arch/i386/pmm.h>
+#include <exec/perso/personality.h>
 
 // Exposed to Generic Scheduler
 void arch_switch_to(thread_t *prev, thread_t *next) {
@@ -61,8 +54,6 @@ static void thread_exit_wrapper(void) {
 void sched_init(void) {
     sched_init_generic();
 
-    // Initialize SMP scheduler with detected CPU count
-    extern void sched_smp_init(int);
     sched_smp_init(smp_get_cpu_count());
 
     /* Bootstrap the swapper (PID 0).  kmalloc is up by this point, so
@@ -118,7 +109,7 @@ int sched_fork_thread(process_t *proc, void *parent_regs) {
     if (current_thread)
         t->gs_base = current_thread->gs_base;
 
-    extern void *pmm_alloc_contiguous(size_t);
+
     /* Allocate 4 pages = 16 KiB contiguous kernel stack.  8 KiB
      * overflows: a deep network TX syscall path (sys_write -> tcp_send
      * -> ... -> rtl_xmit) can take a nested NIC IRQ that runs the whole
@@ -169,7 +160,6 @@ int sched_fork_thread(process_t *proc, void *parent_regs) {
     
     // switch_to expects: [EBX, ESI, EDI, EBP, RetAddr] at stack top
     // RetAddr is at highest address, EBX is at lowest (where ESP will point)
-    extern void fork_child_return(void);
     uint32_t fcr_addr = (uint32_t)fork_child_return;
     kstack--; *kstack = fcr_addr; // Return address for switch_to
     
@@ -221,7 +211,7 @@ int sched_clone_thread(process_t *proc, void *parent_regs, uint32_t tls_base,
      * how pthread_join() observes thread exit. */
     t->exit_tid_ptr = clear_child_tid;
 
-    extern void *pmm_alloc_contiguous(size_t);
+
     void *kstack_base = pmm_alloc_contiguous(4);   /* 16 KiB */
     if (!kstack_base) {
         t->proc = NULL;
@@ -262,7 +252,6 @@ int sched_clone_thread(process_t *proc, void *parent_regs, uint32_t tls_base,
     kstack--; *kstack = regs->fs;
     kstack--; *kstack = regs->gs;
 
-    extern void fork_child_return(void);
     kstack--; *kstack = (uint32_t)fork_child_return;
     kstack--; *kstack = 0;  /* EBP */
     kstack--; *kstack = 0;  /* EDI */
@@ -315,7 +304,6 @@ thread_t *sched_create_thread(process_t *proc, void (*entry_point)(void*), void 
          * through to entry_point — the kernel-side analogue of what
          * new_user_thread_trampoline does for user threads via its iret.
          */
-        extern void new_kernel_thread_trampoline(void);
         stk--; *stk = (uint32_t)(uintptr_t)arg;
         stk--; *stk = (uint32_t)(uintptr_t)thread_exit_wrapper;
         stk--; *stk = (uint32_t)(uintptr_t)entry_point;
@@ -333,7 +321,7 @@ thread_t *sched_create_thread(process_t *proc, void (*entry_point)(void*), void 
 
     /* User thread path.  16 KiB kernel stack — see sched_fork_process
      * for why 8 KiB overflows under the nested TX/RX network path. */
-    extern void *pmm_alloc_contiguous(size_t);
+
     void *kstack_base = pmm_alloc_contiguous(4);   /* 16 KiB */
     if (!kstack_base) {
         t->proc  = NULL;
@@ -355,7 +343,6 @@ thread_t *sched_create_thread(process_t *proc, void (*entry_point)(void*), void 
     kstack--; *kstack = (uint32_t)(uintptr_t)stack;        /* user_stack */
     kstack--; *kstack = (uint32_t)(uintptr_t)entry_point;  /* user_entry */
 
-    extern void new_user_thread_trampoline(void);
     kstack--; *kstack = (uint32_t)(uintptr_t)&new_user_thread_trampoline; /* ret-addr */
     kstack--; *kstack = 0; /* ebp */
     kstack--; *kstack = 0; /* edi */

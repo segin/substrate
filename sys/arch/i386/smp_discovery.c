@@ -1,37 +1,21 @@
-#include <arch/i386/smp.h>
-#include <arch/i386/cpu.h>
+#include <stdio.h>
+#include <stdint.h>
+#include <string.h>
+
+#include <sys/proc.h>
 #include <sys/smp.h>
 #include <kern/console.h>
-#include <arch/i386/early_boot.h>
-#include <string.h>
-#include <stdint.h>
-#include <arch/i386/percpu.h>
-#include <arch/i386/gdt.h>
-#include <arch/i386/pmap.h>
-#include <sys/proc.h>
+#include <kern/sched.h>
 #include <pm/pm.h>
+#include <arch/i386/cpu.h>
+#include <arch/i386/early_boot.h>
+#include <arch/i386/gdt.h>
+#include <arch/i386/idt.h>
+#include <arch/i386/percpu.h>
+#include <arch/i386/pmap.h>
+#include <arch/i386/smp.h>
 #include <arch/x86-common/lapic.h>
 #include <arch/x86-common/ioapic.h>
-#include <stdio.h>
-
-// Externs for Scheduler and IDT
-#ifndef HOST_TEST
-extern thread_t *sched_alloc_thread(process_t *proc);
-
-// IDT Pointer (defined in idt.c)
-typedef struct {
-    uint16_t limit;
-    uint32_t base;
-} __attribute__((packed)) idt_ptr_t;
-extern idt_ptr_t idt_ptr;
-extern void idt_flush(uint32_t);
-
-// TSS Flush (defined in isr.S)
-extern void tss_flush(void);
-
-// GDT Flush (defined in gdt.c/isr.S)
-extern void gdt_flush(uint32_t);
-#endif
 
 /*
  * Early boot page tables in boot.S map only the first 16MB into the higher
@@ -503,13 +487,6 @@ void smp_discover_cores(void) {
 }
 
 #ifndef HOST_TEST
-extern void trampoline_start(void);
-extern void trampoline_end(void);
-extern void trampoline_cr3(void);
-extern void trampoline_cr4(void);
-extern void trampoline_cr0(void);
-extern void trampoline_stack(void);
-extern void trampoline_entry(void);
 
 #define SMP_LOWMEM_PAGE_SIZE       0x1000u
 #define SMP_LOWMEM_TRAMP_BASE      0x8000u

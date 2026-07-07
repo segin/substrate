@@ -63,6 +63,7 @@ extern uint64_t sched_min_vruntime;
 
 /* Scheduler API */
 void sched_init(void);
+void sched_init_generic(void);
 void sched_smp_init(int cpu_count);
 void swapper_request_work(void);
 

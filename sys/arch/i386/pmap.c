@@ -1,22 +1,24 @@
-#include <arch/i386/pmap.h>
-#include <arch/i386/cpu.h>
-#include <arch/i386/pmap_hal.h>
-#include <arch/i386/pmm.h>
-#include <arch/x86-common/lapic.h>
-#include <vm/vm_page.h>
-#include <vm/vm_object.h>
-#include <vm/phys_mem.h>
-#include <kern/panic.h>
-#include <kern/console.h>
-#include <kern/sched.h>
-#include <sys/smp.h>
+#include <stdio.h>
+#include <string.h>
+
 #include <sys/copy.h>
 #include <sys/errno.h>
 #include <sys/lock.h>
 #include <sys/param.h>
+#include <sys/smp.h>
+#include <vm/phys_mem.h>
 #include <vm/vm_kmem.h>
-#include <string.h>
-#include <stdio.h>
+#include <vm/vm_object.h>
+#include <vm/vm_page.h>
+#include <kern/console.h>
+#include <kern/panic.h>
+#include <kern/sched.h>
+#include <arch/i386/cpu.h>
+#include <arch/i386/pmap.h>
+#include <arch/i386/pmap_hal.h>
+#include <arch/i386/pmm.h>
+#include <arch/i386/signal_arch.h>
+#include <arch/x86-common/lapic.h>
 
 // Kernel Page Directory (Static for bootstrap)
 // We need it 4KB aligned.
@@ -1036,9 +1038,7 @@ int pmap_enter_batch(pmap_t pmap, uintptr_t va_start, int count, uintptr_t *pa_l
     return 0;
 }
 
-// Trampoline Support
-extern unsigned char sig_trampoline_code[];
-extern unsigned int sig_trampoline_size;
+
 
 void pmap_map_trampoline(void) {
     // 1. Allocate a page for the trampoline
@@ -2227,7 +2227,6 @@ int pmap_fault(uint32_t err_code, uint32_t cr2) {
         // 1. Allocate new page (returns virtual address)
         void *virt_new = pmm_alloc_block();
         if (!virt_new) {
-            extern void kprint(const char *);
             kprint("pmap_fault: OOM during COW\n");
             return 0;
         }
@@ -2386,7 +2385,7 @@ int pmap_check(pmap_t pmap) {
     
     // Check 3: Kernel PDEs (768-1022) should be shared
     // They should match kernel_page_directory
-    extern uint32_t kernel_page_directory[1024];
+
     for (int pdi = 768; pdi < 1023; pdi++) {
         if (p->pdir[pdi] != kernel_page_directory[pdi]) {
             kprint("pmap_check: Kernel PDE mismatch at ");

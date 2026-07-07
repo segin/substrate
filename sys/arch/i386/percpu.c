@@ -6,19 +6,20 @@
  * Linux personality path.
  */
 
-#include <arch/i386/percpu.h>
-#include <arch/i386/gdt.h>
-#include <arch/i386/smp.h>
-#include <kern/console.h>
-#include <string.h>
 #include <stdio.h>
+#include <string.h>
+
+#include <kern/console.h>
+#include <arch/i386/gdt.h>
+#include <arch/i386/percpu.h>
+#include <arch/i386/smp.h>
+#include <arch/x86-common/lapic.h>
 
 // Per-CPU data array
 static struct percpu_data percpu_data_array[MAX_CPUS] __attribute__((aligned(64)));
 
 // Get current CPU's percpu data (via LAPIC ID for now)
 struct percpu_data *percpu_get(void) {
-    extern uint32_t lapic_get_id(void);
     uint32_t lapic_id = lapic_get_id();
     
     // Find CPU index by LAPIC ID

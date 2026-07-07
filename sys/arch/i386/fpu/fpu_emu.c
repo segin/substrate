@@ -1,12 +1,9 @@
-#include <arch/i386/fpu/fpu_emu.h>
+#include <sys/proc.h>
+#include <kern/console.h>
 #include <arch/i386/cpu.h>
 #include <arch/i386/idt.h>
-#include <io.h>
-#include <kern/console.h>
-#include <sys/proc.h>
-
-extern void isr7(void);
-extern process_t *current_process;
+#include <arch/i386/fpu/fpu_emu.h>
+#include <arch/x86-common/io.h>
 static int fpu_use_fxsave = 0;
 
 // Save FPU context for a process

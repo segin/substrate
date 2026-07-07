@@ -2,19 +2,17 @@
 #include <sys/sysarch.h>
 #include <sys/copy.h>
 #include <sys/proc.h>
-#include <errno.h>
+#include <sys/errno.h>
 #include <kern/console.h>
 #include <kern/sched.h>
-#include <arch/i386/syscall.h>
-#include <arch/i386/percpu.h>
 #include <arch/i386/gdt.h>
-#include <arch/i386/idt.h>  /* registers_t */
-#include <exec/perso/personality.h>            /* PERS_FREEBSD */
-#include <exec/perso/freebsd/freebsd_user.h>   /* FREEBSD_TCB_THREAD_OFFSET */
-
-extern int vm86_init_bsd(void *args);
-extern void gdt_set_gate(int num, uint32_t base, uint32_t limit, uint8_t access, uint8_t gran);
-extern thread_t *current_thread;
+#include <arch/i386/idt.h>
+#include <arch/i386/intr.h>
+#include <arch/i386/percpu.h>
+#include <arch/i386/syscall.h>
+#include <arch/i386/vm86.h>
+#include <exec/perso/personality.h>
+#include <exec/perso/freebsd/freebsd_user.h>
 
 /*
  * Set up a GDT data segment with the given base for use as a GS TLS descriptor.
