@@ -15,6 +15,7 @@
 #include <stddef.h>
 #include <string.h>
 #include <arch/i386/pmap.h>
+#include <arch/i386/pmm.h>
 #include <sys/ldt.h>
 #include <arch/i386/intr.h>
 #include <vm/vm_map.h>
@@ -90,8 +91,7 @@ static void proc_storage_free(process_t *p) {
  */
 mutex_t proctree_lock;
 
-extern fs_node_t *fs_root;
-extern struct personality personality_native;
+
 
 #ifdef HOST_TEST
 #define PROC_DEBUG_ENABLED() 0
@@ -441,7 +441,6 @@ process_t *proc_create(int perso_id) {
     }
     proc_resource_limits_init(proc);
 
-    extern void rusage_init(process_t *p);
     rusage_init(proc);
     proc_timers_init(proc);
 
@@ -576,7 +575,6 @@ static int proc_fork_common(process_t *parent, void *stack, int is_vfork) {
      */
     proc_add_child(parent, child_proc);
 
-    extern int sched_fork_thread(process_t *proc, void *stack);
     int fork_result = sched_fork_thread(child_proc, stack);
     if (fork_result < 0) {
         proc_remove_child(parent, child_proc);
@@ -723,9 +721,7 @@ void proc_vfork_done(process_t *child) {
 }
 
 int sched_spawn_kernel_process(void (*entry)(void*), void *arg) {
-    extern void *pmm_alloc_contiguous(size_t count);
-    extern void pmm_free_contiguous(void *p, size_t count);
-    extern thread_t *sched_create_thread(process_t *proc, void (*entry_point)(void*), void *stack, void *arg);
+
 
     // 1. Create Process
     process_t *child = proc_create(PERS_NATIVE);
@@ -774,7 +770,6 @@ void fd_close_all(process_t *p) {
             // syscall.c 'sys_close' calls 'close_fs' and 'file_free'.
             // We'll declare an external helper or move implementation.
             // For now, let's assume we can call an external 'file_close(file_t*)'
-            extern void file_close_ptr(file_t *f); // Need to add this to syscall.c or file.c
             file_close_ptr(p->fds[i]);
             proc_clear_fd(p, i);
         }
@@ -826,8 +821,7 @@ static void proc_apply_status_flags(file_t *f, int flags) {
      * without this, bsdtar's select-multiplex through gzip
      * deadlocks because every read on the pipe still blocks. */
     if (f->f_data) {
-        extern int pipe_set_nonblock(fs_node_t *, int);
-        extern int pty_set_nonblock(fs_node_t *, int);
+
         fs_node_t *node = (fs_node_t *)f->f_data;
         int nb = (flags & O_NONBLOCK) ? 1 : 0;
         if ((node->flags & 0x7) == FS_PIPE) {

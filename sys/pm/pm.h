@@ -91,4 +91,7 @@ process_t *proc_next(process_t *p);
 int proc_get_last_pid(void);
 void proc_reap_autoreap_zombies(void);
 
+void rusage_init(process_t *p);
+void rusage_finalize(process_t *p);
+
 #endif

@@ -22,4 +22,8 @@ void file_free(struct file *f);
  */
 void file_close_ptr(struct file *f);
 
+struct fs_node;
+int pipe_set_nonblock(struct fs_node *node, int nonblock);
+int pty_set_nonblock(struct fs_node *node, int on);
+
 #endif /* _KERN_FILE_H */
