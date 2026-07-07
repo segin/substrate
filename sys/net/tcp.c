@@ -41,7 +41,7 @@
 #include <string.h>
 #include <stddef.h>
 #include <errno.h>
-#include "../arch/i386/intr.h"
+#include <arch/i386/intr.h>
 
 /*
  * Netstack synchronisation.  tcp_segment_input() and everything it

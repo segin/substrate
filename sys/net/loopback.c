@@ -37,7 +37,7 @@
 #include <kern/time.h>
 #include <string.h>
 #include <stddef.h>
-#include "../arch/i386/intr.h"
+#include <arch/i386/intr.h>
 
 /*
  * Ring depth.  A TCP sender bursts up to a full receive window

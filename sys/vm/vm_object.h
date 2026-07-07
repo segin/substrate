@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
-#include "vm_page.h"
+#include <vm/vm_page.h>
 
 // VM Object types
 typedef enum {

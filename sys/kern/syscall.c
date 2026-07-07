@@ -56,7 +56,7 @@
 #include <stdio.h>
 #include <stddef.h>
 #include <vm/vm_map.h>
-#include "../vm/vm_area.h"
+#include <vm/vm_area.h>
 
 #include <sys/kern_syscalls.h>
 #include <sys/utsname.h>

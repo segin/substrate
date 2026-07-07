@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 #include <stddef.h>
-#include "vm_page.h"
+#include <vm/vm_page.h>
 
 // Generic Physical Memory Manager APIs
 // These manage the core page database and buddy allocator
