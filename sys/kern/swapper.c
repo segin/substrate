@@ -6,19 +6,19 @@
  * fallback and host-side validation.
  */
 
-#include <kern/sched.h>
-#include <pm/pm.h>
-#include <sys/proc.h>
-#include <arch/i386/intr.h>
 #include <stdint.h>
 #include <string.h>
+
+#include <sys/proc.h>
+#include <vm/vm_page.h>
+#include <kern/sched.h>
+#include <pm/pm.h>
+#include <arch/i386/intr.h>
 
 static process_t swapper_fallback_proc;
 static thread_t swapper_fallback_thread;
 static int swapper_fallback_ready = 0;
 static volatile int idle_work_pending = 0;
-
-extern void vm_pageout(void);
 
 static void swapper_seed_fallback_context(void) {
     if (swapper_fallback_ready) {
@@ -89,7 +89,6 @@ void swapper_idle_loop(void) {
             continue;
         }
 
-        extern thread_t *sched_idle_balance(void);
         thread_t *next = sched_idle_balance();
         if (next) {
             intr_restore(flags);

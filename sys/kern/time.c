@@ -1,26 +1,28 @@
 #include <stdint.h>
-#include <sys/types.h>
-#include <sys/param.h>
-#include <sys/math.h>
+#include <string.h>
 #include <time.h>
+
+#include <sys/copy.h>
+#include <sys/errno.h>
+#include <sys/kern_syscalls.h>
+#include <sys/math.h>
+#include <sys/param.h>
+#include <sys/proc.h>
+#include <sys/signal.h>
 #include <sys/time.h>
 #include <sys/times.h>
-#include <sys/proc.h>
-#include <sys/errno.h>
-#include <sys/copy.h>
-#include <sys/signal.h>
-#include <string.h>
-#include <kern/sched.h>
+#include <sys/vt.h>
 #include <pm/pm.h>
-#include <arch/i386/percpu.h>
+#include <kern/console.h>
+#include <kern/sched.h>
+#include <kern/time.h>
+#include <arch/i386/cpu.h>
 #include <arch/i386/intr.h>
+#include <arch/i386/percpu.h>
 #include <arch/x86-common/io.h>
 #include <drivers/storage/floppy/floppy.h>
 #include <drivers/video/fb_console.h>
 #include <drivers/video/hw_text.h>
-#include <sys/vt.h>
-#include <sys/kern_syscalls.h>
-#include <kern/time.h>
 
 time_t boot_time = 0;
 
@@ -50,8 +52,7 @@ static uint64_t tsc_hz             = 0;       /* 0 = uncalibrated, fall back */
 static uint64_t tsc_at_last_tick   = 0;
 static uint64_t tsc_ns_per_tick    = 0;       /* 1e9 / HZ, precomputed */
 
-extern uint64_t i386_cpu_cycle_counter(void);
-extern int      i386_cpu_has_tsc(void);
+
 
 #define PIT_FREQUENCY 1193182U
 #define PIT_CHANNEL0  0x40U
@@ -102,7 +103,7 @@ static void tsc_calibrate(void) {
     tsc_hz = (cycles * 1000000ULL) / calibrate_us;
     tsc_ns_per_tick = 1000000000ULL / HZ;
     tsc_at_last_tick = i386_cpu_cycle_counter();
-    extern int kprintf(const char *fmt, ...);
+
     kprintf("timer: TSC calibrated at %u MHz (%llu Hz)\n",
             (unsigned)(tsc_hz / 1000000ULL),
             (unsigned long long)tsc_hz);

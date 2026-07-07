@@ -4,18 +4,18 @@
  * Kernel Sysctl Subsystem Implementation
  */
 
-#include <sys/sysctl.h>
-#include <sys/copy.h>
-#include <sys/types.h>
-#include <sys/errno.h>
-#include <sys/proc.h>
-#include <sys/lock.h>
-#include <sys/smp.h>
-#include <string.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 
-extern process_t *current_process;
+#include <sys/copy.h>
+#include <sys/errno.h>
+#include <sys/lock.h>
+#include <sys/proc.h>
+#include <sys/smp.h>
+#include <sys/sysctl.h>
+#include <kern/console.h>
+#include <arch/i386/early_boot.h>
 
 /* Global lock for sysctl tree operations */
 static mutex_t sysctl_mutex;
@@ -66,7 +66,7 @@ SYSCTL_INT(hw, HW_PAGESIZE, pagesize, CTLFLAG_RD, &hw_pagesize, 0, "System page 
 /*
  * sysctl_init()
  */
-extern void early_uart_print(const char *s);
+
 
 void sysctl_init(void) {
     if (__sync_bool_compare_and_swap(&sysctl_initialized, 0, 1) == 0)
@@ -122,7 +122,7 @@ int sys_sysctl(int *name, unsigned int namelen, void *oldp, size_t *oldlenp, voi
      * if __guard_setup gets a valid AT_CANARY, this should never fire.
      * KERN_ARND mib is {1, 37}. */
     {
-        extern int kprintf(const char *fmt, ...);
+
         if (namelen == 2 && name_buf[0] == 1 && name_buf[1] == 37) {
             kprintf("[GUARD] KERN_ARND sysctl fallback hit (AT_CANARY path failed)\n");
         }

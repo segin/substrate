@@ -5,16 +5,13 @@
  * Activated by Alt+SysRq+key on PS/2 keyboard, or serial break + key.
  */
 
-#include <kern/sysrq.h>
-#include <kern/console.h>
-#include <kern/debug.h>
 #include <sys/reboot.h>
 #include <sys/syscall_impl.h>
-#include <arch/x86-common/io.h>
-
-/* Forward declarations for subsystem functions we call */
+#include <kern/console.h>
+#include <kern/debug.h>
+#include <kern/sysrq.h>
 #include <arch/i386/pmm.h>
-extern uint32_t pmm_get_free_memory(void);
+#include <arch/x86-common/io.h>
 
 void sysrq_init(void)
 {

@@ -1,12 +1,10 @@
+#include <stdio.h>
+#include <string.h>
+
 #include <sys/proc.h>
 #include <kern/sched.h>
 #include <kern/console.h>
-#include <stdio.h>
 #include <exec/perso/personality.h>
-#include <string.h>
-
-extern thread_t *current_thread;
-extern process_t *current_process;
 
 static const char *state_names[] = {
     "READY", "RUNNING", "BLOCKED", "ZOMBIE"

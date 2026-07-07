@@ -4,20 +4,22 @@
  * System Information Syscall
  */
 
-#include <sys/sysinfo.h>
 #include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+
+#include <sys/copy.h>
 #include <sys/errno.h>
+#include <sys/sysinfo.h>
 #include <sys/types.h>
-#include <pm/pm.h>
-#include <kern/time.h>
 #include <vm/phys_mem.h>
-#include <arch/i386/pmm.h> /* For PMM constants */
 #include <vm/vm_page.h>
 #include <vm/vm_swap.h>
-#include <string.h>
-#include <stdio.h>
-#include <sys/copy.h>
+#include <pm/pm.h>
 #include <kern/memtrack.h>
+#include <kern/sched.h>
+#include <kern/time.h>
+#include <arch/i386/pmm.h>
 
 #define PAGE_SIZE 4096
 
@@ -57,7 +59,6 @@ int do_sysinfo(struct sysinfo *info) {
     // kernel maintains in avenrun (sched_get_loadavg), not an instantaneous
     // proxy.  avenrun is FSHIFT=11 fixed point; sysinfo(2) reports loads
     // scaled by SI_LOAD_SCALE = 65536 = 2^16, so shift left (16 - 11) = 5.
-    extern void sched_get_loadavg(unsigned long *loads);
     unsigned long av[3];
     sched_get_loadavg(av);
     kinfo.loads[0] = av[0] << 5;
