@@ -11,7 +11,7 @@
 
 #include <stdint.h>
 #include <stddef.h>
-#include "psf.h"
+#include <drivers/video/psf.h>
 
 /* ==================== PCF Format Structures ==================== */
 

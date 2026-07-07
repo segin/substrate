@@ -18,8 +18,8 @@
 #include <string.h>
 #include <vm/vm_kmem.h>
 
-#include "psf.h"
-#include "font_cache.h"
+#include <drivers/video/psf.h>
+#include <drivers/video/font_cache.h>
 
 /* FNV-1a hash for 32-bit codepoint */
 static uint32_t hash_codepoint(uint32_t cp)

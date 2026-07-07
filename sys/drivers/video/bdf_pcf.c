@@ -13,8 +13,8 @@
 #include <string.h>
 #include <vm/vm_kmem.h>
 
-#include "psf.h"
-#include "bdf_pcf.h"
+#include <drivers/video/psf.h>
+#include <drivers/video/bdf_pcf.h>
 
 /* ==================== PCF Helpers ==================== */
 

@@ -10,8 +10,8 @@
 #include <stddef.h>
 #include <string.h>
 
-#include "psf.h"
-#include "font.h"
+#include <drivers/video/psf.h>
+#include <drivers/video/font.h>
 
 int psf1_parse(const void *data, size_t size, struct font_info *out)
 {

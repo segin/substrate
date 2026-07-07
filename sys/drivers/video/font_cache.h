@@ -8,7 +8,7 @@
 #define _FONT_CACHE_H
 
 #include <stdint.h>
-#include "psf.h"
+#include <drivers/video/psf.h>
 
 /* Number of hash buckets (power of 2 for fast modulo) */
 #define GLYPH_CACHE_BUCKETS 256
