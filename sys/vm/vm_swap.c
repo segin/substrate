@@ -5,6 +5,7 @@
 #include <vm/vm_pager.h>
 #include <vm/vm_kmem.h>
 #include <vfs/vfs.h>
+#include <kern/console.h>
 #include <sys/lock.h>
 #include <vm/vm_swap.h>
 #include <stddef.h>
@@ -227,7 +228,6 @@ int vm_swapon(void *node) {
 
     spinlock_release(&swap_lock);
 
-    extern void kprint(const char *);
     kprint("Swap enabled.\n");
 
     return 0;

@@ -18,7 +18,7 @@
 #endif
 
 #include <kern/panic.h>
-extern int kprintf(const char *fmt, ...);
+
 
 static uma_zone_t *uma_zones = NULL;
 
@@ -453,7 +453,6 @@ static uma_slab_t *uma_slab_alloc(uma_zone_t *zone) {
         }
 
         if (!page) {
-            extern void kprint(const char*);
             kprint("uma_slab_alloc: pmm_alloc failed for off-page slab!\n");
             return NULL;
         }
@@ -475,7 +474,6 @@ static uma_slab_t *uma_slab_alloc(uma_zone_t *zone) {
         /* Allocate raw page from PMM */
         page = pmm_alloc_block();
         if (!page) {
-            extern void kprint(const char*);
             kprint("uma_slab_alloc: pmm_alloc_block failed!\n");
             return NULL;
         }
@@ -488,7 +486,6 @@ static uma_slab_t *uma_slab_alloc(uma_zone_t *zone) {
             slab->us_data = page;
         } else {
             /* This should not be reached if UMA_ZONE_OFFPAGE logic in uma_zcreate is correct */
-            extern void kprint(const char*);
             kprint("uma_slab_alloc: slab too large for on-page header but OFF_PAGE not set!\n");
             pmm_free_block(page);
             return NULL;
@@ -641,7 +638,6 @@ static uma_slab_t *uma_find_slab(uma_zone_t *zone, void *item) {
     for (uma_slab_t *s = uma_page_hash[bucket]; s; s = s->us_hnext) {
         if ((uintptr_t)s->us_data == page_addr) {
             if (s->us_zone != zone) {
-                extern void kprint(const char*); // Temporary debug
                 kprint("uma_find_slab: slab zone mismatch!\n");
                 return NULL;
             }
@@ -797,7 +793,6 @@ static inline int uma_curcpu(void) {
  */
 void *uma_zalloc(uma_zone_t *zone, int flags) {
     if (!zone) {
-        extern void kprint(const char*);
         kprint("uma_zalloc: zone is NULL!\n");
         return NULL;
     }
@@ -867,7 +862,6 @@ void *uma_zalloc(uma_zone_t *zone, int flags) {
     /* Slow path: allocate from slab */
     item = uma_zalloc_slab(zone, flags);
     if (!item) {
-        extern void kprint(const char*);
         kprint("uma_zalloc: slab alloc failed for ");
         kprint(zone->uz_name);
         kprint("\n");

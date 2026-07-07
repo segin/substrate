@@ -3,12 +3,20 @@
 #include <sys/copy.h>
 #include <sys/fcntl.h>
 #include <sys/file.h>
+#include <sys/futex.h>
 #include <sys/lock.h>
+#include <sys/mqueue.h>
 #include <sys/posix_sem.h>
 #include <sys/random.h>
+#include <sys/sem.h>
 #include <sys/session.h>
+#include <sys/shm.h>
+#include <sys/signal.h>
+#include <sys/tty.h>
+#include <sys/vt.h>
 #include <kern/console.h>
 #include <kern/file.h>
+#include <kern/main.h>
 #include <kern/sched.h>
 #include <kern/sleepq.h>
 #include <sys/preempt.h>
@@ -104,7 +112,6 @@ mutex_t proctree_lock;
 
 static void proc_idle_wait(void) {
 #ifdef HOST_TEST
-    extern void host_wait_for_interrupt(void);
     host_wait_for_interrupt();
 #else
     wait_for_interrupt();
@@ -546,7 +553,6 @@ static int proc_fork_common(process_t *parent, void *stack, int is_vfork) {
     mutex_unlock(&proctree_lock);
     
     // Copy Signal Actions (POSIX: inherited on fork)
-    extern void *memcpy(void*, const void*, size_t);
     memcpy(child_proc->sig_actions, parent->sig_actions, sizeof(parent->sig_actions));
     child_proc->sig_catch = parent->sig_catch;
     child_proc->sig_ignore = parent->sig_ignore;
@@ -1413,7 +1419,6 @@ static void proc_release_zombie_resources(process_t *proc) {
     }
 
     if (proc->p_pgrp) {
-        extern void pgrp_remove_proc(struct process *proc);
         pgrp_remove_proc(proc);
     }
 
@@ -1502,7 +1507,6 @@ void proc_exit(int code) {
 
     /* Reverse this process's SEM_UNDO adjustments before it disappears. */
     {
-        extern void sem_proc_cleanup(int pid);
         sem_proc_cleanup(current_process->pid);
     }
 
@@ -1511,7 +1515,6 @@ void proc_exit(int code) {
      * marked IPC_RMID).  Runs while vm_map is still live so vm_map_remove can
      * tear down the mappings. */
     {
-        extern void shm_proc_cleanup(int pid);
         shm_proc_cleanup(current_process->pid);
     }
 
@@ -1522,7 +1525,6 @@ void proc_exit(int code) {
     /* Close any POSIX message-queue descriptors this process still holds and
      * drop any mq_notify registration it owned. */
     {
-        extern void mq_proc_cleanup(int pid);
         mq_proc_cleanup(current_process->pid);
     }
 
@@ -1531,7 +1533,6 @@ void proc_exit(int code) {
      * the framebuffer wedged in graphics mode and the keyboard in
      * K_RAW even though all sibling VTs are alive. */
     {
-        extern void vt_release_graphics_on_exit(void *);
         vt_release_graphics_on_exit((void *)current_process);
     }
 
@@ -1635,7 +1636,6 @@ void proc_exit(int code) {
      * Counters are accumulated across the whole boot (per personality),
      * so for clean per-process windows pass reset=1 here. */
     if (cmdline_debug_enabled("syscall_stats")) {
-        extern void syscall_stats_dump(int reset);
         kprintf("=== syscall_stats[pid=%d exit=%d] ===\n",
                 current_process->pid, code);
         syscall_stats_dump(1);
@@ -1652,9 +1652,6 @@ void proc_exit(int code) {
     }
     
     // 1b. Thread Cleanup (Robust Futexes & Pending Signals)
-    extern void futex_thread_exit(thread_t *t);
-    extern int mutex_release_owned_by_thread(thread_t *owner);
-    extern void kprint(const char *msg);
     FOREACH_THREAD(thread) {
         if (thread->proc != current_process) continue;
 
@@ -1677,14 +1674,11 @@ void proc_exit(int code) {
         }
     }
 
-    extern void acct_process(int code);
     acct_process(code);
     
     // 2. Resource Release
     fd_close_all(current_process);
     
-    extern void close_fs(fs_node_t *node);
-    extern fs_node_t *fs_root;
 
     if (current_process->cwd_node) {
         close_fs(current_process->cwd_node);
@@ -1731,7 +1725,6 @@ void proc_exit(int code) {
 
     // 9. Controlling Terminal Cleanup
     if (current_process->tty) {
-        extern void tty_hangup(struct tty *tty);
         
         // Check if session leader
         int is_session_leader = 0;
@@ -1750,7 +1743,6 @@ void proc_exit(int code) {
     }
     
     // 5. Calculate final rusage (user + system time)
-    extern void rusage_finalize(process_t *p);
     rusage_finalize(current_process);
     
     /*
@@ -1817,7 +1809,6 @@ void proc_exit(int code) {
 
         if (nocldwait) {
              // Notify parent as required
-             extern void psignal(process_t *p, int sig);
              psignal(current_process->p_parent, SIGCHLD);
 
              current_process->p_flag |= P_AUTOREAP;
@@ -1829,7 +1820,6 @@ void proc_exit(int code) {
              proc_remove_child(current_process->p_parent, current_process);
              current_process->p_parent = NULL;
         } else {
-             extern void psignal(process_t *p, int sig);
              psignal(current_process->p_parent, SIGCHLD);
              // Wake up waiters now that everything they need to observe
              // (SZOMB + all threads ZOMBIE) is in place.

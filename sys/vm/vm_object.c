@@ -3,9 +3,7 @@
 #include <vm/vm_pager.h>
 #include <sys/lock.h>
 #include <kern/panic.h>
-#include <stddef.h>
-
-extern int kprintf(const char *fmt, ...);
+#include <kern/console.h>
 
 // Static pool for bootstrap objects (until kmalloc is ready)
 #define MAX_BOOTSTRAP_OBJECTS 32

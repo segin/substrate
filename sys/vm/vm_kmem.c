@@ -8,6 +8,7 @@
 #include <vm/vm_kmem.h>
 #include <vm/uma.h>
 #include <arch/i386/pmm.h>
+#include <kern/console.h>
 #include <sys/lock.h>
 #include <stdint.h>
 #include <string.h>
@@ -121,7 +122,6 @@ void *kmalloc(size_t size) {
         }
         spinlock_release_irq(&kmem_stats_lock, _kf);
         if (!result) {
-            extern void kprint(const char*);
             kprint("kmalloc: uma_zalloc failed for zone ");
             kprint(kmem_zone_names[idx]);
             kprint("\n");
@@ -270,7 +270,6 @@ void *krealloc(void *ptr, size_t size) {
         /* Pointer was not produced by kmalloc/kzalloc — original allocation
          * is leaked, and the caller will treat the NULL return as ENOMEM
          * rather than a misuse.  Make the bug loud. */
-        extern void kprint(const char *);
         kprint("krealloc: unknown pointer (neither UMA zone nor large alloc) — leak!\n");
         return NULL;
     }

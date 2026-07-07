@@ -7,7 +7,7 @@
 #include <kern/console.h>
 #include <kern/panic.h>
 
-extern int kprintf(const char *fmt, ...);
+
 
 // Generic PMM Data Structures
 #define PMM_MAX_ORDER 11

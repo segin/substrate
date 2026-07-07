@@ -6,9 +6,8 @@
 #include <arch/i386/pmm.h>
 #include <arch/i386/cpu.h>
 #include <kern/panic.h>
-#include <stddef.h>
+#include <kern/console.h>
 
-extern int kprintf(const char *fmt, ...);
 
 /* Tripwire: a vm_object the fault path is about to walk must be live.
  * A freed object kfree'd back to its kmem zone reads back as poison;

@@ -1080,7 +1080,6 @@ int tcp_close(tcp_pcb_t *p) {
      * the kernel down.  (The corruptor itself is a separate bug —
      * tracked via tests/lib/c/test_tcp.c, which reproduces it.) */
     if ((uintptr_t)p < 0xC0000000u) {
-        extern int kprintf(const char *, ...);
         kprintf("tcp_close: refusing bogus pcb %p — socket ->tcp corrupted\n", p);
         return 0;
     }

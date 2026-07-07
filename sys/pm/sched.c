@@ -4,6 +4,8 @@
 #include <sys/errno.h>
 #include <sys/futex.h>
 #include <pm/pm.h>
+#include <arch/i386/pmm.h>
+#include <arch/i386/pmap.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
@@ -177,9 +179,6 @@ static int sched_alloc_tid_locked(process_t *proc) {
 }
 
 static void sched_release_thread_storage(thread_t *t) {
-    extern void kfree(void *ptr, size_t size);
-    extern void pmm_free_block(void *p);
-    extern void pmm_free_contiguous(void *p, size_t count);
 
     if (!t || !t->kstack_owned || t->kstack_base == 0) {
         return;
@@ -336,7 +335,6 @@ static void sched_context_switch(thread_t *prev, thread_t *next) {
 
     // Activate new process's address space if switching processes
     if (prev && prev->proc != next->proc && next->proc && next->proc->pmap) {
-        extern void pmap_activate(void *pmap);
         pmap_activate(next->proc->pmap);
     }
 
@@ -622,7 +620,6 @@ void sched_tick(void) {
     uint64_t now = get_ticks();
 
     // Perform periodic SMP load balancing
-    extern void sched_periodic_balance(void);
     sched_periodic_balance();
 
     FOREACH_THREAD(thread) {

@@ -6,8 +6,7 @@
 
 #include <vm/vm_kmem.h>
 #include <kern/panic.h>
-
-extern int kprintf(const char *fmt, ...);
+#include <kern/console.h>
 
 /*
  * Release the strict-commit reservation a map entry holds over the

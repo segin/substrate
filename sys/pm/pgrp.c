@@ -10,6 +10,7 @@
 #include <sys/lock.h>
 #include <sys/copy.h>
 #include <sys/errno.h>
+#include <sys/signal.h>
 #include <pm/pm.h>
 #include <stddef.h>
 #include <string.h>
@@ -410,7 +411,6 @@ void pgrp_signal(struct pgrp *pgrp, int sig) {
     if (!pgrp) return;
     
     /* psignal is defined in kern/signal.c */
-    extern void psignal(process_t *proc, int sig);
     
     struct process *p = pgrp->pg_members;
     while (p) {

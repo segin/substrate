@@ -144,5 +144,6 @@ void sched_update_loadavg(void);
 void sched_get_loadavg(unsigned long *loads);
 uint32_t sched_count_runnable(void);
 uint32_t sched_count_threads(void);
+void sched_periodic_balance(void);
 
 #endif

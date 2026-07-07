@@ -196,11 +196,9 @@ int kern_wait4(pid_t pid, int *status, int options, struct rusage *rusage) {
 
                 // Unlink from Parent's List
                 // Unlink from Parent's List
-                extern void proc_remove_child(process_t *parent, process_t *child);
                 proc_remove_child(cur, target);
                 
                 // Clear process group membership
-                extern void pgrp_remove_proc(struct process *proc);
                 pgrp_remove_proc(target);
 
                 if (target->vm_map) {

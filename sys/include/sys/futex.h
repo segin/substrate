@@ -133,4 +133,7 @@ int futex_unlock_pi(int *uaddr, int private);
 /* Internal: Wake thread after exit */
 void futex_wake_exited_thread(int *uaddr);
 
+/* Called by thread exit path to release any futex ownership */
+void futex_thread_exit(thread_t *t);
+
 #endif /* _SYS_FUTEX_H */
