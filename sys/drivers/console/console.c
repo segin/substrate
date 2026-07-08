@@ -1,20 +1,21 @@
-#include <kern/console.h>
-#include <sys/proc.h>
-#include <sys/tty.h>
-#include <sys/file.h>
-#include <sys/major.h>
-#include <vfs/vfs.h>
-#include <kern/version.h>
-#include <sys/session.h>
-#include <drivers/console/uart/uart.h>
-#include <sys/vt.h>
-#include <string.h>
-#include <vm/vm_kmem.h>
-#include <stdio.h>
 #include <stdarg.h>
+#include <stdio.h>
+#include <string.h>
+
+#include <sys/file.h>
 #include <sys/lock.h>
+#include <sys/major.h>
+#include <sys/proc.h>
+#include <sys/session.h>
+#include <sys/tty.h>
+#include <sys/vt.h>
+#include <vm/vm_kmem.h>
+#include <vfs/vfs.h>
+#include <kern/console.h>
 #include <kern/sched.h>
-#include <intr.h>
+#include <kern/version.h>
+#include <arch/i386/intr.h>
+#include <drivers/console/uart/uart.h>
 
 // Globals
 static console_backend_t *backends = NULL;
@@ -262,7 +263,7 @@ int console_revoke(void) {
 }
 
 void console_register_devfs(void) {
-    extern void devfs_register_device(fs_node_t *node);
+
     devfs_register_device(&console_node);
 }
 
