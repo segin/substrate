@@ -318,6 +318,10 @@ static void *shmfs_node_mmap(fs_node_t *node, void *addr, size_t length,
         mutex_unlock(&shmfs_lock);
         return (void *)-1;
     }
+    /* The object's real data length BEFORE this mmap's window extension below.
+     * A reference to a page that lies entirely past it must SIGBUS per POSIX
+     * (mmap/11-3), even though the window's frames are backed here. */
+    off_t orig_len = node->length;
     /* Extend logical length so subsequent read/write past the pre-mmap
      * length still sees the mapped region as live. */
     if ((uint64_t)end > (uint64_t)node->length) node->length = (off_t)end;
@@ -358,6 +362,13 @@ static void *shmfs_node_mmap(fs_node_t *node, void *addr, size_t length,
         vm_object_deallocate(obj);
         goto fail;
     }
+    /* Bound the mapping to the object's real extent: a fault on a page wholly
+     * past orig_len (from this mapping's offset) SIGBUSes instead of mapping an
+     * out-of-object frame (POSIX mmap-past-end, mmap/11-3).  0 == no limit. */
+    vm_pager_device_set_valid_pages(obj->pager,
+        (uint64_t)orig_len > (uint64_t)offset
+            ? (((uint64_t)orig_len - (uint64_t)offset + 4095) / 4096)
+            : 0);
     /* Shared anonymous RAM (not strict MMIO registers): map it
      * write-combining so userland stores coalesce into bursts instead
      * of one serialized uncached transaction each.  Falls back to

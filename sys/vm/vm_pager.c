@@ -32,6 +32,10 @@ typedef struct vm_device_pager {
     vm_pager_t base;
     uintptr_t phys_base;
     size_t size;
+    uint64_t valid_pages;  /* in-object pages; a fault at pindex >= this SIGBUSes
+                            * (POSIX mmap-past-object-end).  (uint64_t)-1 == no
+                            * limit (default: MMIO aperture / framebuffer / SysV
+                            * shm).  A real limit of 0 means "all SIGBUS". */
     uint8_t prot;
     uint8_t cache_mode;   /* VM_PAGER_CACHE_UC (default) or _WC */
     void (*dtor)(void *arg);  /* last-unmap callback (shmfs frame release) */
@@ -123,6 +127,7 @@ static struct vm_pager *device_alloc(void *handle, size_t size, uint8_t prot, ui
     pager->base.priv = NULL;
     pager->phys_base = (uintptr_t)handle + (uintptr_t)offset;
     pager->size = size;
+    pager->valid_pages = (uint64_t)-1;   /* unlimited unless a backer sets it */
     pager->prot = prot;
     pager->cache_mode = VM_PAGER_CACHE_UC;   /* strict MMIO by default */
     pager->dtor = NULL;
@@ -196,6 +201,23 @@ uint8_t vm_pager_device_cache_mode(vm_pager_t *pager) {
         return VM_PAGER_CACHE_UC;
     }
     return ((vm_device_pager_t *)pager)->cache_mode;
+}
+
+/* Number of valid (in-object) pages; a fault at pindex >= this must SIGBUS.
+ * Set by shmfs mmap so a window mapped larger than the object faults past the
+ * object's end per POSIX (mmap/11-3).  0 means no limit (true MMIO aperture). */
+void vm_pager_device_set_valid_pages(vm_pager_t *pager, uint64_t npages) {
+    if (!pager || pager->ops != &device_pager_ops) {
+        return;
+    }
+    ((vm_device_pager_t *)pager)->valid_pages = npages;
+}
+
+uint64_t vm_pager_device_valid_pages(vm_pager_t *pager) {
+    if (!pager || pager->ops != &device_pager_ops) {
+        return (uint64_t)-1;   /* not a device pager: no limit */
+    }
+    return ((vm_device_pager_t *)pager)->valid_pages;
 }
 
 // VNode Pager: File-backed memory mapping

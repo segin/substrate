@@ -142,6 +142,15 @@ int vm_fault(vm_map_t *map, uintptr_t va, uint8_t prot) {
         if ((prot & VM_PROT_WRITE) && (entry->max_protection & VM_PROT_WRITE)) {
             enter_prot |= VM_PROT_WRITE;
         }
+        /* POSIX: a reference to a page that lies entirely beyond the object's
+         * end -- a window mmap'd larger than the shm object -- delivers SIGBUS,
+         * not a silent map of out-of-object frames (mmap/11-3).  valid_pages==0
+         * means no limit (a true MMIO aperture / framebuffer). */
+        uint64_t vpages = vm_pager_device_valid_pages(first_obj->pager);
+        if (pindex >= vpages) {   /* vpages==(uint64_t)-1 => unlimited */
+            result = VM_FAULT_SIGBUS;
+            goto out;
+        }
         if (!vm_pager_device_phys(first_obj->pager, pindex, &device_phys)) {
             goto out;
         }

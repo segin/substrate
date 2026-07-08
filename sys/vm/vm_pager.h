@@ -47,6 +47,10 @@ bool vm_pager_device_phys(vm_pager_t *pager, uint64_t pindex, uintptr_t *phys_ou
 void    vm_pager_set_cache_mode(vm_pager_t *pager, uint8_t mode);
 uint8_t vm_pager_device_cache_mode(vm_pager_t *pager);
 void    vm_pager_device_set_phys_base(vm_pager_t *pager, uintptr_t phys_base);
+/* Valid (in-object) page count: a device fault at pindex >= this SIGBUSes
+ * (POSIX mmap-past-object-end).  0 == unlimited (MMIO aperture). */
+void     vm_pager_device_set_valid_pages(vm_pager_t *pager, uint64_t npages);
+uint64_t vm_pager_device_valid_pages(vm_pager_t *pager);
 
 /* Register a destructor on a device pager, invoked once from
  * vm_pager_deallocate() when the owning vm_object's ref_count hits zero
