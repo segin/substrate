@@ -40,6 +40,11 @@ typedef int (*mkdir_type_t)(struct fs_node*, const char *name, uint16_t permissi
 typedef int (*mknod_type_t)(struct fs_node*, const char *name, uint16_t mode, uint32_t dev);
 typedef int (*truncate_type_t)(struct fs_node*, off_t);
 typedef int (*unmount_type_t)(struct fs_node*);
+/* Update a live mount's flags in place (MNT_UPDATE / -o remount): apply the
+ * new MNT_* flags to the mounted filesystem — notably flipping read-only vs
+ * read-write.  Returns 0 on success or a negative errno (e.g. -EROFS if the
+ * filesystem cannot honour read-write). */
+typedef int (*remount_type_t)(struct fs_node*, uint32_t flags);
 typedef int (*rename_type_t)(struct fs_node *old_parent, const char *old_name, struct fs_node *new_parent, const char *new_name);
 typedef int (*statfs_type_t)(struct fs_node *node, struct statfs *buf);
 typedef int (*chmod_type_t)(struct fs_node *node, uint32_t mode);
@@ -113,6 +118,7 @@ typedef struct fs_node {
     mknod_type_t mknod;
     truncate_type_t truncate;
     unmount_type_t unmount;
+    remount_type_t remount;
     rename_type_t rename;
     statfs_type_t statfs;
     chmod_type_t chmod;

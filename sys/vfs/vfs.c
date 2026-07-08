@@ -204,6 +204,37 @@ int vfs_resolve_label(const char *label, char *devpath, size_t len) {
     return -ENODEV;
 }
 
+/*
+ * Remount an existing filesystem in place (MNT_UPDATE / `mount -o remount`):
+ * find the topmost mount at `path`, ask the filesystem to honour the new flags
+ * (chiefly read-only <-> read-write), then record them on the mount.
+ */
+static int vfs_remount(const char *path, uint32_t flags) {
+    struct mount *mp = NULL, *m;
+    TAILQ_FOREACH(m, &mountlist, mnt_list) {
+        if (strcmp(m->mnt_stat_path, path) == 0)
+            mp = m;                 /* keep the last (topmost) match */
+    }
+    if (!mp)
+        return -EINVAL;             /* nothing mounted at this path */
+
+    uint32_t newflags = flags & ~MNT_UPDATE;
+    fs_node_t *root = mp->mnt_node_root;
+
+    /* Let the filesystem apply the change first; if it refuses (e.g. -EROFS
+     * because it cannot safely write), leave the mount untouched. */
+    if (root && root->remount) {
+        int r = root->remount(root, newflags);
+        if (r != 0)
+            return r;
+    }
+
+    mp->mnt_flag = newflags;
+    if (newflags & MNT_RDONLY) mp->mnt_stat.f_flags |= MNT_RDONLY;
+    else                       mp->mnt_stat.f_flags &= ~MNT_RDONLY;
+    return 0;
+}
+
 int vfs_mount_legacy(const char *device, const char *path, const char *type, uint32_t flags, void *data) {
     if (!type || !path) {
         return -EINVAL;
@@ -216,6 +247,11 @@ int vfs_mount_legacy(const char *device, const char *path, const char *type, uin
     if ((flags & MNT_SYNCHRONOUS) && (flags & MNT_ASYNC)) {
         return -EINVAL;
     }
+
+    /* MNT_UPDATE: don't create a new mount — re-apply flags to the existing
+     * one (read-only <-> read-write conversion). */
+    if (flags & MNT_UPDATE)
+        return vfs_remount(path, flags);
 
     /*
      * NOTE: Critical-path overlay protection (preventing user code

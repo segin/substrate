@@ -41,13 +41,15 @@ static unsigned long parse_options(const char *opts) {
     char *save = NULL;
     for (char *tok = strtok_r(buf, ",", &save); tok;
          tok = strtok_r(NULL, ",", &save)) {
-        if      (strcmp(tok, "ro")     == 0) flags |= MNT_RDONLY;
-        else if (strcmp(tok, "rw")     == 0) flags &= ~MNT_RDONLY;
-        else if (strcmp(tok, "nosuid") == 0) flags |= MNT_NOSUID;
-        else if (strcmp(tok, "nodev")  == 0) flags |= MNT_NODEV;
-        else if (strcmp(tok, "noexec") == 0) flags |= MNT_NOEXEC;
-        else if (strcmp(tok, "sync")   == 0) flags |= MNT_SYNCHRONOUS;
-        else if (strcmp(tok, "async")  == 0) flags |= MNT_ASYNC;
+        if      (strcmp(tok, "ro")      == 0) flags |= MNT_RDONLY;
+        else if (strcmp(tok, "rw")      == 0) flags &= ~MNT_RDONLY;
+        else if (strcmp(tok, "remount") == 0) flags |= MNT_UPDATE;
+        else if (strcmp(tok, "nosuid")  == 0) flags |= MNT_NOSUID;
+        else if (strcmp(tok, "nodev")   == 0) flags |= MNT_NODEV;
+        else if (strcmp(tok, "noexec")  == 0) flags |= MNT_NOEXEC;
+        else if (strcmp(tok, "sync")    == 0) flags |= MNT_SYNCHRONOUS;
+        else if (strcmp(tok, "async")   == 0) flags |= MNT_ASYNC;
+        else if (strcmp(tok, "defaults")== 0) { /* rw,suid,dev,exec: no-op */ }
         /* unknown options pass through to the fs in `data`. */
     }
     return flags;
@@ -70,11 +72,23 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    const char *source, *target;
-    if (type && argc - optind == 2) {
+    unsigned long flags = parse_options(opts);
+    if (readonly) flags |= MNT_RDONLY;
+
+    const char *source = NULL, *target = NULL;
+    int nargs = argc - optind;
+    if (flags & MNT_UPDATE) {
+        /* Remount in place: mount -o remount[,rw|ro] <mountpoint>.
+         * device/type are irrelevant (the mount already exists) but the
+         * mount(2) path wants a non-NULL fstype, so supply a placeholder. */
+        if (nargs < 1) usage();
+        target = argv[optind];
+        if (nargs >= 2) source = argv[optind + 1];
+        if (!type) type = "none";
+    } else if (type && nargs == 2) {
         source = argv[optind];
         target = argv[optind + 1];
-    } else if (!type && argc - optind == 3) {
+    } else if (!type && nargs == 3) {
         /* Legacy positional form: source target type */
         source = argv[optind];
         target = argv[optind + 1];
@@ -83,9 +97,6 @@ int main(int argc, char *argv[]) {
         usage();
         return 1; /* unreachable */
     }
-
-    unsigned long flags = parse_options(opts);
-    if (readonly) flags |= MNT_RDONLY;
 
     if (mount(source, target, type, flags, (void *)opts) < 0) {
         fprintf(stderr, "%s: %s on %s (%s): %s\n",

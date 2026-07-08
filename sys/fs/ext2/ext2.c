@@ -106,6 +106,7 @@ static void ext2_node_close(fs_node_t *node) {
 // Forward declarations
 fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data);
 int ext2_unmount(fs_node_t *node);
+int ext2_remount(fs_node_t *node, uint32_t flags);
 size_t ext2_file_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer);
 size_t ext2_file_write(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer);
 struct dirent *ext2_readdir(fs_node_t *node, uint64_t index);
@@ -1235,6 +1236,7 @@ static fs_node_t *ext2_node_build_from_inode(fs_node_t *node, ext2_node_t *ctx,
         node->rename = ext2_rename;
         node->statfs = ext2_statfs;
         node->unmount = ext2_unmount;
+        node->remount = ext2_remount;
         node->symlink = ext2_symlink;
     } else if (type == EXT2_S_IFREG) {
         node->flags = FS_FILE;
@@ -2075,6 +2077,7 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
             kprintf("ext2: mount forced read-only — unsupported ROCOMPAT 0x%08x\n",
                     bad_ro);
             fs->readonly = 1;
+            fs->force_readonly = 1;   /* rw remount must be refused */
         }
         /* Informational: log which ext3/ext4 features are present.  */
         if (fs->sb.s_feature_compat & EXT2F_COMPAT_HASJOURNAL) {
@@ -3604,6 +3607,23 @@ int ext2_statfs(fs_node_t *node, struct statfs *buf) {
 
     return 0;
 }
+/* MNT_UPDATE hook: flip the live mount between read-only and read-write.
+ * Refuses a read-write remount if the volume was forced read-only for
+ * unsupported RO_COMPAT features (writing could corrupt it). */
+int ext2_remount(fs_node_t *node, uint32_t flags) {
+    if (!node) return -EINVAL;
+    ext2_node_t *ctx = (ext2_node_t *)(uintptr_t)node->impl;
+    if (!ctx || !ctx->fs) return -EINVAL;
+    ext2_fs_t *fs = ctx->fs;
+
+    int want_ro = !!(flags & MNT_RDONLY);
+    if (!want_ro && fs->force_readonly)
+        return -EROFS;          /* cannot safely write this volume */
+    fs->readonly = want_ro;
+    fs->mnt_flags = flags;
+    return 0;
+}
+
 int ext2_unmount(fs_node_t *node) {
     if (!node) return -EINVAL;
     ext2_node_t *ctx = (ext2_node_t *)(uintptr_t)node->impl;

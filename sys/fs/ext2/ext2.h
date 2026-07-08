@@ -314,6 +314,7 @@ typedef struct {
      * unknown feature, so we refuse.  */
     uint32_t mnt_flags;
     int      readonly;
+    int      force_readonly;   /* ro forced (unsupported RO_COMPAT); no rw remount */
 
     /* metadata_csum seed.  Either crc32c(~0, uuid, 16) (default) or
      * the explicit s_checksum_seed value if EXT2F_INCOMPAT_CSUM_SEED
