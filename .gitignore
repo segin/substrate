@@ -4,6 +4,8 @@
 # `*.d` accidentally caught etc/rc.d/ (the rc service-script tree),
 # leaving rc.d entries untrackable — un-ignore the directory.
 !etc/rc.d/
+# ...and etc/ld.so.conf.d/ (the ld.so search-path drop-ins).
+!etc/ld.so.conf.d/
 *.dll
 *.elf
 *.exe
