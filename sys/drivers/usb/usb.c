@@ -10,6 +10,8 @@
 #include <kern/time.h>
 #include <kern/device.h>
 #include <kern/bus.h>
+#include <kern/sched.h>
+#include <sys/kthread.h>
 #include <vm/vm_kmem.h>
 #include <stdio.h>
 #include <string.h>
@@ -500,6 +502,7 @@ static void usb_match_driver(usb_device_t *dev)
         if (drv->attach) {
             dev->driver_data = NULL;
             if (drv->attach(dev) == 0) {
+                dev->driver = drv;   /* remember for disconnect dispatch */
                 kprintf("usb: device %u:%u bound to driver '%s'\n",
                         dev->hcd->hcd_index, dev->address, drv->name);
                 return;
@@ -715,6 +718,88 @@ void usb_enumerate_bus(usb_hcd_t *hcd)
 
 /*
  * ============================================================
+ * Hot-plug monitor
+ * ============================================================
+ *
+ * A kthread scans every registered HCD's root ports a few times a second and
+ * reconciles the physical connection state against the device table:
+ *   - a port that lost its device (CCS=0 while a root device is tracked there)
+ *     is disconnected: the bound class driver's .detach runs (e.g. usb_msc ->
+ *     scsi_unregister_link -> blkdev_unregister -> force-unmount of any mounted
+ *     filesystem) and the usb_device_t is freed;
+ *   - a port that gained a device (CCS=1 with nothing tracked) is reset and
+ *     enumerated, so devices attached after boot are picked up too.
+ * Downstream hub ports are handled by the hub driver; this covers the root hub,
+ * where qemu's device_del / a physical unplug lands.
+ */
+
+/* The ROOT device (parent == NULL) currently enumerated on hcd:port, or NULL. */
+static usb_device_t *usb_root_device_on_port(usb_hcd_t *hcd, uint8_t port)
+{
+    for (int i = 0; i < USB_MAX_DEVICES; i++) {
+        usb_device_t *d = usb_devices[i];
+        if (d && d->hcd == hcd && d->parent == NULL && d->port == port)
+            return d;
+    }
+    return NULL;
+}
+
+/* Detach a vanished device: dispatch the bound driver's .detach, then free. */
+static void usb_disconnect_device(usb_device_t *dev)
+{
+    if (!dev)
+        return;
+    if (dev->driver && dev->driver->detach)
+        dev->driver->detach(dev);
+    dev->driver = NULL;
+    usb_free_device(dev);
+}
+
+static void usb_hotplug_scan(void)
+{
+    for (usb_hcd_t *hcd = usb_hcd_list; hcd; hcd = hcd->next) {
+        if (!hcd->port_status)
+            continue;
+        for (uint8_t port = 1; port <= hcd->nports; port++) {
+            uint32_t st = hcd->port_status(hcd, port);
+            int connected = (st & USB_PORT_STAT_CONNECTION) != 0;
+            usb_device_t *dev = usb_root_device_on_port(hcd, port);
+
+            if (dev && !connected) {
+                kprintf("usb: device removed from %s port %u\n",
+                        hcd->name, port);
+                usb_disconnect_device(dev);
+            } else if (!dev && connected && hcd->port_reset) {
+                if (hcd->port_reset(hcd, port) != 0)
+                    continue;
+                st = hcd->port_status(hcd, port);
+                if (!(st & USB_PORT_STAT_ENABLE))
+                    continue;
+                uint8_t speed = (st & USB_PORT_STAT_LOW_SPEED)  ? USB_SPEED_LOW  :
+                                (st & USB_PORT_STAT_HIGH_SPEED) ? USB_SPEED_HIGH :
+                                                                  USB_SPEED_FULL;
+                usb_enumerate_device(hcd, port, speed);
+            }
+        }
+    }
+}
+
+static int usb_hotplug_chan;
+
+static void usb_hotplug_monitor(void *arg)
+{
+    (void)arg;
+    uint64_t interval = get_hz() / 4;  /* ~250 ms between scans */
+    if (interval == 0)
+        interval = 1;
+    for (;;) {
+        sched_sleep_until(&usb_hotplug_chan, get_ticks() + interval);
+        usb_hotplug_scan();
+    }
+}
+
+/*
+ * ============================================================
  * USB Subsystem Initialization
  * ============================================================
  */
@@ -734,5 +819,13 @@ void usb_init(void)
     /* Enumerate all registered HCDs */
     for (hcd = usb_hcd_list; hcd; hcd = hcd->next) {
         usb_enumerate_bus(hcd);
+    }
+
+    /* Start the hot-plug monitor so devices attached/removed after boot
+     * (qemu device_add/device_del, a physical (un)plug) are handled. */
+    {
+        thread_t *td;
+        if (kthread_create(usb_hotplug_monitor, NULL, &td, "usb-hotplug") != 0)
+            kprintf("usb: failed to start hot-plug monitor\n");
     }
 }

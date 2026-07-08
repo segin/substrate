@@ -214,6 +214,9 @@ int vfs_mount_legacy(const char *device, const char *path, const char *type, uin
 int vfs_unmount_legacy(const char *path);
 int vfs_unmount_legacy_flags(const char *path, int flags);
 void vfs_unmount_all(void);
+/* Force-unmount every filesystem backed by a removed block device (hot-unplug);
+ * called from blkdev_unregister before the blkdev is torn down. */
+void vfs_force_unmount_dev(struct blkdev *dev);
 fs_node_t *vfs_lookup(fs_node_t *root, const char *path);
 fs_node_t *vfs_lookup_lstat(fs_node_t *root, const char *path);
 

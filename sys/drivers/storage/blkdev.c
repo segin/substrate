@@ -1,5 +1,6 @@
 #include <drivers/storage/blkdev.h>
 #include <vfs/buf.h>
+#include <vfs/vfs.h>
 #include <kern/geom/geom.h>
 #include <kern/console.h>
 #include <sys/errno.h>
@@ -52,6 +53,8 @@ void blkdev_register(blkdev_t *dev) {
         return;
     }
 
+    dev->dead = 0;
+
     // Setup VFS node
     memset(&dev->node, 0, sizeof(fs_node_t));
     strlcpy(dev->node.name, dev->name, sizeof(dev->node.name));
@@ -77,6 +80,17 @@ void blkdev_unregister(blkdev_t *dev) {
     blkdev_t **pp;
 
     if (!dev) return;
+
+    /* Mark dead FIRST so any in-flight/subsequent I/O short-circuits to -EIO
+     * instead of touching a device that is gone (and, for the caller
+     * scsi_dev_detach, a struct about to be memset to zero).  Then force-
+     * unmount any filesystem still mounted on this device so the mount is torn
+     * down before its backing blkdev disappears -- otherwise the mount's next
+     * read/write dereferences a nulled callback and the kernel faults.  This
+     * runs generically for every removable block device (USB mass storage,
+     * ...), not just USB. */
+    dev->dead = 1;
+    vfs_force_unmount_dev(dev);
 
     pp = &blkdev_list;
     while (*pp) {
@@ -115,6 +129,7 @@ void blkdev_unregister(blkdev_t *dev) {
  * error.
  */
 static int blkdev_do_read(blkdev_t *dev, uint64_t sector, uint32_t count, void *buffer) {
+    if (dev->dead) return -EIO;   /* removed/unplugged: no I/O to a gone device */
     uint32_t ss = dev->sector_size;
     uint8_t *out = (uint8_t *)buffer;
     uint32_t i = 0;
@@ -177,6 +192,7 @@ static int blkdev_do_read(blkdev_t *dev, uint64_t sector, uint32_t count, void *
  * the affected cached sectors so no stale data is ever served (BLK-6).
  */
 static int blkdev_do_write(blkdev_t *dev, uint64_t sector, uint32_t count, const void *buffer) {
+    if (dev->dead) return -EIO;   /* removed/unplugged: no I/O to a gone device */
     uint32_t ss = dev->sector_size;
     const uint8_t *in = (const uint8_t *)buffer;
 

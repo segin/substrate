@@ -16,7 +16,9 @@ typedef struct blkdev {
     int (*read)(struct blkdev *dev, uint64_t sector, uint32_t count, void *buffer);
     int (*write)(struct blkdev *dev, uint64_t sector, uint32_t count, const void *buffer);
     int (*ioctl)(struct blkdev *dev, uint32_t request, void *arg);
-    
+
+    int dead;                   // 1 once removed/unplugged: I/O returns -EIO
+
     // VFS integration
     fs_node_t node;             // fs_node for DevFS
     struct blkdev *next;        // Linked list

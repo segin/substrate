@@ -1399,3 +1399,53 @@ void vfs_unmount_all(void) {
         vfs_unmount_legacy_flags(paths[i], MNT_FORCE);
     }
 }
+
+/*
+ * vfs_force_unmount_dev - force-unmount every filesystem backed by a block
+ * device that has just been removed (hot-unplug).  Called from
+ * blkdev_unregister() before the blkdev struct is torn down, so a filesystem
+ * mounted on a vanished device does not later dereference a freed/zeroed
+ * backing blkdev and fault.  The device is already marked dead (I/O returns
+ * -EIO), so the unmount's flush fails fast rather than hanging on gone media.
+ *
+ * A mount is matched to the device by the basename of its f_mntfromname (the
+ * "/dev/storage/<name>" the fs was mounted from) against dev->name.  MNT_FORCE
+ * mutates the mount list, so we re-scan from the top after each unmount, and
+ * bail if a target mount survives an unmount attempt (avoids an infinite loop).
+ */
+void vfs_force_unmount_dev(struct blkdev *dev) {
+    if (!dev || dev->name[0] == '\0') return;
+
+    char last[128];
+    last[0] = '\0';
+
+    for (;;) {
+        struct mount *mp;
+        char path[128];
+        path[0] = '\0';
+
+        TAILQ_FOREACH(mp, &mountlist, mnt_list) {
+            const char *from = mp->mnt_stat.f_mntfromname;
+            const char *base = strrchr(from, '/');
+            base = base ? base + 1 : from;
+            if (base[0] != '\0' && strcmp(base, dev->name) == 0 &&
+                mp->mnt_stat_path[0] == '/') {
+                strlcpy(path, mp->mnt_stat_path, sizeof(path));
+                break;
+            }
+        }
+
+        if (path[0] == '\0')
+            return;                     /* no (more) mounts on this device */
+        if (strcmp(path, last) == 0) {  /* previous force-unmount didn't remove it */
+            kprintf("VFS: could not force-unmount %s on removed device %s\n",
+                    path, dev->name);
+            return;
+        }
+        strlcpy(last, path, sizeof(last));
+
+        kprintf("VFS: block device %s removed -> forced unmount of %s\n",
+                dev->name, path);
+        vfs_unmount_legacy_flags(path, MNT_FORCE);
+    }
+}

@@ -265,6 +265,10 @@ typedef struct usb_device {
     /* Class driver private data */
     void *driver_data;
 
+    /* The class driver bound to this device (set by usb_match_driver on a
+     * successful attach), so a later disconnect can dispatch its .detach. */
+    struct usb_class_driver *driver;
+
     /* State */
     uint8_t  slot;              /* Index in device table */
     uint8_t  configured;        /* Device has been configured */
