@@ -38,6 +38,7 @@
 #define USB_DT_STRING           3
 #define USB_DT_INTERFACE        4
 #define USB_DT_ENDPOINT         5
+#define USB_DT_SS_EP_COMP     0x30  /* SuperSpeed endpoint companion */
 #define USB_DT_HUB             0x29
 
 /* Standard Request Codes */
@@ -223,6 +224,7 @@ typedef struct usb_endpoint {
     uint16_t max_packet;    /* wMaxPacketSize */
     uint8_t  interval;      /* bInterval */
     uint8_t  toggle;        /* Data toggle (0 or 1) */
+    uint8_t  max_streams;   /* SS companion MaxStreams exponent (0 = no streams) */
 } usb_endpoint_t;
 
 /*
@@ -291,6 +293,7 @@ typedef struct usb_transfer {
     /* Setup packet for control transfers */
     struct usb_setup_packet setup;
     uint8_t  is_control;    /* 1 for control transfers */
+    uint16_t stream_id;     /* xHCI bulk stream ID (0 = no stream) */
 } usb_transfer_t;
 
 /*
@@ -403,6 +406,13 @@ int usb_control_transfer(usb_device_t *dev,
 int usb_bulk_transfer(usb_device_t *dev, usb_endpoint_t *ep,
                       void *data, uint32_t length,
                       uint32_t *actual_length);
+
+/* Like usb_bulk_transfer but tags the transfer with an xHCI bulk stream ID
+ * (used by UAS over USB 3.0).  stream_id 0 behaves exactly like a plain bulk
+ * transfer. */
+int usb_bulk_stream_transfer(usb_device_t *dev, usb_endpoint_t *ep,
+                             uint16_t stream_id, void *data, uint32_t length,
+                             uint32_t *actual_length);
 
 int usb_iso_transfer(usb_device_t *dev, usb_endpoint_t *ep,
                      void *data, uint32_t length,

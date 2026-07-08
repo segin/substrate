@@ -112,7 +112,6 @@ retry:
             goto retry;
         }
     }
-    
     return (ret >= 0) ? 0 : -1;
 }
 
@@ -146,8 +145,11 @@ static int scsi_blk_write(blkdev_t *dev, uint64_t sector, uint32_t count, const 
                                 count * dev->sector_size,
                                 SCSI_REQ_WRITE, 30000);
     }
-    
-    return (ret >= 0) ? (int)count : -1;
+
+    /* blkdev_do_write() treats any nonzero return as an error, so report 0 on
+     * success (matching scsi_blk_read) -- returning the sector count made every
+     * successful write look failed, invalidating the cache and looping. */
+    return (ret >= 0) ? 0 : -1;
 }
 
 /*

@@ -145,6 +145,13 @@ struct xhci_ep_ctx {
 #define EP_TYPE_INT_IN       7
 /* EP context field[0] */
 #define XHCI_EP_STATE_MASK   0x7
+/* EP context field[0] stream fields */
+#define XHCI_EP_MAXPSTREAMS_SHIFT 10          /* MaxPStreams (array = 2^(k+1)) */
+#define XHCI_EP_LSA          (1u << 15)       /* Linear Stream Array */
+/* Stream context (16B): qwSctx0 = DCS(bit0) | SCT(bits1-3) | TR_DQ_PTR */
+#define XHCI_SCTX_SCT_PRIM_TR (1u << 1)       /* SCT = primary transfer ring */
+/* Doorbell: DB target = DCI[7:0] | (stream ID << 16) */
+#define XHCI_DB_STREAM_SHIFT 16
 
 /* Input control context: drop flags [0], add flags [1] */
 struct xhci_input_ctrl_ctx {

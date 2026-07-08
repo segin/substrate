@@ -457,13 +457,42 @@ static void usb_parse_config(usb_device_t *dev)
                     ep->max_packet = ep_desc->wMaxPacketSize;
                     ep->interval = ep_desc->bInterval;
                     ep->toggle = 0;
+                    ep->max_streams = 0;
                     dev->num_endpoints++;
                 }
             }
         }
+        /* SuperSpeed endpoint companion follows its endpoint: for a bulk EP,
+         * bmAttributes bits 4:0 are the MaxStreams exponent (0 = no streams). */
+        if (bType == USB_DT_SS_EP_COMP && bLength >= 6 && dev->num_endpoints > 0) {
+            usb_endpoint_t *ep = &dev->endpoints[dev->num_endpoints - 1];
+            if (ep->type == USB_EP_TYPE_BULK)
+                ep->max_streams = ptr[3] & 0x1F;   /* bmAttributes.MaxStreams */
+        }
 
         ptr += bLength;
     }
+}
+
+int usb_bulk_stream_transfer(usb_device_t *dev, usb_endpoint_t *ep,
+                             uint16_t stream_id, void *data, uint32_t length,
+                             uint32_t *actual_length)
+{
+    usb_transfer_t xfer;
+    int ret;
+    if (!dev || !dev->hcd || !dev->hcd->submit || !ep)
+        return USB_XFER_ERROR;
+    memset(&xfer, 0, sizeof(xfer));
+    xfer.dev = dev;
+    xfer.ep = ep;
+    xfer.is_control = 0;
+    xfer.data = data;
+    xfer.length = length;
+    xfer.stream_id = stream_id;
+    ret = dev->hcd->submit(dev->hcd, &xfer);
+    if (actual_length)
+        *actual_length = xfer.actual_length;
+    return ret;
 }
 
 /*

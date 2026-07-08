@@ -32,6 +32,10 @@
 #define XHCI_MAX_SLOTS     16
 #define XHCI_BOUNCE_SIZE   (64 * 1024)
 #define XHCI_CMD_TIMEOUT_MS 1000
+/* Bulk streams (USB 3.0 / UAS): MaxPStreams=1 -> 4 stream contexts, IDs 0-3
+ * (0 reserved).  A stream-less serial UAS uses stream ID 1. */
+#define XHCI_MAXP_STREAMS  1
+#define XHCI_NUM_STREAMS   4
 
 struct xhci_ring {
     struct xhci_trb *trb;
@@ -45,7 +49,11 @@ struct xhci_slot {
     uint8_t  port;                          /* root port (1-based) */
     uint8_t *dev_ctx;   dma_addr_t dev_ctx_dma;
     uint8_t *in_ctx;    dma_addr_t in_ctx_dma;
-    struct xhci_ring ep_ring[32];           /* by DCI (1 = EP0) */
+    struct xhci_ring ep_ring[32];           /* by DCI (1 = EP0); non-streamed */
+    /* Bulk-stream endpoints (max_streams>0): a stream context array + one
+     * transfer ring per stream ID, both keyed by DCI. */
+    uint8_t *stream_ctx[32];  dma_addr_t stream_ctx_dma[32];
+    struct xhci_ring stream_ring[32][XHCI_NUM_STREAMS];
 };
 
 typedef struct xhci_hc {
@@ -318,11 +326,22 @@ static int xhci_ensure_ep(xhci_hc_t *hc, uint8_t slot, usb_transfer_t *xfer)
     int in = (epaddr & 0x80) != 0;
     int dci = epnum * 2 + (in ? 1 : 0);
     struct xhci_slot *s = &hc->slots[slot];
-    if (s->ep_ring[dci].trb)
+    int streamed = (xfer->ep->max_streams > 0);
+
+    if (streamed ? (s->stream_ctx[dci] != NULL) : (s->ep_ring[dci].trb != NULL))
         return dci;   /* already configured */
 
-    if (xhci_ring_alloc(&s->ep_ring[dci]) != 0)
+    if (streamed) {
+        /* Stream Context Array: XHCI_NUM_STREAMS entries of 16 bytes.  Per-stream
+         * transfer rings are allocated lazily in xhci_bulk on first use. */
+        s->stream_ctx[dci] = dma_alloc_coherent(XHCI_NUM_STREAMS * 16,
+                                                &s->stream_ctx_dma[dci]);
+        if (!s->stream_ctx[dci])
+            return -1;
+        memset(s->stream_ctx[dci], 0, XHCI_NUM_STREAMS * 16);
+    } else if (xhci_ring_alloc(&s->ep_ring[dci]) != 0) {
         return -1;
+    }
 
     /* Input context: add flags = slot (A0, must re-supply) + this EP. */
     memset(s->in_ctx, 0, 33 * hc->ctx_size);
@@ -342,13 +361,22 @@ static int xhci_ensure_ep(xhci_hc_t *hc, uint8_t slot, usb_transfer_t *xfer)
     uint32_t *epc = (uint32_t *)in_ep_of(hc, s->in_ctx, dci);
     epc[1] = (type << XHCI_EP_TYPE_SHIFT) | (mps << XHCI_EP_MPS_SHIFT) |
              (3u << XHCI_EP_CERR_SHIFT);
-    epc[2] = (uint32_t)s->ep_ring[dci].dma | s->ep_ring[dci].cycle;
-    epc[3] = (uint32_t)((uint64_t)s->ep_ring[dci].dma >> 32);
+    if (streamed) {
+        /* Streamed EP: MaxPStreams + Linear Stream Array; the TR-dequeue field
+         * holds the Stream Context Array base (no DCS -- that is per-stream). */
+        epc[0] = (XHCI_MAXP_STREAMS << XHCI_EP_MAXPSTREAMS_SHIFT) | XHCI_EP_LSA;
+        epc[2] = (uint32_t)s->stream_ctx_dma[dci];
+        epc[3] = (uint32_t)((uint64_t)s->stream_ctx_dma[dci] >> 32);
+    } else {
+        epc[2] = (uint32_t)s->ep_ring[dci].dma | s->ep_ring[dci].cycle;
+        epc[3] = (uint32_t)((uint64_t)s->ep_ring[dci].dma >> 32);
+    }
 
     uint32_t ctrl = XHCI_TRB_TYPE(TRB_CONFIGURE_EP) | ((uint32_t)slot << 24);
     int cc = xhci_run_command(hc, s->in_ctx_dma, ctrl, NULL);
     if (cc != XHCI_CC_SUCCESS) {
-        kprintf("xhci: configure-ep slot %u dci %d failed cc=%d\n", slot, dci, cc);
+        kprintf("xhci: configure-ep slot %u dci %d (streamed=%d) failed cc=%d\n",
+                slot, dci, streamed, cc);
         return -1;
     }
     return dci;
@@ -423,8 +451,29 @@ static int xhci_bulk(xhci_hc_t *hc, usb_transfer_t *xfer)
     if (slot == 0) return USB_XFER_ERROR;
     int dci = xhci_ensure_ep(hc, slot, xfer);
     if (dci < 0) return USB_XFER_ERROR;
+    struct xhci_slot *s = &hc->slots[slot];
 
-    struct xhci_ring *ring = &hc->slots[slot].ep_ring[dci];
+    struct xhci_ring *ring;
+    uint32_t db_target;
+    if (xfer->ep->max_streams > 0) {
+        /* Streamed endpoint: pick the stream's transfer ring (allocating it and
+         * its stream-context-array entry on first use) and ring the doorbell
+         * with the stream ID. */
+        uint16_t sid = xfer->stream_id ? xfer->stream_id : 1;
+        if (sid >= XHCI_NUM_STREAMS) sid = 1;
+        ring = &s->stream_ring[dci][sid];
+        if (!ring->trb) {
+            if (xhci_ring_alloc(ring) != 0) return USB_XFER_ERROR;
+            uint8_t *sc = s->stream_ctx[dci] + (uint32_t)sid * 16;
+            *(volatile uint64_t *)sc =
+                (uint64_t)ring->dma | XHCI_SCTX_SCT_PRIM_TR | ring->cycle;
+        }
+        db_target = (uint32_t)dci | ((uint32_t)sid << XHCI_DB_STREAM_SHIFT);
+    } else {
+        ring = &s->ep_ring[dci];
+        db_target = (uint32_t)dci;
+    }
+
     uint32_t len = xfer->length;
     int in = (xfer->ep->address & 0x80) != 0;
     if (len > XHCI_BOUNCE_SIZE) return USB_XFER_ERROR;
@@ -432,7 +481,7 @@ static int xhci_bulk(xhci_hc_t *hc, usb_transfer_t *xfer)
 
     xhci_ring_push(ring, len ? hc->bounce_dma : 0, len,
                    XHCI_TRB_TYPE(TRB_NORMAL) | XHCI_TRB_IOC | XHCI_TRB_ISP);
-    xhci_doorbell(hc, slot, (uint32_t)dci);
+    xhci_doorbell(hc, slot, db_target);
 
     uint32_t evst;
     int cc = xhci_wait_event(hc, NULL, NULL, &evst);

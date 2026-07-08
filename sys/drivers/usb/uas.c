@@ -52,6 +52,7 @@ typedef struct uas_dev {
     usb_endpoint_t  *ep_data_in;
     usb_endpoint_t  *ep_data_out;
     uint16_t         tag;
+    uint16_t         stream_id;   /* xHCI: 1 = use bulk streams; 0 = stream-less */
     mutex_t          lock;
     uint8_t         *cmd_iu;      /* UAS_CMD_IU_SIZE */
     uint8_t         *status_iu;   /* UAS_STATUS_IU_SIZE */
@@ -107,14 +108,23 @@ static int uas_find_pipes(usb_device_t *dev, uas_dev_t *u)
  */
 static int uas_transfer(uas_dev_t *u, uint8_t lun, const uint8_t *cdb,
                         uint8_t cdb_len, void *data, uint32_t data_len,
-                        int is_read, uint32_t *residue)
+                        int is_read, uint32_t *residue,
+                        uint8_t *sense, uint8_t *sense_len)
 {
     uint32_t actual = 0;
     (void)is_read;   /* direction comes from the device's Read/Write-Ready IU */
     if (residue) *residue = 0;
 
-    uint16_t tag = ++u->tag;
-    if (tag == 0) tag = ++u->tag;
+    /* On a stream-capable (USB 3.0) link the data/status pipes use bulk
+     * streams; the UAS task tag doubles as the stream ID, so the device
+     * replies on the same stream we poll.  Serial (queue depth 1) -> stream 1. */
+    uint16_t tag;
+    if (u->stream_id) {
+        tag = u->stream_id;
+    } else {
+        tag = ++u->tag;
+        if (tag == 0) tag = ++u->tag;
+    }
 
     /* ---- Command IU ---- */
     uint8_t *ciu = u->cmd_iu;
@@ -130,17 +140,55 @@ static int uas_transfer(uas_dev_t *u, uint8_t lun, const uint8_t *cdb,
         return -1;
 
     /* ---- Status / data phases ---- */
+    /*
+     * USB 3.0 streams: there are no Read/Write-Ready IUs -- the device moves
+     * the data directly on the data stream (stream ID == task tag), then sends
+     * the Sense IU on the status stream.  Do the data phase (direction known
+     * from the CDB), then read the single status IU.
+     */
+    if (u->stream_id) {
+        uint32_t dact = 0;
+        if (data_len) {
+            usb_endpoint_t *dep = is_read ? u->ep_data_in : u->ep_data_out;
+            int r = usb_bulk_stream_transfer(u->udev, dep, u->stream_id,
+                                             data, data_len, &dact);
+            if (r != USB_XFER_OK && r != USB_XFER_SHORT)
+                return -1;
+            if (residue) *residue = (data_len > dact) ? (data_len - dact) : 0;
+        }
+        uint8_t *siu = u->status_iu;
+        memset(siu, 0, UAS_STATUS_IU_SIZE);
+        int r = usb_bulk_stream_transfer(u->udev, u->ep_status, u->stream_id,
+                                         siu, UAS_STATUS_IU_SIZE, &actual);
+        if (r != USB_XFER_OK && r != USB_XFER_SHORT)
+            return -1;
+        if (siu[0] != UAS_IU_SENSE)
+            return -1;
+        uint8_t status = siu[6];
+        if (status != SCSI_STATUS_GOOD && sense && sense_len) {
+            uint32_t slen = ((uint32_t)siu[14] << 8) | siu[15];
+            if (slen > SCSI_MAX_SENSE_LEN) slen = SCSI_MAX_SENSE_LEN;
+            if (slen > UAS_STATUS_IU_SIZE - 16) slen = UAS_STATUS_IU_SIZE - 16;
+            memcpy(sense, &siu[16], slen);
+            *sense_len = (uint8_t)slen;
+        }
+        return (status == SCSI_STATUS_GOOD) ? 0 : 1;
+    }
+
+    /* Stream-less USB 2.0: Read/Write-Ready IUs pace the data phase. */
     for (int iter = 0; iter < 4; iter++) {
         uint8_t *siu = u->status_iu;
         memset(siu, 0, UAS_STATUS_IU_SIZE);
-        int r = usb_bulk_transfer(u->udev, u->ep_status, siu, UAS_STATUS_IU_SIZE, &actual);
+        int r = usb_bulk_stream_transfer(u->udev, u->ep_status, u->stream_id,
+                                         siu, UAS_STATUS_IU_SIZE, &actual);
         if (r != USB_XFER_OK && r != USB_XFER_SHORT)
             return -1;
 
         switch (siu[0]) {
         case UAS_IU_READ_READY:
             if (data_len) {
-                r = usb_bulk_transfer(u->udev, u->ep_data_in, data, data_len, &actual);
+                r = usb_bulk_stream_transfer(u->udev, u->ep_data_in, u->stream_id,
+                                             data, data_len, &actual);
                 if (r != USB_XFER_OK && r != USB_XFER_SHORT)
                     return -1;
                 if (residue) *residue = (data_len > actual) ? (data_len - actual) : 0;
@@ -148,14 +196,26 @@ static int uas_transfer(uas_dev_t *u, uint8_t lun, const uint8_t *cdb,
             break;   /* next status IU should be the Sense IU */
         case UAS_IU_WRITE_READY:
             if (data_len) {
-                r = usb_bulk_transfer(u->udev, u->ep_data_out, data, data_len, &actual);
+                r = usb_bulk_stream_transfer(u->udev, u->ep_data_out, u->stream_id,
+                                             data, data_len, &actual);
                 if (r != USB_XFER_OK && r != USB_XFER_SHORT)
                     return -1;
                 if (residue) *residue = (data_len > actual) ? (data_len - actual) : 0;
             }
             break;
-        case UAS_IU_SENSE:
-            return (siu[6] == SCSI_STATUS_GOOD) ? 0 : 1;   /* byte 6 = SCSI status */
+        case UAS_IU_SENSE: {
+            /* Sense IU: [6]=SCSI status, [14-15]=sense length, [16+]=sense data.
+             * UAS carries sense inline -- no separate REQUEST SENSE needed. */
+            uint8_t status = siu[6];
+            if (status != SCSI_STATUS_GOOD && sense && sense_len) {
+                uint32_t slen = ((uint32_t)siu[14] << 8) | siu[15];
+                if (slen > SCSI_MAX_SENSE_LEN) slen = SCSI_MAX_SENSE_LEN;
+                if (slen > UAS_STATUS_IU_SIZE - 16) slen = UAS_STATUS_IU_SIZE - 16;
+                memcpy(sense, &siu[16], slen);
+                *sense_len = (uint8_t)slen;
+            }
+            return (status == SCSI_STATUS_GOOD) ? 0 : 1;
+        }
         case UAS_IU_RESPONSE:
         default:
             return -1;
@@ -172,10 +232,12 @@ static int uas_scsi_execute(scsi_link_t *link, scsi_request_t *req)
     if (!u || !u->active || !req)
         return -1;
 
+    uint8_t sense_len = 0;
     mutex_lock(&u->lock);
     int is_read = (req->flags & SCSI_REQ_READ) ? 1 : 0;
     int ret = uas_transfer(u, (uint8_t)req->device->lun, req->cdb, req->cdb_len,
-                           req->data, req->data_len, is_read, &residue);
+                           req->data, req->data_len, is_read, &residue,
+                           req->sense, &sense_len);
     mutex_unlock(&u->lock);
 
     if (ret == 0) {
@@ -184,23 +246,9 @@ static int uas_scsi_execute(scsi_link_t *link, scsi_request_t *req)
         return 0;
     }
     if (ret == 1) {
+        /* CHECK CONDITION: the Sense IU already delivered the sense data. */
         req->status = SCSI_STATUS_CHECK_CONDITION;
-        /* Auto-request sense (UAS carries sense in the Sense IU, but the SCSI
-         * mid-layer expects it in req->sense; fetch it explicitly). */
-        if (!(req->flags & SCSI_REQ_NO_SENSE) && req->cdb[0] != SCSI_CMD_REQUEST_SENSE) {
-            uint8_t sense_cdb[6] = { SCSI_CMD_REQUEST_SENSE, 0, 0, 0, 18, 0 };
-            uint8_t sense_buf[18];
-            uint32_t sr;
-            mutex_lock(&u->lock);
-            int sret = uas_transfer(u, (uint8_t)req->device->lun, sense_cdb, 6,
-                                    sense_buf, sizeof(sense_buf), 1, &sr);
-            mutex_unlock(&u->lock);
-            if (sret == 0) {
-                uint8_t clen = 18 > SCSI_MAX_SENSE_LEN ? SCSI_MAX_SENSE_LEN : 18;
-                memcpy(req->sense, sense_buf, clen);
-                req->sense_len = clen;
-            }
-        }
+        req->sense_len = sense_len;
         return -1;
     }
     req->status = SCSI_STATUS_CHECK_CONDITION;
@@ -230,6 +278,10 @@ static int uas_attach(usb_device_t *dev)
         kprintf("uas: could not identify all four UAS pipes\n");
         return -1;
     }
+    /* If the status pipe advertises SuperSpeed bulk streams, drive UAS over
+     * streams (stream ID 1, serial); otherwise run the stream-less USB 2.0
+     * variant. */
+    u->stream_id = (u->ep_status->max_streams > 0) ? 1 : 0;
     mutex_init(&u->lock, "uas");
     u->cmd_iu    = kmalloc(UAS_CMD_IU_SIZE);
     u->status_iu = kmalloc(UAS_STATUS_IU_SIZE);
@@ -256,8 +308,9 @@ static int uas_attach(usb_device_t *dev)
         return -1;
     }
     dev->driver_data = u;
-    kprintf("uas: attached %04x:%04x -> scsi bus %u (USB Attached SCSI)\n",
-            dev->vendor_id, dev->product_id, u->scsi_link.bus_id);
+    kprintf("uas: attached %04x:%04x -> scsi bus %u (USB Attached SCSI, %s)\n",
+            dev->vendor_id, dev->product_id, u->scsi_link.bus_id,
+            u->stream_id ? "streams" : "stream-less");
     scsi_scan_bus(&u->scsi_link, u->scsi_link.bus_id);
     return 0;
 }
