@@ -12,22 +12,22 @@
  *   - Root hub port status and reset
  */
 
-#include <drivers/usb/uhci.h>
-#include <drivers/usb/usb.h>
-#include <kern/pci.h>
-#include <kern/driver.h>
-#include <kern/bus.h>
-#include <kern/time.h>
-#include <kern/sched.h>
-#include <kern/console.h>
+#include <string.h>
+
 #include <sys/dma.h>
 #include <sys/irq.h>
 #include <sys/lock.h>
-#include <intr.h>
 #include <vm/vm_kmem.h>
-#include <string.h>
-
-#include <io.h>
+#include <kern/bus.h>
+#include <kern/console.h>
+#include <kern/driver.h>
+#include <kern/pci.h>
+#include <kern/sched.h>
+#include <kern/time.h>
+#include <arch/i386/intr.h>
+#include <arch/x86-common/io.h>
+#include <drivers/usb/uhci.h>
+#include <drivers/usb/usb.h>
 
 /*
  * ============================================================
@@ -1037,7 +1037,7 @@ static int uhci_pci_attach(struct device *dev)
  * ============================================================
  */
 
-extern struct bus_type pci_bus_type;
+
 
 static const device_id_t uhci_pci_ids[] = {
     /* Match any UHCI controller: class 0x0C, subclass 0x03, progif 0x00 */
