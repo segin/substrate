@@ -1,16 +1,18 @@
-#include <vfs/vfs.h>
-#include <sys/proc.h>
-#include <sys/file.h>
-#include <sys/poll.h>
-#include <kern/sched.h>
-#include <vm/vm_kmem.h>
-#include <string.h>
 #include <stddef.h>
+#include <string.h>
+
+#include <sys/errno.h>
+#include <sys/file.h>
 #include <sys/lock.h>
+#include <sys/poll.h>
+#include <sys/proc.h>
+#include <sys/signal.h>
+#include <vm/vm_kmem.h>
+#include <vfs/vfs.h>
+#include <kern/sched.h>
 #include <kern/sleepq.h>
 #include <kern/time.h>
 #include <arch/i386/intr.h>
-#include <errno.h>
 
 #define PIPE_SIZE 4096
 
@@ -205,8 +207,6 @@ static size_t pipe_write(fs_node_t *node, off_t offset, size_t size, const uint8
              * zero count.  Preserve the partial-write byte count
              * if we got some data through before the reader left.  */
             if (written > 0) return written;
-            extern void psignal(process_t *, int);
-            extern process_t *current_process;
             if (current_process) psignal(current_process, 13);   /* SIGPIPE */
             return (size_t)-EPIPE;
         }
@@ -215,8 +215,6 @@ static size_t pipe_write(fs_node_t *node, off_t offset, size_t size, const uint8
             if (p->readers_open == 0) {
                 mutex_unlock(&p->lock);
                 if (written > 0) return written;
-                extern void psignal(process_t *, int);
-                extern process_t *current_process;
                 if (current_process) psignal(current_process, 13);   /* SIGPIPE */
                 return (size_t)-EPIPE;
             }
