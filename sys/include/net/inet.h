@@ -130,6 +130,8 @@ int afinet_deliver_v6(const uint8_t saddr[16], const uint8_t daddr[16],
 /* -- One-shot init from main.c -------------------------------------- */
 
 void inet_init(void);
+void loopback_init(void);
+void rtl8139_init(void);
 
 /* -- TCP Control Block (PCB) API ------------------------------------ */
 struct tcp_pcb;

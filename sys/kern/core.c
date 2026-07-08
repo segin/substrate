@@ -1,11 +1,13 @@
-#include <sys/core.h>
-#include <sys/proc.h>
-#include <sys/ldt.h>
-#include <arch/i386/idt.h>
-#include <exec/perso/personality.h>
-#include <kern/console.h>
 #include <stdio.h>
 #include <string.h>
+
+#include <sys/copy.h>
+#include <sys/core.h>
+#include <sys/ldt.h>
+#include <sys/proc.h>
+#include <kern/console.h>
+#include <arch/i386/idt.h>
+#include <exec/perso/personality.h>
 
 static struct core_record last_core_record;
 
@@ -152,7 +154,6 @@ int coredump(process_t *p) {
         /* Dump 8 dwords of user stack, peeked safely via copyin. */
         if (last_core_record.regs.useresp != 0) {
             uint32_t buf[8] = {0};
-            extern int copyin(const void *, void *, unsigned int);
             if (copyin((const void *)last_core_record.regs.useresp, buf, sizeof(buf)) == 0) {
                 kprintf("CORE: stk  +00=%08x +04=%08x +08=%08x +0c=%08x\n",
                         buf[0], buf[1], buf[2], buf[3]);
@@ -163,7 +164,6 @@ int coredump(process_t *p) {
         /* Dump 16 bytes of user code at eip, peeked via copyin. */
         if (last_core_record.regs.eip != 0) {
             unsigned char ibuf[16] = {0};
-            extern int copyin(const void *, void *, unsigned int);
             if (copyin((const void *)last_core_record.regs.eip, ibuf, sizeof(ibuf)) == 0) {
                 kprintf("CORE: code @eip: %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x\n",
                         ibuf[0], ibuf[1], ibuf[2], ibuf[3],

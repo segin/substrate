@@ -1,13 +1,13 @@
 #include <sys/acct.h>
+#include <sys/errno.h>
+#include <sys/kern_syscalls.h>
 #include <sys/proc.h>
 #include <sys/session.h>
 #include <sys/signal.h>
-#include <sys/errno.h>
 #include <vfs/vfs.h>
-#include <drivers/video/vga.h>
 #include <kern/sched.h>
 #include <kern/time.h>
-#include <sys/kern_syscalls.h>
+#include <drivers/video/vga.h>
 
 static fs_node_t *acct_node = 0;
 
@@ -101,5 +101,4 @@ int sys_getpgrp(void) {
     return current_process->p_pgrp->pg_id;
 }
 
-/* sys_setpgid is now implemented in pm/pgrp.c */
-extern int sys_setpgid(int pid, int pgid);
+

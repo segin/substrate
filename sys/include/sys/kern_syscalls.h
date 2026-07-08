@@ -100,4 +100,7 @@ int sys_sysarch(int op, void *args);
 int sys_stat(const char *p, struct stat *buf);
 int sys_fchownat(int dirfd, const char *path, int uid, int gid, int flag);
 
+extern int syscall_trace_pid;
+extern int syscall_trace_serial;
+
 #endif

@@ -2,14 +2,12 @@
  * sys/kern/kern_uio.c - Scatter/gather I/O utilities
  */
 
-#include <sys/uio.h>
-#include <sys/types.h>
-#include <sys/errno.h>
 #include <string.h>
 
-/* Forward declarations for arch-specific copy functions */
-extern int copyin(const void *src, void *dst, size_t size);
-extern int copyout(const void *src, void *dst, size_t size);
+#include <sys/copy.h>
+#include <sys/errno.h>
+#include <sys/types.h>
+#include <sys/uio.h>
 
 /**
  * uiomove - move data between a buffer and a uio structure

@@ -1,73 +1,83 @@
-#include <stdint.h>
-#include <string.h>
-#include <stdio.h>
 #include <stddef.h>
-#include <sys/proc.h>
-#include <sys/input.h>
-#include <sys/posix_sem.h>
-#include <arch/i386/early_boot.h>
-#include <arch/i386/intr.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
 
-#include <drivers/video/vga.h>
-#include <drivers/video/fb.h>
-#include <drivers/video/hw_text.h>
-#include <drivers/console/uart/uart.h>
+#include <sys/crc32.h>
+#include <sys/exec.h>
+#include <sys/freebsd_boot.h>
+#include <sys/input.h>
+#include <sys/kern_syscalls.h>
+#include <sys/mqueue.h>
+#include <sys/ntsync.h>
+#include <sys/param.h>
+#include <sys/posix_sem.h>
+#include <sys/proc.h>
+#include <sys/random.h>
+#include <sys/sem.h>
+#include <sys/shm.h>
+#include <sys/sysctl.h>
+#include <sys/tests.h>
 #include <sys/tty.h>
 #include <sys/vt.h>
-#include <drivers/input/keyboard.h>
-#include <drivers/input/mouse.h>
-#include <drivers/storage/scsi/scsi.h>
-#include <drivers/storage/ide/ide.h>
-#include <drivers/storage/ahci/ahci.h>
-#include <drivers/storage/nvme/nvme.h>
-#include <drivers/usb/usb.h>
-#include <drivers/usb/uhci.h>
-#include <drivers/virtio/virtio.h>
-#include <drivers/storage/ramdisk.h>
-#include <drivers/storage/floppy/floppy.h>
-#include <drivers/audio/audio.h>
+#include <net/inet.h>
 
-#include <arch/i386/idt.h>
-#include <arch/i386/cpu.h>
-#include <arch/i386/gdt.h>
-#include <arch/i386/pmm.h>
-#include <arch/i386/pmap.h>
-#include <arch/i386/pci.h>
-#include <arch/i386/percpu.h>
-#include <arch/i386/smp.h>
-#include <arch/i386/syscall.h>
-#include <arch/i386/fpu/fpu_emu.h>
-#include <arch/x86-common/lapic.h>
-#include <arch/x86-common/rtc.h>
-#include <arch/x86-common/multiboot.h>
-#include <sys/freebsd_boot.h>
-#include <kern/isa.h>
-#include <kern/efi_runtime.h>
-
-#include <sys/param.h>
-#include <pm/pm.h>
-#include <sys/crc32.h>
+#include <vm/uma.h>
+#include <vm/vm_kmem.h>
+#include <vm/vm_object.h>
 #include <vm/vm_page.h>
+#include <vm/vm_zone.h>
+
 #include <vfs/vfs.h>
-#include <sys/exec.h>
-#include <sys/kern_syscalls.h>
-#include <sys/ntsync.h>
-#include <exec/formats/elf.h>
-#include <fs/procfs.h>
-#include <fs/sysfs.h>
-#include <fs/pseudofs.h>
-#include <fs/fuse.h>
 #include <fs/9p.h>
+#include <fs/fuse.h>
+#include <fs/procfs.h>
+#include <fs/pseudofs.h>
+#include <fs/sysfs.h>
 
-#include <sys/tests.h>
+#include <exec/formats/elf.h>
 
-#include <kern/console.h>
 #include <kern/cmdline.h>
+#include <kern/console.h>
+#include <kern/efi_runtime.h>
+#include <kern/isa.h>
+#include <kern/panic.h>
 #include <kern/sched.h>
 #include <kern/time.h>
 #include <kern/version.h>
-#include <kern/panic.h>
 #include <kern/geom/geom.h>
+
+#include <arch/i386/cpu.h>
+#include <arch/i386/early_boot.h>
+#include <arch/i386/fpu/fpu_emu.h>
+#include <arch/i386/gdt.h>
+#include <arch/i386/idt.h>
+#include <arch/i386/intr.h>
+#include <arch/i386/pci.h>
+#include <arch/i386/percpu.h>
+#include <arch/i386/pmap.h>
+#include <arch/i386/pmm.h>
+#include <arch/i386/smp.h>
+#include <arch/x86-common/lapic.h>
+#include <arch/x86-common/multiboot.h>
+#include <arch/x86-common/rtc.h>
+
+#include <drivers/audio/audio.h>
+#include <drivers/console/uart/uart.h>
+#include <drivers/input/keyboard.h>
+#include <drivers/input/mouse.h>
+#include <drivers/storage/ahci/ahci.h>
+#include <drivers/storage/floppy/floppy.h>
+#include <drivers/storage/ide/ide.h>
+#include <drivers/storage/nvme/nvme.h>
+#include <drivers/storage/ramdisk.h>
+#include <drivers/storage/scsi/scsi.h>
+#include <drivers/usb/uhci.h>
+#include <drivers/usb/usb.h>
+#include <drivers/video/fb.h>
+#include <drivers/video/hw_text.h>
+#include <drivers/video/vga.h>
+#include <drivers/virtio/virtio.h>
 
 // Simple string functions to avoid depending on libc in core if not available
 int serial_debug_enabled = 0;
@@ -143,10 +153,7 @@ static void init_memory(multiboot_info_t *mboot_info) {
     }
 
     // Initialize VM subsystem
-    extern void vm_object_init(void);
-    extern void vm_zone_init(void);
-    extern void uma_startup(void);
-    extern void kmem_init(void);
+
 
     early_uart_print("KMAIN: vm_page_init\n");
     vm_page_init();
@@ -512,7 +519,7 @@ static void init_runtime_console(int serial_console) {
 
     /* trace_pid=<n> restricts SYSCALL: ... trace lines to one PID. */
     {
-        extern int syscall_trace_pid;
+
         char vbuf[16];
         if (cmdline_get("trace_pid", vbuf, sizeof(vbuf)) > 0) {
             int pid = 0;
@@ -529,7 +536,7 @@ static void init_runtime_console(int serial_console) {
      * so userland output is still legible while we capture the trace
      * via QEMU -serial file:trace.log. */
     if (cmdline_has("syscall_trace_serial")) {
-        extern int syscall_trace_serial;
+
         syscall_trace_serial = 1;
         kprint("Syscall trace routed to serial only.\n");
     }
@@ -546,7 +553,7 @@ static void init_core_subsystems(multiboot_info_t *mboot_info) {
     idt_init();
     timer_init();
 
-    extern void fpu_init(void);
+
     fpu_init();
 
     rtc_init();
@@ -560,10 +567,10 @@ static void init_core_subsystems(multiboot_info_t *mboot_info) {
         kprint("SMP: Running in PIC/UP mode.\n");
     }
 
-    extern void pmap_map_trampoline(void);
+
     pmap_map_trampoline();
 
-    extern void random_init(void);
+
     random_init();
     exec_init();
 
@@ -577,14 +584,14 @@ static void init_core_subsystems(multiboot_info_t *mboot_info) {
     sched_init();
     kprint("Scheduler Initialized.\n");
 
-    extern void sem_init(void);
+
     sem_init();         /* System V semaphore subsystem */
 
-    extern void shm_init(void);
+
     shm_init();         /* System V shared memory subsystem */
 
     ksem_init();        /* POSIX named / kernel semaphore subsystem */
-    extern void mq_init(void);
+
     mq_init();          /* POSIX message queue subsystem */
 
     hw_text_late_init();
@@ -594,14 +601,14 @@ static void init_core_subsystems(multiboot_info_t *mboot_info) {
         sched_smp_init(smp_get_cpu_count());
     }
 
-    extern void sysctl_init(void);
+
     sysctl_init();
 
     /* Bring up the input subsystem before its first driver so the
      * /dev/input/event0 devfs node exists by the time PS/2 / USB HID
      * drivers report events into it.  input_init is idempotent
      * w.r.t. its internal list (initializes to NULL). */
-    extern void input_init(void);
+
     input_init();
 
     keyboard_init();
@@ -651,16 +658,9 @@ static void init_storage_and_vfs(multiboot_info_t *mboot_info) {
     uac_init();
     usb_init();
     virtio_init();
-    {
-        extern void rtl8139_init(void);
         rtl8139_init();
-    }
-    {
-        extern void inet_init(void);
-        extern void loopback_init(void);
         loopback_init();
         inet_init();
-    }
     register_boot_ramdisks(mboot_info);
     ntsync_init();
 
@@ -868,7 +868,7 @@ void kinit_task(void) {
     kprint("kinit: Starting init process...\n");
     
     // Create new session for init (PID 1)
-    extern int sys_setsid(void);
+
     if (sys_setsid() < 0) {
         kprint("kinit: sys_setsid failed!\n");
     }
