@@ -1,26 +1,26 @@
-#include <sys/types.h>
+#include <string.h>
+
+#include <sys/copy.h>
 #include <sys/errno.h>
-#include <sys/proc.h>
-#include <sys/sysctl.h>
-#include <sys/stat.h>
-#include <sys/memio.h>
-#include <vfs/vfs.h>
-#include <arch/i386/pmap.h>
-#include <arch/i386/pmm.h>
 #include <sys/lock.h>
+#include <sys/memio.h>
+#include <sys/proc.h>
+#include <sys/stat.h>
+#include <sys/sysctl.h>
+#include <sys/types.h>
 #include <vm/vm_map.h>
 #include <vm/vm_object.h>
 #include <vm/vm_pager.h>
+#include <vfs/vfs.h>
+#include <kern/console.h>
+#include <arch/i386/pmap.h>
+#include <arch/i386/pmm.h>
 
 #ifndef MAP_FIXED
 #define MAP_FIXED 0x010
 #endif
-#include <string.h>
-#include <kern/console.h>
 
-/* Helper for user access */
-extern int copyin(const void *src, void *dst, size_t size);
-extern int copyout(const void *src, void *dst, size_t size);
+/* Helper for user access (declared in copy.h) */
 
 /* Securelevel / Policy */
 static int mem_allow = 0;       /* Default: Disallow access to /dev/mem */
