@@ -7,9 +7,11 @@
  * Transport path: SCSI mid-layer -> scsi_link -> atapi_execute -> ide_atapi_packet
  */
 
-#include <string.h>
 #include <stdio.h>
+#include <string.h>
+
 #include <kern/console.h>
+#include <kern/time.h>
 #include <drivers/storage/scsi/scsi.h>
 #include <drivers/storage/ide/ide.h>
 #include <arch/x86-common/io.h>
@@ -124,15 +126,15 @@ static int atapi_reset_device(scsi_link_t *link, scsi_device_t *dev) {
      * is wildly variable across CPU speeds, breaking the SRST timing
      * requirement (≥5µs hold, then wait 2ms before issuing commands).
      */
-    extern uint64_t get_uptime_ms(void);
+
     ide_write_ctrl(target->channel, 0x04);  /* Set SRST */
     {
-        uint64_t until = get_uptime_ms() + 1; /* ≥1ms hold */
+        int64_t until = get_uptime_ms() + 1; /* ≥1ms hold */
         while (get_uptime_ms() < until) __asm__ volatile("pause");
     }
     ide_write_ctrl(target->channel, 0x00);  /* Clear SRST */
     {
-        uint64_t until = get_uptime_ms() + 5; /* 5ms post-reset settle */
+        int64_t until = get_uptime_ms() + 5; /* 5ms post-reset settle */
         while (get_uptime_ms() < until) __asm__ volatile("pause");
     }
     
