@@ -180,4 +180,7 @@ void pmap_invpcid_context(int pcid);
 void pmap_invpcid_all(void);
 void pmap_invpcid_all_global(void);
 
+/* Boot page table (boot.S) */
+extern uint64_t boot_pml4[];
+
 #endif

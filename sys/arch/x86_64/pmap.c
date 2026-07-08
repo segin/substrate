@@ -1,8 +1,8 @@
 #include <arch/x86_64/pmap.h>
 #include <arch/x86_64/msr.h>
+#include <arch/x86-common/lapic.h>
 #include <vm/vm_kmem.h>
 
-extern uint64_t boot_pml4[]; // From boot.S
 
 // Helper to convert kernel virtual to physical
 static inline uint64_t pmap_kvtop(void *va) {
@@ -1072,9 +1072,7 @@ void pmap_release(pmap_t pmap) {
 
 // ========== TLB Shootdown for SMP ==========
 
-// External LAPIC functions (defined in lapic.c)
-extern void lapic_send_eoi(void);
-extern void lapic_send_ipi_all_excl_self(int vector);
+
 
 // TLB shootdown IPI vector
 #define TLB_SHOOTDOWN_VECTOR 0xFC

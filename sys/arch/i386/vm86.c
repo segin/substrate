@@ -110,8 +110,7 @@ void vm86_monitor_signal_fault(uint32_t eip, uint32_t opcode) {
         current_vm86_monitor->fault_opcode = opcode;
     }
 }
-// Assembly helper to enter VM86 mode (defined in vm86_asm.S)
-extern void vm86_enter(struct vm86_struct *info);
+
 
 // Access to the syscall return registers (mapped in syscall.c)
 /*
@@ -389,7 +388,6 @@ void vm86_gpf_handler(registers_t *regs) {
               * It expects to find the VM86 exception frame leftovers (GS, FS, DS, ES, SS, ESP)
               * on the stack after IRET pops EIP, CS, EFLAGS.
               */
-             extern void vm86_bios_ret_point(void);
              regs->eip = (uint32_t)vm86_bios_ret_point;
              regs->cs = 0x08; // Kernel Code
              
