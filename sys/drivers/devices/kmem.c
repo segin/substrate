@@ -8,21 +8,19 @@
  * kernel lockdown/securelevel enforcement.
  */
 
-#include <sys/types.h>
-#include <sys/errno.h>
-#include <sys/proc.h>
-#include <vfs/vfs.h>
-#include <kern/console.h>
-#include <string.h>
-#include <sys/sysctl.h>
-#include <sys/fcntl.h>
-#include <sys/poll.h>
 #include <stdio.h>
-
-/* Global securelevel (defined in sys/kern/sysctl.c) */
-extern int securelevel;
+#include <string.h>
 
 #include <sys/copy.h>
+#include <sys/errno.h>
+#include <sys/fcntl.h>
+#include <sys/poll.h>
+#include <sys/proc.h>
+#include <sys/sysctl.h>
+#include <sys/tests.h>
+#include <sys/types.h>
+#include <vfs/vfs.h>
+#include <kern/console.h>
 
 /* Policy configuration */
 static int kmem_allow_read = 1;   /* Allow reading by default (if privileged) */
@@ -218,7 +216,7 @@ void kmem_dev_init(void) {
     kprint(buf);
 
     /* Initialize Kernel Test Helper (if linked) */
-    extern void kmem_test_init(void);
+
     /* Weak symbol check would be nice, but for now we assume it's linked if configured */
     /* Since we control the build, we know it is there. */
     kmem_test_init();

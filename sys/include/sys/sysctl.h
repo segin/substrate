@@ -215,4 +215,6 @@ SYSCTL_DECL(vm);
 SYSCTL_DECL(hw);
 SYSCTL_DECL(debug);
 
+extern int securelevel;
+
 #endif /* _SYS_SYSCTL_H */

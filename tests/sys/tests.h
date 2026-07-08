@@ -25,5 +25,6 @@ void run_ldt_tests(void);
 void run_reboot_tests(void);
 void run_chacha20_tests(void);
 void test_uname(void);
+void kmem_test_init(void);
 
 #endif
