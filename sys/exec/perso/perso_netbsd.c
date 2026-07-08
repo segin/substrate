@@ -5,24 +5,25 @@
  * Based on NetBSD 10.x i386 ABI.
  */
 
-#include <exec/perso/personality.h>
 #include <stddef.h>
-#include <arch/i386/syscall.h>
-#include <sys/syscall_impl.h>
+#include <stdint.h>
+
+#include <sys/errno.h>
+#include <sys/fcntl.h>
+#include <sys/futex.h>
 #include <sys/kern_syscalls.h>
+#include <sys/proc.h>
+#include <sys/resource.h>
+#include <sys/syscall_impl.h>
+#include <sys/time.h>
+#include <sys/times.h>
+#include <arch/i386/syscall.h>
 #include <exec/perso/compat.h>
-#include <exec/perso/netbsd/netbsd_syscalls.h>
-#include <exec/perso/netbsd/netbsd_user.h>
+#include <exec/perso/personality.h>
 #include <exec/perso/perso_ipc_sem.h>
 #include <exec/perso/perso_ipc_shm.h>
-#include <sys/resource.h>
-#include <sys/time.h>
-#include <sys/proc.h>
-#include <sys/fcntl.h>
-#include <sys/times.h>
-#include <sys/errno.h>
-#include <sys/futex.h>
-#include <stdint.h>
+#include <exec/perso/netbsd/netbsd_syscalls.h>
+#include <exec/perso/netbsd/netbsd_user.h>
 #include <string.h>
 #include <errno.h>
 
@@ -716,8 +717,7 @@ static struct syscall_fmt netbsd_fmts[MAX_SYSCALLS] = {
     [NETBSD_SYS_fchownat]       = { 5, { ARG_INT, ARG_STR, ARG_INT, ARG_INT, ARG_HEX } },
 };
 
-extern void netbsd_sendsig(void *handler, int sig, uint32_t mask, uint32_t flags, void *regs);
-extern int netbsd_sys_sigreturn(void *regs);
+
 
 struct personality personality_netbsd = {
     .name = "NetBSD",
