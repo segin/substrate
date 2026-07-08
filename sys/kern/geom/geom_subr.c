@@ -11,11 +11,9 @@
 #include <kern/geom/geom.h>
 #include <kern/console.h>
 #include <drivers/storage/blkdev.h>
+#include <vm/vm_kmem.h>
 #include <string.h>
 #include <stdio.h>
-
-extern void *kmalloc(size_t size);
-extern void kfree(void *ptr);
 
 /*
  * ============================================================
