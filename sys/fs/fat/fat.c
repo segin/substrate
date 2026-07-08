@@ -23,6 +23,7 @@ static uint32_t fat_cluster_to_sector(fat_fs_t *fs, uint32_t cluster);
 static size_t fat_file_write(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer);
 static int fat_truncate(fs_node_t *node, off_t new_size);
 static int fat_mkdir_vfs(fs_node_t *parent, const char *name, uint16_t permission);
+static int fat_mknod(fs_node_t *parent, const char *name, uint16_t mode, uint32_t dev);
 static int fat_unlink(fs_node_t *parent, const char *name);
 static int fat_rmdir_vfs(fs_node_t *parent, const char *name);
 static int fat_rename(fs_node_t *old_parent, const char *old_name,
@@ -517,6 +518,7 @@ static fs_node_t *fat_alloc_node(fat_fs_t *fs, const char *name, uint64_t inode,
         node->readdir = fat_readdir;
         node->finddir = fat_finddir;
         node->mkdir = fat_mkdir_vfs;
+        node->mknod = fat_mknod;
         node->unlink = fat_unlink;
         node->rmdir = fat_rmdir_vfs;
         node->rename = fat_rename;
@@ -585,6 +587,11 @@ fs_node_t *fat_finddir(fs_node_t *node, char *name) {
                     uint32_t cluster_num = ((uint32_t)entry->cluster_high << 16) | entry->cluster_low;
                     uint64_t inode = fat_make_synth_inode(fs, 0, sector_i, i, cluster_num);
                     fs_node_t *ret = fat_alloc_node(fs, entry_name, inode, cluster_num, entry->file_size, entry->attr);
+                    if (ret) {
+                        fat_node_t *rc = (fat_node_t *)(uintptr_t)ret->impl;
+                        rc->dirent_sector = fs->root_dir_first_sector + sector_i;
+                        rc->dirent_off = (uint16_t)i;
+                    }
                     kfree(root_sector_buf, bytes_per_sector);
                     return ret;
                 }
@@ -661,6 +668,11 @@ fs_node_t *fat_finddir(fs_node_t *node, char *name) {
                 uint32_t cluster_num = ((uint32_t)entry->cluster_high << 16) | entry->cluster_low;
                 uint64_t inode = fat_make_synth_inode(fs, ctx->first_cluster, 0, i, cluster_num);
                 fs_node_t *ret = fat_alloc_node(fs, entry_name, inode, cluster_num, entry->file_size, entry->attr);
+                if (ret) {
+                    fat_node_t *rc = (fat_node_t *)(uintptr_t)ret->impl;
+                    rc->dirent_sector = fat_cluster_to_sector(fs, cluster) + i / bytes_per_sector;
+                    rc->dirent_off = (uint16_t)(i % bytes_per_sector);
+                }
                 kfree(dir_buf, fs->cluster_size);
                 return ret;
             }
@@ -993,6 +1005,31 @@ static int fat_free_chain(fat_fs_t *fs, uint32_t cluster) {
     return 0;
 }
 
+/*
+ * Write the node's file size + first cluster back to its on-disk directory
+ * entry.  Without this, data written to a file never becomes visible after
+ * remount (the directory entry keeps the old size/cluster) -- the equivalent of
+ * msdosfs's deupdat().
+ */
+static void fat_flush_dirent(fat_fs_t *fs, fat_node_t *ctx) {
+    if (ctx->dirent_sector == 0)
+        return;   /* location unknown (root directory itself) */
+    uint32_t ss = fs->bpb.bytes_per_sector;
+    if ((uint32_t)ctx->dirent_off + sizeof(fat_dirent_t) > ss)
+        return;
+    uint8_t *buf = kmalloc(ss);
+    if (!buf)
+        return;
+    if (fat_read_sectors(fs, ctx->dirent_sector, 1, buf) == 0) {
+        fat_dirent_t *e = (fat_dirent_t *)(buf + ctx->dirent_off);
+        e->file_size = ctx->size;
+        e->cluster_low = (uint16_t)(ctx->first_cluster & 0xFFFF);
+        e->cluster_high = (uint16_t)(ctx->first_cluster >> 16);
+        fat_write_sectors(fs, ctx->dirent_sector, 1, buf);
+    }
+    kfree(buf, ss);
+}
+
 /* Write file data */
 static size_t fat_file_write(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer) {
     fat_node_t *ctx = (fat_node_t *)(uintptr_t)node->impl;
@@ -1011,7 +1048,7 @@ static size_t fat_file_write(fs_node_t *node, off_t offset, size_t size, const u
         if (nc == 0) return 0;
         ctx->first_cluster = nc;
         node->inode = nc;
-        /* TODO: update directory entry cluster fields */
+        /* first cluster is persisted to the dir entry by fat_flush_dirent() below */
     }
 
     /* Walk chain, extending as needed */
@@ -1074,8 +1111,11 @@ static size_t fat_file_write(fs_node_t *node, off_t offset, size_t size, const u
     if ((uint32_t)(offset + total_written) > ctx->size) {
         ctx->size = (uint32_t)(offset + total_written);
         node->length = ctx->size;
-        /* TODO: flush directory entry */
     }
+
+    /* Persist the new size + first cluster to the on-disk directory entry. */
+    if (total_written > 0)
+        fat_flush_dirent(fs, ctx);
 
     return total_written;
 }
@@ -1094,6 +1134,7 @@ static int fat_truncate(fs_node_t *node, off_t new_size) {
         ctx->first_cluster = 0;
         ctx->size = 0;
         node->length = 0;
+        fat_flush_dirent(fs, ctx);
         return 0;
     }
 
@@ -1123,6 +1164,7 @@ static int fat_truncate(fs_node_t *node, off_t new_size) {
 
     ctx->size = (uint32_t)new_size;
     node->length = new_size;
+    fat_flush_dirent(fs, ctx);
     return 0;
 }
 
@@ -1491,6 +1533,16 @@ static int fat_create_entry(fs_node_t *parent, const char *name, uint8_t attr) {
 static int fat_mkdir_vfs(fs_node_t *parent, const char *name, uint16_t permission) {
     (void)permission;
     return fat_create_entry(parent, name, FAT_ATTR_DIRECTORY);
+}
+
+/* mknod VFS callback: create a new, empty regular file (no cluster until data
+ * is written -- an empty FAT file has first cluster 0). */
+static int fat_mknod(fs_node_t *parent, const char *name, uint16_t mode, uint32_t dev) {
+    (void)mode;
+    (void)dev;
+    fat_node_t *pctx = (fat_node_t *)(uintptr_t)parent->impl;
+    return fat_dir_add_entry(pctx->fs, pctx->first_cluster, name,
+                             FAT_ATTR_ARCHIVE, 0, 0);
 }
 
 /* unlink VFS callback */
