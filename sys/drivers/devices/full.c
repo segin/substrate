@@ -17,11 +17,15 @@
  * - O1: mmap (O1a: Disallow)
  */
 
-#include <vfs/vfs.h>
+#include <string.h>
+
+#include <sys/copy.h>
 #include <sys/errno.h>
 #include <sys/poll.h>
-#include <string.h>
+#include <vfs/vfs.h>
 #include <kern/console.h>
+
+/* Helper for safe kernel-to-user copy (declared in copy.h) */
 
 static void full_open(fs_node_t *node) {
     (void)node;
@@ -30,9 +34,6 @@ static void full_open(fs_node_t *node) {
 static void full_close(fs_node_t *node) {
     (void)node;
 }
-
-// Helper for safe kernel-to-user copy
-extern int copyout(const void *src, void *dst, size_t size);
 
 // Full read: return zeros
 static size_t full_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
