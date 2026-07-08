@@ -199,4 +199,14 @@ int pmap_fault(uint32_t err_code, uint32_t cr2);
 #define V_PD  ((uint32_t *)0xFFFFF000)
 #define V_PT(i) ((uint32_t *)(0xFFC00000 + ((i) << 12)))
 
+extern uint64_t pmap_destroy_anon_freed;
+extern uint64_t pmap_destroy_anon_skipped;
+extern uint64_t pmap_destroy_skip_obj;
+extern uint64_t pmap_destroy_skip_wired;
+extern uint64_t pmap_destroy_skip_refcnt;
+extern uint64_t pmap_destroy_calls;
+extern uint64_t pmap_destroy_anon_rc0;
+extern uint64_t pmap_destroy_anon_rc2;
+extern uint64_t pmap_destroy_anon_rc_big;
+
 #endif

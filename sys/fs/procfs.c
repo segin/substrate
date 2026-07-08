@@ -5,29 +5,30 @@
  * in procfs_entries[] . Per-process directories are handled separately.
  */
 
-#include <vfs/vfs.h>
-#include <arch/i386/pmm.h>
-#include <fs/procfs.h>
-#include <include/sys/proc.h>
-#include <pm/pm.h>
-#include <kern/sched.h>
-#include <kern/time.h>
-#include <kern/cmdline.h>
-#include <exec/perso/personality.h>
-#include <arch/i386/pmap.h>
-#include <sys/session.h>
-#include <sys/mount.h>
-#include <sys/tty.h>
-#include <sys/file.h>
-#include <drivers/console/console.h>
-#include <string.h>
-#include <stdio.h>
 #include <stddef.h>
+#include <stdio.h>
+#include <string.h>
+
+#include <sys/file.h>
+#include <sys/mount.h>
+#include <sys/proc.h>
+#include <sys/session.h>
+#include <sys/tty.h>
+#include <vm/vm_commit.h>
 #include <vm/vm_kmem.h>
-#include <vm/vm_page.h>
 #include <vm/vm_map.h>
 #include <vm/vm_object.h>
-#include <vm/vm_commit.h>
+#include <vm/vm_page.h>
+#include <vfs/vfs.h>
+#include <fs/procfs.h>
+#include <pm/pm.h>
+#include <kern/cmdline.h>
+#include <kern/sched.h>
+#include <kern/time.h>
+#include <arch/i386/pmap.h>
+#include <arch/i386/pmm.h>
+#include <exec/perso/personality.h>
+#include <drivers/console/console.h>
 #include <kern/memtrack.h>
 #include <sys/lock.h>
 #include <kern/bus.h>
@@ -244,16 +245,7 @@ static uint32_t gen_vmstat(char *buf, size_t size, void *opaque) {
         stats.zero_fill_pages);
 }
 
-/* Diagnostic counters from pmap.c — defined there, declared here */
-extern uint64_t pmap_destroy_anon_freed;
-extern uint64_t pmap_destroy_anon_skipped;
-extern uint64_t pmap_destroy_skip_obj;
-extern uint64_t pmap_destroy_skip_wired;
-extern uint64_t pmap_destroy_skip_refcnt;
-extern uint64_t pmap_destroy_calls;
-extern uint64_t pmap_destroy_anon_rc0;
-extern uint64_t pmap_destroy_anon_rc2;
-extern uint64_t pmap_destroy_anon_rc_big;
+/* Diagnostic counters from pmap.c — declared in pmap.h */
 
 static uint32_t proc_pmap_stats_read(char *buf, size_t size, void *opaque) {
     (void)opaque;
