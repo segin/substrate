@@ -448,4 +448,17 @@ int ext2_xattr_get(fs_node_t *node, const char *full_name,
 int ext2_xattr_list(fs_node_t *node, void *out, size_t out_size,
                     size_t *result_size);
 
+extern uint64_t ext2_alloc_node_hits;
+extern uint64_t ext2_alloc_node_new;
+extern uint64_t ext2_alloc_node_fail;
+extern uint64_t ext2_alloc_node_fail_pinned;
+extern uint64_t ext2_alloc_node_fail_locked;
+extern uint64_t ext2_finddir_calls;
+extern uint64_t ext2_finddir_dcache_hit;
+extern uint64_t ext2_finddir_walk_found;
+extern uint64_t ext2_finddir_walk_missing;
+extern uint64_t ext2_finddir_break_recv_malformed;
+extern uint64_t ext2_finddir_break_block0;
+extern uint64_t ext2_root_pin_lost;
+
 #endif

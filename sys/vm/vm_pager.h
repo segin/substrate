@@ -69,4 +69,7 @@ uint64_t vnode_pager_cached_pages(void);
 int vm_swapon(void *node);
 int vm_swapoff(void);
 
+extern unsigned long vm_pager_vnode_alloc_count;
+extern unsigned long vm_pager_vnode_dealloc_count;
+
 #endif

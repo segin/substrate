@@ -1,44 +1,47 @@
-#include <pm/pm.h>
-#include <sys/acct.h>
-#include <sys/copy.h>
-#include <sys/fcntl.h>
-#include <sys/file.h>
-#include <sys/futex.h>
-#include <sys/lock.h>
-#include <sys/mqueue.h>
-#include <sys/posix_sem.h>
-#include <sys/random.h>
-#include <sys/sem.h>
-#include <sys/session.h>
-#include <sys/shm.h>
-#include <sys/signal.h>
-#include <sys/tty.h>
-#include <sys/vt.h>
-#include <kern/console.h>
-#include <kern/file.h>
-#include <kern/main.h>
-#include <kern/sched.h>
-#include <kern/sleepq.h>
-#include <sys/preempt.h>
 #include <stddef.h>
 #include <string.h>
-#include <arch/i386/pmap.h>
-#include <arch/i386/pmm.h>
-#include <sys/ldt.h>
-#include <arch/i386/intr.h>
-#include <vm/vm_map.h>
-#include <vm/vm_commit.h>
-#include <exec/perso/personality.h>
-#include <kern/time.h>
-#include <sys/types.h>
-#include <vfs/buf.h>
 #ifndef HOST_TEST
 #include <kern/cmdline.h>
 #include <vm/vm_kmem.h>
 #else
 #include <stdlib.h>
 #endif
+
+#include <sys/acct.h>
+#include <sys/copy.h>
+#include <sys/fcntl.h>
+#include <sys/file.h>
+#include <sys/futex.h>
+#include <sys/ldt.h>
+#include <sys/lock.h>
+#include <sys/mqueue.h>
+#include <sys/posix_sem.h>
+#include <sys/preempt.h>
+#include <sys/random.h>
+#include <sys/sem.h>
+#include <sys/session.h>
+#include <sys/shm.h>
+#include <sys/signal.h>
+#include <sys/tty.h>
+#include <sys/types.h>
+#include <sys/vt.h>
+#include <vm/vm_commit.h>
+#include <vm/vm_map.h>
+#include <vm/vm_pager.h>
+#include <vfs/buf.h>
 #include <vfs/vfs.h>
+#include <fs/ext2/ext2.h>
+#include <pm/pm.h>
+#include <kern/console.h>
+#include <kern/file.h>
+#include <kern/main.h>
+#include <kern/sched.h>
+#include <kern/sleepq.h>
+#include <kern/time.h>
+#include <arch/i386/intr.h>
+#include <arch/i386/pmap.h>
+#include <arch/i386/pmm.h>
+#include <exec/perso/personality.h>
 
 process_t *current_process = NULL;
 process_t *kernel_process = NULL;
@@ -1541,32 +1544,10 @@ void proc_exit(int code) {
      * vnode-pager / vm_map / vnode-stat counters drift relative to
      * exec/exit count.  Healthy steady-state: alloc - dealloc == 0. */
     if (cmdline_debug_enabled("vm_leak")) {
-        extern unsigned long vm_pager_vnode_alloc_count;
-        extern unsigned long vm_pager_vnode_dealloc_count;
-        extern unsigned long vm_map_destroy_count;
-        extern unsigned long vm_map_destroy_entries;
-        extern unsigned long fs_open_count;
-        extern unsigned long fs_close_count;
-        extern uint64_t      pmap_create_calls;
-        extern uint64_t      pmap_destroy_calls;
-        extern unsigned long namecache_enter_count;
-        extern unsigned long namecache_evict_count;
-        extern unsigned long namecache_purge_count;
-        extern int           vfs_cache_count;
+
         struct bio_stats bs;
         bio_get_stats(&bs);
-        extern uint64_t ext2_alloc_node_hits;
-        extern uint64_t ext2_alloc_node_new;
-        extern uint64_t ext2_alloc_node_fail;
-        extern uint64_t ext2_alloc_node_fail_pinned;
-        extern uint64_t ext2_alloc_node_fail_locked;
-        extern uint64_t ext2_finddir_calls;
-        extern uint64_t ext2_finddir_dcache_hit;
-        extern uint64_t ext2_finddir_walk_found;
-        extern uint64_t ext2_finddir_walk_missing;
-        extern uint64_t ext2_finddir_break_recv_malformed;
-        extern uint64_t ext2_finddir_break_block0;
-        extern uint64_t ext2_root_pin_lost;
+
         kprintf("vm_leak[pid=%d exit=%d]: pager A=%lu D=%lu (live=%ld) "
                 "map_destroy=%lu (ents=%lu) "
                 "fs_open=%lu fs_close=%lu (drift=%ld) "

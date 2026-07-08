@@ -204,6 +204,7 @@ extern uint64_t pmap_destroy_anon_skipped;
 extern uint64_t pmap_destroy_skip_obj;
 extern uint64_t pmap_destroy_skip_wired;
 extern uint64_t pmap_destroy_skip_refcnt;
+extern uint64_t pmap_create_calls;
 extern uint64_t pmap_destroy_calls;
 extern uint64_t pmap_destroy_anon_rc0;
 extern uint64_t pmap_destroy_anon_rc2;

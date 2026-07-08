@@ -256,6 +256,10 @@ void shmfs_init(void);
 extern fs_node_t *fs_root; // Global root node
 
 extern unsigned long fs_open_count, fs_close_count;
+extern unsigned long namecache_enter_count;
+extern unsigned long namecache_evict_count;
+extern unsigned long namecache_purge_count;
+extern int           vfs_cache_count;
 
 void sysv_init(void);
 extern fs_node_t *devfs_root_node_ptr;

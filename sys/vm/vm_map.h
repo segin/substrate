@@ -90,4 +90,7 @@ void vm_map_audit(vm_map_t *map, const char *where);
  * interpretation lives with the rest of the mman flags in vm_syscalls.c. */
 void vm_apply_mlockall(vm_map_t *map, int flags);
 
+extern unsigned long vm_map_destroy_count;
+extern unsigned long vm_map_destroy_entries;
+
 #endif
