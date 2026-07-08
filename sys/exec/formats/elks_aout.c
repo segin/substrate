@@ -1,30 +1,31 @@
-#include <exec/formats/elks_aout.h>
-#include <sys/exec.h>
-#include <sys/errno.h>
+#include <stdio.h>
 #include <string.h>
-#include <kern/console.h>
-#include <exec/perso/personality.h>
+
 #include <sys/compiler.h>
-#include <sys/proc.h>
+#include <sys/copy.h>
+#include <sys/errno.h>
+#include <sys/exec.h>
+#include <sys/fcntl.h>
+#include <sys/file.h>
+#include <sys/kern_syscalls.h>
 #include <sys/ldt.h>
+#include <sys/proc.h>
+#include <sys/stat.h>
+#include <sys/sysctl.h>
+#include <sys/sysinfo.h>
+#include <vm/vm_kmem.h>
 #include <vm/vm_map.h>
 #include <vm/vm_object.h>
-#include <vm/vm_kmem.h>
-#include <arch/i386/pmm.h>
-#include <arch/i386/pmap.h>
 #include <vfs/vfs.h>
-#include <sys/kern_syscalls.h>
-#include <sys/file.h>
-#include <sys/sysctl.h> // For HW_PHYSMEM in future?
-#include <sys/sysinfo.h>
-#include <sys/stat.h>
-#include <sys/fcntl.h>
-#include <sys/copy.h>
 #include <pm/pm.h>
-#include <kern/panic.h>
 #include <kern/arch.h>
 #include <kern/cmdline.h>
-#include <stdio.h>
+#include <kern/console.h>
+#include <kern/panic.h>
+#include <arch/i386/pmap.h>
+#include <arch/i386/pmm.h>
+#include <exec/formats/elks_aout.h>
+#include <exec/perso/personality.h>
 
 #define ELKS_ARG_MAX_BYTES (32 * 1024)
 #define ELKS_ARG_MAX_COUNT 4096
@@ -417,8 +418,6 @@ int elks_load(int fd, const char *path, char *const argv[], char *const envp[]) 
         plan.text_limit = plan.data_limit;
     }
 
-    // Create new address space
-    extern pmap_t pmap_create(void);
     pmap_t pmap = pmap_create();
     if (!pmap) {
         elks_free_kernel_vector(kargv);
@@ -427,7 +426,6 @@ int elks_load(int fd, const char *path, char *const argv[], char *const envp[]) 
     }
     
     current_process->pmap = (struct pmap*)pmap;
-    extern void pmap_activate(pmap_t pmap);
     pmap_activate(pmap);
     map = vm_map_create(pmap, 0x10000, 0xC0000000U);
     if (!map) {
@@ -556,9 +554,7 @@ int elks_load(int fd, const char *path, char *const argv[], char *const envp[]) 
     }
     user_sp = initial_sp;
 
-    extern void jump_to_elks(uint32_t entry, uint32_t stack, uint32_t cs,
-                             uint32_t ds, uint32_t ss, uint32_t es,
-                             uint32_t stack_size);
+
     uint16_t elks_stack_size = 0;
     
     proc_close_cloexec(current_process);

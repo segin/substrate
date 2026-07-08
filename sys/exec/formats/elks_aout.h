@@ -452,5 +452,8 @@ struct exec_binary_handler;
 void elks_init_handler(void);
 int elks_check_file(const char *path, const char *header, size_t len);
 int elks_load(int fd, const char *path, char *const argv[], char *const envp[]);
+void jump_to_elks(uint32_t entry, uint32_t stack, uint32_t cs,
+                  uint32_t ds, uint32_t ss, uint32_t es,
+                  uint32_t stack_size);
 
 #endif /* _ELKS_AOUT_H */
