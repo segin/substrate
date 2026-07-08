@@ -160,6 +160,11 @@ long ld_read(int fd, void *buf, ld_size n) {
     return ld_syscall3(SYS_read, (ld_u32)fd, (ld_u32)(unsigned long)buf, (ld_u32)n);
 }
 
+long ld_getdents(int fd, void *buf, ld_size n) {
+    return ld_syscall3(SYS_getdents, (ld_u32)fd,
+                       (ld_u32)(unsigned long)buf, (ld_u32)n);
+}
+
 long ld_lseek(int fd, long off, int whence) {
     return ld_syscall3(SYS_lseek, (ld_u32)fd, (ld_u32)off, (ld_u32)whence);
 }

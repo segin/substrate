@@ -129,6 +129,7 @@ typedef struct {
 #define SYS_lseek 19
 #define SYS_mmap        90
 #define SYS_fstat      108
+#define SYS_getdents   141
 #define SYS_set_gsbase 274
 
 /* mmap flags / prot bits we use. */
@@ -259,6 +260,7 @@ int   ld_open(const char *path, int flags);
 int   ld_close(int fd);
 long  ld_read(int fd, void *buf, ld_size n);
 long  ld_lseek(int fd, long off, int whence);
+long  ld_getdents(int fd, void *buf, ld_size n);
 void *ld_mmap(void *addr, ld_size len, int prot, int flags,
               int fd, ld_u32 page_off);
 

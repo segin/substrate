@@ -41,16 +41,25 @@ static const char *const ld_search_paths[] = {
  * Additional search directories from /etc/ld.so.conf — the system
  * default library path (the moral equivalent of a baked-in
  * LD_LIBRARY_PATH).  Parsed once, lazily, on the first object load.
- * Format: one absolute directory per line; blank lines and lines
- * beginning with '#' are comments.  (`include` / glob directives are
- * not supported — ld.so has no directory globbing — and are ignored.)
- * Directory strings point into ld_conf_buf, which persists for the
- * lifetime of the process.
+ *
+ * Format (a subset of glibc's ld.so.conf):
+ *   - one absolute directory per line;
+ *   - blank lines and lines beginning with '#' are comments;
+ *   - `include <glob>` pulls in additional config files.  The glob may
+ *     name a literal file or use '*'/'?' wildcards in the final path
+ *     component (the canonical modern layout is an ld.so.conf.d directory
+ *     of ".conf" files).  Includes may nest up to LD_CONF_MAX_DEPTH.
+ *
+ * Every config file's bytes are slurped into ld_conf_buf (appended, so
+ * strings persist for the process lifetime); ld_conf_dirs[] points into it.
  */
-#define LD_CONF_MAX_DIRS 32
-#define LD_CONF_BUF      4096
+#define LD_CONF_MAX_DIRS  64
+#define LD_CONF_BUF       8192
+#define LD_CONF_MAX_DEPTH 4
 static char        ld_conf_buf[LD_CONF_BUF];
+static ld_size     ld_conf_tail = 0;         /* next free byte in ld_conf_buf */
 static const char *ld_conf_dirs[LD_CONF_MAX_DIRS + 1];
+static int         ld_conf_ndirs = 0;
 static int         ld_conf_loaded = 0;
 
 static ld_size ld_strlen(const char *s) {
@@ -345,28 +354,126 @@ static ld_obj_t *load_from_path(const char *path) {
     return o;
 }
 
-/* Parse /etc/ld.so.conf into ld_conf_dirs (once).  Best effort: a
- * missing or unreadable file simply yields no extra directories. */
-static void ld_conf_load(void) {
-    ld_conf_loaded = 1;                 /* attempt only once */
+/* Shell-style wildcard match for a single path component: supports '*'
+ * (any run) and '?' (any one char).  No '[...]' classes — ld.so.conf globs
+ * never need them. */
+static int ld_fnmatch(const char *pat, const char *str) {
+    while (*pat) {
+        if (*pat == '*') {
+            pat++;
+            if (!*pat) return 1;               /* trailing '*' matches rest */
+            for (; *str; str++)
+                if (ld_fnmatch(pat, str)) return 1;
+            return ld_fnmatch(pat, str);        /* match against empty tail */
+        }
+        if (*pat == '?') {
+            if (!*str) return 0;
+        } else if (*pat != *str) {
+            return 0;
+        }
+        pat++; str++;
+    }
+    return *str == '\0';
+}
 
-    int fd = ld_open("/etc/ld.so.conf", LD_O_RDONLY);
-    if (fd < 0) return;
+/* Append a config directory (deduplicated, bounded). */
+static void ld_conf_add_dir(const char *dir) {
+    for (int i = 0; i < ld_conf_ndirs; i++)
+        if (ld_streq(ld_conf_dirs[i], dir)) return;
+    if (ld_conf_ndirs < LD_CONF_MAX_DIRS)
+        ld_conf_dirs[ld_conf_ndirs++] = dir;
+}
 
+/* Read a whole config file into ld_conf_buf at the current tail, NUL-terminate
+ * it, and return its start (NULL on open failure or no buffer space).  The
+ * bytes persist for the process lifetime so parsed dir strings stay valid. */
+static char *ld_conf_slurp(const char *path) {
+    if (ld_conf_tail + 1 >= LD_CONF_BUF) return 0;
+    int fd = ld_open(path, LD_O_RDONLY);
+    if (fd < 0) return 0;
+    char  *start = ld_conf_buf + ld_conf_tail;
+    ld_size space = (ld_size)(LD_CONF_BUF - 1 - ld_conf_tail);
     long total = 0;
     for (;;) {
-        long n = ld_read(fd, ld_conf_buf + total,
-                         (ld_size)(LD_CONF_BUF - 1 - total));
+        long n = ld_read(fd, start + total, space - (ld_size)total);
         if (n <= 0) break;
         total += n;
-        if (total >= LD_CONF_BUF - 1) break;
+        if ((ld_size)total >= space) break;
     }
     ld_close(fd);
-    ld_conf_buf[total] = '\0';
+    start[total] = '\0';
+    ld_conf_tail += (ld_size)total + 1;         /* keep the NUL */
+    return start;
+}
 
-    int ndirs = 0;
-    char *p = ld_conf_buf;
-    while (*p && ndirs < LD_CONF_MAX_DIRS) {
+static void ld_conf_parse(char *text, int depth);   /* mutually recursive */
+
+/* Handle `include <pattern>`.  A literal path is read directly; a pattern
+ * with '*'/'?' in its final component is globbed against its parent directory
+ * via getdents. */
+static void ld_conf_include(const char *pattern, int depth) {
+    if (depth >= LD_CONF_MAX_DEPTH)
+        return;
+
+    int wild = 0;
+    const char *slash = 0;
+    for (const char *q = pattern; *q; q++) {
+        if (*q == '/') slash = q;
+        else if (*q == '*' || *q == '?') wild = 1;
+    }
+
+    if (!wild) {                                 /* plain include file */
+        char *text = ld_conf_slurp(pattern);
+        if (text) ld_conf_parse(text, depth + 1);
+        return;
+    }
+    if (!slash)
+        return;                                  /* wildcard but no directory */
+
+    /* Split into "<dir>" and "<glob>" (the final component). */
+    char dir[256];
+    ld_size dlen = (ld_size)(slash - pattern);
+    if (dlen == 0) { dir[0] = '/'; dlen = 1; }   /* glob rooted at "/" */
+    else {
+        if (dlen >= sizeof(dir)) return;
+        for (ld_size i = 0; i < dlen; i++) dir[i] = pattern[i];
+    }
+    dir[dlen] = '\0';
+    const char *glob = slash + 1;
+
+    int fd = ld_open(dir, LD_O_RDONLY);
+    if (fd < 0) return;
+
+    char dents[1024];
+    for (;;) {
+        long n = ld_getdents(fd, dents, sizeof(dents));
+        if (n <= 0) break;
+        long off = 0;
+        while (off + 10 <= n) {
+            /* struct dirent: d_ino(4) d_off(4) d_reclen(2) d_name[] */
+            unsigned short reclen;
+            reclen = (unsigned short)((unsigned char)dents[off + 8] |
+                     ((unsigned char)dents[off + 9] << 8));
+            if (reclen < 11 || off + reclen > n) break;
+            const char *name = dents + off + 10;
+            if (ld_fnmatch(glob, name)) {
+                char full[512];
+                if (ld_path_join(full, sizeof(full), dir, name) >= 0) {
+                    char *text = ld_conf_slurp(full);
+                    if (text) ld_conf_parse(text, depth + 1);
+                }
+            }
+            off += reclen;
+        }
+    }
+    ld_close(fd);
+}
+
+/* Parse a config file's text in place: each non-comment line is either a
+ * directory to add or an `include <glob>` directive. */
+static void ld_conf_parse(char *text, int depth) {
+    char *p = text;
+    while (*p) {
         while (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n')
             p++;
         if (!*p) break;
@@ -383,11 +490,24 @@ static void ld_conf_load(void) {
         if (*line == '\0' || *line == '#')
             continue;                   /* blank or comment */
         if (ld_strncmp(line, "include", 7) == 0 &&
-            (line[7] == ' ' || line[7] == '\t' || line[7] == '\0'))
-            continue;                   /* globbed includes unsupported */
-        ld_conf_dirs[ndirs++] = line;
+            (line[7] == ' ' || line[7] == '\t')) {
+            const char *pat = line + 7;
+            while (*pat == ' ' || *pat == '\t') pat++;
+            if (*pat) ld_conf_include(pat, depth);
+            continue;
+        }
+        ld_conf_add_dir(line);
     }
-    ld_conf_dirs[ndirs] = 0;
+}
+
+/* Parse /etc/ld.so.conf into ld_conf_dirs (once).  Best effort: a missing or
+ * unreadable file simply yields no extra directories. */
+static void ld_conf_load(void) {
+    ld_conf_loaded = 1;                 /* attempt only once */
+    char *text = ld_conf_slurp("/etc/ld.so.conf");
+    if (text)
+        ld_conf_parse(text, 0);
+    ld_conf_dirs[ld_conf_ndirs] = 0;    /* NULL-terminate the list */
 }
 
 /* Resolve a soname against the search paths and load it. */
