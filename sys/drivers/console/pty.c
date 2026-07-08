@@ -22,24 +22,25 @@
  * surface as status-only reads.
  */
 
-#include <drivers/console/pty.h>
-
-#include <sys/tty.h>
-#include <sys/ioctl.h>
-#include <sys/poll.h>
-#include <sys/errno.h>
-#include <sys/proc.h>
-#include <sys/lock.h>
-#include <sys/signal.h>
-#include <sys/major.h>
-#include <sys/copy.h>
-#include <vfs/vfs.h>
-#include <vm/vm_kmem.h>
-#include <kern/sched.h>
-#include <kern/console.h>
-#include <intr.h>
 #include <stdio.h>
 #include <string.h>
+
+#include <sys/copy.h>
+#include <sys/errno.h>
+#include <sys/ioctl.h>
+#include <sys/lock.h>
+#include <sys/major.h>
+#include <sys/poll.h>
+#include <sys/proc.h>
+#include <sys/signal.h>
+#include <sys/tty.h>
+#include <vfs/vfs.h>
+#include <vm/vm_kmem.h>
+#include <pm/pm.h>
+#include <kern/console.h>
+#include <kern/sched.h>
+#include <arch/i386/intr.h>
+#include <drivers/console/pty.h>
 
 #define PTY_MAGIC 0x50545932 /* "PTY2" */
 
@@ -456,8 +457,7 @@ static void pty_destroy(pty_pair_t *p) {
      * the tty can still hold the pointer.
      */
     if (p->slave_tty) {
-        extern struct process *proc_first(void);
-        extern struct process *proc_next(struct process *);
+
         struct process *pr;
         for (pr = proc_first(); pr; pr = proc_next(pr)) {
             if (pr->tty == p->slave_tty) pr->tty = NULL;
