@@ -1,3 +1,4 @@
+#include <sys/copy.h>
 #include <sys/errno.h>
 #include <sys/file.h>
 #include <sys/input.h>
@@ -210,8 +211,6 @@ void input_enqueue(uint16_t type, uint16_t code, int32_t value) {
 #define EVIOC_NR_GNAME_BASE 0x06
 #define EVIOC_NR_GBIT_BASE 0x20
 #define EVIOC_NR_GRAB      0x90
-
-extern int copyout(const void *src, void *dst, unsigned int size);
 
 static int input_ioctl(fs_node_t *node, uint32_t request, void *arg) {
     (void)node;
