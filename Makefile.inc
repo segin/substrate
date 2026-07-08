@@ -20,6 +20,19 @@ endif
 
 TOP := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 
+# Header dependency tracking: every compile emits a <obj>.d via -MMD -MP (in
+# COMMON_FLAGS); pull those fragments back in so editing a header rebuilds every
+# object that includes it.  Without this an incremental `make` leaves objects
+# compiled against a stale struct layout -- e.g. adding a field to
+# usb_endpoint_t silently broke the (unrebuilt) USB HID drivers.  This must come
+# AFTER TOP is computed: the .d files land in MAKEFILE_LIST, and TOP uses
+# $(lastword $(MAKEFILE_LIST)).  Covers objects up to one subdir deep (fs/fat/).
+-include $(wildcard *.d */*.d)
+# The .d fragments define targets (foo.o: ...); since Makefile.inc is included
+# first, one of them would otherwise become the default goal.  Clear it so the
+# including Makefile's own first target (usually `all`) is the default again.
+.DEFAULT_GOAL :=
+
 # Branding utility for native Substrate binaries
 BRANDELF = $(TOP)/usr.bin/brandelf/brandelf
 
@@ -34,7 +47,7 @@ DESTDIR ?= $(TOP)/dist
 # to libcalls (__sync_val_compare_and_swap_4 etc) that the
 # substrate libgcc.a does not provide.  Putting it in COMMON_FLAGS
 # rather than just KERNEL_CFLAGS keeps user binaries consistent.
-COMMON_FLAGS = -m32 $(WARNFLAGS) -g -fno-stack-protector -mno-sse -mno-sse2 -mno-mmx -march=i486 -mtune=i486
+COMMON_FLAGS = -m32 $(WARNFLAGS) -g -fno-stack-protector -mno-sse -mno-sse2 -mno-mmx -march=i486 -mtune=i486 -MMD -MP
 USR_INCLUDE = $(TOP)/include
 SYS_INCLUDE = $(TOP)/sys/include
 GCC_INCLUDE = $(shell $(CC) -m32 -print-file-name=include 2>/dev/null)

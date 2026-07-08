@@ -9,4 +9,4 @@ virtio_drv.o: $(OBJS)
 	$(CC) $(CFLAGS) -I../../include -I../../ -c -o $@ $<
 
 clean:
-	rm -f *.o
+	rm -f *.o *.d

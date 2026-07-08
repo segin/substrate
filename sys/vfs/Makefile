@@ -12,4 +12,4 @@ vfs_subsys.o: $(OBJS)
 	$(LD) $(LDFLAGS) -r -o $@ $(OBJS)
 
 clean:
-	rm -f *.o
+	rm -f *.o *.d
