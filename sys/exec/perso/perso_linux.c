@@ -1,39 +1,34 @@
-#include <exec/perso/personality.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <sys/poll.h>
-#include <sys/ioctl.h>
-#include <sys/termios.h>
+#include <string.h>
+
+#include <sys/compiler.h>
 #include <sys/copy.h>
 #include <sys/errno.h>
-#include <sys/file.h>
-#include <sys/uio.h>
-#include <exec/perso/compat.h>
-#include <exec/perso/linux/linux_syscalls.h>
 #include <sys/fcntl.h>
+#include <sys/file.h>
+#include <sys/futex.h>
+#include <sys/ioctl.h>
+#include <sys/kern_syscalls.h>
+#include <sys/poll.h>
+#include <sys/proc.h>
+#include <sys/signal.h>
+#include <sys/stat.h>
+#include <sys/syscall_impl.h>
+#include <sys/termios.h>
+#include <sys/types.h>
+#include <sys/uio.h>
+#include <vm/vm_kmem.h>
+#include <vfs/vfs.h>
+#include <kern/sched.h>
+#include <exec/perso/compat.h>
 #include <exec/perso/linux_user.h>
+#include <exec/perso/personality.h>
 #include <exec/perso/perso_ipc_sem.h>
 #include <exec/perso/linux/linux_blkio.h>
 #include <exec/perso/linux/linux_errno.h>
 #include <exec/perso/linux/linux_exec.h>
-#include <sys/signal.h>
-#include <sys/proc.h>
-#include <string.h>
-#include <sys/syscall_impl.h>
-#include <sys/futex.h>
-#include <sys/kern_syscalls.h>
-#include <vfs/vfs.h>
-#include <vm/vm_kmem.h>
-
-/* Missing in syscall_impl.h but used here */
-extern int sys_kill(int pid, int sig);
-extern int sys_select(int n, void *r, void *w, void *e, void *t);
-extern int sys_yield(void);
-
-/* Helpers from linux_sig.c or similar */
-extern void linux_sendsig(void *handler, int sig, uint32_t mask, uint32_t flags, void *regs_ptr);
+#include <exec/perso/linux/linux_syscalls.h>
 
 #define LINUX_UTS_FIELD_LEN 65
 #define LINUX_IOV_MAX 1024
@@ -889,8 +884,7 @@ static int linux_sys_oldselect(void *lsp) {
 }
 
 static int linux_sys_clone(uint32_t flags, void *child_stack, int *parent_tidptr, void *tls, int *child_tidptr) {
-    extern int arch_fork_with_stack(void *child_stack);
-    extern int arch_clone_thread(void *child_stack, uint32_t tls_base, int *clear_child_tid);
+
 
     const uint32_t CLONE_SIGNAL_MASK     = 0x000000FFu;
     const uint32_t CLONE_VM              = 0x00000100u;

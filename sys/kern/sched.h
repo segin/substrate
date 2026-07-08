@@ -75,6 +75,7 @@ thread_t *sched_create_thread(process_t *proc, void (*entry_point)(void*), void 
 int sched_fork_process(process_t *parent, void *stack);
 int sched_fork_thread(process_t *proc, void *stack);
 int arch_fork_with_stack(void *child_stack);
+int arch_clone_thread(void *child_stack, uint32_t tls_base, int *clear_child_tid);
 int sched_spawn_kernel_process(void (*entry)(void*), void *arg);
 
 void sched_yield(void);
