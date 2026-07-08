@@ -1,0 +1,72 @@
+.Dd July 8, 2026
+.Dt RENICE 1
+.Os Substrate
+.Sh NAME
+.Nm renice
+.Nd alter priority of running processes
+.Sh SYNOPSIS
+.Nm
+.Op Fl n
+.Ar priority
+.Oo Op Fl p
+.Ar pid ... Oc
+.Op Fl g Ar pgrp ...
+.Op Fl u Ar user ...
+.Sh DESCRIPTION
+.Nm
+alters the scheduling priority
+.Pq nice value
+of one or more running processes.
+.Ar priority
+is an absolute nice value in the range
+.Fl 20
+(most favourable scheduling) to
+.Li 19
+(least favourable); it may be preceded by
+.Fl n
+for compatibility.
+Values outside this range are clamped to the nearest limit.
+.Pp
+The operands following the priority are process IDs by default.
+The flags below change how subsequent operands are interpreted:
+.Bl -tag -width Ds
+.It Fl p
+Interpret the following operands as process IDs (the default).
+.It Fl g
+Interpret the following operands as process-group IDs.
+.It Fl u
+Interpret the following operands as users, given either as a login
+name or a numeric user ID.
+.El
+.Pp
+Users other than the super-user may only alter the priority of
+processes they own, and may only
+.Em raise
+the nice value (lower the priority); the kernel enforces this and
+.Nm
+reports the resulting error.
+.Sh EXIT STATUS
+.Ex -std
+.Sh EXAMPLES
+Change the priority of process IDs 987 and 32 to 5:
+.Pp
+.Dl renice 5 987 32
+.Pp
+Give all processes owned by
+.Ar daemon
+the least favourable priority:
+.Pp
+.Dl renice 19 -u daemon
+.Pp
+Favour process group 100 (super-user only):
+.Pp
+.Dl renice -10 -g 100
+.Sh SEE ALSO
+.Xr nice 1 ,
+.Xr getpriority 2 ,
+.Xr setpriority 2
+.Sh STANDARDS
+The
+.Nm
+utility conforms to
+.St -p1003.1 .

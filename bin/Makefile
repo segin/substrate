@@ -56,6 +56,7 @@ SUBDIRS = \
 	native_test \
 	newgrp \
 	nice \
+	renice \
 	nproc \
 	od \
 	passwd \
