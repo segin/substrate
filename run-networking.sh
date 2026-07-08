@@ -97,6 +97,13 @@ set -eu
 #            drives: the first --floppy is fd0 (A:), the second fd1 (B:).
 #            Images are attached raw — a standard 1.44 MB diskette is 1474560
 #            bytes.  substrate's floppy driver enumerates the media.
+#   --usb-version=VER
+#            select the emulated USB host controller: 1.1 = UHCI
+#            (piix3-usb-uhci, the default), 2.0 = EHCI (usb-ehci), 3.0 = xHCI
+#            (qemu-xhci).  All USB devices (kbd, mouse, --usb-host passthrough,
+#            --usb-audio) attach to the chosen controller.  NOTE: substrate
+#            currently only drives UHCI; 2.0/3.0 need the in-progress EHCI/xHCI
+#            drivers, without which the guest sees no USB devices.
 GFX=0
 GFX_MODE="1024x768@32"   # used for bare --gfx; --gfx=WxH@bpp overrides
 KVM=0
@@ -109,6 +116,7 @@ USB_HOST_DEVICES=""        # newline-separated VID:PID / BUS.ADDR passthrough sp
 EXTRA_DRIVES=""
 EXTRA_CTRL_DRIVES=""
 FLOPPY_IMAGES=""           # newline-separated floppy diskette images (fd0, fd1)
+USB_VERSION="1.1"          # 1.1=UHCI (default), 2.0=EHCI, 3.0=xHCI
 while [ $# -gt 0 ]; do
     case "$1" in
         --gfx)      GFX=1 ;;
@@ -162,12 +170,29 @@ $1" ;;
         --floppy=*)
             FLOPPY_IMAGES="$FLOPPY_IMAGES
 ${1#--floppy=}" ;;
+        --usb-version=*)
+            USB_VERSION="${1#--usb-version=}"
+            case "$USB_VERSION" in
+                1.1|2.0|3.0) : ;;
+                *) echo "run-networking.sh: --usb-version must be 1.1, 2.0, or 3.0 (got '$USB_VERSION')" >&2; exit 1 ;;
+            esac ;;
         *)
             echo "run-networking.sh: unknown argument '$1'" >&2
             exit 1 ;;
     esac
     shift
 done
+
+# USB host controller selection (--usb-version).  All USB devices attach to
+# this controller's bus (id=usbctl).  substrate only drives UHCI today; EHCI/
+# xHCI need the in-progress substrate drivers or the guest sees no USB.
+case "$USB_VERSION" in
+    1.1) USB_CTRL="-device piix3-usb-uhci,id=usbctl" ;;
+    2.0) USB_CTRL="-device usb-ehci,id=usbctl" ;;
+    3.0) USB_CTRL="-device qemu-xhci,id=usbctl" ;;
+esac
+USB_BUS=",bus=usbctl.0"
+echo "run-networking.sh: USB $USB_VERSION host controller (${USB_CTRL#-device })"
 
 # Build the qemu args for any --drive images.  Each extra image gets the
 # next AHCI port (1..5) on the existing ich9-ahci controller, so the guest
@@ -309,7 +334,7 @@ for spec in $USB_HOST_DEVICES; do
             echo "run-networking.sh: --usb-host needs VID:PID (hex, e.g. 05ac:110b) or BUS.ADDR (decimal, e.g. 1.5): '$spec'" >&2
             exit 1 ;;
     esac
-    USB_HOST_ARGS="$USB_HOST_ARGS -device usb-host,$match,id=usbhost$uidx"
+    USB_HOST_ARGS="$USB_HOST_ARGS -device usb-host,$match,id=usbhost$uidx$USB_BUS"
     echo "run-networking.sh: passing host USB device $spec through to the guest" \
          "(claimed from the host driver; run as root or grant /dev/bus/usb access if it fails)"
     uidx=$((uidx + 1))
@@ -352,7 +377,7 @@ if [ "$USB_AUDIO_HOST" -eq 1 ]; then
     AUDIO_ARGS=""
     echo "run-networking.sh: real USB audio device passed through -> guest /dev/audio0 (plays on the physical device)"
 elif [ "$USB_AUDIO" -eq 1 ]; then
-    AUDIO_ARGS="-audiodev $AUDIODRV,id=audio0 -device usb-audio,audiodev=audio0"
+    AUDIO_ARGS="-audiodev $AUDIODRV,id=audio0 -device usb-audio,audiodev=audio0$USB_BUS"
     echo "run-networking.sh: emulated USB Audio Class device (UAC 1.0) -> guest /dev/audio0"
 else
     AUDIO_ARGS="-audio driver=$AUDIODRV,model=ac97,id=audio0"
@@ -478,7 +503,7 @@ qemu-system-i386 -cpu qemu32,+sse,+sse2 $ACCEL_ARG \
   $EXTRA_DRIVE_ARGS \
   $EXTRA_CTRL_ARGS \
   $FLOPPY_ARGS \
-  -device piix3-usb-uhci -device usb-kbd -device usb-mouse \
+  $USB_CTRL -device usb-kbd$USB_BUS -device usb-mouse$USB_BUS \
   $USB_HOST_ARGS \
   $NETDEV_ARGS \
   -kernel "$KERNEL" \
