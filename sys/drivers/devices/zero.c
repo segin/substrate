@@ -9,15 +9,16 @@
  * This implementation follows BSD-like semantics used by Substrate.
  */
 
-#include <vfs/vfs.h>
-#include <sys/errno.h>
 #include <string.h>
-#include <sys/poll.h>
+
+#include <sys/errno.h>
 #include <sys/mman.h>
-#include <arch/i386/pmm.h>
-#include <arch/i386/pmap.h>
+#include <sys/poll.h>
 #include <sys/proc.h>
+#include <vfs/vfs.h>
 #include <kern/console.h>
+#include <arch/i386/pmap.h>
+#include <arch/i386/pmm.h>
 
 #define KERNEL_DIRECT_MAP_BASE 0xC0000000U
 
@@ -104,7 +105,6 @@ static void *zero_mmap(fs_node_t *node, void *addr, size_t length, int prot, int
         return (void *)-1;
     }
 
-    extern process_t *current_process;
 
     for (uint32_t virt = start; virt < end; virt += 4096) {
         void *page_virt = pmm_alloc_block();
