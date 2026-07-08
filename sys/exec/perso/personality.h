@@ -64,6 +64,7 @@ extern struct personality personality_svr4;
 extern struct personality personality_netbsd;
 extern struct personality personality_openbsd;
 extern struct personality personality_solaris;
+extern struct personality personality_sunos;
 extern struct personality personality_elks;
 
 void elks_personality_init(void);
