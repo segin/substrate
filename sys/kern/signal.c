@@ -1,23 +1,24 @@
-#include <sys/signal.h>
+#include <stddef.h>
+#include <string.h>
+
+#include <sys/copy.h>
+#include <sys/core.h>
+#include <sys/errno.h>
 #include <sys/kern_syscalls.h>
 #include <sys/proc.h>
+#include <sys/resource.h>
 #include <sys/session.h>
-#include <sys/errno.h>
-#include <kern/sched.h>
-#include <kern/sleepq.h>
-#include <arch/i386/idt.h>
+#include <sys/signal.h>
+#include <sys/time.h>
+#include <pm/pm.h>
 #include <kern/console.h>
 #include <kern/cmdline.h>
 #include <kern/panic.h>
-#include <stddef.h>
-#include <string.h>
-#include <pm/pm.h>
-#include <exec/perso/personality.h>
-#include <sys/core.h>
-#include <sys/resource.h>
-#include <sys/time.h>
+#include <kern/sched.h>
+#include <kern/sleepq.h>
 #include <kern/time.h>
-#include <sys/kern_syscalls.h>
+#include <arch/i386/idt.h>
+#include <exec/perso/personality.h>
 
 /*
  * POSIX real-time signal queue (the per-process rtsig_q[] in sys/proc.h).
@@ -527,7 +528,7 @@ int sys_sigaction(int sig, const void *act, void *oact) {
         current_process &&
         (current_process->perso_id == PERS_FREEBSD ||
          current_process->perso_id == PERS_NETBSD)) {
-        extern int kprintf(const char *fmt, ...);
+
         registers_t *r = current_thread ? (registers_t *)current_thread->syscall_regs : NULL;
         if (r) {
             kprintf("[ABORT] pid=%d eip=0x%08x esp=0x%08x ebp=0x%08x\n",
@@ -984,7 +985,7 @@ int signal_sleep_interrupted(void) {
         /* An orphaned process group discards terminal-generated stops
          * (TSTP/TTIN/TTOU) so it cannot wedge itself unkillable; an explicit
          * SIGSTOP always stops.  Mirrors signal_handle_pending(). */
-        extern int pgrp_is_orphaned(struct pgrp *pgrp);
+
         __sync_fetch_and_and(&current_thread->sig_pending, ~sigmask(stop_sig));
         if (stop_sig != SIGSTOP && current_process->p_pgrp &&
             pgrp_is_orphaned(current_process->p_pgrp)) {
@@ -1250,8 +1251,7 @@ void pgsignal(int pgrp_id, int sig) {
     if (pgrp_id <= 0 || sig <= 0 || sig >= NSIG) return;
     
     /* Use new struct pgrp API from pgrp.c */
-    extern struct pgrp *pgrp_find(int pgid);
-    extern void pgrp_signal(struct pgrp *pgrp, int sig);
+
     
     struct pgrp *pgrp = pgrp_find(pgrp_id);
     if (pgrp) {
@@ -1338,7 +1338,7 @@ void sigexit(process_t *p, int sig) {
     }
     
     /* Terminate the process */
-    extern void proc_exit(int status);
+
     p->p_flag |= P_SIGEXIT;
     p->exit_code = exit_status;
     proc_exit(exit_status);
@@ -1433,7 +1433,7 @@ int sys_kill(int pid, int sig) {
     }
     else {
         // pid < -1: Send to process group -pid
-        extern struct pgrp *pgrp_find(int pgid);
+
         struct pgrp *pgrp = pgrp_find(-pid);
         int permitted = 0;
         int matched = 0;
@@ -1632,7 +1632,7 @@ void signal_handle_pending(registers_t *regs) {
               * itself unkillable with no shell to continue it.  SIGSTOP is
               * never discardable (POSIX) — an explicit SIGSTOP always stops,
               * orphaned or not. */
-             extern int pgrp_is_orphaned(struct pgrp *pgrp);
+
              if (sig != SIGSTOP && current_process->p_pgrp &&
                  pgrp_is_orphaned(current_process->p_pgrp)) {
                  return;
@@ -1768,7 +1768,7 @@ void signal_handle_pending(registers_t *regs) {
         p->sendsig((void*)handler, sig, restore_mask, flags, regs);
     } else {
         // Fallback to native sendsig if no personality hook (should not happen for valid perso)
-        extern void sendsig(sig_t handler, int sig, uint32_t mask, uint32_t flags, registers_t *regs);
+
         sendsig(handler, sig, restore_mask, flags, regs);
     }
     signal_clear_trap_context(current_thread, sig);
