@@ -1,32 +1,37 @@
-#include <stdint.h>
-#include <stddef.h>
 #include <errno.h>
-#include <sys/param.h>
-#include <sys/syscall_impl.h>
-#include <sys/stat.h>
-#include <sys/proc.h>
-#include <sys/mount.h>
-#include <sys/file.h>
-#include <sys/kern_syscalls.h>
-#include <sys/copy.h>
-#include <sys/umtx.h>
-#include <vm/vm_kmem.h>
-#include <sys/fcntl.h>
-#include <sys/tty.h>
-#include <sys/vt.h>
-#include <sys/sysinfo.h>
-#include <exec/perso/personality.h>
-#include <exec/perso/compat.h>
-#include <exec/perso/freebsd/freebsd_user.h>
-#include <exec/perso/freebsd/freebsd_syscalls.h>
-#include <kern/sched.h>
-#include <vfs/vfs.h>
+#include <stddef.h>
+#include <stdint.h>
 #include <string.h>
 #include <termios.h>
-#include <drivers/console/console.h>
 
-extern file_t *file_alloc(void);
-extern void file_free(file_t *f);
+#include <sys/compiler.h>
+#include <sys/copy.h>
+#include <sys/fcntl.h>
+#include <sys/file.h>
+#include <sys/kern_syscalls.h>
+#include <sys/mount.h>
+#include <sys/param.h>
+#include <sys/proc.h>
+#include <sys/random.h>
+#include <sys/stat.h>
+#include <sys/syscall_impl.h>
+#include <sys/tty.h>
+#include <sys/umtx.h>
+#include <sys/vt.h>
+#include <sys/sysinfo.h>
+#include <vm/vm_kmem.h>
+#include <vm/vm_map.h>
+#include <vfs/vfs.h>
+#include <pm/pm.h>
+#include <kern/file.h>
+#include <kern/sched.h>
+#include <kern/version.h>
+#include <arch/i386/pmap.h>
+#include <drivers/console/console.h>
+#include <exec/perso/compat.h>
+#include <exec/perso/personality.h>
+#include <exec/perso/freebsd/freebsd_syscalls.h>
+#include <exec/perso/freebsd/freebsd_user.h>
 
 
 
@@ -222,8 +227,7 @@ int sys_nice(int inc) {
  * Uses the pmap layer to change page protections.
  * PROT_READ=0x1, PROT_WRITE=0x2, PROT_EXEC=0x4 match VM_PROT_* values.
  */
-extern int pmap_protect(struct pmap *, uintptr_t, uintptr_t, uint32_t);
-extern int vm_map_protect(struct vm_map *, uintptr_t, uintptr_t, uint8_t);
+
 
 int sys_mprotect(void *addr, size_t len, int prot) {
     uintptr_t start = (uintptr_t)addr;
@@ -280,7 +284,7 @@ int sys_mprotect(void *addr, size_t len, int prot) {
  * its first prompt read.  Translate the cloexec variants into the
  * non-cloexec equivalent + a follow-up F_SETFD(FD_CLOEXEC).
  */
-extern int proc_fcntl(process_t *, int, int, int);
+
 #define FBSD_F_DUPFD_CLOEXEC  17
 #define FBSD_F_DUP2FD_CLOEXEC 18
 #define FBSD_F_DUP2FD          10
@@ -294,7 +298,7 @@ int freebsd_sys_fcntl(int fd, int cmd, int arg) {
     }
     if (cmd == FBSD_F_DUP2FD || cmd == FBSD_F_DUP2FD_CLOEXEC) {
         /* dup2-style: set up arg as the new fd; close-and-replace. */
-        extern int sys_dup2(int, int);
+
         int rc = sys_dup2(fd, arg);
         if (rc < 0) return rc;
         if (cmd == FBSD_F_DUP2FD_CLOEXEC) {
@@ -332,13 +336,13 @@ int sys_pause(void) {
  * If times is NULL, set both to current time.
  * Otherwise, times points to struct { time_t actime; time_t modtime; }.
  */
-extern time_t kern_time(time_t *);
+
 
 int sys_utime(const char *path, void *times) {
     char kpath[256];
     if (copyinstr(path, kpath, sizeof(kpath), NULL) != 0) return -EFAULT;
 
-    extern fs_node_t *fs_root;
+
     fs_node_t *root = current_process->root_node ? current_process->root_node : fs_root;
     fs_node_t *cwd = current_process->cwd_node ? current_process->cwd_node : root;
     fs_node_t *start = (kpath[0] == '/') ? root : cwd;
@@ -1059,7 +1063,7 @@ int freebsd_sys_sysctl(int *name, unsigned int namelen, void *oldp, size_t *oldl
             return fbsd_sysctl_str(
                 "FreeBSD 14.3-RELEASE (Substrate personality)\n", oldp, oldlenp);
         if (kname[1] == 10) { /* KERN_HOSTNAME */
-            extern char kernel_hostname[];
+
             return fbsd_sysctl_str(kernel_hostname, oldp, oldlenp);
         }
         if (kname[1] == 24) { /* KERN_OSRELDATE */
@@ -1080,7 +1084,7 @@ int freebsd_sys_sysctl(int *name, unsigned int namelen, void *oldp, size_t *oldl
             return 0;
         }
         if (kname[1] == 37) { /* KERN_ARND - secure random bytes */
-            extern int random_get_bytes_flags(void *, size_t, unsigned int);
+
             size_t want = 0;
             if (oldlenp && copyin(oldlenp, &want, sizeof(size_t)) != 0) return -EFAULT;
             if (want == 0 || want > 4096) return -EINVAL;
