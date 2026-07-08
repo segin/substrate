@@ -13,8 +13,7 @@
 #include <string.h>
 #include <stdio.h>
 
-/* Helper from geom_subr.c */
-extern const char *geom_bsd_fstype_name(uint8_t fstype);
+
 
 /*
  * ============================================================

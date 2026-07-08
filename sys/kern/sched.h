@@ -149,4 +149,7 @@ uint32_t sched_count_threads(void);
 void sched_periodic_balance(void);
 thread_t *sched_idle_balance(void);
 
+/* Interactivity scoring (sched_interactivity.c) */
+int sched_interactivity_boost(thread_t *t);
+
 #endif

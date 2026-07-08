@@ -1,9 +1,10 @@
 #include <rtc.h>
 #include <arch/x86-common/io.h>
 #include <kern/console.h>
+#include <kern/time.h>
 #include <stdint.h>
 
-extern int64_t boot_time;
+
 
 static uint8_t rtc_read_reg(uint8_t reg) {
     outb(CMOS_ADDRESS, reg);

@@ -198,6 +198,10 @@ int geom_get_partition_count(geom_disk_t *disk);
 int geom_guid_equal(const uint8_t *a, const uint8_t *b);
 int geom_guid_is_zero(const uint8_t *guid);
 
+/* Type name helpers (defined in geom_subr.c) */
+const char *geom_mbr_type_name(uint8_t type);
+const char *geom_bsd_fstype_name(uint8_t fstype);
+
 /*
  * ============================================================
  * On-Disk Structures (packed for correct memory layout)

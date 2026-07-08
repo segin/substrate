@@ -13,9 +13,7 @@
 #include <string.h>
 #include <stdio.h>
 
-/* Forward declaration for recursive scan */
-extern void geom_scan(geom_disk_t *disk, uint64_t offset, int depth, const char *prefix);
-extern const char *geom_mbr_type_name(uint8_t type);
+
 
 static void geom_summary_append(char *buf, size_t buf_size, int *first, const char *name) {
     size_t len;

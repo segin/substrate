@@ -20,9 +20,7 @@
  * ============================================================
  */
 
-/* Helper from geom_subr.c */
-extern int geom_guid_equal(const uint8_t *a, const uint8_t *b);
-extern int geom_guid_is_zero(const uint8_t *guid);
+
 
 static void geom_summary_append(char *buf, size_t buf_size, int *first, const char *name) {
     size_t len;

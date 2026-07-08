@@ -13,7 +13,8 @@
 static uint32_t last_decay_tick = 0;
 static uint32_t last_recalc_tick = 0;
 
-extern int sched_interactivity_boost(thread_t *t);
+
+
 
 // Decay priority for a CPU-bound thread
 static void decay_thread_priority(thread_t *t) {

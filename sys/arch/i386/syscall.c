@@ -640,7 +640,6 @@ int sys_vfork(void) {
     return child_pid;
 }
 
-extern void isr128(void); 
 void syscall_init(void) {
     idt_set_gate(0x80, (uint32_t)isr128, 0x08, IDT_FLAG_USER_INT_GATE);
 }
