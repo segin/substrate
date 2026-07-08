@@ -1,11 +1,12 @@
-#include <drivers/video/vga.h>
-#include <kern/console.h>
-#include <arch/x86-common/io.h>
 #include <stdint.h>
 #include <string.h>
 
-/* Global framebuffer state (from fb.c) */
-extern fb_info_t fb;
+#include <kern/console.h>
+#include <arch/x86-common/io.h>
+#include <drivers/video/fb.h>
+#include <drivers/video/vga.h>
+
+/* Global framebuffer state (declared in fb.h) */
 
 /* ================== Forward Declarations ================== */
 static void vga_putpixel_linear(int x, int y, uint32_t color);

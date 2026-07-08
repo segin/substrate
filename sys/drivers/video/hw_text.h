@@ -19,4 +19,6 @@ void hw_text_redraw_active(void);
 void hw_text_draw_statusline(const char *line, int cols, int row);
 int hw_text_get_terminal_size(int *cols, int *rows);
 
+extern int hw_text_active;
+
 #endif

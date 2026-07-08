@@ -9,35 +9,34 @@
 #include <stdint.h>
 #include <string.h>
 
-#include <kern/cmdline.h>
-#include <kern/console.h>
+#include <sys/copy.h>
+#include <sys/errno.h>
 #include <sys/fb.h>
 #include <sys/file.h>
+#include <sys/lock.h>
 #include <sys/mman.h>
 #include <sys/proc.h>
-#include <vfs/vfs.h>
+#include <vm/vm_kmem.h>
 #include <vm/vm_map.h>
 #include <vm/vm_object.h>
 #include <vm/vm_pager.h>
+#include <vfs/vfs.h>
+#include <kern/cmdline.h>
+#include <kern/console.h>
 #include <kern/resource.h>
-#include <sys/copy.h>
-#include <sys/errno.h>
-#include <vm/vm_kmem.h>
-
 #include <arch/i386/pmap.h>
 #include <arch/i386/pmm.h>
-#include <sys/lock.h>
-
 #include <drivers/video/bga.h>
 #include <drivers/video/fb.h>
 #include <drivers/video/fb_console.h>
 #include <drivers/video/font.h>
+#include <drivers/video/hw_text.h>
 
 /* ==================== Global State ==================== */
 
 fb_info_t fb;
 int fb_active = 0;
-extern int hw_text_active;
+
 
 /* Multi-framebuffer device registry */
 fb_info_t fb_devices[FB_MAX_DEVICES];
@@ -925,8 +924,7 @@ void video_register_driver(video_driver_t *drv) {
 }
 
 /* External install functions for drivers (Since we lack constructors) */
-extern void bga_install(void);
-extern void vga_install(void);
+
 
 /* Default Multiboot Driver Wrapper */
 static multiboot_info_t *saved_mbi = NULL;

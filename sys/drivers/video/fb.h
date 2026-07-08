@@ -108,4 +108,7 @@ int fb_parse_vga_mode(const char *arg, uint32_t *width, uint32_t *height, uint32
 /* Linear framebuffer putpixel (exported for driver use) */
 void linear_fb_putpixel(int x, int y, uint32_t color);
 
+void bga_install(void);
+void vga_install(void);
+
 #endif /* _FB_H */
