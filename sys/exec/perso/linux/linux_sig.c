@@ -1,16 +1,13 @@
-#include <sys/signal.h>
-#include <sys/proc.h>
-#include <exec/perso/linux/linux_user.h>
-#include <arch/i386/idt.h>
-#include <arch/i386/signal_arch.h>   /* SIG_TRAMPOLINE_ADDR */
-#include <string.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 
-/* These should be exported from sys/arch/i386/signal.c or shared in a header */
-extern int copyout(const void *src, void *dst, size_t size);
-extern int copyin(const void *src, void *dst, size_t size);
-extern int validate_user_addr(const void *addr, size_t size);
+#include <sys/copy.h>
+#include <sys/proc.h>
+#include <sys/signal.h>
+#include <arch/i386/idt.h>
+#include <arch/i386/signal_arch.h>
+#include <exec/perso/linux/linux_user.h>
 
 /*
  * populate_linux_siginfo - Fill in linux_siginfo_t structure

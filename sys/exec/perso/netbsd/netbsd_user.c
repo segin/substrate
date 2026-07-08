@@ -1,16 +1,17 @@
-#include <exec/perso/netbsd/netbsd_user.h>
-#include <sys/kern_syscalls.h>
-#include <sys/syscall_impl.h>
-#include <sys/stat.h>
-#include <sys/copy.h>
-#include <sys/fcntl.h>
-#include <sys/namei.h>
-#include <string.h>
-#include <sys/errno.h>
 #include <stddef.h>
-#include <sys/sysarch.h>
+#include <string.h>
 
-extern int sys_sysarch(int op, void *parms);
+#include <sys/copy.h>
+#include <sys/errno.h>
+#include <sys/fcntl.h>
+#include <sys/kern_syscalls.h>
+#include <sys/namei.h>
+#include <sys/random.h>
+#include <sys/stat.h>
+#include <sys/sysarch.h>
+#include <sys/syscall_impl.h>
+#include <arch/i386/pmm.h>
+#include <exec/perso/netbsd/netbsd_user.h>
 
 /* NetBSD at-flags identical to FreeBSD/POSIX (NOFOLLOW=0x200,
  * REMOVEDIR=0x800).  Substrate native at-flags differ (NOFOLLOW=0x100,
@@ -300,8 +301,7 @@ int netbsd_sys_lwp_setprivate(uintptr_t tcb) {
  * leaves userland actually queries) and answer both the CTL_QUERY
  * enumerations and ordinary by-number leaf reads.
  * =================================================================== */
-extern int sys_cpu_count(void);
-extern int random_get_bytes_flags(void *, size_t, unsigned int);
+
 
 #define NBSD_CTL_KERN          1
 #define NBSD_CTL_VM            2
@@ -375,7 +375,7 @@ struct nbnode {
     uint64_t   (*qfn)(void);                    /* dynamic 64-bit getter */
 };
 
-extern uint32_t pmm_get_total_memory(void);
+
 
 static int nb_ncpu(void) { int n = sys_cpu_count(); return n < 1 ? 1 : n; }
 /* kern.hostname tracks the live hostname (sethostname(2)), not a constant. */

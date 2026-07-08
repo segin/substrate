@@ -1,15 +1,13 @@
-#include <sys/signal.h>
-#include <sys/proc.h>
-#include <sys/kern_syscalls.h>
-#include <sys/syscall_impl.h>
-#include <exec/perso/netbsd/netbsd_user.h>
-#include <arch/i386/idt.h>
-#include <arch/i386/signal_arch.h>
 #include <string.h>
 
-extern int copyout(const void *src, void *dst, size_t size);
-extern int copyin(const void *src, void *dst, size_t size);
-extern int validate_user_addr(const void *addr, size_t size);
+#include <sys/copy.h>
+#include <sys/kern_syscalls.h>
+#include <sys/proc.h>
+#include <sys/signal.h>
+#include <sys/syscall_impl.h>
+#include <arch/i386/idt.h>
+#include <arch/i386/signal_arch.h>
+#include <exec/perso/netbsd/netbsd_user.h>
 
 /*
  * NetBSD <-> substrate-native signal-number translation.
