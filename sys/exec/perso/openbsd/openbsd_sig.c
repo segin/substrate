@@ -1,12 +1,10 @@
-#include <sys/signal.h>
-#include <sys/proc.h>
-#include <exec/perso/openbsd/openbsd_user.h>
-#include <arch/i386/idt.h>
 #include <string.h>
 
-extern int copyout(const void *src, void *dst, size_t size);
-extern int copyin(const void *src, void *dst, size_t size);
-extern int validate_user_addr(const void *addr, size_t size);
+#include <sys/copy.h>
+#include <sys/proc.h>
+#include <sys/signal.h>
+#include <arch/i386/idt.h>
+#include <exec/perso/openbsd/openbsd_user.h>
 
 void openbsd_sendsig(void *handler, int sig, uint32_t mask, uint32_t flags, void *regs_ptr) {
     (void)flags;

@@ -1,21 +1,18 @@
-#include <arch/i386/syscall.h>
-#include <exec/perso/compat.h>
-#include <exec/perso/freebsd/freebsd_syscalls.h>
-#include <exec/perso/freebsd/freebsd_user.h>
-#include <exec/perso/personality.h>
-#include <kern/version.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <sys/syscall_impl.h>
-#include <sys/kern_syscalls.h>
-#include <sys/copy.h>
 #include <string.h>
+
+#include <sys/copy.h>
+#include <sys/kern_syscalls.h>
+#include <sys/syscall_impl.h>
+#include <kern/version.h>
+#include <arch/i386/syscall.h>
+#include <exec/perso/compat.h>
+#include <exec/perso/personality.h>
 #include <exec/perso/perso_ipc_sem.h>
 #include <exec/perso/perso_ipc_shm.h>
-
-/* Personality Signal Hooks */
-extern void freebsd_sendsig(void *handler, int sig, uint32_t mask, uint32_t flags, void *regs);
-extern int freebsd_sys_sigreturn(void *regs);
+#include <exec/perso/freebsd/freebsd_syscalls.h>
+#include <exec/perso/freebsd/freebsd_user.h>
 
 static void *freebsd_syscalls[MAX_SYSCALLS] = {
     [FREEBSD_SYS_semget]   = (void *)&freebsd_sys_semget,
@@ -565,8 +562,7 @@ static struct syscall_fmt freebsd_fmts[MAX_SYSCALLS] = {
     [FREEBSD_SYS_getfsstat_freebsd13] = { 3, { ARG_PTR, ARG_INT, ARG_INT } },
 };
 
-extern char *strncpy(char *dest, const char *src, size_t n);
-extern void *memset(void *s, int c, size_t n);
+
 
 struct personality personality_freebsd = {
     .name = "FreeBSD",
