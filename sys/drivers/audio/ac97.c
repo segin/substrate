@@ -8,16 +8,9 @@
  * when the software FIFO fills.
  */
 
-#include <drivers/audio/ac97.h>
-#include <drivers/audio/audio.h>
-#include <drivers/audio/audio_fifo.h>
+#include <stdio.h>
+#include <string.h>
 
-#include <kern/console.h>
-#include <kern/device.h>
-#include <kern/pci.h>
-#include <kern/sched.h>
-#include <kern/time.h>
-#include <kern/sleepq.h>
 #include <sys/audioio.h>
 #include <sys/dma.h>
 #include <sys/errno.h>
@@ -28,11 +21,18 @@
 #include <vm/vm_map.h>
 #include <vm/vm_object.h>
 #include <vm/vm_pager.h>
+#include <kern/console.h>
+#include <kern/device.h>
+#include <kern/pci.h>
+#include <kern/sched.h>
+#include <kern/sleepq.h>
+#include <kern/time.h>
+#include <arch/i386/intr.h>
 #include <arch/i386/pmap.h>
 #include <arch/x86-common/io.h>
-#include <arch/i386/intr.h>
-#include <stdio.h>
-#include <string.h>
+#include <drivers/audio/ac97.h>
+#include <drivers/audio/audio.h>
+#include <drivers/audio/audio_fifo.h>
 
 #define AC97_PCI_CLASS_MULTIMEDIA  0x04
 #define AC97_PCI_SUBCLASS_AUDIO    0x01
@@ -439,7 +439,7 @@ static int ac97_close(audio_dev_t *adev)
 static int ac97_set_params(audio_dev_t *adev, audio_info_t *info)
 {
 	ac97_dev_t *d = adev->driver_data;
-	extern int kprintf(const char *fmt, ...);
+
 	uint16_t enc = ac97_encode_rate(info->play.sample_rate, d->has_vra);
 	uint16_t back;
 
