@@ -5,16 +5,19 @@
  * Based on OpenBSD i386 ABI.
  */
 
-#include <exec/perso/personality.h>
 #include <stddef.h>
-#include <arch/i386/syscall.h>
-#include <sys/syscall_impl.h>
-#include <exec/perso/openbsd/openbsd_syscalls.h>
-#include <sys/resource.h>
-#include <sys/times.h>
-#include <sys/futex.h>
-#include <sys/errno.h>
 #include <stdint.h>
+#include <string.h>
+
+#include <sys/errno.h>
+#include <sys/futex.h>
+#include <sys/resource.h>
+#include <sys/syscall_impl.h>
+#include <sys/times.h>
+#include <arch/i386/syscall.h>
+#include <exec/perso/personality.h>
+#include <exec/perso/openbsd/openbsd_syscalls.h>
+#include <exec/perso/openbsd/openbsd_user.h>
 
 /*
  * OpenBSD futex(2) (syscall 331), OpenBSD 6.2+.  Prototype:
@@ -52,7 +55,7 @@ int openbsd_sys_getrusage(int who, struct rusage *rusage) {
     struct tms t;
     if ((clock_t)sys_times(&t) == (clock_t)-1) return -1;
 
-    extern void *memset(void *, int, size_t);
+
     memset(rusage, 0, sizeof(struct rusage));
 
     // Ticks to timeval. HZ=128.
@@ -314,8 +317,7 @@ static struct syscall_fmt openbsd_fmts[MAX_SYSCALLS] = {
     [OPENBSD_SYS_dup2]           = { 2, { ARG_INT, ARG_INT } },
 };
 
-extern void openbsd_sendsig(void *handler, int sig, uint32_t mask, uint32_t flags, void *regs);
-extern int openbsd_sys_sigreturn(void *regs);
+
 
 struct personality personality_openbsd = {
     .name = "OpenBSD",
