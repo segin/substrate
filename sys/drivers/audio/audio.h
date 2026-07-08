@@ -193,4 +193,9 @@ void  *audio_node_mmap(struct fs_node *node, void *addr, size_t length,
 void oss_register_device(audio_dev_t *dev, int unit);
 int  oss_ioctl_dispatch(audio_dev_t *dev, uint32_t request, void *arg);
 
+void null_audio_init(void);
+void ac97_init(void);
+void sb16_init(void);
+void hda_init(void);
+
 #endif /* _DRIVERS_AUDIO_H */

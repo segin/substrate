@@ -6,7 +6,8 @@
  * vectors plugged in via audio_register_device().
  */
 
-#include <drivers/audio/audio.h>
+#include <stdio.h>
+#include <string.h>
 
 #include <sys/audioio.h>
 #include <sys/copy.h>
@@ -14,13 +15,10 @@
 #include <sys/lock.h>
 #include <sys/major.h>
 #include <sys/proc.h>
+#include <vfs/vfs.h>
 #include <kern/cmdline.h>
 #include <kern/console.h>
-#include <vfs/vfs.h>
-#include <stdio.h>
-#include <string.h>
-
-extern void devfs_register_device(fs_node_t *node);
+#include <drivers/audio/audio.h>
 
 static audio_dev_t *audio_devices_head;
 static spinlock_t audio_dev_lock = SPINLOCK_INIT("audio_dev");
@@ -631,10 +629,7 @@ void audio_unregister_device(audio_dev_t *dev)
 	}
 }
 
-extern void null_audio_init(void);
-extern void ac97_init(void);
-extern void sb16_init(void);
-extern void hda_init(void);
+
 
 void audio_init(void)
 {
