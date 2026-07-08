@@ -92,6 +92,7 @@
 
 /* Mass Storage Protocols */
 #define USB_MSC_PROTO_BOT       0x50  /* Bulk-Only Transport */
+#define USB_MSC_PROTO_UAS       0x62  /* USB Attached SCSI */
 
 /* Transfer status */
 #define USB_XFER_OK             0
@@ -375,6 +376,7 @@ typedef struct usb_class_driver {
 /* Initialization */
 void usb_init(void);
 void usb_msc_init(void);
+void uas_init(void);
 void uac_init(void);
 void usb_hid_init(void);
 void usb_hid_mouse_init(void);
