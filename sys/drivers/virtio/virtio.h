@@ -104,4 +104,7 @@ int virtio_gpu_upload_cursor(uint32_t resource_id,
 int virtio_gpu_move_cursor(uint32_t x, uint32_t y);
 int virtio_gpu_set_cursor_enabled(int enabled);
 
+// VirtIO Network
+int virtio_net_setup(uint8_t bus, uint8_t slot, uint8_t func);
+
 #endif

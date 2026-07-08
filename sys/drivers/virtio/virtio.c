@@ -1,11 +1,12 @@
-#include <drivers/virtio/virtio.h>
+#include <stdio.h>
+
 #include <arch/i386/cpu.h>
 #include <arch/i386/pci.h>
 #include <arch/x86-common/io.h>
 #include <kern/console.h>
 #include <kern/device.h>
 #include <kern/driver.h>
-#include <stdio.h>
+#include <drivers/virtio/virtio.h>
 
 static const device_id_t virtio_blk_pci_ids[] = {
     { VIRTIO_VENDOR_ID, VIRTIO_PCI_DEVICE_ID_BLK, 0, 0, 0 },
@@ -32,7 +33,6 @@ static const device_id_t virtio_net_pci_ids[] = {
     { 0, 0, 0, 0, 0 },
 };
 
-extern int virtio_net_setup(uint8_t bus, uint8_t slot, uint8_t func);
 
 static int virtio_net_pci_attach(struct device *dev) {
     pci_device_t *pdev = pci_find_device_by_kdev(dev);
