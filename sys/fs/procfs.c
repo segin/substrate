@@ -167,7 +167,6 @@ static uint32_t gen_memtrack(char *buf, size_t size, void *opaque) {
 
 static uint32_t gen_uptime(char *buf, size_t size, void *opaque) {
     (void)opaque;
-    extern time_t get_uptime(void);
     uint32_t t = (uint32_t)get_uptime();
     return snprintf(buf, size, "%u.00 0.00\n", t);
 }

@@ -33,10 +33,11 @@
  */
 #include <stdint.h>
 #include <string.h>
-#include <ext2/ext2.h>
-#include <vfs/vfs.h>
 #include <stdlib.h>
 #include <errno.h>
+
+#include <vfs/vfs.h>
+#include <ext2/ext2.h>
 
 void *kmalloc(size_t);
 void  kfree(void *, size_t);
@@ -199,7 +200,7 @@ static int ext2_xattr_walk_list(const uint8_t *entries,
     return 0;
 }
 
-extern uint32_t ext2_read_block(ext2_fs_t *fs, uint32_t block_num, void *buffer);
+
 
 /* Block-stored xattr fetch (i_file_acl != 0).  Allocates a scratch
  * block, reads it, validates the header, walks for (idx, suffix).  */
