@@ -1,17 +1,17 @@
-#include <sys/input.h>
+#include <sys/errno.h>
 #include <sys/file.h>
-#include <vm/vm_kmem.h>
-#include <kern/sched.h>
-#include <string.h>
-#include <kern/console.h>
-#include <vfs/vfs.h>
-#include <sys/time.h>
-#include <kern/time.h>
+#include <sys/input.h>
 #include <sys/lock.h>
+#include <sys/poll.h>
+#include <sys/time.h>
 #include <sys/vt.h>
 #include <sys/vtio.h>
-#include <sys/errno.h>
-#include <sys/poll.h>
+#include <vm/vm_kmem.h>
+#include <vfs/vfs.h>
+#include <kern/console.h>
+#include <kern/sched.h>
+#include <kern/time.h>
+#include <string.h>
 #include <arch/i386/intr.h>
 
 /* Global input event ring.  This was 64, which is far too small for a
@@ -411,7 +411,6 @@ static uint32_t input_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t
          * kill -9 on a process stuck in read() of /dev/input/event0
          * couldn't reap it — which is exactly the substrate gap the
          * tty layer fixed earlier. */
-        extern void sched_sleep(void *chan);
         if (current_thread) {
             current_thread->flags |= THREAD_F_INTERRUPTIBLE;
             current_thread->wait_chan = &global_event_log;
