@@ -130,7 +130,7 @@ Fix the *class*, not just the instance:
 - **[ ] DRV-07** `sys/drivers/usb/ehci.c:294` — bulk data-toggle advanced once per
   qTD regardless of packet count → wrong DATA PID on even-packet transfers → USB2
   mass-storage reads hang.
-- **[ ] DRV-08** `sys/drivers/storage/scsi/scsi.c:276` — SCSI request + device pools
+- **[x] DRV-08** `sys/drivers/storage/scsi/scsi.c:276` — SCSI request + device pools
   have zero locking on the SMP/preemptible I/O stack → cross-wired CDBs.
 
 ### libc

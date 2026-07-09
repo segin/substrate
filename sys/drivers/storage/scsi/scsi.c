@@ -13,7 +13,16 @@
 #include <stdio.h>
 #include <kern/console.h>
 #include <kern/time.h>
+#include <sys/lock.h>
 #include <drivers/storage/scsi/scsi.h>
+
+/* Serialises the request free-list and the device lists below.  Two threads
+ * driving I/O on different disks (e.g. AHCI + USB) enter scsi_request_alloc()
+ * concurrently on this SMP/preemptible stack; without this they pop the same
+ * scsi_request_t and cross-wire each other's CDBs/status.  IRQ-safe so it is
+ * correct even if a completion path ever frees a request from interrupt
+ * context. */
+static spinlock_t scsi_pool_lock = SPINLOCK_INIT("scsi_pool");
 
 /* Kernel time function */
 static inline uint64_t kernel_time_ms(void) {
@@ -188,14 +197,17 @@ void scsi_unregister_link(scsi_link_t *link) {
  */
 
 scsi_device_t *scsi_device_alloc(void) {
+    unsigned long flags = spinlock_acquire_irq(&scsi_pool_lock);
     if (!scsi_free_devices) {
+        spinlock_release_irq(&scsi_pool_lock, flags);
         kprint("SCSI: Device pool exhausted\n");
         return NULL;
     }
-    
+
     scsi_device_t *dev = scsi_free_devices;
     scsi_free_devices = dev->next;
-    
+    spinlock_release_irq(&scsi_pool_lock, flags);
+
     memset(dev, 0, sizeof(scsi_device_t));
     dev->max_queue_depth = 1;  /* Default single-command queue */
     
@@ -205,34 +217,41 @@ scsi_device_t *scsi_device_alloc(void) {
 void scsi_device_free(scsi_device_t *dev) {
     if (!dev) return;
     
-    /* Ensure device is not in the registry */
+    /* Ensure device is not in the registry (takes scsi_pool_lock itself, so
+     * this must run BEFORE we grab the lock for the free-list push below). */
     scsi_device_unregister(dev);
-    
+
     /* Return to pool */
     memset(dev, 0, sizeof(scsi_device_t));
+    unsigned long flags = spinlock_acquire_irq(&scsi_pool_lock);
     dev->next = scsi_free_devices;
     scsi_free_devices = dev;
+    spinlock_release_irq(&scsi_pool_lock, flags);
 }
 
 int scsi_device_register(scsi_device_t *dev) {
     if (!dev) return -1;
     
-    /* Check for duplicates */
-    scsi_device_t *existing = scsi_device_lookup(dev->bus, dev->target, dev->lun);
-    if (existing) {
+    /* Duplicate check + insert must be atomic against a concurrent register
+     * of the same address.  scsi_device_lookup() is a lock-free read walk, so
+     * calling it under the pool lock does not nest. */
+    unsigned long flags = spinlock_acquire_irq(&scsi_pool_lock);
+    if (scsi_device_lookup(dev->bus, dev->target, dev->lun)) {
+        spinlock_release_irq(&scsi_pool_lock, flags);
         kprint("SCSI: Device already registered at ");
         char buf[32];
         snprintf(buf, sizeof(buf), "%d:%d:%d\n", dev->bus, dev->target, dev->lun);
         kprint(buf);
         return -1;
     }
-    
+
     /* Add to list */
     dev->next = scsi_device_list;
     scsi_device_list = dev;
     scsi_device_count++;
     dev->device_num = scsi_next_device_num++;
-    
+    spinlock_release_irq(&scsi_pool_lock, flags);
+
     /* Log registration */
     char buf[128];
     snprintf(buf, sizeof(buf), "scsi: %d:%d:%d %s %s [0x%02x]\n",
@@ -246,16 +265,19 @@ int scsi_device_register(scsi_device_t *dev) {
 void scsi_device_unregister(scsi_device_t *dev) {
     if (!dev) return;
     
+    unsigned long flags = spinlock_acquire_irq(&scsi_pool_lock);
     scsi_device_t **pp = &scsi_device_list;
     while (*pp) {
         if (*pp == dev) {
             *pp = dev->next;
             dev->next = NULL;
             scsi_device_count--;
+            spinlock_release_irq(&scsi_pool_lock, flags);
             return;
         }
         pp = &(*pp)->next;
     }
+    spinlock_release_irq(&scsi_pool_lock, flags);
 }
 
 scsi_device_t *scsi_device_lookup(uint8_t bus, uint8_t target, uint16_t lun) {
@@ -274,14 +296,17 @@ scsi_device_t *scsi_device_lookup(uint8_t bus, uint8_t target, uint16_t lun) {
  */
 
 scsi_request_t *scsi_request_alloc(void) {
+    unsigned long flags = spinlock_acquire_irq(&scsi_pool_lock);
     if (!scsi_free_requests) {
+        spinlock_release_irq(&scsi_pool_lock, flags);
         kprint("SCSI: Request pool exhausted\n");
         return NULL;
     }
-    
+
     scsi_request_t *req = scsi_free_requests;
     scsi_free_requests = req->next;
-    
+    spinlock_release_irq(&scsi_pool_lock, flags);
+
     memset(req, 0, sizeof(scsi_request_t));
     req->state = SCSI_REQ_STATE_PENDING;
     req->timeout_ms = 30000;  /* 30 second default */
@@ -294,11 +319,13 @@ scsi_request_t *scsi_request_alloc(void) {
 
 void scsi_request_free(scsi_request_t *req) {
     if (!req) return;
-    
+
     memset(req, 0, sizeof(scsi_request_t));
     req->state = SCSI_REQ_STATE_FREE;
+    unsigned long flags = spinlock_acquire_irq(&scsi_pool_lock);
     req->next = scsi_free_requests;
     scsi_free_requests = req;
+    spinlock_release_irq(&scsi_pool_lock, flags);
 }
 
 void scsi_request_init(scsi_request_t *req, scsi_device_t *dev) {
