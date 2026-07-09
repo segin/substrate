@@ -322,6 +322,48 @@ int usb_get_descriptor(usb_device_t *dev, uint8_t type, uint8_t index,
                                 buf, size);
 }
 
+int usb_get_string(usb_device_t *dev, uint8_t index, char *buf, uint16_t bufsize)
+{
+    if (!buf || bufsize == 0)
+        return -1;
+    buf[0] = '\0';
+    if (index == 0)             /* index 0 is the LANGID table, not a string */
+        return 0;
+
+    /* wValue = (STRING << 8 | index); wIndex = LANGID.  0x0409 (US English) is
+     * effectively universal and what QEMU and real devices answer to. */
+    uint16_t wValue = (uint16_t)((USB_DT_STRING << 8) | index);
+
+    /* Step 1: read only the 2-byte header (bLength, bDescriptorType) to learn
+     * the descriptor's true length.  Over-reading EP0 (asking for 255 up front)
+     * makes some HC/device state machines mishandle the short-packet
+     * completion, which corrupts EP0 for later transfers -- so read exactly. */
+    uint8_t hdr[2];
+    int ret = usb_control_transfer(dev,
+                                   USB_DIR_IN | USB_TYPE_STANDARD | USB_RECIP_DEVICE,
+                                   USB_REQ_GET_DESCRIPTOR, wValue, 0x0409, hdr, 2);
+    if (ret != USB_XFER_OK || hdr[1] != USB_DT_STRING || hdr[0] < 2)
+        return 0;
+
+    /* Step 2: read exactly bLength bytes (header + UTF-16LE body). */
+    uint8_t raw[256];
+    uint16_t dlen = hdr[0];
+    ret = usb_control_transfer(dev,
+                               USB_DIR_IN | USB_TYPE_STANDARD | USB_RECIP_DEVICE,
+                               USB_REQ_GET_DESCRIPTOR, wValue, 0x0409, raw, dlen);
+    if (ret != USB_XFER_OK && ret != USB_XFER_SHORT)
+        return 0;
+
+    /* Decode the UTF-16LE body (raw[2..dlen-1]) to ASCII. */
+    uint16_t out = 0;
+    for (uint16_t i = 2; i + 1 < dlen && out + 1 < bufsize; i += 2) {
+        uint16_t u = (uint16_t)(raw[i] | (raw[i + 1] << 8));
+        buf[out++] = (u >= 0x20 && u < 0x7f) ? (char)u : '?';
+    }
+    buf[out] = '\0';
+    return out;
+}
+
 int usb_set_address(usb_device_t *dev, uint8_t address)
 {
     int ret;
@@ -695,10 +737,28 @@ static int usb_enumerate_device_inner(usb_hcd_t *hcd, uint8_t port, uint8_t spee
         return -1;
     }
 
-    kprintf("usb: addr %u: %04x:%04x class %02x/%02x/%02x (%u endpoints)\n",
-            dev->address, dev->vendor_id, dev->product_id,
-            dev->if_class, dev->if_subclass, dev->if_protocol,
-            dev->num_endpoints);
+    /* Fetch the human-readable manufacturer/product strings.  Best-effort:
+     * failures leave the buffers empty and we fall back to the numeric IDs. */
+    usb_get_string(dev, dev->dev_desc.iManufacturer,
+                   dev->manufacturer, sizeof(dev->manufacturer));
+    usb_get_string(dev, dev->dev_desc.iProduct,
+                   dev->product, sizeof(dev->product));
+
+    if (dev->manufacturer[0] || dev->product[0]) {
+        kprintf("usb: addr %u: %04x:%04x class %02x/%02x/%02x (%u endpoints) "
+                "\"%s%s%s\"\n",
+                dev->address, dev->vendor_id, dev->product_id,
+                dev->if_class, dev->if_subclass, dev->if_protocol,
+                dev->num_endpoints,
+                dev->manufacturer,
+                (dev->manufacturer[0] && dev->product[0]) ? " " : "",
+                dev->product);
+    } else {
+        kprintf("usb: addr %u: %04x:%04x class %02x/%02x/%02x (%u endpoints)\n",
+                dev->address, dev->vendor_id, dev->product_id,
+                dev->if_class, dev->if_subclass, dev->if_protocol,
+                dev->num_endpoints);
+    }
 
     /* Match and bind a class driver */
     usb_match_driver(dev);

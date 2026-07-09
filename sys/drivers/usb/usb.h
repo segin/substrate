@@ -240,6 +240,12 @@ typedef struct usb_device {
     uint16_t vendor_id;
     uint16_t product_id;
 
+    /* Human-readable strings decoded from the device's iManufacturer /
+     * iProduct string descriptors (UTF-16LE -> ASCII).  Empty if the device
+     * exposes none or the fetch failed. */
+    char     manufacturer[64];
+    char     product[64];
+
     /* Cached full device descriptor */
     struct usb_device_descriptor dev_desc;
 
@@ -427,6 +433,14 @@ int      usb_iso_schedule(usb_device_t *dev, usb_endpoint_t *ep, uint16_t frame,
 void     usb_iso_reclaim(usb_device_t *dev, void *handle);
 
 /* Standard Requests */
+/*
+ * Fetch string descriptor `index`, decode UTF-16LE -> NUL-terminated ASCII in
+ * `buf` (non-ASCII -> '?').  `index` 0 yields "" (index 0 is the LANGID table).
+ * Reads the 2-byte header first, then exactly bLength bytes, so it never
+ * over-reads EP0.  Returns ASCII length, or a negative USB_XFER_* error.
+ */
+int usb_get_string(usb_device_t *dev, uint8_t index, char *buf, uint16_t bufsize);
+
 int usb_get_descriptor(usb_device_t *dev, uint8_t type, uint8_t index,
                        void *buf, uint16_t size);
 int usb_set_address(usb_device_t *dev, uint8_t address);
