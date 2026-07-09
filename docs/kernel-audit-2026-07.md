@@ -201,15 +201,15 @@ Fix the *class*, not just the instance:
   `-ENOENT`/`-EISDIR`.
 
 ### exec / arch
-- **[ ] EXEC-01** `sys/exec/formats/elf.c:76` — `elf_note_detect_os` computes
+- **[x] EXEC-01** `sys/exec/formats/elf.c:76` — `elf_note_detect_os` computes
   `desc_off` from untrusted `namesz`/`descsz` with only a wrap-vulnerable guard →
   OOB read off the stack buffer → panic.
-- **[ ] EXEC-02** `sys/exec/formats/elf.c:1524` — `elf_execve` early-returns on the
+- **[x] EXEC-02** `sys/exec/formats/elf.c:1524` — `elf_execve` early-returns on the
   E2BIG arg-count path without freeing `image` (~8.5 KiB) or the fd → leak per call.
-- **[ ] ARCH-02** `sys/arch/i386/syscall.c:110` — `sys_set_thread_area` writes
+- **[!] ARCH-02 (deferred)** `sys/arch/i386/syscall.c:110` — `sys_set_thread_area` writes
   `entry_number` through the raw user pointer with no fault trap → panic on a
   read-only user page.
-- **[ ] EXEC-03** `sys/exec/perso/freebsd/freebsd_sig.c:32` — `SA_ONSTACK` tested
+- **[x] EXEC-03** `sys/exec/perso/freebsd/freebsd_sig.c:32` — `SA_ONSTACK` tested
   only via `SS_DISABLE`, so a thread with a zero-init alt-stack gets `esp=NULL` →
   SIGSEGV instead of frame delivery.
 

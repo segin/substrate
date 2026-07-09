@@ -80,11 +80,22 @@ static int elf_note_detect_os(const uint8_t *buf, uint32_t len) {
         const Elf32_Nhdr *nhdr = (const Elf32_Nhdr *)(const void *)(buf + off);
         uint32_t namesz = nhdr->n_namesz;
         uint32_t descsz = nhdr->n_descsz;
+        /* A note's name/desc cannot exceed the note segment.  Rejecting absurd
+         * sizes up front stops the aligned-offset additions below from wrapping
+         * 32-bit and slipping past the `next_off > len` guard while desc_off
+         * points far outside buf (OOB read -> kernel panic on a crafted
+         * binary, EXEC-01). */
+        if (namesz > len || descsz > len) {
+            break;
+        }
         uint32_t name_off = off + sizeof(*nhdr);
         uint32_t desc_off = name_off + elf_note_align4(namesz);
         uint32_t next_off = desc_off + elf_note_align4(descsz);
 
-        if (next_off > len) {
+        /* Monotonic + in-bounds: catches any residual align4 rounding overflow
+         * and guarantees every access below (memcmp at name_off, *abi at
+         * desc_off) stays within [buf, buf+len). */
+        if (desc_off < name_off || next_off < desc_off || next_off > len) {
             break;
         }
 
@@ -1520,36 +1531,32 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
         return -ENOEXEC;
     }
 
-    // Capture arguments and environment
+    // Capture arguments and environment.  These early-out paths must free the
+    // already-allocated image + open fd, not leak them (E2BIG on a large argv
+    // is attacker-triggerable), so route through cleanup like every other
+    // failure.  [EXEC-02]
     ret = exec_count_args(argv, &argc, "execve: Too many arguments\n");
-    if (ret < 0) return ret;
+    if (ret < 0) { error_code = ret; goto cleanup; }
 
     ret = exec_count_args(envp, &envc, "execve: Too many env vars\n");
-    if (ret < 0) return ret;
+    if (ret < 0) { error_code = ret; goto cleanup; }
 
     // Allocate buffers
     if (argc > 0) {
         k_argv = kmalloc((argc + 1) * sizeof(char*));
-        if (!k_argv) return -12; // ENOMEM
+        if (!k_argv) { error_code = -ENOMEM; goto cleanup; }
         k_argv[argc] = NULL;
     }
 
     if (envc > 0) {
         k_envp = kmalloc((envc + 1) * sizeof(char*));
-        if (!k_envp) {
-            if (k_argv) kfree(k_argv, (argc + 1) * sizeof(char*));
-            return -12;
-        }
+        if (!k_envp) { error_code = -ENOMEM; goto cleanup; }
         k_envp[envc] = NULL;
     }
 
     // Always allocate full buffer to avoid TOCTOU re-measurement
     arg_buffer = kmalloc(ARG_MAX_BYTES);
-    if (!arg_buffer) {
-        if (k_argv) kfree(k_argv, (argc + 1) * sizeof(char*));
-        if (k_envp) kfree(k_envp, (envc + 1) * sizeof(char*));
-        return -12;
-    }
+    if (!arg_buffer) { error_code = -ENOMEM; goto cleanup; }
 
     // Copy strings
     char *p_buf = arg_buffer;
