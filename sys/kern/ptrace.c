@@ -116,17 +116,37 @@ int sys_ptrace(int req, int pid, int addr, int data) {
      * stops; remember the real parent to restore on detach. */
     if (req == PTRACE_ATTACH) {
         if (tracee == me || tracee->pid <= 1) return -EPERM;
-        if (tracee->p_flag & P_TRACED) return -EPERM;
+
+        /* Credential check: only root, or a tracer whose euid matches every one
+         * of the tracee's uids and egid matches every one of its gids, may
+         * attach.  Without this any unprivileged process could reparent, stop,
+         * and PEEK/POKE the memory + registers of any other user's process
+         * (privilege escalation / information disclosure). */
+        if (me->euid != 0 &&
+            (me->euid != tracee->uid || me->euid != tracee->euid ||
+             me->euid != tracee->suid ||
+             me->egid != tracee->gid || me->egid != tracee->egid ||
+             me->egid != tracee->sgid)) {
+            return -EPERM;
+        }
 
         mutex_lock(&proctree_lock);
+        /* Re-check the traced flag and perform the reparent + tracer/flag set
+         * atomically under proctree_lock, so two concurrent attachers can't
+         * both win (and holding the lock keeps the tracee from being reaped
+         * mid-attach). */
+        if (tracee->p_flag & P_TRACED) {
+            mutex_unlock(&proctree_lock);
+            return -EPERM;
+        }
         tracee->p_oparent = tracee->p_parent;
         ptrace_unlink_child(tracee->p_parent, tracee);
         tracee->p_parent = me;
         ptrace_link_child(me, tracee);
-        mutex_unlock(&proctree_lock);
-
         tracee->p_tracer = me;
         tracee->p_flag |= P_TRACED;
+        mutex_unlock(&proctree_lock);
+
         psignal(tracee, SIGSTOP);
         return 0;
     }

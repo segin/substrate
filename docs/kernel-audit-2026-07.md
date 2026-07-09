@@ -187,7 +187,7 @@ Fix the *class*, not just the instance:
   `(void*)-1` instead of `-ENOMEM` (libc maps it to EPERM).
 
 ### Scheduler / signals / IPC
-- **[ ] KERN-08** `sys/kern/ptrace.c:117` — `PTRACE_ATTACH` has no credential check
+- **[x] KERN-08** `sys/kern/ptrace.c:117` — `PTRACE_ATTACH` has no credential check
   (any process ptraces any other → privesc/infoleak) and its check/set race +
   no hold on the tracee.
 - **[ ] KERN-09** `sys/kern/futex.c:1108` — `pi_state.owner` is a bare cached
