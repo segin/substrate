@@ -40,6 +40,7 @@
 #include <vm/vm_kmem.h>
 #include <kern/sleepq.h>
 #include <kern/sched.h>
+#include <arch/i386/intr.h>
 #include <kern/time.h>
 #include <errno.h>
 #include <string.h>
@@ -369,20 +370,36 @@ static int ksem_wait_common(int id, uint64_t deadline)
 
         int index = (int)(s - posix_sems);
         s->ncnt++;
-        if (deadline)
-            current_thread->sleep_expiry = deadline;
         current_thread->sleep_status = 0;
-        if (current_thread)
-            current_thread->flags |= THREAD_F_INTERRUPTIBLE;
+        current_thread->flags |= THREAD_F_INTERRUPTIBLE;
+        /* Enqueue-and-release under intr_disable: a timer preempt landing
+         * between sleepq_add (which marks us THREAD_BLOCKED) and mutex_unlock
+         * would park us BLOCKED while still holding ksem_lock, and every
+         * sem_post needs ksem_lock to wake us -> permanent deadlock.  Mirrors
+         * mq_block() in posix_mqueue.c. */
+        uint32_t pf = intr_disable();
         sleepq_add(&posix_sems[index], current_thread);
+        if (deadline) {
+            current_thread->sleep_expiry = deadline;
+        } else if (current_thread->sleep_expiry == 0) {
+            /* Untimed wait: arm a ~100 ms lost-wakeup net so a post that raced
+             * the enqueue still recovers via sched_tick instead of hanging. */
+            uint32_t hz = get_hz();
+            uint64_t span = hz ? (hz / 10u) : 8u;
+            if (span == 0) span = 1;
+            current_thread->sleep_expiry = get_ticks() + span;
+        }
         mutex_unlock(&ksem_lock);
+        intr_restore(pf);
 
-        sched_yield();
+        if (current_thread->wait_chan == &posix_sems[index])
+            sched_yield();
 
         if (current_thread)
             current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
         /* sched_tick timeouts leave the stale sleepq entry linked; self-unlink
          * (idempotent if a post already dequeued us). */
+        current_thread->sleep_expiry = 0;
         sleepq_remove_thread(current_thread);
 
         mutex_lock(&ksem_lock);

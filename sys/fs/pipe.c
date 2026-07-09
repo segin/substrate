@@ -145,6 +145,29 @@ static int pipe_wait(void *chan, mutex_t *m) {
     return 0;
 }
 
+/* Block during fifo_open() until a peer arrives.  Same enqueue-and-release
+ * under intr_disable + lost-wakeup net as pipe_wait(), but NON-interruptible
+ * to preserve the original open() semantics (a looped interruptible wait would
+ * busy-spin on a pending signal, which cannot be delivered mid-syscall).
+ * Caller holds p->lock; it is still held on return. */
+static void fifo_open_wait(pipe_t *p, void *chan) {
+    uint32_t _pf = intr_disable();
+    sleepq_add(chan, current_thread);
+    if (current_thread->sleep_expiry == 0) {
+        uint32_t hz = get_hz();
+        uint64_t span = hz ? (hz / 20u) : 8u;   /* ~50 ms lost-wakeup net */
+        if (span == 0) span = 1;
+        current_thread->sleep_expiry = get_ticks() + span;
+    }
+    mutex_unlock(&p->lock);
+    intr_restore(_pf);
+    if (current_thread->wait_chan == chan)
+        sched_yield();
+    current_thread->sleep_expiry = 0;
+    sleepq_remove_thread(current_thread);
+    mutex_lock(&p->lock);
+}
+
 static size_t pipe_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
     pipe_endpoint_t *ep = (pipe_endpoint_t *)(uintptr_t)node->impl;
     pipe_t *p = ep ? ep->pipe : NULL;
@@ -568,10 +591,7 @@ int fifo_open(fs_node_t *inode, int oflags, fs_node_t **out) {
     /* O_RDWR never blocks. */
     if (accmode == O_RDONLY && !nonblock) {
         while (p->writers_open == 0) {
-            sleepq_add(p->wait_read, current_thread);
-            mutex_unlock(&p->lock);
-            sched_yield();
-            mutex_lock(&p->lock);
+            fifo_open_wait(p, p->wait_read);
         }
     } else if (accmode == O_WRONLY) {
         if (p->readers_open == 0) {
@@ -602,10 +622,7 @@ int fifo_open(fs_node_t *inode, int oflags, fs_node_t **out) {
                 return -ENXIO;
             }
             while (p->readers_open == 0) {
-                sleepq_add(p->wait_write, current_thread);
-                mutex_unlock(&p->lock);
-                sched_yield();
-                mutex_lock(&p->lock);
+                fifo_open_wait(p, p->wait_write);
             }
         }
     }

@@ -29,6 +29,8 @@
 #include <vm/vm_kmem.h>
 #include <kern/sleepq.h>
 #include <kern/sched.h>
+#include <arch/i386/intr.h>
+#include <kern/time.h>
 #include <errno.h>
 #include <string.h>
 #include <stdint.h>
@@ -359,13 +361,26 @@ int kern_semop(int semid, const struct sembuf *ksops, size_t nsops)
          * removed it -> report EIDRM, not the raw lookup error.  Without this
          * a blocked semop woken by rmid returned EINVAL from the freed slot. */
         blocked = 1;
-        if (current_thread)
-            current_thread->flags |= THREAD_F_INTERRUPTIBLE;
+        current_thread->flags |= THREAD_F_INTERRUPTIBLE;
+        /* Enqueue-and-release under intr_disable so a timer preempt can't park
+         * us THREAD_BLOCKED while still holding sem_lock (every waker needs it
+         * -> deadlock).  Arm a ~100 ms lost-wakeup net for this untimed wait so
+         * a post that raced the enqueue still recovers.  Mirrors mq_block(). */
+        uint32_t pf = intr_disable();
         sleepq_add(&semsets[index], current_thread);
+        if (current_thread->sleep_expiry == 0) {
+            uint32_t hz = get_hz();
+            uint64_t span = hz ? (hz / 10u) : 8u;
+            if (span == 0) span = 1;
+            current_thread->sleep_expiry = get_ticks() + span;
+        }
         mutex_unlock(&sem_lock);
-        sched_yield();
-        if (current_thread)
-            current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
+        intr_restore(pf);
+        if (current_thread->wait_chan == &semsets[index])
+            sched_yield();
+        current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
+        current_thread->sleep_expiry = 0;
+        sleepq_remove_thread(current_thread);
         mutex_lock(&sem_lock);
         /* Reverse our waiter count exactly (if the set still exists). */
         {
