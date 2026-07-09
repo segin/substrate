@@ -46,10 +46,10 @@ int kern_acct(const char *path) {
 
     // In a real kernel, we would check permissions here.
     fs_node_t *node = finddir_fs(fs_root, (char*)path); // Simple path lookup
-    if (!node) return -1; // ENOENT
+    if (!node) return -ENOENT;
 
     // Should verify it's a regular file
-    if ((node->flags & 0x7) == FS_DIRECTORY) return -1; // EISDIR
+    if ((node->flags & 0x7) == FS_DIRECTORY) return -EISDIR;
 
     acct_node = node;
     open_fs(acct_node, 1, 1); // Open for writing
@@ -97,7 +97,7 @@ void acct_process(int exitcode) {
 }
 
 int sys_getpgrp(void) {
-    if (!current_process || !current_process->p_pgrp) return -1;
+    if (!current_process || !current_process->p_pgrp) return -ESRCH;
     return current_process->p_pgrp->pg_id;
 }
 

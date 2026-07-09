@@ -388,12 +388,12 @@ time_t kern_time(time_t *tloc) {
 }
 
 int kern_stime(time_t *t) {
-    if (!t) return -1;
+    if (!t) return -EFAULT;
     boot_time = *t - (ticks / HZ);
     return 0;
 }
 int kern_gettimeofday(struct timeval *tv, struct timezone *tz) {
-    if (!tv) return -1;
+    if (!tv) return -EFAULT;
 
     time_t total_seconds = boot_time + (ticks / HZ);
     uint64_t base_usec = ((ticks % HZ) * 1000000ULL) / HZ;
@@ -422,7 +422,7 @@ int kern_gettimeofday(struct timeval *tv, struct timezone *tz) {
 #endif
 
 int kern_clock_gettime(clockid_t clk_id, struct timespec *tp) {
-    if (!tp) return -1;
+    if (!tp) return -EFAULT;
 
     /*
      * CPU-time clocks (read-only).  CLOCK_PROCESS_CPUTIME_ID is the total

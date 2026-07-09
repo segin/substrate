@@ -183,7 +183,7 @@ Fix the *class*, not just the instance:
   bucket index outside the depot lock → two CPUs install the same bucket (SMP).
 - **[ ] VM-11** `sys/vm/vm_kmem.c:217` — `kfree` large path reads `hdr->size` *after*
   freeing the pages → UAF read / corrupted accounting.
-- **[ ] VM-12** `sys/vm/vm_syscalls.c:276,457,474` — `sys_mmap` returns bare
+- **[x] VM-12** `sys/vm/vm_syscalls.c:276,457,474` — `sys_mmap` returns bare
   `(void*)-1` instead of `-ENOMEM` (libc maps it to EPERM).
 
 ### Scheduler / signals / IPC
@@ -197,7 +197,7 @@ Fix the *class*, not just the instance:
   APs schedule.
 - **[ ] KERN-11** `sys/kern/futex.c:883` — PI priority inheritance uses "larger =
   higher", inverted for SCHED_TIMESHARE, so a boost *lowers* the owner's weight.
-- **[ ] KERN-12** `sys/kern/acct.c:49,52` — `kern_acct` returns bare `-1` instead of
+- **[x] KERN-12** `sys/kern/acct.c:49,52` — `kern_acct` returns bare `-1` instead of
   `-ENOENT`/`-EISDIR`.
 
 ### exec / arch
@@ -293,7 +293,7 @@ Fix the *class*, not just the instance:
   `printf("%e",9.9999999)` emits `10.000000e+00`.
 - **[ ] LIBC-12** `lib/c/src/dirent.c:48` — `readdir` refill doesn't negate the
   kernel's `-errno` → a real failure is indistinguishable from EOF, stale errno.
-- **[ ] KERN-13** `sys/kern/acct.c:100` + `time.c:391,396,425` — bare `-1` on
+- **[x] KERN-13** `sys/kern/acct.c:100` + `time.c:391,396,425` — bare `-1` on
   (currently unreachable) NULL guards.
 - **[ ] KERN-14** `sys/kern/ioremap.c:15` + `ksyms.c:24` + `isa.c:16` — manual
   `extern` prototypes in .c files (project directive violation).

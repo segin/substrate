@@ -260,7 +260,7 @@ static vm_object_t *mmap_create_file_object(fs_node_t *node, size_t length, uint
 
 void *sys_mmap(void *addr, size_t length, int prot, int flags, int fd, uint64_t offset) {
     process_t *p = current_process;
-    if (!p || !p->vm_map) return (void *)-1;
+    if (!p || !p->vm_map) return (void *)(intptr_t)(-EINVAL);
     /* Invalid flags word (neither -- or both -- of MAP_SHARED/MAP_PRIVATE)
      * is EINVAL.  Returning a bare (void *)-1 would be negated by the libc
      * mmap wrapper into errno=EPERM instead (OPTS mmap/21-1). */
@@ -273,7 +273,7 @@ void *sys_mmap(void *addr, size_t length, int prot, int flags, int fd, uint64_t 
     /* Zero length is EINVAL and must be caught before page-rounding, which
      * also rejects 0 but would surface as a bare -1 == EPERM (OPTS mmap/32-1). */
     if (length == 0) return (void *)(intptr_t)(-EINVAL);
-    if (vm_round_page_size(length, &aligned_length) != 0) return (void *)-1;
+    if (vm_round_page_size(length, &aligned_length) != 0) return (void *)(intptr_t)(-ENOMEM);
 
     /* POSIX EINVAL cases that otherwise feed malformed ranges into the
      * file-object / device (/dev/mem) mmap paths: zero length, a
@@ -453,7 +453,7 @@ void *sys_mmap(void *addr, size_t length, int prot, int flags, int fd, uint64_t 
     }
     if (!obj) {
         if (commit_charged) vm_commit_uncharge(commit_pages);
-        return (void *)-1;
+        return (void *)(intptr_t)(-ENOMEM);
     }
 
     // Determine inheritance based on sharing
@@ -471,7 +471,7 @@ void *sys_mmap(void *addr, size_t length, int prot, int flags, int fd, uint64_t 
     if (vm_map_insert(map, obj, 0, v_addr, v_addr + aligned_length, vm_prot, max_prot, inheritance) != 0) {
         vm_object_deallocate(obj);
         if (commit_charged) vm_commit_uncharge(commit_pages);
-        return (void *)-1;
+        return (void *)(intptr_t)(-ENOMEM);
     }
 
     /*
