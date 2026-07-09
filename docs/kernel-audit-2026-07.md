@@ -60,10 +60,10 @@ Fix the *class*, not just the instance:
   context (timer tick, `^C`) and calls `sleepq_remove_thread()` → takes the sleepq
   bucket `sq_lock`, a plain non-IRQ-safe spinloop with no try/timeout → if the
   interrupted thread on that CPU holds the colliding bucket, **hard CPU lockup**.
-- **[ ] KERN-02** `sys/kern/ipc_sem.c:364` — SysV `semop` parks `THREAD_BLOCKED`
+- **[x] KERN-02** `sys/kern/ipc_sem.c:364` — SysV `semop` parks `THREAD_BLOCKED`
   holding `sem_lock` with no `intr_disable` window and no `sleep_expiry` fallback →
   permanent system-wide SysV-semaphore deadlock (the pipe/mqueue bug class).
-- **[ ] KERN-03** `sys/kern/posix_sem.c:377` — POSIX `sem_wait` has the same
+- **[x] KERN-03** `sys/kern/posix_sem.c:377` — POSIX `sem_wait` has the same
   unprotected window → named-semaphore deadlock.
 - **[ ] LIBC-01** `lib/c/stdio/stdio_core.c:141` — `fflush()` on an update-mode
   (`r+`) stream writes buffered **read** data back to the file:
@@ -158,7 +158,7 @@ Fix the *class*, not just the instance:
 ## MEDIUM
 
 ### Filesystems
-- **[ ] FS-06** `sys/fs/pipe.c:569` — `fifo_open` reintroduces the
+- **[x] FS-06** `sys/fs/pipe.c:569` — `fifo_open` reintroduces the
   THREAD_BLOCKED-holding-mutex deadlock (missing `intr_disable` window).
 - **[ ] FS-07** `sys/fs/ext2/ext2.c:3042` — `ext2_rename` has no ancestor/self check
   → `rename("/a","/a/b")` creates a detached directory cycle.
@@ -338,4 +338,30 @@ outside the libc implementations themselves.
 
 ## lib/m/ and lib/sys/ findings
 
-_(Appended when the dedicated audit pass completes.)_
+libsys is clean — the `syscall.S` stack/ABI discipline is correct (the documented
+nr-slot / return-address bugs are genuinely fixed, esp is balanced), and every
+typed wrapper routes negative-errno through `__sysret`. libm's core is solid. The
+real defects are a family of premature overflow thresholds plus low-impact C23
+edge cases.
+
+- **[ ] MATH-01** `lib/m/src/math_exp.c:107` — MEDIUM — `exp2()` overflow guard at
+  `x > 1023.0`, but `log2(DBL_MAX) ≈ 1023.9999`, so `exp2(1023.5)` returns INFINITY
+  + ERANGE instead of the representable `≈1.27e308`.
+- **[ ] MATH-02** `lib/m/src/math_exp.c:508` — MEDIUM — `pow()` uses the same too-low
+  `yl2x > 1023.0` cutoff → `pow(2.0, 1023.5)` returns INFINITY + ERANGE for a finite
+  result.
+- **[ ] SYS-01** `lib/sys/select.c:51` — LOW/MEDIUM — poll-timeout conversion done in
+  64-bit then stored into `int poll_timeout`; a `tv_sec` above ~24 days truncates to
+  a negative int → `poll` treats it as infinite → `select()` blocks forever.
+- **[ ] MATH-03** `lib/m/src/math_totalorder.c:98,115` — LOW — `totalorderl`/
+  `totalordermagl` cast `long double`→`double`, collapsing 11 mantissa bits → two
+  distinct 80-bit values report order-equal (violates IEEE totalOrder).
+- **[ ] MATH-04** `lib/m/src/math_totalorder.c:299,317` — LOW — `setpayloadl` sets
+  byte 9 bit 7 (the **sign** bit, not the mantissa MSB) → every result is a negative
+  pseudo-NaN; `setpayloadsigl` shares a payload-duplication bug.
+- **[ ] MATH-05** `lib/m/src/math_narrowing.c:183` — LOW — `ffma(double,...)` casts
+  operands to float before `fmaf`, discarding precision before the multiply → C23
+  narrowing contract violated.
+- **[ ] MATH-06** `lib/m/src/math_trig.c:296,304` — LOW — `sinh`/`cosh` inherit
+  `exp`'s overflow at `x>709.78`; true overflow is `~710.47`, so inputs in
+  `(709.78, 710.47)` spuriously return INFINITY + ERANGE.
