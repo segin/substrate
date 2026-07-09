@@ -104,7 +104,10 @@ double exp2(double x) {
     if (__builtin_isnan(x)) return x;
     if (x == 0.0) return 1.0;
     if (__builtin_isinf(x)) return (x > 0) ? INFINITY : 0.0;
-    if (x >  1023.0) { errno = ERANGE; return INFINITY; }
+    /* 2^x overflows only at x >= 1024 (2^1024 > DBL_MAX); results in
+     * [2^1023, 2^1024) are finite and representable, so the old x > 1023
+     * cutoff spuriously returned INFINITY+ERANGE for e.g. exp2(1023.5). */
+    if (x >= 1024.0) { errno = ERANGE; return INFINITY; }
     if (x < -1074.0) { errno = ERANGE; return 0.0; }
 
     return x87_exp2(x);
@@ -505,7 +508,9 @@ double pow(double x, double y) {
         "fstpl  %0"
         : "=m"(yl2x) : "m"(x), "m"(y));
 
-    if (yl2x >  1023.0) { errno = ERANGE; return  INFINITY; }
+    /* Same threshold correction as exp2(): 2^(y*log2 x) is finite up to but
+     * not including 2^1024, so pow(2.0, 1023.5) etc. must not be flagged. */
+    if (yl2x >= 1024.0) { errno = ERANGE; return  INFINITY; }
     if (yl2x < -1074.0) { errno = ERANGE; return  0.0; }
     return x87_exp2(yl2x);
 }

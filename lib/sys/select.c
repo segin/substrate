@@ -3,6 +3,8 @@
  *
  * Minimal implementation for basic select() usage with timeouts.
  */
+#include <limits.h>
+#include <stdint.h>
 #include <sys/syscall.h>
 #include <sys/select.h>
 #include <sys/poll.h>
@@ -45,10 +47,16 @@ int sys_select(int nfds, fd_set * __restrict readfds, fd_set * __restrict writef
         }
     }
     
-    /* Convert timeout to milliseconds */
+    /* Convert timeout to milliseconds.  tv_sec is 64-bit; computing in int
+     * lets a multi-week timeout (tv_sec > ~2.1e6) wrap to a negative value,
+     * which poll(2) treats as an infinite wait -> select() blocks forever.
+     * Compute in 64-bit and clamp to INT_MAX (poll's max finite timeout). */
     int poll_timeout = -1;
     if (timeout) {
-        poll_timeout = timeout->tv_sec * 1000 + timeout->tv_usec / 1000;
+        int64_t ms = (int64_t)timeout->tv_sec * 1000 + timeout->tv_usec / 1000;
+        if (ms < 0) ms = 0;
+        if (ms > INT_MAX) ms = INT_MAX;
+        poll_timeout = (int)ms;
     }
     
     /* Call poll syscall */

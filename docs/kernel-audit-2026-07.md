@@ -344,13 +344,13 @@ typed wrapper routes negative-errno through `__sysret`. libm's core is solid. Th
 real defects are a family of premature overflow thresholds plus low-impact C23
 edge cases.
 
-- **[ ] MATH-01** `lib/m/src/math_exp.c:107` — MEDIUM — `exp2()` overflow guard at
+- **[x] MATH-01** `lib/m/src/math_exp.c:107` — MEDIUM — `exp2()` overflow guard at
   `x > 1023.0`, but `log2(DBL_MAX) ≈ 1023.9999`, so `exp2(1023.5)` returns INFINITY
   + ERANGE instead of the representable `≈1.27e308`.
-- **[ ] MATH-02** `lib/m/src/math_exp.c:508` — MEDIUM — `pow()` uses the same too-low
+- **[x] MATH-02** `lib/m/src/math_exp.c:508` — MEDIUM — `pow()` uses the same too-low
   `yl2x > 1023.0` cutoff → `pow(2.0, 1023.5)` returns INFINITY + ERANGE for a finite
   result.
-- **[ ] SYS-01** `lib/sys/select.c:51` — LOW/MEDIUM — poll-timeout conversion done in
+- **[x] SYS-01** `lib/sys/select.c:51` — LOW/MEDIUM — poll-timeout conversion done in
   64-bit then stored into `int poll_timeout`; a `tv_sec` above ~24 days truncates to
   a negative int → `poll` treats it as infinite → `select()` blocks forever.
 - **[ ] MATH-03** `lib/m/src/math_totalorder.c:98,115` — LOW — `totalorderl`/
