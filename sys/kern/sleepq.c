@@ -326,18 +326,27 @@ static thread_t *sleepq_wake_one_internal(void *chan, int type, int pid) {
     return(t);
 }
 
+/*
+ * NOTE: the single-waiter wakes deliberately do NOT call
+ * sched_poll_wake_pollers().  Every caller of sleepq_wake_one[_private] is an
+ * internal synchronisation primitive being released -- mutex_unlock,
+ * kernel/POSIX semaphore post, rwlock -- none of which changes any pollable
+ * fd's readiness.  Broadcasting to every poll()/select() sleeper on each of
+ * those (mutex_unlock alone fires on essentially every locked kernel
+ * operation) produced a self-sustaining thundering-herd storm: pollers woke
+ * each other via the poll handlers' own mutex releases and the CPU never
+ * reached the hlt idle path (~100% kernel time).  Real fd readiness changes go
+ * through sleepq_wake_all() (pipe, af_unix) or sched_wakeup() (tty, tcp,
+ * af_inet), both of which still kick pollers -- so no wakeup is lost.
+ */
 thread_t *sleepq_wake_one(void *chan) {
-    thread_t *t = sleepq_wake_one_internal(chan, SLEEPQ_TYPE_SHARED, 0);
-    sched_poll_wake_pollers();
-    return t;
+    return sleepq_wake_one_internal(chan, SLEEPQ_TYPE_SHARED, 0);
 }
 
 thread_t *sleepq_wake_one_private(void *chan) {
     int pid = sleepq_current_private_pid();
     if (pid < 0) return NULL;
-    thread_t *t = sleepq_wake_one_internal(chan, SLEEPQ_TYPE_PRIVATE, pid);
-    sched_poll_wake_pollers();
-    return t;
+    return sleepq_wake_one_internal(chan, SLEEPQ_TYPE_PRIVATE, pid);
 }
 
 static int sleepq_wake_all_internal(void *chan, int type, int pid) {

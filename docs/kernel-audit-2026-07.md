@@ -72,6 +72,20 @@ Fix the *class*, not just the instance:
 
 ---
 
+## HIGH — performance (found live via gdb)
+
+- **[x] SCHED-01** `sys/kern/sleepq.c:331,339` — `poll(2)` thundering-herd storm:
+  `sleepq_wake_one`/`_private` broadcast to **all** `poll()`/`select()` waiters
+  (single global `g_poll_wake_chan`) on every call, and `mutex_unlock` calls
+  `sleepq_wake_one` on essentially every locked kernel operation. With several
+  processes in `poll()` (X, daemons), the poll handlers' own mutex releases wake
+  every poller, which re-scan and release more mutexes → self-sustaining; the CPU
+  never reaches the `hlt` idle path (~100% kernel time). Fixed by dropping the
+  poll-wake from the `_one` variants (all callers are internal sync primitives —
+  mutex/sem/rwlock — never fd readiness); real readiness still kicks pollers via
+  `sleepq_wake_all` / `sched_wakeup`. Verified live: idle VM went from 100% in
+  the scheduler to sitting in `enter_kernel_idle_loop`, X still comes up.
+
 ## HIGH
 
 ### Memory / arch
