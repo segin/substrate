@@ -160,9 +160,9 @@ Fix the *class*, not just the instance:
   have zero locking on the SMP/preemptible I/O stack → cross-wired CDBs.
 
 ### libc
-- **[ ] LIBC-02** `lib/c/src/cvt.c:97` — `fcvt_common` `memcpy`s the full number then
+- **[x] LIBC-02** `lib/c/src/cvt.c:97` — `fcvt_common` `memcpy`s the full number then
   truncates → buffer overflow for large magnitudes.
-- **[ ] LIBC-03** `lib/c/stdio/printf.c:80` — `ftoa` casts `double`→`int64` with no
+- **[x] LIBC-03** `lib/c/stdio/printf.c:80` — `ftoa` casts `double`→`int64` with no
   range check → `printf("%f",1e19)` prints `INT64_MIN`; poisons `%e/%g/fcvt`.
 
 ### Scheduler / signals
@@ -281,19 +281,19 @@ Fix the *class*, not just the instance:
   usbdevfs nodes are never removed on disconnect → leak per hotplug cycle.
 
 ### libc
-- **[ ] LIBC-04** `lib/c/src/stdlib.c:803` — `strtoul("-2")` returns the wrong value
+- **[x] LIBC-04** `lib/c/src/stdlib.c:803` — `strtoul("-2")` returns the wrong value
   and a spurious `ERANGE` (64-bit clamp applied to a negated in-range value).
-- **[ ] LIBC-05** `lib/c/stdio/stdio_core.c:80` — the global open-FILE list is
+- **[x] LIBC-05** `lib/c/stdio/stdio_core.c:80` — the global open-FILE list is
   mutated by `fdopen`/`fclose` and walked by `fflush(NULL)` with no lock.
-- **[ ] LIBC-06** `lib/c/src/stdlib.c:103` — `abort()` is `_exit(134)`; never raises
+- **[x] LIBC-06** `lib/c/src/stdlib.c:103` — `abort()` is `_exit(134)`; never raises
   SIGABRT, so handlers don't run and the parent sees WIFEXITED not WIFSIGNALED.
-- **[ ] LIBC-07** `lib/c/stdio/stdio_core.c:725` — `pclose` returns `WEXITSTATUS`
+- **[x] LIBC-07** `lib/c/stdio/stdio_core.c:725` — `pclose` returns `WEXITSTATUS`
   instead of the raw wait status POSIX requires.
-- **[ ] LIBC-08** `lib/c/stdio/stdio_core.c:113` — `fclose` ignores the flush result
+- **[x] LIBC-08** `lib/c/stdio/stdio_core.c:113` — `fclose` ignores the flush result
   → data lost to ENOSPC/EIO at close is reported as success.
-- **[ ] LIBC-09** `lib/c/stdio/scanf.c:226` — `%a` on `"0"` consumes the leading `0`
+- **[x] LIBC-09** `lib/c/stdio/scanf.c:226` — `%a` on `"0"` consumes the leading `0`
   and returns EOF instead of assigning 0.0.
-- **[ ] LIBC-10** `lib/c/src/time/time.c:456` — `mktime` treats the tm as UTC (no TZ)
+- **[x] LIBC-10** `lib/c/src/time/time.c:456` — `mktime` treats the tm as UTC (no TZ)
   and breaks pre-1970 dates.
 
 ---
@@ -315,9 +315,9 @@ Fix the *class*, not just the instance:
   block on a short write and leaves the cache slot populated.
 - **[ ] FS-12** `sys/fs/ext2/ext2.c:3446` — `ext2_unlink`/`rmdir`/`mkdir` deref
   `dir->impl` before the `!dir` NULL guard.
-- **[ ] LIBC-11** `lib/c/stdio/printf.c:116` — `etoa` normalizes before rounding →
+- **[x] LIBC-11** `lib/c/stdio/printf.c:116` — `etoa` normalizes before rounding →
   `printf("%e",9.9999999)` emits `10.000000e+00`.
-- **[ ] LIBC-12** `lib/c/src/dirent.c:48` — `readdir` refill doesn't negate the
+- **[x] LIBC-12** `lib/c/src/dirent.c:48` — `readdir` refill doesn't negate the
   kernel's `-errno` → a real failure is indistinguishable from EOF, stale errno.
 - **[x] KERN-13** `sys/kern/acct.c:100` + `time.c:391,396,425` — bare `-1` on
   (currently unreachable) NULL guards.

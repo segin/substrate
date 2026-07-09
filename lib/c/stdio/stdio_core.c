@@ -4,8 +4,32 @@
 #include <fcntl.h>
 #include <errno.h>
 #include <string.h>
+#include <stdatomic.h>
 
 static FILE *g_file_list_head = NULL;
+
+/*
+ * LIBC-05: the global open-FILE list (g_file_list_head) is shared mutable
+ * state — fdopen/fclose splice nodes in and out while fflush(NULL) walks it.
+ * Guard it with a single spinlock mirroring libc's malloc lock (CAS +
+ * sched_yield) so the C library stays independent of libpthread and is safe
+ * to use from processes that don't link it.
+ */
+extern int sched_yield(void);
+static atomic_int __file_list_lock = 0;
+
+static void __file_list_lock_acquire(void) {
+	int expected;
+	for (;;) {
+		expected = 0;
+		if (atomic_compare_exchange_weak(&__file_list_lock, &expected, 1)) return;
+		sched_yield();
+	}
+}
+
+static void __file_list_lock_release(void) {
+	atomic_store(&__file_list_lock, 0);
+}
 
 /* FILE::rw_state — which direction the buffer currently holds data for.  Only
  * a WRITE-buffered stream may be written back by fflush()/__fflush_write(). */
@@ -82,13 +106,15 @@ FILE *fdopen(int fd, const char *mode) {
     
     f->mode = _IOFBF; 
     
-    // Add to global list
+    // Add to global list (LIBC-05: guard the shared list)
+    __file_list_lock_acquire();
     f->next = g_file_list_head;
     f->prev = NULL;
     if (g_file_list_head) {
         g_file_list_head->prev = f;
     }
     g_file_list_head = f;
+    __file_list_lock_release();
 
     return f;
 }
@@ -116,9 +142,12 @@ FILE *fopen(const char *path, const char *mode) {
 
 int fclose(FILE *stream) {
     if (!stream) return EOF;
-    fflush(stream);
+    /* LIBC-08: a write error at close-time must be reported, not swallowed.
+     * Capture the flush and close results and fold them into the return. */
+    int flush_err = fflush(stream);
 
-    // Remove from global list
+    // Remove from global list (LIBC-05: guard the shared list)
+    __file_list_lock_acquire();
     if (stream->prev) {
         stream->prev->next = stream->next;
     } else {
@@ -127,21 +156,26 @@ int fclose(FILE *stream) {
     if (stream->next) {
         stream->next->prev = stream->prev;
     }
+    __file_list_lock_release();
 
-    close(stream->fd);
+    int close_err = close(stream->fd);
     if (stream->own_buffer) free(stream->buffer);
     free(stream);
-    return 0;
+    return (flush_err == EOF || close_err < 0) ? EOF : 0;
 }
 
 int fflush(FILE *stream) {
 	if(!stream) {
+		/* LIBC-05: walk the shared open-FILE list under the lock so a
+		 * concurrent fdopen/fclose can't splice a node mid-traversal. */
 		int ret = 0;
+		__file_list_lock_acquire();
 		FILE *current = g_file_list_head;
 		while(current) {
 			if(fflush(current) == EOF) ret = EOF;
 			current = current->next;
 		}
+		__file_list_lock_release();
 		return ret;
 	}
 	/* Only write-flush a stream whose buffer actually holds WRITE data.  For a
@@ -743,7 +777,10 @@ int pclose(FILE *stream) {
             int status = 0;
             if (waitpid(pid, &status, 0) < 0)
                 return -1;
-            return WEXITSTATUS(status);
+            /* LIBC-07: POSIX requires pclose() to return the raw wait status
+             * (as from waitpid), not the decoded exit code — callers apply
+             * WIFEXITED/WEXITSTATUS/WIFSIGNALED themselves. */
+            return status;
         }
     }
     return -1;

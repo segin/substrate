@@ -74,18 +74,24 @@ fcvt_common(long double value, int ndigit, int *decpt, int *sign,
     dot = strchr(tmp, '.');
     intlen = dot ? (int)(dot - tmp) : (int)strlen(tmp);
 
+    /* LIBC-02: bound every write to the caller's buffer as we go (reserving
+     * one byte for the NUL) so a small `len` can never be overflowed.  The
+     * old code copied the full integer + fraction unconditionally and only
+     * truncated AFTER, which had already written past buf. */
+    char *end = buf + len - 1;   /* len >= 1 checked above; reserve NUL */
+
     if (value == 0) {
         /* glibc keeps every digit for an exact zero: "0" + ndigit zeros,
          * decimal point after the integer "0" (decpt 1). */
-        memcpy(buf, tmp, (size_t)intlen);
-        out = buf + intlen;
+        size_t n = (size_t)intlen;
+        if (n > (size_t)(end - buf)) n = (size_t)(end - buf);
+        memcpy(buf, tmp, n);
+        out = buf + n;
         if (dot)
-            for (char *p = dot + 1; *p; p++)
+            for (char *p = dot + 1; *p && out < end; p++)
                 *out++ = *p;
         *out = '\0';
         *decpt = intlen;
-        if ((size_t)strlen(buf) > len - 1)
-            buf[len - 1] = '\0';
         return 0;
     }
 
@@ -94,12 +100,14 @@ fcvt_common(long double value, int ndigit, int *decpt, int *sign,
         /* 0 < value < 1: the integer "0" is not a significant digit. */
         *decpt = 0;
     } else {
-        memcpy(out, tmp, (size_t)intlen);
-        out += intlen;
+        size_t n = (size_t)intlen;
+        if (n > (size_t)(end - out)) n = (size_t)(end - out);
+        memcpy(out, tmp, n);
+        out += n;
         *decpt = intlen;
     }
     if (dot)
-        for (char *p = dot + 1; *p; p++)
+        for (char *p = dot + 1; *p && out < end; p++)
             *out++ = *p;
     *out = '\0';
 

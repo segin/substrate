@@ -61,6 +61,8 @@ static void utoa_hex(char *buf, uint64_t val, int uppercase) {
     buf[i] = '\0';
 }
 
+static void etoa(char *buf, size_t size, double val, int precision, int uppercase);
+
 static void ftoa(char *buf, size_t size, double val, int precision, int uppercase) {
     if (precision < 0) precision = 6;
     if (val != val) { strlcpy(buf, uppercase ? "NAN" : "nan", size); return; }
@@ -71,6 +73,18 @@ static void ftoa(char *buf, size_t size, double val, int precision, int uppercas
             size--;
         }
         val = -val;
+    }
+
+    /* LIBC-03: |val| >= 2^63 overflows the int64_t integer-part cast below
+     * (undefined behavior — the cast yields INT64_MIN and prints garbage
+     * such as "-9223372036854775808...").  A magnitude that large cannot be
+     * rendered in fixed notation without bignum arithmetic, so fall back to
+     * scientific notation for the (already sign-stripped) value; this at
+     * least prints the correct magnitude.  Values arriving from %e/%g never
+     * hit this — etoa normalizes into [1,10) before calling ftoa. */
+    if (val >= 9223372036854775808.0) {   /* 2^63 */
+        etoa(buf, size, val, precision, uppercase);
+        return;
     }
 
     double rounding = 0.5;
@@ -121,6 +135,14 @@ static void etoa(char *buf, size_t size, double val, int precision, int uppercas
             while (val < 1.0) { val *= 10.0; exponent--; }
         }
     }
+
+    /* LIBC-11: ftoa applies round-half-up, which can carry the normalized
+     * mantissa from [1,10) up to 10 (e.g. 9.9999999 at precision 6).  Apply
+     * the identical rounding here first and renormalize, so the result is
+     * "1.000000e+01" rather than a denormalized "10.000000e+00". */
+    double rnd = 0.5;
+    for (int i = 0; i < precision; i++) rnd /= 10.0;
+    if (val + rnd >= 10.0) { val /= 10.0; exponent++; }
 
     ftoa(buf, size, val, precision, uppercase);
     size_t len = strlen(buf);

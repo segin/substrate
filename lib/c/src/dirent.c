@@ -46,7 +46,15 @@ struct dirent *readdir(DIR *dirp) {
     if (dirp->buf_pos >= dirp->buf_end) {
         // Refill buffer
         int ret = _syscall3(SYS_GETDENTS, dirp->fd, (uintptr_t)dirp->buf, sizeof(dirp->buf));
-        if (ret <= 0) return NULL;
+        if (ret < 0) {
+            /* LIBC-12: getdents failed — the kernel returns a negative
+             * -errno.  Surface it so a real error is distinguishable from a
+             * clean end-of-directory (ret == 0, which leaves errno untouched
+             * per POSIX). */
+            errno = -ret;
+            return NULL;
+        }
+        if (ret == 0) return NULL;   /* clean end-of-directory */
         dirp->buf_end = ret;
         dirp->buf_pos = 0;
     }

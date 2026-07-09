@@ -20,6 +20,7 @@
 #include <sys/random.h>
 #include <sys/syscall.h>
 #include <termios.h>
+#include <signal.h>
 
 extern int64_t _syscall3(int, uintptr_t, uintptr_t, uintptr_t);
 
@@ -101,6 +102,21 @@ void exit(int status) {
 }
 
 void abort(void) {
+    /* LIBC-06: C11 §7.22.4.1 / POSIX require abort() to raise SIGABRT.  The
+     * signal must be unblocked (and, on the second pass, its disposition
+     * reset to default) so a caught-and-returned or blocked/ignored SIGABRT
+     * cannot defeat abort().  _exit(134) is only the last-resort fallback. */
+    sigset_t set;
+    sigemptyset(&set);
+    sigaddset(&set, SIGABRT);
+    sigprocmask(SIG_UNBLOCK, &set, NULL);
+    raise(SIGABRT);
+
+    /* If a handler caught SIGABRT and returned, force the default action. */
+    signal(SIGABRT, SIG_DFL);
+    sigprocmask(SIG_UNBLOCK, &set, NULL);
+    raise(SIGABRT);
+
     _exit(134);
 }
 
@@ -800,12 +816,31 @@ unsigned long long strtoull(const char *nptr, char **endptr, int base) {
 }
 
 unsigned long strtoul(const char *nptr, char **endptr, int base) {
+    /* LIBC-04: strtoul negates in the return type and flags ERANGE only when
+     * the parsed *magnitude* exceeds ULONG_MAX.  A legitimately-negated
+     * in-range value wraps modulo 2^bits — it must not be reported as
+     * overflow.  Funnelling through strtoull and comparing the 64-bit
+     * modularly-negated result against ULONG_MAX wrongly flagged such
+     * values (e.g. strtoul("-2") -> 0xFFFFFFFFFFFFFFFE > ULONG_MAX). */
+    int saved_errno = errno;
+    errno = 0;
     unsigned long long v = strtoull(nptr, endptr, base);
-    if (v > ULONG_MAX) {
+    int over = (errno == ERANGE);
+    if (!over) errno = saved_errno;
+
+    /* Was the input negative?  (leading whitespace + optional sign) */
+    const char *s = nptr;
+    while (isspace((unsigned char)*s)) s++;
+    int neg = (*s == '-');
+
+    /* Magnitude before strtoull's modular negation — that is what must fit
+     * in unsigned long. */
+    unsigned long long mag = neg ? (0ULL - v) : v;
+    if (over || mag > (unsigned long long)ULONG_MAX) {
         errno = ERANGE;
         return ULONG_MAX;
     }
-    return (unsigned long)v;
+    return (unsigned long)v;   /* truncation reproduces the modular negation */
 }
 
 long long strtoll(const char *nptr, char **endptr, int base) {

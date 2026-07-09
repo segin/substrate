@@ -438,39 +438,54 @@ struct tm *localtime(const time_t *timer) {
 }
 
 time_t mktime(struct tm *timeptr) {
-    // Crude implementation, doesn't handle normalization or DST correctly yet
-    
-    // 1. Normalize
-    // (Simplification: Assuming pre-normalized)
-    
-    int year = timeptr->tm_year + 1900;
-    int mon = timeptr->tm_mon;
-    
-    // Handle month overflow
-    while (mon < 0) { mon += 12; year--; }
-    while (mon > 11) { mon -= 12; year++; }
-    
-    long days = 0;
-    
-    // Add days for years since 1970
-    for (int y = 1970; y < year; y++) {
-        days += IS_LEAP(y) ? 366 : 365;
+    /*
+     * LIBC-10: interpret the broken-down time as LOCAL time honoring $TZ —
+     * the inverse of localtime_r — so that mktime(localtime(&t)) == t even
+     * off UTC.  The previous version treated the fields as UTC and, via its
+     * `for (y=1970; y<year; y++)` loop, never subtracted days for years
+     * before 1970 (negative time_t).  internal_timegm() already counts days
+     * correctly in both directions, and localtime_r() re-derives the offset,
+     * so we route through them.
+     */
+    const char *env_tz = getenv("TZ");
+    struct tz_info info;
+    parse_tz(env_tz, &info);
+
+    /* Seconds for the wall-clock fields as though they were UTC (this also
+     * normalizes tm_mon and pre-1970 dates). */
+    time_t local = internal_timegm(timeptr);
+
+    long offset = info.std_off;   /* seconds West of UTC */
+
+    if (info.has_dst) {
+        int force = timeptr->tm_isdst;
+        if (force > 0) {
+            offset = info.dst_off;
+        } else if (force < 0) {
+            /* Determine DST from the candidate UTC instant, mirroring
+             * localtime_r's transition comparison. */
+            time_t guess = local + info.std_off;
+            int year = timeptr->tm_year + 1900;
+            time_t t_start = get_transition_time(year, &info.start, info.std_off);
+            time_t t_end = get_transition_time(year, &info.end, info.dst_off);
+            bool in_dst = false;
+            if (t_start < t_end) {
+                if (guess >= t_start && guess < t_end) in_dst = true;
+            } else {
+                if (guess >= t_start || guess < t_end) in_dst = true;
+            }
+            if (in_dst) offset = info.dst_off;
+        }
+        /* force == 0: standard time (offset already info.std_off). */
     }
-    
-    // Add days for months in current year
-    for (int m = 0; m < mon; m++) {
-        int dim = days_in_month[m];
-        if (m == 1 && IS_LEAP(year)) dim++;
-        days += dim;
-    }
-    
-    days += (timeptr->tm_mday - 1);
-    
-    time_t t = days * SECS_PER_DAY;
-    t += timeptr->tm_hour * SECS_PER_HOUR;
-    t += timeptr->tm_min * SECS_PER_MIN;
-    t += timeptr->tm_sec;
-    
+
+    /* localtime_r computes local = utc - offset, so utc = local + offset. */
+    time_t t = local + offset;
+
+    /* Fully normalize the caller's struct (tm_wday/tm_yday/tm_isdst, plus any
+     * out-of-range fields) from the resolved time_t, as POSIX requires. */
+    localtime_r(&t, timeptr);
+
     return t;
 }
 

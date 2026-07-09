@@ -179,13 +179,24 @@ static int scan_decimal_float_token(scan_input_t *in, int width, char *buf, size
 	return 1;
 }
 
-static int scan_hex_float_token(scan_input_t *in, int width, char *buf, size_t bufsz, int *input_failure) {
+/*
+ * LIBC-09: combined float token for %a/%A.  These specifiers accept BOTH a
+ * C99 hex float ("0x1.8p3") AND an ordinary decimal float ("0", "3.14",
+ * "1e5"), exactly like strtod/strtof.  The previous scan_hex_float_token
+ * consumed the leading '0' (and any sign) while probing for the "0x" prefix
+ * and, on discovering no 'x', could only push a single character back — so
+ * the '0' was lost and the decimal fallback then began at EOF, making
+ * sscanf("0","%a",&f) return EOF instead of assigning 0.0.  Scanning both
+ * forms in one pass removes the destructive lookahead.
+ */
+static int scan_float_token(scan_input_t *in, int width, char *buf, size_t bufsz, int *input_failure) {
 	int idx = 0;
 	int c;
-	int saw_hex_digit = 0;
+	int saw_digit = 0;
 	int saw_dot = 0;
 	int saw_exp = 0;
 	int exp_needs_digit = 0;
+	int is_hex = 0;
 
 	*input_failure = 0;
 
@@ -211,43 +222,49 @@ static int scan_hex_float_token(scan_input_t *in, int width, char *buf, size_t b
 		}
 	}
 
-	if(c != '0') {
-		scan_ungetc(in, c);
-		buf[idx] = '\0';
-		return 0;
-	}
-	if((size_t)idx + 1 < bufsz) buf[idx++] = (char)c;
-	width--;
-	if(width <= 0) {
-		buf[idx] = '\0';
-		return 0;
-	}
-
-	c = scan_getc(in);
-	if(c != 'x' && c != 'X') {
-		scan_ungetc(in, c);
-		buf[idx] = '\0';
-		return 0;
-	}
-	if((size_t)idx + 1 < bufsz) buf[idx++] = (char)c;
-	width--;
-	if(width <= 0) {
-		buf[idx] = '\0';
-		return 0;
-	}
-
-	while(width > 0) {
+	/* Optional 0x/0X hex-float prefix.  A leading '0' NOT followed by x/X is
+	 * an ordinary decimal digit and must be kept, not discarded. */
+	if(c == '0') {
+		if((size_t)idx + 1 < bufsz) buf[idx++] = (char)c;
+		saw_digit = 1;
+		width--;
+		if(width <= 0) {
+			buf[idx] = '\0';
+			return 1;               /* a bare "0" */
+		}
 		c = scan_getc(in);
-		if(c == EOF) break;
-
-		if(is_hex_digit(c)) {
+		if(c == 'x' || c == 'X') {
+			is_hex = 1;
+			saw_digit = 0;          /* still need a hex mantissa digit */
 			if((size_t)idx + 1 < bufsz) buf[idx++] = (char)c;
-			saw_hex_digit = 1;
-			if(exp_needs_digit) exp_needs_digit = 0;
+			width--;
+			if(width <= 0) {
+				buf[idx] = '\0';
+				return 0;           /* "0x" alone is invalid */
+			}
+			c = scan_getc(in);
+			if(c == EOF) {
+				buf[idx] = '\0';
+				return 0;
+			}
+		} else if(c == EOF) {
+			buf[idx] = '\0';
+			return 1;               /* a bare "0" at end of input */
+		}
+		/* else: c holds the char following the leading '0'; fall through. */
+	}
+
+	for(;;) {
+		int mant_digit = is_hex ? is_hex_digit(c) : (c >= '0' && c <= '9');
+		int exp_marker = is_hex ? (c == 'p' || c == 'P') : (c == 'e' || c == 'E');
+
+		if(mant_digit && !saw_exp) {
+			if((size_t)idx + 1 < bufsz) buf[idx++] = (char)c;
+			saw_digit = 1;
 		} else if(c == '.' && !saw_dot && !saw_exp) {
 			if((size_t)idx + 1 < bufsz) buf[idx++] = (char)c;
 			saw_dot = 1;
-		} else if((c == 'p' || c == 'P') && !saw_exp && saw_hex_digit) {
+		} else if(exp_marker && !saw_exp && saw_digit) {
 			if((size_t)idx + 1 < bufsz) buf[idx++] = (char)c;
 			saw_exp = 1;
 			exp_needs_digit = 1;
@@ -262,17 +279,23 @@ static int scan_hex_float_token(scan_input_t *in, int width, char *buf, size_t b
 		}
 
 		width--;
+		if(width <= 0) break;
+		c = scan_getc(in);
+		if(c == EOF) break;
 	}
 
+	/* Drop a dangling exponent marker (and its sign) that never got a digit. */
 	if(exp_needs_digit && idx > 0) {
 		int back = buf[idx - 1];
 		if(back == '+' || back == '-') idx--;
-		if(idx > 0 && (buf[idx - 1] == 'p' || buf[idx - 1] == 'P')) idx--;
+		if(idx > 0 && (buf[idx - 1] == 'e' || buf[idx - 1] == 'E' ||
+		               buf[idx - 1] == 'p' || buf[idx - 1] == 'P')) idx--;
 		saw_exp = 0;
 	}
 
 	buf[idx] = '\0';
-	if(!saw_hex_digit || !saw_exp) return 0;
+	if(!saw_digit) return 0;
+	if(is_hex && !saw_exp) return 0;    /* C99 hex floats require a p-exponent */
 	return 1;
 }
 
@@ -658,10 +681,8 @@ static int scan_core(scan_input_t *in, const char *format, va_list ap) {
 			int ok;
 
 			if(spec == 'a' || spec == 'A') {
-				ok = scan_hex_float_token(in, width, fbuf, sizeof(fbuf), &input_failure);
-				if(!ok) {
-					ok = scan_decimal_float_token(in, width, fbuf, sizeof(fbuf), &input_failure);
-				}
+				/* LIBC-09: one pass accepts both hex and decimal floats. */
+				ok = scan_float_token(in, width, fbuf, sizeof(fbuf), &input_failure);
 			} else {
 				ok = scan_decimal_float_token(in, width, fbuf, sizeof(fbuf), &input_failure);
 			}
