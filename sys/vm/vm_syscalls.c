@@ -516,7 +516,22 @@ int sys_munmap(void *addr, size_t length) {
 
 
 
+static void *sys_brk_locked(void *addr);
+
 void *sys_brk(void *addr) {
+    /* Serialize concurrent brk/sbrk (and brk vs mmap) on the address-space
+     * write lock: without it two threads both read old_brk, both grow, and the
+     * loser's brk update is lost (heap truncated) while its freshly-allocated
+     * frames become unreachable (permanent leak).  VM-05. */
+    if (!current_process) return NULL;
+    vm_map_t *map = current_process->vm_map;
+    if (map) vm_map_lock(map);
+    void *r = sys_brk_locked(addr);
+    if (map) vm_map_unlock(map);
+    return r;
+}
+
+static void *sys_brk_locked(void *addr) {
     if (!current_process) return NULL;
 
     /*
