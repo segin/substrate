@@ -420,7 +420,20 @@ static fs_node_t *exfat_alloc_node(exfat_fs_t *fs, const char *name, uint64_t in
                                    uint8_t has_dir_entry, uint32_t dir_cluster,
                                    uint8_t dir_no_fat_chain, uint64_t primary_index,
                                    uint8_t secondary_count) {
-    uint32_t idx = exfat_node_cache_idx++ % EXFAT_NODE_CACHE_SIZE;
+    /* Slot 0 is permanently the root node: fs->root_node is held for the whole
+     * mount lifetime, and every path lookup starts by dereferencing it.  The
+     * old code round-robined it like any other slot, so after
+     * EXFAT_NODE_CACHE_SIZE lookups the round-robin recycled the root to some
+     * other file -> the root (and other VFS-held nodes) silently became a
+     * different, often non-directory, inode.  That is what broke reading back
+     * anything substantial (untar onto exFAT failed with ENOTDIR, `ls` came up
+     * empty).  Pin the root to slot 0 and round-robin only the rest. */
+    uint32_t idx;
+    if (inode == EXFAT_ROOT_INO) {
+        idx = 0;
+    } else {
+        idx = 1 + (exfat_node_cache_idx++ % (EXFAT_NODE_CACHE_SIZE - 1));
+    }
     exfat_node_t *ctx = &exfat_node_cache[idx];
     fs_node_t *node = &exfat_fs_node_cache[idx];
     memset(ctx, 0, sizeof(*ctx));

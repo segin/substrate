@@ -32,6 +32,18 @@ Fix the *class*, not just the instance:
 
 ---
 
+## CRITICAL — filesystem (found via mc untar repro)
+
+- **[x] EXFAT-01** `sys/fs/exfat/exfat.c:423` — the exFAT node cache is a 64-slot
+  round-robin with no pinning, and `fs->root_node` is allocated from it (slot 0).
+  After 64 lookups the round-robin recycled the root (and any VFS-held node) to a
+  different file, so reading back anything substantial broke: `tar x` onto exFAT
+  failed with `ENOTDIR` partway (80/558 files), `ls` came up empty. Writes were
+  fine (fsck clean); the bug was entirely on the directory read-back path. Fixed
+  by pinning the root to slot 0 and round-robining only the rest (+ size 64->128).
+  Verified: full mc-4.6.1 tree (558 files) untars, reads back, fsck clean. Same
+  bug *class* as the ext2 node cache (FS-01/FS-05, still open).
+
 ## CRITICAL
 
 - **[ ] VM-01** `sys/vm/uma_core.c:855` — UMA slab layer is entirely unlocked: the

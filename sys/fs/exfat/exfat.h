@@ -162,7 +162,7 @@ typedef struct exfat_node {
     struct dirent current_dirent;      /* per-node readdir scratch */
 } exfat_node_t;
 
-#define EXFAT_NODE_CACHE_SIZE 64
+#define EXFAT_NODE_CACHE_SIZE 128
 
 void exfat_init(void);
 struct blkdev;
