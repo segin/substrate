@@ -308,6 +308,19 @@ static void tcp_kill_pcb(tcp_pcb_t *p, int err) {
     sched_wakeup(p->send_chan);
 }
 
+/* NET-04: is this child still queued for a pending accept() on its
+ * parent listener?  If so the reaper must not free it — a blocked
+ * accept() could still hand it to userspace.  tcp_accept() clears
+ * ->parent when it dequeues a child, so a child with ->parent still set
+ * is either mid-handshake (not yet queued) or sitting in accept_q. */
+static int tcp_child_in_accept_q(const tcp_pcb_t *p) {
+    tcp_pcb_t *par = p->parent;
+    if (!par || !par->accept_q) return 0;
+    for (int i = 0; i < par->accept_count; i++)
+        if (par->accept_q[i] == p) return 1;
+    return 0;
+}
+
 static void tcp_timer_tick(uint64_t now) {
     /* The timer kthread is the single reaper of orphaned PCBs.  Walk
      * the list with IRQs off (tcp_lock) so an RX interrupt can't free
@@ -322,7 +335,14 @@ static void tcp_timer_tick(uint64_t now) {
         if (p->state == TCP_CLOSED) {
             /* Terminal.  Reap if orphaned — tcp_find() never returns a
              * CLOSED PCB, so no RX path can be holding this pointer. */
-            if (p->detached) tcp_free(p);
+            if (p->detached) { tcp_free(p); continue; }
+            /* NET-04: a never-accepted child (->parent still set) that
+             * died in the handshake — e.g. SYN_RECEIVED retransmit
+             * timeout or a RST (NET-06) — has no userspace owner and no
+             * fd.  Free it now instead of leaking its rxbuf until the
+             * listener closes.  Skip it while still in the listener's
+             * accept queue, where a pending accept() could claim it. */
+            if (p->parent && !tcp_child_in_accept_q(p)) { tcp_free(p); continue; }
             continue;
         }
         if (p->state == TCP_TIME_WAIT && now >= p->time_wait_until) {
@@ -338,6 +358,10 @@ static void tcp_timer_tick(uint64_t now) {
             tcp_kill_pcb(p, ETIMEDOUT);
             continue;
         }
+        /* NET-11: cap the per-tick retransmit batch at 32.  Any surplus
+         * PCBs simply retransmit on the next timer tick — a small added
+         * latency, never a lost retransmit — so no larger structure is
+         * warranted here. */
         if (nretx < 32) retx_list[nretx++] = p;
     }
     tcp_unlock(f);
@@ -470,6 +494,14 @@ static void tcp_in_syn_sent(tcp_pcb_t *p, uint32_t seq, uint32_t ack,
 }
 
 static void tcp_in_syn_received(tcp_pcb_t *p, uint32_t ack, uint8_t flags) {
+    /* NET-06: a RST for a half-open child aborts it.  Tear the child
+     * down (tcp_kill_pcb -> TCP_CLOSED) instead of silently dropping the
+     * segment; the retransmit-timer reaper then frees the never-accepted
+     * PCB — see NET-04. */
+    if (flags & TCP_RST) {
+        tcp_kill_pcb(p, ECONNRESET);
+        return;
+    }
     if ((flags & TCP_ACK) && ack == p->snd_nxt) {
         if ((int32_t)(ack - p->snd_una) > 0) {
             p->snd_una = ack;

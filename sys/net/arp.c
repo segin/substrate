@@ -16,6 +16,7 @@
 #include <netinet/if_arp.h>
 #include <netinet/ip.h>
 #include <kern/console.h>
+#include <sys/lock.h>
 #include <string.h>
 #include <stddef.h>
 
@@ -30,17 +31,26 @@ struct arp_entry {
 static struct arp_entry g_arp_cache[ARP_CACHE_SIZE];
 static unsigned          g_arp_next;   /* LRU pointer */
 
+/* NET-09: the cache is written by arp_input() in IRQ/RX context and read
+ * by arp_lookup() in process context; guard it with an IRQ-safe spinlock
+ * so a partially-written MAC is never read.  Critical sections are kept
+ * tiny — the ARP reply transmit in arp_input() stays outside the lock. */
+static spinlock_t g_arp_lock = SPINLOCK_INIT("arp_cache");
+
 /* ------------------------------------------------------------------ */
 
 int arp_lookup(netdev_t *dev, uint32_t ip, uint8_t mac[6]) {
     if (!dev) return -1;
+    unsigned long f = spinlock_acquire_irq(&g_arp_lock);   /* NET-09 */
     for (unsigned i = 0; i < ARP_CACHE_SIZE; i++) {
         struct arp_entry *e = &g_arp_cache[i];
         if (e->ip == ip && e->ifindex == dev->ifindex) {
             memcpy(mac, e->mac, 6);
+            spinlock_release_irq(&g_arp_lock, f);
             return 0;
         }
     }
+    spinlock_release_irq(&g_arp_lock, f);
     return -1;
 }
 
@@ -62,7 +72,8 @@ static int arp_update_existing(netdev_t *dev, uint32_t ip,
     return 0;
 }
 
-void arp_insert(netdev_t *dev, uint32_t ip, const uint8_t mac[6]) {
+/* Raw update-or-insert; caller must hold g_arp_lock (NET-09). */
+static void arp_insert_raw(netdev_t *dev, uint32_t ip, const uint8_t mac[6]) {
     if (!dev || !ip) return;
     /* Update if already present. */
     if (arp_update_existing(dev, ip, mac)) return;
@@ -71,6 +82,12 @@ void arp_insert(netdev_t *dev, uint32_t ip, const uint8_t mac[6]) {
     slot->ip = ip;
     slot->ifindex = dev->ifindex;
     memcpy(slot->mac, mac, 6);
+}
+
+void arp_insert(netdev_t *dev, uint32_t ip, const uint8_t mac[6]) {
+    unsigned long f = spinlock_acquire_irq(&g_arp_lock);   /* NET-09 */
+    arp_insert_raw(dev, ip, mac);
+    spinlock_release_irq(&g_arp_lock, f);
 }
 
 /* ------------------------------------------------------------------ */
@@ -121,8 +138,13 @@ void arp_input(netdev_t *dev, const uint8_t *pkt, size_t len) {
      *     broadcast/unsolicited reply, can refresh but never create.
      */
     int target_is_me = (target_ip == dev->ip4_addr && dev->ip4_addr);
+    /* NET-09: merge/insert under the cache lock (raw ops — we already hold
+     * it, so do not call the locking arp_insert() here).  Kept tiny; the
+     * reply transmit below runs outside the lock. */
+    unsigned long af = spinlock_acquire_irq(&g_arp_lock);
     if (!arp_update_existing(dev, sender_ip, arp->ar_sha) && target_is_me)
-        arp_insert(dev, sender_ip, arp->ar_sha);
+        arp_insert_raw(dev, sender_ip, arp->ar_sha);
+    spinlock_release_irq(&g_arp_lock, af);
 
     /* If a request is directed at us, reply. */
     uint16_t op = __builtin_bswap16(arp->ar_op);

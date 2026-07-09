@@ -398,7 +398,10 @@ static size_t afinet_node_write(fs_node_t *node, off_t off, size_t size, const u
             uint8_t pkt[AFI_DATA_MAX + sizeof(struct udphdr)];
             if (size > AFI_DATA_MAX) return (size_t)-EMSGSIZE;
             struct udphdr *uh = (struct udphdr *)pkt;
-            uh->source = __builtin_bswap16(s->local_port ? s->local_port : ++g_ephemeral_next);
+            /* NET-07: allocate via afinet_alloc_ephemeral() — the inline
+             * ++g_ephemeral_next bypassed its wrap-to-49152 guard and is
+             * non-atomic, yielding port 0 / low ports past 65535. */
+            uh->source = __builtin_bswap16(s->local_port ? s->local_port : afinet_alloc_ephemeral());
             if (!s->local_port) s->local_port = __builtin_bswap16(uh->source);
             uh->dest   = __builtin_bswap16(s->peer_port);
             uh->len    = __builtin_bswap16((uint16_t)(sizeof(*uh) + size));
@@ -419,7 +422,10 @@ static size_t afinet_node_write(fs_node_t *node, off_t off, size_t size, const u
             uint8_t pkt[AFI_DATA_MAX + sizeof(struct udphdr)];
             if (size > AFI_DATA_MAX) return (size_t)-EMSGSIZE;
             struct udphdr *uh = (struct udphdr *)pkt;
-            uh->source = __builtin_bswap16(s->local_port ? s->local_port : ++g_ephemeral_next);
+            /* NET-07: allocate via afinet_alloc_ephemeral() — the inline
+             * ++g_ephemeral_next bypassed its wrap-to-49152 guard and is
+             * non-atomic, yielding port 0 / low ports past 65535. */
+            uh->source = __builtin_bswap16(s->local_port ? s->local_port : afinet_alloc_ephemeral());
             if (!s->local_port) s->local_port = __builtin_bswap16(uh->source);
             uh->dest   = __builtin_bswap16(s->peer_port);
             uh->len    = __builtin_bswap16((uint16_t)(sizeof(*uh) + size));
@@ -895,7 +901,9 @@ ssize_t afinet_sendto(int fd, const void *buf, size_t len, int flags,
             return rc < 0 ? rc : (ssize_t)len;
         }
         /* DGRAM/UDP */
-        uint16_t sport = s->local_port ? s->local_port : ++g_ephemeral_next;
+        /* NET-07: use the wrap-guarded ephemeral allocator, not the raw
+         * (non-atomic, unguarded) ++g_ephemeral_next. */
+        uint16_t sport = s->local_port ? s->local_port : afinet_alloc_ephemeral();
         if (!s->local_port) s->local_port = sport;
         uint8_t pkt[AFI_DATA_MAX + sizeof(struct udphdr)];
         if (len > AFI_DATA_MAX) return -EMSGSIZE;
@@ -914,7 +922,9 @@ ssize_t afinet_sendto(int fd, const void *buf, size_t len, int flags,
             int rc = ip6_output(daddr_buf, (uint8_t)s->protocol, buf, len);
             return rc < 0 ? rc : (ssize_t)len;
         }
-        uint16_t sport = s->local_port ? s->local_port : ++g_ephemeral_next;
+        /* NET-07: use the wrap-guarded ephemeral allocator, not the raw
+         * (non-atomic, unguarded) ++g_ephemeral_next. */
+        uint16_t sport = s->local_port ? s->local_port : afinet_alloc_ephemeral();
         if (!s->local_port) s->local_port = sport;
         uint8_t pkt[AFI_DATA_MAX + sizeof(struct udphdr)];
         if (len > AFI_DATA_MAX) return -EMSGSIZE;
@@ -1051,10 +1061,13 @@ int afinet_deliver_v4(uint32_t saddr, uint32_t daddr,
     const uint8_t *payload = pkt;
     size_t payload_len = len;
     if (protocol == IPPROTO_UDP_NUM) {
-        /* pkt is the IP packet for RAW deliveries, or the UDP datagram
-         * for udp_input deliveries.  Detect: if first byte high nibble
-         * == 4, it's the full IP packet → step past header. */
-        if (len >= sizeof(struct iphdr) && (pkt[0] >> 4) == 4) {
+        /* pkt is the IP packet for RAW deliveries (for_dgram==0), or the
+         * bare UDP datagram for udp_input deliveries (for_dgram==1).
+         * NET-08: only strip an IP header on the RAW path — gating on the
+         * for_dgram flag, not the (pkt[0]>>4)==4 heuristic, which misfires
+         * when a UDP source port's high byte is 0x4X on the datagram
+         * path and wrongly strips IPH_HL*4 bytes as a phantom IP header. */
+        if (!for_dgram && len >= sizeof(struct iphdr) && (pkt[0] >> 4) == 4) {
             const struct iphdr *ih = (const struct iphdr *)pkt;
             size_t hlen = IPH_HL(ih) * 4;
             if (hlen + sizeof(struct udphdr) > len) return 0;
@@ -1098,7 +1111,10 @@ int afinet_deliver_v6(const uint8_t saddr[16], const uint8_t daddr[16],
     const uint8_t *payload = pkt;
     size_t payload_len = len;
     if (protocol == IPPROTO_UDP_NUM) {
-        if (len >= sizeof(struct ip6_hdr) &&
+        /* NET-08 (v6 twin): only strip a leading IPv6 header on the RAW path
+         * (for_dgram==0); on the bare-datagram path the (pkt[0]>>4)==6
+         * heuristic can misfire on datagram bytes. */
+        if (!for_dgram && len >= sizeof(struct ip6_hdr) &&
             (pkt[0] >> 4) == 6) {
             payload = pkt + sizeof(struct ip6_hdr);
             payload_len = len - sizeof(struct ip6_hdr);

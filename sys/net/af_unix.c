@@ -1827,6 +1827,9 @@ int sys_getsockname(int fd, struct sockaddr *addr, socklen_t *addrlen) {
     un->sun_family = AF_UNIX;
     int plen = s->pathlen;
     if (plen > (int)*addrlen - 2) plen = *addrlen - 2;
+    /* NET-10: a user *addrlen of 0 or 1 drives plen negative; clamp so
+     * un->sun_path[plen]='\0' below never writes at a negative index. */
+    if (plen < 0) plen = 0;
     if (plen > 0) memcpy(un->sun_path, s->path, plen);
     if (plen < AFUNIX_PATH_MAX) un->sun_path[plen] = '\0';
     *addrlen = 2 + plen;
@@ -1846,6 +1849,7 @@ int sys_getpeername(int fd, struct sockaddr *addr, socklen_t *addrlen) {
     un->sun_family = AF_UNIX;
     int plen = s->peer->pathlen;
     if (plen > (int)*addrlen - 2) plen = *addrlen - 2;
+    if (plen < 0) plen = 0;   /* NET-10 twin: negative *addrlen-2 -> no neg index */
     if (plen > 0) memcpy(un->sun_path, s->peer->path, plen);
     if (plen < AFUNIX_PATH_MAX) un->sun_path[plen] = '\0';
     *addrlen = 2 + plen;
