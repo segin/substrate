@@ -53,6 +53,44 @@ static struct uma_bucket *uma_bucket_full_depot;
 
 #ifndef HOST_TEST
 static spinlock_t uma_bucket_depot_lock;
+/*
+ * Serialises the slab layer: the per-zone uz_part/free/full_slabs lists and the
+ * global uma_page_hash.  The per-CPU fast path (uma_zalloc/zfree) uses only
+ * intr_disable, which gives no cross-CPU exclusion and drops before the slow
+ * path, so two allocators of one zone could interleave the slab-list splices
+ * and hand the same item to two callers (kernel-wide heap corruption, VM-01).
+ * IRQ-safe because kfree() runs from IRQ context.
+ *
+ * It must be RECURSIVE: uma_slab_alloc() calls kzalloc() for an off-page slab
+ * header, which re-enters uma_zalloc_slab() for the (different, small) header
+ * zone while this lock is already held on the same CPU.  A plain spinlock would
+ * self-deadlock there.  pmm_alloc/free never re-enter uma.
+ */
+static spinlock_t   uma_slab_lock = SPINLOCK_INIT("uma_slab");
+static volatile int uma_slab_owner_cpu = -1;
+static int          uma_slab_depth;
+
+static unsigned long uma_slab_lock_acquire(void) {
+    unsigned long f;
+    __asm__ volatile("pushfl; popl %0; cli" : "=r"(f) :: "memory");
+    int cpu = smp_get_cpu_id();
+    if (uma_slab_owner_cpu == cpu) {
+        uma_slab_depth++;               /* already ours (nested header alloc) */
+    } else {
+        spinlock_acquire(&uma_slab_lock);
+        uma_slab_owner_cpu = cpu;
+        uma_slab_depth = 1;
+    }
+    return f;
+}
+
+static void uma_slab_lock_release(unsigned long f) {
+    if (--uma_slab_depth == 0) {
+        uma_slab_owner_cpu = -1;
+        spinlock_release(&uma_slab_lock);
+    }
+    __asm__ volatile("pushl %0; popfl" :: "r"(f) : "memory", "cc");
+}
 #endif
 
 /* Global Slab Hash Table */
@@ -707,11 +745,11 @@ static void uma_slab_unlink(uma_slab_t **list, uma_slab_t *slab) {
 /*
  * Allocate from zone (slow path - slab layer)
  */
-static void *uma_zalloc_slab(uma_zone_t *zone, int flags) {
+static void *uma_zalloc_slab_locked(uma_zone_t *zone, int flags) {
     void *item = NULL;
     uma_slab_t *slab;
     (void)flags; /* M_NOWAIT/M_WAITOK handled at pmm layer */
-    
+
     /* Try partial slabs first */
     if (zone->uz_part_slabs) {
         slab = zone->uz_part_slabs;
@@ -745,17 +783,30 @@ static void *uma_zalloc_slab(uma_zone_t *zone, int flags) {
         zone->uz_part_slabs = slab;
         item = uma_slab_alloc_item(zone, slab);
     }
-    
+
+    return item;
+}
+
+/* Locking wrapper (see uma_slab_lock).  All slab-list + page-hash mutation
+ * happens inside the _locked body, so every caller is serialised here. */
+static void *uma_zalloc_slab(uma_zone_t *zone, int flags) {
+#ifndef HOST_TEST
+    unsigned long f = uma_slab_lock_acquire();
+#endif
+    void *item = uma_zalloc_slab_locked(zone, flags);
+#ifndef HOST_TEST
+    uma_slab_lock_release(f);
+#endif
     return item;
 }
 
 /*
  * Free to zone (slow path - slab layer)
  */
-static void uma_zfree_slab(uma_zone_t *zone, void *item) {
+static void uma_zfree_slab_locked(uma_zone_t *zone, void *item) {
     uma_slab_t *slab = uma_find_slab(zone, item);
     if (!slab) return;
-    
+
     bool was_full = (slab->us_freecount == 0);
     uma_slab_free_item(zone, slab, item);
     
@@ -779,6 +830,17 @@ static void uma_zfree_slab(uma_zone_t *zone, void *item) {
             uma_slab_free(zone, slab);
         }
     }
+}
+
+/* Locking wrapper (see uma_slab_lock). */
+static void uma_zfree_slab(uma_zone_t *zone, void *item) {
+#ifndef HOST_TEST
+    unsigned long f = uma_slab_lock_acquire();
+#endif
+    uma_zfree_slab_locked(zone, item);
+#ifndef HOST_TEST
+    uma_slab_lock_release(f);
+#endif
 }
 
 /*

@@ -46,7 +46,7 @@ Fix the *class*, not just the instance:
 
 ## CRITICAL
 
-- **[ ] VM-01** `sys/vm/uma_core.c:855` — UMA slab layer is entirely unlocked: the
+- **[x] VM-01** `sys/vm/uma_core.c:855` — UMA slab layer is entirely unlocked: the
   fast path drops `intr_disable` *before* the slab slow path, so two allocators of
   one zone hand the **same item to two callers** → kernel-wide heap corruption.
   *(Both VM passes.)*
