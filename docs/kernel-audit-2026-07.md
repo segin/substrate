@@ -97,10 +97,10 @@ Fix the *class*, not just the instance:
   `LD_PRELOAD=evil.so ./setuid-root-bin` = local root.
 
 ### Filesystems
-- **[ ] FS-03** `sys/fs/ext2/ext2.c:2898` — `ext2_add_entry` unsigned
+- **[x] FS-03** `sys/fs/ext2/ext2.c:2898` — `ext2_add_entry` unsigned
   `slack = rec_len - actual_size` underflows from untrusted `name_len` →
   **heap overflow** writing a dirent past the block buffer on any create.
-- **[ ] FS-04** `sys/fs/ext2/ext2.c:1660` — `ext2_readdir` copies `name_len` past the
+- **[x] FS-04** `sys/fs/ext2/ext2.c:1660` — `ext2_readdir` copies `name_len` past the
   block bound → **OOB heap read** leaking kernel memory into userspace `d_name`.
 - **[ ] FS-05** `sys/fs/ext2/ext2.c:3049` — finddir returns unpinned node-cache
   slots recycled mid-path-walk and mid-`ext2_rename` (derefs `old_node` after
@@ -162,9 +162,9 @@ Fix the *class*, not just the instance:
   THREAD_BLOCKED-holding-mutex deadlock (missing `intr_disable` window).
 - **[ ] FS-07** `sys/fs/ext2/ext2.c:3042` — `ext2_rename` has no ancestor/self check
   → `rename("/a","/a/b")` creates a detached directory cycle.
-- **[ ] FS-08** `sys/fs/ext2/ext2.c:337` — `ext2_write_block` has no block-range
+- **[x] FS-08** `sys/fs/ext2/ext2.c:337` — `ext2_write_block` has no block-range
   bounds check (the read path does) → a corrupt block pointer writes off-range.
-- **[ ] FS-09** `sys/fs/ext2/ext2.c:2498,2667` — `free_block`/`free_inode` bump the
+- **[x] FS-09** `sys/fs/ext2/ext2.c:2498,2667` — `free_block`/`free_inode` bump the
   free counts without checking the bit was set → a double-free inflates counts →
   later over-allocation.
 - **[ ] FS-10** `sys/vfs/bio.c:702` — `bio_dev_invalidate` clears `B_DELWRI`

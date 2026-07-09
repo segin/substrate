@@ -336,6 +336,13 @@ int ext2_read_inode(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_t *inode) {
 // its cache coherent with the device, so the filesystem just issues the write.
 uint32_t ext2_write_block(ext2_fs_t *fs, uint32_t block_num, const void *buffer) {
     if (!fs || !fs->device || !fs->device->write) return 0;
+    /* Symmetric with ext2_read_block: block_num often comes from untrusted
+     * on-disk metadata (indirect pointers, freshly-allocated blocks whose
+     * bitmap may be corrupt).  Reject block 0 and anything past the data range
+     * so a bad pointer cannot scribble an arbitrary device offset. */
+    if (block_num == 0 || block_num >= fs->sb.s_blocks_count) {
+        return 0;
+    }
     off_t offset = (off_t)block_num * fs->block_size;
     return fs->device->write(fs->device, offset, fs->block_size, (uint8_t *)buffer);
 }
@@ -1660,7 +1667,13 @@ struct dirent *ext2_readdir(fs_node_t *node, uint64_t index) {
             if (de->inode != 0 && de->name_len > 0) {
                 ctx->current_dirent.d_ino = de->inode;
                 uint32_t len = de->name_len;
-                // Fix: Ensure name fits in buffer to prevent overflow
+                /* Clamp to what actually fits within this record (the name
+                 * starts at offset 8) so a bogus on-disk name_len can't read
+                 * past the directory block into adjacent kernel memory. */
+                if (len > (uint32_t)(de->rec_len - 8)) {
+                    len = de->rec_len - 8;
+                }
+                // Ensure name fits in the dirent buffer.
                 if (len >= sizeof(ctx->current_dirent.d_name)) {
                     len = sizeof(ctx->current_dirent.d_name) - 1;
                 }
@@ -2494,18 +2507,17 @@ void ext2_free_block(ext2_fs_t *fs, uint32_t block_num) {
     uint32_t byte_idx = index / 8;
     uint32_t bit_idx = index % 8;
     
-    // Clear the bit
-    bitmap_buf[byte_idx] &= ~(1 << bit_idx);
-    
-    // Write bitmap back
-    ext2_write_block(fs, fs->bgd[group].bg_block_bitmap, bitmap_buf);
-    
-    // Update block group descriptor
-    fs->bgd[group].bg_free_blocks_count++;
-    
-    // Update superblock
-    fs->sb.s_free_blocks_count++;
-    ext2_mark_meta_dirty(fs, group);
+    /* Only account the free if the block was actually allocated; a double
+     * free (bit already clear) must not inflate the free counts, which would
+     * later let the allocator hand out the same block twice. */
+    if (bitmap_buf[byte_idx] & (1 << bit_idx)) {
+        bitmap_buf[byte_idx] &= ~(1 << bit_idx);
+        ext2_write_block(fs, fs->bgd[group].bg_block_bitmap, bitmap_buf);
+
+        fs->bgd[group].bg_free_blocks_count++;
+        fs->sb.s_free_blocks_count++;
+        ext2_mark_meta_dirty(fs, group);
+    }
     mutex_unlock(&fs->alloc_lock);
 }
 
@@ -2663,21 +2675,21 @@ void ext2_free_inode(ext2_fs_t *fs, uint32_t inode_num, int was_dir) {
     uint32_t byte_idx = index / 8;
     uint32_t bit_idx = index % 8;
     
-    // Clear the bit
-    bitmap_buf[byte_idx] &= ~(1 << bit_idx);
-    
-    // Write bitmap back
-    ext2_write_block(fs, fs->bgd[group].bg_inode_bitmap, bitmap_buf);
-    
-    // Update block group descriptor
-    fs->bgd[group].bg_free_inodes_count++;
-    if (was_dir) {
-        fs->bgd[group].bg_used_dirs_count--;
+    /* Only account the free if the inode was actually allocated.  A double
+     * free (bit already clear — e.g. an error-path rollback that also runs the
+     * normal free) must not inflate the free counts, which would later let the
+     * allocator over-hand inodes. */
+    if (bitmap_buf[byte_idx] & (1 << bit_idx)) {
+        bitmap_buf[byte_idx] &= ~(1 << bit_idx);
+        ext2_write_block(fs, fs->bgd[group].bg_inode_bitmap, bitmap_buf);
+
+        fs->bgd[group].bg_free_inodes_count++;
+        if (was_dir) {
+            fs->bgd[group].bg_used_dirs_count--;
+        }
+        fs->sb.s_free_inodes_count++;
+        ext2_mark_meta_dirty(fs, group);
     }
-    
-    // Update superblock
-    fs->sb.s_free_inodes_count++;
-    ext2_mark_meta_dirty(fs, group);
     mutex_unlock(&fs->alloc_lock);
 }
 
@@ -2893,9 +2905,14 @@ static int ext2_add_entry(fs_node_t *dir, const char *name, uint32_t inode, uint
             ext2_dirent_t *de = (ext2_dirent_t *)(block_buf + block_off);
             
             if (de->rec_len < 8 || block_off + de->rec_len > fs->block_size) break;
-            
+
             // Calculate actual size needed by this entry
             uint32_t actual_size = ((8 + de->name_len + 3) / 4) * 4;
+            /* A corrupt on-disk name_len can make actual_size exceed this
+             * record's rec_len; the unsigned `slack` would then underflow to a
+             * huge value, pass the fit test, and place new_de past the block
+             * buffer (heap overflow).  Treat it as a malformed entry. */
+            if (actual_size > de->rec_len) break;
             uint32_t slack = de->rec_len - actual_size;
             
             // Can we fit the new entry in the slack space?
