@@ -5,7 +5,7 @@ FFT spectrum visualizer, by Kirn Gill II (segin).  This port cross-builds it
 for substrate (i386, ELFOSABI_SUBSTRATE).
 
 * Upstream: <https://github.com/segin/psymp3>
-* Pinned commit: `5e92082de0102785b612b9e9a87d41f49abd1f69`
+* Pinned commit: `5295f5cef7602ac8a2290ff95874d0a04b078138` (master, post-`1.99.7-RELEASE`)
 * License: ISC
 
 ## Build
