@@ -65,7 +65,7 @@ Fix the *class*, not just the instance:
   permanent system-wide SysV-semaphore deadlock (the pipe/mqueue bug class).
 - **[x] KERN-03** `sys/kern/posix_sem.c:377` — POSIX `sem_wait` has the same
   unprotected window → named-semaphore deadlock.
-- **[ ] LIBC-01** `lib/c/stdio/stdio_core.c:141` — `fflush()` on an update-mode
+- **[x] LIBC-01** `lib/c/stdio/stdio_core.c:141` — `fflush()` on an update-mode
   (`r+`) stream writes buffered **read** data back to the file:
   `fopen("f","r+"); fgetc(f); fclose(f)` silently corrupts the file (also via
   `fflush(NULL)` at `exit()`).

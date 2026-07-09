@@ -35,6 +35,13 @@ typedef struct FILE {
 
     struct FILE *next;
     struct FILE *prev;
+
+    /* Whether the buffer currently holds READ data or WRITE data.  fflush()
+     * must only write the buffer back when it holds WRITE data; otherwise a
+     * read-buffered update-mode ("r+") stream would have its read-ahead
+     * written back to the file (silent corruption).  0 = none, 1 = read,
+     * 2 = write (see _IO_RW_* in stdio_core.c). */
+    int rw_state;
 } FILE;
 
 #include <sys/types.h>

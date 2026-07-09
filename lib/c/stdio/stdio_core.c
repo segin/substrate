@@ -7,6 +7,12 @@
 
 static FILE *g_file_list_head = NULL;
 
+/* FILE::rw_state — which direction the buffer currently holds data for.  Only
+ * a WRITE-buffered stream may be written back by fflush()/__fflush_write(). */
+#define _IO_RW_NONE  0
+#define _IO_RW_READ  1
+#define _IO_RW_WRITE 2
+
 /*
  * Stdio's internal read/write retry on EINTR.  POSIX read(2)/write(2)
  * may return -1 with EINTR when a signal arrives mid-call; the public
@@ -138,12 +144,19 @@ int fflush(FILE *stream) {
 		}
 		return ret;
 	}
-	if(stream->flags == O_RDONLY) {
+	/* Only write-flush a stream whose buffer actually holds WRITE data.  For a
+	 * read-buffered or idle stream — including an update-mode "r+" stream last
+	 * used for reading — the buffer holds data read FROM the file, and the old
+	 * unconditional __fflush_write() wrote that read-ahead back, corrupting the
+	 * file (e.g. fopen("f","r+"); fgetc(f); fclose(f)). */
+	if(stream->rw_state != _IO_RW_WRITE) {
 		stream->pos = stream->buffer;
 		stream->limit = stream->buffer;
 		return 0;
 	}
-	return __fflush_write(stream);
+	int r = __fflush_write(stream);
+	stream->rw_state = _IO_RW_NONE;
+	return r;
 }
 
 int setvbuf(FILE *stream, char *buf, int mode, size_t size) {
@@ -247,7 +260,11 @@ size_t fread(void *ptr, size_t size, size_t nmemb, FILE *stream) {
     size_t total = size * nmemb;
     size_t read_bytes = 0;
     unsigned char *dest = ptr;
-    
+
+    /* The buffer now holds (or will hold) READ data; a subsequent fflush()
+     * must not write it back to the file. */
+    stream->rw_state = _IO_RW_READ;
+
     if (stream->has_unget) {
         *dest++ = stream->unget_char;
         stream->has_unget = 0;
@@ -342,6 +359,10 @@ size_t fwrite(const void *ptr, size_t size, size_t nmemb, FILE *stream) {
         }
         return off / size;
     }
+
+    /* Buffered write: the buffer now holds WRITE data that fflush must write
+     * back to the file. */
+    stream->rw_state = _IO_RW_WRITE;
 
     while (total > 0) {
         size_t room = stream->buf_end - stream->pos;
