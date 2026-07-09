@@ -196,6 +196,31 @@ static int xhci_run_command(xhci_hc_t *hc, uint64_t param, uint32_t ctrl,
     return 0;
 }
 
+/* [DRV-03] Wait for the Transfer Event addressed to (slot, dci); skip unrelated
+ * events (port-status changes from the hotplug scanner, other slots/endpoints).
+ * Without this filter a routine Port-Status-Change event is consumed as the
+ * transfer's completion, giving a bogus actual_length and desyncing every later
+ * waiter.  Mirrors xhci_run_command's TRB-type filtering.  Returns the completion
+ * code (0 on timeout); on a match *out_status gets the event's status dword.
+ * Transfer Event control dword: [31:24] slot id, [20:16] endpoint id (DCI). */
+static int xhci_wait_transfer(xhci_hc_t *hc, uint8_t slot, int dci,
+                              uint32_t *out_status)
+{
+    uint32_t ec, est;
+    for (int guard = 0; guard < 8; guard++) {
+        int cc = xhci_wait_event(hc, NULL, &ec, &est);
+        if (cc == 0) return 0;   /* timeout */
+        if (XHCI_TRB_GET_TYPE(ec) == TRB_TRANSFER_EVENT &&
+            XHCI_TRB_GET_SLOT(ec) == slot &&
+            (int)((ec >> 16) & 0x1F) == dci) {
+            if (out_status) *out_status = est;
+            return cc;
+        }
+        /* non-matching event (port status, other slot/endpoint): drop, keep looking */
+    }
+    return 0;
+}
+
 /* ---- context helpers ---- */
 static uint8_t *slot_ctx_of(xhci_hc_t *hc, uint8_t *dev_ctx) { (void)hc; return dev_ctx; }
 /* input context: [0]=input-control, [1]=slot, [1+dci]=ep */
@@ -433,7 +458,7 @@ static int xhci_control(xhci_hc_t *hc, usb_transfer_t *xfer)
     xhci_doorbell(hc, slot, 1);   /* DCI 1 = EP0 */
 
     uint32_t evst;
-    int cc = xhci_wait_event(hc, NULL, NULL, &evst);
+    int cc = xhci_wait_transfer(hc, slot, 1, &evst);   /* [DRV-03] EP0 = DCI 1 */
     if (cc != XHCI_CC_SUCCESS && cc != XHCI_CC_SHORT_PACKET)
         return (cc == 0) ? USB_XFER_TIMEOUT : USB_XFER_STALL;
 
@@ -484,7 +509,7 @@ static int xhci_bulk(xhci_hc_t *hc, usb_transfer_t *xfer)
     xhci_doorbell(hc, slot, db_target);
 
     uint32_t evst;
-    int cc = xhci_wait_event(hc, NULL, NULL, &evst);
+    int cc = xhci_wait_transfer(hc, slot, dci, &evst);   /* [DRV-03] this EP's DCI */
     if (cc != XHCI_CC_SUCCESS && cc != XHCI_CC_SHORT_PACKET)
         return (cc == 0) ? USB_XFER_TIMEOUT : USB_XFER_STALL;
 

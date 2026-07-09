@@ -142,7 +142,7 @@ Fix the *class*, not just the instance:
   `getsockname` deref raw **user pointers** without copyin/out → kernel fault/DoS.
 
 ### Drivers
-- **[ ] DRV-03** `sys/drivers/usb/xhci.c:436` — transfer completion accepts *any*
+- **[x] DRV-03** `sys/drivers/usb/xhci.c:436` — transfer completion accepts *any*
   event-ring entry; a Port-Status-Change event is consumed as the transfer's
   completion → bogus length, desynced event stream.
 - **[ ] DRV-04** `sys/drivers/usb/usb.c:830` — `dev->parent` is never assigned, so
@@ -151,9 +151,9 @@ Fix the *class*, not just the instance:
 - **[ ] DRV-05** `sys/drivers/storage/ahci/ahci.c:393` + `usb/ehci.c:195` +
   `uhci.c:597` — timeout paths reclaim controller-owned DMA memory without stopping
   the hardware → late completion DMAs into recycled memory (IDE does this right).
-- **[ ] DRV-06** `sys/drivers/usb/ehci.c:195` — `ehci_run_qh` polls stale qTDs from
+- **[x] DRV-06** `sys/drivers/usb/ehci.c:195` — `ehci_run_qh` polls stale qTDs from
   prior transfers → spurious `USB_XFER_STALL` / burned timeouts on USB2 storage.
-- **[ ] DRV-07** `sys/drivers/usb/ehci.c:294` — bulk data-toggle advanced once per
+- **[x] DRV-07** `sys/drivers/usb/ehci.c:294` — bulk data-toggle advanced once per
   qTD regardless of packet count → wrong DATA PID on even-packet transfers → USB2
   mass-storage reads hang.
 - **[x] DRV-08** `sys/drivers/storage/scsi/scsi.c:276` — SCSI request + device pools

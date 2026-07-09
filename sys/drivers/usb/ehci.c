@@ -176,8 +176,11 @@ static uint32_t ehci_qtd_dma(ehci_hc_t *hc, int idx)
     return (uint32_t)(hc->qtd_dma + (dma_addr_t)idx * sizeof(struct ehci_qtd));
 }
 
-/* Arm the async QH at a qTD chain and poll to completion.  Returns USB_XFER_*. */
-static int ehci_run_qh(ehci_hc_t *hc, int first_qtd, uint32_t endp_char)
+/* Arm the async QH at a qTD chain and poll to completion.  Returns USB_XFER_*.
+ * [DRV-06] n_qtd counts the qTDs this transfer filled/linked (contiguous from
+ * first_qtd); only those are polled, so stale qTDs left ACTIVE/HALTED by a prior
+ * transfer (e.g. a STALLed GET_MAX_LUN) no longer poison this one. */
+static int ehci_run_qh(ehci_hc_t *hc, int first_qtd, int n_qtd, uint32_t endp_char)
 {
     struct ehci_qh *qh = hc->async_qh;
     qh->endp_char = endp_char | EHCI_QH_HEAD | EHCI_QH_DTC;
@@ -192,7 +195,7 @@ static int ehci_run_qh(ehci_hc_t *hc, int first_qtd, uint32_t endp_char)
     uint64_t deadline = (uint64_t)get_uptime_ms() + EHCI_XFER_TIMEOUT_MS;
     for (;;) {
         int active = 0, halted = 0;
-        for (int i = 0; i < EHCI_MAX_QTD; i++) {
+        for (int i = first_qtd; i < first_qtd + n_qtd; i++) {   /* [DRV-06] this xfer only */
             uint32_t tok = hc->qtd[i].token;
             /* only inspect qTDs we linked (token nonzero means we set it) */
             if (!(tok & (EHCI_QTD_STATUS_ACTIVE | EHCI_QTD_STATUS_ERRMASK)))
@@ -258,7 +261,7 @@ static int ehci_control_transfer(ehci_hc_t *hc, usb_transfer_t *xfer)
                       EHCI_QTD_PID_SETUP, 8, 0, hc->setup_dma, 0);
     }
 
-    int r = ehci_run_qh(hc, setup_i, ehci_endp_char(xfer, 1));
+    int r = ehci_run_qh(hc, setup_i, idx, ehci_endp_char(xfer, 1)); /* [DRV-06] idx qTDs */
     if (r == USB_XFER_OK && in && len) {
         /* bytes actually moved = requested - residue from the data qTD */
         uint32_t residue = (hc->qtd[data_i].token >> EHCI_QTD_BYTES_SHIFT) & 0x7FFF;
@@ -285,13 +288,22 @@ static int ehci_bulk_transfer(ehci_hc_t *hc, usb_transfer_t *xfer)
     int toggle = xfer->ep ? xfer->ep->toggle : 0;
     ehci_fill_qtd(hc, 0, 0, pid, len, toggle, len ? hc->bounce_dma : 0, 1);
 
-    int r = ehci_run_qh(hc, 0, ehci_endp_char(xfer, 0));
+    int r = ehci_run_qh(hc, 0, 1, ehci_endp_char(xfer, 0)); /* [DRV-06] single qTD */
     if (r == USB_XFER_OK) {
         uint32_t residue = (hc->qtd[0].token >> EHCI_QTD_BYTES_SHIFT) & 0x7FFF;
         xfer->actual_length = len - residue;
         if (in && xfer->actual_length)
             memcpy(xfer->data, hc->bounce, xfer->actual_length);
-        if (xfer->ep) xfer->ep->toggle ^= 1;   /* advance toggle (single qTD) */
+        if (xfer->ep) {
+            /* [DRV-07] One qTD moves many max-packet packets; the ending data
+             * toggle is initial ^ (npackets & 1).  Advance by the parity of the
+             * packets actually moved, not unconditionally by one (an even packet
+             * count, e.g. 1024 B at MPS 512, must leave the toggle unchanged). */
+            uint32_t mps = xfer->ep->max_packet ? xfer->ep->max_packet : 512;
+            uint32_t moved = xfer->actual_length;
+            uint32_t npkts = moved ? ((moved + mps - 1) / mps) : 1; /* ZLP = 1 packet */
+            xfer->ep->toggle ^= (npkts & 1);
+        }
     }
     xfer->status = r;
     return r;
