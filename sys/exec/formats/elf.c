@@ -22,6 +22,7 @@
 #include <sys/file.h>
 #include <sys/errno.h>
 #include <sys/stat.h>
+#include <sys/mount.h>   /* struct mount, MNT_NOSUID */
 #include <arch/i386/pmm.h>
 #if defined(__i386__) || defined(HOST_TEST)
 #include <arch/i386/pmap.h>
@@ -1387,7 +1388,18 @@ static int exec_setup_stack(pmap_t pmap, uint32_t *sp_out, char **k_argv, int ar
         sp -= 4; STACK_WRITE32(sp, rand_ptr);
         sp -= 4; STACK_WRITE32(sp, AT_RANDOM);
 
-        sp -= 4; STACK_WRITE32(sp, 0);
+        /* AT_SECURE: nonzero when this exec is running with privileges the
+         * real user does not hold — i.e. a setuid/setgid image raised the
+         * effective IDs above the real IDs (the credential change already
+         * happened before this stack is built).  A trusted (non-secure)
+         * exec keeps AT_SECURE = 0, so ld.so's LD_PRELOAD path is
+         * unaffected; a secure exec sets it so ld.so ignores LD_PRELOAD. */
+        uint32_t at_secure = 0;
+        if (current_process &&
+            (current_process->euid != current_process->uid ||
+             current_process->egid != current_process->gid))
+            at_secure = 1;
+        sp -= 4; STACK_WRITE32(sp, at_secure);
         sp -= 4; STACK_WRITE32(sp, AT_SECURE);
 
         sp -= 4; STACK_WRITE32(sp, platform_ptr);
@@ -1679,10 +1691,15 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
         // Reset signal handlers on successful exec (POSIX requirement)
         exec_reset_signals();
 
-        // Handle setuid/setgid bits (POSIX exec credential change)
-        if (file && (file->mask & S_ISUID))
+        // Handle setuid/setgid bits (POSIX exec credential change).
+        // Honor MNT_NOSUID: a filesystem mounted nosuid must never let a
+        // setuid/setgid bit raise the caller's effective credentials, so
+        // the bits are ignored for images that live on such a mount.
+        int honor_suid = !(file && file->mp &&
+                           (file->mp->mnt_flag & MNT_NOSUID));
+        if (honor_suid && file && (file->mask & S_ISUID))
             current_process->euid = file->uid;
-        if (file && (file->mask & S_ISGID))
+        if (honor_suid && file && (file->mask & S_ISGID))
             current_process->egid = file->gid;
         // POSIX: on every exec the saved-set-IDs are set to the
         // (possibly just-changed) effective IDs.  Without this a

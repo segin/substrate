@@ -118,6 +118,7 @@ typedef struct {
 #define AT_FLAGS   8
 #define AT_ENTRY   9
 #define AT_PLATFORM 15
+#define AT_SECURE  23   /* nonzero => secure exec (setuid/setgid): ignore LD_* */
 #define AT_EXECFN  31
 
 /* Native syscall numbers we actually issue from the linker. */

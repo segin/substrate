@@ -24,6 +24,7 @@ typedef struct {
     ld_u32 base;
     ld_u32 entry;
     ld_u32 pagesz;
+    ld_u32 secure;
 } ld_auxv_t;
 
 static void parse_auxv(ld_u32 *initial_stack, ld_auxv_t *out) {
@@ -39,6 +40,7 @@ static void parse_auxv(ld_u32 *initial_stack, ld_auxv_t *out) {
     /* Auxv now starts at p as (a_type, a_val) pairs. */
     out->phdr = out->phent = out->phnum = 0;
     out->base = out->entry = out->pagesz = 0;
+    out->secure = 0;
     while (*p) {
         ld_u32 tag = p[0];
         ld_u32 val = p[1];
@@ -49,6 +51,7 @@ static void parse_auxv(ld_u32 *initial_stack, ld_auxv_t *out) {
         case AT_BASE:   out->base = val;   break;
         case AT_ENTRY:  out->entry = val;  break;
         case AT_PAGESZ: out->pagesz = val; break;
+        case AT_SECURE: out->secure = val; break;
         }
         p += 2;
     }
@@ -223,6 +226,16 @@ ld_u32 ld_main(ld_u32 *initial_stack) {
             p++;
         }
     }
+
+    /* Secure-execution (setuid/setgid) hardening.  When the kernel set
+     * AT_SECURE the program runs with privileges its real user does not
+     * hold, so untrusted, environment-driven library search must be
+     * ignored — otherwise `LD_PRELOAD=evil.so ./setuid-root-bin` would
+     * inject an attacker-controlled object into a privileged process.
+     * Drop LD_PRELOAD here; LD_LIBRARY_PATH is not yet honored, but must
+     * be gated the same way once it is. */
+    if (a.secure)
+        preload_list = 0;
 
     if (ld_debug) {
         ld_puts("ld.so: AT_BASE  = "); ld_putx(a.base);   ld_puts("\n");

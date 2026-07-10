@@ -488,10 +488,17 @@ static int proc_fork_common(process_t *parent, void *stack, int is_vfork) {
 
     if (ldt_clone_process(child_proc, parent) != 0) {
         if (child_proc->vm_map) {
+            /* vm_map_destroy() owns and frees the map's pmap (via
+             * pmap_destroy(map->pmap)), so releasing the pmap again here
+             * would double-free the page directory.  Tear the map down and
+             * clear both pointers so the trailing proc_destroy() cannot
+             * touch freed VM state. */
             vm_map_destroy(child_proc->vm_map);
             child_proc->vm_map = NULL;
-        }
-        if (child_proc->pmap) {
+            child_proc->pmap = NULL;
+        } else if (child_proc->pmap) {
+            /* No vm_map was created to own the pmap (e.g. a kernel process
+             * that never reached vm_map_fork), so release it directly. */
             pmap_release(child_proc->pmap);
             child_proc->pmap = NULL;
         }
