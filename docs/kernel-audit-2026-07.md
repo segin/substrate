@@ -7,6 +7,34 @@ and networking each audited **twice** for cross-validation). `lib/m/` and
 
 Status legend: **[ ] open** · **[~] in progress** · **[x] fixed** · **[!] wontfix/deferred**
 
+### Progress (updated 2026-07-09)
+
+**51 fixed · 1 deferred · 23 in progress · 31 open.**
+
+Fixed & committed (clean kernel build → boots to `60-sdm`, zero panics):
+
+- **Critical:** EXFAT-01 (root-node pin), VM-01 (UMA slab lock), KERN-02/03
+  (SysV/POSIX sem waiter windows), LIBC-01 (`fflush` r+ corruption).
+- **High/perf:** SCHED-01 (poll thundering-herd; verified idle now `hlt`s),
+  VM-05 (`sys_brk` serialized), FS-03/04 (ext2 untrusted `name_len`/`rec_len`),
+  DRV-03/06/07 (xHCI/EHCI completion + toggle), DRV-08 (SCSI pool lock),
+  KERN-08 (ptrace ATTACH creds), KERN-09/10/11 (futex PI owner UAF + priority
+  sign + lockmgr ABBA), NET-04/06 (TCP half-open free + RST), NET-07/08 (UDP
+  ephemeral ports + RAW-only header strip, v4+v6).
+- **Medium/low:** FS-06/08/09, EXEC-01/02/03, KERN-12/13, NET-09/10, VM-12,
+  LIBC-02..12, MATH-01..06, SYS-01.
+
+In progress (Wave 1 subagents, uncommitted): NET-01/02/03/05/11 (AF_INET
+refcount, TCP retransmit UAF, copyin/out, IRQ-sleep, retransmit cap) and the
+DRV cluster DRV-01/02/04/05/09–22 (USB unplug UAF, hub topology, HCD/AHCI DMA
+quiesce, console/audio/blkdev/virtio races).
+
+Deferred: ARCH-02 (`set_thread_area` RO-page write — needs a fault-guarded
+copyout; the naive copyout regressed TLS and hung boot, so reverted).
+
+Open (Wave 2, boot-critical core, queued): VM-02/03/04/06–11/13/14/15,
+FS-01/02/05/07/10/11/12, KERN-01/04/05/06/07/14, ARCH-01/03/04, SEC-01, PM-01.
+
 ---
 
 ## Cross-cutting themes
@@ -61,11 +89,11 @@ Fix the *class*, not just the instance:
   unserialized read-modify-write of a whole inode-table block shared by many
   inodes; a co-resident inode's `i_links_count` gets clobbered to 0 → stale-slot
   logic + fsck treat a live inode as free. Second half of the reproduced bug.
-- **[ ] DRV-01** `sys/drivers/usb/usb.c:837` + `usb_msc.c:532` — USB unplug frees
+- **[~] DRV-01** `sys/drivers/usb/usb.c:837` + `usb_msc.c:532` — USB unplug frees
   the device + DMA buffers (`cbw`/`csw`/`udev`) with **no in-flight transfer
   quiescing** and no poll-thread join (HID joins; storage does not) → DMA into
   recycled memory / UAF.
-- **[ ] DRV-02** `sys/drivers/usb/usbdevfs.c:184` — `usbdevfs_publish` stores
+- **[~] DRV-02** `sys/drivers/usb/usbdevfs.c:184` — `usbdevfs_publish` stores
   `node->impl = dev` on `/dev/usb/...` nodes with **no unpublish path**; after
   `usb_free_device`, `lsusb`/libusb deref the freed (address-reusable) `dev` → UAF.
 - **[ ] KERN-01** `sys/kern/signal.c:285` → `sleepq.c:75` — `psignal()` runs in ISR
@@ -133,22 +161,22 @@ Fix the *class*, not just the instance:
   intervening recycling calls).
 
 ### Networking
-- **[ ] NET-01** `sys/net/af_inet.c:437,960` — AF_INET UDP/RAW list + per-socket
+- **[~] NET-01** `sys/net/af_inet.c:437,960` — AF_INET UDP/RAW list + per-socket
   rings mutated in hard IRQ while `close()` frees nodes with IRQs on, no socket
   refcount → UAF/heap corruption under inbound traffic.
-- **[ ] NET-02** `sys/net/tcp.c:283,343` — `tcp_timer_tick` drops `tcp_lock` then
+- **[~] NET-02** `sys/net/tcp.c:283,343` — `tcp_timer_tick` drops `tcp_lock` then
   derefs an unacked segment an incoming ACK can `kfree` → retransmit UAF.
-- **[ ] NET-03** `sys/net/af_inet.c:566` + `af_unix.c:1876` — `getsockopt`/`bind`/
+- **[~] NET-03** `sys/net/af_inet.c:566` + `af_unix.c:1876` — `getsockopt`/`bind`/
   `getsockname` deref raw **user pointers** without copyin/out → kernel fault/DoS.
 
 ### Drivers
 - **[x] DRV-03** `sys/drivers/usb/xhci.c:436` — transfer completion accepts *any*
   event-ring entry; a Port-Status-Change event is consumed as the transfer's
   completion → bogus length, desynced event stream.
-- **[ ] DRV-04** `sys/drivers/usb/usb.c:830` — `dev->parent` is never assigned, so
+- **[~] DRV-04** `sys/drivers/usb/usb.c:830` — `dev->parent` is never assigned, so
   hub-downstream devices masquerade as root-port devices and the 250 ms hotplug
   scan can disconnect a working hub-attached disk.
-- **[ ] DRV-05** `sys/drivers/storage/ahci/ahci.c:393` + `usb/ehci.c:195` +
+- **[~] DRV-05** `sys/drivers/storage/ahci/ahci.c:393` + `usb/ehci.c:195` +
   `uhci.c:597` — timeout paths reclaim controller-owned DMA memory without stopping
   the hardware → late completion DMAs into recycled memory (IDE does this right).
 - **[x] DRV-06** `sys/drivers/usb/ehci.c:195` — `ehci_run_qh` polls stale qTDs from
@@ -242,7 +270,7 @@ Fix the *class*, not just the instance:
 ### Networking
 - **[x] NET-04** `sys/net/tcp.c:337` — half-open (`SYN_RECEIVED`) child PCBs that
   time out are never freed (32 KiB rxbuf each) → half-open-flood DoS.
-- **[ ] NET-05** `sys/net/tcp.c:531` + `inet.c:182` — `tcp_input` (hard IRQ) reaches
+- **[~] NET-05** `sys/net/tcp.c:531` + `inet.c:182` — `tcp_input` (hard IRQ) reaches
   `sched_yield()` via ARP-miss on a real NIC → sleep in interrupt context.
 - **[x] NET-06** `sys/net/tcp.c:472` — RST ignored in `SYN_RECEIVED` → half-open
   child lingers retransmitting SYN-ACK.
@@ -253,31 +281,31 @@ Fix the *class*, not just the instance:
   high byte is `0x4X`.
 
 ### Drivers
-- **[ ] DRV-09** `sys/drivers/console/uart/uart.c:524` — UART TX ring indices
+- **[~] DRV-09** `sys/drivers/console/uart/uart.c:524` — UART TX ring indices
   read-modify-written from process + IRQ context with no lock → `count` underflow
   spews the ring / wedges the console.
-- **[ ] DRV-10** `sys/drivers/console/tty.c:884` — non-canonical read never arms a
+- **[~] DRV-10** `sys/drivers/console/tty.c:884` — non-canonical read never arms a
   timed wakeup → `MIN=0,TIME>0` read blocks forever when the line goes idle.
-- **[ ] DRV-11** `sys/drivers/audio/audio.c:395` — `/dev/audio` exclusivity keyed
+- **[~] DRV-11** `sys/drivers/audio/audio.c:395` — `/dev/audio` exclusivity keyed
   per-process, not per-thread → two threads of one process race the SPSC FIFO.
-- **[ ] DRV-12** `sys/drivers/audio/ac97.c:414` + `hda.c:563` — `_close` resets
+- **[~] DRV-12** `sys/drivers/audio/ac97.c:414` + `hda.c:563` — `_close` resets
   ring/FIFO state without `feed_lock`, racing the IRQ feeder (SMP).
-- **[ ] DRV-13** `sys/drivers/storage/blkdev.c:194` — a write to the raw disk node
+- **[~] DRV-13** `sys/drivers/storage/blkdev.c:194` — a write to the raw disk node
   doesn't invalidate the partition's cached copy of the same sector → stale reads;
   `blkdev_geom_read` also bypasses the cache and the `dead` check.
-- **[ ] DRV-14** `sys/drivers/storage/scsi/scsi_dev.c:289` — partition blkdevs (and
+- **[~] DRV-14** `sys/drivers/storage/scsi/scsi_dev.c:289` — partition blkdevs (and
   their bio caches + mounts) are never torn down when the parent disk detaches.
-- **[ ] DRV-15** `sys/drivers/virtio/virtio_blk.c:86` — `virtio_blk_setup`'s ring
+- **[~] DRV-15** `sys/drivers/virtio/virtio_blk.c:86` — `virtio_blk_setup`'s ring
   math can never succeed → the driver never reaches DRIVER_OK (dead code).
-- **[ ] DRV-16** `sys/drivers/usb/usb_msc.c:90` — 128 KiB direct chunk exceeds the
+- **[~] DRV-16** `sys/drivers/usb/usb_msc.c:90` — 128 KiB direct chunk exceeds the
   EHCI (20 KiB) / xHCI (64 KiB) per-transfer limits → large I/O fails.
-- **[ ] DRV-17** `sys/drivers/usb/uas.c:165` — UAS status IUs are never matched
+- **[~] DRV-17** `sys/drivers/usb/uas.c:165` — UAS status IUs are never matched
   against the command tag → a late status IU is misattributed.
-- **[ ] DRV-18** `sys/drivers/usb/uhci.c:597` — on timeout, TDs are freed and the
+- **[~] DRV-18** `sys/drivers/usb/uhci.c:597` — on timeout, TDs are freed and the
   data buffer unmapped within the HC's current-frame window → DMA into a reissued TD.
-- **[ ] DRV-19** `sys/drivers/usb/xhci.c:253` — `xhci_setup_slot` leaks slot + DMA
+- **[~] DRV-19** `sys/drivers/usb/xhci.c:253` — `xhci_setup_slot` leaks slot + DMA
   contexts on any partial failure → 16 flaky enumerations exhaust all slots.
-- **[ ] DRV-20** `sys/drivers/usb/usb.c:27,837` — the `/proc/devtree` device node and
+- **[~] DRV-20** `sys/drivers/usb/usb.c:27,837` — the `/proc/devtree` device node and
   usbdevfs nodes are never removed on disconnect → leak per hotplug cycle.
 
 ### libc
@@ -300,15 +328,15 @@ Fix the *class*, not just the instance:
 
 ## LOW
 
-- **[ ] DRV-21** `sys/drivers/console/tty.c:1177` — TTY permission failures return
+- **[~] DRV-21** `sys/drivers/console/tty.c:1177` — TTY permission failures return
   bare `-1`, which aliases the driver-forward sentinel (op silently forwarded).
-- **[ ] DRV-22** `sys/drivers/input/keyboard.c:308` — PS/2 + USB-HID share non-atomic
+- **[~] DRV-22** `sys/drivers/input/keyboard.c:308` — PS/2 + USB-HID share non-atomic
   modifier globals → transient wrong-modifier characters.
 - **[x] NET-09** `sys/net/arp.c:35` — ARP cache read/written across IRQ/process with
   no lock → torn MAC read.
 - **[x] NET-10** `sys/net/af_unix.c:1828` — `getsockname` signed-underflow write with
   a user `addrlen` of 0/1.
-- **[ ] NET-11** `sys/net/tcp.c:341` — retransmit victim list silently capped at 32.
+- **[~] NET-11** `sys/net/tcp.c:341` — retransmit victim list silently capped at 32.
 - **[ ] ARCH-03** `sys/arch/i386/signal.c:597` — `sigreturn` EFLAGS filter doesn't
   mask NT despite the comment.
 - **[ ] FS-11** `sys/fs/ext2/ext2.c:3314` — `ext2_symlink` slow path leaks the data
