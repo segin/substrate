@@ -106,8 +106,16 @@ int sys_set_thread_area(struct user_desc *u_info) {
     uint16_t selector = (info.entry_number << 3) | 3;
     __asm__ volatile("mov %0, %%gs" : : "r"(selector));
     
-    // Write back the entry number to user
-    u_info->entry_number = info.entry_number;
+    /* Write the resolved entry number back to the user struct.  Use a
+     * fault-guarded copyout instead of a raw store: a hostile or COW/read-only
+     * user page would otherwise #PF in kernel context and panic (ARCH-02).
+     * entry_number is at offset 0 of struct user_desc, so this targets exactly
+     * the pointer copyin() validated above; correct copyout arg order is
+     * (kernel src, user dst, size) -- swapping them makes validate_user_addr
+     * reject the kernel address, which is what regressed an earlier attempt. */
+    if (copyout(&info.entry_number, &u_info->entry_number,
+                sizeof(u_info->entry_number)) != 0)
+        return -14; // EFAULT
     
     // CRITICAL: Update the saved regs context so that when syscall returns,
     // the POP GS instruction in isr_exit restores this new selector,
