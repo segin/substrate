@@ -99,6 +99,7 @@ struct freebsd13_stat;
 #define FREEBSD_SYS_fchmod     124
 #define FREEBSD_SYS_lchown     254
 #define FREEBSD_SYS_minherit   250
+#define FREEBSD_SYS_rfork      251
 #define FREEBSD_SYS_lchmod     274
 #define FREEBSD_SYS_getrlimit_old  144  /* compat_43 getrlimit */
 #define FREEBSD_SYS_setrlimit_old  145  /* compat_43 setrlimit */

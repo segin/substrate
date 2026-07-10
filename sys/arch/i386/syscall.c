@@ -11,6 +11,7 @@
 #include <sys/errno.h>
 #include <sys/exec.h>
 #include <sys/file.h>
+#include <sys/kern_syscalls.h>
 #include <sys/proc.h>
 #include <sys/session.h>
 #include <sys/signal.h>
@@ -646,6 +647,33 @@ int sys_vfork(void) {
     process_t *child = proc_find(child_pid);
     proc_begin_vfork(child);
     return child_pid;
+}
+
+/*
+ * rfork(2) — BSD/Plan9 process-fork primitive (FreeBSD/NetBSD personalities).
+ * A libc posix_spawn(3) fast path calls rfork(RFSPAWN); without this a FreeBSD
+ * compiler driver (cc -> cc1) fails with "posix_spawn failed: Function not
+ * implemented".  Map the process-creating flag combinations onto fork/vfork:
+ *
+ *   RFSPAWN (posix_spawn) or RFMEM|RFPROC (shared address space)
+ *        -> vfork semantics: the child shares the parent's VM and the parent
+ *           blocks until the child execs or _exits (which is exactly what a
+ *           spawn wants -- the child immediately execve()s the target).
+ *   RFPROC without RFMEM -> fork: a new process with a private address space.
+ *
+ * Variants that do not create a separate process (thread-style rfork with
+ * RFPROC clear) are not supported and return -EINVAL.
+ */
+int sys_rfork(int flags) {
+    uint32_t f = (uint32_t)flags;
+
+    if (f & RF_SPAWN)
+        return sys_vfork();
+    if (!(f & RF_PROC))
+        return -EINVAL;
+    if (f & RF_MEM)
+        return sys_vfork();
+    return sys_fork();
 }
 
 void syscall_init(void) {

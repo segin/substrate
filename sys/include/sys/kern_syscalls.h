@@ -95,6 +95,17 @@ int sys_setsid(void);
 int sys_getpgid(int pid);
 int sys_fork(void);
 int sys_vfork(void);
+
+/*
+ * rfork(2) — BSD/Plan9 process-fork primitive.  Flag values match FreeBSD's
+ * <sys/unistd.h> (the personality ABI that consumes this).  We support the
+ * combinations a libc posix_spawn(3) fast path needs.
+ */
+#define RF_FDG    (1u << 2)    /* copy the fd table (fork) */
+#define RF_PROC   (1u << 4)    /* create a new process */
+#define RF_MEM    (1u << 5)    /* share the parent's address space (vfork) */
+#define RF_SPAWN  (1u << 31)   /* posix_spawn fast path: vfork semantics */
+int sys_rfork(int flags);
 int sys_vm86(void *v);
 int sys_sysarch(int op, void *args);
 int sys_stat(const char *p, struct stat *buf);
