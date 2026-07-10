@@ -23,6 +23,10 @@ set -eu
 #            that corrupts a single-byte read right after a SIGALRM reaches a
 #            userland handler (tests/lib/c/torture_heap_stdio sc9f; passes
 #            under TCG). Use --kvm for speed when that risk is acceptable.
+#   --smp[=N]
+#            boot with N virtual CPUs. Bare --smp uses 2; --smp=4 sets the
+#            count. Default is 1 (uniprocessor). Substrate SMP is new: it boots
+#            multi-core cleanly, but races under sustained load may still remain.
 #   --snapshot
 #            add -snapshot: every writable disk (rootfs.img, --drive,
 #            --drive-ctrl) is backed by a throwaway overlay, so guest writes
@@ -77,6 +81,7 @@ set -eu
 GFX=0
 GFX_MODE="1024x768@32"   # used for bare --gfx; --gfx=WxH@bpp overrides
 KVM=0
+SMP=1
 USERNET=0
 DEBUG=0
 SNAPSHOT=0
@@ -96,6 +101,12 @@ while [ $# -gt 0 ]; do
                         *) echo "run-networking.sh: --gfx needs WxH or WxH@bpp (e.g. --gfx=640x480@4)" >&2; exit 1 ;;
                     esac ;;
         --kvm)      KVM=1 ;;
+        --smp)      SMP=2 ;;
+        --smp=*)    SMP="${1#--smp=}"
+                    case "$SMP" in
+                        ''|*[!0-9]*) echo "run-networking.sh: --smp needs a positive integer (e.g. --smp=4)" >&2; exit 1 ;;
+                    esac
+                    [ "$SMP" -ge 1 ] || { echo "run-networking.sh: --smp count must be >= 1" >&2; exit 1; } ;;
         --user)     USERNET=1 ;;
         --debug)    DEBUG=1 ;;
         --snapshot) SNAPSHOT=1 ;;
@@ -257,6 +268,9 @@ if [ "$GFX" -eq 1 ]; then
 fi
 if [ "$KVM" -eq 1 ]; then
     ACCEL_ARG="-accel kvm"
+fi
+if [ "$SMP" -gt 1 ]; then
+    echo "run-networking.sh: SMP with $SMP virtual CPUs"
 fi
 SNAPSHOT_ARG=""
 if [ "$SNAPSHOT" -eq 1 ]; then
@@ -454,6 +468,7 @@ fi
 # substrate's PS/2 mouse path is unreliable, and usb-kbd/usb-mouse below cover
 # input, so this leaves a single clean USB pointer on /dev/input/event0.
 qemu-system-i386 -cpu qemu32,+sse,+sse2 $ACCEL_ARG \
+  -smp "$SMP" \
   -m 512M \
   -machine pc,i8042=off \
   $SNAPSHOT_ARG \
