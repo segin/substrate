@@ -93,9 +93,12 @@ lockmgr(struct lock *lkp, uint32_t flags, spinlock_t *interlock)
                 spinlock_release(interlock);
             spinlock_release(&lkp->lk_interlock);
             sched_yield();
-            spinlock_acquire(&lkp->lk_interlock);
+            /* KERN-10: reacquire in caller-entry order (interlock before
+             * lk_interlock) to avoid an ABBA deadlock with vn_lock(), which
+             * enters holding v_interlock and then takes lk_interlock. */
             if (interlock)
                 spinlock_acquire(interlock);
+            spinlock_acquire(&lkp->lk_interlock);
             lkp->lk_waitcount--;
         }
         if (error == 0)
@@ -128,9 +131,12 @@ lockmgr(struct lock *lkp, uint32_t flags, spinlock_t *interlock)
                 spinlock_release(interlock);
             spinlock_release(&lkp->lk_interlock);
             sched_yield();
-            spinlock_acquire(&lkp->lk_interlock);
+            /* KERN-10: reacquire in caller-entry order (interlock before
+             * lk_interlock) to avoid an ABBA deadlock with vn_lock(), which
+             * enters holding v_interlock and then takes lk_interlock. */
             if (interlock)
                 spinlock_acquire(interlock);
+            spinlock_acquire(&lkp->lk_interlock);
             lkp->lk_waitcount--;
         }
         if (error == 0) {
@@ -173,9 +179,12 @@ lockmgr(struct lock *lkp, uint32_t flags, spinlock_t *interlock)
                 spinlock_release(interlock);
             spinlock_release(&lkp->lk_interlock);
             sched_yield();
-            spinlock_acquire(&lkp->lk_interlock);
+            /* KERN-10: reacquire in caller-entry order (interlock before
+             * lk_interlock) to avoid an ABBA deadlock with vn_lock(), which
+             * enters holding v_interlock and then takes lk_interlock. */
             if (interlock)
                 spinlock_acquire(interlock);
+            spinlock_acquire(&lkp->lk_interlock);
             lkp->lk_waitcount--;
         }
         if (error == 0) {
@@ -253,9 +262,12 @@ lockmgr(struct lock *lkp, uint32_t flags, spinlock_t *interlock)
                 spinlock_release(interlock);
             spinlock_release(&lkp->lk_interlock);
             sched_yield();
-            spinlock_acquire(&lkp->lk_interlock);
+            /* KERN-10: reacquire in caller-entry order (interlock before
+             * lk_interlock) to avoid an ABBA deadlock with vn_lock(), which
+             * enters holding v_interlock and then takes lk_interlock. */
             if (interlock)
                 spinlock_acquire(interlock);
+            spinlock_acquire(&lkp->lk_interlock);
             lkp->lk_waitcount--;
         }
         if (error == 0) {
