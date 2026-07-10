@@ -6,7 +6,7 @@ LDFLAGS := $(FREESTANDING_LDFLAGS)
 SRCS = acct.c time.c main.c panic.c stacktrace.c ksyms.c core.c spinlock.c mutex.c semaphore.c rwlock.c lockmgr.c kthread.c turnstile.c \
        crc32c.c memtrack.c \
        signal.c sigprop.c ptrace.c swapper.c futex.c umtx.c kobject.c cmdline.c debug.c sleepq.c random.c syscall.c device.c driver.c bus.c sysctl.c sysinfo.c irq.c dma.c pci.c isa.c isapnp.c resource.c ioremap.c sysrq.c \
-       sched_affinity.c sched_posix.c runqueue.c sched_smp.c loadavg.c \
+       sched_affinity.c sched_posix.c runqueue.c sched_smp.c sched_ipi.c loadavg.c \
        kern_uio.c subr_copy.c ipc_sem.c ipc_shm.c posix_sem.c posix_mqueue.c \
        efi_runtime.c \
        geom/geom_subr.c geom/geom_mbr.c geom/geom_gpt.c geom/geom_bsd.c

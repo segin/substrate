@@ -165,6 +165,13 @@ msi_isr_stubs:
 .noaltmacro
 .text
 
+# SMP IPI vectors that route through the common stub -> isr_handler, which
+# dispatches them to their C handlers (each sends its own LAPIC EOI):
+#   0xFD (253) SCHED_IPI_VECTOR     -> sched_ipi_handler
+#   0xFE (254) TLB_SHOOTDOWN_VECTOR -> pmap_shootdown_handler
+ISR_NOERRCODE 253
+ISR_NOERRCODE 254
+
 # Panic IPI (vector 0xFB).  When one CPU panics, it sends this IPI
 # to every other CPU.  The handler does NOT return — it disables
 # interrupts and halts forever.  No common-stub round-trip, no LAPIC

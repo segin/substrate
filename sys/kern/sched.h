@@ -54,6 +54,10 @@ void poll_notify(void *chan);
 /* IPI vector for scheduler preemption (must match IDT setup) */
 #define SCHED_IPI_VECTOR 0xFD
 
+/* Scheduler-preemption IPI handler, invoked from the IDT stub for
+ * SCHED_IPI_VECTOR; flags the current thread for reschedule and EOIs. */
+void sched_ipi_handler(void);
+
 /* Interactivity constants */
 #define INTERACT_MAX        128     /* Maximum interactivity score */
 #define INTERACT_THRESH     30      /* Threshold to be considered "interactive" */

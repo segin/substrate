@@ -85,6 +85,8 @@ extern void isr46(void);  // IRQ14 (IDE Primary)
 extern void isr47(void);  // IRQ15 (IDE Secondary)
 
 extern void isr128(void); // Syscall
+extern void isr253(void); // SCHED_IPI_VECTOR   (0xFD)
+extern void isr254(void); // TLB_SHOOTDOWN_VECTOR (0xFE)
 extern void isr_panic_ipi(void);
 
 /* Entry points for the dynamic (MSI) vector stubs 0x50..0xBF, indexed by

@@ -175,6 +175,14 @@ void idt_init(void) {
         idt_set_gate(0xFB, (uint32_t)(uintptr_t)isr_panic_ipi,
                      KERNEL_CODE_SELECTOR, IDT_FLAG_KERNEL_INT_GATE);
 
+    /* SMP IPIs routed through the common stub -> isr_handler dispatch.
+     * Without these gates the first shootdown/preemption IPI on an SMP boot
+     * GP-faults (vector-not-present) and cascades into a panic IPI storm. */
+    idt_set_gate(SCHED_IPI_VECTOR, (uint32_t)(uintptr_t)isr253,
+                 KERNEL_CODE_SELECTOR, IDT_FLAG_KERNEL_INT_GATE);
+    idt_set_gate(TLB_SHOOTDOWN_VECTOR, (uint32_t)(uintptr_t)isr254,
+                 KERNEL_CODE_SELECTOR, IDT_FLAG_KERNEL_INT_GATE);
+
     /* Dynamic (MSI/MSI-X) vectors 0x50..0xBF: install a gate per vector so
      * LAPIC-delivered messages reach isr_handler, which routes them to
      * irq_dispatch() + a LAPIC EOI. */
@@ -574,6 +582,12 @@ void isr_handler(registers_t *regs) {
          * (never the 8259 PIC). */
         (void)irq_dispatch((unsigned int)regs->int_no, regs);
         lapic_send_eoi();
+    } else if (regs->int_no == SCHED_IPI_VECTOR) {
+        /* Scheduler-preemption IPI: flag reschedule; handler sends its EOI. */
+        sched_ipi_handler();
+    } else if (regs->int_no == TLB_SHOOTDOWN_VECTOR) {
+        /* TLB shootdown IPI: invalidate the requested range, ack, EOI. */
+        pmap_shootdown_handler();
     }
 
     if (is_usermode) signal_handle_pending(regs);  /* not for kernel-mode IRQs */
