@@ -20,6 +20,7 @@
 #include <vm/vm_object.h>
 #include <vm/vm_page.h>
 #include <vfs/vfs.h>
+#include <vfs/buf.h>
 #include <fs/procfs.h>
 #include <pm/pm.h>
 #include <kern/cmdline.h>
@@ -107,6 +108,15 @@ static uint32_t gen_meminfo(char *buf, size_t size, void *opaque) {
     uint32_t commit_limit_kb = (uint32_t)(vm_commit_limit() * 4);
     uint32_t committed_kb    = (uint32_t)(vm_commit_current() * 4);
 
+    /* Report the block (buffer) cache footprint under Buffers, like Linux.
+     * Substrate's bio cache is block-level (no separate page cache), so file
+     * and metadata blocks both land here; Cached stays 0.  The cache is
+     * reclaimable, so fold it into MemAvailable too. */
+    struct bio_stats bstat;
+    bio_get_stats(&bstat);
+    uint32_t buffers_kb  = (uint32_t)(bstat.resident_bytes / 1024);
+    uint32_t available_kb = free_kb + buffers_kb;
+
     /* MemAvailable is a standard /proc/meminfo field (Linux 3.14+) that
      * callers use as the canonical "how much can I allocate" figure.
      * Without it, software that computes "available = MemAvailable"
@@ -121,13 +131,13 @@ static uint32_t gen_meminfo(char *buf, size_t size, void *opaque) {
         "MemFree:     %8u kB\n"
         "MemAvailable:%8u kB\n"
         "MemUsed:     %8u kB\n"
-        "Buffers:            0 kB\n"
+        "Buffers:     %8u kB\n"
         "Cached:             0 kB\n"
         "SwapTotal:          0 kB\n"
         "SwapFree:           0 kB\n"
         "CommitLimit: %8u kB\n"
         "Committed_AS:%8u kB\n",
-        total_kb, free_kb, free_kb, used_kb,
+        total_kb, free_kb, available_kb, used_kb, buffers_kb,
         commit_limit_kb, committed_kb);
 }
 
