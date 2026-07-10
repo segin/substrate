@@ -29,25 +29,12 @@
 #include <kern/sched.h>
 #include <sys/dma.h>
 #include <sys/lock.h>
-#include <sys/irq.h>
 
 /* Pause-spin iterations to await command completion before yielding the CPU
  * in ahci_port_issue_cmd() — long enough to catch a fast (KVM/emulated)
  * completion at low latency, short enough that a real-latency transfer yields
  * (cmd_lock is a mutex, so a contender sleeps rather than spins). */
 #define AHCI_POLL_SPIN_LIMIT   2048
-
-/* When the completion IRQ is wired up, spin only this briefly for an
- * instant completion (avoids a context switch for sub-microsecond transfers)
- * before sleeping until ahci_irq() wakes us -- vs AHCI_POLL_SPIN_LIMIT MMIO
- * reads (each a VM-exit under KVM) burning the CPU for the whole DMA. */
-#define AHCI_IRQ_FASTSPIN      64
-
-/* Per-port interrupt-enable mask: command-completion FIS interrupts plus the
- * fatal error bits the wait loop already checks (so an error wakes the waiter
- * immediately rather than after the re-check timeout). */
-#define AHCI_PORT_IE_MASK  (HBA_PXIS_DHRS | HBA_PXIS_PSS | HBA_PXIS_DSS | \
-                            HBA_PXIS_SDBS | HBA_PXIS_FATAL)
 #include <drivers/storage/ahci/ahci.h>
 #include <drivers/storage/blkdev.h>
 #include <drivers/storage/scsi/scsi.h>
@@ -64,14 +51,10 @@
 #define AHCI_PORT_TYPE_SEMB     3
 #define AHCI_PORT_TYPE_PM       4
 
-struct ahci_controller;
-
 typedef struct ahci_port {
     int                port_num;
     int                type;        /* AHCI_PORT_TYPE_* */
     hba_port_t        *regs;        /* MMIO port registers */
-    struct ahci_controller *ctrl;  /* owning HBA (for irq_ready) */
-    char               io_wait;     /* completion wait channel; ahci_irq() wakes &io_wait */
 
     /* DMA areas */
     hba_cmd_header_t  *cmd_list;    /* Command list (32 entries, 1024 bytes) */
@@ -121,8 +104,6 @@ typedef struct ahci_controller {
     ahci_port_t     ports[AHCI_MAX_PORTS];
     int             port_count;     /* Number of active ports */
     int             disk_count;     /* Running sata disk index */
-    uint8_t         irq;            /* PCI interrupt line */
-    volatile int    irq_ready;      /* completion IRQ hooked + enabled */
 } ahci_controller_t;
 
 /*
@@ -372,71 +353,6 @@ static int ahci_port_detect_device(ahci_port_t *ap) {
  */
 
 /*
- * Completion interrupt handler.  Shared-IRQ safe: returns 0 (not handled) when
- * this HBA has no pending interrupt, so other devices on the line still get a
- * look.  For each port flagged in HBA.IS, clear that port's latched PxIS and
- * wake any waiter parked in ahci_port_issue_cmd().  Clear order is PxIS then
- * HBA.IS (both write-1-to-clear), per AHCI 1.3.1 section 10.7.2.
- */
-static int ahci_irq(unsigned int irq, void *dev_id, void *frame) {
-    (void)irq; (void)frame;
-    ahci_controller_t *ctrl = (ahci_controller_t *)dev_id;
-    if (!ctrl || !ctrl->abar) return 0;
-
-    uint32_t is = ctrl->abar->is;
-    if (!is) return 0;                      /* not ours (shared line) */
-
-    for (int p = 0; p < AHCI_MAX_PORTS; p++) {
-        if (!(is & (1U << p))) continue;
-        ahci_port_t *ap = &ctrl->ports[p];
-        if (!ap->regs) continue;
-        ap->regs->is = ap->regs->is;        /* clear this port's PxIS (RW1C) */
-        sched_wakeup(&ap->io_wait);          /* wake the command waiter, if any */
-    }
-
-    ctrl->abar->is = is;                     /* clear serviced HBA.IS bits (RW1C) */
-    return 1;
-}
-
-/*
- * Arm completion interrupts on every active port and hook the HBA's IRQ line,
- * then flip irq_ready so ahci_port_issue_cmd() switches from busy-polling to
- * sleeping until ahci_irq() wakes it.  Called once per controller after the
- * ports are probed (the probe itself runs polled, before this).  On any failure
- * the controller simply stays in polled mode.
- */
-static void ahci_enable_interrupts(ahci_controller_t *ctrl) {
-    hba_mem_t *abar = ctrl->abar;
-    char buf[64];
-
-    for (int p = 0; p < AHCI_MAX_PORTS; p++) {
-        ahci_port_t *ap = &ctrl->ports[p];
-        if (ap->type == AHCI_PORT_TYPE_NONE || !ap->regs) continue;
-        ap->regs->is = ap->regs->is;         /* clear stale PxIS */
-        ap->regs->ie = AHCI_PORT_IE_MASK;    /* enable completion/error IRQs */
-    }
-
-    abar->is = abar->is;                     /* clear stale HBA.IS */
-
-    ctrl->irq = (uint8_t)pci_get_irq(ctrl->pci_dev);
-    if (ctrl->irq == 0) {
-        kprint("ahci: no PCI interrupt line; staying in polled mode\n");
-        return;
-    }
-    if (request_irq(ctrl->irq, ahci_irq, IRQF_SHARED, "ahci", ctrl) != 0) {
-        kprint("ahci: request_irq failed; staying in polled mode\n");
-        return;
-    }
-
-    abar->ghc |= HBA_GHC_IE;                 /* global interrupt enable */
-    ctrl->irq_ready = 1;
-
-    snprintf(buf, sizeof(buf),
-             "ahci: IRQ %u wired; completion-driven I/O\n", ctrl->irq);
-    kprint(buf);
-}
-
-/*
  * Issue a command in slot 0 and wait for completion.
  * The caller must have filled in cmd_list[0] and cmd_table before calling.
  */
@@ -497,26 +413,11 @@ static int ahci_port_issue_cmd(ahci_port_t *ap, uint32_t timeout_ms) {
             return -1;
         }
 
-        /*
-         * Completion wait.  cmd_lock is a mutex held across this wait, so a
-         * contending thread sleeps on it rather than spinning.
-         *
-         * Once the completion IRQ is wired up (ap->ctrl->irq_ready), spin only
-         * briefly for an instant completion, then sched_sleep_until() on this
-         * port's channel: ahci_irq() clears PxIS and wakes us the moment the
-         * DMA finishes, so the CPU idles (hlt) instead of burning thousands of
-         * MMIO polls (each a VM-exit under KVM) for the whole transfer.  The
-         * short re-check deadline is a lost-wakeup safety net -- if the IRQ
-         * fires in the window between the CI check above and blocking, we wake
-         * on the deadline and re-check CI rather than hang.
-         *
-         * Before IRQs are enabled (early boot / disk probe) fall back to the
-         * original tight-spin-then-yield poll so those paths still work. */
-        if (ap->ctrl && ap->ctrl->irq_ready && spins >= AHCI_IRQ_FASTSPIN) {
-            uint32_t hz = get_hz();
-            uint64_t d = get_ticks() + (hz >= 100 ? hz / 100u : 1u);  /* ~10 ms */
-            sched_sleep_until(&ap->io_wait, d);
-        } else if (spins < AHCI_POLL_SPIN_LIMIT) {
+        /* Tight-spin briefly for a fast completion, then yield: cmd_lock is a
+         * mutex held across this wait, so a contending thread sleeps on it
+         * rather than spinning, and the scheduler is free to run other work
+         * while the controller does the DMA — no system-wide freeze. */
+        if (spins < AHCI_POLL_SPIN_LIMIT) {
             spins++;
             __asm__ volatile("pause");
         } else {
@@ -1131,7 +1032,6 @@ static void ahci_probe_ports(ahci_controller_t *ctrl) {
             kprint(buf);
             continue;
         }
-        ap->ctrl = ctrl;   /* back-pointer so issue_cmd can see irq_ready */
 
         if (!ahci_port_detect_device(ap)) {
             continue;
@@ -1229,8 +1129,7 @@ static int ahci_pci_attach(struct device *dev) {
     }
 
     ahci_ctrl_count++;          /* commit the controller before probing */
-    ahci_probe_ports(ctrl);     /* probe runs polled (irq_ready still 0) */
-    ahci_enable_interrupts(ctrl);   /* switch to completion-driven I/O */
+    ahci_probe_ports(ctrl);
     return 0;
 }
 
