@@ -9,29 +9,28 @@ Status legend: **[ ] open** · **[~] in progress** · **[x] fixed** · **[!] won
 
 ### Progress (updated 2026-07-09)
 
-**102 fixed · 1 partial · 1 deferred · 0 open.** Every finding is resolved.
+**104 fixed · 0 partial · 0 deferred · 0 open. Every finding is resolved.**
 
 All fixes are committed and the kernel builds clean (`make -C sys clean && make`)
-and boots to `60-sdm` with zero panics — verified after each of the three
-integration waves (peripheral drivers/net/libm, boot-critical core, FPU).
+and boots to `60-sdm` with zero panics — verified after each integration wave
+(peripheral drivers/net/libm, boot-critical core, FPU, and the final
+KERN-06/ARCH-02 pair).
 
 - **Critical:** EXFAT-01, VM-01, VM-02, FS-01/02, DRV-01/02, KERN-01/02/03,
   LIBC-01.
 - **High/perf:** SCHED-01 (idle now `hlt`s), VM-03/04/05, ARCH-01 (lazy-FPU
   save/restore — was cross-process FP/SSE corruption), FS-03/04/05, SEC-01
   (setuid AT_SECURE + MNT_NOSUID + LD_PRELOAD gate), PM-01 (fork pmap double-
-  free), DRV-03/04/05/06/07/08, KERN-04/05/07/08/09/10/11, NET-01/02/03/04/06/07/08.
-- **Medium/low:** VM-06..15, FS-06..12, EXEC-01/02/03, ARCH-03/04, KERN-12/13/14,
-  NET-05/09/10/11, DRV-09..22, LIBC-02..12, MATH-01..06, SYS-01.
+  free), DRV-03/04/05/06/07/08, KERN-04/05/06/07/08/09/10/11,
+  NET-01/02/03/04/06/07/08.
+- **Medium/low:** VM-06..15, FS-06..12, EXEC-01/02/03, ARCH-02/03/04,
+  KERN-12/13/14, NET-05/09/10/11, DRV-09..22, LIBC-02..12, MATH-01..06, SYS-01.
 
-Partial: KERN-06 — the two `sys_kill` pgrp walks are locked under
-`proctree_lock`; the `psignal_info` hard-IRQ `FOREACH_THREAD` walks and
-`sys_kill(-1)`'s `FOREACH_PROC` are deliberately left, as a correct fix needs a
-uniform IRQ-safe `tid_lock`/`pid_lock` class change across the hottest scheduler
-paths (tracked as a follow-up, not rushed into a conservative pass).
-
-Deferred: ARCH-02 (`set_thread_area` RO-page write — needs a fault-guarded
-copyout; the naive copyout regressed TLS and hung boot, so reverted).
+The two previously-deferred hard items are now done: **KERN-06** (full
+registry-lock discipline — IRQ-safe `tid_lock` held across every signal/sched
+`FOREACH_THREAD`, `pid_lock` across `sys_kill(-1)`'s `FOREACH_PROC`; lock order
+`pid_lock → tid_lock → sq_lock`, no ABBA) and **ARCH-02** (`set_thread_area`
+entry_number write-back via fault-guarded `copyout`, correct src/dst order).
 
 ---
 
@@ -198,7 +197,7 @@ Fix the *class*, not just the instance:
 - **[x] KERN-05** `sys/kern/futex.c:1067` — `futex_lock_pi` sleeps with no
   post-enqueue re-read, no timeout, no interruptible flag → racing `unlock_pi` =
   **unkillable lost-wakeup hang** for PI mutexes.
-- **[~] KERN-06** `sys/kern/signal.c:1157,1412,1425` — `psignal_info`/`sys_kill(-1)`/
+- **[x] KERN-06** `sys/kern/signal.c:1157,1412,1425` — `psignal_info`/`sys_kill(-1)`/
   pgrp walkers iterate `FOREACH_THREAD/PROC` unlocked while `wait4` reap frees nodes
   → UAF / wild-pointer signal delivery.
 - **[x] KERN-07** `sys/kern/signal.c:286` — `signal_interrupt_thread` sets
@@ -258,7 +257,7 @@ Fix the *class*, not just the instance:
   OOB read off the stack buffer → panic.
 - **[x] EXEC-02** `sys/exec/formats/elf.c:1524` — `elf_execve` early-returns on the
   E2BIG arg-count path without freeing `image` (~8.5 KiB) or the fd → leak per call.
-- **[!] ARCH-02 (deferred)** `sys/arch/i386/syscall.c:110` — `sys_set_thread_area` writes
+- **[x] ARCH-02** `sys/arch/i386/syscall.c:110` — `sys_set_thread_area` writes
   `entry_number` through the raw user pointer with no fault trap → panic on a
   read-only user page.
 - **[x] EXEC-03** `sys/exec/perso/freebsd/freebsd_sig.c:32` — `SA_ONSTACK` tested
