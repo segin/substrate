@@ -139,6 +139,62 @@ void blkdev_unregister(blkdev_t *dev) {
  */
 
 /*
+ * Read-ahead window bounds (sectors).  The window starts at BLKDEV_RA_MIN on
+ * the first detected sequential read and doubles each subsequent one up to
+ * BLKDEV_RA_MAX -- a ramp that avoids over-reading for short sequential bursts
+ * while reaching a deep window (128 KiB @ 512B sectors) for sustained streams.
+ */
+#define BLKDEV_RA_MIN   16
+#define BLKDEV_RA_MAX   256
+
+/*
+ * Prefetch up to `window` sectors starting at `start` into the buffer cache.
+ * Reads only the leading run that is not already cached (one device read) and
+ * populates the cache with it; the streaming reader then serves those sectors
+ * as cache hits instead of one device round-trip per read.  Best-effort: any
+ * allocation or device-read failure simply skips the prefetch.
+ */
+static void blkdev_prefetch(blkdev_t *dev, uint64_t start, uint32_t window) {
+    if (dev->dead || !dev->read || start >= dev->total_sectors)
+        return;
+
+    uint32_t ss = dev->sector_size;
+    if ((uint64_t)window > dev->total_sectors - start)
+        window = (uint32_t)(dev->total_sectors - start);
+
+    /* Only fetch the leading contiguous run of not-yet-cached sectors: past
+     * the frontier there is nothing to gain, and stopping at the first cached
+     * sector keeps the prefetch a single coalesced device read. */
+    uint32_t run = 0;
+    while (run < window && !bio_dev_cached(dev, (int64_t)(start + run)))
+        run++;
+    if (run == 0)
+        return;
+
+    size_t bytes = (size_t)run * ss;
+    void *tmp = kmalloc(bytes);
+    if (!tmp)
+        return;
+
+    if (dev->read(dev, start, run, tmp) != 0) {
+        kfree(tmp, bytes);
+        return;
+    }
+
+    for (uint32_t k = 0; k < run; k++) {
+        struct buf *bp = bio_dev_get(dev, (int64_t)(start + k), ss);
+        if (!bp)
+            continue;                       /* cache full: drop the rest */
+        if (!(bp->b_flags & B_CACHE)) {
+            memcpy(bp->b_data, (uint8_t *)tmp + (size_t)k * ss, ss);
+            bp->b_flags |= B_CACHE;
+        }
+        bio_dev_release(bp);
+    }
+    kfree(tmp, bytes);
+}
+
+/*
  * Read `count` sectors at `sector` into `buffer`: serve cached sectors from
  * the buffer cache and coalesce each maximal run of contiguous uncached
  * sectors into one device read.  Returns 0 on success, else the driver's
@@ -199,6 +255,28 @@ static int blkdev_do_read(blkdev_t *dev, uint64_t sector, uint32_t count, void *
         }
         i += run;
     }
+
+    /*
+     * Sequential read-ahead.  If this request continued exactly where the
+     * previous one ended, ramp the read-ahead window and prefetch that many
+     * sectors past the end of this request into the cache -- but only when the
+     * sector just past the end is not already cached (i.e. we are at the
+     * frontier), so a reader working through an already-prefetched region
+     * costs a single cache probe and no device I/O.  A non-sequential request
+     * resets the window so random access does not drag unwanted sectors in.
+     */
+    uint64_t end = sector + count;
+    if (sector == dev->ra_next) {
+        uint32_t win = dev->ra_window ? dev->ra_window * 2 : BLKDEV_RA_MIN;
+        if (win > BLKDEV_RA_MAX)
+            win = BLKDEV_RA_MAX;
+        dev->ra_window = win;
+        if (end < dev->total_sectors && !bio_dev_cached(dev, (int64_t)end))
+            blkdev_prefetch(dev, end, win);
+    } else {
+        dev->ra_window = 0;
+    }
+    dev->ra_next = end;
     return 0;
 }
 

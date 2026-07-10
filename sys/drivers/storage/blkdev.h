@@ -21,6 +21,16 @@ typedef struct blkdev {
 
     int dead;                   // 1 once removed/unplugged: I/O returns -EIO
 
+    /* Sequential read-ahead heuristic (blkdev.c).  ra_next is the sector where
+     * the next sequential read is expected; a read starting there grows
+     * ra_window and prefetches that many sectors ahead into the bio cache, so
+     * a streaming reader's subsequent reads hit cache instead of a fresh
+     * device round-trip.  Device-global and lock-free: these are hints, so a
+     * race between concurrent readers costs at most a wasted prefetch, never
+     * correctness (prefetched data is always read straight from the device). */
+    uint64_t ra_next;           // expected next sequential sector
+    uint32_t ra_window;         // current read-ahead window (sectors)
+
     /* For a raw disk registered via blkdev_register_disk(): the GEOM disk
      * whose partition child blkdevs derive from this device.  NULL for
      * partition blkdevs and for raw devices registered without partition
