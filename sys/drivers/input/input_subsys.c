@@ -333,7 +333,6 @@ static int input_ioctl(fs_node_t *node, uint32_t request, void *arg) {
  * back to "anything ever" so unfamiliar callers don't regress. */
 static int input_poll(fs_node_t *node, void *waiter) {
     (void)node;
-    (void)waiter;
 
     int events = POLLOUT;
     uint64_t caller_seq = 0;
@@ -348,6 +347,7 @@ static int input_poll(fs_node_t *node, void *waiter) {
     input_lock_give(__if);
     int has_event = caller_has_pos ? (caller_seq < snap) : (snap > 0);
     if (has_event) events |= POLLIN | POLLRDNORM;
+    else if (waiter) *(void **)waiter = &global_event_log;   /* targeted poll wake */
     return events;
 }
 

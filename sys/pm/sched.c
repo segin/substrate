@@ -691,18 +691,88 @@ void sched_tick(void) {
 char g_poll_wake_chan;
 volatile uint64_t g_poll_wake_seq = 0;
 
+/*
+ * Per-channel poll registry.
+ *
+ * A poller in kern_poll() registers one entry per polled fd, mapping the fd's
+ * readiness wake-channel (the this_chan a driver's ->poll stores) to the
+ * poller's private cookie.  When an object signals readiness on its channel
+ * (sched_wakeup / sleepq_wake_all), poll_notify() wakes ONLY the pollers
+ * registered on THAT channel — instead of the old system-wide fan-out to
+ * g_poll_wake_chan that woke every poller on every event (the thundering herd
+ * that pinned the kernel under heavy AF_UNIX/X11 traffic).
+ *
+ * Entries live on the registering thread's kern_poll stack frame (it is blocked
+ * there while registered), so no allocation is needed.  The lock is IRQ-safe:
+ * readiness wakes fire from hard-IRQ context (tty/tcp/af_inet).
+ */
+#define POLLREG_HASH        256
+#define POLL_NOTIFY_BATCH   32
+static struct poll_ent *pollreg[POLLREG_HASH];
+static spinlock_t pollreg_lock = SPINLOCK_INIT("pollreg");
+
+static inline unsigned pollreg_hash(const void *chan) {
+    return (unsigned)(((uintptr_t)chan >> 4)) & (POLLREG_HASH - 1);
+}
+
+void poll_register(struct poll_ent *e, void *chan, void *cookie) {
+    if (!e || !chan) return;
+    e->chan = chan;
+    e->cookie = cookie;
+    unsigned h = pollreg_hash(chan);
+    unsigned long f = spinlock_acquire_irq(&pollreg_lock);
+    e->hnext = pollreg[h];
+    pollreg[h] = e;
+    spinlock_release_irq(&pollreg_lock, f);
+}
+
+void poll_unregister(struct poll_ent *e) {
+    if (!e || !e->chan) return;
+    unsigned h = pollreg_hash(e->chan);
+    unsigned long f = spinlock_acquire_irq(&pollreg_lock);
+    for (struct poll_ent **pp = &pollreg[h]; *pp; pp = &(*pp)->hnext) {
+        if (*pp == e) { *pp = e->hnext; break; }
+    }
+    spinlock_release_irq(&pollreg_lock, f);
+    e->chan = NULL;
+}
+
+void poll_notify(void *chan) {
+    if (!chan) return;
+
+    /* Snapshot the matching cookies under the lock, then wake outside it —
+     * sched_wakeup_n() takes tid_lock/sq_lock, which must never nest under
+     * pollreg_lock. */
+    void *cookies[POLL_NOTIFY_BATCH];
+    int n = 0;
+    unsigned h = pollreg_hash(chan);
+    unsigned long f = spinlock_acquire_irq(&pollreg_lock);
+    for (struct poll_ent *e = pollreg[h]; e; e = e->hnext) {
+        if (e->chan == chan) {
+            if (n < POLL_NOTIFY_BATCH) cookies[n++] = e->cookie;
+            /* else: overflow -> the poller's backstop deadline recovers it */
+        }
+    }
+    spinlock_release_irq(&pollreg_lock, f);
+
+    for (int i = 0; i < n; i++)
+        sched_wakeup_n(cookies[i], -1);
+
+    /* Bump the seq so a poller that is RUNNING mid-scan re-scans rather than
+     * sleeping into its backstop (the same lost-wakeup recovery as before). */
+    g_poll_wake_seq++;
+}
+
 void sched_poll_wake_pollers(void) {
-    sched_wakeup_n(&g_poll_wake_chan, -1);
+    /* Legacy global kick: pollers now sleep on private cookies woken by
+     * poll_notify(), so this only bumps the mid-scan re-scan sequence. */
+    g_poll_wake_seq++;
 }
 
 void sched_wakeup(void *chan) {
     sched_wakeup_n(chan, -1);
-    /* Also kick any select/poll sleepers — they may be interested
-     * in `chan` even though they're sleeping on &g_poll_wake_chan.
-     * Recursion-safe: this calls sched_wakeup_n directly, not back
-     * into sched_wakeup. */
-    if (chan != &g_poll_wake_chan)
-        sched_wakeup_n(&g_poll_wake_chan, -1);
+    /* Targeted poll/select wake: only sleepers registered on THIS channel. */
+    poll_notify(chan);
 }
 
 void sched_wakeup_n(void *chan, int n) {

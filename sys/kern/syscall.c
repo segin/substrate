@@ -2157,6 +2157,9 @@ int sys_poll(struct pollfd *fds, unsigned int nfds, int timeout) {
     return ret;
 }
 
+/* fd counts up to this poll on the stack; larger sets (nfds<=1024) allocate. */
+#define POLL_KPOLL_STACK_FDS 64
+
 int kern_poll(struct pollfd *kfds, unsigned int nfds, int timeout) {
     int ready = 0;
     uint64_t deadline = 0;
@@ -2169,11 +2172,26 @@ int kern_poll(struct pollfd *kfds, unsigned int nfds, int timeout) {
         deadline = get_ticks() + timeout_ticks;
     }
 
+    /*
+     * Per-fd poll registration (targeted wakeups, no thundering herd).  We
+     * register one poll_ent per not-ready fd, keyed by that fd's readiness
+     * channel, and sleep on a private cookie; poll_notify() then wakes only us
+     * when one of those channels signals, instead of every poller waking on
+     * every event.  Small fd sets use the stack; large ones (<=1024) allocate.
+     * ents may be NULL on OOM -> we degrade to the backstop deadline only.
+     */
+    char pollcookie;
+    struct poll_ent stack_ents[POLL_KPOLL_STACK_FDS];
+    struct poll_ent *ents = stack_ents;
+    if (nfds > POLL_KPOLL_STACK_FDS)
+        ents = kmalloc((size_t)nfds * sizeof(*ents));
+
     /* Bounded re-scans to catch a wake that raced our fd-scan (see below). */
     int rescan_budget = 4;
     while (1) {
         uint64_t poll_seq0 = g_poll_wake_seq;   /* snapshot before scanning */
         ready = 0;
+        unsigned int nreg = 0;
         for (unsigned int i = 0; i < nfds; i++) {
             if (kfds[i].fd < 0) {
                 kfds[i].revents = 0;
@@ -2196,9 +2214,16 @@ int kern_poll(struct pollfd *kfds, unsigned int nfds, int timeout) {
             } else {
                 kfds[i].revents = POLLNVAL;
             }
-            (void)this_chan;   /* see sleep comment — wakeups not relied on */
-
-            if (kfds[i].revents) ready++;
+            if (kfds[i].revents) {
+                ready++;
+            } else if (ents && this_chan && nreg < nfds) {
+                /* Not ready: remember this fd's readiness channel so
+                 * poll_notify() can wake us directly when it signals. */
+                ents[nreg].chan   = this_chan;
+                ents[nreg].cookie = &pollcookie;
+                ents[nreg].hnext  = NULL;
+                nreg++;
+            }
         }
 
         if (ready > 0) break;
@@ -2220,21 +2245,17 @@ int kern_poll(struct pollfd *kfds, unsigned int nfds, int timeout) {
         rescan_budget = 4;
 
         /*
-         * Wait on the dedicated poll wake-channel — sched_wakeup()
-         * and sleepq_wake_all() both fan out to it (see
-         * sched_poll_wake_pollers() in sched.c), so any state change
-         * a poller might care about — AF_UNIX rx/tx, accept queue,
-         * pipe/tty input, evdev events — kicks us out of this sleep.
-         *
-         * Backstop is the rescue interval for a wake that lands in
-         * the TOCTOU window between the fd-check above and the
-         * sched_sleep_until below: in that window the thread is still
-         * RUNNING, so sched_wakeup_n won't pick it up, and the wake
-         * is lost until the timer fires.  50 ms keeps recovery quick
-         * (TCP X-client connect over a real NIC was stalling ~1 s per
-         * round-trip with a 1 s backstop) while still being 5x quieter
-         * at idle than the pre-fix 10 ms busy-spin.
+         * Register on each not-ready fd's readiness channel and sleep on our
+         * private cookie: poll_notify() (fired from sched_wakeup /
+         * sleepq_wake_all on that channel) wakes only us.  The backstop is the
+         * rescue interval for a wake that lands in the TOCTOU window between the
+         * fd-check above and the sched_sleep_until below (the thread is still
+         * RUNNING, so the wake is lost until the timer fires), and also covers
+         * any object whose ->poll didn't hand back a channel (ents==NULL / no
+         * this_chan) or whose channel overflowed POLL_NOTIFY_BATCH.
          */
+        for (unsigned int k = 0; k < nreg; k++)
+            poll_register(&ents[k], ents[k].chan, &pollcookie);
 
         uint64_t backstop = (uint64_t)HZ / 20;          /* ~50 ms */
         if (backstop == 0) backstop = 1;
@@ -2246,20 +2267,26 @@ int kern_poll(struct pollfd *kfds, unsigned int nfds, int timeout) {
          * sig_pending check below can fire. */
         if (current_thread)
             current_thread->flags |= THREAD_F_INTERRUPTIBLE;
-        int sleep_ret = sched_sleep_until(&g_poll_wake_chan, sleep_deadline);
+        int sleep_ret = sched_sleep_until(&pollcookie, sleep_deadline);
         if (current_thread)
             current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
+
+        for (unsigned int k = 0; k < nreg; k++)
+            poll_unregister(&ents[k]);
 
         if (sleep_ret == -EINTR ||
             (current_thread &&
              (current_thread->sig_pending & ~current_thread->sig_mask))) {
+            if (ents != stack_ents && ents) kfree(ents, (size_t)nfds * sizeof(*ents));
             return -EINTR;
         }
         if (timeout > 0 && get_ticks() >= deadline) {
+            if (ents != stack_ents && ents) kfree(ents, (size_t)nfds * sizeof(*ents));
             return 0;
         }
     }
 
+    if (ents != stack_ents && ents) kfree(ents, (size_t)nfds * sizeof(*ents));
     return ready;
 }
 

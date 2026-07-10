@@ -400,12 +400,10 @@ static int sleepq_wake_all_internal(void *chan, int type, int pid) {
 
 int sleepq_wake_all(void *chan) {
     int n = sleepq_wake_all_internal(chan, SLEEPQ_TYPE_SHARED, 0);
-    /* Also wake any select/poll sleepers — substrate's poll layer
-     * uses its own dedicated channel (see sched.c's
-     * sched_poll_wake_pollers) and won't otherwise hear about
-     * AF_UNIX rx/tx, accept, futex, etc.  Tiny cost (a walk over
-     * threads); large benefit: kern_poll stops 10 ms busy-spinning. */
-    sched_poll_wake_pollers();
+    /* Wake the poll()/select() sleepers registered on THIS channel (AF_UNIX
+     * rx/tx, accept, futex, ...).  Targeted per-channel via the poll registry
+     * (replaces the old system-wide g_poll_wake_chan fan-out). */
+    poll_notify(chan);
     return n;
 }
 
@@ -413,7 +411,7 @@ int sleepq_wake_all_private(void *chan) {
     int pid = sleepq_current_private_pid();
     if (pid < 0) return 0;
     int n = sleepq_wake_all_internal(chan, SLEEPQ_TYPE_PRIVATE, pid);
-    sched_poll_wake_pollers();
+    poll_notify(chan);
     return n;
 }
 

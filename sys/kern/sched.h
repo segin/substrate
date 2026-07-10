@@ -33,6 +33,21 @@ thread_t *thread_next(thread_t *t);
 unsigned long thread_registry_lock(void);
 void thread_registry_unlock(unsigned long flags);
 
+/*
+ * Per-channel poll registry (see sched.c).  A kern_poll()/select() sleeper
+ * registers one poll_ent per polled fd, keyed by the fd's readiness wake
+ * channel; poll_notify(chan) wakes only the pollers registered on chan.
+ * poll_ent instances live on the poller's stack while it is blocked.
+ */
+struct poll_ent {
+    void *chan;
+    void *cookie;
+    struct poll_ent *hnext;
+};
+void poll_register(struct poll_ent *e, void *chan, void *cookie);
+void poll_unregister(struct poll_ent *e);
+void poll_notify(void *chan);
+
 #define FOREACH_THREAD(var) \
     for (thread_t *var = thread_first(); (var) != NULL; (var) = thread_next(var))
 
