@@ -113,7 +113,7 @@ Fix the *class*, not just the instance:
   `pv_entry`.
 - **[ ] VM-04** `sys/vm/uma_core.c:997` — `uma_reclaim` drains other CPUs' per-CPU
   buckets unsynchronized → double-allocation.
-- **[ ] VM-05** `sys/vm/vm_syscalls.c:519` — `sys_brk` unserialized → concurrent
+- **[x] VM-05** `sys/vm/vm_syscalls.c:519` — `sys_brk` unserialized → concurrent
   sbrk lost-update truncates the heap and leaks the loser's frames.
 
 ### Security
@@ -216,12 +216,12 @@ Fix the *class*, not just the instance:
 - **[x] KERN-08** `sys/kern/ptrace.c:117` — `PTRACE_ATTACH` has no credential check
   (any process ptraces any other → privesc/infoleak) and its check/set race +
   no hold on the tracee.
-- **[ ] KERN-09** `sys/kern/futex.c:1108` — `pi_state.owner` is a bare cached
+- **[x] KERN-09** `sys/kern/futex.c:1108` — `pi_state.owner` is a bare cached
   `thread_t*` with no hold → UAF when a PI owner dies without unlocking.
-- **[ ] KERN-10** `sys/kern/lockmgr.c:96` — post-sleep reacquisition order
+- **[x] KERN-10** `sys/kern/lockmgr.c:96` — post-sleep reacquisition order
   (`lk_interlock` then `interlock`) inverts the caller's order → ABBA deadlock once
   APs schedule.
-- **[ ] KERN-11** `sys/kern/futex.c:883` — PI priority inheritance uses "larger =
+- **[x] KERN-11** `sys/kern/futex.c:883` — PI priority inheritance uses "larger =
   higher", inverted for SCHED_TIMESHARE, so a boost *lowers* the owner's weight.
 - **[x] KERN-12** `sys/kern/acct.c:49,52` — `kern_acct` returns bare `-1` instead of
   `-ENOENT`/`-EISDIR`.
@@ -240,15 +240,15 @@ Fix the *class*, not just the instance:
   SIGSEGV instead of frame delivery.
 
 ### Networking
-- **[ ] NET-04** `sys/net/tcp.c:337` — half-open (`SYN_RECEIVED`) child PCBs that
+- **[x] NET-04** `sys/net/tcp.c:337` — half-open (`SYN_RECEIVED`) child PCBs that
   time out are never freed (32 KiB rxbuf each) → half-open-flood DoS.
 - **[ ] NET-05** `sys/net/tcp.c:531` + `inet.c:182` — `tcp_input` (hard IRQ) reaches
   `sched_yield()` via ARP-miss on a real NIC → sleep in interrupt context.
-- **[ ] NET-06** `sys/net/tcp.c:472` — RST ignored in `SYN_RECEIVED` → half-open
+- **[x] NET-06** `sys/net/tcp.c:472` — RST ignored in `SYN_RECEIVED` → half-open
   child lingers retransmitting SYN-ACK.
-- **[ ] NET-07** `sys/net/af_inet.c:898` — UDP ephemeral port `++g_ephemeral_next`
+- **[x] NET-07** `sys/net/af_inet.c:898` — UDP ephemeral port `++g_ephemeral_next`
   bypasses the wrap guard → port 0 / privileged ports after wrap; non-atomic.
-- **[ ] NET-08** `sys/net/af_inet.c:1053` — `afinet_deliver_v4` applies the
+- **[x] NET-08** `sys/net/af_inet.c:1053` — `afinet_deliver_v4` applies the
   "looks like IP" heuristic to bare UDP datagrams → misparse when the source-port
   high byte is `0x4X`.
 
@@ -304,9 +304,9 @@ Fix the *class*, not just the instance:
   bare `-1`, which aliases the driver-forward sentinel (op silently forwarded).
 - **[ ] DRV-22** `sys/drivers/input/keyboard.c:308` — PS/2 + USB-HID share non-atomic
   modifier globals → transient wrong-modifier characters.
-- **[ ] NET-09** `sys/net/arp.c:35` — ARP cache read/written across IRQ/process with
+- **[x] NET-09** `sys/net/arp.c:35` — ARP cache read/written across IRQ/process with
   no lock → torn MAC read.
-- **[ ] NET-10** `sys/net/af_unix.c:1828` — `getsockname` signed-underflow write with
+- **[x] NET-10** `sys/net/af_unix.c:1828` — `getsockname` signed-underflow write with
   a user `addrlen` of 0/1.
 - **[ ] NET-11** `sys/net/tcp.c:341` — retransmit victim list silently capped at 32.
 - **[ ] ARCH-03** `sys/arch/i386/signal.c:597` — `sigreturn` EFLAGS filter doesn't
