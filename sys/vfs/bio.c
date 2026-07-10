@@ -699,11 +699,27 @@ retry:
     }
     if (bp->b_qindex != -1)
         bio_remove_from_queue(bp);
-    bp->b_flags |= B_BUSY | B_INVAL;
-    bp->b_flags &= ~(B_DELWRI | B_CACHE);
+    bp->b_flags |= B_BUSY;
     bio_insert_queue(bp, BQ_LOCKED);
     spinlock_release(&bio_lock);
-    brelse(bp);
+
+    if (bp->b_flags & B_DELWRI) {
+        /*
+         * FS-10: the block carries a pending delayed write.  The old code
+         * cleared B_DELWRI unconditionally here, silently discarding that
+         * writeback.  Flush it to the backing store first (bwrite() writes
+         * the buffer and clears B_BUSY/B_DELWRI), so the write is not lost;
+         * B_INVAL set beforehand makes the trailing brelse() inside bwrite()
+         * still drop the now-stale slot from cache so the next read
+         * re-fetches from disk (the invalidation this function owes).
+         */
+        bp->b_flags |= B_INVAL;
+        (void)bwrite(bp);
+    } else {
+        bp->b_flags |= B_INVAL;
+        bp->b_flags &= ~B_CACHE;
+        brelse(bp);
+    }
 }
 
 void
