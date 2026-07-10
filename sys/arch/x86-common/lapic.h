@@ -114,6 +114,14 @@ void lapic_send_eoi(void);
 // ID
 uint32_t lapic_get_id(void);
 
+/*
+ * Arm the uniprocessor LAPIC-ID cache: memoize the BSP's LAPIC ID so
+ * lapic_get_id() answers without an MMIO read (a vmexit under KVM).  Only
+ * safe to call once AP bring-up is complete AND the system is uniprocessor;
+ * on SMP it must not be called so each CPU keeps reading its own true ID.
+ */
+void lapic_enable_id_cache(void);
+
 // IPI (Inter-Processor Interrupts)
 void lapic_send_ipi(uint8_t dest_cpu, uint8_t vector);
 void lapic_send_ipi_ex(uint8_t dest_cpu, uint8_t vector, uint32_t delivery_mode);

@@ -413,8 +413,36 @@ void lapic_send_eoi(void) {
     lapic_write(LAPIC_EOI, 0);
 }
 
+/*
+ * LAPIC ID cache.
+ *
+ * lapic_get_id() is on the hottest path in the kernel: spinlock_acquire /
+ * spinlock_release / spinlock_is_held each call it to stamp/verify the owner
+ * CPU, so every lock/unlock cycle issues 2-3 LAPIC ID reads.  Each read is an
+ * MMIO load from the LAPIC register page, which under KVM (and any emulator)
+ * traps out to the hypervisor as a vmexit.  On a busy workload that takes tens
+ * of thousands of locks per second the resulting vmexit storm dominates kernel
+ * CPU time (observed as high `sys` time with no single hot syscall).
+ *
+ * A CPU's LAPIC ID never changes at runtime.  On a uniprocessor there is only
+ * ever one CPU, so once the SMP topology is known to be single-core we memoize
+ * the BSP's ID and answer every future query from the cache with no MMIO.  The
+ * cache is only armed after AP bring-up has finished (see lapic_enable_id_cache),
+ * so on a real SMP system it stays disarmed and every CPU keeps reading its own
+ * true ID from the LAPIC.
+ */
+static uint32_t lapic_id_cache;
+static volatile int lapic_id_cache_valid;
+
 uint32_t lapic_get_id(void) {
+    if (lapic_id_cache_valid)
+        return lapic_id_cache;
     return lapic_read(LAPIC_ID) >> 24;
+}
+
+void lapic_enable_id_cache(void) {
+    lapic_id_cache = lapic_read(LAPIC_ID) >> 24;
+    lapic_id_cache_valid = 1;
 }
 
 // ==================== LAPIC IPI ====================

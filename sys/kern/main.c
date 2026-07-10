@@ -603,6 +603,17 @@ static void init_core_subsystems(multiboot_info_t *mboot_info) {
         sched_smp_init(smp_get_cpu_count());
     }
 
+    /*
+     * SMP topology is now final.  On a uniprocessor, memoize the LAPIC ID so
+     * the per-lock owner check (spinlock_acquire/release/is_held) stops issuing
+     * an MMIO LAPIC read on every lock op — that read is a vmexit under KVM and
+     * is otherwise the dominant source of kernel CPU time under load.  On SMP
+     * (cpu_count > 1) leave it disarmed so each CPU reads its own true ID.
+     */
+    if (smp_get_cpu_count() <= 1) {
+        lapic_enable_id_cache();
+    }
+
 
     sysctl_init();
 
