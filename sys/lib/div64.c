@@ -23,6 +23,20 @@ static uint64_t udiv64(uint64_t n, uint64_t d, uint64_t *rem) {
         __builtin_trap(); /* Division by zero */
     }
 
+    /*
+     * Fast path: both operands fit in 32 bits -> a single hardware divide
+     * instead of 64 shift-subtract iterations.  GCC emits __udivdi3/__umoddi3
+     * for the 64-bit byte-offset -> sector math the block/VFS read path runs on
+     * every read(); for any offset under 4 GiB the high words are zero, so this
+     * covers that hot path (and most other kernel 64-bit divides).
+     */
+    if ((n >> 32) == 0 && (d >> 32) == 0) {
+        uint32_t nn = (uint32_t)n, dd = (uint32_t)d;
+        if (rem)
+            *rem = nn % dd;
+        return nn / dd;
+    }
+
     uint64_t q = 0;
     uint64_t r = 0;
 
