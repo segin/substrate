@@ -65,25 +65,41 @@ static inline int sleepq_current_private_pid(void) {
 
 // Lock a hash bucket.
 //
-// Disable preemption BEFORE taking the lock (preempt.h contract: a held
-// spinlock must keep preempt_count != 0 so the timer-IRQ preemption path
-// won't switch away from the holder).  These buckets were raw test_and_set
-// spinlocks that did NOT raise preempt_count — so once kernel preemption was
-// enabled a thread could be preempted while holding a sleepq bucket, and a
-// peer that then needed the same bucket (pipe/mutex ping-pong, etc.) spun on
-// it while the holder sat un-runnable: the intermittent pipe/mutex/pty hang.
-static inline void sq_lock(int hash) {
+// IRQ-SAFE (KERN-01): psignal() runs in hard-interrupt context (the timer
+// tick delivering SIGALRM, a TTY ^C from the keyboard IRQ) and reaches
+// sleepq_remove_thread() -> sq_lock().  If a bucket could be held with local
+// IRQs enabled, an interrupt landing on the CPU that already owns that bucket
+// would spin here forever waiting for a holder that can never run (the ISR
+// preempted it) — a hard CPU lockup.  Disabling local IRQs for the whole
+// (short, non-sleeping) critical section guarantees no ISR ever lands while
+// this CPU holds a bucket, so the ISR-context acquirer can never collide with
+// the interrupted holder.  Returns the caller's saved IRQ state, restored by
+// the matching sq_unlock(); nested acquisitions (sleepq_requeue) unwind in
+// reverse order so the flags stack correctly.
+//
+// Disable preemption too (preempt.h contract: a held spinlock must keep
+// preempt_count != 0 so the timer-IRQ preemption path won't switch away from
+// the holder).  These buckets were raw test_and_set spinlocks that did NOT
+// raise preempt_count — so once kernel preemption was enabled a thread could
+// be preempted while holding a sleepq bucket, and a peer that then needed the
+// same bucket (pipe/mutex ping-pong, etc.) spun on it while the holder sat
+// un-runnable: the intermittent pipe/mutex/pty hang.
+static inline unsigned long sq_lock(int hash) {
+    unsigned long flags;
+    __asm__ volatile("pushfl; popl %0; cli" : "=r"(flags) :: "memory");
     preempt_disable();
     while (__sync_lock_test_and_set(&sleepq_locks[hash], 1)) {
         while (sleepq_locks[hash])
             __asm__ volatile("pause");
     }
+    return flags;
 }
 
-// Unlock a hash bucket
-static inline void sq_unlock(int hash) {
+// Unlock a hash bucket (restores the IRQ state saved by sq_lock)
+static inline void sq_unlock(int hash, unsigned long flags) {
     __sync_lock_release(&sleepq_locks[hash]);
     preempt_enable_noresched();
+    __asm__ volatile("pushl %0; popfl" :: "r"(flags) : "memory", "cc");
 }
 
 // Allocate a sleep queue (free list first, then kmalloc)
@@ -153,11 +169,11 @@ static int sleepq_remove_thread_internal(thread_t *t, int type, int pid) {
 
     chan = t->wait_chan;
     hash = sleepq_hash_func(chan, type, pid);
-    sq_lock(hash);
+    unsigned long f = sq_lock(hash);
 
     sq = sleepq_lookup(chan, type, pid, hash);
     if (!sq) {
-        sq_unlock(hash);
+        sq_unlock(hash, f);
         return 0;
     }
 
@@ -179,14 +195,14 @@ static int sleepq_remove_thread_internal(thread_t *t, int type, int pid) {
             if (sq->sq_count == 0) {
                 sleepq_remove(sq, hash);
             }
-            sq_unlock(hash);
+            sq_unlock(hash, f);
             return 1;
         }
         prev = cur;
         cur = cur->next;
     }
 
-    sq_unlock(hash);
+    sq_unlock(hash, f);
     return 0;
 }
 
@@ -223,14 +239,14 @@ static void sleepq_add_internal(void *chan, thread_t *t, int type, int pid) {
         return;
 
     int hash = sleepq_hash_func(chan, type, pid);
-    sq_lock(hash);
+    unsigned long f = sq_lock(hash);
 
     // Find or create sleep queue
     sleepq_t *sq = sleepq_lookup(chan, type, pid, hash);
     if (!sq) {
         sq = sleepq_alloc();
         if (!sq) {
-            sq_unlock(hash);
+            sq_unlock(hash, f);
             return;  // Out of sleep queues
         }
         sq->sq_chan = chan;
@@ -261,7 +277,7 @@ static void sleepq_add_internal(void *chan, thread_t *t, int type, int pid) {
             t->proc->state = SSLEEP;
     }
 
-    sq_unlock(hash);
+    sq_unlock(hash, f);
 }
 
 // Add a thread to shared sleep queue
@@ -282,14 +298,14 @@ static thread_t *sleepq_wake_one_internal(void *chan, int type, int pid) {
         return(NULL);
     
     int hash = sleepq_hash_func(chan, type, pid);
-    sq_lock(hash);
-    
+    unsigned long f = sq_lock(hash);
+
     sleepq_t *sq = sleepq_lookup(chan, type, pid, hash);
     if (!sq || sq->sq_count == 0) {
-        sq_unlock(hash);
+        sq_unlock(hash, f);
         return NULL;
     }
-    
+
     thread_t *t = sq->sq_head;
     sq->sq_head = t->next;
     if (!sq->sq_head)
@@ -322,7 +338,7 @@ static thread_t *sleepq_wake_one_internal(void *chan, int type, int pid) {
         sleepq_remove(sq, hash);
     }
 
-    sq_unlock(hash);
+    sq_unlock(hash, f);
     return(t);
 }
 
@@ -354,14 +370,14 @@ static int sleepq_wake_all_internal(void *chan, int type, int pid) {
         return(0);
     
     int hash = sleepq_hash_func(chan, type, pid);
-    sq_lock(hash);
-    
+    unsigned long f = sq_lock(hash);
+
     sleepq_t *sq = sleepq_lookup(chan, type, pid, hash);
     if (!sq || sq->sq_count == 0) {
-        sq_unlock(hash);
+        sq_unlock(hash, f);
         return(0);
     }
-    
+
     int woken = 0;
     thread_t *t = sq->sq_head;
     while (t) {
@@ -378,7 +394,7 @@ static int sleepq_wake_all_internal(void *chan, int type, int pid) {
     // Remove sleep queue
     sleepq_remove(sq, hash);
 
-    sq_unlock(hash);
+    sq_unlock(hash, f);
     return(woken);
 }
 
@@ -408,11 +424,11 @@ static int sleepq_wake_n_internal(void *chan, int n, int type, int pid) {
         return(sleepq_wake_all_internal(chan, type, pid));
 
     int hash = sleepq_hash_func(chan, type, pid);
-    sq_lock(hash);
+    unsigned long f = sq_lock(hash);
 
     sleepq_t *sq = sleepq_lookup(chan, type, pid, hash);
     if (!sq || sq->sq_count == 0) {
-        sq_unlock(hash);
+        sq_unlock(hash, f);
         return(0);
     }
 
@@ -436,7 +452,7 @@ static int sleepq_wake_n_internal(void *chan, int n, int type, int pid) {
     if (sq->sq_count == 0)
         sleepq_remove(sq, hash);
 
-    sq_unlock(hash);
+    sq_unlock(hash, f);
     return(woken);
 }
 
@@ -462,11 +478,11 @@ static int sleepq_wake_bitset_internal(void *chan, int n, int type, int pid,
         return(0);
 
     int hash = sleepq_hash_func(chan, type, pid);
-    sq_lock(hash);
+    unsigned long f = sq_lock(hash);
 
     sleepq_t *sq = sleepq_lookup(chan, type, pid, hash);
     if (!sq || sq->sq_count == 0) {
-        sq_unlock(hash);
+        sq_unlock(hash, f);
         return(0);
     }
 
@@ -500,7 +516,7 @@ static int sleepq_wake_bitset_internal(void *chan, int n, int type, int pid,
     if (sq->sq_count == 0)
         sleepq_remove(sq, hash);
 
-    sq_unlock(hash);
+    sq_unlock(hash, f);
     return(woken);
 }
 
@@ -519,12 +535,12 @@ static int sleepq_has_waiters_internal(void *chan, int type, int pid) {
         return(0);
     
     int hash = sleepq_hash_func(chan, type, pid);
-    sq_lock(hash);
-    
+    unsigned long f = sq_lock(hash);
+
     sleepq_t *sq = sleepq_lookup(chan, type, pid, hash);
     int has = (sq && sq->sq_count > 0);
-    
-    sq_unlock(hash);
+
+    sq_unlock(hash, f);
     return(has);
 }
 
@@ -545,15 +561,19 @@ static int sleepq_requeue_internal(void *src_chan, void *dst_chan, int wake_n, i
     int src_hash = sleepq_hash_func(src_chan, type, pid);
     int dst_hash = sleepq_hash_func(dst_chan, type, pid);
     
-    // Lock ordering to prevent deadlock (lower hash first)
+    // Lock ordering to prevent deadlock (lower hash first).  f_first saves
+    // the caller's real IRQ state (before any cli); f_second is the already
+    // IRQ-disabled state and must be restored FIRST on unwind so IRQs stay
+    // masked until the outermost bucket is released (see sq_lock/sq_unlock).
+    unsigned long f_first, f_second = 0;
     if (src_hash < dst_hash) {
-        sq_lock(src_hash);
-        sq_lock(dst_hash);
+        f_first = sq_lock(src_hash);
+        f_second = sq_lock(dst_hash);
     } else if (src_hash > dst_hash) {
-        sq_lock(dst_hash);
-        sq_lock(src_hash);
+        f_first = sq_lock(dst_hash);
+        f_second = sq_lock(src_hash);
     } else {
-        sq_lock(src_hash);
+        f_first = sq_lock(src_hash);
     }
     
     // 1. Wake phase
@@ -622,14 +642,18 @@ static int sleepq_requeue_internal(void *src_chan, void *dst_chan, int wake_n, i
     if (src_sq && src_sq->sq_count == 0)
         sleepq_remove(src_sq, src_hash);
     
-    // Unlock
-    if (src_hash != dst_hash) {
-        sq_unlock(dst_hash);
-        sq_unlock(src_hash);
+    // Unlock in reverse acquisition order (second-acquired first) so the
+    // outermost sq_unlock restores the caller's original IRQ state last.
+    if (src_hash < dst_hash) {
+        sq_unlock(dst_hash, f_second);
+        sq_unlock(src_hash, f_first);
+    } else if (src_hash > dst_hash) {
+        sq_unlock(src_hash, f_second);
+        sq_unlock(dst_hash, f_first);
     } else {
-        sq_unlock(src_hash);
+        sq_unlock(src_hash, f_first);
     }
-    
+
     return(woken_count);
 }
 

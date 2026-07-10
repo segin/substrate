@@ -162,7 +162,7 @@ fault:
 }
 
 /* Forward declarations for PI functions */
-int futex_lock_pi(int *uaddr, int detect, int trylock, int private);
+int futex_lock_pi(int *uaddr, int detect, int trylock, int private, void *timeout);
 int futex_unlock_pi(int *uaddr, int private);
 
 /*
@@ -728,9 +728,10 @@ int sys_futex(int *uaddr, int op, int val, void *timeout, int *uaddr2, int val3)
 
         case FUTEX_LOCK_PI: {
             /*
-             * Priority Inheritance lock acquisition
+             * Priority Inheritance lock acquisition.  The FUTEX_LOCK_PI
+             * timeout is absolute (CLOCK_REALTIME); NULL means block forever.
              */
-            return futex_lock_pi(uaddr, 0, 0, private_flag);
+            return futex_lock_pi(uaddr, 0, 0, private_flag, timeout);
         }
 
         case FUTEX_UNLOCK_PI: {
@@ -742,9 +743,9 @@ int sys_futex(int *uaddr, int op, int val, void *timeout, int *uaddr2, int val3)
 
         case FUTEX_TRYLOCK_PI: {
             /*
-             * Non-blocking PI lock attempt
+             * Non-blocking PI lock attempt (never sleeps, so no timeout).
              */
-            return futex_lock_pi(uaddr, 0, 1, private_flag);
+            return futex_lock_pi(uaddr, 0, 1, private_flag, NULL);
         }
 
         default:
@@ -997,28 +998,28 @@ static void pi_boost_owner(pi_state_t *ps) {
  * 3. Sleep until woken
  * 4. On wake, retry acquire
  */
-int futex_lock_pi(int *uaddr, int detect, int trylock, int private) {
+int futex_lock_pi(int *uaddr, int detect, int trylock, int private, void *timeout) {
     (void)detect;
-    
+
     if (!current_thread) return -EFAULT;
-    
+
     int tid = current_thread->tid;
     int err;
     int oldval, newval;
-    
+
     /* Fast path: try uncontended acquire */
     oldval = futex_cmpxchg_user(uaddr, 0, tid, &err);
     if (err) return err;
-    
+
     if (oldval == 0) {
         /* Successfully acquired - no contention */
         return 0;
     }
-    
+
     if (trylock) {
         return -EWOULDBLOCK;
     }
-    
+
     /* Check for OWNER_DIED - can take over */
     if (oldval & FUTEX_OWNER_DIED) {
         newval = tid | (oldval & FUTEX_WAITERS);
@@ -1027,7 +1028,32 @@ int futex_lock_pi(int *uaddr, int detect, int trylock, int private) {
         }
         if (err) return err;
     }
-    
+
+    /*
+     * KERN-05: resolve the (absolute, CLOCK_REALTIME) timeout into a tick
+     * deadline before registering as a waiter, so a malformed timespec fails
+     * cleanly and an already-expired deadline returns ETIMEDOUT without ever
+     * sleeping.  NULL timeout => block indefinitely (but still interruptibly).
+     */
+    uint64_t deadline = 0;
+    int has_timeout = 0;
+    if (timeout) {
+        struct timespec ts;
+        if (futex_read_timespec(timeout, &ts) != 0)
+            return -EFAULT;
+        if (ts.tv_nsec < 0 || ts.tv_nsec >= 1000000000)
+            return -EINVAL;
+        uint64_t hz = get_hz();
+        time_t now_sec = get_time();
+        int64_t delta_sec = (int64_t)ts.tv_sec - (int64_t)now_sec;
+        int64_t ticks = delta_sec * (int64_t)hz +
+                        ((int64_t)ts.tv_nsec * (int64_t)hz) / 1000000000LL;
+        if (ticks <= 0)
+            return -ETIMEDOUT;
+        deadline = get_ticks() + (uint64_t)ticks;
+        has_timeout = 1;
+    }
+
     /* Slow path: contended - need PI handling */
     void *key;
     if (private) {
@@ -1099,13 +1125,97 @@ int futex_lock_pi(int *uaddr, int detect, int trylock, int private) {
             }
         }
         
-        /* Sleep using sleepq mechanism */
+        /*
+         * KERN-05: interruptible, timed sleep with a post-enqueue re-read.
+         *
+         * Arm the deadline and the interruptible flag BEFORE enqueuing so a
+         * signal or timeout can abort the wait — without this a racing
+         * futex_unlock_pi whose wake fires before we block parks this thread
+         * forever (an unkillable PI-mutex hang).
+         */
+        current_thread->sleep_status = 0;
+        if (has_timeout)
+            current_thread->sleep_expiry = deadline;
+        current_thread->flags |= THREAD_F_INTERRUPTIBLE;
+
         if (private)
             sleepq_add_private(key, current_thread);
         else
             sleepq_add(key, current_thread);
-        sched_yield();
-        
+
+        /*
+         * Re-read the lock word now that we are queued.  futex_unlock_pi
+         * writes 0 to *uaddr and issues the wake under the same sleepq bucket
+         * lock as sleepq_add() above, so a release that raced our enqueue is
+         * observed here: if the word is free we skip the sleep and retry the
+         * acquire below (nothing lost); otherwise the release necessarily
+         * follows our enqueue and its wake will find us.
+         */
+        int should_sleep = 1;
+        {
+            int recheck;
+            int rr = futex_read_user(uaddr, &recheck);
+            if (rr != 0) {
+                sleepq_remove_thread(current_thread);
+                current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
+                if (has_timeout)
+                    current_thread->sleep_expiry = 0;
+                pi_spinlock();
+                pi_remove_waiter(ps, current_thread);
+                pi_unlock();
+                return -EFAULT;
+            }
+            if (recheck == 0)
+                should_sleep = 0;   /* lock free — retry acquire, don't block */
+        }
+
+        /*
+         * An unmasked signal already pending before we block must abort the
+         * wait now, so pthread_cancel / thr_kill reaches a PI-mutex waiter
+         * instead of hanging until the (possibly infinite) timeout.
+         */
+        if (should_sleep &&
+            (current_thread->sig_pending & ~current_thread->sig_mask)) {
+            sleepq_remove_thread(current_thread);
+            current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
+            if (has_timeout)
+                current_thread->sleep_expiry = 0;
+            pi_spinlock();
+            pi_remove_waiter(ps, current_thread);
+            pi_unlock();
+            return -EINTR;
+        }
+
+        if (should_sleep)
+            sched_yield();
+
+        current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
+        /*
+         * Self-remove from the sleepq on wake.  A real wake already dequeued
+         * us, but a timeout (sched_tick, IRQ context) or signal wake only
+         * flips us READY and leaves the stale bucket entry — unlink it here
+         * (idempotent if already dequeued).
+         */
+        sleepq_remove_thread(current_thread);
+
+        if (has_timeout) {
+            current_thread->sleep_expiry = 0;
+            if (current_thread->sleep_status == -ETIMEDOUT) {
+                pi_spinlock();
+                pi_remove_waiter(ps, current_thread);
+                pi_unlock();
+                return -ETIMEDOUT;
+            }
+        }
+
+        if (current_thread->sleep_status == -EINTR ||
+            (current_thread->sig_pending & ~current_thread->sig_mask)) {
+            pi_spinlock();
+            pi_remove_waiter(ps, current_thread);
+            pi_unlock();
+            return -EINTR;
+        }
+
         /* Woken: try to acquire */
         oldval = futex_cmpxchg_user(uaddr, 0, tid, &err);
         if (err) {

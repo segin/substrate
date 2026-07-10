@@ -127,7 +127,7 @@ int sys_get_robust_list(int pid, struct robust_list_head **head_ptr, size_t *len
 void futex_exit_cleanup(void);
 
 /* PI futex operations */
-int futex_lock_pi(int *uaddr, int detect, int trylock, int private);
+int futex_lock_pi(int *uaddr, int detect, int trylock, int private, void *timeout);
 int futex_unlock_pi(int *uaddr, int private);
 
 /* Internal: Wake thread after exit */

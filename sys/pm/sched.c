@@ -695,6 +695,20 @@ void sched_wakeup_n(void *chan, int n) {
 
     FOREACH_THREAD(thread) {
         if (thread->state == THREAD_BLOCKED && thread->wait_chan == chan) {
+            /*
+             * KERN-04: a thread parked via sleepq_add() is linked in a
+             * sleepq bucket AND carries wait_chan == chan.  Readying it by
+             * only clearing wait_chan would strand its bucket entry: the
+             * sleepq self-unlink path (sleepq_remove_thread) keys off
+             * wait_chan, which we are about to NULL, so the stale entry would
+             * be popped by a later sleepq_wake and dereferenced after the
+             * thread_t is freed (UAF).  Dequeue it from the sleepq first —
+             * sleepq_remove_thread finds the bucket via wait_chan (still set
+             * here) and is a no-op for pure sched_sleep() sleepers, which are
+             * on no bucket.  It is IRQ-safe (KERN-01), so this is fine even on
+             * the IRQ-context wake paths (tty/tcp/af_inet).
+             */
+            sleepq_remove_thread(thread);
             thread->state = THREAD_READY;
             thread->wait_chan = NULL;
             woken++;

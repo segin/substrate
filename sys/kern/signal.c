@@ -285,7 +285,19 @@ static void signal_interrupt_thread(thread_t *t) {
     sleepq_remove_thread(t);
     t->sleep_status = -EINTR;
     t->wait_chan = NULL;
-    t->state = THREAD_READY;
+    /*
+     * KERN-07: never resurrect a thread that is not genuinely sleeping.
+     * A thread proc_exit() is tearing down (THREAD_ZOMBIE) — reachable
+     * because a killed thread can re-block interruptibly during its own
+     * teardown — must not be flipped back to THREAD_READY: the scheduler
+     * would then pick it, arch_switch_to returns into proc_exit()'s
+     * post-yield while(1) with preemption disabled, and the CPU busy-spins
+     * forever.  A job-control-stopped thread (THREAD_STOPPED) likewise
+     * stays stopped until SIGCONT.  Same guard the sleepq wake paths use.
+     */
+    if (t->state != THREAD_ZOMBIE && t->state != THREAD_STOPPED) {
+        t->state = THREAD_READY;
+    }
 }
 
 /*
@@ -1409,11 +1421,21 @@ int sys_kill(int pid, int sig) {
         if (!current_process || !current_process->p_pgrp) return -ESRCH;
         int permitted = 0;
         int matched = 0;
+        /*
+         * KERN-06: hold proctree_lock across the pg_members walk.  A
+         * concurrent wait4()/autoreap reap unlinks a member from pg_members
+         * only through pgrp_remove_proc() (under proctree_lock) BEFORE it
+         * frees the process_t, so serializing here keeps member->p_pgrp_link
+         * from dereferencing a freed node mid-walk.  signal_record_match ->
+         * psignal takes no proctree_lock, so this is deadlock-free.
+         */
+        mutex_lock(&proctree_lock);
         process_t *member = current_process->p_pgrp->pg_members;
         while (member) {
             signal_record_match(member, &matched, &permitted, sig);
             member = member->p_pgrp_link;
         }
+        mutex_unlock(&proctree_lock);
         if (matched == 0) return -ESRCH;
         if (permitted == 0) return -EPERM;
         return 0;
@@ -1440,11 +1462,15 @@ int sys_kill(int pid, int sig) {
 
         if (!pgrp) return -ESRCH;
 
+        /* KERN-06: serialize the pg_members walk against reap (see the
+         * pid==0 case above). */
+        mutex_lock(&proctree_lock);
         process_t *member = pgrp->pg_members;
         while (member) {
             signal_record_match(member, &matched, &permitted, sig);
             member = member->p_pgrp_link;
         }
+        mutex_unlock(&proctree_lock);
         if (matched == 0) return -ESRCH;
         if (permitted == 0) return -EPERM;
         return 0;

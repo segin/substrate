@@ -10,6 +10,14 @@ struct ksym {
 };
 
 /*
+ * The symbol table itself is emitted by the build system (mkksyms.py
+ * parsing kernel.map) into ksyms_table.o and linked into the final
+ * binary; kern/ksyms.c provides weak fallbacks for the first link pass.
+ */
+extern struct ksym ksym_table[];
+extern int ksym_count;
+
+/*
  * ksym_init - Initialize symbol table
  *
  * Call early in boot to load/parse kernel symbols.

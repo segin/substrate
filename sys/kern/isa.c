@@ -13,8 +13,7 @@
 #define isa_inb(port) inb(port)
 #define isa_outb(port, value) outb((port), (value))
 #else
-extern uint8_t isa_test_inb(uint16_t port);
-extern void isa_test_outb(uint16_t port, uint8_t value);
+/* isa_test_inb/isa_test_outb are declared in <kern/isa.h> under HOST_TEST. */
 #define isa_inb(port) isa_test_inb(port)
 #define isa_outb(port, value) isa_test_outb((port), (value))
 #endif

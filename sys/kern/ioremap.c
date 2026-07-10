@@ -6,16 +6,7 @@
 #include <arch/i386/pmap.h>
 #include <arch/i386/cpu.h>
 #else
-typedef void *pmap_t;
-#define VM_PROT_READ  0x01
-#define VM_PROT_WRITE 0x02
-#define PTE_PWT       0x08
-#define PTE_PCD       0x10
-#define PTE_PAT       0x80
-extern pmap_t pmap_kernel(void);
-extern int pmap_enter(pmap_t pmap, uintptr_t va, uintptr_t pa, uint32_t prot, uint32_t flags);
-extern void pmap_kremove(uintptr_t va);
-extern int i386_cpu_pat_wc_enabled(void);
+#include <kern/ioremap_host.h>
 #endif
 
 #define IOREMAP_BASE  0xF7000000U
