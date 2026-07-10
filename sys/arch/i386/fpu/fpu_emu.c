@@ -6,15 +6,36 @@
 #include <arch/x86-common/io.h>
 static int fpu_use_fxsave = 0;
 
+/*
+ * Lazy-FPU owner: the process whose x87/SSE register state is currently live
+ * in the hardware.  NULL means the registers belong to no live process (fresh
+ * boot, or the owner exited).  The invariant that makes lazy save/restore
+ * correct is: whenever a *different* process is scheduled, CR0.TS is re-armed
+ * (fpu_switch below) so that process traps (#NM) before it can touch the FPU;
+ * the handler then saves fpu_owner's still-live registers and loads the
+ * faulting process's.  Because TS is set on every process change, no process
+ * other than fpu_owner can dirty the registers between ownership changes, so
+ * the save in the handler always captures the correct owner's state.
+ */
+static struct process *fpu_owner = NULL;
+
+/* FXSAVE/FXRSTOR fault (#GP) on a non-16-byte-aligned operand, and the
+ * enclosing struct process is kmalloc'd with no 16-byte guarantee, so align
+ * the save area within its 15-byte-slack buffer at runtime. */
+static inline void *fpu_area(struct process *p) {
+    return (void *)(((uintptr_t)p->fpu_ctx.fpu_state + 15) & ~(uintptr_t)15);
+}
+
 // Save FPU context for a process
 void fpu_save_context(struct process *p) {
     if (!p) return;
-    
+
 #ifndef HOST_TEST
+    void *area = fpu_area(p);
     if (fpu_use_fxsave) {
-        __asm__ volatile("fxsave %0" : "=m"(p->fpu_ctx.fpu_state));
+        __asm__ volatile("fxsave (%0)" : : "r"(area), "m"(*(char (*)[512])area) : "memory");
     } else {
-        __asm__ volatile("fnsave %0" : "=m"(p->fpu_ctx.fpu_state));
+        __asm__ volatile("fnsave (%0)" : : "r"(area), "m"(*(char (*)[108])area) : "memory");
     }
 #endif
 }
@@ -22,42 +43,83 @@ void fpu_save_context(struct process *p) {
 // Restore FPU context for a process
 void fpu_restore_context(struct process *p) {
     if (!p) return;
-    
+
 #ifndef HOST_TEST
+    void *area = fpu_area(p);
     if (fpu_use_fxsave) {
-        __asm__ volatile("fxrstor %0" : : "m"(p->fpu_ctx.fpu_state));
+        __asm__ volatile("fxrstor (%0)" : : "r"(area), "m"(*(const char (*)[512])area));
     } else {
-        __asm__ volatile("frstor %0" : : "m"(p->fpu_ctx.fpu_state));
+        __asm__ volatile("frstor (%0)" : : "r"(area), "m"(*(const char (*)[108])area));
     }
 #endif
+}
+
+/*
+ * Re-arm CR0.TS so the next process to touch the FPU traps (#NM).  Called from
+ * arch_switch_to on a process change.  Setting TS is what preserves the
+ * fpu_owner invariant: after this, only the eventual #NM handler may clear it.
+ */
+void fpu_switch(void) {
+#ifndef HOST_TEST
+    uint32_t cr0;
+    __asm__ volatile("mov %%cr0, %0" : "=r"(cr0));
+    cr0 |= 0x08; // Set TS
+    __asm__ volatile("mov %0, %%cr0" : : "r"(cr0));
+#endif
+}
+
+/*
+ * A process is being torn down: if it currently owns the live FPU registers,
+ * drop the ownership so the handler never tries to fnsave into freed storage.
+ * Its register contents are discarded (the process is dead).
+ */
+void fpu_forget_process(struct process *p) {
+    if (fpu_owner == p)
+        fpu_owner = NULL;
 }
 
 // FPU Device Not Available Exception (Interrupt 7)
 void fpu_handler(registers_t *regs) {
     (void)regs;
 #ifndef HOST_TEST
-    // Clear TS bit in CR0 to allow FPU access
+    // Clear TS bit in CR0 to allow FPU access for the faulting instruction.
     uint32_t cr0;
     __asm__ volatile("mov %%cr0, %0" : "=r"(cr0));
     cr0 &= ~0x08; // Clear TS
     __asm__ volatile("mov %0, %%cr0" : : "r"(cr0));
 #endif
-    
-    // Restore FPU state for current process (lazy FPU switching)
-    if (current_process) {
-        if (!current_process->fpu_ctx.fpu_used) {
-            // First use of FPU by this process - initialize it
+
+    /* Kernel context with no current process: just enable the FPU for this
+     * transient use and leave ownership untouched (the live registers still
+     * belong to fpu_owner; a kernel path must not clobber user FP state). */
+    if (!current_process)
+        return;
+
+    /* We are already the owner: our registers are live and intact (TS kept
+     * every other process out since we last ran), so restoring here would
+     * overwrite them with a stale save.  Nothing to do but keep TS clear. */
+    if (fpu_owner == current_process)
+        return;
+
+    /* Ownership is changing.  Save the outgoing owner's still-live registers
+     * before we load ours, so a later switch back to it restores correctly. */
+    if (fpu_owner)
+        fpu_save_context(fpu_owner);
+
+    if (!current_process->fpu_ctx.fpu_used) {
+        // First use of the FPU by this process - initialize to a known state.
 #ifndef HOST_TEST
-            __asm__ volatile("fninit");
+        __asm__ volatile("fninit");
 #endif
-            current_process->fpu_ctx.fpu_used = 1;
-        } else {
-            // Restore previously saved FPU state
-            fpu_restore_context(current_process);
-        }
+        current_process->fpu_ctx.fpu_used = 1;
+    } else {
+        // Restore this process's previously saved FPU state.
+        fpu_restore_context(current_process);
     }
-    
-    // Re-executing the instruction will now work since FPU is enabled
+
+    fpu_owner = current_process;
+
+    // Re-executing the faulting instruction will now work.
 }
 
 static int fpu_present = 0;

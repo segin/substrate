@@ -36,5 +36,7 @@ void fpu_init(void);
 void fpu_handler(registers_t *regs);
 void fpu_save_context(struct process *p);
 void fpu_restore_context(struct process *p);
+void fpu_switch(void);
+void fpu_forget_process(struct process *p);
 
 #endif

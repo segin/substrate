@@ -41,6 +41,7 @@
 #include <arch/i386/intr.h>
 #include <arch/i386/pmap.h>
 #include <arch/i386/pmm.h>
+#include <arch/i386/fpu/fpu_emu.h>
 #include <exec/perso/personality.h>
 
 process_t *current_process = NULL;
@@ -373,6 +374,11 @@ process_t *proc_bootstrap_kernel(int pid, int perso_id) {
 
 void proc_destroy(process_t *p) {
     if (!p) return;
+
+    /* If this process owns the live FPU registers, relinquish ownership before
+     * the struct is freed so a later #NM never fnsaves into freed storage
+     * (ARCH-01). */
+    fpu_forget_process(p);
 
     spinlock_acquire(&pid_lock);
     proc_unlink_locked(p);

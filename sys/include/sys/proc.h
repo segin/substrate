@@ -87,8 +87,13 @@ static inline void fdset_clear(uint32_t *bm, int fd) {
 
 // FPU Context Structure
 typedef struct {
-    uint8_t fpu_state[512] __attribute__((aligned(16)));  // FXSAVE area (512 bytes, 16-byte aligned)
-    int fpu_used;                                          // Flag: has this process used FPU?
+    /* FXSAVE/FXRSTOR require a 16-byte-aligned operand.  struct process is
+     * kmalloc'd and kmalloc does not guarantee 16-byte alignment, so the
+     * aligned(16) attribute on the field (which only fixes the offset) is not
+     * enough — the struct base can be misaligned.  Over-allocate by 15 bytes
+     * and align the pointer at runtime (see fpu_area() in fpu_emu.c). */
+    uint8_t fpu_state[512 + 15];  // FXSAVE area (512B) + slack for 16-byte alignment
+    int fpu_used;                 // Flag: has this process used FPU?
 } fpu_context_t;
 
 // Process Structure

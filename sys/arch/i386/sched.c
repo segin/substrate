@@ -13,6 +13,7 @@
 #include <arch/i386/percpu.h>
 #include <arch/i386/pmap.h>
 #include <arch/i386/pmm.h>
+#include <arch/i386/fpu/fpu_emu.h>
 #include <exec/perso/personality.h>
 
 // Exposed to Generic Scheduler
@@ -25,6 +26,12 @@ void arch_switch_to(thread_t *prev, thread_t *next) {
     // Switch LDT if needed
     if (next->proc != prev->proc) {
         ldt_activate(next->proc);
+
+        /* Re-arm CR0.TS (lazy FPU): the incoming process must trap (#NM) on
+         * its first FPU/SSE use so fpu_handler saves the outgoing owner's
+         * live registers and loads the incoming one's, instead of running
+         * with another process's x87/SSE state (ARCH-01). */
+        fpu_switch();
     }
 
     /* Reload per-thread %gs TLS base into the shared GDT_TLS_START slot.
