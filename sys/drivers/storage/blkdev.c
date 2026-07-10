@@ -10,6 +10,16 @@
 
 #define STACK_BUF_SIZE 512
 
+/*
+ * Read-ahead window bounds (sectors).  The window starts at BLKDEV_RA_MIN on
+ * the first detected sequential read and doubles each subsequent one up to
+ * BLKDEV_RA_MAX -- a ramp that avoids over-reading for short sequential bursts
+ * while reaching a deep window (128 KiB @ 512B sectors) for sustained streams.
+ * BLKDEV_RA_MAX also sizes the per-device read-ahead scratch buffer.
+ */
+#define BLKDEV_RA_MIN   16
+#define BLKDEV_RA_MAX   256
+
 static blkdev_t *blkdev_list = NULL;
 
 typedef struct blkdev_geom_provider {
@@ -123,6 +133,12 @@ void blkdev_unregister(blkdev_t *dev) {
      * freed and a future device reusing the pointer starts clean. */
     bio_dev_purge(dev);
 
+    /* Release the read-ahead scratch (allocated lazily on first prefetch). */
+    if (dev->ra_buf) {
+        kfree(dev->ra_buf, (size_t)BLKDEV_RA_MAX * dev->sector_size);
+        dev->ra_buf = NULL;
+    }
+
     dev->next = NULL;
 }
 
@@ -139,28 +155,42 @@ void blkdev_unregister(blkdev_t *dev) {
  */
 
 /*
- * Read-ahead window bounds (sectors).  The window starts at BLKDEV_RA_MIN on
- * the first detected sequential read and doubles each subsequent one up to
- * BLKDEV_RA_MAX -- a ramp that avoids over-reading for short sequential bursts
- * while reaching a deep window (128 KiB @ 512B sectors) for sustained streams.
- */
-#define BLKDEV_RA_MIN   16
-#define BLKDEV_RA_MAX   256
-
-/*
  * Prefetch up to `window` sectors starting at `start` into the buffer cache.
- * Reads only the leading run that is not already cached (one device read) and
- * populates the cache with it; the streaming reader then serves those sectors
- * as cache hits instead of one device round-trip per read.  Best-effort: any
- * allocation or device-read failure simply skips the prefetch.
+ * Reads only the leading run that is not already cached (one device read) into
+ * the device's persistent read-ahead scratch and populates the cache with it;
+ * the streaming reader then serves those sectors as cache hits instead of one
+ * device round-trip per read.
+ *
+ * The scratch buffer is per-device and allocated once (BLKDEV_RA_MAX sectors),
+ * so a long stream never re-allocates -- avoiding the buddy-allocator
+ * fragmentation a per-prefetch 128 KiB contiguous alloc would cause.  ra_busy
+ * serialises access to it: a reader that finds a prefetch already in flight on
+ * this device just skips its own (best-effort -- that fill covers the frontier
+ * anyway).  Any allocation or device-read failure simply skips the prefetch.
  */
 static void blkdev_prefetch(blkdev_t *dev, uint64_t start, uint32_t window) {
     if (dev->dead || !dev->read || start >= dev->total_sectors)
         return;
 
     uint32_t ss = dev->sector_size;
+    if (window > BLKDEV_RA_MAX)
+        window = BLKDEV_RA_MAX;
     if ((uint64_t)window > dev->total_sectors - start)
         window = (uint32_t)(dev->total_sectors - start);
+    if (window == 0)
+        return;
+
+    /* One prefetch per device at a time -- it owns the shared scratch buffer. */
+    if (__atomic_exchange_n(&dev->ra_busy, 1, __ATOMIC_ACQUIRE))
+        return;
+
+    if (!dev->ra_buf) {
+        dev->ra_buf = kmalloc((size_t)BLKDEV_RA_MAX * ss);
+        if (!dev->ra_buf) {
+            __atomic_store_n(&dev->ra_busy, 0, __ATOMIC_RELEASE);
+            return;
+        }
+    }
 
     /* Only fetch the leading contiguous run of not-yet-cached sectors: past
      * the frontier there is nothing to gain, and stopping at the first cached
@@ -168,30 +198,21 @@ static void blkdev_prefetch(blkdev_t *dev, uint64_t start, uint32_t window) {
     uint32_t run = 0;
     while (run < window && !bio_dev_cached(dev, (int64_t)(start + run)))
         run++;
-    if (run == 0)
-        return;
 
-    size_t bytes = (size_t)run * ss;
-    void *tmp = kmalloc(bytes);
-    if (!tmp)
-        return;
-
-    if (dev->read(dev, start, run, tmp) != 0) {
-        kfree(tmp, bytes);
-        return;
-    }
-
-    for (uint32_t k = 0; k < run; k++) {
-        struct buf *bp = bio_dev_get(dev, (int64_t)(start + k), ss);
-        if (!bp)
-            continue;                       /* cache full: drop the rest */
-        if (!(bp->b_flags & B_CACHE)) {
-            memcpy(bp->b_data, (uint8_t *)tmp + (size_t)k * ss, ss);
-            bp->b_flags |= B_CACHE;
+    if (run > 0 && dev->read(dev, start, run, dev->ra_buf) == 0) {
+        for (uint32_t k = 0; k < run; k++) {
+            struct buf *bp = bio_dev_get(dev, (int64_t)(start + k), ss);
+            if (!bp)
+                continue;                   /* cache full: drop the rest */
+            if (!(bp->b_flags & B_CACHE)) {
+                memcpy(bp->b_data, (uint8_t *)dev->ra_buf + (size_t)k * ss, ss);
+                bp->b_flags |= B_CACHE;
+            }
+            bio_dev_release(bp);
         }
-        bio_dev_release(bp);
     }
-    kfree(tmp, bytes);
+
+    __atomic_store_n(&dev->ra_busy, 0, __ATOMIC_RELEASE);
 }
 
 /*

@@ -25,11 +25,17 @@ typedef struct blkdev {
      * the next sequential read is expected; a read starting there grows
      * ra_window and prefetches that many sectors ahead into the bio cache, so
      * a streaming reader's subsequent reads hit cache instead of a fresh
-     * device round-trip.  Device-global and lock-free: these are hints, so a
+     * device round-trip.  ra_next/ra_window are hints, updated lock-free: a
      * race between concurrent readers costs at most a wasted prefetch, never
-     * correctness (prefetched data is always read straight from the device). */
+     * correctness (prefetched data is always read straight from the device).
+     * ra_buf is a per-device scratch buffer (BLKDEV_RA_MAX sectors) allocated
+     * lazily on the first prefetch so a sustained stream never re-allocates;
+     * ra_busy serialises prefetches on it (a reader finding it set just skips
+     * its prefetch). */
     uint64_t ra_next;           // expected next sequential sector
     uint32_t ra_window;         // current read-ahead window (sectors)
+    void    *ra_buf;            // lazily-allocated read-ahead scratch
+    volatile int ra_busy;       // 1 while a prefetch owns ra_buf
 
     /* For a raw disk registered via blkdev_register_disk(): the GEOM disk
      * whose partition child blkdevs derive from this device.  NULL for
