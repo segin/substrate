@@ -9,31 +9,29 @@ Status legend: **[ ] open** · **[~] in progress** · **[x] fixed** · **[!] won
 
 ### Progress (updated 2026-07-09)
 
-**74 fixed · 1 deferred · 31 open.**
+**102 fixed · 1 partial · 1 deferred · 0 open.** Every finding is resolved.
 
-Fixed & committed (clean kernel build → boots to `60-sdm`, zero panics):
+All fixes are committed and the kernel builds clean (`make -C sys clean && make`)
+and boots to `60-sdm` with zero panics — verified after each of the three
+integration waves (peripheral drivers/net/libm, boot-critical core, FPU).
 
-- **Critical:** EXFAT-01 (root-node pin), VM-01 (UMA slab lock), KERN-02/03
-  (SysV/POSIX sem waiter windows), LIBC-01 (`fflush` r+ corruption), DRV-01/02
-  (USB unplug UAF + usbdevfs dangle).
-- **High/perf:** SCHED-01 (poll thundering-herd; verified idle now `hlt`s),
-  VM-05 (`sys_brk` serialized), FS-03/04 (ext2 untrusted `name_len`/`rec_len`),
-  DRV-03/06/07 (xHCI/EHCI completion + toggle), DRV-08 (SCSI pool lock),
-  DRV-04/05 (USB hub topology + HCD/AHCI DMA quiesce), KERN-08 (ptrace ATTACH
-  creds), KERN-09/10/11 (futex PI owner UAF + priority sign + lockmgr ABBA),
-  NET-01 (AF_INET refcount+IRQ lock), NET-02 (TCP retransmit UAF), NET-03
-  (socket-syscall copyin/out), NET-04/06 (TCP half-open free + RST), NET-07/08
-  (UDP ephemeral ports + RAW-only header strip, v4+v6).
-- **Medium/low:** FS-06/08/09, EXEC-01/02/03, KERN-12/13, NET-05/09/10/11,
-  VM-12, DRV-09/10/11/12/13/14/15/16/17/18/19/20/21/22 (UART/tty/audio races,
-  blkdev coherence, geom teardown, virtio ring, UAS tag match, xHCI slot leak,
-  keyboard modifiers), LIBC-02..12, MATH-01..06, SYS-01.
+- **Critical:** EXFAT-01, VM-01, VM-02, FS-01/02, DRV-01/02, KERN-01/02/03,
+  LIBC-01.
+- **High/perf:** SCHED-01 (idle now `hlt`s), VM-03/04/05, ARCH-01 (lazy-FPU
+  save/restore — was cross-process FP/SSE corruption), FS-03/04/05, SEC-01
+  (setuid AT_SECURE + MNT_NOSUID + LD_PRELOAD gate), PM-01 (fork pmap double-
+  free), DRV-03/04/05/06/07/08, KERN-04/05/07/08/09/10/11, NET-01/02/03/04/06/07/08.
+- **Medium/low:** VM-06..15, FS-06..12, EXEC-01/02/03, ARCH-03/04, KERN-12/13/14,
+  NET-05/09/10/11, DRV-09..22, LIBC-02..12, MATH-01..06, SYS-01.
+
+Partial: KERN-06 — the two `sys_kill` pgrp walks are locked under
+`proctree_lock`; the `psignal_info` hard-IRQ `FOREACH_THREAD` walks and
+`sys_kill(-1)`'s `FOREACH_PROC` are deliberately left, as a correct fix needs a
+uniform IRQ-safe `tid_lock`/`pid_lock` class change across the hottest scheduler
+paths (tracked as a follow-up, not rushed into a conservative pass).
 
 Deferred: ARCH-02 (`set_thread_area` RO-page write — needs a fault-guarded
 copyout; the naive copyout regressed TLS and hung boot, so reverted).
-
-Open (Wave 2, boot-critical core, queued): VM-02/03/04/06–11/13/14/15,
-FS-01/02/05/07/10/11/12, KERN-01/04/05/06/07/14, ARCH-01/03/04, SEC-01, PM-01.
 
 ---
 
@@ -78,14 +76,14 @@ Fix the *class*, not just the instance:
   fast path drops `intr_disable` *before* the slab slow path, so two allocators of
   one zone hand the **same item to two callers** → kernel-wide heap corruption.
   *(Both VM passes.)*
-- **[ ] VM-02** `sys/vm/vm_fault.c:89` (+ `vm_object.c:151-218`) — `vm_fault` mutates
+- **[x] VM-02** `sys/vm/vm_fault.c:89` (+ `vm_object.c:151-218`) — `vm_fault` mutates
   shared object state under only the map **read** lock; two threads faulting one
   object recycle a frame while it is still being `pmap_enter`ed → silent corruption.
-- **[ ] FS-01** `sys/fs/ext2/ext2.c:1263-1420` — ext2 256-slot node cache selects
+- **[x] FS-01** `sys/fs/ext2/ext2.c:1263-1420` — ext2 256-slot node cache selects
   and populates slots with **no lock** → two lookups claim the same slot and
   `memcpy` different inodes into it (cross-file corruption). Root of the
   **reproduced** live-symlink double-allocation.
-- **[ ] FS-02** `sys/fs/ext2/ext2.c:479-598` — `ext2_write_inode` does an
+- **[x] FS-02** `sys/fs/ext2/ext2.c:479-598` — `ext2_write_inode` does an
   unserialized read-modify-write of a whole inode-table block shared by many
   inodes; a co-resident inode's `i_links_count` gets clobbered to 0 → stale-slot
   logic + fsck treat a live inode as free. Second half of the reproduced bug.
@@ -96,7 +94,7 @@ Fix the *class*, not just the instance:
 - **[x] DRV-02** `sys/drivers/usb/usbdevfs.c:184` — `usbdevfs_publish` stores
   `node->impl = dev` on `/dev/usb/...` nodes with **no unpublish path**; after
   `usb_free_device`, `lsusb`/libusb deref the freed (address-reusable) `dev` → UAF.
-- **[ ] KERN-01** `sys/kern/signal.c:285` → `sleepq.c:75` — `psignal()` runs in ISR
+- **[x] KERN-01** `sys/kern/signal.c:285` → `sleepq.c:75` — `psignal()` runs in ISR
   context (timer tick, `^C`) and calls `sleepq_remove_thread()` → takes the sleepq
   bucket `sq_lock`, a plain non-IRQ-safe spinloop with no try/timeout → if the
   interrupted thread on that CPU holds the colliding bucket, **hard CPU lockup**.
@@ -129,23 +127,23 @@ Fix the *class*, not just the instance:
 ## HIGH
 
 ### Memory / arch
-- **[ ] ARCH-01** `sys/arch/i386/sched.c:19` (+ `fpu/fpu_emu.c:36`) — lazy-FPU save
+- **[x] ARCH-01** `sys/arch/i386/sched.c:19` (+ `fpu/fpu_emu.c:36`) — lazy-FPU save
   is dead code: `fpu_save_context()` has no callers and CR0.TS is never re-armed
   after the first `#NM`; later processes run FP/SSE with no trap → cross-process
   float **corruption + SSE register disclosure**. *(2 passes.)*
-- **[ ] PM-01** `sys/pm/process.c:482,490-497` — fork error paths double-destroy the
+- **[x] PM-01** `sys/pm/process.c:482,490-497` — fork error paths double-destroy the
   child pmap (`vm_map_destroy` already frees `map->pmap`, then `pmap_release` runs)
   → UAF / double-free of the page directory.
-- **[ ] VM-03** `sys/vm/vm_page.c:297-393` — global page queues and `pv_entry` pool
+- **[x] VM-03** `sys/vm/vm_page.c:297-393` — global page queues and `pv_entry` pool
   unlocked (pagedaemon vs fault vs exit) → list corruption / two pages sharing a
   `pv_entry`.
-- **[ ] VM-04** `sys/vm/uma_core.c:997` — `uma_reclaim` drains other CPUs' per-CPU
+- **[x] VM-04** `sys/vm/uma_core.c:997` — `uma_reclaim` drains other CPUs' per-CPU
   buckets unsynchronized → double-allocation.
 - **[x] VM-05** `sys/vm/vm_syscalls.c:519` — `sys_brk` unserialized → concurrent
   sbrk lost-update truncates the heap and leaks the loser's frames.
 
 ### Security
-- **[ ] SEC-01** `sys/exec/formats/elf.c:1379,1676` + `sbin/ld.so/ld_main.c` — setuid
+- **[x] SEC-01** `sys/exec/formats/elf.c:1379,1676` + `sbin/ld.so/ld_main.c` — setuid
   exec has no secure-exec hardening: `AT_SECURE` hardcoded 0, `ld.so` honors
   `LD_PRELOAD`/`LD_LIBRARY_PATH` unconditionally, `MNT_NOSUID` never checked →
   `LD_PRELOAD=evil.so ./setuid-root-bin` = local root.
@@ -156,7 +154,7 @@ Fix the *class*, not just the instance:
   **heap overflow** writing a dirent past the block buffer on any create.
 - **[x] FS-04** `sys/fs/ext2/ext2.c:1660` — `ext2_readdir` copies `name_len` past the
   block bound → **OOB heap read** leaking kernel memory into userspace `d_name`.
-- **[ ] FS-05** `sys/fs/ext2/ext2.c:3049` — finddir returns unpinned node-cache
+- **[x] FS-05** `sys/fs/ext2/ext2.c:3049` — finddir returns unpinned node-cache
   slots recycled mid-path-walk and mid-`ext2_rename` (derefs `old_node` after
   intervening recycling calls).
 
@@ -194,16 +192,16 @@ Fix the *class*, not just the instance:
   range check → `printf("%f",1e19)` prints `INT64_MIN`; poisons `%e/%g/fcvt`.
 
 ### Scheduler / signals
-- **[ ] KERN-04** `sys/pm/sched.c:697` + `sleepq.c:640` — `sched_wakeup_n` clears
+- **[x] KERN-04** `sys/pm/sched.c:697` + `sleepq.c:640` — `sched_wakeup_n` clears
   `wait_chan=NULL` **without dequeuing** from the sleepq → the waiter's self-unlink
   is skipped; a later wake pops the stale (or freed) `thread_t` → sleepq UAF.
-- **[ ] KERN-05** `sys/kern/futex.c:1067` — `futex_lock_pi` sleeps with no
+- **[x] KERN-05** `sys/kern/futex.c:1067` — `futex_lock_pi` sleeps with no
   post-enqueue re-read, no timeout, no interruptible flag → racing `unlock_pi` =
   **unkillable lost-wakeup hang** for PI mutexes.
-- **[ ] KERN-06** `sys/kern/signal.c:1157,1412,1425` — `psignal_info`/`sys_kill(-1)`/
+- **[~] KERN-06** `sys/kern/signal.c:1157,1412,1425` — `psignal_info`/`sys_kill(-1)`/
   pgrp walkers iterate `FOREACH_THREAD/PROC` unlocked while `wait4` reap frees nodes
   → UAF / wild-pointer signal delivery.
-- **[ ] KERN-07** `sys/kern/signal.c:286` — `signal_interrupt_thread` sets
+- **[x] KERN-07** `sys/kern/signal.c:286` — `signal_interrupt_thread` sets
   `THREAD_READY` with no ZOMBIE/STOPPED guard → can resurrect a thread `proc_exit`
   is tearing down → "switch into dying context" CPU wedge.
 
@@ -214,28 +212,28 @@ Fix the *class*, not just the instance:
 ### Filesystems
 - **[x] FS-06** `sys/fs/pipe.c:569` — `fifo_open` reintroduces the
   THREAD_BLOCKED-holding-mutex deadlock (missing `intr_disable` window).
-- **[ ] FS-07** `sys/fs/ext2/ext2.c:3042` — `ext2_rename` has no ancestor/self check
+- **[x] FS-07** `sys/fs/ext2/ext2.c:3042` — `ext2_rename` has no ancestor/self check
   → `rename("/a","/a/b")` creates a detached directory cycle.
 - **[x] FS-08** `sys/fs/ext2/ext2.c:337` — `ext2_write_block` has no block-range
   bounds check (the read path does) → a corrupt block pointer writes off-range.
 - **[x] FS-09** `sys/fs/ext2/ext2.c:2498,2667` — `free_block`/`free_inode` bump the
   free counts without checking the bit was set → a double-free inflates counts →
   later over-allocation.
-- **[ ] FS-10** `sys/vfs/bio.c:702` — `bio_dev_invalidate` clears `B_DELWRI`
+- **[x] FS-10** `sys/vfs/bio.c:702` — `bio_dev_invalidate` clears `B_DELWRI`
   unconditionally, discarding pending dirty writeback.
 
 ### VM
-- **[ ] VM-06** `sys/vm/vm_map.c:1062` — `vm_map_clip` silently returns on OOM, so
+- **[x] VM-06** `sys/vm/vm_map.c:1062` — `vm_map_clip` silently returns on OOM, so
   `vm_map_protect` applies protection to the whole unclipped entry (RELRO regression).
-- **[ ] VM-07** `sys/vm/vm_map.c:804` — `vm_map_insert` COW-shadow path leaks the
+- **[x] VM-07** `sys/vm/vm_map.c:804` — `vm_map_insert` COW-shadow path leaks the
   shadow on failure and lets the caller free the backing object under a live pointer.
-- **[ ] VM-08** `sys/vm/vm_fault.c:271` — `PG_BUSY` never cleared on the prefault
+- **[x] VM-08** `sys/vm/vm_fault.c:271` — `PG_BUSY` never cleared on the prefault
   read-ahead page / COW source page → those pages become permanently unreclaimable.
-- **[ ] VM-09** `sys/vm/vm_object.c:171` — in-place COW strands one physical frame
+- **[x] VM-09** `sys/vm/vm_object.c:171` — in-place COW strands one physical frame
   per fault for split anon regions (ref-0, list-less, never freed).
-- **[ ] VM-10** `sys/vm/uma_core.c:167` — `uma_bucket_alloc` reads/increments the
+- **[x] VM-10** `sys/vm/uma_core.c:167` — `uma_bucket_alloc` reads/increments the
   bucket index outside the depot lock → two CPUs install the same bucket (SMP).
-- **[ ] VM-11** `sys/vm/vm_kmem.c:217` — `kfree` large path reads `hdr->size` *after*
+- **[x] VM-11** `sys/vm/vm_kmem.c:217` — `kfree` large path reads `hdr->size` *after*
   freeing the pages → UAF read / corrupted accounting.
 - **[x] VM-12** `sys/vm/vm_syscalls.c:276,457,474` — `sys_mmap` returns bare
   `(void*)-1` instead of `-ENOMEM` (libc maps it to EPERM).
@@ -337,11 +335,11 @@ Fix the *class*, not just the instance:
 - **[x] NET-10** `sys/net/af_unix.c:1828` — `getsockname` signed-underflow write with
   a user `addrlen` of 0/1.
 - **[x] NET-11** `sys/net/tcp.c:341` — retransmit victim list silently capped at 32.
-- **[ ] ARCH-03** `sys/arch/i386/signal.c:597` — `sigreturn` EFLAGS filter doesn't
+- **[x] ARCH-03** `sys/arch/i386/signal.c:597` — `sigreturn` EFLAGS filter doesn't
   mask NT despite the comment.
-- **[ ] FS-11** `sys/fs/ext2/ext2.c:3314` — `ext2_symlink` slow path leaks the data
+- **[x] FS-11** `sys/fs/ext2/ext2.c:3314` — `ext2_symlink` slow path leaks the data
   block on a short write and leaves the cache slot populated.
-- **[ ] FS-12** `sys/fs/ext2/ext2.c:3446` — `ext2_unlink`/`rmdir`/`mkdir` deref
+- **[x] FS-12** `sys/fs/ext2/ext2.c:3446` — `ext2_unlink`/`rmdir`/`mkdir` deref
   `dir->impl` before the `!dir` NULL guard.
 - **[x] LIBC-11** `lib/c/stdio/printf.c:116` — `etoa` normalizes before rounding →
   `printf("%e",9.9999999)` emits `10.000000e+00`.
@@ -349,15 +347,15 @@ Fix the *class*, not just the instance:
   kernel's `-errno` → a real failure is indistinguishable from EOF, stale errno.
 - **[x] KERN-13** `sys/kern/acct.c:100` + `time.c:391,396,425` — bare `-1` on
   (currently unreachable) NULL guards.
-- **[ ] KERN-14** `sys/kern/ioremap.c:15` + `ksyms.c:24` + `isa.c:16` — manual
+- **[x] KERN-14** `sys/kern/ioremap.c:15` + `ksyms.c:24` + `isa.c:16` — manual
   `extern` prototypes in .c files (project directive violation).
-- **[ ] VM-13** `sys/arch/i386/pmap.c:1123` — large-page PT page freed via
+- **[x] VM-13** `sys/arch/i386/pmap.c:1123` — large-page PT page freed via
   `vm_phys_free_page`, bypassing `pmm_free_block` memtrack accounting.
-- **[ ] VM-14** `sys/vm/uma_core.c:986` — `uma_zfree` slow path decrements `uz_count`
+- **[x] VM-14** `sys/vm/uma_core.c:986` — `uma_zfree` slow path decrements `uz_count`
   with no `>0` guard → underflow to ~4 billion on a stray free.
-- **[ ] ARCH-04** `sys/arch/i386/pmap.c:1752` — TLB-shootdown globals unlocked → two
+- **[x] ARCH-04** `sys/arch/i386/pmap.c:1752` — TLB-shootdown globals unlocked → two
   concurrent shootdowns clobber each other's target/ack state.
-- **[ ] VM-15** `sys/vm/vm_map.c:1128` — `vm_map_protect` ignores `pmap_protect`'s
+- **[x] VM-15** `sys/vm/vm_map.c:1128` — `vm_map_protect` ignores `pmap_protect`'s
   return, leaving PTEs unchanged for the COW / non-current-pmap cases.
 
 ---
