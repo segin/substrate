@@ -10,6 +10,7 @@
 #include <sys/termios.h>
 #include <sys/major.h>
 #include <sys/errno.h>
+#include <sys/lock.h>
 #include <sys/poll.h>
 #include <vfs/vfs.h>
 #include <sys/copy.h>
@@ -65,6 +66,17 @@ static struct {
     unsigned int count;
     int xoff_held;       /* 1 = XON/XOFF flow stopped */
 } uart_tx;
+
+/*
+ * The TX ring head/tail/count and xoff_held are read-modify-written from
+ * both process context (uart_tx_enqueue via write()/console output) and
+ * IRQ context (the THRE drain + XON/XOFF handling in uart_handler).  An
+ * IRQ landing mid-update in process context (or an SMP peer) otherwise
+ * corrupts count → underflow spews the ring / wedges the console.  This
+ * lock is always taken IRQ-safe so an interrupt can never re-enter it on
+ * the CPU already holding it.
+ */
+static spinlock_t uart_tx_lock = SPINLOCK_INIT("uart_tx");
 
 /* SysRq state for serial break detection */
 static int uart_sysrq_pending = 0;
@@ -306,7 +318,9 @@ static int uart_node_ioctl(fs_node_t *node, uint32_t request, void *arg) {
     }
     case TIOCOUTQ: {
         /* Report TX bytes pending */
+        unsigned long f = spinlock_acquire_irq(&uart_tx_lock);
         bits = (int)uart_tx.count;
+        spinlock_release_irq(&uart_tx_lock, f);
         if (copyout(&bits, arg, sizeof(int)) != 0) {
             return -EFAULT;
         }
@@ -499,10 +513,11 @@ int uart_init(void) {
 }
 
 /*
- * uart_tx_drain - Transmit bytes from the TX ring buffer.
- * Called from THRE interrupt or when XOFF is released.
+ * uart_tx_drain_locked - Transmit bytes from the TX ring buffer.
+ * Called from THRE interrupt or when XOFF is released.  The caller must
+ * hold uart_tx_lock (IRQ-safe).
  */
-static void uart_tx_drain(void) {
+static void uart_tx_drain_locked(void) {
     while (uart_tx.count > 0 && !uart_tx.xoff_held) {
         if (!(inb(uart_base_port + 5) & UART_LSR_THRE))
             break;
@@ -522,16 +537,22 @@ static void uart_tx_drain(void) {
  * Falls back to polling if the buffer is full.
  */
 static void uart_tx_enqueue(uint8_t byte) {
-    uart_tx_drain();
+    unsigned long f = spinlock_acquire_irq(&uart_tx_lock);
+    uart_tx_drain_locked();
 
     if (uart_tx.count == 0 && !uart_tx.xoff_held &&
         uart_port_is_transmit_empty(uart_base_port)) {
         outb(uart_base_port + 0, byte);
+        spinlock_release_irq(&uart_tx_lock, f);
         return;
     }
 
     if (uart_tx.count >= UART_TX_BUF_SIZE) {
-        if (!uart_tx.xoff_held) {
+        int xoff_held = uart_tx.xoff_held;
+        /* Drop the lock before the (potentially long) polled fallback so
+         * we don't hold it — and IRQs — across the spin. */
+        spinlock_release_irq(&uart_tx_lock, f);
+        if (!xoff_held) {
             (void)uart_poll_putc(uart_base_port, byte, UART_TX_SPIN_LIMIT);
         }
         return;
@@ -543,6 +564,7 @@ static void uart_tx_enqueue(uint8_t byte) {
     uint8_t ier = inb(uart_base_port + 1);
     if (!(ier & UART_IER_THRE))
         outb(uart_base_port + 1, ier | UART_IER_THRE);
+    spinlock_release_irq(&uart_tx_lock, f);
 }
 
 /*
@@ -583,12 +605,16 @@ void uart_handler(registers_t *regs) {
 
                 /* XON/XOFF flow control for TX */
                 if (c == 0x13) {        /* XOFF (Ctrl+S) */
+                    unsigned long f = spinlock_acquire_irq(&uart_tx_lock);
                     uart_tx.xoff_held = 1;
+                    spinlock_release_irq(&uart_tx_lock, f);
                     continue;
                 } else if (c == 0x11) { /* XON (Ctrl+Q) */
+                    unsigned long f = spinlock_acquire_irq(&uart_tx_lock);
                     uart_tx.xoff_held = 0;
                     /* Kick TX if buffered data waiting */
-                    uart_tx_drain();
+                    uart_tx_drain_locked();
+                    spinlock_release_irq(&uart_tx_lock, f);
                     continue;
                 }
 
@@ -596,7 +622,9 @@ void uart_handler(registers_t *regs) {
             }
         } else if (type == 1) {
             /* Transmitter Holding Register Empty — drain TX buffer */
-            uart_tx_drain();
+            unsigned long f = spinlock_acquire_irq(&uart_tx_lock);
+            uart_tx_drain_locked();
+            spinlock_release_irq(&uart_tx_lock, f);
         } else if (type == 3) {
             /* Receiver Line Status — error conditions */
             uint8_t lsr = inb(uart_base_port + 5);

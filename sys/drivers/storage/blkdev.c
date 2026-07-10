@@ -81,6 +81,22 @@ void blkdev_unregister(blkdev_t *dev) {
 
     if (!dev) return;
 
+    /* Tear down the partition child devices first, while this raw device's
+     * I/O still works, so their force-unmounts can flush.  geom_unregister_
+     * disk() unregisters + frees each partition blkdev (force-unmount, devfs
+     * removal, bio-cache purge) and drops the disk from the GEOM lists.  The
+     * GEOM disk is embedded in the kmalloc'd provider, which we free after
+     * (DRV-14).  Partition blkdevs have dev->geom == NULL, so this does not
+     * recurse. */
+    if (dev->geom) {
+        blkdev_geom_provider_t *provider =
+            (blkdev_geom_provider_t *)((char *)dev->geom -
+                offsetof(blkdev_geom_provider_t, disk));
+        geom_unregister_disk(dev->geom);
+        dev->geom = NULL;
+        kfree(provider, sizeof(*provider));
+    }
+
     /* Mark dead FIRST so any in-flight/subsequent I/O short-circuits to -EIO
      * instead of touching a device that is gone (and, for the caller
      * scsi_dev_detach, a struct about to be memset to zero).  Then force-
@@ -187,6 +203,36 @@ static int blkdev_do_read(blkdev_t *dev, uint64_t sector, uint32_t count, void *
 }
 
 /*
+ * A raw-disk write bypasses the per-partition bio caches: a partition's
+ * sectors are cached under its OWN blkdev pointer at partition-relative
+ * offsets, so a write to the raw disk node at absolute sector S leaves the
+ * partition's cached copy of that same physical sector stale (DRV-13).
+ * Drop every partition cache block overlapping the written range.  A no-op
+ * for partition blkdevs and for raw devices with no partitions (dev->geom
+ * NULL).
+ */
+static void blkdev_invalidate_partitions(blkdev_t *dev, uint64_t sector, uint32_t count) {
+    geom_disk_t *disk = dev->geom;
+    uint64_t w_start, w_end;
+
+    if (!disk) return;
+
+    w_start = sector;
+    w_end   = sector + count;               /* exclusive */
+    for (geom_partition_t *p = disk->partitions; p; p = p->next) {
+        uint64_t p_start, p_end, lo, hi;
+
+        if (!p->bdev) continue;
+        p_start = p->start_lba;
+        p_end   = p->start_lba + p->size_sectors;
+        lo = (w_start > p_start) ? w_start : p_start;
+        hi = (w_end   < p_end)   ? w_end   : p_end;
+        for (uint64_t s = lo; s < hi; s++)
+            bio_dev_invalidate(p->bdev, (int64_t)(s - p_start));
+    }
+}
+
+/*
  * Write `count` sectors write-through: push to the device first, then
  * refresh the cached copies (BLK-5).  On a failed device write, invalidate
  * the affected cached sectors so no stale data is ever served (BLK-6).
@@ -197,6 +243,12 @@ static int blkdev_do_write(blkdev_t *dev, uint64_t sector, uint32_t count, const
     const uint8_t *in = (const uint8_t *)buffer;
 
     int ret = dev->write(dev, sector, count, buffer);
+
+    /* Keep any overlapping partition-cache blocks coherent with this raw
+     * write regardless of outcome (on failure the on-disk contents are
+     * indeterminate, so a stale cached copy must not survive either). */
+    blkdev_invalidate_partitions(dev, sector, count);
+
     if (ret != 0) {
         for (uint32_t k = 0; k < count; k++)
             bio_dev_invalidate(dev, (int64_t)(sector + k));
@@ -218,6 +270,13 @@ static int blkdev_geom_read(struct geom_disk *disk, uint64_t sector, size_t coun
     blkdev_geom_provider_t *provider = (blkdev_geom_provider_t *)disk->priv;
     if (!provider || !provider->blkdev || !provider->blkdev->read) return -1;
     if (count > 0xFFFFFFFFU) return -1;
+    /* Honour the `dead` short-circuit (DRV-13) but read directly from the
+     * driver: geom_read runs during partition scan at registration time
+     * (before the raw device has any mount/bio context), and its reads are
+     * keyed on the raw-disk pointer at absolute sectors -- a different key
+     * from a partition blkdev's own cache -- so routing through the buffer
+     * cache neither dedupes with partition reads nor is safe this early. */
+    if (provider->blkdev->dead) return -EIO;
     return provider->blkdev->read(provider->blkdev, sector, (uint32_t)count, buf);
 }
 
@@ -246,6 +305,10 @@ void blkdev_scan_partitions(blkdev_t *dev) {
     provider->disk.write = dev->write ? blkdev_geom_write : NULL;
     provider->disk.total_sectors = dev->total_sectors;
     provider->disk.sector_size = dev->sector_size;
+
+    /* Back-link the raw device to its GEOM disk so raw writes can keep the
+     * partition bio caches coherent and detach can tear the partitions down. */
+    dev->geom = &provider->disk;
 
     geom_register_disk(&provider->disk);
 }

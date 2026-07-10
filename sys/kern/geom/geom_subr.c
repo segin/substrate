@@ -168,11 +168,60 @@ geom_partition_t *geom_add_partition(geom_disk_t *disk, const char *name,
         bdev->priv = part;
         bdev->read = geom_part_read;
         bdev->write = geom_part_write;
-        
+
         blkdev_register(bdev);
+        /* Remember the child blkdev so the parent disk can invalidate its
+         * bio cache on raw writes and tear it down on detach. */
+        part->bdev = bdev;
     }
-    
+
     return part;
+}
+
+/*
+ * Tear down every partition block device derived from `disk` and drop the
+ * disk (and its partition entries) from the GEOM lists.  Invoked when the
+ * backing raw block device detaches so the partition blkdevs, their bio
+ * caches, and any filesystems mounted on them do not linger past the disk.
+ */
+void geom_unregister_disk(geom_disk_t *disk) {
+    if (!disk) return;
+
+    /* Unlink the disk first so nothing new resolves partitions on it. */
+    for (geom_disk_t **dp = &geom_disks; *dp; dp = &(*dp)->next) {
+        if (*dp == disk) {
+            *dp = disk->next;
+            break;
+        }
+    }
+
+    /* Unregister + free each partition blkdev.  blkdev_unregister()
+     * force-unmounts any mount, removes the devfs node, and purges the
+     * partition's bio cache. */
+    geom_partition_t *p = disk->partitions;
+    while (p) {
+        geom_partition_t *pnext = p->next;
+        if (p->bdev) {
+            blkdev_unregister(p->bdev);
+            kfree(p->bdev, sizeof(blkdev_t));
+        }
+        kfree(p, sizeof(geom_partition_t));
+        p = pnext;
+    }
+    disk->partitions = NULL;
+    disk->partition_count = 0;
+
+    /* Drop this disk's entries from the global lookup list. */
+    geom_partition_t **gp = &geom_all_partitions;
+    while (*gp) {
+        if ((*gp)->disk == disk) {
+            geom_partition_t *dead = *gp;
+            *gp = dead->next;
+            kfree(dead, sizeof(geom_partition_t));
+        } else {
+            gp = &(*gp)->next;
+        }
+    }
 }
 
 geom_partition_t *geom_find_partition(const char *name) {

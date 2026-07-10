@@ -564,6 +564,15 @@ static int hda_close(audio_dev_t *adev)
 {
 	hda_dev_t *d = adev->driver_data;
 
+	/*
+	 * Stop the stream and reset the ring/FIFO state under feed_lock
+	 * (IRQ-masked).  hda_feed() runs from the IRQ handler holding this
+	 * lock; without it, a completion IRQ firing between CTL=0 and the
+	 * reset below re-arms the ring / advances slots_played against the
+	 * counters we are zeroing, corrupting the next stream's back-pressure.
+	 */
+	unsigned long flags = spinlock_acquire_irq(&d->feed_lock);
+
 	hda_write32(d, HDA_SD_BASE + HDA_SD_CTL, 0);
 	/* Drop latched status bits so stale BCIS doesn't bump the next
 	 * stream's slots_played at open. */
@@ -579,6 +588,8 @@ static int hda_close(audio_dev_t *adev)
 	d->next_idx      = 0;
 	d->running       = 0;
 	audio_fifo_reset(&d->fifo);
+
+	spinlock_release_irq(&d->feed_lock, flags);
 	return 0;
 }
 

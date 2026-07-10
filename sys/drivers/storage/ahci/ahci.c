@@ -396,6 +396,20 @@ static int ahci_port_issue_cmd(ahci_port_t *ap, uint32_t timeout_ms) {
             snprintf(buf, sizeof(buf),
                      "ahci: port %d command timeout\n", ap->port_num);
             kprint(buf);
+            /*
+             * The command is still outstanding (CI slot set): the HBA may
+             * yet DMA into the command table / PRDT / data buffer.  If we
+             * just returned, the caller would reclaim and reuse slot 0's
+             * cmd_table for the next command while the controller finishes
+             * the old transfer -> DMA into recycled memory (DRV-05).  Stop
+             * the command engine to make the HBA relinquish the slot, clear
+             * the latched errors, and restart, mirroring the fatal-error
+             * path above (IDE quiesces on timeout the same way).
+             */
+            port->serr = port->serr;
+            port->is = port->is;
+            ahci_port_stop(port);
+            ahci_port_start(port);
             return -1;
         }
 

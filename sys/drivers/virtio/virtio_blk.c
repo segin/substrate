@@ -67,45 +67,60 @@ void virtio_blk_setup(uint8_t bus, uint8_t slot, uint8_t func) {
     
     // 4. Setup Queue 0
     uint16_t q_size = inw(vblk.io_base + VIRTIO_REG_QUEUE_SIZE);
-    vblk.q_size = q_size;
-    
-    // Allocate Queue Memory (must be page aligned, physically contiguous)
-    // Ring size = Desc(16*N) + Avail(6+2*N) + Padding + Used(6+8*N)
-    // 4096 is enough for small N (e.g. 64 or 128)
-    void *q_mem = pmm_alloc_block();  // Returns virtual address
-    if (!q_mem) {
-        kprint("VirtIO-Blk: Failed to allocate queue memory!\n");
+    if (q_size == 0) {
+        kprint("VirtIO-Blk: Device reports no queue 0.\n");
+        outb(vblk.io_base + VIRTIO_REG_DEVICE_STATUS, VIRTIO_STATUS_FAILED);
         return;
     }
-    memset(q_mem, 0, 4096);
-    
-    vblk.desc_page = q_mem;
-    vblk.desc = (struct vring_desc *)q_mem;
-    vblk.avail = (struct vring_avail *)((char*)q_mem + 16 * q_size);
-    
-    uint32_t avail_ring_end = 16 * q_size + 6 + 2 * q_size;
-    uint32_t used_ring_offset = (avail_ring_end + 4095) & ~4095;
-    
-    // We need more than 1 page if used_ring_offset >= 4096
-    if (used_ring_offset + 6 + 8 * q_size > 4096) {
-         // Simplify: panic if queue too large for single page
-         kprint("VirtIO-Blk: Queue too large for single page support!\n");
-         return;
+    vblk.q_size = q_size;
+
+    /*
+     * Legacy virtio split-ring layout in ONE physically-contiguous,
+     * page-aligned region:
+     *   desc[q_size]        16 * q_size
+     *   avail               6 + 2 * q_size
+     *   <pad to VIRTIO_PCI_VRING_ALIGN>
+     *   used                6 + 8 * q_size
+     * The device derives all three rings from the single QUEUE_ADDR PFN
+     * using exactly this layout, so we size + align identically and
+     * allocate however many pages the ring actually needs.  The old code
+     * pinned the region to a single 4 KiB page and then rejected any queue
+     * whose used ring spilled past it -- which is EVERY real q_size (the
+     * desc+avail of even q_size 64 already rounds the used ring to offset
+     * 4096), so the driver never reached DRIVER_OK.
+     */
+    uint32_t desc_avail_end = 16u * q_size + 6u + 2u * q_size;
+    uint32_t used_ring_offset =
+        (desc_avail_end + (VIRTIO_PCI_VRING_ALIGN - 1u)) &
+        ~(VIRTIO_PCI_VRING_ALIGN - 1u);
+    uint32_t ring_bytes = used_ring_offset + 6u + 8u * q_size;
+    size_t   q_pages = (ring_bytes + 4095u) / 4096u;
+
+    // Allocate Queue Memory (page aligned, physically contiguous).
+    void *q_mem = pmm_alloc_contiguous(q_pages);  // Returns virtual address
+    if (!q_mem) {
+        kprint("VirtIO-Blk: Failed to allocate queue memory!\n");
+        outb(vblk.io_base + VIRTIO_REG_DEVICE_STATUS, VIRTIO_STATUS_FAILED);
+        return;
     }
-    
-    vblk.used = (struct vring_used *)((char*)q_mem + used_ring_offset);
-    
+    memset(q_mem, 0, q_pages * 4096u);
+
+    vblk.desc_page = q_mem;
+    vblk.desc  = (struct vring_desc *)q_mem;
+    vblk.avail = (struct vring_avail *)((char*)q_mem + 16 * q_size);
+    vblk.used  = (struct vring_used *)((char*)q_mem + used_ring_offset);
+
     // Write PFN to Queue Address - MUST be physical address!
-    // pmm_alloc_block returns virtual, convert to physical
+    // pmm_alloc_contiguous returns virtual, convert to physical.
     uint32_t q_phys = (uint32_t)(uintptr_t)q_mem - 0xC0000000;
     outl(vblk.io_base + VIRTIO_REG_QUEUE_ADDR, q_phys / 4096);
-    
+
     // 5. Driver OK
-    outb(vblk.io_base + VIRTIO_REG_DEVICE_STATUS, 
+    outb(vblk.io_base + VIRTIO_REG_DEVICE_STATUS,
          VIRTIO_STATUS_ACKNOWLEDGE | VIRTIO_STATUS_DRIVER | VIRTIO_STATUS_DRIVER_OK);
-    
+
     kprint("VirtIO-Blk Initialized.\n");
-    
+
     geom_register_disk(&vblk_disk);
 }
 

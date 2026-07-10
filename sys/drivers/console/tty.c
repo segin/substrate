@@ -947,6 +947,16 @@ int tty_read(struct tty *tty, char *buf, int len) {
              * kill -9 doesn't kick a process out of read(). */
             current_thread->flags |= THREAD_F_INTERRUPTIBLE;
             current_thread->wait_chan = &tty->read_wait;
+            /*
+             * VTIME wakeup: with an active timer (MIN=0,TIME>0 or the
+             * post-first-char timer of MIN>0,TIME>0) nothing else wakes
+             * us once the line goes idle — read_wait is only kicked on
+             * new input.  Arm sched_tick's timed re-ready with the same
+             * absolute deadline so we wake at TIME expiry and re-check
+             * the completion conditions above instead of blocking forever.
+             */
+            if (timer_started)
+                current_thread->sleep_expiry = deadline;
             current_thread->state = THREAD_BLOCKED;
             spinlock_release(&tty->lock);
             intr_restore(_flags);
@@ -955,6 +965,7 @@ int tty_read(struct tty *tty, char *buf, int len) {
 
             _flags = intr_disable();
             spinlock_acquire(&tty->lock);
+            current_thread->sleep_expiry = 0;
             current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
 
             /* Same check after wakeup — covers the case where the
@@ -1117,9 +1128,19 @@ void tty_start(struct tty *tty) {
     TTY_UNLOCK(tty);
 }
 
+/*
+ * Sentinel for "the core ioctl switch did not handle this cmd" — forwarded to
+ * the line driver below.  It must NOT collide with any real -errno the switch
+ * can return: the historical -1 aliased -EPERM (EPERM == 1), so a permission
+ * failure was indistinguishable from "unhandled" and got silently forwarded to
+ * the driver instead of failing.  Using an out-of-band value lets denials
+ * return a proper -errno. [DRV-21]
+ */
+#define TTY_IOCTL_UNHANDLED  0x7FFFFFFF
+
 int tty_ioctl_kern(struct tty *tty, uint32_t cmd, uintptr_t arg) {
     if (!tty_valid(tty)) return -EIO;
-    int ret = -1;
+    int ret = TTY_IOCTL_UNHANDLED;
     int do_hangup = 0;
 
     TTY_LOCK(tty);
@@ -1174,7 +1195,11 @@ int tty_ioctl_kern(struct tty *tty, uint32_t cmd, uintptr_t arg) {
                     current_process->p_pgrp->pg_session &&
                     tty->session != 0 &&
                     tty->session != current_process->p_pgrp->pg_session->s_sid) {
-                    ret = -1;   /* not our controlling terminal (EPERM) */
+                    /* Return a real errno, not the bare -1 the dispatch below
+                     * treats as "unhandled → forward to the driver ioctl":
+                     * otherwise the permission failure is silently swallowed
+                     * and the op forwarded. [DRV-21] */
+                    ret = -EPERM;   /* not our controlling terminal */
                     break;
                 }
 
@@ -1198,7 +1223,7 @@ int tty_ioctl_kern(struct tty *tty, uint32_t cmd, uintptr_t arg) {
             }
             if (!is_session_leader) {
                 // Must be session leader
-                ret = -1;
+                ret = -EPERM;   /* not -1: that aliases the driver-forward sentinel [DRV-21] */
                 break;
             }
             int cur_sid = current_process->p_pgrp->pg_session->s_sid;
@@ -1209,7 +1234,7 @@ int tty_ioctl_kern(struct tty *tty, uint32_t cmd, uintptr_t arg) {
              * or explicitly stolen.
              */
             if (tty->session != 0 && tty->session != cur_sid && arg != 1) {
-                ret = -1;
+                ret = -EPERM;   /* not -1: that aliases the driver-forward sentinel [DRV-21] */
                 break;
             }
 
@@ -1232,7 +1257,7 @@ int tty_ioctl_kern(struct tty *tty, uint32_t cmd, uintptr_t arg) {
                 ret = 0;
                 break;
             }
-            ret = -1;
+            ret = -ENOTTY;   /* not -1: that aliases the driver-forward sentinel [DRV-21] */
             break;
         }
     }
@@ -1244,7 +1269,7 @@ int tty_ioctl_kern(struct tty *tty, uint32_t cmd, uintptr_t arg) {
      * We unlock before calling driver ioctl to allow it to sleep/copyin safely.
      * We assume tty pointer remains valid (held by open file reference).
      */
-    if (ret == -1 && tty->driver && tty->driver->ioctl) {
+    if (ret == TTY_IOCTL_UNHANDLED && tty->driver && tty->driver->ioctl) {
         if (!tty_driver_cb_valid((const void *)tty->driver->ioctl)) {
             return -EIO;
         }
@@ -1253,6 +1278,12 @@ int tty_ioctl_kern(struct tty *tty, uint32_t cmd, uintptr_t arg) {
 
     if (ret == 0 && do_hangup) {
         tty_hangup(tty);
+    }
+
+    /* Nothing (core or driver) handled it: report the POSIX errno for an
+     * inappropriate ioctl rather than leaking the sentinel. [DRV-21] */
+    if (ret == TTY_IOCTL_UNHANDLED) {
+        ret = -ENOTTY;
     }
 
     return ret;

@@ -413,6 +413,15 @@ static int ac97_close(audio_dev_t *adev)
 	 */
 	(void)ac97_drain(adev);
 
+	/*
+	 * Stop the engine and reset the ring/FIFO state under feed_lock
+	 * (IRQ-masked).  ac97_feed() runs from the IRQ handler holding this
+	 * lock; without it, a completion IRQ firing between CR=0 and the reset
+	 * below re-arms the ring / advances slots_played against the very
+	 * counters we are zeroing, corrupting the next stream's back-pressure.
+	 */
+	unsigned long f = spinlock_acquire_irq(&d->feed_lock);
+
 	/* Stop the bus master if anything was running. */
 	ac97_bm_write8(d, AC97_BM_PO_BASE + AC97_BM_CR, 0);
 
@@ -433,6 +442,8 @@ static int ac97_close(audio_dev_t *adev)
 	d->running       = 0;
 	d->mmap_mode     = 0;
 	audio_fifo_reset(&d->fifo);
+
+	spinlock_release_irq(&d->feed_lock, f);
 	return 0;
 }
 

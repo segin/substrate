@@ -37,6 +37,12 @@
 #define VIRTIO_STATUS_DRIVER_OK   4
 #define VIRTIO_STATUS_FAILED      128
 
+/* Legacy virtio split-ring alignment: the used ring starts at the next
+ * multiple of this boundary after the descriptor table + available ring,
+ * and the whole ring is one physically-contiguous region derived from a
+ * single QUEUE_ADDR PFN. */
+#define VIRTIO_PCI_VRING_ALIGN 4096
+
 // VirtQueue Descriptors
 #define VRING_DESC_F_NEXT      1
 #define VRING_DESC_F_WRITE     2

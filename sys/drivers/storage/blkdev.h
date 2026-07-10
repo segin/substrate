@@ -5,6 +5,8 @@
 #include <stddef.h>
 #include <vfs/vfs.h>
 
+struct geom_disk;
+
 // Block device structure
 typedef struct blkdev {
     char name[32];              // Device name (e.g., "ide0", "ram0")
@@ -18,6 +20,13 @@ typedef struct blkdev {
     int (*ioctl)(struct blkdev *dev, uint32_t request, void *arg);
 
     int dead;                   // 1 once removed/unplugged: I/O returns -EIO
+
+    /* For a raw disk registered via blkdev_register_disk(): the GEOM disk
+     * whose partition child blkdevs derive from this device.  NULL for
+     * partition blkdevs and for raw devices registered without partition
+     * scanning.  Used to keep the partition bio caches coherent with raw
+     * writes and to tear the partitions down when the raw device detaches. */
+    struct geom_disk *geom;
 
     // VFS integration
     fs_node_t node;             // fs_node for DevFS

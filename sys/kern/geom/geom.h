@@ -26,6 +26,7 @@
 struct geom_disk;
 struct geom_partition;
 struct geom_class;
+struct blkdev;
 
 /*
  * ============================================================
@@ -129,7 +130,13 @@ typedef struct geom_partition {
 #define GEOM_PART_BOOTABLE      0x0001
 #define GEOM_PART_ACTIVE        0x0002
 #define GEOM_PART_CONTAINER     0x0004  /* Contains nested partition table */
-    
+
+    /* The block device this partition was registered as (kmalloc'd in
+     * geom_add_partition), so the parent disk can invalidate its bio
+     * cache and tear it down on detach.  Only set on the per-disk list
+     * entry, not the global-lookup copy. */
+    struct blkdev *bdev;
+
     /* Link for partition list */
     struct geom_partition *next;
 } geom_partition_t;
@@ -171,6 +178,11 @@ void geom_register_class(geom_class_t *cls);
 
 /* Disk registration - triggers partition scan */
 void geom_register_disk(geom_disk_t *disk);
+
+/* Disk teardown - unregisters + frees every partition blkdev derived from
+ * this disk and drops the disk from the GEOM lists.  Called when the
+ * backing raw block device detaches. */
+void geom_unregister_disk(geom_disk_t *disk);
 
 /* Partition registration - called by scanners */
 geom_partition_t *geom_add_partition(geom_disk_t *disk, const char *name,

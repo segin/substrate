@@ -385,14 +385,16 @@ size_t audio_node_write(fs_node_t *node, off_t offset, size_t size,
 
 	/*
 	 * Exclusive playback.  The backend's software FIFO / DMA path is a
-	 * single-producer design; two processes write()ing concurrently corrupt
+	 * single-producer design; two writers running concurrently corrupt
 	 * the FIFO and both wedge forever in an uninterruptible D-state ("more
 	 * than one program using the audio device -> both hang, unkillable").
-	 * Claim the device for the first writer's process; a second process gets
-	 * -EBUSY (write() fails, the player exits cleanly) instead of corrupting
-	 * it.  Kernel-context writes (no thread) are not arbitrated.
+	 * Claim the device for the first writer's thread; any other thread —
+	 * including a second thread of the SAME process — gets -EBUSY (write()
+	 * fails, the player exits cleanly) instead of corrupting it.  Keying
+	 * per-process would let sibling threads race the FIFO.  Kernel-context
+	 * writes (no thread) are not arbitrated.
 	 */
-	me = current_thread ? (void *)current_thread->proc : NULL;
+	me = current_thread ? (void *)current_thread : NULL;
 	if (me != NULL) {
 		spinlock_acquire(&audio_dev_lock);
 		if (dev->play_owner == NULL) {
@@ -484,11 +486,11 @@ void audio_node_close(fs_node_t *node)
 	}
 	dev->open_refs--;
 	last_close = (dev->open_refs == 0);
-	/* Release the exclusive playback claim when its owner closes (covers
-	 * exit() too: proc_exit closes fds in the owner's context), or whenever
-	 * the device falls fully idle. */
+	/* Release the exclusive playback claim when its owning thread closes
+	 * (covers exit() too: proc_exit closes fds in the owner's context), or
+	 * whenever the device falls fully idle. */
 	if (last_close ||
-	    (current_thread && dev->play_owner == (void *)current_thread->proc)) {
+	    (current_thread && dev->play_owner == (void *)current_thread)) {
 		dev->play_owner = NULL;
 	}
 	spinlock_release(&audio_dev_lock);
