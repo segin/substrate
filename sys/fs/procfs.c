@@ -21,6 +21,8 @@
 #include <vm/vm_page.h>
 #include <vfs/vfs.h>
 #include <vfs/buf.h>
+#include <sys/param.h>
+#include <vm/vm_swap.h>
 #include <fs/procfs.h>
 #include <pm/pm.h>
 #include <kern/cmdline.h>
@@ -108,14 +110,21 @@ static uint32_t gen_meminfo(char *buf, size_t size, void *opaque) {
     uint32_t commit_limit_kb = (uint32_t)(vm_commit_limit() * 4);
     uint32_t committed_kb    = (uint32_t)(vm_commit_current() * 4);
 
-    /* Report the block (buffer) cache footprint under Buffers, like Linux.
-     * Substrate's bio cache is block-level (no separate page cache), so file
-     * and metadata blocks both land here; Cached stays 0.  The cache is
-     * reclaimable, so fold it into MemAvailable too. */
+    /* Buffers = disk block-buffer cache (bio); Cached = RAM-backed filesystem
+     * data (shmfs / tmpfs / POSIX shm, i.e. Linux's Shmem which is counted in
+     * Cached).  Both are reclaimable, so fold them into MemAvailable. */
     struct bio_stats bstat;
     bio_get_stats(&bstat);
-    uint32_t buffers_kb  = (uint32_t)(bstat.resident_bytes / 1024);
-    uint32_t available_kb = free_kb + buffers_kb;
+    uint32_t buffers_kb   = (uint32_t)(bstat.resident_bytes / 1024);
+    uint32_t cached_kb    = (uint32_t)(shmfs_resident_bytes() / 1024);
+    uint32_t available_kb = free_kb + buffers_kb + cached_kb;
+
+    /* Swap accounting comes from the swap subsystem (0 until a swap device is
+     * configured via swapon), never a hardcoded literal. */
+    uint64_t swap_total_pg = 0, swap_free_pg = 0;
+    vm_swap_get_stats(&swap_total_pg, &swap_free_pg);
+    uint32_t swap_total_kb = (uint32_t)(swap_total_pg * (PAGE_SIZE / 1024));
+    uint32_t swap_free_kb  = (uint32_t)(swap_free_pg * (PAGE_SIZE / 1024));
 
     /* MemAvailable is a standard /proc/meminfo field (Linux 3.14+) that
      * callers use as the canonical "how much can I allocate" figure.
@@ -132,13 +141,13 @@ static uint32_t gen_meminfo(char *buf, size_t size, void *opaque) {
         "MemAvailable:%8u kB\n"
         "MemUsed:     %8u kB\n"
         "Buffers:     %8u kB\n"
-        "Cached:             0 kB\n"
-        "SwapTotal:          0 kB\n"
-        "SwapFree:           0 kB\n"
+        "Cached:      %8u kB\n"
+        "SwapTotal:   %8u kB\n"
+        "SwapFree:    %8u kB\n"
         "CommitLimit: %8u kB\n"
         "Committed_AS:%8u kB\n",
-        total_kb, free_kb, available_kb, used_kb, buffers_kb,
-        commit_limit_kb, committed_kb);
+        total_kb, free_kb, available_kb, used_kb, buffers_kb, cached_kb,
+        swap_total_kb, swap_free_kb, commit_limit_kb, committed_kb);
 }
 
 /* /proc/memtrack — per-call-site physical-page accounting.  One line

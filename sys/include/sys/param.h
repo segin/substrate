@@ -11,4 +11,9 @@
 #define KERN_BASE       0xC0000000
 #define USER_STACK_MIN  0x00001000  /* Minimum valid user stack address */
 
+/* Page geometry (x86, 4 KiB pages). */
+#define PAGE_SHIFT      12
+#define PAGE_SIZE       (1U << PAGE_SHIFT)   /* 4096 */
+#define PAGE_MASK       (PAGE_SIZE - 1U)
+
 #endif

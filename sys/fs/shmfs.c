@@ -102,6 +102,10 @@ static shmfs_inode_t  *shmfs_hash[SHMFS_HASH_SIZE];
 static mutex_t         shmfs_lock;
 static struct dirent   shmfs_dirent;
 static uint64_t        shmfs_next_inode = 2;  /* 1 reserved for root */
+static uint64_t        shmfs_resident;         /* bytes of backing pages held */
+
+/* Total RAM held by shmfs backing store (reported as /proc/meminfo Cached). */
+uint64_t shmfs_resident_bytes(void) { return shmfs_resident; }
 
 /* FNV-1a over the name, masked to the bucket count (power of two). */
 static unsigned shmfs_name_hash(const char *name) {
@@ -165,6 +169,7 @@ static int shmfs_grow(shmfs_inode_t *inode, size_t want) {
         pmm_free_contiguous(inode->data, inode->data_cap >> 12);
     }
     memset(nb + (inode->data_cap), 0, newcap - inode->data_cap);
+    shmfs_resident += (uint64_t)newcap - (uint64_t)inode->data_cap;
     inode->data      = nb;
     inode->data_phys = (uintptr_t)V2P(nb);
     inode->data_cap  = newcap;
@@ -204,6 +209,8 @@ static size_t shmfs_write(fs_node_t *node, off_t off, size_t sz, const uint8_t *
 static void shmfs_free_inode(shmfs_inode_t *inode) {
     if (!inode) return;
     if (inode->data && inode->data_cap > 0) {
+        if (shmfs_resident >= inode->data_cap)
+            shmfs_resident -= inode->data_cap;
         pmm_free_contiguous(inode->data, inode->data_cap >> 12);
     }
     kfree(inode, sizeof(*inode));

@@ -1,3 +1,4 @@
+#include <sys/param.h>
 #include <kern/resource.h>
 #include <string.h>
 #include <vm/vm_kmem.h>
@@ -11,7 +12,6 @@
 
 #define IOREMAP_BASE  0xF7000000U
 #define IOREMAP_LIMIT 0xF8000000U
-#define PAGE_SIZE     4096U
 
 struct ioremap_region {
     void *addr;

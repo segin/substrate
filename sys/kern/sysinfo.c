@@ -10,6 +10,7 @@
 
 #include <sys/copy.h>
 #include <sys/errno.h>
+#include <sys/param.h>
 #include <sys/sysinfo.h>
 #include <sys/types.h>
 #include <vm/phys_mem.h>
@@ -21,7 +22,6 @@
 #include <kern/time.h>
 #include <arch/i386/pmm.h>
 
-#define PAGE_SIZE 4096
 
 /*
  * validate_user_buffer is static in syscall.c. 
