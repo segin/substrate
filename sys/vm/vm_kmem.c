@@ -210,7 +210,12 @@ void kfree(void *ptr, size_t size) {
         return;
     }
 
-    size_t total = hdr->size + sizeof(kmem_large_header_t);
+    /* Snapshot the header size BEFORE freeing the pages: pmm_free_contiguous
+     * hands hdr's pages back to the buddy allocator, after which hdr->size is
+     * freed memory that may be recycled/scribbled at any instant.  Reading it
+     * afterward (VM-11) is a use-after-free that corrupts the accounting. */
+    size_t hdr_size = hdr->size;
+    size_t total = hdr_size + sizeof(kmem_large_header_t);
     size_t pages = (total + 4095) / 4096;
 
     /* Free pages */
@@ -218,8 +223,8 @@ void kfree(void *ptr, size_t size) {
 
     _kf = spinlock_acquire_irq(&kmem_stats_lock);
     kmem_stats.large_frees++;
-    if (kmem_stats.large_bytes_outstanding >= hdr->size) {
-        kmem_stats.large_bytes_outstanding -= hdr->size;
+    if (kmem_stats.large_bytes_outstanding >= hdr_size) {
+        kmem_stats.large_bytes_outstanding -= hdr_size;
     } else {
         kmem_stats.large_bytes_outstanding = 0;
     }

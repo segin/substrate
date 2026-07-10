@@ -7,6 +7,42 @@
 #include <arch/i386/cpu.h>
 #include <kern/panic.h>
 #include <kern/console.h>
+#include <sys/lock.h>
+
+/*
+ * Serialises the object-resolution + page-fill + COW + pmap_enter region of
+ * vm_fault (VM-02).  vm_fault runs holding only the map READ lock, so several
+ * threads faulting the same vm_object proceed concurrently and race the
+ * object's page-list mutation: one faulter's vm_object_add_page() stale
+ * eviction frees a frame while another is still pmap_enter'ing it → silent
+ * corruption.  A sleepable mutex (the pager fill path may sleep) taken UNDER
+ * the map read lock — and always released before it — keeps the ordering
+ * acyclic (map-read → fault-object-lock, never the reverse; nothing under it
+ * re-enters vm_fault).  Coarse but provably deadlock-free; per-object locking
+ * is a future refinement.
+ *
+ * Lazily initialised: vm_fault has no init hook of its own, and the mutex_t
+ * has no static initialiser.  The double-checked guard runs once.
+ */
+static mutex_t vm_fault_object_lock;
+static int vm_fault_lock_ready = 0;
+static spinlock_t vm_fault_lock_init = SPINLOCK_INIT("vm_fault_init");
+
+static void vm_fault_object_lock_acquire(void) {
+    if (!__atomic_load_n(&vm_fault_lock_ready, __ATOMIC_ACQUIRE)) {
+        unsigned long f = spinlock_acquire_irq(&vm_fault_lock_init);
+        if (!vm_fault_lock_ready) {
+            mutex_init(&vm_fault_object_lock, "vm_fault");
+            __atomic_store_n(&vm_fault_lock_ready, 1, __ATOMIC_RELEASE);
+        }
+        spinlock_release_irq(&vm_fault_lock_init, f);
+    }
+    mutex_lock(&vm_fault_object_lock);
+}
+
+static void vm_fault_object_lock_release(void) {
+    mutex_unlock(&vm_fault_object_lock);
+}
 
 
 /* Tripwire: a vm_object the fault path is about to walk must be live.
@@ -80,7 +116,10 @@ int vm_fault(vm_map_t *map, uintptr_t va, uint8_t prot) {
      * resource shortage, not a programmer error.  Set only at the
      * exact failure site; the trailing `goto out` uses it. */
     int oom = 0;
-    
+    /* Set once the fault-object lock (VM-02) is held so the single `out`
+     * epilogue releases it exactly when it was taken. */
+    int fault_locked = 0;
+
     // 1. Find the map entry.  Fast path: the splay-tree hint (last fault) or
     //    root usually contains the faulting address for the sequential fault
     //    patterns that dominate — demand-zero / COW sweeping a region, stack
@@ -129,7 +168,13 @@ int vm_fault(vm_map_t *map, uintptr_t va, uint8_t prot) {
     if (!first_obj) {
         goto out;
     }
-    
+
+    /* Serialize object mutation from here through pmap_enter (VM-02).
+     * Acquired under the map read lock; released at `out` before the map
+     * read lock is dropped. */
+    vm_fault_object_lock_acquire();
+    fault_locked = 1;
+
     vm_object_t *obj = first_obj;
     vm_page_t *m = NULL;
     uint64_t offset = (page_va - entry->start) + entry->offset;
@@ -270,6 +315,11 @@ int vm_fault(vm_map_t *map, uintptr_t va, uint8_t prot) {
             // Add prefaulted page if successful
             if (count > 1 && pages[1]) {
                 pages[1]->flags |= PG_VALID;
+                /* The prefaulted read-ahead page is fully populated and this
+                 * fault is done filling it — clear PG_BUSY (VM-08).  Left set,
+                 * it is permanently unreclaimable (vm_page_try_to_free skips
+                 * PG_BUSY pages). */
+                pages[1]->flags &= ~PG_BUSY;
                 vm_object_add_page(fill_obj, pages[1]);
                 vm_page_deactivate(pages[1]); // Move to inactive queue immediately (heuristically)
             }
@@ -289,15 +339,41 @@ int vm_fault(vm_map_t *map, uintptr_t va, uint8_t prot) {
     // 5. Handle Copy-on-Write faults after we have a source page.
     if ((prot & VM_PROT_WRITE) && (entry->inheritance != VM_INHERIT_SHARE) &&
         (obj != first_obj || obj->ref_count > 1)) {
+        vm_page_t *cow_src = m;   /* the page we copy FROM */
         vm_page_t *new_m = vm_page_alloc(first_obj, offset / 4096, 0);
         if (!new_m) {
             oom = 1;
             goto out;
         }
 
-        page_copy(m->phys_addr, new_m->phys_addr);
+        page_copy(cow_src->phys_addr, new_m->phys_addr);
         new_m->flags |= PG_VALID | PG_DIRTY;
+
+        /* The COW source is fully copied and this fault is done filling it —
+         * clear PG_BUSY (VM-08) before vm_object_add_page(), which in the
+         * in-place case (cow_src lives in first_obj at this pindex) FREES
+         * cow_src: touching it afterward would be a use-after-free. */
+        cow_src->flags &= ~PG_BUSY;
+
         vm_object_add_page(first_obj, new_m);
+
+        /* VM-09: when the source lives one level down in an exclusively-owned
+         * anonymous shadow (obj != first_obj, obj->ref_count == 1), the copy
+         * we just installed in first_obj now MASKS cow_src — no fault can
+         * ever reach it again, yet it lingers in the shadow's page list until
+         * the object is torn down at exit (a per-COW-fault frame strand).
+         * Reclaim it here, but ONLY when it is mapped nowhere (pv_list NULL,
+         * unheld, unwired) so a live PTE can never be left pointing at a freed
+         * frame.  A still-mapped source is left to vm_object_collapse. */
+        if (obj != first_obj && obj->ref_count == 1 &&
+            obj->type == VM_OBJ_TYPE_DEFAULT &&
+            cow_src->object == obj &&
+            cow_src->pv_list == NULL &&
+            cow_src->wire_count == 0 &&
+            cow_src->ref_count <= 1) {
+            vm_object_remove_page(obj, cow_src);
+            vm_page_free(cow_src);
+        }
 
         m = new_m;
         obj = first_obj;
@@ -329,6 +405,9 @@ int vm_fault(vm_map_t *map, uintptr_t va, uint8_t prot) {
 
     result = VM_FAULT_SUCCESS;
 out:
+    if (fault_locked) {
+        vm_fault_object_lock_release();
+    }
     vm_map_unlock_read(map);
     if (result != VM_FAULT_SUCCESS && oom) {
         return VM_FAULT_OOM;

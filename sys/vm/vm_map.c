@@ -791,6 +791,11 @@ static bool vm_map_lookup_entry(vm_map_t *map, uintptr_t va, vm_map_entry_t **en
 
 int vm_map_insert(vm_map_t *map, struct vm_object *obj, uint64_t offset, uintptr_t start, uintptr_t end, uint8_t prot, uint8_t max_prot, uint8_t inheritance) {
     vm_map_entry_t *prev_entry;
+    /* The object the caller handed us.  On failure the caller keeps
+     * ownership of THIS object and deallocates it itself, so if we wrap it
+     * in a shadow below we must restore it to the caller before failing. */
+    vm_object_t *orig_obj = obj;
+    int shadowed = 0;
 
     /*
      * For a private (VM_INHERIT_COPY) mapping of a file-backed (pager)
@@ -810,6 +815,7 @@ int vm_map_insert(vm_map_t *map, struct vm_object *obj, uint64_t offset, uintptr
          * original ref so the net ref count on obj is unchanged. */
         vm_object_deallocate(obj);
         obj = shadow;
+        shadowed = 1;
     }
 
     vm_map_lock(map);
@@ -818,7 +824,7 @@ int vm_map_insert(vm_map_t *map, struct vm_object *obj, uint64_t offset, uintptr
     // We replace the linear overlap check with hole_consume
     if (hole_consume(map, start, end) != 0) {
         vm_map_unlock(map);
-        return -1; // Overlap or allocation failure
+        goto fail_shadow;   // Overlap or allocation failure
     }
 
     // We still need 'prev_entry' to insert into the list correctly.
@@ -837,7 +843,7 @@ int vm_map_insert(vm_map_t *map, struct vm_object *obj, uint64_t offset, uintptr
         // Restore hole?
         hole_insert(map, start, end);
         vm_map_unlock(map);
-        return -1;
+        goto fail_shadow;
     }
 
     new_entry->start = start;
@@ -867,6 +873,21 @@ int vm_map_insert(vm_map_t *map, struct vm_object *obj, uint64_t offset, uintptr
     vm_map_audit(map, "vm_map_insert");
     vm_map_unlock(map);
     return 0;
+
+fail_shadow:
+    /*
+     * Insertion failed after we wrapped the caller's object in a shadow
+     * (VM-07).  Undo the wrap so we neither leak the shadow nor let the
+     * caller's own vm_object_deallocate(orig_obj) drop a reference we
+     * already consumed: re-reference the original (restoring the caller's
+     * ref) and free the shadow — its teardown drops the ref it holds on
+     * the original, netting zero change on orig_obj.
+     */
+    if (shadowed) {
+        vm_object_reference(orig_obj);
+        vm_object_deallocate(obj);   /* obj == shadow */
+    }
+    return -1;
 }
 
 int vm_map_find_space(vm_map_t *map, uintptr_t *addr, size_t length) {
@@ -1059,14 +1080,14 @@ void vm_map_destroy(vm_map_t *map) {
  * [addr, end).  Mirrors the split path in vm_map_remove.  Caller holds the
  * map lock.  No-op when addr already falls on a boundary (or in a hole).
  */
-static void vm_map_clip(vm_map_t *map, uintptr_t addr) {
+static int vm_map_clip(vm_map_t *map, uintptr_t addr) {
     for (vm_map_entry_t *cur = map->header->next; cur != map->header; cur = cur->next) {
         if (cur->start >= addr)
             break;
         if (addr < cur->end) {           /* cur->start < addr < cur->end */
             vm_map_entry_t *ne = alloc_entry();
             if (!ne)
-                return;
+                return -1;               /* OOM — report so the caller can fail */
             ne->start = addr;
             ne->end = cur->end;
             ne->object = cur->object;
@@ -1087,9 +1108,10 @@ static void vm_map_clip(vm_map_t *map, uintptr_t addr) {
 
             cur->end = addr;
             map->nentries++;
-            return;
+            return 0;
         }
     }
+    return 0;   /* addr already on an entry boundary, or falls in a hole */
 }
 
 int vm_map_protect(vm_map_t *map, uintptr_t start, uintptr_t end, uint8_t prot) {
@@ -1115,9 +1137,17 @@ int vm_map_protect(vm_map_t *map, uintptr_t start, uintptr_t end, uint8_t prot) 
      * a mapping widened to the whole entry — e.g. a dynamic linker making
      * one RELRO page read-only/PROT_NONE clobbered the protection of the
      * entire text segment, faulting every later access to it. */
-    vm_map_clip(map, start);
-    vm_map_clip(map, end);
+    /* If clipping can't split (OOM), applying prot to the whole unclipped
+     * entry would widen the change beyond [start,end) — e.g. a RELRO page
+     * turned read-only would drag the rest of the text segment with it
+     * (VM-06).  Fail cleanly instead; nothing has been re-protected yet, so
+     * the map is unchanged. */
+    if (vm_map_clip(map, start) != 0 || vm_map_clip(map, end) != 0) {
+        vm_map_unlock(map);
+        return -1;
+    }
 
+    int prot_err = 0;
     for (vm_map_entry_t *cur = header->next; cur != header; cur = cur->next) {
         if (cur->start >= end)
             break;
@@ -1125,7 +1155,18 @@ int vm_map_protect(vm_map_t *map, uintptr_t start, uintptr_t end, uint8_t prot) 
             continue;
 
         cur->protection = prot;
-        pmap_protect(map->pmap, cur->start, cur->end, prot);
+        /* Don't ignore pmap_protect's result (VM-15).  rc == -11 is the
+         * deferred-COW case: the PTE is intentionally left read-only and the
+         * pending write fault performs the copy from entry->protection, which
+         * is correct — treat it as success.  Any other non-zero return means
+         * the hardware PTEs could NOT be updated (large-page demote OOM, or a
+         * non-current target pmap), so the requested protection was not
+         * actually enforced; remember it and fail the call rather than
+         * silently claiming success with stale PTEs. */
+        int rc = pmap_protect(map->pmap, cur->start, cur->end, prot);
+        if (rc != 0 && rc != -11) {
+            prot_err = rc;
+        }
     }
     for (vm_map_entry_t *cur = header->next; cur != header; cur = cur->next) {
         if (cur->start >= end)
@@ -1136,7 +1177,7 @@ int vm_map_protect(vm_map_t *map, uintptr_t start, uintptr_t end, uint8_t prot) 
     }
     vm_map_audit(map, "vm_map_protect");
     vm_map_unlock(map);
-    return 0;
+    return prot_err ? -1 : 0;
 }
 
 int vm_map_inherit(vm_map_t *map, uintptr_t start, uintptr_t end, uint8_t inheritance) {

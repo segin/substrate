@@ -200,12 +200,17 @@ static struct uma_bucket *uma_bucket_alloc(void) {
         b->ub_cnt = 0;
         return b;
     }
-    uma_bucket_depot_release(f);
 
+    /* The static-pool carve MUST stay under the depot lock too (VM-10):
+     * reading and bumping uma_bucket_idx outside it let two CPUs read the
+     * same index and hand the same bucket struct to both, so a single
+     * bucket ends up installed in two per-CPU caches. */
     if (uma_bucket_idx >= UMA_BUCKET_POOL_SIZE) {
+        uma_bucket_depot_release(f);
         return NULL;
     }
     b = &uma_bucket_pool[uma_bucket_idx++];
+    uma_bucket_depot_release(f);
     b->ub_cnt = 0;
     b->ub_next = NULL;
     b->ub_zone = NULL;
@@ -1045,7 +1050,11 @@ void uma_zfree(uma_zone_t *zone, void *item) {
     /* Slow path: free to slab */
     uma_zfree_slab(zone, item);
     zone->uz_frees++;
-    zone->uz_count--;
+    /* Guard against underflow (VM-14): a stray/duplicate free must not wrap
+     * uz_count to ~4 billion.  Matches the >0 guard on the fast path above. */
+    if (zone->uz_count > 0) {
+        zone->uz_count--;
+    }
 }
 
 /*
@@ -1054,28 +1063,49 @@ void uma_zfree(uma_zone_t *zone, void *item) {
 void uma_reclaim(void) {
     for (uma_zone_t *zone = uma_zones; zone; zone = zone->uz_next) {
         if (zone->uz_flags & UMA_ZONE_NOFREE) continue;
-        
-        /* Drain per-CPU buckets */
-        for (int cpu = 0; cpu < uma_ncpu; cpu++) {
-            uma_cache_t *cache = &zone->uz_cpu[cpu];
-            
-            if (cache->uc_allocbucket) {
-                struct uma_bucket *b = cache->uc_allocbucket;
-                while (b->ub_cnt > 0) {
-                     uma_zfree_slab(zone, b->ub_bucket[--b->ub_cnt]);
-                }
-                uma_bucket_put_empty(b);
-                cache->uc_allocbucket = NULL;
+
+        /*
+         * Drain ONLY this CPU's per-CPU buckets (VM-04).  The old loop
+         * reached into every CPU's live per-CPU cache, which is protected
+         * solely by the owning CPU's intr_disable window (the lockless
+         * uma_zalloc/uma_zfree fast path) — there is no cross-CPU lock.
+         * Draining a remote CPU's alloc/free bucket while that CPU is
+         * pulling items from it hands the same item out twice
+         * (double-allocation → heap corruption).  intr_disable here gives
+         * the same exclusion against this CPU's own fast path and
+         * preemption that the fast path itself relies on; we atomically
+         * detach the buckets under it, then drain the now-private buckets
+         * outside it (uma_zfree_slab / uma_bucket_put_empty take their own
+         * IRQ-safe locks).  Remote CPUs' cached items are still returned to
+         * the shared full-bucket depot (drained below under the depot
+         * lock) as those CPUs cycle their buckets, and via zone destroy.
+         */
+        struct uma_bucket *ab, *fb;
+#ifndef HOST_TEST
+        uint32_t _rf = intr_disable();
+#endif
+        {
+            uma_cache_t *cache = &zone->uz_cpu[uma_curcpu()];
+            ab = cache->uc_allocbucket;
+            fb = cache->uc_freebucket;
+            cache->uc_allocbucket = NULL;
+            cache->uc_freebucket = NULL;
+        }
+#ifndef HOST_TEST
+        intr_restore(_rf);
+#endif
+
+        if (ab) {
+            while (ab->ub_cnt > 0) {
+                uma_zfree_slab(zone, ab->ub_bucket[--ab->ub_cnt]);
             }
-            
-            if (cache->uc_freebucket) {
-                struct uma_bucket *b = cache->uc_freebucket;
-                while (b->ub_cnt > 0) {
-                     uma_zfree_slab(zone, b->ub_bucket[--b->ub_cnt]);
-                }
-                uma_bucket_put_empty(b);
-                cache->uc_freebucket = NULL;
+            uma_bucket_put_empty(ab);
+        }
+        if (fb) {
+            while (fb->ub_cnt > 0) {
+                uma_zfree_slab(zone, fb->ub_bucket[--fb->ub_cnt]);
             }
+            uma_bucket_put_empty(fb);
         }
 
         {

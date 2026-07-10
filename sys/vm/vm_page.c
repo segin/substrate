@@ -16,12 +16,38 @@
 #include <vm/vm_area.h>
 #include <vm/phys_mem.h>
 #include <vm/vm_map.h>
+#include <sys/lock.h>
 
 // System Page Queues
 static vm_page_t *active_queue = NULL;
 static vm_page_t *inactive_queue = NULL;
 static vm_page_t *wired_queue = NULL;      // Pages pinned in memory (kernel, DMA)
 static vm_page_t *laundry_queue = NULL;    // Dirty pages pending writeback
+
+/*
+ * Serialises the four global page queues and the enqueue()/dequeue() splices
+ * (VM-03).  The queues are mutated concurrently by the fault path
+ * (vm_page_activate), the exit path (vm_page_free), wiring, and the
+ * pagedaemon scanners; without this an interleaved pair of splices corrupts
+ * the next/prev linkage.
+ *
+ * IRQ-safe (spinlock_acquire_irq): reachable from IRQ-context frees.
+ * LEAF lock — held only across the pointer splices + the PG_ACTIVE/PG_INACTIVE
+ * flag update that selects a page's queue.  Never call kmalloc/pmm/pmap/pager/
+ * sleep while holding it (in particular vm_page_free / vm_pager_* / the pmap
+ * A-bit probes run with it dropped), and it is never taken under another lock
+ * that is itself taken under it.
+ */
+static spinlock_t vm_page_queue_lock = SPINLOCK_INIT("vm_page_queue");
+
+/*
+ * Protects the static pv_entry free list and its one-shot bootstrap (VM-03).
+ * IRQ-safe and a LEAF lock: the kmalloc() fallback in pv_alloc() runs with it
+ * dropped, so it never nests kmalloc/UMA locks under itself.  It guards only
+ * the pool free list — the per-page pv_list chains remain serialised by the
+ * caller's pmap lock (pmap.c), which never takes this lock, so no cycle.
+ */
+static spinlock_t vm_pv_lock = SPINLOCK_INIT("vm_pv");
 
 static int vm_pagedaemon_started = 0;
 static int vm_page_inactive_target = 128;
@@ -293,7 +319,8 @@ void vm_page_late_init(void) {
 	}
 }
 
-// Internal helper to add a page to the head of a queue
+// Internal helper to add a page to the head of a queue.
+// Caller MUST hold vm_page_queue_lock (raw splice, no internal locking).
 static void enqueue(vm_page_t **head, vm_page_t *page) {
 	page->next = *head;
 	page->prev = NULL;
@@ -303,7 +330,8 @@ static void enqueue(vm_page_t **head, vm_page_t *page) {
 	*head = page;
 }
 
-// Internal helper to remove a page from a queue
+// Internal helper to remove a page from a queue.
+// Caller MUST hold vm_page_queue_lock (raw splice, no internal locking).
 static void dequeue(vm_page_t **head, vm_page_t *page) {
 	if(page->prev) {
 		page->prev->next = page->next;
@@ -358,19 +386,23 @@ static void pv_pool_init(void) {
 }
 
 static struct pv_entry *pv_alloc(void) {
+	unsigned long f = spinlock_acquire_irq(&vm_pv_lock);
 	if(!pv_pool_initialized)
-		pv_pool_init();
+		pv_pool_init();          /* links the static array only — no external calls */
 
 	if(pv_free_list) {
 		struct pv_entry *entry = pv_free_list;
 		pv_free_list = entry->next;
+		spinlock_release_irq(&vm_pv_lock, f);
 		entry->next = NULL;
 		entry->pmap = NULL;
 		entry->va = 0;
 		return(entry);
 	}
+	spinlock_release_irq(&vm_pv_lock, f);
 
-	// Fallback to kmalloc
+	// Fallback to kmalloc.  Leaf discipline: NOT under vm_pv_lock (kmalloc
+	// takes the kmem/UMA locks, which must never nest under this lock).
 	struct pv_entry *entry = kmalloc(sizeof(struct pv_entry));
 	if(entry) {
 		entry->next = NULL;
@@ -385,8 +417,10 @@ static void pv_free(struct pv_entry *entry) {
 
 	// Return to static pool if it came from there
 	if(entry >= &pv_pool[0] && entry < &pv_pool[PV_POOL_SIZE]) {
+		unsigned long f = spinlock_acquire_irq(&vm_pv_lock);
 		entry->next = pv_free_list;
 		pv_free_list = entry;
+		spinlock_release_irq(&vm_pv_lock, f);
 	} else {
 		kfree(entry, sizeof(struct pv_entry));
 	}
@@ -508,7 +542,9 @@ void vm_page_free(vm_page_t *m) {
 		return;
 	}
 
-	// Remove from whatever queue it's in
+	// Remove from whatever queue it's in (atomic with the flag clear so a
+	// concurrent scanner/mutator can't double-splice this page).
+	unsigned long qf = spinlock_acquire_irq(&vm_page_queue_lock);
 	if(m->flags & PG_ACTIVE) {
 		dequeue(&active_queue, m);
 		m->flags &= ~PG_ACTIVE;
@@ -516,8 +552,9 @@ void vm_page_free(vm_page_t *m) {
 		dequeue(&inactive_queue, m);
 		m->flags &= ~PG_INACTIVE;
 	}
+	spinlock_release_irq(&vm_page_queue_lock, qf);
 
-	// Unlink from owning object
+	// Unlink from owning object (outside the queue lock — leaf discipline).
 	if(m->object)
 		vm_page_remove(m);
 
@@ -548,7 +585,13 @@ void vm_page_free(vm_page_t *m) {
 
 // Move page to active queue (recently accessed)
 void vm_page_activate(vm_page_t *m) {
-	if(!m || (m->flags & PG_ACTIVE)) return;
+	if(!m) return;
+
+	unsigned long f = spinlock_acquire_irq(&vm_page_queue_lock);
+	if(m->flags & PG_ACTIVE) {
+		spinlock_release_irq(&vm_page_queue_lock, f);
+		return;
+	}
 
 	// Remove from current queue
 	if(m->flags & PG_INACTIVE) {
@@ -562,11 +605,18 @@ void vm_page_activate(vm_page_t *m) {
 	if (m->age < VM_PAGE_AGE_INITIAL) {
 		m->age = VM_PAGE_AGE_INITIAL;
 	}
+	spinlock_release_irq(&vm_page_queue_lock, f);
 }
 
 // Move page to inactive queue (eviction candidate)
 void vm_page_deactivate(vm_page_t *m) {
-	if(!m || (m->flags & PG_INACTIVE)) return;
+	if(!m) return;
+
+	unsigned long f = spinlock_acquire_irq(&vm_page_queue_lock);
+	if(m->flags & PG_INACTIVE) {
+		spinlock_release_irq(&vm_page_queue_lock, f);
+		return;
+	}
 
 	// Remove from active queue
 	if(m->flags & PG_ACTIVE) {
@@ -576,12 +626,14 @@ void vm_page_deactivate(vm_page_t *m) {
 
 	enqueue(&inactive_queue, m);
 	m->flags |= PG_INACTIVE;
+	spinlock_release_irq(&vm_page_queue_lock, f);
 }
 
 // Wire page (pin in memory, cannot be paged out)
 void vm_page_wire(vm_page_t *m) {
 	if(!m) return;
 
+	unsigned long f = spinlock_acquire_irq(&vm_page_queue_lock);
 	m->wire_count++;
 
 	// Remove from LRU queues if being wired for first time
@@ -595,11 +647,18 @@ void vm_page_wire(vm_page_t *m) {
 		}
 		enqueue(&wired_queue, m);
 	}
+	spinlock_release_irq(&vm_page_queue_lock, f);
 }
 
 // Unwire page (allow paging out when wire_count reaches 0)
 void vm_page_unwire(vm_page_t *m) {
-	if(!m || m->wire_count == 0) return;
+	if(!m) return;
+
+	unsigned long f = spinlock_acquire_irq(&vm_page_queue_lock);
+	if(m->wire_count == 0) {
+		spinlock_release_irq(&vm_page_queue_lock, f);
+		return;
+	}
 
 	m->wire_count--;
 
@@ -609,6 +668,7 @@ void vm_page_unwire(vm_page_t *m) {
 		enqueue(&active_queue, m);
 		m->flags |= PG_ACTIVE;
 	}
+	spinlock_release_irq(&vm_page_queue_lock, f);
 }
 
 // Hold page (increment ref_count for mapping)
@@ -664,11 +724,23 @@ static int vm_pageout_scan_clock(int max_scan) {
 			continue;
 		}
 
-		// Check if page was recently accessed via PTE A bit
-		if(pmap_page_is_referenced(m)) {
-			// Page was accessed - give it second chance
+		// Check if page was recently accessed via PTE A bit (pmap probe
+		// stays OUTSIDE the queue lock — leaf discipline).
+		int referenced = pmap_page_is_referenced(m);
+		if(referenced) {
 			pmap_page_clear_reference(m);
-			// Move to head of active queue (most recently used)
+		}
+
+		// Splice under the lock, re-validating the page is still on the
+		// active queue (a concurrent free/mutator may have moved it).
+		unsigned long f = spinlock_acquire_irq(&vm_page_queue_lock);
+		if(!(m->flags & PG_ACTIVE)) {
+			spinlock_release_irq(&vm_page_queue_lock, f);
+			m = next;
+			continue;
+		}
+		if(referenced) {
+			// Page was accessed - give it second chance (move to head).
 			dequeue(&active_queue, m);
 			enqueue(&active_queue, m);
 			m->flags |= PG_ACTIVE;  // Keep active flag
@@ -680,6 +752,7 @@ static int vm_pageout_scan_clock(int max_scan) {
 			m->flags |= PG_INACTIVE;
 			deactivated++;
 		}
+		spinlock_release_irq(&vm_page_queue_lock, f);
 
 		m = next;
 	}
@@ -701,8 +774,18 @@ static int vm_pageout_scan_lru(int max_scan) {
 			continue;
 		}
 
-		if (pmap_page_is_referenced(m)) {
+		int referenced = pmap_page_is_referenced(m);
+		if (referenced) {
 			pmap_page_clear_reference(m);
+		}
+
+		unsigned long f = spinlock_acquire_irq(&vm_page_queue_lock);
+		if (!(m->flags & PG_ACTIVE)) {
+			spinlock_release_irq(&vm_page_queue_lock, f);
+			m = next;
+			continue;
+		}
+		if (referenced) {
 			m->age = VM_PAGE_AGE_MAX;
 			dequeue(&active_queue, m);
 			enqueue(&active_queue, m);
@@ -717,6 +800,7 @@ static int vm_pageout_scan_lru(int max_scan) {
 			m->flags |= PG_INACTIVE;
 			deactivated++;
 		}
+		spinlock_release_irq(&vm_page_queue_lock, f);
 
 		m = next;
 	}
@@ -762,13 +846,21 @@ static int vm_page_reclaim_inactive_clean(int target) {
 	while(m && freed < target) {
 		vm_page_t *next = m->next;
 
-		if(!(m->flags & PG_DIRTY) && !(m->flags & PG_BUSY) && m->wire_count == 0) {
+		// Detach a clean/idle inactive page under the lock, then free it
+		// with the lock DROPPED (vm_page_free re-takes the queue lock —
+		// holding it here would self-deadlock, and it also calls pmm).
+		unsigned long f = spinlock_acquire_irq(&vm_page_queue_lock);
+		if((m->flags & PG_INACTIVE) && !(m->flags & PG_DIRTY) &&
+		   !(m->flags & PG_BUSY) && m->wire_count == 0) {
 			dequeue(&inactive_queue, m);
 			m->flags &= ~PG_INACTIVE;
+			spinlock_release_irq(&vm_page_queue_lock, f);
 
 			if(vm_page_try_to_free(m)) {
 				freed++;
 			}
+		} else {
+			spinlock_release_irq(&vm_page_queue_lock, f);
 		}
 
 		m = next;
@@ -801,16 +893,17 @@ static int vm_page_launder_inactive_dirty(int target) {
 void vm_page_launder(vm_page_t *m) {
 	if(!m || !(m->flags & PG_DIRTY)) return;
 
-	// Remove from inactive queue
+	// Move inactive -> laundry under the queue lock.
+	unsigned long f = spinlock_acquire_irq(&vm_page_queue_lock);
 	if(m->flags & PG_INACTIVE) {
 		dequeue(&inactive_queue, m);
 		m->flags &= ~PG_INACTIVE;
 	}
-
-	// Add to laundry queue
 	enqueue(&laundry_queue, m);
+	spinlock_release_irq(&vm_page_queue_lock, f);
 
-	// Perform writeback via pager
+	// Perform writeback via pager (OUTSIDE the queue lock — pager I/O may
+	// sleep; holding a leaf spinlock across it is forbidden).
 	bool success = false;
 	if(m->object && m->object->pager) {
 		if(vm_pager_put_pages(m->object->pager, &m, 1, true) == 0) {
@@ -821,15 +914,12 @@ void vm_page_launder(vm_page_t *m) {
 		// Should have been assigned a swap pager.
 	}
 
-	// Remove from laundry queue
+	// Move laundry -> inactive (clean) or -> active (retry) under the lock.
+	f = spinlock_acquire_irq(&vm_page_queue_lock);
 	dequeue(&laundry_queue, m);
-
 	if(success) {
-		// Mark clean
+		// Mark clean, move to inactive queue (next scan can free it).
 		m->flags &= ~PG_DIRTY;
-		vm_stat_pageouts++;
-
-		// Move to inactive queue (now clean, so next scan can free it)
 		enqueue(&inactive_queue, m);
 		m->flags |= PG_INACTIVE;
 	} else {
@@ -837,6 +927,11 @@ void vm_page_launder(vm_page_t *m) {
 		// Reactivate it to avoid tight loop of failing laundry
 		enqueue(&active_queue, m);
 		m->flags |= PG_ACTIVE;
+	}
+	spinlock_release_irq(&vm_page_queue_lock, f);
+
+	if(success) {
+		vm_stat_pageouts++;
 	}
 }
 
@@ -977,23 +1072,27 @@ void vm_page_age_scan(void) {
 			continue;
 		}
 
-		// Check A-bit via pmap and update access tracking
+		// Check A-bit via pmap and update access tracking (pmap probe
+		// outside the queue lock — leaf discipline).
 		if(pmap_page_is_referenced(m)) {
 			// Page was accessed - reset age to max
 			m->age = VM_PAGE_AGE_MAX;
 			pmap_page_clear_reference(m);
 		} else {
-			// Page not accessed - decrement age
-			if(m->age > 0) {
-				m->age--;
+			// Page not accessed - age it and, if aged out, move to inactive.
+			unsigned long f = spinlock_acquire_irq(&vm_page_queue_lock);
+			if(m->flags & PG_ACTIVE) {
+				if(m->age > 0) {
+					m->age--;
+				}
+				if(m->age == 0) {
+					dequeue(&active_queue, m);
+					m->flags &= ~PG_ACTIVE;
+					enqueue(&inactive_queue, m);
+					m->flags |= PG_INACTIVE;
+				}
 			}
-			// If age reaches 0, move to inactive queue
-			if(m->age == 0) {
-				dequeue(&active_queue, m);
-				m->flags &= ~PG_ACTIVE;
-				enqueue(&inactive_queue, m);
-				m->flags |= PG_INACTIVE;
-			}
+			spinlock_release_irq(&vm_page_queue_lock, f);
 		}
 
 		m = next;
@@ -1012,14 +1111,18 @@ void vm_page_age_scan(void) {
 
 		// Check if page was accessed while inactive
 		if(pmap_page_is_referenced(m)) {
-			// Reactivate
-			dequeue(&inactive_queue, m);
-			m->flags &= ~PG_INACTIVE;
-			enqueue(&active_queue, m);
-			m->flags |= PG_ACTIVE;
-			m->age = VM_PAGE_AGE_INITIAL;  // Give a second chance
-			vm_stat_reactivations++;
 			pmap_page_clear_reference(m);
+			// Reactivate under the queue lock.
+			unsigned long f = spinlock_acquire_irq(&vm_page_queue_lock);
+			if(m->flags & PG_INACTIVE) {
+				dequeue(&inactive_queue, m);
+				m->flags &= ~PG_INACTIVE;
+				enqueue(&active_queue, m);
+				m->flags |= PG_ACTIVE;
+				m->age = VM_PAGE_AGE_INITIAL;  // Give a second chance
+			}
+			spinlock_release_irq(&vm_page_queue_lock, f);
+			vm_stat_reactivations++;
 		}
 
 		m = next;
