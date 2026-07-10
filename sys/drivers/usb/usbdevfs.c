@@ -206,6 +206,7 @@ void usbdevfs_publish(usb_device_t *dev)
         dn->ioctl = usbdevfs_dev_ioctl;
         devfs_register_device(dn);
     }
+    dev->usbfs_node = dn;
 
     snprintf(name, sizeof(name), "usb/bus%u/dev%u.meta", USBDEVFS_BUS, dev->address);
     mn = usbdevfs_make_node(name, dev);
@@ -213,5 +214,30 @@ void usbdevfs_publish(usb_device_t *dev)
         mn->flags = FS_FILE;
         mn->read = usbdevfs_meta_read;
         devfs_register_device(mn);
+    }
+    dev->usbfs_meta_node = mn;
+}
+
+/* Remove the /dev/usb nodes on disconnect.  The nodes cache a raw usb_device_t
+ * pointer in node->impl; without this, lsusb/libusb would dereference the freed
+ * (address-reusable) struct after usb_free_device.  devfs_register_device made
+ * these entries with owns_node == 0, so devfs won't free the fs_node_t — we own
+ * it and free it here. [DRV-02][DRV-20] */
+void usbdevfs_unpublish(usb_device_t *dev)
+{
+    fs_node_t *dn = (fs_node_t *)dev->usbfs_node;
+    fs_node_t *mn = (fs_node_t *)dev->usbfs_meta_node;
+
+    if (dn != NULL) {
+        dn->impl = 0;                  /* drop the dangling usb_device_t ref */
+        devfs_unregister_device(dn);
+        kfree(dn, sizeof(fs_node_t));
+        dev->usbfs_node = NULL;
+    }
+    if (mn != NULL) {
+        mn->impl = 0;
+        devfs_unregister_device(mn);
+        kfree(mn, sizeof(fs_node_t));
+        dev->usbfs_meta_node = NULL;
     }
 }

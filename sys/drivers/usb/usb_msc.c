@@ -81,13 +81,16 @@ struct usb_msc_csw {
  * fall-back doesn't double the round-trip count for very large I/Os.
  */
 #define USB_MSC_BOUNCE_SIZE     65536
-/* Max bytes per Bulk transfer.  At max_packet=64 (USB 1.1 bulk) one
- * TD covers 64 bytes, so 128 KB needs 2048 TDs — exactly the UHCI
- * pool size.  Submit_lock serializes everything, so concurrent control
- * transfers can't race for TDs.  Doubling from 64 KB halves the
- * per-chunk software overhead (lock acquire, descriptor wiring,
- * schedule insert/remove). */
-#define USB_MSC_DIRECT_CHUNK    131072
+/* Max bytes per Bulk transfer handed to the HCD.  This must not exceed the
+ * smallest per-transfer limit of any host controller the request may land on:
+ * EHCI bounces through a 20 KiB (5-page) buffer and rejects anything larger,
+ * xHCI through 64 KiB; UHCI streams arbitrary lengths as max-packet TDs.  A
+ * larger chunk simply failed outright on EHCI/xHCI, so large I/O never worked
+ * on USB2/USB3 storage.  16 KiB is block-aligned (32 * 512) and clears the
+ * 20 KiB EHCI ceiling with margin; bigger transfers are split across the loop
+ * below.  Submit_lock serializes everything, so concurrent control transfers
+ * can't race for TDs. [DRV-16] */
+#define USB_MSC_MAX_XFER        16384
 #define USB_MSC_KERN_BASE       0xC0000000U
 
 typedef struct usb_msc_dev {
@@ -147,13 +150,24 @@ static int usb_msc_bot_transfer(usb_msc_dev_t *msc, uint8_t lun,
                                 void *data, uint32_t data_len,
                                 int is_read, uint32_t *residue)
 {
-    struct usb_msc_cbw *cbw = msc->cbw;
-    struct usb_msc_csw *csw = msc->csw;
+    struct usb_msc_cbw *cbw;
+    struct usb_msc_csw *csw;
     uint32_t actual;
     int ret;
     int status = -1;
 
     mutex_lock(&msc->lock);
+
+    /* Re-check under the lock: a concurrent detach (USB unplug) may have
+     * quiesced the device and freed the DMA buffers after our caller's
+     * lock-less active check.  The detach holds this same lock while it tears
+     * down, so once we hold it the state is stable. [DRV-01] */
+    if (!msc->active || !msc->udev || !msc->cbw || !msc->csw) {
+        mutex_unlock(&msc->lock);
+        return -1;
+    }
+    cbw = msc->cbw;
+    csw = msc->csw;
 
     /* Build CBW in DMA-coherent buffer */
     memset(cbw, 0, sizeof(*cbw));
@@ -182,7 +196,7 @@ static int usb_msc_bot_transfer(usb_msc_dev_t *msc, uint8_t lun,
      * (kmalloc / pmm_alloc_contiguous output), which is the case for all
      * SCSI mid-layer requests originating from disk I/O.  Hand the buffer
      * straight to the HCD; dma_map_single will return its physical address
-     * with no copy.  We still chunk at USB_MSC_DIRECT_CHUNK to bound TD
+     * with no copy.  We still chunk at USB_MSC_MAX_XFER to bound TD
      * pool usage in UHCI (each Bulk transfer allocates max_packet-sized
      * TDs, e.g. 64KB / 64B = 1024 TDs out of UHCI_MAX_TDS=2048).
      *
@@ -199,8 +213,8 @@ static int usb_msc_bot_transfer(usb_msc_dev_t *msc, uint8_t lun,
 
         if (direct) {
             while (remaining > 0) {
-                uint32_t chunk_size = (remaining > USB_MSC_DIRECT_CHUNK) ?
-                                      USB_MSC_DIRECT_CHUNK : remaining;
+                uint32_t chunk_size = (remaining > USB_MSC_MAX_XFER) ?
+                                      USB_MSC_MAX_XFER : remaining;
 
                 ret = usb_bulk_transfer(msc->udev, data_ep,
                                         ptr, chunk_size, &actual);
@@ -222,8 +236,11 @@ static int usb_msc_bot_transfer(usb_msc_dev_t *msc, uint8_t lun,
             }
         } else {
             while (remaining > 0) {
-                uint32_t chunk_size = (remaining > USB_MSC_BOUNCE_SIZE) ?
-                                      USB_MSC_BOUNCE_SIZE : remaining;
+                /* Cap the bounce chunk at the same HCD-safe limit; the bounce
+                 * buffer itself is larger but the transfer must still fit the
+                 * controller's per-transfer ceiling. [DRV-16] */
+                uint32_t chunk_size = (remaining > USB_MSC_MAX_XFER) ?
+                                      USB_MSC_MAX_XFER : remaining;
 
                 if (!is_read)
                     memcpy(msc->bounce_buf, ptr, chunk_size);
@@ -536,7 +553,19 @@ static void usb_msc_detach(usb_device_t *dev)
     if (!msc || !msc->active)
         return;
 
+    /* Unregister from the SCSI mid-layer first: this force-unmounts and drains
+     * outstanding requests, and stops new ones from being dispatched.  These
+     * final requests are real BOT transfers that still need active == 1 and the
+     * DMA buffers, so they must run before we tear anything down. */
     scsi_unregister_link(&msc->scsi_link);
+
+    /* Quiesce: take the transfer lock so any BOT transfer already past its
+     * active check completes before we free the DMA buffers and drop udev.  A
+     * transfer that blocked on the lock re-checks active/udev after acquiring
+     * it and bails, so it can't touch the freed buffers. [DRV-01] */
+    mutex_lock(&msc->lock);
+    msc->active = 0;
+    msc->udev = NULL;
 
     /* Free DMA-coherent BOT buffers */
     if (msc->cbw)
@@ -548,9 +577,8 @@ static void usb_msc_detach(usb_device_t *dev)
     msc->cbw = NULL;
     msc->csw = NULL;
     msc->bounce_buf = NULL;
+    mutex_unlock(&msc->lock);
 
-    msc->active = 0;
-    msc->udev = NULL;
     dev->driver_data = NULL;
 
     kprintf("usb_msc: detached device\n");

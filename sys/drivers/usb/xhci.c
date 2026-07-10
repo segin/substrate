@@ -274,6 +274,36 @@ static int xhci_port_enable(usb_hcd_t *hcd, uint8_t port, int enable)
     return 0;   /* xHCI enables ports via reset; nothing to do */
 }
 
+/* [DRV-19] Release everything a (partially) set-up slot allocated and hand the
+ * slot id back to the controller.  Every failure path in xhci_setup_slot funnels
+ * here so a flaky enumeration doesn't leak the slot + its DMA contexts — 16 such
+ * failures would otherwise exhaust every slot the controller has. */
+static void xhci_free_slot(xhci_hc_t *hc, uint8_t slot)
+{
+    struct xhci_slot *s = &hc->slots[slot];
+
+    /* Tell the controller to release the slot before we free its contexts. */
+    xhci_run_command(hc, 0,
+                     XHCI_TRB_TYPE(TRB_DISABLE_SLOT) | ((uint32_t)slot << 24),
+                     NULL);
+    hc->dcbaa[slot] = 0;
+
+    if (s->ep_ring[1].trb) {
+        dma_free_coherent(s->ep_ring[1].trb,
+                          XHCI_RING_TRBS * sizeof(struct xhci_trb));
+        s->ep_ring[1].trb = NULL;
+    }
+    if (s->in_ctx) {
+        dma_free_coherent(s->in_ctx, 33 * hc->ctx_size);
+        s->in_ctx = NULL;
+    }
+    if (s->dev_ctx) {
+        dma_free_coherent(s->dev_ctx, 32 * hc->ctx_size);
+        s->dev_ctx = NULL;
+    }
+    memset(s, 0, sizeof(*s));
+}
+
 /* ---- slot setup: Enable Slot + Address Device ---- */
 static int xhci_setup_slot(xhci_hc_t *hc, usb_transfer_t *xfer, uint8_t port)
 {
@@ -292,6 +322,7 @@ static int xhci_setup_slot(xhci_hc_t *hc, usb_transfer_t *xfer, uint8_t port)
     s->in_ctx  = dma_alloc_coherent(33 * hc->ctx_size, &s->in_ctx_dma);
     if (!s->dev_ctx || !s->in_ctx || xhci_ring_alloc(&s->ep_ring[1]) != 0) {
         kprintf("xhci: slot %u alloc failed\n", slot);
+        xhci_free_slot(hc, slot);   /* [DRV-19] */
         return -1;
     }
     memset(s->dev_ctx, 0, 32 * hc->ctx_size);
@@ -324,6 +355,7 @@ static int xhci_setup_slot(xhci_hc_t *hc, usb_transfer_t *xfer, uint8_t port)
     cc = xhci_run_command(hc, s->in_ctx_dma, ctrl, NULL);
     if (cc != XHCI_CC_SUCCESS) {
         kprintf("xhci: address-device(BSR) slot %u failed cc=%d\n", slot, cc);
+        xhci_free_slot(hc, slot);   /* [DRV-19] */
         return -1;
     }
     hc->enum_slot = slot;

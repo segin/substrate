@@ -187,8 +187,10 @@ static void usb_hub_enumerate_ports(usb_hub_dev_t *hub)
 				__asm__ volatile("pause");
 		}
 
-		/* Enumerate the downstream device through the core USB stack */
-		usb_enumerate_device(hub->udev->hcd, port, speed);
+		/* Enumerate the downstream device through the core USB stack,
+		 * recording this hub as its parent so the root-port hot-plug scan
+		 * doesn't mistake it for a root device and disconnect it. [DRV-04] */
+		usb_enumerate_device_parent(hub->udev->hcd, port, speed, hub->udev);
 	}
 }
 

@@ -103,6 +103,7 @@ struct xhci_trb {
 #define TRB_STATUS           4
 #define TRB_LINK             6
 #define TRB_ENABLE_SLOT      9
+#define TRB_DISABLE_SLOT     10
 #define TRB_ADDRESS_DEVICE   11
 #define TRB_CONFIGURE_EP     12
 #define TRB_EVAL_CONTEXT     13

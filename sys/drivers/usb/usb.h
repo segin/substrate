@@ -232,6 +232,8 @@ typedef struct usb_endpoint {
  * USB Device
  * ============================================================
  */
+struct device;      /* /proc/devtree bus device (kern/device.h) */
+
 typedef struct usb_device {
     uint8_t  address;           /* Assigned USB address (1-127) */
     uint8_t  speed;             /* USB_SPEED_* */
@@ -277,6 +279,15 @@ typedef struct usb_device {
     /* The class driver bound to this device (set by usb_match_driver on a
      * successful attach), so a later disconnect can dispatch its .detach. */
     struct usb_class_driver *driver;
+
+    /* Teardown handles published at enumeration and torn down on disconnect,
+     * so nothing outlives the freed usb_device_t (see usb_disconnect_device).
+     * devtree_dev is the /proc/devtree bus node; usbfs_node / usbfs_meta_node
+     * are the /dev/usb/... fs_node_t nodes (stored as void * to keep vfs.h out
+     * of this header). */
+    struct device *devtree_dev;
+    void          *usbfs_node;
+    void          *usbfs_meta_node;
 
     /* State */
     uint8_t  slot;              /* Index in device table */
@@ -448,11 +459,16 @@ int usb_set_configuration(usb_device_t *dev, uint8_t config);
 int usb_set_interface(usb_device_t *dev, uint8_t iface, uint8_t alt);
 int usb_clear_halt(usb_device_t *dev, usb_endpoint_t *ep);
 
-/* Enumeration */
+/* Enumeration.  usb_enumerate_device_parent records the enumerating hub as the
+ * new device's parent (NULL = a root-hub port); usb_enumerate_device is the
+ * root-port shorthand (parent == NULL). */
 int usb_enumerate_device(usb_hcd_t *hcd, uint8_t port, uint8_t speed);
+int usb_enumerate_device_parent(usb_hcd_t *hcd, uint8_t port, uint8_t speed,
+                                usb_device_t *parent);
 
-/* Publish a device under /dev/usb (libusb/lsusb backend). */
+/* Publish/unpublish a device under /dev/usb (libusb/lsusb backend). */
 void usbdevfs_publish(usb_device_t *dev);
+void usbdevfs_unpublish(usb_device_t *dev);
 void usb_enumerate_bus(usb_hcd_t *hcd);
 
 /* Endpoint Lookup Helpers */

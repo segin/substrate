@@ -489,6 +489,46 @@ static int uhci_poll_td(uhci_hc_t *hc, struct uhci_td *td,
 }
 
 /*
+ * [DRV-18] On a timeout the TD chain is still linked into the async QH (or
+ * cached inside the controller's current frame) and its TDs may still be
+ * Active.  Freeing the TDs and unmapping the data buffer here would let a late
+ * controller visit DMA into a TD slot that has since been reissued, or into an
+ * unmapped buffer.  Quiesce first: unlink the chain from the schedule, clear
+ * Active on every TD so any TD the HC has not yet started becomes a no-op, then
+ * wait for the controller to advance past the frame it may currently be
+ * executing (a transaction runs to the next SOF) so any in-flight TD retires.
+ */
+static void uhci_quiesce_chain(uhci_hc_t *hc, struct uhci_td *first_td)
+{
+    /* Detach the chain from the async schedule. */
+    hc->async_qh->element_link = UHCI_QH_LINK_T;
+
+    struct uhci_td *td = first_td;
+    uint32_t budget = UHCI_MAX_TDS;
+    while (td && budget--) {
+        td->ctrl_status &= ~UHCI_TD_CTRL_ACTIVE;
+        if (td->link & UHCI_TD_LINK_T)
+            break;
+        td = (struct uhci_td *)((uintptr_t)(td->link & ~0xF) + 0xC0000000);
+    }
+    __sync_synchronize();
+
+    /* Wait for two frame boundaries: the controller finishes any transaction
+     * in progress on our TDs and moves on.  Bounded so a stopped HC can't wedge
+     * us here. */
+    uint16_t f0 = uhci_readw(hc, UHCI_FRNUM) & (UHCI_FRAME_LIST_SIZE - 1);
+    uint64_t deadline = (uint64_t)get_uptime_ms() + 5;
+    for (;;) {
+        uint16_t f = uhci_readw(hc, UHCI_FRNUM) & (UHCI_FRAME_LIST_SIZE - 1);
+        if ((uint16_t)(f - f0) >= 2)
+            break;
+        if ((uint64_t)get_uptime_ms() > deadline)
+            break;
+        __asm__ volatile("pause");
+    }
+}
+
+/*
  * Execute a control transfer: SETUP → DATA (optional) → STATUS
  */
 static int uhci_control_transfer(uhci_hc_t *hc, usb_transfer_t *xfer)
@@ -599,6 +639,11 @@ static int uhci_control_transfer(uhci_hc_t *hc, usb_transfer_t *xfer)
     /* Remove from schedule */
     hc->async_qh->element_link = UHCI_QH_LINK_T;
 
+    /* [DRV-18] On timeout the HC may still own the chain — quiesce before the
+     * cleanup path frees the TDs and unmaps the data buffer. */
+    if (ret == USB_XFER_TIMEOUT)
+        uhci_quiesce_chain(hc, first_td);
+
     xfer->actual_length = actual;
     xfer->status = ret;
 
@@ -703,6 +748,11 @@ static int uhci_bulk_transfer(uhci_hc_t *hc, usb_transfer_t *xfer)
 
     /* Remove from schedule */
     hc->async_qh->element_link = UHCI_QH_LINK_T;
+
+    /* [DRV-18] On timeout the HC may still own the chain — quiesce before the
+     * cleanup path frees the TDs and unmaps the data buffer. */
+    if (ret == USB_XFER_TIMEOUT)
+        uhci_quiesce_chain(hc, first_td);
 
     xfer->actual_length = actual;
     xfer->status = ret;

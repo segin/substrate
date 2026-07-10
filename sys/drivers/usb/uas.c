@@ -164,6 +164,11 @@ static int uas_transfer(uas_dev_t *u, uint8_t lun, const uint8_t *cdb,
             return -1;
         if (siu[0] != UAS_IU_SENSE)
             return -1;
+        /* The Sense IU must carry the task tag of the command we issued; a
+         * status IU bearing a different tag belongs to another command and
+         * must not be attributed to this one. [DRV-17] */
+        if ((((uint16_t)siu[2] << 8) | siu[3]) != tag)
+            return -1;
         uint8_t status = siu[6];
         if (status != SCSI_STATUS_GOOD && sense && sense_len) {
             uint32_t slen = ((uint32_t)siu[14] << 8) | siu[15];
@@ -183,6 +188,12 @@ static int uas_transfer(uas_dev_t *u, uint8_t lun, const uint8_t *cdb,
                                          siu, UAS_STATUS_IU_SIZE, &actual);
         if (r != USB_XFER_OK && r != USB_XFER_SHORT)
             return -1;
+
+        /* Every status/ready IU is tagged with the task tag it responds to;
+         * one bearing a different tag is a stale or misordered reply to another
+         * command and must be skipped, not acted upon. [DRV-17] */
+        if ((((uint16_t)siu[2] << 8) | siu[3]) != tag)
+            continue;
 
         switch (siu[0]) {
         case UAS_IU_READ_READY:

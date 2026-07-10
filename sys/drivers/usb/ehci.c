@@ -176,6 +176,41 @@ static uint32_t ehci_qtd_dma(ehci_hc_t *hc, int idx)
     return (uint32_t)(hc->qtd_dma + (dma_addr_t)idx * sizeof(struct ehci_qtd));
 }
 
+/* [DRV-05] On a transfer timeout the controller may still own the async QH
+ * overlay and keep DMAing into the (reused) bounce buffer / walking the qTDs.
+ * Stop it before the caller reclaims that memory: disable the async schedule
+ * and wait for the controller to acknowledge it has stopped (ASS clears), then
+ * neutralize this transfer's qTDs and the QH overlay so a late visit is a
+ * no-op, and finally restart the schedule for subsequent transfers.  Without
+ * this, a late completion scribbles over the next transfer's data. */
+static void ehci_quiesce_async(ehci_hc_t *hc, int first_qtd, int n_qtd)
+{
+    uint32_t cmd = ehci_op_rd(hc, EHCI_OP_USBCMD);
+    ehci_op_wr(hc, EHCI_OP_USBCMD, cmd & ~EHCI_CMD_ASE);
+    for (int i = 0; i < 100; i++) {
+        if (!(ehci_op_rd(hc, EHCI_OP_USBSTS) & EHCI_STS_ASS))
+            break;
+        ehci_delay_ms(1);
+    }
+
+    /* Schedule stopped: the HC no longer touches the QH/qTDs. */
+    for (int i = first_qtd; i < first_qtd + n_qtd; i++)
+        hc->qtd[i].token &= ~EHCI_QTD_STATUS_ACTIVE;
+    struct ehci_qh *qh = hc->async_qh;
+    qh->overlay_next = EHCI_LINK_TERMINATE;
+    qh->overlay_alt_next = EHCI_LINK_TERMINATE;
+    qh->overlay_token &= ~EHCI_QTD_STATUS_ACTIVE;
+
+    /* Re-enable the async schedule for the next transfer. */
+    cmd = ehci_op_rd(hc, EHCI_OP_USBCMD);
+    ehci_op_wr(hc, EHCI_OP_USBCMD, cmd | EHCI_CMD_ASE);
+    for (int i = 0; i < 100; i++) {
+        if (ehci_op_rd(hc, EHCI_OP_USBSTS) & EHCI_STS_ASS)
+            break;
+        ehci_delay_ms(1);
+    }
+}
+
 /* Arm the async QH at a qTD chain and poll to completion.  Returns USB_XFER_*.
  * [DRV-06] n_qtd counts the qTDs this transfer filled/linked (contiguous from
  * first_qtd); only those are polled, so stale qTDs left ACTIVE/HALTED by a prior
@@ -206,7 +241,9 @@ static int ehci_run_qh(ehci_hc_t *hc, int first_qtd, int n_qtd, uint32_t endp_ch
         if (halted) return USB_XFER_STALL;
         if (!active) break;
         if ((uint64_t)get_uptime_ms() > deadline) {
-            qh->overlay_next = EHCI_LINK_TERMINATE;
+            /* [DRV-05] Reclaim the descriptors from the hardware before the
+             * caller reuses the bounce buffer / qTD pool. */
+            ehci_quiesce_async(hc, first_qtd, n_qtd);
             return USB_XFER_TIMEOUT;
         }
         __asm__ volatile("pause");

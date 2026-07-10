@@ -46,6 +46,10 @@ static void usb_publish_device(usb_device_t *dev)
     bd->progif = dev->if_protocol;
     if (device_register(bd, &usb_bus_type) != 0) {
         device_put(bd);
+    } else {
+        /* Remember the node so a later disconnect can remove it (else the
+         * /proc/devtree entry leaks one device per hot-plug cycle). [DRV-20] */
+        dev->devtree_dev = bd;
     }
     usbdevfs_publish(dev);
 }
@@ -606,9 +610,11 @@ static void usb_match_driver(usb_device_t *dev)
 #define USB_MAX_ENUM_DEPTH 7
 static int usb_enum_depth = 0;
 
-static int usb_enumerate_device_inner(usb_hcd_t *hcd, uint8_t port, uint8_t speed);
+static int usb_enumerate_device_inner(usb_hcd_t *hcd, uint8_t port, uint8_t speed,
+                                      usb_device_t *parent);
 
-int usb_enumerate_device(usb_hcd_t *hcd, uint8_t port, uint8_t speed)
+int usb_enumerate_device_parent(usb_hcd_t *hcd, uint8_t port, uint8_t speed,
+                                usb_device_t *parent)
 {
     if (usb_enum_depth >= USB_MAX_ENUM_DEPTH) {
         kprintf("usb: enumeration depth limit (%d) reached at port %u; refusing\n",
@@ -616,12 +622,19 @@ int usb_enumerate_device(usb_hcd_t *hcd, uint8_t port, uint8_t speed)
         return -1;
     }
     usb_enum_depth++;
-    int ret = usb_enumerate_device_inner(hcd, port, speed);
+    int ret = usb_enumerate_device_inner(hcd, port, speed, parent);
     usb_enum_depth--;
     return ret;
 }
 
-static int usb_enumerate_device_inner(usb_hcd_t *hcd, uint8_t port, uint8_t speed)
+int usb_enumerate_device(usb_hcd_t *hcd, uint8_t port, uint8_t speed)
+{
+    /* Root-hub port: no parent hub. */
+    return usb_enumerate_device_parent(hcd, port, speed, NULL);
+}
+
+static int usb_enumerate_device_inner(usb_hcd_t *hcd, uint8_t port, uint8_t speed,
+                                      usb_device_t *parent)
 {
     usb_device_t *dev;
     struct usb_device_descriptor dd;
@@ -635,6 +648,7 @@ static int usb_enumerate_device_inner(usb_hcd_t *hcd, uint8_t port, uint8_t spee
 
     dev->port = port;
     dev->speed = speed;
+    dev->parent = parent;   /* NULL for a root-hub port; the hub otherwise [DRV-04] */
     dev->address = 0;   /* Default address for initial communication */
 
     /* Set EP0 max packet size based on speed */
@@ -833,14 +847,32 @@ static usb_device_t *usb_root_device_on_port(usb_hcd_t *hcd, uint8_t port)
     return NULL;
 }
 
-/* Detach a vanished device: dispatch the bound driver's .detach, then free. */
+/* Detach a vanished device.  Ordering matters: the bound driver must detach
+ * (quiesce in-flight transfers, force-unmount, free its DMA buffers) and every
+ * published node that stores a back-pointer to this usb_device_t must be
+ * removed BEFORE the struct is freed, or those consumers dereference freed
+ * memory. [DRV-01][DRV-02][DRV-20] */
 static void usb_disconnect_device(usb_device_t *dev)
 {
     if (!dev)
         return;
+
+    /* 1. Driver detach first: it drains outstanding I/O before we free. */
     if (dev->driver && dev->driver->detach)
         dev->driver->detach(dev);
     dev->driver = NULL;
+
+    /* 2. Remove the /proc/devtree bus node (leaked one per hot-plug otherwise). */
+    if (dev->devtree_dev) {
+        device_unregister(dev->devtree_dev);
+        device_put(dev->devtree_dev);
+        dev->devtree_dev = NULL;
+    }
+
+    /* 3. Remove the /dev/usb nodes that cache a raw usb_device_t pointer. */
+    usbdevfs_unpublish(dev);
+
+    /* 4. Now nothing references the struct: free it. */
     usb_free_device(dev);
 }
 

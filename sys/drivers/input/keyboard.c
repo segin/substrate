@@ -543,11 +543,22 @@ static int kbd_extended = 0;
 static int kbd_s2_break_pending = 0;
 
 /*
+ * Modifier state is updated from two contexts that race: the PS/2 keyboard IRQ
+ * and the USB-HID poll kthread, both funnelling through process_keycode ->
+ * handle_modifier.  Without serialization an update from one source can
+ * interleave with the l/r-set + composite-recompute of the other, briefly
+ * exposing an inconsistent kbd_shift/ctrl/alt and emitting a wrong-modifier
+ * character.  IRQ-safe because one caller runs in hard IRQ context. [DRV-22]
+ */
+static spinlock_t kbd_mod_lock = SPINLOCK_INIT("kbd_mod");
+
+/*
  * Handle a modifier key press/release.
  * Returns 1 if the scancode was a modifier (consumed), 0 otherwise.
  */
 static int handle_modifier(uint16_t keycode, int pressed)
 {
+    unsigned long flags = spinlock_acquire_irq(&kbd_mod_lock);
     switch (keycode) {
     case KEY_LEFTSHIFT:  kbd_lshift = pressed; break;
     case KEY_RIGHTSHIFT: kbd_rshift = pressed; break;
@@ -556,11 +567,13 @@ static int handle_modifier(uint16_t keycode, int pressed)
     case KEY_LEFTALT:    kbd_lalt   = pressed; break;
     case KEY_RIGHTALT:   kbd_ralt   = pressed; break;
     default:
+        spinlock_release_irq(&kbd_mod_lock, flags);
         return 0;
     }
     kbd_shift = kbd_lshift | kbd_rshift;
     kbd_ctrl  = kbd_lctrl  | kbd_rctrl;
     kbd_alt   = kbd_lalt   | kbd_ralt;
+    spinlock_release_irq(&kbd_mod_lock, flags);
     return 1;
 }
 
