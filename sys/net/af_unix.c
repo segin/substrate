@@ -965,16 +965,27 @@ int sys_socketpair(int domain, int type, int protocol, int sv[2]) {
     return 0;
 }
 
-int sys_bind(int fd, const struct sockaddr *addr, socklen_t addrlen) {
+int sys_bind(int fd, const struct sockaddr *uaddr, socklen_t addrlen) {
     if (sock_fd_invalid(fd)) return -EBADF;
-    if (addr && addr->sa_family == AF_UNIX) {
+    if (!uaddr || addrlen < 2) return -EINVAL;
+    /* NET-03: `uaddr` is a raw userspace pointer.  Copy the sockaddr into
+     * a kernel buffer before reading any field — dereferencing it directly
+     * takes an unrecoverable kernel fault on a bad/unmapped user pointer
+     * (a trivial DoS).  Everything below works off the kernel copy. */
+    uint8_t kbuf[128];
+    socklen_t clen = addrlen > (socklen_t)sizeof(kbuf)
+                         ? (socklen_t)sizeof(kbuf) : addrlen;
+    memset(kbuf, 0, sizeof(kbuf));
+    if (copyin(uaddr, kbuf, clen) != 0) return -EFAULT;
+    const struct sockaddr *addr = (const struct sockaddr *)kbuf;
+
+    if (addr->sa_family == AF_UNIX) {
         const char *p = ((const struct sockaddr_un *)addr)->sun_path;
         XFD("sys_bind pid=%d fd=%d af_unix path='%.*s'",
             current_process ? (int)current_process->pid : -1, fd,
             (int)(addrlen >= 2 ? addrlen - 2 : 0),
             p ? p : "(null)");
     }
-    if (!addr || addrlen < 2) return -EINVAL;
     if (addr->sa_family == AF_PACKET) {
         return afpacket_bind(fd, addr, addrlen);
     }
@@ -1154,12 +1165,19 @@ int sys_accept(int fd, struct sockaddr *addr, socklen_t *addrlen) {
     return newfd;
 }
 
-int sys_connect(int fd, const struct sockaddr *addr, socklen_t addrlen) {
+int sys_connect(int fd, const struct sockaddr *uaddr, socklen_t addrlen) {
     if (sock_fd_invalid(fd)) return -EBADF;
+    if (!uaddr || addrlen < 2) return -EINVAL;
+    /* NET-03: copy the sockaddr in before touching it — see sys_bind. */
+    uint8_t kbuf[128];
+    socklen_t clen = addrlen > (socklen_t)sizeof(kbuf)
+                         ? (socklen_t)sizeof(kbuf) : addrlen;
+    memset(kbuf, 0, sizeof(kbuf));
+    if (copyin(uaddr, kbuf, clen) != 0) return -EFAULT;
+    const struct sockaddr *addr = (const struct sockaddr *)kbuf;
     XFD("sys_connect ENTER pid=%d fd=%d family=%d",
         current_process ? (int)current_process->pid : -1,
-        fd, addr ? addr->sa_family : -1);
-    if (!addr || addrlen < 2) return -EINVAL;
+        fd, addr->sa_family);
     if (addr->sa_family == AF_INET || addr->sa_family == AF_INET6) {
         return afinet_connect(fd, addr, addrlen);
     }
@@ -1815,44 +1833,74 @@ int sys_shutdown(int fd, int how) {
  * Fall through to AF_UNIX only on ENOTSOCK.  */
 
 
-int sys_getsockname(int fd, struct sockaddr *addr, socklen_t *addrlen) {
+int sys_getsockname(int fd, struct sockaddr *uaddr, socklen_t *uaddrlen) {
     if (sock_fd_invalid(fd)) return -EBADF;
-    if (!addr || !addrlen) return -EINVAL;
-    int rc = afinet_getsockname(fd, addr, addrlen);
-    if (rc != -ENOTSOCK) return rc;
+    if (!uaddr || !uaddrlen) return -EINVAL;
+    /* NET-03: uaddr/uaddrlen are user pointers.  Pull the caller's buffer
+     * capacity in, build the result in a kernel buffer, then copy out
+     * under length validation — never write through the raw user pointer. */
+    socklen_t cap;
+    if (copyin(uaddrlen, &cap, sizeof(cap)) != 0) return -EFAULT;
+    uint8_t kaddr[128];
+    memset(kaddr, 0, sizeof(kaddr));
+    if (cap > (socklen_t)sizeof(kaddr)) cap = sizeof(kaddr);
+    socklen_t outlen = cap;
 
-    afunix_sock_t *s = afunix_from_fd(fd);
-    if (!s) return -ENOTSOCK;
-    struct sockaddr_un *un = (struct sockaddr_un *)addr;
-    un->sun_family = AF_UNIX;
-    int plen = s->pathlen;
-    if (plen > (int)*addrlen - 2) plen = *addrlen - 2;
-    /* NET-10: a user *addrlen of 0 or 1 drives plen negative; clamp so
-     * un->sun_path[plen]='\0' below never writes at a negative index. */
-    if (plen < 0) plen = 0;
-    if (plen > 0) memcpy(un->sun_path, s->path, plen);
-    if (plen < AFUNIX_PATH_MAX) un->sun_path[plen] = '\0';
-    *addrlen = 2 + plen;
+    int rc = afinet_getsockname(fd, kaddr, &outlen);
+    if (rc == -ENOTSOCK) {
+        afunix_sock_t *s = afunix_from_fd(fd);
+        if (!s) return -ENOTSOCK;
+        struct sockaddr_un *un = (struct sockaddr_un *)kaddr;
+        un->sun_family = AF_UNIX;
+        int plen = s->pathlen;
+        if (plen > (int)cap - 2) plen = (int)cap - 2;
+        /* NET-10: a user *addrlen of 0 or 1 drives plen negative; clamp so
+         * un->sun_path[plen]='\0' below never writes at a negative index. */
+        if (plen < 0) plen = 0;
+        if (plen > 0) memcpy(un->sun_path, s->path, plen);
+        if (plen < AFUNIX_PATH_MAX) un->sun_path[plen] = '\0';
+        outlen = 2 + plen;
+        rc = 0;
+    }
+    if (rc != 0) return rc;
+
+    socklen_t cpy = outlen < cap ? outlen : cap;
+    if (cpy > 0 && copyout(kaddr, uaddr, cpy) != 0) return -EFAULT;
+    if (copyout(&outlen, uaddrlen, sizeof(outlen)) != 0) return -EFAULT;
     return 0;
 }
 
-int sys_getpeername(int fd, struct sockaddr *addr, socklen_t *addrlen) {
+int sys_getpeername(int fd, struct sockaddr *uaddr, socklen_t *uaddrlen) {
     if (sock_fd_invalid(fd)) return -EBADF;
-    if (!addr || !addrlen) return -EINVAL;
-    int rc = afinet_getpeername(fd, addr, addrlen);
-    if (rc != -ENOTSOCK) return rc;
+    if (!uaddr || !uaddrlen) return -EINVAL;
+    /* NET-03: see sys_getsockname. */
+    socklen_t cap;
+    if (copyin(uaddrlen, &cap, sizeof(cap)) != 0) return -EFAULT;
+    uint8_t kaddr[128];
+    memset(kaddr, 0, sizeof(kaddr));
+    if (cap > (socklen_t)sizeof(kaddr)) cap = sizeof(kaddr);
+    socklen_t outlen = cap;
 
-    afunix_sock_t *s = afunix_from_fd(fd);
-    if (!s) return -ENOTSOCK;
-    if (!s->peer) return -ENOTCONN;
-    struct sockaddr_un *un = (struct sockaddr_un *)addr;
-    un->sun_family = AF_UNIX;
-    int plen = s->peer->pathlen;
-    if (plen > (int)*addrlen - 2) plen = *addrlen - 2;
-    if (plen < 0) plen = 0;   /* NET-10 twin: negative *addrlen-2 -> no neg index */
-    if (plen > 0) memcpy(un->sun_path, s->peer->path, plen);
-    if (plen < AFUNIX_PATH_MAX) un->sun_path[plen] = '\0';
-    *addrlen = 2 + plen;
+    int rc = afinet_getpeername(fd, kaddr, &outlen);
+    if (rc == -ENOTSOCK) {
+        afunix_sock_t *s = afunix_from_fd(fd);
+        if (!s) return -ENOTSOCK;
+        if (!s->peer) return -ENOTCONN;
+        struct sockaddr_un *un = (struct sockaddr_un *)kaddr;
+        un->sun_family = AF_UNIX;
+        int plen = s->peer->pathlen;
+        if (plen > (int)cap - 2) plen = (int)cap - 2;
+        if (plen < 0) plen = 0;   /* NET-10 twin: negative cap-2 -> no neg index */
+        if (plen > 0) memcpy(un->sun_path, s->peer->path, plen);
+        if (plen < AFUNIX_PATH_MAX) un->sun_path[plen] = '\0';
+        outlen = 2 + plen;
+        rc = 0;
+    }
+    if (rc != 0) return rc;
+
+    socklen_t cpy = outlen < cap ? outlen : cap;
+    if (cpy > 0 && copyout(kaddr, uaddr, cpy) != 0) return -EFAULT;
+    if (copyout(&outlen, uaddrlen, sizeof(outlen)) != 0) return -EFAULT;
     return 0;
 }
 
@@ -1862,8 +1910,12 @@ int sys_setsockopt(int fd, int level, int optname,
      * bind()'s EADDRINUSE check — so record it on the AF_INET socket.  All
      * other options are accepted silently. */
     if (level == 1 /*SOL_SOCKET*/ && optname == 2 /*SO_REUSEADDR*/) {
-
-        int on = (optval && optlen >= (socklen_t)sizeof(int)) ? *(const int *)optval : 0;
+        int on = 0;
+        if (optval && optlen >= (socklen_t)sizeof(int)) {
+            /* NET-03: optval is a raw user pointer — copy it in rather than
+             * dereferencing it in the kernel. */
+            if (copyin(optval, &on, sizeof(on)) != 0) return -EFAULT;
+        }
         afinet_set_reuseaddr(fd, on);   /* no-op on non-AF_INET fds */
     }
     return 0;
@@ -1875,10 +1927,24 @@ int sys_setsockopt(int fd, int level, int optname,
  * succeeded and proceed to send into a dead PCB).  */
 
 
+/* NET-03: copy a single-int option value out to the user optval/optlen,
+ * which are raw user pointers.  Returns 0 or -EFAULT. */
+static int getsockopt_ret_int(int val, void *uoptval, socklen_t *uoptlen) {
+    if (copyout(&val, uoptval, sizeof(val)) != 0) return -EFAULT;
+    socklen_t l = (socklen_t)sizeof(val);
+    if (copyout(&l, uoptlen, sizeof(l)) != 0) return -EFAULT;
+    return 0;
+}
+
 int sys_getsockopt(int fd, int level, int optname,
                    void *optval, socklen_t *optlen) {
-    if (!optval || !optlen || *optlen < (socklen_t)sizeof(int))
-        return -EINVAL;
+    if (!optval || !optlen) return -EINVAL;
+    /* NET-03: optval/optlen are user pointers.  Pull the caller's buffer
+     * length in first and validate it, then copy each result out — never
+     * read or write through the raw user pointer. */
+    socklen_t ulen;
+    if (copyin(optlen, &ulen, sizeof(ulen)) != 0) return -EFAULT;
+    if (ulen < (socklen_t)sizeof(int)) return -EINVAL;
 
     #define SOL_SOCKET_K   1
     #define SO_ERROR_K     4
@@ -1886,24 +1952,18 @@ int sys_getsockopt(int fd, int level, int optname,
     #define SO_ACCEPTCONN_K 30
     if (level == SOL_SOCKET_K) {
         if (optname == SO_ERROR_K) {
-            int err = afinet_so_error(fd);
-            *(int *)optval = err;
-            *optlen = sizeof(int);
-            return 0;
+            return getsockopt_ret_int(afinet_so_error(fd), optval, optlen);
         }
         if (optname == SO_TYPE_K) {
             /* Report the socket's actual type (SOCK_STREAM / SOCK_DGRAM / ...).
              * libtirpc's svc_tli_create switches on getsockopt(SO_TYPE) to pick
              * its transport; returning 0 here made it reject every RPC server
              * socket with "bad service type" (broke rpcbind / ToolTalk). */
-
             afunix_sock_t *u = afunix_from_fd(fd);
             int t = u ? u->type : afinet_so_type(fd);
             if (t < 0)
                 return -ENOTSOCK;
-            *(int *)optval = t;
-            *optlen = sizeof(int);
-            return 0;
+            return getsockopt_ret_int(t, optval, optlen);
         }
         #define SO_PEERCRED_K 17
         if (optname == SO_PEERCRED_K) {
@@ -1923,18 +1983,15 @@ int sys_getsockopt(int fd, int level, int optname,
                 /* Unconnected (or socketpair self-query): our own creds. */
                 cr.pid = u->cr_pid; cr.uid = u->cr_uid; cr.gid = u->cr_gid;
             }
-            socklen_t n = *optlen;
+            socklen_t n = ulen;
             if (n > (socklen_t)sizeof(cr)) n = sizeof(cr);
-            memcpy(optval, &cr, n);
-            *optlen = n;
+            if (copyout(&cr, optval, n) != 0) return -EFAULT;
+            if (copyout(&n, optlen, sizeof(n)) != 0) return -EFAULT;
             return 0;
         }
         if (optname == 2 /*SO_REUSEADDR*/) {
-
             int r = afinet_get_reuseaddr(fd);
-            *(int *)optval = (r < 0) ? 0 : r;
-            *optlen = sizeof(int);
-            return 0;
+            return getsockopt_ret_int(r < 0 ? 0 : r, optval, optlen);
         }
         if (optname == 7 /*SO_SNDBUF*/ || optname == 8 /*SO_RCVBUF*/) {
             /* Report a buffer size consistent with when a send actually
@@ -1946,24 +2003,17 @@ int sys_getsockopt(int fd, int level, int optname,
              * messages fit the 256 KiB ring (with headroom for the write
              * path's per-4KiB-chunk datagram framing) and a third does not. */
             afunix_sock_t *us = afunix_from_fd(fd);
-            *(int *)optval = (us && us->type == SOCK_DGRAM)
-                                 ? (192 * 1024)
-                                 : 32 * 1024;
-            *optlen = sizeof(int);
-            return 0;
+            int v = (us && us->type == SOCK_DGRAM) ? (192 * 1024) : 32 * 1024;
+            return getsockopt_ret_int(v, optval, optlen);
         }
         if (optname == 6 /*SO_BROADCAST*/ || optname == 9 /*SO_KEEPALIVE*/ ||
             optname == 15 /*SO_REUSEPORT*/ || optname == SO_ACCEPTCONN_K) {
-            *(int *)optval = 0;
-            *optlen = sizeof(int);
-            return 0;
+            return getsockopt_ret_int(0, optval, optlen);
         }
         /* Unknown SOL_SOCKET option — POSIX ENOPROTOOPT (was silently 0,
          * which let bogus getsockopt() calls "succeed"). */
         return -ENOPROTOOPT;
     }
     /* Non-SOL_SOCKET levels (IPPROTO_TCP/IP/...): stay lenient. */
-    *(int *)optval = 0;
-    *optlen = sizeof(int);
-    return 0;
+    return getsockopt_ret_int(0, optval, optlen);
 }

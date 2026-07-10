@@ -17,6 +17,7 @@
 #include <kern/console.h>
 #include <kern/sched.h>
 #include <vm/vm_kmem.h>
+#include <arch/i386/intr.h>
 #include <string.h>
 #include <stddef.h>
 #include <errno.h>
@@ -179,6 +180,20 @@ int ip4_output(uint32_t daddr, uint8_t protocol,
         uint32_t nexthop = via_gw ? dev->ip4_gateway : daddr;
         if (arp_lookup(dev, nexthop, mac) != 0) {
             arp_request(dev, nexthop);
+            /*
+             * NET-05: ip4_output is reachable from tcp_input()/ip4_input(),
+             * which run in hard IRQ context (netdev RX upcall, IF=0).  The
+             * sched_yield() spin below sleeps — switching away from an
+             * interrupt handler is illegal and corrupts the interrupted
+             * thread's state.  Only wait for the ARP reply when interrupts
+             * are enabled (process / kthread context); in interrupt or
+             * atomic context, drop the packet after firing the ARP request.
+             * The next-hop MAC populates the cache from the reply, and the
+             * upper layer (TCP retransmit timer, higher-level retry) resends
+             * once it does — a one-RTT delay, never a sleep in IRQ.
+             */
+            if (!intr_enabled())
+                return -EHOSTUNREACH;
             for (int i = 0; i < 32; i++) {
                 sched_yield();
                 if (arp_lookup(dev, nexthop, mac) == 0) break;

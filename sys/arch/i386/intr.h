@@ -17,6 +17,18 @@ static inline void intr_enable(void) {
     __asm__ volatile ("sti");
 }
 
+/*
+ * True when local interrupts are currently enabled (EFLAGS.IF set).
+ * A caller that finds IF clear is running either inside a hard
+ * interrupt handler or an intr_disable()/spinlock_acquire_irq()
+ * critical section — in both cases it MUST NOT sleep or yield.
+ */
+static inline int intr_enabled(void) {
+    uint32_t eflags;
+    __asm__ volatile ("pushfl; popl %0" : "=r" (eflags) : : "memory");
+    return (eflags & 0x200u) != 0;   /* bit 9 = IF */
+}
+
 static inline void wait_for_interrupt(void) {
     /*
      * "Wait for an interrupt" is meaningless with interrupts masked: a hlt

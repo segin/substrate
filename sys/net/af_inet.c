@@ -29,6 +29,7 @@
 #include <kern/console.h>
 #include <vm/vm_kmem.h>
 #include <sys/copy.h>
+#include <sys/lock.h>
 #include <string.h>
 #include <stddef.h>
 #include <errno.h>
@@ -107,12 +108,46 @@ typedef struct afi_sock {
     int        closed;
     int        rd_shut;     /* shutdown(SHUT_RD): reads return EOF */
 
+    /* NET-01: reference count guarding the socket's lifetime against the
+     * hard-IRQ delivery path.  Held by the installed socket itself (the
+     * fd/list reference, dropped by afinet_node_close) plus a transient
+     * reference each blocking reader takes for its duration, so a
+     * concurrent close() can never free the struct while inbound traffic
+     * is being delivered into its ring or a reader is asleep on it. */
+    int        refcount;
+
     fs_node_t  node;
     struct afi_sock *next;
 } afi_sock_t;
 
 static afi_sock_t *g_afi_head;
 static uint16_t    g_ephemeral_next = 49152;
+
+/* NET-01: g_afi_head and every socket's ring counters (head/tail/count),
+ * closed flag and refcount are mutated from BOTH the hard-IRQ delivery
+ * path (afinet_deliver_v4/v6 -> enqueue, called from netdev RX) and
+ * process context (socket/accept/bind/close/recv).  This IRQ-safe
+ * spinlock serialises them: an RX interrupt landing mid-close() can no
+ * longer free a node out from under a delivering packet, and the list
+ * walk can't observe a half-spliced link.  Must always be taken with the
+ * _irq variants — it is acquired from interrupt context. */
+static spinlock_t afi_lock = SPINLOCK_INIT("af_inet");
+
+/* Free a socket's backing storage.  Never called with afi_lock held —
+ * kfree may take the allocator's own locks. */
+static void afi_free_sock(afi_sock_t *s) {
+    if (s->ring) kfree(s->ring, sizeof(afi_pkt_t) * AFI_RING_LEN);
+    kfree(s, sizeof(*s));
+}
+
+/* Drop a reference taken under afi_lock and release the lock in one step;
+ * frees the socket if this was the last reference.  Callers hold afi_lock
+ * (acquired with flags `fl`) and must not touch `s` afterwards. */
+static void afi_rele_unlock(afi_sock_t *s, unsigned long fl) {
+    int last = (--s->refcount == 0);
+    spinlock_release_irq(&afi_lock, fl);
+    if (last) afi_free_sock(s);
+}
 
 /* Hand out a host-order ephemeral port in the IANA dynamic range
  * [49152, 65535], never 0.  Used by bind(port 0) so getsockname()
@@ -359,25 +394,39 @@ size_t afinet_node_read(fs_node_t *node, off_t off, size_t size, uint8_t *buf) {
          * closing the connection. */
         return (size_t)n;
     }
+    /* NET-01: serialise ring access against the hard-IRQ delivery path
+     * and pin the socket with a reference so a concurrent close() cannot
+     * free it while we are dequeuing or asleep.  The ring slot is copied
+     * into a kernel-local buffer under the lock; the copy out to the
+     * caller's (possibly user) buffer runs unlocked so a page fault there
+     * is never taken with interrupts disabled. */
+    unsigned long fl = spinlock_acquire_irq(&afi_lock);
+    s->refcount++;
     for (;;) {
         if (s->count > 0) {
             afi_pkt_t *p = &s->ring[s->tail];
             size_t n = p->len < size ? p->len : size;
-            memcpy(buf, p->data, n);
+            uint8_t tmp[AFI_DATA_MAX];
+            memcpy(tmp, p->data, n);
             s->tail = (s->tail + 1) % AFI_RING_LEN;
             s->count--;
+            afi_rele_unlock(s, fl);
+            memcpy(buf, tmp, n);
             return n;
         }
-        if (nb) return (size_t)-EAGAIN;
+        if (nb) { afi_rele_unlock(s, fl); return (size_t)-EAGAIN; }
+        spinlock_release_irq(&afi_lock, fl);
         /* Make the sleep signal-interruptible so SIGINT (and friends)
          * yank ping/etc out of a blocked recv. */
         current_thread->flags |= THREAD_F_INTERRUPTIBLE;
         sched_sleep(s->wait_chan);
         current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
+        fl = spinlock_acquire_irq(&afi_lock);
         if (current_thread->sig_pending & ~current_thread->sig_mask) {
+            afi_rele_unlock(s, fl);
             return (size_t)-EINTR;
         }
-        if (s->closed) return 0;
+        if (s->closed) { afi_rele_unlock(s, fl); return 0; }
     }
 }
 
@@ -443,16 +492,23 @@ static size_t afinet_node_write(fs_node_t *node, off_t off, size_t size, const u
 static void afinet_node_close(fs_node_t *node) {
     afi_sock_t *s = (afi_sock_t *)(uintptr_t)node->impl;
     if (!s) return;
-    s->closed = 1;
-    sched_wakeup(s->wait_chan);
+    node->impl = 0;
+    /* tcp_close() serialises internally (its own IRQ-off critical
+     * section) and may not run under afi_lock. */
     if (s->tcp) { tcp_close(s->tcp); s->tcp = NULL; }
-    /* Unlink from list. */
+    /* NET-01: mark closed, unlink from the delivery list, and drop the
+     * install reference — all under afi_lock so the hard-IRQ delivery
+     * path can neither be walking the list nor enqueuing into this
+     * socket's ring while we unlink it.  The socket is freed here only
+     * if no blocking reader still holds a reference; otherwise the last
+     * afi_rele_unlock() (in the reader) frees it after it wakes. */
+    unsigned long fl = spinlock_acquire_irq(&afi_lock);
+    s->closed = 1;
     afi_sock_t **link = &g_afi_head;
     while (*link && *link != s) link = &(*link)->next;
     if (*link == s) *link = s->next;
-    if (s->ring) kfree(s->ring, sizeof(afi_pkt_t) * AFI_RING_LEN);
-    kfree(s, sizeof(*s));
-    node->impl = 0;
+    sched_wakeup(s->wait_chan);   /* wake readers so they re-check closed */
+    afi_rele_unlock(s, fl);       /* drop install ref; frees if last */
 }
 
 /* ------------------------------------------------------------------ */
@@ -522,6 +578,7 @@ int afinet_socket(int family, int type, int protocol) {
     s->family = family;
     s->type = type;
     s->protocol = protocol;
+    s->refcount = 1;                 /* NET-01: the installed reference */
     s->ring = (afi_pkt_t *)kmalloc(sizeof(afi_pkt_t) * AFI_RING_LEN);
     if (!s->ring) { kfree(s, sizeof(*s)); return -ENOMEM; }
     s->wait_chan = &s->count;
@@ -543,21 +600,31 @@ int afinet_socket(int family, int type, int protocol) {
         return -EMFILE;
     }
 
+    unsigned long fl = spinlock_acquire_irq(&afi_lock);
     s->next = g_afi_head;
     g_afi_head = s;
+    spinlock_release_irq(&afi_lock, fl);
     return fd;
 }
 
 /* True iff another live socket of the same family+type already has `port`
  * explicitly bound — the EADDRINUSE test, relaxed by SO_REUSEADDR. */
 static int afinet_port_taken(const afi_sock_t *self, uint16_t port) {
+    int taken = 0;
+    /* NET-01: walk the delivery list under afi_lock so it can't be
+     * re-spliced by socket()/accept()/close() (or an IRQ delivery walk)
+     * mid-scan. */
+    unsigned long fl = spinlock_acquire_irq(&afi_lock);
     for (afi_sock_t *o = g_afi_head; o; o = o->next) {
         if (o == self || o->closed) continue;
         if (o->bound && o->local_port == port &&
-            o->family == self->family && o->type == self->type)
-            return 1;
+            o->family == self->family && o->type == self->type) {
+            taken = 1;
+            break;
+        }
     }
-    return 0;
+    spinlock_release_irq(&afi_lock, fl);
+    return taken;
 }
 
 int afinet_bind(int fd, const void *addr, socklen_t len) {
@@ -676,6 +743,7 @@ int afinet_accept(int fd, void *addr, socklen_t *addrlen) {
     c->family = s->family;
     c->type = SOCK_STREAM;
     c->protocol = 6;
+    c->refcount = 1;                 /* NET-01: the installed reference */
     c->ring = (afi_pkt_t *)kmalloc(sizeof(afi_pkt_t) * AFI_RING_LEN);
     if (!c->ring) { kfree(c, sizeof(*c)); tcp_close(cp); return -ENOMEM; }
     c->wait_chan = &c->count;
@@ -707,8 +775,10 @@ int afinet_accept(int fd, void *addr, socklen_t *addrlen) {
         tcp_close(cp);
         return -EMFILE;
     }
+    unsigned long fl = spinlock_acquire_irq(&afi_lock);
     c->next = g_afi_head;
     g_afi_head = c;
+    spinlock_release_irq(&afi_lock, fl);
 
     /* Fill the accept() out-param with the peer's address, BSD/POSIX
      * convention.  addr may be NULL if the caller doesn't want it. */
@@ -966,40 +1036,58 @@ ssize_t afinet_recvfrom(int fd, void *buf, size_t len, int flags,
                   : tcp_recv   (s->tcp, buf, len);
     }
 
+    /* NET-01: pin the socket and take the ring lock — see afinet_node_read.
+     * The datagram payload and its source address are snapshotted into
+     * kernel-local storage under the lock; the fill-out of the caller's
+     * buffers runs unlocked.  `addr`/`addrlen` here are the kernel bounce
+     * buffers supplied by recv_into_kbuf(), so the copy is safe. */
+    unsigned long fl = spinlock_acquire_irq(&afi_lock);
+    s->refcount++;
+    int fam = s->family;
     for (;;) {
         if (s->count > 0) {
             afi_pkt_t *p = &s->ring[s->tail];
             size_t n = p->len < len ? p->len : len;
-            memcpy(buf, p->data, n);
+            uint8_t tmp[AFI_DATA_MAX];
+            uint8_t paddr[16];
+            uint16_t pport = p->port;
+            memcpy(tmp, p->data, n);
+            memcpy(paddr, p->addr, 16);
+            s->tail = (s->tail + 1) % AFI_RING_LEN;
+            s->count--;
+            afi_rele_unlock(s, fl);
+            memcpy(buf, tmp, n);
             if (addr && addrlen) {
-                if (s->family == AF_INET && *addrlen >= (socklen_t)sizeof(struct sin_kern)) {
+                if (fam == AF_INET && *addrlen >= (socklen_t)sizeof(struct sin_kern)) {
                     struct sin_kern *sin = (struct sin_kern *)addr;
                     memset(sin, 0, sizeof(*sin));
                     sin->sin_family = AF_INET;
-                    sin->sin_port = __builtin_bswap16(p->port);
-                    memcpy(&sin->sin_addr, p->addr, 4);
+                    sin->sin_port = __builtin_bswap16(pport);
+                    memcpy(&sin->sin_addr, paddr, 4);
                     *addrlen = sizeof(*sin);
-                } else if (s->family == AF_INET6 && *addrlen >= (socklen_t)sizeof(struct sin6_kern)) {
+                } else if (fam == AF_INET6 && *addrlen >= (socklen_t)sizeof(struct sin6_kern)) {
                     struct sin6_kern *sin6 = (struct sin6_kern *)addr;
                     memset(sin6, 0, sizeof(*sin6));
                     sin6->sin6_family = AF_INET6;
-                    sin6->sin6_port = __builtin_bswap16(p->port);
-                    memcpy(sin6->sin6_addr, p->addr, 16);
+                    sin6->sin6_port = __builtin_bswap16(pport);
+                    memcpy(sin6->sin6_addr, paddr, 16);
                     *addrlen = sizeof(*sin6);
                 }
             }
-            s->tail = (s->tail + 1) % AFI_RING_LEN;
-            s->count--;
             return (ssize_t)n;
         }
         /* Non-blocking via MSG_DONTWAIT (Linux convention). */
-        if (flags & 0x40 /* MSG_DONTWAIT */) return -EAGAIN;
+        if (flags & 0x40 /* MSG_DONTWAIT */) { afi_rele_unlock(s, fl); return -EAGAIN; }
+        spinlock_release_irq(&afi_lock, fl);
         current_thread->flags |= THREAD_F_INTERRUPTIBLE;
         sched_sleep(s->wait_chan);
         current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
-        if (current_thread->sig_pending & ~current_thread->sig_mask)
+        fl = spinlock_acquire_irq(&afi_lock);
+        if (current_thread->sig_pending & ~current_thread->sig_mask) {
+            afi_rele_unlock(s, fl);
             return -EINTR;
-        if (s->closed) return 0;
+        }
+        if (s->closed) { afi_rele_unlock(s, fl); return 0; }
     }
 }
 
@@ -1081,6 +1169,12 @@ int afinet_deliver_v4(uint32_t saddr, uint32_t daddr,
         /* Strip UDP header for DGRAM sockets. */
     }
 
+    /* NET-01: walk + enqueue under afi_lock (IRQ-safe).  This runs in
+     * hard IRQ context; holding the lock across the whole walk means a
+     * concurrent close() cannot unlink and free a socket while we are
+     * about to enqueue into its ring, and enqueue()'s ring-counter
+     * mutation is serialised against process-context readers. */
+    unsigned long fl = spinlock_acquire_irq(&afi_lock);
     for (afi_sock_t *s = g_afi_head; s; s = s->next) {
         if (!sock_matches_v4(s, protocol, dport)) continue;
         if (s->type == SOCK_RAW) {
@@ -1098,6 +1192,7 @@ int afinet_deliver_v4(uint32_t saddr, uint32_t daddr,
         }
         delivered = 1;
     }
+    spinlock_release_irq(&afi_lock, fl);
     return delivered;
 }
 
@@ -1125,6 +1220,8 @@ int afinet_deliver_v6(const uint8_t saddr[16], const uint8_t daddr[16],
         dport = __builtin_bswap16(uh->dest);
     }
 
+    /* NET-01: walk + enqueue under afi_lock — see afinet_deliver_v4. */
+    unsigned long fl = spinlock_acquire_irq(&afi_lock);
     for (afi_sock_t *s = g_afi_head; s; s = s->next) {
         if (!sock_matches_v6(s, protocol, dport)) continue;
         if (s->type == SOCK_RAW) {
@@ -1146,5 +1243,6 @@ int afinet_deliver_v6(const uint8_t saddr[16], const uint8_t daddr[16],
         }
         delivered = 1;
     }
+    spinlock_release_irq(&afi_lock, fl);
     return delivered;
 }

@@ -322,13 +322,24 @@ static int tcp_child_in_accept_q(const tcp_pcb_t *p) {
 }
 
 static void tcp_timer_tick(uint64_t now) {
-    /* The timer kthread is the single reaper of orphaned PCBs.  Walk
-     * the list with IRQs off (tcp_lock) so an RX interrupt can't free
-     * or splice a node underneath us; collect the retransmit victims
-     * and do the actual transmits after dropping the lock, since
-     * tcp_xmit_raw -> ip4_output may need IRQs enabled (ARP wait). */
-    tcp_pcb_t *retx_list[32];
-    int nretx = 0;
+    /* The timer kthread is the single reaper of orphaned PCBs.  Walk the
+     * list with IRQs off (tcp_lock) so an RX interrupt can neither free
+     * nor splice a node — nor prune/free an unacked segment — underneath
+     * us.
+     *
+     * NET-02: the retransmit runs INLINE under the lock.  The previous
+     * design collected the victims, dropped the lock, then dereferenced
+     * each PCB's unacked_head to transmit — a window in which an incoming
+     * ACK (tcp_input, hard IRQ) could tcp_unacked_prune() and kfree() the
+     * very segment tcp_retx_head() was about to read: a use-after-free.
+     * Holding the lock across the dereference-and-transmit closes it.
+     *
+     * This is safe only because NET-05 makes ip4_output() non-sleeping
+     * while interrupts are disabled: on an ARP miss it fires the request
+     * and drops the frame (the next tick resends) instead of yielding, so
+     * tcp_xmit_raw() cannot block here.  Retransmitting inline also drops
+     * the old fixed 32-victim batch array (NET-11): every PCB whose RTO
+     * has expired is serviced on this tick, not silently deferred. */
     uint32_t f = tcp_lock();
     for (tcp_pcb_t *p = g_tcp_pcbs, *next; p; p = next) {
         next = p->next;
@@ -358,14 +369,9 @@ static void tcp_timer_tick(uint64_t now) {
             tcp_kill_pcb(p, ETIMEDOUT);
             continue;
         }
-        /* NET-11: cap the per-tick retransmit batch at 32.  Any surplus
-         * PCBs simply retransmit on the next timer tick — a small added
-         * latency, never a lost retransmit — so no larger structure is
-         * warranted here. */
-        if (nretx < 32) retx_list[nretx++] = p;
+        tcp_retx_head(p);
     }
     tcp_unlock(f);
-    for (int i = 0; i < nretx; i++) tcp_retx_head(retx_list[i]);
 }
 
 static void tcp_timer_thread(void *arg) {
