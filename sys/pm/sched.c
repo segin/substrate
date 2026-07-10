@@ -711,6 +711,16 @@ volatile uint64_t g_poll_wake_seq = 0;
 static struct poll_ent *pollreg[POLLREG_HASH];
 static spinlock_t pollreg_lock = SPINLOCK_INIT("pollreg");
 
+/*
+ * Count of currently-registered pollers.  poll_notify() fires on EVERY
+ * sched_wakeup / sleepq_wake_all — the hottest path in the kernel (every block
+ * I/O completion, pipe, socket, and sleepq wake) — but a poller is registered
+ * only while a thread is blocked inside poll()/select(), which is rare relative
+ * to that traffic.  When the count is zero, poll_notify() skips the lock and
+ * bucket walk entirely and just bumps the mid-scan re-scan sequence.
+ */
+static volatile int pollreg_count;
+
 static inline unsigned pollreg_hash(const void *chan) {
     return (unsigned)(((uintptr_t)chan >> 4)) & (POLLREG_HASH - 1);
 }
@@ -723,6 +733,7 @@ void poll_register(struct poll_ent *e, void *chan, void *cookie) {
     unsigned long f = spinlock_acquire_irq(&pollreg_lock);
     e->hnext = pollreg[h];
     pollreg[h] = e;
+    pollreg_count++;
     spinlock_release_irq(&pollreg_lock, f);
 }
 
@@ -731,7 +742,7 @@ void poll_unregister(struct poll_ent *e) {
     unsigned h = pollreg_hash(e->chan);
     unsigned long f = spinlock_acquire_irq(&pollreg_lock);
     for (struct poll_ent **pp = &pollreg[h]; *pp; pp = &(*pp)->hnext) {
-        if (*pp == e) { *pp = e->hnext; break; }
+        if (*pp == e) { *pp = e->hnext; pollreg_count--; break; }
     }
     spinlock_release_irq(&pollreg_lock, f);
     e->chan = NULL;
@@ -739,6 +750,16 @@ void poll_unregister(struct poll_ent *e) {
 
 void poll_notify(void *chan) {
     if (!chan) return;
+
+    /* Fast path: with no poller registered anywhere, skip the lock and bucket
+     * walk — this runs on every wakeup in the kernel, so the common no-poller
+     * case must be nearly free.  The seq bump still fires so a poller that is
+     * RUNNING mid-scan (registered after it read the seq) re-scans instead of
+     * sleeping into its backstop. */
+    if (__atomic_load_n(&pollreg_count, __ATOMIC_RELAXED) == 0) {
+        g_poll_wake_seq++;
+        return;
+    }
 
     /* Snapshot the matching cookies under the lock, then wake outside it —
      * sched_wakeup_n() takes tid_lock/sq_lock, which must never nest under
