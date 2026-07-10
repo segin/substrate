@@ -44,7 +44,7 @@
 #include <arch/i386/fpu/fpu_emu.h>
 #include <exec/perso/personality.h>
 
-process_t *current_process = NULL;
+/* current_process is per-CPU: a macro over curproc_slot() (arch percpu.c). */
 process_t *kernel_process = NULL;
 
 /*

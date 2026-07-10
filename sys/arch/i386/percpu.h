@@ -6,6 +6,7 @@
 
 // Forward declaration
 struct thread;
+struct process;
 
 // Per-CPU data structure
 struct percpu_data {
@@ -20,6 +21,7 @@ struct percpu_data {
 
     // Current execution context
     struct thread *current;     // Currently running thread
+    struct process *current_proc; // Its process (current_process slot)
     struct thread *idle;        // Idle thread for this CPU
     
     // Scheduler runqueue (per-CPU)

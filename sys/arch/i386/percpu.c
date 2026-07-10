@@ -83,3 +83,25 @@ int percpu_get_cpu_id(void) {
     struct percpu_data *pcpu = percpu_get();
     return (int)pcpu->cpu_id;
 }
+
+/*
+ * Per-CPU current thread / process slots.
+ *
+ * current_thread / current_process (see <sys/proc.h>) are macros expanding to
+ * *curthread_slot() / *curproc_slot(), so the running CPU always reads and
+ * writes its own slot instead of a shared global (which two CPUs would clobber
+ * on SMP -- the classic "rw_wunlock by non-owner" fork failure).  The
+ * uniprocessor fast path returns CPU 0's slot directly with no LAPIC access;
+ * only a real SMP system pays for percpu_get()'s CPU lookup.
+ */
+struct thread **curthread_slot(void) {
+    if (cpu_count <= 1)
+        return &percpu_data_array[0].current;
+    return &percpu_get()->current;
+}
+
+struct process **curproc_slot(void) {
+    if (cpu_count <= 1)
+        return &percpu_data_array[0].current_proc;
+    return &percpu_get()->current_proc;
+}

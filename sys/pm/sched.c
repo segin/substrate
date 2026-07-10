@@ -16,7 +16,7 @@
 #include <stdlib.h>
 #endif
 
-thread_t *current_thread = NULL;
+/* current_thread is per-CPU: a macro over curthread_slot() (arch percpu.c). */
 
 /* CFS-style minimum vruntime across ready SCHED_TIMESHARE threads, republished
  * by the pick (declared in sched.h).  Waking and newly-created timeshare

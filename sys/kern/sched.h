@@ -20,7 +20,7 @@
  * sched_alloc_thread(kernel_process).
  */
 
-extern thread_t *current_thread;
+/* current_thread is a per-CPU macro defined in <sys/proc.h> (included above). */
 
 thread_t *thread_first(void);
 thread_t *thread_next(thread_t *t);

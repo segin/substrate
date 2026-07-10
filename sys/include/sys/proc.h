@@ -547,8 +547,22 @@ typedef struct thread {
 } thread_t;
 
 // Globals
+#if defined(__STDC_HOSTED__) && __STDC_HOSTED__ == 1
+/* Host unit-test builds (hosted libc, no per-CPU machinery): plain globals. */
 extern thread_t *current_thread;
 extern process_t *current_process;
+#else
+/*
+ * current_thread / current_process are per-CPU: each expands to a dereference
+ * of the running CPU's slot (arch percpu.c), so SMP CPUs never clobber a shared
+ * global.  Both reads (current_thread->x) and writes (current_thread = t) work
+ * transparently.  The uniprocessor path resolves the slot with no LAPIC access.
+ */
+thread_t **curthread_slot(void);
+process_t **curproc_slot(void);
+#define current_thread   (*curthread_slot())
+#define current_process  (*curproc_slot())
+#endif
 extern process_t *kernel_process;
 process_t *swapper_get_proc(void);
 

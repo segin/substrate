@@ -22,7 +22,7 @@
  * process_t and lives at the tail of allproc for its whole lifetime.
  */
 
-extern process_t *current_process;
+/* current_process is a per-CPU macro defined in <sys/proc.h> (included above). */
 extern process_t *kernel_process;
 extern mutex_t proctree_lock;
 
