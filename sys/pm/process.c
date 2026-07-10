@@ -372,6 +372,18 @@ process_t *proc_bootstrap_kernel(int pid, int perso_id) {
     return proc;
 }
 
+/*
+ * KERN-06: expose the process-registry lock so a FOREACH_PROC broadcast walker
+ * (sys_kill(-1)) can hold it across the walk.  proc_destroy() unlinks+frees a
+ * process_t under pid_lock, so an unlocked walk can dereference freed storage.
+ * A plain acquire suffices: the only concurrent freer is proc_destroy() via
+ * autoreap in sched_yield(), which runs on preemption -- disabled while this
+ * spinlock is held -- and via wait4() on another thread, which blocks on the
+ * same lock.  No IRQ-context path takes pid_lock, so it need not be IRQ-safe.
+ */
+void proc_registry_lock(void)   { spinlock_acquire(&pid_lock); }
+void proc_registry_unlock(void) { spinlock_release(&pid_lock); }
+
 void proc_destroy(process_t *p) {
     if (!p) return;
 

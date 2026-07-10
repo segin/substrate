@@ -68,10 +68,12 @@ static int rtsig_enqueue(process_t *p, int sig, int code, union sigval val) {
                  * instance: bit clear, queue non-empty -> lost signal + a
                  * permanently-occupied slot (spurious EAGAIN). */
                 uint32_t m = sigmask(sig);
+                unsigned long rrf = thread_registry_lock();  /* KERN-06 */
                 FOREACH_THREAD(t) {
                     if (t->proc == p)
                         __sync_fetch_and_or(&t->sig_pending, m);
                 }
+                thread_registry_unlock(rrf);
                 break;
             }
         }
@@ -270,10 +272,12 @@ static void sigwait_consume(int sig, int *code, union sigval *val,
      * dequeued from the process rtsig_q[] above, one instance per accept). */
     if (current_process) {
         uint32_t clr = ~sigmask(sig);
+        unsigned long rf = thread_registry_lock();  /* KERN-06 */
         FOREACH_THREAD(t) {
             if (t != current_thread && t->proc == current_process)
                 __sync_fetch_and_and(&t->sig_pending, clr);
         }
+        thread_registry_unlock(rf);
     }
 }
 
@@ -355,11 +359,13 @@ static void signal_stop_process_threads(process_t *p, const char *reason) {
         return;
     }
 
+    unsigned long rf = thread_registry_lock();  /* KERN-06 */
     FOREACH_THREAD(thread) {
         if (thread->proc != p) continue;
         thread->state = THREAD_STOPPED;
         thread->wait_reason = reason;
     }
+    thread_registry_unlock(rf);
     p->state = SSTOP;
     /* A fresh stop is unreported: clear P_WAITED so wait4() surfaces it (each
      * ptrace stop must be visible to the tracer, not just the first). */
@@ -371,6 +377,9 @@ void signal_resume_process_threads(process_t *p) {
         return;
     }
 
+    /* KERN-06: reachable from psignal_info in IRQ context (SIGCONT/SIGKILL);
+     * hold the registry lock across the walk.  Callers never hold tid_lock. */
+    unsigned long rf = thread_registry_lock();
     FOREACH_THREAD(thread) {
         if (thread->proc != p) continue;
         if (thread->state == THREAD_STOPPED) {
@@ -378,6 +387,7 @@ void signal_resume_process_threads(process_t *p) {
             thread->wait_reason = NULL;
         }
     }
+    thread_registry_unlock(rf);
     if (p->state == SSTOP) {
         p->state = SRUN;
     }
@@ -403,12 +413,16 @@ void *ptrace_user_frame(process_t *p) {
     if (!p) {
         return NULL;
     }
+    void *frame = NULL;
+    unsigned long rf = thread_registry_lock();  /* KERN-06 */
     FOREACH_THREAD(thread) {
         if (thread->proc == p && thread->user_frame) {
-            return thread->user_frame;
+            frame = thread->user_frame;
+            break;
         }
     }
-    return NULL;
+    thread_registry_unlock(rf);
+    return frame;
 }
 
 /* ptrace exec-stop.  A freshly-exec'd traced process must stop at the entry of
@@ -1063,11 +1077,13 @@ static int psignal_info(process_t *p, int sig, int si_code,
         uint32_t stop_mask = sigmask(SIGSTOP) | sigmask(SIGTSTP) | sigmask(SIGTTIN) | sigmask(SIGTTOU);
 
         // Clear pending stop signals on all threads (atomic — racing psignal on SMP)
+        unsigned long rf = thread_registry_lock();  /* KERN-06: IRQ-context walk */
         FOREACH_THREAD(thread) {
             if (thread->proc == p) {
                 __sync_fetch_and_and(&thread->sig_pending, ~stop_mask);
             }
         }
+        thread_registry_unlock(rf);
 
         if (p->state == SSTOP) {
             signal_resume_process_threads(p);
@@ -1093,11 +1109,13 @@ static int psignal_info(process_t *p, int sig, int si_code,
 
     /* For SIGSTOP/SIGTSTP/SIGTTIN/SIGTTOU, clear SIGCONT */
     if (sig == SIGSTOP || sig == SIGTSTP || sig == SIGTTIN || sig == SIGTTOU) {
+        unsigned long rf = thread_registry_lock();  /* KERN-06: IRQ-context walk */
         FOREACH_THREAD(thread) {
             if (thread->proc == p) {
                 __sync_fetch_and_and(&thread->sig_pending, ~sigmask(SIGCONT));
             }
         }
+        thread_registry_unlock(rf);
     }
 
     /* A signal whose effective disposition is "ignore" is discarded
@@ -1126,6 +1144,7 @@ static int psignal_info(process_t *p, int sig, int si_code,
             uint32_t m = sigmask(sig);
             int deliverable_now = 0;
             int awaited = 0;
+            unsigned long rf = thread_registry_lock();  /* KERN-06 */
             FOREACH_THREAD(t) {
                 if (t->proc != p) continue;
                 if (!(t->sig_mask & m)) { deliverable_now = 1; }
@@ -1135,6 +1154,7 @@ static int psignal_info(process_t *p, int sig, int si_code,
                  * the waiter. */
                 if (t->sig_wait_mask & m) { awaited = 1; }
             }
+            thread_registry_unlock(rf);
             if (deliverable_now && !awaited)
                 return 0;
         }
@@ -1166,6 +1186,12 @@ static int psignal_info(process_t *p, int sig, int si_code,
     thread_t *best_thread = NULL;
     int best_priority = -1; // Higher is better
 
+    /* KERN-06: this walk sets pending bits, selects best_thread, and wakes it
+     * (below, still under the lock) -- all from IRQ context.  Hold the registry
+     * lock so a concurrent reap can't free a thread_t (or best_thread) mid-walk.
+     * signal_interrupt_thread takes only the sleepq lock, ranked below tid_lock,
+     * so the order is consistent (no ABBA). */
+    unsigned long rf = thread_registry_lock();
     FOREACH_THREAD(t) {
         if (t->proc != p) continue;
 
@@ -1218,12 +1244,14 @@ static int psignal_info(process_t *p, int sig, int si_code,
         }
     }
     
-    /* If we found a best thread and it's blocked, wake it */
+    /* If we found a best thread and it's blocked, wake it (still under the
+     * registry lock, so best_thread can't have been freed since selection). */
     if (best_thread && best_thread->state == THREAD_BLOCKED &&
         best_priority > 0 &&
         (best_thread->flags & THREAD_F_INTERRUPTIBLE)) {
         signal_interrupt_thread(best_thread);
     }
+    thread_registry_unlock(rf);
     return 0;
 }
 
@@ -1444,11 +1472,20 @@ int sys_kill(int pid, int sig) {
         // Send to all processes (except Init)
         int permitted = 0;
         int matched = 0;
+        /*
+         * KERN-06: hold the process registry lock across the broadcast walk so
+         * a concurrent proc_destroy() (wait4 / autoreap) can't free a process_t
+         * mid-walk (allproc UAF).  signal_record_match -> psignal takes tid_lock
+         * (order pid_lock -> tid_lock) but never pid_lock, so this is
+         * deadlock-free.
+         */
+        proc_registry_lock();
         FOREACH_PROC(proc) {
             if (proc->pid > 1) {
                 signal_record_match(proc, &matched, &permitted, sig);
             }
         }
+        proc_registry_unlock();
         if (matched == 0) return -ESRCH;
         if (permitted == 0) return -EPERM;
         return 0;

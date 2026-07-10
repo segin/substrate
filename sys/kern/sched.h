@@ -25,6 +25,14 @@ extern thread_t *current_thread;
 thread_t *thread_first(void);
 thread_t *thread_next(thread_t *t);
 
+/*
+ * Registry lock for FOREACH_THREAD walkers that run in IRQ context or race a
+ * concurrent sched_reap_thread() free (KERN-06).  IRQ-safe; returns/restores
+ * the caller's interrupt state.  Acquire BEFORE any sleepq bucket lock.
+ */
+unsigned long thread_registry_lock(void);
+void thread_registry_unlock(unsigned long flags);
+
 #define FOREACH_THREAD(var) \
     for (thread_t *var = thread_first(); (var) != NULL; (var) = thread_next(var))
 

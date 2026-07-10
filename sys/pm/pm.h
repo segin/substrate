@@ -48,6 +48,8 @@ process_t *proc_bootstrap_kernel(int pid, int perso_id);
  * unlinks from allproc / pid_hash and kfree's the struct.
  */
 void proc_destroy(process_t *p);
+void proc_registry_lock(void);
+void proc_registry_unlock(void);
 
 void proc_set_bitness(process_t *p, uint8_t bitness);
 uint8_t proc_get_bitness(process_t *p);

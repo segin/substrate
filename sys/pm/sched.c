@@ -99,6 +99,26 @@ static void sched_storage_free(thread_t *t) {
 thread_t *thread_first(void) { return allthread; }
 thread_t *thread_next(thread_t *t) { return t ? t->t_allthread_next : NULL; }
 
+/*
+ * KERN-06: the thread registry (allthread + tid_hash) is walked by signal
+ * delivery (psignal_info) and the scheduler tick from HARD-IRQ context while
+ * other threads are concurrently reaped -- sched_reap_thread() unlinks and
+ * frees a thread_t under tid_lock, so an unlocked walker can dereference freed
+ * storage (UAF).  Expose the registry lock so those walkers can hold it across
+ * a FOREACH_THREAD.  It is IRQ-safe (masks local interrupts) because every
+ * tid_lock acquisition is now IRQ-safe: a walker interrupting a tid_lock holder
+ * would otherwise spin forever on it (the interrupted holder cannot release).
+ * Lock order: tid_lock is acquired BEFORE any sleepq bucket lock (sq_lock) --
+ * a walker's body may take sq_lock (signal_interrupt_thread), never the reverse
+ * -- and BEFORE nothing that re-enters tid_lock, so no self-deadlock.
+ */
+unsigned long thread_registry_lock(void) {
+    return spinlock_acquire_irq(&tid_lock);
+}
+void thread_registry_unlock(unsigned long flags) {
+    spinlock_release_irq(&tid_lock, flags);
+}
+
 static void sched_link_locked(thread_t *t) {
     t->t_allthread_next = allthread;
     allthread = t;
@@ -269,16 +289,16 @@ thread_t *sched_alloc_thread(process_t *proc) {
     thread->cpu_utime = 0;
     thread->cpu_stime = 0;
 
-    spinlock_acquire(&tid_lock);
+    unsigned long tf = spinlock_acquire_irq(&tid_lock);
     tid = sched_alloc_tid_locked(proc);
     if (tid < 0) {
-        spinlock_release(&tid_lock);
+        spinlock_release_irq(&tid_lock, tf);
         sched_storage_free(thread);
         return NULL;
     }
     thread->tid = tid;
     sched_link_locked(thread);
-    spinlock_release(&tid_lock);
+    spinlock_release_irq(&tid_lock, tf);
 
     return thread;
 }
@@ -530,9 +550,9 @@ int sched_get_current_tid(void) {
 thread_t *sched_get_thread(int tid) {
     if (tid < 0) return NULL;
 
-    spinlock_acquire(&tid_lock);
+    unsigned long tf = spinlock_acquire_irq(&tid_lock);
     thread_t *t = sched_lookup_tid_locked(tid);
-    spinlock_release(&tid_lock);
+    spinlock_release_irq(&tid_lock, tf);
     return t;
 }
 
@@ -622,6 +642,9 @@ void sched_tick(void) {
     // Perform periodic SMP load balancing
     sched_periodic_balance();
 
+    /* KERN-06: sched_tick runs in the timer IRQ; hold the registry lock so a
+     * thread being reaped concurrently can't be freed under this walk. */
+    unsigned long rf = thread_registry_lock();
     FOREACH_THREAD(thread) {
         if (thread->state == THREAD_BLOCKED &&
             thread->sleep_expiry > 0 &&
@@ -644,6 +667,7 @@ void sched_tick(void) {
              */
         }
     }
+    thread_registry_unlock(rf);
 }
 
 /*
@@ -693,6 +717,11 @@ void sched_wakeup_n(void *chan, int n) {
     if (chan == &g_poll_wake_chan)
         g_poll_wake_seq++;
 
+    /* KERN-06: sched_wakeup_n runs from IRQ wake paths (tty/tcp/af_inet) and
+     * walks the registry; hold it so a concurrent reap can't free a thread_t
+     * mid-walk.  The body takes the sleepq bucket lock (sleepq_remove_thread),
+     * which is ranked below tid_lock -- consistent order, no ABBA. */
+    unsigned long rf = thread_registry_lock();
     FOREACH_THREAD(thread) {
         if (thread->state == THREAD_BLOCKED && thread->wait_chan == chan) {
             /*
@@ -715,6 +744,7 @@ void sched_wakeup_n(void *chan, int n) {
             if (n > 0 && woken >= n) break;
         }
     }
+    thread_registry_unlock(rf);
 
     if (woken > 0 && current_thread) {
         current_thread->needs_resched = 1;
@@ -753,9 +783,9 @@ void sched_reap_thread(thread_t *t) {
 
     sched_release_thread_storage(t);
 
-    spinlock_acquire(&tid_lock);
+    unsigned long tf = spinlock_acquire_irq(&tid_lock);
     sched_unlink_locked(t);
-    spinlock_release(&tid_lock);
+    spinlock_release_irq(&tid_lock, tf);
 
     sched_storage_free(t);
 }
