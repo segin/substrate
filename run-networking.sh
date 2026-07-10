@@ -42,11 +42,13 @@ set -eu
 #            so a botched session can't corrupt rootfs.img.
 #   --user   use QEMU internal (user-mode/slirp) networking instead of
 #            macvtap-onto-real-LAN.  No sudo, no host NIC required.
-#   --debug  start QEMU's GDB stub listening on tcp::1234 (override the port
-#            with $GDBPORT).  By default the guest still boots normally and
-#            you attach whenever you like (e.g. to break into a hang); set
-#            GDBHALT=1 to also freeze the CPU at reset so you can set
-#            breakpoints before boot and `continue` from gdb.
+#   --debug  turn on verbose kernel serial debug output (the `serial_debug`
+#            boot arg — OFF by default because it noticeably slows the serial
+#            console, e.g. dhclient) AND start QEMU's GDB stub listening on
+#            tcp::1234 (override the port with $GDBPORT).  By default the guest
+#            still boots normally and you attach whenever you like (e.g. to
+#            break into a hang); set GDBHALT=1 to also freeze the CPU at reset
+#            so you can set breakpoints before boot and `continue` from gdb.
 #   --usb-host=SPEC
 #            pass a REAL host USB device through to the guest via
 #            -device usb-host so substrate enumerates and drives it — use this
@@ -280,7 +282,7 @@ for f in $FLOPPY_IMAGES; do
 done
 IFS=$OLDIFS
 
-APPEND="root=/dev/storage/sata0 trap serial_debug"
+APPEND="root=/dev/storage/sata0 trap"
 GFX_ARGS=""
 ACCEL_ARG=""
 if [ "$GFX" -eq 1 ]; then
@@ -456,6 +458,10 @@ fi
 # symbols, point gdb at the kernel ELF (sys/kernel.bin carries them).
 DEBUG_ARGS=""
 if [ "$DEBUG" -eq 1 ]; then
+    # Verbose kernel serial debug output is OFF by default (it noticeably slows
+    # the serial console, e.g. dhclient); --debug turns it back on.
+    APPEND="$APPEND serial_debug"
+    echo "run-networking.sh: kernel serial_debug output enabled"
     GDBPORT=${GDBPORT:-1234}
     DEBUG_ARGS="-gdb tcp::$GDBPORT"
     HALTNOTE=""
