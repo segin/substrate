@@ -379,15 +379,15 @@ edge cases.
 - **[x] SYS-01** `lib/sys/select.c:51` — LOW/MEDIUM — poll-timeout conversion done in
   64-bit then stored into `int poll_timeout`; a `tv_sec` above ~24 days truncates to
   a negative int → `poll` treats it as infinite → `select()` blocks forever.
-- **[ ] MATH-03** `lib/m/src/math_totalorder.c:98,115` — LOW — `totalorderl`/
+- **[x] MATH-03** `lib/m/src/math_totalorder.c:98,115` — LOW — `totalorderl`/
   `totalordermagl` cast `long double`→`double`, collapsing 11 mantissa bits → two
   distinct 80-bit values report order-equal (violates IEEE totalOrder).
-- **[ ] MATH-04** `lib/m/src/math_totalorder.c:299,317` — LOW — `setpayloadl` sets
+- **[x] MATH-04** `lib/m/src/math_totalorder.c:299,317` — LOW — `setpayloadl` sets
   byte 9 bit 7 (the **sign** bit, not the mantissa MSB) → every result is a negative
   pseudo-NaN; `setpayloadsigl` shares a payload-duplication bug.
-- **[ ] MATH-05** `lib/m/src/math_narrowing.c:183` — LOW — `ffma(double,...)` casts
+- **[x] MATH-05** `lib/m/src/math_narrowing.c:183` — LOW — `ffma(double,...)` casts
   operands to float before `fmaf`, discarding precision before the multiply → C23
   narrowing contract violated.
-- **[ ] MATH-06** `lib/m/src/math_trig.c:296,304` — LOW — `sinh`/`cosh` inherit
+- **[x] MATH-06** `lib/m/src/math_trig.c:296,304` — LOW — `sinh`/`cosh` inherit
   `exp`'s overflow at `x>709.78`; true overflow is `~710.47`, so inputs in
   `(709.78, 710.47)` spuriously return INFINITY + ERANGE.

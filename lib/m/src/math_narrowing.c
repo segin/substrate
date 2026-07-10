@@ -179,8 +179,11 @@ double ddivl(long double a, long double b) {
  * ============================================================ */
 
 double ffma(double x, double y, double z) {
-    /* All-float result: fmaf rounds x*y+z once to float. */
-    return fmaf((float)x, (float)y, (float)z);
+    /* float result, double operands: fuse in long double (which holds
+     * every double operand exactly), then round once to float.  Casting
+     * the operands to float first (fmaf) would discard ~29 bits of each
+     * operand before the multiply, violating the C23 narrowing contract. */
+    return (float)fmal(x, y, z);
 }
 
 double ffmal(long double x, long double y, long double z) {

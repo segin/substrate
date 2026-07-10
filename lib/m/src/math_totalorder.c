@@ -96,7 +96,42 @@ int totalorderf(float x, float y) {
 }
 
 int totalorderl(long double x, long double y) {
-    return totalorder((double)x, (double)y);
+    /* 80-bit x87 extended: bytes 0-7 = 64-bit significand (explicit
+     * integer bit at bit 63), byte 8 + low 7 bits of byte 9 = 15-bit
+     * exponent, byte 9 bit 7 = sign.  Casting to double would collapse
+     * the 64-bit significand to 53 bits and mis-order distinct 80-bit
+     * values, so compare the extended encoding directly. */
+    union { long double f; uint8_t e[10]; } ux = { x }, uy = { y };
+
+    int sx = (ux.e[9] >> 7) & 1;
+    int sy = (uy.e[9] >> 7) & 1;
+
+    /* Magnitude key: exponent (15 bits) is more significant than the
+     * significand (64 bits); compare exponent first, then significand. */
+    uint64_t ex = ((uint64_t)(ux.e[9] & 0x7F) << 8) | ux.e[8];
+    uint64_t ey = ((uint64_t)(uy.e[9] & 0x7F) << 8) | uy.e[8];
+    uint64_t mx = ((uint64_t)ux.e[7] << 56) | ((uint64_t)ux.e[6] << 48) |
+                  ((uint64_t)ux.e[5] << 40) | ((uint64_t)ux.e[4] << 32) |
+                  ((uint64_t)ux.e[3] << 24) | ((uint64_t)ux.e[2] << 16) |
+                  ((uint64_t)ux.e[1] << 8)  |  (uint64_t)ux.e[0];
+    uint64_t my = ((uint64_t)uy.e[7] << 56) | ((uint64_t)uy.e[6] << 48) |
+                  ((uint64_t)uy.e[5] << 40) | ((uint64_t)uy.e[4] << 32) |
+                  ((uint64_t)uy.e[3] << 24) | ((uint64_t)uy.e[2] << 16) |
+                  ((uint64_t)uy.e[1] << 8)  |  (uint64_t)uy.e[0];
+
+    int magcmp;  /* -1 if |x|<|y|, 0 if equal, +1 if |x|>|y| */
+    if (ex != ey)
+        magcmp = (ex < ey) ? -1 : 1;
+    else if (mx != my)
+        magcmp = (mx < my) ? -1 : 1;
+    else
+        magcmp = 0;
+
+    if (sx != sy)
+        return sx > sy;       /* negative x precedes positive y (-0 < +0) */
+    if (sx == 0)
+        return magcmp <= 0;   /* both non-negative: smaller magnitude first */
+    return magcmp >= 0;       /* both negative: larger magnitude first */
 }
 
 /* ============================================================
@@ -113,7 +148,9 @@ int totalordermagf(float x, float y) {
 }
 
 int totalordermagl(long double x, long double y) {
-    return totalordermag((double)x, (double)y);
+    /* Compare by magnitude in full 80-bit precision (fabsl clears the
+     * sign bit; totalorderl keeps all 64 significand bits). */
+    return totalorderl(fabsl(x), fabsl(y));
 }
 
 /* ============================================================
@@ -294,23 +331,19 @@ double setpayloadl(long double *res, long double x, int payload) {
     (void)payload64;  /* payload64 used below via individual byte extraction */
 
     memset(&u, 0, sizeof(u));
-    u.e[9] = 0x7F;    /* high byte: exp high bits + mantissa MSB */
-    u.e[8] = 0xFF;    /* exp low byte */
-    u.e[9] |= 0x80;   /* set mantissa MSB (the explicit bit for normalized) */
+    u.e[9] = 0x7F;    /* high byte: sign(bit7,0) + exponent high 7 bits */
+    u.e[8] = 0xFF;    /* exponent low byte => exp = 0x7FFF */
+    /* The mantissa MSBs live in byte 7, NOT byte 9 (byte 9 bit 7 is the
+     * sign).  A quiet NaN needs the explicit integer bit (bit 63 = 0x80)
+     * and the quiet bit (bit 62 = 0x40) set. */
+    u.e[7] = 0xC0;
 
-    /* Apply payload to the lower 64 mantissa bits (bytes 0-7) */
+    /* payload is a 32-bit int; it occupies mantissa bytes 0-3 only.
+     * Bytes 4-6 stay zero (memset); byte 7 holds the integer/quiet bits. */
     u.e[0] = (uint8_t)payload;
     u.e[1] = (uint8_t)(payload >> 8);
     u.e[2] = (uint8_t)(payload >> 16);
     u.e[3] = (uint8_t)(payload >> 24);
-    /* Bytes 4-7 carry the high 32 bits of payload; cast to uint64_t first. */
-    {
-        uint64_t hi = (uint64_t)(uint32_t)payload;
-        u.e[4] = (uint8_t)(hi >> 16);
-        u.e[5] = (uint8_t)(hi >> 24);
-        u.e[6] = 0;
-        u.e[7] = 0;
-    }
 
     /* Apply sign of x */
     union { long double f; uint8_t e[10]; } sx = { x };
@@ -330,17 +363,13 @@ double setpayloadsigl(long double *res, long double x, int payload) {
     u.e[8] = 0xFF;
     /* Don't set the explicit bit (MSB) — this makes it signaling */
 
+    /* payload is a 32-bit int; it occupies mantissa bytes 0-3 only.
+     * Bytes 4-7 stay zero (memset) — the previous byte-4/5 writes
+     * duplicated payload bytes 2/3 into the high mantissa. */
     u.e[0] = (uint8_t)(payload);
     u.e[1] = (uint8_t)(payload >> 8);
     u.e[2] = (uint8_t)(payload >> 16);
     u.e[3] = (uint8_t)(payload >> 24);
-    {
-        uint64_t hi = (uint64_t)(uint32_t)payload;
-        u.e[4] = (uint8_t)(hi >> 16);
-        u.e[5] = (uint8_t)(hi >> 24);
-        u.e[6] = 0;
-        u.e[7] = 0;
-    }
 
     union { long double f; uint8_t e[10]; } sx = { x };
     if (sx.e[9] & 0x80)

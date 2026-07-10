@@ -293,6 +293,19 @@ double sinh(double x) {
     if (isinf(x)) return x;  /* sinh(+inf)=+inf, sinh(-inf)=-inf */
     if (x == 0.0) return x;  /* preserves +0.0/-0.0 (sinh is odd) */
     if (fabs(x) < 1e-9) return x;  /* Taylor for small x */
+    /* A single exp() overflows at |x| > 709.7827 (ln DBL_MAX), but
+     * sinh(x) ~ e^|x|/2 stays finite up to |x| = ln(2*DBL_MAX) ~
+     * 710.4758, so the direct formula spuriously reports overflow in
+     * that window.  Split the exponential to keep the intermediate in
+     * range: e^a/2 = (e^(a/2)*0.5) * e^(a/2).  Genuine overflow only
+     * past ln(2*DBL_MAX). */
+    double a = fabs(x);
+    if (a > 709.7827128933840) {
+        if (a > 710.4758600739439) { errno = ERANGE; return x < 0.0 ? -INFINITY : INFINITY; }
+        double w = exp(a * 0.5);
+        double r = (0.5 * w) * w;
+        return x < 0.0 ? -r : r;
+    }
     double ex = exp(x);
     return (ex - 1.0 / ex) * 0.5;
 }
@@ -301,7 +314,15 @@ double cosh(double x) {
     if (isnan(x)) return x;
     if (isinf(x)) return INFINITY;  /* cosh(+/-inf)=+inf (even function) */
     if (x == 0.0) return 1.0;        /* cosh(+/-0)=1 */
-    double ex = exp(fabs(x));        /* even function; use |x| for symmetry */
+    double a = fabs(x);              /* even function; use |x| for symmetry */
+    /* Same split as sinh: cosh(x) ~ e^|x|/2 is finite up to
+     * |x| = ln(2*DBL_MAX) ~ 710.4758, past exp()'s 709.7827 overflow. */
+    if (a > 709.7827128933840) {
+        if (a > 710.4758600739439) { errno = ERANGE; return INFINITY; }
+        double w = exp(a * 0.5);
+        return (0.5 * w) * w;
+    }
+    double ex = exp(a);
     return (ex + 1.0 / ex) * 0.5;
 }
 
