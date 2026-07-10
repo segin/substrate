@@ -872,6 +872,19 @@ void sched_reap_thread(thread_t *t) {
      * so make sure it is off every queue before we release its storage. */
     sleepq_remove_thread(t);
 
+    /* A thread zombified while blocked in poll()/select() never ran its own
+     * poll_unregister (kern_poll), so its poll_ent registrations still point
+     * into the stack we are about to free.  Remove them from pollreg now, while
+     * the stack is still valid -- otherwise the next poll_notify() walk follows
+     * a dangling pointer into freed/reused memory and faults (SMP UAF). */
+    if (t->poll_ents && t->poll_nents) {
+        struct poll_ent *pents = (struct poll_ent *)t->poll_ents;
+        for (unsigned int k = 0; k < t->poll_nents; k++)
+            poll_unregister(&pents[k]);
+        t->poll_ents = NULL;
+        t->poll_nents = 0;
+    }
+
     sched_release_thread_storage(t);
 
     unsigned long tf = spinlock_acquire_irq(&tid_lock);

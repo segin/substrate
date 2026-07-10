@@ -2254,6 +2254,15 @@ int kern_poll(struct pollfd *kfds, unsigned int nfds, int timeout) {
          * any object whose ->poll didn't hand back a channel (ents==NULL / no
          * this_chan) or whose channel overflowed POLL_NOTIFY_BATCH.
          */
+        /* Publish the set we're about to register so sched_reap_thread can
+         * unregister it if we're zombified mid-poll (never reaching the
+         * unregister loop below).  Set before registering so a kill during the
+         * register loop is still covered (poll_unregister is a no-op on an
+         * entry that was not linked). */
+        if (current_thread) {
+            current_thread->poll_ents = ents;
+            current_thread->poll_nents = nreg;
+        }
         for (unsigned int k = 0; k < nreg; k++)
             poll_register(&ents[k], ents[k].chan, &pollcookie);
 
@@ -2273,6 +2282,10 @@ int kern_poll(struct pollfd *kfds, unsigned int nfds, int timeout) {
 
         for (unsigned int k = 0; k < nreg; k++)
             poll_unregister(&ents[k]);
+        if (current_thread) {
+            current_thread->poll_ents = NULL;
+            current_thread->poll_nents = 0;
+        }
 
         if (sleep_ret == -EINTR ||
             (current_thread &&

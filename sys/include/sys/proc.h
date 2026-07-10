@@ -544,6 +544,16 @@ typedef struct thread {
      * preserve every existing (offset-hardcoded) field position. */
     uint32_t     cpu_utime;
     uint32_t     cpu_stime;
+
+    /* poll()/select() registration the thread currently holds in the global
+     * pollreg (see sched.c).  kern_poll points these at its on-stack poll_ent
+     * array while it sleeps; if the thread is zombified mid-poll (a sibling
+     * thread exits the process) it never runs its own poll_unregister, so
+     * sched_reap_thread force-unregisters them before freeing the stack -- else
+     * the entries dangle into freed stack and the next poll_notify walk faults
+     * (an SMP use-after-free).  void* to avoid pulling <kern/sched.h> here. */
+    void        *poll_ents;
+    unsigned int poll_nents;
 } thread_t;
 
 // Globals
