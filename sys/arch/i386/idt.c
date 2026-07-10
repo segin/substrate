@@ -21,6 +21,7 @@
 #include <arch/i386/vm86.h>
 #include <arch/i386/fpu/fpu_emu.h>
 #include <arch/x86-common/io.h>
+#include <arch/x86-common/lapic.h>
 #include <drivers/console/uart/uart.h>
 #include <drivers/input/keyboard.h>
 #include <drivers/input/mouse.h>
@@ -173,6 +174,17 @@ void idt_init(void) {
      * intentionally bypasses the common stub since we never return. */
         idt_set_gate(0xFB, (uint32_t)(uintptr_t)isr_panic_ipi,
                      KERNEL_CODE_SELECTOR, IDT_FLAG_KERNEL_INT_GATE);
+
+    /* Dynamic (MSI/MSI-X) vectors 0x50..0xBF: install a gate per vector so
+     * LAPIC-delivered messages reach isr_handler, which routes them to
+     * irq_dispatch() + a LAPIC EOI. */
+    for (unsigned v = IRQ_VECTOR_FIRST; v <= IRQ_VECTOR_LAST; v++) {
+        if (v == IDT_SYSCALL_VECTOR)   /* 0x80 keeps its user-accessible gate */
+            continue;
+        idt_set_gate((uint8_t)v,
+                     (uint32_t)(uintptr_t)msi_isr_stubs[v - IRQ_VECTOR_FIRST],
+                     KERNEL_CODE_SELECTOR, IDT_FLAG_KERNEL_INT_GATE);
+    }
 
     idt_flush((uint32_t)&idt_ptr);
 }
@@ -556,6 +568,12 @@ void isr_handler(registers_t *regs) {
         (void)irq_dispatch((unsigned int)(regs->int_no - IDT_IRQ_BASE), regs);
         if (regs->int_no >= 40) outb(0xA0, 0x20);
         outb(0x20, 0x20);
+    } else if (regs->int_no >= IRQ_VECTOR_FIRST && regs->int_no <= IRQ_VECTOR_LAST) {
+        /* Dynamic MSI/MSI-X vector: the vector doubles as its irq_lines[]
+         * index.  These are LAPIC-delivered, so acknowledge at the LAPIC
+         * (never the 8259 PIC). */
+        (void)irq_dispatch((unsigned int)regs->int_no, regs);
+        lapic_send_eoi();
     }
 
     if (is_usermode) signal_handle_pending(regs);  /* not for kernel-mode IRQs */

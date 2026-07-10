@@ -428,7 +428,14 @@ int pci_get_irq(pci_device_t *dev) {
     return (int)line;
 }
 
-int pci_enable_msi(pci_device_t *dev) {
+/*
+ * Enable MSI on `dev`, routing its message to LAPIC interrupt `vector`
+ * (an IDT vector in the dynamic 0x50..0xBF range, allocated via
+ * irq_alloc_vector()).  Programs a single-message, fixed-delivery,
+ * physical-destination MSI to the BSP.  Returns 0, -ENODEV if the device
+ * has no MSI capability, -EINVAL on a bad argument.
+ */
+int pci_enable_msi(pci_device_t *dev, uint8_t vector) {
     int off;
     uint16_t control;
 
@@ -442,13 +449,19 @@ int pci_enable_msi(pci_device_t *dev) {
     }
 
     control = pci_read_config16(dev->bus, dev->slot, dev->func, (uint16_t)(off + 2));
+    /* Request exactly one message vector (Multiple Message Enable = 0). */
+    control &= (uint16_t)~(7U << 4);
+
+    /* Message Address: 0xFEE00000 = LAPIC, destination APIC ID 0 (BSP),
+     * physical destination, fixed delivery.  Message Data = the vector. */
     pci_write_config32(dev->bus, dev->slot, dev->func, (uint16_t)(off + 4), 0xFEE00000U);
-    if (control & (1U << 7)) {
-        pci_write_config16(dev->bus, dev->slot, dev->func, (uint16_t)(off + 12), 0x40U);
+    if (control & (1U << 7)) {          /* 64-bit message address capable */
+        pci_write_config32(dev->bus, dev->slot, dev->func, (uint16_t)(off + 8), 0U);
+        pci_write_config16(dev->bus, dev->slot, dev->func, (uint16_t)(off + 12), vector);
     } else {
-        pci_write_config16(dev->bus, dev->slot, dev->func, (uint16_t)(off + 8), 0x40U);
+        pci_write_config16(dev->bus, dev->slot, dev->func, (uint16_t)(off + 8), vector);
     }
-    control |= 0x0001U;
+    control |= 0x0001U;                 /* MSI Enable */
     pci_write_config16(dev->bus, dev->slot, dev->func, (uint16_t)(off + 2), control);
     return 0;
 }

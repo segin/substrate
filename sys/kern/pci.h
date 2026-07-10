@@ -76,7 +76,7 @@ size_t pci_bar_size(pci_device_t *dev, int bar);
 int pci_request_region(pci_device_t *dev, int bar, const char *name);
 void *pci_iomap(pci_device_t *dev, int bar, size_t max_len);
 int pci_get_irq(pci_device_t *dev);
-int pci_enable_msi(pci_device_t *dev);
+int pci_enable_msi(pci_device_t *dev, uint8_t vector);
 int pci_disable_msi(pci_device_t *dev);
 int pci_enable_msix(pci_device_t *dev, int nvec);
 void pci_hotplug_poll(void);

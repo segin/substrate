@@ -87,6 +87,10 @@ extern void isr47(void);  // IRQ15 (IDE Secondary)
 extern void isr128(void); // Syscall
 extern void isr_panic_ipi(void);
 
+/* Entry points for the dynamic (MSI) vector stubs 0x50..0xBF, indexed by
+ * (vector - IRQ_VECTOR_FIRST).  Defined in isr.S. */
+extern void *msi_isr_stubs[];
+
 void idt_flush(uint32_t);
 
 // Common handler called from ASM

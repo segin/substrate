@@ -126,6 +126,45 @@ ISR_NOERRCODE 46
 ISR_NOERRCODE 47
 ISR_NOERRCODE 128
 
+# Dynamic interrupt vectors 0x50..0xBF (MSI / MSI-X, LAPIC-delivered).
+# Each needs its own stub to push the correct vector number, since the CPU
+# does not push a vector for these.  isr_handler routes this range to
+# irq_dispatch() and issues a LAPIC EOI (not a PIC EOI).  Generated with
+# altmacro so a single .rept emits the stubs.  Vector 0x80 is the syscall
+# gate (isr128, already defined above), so the ranges skip it.
+.altmacro
+.set msivec, 0x50
+.rept (0x7F - 0x50 + 1)          # 0x50 .. 0x7F
+    ISR_NOERRCODE %msivec
+    .set msivec, msivec + 1
+.endr
+.set msivec, 0x81
+.rept (0xBF - 0x81 + 1)          # 0x81 .. 0xBF (0x80 = syscall, skipped)
+    ISR_NOERRCODE %msivec
+    .set msivec, msivec + 1
+.endr
+.noaltmacro
+
+# Table of all 112 stub entry points (0x50..0xBF) so idt_init() can install
+# their gates in a loop, indexed by (vector - 0x50).  The 0x80 slot references
+# the pre-existing syscall stub isr128; idt_init() skips installing a gate
+# there so the syscall vector keeps its user-accessible gate.
+.macro MSISTUBPTR n
+    .long isr\n
+.endm
+.section .rodata
+.align 4
+.global msi_isr_stubs
+msi_isr_stubs:
+.altmacro
+.set msivec, 0x50
+.rept (0xBF - 0x50 + 1)
+    MSISTUBPTR %msivec
+    .set msivec, msivec + 1
+.endr
+.noaltmacro
+.text
+
 # Panic IPI (vector 0xFB).  When one CPU panics, it sends this IPI
 # to every other CPU.  The handler does NOT return — it disables
 # interrupts and halts forever.  No common-stub round-trip, no LAPIC

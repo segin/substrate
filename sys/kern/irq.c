@@ -138,6 +138,11 @@ int irq_alloc_vector(void) {
 
     spinlock_acquire(&irq_lock);
     for (i = 0; i < IRQ_VECTOR_COUNT; i++) {
+        /* 0x80 falls inside [IRQ_VECTOR_FIRST, IRQ_VECTOR_LAST] but is the
+         * INT 0x80 syscall gate — never hand it out as a device vector. */
+        if (IRQ_VECTOR_FIRST + i == 0x80) {
+            continue;
+        }
         if (!irq_vector_used[i]) {
             irq_vector_used[i] = 1;
             spinlock_release(&irq_lock);
