@@ -1117,11 +1117,11 @@ int pmap_enter_large(pmap_t pmap, uintptr_t va, uintptr_t pa, uint32_t prot, uin
                 }
             }
 
-            // 4. Free the page table page itself
-            vm_page_t *pt_page = pmm_get_page(pt_phys);
-            if (pt_page) {
-                vm_phys_free_page(pt_page);
-            }
+            // 4. Free the page table page itself.
+            //    Route through pmm_free_block (not vm_phys_free_page) so the
+            //    memtrack per-call-site accounting stays balanced.  pmm_free_block
+            //    takes the VIRTUAL direct-mapped address, so convert pt_phys.
+            pmm_free_block((void *)(uintptr_t)(pt_phys + 0xC0000000));
 
             // 5. Invalidate TLB: Replacing a page table requires flushing all TLB entries
             // covered by it. Since iterating 1024 invlpg is slow, we do a full flush.
@@ -1755,6 +1755,14 @@ static volatile int shootdown_all = 0;
 static volatile int shootdown_pending = 0;
 static volatile int shootdown_ack_count = 0;
 
+// Serializes shootdown initiators.  The globals above are a single shared
+// request slot: two CPUs (or a process context preempted by an IPI on the
+// same CPU) mid-shootdown would clobber each other's va/len/ack state.  This
+// must be IRQ-safe because shootdowns may be initiated from interrupt context;
+// the IPI *handler* (pmap_shootdown_handler) never takes this lock, so a CPU
+// spinning for ACKs while holding it never blocks a remote handler's ack.
+static spinlock_t shootdown_lock = SPINLOCK_INIT("pmap_shootdown");
+
 static int pmap_shootdown_expected_acks(void) {
     int cpus = smp_get_cpu_count();
     if (cpus <= 1) return 0;
@@ -1778,9 +1786,11 @@ void pmap_shootdown_handler(void) {
 
 // Invalidate single page on all CPUs
 void pmap_shootdown_page(uintptr_t va) {
+    unsigned long flags = spinlock_acquire_irq(&shootdown_lock);
+
     // Local invalidation first
     pmap_invalidate_page(va);
-    
+
     // Set up shootdown state
     shootdown_va = va;
     shootdown_len = 0;
@@ -1788,47 +1798,57 @@ void pmap_shootdown_page(uintptr_t va) {
     shootdown_ack_count = 0;
     shootdown_pending = 1;
     __sync_synchronize();
-    
+
     // Send IPI to all other CPUs
     lapic_send_ipi_all_excl_self(TLB_SHOOTDOWN_VECTOR);
     pmap_shootdown_wait(pmap_shootdown_expected_acks());
     shootdown_pending = 0;
+
+    spinlock_release_irq(&shootdown_lock, flags);
 }
 
 // Invalidate range on all CPUs
 void pmap_shootdown_range(uintptr_t va, uint32_t len) {
+    unsigned long flags = spinlock_acquire_irq(&shootdown_lock);
+
     // Local invalidation first
     for (uint32_t addr = va; addr < va + len; addr += 0x1000) {
         pmap_invalidate_page(addr);
     }
-    
-    // Set up shootdown state  
+
+    // Set up shootdown state
     shootdown_va = va;
     shootdown_len = len;
     shootdown_all = 0;
     shootdown_ack_count = 0;
     shootdown_pending = 1;
     __sync_synchronize();
-    
+
     lapic_send_ipi_all_excl_self(TLB_SHOOTDOWN_VECTOR);
     pmap_shootdown_wait(pmap_shootdown_expected_acks());
     shootdown_pending = 0;
+
+    spinlock_release_irq(&shootdown_lock, flags);
 }
 
 // Full TLB flush on all CPUs
 void pmap_shootdown_all(void) {
+    unsigned long flags = spinlock_acquire_irq(&shootdown_lock);
+
     pmap_invalidate_all();
-    
+
     shootdown_va = 0;
     shootdown_len = 0;
     shootdown_all = 1;
     shootdown_ack_count = 0;
     shootdown_pending = 1;
     __sync_synchronize();
-    
+
     lapic_send_ipi_all_excl_self(TLB_SHOOTDOWN_VECTOR);
     pmap_shootdown_wait(pmap_shootdown_expected_acks());
     shootdown_pending = 0;
+
+    spinlock_release_irq(&shootdown_lock, flags);
 }
 
 // Deferred shootdown: accumulate pages for batch invalidation

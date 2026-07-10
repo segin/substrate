@@ -585,17 +585,25 @@ int sys_sigreturn(void *scp_ptr) {
     /*
      * Restore EFLAGS with security filtering
      *
-     * Sensitive bits that must not be changed by user:
-     * - IOPL (bits 12-13): I/O privilege level
-     * - VM (bit 17): Virtual 8086 mode
-     * - RF (bit 16): Resume flag
-     * - NT (bit 14): Nested task
+     * Only the arithmetic/control flags a user program may legitimately
+     * observe or set are taken from the saved sigcontext:
+     *   CF(0) PF(2) AF(4) ZF(6) SF(7) TF(8) DF(10) OF(11)  == 0x00000DD5
      *
-     * We preserve the kernel's values for these bits and only
-     * restore the user-controllable bits from the saved context.
+     * Every other bit is forced to the kernel's current value, which
+     * keeps IF(9) forced on and forces the sensitive/system bits to
+     * safe values regardless of what a malicious or garbage frame
+     * supplies:
+     * - IOPL (bits 12-13): I/O privilege level
+     * - NT   (bit 14):     Nested task  (an errant IRET with NT set would
+     *                      attempt a task switch off a bogus back-link)
+     * - RF   (bit 16):     Resume flag
+     * - VM   (bit 17):     Virtual 8086 mode
+     * - AC/VIF/VIP/ID and all reserved bits.
+     *
+     * The two masks are exact complements, so no bit is left to chance.
      */
-    #define EFLAGS_KERNEL_MASK  0x00033200  /* IOPL, VM, RF, NT */
-    #define EFLAGS_USER_MASK    0xFFCCCDFF  /* User-modifiable flags */
+    #define EFLAGS_USER_MASK    0x00000DD5  /* CF PF AF ZF SF TF DF OF */
+    #define EFLAGS_KERNEL_MASK  (~EFLAGS_USER_MASK)  /* everything else */
     
     uint32_t safe_eflags = (syscall_regs->eflags & EFLAGS_KERNEL_MASK) |
                            (sc.eflags & EFLAGS_USER_MASK);
