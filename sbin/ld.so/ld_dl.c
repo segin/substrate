@@ -201,36 +201,50 @@ LD_PUBLIC int __ldso_dlclose(void *handle) {
 /* Walk a DSO's dynamic symbol table for the symbol whose
  * [st_value, st_value + st_size) range contains `target`.  Skip
  * undefined and zero-size symbols.  Returns 0 if no match. */
+/* Number of entries in a DSO's .dynsym.  Derived exactly from the
+ * hash section rather than guessed: DT_HASH stores nchains (== symbol
+ * count) at word[1]; DT_GNU_HASH requires finding the max symbol index
+ * reachable through its buckets/chains and adding 1.  Returns 0 if
+ * neither hash is present (dladdr then can't safely walk). */
+static ld_u32 dl_dynsym_count(const ld_obj_t *o) {
+    if (o->hash)
+        return o->hash[1];              /* nchains == nsyms (SysV) */
+    if (o->gnu_hash) {
+        const ld_u32 *h = o->gnu_hash;
+        ld_u32 nbuckets   = h[0];
+        ld_u32 symbias    = h[1];
+        ld_u32 bloom_size = h[2];
+        const ld_u32 *buckets = h + 4 + bloom_size;
+        const ld_u32 *chain   = buckets + nbuckets;
+        ld_u32 maxidx = symbias;        /* symbols [0, symbias) aren't hashed */
+        for (ld_u32 b = 0; b < nbuckets; b++) {
+            ld_u32 idx = buckets[b];
+            if (idx < symbias) continue;
+            /* Walk to this bucket's end-of-chain (low bit set). */
+            for (;;) {
+                if (idx >= maxidx) maxidx = idx;
+                if (chain[idx - symbias] & 1) break;
+                idx++;
+            }
+        }
+        return maxidx + 1;
+    }
+    return 0;
+}
+
 static Elf32_Sym *dl_find_sym_in_obj(const ld_obj_t *o, ld_u32 target) {
     if (!o->symtab) return 0;
-    /* Determine symtab range from the hash table — DT_HASH has
-     * the symbol count in chain[]; DT_GNU_HASH requires walking
-     * the chain.  Cheaper: walk via the strtab end, since strtab
-     * follows symtab in the typical link layout and we have strsz.
-     * Fall back to "until we run off the end of strtab" which
-     * bounds it safely. */
-    ld_size max_syms = 65536;   /* sanity cap — no DSO has more in practice */
+    /* Bound the walk by the exact dynsym count from the hash section.
+     * The old 65536 + zero-run heuristic reinterpreted strtab bytes as
+     * symbols and marched ~1 MB past a small DSO's mapping → SIGSEGV. */
+    ld_u32 nsyms = dl_dynsym_count(o);
+    if (nsyms == 0) return 0;
+    if (nsyms > 65536) nsyms = 65536;   /* backstop vs a corrupt count */
     Elf32_Sym *best = 0;
     ld_u32 best_off = 0xFFFFFFFFu;
-    for (ld_size i = 0; i < max_syms; i++) {
+    for (ld_u32 i = 0; i < nsyms; i++) {
         Elf32_Sym *s = &o->symtab[i];
-        if (s->st_name == 0 && s->st_value == 0 && s->st_size == 0) {
-            /* Could be the index-0 sentinel OR run-off-end —
-             * after the sentinel we keep going, but if we see
-             * many zeros in a row we bail. */
-            if (i > 0) {
-                /* Heuristic: 8 zero entries in a row means we've
-                 * walked past the table. */
-                ld_size zeroes = 1;
-                while (zeroes < 8 && (i + zeroes) < max_syms) {
-                    Elf32_Sym *t = &o->symtab[i + zeroes];
-                    if (t->st_name || t->st_value || t->st_size) break;
-                    zeroes++;
-                }
-                if (zeroes >= 8) break;
-            }
-            continue;
-        }
+        if (o->strsz && s->st_name >= o->strsz) continue;  /* bad name idx */
         if (s->st_shndx == 0 /* SHN_UNDEF */) continue;
         if (s->st_size == 0) continue;
         ld_u32 sv = s->st_value + o->base;
