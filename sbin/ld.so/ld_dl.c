@@ -212,7 +212,10 @@ extern ld_u32 ld_lookup_in_obj(const ld_obj_t *o, const char *name);
 static void *dlsym_locked(void *handle, const char *name, void *caller_pc) {
     if (!name) { ld_dl_error("dlsym: null name", 0, 0, 0); return 0; }
 
-    if (handle == LD_RTLD_DEFAULT) {
+    /* RTLD_DEFAULT, or the dlopen(NULL) handle (the main program at the
+     * list head): both mean "search the whole global scope" per POSIX,
+     * not just the executable's own symbol table. */
+    if (handle == LD_RTLD_DEFAULT || handle == (void *)ld_obj_list()) {
         ld_u32 v = ld_resolve(name);
         if (!v) ld_dl_error("dlsym(\"", name, "\"): not found", 0);
         return (void *)(unsigned long)v;
