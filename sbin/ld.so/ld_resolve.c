@@ -126,13 +126,19 @@ static Elf32_Sym *lookup_sysv(const ld_obj_t *o, const char *name,
                               sym_pred_t pred, void *pred_arg) {
     if (!o->hash || !o->symtab || !o->strtab) return 0;
     ld_u32 nbuckets = o->hash[0];
-    /* nchains = o->hash[1]; */
+    ld_u32 nchains  = o->hash[1];
     const ld_u32 *buckets = o->hash + 2;
     const ld_u32 *chains  = buckets + nbuckets;
     if (nbuckets == 0) return 0;
 
     ld_u32 hv = sysv_hash(name);
-    for (ld_u32 idx = buckets[hv % nbuckets]; idx != 0; idx = chains[idx]) {
+    /* Bound the chain walk by nchains and cap the iteration count: a
+     * truncated or corrupt DT_HASH must not drive an out-of-bounds read
+     * or an infinite loop (a chain entry that points back into itself). */
+    ld_u32 guard = 0;
+    for (ld_u32 idx = buckets[hv % nbuckets];
+         idx != 0 && idx < nchains && guard < nchains;
+         idx = chains[idx], guard++) {
         Elf32_Sym *s = &o->symtab[idx];
         /* Don't blanket-skip UNDEF here: a program's canonical-PLT
          * symbol (function-address equality, see resolve_pred) is UND
