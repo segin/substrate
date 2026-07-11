@@ -213,12 +213,16 @@ ld_u32 ld_main(ld_u32 *initial_stack) {
         while (*p) {
             const char *e = (const char *)(unsigned long)*p;
             unsigned i;
+            /* Trigger on PRESENCE of the variable (the full "NAME="
+             * prefix matched), not on a non-empty value - glibc treats
+             * LD_TRACE_LOADED_OBJECTS= / LD_DEBUG= the same as any set
+             * value. */
             for (i = 0; i < sizeof(k_trace) - 1; i++)
                 if (e[i] != k_trace[i]) break;
-            if (i == sizeof(k_trace) - 1 && e[i] != '\0') trace_mode = 1;
+            if (i == sizeof(k_trace) - 1) trace_mode = 1;
             for (i = 0; i < sizeof(k_debug) - 1; i++)
                 if (e[i] != k_debug[i]) break;
-            if (i == sizeof(k_debug) - 1 && e[i] != '\0') ld_debug = 1;
+            if (i == sizeof(k_debug) - 1) ld_debug = 1;
             for (i = 0; i < sizeof(k_preload) - 1; i++)
                 if (e[i] != k_preload[i]) break;
             if (i == sizeof(k_preload) - 1 && e[i] != '\0')
@@ -233,9 +237,15 @@ ld_u32 ld_main(ld_u32 *initial_stack) {
      * ignored - otherwise `LD_PRELOAD=evil.so ./setuid-root-bin` would
      * inject an attacker-controlled object into a privileged process.
      * Drop LD_PRELOAD here; LD_LIBRARY_PATH is not yet honored, but must
-     * be gated the same way once it is. */
-    if (a.secure)
+     * be gated the same way once it is.  LD_DEBUG and
+     * LD_TRACE_LOADED_OBJECTS are dropped too: on a setuid binary the
+     * trace dump is a behaviour/info channel and LD_DEBUG leaks the
+     * process's memory layout. */
+    if (a.secure) {
         preload_list = 0;
+        trace_mode   = 0;
+        ld_debug     = 0;
+    }
 
     if (ld_debug) {
         ld_puts("ld.so: AT_BASE  = "); ld_putx(a.base);   ld_puts("\n");
