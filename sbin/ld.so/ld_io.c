@@ -200,6 +200,11 @@ long ld_munmap(void *addr, ld_size len) {
                        (ld_u32)len, 0);
 }
 
+long ld_mprotect(void *addr, ld_size len, int prot) {
+    return ld_syscall3(SYS_mprotect, (ld_u32)(unsigned long)addr,
+                       (ld_u32)len, (ld_u32)prot);
+}
+
 int ld_sys_set_gsbase(ld_u32 base) {
     return (int)ld_syscall1(SYS_set_gsbase, base);
 }

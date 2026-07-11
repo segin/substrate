@@ -631,6 +631,44 @@ static void ld_keep_helpers(void) {
     (void)ld_strncmp;
 }
 
+/* Re-protect an ld.so-mapped object after its relocations are applied:
+ * every PT_LOAD to its real ELF protection (dropping the write bit ld.so
+ * mapped all segments with), then any PT_GNU_RELRO region to read-only.
+ * Restores W^X for shared-library text and locks down the GOT.  Skips
+ * objects ld.so didn't map (path[0] == 0: the kernel-mapped executable
+ * and ld.so itself) and objects already protected. */
+void ld_protect_object(ld_obj_t *o) {
+    if (o->protected || !o->path[0] || !o->phdr) return;
+    o->protected = 1;
+    const Elf32_Phdr *ph = (const Elf32_Phdr *)o->phdr;
+
+    for (ld_u32 i = 0; i < o->phnum; i++) {
+        if (ph[i].p_type != PT_LOAD) continue;
+        int prot = 0;
+        if (ph[i].p_flags & 0x1) prot |= LD_PROT_EXEC;
+        if (ph[i].p_flags & 0x2) prot |= LD_PROT_WRITE;
+        if (ph[i].p_flags & 0x4) prot |= LD_PROT_READ;
+        ld_u32 start = (ph[i].p_vaddr + o->base) & ~(PAGE_SIZE - 1);
+        ld_u32 end   = (ph[i].p_vaddr + o->base + ph[i].p_memsz
+                        + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
+        if (end > start)
+            ld_mprotect((void *)(unsigned long)start, end - start, prot);
+    }
+
+    /* RELRO after the PT_LOAD pass so it wins over the data segment's
+     * writable protection.  The region's end rounds DOWN to a page so a
+     * trailing partial page shared with still-writable data stays RW. */
+    for (ld_u32 i = 0; i < o->phnum; i++) {
+        if (ph[i].p_type != PT_GNU_RELRO) continue;
+        ld_u32 start = (ph[i].p_vaddr + o->base) & ~(PAGE_SIZE - 1);
+        ld_u32 end   = (ph[i].p_vaddr + o->base + ph[i].p_memsz)
+                       & ~(PAGE_SIZE - 1);
+        if (end > start)
+            ld_mprotect((void *)(unsigned long)start, end - start,
+                        LD_PROT_READ);
+    }
+}
+
 /* Public accessor for the loaded-object list - used by the
  * resolver and relocator. */
 ld_obj_t *ld_obj_list(void) { return ld_obj_head; }

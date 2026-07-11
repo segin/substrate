@@ -84,6 +84,7 @@ typedef struct {
 #define PT_INTERP   3
 #define PT_PHDR     6
 #define PT_TLS      7
+#define PT_GNU_RELRO 0x6474e552   /* segment to make read-only after reloc */
 
 /* i386 relocation types - only R_386_RELATIVE used by self-reloc */
 #define R_386_NONE     0
@@ -132,6 +133,7 @@ typedef struct {
 #define SYS_munmap      91
 #define SYS_fstat      108
 #define SYS_getdents   141
+#define SYS_mprotect   125
 #define SYS_futex      240
 #define SYS_set_gsbase 274
 #define SYS_thr_self   432
@@ -268,6 +270,7 @@ long  ld_getdents(int fd, void *buf, ld_size n);
 void *ld_mmap(void *addr, ld_size len, int prot, int flags,
               int fd, ld_u32 page_off);
 long  ld_munmap(void *addr, ld_size len);
+long  ld_mprotect(void *addr, ld_size len, int prot);
 
 /* True iff an mmap/syscall pointer return is an error.  The kernel returns
  * a -errno in [-4095, -1] on failure; everything else is a valid pointer.
@@ -339,6 +342,7 @@ typedef struct ld_obj {
     int             initialized;
     int             finalized;
     int             refcount;       /* dlopen refs; fini at last close (LDSO-11) */
+    int             protected;      /* W^X + RELRO applied (LDSO-08b) */
 
     /* Phase 5 (C++ linkage): GNU symbol-versioning sections.  All
      * three are biased pointers into the loaded image.  NULL when
@@ -416,6 +420,12 @@ int ld_relocate_copy(ld_obj_t *obj);
 
 /* Public head of the loaded-object list. */
 ld_obj_t *ld_obj_list(void);
+
+/* Re-protect an ld.so-mapped object after relocation: each PT_LOAD to
+ * its real ELF flags (dropping the write bit ld.so mapped it with) and
+ * PT_GNU_RELRO to read-only.  No-op if already applied or if the object
+ * wasn't mapped by ld.so (the kernel-mapped exe / ld.so itself). */
+void ld_protect_object(ld_obj_t *o);
 
 /* Save / restore the end of the loaded-object list so a failed dlopen
  * can roll back every object it appended (see ld_load.c). */

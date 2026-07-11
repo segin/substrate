@@ -97,6 +97,7 @@
 #define SYS_CLONE   120
 #define SYS_UNAME   122
 #define SYS_MODIFY_LDT 123
+#define SYS_MPROTECT 125
 #define SYS_SETHOSTNAME 170
 #define SYS_GETDENTS 141
 #define SYS_MSYNC   144

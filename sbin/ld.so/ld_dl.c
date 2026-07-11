@@ -174,6 +174,10 @@ static void *dlopen_locked(const char *path, int flags) {
             return 0;
         }
     }
+    /* Apply W^X + RELRO to the newly-mapped objects (idempotent guard
+     * skips ones already protected) before their constructors run. */
+    for (ld_obj_t *r = ld_obj_list(); r; r = r->next)
+        ld_protect_object(r);
     ld_run_init_arrays();
     /* Count this reference.  A repeat dlopen of the same object (dedup)
      * returns the same handle and bumps the count again, so it takes an

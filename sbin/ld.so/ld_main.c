@@ -574,6 +574,13 @@ ld_u32 ld_main(ld_u32 *initial_stack) {
         }
     }
 
+    /* Now that every relocation (incl. R_386_COPY) is applied, restore
+     * W^X on the shared libraries ld.so mapped and lock down their
+     * PT_GNU_RELRO regions.  Runs before constructors so a hostile or
+     * buggy ctor already faces read-only text and GOT. */
+    for (ld_obj_t *o = ld_obj_list(); o; o = o->next)
+        ld_protect_object(o);
+
     /* Trace mode: dump the loaded-object map and exit without
      * handing control to the program.  Output format mirrors GNU
      * `ldd`: one tab-indented "soname => path (0xbase)" per line.
