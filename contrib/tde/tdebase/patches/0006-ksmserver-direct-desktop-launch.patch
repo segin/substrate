@@ -1,19 +1,19 @@
-Subject: ksmserver -- launch the desktop directly (twin/kicker/kdesktop)
+Subject: ksmserver -- launch session apps with fork()+execvp() not exec_blind
 
-ksmserver normally launches session apps (window manager, panel, desktop) by an
-async DCOP exec_blind() to tdelauncher and sequences kdesktop/kicker through the
-DCOP-coordinated autostart phases.  On substrate the autostart-phase handshake
-(tdelauncher's autoStartNDone() signals back to ksmserver) does not reliably
-complete, so the session can stall before the panel/desktop come up.
+ksmserver normally launches session apps (window manager, panel, desktop) via an
+async DCOP exec_blind() to tdelauncher.  On substrate the tdelauncher
+start_service path does not reliably bring up kdesktop, so launch the command
+directly with fork()+execvp() instead (binaries are on $PATH under
+/opt/trinity/bin).  Inter-app DCOP itself works (the af_unix SO_PEERCRED fix), so
+this is purely swapping the launch primitive: every startApplication() caller --
+the window manager, the autostart phases, and the saved-session restore -- now
+forks the binary directly.
 
-Launch the core desktop directly instead: startApplication() fork()+execvp()s the
-command (binaries are on $PATH under /opt/trinity/bin), and restoreSession()/
-startDefaultSession() also start kdesktop and kicker directly.  Inter-app DCOP
-itself works (the af_unix SO_PEERCRED fix) so exec_blind would also launch the
-app -- but doing both races two copies of the same unique app past each other, so
-this uses fork()+execvp() as the single launch path; the autostart's later
-duplicate is dropped by TDEUniqueApplication's defer-to-running check (tdelibs
-patch 0009).
+(An earlier revision also hard-coded kdesktop/kicker launches in
+restoreSession()/startDefaultSession() as a workaround for the autostart-phase
+DCOP handshake not completing.  That handshake now runs, so the hard-coded
+launches raced a second copy of kicker/kdesktop against the autostart's own and
+have been removed -- the autostart/restore is the single launch path.)
 
 --- a/ksmserver/server.cpp
 +++ b/ksmserver/server.cpp
@@ -28,13 +28,9 @@ patch 0009).
 +
 +    /* substrate: launch session apps (the window manager, panel, desktop, ...)
 +     * directly with fork()+execvp() rather than the async DCOP exec_blind() to
-+     * tdelauncher.  Inter-app DCOP now works (the af_unix SO_PEERCRED fix), so
-+     * exec_blind would also launch the app — but doing BOTH races two copies of
-+     * the same unique app past each other (each registers before it sees the
-+     * other), and the tdelauncher/autostart start_service path does not reliably
-+     * bring up kdesktop here.  fork()+execvp() is the single reliable path; the
-+     * autostart's later duplicate is dropped by TDEUniqueApplication's
-+     * defer-to-running check.  Binaries are on $PATH (/opt/trinity/bin). */
++     * tdelauncher, whose start_service path does not reliably bring up kdesktop
++     * here.  Inter-app DCOP still works (the af_unix SO_PEERCRED fix); this only
++     * swaps the launch primitive.  Binaries are on $PATH (/opt/trinity/bin). */
 +    if ( fork() == 0 ) {
 +        setsid();
 +        char **argv = (char **) malloc( ( n + 1 ) * sizeof( char * ) );
@@ -46,38 +42,5 @@ patch 0009).
 +        _exit( 127 );
 +    }
  }
- 
+
  /*! Utility function to execute a command on the local machine. Used
---- a/ksmserver/startup.cpp
-+++ b/ksmserver/startup.cpp
-@@ -140,8 +140,18 @@
-         // when we have a window manager, we start it first and give
-         // it some time before launching other processes. Results in a
-         // visually more appealing startup.
--        for (uint i = 0; i < wmCommands.count(); i++)
-+        for (uint i = 0; i < wmCommands.count(); i++) {
-             startApplication( wmCommands[i] );
-+        }
-+        /* substrate: the autostart phases that normally bring up the desktop
-+         * shell (kdesktop) and panel (kicker) are driven by DCOP round-trips to
-+         * tdelauncher (DCOPRef(launcher).send("autoStart", N) and the
-+         * autoStartNDone() signals), but tdelauncher never processes incoming
-+         * DCOP method calls here, so those phases never run.  startApplication()
-+         * now launches directly (see server.cpp), so launch the core desktop
-+         * components ourselves to get a usable session. */
-+        startApplication( TQStringList() << TQString::fromLatin1("kdesktop") );
-+        startApplication( TQStringList() << TQString::fromLatin1("kicker") );
-         if ((showFancyLogin) && (!startupNotifierIPDlg)) {
-             startupNotifierIPDlg = KSMStartupIPDlg::showStartupIP();
-         }
-@@ -189,6 +199,10 @@
-     else {
-         startApplication( wm );
-     }
-+    /* substrate: bring up the desktop shell + panel directly — see the matching
-+     * comment in restoreSession(); the DCOP-driven autostart never runs. */
-+    startApplication( TQStringList() << TQString::fromLatin1("kdesktop") );
-+    startApplication( TQStringList() << TQString::fromLatin1("kicker") );
-     if ((showFancyLogin) && (!startupNotifierIPDlg)) {
-         startupNotifierIPDlg = KSMStartupIPDlg::showStartupIP();
-     }
