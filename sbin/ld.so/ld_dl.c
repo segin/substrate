@@ -175,6 +175,14 @@ static void *dlopen_locked(const char *path, int flags) {
         }
     }
     ld_run_init_arrays();
+    /* Count this reference.  A repeat dlopen of the same object (dedup)
+     * returns the same handle and bumps the count again, so it takes an
+     * equal number of dlclose calls to run its destructors.  If a prior
+     * dlclose already finalized it, clear the flag so a future last
+     * close can fire destructors again (constructors are NOT re-run: we
+     * never unmapped, so the object's state persists). */
+    o->refcount++;
+    o->finalized = 0;
     return o;
 }
 
@@ -268,6 +276,22 @@ LD_PUBLIC void *__ldso_dlsym(void *handle, const char *name, void *caller_pc) {
  * for the handle so global destructors fire.
  * -------------------------------------------------------------------- */
 
+static int dl_streq(const char *a, const char *b);   /* defined below */
+
+/* True iff some other loaded object lists `o`'s SONAME in its
+ * DT_NEEDED - i.e. o is still a live dependency and must not be
+ * finalized even though its own dlopen refcount hit zero. */
+static int dl_object_still_needed(const ld_obj_t *o) {
+    for (ld_obj_t *c = ld_obj_list(); c; c = c->next) {
+        if (c == o || !c->dynamic || !c->strtab) continue;
+        for (Elf32_Dyn *d = c->dynamic; d->d_tag != DT_NULL; d++) {
+            if (d->d_tag != DT_NEEDED) continue;
+            if (dl_streq(c->strtab + d->d_un.d_val, o->name)) return 1;
+        }
+    }
+    return 0;
+}
+
 static int dlclose_locked(void *handle) {
     if (!handle || handle == LD_RTLD_DEFAULT || handle == LD_RTLD_NEXT ||
         !dl_handle_valid(handle)) {
@@ -275,6 +299,9 @@ static int dlclose_locked(void *handle) {
         return -1;
     }
     ld_obj_t *o = (ld_obj_t *)handle;
+    if (o->refcount > 0) o->refcount--;
+    if (o->refcount > 0) return 0;              /* other dlopens still hold it */
+    if (dl_object_still_needed(o)) return 0;    /* a live DSO DT_NEEDEDs it */
     if (o->finalized) return 0;
     /* Run DT_FINI_ARRAY in REVERSE registration order, then DT_FINI
      * - matches the order glibc uses. */
