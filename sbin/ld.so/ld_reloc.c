@@ -179,12 +179,30 @@ static int apply_one(ld_obj_t *obj, Elf32_Rel *r) {
                 ld_puts(": "); ld_puts(nm); ld_puts("\n");
                 return -1;
             }
+            /* A defining module with no tls_modid was loaded AFTER the
+             * one-shot startup TLS layout (dlopen) — its tls_offset is
+             * 0, and 0-offset math would produce POSITIVE %gs offsets
+             * that scribble over the TCB/DTV.  Fail the relocation
+             * (and thus the dlopen) instead of corrupting memory. */
+            if (def->tls_modid == 0) {
+                ld_puts("ld.so: TLS module loaded after startup (dlopen): ");
+                ld_puts(def->name); ld_puts(" — unsupported\n");
+                return -1;
+            }
             *p = val - def->tls_offset + *p;
             return 0;
         }
         if (obj->tls_memsz == 0) {
             ld_puts("ld.so: TPOFF reloc but obj has no PT_TLS: ");
             ld_puts(obj->name); ld_puts("\n");
+            return -1;
+        }
+        /* Same post-startup guard for the local/defined case: an object
+         * dlopen'd after ld_setup_tls() has tls_offset 0 — the formula
+         * below would emit positive %gs offsets into the TCB/DTV. */
+        if (obj->tls_modid == 0) {
+            ld_puts("ld.so: TLS module loaded after startup (dlopen): ");
+            ld_puts(obj->name); ld_puts(" — unsupported\n");
             return -1;
         }
         /* Per the i386 TLS variant-II ABI: TPOFF = sym_value - tls_offset
@@ -208,6 +226,13 @@ static int apply_one(ld_obj_t *obj, Elf32_Rel *r) {
          * binds DTPMOD32 to obj->tls_modid for both flavours,
          * which is correct for the LDM/GD-of-local cases that
          * libstdc++ and __thread C++ types produce. */
+        if (obj->tls_modid == 0) {
+            /* Loaded after the startup TLS layout (dlopen) — modid 0
+             * makes __tls_get_addr return NULL.  Fail cleanly. */
+            ld_puts("ld.so: TLS module loaded after startup (dlopen): ");
+            ld_puts(obj->name); ld_puts(" — unsupported\n");
+            return -1;
+        }
         *p = obj->tls_modid;
         return 0;
 
