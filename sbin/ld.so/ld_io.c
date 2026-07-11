@@ -26,8 +26,21 @@ int ld_debug = 0;
  * uses its own stack so playing tricks with our %esp is safe.
  */
 
+/* Signal safety for the %esp-swap wrappers.  While %esp points at the
+ * arg block during int $0x80, a signal delivered on syscall return has
+ * the kernel push its sigframe just BELOW %esp.  The worst case is the
+ * SA_SIGINFO frame (siginfo_t + a full ucontext whose mcontext carries
+ * a 512-byte fpstate), a bit under 1 KiB.  Put the arg block at the top
+ * of a padded buffer so that sigframe lands in the pad instead of over
+ * the caller's live locals / return address.  1.5 KiB covers it with
+ * margin; the buffer is a transient stack local, and these wrappers do
+ * not recurse. */
+#define LD_SYSCALL_PAD_WORDS 384        /* 1536 bytes below the arg block */
+
 static long ld_syscall3(int nr, ld_u32 a, ld_u32 b, ld_u32 c) {
-    ld_u32 stk[4] = { 0 /*dummy*/, a, b, c };
+    volatile ld_u32 buf[LD_SYSCALL_PAD_WORDS + 4];
+    volatile ld_u32 *stk = &buf[LD_SYSCALL_PAD_WORDS];
+    stk[0] = 0 /*dummy*/; stk[1] = a; stk[2] = b; stk[3] = c;
     long ret, saved;
     __asm__ volatile (
         "movl %%esp, %1\n\t"
@@ -50,7 +63,9 @@ static long ld_syscall3(int nr, ld_u32 a, ld_u32 b, ld_u32 c) {
 }
 
 static long ld_syscall1(int nr, ld_u32 a) {
-    ld_u32 stk[2] = { 0, a };
+    volatile ld_u32 buf[LD_SYSCALL_PAD_WORDS + 2];
+    volatile ld_u32 *stk = &buf[LD_SYSCALL_PAD_WORDS];
+    stk[0] = 0; stk[1] = a;
     long ret, saved;
     __asm__ volatile (
         "movl %%esp, %1\n\t"
@@ -74,7 +89,10 @@ static long ld_syscall1(int nr, ld_u32 a) {
 
 static long ld_syscall6(int nr, ld_u32 a, ld_u32 b, ld_u32 c,
                         ld_u32 d, ld_u32 e, ld_u32 f) {
-    ld_u32 stk[7] = { 0, a, b, c, d, e, f };
+    volatile ld_u32 buf[LD_SYSCALL_PAD_WORDS + 7];
+    volatile ld_u32 *stk = &buf[LD_SYSCALL_PAD_WORDS];
+    stk[0] = 0; stk[1] = a; stk[2] = b; stk[3] = c;
+    stk[4] = d; stk[5] = e; stk[6] = f;
     long ret, saved;
     __asm__ volatile (
         "movl %%esp, %1\n\t"
