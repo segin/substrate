@@ -132,11 +132,8 @@ static int apply_one(ld_obj_t *obj, Elf32_Rel *r) {
     }
 
     case R_386_COPY: {
-        /* Find the source-of-truth in any OTHER loaded object,
-         * memcpy the symbol's bytes into our slot.  The size comes
-         * from the source symbol's st_size; the executable's
-         * version of the symbol must be at least that big (it
-         * is - same .o-defined extern data both sides agree on). */
+        /* Find the source-of-truth in any OTHER loaded object and
+         * memcpy the symbol's bytes into our slot. */
         if (sym == 0) return 0;
         const char *name = obj->strtab + obj->symtab[sym].st_name;
         ld_u32 size = 0;
@@ -148,9 +145,20 @@ static int apply_one(ld_obj_t *obj, Elf32_Rel *r) {
             ld_puts(" in "); ld_puts(obj->name); ld_puts("\n");
             return -1;
         }
+        /* Copy at most the destination's own size.  Normally both
+         * sides agree (same extern data), but a version-skewed
+         * provider whose symbol grew would otherwise overrun the
+         * executable's .bss slot; clamp to the smaller and warn. */
+        ld_u32 dstsize = obj->symtab[sym].st_size;
+        ld_u32 n = size;
+        if (dstsize && dstsize < n) {
+            ld_puts("ld.so: R_386_COPY size mismatch for "); ld_puts(name);
+            ld_puts(" - clamping to destination\n");
+            n = dstsize;
+        }
         unsigned char *dst = (unsigned char *)p;
         const unsigned char *s = (const unsigned char *)(unsigned long)src;
-        for (ld_u32 i = 0; i < size; i++) dst[i] = s[i];
+        for (ld_u32 i = 0; i < n; i++) dst[i] = s[i];
         return 0;
     }
 
