@@ -174,7 +174,13 @@ static void ld_cache_dynamic(ld_obj_t *o) {
     o->verdef  = verdef_off  ? (Elf32_Verdef  *)(verdef_off  + o->base) : 0;
     o->verneed = verneed_off ? (Elf32_Verneed *)(verneed_off + o->base) : 0;
 
-    if (soname_seen && o->strtab && o->name[0] == '\0') {
+    /* DT_SONAME overwrites the basename placeholder set by the loader —
+     * the SONAME is the canonical dedup key (DT_NEEDED entries carry
+     * sonames, not file names).  The old `name[0] == '\0'` guard made
+     * this dead code: the placeholder is always non-empty, so dedup
+     * silently keyed on the request string and a symlinked soname
+     * alias (or an absolute-path dlopen) loaded the same DSO twice. */
+    if (soname_seen && o->strtab) {
         ld_strncpy(o->name, o->strtab + soname_str, sizeof(o->name));
     }
 }
@@ -191,6 +197,12 @@ void ld_obj_append(ld_obj_t *o) {
  * descriptor or NULL on failure. */
 static ld_obj_t *load_from_path(const char *path) {
     if (ld_obj_count >= LD_MAX_OBJS) return 0;
+
+    /* Path-keyed dedup: the same file requested under a different
+     * string (absolute-path dlopen after a DT_NEEDED pull, repeat
+     * dlopen of the same path) must not be mapped twice. */
+    for (ld_obj_t *e = ld_obj_head; e; e = e->next)
+        if (e->path[0] && ld_streq(e->path, path)) return e;
 
     int fd = ld_open(path, LD_O_RDONLY);
     if (fd < 0) return 0;
@@ -324,6 +336,14 @@ static ld_obj_t *load_from_path(const char *path) {
     if (!dyn) return 0;
 
     ld_obj_t *o = &ld_obj_pool[ld_obj_count++];
+    /* Zero the slot: pool slots can be released and reused (SONAME
+     * dedup below rolls the counter back), and ld_cache_dynamic only
+     * writes fields whose tags are present — stale values from a
+     * previous occupant must not leak through. */
+    {
+        unsigned char *z = (unsigned char *)o;
+        for (ld_size zi = 0; zi < sizeof(*o); zi++) z[zi] = 0;
+    }
     o->base       = base;
     /* Runtime program-header address + count, for dl_iterate_phdr(3).
      * The phdrs sit at e_phoff inside the first PT_LOAD (which maps file
@@ -354,6 +374,18 @@ static ld_obj_t *load_from_path(const char *path) {
      * etc. — rather than a hard-coded /lib guess. */
     ld_strncpy(o->path, path, sizeof(o->path));
     ld_cache_dynamic(o);
+    /* SONAME dedup after the dynamic walk: a symlink alias (libfoo.so
+     * -> libfoo.so.1) resolves to a different path but carries the
+     * SONAME of an object we already hold.  Return the existing copy —
+     * o is not yet on the list, so find_loaded only sees prior loads.
+     * The duplicate mapping leaks until munmap is wired (LDSO-08). */
+    {
+        ld_obj_t *dup = find_loaded(o->name);
+        if (dup) {
+            ld_obj_count--;         /* o is the last slot — release it */
+            return dup;
+        }
+    }
     ld_obj_append(o);
     return o;
 }
