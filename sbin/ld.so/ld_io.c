@@ -1,7 +1,7 @@
 /*
- * ld_io.c — minimal write/exit stubs for /sbin/ld.so.
+ * ld_io.c - minimal write/exit stubs for /sbin/ld.so.
  *
- * The dynamic linker can't call libc — libc isn't loaded yet.
+ * The dynamic linker can't call libc - libc isn't loaded yet.
  * We hand-roll the two syscalls we need and a few formatting
  * helpers.  Native syscall ABI is stack-based: number in %eax,
  * args at [esp+4..], dummy slot at [esp+0], int $0x80.
@@ -16,7 +16,7 @@ int ld_debug = 0;
 /* Native syscall ABI: number in %eax, args at [esp+4..], dummy at
  * [esp+0].  Inline-asm pitfall: any "g"/"m"-constrained operand
  * may resolve to a stack slot, and explicit pushes shift %esp
- * before the operand is read — the kernel then sees garbage.
+ * before the operand is read - the kernel then sees garbage.
  * i386 also has only 7 GPRs total, so a 6-arg syscall plus the
  * number can exhaust the register pool.
  *
@@ -38,7 +38,7 @@ static long ld_syscall3(int nr, ld_u32 a, ld_u32 b, ld_u32 c) {
         : "r"(stk), "0"(nr)
         : "memory", "cc",
           /* Substrate's syscall return path stuffs the high half of
-           * the 64-bit return into %edx — any caller that doesn't
+           * the 64-bit return into %edx - any caller that doesn't
            * sign-extend (cdq) or re-load edx will pick up the
            * clobbered value.  Without the explicit clobber GCC
            * happily reuses edx for `stk` across calls, and the
@@ -61,7 +61,7 @@ static long ld_syscall1(int nr, ld_u32 a) {
         : "r"(stk), "0"(nr)
         : "memory", "cc",
           /* Substrate's syscall return path stuffs the high half of
-           * the 64-bit return into %edx — any caller that doesn't
+           * the 64-bit return into %edx - any caller that doesn't
            * sign-extend (cdq) or re-load edx will pick up the
            * clobbered value.  Without the explicit clobber GCC
            * happily reuses edx for `stk` across calls, and the
@@ -85,7 +85,7 @@ static long ld_syscall6(int nr, ld_u32 a, ld_u32 b, ld_u32 c,
         : "r"(stk), "0"(nr)
         : "memory", "cc",
           /* Substrate's syscall return path stuffs the high half of
-           * the 64-bit return into %edx — any caller that doesn't
+           * the 64-bit return into %edx - any caller that doesn't
            * sign-extend (cdq) or re-load edx will pick up the
            * clobbered value.  Without the explicit clobber GCC
            * happily reuses edx for `stk` across calls, and the
@@ -146,7 +146,7 @@ void ld_die(const char *msg) {
 }
 
 int ld_open(const char *path, int flags) {
-    /* sys_open(path, flags, mode) — pass 0 for mode since
+    /* sys_open(path, flags, mode) - pass 0 for mode since
      * we never create files. */
     return (int)ld_syscall3(SYS_open, (ld_u32)(unsigned long)path,
                             (ld_u32)flags, 0);
@@ -179,4 +179,14 @@ void *ld_mmap(void *addr, ld_size len, int prot, int flags,
 
 int ld_sys_set_gsbase(ld_u32 base) {
     return (int)ld_syscall1(SYS_set_gsbase, base);
+}
+
+long ld_futex(int *uaddr, int op, int val) {
+    /* sys_futex(uaddr, op, val, timeout, uaddr2, val3) */
+    return ld_syscall6(SYS_futex, (ld_u32)(unsigned long)uaddr,
+                       (ld_u32)op, (ld_u32)val, 0, 0, 0);
+}
+
+int ld_thr_self(void) {
+    return (int)ld_syscall1(SYS_thr_self, 0);
 }

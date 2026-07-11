@@ -1,5 +1,5 @@
 /*
- * ld.h — internal types for /sbin/ld.so.
+ * ld.h - internal types for /sbin/ld.so.
  *
  * Phase 2 surface: enough of the ELF / auxv types to walk the
  * program's PT_DYNAMIC.  We deliberately do NOT include any
@@ -14,7 +14,7 @@ typedef int            ld_i32;
 typedef unsigned short ld_u16;
 typedef unsigned long  ld_size;
 
-/* ELF32 program header — System V ELF spec Fig. 2-1 */
+/* ELF32 program header - System V ELF spec Fig. 2-1 */
 typedef struct {
     ld_u32 p_type;
     ld_u32 p_offset;
@@ -67,7 +67,7 @@ typedef struct {
 #define DT_INIT    12
 #define DT_FINI    13
 #define DT_INIT_ARRAY    25
-/* GNU symbol versioning — required to load libstdc++.so.6 and any
+/* GNU symbol versioning - required to load libstdc++.so.6 and any
  * other DSO that uses versioned symbols (GLIBCXX_3.4 etc.). */
 #define DT_VERSYM      0x6ffffff0   /* Per-symbol version index table */
 #define DT_VERDEF      0x6ffffffc   /* Verdef array (what we provide) */
@@ -85,7 +85,7 @@ typedef struct {
 #define PT_PHDR     6
 #define PT_TLS      7
 
-/* i386 relocation types — only R_386_RELATIVE used by self-reloc */
+/* i386 relocation types - only R_386_RELATIVE used by self-reloc */
 #define R_386_NONE     0
 #define R_386_32       1
 #define R_386_PC32     2
@@ -131,7 +131,9 @@ typedef struct {
 #define SYS_mmap        90
 #define SYS_fstat      108
 #define SYS_getdents   141
+#define SYS_futex      240
 #define SYS_set_gsbase 274
+#define SYS_thr_self   432
 
 /* mmap flags / prot bits we use. */
 #define LD_PROT_READ   1
@@ -144,7 +146,7 @@ typedef struct {
 /* open() flags */
 #define LD_O_RDONLY 0
 
-/* ELF32 file header — only the fields ld.so reads at load time. */
+/* ELF32 file header - only the fields ld.so reads at load time. */
 typedef struct {
     unsigned char e_ident[16];
     ld_u16 e_type;
@@ -181,7 +183,7 @@ typedef struct {
 #define STN_UNDEF  0
 #define SHN_UNDEF  0
 
-/* GNU symbol versioning — DT_VERDEF / DT_VERNEED / DT_VERSYM blocks.
+/* GNU symbol versioning - DT_VERDEF / DT_VERNEED / DT_VERSYM blocks.
  * Layout per glibc / binutils elf/external.h.  Strings live in the
  * dynamic strtab; the version-name HASH is computed via the standard
  * ELF hash function (NOT the GNU hash). */
@@ -198,14 +200,14 @@ typedef struct {
 } Elf32_Verdef;
 
 typedef struct {
-    ld_u32     vda_name;    /* offset into strtab — version name */
+    ld_u32     vda_name;    /* offset into strtab - version name */
     ld_u32     vda_next;    /* byte offset to next aux (0=end) */
 } Elf32_Verdaux;
 
 typedef struct {
     Elf32_Half vn_version;  /* always 1 */
     Elf32_Half vn_cnt;      /* number of vn_aux entries */
-    ld_u32     vn_file;     /* offset into strtab — providing soname */
+    ld_u32     vn_file;     /* offset into strtab - providing soname */
     ld_u32     vn_aux;      /* byte offset to first Elf32_Vernaux */
     ld_u32     vn_next;     /* byte offset to next Elf32_Verneed (0=end) */
 } Elf32_Verneed;
@@ -213,14 +215,14 @@ typedef struct {
 typedef struct {
     ld_u32     vna_hash;    /* ELF hash of the required version name */
     Elf32_Half vna_flags;
-    Elf32_Half vna_other;   /* version index — matches VERSYM in this DSO */
-    ld_u32     vna_name;    /* offset into strtab — version name */
+    Elf32_Half vna_other;   /* version index - matches VERSYM in this DSO */
+    ld_u32     vna_name;    /* offset into strtab - version name */
     ld_u32     vna_next;    /* byte offset to next aux (0=end) */
 } Elf32_Vernaux;
 
 /* VERSYM is a Half[] parallel to .dynsym.  Index meanings:
  *   0 = VER_NDX_LOCAL    (symbol not exported)
- *   1 = VER_NDX_GLOBAL   (no version assigned — base def)
+ *   1 = VER_NDX_GLOBAL   (no version assigned - base def)
  *   N = a verdef vd_ndx (exporter) or vernaux vna_other (importer)
  * The high bit 0x8000 is the HIDDEN flag: when set on a defined
  * symbol, the symbol is NOT eligible to satisfy an unversioned
@@ -234,7 +236,7 @@ typedef struct {
 #define VER_FLG_WEAK     2
 
 /* TLS module descriptor passed to __tls_get_addr() for GD/LD models.
- * On i386 the call is regparm(1) — pointer in %eax — but our exported
+ * On i386 the call is regparm(1) - pointer in %eax - but our exported
  * symbol is plain cdecl since GCC emits a normal call instruction
  * with the pointer pushed on the stack for the GD sequence. */
 typedef struct {
@@ -242,7 +244,7 @@ typedef struct {
     ld_u32 ti_offset;
 } tls_index;
 
-/* Tiny IO helpers — implemented in ld_io.c. */
+/* Tiny IO helpers - implemented in ld_io.c. */
 void  ld_write(int fd, const char *buf, ld_size len);
 void  ld_puts(const char *s);
 void  ld_putx(ld_u32 v);
@@ -251,7 +253,7 @@ void  ld_die(const char *msg) __attribute__((noreturn));
 
 /* When non-zero, emit the verbose loading / relocating / TLS / etc.
  * trace.  Set from LD_DEBUG=<anything> in envp.  Errors and the
- * LD_TRACE_LOADED_OBJECTS dump are NOT gated by this — they go to
+ * LD_TRACE_LOADED_OBJECTS dump are NOT gated by this - they go to
  * stderr / stdout regardless. */
 extern int ld_debug;
 #define LD_DBG(stmt) do { if (ld_debug) { stmt; } } while (0)
@@ -286,7 +288,7 @@ typedef struct ld_obj {
     ld_u32          load_end;   /* high end of PT_LOAD span (absolute) */
     Elf32_Dyn      *dynamic;    /* PT_DYNAMIC pointer (already biased) */
 
-    /* In-memory program-header table, for dl_iterate_phdr(3) — which
+    /* In-memory program-header table, for dl_iterate_phdr(3) - which
      * libgcc's DWARF unwinder uses (USE_PT_GNU_EH_FRAME) to locate each
      * loaded object's PT_GNU_EH_FRAME / .eh_frame_hdr.  Without this,
      * C++ exceptions can't unwind across DSO boundaries. */
@@ -309,7 +311,7 @@ typedef struct ld_obj {
     /* Initializers / finalizers (DT_INIT, DT_INIT_ARRAY, ...). */
     void          (*init)(void);
     void          (**init_array)(void);
-    ld_u32          init_arraysz;   /* bytes — count = sz / sizeof(fn ptr) */
+    ld_u32          init_arraysz;   /* bytes - count = sz / sizeof(fn ptr) */
     void          (*fini)(void);
     void          (**fini_array)(void);
     ld_u32          fini_arraysz;
@@ -317,15 +319,15 @@ typedef struct ld_obj {
     /* PT_TLS metadata, populated when an object carries a thread-
      * local segment.  `tls_offset` is the negative offset from the
      * thread pointer at which this module's TLS image lives in the
-     * combined per-thread block — assigned by ld_setup_tls(). */
+     * combined per-thread block - assigned by ld_setup_tls(). */
     const void     *tls_image;      /* file-image (PT_TLS at p_offset+base) */
     ld_u32          tls_filesz;
     ld_u32          tls_memsz;
     ld_u32          tls_align;
     ld_u32          tls_offset;     /* abs(offset) below thread pointer */
 
-    /* Per-object guards.  R_386_RELATIVE is `*p += base` —
-     * non-idempotent — so re-running ld_relocate on an already-
+    /* Per-object guards.  R_386_RELATIVE is `*p += base` -
+     * non-idempotent - so re-running ld_relocate on an already-
      * relocated object would double the bias and silently corrupt
      * every relative pointer (notably DT_FINI_ARRAY entries).
      * Same concern for init/fini arrays which must fire exactly
@@ -338,10 +340,10 @@ typedef struct ld_obj {
     /* Phase 5 (C++ linkage): GNU symbol-versioning sections.  All
      * three are biased pointers into the loaded image.  NULL when
      * the DSO doesn't carry versioning (substrate libc, libm, etc.
-     * currently don't — libstdc++.so.6 does). */
-    Elf32_Half     *versym;     /* DT_VERSYM — parallel to symtab */
-    Elf32_Verdef   *verdef;     /* DT_VERDEF — what we EXPORT */
-    Elf32_Verneed  *verneed;    /* DT_VERNEED — what we IMPORT */
+     * currently don't - libstdc++.so.6 does). */
+    Elf32_Half     *versym;     /* DT_VERSYM - parallel to symtab */
+    Elf32_Verdef   *verdef;     /* DT_VERDEF - what we EXPORT */
+    Elf32_Verneed  *verneed;    /* DT_VERNEED - what we IMPORT */
     ld_u32          verdefnum;  /* count of verdef entries */
     ld_u32          verneednum; /* count of verneed entries */
 
@@ -365,7 +367,7 @@ ld_u32 ld_resolve(const char *name);
 
 /* Requester-aware resolve for the relocation processor: `requester` is
  * the object being relocated, so a program's own PLT slot isn't bound to
- * its own canonical-PLT entry (function-address equality — see
+ * its own canonical-PLT entry (function-address equality - see
  * ld_resolve.c resolve_pred). */
 ld_u32 ld_resolve_req(const char *name, ld_u32 vh_hash,
                       const ld_obj_t *requester);
@@ -385,7 +387,7 @@ ld_u32 ld_resolve_skip(const char *name, const ld_obj_t *skip);
 ld_u32 ld_resolve_versioned(const char *name, ld_u32 vh_hash,
                             const ld_obj_t *skip, ld_u32 *size_out);
 
-/* Standard ELF hash function — re-used for version-name hashing
+/* Standard ELF hash function - re-used for version-name hashing
  * (the SAME function ELF uses for the SysV symbol-name hash table). */
 ld_u32 ld_elf_hash(const char *s);
 
@@ -414,7 +416,7 @@ ld_obj_t *ld_obj_list(void);
 
 /* Run DT_INIT and DT_INIT_ARRAY for every loaded object in
  * dependency order (deepest deps first, program last).  Idempotent
- * — each object is initialized exactly once via a per-object guard
+ * - each object is initialized exactly once via a per-object guard
  * inside the function. */
 void ld_run_init_arrays(void);
 
@@ -436,6 +438,18 @@ int ld_setup_tls(void);
 /* Native syscall: install a TLS base for the current thread.
  * Returns 0 on success or -errno. */
 int ld_sys_set_gsbase(ld_u32 base);
+
+/* futex(2) - op is FUTEX_WAIT (0) or FUTEX_WAKE (1); timeout/uaddr2/
+ * val3 are always 0 for ld.so's mutex.  Returns the raw kernel result.
+ * Used by the dlopen/dlsym/dlclose serialization lock (ld_dl.c). */
+#define LD_FUTEX_WAIT 0
+#define LD_FUTEX_WAKE 1
+long ld_futex(int *uaddr, int op, int val);
+
+/* thr_self(2) - current kernel thread id, used as the recursive-lock
+ * owner token in ld_dl.c (always valid, unlike gs:0 for a no-TLS
+ * program). */
+int ld_thr_self(void);
 
 /* Per-process upper bound on objects we'll iterate during init.
  * Sized to match LD_MAX_OBJS in ld_load.c so it's effectively the

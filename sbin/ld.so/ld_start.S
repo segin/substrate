@@ -1,18 +1,18 @@
 /*
- * ld_start.S — entry point for /sbin/ld.so (Substrate dynamic linker).
+ * ld_start.S - entry point for /sbin/ld.so (Substrate dynamic linker).
  *
  * Phase-2 responsibilities (executed BEFORE any C code):
  *   1. Save the kernel-handed initial %esp (where argc lives).
  *   2. Compute our own load base = runtime address of __ehdr_start.
  *   3. Walk our own PT_DYNAMIC for DT_REL / DT_RELSZ.
  *   4. Apply every R_386_RELATIVE in our image: *(base+r_offset) += base.
- *      (Only RELATIVE — we have no DT_NEEDED, no symbol resolutions.)
+ *      (Only RELATIVE - we have no DT_NEEDED, no symbol resolutions.)
  *   5. Call ld_main(initial_stack), receive program entry in %eax.
  *   6. Restore %esp to the saved value, zero %ebp/%edx, jump to entry.
  *
  * After step 4 globals are reachable by their final addresses, so
  * the C code in ld_main.c is free to use string literals, function
- * pointers, etc. — anything the linker emitted as R_386_RELATIVE
+ * pointers, etc. - anything the linker emitted as R_386_RELATIVE
  * has been fixed up.
  */
 
@@ -39,7 +39,7 @@ _start:
 
     /* --- Locate _DYNAMIC --------------------------------------------
      * _DYNAMIC has link-time vaddr; runtime addr = base + that. */
-    leal  _DYNAMIC@GOTOFF, %ecx     /* would need GOT — easier path: */
+    leal  _DYNAMIC@GOTOFF, %ecx     /* would need GOT - easier path: */
     /* Fallback: call/pop to get a known PC address, then add the
      * fixed offset from .Lpc to _DYNAMIC at link time. */
 

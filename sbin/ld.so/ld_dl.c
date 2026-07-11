@@ -1,5 +1,5 @@
 /*
- * ld_dl.c — runtime dlopen / dlsym / dlclose / dlerror / dladdr
+ * ld_dl.c - runtime dlopen / dlsym / dlclose / dlerror / dladdr
  * API exported by /sbin/ld.so to libdl.so.0.
  *
  * Public entries (default visibility, all under __ldso_ prefix to
@@ -30,6 +30,54 @@
 #define LD_RTLD_NEXT    ((void *)-1)
 
 #define LD_PUBLIC __attribute__((visibility("default")))
+
+/* -------------------------------------------------------------------- *
+ * dl-API serialization lock (LDSO-06)
+ *
+ * The startup path (ld_main) is single-threaded, but once the program
+ * is running any thread may call dlopen/dlsym/dlclose concurrently -
+ * and with SMP those threads run in parallel.  dlopen mutates the
+ * global object list (a non-atomic multi-store append) and flips
+ * per-object relocation guards; dlsym/dlerror read shared state.  A
+ * single process-wide futex mutex serializes them.
+ *
+ * The lock is RECURSIVE: dlopen holds it while running the new
+ * objects' constructors (ld_run_init_arrays), and a constructor may
+ * legitimately call dlopen/dlsym itself (optional-symbol probing is
+ * common) - a plain mutex would self-deadlock.  Owner is the kernel
+ * thread id (thr_self), always valid unlike gs:0 for a no-TLS program.
+ * The futex word is three-state (0=free, 1=held, 2=held+waiters) so
+ * the uncontended acquire is a lone compare-exchange with no syscall.
+ * -------------------------------------------------------------------- */
+
+static int g_dl_futex = 0;      /* 0=free, 1=held, 2=held+waiters */
+static int g_dl_owner = 0;      /* thr_self() of the holder, 0 if free */
+static int g_dl_depth = 0;      /* recursion count */
+
+static void dl_lock(void) {
+    int me = ld_thr_self();
+    if (g_dl_owner == me) { g_dl_depth++; return; }   /* re-entrant */
+    int c = __sync_val_compare_and_swap(&g_dl_futex, 0, 1);
+    if (c != 0) {
+        if (c != 2) c = __sync_lock_test_and_set(&g_dl_futex, 2);
+        while (c != 0) {
+            ld_futex(&g_dl_futex, LD_FUTEX_WAIT, 2);
+            c = __sync_lock_test_and_set(&g_dl_futex, 2);
+        }
+    }
+    g_dl_owner = me;
+    g_dl_depth = 1;
+}
+
+static void dl_unlock(void) {
+    if (--g_dl_depth > 0) return;                       /* still held by us */
+    g_dl_owner = 0;
+    /* If there were waiters (value was 2), wake one after releasing. */
+    if (__sync_fetch_and_sub(&g_dl_futex, 1) != 1) {
+        g_dl_futex = 0;
+        ld_futex(&g_dl_futex, LD_FUTEX_WAKE, 1);
+    }
+}
 
 /* -------------------------------------------------------------------- *
  * Error string slot
@@ -72,10 +120,10 @@ LD_PUBLIC const char *__ldso_dlerror(void) {
  * dlopen
  * -------------------------------------------------------------------- */
 
-LD_PUBLIC void *__ldso_dlopen(const char *path, int flags) {
+static void *dlopen_locked(const char *path, int flags) {
     (void)flags; /* RTLD_LAZY/NOW/GLOBAL/LOCAL all behave eager+global today */
     if (!path) {
-        /* dlopen(NULL) — return a handle representing the main
+        /* dlopen(NULL) - return a handle representing the main
          * program (== head of loaded-object list). */
         return ld_obj_list();
     }
@@ -104,6 +152,13 @@ LD_PUBLIC void *__ldso_dlopen(const char *path, int flags) {
     return o;
 }
 
+LD_PUBLIC void *__ldso_dlopen(const char *path, int flags) {
+    dl_lock();
+    void *r = dlopen_locked(path, flags);
+    dl_unlock();
+    return r;
+}
+
 /* -------------------------------------------------------------------- *
  * dlsym
  * -------------------------------------------------------------------- */
@@ -120,7 +175,7 @@ static ld_obj_t *dl_obj_for_addr(ld_u32 addr) {
 
 extern ld_u32 ld_lookup_in_obj(const ld_obj_t *o, const char *name);
 
-LD_PUBLIC void *__ldso_dlsym(void *handle, const char *name, void *caller_pc) {
+static void *dlsym_locked(void *handle, const char *name, void *caller_pc) {
     if (!name) { ld_dl_error("dlsym: null name", 0, 0, 0); return 0; }
 
     if (handle == LD_RTLD_DEFAULT) {
@@ -157,24 +212,31 @@ LD_PUBLIC void *__ldso_dlsym(void *handle, const char *name, void *caller_pc) {
         return 0;
     }
 
-    /* Object handle — search just this object's symbol table. */
+    /* Object handle - search just this object's symbol table. */
     ld_obj_t *target = (ld_obj_t *)handle;
     ld_u32 v = ld_lookup_in_obj(target, name);
     if (!v) ld_dl_error("dlsym(\"", name, "\"): not found in handle", 0);
     return (void *)(unsigned long)v;
 }
 
+LD_PUBLIC void *__ldso_dlsym(void *handle, const char *name, void *caller_pc) {
+    dl_lock();
+    void *r = dlsym_locked(handle, name, caller_pc);
+    dl_unlock();
+    return r;
+}
+
 /* -------------------------------------------------------------------- *
- * dlclose — run fini, decrement (notional) refcount, do not unmap.
+ * dlclose - run fini, decrement (notional) refcount, do not unmap.
  *
  * Real unmap requires reverse-dependency tracking (every symbol that
  * was resolved through this object's hash must still be reachable
- * elsewhere or never called) — Phase 5+ concern.  For now dlclose
+ * elsewhere or never called) - Phase 5+ concern.  For now dlclose
  * delivers its most useful behaviour: runs DT_FINI / DT_FINI_ARRAY
  * for the handle so global destructors fire.
  * -------------------------------------------------------------------- */
 
-LD_PUBLIC int __ldso_dlclose(void *handle) {
+static int dlclose_locked(void *handle) {
     if (!handle || handle == LD_RTLD_DEFAULT || handle == LD_RTLD_NEXT) {
         ld_dl_error("dlclose: invalid handle", 0, 0, 0);
         return -1;
@@ -182,7 +244,7 @@ LD_PUBLIC int __ldso_dlclose(void *handle) {
     ld_obj_t *o = (ld_obj_t *)handle;
     if (o->finalized) return 0;
     /* Run DT_FINI_ARRAY in REVERSE registration order, then DT_FINI
-     * — matches the order glibc uses. */
+     * - matches the order glibc uses. */
     if (o->fini_array && o->fini_arraysz >= sizeof(void (*)(void))) {
         ld_u32 cnt = o->fini_arraysz / sizeof(void (*)(void));
         for (ld_u32 j = cnt; j > 0; j--) {
@@ -194,8 +256,15 @@ LD_PUBLIC int __ldso_dlclose(void *handle) {
     return 0;
 }
 
+LD_PUBLIC int __ldso_dlclose(void *handle) {
+    dl_lock();
+    int r = dlclose_locked(handle);
+    dl_unlock();
+    return r;
+}
+
 /* -------------------------------------------------------------------- *
- * dladdr — given an address, find the DSO + symbol containing it.
+ * dladdr - given an address, find the DSO + symbol containing it.
  * -------------------------------------------------------------------- */
 
 /* Walk a DSO's dynamic symbol table for the symbol whose
@@ -256,7 +325,7 @@ static Elf32_Sym *dl_find_sym_in_obj(const ld_obj_t *o, ld_u32 target) {
     return best;
 }
 
-/* Userspace-visible Dl_info — must match the layout in
+/* Userspace-visible Dl_info - must match the layout in
  * include/dlfcn.h.  Kept here as a local struct so ld.so doesn't
  * need to include the userspace header. */
 typedef struct {
@@ -364,7 +433,7 @@ ld_u32 ld_lookup_in_obj(const ld_obj_t *o, const char *name) {
 }
 
 /*
- * dl_iterate_phdr(3) — walk every loaded object (the executable plus all
+ * dl_iterate_phdr(3) - walk every loaded object (the executable plus all
  * shared libraries) and hand each one's program headers to the callback.
  * libgcc's DWARF unwinder, when built with USE_PT_GNU_EH_FRAME, calls this
  * to locate each module's PT_GNU_EH_FRAME (.eh_frame_hdr); it is what lets

@@ -1,5 +1,5 @@
 /*
- * ld_resolve.c — symbol resolution against the loaded-object list.
+ * ld_resolve.c - symbol resolution against the loaded-object list.
  *
  * Phase 3 + Phase 5 strategy: walk the loaded-object list in load
  * order; for each object, hash-lookup the name in DT_GNU_HASH
@@ -18,19 +18,19 @@
  *
  * Still deferred:
  *   - LD_PRELOAD / interposition rules.
- *   - STV_HIDDEN / STV_PROTECTED visibility filtering — every
+ *   - STV_HIDDEN / STV_PROTECTED visibility filtering - every
  *     globally-bound symbol is currently eligible.
  *
  * Weak symbol semantics: WEAK undef references keep looking past
  * undef; first non-undef def (strong or weak) wins.  Standard
- * vague-linkage handling — multiple DSOs may legitimately export
+ * vague-linkage handling - multiple DSOs may legitimately export
  * the same symbol (vtables, typeinfo, template instantiations) and
  * the runtime picks one canonical instance.
  */
 
 #include "ld.h"
 
-/* GNU hash function — single-pass DJB-style.  Identical formula
+/* GNU hash function - single-pass DJB-style.  Identical formula
  * to glibc and BSD rtld so symbol indices match.  */
 static ld_u32 gnu_hash(const char *s) {
     ld_u32 h = 5381;
@@ -38,7 +38,7 @@ static ld_u32 gnu_hash(const char *s) {
     return h;
 }
 
-/* SysV hash — used when the .so was built without DT_GNU_HASH. */
+/* SysV hash - used when the .so was built without DT_GNU_HASH. */
 static ld_u32 sysv_hash(const char *s) {
     ld_u32 h = 0, g;
     while (*s) {
@@ -57,8 +57,8 @@ static int strcmp_local(const char *a, const char *b) {
 
 /* GNU-hash table layout (binutils gnu-hash.txt):
  *   uint32 nbuckets
- *   uint32 symbias       — symbol index of first hashed symbol
- *   uint32 bloom_size    — number of bloom words (size_t-wide)
+ *   uint32 symbias       - symbol index of first hashed symbol
+ *   uint32 bloom_size    - number of bloom words (size_t-wide)
  *   uint32 bloom_shift
  *   size_t bloom[bloom_size]
  *   uint32 buckets[nbuckets]
@@ -145,7 +145,7 @@ static Elf32_Sym *lookup_sysv(const ld_obj_t *o, const char *name,
     return 0;
 }
 
-/* Standard ELF hash — the same function ELF uses for symbol-name
+/* Standard ELF hash - the same function ELF uses for symbol-name
  * hashing in the SysV DT_HASH section, and (separately) for
  * GNU-versioning verdef/verneed name hashes. */
 ld_u32 ld_elf_hash(const char *s) {
@@ -173,7 +173,7 @@ ld_u32 ld_elf_hash(const char *s) {
  *                    the symbol's verdef carries that vd_hash.
  *
  * For DSOs without DT_VERSYM (substrate's own libc / libm / etc.
- * pre-Phase-5) every symbol matches — versioning is opt-in per
+ * pre-Phase-5) every symbol matches - versioning is opt-in per
  * object. */
 static int version_matches(const ld_obj_t *o, ld_u32 sym_index,
                            ld_u32 want_hash) {
@@ -227,7 +227,7 @@ static int version_matches(const ld_obj_t *o, ld_u32 sym_index,
  * is what the old single-shot lookup returned.  If that first hit is
  * the hidden compat tag, version_matches rejects it for an
  * unversioned reference and resolve_internal moves on to the next
- * DSO — missing the default-version definition sitting one chain
+ * DSO - missing the default-version definition sitting one chain
  * link later. */
 /* Arg threaded through resolve_pred: the wanted version hash plus the
  * object that issued the reference (for the canonical-PLT rule below). */
@@ -247,7 +247,7 @@ static int resolve_pred(const ld_obj_t *o, ld_u32 sym_idx, void *arg) {
          * this: libXt resolves widget class-method inheritance with
          * `method == XtInheritInsertChild` (== &_XtInherit), but dtwm's
          * DtPanelShell class record (compiled into the non-PIE exe) held
-         * dtwm's canonical PLT &_XtInherit while libXt.so saw its own —
+         * dtwm's canonical PLT &_XtInherit while libXt.so saw its own -
          * so insert_child never resolved, calling it raised "Unresolved
          * inheritance operation", and dtwm aborted the desktop.
          *
@@ -255,7 +255,7 @@ static int resolve_pred(const ld_obj_t *o, ld_u32 sym_idx, void *arg) {
          * for address-taken functions (st_value != 0; call-only UND funcs
          * keep st_value 0), and ONLY when the requester is some other
          * module.  The program's own PLT JMP_SLOT must still bind to the
-         * real defining DSO — otherwise GOT[f] would point back at the
+         * real defining DSO - otherwise GOT[f] would point back at the
          * program's own PLT stub and any call through it self-loops
          * (which hung Xfbdev for every address-taken-and-called func). */
         if (o == ld_obj_list() && o != ctx->requester && s->st_value != 0 &&
@@ -271,7 +271,7 @@ static int resolve_pred(const ld_obj_t *o, ld_u32 sym_idx, void *arg) {
 /* Internal: scope walk with optional skip-this-object, version filter, a
  * place to deposit the symbol's st_size for R_386_COPY callers, and the
  * requesting object (so a program's own relocations don't pick up its
- * own canonical-PLT entry — see resolve_pred). */
+ * own canonical-PLT entry - see resolve_pred). */
 static ld_u32 resolve_internal(const char *name, ld_u32 want_ver_hash,
                                const ld_obj_t *skip, ld_u32 *size_out,
                                const ld_obj_t *requester) {
@@ -301,7 +301,7 @@ ld_u32 ld_resolve_with_size(const char *name, const ld_obj_t *skip,
     return resolve_internal(name, 0, skip, size_out, 0);
 }
 
-/* Resolve an imported TLS symbol (initial-exec model — e.g. a program
+/* Resolve an imported TLS symbol (initial-exec model - e.g. a program
  * referencing libstdc++'s `thread_local std::__once_call`).  Returns the
  * symbol's RAW st_value (its offset within its DEFINING module's PT_TLS
  * image, NOT biased by the load base) and hands that module back via

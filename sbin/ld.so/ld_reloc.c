@@ -1,24 +1,24 @@
 /*
- * ld_reloc.c — apply DT_REL and DT_JMPREL on a loaded object.
+ * ld_reloc.c - apply DT_REL and DT_JMPREL on a loaded object.
  *
  * Phase 3 supports the i386 relocation types listed below; every
  * other type aborts with a diagnostic so we never silently scribble
  * the wrong value:
  *
- *   R_386_NONE     — no-op.
- *   R_386_RELATIVE — *p += base                (already done in
+ *   R_386_NONE     - no-op.
+ *   R_386_RELATIVE - *p += base                (already done in
  *                    ld_start.S for our own image; included here
  *                    for shared libraries the loader brings in).
- *   R_386_GLOB_DAT — *p  = S
- *   R_386_JMP_SLOT — *p  = S  (eager binding; no lazy stub)
- *   R_386_32       — *p  = S + A   (A = current contents of p)
- *   R_386_PC32     — *p  = S + A - P
+ *   R_386_GLOB_DAT - *p  = S
+ *   R_386_JMP_SLOT - *p  = S  (eager binding; no lazy stub)
+ *   R_386_32       - *p  = S + A   (A = current contents of p)
+ *   R_386_PC32     - *p  = S + A - P
  *
  * No DT_RELA on i386 by spec.  R_386_COPY copies a DSO's data
  * bytes into a non-PIE executable's own .bss slot; it is applied
  * in a dedicated final pass (ld_relocate_copy) AFTER every object
  * has been through ld_relocate, because the copy reads the source
- * variable's *relocated* value — running it while the providing
+ * variable's *relocated* value - running it while the providing
  * library is still unrelocated copies zero.
  */
 
@@ -28,7 +28,7 @@
  * hash that this reference requires.  Returns 0 if either the
  * object has no versioning or this particular reference is
  * unversioned (VER_NDX_GLOBAL).  Used to keep cross-DSO links
- * inside the right ABI version family — vital for libstdc++ which
+ * inside the right ABI version family - vital for libstdc++ which
  * legitimately ships multiple definitions of the same symbol name
  * at different GLIBCXX_3.4.* version tags. */
 static ld_u32 importer_version_hash(const ld_obj_t *obj, ld_u32 sym_idx) {
@@ -136,7 +136,7 @@ static int apply_one(ld_obj_t *obj, Elf32_Rel *r) {
          * memcpy the symbol's bytes into our slot.  The size comes
          * from the source symbol's st_size; the executable's
          * version of the symbol must be at least that big (it
-         * is — same .o-defined extern data both sides agree on). */
+         * is - same .o-defined extern data both sides agree on). */
         if (sym == 0) return 0;
         const char *name = obj->strtab + obj->symtab[sym].st_name;
         ld_u32 size = 0;
@@ -180,13 +180,13 @@ static int apply_one(ld_obj_t *obj, Elf32_Rel *r) {
                 return -1;
             }
             /* A defining module with no tls_modid was loaded AFTER the
-             * one-shot startup TLS layout (dlopen) — its tls_offset is
+             * one-shot startup TLS layout (dlopen) - its tls_offset is
              * 0, and 0-offset math would produce POSITIVE %gs offsets
              * that scribble over the TCB/DTV.  Fail the relocation
              * (and thus the dlopen) instead of corrupting memory. */
             if (def->tls_modid == 0) {
                 ld_puts("ld.so: TLS module loaded after startup (dlopen): ");
-                ld_puts(def->name); ld_puts(" — unsupported\n");
+                ld_puts(def->name); ld_puts(" - unsupported\n");
                 return -1;
             }
             *p = val - def->tls_offset + *p;
@@ -198,11 +198,11 @@ static int apply_one(ld_obj_t *obj, Elf32_Rel *r) {
             return -1;
         }
         /* Same post-startup guard for the local/defined case: an object
-         * dlopen'd after ld_setup_tls() has tls_offset 0 — the formula
+         * dlopen'd after ld_setup_tls() has tls_offset 0 - the formula
          * below would emit positive %gs offsets into the TCB/DTV. */
         if (obj->tls_modid == 0) {
             ld_puts("ld.so: TLS module loaded after startup (dlopen): ");
-            ld_puts(obj->name); ld_puts(" — unsupported\n");
+            ld_puts(obj->name); ld_puts(" - unsupported\n");
             return -1;
         }
         /* Per the i386 TLS variant-II ABI: TPOFF = sym_value - tls_offset
@@ -221,16 +221,16 @@ static int apply_one(ld_obj_t *obj, Elf32_Rel *r) {
          * (LDM uses sym=0) the module is the current object;
          * otherwise it's the defining object of the symbol.  In
          * either case the binding stays inside this DSO because
-         * GD on a globally-defined TLS symbol is unusual — gcc
+         * GD on a globally-defined TLS symbol is unusual - gcc
          * would have emitted IE/TPOFF instead.  Substrate always
          * binds DTPMOD32 to obj->tls_modid for both flavours,
          * which is correct for the LDM/GD-of-local cases that
          * libstdc++ and __thread C++ types produce. */
         if (obj->tls_modid == 0) {
-            /* Loaded after the startup TLS layout (dlopen) — modid 0
+            /* Loaded after the startup TLS layout (dlopen) - modid 0
              * makes __tls_get_addr return NULL.  Fail cleanly. */
             ld_puts("ld.so: TLS module loaded after startup (dlopen): ");
-            ld_puts(obj->name); ld_puts(" — unsupported\n");
+            ld_puts(obj->name); ld_puts(" - unsupported\n");
             return -1;
         }
         *p = obj->tls_modid;
@@ -259,7 +259,7 @@ static int apply_one(ld_obj_t *obj, Elf32_Rel *r) {
 
 int ld_relocate(ld_obj_t *obj) {
     /* R_386_RELATIVE is `*p += base` (non-idempotent).  Apply
-     * relocations exactly once per object — re-running on an
+     * relocations exactly once per object - re-running on an
      * already-relocated object doubles the bias on relative
      * entries and silently corrupts everything.  dlopen's
      * "relocate the world" pass relies on this guard to be safe. */

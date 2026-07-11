@@ -1,5 +1,5 @@
 /*
- * ld_load.c — load a shared object into memory.
+ * ld_load.c - load a shared object into memory.
  *
  * Phase 3 strategy: open the file, read its ELF header off the
  * first page, walk PT_LOAD entries, mmap each segment with the
@@ -12,7 +12,7 @@
  *   - SONAME-based dedup: if a .so with this DT_SONAME is already
  *     loaded, return the cached descriptor.  Loaders without a
  *     SONAME fall back to basename matching.
- *   - No DT_RPATH / DT_RUNPATH yet — search /lib, /usr/lib, then
+ *   - No DT_RPATH / DT_RUNPATH yet - search /lib, /usr/lib, then
  *     LD_LIBRARY_PATH (later).
  *   - Each PT_LOAD must be page-aligned in p_vaddr / p_offset
  *     (per the ELF spec).
@@ -29,7 +29,7 @@ static ld_obj_t *ld_obj_head = 0;
 static ld_obj_t *ld_obj_tail = 0;
 
 /* Built-in (trusted) system search paths, always searched first.
- * Extending the list is just adding an entry — keep terminating NULL. */
+ * Extending the list is just adding an entry - keep terminating NULL. */
 static const char *const ld_search_paths[] = {
     "/lib",
     "/usr/lib",
@@ -38,7 +38,7 @@ static const char *const ld_search_paths[] = {
 };
 
 /*
- * Additional search directories from /etc/ld.so.conf — the system
+ * Additional search directories from /etc/ld.so.conf - the system
  * default library path (the moral equivalent of a baked-in
  * LD_LIBRARY_PATH).  Parsed once, lazily, on the first object load.
  *
@@ -174,7 +174,7 @@ static void ld_cache_dynamic(ld_obj_t *o) {
     o->verdef  = verdef_off  ? (Elf32_Verdef  *)(verdef_off  + o->base) : 0;
     o->verneed = verneed_off ? (Elf32_Verneed *)(verneed_off + o->base) : 0;
 
-    /* DT_SONAME overwrites the basename placeholder set by the loader —
+    /* DT_SONAME overwrites the basename placeholder set by the loader -
      * the SONAME is the canonical dedup key (DT_NEEDED entries carry
      * sonames, not file names).  The old `name[0] == '\0'` guard made
      * this dead code: the placeholder is always non-empty, so dedup
@@ -185,9 +185,16 @@ static void ld_cache_dynamic(ld_obj_t *o) {
     }
 }
 
-/* Append `o` to the global loaded-object list, preserving order. */
+/* Append `o` to the global loaded-object list, preserving order.
+ * The node's fields (set by the caller before this point) must be
+ * visible before it becomes reachable through tail->next, or a
+ * lock-free reader (dl_iterate_phdr, called by the C++ unwinder) could
+ * observe a half-initialized node.  x86 has store-store ordering
+ * (TSO), so a compiler barrier before the linking store is sufficient
+ * to make this a release publish. */
 void ld_obj_append(ld_obj_t *o) {
     o->next = 0;
+    __asm__ volatile("" ::: "memory");      /* publish fields before link */
     if (!ld_obj_head) ld_obj_head = o;
     if (ld_obj_tail) ld_obj_tail->next = o;
     ld_obj_tail = o;
@@ -257,7 +264,7 @@ static ld_obj_t *load_from_path(const char *path) {
     }
     if (!have_load) { ld_close(fd); return 0; }
 
-    /* Anonymous reserve for the whole span — we'll overwrite each
+    /* Anonymous reserve for the whole span - we'll overwrite each
      * PT_LOAD with MAP_FIXED + file backing.  This guarantees we
      * get a contiguous address range. */
     ld_size span = (ld_size)(hi - lo);
@@ -291,11 +298,11 @@ static ld_obj_t *load_from_path(const char *path) {
          *      boundary are part of the LAST file page we mapped.
          *      The file mmap brought in whatever happened to live
          *      in the file at that offset (typically the next
-         *      segment's contents) — definitely not zero.  Memset
+         *      segment's contents) - definitely not zero.  Memset
          *      them to 0 so BSS data starts blank.
          *   2. Pages beyond that (vaddr + mapsz onward, up to the
          *      page-aligned end of memsz) get an anonymous
-         *      MAP_FIXED mapping — anon pages are kernel-zeroed. */
+         *      MAP_FIXED mapping - anon pages are kernel-zeroed. */
         if (ph[i].p_memsz > ph[i].p_filesz) {
             ld_u32 bss_start  = ph[i].p_vaddr + base + ph[i].p_filesz;
             ld_u32 bss_actual_end = ph[i].p_vaddr + base + ph[i].p_memsz;
@@ -338,7 +345,7 @@ static ld_obj_t *load_from_path(const char *path) {
     ld_obj_t *o = &ld_obj_pool[ld_obj_count++];
     /* Zero the slot: pool slots can be released and reused (SONAME
      * dedup below rolls the counter back), and ld_cache_dynamic only
-     * writes fields whose tags are present — stale values from a
+     * writes fields whose tags are present - stale values from a
      * previous occupant must not leak through. */
     {
         unsigned char *z = (unsigned char *)o;
@@ -370,19 +377,19 @@ static ld_obj_t *load_from_path(const char *path) {
         ld_strncpy(o->name, bn, sizeof(o->name));
     }
     /* Remember the full path we actually resolved from, so trace mode
-     * (ldd) reports the real location — /opt/trinity/lib/…, /usr/lib/…,
-     * etc. — rather than a hard-coded /lib guess. */
+     * (ldd) reports the real location - /opt/trinity/lib/…, /usr/lib/…,
+     * etc. - rather than a hard-coded /lib guess. */
     ld_strncpy(o->path, path, sizeof(o->path));
     ld_cache_dynamic(o);
     /* SONAME dedup after the dynamic walk: a symlink alias (libfoo.so
      * -> libfoo.so.1) resolves to a different path but carries the
-     * SONAME of an object we already hold.  Return the existing copy —
+     * SONAME of an object we already hold.  Return the existing copy -
      * o is not yet on the list, so find_loaded only sees prior loads.
      * The duplicate mapping leaks until munmap is wired (LDSO-08). */
     {
         ld_obj_t *dup = find_loaded(o->name);
         if (dup) {
-            ld_obj_count--;         /* o is the last slot — release it */
+            ld_obj_count--;         /* o is the last slot - release it */
             return dup;
         }
     }
@@ -391,7 +398,7 @@ static ld_obj_t *load_from_path(const char *path) {
 }
 
 /* Shell-style wildcard match for a single path component: supports '*'
- * (any run) and '?' (any one char).  No '[...]' classes — ld.so.conf globs
+ * (any run) and '?' (any one char).  No '[...]' classes - ld.so.conf globs
  * never need them. */
 static int ld_fnmatch(const char *pat, const char *str) {
     while (*pat) {
@@ -581,7 +588,7 @@ static void ld_keep_helpers(void) {
     (void)ld_strncmp;
 }
 
-/* Public accessor for the loaded-object list — used by the
+/* Public accessor for the loaded-object list - used by the
  * resolver and relocator. */
 ld_obj_t *ld_obj_list(void) { return ld_obj_head; }
 

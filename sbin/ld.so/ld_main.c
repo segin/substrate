@@ -1,21 +1,21 @@
 /*
- * ld_main.c — Phase 2 entry from asm.
+ * ld_main.c - Phase 2 entry from asm.
  *
  * At call time, our own image's R_386_RELATIVE relocations have
- * already been applied by ld_start.S — so all globals and string
+ * already been applied by ld_start.S - so all globals and string
  * constants are reachable normally.  We're handed the original
  * kernel-built stack pointer (where argc lives).
  *
  * Phase 2 deliverable: locate the program's PT_DYNAMIC via the
  * auxv (AT_PHDR / AT_PHNUM / AT_PHENT), walk it, summarize what
- * we found, then jump to AT_ENTRY.  No DT_NEEDED loading yet —
+ * we found, then jump to AT_ENTRY.  No DT_NEEDED loading yet -
  * that lands in Phase 3.
  */
 
 #include "ld.h"
 
 /* Walk auxv and pull out the entries we need.  argc/argv/envp
- * are skipped over — same logic as the asm AT_ENTRY scanner from
+ * are skipped over - same logic as the asm AT_ENTRY scanner from
  * Phase 1, just doing it in C now that we can. */
 typedef struct {
     ld_u32 phdr;
@@ -117,7 +117,7 @@ static Elf32_Dyn *find_dynamic(const ld_auxv_t *a, ld_u32 *load_bias_out) {
             break;
         }
     }
-    /* No PT_PHDR — fall back to assuming the first PT_LOAD has
+    /* No PT_PHDR - fall back to assuming the first PT_LOAD has
      * p_vaddr = 0, so bias = AT_PHDR - link_time_phdr_vaddr.
      * Without the file header we can't read e_phoff; but the
      * program header table lives at a fixed file offset that maps
@@ -198,7 +198,7 @@ ld_u32 ld_main(ld_u32 *initial_stack) {
      * up-front so the very first AT_* / summarize_dynamic prints
      * below honour the debug flag.  trace_mode is consumed later in
      * this function (see the post-relocation block).  preload_list
-     * is consumed below — right after the program is registered on
+     * is consumed below - right after the program is registered on
      * the loaded-object list, so the preload libs interpose between
      * the program and its DT_NEEDED chain (the canonical position
      * defined by the ELF spec and matched by glibc). */
@@ -230,7 +230,7 @@ ld_u32 ld_main(ld_u32 *initial_stack) {
     /* Secure-execution (setuid/setgid) hardening.  When the kernel set
      * AT_SECURE the program runs with privileges its real user does not
      * hold, so untrusted, environment-driven library search must be
-     * ignored — otherwise `LD_PRELOAD=evil.so ./setuid-root-bin` would
+     * ignored - otherwise `LD_PRELOAD=evil.so ./setuid-root-bin` would
      * inject an attacker-controlled object into a privileged process.
      * Drop LD_PRELOAD here; LD_LIBRARY_PATH is not yet honored, but must
      * be gated the same way once it is. */
@@ -352,7 +352,7 @@ ld_u32 ld_main(ld_u32 *initial_stack) {
             case DT_INIT_ARRAYSZ: prog_obj.init_arraysz = d->d_un.d_val; break;
             case DT_FINI_ARRAY:   fini_arr_off = d->d_un.d_ptr; break;
             case DT_FINI_ARRAYSZ: prog_obj.fini_arraysz = d->d_un.d_val; break;
-            /* GNU symbol versioning — without these the executable's
+            /* GNU symbol versioning - without these the executable's
              * versioned imports (foo@GLIBCXX_3.4.x) all resolve as
              * UNVERSIONED and can mis-bind when a symbol name carries
              * several versions and the wanted one isn't the default. */
@@ -395,7 +395,7 @@ ld_u32 ld_main(ld_u32 *initial_stack) {
         for (ld_size i = 0; i < sizeof(self_name); i++)
             self_obj.name[i] = self_name[i];
         self_obj.base       = a.base;
-        /* We don't have ld.so's own phdrs handy here — leave the
+        /* We don't have ld.so's own phdrs handy here - leave the
          * load span empty.  __ldso_dladdr will simply not report
          * addresses inside ld.so itself; that's fine for a loader. */
         self_obj.load_start = 0;
@@ -450,10 +450,10 @@ ld_u32 ld_main(ld_u32 *initial_stack) {
         ld_obj_append(&self_obj);
     }
 
-    /* LD_PRELOAD — colon-separated list of paths or basenames loaded
+    /* LD_PRELOAD - colon-separated list of paths or basenames loaded
      * AFTER the program but BEFORE its DT_NEEDED chain (because we
      * load them BEFORE the BFS below).  This is the canonical ELF
-     * scope position — preload symbols win over libc/libstdc++/etc.
+     * scope position - preload symbols win over libc/libstdc++/etc.
      * but not over the program's own symbols.  Standard uses:
      * malloc instrumentation, function interposition, debugging.
      *
@@ -462,7 +462,7 @@ ld_u32 ld_main(ld_u32 *initial_stack) {
      * otherwise ld_load_object searches the standard paths.
      *
      * Empty entries (e.g. trailing ':') are skipped silently.
-     * Missing-file failures are non-fatal — we warn and continue
+     * Missing-file failures are non-fatal - we warn and continue
      * so a misconfigured LD_PRELOAD doesn't kill the program. */
     if (preload_list && *preload_list) {
         const char *p = preload_list;
@@ -481,7 +481,7 @@ ld_u32 ld_main(ld_u32 *initial_stack) {
             if (!o) {
                 ld_puts("ld.so: LD_PRELOAD: cannot load ");
                 ld_puts(path);
-                ld_puts(" — skipping\n");
+                ld_puts(" - skipping\n");
                 continue;
             }
             if (ld_debug) {
@@ -497,7 +497,7 @@ ld_u32 ld_main(ld_u32 *initial_stack) {
     /* BFS over the loaded-object list resolving DT_NEEDED.  Walk
      * the list head-to-tail; for each object, load every entry in
      * its DT_NEEDED.  ld_load_object dedup's by SONAME and appends
-     * new objects to the same list — the loop sees them and
+     * new objects to the same list - the loop sees them and
      * processes their dependencies in turn.  Terminates when we
      * walk off the end (every reachable DT_NEEDED has been loaded
      * and its own deps already queued).
@@ -516,7 +516,7 @@ ld_u32 ld_main(ld_u32 *initial_stack) {
                 ld_puts(cur->name);
                 ld_puts(" needs ");
                 ld_puts(soname);
-                ld_puts(" — not found\n");
+                ld_puts(" - not found\n");
                 ld_die("DT_NEEDED resolution failed");
             }
             if (ld_debug) {
@@ -557,7 +557,7 @@ ld_u32 ld_main(ld_u32 *initial_stack) {
      * object above has been through ld_relocate().  The program is
      * the list head and gets relocated first, so its COPY relocs
      * would otherwise capture libraries' pre-relocation (zero)
-     * state — e.g. libXt's `sessionShellWidgetClass`. */
+     * state - e.g. libXt's `sessionShellWidgetClass`. */
     for (ld_obj_t *o = ld_obj_list(); o; o = o->next) {
         if (ld_relocate_copy(o) != 0) {
             ld_die("R_386_COPY relocation failed");
@@ -567,7 +567,7 @@ ld_u32 ld_main(ld_u32 *initial_stack) {
     /* Trace mode: dump the loaded-object map and exit without
      * handing control to the program.  Output format mirrors GNU
      * `ldd`: one tab-indented "soname => path (0xbase)" per line.
-     * Skip the program itself (head of list) — GNU ldd's output
+     * Skip the program itself (head of list) - GNU ldd's output
      * doesn't list the binary itself. */
     if (trace_mode) {
         for (ld_obj_t *o = ld_obj_list(); o; o = o->next) {
@@ -576,7 +576,7 @@ ld_u32 ld_main(ld_u32 *initial_stack) {
             ld_puts(o->name);
             int is_self = o->name[0]=='l'&&o->name[1]=='d'&&o->name[2]=='.';
             if (is_self) {
-                /* ld.so itself — no resolved path. */
+                /* ld.so itself - no resolved path. */
                 ld_puts(" (");
             } else {
                 /* Report the real path it resolved from; fall back to a
@@ -606,7 +606,7 @@ ld_u32 ld_main(ld_u32 *initial_stack) {
 
     /* glibc-rtld parity: publish `environ` BEFORE any constructor runs.
      * crt0 only assigns it at program entry, which happens after the
-     * DT_INIT/init_array pass below — so a shared-library constructor
+     * DT_INIT/init_array pass below - so a shared-library constructor
      * calling getenv() (or an interposing getenv, e.g. ksh93/dtksh's
      * sh_getenv) would otherwise walk a NULL environ and fault.
      * ld_resolve returns the canonical symbol (the program's copy when
@@ -652,7 +652,7 @@ void __ldso_run_fini(void) {
  * array, then iterate in reverse so deepest deps run first.  Each
  * object's DT_INIT runs before its DT_INIT_ARRAY (per ABI), and
  * within the array entries fire in declared order.  The program
- * itself is included — it may carry its own __attribute__((ctor))
+ * itself is included - it may carry its own __attribute__((ctor))
  * functions even without static C++ globals. */
 void ld_run_init_arrays(void) {
     ld_obj_t *stack[LD_MAX_OBJS_INIT_LIMIT];

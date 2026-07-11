@@ -1,5 +1,5 @@
 /*
- * ld_tls.c — install per-thread TLS (i386 variant 2 layout).
+ * ld_tls.c - install per-thread TLS (i386 variant 2 layout).
  *
  * i386 variant-II TLS:
  *
@@ -42,10 +42,10 @@ static ld_u32 align_up(ld_u32 v, ld_u32 a) {
     return a <= 1 ? v : (v + a - 1) & ~(a - 1);
 }
 
-/* Global GS base — recorded here so __tls_get_addr() can read it
+/* Global GS base - recorded here so __tls_get_addr() can read it
  * cheaply without a syscall.  Set at the end of ld_setup_tls().
  * The same value is also stored at TCB[0] via the variant-II
- * self-pointer, but reading via gs:0 needs a tiny asm helper —
+ * self-pointer, but reading via gs:0 needs a tiny asm helper -
  * doing it from C through this variable is portable enough.
  *
  * NOTE: this is the INITIAL thread's TP.  Each pthread_create-
@@ -83,7 +83,7 @@ int ld_setup_tls(void) {
     /* First pass: assign each PT_TLS module a negative offset from
      * the thread pointer, in load order.  The deepest dep gets the
      * highest |offset| (= farthest below the TP), the program gets
-     * the lowest |offset| (= immediately below the TP) — same as
+     * the lowest |offset| (= immediately below the TP) - same as
      * what static linkers compute when relocating the program.
      *
      * Module IDs are 1-based (0 means "no TLS"), allocated in the
@@ -103,7 +103,7 @@ int ld_setup_tls(void) {
     ld_tls_modcount = next_modid - 1;
     /* Round the final cursor up to the LARGEST module alignment.  Each
      * module's slot lives at tp - tls_offset with tls_offset a multiple
-     * of that module's own alignment — so the slot is aligned iff tp
+     * of that module's own alignment - so the slot is aligned iff tp
      * itself is aligned to it.  tp = block + cursor with block page-
      * aligned, so aligning the cursor to max_align aligns tp for every
      * module.  (Assumes max_align <= PAGE_SIZE, true for any real DSO.)
@@ -111,10 +111,10 @@ int ld_setup_tls(void) {
      * smaller-aligned one could land at tp-offset ≡ 4 (mod 16). */
     cursor = align_up(cursor, max_align);
     if (cursor == 0) {
-        /* No TLS-using objects.  Skip — gs:0 stays whatever the
+        /* No TLS-using objects.  Skip - gs:0 stays whatever the
          * kernel left it; libc that doesn't use __thread won't
          * touch it. */
-        LD_DBG(ld_puts("ld.so: no PT_TLS modules — skipping TLS setup\n"));
+        LD_DBG(ld_puts("ld.so: no PT_TLS modules - skipping TLS setup\n"));
         return 0;
     }
     if (cursor + LD_TLS_TCB_SIZE > LD_TLS_MAX_BYTES) {
@@ -163,7 +163,7 @@ int ld_setup_tls(void) {
     }
 
     /* Install the GS base.  After this, %gs:N maps to (tp + N)
-     * for any N — including negative offsets that hit our TLS
+     * for any N - including negative offsets that hit our TLS
      * slots and zero that returns the TCB's self-pointer. */
     int rc = ld_sys_set_gsbase(tp);
     if (rc < 0) {
@@ -190,9 +190,9 @@ int ld_setup_tls(void) {
  * address of variable X within the current thread.
  *
  * Substrate's loader stores per-module TLS offsets in ld_obj_t.
- * Linear scan is fine — programs rarely have more than a handful
+ * Linear scan is fine - programs rarely have more than a handful
  * of TLS-using modules. */
-/* Public surface — explicit visibility since the rest of ld.so is
+/* Public surface - explicit visibility since the rest of ld.so is
  * built with -fvisibility=hidden. */
 #define LD_PUBLIC __attribute__((visibility("default")))
 
@@ -201,7 +201,7 @@ int ld_setup_tls(void) {
  * set gs_base via sys_set_gsbase from ld_setup_tls) AND for
  * pthread-created threads (where the kernel set gs_base from
  * thr_param.tls_base via kern_thr_new).  Cheaper and more correct
- * than reading the static ld_tp — which only knows about the
+ * than reading the static ld_tp - which only knows about the
  * initial thread's block. */
 static inline ld_u32 current_tp(void) {
     ld_u32 tp;
@@ -281,7 +281,7 @@ LD_PUBLIC void __ldso_free_tls(void *tp_ptr) {
  *     call  ___tls_get_addr@PLT
  * i.e. the tls_index pointer is passed in %eax, NOT on the stack.  So
  * ___tls_get_addr (three underscores) takes its argument with regparm(1);
- * it is NOT a plain alias of the stack-convention __tls_get_addr — aliasing
+ * it is NOT a plain alias of the stack-convention __tls_get_addr - aliasing
  * the two would make ___tls_get_addr read a garbage "pointer" off the stack. */
 LD_PUBLIC __attribute__((regparm(1))) void *___tls_get_addr(tls_index *idx) {
     return ld_tls_get_addr(idx);
