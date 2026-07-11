@@ -3011,8 +3011,22 @@ static int ext2_add_entry(fs_node_t *dir, const char *name, uint32_t inode, uint
             block_off += de->rec_len;
             pos += de->rec_len;
         }
+
+        /*
+         * Guarantee forward progress.  The inner scan can break early on a
+         * malformed entry (rec_len < 8, a record that runs past the block, or
+         * name_len larger than the record) without having advanced pos into the
+         * next block.  If pos is left mid-block the outer loop recomputes the
+         * same block_idx, re-reads the same block, breaks again, and spins
+         * forever in the kernel -- an unkillable 100%-CPU hang (observed adding
+         * a directory entry into a directory with a corrupt/zero block).  Skip
+         * to the start of the next block so a bad block can never trap us.
+         */
+        uint32_t block_end = (block_idx + 1) * fs->block_size;
+        if (pos < block_end)
+            pos = block_end;
     }
-    
+
     // No space found - need to allocate a new block
     uint32_t new_block_idx = dir_size / fs->block_size;
 
