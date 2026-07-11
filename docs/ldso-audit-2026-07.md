@@ -3,7 +3,12 @@
 Full read of `sbin/ld.so/` (3,303 lines: ld.h, ld_start.S, ld_io.c,
 ld_load.c, ld_main.c, ld_resolve.c, ld_reloc.c, ld_tls.c, ld_dl.c,
 Makefile) at commit f815b4ee0.  Findings numbered LDSO-NN, ranked by
-severity.  Status: **all open** (audit only — no fixes applied).
+severity.
+
+Status: **all 20 findings fixed** (one commit each, LDSO-01..LDSO-20).
+LDSO-08 landed in two parts: 08a (munmap wrapper + leak-free
+failure/rollback/dedup) and 08b (native mprotect syscall + W^X/RELRO,
+boot-verified).  See `git log` for the per-finding commits.
 
 What's solid: the `ld_mmap_failed()` -errno-range check (high-address
 mappings handled), the two-pass R_386_COPY design, the canonical-PLT

@@ -1,0 +1,81 @@
+.\" Process this file with
+.\" groff -man -Tascii mprotect.2
+.\"
+.TH MPROTECT 2 "July 2026" "Substrate Kernel" "System Calls Manual"
+.SH NAME
+mprotect \- set protection on a region of memory
+.SH LIBRARY
+Standard C library (libc, -lc)
+.SH SYNOPSIS
+.B #include <sys/mman.h>
+.PP
+.BI "int mprotect(void *" addr ", size_t " len ", int " prot ");"
+.SH DESCRIPTION
+.B mprotect()
+changes the access protections for the calling process's memory pages
+containing any part of the address range
+.RI [ addr ", " addr + len ).
+.PP
+.I addr
+must be page-aligned.
+.I len
+is rounded up to the next page boundary; a
+.I len
+of 0 is a no-op.
+.PP
+.I prot
+is a bitwise OR of the following flags:
+.TP
+.B PROT_READ
+The memory may be read.
+.TP
+.B PROT_WRITE
+The memory may be written.
+.TP
+.B PROT_EXEC
+The memory may be executed.
+.PP
+.B PROT_READ,
+.B PROT_WRITE,
+and
+.B PROT_EXEC
+have the values 0x1, 0x2, and 0x4, matching the kernel's internal
+.B VM_PROT_*
+constants.
+The requested protection is applied to the underlying virtual-memory
+map entries (not merely to already-faulted pages), so a page brought in
+by a later demand fault is populated with the new protection.
+.PP
+The new protection is clamped to each mapping's maximum protection: a
+region may only be reprotected to a subset of the protection it was
+created with.
+.SH RETURN VALUE
+On success,
+.B mprotect()
+returns 0.
+On error, \-1 is returned and
+.I errno
+is set to indicate the error.
+.SH ERRORS
+.TP
+.B EINVAL
+.I addr
+is not page-aligned, or the range
+.RI [ addr ", " addr + len )
+falls outside the user address space.
+.TP
+.B ENOMEM
+The process has no address space, or the kernel could not apply the
+protection change to the requested range.
+.SH SEE ALSO
+.BR mmap (2),
+.BR munmap (2)
+.SH NOTES
+The Substrate dynamic linker
+.RB ( /sbin/ld.so )
+uses
+.B mprotect()
+to restore write-exclusive-or-execute (W^X) on shared-library text and
+to make each object's
+.B PT_GNU_RELRO
+region read-only once relocations are applied.
