@@ -280,6 +280,7 @@ static inline int ld_mmap_failed(void *p) {
  * in load order for deterministic symbol resolution. */
 typedef struct ld_obj {
     char            name[64];   /* SONAME or basename, for diagnostics */
+    char            path[256];  /* full filesystem path it resolved from (ldd) */
     ld_u32          base;       /* load bias */
     ld_u32          load_start; /* low end of PT_LOAD span (absolute) */
     ld_u32          load_end;   /* high end of PT_LOAD span (absolute) */

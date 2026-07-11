@@ -563,11 +563,18 @@ ld_u32 ld_main(ld_u32 *initial_stack) {
             ld_puts(o->name);
             int is_self = o->name[0]=='l'&&o->name[1]=='d'&&o->name[2]=='.';
             if (is_self) {
-                /* ld.so itself — no /lib path. */
+                /* ld.so itself — no resolved path. */
                 ld_puts(" (");
             } else {
-                ld_puts(" => /lib/");
-                ld_puts(o->name);
+                /* Report the real path it resolved from; fall back to a
+                 * /lib guess only if we somehow never recorded one. */
+                ld_puts(" => ");
+                if (o->path[0])
+                    ld_puts(o->path);
+                else {
+                    ld_puts("/lib/");
+                    ld_puts(o->name);
+                }
                 ld_puts(" (");
             }
             ld_putx(o->base);

@@ -349,6 +349,10 @@ static ld_obj_t *load_from_path(const char *path) {
         for (const char *p = path; *p; p++) if (*p == '/') bn = p + 1;
         ld_strncpy(o->name, bn, sizeof(o->name));
     }
+    /* Remember the full path we actually resolved from, so trace mode
+     * (ldd) reports the real location — /opt/trinity/lib/…, /usr/lib/…,
+     * etc. — rather than a hard-coded /lib guess. */
+    ld_strncpy(o->path, path, sizeof(o->path));
     ld_cache_dynamic(o);
     ld_obj_append(o);
     return o;
