@@ -354,7 +354,14 @@ static ld_obj_t *load_from_path(const char *path) {
                                   prot | LD_PROT_WRITE,
                                   LD_MAP_PRIVATE | LD_MAP_ANON | LD_MAP_FIXED,
                                   -1, 0);
-                (void)a;
+                /* A failed BSS mapping used to be ignored, so the load
+                 * "succeeded" and the process faulted later touching
+                 * .bss.  Fail the load and release the reservation. */
+                if (ld_mmap_failed(a)) {
+                    ld_close(fd);
+                    ld_munmap(base_v, span);
+                    return 0;
+                }
             }
         }
     }
