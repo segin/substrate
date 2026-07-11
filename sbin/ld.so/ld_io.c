@@ -177,6 +177,11 @@ void *ld_mmap(void *addr, ld_size len, int prot, int flags,
     return (void *)r;
 }
 
+long ld_munmap(void *addr, ld_size len) {
+    return ld_syscall3(SYS_munmap, (ld_u32)(unsigned long)addr,
+                       (ld_u32)len, 0);
+}
+
 int ld_sys_set_gsbase(ld_u32 base) {
     return (int)ld_syscall1(SYS_set_gsbase, base);
 }

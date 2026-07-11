@@ -129,6 +129,7 @@ typedef struct {
 #define SYS_close  6
 #define SYS_lseek 19
 #define SYS_mmap        90
+#define SYS_munmap      91
 #define SYS_fstat      108
 #define SYS_getdents   141
 #define SYS_futex      240
@@ -266,6 +267,7 @@ long  ld_lseek(int fd, long off, int whence);
 long  ld_getdents(int fd, void *buf, ld_size n);
 void *ld_mmap(void *addr, ld_size len, int prot, int flags,
               int fd, ld_u32 page_off);
+long  ld_munmap(void *addr, ld_size len);
 
 /* True iff an mmap/syscall pointer return is an error.  The kernel returns
  * a -errno in [-4095, -1] on failure; everything else is a valid pointer.

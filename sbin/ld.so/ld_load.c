@@ -210,12 +210,17 @@ void ld_obj_savepoint(ld_obj_t **tail_out, ld_size *count_out) {
     *count_out = ld_obj_count;
 }
 
-/* Truncate the list back to `tail` and release every pool slot past
- * `count`.  The underlying mmap'd segments are not unmapped yet (no
- * munmap wrapper until LDSO-08), so this leaks address space on the
- * failure path - but it keeps half-loaded, unrelocated objects from
- * staying resolvable in the global scope. */
+/* Truncate the list back to `tail`, unmap every object appended after
+ * it, and release every pool slot past `count`.  Each object records
+ * its reserved span in [load_start, load_end), so the whole mapping is
+ * handed back - no address-space leak on the dlopen failure path. */
 void ld_obj_restore(ld_obj_t *tail, ld_size count) {
+    ld_obj_t *first = tail ? tail->next : ld_obj_head;
+    for (ld_obj_t *o = first; o; o = o->next) {
+        if (o->load_end > o->load_start)
+            ld_munmap((void *)(unsigned long)o->load_start,
+                      (ld_size)(o->load_end - o->load_start));
+    }
     if (tail) {
         tail->next = 0;
         ld_obj_tail = tail;
@@ -317,7 +322,11 @@ static ld_obj_t *load_from_path(const char *path) {
                               prot | LD_PROT_WRITE,
                               LD_MAP_PRIVATE | LD_MAP_FIXED,
                               fd, fileoff_pages);
-            if (ld_mmap_failed(r) || r != (void *)vaddr) { ld_close(fd); return 0; }
+            if (ld_mmap_failed(r) || r != (void *)vaddr) {
+                ld_close(fd);
+                ld_munmap(base_v, span);    /* release the reservation */
+                return 0;
+            }
         }
         /* BSS handling.  Two pieces:
          *   1. Bytes from (p_vaddr + p_filesz) up to the next page
@@ -366,7 +375,7 @@ static ld_obj_t *load_from_path(const char *path) {
             tls_align  = ph[i].p_align ? ph[i].p_align : 1;
         }
     }
-    if (!dyn) return 0;
+    if (!dyn) { ld_munmap(base_v, span); return 0; }
 
     ld_obj_t *o = &ld_obj_pool[ld_obj_count++];
     /* Zero the slot: pool slots can be released and reused (SONAME
@@ -415,7 +424,8 @@ static ld_obj_t *load_from_path(const char *path) {
     {
         ld_obj_t *dup = find_loaded(o->name);
         if (dup) {
-            ld_obj_count--;         /* o is the last slot - release it */
+            ld_munmap(base_v, span); /* drop this alias's mapping */
+            ld_obj_count--;          /* o is the last slot - release it */
             return dup;
         }
     }
