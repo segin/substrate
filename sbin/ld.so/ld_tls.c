@@ -101,6 +101,15 @@ int ld_setup_tls(void) {
         if (align > max_align) max_align = align;
     }
     ld_tls_modcount = next_modid - 1;
+    /* Round the final cursor up to the LARGEST module alignment.  Each
+     * module's slot lives at tp - tls_offset with tls_offset a multiple
+     * of that module's own alignment — so the slot is aligned iff tp
+     * itself is aligned to it.  tp = block + cursor with block page-
+     * aligned, so aligning the cursor to max_align aligns tp for every
+     * module.  (Assumes max_align <= PAGE_SIZE, true for any real DSO.)
+     * Without this, a 16-byte-aligned TLS block laid out before a
+     * smaller-aligned one could land at tp-offset ≡ 4 (mod 16). */
+    cursor = align_up(cursor, max_align);
     if (cursor == 0) {
         /* No TLS-using objects.  Skip — gs:0 stays whatever the
          * kernel left it; libc that doesn't use __thread won't
