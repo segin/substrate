@@ -77,12 +77,12 @@ cmake -G "Unix Makefiles" \
 make -j"${JOBS}"
 rm -rf "${DEST}"; make install DESTDIR="${DEST}"
 
-# substrate: the panel (kicker) and desktop shell (kdesktop) come up through
-# their stock autostart .desktop entries (panel.desktop / kdesktop.desktop),
-# launched by the autostart phase.  ksmserver no longer starts them itself
-# (the old direct-launch workaround was dropped from tdebase patch 0006 because
-# it raced a second copy against the autostart, reloading the panel twice), so
-# these entries are the sole launcher and must NOT be removed.
+# substrate: stock ksmserver brings the panel (kicker) and desktop shell
+# (kdesktop) up through the normal DCOP autostart, which reads their
+# panel.desktop / kdesktop.desktop entries.  (The old ksmserver direct-launch
+# workaround and this file's deletion of those .desktop entries were removed
+# once the fork/AF_UNIX bug behind the no-fork cluster was fixed -- they double-
+# launched the panel.)  Leave the autostart entries in place.
 
 _n=0
 for so in $(find "${DEST}/opt/trinity" -name '*.so*' -type f); do
