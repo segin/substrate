@@ -215,36 +215,57 @@ static int apply_one(ld_obj_t *obj, Elf32_Rel *r) {
         return 0;
     }
 
-    case R_386_TLS_DTPMOD32:
+    case R_386_TLS_DTPMOD32: {
         /* Module-id half of the tls_index pair consumed by
-         * __tls_get_addr in the GD model.  For undef-sym variants
-         * (LDM uses sym=0) the module is the current object;
-         * otherwise it's the defining object of the symbol.  In
-         * either case the binding stays inside this DSO because
-         * GD on a globally-defined TLS symbol is unusual - gcc
-         * would have emitted IE/TPOFF instead.  Substrate always
-         * binds DTPMOD32 to obj->tls_modid for both flavours,
-         * which is correct for the LDM/GD-of-local cases that
-         * libstdc++ and __thread C++ types produce. */
-        if (obj->tls_modid == 0) {
-            /* Loaded after the startup TLS layout (dlopen) - modid 0
-             * makes __tls_get_addr return NULL.  Fail cleanly. */
+         * __tls_get_addr in the GD model.  LDM (sym == 0) and a
+         * GD reference to a TLS symbol DEFINED in this object both
+         * bind to obj's own module id.  But a GD reference to a
+         * __thread variable defined in ANOTHER DSO (sym UNDEF) must
+         * bind to the DEFINING module's id - binding the importer's
+         * id made __tls_get_addr return the wrong module's block. */
+        ld_u32 modid = obj->tls_modid;
+        if (sym != 0 && obj->symtab[sym].st_shndx == SHN_UNDEF) {
+            const char *nm = obj->strtab + obj->symtab[sym].st_name;
+            const ld_obj_t *def = 0;
+            (void)ld_resolve_tls(nm, obj, &def);
+            if (!def) {
+                ld_puts("ld.so: DTPMOD32 undef TLS sym in ");
+                ld_puts(obj->name); ld_puts(": "); ld_puts(nm); ld_puts("\n");
+                return -1;
+            }
+            modid = def->tls_modid;
+        }
+        if (modid == 0) {
+            /* The defining module was loaded after the startup TLS
+             * layout (dlopen) - modid 0 makes __tls_get_addr return
+             * NULL.  Fail cleanly. */
             ld_puts("ld.so: TLS module loaded after startup (dlopen): ");
             ld_puts(obj->name); ld_puts(" - unsupported\n");
             return -1;
         }
-        *p = obj->tls_modid;
+        *p = modid;
         return 0;
+    }
 
     case R_386_TLS_DTPOFF32: {
         /* Offset-within-module half of the GD/LD pair.  For LDM
-         * (sym == 0) the addend already carries the offset.  For
-         * GD-with-symbol, resolve to st_value within obj. */
+         * (sym == 0) the addend already carries the offset.  For a
+         * GD symbol defined here, use its st_value; for one imported
+         * from another DSO, use its st_value within that module
+         * (ld_resolve_tls returns the raw, unbiased value). */
         if (sym == 0) return 0;
         Elf32_Sym *s = &obj->symtab[sym];
         if (s->st_shndx == SHN_UNDEF) {
-            ld_puts("ld.so: DTPOFF undef in "); ld_puts(obj->name); ld_puts("\n");
-            return -1;
+            const char *nm = obj->strtab + s->st_name;
+            const ld_obj_t *def = 0;
+            ld_u32 val = ld_resolve_tls(nm, obj, &def);
+            if (!def) {
+                ld_puts("ld.so: DTPOFF undef in "); ld_puts(obj->name);
+                ld_puts(": "); ld_puts(nm); ld_puts("\n");
+                return -1;
+            }
+            *p = val + *p;
+            return 0;
         }
         *p = s->st_value + *p;
         return 0;
