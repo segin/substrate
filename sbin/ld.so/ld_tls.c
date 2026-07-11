@@ -269,11 +269,12 @@ LD_PUBLIC void *__ldso_alloc_tls(void) {
  * (= tp - ld_tls_cursor). */
 LD_PUBLIC void __ldso_free_tls(void *tp_ptr) {
     if (!tp_ptr || ld_tls_total == 0) return;
-    /* munmap not yet wired through ld.so's io layer; for now we
-     * leak the block.  libpthread doesn't currently support
-     * detach-then-exit either, so the leak is bounded by
-     * MAX_PTHREADS. */
-    (void)tp_ptr;
+    /* The block was mmap'd at (tp - ld_tls_cursor) for ld_tls_total
+     * bytes (see __ldso_alloc_tls / ld_setup_tls); hand the whole
+     * allocation back.  Without this every thread exit leaked >= 1
+     * page. */
+    void *block = (void *)((unsigned long)tp_ptr - ld_tls_cursor);
+    ld_munmap(block, ld_tls_total);
 }
 
 /* The i386 GD/LD sequence GCC emits is:
