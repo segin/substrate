@@ -79,6 +79,16 @@ static void dl_unlock(void) {
     }
 }
 
+/* True iff `h` is a live object handle (a node currently on the loaded-
+ * object list).  dlopen returns ld_obj_t pointers as opaque handles;
+ * a caller passing a stale or garbage handle must not be dereferenced.
+ * The list is short (<= LD_MAX_OBJS), so a linear walk is cheap. */
+static int dl_handle_valid(const void *h) {
+    for (ld_obj_t *o = ld_obj_list(); o; o = o->next)
+        if ((const void *)o == h) return 1;
+    return 0;
+}
+
 /* -------------------------------------------------------------------- *
  * Error string slot
  * -------------------------------------------------------------------- */
@@ -228,7 +238,13 @@ static void *dlsym_locked(void *handle, const char *name, void *caller_pc) {
         return 0;
     }
 
-    /* Object handle - search just this object's symbol table. */
+    /* Object handle - search just this object's symbol table.  Reject a
+     * handle that isn't a live loaded object rather than dereferencing
+     * a stale/garbage pointer. */
+    if (!dl_handle_valid(handle)) {
+        ld_dl_error("dlsym: invalid handle", 0, 0, 0);
+        return 0;
+    }
     ld_obj_t *target = (ld_obj_t *)handle;
     ld_u32 v = ld_lookup_in_obj(target, name);
     if (!v) ld_dl_error("dlsym(\"", name, "\"): not found in handle", 0);
@@ -253,7 +269,8 @@ LD_PUBLIC void *__ldso_dlsym(void *handle, const char *name, void *caller_pc) {
  * -------------------------------------------------------------------- */
 
 static int dlclose_locked(void *handle) {
-    if (!handle || handle == LD_RTLD_DEFAULT || handle == LD_RTLD_NEXT) {
+    if (!handle || handle == LD_RTLD_DEFAULT || handle == LD_RTLD_NEXT ||
+        !dl_handle_valid(handle)) {
         ld_dl_error("dlclose: invalid handle", 0, 0, 0);
         return -1;
     }
