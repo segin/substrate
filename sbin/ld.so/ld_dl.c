@@ -127,24 +127,40 @@ static void *dlopen_locked(const char *path, int flags) {
          * program (== head of loaded-object list). */
         return ld_obj_list();
     }
+    /* Snapshot the list end so any failure below unwinds every object
+     * this call appended - leaving unrelocated, half-loaded objects in
+     * the global scope (the old behaviour) let later lookups bind to
+     * garbage. */
+    ld_obj_t *snap_tail;
+    ld_size   snap_count;
+    ld_obj_savepoint(&snap_tail, &snap_count);
+
     ld_obj_t *o = ld_load_object(path);
     if (!o) {
         ld_dl_error("dlopen(\"", path, "\"): load failed", 0);
+        ld_obj_restore(snap_tail, snap_count);
         return 0;
     }
     /* Walk newly-loaded objects' DT_NEEDED so transitive deps
-     * are pulled in. */
+     * are pulled in.  A missing dependency is fatal (matches the
+     * startup BFS), not silently ignored. */
     for (ld_obj_t *cur = o; cur; cur = cur->next) {
         if (!cur->dynamic || !cur->strtab) continue;
         for (Elf32_Dyn *d = cur->dynamic; d->d_tag != DT_NULL; d++) {
             if (d->d_tag != DT_NEEDED) continue;
             const char *soname = cur->strtab + d->d_un.d_val;
-            (void)ld_load_object(soname);
+            if (!ld_load_object(soname)) {
+                ld_dl_error("dlopen(\"", path, "\"): missing dependency ",
+                            soname);
+                ld_obj_restore(snap_tail, snap_count);
+                return 0;
+            }
         }
     }
     for (ld_obj_t *r = ld_obj_list(); r; r = r->next) {
         if (ld_relocate(r) != 0) {
             ld_dl_error("dlopen(\"", path, "\"): relocation failed", 0);
+            ld_obj_restore(snap_tail, snap_count);
             return 0;
         }
     }

@@ -200,6 +200,32 @@ void ld_obj_append(ld_obj_t *o) {
     ld_obj_tail = o;
 }
 
+/* Record the current end of the loaded-object list + pool cursor so a
+ * failed dlopen can undo every object it appended.  Pool slots are
+ * allocated in append order (load_from_path bumps ld_obj_count and
+ * appends, or rolls back the last slot on dedup), so the objects added
+ * after this point occupy exactly pool slots [count, ld_obj_count). */
+void ld_obj_savepoint(ld_obj_t **tail_out, ld_size *count_out) {
+    *tail_out  = ld_obj_tail;
+    *count_out = ld_obj_count;
+}
+
+/* Truncate the list back to `tail` and release every pool slot past
+ * `count`.  The underlying mmap'd segments are not unmapped yet (no
+ * munmap wrapper until LDSO-08), so this leaks address space on the
+ * failure path - but it keeps half-loaded, unrelocated objects from
+ * staying resolvable in the global scope. */
+void ld_obj_restore(ld_obj_t *tail, ld_size count) {
+    if (tail) {
+        tail->next = 0;
+        ld_obj_tail = tail;
+    } else {
+        ld_obj_head = 0;
+        ld_obj_tail = 0;
+    }
+    ld_obj_count = count;
+}
+
 /* Load a single .so file from `path` into memory.  Returns the
  * descriptor or NULL on failure. */
 static ld_obj_t *load_from_path(const char *path) {

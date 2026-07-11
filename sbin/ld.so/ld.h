@@ -414,6 +414,11 @@ int ld_relocate_copy(ld_obj_t *obj);
 /* Public head of the loaded-object list. */
 ld_obj_t *ld_obj_list(void);
 
+/* Save / restore the end of the loaded-object list so a failed dlopen
+ * can roll back every object it appended (see ld_load.c). */
+void ld_obj_savepoint(ld_obj_t **tail_out, ld_size *count_out);
+void ld_obj_restore(ld_obj_t *tail, ld_size count);
+
 /* Run DT_INIT and DT_INIT_ARRAY for every loaded object in
  * dependency order (deepest deps first, program last).  Idempotent
  * - each object is initialized exactly once via a per-object guard
