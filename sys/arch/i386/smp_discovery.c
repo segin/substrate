@@ -538,11 +538,9 @@ void smp_ap_entry(void) {
     // Signal that we've started and initialized
     __sync_fetch_and_add(&aps_ready, 1);
     
-    kprint("SMP: AP Core online (LAPIC ID: ");
-    // Get and print LAPIC ID
+    // Single kprintf so the whole line emits atomically (see console_out lock).
     uint32_t id = lapic_get_id();
-    smp_emit_u32(kprint, id);
-    kprint(")\n");
+    kprintf("SMP: AP Core online (LAPIC ID: %u)\n", id);
     
     // Enable LAPIC on this AP
     lapic_enable(0xFF);  // Spurious vector
@@ -652,32 +650,23 @@ int smp_boot_ap(uint8_t apic_id) {
         return 0;  // Success
     }
     
-    kprint("SMP: AP ");
-    smp_emit_u32(kprint, apic_id);
-    kprint(" did not respond!\n");
+    kprintf("SMP: AP %u did not respond!\n", apic_id);
     return -1;
 }
 
 // Boot all APs
 void smp_boot_all_aps(void) {
-    kprint("SMP: Booting ");
     int ap_count = cpu_count - 1;  // Exclude BSP
-    smp_emit_u32(kprint, (uint32_t)ap_count);
-    kprint(" Application Processor(s)...\n");
-    
+    kprintf("SMP: Booting %d Application Processor(s)...\n", ap_count);
+
     for (int i = 1; i < cpu_count; i++) {  // Skip BSP (index 0)
         smp_boot_ap(cpus[i].lapic_id);
     }
 
     cpu_count = aps_ready + 1;  // BSP + online APs
 
-    kprint("SMP: ");
-    smp_emit_u32(kprint, (uint32_t)aps_ready);
-    kprint(" AP(s) online.\n");
-
-    kprint("SMP: Brought up ");
-    smp_emit_u32(kprint, (uint32_t)cpu_count);
-    kprint(" CPU(s)!\n");
+    kprintf("SMP: %u AP(s) online.\n", (uint32_t)aps_ready);
+    kprintf("SMP: Brought up %u CPU(s)!\n", (uint32_t)cpu_count);
 }
 
 void smp_init(void) {

@@ -130,13 +130,9 @@ void lapic_enable(uint8_t spurious_vector) {
     
     lapic_write(LAPIC_SVR, svr);
     
-    kprint("LAPIC: Enabled with spurious vector 0x");
-    char buf[3];
-    buf[0] = (spurious_vector >> 4) < 10 ? '0' + (spurious_vector >> 4) : 'A' + (spurious_vector >> 4) - 10;
-    buf[1] = (spurious_vector & 0xF) < 10 ? '0' + (spurious_vector & 0xF) : 'A' + (spurious_vector & 0xF) - 10;
-    buf[2] = '\0';
-    kprint(buf);
-    kprint("\n");
+    /* Single kprintf so the line emits atomically under the console output
+     * lock -- APs enabling their LAPICs concurrently would otherwise interleave. */
+    kprintf("LAPIC: Enabled with spurious vector 0x%02X\n", spurious_vector);
 }
 
 // Disable LAPIC

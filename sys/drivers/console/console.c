@@ -16,11 +16,62 @@
 #include <kern/version.h>
 #include <arch/i386/intr.h>
 #include <drivers/console/uart/uart.h>
+#include <sys/smp.h>
+#include <arch/x86-common/lapic.h>
 
 // Globals
 static console_backend_t *backends = NULL;
 static struct tty *console_tty = NULL;
 static spinlock_t console_input_lock = SPINLOCK_INIT("console_input");
+
+/*
+ * Console output serialization.  Without it, two CPUs writing at once interleave
+ * byte-by-byte (the garbled SMP boot banner).  Held across a whole backend write
+ * and each klog append so every message is emitted atomically.
+ *
+ *  - Uniprocessor: no lock and no IRQ change -- there is no contention, and this
+ *    runs before the LAPIC is up, so lapic_get_id() would be unsafe.  Behaviour
+ *    is exactly as before on UP.
+ *  - SMP: spin for the lock with IRQs disabled.  IRQs off means the panic IPI
+ *    (maskable) can't strand the lock on a mid-write CPU -- it finishes and
+ *    releases first; panic's own output uses a separate direct emitter anyway.
+ *  - Recursion-safe: a backend write that itself kprints on the same CPU (e.g.
+ *    the framebuffer path) finds this CPU already the owner and proceeds without
+ *    re-locking, so substrate's non-recursive spinlock never tripwires.
+ *
+ * The owner is identified by lapic_get_id() (the physical APIC id), NOT the
+ * logical smp_get_cpu_id(): during AP bring-up the latter routes through
+ * percpu_get() and can fall back to CPU 0 for an AP whose percpu mapping is not
+ * established yet, so several APs would compute id 0, all false-match the owner
+ * check, skip the lock, and interleave.  lapic_get_id() is a direct MMIO read
+ * that is correct per-CPU from the moment the AP runs (it prints its own LAPIC
+ * ID in the bring-up banner).
+ */
+static spinlock_t console_out_lock = SPINLOCK_INIT("console_out");
+static volatile int console_out_owner = -1;     /* LAPIC id emitting; -1 = none */
+
+static int console_out_enter(unsigned long *pflags) {
+    *pflags = 0;
+    if (smp_get_cpu_count() <= 1)
+        return 0;                                /* UP: unchanged */
+    int id = (int)lapic_get_id();
+    if (console_out_owner == id)
+        return 0;                                /* reentry: we already own it */
+    unsigned long flags;
+    __asm__ volatile("pushfl; popl %0; cli" : "=r"(flags) :: "memory");
+    spinlock_acquire(&console_out_lock);
+    console_out_owner = id;
+    *pflags = flags;
+    return 1;
+}
+
+static void console_out_leave(int held, unsigned long flags) {
+    if (!held)
+        return;                                  /* UP or reentry: nothing to undo */
+    console_out_owner = -1;
+    spinlock_release(&console_out_lock);
+    __asm__ volatile("pushl %0; popfl" :: "r"(flags) : "memory", "cc");
+}
 
 #define CONSOLE_INPUT_BUF_SIZE 256
 static char console_input_buf[CONSOLE_INPUT_BUF_SIZE];
@@ -86,6 +137,8 @@ int console_get_terminal_size(int *cols, int *rows) {
 
 // Low-level backend write (used by kprint directly or via TTY)
 static void backend_write(const char *data, size_t len) {
+    unsigned long f;
+    int held = console_out_enter(&f);
     console_backend_t *b = backends;
     while (b) {
         if (b->write) {
@@ -97,6 +150,7 @@ static void backend_write(const char *data, size_t len) {
         }
         b = b->next;
     }
+    console_out_leave(held, f);
 }
 
 // Public wrapper for kernel printing
@@ -290,6 +344,8 @@ static uint32_t klog_head;       /* next write index */
 static int      klog_wrapped;    /* set once the ring has wrapped around */
 
 static void klog_append(const char *s, size_t len) {
+    unsigned long f;
+    int held = console_out_enter(&f);
     for (size_t i = 0; i < len; i++) {
         klog_buf[klog_head] = s[i];
         if (++klog_head >= klog_capacity) {
@@ -297,6 +353,7 @@ static void klog_append(const char *s, size_t len) {
             klog_wrapped = 1;
         }
     }
+    console_out_leave(held, f);
 }
 
 /* Total bytes currently held in the ring (oldest .. newest). */

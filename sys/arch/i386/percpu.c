@@ -61,11 +61,9 @@ void percpu_init_cpu(int cpu_id) {
     pcpu->runqueue_tail = NULL;
     pcpu->runqueue_count = 0;
     
-    kprint("PERCPU: Initialized CPU ");
-    char buf[16];
-    snprintf(buf, sizeof(buf), "%d", cpu_id);
-    kprint(buf);
-    kprint("\n");
+    /* Single kprintf so the whole line emits atomically under the console
+     * output lock -- APs bringing up concurrently would otherwise interleave. */
+    kprintf("PERCPU: Initialized CPU %d\n", cpu_id);
 }
 
 // Initialize per-CPU subsystem
