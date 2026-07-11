@@ -38,14 +38,9 @@ _start:
     leal  __ehdr_start - .Lpc(%ebx), %ebx  /* %ebx = base */
 
     /* --- Locate _DYNAMIC --------------------------------------------
-     * _DYNAMIC has link-time vaddr; runtime addr = base + that. */
-    leal  _DYNAMIC@GOTOFF, %ecx     /* would need GOT - easier path: */
-    /* Fallback: call/pop to get a known PC address, then add the
-     * fixed offset from .Lpc to _DYNAMIC at link time. */
-
-    /* The above @GOTOFF path needs a GOT register set up; easier
-     * pattern: re-anchor at .Lpc and use _DYNAMIC - .Lpc as a
-     * link-time-known offset. */
+     * _DYNAMIC has link-time vaddr; runtime addr = base + that.
+     * Re-anchor at .Lpc2 and add the link-time-known offset
+     * (_DYNAMIC - .Lpc2); this needs no GOT register. */
     call  .Lpc2
 .Lpc2:
     popl  %ecx                      /* %ecx = runtime addr of .Lpc2 */
