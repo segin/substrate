@@ -334,6 +334,7 @@ ld_u32 ld_main(ld_u32 *initial_stack) {
         ld_u32 strtab_off=0, symtab_off=0, hash_off=0, gnu_hash_off=0;
         ld_u32 rel_off=0, jmprel_off=0;
         ld_u32 init_off=0, fini_off=0, init_arr_off=0, fini_arr_off=0;
+        ld_u32 versym_off=0, verdef_off=0, verneed_off=0;
         for (Elf32_Dyn *d = dyn; d->d_tag != DT_NULL; d++) {
             switch (d->d_tag) {
             case DT_STRTAB:   strtab_off   = d->d_un.d_ptr; break;
@@ -351,6 +352,15 @@ ld_u32 ld_main(ld_u32 *initial_stack) {
             case DT_INIT_ARRAYSZ: prog_obj.init_arraysz = d->d_un.d_val; break;
             case DT_FINI_ARRAY:   fini_arr_off = d->d_un.d_ptr; break;
             case DT_FINI_ARRAYSZ: prog_obj.fini_arraysz = d->d_un.d_val; break;
+            /* GNU symbol versioning — without these the executable's
+             * versioned imports (foo@GLIBCXX_3.4.x) all resolve as
+             * UNVERSIONED and can mis-bind when a symbol name carries
+             * several versions and the wanted one isn't the default. */
+            case DT_VERSYM:     versym_off  = d->d_un.d_ptr; break;
+            case DT_VERDEF:     verdef_off  = d->d_un.d_ptr; break;
+            case DT_VERDEFNUM:  prog_obj.verdefnum  = d->d_un.d_val; break;
+            case DT_VERNEED:    verneed_off = d->d_un.d_ptr; break;
+            case DT_VERNEEDNUM: prog_obj.verneednum = d->d_un.d_val; break;
             }
         }
         prog_obj.strtab   = strtab_off   ? (const char *)(strtab_off   + bias) : 0;
@@ -363,6 +373,9 @@ ld_u32 ld_main(ld_u32 *initial_stack) {
         prog_obj.fini       = fini_off       ? (void (*)(void))(fini_off       + bias) : 0;
         prog_obj.init_array = init_arr_off   ? (void (**)(void))(init_arr_off  + bias) : 0;
         prog_obj.fini_array = fini_arr_off   ? (void (**)(void))(fini_arr_off  + bias) : 0;
+        prog_obj.versym  = versym_off  ? (Elf32_Half    *)(versym_off  + bias) : 0;
+        prog_obj.verdef  = verdef_off  ? (Elf32_Verdef  *)(verdef_off  + bias) : 0;
+        prog_obj.verneed = verneed_off ? (Elf32_Verneed *)(verneed_off + bias) : 0;
     }
 
     /* Splice the program into the loaded-object list head so the
