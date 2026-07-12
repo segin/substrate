@@ -674,13 +674,17 @@ bc_num *bc_math_l(bc_num *x) {
     bc_scale = wscale;
     bc_num *one = bc_from_long(1), *two = bc_from_long(2);
     /* ln(2) via atanh(1/3) */
-    bc_num *third = bc_div(one, bc_from_long(3));
+    bc_num *three_tmp = bc_from_long(3);
+    bc_num *third = bc_div(one, three_tmp);
+    bc_free(three_tmp);
     bc_num *ln2s = atanh_series(third); bc_free(third);
     bc_num *ln2 = bc_mul(ln2s, two); bc_free(ln2s); trunc_to_scale(ln2, wscale);
     /* reduce x toward [2/3, 3/2] counting powers of two */
     bc_num *xr = bc_dup(x);
-    bc_num *threeh = bc_div(bc_from_long(3), two);   /* 1.5 */
-    bc_num *twoth  = bc_div(bc_from_long(2), bc_from_long(3)); /* .666 */
+    bc_num *n3 = bc_from_long(3), *n2 = bc_from_long(2);
+    bc_num *threeh = bc_div(n3, two);   /* 1.5 */
+    bc_num *twoth  = bc_div(n2, n3);    /* .666 */
+    bc_free(n3); bc_free(n2);
     long e = 0;
     while (bc_compare(xr, threeh) > 0) { bc_num *h = bc_div(xr, two); bc_free(xr); xr = h; e++; }
     while (bc_compare(xr, twoth)  < 0) { bc_num *d = bc_mul(xr, two); bc_free(xr); xr = d; e--; }
@@ -705,7 +709,9 @@ bc_num *bc_math_a(bc_num *x) {
     bc_num *one = bc_from_long(1), *two = bc_from_long(2);
     bc_num *xr = bc_dup(x);
     int k = 0;
-    bc_num *tenth = bc_div(one, bc_from_long(10));   /* reduce until |x|<0.1 */
+    bc_num *ten_tmp = bc_from_long(10);
+    bc_num *tenth = bc_div(one, ten_tmp);   /* reduce until |x|<0.1 */
+    bc_free(ten_tmp);
     for (;;) {
         bc_num *ax = mk_abs(xr); int c = bc_compare(ax, tenth); bc_free(ax);
         if (c < 0 || k > 4000) break;
@@ -753,7 +759,9 @@ static bc_num *reduce_angle(bc_num *x, bc_num *pi, bc_num *twopi) {
     /* r = r - twopi*floor(r/twopi + 1/2) via mod; use bc_mod toward range */
     bc_num *q = bc_div(r, twopi);
     /* round q to nearest integer: trunc(q + 0.5*sign) */
-    bc_num *half = bc_div(bc_from_long(1), bc_from_long(2));
+    bc_num *h1 = bc_from_long(1), *h2 = bc_from_long(2);
+    bc_num *half = bc_div(h1, h2);
+    bc_free(h1); bc_free(h2);
     bc_num *adj = bc_is_neg(q) ? bc_sub(q, half) : bc_add(q, half);
     trunc_to_scale(adj, 0);            /* floor toward zero of rounded */
     bc_num *qt = bc_mul(adj, twopi);
