@@ -5,8 +5,12 @@ Full read of `bin/bc/` (bc.c, 1,778 lines + Makefile) at commit
 against a freshly built host binary (the checked-in `bc_host` was
 stale; see BC-20).  The libbc number engine (`usr.lib/bc/`) is out of
 scope except where its behavior surfaces through the interpreter.
-Findings numbered BC-NN, ranked by severity.  Status: **all open**
-(audit only - no fixes applied).
+Findings numbered BC-NN, ranked by severity.
+
+Status: **all 20 findings fixed** (BC-01..BC-20), one commit each,
+verified against a freshly built host binary; the host and substrate
+target builds are both clean under -Werror.  See `git log` for the
+per-finding commits.
 
 What's solid: the AST ownership discipline (tok_num/tok_str handover,
 ast_free covering every node shape), the BC_DIM_MAX cap with its

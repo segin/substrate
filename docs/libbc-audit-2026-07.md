@@ -3,8 +3,11 @@
 Full read of `usr.lib/bc/` (num.h, num.c 413 lines, arith.c 841 lines,
 Makefile) at commit 130aae793, with behavioral checks against a freshly
 built host binary.  This is the arbitrary-precision (base-100) number
-engine behind `bin/bc`.  Findings numbered LBC-NN.  Status: **all open**
-(audit only - no fixes applied).
+engine behind `bin/bc`.  Findings numbered LBC-NN.
+
+Status: **all 6 findings fixed** (LBC-01..LBC-06), verified against a
+freshly built host binary; host and substrate target builds clean under
+-Werror.  See `git log` for the per-finding commits.
 
 What's solid and verified correct: Knuth-D division and modulo (the
 detailed comments document real past fixes; sqrt(2)@20, mod signs, and
