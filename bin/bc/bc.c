@@ -1078,7 +1078,6 @@ ast_node_t *parse_top_level(void) {
                 if (byref) {
                     size_t nm_len = strlen(tok_str) + 2;
                     char *nm = xmalloc(nm_len);
-                    if (!nm) { perror("malloc"); exit(1); }
                     snprintf(nm, nm_len, "*%s", tok_str);
                     v->id = nm;
                 } else {
@@ -1099,7 +1098,12 @@ ast_node_t *parse_top_level(void) {
                     v->type = AST_ARRAY;
                     v->arr.idx = NULL;
                 }
-                
+
+                /* '*' is only meaningful on an array parameter (*a[]); on a
+                 * scalar it used to be silently accepted and ignored. */
+                if (byref && v->type != AST_ARRAY)
+                    lex_error("'*' requires an array parameter");
+
                 if (cur_tok == ',') lex();
                 else break;
             }
