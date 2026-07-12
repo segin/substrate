@@ -70,8 +70,10 @@ elf_err_t elf_dwarf_get_line_info(elfobj_t *obj, uint64_t addr, char **out_file,
             unit_length = (uint32_t)len64;
         }
 
+        /* off + unit_length can wrap size_t on the 32-bit target; compare
+         * with the non-wrapping form (off < size holds from the loop). */
+        if (unit_length > size - off) break;
         size_t unit_end = off + unit_length;
-        if (unit_end > size) break;
 
         if (off + 2 > unit_end) break;
         uint16_t version = elf__rd16(data + off, obj->endian);
@@ -93,8 +95,8 @@ elf_err_t elf_dwarf_get_line_info(elfobj_t *obj, uint64_t addr, char **out_file,
             off += 4;
         }
 
+        if (header_length > unit_end - off) break;
         size_t program_start = off + header_length;
-        if (program_start > unit_end) break;
 
         /* Fixed header fields read below: min_inst_len, default_is_stmt,
          * line_base, line_range, opcode_base (5), plus max_ops_per_inst for
@@ -177,8 +179,8 @@ elf_err_t elf_dwarf_get_line_info(elfobj_t *obj, uint64_t addr, char **out_file,
                 }
             } else if (opcode == 0) {
                 uint64_t ext_len = read_uleb128(data, &off, unit_end);
+                if (ext_len > unit_end - off) break;
                 size_t ext_end = off + ext_len;
-                if (ext_end > unit_end) break;
                 /* A zero-length extended op (or a length ULEB that consumed
                  * up to unit_end) leaves no opcode byte; reading data[off]
                  * would be one past the section. */
