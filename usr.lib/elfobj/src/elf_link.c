@@ -364,7 +364,16 @@ static elf_err_t append_section_data(struct elf_section *dst, const uint8_t *src
         return ELF_OK;
     }
 
-    buf = (uint8_t *)realloc(dst->data, dst->data_size + src_sz);
+    {
+        /* dst->data_size + src_sz is a size_t add that wraps on the 32-bit
+         * target when merged section data approaches 4 GiB, yielding an
+         * undersized buffer and an OOB memcpy below. */
+        uint64_t newsz;
+        if (!elf__u64_add(dst->data_size, src_sz, &newsz) || newsz > (uint64_t)SIZE_MAX) {
+            return ELF_ERR_BOUNDS;
+        }
+        buf = (uint8_t *)realloc(dst->data, (size_t)newsz);
+    }
     if (buf == NULL) {
         return ELF_ERR_OOM;
     }
@@ -409,14 +418,23 @@ static elf_err_t align_merged_section(struct elf_section *dst, uint64_t align, u
     }
 
     {
-        uint8_t *buf = (uint8_t *)realloc(dst->data, dst->data_size + pad);
+        /* pad is uint64; dst->data_size + pad was computed in 64-bit then
+         * truncated at the realloc while the memset truncated (size_t)pad
+         * separately - the two could disagree and write past the buffer.
+         * Compute one checked new size and derive the memset length from it. */
+        uint64_t newsz;
+        uint8_t *buf;
+        if (!elf__u64_add(dst->data_size, pad, &newsz) || newsz > (uint64_t)SIZE_MAX) {
+            return ELF_ERR_BOUNDS;
+        }
+        buf = (uint8_t *)realloc(dst->data, (size_t)newsz);
         if (buf == NULL) {
             return ELF_ERR_OOM;
         }
-        memset(buf + dst->data_size, 0, (size_t)pad);
+        memset(buf + dst->data_size, 0, (size_t)newsz - dst->data_size);
         dst->data = buf;
         dst->owns_data = 1;
-        dst->data_size += (size_t)pad;
+        dst->data_size = (size_t)newsz;
         dst->size = dst->data_size;
         if (base_out != NULL) {
             *base_out = dst->data_size;
