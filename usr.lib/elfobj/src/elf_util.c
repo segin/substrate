@@ -60,6 +60,9 @@ void *elf__calloc(size_t n, size_t sz) {
     if (total > ELFOBJ_MAX_ALLOC_BYTES) {
         return NULL;
     }
+    if (total == 0) {
+        total = 1;
+    }
     return calloc(1, total);
 }
 
@@ -70,6 +73,11 @@ void *elf__reallocarray(void *ptr, size_t n, size_t sz) {
     }
     if (total > ELFOBJ_MAX_ALLOC_BYTES) {
         return NULL;
+    }
+    /* realloc(ptr, 0) may free ptr and return NULL, which a caller reads as
+     * OOM and then keeps using (or frees) the now-dangling ptr. Never pass 0. */
+    if (total == 0) {
+        total = 1;
     }
     return realloc(ptr, total);
 }

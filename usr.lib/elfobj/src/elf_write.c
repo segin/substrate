@@ -290,7 +290,7 @@ static uint8_t *build_symtab(const elfobj_t *obj, elfobj_endian_t e, elfobj_clas
                              elf_strtab_t *strtab, const char **extra_names, size_t extra_count,
                              size_t *extra_indices, size_t *out_size, size_t *out_entsize) {
     size_t entsz = (cls == ELFOBJ_CLASS_64) ? 24 : 16;
-    int has_null = (obj->symbol_count > 0 &&
+    int has_null = (obj->symbol_count > 0 && obj->symbols[0] != NULL &&
                     (obj->symbols[0]->name == NULL || obj->symbols[0]->name[0] == '\0') &&
                     obj->symbols[0]->value == 0 &&
                     obj->symbols[0]->size == 0);
@@ -451,7 +451,7 @@ static elf_err_t collect_version_names(const elfobj_t *obj, ver_name_t **out_nam
 
 static uint8_t *build_gnu_versym(const elfobj_t *obj, elfobj_endian_t e, const ver_name_t *names,
                                  size_t name_count, size_t extra_count, size_t *out_size) {
-    int has_null = (obj->symbol_count > 0 &&
+    int has_null = (obj->symbol_count > 0 && obj->symbols[0] != NULL &&
                     (obj->symbols[0]->name == NULL || obj->symbols[0]->name[0] == '\0') &&
                     obj->symbols[0]->value == 0 &&
                     obj->symbols[0]->size == 0);
@@ -1062,7 +1062,7 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
 
     secs[symtab_index].link = (uint32_t)strtab_index;
     {
-        int has_null = (obj->symbol_count > 0 &&
+        int has_null = (obj->symbol_count > 0 && obj->symbols[0] != NULL &&
                         (obj->symbols[0]->name == NULL || obj->symbols[0]->name[0] == '\0') &&
                         obj->symbols[0]->value == 0 &&
                         obj->symbols[0]->size == 0);
