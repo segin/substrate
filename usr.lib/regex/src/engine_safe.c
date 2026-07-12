@@ -2966,7 +2966,10 @@ static regex_err_t safe_regex_split(const regex_t *re, const char *text, size_t 
         {
             size_t start = caps[0] + pos;
             size_t end = caps[1] + pos;
-            size_t seg_len = start - pos;
+            /* start >= pos today (caps[0] is relative to pos), but guard the
+             * subtraction so a future anchored/zero-width change producing
+             * start < pos cannot underflow into a huge malloc+memcpy. */
+            size_t seg_len = start >= pos ? start - pos : 0;
             if (count == cap) {
                 size_t new_cap = cap ? cap * 2 : 8;
                 char **new_items = (char **)realloc(items, new_cap * sizeof(*new_items));
