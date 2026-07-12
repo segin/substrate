@@ -96,7 +96,11 @@ elf_err_t elf_dwarf_get_line_info(elfobj_t *obj, uint64_t addr, char **out_file,
         size_t program_start = off + header_length;
         if (program_start > unit_end) break;
 
-        if (off + 5 > program_start) break;
+        /* Fixed header fields read below: min_inst_len, default_is_stmt,
+         * line_base, line_range, opcode_base (5), plus max_ops_per_inst for
+         * version >= 4 (6). The old +5 guard let the v4 opcode_base read one
+         * byte past the section. */
+        if (off + 5 + (version >= 4 ? 1u : 0u) > program_start) break;
         uint8_t min_inst_len = data[off++];
         if (version >= 4) {
             off++;
@@ -175,6 +179,10 @@ elf_err_t elf_dwarf_get_line_info(elfobj_t *obj, uint64_t addr, char **out_file,
                 uint64_t ext_len = read_uleb128(data, &off, unit_end);
                 size_t ext_end = off + ext_len;
                 if (ext_end > unit_end) break;
+                /* A zero-length extended op (or a length ULEB that consumed
+                 * up to unit_end) leaves no opcode byte; reading data[off]
+                 * would be one past the section. */
+                if (off >= ext_end) break;
 
                 uint8_t ext_opcode = data[off++];
 
