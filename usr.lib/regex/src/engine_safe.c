@@ -369,11 +369,18 @@ static int charclass_match_raw(const regex_charclass *cc, uint32_t cp) {
     return 0;
 }
 
-static int charclass_match(const regex_charclass *cc, uint32_t cp, int icase, int utf8) {
+static int charclass_match(const regex_charclass *cc, uint32_t cp, unsigned flags) {
+    int icase = (flags & REGEX_FLAG_ICASE) != 0;
+    int utf8 = (flags & REGEX_FLAG_UTF8) != 0;
     int matched;
     uint32_t alt;
 
     if (!cc) {
+        return 0;
+    }
+    /* POSIX REG_NEWLINE: a negated bracket expression ([^...]) does not match
+     * a newline, even though the inverted set would otherwise include it. */
+    if ((flags & REGEX_FLAG_NEWLINE) && cc->negated && regex_is_newline(cp)) {
         return 0;
     }
     matched = charclass_match_raw(cc, cp);
@@ -1776,7 +1783,7 @@ static void dfa_move(nfa_prog *prog, uint8_t *set, size_t pos, const char *text,
                 }
                 break;
             case NFA_CLASS:
-                if (charclass_match(s->charclass, cp, (flags & REGEX_FLAG_ICASE) != 0, (flags & REGEX_FLAG_UTF8) != 0)) {
+                if (charclass_match(s->charclass, cp, flags)) {
                     if (s->out) {
                         epsilon_closure(prog, next, (size_t)s->out->id, pos, text, text_len, flags, 1);
                     }
@@ -1987,7 +1994,7 @@ static int add_state(thread_list *list, nfa_state *s, size_t *caps, size_t cap_c
 }
 
 static int match_class_char(regex_charclass *cc, uint32_t cp, unsigned flags) {
-    return charclass_match(cc, cp, (flags & REGEX_FLAG_ICASE) != 0, (flags & REGEX_FLAG_UTF8) != 0);
+    return charclass_match(cc, cp, flags);
 }
 
 static int match_char(uint32_t pat, uint32_t cp, unsigned flags) {

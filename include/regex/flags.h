@@ -17,7 +17,8 @@ enum {
     REGEX_FLAG_LITERAL     = 0x0100u, /* literal fixed-string mode */
     REGEX_FLAG_NOTBOL      = 0x0200u, /* start of text is not a line start (^ won't match at pos 0) */
     REGEX_FLAG_NOTEOL      = 0x0400u, /* end of text is not a line end ($ won't match at end) */
-    REGEX_FLAG_NOSUB       = 0x0800u  /* POSIX REG_NOSUB: do not report submatch offsets */
+    REGEX_FLAG_NOSUB       = 0x0800u, /* POSIX REG_NOSUB: do not report submatch offsets */
+    REGEX_FLAG_NEWLINE     = 0x1000u  /* POSIX REG_NEWLINE: . and negated classes exclude newline */
 };
 
 /* Iterator options */

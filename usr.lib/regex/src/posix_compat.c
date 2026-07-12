@@ -25,7 +25,7 @@ int regcomp(regex_t *restrict preg, const char *restrict pattern, int cflags)
     if (cflags & REG_ICASE)
         sub_flags |= REGEX_FLAG_ICASE;
     if (cflags & REG_NEWLINE)
-        sub_flags |= REGEX_FLAG_MULTILINE;
+        sub_flags |= REGEX_FLAG_MULTILINE | REGEX_FLAG_NEWLINE;
     if (cflags & REG_NOSUB)
         sub_flags |= REGEX_FLAG_NOSUB;
 
