@@ -2681,7 +2681,7 @@ static int ensure_capacity(char **buf, size_t *cap, size_t needed) {
 static regex_err_t replace_append_capture(char **out, size_t *out_len, size_t *out_cap,
                                          const char *text, size_t text_len,
                                          const size_t *caps, size_t cap_count,
-                                         size_t idx) {
+                                         size_t idx, size_t base) {
     size_t start;
     size_t end;
     if (idx >= cap_count) {
@@ -2691,7 +2691,15 @@ static regex_err_t replace_append_capture(char **out, size_t *out_len, size_t *o
     }
     start = caps[2 * idx];
     end = caps[2 * idx + 1];
-    if (start == (size_t)-1 || end == (size_t)-1 || end < start || end > text_len) {
+    /* caps are relative to the current match start (text + base); an unset
+     * group is the SIZE_MAX sentinel and must be tested before shifting to
+     * absolute offsets into text. */
+    if (start == (size_t)-1 || end == (size_t)-1 || end < start) {
+        return REGEX_OK;
+    }
+    start += base;
+    end += base;
+    if (end > text_len) {
         return REGEX_OK;
     }
     if (!ensure_capacity(out, out_cap, *out_len + (end - start) + 1)) {
@@ -2790,7 +2798,7 @@ static regex_err_t safe_regex_replace(const regex_t *re, const char *text, size_
             while (replacement[rpos] != '\0') {
                 if (replacement[rpos] == '$' && replacement[rpos + 1] >= '0' && replacement[rpos + 1] <= '9') {
                     size_t idx = (size_t)(replacement[rpos + 1] - '0');
-                    err = replace_append_capture(&out, out_len_ptr, &out_cap, text, text_len, caps, cap_count / 2, idx);
+                    err = replace_append_capture(&out, out_len_ptr, &out_cap, text, text_len, caps, cap_count / 2, idx, pos);
                     if (err != REGEX_OK) {
                         free(caps);
                         free(out);
