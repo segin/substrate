@@ -47,6 +47,7 @@ static token_t *scan_operator(lexer_t *l) {
     if (!is_operator_char(c)) return NULL;
 
     token_t *tok = calloc(1, sizeof(token_t));
+    if (!tok) return NULL;
     tok->type = TOKEN_OPERATOR;
     char val[4] = {0};
 
@@ -116,6 +117,7 @@ static token_t *lexer_scan(lexer_t *l) {
         if (c == '\n') {
             advance(l);
             token_t *t = calloc(1, sizeof(token_t));
+            if (!t) return NULL;
             t->type = TOKEN_NEWLINE;
             t->value = strdup("\n");
             return t;
@@ -141,11 +143,13 @@ static token_t *lexer_scan(lexer_t *l) {
                 size_t cap = 8;
                 size_t len = 0;
                 char *buf = malloc(cap);
+                if (!buf) return NULL;
                 buf[0] = 0;
                 for (size_t i = 0; i < k; i++) {
                     buffer_append(&buf, &cap, &len, advance(l));
                 }
                 token_t *t = calloc(1, sizeof(token_t));
+                if (!t) { free(buf); return NULL; }
                 t->type = TOKEN_IO_NUMBER;
                 t->value = buf;
                 return t;
@@ -161,6 +165,7 @@ static token_t *lexer_scan(lexer_t *l) {
         size_t cap = 32;
         size_t len = 0;
         char *buf = malloc(cap);
+        if (!buf) return NULL;
         buf[0] = 0;
 
         int in_sq = 0; // single quote
@@ -321,12 +326,14 @@ static token_t *lexer_scan(lexer_t *l) {
              // Return error token?
              free(buf);
              token_t *t = calloc(1, sizeof(token_t));
+             if (!t) return NULL;
              t->type = TOKEN_ERROR;
              t->value = strdup("Unclosed quote");
              return t;
         }
 
         token_t *t = calloc(1, sizeof(token_t));
+        if (!t) { free(buf); return NULL; }
         t->type = TOKEN_WORD;
         t->value = buf;
         t->quoted = was_quoted;
@@ -334,6 +341,7 @@ static token_t *lexer_scan(lexer_t *l) {
     }
 
     token_t *t = calloc(1, sizeof(token_t));
+    if (!t) return NULL;
     t->type = TOKEN_EOF;
     return t;
 }

@@ -253,19 +253,29 @@ char *ast_to_string(ast_node_t *node) {
 
 static void cmd_add_arg(ast_simple_command_t *cmd, char *arg) {
     if (cmd->arg_count >= cmd->arg_capacity) {
-        cmd->arg_capacity *= 2;
-        cmd->args = realloc(cmd->args, (cmd->arg_capacity + 1) * sizeof(char*));
+        size_t ncap = cmd->arg_capacity * 2;
+        char **na = realloc(cmd->args, (ncap + 1) * sizeof(char*));
+        if (!na) return;   /* OOM: drop the argument rather than clobber cmd->args */
+        cmd->args = na;
+        cmd->arg_capacity = ncap;
     }
-    cmd->args[cmd->arg_count++] = strdup(arg);
+    char *dup = strdup(arg);
+    if (!dup) return;
+    cmd->args[cmd->arg_count++] = dup;
     cmd->args[cmd->arg_count] = NULL;
 }
 
 static void cmd_add_assign(ast_simple_command_t *cmd, char *arg) {
     if (cmd->assign_count >= cmd->assign_capacity) {
-        cmd->assign_capacity *= 2;
-        cmd->assignments = realloc(cmd->assignments, (cmd->assign_capacity + 1) * sizeof(char*));
+        size_t ncap = cmd->assign_capacity * 2;
+        char **na = realloc(cmd->assignments, (ncap + 1) * sizeof(char*));
+        if (!na) return;
+        cmd->assignments = na;
+        cmd->assign_capacity = ncap;
     }
-    cmd->assignments[cmd->assign_count++] = strdup(arg);
+    char *dup = strdup(arg);
+    if (!dup) return;
+    cmd->assignments[cmd->assign_count++] = dup;
     cmd->assignments[cmd->assign_count] = NULL;
 }
 
@@ -798,8 +808,10 @@ static ast_node_t *parse_for(lexer_t *l) {
             if (t->type == TOKEN_WORD) {
                 t = lexer_next(l);
                 if (node->element_count >= node->element_capacity) {
-                    node->element_capacity = (node->element_capacity == 0) ? 8 : node->element_capacity * 2;
-                    node->elements = realloc(node->elements, (node->element_capacity + 1) * sizeof(char*));
+                    size_t ncap = (node->element_capacity == 0) ? 8 : node->element_capacity * 2;
+                    char **ne = realloc(node->elements, (ncap + 1) * sizeof(char*));
+                    if (ne) { node->elements = ne; node->element_capacity = ncap; }
+                    else { token_free(t); break; }
                 }
                 node->elements[node->element_count++] = strdup(t->value);
                 node->elements[node->element_count] = NULL;
@@ -1050,8 +1062,11 @@ static ast_pipeline_t *create_pipeline(void) {
 
 static void pipeline_add_command(ast_pipeline_t *pipe, ast_node_t *cmd) {
     if (pipe->command_count >= pipe->command_capacity) {
-        pipe->command_capacity *= 2;
-        pipe->commands = realloc(pipe->commands, pipe->command_capacity * sizeof(ast_node_t*));
+        size_t ncap = pipe->command_capacity * 2;
+        ast_node_t **nc = realloc(pipe->commands, ncap * sizeof(ast_node_t*));
+        if (!nc) { ast_free(cmd); return; }   /* OOM: drop rather than clobber */
+        pipe->commands = nc;
+        pipe->command_capacity = ncap;
     }
     pipe->commands[pipe->command_count++] = cmd;
 }

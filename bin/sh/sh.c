@@ -67,6 +67,9 @@ int execute_line(char *buffer) {
             }
         }
     }
+    /* Free any token still cached in the lexer's lookahead (e.g. the EOF
+     * token the loop peeked and broke on) so it does not leak. */
+    lexer_clear_lookahead(&l);
     return last_status;
 }
 
