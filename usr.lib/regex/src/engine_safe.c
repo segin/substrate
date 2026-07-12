@@ -635,6 +635,10 @@ static regex_node *parse_charclass(parser *p) {
                     p->err = REGEX_ERR_SYNTAX;
                     break;
                 }
+                if (lo > REGEX_MAX_CODEPOINT) {
+                    p->err = REGEX_ERR_SYNTAX;
+                    break;
+                }
                 if (!charclass_add_range(cc, lo, lo)) {
                     p->err = REGEX_ERR_NOMEM;
                 }
@@ -820,6 +824,10 @@ static regex_node *parse_escape(parser *p) {
         return n;
     case 'U':
         if (!parser_read_hex(p, 8, &cp)) {
+            p->err = REGEX_ERR_SYNTAX;
+            return NULL;
+        }
+        if (cp > REGEX_MAX_CODEPOINT) {
             p->err = REGEX_ERR_SYNTAX;
             return NULL;
         }
