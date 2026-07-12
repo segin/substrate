@@ -1130,6 +1130,7 @@ static int builtin_command(int argc, char **argv) {
     /* Build new argv for the command */
     int new_argc = argc - arg_idx;
     char **new_argv = malloc((new_argc + 1) * sizeof(char*));
+    if (!new_argv) return 1;
     for (int i = 0; i < new_argc; i++) new_argv[i] = argv[arg_idx + i];
     new_argv[new_argc] = NULL;
 
@@ -1597,6 +1598,7 @@ static char *find_in_path(const char *cmd) {
 
     char *path_copy = strdup(path);
     free(path_alloc);
+    if (!path_copy) return NULL;
     char *dir = strtok(path_copy, ":");
     while (dir) {
         char full_path[1024];
@@ -1617,6 +1619,7 @@ static char **merge_env(char **base_env, int assign_count, char **assignments) {
 
     /* Allocate new env array (base + assignments + 1) */
     char **new_env = malloc((env_count + assign_count + 1) * sizeof(char *));
+    if (!new_env) return NULL;   /* child execs with an empty environment */
     for (int i = 0; i < env_count; i++) new_env[i] = base_env[i];
 
     int current_count = env_count;
@@ -1643,6 +1646,7 @@ static char **merge_env(char **base_env, int assign_count, char **assignments) {
         }
 
         char *entry = strdup(buf);
+        if (!entry) continue;   /* OOM: skip this assignment rather than store NULL */
         if (found != -1) {
             free(new_env[found]);
             new_env[found] = entry;
