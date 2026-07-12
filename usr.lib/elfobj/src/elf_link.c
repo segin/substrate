@@ -768,6 +768,12 @@ static elf_err_t merge_symbols(elf_link_plan_t *plan, elfobj_t *out,
                 }
                 shndx = (uint16_t)(dst_sec->index + 1);
                 sec_name = dst_sec->name != NULL ? dst_sec->name : "";
+            } else if (sym->shndx != SHN_UNDEF && sym->shndx < 0xff00u) {
+                /* A real (non-reserved, < SHN_LORESERVE) input section index
+                 * that did not resolve to an output section would be stored
+                 * verbatim and read as an out-of-range out->sections[] index
+                 * downstream. Make it absolute instead of a dangling index. */
+                shndx = SHN_ABS;
             }
         }
         if (out->machine == EM_PPC64 && (out->flags & EF_PPC64_ABI) == EF_PPC64_ABI_V2 &&
