@@ -32,6 +32,33 @@ int opt_w = 0; // Warn on extensions
 int opt_q = 0; // Quiet
 int opt_l = 0; // Math library
 
+/* Checked allocation wrappers.  bc has no way to recover from OOM
+ * mid-evaluation, so - like libbc's bc_new/bc_expsize - they report and
+ * exit rather than return NULL.  Using them also fixes the array-growth
+ * realloc sites, which assigned realloc's result straight back to the
+ * array pointer: on failure that lost the old block (leak) and left the
+ * following memset dereferencing NULL. */
+static void *xmalloc(size_t n) {
+    void *p = malloc(n);
+    if (!p) { perror("bc: malloc"); exit(1); }
+    return p;
+}
+static void *xcalloc(size_t n, size_t sz) {
+    void *p = calloc(n, sz);
+    if (!p) { perror("bc: calloc"); exit(1); }
+    return p;
+}
+static void *xrealloc(void *o, size_t n) {
+    void *p = realloc(o, n);
+    if (!p) { perror("bc: realloc"); exit(1); }
+    return p;
+}
+static char *xstrdup(const char *s) {
+    char *p = strdup(s);
+    if (!p) { perror("bc: strdup"); exit(1); }
+    return p;
+}
+
 void bc_ext_warn(const char *msg) {
     if (opt_w && !opt_s) {
         fprintf(stderr, "bc: warning (POSIX extension): %s\n", msg);
@@ -148,8 +175,7 @@ typedef struct ast_node {
 
 // AST Allocator
 ast_node_t *ast_new(ast_type_t type) {
-    ast_node_t *n = calloc(1, sizeof(ast_node_t));
-    if (!n) { perror("malloc"); exit(1); }
+    ast_node_t *n = xcalloc(1, sizeof(ast_node_t));
     n->type = type;
     return n;
 }
@@ -248,8 +274,8 @@ var_entry_t *get_global(const char *name) {
     for (var_entry_t *v = global_vars; v; v = v->next) {
         if (strcmp(v->name, name) == 0) return v;
     }
-    var_entry_t *v = calloc(1, sizeof(var_entry_t));
-    v->name = strdup(name);
+    var_entry_t *v = xcalloc(1, sizeof(var_entry_t));
+    v->name = xstrdup(name);
     v->val = bc_from_long(0);
     v->next = global_vars;
     global_vars = v;
@@ -265,8 +291,8 @@ typedef struct func_entry {
 func_entry_t *functions = NULL;
 
 void register_func(ast_node_t *node) {
-    func_entry_t *f = malloc(sizeof(func_entry_t));
-    f->name = strdup(node->func.name);
+    func_entry_t *f = xmalloc(sizeof(func_entry_t));
+    f->name = xstrdup(node->func.name);
     f->ast = node;
     f->next = functions;
     functions = f;
@@ -394,8 +420,7 @@ static void lb_init(lexbuf_t *b) { b->p = b->inln; b->len = 0; b->cap = sizeof(b
 static void lb_push(lexbuf_t *b, int c) {
     if (b->len + 1 >= b->cap) {
         size_t nc = b->cap * 2;
-        char *np = (b->p == b->inln) ? malloc(nc) : realloc(b->p, nc);
-        if (!np) { perror("malloc"); exit(1); }
+        char *np = (b->p == b->inln) ? xmalloc(nc) : xrealloc(b->p, nc);
         if (b->p == b->inln) memcpy(np, b->inln, b->len);
         b->p = np;
         b->cap = nc;
@@ -508,7 +533,7 @@ int lex(void) {
 
             if (!kw) {
                 if (tok_str) free(tok_str);
-                tok_str = strdup(buf);
+                tok_str = xstrdup(buf);
                 kw = TOK_ID;
             }
             lb_free(&ib);
@@ -523,7 +548,7 @@ int lex(void) {
              }
              lex_in_string = 0;
              if (tok_str) free(tok_str);
-             tok_str = strdup(lb_cstr(&sb));
+             tok_str = xstrdup(lb_cstr(&sb));
              lb_free(&sb);
              return cur_tok = TOK_STR;
         }
@@ -640,7 +665,7 @@ ast_node_t *parse_primary(void) {
         return n;
     }
     if (cur_tok == TOK_ID) {
-        char *id = strdup(tok_str);
+        char *id = xstrdup(tok_str);
         lex();
         if (cur_tok == '[') {
             lex();
@@ -661,7 +686,7 @@ ast_node_t *parse_primary(void) {
             expr_list_t **tail = &n->call.args;
             if (cur_tok != ')') {
                 while (1) {
-                    expr_list_t *item = calloc(1, sizeof(expr_list_t));
+                    expr_list_t *item = xcalloc(1, sizeof(expr_list_t));
                     item->expr = parse_expr();
                     *tail = item;
                     tail = &item->next;
@@ -683,11 +708,11 @@ ast_node_t *parse_primary(void) {
         if (cur_tok == '(') {
             lex();
             n = ast_new(AST_CALL);
-            if (func == TOK_LENGTH) n->call.name = strdup("length");
-            else if (func == TOK_SCALE_FUNC) n->call.name = strdup("scale");
-            else n->call.name = strdup("sqrt");
+            if (func == TOK_LENGTH) n->call.name = xstrdup("length");
+            else if (func == TOK_SCALE_FUNC) n->call.name = xstrdup("scale");
+            else n->call.name = xstrdup("sqrt");
             
-            expr_list_t *item = calloc(1, sizeof(expr_list_t));
+            expr_list_t *item = xcalloc(1, sizeof(expr_list_t));
             item->expr = parse_expr();
             n->call.args = item;
             match(')');
@@ -696,7 +721,7 @@ ast_node_t *parse_primary(void) {
             // Treat as variable (only 'scale' is really a variable)
             if (func == TOK_SCALE_FUNC) {
                 n = ast_new(AST_VAR);
-                n->id = strdup("scale");
+                n->id = xstrdup("scale");
                 return n;
             }
             lex_error("expected '(' after function name");
@@ -708,7 +733,7 @@ ast_node_t *parse_primary(void) {
         lex();
         match('(');
         n = ast_new(AST_CALL);
-        n->call.name = strdup("read");
+        n->call.name = xstrdup("read");
         n->call.args = NULL;
         match(')');
         return n;
@@ -974,7 +999,7 @@ ast_node_t *parse_statement(void) {
         n->print_stmt.args = NULL;
         expr_list_t **tail = &n->print_stmt.args;
         while (1) {
-            expr_list_t *item = calloc(1, sizeof(expr_list_t));
+            expr_list_t *item = xcalloc(1, sizeof(expr_list_t));
             if (cur_tok == TOK_STR) {
                 ast_node_t *s = ast_new(AST_STR);
                 s->str = tok_str;
@@ -1026,7 +1051,7 @@ ast_node_t *parse_top_level(void) {
     if (cur_tok == TOK_DEFINE) {
         lex();
         if (cur_tok != TOK_ID) lex_error("expected function name");
-        char *name = strdup(tok_str);
+        char *name = xstrdup(tok_str);
         lex();
         match('(');
         
@@ -1040,16 +1065,16 @@ ast_node_t *parse_top_level(void) {
                 int byref = 0;
                 if (cur_tok == '*') { byref = 1; lex(); }
                 if (cur_tok != TOK_ID) lex_error("expected param name");
-                expr_list_t *item = calloc(1, sizeof(expr_list_t));
+                expr_list_t *item = xcalloc(1, sizeof(expr_list_t));
                 ast_node_t *v = ast_new(AST_VAR);
                 if (byref) {
                     size_t nm_len = strlen(tok_str) + 2;
-                    char *nm = malloc(nm_len);
+                    char *nm = xmalloc(nm_len);
                     if (!nm) { perror("malloc"); exit(1); }
                     snprintf(nm, nm_len, "*%s", tok_str);
                     v->id = nm;
                 } else {
-                    v->id = strdup(tok_str);
+                    v->id = xstrdup(tok_str);
                 }
                 item->expr = v;
                 *ptail = item;
@@ -1083,9 +1108,9 @@ ast_node_t *parse_top_level(void) {
             lex();
             while (1) {
                 if (cur_tok != TOK_ID) lex_error("expected auto var name");
-                expr_list_t *item = calloc(1, sizeof(expr_list_t));
+                expr_list_t *item = xcalloc(1, sizeof(expr_list_t));
                 ast_node_t *v = ast_new(AST_VAR);
-                v->id = strdup(tok_str);
+                v->id = xstrdup(tok_str);
                 item->expr = v;
                 *atail = item;
                 atail = &item->next;
@@ -1195,13 +1220,13 @@ bc_num *get_arr_val(const char *name, int idx) {
         if (!l->array) {
             l->array_cap = (idx + 1) < 16 ? 16 : (idx + 1) * 2;
             l->array_len = idx + 1;
-            l->array = calloc(l->array_cap, sizeof(bc_num*));
+            l->array = xcalloc(l->array_cap, sizeof(bc_num*));
         }
         if (idx >= l->array_len) {
             if (idx >= l->array_cap) {
                 int new_cap = l->array_cap == 0 ? 16 : l->array_cap * 2;
                 while (idx >= new_cap) new_cap *= 2;
-                l->array = realloc(l->array, new_cap * sizeof(bc_num*));
+                l->array = xrealloc(l->array, new_cap * sizeof(bc_num*));
                 memset(l->array + l->array_cap, 0, (new_cap - l->array_cap) * sizeof(bc_num*));
                 l->array_cap = new_cap;
             }
@@ -1214,13 +1239,13 @@ bc_num *get_arr_val(const char *name, int idx) {
     if (!g->array) {
         g->array_cap = (idx + 1) < 16 ? 16 : (idx + 1) * 2;
         g->array_len = idx + 1;
-        g->array = calloc(g->array_cap, sizeof(bc_num*));
+        g->array = xcalloc(g->array_cap, sizeof(bc_num*));
     }
     if (idx >= g->array_len) {
         if (idx >= g->array_cap) {
             int new_cap = g->array_cap == 0 ? 16 : g->array_cap * 2;
             while (idx >= new_cap) new_cap *= 2;
-            g->array = realloc(g->array, new_cap * sizeof(bc_num*));
+            g->array = xrealloc(g->array, new_cap * sizeof(bc_num*));
             memset(g->array + g->array_cap, 0, (new_cap - g->array_cap) * sizeof(bc_num*));
             g->array_cap = new_cap;
         }
@@ -1278,13 +1303,13 @@ void set_arr_val(const char *name, int idx, bc_num *val) {
         if (!l->array) {
             l->array_cap = (idx + 1) < 16 ? 16 : (idx + 1) * 2;
             l->array_len = idx + 1;
-            l->array = calloc(l->array_cap, sizeof(bc_num*));
+            l->array = xcalloc(l->array_cap, sizeof(bc_num*));
         }
         if (idx >= l->array_len) {
             if (idx >= l->array_cap) {
                 int new_cap = l->array_cap == 0 ? 16 : l->array_cap * 2;
                 while (idx >= new_cap) new_cap *= 2;
-                l->array = realloc(l->array, new_cap * sizeof(bc_num*));
+                l->array = xrealloc(l->array, new_cap * sizeof(bc_num*));
                 memset(l->array + l->array_cap, 0, (new_cap - l->array_cap) * sizeof(bc_num*));
                 l->array_cap = new_cap;
             }
@@ -1298,13 +1323,13 @@ void set_arr_val(const char *name, int idx, bc_num *val) {
     if (!g->array) {
         g->array_cap = (idx + 1) < 16 ? 16 : (idx + 1) * 2;
         g->array_len = idx + 1;
-        g->array = calloc(g->array_cap, sizeof(bc_num*));
+        g->array = xcalloc(g->array_cap, sizeof(bc_num*));
     }
     if (idx >= g->array_len) {
         if (idx >= g->array_cap) {
             int new_cap = g->array_cap == 0 ? 16 : g->array_cap * 2;
             while (idx >= new_cap) new_cap *= 2;
-            g->array = realloc(g->array, new_cap * sizeof(bc_num*));
+            g->array = xrealloc(g->array, new_cap * sizeof(bc_num*));
             memset(g->array + g->array_cap, 0, (new_cap - g->array_cap) * sizeof(bc_num*));
             g->array_cap = new_cap;
         }
@@ -1549,14 +1574,14 @@ bc_num *eval_expr(ast_node_t *n) {
             expr_list_t *fp = f->ast->func.params;
             expr_list_t *ap = n->call.args;
             while (fp && ap) {
-                local_var_t *l = calloc(1, sizeof(local_var_t));
+                local_var_t *l = xcalloc(1, sizeof(local_var_t));
                 int param_is_array = (fp->expr->type == AST_ARRAY);
                 const char *pname = param_is_array ? fp->expr->arr.name
                                                    : fp->expr->id;
                 /* A '*' prefix marks a by-reference array parameter. */
                 int byref = (pname[0] == '*');
                 if (byref) pname++;
-                l->name = strdup(pname);
+                l->name = xstrdup(pname);
                 if (param_is_array) {
                     if (ap->expr->type != AST_ARRAY || ap->expr->arr.idx != NULL)
                         runtime_error("array argument expected for array parameter");
@@ -1565,16 +1590,16 @@ bc_num *eval_expr(ast_node_t *n) {
                     if (src && slen > 0) {
                         l->array_cap = slen < 16 ? 16 : slen;
                         l->array_len = slen;
-                        l->array = calloc(l->array_cap, sizeof(bc_num *));
+                        l->array = xcalloc(l->array_cap, sizeof(bc_num *));
                         for (int k = 0; k < slen; k++)
                             if (src[k]) l->array[k] = bc_dup(src[k]);
                     }
                     if (byref) {
                         /* Remember to copy the callee's working array back over
                          * the caller's source array when the function returns. */
-                        byref_bind_t *br = calloc(1, sizeof(byref_bind_t));
+                        byref_bind_t *br = xcalloc(1, sizeof(byref_bind_t));
                         br->local = l;
-                        br->srcname = strdup(ap->expr->arr.name);
+                        br->srcname = xstrdup(ap->expr->arr.name);
                         br->next = byrefs;
                         byrefs = br;
                     }
@@ -1615,7 +1640,7 @@ bc_num *eval_expr(ast_node_t *n) {
             }
 
             // Push Frame and attach the captured parameter locals.
-            frame_t *fr = calloc(1, sizeof(frame_t));
+            frame_t *fr = xcalloc(1, sizeof(frame_t));
             fr->prev = call_stack;
             fr->locals = bound;
             fr->byrefs = byrefs;
@@ -1629,10 +1654,10 @@ bc_num *eval_expr(ast_node_t *n) {
             // Bind Autos
             expr_list_t *fa = f->ast->func.autos;
             while (fa) {
-                local_var_t *l = calloc(1, sizeof(local_var_t));
+                local_var_t *l = xcalloc(1, sizeof(local_var_t));
                 const char *aname = (fa->expr->type == AST_ARRAY)
                                     ? fa->expr->arr.name : fa->expr->id;
-                l->name = strdup(aname);
+                l->name = xstrdup(aname);
                 l->val = bc_from_long(0);
                 l->next = fr->locals;
                 fr->locals = l;
@@ -1680,7 +1705,7 @@ bc_num *eval_expr(ast_node_t *n) {
                 }
                 local_var_t *wl = br->local;
                 if (wl->array && wl->array_len > 0) {
-                    *arrp = calloc(wl->array_len, sizeof(bc_num *));
+                    *arrp = xcalloc(wl->array_len, sizeof(bc_num *));
                     for (int i = 0; i < wl->array_len; i++)
                         if (wl->array[i]) (*arrp)[i] = bc_dup(wl->array[i]);
                     *lenp = wl->array_len; *capp = wl->array_len;
