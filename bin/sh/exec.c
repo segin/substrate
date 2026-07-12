@@ -283,7 +283,18 @@ static int save_redirections(ast_redirection_t *redir, fd_save_t **out_list) {
             return -1;
         }
         save->orig_fd = r->fd;
-        save->saved_fd = dup(r->fd);
+        /*
+         * Duplicate to a fd >= 10 (out of the way of redirections the body
+         * itself may perform) and mark it close-on-exec so the saved
+         * descriptor does not leak into any command execed while the
+         * redirection is in effect. F_DUPFD_CLOEXEC is unavailable on this
+         * target, so set FD_CLOEXEC in a second step -- safe because the
+         * shell is single-threaded.
+         */
+        save->saved_fd = fcntl(r->fd, F_DUPFD, 10);
+        if (save->saved_fd >= 0) {
+            fcntl(save->saved_fd, F_SETFD, FD_CLOEXEC);
+        }
         if (save->saved_fd < 0) {
             if (errno == EBADF) {
                 save->saved_fd = -1; // Was closed
