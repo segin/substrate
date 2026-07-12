@@ -129,7 +129,10 @@ static int posix_match_from(const regex_t *re, const char *text, size_t text_len
     memcpy(tmp, text + offset, text_len - offset);
     tmp[text_len - offset] = '\0';
 
-    rc = host_regexec(&impl->re, tmp, mcount, m, 0);
+    /* When restarting past the start of the text, tmp[0] is not a real line
+     * start; without REG_NOTBOL a `^`-anchored pattern would match at every
+     * restart offset (find_all(/^a/, "aaa") would report three matches). */
+    rc = host_regexec(&impl->re, tmp, mcount, m, offset > 0 ? HOST_REG_NOTBOL : 0);
     free(tmp);
 
     if (rc == HOST_REG_NOMATCH) {
