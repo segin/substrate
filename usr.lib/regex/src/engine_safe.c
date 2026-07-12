@@ -2961,13 +2961,25 @@ static regex_err_t safe_regex_split(const regex_t *re, const char *text, size_t 
 
 static int match_queue_push(match_queue *q, match_record *rec) {
     if (q->count == q->cap) {
-        size_t new_cap = q->cap ? q->cap * 2 : 16;
+        size_t old_cap = q->cap;
+        size_t new_cap = old_cap ? old_cap * 2 : 16;
         match_record *new_items = (match_record *)realloc(q->items, new_cap * sizeof(*new_items));
         if (!new_items) {
             return 0;
         }
         q->items = new_items;
         q->cap = new_cap;
+        /* The ring was full, so head == tail and the logical order wraps:
+         * items[head..old_cap) then items[0..head). Relocate the wrapped
+         * prefix [0..head) into the freed upper half so the queue is
+         * contiguous; otherwise the push below (and later pops) overwrite
+         * and reorder live records once the queue grows past its first cap. */
+        if (old_cap > 0 && q->head > 0) {
+            memcpy(q->items + old_cap, q->items, q->head * sizeof(*q->items));
+            q->tail = q->head + old_cap;
+        } else {
+            q->tail = old_cap;
+        }
     }
     q->items[q->tail] = *rec;
     q->tail = (q->tail + 1) % q->cap;
