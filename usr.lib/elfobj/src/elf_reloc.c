@@ -2560,91 +2560,117 @@ static void register_builtin_backends_locked(void) {
     b.apply_reloc = i386_apply;
     b.reloc_size = i386_reloc_size;
     b.is_pc_relative = i386_is_pc_relative;
-    g_backends[g_backend_count++] = b;
+    if (g_backend_count < ELFOBJ_MAX_RELOC_BACKENDS) {
+        g_backends[g_backend_count++] = b;
+    }
 
     memset(&b, 0, sizeof(b));
     b.machine = EM_X86_64;
     b.apply_reloc = x64_apply;
     b.reloc_size = x64_reloc_size;
     b.is_pc_relative = x64_is_pc_relative;
-    g_backends[g_backend_count++] = b;
+    if (g_backend_count < ELFOBJ_MAX_RELOC_BACKENDS) {
+        g_backends[g_backend_count++] = b;
+    }
 
     memset(&b, 0, sizeof(b));
     b.machine = EM_ARM;
     b.apply_reloc = arm_apply;
     b.reloc_size = arm_reloc_size;
     b.is_pc_relative = arm_is_pc_relative;
-    g_backends[g_backend_count++] = b;
+    if (g_backend_count < ELFOBJ_MAX_RELOC_BACKENDS) {
+        g_backends[g_backend_count++] = b;
+    }
 
     memset(&b, 0, sizeof(b));
     b.machine = EM_AARCH64;
     b.apply_reloc = aarch64_apply;
     b.reloc_size = aarch64_reloc_size;
     b.is_pc_relative = aarch64_is_pc_relative;
-    g_backends[g_backend_count++] = b;
+    if (g_backend_count < ELFOBJ_MAX_RELOC_BACKENDS) {
+        g_backends[g_backend_count++] = b;
+    }
 
     memset(&b, 0, sizeof(b));
     b.machine = EM_MIPS;
     b.apply_reloc = mips_apply;
     b.reloc_size = mips_reloc_size;
     b.is_pc_relative = mips_is_pc_relative;
-    g_backends[g_backend_count++] = b;
+    if (g_backend_count < ELFOBJ_MAX_RELOC_BACKENDS) {
+        g_backends[g_backend_count++] = b;
+    }
 
     memset(&b, 0, sizeof(b));
     b.machine = EM_RISCV;
     b.apply_reloc = riscv_apply;
     b.reloc_size = riscv_reloc_size;
     b.is_pc_relative = riscv_is_pc_relative;
-    g_backends[g_backend_count++] = b;
+    if (g_backend_count < ELFOBJ_MAX_RELOC_BACKENDS) {
+        g_backends[g_backend_count++] = b;
+    }
 
     memset(&b, 0, sizeof(b));
     b.machine = EM_LOONGARCH;
     b.apply_reloc = larch_apply;
     b.reloc_size = larch_reloc_size;
     b.is_pc_relative = larch_is_pc_relative;
-    g_backends[g_backend_count++] = b;
+    if (g_backend_count < ELFOBJ_MAX_RELOC_BACKENDS) {
+        g_backends[g_backend_count++] = b;
+    }
 
     memset(&b, 0, sizeof(b));
     b.machine = EM_68K;
     b.apply_reloc = m68k_apply;
     b.reloc_size = m68k_reloc_size;
     b.is_pc_relative = m68k_is_pc_relative;
-    g_backends[g_backend_count++] = b;
+    if (g_backend_count < ELFOBJ_MAX_RELOC_BACKENDS) {
+        g_backends[g_backend_count++] = b;
+    }
 
     memset(&b, 0, sizeof(b));
     b.machine = EM_VAX;
     b.apply_reloc = vax_apply;
     b.reloc_size = vax_reloc_size;
     b.is_pc_relative = vax_is_pc_relative;
-    g_backends[g_backend_count++] = b;
+    if (g_backend_count < ELFOBJ_MAX_RELOC_BACKENDS) {
+        g_backends[g_backend_count++] = b;
+    }
 
     memset(&b, 0, sizeof(b));
     b.machine = EM_PPC;
     b.apply_reloc = ppc_apply;
     b.reloc_size = ppc_reloc_size;
     b.is_pc_relative = ppc_is_pc_relative;
-    g_backends[g_backend_count++] = b;
+    if (g_backend_count < ELFOBJ_MAX_RELOC_BACKENDS) {
+        g_backends[g_backend_count++] = b;
+    }
 
     memset(&b, 0, sizeof(b));
     b.machine = EM_PPC64;
     b.apply_reloc = ppc64_apply;
     b.reloc_size = ppc64_reloc_size;
     b.is_pc_relative = ppc64_is_pc_relative;
-    g_backends[g_backend_count++] = b;
+    if (g_backend_count < ELFOBJ_MAX_RELOC_BACKENDS) {
+        g_backends[g_backend_count++] = b;
+    }
 
     memset(&b, 0, sizeof(b));
     b.machine = EM_ALPHA;
     b.apply_reloc = alpha_apply;
     b.reloc_size = alpha_reloc_size;
     b.is_pc_relative = alpha_is_pc_relative;
-    g_backends[g_backend_count++] = b;
+    if (g_backend_count < ELFOBJ_MAX_RELOC_BACKENDS) {
+        g_backends[g_backend_count++] = b;
+    }
 
     memset(&b, 0, sizeof(b));
     b.machine = EM_IA_64;
     b.apply_reloc = ia64_apply;
     b.reloc_size = ia64_reloc_size;
     b.is_pc_relative = ia64_is_pc_relative;
-    g_backends[g_backend_count++] = b;
+    if (g_backend_count < ELFOBJ_MAX_RELOC_BACKENDS) {
+        g_backends[g_backend_count++] = b;
+    }
 
     g_builtin_backends_ready = 1;
 }
