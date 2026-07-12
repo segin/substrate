@@ -379,6 +379,33 @@ void unget_char(int c) {
     ungetc(c, fp);
 }
 
+/* Growable token buffer: starts in an inline stack array and spills to
+ * the heap when a token outgrows it, so numbers, names, and strings are
+ * no longer silently truncated at a fixed size (bc is arbitrary
+ * precision - a 2000-digit constant must be read whole). */
+typedef struct {
+    char  *p;
+    size_t len, cap;
+    char   inln[256];
+} lexbuf_t;
+
+static void lb_init(lexbuf_t *b) { b->p = b->inln; b->len = 0; b->cap = sizeof(b->inln); }
+
+static void lb_push(lexbuf_t *b, int c) {
+    if (b->len + 1 >= b->cap) {
+        size_t nc = b->cap * 2;
+        char *np = (b->p == b->inln) ? malloc(nc) : realloc(b->p, nc);
+        if (!np) { perror("malloc"); exit(1); }
+        if (b->p == b->inln) memcpy(np, b->inln, b->len);
+        b->p = np;
+        b->cap = nc;
+    }
+    b->p[b->len++] = (char)c;
+}
+
+static char *lb_cstr(lexbuf_t *b) { b->p[b->len] = '\0'; return b->p; }
+static void  lb_free(lexbuf_t *b) { if (b->p != b->inln) free(b->p); }
+
 int lex(void) {
     int c;
     while ((c = next_char()) != EOF) {
@@ -417,92 +444,87 @@ int lex(void) {
         }
 
         if (isdigit(c) || c == '.' || (c >= 'A' && c <= 'F')) {
-            char buf[1024];
-            int i = 0;
+            lexbuf_t nb; lb_init(&nb);
             int seen_dot = (c == '.');
-            buf[i++] = c;
-            
+            lb_push(&nb, c);
+
             // POSIX: digits + A-F for high base input
             while ((c = next_char()) != EOF) {
                 if (isdigit(c) || (c >= 'A' && c <= 'F')) {
-                    if (i < 1023) buf[i++] = c;
+                    lb_push(&nb, c);
                 } else if (c == '.') {
                     if (seen_dot) break;
                     seen_dot = 1;
-                    if (i < 1023) buf[i++] = c;
+                    lb_push(&nb, c);
                 } else {
                     break;
                 }
             }
             if (c != EOF) unget_char(c);
-            buf[i] = '\0';
-            
-            // If it's just 'A'-'F' and ibase is 10, it could be an ID if we allowed uppercase IDs.
-            // But POSIX constants are {0..9, A..F}.
-            // Note: If ibase is 10, 'A' is 10.
-            
+
             if (tok_num) bc_free(tok_num);
-            tok_num = bc_from_string(buf, bc_ibase); 
+            tok_num = bc_from_string(lb_cstr(&nb), bc_ibase);
+            lb_free(&nb);
             return cur_tok = TOK_NUM;
         }
 
         if (isalpha(c) && islower(c)) {
-            char buf[256];
-            int i = 0;
-            buf[i++] = c;
-            
+            lexbuf_t ib; lb_init(&ib);
+            lb_push(&ib, c);
+
             while ((c = next_char()) != EOF) {
                 if (isalnum(c) || c == '_') {
-                    if (i < 255) buf[i++] = c;
+                    lb_push(&ib, c);
                 } else {
                     break;
                 }
             }
             if (c != EOF) unget_char(c);
-            buf[i] = '\0';
+            char *buf = lb_cstr(&ib);
 
-            if (strlen(buf) > 1) bc_ext_warn("multi-character names are a GNU extension");
+            if (ib.len > 1) bc_ext_warn("multi-character names are a GNU extension");
 
-            if (strcmp(buf, "if") == 0) return cur_tok = TOK_IF;
-            if (strcmp(buf, "else") == 0) return cur_tok = TOK_ELSE;
-            if (strcmp(buf, "while") == 0) return cur_tok = TOK_WHILE;
-            if (strcmp(buf, "for") == 0) return cur_tok = TOK_FOR;
-            if (strcmp(buf, "break") == 0) return cur_tok = TOK_BREAK;
-            if (strcmp(buf, "continue") == 0) return cur_tok = TOK_CONTINUE;
-            if (strcmp(buf, "return") == 0) return cur_tok = TOK_RETURN;
-            if (strcmp(buf, "halt") == 0) return cur_tok = TOK_HALT;
+            int kw = 0;
+            if      (strcmp(buf, "if") == 0)       kw = TOK_IF;
+            else if (strcmp(buf, "else") == 0)     kw = TOK_ELSE;
+            else if (strcmp(buf, "while") == 0)    kw = TOK_WHILE;
+            else if (strcmp(buf, "for") == 0)      kw = TOK_FOR;
+            else if (strcmp(buf, "break") == 0)    kw = TOK_BREAK;
+            else if (strcmp(buf, "continue") == 0) kw = TOK_CONTINUE;
+            else if (strcmp(buf, "return") == 0)   kw = TOK_RETURN;
+            else if (strcmp(buf, "halt") == 0)     kw = TOK_HALT;
             /* `quit` ends the session.  bc draws a fine distinction (quit acts
              * at lex time, halt at run time); for normal top-level use both
              * simply terminate, so reuse the halt path.  Without this `quit`
              * was read as an undefined variable, printing a stray 0. */
-            if (strcmp(buf, "quit") == 0) return cur_tok = TOK_HALT;
-            if (strcmp(buf, "define") == 0) return cur_tok = TOK_DEFINE;
-            if (strcmp(buf, "auto") == 0) return cur_tok = TOK_AUTO;
-            if (strcmp(buf, "print") == 0) {
-                bc_ext_warn("print statement is a GNU extension");
-                return cur_tok = TOK_PRINT;
+            else if (strcmp(buf, "quit") == 0)     kw = TOK_HALT;
+            else if (strcmp(buf, "define") == 0)   kw = TOK_DEFINE;
+            else if (strcmp(buf, "auto") == 0)     kw = TOK_AUTO;
+            else if (strcmp(buf, "print") == 0)  { bc_ext_warn("print statement is a GNU extension"); kw = TOK_PRINT; }
+            else if (strcmp(buf, "read") == 0)     kw = TOK_READ;
+            else if (strcmp(buf, "length") == 0)   kw = TOK_LENGTH;
+            else if (strcmp(buf, "scale") == 0)    kw = TOK_SCALE_FUNC;
+            else if (strcmp(buf, "sqrt") == 0)     kw = TOK_SQRT;
+
+            if (!kw) {
+                if (tok_str) free(tok_str);
+                tok_str = strdup(buf);
+                kw = TOK_ID;
             }
-            if (strcmp(buf, "read") == 0) return cur_tok = TOK_READ;
-            if (strcmp(buf, "length") == 0) return cur_tok = TOK_LENGTH;
-            if (strcmp(buf, "scale") == 0) return cur_tok = TOK_SCALE_FUNC;
-            if (strcmp(buf, "sqrt") == 0) return cur_tok = TOK_SQRT;
-            
-            if (tok_str) free(tok_str);
-            tok_str = strdup(buf);
-            return cur_tok = TOK_ID;
+            lb_free(&ib);
+            return cur_tok = kw;
         }
-        
+
         if (c == '"') {
-             char buf[1024];
-             int i = 0;
+             lexbuf_t sb; lb_init(&sb);
              lex_in_string = 1;
              while ((c = next_char()) != '"' && c != EOF) {
-                 if (i < 1023) buf[i++] = c;
+                 lb_push(&sb, c);
              }
              lex_in_string = 0;
-             buf[i] = '\0';
              if (tok_str) free(tok_str);
-             tok_str = strdup(buf);
+             tok_str = strdup(lb_cstr(&sb));
+             lb_free(&sb);
              return cur_tok = TOK_STR;
         }
 
