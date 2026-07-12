@@ -401,6 +401,7 @@ static char *read_heredoc(lexer_t *l, const char *delim, int strip_tabs) {
     size_t cap = 256;
     size_t len = 0;
     char *buf = malloc(cap);
+    if (!buf) return NULL;
     buf[0] = 0;
 
     size_t line_start = l->pos;
@@ -427,15 +428,26 @@ static char *read_heredoc(lexer_t *l, const char *delim, int strip_tabs) {
                  * unexpected trailing tokens. */
                 lexer_clear_lookahead(l);
                 token_t *nl = calloc(1, sizeof(token_t));
-                nl->type = TOKEN_NEWLINE;
-                nl->value = strdup("\n");
-                lexer_push_back(l, nl);
+                if (nl) {
+                    nl->type = TOKEN_NEWLINE;
+                    nl->value = strdup("\n");
+                    lexer_push_back(l, nl);
+                }
                 return buf;
             }
 
             // Append line + \n (with leading-tab strip for <<-)
-            while (len + line_len + 1 >= cap) cap *= 2;
-            buf = realloc(buf, cap);
+            if (len + line_len + 1 >= cap) {
+                size_t ncap = cap;
+                /* line_len is bounded by the (already size-capped) input, so
+                 * this cannot overflow; grow through a temp so a failed
+                 * realloc neither leaks buf nor NULL-clobbers it. */
+                while (len + line_len + 1 >= ncap) ncap *= 2;
+                char *nb = realloc(buf, ncap);
+                if (!nb) { free(buf); return NULL; }
+                buf = nb;
+                cap = ncap;
+            }
             memcpy(buf + len, l->input + cmp_start, line_len + 1);
             len += line_len + 1;
             buf[len] = 0;
@@ -450,9 +462,11 @@ static char *read_heredoc(lexer_t *l, const char *delim, int strip_tabs) {
      * for the outer parser so it doesn't trip on stale lookahead. */
     lexer_clear_lookahead(l);
     token_t *nl = calloc(1, sizeof(token_t));
-    nl->type = TOKEN_NEWLINE;
-    nl->value = strdup("\n");
-    lexer_push_back(l, nl);
+    if (nl) {
+        nl->type = TOKEN_NEWLINE;
+        nl->value = strdup("\n");
+        lexer_push_back(l, nl);
+    }
     return buf;
 }
 
