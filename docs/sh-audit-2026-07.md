@@ -20,6 +20,34 @@ is 32-bit, so `size_t` growth math (`cap*2`, `len+n`) can wrap.
 
 Findings numbered SH-NN by severity.
 
+## Resolution status — ALL FIXED (2026-07)
+
+SH-01 … SH-22 are all fixed and committed, one finding per commit, each
+built and verified against the ASan/UBSan host build plus the `.sh`
+regression scripts. Four further bugs were discovered while fixing and
+verifying the numbered set and were fixed the same way:
+
+- **SH-23** — `execute_line` dereferenced a token already freed by
+  `parser_parse` on *any* syntax error (heap use-after-free; surfaced by
+  the SH-03 depth cap changing a stack overflow into a UAF).
+- **SH-24** — an unterminated `$((`, `$(` or `${` scanned to the string's
+  NUL and the loop's trailing `p++` stepped one byte past the buffer
+  (heap OOB read).
+- **SH-25** — `$(( … ))` never parameter-expanded `$`-prefixed tokens, so
+  `$(( $1 - 1 ))` and friends evaluated to 0 (POSIX non-conformance;
+  broke e.g. recursive countdown functions).
+- **SH-26** — a `VAR=val command` prefix doubled the value in the child's
+  environment (`FOO=bar` → `FOO=bar=bar`) because `merge_env` formatted
+  the entry after restoring the `=`.
+
+Verification caveat: the pre-existing C unit tests and fuzz harnesses
+under `tests/bin/sh/` (`test_lexer.c`, `test_parser.c`, `fuzz_parser.c`,
+…) do not compile — they carry stale `"../lexer.h"`-style includes from
+before the test-tree relocation. Verification therefore used a full
+`sh_asan` host build driven by crafted hostile scripts plus the `.sh`
+feature/regression scripts. Fixing those stale test builds is follow-up
+work, tracked separately from this audit.
+
 ## What's solid (coverage confirmed)
 
 - The per-token / per-word / prompt string builders all funnel through
