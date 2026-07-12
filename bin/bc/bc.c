@@ -280,6 +280,15 @@ int cur_tok;
 char *tok_str = NULL;
 bc_num *tok_num = NULL;
 int lineno = 1;
+
+/* Recursion guards.  Unbounded function recursion or deeply nested
+ * parentheses would otherwise run the C stack off its end and SIGSEGV;
+ * these convert that into a clean error.  Reset in bc_reset_after_error
+ * (errors longjmp past the normal decrement). */
+#define BC_MAX_CALL_DEPTH  1000
+#define BC_MAX_PARSE_DEPTH 1000
+int call_depth = 0;
+int parse_depth = 0;
 static FILE *lex_file = NULL;
 static const char *lex_string = NULL;
 
@@ -822,24 +831,32 @@ ast_node_t *parse_logical_or(void) {
 }
 
 ast_node_t *parse_expr(void) {
+    /* Guard against runaway nesting (deeply parenthesized input) driving
+     * the recursive-descent parser off the C stack. */
+    if (++parse_depth > BC_MAX_PARSE_DEPTH) {
+        parse_depth = 0;
+        lex_error("expression nested too deeply");
+    }
     ast_node_t *left = parse_logical_or();
+    ast_node_t *result = left;
     if (cur_tok == TOK_ASSIGN || cur_tok == TOK_ADD_ASSIGN || cur_tok == TOK_SUB_ASSIGN ||
         cur_tok == TOK_MUL_ASSIGN || cur_tok == TOK_DIV_ASSIGN || cur_tok == TOK_MOD_ASSIGN ||
         cur_tok == TOK_POW_ASSIGN) {
-        
+
         if (left->type != AST_VAR && left->type != AST_ARRAY) {
             lex_error("invalid lvalue in assignment");
         }
-        
+
         int op = cur_tok;
         lex();
         ast_node_t *n = ast_new(AST_ASSIGN);
         n->assign.op = op;
         n->assign.lval = left;
         n->assign.rval = parse_expr(); // right-associative
-        return n;
+        result = n;
     }
-    return left;
+    parse_depth--;
+    return result;
 }
 
 
@@ -1582,6 +1599,11 @@ bc_num *eval_expr(ast_node_t *n) {
             fr->byrefs = byrefs;
             call_stack = fr;
 
+            /* Bound recursion: the frame is on the stack (so error
+             * recovery unwinds it), then fail if we are too deep. */
+            if (++call_depth > BC_MAX_CALL_DEPTH)
+                runtime_error("call stack too deep");
+
             // Bind Autos
             expr_list_t *fa = f->ast->func.autos;
             while (fa) {
@@ -1661,7 +1683,8 @@ bc_num *eval_expr(ast_node_t *n) {
             }
             call_stack = fr->prev;
             free(fr);
-            
+            call_depth--;
+
             return rv;
         }
             
@@ -1827,6 +1850,8 @@ static void bc_reset_after_error(void) {
     }
     if (ret_val) { bc_free(ret_val); ret_val = NULL; }
     is_returning = is_breaking = is_continuing = 0;
+    call_depth = 0;
+    parse_depth = 0;
 }
 
 /* Execute one top-level statement, then clear any control-flow flag it
