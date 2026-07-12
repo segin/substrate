@@ -1,7 +1,11 @@
 #include "util.h"
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+
+/* Upper bound on a single read_stream_all() result (script / stdin size). */
+#define READ_STREAM_MAX (64u * 1024 * 1024)
 
 char *sh_strndup(const char *s, size_t n) {
     size_t len = 0;
@@ -186,12 +190,26 @@ char *read_stream_all(FILE *stream) {
             break;
         }
 
-        while (len + nread + 1 > cap) {
-            cap *= 2;
-            buf = realloc(buf, cap);
-            if (!buf) {
+        if (len + nread + 1 > cap) {
+            /* Bound total size (guards a 32-bit size_t against cap*2 wrapping
+             * to a tiny value, and an endless stream against OOM). */
+            if (len + nread + 1 > READ_STREAM_MAX) {
+                fprintf(stderr, "sh: input exceeds %u bytes\n",
+                    (unsigned)READ_STREAM_MAX);
+                free(buf);
                 return NULL;
             }
+            size_t ncap = cap;
+            while (len + nread + 1 > ncap) {
+                ncap = (ncap > READ_STREAM_MAX / 2) ? READ_STREAM_MAX : ncap * 2;
+            }
+            char *nb = realloc(buf, ncap);
+            if (!nb) {
+                free(buf);
+                return NULL;
+            }
+            buf = nb;
+            cap = ncap;
         }
 
         memcpy(buf + len, chunk, nread);
