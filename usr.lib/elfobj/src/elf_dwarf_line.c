@@ -106,6 +106,14 @@ elf_err_t elf_dwarf_get_line_info(elfobj_t *obj, uint64_t addr, char **out_file,
         uint8_t line_range = data[off++];
         uint8_t opcode_base = data[off++];
 
+        /* line_range is the divisor/modulus for special opcodes; a zero
+         * value (DW_LNS_const_add_pc and special-opcode advance) is a
+         * division by zero. Skip a unit with a malformed header. */
+        if (line_range == 0) {
+            off = unit_end;
+            continue;
+        }
+
         if (off + opcode_base - 1 > program_start) break;
         uint8_t std_opcode_lengths[256] = {0};
         for (int i = 1; i < opcode_base; ++i) {
