@@ -99,7 +99,7 @@ typedef enum {
     
     // Keywords
     TOK_IF, TOK_ELSE, TOK_WHILE, TOK_FOR,
-    TOK_BREAK, TOK_CONTINUE, TOK_RETURN, TOK_HALT,
+    TOK_BREAK, TOK_CONTINUE, TOK_RETURN, TOK_HALT, TOK_QUIT,
     TOK_DEFINE, TOK_AUTO, TOK_PRINT, TOK_READ,
     TOK_LENGTH, TOK_SCALE_FUNC, TOK_SQRT
 } token_t;
@@ -518,11 +518,10 @@ int lex(void) {
             else if (strcmp(buf, "continue") == 0) kw = TOK_CONTINUE;
             else if (strcmp(buf, "return") == 0)   kw = TOK_RETURN;
             else if (strcmp(buf, "halt") == 0)     kw = TOK_HALT;
-            /* `quit` ends the session.  bc draws a fine distinction (quit acts
-             * at lex time, halt at run time); for normal top-level use both
-             * simply terminate, so reuse the halt path.  Without this `quit`
-             * was read as an undefined variable, printing a stray 0. */
-            else if (strcmp(buf, "quit") == 0)     kw = TOK_HALT;
+            /* `quit` terminates when the parser reaches it (see
+             * parse_statement), whether or not it would execute - unlike
+             * `halt`, which stops only when executed. */
+            else if (strcmp(buf, "quit") == 0)     kw = TOK_QUIT;
             else if (strcmp(buf, "define") == 0)   kw = TOK_DEFINE;
             else if (strcmp(buf, "auto") == 0)     kw = TOK_AUTO;
             else if (strcmp(buf, "print") == 0)  { bc_ext_warn("print statement is a GNU extension"); kw = TOK_PRINT; }
@@ -919,6 +918,13 @@ ast_node_t *parse_statement(void) {
         tok_str = NULL;
         lex();
         return n; // handled in eval as print
+    }
+    if (cur_tok == TOK_QUIT) {
+        /* quit takes effect the moment it is parsed - even inside an
+         * unexecuted branch (`if (0) quit` still exits) - which is what
+         * distinguishes it from halt.  Statements parsed before it (on
+         * earlier lines) have already run, so `1; quit` prints 1. */
+        exit(0);
     }
     if (cur_tok == TOK_IF) {
         lex();
