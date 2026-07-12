@@ -17,7 +17,7 @@
 #include <histedit.h>
 
 static int command_count = 1;
-int shell_promptvars = 0;
+int shell_promptvars = 1;   /* bash default: prompt performs $ expansion */
 
 static EditLine *el = NULL;
 static History *hist = NULL;

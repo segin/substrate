@@ -8,6 +8,7 @@
 #include "prompt.h"
 #include "util.h"
 #include "expand.h"
+#include "exec.h"   /* shell_promptvars */
 #include "shell_var.h"
 #include "exec.h"
 #include "job.h"
@@ -419,9 +420,18 @@ char *evaluate_prompt(const char *ps1, int command_count, int extended) {
     char *escaped = expand_prompt_escapes(ps1, command_count, extended, 0);
     // fprintf(stderr, "DEBUG: escaped=[%s]\n", escaped ? escaped : "NULL");
     char *expanded;
-    
-    // Always call expand_word
-    expanded = expand_word(escaped ? escaped : ps1);
+
+    /*
+     * Parameter/arithmetic/command substitution in the prompt is gated on
+     * the `promptvars` shopt option (bash-compatible, default on). With it
+     * turned off, the already-backslash-expanded prompt is used verbatim so
+     * a PS1 from an untrusted source cannot run $(...) or leak variables.
+     */
+    if (shell_promptvars) {
+        expanded = expand_word(escaped ? escaped : ps1);
+    } else {
+        expanded = strdup(escaped ? escaped : ps1);
+    }
     // fprintf(stderr, "DEBUG: expanded=[%s]\n", expanded ? expanded : "NULL");
     
     if (escaped) free(escaped);
