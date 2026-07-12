@@ -3,6 +3,13 @@
 
 #include "regex_internal.h"
 
+/* Upper bound on a single {m,n} repetition count.  POSIX only requires
+ * RE_DUP_MAX (>= 255) to be supported; we allow far more but reject the
+ * absurd values a{100000000} that would otherwise spin the NFA expansion
+ * loop.  The compile-time state budget (regex_limits.max_states) is the
+ * real backstop; this just fails such patterns cleanly at parse time. */
+#define REGEX_MAX_REPEAT 32767
+
 typedef enum {
     NODE_EMPTY,
     NODE_LITERAL,
@@ -87,6 +94,8 @@ typedef struct nfa_prog {
     size_t capture_count;
     int uses_bol;
     int uses_eol;
+    size_t max_states;  /* compile-time state budget (0 = unlimited) */
+    int failed;         /* set when nfa_state_new hit the budget or OOM */
 } nfa_prog;
 
 typedef struct dfa_trans {
@@ -896,7 +905,14 @@ static regex_node *parse_repeat(parser *p) {
             return atom;
         }
         while (!parser_at_end(p) && parser_peek(p) >= '0' && parser_peek(p) <= '9') {
-            min = min * 10 + (parser_get(p) - '0');
+            /* Clamp accumulation so an absurd count string cannot overflow
+             * size_t; anything past the cap stays just above it and is
+             * rejected below. */
+            if (min <= REGEX_MAX_REPEAT) {
+                min = min * 10 + (parser_get(p) - '0');
+            } else {
+                parser_get(p);
+            }
         }
         max = min;
         if (!parser_at_end(p) && parser_peek(p) == ',') {
@@ -904,13 +920,28 @@ static regex_node *parse_repeat(parser *p) {
             has_max = 1;
             max = 0;
             while (!parser_at_end(p) && parser_peek(p) >= '0' && parser_peek(p) <= '9') {
-                max = max * 10 + (parser_get(p) - '0');
+                if (max <= REGEX_MAX_REPEAT) {
+                    max = max * 10 + (parser_get(p) - '0');
+                } else {
+                    parser_get(p);
+                }
                 max_set = 1;
             }
         }
         if (parser_at_end(p) || parser_get(p) != '}') {
             p->pos = save;
             return atom;
+        }
+        if (min > REGEX_MAX_REPEAT || (max_set && max > REGEX_MAX_REPEAT)) {
+            node_free(atom);
+            p->err = REGEX_ERR_SYNTAX;
+            return NULL;
+        }
+        /* {m,n} with an explicit finite n < m is a malformed bound. */
+        if (has_max && max_set && max < min) {
+            node_free(atom);
+            p->err = REGEX_ERR_SYNTAX;
+            return NULL;
         }
         n = node_new(NODE_REPEAT);
         if (!n) {
@@ -1090,10 +1121,20 @@ static void patch(ptrlist *l, nfa_state *s) {
 
 static nfa_state *nfa_state_new(nfa_prog *prog, nfa_type_t type) {
     nfa_state *s;
+    /* Enforce the state budget DURING construction so a pattern whose
+     * expansion is huge (nested {m,n}, deep nesting) fails fast instead
+     * of building the whole NFA before the post-hoc check.  The `failed`
+     * flag propagates out through the frag builders (which return an
+     * empty frag) so compile aborts cleanly. */
+    if (prog->max_states && prog->state_count >= prog->max_states) {
+        prog->failed = 1;
+        return NULL;
+    }
     if (prog->state_count == prog->state_cap) {
         size_t new_cap = prog->state_cap ? prog->state_cap * 2 : 64;
         nfa_state **new_states = (nfa_state **)realloc(prog->states, new_cap * sizeof(*new_states));
         if (!new_states) {
+            prog->failed = 1;
             return NULL;
         }
         prog->states = new_states;
@@ -1101,6 +1142,7 @@ static nfa_state *nfa_state_new(nfa_prog *prog, nfa_type_t type) {
     }
     s = (nfa_state *)calloc(1, sizeof(*s));
     if (!s) {
+        prog->failed = 1;
         return NULL;
     }
     s->type = type;
@@ -1109,9 +1151,22 @@ static nfa_state *nfa_state_new(nfa_prog *prog, nfa_type_t type) {
     return s;
 }
 
+/* Empty frag returned when a state allocation fails (prog->failed is set
+ * by nfa_state_new).  Every builder short-circuits to this so a NULL
+ * state is never dereferenced (list1(&NULL->out) would form a bogus
+ * pointer that patch() later writes through). */
+static frag frag_none(void) {
+    frag f;
+    memset(&f, 0, sizeof(f));
+    return f;
+}
+
 static frag frag_literal(nfa_prog *prog, uint32_t cp) {
     frag f;
     nfa_state *s = nfa_state_new(prog, NFA_CHAR);
+    if (!s) {
+        return frag_none();
+    }
     s->ch = cp;
     f.start = s;
     f.out = list1(&s->out);
@@ -1121,6 +1176,9 @@ static frag frag_literal(nfa_prog *prog, uint32_t cp) {
 static frag frag_dot(nfa_prog *prog) {
     frag f;
     nfa_state *s = nfa_state_new(prog, NFA_DOT);
+    if (!s) {
+        return frag_none();
+    }
     f.start = s;
     f.out = list1(&s->out);
     return f;
@@ -1129,6 +1187,13 @@ static frag frag_dot(nfa_prog *prog) {
 static frag frag_class(nfa_prog *prog, regex_charclass *cc) {
     frag f;
     nfa_state *s = nfa_state_new(prog, NFA_CLASS);
+    if (!s) {
+        if (cc) {
+            free(cc->ranges);
+            free(cc);
+        }
+        return frag_none();
+    }
     s->charclass = cc;
     f.start = s;
     f.out = list1(&s->out);
@@ -1138,6 +1203,9 @@ static frag frag_class(nfa_prog *prog, regex_charclass *cc) {
 static frag frag_backref(nfa_prog *prog, size_t group_id) {
     frag f;
     nfa_state *s = nfa_state_new(prog, NFA_BACKREF);
+    if (!s) {
+        return frag_none();
+    }
     /* The group this back-reference reproduces; reuses save_slot storage. */
     s->save_slot = (int)group_id;
     f.start = s;
@@ -1148,6 +1216,9 @@ static frag frag_backref(nfa_prog *prog, size_t group_id) {
 static frag frag_anchor(nfa_prog *prog, nfa_type_t type) {
     frag f;
     nfa_state *s = nfa_state_new(prog, type);
+    if (!s) {
+        return frag_none();
+    }
     f.start = s;
     f.out = list1(&s->out);
     return f;
@@ -1162,6 +1233,9 @@ static frag frag_concat(frag a, frag b) {
 static frag frag_alt(nfa_prog *prog, frag a, frag b) {
     frag f;
     nfa_state *s = nfa_state_new(prog, NFA_SPLIT);
+    if (!s) {
+        return frag_none();
+    }
     s->out = a.start;
     s->out1 = b.start;
     f.start = s;
@@ -1172,6 +1246,9 @@ static frag frag_alt(nfa_prog *prog, frag a, frag b) {
 static frag frag_star(nfa_prog *prog, frag a) {
     frag f;
     nfa_state *s = nfa_state_new(prog, NFA_SPLIT);
+    if (!s) {
+        return frag_none();
+    }
     s->out = a.start;
     patch(a.out, s);
     f.start = s;
@@ -1182,6 +1259,9 @@ static frag frag_star(nfa_prog *prog, frag a) {
 static frag frag_plus(nfa_prog *prog, frag a) {
     frag f;
     nfa_state *s = nfa_state_new(prog, NFA_SPLIT);
+    if (!s) {
+        return frag_none();
+    }
     patch(a.out, s);
     s->out = a.start;
     f.start = a.start;
@@ -1192,6 +1272,9 @@ static frag frag_plus(nfa_prog *prog, frag a) {
 static frag frag_qmark(nfa_prog *prog, frag a) {
     frag f;
     nfa_state *s = nfa_state_new(prog, NFA_SPLIT);
+    if (!s) {
+        return frag_none();
+    }
     s->out = a.start;
     f.start = s;
     f.out = append_list(a.out, list1(&s->out1));
@@ -1202,6 +1285,9 @@ static frag frag_group(nfa_prog *prog, frag inner, size_t group_id) {
     frag f;
     nfa_state *s1 = nfa_state_new(prog, NFA_SAVE);
     nfa_state *s2 = nfa_state_new(prog, NFA_SAVE);
+    if (!s1 || !s2) {
+        return frag_none();
+    }
     s1->save_slot = (int)(2 * group_id);
     s2->save_slot = (int)(2 * group_id + 1);
     s1->out = inner.start;
@@ -1220,11 +1306,20 @@ static frag compile_node(nfa_prog *prog, regex_node *n) {
     if (!n) {
         return f;
     }
+    /* Once the state budget is exhausted, stop building: recursive callers
+     * and the counted-repeat loops below check prog->failed and unwind
+     * instead of spinning out the full (rejected) expansion. */
+    if (prog->failed) {
+        return frag_none();
+    }
 
     switch (n->type) {
     case NODE_EMPTY:
         {
             nfa_state *s = nfa_state_new(prog, NFA_EPSILON);
+            if (!s) {
+                return frag_none();
+            }
             f.start = s;
             f.out = list1(&s->out);
         }
@@ -1272,6 +1367,9 @@ static frag compile_node(nfa_prog *prog, regex_node *n) {
         }
         f = compile_node(prog, n->left);
         for (i = 1; i < n->rep_min; ++i) {
+            if (prog->failed) {
+                break;
+            }
             f = frag_concat(f, compile_node(prog, n->left));
         }
         if (max == SIZE_MAX) {
@@ -1281,6 +1379,9 @@ static frag compile_node(nfa_prog *prog, regex_node *n) {
         if (max > n->rep_min) {
             size_t extra;
             for (extra = n->rep_min; extra < max; ++extra) {
+                if (prog->failed) {
+                    break;
+                }
                 f = frag_concat(f, frag_qmark(prog, compile_node(prog, n->left)));
             }
         }
@@ -3056,8 +3157,17 @@ static regex_err_t safe_regex_compile(regex_t *re, const char *pattern, unsigned
         node_free(ast);
         return REGEX_ERR_NOMEM;
     }
+    /* Enforce the state budget during construction (nfa_state_new), so a
+     * pattern whose NFA expansion is enormous - nested {m,n}, deeply
+     * nested groups - fails fast instead of allocating it all first. */
+    prog->max_states = re->limits.max_states;
 
     compiled = compile_node(prog, ast);
+    if (prog->failed) {
+        node_free(ast);
+        nfa_free(prog);
+        return REGEX_ERR_COMPILE_LIMIT;
+    }
     match_state = nfa_state_new(prog, NFA_MATCH);
     if (!match_state) {
         node_free(ast);
