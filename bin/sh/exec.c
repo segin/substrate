@@ -1629,10 +1629,13 @@ static char **merge_env(char **base_env, int assign_count, char **assignments) {
 
         *eq = '\0';
         char *val = expand_word(eq + 1);
-        *eq = '=';
 
+        /* Build NAME=value while assignments[i] is still split at '='; the
+         * previous code restored the '=' first, so the format's own "=%s"
+         * doubled the value ("FOO=bar" -> "FOO=bar=bar"). */
         char buf[2048];
         snprintf(buf, sizeof(buf), "%s=%s", assignments[i], val ? val : "");
+        *eq = '=';
         if (val) free(val);
 
         /* Duplication handling: replace if exists, else append */
