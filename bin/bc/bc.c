@@ -1903,17 +1903,17 @@ int main(int argc, char **argv) {
         fprintf(stderr, "bc (Substrate AST Interpreter)\n");
     }
 
-    if (optind < argc) {
-        for (int i = optind; i < argc; i++) {
-            FILE *fp = fopen(argv[i], "r");
-            if (!fp) {
-                perror(argv[i]);
-                return 1;
-            }
-            run_file_stream(fp);
-            fclose(fp);
+    /* POSIX: after all file operands are read, bc reads standard input.
+     * (GNU bc likewise drops to an interactive session after running a
+     * file.)  So process the files, then fall through to stdin. */
+    for (int i = optind; i < argc; i++) {
+        FILE *fp = fopen(argv[i], "r");
+        if (!fp) {
+            perror(argv[i]);
+            return 1;
         }
-        return 0;
+        run_file_stream(fp);
+        fclose(fp);
     }
 
     if (isatty(STDIN_FILENO)) {
