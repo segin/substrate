@@ -272,6 +272,7 @@ char *shell_var_get(const char *name) {
 }
 
 static shell_var_t *find_var_recursive(const char *name, shell_scope_t **found_in) {
+    if (!name) return NULL;
     shell_scope_t *s = scope_stack;
     while (s) {
         shell_var_t *v = s->vars;
@@ -287,7 +288,38 @@ static shell_var_t *find_var_recursive(const char *name, shell_scope_t **found_i
     return NULL;
 }
 
+/*
+ * Allocate a fully-initialised variable node, checking every allocation.
+ * Returns NULL on OOM (with nothing leaked). name/value must be non-NULL.
+ */
+static shell_var_t *new_var(const char *name, const char *value) {
+    shell_var_t *v = malloc(sizeof(shell_var_t));
+    if (!v) return NULL;
+    v->name = strdup(name);
+    v->value = strdup(value);
+    if (!v->name || !v->value) {
+        free(v->name);
+        free(v->value);
+        free(v);
+        return NULL;
+    }
+    v->exported = 0;
+    v->readonly = 0;
+    v->next = NULL;
+    return v;
+}
+
+/* Replace v->value with a copy of value, leaving v->value intact on OOM. */
+static void set_var_value(shell_var_t *v, const char *value) {
+    char *nv = strdup(value);
+    if (!nv) return;
+    free(v->value);
+    v->value = nv;
+}
+
 void shell_var_set(const char *name, const char *value) {
+    if (!name) return;
+    if (!value) value = "";
     ensure_global_scope();
     shell_scope_t *s;
     shell_var_t *v = find_var_recursive(name, &s);
@@ -296,47 +328,43 @@ void shell_var_set(const char *name, const char *value) {
             fprintf(stderr, "%s: %s: readonly variable\n", shell_var_get_name(), name);
             return;
         }
-        free(v->value);
-        v->value = strdup(value);
+        set_var_value(v, value);
     } else {
         // If not found, set in global scope (the last one in list)
         s = scope_stack;
         while (s->next) s = s->next;
-        
-        v = malloc(sizeof(shell_var_t));
-        v->name = strdup(name);
-        v->value = strdup(value);
-        v->exported = 0;
-        v->readonly = 0;
+
+        v = new_var(name, value);
+        if (!v) return;
         v->next = s->vars;
         s->vars = v;
     }
 }
 
 void shell_var_force_set(const char *name, const char *value) {
+    if (!name) return;
+    if (!value) value = "";
     ensure_global_scope();
     shell_scope_t *s;
     shell_var_t *v = find_var_recursive(name, &s);
     if (v) {
         // Bypass readonly check
-        free(v->value);
-        v->value = strdup(value);
+        set_var_value(v, value);
     } else {
         // If not found, set in global scope
         s = scope_stack;
         while (s->next) s = s->next;
-        
-        v = malloc(sizeof(shell_var_t));
-        v->name = strdup(name);
-        v->value = strdup(value);
-        v->exported = 0;
-        v->readonly = 0;
+
+        v = new_var(name, value);
+        if (!v) return;
         v->next = s->vars;
         s->vars = v;
     }
 }
 
 void shell_var_set_local(const char *name, const char *value) {
+    if (!name) return;
+    if (!value) value = "";
     ensure_global_scope();
     shell_scope_t *s = scope_stack; // top scope
     shell_var_t *v = s->vars;
@@ -346,17 +374,13 @@ void shell_var_set_local(const char *name, const char *value) {
                 fprintf(stderr, "%s: %s: readonly variable\n", shell_var_get_name(), name);
                 return;
             }
-            free(v->value);
-            v->value = strdup(value);
+            set_var_value(v, value);
             return;
         }
         v = v->next;
     }
-    v = malloc(sizeof(shell_var_t));
-    v->name = strdup(name);
-    v->value = strdup(value);
-    v->exported = 0;
-    v->readonly = 0;
+    v = new_var(name, value);
+    if (!v) return;
     v->next = s->vars;
     s->vars = v;
 }
