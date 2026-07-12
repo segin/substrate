@@ -1630,16 +1630,24 @@ static char **merge_env(char **base_env, int assign_count, char **assignments) {
         *eq = '\0';
         char *val = expand_word(eq + 1);
 
-        /* Build NAME=value while assignments[i] is still split at '='; the
-         * previous code restored the '=' first, so the format's own "=%s"
-         * doubled the value ("FOO=bar" -> "FOO=bar=bar"). */
-        char buf[2048];
-        snprintf(buf, sizeof(buf), "%s=%s", assignments[i], val ? val : "");
+        /* Build "NAME=value" in an exactly-sized buffer (a fixed buf[2048]
+         * previously truncated long entries). assignments[i] is still split
+         * at '=', so it is just NAME here. */
+        size_t key_len = eq - assignments[i];
+        const char *v = val ? val : "";
+        size_t val_len = strlen(v);
+        char *entry = malloc(key_len + 1 + val_len + 1);
+        if (entry) {
+            memcpy(entry, assignments[i], key_len);
+            entry[key_len] = '=';
+            memcpy(entry + key_len + 1, v, val_len);
+            entry[key_len + 1 + val_len] = '\0';
+        }
         *eq = '=';
         if (val) free(val);
+        if (!entry) continue;   /* OOM: skip this assignment rather than store NULL */
 
         /* Duplication handling: replace if exists, else append */
-        size_t key_len = eq - assignments[i];
         int found = -1;
         for (int k = 0; k < current_count; k++) {
             if (strncmp(new_env[k], assignments[i], key_len) == 0 && new_env[k][key_len] == '=') {
@@ -1647,9 +1655,6 @@ static char **merge_env(char **base_env, int assign_count, char **assignments) {
                 break;
             }
         }
-
-        char *entry = strdup(buf);
-        if (!entry) continue;   /* OOM: skip this assignment rather than store NULL */
         if (found != -1) {
             free(new_env[found]);
             new_env[found] = entry;

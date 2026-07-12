@@ -1021,6 +1021,32 @@ static int expand_word_internal(const char *word, char ***list, size_t *cap,
                                 expand_str_split(val, split && !in_dq, list, cap, len, &cw, &cw_cap, &cw_len);
                             }
                         }
+                    } else if (*c == ':') {
+                        /* ${var:offset} / ${var:offset:length} substring.
+                         * offset/length are (optionally signed) integers; a
+                         * negative offset counts from the end, a negative
+                         * length trims that many chars from the end. */
+                        if (val) {
+                            long slen = (long)strlen(val);
+                            char *endp;
+                            long off = strtol(c + 1, &endp, 10);
+                            long length = 0;
+                            int have_len = 0;
+                            if (*endp == ':') {
+                                length = strtol(endp + 1, &endp, 10);
+                                have_len = 1;
+                            }
+                            if (off < 0) { off += slen; if (off < 0) off = 0; }
+                            if (off > slen) off = slen;
+                            long avail = slen - off;
+                            long take;
+                            if (!have_len) take = avail;
+                            else if (length < 0) { take = avail + length; if (take < 0) take = 0; }
+                            else take = length > avail ? avail : length;
+                            char *sub = sh_strndup(val + off, (size_t)take);
+                            expand_str_split(sub, split && !in_dq, list, cap, len, &cw, &cw_cap, &cw_len);
+                            free(sub);
+                        }
                     } else if (*c == '#') {
                         // ${#var} or ${var#pattern} / ${var##pattern}
                         if (c == content && c[1] && (ISALPHA(c[1]) || c[1] == '_')) {
