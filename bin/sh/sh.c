@@ -48,11 +48,12 @@ int execute_line(char *buffer) {
             shell_var_set("?", res_buf);
             ast_free(node);
         } else {
-            // Parser error or empty
-            if (t && t->type != TOKEN_EOF) {
-                last_status = 2;
-                shell_var_set("?", "2");
-            }
+            /* Parser error. `t` (peeked above) was consumed and freed by
+             * parser_parse, so it must not be dereferenced here - and we
+             * already know it was a non-EOF token (the loop broke on EOF at
+             * the top), so this is unconditionally a parse error. */
+            last_status = 2;
+            shell_var_set("?", "2");
             break;
         }
         
