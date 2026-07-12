@@ -191,6 +191,7 @@ void elf__wr64(uint8_t *p, elfobj_endian_t e, uint64_t v) {
 elf_err_t elf__diag_append(elfobj_t *obj, elf_diag_level_t level, elf_err_t code,
                            uint64_t index, const char *msg) {
     size_t need;
+    size_t reserve;
     char *next;
     char *copy;
     void *items_next;
@@ -199,13 +200,18 @@ elf_err_t elf__diag_append(elfobj_t *obj, elf_diag_level_t level, elf_err_t code
         return ELF_ERR_STATE;
     }
 
+    /* The append writes strlen(msg) bytes + '\n' + '\0', so the highest index
+     * touched is len + need (need = strlen+1). Reserve one extra byte for the
+     * newline beyond the message+NUL, otherwise buf[len+need] overflows the
+     * allocation by one byte when cap == len + need exactly. */
     need = strlen(msg) + 1;
-    if (obj->diag.len > ELFOBJ_MAX_DIAG_BYTES || need > ELFOBJ_MAX_DIAG_BYTES - obj->diag.len) {
+    reserve = need + 1;
+    if (obj->diag.len > ELFOBJ_MAX_DIAG_BYTES || reserve > ELFOBJ_MAX_DIAG_BYTES - obj->diag.len) {
         return ELF_ERR_OOM;
     }
-    if (obj->diag.cap < obj->diag.len + need) {
+    if (obj->diag.cap < obj->diag.len + reserve) {
         size_t new_cap = obj->diag.cap == 0 ? 128 : obj->diag.cap;
-        while (new_cap < obj->diag.len + need) {
+        while (new_cap < obj->diag.len + reserve) {
             if (new_cap > ((size_t)-1) / 2) {
                 return ELF_ERR_OOM;
             }
@@ -213,7 +219,7 @@ elf_err_t elf__diag_append(elfobj_t *obj, elf_diag_level_t level, elf_err_t code
         }
         if (new_cap > ELFOBJ_MAX_DIAG_BYTES) {
             new_cap = ELFOBJ_MAX_DIAG_BYTES;
-            if (new_cap < obj->diag.len + need) {
+            if (new_cap < obj->diag.len + reserve) {
                 return ELF_ERR_OOM;
             }
         }
