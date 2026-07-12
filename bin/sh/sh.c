@@ -2,6 +2,7 @@
 #include <unistd.h>
 #include <string.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include "lexer.h"
 #include "parser.h"
 #include <sys/wait.h>
@@ -331,15 +332,23 @@ int main(int argc, char **argv, char **envp) {
                 execute_line(buffer);
             }
             free(buffer);
+        } else if ((uintmax_t)fsize > (uintmax_t)(SIZE_MAX - 1)) {
+            /* off_t is wider than size_t on the 32-bit target; reject a size
+             * that would truncate (or wrap when +1'd) before malloc/fread. */
+            fprintf(stderr, "%s: script too large\n", shell_var_get_name());
+            if (input != stdin) fclose(input);
+            run_exit_trap();
+            return 1;
         } else {
-            char *buffer = malloc(fsize + 1);
+            size_t sz = (size_t)fsize;
+            char *buffer = malloc(sz + 1);
             if (!buffer) {
                 fprintf(stderr, "%s: Out of memory\n", shell_var_get_name());
                 if (input != stdin) fclose(input);
                 run_exit_trap();
                 return 1;
             }
-            size_t nread = fread(buffer, 1, (size_t)fsize, input);
+            size_t nread = fread(buffer, 1, sz, input);
             buffer[nread] = 0;
  
             if (nread > 0) {
