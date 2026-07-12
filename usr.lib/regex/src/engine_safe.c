@@ -2532,6 +2532,13 @@ static regex_err_t safe_regex_replace(const regex_t *re, const char *text, size_
         return REGEX_ERR_NOMEM;
     }
 
+    /* End offset of the previous SUBSTITUTED match; SIZE_MAX = none yet.
+     * Used to suppress a degenerate empty match sitting exactly at the
+     * end of the previous match (sed/perl semantics) - otherwise an
+     * empty-matchable pattern double-substitutes and/or drops the text
+     * between matches. */
+    size_t prev_end = (size_t)-1;
+
     while (pos <= text_len) {
         res = safe_regex_match_internal(re, text + pos, text_len - pos, caps, cap_count, &err, scratch_set, scratch_cap);
         if (res < 0 && res != -1) {
@@ -2548,6 +2555,24 @@ static regex_err_t safe_regex_replace(const regex_t *re, const char *text, size_
             size_t start = caps[0] + pos;
             size_t end = caps[1] + pos;
             size_t rpos = 0;
+
+            /* Degenerate empty match adjacent to the previous match's
+             * end: don't substitute again; emit one char and advance so
+             * the loop makes progress without losing text. */
+            if (start == end && start == prev_end) {
+                if (pos < text_len) {
+                    if (!ensure_capacity(&out, &out_cap, *out_len_ptr + 2)) {
+                        free(caps);
+                        free(out);
+                        free(scratch_set);
+                        return REGEX_ERR_NOMEM;
+                    }
+                    out[(*out_len_ptr)++] = text[pos];
+                }
+                pos++;
+                continue;
+            }
+
             if (!ensure_capacity(&out, &out_cap, *out_len_ptr + (start - pos) + 1)) {
                 free(caps);
                 free(out);
@@ -2582,25 +2607,43 @@ static regex_err_t safe_regex_replace(const regex_t *re, const char *text, size_
                 out[(*out_len_ptr)++] = replacement[rpos++];
             }
 
+            prev_end = end;
             pos = end;
             if (!global) {
                 break;
             }
             if (end == start) {
+                /* Zero-width match: emit the char we skip over so it is
+                 * not dropped from the output. */
+                if (pos < text_len) {
+                    if (!ensure_capacity(&out, &out_cap, *out_len_ptr + 2)) {
+                        free(caps);
+                        free(out);
+                        free(scratch_set);
+                        return REGEX_ERR_NOMEM;
+                    }
+                    out[(*out_len_ptr)++] = text[pos];
+                }
                 pos++;
             }
         }
     }
 
-    if (!ensure_capacity(&out, &out_cap, *out_len_ptr + (text_len - pos) + 1)) {
-        free(caps);
-        free(out);
-        free(scratch_set);
-        return REGEX_ERR_NOMEM;
+    {
+        /* A zero-width match at end-of-text advances pos to text_len+1
+         * (2589-2590), so guard the subtraction: an unguarded
+         * text_len - pos underflows to SIZE_MAX and memcpy overflows. */
+        size_t rest = pos < text_len ? text_len - pos : 0;
+        if (!ensure_capacity(&out, &out_cap, *out_len_ptr + rest + 1)) {
+            free(caps);
+            free(out);
+            free(scratch_set);
+            return REGEX_ERR_NOMEM;
+        }
+        memcpy(out + *out_len_ptr, text + pos, rest);
+        *out_len_ptr += rest;
+        out[*out_len_ptr] = '\0';
     }
-    memcpy(out + *out_len_ptr, text + pos, text_len - pos);
-    *out_len_ptr += text_len - pos;
-    out[*out_len_ptr] = '\0';
 
     *out_buf = out;
     free(caps);
