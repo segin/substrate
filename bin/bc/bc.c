@@ -1525,6 +1525,33 @@ bc_num *eval_expr(ast_node_t *n) {
                 ap = ap->next;
             }
 
+            /* POSIX requires the argument count to match the parameter
+             * count.  The old code just stopped at the shorter list, so
+             * a missing argument left its parameter unbound and the
+             * function body silently read the same-named GLOBAL.  Free
+             * the partially-built (not-yet-pushed) locals and error. */
+            if (fp || ap) {
+                while (bound) {
+                    local_var_t *nx = bound->next;
+                    if (bound->val) bc_free(bound->val);
+                    if (bound->array) {
+                        for (int i = 0; i < bound->array_len; i++)
+                            if (bound->array[i]) bc_free(bound->array[i]);
+                        free(bound->array);
+                    }
+                    free(bound->name);
+                    free(bound);
+                    bound = nx;
+                }
+                while (byrefs) {
+                    byref_bind_t *bn = byrefs->next;
+                    free(byrefs->srcname);
+                    free(byrefs);
+                    byrefs = bn;
+                }
+                runtime_error("wrong number of arguments to function");
+            }
+
             // Push Frame and attach the captured parameter locals.
             frame_t *fr = calloc(1, sizeof(frame_t));
             fr->prev = call_stack;
