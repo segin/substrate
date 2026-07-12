@@ -14,66 +14,90 @@ char *sh_strndup(const char *s, size_t n) {
     return res;
 }
 
+/*
+ * Match one character c against the bracket expression starting at *pp
+ * (which points at '['), advancing *pp past the closing ']'.
+ *   returns  1 : valid bracket expression, c matches
+ *   returns  0 : valid bracket expression, c does not match
+ *   returns -1 : no closing ']' -- not a bracket expression (*pp unchanged),
+ *                the caller should treat the '[' as a literal character.
+ * Range endpoints are compared as unsigned char so bytes >= 0x80 order
+ * correctly.
+ */
+static int match_bracket(const char **pp, char c) {
+    const char *p = *pp + 1;   /* skip '[' */
+    int invert = 0;
+    if (*p == '!' || *p == '^') { invert = 1; p++; }
+
+    int match = 0, first = 1;
+    const char *scan = p;
+    while (*scan && (*scan != ']' || first)) {
+        if (scan[1] == '-' && scan[2] && scan[2] != ']') {
+            unsigned char lo = (unsigned char)scan[0];
+            unsigned char hi = (unsigned char)scan[2];
+            unsigned char uc = (unsigned char)c;
+            if (uc >= lo && uc <= hi) match = 1;
+            scan += 3;
+        } else {
+            if (*scan == c) match = 1;
+            scan++;
+        }
+        first = 0;
+    }
+    if (*scan != ']') return -1;   /* unterminated: literal '[' */
+    *pp = scan + 1;                /* past ']' */
+    return invert ? !match : match;
+}
+
+/*
+ * Glob matcher for '*', '?' and '[...]'. Iterative two-pointer algorithm
+ * with a single backtrack point (star_p/star_s): O(len(pattern)*len(str))
+ * worst case, no recursion and no exponential backtracking -- the previous
+ * recursive version overflowed the stack on long inputs and blew up
+ * exponentially on patterns like "a*a*a*...b".
+ */
 int match_pattern(const char *pattern, const char *str) {
     if (!pattern || !str) return 0;
-    
-    // Simple recursive glob matcher supporting * and ?
-    if (*pattern == '\0') {
-        return *str == '\0';
-    }
-    
-    if (*pattern == '*') {
-        while (*(pattern + 1) == '*') pattern++; // Skip multiple *
-        
-        if (*(pattern + 1) == '\0') return 1; // * at end matches everything
-        
-        while (*str) {
-            if (match_pattern(pattern + 1, str)) return 1;
-            str++;
+
+    const char *p = pattern;
+    const char *s = str;
+    const char *star_p = NULL;   /* pattern just after the last '*' */
+    const char *star_s = NULL;   /* str position that '*' is matching from */
+
+    while (*s) {
+        int advanced = 0;
+
+        if (*p == '*') {
+            while (*p == '*') p++;          /* collapse consecutive '*' */
+            if (*p == '\0') return 1;       /* trailing '*' matches the rest */
+            star_p = p;
+            star_s = s;
+            continue;
+        } else if (*p == '?') {
+            p++; s++; advanced = 1;
+        } else if (*p == '[') {
+            const char *pp = p;
+            int r = match_bracket(&pp, *s);
+            if (r == 1) { p = pp; s++; advanced = 1; }
+            else if (r < 0 && *p == *s) { p++; s++; advanced = 1; }
+            /* r == 0 (no match) or unterminated non-literal: not advanced */
+        } else if (*p == *s) {
+            p++; s++; advanced = 1;
         }
-        return match_pattern(pattern + 1, str); // Try matching empty string at end
-    }
-    
-    if (*pattern == '?' || *pattern == *str) {
-        if (*str == '\0') return 0; // ? cannot match empty
-        return match_pattern(pattern + 1, str + 1);
+
+        if (!advanced) {
+            if (star_p) {
+                /* '*' absorbs one more character and we retry. */
+                p = star_p;
+                s = ++star_s;
+            } else {
+                return 0;
+            }
+        }
     }
 
-    if (*pattern == '[') {
-        if (*str == '\0') return 0;
-        pattern++;
-        int invert = 0;
-        if (*pattern == '!') {
-            invert = 1;
-            pattern++;
-        }
-        
-        int match = 0;
-        int first = 1;
-        while (*pattern && (*pattern != ']' || first)) {
-             // Handle ranges like a-z
-             if (*(pattern + 1) == '-' && *(pattern + 2) && *(pattern + 2) != ']') {
-                 char start = *pattern;
-                 char end = *(pattern + 2);
-                 if (*str >= start && *str <= end) match = 1;
-                 pattern += 3;
-             } else {
-                 if (*pattern == *str) match = 1;
-                 pattern++;
-             }
-             first = 0;
-        }
-        
-        if (*pattern != ']') return 0; // Unmatched [
-        pattern++; // Skip ]
-        
-        if (invert) match = !match;
-        if (!match) return 0;
-        
-        return match_pattern(pattern, str + 1);
-    }
-    
-    return 0;
+    while (*p == '*') p++;   /* trailing '*' can match the empty tail */
+    return *p == '\0';
 }
 
 void unquote_word(char *word) {
