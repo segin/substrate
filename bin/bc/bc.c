@@ -1830,7 +1830,11 @@ void eval_stmt(ast_node_t *n) {
              * plain assignment is silent.  Pre/post increment and decrement
              * ARE printing expressions in bc (++x echoes the new value, x++
              * the old), so they must not be lumped in with assignment. */
-            if (n->type != AST_ASSIGN) {
+            /* Suppress the auto-print when a math error (e.g. divide by
+             * zero) was reported during this statement: libbc already
+             * printed the diagnostic and returned a fallback zero that
+             * must not masquerade as a result. */
+            if (n->type != AST_ASSIGN && !bc_error_flag) {
                 bc_print_base(v, bc_obase);
                 printf("\n");           /* every auto-printed value ends its line */
             }
@@ -1882,6 +1886,7 @@ static void bc_reset_after_error(void) {
  * subsequent statement is silently skipped (the eval_stmt guard sees
  * the stuck flag), wedging the rest of the script or session. */
 void run_toplevel(ast_node_t *n) {
+    bc_error_flag = 0;      /* fresh per statement; checked by the auto-print */
     eval_stmt(n);
     if (is_breaking || is_continuing) {
         fprintf(stderr, "bc: '%s' outside of a loop\n",

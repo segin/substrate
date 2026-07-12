@@ -13,6 +13,7 @@
 int bc_scale = 0;
 int bc_ibase = 10;
 int bc_obase = 10;
+int bc_error_flag = 0;
 
 void bc_error(const char *fmt, ...) {
     va_list ap;
@@ -22,7 +23,8 @@ void bc_error(const char *fmt, ...) {
     fprintf(stderr, "\n");
     va_end(ap);
     // In strict bc, math errors might not abort the interpreter, just the statement.
-    // For libbc, we log to stderr.
+    // For libbc, we log to stderr and set a flag the caller can inspect.
+    bc_error_flag = 1;
 }
 
 void bc_warn(const char *fmt, ...) {

@@ -78,4 +78,10 @@ void bc_raw_sub(bc_num *r, bc_num *a, bc_num *b);
 void bc_error(const char *fmt, ...);
 void bc_warn(const char *fmt, ...);
 
+/* Set by bc_error() when a math error (divide by zero, sqrt of a
+ * negative, ...) is reported.  The caller resets it before an
+ * evaluation and checks it after, e.g. to suppress auto-printing the
+ * fallback zero that a failed operation returns. */
+extern int bc_error_flag;
+
 #endif
