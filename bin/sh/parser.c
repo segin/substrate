@@ -2,6 +2,9 @@
 #include "shell_var.h"
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <errno.h>
+#include <limits.h>
 #include "util.h"
 
 /* Bound on syntactic nesting depth: every nesting level of a compound
@@ -23,6 +26,18 @@ static ast_node_t *parse_subshell(lexer_t *l);
 static ast_node_t *parse_group(lexer_t *l);
 static ast_redirection_t *parse_redirections(lexer_t *l);
 static int is_reserved(const char *val, const char *word);
+
+/* Parse an IO-redirection fd. The lexer only emits all-digit IO_NUMBER
+ * tokens, but atoi() on a value past INT_MAX wraps to a negative fd (UB in
+ * dup2). Return a non-negative fd, or INT_MAX for an out-of-range value so
+ * the redirection simply fails at dup2 time instead. */
+static int parse_io_fd(const char *s) {
+    errno = 0;
+    char *end;
+    long v = strtol(s, &end, 10);
+    if (errno != 0 || v < 0 || v > INT_MAX) return INT_MAX;
+    return (int)v;
+}
 
 static void parser_error(lexer_t *l, const char *msg) {
     token_t *t = lexer_peek(l);
@@ -330,7 +345,7 @@ static ast_redirection_t *parse_redirections(lexer_t *l) {
                  strcmp(next->value, ">>") == 0 || strcmp(next->value, "<<") == 0 ||
                  strcmp(next->value, "<&") == 0 || strcmp(next->value, ">&") == 0)) {
                  
-                 fd = atoi(t->value);
+                 fd = parse_io_fd(t->value);
                  token_free(lexer_next(l)); // consume number
                  t = lexer_peek(l); // should be op
             } else {
@@ -527,7 +542,7 @@ static ast_node_t *parse_simple_command(lexer_t *l) {
              // But let's stick to the logic: consume IO_NUMBER, then must consume operator.
              
              t = lexer_next(l); // Consume IO number
-             int fd = atoi(t->value);
+             int fd = parse_io_fd(t->value);
              token_free(t);
              
              pending_fd = fd;

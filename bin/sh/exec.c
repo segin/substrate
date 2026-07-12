@@ -1487,19 +1487,19 @@ static int apply_redirections(ast_redirection_t *redir) {
             case REDIR_OUT:
                 fd = open(expanded, O_WRONLY | O_CREAT | O_TRUNC, 0644);
                 if (fd < 0) { perror(expanded); free(expanded); return 1; }
-                dup2(fd, redir->fd);
+                if (dup2(fd, redir->fd) < 0) { perror("dup2"); close(fd); free(expanded); return 1; }
                 close(fd);
                 break;
             case REDIR_APPEND:
                 fd = open(expanded, O_WRONLY | O_CREAT | O_APPEND, 0644);
                 if (fd < 0) { perror(expanded); free(expanded); return 1; }
-                dup2(fd, redir->fd);
+                if (dup2(fd, redir->fd) < 0) { perror("dup2"); close(fd); free(expanded); return 1; }
                 close(fd);
                 break;
             case REDIR_IN:
                 fd = open(expanded, O_RDONLY);
                 if (fd < 0) { perror(expanded); free(expanded); return 1; }
-                dup2(fd, redir->fd);
+                if (dup2(fd, redir->fd) < 0) { perror("dup2"); close(fd); free(expanded); return 1; }
                 close(fd);
                 break;
             case REDIR_DUP_OUT: // >&
@@ -1998,6 +1998,12 @@ static int execute_simple_command(ast_simple_command_t *cmd, exec_info_t *info) 
 
 static int execute_pipeline(ast_pipeline_t *pipe_node, exec_info_t *info) {
     int n = pipe_node->command_count;
+    if (n <= 0) return 0;
+    if (n == 1) {
+        /* Degenerate "pipeline" of one command: 2*(n-1)=0 would malloc(0);
+         * just run the command directly. */
+        return execute_ast(pipe_node->commands[0], info);
+    }
     int *pipefds = malloc(2 * (n - 1) * sizeof(int));
     pid_t *pids = malloc(n * sizeof(pid_t));
     int last_status = 0;
