@@ -59,6 +59,12 @@ typedef struct {
     size_t cap;
 } elf_diag_t;
 
+struct elf_addr_index_ent {
+    uint64_t addr;
+    uint64_t end;
+    struct elf_section *sec;
+};
+
 typedef struct {
     elf_diag_level_t level;
     elf_err_t code;
@@ -199,6 +205,14 @@ struct elfobj {
 
     elf_validate_mode_t validate_mode;
     size_t validate_max_errors;
+
+    /* Lazily-built, addr-sorted index of SHF_ALLOC sections, used to resolve
+     * runtime relocation targets in O(log n) instead of an O(n) scan per
+     * relocation (which is O(relocs * sections) overall - a parse-time DoS on
+     * an object with many sections and many runtime relocations). */
+    struct elf_addr_index_ent *runtime_addr_index;
+    size_t runtime_addr_index_count;
+    uint8_t runtime_addr_index_built;
 
     elf_err_t last_err;
     elf_diag_t diag;

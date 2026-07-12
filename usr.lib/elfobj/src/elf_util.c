@@ -491,6 +491,7 @@ void elf_close(elfobj_t *obj) {
     elf_free_relocs(obj);
     elf_free_phdrs(obj);
     elf_free_segments(obj);
+    free(obj->runtime_addr_index);
     elf__diag_clear(obj);
     free(obj);
 }

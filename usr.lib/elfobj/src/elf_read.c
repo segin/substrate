@@ -448,27 +448,102 @@ static void rollback_relocs(elfobj_t *obj, size_t base_count) {
     }
 }
 
-static struct elf_section *find_runtime_reloc_target(elfobj_t *obj, uint64_t r_offset, uint64_t *out_rel_off) {
-    size_t i;
+static int addr_index_cmp(const void *a, const void *b) {
+    const struct elf_addr_index_ent *ea = (const struct elf_addr_index_ent *)a;
+    const struct elf_addr_index_ent *eb = (const struct elf_addr_index_ent *)b;
+    if (ea->addr < eb->addr) {
+        return -1;
+    }
+    if (ea->addr > eb->addr) {
+        return 1;
+    }
+    return 0;
+}
 
-    if (obj == NULL) {
-        return NULL;
+/* Build the addr-sorted index of SHF_ALLOC sections once. On allocation
+ * failure the index stays unbuilt and the caller falls back to a linear
+ * scan, so this never fails the parse. */
+static void build_runtime_addr_index(elfobj_t *obj) {
+    size_t i;
+    size_t n = 0;
+    struct elf_addr_index_ent *arr;
+
+    obj->runtime_addr_index_built = 1;
+    arr = (struct elf_addr_index_ent *)elf__calloc(obj->section_count ? obj->section_count : 1,
+                                                   sizeof(*arr));
+    if (arr == NULL) {
+        return;
     }
     for (i = 0; i < obj->section_count; ++i) {
         struct elf_section *sec = obj->sections[i];
         uint64_t sec_end;
-
         if (sec == NULL || sec->size == 0 || (sec->flags & SHF_ALLOC) == 0) {
             continue;
         }
         if (!elf__u64_add(sec->addr, sec->size, &sec_end)) {
             continue;
         }
-        if (r_offset >= sec->addr && r_offset < sec_end) {
-            if (out_rel_off != NULL) {
-                *out_rel_off = r_offset - sec->addr;
+        arr[n].addr = sec->addr;
+        arr[n].end = sec_end;
+        arr[n].sec = sec;
+        n++;
+    }
+    qsort(arr, n, sizeof(*arr), addr_index_cmp);
+    obj->runtime_addr_index = arr;
+    obj->runtime_addr_index_count = n;
+}
+
+static struct elf_section *find_runtime_reloc_target(elfobj_t *obj, uint64_t r_offset, uint64_t *out_rel_off) {
+    size_t lo;
+    size_t hi;
+
+    if (obj == NULL) {
+        return NULL;
+    }
+    if (!obj->runtime_addr_index_built) {
+        build_runtime_addr_index(obj);
+    }
+    if (obj->runtime_addr_index == NULL) {
+        /* Index build failed (OOM): fall back to the linear scan. */
+        size_t i;
+        for (i = 0; i < obj->section_count; ++i) {
+            struct elf_section *sec = obj->sections[i];
+            uint64_t sec_end;
+            if (sec == NULL || sec->size == 0 || (sec->flags & SHF_ALLOC) == 0) {
+                continue;
             }
-            return sec;
+            if (!elf__u64_add(sec->addr, sec->size, &sec_end)) {
+                continue;
+            }
+            if (r_offset >= sec->addr && r_offset < sec_end) {
+                if (out_rel_off != NULL) {
+                    *out_rel_off = r_offset - sec->addr;
+                }
+                return sec;
+            }
+        }
+        return NULL;
+    }
+    /* Binary search: entries are sorted by addr and (SHF_ALLOC sections do
+     * not overlap in a valid object) non-overlapping, so the last entry with
+     * addr <= r_offset is the only candidate. */
+    lo = 0;
+    hi = obj->runtime_addr_index_count;
+    while (lo < hi) {
+        size_t mid = lo + (hi - lo) / 2;
+        if (obj->runtime_addr_index[mid].addr <= r_offset) {
+            lo = mid + 1;
+        } else {
+            hi = mid;
+        }
+    }
+    if (lo > 0) {
+        struct elf_addr_index_ent *e = &obj->runtime_addr_index[lo - 1];
+        if (r_offset >= e->addr && r_offset < e->end) {
+            if (out_rel_off != NULL) {
+                *out_rel_off = r_offset - e->addr;
+            }
+            return e->sec;
         }
     }
     return NULL;
