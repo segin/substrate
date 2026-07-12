@@ -258,10 +258,10 @@ static int validate_note_gnu_property_aarch64(validate_ctx_t *ctx, const struct 
         }
         off += pr_datasz;
         off = (off + 7u) & ~7u;
-        if (descsz < 8 + pr_datasz) {
+        if (descsz < (uint64_t)8 + pr_datasz) {
             break;
         }
-        descsz -= 8 + pr_datasz;
+        descsz -= (uint64_t)8 + pr_datasz;
     }
     return 0;
 }
@@ -368,10 +368,10 @@ static int validate_x86_gnu_property(validate_ctx_t *ctx, const struct elf_secti
         }
         off += sz;
         off = (off + align - 1) & ~(align - 1);
-        if (descsz < 8 + sz) {
+        if (descsz < (uint64_t)8 + sz) {
             break;
         }
-        descsz -= 8 + sz;
+        descsz -= (uint64_t)8 + sz;
     }
     return 0;
 }

@@ -57,7 +57,7 @@ elf_err_t elf_dwarf_get_line_info(elfobj_t *obj, uint64_t addr, char **out_file,
 
     while (off < size) {
         if (off + 4 > size) break;
-        uint32_t unit_length = elf__rd32(data + off, obj->endian);
+        size_t unit_length = elf__rd32(data + off, obj->endian);
         off += 4;
 
         int is_64bit = 0;
@@ -67,7 +67,7 @@ elf_err_t elf_dwarf_get_line_info(elfobj_t *obj, uint64_t addr, char **out_file,
             uint64_t len64 = elf__rd64(data + off, obj->endian);
             off += 8;
             if (len64 > size - off) break;
-            unit_length = (uint32_t)len64;
+            unit_length = (size_t)len64;
         }
 
         /* off + unit_length can wrap size_t on the 32-bit target; compare

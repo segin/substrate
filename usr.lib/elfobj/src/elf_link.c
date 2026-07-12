@@ -67,7 +67,7 @@ static elf_err_t comdat_set_add(comdat_set_t *set, const char *name) {
     }
     if (set->count == set->cap) {
         size_t ncap = set->cap == 0 ? 16 : set->cap * 2;
-        next = (char **)realloc(set->items, ncap * sizeof(*next));
+        next = (char **)elf__reallocarray(set->items, ncap, sizeof(*next));
         if (next == NULL) {
             return ELF_ERR_OOM;
         }

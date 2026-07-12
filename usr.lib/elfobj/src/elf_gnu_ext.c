@@ -387,10 +387,10 @@ static size_t parse_arm_attrs(const elfobj_t *obj, arm_attr_item_t *out, size_t 
         if (sect_len < 5) {
             break;
         }
-        end = start + sect_len;
-        if (end > size) {
+        if (sect_len > size - start) {
             break;
         }
+        end = start + sect_len;
         off += 4;
         vendor_off = off;
         while (off < end && p[off] != '\0') {
@@ -508,10 +508,10 @@ static size_t parse_riscv_attrs(const elfobj_t *obj, arm_attr_item_t *out, size_
         if (sect_len < 5) {
             break;
         }
-        end = start + sect_len;
-        if (end > size) {
+        if (sect_len > size - start) {
             break;
         }
+        end = start + sect_len;
         off += 4;
         while (off < end && p[off] != '\0') {
             off++;
