@@ -282,8 +282,11 @@ void bc_print_base(bc_num *n, int obase) {
     }
     
     if (bc_is_zero(n)) {
-        if (obase <= 16) printf("0\n");
-        else printf(" 0\n");
+        /* No trailing newline: bc_print_base is a value printer; the
+         * caller (auto-print) adds the newline, and the print statement
+         * intentionally does not. */
+        if (obase <= 16) printf("0");
+        else printf(" 0");
         return;
     }
     

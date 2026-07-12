@@ -1832,7 +1832,7 @@ void eval_stmt(ast_node_t *n) {
              * the old), so they must not be lumped in with assignment. */
             if (n->type != AST_ASSIGN) {
                 bc_print_base(v, bc_obase);
-                if (bc_obase <= 16) printf("\n");
+                printf("\n");           /* every auto-printed value ends its line */
             }
             bc_free(v);
             break;
