@@ -993,7 +993,12 @@ static int expand_word_internal(const char *word, char ***list, size_t *cap,
         else {
             buffer_append(&cw, &cw_cap, &cw_len, in_dq ? (c | QUOTED_BIT) : c);
         }
-        p++;
+        /* An unterminated $((, $( or ${ scan consumes to the string's NUL and
+         * parks p there; advancing unconditionally would step one byte past
+         * the buffer and the loop guard would read out of bounds. Guarding on
+         * *p is equivalent for every terminated path (the loop ends at NUL
+         * anyway). */
+        if (*p) p++;
     }
     finalize_word(&cw, &cw_cap, &cw_len, list, cap, len, quoted_any);
     free(cw);
