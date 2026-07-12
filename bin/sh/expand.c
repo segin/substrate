@@ -47,6 +47,14 @@ static char *capture_command_output(const char *cmd_str, expand_state_t *state) 
         int overflow = 0;
         char read_buf[256];
         ssize_t n;
+        if (!buf) {
+            /* Drain and reap the child so it neither blocks on a full pipe
+             * nor orphans/zombies, then report empty output. */
+            while (read(pfd[0], read_buf, sizeof(read_buf)) > 0) { }
+            close(pfd[0]);
+            waitpid(pid, NULL, 0);
+            return strdup("");
+        }
         while ((n = read(pfd[0], read_buf, sizeof(read_buf))) > 0) {
             if (len >= CMDSUB_MAX_OUTPUT_SIZE) {
                 overflow = 1;
@@ -60,14 +68,19 @@ static char *capture_command_output(const char *cmd_str, expand_state_t *state) 
             }
 
             if (len + chunk + 1 >= cap) {
-                while (len + chunk + 1 >= cap) {
-                    cap *= 2;
+                size_t ncap = cap;
+                while (len + chunk + 1 >= ncap) {
+                    ncap *= 2;
                 }
-                buf = realloc(buf, cap);
-                if (!buf) {
-                    close(pfd[0]);
-                    return strdup("");
+                char *nb = realloc(buf, ncap);
+                if (!nb) {
+                    /* Keep the bytes gathered so far and stop growing; the
+                     * normal close/waitpid path below still reaps the child. */
+                    overflow = 1;
+                    break;
                 }
+                buf = nb;
+                cap = ncap;
             }
             memcpy(buf + len, read_buf, chunk);
             len += chunk;
@@ -140,11 +153,13 @@ static void finalize_word(char **cw, size_t *cw_cap, size_t *cw_len, char ***lis
     (void)cw_cap;
     if (*cw_len > 0 || quoted_any) {
         if (*len + 1 >= *cap) {
-            *cap *= 2;
-            if (*cap == 0) *cap = 16;
-            *list = realloc(*list, *cap * sizeof(char *));
+            size_t ncap = *cap ? *cap * 2 : 16;
+            char **nl = realloc(*list, ncap * sizeof(char *));
+            if (nl) { *list = nl; *cap = ncap; }
         }
-        (*list)[(*len)++] = strdup(*cw);
+        if (*len + 1 < *cap) {   /* only store if capacity is assured */
+            (*list)[(*len)++] = strdup(*cw);
+        }
     }
     (*cw)[0] = 0;
     *cw_len = 0;
@@ -559,11 +574,11 @@ static int compare_strings(const void *a, const void *b) {
 static void expand_glob_recursive(char ***list, size_t *cap, size_t *len, const char *prefix, const char *pattern) {
     if (!pattern || !*pattern) {
         if (*len + 1 >= *cap) {
-            *cap *= 2;
-            if (*cap == 0) *cap = 16;
-            *list = realloc(*list, *cap * sizeof(char *));
+            size_t ncap = *cap ? *cap * 2 : 16;
+            char **nl = realloc(*list, ncap * sizeof(char *));
+            if (nl) { *list = nl; *cap = ncap; }
         }
-        (*list)[(*len)++] = strdup(prefix);
+        if (*len + 1 < *cap) (*list)[(*len)++] = strdup(prefix);
         return;
     }
 
@@ -640,11 +655,11 @@ static void expand_glob_recursive(char ***list, size_t *cap, size_t *len, const 
 static void glob_word(const char *pattern, char ***list, size_t *cap, size_t *len) {
     if (!is_glob(pattern)) {
         if (*len + 1 >= *cap) {
-            *cap *= 2;
-            if (*cap == 0) *cap = 16;
-            *list = realloc(*list, *cap * sizeof(char *));
+            size_t ncap = *cap ? *cap * 2 : 16;
+            char **nl = realloc(*list, ncap * sizeof(char *));
+            if (nl) { *list = nl; *cap = ncap; }
         }
-        (*list)[(*len)++] = strdup(pattern);
+        if (*len + 1 < *cap) (*list)[(*len)++] = strdup(pattern);
         return;
     }
 
@@ -660,8 +675,12 @@ static void glob_word(const char *pattern, char ***list, size_t *cap, size_t *le
     expand_glob_recursive(list, cap, len, prefix, remain);
     
     if (*len == start_len) {
-        if (*len + 1 >= *cap) { *cap *= 2; *list = realloc(*list, *cap * sizeof(char *)); }
-        (*list)[(*len)++] = strdup(pattern);
+        if (*len + 1 >= *cap) {
+            size_t ncap = *cap ? *cap * 2 : 16;
+            char **nl = realloc(*list, ncap * sizeof(char *));
+            if (nl) { *list = nl; *cap = ncap; }
+        }
+        if (*len + 1 < *cap) (*list)[(*len)++] = strdup(pattern);
     } else {
         qsort((*list) + start_len, *len - start_len, sizeof(char *), compare_strings);
     }
