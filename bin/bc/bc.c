@@ -1270,6 +1270,31 @@ bc_num *ret_val = NULL;
 int is_breaking = 0;
 int is_continuing = 0;
 
+/* Read an lvalue (AST_VAR or AST_ARRAY), evaluating an array subscript
+ * EXACTLY ONCE.  The evaluated index is returned via *idx_out (-1 for a
+ * scalar) so the matching lval_set reuses it instead of re-evaluating
+ * the subscript - re-evaluation would double-apply side effects like
+ * a[i++].  Returns a freshly owned value. */
+static bc_num *lval_get(ast_node_t *lv, int *idx_out) {
+    if (lv->type == AST_VAR) {
+        *idx_out = -1;
+        return get_var_val(lv->id);
+    }
+    bc_num *iv = eval_expr(lv->arr.idx);
+    int idx = bc_num_to_long(iv);
+    bc_free(iv);
+    *idx_out = idx;
+    return get_arr_val(lv->arr.name, idx);
+}
+
+/* Store into an lvalue using the index captured by lval_get.  set_*_val
+ * duplicate `v` internally, so the caller keeps ownership of `v`.
+ * Handles AST_ARRAY too, which the old inline inc/dec path did not. */
+static void lval_set(ast_node_t *lv, int idx, bc_num *v) {
+    if (lv->type == AST_VAR) set_var_val(lv->id, v);
+    else set_arr_val(lv->arr.name, idx, v);
+}
+
 bc_num *eval_expr(ast_node_t *n) {
     if (!n) return bc_from_long(0);
     
@@ -1330,18 +1355,24 @@ bc_num *eval_expr(ast_node_t *n) {
         }
         
         case AST_ASSIGN: {
+            ast_node_t *lv = n->assign.lval;
             bc_num *r = eval_expr(n->assign.rval);
             if (n->assign.op == TOK_ASSIGN) {
-                if (n->assign.lval->type == AST_VAR) set_var_val(n->assign.lval->id, r);
-                else if (n->assign.lval->type == AST_ARRAY) {
-                    bc_num *idx_v = eval_expr(n->assign.lval->arr.idx);
-                    int idx = bc_num_to_long(idx_v);
-                    bc_free(idx_v);
-                    set_arr_val(n->assign.lval->arr.name, idx, r);
+                /* Plain assign: subscript evaluated once. */
+                if (lv->type == AST_ARRAY) {
+                    bc_num *iv = eval_expr(lv->arr.idx);
+                    int idx = bc_num_to_long(iv);
+                    bc_free(iv);
+                    set_arr_val(lv->arr.name, idx, r);
+                } else {
+                    set_var_val(lv->id, r);
                 }
                 return r;
             }
-            bc_num *l = eval_expr(n->assign.lval);
+            /* Compound assign: read the lvalue (index captured once) and
+             * store the result back to the SAME element. */
+            int idx;
+            bc_num *l = lval_get(lv, &idx);
             bc_num *res = NULL;
             switch (n->assign.op) {
                 case TOK_ADD_ASSIGN: res = bc_add(l, r); break;
@@ -1351,28 +1382,24 @@ bc_num *eval_expr(ast_node_t *n) {
                 case TOK_MOD_ASSIGN: res = bc_mod(l, r); break;
                 case TOK_POW_ASSIGN: res = bc_pow(l, r); break;
             }
-            if (n->assign.lval->type == AST_VAR) set_var_val(n->assign.lval->id, res);
-            else if (n->assign.lval->type == AST_ARRAY) {
-                bc_num *idx_v = eval_expr(n->assign.lval->arr.idx);
-                int idx = bc_num_to_long(idx_v);
-                bc_free(idx_v);
-                set_arr_val(n->assign.lval->arr.name, idx, res);
-            }
+            lval_set(lv, idx, res);
             bc_free(l); bc_free(r);
-            return bc_dup(res); 
+            return res;                     /* transfer ownership; no extra dup */
         }
-        
+
         case AST_PREINC:
         case AST_POSTINC:
         case AST_PREDEC:
         case AST_POSTDEC: {
-            bc_num *l = eval_expr(n->unop.expr);
+            ast_node_t *lv = n->unop.expr;
+            int idx;
+            bc_num *l = lval_get(lv, &idx);
             bc_num *one = bc_from_long(1);
             bc_num *res = NULL;
             if (n->type == AST_PREINC || n->type == AST_POSTINC) res = bc_add(l, one);
             else res = bc_sub(l, one);
-            if (n->unop.expr->type == AST_VAR) set_var_val(n->unop.expr->id, bc_dup(res));
             bc_free(one);
+            lval_set(lv, idx, res);         /* stores back for arrays too */
             if (n->type == AST_POSTINC || n->type == AST_POSTDEC) { bc_free(res); return l; }
             else { bc_free(l); return res; }
         }
