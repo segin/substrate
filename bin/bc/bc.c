@@ -1109,10 +1109,15 @@ ast_node_t *parse_top_level(void) {
         if (cur_tok == TOK_AUTO) {
             lex();
             while (1) {
-                if (cur_tok != TOK_ID) lex_error("expected auto var name");
+                /* `scale` lexes as a keyword, not an identifier, but is a
+                 * legal auto name (a POSIX special register). */
+                const char *aname;
+                if (cur_tok == TOK_ID) aname = tok_str;
+                else if (cur_tok == TOK_SCALE_FUNC) aname = "scale";
+                else lex_error("expected auto var name");
                 expr_list_t *item = xcalloc(1, sizeof(expr_list_t));
                 ast_node_t *v = ast_new(AST_VAR);
-                v->id = xstrdup(tok_str);
+                v->id = xstrdup(aname);
                 item->expr = v;
                 *atail = item;
                 atail = &item->next;
@@ -1188,6 +1193,12 @@ typedef struct byref_bind {
 typedef struct frame {
     local_var_t *locals;
     byref_bind_t *byrefs;
+    /* ibase/obase/scale named in the auto list are POSIX "special
+     * register" autos: their global value is saved on entry and
+     * restored on exit, so the function can set them freely as locals.
+     * Bit 0=ibase, 1=obase, 2=scale in reg_saved. */
+    int reg_saved;
+    int save_ibase, save_obase, save_scale;
     struct frame *prev;
 } frame_t;
 
@@ -1199,6 +1210,13 @@ local_var_t *get_local(const char *name) {
         if (strcmp(l->name, name) == 0) return l;
     }
     return NULL;
+}
+
+/* Restore any ibase/obase/scale registers this frame saved as autos. */
+static void frame_restore_regs(frame_t *fr) {
+    if (fr->reg_saved & 1) bc_ibase = fr->save_ibase;
+    if (fr->reg_saved & 2) bc_obase = fr->save_obase;
+    if (fr->reg_saved & 4) bc_scale = fr->save_scale;
 }
 
 bc_num *get_var_val(const char *name) {
@@ -1656,9 +1674,24 @@ bc_num *eval_expr(ast_node_t *n) {
             // Bind Autos
             expr_list_t *fa = f->ast->func.autos;
             while (fa) {
-                local_var_t *l = xcalloc(1, sizeof(local_var_t));
                 const char *aname = (fa->expr->type == AST_ARRAY)
                                     ? fa->expr->arr.name : fa->expr->id;
+                /* ibase/obase/scale: save + reset the real register
+                 * instead of shadowing it with a dead local (which the
+                 * get/set specials would ignore anyway). */
+                if (strcmp(aname, "ibase") == 0) {
+                    fr->save_ibase = bc_ibase; fr->reg_saved |= 1;
+                    fa = fa->next; continue;
+                }
+                if (strcmp(aname, "obase") == 0) {
+                    fr->save_obase = bc_obase; fr->reg_saved |= 2;
+                    fa = fa->next; continue;
+                }
+                if (strcmp(aname, "scale") == 0) {
+                    fr->save_scale = bc_scale; fr->reg_saved |= 4;
+                    fa = fa->next; continue;
+                }
+                local_var_t *l = xcalloc(1, sizeof(local_var_t));
                 l->name = xstrdup(aname);
                 l->val = bc_from_long(0);
                 l->next = fr->locals;
@@ -1730,6 +1763,7 @@ bc_num *eval_expr(ast_node_t *n) {
                 free(l);
                 l = next;
             }
+            frame_restore_regs(fr);
             call_stack = fr->prev;
             free(fr);
             call_depth--;
@@ -1901,6 +1935,7 @@ static void bc_reset_after_error(void) {
             free(br);
             br = bn;
         }
+        frame_restore_regs(fr);
         call_stack = fr->prev;
         free(fr);
     }
