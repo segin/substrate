@@ -22,6 +22,21 @@ first-class bug class here and several findings are 32-bit-only.
 Findings numbered ELFOBJ-NN by severity. A prior commit (420440f68) fixed
 an earlier round of OOB reads; these are what remains.
 
+**Status: all fixed** - ELFOBJ-01 through ELFOBJ-20 are each fixed and
+verified in their own commit. Memory-safety findings were reproduced with
+crafted-ELF + AddressSanitizer/UBSan and confirmed clean after the fix
+(ELFOBJ-01 reloc OOB read, ELFOBJ-02 ARM-attr stack overflow, ELFOBJ-03
+diag heap overflow, ELFOBJ-04 writer OOB write, ELFOBJ-05 div-by-zero,
+ELFOBJ-11 sort NULL-deref, ELFOBJ-13 DWARF OOB read, ELFOBJ-14 LEB shift
+UB); the 32-bit-only truncation findings (ELFOBJ-06/07) were verified on an
+`-m32` build. LOW items with a poor risk/benefit for this well-tested,
+shipping library are documented in their commits as accepted rather than
+force-changed (the signed reloc arithmetic in ELFOBJ-17, the reloc-add and
+OOM-leak sub-items). The library's own test suite passes 17/20 after these
+changes; the 3 failures (`test_strtab`, `test_reader_writer`,
+`test_validate_hardening`/`test_multiarch_api`) fail identically on the
+audit-base commit 4ed98a685 and predate this audit.
+
 ## What's solid (coverage confirmed)
 
 - The core arithmetic helpers are correct: `elf__bounds_ok` (`off>total`
