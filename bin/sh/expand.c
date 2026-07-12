@@ -164,8 +164,14 @@ static char *lookup_variable(const char *name) {
 // Full recursive descent parser for POSIX arithmetic
 static const char *arith_ptr;
 static int arith_error;
+/* Recursion depth of the arithmetic descent (parens + unary ops all funnel
+ * through parse_unary); bounds C-stack use on deeply nested $(( ((...)) )). */
+#define SH_ARITH_MAX_DEPTH 200
+#define SH_EXPAND_MAX_DEPTH 100
+static int arith_depth;
 
 static long parse_assign(void);
+static long parse_unary_inner(void);
 static long parse_log_or(void);
 static void remove_quotes(char *word);
 
@@ -187,6 +193,15 @@ static long parse_cond(void) {
 
 // Logic to be refined... but let's implement common levels
 static long parse_unary(void) {
+    long v;
+    if (arith_depth >= SH_ARITH_MAX_DEPTH) { arith_error = 1; return 0; }
+    arith_depth++;
+    v = parse_unary_inner();
+    arith_depth--;
+    return v;
+}
+
+static long parse_unary_inner(void) {
     while (isspace(*arith_ptr)) arith_ptr++;
     if (*arith_ptr == '(') {
         arith_ptr++;
@@ -645,6 +660,7 @@ static int expand_word_internal(const char *word, char ***list, size_t *cap,
                     int saved_arith_error = arith_error;
                     arith_ptr = expr;
                     arith_error = 0;
+                    arith_depth = 0;
                     long val = parse_assign();
                     int had_error = arith_error;
                     arith_ptr = saved_arith_ptr;
@@ -995,17 +1011,30 @@ static void remove_quotes(char *word) {
 
 int expand_word_ex(const char *word, char **out, expand_state_t *state) {
     size_t cap = 4, len = 0;
-    char **list = malloc(cap * sizeof(char *));
+    char **list;
     char *res;
 
     *out = NULL;
+    /* Bound recursion through nested ${x:-WORD} default expansions: the
+     * modifier re-enters expand_word_ex on WORD carrying the same state, so
+     * ${a:-${a:-${a:-...}}} would otherwise overflow the C stack. */
+    if (state && state->depth >= SH_EXPAND_MAX_DEPTH) {
+        *out = strdup("");
+        expand_state_fail(state, 1);
+        return -1;
+    }
+    if (state) state->depth++;
+
+    list = malloc(cap * sizeof(char *));
     if (expand_word_internal(word, &list, &cap, &len, 0, state) != 0) {
         free_word_array_n(list, len);
+        if (state) state->depth--;
         return -1;
     }
     if (len == 0) {
         free(list);
         *out = strdup("");
+        if (state) state->depth--;
         return 0;
     }
     res = strdup(list[0]);
@@ -1013,6 +1042,7 @@ int expand_word_ex(const char *word, char **out, expand_state_t *state) {
     for (size_t i = 0; i < len; i++) free(list[i]);
     free(list);
     *out = res;
+    if (state) state->depth--;
     return 0;
 }
 
@@ -1114,6 +1144,7 @@ int expand_heredoc_ex(const char *content, int quoted, char **out,
                      int saved_arith_error = arith_error;
                      arith_ptr = expr;
                      arith_error = 0;
+                    arith_depth = 0;
                      long val = parse_assign();
                      int had_error = arith_error;
                      arith_ptr = saved_arith_ptr;

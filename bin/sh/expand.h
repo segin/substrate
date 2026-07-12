@@ -8,6 +8,7 @@ typedef struct expand_state {
     int fatal_status;
     int cmdsub_status;
     int saw_cmdsub;
+    int depth;          /* recursion depth of nested word expansion (${:-word}) */
 } expand_state_t;
 
 /**
