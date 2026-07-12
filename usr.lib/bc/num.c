@@ -312,10 +312,16 @@ void bc_print_base(bc_num *n, int obase) {
     bc_free(copy);
 
     bc_num *base = bc_from_long(obase);
-    
-    // Collect integer digits
-    int max_digits = 1024;
-    int *out_digits = malloc(max_digits * sizeof(int));
+
+    /* Collect integer digits.  Size the buffer from the value's own
+     * magnitude instead of a fixed 1024: an int_part of `len` base-100
+     * digits is < 100^len = 2^(6.644*len), so it needs at most
+     * ceil(6.644*len)+1 digits even in the densest base (obase 2).
+     * 7*len + 16 covers that with margin; the old fixed cap silently
+     * truncated anything longer (e.g. 2^1200 in binary). */
+    int max_digits = int_part->len * 7 + 16;
+    int *out_digits = malloc((size_t)max_digits * sizeof(int));
+    if (!out_digits) { perror("bc_print_base: malloc"); exit(1); }
     int ds = 0;
     
     bc_num *curr_int = int_part; // Transfer ownership
