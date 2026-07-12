@@ -353,12 +353,9 @@ static void lex_set_file(FILE *fp) {
     lex_string = NULL;
     lineno = 1;
 }
-
-static void lex_set_string(const char *s) {
-    lex_file = NULL;
-    lex_string = s;
-    lineno = 1;
-}
+/* (lex_set_string removed with BC-03: the interactive REPL now uses the
+ * FILE-based lexer directly, so nothing lexes from a string buffer.
+ * lex_string stays NULL, so its branches in next_char are inert.) */
 
 /* Set while the string-literal lexer is consuming a "..." body, so the
  * line-continuation handling below leaves "\<newline>" literal inside strings
