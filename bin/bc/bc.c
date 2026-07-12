@@ -11,6 +11,7 @@
 #include <stdarg.h>
 #include <unistd.h>
 #include <setjmp.h>
+#include <limits.h>
 #include "num.h"
 
 void runtime_error(const char *msg);
@@ -22,8 +23,11 @@ void runtime_error(const char *msg);
  * negative capacity, undersizing the allocation while array[idx] is
  * still written — a heap out-of-bounds write.  POSIX guarantees
  * BC_DIM_MAX >= 65535; capping well below INT_MAX keeps the doubling
- * arithmetic from overflowing.
+ * arithmetic from overflowing.  (<limits.h> also defines a POSIX
+ * BC_DIM_MAX minimum; undef it so our concrete cap wins without a
+ * redefinition warning.)
  */
+#undef BC_DIM_MAX
 #define BC_DIM_MAX 16777216  /* 2^24 elements */
 
 // Configuration
@@ -1314,20 +1318,29 @@ static bc_num **find_array(const char *name, int *len_out) {
 }
 
 void set_var_val(const char *name, bc_num *val) {
+    /* ibase/obase/scale are `int` registers.  Clamp the (possibly huge)
+     * assigned value to each register's valid range as a long long
+     * BEFORE narrowing to int - assigning the raw long long straight to
+     * the int truncated (obase = 2^40 wrapped to 0, then clamped to 2,
+     * so `5` printed as "101").  obase's upper bound is 100: the
+     * non-decimal digit renderer emits two decimal digits per digit
+     * (" %02d"), so a digit value >= 100 would overflow that field. */
     if (strcmp(name, "ibase") == 0) {
-        bc_ibase = bc_num_to_long(val);
-        if (bc_ibase < 2) bc_ibase = 2;
-        if (bc_ibase > 36) bc_ibase = 36;
+        long long v = bc_num_to_long(val);
+        if (v < 2) v = 2; else if (v > 16) v = 16;   /* POSIX ibase max */
+        bc_ibase = (int)v;
         return;
     }
     if (strcmp(name, "obase") == 0) {
-        bc_obase = bc_num_to_long(val);
-        if (bc_obase < 2) bc_obase = 2;
+        long long v = bc_num_to_long(val);
+        if (v < 2) v = 2; else if (v > 100) v = 100;
+        bc_obase = (int)v;
         return;
     }
     if (strcmp(name, "scale") == 0) {
-        bc_scale = bc_num_to_long(val);
-        if (bc_scale < 0) bc_scale = 0;
+        long long v = bc_num_to_long(val);
+        if (v < 0) v = 0; else if (v > INT_MAX) v = INT_MAX;
+        bc_scale = (int)v;
         return;
     }
     
