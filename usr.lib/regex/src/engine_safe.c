@@ -10,6 +10,13 @@
  * real backstop; this just fails such patterns cleanly at parse time. */
 #define REGEX_MAX_REPEAT 32767
 
+/* Cap on parser group-nesting and compile-node recursion depth.  A pattern
+ * like ((((...)))) recurses parse_regex -> ... -> parse_group -> parse_regex
+ * (and later compile_node) once per nesting level; without a cap a deeply
+ * nested pattern from a file or config overflows the C stack.  1000 is far
+ * beyond any real regex yet nowhere near the userland stack limit. */
+#define REGEX_MAX_DEPTH 1000
+
 typedef enum {
     NODE_EMPTY,
     NODE_LITERAL,
@@ -96,6 +103,7 @@ typedef struct nfa_prog {
     int uses_eol;
     size_t max_states;  /* compile-time state budget (0 = unlimited) */
     int failed;         /* set when nfa_state_new hit the budget or OOM */
+    int depth;          /* current compile_node recursion depth */
 } nfa_prog;
 
 typedef struct dfa_trans {
@@ -179,6 +187,7 @@ typedef struct parser {
     int utf8;
     size_t capture_count;
     int has_backref;
+    int depth;          /* current group-nesting recursion depth */
     regex_err_t err;
 } parser;
 
@@ -1094,7 +1103,7 @@ static regex_node *parse_concat(parser *p) {
     return left;
 }
 
-static regex_node *parse_regex(parser *p) {
+static regex_node *parse_regex_body(parser *p) {
     regex_node *left = parse_concat(p);
     regex_node *right;
 
@@ -1158,6 +1167,19 @@ static regex_node *parse_regex(parser *p) {
     }
 
     return left;
+}
+
+static regex_node *parse_regex(parser *p) {
+    regex_node *n;
+
+    if (p->depth >= REGEX_MAX_DEPTH) {
+        p->err = REGEX_ERR_COMPILE_LIMIT;
+        return NULL;
+    }
+    p->depth++;
+    n = parse_regex_body(p);
+    p->depth--;
+    return n;
 }
 
 static ptrlist *list1(nfa_state **outp) {
@@ -1384,13 +1406,20 @@ static frag compile_node(nfa_prog *prog, regex_node *n) {
     if (prog->failed) {
         return frag_none();
     }
+    /* Bound recursion so a deeply nested AST cannot overflow the C stack. */
+    if (prog->depth >= REGEX_MAX_DEPTH) {
+        prog->failed = 1;
+        return frag_none();
+    }
+    prog->depth++;
 
     switch (n->type) {
     case NODE_EMPTY:
         {
             nfa_state *s = nfa_state_new(prog, NFA_EPSILON);
             if (!s) {
-                return frag_none();
+                f = frag_none();
+                break;
             }
             f.start = s;
             f.out = list1(&s->out);
@@ -1468,6 +1497,7 @@ static frag compile_node(nfa_prog *prog, regex_node *n) {
         break;
     }
 
+    prog->depth--;
     return f;
 }
 
