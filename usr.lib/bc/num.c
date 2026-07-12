@@ -8,6 +8,7 @@
 #include <string.h>
 #include <ctype.h>
 #include <stdarg.h>
+#include <limits.h>
 #include "num.h"
 
 int bc_scale = 0;
@@ -109,18 +110,26 @@ bc_num *bc_from_long(long long v) {
 long long bc_num_to_long(bc_num *n) {
     if (!n || n->len == 0) return 0;
     long long res = 0;
+    unsigned long long p = 1;   /* unsigned: wraps defined, never UB */
     int s = n->scale;
     int start = s / 2;
-    long long p = 1;
-    
+
     for (int i = start; i < n->len; i++) {
         int val = n->digits[i];
-        if (i == start && (s % 2) != 0) {
-            val /= 10;
+        int half = (i == start && (s % 2) != 0);
+        if (half) val /= 10;
+        /* Saturate on overflow instead of wrapping (which was signed
+         * UB).  Every caller - array indices, ibase/obase/scale, Bessel
+         * order - only cares about in-range magnitudes, so returning the
+         * extreme is the useful behaviour.  The guard fires before p can
+         * wrap, so the wrap never yields a bogus in-range result. */
+        if (val != 0) {
+            if (p > (unsigned long long)LLONG_MAX / (unsigned)val ||
+                (unsigned long long)val * p > (unsigned long long)(LLONG_MAX - res))
+                return n->sign < 0 ? LLONG_MIN : LLONG_MAX;
+            res += (long long)((unsigned long long)val * p);
         }
-        res += (long long)val * p;
-        if (i == start && (s % 2) != 0) p = 10;
-        else p *= 100;
+        p = half ? p * 10 : p * 100;
     }
     return n->sign < 0 ? -res : res;
 }
