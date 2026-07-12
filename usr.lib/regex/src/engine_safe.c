@@ -2015,12 +2015,11 @@ static void copy_capture_offsets(size_t *dst, size_t dst_cap,
 
 static ssize_t nfa_capture_match(nfa_prog *prog, const regex_t *re, const char *text, size_t text_len,
                                  size_t start_pos, size_t *capture_offsets, size_t max_captures,
-                                 regex_err_t *out_err) {
+                                 regex_err_t *out_err, size_t *steps) {
     size_t cap_count = prog->capture_count * 2;
     size_t *caps_init;
     size_t i;
     size_t local_pos = start_pos;
-    size_t steps = 0;
     int list_id = 1;
     thread_list clist;
     thread_list nlist;
@@ -2091,7 +2090,7 @@ static ssize_t nfa_capture_match(nfa_prog *prog, const regex_t *re, const char *
             break;
         }
 
-        if (steps++ > re->limits.match_steps) {
+        if ((*steps)++ > re->limits.match_steps) {
             if (out_err) {
                 *out_err = REGEX_ERR_MATCH_TIMEOUT;
             }
@@ -2208,13 +2207,12 @@ static ssize_t nfa_capture_match(nfa_prog *prog, const regex_t *re, const char *
 
 static int dfa_match_span(const regex_t *re, safe_regex *sre, const char *text, size_t text_len,
                           size_t start_pos, size_t *out_end, regex_err_t *out_err,
-                          uint8_t *scratch_set, size_t scratch_cap) {
+                          uint8_t *scratch_set, size_t scratch_cap, size_t *steps) {
     dfa_prog *dfa = sre->dfa;
     size_t pos = start_pos;
     int state = dfa->start_state;
     int matched = 0;
     size_t last_accept = start_pos;
-    size_t steps = 0;
 
     while (pos <= text_len) {
         if (dfa->states[state].is_accept) {
@@ -2224,7 +2222,7 @@ static int dfa_match_span(const regex_t *re, safe_regex *sre, const char *text, 
         if (pos == text_len) {
             break;
         }
-        if (steps++ > re->limits.match_steps) {
+        if ((*steps)++ > re->limits.match_steps) {
             if (out_err) {
                 *out_err = REGEX_ERR_MATCH_TIMEOUT;
             }
@@ -2308,17 +2306,29 @@ static ssize_t safe_regex_match_internal(const regex_t *re, const char *text, si
         }
     }
 
+    /* One step budget shared across every scan-start position, so worst-case
+     * work is O(match_steps), not O(text_len * match_steps). */
+    size_t steps = 0;
+
     while (start_pos <= text_len) {
         size_t end_pos = 0;
-        int ok = dfa_match_span(re, sre, text, text_len, start_pos, &end_pos, out_err, scratch_set, scratch_cap);
+        int ok = dfa_match_span(re, sre, text, text_len, start_pos, &end_pos, out_err, scratch_set, scratch_cap, &steps);
         if (ok) {
             ssize_t cap_res = nfa_capture_match(sre->nfa, re, text, text_len, start_pos,
-                                                capture_offsets, max_captures, out_err);
+                                                capture_offsets, max_captures, out_err, &steps);
             if (cap_res >= 0) {
                 (void)end_pos;
                 return cap_res;
             }
             return cap_res;
+        }
+        /* dfa_match_span sets MATCH_TIMEOUT and returns 0 once the shared
+         * budget is exhausted; stop the whole scan rather than restarting. */
+        if (steps > re->limits.match_steps) {
+            if (out_err) {
+                *out_err = REGEX_ERR_MATCH_TIMEOUT;
+            }
+            return -REGEX_ERR_MATCH_TIMEOUT;
         }
         if (anchored || sre->nfa->uses_bol) {
             break;
