@@ -11,9 +11,17 @@ memory-safety and DoS-resistance are the priority.
 The large safe engine was read by parallel auditors; findings were then
 verified against a host build of `libregex.a` (a probe harness plus an
 AddressSanitizer/UBSan build).  Findings numbered REGEX-NN by severity.
-Status: **all open** (audit only - no fixes applied).  `[VERIFIED]` =
-reproduced against the host binary (ASan or observed behavior);
-`[code]` = confirmed by inspection.
+Status: **all fixed** - REGEX-01 through REGEX-20 are each fixed and
+verified in their own commit (build + AddressSanitizer/UBSan + a
+behavioural check, GNU-sed/grep parity where applicable).  Two further
+defects found while verifying fixes are also fixed: **REGEX-21**
+(match_queue ring-buffer corruption when the streaming queue grows past
+its first capacity, found verifying REGEX-07) and **REGEX-22** ($N group
+offsets not adjusted by match position in replace, found verifying
+REGEX-08).  REGEX-17's fix lives in `include/sys/types.h` (ssize_t width);
+REGEX-12 also required making the never-compiled PCRE2 adapter build.
+`[VERIFIED]` = reproduced against the host binary (ASan or observed
+behavior); `[code]` = confirmed by inspection.
 
 What's solid: no forbidden `strcpy`/`strcat`/`sprintf`/`vsprintf`/`gets`
 anywhere; the realloc-grow sites all use the temp-pointer pattern (no
