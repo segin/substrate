@@ -2685,7 +2685,9 @@ static regex_err_t replace_append_capture(char **out, size_t *out_len, size_t *o
     size_t start;
     size_t end;
     if (idx >= cap_count) {
-        return REGEX_ERR_INVALID_ARGUMENT;
+        /* A $N referencing a group the pattern does not have expands to
+         * nothing, as POSIX/ed/sed do - it must not abort the replace. */
+        return REGEX_OK;
     }
     start = caps[2 * idx];
     end = caps[2 * idx + 1];
