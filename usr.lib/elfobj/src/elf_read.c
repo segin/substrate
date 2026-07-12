@@ -187,7 +187,13 @@ static elf_err_t parse_sections(elfobj_t *obj, uint64_t shoff, uint16_t entsize,
 
         if (sec->type != SHT_NOBITS && sec->size > 0) {
             size_t j;
-            if (!elf__bounds_ok((size_t)sec->offset, (size_t)sec->size, obj->image_size)) {
+            /* Compare the 64-bit offset/size against image_size without
+             * truncating to size_t first; on the 32-bit target a section
+             * whose true span is out of file but whose low 32 bits are in
+             * range would otherwise pass and be materialized at wrong bytes.
+             * A pass here proves offset+size <= image_size <= SIZE_MAX, so
+             * the (size_t) casts below are exact. */
+            if (!elf__bounds_ok_u64(sec->offset, sec->size, obj->image_size)) {
                 if (debug_open_enabled()) {
                     fprintf(stderr, "elfobj: section bounds idx=%zu off=0x%llx size=0x%llx image=0x%zx\n",
                             i, (unsigned long long)sec->offset, (unsigned long long)sec->size, obj->image_size);
@@ -912,10 +918,12 @@ static elf_err_t parse_relocations(elfobj_t *obj, symtab_index_t *maps, size_t m
                 target = obj->sections[sec->info];
                 rel_offset = r_offset;
             }
-            target_size = target->size;
-            if (target->has_compression_hint && target->compression_size > target_size) {
-                target_size = target->compression_size;
-            }
+            /* Bound the relocation against the materialized buffer length
+             * (data_size), not the raw 64-bit sh_size or the untrusted
+             * uncompressed compression_size: a consumer patches target->data,
+             * which is exactly data_size bytes, so a wider bound would let a
+             * reloc point past the real buffer. */
+            target_size = target->data_size;
             if (rel_offset >= target_size) {
                 if (trace) {
                     fprintf(stderr,
