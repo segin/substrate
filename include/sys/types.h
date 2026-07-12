@@ -18,7 +18,12 @@ extern "C" {
 typedef __SIZE_TYPE__   __sz_internal_size_t__;
 #ifndef _SSIZE_T_DECLARED
 #define _SSIZE_T_DECLARED
-typedef __INT32_TYPE__  ssize_t;
+/* Track pointer width (the signed counterpart of size_t): int on the
+ * 32-bit target, long on x86_64.  On i386 __PTRDIFF_TYPE__ is int, so this
+ * is identical to the old __INT32_TYPE__ there; on a 64-bit build it makes
+ * a negative return (e.g. regex_match's -1 no-match) sign-extend correctly
+ * instead of zero-extending to 0xFFFFFFFF. */
+typedef __PTRDIFF_TYPE__  ssize_t;
 #endif
 #ifndef _OFF_T_DECLARED
 #define _OFF_T_DECLARED
