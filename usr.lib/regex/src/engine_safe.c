@@ -1976,6 +1976,18 @@ static int match_char(uint32_t pat, uint32_t cp, unsigned flags) {
     return pat == cp;
 }
 
+/* Copy as many capture offsets as fit in the caller's buffer. A buffer
+ * smaller than the group count receives the leading offsets it can hold
+ * (POSIX regexec style) rather than being left uninitialized while the
+ * caller is told the full count was produced. */
+static void copy_capture_offsets(size_t *dst, size_t dst_cap,
+                                 const size_t *src, size_t src_count) {
+    size_t n = dst_cap < src_count ? dst_cap : src_count;
+    if (dst && src && n) {
+        memcpy(dst, src, n * sizeof(*dst));
+    }
+}
+
 static ssize_t nfa_capture_match(nfa_prog *prog, const regex_t *re, const char *text, size_t text_len,
                                  size_t start_pos, size_t *capture_offsets, size_t max_captures,
                                  regex_err_t *out_err) {
@@ -2149,9 +2161,11 @@ static ssize_t nfa_capture_match(nfa_prog *prog, const regex_t *re, const char *
     thread_list_free(&nlist);
 
     if (best_match_pos != (size_t)-1) {
-        if (capture_offsets && max_captures >= cap_count && best_match_caps) {
-            memcpy(capture_offsets, best_match_caps, cap_count * sizeof(*capture_offsets));
-            capture_offsets[1] = best_match_pos;
+        if (capture_offsets && best_match_caps) {
+            copy_capture_offsets(capture_offsets, max_captures, best_match_caps, cap_count);
+            if (max_captures >= 2 && cap_count >= 2) {
+                capture_offsets[1] = best_match_pos;
+            }
         }
         free(best_match_caps);
         if (out_err) {
@@ -2261,9 +2275,10 @@ static ssize_t safe_regex_match_internal(const regex_t *re, const char *text, si
     }
     cap_count = sre->capture_count * 2;
 
-    if (capture_offsets && max_captures >= cap_count) {
+    if (capture_offsets) {
         size_t i;
-        for (i = 0; i < cap_count; ++i) {
+        size_t n = max_captures < cap_count ? max_captures : cap_count;
+        for (i = 0; i < n; ++i) {
             capture_offsets[i] = (size_t)-1;
         }
     }
@@ -2509,8 +2524,8 @@ static ssize_t safe_regex_backtrack(const regex_t *re, const char *text, size_t 
         }
         caps[0] = start;
         if (nfa_bt(&c, sre->nfa->start, start, 0)) {
-            if (capture_offsets && max_captures >= cap_count) {
-                memcpy(capture_offsets, caps, cap_count * sizeof(*capture_offsets));
+            if (capture_offsets) {
+                copy_capture_offsets(capture_offsets, max_captures, caps, cap_count);
             }
             free(caps);
             if (out_err) {
@@ -3191,8 +3206,8 @@ static ssize_t safe_regex_iter_next(regex_iter_t *it_base, size_t *start, size_t
     if (end) {
         *end = rec.end;
     }
-    if (capture_offsets && max_captures >= rec.cap_count) {
-        memcpy(capture_offsets, rec.caps, rec.cap_count * sizeof(*capture_offsets));
+    if (capture_offsets) {
+        copy_capture_offsets(capture_offsets, max_captures, rec.caps, rec.cap_count);
     }
     if (out_cap_count) {
         *out_cap_count = rec.cap_count / 2;
