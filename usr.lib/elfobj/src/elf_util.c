@@ -100,6 +100,18 @@ int elf__bounds_ok(size_t off, size_t len, size_t total) {
     return 1;
 }
 
+/* 64-bit-safe bounds check: does [off, off+len) fit within `total` bytes?
+ * ELF fields are uint64_t; casting them to size_t before elf__bounds_ok
+ * truncates on the 32-bit target, so an out-of-file span with a low 32-bit
+ * remainder would pass. Compute the end in 64-bit and reject on overflow. */
+int elf__bounds_ok_u64(uint64_t off, uint64_t len, size_t total) {
+    uint64_t end;
+    if (!elf__u64_add(off, len, &end)) {
+        return 0;
+    }
+    return end <= (uint64_t)total;
+}
+
 int elf__u64_add(uint64_t a, uint64_t b, uint64_t *out) {
     if (out == NULL) {
         return 0;

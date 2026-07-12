@@ -760,7 +760,7 @@ elf_err_t elf_validate_ex(elfobj_t *obj, const elf_validate_options_t *options, 
             continue;
         }
         if (s->type != SHT_NOBITS && obj->image != NULL && s->size > 0) {
-            if (!elf__bounds_ok((size_t)s->offset, (size_t)s->size, obj->image_size)) {
+            if (!elf__bounds_ok_u64(s->offset, s->size, obj->image_size)) {
                 if (report_diag_fmt(&ctx, ELF_DIAG_ERROR, ELF_ERR_BOUNDS, i,
                                     "section out of file bounds index=", i)) goto done;
             }
@@ -1027,7 +1027,7 @@ elf_err_t elf_validate_ex(elfobj_t *obj, const elf_validate_options_t *options, 
         for (i = 0; i < obj->phdr_count; ++i) {
             const struct elf_phdr *ph = &obj->phdrs[i];
             if (obj->image != NULL && ph->filesz > 0 &&
-                !elf__bounds_ok((size_t)ph->offset, (size_t)ph->filesz, obj->image_size)) {
+                !elf__bounds_ok_u64(ph->offset, ph->filesz, obj->image_size)) {
                 if (report_diag_fmt(&ctx, ELF_DIAG_ERROR, ELF_ERR_BOUNDS, i,
                                     "program header out of file bounds index=", i)) goto done;
             }

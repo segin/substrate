@@ -252,6 +252,7 @@ void *elf__calloc(size_t n, size_t sz);
 void *elf__reallocarray(void *ptr, size_t n, size_t sz);
 char *elf__strdup(const char *s);
 int elf__bounds_ok(size_t off, size_t len, size_t total);
+int elf__bounds_ok_u64(uint64_t off, uint64_t len, size_t total);
 int elf__u64_add(uint64_t a, uint64_t b, uint64_t *out);
 int elf__u64_mul(uint64_t a, uint64_t b, uint64_t *out);
 elf_err_t elf__write_file_atomic(const char *path, const void *buf, size_t size);
