@@ -103,7 +103,38 @@ static char *capture_command_output(const char *cmd_str, expand_state_t *state) 
 
 
 
-#define QUOTED_BIT 0x80
+/*
+ * Words are carried through expansion in a "marked" encoding that records,
+ * per character, whether it came from a quoted context (and so must not act
+ * as a glob / IFS metacharacter). A quoted character C is stored as the two
+ * bytes QMARK, C; an unquoted character is stored as itself. A literal QMARK
+ * byte in data is always stored quoted (QMARK, QMARK) so arbitrary bytes are
+ * preserved.
+ *
+ * This replaces an earlier scheme that OR'd 0x80 into each byte to mark it
+ * quoted: that collided with the 8th bit of UTF-8 / Latin-1 / binary data,
+ * and remove_quotes stripped 0x80 from *every* byte, so any high-bit data
+ * (e.g. `x=café; echo "$x"`) was corrupted. With the marker scheme
+ * remove_quotes only rewrites QMARK sequences and leaves all other bytes,
+ * including >= 0x80 data and clean filenames, untouched.
+ */
+#define QMARK 0x01
+
+/* Append character c to a marked word buffer, quoted or not. */
+static void word_append(char **buf, size_t *cap, size_t *len,
+    unsigned char c, int quoted) {
+    if (quoted || c == QMARK) {
+        buffer_append(buf, cap, len, (char)QMARK);
+    }
+    buffer_append(buf, cap, len, (char)c);
+}
+
+/* First "real" (decoded) character of a marked word, or 0 if empty. */
+static char marked_first_char(const char *s) {
+    if (!s || !*s) return 0;
+    if ((unsigned char)s[0] == QMARK) return s[1];
+    return s[0];
+}
 
 static void finalize_word(char **cw, size_t *cw_cap, size_t *cw_len, char ***list, size_t *cap, size_t *len, int quoted_any) {
     (void)cw_cap;
@@ -128,9 +159,9 @@ static char *get_ifs() {
 static void expand_str_split(const char *val, int split, char ***list, size_t *cap, size_t *len, char **cw, size_t *cw_cap, size_t *cw_len) {
     if (!val) return;
     if (!split) {
-        // Within double quotes: mask everything to prevent field splitting and globbing
+        // Within double quotes: mark everything to prevent field splitting and globbing
         while (*val) {
-            buffer_append(cw, cw_cap, cw_len, (*val++) | QUOTED_BIT);
+            word_append(cw, cw_cap, cw_len, (unsigned char)*val++, 1);
         }
         return;
     }
@@ -148,7 +179,7 @@ static void expand_str_split(const char *val, int split, char ***list, size_t *c
                 continue;
             }
         } else {
-            buffer_append(cw, cw_cap, cw_len, *p);
+            word_append(cw, cw_cap, cw_len, (unsigned char)*p, 0);
         }
         if (*p) p++;
     }
@@ -385,52 +416,75 @@ static long parse_assign(void) {
 static int is_glob(const char *s) {
     if (!s) return 0;
     while (*s) {
-        if (!((*s) & QUOTED_BIT)) {
-            char c = *s;
-            if (c == '*' || c == '?' || c == '[') return 1;
+        if ((unsigned char)*s == QMARK) {   /* quoted char -> literal */
+            s++;
+            if (*s) s++;
+            continue;
         }
+        if (*s == '*' || *s == '?' || *s == '[') return 1;
         s++;
     }
     return 0;
 }
 
+/* Decode one marked element at *scan into its literal byte, advancing *scan. */
+static unsigned char marked_take(const char **scan) {
+    const char *p = *scan;
+    if ((unsigned char)*p == QMARK && p[1]) {
+        *scan = p + 2;
+        return (unsigned char)p[1];
+    }
+    *scan = p + 1;
+    return (unsigned char)*p;
+}
+
+/* True if *p is an unquoted occurrence of literal byte ch. */
+static int marked_is_unquoted(const char *p, char ch) {
+    return (unsigned char)*p != QMARK && *p == ch;
+}
+
 /*
- * Match one character c against the (quoting-bit-aware) bracket expression
- * at *pp (pointing at an unquoted '['), advancing *pp past ']'. Returns 1
- * (match), 0 (valid, no match) or -1 (no closing ']' -> treat '[' as a
- * literal, *pp left unchanged).
+ * Match one character c against the bracket expression at *pp (pointing at an
+ * unquoted '['), advancing *pp past ']'. Returns 1 (match), 0 (valid, no
+ * match) or -1 (no closing ']' -> treat '[' as a literal, *pp unchanged).
+ * The marked encoding is honoured: only an unquoted ']' closes, only an
+ * unquoted '-' forms a range.
  */
 static int glob_bracket(const char **pp, char c) {
     const char *p = *pp + 1;   /* skip '[' */
     int invert = 0;
-    if ((*p & ~QUOTED_BIT) == '!') { invert = 1; p++; }
+    if (marked_is_unquoted(p, '!') || marked_is_unquoted(p, '^')) { invert = 1; p++; }
 
     int match = 0, first = 1;
     const char *scan = p;
-    while (*scan && ((*scan & ~QUOTED_BIT) != ']' || first)) {
-        if (((unsigned char)scan[1] & ~QUOTED_BIT) == '-' && (unsigned char)scan[2] &&
-            ((unsigned char)scan[2] & ~QUOTED_BIT) != ']') {
-            unsigned char lo = (unsigned char)scan[0] & ~QUOTED_BIT;
-            unsigned char hi = (unsigned char)scan[2] & ~QUOTED_BIT;
+    while (*scan) {
+        if (marked_is_unquoted(scan, ']') && !first) break;
+
+        const char *after = scan;
+        unsigned char lo = marked_take(&after);
+        /* Range 'lo-hi' when '-' is unquoted and hi is not the closing ']'. */
+        if (marked_is_unquoted(after, '-') && after[1] &&
+            !marked_is_unquoted(after + 1, ']')) {
+            const char *after2 = after + 1;   /* at hi */
+            unsigned char hi = marked_take(&after2);
             if ((unsigned char)c >= lo && (unsigned char)c <= hi) match = 1;
-            scan += 3;
+            scan = after2;
         } else {
-            if ((unsigned char)c == ((unsigned char)*scan & ~QUOTED_BIT)) match = 1;
-            scan++;
+            if ((unsigned char)c == lo) match = 1;
+            scan = after;
         }
         first = 0;
     }
-    if ((*scan & ~QUOTED_BIT) != ']') return -1;   /* unterminated */
+    if (!marked_is_unquoted(scan, ']')) return -1;   /* unterminated */
     *pp = scan + 1;
     return invert ? !match : match;
 }
 
 /*
- * Pathname glob matcher for '*', '?' and '[...]', honouring the expander's
- * QUOTED_BIT (a quoted metacharacter matches literally). Iterative
+ * Pathname glob matcher for '*', '?' and '[...]' over a marked pattern and a
+ * clean name (a quoted metacharacter matches literally). Iterative
  * two-pointer algorithm with one backtrack point: O(len(pattern)*len(name)),
- * no recursion and no exponential backtracking. The recursive predecessor
- * overflowed the stack on long names and blew up on patterns like "*a*a*...".
+ * no recursion and no exponential backtracking.
  */
 static int glob_match(const char *pattern, const char *name) {
     const char *p = pattern;
@@ -439,26 +493,25 @@ static int glob_match(const char *pattern, const char *name) {
     const char *star_s = NULL;
 
     while (*s) {
-        unsigned char pc = (unsigned char)*p;
-        int unquoted = !(pc & QUOTED_BIT);
-        char pv = (char)(pc & ~QUOTED_BIT);   /* value ignoring the quote bit */
         int advanced = 0;
 
-        if (unquoted && pc == '*') {
+        if ((unsigned char)*p == QMARK && p[1]) {   /* quoted literal */
+            if (p[1] == *s) { p += 2; s++; advanced = 1; }
+        } else if (*p == '*') {
             while (*p == '*') p++;          /* collapse consecutive unquoted '*' */
             if (!*p) return 1;              /* trailing '*' matches the rest */
             star_p = p;
             star_s = s;
             continue;
-        } else if (unquoted && pc == '?') {
+        } else if (*p == '?') {
             p++; s++; advanced = 1;
-        } else if (unquoted && pc == '[') {
+        } else if (*p == '[') {
             const char *pp = p;
             int r = glob_bracket(&pp, *s);
             if (r == 1) { p = pp; s++; advanced = 1; }
-            else if (r < 0 && pv == *s) { p++; s++; advanced = 1; }
+            else if (r < 0 && *p == *s) { p++; s++; advanced = 1; }
             /* r == 0: valid bracket, no match -> not advanced */
-        } else if (pv == *s) {              /* literal (plain or quoted) */
+        } else if (*p == *s) {              /* literal */
             p++; s++; advanced = 1;
         }
 
@@ -473,7 +526,8 @@ static int glob_match(const char *pattern, const char *name) {
     }
 
     while (*p == '*') p++;   /* only unquoted trailing '*' collapse to empty */
-    return !*p;
+    /* A remaining quoted literal (QMARK...) cannot match the empty tail. */
+    return *p == '\0';
 }
 
 // Compare function for qsort
@@ -514,7 +568,11 @@ static void expand_glob_recursive(char ***list, size_t *cap, size_t *len, const 
     }
 
     const char *slash = pattern;
-    while (*slash && ((*slash & ~QUOTED_BIT) != '/')) slash++;
+    while (*slash) {   /* first UNQUOTED '/' splits off this path component */
+        if ((unsigned char)*slash == QMARK) { slash++; if (*slash) slash++; continue; }
+        if (*slash == '/') break;
+        slash++;
+    }
     
     char *component;
     const char *remainder;
@@ -557,7 +615,7 @@ static void expand_glob_recursive(char ***list, size_t *cap, size_t *len, const 
 
     struct dirent *ent;
     while ((ent = readdir(d)) != NULL) {
-        if (ent->d_name[0] == '.' && (component[0] & ~QUOTED_BIT) != '.') continue;
+        if (ent->d_name[0] == '.' && marked_first_char(component) != '.') continue;
         if (glob_match(component, ent->d_name)) {
             char *new_prefix;
             if (!prefix || !*prefix) {
@@ -594,7 +652,7 @@ static void glob_word(const char *pattern, char ***list, size_t *cap, size_t *le
     const char *prefix = "";
     const char *remain = pattern;
     
-    if ((*pattern & ~QUOTED_BIT) == '/') {
+    if ((unsigned char)pattern[0] != QMARK && pattern[0] == '/') {
         prefix = "/";
         remain = pattern + 1;
     }
@@ -646,33 +704,33 @@ static int expand_word_internal(const char *word, char ***list, size_t *cap,
                 expand_str_split(pw->pw_dir, 0, list, cap, len, &cw, &cw_cap, &cw_len);
             } else {
                 /* Not found: emit literal ~user */
-                buffer_append(&cw, &cw_cap, &cw_len, '~');
+                word_append(&cw, &cw_cap, &cw_len, '~', 0);
                 for (size_t i = 0; i < ulen; i++)
-                    buffer_append(&cw, &cw_cap, &cw_len, start[i]);
+                    word_append(&cw, &cw_cap, &cw_len, (unsigned char)start[i], 0);
             }
             free(user);
         }
     }
     while (*p) {
         char c = *p;
-        if (escape) { buffer_append(&cw, &cw_cap, &cw_len, c | QUOTED_BIT); escape = 0; }
+        if (escape) { word_append(&cw, &cw_cap, &cw_len, (unsigned char)c, 1); escape = 0; }
         else if (in_sq) {
             if (c == '\'') { in_sq = 0; quoted_any = 1; }
-            else { buffer_append(&cw, &cw_cap, &cw_len, c | QUOTED_BIT); quoted_any = 1; }
+            else { word_append(&cw, &cw_cap, &cw_len, (unsigned char)c, 1); quoted_any = 1; }
         }
         else if (c == '\\') {
             if (in_dq) {
                 char next = *(p + 1);
                 if (next == '$' || next == '`' || next == '"' || next == '\\' || next == '\n') { escape = 1; p++; continue; }
-                buffer_append(&cw, &cw_cap, &cw_len, c | QUOTED_BIT);
+                word_append(&cw, &cw_cap, &cw_len, (unsigned char)c, 1);
             } else { escape = 1; p++; continue; }
         } else if (c == '\'') {
             if (!in_dq) { in_sq = 1; quoted_any = 1; }
-            else { buffer_append(&cw, &cw_cap, &cw_len, c | QUOTED_BIT); }
+            else { word_append(&cw, &cw_cap, &cw_len, (unsigned char)c, 1); }
         }
         else if (c == '"') {
             if (!in_sq) { in_dq = !in_dq; quoted_any = 1; }
-            else { buffer_append(&cw, &cw_cap, &cw_len, c | QUOTED_BIT); }
+            else { word_append(&cw, &cw_cap, &cw_len, (unsigned char)c, 1); }
         }
         else if (c == '$' && !in_sq) {
             p++;
@@ -1033,12 +1091,12 @@ static int expand_word_internal(const char *word, char ***list, size_t *cap,
                 free(output);
                 free(cmd);
             } else {
-                buffer_append(&cw, &cw_cap, &cw_len, '`');
+                word_append(&cw, &cw_cap, &cw_len, '`', 0);
                 p = start - 1;
             }
         }
         else {
-            buffer_append(&cw, &cw_cap, &cw_len, in_dq ? (c | QUOTED_BIT) : c);
+            word_append(&cw, &cw_cap, &cw_len, (unsigned char)c, in_dq);
         }
         /* An unterminated $((, $( or ${ scan consumes to the string's NUL and
          * parks p there; advancing unconditionally would step one byte past
@@ -1051,12 +1109,21 @@ static int expand_word_internal(const char *word, char ***list, size_t *cap,
     free(cw);
     return 0;
 }
+/*
+ * Collapse the marked encoding back to plain bytes: a QMARK is dropped and
+ * the byte after it copied literally; every other byte (including >= 0x80
+ * data and clean filenames) is copied unchanged.
+ */
 static void remove_quotes(char *word) {
     if (!word) return;
     char *src = word;
     char *dest = word;
     while (*src) {
-        *dest++ = (*src++) & ~QUOTED_BIT;
+        if ((unsigned char)*src == QMARK) {
+            src++;
+            if (!*src) break;
+        }
+        *dest++ = *src++;
     }
     *dest = 0;
 }
