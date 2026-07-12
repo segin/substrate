@@ -448,6 +448,72 @@ static regex_node *parse_group_basic(parser *p) {
     return create_group_node(p, n, group_id);
 }
 
+/* Add the members of a POSIX character class (the NAME in [[:NAME:]]) to
+ * cc.  Returns 0 on success, 1 if NAME is not a known class, 2 on an
+ * allocation failure. */
+static int charclass_add_posix(regex_charclass *cc, const char *name,
+                               size_t namelen) {
+    struct { const char *name; uint32_t lo[4]; uint32_t hi[4]; int n; } tbl[] = {
+        { "alpha",  { 'A', 'a' },       { 'Z', 'z' },       2 },
+        { "digit",  { '0' },            { '9' },            1 },
+        { "alnum",  { '0', 'A', 'a' },  { '9', 'Z', 'z' },  3 },
+        { "upper",  { 'A' },            { 'Z' },            1 },
+        { "lower",  { 'a' },            { 'z' },            1 },
+        { "space",  { '\t', ' ' },      { '\r', ' ' },      2 },
+        { "blank",  { '\t', ' ' },      { '\t', ' ' },      2 },
+        { "punct",  { '!', ':', '[', '{' }, { '/', '@', '`', '~' }, 4 },
+        { "cntrl",  { 0x00, 0x7f },     { 0x1f, 0x7f },     2 },
+        { "xdigit", { '0', 'A', 'a' },  { '9', 'F', 'f' },  3 },
+        { "print",  { 0x20 },           { 0x7e },           1 },
+        { "graph",  { 0x21 },           { 0x7e },           1 },
+    };
+    size_t i;
+    int j;
+    for (i = 0; i < sizeof(tbl) / sizeof(tbl[0]); ++i) {
+        if (strlen(tbl[i].name) == namelen &&
+            memcmp(tbl[i].name, name, namelen) == 0) {
+            for (j = 0; j < tbl[i].n; ++j) {
+                if (!charclass_add_range(cc, tbl[i].lo[j], tbl[i].hi[j])) {
+                    return 2;
+                }
+            }
+            return 0;
+        }
+    }
+    return 1;
+}
+
+/* If p is positioned at a POSIX class expression "[:name:]", consume it and
+ * add its members to cc.  Returns 1 if one was consumed (p->err is set on a
+ * bad/unknown class), 0 if p is not at "[:", leaving p unchanged. */
+static int parse_posix_class(parser *p, regex_charclass *cc) {
+    size_t start;
+    size_t end;
+    int rc;
+
+    if (parser_peek(p) != '[' || p->pos + 1 >= p->len ||
+        p->pattern[p->pos + 1] != ':') {
+        return 0;
+    }
+    start = p->pos + 2;
+    end = start;
+    while (end + 1 < p->len &&
+           !(p->pattern[end] == ':' && p->pattern[end + 1] == ']')) {
+        end++;
+    }
+    if (end + 1 >= p->len ||
+        !(p->pattern[end] == ':' && p->pattern[end + 1] == ']')) {
+        /* No closing ":]" - not a POSIX class; treat "[" as a literal. */
+        return 0;
+    }
+    rc = charclass_add_posix(cc, p->pattern + start, end - start);
+    if (rc != 0) {
+        p->err = rc == 2 ? REGEX_ERR_NOMEM : REGEX_ERR_SYNTAX;
+    }
+    p->pos = end + 2;
+    return 1;
+}
+
 static regex_node *parse_charclass(parser *p) {
     regex_node *n;
     regex_charclass *cc;
@@ -475,6 +541,12 @@ static regex_node *parse_charclass(parser *p) {
     cc->negated = negate;
 
     while (!parser_at_end(p) && parser_peek(p) != ']') {
+        if (parse_posix_class(p, cc)) {
+            if (p->err != REGEX_OK) {
+                break;
+            }
+            continue;
+        }
         if (parser_peek(p) == '\\') {
             parser_get(p);
             if (parser_at_end(p)) {
