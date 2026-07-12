@@ -847,15 +847,20 @@ static elf_err_t parse_relocations(elfobj_t *obj, symtab_index_t *maps, size_t m
             return ELF_ERR_FORMAT;
         }
 
+        size_t min_entsz;
         if (obj->cls == ELFOBJ_CLASS_32) {
-            entsz = sec->type == SHT_RELA ? 12 : 8;
+            min_entsz = sec->type == SHT_RELA ? 12 : 8;
         } else {
-            entsz = sec->type == SHT_RELA ? 24 : 16;
+            min_entsz = sec->type == SHT_RELA ? 24 : 16;
         }
+        entsz = min_entsz;
         if (sec->entsize != 0) {
             entsz = (size_t)sec->entsize;
         }
-        if (entsz == 0 || sec->data_size % entsz != 0) {
+        /* The per-entry reads below need the full REL/RELA struct; an
+         * attacker-supplied sh_entsize smaller than that would place the
+         * fixed reads past the (zero-copy) section data and image. */
+        if (entsz < min_entsz || sec->data_size % entsz != 0) {
             if (trace) {
                 fprintf(stderr, "elfobj: bad reloc entsize section=%s data_size=%zu entsize=%zu\n",
                         sec->name != NULL ? sec->name : "<unnamed>", sec->data_size, entsz);
