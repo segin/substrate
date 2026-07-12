@@ -12,6 +12,16 @@
 #include <pwd.h>
 #include <sys/wait.h>
 
+/* ctype wrappers: the classification functions are only defined for an int
+ * that is representable as unsigned char (or EOF); passing a plain, possibly
+ * signed, char with the high bit set is undefined. Cast through unsigned char
+ * at every call so high-bit data (UTF-8 / Latin-1 / binary) is safe. */
+#define ISSPACE(c) isspace((unsigned char)(c))
+#define ISDIGIT(c) isdigit((unsigned char)(c))
+#define ISALPHA(c) isalpha((unsigned char)(c))
+#define ISALNUM(c) isalnum((unsigned char)(c))
+
+
 static void expand_state_note_cmdsub(expand_state_t *state, int status) {
     if (!state) {
         return;
@@ -184,13 +194,13 @@ static void expand_str_split(const char *val, int split, char ***list, size_t *c
     char *ifs = get_ifs();
     const char *p = val;
     // Skip initial IFS whitespace if splitting
-    while (*p && isspace(*p) && strchr(ifs, *p)) p++;
+    while (*p && ISSPACE(*p) && strchr(ifs, *p)) p++;
 
     while (*p) {
         if (strchr(ifs, *p)) {
             finalize_word(cw, cw_cap, cw_len, list, cap, len, 0);
-            if (isspace(*p) && strchr(" \t\n", *p)) {
-                while (*p && isspace(*p) && strchr(ifs, *p)) p++;
+            if (ISSPACE(*p) && strchr(" \t\n", *p)) {
+                while (*p && ISSPACE(*p) && strchr(ifs, *p)) p++;
                 continue;
             }
         } else {
@@ -223,11 +233,11 @@ static void remove_quotes(char *word);
 
 static long parse_cond(void) {
     long val = parse_log_or();
-    while (isspace(*arith_ptr)) arith_ptr++;
+    while (ISSPACE(*arith_ptr)) arith_ptr++;
     if (*arith_ptr == '?') {
         arith_ptr++;
         long left = parse_assign();
-        while (isspace(*arith_ptr)) arith_ptr++;
+        while (ISSPACE(*arith_ptr)) arith_ptr++;
         if (*arith_ptr == ':') {
             arith_ptr++;
             long right = parse_cond();
@@ -248,11 +258,11 @@ static long parse_unary(void) {
 }
 
 static long parse_unary_inner(void) {
-    while (isspace(*arith_ptr)) arith_ptr++;
+    while (ISSPACE(*arith_ptr)) arith_ptr++;
     if (*arith_ptr == '(') {
         arith_ptr++;
         long val = parse_assign();
-        while (isspace(*arith_ptr)) arith_ptr++;
+        while (ISSPACE(*arith_ptr)) arith_ptr++;
         if (*arith_ptr == ')') arith_ptr++;
         return val;
     }
@@ -261,16 +271,16 @@ static long parse_unary_inner(void) {
     if (*arith_ptr == '!') { arith_ptr++; return !parse_unary(); }
     if (*arith_ptr == '~') { arith_ptr++; return ~parse_unary(); }
     
-    if (isdigit(*arith_ptr)) {
+    if (ISDIGIT(*arith_ptr)) {
         char *end;
         long val = strtol(arith_ptr, &end, 0);
         arith_ptr = end;
         return val;
     }
     
-    if (isalpha(*arith_ptr) || *arith_ptr == '_') {
+    if (ISALPHA(*arith_ptr) || *arith_ptr == '_') {
         const char *start = arith_ptr;
-        while (isalnum(*arith_ptr) || *arith_ptr == '_') arith_ptr++;
+        while (ISALNUM(*arith_ptr) || *arith_ptr == '_') arith_ptr++;
         char *name = sh_strndup(start, arith_ptr - start);
         char *val_str = lookup_variable(name);
         long val = 0;
@@ -284,7 +294,7 @@ static long parse_unary_inner(void) {
 static long parse_mul(void) {
     long left = parse_unary();
     while (1) {
-        while (isspace(*arith_ptr)) arith_ptr++;
+        while (ISSPACE(*arith_ptr)) arith_ptr++;
         if (*arith_ptr == '*' && *(arith_ptr+1) != '=') { arith_ptr++; left *= parse_unary(); }
         else if (*arith_ptr == '/' && *(arith_ptr+1) != '=') {
             arith_ptr++; long r = parse_unary();
@@ -307,7 +317,7 @@ static long parse_mul(void) {
 static long parse_add(void) {
     long left = parse_mul();
     while (1) {
-        while (isspace(*arith_ptr)) arith_ptr++;
+        while (ISSPACE(*arith_ptr)) arith_ptr++;
         if (*arith_ptr == '+' && *(arith_ptr+1) != '+' && *(arith_ptr+1) != '=') { arith_ptr++; left += parse_mul(); }
         else if (*arith_ptr == '-' && *(arith_ptr+1) != '-' && *(arith_ptr+1) != '=') { arith_ptr++; left -= parse_mul(); }
         else break;
@@ -318,7 +328,7 @@ static long parse_add(void) {
 static long parse_shift(void) {
     long left = parse_add();
     while (1) {
-        while (isspace(*arith_ptr)) arith_ptr++;
+        while (ISSPACE(*arith_ptr)) arith_ptr++;
         if (strncmp(arith_ptr, "<<", 2) == 0 && *(arith_ptr+2) != '=') { arith_ptr += 2; left <<= parse_add(); }
         else if (strncmp(arith_ptr, ">>", 2) == 0 && *(arith_ptr+2) != '=') { arith_ptr += 2; left >>= parse_add(); }
         else break;
@@ -329,7 +339,7 @@ static long parse_shift(void) {
 static long parse_rel(void) {
     long left = parse_shift();
     while (1) {
-        while (isspace(*arith_ptr)) arith_ptr++;
+        while (ISSPACE(*arith_ptr)) arith_ptr++;
         if (strncmp(arith_ptr, "<=", 2) == 0) { arith_ptr += 2; left = (left <= parse_shift()); }
         else if (strncmp(arith_ptr, ">=", 2) == 0) { arith_ptr += 2; left = (left >= parse_shift()); }
         else if (*arith_ptr == '<' && *(arith_ptr+1) != '<') { arith_ptr++; left = (left < parse_shift()); }
@@ -342,7 +352,7 @@ static long parse_rel(void) {
 static long parse_eq(void) {
     long left = parse_rel();
     while (1) {
-        while (isspace(*arith_ptr)) arith_ptr++;
+        while (ISSPACE(*arith_ptr)) arith_ptr++;
         if (strncmp(arith_ptr, "==", 2) == 0) { arith_ptr += 2; left = (left == parse_rel()); }
         else if (strncmp(arith_ptr, "!=", 2) == 0) { arith_ptr += 2; left = (left != parse_rel()); }
         else break;
@@ -353,7 +363,7 @@ static long parse_eq(void) {
 static long parse_bit_and(void) {
     long left = parse_eq();
     while (1) {
-        while (isspace(*arith_ptr)) arith_ptr++;
+        while (ISSPACE(*arith_ptr)) arith_ptr++;
         if (*arith_ptr == '&' && *(arith_ptr+1) != '&' && *(arith_ptr+1) != '=') { arith_ptr++; left &= parse_eq(); }
         else break;
     }
@@ -363,7 +373,7 @@ static long parse_bit_and(void) {
 static long parse_bit_xor(void) {
     long left = parse_bit_and();
     while (1) {
-        while (isspace(*arith_ptr)) arith_ptr++;
+        while (ISSPACE(*arith_ptr)) arith_ptr++;
         if (*arith_ptr == '^' && *(arith_ptr+1) != '=') { arith_ptr++; left ^= parse_bit_and(); }
         else break;
     }
@@ -373,7 +383,7 @@ static long parse_bit_xor(void) {
 static long parse_bit_or(void) {
     long left = parse_bit_xor();
     while (1) {
-        while (isspace(*arith_ptr)) arith_ptr++;
+        while (ISSPACE(*arith_ptr)) arith_ptr++;
         if (*arith_ptr == '|' && *(arith_ptr+1) != '|' && *(arith_ptr+1) != '=') { arith_ptr++; left |= parse_bit_xor(); }
         else break;
     }
@@ -383,7 +393,7 @@ static long parse_bit_or(void) {
 static long parse_log_and(void) {
     long left = parse_bit_or();
     while (1) {
-        while (isspace(*arith_ptr)) arith_ptr++;
+        while (ISSPACE(*arith_ptr)) arith_ptr++;
         if (strncmp(arith_ptr, "&&", 2) == 0) { arith_ptr += 2; left = left && parse_bit_or(); }
         else break;
     }
@@ -393,7 +403,7 @@ static long parse_log_and(void) {
 static long parse_log_or(void) {
     long left = parse_log_and();
     while (1) {
-        while (isspace(*arith_ptr)) arith_ptr++;
+        while (ISSPACE(*arith_ptr)) arith_ptr++;
         if (strncmp(arith_ptr, "||", 2) == 0) { arith_ptr += 2; left = left || parse_log_and(); }
         else break;
     }
@@ -401,13 +411,13 @@ static long parse_log_or(void) {
 }
 
 static long parse_assign(void) {
-    while (isspace(*arith_ptr)) arith_ptr++;
+    while (ISSPACE(*arith_ptr)) arith_ptr++;
     const char *saved_ptr = arith_ptr;
-    if (isalpha(*arith_ptr) || *arith_ptr == '_') {
+    if (ISALPHA(*arith_ptr) || *arith_ptr == '_') {
         const char *start = arith_ptr;
-        while (isalnum(*arith_ptr) || *arith_ptr == '_') arith_ptr++;
+        while (ISALNUM(*arith_ptr) || *arith_ptr == '_') arith_ptr++;
         const char *end = arith_ptr;
-        while (isspace(*arith_ptr)) arith_ptr++;
+        while (ISSPACE(*arith_ptr)) arith_ptr++;
         if (*arith_ptr == '=' && *(arith_ptr+1) != '=') {
             char *name = sh_strndup(start, end - start);
             arith_ptr++;
@@ -847,13 +857,13 @@ static int expand_word_internal(const char *word, char ***list, size_t *cap,
                     } else if (*c == '!' || *c == '?' || *c == '$' || *c == '-' || *c == '@' || *c == '*') {
                         varname = sh_strndup(c, 1);
                         c++;
-                    } else if (isdigit(*c)) {
+                    } else if (ISDIGIT(*c)) {
                         varname = sh_strndup(c, 1);
                         c++;
                     } else {
                         // Regular varname
                         const char *name_start = c;
-                        while (*c && (isalnum(*c) || *c == '_')) c++;
+                        while (*c && (ISALNUM(*c) || *c == '_')) c++;
                         if (c > name_start) {
                             varname = sh_strndup(name_start, c - name_start);
                         }
@@ -1013,7 +1023,7 @@ static int expand_word_internal(const char *word, char ***list, size_t *cap,
                         }
                     } else if (*c == '#') {
                         // ${#var} or ${var#pattern} / ${var##pattern}
-                        if (c == content && c[1] && (isalpha(c[1]) || c[1] == '_')) {
+                        if (c == content && c[1] && (ISALPHA(c[1]) || c[1] == '_')) {
                             // ${#var} - length
                             c++;
                             char *length_var = strdup(c);
@@ -1070,10 +1080,10 @@ static int expand_word_internal(const char *word, char ***list, size_t *cap,
                     free(varname);
                     free(content);
                 }
-            } else if (isalpha(*p) || *p == '_' || isdigit(*p) || *p == '?' || *p == '$' || *p == '#' || *p == '@' || *p == '*' || *p == '-' || *p == '!') {
+            } else if (ISALPHA(*p) || *p == '_' || ISDIGIT(*p) || *p == '?' || *p == '$' || *p == '#' || *p == '@' || *p == '*' || *p == '-' || *p == '!') {
                 const char *start = p;
-                if (isdigit(*p) || *p == '?' || *p == '$' || *p == '#' || *p == '@' || *p == '*' || *p == '-' || *p == '!') p++;
-                else while (*p && (isalnum(*p) || *p == '_')) p++;
+                if (ISDIGIT(*p) || *p == '?' || *p == '$' || *p == '#' || *p == '@' || *p == '*' || *p == '-' || *p == '!') p++;
+                else while (*p && (ISALNUM(*p) || *p == '_')) p++;
                 char *name = sh_strndup(start, p - start);
                 char *val = lookup_variable(name);
                 expand_str_split(val, split && !in_dq, list, cap, len, &cw, &cw_cap, &cw_len);
@@ -1323,10 +1333,10 @@ int expand_heredoc_ex(const char *content, int quoted, char **out,
                     free(val);
                     free(name);
                 }
-            } else if (isalpha(*p) || *p == '_' || isdigit(*p) || *p == '?' || *p == '$' || *p == '#' || *p == '@' || *p == '*' || *p == '-' || *p == '!') {
+            } else if (ISALPHA(*p) || *p == '_' || ISDIGIT(*p) || *p == '?' || *p == '$' || *p == '#' || *p == '@' || *p == '*' || *p == '-' || *p == '!') {
                 const char *start = p;
-                if (isdigit(*p) || *p == '?' || *p == '$' || *p == '#' || *p == '@' || *p == '*' || *p == '-' || *p == '!') p++;
-                else while (*p && (isalnum(*p) || *p == '_')) p++;
+                if (ISDIGIT(*p) || *p == '?' || *p == '$' || *p == '#' || *p == '@' || *p == '*' || *p == '-' || *p == '!') p++;
+                else while (*p && (ISALNUM(*p) || *p == '_')) p++;
                 char *name = sh_strndup(start, p - start);
                 char *val = lookup_variable(name);
                 if (val) buffer_append_str(&buf, &cap, &len, val);

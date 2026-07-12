@@ -5,6 +5,16 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+/* ctype wrappers: the classification functions are only defined for an int
+ * that is representable as unsigned char (or EOF); passing a plain, possibly
+ * signed, char with the high bit set is undefined. Cast through unsigned char
+ * at every call so high-bit data (UTF-8 / Latin-1 / binary) is safe. */
+#define ISSPACE(c) isspace((unsigned char)(c))
+#define ISDIGIT(c) isdigit((unsigned char)(c))
+#define ISALPHA(c) isalpha((unsigned char)(c))
+#define ISALNUM(c) isalnum((unsigned char)(c))
+
+
 void lexer_init(lexer_t *l, const char *input) {
     l->input = input;
     l->pos = 0;
@@ -37,7 +47,7 @@ static int is_operator_char(char c) {
 }
 
 static int is_meta_char(char c) {
-    return isspace(c) || is_operator_char(c);
+    return ISSPACE(c) || is_operator_char(c);
 }
 
 // Check for operators
@@ -109,7 +119,7 @@ static token_t *lexer_scan(lexer_t *l) {
         }
 
         // Skip whitespace (EXCEPT newline)
-        if (isspace(c) && c != '\n') {
+        if (ISSPACE(c) && c != '\n') {
             advance(l);
             continue;
         }
@@ -132,11 +142,11 @@ static token_t *lexer_scan(lexer_t *l) {
         // Try IO Number (digit followed by < or >)
         // Only if it looks like a number start and is purely digits until operator
         // POSIX: IO_NUMBER is only recognized if it is entirely digits and immediately followed by < or >
-        if (isdigit(c)) {
+        if (ISDIGIT(c)) {
             // Must check if this digit is part of a word or an IO number
             // Look ahead to see if it's digit+ followed by < or >
             size_t k = 0;
-            while (isdigit(peek_n(l, k))) k++;
+            while (ISDIGIT(peek_n(l, k))) k++;
             char after = peek_n(l, k);
             if (after == '<' || after == '>') {
                 // It is an IO number
