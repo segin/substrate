@@ -655,24 +655,37 @@ static int expand_word_internal(const char *word, char ***list, size_t *cap,
                     if (depth > 0) p++;
                 }
                 if (depth == 0) {
-                    char *expr = sh_strndup(start, p - start - 1);
-                    const char *saved_arith_ptr = arith_ptr;
-                    int saved_arith_error = arith_error;
-                    arith_ptr = expr;
-                    arith_error = 0;
-                    arith_depth = 0;
-                    long val = parse_assign();
-                    int had_error = arith_error;
-                    arith_ptr = saved_arith_ptr;
-                    arith_error = saved_arith_error;
-                    if (had_error) {
-                        expand_state_fail(state, 1);
+                    char *raw = sh_strndup(start, p - start - 1);
+                    /* POSIX: the arithmetic expression first undergoes
+                     * parameter expansion, command substitution and quote
+                     * removal (as if within double quotes) before it is
+                     * evaluated, so $1, $var and $(cmd) work inside $((...)).
+                     * expand_word_ex(split=0) returns a single quote-removed
+                     * string; the evaluator only groks bare identifiers. */
+                    char *expr = NULL;
+                    if (expand_word_ex(raw, &expr, state) != 0) {
+                        /* expand_word_ex already flagged fatal state */
+                        free(raw);
                         free(expr);
                     } else {
-                        char buf[32];
-                        snprintf(buf, sizeof(buf), "%ld", val);
-                        expand_str_split(buf, !in_dq, list, cap, len, &cw, &cw_cap, &cw_len);
+                        const char *saved_arith_ptr = arith_ptr;
+                        int saved_arith_error = arith_error;
+                        arith_ptr = expr;
+                        arith_error = 0;
+                        arith_depth = 0;
+                        long val = parse_assign();
+                        int had_error = arith_error;
+                        arith_ptr = saved_arith_ptr;
+                        arith_error = saved_arith_error;
+                        if (had_error) {
+                            expand_state_fail(state, 1);
+                        } else {
+                            char buf[32];
+                            snprintf(buf, sizeof(buf), "%ld", val);
+                            expand_str_split(buf, !in_dq, list, cap, len, &cw, &cw_cap, &cw_len);
+                        }
                         free(expr);
+                        free(raw);
                     }
                 }
             } else if (*p == '(') {
