@@ -26,6 +26,8 @@ int regcomp(regex_t *restrict preg, const char *restrict pattern, int cflags)
         sub_flags |= REGEX_FLAG_ICASE;
     if (cflags & REG_NEWLINE)
         sub_flags |= REGEX_FLAG_MULTILINE;
+    if (cflags & REG_NOSUB)
+        sub_flags |= REGEX_FLAG_NOSUB;
 
     tmp = regex_compile(pattern, sub_flags, &err);
     if (!tmp) {
@@ -57,15 +59,29 @@ int regexec(const regex_t *restrict preg, const char *restrict string,
     size_t *offsets;
     ssize_t rc;
     size_t i;
+    regex_t local;
 
-    (void)eflags;
     if (!preg || !string)
         return REG_BADPAT;
 
+    /* REG_NOSUB (set at regcomp time) means the caller wants no submatch
+     * data; ignore nmatch/pmatch and report only match/no-match. */
+    if (preg->flags & REGEX_FLAG_NOSUB)
+        nmatch = 0;
+
     text_len = strlen(string);
     max_captures = preg->capture_count;
-    if (nmatch > 0 && nmatch < max_captures)
+    if (nmatch < max_captures)
         max_captures = nmatch;
+
+    /* Apply per-execution anchoring flags to a private copy of the compiled
+     * pattern (regex_t is a flat value with no back-pointer, so a shallow
+     * copy shares the engine state safely for a read-only match). */
+    local = *preg;
+    if (eflags & REG_NOTBOL)
+        local.flags |= REGEX_FLAG_NOTBOL;
+    if (eflags & REG_NOTEOL)
+        local.flags |= REGEX_FLAG_NOTEOL;
 
     offsets = NULL;
     if (max_captures > 0) {
@@ -79,7 +95,7 @@ int regexec(const regex_t *restrict preg, const char *restrict string,
      * the slot count (2 * groups), matching the 2*max_captures allocation
      * above; otherwise the engine's "did the caller provide room?" guard fails
      * and it never writes any submatch offsets. */
-    rc = regex_match(preg, string, text_len, offsets, max_captures * 2, NULL);
+    rc = regex_match(&local, string, text_len, offsets, max_captures * 2, NULL);
 
     if (rc < 0) {
         free(offsets);

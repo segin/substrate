@@ -1535,6 +1535,25 @@ static size_t bitset_bytes(size_t bits) {
     return (bits + 7u) / 8u;
 }
 
+/* Does a `^` anchor match at pos?  Start of text counts unless REG_NOTBOL
+ * (REGEX_FLAG_NOTBOL) says the buffer start is mid-line; an interior line
+ * start counts only in multiline mode. */
+static int anchor_at_bol(unsigned flags, size_t pos, const char *text) {
+    if (pos == 0) {
+        return !(flags & REGEX_FLAG_NOTBOL);
+    }
+    return (flags & REGEX_FLAG_MULTILINE) && text && text[pos - 1] == '\n';
+}
+
+/* Does a `$` anchor match at pos?  End of text counts unless REG_NOTEOL
+ * (REGEX_FLAG_NOTEOL); an interior line end counts only in multiline mode. */
+static int anchor_at_eol(unsigned flags, size_t pos, size_t text_len, const char *text) {
+    if (pos == text_len) {
+        return !(flags & REGEX_FLAG_NOTEOL);
+    }
+    return (flags & REGEX_FLAG_MULTILINE) && text && text[pos] == '\n';
+}
+
 static void epsilon_closure(nfa_prog *prog, uint8_t *set, size_t start_id, size_t pos,
                             const char *text, size_t text_len, unsigned flags, int ignore_anchors) {
 #pragma GCC diagnostic push
@@ -1600,16 +1619,14 @@ static void epsilon_closure(nfa_prog *prog, uint8_t *set, size_t start_id, size_
             }
             break;
         case NFA_BOL:
-            if (ignore_anchors ||
-                pos == 0 || ((flags & REGEX_FLAG_MULTILINE) && pos > 0 && text && text[pos - 1] == '\n')) {
+            if (ignore_anchors || anchor_at_bol(flags, pos, text)) {
                 if (s->out) {
                     PUSH_STACK(s->out->id);
                 }
             }
             break;
         case NFA_EOL:
-            if (ignore_anchors ||
-                pos == text_len || ((flags & REGEX_FLAG_MULTILINE) && pos < text_len && text && text[pos] == '\n')) {
+            if (ignore_anchors || anchor_at_eol(flags, pos, text_len, text)) {
                 if (s->out) {
                     PUSH_STACK(s->out->id);
                 }
@@ -1944,13 +1961,13 @@ static int add_state(thread_list *list, nfa_state *s, size_t *caps, size_t cap_c
         }
         return add_state(list, s->out1, clone_caps, cap_count, list_id, pos, text, text_len, flags, out_err);
     case NFA_BOL:
-        if (pos == 0 || ((flags & REGEX_FLAG_MULTILINE) && pos > 0 && text[pos - 1] == '\n')) {
+        if (anchor_at_bol(flags, pos, text)) {
             return add_state(list, s->out, caps, cap_count, list_id, pos, text, text_len, flags, out_err);
         }
         free(caps);
         return 1;
     case NFA_EOL:
-        if (pos == text_len || ((flags & REGEX_FLAG_MULTILINE) && pos < text_len && text[pos] == '\n')) {
+        if (anchor_at_eol(flags, pos, text_len, text)) {
             return add_state(list, s->out, caps, cap_count, list_id, pos, text, text_len, flags, out_err);
         }
         free(caps);
@@ -2415,15 +2432,13 @@ static int nfa_bt(bt_ctx *c, nfa_state *s, size_t pos, size_t depth) {
             continue;
         }
         case NFA_BOL:
-            if (pos == 0 ||
-                ((c->flags & REGEX_FLAG_MULTILINE) && c->text[pos - 1] == '\n')) {
+            if (anchor_at_bol(c->flags, pos, c->text)) {
                 s = s->out;
                 continue;
             }
             return 0;
         case NFA_EOL:
-            if (pos == c->len ||
-                ((c->flags & REGEX_FLAG_MULTILINE) && c->text[pos] == '\n')) {
+            if (anchor_at_eol(c->flags, pos, c->len, c->text)) {
                 s = s->out;
                 continue;
             }

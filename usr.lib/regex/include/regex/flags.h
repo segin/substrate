@@ -14,7 +14,10 @@ enum {
     REGEX_FLAG_ANCHORED    = 0x0020u, /* anchor pattern automatically */
     REGEX_FLAG_MULTILINE   = 0x0040u, /* ^ and $ match line boundaries */
     REGEX_FLAG_DOTALL      = 0x0080u, /* dot matches newline */
-    REGEX_FLAG_LITERAL     = 0x0100u  /* literal fixed-string mode */
+    REGEX_FLAG_LITERAL     = 0x0100u, /* literal fixed-string mode */
+    REGEX_FLAG_NOTBOL      = 0x0200u, /* start of text is not a line start (^ won't match at pos 0) */
+    REGEX_FLAG_NOTEOL      = 0x0400u, /* end of text is not a line end ($ won't match at end) */
+    REGEX_FLAG_NOSUB       = 0x0800u  /* POSIX REG_NOSUB: do not report submatch offsets */
 };
 
 /* Iterator options */
