@@ -1,10 +1,20 @@
 #include "elf_private.h"
 
-static uint64_t align_up(uint64_t v, uint64_t a) {
+/* Overflow-safe alignment: fails if `a` is not a power of two or if
+ * rounding `v` up would wrap uint64. */
+static int align_up_checked(uint64_t v, uint64_t a, uint64_t *out) {
     if (a <= 1) {
-        return v;
+        *out = v;
+        return 1;
     }
-    return (v + (a - 1)) & ~(a - 1);
+    if ((a & (a - 1)) != 0) {
+        return 0;
+    }
+    if (v > UINT64_MAX - (a - 1)) {
+        return 0;
+    }
+    *out = (v + (a - 1)) & ~(a - 1);
+    return 1;
 }
 
 elf_err_t elf__layout(elfobj_t *obj) {
@@ -25,10 +35,14 @@ elf_err_t elf__layout(elfobj_t *obj) {
             sec->offset = 0;
             continue;
         }
-        off = align_up(off, sec->addralign ? sec->addralign : 1);
+        if (!align_up_checked(off, sec->addralign ? sec->addralign : 1, &off)) {
+            return ELF_ERR_BOUNDS;
+        }
         sec->offset = off;
         sec->size = sec->data_size;
-        off += sec->data_size;
+        if (!elf__u64_add(off, sec->data_size, &off)) {
+            return ELF_ERR_BOUNDS;
+        }
     }
 
     return ELF_OK;
