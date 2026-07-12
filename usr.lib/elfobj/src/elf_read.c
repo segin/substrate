@@ -918,12 +918,16 @@ static elf_err_t parse_relocations(elfobj_t *obj, symtab_index_t *maps, size_t m
                 target = obj->sections[sec->info];
                 rel_offset = r_offset;
             }
-            /* Bound the relocation against the materialized buffer length
-             * (data_size), not the raw 64-bit sh_size or the untrusted
-             * uncompressed compression_size: a consumer patches target->data,
-             * which is exactly data_size bytes, so a wider bound would let a
-             * reloc point past the real buffer. */
-            target_size = target->data_size;
+            /* Relocations against a compressed section apply to its
+             * uncompressed content, so bound r_offset by the uncompressed
+             * size when present; otherwise by the section size. The compare
+             * is all-uint64, so it does not truncate on the 32-bit target
+             * (the earlier per-section bounds check already proved a
+             * non-compressed size fits image_size). */
+            target_size = target->size;
+            if (target->has_compression_hint && target->compression_size > target_size) {
+                target_size = target->compression_size;
+            }
             if (rel_offset >= target_size) {
                 if (trace) {
                     fprintf(stderr,
