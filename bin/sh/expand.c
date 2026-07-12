@@ -8,6 +8,7 @@
 #include <ctype.h>
 #include <dirent.h>
 #include <unistd.h>
+#include <limits.h>
 #include <pwd.h>
 #include <sys/wait.h>
 
@@ -224,15 +225,18 @@ static long parse_mul(void) {
     while (1) {
         while (isspace(*arith_ptr)) arith_ptr++;
         if (*arith_ptr == '*' && *(arith_ptr+1) != '=') { arith_ptr++; left *= parse_unary(); }
-        else if (*arith_ptr == '/' && *(arith_ptr+1) != '=') { 
+        else if (*arith_ptr == '/' && *(arith_ptr+1) != '=') {
             arith_ptr++; long r = parse_unary();
-            if (r) { left /= r; }
-            else { fprintf(stderr, "sh: arithmetic: division by zero\n"); arith_error = 1; return 0; }
+            if (r == 0) { fprintf(stderr, "sh: arithmetic: division by zero\n"); arith_error = 1; return 0; }
+            /* LONG_MIN / -1 overflows and traps (SIGFPE) on x86 idiv. */
+            if (left == LONG_MIN && r == -1) { fprintf(stderr, "sh: arithmetic: overflow\n"); arith_error = 1; return 0; }
+            left /= r;
         }
-        else if (*arith_ptr == '%' && *(arith_ptr+1) != '=') { 
+        else if (*arith_ptr == '%' && *(arith_ptr+1) != '=') {
             arith_ptr++; long r = parse_unary();
-            if (r) { left %= r; }
-            else { fprintf(stderr, "sh: arithmetic: division by zero\n"); arith_error = 1; return 0; }
+            if (r == 0) { fprintf(stderr, "sh: arithmetic: division by zero\n"); arith_error = 1; return 0; }
+            if (left == LONG_MIN && r == -1) { left = 0; }
+            else { left %= r; }
         }
         else break;
     }
