@@ -1791,6 +1791,39 @@ static void run_file_stream(FILE *fp) {
     bc_err_active = 0;
 }
 
+/* Interactive REPL.  Reads through the persistent FILE-based lexer on
+ * stdin (NOT one getline'd string per line), so a statement that spans
+ * lines - `define f(x) {` ... `}`, an open brace or paren - keeps
+ * lexing across newlines instead of hitting EOF mid-parse.  The "bc> "
+ * prompt is printed before each new input line (i.e. when a statement
+ * terminator is seen), so it appears before the blocking read.  Errors
+ * recover per BC-02. */
+static void run_interactive(void) {
+    lex_set_file(stdin);
+    bc_err_active = 1;
+    if (setjmp(bc_err_jmp)) {
+        bc_reset_after_error();
+        while (cur_tok != '\n' && cur_tok != TOK_EOF) lex();  /* resync */
+    } else {
+        printf("bc> ");
+        fflush(stdout);
+        lex();
+    }
+    while (cur_tok != TOK_EOF) {
+        if (cur_tok == '\n') {
+            /* Statement terminator: prompt for the next line, then read
+             * it (the read blocks, so the prompt must come first). */
+            printf("bc> ");
+            fflush(stdout);
+            lex();
+            continue;
+        }
+        ast_node_t *n = parse_top_level();
+        if (n) { run_toplevel(n); ast_free(n); }
+    }
+    bc_err_active = 0;
+}
+
 int main(int argc, char **argv) {
     int c;
     while ((c = getopt(argc, argv, "hswql")) != -1) {
@@ -1830,35 +1863,7 @@ int main(int argc, char **argv) {
     }
 
     if (isatty(STDIN_FILENO)) {
-        char *line = NULL;
-        size_t cap = 0;
-        ssize_t len;
-
-        while (1) {
-            printf("bc> ");
-            fflush(stdout);
-            len = getline(&line, &cap, stdin);
-            if (len < 0) break;
-            lex_set_string(line);
-            bc_err_active = 1;
-            if (setjmp(bc_err_jmp)) {
-                /* Error in this line: recover and prompt for the next
-                 * one instead of exiting the session. */
-                bc_reset_after_error();
-                bc_err_active = 0;
-                continue;
-            }
-            lex();
-            while (cur_tok != TOK_EOF) {
-                ast_node_t *n = parse_top_level();
-                if (n) {
-                    run_toplevel(n);
-                    ast_free(n);
-                }
-            }
-            bc_err_active = 0;
-        }
-        free(line);
+        run_interactive();
         return 0;
     }
 
