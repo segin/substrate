@@ -1694,6 +1694,23 @@ void eval_stmt(ast_node_t *n) {
     }
 }
 
+/* Execute one top-level statement, then clear any control-flow flag it
+ * left set.  A break/continue/return that reaches here was not consumed
+ * by an enclosing loop or function - without this reset every
+ * subsequent statement is silently skipped (the eval_stmt guard sees
+ * the stuck flag), wedging the rest of the script or session. */
+void run_toplevel(ast_node_t *n) {
+    eval_stmt(n);
+    if (is_breaking || is_continuing) {
+        fprintf(stderr, "bc: '%s' outside of a loop\n",
+                is_breaking ? "break" : "continue");
+    } else if (is_returning) {
+        fprintf(stderr, "bc: 'return' outside of a function\n");
+    }
+    if (ret_val) { bc_free(ret_val); ret_val = NULL; }
+    is_returning = is_breaking = is_continuing = 0;
+}
+
 int main(int argc, char **argv) {
     int c;
     while ((c = getopt(argc, argv, "hswql")) != -1) {
@@ -1731,7 +1748,7 @@ int main(int argc, char **argv) {
             while (cur_tok != TOK_EOF) {
                 ast_node_t *n = parse_top_level();
                 if (n) {
-                    eval_stmt(n);
+                    run_toplevel(n);
                     ast_free(n);
                 }
             }
@@ -1755,7 +1772,7 @@ int main(int argc, char **argv) {
             while (cur_tok != TOK_EOF) {
                 ast_node_t *n = parse_top_level();
                 if (n) {
-                    eval_stmt(n);
+                    run_toplevel(n);
                     ast_free(n);
                 }
             }
@@ -1769,7 +1786,7 @@ int main(int argc, char **argv) {
     while (cur_tok != TOK_EOF) {
         ast_node_t *n = parse_top_level();
         if (n) {
-            eval_stmt(n);
+            run_toplevel(n);
             ast_free(n);
         }
     }
