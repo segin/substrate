@@ -951,11 +951,13 @@ ast_node_t *parse_statement(void) {
     if (cur_tok == TOK_FOR) {
         lex();
         match('(');
-        ast_node_t *init = parse_expr();
+        /* Any of the three clauses may be empty (`for(;;)`); an omitted
+         * condition means "always true" (evaluated in AST_FOR). */
+        ast_node_t *init = (cur_tok == ';') ? NULL : parse_expr();
         match(';');
-        ast_node_t *cond = parse_expr();
+        ast_node_t *cond = (cur_tok == ';') ? NULL : parse_expr();
         match(';');
-        ast_node_t *inc = parse_expr();
+        ast_node_t *inc = (cur_tok == ')') ? NULL : parse_expr();
         match(')');
         ast_node_t *body = parse_statement();
         ast_node_t *n = ast_new(AST_FOR);
@@ -1780,21 +1782,24 @@ void eval_stmt(ast_node_t *n) {
             break;
             
         case AST_FOR:
-            { bc_num *init = eval_expr(n->for_stmt.init); bc_free(init); }
-            
+            if (n->for_stmt.init) { bc_num *v = eval_expr(n->for_stmt.init); bc_free(v); }
+
             while (1) {
-                bc_num *cond = eval_expr(n->for_stmt.cond);
-                int is_true = !bc_is_zero(cond);
-                bc_free(cond);
+                int is_true = 1;                /* omitted condition => true */
+                if (n->for_stmt.cond) {
+                    bc_num *cond = eval_expr(n->for_stmt.cond);
+                    is_true = !bc_is_zero(cond);
+                    bc_free(cond);
+                }
                 if (!is_true) break;
-                
+
                 eval_stmt(n->for_stmt.body);
-                
+
                 if (is_returning) break;
                 if (is_breaking) { is_breaking = 0; break; }
                 if (is_continuing) { is_continuing = 0; }
-                
-                { bc_num *inc = eval_expr(n->for_stmt.inc); bc_free(inc); }
+
+                if (n->for_stmt.inc) { bc_num *v = eval_expr(n->for_stmt.inc); bc_free(v); }
             }
             break;
             
