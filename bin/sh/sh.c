@@ -352,6 +352,10 @@ int main(int argc, char **argv, char **envp) {
         while (1) {
             char *line = NULL;
             int count = 0;
+            /* buf must outlive the fgets block below: `line` aliases it and is
+             * used (execute_line) after that block. Declaring it inside the
+             * `if (!line)` block was a stack-use-after-scope. */
+            char buf[1024];
 
             if (shell_is_interactive) {
                 job_update_status();
@@ -385,7 +389,6 @@ int main(int argc, char **argv, char **envp) {
             }
             
             if (!line) {
-                char buf[1024];
                 if (!fgets(buf, sizeof(buf), input)) break;
                 line = buf;
             }
