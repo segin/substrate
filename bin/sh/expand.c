@@ -394,52 +394,86 @@ static int is_glob(const char *s) {
     return 0;
 }
 
+/*
+ * Match one character c against the (quoting-bit-aware) bracket expression
+ * at *pp (pointing at an unquoted '['), advancing *pp past ']'. Returns 1
+ * (match), 0 (valid, no match) or -1 (no closing ']' -> treat '[' as a
+ * literal, *pp left unchanged).
+ */
+static int glob_bracket(const char **pp, char c) {
+    const char *p = *pp + 1;   /* skip '[' */
+    int invert = 0;
+    if ((*p & ~QUOTED_BIT) == '!') { invert = 1; p++; }
+
+    int match = 0, first = 1;
+    const char *scan = p;
+    while (*scan && ((*scan & ~QUOTED_BIT) != ']' || first)) {
+        if (((unsigned char)scan[1] & ~QUOTED_BIT) == '-' && (unsigned char)scan[2] &&
+            ((unsigned char)scan[2] & ~QUOTED_BIT) != ']') {
+            unsigned char lo = (unsigned char)scan[0] & ~QUOTED_BIT;
+            unsigned char hi = (unsigned char)scan[2] & ~QUOTED_BIT;
+            if ((unsigned char)c >= lo && (unsigned char)c <= hi) match = 1;
+            scan += 3;
+        } else {
+            if ((unsigned char)c == ((unsigned char)*scan & ~QUOTED_BIT)) match = 1;
+            scan++;
+        }
+        first = 0;
+    }
+    if ((*scan & ~QUOTED_BIT) != ']') return -1;   /* unterminated */
+    *pp = scan + 1;
+    return invert ? !match : match;
+}
+
+/*
+ * Pathname glob matcher for '*', '?' and '[...]', honouring the expander's
+ * QUOTED_BIT (a quoted metacharacter matches literally). Iterative
+ * two-pointer algorithm with one backtrack point: O(len(pattern)*len(name)),
+ * no recursion and no exponential backtracking. The recursive predecessor
+ * overflowed the stack on long names and blew up on patterns like "*a*a*...".
+ */
 static int glob_match(const char *pattern, const char *name) {
-    if (!*pattern) return !*name;
-    unsigned char p = (unsigned char)*pattern;
-    if (!(p & QUOTED_BIT)) {
-        if (p == '*') {
-            if (glob_match(pattern + 1, name)) return 1;
-            if (*name && glob_match(pattern, name + 1)) return 1;
-            return 0;
+    const char *p = pattern;
+    const char *s = name;
+    const char *star_p = NULL;
+    const char *star_s = NULL;
+
+    while (*s) {
+        unsigned char pc = (unsigned char)*p;
+        int unquoted = !(pc & QUOTED_BIT);
+        char pv = (char)(pc & ~QUOTED_BIT);   /* value ignoring the quote bit */
+        int advanced = 0;
+
+        if (unquoted && pc == '*') {
+            while (*p == '*') p++;          /* collapse consecutive unquoted '*' */
+            if (!*p) return 1;              /* trailing '*' matches the rest */
+            star_p = p;
+            star_s = s;
+            continue;
+        } else if (unquoted && pc == '?') {
+            p++; s++; advanced = 1;
+        } else if (unquoted && pc == '[') {
+            const char *pp = p;
+            int r = glob_bracket(&pp, *s);
+            if (r == 1) { p = pp; s++; advanced = 1; }
+            else if (r < 0 && pv == *s) { p++; s++; advanced = 1; }
+            /* r == 0: valid bracket, no match -> not advanced */
+        } else if (pv == *s) {              /* literal (plain or quoted) */
+            p++; s++; advanced = 1;
         }
-        if (p == '?') {
-            if (!*name) return 0;
-            return glob_match(pattern + 1, name + 1);
-        }
-        if (p == '[') {
-            if (!*name) return 0;
-            pattern++;
-            int invert = 0;
-            if ((*pattern & ~QUOTED_BIT) == '!') {
-                invert = 1;
-                pattern++;
+
+        if (!advanced) {
+            if (star_p) {
+                p = star_p;
+                s = ++star_s;
+            } else {
+                return 0;
             }
-            int match = 0;
-            int first = 1;
-            while (*pattern && ((*pattern & ~QUOTED_BIT) != ']' || first)) {
-                if (((unsigned char)pattern[1] & ~QUOTED_BIT) == '-' && (unsigned char)pattern[2] && ((unsigned char)pattern[2] & ~QUOTED_BIT) != ']') {
-                    unsigned char start = (unsigned char)*pattern & ~QUOTED_BIT;
-                    unsigned char end = (unsigned char)pattern[2] & ~QUOTED_BIT;
-                    if ((unsigned char)*name >= start && (unsigned char)*name <= end) match = 1;
-                    pattern += 3;
-                } else {
-                    if ((unsigned char)*name == (unsigned char)(*pattern & ~QUOTED_BIT)) match = 1;
-                    pattern++;
-                }
-                first = 0;
-            }
-            if ((*pattern & ~QUOTED_BIT) != ']') return 0;
-            pattern++;
-            if (invert) match = !match;
-            if (!match) return 0;
-            return glob_match(pattern, name + 1);
         }
     }
-    if (*name && (*name == (char)(p & ~QUOTED_BIT))) {
-        return glob_match(pattern + 1, name + 1);
-    }
-    return 0;
+
+    while (*p == '*') p++;   /* only unquoted trailing '*' collapse to empty */
+    return !*p;
 }
 
 // Compare function for qsort
