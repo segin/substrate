@@ -671,6 +671,17 @@ ast_node_t *parse_primary(void) {
             lex_error("expected '(' after function name");
         }
     }
+    if (cur_tok == TOK_READ) {
+        /* read() - GNU extension: read one number from stdin at eval
+         * time.  Takes no arguments. */
+        lex();
+        match('(');
+        n = ast_new(AST_CALL);
+        n->call.name = strdup("read");
+        n->call.args = NULL;
+        match(')');
+        return n;
+    }
     if (cur_tok == '(') {
         lex();
         n = parse_expr();
@@ -1438,6 +1449,18 @@ bc_num *eval_expr(ast_node_t *n) {
                  bc_num *res = bc_sqrt(arg);
                  bc_free(arg);
                  return res;
+            }
+            if (strcmp(n->call.name, "read") == 0) {
+                 /* Read one line from stdin and parse it as a number in
+                  * the current ibase.  EOF yields 0. */
+                 char *line = NULL;
+                 size_t cap = 0;
+                 fflush(stdout);
+                 ssize_t len = getline(&line, &cap, stdin);
+                 if (len < 0) { free(line); return bc_from_long(0); }
+                 bc_num *v = bc_from_string(line, bc_ibase);
+                 free(line);
+                 return v;
             }
             if (opt_l) {
                 /* j(n,x) is the only two-argument math-library function. */
