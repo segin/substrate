@@ -1,6 +1,13 @@
 #include "regex_internal.h"
 
 #ifdef REGEX_USE_PCRE2
+#include <stdlib.h>
+#include <string.h>
+/* The adapter is hardwired to PCRE2's 8-bit API; select it before the
+ * header so pcre2_compile/pcre2_match/pcre2_substitute resolve. */
+#ifndef PCRE2_CODE_UNIT_WIDTH
+#define PCRE2_CODE_UNIT_WIDTH 8
+#endif
 #include <pcre2.h>
 
 typedef struct pcre2_regex_impl {
@@ -34,7 +41,7 @@ static uint32_t pcre2_map_flags(unsigned flags) {
     return opts;
 }
 
-static regex_err_t pcre2_compile(regex_t *re, const char *pattern, unsigned flags) {
+static regex_err_t pcre2_adapter_compile(regex_t *re, const char *pattern, unsigned flags) {
     int error_code = 0;
     PCRE2_SIZE error_offset = 0;
     pcre2_code *code;
@@ -69,7 +76,7 @@ static void pcre2_destroy(regex_t *re) {
     re->impl = NULL;
 }
 
-static ssize_t pcre2_match(const regex_t *re, const char *text, size_t text_len,
+static ssize_t pcre2_adapter_match(const regex_t *re, const char *text, size_t text_len,
                            size_t *capture_offsets, size_t max_captures,
                            regex_err_t *out_err) {
     pcre2_regex_impl *impl = (pcre2_regex_impl *)re->impl;
@@ -139,7 +146,7 @@ static regex_err_t pcre2_find_all(const regex_t *re, const char *text, size_t te
     }
 
     while (offset <= text_len) {
-        rc = pcre2_match(re, text + offset, text_len - offset, caps, cap_count, &err);
+        rc = pcre2_adapter_match(re, text + offset, text_len - offset, caps, cap_count, &err);
         if (rc < 0 && rc != -1) {
             free(caps);
             return err;
@@ -193,10 +200,19 @@ static regex_err_t pcre2_replace(const regex_t *re, const char *text, size_t tex
         opts |= PCRE2_SUBSTITUTE_GLOBAL;
     }
 
-    rc = pcre2_substitute(impl->code, (PCRE2_SPTR)text, text_len, 0, opts, NULL, NULL,
+    /* Size probe: PCRE2_SUBSTITUTE_OVERFLOW_LENGTH makes pcre2_substitute
+     * report the full buffer length needed (in out_size) and return
+     * PCRE2_ERROR_NOMEMORY even when nothing matched - the unchanged text
+     * still needs a buffer.  A non-negative rc means the result already fit
+     * in the zero-length buffer (an empty result); only a different negative
+     * code is a real error.  The previous check treated any rc other than
+     * NOMEMORY as an error, so a non-matching pattern failed instead of
+     * returning the unchanged text. */
+    rc = pcre2_substitute(impl->code, (PCRE2_SPTR)text, text_len, 0,
+                          opts | PCRE2_SUBSTITUTE_OVERFLOW_LENGTH, NULL, NULL,
                           (PCRE2_SPTR)replacement, PCRE2_ZERO_TERMINATED,
                           NULL, &out_size);
-    if (rc != PCRE2_ERROR_NOMEMORY) {
+    if (rc < 0 && rc != PCRE2_ERROR_NOMEMORY) {
         return REGEX_ERR_INTERNAL;
     }
 
@@ -242,10 +258,9 @@ static regex_err_t pcre2_split(const regex_t *re, const char *text, size_t text_
     }
 
     while (pos <= text_len) {
-        rc = pcre2_match(re, text + pos, text_len - pos, caps, cap_count, &err);
+        rc = pcre2_adapter_match(re, text + pos, text_len - pos, caps, cap_count, &err);
         if (rc < 0 && rc != -1) {
-            free(caps);
-            return err;
+            goto fail;
         }
         if (rc == -1 || (max_splits && count >= max_splits)) {
             break;
@@ -258,16 +273,16 @@ static regex_err_t pcre2_split(const regex_t *re, const char *text, size_t text_
                 size_t new_cap = cap ? cap * 2 : 8;
                 char **new_items = (char **)realloc(items, new_cap * sizeof(*new_items));
                 if (!new_items) {
-                    free(caps);
-                    return REGEX_ERR_NOMEM;
+                    err = REGEX_ERR_NOMEM;
+                    goto fail;
                 }
                 items = new_items;
                 cap = new_cap;
             }
             items[count] = (char *)malloc(seg_len + 1);
             if (!items[count]) {
-                free(caps);
-                return REGEX_ERR_NOMEM;
+                err = REGEX_ERR_NOMEM;
+                goto fail;
             }
             memcpy(items[count], text + pos, seg_len);
             items[count][seg_len] = '\0';
@@ -285,16 +300,16 @@ static regex_err_t pcre2_split(const regex_t *re, const char *text, size_t text_
             size_t new_cap = cap ? cap * 2 : 8;
             char **new_items = (char **)realloc(items, new_cap * sizeof(*new_items));
             if (!new_items) {
-                free(caps);
-                return REGEX_ERR_NOMEM;
+                err = REGEX_ERR_NOMEM;
+                goto fail;
             }
             items = new_items;
             cap = new_cap;
         }
         items[count] = (char *)malloc(seg_len + 1);
         if (!items[count]) {
-            free(caps);
-            return REGEX_ERR_NOMEM;
+            err = REGEX_ERR_NOMEM;
+            goto fail;
         }
         memcpy(items[count], text + pos, seg_len);
         items[count][seg_len] = '\0';
@@ -305,6 +320,19 @@ static regex_err_t pcre2_split(const regex_t *re, const char *text, size_t text_
     out->count = count;
     free(caps);
     return REGEX_OK;
+
+fail:
+    /* Free the segments built so far and the item array itself; previously
+     * only caps was freed, leaking items and every segment on any OOM. */
+    {
+        size_t i;
+        for (i = 0; i < count; ++i) {
+            free(items[i]);
+        }
+    }
+    free(items);
+    free(caps);
+    return err;
 }
 
 static regex_iter_t *pcre2_iter_create(const regex_t *re, unsigned options, regex_err_t *out_err) {
@@ -351,9 +379,9 @@ static void pcre2_iter_destroy(regex_iter_t *it) {
 
 static const regex_engine_vtable pcre2_vtable = {
     .name = "pcre2",
-    .compile = pcre2_compile,
+    .compile = pcre2_adapter_compile,
     .destroy = pcre2_destroy,
-    .match = pcre2_match,
+    .match = pcre2_adapter_match,
     .find_all = pcre2_find_all,
     .replace = pcre2_replace,
     .split = pcre2_split,
