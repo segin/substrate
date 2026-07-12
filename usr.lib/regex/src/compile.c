@@ -106,6 +106,12 @@ fail:
     if (out_err) {
         *out_err = err;
     }
+    /* If engine->compile failed after allocating re->impl, free that engine
+     * state too; destroy is a no-op when impl is NULL (compile failed before
+     * setting it), so this is safe for every goto into fail. */
+    if (re->engine && re->engine->destroy) {
+        re->engine->destroy(re);
+    }
     free(re);
     return NULL;
 }
