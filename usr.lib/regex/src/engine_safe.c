@@ -3115,6 +3115,31 @@ static regex_err_t safe_regex_iter_feed(regex_iter_t *it_base, const char *chunk
     }
 
     free(caps);
+
+    /* Drop the consumed prefix (everything below scan_pos) so the buffer
+     * and the max_stream_buffer budget track only the unconsumed tail, not
+     * the whole stream. base_offset carries the trimmed byte count so the
+     * absolute offsets already queued and future ones stay correct. Without
+     * this, buf_len grows to the cap and every stream longer than
+     * max_stream_buffer eventually fails even after emitting matches. */
+    {
+        size_t trim = it->scan_pos;
+        if (trim > it->buf_len) {
+            trim = it->buf_len;
+        }
+        if (trim > 0) {
+            size_t remaining = it->buf_len - trim;
+            if (remaining > 0) {
+                memmove(it->buffer, it->buffer + trim, remaining);
+            }
+            it->base_offset += trim;
+            it->buf_len = remaining;
+            it->scan_pos -= trim;
+            if (it->buffer) {
+                it->buffer[it->buf_len] = '\0';
+            }
+        }
+    }
     return REGEX_OK;
 }
 
