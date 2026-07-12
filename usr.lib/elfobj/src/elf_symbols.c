@@ -255,9 +255,20 @@ typedef struct {
 } sym_ord_t;
 
 static int sym_order_before(const sym_ord_t *a, const sym_ord_t *b) {
-    int a_local = a->sym->bind == STB_LOCAL;
-    int b_local = b->sym->bind == STB_LOCAL;
+    int a_local;
+    int b_local;
     int cmp;
+
+    /* obj->symbols[] may hold NULL slots (every other consumer checks);
+     * order any NULL entry last, stably by original index. */
+    if (a->sym == NULL || b->sym == NULL) {
+        if (a->sym != b->sym) {
+            return a->sym != NULL;
+        }
+        return a->old_index < b->old_index;
+    }
+    a_local = a->sym->bind == STB_LOCAL;
+    b_local = b->sym->bind == STB_LOCAL;
 
     if (a_local != b_local) {
         return a_local > b_local;
@@ -306,6 +317,9 @@ elf_err_t elf_symbols_sort_deterministic(elfobj_t *obj, size_t *first_global_out
     }
     for (i = 0; i < obj->symbol_count; ++i) {
         obj->symbols[i] = ord[i].sym;
+        if (obj->symbols[i] == NULL) {
+            continue;
+        }
         obj->symbols[i]->index = i;
         if (first_global_out != NULL && obj->symbols[i]->bind != STB_LOCAL) {
             *first_global_out = i + 1;
