@@ -355,7 +355,11 @@ int elf_mips_abiflags(const elfobj_t *obj, elf_mips_abiflags_t *out) {
     return 1;
 }
 
-static size_t parse_arm_attrs(const elfobj_t *obj, arm_attr_item_t *items, size_t max_items) {
+/* Walk the attribute section and return the total attribute count. When
+ * `out` is non-NULL it receives ONLY the single attribute at position
+ * `want_index` (in out[0]); callers pass a one-element buffer. Storing at a
+ * running `outn` index into a single-element buffer was a stack overflow. */
+static size_t parse_arm_attrs(const elfobj_t *obj, arm_attr_item_t *out, size_t want_index) {
     const elf_section_t *s;
     const uint8_t *p;
     size_t size;
@@ -432,10 +436,10 @@ static size_t parse_arm_attrs(const elfobj_t *obj, arm_attr_item_t *items, size_
                         break;
                     }
                 }
-                if (items != NULL && outn < max_items) {
-                    items[outn].tag = (uint32_t)tag;
-                    items[outn].value = value;
-                    items[outn].str = str;
+                if (out != NULL && outn == want_index) {
+                    out[0].tag = (uint32_t)tag;
+                    out[0].value = value;
+                    out[0].str = str;
                 }
                 outn++;
             }
@@ -452,7 +456,7 @@ size_t elf_arm_attribute_count(const elfobj_t *obj) {
 
 uint32_t elf_arm_attribute_tag_at(const elfobj_t *obj, size_t index) {
     arm_attr_item_t item;
-    if (parse_arm_attrs(obj, &item, index + 1) <= index) {
+    if (parse_arm_attrs(obj, &item, index) <= index) {
         return 0;
     }
     return item.tag;
@@ -460,7 +464,7 @@ uint32_t elf_arm_attribute_tag_at(const elfobj_t *obj, size_t index) {
 
 uint64_t elf_arm_attribute_value_at(const elfobj_t *obj, size_t index) {
     arm_attr_item_t item;
-    if (parse_arm_attrs(obj, &item, index + 1) <= index) {
+    if (parse_arm_attrs(obj, &item, index) <= index) {
         return 0;
     }
     return item.value;
@@ -468,7 +472,7 @@ uint64_t elf_arm_attribute_value_at(const elfobj_t *obj, size_t index) {
 
 const char *elf_arm_attribute_string_at(const elfobj_t *obj, size_t index) {
     arm_attr_item_t item;
-    size_t n = parse_arm_attrs(obj, &item, index + 1);
+    size_t n = parse_arm_attrs(obj, &item, index);
     if (n <= index || item.str == NULL) {
         return NULL;
     }
@@ -477,7 +481,7 @@ const char *elf_arm_attribute_string_at(const elfobj_t *obj, size_t index) {
     return g_last_attr_string;
 }
 
-static size_t parse_riscv_attrs(const elfobj_t *obj, arm_attr_item_t *items, size_t max_items) {
+static size_t parse_riscv_attrs(const elfobj_t *obj, arm_attr_item_t *out, size_t want_index) {
     const elf_section_t *s;
     const uint8_t *p;
     size_t size;
@@ -536,10 +540,10 @@ static size_t parse_riscv_attrs(const elfobj_t *obj, arm_attr_item_t *items, siz
                     break;
                 }
             }
-            if (items != NULL && outn < max_items) {
-                items[outn].tag = (uint32_t)tag;
-                items[outn].value = value;
-                items[outn].str = NULL;
+            if (out != NULL && outn == want_index) {
+                out[0].tag = (uint32_t)tag;
+                out[0].value = value;
+                out[0].str = NULL;
             }
             outn++;
         }
@@ -554,7 +558,7 @@ size_t elf_riscv_attribute_count(const elfobj_t *obj) {
 
 uint32_t elf_riscv_attribute_tag_at(const elfobj_t *obj, size_t index) {
     arm_attr_item_t item;
-    if (parse_riscv_attrs(obj, &item, index + 1) <= index) {
+    if (parse_riscv_attrs(obj, &item, index) <= index) {
         return 0;
     }
     return item.tag;
@@ -562,7 +566,7 @@ uint32_t elf_riscv_attribute_tag_at(const elfobj_t *obj, size_t index) {
 
 uint64_t elf_riscv_attribute_value_at(const elfobj_t *obj, size_t index) {
     arm_attr_item_t item;
-    if (parse_riscv_attrs(obj, &item, index + 1) <= index) {
+    if (parse_riscv_attrs(obj, &item, index) <= index) {
         return 0;
     }
     return item.value;
