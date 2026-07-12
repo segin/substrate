@@ -493,7 +493,7 @@ int lex(void) {
             return cur_tok = TOK_NUM;
         }
 
-        if (isalpha(c) && islower(c)) {
+        if (islower(c)) {       /* islower already implies alphabetic */
             lexbuf_t ib; lb_init(&ib);
             lb_push(&ib, c);
 
@@ -576,11 +576,9 @@ int lex(void) {
             unget_char(next);
             return cur_tok = '*';
         }
-        if (c == '/') {
-            if (next == '=') return cur_tok = TOK_DIV_ASSIGN;
-            unget_char(next); // handled as comments earlier
-            return cur_tok = '/';
-        }
+        /* '/' (and '/=' and comments) are fully handled by the comment
+         * scanner near the top of lex(), so control never reaches here
+         * for it - no '/' case is needed in this operator block. */
         if (c == '%') {
             if (next == '=') return cur_tok = TOK_MOD_ASSIGN;
             unget_char(next);
@@ -638,12 +636,31 @@ ast_node_t *parse_expr(void);
 ast_node_t *parse_statement(void);
 ast_node_t *parse_block(void);
 
+/* Human-readable name for a token, for diagnostics.  Printable single
+ * characters render as themselves; named tokens use their spelling. */
+static const char *tok_name(int t) {
+    static char one[4];
+    switch (t) {
+        case TOK_EOF:    return "end of input";
+        case TOK_NUM:    return "a number";
+        case TOK_ID:     return "a name";
+        case TOK_STR:    return "a string";
+        case '\n':       return "newline";
+        case TOK_ASSIGN: return "'='";
+        case TOK_EQ:     return "'=='";
+        default:
+            if (t >= 32 && t < 127) { one[0] = '\''; one[1] = (char)t; one[2] = '\''; one[3] = '\0'; return one; }
+            return "token";
+    }
+}
+
 void match(int tok) {
     if (cur_tok == tok) {
         lex();
     } else {
-        fprintf(stderr, "bc: syntax error at line %d: expected token %d, got %d\n", lineno, tok, cur_tok);
-        exit(1);
+        fprintf(stderr, "bc: syntax error at line %d: expected %s, got %s\n",
+                lineno, tok_name(tok), tok_name(cur_tok));
+        bc_fail();          /* recover per BC-02 instead of exit()ing */
     }
 }
 
