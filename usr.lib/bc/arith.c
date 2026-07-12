@@ -42,16 +42,14 @@ static void shift_scale(bc_num *n, int target_scale) {
 }
 
 // Align a and b to the same scale, padding with 0 digits.
-bc_num *bc_align_scale(bc_num *a, bc_num *b, bc_num **a_aligned, bc_num **b_aligned) {
+void bc_align_scale(bc_num *a, bc_num *b, bc_num **a_aligned, bc_num **b_aligned) {
     int max_scale = a->scale > b->scale ? a->scale : b->scale;
-    
+
     *a_aligned = bc_dup(a);
     *b_aligned = bc_dup(b);
-    
+
     shift_scale(*a_aligned, max_scale);
     shift_scale(*b_aligned, max_scale);
-    
-    return NULL; // Void really
 }
 
 void bc_raw_add(bc_num *r, bc_num *a, bc_num *b) {
@@ -538,7 +536,6 @@ bc_num *bc_sqrt(bc_num *a) {
     int saved = bc_scale;
     bc_scale = rscale + 2;                 /* guard digits */
 
-    bc_num *one = bc_from_long(1);
     bc_num *two = bc_from_long(2);
     bc_num *x   = bc_dup(a);               /* initial guess */
 
@@ -566,7 +563,6 @@ bc_num *bc_sqrt(bc_num *a) {
         x->scale -= 2;
     }
     bc_trim(x);
-    bc_free(one);
     bc_free(two);
     bc_scale = saved;
     return x;
@@ -753,6 +749,27 @@ static bc_num *compute_pi(void) {
     return pi;
 }
 
+/* Cached pi.  compute_pi() is a full atan series; recomputing it on
+ * every sin/cos call was wasteful.  Cache the highest-scale value seen
+ * and hand out a copy truncated to the requested scale (recomputing
+ * only when a higher scale is needed). */
+static bc_num *pi_cache = NULL;
+static int     pi_cache_scale = -1;
+
+static bc_num *get_pi(int want_scale) {
+    if (!pi_cache || pi_cache_scale < want_scale) {
+        if (pi_cache) bc_free(pi_cache);
+        int saved = bc_scale;
+        bc_scale = want_scale;
+        pi_cache = compute_pi();          /* computes at bc_scale */
+        bc_scale = saved;
+        pi_cache_scale = want_scale;
+    }
+    bc_num *r = bc_dup(pi_cache);
+    trunc_to_scale(r, want_scale);
+    return r;
+}
+
 /* Reduce x into (-pi, pi]; returns new bc_num. */
 static bc_num *reduce_angle(bc_num *x, bc_num *pi, bc_num *twopi) {
     bc_num *r = bc_dup(x);
@@ -775,7 +792,7 @@ static bc_num *reduce_angle(bc_num *x, bc_num *pi, bc_num *twopi) {
 static bc_num *bc_sincos(bc_num *x, int want_cos) {
     int rscale = bc_scale, wscale = rscale + 12, saved = bc_scale;
     bc_scale = wscale;
-    bc_num *pi = compute_pi();
+    bc_num *pi = get_pi(wscale);
     bc_num *two = bc_from_long(2);
     bc_num *twopi = bc_mul(pi, two);
     bc_num *xr;
