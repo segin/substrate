@@ -173,6 +173,7 @@ typedef struct regex_iter_safe {
     unsigned options;
     regex_err_t last_err;
     match_queue queue;
+    size_t total_matches;   /* cumulative matches produced over the stream */
     int finished;
     uint8_t *scratch_set;
     size_t scratch_cap;
@@ -3176,7 +3177,12 @@ static regex_err_t safe_regex_iter_feed(regex_iter_t *it_base, const char *chunk
             } else {
                 it->scan_pos = end;
             }
-            if (it->re->limits.max_matches && it->queue.count > it->re->limits.max_matches) {
+            /* Bound the cumulative match count over the whole stream, not the
+             * momentary queue depth: a consumer draining between feeds keeps
+             * queue.count low, so checking it alone leaves match volume
+             * unbounded. */
+            it->total_matches++;
+            if (it->re->limits.max_matches && it->total_matches > it->re->limits.max_matches) {
                 it->last_err = REGEX_ERR_MATCH_TIMEOUT;
                 free(caps);
                 return it->last_err;
