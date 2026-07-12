@@ -1521,21 +1521,61 @@ static int apply_redirections(ast_redirection_t *redir) {
                 {
                     int p[2];
                     if (pipe(p) < 0) { perror("pipe"); return 1; }
+                    char *heredoc_expanded = NULL;
                     if (redir->heredoc_content) {
-                        char *heredoc_expanded = NULL;
                         if (expand_heredoc_ex(redir->heredoc_content, redir->quoted,
                             &heredoc_expanded, &state) != 0) {
                             close(p[0]);
                             close(p[1]);
                             return 1;
                         }
-                        if (heredoc_expanded) {
-                            if (write(p[1], heredoc_expanded, strlen(heredoc_expanded)) < 0) perror("write");
-                            free(heredoc_expanded);
-                        }
                     }
+                    size_t hlen = heredoc_expanded ? strlen(heredoc_expanded) : 0;
+
+                    /*
+                     * The reader (the command being redirected) has not
+                     * started yet, so writing the whole body up front blocks
+                     * once it exceeds the pipe capacity (only 4 KiB here) and
+                     * deadlocks. Hand the body to a writer process instead.
+                     * Double-fork so the writer is reparented to init and
+                     * reaped there: the shell must not wait for it (that would
+                     * re-introduce the deadlock) yet must not leak a zombie.
+                     */
+                    if (hlen > 0) {
+                        pid_t mid = fork();
+                        if (mid < 0) {
+                            perror("fork");
+                            free(heredoc_expanded);
+                            close(p[0]);
+                            close(p[1]);
+                            return 1;
+                        }
+                        if (mid == 0) {
+                            pid_t w = fork();
+                            if (w == 0) {
+                                /* writer: stream the body, then exit */
+                                signal(SIGPIPE, SIG_IGN);   /* reader may close early */
+                                close(p[0]);
+                                size_t off = 0;
+                                while (off < hlen) {
+                                    ssize_t n = write(p[1], heredoc_expanded + off, hlen - off);
+                                    if (n < 0) {
+                                        if (errno == EINTR) continue;
+                                        break;   /* reader gone */
+                                    }
+                                    off += (size_t)n;
+                                }
+                                close(p[1]);
+                                _exit(0);
+                            }
+                            /* middle exits at once -> writer orphaned to init */
+                            _exit(0);
+                        }
+                        waitpid(mid, NULL, 0);   /* returns immediately */
+                    }
+                    free(heredoc_expanded);
                     close(p[1]);
-                    if (dup2(p[0], redir->fd) < 0) { perror("dup2"); return 1; }
+                    if (dup2(p[0], redir->fd) < 0) { perror("dup2"); close(p[0]); return 1; }
                     close(p[0]);
                 }
                 break;
