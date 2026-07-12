@@ -227,6 +227,13 @@ static function_entry_t *functions = NULL;
 static int func_return_signaled = 0;
 static int func_return_status = 0;
 
+/* Bound nested shell-function calls and eval re-entry: `f() { f; }; f` and
+ * `eval "eval ..."` both recurse through execute_ast/execute_line and would
+ * otherwise overflow the C stack. Shared because both consume real stack
+ * frames per level (bash's FUNCNEST default is comparable). */
+#define SH_MAX_CALL_DEPTH 512
+static int call_depth = 0;
+
 // Loop control
 static int loop_break_count = 0;
 static int loop_continue_count = 0;
@@ -620,6 +627,11 @@ static int builtin_exec(int argc, char **argv) {
 
 static int builtin_eval(int argc, char **argv) {
     int status = 0;
+    if (call_depth >= SH_MAX_CALL_DEPTH) {
+        fprintf(stderr, "%s: eval: maximum nesting depth (%d) exceeded\n",
+            shell_var_get_name(), SH_MAX_CALL_DEPTH);
+        return 2;
+    }
     if (argc > 1) {
         size_t total_len = 0;
         size_t *lengths = malloc(argc * sizeof(size_t));
@@ -637,7 +649,9 @@ static int builtin_eval(int argc, char **argv) {
                 if (i < argc - 1) *ptr++ = ' ';
             }
             *ptr = '\0';
+            call_depth++;
             status = execute_line(line);
+            call_depth--;
             free(line);
         }
         free(lengths);
@@ -2341,6 +2355,13 @@ static int execute_function_def(ast_function_t *func_def, exec_info_t *info) {
 }
 
 static int execute_function(function_entry_t *func, int argc, char **argv, exec_info_t *info) {
+    if (call_depth >= SH_MAX_CALL_DEPTH) {
+        fprintf(stderr, "%s: %s: maximum function call depth (%d) exceeded\n",
+            shell_var_get_name(), argv[0], SH_MAX_CALL_DEPTH);
+        return 2;
+    }
+    call_depth++;
+
     shell_var_push_args();
     shell_var_push_scope();
     shell_var_set_args(argc, argv);
@@ -2363,6 +2384,7 @@ static int execute_function(function_entry_t *func, int argc, char **argv, exec_
     
     shell_var_pop_scope();
     shell_var_pop_args();
+    call_depth--;
     return status;
 }
 
