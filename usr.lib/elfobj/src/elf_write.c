@@ -40,11 +40,39 @@ typedef struct {
 #define GRP_COMDAT 0x1u
 #endif
 
+/* Largest section alignment we will lay out (mirrors the parser's cap in
+ * elf_read.c). sh_addralign must be a power of two per the ELF spec; a
+ * built object carrying a huge/non-power-of-two value wraps align_up's
+ * (v + a-1) and shrinks the computed layout below an earlier section,
+ * turning a later section copy into an OOB write. */
+#define ELFOBJ_MAX_SECTION_ALIGN (1ULL << 20)
+
+static int align_valid(uint64_t a) {
+    return a == 0 || ((a & (a - 1)) == 0 && a <= ELFOBJ_MAX_SECTION_ALIGN);
+}
+
 static uint64_t align_up(uint64_t v, uint64_t a) {
     if (a <= 1) {
         return v;
     }
     return (v + (a - 1)) & ~(a - 1);
+}
+
+/* Overflow-checked align_up: returns 0 if `a` is not a valid alignment or if
+ * rounding `v` up would wrap uint64. */
+static int align_up_checked(uint64_t v, uint64_t a, uint64_t *out) {
+    if (!align_valid(a)) {
+        return 0;
+    }
+    if (a <= 1) {
+        *out = v;
+        return 1;
+    }
+    if (v > UINT64_MAX - (a - 1)) {
+        return 0;
+    }
+    *out = (v + (a - 1)) & ~(a - 1);
+    return 1;
 }
 
 static uint64_t align_with_page_mod(uint64_t off, uint64_t align, uint64_t addr) {
@@ -755,6 +783,10 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
         out.addr = s->addr;
         out.link = s->link;
         out.info = s->info;
+        if (!align_valid(s->addralign)) {
+            err = ELF_ERR_FORMAT;
+            goto done;
+        }
         out.addralign = s->addralign ? s->addralign : 1;
         out.entsize = s->entsize;
         out.data = s->data;
@@ -1252,9 +1284,16 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
             continue;
         }
         if ((secs[i].flags & SHF_ALLOC) != 0 && secs[i].addr != 0) {
+            if (!align_up_checked(off, secs[i].addralign ? secs[i].addralign : 1, &off)) {
+                err = ELF_ERR_BOUNDS;
+                goto done;
+            }
             off = align_with_page_mod(off, secs[i].addralign ? secs[i].addralign : 1, secs[i].addr);
         } else {
-            off = align_up(off, secs[i].addralign ? secs[i].addralign : 1);
+            if (!align_up_checked(off, secs[i].addralign ? secs[i].addralign : 1, &off)) {
+                err = ELF_ERR_BOUNDS;
+                goto done;
+            }
         }
         secs[i].offset = off;
         if (!u64_add_checked(off, secs[i].size, &off)) {

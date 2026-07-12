@@ -140,6 +140,11 @@ elf_err_t elf_section_set_align(elf_section_t *section, uint64_t align) {
     if (align == 0) {
         align = 1;
     }
+    /* sh_addralign must be a power of two within a sane cap; an invalid value
+     * would wrap the writer's layout alignment math into an OOB write. */
+    if ((align & (align - 1)) != 0 || align > (1ULL << 20)) {
+        return ELF_ERR_STATE;
+    }
     section->addralign = align;
     section->obj->dirty = 1;
     return ELF_OK;
