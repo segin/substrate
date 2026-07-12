@@ -10,7 +10,10 @@
 #include <ctype.h>
 #include <stdarg.h>
 #include <unistd.h>
+#include <setjmp.h>
 #include "num.h"
+
+void runtime_error(const char *msg);
 
 /*
  * Upper bound on an array index.  The capacity growth below computes
@@ -280,9 +283,30 @@ int lineno = 1;
 static FILE *lex_file = NULL;
 static const char *lex_string = NULL;
 
+/* Error recovery.  When bc_err_active is set (inside the read/eval
+ * loops), an error longjmps back to the loop so the session survives a
+ * bad statement instead of exit()ing.  Outside that window (startup,
+ * option parsing) errors still terminate. */
+jmp_buf bc_err_jmp;
+int bc_err_active = 0;
+
+static void bc_fail(void) {
+    if (bc_err_active) longjmp(bc_err_jmp, 1);
+    exit(1);
+}
+
 void lex_error(const char *msg) {
     fprintf(stderr, "bc: syntax error at line %d: %s\n", lineno, msg);
-    exit(1);
+    bc_fail();
+}
+
+/* Runtime (evaluation-time) error: undefined function, array used as a
+ * scalar, etc.  Reported distinctly from parse errors, and WITHOUT the
+ * lexer's line number, which by evaluation time points at wherever the
+ * lexer last stopped - not the offending statement. */
+void runtime_error(const char *msg) {
+    fprintf(stderr, "bc: runtime error: %s\n", msg);
+    bc_fail();
 }
 
 static void lex_set_file(FILE *fp) {
@@ -1260,7 +1284,7 @@ bc_num *eval_expr(ast_node_t *n) {
             /* A whole-array reference "name[]" (idx==NULL) is only valid as a
              * function argument, handled in AST_CALL; reaching here means it
              * was used where a scalar value is required. */
-            if (!n->arr.idx) lex_error("array used where a number is required");
+            if (!n->arr.idx) runtime_error("array used where a number is required");
             bc_num *idx_v = eval_expr(n->arr.idx);
             int idx = bc_num_to_long(idx_v);
             bc_free(idx_v);
@@ -1423,7 +1447,7 @@ bc_num *eval_expr(ast_node_t *n) {
                 if (strcmp(f->name, n->call.name) == 0) break;
                 f = f->next;
             }
-            if (!f) lex_error("undefined function called");
+            if (!f) runtime_error("undefined function called");
             
             // Bind parameters in the CALLER's scope, before pushing the new
             // frame.  A scalar parameter takes the value of its argument
@@ -1446,7 +1470,7 @@ bc_num *eval_expr(ast_node_t *n) {
                 l->name = strdup(pname);
                 if (param_is_array) {
                     if (ap->expr->type != AST_ARRAY || ap->expr->arr.idx != NULL)
-                        lex_error("array argument expected for array parameter");
+                        runtime_error("array argument expected for array parameter");
                     int slen = 0;
                     bc_num **src = find_array(ap->expr->arr.name, &slen);
                     if (src && slen > 0) {
@@ -1694,6 +1718,40 @@ void eval_stmt(ast_node_t *n) {
     }
 }
 
+/* After an error longjmps out of the middle of an evaluation, the call
+ * stack may hold frames whose locals were never freed and the
+ * control-flow flags may be set.  Unwind to global scope so the next
+ * statement starts clean.  (The abandoned frames' bc_nums are freed
+ * here; nothing else in a bc process holds references to them.) */
+static void bc_reset_after_error(void) {
+    while (call_stack) {
+        frame_t *fr = call_stack;
+        local_var_t *l = fr->locals;
+        while (l) {
+            local_var_t *nx = l->next;
+            if (l->val) bc_free(l->val);
+            if (l->array) {
+                for (int i = 0; i < l->array_len; i++)
+                    if (l->array[i]) bc_free(l->array[i]);
+                free(l->array);
+            }
+            free(l->name);
+            free(l);
+            l = nx;
+        }
+        for (byref_bind_t *br = fr->byrefs; br; ) {
+            byref_bind_t *bn = br->next;
+            free(br->srcname);
+            free(br);
+            br = bn;
+        }
+        call_stack = fr->prev;
+        free(fr);
+    }
+    if (ret_val) { bc_free(ret_val); ret_val = NULL; }
+    is_returning = is_breaking = is_continuing = 0;
+}
+
 /* Execute one top-level statement, then clear any control-flow flag it
  * left set.  A break/continue/return that reaches here was not consumed
  * by an enclosing loop or function - without this reset every
@@ -1709,6 +1767,28 @@ void run_toplevel(ast_node_t *n) {
     }
     if (ret_val) { bc_free(ret_val); ret_val = NULL; }
     is_returning = is_breaking = is_continuing = 0;
+}
+
+/* Read and execute a whole FILE-based source stream with error
+ * recovery: an error longjmps back to the setjmp below, we unwind and
+ * resync to the next line, then keep going - so one bad statement no
+ * longer aborts the entire file / stdin stream. */
+static void run_file_stream(FILE *fp) {
+    lex_set_file(fp);
+    bc_err_active = 1;
+    if (setjmp(bc_err_jmp)) {
+        bc_reset_after_error();
+        /* Drop the rest of the offending line so the parser resyncs on a
+         * statement boundary instead of mid-expression. */
+        while (cur_tok != '\n' && cur_tok != TOK_EOF) lex();
+    } else {
+        lex();                          /* prime the first token */
+    }
+    while (cur_tok != TOK_EOF) {
+        ast_node_t *n = parse_top_level();
+        if (n) { run_toplevel(n); ast_free(n); }
+    }
+    bc_err_active = 0;
 }
 
 int main(int argc, char **argv) {
@@ -1743,15 +1823,7 @@ int main(int argc, char **argv) {
                 perror(argv[i]);
                 return 1;
             }
-            lex_set_file(fp);
-            lex();
-            while (cur_tok != TOK_EOF) {
-                ast_node_t *n = parse_top_level();
-                if (n) {
-                    run_toplevel(n);
-                    ast_free(n);
-                }
-            }
+            run_file_stream(fp);
             fclose(fp);
         }
         return 0;
@@ -1768,6 +1840,14 @@ int main(int argc, char **argv) {
             len = getline(&line, &cap, stdin);
             if (len < 0) break;
             lex_set_string(line);
+            bc_err_active = 1;
+            if (setjmp(bc_err_jmp)) {
+                /* Error in this line: recover and prompt for the next
+                 * one instead of exiting the session. */
+                bc_reset_after_error();
+                bc_err_active = 0;
+                continue;
+            }
             lex();
             while (cur_tok != TOK_EOF) {
                 ast_node_t *n = parse_top_level();
@@ -1776,20 +1856,12 @@ int main(int argc, char **argv) {
                     ast_free(n);
                 }
             }
+            bc_err_active = 0;
         }
         free(line);
         return 0;
     }
 
-    lex_set_file(stdin);
-    lex();
-    while (cur_tok != TOK_EOF) {
-        ast_node_t *n = parse_top_level();
-        if (n) {
-            run_toplevel(n);
-            ast_free(n);
-        }
-    }
-    
+    run_file_stream(stdin);
     return 0;
 }
