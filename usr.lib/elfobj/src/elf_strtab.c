@@ -1,5 +1,11 @@
 #include "elf_private.h"
 
+/* Cap the string table's growth (mirrors ELFOBJ_MAX_ALLOC_BYTES in
+ * elf_util.c). elf__strtab_add grew via a raw doubling realloc with no
+ * ceiling other than the 4 GiB uint32 offset limit, so a caller feeding a
+ * large stream of strings could drive the table into a huge allocation. */
+#define ELFOBJ_STRTAB_MAX_BYTES (256u * 1024u * 1024u)
+
 elf_err_t elf__strtab_init(elf_strtab_t *tab) {
     if (tab == NULL) {
         return ELF_ERR_STATE;
@@ -44,11 +50,17 @@ uint32_t elf__strtab_add(elf_strtab_t *tab, const char *s) {
     }
     if (tab->cap < tab->size + len) {
         size_t new_cap = tab->cap == 0 ? 16 : tab->cap;
+        if (tab->size + len > ELFOBJ_STRTAB_MAX_BYTES) {
+            return UINT32_MAX;
+        }
         while (new_cap < tab->size + len) {
             if (new_cap > ((size_t)-1) / 2) {
                 return UINT32_MAX;
             }
             new_cap *= 2;
+        }
+        if (new_cap > ELFOBJ_STRTAB_MAX_BYTES) {
+            new_cap = ELFOBJ_STRTAB_MAX_BYTES;
         }
         next = (char *)realloc(tab->data, new_cap);
         if (next == NULL) {
