@@ -4,8 +4,17 @@
 #include <stdio.h>
 #include "util.h"
 
+/* Bound on syntactic nesting depth: every nesting level of a compound
+ * command (subshell, group, if/while/for/case, function body) passes
+ * through parse_command exactly once, so a counter there caps C-stack
+ * recursion. Flat pipelines/lists do NOT nest (they loop), so this does
+ * not restrict long `a|b|c...` or `a;b;c...`. */
+#define SH_PARSE_MAX_DEPTH 256
+static int g_parse_depth = 0;
+
 static ast_node_t *parse_list(lexer_t *l);
 static ast_node_t *parse_command(lexer_t *l);
+static ast_node_t *parse_command_inner(lexer_t *l);
 static ast_node_t *parse_if(lexer_t *l);
 static ast_node_t *parse_while(lexer_t *l);
 static ast_node_t *parse_for(lexer_t *l);
@@ -787,10 +796,22 @@ static ast_node_t *parse_for(lexer_t *l) {
 
 
 static ast_node_t *parse_command(lexer_t *l) {
+    ast_node_t *n;
+    if (g_parse_depth >= SH_PARSE_MAX_DEPTH) {
+        parser_error(l, "nesting too deep");
+        return NULL;
+    }
+    g_parse_depth++;
+    n = parse_command_inner(l);
+    g_parse_depth--;
+    return n;
+}
+
+static ast_node_t *parse_command_inner(lexer_t *l) {
     consume_newlines(l);
     token_t *t = lexer_peek(l);
     if (!t || t->type == TOKEN_EOF) return NULL;
-    
+
     if (t->type == TOKEN_OPERATOR && strcmp(t->value, "(") == 0) {
         return parse_subshell(l);
     }
@@ -1138,10 +1159,11 @@ static ast_node_t *parse_list(lexer_t *l) {
 }
 
 ast_node_t *parser_parse(lexer_t *l) {
+    g_parse_depth = 0;
     consume_newlines(l);
     token_t *t = lexer_peek(l);
     if (!t || t->type == TOKEN_EOF) return NULL;
-    
+
     ast_node_t *node = parse_list(l);
     consume_newlines(l);
     t = lexer_peek(l);
