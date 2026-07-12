@@ -79,10 +79,24 @@ void ast_free(ast_node_t *node) {
         free(pipe->commands);
         free(pipe);
     } else if (node->type == NODE_BINARY_OP) {
+        /* Iterate down the left-associative spine (a; b; c and a && b && c
+         * nest on the left) so freeing a long list / AND-OR chain does not
+         * recurse once per element and overflow the stack. Right subtrees
+         * are shallow and recurse normally. The root's redirections were
+         * already released above; deeper spine nodes get theirs freed here. */
         ast_binary_op_t *bin = (ast_binary_op_t*)node;
-        ast_free(bin->left);
-        ast_free(bin->right);
-        free(bin);
+        while (1) {
+            ast_node_t *left = bin->left;
+            ast_free(bin->right);
+            free(bin);
+            if (left && left->type == NODE_BINARY_OP) {
+                free_redirections(left->redirections);
+                bin = (ast_binary_op_t*)left;
+            } else {
+                ast_free(left);
+                break;
+            }
+        }
     } else if (node->type == NODE_IF) {
         ast_if_t *if_node = (ast_if_t*)node;
         ast_free(if_node->condition);
@@ -195,19 +209,43 @@ char *ast_to_string(ast_node_t *node) {
         return res;
     }
     if (node->type == NODE_BINARY_OP) {
-        ast_binary_op_t *bin = (ast_binary_op_t *)node;
-        char *s1 = ast_to_string(bin->left);
-        char *s2 = bin->right ? ast_to_string(bin->right) : strdup("");
-        const char *op = " ; ";
-        if (bin->op == OP_AND) op = " && ";
-        else if (bin->op == OP_OR) op = " || ";
-        else if (bin->op == OP_BACKGROUND) op = " & ";
-        
-        size_t len = strlen(s1) + strlen(s2) + strlen(op) + 1;
-        char *res = malloc(len);
-        snprintf(res, len, "%s%s%s", s1, op, s2);
-        free(s1);
-        free(s2);
+        /* Iterate the left-associative spine instead of recursing per
+         * element (a long a;b;c;... or a&&b&&... would otherwise overflow
+         * the stack). Collect spine root->deepest, then fold left-to-right:
+         * base, then each node's operator + right. */
+        ast_binary_op_t **spine = NULL;
+        size_t n = 0, capn = 0;
+        ast_node_t *cur = node;
+        while (cur && cur->type == NODE_BINARY_OP) {
+            if (n == capn) {
+                capn = capn ? capn * 2 : 32;
+                ast_binary_op_t **t = realloc(spine, capn * sizeof(*spine));
+                if (!t) { free(spine); return strdup(""); }
+                spine = t;
+            }
+            spine[n++] = (ast_binary_op_t *)cur;
+            cur = ((ast_binary_op_t *)cur)->left;
+        }
+
+        char *res = ast_to_string(cur);   /* base (leftmost operand) */
+        size_t len = strlen(res);
+        for (size_t idx = n; idx-- > 0; ) {
+            ast_binary_op_t *b = spine[idx];
+            const char *op = " ; ";
+            if (b->op == OP_AND) op = " && ";
+            else if (b->op == OP_OR) op = " || ";
+            else if (b->op == OP_BACKGROUND) op = " & ";
+            char *rs = b->right ? ast_to_string(b->right) : strdup("");
+            size_t opl = strlen(op), rl = strlen(rs);
+            char *nr = realloc(res, len + opl + rl + 1);
+            if (!nr) { free(res); free(rs); free(spine); return strdup(""); }
+            res = nr;
+            memcpy(res + len, op, opl); len += opl;
+            memcpy(res + len, rs, rl); len += rl;
+            res[len] = '\0';
+            free(rs);
+        }
+        free(spine);
         return res;
     }
     return strdup("builtin/compound");

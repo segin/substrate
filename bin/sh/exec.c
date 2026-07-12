@@ -2145,46 +2145,97 @@ static int execute_binary_op(ast_binary_op_t *bin, exec_info_t *info) {
         return 0;
     }
     
-    int left_status;
-    if (bin->op == OP_AND || bin->op == OP_OR) {
-        /* POSIX: errexit ignored for any command of an AND-OR list other than the last */
-        errexit_disabled++;
-        left_status = execute_ast(bin->left, info);
-        errexit_disabled--;
-    } else {
-        left_status = execute_ast(bin->left, info);
+    /*
+     * parse_list / parse_logic build LEFT-associative spines: `a; b; c` and
+     * `a && b && c` are SEQ(SEQ(a,b),c) / AND(AND(a,b),c). Recursing down the
+     * left pointer once per element overflowed the C stack on a long flat
+     * list -- and since newline-separated commands share the same SEQ spine,
+     * a large multi-line script was enough to crash. Fold the spine
+     * iteratively instead.
+     *
+     * Descent stops at a non-binary node or a BACKGROUND node (whose left is
+     * run in a forked child, not by the parent), so those still go through
+     * the normal recursive path. AND/OR keep POSIX errexit semantics:
+     * errexit is disabled for every command of an AND-OR list except the
+     * last, i.e. while a command has an AND/OR ancestor still pending.
+     */
+    ast_binary_op_t **spine = NULL;
+    size_t spine_len = 0, spine_cap = 0;
+    ast_node_t *cur = (ast_node_t *)bin;
+    while (cur->type == NODE_BINARY_OP &&
+           ((ast_binary_op_t *)cur)->op != OP_BACKGROUND) {
+        if (spine_len == spine_cap) {
+            size_t ncap = spine_cap ? spine_cap * 2 : 32;
+            ast_binary_op_t **tmp = realloc(spine, ncap * sizeof(*spine));
+            if (!tmp) {
+                free(spine);
+                fprintf(stderr, "%s: out of memory\n", shell_var_get_name());
+                return 1;
+            }
+            spine = tmp;
+            spine_cap = ncap;
+        }
+        spine[spine_len++] = (ast_binary_op_t *)cur;
+        cur = ((ast_binary_op_t *)cur)->left;
     }
-    
-    // Update $? after each command so subsequent commands can see it
-    char status_buf[16];
-    snprintf(status_buf, sizeof(status_buf), "%d", left_status);
-    shell_var_set("?", status_buf);
-    
-    if (func_return_signaled || loop_break_count > 0 || loop_continue_count > 0) return left_status;
-    
-    switch (bin->op) {
-        case OP_SEQ:
-            check_traps();
-            return execute_ast(bin->right, info);
-        case OP_AND:
-            if (left_status == 0) {
-                check_traps();
-                return execute_ast(bin->right, info);  /* Right is "last" - errexit applies */
-            }
-            /* Short-circuit: left failed, don't execute right.
-             * errexit is skipped by early return in execute_ast for AND nodes */
-            return left_status;
-        case OP_OR:
-            if (left_status != 0) {
-                check_traps();
-                return execute_ast(bin->right, info);  /* Right is "last" - errexit applies */
-            }
-            /* Short-circuit: left succeeded, return it */
-            return left_status;
-        case OP_BACKGROUND:
+
+    /* andor_above[i] = number of AND/OR nodes strictly above spine[i]; these
+     * are the still-pending AND-OR ancestors whose errexit-disable is active
+     * while spine[i]->right runs. The base sees all of them (total_andor). */
+    int *andor_above = malloc(spine_len * sizeof(int));
+    if (!andor_above) {
+        free(spine);
+        fprintf(stderr, "%s: out of memory\n", shell_var_get_name());
+        return 1;
+    }
+    int total_andor = 0;
+    for (size_t i = 0; i < spine_len; i++) {
+        andor_above[i] = total_andor;
+        if (spine[i]->op == OP_AND || spine[i]->op == OP_OR) total_andor++;
+    }
+
+    /* Evaluate the base (leftmost operand) with every AND/OR ancestor's
+     * errexit-disable in effect. */
+    int acc;
+    errexit_disabled += total_andor;
+    if (cur->type == NODE_BINARY_OP)   /* BACKGROUND base: forks internally */
+        acc = execute_binary_op((ast_binary_op_t *)cur, info);
+    else
+        acc = execute_ast(cur, info);
+    errexit_disabled -= total_andor;
+
+    /* Fold from the deepest spine node up to the root. */
+    for (size_t idx = spine_len; idx-- > 0; ) {
+        ast_binary_op_t *node = spine[idx];
+
+        /* $? reflects the left-hand status before the right side runs. */
+        char status_buf[16];
+        snprintf(status_buf, sizeof(status_buf), "%d", acc);
+        shell_var_set("?", status_buf);
+
+        if (func_return_signaled || loop_break_count > 0 || loop_continue_count > 0)
             break;
+
+        int run_right;
+        switch (node->op) {
+            case OP_AND: run_right = (acc == 0); break;
+            case OP_OR:  run_right = (acc != 0); break;
+            case OP_SEQ:
+            default:     run_right = 1; break;
+        }
+
+        if (run_right) {
+            check_traps();
+            errexit_disabled += andor_above[idx];
+            acc = execute_ast(node->right, info);
+            errexit_disabled -= andor_above[idx];
+        }
+        /* else short-circuit: the left status propagates up unchanged. */
     }
-    return 1;
+
+    free(andor_above);
+    free(spine);
+    return acc;
 }
 
 static int execute_if(ast_if_t *if_node, exec_info_t *info) {
