@@ -11,6 +11,7 @@
 #include <stdarg.h>
 #include <errno.h>
 #include <limits.h>
+#include <stdint.h>
 #include <unistd.h>
 #include <getopt.h>
 
@@ -100,30 +101,41 @@ static char *replace_tok(const char *tok, const char *r, const char *val,
     if (rl == 0 || !strstr(tok, r))
         return NULL;
     size_t vl = strlen(val);
-    /* worst case: every position is a match */
-    size_t cap = strlen(tok) + 1;
-    /* grow conservatively */
-    size_t out_cap = cap + (vl > rl ? (vl - rl) * (cap / (rl ? rl : 1) + 1) : 0) + 1;
+    /*
+     * Grow the output on demand rather than pre-computing a worst-case
+     * size: the old estimate `(vl-rl)*(cap/rl+1)` overflowed 32-bit
+     * size_t for a long token with a large replacement, yielding a tiny
+     * malloc, and only the match branch re-checked capacity — the
+     * literal-byte else branch overran the buffer (XARGS-01). Here every
+     * write ensures room first.
+     */
+    size_t out_cap = strlen(tok) + 16;
+    size_t used = 0;
     char *out = malloc(out_cap);
-    if (!out) xa_fatal("malloc");
-    char *o = out;
     const char *p = tok;
     long done = 0;
+    if (!out) xa_fatal("malloc");
     while (*p) {
-        if ((count < 0 || done < count) && strncmp(p, r, rl) == 0) {
-            size_t used = (size_t)(o - out);
-            if (used + vl + 1 > out_cap) {
-                out_cap = used + vl + 16;
-                char *no = realloc(out, out_cap);
-                if (!no) xa_fatal("realloc");
-                o = no + used; out = no;
+        int    is_match = (count < 0 || done < count) &&
+                          strncmp(p, r, rl) == 0;
+        size_t need = is_match ? vl : 1;
+        if (used + need + 1 > out_cap) {
+            size_t nc = out_cap;
+            while (used + need + 1 > nc) {
+                if (nc > SIZE_MAX / 2) { nc = used + need + 1; break; }
+                nc *= 2;
             }
-            memcpy(o, val, vl); o += vl; p += rl; done++;
+            char *no = realloc(out, nc);
+            if (!no) xa_fatal("realloc");
+            out = no; out_cap = nc;
+        }
+        if (is_match) {
+            memcpy(out + used, val, vl); used += vl; p += rl; done++;
         } else {
-            *o++ = *p++;
+            out[used++] = *p++;
         }
     }
-    *o = '\0';
+    out[used] = '\0';
     return out;
 }
 
