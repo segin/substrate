@@ -128,6 +128,15 @@ static int read_file(struct file *F, const char *name)
 	while ((got = fread(F->raw + F->rawlen, 1, cap - F->rawlen, f)) > 0) {
 		F->rawlen += got;
 		if (F->rawlen == cap) {
+			/* Cap the slurp: doubling at ~2 GiB wraps cap to 0 on the
+			 * 32-bit target, so the next fread count (cap - rawlen)
+			 * becomes a huge value and overflows the heap (DIFF-03). */
+			if (cap > (512UL * 1024 * 1024)) {
+				fprintf(stderr, "%s: %s: file too large\n", prog, name);
+				if (!is_stdin) fclose(f);
+				free(F->raw); F->raw = NULL;
+				return -1;
+			}
 			cap *= 2;
 			F->raw = xrealloc(F->raw, cap);
 		}
@@ -213,8 +222,22 @@ static void myers(struct file *A, struct file *B, int *am, int *bm)
 	if (MAX <= 0)
 		return;
 
-	int     off = MAX;
 	size_t  vsz = (size_t)MAX * 2u + 1u;
+	/*
+	 * The O(ND) tracer keeps a vsz-int vector for every edit depth, i.e.
+	 * ~(MAX+1)*vsz ints — quadratic in the file size (two dissimilar 10k-
+	 * line files would need ~3.2 GB and OOM on the 32-bit target).  Guard
+	 * the size_t multiplies (DIFF-02) and bound the total to a memory
+	 * budget; when the pair is too large fall back to leaving am/bm all -1
+	 * (already initialised), which yields a correct if non-minimal diff
+	 * rather than OOMing (DIFF-01).
+	 */
+	if (vsz > SIZE_MAX / sizeof(int) ||
+	    (size_t)(MAX + 1) > SIZE_MAX / sizeof(int *) ||
+	    (size_t)(MAX + 1) > (128UL * 1024 * 1024) / (vsz * sizeof(int)))
+		return;
+
+	int     off = MAX;
 	int    *V   = xmalloc(vsz * sizeof(int));
 	for (size_t i = 0; i < vsz; i++) V[i] = 0;
 	int **trace = xmalloc((size_t)(MAX + 1) * sizeof(int *));
