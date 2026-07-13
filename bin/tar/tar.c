@@ -18,6 +18,7 @@
 
 #define TAR_BLOCK 512
 #define PAX_TYPE 'x'
+#define PAX_MAX (1 << 20)   /* cap on a pax extended-header blob (TAR-06) */
 
 struct tar_header {
     char name[100], mode[8], uid[8], gid[8], size[12], mtime[12], chksum[8];
@@ -70,6 +71,15 @@ static void pax_reset(struct pax_state *p) {
 static void die(const char *s) { perror(s); exit(2); }
 
 static int64_t oct2i(const char *s, size_t n) {
+    /* GNU base-256: when the top bit of the first byte is set the field is a
+     * big-endian binary integer, not ASCII octal.  Decoding it as octal (and
+     * "continue"-skipping the non-octal bytes) silently desyncs large
+     * size/uid/mtime values (TAR-07). */
+    if (n > 0 && (s[0] & 0x80)) {
+        uint64_t v = (uint64_t)((unsigned char)s[0] & 0x7f);
+        for (size_t i = 1; i < n; i++) v = (v << 8) | (unsigned char)s[i];
+        return (int64_t)v;
+    }
     int64_t v = 0;
     for (size_t i = 0; i < n && s[i]; i++) {
         if (s[i] < '0' || s[i] > '7') continue;
@@ -606,11 +616,22 @@ static int process_read(FILE *in, bool extract) {
         if (!verify_checksum(&h)) return -1;
 
         int64_t hsize = oct2i(h.size, sizeof(h.size));
+        /* name/prefix/linkname are fixed-width fields with no guaranteed NUL;
+         * bound every read with a field-width precision / explicit copy so a
+         * full-width value can't read past the field (TAR-04). */
         char name[PATH_MAX];
-        if (h.prefix[0]) snprintf(name, sizeof(name), "%s/%s", h.prefix, h.name);
-        else snprintf(name, sizeof(name), "%s", h.name);
+        if (h.prefix[0]) snprintf(name, sizeof(name), "%.155s/%.100s", h.prefix, h.name);
+        else snprintf(name, sizeof(name), "%.100s", h.name);
+        char linkbuf[sizeof(h.linkname) + 1];
+        memcpy(linkbuf, h.linkname, sizeof(h.linkname));
+        linkbuf[sizeof(h.linkname)] = '\0';
 
         if (h.typeflag == PAX_TYPE) {
+            /* Cap the extended-header size: reject non-positive or absurd
+             * values before the (size_t) cast so a 64-bit attacker length
+             * can't truncate to a small/zero malloc that then desyncs the
+             * stream (TAR-06). */
+            if (hsize <= 0 || hsize > PAX_MAX) return -1;
             char *blob = malloc((size_t)hsize);
             if (!blob) return -1;
             if (fread(blob, 1, (size_t)hsize, in) != (size_t)hsize) { free(blob); return -1; }
@@ -666,7 +687,7 @@ static int process_read(FILE *in, bool extract) {
                 if (mkdirat(pdir, leaf, 0777) && errno != EEXIST) perror(target);
                 break;
             case '2': {   /* symlink: leaf itself may be replaced, never followed */
-                const char *lt = ps.linkpath ? ps.linkpath : h.linkname;
+                const char *lt = ps.linkpath ? ps.linkpath : linkbuf;
                 if (!opt.no_overwrite || faccessat(pdir, leaf, F_OK, AT_SYMLINK_NOFOLLOW)) {
                     unlinkat(pdir, leaf, 0);
                     if (symlinkat(lt, pdir, leaf)) perror(target);
@@ -675,7 +696,7 @@ static int process_read(FILE *in, bool extract) {
                 break;
             }
             case '1': {   /* hardlink: confine the source to the extraction root (TAR-02) */
-                const char *lt = ps.linkpath ? ps.linkpath : h.linkname;
+                const char *lt = ps.linkpath ? ps.linkpath : linkbuf;
                 /*
                  * The old code passed linkname to link() verbatim, so a member
                  * with linkname=/etc/shadow created a hardlink to the victim
@@ -711,9 +732,14 @@ static int process_read(FILE *in, bool extract) {
         }
 
         /* Metadata via *at on the pinned parent — never re-traverses the path
-         * and never follows a symlink member (chmod skipped for symlinks). */
+         * and never follows a symlink member (chmod skipped for symlinks).
+         * Strip setuid/setgid from a restored mode so a hostile archive can't
+         * plant a setuid-root binary (TAR-05). */
         if (opt.preserve_permissions && tf != '2')
-            fchmodat(pdir, leaf, (mode_t)oct2i(h.mode, sizeof(h.mode)) & 07777, 0);
+            fchmodat(pdir, leaf,
+                     (mode_t)oct2i(h.mode, sizeof(h.mode)) & 07777
+                         & ~(mode_t)(S_ISUID | S_ISGID),
+                     0);
         if (!opt.no_same_owner) {
             fchownat(pdir, leaf,
                      (uid_t)(ps.uid >= 0 ? ps.uid : oct2i(h.uid, sizeof(h.uid))),
@@ -761,6 +787,10 @@ static void usage(void) {
 
 int main(int argc, char **argv) {
     memset(&opt, 0, sizeof(opt));
+    /* Default to NOT restoring archived ownership: applying an untrusted
+     * uid/gid (especially as root) is a footgun / priv-esc vector. Opt in
+     * with --same-owner (TAR-05). */
+    opt.no_same_owner = true;
     opt.format = FMT_PAX;
     opt.safe_extract = true; /* Enable safe extraction by default */
 
@@ -788,6 +818,7 @@ int main(int argc, char **argv) {
         {"strip-components", required_argument, 0, 1002},
         {"no-overwrite", no_argument, 0, 1003},
         {"no-same-owner", no_argument, 0, 1004},
+        {"same-owner", no_argument, 0, 1009},
         {"preserve-permissions", no_argument, 0, 1005},
         {"keep-directory-symlink", no_argument, 0, 1006},
         {"listed-incremental", required_argument, 0, 1007},
@@ -820,6 +851,7 @@ int main(int argc, char **argv) {
             case 1002: opt.strip_components = atoi(optarg); break;
             case 1003: opt.no_overwrite = true; break;
             case 1004: opt.no_same_owner = true; break;
+            case 1009: opt.no_same_owner = false; break;
             case 1005: opt.preserve_permissions = true; break;
             case 1006: opt.keep_directory_symlink = true; break;
             case 1007: opt.snapshot = optarg; break;
