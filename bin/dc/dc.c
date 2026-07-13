@@ -120,9 +120,20 @@ void unget_char(input_t *in, int c) {
 
 void execute(input_t *in);
 
+/* Cap nested macro execution so a self-referential macro (e.g.
+ * `[lFx]sF lFx`) cannot recurse until the C stack overflows (DC-03). */
+#define DC_MAX_EXEC_DEPTH 500
+static int exec_depth = 0;
+
 void execute_str(const char *s) {
     input_t in = { .p = s, .f = NULL };
+    if (exec_depth >= DC_MAX_EXEC_DEPTH) {
+        fprintf(stderr, "dc: macro recursion too deep\n");
+        return;
+    }
+    exec_depth++;
     execute(&in);
+    exec_depth--;
     if (quit_levels > 0) quit_levels--;
 }
 
