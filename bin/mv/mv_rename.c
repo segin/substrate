@@ -50,11 +50,18 @@ static int copy_regular(const char *src, const char *dst,
     ssize_t n;
     int ret = 0;
 
-    sfd = open(src, O_RDONLY);
+    sfd = open(src, O_RDONLY | O_NOFOLLOW);
     if (sfd < 0) {
         return -1;
     }
-    dfd = open(dst, O_WRONLY | O_CREAT | O_TRUNC, sst->st_mode & 07777);
+    /*
+     * This is the cross-device fallback for a rename, so the move replaces
+     * the destination: remove any existing entry, then create fresh with
+     * O_EXCL|O_NOFOLLOW so a symlink planted at dst can neither be followed
+     * (truncating the linked file) nor win a create race (MV-01).
+     */
+    (void)unlink(dst);
+    dfd = open(dst, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, sst->st_mode & 07777);
     if (dfd < 0) {
         close(sfd);
         return -1;
