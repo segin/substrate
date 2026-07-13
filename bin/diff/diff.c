@@ -141,6 +141,14 @@ static int read_file(struct file *F, const char *name)
 			F->raw = xrealloc(F->raw, cap);
 		}
 	}
+	/* Distinguish a read error from EOF so a truncated read isn't silently
+	 * compared as the whole file (DIFF-08). */
+	if (ferror(f)) {
+		fprintf(stderr, "%s: %s: %s\n", prog, name, strerror(errno));
+		if (!is_stdin) fclose(f);
+		free(F->raw); F->raw = NULL;
+		return -1;
+	}
 	if (!is_stdin)
 		fclose(f);
 
@@ -641,6 +649,9 @@ static int diff_files(const char *n1, const char *n2)
 /* ------------------------------------------------------------------ */
 /* Directory handling.                                                 */
 
+#define DIFF_MAX_DEPTH 64
+static int dir_depth = 0;
+
 static int is_dir(const char *p)
 {
 	struct stat st;
@@ -676,10 +687,20 @@ static char **list_dir(const char *d, int *n_out)
 			cap = cap ? cap * 2 : 32;
 			names = xrealloc(names, (size_t)cap * sizeof(char *));
 		}
-		names[n++] = strdup(e->d_name);
+		names[n] = strdup(e->d_name);         /* was unchecked (DIFF-07) */
+		if (!names[n]) {
+			fprintf(stderr, "%s: out of memory\n", prog);
+			for (int k = 0; k < n; k++) free(names[k]);
+			free(names);
+			closedir(dp);
+			*n_out = -1;
+			return NULL;
+		}
+		n++;
 	}
 	closedir(dp);
-	qsort(names, (size_t)n, sizeof(char *), cmp_str);
+	if (n > 0)                                 /* qsort(NULL,0,...) is UB (DIFF-10) */
+		qsort(names, (size_t)n, sizeof(char *), cmp_str);
 	*n_out = n;
 	return names;
 }
@@ -766,7 +787,18 @@ static int diff_path(const char *p1, const char *p2)
 			printf("Common subdirectories: %s and %s\n", p1, p2);
 			return 0;
 		}
-		return diff_dirs(p1, p2);
+		/* Cap recursion depth so a symlink loop (a directory that contains
+		 * a symlink back to an ancestor) cannot recurse until the C stack
+		 * overflows (DIFF-04). */
+		if (dir_depth >= DIFF_MAX_DEPTH) {
+			fprintf(stderr, "%s: %s: directory nesting too deep\n", prog, p1);
+			exitcode = 2;
+			return 2;
+		}
+		dir_depth++;
+		int r = diff_dirs(p1, p2);
+		dir_depth--;
+		return r;
 	}
 	if (d1 != d2) {
 		fprintf(stderr,
@@ -792,6 +824,21 @@ static void usage(FILE *o)
 	fprintf(o,
 	    "usage: %s [-cefnqrsuabitwBN] [-C n] [-U n] [-I regexp] "
 	    "[--label name] file1 file2\n", prog);
+}
+
+/* Parse a context-line count: reject garbage/negatives and clamp so that
+ * 2*context (used in hunk grouping) cannot overflow int (DIFF-06). */
+static int parse_context(const char *s)
+{
+	char *e;
+	long  v;
+	errno = 0;
+	v = strtol(s, &e, 10);
+	if (e == s || *e != '\0' || errno == ERANGE || v < 0 || v > (1 << 20)) {
+		fprintf(stderr, "%s: invalid context length '%s'\n", prog, s);
+		exit(2);
+	}
+	return (int)v;
 }
 
 int main(int argc, char **argv)
@@ -825,7 +872,7 @@ int main(int argc, char **argv)
 		case 'a': opt_text = true; break;
 		case 'b': opt_ignore_wsamt = true; break;
 		case 'c': format = F_CONTEXT; break;
-		case 'C': format = F_CONTEXT; context = atoi(optarg); break;
+		case 'C': format = F_CONTEXT; context = parse_context(optarg); break;
 		case 'e': format = F_ED; break;
 		case 'f': format = F_FORWARD; break;
 		case 'i': opt_ignore_case = true; break;
@@ -835,7 +882,7 @@ int main(int argc, char **argv)
 		case 's': opt_report_same = true; break;
 		case 't': opt_expand_tabs = true; break;
 		case 'u': format = F_UNIFIED; break;
-		case 'U': format = F_UNIFIED; context = atoi(optarg); break;
+		case 'U': format = F_UNIFIED; context = parse_context(optarg); break;
 		case 'w': opt_ignore_ws = true; break;
 		case 'B': opt_ignore_blank = true; break;
 		case 'N': opt_new_file = true; break;
@@ -854,11 +901,11 @@ int main(int argc, char **argv)
 		case 1: format = F_NORMAL; break;
 		case 2:
 			format = F_UNIFIED;
-			if (optarg) context = atoi(optarg);
+			if (optarg) context = parse_context(optarg);
 			break;
 		case 3:
 			format = F_CONTEXT;
-			if (optarg) context = atoi(optarg);
+			if (optarg) context = parse_context(optarg);
 			break;
 		case 'H': usage(stdout); return 0;
 		case 'V': puts(DIFF_VERSION); return 0;
