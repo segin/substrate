@@ -124,6 +124,13 @@ static int parse_count(const char *s, int64_t *out, bool *from_start,
 		*from_start = true;
 		s++;
 		if(!*s) goto bad;
+	} else if(*s == '-') {
+		/* Explicit leading '-' is the documented from-end form
+		 * (`tail -n -5` == `tail -n 5`); consume it and parse the
+		 * magnitude, or the negative value would reach the printer
+		 * as "output nothing" (TAIL-02). */
+		s++;
+		if(!*s) goto bad;
 	}
 	if(expand_number(s, out) < 0) {
 		if(errno == ERANGE)

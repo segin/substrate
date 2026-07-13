@@ -144,6 +144,17 @@ int main(int argc, char *argv[])
 				first = false;
 				continue;
 			}
+			/* Reject a directory operand rather than reading garbage
+			 * (or spinning in follow) on it (TAIL-05..10). */
+			struct stat dst;
+			if(fstat(fd, &dst) == 0 && S_ISDIR(dst.st_mode)) {
+				fprintf(stderr, "%s: error reading '%s': Is a directory\n",
+					o.progname, name);
+				exit_status = 1;
+				close(fd);
+				first = false;
+				continue;
+			}
 		}
 
 		if(process_fd(fd, &o) < 0) {
@@ -169,7 +180,10 @@ next:
 		first = false;
 	}
 
-	if(o.follow && ffs && exit_status == 0) {
+	/* Enter the follow loop even when some operand failed to open: -F
+	 * must wait for a missing file to appear, and -f on a mix of present
+	 * and absent files must still follow the present ones (TAIL-04). */
+	if(o.follow && ffs) {
 		int last_active = -1;
 		if(follow_files(ffs, nfiles, &o, show_headers, &last_active) < 0)
 			exit_status = 1;

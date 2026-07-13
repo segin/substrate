@@ -238,42 +238,73 @@ static int tail_pipe_lines(int fd, int64_t count, unsigned char delim)
 {
 	if(count <= 0) return(0);
 
-	/* Buffer entire input then find the right offset */
-	size_t alloc = 65536, used = 0;
-	unsigned char *data = malloc(alloc);
-	if(!data) return(-1);
+	/* Bounded ring of the last `count` lines: keep only N line copies
+	 * rather than buffering the entire (possibly infinite) pipe, which
+	 * would OOM on a large or unbounded producer (TAIL-03).  A
+	 * pathologically huge count fails the pointer-array allocation
+	 * gracefully instead of crashing. */
+	if((uint64_t)count > SIZE_MAX / sizeof(char *)) {
+		errno = ENOMEM;
+		return(-1);
+	}
+	size_t  slots = (size_t)count;
+	char  **lines = calloc(slots, sizeof(*lines));
+	size_t *lens  = calloc(slots, sizeof(*lens));
+	if(!lines || !lens) { free(lines); free(lens); errno = ENOMEM; return(-1); }
 
+	size_t head = 0;        /* next slot to overwrite */
+	size_t nfilled = 0;     /* slots currently holding a line */
+	char  *cur = NULL;
+	size_t cur_len = 0, cur_cap = 0;
+	int    rc = 0;
+
+	unsigned char buf[TAIL_BUFSZ];
 	for(;;) {
-		unsigned char buf[TAIL_BUFSZ];
 		ssize_t n = read(fd, buf, sizeof(buf));
-		if(n < 0) { if(errno == EINTR) continue; free(data); return(-1); }
+		if(n < 0) { if(errno == EINTR) continue; rc = -1; goto done; }
 		if(n == 0) break;
-		if(used + (size_t)n > alloc) {
-			size_t na = alloc * 2;
-			if(na < used + (size_t)n) na = used + (size_t)n;
-			unsigned char *tmp = realloc(data, na);
-			if(!tmp) { free(data); return(-1); }
-			data = tmp; alloc = na;
-		}
-		memcpy(data + used, buf, (size_t)n);
-		used += (size_t)n;
-	}
-
-	/* Find position of (count)-th delimiter from the end */
-	int64_t delims = 0;
-	size_t  start = 0;
-	for(size_t k = used; k > 0; k--) {
-		if(data[k - 1] == (char)delim) {
-			/* Don't count a delimiter if it's the very last byte of the input */
-			if(k == used)
-				continue;
-
-			delims++;
-			if(delims == count) { start = k; break; }
+		for(ssize_t i = 0; i < n; i++) {
+			if(cur_len + 1 > cur_cap) {
+				size_t nc = cur_cap ? cur_cap * 2 : 128;
+				char *t = realloc(cur, nc);
+				if(!t) { rc = -1; goto done; }
+				cur = t; cur_cap = nc;
+			}
+			cur[cur_len++] = (char)buf[i];
+			if(buf[i] == delim) {
+				free(lines[head]);
+				lines[head] = cur; lens[head] = cur_len;
+				head = (head + 1) % slots;
+				if(nfilled < slots) nfilled++;
+				cur = NULL; cur_len = cur_cap = 0;
+			}
 		}
 	}
-	int rc = write_all(data + start, used - start);
-	free(data);
+	/* A trailing line with no final delimiter is still a line. */
+	if(cur_len > 0) {
+		free(lines[head]);
+		lines[head] = cur; lens[head] = cur_len;
+		head = (head + 1) % slots;
+		if(nfilled < slots) nfilled++;
+		cur = NULL;
+	}
+
+	/* Emit the retained lines oldest-first. */
+	size_t start = (nfilled < slots) ? 0 : head;
+	for(size_t k = 0; k < nfilled; k++) {
+		size_t idx = (start + k) % slots;
+		if(write_all((unsigned char *)lines[idx], lens[idx]) < 0) {
+			rc = -1;
+			break;
+		}
+	}
+
+done:
+	free(cur);
+	for(size_t k = 0; k < slots; k++)
+		free(lines[k]);
+	free(lines);
+	free(lens);
 	return(rc);
 }
 
