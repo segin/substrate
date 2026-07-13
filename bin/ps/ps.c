@@ -120,7 +120,11 @@ static void render_cmd(ps_row_t *row, const ps_options_t *opts) {
     if (opts->flag_e) {
         char blob[512];
         size_t cap = sizeof(blob);
-        if (sys_proc_cmdline(row->info.pid, (char **)blob, &cap) == 0 && cap > 0) {
+        /* sys_proc_cmdline's "char **argv" parameter is really a byte
+         * buffer the kernel fills with the NUL-separated argv blob; route
+         * the address through void * so this isn't a bare char*→char**
+         * pun. */
+        if (sys_proc_cmdline(row->info.pid, (char **)(void *)blob, &cap) == 0 && cap > 0) {
             /* sys_proc_cmdline writes the cmdline_tail blob —
              * NUL-separated argv.  Re-NUL → space for display,
              * keeping the final NUL terminator intact. */

@@ -53,8 +53,10 @@ int top_snapshot_take(top_snapshot_t *s) {
     if (!s) return -EINVAL;
 
     /* Stash the previous tick's process list so we can compute
-     * per-PID jiffy deltas, then start filling fresh. */
-    top_proc_t prev[TOP_MAX_PROCS];
+     * per-PID jiffy deltas, then start filling fresh.  static (not on
+     * the stack): a top_proc_t[4096] is ~512 KiB, far past a sane frame,
+     * and top is single-threaded so a shared scratch buffer is safe. */
+    static top_proc_t prev[TOP_MAX_PROCS];
     size_t prev_n = s->nprocs;
     if (prev_n > TOP_MAX_PROCS) prev_n = TOP_MAX_PROCS;
     memcpy(prev, s->procs, prev_n * sizeof(top_proc_t));
@@ -67,7 +69,7 @@ int top_snapshot_take(top_snapshot_t *s) {
 
     /* Discover capacity, retrying once if the kernel signals
      * truncation via -ENOMEM (REQ-23-0008). */
-    pid_t pids[TOP_MAX_PROCS];
+    static pid_t pids[TOP_MAX_PROCS];
     int total = sys_proc_count();
     if (total < 0) return total;
     if (total > TOP_MAX_PROCS) {

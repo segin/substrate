@@ -283,7 +283,12 @@ int main(int argc, char **argv) {
         case 'c': v.show_cmdline = 1; break;
         case 'H': v.threads = 1; break;
         case 's': v.secure = 1; break;
-        case 'd': v.delay = atof(optarg); if (v.delay <= 0) v.delay = 3.0; break;
+        case 'd':
+            v.delay = atof(optarg);
+            /* Reject <=0, NaN (self-compare) and absurdly large delays;
+             * a NaN would make wait_key()'s (int)(delay*1000) undefined. */
+            if (!(v.delay > 0.0) || v.delay > 86400.0) v.delay = 3.0;
+            break;
         case 'n': v.max_iters = atoi(optarg); break;
         case 'p': parse_pids(&v, optarg); break;
         case 'u': snprintf(v.filter_user, sizeof(v.filter_user), "%s", optarg);

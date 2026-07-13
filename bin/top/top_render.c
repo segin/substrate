@@ -20,6 +20,21 @@
 #include <pwd.h>
 #include <unistd.h>
 
+/*
+ * Render an untrusted process name safe for a terminal: printable bytes
+ * pass through, everything else becomes '?'.  A process can set its own
+ * comm (thr_set_name/exec argv), so without this an escape sequence in a
+ * process name would be interpreted by the viewer's terminal.
+ */
+static void sanitize_comm(const char *in, char *out, size_t cap) {
+    size_t o = 0;
+    for (; in[o] != '\0' && o + 1 < cap; o++) {
+        unsigned char c = (unsigned char)in[o];
+        out[o] = (c >= 0x20 && c < 0x7f) ? (char)c : '?';
+    }
+    out[o] = '\0';
+}
+
 /* ---- bounded string builder ---- */
 typedef struct { char *buf; size_t cap; size_t len; } sb_t;
 
@@ -249,7 +264,9 @@ size_t top_render(const top_snapshot_t *s, const top_view_t *v, char *out, size_
                   (int)p->info.pid, user, pr, ni, virt, res, "0",
                   state_char(p->info.state), p->cpu_pct, p->mem_pct, tplus);
 
-        const char *cmd = p->info.name[0] ? p->info.name : "?";
+        char cmdbuf[256];
+        sanitize_comm(p->info.name[0] ? p->info.name : "?", cmdbuf, sizeof(cmdbuf));
+        const char *cmd = cmdbuf;
         if (v->batch) {
             sb_puts(&b, cmd);
         } else {
