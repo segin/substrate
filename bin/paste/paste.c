@@ -18,6 +18,7 @@
 #include <getopt.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -79,6 +80,10 @@ static int read_line(FILE *f, struct buf *b)
 		if (c == line_delim)
 			break;
 		if (b->len + 1 >= b->cap) {
+			/* Guard the doubling: on a >=2 GiB line b->cap*2 wraps to 0
+			 * on the 32-bit target -> tiny realloc then heap overflow
+			 * (PASTE-01). */
+			if (b->cap > SIZE_MAX / 2) die("line too long");
 			size_t nc = b->cap ? b->cap * 2 : 256;
 			char  *np = realloc(b->p, nc);
 			if (!np) die("out of memory");

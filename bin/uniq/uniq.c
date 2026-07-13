@@ -31,6 +31,7 @@
 #include <ctype.h>
 #include <errno.h>
 #include <stdio.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -120,6 +121,10 @@ read_line(FILE *f, char **out, size_t *out_len, int term)
     if (!buf) return -1;
     while ((c = fgetc(f)) != EOF) {
         if (len + 1 >= cap) {
+            /* Guard the doubling: on a >=2 GiB line cap*2 wraps to 0 on the
+             * 32-bit target, giving a tiny realloc then a heap overflow
+             * (UNIQ-01). */
+            if (cap > SIZE_MAX / 2) { free(buf); return -1; }
             size_t nc = cap * 2;
             char *nb = realloc(buf, nc);
             if (!nb) { free(buf); return -1; }
