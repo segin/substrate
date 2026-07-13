@@ -254,3 +254,172 @@ printf/`random()` and fixing there if deficient.
 
 Verification: ASan/UBSan host builds + crafted repros + behavior checks, one
 finding per commit, mirroring the bin/sh audit.
+
+---
+
+# Batch 2 — 2026-07 (further ~49 utilities)
+
+Second parallel audit wave. Same threat model / 32-bit notes. A recurring
+finding across this batch: **many programs discard write/`fclose` errors and
+`return 0`**, and a surprising number are **unimplemented stubs or thin
+wrappers**. New cross-cutting theme for the privileged/tty tools (`wall`,
+`write`, `who`, `w`): **untrusted `utmp` `ut_host`/`ut_line` and message
+bodies are emitted to terminals with no control-character sanitization →
+terminal-escape injection**, and `ut_line` is used to build `/dev/<line>`
+paths without `/`-rejection or `O_NOFOLLOW`.
+
+## kill  (bin/kill/) — FIXED (commit)
+- KILL-01..07 all fixed by a rewrite: real signal name<->number table,
+  `-s`/`-l`, strtol-parsed pids with range checks (no silent pid 0), correct
+  nonzero exit status. (Verified ASan; committed.)
+
+## passwd  (bin/passwd/passwd.c) — SETUID, privilege-critical
+- **PASSWD-01** HIGH `passwd.c:103-171` — no `pwdb_lock`/flock on /etc/shadow; concurrent passwd/useradd race → lost-update / shadow DB corruption; read-for-auth then read-for-rewrite with no lock = TOCTOU.
+- **PASSWD-02** HIGH `passwd.c:140-166` — fwrite/fputs/fclose returns unchecked; a write error (ENOSPC) makes a truncated shadow.new get renamed over /etc/shadow → accounts lose hashes / box unloginnable. fsync + check + unlink-on-error.
+- **PASSWD-03** HIGH `passwd.c:118,166` — temp `/etc/shadow.new` created 0644 (world-readable) holding all hashes; chmod 0640 only after rename and unchecked. Create O_EXCL 0600 / umask 077, fchmod before rename.
+- **PASSWD-04** MEDIUM `passwd.c:277-297` — salt folded through a 32-bit LCG (≤32 bits entropy); /dev/urandom-fail path derives salt from pid*const+uid (predictable). Fill salt directly from urandom, fail closed.
+- **PASSWD-05** MEDIUM `passwd.c:43-60` — echo-off termios not restored on SIGINT → leaks next typed line, breaks terminal. Signal handler / block signals.
+- **PASSWD-06** MEDIUM `passwd.c:204-309` — cleartext passwords + stored hash never scrubbed (explicit_bzero) from stack.
+- **PASSWD-07** LOW `passwd.c:50-63` — read_password returns unsigned length; `<0` error checks are dead; EOF becomes an empty password.
+- **PASSWD-08/09/10** LOW — short urandom read leaves salt bytes uninit; shadow line >511 mis-parsed by fgets(512); empty stored password skips non-root re-auth.
+- Solid: privilege gate (non-root can only target self + must re-auth) correct; %s for username (no format-string); read_password bounds-checked+NUL.
+
+## su  (bin/su/su.c) — SETUID, privilege-critical
+- **SU-01** HIGH `su.c:172-197` — environment NEVER sanitized across the privilege boundary; `LD_PRELOAD=/tmp/evil.so su -c cmd` (or IFS/ENV/BASH_ENV) runs as the target uid → arbitrary code execution. Whitelist env, strip LD_*/IFS/etc.
+- **SU-02** HIGH `su.c:166` — `initgroups()` return discarded; on failure the switched shell keeps root's supplementary groups (gid 0/wheel). Check it.
+- **SU-03** MEDIUM `su.c:172-183` — PATH not reset for the target/login shell (inherits caller PATH). Set a secure PATH for uid 0 / login.
+- **SU-04** MEDIUM `su.c:96-98,152-155` — empty stored hash / missing shadow entry falls through to a no-password success (combines with SU-08 EOF-empty-password). Treat missing shadow as failure.
+- **SU-05..09** LOW/MED — password buffer not cleared; non-constant-time strcmp; echo-off not restored on signal; read_password `<0` dead (EOF→empty pw); login argv[0] lacks leading '-'.
+- Solid: priv-drop ORDER correct (setgid→initgroups→setuid); root skips prompt; failed auth returns before any setuid; setgid/setuid returns checked; locked accounts (*/!) rejected; %s formats.
+
+## sed  (bin/sed/) — runs untrusted scripts
+- **SED-01** HIGH `sed_parse.c:295-306,349,576` — `-S` sandbox doesn't stop `w`/`W`: files are `fopen("w")` (truncated) at PARSE time; `sed -S -e 'w /etc/motd' /dev/null` truncates it. Defer fopen to first write, skip when sandboxed.
+- **SED-02** HIGH `sed_exec.c:702,662,686` — default (non-`-S`) execution of an untrusted script is RCE + arbitrary file R/W (`e cmd`, `s///e`, `r`, `w`). Document / require opt-in.
+- **SED-03** HIGH `sed.c:124-156` — `-i`: write/fclose errors never checked → truncated temp renamed over original (data loss). Check fflush+ferror+fclose, unlink temp on error.
+- **SED-04** MEDIUM `sed.c:93-104,151` — `-i` doesn't preserve mode/owner; non-mkstemp fallback uses a predictable `name.sed<pid>` opened `fopen("w")` → symlink TOCTOU (arbitrary write). fstat+fchmod/fchown; O_CREAT|O_EXCL only.
+- **SED-05** MEDIUM `sed_util.c:60-73` — `db_reserve` doubling overflows 32-bit size_t (`newcap*=2` → 0 hang; `need` wrap → undersized realloc then memcpy overflow). Overflow-check.
+- **SED-06** MEDIUM `sed_exec.c:122-142,270` — regex recompiled per match iteration; untrusted `s///`/address regex = ReDoS/CPU DoS. Compile once + match budget.
+- **SED-07..11** LOW — caps[] not zero-init before regex_match; `-i` fflush after dup2 (wrong file); leftover temp on fdopen fail; no branch-loop guard; out-of-range `\N` silently ignored.
+- Solid: ctype unsigned-cast; y/// length-mismatch rejected; brace nesting depth-capped(64)+iterative exec; realloc-via-temp; length-tracked lines (embedded NUL safe); labels validated.
+
+## sort  (bin/sort/sort.c)
+- **SORT-01** MEDIUM `sort.c:158,258,352` — comparators use strcmp/str* (NUL-terminated) on length-tracked lines → embedded NUL truncates keys; `-u` silently drops distinct binary lines. memcmp over min(len).
+- **SORT-02** MEDIUM `sort.c:346-350` — `-s` (stable) breaks `-u`: the uniqueness comparator leaves `stable=1` so equal keys never compare 0; `sort -su` emits dupes. Set neq.stable=0.
+- **SORT-03** MEDIUM `sort.c:100-133` — no external/temp merge (comment claims one); whole input in RAM → OOM DoS on 32-bit. Document or implement.
+- **SORT-04** MEDIUM `sort.c:399-407` — `-k`/`-t` field keys parsed then IGNORED; `sort -t: -k3` silently whole-line sorts (exit 0). Implement or reject.
+- **SORT-05/06** LOW — `parse_int_key`/`version_compare` numeric accumulation overflow (signed UB / wrap). strtoll+saturate.
+- **SORT-07** LOW `sort.c:85-86` — `cap_lines*2`/`nc*sizeof` 32-bit multiply overflow (unreachable-in-practice). Guard `nc > SIZE_MAX/sizeof`.
+- **SORT-08..10** LOW — empty `-t ''` sets NUL separator; `-c` fixed `-` filename label + no `-u` strictness; `-R` hash comparator not a strict total order (drops collisions under `-u`).
+- Solid: `-o` reads all input before opening output (self-sort safe); qsort_r convention matches libc; unsigned-char in slow paths; alloc checks; stability via orig_index.
+
+## tar  (bin/tar/tar.c) — extraction of untrusted archives = HIGH surface
+- **TAR-01** HIGH `tar.c:444-455,485,599-605` — symlink-directory traversal: only the final component gets O_NOFOLLOW; a symlink member `evil -> /etc` then a `evil/passwd` member writes through it. Symlink target not sanitized either. openat(O_NOFOLLOW|O_DIRECTORY) per component from a pinned root; reject abs/`..` link targets.
+- **TAR-02** HIGH `tar.c:606-611,618,620` — hardlink source used verbatim; a member `linkname=/etc/shadow mode=0777` makes the following chmod/lchown rewrite the victim inode (root priv-esc). Confine link targets to the extraction root.
+- **TAR-03** HIGH `tar.c:511-517` — `pax_parse` integer underflow: `rec` trusted ≥ prefix len; a record like `"1 =\n"` → `n = 1-2 = SIZE_MAX` → `memchr`/`strndup` huge over-read (crash/infoleak). Require rec ≥ prefix+2.
+- **TAR-04** MEDIUM `tar.c:565,602,321` — name/prefix/linkname[100/155/100] consumed as C strings without guaranteed NUL → read past field / stack. memcpy+NUL or strnlen.
+- **TAR-05** MEDIUM `tar.c:618-624` — untrusted setuid/setgid restored (`chmod & 07777`) and ownership applied by default (`no_same_owner` defaults false) → setuid-root binary from a hostile archive. Strip setuid/setgid; default same-owner off.
+- **TAR-06** MEDIUM `tar.c:569-571` — `malloc((size_t)hsize)` unchecked + 32-bit truncation of a 64-bit attacker hsize (OOM / malloc(0) desync). Cap pax header size.
+- **TAR-07** LOW `tar.c:458,469` — dead absolute-path clause; `oct2i` skips non-octal (GNU base-256 fields desync); chmod on a symlink member follows it.
+- Solid: textual `../`/`/..` rejection; leading `/` stripped; off_t used for member data (no 32-bit truncation); checksum via unsigned char; create-side lstat (no symlink recursion).
+
+## xargs  (bin/xargs/)
+- **XARGS-01** HIGH `xargs.c:106,123` — `-I` replacement buffer sizing `(vl-rl)*(cap/rl+1)` overflows 32-bit size_t → tiny malloc then unguarded literal-byte copy overruns it. Overflow-check out_cap + guard the else branch.
+- **XARGS-02/03** MEDIUM `xargs.c:296,273` — `-I` line buffer unbounded (ignores -s/ARG_MAX); `-s` budget omits sizeof(char*) overhead + no ARG_MAX clamp → silent E2BIG.
+- **XARGS-04..07** LOW — unterminated quote silently accepted (swallows delims/newlines); `-d ''`/`-d '\x'` → NUL/0 silently; `-a` files never closed; `-P0` serial not unlimited.
+- Solid: no ctype (unsigned-char getc); replace_tok no infinite recursion; argv NULL-terminated; buf_putc growth + match-path realloc guard correct; exit-status mapping correct.
+
+## tail  (bin/tail/)
+- **TAIL-01** HIGH `tail_io.c:179-194` — `tail -c 4G` from a pipe: `count` (int64) truncates to `size_t` 0 → `malloc(0)`, `ring[head]` OOB write, `(x)%0` SIGFPE. Reject/clamp count>SIZE_MAX, guard cap!=0.
+- **TAIL-02** MEDIUM `tail_parse.c:118-143` — documented `-n -N`/`-c -N` (explicit minus, from-end) prints nothing (leading `-` not handled → negative count → "output nothing"). Skip optional leading `-`.
+- **TAIL-03** MEDIUM `tail_io.c:216-284` — pipe line-mode + reverse-mode buffer the ENTIRE input into RAM → OOM on a large/infinite producer. Bounded ring of last-N offsets.
+- **TAIL-04** MEDIUM `tail_main.c:172` — a failed open aborts ALL follow (`-F missing` never waits; `-f present absent` refuses to follow present). Don't gate follow on exit_status.
+- **TAIL-05..10** LOW — rotation drops old-fd tail + unchecked fstat; backward block read treats EINTR/short as fatal; `-b +N` unchecked *512 overflow + `-s 0` busy-poll; directory operand not detected; INT64_MIN range-check UB; first follow header missing separating newline.
+- Solid: write_all short/EINTR; positive-side overflow guards; seekable paths 64-bit off_t with underflow clamp; pipe *byte* ring bounded; --pid array bounded.
+
+## printf  (bin/printf/printf.c)
+- **PRINTF-01** HIGH `printf.c:96-130` — infinite loop when FORMAT consumes no arg but args remain (`printf 'hello' x` hangs). Break when argi didn't advance.
+- **PRINTF-02** HIGH `printf.c:111-119` — 1-byte stack OOB: the `.` and conversion-char writes to `spec[32]` aren't bounds-guarded (only the flag/width loops are). Guard every write.
+- **PRINTF-03** MEDIUM `printf.c:60,65,73` — width/precision copied verbatim into `spec` → `printf '%999999999d'` huge-pad DoS. Parse+clamp.
+- **PRINTF-04** LOW-MED `printf.c:60,65` — numeric conversions ignore ERANGE/endptr; `'A` char-code form unimplemented.
+- **PRINTF-05/06** LOW — `*` width, `%b`, `%f`, `\xHH`, `\c` unimplemented; misc `%%`-with-flags/`%c` signed/missing-arg + unchecked writes.
+- Solid: `%n` can't reach real printf (validated conversion set); missing %s/%d args default safely; interp_escapes output ≤ input, octal capped, trailing-`\` handled.
+
+## touch  (bin/touch/touch.c)
+- **TOUCH-01** HIGH `touch.c:89-95` — `-t` fields used uninitialized when sscanf doesn't match all (`touch -t 1a2b3c4d f`) → UB / garbage timestamp. Check sscanf return / init.
+- **TOUCH-02** MEDIUM `touch.c:84-96,53-67` — no range validation of mm/dd/hh/mm before the hand-rolled epoch math (`touch -t 13322500 f`). Validate.
+- **TOUCH-03** MEDIUM `touch.c:153-157` — directories can't be touched (open O_WRONLY → EISDIR treated fatal). Handle EISDIR, fall through to utimensat.
+- **TOUCH-04..10** LOW — dead EEXIST branch; iso[24] truncation on wild fields; `-h` doesn't suppress creation / no O_NOFOLLOW; `-r` drops sub-second + follows link under `-h`; `-t` treated UTC not local; `ss` unvalidated; -d/-r/-t precedence by hardcoded order.
+- Solid: `-d @epoch` strtoll+endptr (64-bit time_t safe); parse_t buffer bounds-checked; -r stat checked; multi-operand exit status; -a/-m UTIME_OMIT correct.
+
+## tee  (bin/tee/tee.c)
+- **TEE-01** HIGH `tee.c:24` — raw `write(1,...)` ignores short writes/EINTR → silent data loss. Loop + retry EINTR.
+- **TEE-02** HIGH `tee.c:18` — `fopen` failure undiagnosed, exit stays 0 (POSIX violation). Check + perror + status 1.
+- **TEE-03** HIGH `tee.c:7,17` — fixed `files[10]` silently drops the 10th+ operand. malloc(argc).
+- **TEE-04..07** MED — read EINTR truncates input; fwrite/fclose returns unchecked; always `return 0`.
+- **TEE-08/09** MED/LOW — `-i`/`-p`/`--`/long-opts unimplemented (`-i` becomes a filename, no SIGINT ignore); fopen follows symlinks (no O_NOFOLLOW/mode control).
+- Solid: length-based writes (embedded NUL safe); NULL-guards on failed opens (no crash/fd-leak).
+
+## uniq  (bin/uniq/uniq.c)  + paste + sum
+- **UNIQ-01/PASTE-01** MEDIUM `uniq.c:123`, `paste.c:82` — line-buffer `cap*2` 32-bit overflow → wrap to 0 → heap overflow on a ≥2 GiB line. Overflow-check.
+- **UNIQ-02** MEDIUM `uniq.c:100-110` — str*cmp truncates at embedded NUL → wrong dedup on binary input. memcmp over min(len).
+- **UNIQ-03** MEDIUM `uniq.c:148,288` — output write/fclose errors ignored → data loss, exit 0.
+- **UNIQ-04/05/06/07** LOW — read errors/OOM treated as EOF; `-f/-s/-w` unvalidated atoi; `-c` int overflow.
+- **PASTE-02..03** LOW — read error == EOF (no ferror); FILE* leak on later open failure.
+- Solid (paste): delimiter cycling bounded; length-tracked; final fflush checks. **Solid (sum): no findings** — BSD/SysV checksums correct, uint64 counts, EINTR/short-read handled, unsigned-char, fds closed.
+
+## pwd / which / whoami
+- **PWD-01** HIGH `pwd.c:9-12` — returns exit 0 even when getcwd fails. **PWD-02** HIGH `pwd.c:10` — error printed to stdout (`cd $(pwd)` into "pwd: error"). **PWD-03/04/05** MED/LOW — 1024-byte buffer < PATH_MAX (ERANGE on deep cwd); `-L`/`-P` ignored; unchecked write.
+- **WHICH-01/02** LOW — getcwd-fail silently disables --show-dot; not-found dumps raw $PATH. Solid otherwise (exact-sized buffers, PATH strdup'd, freed).
+- **WHOAMI-01/02** LOW — pw_name NULL not guarded (puts(NULL) UB); unknown option → "extra operand". Solid: getpwuid(geteuid()) NULL checked, %s-safe, write checked.
+
+## w / who / uptime
+- **WHO-01/W-01** MEDIUM `who.c:55`, `w.c:188` — untrusted utmp `ut_host` (set by telnetd from the network peer) printed raw → terminal-escape injection into the operator's terminal. Filter non-printing bytes to `?`.
+- **UPTIME-01** LOW `uptime.c:44-47` — `count_users()` is a hardcoded `return 1` stub (always "1 user"); header comment lies.
+- **W-02..04, WHO-02/03** LOW/info — find_what() O(users×procs) /proc rescan; manual /proc/uptime parse; only exact `-b`/`-H`; no diagnostic on unreadable utmp.
+- Solid: `field()` helper memcpy's exactly UT_*SIZE into [SIZE+1]+NUL (no OOB); all buffers snprintf-bounded; localtime NULL-checked; %s-safe; fd/FILE closed.
+
+## nice / renice
+- **NICE-01** HIGH(correctness) `nice.c:20` — `setpriority` is COMMENTED OUT; `nice` is a silent no-op (`inc` parsed then discarded). Uncomment+check.
+- **NICE-02** HIGH `nice.c:9-12` — two-token `-n adj` form execs the numeric arg as the command (`nice -n 5 ls` runs "5"). Parse argv[2] when argv[1]=="-n".
+- **NICE-03/04** MED/LOW — wrong exit codes (should be 125/126/127; msgs to stdout); atoi adj no overflow/clamp.
+- **RENICE-01** MEDIUM `renice.c:67,98` — strtol overflow unchecked; a huge pid/uid truncates to an in-range id → renices the WRONG process/user. errno/ERANGE + range check.
+- **RENICE-02/03** LOW — trailing/empty `-p`/`-u` selector is a silent no-op exit 0; numeric id accepts negative via (id_t) wrap.
+- Solid (renice): getpwnam NULL-checked; getpriority -1 disambiguated; setpriority checked per-target; priority clamped; %ld formats.
+
+## wall / write
+- **WALL-01** HIGH `wall.c:91` — message written raw to every tty; no control-char sanitization → terminal-escape injection (retitle/clear/DECRQSS type-back/OSC52) to all users incl. root console. carefulputc-style escape.
+- **WALL-03** MEDIUM `wall.c:83-88` — `ut_line` only NUL-clamped, not validated; `ut_line="../../etc/passwd"` → open("/dev//../../etc/passwd") writes the body into an arbitrary file. Reject `/` and leading `.`.
+- **WALL-04** MEDIUM `wall.c:88` — open without O_NOFOLLOW / no isatty gate → symlink target redirection. Add O_NOFOLLOW + isatty check.
+- **WALL-02/05** LOW — read_message `cap-1` underflows if cap==0 + silent truncation; no privilege scoping / per-write result check.
+- **WRITE-01** HIGH(stub) `write.c` — 13-line stub: no utmp/tty/mesg/sanitization, hardcodes sender as "root" (spoofing). All security logic is a latent requirement.
+- Solid (wall): utmp filtered USER_PROCESS; ut_line NUL-terminated (no OOB read); fds closed.
+
+## Stubs / thin wrappers (no real attack surface as-is)
+- **od** — 25-line stub; `argv[1]` used verbatim as path (every flag → fopen fail); `offset` is 32-bit `long` (wraps at 2 GiB); read-error==success. Unimplemented.
+- **test** — 28-line stub; only `-f`/`-d`/`-e`; no `[`/`]`, no parser, no int/string ops; errors return 1 not 2. Unimplemented.
+- **split** — 10-line stub (`split: not implemented`, exit 0). Unimplemented.
+- **pgrep** — 9-line stub (`printf` only, exit 0). Unimplemented.
+- **newgrp** — 12-line stub (prints "not fully implemented", exit 0; commented-out ref logic is itself unsafe). Unimplemented.
+- **prof** — 6-line stub. **size** — stub (`argv[1]` never opened). **sync** — stub (global sync(); `-f`/`-d`/operands ignored). **nproc** — stub (always prints `1`; wrong on SMP → serializes `make -j$(nproc)`). **tc** — 6-line traffic-control stub. **tabs** — 7-line stub emitting `ESC c` (full RIS reset, not tab clear).
+- **yes** — repeats only argv[1] (not argv[1..]); no EPIPE/write-error handling (busy-spin if SIGPIPE ignored).
+- **vi** — clean 7-line wrapper → `exvi_main` (library link, no exec/path/argv hazard). Editor surface lives in `usr.lib/exvi/` (NOT audited here).
+- **umount** — clean 37-line `umount2(2)` wrapper (no -a/-l/mtab); minor argv[0] NULL-deref nit. **tty** — clean (ttyname NULL handled, POSIX exit codes). **uname** — sound (only `-a` omits `-o`, and memset-before-uname hardening nit). **reset** — clean (write_all, tcgetattr checked, sane termios). **ps**/**top** — well-built (kernel strlcpy's comm so no /proc parenthesized-comm bug; findings mostly LOW: type-pun cmdline read, terminal-escape of comm in top, ~512 KB top stack frame). **tr** — hardened OpenBSD tr (unsigned-char indexing safe; LOW: unchecked writes, `[c*n]` count int-truncation). **readlink** — sound (readlink NUL-terminated, ELOOP bounded; LOW: snprintf-truncation defeats ENAMETOOLONG guard). **time** — memory-safe (LOW: `-c`/`-t`/`-f` custom format emit nothing).
+
+## ping  (bin/ping/ping.c) — raw socket, likely setuid-root
+- **PING-01** CRITICAL `ping.c:264,316` — raw SOCK_RAW opened but privilege is NEVER dropped; the whole reply-parse loop consumes attacker packets as root. `setgid(getgid())`+`setuid(getuid())` right after socket().
+- **PING-02/03** LOW — `-s`/`-c`/`-i` via atoi/atol/strtod: negative/overflow unvalidated (`-s -4` wraps guard; `-c -5` → unlimited; `-i 0` → busy flood as root). strtol+range.
+- **PING-04** info — `-t ttl` parsed but never applied (setsockopt stub).
+- Solid: v4/v6 reply parsing is carefully bounds-checked (ihl validated before indexing; timestamp copy-out length-checked; short packets rejected); send buffer never overruns pkt[1500]; stats div-by-zero guarded; uint8_t fields; no format-string.
+
+## rmdir  (bin/rmdir/)
+- **RMDIR-01** HIGH `rmdir_parents.c:237-239` — `-p` leaves the top component of an absolute path (`rmdir -p /a/b/c` removes c,b but not a) and exits 0; inconsistent with `//a/b`. Only break when the path is exactly `/`.
+- **RMDIR-02** LOW `rmdir_opts.c:39` — leading `+` in optstring disables permutation (`rmdir dir -p` treats `-p` as a filename).
+- Solid: truncation loop always terminates; `/`//`//`/`.`/`..` protected; malloc'd paths + NUL; --ignore-fail-on-non-empty correct; fstatat AT_SYMLINK_NOFOLLOW; per-operand exit status.
+
+## Fix priority (batch 2)
+1. CRITICAL/privilege: PING-01 (drop priv), SU-01/02 (env sanitize + initgroups), PASSWD-01/02/03 (lock + checked writes + temp perms).
+2. HIGH memory-safety: PRINTF-01/02, TAIL-01, XARGS-01, TAR-01/02/03, SED-01/03/05, TEE-01/02/03, UNIQ-01/PASTE-01.
+3. HIGH correctness: NICE-01/02, RMDIR-01, PWD-01/02, KILL (done).
+4. Terminal-escape injection: WALL-01, WHO-01/W-01 (+ ut_line traversal WALL-03/04).
+5. Stubs (test/od/split/pgrep/nproc/sync/size/prof/tc/tabs/write/newgrp): implement or make honestly fail; out of scope for a bug-fix pass.
+6. awk (contrib): AWK-01/02/03 upstream — contrib patch, not a verbatim-tree edit.
