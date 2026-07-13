@@ -942,7 +942,11 @@ static int cp_copy_regular(struct cp_context *ctx,
     }
 
     if (ctx->opts->atomic_replace) {
-        if (cp_atomic_open_temp(dst, 0600, &tmp_path, &dst_fd) != 0) {
+        /* Create the temp with the source-derived mode (subject to umask via
+         * open), not a hardcoded 0600 — otherwise `cp foo bar` produced a
+         * 0600 file, dropping exec/group/other bits and ignoring the source
+         * mode + umask (CP-01). */
+        if (cp_atomic_open_temp(dst, create_mode, &tmp_path, &dst_fd) != 0) {
             cp_diag(ctx, src, dst, "create atomic temporary file", errno);
             goto out;
         }
