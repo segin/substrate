@@ -200,7 +200,12 @@ main(int argc, char **argv)
         perror("su: setgid");
         return 1;
     }
-    (void)initgroups(pw->pw_name, pw->pw_gid);
+    /* Must succeed before setuid: on failure the target shell would keep
+     * root's supplementary groups (e.g. gid 0/wheel) after the uid drop. */
+    if (initgroups(pw->pw_name, pw->pw_gid) != 0) {
+        perror("su: initgroups");
+        return 1;
+    }
     if (setuid(pw->pw_uid) != 0) {
         perror("su: setuid");
         return 1;
