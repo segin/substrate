@@ -154,6 +154,8 @@ static bool search(const char *name,
     char cwdbuf[4096];
     if (show_dot && (!tty_only || tty)) {
         cwd = getcwd(cwdbuf, sizeof(cwdbuf));
+        if (cwd == NULL)          /* don't silently drop --show-dot (WHICH-01) */
+            fprintf(stderr, "which: getcwd: %s\n", strerror(errno));
     }
     if (show_tilde && (!tty_only || tty)) {
         home = getenv("HOME");

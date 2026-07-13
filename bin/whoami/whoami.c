@@ -57,7 +57,10 @@ main(int argc, char **argv)
             }
             break;
         }
-        fprintf(stderr, "%s: extra operand '%s'\n", prog, a);
+        if (a[0] == '-' && a[1] != '\0')   /* an option, not an operand (WHOAMI-02) */
+            fprintf(stderr, "%s: unrecognized option '%s'\n", prog, a);
+        else
+            fprintf(stderr, "%s: extra operand '%s'\n", prog, a);
         fprintf(stderr, "Try '%s --help' for more information.\n", prog);
         return 1;
     }
@@ -78,6 +81,10 @@ main(int argc, char **argv)
         return 1;
     }
 
+    if (pw->pw_name == NULL) {          /* malformed entry: puts(NULL) is UB (WHOAMI-01) */
+        fprintf(stderr, "%s: no name for user ID %u\n", prog, (unsigned)euid);
+        return 1;
+    }
     if (puts(pw->pw_name) == EOF) {
         fprintf(stderr, "%s: write error: %s\n", prog, strerror(errno));
         return 1;
