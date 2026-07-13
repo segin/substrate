@@ -9,6 +9,7 @@
  *   dmesg            dump the kernel log
  *   dmesg -V         print version and exit
  */
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -44,7 +45,13 @@ int main(int argc, char **argv) {
         while (off < n) {
             ssize_t w = write(STDOUT_FILENO, buf + off, (size_t)(n - off));
             if (w < 0) {
+                if (errno == EINTR) continue;
                 perror("dmesg: write");
+                close(fd);
+                return 1;
+            }
+            if (w == 0) {          /* no progress: avoid an infinite loop (DMESG-02) */
+                fprintf(stderr, "dmesg: write: no progress\n");
                 close(fd);
                 return 1;
             }
@@ -56,6 +63,9 @@ int main(int argc, char **argv) {
         close(fd);
         return 1;
     }
-    close(fd);
+    if (close(fd) != 0) {          /* check close (DMESG-03) */
+        perror("dmesg: close");
+        return 1;
+    }
     return 0;
 }

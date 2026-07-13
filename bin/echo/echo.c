@@ -48,6 +48,10 @@ echo_print_version(void)
 static void
 echo_warn_write(const struct echo_options *options)
 {
+    /* A broken pipe (reader went away) is normal for a filter; exit quietly
+     * without a diagnostic, like a SIGPIPE death (ECHO-03). */
+    if (errno == EPIPE)
+        return;
     fprintf(stderr, "%s: write failed: %s\n", options->progname, strerror(errno));
 }
 

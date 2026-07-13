@@ -94,5 +94,11 @@ int main(int argc, char *argv[])
 		free(copy);
 	}
 
+	/* Report an output error (e.g. `dirname foo > /dev/full`) rather than
+	 * exiting 0 (DIRNAME-01). */
+	if (fflush(stdout) != 0 || ferror(stdout)) {
+		perror(progname);
+		return 1;
+	}
 	return 0;
 }
