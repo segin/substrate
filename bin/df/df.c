@@ -29,6 +29,7 @@
 #include <ctype.h>
 #include <errno.h>
 #include <getopt.h>
+#include <limits.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -376,7 +377,9 @@ int main(int argc, char **argv)
 		}
 	} else {
 		for (int i = optind; i < argc; i++) {
-			char resolved[1024];
+			/* realpath() may write up to PATH_MAX bytes; a 1024-byte
+			 * buffer overran the stack for deep paths (DF-01). */
+			char resolved[PATH_MAX];
 			if (!realpath(argv[i], resolved)) {
 				strlcpy(resolved, argv[i], sizeof resolved);
 			}
