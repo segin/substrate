@@ -38,34 +38,54 @@
 #define UTIME_OMIT ((1L << 30) - 2L)
 #endif
 
+/* Validate broken-down fields and convert to an epoch timespec.  Uses
+ * mktime(), so the fields are interpreted in the system's local time
+ * (POSIX touch semantics), not forced to UTC (TOUCH-04). */
+static int fields_to_ts(int Y, int M, int D, int h, int m, int sec,
+                        long nsec, struct timespec *out) {
+    /* Range-validate before any arithmetic (TOUCH-02/TOUCH-04). */
+    if (M < 1 || M > 12 || D < 1 || D > 31 ||
+        h < 0 || h > 23 || m < 0 || m > 59 || sec < 0 || sec > 61)
+        return -1;
+
+    struct tm tmv;
+    memset(&tmv, 0, sizeof tmv);
+    tmv.tm_year = Y - 1900;
+    tmv.tm_mon  = M - 1;
+    tmv.tm_mday = D;
+    tmv.tm_hour = h;
+    tmv.tm_min  = m;
+    tmv.tm_sec  = sec;
+    tmv.tm_isdst = -1;
+
+    time_t t = mktime(&tmv);
+    if (t == (time_t)-1)
+        return -1;
+    out->tv_sec  = t;
+    out->tv_nsec = nsec;
+    return 0;
+}
+
 static int parse_date(const char *s, struct timespec *out) {
     if (!s || !*s) return -1;
     out->tv_nsec = 0;
-    /* @<epoch> */
+    /* @<epoch> — absolute seconds since 1970 (TOUCH-01: check endptr). */
     if (s[0] == '@') {
         char *end;
+        errno = 0;
         long long v = strtoll(s + 1, &end, 10);
-        if (end == s + 1 || *end != '\0') return -1;
+        if (end == s + 1 || *end != '\0' || errno == ERANGE) return -1;
         out->tv_sec = (time_t)v;
         return 0;
     }
-    /* YYYY-MM-DD [T HH:MM:SS] — UTC.  */
+    /* YYYY-MM-DD [T|space HH:MM:SS] — local time. */
     int Y, M, D, h = 0, m = 0, sec = 0;
     int n = sscanf(s, "%d-%d-%dT%d:%d:%d", &Y, &M, &D, &h, &m, &sec);
     if (n < 3) {
         n = sscanf(s, "%d-%d-%d %d:%d:%d", &Y, &M, &D, &h, &m, &sec);
-        if (n < 3) return -1;
+        if (n < 3) return -1;                 /* need at least Y-M-D (TOUCH-01) */
     }
-    /* civil_from_fields → epoch (Howard Hinnant).  */
-    Y -= (M <= 2);
-    long era = (Y >= 0 ? Y : Y - 399) / 400;
-    unsigned yoe = (unsigned)(Y - era * 400);
-    unsigned doy = (153 * (unsigned)(M > 2 ? M - 3 : M + 9) + 2) / 5 + (unsigned)D - 1;
-    unsigned doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    long long days = era * 146097LL + (long long)doe - 719468LL;
-    long long secs = days * 86400LL + h * 3600LL + m * 60LL + sec;
-    out->tv_sec = (time_t)secs;
-    return 0;
+    return fields_to_ts(Y, M, D, h, m, sec, 0, out);
 }
 
 static int parse_t(const char *s, struct timespec *out) {
@@ -76,27 +96,31 @@ static int parse_t(const char *s, struct timespec *out) {
     const char *dot = strchr(s, '.');
     if (dot) {
         if (dot - s != (long)len - 3) return -1;
-        ss = atoi(dot + 1);
+        /* Validate the two seconds digits (TOUCH-04: ss unchecked). */
+        if (dot[1] < '0' || dot[1] > '9' || dot[2] < '0' || dot[2] > '9')
+            return -1;
+        ss = (dot[1] - '0') * 10 + (dot[2] - '0');
         len -= 3;
     }
     if (len > sizeof(buf) - 1) return -1;
     memcpy(buf, s, len); buf[len] = '\0';
-    int Y, M, D, h, m;
+    int Y, M, D, h, m, nread;
     if (len == 8) {
         time_t now = time(NULL); struct tm tmv;
-        if (!gmtime_r(&now, &tmv)) return -1;
+        if (!localtime_r(&now, &tmv)) return -1;
         Y = tmv.tm_year + 1900;
-        sscanf(buf, "%2d%2d%2d%2d", &M, &D, &h, &m);
+        nread = sscanf(buf, "%2d%2d%2d%2d", &M, &D, &h, &m);
+        if (nread != 4) return -1;            /* TOUCH-01: reject partial */
     } else if (len == 10) {
         int YY;
-        sscanf(buf, "%2d%2d%2d%2d%2d", &YY, &M, &D, &h, &m);
+        nread = sscanf(buf, "%2d%2d%2d%2d%2d", &YY, &M, &D, &h, &m);
+        if (nread != 5) return -1;
         Y = (YY < 69 ? 2000 + YY : 1900 + YY);
     } else if (len == 12) {
-        sscanf(buf, "%4d%2d%2d%2d%2d", &Y, &M, &D, &h, &m);
+        nread = sscanf(buf, "%4d%2d%2d%2d%2d", &Y, &M, &D, &h, &m);
+        if (nread != 5) return -1;
     } else return -1;
-    char iso[24];
-    snprintf(iso, sizeof(iso), "%04d-%02d-%02dT%02d:%02d:%02d", Y, M, D, h, m, ss);
-    return parse_date(iso, out);
+    return fields_to_ts(Y, M, D, h, m, ss, 0, out);
 }
 
 int main(int argc, char **argv) {
@@ -127,9 +151,12 @@ int main(int argc, char **argv) {
 
     if (ref) {
         struct stat st;
-        if (stat(ref, &st) != 0) { perror(ref); return 1; }
-        ts[0].tv_sec = st.st_atime; ts[0].tv_nsec = 0;
-        ts[1].tv_sec = st.st_mtime; ts[1].tv_nsec = 0;
+        /* With -h, take the times of the symlink itself (TOUCH-04). */
+        int r = no_follow ? lstat(ref, &st) : stat(ref, &st);
+        if (r != 0) { perror(ref); return 1; }
+        /* Preserve sub-second resolution (TOUCH-04: don't drop nsec). */
+        ts[0].tv_sec = st.st_atime; ts[0].tv_nsec = st.st_atime_nsec;
+        ts[1].tv_sec = st.st_mtime; ts[1].tv_nsec = st.st_mtime_nsec;
     } else if (date_str) {
         struct timespec t;
         if (parse_date(date_str, &t) != 0) {
@@ -149,10 +176,18 @@ int main(int argc, char **argv) {
 
     int rc_all = 0;
     for (int i = optind; i < argc; i++) {
-        if (!no_create) {
+        if (!no_create && !no_follow) {
+            /* Create the file if it doesn't exist.  O_CREAT without
+             * O_EXCL never yields EEXIST, so the old EEXIST test was
+             * dead (TOUCH-04); the real "already exists" cases are a
+             * successful open (regular file) or EISDIR (a directory) —
+             * both mean "exists, just set its times" (TOUCH-03).  With
+             * -h we skip the create probe entirely: touch can't create
+             * a symlink, and O_WRONLY would follow one to its target. */
             int fd = open(argv[i], O_WRONLY | O_CREAT, 0666);
-            if (fd >= 0) close(fd);
-            else if (errno != EEXIST) {
+            if (fd >= 0) {
+                close(fd);
+            } else if (errno != EISDIR) {
                 perror(argv[i]); rc_all = 1; continue;
             }
         }
