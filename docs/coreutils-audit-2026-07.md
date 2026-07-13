@@ -11,12 +11,16 @@
 > and the stub utilities (nproc, sync, umount, test/[, od, split, pgrep,
 > prof, size, tc, newgrp, write).
 >
+> **chown/chgrp fd-relative `-R` descent** (CHOWN-01/07/08,
+> CHGRP-01/02/05/06, CHOWN-10/11+CHGRP-08/09) — **FIXED** (2026-07): both
+> tools were converted to the `rm` `openat`/`fstatat`/`fchownat` model
+> (subdirs opened `O_DIRECTORY|O_NOFOLLOW`, now kernel-enforced), plus a
+> recursion/fd cap, an ancestor-only cycle set, a `path_join` size_t-wrap
+> guard, and real `-v`/`-c`. This required two kernel fixes:
+> `O_NOFOLLOW`/`O_DIRECTORY` enforcement in the open path, and honoring
+> `dirfd` in `sys_fchownat`'s follow branch. Boot-verified.
+>
 > **Deferred (documented, not fixed):**
-> - **chown/chgrp fd-relative `-R` descent** (CHOWN-01/07/08,
->   CHGRP-01/02/05/06, CHOWN-10/11+CHGRP-08/09) — the shared TOCTOU
->   conversion onto the `rm` `openat`/`fstatat`/`fchownat` model needs a
->   boot-tested rewrite; the named-spec parsing, `--reference` no-op, and
->   errno/range fixes for these tools have landed.
 > - **awk AWK-01/02/03** — genuine upstream bugs in the directly-vendored
 >   `contrib/onetrueawk` tree (compiled verbatim; editing it in place is
 >   forbidden by project directive); require pathological inputs. AWK-04/05
