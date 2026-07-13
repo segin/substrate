@@ -209,11 +209,13 @@ rm_split_path(const char *path, char **parent_out, char **name_out,
 
     trimmed = rm_dup_range(path, length);
     if (trimmed == NULL) {
+        errno = ENOMEM;                 /* RM-10 */
         return -1;
     }
     *display_out = rm_dup_range(trimmed, strlen(trimmed));
     if (*display_out == NULL) {
         free(trimmed);
+        errno = ENOMEM;                 /* RM-10 */
         return -1;
     }
 
@@ -247,6 +249,7 @@ rm_split_path(const char *path, char **parent_out, char **name_out,
         *parent_out = NULL;
         *name_out = NULL;
         *display_out = NULL;
+        errno = ENOMEM;                 /* RM-10 */
         return -1;
     }
     return 0;

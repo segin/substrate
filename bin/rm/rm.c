@@ -51,6 +51,11 @@ static int rm_confirm_once(const struct rm_options *opts, int argc, int first)
 
     if (!need) return 0;
 
+    /* -I prompts only on a terminal; a non-tty (script) stdin proceeds
+     * rather than reading EOF and silently doing nothing (RM-07). */
+    if (!isatty(STDIN_FILENO))
+        return 0;
+
     fprintf(stderr,
         "%s: remove %d argument%s%s? ",
         opts->progname,
@@ -133,6 +138,10 @@ int main(int argc, char *argv[])
             rc = 1;
         }
     }
+
+    /* An interrupted run left work undone; don't report success (RM-09). */
+    if (g_interrupted && rc == 0)
+        rc = 1;
 
     return rc;
 }
