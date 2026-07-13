@@ -14,6 +14,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #include <fcntl.h>
 
@@ -81,6 +82,11 @@ process_files(int argc, char **argv, int optind)
                 continue;
             }
 
+            /* Capture the original's mode/owner so the replacement can
+             * preserve them (SED-04) rather than inherit mkstemp's 0600. */
+            struct stat orig_st;
+            int have_st = (fstat(fileno(fp), &orig_st) == 0);
+
             /* build temp filename */
             size_t nlen = strlen(name);
             char *tmpname = malloc(nlen + 16);
@@ -108,10 +114,11 @@ process_files(int argc, char **argv, int optind)
                 free(tmpname); fclose(fp); ret = 1; continue;
             }
 
-            /* Save and redirect stdout to temp file */
+            /* Flush the real stdout BEFORE redirecting, otherwise pending
+             * output would be written into the temp file (SED-07). */
+            fflush(stdout);
             int saved_stdout_fd = dup(STDOUT_FILENO);
             dup2(fileno(tmpfp), STDOUT_FILENO);
-            fflush(stdout);
 
             if (G.separate) {
                 /* reset ranges per-file */
@@ -122,14 +129,30 @@ process_files(int argc, char **argv, int optind)
             }
 
             int r = sed_process_file(fp, name, i == argc - 1);
-            fflush(stdout);
+
+            /* Detect any write error to the temp before committing it over
+             * the original: a silent ENOSPC would otherwise rename a
+             * truncated temp and lose the file (SED-03). */
+            int werr = (fflush(stdout) != 0) || ferror(stdout);
 
             /* restore stdout */
             dup2(saved_stdout_fd, STDOUT_FILENO);
             close(saved_stdout_fd);
-            fclose(tmpfp);
+
+            /* Preserve the original mode/owner (SED-04) and force the data to
+             * disk before the rename commits it. */
+            if (have_st) {
+                (void)fchmod(fileno(tmpfp), orig_st.st_mode & 07777);
+                (void)fchown(fileno(tmpfp), orig_st.st_uid, orig_st.st_gid);
+            }
+            if (fsync(fileno(tmpfp)) != 0) werr = 1;
+            if (fclose(tmpfp) != 0) werr = 1;
             fclose(fp);
 
+            if (werr) {
+                warn("write error on '%s'; original left unchanged", name);
+                unlink(tmpname); free(tmpname); ret = 1; continue;
+            }
             if (r != 0 && r != G.exit_code) {
                 unlink(tmpname); free(tmpname); ret = r; continue;
             }
