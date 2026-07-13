@@ -20,10 +20,21 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/pwdb.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <termios.h>
 #include <unistd.h>
+
+/* Overwrite a buffer so the compiler cannot elide the clear (no
+ * explicit_bzero on this target). */
+static void
+secure_zero(void *p, size_t n)
+{
+    volatile unsigned char *v = p;
+    while (n--)
+        *v++ = 0;
+}
 
 #define PW_MAX 128
 
@@ -97,77 +108,101 @@ read_shadow_file(size_t *out_len)
     return buf;
 }
 
-/* Replace the password field (between the 1st and 2nd colon) of
- * `user`'s row with `newpw`.  Returns 0 on success, -1 if the user
- * has no row. */
+struct rewrite_ctx {
+    const char *in;
+    const char *user;
+    const char *newpw;
+    int         found;
+};
+
+/* Emit `n` bytes, propagating a short/failed write as an error. */
 static int
-rewrite_shadow(const char *user, const char *newpw)
+emit(FILE *out, const char *data, size_t n)
 {
-    size_t in_len = 0;
-    char  *in = read_shadow_file(&in_len);
-    char  *p;
-    char  *line_start;
-    FILE  *out;
-    size_t ulen = strlen(user);
-    int    found = 0;
+    return (n == 0 || fwrite(data, 1, n, out) == n) ? 0 : -1;
+}
 
-    if (in == NULL) {
-        return -1;
-    }
+/* pwdb_atomic_rewrite callback: copy the shadow contents, replacing the
+ * password field of `user`'s row. Every write is checked; returns -1 (which
+ * makes pwdb_atomic_rewrite unlink the temp and NOT rename) if the user is
+ * not found or any write fails. */
+static int
+rewrite_shadow_cb(FILE *out, void *arg)
+{
+    struct rewrite_ctx *ctx = arg;
+    size_t      ulen = strlen(ctx->user);
+    const char *p = ctx->in;
 
-    out = fopen("/etc/shadow.new", "w");
-    if (out == NULL) {
-        free(in);
-        return -1;
-    }
-
-    /* Walk lines.  When we find user's row, rewrite the password
-     * field; otherwise copy verbatim. */
-    p = in;
     while (*p != '\0') {
-        line_start = p;
+        const char *line_start = p;
         while (*p != '\0' && *p != '\n') {
             p++;
         }
-        /* `line_start..p` is one line (no trailing \n). */
-        if (!found &&
+        if (!ctx->found &&
             (size_t)(p - line_start) > ulen &&
-            strncmp(line_start, user, ulen) == 0 &&
+            strncmp(line_start, ctx->user, ulen) == 0 &&
             line_start[ulen] == ':') {
-            char *colon2 = strchr(line_start + ulen + 1, ':');
+            const char *colon2 = strchr(line_start + ulen + 1, ':');
             if (colon2 == NULL || colon2 > p) {
-                /* malformed — copy verbatim */
-                fwrite(line_start, 1, (size_t)(p - line_start), out);
+                if (emit(out, line_start, (size_t)(p - line_start)) != 0)
+                    return -1;
             } else {
-                fwrite(line_start, 1, ulen + 1, out);
-                fputs(newpw, out);
-                fwrite(colon2, 1, (size_t)(p - colon2), out);
+                if (emit(out, line_start, ulen + 1) != 0 ||
+                    emit(out, ctx->newpw, strlen(ctx->newpw)) != 0 ||
+                    emit(out, colon2, (size_t)(p - colon2)) != 0)
+                    return -1;
             }
-            found = 1;
+            ctx->found = 1;
         } else {
-            fwrite(line_start, 1, (size_t)(p - line_start), out);
+            if (emit(out, line_start, (size_t)(p - line_start)) != 0)
+                return -1;
         }
         if (*p == '\n') {
-            fputc('\n', out);
+            if (fputc('\n', out) == EOF)
+                return -1;
             p++;
         }
     }
+    /* Refuse the rewrite (unlink temp, no rename) if the user was absent,
+     * so a not-found never truncates or replaces /etc/shadow. */
+    return ctx->found ? 0 : -1;
+}
 
-    fclose(out);
+/* Replace the password field of `user`'s row with `newpw`.  Returns 0 on
+ * success, -1 on failure. Holds the passwd-DB lock across the read and the
+ * atomic rewrite so concurrent passwd/useradd cannot lose an update
+ * (PASSWD-01); pwdb_atomic_rewrite does the O_EXCL 0640 temp + fsync +
+ * checked writes + rename, unlinking on any failure (PASSWD-02/03). */
+static int
+rewrite_shadow(const char *user, const char *newpw)
+{
+    int    lockfd = pwdb_lock();
+    size_t in_len = 0;
+    char  *in;
+    struct rewrite_ctx ctx;
+    int    rc;
+
+    if (lockfd < 0) {
+        return -1;
+    }
+    in = read_shadow_file(&in_len);
+    if (in == NULL) {
+        pwdb_unlock(lockfd);
+        return -1;
+    }
+
+    ctx.in = in;
+    ctx.user = user;
+    ctx.newpw = newpw;
+    ctx.found = 0;
+
+    rc = pwdb_atomic_rewrite("/etc/shadow", 0640, rewrite_shadow_cb, &ctx);
+
+    /* Scrub the buffer: it held every user's hash. */
+    secure_zero(in, in_len);
     free(in);
-
-    if (!found) {
-        unlink("/etc/shadow.new");
-        return -1;
-    }
-
-    /* Atomic-ish swap: rename .new over the original.  Substrate's
-     * rename takes care of the directory entry replacement. */
-    if (rename("/etc/shadow.new", "/etc/shadow") != 0) {
-        return -1;
-    }
-    chmod("/etc/shadow", 0640);
-    return 0;
+    pwdb_unlock(lockfd);
+    return rc;
 }
 
 static const char *
