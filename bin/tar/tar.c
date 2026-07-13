@@ -536,15 +536,25 @@ static int pax_parse(const char *blob, size_t len, struct pax_state *ps) {
         if (j >= len) break;
         int rec = atoi(blob + i);
         if (rec <= 0 || i + (size_t)rec > len) return -1;
+        /*
+         * The record is "<len> <key>=<value>\n"; the "<len> " prefix is
+         * (j+1-i) bytes.  A record whose declared length is <= the prefix
+         * (e.g. "1 =\n") would make n = rec - prefix underflow to a huge
+         * size_t and memchr/strndup over-read far past the blob (TAR-03).
+         * Require room for the prefix plus at least "=\n".
+         */
+        size_t plen = (size_t)(j + 1 - i);
+        if ((size_t)rec <= plen || (size_t)rec - plen < 2) return -1;
         const char *s = blob + j + 1;
-        size_t n = (size_t)rec - (j + 1 - i);
+        size_t n = (size_t)rec - plen;
         const char *eq = memchr(s, '=', n);
         if (!eq) return -1;
         size_t klen = (size_t)(eq - s);
+        if (n < klen + 2) return -1;            /* guard vlen underflow */
         size_t vlen = n - klen - 2;
         char key[64];
-        if (klen >= sizeof(key)) klen = sizeof(key) - 1;
-        memcpy(key, s, klen); key[klen] = 0;
+        size_t kcopy = klen >= sizeof(key) ? sizeof(key) - 1 : klen;
+        memcpy(key, s, kcopy); key[kcopy] = 0;
         char *v = strndup(eq + 1, vlen);
         if (!v) return -1;
         if (!strcmp(key, "path")) { free(ps->path); ps->path = v; }
