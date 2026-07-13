@@ -441,19 +441,6 @@ static int write_eoa(FILE *out) {
     return wr(out, z, TAR_BLOCK) || wr(out, z, TAR_BLOCK) ? -1 : 0;
 }
 
-static int ensure_parents(const char *path) {
-    char tmp[PATH_MAX]; strlcpy(tmp, path, sizeof(tmp));
-    for (char *p = tmp + 1; *p; p++) if (*p == '/') {
-        *p = 0;
-        struct stat st;
-        if (!lstat(tmp, &st)) {
-            if (opt.keep_directory_symlink && S_ISLNK(st.st_mode)) { errno = ELOOP; return -1; }
-        } else if (mkdir(tmp, 0777) && errno != EEXIST) return -1;
-        *p = '/';
-    }
-    return 0;
-}
-
 static char *map_extract_path(const char *in) {
     while (*in == '/') in++;
     char *dup = strdup(in);
@@ -472,17 +459,57 @@ static char *map_extract_path(const char *in) {
     return out;
 }
 
-static int extract_reg(FILE *in, const char *path, off_t size) {
+/*
+ * Open the directory that will hold `relpath`'s final component, walking one
+ * component at a time from the pinned extraction-root fd with
+ * O_DIRECTORY|O_NOFOLLOW so that NO symlink in any intermediate component can
+ * redirect the operation outside the extraction root (TAR-01).  Intermediate
+ * directories are created with mkdirat.  On success returns a dirfd the caller
+ * must close and copies the final path component into leaf[leafsz].  `relpath`
+ * must already be root-relative and free of "../" (map_extract_path).
+ */
+static int open_parent_dir(int rootfd, const char *relpath, char *leaf, size_t leafsz)
+{
+    int dirfd = dup(rootfd);
+    const char *p = relpath;
+    if (dirfd < 0) return -1;
+    while (*p == '/') p++;
+    for (;;) {
+        const char *slash = strchr(p, '/');
+        if (!slash) {
+            if (*p == '\0' || !strcmp(p, ".") || !strcmp(p, "..")) {
+                close(dirfd); errno = EINVAL; return -1;
+            }
+            if (strlcpy(leaf, p, leafsz) >= leafsz) {
+                close(dirfd); errno = ENAMETOOLONG; return -1;
+            }
+            return dirfd;
+        }
+        size_t clen = (size_t)(slash - p);
+        if (clen == 0) { p = slash + 1; continue; }   /* collapse // */
+        if (clen > NAME_MAX) { close(dirfd); errno = ENAMETOOLONG; return -1; }
+        char comp[NAME_MAX + 1];
+        memcpy(comp, p, clen); comp[clen] = '\0';
+        if (!strcmp(comp, "..")) { close(dirfd); errno = EINVAL; return -1; }
+        if (strcmp(comp, ".") != 0) {
+            int nfd;
+            if (mkdirat(dirfd, comp, 0777) && errno != EEXIST) { close(dirfd); return -1; }
+            nfd = openat(dirfd, comp, O_DIRECTORY | O_NOFOLLOW | O_RDONLY);
+            if (nfd < 0) { close(dirfd); return -1; }   /* symlink component => ELOOP */
+            close(dirfd); dirfd = nfd;
+        }
+        p = slash + 1;
+    }
+}
+
+static int extract_reg_at(FILE *in, int dirfd, const char *leaf, off_t size) {
     int fd = -1;
-    if (!(opt.no_overwrite && access(path, F_OK) == 0)) {
-        if (ensure_parents(path)) return -1;
-        /* Remove any existing entry at the destination first so a
-         * pre-planted symlink (from an earlier archive member) is not
-         * followed and truncated through — the classic archive symlink
-         * traversal.  O_NOFOLLOW is belt-and-suspenders for hosts whose
-         * open(2) honours it. */
-        unlink(path);
-        fd = open(path, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW, 0666);
+    if (!(opt.no_overwrite && faccessat(dirfd, leaf, F_OK, 0) == 0)) {
+        /* Remove any existing entry (a pre-planted symlink from an earlier
+         * member) then create with O_NOFOLLOW so the final component is never
+         * followed either — the classic archive symlink traversal. */
+        unlinkat(dirfd, leaf, 0);
+        fd = openat(dirfd, leaf, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW, 0666);
         if (fd < 0) return -1;
     }
     unsigned char b[TAR_BLOCK];
@@ -544,6 +571,14 @@ static int process_read(FILE *in, bool extract) {
     int zeros = 0;
     int dbg = getenv("TAR_DEBUG") != NULL;
     long total_read = 0;
+    /* Pin the extraction root (cwd, after any -C).  Every member is written
+     * relative to this fd via a per-component O_NOFOLLOW walk so no symlink
+     * planted by an earlier member can redirect a write outside it. */
+    int rootfd = -1;
+    if (extract) {
+        rootfd = open(".", O_RDONLY | O_DIRECTORY);
+        if (rootfd < 0) { pax_reset(&ps); return -1; }
+    }
     while (1) {
         struct tar_header h;
         if (dbg) fprintf(stderr, "tar: reading header (total=%ld)\n", total_read);
@@ -589,48 +624,103 @@ static int process_read(FILE *in, bool extract) {
             continue;
         }
 
+        char tf = h.typeflag ? h.typeflag : '0';
         char *target = map_extract_path(entry);
-        if (!target) { fprintf(stderr, "tar: unsafe path rejected: %s\n", entry); if (skip_padded(in, hsize)) return -1; pax_reset(&ps); continue; }
+        if (!target) {
+            fprintf(stderr, "tar: unsafe path rejected: %s\n", entry);
+            if (tf != '5' && skip_padded(in, hsize)) { close(rootfd); return -1; }
+            pax_reset(&ps); continue;
+        }
 
-        switch (h.typeflag ? h.typeflag : '0') {
+        /* Trim a directory member's trailing '/', and skip the archive's
+         * "." / "" root entry — it needs no creation and has no leaf. */
+        size_t tl = strlen(target);
+        while (tl > 1 && target[tl - 1] == '/') target[--tl] = '\0';
+        if (!strcmp(target, ".") || target[0] == '\0') {
+            free(target);
+            if (tf != '5' && skip_padded(in, hsize)) { close(rootfd); return -1; }
+            pax_reset(&ps); continue;
+        }
+
+        char leaf[NAME_MAX + 1];
+        int pdir = open_parent_dir(rootfd, target, leaf, sizeof(leaf));
+        if (pdir < 0) {
+            fprintf(stderr, "tar: %s: %s\n", target, strerror(errno));
+            free(target);
+            if (tf != '5' && skip_padded(in, hsize)) { close(rootfd); return -1; }
+            pax_reset(&ps); continue;
+        }
+
+        switch (tf) {
             case '5':
-                if (mkdir(target, 0777) && errno != EEXIST) perror(target);
+                if (mkdirat(pdir, leaf, 0777) && errno != EEXIST) perror(target);
                 break;
-            case '2':
-                if (!opt.no_overwrite || access(target, F_OK)) {
-                    if (ensure_parents(target)) { perror(target); }
-                    else { unlink(target); if (symlink(ps.linkpath ? ps.linkpath : h.linkname, target)) perror(target); }
+            case '2': {   /* symlink: leaf itself may be replaced, never followed */
+                const char *lt = ps.linkpath ? ps.linkpath : h.linkname;
+                if (!opt.no_overwrite || faccessat(pdir, leaf, F_OK, AT_SYMLINK_NOFOLLOW)) {
+                    unlinkat(pdir, leaf, 0);
+                    if (symlinkat(lt, pdir, leaf)) perror(target);
                 }
-                if (skip_padded(in, hsize)) return -1;
+                if (skip_padded(in, hsize)) { close(pdir); free(target); close(rootfd); return -1; }
                 break;
-            case '1':
-                if (!opt.no_overwrite || access(target, F_OK)) {
-                    if (ensure_parents(target)) { perror(target); }
-                    else { unlink(target); if (link(ps.linkpath ? ps.linkpath : h.linkname, target)) perror(target); }
+            }
+            case '1': {   /* hardlink: confine the source to the extraction root (TAR-02) */
+                const char *lt = ps.linkpath ? ps.linkpath : h.linkname;
+                /*
+                 * The old code passed linkname to link() verbatim, so a member
+                 * with linkname=/etc/shadow created a hardlink to the victim
+                 * inode which the following chmod/chown then rewrote (root
+                 * priv-esc).  Reject absolute / ".." link sources via the same
+                 * path mapper used for member names, and prove — with an
+                 * O_NOFOLLOW component walk — that neither the source nor the
+                 * destination path contains a symlink component before calling
+                 * link() (there is no native linkat to do this fd-relative).
+                 */
+                char *src = map_extract_path(lt);
+                if (!src) {
+                    fprintf(stderr, "tar: unsafe hardlink target rejected: %s\n", lt);
+                } else {
+                    char sleaf[NAME_MAX + 1];
+                    int sdir = open_parent_dir(rootfd, src, sleaf, sizeof(sleaf));
+                    if (sdir < 0) { perror(src); }
+                    else {
+                        close(sdir);           /* walk succeeded: no symlink components */
+                        if (!opt.no_overwrite || faccessat(pdir, leaf, F_OK, AT_SYMLINK_NOFOLLOW)) {
+                            unlinkat(pdir, leaf, 0);
+                            if (link(src, target)) perror(target);
+                        }
+                    }
+                    free(src);
                 }
-                if (skip_padded(in, hsize)) return -1;
+                if (skip_padded(in, hsize)) { close(pdir); free(target); close(rootfd); return -1; }
                 break;
+            }
             default:
-                if (extract_reg(in, target, size)) perror(target);
+                if (extract_reg_at(in, pdir, leaf, size)) perror(target);
                 break;
         }
 
-        if (opt.preserve_permissions) chmod(target, (mode_t)oct2i(h.mode, sizeof(h.mode)) & 07777);
+        /* Metadata via *at on the pinned parent — never re-traverses the path
+         * and never follows a symlink member (chmod skipped for symlinks). */
+        if (opt.preserve_permissions && tf != '2')
+            fchmodat(pdir, leaf, (mode_t)oct2i(h.mode, sizeof(h.mode)) & 07777, 0);
         if (!opt.no_same_owner) {
-            if (lchown(target, (uid_t)(ps.uid >= 0 ? ps.uid : oct2i(h.uid, sizeof(h.uid))),
-                       (gid_t)(ps.gid >= 0 ? ps.gid : oct2i(h.gid, sizeof(h.gid)))) < 0) {
-                // ignore
-            }
+            fchownat(pdir, leaf,
+                     (uid_t)(ps.uid >= 0 ? ps.uid : oct2i(h.uid, sizeof(h.uid))),
+                     (gid_t)(ps.gid >= 0 ? ps.gid : oct2i(h.gid, sizeof(h.gid))),
+                     AT_SYMLINK_NOFOLLOW);
         }
         struct timespec ts[2] = {{0}};
         ts[0].tv_sec = oct2i(h.mtime, sizeof(h.mtime));
         ts[1].tv_sec = ps.mtime >= 0 ? ps.mtime : oct2i(h.mtime, sizeof(h.mtime));
-        utimensat(AT_FDCWD, target, ts, AT_SYMLINK_NOFOLLOW);
+        utimensat(pdir, leaf, ts, AT_SYMLINK_NOFOLLOW);
 
+        close(pdir);
         free(target);
         pax_reset(&ps);
     }
     pax_reset(&ps);
+    if (rootfd >= 0) close(rootfd);
     return 0;
 }
 
