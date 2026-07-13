@@ -34,6 +34,7 @@
 
 #include <assert.h>
 #include <errno.h>
+#include <limits.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -273,8 +274,15 @@ genseq(STR *s)
 		break;
 	default:
 		if (isdigit(*s->str)) {
-			s->cnt = strtol((char *)s->str, &ep, 0);
+			long v;
+			errno = 0;
+			v = strtol((char *)s->str, &ep, 0);
 			if (*ep == ']') {
+				/* The count is stored in an int; reject a value that
+				 * would overflow/negate rather than truncate (TR). */
+				if (errno == ERANGE || v < 0 || v > INT_MAX)
+					errx(1, "repeat count out of range");
+				s->cnt = (int)v;
 				s->str = (unsigned char *)ep + 1;
 				break;
 			}
