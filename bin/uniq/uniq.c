@@ -30,6 +30,7 @@
 
 #include <ctype.h>
 #include <errno.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -72,43 +73,60 @@ skip_n_fields(const char *s, int n)
     return s;
 }
 
-static const char *
-compare_view(const char *s, const uniq_opts_t *o)
+static void
+compare_view(const char *s, size_t slen, const uniq_opts_t *o,
+             const char **vp, size_t *vlen)
 {
+    const char *start = s;
     if (o->skip_fields > 0) s = skip_n_fields(s, o->skip_fields);
     if (o->skip_chars > 0) {
         int i;
         for (i = 0; i < o->skip_chars && *s; i++) s++;
     }
-    return s;
+    size_t off = (size_t)(s - start);
+    *vp = s;
+    *vlen = off <= slen ? slen - off : 0;
 }
 
+/* Compare using the byte lengths, not strcmp — an embedded NUL in a line
+ * (binary input) must not truncate the comparison (UNIQ-02). */
 static int
-lines_equal(const char *a, const char *b, const uniq_opts_t *o)
+lines_equal(const char *a, size_t alen, const char *b, size_t blen,
+            const uniq_opts_t *o)
 {
-    a = compare_view(a, o);
-    b = compare_view(b, o);
+    const char *va, *vb;
+    size_t la, lb;
+    compare_view(a, alen, o, &va, &la);
+    compare_view(b, blen, o, &vb, &lb);
     if (o->width > 0) {
-        if (o->icase) {
-            for (int i = 0; i < o->width; i++) {
-                int ca = (a[i] != '\0') ? tolower((unsigned char)a[i]) : 0;
-                int cb = (b[i] != '\0') ? tolower((unsigned char)b[i]) : 0;
-                if (ca != cb) return 0;
-                if (ca == 0) return 1;
-            }
-            return 1;
-        }
-        return strncmp(a, b, (size_t)o->width) == 0;
+        size_t w = (size_t)o->width;
+        if (la > w) la = w;
+        if (lb > w) lb = w;
     }
+    if (la != lb) return 0;
     if (o->icase) {
-        while (*a && *b) {
-            if (tolower((unsigned char)*a) != tolower((unsigned char)*b))
+        for (size_t i = 0; i < la; i++)
+            if (tolower((unsigned char)va[i]) != tolower((unsigned char)vb[i]))
                 return 0;
-            a++; b++;
-        }
-        return *a == *b;
+        return 1;
     }
-    return strcmp(a, b) == 0;
+    return memcmp(va, vb, la) == 0;
+}
+
+/* Parse a non-negative count operand, rejecting garbage/negatives/overflow
+ * instead of atoi's silent 0 (UNIQ-05/06). */
+static int
+parse_count(const char *s)
+{
+    char *e;
+    long  v;
+    errno = 0;
+    v = strtol(s, &e, 10);
+    if (e == s || *e != '\0' || errno == ERANGE || v < 0 || v > INT_MAX) {
+        fprintf(stderr, "%s: invalid count: %s\n", progname, s);
+        exit(2);
+    }
+    return (int)v;
 }
 
 static int
@@ -144,11 +162,11 @@ read_line(FILE *f, char **out, size_t *out_len, int term)
 }
 
 static void
-emit(FILE *out, const char *line, size_t len, int count,
+emit(FILE *out, const char *line, size_t len, long count,
      const uniq_opts_t *o)
 {
     if (o->count) {
-        fprintf(out, "%4d ", count);
+        fprintf(out, "%4ld ", count);
     }
     fwrite(line, 1, len, out);
     fputc(o->z_terminated ? '\0' : '\n', out);
@@ -163,7 +181,7 @@ main(int argc, char **argv)
     FILE *out  = stdout;
     char *cur = NULL, *prev = NULL;
     size_t cur_len = 0, prev_len = 0;
-    int    count = 0;
+    long   count = 0;
     int    first_group = 1;
     int    term;
 
@@ -201,17 +219,17 @@ main(int argc, char **argv)
                 case 'D': o.print_all_dup = 1; break;
                 case 'z': o.z_terminated = 1; break;
                 case 'f':
-                    if (p[1] != '\0') { o.skip_fields = atoi(p + 1); p += strlen(p) - 1; break; }
+                    if (p[1] != '\0') { o.skip_fields = parse_count(p + 1); p += strlen(p) - 1; break; }
                     if (argi + 1 >= argc) usage();
-                    o.skip_fields = atoi(argv[++argi]); goto next_arg;
+                    o.skip_fields = parse_count(argv[++argi]); goto next_arg;
                 case 's':
-                    if (p[1] != '\0') { o.skip_chars = atoi(p + 1); p += strlen(p) - 1; break; }
+                    if (p[1] != '\0') { o.skip_chars = parse_count(p + 1); p += strlen(p) - 1; break; }
                     if (argi + 1 >= argc) usage();
-                    o.skip_chars = atoi(argv[++argi]); goto next_arg;
+                    o.skip_chars = parse_count(argv[++argi]); goto next_arg;
                 case 'w':
-                    if (p[1] != '\0') { o.width = atoi(p + 1); p += strlen(p) - 1; break; }
+                    if (p[1] != '\0') { o.width = parse_count(p + 1); p += strlen(p) - 1; break; }
                     if (argi + 1 >= argc) usage();
-                    o.width = atoi(argv[++argi]); goto next_arg;
+                    o.width = parse_count(argv[++argi]); goto next_arg;
                 default:
                     fprintf(stderr, "%s: invalid option -- '%c'\n", progname, *p);
                     usage();
@@ -241,8 +259,10 @@ next_arg: ;
 
     term = o.z_terminated ? '\0' : '\n';
 
-    while (read_line(in, &cur, &cur_len, term) == 1) {
-        if (prev != NULL && lines_equal(prev, cur, &o)) {
+    int ret = 0;
+    int rl;
+    while ((rl = read_line(in, &cur, &cur_len, term)) == 1) {
+        if (prev != NULL && lines_equal(prev, prev_len, cur, cur_len, &o)) {
             count++;
             if (o.print_all_dup) {
                 if (count == 2) {
@@ -289,7 +309,21 @@ next_arg: ;
         free(prev);
     }
 
+    /* Distinguish a read error from EOF (UNIQ-04). */
+    if (rl < 0 || ferror(in)) {
+        fprintf(stderr, "%s: read error: %s\n", progname, strerror(errno));
+        ret = 1;
+    }
+
+    /* Check that all output actually reached the file (UNIQ-03). */
+    if (fflush(out) != 0 || ferror(out)) {
+        fprintf(stderr, "%s: write error: %s\n", progname, strerror(errno));
+        ret = 1;
+    }
     if (in != stdin) fclose(in);
-    if (out != stdout) fclose(out);
-    return 0;
+    if (out != stdout && fclose(out) != 0) {
+        fprintf(stderr, "%s: write error: %s\n", progname, strerror(errno));
+        ret = 1;
+    }
+    return ret;
 }

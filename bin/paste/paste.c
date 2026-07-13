@@ -91,6 +91,11 @@ static int read_line(FILE *f, struct buf *b)
 		}
 		b->p[b->len++] = (char)c;
 	}
+	/* getc returns EOF on both end-of-file and read error; distinguish the
+	 * latter so a mid-stream I/O error isn't silently treated as EOF
+	 * (PASTE-02). */
+	if (ferror(f))
+		die("read error");
 	return any;
 }
 
@@ -209,6 +214,11 @@ int main(int argc, char **argv)
 		} else if (!(f[i] = fopen(name, "r"))) {
 			fprintf(stderr, "%s: %s: %s\n", prog, name,
 			    strerror(errno));
+			/* Close the files already opened before bailing (PASTE-03). */
+			for (int j = 0; j < i; j++)
+				if (f[j] != stdin)
+					fclose(f[j]);
+			free(f);
 			return 1;
 		}
 	}
