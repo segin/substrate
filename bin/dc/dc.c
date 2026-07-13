@@ -5,7 +5,21 @@
 #include <stdarg.h>
 #include <unistd.h>
 #include <sys/wait.h>
+#include <stdint.h>
 #include "num.h"
+
+/* Caps: a huge output base OOMs the printer, and a huge power exponent makes
+ * a number with billions of digits — both DoS on untrusted input (DC-04). */
+#define DC_OBASE_MAX 65535
+#define DC_POW_MAX   1000000
+
+/* Accept the digits valid for the given input base, including A..Z for
+ * ibase up to 36 (the old code only accepted A..F) (DC-09). */
+static int dc_is_num_char(int c, int base) {
+    if (c >= '0' && c <= '9') return 1;
+    if (base > 10 && c >= 'A' && c <= 'A' + (base - 11)) return 1;
+    return 0;
+}
 
 /* Upper bound on a dc register-array index: caps a single array at ~1M
  * entries so a hostile index can neither overflow the size arithmetic nor
@@ -42,6 +56,7 @@ void stack_init(dc_stack_t *s) {
     s->cap = 64;
     s->sp = 0;
     s->data = malloc(s->cap * sizeof(dc_val_t*));
+    if (!s->data) { perror("dc: malloc"); exit(1); }   /* DC-08 */
 }
 
 void val_free(dc_val_t *v) {
@@ -53,6 +68,7 @@ void val_free(dc_val_t *v) {
 
 dc_val_t *val_new_num(bc_num *n) {
     dc_val_t *v = malloc(sizeof(dc_val_t));
+    if (!v) { perror("dc: malloc"); exit(1); }          /* DC-08 */
     v->type = VAL_NUM;
     v->v.num = n;
     return v;
@@ -60,8 +76,10 @@ dc_val_t *val_new_num(bc_num *n) {
 
 dc_val_t *val_new_str(const char *s) {
     dc_val_t *v = malloc(sizeof(dc_val_t));
+    if (!v) { perror("dc: malloc"); exit(1); }          /* DC-08 */
     v->type = VAL_STR;
     v->v.str = strdup(s);
+    if (!v->v.str) { perror("dc: strdup"); exit(1); }
     return v;
 }
 
@@ -182,11 +200,11 @@ void execute(input_t *in) {
         if (quit_levels > 0) return;
         if (isspace(c)) continue;
         
-        if (isdigit(c) || c == '_' || c == '.' || (bc_ibase > 10 && c >= 'A' && c <= 'F')) {
+        if (dc_is_num_char(c, bc_ibase) || c == '_' || c == '.') {
             char buf[1024]; int i = 0;
             int sign = 1;
             if (c == '_') { sign = -1; c = get_char(in); }
-            while (c != EOF && (isdigit(c) || c == '.' || (bc_ibase > 10 && c >= 'A' && c <= 'F'))) {
+            while (c != EOF && (dc_is_num_char(c, bc_ibase) || c == '.')) {
                 if (i < 1023) buf[i++] = c;
                 c = get_char(in);
             }
@@ -206,20 +224,23 @@ void execute(input_t *in) {
         }
 
         if (c == '[') {
-            char *s = malloc(1024); int i = 0, cap = 1024;
+            size_t i = 0, cap = 1024;
+            char *s = malloc(cap);          /* was unchecked (DC-06) */
             int depth = 1;
+            if (!s) { perror("dc: malloc"); exit(1); }
             while ((c = get_char(in)) != EOF) {
                 if (c == '[') depth++;
                 else if (c == ']') {
                     if (--depth == 0) break;
                 }
                 if (i + 1 >= cap) {
+                    if (cap > SIZE_MAX / 2) { free(s); fprintf(stderr, "dc: string too long\n"); exit(1); }
                     cap *= 2;
                     char *tmp = realloc(s, cap);
-                    if (!tmp) { free(s); perror("realloc"); exit(1); }
+                    if (!tmp) { free(s); perror("dc: realloc"); exit(1); }
                     s = tmp;
                 }
-                s[i++] = c;
+                s[i++] = (char)c;
             }
             s[i] = 0;
             push(&main_stack, val_new_str(s));
@@ -277,9 +298,26 @@ void execute(input_t *in) {
                 if (c == '+') res = bc_add(av->v.num, bv->v.num);
                 else if (c == '-') res = bc_sub(av->v.num, bv->v.num);
                 else if (c == '*') res = bc_mul(av->v.num, bv->v.num);
-                else if (c == '/') res = bc_div(av->v.num, bv->v.num);
-                else if (c == '%') res = bc_mod(av->v.num, bv->v.num);
-                else if (c == '^') res = bc_pow(av->v.num, bv->v.num);
+                else if (c == '/' || c == '%') {
+                    /* Guard divide/modulo by zero at the dc layer (DC-05). */
+                    if (bc_is_zero(bv->v.num)) {
+                        fprintf(stderr, "dc: divide by zero\n");
+                        push(&main_stack, av); push(&main_stack, bv);
+                        break;
+                    }
+                    res = (c == '/') ? bc_div(av->v.num, bv->v.num)
+                                     : bc_mod(av->v.num, bv->v.num);
+                } else if (c == '^') {
+                    /* Reject an enormous exponent so `2 100000000^` can't build
+                     * a billion-digit number and OOM/hang (DC-04). */
+                    long e = (long)bc_num_to_long(bv->v.num);
+                    if (e > DC_POW_MAX || e < -DC_POW_MAX) {
+                        fprintf(stderr, "dc: exponent too large\n");
+                        push(&main_stack, av); push(&main_stack, bv);
+                        break;
+                    }
+                    res = bc_pow(av->v.num, bv->v.num);
+                }
                 push(&main_stack, val_new_num(res));
                 val_free(av); val_free(bv);
                 break;
@@ -305,8 +343,8 @@ void execute(input_t *in) {
                 dc_val_t *v = pop(&main_stack);
                 if (v->type == VAL_NUM) {
                     long long ob = bc_num_to_long(v->v.num);
-                    if (ob >= 2) bc_obase = (int)ob;
-                    else fprintf(stderr, "dc: obase must be >= 2\n");
+                    if (ob >= 2 && ob <= DC_OBASE_MAX) bc_obase = (int)ob;
+                    else fprintf(stderr, "dc: obase must be in [2,%d]\n", DC_OBASE_MAX);
                 }
                 val_free(v);
                 break;
@@ -478,6 +516,13 @@ void execute(input_t *in) {
                     }
                     line[i] = 0;
                     if (line[0]) {
+                        /* Shell-out from dc input is an RCE vector on untrusted
+                         * scripts; require explicit opt-in (DC-02). */
+                        if (!getenv("DC_ENABLE_SHELL")) {
+                            fprintf(stderr, "dc: '!' shell execution is disabled "
+                                            "(set DC_ENABLE_SHELL to enable)\n");
+                            break;
+                        }
                         char *argv[128];
                         int argc = 0;
                         char *p = line;
