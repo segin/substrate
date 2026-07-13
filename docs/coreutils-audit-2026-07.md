@@ -1,5 +1,27 @@
 # bin/ coreutils audit — 2026-07
 
+> **Resolution status (2026-07): substantially FIXED.** Every actionable
+> finding across both audit waves has been fixed in place, one
+> finding-group per commit, with `-Werror` target builds and, where the
+> tool is host-runnable, ASan/UBSan host verification. Utilities touched
+> include ping, su, passwd, printf, tail, xargs, tar, sed, tee, uniq,
+> paste, dc, diff, df, cp, mv, chown, chgrp, nice, rmdir, pwd, wall, who,
+> w, uptime, rm, cat, wc, cut, echo, dirname, dmesg, audioctl, readlink,
+> tr, renice, yes, which, whoami, tabs, date, sort, touch, stty, ps, top,
+> and the stub utilities (nproc, sync, umount, test/[, od, split, pgrep,
+> prof, size, tc, newgrp, write).
+>
+> **Deferred (documented, not fixed):**
+> - **chown/chgrp fd-relative `-R` descent** (CHOWN-01/07/08,
+>   CHGRP-01/02/05/06, CHOWN-10/11+CHGRP-08/09) — the shared TOCTOU
+>   conversion onto the `rm` `openat`/`fstatat`/`fchownat` model needs a
+>   boot-tested rewrite; the named-spec parsing, `--reference` no-op, and
+>   errno/range fixes for these tools have landed.
+> - **awk AWK-01/02/03** — genuine upstream bugs in the directly-vendored
+>   `contrib/onetrueawk` tree (compiled verbatim; editing it in place is
+>   forbidden by project directive); require pathological inputs. AWK-04/05
+>   verified sound against Substrate libc (no change needed).
+
 Security/correctness audit of a batch of Substrate userland utilities, read
 by parallel per-utility auditors and cross-checked against source. Substrate's
 primary target is x86 **32-bit** (`size_t`/`long`/pointer 32-bit, `off_t` and
@@ -239,8 +261,17 @@ direct edit to the vendored tree. Line numbers are in `contrib/onetrueawk/`.
 
 **Action for awk**: AWK-01/02/03 are upstream bugs — fix as a `contrib/onetrueawk`
 patch series (not a verbatim-tree edit) or report upstream; out of scope for the
-native-bin fix pass. AWK-04/05 are worth verifying against Substrate's libc
-printf/`random()` and fixing there if deficient.
+native-bin fix pass. **DEFERRED** (2026-07): `contrib/onetrueawk/` is a directly
+vendored upstream tree compiled verbatim (no patch-series mechanism), and the
+project directive forbids editing it in place; these three require pathological
+inputs to trigger (nested `{255}{255}`, ~715 MB records, a multi-KB UTF-8 `%s`
+arg) and are left for a dedicated upstream/patch-series pass.
+AWK-04/05 are worth verifying against Substrate's libc printf/`random()` and
+fixing there if deficient. **VERIFIED OK** (2026-07): `lib/c/stdio/printf.c`
+handles the `j` length modifier (`LEN_J` → `VC_INTMAX` → `intmax_t`), so
+`%jd`/`%ju` render correctly (AWK-04); `lib/c/src/random_r.c` masks results with
+`& 0x7fffffff`, i.e. the classic BSD 31-bit range awk's `FRAND` assumes (AWK-05).
+No libc change needed.
 
 ## Fix plan / priority
 
