@@ -200,6 +200,12 @@ int cp_preserve_metadata(const struct cp_options *opts,
                          cp_preserve_warn_cb warn_cb,
                          void *warn_userdata)
 {
+    /* Whether the destination's owner/group were set to the source's. If not
+     * (typically EPERM as non-root), the setuid/setgid bits must NOT be
+     * restored, else -p would leave a setuid binary owned by the invoker
+     * (CP-02). */
+    int owner_established = 1;
+
     if (opts->preserve_owner) {
         int rc = -1;
 
@@ -222,27 +228,34 @@ int cp_preserve_metadata(const struct cp_options *opts,
         rc = chown(dst_path, src_st->st_uid, src_st->st_gid);
 #endif
 
-        if (rc != 0 && errno != EPERM && errno != EACCES) {
-            cp_preserve_warn(warn_cb, warn_userdata, src_path, dst_path,
-                             "preserve owner", errno);
-        } else if (rc != 0 && (errno == EPERM || errno == EACCES)) {
-            cp_preserve_warn(warn_cb, warn_userdata, src_path, dst_path,
-                             "preserve owner requires privilege", errno);
+        if (rc != 0) {
+            owner_established = 0;
+            if (errno != EPERM && errno != EACCES) {
+                cp_preserve_warn(warn_cb, warn_userdata, src_path, dst_path,
+                                 "preserve owner", errno);
+            } else {
+                cp_preserve_warn(warn_cb, warn_userdata, src_path, dst_path,
+                                 "preserve owner requires privilege", errno);
+            }
         }
     }
 
     if (opts->preserve_mode && !is_symlink) {
-        int rc = -1;
+        int    rc   = -1;
+        mode_t mode = src_st->st_mode & 07777;
+        /* Never restore setuid/setgid when we could not set the owner. */
+        if (!owner_established)
+            mode &= ~(mode_t)(S_ISUID | S_ISGID);
 
 #ifdef CP_HOST_BUILD
         if (dst_fd >= 0) {
-            rc = fchmod(dst_fd, src_st->st_mode & 07777);
+            rc = fchmod(dst_fd, mode);
         } else {
-            rc = chmod(dst_path, src_st->st_mode & 07777);
+            rc = chmod(dst_path, mode);
         }
 #else
         (void)dst_fd;
-        rc = chmod(dst_path, src_st->st_mode & 07777);
+        rc = chmod(dst_path, mode);
 #endif
         if (rc != 0) {
             cp_preserve_warn(warn_cb, warn_userdata, src_path, dst_path,
