@@ -243,6 +243,20 @@ static void drain_v6_nonblock(const struct sockaddr_in6 *expected_src) {
 
 /* ---- main loop ---- */
 
+/*
+ * Permanently drop root/setuid privilege once the raw socket is open.
+ * ping needs root only to create SOCK_RAW; everything after (DNS, and the
+ * loop that parses attacker-controlled reply packets) must run unprivileged
+ * so a bug there is not a root compromise. Order: gid before uid.
+ */
+static void drop_privileges(void) {
+    if (setgid(getgid()) != 0 || setuid(getuid()) != 0) {
+        fprintf(stderr, "ping: failed to drop privileges: %s\n",
+            strerror(errno));
+        _exit(2);
+    }
+}
+
 static int run_v4(const char *target) {
     struct sockaddr_in dst = { 0 };
     char ipbuf[32];
@@ -266,6 +280,7 @@ static int run_v4(const char *target) {
         fprintf(stderr, "ping: socket: %s\n", strerror(errno));
         return 2;
     }
+    drop_privileges();
     /* TTL via setsockopt would be IP_TTL=2.  Substrate setsockopt is
      * a no-op stub today; the kernel uses TTL=64 unconditionally.
      * The Linux convention is `PING <name> (<resolved-ip>) ...` —
@@ -318,6 +333,7 @@ static int run_v6(const char *target) {
         fprintf(stderr, "ping: socket: %s\n", strerror(errno));
         return 2;
     }
+    drop_privileges();
     char buf[64];
     inet_ntop(AF_INET6, dst.sin6_addr.s6_addr, buf, sizeof(buf));
     fprintf(stdout, "PING %s (%s) %d data bytes\n", target, buf, opt_size);
