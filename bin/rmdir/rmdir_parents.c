@@ -234,9 +234,13 @@ rmdir_remove_path(const struct rmdir_options *opts, const char *path)
             current_path[0] == '\0') {
             break;
         }
-        if (current_path[0] == '/' && strrchr(current_path, '/') == current_path) {
-            break;
-        }
+        /*
+         * The old code broke here whenever only the leading component of an
+         * absolute path remained (e.g. "/a"), so `rmdir -p /a/b/c` removed
+         * c and b but left a. Removing that early-out lets the final
+         * component be removed too; the `slash == current_path` guard above
+         * still stops the descent at "/" (RMDIR-01).
+         */
 
         result = rmdir_remove_single(opts, current_path);
         if (result != RMDIR_RESULT_REMOVED) {

@@ -36,7 +36,10 @@ rmdir_parse_options(struct rmdir_options *opts, int argc, char **argv,
     opterr = 0;
     optind = 1;
 
-    while ((option = getopt_long(argc, argv, "+pv", long_options,
+    /* No leading '+' in the optstring: it would make getopt stop at the
+     * first operand, so `rmdir dir -p` would treat -p as a filename
+     * (RMDIR-02). */
+    while ((option = getopt_long(argc, argv, "pv", long_options,
                 NULL)) != -1) {
         switch (option) {
         case 'p':
