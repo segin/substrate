@@ -4,6 +4,7 @@
 #include <grp.h>
 #include <pwd.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -12,9 +13,10 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 
-#ifdef NATIVE_BUILD
 #include <fcntl.h>
-#endif
+
+/* Bound recursion (one dir fd held per level) — see chown. */
+#define CHGRP_MAX_DEPTH 512
 
 struct visited_dir {
     dev_t dev;
@@ -33,6 +35,8 @@ struct chgrp_options {
     bool force;
     bool change_symlink;
     bool use_reference;
+    bool verbose;        /* -v: report every file */
+    bool changes_only;   /* -c: report only files actually changed */
     enum walk_policy policy;
 
     const char *reference_path;
@@ -55,7 +59,7 @@ static void
 usage(const char *progname)
 {
     fprintf(stderr,
-        "Usage: %s [-R [-H | -L | -P]] [-fhv] group file ...\n"
+        "Usage: %s [-R [-H | -L | -P]] [-cfhv] group file ...\n"
         "       %s [-R [-H | -L | -P]] [-fhv] -r file file ...\n",
         progname, progname);
 }
@@ -94,17 +98,7 @@ warn_message_path(struct chgrp_context *ctx, const char *path, const char *msg)
     }
 }
 
-static int
-retry_lstat(const char *path, struct stat *st)
-{
-    int rc;
-
-    do {
-        rc = lstat(path, st);
-    } while (rc < 0 && errno == EINTR);
-    return rc;
-}
-
+/* Used only for the --reference file (a single up-front stat). */
 static int
 retry_stat(const char *path, struct stat *st)
 {
@@ -116,37 +110,28 @@ retry_stat(const char *path, struct stat *st)
     return rc;
 }
 
+/* fd-relative stat/chown, EINTR-retried, for the pinned-parent descent
+ * (CHGRP-01/05). */
 static int
-retry_chown(const char *path, uid_t uid, gid_t gid)
+retry_fstatat(int dirfd, const char *name, struct stat *st, int flag)
 {
     int rc;
 
     do {
-        rc = chown(path, uid, gid);
+        rc = fstatat(dirfd, name, st, flag);
     } while (rc < 0 && errno == EINTR);
     return rc;
 }
 
 static int
-retry_lchown(const char *path, uid_t uid, gid_t gid)
+retry_fchownat(int dirfd, const char *name, uid_t uid, gid_t gid, int flag)
 {
     int rc;
 
     do {
-        rc = lchown(path, uid, gid);
+        rc = fchownat(dirfd, name, uid, gid, flag);
     } while (rc < 0 && errno == EINTR);
     return rc;
-}
-
-static DIR *
-retry_opendir(const char *path)
-{
-    DIR *dir;
-
-    do {
-        dir = opendir(path);
-    } while (dir == NULL && errno == EINTR);
-    return dir;
 }
 
 static int
@@ -182,6 +167,10 @@ path_join(const char *base, const char *name)
     const size_t base_len = strlen(base);
     const size_t name_len = strlen(name);
     const bool need_slash = base_len > 0 && base[base_len - 1] != '/';
+    /* Guard the length arithmetic against size_t wrap on 32-bit (CHGRP-08). */
+    if (base_len > SIZE_MAX - name_len - 2u) {
+        return NULL;
+    }
     const size_t total = base_len + (need_slash ? 1u : 0u) + name_len + 1u;
     char *joined = (char *)malloc(total);
 
@@ -239,6 +228,16 @@ visited_add(struct chgrp_context *ctx, dev_t dev, ino_t ino)
     return 0;
 }
 
+/* Pop the directory pushed on entry, so the set tracks only current-path
+ * ancestors (CHGRP-08/09 ancestor-only cycle set). */
+static void
+visited_pop(struct chgrp_context *ctx)
+{
+    if (ctx->visited_count > 0) {
+        ctx->visited_count--;
+    }
+}
+
 /*
  * Resolve a group spec to a gid via an out-parameter (no int/(gid_t)-1
  * sentinel collision, CHGRP-07).  A real group name is preferred over a
@@ -274,20 +273,17 @@ resolve_group_gid(const char *name, gid_t *out)
 }
 
 static void
-apply_group_to_entry(struct chgrp_context *ctx, const char *path,
-    bool is_symlink)
+apply_at(struct chgrp_context *ctx, int dirfd, const char *name,
+    const char *display, bool is_symlink, const struct stat *stat_st)
 {
-    uid_t uid;
     gid_t gid;
-    int rc;
+    int   flag;
+    bool  changed = false;
 
-    uid = -1;
     gid = ctx->opts.gid;
-
     if (ctx->opts.use_reference) {
         gid = ctx->opts.reference_gid;
     }
-
     /* --reference implies a target gid even though it doesn't set gid_set;
      * without this the reference gid was clobbered to -1 and chgrp became a
      * silent no-op (CHGRP-03). */
@@ -295,40 +291,62 @@ apply_group_to_entry(struct chgrp_context *ctx, const char *path,
         gid = (gid_t)-1;
     }
 
-    if (ctx->opts.change_symlink && is_symlink) {
-        rc = retry_lchown(path, uid, gid);
-    } else {
-        rc = retry_chown(path, uid, gid);
+    if (stat_st != NULL && gid != (gid_t)-1 && stat_st->st_gid != gid) {
+        changed = true;
     }
 
-    if (rc < 0) {
-        warn_errno_path(ctx, path, NULL);
+    flag = (ctx->opts.change_symlink && is_symlink) ? AT_SYMLINK_NOFOLLOW : 0;
+    if (retry_fchownat(dirfd, name, (uid_t)-1, gid, flag) < 0) {
+        warn_errno_path(ctx, display, NULL);
+        return;
+    }
+
+    if (ctx->opts.verbose || ctx->opts.changes_only) {
+        if (changed) {
+            printf("changed group of '%s'\n", display);
+        } else if (ctx->opts.verbose) {
+            printf("group of '%s' retained\n", display);
+        }
     }
 }
 
-static void process_path(struct chgrp_context *ctx, const char *path,
-    bool cmdline);
+static void process_entry_at(struct chgrp_context *ctx, int dirfd,
+    const char *name, const char *display, bool cmdline, int depth);
 
+/* Descend into `owned_fd` (taken ownership of + closed here), operating
+ * fd-relative so a swapped-in symlink can't redirect the walk (CHGRP-01/05). */
 static void
-walk_directory(struct chgrp_context *ctx, const char *path, dev_t dev, ino_t ino)
+walk_fd(struct chgrp_context *ctx, int owned_fd, const char *display,
+    dev_t dev, ino_t ino, int depth)
 {
-    DIR *dir;
+    DIR           *dir;
     struct dirent *de;
-    int visit_rc;
+    int            visit_rc;
+
+    if (depth >= CHGRP_MAX_DEPTH) {
+        errno = ELOOP;
+        warn_errno_path(ctx, display, "recursion too deep");
+        (void)close(owned_fd);
+        return;
+    }
 
     visit_rc = visited_add(ctx, dev, ino);
     if (visit_rc < 0) {
         errno = ENOMEM;
-        warn_errno_path(ctx, path, "cannot track visited directory");
+        warn_errno_path(ctx, display, "cannot track visited directory");
+        (void)close(owned_fd);
         return;
     }
     if (visit_rc > 0) {
+        (void)close(owned_fd);
         return;
     }
 
-    dir = retry_opendir(path);
+    dir = fdopendir(owned_fd);
     if (dir == NULL) {
-        warn_errno_path(ctx, path, "cannot read directory");
+        warn_errno_path(ctx, display, "cannot read directory");
+        (void)close(owned_fd);
+        visited_pop(ctx);
         return;
     }
 
@@ -342,7 +360,7 @@ walk_directory(struct chgrp_context *ctx, const char *path, dev_t dev, ino_t ino
                 continue;
             }
             if (errno != 0) {
-                warn_errno_path(ctx, path, "directory traversal failed");
+                warn_errno_path(ctx, display, "directory traversal failed");
             }
             break;
         }
@@ -351,24 +369,26 @@ walk_directory(struct chgrp_context *ctx, const char *path, dev_t dev, ino_t ino
             continue;
         }
 
-        child = path_join(path, de->d_name);
+        child = path_join(display, de->d_name);
         if (child == NULL) {
             errno = ENOMEM;
-            warn_errno_path(ctx, path, "out of memory while traversing");
+            warn_errno_path(ctx, display, "out of memory while traversing");
             break;
         }
 
-        process_path(ctx, child, false);
+        process_entry_at(ctx, dirfd(dir), de->d_name, child, false, depth);
         free(child);
     }
 
     if (retry_closedir(dir) < 0) {
-        warn_errno_path(ctx, path, "cannot close directory");
+        warn_errno_path(ctx, display, "cannot close directory");
     }
+    visited_pop(ctx);
 }
 
 static void
-process_path(struct chgrp_context *ctx, const char *path, bool cmdline)
+process_entry_at(struct chgrp_context *ctx, int dirfd, const char *name,
+    const char *display, bool cmdline, int depth)
 {
     struct stat lst;
     struct stat st_target;
@@ -379,10 +399,9 @@ process_path(struct chgrp_context *ctx, const char *path, bool cmdline)
     bool follow_change;
     bool have_target = false;
     bool should_change = true;
-    bool should_recurse = false;
 
-    if (retry_lstat(path, &lst) < 0) {
-        warn_errno_path(ctx, path, NULL);
+    if (retry_fstatat(dirfd, name, &lst, AT_SYMLINK_NOFOLLOW) < 0) {
+        warn_errno_path(ctx, display, NULL);
         return;
     }
 
@@ -402,13 +421,14 @@ process_path(struct chgrp_context *ctx, const char *path, bool cmdline)
     }
 
     if (is_symlink && (follow_walk || follow_change)) {
-        if (retry_stat(path, &st_target) == 0) {
+        if (retry_fstatat(dirfd, name, &st_target, 0) == 0) {
             have_target = true;
         } else if (follow_change) {
-            warn_errno_path(ctx, path, NULL);
+            warn_errno_path(ctx, display, NULL);
             return;
         } else if (follow_walk) {
-            warn_message_path(ctx, path, "cannot follow symbolic link during traversal");
+            warn_message_path(ctx, display,
+                "cannot follow symbolic link during traversal");
         }
     }
 
@@ -421,12 +441,13 @@ process_path(struct chgrp_context *ctx, const char *path, bool cmdline)
         should_change = false;
     }
 
-    if (ctx->opts.recursive && is_symlink && !ctx->opts.change_symlink && !follow_walk) {
+    if (ctx->opts.recursive && is_symlink && !ctx->opts.change_symlink &&
+        !follow_walk) {
         should_change = false;
     }
 
     if (should_change) {
-        apply_group_to_entry(ctx, path, is_symlink);
+        apply_at(ctx, dirfd, name, display, is_symlink, stat_st);
     }
 
     if (!ctx->opts.recursive) {
@@ -438,9 +459,28 @@ process_path(struct chgrp_context *ctx, const char *path, bool cmdline)
         walk_stat = &st_target;
     }
 
-    should_recurse = S_ISDIR(walk_stat->st_mode);
-    if (should_recurse) {
-        walk_directory(ctx, path, walk_stat->st_dev, walk_stat->st_ino);
+    if (S_ISDIR(walk_stat->st_mode)) {
+        int flags = O_RDONLY | O_DIRECTORY;
+        int cfd;
+        struct stat opened;
+
+        if (!(is_symlink && follow_walk)) {
+            flags |= O_NOFOLLOW;
+        }
+
+        do {
+            cfd = openat(dirfd, name, flags);
+        } while (cfd < 0 && errno == EINTR);
+        if (cfd < 0) {
+            warn_errno_path(ctx, display, "cannot read directory");
+            return;
+        }
+        if (fstat(cfd, &opened) < 0) {
+            warn_errno_path(ctx, display, NULL);
+            (void)close(cfd);
+            return;
+        }
+        walk_fd(ctx, cfd, display, opened.st_dev, opened.st_ino, depth + 1);
     }
 }
 
@@ -543,7 +583,9 @@ parse_args(struct chgrp_context *ctx, int argc, char *argv[], int *file_index)
             } else if (arg[j] == 'h') {
                 ctx->opts.change_symlink = true;
             } else if (arg[j] == 'v') {
-                /* verbose - no-op, ignore */
+                ctx->opts.verbose = true;      /* report every file */
+            } else if (arg[j] == 'c') {
+                ctx->opts.changes_only = true; /* report only real changes */
             } else if (arg[j] == 'r') {
                 ctx->opts.use_reference = true;
                 if (i + 1 >= argc) {
@@ -621,7 +663,7 @@ main(int argc, char *argv[])
     }
 
     for (i = file_index; i < argc; ++i) {
-        process_path(&ctx, argv[i], true);
+        process_entry_at(&ctx, AT_FDCWD, argv[i], argv[i], true, 0);
     }
 
     free(ctx.visited);
