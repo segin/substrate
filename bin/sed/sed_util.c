@@ -2,6 +2,7 @@
  * sed_util.c - dynamic buffer and error helpers.
  */
 #include <stdarg.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -59,12 +60,21 @@ db_free(dynbuf_t *db)
 int
 db_reserve(dynbuf_t *db, size_t extra)
 {
+    /*
+     * Guard the size arithmetic: on the 32-bit target `db->len + extra + 1`
+     * can wrap to a small value (undersized realloc then memcpy overflow),
+     * and the `newcap *= 2` doubling can wrap to 0 (endless loop) (SED-05).
+     */
+    if (extra > SIZE_MAX - 1 - db->len)
+        return -1;
     size_t need = db->len + extra + 1; /* +1 for NUL */
     if (need <= db->cap)
         return 0;
-    size_t newcap = db->cap ? db->cap * 2 : 256;
-    while (newcap < need)
+    size_t newcap = db->cap ? db->cap : 256;
+    while (newcap < need) {
+        if (newcap > SIZE_MAX / 2) { newcap = need; break; }
         newcap *= 2;
+    }
     char *nb = realloc(db->buf, newcap);
     if (!nb)
         return -1;
