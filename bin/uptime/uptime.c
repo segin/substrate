@@ -14,6 +14,7 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
+#include <utmp.h>
 
 static double read_uptime_seconds(void) {
     int fd = open("/proc/uptime", O_RDONLY);
@@ -42,8 +43,18 @@ static void read_loadavg(double load[3]) {
 }
 
 static int count_users(void) {
-    /* No utmp wired yet; report 1 active session. */
-    return 1;
+    /* Count USER_PROCESS records in utmp (UPTIME-01: was a hardcoded 1). */
+    FILE *f = fopen(UTMP_FILE, "r");
+    struct utmp u;
+    int n = 0;
+    if (f == NULL)
+        return 0;
+    while (fread(&u, sizeof u, 1, f) == 1) {
+        if (u.ut_type == USER_PROCESS && u.ut_user[0] != '\0')
+            n++;
+    }
+    fclose(f);
+    return n;
 }
 
 int main(void) {
