@@ -46,12 +46,17 @@ static int copy_regular(const char *src, const char *dst,
                         const struct stat *sst)
 {
     int sfd, dfd;
-    char buf[64 * 1024];
     ssize_t n;
     int ret = 0;
+    /* Heap-allocate the 64 KiB copy buffer rather than putting it on the
+     * stack: copy_tree recurses, so a per-frame 64 KiB buffer would exhaust
+     * the stack on a deep cross-device move (MV-03). */
+    char *buf = malloc(64 * 1024);
+    if (!buf) return -1;
 
     sfd = open(src, O_RDONLY | O_NOFOLLOW);
     if (sfd < 0) {
+        free(buf);
         return -1;
     }
     /*
@@ -64,9 +69,10 @@ static int copy_regular(const char *src, const char *dst,
     dfd = open(dst, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, sst->st_mode & 07777);
     if (dfd < 0) {
         close(sfd);
+        free(buf);
         return -1;
     }
-    while ((n = read(sfd, buf, sizeof(buf))) > 0) {
+    while ((n = read(sfd, buf, 64 * 1024)) > 0) {
         ssize_t total = 0;
         while (total < n) {
             ssize_t w = write(dfd, buf + total, (size_t)(n - total));
@@ -84,10 +90,13 @@ done:
     close(sfd);
     if (close(dfd) != 0) ret = -1;
     if (ret == 0) {
-        (void)chmod(dst, sst->st_mode & 07777);
+        /* chown before chmod: chown clears setuid/setgid, so applying the
+         * mode afterwards preserves them (MV-04). */
         (void)chown(dst, sst->st_uid, sst->st_gid);
+        (void)chmod(dst, sst->st_mode & 07777);
         copy_times(dst, sst);
     }
+    free(buf);
     return ret;
 }
 
@@ -146,24 +155,40 @@ static int copy_tree_inner(const char *src, const char *dst,
         free(sp); free(dp2);
     }
     closedir(dp);
+    (void)chown(dst, sst->st_uid, sst->st_gid);   /* chown before chmod (MV-04) */
     (void)chmod(dst, sst->st_mode & 07777);
-    (void)chown(dst, sst->st_uid, sst->st_gid);
     copy_times(dst, sst);
     return rc;
 }
 
+#define MV_MAX_TREE_DEPTH 512
+static int copy_tree_depth = 0;
+
 static int copy_tree(const char *src, const char *dst)
 {
     struct stat sst;
+    int rc;
+
+    /* Cap recursion so a deep (or symlink-looped) source tree can't exhaust
+     * the C stack mid cross-device move (MV-03). */
+    if (copy_tree_depth >= MV_MAX_TREE_DEPTH) {
+        errno = ELOOP;
+        return -1;
+    }
 
     if (lstat(src, &sst) != 0) return -1;
     if (S_ISLNK(sst.st_mode))  return copy_symlink(src, dst, &sst);
-    if (S_ISDIR(sst.st_mode))  return copy_tree_inner(src, dst, &sst);
+    if (S_ISDIR(sst.st_mode)) {
+        copy_tree_depth++;
+        rc = copy_tree_inner(src, dst, &sst);
+        copy_tree_depth--;
+        return rc;
+    }
     if (S_ISREG(sst.st_mode))  return copy_regular(src, dst, &sst);
     /* Special files: mknod */
     if (mknod(dst, sst.st_mode, sst.st_rdev) != 0) return -1;
+    (void)chown(dst, sst.st_uid, sst.st_gid);      /* chown before chmod (MV-04) */
     (void)chmod(dst, sst.st_mode & 07777);
-    (void)chown(dst, sst.st_uid, sst.st_gid);
     copy_times(dst, &sst);
     return 0;
 }

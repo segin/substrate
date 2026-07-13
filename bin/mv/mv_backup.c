@@ -3,6 +3,7 @@
 
 #include <dirent.h>
 #include <errno.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -137,6 +138,10 @@ static char *next_numbered_backup(const char *target)
     }
     free(dir);
 
+    if (highest >= ULONG_MAX) {          /* next index would wrap (MV-09) */
+        errno = EOVERFLOW;
+        return NULL;
+    }
     size_t alloc_sz = strlen(target) + 32;
     out = malloc(alloc_sz);
     if (out == NULL) {
@@ -169,6 +174,13 @@ char *mv_backup_name(const char *target,
     }
     if (suffix == NULL || suffix[0] == '\0') {
         suffix = "~";
+    }
+    /* A suffix containing '/' (e.g. from a crafted -S or
+     * $SIMPLE_BACKUP_SUFFIX like "/../../victim") would make the backup path
+     * escape the target's directory and clobber an unrelated file (MV-06). */
+    if (strchr(suffix, '/') != NULL) {
+        errno = EINVAL;
+        return NULL;
     }
     switch (mode) {
     case MV_BACKUP_SIMPLE:
