@@ -159,6 +159,17 @@ static int wc_file(struct wc_opts *o, int fd, const char *name, struct wc_counts
 
     memset(file_counts, 0, sizeof(*file_counts));
 
+    /* Reject a directory rather than read()-ing garbage counts out of it
+     * (WC-02). */
+    {
+        struct stat st;
+        if (fstat(fd, &st) == 0 && S_ISDIR(st.st_mode)) {
+            fprintf(stderr, "%s: %s: Is a directory\n",
+                    o->progname, name ? name : "-");
+            return 1;
+        }
+    }
+
     bool use_mb = false;
     if (o->count_chars || (o->count_words && o->count_chars)) {
         if (MB_CUR_MAX > 1) {
@@ -168,7 +179,12 @@ static int wc_file(struct wc_opts *o, int fd, const char *name, struct wc_counts
 
     /* Leftovers could be used here for true multibyte boundary buffering */
 
-    while ((n = read(fd, buf, BUF_SIZE)) > 0) {
+    while ((n = read(fd, buf, BUF_SIZE)) != 0) {
+        if (n < 0) {
+            if (errno == EINTR)   /* e.g. interrupted by the SIGINFO handler (WC-03) */
+                continue;
+            break;
+        }
         if (siginfo_received) {
             siginfo_received = 0;
             if (o->debug) fprintf(stderr, "SIGINFO\n");
