@@ -698,6 +698,35 @@ static int cat_process_raw_fd(int fd,
     }
 }
 
+/*
+ * Reject a directory operand (CAT-02) and guard against `cat f >> f`, where
+ * the input file is the output file and cat would read its own growing
+ * output forever (CAT-01). Returns 0 if the fd is safe to read, -1 otherwise.
+ */
+static int cat_input_ok(int fd, const char *name,
+                        const struct cat_options *options)
+{
+    struct stat in_st, out_st;
+
+    if (fstat(fd, &in_st) != 0) {
+        cat_warn_file(options, name);
+        return -1;
+    }
+    if (S_ISDIR(in_st.st_mode)) {
+        errno = EISDIR;
+        cat_warn_file(options, name);
+        return -1;
+    }
+    if (S_ISREG(in_st.st_mode) &&
+        fstat(STDOUT_FILENO, &out_st) == 0 && S_ISREG(out_st.st_mode) &&
+        in_st.st_dev == out_st.st_dev && in_st.st_ino == out_st.st_ino) {
+        fprintf(stderr, "%s: %s: input file is output file\n",
+                options->progname, name);
+        return -1;
+    }
+    return 0;
+}
+
 static int cat_process_raw_file(const char *name,
                                 const struct cat_options *options,
                                 struct cat_raw_buffer *raw)
@@ -722,6 +751,11 @@ static int cat_process_raw_file(const char *name,
 
     if (options->fast_open) {
         cat_maybe_clear_nonblock(fd, options, name);
+    }
+
+    if (cat_input_ok(fd, name, options) != 0) {
+        (void)close(fd);
+        return CAT_PROCESS_FILE_ERROR;
     }
 
     rc = cat_process_raw_fd(fd, name, options, raw);
@@ -795,6 +829,11 @@ static int cat_process_cooked_file(const char *name,
     fp = fopen(name, "rb");
     if (fp == NULL) {
         cat_warn_file(options, name);
+        return CAT_PROCESS_FILE_ERROR;
+    }
+
+    if (cat_input_ok(fileno(fp), name, options) != 0) {
+        (void)fclose(fp);
         return CAT_PROCESS_FILE_ERROR;
     }
 
