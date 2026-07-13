@@ -10,11 +10,20 @@
 #include <time.h>
 #include <utmp.h>
 
-/* utmp char fields are not guaranteed NUL-terminated. */
+/*
+ * Copy a utmp char field (not guaranteed NUL-terminated), replacing any
+ * non-printable byte with '?'.  ut_host is set by telnetd from the network
+ * peer, so printing it raw would inject terminal-escape sequences into the
+ * operator's terminal (WHO-01).
+ */
 static void field(char *dst, const char *src, size_t n)
 {
-    memcpy(dst, src, n);
-    dst[n] = '\0';
+    size_t i;
+    for (i = 0; i < n && src[i] != '\0'; i++) {
+        unsigned char c = (unsigned char)src[i];
+        dst[i] = (c >= 0x20 && c < 0x7f) ? (char)c : '?';
+    }
+    dst[i] = '\0';
 }
 
 int main(int argc, char **argv)

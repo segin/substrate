@@ -21,10 +21,19 @@
 #include <dirent.h>
 #include <utmp.h>
 
+/*
+ * Copy a utmp char field, replacing non-printable bytes with '?'. ut_host is
+ * attacker-influenced (set by telnetd from the peer), so a raw print would
+ * inject terminal-escape sequences into the operator's terminal (W-01).
+ */
 static void field(char *dst, const char *src, size_t n)
 {
-    memcpy(dst, src, n);
-    dst[n] = '\0';
+    size_t i;
+    for (i = 0; i < n && src[i] != '\0'; i++) {
+        unsigned char c = (unsigned char)src[i];
+        dst[i] = (c >= 0x20 && c < 0x7f) ? (char)c : '?';
+    }
+    dst[i] = '\0';
 }
 
 /* Read a small /proc file into buf (NUL-terminated). */
