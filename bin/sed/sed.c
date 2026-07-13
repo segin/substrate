@@ -40,7 +40,11 @@ usage(void)
         "  -s            treat each file separately (reset line counter)\n"
         "  -S            sandbox mode (disable r/R/w/W/e commands)\n"
         "  -z            use NUL as line delimiter\n"
-        "  -l width      set l-command wrap width (default: 70)\n",
+        "  -l width      set l-command wrap width (default: 70)\n"
+        "\n"
+        "SECURITY: without -S, a sed script can read and write arbitrary\n"
+        "files (r/R/w/W) and run shell commands (e, s///e). Always pass -S\n"
+        "when running a script from an untrusted source.\n",
         stderr);
 }
 
@@ -110,7 +114,7 @@ process_files(int argc, char **argv, int optind)
 #endif
             if (!tmpfp) {
                 warn("cannot create temp '%s': %s", tmpname, strerror(errno));
-                if (tmpfd >= 0) close(tmpfd);
+                if (tmpfd >= 0) { close(tmpfd); unlink(tmpname); } /* SED-09 */
                 free(tmpname); fclose(fp); ret = 1; continue;
             }
 

@@ -119,8 +119,10 @@ sed_do_subst(subst_t *sub, dynbuf_t *pat)
     const char *text = pat->buf ? pat->buf : "";
     size_t      tlen = pat->len;
 
-    /* Compile fresh regex for each substitution (workaround for
-     * regex_t statefulness bug: object is broken after first use). */
+    /* Compile the pattern ONCE and reuse it for every match position:
+     * regex_match() takes a const regex_t* and does not mutate the object,
+     * so the old per-iteration recompile was pure CPU-DoS overhead on lines
+     * with many matches (SED-06). */
     regex_err_t compile_err;
     regex_t *re = regex_compile(sub->pat, sub->reflags, &compile_err);
     if (!re) return 0;
@@ -136,12 +138,10 @@ sed_do_subst(subst_t *sub, dynbuf_t *pat)
     int occur   = 0;
 
     while (pos <= tlen) {
-        /* Must compile fresh each iteration: regex_t is stateful and breaks
-         * after first use (library bug). */
-        regex_free(re);
-        re = regex_compile(sub->pat, sub->reflags, &compile_err);
-        if (!re) break;
         regex_err_t err;
+        /* Reset the capture vector so an unset group reads as (size_t)-1
+         * rather than uninitialised heap (SED-08). */
+        for (size_t k = 0; k < ncaps * 2; k++) caps[k] = (size_t)-1;
         ssize_t rc = regex_match(re, text + pos, tlen - pos,
                                  caps, ncaps * 2, &err);
         if ((int)rc < 0) break;
@@ -451,7 +451,13 @@ static int
 run_cmds(cmd_t *start)
 {
     cmd_t *c = start;
+    /* Bound the number of command steps per input line so an untrusted
+     * script cannot hang the process with an unconditional branch loop
+     * (e.g. `:x;bx`). The cap is far above any legitimate use (SED-10). */
+    unsigned long steps = 0;
     while (c) {
+        if (++steps > 100000000UL)
+            die("script exceeded command-step limit (branch loop?)");
         bool match = addr_matches(c);
         if (!match) {
             if (c->type == C_LBRACE && c->end_block)
