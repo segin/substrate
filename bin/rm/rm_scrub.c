@@ -34,6 +34,10 @@ static int pass(int fd, off_t len, uint8_t byte)
             free(buf);
             return -1;
         }
+        if (w == 0) {           /* no progress: avoid an infinite loop (RM-06) */
+            free(buf);
+            return -1;
+        }
         remaining -= w;
     }
     free(buf);

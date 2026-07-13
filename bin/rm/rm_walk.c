@@ -131,6 +131,13 @@ rm_remove_directory(struct rm_walk_state *state, int parent_fd,
     int directory_fd;
     int result;
 
+    /* Bound recursion so a very deep tree can't exhaust the C stack or
+     * (with one held-open fd per level) RLIMIT_NOFILE mid-delete (RM-01). */
+    if (state->depth >= RM_MAX_DEPTH) {
+        rm_report_errno(state->opts, display_path, ELOOP);
+        return RM_WALK_FAILED;
+    }
+
     if (state->opts->one_file_system && directory_st->st_dev != boundary_dev) {
         rm_report_boundary_skip(state->opts, display_path);
         return RM_WALK_SKIPPED;
@@ -158,6 +165,26 @@ rm_remove_directory(struct rm_walk_state *state, int parent_fd,
         return RM_WALK_FAILED;
     }
 
+    /*
+     * Re-verify the file-system boundary against the actually-opened fd, not
+     * the pre-openat fstatat: a rename swap between the two could otherwise
+     * let --one-file-system descend across the boundary (RM-03).
+     */
+    if (state->opts->one_file_system) {
+        struct stat opened_st;
+        if (fstat(directory_fd, &opened_st) != 0) {
+            rm_report_errno(state->opts, display_path, errno);
+            (void)closedir(directory_stream);
+            return RM_WALK_FAILED;
+        }
+        if (opened_st.st_dev != boundary_dev) {
+            rm_report_boundary_skip(state->opts, display_path);
+            (void)closedir(directory_stream);
+            return RM_WALK_SKIPPED;
+        }
+    }
+
+    state->depth++;
     result = RM_WALK_REMOVED;
     for (;;) {
         struct dirent *entry;
@@ -191,15 +218,19 @@ rm_remove_directory(struct rm_walk_state *state, int parent_fd,
             free(child_display);
 
             if (child_result == RM_WALK_FAILED) {
+                /* Record the failure but keep removing the remaining
+                 * siblings rather than abandoning them (RM-02). The
+                 * non-empty parent will then fail its own rmdir below. */
                 result = RM_WALK_FAILED;
-                break;
+                continue;
             }
-            if (child_result == RM_WALK_SKIPPED) {
+            if (child_result == RM_WALK_SKIPPED && result != RM_WALK_FAILED) {
                 result = RM_WALK_SKIPPED;
             }
         }
     }
 
+    state->depth--;
     if (closedir(directory_stream) != 0 && result != RM_WALK_FAILED) {
         rm_report_errno(state->opts, display_path, errno);
         result = RM_WALK_FAILED;
@@ -283,10 +314,13 @@ rm_remove_root(struct rm_walk_state *state)
             free(child_display);
 
             if (child_result == RM_WALK_FAILED) {
+                /* Record the failure but keep removing the remaining
+                 * siblings rather than abandoning them (RM-02). The
+                 * non-empty parent will then fail its own rmdir below. */
                 result = RM_WALK_FAILED;
-                break;
+                continue;
             }
-            if (child_result == RM_WALK_SKIPPED) {
+            if (child_result == RM_WALK_SKIPPED && result != RM_WALK_FAILED) {
                 result = RM_WALK_SKIPPED;
             }
         }

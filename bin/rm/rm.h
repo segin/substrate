@@ -34,6 +34,7 @@ struct rm_walk_state {
     const struct rm_options *opts;
     FILE *prompt_input;
     volatile sig_atomic_t *interrupted;
+    int depth;            /* current recursion depth (RM-01) */
 };
 
 enum rm_walk_result {
@@ -41,5 +42,8 @@ enum rm_walk_result {
     RM_WALK_REMOVED = 0,
     RM_WALK_SKIPPED = 1,
 };
+
+/* Maximum directory recursion depth for rm -r (RM-01). */
+#define RM_MAX_DEPTH 512
 
 #endif

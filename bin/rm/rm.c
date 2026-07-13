@@ -117,6 +117,7 @@ int main(int argc, char *argv[])
     state.opts = &opts;
     state.prompt_input = stdin;
     state.interrupted = &g_interrupted;
+    state.depth = 0;
 
     for (int i = opts.operand_start; i < argc; i++) {
         if (g_interrupted) break;
