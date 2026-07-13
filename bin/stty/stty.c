@@ -20,6 +20,7 @@
 #include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -485,13 +486,20 @@ static int alldigits(const char *s)
 	return 1;
 }
 
-static long getnum(const char *s, const char *what)
+/*
+ * Parse an integer operand, rejecting out-of-range values (including negatives)
+ * before they are narrowed into a small field.  Without this a
+ * "stty rows -1" / "stty min 99999" silently wrapped through
+ * unsigned short / cc_t.
+ */
+static long getnum_range(const char *s, const char *what, long lo, long hi)
 {
 	char *end;
-	long v;
+	long  v;
 
+	errno = 0;
 	v = strtol(s, &end, 10);
-	if (end == s || *end)
+	if (end == s || *end || errno == ERANGE || v < lo || v > hi)
 		fatal2("invalid integer argument", what);
 	return v;
 }
@@ -507,12 +515,21 @@ static int parse_cc(const char *s)
 			return 127;
 		return toupper((unsigned char)s[1]) & 0x1f;
 	}
-	if (s[0] == '0' && (s[1] == 'x' || s[1] == 'X'))
-		return (int)strtol(s, &end, 16) & 0xff;
-	if (s[0] == '0' && s[1] != '\0')
-		return (int)strtol(s, &end, 8) & 0xff;
-	if (isdigit((unsigned char)s[0]))
-		return (int)strtol(s, &end, 10) & 0xff;
+	if (s[0] == '0' && (s[1] == 'x' || s[1] == 'X')) {
+		long v = strtol(s, &end, 16);
+		if (end == s || *end) fatal2("invalid control-character value", s);
+		return (int)v & 0xff;
+	}
+	if (s[0] == '0' && s[1] != '\0') {
+		long v = strtol(s, &end, 8);
+		if (end == s || *end) fatal2("invalid control-character value", s);
+		return (int)v & 0xff;
+	}
+	if (isdigit((unsigned char)s[0])) {
+		long v = strtol(s, &end, 10);
+		if (end == s || *end) fatal2("invalid control-character value", s);
+		return (int)v & 0xff;
+	}
 	if (s[1] == '\0')
 		return (unsigned char)s[0];
 	fatal2("invalid control-character value", s);
@@ -557,9 +574,10 @@ static int set_operand(int idx, int argc, char **argv, struct termios *t,
 			return 1;
 		}
 
-	/* character size */
-	if (!neg && !strncmp(name, "cs", 2) && name[3] == '\0' &&
-	    name[2] >= '5' && name[2] <= '8') {
+	/* character size.  Test name[2] (the size digit) before name[3]
+	 * so a two-char "cs" doesn't read one byte past its NUL. */
+	if (!neg && name[0] == 'c' && name[1] == 's' &&
+	    name[2] >= '5' && name[2] <= '8' && name[3] == '\0') {
 		tcflag_t sz = name[2] == '5' ? CS5 : name[2] == '6' ? CS6
 		            : name[2] == '7' ? CS7 : CS8;
 		t->c_cflag = (t->c_cflag & ~CSIZE) | sz;
@@ -677,37 +695,40 @@ static int set_operand(int idx, int argc, char **argv, struct termios *t,
 
 			if (idx + 1 >= argc)
 				fatal2("missing argument to", op);
-			t->c_cc[ci] = (cc_t)getnum(argv[idx + 1], op);
+			/* cc_t is a single byte: 0..255. */
+			t->c_cc[ci] = (cc_t)getnum_range(argv[idx + 1], op, 0, 255);
 			return 2;
 		}
 		if (!strcmp(name, "rows") || !strcmp(name, "cols") ||
 		    !strcmp(name, "columns")) {
 			if (idx + 1 >= argc)
 				fatal2("missing argument to", op);
+			/* ws_row/ws_col are unsigned short: 0..65535. */
 			if (name[0] == 'r')
-				ws->ws_row =
-				    (unsigned short)getnum(argv[idx + 1], op);
+				ws->ws_row = (unsigned short)
+				    getnum_range(argv[idx + 1], op, 0, 65535);
 			else
-				ws->ws_col =
-				    (unsigned short)getnum(argv[idx + 1], op);
+				ws->ws_col = (unsigned short)
+				    getnum_range(argv[idx + 1], op, 0, 65535);
 			*ws_dirty = 1;
 			return 2;
 		}
 		if (!strcmp(name, "ispeed") || !strcmp(name, "ospeed")) {
 			if (idx + 1 >= argc)
 				fatal2("missing argument to", op);
+			/* Reject a negative baud rate. */
 			if (name[0] == 'i')
-				t->c_ispeed =
-				    (speed_t)getnum(argv[idx + 1], op);
+				t->c_ispeed = (speed_t)
+				    getnum_range(argv[idx + 1], op, 0, INT_MAX);
 			else
-				t->c_ospeed =
-				    (speed_t)getnum(argv[idx + 1], op);
+				t->c_ospeed = (speed_t)
+				    getnum_range(argv[idx + 1], op, 0, INT_MAX);
 			return 2;
 		}
 		if (!strcmp(name, "line")) {
 			if (idx + 1 >= argc)
 				fatal2("missing argument to", op);
-			t->c_line = (cc_t)getnum(argv[idx + 1], op);
+			t->c_line = (cc_t)getnum_range(argv[idx + 1], op, 0, 255);
 			return 2;
 		}
 	}
