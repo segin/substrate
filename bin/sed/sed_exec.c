@@ -417,6 +417,23 @@ print_first_line_to(FILE *fp)
     if (!nl) fputc('\n', fp);
 }
 
+/*
+ * Resolve a w/W/s///w target to its stdio stream, opening (and truncating)
+ * it lazily on the first actual write.  Returns NULL — writing nothing — in
+ * sandbox mode, so -S never creates or truncates a file (SED-01).
+ */
+static FILE *
+wfile_fp(int idx)
+{
+    if (G.sandbox || idx < 0 || idx >= G.write_count) return NULL;
+    if (!G.write_fps[idx]) {
+        G.write_fps[idx] = fopen(G.write_files[idx], "w");
+        if (!G.write_fps[idx])
+            die("cannot open '%s': %s", G.write_files[idx], strerror(errno));
+    }
+    return G.write_fps[idx];
+}
+
 /* ------------------------------------------------------------------ */
 /* Internal return codes from run_cmds                                  */
 /* ------------------------------------------------------------------ */
@@ -603,8 +620,10 @@ run_cmds(cmd_t *start)
             if (r > 0) {
                 G.subst_flag = true;
                 if (c->subst->print)  print_pat();
-                if (c->subst->wfile >= 0)
-                    print_pat_to(G.write_fps[c->subst->wfile]);
+                if (c->subst->wfile >= 0) {
+                    FILE *wf = wfile_fp(c->subst->wfile);
+                    if (wf) print_pat_to(wf);
+                }
             }
             break;
         }
@@ -683,15 +702,17 @@ run_cmds(cmd_t *start)
             }
             break;
 
-        case C_WRITE:
-            if (!G.sandbox && c->num >= 0)
-                print_pat_to(G.write_fps[c->num]);
+        case C_WRITE: {
+            FILE *wf = wfile_fp(c->num);
+            if (wf) print_pat_to(wf);
             break;
+        }
 
-        case C_WRITELN:
-            if (!G.sandbox && c->num >= 0)
-                print_first_line_to(G.write_fps[c->num]);
+        case C_WRITELN: {
+            FILE *wf = wfile_fp(c->num);
+            if (wf) print_first_line_to(wf);
             break;
+        }
 
         /* ---- misc ---- */
 
