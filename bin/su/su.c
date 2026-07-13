@@ -19,6 +19,43 @@
 #include <termios.h>
 #include <unistd.h>
 
+extern char **environ;
+
+/*
+ * Remove environment variables that let an unprivileged caller subvert the
+ * dynamic loader or the target shell's startup across the privilege
+ * boundary. Without this, `LD_PRELOAD=/tmp/evil.so su -c cmd` (or IFS / ENV
+ * / BASH_ENV) executes attacker code as the target uid. Called before exec.
+ */
+static void sanitize_environment(void)
+{
+	static const char *const unsafe[] = {
+		"IFS", "ENV", "BASH_ENV", "CDPATH", "SHELLOPTS", "BASHOPTS",
+		"GLOBIGNORE", "PS1", "PS2", "PS4", "PROMPT_COMMAND", NULL
+	};
+
+	/* Strip every LD_* / _RLD* entry; unsetenv() shifts environ, so on a
+	 * removal we re-examine the same index. */
+	for (int i = 0; environ[i] != NULL; ) {
+		if (strncmp(environ[i], "LD_", 3) == 0 ||
+		    strncmp(environ[i], "_RLD", 4) == 0) {
+			char name[128];
+			const char *eq = strchr(environ[i], '=');
+			size_t n = eq ? (size_t)(eq - environ[i])
+			              : strlen(environ[i]);
+			if (n >= sizeof(name))
+				n = sizeof(name) - 1;
+			memcpy(name, environ[i], n);
+			name[n] = '\0';
+			unsetenv(name);
+		} else {
+			i++;
+		}
+	}
+	for (int i = 0; unsafe[i] != NULL; i++)
+		unsetenv(unsafe[i]);
+}
+
 #define SU_PASS_MAX 128
 
 static int
@@ -168,6 +205,8 @@ main(int argc, char **argv)
         perror("su: setuid");
         return 1;
     }
+
+    sanitize_environment();
 
     if (login_shell) {
         setenv("HOME", pw->pw_dir, 1);
