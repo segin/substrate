@@ -4,6 +4,7 @@
 #include <grp.h>
 #include <pwd.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -12,11 +13,15 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 
-#ifdef NATIVE_BUILD
 #include <fcntl.h>
-#endif
 
 #define CHOWN_MODE_BITS (0)
+
+/*
+ * Bound recursion so a deep (or cyclic) tree can't exhaust the C stack or
+ * RLIMIT_NOFILE (one dir fd is held open per level during descent).
+ */
+#define CHOWN_MAX_DEPTH 512
 
 struct visited_dir {
     dev_t dev;
@@ -35,6 +40,8 @@ struct chown_options {
     bool force;
     bool change_symlink;
     bool use_reference;
+    bool verbose;        /* -v: report every file */
+    bool changes_only;   /* -c: report only files actually changed */
     enum walk_policy policy;
 
     const char *reference_path;
@@ -60,8 +67,8 @@ static void
 usage(const char *progname)
 {
     fprintf(stderr,
-        "Usage: %s [-R [-H | -L | -P]] [-fhv] owner[:group] file ...\n"
-        "       %s [-R [-H | -L | -P]] [-fhv] -r file file ...\n",
+        "Usage: %s [-R [-H | -L | -P]] [-cfhv] owner[:group] file ...\n"
+        "       %s [-R [-H | -L | -P]] [-cfhv] -r file file ...\n",
         progname, progname);
 }
 
@@ -99,17 +106,7 @@ warn_message_path(struct chown_context *ctx, const char *path, const char *msg)
     }
 }
 
-static int
-retry_lstat(const char *path, struct stat *st)
-{
-    int rc;
-
-    do {
-        rc = lstat(path, st);
-    } while (rc < 0 && errno == EINTR);
-    return rc;
-}
-
+/* Used only for the --reference file, which is a single up-front stat. */
 static int
 retry_stat(const char *path, struct stat *st)
 {
@@ -121,37 +118,32 @@ retry_stat(const char *path, struct stat *st)
     return rc;
 }
 
+/*
+ * fd-relative stat/chown, EINTR-retried.  The descent uses these against a
+ * pinned parent directory fd + a single path component, so an attacker who
+ * swaps an intermediate directory for a symlink between check and act can no
+ * longer redirect the operation outside the tree (CHOWN-01/07).
+ */
 static int
-retry_chown(const char *path, uid_t uid, gid_t gid)
+retry_fstatat(int dirfd, const char *name, struct stat *st, int flag)
 {
     int rc;
 
     do {
-        rc = chown(path, uid, gid);
+        rc = fstatat(dirfd, name, st, flag);
     } while (rc < 0 && errno == EINTR);
     return rc;
 }
 
 static int
-retry_lchown(const char *path, uid_t uid, gid_t gid)
+retry_fchownat(int dirfd, const char *name, uid_t uid, gid_t gid, int flag)
 {
     int rc;
 
     do {
-        rc = lchown(path, uid, gid);
+        rc = fchownat(dirfd, name, uid, gid, flag);
     } while (rc < 0 && errno == EINTR);
     return rc;
-}
-
-static DIR *
-retry_opendir(const char *path)
-{
-    DIR *dir;
-
-    do {
-        dir = opendir(path);
-    } while (dir == NULL && errno == EINTR);
-    return dir;
 }
 
 static int
@@ -187,6 +179,10 @@ path_join(const char *base, const char *name)
     const size_t base_len = strlen(base);
     const size_t name_len = strlen(name);
     const bool need_slash = base_len > 0 && base[base_len - 1] != '/';
+    /* Guard the length arithmetic against size_t wrap on 32-bit (CHOWN-11). */
+    if (base_len > SIZE_MAX - name_len - 2u) {
+        return NULL;
+    }
     const size_t total = base_len + (need_slash ? 1u : 0u) + name_len + 1u;
     char *joined = (char *)malloc(total);
 
@@ -242,6 +238,21 @@ visited_add(struct chown_context *ctx, dev_t dev, ino_t ino)
     ctx->visited_count++;
 
     return 0;
+}
+
+/*
+ * Pop the directory pushed by the matching visited_add on the way out of a
+ * subtree.  The set therefore tracks only the *ancestors* on the current
+ * descent path, so an A/B/A hardlink cycle is caught while a directory
+ * legitimately reachable from two sibling branches is not falsely skipped
+ * (CHGRP-08/09 ancestor-only set).
+ */
+static void
+visited_pop(struct chown_context *ctx)
+{
+    if (ctx->visited_count > 0) {
+        ctx->visited_count--;
+    }
 }
 
 /* Parse a whole-string non-negative id; 0 + *out on success, -1 otherwise. */
@@ -325,63 +336,97 @@ resolve_group_gid(const char *name, gid_t *out)
     return -1;
 }
 
+/*
+ * Apply the requested ownership to `name` relative to `dirfd` (AT_FDCWD +
+ * full path for a top-level operand).  `stat_st` is the pre-change stat used
+ * only to decide whether -v/-c should announce a real change.
+ */
 static void
-apply_owner_to_entry(struct chown_context *ctx, const char *path,
-    bool is_symlink)
+apply_at(struct chown_context *ctx, int dirfd, const char *name,
+    const char *display, bool is_symlink, const struct stat *stat_st)
 {
     uid_t uid;
     gid_t gid;
-    int rc;
+    int   flag;
+    bool  changed = false;
 
-    uid = ctx->opts.uid;
-    gid = ctx->opts.gid;
-
-    if (ctx->opts.use_reference) {
-        uid = ctx->opts.reference_uid;
-        gid = ctx->opts.reference_gid;
-    }
-
+    uid = ctx->opts.use_reference ? ctx->opts.reference_uid : ctx->opts.uid;
+    gid = ctx->opts.use_reference ? ctx->opts.reference_gid : ctx->opts.gid;
     if (!ctx->opts.uid_set) {
-        uid = -1;
+        uid = (uid_t)-1;
     }
     if (!ctx->opts.gid_set) {
-        gid = -1;
+        gid = (gid_t)-1;
     }
 
-    if (ctx->opts.change_symlink && is_symlink) {
-        rc = retry_lchown(path, uid, gid);
-    } else {
-        rc = retry_chown(path, uid, gid);
+    if (stat_st != NULL) {
+        if (uid != (uid_t)-1 && stat_st->st_uid != uid) {
+            changed = true;
+        }
+        if (gid != (gid_t)-1 && stat_st->st_gid != gid) {
+            changed = true;
+        }
     }
 
-    if (rc < 0) {
-        warn_errno_path(ctx, path, NULL);
+    /* -h operates on the symlink itself; otherwise the change follows it. */
+    flag = (ctx->opts.change_symlink && is_symlink) ? AT_SYMLINK_NOFOLLOW : 0;
+    if (retry_fchownat(dirfd, name, uid, gid, flag) < 0) {
+        warn_errno_path(ctx, display, NULL);
+        return;
+    }
+
+    /* -v reports every file; -c reports only files actually changed. */
+    if (ctx->opts.verbose || ctx->opts.changes_only) {
+        if (changed) {
+            printf("changed ownership of '%s'\n", display);
+        } else if (ctx->opts.verbose) {
+            printf("ownership of '%s' retained\n", display);
+        }
     }
 }
 
-static void process_path(struct chown_context *ctx, const char *path,
-    bool cmdline);
+static void process_entry_at(struct chown_context *ctx, int dirfd,
+    const char *name, const char *display, bool cmdline, int depth);
 
+/*
+ * Descend into the directory referenced by `dirfd` (which this function
+ * takes ownership of and closes).  Every child is stat'd and modified
+ * fd-relative to `dirfd`, so a component swapped for a symlink after the
+ * parent was opened cannot redirect the walk outside the tree.
+ */
 static void
-walk_directory(struct chown_context *ctx, const char *path, dev_t dev, ino_t ino)
+walk_fd(struct chown_context *ctx, int owned_fd, const char *display,
+    dev_t dev, ino_t ino, int depth)
 {
-    DIR *dir;
+    DIR           *dir;
     struct dirent *de;
-    int visit_rc;
+    int            visit_rc;
 
+    if (depth >= CHOWN_MAX_DEPTH) {
+        errno = ELOOP;
+        warn_errno_path(ctx, display, "recursion too deep");
+        (void)close(owned_fd);
+        return;
+    }
+
+    /* Ancestor-only cycle set: pushed here, popped on the way out. */
     visit_rc = visited_add(ctx, dev, ino);
     if (visit_rc < 0) {
         errno = ENOMEM;
-        warn_errno_path(ctx, path, "cannot track visited directory");
+        warn_errno_path(ctx, display, "cannot track visited directory");
+        (void)close(owned_fd);
         return;
     }
-    if (visit_rc > 0) {
+    if (visit_rc > 0) {          /* already an ancestor -> cycle */
+        (void)close(owned_fd);
         return;
     }
 
-    dir = retry_opendir(path);
+    dir = fdopendir(owned_fd);
     if (dir == NULL) {
-        warn_errno_path(ctx, path, "cannot read directory");
+        warn_errno_path(ctx, display, "cannot read directory");
+        (void)close(owned_fd);
+        visited_pop(ctx);
         return;
     }
 
@@ -395,7 +440,7 @@ walk_directory(struct chown_context *ctx, const char *path, dev_t dev, ino_t ino
                 continue;
             }
             if (errno != 0) {
-                warn_errno_path(ctx, path, "directory traversal failed");
+                warn_errno_path(ctx, display, "directory traversal failed");
             }
             break;
         }
@@ -404,24 +449,26 @@ walk_directory(struct chown_context *ctx, const char *path, dev_t dev, ino_t ino
             continue;
         }
 
-        child = path_join(path, de->d_name);
+        child = path_join(display, de->d_name);
         if (child == NULL) {
             errno = ENOMEM;
-            warn_errno_path(ctx, path, "out of memory while traversing");
+            warn_errno_path(ctx, display, "out of memory while traversing");
             break;
         }
 
-        process_path(ctx, child, false);
+        process_entry_at(ctx, dirfd(dir), de->d_name, child, false, depth);
         free(child);
     }
 
     if (retry_closedir(dir) < 0) {
-        warn_errno_path(ctx, path, "cannot close directory");
+        warn_errno_path(ctx, display, "cannot close directory");
     }
+    visited_pop(ctx);
 }
 
 static void
-process_path(struct chown_context *ctx, const char *path, bool cmdline)
+process_entry_at(struct chown_context *ctx, int dirfd, const char *name,
+    const char *display, bool cmdline, int depth)
 {
     struct stat lst;
     struct stat st_target;
@@ -432,10 +479,9 @@ process_path(struct chown_context *ctx, const char *path, bool cmdline)
     bool follow_change;
     bool have_target = false;
     bool should_change = true;
-    bool should_recurse = false;
 
-    if (retry_lstat(path, &lst) < 0) {
-        warn_errno_path(ctx, path, NULL);
+    if (retry_fstatat(dirfd, name, &lst, AT_SYMLINK_NOFOLLOW) < 0) {
+        warn_errno_path(ctx, display, NULL);
         return;
     }
 
@@ -455,13 +501,14 @@ process_path(struct chown_context *ctx, const char *path, bool cmdline)
     }
 
     if (is_symlink && (follow_walk || follow_change)) {
-        if (retry_stat(path, &st_target) == 0) {
+        if (retry_fstatat(dirfd, name, &st_target, 0) == 0) {
             have_target = true;
         } else if (follow_change) {
-            warn_errno_path(ctx, path, NULL);
+            warn_errno_path(ctx, display, NULL);
             return;
         } else if (follow_walk) {
-            warn_message_path(ctx, path, "cannot follow symbolic link during traversal");
+            warn_message_path(ctx, display,
+                "cannot follow symbolic link during traversal");
         }
     }
 
@@ -474,12 +521,13 @@ process_path(struct chown_context *ctx, const char *path, bool cmdline)
         should_change = false;
     }
 
-    if (ctx->opts.recursive && is_symlink && !ctx->opts.change_symlink && !follow_walk) {
+    if (ctx->opts.recursive && is_symlink && !ctx->opts.change_symlink &&
+        !follow_walk) {
         should_change = false;
     }
 
     if (should_change) {
-        apply_owner_to_entry(ctx, path, is_symlink);
+        apply_at(ctx, dirfd, name, display, is_symlink, stat_st);
     }
 
     if (!ctx->opts.recursive) {
@@ -491,9 +539,32 @@ process_path(struct chown_context *ctx, const char *path, bool cmdline)
         walk_stat = &st_target;
     }
 
-    should_recurse = S_ISDIR(walk_stat->st_mode);
-    if (should_recurse) {
-        walk_directory(ctx, path, walk_stat->st_dev, walk_stat->st_ino);
+    if (S_ISDIR(walk_stat->st_mode)) {
+        int flags = O_RDONLY | O_DIRECTORY;
+        int cfd;
+        struct stat opened;
+
+        /* Refuse to follow the entry unless it is a symlink we deliberately
+         * traverse (-L, or -H at the command line); the kernel now enforces
+         * O_NOFOLLOW, so a swapped-in symlink yields ELOOP (CHOWN-01/07). */
+        if (!(is_symlink && follow_walk)) {
+            flags |= O_NOFOLLOW;
+        }
+
+        do {
+            cfd = openat(dirfd, name, flags);
+        } while (cfd < 0 && errno == EINTR);
+        if (cfd < 0) {
+            warn_errno_path(ctx, display, "cannot read directory");
+            return;
+        }
+        if (fstat(cfd, &opened) < 0) {
+            warn_errno_path(ctx, display, NULL);
+            (void)close(cfd);
+            return;
+        }
+        /* walk_fd takes ownership of cfd. */
+        walk_fd(ctx, cfd, display, opened.st_dev, opened.st_ino, depth + 1);
     }
 }
 
@@ -654,7 +725,9 @@ parse_args(struct chown_context *ctx, int argc, char *argv[], int *file_index)
             } else if (arg[j] == 'h') {
                 ctx->opts.change_symlink = true;
             } else if (arg[j] == 'v') {
-                /* verbose - no-op, ignore */
+                ctx->opts.verbose = true;      /* report every file */
+            } else if (arg[j] == 'c') {
+                ctx->opts.changes_only = true; /* report only real changes */
             } else if (arg[j] == 'r') {
                 ctx->opts.use_reference = true;
                 if (i + 1 >= argc) {
@@ -734,7 +807,7 @@ main(int argc, char *argv[])
     }
 
     for (i = file_index; i < argc; ++i) {
-        process_path(&ctx, argv[i], true);
+        process_entry_at(&ctx, AT_FDCWD, argv[i], argv[i], true, 0);
     }
 
     free(ctx.visited);
