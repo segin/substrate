@@ -19,12 +19,12 @@ int main(int argc, char *argv[]) {
         switch (opt) {
         case 'f': flags |= MNT_FORCE; break;
         default:
-            fprintf(stderr, "usage: %s [-f] target\n", argv[0]);
+            fprintf(stderr, "usage: umount [-f] target\n");
             return 1;
         }
     }
     if (argc - optind != 1) {
-        fprintf(stderr, "usage: %s [-f] target\n", argv[0]);
+        fprintf(stderr, "usage: umount [-f] target\n");
         return 1;
     }
     const char *target = argv[optind];
