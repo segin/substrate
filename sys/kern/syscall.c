@@ -658,6 +658,41 @@ static int kern_open_from(const char *path, int flags, int mode, fs_node_t *root
         return -EEXIST;
     }
 
+    /*
+     * O_NOFOLLOW: if the final path component is itself a symbolic link,
+     * refuse to open it (-ELOOP).  vfs_perso_lookup() above already
+     * followed it, so re-resolve the parent directory and finddir() the
+     * last name to inspect the *unfollowed* entry.  This is what makes
+     * fd-relative O_NOFOLLOW descent actually safe on Substrate — tar/cp/mv
+     * extraction and a future chown/chgrp -R rely on the kernel enforcing
+     * it, not just on the flag being accepted and ignored.
+     */
+    if ((flags & O_NOFOLLOW) && !(flags & O_CREAT)) {
+        fs_node_t *lparent = NULL;
+        const char *lname = NULL;
+        if (kern_resolve_parent_at(path, root, cwd, &lparent, &lname) == 0 &&
+            lparent->finddir) {
+            char lnamebuf[256];
+            size_t ln = 0;
+            while (lname[ln] && ln < sizeof(lnamebuf) - 1) {
+                lnamebuf[ln] = lname[ln];
+                ln++;
+            }
+            lnamebuf[ln] = '\0';
+            fs_node_t *lnode = lparent->finddir(lparent, lnamebuf);
+            if (lnode && (lnode->flags & 0x7) == FS_SYMLINK) {
+                proc_clear_fd(current_process, fd);
+                return -ELOOP;
+            }
+        }
+    }
+
+    /* O_DIRECTORY: the resolved target must be a directory. */
+    if ((flags & O_DIRECTORY) && (node->flags & 0x7) != FS_DIRECTORY) {
+        proc_clear_fd(current_process, fd);
+        return -ENOTDIR;
+    }
+
     if (vfs_may_open_groups(node,
             current_process ? current_process->euid : 0,
             current_process ? current_process->egid : 0,

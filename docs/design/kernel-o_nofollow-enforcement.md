@@ -43,19 +43,29 @@ are unaffected:
 2. **`O_DIRECTORY`**: if the resolved target is not `FS_DIRECTORY`, return
    `-ENOTDIR`.
 
-The patch builds clean (`make -C sys`, `-Werror`). It is **not yet committed**
-because it modifies the kernel's core `open()` path and must be boot-verified
-in a working Substrate boot environment first — the local `qemu -kernel`
-images in the dev checkout do not currently reach userland (the *unmodified*
-kernel panics identically with "No init found"), so an end-to-end boot +
-symlink-swap repro could not be completed here.
+The patch builds clean (`make -C sys`, `-Werror`) and has been **APPLIED and
+boot-verified** (2026-07).
 
-## Verification plan (once a bootable image is available)
+## Verification (completed)
 
-1. Boot the patched kernel; confirm it reaches login (proves the common
-   open path — init, mounts, exec, shell — is unaffected).
-2. Repro: `ln -s /etc target; open("target", O_DIRECTORY|O_NOFOLLOW)` must
-   return `ELOOP`; a real directory must still open.
-3. Re-run the tar symlink-dir extraction repro on-target and confirm the
-   victim file is untouched.
-4. Then land the chown/chgrp fd-relative `-R` descent rewrite on top.
+The dev checkout's default `rootfs.img` was corrupted (prior debugfs
+mass-injection) and unbootable on the *unmodified* kernel too; a clean image
+baked from `dist/` with `mke2fs -d` boots init fine. A static test binary
+(symlink→dir open with `O_DIRECTORY|O_NOFOLLOW`, `O_DIRECTORY` on a real dir,
+`O_DIRECTORY` on a regular file) was installed as `/sbin/init` and run under
+`qemu -kernel`:
+
+| test                              | unpatched              | patched            |
+|-----------------------------------|------------------------|--------------------|
+| `O_NOFOLLOW` on symlink→dir        | FAIL (followed link)   | **PASS (ELOOP)**   |
+| `O_DIRECTORY` on real directory    | PASS                   | PASS               |
+| `O_DIRECTORY` on regular file      | FAIL (opened as dir)   | **PASS (ENOTDIR)** |
+
+The patched kernel boots cleanly (init, mounts, exec all work), confirming the
+common open path — which never sets these flags — is unaffected.
+
+## Follow-on
+
+With the kernel now enforcing `O_NOFOLLOW`, the tar/cp/mv symlink-swap
+hardening is effective on-target, and the chown/chgrp fd-relative `-R` descent
+rewrite (CU-CHOWN-01/07/08, CU-CHGRP-01/02/05/06) can be built on top.
