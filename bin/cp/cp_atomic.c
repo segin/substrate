@@ -102,12 +102,17 @@ int cp_atomic_open_temp(const char *dest_path, mode_t mode,
 int cp_atomic_commit(int fd, const char *tmp_path, const char *dest_path)
 {
     char *dir;
+    int   rc = cp_atomic_fsync_fd(fd);
 
-    if (cp_atomic_fsync_fd(fd) != 0) {
-        return -1;
+    /*
+     * Always consume (close) the fd, even when fsync failed, so the caller
+     * can unconditionally clear its copy and never double-close it on the
+     * cleanup path (CP-04).
+     */
+    if (close(fd) != 0 && rc == 0) {
+        rc = -1;
     }
-
-    if (close(fd) != 0) {
+    if (rc != 0) {
         return -1;
     }
 

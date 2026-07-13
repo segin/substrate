@@ -189,6 +189,14 @@ static int cp_prompt_overwrite(const struct cp_options *opts, const char *path)
         return 0;
     }
 
+    /* Drain the rest of the input line so leftover bytes don't spill into
+     * the next prompt (CP-11). */
+    if (memchr(buf, '\n', (size_t)n) == NULL) {
+        char c;
+        while (read(STDIN_FILENO, &c, 1) == 1 && c != '\n')
+            ;
+    }
+
     return buf[0] == 'y' || buf[0] == 'Y';
 }
 
@@ -1010,11 +1018,12 @@ static int cp_copy_regular(struct cp_context *ctx,
     }
 
     if (using_atomic) {
-        if (cp_atomic_commit(dst_fd, tmp_path, dst) != 0) {
+        int crc = cp_atomic_commit(dst_fd, tmp_path, dst);
+        dst_fd = -1;                    /* commit owns/closed the fd (CP-04) */
+        if (crc != 0) {
             cp_diag(ctx, src, dst, "atomic replace", errno);
             goto out;
         }
-        dst_fd = -1;
     } else {
 #ifdef CP_HOST_BUILD
         if (fsync(dst_fd) != 0 && errno != EINVAL) {
@@ -1099,7 +1108,10 @@ static int cp_copy_directory(struct cp_context *ctx,
             return -1;
         }
     } else {
-        if (mkdir(dst, src_st->st_mode & 0777) != 0) {
+        /* Create with owner rwx so children can be written even when the
+         * source directory is read-only (e.g. 0555); the real mode is
+         * restored after the directory is populated (CP-05). */
+        if (mkdir(dst, (src_st->st_mode & 0777) | S_IRWXU) != 0) {
             cp_diag(ctx, src, dst, "create destination directory", errno);
             return -1;
         }
@@ -1150,6 +1162,10 @@ static int cp_copy_directory(struct cp_context *ctx,
         ctx->opts->preserve_timestamps || ctx->opts->preserve_all) {
         (void)cp_preserve_metadata(ctx->opts, src, src_st, dst, -1, 0,
                                    cp_preserve_warn_bridge, ctx);
+    } else if (created) {
+        /* Restore the source directory's real mode now that it is populated
+         * (we created it u+rwx to be able to write into it) (CP-05). */
+        (void)chmod(dst, src_st->st_mode & 0777);
     }
 
     return 0;
