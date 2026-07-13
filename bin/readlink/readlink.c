@@ -70,14 +70,21 @@ static int canon(const char *name, int mode, char *resolved)
 	int nlinks = 0;
 	int missing = 0;	/* set once we pass a non-existent component (-m) */
 
+	int n;
 	if (name[0] == '/') {
 		result[0] = '/';
 		result[1] = '\0';
-		snprintf(rest, sizeof rest, "%s", name + 1);
+		n = snprintf(rest, sizeof rest, "%s", name + 1);
 	} else {
 		if (!getcwd(result, sizeof result))
 			return -1;
-		snprintf(rest, sizeof rest, "%s", name);
+		n = snprintf(rest, sizeof rest, "%s", name);
+	}
+	/* A silently-truncated snprintf would defeat the ENAMETOOLONG guard
+	 * below and canonicalize a wrong (truncated) path (READLINK). */
+	if (n < 0 || (size_t)n >= sizeof rest) {
+		errno = ENAMETOOLONG;
+		return -1;
 	}
 
 	while (*rest) {
@@ -115,10 +122,15 @@ static int canon(const char *name, int mode, char *resolved)
 		}
 
 		char cand[PATH_MAX];
+		int  cn;
 		if (strcmp(result, "/") == 0)
-			snprintf(cand, sizeof cand, "/%s", comp);
+			cn = snprintf(cand, sizeof cand, "/%s", comp);
 		else
-			snprintf(cand, sizeof cand, "%s/%s", result, comp);
+			cn = snprintf(cand, sizeof cand, "%s/%s", result, comp);
+		if (cn < 0 || (size_t)cn >= sizeof cand) {
+			errno = ENAMETOOLONG;
+			return -1;
+		}
 
 		if (missing) {		/* -m, past the first missing component */
 			if (strlcpy(result, cand, sizeof result) >= sizeof result) {
