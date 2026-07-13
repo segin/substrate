@@ -7,6 +7,11 @@
 #include <sys/wait.h>
 #include "num.h"
 
+/* Upper bound on a dc register-array index: caps a single array at ~1M
+ * entries so a hostile index can neither overflow the size arithmetic nor
+ * drive an unbounded allocation (DC-01). */
+#define DC_ARRAY_MAX (1 << 20)
+
 typedef enum { VAL_NUM, VAL_STR } val_type_t;
 
 typedef struct {
@@ -390,18 +395,32 @@ void execute(input_t *in) {
                 if (idxv->type != VAL_NUM || valv->type != VAL_NUM) {
                     fprintf(stderr, "dc: non-numeric array access\n");
                 } else {
-                    int idx = (int)bc_num_to_long(idxv->v.num);
-                    if (idx < 0) fprintf(stderr, "dc: array index out of bounds\n");
-                    else {
-                        if (!regs[r].array) {
-                            regs[r].array_len = idx + 1;
-                            regs[r].array = calloc(regs[r].array_len, sizeof(bc_num*));
-                        }
-                        if (idx >= regs[r].array_len) {
-                            int old = regs[r].array_len;
-                            regs[r].array_len = idx + 1;
-                            regs[r].array = realloc(regs[r].array, regs[r].array_len * sizeof(bc_num*));
-                            memset(regs[r].array + old, 0, (regs[r].array_len - old) * sizeof(bc_num*));
+                    long idxl = bc_num_to_long(idxv->v.num);
+                    /*
+                     * Bound the index and use size_t, overflow-checked
+                     * arithmetic, and a checked realloc.  The old code cast to
+                     * int (idx+1 overflowed at INT_MAX), multiplied int*size_t
+                     * (wraps on 32-bit -> tiny alloc then OOB memset/store),
+                     * left realloc unchecked (NULL deref + leak), and let a
+                     * moderate index drive an unbounded allocation (DC-01).
+                     */
+                    if (idxl < 0 || idxl > DC_ARRAY_MAX) {
+                        fprintf(stderr, "dc: array index out of bounds\n");
+                    } else {
+                        size_t idx = (size_t)idxl;
+                        if (idx >= (size_t)regs[r].array_len) {
+                            size_t old  = (size_t)regs[r].array_len;
+                            size_t need = idx + 1;
+                            bc_num **na = realloc(regs[r].array,
+                                                  need * sizeof(bc_num *));
+                            if (!na) {
+                                fprintf(stderr, "dc: out of memory\n");
+                                val_free(idxv); val_free(valv);
+                                break;
+                            }
+                            memset(na + old, 0, (need - old) * sizeof(bc_num *));
+                            regs[r].array = na;
+                            regs[r].array_len = (int)need;
                         }
                         if (regs[r].array[idx]) bc_free(regs[r].array[idx]);
                         regs[r].array[idx] = bc_dup(valv->v.num);
