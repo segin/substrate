@@ -3279,8 +3279,14 @@ int sys_fchownat(int dirfd, const char *path, int uid, int gid, int flag) {
         return 0;
     }
 
-    /* Default case (no AT_SYMLINK_NOFOLLOW): follow symlinks, resolve full path */
-    fs_node_t *node = sys_lookup_path(kpath, 1);
+    /* Default case (no AT_SYMLINK_NOFOLLOW): follow symlinks, but resolve
+     * relative to dirfd — sys_lookup_path() ignores dirfd, which broke
+     * fchownat(dirfd, name, ...) for a non-symlink component (fd-relative
+     * chown/chgrp -R descent depends on this). */
+    fs_node_t *froot = NULL, *fcwd = NULL;
+    ret = kern_path_roots_from_dirfd(dirfd, kpath, &froot, &fcwd);
+    if (ret != 0) return ret;
+    fs_node_t *node = vfs_perso_lookup(froot, fcwd, kpath);
     if (!node) return -ENOENT;
 
     /* Match fchown's current policy until supplementary groups exist. */
