@@ -10,6 +10,7 @@
  * super-user may lower a nice value or renice another user's processes; the
  * kernel enforces this and renice reports the resulting EPERM.
  */
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -35,8 +36,12 @@ static int resolve_user(const char *s, id_t *out)
 		return 0;
 	}
 	char *end;
-	long v = strtol(s, &end, 10);
-	if (end != s && *end == '\0') {
+	long  v;
+	errno = 0;
+	v = strtol(s, &end, 10);
+	/* Range-check so a huge id can't truncate into a valid id_t and
+	 * target the wrong user (RENICE-01/03). */
+	if (end != s && *end == '\0' && errno != ERANGE && v >= 0 && v <= INT_MAX) {
 		*out = (id_t)v;
 		return 0;
 	}
@@ -95,13 +100,16 @@ int main(int argc, char *argv[])
 				continue;
 			}
 		} else {
-			who = (id_t)strtol(argv[i], &end, 10);
-			if (end == argv[i] || *end != '\0') {
+			errno = 0;
+			long idv = strtol(argv[i], &end, 10);
+			if (end == argv[i] || *end != '\0' || errno == ERANGE ||
+			    idv < 0 || idv > INT_MAX) {
 				fprintf(stderr, "renice: %s: invalid %s id\n",
 				    argv[i], which_name(which));
 				rc = 1;
 				continue;
 			}
+			who = (id_t)idv;
 		}
 
 		/* getpriority() returns -1 on error, but -1 is also a valid nice
