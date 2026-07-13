@@ -17,6 +17,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <pwd.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -38,6 +39,23 @@ secure_zero(void *p, size_t n)
 
 #define PW_MAX 128
 
+/* Terminal state to restore if a signal interrupts the echo-off prompt,
+ * so ^C never leaves the tty un-echoing and leaking the next line
+ * (PASSWD-05). */
+static struct termios         g_saved_tio;
+static volatile sig_atomic_t  g_tio_saved;
+
+static void
+restore_tio_and_die(int sig)
+{
+    if (g_tio_saved)
+        tcsetattr(0, TCSANOW, &g_saved_tio);
+    _exit(128 + sig);
+}
+
+/* Read a line with echo disabled.  Returns the length on success, or -1
+ * on read error or EOF-before-any-input (PASSWD-07) so the caller can
+ * tell an I/O failure from a genuinely empty entry. */
 static int
 read_password(const char *prompt, char *buf, size_t bufsz)
 {
@@ -47,20 +65,31 @@ read_password(const char *prompt, char *buf, size_t bufsz)
     size_t         i = 0;
     char           c;
     ssize_t        n;
+    int            got_error = 0;
 
     fputs(prompt, stdout);
     fflush(stdout);
 
     tty_ok = (tcgetattr(0, &old_tio) == 0);
     if (tty_ok) {
+        struct sigaction sa = { 0 };
         new_tio = old_tio;
         new_tio.c_lflag &= ~(ECHO | ECHONL);
         new_tio.c_lflag |= ICANON;
+        g_saved_tio = old_tio;
+        g_tio_saved = 1;
+        sa.sa_handler = restore_tio_and_die;
+        sigaction(SIGINT, &sa, NULL);
+        sigaction(SIGQUIT, &sa, NULL);
+        sigaction(SIGTERM, &sa, NULL);
         tcsetattr(0, TCSANOW, &new_tio);
     }
     while (i + 1 < bufsz) {
         n = read(0, &c, 1);
-        if (n <= 0 || c == '\n' || c == '\r') {
+        if (n < 0) { got_error = 1; break; }
+        if (n == 0 || c == '\n' || c == '\r') {
+            if (n == 0 && i == 0)
+                got_error = 1;
             break;
         }
         buf[i++] = c;
@@ -68,10 +97,11 @@ read_password(const char *prompt, char *buf, size_t bufsz)
     buf[i] = '\0';
     if (tty_ok) {
         tcsetattr(0, TCSANOW, &old_tio);
+        g_tio_saved = 0;
     }
     fputc('\n', stdout);
     fflush(stdout);
-    return (int)i;
+    return got_error ? -1 : (int)i;
 }
 
 /* Read /etc/shadow into a buffer; on return the caller owns the
@@ -210,12 +240,24 @@ shadow_current(const char *user, char *line_out, size_t line_sz)
 {
     FILE  *f = fopen("/etc/shadow", "r");
     size_t ulen;
+    int    at_line_start = 1;
     if (f == NULL) {
         return NULL;
     }
     ulen = strlen(user);
     while (fgets(line_out, (int)line_sz, f) != NULL) {
-        char *colon;
+        size_t l = strlen(line_out);
+        int    full_line = (l > 0 && line_out[l - 1] == '\n');
+        int    this_start = at_line_start;
+        char  *colon;
+
+        /* A chunk that did not end in '\n' was truncated by the buffer;
+         * the next chunk is a mid-line continuation and must never be
+         * matched as a record start (PASSWD-09). */
+        at_line_start = full_line;
+        if (!this_start) {
+            continue;
+        }
         if (strncmp(line_out, user, ulen) != 0 || line_out[ulen] != ':') {
             continue;
         }
@@ -269,75 +311,114 @@ main(int argc, char **argv)
         const char *cur_stored;
         char       *cur_hashed;
         if (read_password("Current password: ", cur, sizeof(cur)) < 0) {
+            fprintf(stderr, "passwd: no current password read\n");
             return 1;
         }
         cur_stored = shadow_current(user, line, sizeof(line));
         if (cur_stored == NULL) {
+            secure_zero(cur, sizeof(cur));
+            secure_zero(line, sizeof(line));
             fprintf(stderr, "passwd: authentication failure\n");
             return 1;
         }
-        if (cur_stored[0] != '\0') {
+        if (cur_stored[0] == '\0') {
+            /* An empty stored password authenticates only against an
+             * empty entry — never silently skip re-auth (PASSWD-10). */
+            if (cur[0] != '\0') {
+                secure_zero(cur, sizeof(cur));
+                secure_zero(line, sizeof(line));
+                fprintf(stderr, "passwd: authentication failure\n");
+                return 1;
+            }
+        } else {
             cur_hashed = crypt(cur, cur_stored);
             if (cur_hashed == NULL ||
                 strcmp(cur_hashed, cur_stored) != 0) {
+                secure_zero(cur, sizeof(cur));
+                secure_zero(line, sizeof(line));
                 fprintf(stderr, "passwd: authentication failure\n");
                 return 1;
             }
         }
+        secure_zero(cur, sizeof(cur));
+        secure_zero(line, sizeof(line));
     }
 
     if (read_password("New password: ", new1, sizeof(new1)) < 0) {
+        fprintf(stderr, "passwd: no new password read\n");
         return 1;
     }
     if (read_password("Retype new password: ", new2, sizeof(new2)) < 0) {
+        secure_zero(new1, sizeof(new1));
+        fprintf(stderr, "passwd: no new password read\n");
         return 1;
     }
     if (strcmp(new1, new2) != 0) {
+        secure_zero(new1, sizeof(new1));
+        secure_zero(new2, sizeof(new2));
         fprintf(stderr, "passwd: passwords do not match\n");
         return 1;
     }
+    secure_zero(new2, sizeof(new2));
     if (new1[0] == '\0') {
+        secure_zero(new1, sizeof(new1));
         fprintf(stderr, "passwd: empty password not allowed\n");
         return 1;
     }
 
     {
         /* Build a $5$ setting with a fresh salt and crypt the new
-         * password under it.  Salt: 8 chars from the b64 alphabet
-         * seeded from time + uid + a /dev/urandom byte if available. */
+         * password under it.  The salt is filled directly from
+         * /dev/urandom (8 chars, 6 bits each); if we cannot obtain the
+         * full 8 random bytes we fail closed rather than fall back to a
+         * predictable pid/time-derived salt (PASSWD-04/08). */
         static const char b64[] =
             "./0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
-        char  setting[64];
+        char  setting[16];
         char *hashed;
-        unsigned long seed;
-        int           i, urand_fd;
+        int           i, urand_fd, rc;
         unsigned char rb[8];
+        size_t        got = 0;
 
-        seed = (unsigned long)getpid() * 0x9E3779B1u + (unsigned long)getuid();
-        urand_fd = open("/dev/urandom", 0);
-        if (urand_fd >= 0) {
-            (void)read(urand_fd, rb, sizeof(rb));
-            close(urand_fd);
-            for (i = 0; i < 8; i++) {
-                seed = seed * 1103515245u + rb[i];
+        urand_fd = open("/dev/urandom", O_RDONLY);
+        if (urand_fd < 0) {
+            secure_zero(new1, sizeof(new1));
+            fprintf(stderr, "passwd: cannot open /dev/urandom for salt\n");
+            return 1;
+        }
+        while (got < sizeof(rb)) {
+            ssize_t r = read(urand_fd, rb + got, sizeof(rb) - got);
+            if (r <= 0) {
+                break;
             }
+            got += (size_t)r;
+        }
+        close(urand_fd);
+        if (got != sizeof(rb)) {
+            secure_zero(new1, sizeof(new1));
+            fprintf(stderr, "passwd: short read from /dev/urandom\n");
+            return 1;
         }
 
         memcpy(setting, "$5$", 3);
         for (i = 0; i < 8; i++) {
-            setting[3 + i] = b64[seed & 63];
-            seed >>= 6;
-            if (seed == 0) seed = 0xDEADBEEFu ^ (unsigned long)i;
+            setting[3 + i] = b64[rb[i] & 63];
         }
         setting[11] = '\0';
 
         hashed = crypt(new1, setting);
+        secure_zero(new1, sizeof(new1));
+        secure_zero(rb, sizeof(rb));
         if (hashed == NULL) {
             fprintf(stderr, "passwd: crypt() failed\n");
             return 1;
         }
 
-        if (rewrite_shadow(user, hashed) != 0) {
+        rc = rewrite_shadow(user, hashed);
+        /* hashed points into crypt(3)'s static buffer; overwrite it so the
+         * new hash does not linger there. */
+        secure_zero(hashed, strlen(hashed));
+        if (rc != 0) {
             fprintf(stderr, "passwd: failed to update /etc/shadow\n");
             return 1;
         }
