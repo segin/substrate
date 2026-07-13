@@ -99,6 +99,15 @@ static int copy_symlink(const char *src, const char *dst,
 
     n = readlink(src, target, sizeof(target) - 1u);
     if (n < 0) return -1;
+    /*
+     * A target that fills the buffer was truncated; creating a link to the
+     * wrong target and then removing the source would be silent data loss.
+     * Fail instead (MV-02).
+     */
+    if ((size_t)n >= sizeof(target) - 1u) {
+        errno = ENAMETOOLONG;
+        return -1;
+    }
     target[n] = '\0';
     (void)unlink(dst);
     if (symlink(target, dst) != 0) return -1;
