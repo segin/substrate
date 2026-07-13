@@ -239,28 +239,37 @@ visited_add(struct chgrp_context *ctx, dev_t dev, ino_t ino)
     return 0;
 }
 
+/*
+ * Resolve a group spec to a gid via an out-parameter (no int/(gid_t)-1
+ * sentinel collision, CHGRP-07).  A real group name is preferred over a
+ * numeric guess; numeric ids are parsed with strtoul + endptr + range so
+ * "12abc" and out-of-range values are rejected rather than truncated
+ * (CHGRP-04).
+ */
 static int
-resolve_group_gid(const char *name)
+resolve_group_gid(const char *name, gid_t *out)
 {
     struct group *gr;
+    char         *end;
+    unsigned long v;
 
     if (name == NULL || name[0] == '\0') {
         return -1;
     }
 
-    if (isdigit((unsigned char)name[0])) {
-        long val = strtol(name, NULL, 10);
-        if (val < 0) {
-            return -1;
-        }
-        return (int)val;
-    }
-
     gr = getgrnam(name);
     if (gr != NULL) {
-        return gr->gr_gid;
+        *out = gr->gr_gid;
+        return 0;
     }
 
+    errno = 0;
+    v = strtoul(name, &end, 10);
+    if (end != name && *end == '\0' && errno != ERANGE &&
+        v <= (unsigned long)(gid_t)-1) {
+        *out = (gid_t)v;
+        return 0;
+    }
     return -1;
 }
 
@@ -279,8 +288,11 @@ apply_group_to_entry(struct chgrp_context *ctx, const char *path,
         gid = ctx->opts.reference_gid;
     }
 
-    if (!ctx->opts.gid_set) {
-        gid = -1;
+    /* --reference implies a target gid even though it doesn't set gid_set;
+     * without this the reference gid was clobbered to -1 and chgrp became a
+     * silent no-op (CHGRP-03). */
+    if (!ctx->opts.gid_set && !ctx->opts.use_reference) {
+        gid = (gid_t)-1;
     }
 
     if (ctx->opts.change_symlink && is_symlink) {
@@ -435,19 +447,13 @@ process_path(struct chgrp_context *ctx, const char *path, bool cmdline)
 static int
 parse_group_spec(const char *spec, gid_t *gid, bool *gid_set)
 {
-    int val;
-
     if (spec == NULL || spec[0] == '\0') {
         return -1;
     }
-
-    val = resolve_group_gid(spec);
-    if (val < 0) {
+    if (resolve_group_gid(spec, gid) != 0) {
         return -1;
     }
-    *gid = (gid_t)val;
     *gid_set = true;
-
     return 0;
 }
 
