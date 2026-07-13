@@ -176,8 +176,29 @@ static int tail_pipe_bytes(int fd, int64_t count)
 {
 	if(count <= 0) return(0);
 
+	/*
+	 * If the requested tail is larger than any buffer we could address,
+	 * the "last count bytes" is the entire stream.  Copy it straight
+	 * through rather than truncating count into a bogus size_t — on a
+	 * 32-bit target `tail -c 4G` would otherwise yield malloc(0), a
+	 * `% cap` divide-by-zero (SIGFPE), and an out-of-bounds ring write
+	 * (TAIL-01).
+	 */
+	if((uint64_t)count > (uint64_t)SIZE_MAX) {
+		unsigned char buf[TAIL_BUFSZ];
+		for(;;) {
+			ssize_t n = read(fd, buf, sizeof(buf));
+			if(n < 0) { if(errno == EINTR) continue; return(-1); }
+			if(n == 0) break;
+			if(write_all(buf, (size_t)n) < 0) return(-1);
+		}
+		return(0);
+	}
+
 	size_t cap = (size_t)count;
-	unsigned char *ring = malloc(cap);
+	unsigned char *ring;
+	if(cap == 0) return(0);		/* defensive: keeps the `% cap` below safe */
+	ring = malloc(cap);
 	if(!ring) { errno = ENOMEM; return(-1); }
 
 	size_t head = 0, fill = 0;
