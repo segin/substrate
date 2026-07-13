@@ -244,53 +244,84 @@ visited_add(struct chown_context *ctx, dev_t dev, ino_t ino)
     return 0;
 }
 
+/* Parse a whole-string non-negative id; 0 + *out on success, -1 otherwise. */
 static int
-resolve_owner_uid(const char *name)
+parse_numeric_id(const char *s, unsigned long *out)
+{
+    char         *end;
+    unsigned long v;
+
+    if (s == NULL || s[0] == '\0') {
+        return -1;
+    }
+    errno = 0;
+    v = strtoul(s, &end, 10);
+    if (end == s || *end != '\0' || errno == ERANGE) {
+        return -1;
+    }
+    *out = v;
+    return 0;
+}
+
+/*
+ * Resolve a user spec to a uid.  A real account name is preferred over a
+ * numeric guess, so `4chan`/`0day` chown to the account, not uid 4/0
+ * (CHOWN-03); a leading '+' forces numeric (CHOWN-09); numeric ids are
+ * parsed with range checking into uid_t (CHOWN-04).
+ */
+static int
+resolve_owner_uid(const char *name, uid_t *out)
 {
     struct passwd *pw;
+    unsigned long  v;
 
     if (name == NULL || name[0] == '\0') {
         return -1;
     }
-
-    if (isdigit((unsigned char)name[0])) {
-        long val = strtol(name, NULL, 10);
-        if (val < 0) {
+    if (name[0] == '+') {
+        if (parse_numeric_id(name + 1, &v) != 0 || v > (unsigned long)(uid_t)-1) {
             return -1;
         }
-        return (int)val;
+        *out = (uid_t)v;
+        return 0;
     }
-
     pw = getpwnam(name);
     if (pw != NULL) {
-        return pw->pw_uid;
+        *out = pw->pw_uid;
+        return 0;
     }
-
+    if (parse_numeric_id(name, &v) == 0 && v <= (unsigned long)(uid_t)-1) {
+        *out = (uid_t)v;
+        return 0;
+    }
     return -1;
 }
 
 static int
-resolve_group_gid(const char *name)
+resolve_group_gid(const char *name, gid_t *out)
 {
     struct group *gr;
+    unsigned long v;
 
     if (name == NULL || name[0] == '\0') {
         return -1;
     }
-
-    if (isdigit((unsigned char)name[0])) {
-        long val = strtol(name, NULL, 10);
-        if (val < 0) {
+    if (name[0] == '+') {
+        if (parse_numeric_id(name + 1, &v) != 0 || v > (unsigned long)(gid_t)-1) {
             return -1;
         }
-        return (int)val;
+        *out = (gid_t)v;
+        return 0;
     }
-
     gr = getgrnam(name);
     if (gr != NULL) {
-        return gr->gr_gid;
+        *out = gr->gr_gid;
+        return 0;
     }
-
+    if (parse_numeric_id(name, &v) == 0 && v <= (unsigned long)(gid_t)-1) {
+        *out = (gid_t)v;
+        return 0;
+    }
     return -1;
 }
 
@@ -469,43 +500,66 @@ process_path(struct chown_context *ctx, const char *path, bool cmdline)
 static int
 parse_owner_spec(const char *spec, uid_t *uid, gid_t *gid, bool *uid_set, bool *gid_set)
 {
-    const char *colon;
-    int val;
+    char        userbuf[256];
+    const char *sep;
+    const char *grp;
+    size_t      ulen;
 
-    colon = strchr(spec, ':');
+    *uid_set = false;
+    *gid_set = false;
 
-    if (colon != NULL) {
-        if (*(colon + 1) == '\0') {
-            val = resolve_owner_uid(spec);
-            if (val < 0) {
-                return -1;
+    sep = strchr(spec, ':');
+    if (sep == NULL) {
+        /*
+         * Deprecated `user.group`: split on '.' only when the whole spec is
+         * not itself a valid owner, so a real username containing a dot
+         * still works (CHOWN-05).
+         */
+        const char *dot = strchr(spec, '.');
+        if (dot != NULL) {
+            uid_t tmp;
+            if (resolve_owner_uid(spec, &tmp) != 0) {
+                sep = dot;
             }
-            *uid = (uid_t)val;
-            *uid_set = true;
-            *gid_set = false;
-        } else {
-            val = resolve_owner_uid(spec);
-            if (val < 0) {
-                return -1;
-            }
-            *uid = (uid_t)val;
-            *uid_set = true;
-
-            val = resolve_group_gid(colon + 1);
-            if (val < 0) {
-                return -1;
-            }
-            *gid = (gid_t)val;
-            *gid_set = true;
         }
-    } else {
-        val = resolve_owner_uid(spec);
-        if (val < 0) {
+    }
+
+    if (sep == NULL) {
+        /* The whole spec is the user (CHOWN-02: no longer includes ":grp"). */
+        if (resolve_owner_uid(spec, uid) != 0) {
             return -1;
         }
-        *uid = (uid_t)val;
         *uid_set = true;
-        *gid_set = false;
+        return 0;
+    }
+
+    ulen = (size_t)(sep - spec);
+    grp  = sep + 1;
+
+    if (ulen > 0) {
+        if (ulen >= sizeof(userbuf)) {
+            return -1;
+        }
+        memcpy(userbuf, spec, ulen);
+        userbuf[ulen] = '\0';
+        if (resolve_owner_uid(userbuf, uid) != 0) {
+            return -1;
+        }
+        *uid_set = true;
+    }
+
+    if (grp[0] != '\0') {
+        if (resolve_group_gid(grp, gid) != 0) {
+            return -1;
+        }
+        *gid_set = true;
+    } else if (ulen > 0) {
+        /* `user:` — set the group to the user's login group. */
+        struct passwd *pw = getpwnam(userbuf);
+        if (pw != NULL) {
+            *gid = pw->pw_gid;
+            *gid_set = true;
+        }
     }
 
     return 0;
