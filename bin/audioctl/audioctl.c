@@ -146,10 +146,20 @@ apply_var(audio_info_t *info, const char *var, const char *valstr)
     unsigned long uval = 0;
     int is_num = 1;
 
-    /* Try to parse numeric value */
+    /*
+     * Parse the value strictly: reject an empty value, a negative one (which
+     * strtoul would silently wrap to a huge unsigned), trailing garbage, and
+     * out-of-range values, rather than accepting a bogus setting (AUDIOCTL).
+     */
     char *end;
-    uval = strtoul(valstr, &end, 10);
-    if (*end != '\0') is_num = 0;
+    if (valstr[0] == '\0' || valstr[0] == '-') {
+        is_num = 0;
+    } else {
+        errno = 0;
+        uval = strtoul(valstr, &end, 10);
+        if (end == valstr || *end != '\0' || errno == ERANGE)
+            is_num = 0;
+    }
 
     /* Shorthands */
     if (strcmp(var, "volume") == 0) var = "play.gain";
