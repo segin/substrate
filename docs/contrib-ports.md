@@ -188,6 +188,26 @@ meta-compiler (host wml/wmluiltok) and installs the uil/ headers.
   substrate atop the libsys `ptrace` PEEK bridge.  (See also
   `docs/toolchain.md`.)
 
+## Build tooling
+
+- **CMake 3.30.5** (`contrib/cmake/`) — provides two things:
+  1. **Cross-compile support** for CMake-based projects — a reusable
+     toolchain file (`substrate.toolchain.cmake`) plus a
+     `Platform/Substrate` module set (`cmake-modules/`, which defers to
+     CMake's Linux ELF conventions).  The host's cmake targets substrate
+     via `-DCMAKE_TOOLCHAIN_FILE=...`.  It names the platform honestly
+     (`CMAKE_SYSTEM_NAME=Substrate`), selects the `i386-unknown-substrate`
+     toolchain + `i486` baseline, force-links `libc.so.0`/`libsys.so.0`
+     into shared objects and `-lpthread` into every C++ link.
+  2. **On-VM native cmake** (`fetch.sh` / `build.sh`) — cmake itself
+     cross-built as a substrate ELF (cmake/ctest/cpack), staged into
+     `dist-overlay/dist-cmake/`.  The bundled libuv uses its generic
+     `poll(2)` backend (patch `0001`; substrate has no epoll/kqueue);
+     patch `0002` drops source-specific multicast from libuv's udp.c.
+     `build.sh` installs the `Platform/Substrate` modules into the staged
+     module tree so native builds resolve the platform (a native cmake
+     reports `uname -s == Substrate`).
+
 ## Multimedia / audio stack
 
 - **SDL 2.30.9** (`contrib/sdl2/`) — with the X11 video driver and the

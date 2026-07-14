@@ -58,15 +58,17 @@ endforeach()
 set(CMAKE_C_FLAGS_INIT   "-march=i486 -mtune=i486")
 set(CMAKE_CXX_FLAGS_INIT "-march=i486 -mtune=i486")
 
-# `gcc -shared` on substrate adds no implicit libc, so a shared object with an
-# otherwise-undefined libc symbol (errno, malloc, ...) won't resolve; link
-# libc explicitly for shared libs/modules.  Executables get libc from the
-# driver, so they need nothing here.  Point ld at the sysroot for -rpath-link
-# resolution of indirect DT_NEEDED.
-set(_substrate_shared_link "-L${SUBSTRATE_SYSROOT}/lib -Wl,-rpath-link,${SUBSTRATE_SYSROOT}/lib -l:libc.so.0")
-set(CMAKE_SHARED_LINKER_FLAGS_INIT "${_substrate_shared_link}")
-set(CMAKE_MODULE_LINKER_FLAGS_INIT "${_substrate_shared_link}")
-set(CMAKE_EXE_LINKER_FLAGS_INIT    "-L${SUBSTRATE_SYSROOT}/lib -Wl,-rpath-link,${SUBSTRATE_SYSROOT}/lib")
+# libsys owns the raw syscall() dispatcher and the sys_* typed wrappers
+# (setsid, and everything the personality layer routes); every substrate
+# binary links it, and the cross gcc/g++ driver does NOT add it implicitly, so
+# name it explicitly for executables, shared libraries and modules.
+# `gcc -shared` also adds no implicit libc, so shared objects/modules link libc
+# too (executables get libc from the driver).  Point ld at the sysroot for
+# -rpath-link resolution of indirect DT_NEEDED.
+set(_substrate_ldpath "-L${SUBSTRATE_SYSROOT}/lib -Wl,-rpath-link,${SUBSTRATE_SYSROOT}/lib")
+set(CMAKE_SHARED_LINKER_FLAGS_INIT "${_substrate_ldpath} -l:libc.so.0 -l:libsys.so.0")
+set(CMAKE_MODULE_LINKER_FLAGS_INIT "${_substrate_ldpath} -l:libc.so.0 -l:libsys.so.0")
+set(CMAKE_EXE_LINKER_FLAGS_INIT    "${_substrate_ldpath} -l:libsys.so.0")
 
 # --- find-root: libs/headers/packages ONLY in the sysroot, programs on host -
 set(CMAKE_FIND_ROOT_PATH "${SUBSTRATE_SYSROOT}")

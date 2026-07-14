@@ -1,0 +1,32 @@
+--- a/Utilities/cmlibuv/include/uv/unix.h
++++ b/Utilities/cmlibuv/include/uv/unix.h
+@@ -72,6 +72,7 @@
+ # include "bsd.h"
+ #elif defined(__CYGWIN__) || \
+       defined(__MSYS__)   || \
++      defined(__substrate__) || \
+       defined(__HAIKU__)  || \
+       defined(__QNX__)    || \
+       defined(__GNU__)
+--- a/Utilities/cmlibuv/CMakeLists.txt
++++ b/Utilities/cmlibuv/CMakeLists.txt
+@@ -343,6 +343,19 @@
+     )
+ endif()
+ 
++if(CMAKE_SYSTEM_NAME STREQUAL "Substrate")
++  # Substrate has no epoll/kqueue; use the generic poll(2) event backend.
++  list(APPEND uv_headers
++    include/uv/posix.h
++    )
++  list(APPEND uv_sources
++    src/unix/posix-hrtime.c
++    src/unix/posix-poll.c
++    src/unix/no-fsevents.c
++    src/unix/no-proctitle.c
++    )
++endif()
++
+ include_directories(
+   ${uv_includes}
+   ${KWSYS_HEADER_ROOT}
