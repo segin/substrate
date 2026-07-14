@@ -48,8 +48,8 @@ ssize_t mq_timedreceive(mqd_t mqdes, char *msg_ptr, size_t msg_len,
                         unsigned *msg_prio, const struct timespec *abs_timeout);
 int     mq_notify(mqd_t mqdes, const struct sigevent *notification);
 int     mq_getattr(mqd_t mqdes, struct mq_attr *attr);
-int     mq_setattr(mqd_t mqdes, const struct mq_attr *restrict attr,
-                   struct mq_attr *restrict oattr);
+int     mq_setattr(mqd_t mqdes, const struct mq_attr *__restrict attr,
+                   struct mq_attr *__restrict oattr);
 
 #ifdef __cplusplus
 }

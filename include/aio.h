@@ -62,8 +62,8 @@ int      aio_suspend(const struct aiocb *const list[], int nent,
                      const struct timespec *timeout);
 int      aio_cancel(int fildes, struct aiocb *aiocbp);
 int      aio_fsync(int op, struct aiocb *aiocbp);
-int      lio_listio(int mode, struct aiocb *const restrict list[restrict],
-                    int nent, struct sigevent *restrict sig);
+int      lio_listio(int mode, struct aiocb *const __restrict list[__restrict],
+                    int nent, struct sigevent *__restrict sig);
 
 #ifdef __cplusplus
 }
