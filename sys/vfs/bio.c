@@ -7,6 +7,7 @@
 #include <kern/sleepq.h>
 #include <kern/time.h>
 #include <vm/vm_kmem.h>
+#include <drivers/console/console.h>
 #include <string.h>
 
 #ifndef HOST_TEST
@@ -32,10 +33,22 @@ uint32_t pmm_get_free_memory(void);
  * (LRU first), freeing buf metadata and data pages until the target is
  * met.  Callers (vm pressure handlers, unmount, etc.) drive the policy.
  */
-#define BIO_HASH_SIZE       256
+#define BIO_HASH_SIZE       8192
 #define BIO_NBUF_FLOOR      64
-#define BIO_NBUF_CEILING    8192
-#define BIO_RESERVE_BYTES   (8U * 1024U * 1024U)
+#define BIO_NBUF_HARD_CAP   262144   /* absolute cap: bound metadata on big-RAM boxes */
+#define BIO_RESERVE_BYTES   (16U * 1024U * 1024U)
+
+/*
+ * Runtime cache ceiling, sized to a fraction of total RAM at bio_init().
+ * The old fixed 8192-buffer ceiling was a 4 MiB cache (8192 * 512 B) — far
+ * too small for build/grep/link workloads, so hot data was evicted almost
+ * immediately and nearly every demand-page fault fell through to a
+ * synchronous device read.  bio_reclaim() is not yet wired to the VM
+ * pressure path, so the cache never shrinks once grown; keep the ceiling at
+ * 1/8 of RAM so the other 7/8 stays available to userland regardless.
+ */
+#define BIO_CACHE_RAM_SHIFT 3        /* total_ram >> 3 == 1/8 of RAM */
+static uint32_t bio_nbuf_ceiling = BIO_NBUF_FLOOR;
 
 static struct bufhashhead bio_hashtbl[BIO_HASH_SIZE];
 static struct bufqueue bio_queues[BQ_COUNT];
@@ -162,7 +175,7 @@ bio_can_grow_locked(size_t size)
 
     if (bio_nbuf < BIO_NBUF_FLOOR)
         return 1;
-    if (bio_nbuf >= BIO_NBUF_CEILING)
+    if (bio_nbuf >= bio_nbuf_ceiling)
         return 0;
 
     free_ram = pmm_get_free_memory();
@@ -176,6 +189,22 @@ bio_init(void)
 {
     uint32_t i;
     thread_t *syncer_td;
+
+    /* Size the cache ceiling to 1/8 of total RAM (see BIO_CACHE_RAM_SHIFT).
+     * per-buffer cost ~= struct buf metadata + one sector of data. */
+    {
+        uint32_t total = pmm_get_total_memory();
+        uint32_t per   = (uint32_t)sizeof(struct buf) + 512;
+        uint64_t budget = (uint64_t)total >> BIO_CACHE_RAM_SHIFT;
+        uint64_t ceil  = budget / per;
+        if (ceil < BIO_NBUF_FLOOR)      ceil = BIO_NBUF_FLOOR;
+        if (ceil > BIO_NBUF_HARD_CAP)   ceil = BIO_NBUF_HARD_CAP;
+        bio_nbuf_ceiling = (uint32_t)ceil;
+        kprintf("bio: block cache ceiling %u buffers (~%u MiB) of %u MiB RAM\n",
+            bio_nbuf_ceiling,
+            (unsigned)((uint64_t)bio_nbuf_ceiling * per / (1024U * 1024U)),
+            total / (1024U * 1024U));
+    }
 
     for (i = 0; i < BIO_HASH_SIZE; i++) {
         LIST_INIT(&bio_hashtbl[i]);
@@ -849,5 +878,5 @@ bio_get_stats(struct bio_stats *out)
 
     out->free_ram_bytes = pmm_get_free_memory();
     out->nbuf_target = (out->free_ram_bytes > BIO_RESERVE_BYTES) ?
-        BIO_NBUF_CEILING : BIO_NBUF_FLOOR;
+        bio_nbuf_ceiling : BIO_NBUF_FLOOR;
 }

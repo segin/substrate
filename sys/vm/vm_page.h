@@ -92,7 +92,13 @@ struct pv_entry {
     struct pv_entry *next;      // Next entry in page's pv_list
     struct pmap *pmap;          // Pmap containing this mapping
     uintptr_t va;               // Virtual address of mapping
+    uint32_t poison;            // PV_POISON_LIVE while allocated, _FREED once freed
+                                // (double-free diagnostic; keeps struct <=16B/kmem-16)
 };
+
+/* pv double-free diagnostic sentinels. */
+#define PV_POISON_LIVE   0x504C4956u   /* "PLIV" */
+#define PV_POISON_FREED  0x50465245u   /* "PFRE" */
 
 // PV Entry management
 void pv_insert(vm_page_t *page, struct pmap *pmap, uintptr_t va);

@@ -6,6 +6,7 @@
 #include <arch/i386/pmap.h>
 #include <arch/i386/pmm.h>
 #include <drivers/console/console.h>
+#include <vfs/buf.h>
 #include <kern/time.h>
 #include <kern/sched.h>
 #include <pm/pm.h>
@@ -397,6 +398,7 @@ static struct pv_entry *pv_alloc(void) {
 		entry->next = NULL;
 		entry->pmap = NULL;
 		entry->va = 0;
+		entry->poison = PV_POISON_LIVE;
 		return(entry);
 	}
 	spinlock_release_irq(&vm_pv_lock, f);
@@ -408,12 +410,36 @@ static struct pv_entry *pv_alloc(void) {
 		entry->next = NULL;
 		entry->pmap = NULL;
 		entry->va = 0;
+		entry->poison = PV_POISON_LIVE;
 	}
 	return(entry);
 }
 
+/* Count of pv double-frees caught by the poison guard (diagnostic). */
+volatile uint32_t pv_double_free_count = 0;
+
 static void pv_free(struct pv_entry *entry) {
 	if(!entry) return;
+
+	/*
+	 * Double-free diagnostic.  A pv_entry freed twice means the same
+	 * mapping node reached pv_free via two paths (the pv_list SMP race:
+	 * pv_remove_all frees before detaching page->pv_list, so a concurrent
+	 * pv_alloc on another CPU can re-hand-out a still-linked node).  Catch
+	 * it HERE — with the mapping's pmap/va and the offending caller — and
+	 * SURVIVE (log + skip the second free) so one workload run enumerates
+	 * every occurrence instead of panicking on the first in uma_zfree.
+	 */
+	if (entry->poison == PV_POISON_FREED) {
+		__sync_fetch_and_add(&pv_double_free_count, 1);
+		kprintf("PV-DOUBLE-FREE #%u: entry=%p pmap=%p va=%p "
+		        "caller=%p (skipped 2nd free)\n",
+		        (unsigned)pv_double_free_count, (void *)entry,
+		        (void *)entry->pmap, (void *)entry->va,
+		        __builtin_return_address(0));
+		return;   /* do NOT free again — avoids the uma double-free panic */
+	}
+	entry->poison = PV_POISON_FREED;
 
 	// Return to static pool if it came from there
 	if(entry >= &pv_pool[0] && entry < &pv_pool[PV_POOL_SIZE]) {
@@ -973,6 +999,22 @@ void vm_pageout(void) {
 	}
 	if(freed < target) {
 		freed += vm_page_launder_inactive_dirty(target - freed);
+	}
+
+	// Phase 4.5: still short after reclaiming process pages — drop clean
+	// block-cache buffers.  They are pure cache and always safe to release,
+	// so the cache gives RAM back under pressure (and a process is not
+	// OOM-killed for cache it is not using).  uma_reclaim() then returns the
+	// freed buffer memory from the UMA free lists to the page allocator so
+	// the phase-5 free-memory check below actually sees it.
+	if(freed < target) {
+		size_t want = (size_t)(target - freed) * PAGE_SIZE;
+		size_t got = bio_reclaim(want);
+		if(got) {
+			uma_reclaim();
+			kprintf("vm: reclaimed %u KiB block cache under memory pressure\n",
+			    (unsigned)(got / 1024));
+		}
 	}
 
 	// Clear request
