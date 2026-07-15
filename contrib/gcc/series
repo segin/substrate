@@ -9,3 +9,4 @@
 0007-libstdcxx-configure-host.patch
 0008-libstdcxx-crossconfig.patch
 0010-libgcc-pt-gnu-eh-frame-substrate.patch
+0011-c-default-gnu17.patch

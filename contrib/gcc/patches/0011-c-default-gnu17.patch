@@ -1,0 +1,27 @@
+Subject: gcc/c-family: default the C dialect to gnu17
+
+GCC 16 defaults C to gnu23, whose "()" == "(void)" prototype rule rejects
+the K&R function declarations (`char *getcwd ();` and friends) that are
+pervasive in the older autotools/gnulib code making up substrate's contrib
+userland (gettext, etc.).  Default the C front end to gnu17 instead; an
+explicit -std=... on the command line still overrides.  C++ is untouched.
+
+---
+--- a/gcc/c-family/c-opts.cc
++++ b/gcc/c-family/c-opts.cc
+@@ -261,8 +261,13 @@
+ 
+   if (c_language == clk_c)
+     {
+-      /* The default for C is gnu23.  */
+-      set_std_c23 (false /* ISO */);
++      /* Substrate: default C to gnu17, not gnu23.  GCC 16's gnu23 default
++	 makes an empty "()" declaration mean "(void)" (zero args), which
++	 rejects the K&R function declarations pervasive in the older
++	 autotools/gnulib code that makes up substrate's userland
++	 (e.g. gettext's `char *getcwd ();`).  An explicit -std=... still
++	 overrides this.  C++ is unaffected (handled separately below).  */
++      set_std_c17 (false /* ISO */);
+ 
+       /* If preprocessing assembly language, accept any of the C-family
+ 	 front end options since the driver may pass them through.  */
