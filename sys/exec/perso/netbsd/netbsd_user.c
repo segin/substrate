@@ -278,6 +278,18 @@ void *netbsd_sys_mmap(void *addr, size_t len, int prot, int flags,
      * grow-down region).  Closest fit: anonymous private mapping. */
     if (flags & NETBSD_MAP_STACK)
         kflags |= KERN_MAP_PRIVATE | KERN_MAP_ANONYMOUS;
+    /*
+     * NetBSD permits a mapping with neither MAP_SHARED nor MAP_PRIVATE and
+     * treats it as private (UVM_INH_COPY): its uvm_mmap() only rejects flags
+     * as EINVAL when BOTH bits are set (sys/uvm/uvm_mmap.c).  libpthread's
+     * pthread_tsd_init() maps its TSD arena with a bare MAP_ANON for exactly
+     * this reason -- "Cannot allocate pthread storage: Invalid argument"
+     * otherwise.  substrate's sys_mmap requires exactly one sharing bit
+     * (mmap_validate_flags), so default to MAP_PRIVATE when the caller named
+     * neither, matching NetBSD (and the FreeBSD shim in compat.c).
+     */
+    if ((kflags & (KERN_MAP_SHARED | KERN_MAP_PRIVATE)) == 0)
+        kflags |= KERN_MAP_PRIVATE;
     return sys_mmap(addr, len, prot, kflags, fd, pos);
 }
 
