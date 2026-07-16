@@ -197,4 +197,18 @@ int netbsd_sys_fchownat(int dirfd, const char *path, int uid, int gid, int flag)
 void *netbsd_sys_mmap(void *addr, size_t len, int prot, int flags,
                       int fd, long pad, uint64_t pos);
 
+/* LWP park/unpark + lwpctl — libpthread's threading primitives.  Mapped
+ * onto substrate's native thr_suspend/thr_wake parking contract.  The
+ * (NULL, 0, NULL) form of _lwp_unpark_all is a batch-size query issued by
+ * pthread__init; NETBSD_LWP_UNPARK_MAX bounds one batch. */
+#define NETBSD_LWP_UNPARK_MAX 1024
+long netbsd_sys_lwp_unpark(int target, const void *hint);
+long netbsd_sys_lwp_unpark_all(const int *targets, unsigned int ntargets,
+                               const void *hint);
+long netbsd_sys_lwp_park(int clock_id, int flags,
+                         const struct netbsd_timespec50 *ts,
+                         int unpark, const void *hint, const void *unparkhint);
+long netbsd_sys_lwp_ctl(int features, void **address);
+void *netbsd_sys_lwp_getprivate(void);
+
 #endif /* _NETBSD_USER_H */

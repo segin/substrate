@@ -6,6 +6,7 @@
 #include <sys/fcntl.h>
 #include <sys/kern_syscalls.h>
 #include <sys/namei.h>
+#include <sys/proc.h>
 #include <sys/random.h>
 #include <sys/stat.h>
 #include <sys/sysarch.h>
@@ -299,6 +300,103 @@ void *netbsd_sys_mmap(void *addr, size_t len, int prot, int flags,
  * cpu_lwp_setprivate() path in NetBSD's machine-dependent code. */
 int netbsd_sys_lwp_setprivate(uintptr_t tcb) {
     return i386_set_gsbase((uint32_t)tcb);
+}
+
+/* ===================================================================
+ * NetBSD LWP park/unpark + lwpctl — libpthread's threading primitives.
+ *
+ * NetBSD's libpthread parks a blocked LWP with _lwp_park and wakes it with
+ * _lwp_unpark / _lwp_unpark_all; pthread__init also probes the maximum
+ * unpark batch and installs a per-LWP `lwpctl` scratch page.  These map
+ * directly onto substrate's native thr_suspend/thr_wake, which already
+ * implement the same wake-before-park latch (THREAD_F_WAKE_PENDING) that
+ * NetBSD's turnstile-backed parking lot provides.  Without them a threaded
+ * NetBSD binary aborts in pthread__init ("_lwp_unpark_all", "_lwp_ctl") or,
+ * worse, misreads the ENOSYS return as a batch size and crashes.
+ * =================================================================== */
+#define NETBSD_TIMER_ABSTIME 1
+
+/* _lwp_unpark(lwpid_t target, const void *hint) — wake one parked LWP. */
+long netbsd_sys_lwp_unpark(int target, const void *hint) {
+    (void)hint;
+    return sys_thr_wake((long)target);
+}
+
+/* _lwp_unpark_all(const lwpid_t *targets, size_t ntargets, const void *hint).
+ * pthread__init issues the (NULL, 0, NULL) form purely to learn the largest
+ * batch it may hand us in one call; answer with the fixed cap.  Otherwise
+ * wake each listed LWP. */
+long netbsd_sys_lwp_unpark_all(const int *targets, unsigned int ntargets,
+                               const void *hint) {
+    (void)hint;
+    if (targets == NULL)
+        return NETBSD_LWP_UNPARK_MAX;           /* batch-size query */
+    if (ntargets > NETBSD_LWP_UNPARK_MAX)
+        return -EINVAL;
+    for (unsigned int i = 0; i < ntargets; i++) {
+        int lid;
+        if (copyin(&targets[i], &lid, sizeof(lid)) != 0)
+            return -EFAULT;
+        sys_thr_wake((long)lid);
+    }
+    return (long)ntargets;
+}
+
+/* ___lwp_park60(clockid_t clock_id, int flags, const struct timespec *ts,
+ *               lwpid_t unpark, const void *hint, const void *unparkhint).
+ * Park the caller until unparked or the deadline passes.  A non-zero
+ * `unpark` is the common condvar hand-off: wake that LWP before we block.
+ * NetBSD hands us an ABSOLUTE deadline when flags & TIMER_ABSTIME, whereas
+ * substrate's park takes a relative timeout, so convert against the same
+ * clock the caller named. */
+long netbsd_sys_lwp_park(int clock_id, int flags,
+                         const struct netbsd_timespec50 *ts,
+                         int unpark, const void *hint, const void *unparkhint) {
+    (void)hint; (void)unparkhint;
+    if (unpark)
+        sys_thr_wake((long)unpark);
+    if (ts == NULL)
+        return thr_park_kernel(NULL);
+
+    struct netbsd_timespec50 want;
+    if (copyin(ts, &want, sizeof(want)) != 0)
+        return -EFAULT;
+
+    struct timespec rel;
+    if (flags & NETBSD_TIMER_ABSTIME) {
+        struct timespec now = {0, 0};
+        kern_clock_gettime(clock_id, &now);
+        rel.tv_sec  = (long)(want.tv_sec  - now.tv_sec);
+        rel.tv_nsec = (long)(want.tv_nsec - now.tv_nsec);
+        if (rel.tv_nsec < 0) { rel.tv_nsec += 1000000000L; rel.tv_sec -= 1; }
+        if (rel.tv_sec < 0) { rel.tv_sec = 0; rel.tv_nsec = 0; } /* already elapsed */
+    } else {
+        rel.tv_sec  = (long)want.tv_sec;
+        rel.tv_nsec = want.tv_nsec;
+    }
+    return thr_park_kernel(&rel);
+}
+
+/* _lwp_ctl(int features, struct lwpctl **address) — hand back a per-LWP
+ * scratch page libpthread consults for the "which CPU am I on" fast path.
+ * A fresh MAP_ANON page is already zero-filled, which reads as
+ * lc_curcpu = 0 (CPU 0) / lc_pctr = 0 — a valid static view for a system
+ * that does not migrate the caller mid-syscall. */
+long netbsd_sys_lwp_ctl(int features, void **address) {
+    (void)features;
+    void *page = sys_mmap(NULL, 4096, 0x3 /* PROT_READ|PROT_WRITE */,
+                          0x22 /* MAP_ANONYMOUS|MAP_PRIVATE */, -1, 0);
+    if ((uintptr_t)page > (uintptr_t)-4096UL)
+        return (long)(intptr_t)page;            /* -errno from sys_mmap */
+    if (copyout(&page, address, sizeof(page)) != 0)
+        return -EFAULT;
+    return 0;
+}
+
+/* _lwp_getprivate(void) — the TCB pointer previously installed by
+ * _lwp_setprivate (kept in the thread's %gs base). */
+void *netbsd_sys_lwp_getprivate(void) {
+    return current_thread ? (void *)(uintptr_t)current_thread->gs_base : NULL;
 }
 
 /* ===================================================================

@@ -231,6 +231,7 @@ extern int sys_thr_kill(long, int);
 extern int sys_thr_kill2(pid_t, long, int);
 struct timespec;
 extern int sys_thr_suspend(const struct timespec *);
+extern int thr_park_kernel(const struct timespec *);
 extern int sys_thr_wake(long);
 extern int sys_thr_set_name(long, const char *);
 extern int sys_yield(void);

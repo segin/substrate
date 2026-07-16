@@ -189,6 +189,14 @@
  * then every TLS access faults at the first `mov %gs:0x0,%eax`. */
 #define NETBSD_SYS__lwp_setprivate 317
 
+/* LWP park/unpark + lwpctl — libpthread's threading primitives.  Wired to
+ * substrate's native thr_suspend/thr_wake (see netbsd_sys_lwp_* handlers). */
+#define NETBSD_SYS__lwp_getprivate 316
+#define NETBSD_SYS__lwp_unpark     321
+#define NETBSD_SYS__lwp_unpark_all 322
+#define NETBSD_SYS__lwp_ctl        325
+#define NETBSD_SYS____lwp_park60   478
+
 /* NetBSD __sysctl(name, namelen, oldp, oldlenp, newp, newlen).  Used
  * by libc startup (getprogname, stack-guard, page-size lookup);
  * static-pie binaries like vi crash at _start without it because

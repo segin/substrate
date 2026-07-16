@@ -1462,15 +1462,15 @@ int sys_thr_kill2(pid_t pid, long id, int sig) {
     return 0;
 }
 
-int sys_thr_suspend(const struct timespec *timeout) {
-    /* Pull the timeout into the kernel (NULL = sleep forever). */
-    struct timespec kts = {0, 0};
-    int has_timeout = 0;
-    if (timeout) {
-        if (copyin(timeout, &kts, sizeof(kts)) != 0) return -14;
-        has_timeout = 1;
-    }
-
+/*
+ * Park the current thread until thr_wake / _lwp_unpark hits it or the
+ * (relative, kernel-resident) timeout expires.  `kts` NULL means sleep
+ * forever.  Split out from sys_thr_suspend so in-kernel callers — notably
+ * the NetBSD-personality _lwp_park handler, which converts an absolute
+ * deadline to a relative one on the kernel stack — can park without a
+ * user-space copyin.
+ */
+int thr_park_kernel(const struct timespec *kts) {
     /* Edge case: a thr_wake fired before we entered.  We model that
      * with THREAD_F_WAKE_PENDING; consume and return immediately. */
     if (current_thread->flags & THREAD_F_WAKE_PENDING) {
@@ -1478,8 +1478,8 @@ int sys_thr_suspend(const struct timespec *timeout) {
         return 0;
     }
 
-    if (has_timeout) {
-        uint64_t ticks = (uint64_t)kts.tv_sec * 100 + (uint64_t)kts.tv_nsec / 10000000;
+    if (kts) {
+        uint64_t ticks = (uint64_t)kts->tv_sec * 100 + (uint64_t)kts->tv_nsec / 10000000;
         if (ticks == 0) ticks = 1;
         current_thread->sleep_expiry = get_ticks() + ticks;
     } else {
@@ -1491,6 +1491,16 @@ int sys_thr_suspend(const struct timespec *timeout) {
     /* sleep_status: 0 normal wake, -ETIMEDOUT if timer expired,
      * -EINTR if a signal woke us. */
     return current_thread->sleep_status;
+}
+
+int sys_thr_suspend(const struct timespec *timeout) {
+    /* Pull the timeout into the kernel (NULL = sleep forever). */
+    struct timespec kts = {0, 0};
+    if (timeout) {
+        if (copyin(timeout, &kts, sizeof(kts)) != 0) return -14;
+        return thr_park_kernel(&kts);
+    }
+    return thr_park_kernel(NULL);
 }
 
 int sys_thr_wake(long id) {
