@@ -195,6 +195,8 @@
 #define NETBSD_SYS__lwp_create     309
 #define NETBSD_SYS__lwp_exit       310
 #define NETBSD_SYS__lwp_wait       312
+#define NETBSD_SYS__lwp_suspend    313
+#define NETBSD_SYS__lwp_continue   314
 #define NETBSD_SYS__lwp_detach     319
 #define NETBSD_SYS__lwp_getprivate 316
 #define NETBSD_SYS__lwp_unpark     321

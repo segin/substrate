@@ -358,6 +358,9 @@ typedef struct thread {
 #define THREAD_F_INTERRUPTIBLE 0x0001 // Sleep is interruptible by signals
 #define THREAD_F_NO_PREEMPT    0x0002 // Suppress timer-driven reschedule
 #define THREAD_F_WAKE_PENDING  0x0004 // thr_wake() seen before thr_suspend() — latched
+#define THREAD_F_DETACHED      0x0008 // Detached LWP: self-reap on exit, no join
+#define THREAD_F_SUSPENDED     0x0010 // _lwp_suspend: off-CPU until _lwp_continue
+                                      // (distinct from job-control THREAD_STOPPED)
 
     // Scheduling - Runqueue linkage
     struct thread *rq_next;       // Next in runqueue level

@@ -366,6 +366,7 @@ void sched_yield(void) {
     if (!current_thread) return;
 
     proc_reap_autoreap_zombies();
+    sched_reap_detached_zombies();
 
     /* Disable interrupts across thread selection and the context switch so
      * a timer tick cannot re-enter sched_yield (kernel preemption) and
@@ -892,4 +893,155 @@ void sched_reap_thread(thread_t *t) {
     spinlock_release_irq(&tid_lock, tf);
 
     sched_storage_free(t);
+}
+
+/* ---------------------------------------------------------------------------
+ * Detached-LWP self-reap + per-LWP suspend/continue.
+ *
+ * A detached thread (NetBSD LWP_DETACHED / _lwp_detach) has no joiner, so when
+ * it exits nobody calls sched_reap_thread() for it and its kernel stack +
+ * thread_t would leak as a permanent zombie.  sys_thr_exit() flags the pending
+ * work via sched_mark_detached_zombie(); sched_yield() then drains it from a
+ * safe context (never the exiting thread's own stack) — the same deferred-reap
+ * shape as proc_reap_autoreap_zombies().
+ * ------------------------------------------------------------------------- */
+static volatile int detached_zombie_pending;
+
+void sched_mark_detached_zombie(void) {
+    __sync_fetch_and_add(&detached_zombie_pending, 1);
+}
+
+void sched_reap_detached_zombies(void) {
+    if (detached_zombie_pending == 0)
+        return;                       /* fast path: nothing to reap */
+
+    /* Serialize reapers (a concurrent CPU / a nested yield) so a thread_t is
+     * claimed and freed exactly once. */
+    static volatile int reaping;
+    if (__sync_lock_test_and_set(&reaping, 1))
+        return;
+
+    for (;;) {
+        thread_t *victim = NULL;
+
+        unsigned long tf = spinlock_acquire_irq(&tid_lock);
+        FOREACH_THREAD(t) {
+            if (t == current_thread)
+                continue;
+            if (t->state == THREAD_ZOMBIE && (t->flags & THREAD_F_DETACHED)) {
+                /* Claim by unlinking from the registry under tid_lock: this is
+                 * the atomic ownership transfer.  Once unlinked, neither
+                 * another detached-reaper scan nor proc_exit's
+                 * sched_reap_process_threads() walk can find it, so it is freed
+                 * exactly once.  sched_reap_thread()'s own unlink below is then
+                 * an idempotent no-op. */
+                victim = t;
+                sched_unlink_locked(t);
+                break;
+            }
+        }
+        spinlock_release_irq(&tid_lock, tf);
+
+        if (!victim)
+            break;
+        __sync_fetch_and_sub(&detached_zombie_pending, 1);
+        sched_reap_thread(victim);
+    }
+
+    __sync_lock_release(&reaping);
+}
+
+/* Mark tid detached.  If it has already exited (a joinable thread that
+ * zombied before the detach), hand it to the deferred reaper. */
+int sched_lwp_detach(tid_t tid) {
+    thread_t *t = sched_get_thread((int)tid);
+    if (!t || t->proc != current_process)
+        return -ESRCH;
+    t->flags |= THREAD_F_DETACHED;
+    if (t->state == THREAD_ZOMBIE)
+        sched_mark_detached_zombie();
+    return 0;
+}
+
+/* Set the detached flag on a freshly-created LWP (from _lwp_create's
+ * LWP_DETACHED); it has not run yet, so this is race-free. */
+int sched_lwp_set_detached(tid_t tid) {
+    thread_t *t = sched_get_thread((int)tid);
+    if (!t || t->proc != current_process)
+        return -ESRCH;
+    t->flags |= THREAD_F_DETACHED;
+    return 0;
+}
+
+/* _lwp_suspend: take an LWP off-CPU until _lwp_continue.  THREAD_F_SUSPENDED
+ * keeps it distinct from a job-control THREAD_STOPPED so SIGCONT won't resume
+ * it (see signal.c).  A READY/RUNNING target is parked in THREAD_STOPPED so the
+ * scheduler skips it; a blocked target just carries the flag and parks when it
+ * would next become runnable. */
+int sched_lwp_suspend(tid_t tid) {
+    thread_t *t = sched_get_thread((int)tid);
+    if (!t || t->proc != current_process)
+        return -ESRCH;
+    if (t == current_thread)
+        return -EDEADLK;              /* suspending self is not supported here */
+    t->flags |= THREAD_F_SUSPENDED;
+    if (t->state == THREAD_READY || t->state == THREAD_RUNNING)
+        t->state = THREAD_STOPPED;
+    return 0;
+}
+
+/* _lwp_continue: undo _lwp_suspend and make the LWP runnable again. */
+int sched_lwp_continue(tid_t tid) {
+    thread_t *t = sched_get_thread((int)tid);
+    if (!t || t->proc != current_process)
+        return -ESRCH;
+    t->flags &= ~THREAD_F_SUSPENDED;
+    if (t->state == THREAD_STOPPED)
+        t->state = THREAD_READY;
+    return 0;
+}
+
+/* Find, atomically claim, and reap one zombie sibling of the caller in the
+ * current process; returns its tid, or -1 if none is a zombie right now.
+ * The claim (sched_unlink_locked under tid_lock) removes the victim from the
+ * registry so a concurrent _lwp_wait(0) cannot find and double-free it; the
+ * subsequent sched_reap_thread()'s own unlink is then a harmless no-op.
+ * Backs _lwp_wait(0) ("wait for any LWP"). */
+int sched_reap_any_zombie_sibling(void) {
+    thread_t *victim = NULL;
+    int lid = -1;
+    unsigned long tf = spinlock_acquire_irq(&tid_lock);
+    FOREACH_THREAD(t) {
+        if (t == current_thread || t->proc != current_process)
+            continue;
+        if (t->state == THREAD_ZOMBIE) {
+            victim = t;
+            lid = t->tid;
+            sched_unlink_locked(t);       /* claim before releasing the lock */
+            break;
+        }
+    }
+    spinlock_release_irq(&tid_lock, tf);
+    if (!victim)
+        return -1;
+    sched_reap_thread(victim);
+    return lid;
+}
+
+/* True if the current process has any thread other than the caller that has
+ * not yet zombified — i.e. there is still an LWP that _lwp_wait(0) could wait
+ * for.  When false and no zombie is pending, _lwp_wait(0) is a deadlock. */
+int sched_has_live_siblings(void) {
+    int live = 0;
+    unsigned long rf = thread_registry_lock();
+    FOREACH_THREAD(t) {
+        if (t == current_thread || t->proc != current_process)
+            continue;
+        if (t->state != THREAD_ZOMBIE) {
+            live = 1;
+            break;
+        }
+    }
+    thread_registry_unlock(rf);
+    return live;
 }

@@ -214,5 +214,7 @@ long netbsd_sys_lwp_create(const void *ucp, unsigned long flags, int *new_lwp);
 long netbsd_sys_lwp_exit(void);
 long netbsd_sys_lwp_wait(int wait_for, int *departed);
 long netbsd_sys_lwp_detach(int lid);
+long netbsd_sys_lwp_suspend(int lid);
+long netbsd_sys_lwp_continue(int lid);
 
 #endif /* _NETBSD_USER_H */

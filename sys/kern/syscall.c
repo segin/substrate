@@ -1336,6 +1336,13 @@ int sys_thr_exit(void *retval) {
      */
     preempt_disable();
     current_thread->state = THREAD_ZOMBIE;
+    /* A detached LWP (NetBSD LWP_DETACHED / _lwp_detach) has no joiner to
+     * reap it, so hand it to sched_yield()'s deferred detached-zombie reaper;
+     * a joinable thread stays a zombie until sys_thr_join()/_lwp_wait reaps
+     * it.  Only NetBSD threads ever set THREAD_F_DETACHED, so the native and
+     * FreeBSD paths are unaffected. */
+    if (current_thread->flags & THREAD_F_DETACHED)
+        sched_mark_detached_zombie();
     sleepq_wake_all(current_thread);
     sched_yield();
     return 0; // Not reached

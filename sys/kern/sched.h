@@ -147,6 +147,21 @@ void sched_reap_process_threads(process_t *proc);
  */
 void sched_reap_thread(thread_t *t);
 
+/*
+ * Detached-LWP self-reap + per-LWP suspend/continue (NetBSD _lwp_* support).
+ * sched_mark_detached_zombie() is called by a detached thread's exit path;
+ * sched_reap_detached_zombies() drains the pending reaps from sched_yield().
+ * The suspend/continue/detach helpers operate on a tid in the current process.
+ */
+void sched_mark_detached_zombie(void);
+void sched_reap_detached_zombies(void);
+int  sched_lwp_detach(tid_t tid);
+int  sched_lwp_set_detached(tid_t tid);
+int  sched_lwp_suspend(tid_t tid);
+int  sched_lwp_continue(tid_t tid);
+int  sched_reap_any_zombie_sibling(void);
+int  sched_has_live_siblings(void);
+
 void sched_check_timeouts(void);
 int sched_can_run_on_cpu(thread_t *t, int cpu_id);
 int sched_bind_thread(thread_t *t, int cpu_id);

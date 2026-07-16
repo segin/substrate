@@ -382,7 +382,10 @@ void signal_resume_process_threads(process_t *p) {
     unsigned long rf = thread_registry_lock();
     FOREACH_THREAD(thread) {
         if (thread->proc != p) continue;
-        if (thread->state == THREAD_STOPPED) {
+        /* Leave an _lwp_suspend'd thread parked (see the SIGCONT note in
+         * psignal): only _lwp_continue clears THREAD_F_SUSPENDED. */
+        if (thread->state == THREAD_STOPPED &&
+            !(thread->flags & THREAD_F_SUSPENDED)) {
             thread->state = THREAD_READY;
             thread->wait_reason = NULL;
         }
@@ -1195,8 +1198,12 @@ static int psignal_info(process_t *p, int sig, int si_code,
     FOREACH_THREAD(t) {
         if (t->proc != p) continue;
 
-        /* SIGCONT Special: Wake up stopped threads */
-        if (sig == SIGCONT && t->state == THREAD_STOPPED) {
+        /* SIGCONT Special: Wake up job-control-stopped threads.  A thread
+         * parked by _lwp_suspend (THREAD_F_SUSPENDED) is deliberately NOT
+         * resumed here — that suspension is independent of job control and
+         * is cleared only by _lwp_continue. */
+        if (sig == SIGCONT && t->state == THREAD_STOPPED &&
+            !(t->flags & THREAD_F_SUSPENDED)) {
             t->state = THREAD_READY;
         }
         

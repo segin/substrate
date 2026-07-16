@@ -6,9 +6,11 @@
 #include <sys/fcntl.h>
 #include <sys/kern_syscalls.h>
 #include <sys/namei.h>
+#include <sys/preempt.h>
 #include <sys/proc.h>
 #include <sys/random.h>
 #include <sys/thr.h>
+#include <kern/sched.h>
 #include <sys/stat.h>
 #include <sys/sysarch.h>
 #include <sys/syscall_impl.h>
@@ -457,16 +459,27 @@ long netbsd_sys_lwp_create(const void *ucp, unsigned long flags, int *new_lwp) {
     param.tls_base   = (void *)(uintptr_t)tls;
     param.child_tid  = &ktid;                  /* kern_thr_new writes the new tid */
 
+    /*
+     * kern_thr_new() creates the LWP already runnable, so hold off preemption
+     * across create + attribute-application: a timer tick must not run the new
+     * thread before we mark it suspended (LWP_SUSPENDED) or detached
+     * (LWP_DETACHED).  Both are looked up by tid immediately, before any yield.
+     */
+    preempt_disable();
     int rc = kern_thr_new(&param, (int)sizeof(param));
+    if (rc == 0) {
+        if (flags & NETBSD_LWP_SUSPENDED)
+            sched_lwp_suspend((tid_t)ktid);
+        if (flags & NETBSD_LWP_DETACHED)
+            sched_lwp_set_detached((tid_t)ktid);
+    }
+    preempt_enable_noresched();
     if (rc != 0) return rc;
 
     if (new_lwp) {
         int lid = (int)ktid;
         if (copyout(&lid, new_lwp, sizeof(lid)) != 0) return -EFAULT;
     }
-    /* LWP_DETACHED is handled by _lwp_detach/_lwp_exit; LWP_SUSPENDED (a thread
-     * attribute, rarely used) is not yet honored — the LWP starts runnable. */
-    (void)flags;
     return 0;
 }
 
@@ -476,25 +489,55 @@ long netbsd_sys_lwp_exit(void) {
     return sys_thr_exit(NULL);
 }
 
-/* _lwp_wait(lwpid_t wait_for, lwpid_t *departed) — reap a specific exited LWP
- * (libpthread's pthread_join / reaper path).  wait_for == 0 ("any LWP") is not
- * yet supported. */
+/* _lwp_wait(lwpid_t wait_for, lwpid_t *departed) — reap an exited LWP.  A
+ * specific wait_for joins that one (libpthread's pthread_join path).
+ * wait_for == 0 waits for ANY sibling LWP to exit, returning its lid in
+ * *departed; it fails EDEADLK when the caller is the last LWP (nothing left to
+ * wait for), matching NetBSD. */
 long netbsd_sys_lwp_wait(int wait_for, int *departed) {
-    if (wait_for == 0) return -ENOSYS;
-    int rc = sys_thr_join((tid_t)wait_for, NULL);
-    if (rc != 0) return rc;
-    if (departed && copyout(&wait_for, departed, sizeof(wait_for)) != 0)
-        return -EFAULT;
-    return 0;
+    if (wait_for != 0) {
+        int rc = sys_thr_join((tid_t)wait_for, NULL);
+        if (rc != 0) return rc;
+        if (departed && copyout(&wait_for, departed, sizeof(wait_for)) != 0)
+            return -EFAULT;
+        return 0;
+    }
+
+    /* Any-LWP wait: reap an already-exited sibling if there is one, else park
+     * briefly and re-scan.  sys_thr_exit() has no per-process exit wakeup, so
+     * poll on a short timeout rather than a precise sleep — this path is not
+     * used by libpthread and never runs hot. */
+    for (;;) {
+        int lid = sched_reap_any_zombie_sibling();
+        if (lid >= 0) {
+            if (departed && copyout(&lid, departed, sizeof(lid)) != 0)
+                return -EFAULT;
+            return 0;
+        }
+        if (!sched_has_live_siblings())
+            return -EDEADLK;           /* caller is the last LWP */
+        struct timespec nap = { 0, 10 * 1000 * 1000 };  /* 10 ms */
+        int rc = thr_park_kernel(&nap);
+        if (rc == -EINTR) return -EINTR;
+    }
 }
 
-/* _lwp_detach(lwpid_t) — mark an LWP so no join is required.  substrate has no
- * self-reaping detached-thread path yet, so this is best-effort: a detached
- * thread that later exits leaves a reapable zombie (a small leak, not a fault).
- * Returning success keeps pthread_detach() working. */
+/* _lwp_suspend(lwpid_t) — take a sibling LWP off-CPU until _lwp_continue.
+ * _lwp_continue(lwpid_t) reverses it.  Distinct from job-control stop
+ * (see sched_lwp_suspend / the SIGCONT guard in signal.c). */
+long netbsd_sys_lwp_suspend(int lid) {
+    return sched_lwp_suspend((tid_t)lid);
+}
+
+long netbsd_sys_lwp_continue(int lid) {
+    return sched_lwp_continue((tid_t)lid);
+}
+
+/* _lwp_detach(lwpid_t) — mark an LWP detached so it self-reaps on exit rather
+ * than lingering as a joinable zombie.  If it has already exited, hands it to
+ * the deferred reaper immediately. */
 long netbsd_sys_lwp_detach(int lid) {
-    (void)lid;
-    return 0;
+    return sched_lwp_detach((tid_t)lid);
 }
 
 /* ===================================================================
