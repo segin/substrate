@@ -8,6 +8,7 @@
 #include <sys/namei.h>
 #include <sys/proc.h>
 #include <sys/random.h>
+#include <sys/thr.h>
 #include <sys/stat.h>
 #include <sys/sysarch.h>
 #include <sys/syscall_impl.h>
@@ -397,6 +398,103 @@ long netbsd_sys_lwp_ctl(int features, void **address) {
  * _lwp_setprivate (kept in the thread's %gs base). */
 void *netbsd_sys_lwp_getprivate(void) {
     return current_thread ? (void *)(uintptr_t)current_thread->gs_base : NULL;
+}
+
+/* ===================================================================
+ * NetBSD LWP creation / teardown — pthread_create's kernel side.
+ *
+ * NetBSD i386 ucontext_t byte layout (fixed by the ABI):
+ *   +0    uc_flags       +4  uc_link         +8  uc_sigmask[4]
+ *   +24   uc_stack[12]   +36 uc_mcontext.__gregs[19]
+ *   +112  uc_mcontext.__fpregs[644]          +756 uc_mcontext._mc_tlsbase
+ * pthread__makelwp() fills it via _lwp_makecontext(): __gregs[_REG_EIP] is the
+ * trampoline entry, __gregs[_REG_UESP] is a user stack already carrying the
+ * cdecl [ _lwp_exit ][ arg ] frame, and _mc_tlsbase (valid when
+ * uc_flags & _UC_TLSBASE) is the new thread's TLS base.
+ * =================================================================== */
+#define NBUC_REG_EIP         14         /* __gregs[_REG_EIP]  */
+#define NBUC_REG_UESP        17         /* __gregs[_REG_UESP] */
+#define NETBSD_UC_TLSBASE    0x00080000 /* _UC_TLSBASE (i386 _UC_MD_BIT19) */
+#define NETBSD_LWP_DETACHED  0x00000040
+#define NETBSD_LWP_SUSPENDED 0x00000080
+
+struct netbsd_ucontext {
+    uint32_t uc_flags;          /* +0   */
+    uint32_t uc_link;           /* +4   */
+    uint32_t uc_sigmask[4];     /* +8   */
+    uint8_t  uc_stack[12];      /* +24  ss_sp / ss_size / ss_flags */
+    uint32_t __gregs[19];       /* +36  uc_mcontext.__gregs        */
+    uint8_t  __fpregs[644];     /* +112 uc_mcontext.__fpregs       */
+    uint32_t _mc_tlsbase;       /* +756 uc_mcontext._mc_tlsbase    */
+    uint32_t __uc_pad[4];       /* +760 */
+};
+
+/* _lwp_create(const ucontext_t *ucp, u_long flags, lwpid_t *new_lwp).
+ * Re-uses substrate's native kern_thr_new: the ucontext's UESP already points
+ * at a ready cdecl frame, so hand kern_thr_new the entry, that exact SP (as a
+ * zero-length stack, making stack_top == UESP), the argument (read back from
+ * [UESP + 4], where _lwp_makecontext pushed it), and the TLS base. */
+long netbsd_sys_lwp_create(const void *ucp, unsigned long flags, int *new_lwp) {
+    struct netbsd_ucontext uc;
+    if (copyin(ucp, &uc, sizeof(uc)) != 0) return -EFAULT;
+
+    uint32_t entry   = uc.__gregs[NBUC_REG_EIP];
+    uint32_t user_sp = uc.__gregs[NBUC_REG_UESP];
+    uint32_t tls     = (uc.uc_flags & NETBSD_UC_TLSBASE) ? uc._mc_tlsbase : 0;
+    if (entry == 0 || user_sp == 0) return -EINVAL;
+
+    uint32_t arg = 0;
+    if (copyin((const void *)(uintptr_t)(user_sp + 4), &arg, sizeof(arg)) != 0)
+        return -EFAULT;
+
+    long ktid = 0;
+    struct thr_param param;
+    memset(&param, 0, sizeof(param));
+    param.start_func = (void (*)(void *))(uintptr_t)entry;
+    param.arg        = (void *)(uintptr_t)arg;
+    param.stack_base = (void *)(uintptr_t)user_sp;
+    param.stack_size = 0;                      /* stack_top == user_sp */
+    param.tls_base   = (void *)(uintptr_t)tls;
+    param.child_tid  = &ktid;                  /* kern_thr_new writes the new tid */
+
+    int rc = kern_thr_new(&param, (int)sizeof(param));
+    if (rc != 0) return rc;
+
+    if (new_lwp) {
+        int lid = (int)ktid;
+        if (copyout(&lid, new_lwp, sizeof(lid)) != 0) return -EFAULT;
+    }
+    /* LWP_DETACHED is handled by _lwp_detach/_lwp_exit; LWP_SUSPENDED (a thread
+     * attribute, rarely used) is not yet honored — the LWP starts runnable. */
+    (void)flags;
+    return 0;
+}
+
+/* _lwp_exit(void) — terminate the calling LWP.  NetBSD keeps the pthread
+ * return value in userspace, so no kernel-side status is carried. */
+long netbsd_sys_lwp_exit(void) {
+    return sys_thr_exit(NULL);
+}
+
+/* _lwp_wait(lwpid_t wait_for, lwpid_t *departed) — reap a specific exited LWP
+ * (libpthread's pthread_join / reaper path).  wait_for == 0 ("any LWP") is not
+ * yet supported. */
+long netbsd_sys_lwp_wait(int wait_for, int *departed) {
+    if (wait_for == 0) return -ENOSYS;
+    int rc = sys_thr_join((tid_t)wait_for, NULL);
+    if (rc != 0) return rc;
+    if (departed && copyout(&wait_for, departed, sizeof(wait_for)) != 0)
+        return -EFAULT;
+    return 0;
+}
+
+/* _lwp_detach(lwpid_t) — mark an LWP so no join is required.  substrate has no
+ * self-reaping detached-thread path yet, so this is best-effort: a detached
+ * thread that later exits leaves a reapable zombie (a small leak, not a fault).
+ * Returning success keeps pthread_detach() working. */
+long netbsd_sys_lwp_detach(int lid) {
+    (void)lid;
+    return 0;
 }
 
 /* ===================================================================

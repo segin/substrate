@@ -189,8 +189,13 @@
  * then every TLS access faults at the first `mov %gs:0x0,%eax`. */
 #define NETBSD_SYS__lwp_setprivate 317
 
-/* LWP park/unpark + lwpctl — libpthread's threading primitives.  Wired to
- * substrate's native thr_suspend/thr_wake (see netbsd_sys_lwp_* handlers). */
+/* LWP creation/teardown + park/unpark + lwpctl — libpthread's threading
+ * primitives.  Wired to substrate's native thr_new/thr_exit/thr_join +
+ * thr_suspend/thr_wake (see the netbsd_sys_lwp_* handlers). */
+#define NETBSD_SYS__lwp_create     309
+#define NETBSD_SYS__lwp_exit       310
+#define NETBSD_SYS__lwp_wait       312
+#define NETBSD_SYS__lwp_detach     319
 #define NETBSD_SYS__lwp_getprivate 316
 #define NETBSD_SYS__lwp_unpark     321
 #define NETBSD_SYS__lwp_unpark_all 322

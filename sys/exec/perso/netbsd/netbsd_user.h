@@ -210,5 +210,9 @@ long netbsd_sys_lwp_park(int clock_id, int flags,
                          int unpark, const void *hint, const void *unparkhint);
 long netbsd_sys_lwp_ctl(int features, void **address);
 void *netbsd_sys_lwp_getprivate(void);
+long netbsd_sys_lwp_create(const void *ucp, unsigned long flags, int *new_lwp);
+long netbsd_sys_lwp_exit(void);
+long netbsd_sys_lwp_wait(int wait_for, int *departed);
+long netbsd_sys_lwp_detach(int lid);
 
 #endif /* _NETBSD_USER_H */
