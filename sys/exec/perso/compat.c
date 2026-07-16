@@ -441,12 +441,26 @@ struct freebsd_rlimit {
 };
 #define FREEBSD_RLIM_INFINITY (~0ULL)
 
+/*
+ * RLIMIT_STACK is 3 in both the FreeBSD and NetBSD ABIs.  It must report a
+ * finite value: NetBSD libpthread rounds rlim_cur up to a page
+ * (stacksize += pagesize-1; stacksize &= ~(pagesize-1)), so an "infinite"
+ * 0xFFFFFFFF wraps to ~0 on the 32-bit add and trips its
+ * errx("Stacksize limit is too low") — which then calls write() before the
+ * TCB's pthread self-pointer is set, faulting in the cancellation stub.
+ * Report substrate's real 8 MiB grow-down ceiling instead.
+ */
+#define RLIMIT_STACK_BSD 3
 int sys_getrlimit(int resource, void *rlp) {
-    (void)resource;
     if (!rlp) return -EFAULT;
     struct freebsd_rlimit krl;
-    krl.rlim_cur = FREEBSD_RLIM_INFINITY;
-    krl.rlim_max = FREEBSD_RLIM_INFINITY;
+    if (resource == RLIMIT_STACK_BSD) {
+        krl.rlim_cur = USER_STACK_MAX;
+        krl.rlim_max = USER_STACK_MAX;
+    } else {
+        krl.rlim_cur = FREEBSD_RLIM_INFINITY;
+        krl.rlim_max = FREEBSD_RLIM_INFINITY;
+    }
     return copyout(&krl, rlp, sizeof(krl));
 }
 

@@ -1043,7 +1043,7 @@ static int exec_setup_stack(pmap_t pmap, uint32_t *sp_out, char **k_argv, int ar
      * USER_STACK_MAX caps how far it may grow.
      */
     #define USER_STACK_EAGER_PAGES 32        /* 128 KiB mapped at exec */
-    #define USER_STACK_MAX        0x800000   /* 8 MiB grow-down ceiling */
+    /* USER_STACK_MAX (8 MiB grow-down ceiling) comes from <sys/param.h>. */
     uint32_t user_stack_size = USER_STACK_EAGER_PAGES;
     uint32_t user_stack_base = user_stack_top - (user_stack_size * 0x1000);
 

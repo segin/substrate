@@ -10,6 +10,9 @@
 /* Memory layout (Temporary defaults, should be arch-specific) */
 #define KERN_BASE       0xC0000000
 #define USER_STACK_MIN  0x00001000  /* Minimum valid user stack address */
+#define USER_STACK_MAX  0x00800000  /* 8 MiB grow-down user-stack ceiling
+                                     * (RLIMIT_STACK; also the exec-time
+                                     * demand-paged stack limit). */
 
 /* Page geometry (x86, 4 KiB pages). */
 #define PAGE_SHIFT      12
