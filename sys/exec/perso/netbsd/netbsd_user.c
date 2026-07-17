@@ -15,6 +15,7 @@
 #include <sys/sysarch.h>
 #include <sys/syscall_impl.h>
 #include <arch/i386/pmm.h>
+#include <exec/perso/netbsd/netbsd_syscalls.h>
 #include <exec/perso/netbsd/netbsd_user.h>
 
 /* NetBSD at-flags identical to FreeBSD/POSIX (NOFOLLOW=0x200,
@@ -295,6 +296,47 @@ void *netbsd_sys_mmap(void *addr, size_t len, int prot, int flags,
     if ((kflags & (KERN_MAP_SHARED | KERN_MAP_PRIVATE)) == 0)
         kflags |= KERN_MAP_PRIVATE;
     return sys_mmap(addr, len, prot, kflags, fd, pos);
+}
+
+/* ===================================================================
+ * NetBSD open(2) flags.
+ *
+ * NetBSD uses the BSD numbering (sys/sys/fcntl.h); substrate's <sys/fcntl.h>
+ * uses the Linux numbering.  Only the access mode (O_RDONLY/WRONLY/RDWR, 0..2)
+ * happens to agree — every other bit differs, and dispatching open() straight
+ * at sys_open silently mis-read all of them.  The damaging one:
+ *
+ *     NetBSD O_CREAT (0x200) == substrate O_TRUNC
+ *
+ * so a NetBSD program could never *create* a file: open(path, O_WRONLY|O_CREAT
+ * |O_TRUNC) arrived as O_WRONLY|O_TRUNC|O_APPEND with no O_CREAT and failed
+ * ENOENT (psymp3: "Failed to write config file ...").  O_EXCL likewise landed
+ * on O_NONBLOCK, O_SYNC on O_EXCL, and O_NOFOLLOW on O_NOCTTY — so the
+ * exclusive-create and no-follow security checks were silently not applied
+ * either.  Translate bit by bit; flags substrate has no notion of (SHLOCK/
+ * EXLOCK/ASYNC/ALT_IO/REGULAR/...) are dropped rather than mapped onto an
+ * unrelated bit.
+ * =================================================================== */
+
+int netbsd_oflags_to_native(int f) {
+    int n = f & 0x3;                      /* access mode: same numbering */
+    if (f & NETBSD_O_NONBLOCK)  n |= O_NONBLOCK;
+    if (f & NETBSD_O_APPEND)    n |= O_APPEND;
+    if (f & NETBSD_O_SYNC)      n |= O_SYNC;
+    if (f & NETBSD_O_DSYNC)     n |= O_SYNC;
+    if (f & NETBSD_O_RSYNC)     n |= O_SYNC;
+    if (f & NETBSD_O_NOFOLLOW)  n |= O_NOFOLLOW;
+    if (f & NETBSD_O_CREAT)     n |= O_CREAT;
+    if (f & NETBSD_O_TRUNC)     n |= O_TRUNC;
+    if (f & NETBSD_O_EXCL)      n |= O_EXCL;
+    if (f & NETBSD_O_NOCTTY)    n |= O_NOCTTY;
+    if (f & NETBSD_O_DIRECTORY) n |= O_DIRECTORY;
+    if (f & NETBSD_O_CLOEXEC)   n |= O_CLOEXEC;
+    return n;
+}
+
+int netbsd_sys_open(const char *path, int flags, int mode) {
+    return sys_open(path, netbsd_oflags_to_native(flags), mode);
 }
 
 /* _lwp_setprivate(addr) — NetBSD's i386 TLS install.  ld.elf_so calls

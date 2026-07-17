@@ -53,8 +53,23 @@
  * NetBSD O_CLOEXEC=0x400000 differs from substrate's 0x80000, so the flag
  * needs translating (the native handler EINVALs an unknown flag bit). */
 #define NETBSD_SYS_dup3              454
-#define NETBSD_O_CLOEXEC             0x00400000
+
+/* NetBSD open(2) flag values (BSD numbering, sys/sys/fcntl.h).  Only the access
+ * mode (O_RDONLY/WRONLY/RDWR) agrees with substrate's Linux-style <sys/fcntl.h>;
+ * every other bit differs, so anything taking these must translate — see
+ * netbsd_oflags_to_native() and netbsd_sys_dup3(). */
 #define NETBSD_O_NONBLOCK            0x00000004
+#define NETBSD_O_APPEND              0x00000008
+#define NETBSD_O_SYNC                0x00000080
+#define NETBSD_O_NOFOLLOW            0x00000100
+#define NETBSD_O_CREAT               0x00000200
+#define NETBSD_O_TRUNC               0x00000400
+#define NETBSD_O_EXCL                0x00000800
+#define NETBSD_O_NOCTTY              0x00008000
+#define NETBSD_O_DSYNC               0x00010000
+#define NETBSD_O_RSYNC               0x00020000
+#define NETBSD_O_DIRECTORY           0x00200000
+#define NETBSD_O_CLOEXEC             0x00400000
 #define NETBSD_SYS_creat          8
 #define NETBSD_SYS_link           9
 #define NETBSD_SYS_unlink         10

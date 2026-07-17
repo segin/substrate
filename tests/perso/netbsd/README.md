@@ -40,6 +40,18 @@ libpthread bookkeeping in the way):
 Raw LWPs get no libpthread TCB, so their entry points touch only volatile
 globals and atomics before `_lwp_exit()` — no stdio or TLS from a raw LWP.
 
+## opentest
+
+Pins open(2) flag handling.  NetBSD uses the BSD flag numbering, substrate's
+native `<sys/fcntl.h>` uses the Linux one, and only the access mode agrees — so
+dispatching `open()` straight at `sys_open` mis-read every other bit.  The
+damaging one: NetBSD's `O_CREAT` (0x200) is substrate's `O_TRUNC`, so a NetBSD
+binary could never *create* a file.  Covers O_CREAT / O_EXCL / O_TRUNC /
+O_APPEND.
+
+Known gap not covered: NetBSD returns `EFTYPE` for `open(symlink, O_NOFOLLOW)`
+where substrate returns `ELOOP`, and substrate has no `EFTYPE` to map onto.
+
 ### Build + run
 
 On a NetBSD 10.1/i386 host:

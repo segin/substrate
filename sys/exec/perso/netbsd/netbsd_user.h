@@ -217,4 +217,10 @@ long netbsd_sys_lwp_detach(int lid);
 long netbsd_sys_lwp_suspend(int lid);
 long netbsd_sys_lwp_continue(int lid);
 
+/* open(2) flag translation: NetBSD uses BSD flag numbering, substrate uses the
+ * Linux numbering, and only the access mode agrees.  netbsd_sys_open maps them
+ * before calling sys_open (see netbsd_user.c for why this matters). */
+int netbsd_oflags_to_native(int flags);
+int netbsd_sys_open(const char *path, int flags, int mode);
+
 #endif /* _NETBSD_USER_H */
