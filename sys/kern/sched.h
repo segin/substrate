@@ -160,7 +160,8 @@ int  sched_lwp_set_detached(tid_t tid);
 int  sched_lwp_suspend(tid_t tid);
 int  sched_lwp_continue(tid_t tid);
 int  sched_reap_any_zombie_sibling(void);
-int  sched_has_live_siblings(void);
+int  sched_has_waitable_siblings(void);
+int  sched_lwp_wait_check(tid_t tid);
 
 void sched_check_timeouts(void);
 int sched_can_run_on_cpu(thread_t *t, int cpu_id);

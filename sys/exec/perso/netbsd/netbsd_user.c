@@ -489,13 +489,19 @@ long netbsd_sys_lwp_exit(void) {
     return sys_thr_exit(NULL);
 }
 
-/* _lwp_wait(lwpid_t wait_for, lwpid_t *departed) — reap an exited LWP.  A
- * specific wait_for joins that one (libpthread's pthread_join path).
- * wait_for == 0 waits for ANY sibling LWP to exit, returning its lid in
- * *departed; it fails EDEADLK when the caller is the last LWP (nothing left to
- * wait for), matching NetBSD. */
+/* _lwp_wait(lwpid_t wait_for, lwpid_t *departed) — reap an exited LWP.
+ * Error contract follows NetBSD's lwp_wait() (sys/kern/kern_lwp.c), as
+ * confirmed against a real NetBSD 10.1 i386 host:
+ *   - a specific wait_for that is not an LWP of this process -> ESRCH
+ *   - a specific wait_for that is DETACHED                   -> EINVAL
+ *   - wait_for == 0 with no waitable (non-detached) sibling   -> ESRCH
+ *     (NetBSD's `nfound == 0` case — NOT EDEADLK, which it reserves for
+ *      "every LWP is simultaneously blocked in _lwp_wait")
+ * Otherwise wait_for == 0 waits for ANY sibling to exit and reports its lid. */
 long netbsd_sys_lwp_wait(int wait_for, int *departed) {
     if (wait_for != 0) {
+        int chk = sched_lwp_wait_check((tid_t)wait_for);
+        if (chk != 0) return chk;                 /* ESRCH / EINVAL */
         int rc = sys_thr_join((tid_t)wait_for, NULL);
         if (rc != 0) return rc;
         if (departed && copyout(&wait_for, departed, sizeof(wait_for)) != 0)
@@ -503,10 +509,10 @@ long netbsd_sys_lwp_wait(int wait_for, int *departed) {
         return 0;
     }
 
-    /* Any-LWP wait: reap an already-exited sibling if there is one, else park
-     * briefly and re-scan.  sys_thr_exit() has no per-process exit wakeup, so
-     * poll on a short timeout rather than a precise sleep — this path is not
-     * used by libpthread and never runs hot. */
+    /* Any-LWP wait: reap an already-exited waitable sibling if there is one,
+     * else park briefly and re-scan.  sys_thr_exit() has no per-process exit
+     * wakeup, so poll on a short timeout rather than a precise sleep — this
+     * path is not used by libpthread and never runs hot. */
     for (;;) {
         int lid = sched_reap_any_zombie_sibling();
         if (lid >= 0) {
@@ -514,8 +520,8 @@ long netbsd_sys_lwp_wait(int wait_for, int *departed) {
                 return -EFAULT;
             return 0;
         }
-        if (!sched_has_live_siblings())
-            return -EDEADLK;           /* caller is the last LWP */
+        if (!sched_has_waitable_siblings())
+            return -ESRCH;             /* nothing this LWP could wait for */
         struct timespec nap = { 0, 10 * 1000 * 1000 };  /* 10 ms */
         int rc = thr_park_kernel(&nap);
         if (rc == -EINTR) return -EINTR;

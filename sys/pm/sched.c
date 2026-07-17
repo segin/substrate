@@ -1001,8 +1001,11 @@ int sched_lwp_continue(tid_t tid) {
     return 0;
 }
 
-/* Find, atomically claim, and reap one zombie sibling of the caller in the
- * current process; returns its tid, or -1 if none is a zombie right now.
+/* Find, atomically claim, and reap one *waitable* zombie sibling of the caller
+ * in the current process; returns its tid, or -1 if none is a zombie right now.
+ * A detached LWP is NOT waitable — the kernel's own detached reaper owns it, so
+ * _lwp_wait() must neither reap nor report it (NetBSD kern_lwp.c skips
+ * LPR_DETACHED when counting waitable LWPs).
  * The claim (sched_unlink_locked under tid_lock) removes the victim from the
  * registry so a concurrent _lwp_wait(0) cannot find and double-free it; the
  * subsequent sched_reap_thread()'s own unlink is then a harmless no-op.
@@ -1013,6 +1016,8 @@ int sched_reap_any_zombie_sibling(void) {
     unsigned long tf = spinlock_acquire_irq(&tid_lock);
     FOREACH_THREAD(t) {
         if (t == current_thread || t->proc != current_process)
+            continue;
+        if (t->flags & THREAD_F_DETACHED)
             continue;
         if (t->state == THREAD_ZOMBIE) {
             victim = t;
@@ -1028,20 +1033,33 @@ int sched_reap_any_zombie_sibling(void) {
     return lid;
 }
 
-/* True if the current process has any thread other than the caller that has
- * not yet zombified — i.e. there is still an LWP that _lwp_wait(0) could wait
- * for.  When false and no zombie is pending, _lwp_wait(0) is a deadlock. */
-int sched_has_live_siblings(void) {
-    int live = 0;
+/* True if the current process has any *waitable* sibling — one that is neither
+ * the caller nor detached (zombie or not).  _lwp_wait() reports ESRCH when
+ * there is nothing it could ever wait for, matching NetBSD's `nfound == 0`
+ * check in lwp_wait(). */
+int sched_has_waitable_siblings(void) {
+    int found = 0;
     unsigned long rf = thread_registry_lock();
     FOREACH_THREAD(t) {
         if (t == current_thread || t->proc != current_process)
             continue;
-        if (t->state != THREAD_ZOMBIE) {
-            live = 1;
-            break;
-        }
+        if (t->flags & THREAD_F_DETACHED)
+            continue;
+        found = 1;
+        break;
     }
     thread_registry_unlock(rf);
-    return live;
+    return found;
+}
+
+/* Validate a specific _lwp_wait(lid) target: ESRCH if it is not an LWP of this
+ * process, EINVAL if it is detached (NetBSD returns EINVAL for a detached
+ * target rather than waiting on it), else 0. */
+int sched_lwp_wait_check(tid_t tid) {
+    thread_t *t = sched_get_thread((int)tid);
+    if (!t || t->proc != current_process)
+        return -ESRCH;
+    if (t->flags & THREAD_F_DETACHED)
+        return -EINVAL;
+    return 0;
 }
