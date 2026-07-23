@@ -172,13 +172,15 @@ static void translate_stat_to_freebsd13(struct stat *native, struct freebsd13_st
     fbsd->st_uid      = native->st_uid;
     fbsd->st_gid      = native->st_gid;
     fbsd->st_rdev     = native->st_rdev;
-    fbsd->st_atim.tv_sec  = native->st_atime;
+    /* i386 FreeBSD tv_sec is 32-bit; the interleaved st_*_ext words stay 0
+     * (already cleared by the memset above), matching the kernel. */
+    fbsd->st_atim.tv_sec  = (int32_t)native->st_atime;
     fbsd->st_atim.tv_nsec = (int32_t)native->st_atime_nsec;
-    fbsd->st_mtim.tv_sec  = native->st_mtime;
+    fbsd->st_mtim.tv_sec  = (int32_t)native->st_mtime;
     fbsd->st_mtim.tv_nsec = (int32_t)native->st_mtime_nsec;
-    fbsd->st_ctim.tv_sec  = native->st_ctime;
+    fbsd->st_ctim.tv_sec  = (int32_t)native->st_ctime;
     fbsd->st_ctim.tv_nsec = (int32_t)native->st_ctime_nsec;
-    fbsd->st_birthtim.tv_sec  = native->st_ctime;
+    fbsd->st_birthtim.tv_sec  = (int32_t)native->st_ctime;
     fbsd->st_birthtim.tv_nsec = (int32_t)native->st_ctime_nsec;
     fbsd->st_size     = native->st_size;
     fbsd->st_blocks   = native->st_blocks;
@@ -299,6 +301,22 @@ int freebsd_sys_pipe2(int *fds, int flags) {
     if (flags & FREEBSD_O_CLOEXEC)  native |= O_CLOEXEC;
     if (flags & FREEBSD_O_NONBLOCK) native |= O_NONBLOCK;
     return sys_pipe2(fds, native);
+}
+
+/*
+ * FreeBSD COMPAT10 pipe(2) (syscall 42): declared `int pipe(void)` — it takes
+ * NO argument and returns the two descriptors in registers (fd0 in eax /
+ * retval[0], fd1 in edx / retval[1]), see freebsd sys/kern/sys_pipe.c:531-544.
+ * The native sys_pipe instead copies the pair into a user "int fildes[2]"
+ * pointer, so routing 42 there makes the kernel treat a stale argument
+ * register as a destination pointer.  Return the pair as a 64-bit value; the
+ * BSD syscall path (syscall 42) places the high half in edx.
+ */
+int64_t freebsd_sys_pipe(void) {
+    int fds[2];
+    int ret = kern_pipe(fds);
+    if (ret != 0) return ret;
+    return ((int64_t)(uint32_t)fds[1] << 32) | (uint32_t)fds[0];
 }
 
 int freebsd_sys_dup3(int oldfd, int newfd, int flags) {

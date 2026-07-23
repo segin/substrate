@@ -3,10 +3,104 @@
 #include <sys/copy.h>
 #include <sys/errno.h>
 #include <sys/kern_syscalls.h>
+#include <sys/syscall_impl.h>
 #include <exec/perso/freebsd/freebsd_user.h>
 #include <arch/i386/idt.h>
 #include <arch/i386/signal_arch.h>
 #include <string.h>
+
+/*
+ * FreeBSD <-> substrate-native signal-number translation.
+ *
+ * FreeBSD i386 uses the historical 4.3BSD signal numbering (SIGCHLD=20,
+ * SIGUSR1=30, SIGUSR2=31, SIGBUS=10, SIGSYS=12, SIGSTOP=17, SIGTSTP=18,
+ * SIGCONT=19 -- verified against freebsd sys/sys/signal.h), which is the
+ * SAME numbering NetBSD uses; substrate's native numbering is Linux-ish
+ * (SIGCHLD=17, SIGUSR1=10, SIGBUS=7, where 20=SIGTSTP).  The shared kernel
+ * signal machinery -- pending sets, blocked masks, psignal(), the SIGCHLD
+ * raised on child exit, the SIGTSTP a tty raises on Ctrl-Z -- all speak
+ * NATIVE numbers, so every FreeBSD signal syscall argument (and the
+ * number/mask handed to a signal handler at delivery) must be translated at
+ * the personality boundary.  Without this a FreeBSD program's
+ * sigaction(SIGCHLD=20) installs on the native SIGTSTP slot, its kernel
+ * SIGCHLD is never caught, and a Ctrl-Z spuriously fires its handler.
+ *
+ * These tables carry the same values as the NetBSD personality's
+ * (netbsd_sig.c); the numberings are identical.  Indexed by signal number
+ * (1..31); 0 and out-of-range fall back to identity.
+ */
+static const unsigned char fbsd2nat_signo[32] = {
+    [1] = SIGHUP,  [2] = SIGINT,  [3] = SIGQUIT, [4] = SIGILL,
+    [5] = SIGTRAP, [6] = SIGABRT,
+    [7] = SIGBUS,                 /* FreeBSD SIGEMT -> nearest native trap */
+    [8] = SIGFPE,  [9] = SIGKILL,
+    [10] = SIGBUS,                /* FreeBSD SIGBUS=10  */
+    [11] = SIGSEGV,
+    [12] = SIGSYS,                /* FreeBSD SIGSYS=12 -> native 31 */
+    [13] = SIGPIPE, [14] = SIGALRM, [15] = SIGTERM, [16] = SIGURG,
+    [17] = SIGSTOP,               /* FreeBSD SIGSTOP=17 -> native 19 */
+    [18] = SIGTSTP,               /* FreeBSD SIGTSTP=18 -> native 20 */
+    [19] = SIGCONT,               /* FreeBSD SIGCONT=19 -> native 18 */
+    [20] = SIGCHLD,               /* FreeBSD SIGCHLD=20 -> native 17 */
+    [21] = SIGTTIN, [22] = SIGTTOU,
+    [23] = SIGIO,                 /* FreeBSD SIGIO=23 */
+    [24] = 24, [25] = 25,         /* XCPU / XFSZ -> unused native slots */
+    [26] = SIGVTALRM, [27] = SIGPROF, [28] = SIGWINCH,
+    [29] = 29,                    /* SIGINFO -> unused native slot */
+    [30] = SIGUSR1,               /* FreeBSD SIGUSR1=30 -> native 10 */
+    [31] = SIGUSR2,               /* FreeBSD SIGUSR2=31 -> native 12 */
+};
+
+static const unsigned char nat2fbsd_signo[32] = {
+    [SIGHUP] = 1,  [SIGINT] = 2,  [SIGQUIT] = 3, [SIGILL] = 4,
+    [SIGTRAP] = 5, [SIGABRT] = 6,
+    [SIGBUS] = 10,                /* native SIGBUS=7 -> FreeBSD 10 */
+    [SIGFPE] = 8,  [SIGKILL] = 9,
+    [SIGUSR1] = 30,               /* native SIGUSR1=10 -> FreeBSD 30 */
+    [SIGSEGV] = 11,
+    [SIGUSR2] = 31,               /* native SIGUSR2=12 -> FreeBSD 31 */
+    [SIGPIPE] = 13, [SIGALRM] = 14, [SIGTERM] = 15, [SIGURG] = 16,
+    [SIGCHLD] = 20,               /* native SIGCHLD=17 -> FreeBSD 20 */
+    [SIGCONT] = 19,               /* native SIGCONT=18 -> FreeBSD 19 */
+    [SIGSTOP] = 17,               /* native SIGSTOP=19 -> FreeBSD 17 */
+    [SIGTSTP] = 18,               /* native SIGTSTP=20 -> FreeBSD 18 */
+    [SIGTTIN] = 21, [SIGTTOU] = 22,
+    [SIGIO] = 23,
+    [24] = 24, [25] = 25,
+    [SIGVTALRM] = 26, [SIGPROF] = 27, [SIGWINCH] = 28,
+    [29] = 29, [30] = 30,
+    [SIGSYS] = 12,                /* native SIGSYS=31 -> FreeBSD 12 */
+};
+
+int freebsd_to_native_signo(int sig) {
+    if (sig <= 0 || sig >= 32) return sig;
+    int n = fbsd2nat_signo[sig];
+    return n ? n : sig;
+}
+
+int native_to_freebsd_signo(int sig) {
+    if (sig <= 0 || sig >= 32) return sig;
+    int n = nat2fbsd_signo[sig];
+    return n ? n : sig;
+}
+
+/* Remap a signal bitmask (bit (signo-1) set) between the two numberings.
+ * Only signals 1..31 are meaningful in substrate's 32-bit mask word. */
+uint32_t freebsd_to_native_sigmask(uint32_t m) {
+    uint32_t out = 0;
+    for (int s = 1; s <= 31; s++)
+        if (m & (1u << (s - 1)))
+            out |= 1u << (freebsd_to_native_signo(s) - 1);
+    return out;
+}
+
+uint32_t native_to_freebsd_sigmask(uint32_t m) {
+    uint32_t out = 0;
+    for (int s = 1; s <= 31; s++)
+        if (m & (1u << (s - 1)))
+            out |= 1u << (native_to_freebsd_signo(s) - 1);
+    return out;
+}
 
 /*
  * FreeBSD i386 signal delivery.
@@ -69,15 +163,19 @@ void freebsd_sendsig(void *handler, int sig, uint32_t mask, uint32_t flags, void
         si_code = current_thread->trap_code;
     }
 
+    /* The kernel posts NATIVE signal numbers; the handler must see the
+     * FreeBSD number it installed against. */
+    int fsig = native_to_freebsd_signo(sig);
+
     frame.sf_ra       = FBSD_SIG_TRAMPOLINE_ADDR;
-    frame.sf_signum   = sig;
+    frame.sf_signum   = fsig;
     frame.sf_ucontext = uc_user;               /* arg3 is always a ucontext */
     frame.sf_addr     = fault_addr;            /* arg4 */
     frame.sf_ahu      = (uint32_t)(uintptr_t)handler;
 
     if (flags & SA_SIGINFO) {
         frame.sf_siginfo   = si_user;          /* arg2 -> &sf_si */
-        frame.sf_si.si_signo = sig;
+        frame.sf_si.si_signo = fsig;
         frame.sf_si.si_errno = 0;
         frame.sf_si.si_code  = si_code;
         frame.sf_si.si_pid   = current_process ? current_process->pid : 0;
@@ -116,8 +214,9 @@ void freebsd_sendsig(void *handler, int sig, uint32_t mask, uint32_t flags, void
     mc->mc_flags     = 0;
 
     /* Signal mask to restore on sigreturn (only the low 32 bits are used by
-     * substrate's native signal machinery). */
-    frame.sf_uc.uc_sigmask.__bits[0] = mask;
+     * substrate's native signal machinery).  The user sees a FreeBSD-numbered
+     * set; sigreturn translates it back to native. */
+    frame.sf_uc.uc_sigmask.__bits[0] = native_to_freebsd_sigmask(mask);
 
     frame.sf_uc.uc_stack_ss_sp    = (uint32_t)(uintptr_t)current_thread->sig_alt_stack.ss_sp;
     frame.sf_uc.uc_stack_ss_size  = (uint32_t)current_thread->sig_alt_stack.ss_size;
@@ -163,7 +262,8 @@ int freebsd_sys_sigreturn(void *regs_ptr) {
     regs->fs = mc->mc_fs | 3;
     regs->gs = mc->mc_gs | 3;
 
-    current_thread->sig_mask = uc.uc_sigmask.__bits[0];
+    /* uc_sigmask is a FreeBSD-numbered set; the kernel mask is native. */
+    current_thread->sig_mask = freebsd_to_native_sigmask(uc.uc_sigmask.__bits[0]);
     current_thread->sig_on_stack = 0;
     current_thread->sig_alt_stack.ss_flags &= ~SS_ONSTACK;
     /* Trapframe is now the restored user context -- the dispatcher must not
@@ -207,32 +307,91 @@ static int32_t native_sa_flags_to_freebsd(uint32_t n) {
  * SA_* bit values -- so SA_SIGINFO could never be recognised and the
  * during-handler mask was garbage.  Marshal both directions explicitly.
  *
- * Signal *numbers* are deliberately left untranslated: kill(2)/thr_kill(2)/
- * psignal deliver in FreeBSD's number space too, so install and delivery stay
- * self-consistent (translating only here would desynchronise them).
+ * The signal *number* and sa_mask are FreeBSD-numbered and must be
+ * translated to native: the kernel indexes handlers and masks by native
+ * number, and posts native numbers (delivery translates back in sendsig),
+ * so installing on the raw FreeBSD number would land on the wrong slot.
  */
 int freebsd_sys_sigaction(int sig, const void *act, void *oact) {
     struct sigaction kact, koact;
     struct sigaction *pkact = NULL;
     struct freebsd_sigaction fact, foact;
 
+    int nat = freebsd_to_native_signo(sig);
+
     if (act) {
         if (copyin(act, &fact, sizeof(fact)) != 0) return -EFAULT;
         kact.sa_handler = (sig_t)(uintptr_t)fact.sa_handler;
         kact.sa_flags   = (int)freebsd_sa_flags_to_native(fact.sa_flags);
-        kact.sa_mask    = fact.sa_mask.__bits[0];
+        kact.sa_mask    = freebsd_to_native_sigmask(fact.sa_mask.__bits[0]);
         pkact = &kact;
     }
 
-    int ret = kern_sigaction(sig, pkact, oact ? &koact : NULL);
+    int ret = kern_sigaction(nat, pkact, oact ? &koact : NULL);
     if (ret != 0) return ret;
 
     if (oact) {
         memset(&foact, 0, sizeof(foact));
         foact.sa_handler        = (uint32_t)(uintptr_t)koact.sa_handler;
         foact.sa_flags          = native_sa_flags_to_freebsd((uint32_t)koact.sa_flags);
-        foact.sa_mask.__bits[0] = koact.sa_mask;
+        foact.sa_mask.__bits[0] = native_to_freebsd_sigmask(koact.sa_mask);
         if (copyout(&foact, oact, sizeof(foact)) != 0) return -EFAULT;
+    }
+    return 0;
+}
+
+/* kill(2): translate the FreeBSD signal number to native. */
+int freebsd_sys_kill(int pid, int sig) {
+    return sys_kill(pid, freebsd_to_native_signo(sig));
+}
+
+/* thr_kill(2): the signo is FreeBSD-numbered (libthr pthread_kill). */
+int freebsd_sys_thr_kill(long tid, int sig) {
+    return sys_thr_kill(tid, freebsd_to_native_signo(sig));
+}
+
+/*
+ * sigprocmask(2): the set/oset are FreeBSD-numbered sigset_t (only the first
+ * 32-bit word is meaningful here).  Translate the incoming mask to native
+ * bit positions, and the outgoing old mask back.
+ */
+int freebsd_sys_sigprocmask(int how, const void *set, void *oset) {
+    uint32_t kset, koset;
+    uint32_t *p_set = NULL;
+
+    if (set) {
+        uint32_t fset;
+        if (copyin(set, &fset, sizeof(fset)) != 0) return -EFAULT;
+        kset = freebsd_to_native_sigmask(fset);
+        p_set = &kset;
+    }
+
+    int ret = kern_sigprocmask(how, p_set, oset ? &koset : NULL);
+    if (ret != 0) return ret;
+
+    if (oset) {
+        uint32_t fold = native_to_freebsd_sigmask(koset);
+        if (copyout(&fold, oset, sizeof(fold)) != 0) return -EFAULT;
+    }
+    return 0;
+}
+
+/* sigsuspend(2): the mask is FreeBSD-numbered. */
+int freebsd_sys_sigsuspend(const void *mask) {
+    uint32_t fmask = 0;
+    if (mask && copyin(mask, &fmask, sizeof(fmask)) != 0) return -EFAULT;
+    uint32_t kmask = freebsd_to_native_sigmask(fmask);
+    return kern_sigsuspend(&kmask);
+}
+
+/* sigpending(2): the returned set is FreeBSD-numbered. */
+int freebsd_sys_sigpending(void *set) {
+    uint32_t kset = 0;
+    int ret = kern_sigpending(&kset);
+    if (ret != 0) return ret;
+    if (set) {
+        uint32_t fset = native_to_freebsd_sigmask(kset);
+        if (copyout(&fset, set, sizeof(fset)) != 0) return -EFAULT;
     }
     return 0;
 }
