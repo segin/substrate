@@ -930,49 +930,49 @@ int readlink_fs(fs_node_t *node, char *buf, size_t size) {
     if (node && node->readlink) {
         return node->readlink(node, buf, size);
     }
-    return -1;
+    return -ENOSYS;
 }
 
 int symlink_fs(fs_node_t *parent, const char *target, const char *name) {
     if (parent && parent->symlink) {
         return parent->symlink(parent, target, name);
     }
-    return -1;
+    return -ENOSYS;
 }
 
 int link_fs(fs_node_t *parent, fs_node_t *source, const char *name) {
     if (parent && parent->link) {
         return parent->link(parent, source, name);
     }
-    return -1;
+    return -ENOSYS;
 }
 
 int unlink_fs(fs_node_t *node, const char *name) {
     if (node && node->unlink) {
         return node->unlink(node, name);
     }
-    return -1;
+    return -ENOSYS;
 }
 
 int rmdir_fs(fs_node_t *node, const char *name) {
     if (node && node->rmdir) {
         return node->rmdir(node, name);
     }
-    return -1;
+    return -ENOSYS;
 }
 
 int rename_fs(fs_node_t *old_parent, const char *old_name, fs_node_t *new_parent, const char *new_name) {
     if (old_parent && old_parent->rename) {
         return old_parent->rename(old_parent, old_name, new_parent, new_name);
     }
-    return -1;
+    return -ENOSYS;
 }
 
 int statfs_fs(fs_node_t *node, struct statfs *buf) {
     if (node && node->statfs) {
         return node->statfs(node, buf);
     }
-    return -1;
+    return -ENOSYS;
 }
 
 /*
@@ -1081,14 +1081,14 @@ int mknod_fs(fs_node_t *node, const char *name, uint16_t mode, uint32_t dev) {
     if (node && node->mknod) {
         return node->mknod(node, name, mode, dev);
     }
-    return -1;
+    return -ENOSYS;
 }
 
 void *mmap_fs(fs_node_t *node, void *addr, size_t length, int prot, int flags, off_t offset) {
     if (node && node->mmap) {
         return node->mmap(node, addr, length, prot, flags, offset);
     }
-    return (void *)-1;
+    return (void *)-ENOSYS;
 }
 
 int poll_fs(fs_node_t *node, void *waiter) {
