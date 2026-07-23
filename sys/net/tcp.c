@@ -486,13 +486,25 @@ static void tcp_in_syn_sent(tcp_pcb_t *p, uint32_t seq, uint32_t ack,
         return;
     }
     if ((flags & (TCP_SYN | TCP_ACK)) == (TCP_SYN | TCP_ACK)) {
-        p->rcv_nxt = seq + 1;
-        /* The peer's ACK confirms our SYN.  Prune it from the
-         * unacked queue and advance snd_una.  */
-        if ((int32_t)(ack - p->snd_una) > 0) {
-            p->snd_una = ack;
-            tcp_unacked_prune(p, ack);
+        /* A71: RFC 793 SYN-SENT requires validating the ACK before
+         * proceeding.  The segment's ACK must acknowledge our SYN,
+         * i.e. ISS < SEG.ACK <= SND.NXT (in SYN_SENT snd_una == ISS
+         * and snd_nxt == ISS+1).  An ack that is at/below snd_una or
+         * beyond snd_nxt is unacceptable: reply with a reset
+         * (<SEQ=SEG.ACK><CTL=RST>, as the RFC prescribes) and drop the
+         * segment rather than establishing with a stale/forged send
+         * state (which also left the SYN un-pruned and snd_una wrong). */
+        if ((int32_t)(ack - p->snd_una) <= 0 ||
+            (int32_t)(ack - p->snd_nxt) > 0) {
+            tcp_xmit_raw(p, ack, TCP_RST, NULL, 0);
+            return;
         }
+        p->rcv_nxt = seq + 1;
+        /* The peer's ACK confirms our SYN (validated acceptable above,
+         * so it always advances snd_una).  Prune it from the unacked
+         * queue and advance snd_una. */
+        p->snd_una = ack;
+        tcp_unacked_prune(p, ack);
         p->state = TCP_ESTABLISHED;
         tcp_send_ctl(p, TCP_ACK);
         sched_wakeup(p->connect_chan);
@@ -1154,11 +1166,19 @@ int tcp_close(tcp_pcb_t *p) {
          * connection is up.  Reset and detach each so the peer is told
          * the connection is gone and the timer frees the PCB.
          *
-         * RST is emitted with IRQs enabled (collect under the lock,
-         * send after unlock) since tcp_xmit_raw -> ip4_output may
-         * ARP-wait. */
-        tcp_pcb_t *rst_list[32];
-        int nrst = 0;
+         * A45: the RST is emitted INLINE, under the lock, exactly like
+         * the retransmit timer's inline transmit (NET-02).  NET-05
+         * makes ip4_output() non-sleeping while interrupts are disabled
+         * (an ARP miss fires the request and drops the frame instead of
+         * yielding), so tcp_xmit_raw() cannot block here.  The previous
+         * design collected the children, dropped the lock, then called
+         * tcp_send_ctl() on each after the unlock — but tcp_kill_pcb()
+         * transitions each child to CLOSED+detached, precisely the state
+         * the timer reaper (an ordinary preemptible kthread) tcp_free()s
+         * on its next wake.  A preemption in the gap between the unlock
+         * and the RST sends could free a child before its pointer was
+         * dereferenced: a use-after-free.  Sending under the lock closes
+         * the window (and drops the old 32-child cap). */
         for (tcp_pcb_t *q = g_tcp_pcbs; q; q = q->next) {
             if (q->parent != p) continue;
             q->parent   = NULL;     /* drop the dangling back-pointer */
@@ -1166,15 +1186,13 @@ int tcp_close(tcp_pcb_t *p) {
             int qst = q->state;
             /* Only an established/half-open child has a peer that needs
              * telling; a CLOSED/TIME_WAIT one is already torn down. */
-            if (qst != TCP_CLOSED && qst != TCP_TIME_WAIT && nrst < 32)
-                rst_list[nrst++] = q;
+            if (qst != TCP_CLOSED && qst != TCP_TIME_WAIT)
+                tcp_send_ctl(q, TCP_RST | TCP_ACK);
             tcp_kill_pcb(q, ECONNRESET);   /* -> CLOSED, wakes waiters */
         }
         p->accept_count = 0;
         p->state = TCP_CLOSED;
         tcp_unlock(f);
-        for (int i = 0; i < nrst; i++)
-            tcp_send_ctl(rst_list[i], TCP_RST | TCP_ACK);
         break;
     }
     case TCP_SYN_SENT:
