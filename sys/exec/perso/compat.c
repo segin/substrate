@@ -85,10 +85,20 @@ int32_t compat_time32(int32_t *tloc) {
 #include <sys/kern_syscalls.h>
 #include <string.h>
 
-/* Old lseek (syscall 19): (fd, pad, off_lo, off_hi, whence) with alignment pad */
+/* COMPAT6 lseek (syscall 199): (fd, pad, off_lo, off_hi, whence) with alignment pad */
 int64_t freebsd_sys_lseek(int fd, int pad, uint32_t off_lo, uint32_t off_hi, int whence) {
     (void)pad;
     return sys_lseek(fd, off_lo, off_hi, whence);
+}
+
+/* Ancient lseek (syscall 19): "long lseek(int fd, long offset, int whence)" —
+ * three args, a SIGNED 32-bit offset, no pad slot (FreeBSD syscalls.master:229).
+ * The padded COMPAT6 handler above misreads this form (it takes the offset as
+ * the pad and off_hi as whence), so syscall 19 needs its own 3-arg wrapper.
+ * Sign-extend the 32-bit offset into the split 64-bit form sys_lseek expects. */
+int64_t freebsd_sys_olseek(int fd, int32_t offset, int whence) {
+    int64_t off = (int64_t)offset;
+    return sys_lseek(fd, (uint32_t)off, (uint32_t)((uint64_t)off >> 32), whence);
 }
 
 /* lseek_freebsd13 (syscall 478): pad-less ABI - (fd, off_lo, off_hi, whence) */
@@ -1360,8 +1370,8 @@ static const struct flag_pair fbsd_lflag[] = {
     { 0x00000100, 0000002 },  /* ICANON */
     { 0x00000400, 0100000 },  /* IEXTEN */
     { 0x00000800, 0040000 },  /* EXTPROC */
-    { 0x00008000, 0000400 },  /* TOSTOP */
-    { 0x00010000, 0000020 },  /* FLUSHO */
+    { 0x00400000, 0000400 },  /* TOSTOP  (FreeBSD _termios.h:175 == 0x00400000) */
+    { 0x00800000, 0010000 },  /* FLUSHO  (FreeBSD 0x00800000; native FLUSHO == 0010000) */
 };
 
 static uint32_t translate_flags(uint32_t in, const struct flag_pair *table, size_t n,

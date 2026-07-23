@@ -20,6 +20,7 @@ struct freebsd11_stat;
 int freebsd_sys_uname(void *buf);
 int freebsd_sys_uname_v4(void *buf);
 int64_t freebsd_sys_lseek(int fd, int pad, uint32_t off_lo, uint32_t off_hi, int whence);
+int64_t freebsd_sys_olseek(int fd, int32_t offset, int whence);
 int64_t freebsd_sys_lseek13(int fd, uint32_t off_lo, uint32_t off_hi, int whence);
 void *freebsd_sys_mmap(void *addr, size_t len, int prot, int flags, int fd, uint32_t off_lo, uint32_t off_hi);
 int freebsd_sys_ioctl(int fd, uint32_t request, void *arg);

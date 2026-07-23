@@ -41,7 +41,7 @@ static void *freebsd_syscalls[MAX_SYSCALLS] = {
     [FREEBSD_SYS_lchown]   = (void *)&sys_lchown,             /* 254  no follow */
     [FREEBSD_SYS_lchmod]   = (void *)&freebsd_sys_lchmod,     /* 274  no follow */
     [FREEBSD_SYS_break]    = (void *)&sys_brk,
-    [FREEBSD_SYS_lseek]    = (void *)&freebsd_sys_lseek,
+    [FREEBSD_SYS_lseek]    = (void *)&freebsd_sys_olseek,  /* syscall 19: ancient 3-arg 32-bit lseek */
     [FREEBSD_SYS_getpid]   = &sys_getpid,
     [FREEBSD_SYS_mount]    = &sys_mount,
     /* FreeBSD unmount(2) is (path, flags); use the 2-arg native form. */
@@ -454,7 +454,7 @@ static struct syscall_fmt freebsd_fmts[MAX_SYSCALLS] = {
     [FREEBSD_SYS_fchmod] = { 2, { ARG_INT, ARG_INT } },
     [FREEBSD_SYS_lchown] = { 3, { ARG_STR, ARG_INT, ARG_INT } },
     [FREEBSD_SYS_lchmod] = { 2, { ARG_STR, ARG_INT } },
-    [FREEBSD_SYS_lseek]  = { 5, { ARG_INT, ARG_INT, ARG_LONG, ARG_INT } },
+    [FREEBSD_SYS_lseek]  = { 3, { ARG_INT, ARG_LONG, ARG_INT } },
     [FREEBSD_SYS_mount]  = { 5, { ARG_STR, ARG_STR, ARG_STR, ARG_HEX, ARG_PTR } },
     [FREEBSD_SYS_umount] = { 2, { ARG_STR, ARG_HEX } },
     [FREEBSD_SYS_setuid] = { 1, { ARG_INT } },
