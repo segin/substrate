@@ -18,6 +18,7 @@
 #include <sys/time.h>
 #include <sys/times.h>
 #include <arch/i386/syscall.h>
+#include <vm/vm_kmem.h>
 #include <exec/perso/compat.h>
 #include <exec/perso/personality.h>
 #include <exec/perso/perso_ipc_sem.h>
@@ -27,27 +28,58 @@
 #include <string.h>
 #include <errno.h>
 
-int netbsd_sys_getrusage(int who, struct rusage *rusage) {
+/*
+ * NetBSD getrusage(2) syscall 117 is the COMPAT_50 entry: its ABI is
+ *   int getrusage(int who, struct rusage50 *rusage);
+ * struct rusage50 (compat/sys/resource.h) uses struct timeval50 -- two 32-bit
+ * `long`s -- so on i386 it is exactly 72 bytes: two 8-byte timeval50 followed
+ * by fourteen 4-byte longs.  Substrate's native struct rusage has 16-byte
+ * timevals (64-bit suseconds_t), i.e. 88 bytes, so filling and copying the
+ * native layout overran a compat_50 caller's 72-byte buffer by 16 bytes and
+ * mis-placed ru_stime and every ru_* field.  Marshal a rusage50 explicitly.
+ * (The modern getrusage lives at syscall 445 -> netbsd_sys_getrusage50.)
+ */
+struct netbsd_timeval50 { int32_t tv_sec; int32_t tv_usec; };
+struct netbsd_rusage50 {
+    struct netbsd_timeval50 ru_utime;
+    struct netbsd_timeval50 ru_stime;
+    int32_t ru_maxrss;
+    int32_t ru_ixrss;
+    int32_t ru_idrss;
+    int32_t ru_isrss;
+    int32_t ru_minflt;
+    int32_t ru_majflt;
+    int32_t ru_nswap;
+    int32_t ru_inblock;
+    int32_t ru_oublock;
+    int32_t ru_msgsnd;
+    int32_t ru_msgrcv;
+    int32_t ru_nsignals;
+    int32_t ru_nvcsw;
+    int32_t ru_nivcsw;
+};
+
+int netbsd_sys_getrusage(int who, void *rusage) {
     if (who != RUSAGE_SELF && who != RUSAGE_CHILDREN) return -EINVAL;
 
     struct tms t;
     if ((clock_t)kern_times(&t) == (clock_t)-1) return -EFAULT;
 
-    struct rusage kr;
-    memset(&kr, 0, sizeof(struct rusage));
+    struct netbsd_rusage50 kr;
+    memset(&kr, 0, sizeof(kr));
 
     // Ticks to timeval. HZ=128.
     // user time
     clock_t ut = (who == RUSAGE_SELF) ? t.tms_utime : t.tms_cutime;
-    kr.ru_utime.tv_sec = ut / 128;
-    kr.ru_utime.tv_usec = ((ut % 128) * 1000000) / 128;
+    kr.ru_utime.tv_sec = (int32_t)(ut / 128);
+    kr.ru_utime.tv_usec = (int32_t)(((ut % 128) * 1000000) / 128);
 
     // system time
     clock_t st = (who == RUSAGE_SELF) ? t.tms_stime : t.tms_cstime;
-    kr.ru_stime.tv_sec = st / 128;
-    kr.ru_stime.tv_usec = ((st % 128) * 1000000) / 128;
+    kr.ru_stime.tv_sec = (int32_t)(st / 128);
+    kr.ru_stime.tv_usec = (int32_t)(((st % 128) * 1000000) / 128);
 
-    if (copyout(&kr, rusage, sizeof(struct rusage)) != 0) return -14;
+    if (copyout(&kr, rusage, sizeof(kr)) != 0) return -14;
     return 0;
 }
 
@@ -210,6 +242,93 @@ int netbsd_sys_fcntl(int fd, int cmd, int arg) {
 
 #ifndef HOST_TEST
 
+/*
+ * NetBSD __getdents30(2) (syscall 390) must return an array of NetBSD
+ * `struct dirent` (sys/sys/dirent.h):
+ *   uint64_t d_fileno @0, uint16_t d_reclen @8, uint16_t d_namlen @10,
+ *   uint8_t d_type @12, char d_name[] @13, records padded to 8 bytes.
+ * The native sys_getdents emits a Linux-layout record (4-byte d_ino, no
+ * d_type, name at offset 10), which NetBSD libc's readdir() misreads
+ * entirely.  Translate from kern_getdents64 -- which already carries a
+ * 64-bit inode, d_type, and a stable cursor -- into the NetBSD layout.
+ *
+ * NetBSD DT_* file-type values match the Linux ones this kernel emits
+ * (UNKNOWN=0, FIFO=1, CHR=2, DIR=4, BLK=6, REG=8, LNK=10, SOCK=12), so
+ * d_type copies straight across.  A NetBSD record is never larger than the
+ * corresponding linux_dirent64 record (name offset 13 vs 19), so re-encoding
+ * a buffer of `count` linux64 bytes always fits within the caller's `count`
+ * bytes -- no entry is ever dropped and f_offset (already advanced by
+ * kern_getdents64) needs no rewind.
+ */
+struct netbsd_ldirent64 {
+    uint64_t d_ino;
+    int64_t  d_off;
+    uint16_t d_reclen;
+    uint8_t  d_type;
+    char     d_name[];
+};
+struct netbsd_dirent {
+    uint64_t d_fileno;
+    uint16_t d_reclen;
+    uint16_t d_namlen;
+    uint8_t  d_type;
+    char     d_name[];
+};
+#define NETBSD_DIRENT_NAMEOFF 13u
+#define NETBSD_DIRENT_RECLEN(namlen) \
+    ((NETBSD_DIRENT_NAMEOFF + (namlen) + 1u + 7u) & ~7u)
+
+int netbsd_sys_getdents(int fd, void *ubuf, unsigned int count) {
+    if (count > 65536) count = 65536;
+    if (count < NETBSD_DIRENT_RECLEN(0)) return -EINVAL;
+
+    void *lbuf = kmalloc(count);
+    if (!lbuf) return -ENOMEM;
+    void *obuf = kmalloc(count);
+    if (!obuf) { kfree(lbuf, count); return -ENOMEM; }
+
+    int n = kern_getdents64((unsigned int)fd, lbuf, count);
+    if (n <= 0) { kfree(lbuf, count); kfree(obuf, count); return n; }
+
+    unsigned int ipos = 0, opos = 0;
+    const unsigned int lhdr = offsetof(struct netbsd_ldirent64, d_name);
+    while (ipos + lhdr <= (unsigned int)n) {
+        struct netbsd_ldirent64 *li =
+            (struct netbsd_ldirent64 *)((char *)lbuf + ipos);
+        if (li->d_reclen < lhdr || ipos + li->d_reclen > (unsigned int)n)
+            break;
+
+        const char *nm = (char *)lbuf + ipos + lhdr;
+        unsigned int maxname = li->d_reclen - lhdr;
+        unsigned int namelen = 0;
+        while (namelen < maxname && nm[namelen]) namelen++;
+
+        unsigned int orl = NETBSD_DIRENT_RECLEN(namelen);
+        if (opos + orl > count) break;   /* invariant: never trips */
+
+        struct netbsd_dirent *od = (struct netbsd_dirent *)((char *)obuf + opos);
+        memset(od, 0, orl);              /* zero name pad + NUL terminator */
+        od->d_fileno = li->d_ino;
+        od->d_reclen = (uint16_t)orl;
+        od->d_namlen = (uint16_t)namelen;
+        od->d_type   = li->d_type;
+        memcpy(od->d_name, nm, namelen);
+
+        ipos += li->d_reclen;
+        opos += orl;
+    }
+
+    int rc;
+    if (opos != 0 && copyout(obuf, ubuf, opos) != 0)
+        rc = -EFAULT;
+    else
+        rc = (int)opos;
+
+    kfree(lbuf, count);
+    kfree(obuf, count);
+    return rc;
+}
+
 /* NetBSD syscall table - based on i386 column */
 static void *netbsd_syscalls[MAX_SYSCALLS] = {
     [NETBSD_SYS_semget]         = (void *)&netbsd_sys_semget,
@@ -357,8 +476,15 @@ static void *netbsd_syscalls[MAX_SYSCALLS] = {
     [NETBSD_SYS_compat_sigset]  = NULL,            /* compat_sigset */
     [NETBSD_SYS_sigsuspend]     = (void *)&netbsd_sys_sigsuspend,
     [NETBSD_SYS_compat_sigstk]  = NULL,            /* compat_sigstk */
-    [NETBSD_SYS_compat_recvmsg] = &sys_recvmsg,
-    [NETBSD_SYS_compat_sendmsg] = &sys_sendmsg,
+    /* Syscalls 113/114 are COMPAT_43 orecvmsg/osendmsg (struct omsghdr, with
+     * msg_accrights instead of msg_control and no msg_flags -- syscalls.master
+     * 113/114).  Routing them to the modern sys_recvmsg/sys_sendmsg misreads
+     * the header (and recvmsg would write msg_flags 4 bytes past the 24-byte
+     * omsghdr).  NetBSD 10 binaries use the STD recvmsg/sendmsg at 27/28 (wired
+     * above); leave the ancient a.out compat entries unimplemented (ENOSYS)
+     * rather than mis-dispatch.  Full omsghdr translation is left as follow-up. */
+    [NETBSD_SYS_compat_recvmsg] = NULL,            /* compat_43 orecvmsg */
+    [NETBSD_SYS_compat_sendmsg] = NULL,            /* compat_43 osendmsg */
     [NETBSD_SYS_obs_vtrace]     = NULL,            /* obs_vtrace */
     [NETBSD_SYS_gettimeofday]   = &sys_gettimeofday,
     [NETBSD_SYS_getrusage]      = &netbsd_sys_getrusage,
@@ -399,10 +525,9 @@ static void *netbsd_syscalls[MAX_SYSCALLS] = {
     [NETBSD_SYS__lwp_ctl]        = (void *)&netbsd_sys_lwp_ctl,
     [NETBSD_SYS____lwp_park60]   = (void *)&netbsd_sys_lwp_park,
     [NETBSD_SYS___sysctl]       = (void *)&netbsd_sys_sysctl,
-    [NETBSD_SYS_nanosleep]      = &sys_nanosleep,
     [NETBSD_SYS_poll]           = &sys_poll,
     [NETBSD_SYS_getcwd]         = &sys_getcwd,
-    [NETBSD_SYS_getdents]       = &sys_getdents,  /* __getdents30 */
+    [NETBSD_SYS_getdents]       = (void *)&netbsd_sys_getdents,  /* __getdents30 (NetBSD dirent layout) */
     [NETBSD_SYS_fchown]         = (void *)&sys_fchown,                /* 123 */
     [NETBSD_SYS_fchmod]         = (void *)&sys_fchmod,                /* 124 */
     [NETBSD_SYS_lchmod]         = (void *)&netbsd_sys_lchmod,         /* 274  no follow */
@@ -629,7 +754,6 @@ static const char *netbsd_names[MAX_SYSCALLS] = {
     [NETBSD_SYS__lwp_ctl]        = "_lwp_ctl",
     [NETBSD_SYS____lwp_park60]   = "_lwp_park",
     [NETBSD_SYS___sysctl]       = "__sysctl",
-    [NETBSD_SYS_nanosleep]      = "nanosleep",
     [NETBSD_SYS_poll]           = "poll",
     [NETBSD_SYS_getcwd]         = "getcwd",
     [NETBSD_SYS_getdents]       = "getdents",
@@ -764,7 +888,6 @@ static struct syscall_fmt netbsd_fmts[MAX_SYSCALLS] = {
     [NETBSD_SYS__lwp_ctl]        = { 2, { ARG_INT, ARG_PTR } },
     [NETBSD_SYS____lwp_park60]   = { 6, { ARG_INT, ARG_INT, ARG_PTR, ARG_INT, ARG_PTR, ARG_PTR } },
     [NETBSD_SYS___sysctl]       = { 6, { ARG_PTR, ARG_INT, ARG_PTR, ARG_PTR, ARG_PTR, ARG_INT } },
-    [NETBSD_SYS_nanosleep]      = { 2, { ARG_PTR, ARG_PTR } },
     [NETBSD_SYS_poll]           = { 3, { ARG_PTR, ARG_INT, ARG_INT } },
     [NETBSD_SYS_getcwd]         = { 2, { ARG_PTR, ARG_INT } },
     [NETBSD_SYS_getdents]       = { 3, { ARG_INT, ARG_PTR, ARG_INT } },

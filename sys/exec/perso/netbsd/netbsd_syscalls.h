@@ -236,7 +236,15 @@
  * static-pie binaries like vi crash at _start without it because
  * the unfilled `oldp` buffer is later dereferenced as a pointer. */
 #define NETBSD_SYS___sysctl       202
-#define NETBSD_SYS_nanosleep      196
+/*
+ * NOTE: there is deliberately no unversioned nanosleep here.  NetBSD syscall
+ * 196 is COMPAT_12 getdirentries (syscalls.master line 196), NOT nanosleep;
+ * the compat_50 nanosleep is 240 (struct timespec50) and the modern
+ * __nanosleep50 is 430 (wired above, struct timespec).  Mapping nanosleep at
+ * 196 both invented a nonexistent alias and shadowed getdirentries, so it was
+ * removed -- syscall 196 now returns ENOSYS (getdirentries's compat module is
+ * absent), which is the correct behaviour for a NetBSD 10 target.
+ */
 /* Modern mmap with `long PAD` between fd and pos to align off_t.
  * Signature: void *mmap(void*, size_t, int, int, int, long pad, off_t pos). */
 #define NETBSD_SYS_mmap           197
@@ -288,12 +296,14 @@
 #define NETBSD_SYS_____semctl50   442
 
 /* System V shared memory.  shmat/shmdt/shmget are unversioned; shmctl is the
- * time_t-64 "50" variant (____shmctl50, syscall 512).  The legacy shmctl (224)
+ * time_t-64 "50" variant (____shmctl50, syscall 443 -- verified against
+ * syscalls.master line 443 "STD MODULAR sysv_ipc { int|sys|50|shmctl(...) }"
+ * and sys/sys/syscall.h "#define SYS___shmctl50 443").  The legacy shmctl (224)
  * is compat_14_shmctl and is not provided. */
 #define NETBSD_SYS_shmat          228
 #define NETBSD_SYS_shmdt          230
 #define NETBSD_SYS_shmget         231
-#define NETBSD_SYS_____shmctl50   512
+#define NETBSD_SYS_____shmctl50   443
 
 /* --- Additional syscalls (numbers verified against NetBSD
  *     sys/kern/syscalls.master).  chflags/fchflags/madvise/getgroups/

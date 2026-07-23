@@ -4,49 +4,86 @@
 #include <stdint.h>
 #include <stddef.h>
 
-/* NetBSD i386 sigcontext */
-struct netbsd_sigcontext {
-    int32_t sc_gs;
-    int32_t sc_fs;
-    int32_t sc_es;
-    int32_t sc_ds;
-    int32_t sc_edi;
-    int32_t sc_esi;
-    int32_t sc_ebp;
-    int32_t sc_ebx;
-    int32_t sc_edx;
-    int32_t sc_ecx;
-    int32_t sc_eax;
-    int32_t sc_trapno;
-    int32_t sc_err;
-    int32_t sc_eip;
-    int32_t sc_cs;
-    int32_t sc_eflags;
-    int32_t sc_esp;
-    int32_t sc_ss;
-    int32_t sc_onstack;
-    uint32_t sc_mask;
+/*
+ * NetBSD 10 delivers EVERY caught signal through sendsig_siginfo (the
+ * "new-style" frame -- arch/i386/i386/machdep.c).  The handler is entered as
+ *   handler(int signum, siginfo_t *sip, ucontext_t *ucp)
+ * and the interrupted machine state lives in ucp->uc_mcontext.__gregs[],
+ * indexed by the _REG_* constants below (arch/i386/include/mcontext.h).  The
+ * legacy sigcontext frame (sendsig_sigcontext) is only used by ancient a.out
+ * binaries and is not emitted here.  See struct sigframe_siginfo in
+ * arch/i386/include/frame.h.
+ */
+
+/* mcontext_t.__gregs[] indices -- i386 mcontext.h _REG_*. */
+#define NBSD_REG_GS      0
+#define NBSD_REG_FS      1
+#define NBSD_REG_ES      2
+#define NBSD_REG_DS      3
+#define NBSD_REG_EDI     4
+#define NBSD_REG_ESI     5
+#define NBSD_REG_EBP     6
+#define NBSD_REG_ESP     7
+#define NBSD_REG_EBX     8
+#define NBSD_REG_EDX     9
+#define NBSD_REG_ECX     10
+#define NBSD_REG_EAX     11
+#define NBSD_REG_TRAPNO  12
+#define NBSD_REG_ERR     13
+#define NBSD_REG_EIP     14
+#define NBSD_REG_CS      15
+#define NBSD_REG_EFL     16
+#define NBSD_REG_UESP    17
+#define NBSD_REG_SS      18
+#define NBSD_NGREG       19
+
+/* uc_flags bits -- sys/ucontext.h. */
+#define NBSD_UC_SIGMASK  0x01
+#define NBSD_UC_STACK    0x02
+#define NBSD_UC_CPU      0x04
+
+/* NetBSD i386 mcontext_t (mcontext.h): __gregs[19] + __fpregs (644 bytes) +
+ * _mc_tlsbase. */
+struct netbsd_mcontext {
+    uint32_t __gregs[NBSD_NGREG];
+    uint8_t  __fpregs[644];
+    uint32_t _mc_tlsbase;
 };
 
-/* NetBSD i386 sigframe.
- *
- * Layout as seen by the handler (ESP grows down):
- *   [ sf_ra ]   <- return address: the NetBSD sigreturn trampoline
- *   [ sf_sig ]  <- arg1: signal number
- *   [ sf_code ] <- arg2: code
- *   [ sf_scp ]  <- arg3: pointer to sf_sc (the saved sigcontext)
- *   [ sf_sc ]   <- the saved context
- * The return address MUST be the first word: when the handler executes
- * `ret`, it pops sf_ra and jumps to the trampoline, which calls sigreturn.
- * (The old layout omitted sf_ra, so a returning handler popped sf_sig --
- * the signal number -- as its return address and crashed at eip=signo.)
- */
-struct netbsd_sigframe {
-    uint32_t sf_ra;     /* return address -> sigreturn trampoline */
-    int32_t  sf_sig;
-    int32_t  sf_code;
-    uint32_t sf_scp;    /* struct sigcontext * */
-    struct netbsd_sigcontext sf_sc;
+/* NetBSD i386 ucontext_t (sys/ucontext.h + mcontext.h) -- 776 bytes. */
+struct netbsd_ucontext_sig {
+    uint32_t uc_flags;
+    uint32_t uc_link;
+    uint32_t uc_sigmask[4];        /* sigset_t: 128 bits */
+    uint8_t  uc_stack[12];         /* stack_t { ss_sp; ss_size; ss_flags } */
+    struct netbsd_mcontext uc_mcontext;
+    uint32_t __uc_pad[4];
+};
+
+/* NetBSD i386 siginfo_t (sys/siginfo.h) -- fixed 128 bytes; the first three
+ * ints are si_signo / si_code / si_errno. */
+struct netbsd_siginfo {
+    int32_t  si_signo;
+    int32_t  si_code;
+    int32_t  si_errno;
+    uint8_t  si_pad[128 - 12];
+};
+
+/* NetBSD i386 new-style signal frame (struct sigframe_siginfo, frame.h).
+ * Handler-entry stack (ESP grows down):
+ *   [ sf_ra ]     <- return address: the sigreturn trampoline
+ *   [ sf_signum ] <- arg1: signal number
+ *   [ sf_sip ]    <- arg2: siginfo_t *  (points at sf_si)
+ *   [ sf_ucp ]    <- arg3: ucontext_t * (points at sf_uc)
+ *   [ sf_si ]     <- the saved siginfo
+ *   [ sf_uc ]     <- the saved ucontext (registers in uc_mcontext.__gregs) */
+struct netbsd_sigframe_si {
+    uint32_t sf_ra;                /* return address -> sigreturn trampoline */
+    int32_t  sf_signum;            /* arg1 */
+    uint32_t sf_sip;               /* arg2: siginfo_t *  */
+    uint32_t sf_ucp;               /* arg3: ucontext_t * */
+    struct netbsd_siginfo      sf_si;
+    struct netbsd_ucontext_sig sf_uc;
 };
 
 /* NetBSD signal translation functions */
@@ -128,6 +165,11 @@ struct netbsd_stat {
     uint32_t st_blksize;
     uint32_t st_flags;
     uint32_t st_gen;
+    /* NetBSD stat12 places an int32_t st_lspare between st_gen and st_qspare
+     * (compat/sys/stat.h).  On i386 int64_t is only 4-byte aligned, so without
+     * this field st_qspare lands at offset 76 and sizeof is 92; NetBSD's ABI
+     * puts st_qspare at 80 with sizeof 96.  Keep the spare word explicit. */
+    int32_t  st_lspare;
     int64_t  st_qspare[2];
 };
 
