@@ -1493,6 +1493,15 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
     int old_perso_id = current_process ? current_process->perso_id : PERS_NATIVE;
     int switched_pmap = 0;
     int vm_state_committed = 0;
+    /* Saved credentials, restored on a pre-commit failure.  A setuid/setgid
+     * image must not leave the (still-running old) image with raised euid/egid
+     * if a later fallible step (exec_setup_stack) fails — that would be a
+     * privilege escalation.  Signal dispositions are handled by deferring
+     * exec_reset_signals() until after the commit point. */
+    uint32_t old_euid = current_process ? current_process->euid : 0;
+    uint32_t old_egid = current_process ? current_process->egid : 0;
+    uint32_t old_suid = current_process ? current_process->suid : 0;
+    uint32_t old_sgid = current_process ? current_process->sgid : 0;
     if (!root) {
         if (fd >= 0) kern_close(fd);
         return -1;
@@ -1688,8 +1697,9 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
 
 
     if (current_process) {
-        // Reset signal handlers on successful exec (POSIX requirement)
-        exec_reset_signals();
+        // NB: signal dispositions are reset only AFTER the commit point
+        // below, so a pre-commit failure (exec_setup_stack) leaves the old
+        // image's handlers intact.
 
         // Handle setuid/setgid bits (POSIX exec credential change).
         // Honor MNT_NOSUID: a filesystem mounted nosuid must never let a
@@ -1769,6 +1779,13 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
         old_vm_map = NULL;
     }
     vm_state_committed = 1;
+
+    /* Committed: the new image will run.  Reset signal handlers now (POSIX
+     * requirement) — deferred to here so a pre-commit failure could not have
+     * wiped the old image's dispositions. */
+    if (current_process) {
+        exec_reset_signals();
+    }
 
     char hexbuf[16];
     uint32_t val;
@@ -1862,6 +1879,12 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
 cleanup:
     if (!vm_state_committed && current_process) {
         current_process->perso_id = old_perso_id;
+        /* Roll back any setuid/setgid credential change: the old image keeps
+         * running, so it must keep its original credentials. */
+        current_process->euid = old_euid;
+        current_process->egid = old_egid;
+        current_process->suid = old_suid;
+        current_process->sgid = old_sgid;
     }
     if (!vm_state_committed && switched_pmap) {
         if (old_pmap) {
