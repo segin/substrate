@@ -1672,7 +1672,7 @@ ssize_t sys_sendmsg(int fd, const struct msghdr *umsg, int flags) {
                     if (fds[i] < 0 || fds[i] >= MAX_FD) goto fd_fail;
                     file_t *f = current_process->fds[fds[i]];
                     if (!f) goto fd_fail;
-                    f->f_count++;
+                    __sync_fetch_and_add(&f->f_count, 1);   /* atomic (A48) */
                     s->peer->rx_fdq[s->peer->rx_fdq_count + queued] = f;
                     queued++;
                     continue;
@@ -1680,7 +1680,7 @@ ssize_t sys_sendmsg(int fd, const struct msghdr *umsg, int flags) {
                     /* Roll back. */
                     for (int j = 0; j < queued; j++) {
                         file_t *qf = s->peer->rx_fdq[s->peer->rx_fdq_count + j];
-                        if (qf && qf->f_count > 0) qf->f_count--;
+                        if (qf && qf->f_count > 0) __sync_fetch_and_sub(&qf->f_count, 1);
                         s->peer->rx_fdq[s->peer->rx_fdq_count + j] = NULL;
                     }
                     mutex_unlock(&s->peer->lock);

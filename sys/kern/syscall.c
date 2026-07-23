@@ -939,8 +939,10 @@ void file_close_ptr(file_t *f) {
      */
     if (current_process)
         advlock_release_by_owner(f, current_process->pid);
-    f->f_count--;
-    if (f->f_count <= 0) {
+    /* Atomic decrement-and-test: a plain RMW here races fork's concurrent
+     * f_count increment (A48) — the lost update could free a file still
+     * referenced by the child, or double-free. */
+    if (__sync_sub_and_fetch(&f->f_count, 1) <= 0) {
         close_fs((fs_node_t*)f->f_data);
         if (f->f_ops && f->f_ops->fo_close) {
             f->f_ops->fo_close(f, current_thread);
@@ -3017,7 +3019,7 @@ int sys_dup(int oldfd) {
 
     proc_set_fd(current_process, newfd, f);
     fdset_clear(current_process->fd_cloexec, newfd);
-    f->f_count++;
+    __sync_fetch_and_add(&f->f_count, 1);   /* atomic vs racing close (A48) */
     return newfd;
 }
 
@@ -3036,7 +3038,7 @@ int sys_dup2(int oldfd, int newfd) {
 
     proc_set_fd(current_process, newfd, f);
     fdset_clear(current_process->fd_cloexec, newfd);
-    f->f_count++;
+    __sync_fetch_and_add(&f->f_count, 1);   /* atomic vs racing close (A48) */
     return newfd;
 }
 

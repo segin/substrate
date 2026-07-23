@@ -392,6 +392,16 @@ void proc_destroy(process_t *p) {
      * (ARCH-01). */
     fpu_forget_process(p);
 
+    /* Release the chroot-root vnode reference taken in proc_create() when the
+     * process inherited a non-default root (open_fs).  proc_exit() closes and
+     * NULLs it on the normal path; this covers the fork() failure paths that
+     * jump straight here (pmap_fork/vm_map_fork/ldt_clone/sched_fork_thread),
+     * which otherwise leak the reference and pin the chroot dir's mount. */
+    if (p->root_node && p->root_node != fs_root) {
+        close_fs(p->root_node);
+        p->root_node = NULL;
+    }
+
     spinlock_acquire(&pid_lock);
     proc_unlink_locked(p);
     spinlock_release(&pid_lock);
@@ -559,7 +569,9 @@ static int proc_fork_common(process_t *parent, void *stack, int is_vfork) {
     for(int j=0; j<MAX_FD; j++) {
         if (parent->fds[j]) {
             child_proc->fds[j] = parent->fds[j];
-            child_proc->fds[j]->f_count++;
+            /* Atomic: a sibling thread of the parent may be close()ing/dup()ing
+             * this same file_t concurrently on another CPU. */
+            __sync_fetch_and_add(&child_proc->fds[j]->f_count, 1);
         }
     }
     
@@ -619,7 +631,7 @@ static int proc_fork_common(process_t *parent, void *stack, int is_vfork) {
 
         for (int j = 0; j < MAX_FD; j++) {
             if (child_proc->fds[j]) {
-                child_proc->fds[j]->f_count--;
+                __sync_fetch_and_sub(&child_proc->fds[j]->f_count, 1);
                 child_proc->fds[j] = NULL;
             }
         }
@@ -1269,7 +1281,7 @@ int proc_fcntl(process_t *p, int fd, int cmd, int arg) {
         }
         proc_set_fd(p, newfd, f);
         fdset_clear(p->fd_cloexec, newfd);
-        f->f_count++;
+        __sync_fetch_and_add(&f->f_count, 1);   /* atomic vs racing close (A48) */
         return newfd;
     case F_GETFD:
         return fdset_test(p->fd_cloexec, fd) ? FD_CLOEXEC : 0;
