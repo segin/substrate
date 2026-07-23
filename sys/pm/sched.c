@@ -77,6 +77,7 @@ static thread_t *rr_last = NULL;
 #include <arch/i386/percpu.h>
 #include <arch/i386/intr.h>
 #include <sys/preempt.h>
+#include <sys/smp.h>
 
 #ifdef HOST_TEST
 static thread_t *sched_storage_alloc(void) {
@@ -862,8 +863,50 @@ void sched_reap_process_threads(process_t *proc) {
     }
 }
 
+/* Non-zero if t is currently the running thread on some CPU other than the
+ * caller's — i.e. still executing on another core. */
+int sched_thread_running_remote(thread_t *t) {
+    int self = percpu_get_cpu_id();
+    int n = smp_get_cpu_count();
+    if (n > MAX_CPUS) n = MAX_CPUS;
+    for (int c = 0; c < n; c++) {
+        if (c == self) continue;
+        if (percpu_get_cpu(c)->current == t) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* Bounded spin until t is off every remote CPU.  A thread marked
+ * THREAD_ZOMBIE is dropped by the remote scheduler on its next reschedule
+ * (<= one timer tick), so this normally returns almost immediately; the cap
+ * prevents a wedge if a remote CPU is stuck.  On a uniprocessor — or with the
+ * APs parked — it is a no-op.  Callers use it to avoid freeing or force-
+ * mutating a sibling thread that is still live on another core. */
+void sched_wait_thread_offcpu(thread_t *t) {
+    if (!t) return;
+    int spins = 0;
+    while (sched_thread_running_remote(t) && spins++ < 20000000) {
+        __asm__ volatile("pause");
+    }
+}
+
 void sched_reap_thread(thread_t *t) {
     if (!t) return;
+
+    /* Never free a thread that is still executing on another CPU: proc_exit
+     * marks siblings THREAD_ZOMBIE without forcing them off remote cores, so a
+     * concurrent wait4 reap could otherwise free the kstack/thread_t out from
+     * under a running sibling (A26).  Wait for it to leave the CPU first. */
+    sched_wait_thread_offcpu(t);
+
+    /* Release any kernel mutexes this thread still holds, now that it is
+     * guaranteed off-CPU.  proc_exit defers a still-running sibling's release
+     * to here rather than force-releasing (and corrupting held_mutexes) while
+     * the sibling concurrently mutates it on another core (A22).  Idempotent
+     * if proc_exit already released them. */
+    mutex_release_owned_by_thread(t);
 
     /* A thread can still be linked on a sleepq at reap time: proc_exit
      * dequeues each thread once, but a thread killed mid-sleep can re-block

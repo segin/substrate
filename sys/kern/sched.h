@@ -138,6 +138,8 @@ process_t *sched_create_process(struct personality *pers);
 thread_t *sched_get_thread(int tid);
 void sched_iterate_threads(void (*callback)(thread_t *t, void *arg), void *arg);
 void sched_reap_process_threads(process_t *proc);
+void sched_wait_thread_offcpu(thread_t *t);
+int sched_thread_running_remote(thread_t *t);
 
 /*
  * Reap one specific thread: unlink from allthread/tid_hash, release

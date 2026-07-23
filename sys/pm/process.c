@@ -1664,8 +1664,17 @@ void proc_exit(int code) {
         /* Cleanup robust futexes for this thread */
         futex_thread_exit(thread);
 
-        if (mutex_release_owned_by_thread(thread) > 0) {
-            kprint("proc_exit: force-releasing mutexes held by exiting thread.\n");
+        /* Force-release this thread's kernel mutexes — but ONLY if it is not
+         * still executing on another CPU.  Walking/unlinking a running
+         * sibling's held_mutexes while it concurrently mutates the list on its
+         * own core corrupts it (A22).  A sibling still on a remote CPU has its
+         * mutexes released later at sched_reap_thread(), which waits for it to
+         * leave the CPU first.  The exiting thread itself is on THIS CPU, so it
+         * is never "remote" and is handled here as before. */
+        if (!sched_thread_running_remote(thread)) {
+            if (mutex_release_owned_by_thread(thread) > 0) {
+                kprint("proc_exit: force-releasing mutexes held by exiting thread.\n");
+            }
         }
 
         /* Remove sleepers from sleep queues before they become zombies. */
