@@ -53,7 +53,9 @@ int runqueue_level_for_thread(thread_t *t) {
             // Nice -20 to +19 maps to levels 32-71
             // Lower nice = higher priority = lower level index
             // priority is stored as 0-39, where 0 is highest
-            return RQ_TIMESHARE_BASE + (t->priority & 39);
+            return RQ_TIMESHARE_BASE + (t->priority < 0 ? 0 :
+                (t->priority >= RQ_TIMESHARE_LEVELS ? RQ_TIMESHARE_LEVELS - 1
+                                                    : t->priority));
             
         case SCHED_IDLE:
         default:
