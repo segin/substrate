@@ -707,9 +707,11 @@ static int fat_unmount(fs_node_t *root) {
     }
 
     kfree(fs, sizeof(fat_fs_t));
-    // Root node and its context are in the cache (usually), 
-    // but the VFS might have a separate copy of the root node.
-    // Actually, fat_mount returns a pointer to the cache.
+
+    /* Free the dedicated root node + context allocated in fat_mount (kept out
+     * of the recycling ring cache, so not covered by the loop above). */
+    kfree(ctx, sizeof(fat_node_t));
+    kfree(root, sizeof(fs_node_t));
     return 0;
 }
 
@@ -837,12 +839,28 @@ fs_node_t *fat_mount(const char *device, uint32_t flags, void *data) {
     kprint(")\n");
     
     uint32_t root_cluster = (fs->fat_type == 32) ? fs->ext_bpb.root_cluster : 0;
-    fs_node_t *root_node = fat_alloc_node(fs, "/", FAT_ROOT_INO, root_cluster, 0, FAT_ATTR_DIRECTORY);
-    if (root_node) {
-        root_node->unmount = fat_unmount;
-        fs->root_node = root_node;
+    fs_node_t *tmp = fat_alloc_node(fs, "/", FAT_ROOT_INO, root_cluster, 0, FAT_ATTR_DIRECTORY);
+    if (tmp) {
+        /* Copy the root out of the recycling ring cache into dedicated storage:
+         * fat_alloc_node hands back a slot that is reused every
+         * FAT_NODE_CACHE_SIZE lookups, so the long-lived fs->root_node would
+         * otherwise be silently overwritten by an unrelated node (A15).  The
+         * dedicated pair is freed in fat_unmount. */
+        fs_node_t  *rn = kmalloc(sizeof(fs_node_t));
+        fat_node_t *rc = kmalloc(sizeof(fat_node_t));
+        if (rn && rc) {
+            *rc = *(fat_node_t *)(uintptr_t)tmp->impl;
+            *rn = *tmp;
+            rn->impl    = (uint32_t)(uintptr_t)rc;
+            rn->unmount = fat_unmount;
+            fs->root_node = rn;
+        } else {
+            if (rn) kfree(rn, sizeof(fs_node_t));
+            if (rc) kfree(rc, sizeof(fat_node_t));
+            fs->root_node = NULL;
+        }
     }
-    return root_node;
+    return fs->root_node;
 }
 
 /* ============================================================
