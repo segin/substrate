@@ -5,8 +5,8 @@ Source: `docs/kernel-audit-2026-07-sys.md`. Work one checkbox at a time: fix →
 
 ## CRITICAL
 
-- [ ] **A01** [sys/arch/i386/pmap.c:1460] ptrace PEEK/POKE reaches kernel VAs — arbitrary kernel read/write
-- [ ] **A02** [sys/drivers/console/pty.c:747] PTY master close frees pair while slave still open (UAF)
+- [x] **A01** [sys/arch/i386/pmap.c:1460] ptrace PEEK/POKE reaches kernel VAs — arbitrary kernel read/write
+- [x] **A02** [sys/drivers/console/pty.c:747] PTY master close frees pair while slave still open (UAF)
 - [ ] **A03** [sys/kern/sleepq.c:332] Single-thread wakeups swallowed by STOPPED/ZOMBIE head waiter
 - [ ] **A04** [sys/pm/wait.c:158] kern_wait4 walks and reaps children with no locking — double-reap double-free
 

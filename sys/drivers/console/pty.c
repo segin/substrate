@@ -52,6 +52,7 @@ typedef struct pty_pair {
     uint8_t         packet_status;   /* pending packet status byte */
     int             master_open;     /* fd-count proxy for master */
     int             slave_open;      /* fd-count proxy for slave */
+    int             destroying;      /* claimed for teardown (once) */
     int             dead;            /* either side hung up */
     int             master_nonblock; /* O_NONBLOCK on the master fd */
     int             is_bsd;          /* BSD-grid pair: static nodes, persistent */
@@ -271,6 +272,9 @@ static int pty_alloc_index_locked(void) {
     return -1;
 }
 
+static void pty_slave_node_open(fs_node_t *node);
+static void pty_slave_node_close(fs_node_t *node);
+
 static void pty_publish_slave_node(pty_pair_t *p) {
     fs_node_t *node = kmalloc(sizeof(fs_node_t));
     if (!node) {
@@ -296,8 +300,8 @@ static void pty_publish_slave_node(pty_pair_t *p) {
     node->read  = tty_fs_read;
     node->write = tty_fs_write;
     node->ioctl = tty_fs_ioctl;
-    node->open  = tty_fs_open;
-    node->close = tty_fs_close;
+    node->open  = pty_slave_node_open;
+    node->close = pty_slave_node_close;
     node->poll  = tty_fs_poll;
 
     p->slave_node = node;
@@ -484,6 +488,65 @@ static void pty_destroy(pty_pair_t *p) {
     }
     spinlock_release(&pty_table_lock);
     kfree(p, sizeof(*p));
+}
+
+/*
+ * Claim the sole right to tear down a fully-closed Unix98 pair.  Returns 1
+ * to exactly one caller once BOTH ends are closed; that winner (and only it)
+ * must call pty_destroy(p).  Serialises the master-close and slave-last-close
+ * paths, which can run concurrently on different CPUs, so the pair is neither
+ * double-freed nor leaked.
+ */
+static int pty_claim_destroy(pty_pair_t *p) {
+    int win = 0;
+    spinlock_acquire(&p->lock);
+    if (!p->master_open && !p->slave_open && !p->destroying) {
+        p->destroying = 1;
+        win = 1;
+    }
+    spinlock_release(&p->lock);
+    return win;
+}
+
+/*
+ * Unix98 slave open: mark the slave held BEFORE chaining to the tty open
+ * glue, so a master close racing with this open sees slave_open != 0 and
+ * defers teardown to us instead of freeing the pair out from under the
+ * slave fd.  slave_open is a held/not-held flag (set on every open, cleared
+ * only by the tty last-close hook pty_slave_drv_close), so repeated opens
+ * are idempotent.
+ */
+static void pty_slave_node_open(fs_node_t *node) {
+    struct tty *st = (struct tty *)node->ptr;
+    if (st) {
+        pty_pair_t *p = (pty_pair_t *)st->driver_data;
+        if (p && p->magic == PTY_MAGIC) {
+            spinlock_acquire(&p->lock);
+            p->slave_open = 1;
+            spinlock_release(&p->lock);
+        }
+    }
+    tty_fs_open(node);
+}
+
+/*
+ * Unix98 slave close: run the tty close FIRST — its last-close hook
+ * (pty_slave_drv_close) flushes the linger buffer and clears slave_open —
+ * then, now that tty_close has fully returned and the slave tty is safe to
+ * free, tear the pair down if the master has already gone.  Freeing from
+ * inside the driver .close would be a use-after-free, because tty_close
+ * dereferences the tty again after .close returns.  p is captured before
+ * the close since pty_destroy frees the tty we would otherwise re-read.
+ */
+static void pty_slave_node_close(fs_node_t *node) {
+    struct tty *st = (struct tty *)node->ptr;
+    pty_pair_t *p = (st ? (pty_pair_t *)st->driver_data : NULL);
+
+    tty_fs_close(node);
+
+    if (p && p->magic == PTY_MAGIC && pty_claim_destroy(p)) {
+        pty_destroy(p);
+    }
 }
 
 /* ------------------------------------------------------------------ */
@@ -724,7 +787,6 @@ void pty_master_node_close(fs_node_t *node) {
     p->dead = 1;
     /* Wake any reader / writer waiting on us. */
     sched_wakeup(&p->read_wait);
-    int slave_open = p->slave_open;
     struct tty *slave_tty = p->slave_tty;
     spinlock_release(&p->lock);
 
@@ -743,8 +805,15 @@ void pty_master_node_close(fs_node_t *node) {
         sched_wakeup(&slave_tty->write_wait);
     }
 
-    /* If the slave is also closed (or never opened), free everything. */
-    if (!slave_open) {
+    /*
+     * Free the pair only if the slave is also gone.  If a process still
+     * holds the slave (/dev/pts/N) open, teardown is deferred to that
+     * slave's last close (pty_slave_node_close), which claims the same
+     * right via pty_claim_destroy.  This closes the UAF where a master
+     * close (e.g. telnetd dropping its forwarder) freed slave_tty while
+     * the login shell still had the slave open.
+     */
+    if (pty_claim_destroy(p)) {
         pty_destroy(p);
     }
 }
