@@ -231,6 +231,50 @@ static uint8_t *in_ep_of(xhci_hc_t *hc, uint8_t *in_ctx, int dci)
     return in_ctx + (uint32_t)(dci + 1) * hc->ctx_size;
 }
 
+static void xhci_free_slot(xhci_hc_t *hc, uint8_t slot);
+
+/* [A34] Release any slot still bound to a root port that has lost its
+ * connection.  The USB core has no HCD-level disconnect callback — it only runs
+ * the class driver's .detach — so a successfully-enumerated device's slot was
+ * never disabled and its contexts + transfer rings leaked on unplug, exhausting
+ * the controller's 16 slots after a handful of cycles.  We piggy-back on the
+ * hot-plug scanner's port_status poll: when a port that owns a slot reads
+ * CCS=0, disable the slot and free everything, and drop the address->slot and
+ * enumeration bookkeeping that pointed at it (so a re-plugged device can't route
+ * through a stale slot).  submit_lock is taken because xhci_free_slot drives the
+ * command/event rings, exactly like a submit. */
+static void xhci_port_disconnect(xhci_hc_t *hc, uint8_t port)
+{
+    int found = 0;
+
+    /* Cheap lock-free pre-check: the common case is an empty port with no slot,
+     * polled several times a second — don't take submit_lock for it. */
+    for (uint8_t slot = 1; slot <= XHCI_MAX_SLOTS; slot++) {
+        if (hc->slots[slot].in_use && hc->slots[slot].port == port) {
+            found = 1;
+            break;
+        }
+    }
+    if (!found)
+        return;
+
+    mutex_lock(&hc->submit_lock);
+    for (uint8_t slot = 1; slot <= XHCI_MAX_SLOTS; slot++) {
+        struct xhci_slot *s = &hc->slots[slot];
+        if (!s->in_use || s->port != port)
+            continue;
+        for (int a = 0; a < 128; a++)
+            if (hc->addr_slot[a] == slot)
+                hc->addr_slot[a] = 0;
+        if (hc->enum_slot == slot) {
+            hc->enum_slot = 0;
+            hc->enum_port = 0;
+        }
+        xhci_free_slot(hc, slot);
+    }
+    mutex_unlock(&hc->submit_lock);
+}
+
 /* ---- port ops ---- */
 static uint32_t xhci_port_status(usb_hcd_t *hcd, uint8_t port)
 {
@@ -241,6 +285,7 @@ static uint32_t xhci_port_status(usb_hcd_t *hcd, uint8_t port)
     if (psc & XHCI_PORT_PED) out |= USB_PORT_STAT_ENABLE;
     /* xHCI usb-storage is SuperSpeed/High: report high-speed for the core. */
     if (psc & XHCI_PORT_CCS) out |= USB_PORT_STAT_HIGH_SPEED;
+    else xhci_port_disconnect(hc, port);   /* [A34] reap the departed slot */
     return out;
 }
 
@@ -288,10 +333,29 @@ static void xhci_free_slot(xhci_hc_t *hc, uint8_t slot)
                      NULL);
     hc->dcbaa[slot] = 0;
 
-    if (s->ep_ring[1].trb) {
-        dma_free_coherent(s->ep_ring[1].trb,
-                          XHCI_RING_TRBS * sizeof(struct xhci_trb));
-        s->ep_ring[1].trb = NULL;
+    /* Free every per-DCI resource, not just EP0's ring: a fully-enumerated
+     * device also has bulk/interrupt transfer rings (xhci_ensure_ep) and, for
+     * USB3 UAS, a stream-context array plus one ring per stream ID (xhci_bulk).
+     * On a setup-time failure only ep_ring[1] exists, so the extra checks are
+     * cheap no-ops; on a real disconnect they are what actually plugs the leak.
+     * [A34] */
+    for (int dci = 0; dci < 32; dci++) {
+        if (s->ep_ring[dci].trb) {
+            dma_free_coherent(s->ep_ring[dci].trb,
+                              XHCI_RING_TRBS * sizeof(struct xhci_trb));
+            s->ep_ring[dci].trb = NULL;
+        }
+        for (int sid = 0; sid < XHCI_NUM_STREAMS; sid++) {
+            if (s->stream_ring[dci][sid].trb) {
+                dma_free_coherent(s->stream_ring[dci][sid].trb,
+                                  XHCI_RING_TRBS * sizeof(struct xhci_trb));
+                s->stream_ring[dci][sid].trb = NULL;
+            }
+        }
+        if (s->stream_ctx[dci]) {
+            dma_free_coherent(s->stream_ctx[dci], XHCI_NUM_STREAMS * 16);
+            s->stream_ctx[dci] = NULL;
+        }
     }
     if (s->in_ctx) {
         dma_free_coherent(s->in_ctx, 33 * hc->ctx_size);
