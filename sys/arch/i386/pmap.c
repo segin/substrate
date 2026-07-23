@@ -14,6 +14,7 @@
 #include <kern/panic.h>
 #include <kern/sched.h>
 #include <arch/i386/cpu.h>
+#include <arch/i386/percpu.h>
 #include <arch/i386/pmap.h>
 #include <arch/i386/pmap_hal.h>
 #include <arch/i386/pmm.h>
@@ -1769,7 +1770,19 @@ static volatile uint32_t shootdown_va = 0;
 static volatile uint32_t shootdown_len = 0;
 static volatile int shootdown_all = 0;
 static volatile int shootdown_pending = 0;
-static volatile int shootdown_ack_count = 0;
+/*
+ * Generation-tagged acknowledgement.  A single shared ack COUNTER was wrong:
+ * a late handler from a timed-out previous round would increment it and let
+ * the NEXT round's wait complete before the remote CPU had actually flushed,
+ * leaving a stale TLB entry pointing at a freed/remapped page.  Instead each
+ * round bumps shootdown_gen (under shootdown_lock) and every remote handler
+ * stamps its own tlb_seen_gen[cpu] with the generation it just serviced.  A
+ * round waits until every other CPU's seen-gen has reached its own gen, so a
+ * stale ack can only ever ADVANCE a CPU's seen-gen — never falsely satisfy a
+ * later round.
+ */
+static volatile uint32_t shootdown_gen = 0;
+static volatile uint32_t tlb_seen_gen[MAX_CPUS];
 
 // Serializes shootdown initiators.  The globals above are a single shared
 // request slot: two CPUs (or a process context preempted by an IPI on the
@@ -1778,12 +1791,6 @@ static volatile int shootdown_ack_count = 0;
 // the IPI *handler* (pmap_shootdown_handler) never takes this lock, so a CPU
 // spinning for ACKs while holding it never blocks a remote handler's ack.
 static spinlock_t shootdown_lock = SPINLOCK_INIT("pmap_shootdown");
-
-static int pmap_shootdown_expected_acks(void) {
-    int cpus = smp_get_cpu_count();
-    if (cpus <= 1) return 0;
-    return cpus - 1;
-}
 
 // Called by other CPUs on TLB shootdown IPI
 void pmap_shootdown_handler(void) {
@@ -1796,7 +1803,11 @@ void pmap_shootdown_handler(void) {
     } else {
         pmap_invalidate_page(shootdown_va);
     }
-    __sync_fetch_and_add((int*)&shootdown_ack_count, 1);
+    int cpu = CPU_ID();
+    if (cpu >= 0 && cpu < MAX_CPUS) {
+        tlb_seen_gen[cpu] = shootdown_gen;
+    }
+    __sync_synchronize();
     lapic_send_eoi();
 }
 
@@ -1811,13 +1822,14 @@ void pmap_shootdown_page(uintptr_t va) {
     shootdown_va = va;
     shootdown_len = 0;
     shootdown_all = 0;
-    shootdown_ack_count = 0;
     shootdown_pending = 1;
+    __sync_synchronize();
+    uint32_t gen = ++shootdown_gen;   // publish this round (under shootdown_lock)
     __sync_synchronize();
 
     // Send IPI to all other CPUs
     lapic_send_ipi_all_excl_self(TLB_SHOOTDOWN_VECTOR);
-    pmap_shootdown_wait(pmap_shootdown_expected_acks());
+    pmap_shootdown_wait(gen);
     shootdown_pending = 0;
 
     spinlock_release_irq(&shootdown_lock, flags);
@@ -1836,12 +1848,13 @@ void pmap_shootdown_range(uintptr_t va, uint32_t len) {
     shootdown_va = va;
     shootdown_len = len;
     shootdown_all = 0;
-    shootdown_ack_count = 0;
     shootdown_pending = 1;
+    __sync_synchronize();
+    uint32_t gen = ++shootdown_gen;   // publish this round (under shootdown_lock)
     __sync_synchronize();
 
     lapic_send_ipi_all_excl_self(TLB_SHOOTDOWN_VECTOR);
-    pmap_shootdown_wait(pmap_shootdown_expected_acks());
+    pmap_shootdown_wait(gen);
     shootdown_pending = 0;
 
     spinlock_release_irq(&shootdown_lock, flags);
@@ -1856,12 +1869,13 @@ void pmap_shootdown_all(void) {
     shootdown_va = 0;
     shootdown_len = 0;
     shootdown_all = 1;
-    shootdown_ack_count = 0;
     shootdown_pending = 1;
+    __sync_synchronize();
+    uint32_t gen = ++shootdown_gen;   // publish this round (under shootdown_lock)
     __sync_synchronize();
 
     lapic_send_ipi_all_excl_self(TLB_SHOOTDOWN_VECTOR);
-    pmap_shootdown_wait(pmap_shootdown_expected_acks());
+    pmap_shootdown_wait(gen);
     shootdown_pending = 0;
 
     spinlock_release_irq(&shootdown_lock, flags);
@@ -1909,15 +1923,21 @@ void pmap_shootdown_commit(void) {
     }
 }
 
-// Wait for all shootdown acknowledgments
-void pmap_shootdown_wait(int expected_cpus) {
-    if (expected_cpus <= 0) return;
-    
-    // Spin waiting for ACKs (with timeout)
-    int timeout = 1000000;
-    while (shootdown_ack_count < expected_cpus && timeout > 0) {
-        __asm__ volatile("pause");
-        timeout--;
+// Wait until every other CPU has serviced a shootdown of at least generation
+// `gen`.  Per-CPU seen-gen makes this immune to stale acks from earlier rounds
+// (a late ack only advances a CPU's seen-gen; it never satisfies a later gen).
+void pmap_shootdown_wait(uint32_t gen) {
+    int cpus = smp_get_cpu_count();
+    if (cpus <= 1) return;
+
+    int self = CPU_ID();
+    for (int c = 0; c < cpus && c < MAX_CPUS; c++) {
+        if (c == self) continue;
+        int timeout = 1000000;
+        while ((int32_t)(tlb_seen_gen[c] - gen) < 0 && timeout > 0) {
+            __asm__ volatile("pause");
+            timeout--;
+        }
     }
 }
 
