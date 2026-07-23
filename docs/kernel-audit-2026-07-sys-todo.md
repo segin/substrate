@@ -8,7 +8,7 @@ Source: `docs/kernel-audit-2026-07-sys.md`. Work one checkbox at a time: fix →
 - [x] **A01** [sys/arch/i386/pmap.c:1460] ptrace PEEK/POKE reaches kernel VAs — arbitrary kernel read/write
 - [x] **A02** [sys/drivers/console/pty.c:747] PTY master close frees pair while slave still open (UAF)
 - [x] **A03** [sys/kern/sleepq.c:332] Single-thread wakeups swallowed by STOPPED/ZOMBIE head waiter
-- [ ] **A04** [sys/pm/wait.c:158] kern_wait4 walks and reaps children with no locking — double-reap double-free
+- [x] **A04** [sys/pm/wait.c:158] kern_wait4 walks and reaps children with no locking — double-reap double-free
 
 ## HIGH
 
@@ -34,7 +34,7 @@ Source: `docs/kernel-audit-2026-07-sys.md`. Work one checkbox at a time: fix →
 - [ ] **A24** [sys/net/af_unix.c:964] sys_socketpair writes result fds directly to user sv[] pointer without copyout
 - [ ] **A25** [sys/pm/pgrp.c:213] pgrp_remove_proc reads and frees old_pgrp after dropping proctree_lock
 - [ ] **A26** [sys/pm/process.c:1792] proc_exit publishes reapable state while threads may still run on other CPUs
-- [ ] **A27** [sys/pm/wait.c:160] Concurrent wait4() double-frees a zombie child
+- [x] **A27** [sys/pm/wait.c:160] Concurrent wait4() double-frees a zombie child
 - [ ] **A28** [sys/vfs/vfs.c:1371] mountlist traversed lock-free while mount/unmount mutate and kfree() entries
 - [ ] **A29** [sys/vm/uma_core.c:998] UMA page hash walked without slab lock — use-after-free of freed slab headers
 - [ ] **A30** [sys/vm/vm_fault.c:160] Write to PROT_READ / PROT_NONE private mapping silently granted (protection bypass)

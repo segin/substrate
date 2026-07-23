@@ -147,6 +147,56 @@ static process_t *find_waitable_child(pid_t pid, process_t *parent, int options,
 }
 
 
+/*
+ * Atomically find a waitable child and claim the right to report/reap it,
+ * all under proctree_lock so concurrent wait4() callers (and the autoreap
+ * sweep) cannot select the same child twice.  For a zombie the claim is the
+ * unlink from parent->p_children: once unlinked no other waiter's scan can
+ * reach it, so exactly one caller runs the teardown — closing the
+ * double-reap / double-free (double vm_map_destroy + double kfree of the
+ * process_t).  For stopped/continued the report flag is consumed under the
+ * lock so only one waiter reports the event.
+ *
+ * find_waitable_child() (and wait_threads_all_zombie) run under the lock;
+ * they only read the tree.  The heavy teardown in the caller runs AFTER the
+ * lock is dropped — safe because the corpse is already unreachable.
+ */
+static process_t *find_and_claim_child(pid_t pid, process_t *parent, int options,
+                                       int *any_exists, int *reason) {
+    mutex_lock(&proctree_lock);
+    process_t *t = find_waitable_child(pid, parent, options, any_exists, reason);
+    if (t) {
+        if (*reason == 0) {
+            /* Claim by unlinking from the parent's child list (inline
+             * proc_remove_child — we already hold proctree_lock). */
+            if (parent->p_children == t) {
+                parent->p_children = t->p_sibling;
+            } else {
+                process_t *prev = parent->p_children;
+                while (prev && prev->p_sibling != t) prev = prev->p_sibling;
+                if (prev) prev->p_sibling = t->p_sibling;
+            }
+            t->p_sibling = NULL;
+        } else if (*reason == 1) {
+            t->p_flag |= P_WAITED;      /* consume the stop report */
+        } else if (*reason == 2) {
+            t->p_flag &= ~P_CONTINUED;  /* consume the continue report */
+        }
+    }
+    mutex_unlock(&proctree_lock);
+    return t;
+}
+
+/* Non-claiming, lock-protected peek used by the pre-block recheck: reads the
+ * tree consistently against a concurrent claim+free without unlinking. */
+static process_t *peek_waitable_child(pid_t pid, process_t *parent, int options,
+                                      int *any_exists, int *reason) {
+    mutex_lock(&proctree_lock);
+    process_t *t = find_waitable_child(pid, parent, options, any_exists, reason);
+    mutex_unlock(&proctree_lock);
+    return t;
+}
+
 int kern_wait4(pid_t pid, int *status, int options, struct rusage *rusage) {
     process_t *cur = current_process;
     process_t *target = NULL;
@@ -154,8 +204,8 @@ int kern_wait4(pid_t pid, int *status, int options, struct rusage *rusage) {
     int reason = 0;
 
     while (1) {
-        // 1. Search Logic - now handles zombies, stopped, and continued
-        target = find_waitable_child(pid, cur, options, &any_exists, &reason);
+        // 1. Search + atomic claim - handles zombies, stopped, and continued
+        target = find_and_claim_child(pid, cur, options, &any_exists, &reason);
 
         if (target) {
             pid_t pid_val = target->pid;
@@ -194,11 +244,9 @@ int kern_wait4(pid_t pid, int *status, int options, struct rusage *rusage) {
                 cur->rusage_children.ru_nvcsw += target->rusage.ru_nvcsw + target->rusage_children.ru_nvcsw;
                 cur->rusage_children.ru_nivcsw += target->rusage.ru_nivcsw + target->rusage_children.ru_nivcsw;
 
-                // Unlink from Parent's List
-                // Unlink from Parent's List
-                proc_remove_child(cur, target);
-                
-                // Clear process group membership
+                // Already unlinked from the parent's child list by
+                // find_and_claim_child (the atomic claim); just clear
+                // process group membership now.
                 pgrp_remove_proc(target);
 
                 if (target->vm_map) {
@@ -231,19 +279,17 @@ int kern_wait4(pid_t pid, int *status, int options, struct rusage *rusage) {
                 
             case 1: // Stopped (WUNTRACED)
                 // Return stopped status: 0x7f in low byte, stop signal in high byte
+                // (P_WAITED already set by find_and_claim_child)
                 {
                     int stopsig = target->p_xsig ? target->p_xsig : SIGSTOP;
                     if (status) *status = 0x7f | (stopsig << 8);
                 }
-                // Mark as reported so we don't report again
-                target->p_flag |= P_WAITED;
                 return pid_val;
-                
+
             case 2: // Continued (WCONTINUED)
-                // Return continued status: 0xffff
+                // Return continued status: 0xffff (P_CONTINUED already cleared
+                // by find_and_claim_child)
                 if (status) *status = 0xffff; // WIFCONTINUED will be true
-                // Clear P_CONTINUED flag so we don't report again
-                target->p_flag &= ~P_CONTINUED;
                 return pid_val;
             }
         }
@@ -264,19 +310,21 @@ int kern_wait4(pid_t pid, int *status, int options, struct rusage *rusage) {
         }
 
         /*
-         * Sleep on p_children channel with a recheck to avoid missed wakeups.
-         * Child exit can race with the gap between the scan above and blocking.
+         * Recheck under proctree_lock before blocking, to avoid missed
+         * wakeups: a child exit can race the gap between the scan above and
+         * blocking.  The peek takes a (sleepable) mutex, so it must run
+         * BEFORE we mark the thread BLOCKED — otherwise mutex contention
+         * inside the peek would clobber that state.  The (now slightly wider)
+         * lost-wakeup window is covered by the sleep_expiry deadline below.
          */
-        current_thread->wait_chan = &cur->p_children;
-        current_thread->state = THREAD_BLOCKED;
-
-        target = find_waitable_child(pid, cur, options, &any_exists, &reason);
+        target = peek_waitable_child(pid, cur, options, &any_exists, &reason);
         if (target || !any_exists ||
             (current_thread->sig_pending & ~current_thread->sig_mask)) {
-            current_thread->state = THREAD_READY;
-            current_thread->wait_chan = NULL;
             continue;
         }
+
+        current_thread->wait_chan = &cur->p_children;
+        current_thread->state = THREAD_BLOCKED;
 
         /* Block until proc_exit() wakes &p_children — but arm a
          * deadline so a missed wakeup re-checks instead of wedging
@@ -284,6 +332,8 @@ int kern_wait4(pid_t pid, int *status, int options, struct rusage *rusage) {
         current_thread->sleep_expiry = get_ticks() + WAIT_POLL_TICKS;
         sched_yield();
         current_thread->sleep_expiry = 0;
+        current_thread->wait_chan = NULL;
+        current_thread->state = THREAD_READY;
     }
 }
 
