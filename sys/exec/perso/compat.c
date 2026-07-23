@@ -710,6 +710,31 @@ int freebsd_sys_clock_getres(int clk_id, void *res) {
     return copyout(&r, res, sizeof(r));
 }
 
+/*
+ * freebsd_sys_gettimeofday - gettimeofday(2) with FreeBSD i386 struct layout.
+ *
+ * FreeBSD i386 `struct timeval` is 8 bytes (int32 tv_sec + int32 tv_usec),
+ * but the native sys_gettimeofday copies out a 12/16-byte native timeval
+ * (64-bit time_t), overrunning the caller's buffer by 4-8 bytes — the same
+ * hazard fixed for clock_gettime above.  Marshal into the 8-byte FreeBSD
+ * layout explicitly.  The timezone struct (two ints) is identical, so it is
+ * copied out natively.
+ */
+int freebsd_sys_gettimeofday(void *tv, void *tz) {
+    struct timeval ktv;
+    struct timezone ktz;
+    int ret = kern_gettimeofday(&ktv, tz ? &ktz : NULL);
+    if (ret != 0) return ret;
+    if (tv) {
+        struct freebsd_timeval ftv;
+        ftv.tv_sec  = (int32_t)ktv.tv_sec;
+        ftv.tv_usec = (int32_t)ktv.tv_usec;
+        if (copyout(&ftv, tv, sizeof(ftv)) != 0) return -EFAULT;
+    }
+    if (tz && copyout(&ktz, tz, sizeof(ktz)) != 0) return -EFAULT;
+    return 0;
+}
+
 int freebsd_sys_rtprio_thread(int function, long lwpid, void *rtp) {
     /*
      * rtprio_thread(2): query/set a thread's realtime/idle scheduling class.

@@ -18,7 +18,7 @@ Source: `docs/kernel-audit-2026-07-sys.md`. Work one checkbox at a time: fix →
 - [x] **A08** [sys/exec/formats/elf.c:1700] exec raises setuid/setgid credentials and resets signal dispositions before the last fallible step
 - [x] **A09** [sys/exec/formats/elf.c:756] Double-free of segment pages on elf_load error paths
 - [x] **A10** [sys/exec/formats/elf.c:1743] Failed execve after setuid does not roll back credentials or signal state
-- [ ] **A11** [sys/exec/perso/perso_freebsd.c:106] FreeBSD gettimeofday overruns caller's 8-byte struct timeval
+- [x] **A11** [sys/exec/perso/perso_freebsd.c:106] FreeBSD gettimeofday overruns caller's 8-byte struct timeval
 - [ ] **A12** [sys/exec/perso/perso_openbsd.c:59] OpenBSD getrusage writes to unvalidated user pointer
 - [ ] **A13** [sys/fs/ext2/ext2.c:680] Unbounded eh_ecount in ext4 extent resolver → OOB read
 - [ ] **A14** [sys/fs/ext2/ext2.c:2213] blocks_per_group / inodes_per_group not bounded to block_size*8 → OOB bitmap scan
