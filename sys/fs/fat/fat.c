@@ -1399,8 +1399,15 @@ static int fat_dir_add_entry(fat_fs_t *fs, uint32_t dir_cluster,
 
     /* Write entries sequentially */
     uint32_t bytes_per_sector = fs->bpb.bytes_per_sector;
+    uint32_t spc = fs->bpb.sectors_per_cluster;
     uint32_t sector = start_sector;
     uint32_t byte_off = start_byte_off;
+    /* The found run of slots may straddle a cluster boundary; clusters are NOT
+     * physically contiguous, so at a boundary we must follow the FAT chain
+     * rather than step to the next physical sector.  The FAT12/16 fixed root
+     * region is genuinely contiguous, so there a plain sector++ is correct. */
+    uint32_t cluster = start_cluster_out;
+    int is_fixed_root = (cluster == 0 && fs->fat_type != 32);
 
     static uint8_t sector_buf[4096];
 
@@ -1429,6 +1436,19 @@ static int fat_dir_add_entry(fat_fs_t *fs, uint32_t dir_cluster,
         if (byte_off >= bytes_per_sector) {
             byte_off = 0;
             sector++;
+            if (!is_fixed_root && sector >= fat_cluster_to_sector(fs, cluster) + spc) {
+                /* Stepped past the last sector of this cluster: follow the
+                 * chain to the next cluster's first sector instead of the
+                 * (unrelated) next physical sector. */
+                uint32_t next = fat_get_next_cluster(fs, cluster);
+                if (next >= 0x0FFFFFF8) {
+                    /* fat_find_dir_space should have allocated enough space;
+                     * bail rather than write into the wrong cluster. */
+                    return -1;
+                }
+                cluster = next;
+                sector = fat_cluster_to_sector(fs, cluster);
+            }
         }
     }
 
