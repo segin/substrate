@@ -603,7 +603,7 @@ syscall_done:
 
 /* Arch-specific syscalls that require registers_t */
 int arch_fork_with_stack(void *child_stack) {
-    if (!current_thread || !current_thread->syscall_regs) return -1;
+    if (!current_thread || !current_thread->syscall_regs) return -EINVAL;
 
     /*
      * Copy the trap frame before handing it to fork logic.
@@ -625,7 +625,7 @@ int arch_fork_with_stack(void *child_stack) {
  */
 int arch_clone_thread(void *child_stack, uint32_t tls_base, int *clear_child_tid) {
 
-    if (!current_thread || !current_thread->syscall_regs) return -1;
+    if (!current_thread || !current_thread->syscall_regs) return -EINVAL;
 
     registers_t regs = *(registers_t *)current_thread->syscall_regs;
     if (child_stack) {
