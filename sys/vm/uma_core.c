@@ -702,6 +702,14 @@ size_t uma_item_size(void *item) {
     page_addr = (uintptr_t)item & ~(uintptr_t)0xFFF;
     bucket = uma_hash((void *)page_addr);
 
+    /* Walk the page hash under the slab lock: a concurrent slab free
+     * (uma_hash_remove + header kfree) would otherwise unlink and free a slab
+     * header mid-walk, turning slab->us_hnext into a use-after-free.  The lock
+     * is recursive per-CPU, so callers already holding it nest safely. */
+    size_t result = 0;
+#ifndef HOST_TEST
+    unsigned long f = uma_slab_lock_acquire();
+#endif
     for (uma_slab_t *slab = uma_page_hash[bucket]; slab; slab = slab->us_hnext) {
         uintptr_t slab_start = (uintptr_t)slab->us_data + slab->us_offset;
         uintptr_t slab_end = slab_start + slab->us_zone->uz_rsize * slab->us_zone->uz_ipers;
@@ -724,10 +732,13 @@ size_t uma_item_size(void *item) {
             continue;
         }
 
-        return slab->us_zone->uz_size;
+        result = slab->us_zone->uz_size;
+        break;
     }
-
-    return 0;
+#ifndef HOST_TEST
+    uma_slab_lock_release(f);
+#endif
+    return result;
 }
 
 /*
@@ -994,16 +1005,29 @@ static uint8_t *uma_item_marker(uma_zone_t *zone, void *item) {
 void uma_zfree(uma_zone_t *zone, void *item) {
     if (!zone || !item) return;
 
-    /* Double-free guard: the item must currently be marked allocated. */
+    /* Double-free guard: the item must currently be marked allocated.  Hold
+     * the slab lock across the marker lookup AND its read/write — otherwise a
+     * concurrent slab free could unlink and free the slab header that
+     * uma_find_slab returned, so *df_mark would touch freed memory.  Recursive
+     * per-CPU, so nesting under a caller that already holds it is fine. */
+#ifndef HOST_TEST
+    unsigned long dff = uma_slab_lock_acquire();
+#endif
     uint8_t *df_mark = uma_item_marker(zone, item);
     if (df_mark) {
         if (*df_mark != UMA_ITEM_ALLOCED) {
+#ifndef HOST_TEST
+            uma_slab_lock_release(dff);
+#endif
             kprintf("UMA: DOUBLE-FREE in zone '%s' item %p marker=0x%02x\n",
                     zone->uz_name, item, *df_mark);
             panic("uma double-free");
         }
         *df_mark = UMA_ITEM_BUCKETED;
     }
+#ifndef HOST_TEST
+    uma_slab_lock_release(dff);
+#endif
 
     /* Call destructor */
     if (zone->uz_dtor) {
