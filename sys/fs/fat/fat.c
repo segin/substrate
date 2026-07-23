@@ -34,6 +34,47 @@ static void fat_alloc_lock_ensure(void) {
     }
 }
 
+/* Recursive per-thread lock serialising the directory/write helpers that share
+ * function-static 32 KiB scratch buffers (fat_file_write's cluster_buf,
+ * fat_find_dir_space / fat_dir_remove_entry dir_buf, fat_dir_add_entry's
+ * sector_buf + lfn_entries, fat_create_entry's zero_buf).  Without it two
+ * concurrent FAT operations corrupt each other's buffer.  Recursive because
+ * these helpers nest (create -> add_entry -> find_dir_space); recursion is
+ * detected via the mutex owner (mutex_is_held) so only the outermost call
+ * actually blocks.  Ordering: fat_io_lock is always taken BEFORE fat_alloc_lock
+ * (fat_alloc_cluster), never the reverse, so the two cannot deadlock. */
+static mutex_t fat_io_mtx;
+static int fat_io_ready = 0;
+static int fat_io_depth = 0;
+
+static void fat_io_lock(void) {
+    if (!fat_io_ready) {
+        mutex_init(&fat_io_mtx, "fat_io");
+        fat_io_ready = 1;
+    }
+    if (mutex_is_held(&fat_io_mtx)) {   /* already ours: nested helper */
+        fat_io_depth++;
+        return;
+    }
+    mutex_lock(&fat_io_mtx);
+    fat_io_depth = 1;
+}
+
+static void fat_io_unlock(void) {
+    if (--fat_io_depth == 0) {
+        mutex_unlock(&fat_io_mtx);
+    }
+}
+
+/* Forward decls: the fat_io_lock wrappers below call the _locked bodies. */
+static size_t fat_file_write_locked(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer);
+static int fat_find_dir_space_locked(fat_fs_t *fs, uint32_t dir_cluster, int total_entries,
+                                     uint32_t *out_sector, uint32_t *out_byte_off, uint32_t *out_cluster);
+static int fat_dir_add_entry_locked(fat_fs_t *fs, uint32_t dir_cluster, const char *name,
+                                    uint8_t attr, uint32_t first_cluster, uint32_t file_size);
+static int fat_dir_remove_entry_locked(fat_fs_t *fs, uint32_t dir_cluster, const char *name);
+static int fat_create_entry_locked(fs_node_t *parent, const char *name, uint8_t attr);
+
 static uint32_t fat_cluster_to_sector(fat_fs_t *fs, uint32_t cluster);
 
 /* Write support forward declarations */
@@ -1072,6 +1113,13 @@ static void fat_flush_dirent(fat_fs_t *fs, fat_node_t *ctx) {
 
 /* Write file data */
 static size_t fat_file_write(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer) {
+    fat_io_lock();
+    size_t r = fat_file_write_locked(node, offset, size, buffer);
+    fat_io_unlock();
+    return r;
+}
+
+static size_t fat_file_write_locked(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer) {
     fat_node_t *ctx = (fat_node_t *)(uintptr_t)node->impl;
     fat_fs_t *fs = ctx->fs;
     uint32_t cluster_size = fs->bpb.bytes_per_sector * fs->bpb.sectors_per_cluster;
@@ -1294,6 +1342,17 @@ static int fat_find_dir_space(fat_fs_t *fs, uint32_t dir_cluster,
                                int total_entries,
                                uint32_t *out_sector, uint32_t *out_byte_off,
                                uint32_t *out_cluster) {
+    fat_io_lock();
+    int r = fat_find_dir_space_locked(fs, dir_cluster, total_entries,
+                                      out_sector, out_byte_off, out_cluster);
+    fat_io_unlock();
+    return r;
+}
+
+static int fat_find_dir_space_locked(fat_fs_t *fs, uint32_t dir_cluster,
+                               int total_entries,
+                               uint32_t *out_sector, uint32_t *out_byte_off,
+                               uint32_t *out_cluster) {
     uint32_t cluster_size = fs->bpb.bytes_per_sector * fs->bpb.sectors_per_cluster;
     static uint8_t dir_buf[32768];
     int consecutive = 0;
@@ -1377,6 +1436,16 @@ static int fat_find_dir_space(fat_fs_t *fs, uint32_t dir_cluster,
 static int fat_dir_add_entry(fat_fs_t *fs, uint32_t dir_cluster,
                               const char *name, uint8_t attr,
                               uint32_t first_cluster, uint32_t file_size) {
+    fat_io_lock();
+    int r = fat_dir_add_entry_locked(fs, dir_cluster, name, attr,
+                                     first_cluster, file_size);
+    fat_io_unlock();
+    return r;
+}
+
+static int fat_dir_add_entry_locked(fat_fs_t *fs, uint32_t dir_cluster,
+                              const char *name, uint8_t attr,
+                              uint32_t first_cluster, uint32_t file_size) {
     int name_len = 0;
     while (name[name_len]) name_len++;
 
@@ -1458,6 +1527,13 @@ static int fat_dir_add_entry(fat_fs_t *fs, uint32_t dir_cluster,
 /* Mark a directory entry as deleted (set first byte to 0xE5).
  * Searches for the short name in dir_cluster directory. */
 static int fat_dir_remove_entry(fat_fs_t *fs, uint32_t dir_cluster, const char *name) {
+    fat_io_lock();
+    int r = fat_dir_remove_entry_locked(fs, dir_cluster, name);
+    fat_io_unlock();
+    return r;
+}
+
+static int fat_dir_remove_entry_locked(fat_fs_t *fs, uint32_t dir_cluster, const char *name) {
     static uint8_t dir_buf[32768];
     char lfn_buf[256];
     int lfn_len = 0;
@@ -1549,6 +1625,13 @@ static int fat_dir_remove_entry(fat_fs_t *fs, uint32_t dir_cluster, const char *
 
 /* Create a file or directory entry */
 static int fat_create_entry(fs_node_t *parent, const char *name, uint8_t attr) {
+    fat_io_lock();
+    int r = fat_create_entry_locked(parent, name, attr);
+    fat_io_unlock();
+    return r;
+}
+
+static int fat_create_entry_locked(fs_node_t *parent, const char *name, uint8_t attr) {
     fat_node_t *pctx = (fat_node_t *)(uintptr_t)parent->impl;
     fat_fs_t *fs = pctx->fs;
     uint32_t dir_cluster = pctx->first_cluster;
