@@ -591,6 +591,16 @@ static int fb_fs_ioctl(fs_node_t *node, uint32_t request, void *arg) {
         }
         
         if (current_driver->set_mode(mode_id) == 0) {
+            /* set_mode updated the global fb geometry.  Resync the derived
+             * state so nothing keeps the old dimensions: the fb0 registry
+             * entry and — critically — the console's RAM shadow, which would
+             * otherwise be read/written out of bounds when a draw clips to the
+             * new (possibly larger) fb.width/height. */
+            fb_set_default_color_layout(&fb);
+            if (fb.virt_height == 0) fb.virt_height = fb.height;
+            if (fb.virt_width == 0) fb.virt_width = fb.width;
+            fb_devices[0] = fb;
+            fb_console_resize();
             return 0;
         }
         return -EINVAL;

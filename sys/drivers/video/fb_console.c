@@ -2207,6 +2207,22 @@ void fb_console_init(void) {
     vt_render_statusline(vt_get_state(vt_get_active()));
 }
 
+/* Re-sync console state to the current framebuffer geometry after a runtime
+ * mode change (FBIOPUT_VIDEO_MODE updated the global fb).  Reallocates the RAM
+ * shadow so it matches the new width/height: otherwise a draw clipped to the
+ * new (larger) fb.width/height would run past a shadow still sized for the old
+ * mode — an out-of-bounds shadow access. */
+void fb_console_resize(void) {
+    if (!fb_active) {
+        return;
+    }
+    (void)vt_refresh_geometry_from_terminal();
+    fbcon_shadow_setup();
+    fb_console_refresh_tty_winsizes();
+    fb_console_redraw_active();
+    vt_render_statusline(vt_get_state(vt_get_active()));
+}
+
 /* ==================== Character Rendering ==================== */
 
 void fb_putc(char c, uint32_t fg, uint32_t bg) {
