@@ -477,7 +477,7 @@ process_t *proc_create(int perso_id) {
 
 static int proc_fork_common(process_t *parent, void *stack, int is_vfork) {
     process_t *child_proc = proc_create(parent->perso_id);
-    if (!child_proc) return -1;
+    if (!child_proc) return -ENOMEM;
     
     // Inherit process name
     strncpy(child_proc->comm, parent->comm, AC_COMM_LEN);
@@ -488,7 +488,7 @@ static int proc_fork_common(process_t *parent, void *stack, int is_vfork) {
         child_proc->pmap = pmap_fork(parent->pmap);
         if (!child_proc->pmap) {
             proc_destroy(child_proc);
-            return -1;
+            return -ENOMEM;
         }
     } else {
         child_proc->pmap = NULL; // Kernel process (shouldn't fork)
@@ -500,7 +500,7 @@ static int proc_fork_common(process_t *parent, void *stack, int is_vfork) {
             pmap_release(child_proc->pmap);
             child_proc->pmap = NULL;
             proc_destroy(child_proc);
-            return -1;
+            return -ENOMEM;
         }
     }
 
@@ -521,9 +521,9 @@ static int proc_fork_common(process_t *parent, void *stack, int is_vfork) {
             child_proc->pmap = NULL;
         }
         proc_destroy(child_proc);
-        return -1;
+        return -ENOMEM;
     }
-    
+
     // Copy cwd_node
     child_proc->cwd_node = parent->cwd_node;
     if (child_proc->cwd_node) {
