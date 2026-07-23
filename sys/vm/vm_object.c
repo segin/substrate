@@ -171,7 +171,20 @@ void vm_object_add_page(vm_object_t *object, vm_page_t *page) {
     vm_page_t *stale = vm_object_lookup_page(object, page->pindex);
     if (stale && stale != page) {
         vm_object_remove_page(object, stale);
-        vm_page_free(stale);
+        /* Reclaim the evicted frame ONLY when nothing still maps, holds, or
+         * wires it — mirroring the VM-09 guard in vm_fault().  vm_page_free()
+         * force-zeroes the frame's hold accounting and returns it to the buddy
+         * allocator WITHOUT clearing any hardware PTE, so freeing a still-
+         * mapped stale page (the in-place COW case: the source is still mapped
+         * read-only in the faulting/sibling pmaps when it is evicted here)
+         * would leave live PTEs pointing at a recycled frame — cross-
+         * allocation corruption, and a later pmap_enter's pv_remove would
+         * unhold the frame's NEW owner.  A still-mapped stale page is left for
+         * the pmap teardown to reclaim when its last mapping is removed. */
+        if (stale->pv_list == NULL && stale->wire_count == 0 &&
+            stale->ref_count <= 1) {
+            vm_page_free(stale);
+        }
     }
 
     page->object = object;
