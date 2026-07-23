@@ -23,6 +23,7 @@
 #include <sys/errno.h>
 #include <sys/stat.h>
 #include <sys/mount.h>   /* struct mount, MNT_NOSUID */
+#include <sys/lock.h>    /* elf_image_cache spinlock */
 #include <arch/i386/pmm.h>
 #if defined(__i386__) || defined(HOST_TEST)
 #include <arch/i386/pmap.h>
@@ -65,6 +66,11 @@ typedef struct elf_image_cache_entry {
 #define ELF_IMAGE_CACHE_SIZE 16
 static elf_image_cache_entry_t elf_image_cache[ELF_IMAGE_CACHE_SIZE];
 static uint32_t elf_image_cache_hand;
+/* Serialises the cache: the image struct is ~8.7 KB, so an unlocked lookup
+ * racing an insert (concurrent execs on different CPUs, or a preempted exec)
+ * would copy out a half-overwritten entry — a torn phdr table that then
+ * drives out-of-bounds segment loading. */
+static spinlock_t elf_image_cache_lock = SPINLOCK_INIT("elf_img_cache");
 
 static int elf_debug_enabled(void) {
     return cmdline_debug_enabled("elf");
@@ -279,17 +285,22 @@ static int elf_get_image_info(fs_node_t *file, elf_image_info_t *image) {
 
     elf_cache_identity(file, &fsid, &ino);
 
+    spinlock_acquire(&elf_image_cache_lock);
     for (int i = 0; i < ELF_IMAGE_CACHE_SIZE; i++) {
         if (elf_cache_matches(&elf_image_cache[i], file, fsid, ino)) {
             *image = elf_image_cache[i].image;
+            spinlock_release(&elf_image_cache_lock);
             return 0;
         }
     }
+    spinlock_release(&elf_image_cache_lock);
 
+    /* Read metadata from the file with the lock dropped (file I/O may sleep). */
     if (elf_read_image_info(file, image) != 0) {
         return -ENOEXEC;
     }
 
+    spinlock_acquire(&elf_image_cache_lock);
     {
         elf_image_cache_entry_t *entry = &elf_image_cache[elf_image_cache_hand++ % ELF_IMAGE_CACHE_SIZE];
         entry->valid = 1;
@@ -300,6 +311,7 @@ static int elf_get_image_info(fs_node_t *file, elf_image_info_t *image) {
         entry->ctime = file->ctime;
         entry->image = *image;
     }
+    spinlock_release(&elf_image_cache_lock);
 
     return 0;
 }

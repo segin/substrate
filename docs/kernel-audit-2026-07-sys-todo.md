@@ -46,7 +46,7 @@ Source: `docs/kernel-audit-2026-07-sys.md`. Work one checkbox at a time: fix →
 - [ ] **A33** [sys/drivers/usb/usb.c:840] Hub-downstream devices are never disconnected or quiesced on hot-unplug
 - [ ] **A34** [sys/drivers/usb/xhci.c:281] xHCI slot, device/input contexts and transfer rings leaked on every device disconnect
 - [ ] **A35** [sys/drivers/virtio/virtio_blk.c:155] virtio-blk synchronous read races shared descriptor ring on concurrent callers
-- [ ] **A36** [sys/exec/formats/elf.c:283] Unsynchronized global ELF image cache — torn reads under preemption
+- [x] **A36** [sys/exec/formats/elf.c:283] Unsynchronized global ELF image cache — torn reads under preemption
 - [ ] **A37** [sys/exec/perso/perso_freebsd.c:107] FreeBSD getrusage/getitimer/wait4 native handlers overrun 8-byte-timeval structs
 - [ ] **A38** [sys/fs/ext2/ext2.c:2683] ext2_free_inode mutates node cache without ext2_node_cache_lock
 - [ ] **A39** [sys/fs/udf/udf_write.c:782] UDF udf_add_fid: only one sector read but directory treated as 4096 bytes
