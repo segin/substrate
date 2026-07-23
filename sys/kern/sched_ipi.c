@@ -10,6 +10,7 @@
 #include <kern/sched.h>
 #include <kern/runqueue.h>
 #include <arch/i386/percpu.h>
+#include <arch/i386/smp.h>
 #include <arch/x86-common/lapic.h>
 
 /* IPI vector defined in sched.h */
@@ -18,12 +19,10 @@
 
 // Send preemption IPI to a specific CPU
 void sched_send_preempt_ipi(int cpu_id) {
-    if (cpu_id < 0 || cpu_id >= num_cpus) return;
-    
-    // Get LAPIC ID for this CPU
-    // (In a full system, we'd have a cpu_to_lapic mapping)
-    // For simplicity, assume CPU ID == LAPIC ID
-    lapic_send_ipi((uint8_t)cpu_id, SCHED_IPI_VECTOR);
+    if (cpu_id < 0 || cpu_id >= num_cpus || cpu_id >= MAX_CPUS) return;
+
+    // Translate the logical CPU index to its real per-core LAPIC id.
+    lapic_send_ipi(cpus[cpu_id].lapic_id, SCHED_IPI_VECTOR);
 }
 
 // Send preemption IPI to all other CPUs
