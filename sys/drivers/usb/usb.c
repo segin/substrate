@@ -857,6 +857,21 @@ static void usb_disconnect_device(usb_device_t *dev)
     if (!dev)
         return;
 
+    /* 0. Recursively disconnect any devices enumerated behind this one (it may
+     * be a hub).  They are recorded with parent == dev (usb_enumerate_device_
+     * parent) and share the hub's root-port CCS, so the root-port hot-plug scan
+     * never sees them go away.  Unplugging a hub — or a whole sub-tree of nested
+     * hubs — must therefore quiesce and free its children here, or each
+     * downstream device's class-driver .detach (force-unmount, DMA-buffer free,
+     * thread quiesce) is skipped and its usb_device_t + USB address leak.
+     * Children go first so their in-flight I/O drains before the parent hub
+     * (which they depend on for transfers) is torn down. [A33] */
+    for (int i = 0; i < USB_MAX_DEVICES; i++) {
+        usb_device_t *child = usb_devices[i];
+        if (child && child != dev && child->parent == dev)
+            usb_disconnect_device(child);
+    }
+
     /* 1. Driver detach first: it drains outstanding I/O before we free. */
     if (dev->driver && dev->driver->detach)
         dev->driver->detach(dev);
