@@ -1407,6 +1407,14 @@ size_t pmap_copyin_other(pmap_t pmap, uintptr_t uva, void *dst, size_t len) {
     if (!pmap || pmap->pdir_phys >= 0x40000000) {
         return 0;
     }
+    /* Confine the access to the user address space.  Every user pmap shares the
+     * kernel's higher-half PDEs, so a caller-supplied uva >= KERN_BASE would
+     * otherwise resolve through the kernel mapping and let a ptrace PEEK read
+     * arbitrary kernel memory.  Reject the whole request if it starts in, or
+     * would run into, kernel space. */
+    if (uva >= KERN_BASE || len > KERN_BASE - uva) {
+        return 0;
+    }
     pd = (uint32_t *)(pmap->pdir_phys + 0xC0000000);
 
     while (got < len) {
@@ -1458,6 +1466,14 @@ size_t pmap_copyout_other(pmap_t pmap, uintptr_t uva, const void *src, size_t le
     uint32_t *pd;
 
     if (!pmap || pmap->pdir_phys >= 0x40000000) {
+        return 0;
+    }
+    /* Confine the write to the user address space.  Without this a ptrace POKE
+     * with uva >= KERN_BASE would resolve through the shared kernel PDEs and,
+     * because the write lands straight on the backing physical page (bypassing
+     * PTE write-protection), give an unprivileged tracer an arbitrary kernel
+     * write.  Reject anything that starts in, or runs into, kernel space. */
+    if (uva >= KERN_BASE || len > KERN_BASE - uva) {
         return 0;
     }
     pd = (uint32_t *)(pmap->pdir_phys + 0xC0000000);
