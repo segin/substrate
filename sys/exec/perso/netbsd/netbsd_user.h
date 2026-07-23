@@ -223,4 +223,19 @@ long netbsd_sys_lwp_continue(int lid);
 int netbsd_oflags_to_native(int flags);
 int netbsd_sys_open(const char *path, int flags, int mode);
 
+/* NetBSD _ksem_*(2) — kernel semaphores (behind POSIX sem_*).  Mapped onto
+ * substrate's native ksem layer; see netbsd_user.c. */
+struct timespec;
+long netbsd_sys_ksem_init(unsigned int value, int *idp);
+long netbsd_sys_ksem_open(const char *name, int oflag, int mode,
+                          unsigned int value, int *idp);
+long netbsd_sys_ksem_unlink(const char *name);
+long netbsd_sys_ksem_close(int id);
+long netbsd_sys_ksem_destroy(int id);
+long netbsd_sys_ksem_post(int id);
+long netbsd_sys_ksem_wait(int id);
+long netbsd_sys_ksem_trywait(int id);
+long netbsd_sys_ksem_getvalue(int id, unsigned int *value);
+long netbsd_sys_ksem_timedwait(int id, const struct timespec *abstime);
+
 #endif /* _NETBSD_USER_H */

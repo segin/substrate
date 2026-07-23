@@ -31,7 +31,7 @@ int netbsd_sys_getrusage(int who, struct rusage *rusage) {
     if (who != RUSAGE_SELF && who != RUSAGE_CHILDREN) return -EINVAL;
 
     struct tms t;
-    if ((clock_t)kern_times(&t) == (clock_t)-1) return -1;
+    if ((clock_t)kern_times(&t) == (clock_t)-1) return -EFAULT;
 
     struct rusage kr;
     memset(&kr, 0, sizeof(struct rusage));
@@ -377,6 +377,16 @@ static void *netbsd_syscalls[MAX_SYSCALLS] = {
     [NETBSD_SYS_fstat50]        = (void *)&netbsd_sys_fstat50,
     [NETBSD_SYS_lstat50]        = (void *)&netbsd_sys_lstat50,
     [NETBSD_SYS__lwp_setprivate] = (void *)&netbsd_sys_lwp_setprivate,
+    [NETBSD_SYS__ksem_init]      = (void *)&netbsd_sys_ksem_init,
+    [NETBSD_SYS__ksem_open]      = (void *)&netbsd_sys_ksem_open,
+    [NETBSD_SYS__ksem_unlink]    = (void *)&netbsd_sys_ksem_unlink,
+    [NETBSD_SYS__ksem_close]     = (void *)&netbsd_sys_ksem_close,
+    [NETBSD_SYS__ksem_post]      = (void *)&netbsd_sys_ksem_post,
+    [NETBSD_SYS__ksem_wait]      = (void *)&netbsd_sys_ksem_wait,
+    [NETBSD_SYS__ksem_trywait]   = (void *)&netbsd_sys_ksem_trywait,
+    [NETBSD_SYS__ksem_getvalue]  = (void *)&netbsd_sys_ksem_getvalue,
+    [NETBSD_SYS__ksem_destroy]   = (void *)&netbsd_sys_ksem_destroy,
+    [NETBSD_SYS__ksem_timedwait] = (void *)&netbsd_sys_ksem_timedwait,
     [NETBSD_SYS__lwp_create]     = (void *)&netbsd_sys_lwp_create,
     [NETBSD_SYS__lwp_exit]       = (void *)&netbsd_sys_lwp_exit,
     [NETBSD_SYS__lwp_wait]       = (void *)&netbsd_sys_lwp_wait,
@@ -597,6 +607,16 @@ static const char *netbsd_names[MAX_SYSCALLS] = {
     [NETBSD_SYS_fstat50]        = "__fstat50",
     [NETBSD_SYS_lstat50]        = "__lstat50",
     [NETBSD_SYS__lwp_setprivate] = "_lwp_setprivate",
+    [NETBSD_SYS__ksem_init]      = "_ksem_init",
+    [NETBSD_SYS__ksem_open]      = "_ksem_open",
+    [NETBSD_SYS__ksem_unlink]    = "_ksem_unlink",
+    [NETBSD_SYS__ksem_close]     = "_ksem_close",
+    [NETBSD_SYS__ksem_post]      = "_ksem_post",
+    [NETBSD_SYS__ksem_wait]      = "_ksem_wait",
+    [NETBSD_SYS__ksem_trywait]   = "_ksem_trywait",
+    [NETBSD_SYS__ksem_getvalue]  = "_ksem_getvalue",
+    [NETBSD_SYS__ksem_destroy]   = "_ksem_destroy",
+    [NETBSD_SYS__ksem_timedwait] = "_ksem_timedwait",
     [NETBSD_SYS__lwp_create]     = "_lwp_create",
     [NETBSD_SYS__lwp_exit]       = "_lwp_exit",
     [NETBSD_SYS__lwp_wait]       = "_lwp_wait",
@@ -722,6 +742,16 @@ static struct syscall_fmt netbsd_fmts[MAX_SYSCALLS] = {
     [NETBSD_SYS_fstat50]        = { 2, { ARG_INT, ARG_PTR } },
     [NETBSD_SYS_lstat50]        = { 2, { ARG_STR, ARG_PTR } },
     [NETBSD_SYS__lwp_setprivate] = { 1, { ARG_HEX } },
+    [NETBSD_SYS__ksem_init]      = { 2, { ARG_INT, ARG_PTR } },
+    [NETBSD_SYS__ksem_open]      = { 5, { ARG_STR, ARG_HEX, ARG_INT, ARG_INT, ARG_PTR } },
+    [NETBSD_SYS__ksem_unlink]    = { 1, { ARG_STR } },
+    [NETBSD_SYS__ksem_close]     = { 1, { ARG_INT } },
+    [NETBSD_SYS__ksem_post]      = { 1, { ARG_INT } },
+    [NETBSD_SYS__ksem_wait]      = { 1, { ARG_INT } },
+    [NETBSD_SYS__ksem_trywait]   = { 1, { ARG_INT } },
+    [NETBSD_SYS__ksem_getvalue]  = { 2, { ARG_INT, ARG_PTR } },
+    [NETBSD_SYS__ksem_destroy]   = { 1, { ARG_INT } },
+    [NETBSD_SYS__ksem_timedwait] = { 2, { ARG_INT, ARG_PTR } },
     [NETBSD_SYS__lwp_create]     = { 3, { ARG_PTR, ARG_HEX, ARG_PTR } },
     [NETBSD_SYS__lwp_exit]       = { 0, { 0 } },
     [NETBSD_SYS__lwp_wait]       = { 2, { ARG_INT, ARG_PTR } },

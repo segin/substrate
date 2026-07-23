@@ -219,6 +219,18 @@
 #define NETBSD_SYS__lwp_ctl        325
 #define NETBSD_SYS____lwp_park60   478
 
+/* _ksem_*(2) — kernel semaphores behind POSIX sem_* (uipc_sem.c 247..256). */
+#define NETBSD_SYS__ksem_init      247
+#define NETBSD_SYS__ksem_open      248
+#define NETBSD_SYS__ksem_unlink    249
+#define NETBSD_SYS__ksem_close     250
+#define NETBSD_SYS__ksem_post      251
+#define NETBSD_SYS__ksem_wait      252
+#define NETBSD_SYS__ksem_trywait   253
+#define NETBSD_SYS__ksem_getvalue  254
+#define NETBSD_SYS__ksem_destroy   255
+#define NETBSD_SYS__ksem_timedwait 256
+
 /* NetBSD __sysctl(name, namelen, oldp, oldlenp, newp, newlen).  Used
  * by libc startup (getprogname, stack-guard, page-size lookup);
  * static-pie binaries like vi crash at _start without it because
