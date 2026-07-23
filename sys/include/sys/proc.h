@@ -366,6 +366,10 @@ typedef struct thread {
     struct thread *rq_next;       // Next in runqueue level
     struct thread *rq_prev;       // Prev in runqueue level
     struct runqueue *current_queue; // The runqueue this thread is currently on
+    int16_t        rq_level;      // Level index this thread was enqueued at.
+                                  // priority/sched_class can be mutated in
+                                  // place after enqueue, so removal must use
+                                  // the stored level, not a recomputed one.
     uint32_t       cpu_affinity;  // CPU affinity mask (bitmask)
     int16_t        bound_cpu;     // Hard CPU binding (-1 = floating)
     int16_t        exec_saved_bound_cpu; // Saved binding across exec pin window
