@@ -9,6 +9,7 @@
 #include <sys/acct.h>
 #include <sys/copy.h>
 #include <sys/errno.h>
+#include <errno.h>   /* socket/network errno symbols for bsd_errno_xlate */
 #include <sys/exec.h>
 #include <sys/file.h>
 #include <sys/kern_syscalls.h>
@@ -49,17 +50,87 @@
  * (e.g. capsicum's caph_enter / caph_limit_stdio, used by echo(1) and most
  * of the FreeBSD base utilities).
  */
-static uint32_t bsd_errno_xlate(uint32_t e) {
+static uint32_t bsd_errno_xlate(uint32_t e, int perso) {
+    /*
+     * Substrate uses Linux-ish errno numbers; the BSDs share the historical
+     * 4.3BSD numbering, which agrees for 1..34 but then diverges sharply --
+     * most of all the whole socket/network block (Linux 88..116 vs BSD 36..70)
+     * and ENOSYS (Linux 38 vs BSD 78).  The socket range and the low
+     * divergences are IDENTICAL across FreeBSD/NetBSD/OpenBSD; only the high
+     * "ELAST" tail (EPROTO/ENOLINK/EMULTIHOP/EBADMSG/EILSEQ/ECANCELED/
+     * EOWNERDEAD/ENOTRECOVERABLE) differs per-OS, so those are dispatched on
+     * `perso`.  Values verified against ~/freebsd and ~/netbsd sys/sys/errno.h.
+     */
     switch (e) {
-    case EAGAIN:          return 35;  /* BSD EAGAIN == EWOULDBLOCK */
-    case EDEADLK:         return 11;
+    /* --- shared by all BSD personalities --- */
+    case EAGAIN:          return 35;  /* substrate EAGAIN=11 -> BSD 35 (==EWOULDBLOCK) */
+    case EDEADLK:         return 11;  /* substrate 35 -> BSD 11 */
+    case ENOLCK:          return 77;
     case ENOSYS:          return 78;
     case ENOTEMPTY:       return 66;
-    case EOPNOTSUPP:      return 45;  /* BSD EOPNOTSUPP == ENOTSUP */
+    case ENOMSG:          return 83;
+    case EIDRM:           return 82;
+    case EOVERFLOW:       return 84;  /* substrate 75 -> BSD 84 (75 is EPROGMISMATCH!) */
+    case EDQUOT:          return 69;
+    case EOPNOTSUPP:      return 45;  /* substrate 95 -> BSD 45 (==ENOTSUP) */
+    /* socket/network block: Linux 88..116 -> BSD 36..70 */
+    case ENOTSOCK:        return 38;
+    case EDESTADDRREQ:    return 39;
+    case EMSGSIZE:        return 40;
+    case EPROTOTYPE:      return 41;
+    case ENOPROTOOPT:     return 42;
+    case EPROTONOSUPPORT: return 43;
+    case ESOCKTNOSUPPORT: return 44;
+    case EPFNOSUPPORT:    return 46;
+    case EAFNOSUPPORT:    return 47;
+    case EADDRINUSE:      return 48;
+    case EADDRNOTAVAIL:   return 49;
+    case ENETDOWN:        return 50;
+    case ENETUNREACH:     return 51;
+    case ENETRESET:       return 52;
+    case ECONNABORTED:    return 53;
+    case ECONNRESET:      return 54;
+    case ENOBUFS:         return 55;
+    case EISCONN:         return 56;
+    case ENOTCONN:        return 57;
+    case ESHUTDOWN:       return 58;
+    case ETOOMANYREFS:    return 59;
     case ETIMEDOUT:       return 60;
+    case ECONNREFUSED:    return 61;
+    case EHOSTDOWN:       return 64;
+    case EHOSTUNREACH:    return 65;
+    case EALREADY:        return 37;
+    case EINPROGRESS:     return 36;
+    case ESTALE:          return 70;
+    default:              break;      /* 1..34, ELOOP(62), ENAMETOOLONG(63) match */
+    }
+
+    /* --- per-OS ELAST tail (diverges between the BSDs) --- */
+    if (perso == PERS_NETBSD) {
+        switch (e) {
+        case EMULTIHOP:       return 94;
+        case ENOLINK:         return 95;
+        case EPROTO:          return 96;
+        case EBADMSG:         return 88;
+        case EILSEQ:          return 85;
+        case ECANCELED:       return 87;
+        case EOWNERDEAD:      return 97;
+        case ENOTRECOVERABLE: return 98;
+        default:              return e;
+        }
+    }
+    /* FreeBSD (and OpenBSD as best-effort: its socket range matches and no
+     * OpenBSD source tree is available to pin the tail precisely). */
+    switch (e) {
+    case EMULTIHOP:       return 90;
+    case ENOLINK:         return 91;
+    case EPROTO:          return 92;
+    case EBADMSG:         return 89;
+    case EILSEQ:          return 86;
+    case ECANCELED:       return 85;
     case EOWNERDEAD:      return 96;
     case ENOTRECOVERABLE: return 95;
-    default:              return e;   /* 1..34, ENAMETOOLONG(63), ELOOP(62) match */
+    default:              return e;
     }
 }
 
@@ -247,7 +318,7 @@ static inline void syscall_trace_emit(const char *s) {
 static void syscall_emit_enosys(registers_t *regs, struct personality *p) {
     if (p && (p->id == PERS_FREEBSD || p->id == PERS_NETBSD ||
               p->id == PERS_OPENBSD)) {
-        regs->eax = bsd_errno_xlate(38);   /* native ENOSYS -> BSD ENOSYS (78) */
+        regs->eax = bsd_errno_xlate(38, p->id);   /* native ENOSYS -> BSD ENOSYS (78) */
         regs->eflags |= 1;                 /* CF = error */
     } else {
         regs->eax = (uint32_t)-38;         /* Linux/native negative-errno */
@@ -534,7 +605,7 @@ void syscall_handler(registers_t *regs) {
         uint32_t low = (uint32_t)(ret & 0xFFFFFFFF);
         if ((int32_t)low < 0) {
             /* positive errno, mapped from substrate to BSD numbering */
-            regs->eax = bsd_errno_xlate((uint32_t)(-(int32_t)low));
+            regs->eax = bsd_errno_xlate((uint32_t)(-(int32_t)low), p->id);
             regs->eflags |= 1;  /* set CF */
         } else {
             regs->eax = low;
