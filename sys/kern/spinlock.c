@@ -110,5 +110,5 @@ bool spinlock_is_held(spinlock_t *lock) {
 
     /* smp_get_cpu_id() short-circuits to 0 on UP (no LAPIC MMIO vmexit),
      * unlike lapic_get_id(); this is on the per-lock-op hot path. */
-    return (locked_before != 0) && (owner_cpu == smp_get_cpu_id());
+    return (locked_before != 0) && (owner_cpu == (uint32_t)smp_get_cpu_id());
 }
