@@ -2,7 +2,7 @@
 
 Source: `docs/perf-audit-2026-07.md`. 44 findings, ordered by impact.
 
-- [ ] **F01** (high) [sys/vm/uma_core.c:885] uma_curcpu() issues an MMIO LAPIC-ID read per alloc and per free on real SM
+- [x] **F01** (high) [sys/vm/uma_core.c:885] uma_curcpu() issues an MMIO LAPIC-ID read per alloc and per free on real SM
 - [ ] **F02** (high) [sys/pm/sched.c:399] sched_yield() linearly scans the ENTIRE thread registry on every schedule; 
 - [ ] **F03** (high) [sys/vm/vm_object.c:239] Object page lookup is an O(n) linked-list scan run on every fault → O(N^2) 
 - [ ] **F04** (medium) [sys/fs/ext2/ext2.c:795] ext2 contiguity scan re-reads the same indirect/dindirect/tindirect block o
@@ -10,9 +10,9 @@ Source: `docs/perf-audit-2026-07.md`. 44 findings, ordered by impact.
 - [ ] **F06** (medium) [sys/fs/ext2/ext2.c:261] ext2_read_inode kmalloc/kfree a full filesystem block on every inode read (
 - [ ] **F07** (medium) [sys/drivers/storage/ahci/ahci.c:612] AHCI bounces every disk transfer through a freshly-allocated+zeroed DMA buf
 - [ ] **F08** (medium) [sys/drivers/storage/ide/ide_wait.c:233] IDE DMA completion wait ignores the completion IRQ and only wakes on the ti
-- [ ] **F09** (medium) [sys/kern/spinlock.c:15] spinlock_acquire issues two lapic_get_id() reads plus a stable-snapshot sel
+- [x] **F09** (medium) [sys/kern/spinlock.c:15] spinlock_acquire issues two lapic_get_id() reads plus a stable-snapshot sel
 - [ ] **F10** (medium) [sys/kern/rwlock.c:47] rwlock read acquire/release probe the sleepq bucket (hash + cli + bucket lo
-- [ ] **F11** (medium) [sys/kern/spinlock.c:53] spinlock stamps last_acquire_eip (debug-only) into the lock line on every a
+- [x] **F11** (medium) [sys/kern/spinlock.c:53] spinlock stamps last_acquire_eip (debug-only) into the lock line on every a
 - [ ] **F12** (medium) [sys/vm/uma_core.c:1016] uma_zalloc/uma_zfree walk the global slab page-hash on every fast-path op j
 - [ ] **F13** (medium) [sys/vm/vm_kmem.c:101] kmem_stats_lock global spinlock taken twice per kmalloc and once per kfree 
 - [ ] **F14** (medium) [sys/vm/vm_kmem.c:187] kfree() calls uma_item_size() — a redundant THIRD global-slab-lock hash wal
@@ -33,7 +33,7 @@ Source: `docs/perf-audit-2026-07.md`. 44 findings, ordered by impact.
 - [ ] **F29** (low) [sys/net/tcp.c:188] tcp_xmit_raw bounces the segment payload through a 1.5 KB stack buffer on e
 - [ ] **F30** (low) [sys/net/af_inet.c:1178] afinet_deliver_v4/v6 walk the entire socket list per inbound datagram in ha
 - [ ] **F31** (low) [sys/net/loopback.c:110] Loopback frame copied twice per delivery (xmit into ring, drain into scratc
-- [ ] **F32** (low) [sys/arch/i386/percpu.c:22] THIS_CPU()/percpu_get_cpu_id() lack the UP short-circuit and issue LAPIC MM
+- [x] **F32** (low) [sys/arch/i386/percpu.c:22] THIS_CPU()/percpu_get_cpu_id() lack the UP short-circuit and issue LAPIC MM
 - [ ] **F33** (low) [sys/arch/i386/syscall.c:260] current_thread / current_process are opaque out-of-line calls, re-invoked ~
 - [ ] **F34** (low) [sys/kern/subr_copy.c:153] copyinstr calls validate_user_addr() once per byte on every path-taking sys
 - [ ] **F35** (low) [sys/arch/i386/syscall_abi.h:17] syscall arg extraction memsets 8 words then overwrites all 8 via copyin on 

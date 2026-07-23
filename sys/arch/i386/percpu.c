@@ -20,8 +20,19 @@ static struct percpu_data percpu_data_array[MAX_CPUS] __attribute__((aligned(64)
 
 // Get current CPU's percpu data (via LAPIC ID for now)
 struct percpu_data *percpu_get(void) {
+    /*
+     * Uniprocessor fast path: skip the LAPIC-ID read entirely.  lapic_get_id()
+     * is an MMIO load, which is an expensive vmexit under KVM/QEMU, and
+     * percpu_get() is on the hottest paths in the kernel — every
+     * percpu_get_cpu_id(), uma_curcpu(), spinlock recursion check, and
+     * context switch calls it.  On a single-CPU system the answer is always
+     * CPU 0, so return it without touching the LAPIC (mirrors curthread_slot).
+     */
+    if (cpu_count <= 1)
+        return &percpu_data_array[0];
+
     uint32_t lapic_id = lapic_get_id();
-    
+
     // Find CPU index by LAPIC ID
     for (int i = 0; i < cpu_count; i++) {
         if (cpus[i].lapic_id == lapic_id) {

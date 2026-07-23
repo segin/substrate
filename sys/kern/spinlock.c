@@ -3,6 +3,7 @@
 #include <kern/console.h>
 #include <kern/panic.h>
 #include <arch/x86-common/lapic.h>
+#include <sys/smp.h>
 
 void spinlock_init(spinlock_t *lock, const char *name) {
     lock->locked = 0;
@@ -12,9 +13,13 @@ void spinlock_init(spinlock_t *lock, const char *name) {
 }
 
 void spinlock_acquire(spinlock_t *lock) {
-    uint32_t id = lapic_get_id();
+    /* smp_get_cpu_id() is MMIO-free on a uniprocessor; read the CPU id ONCE
+     * and inline the recursive-acquire (deadlock) check against it rather than
+     * calling spinlock_is_held() which would read the CPU id a second time. */
+    uint32_t id = smp_get_cpu_id();
 
-    if (spinlock_is_held(lock)) {
+    if (__atomic_load_n(&lock->locked, __ATOMIC_ACQUIRE) &&
+        __atomic_load_n(&lock->cpu_id, __ATOMIC_ACQUIRE) == id) {
         /* Recursive acquire on the same CPU — we never release a
          * spinlock implicitly, so this means either (a) we acquired
          * it earlier in this call chain and forgot to release, or
@@ -54,9 +59,10 @@ void spinlock_acquire(spinlock_t *lock) {
 }
 
 bool spinlock_try_acquire(spinlock_t *lock) {
-    uint32_t id = lapic_get_id();
+    uint32_t id = smp_get_cpu_id();
 
-    if (spinlock_is_held(lock)) {
+    if (__atomic_load_n(&lock->locked, __ATOMIC_ACQUIRE) &&
+        __atomic_load_n(&lock->cpu_id, __ATOMIC_ACQUIRE) == id) {
         return false;
     }
 
@@ -102,5 +108,7 @@ bool spinlock_is_held(spinlock_t *lock) {
         locked_after = __atomic_load_n(&lock->locked, __ATOMIC_ACQUIRE);
     } while (locked_before != locked_after);
 
-    return (locked_before != 0) && (owner_cpu == lapic_get_id());
+    /* smp_get_cpu_id() short-circuits to 0 on UP (no LAPIC MMIO vmexit),
+     * unlike lapic_get_id(); this is on the per-lock-op hot path. */
+    return (locked_before != 0) && (owner_cpu == smp_get_cpu_id());
 }
