@@ -242,6 +242,16 @@ int sys_mprotect(void *addr, size_t len, int prot) {
     if (len == 0)
         return 0;
 
+    /*
+     * Guard the page round-up against 32-bit wrap (audit A60).  A huge len
+     * makes (start + len + 0xFFF) overflow to a small value; the end <=
+     * 0xC0000000 check below would then pass with end < start, and
+     * vm_map_protect's loops terminate immediately — silently reporting
+     * success while changing no protections.
+     */
+    if (len > (uintptr_t)-1 - 0xFFF - start)
+        return -EINVAL;
+
     /* Round up to page boundary */
     uintptr_t end = (start + len + 0xFFF) & ~0xFFF;
 
