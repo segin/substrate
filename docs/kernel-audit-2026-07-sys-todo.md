@@ -25,7 +25,7 @@ Source: `docs/kernel-audit-2026-07-sys.md`. Work one checkbox at a time: fix →
 - [x] **A15** [sys/fs/fat/fat.c:490] FAT root node not pinned in node cache — recycled after 64 lookups
 - [x] **A16** [sys/fs/fat/fat.c:946] Cluster allocator is not atomic — concurrent allocation cross-links files
 - [ ] **A17** [sys/fs/fat/fat.c:1086] FAT write/directory paths share function-static scratch buffers with no locking
-- [ ] **A18** [sys/fs/fat/fat.c:1367] FAT directory-entry write assumes physical contiguity across a cluster boundary
+- [x] **A18** [sys/fs/fat/fat.c:1367] FAT directory-entry write assumes physical contiguity across a cluster boundary
 - [x] **A19** [sys/fs/shmfs.c:196] shmfs_write: size_t overflow of (off+sz) defeats grow → OOB write
 - [x] **A20** [sys/kern/geom/geom_gpt.c:148] GPT entry array parsed with unbounded on-disk entry_size -> OOB read
 - [x] **A21** [sys/kern/geom/geom_gpt.c:134] GPT entries_per_sector division by zero when entry_size > 512
@@ -56,11 +56,11 @@ Source: `docs/kernel-audit-2026-07-sys.md`. Work one checkbox at a time: fix →
 - [ ] **A43** [sys/kern/turnstile.c:131] Turnstile pool exhaustion panics the kernel (128 contended locks)
 - [x] **A44** [sys/net/af_unix.c:602] AF_UNIX SOCK_DGRAM datagram > 65535 bytes truncates its 2-byte length header, corrupting frame boundaries
 - [ ] **A45** [sys/net/tcp.c:1176] Use-after-free of child PCBs in tcp_close() LISTEN teardown
-- [ ] **A46** [sys/pm/pgrp.c:278] pgrp/session syscalls return bare -1 instead of -errno
-- [ ] **A47** [sys/pm/process.c:480] fork failure returns bare -1 → userspace sees EPERM instead of ENOMEM/EAGAIN
+- [x] **A46** [sys/pm/pgrp.c:278] pgrp/session syscalls return bare -1 instead of -errno
+- [x] **A47** [sys/pm/process.c:480] fork failure returns bare -1 → userspace sees EPERM instead of ENOMEM/EAGAIN
 - [ ] **A48** [sys/pm/process.c:563] Non-atomic f_count++ during fork races sibling-thread close
 - [ ] **A49** [sys/pm/sched.c:960] sched_get_thread returns unreferenced pointer; lwp ops write to possibly-freed thread_t
-- [ ] **A50** [sys/vfs/vfs.c:954] Legacy fs op-dispatch helpers return bare -1, surfacing to userspace as EPERM
+- [x] **A50** [sys/vfs/vfs.c:954] Legacy fs op-dispatch helpers return bare -1, surfacing to userspace as EPERM
 - [ ] **A51** [sys/vm/vm_kmem.c:200] kfree trusts caller-supplied size; cross-zone free reaches the per-CPU bucket unvalidated
 - [ ] **A52** [sys/vm/vm_page.c:606] vm_page_free on an already-freed page clears PG_FREE, defeating the buddy double-free guard
 - [ ] **A53** [sys/vm/vm_page.c:872] Pagedaemon and stats paths iterate page queues without the queue lock
@@ -70,18 +70,18 @@ Source: `docs/kernel-audit-2026-07-sys.md`. Work one checkbox at a time: fix →
 
 - [ ] **A55** [sys/arch/i386/pmap.c:664] pmap_fork treats a large-page (PTE_PS) user PDE as a page table
 - [ ] **A56** [sys/arch/i386/signal.c:405] Signal handler entered with 16-byte-aligned ESP (i386 SysV ABI wants ESP%16==12)
-- [ ] **A57** [sys/arch/i386/syscall.c:606] arch_fork_with_stack / arch_clone_thread return bare -1 (wrong errno contract)
+- [x] **A57** [sys/arch/i386/syscall.c:606] arch_fork_with_stack / arch_clone_thread return bare -1 (wrong errno contract)
 - [ ] **A58** [sys/drivers/video/psf.c:80] psf2_parse: unsigned underflow of (size - headersize) bypasses glyph-data bounds check
 - [x] **A59** [sys/exec/formats/elf.c:1531] execve returns bare -1 (maps to EPERM) instead of correct errno
 - [ ] **A60** [sys/exec/perso/compat.c:244] sys_mprotect end computation can wrap 32-bit, silently protecting nothing
-- [ ] **A61** [sys/exec/perso/perso_netbsd.c:34] getrusage wrappers return bare -1 instead of -errno
-- [ ] **A62** [sys/exec/perso/perso_svr3.c:46] SVR3/SVR4: ulimit(2) dispatched to sys_dup2
+- [~] **A61** [sys/exec/perso/perso_netbsd.c:34] getrusage wrappers return bare -1 instead of -errno (applied in-tree; netbsd files uncommitted — carry unrelated in-progress ksem work)
+- [x] **A62** [sys/exec/perso/perso_svr3.c:46] SVR3/SVR4: ulimit(2) dispatched to sys_dup2
 - [ ] **A63** [sys/fs/ext2/ext2.c:3235] rename '..' fixup trusts dot->rec_len → OOB access in dir block buffer
-- [ ] **A64** [sys/fs/minix/minix.c:905] minix_finddir: kmalloc result used without NULL check
+- [x] **A64** [sys/fs/minix/minix.c:905] minix_finddir: kmalloc result used without NULL check
 - [ ] **A65** [sys/fs/udf/udf_write.c:1181] UDF error paths leak kmalloc'd buffers
 - [ ] **A66** [sys/kern/ipc_shm.c:280] shmat with explicit address destroys existing mapping before it can fail
-- [ ] **A67** [sys/kern/runqueue.c:56] Timeshare MLFQ level uses bitwise AND (& 39) instead of range clamp
-- [ ] **A68** [sys/kern/sched_ipi.c:26] Preemption IPI assumes CPU index == LAPIC ID
+- [x] **A67** [sys/kern/runqueue.c:56] Timeshare MLFQ level uses bitwise AND (& 39) instead of range clamp
+- [x] **A68** [sys/kern/sched_ipi.c:26] Preemption IPI assumes CPU index == LAPIC ID
 - [ ] **A69** [sys/kern/turnstile.c:196] turnstile_release clobbers priority boosts from other still-held locks
 - [ ] **A70** [sys/kern/turnstile.c:43] turnstile global lock taken without preempt_disable
 - [ ] **A71** [sys/net/tcp.c:488] SYN_SENT accepts SYN|ACK without validating the acknowledgement number
