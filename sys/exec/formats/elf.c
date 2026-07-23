@@ -1504,7 +1504,7 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
     uint32_t old_sgid = current_process ? current_process->sgid : 0;
     if (!root) {
         if (fd >= 0) kern_close(fd);
-        return -1;
+        return -ENOENT;
     }
 
     // ARG_MAX: Maximum bytes for arguments + environment
@@ -1514,7 +1514,7 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
     char *arg_buffer = NULL;
     int argc = 0;
     int envc = 0;
-    int error_code = -1;
+    int error_code = -ENOEXEC;  /* meaningful default for any goto cleanup */
     int ret;
 
     fs_node_t *file = NULL;
@@ -1536,7 +1536,7 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
     if ((file->flags & 0x7) != FS_FILE) {
         kprint("execve: Not a regular file\n");
         if (fd >= 0) kern_close(fd);
-        return -1;
+        return -EACCES;
     }
 
     image = elf_image_alloc();
@@ -1599,7 +1599,7 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
     pmap_t new_pmap = pmap_create();
     if (!new_pmap) {
         kprint("execve: Failed to create pmap\n");
-        error_code = -1;
+        error_code = -ENOMEM;
         goto cleanup;
     }
 
@@ -1620,7 +1620,7 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
     new_vm_map = vm_map_create(new_pmap, 0x10000, 0xC0000000);
     if (!new_vm_map) {
         kprint("execve: Failed to create vm_map\n");
-        error_code = -1;
+        error_code = -ENOMEM;
         goto cleanup;
     }
     if (current_process) {
@@ -1636,6 +1636,7 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
     uint32_t main_entry = elf_load(file, main_load_base, 1, interp_path, &interp_len);
     if (main_entry == 0) {
         kprint("execve: Failed to load ELF\n");
+        error_code = -ENOEXEC;
         goto cleanup;
     }
 
@@ -1676,6 +1677,7 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
         fs_node_t *interp_file = elf_lookup_interpreter(root, interp_path, perso_prefix);
         if (!interp_file) {
             kprint("execve: Interpreter not found\n");
+            error_code = -ENOENT;
             goto cleanup;
         }
 
@@ -1683,6 +1685,7 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
         uint32_t interp_entry = elf_load(interp_file, interp_base, 0, NULL, NULL);
         if (interp_entry == 0) {
             kprint("execve: Failed to load interpreter\n");
+            error_code = -ENOEXEC;
             goto cleanup;
         }
 
@@ -1750,6 +1753,7 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
     if (exec_setup_stack(new_pmap, &sp, k_argv, argc, k_envp, envc,
                          main_entry, at_base, at_phdr, image,
                          &ps_strings_user) < 0) {
+        error_code = -ENOMEM;
         goto cleanup;
     }
 

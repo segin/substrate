@@ -72,7 +72,7 @@ Source: `docs/kernel-audit-2026-07-sys.md`. Work one checkbox at a time: fix →
 - [ ] **A56** [sys/arch/i386/signal.c:405] Signal handler entered with 16-byte-aligned ESP (i386 SysV ABI wants ESP%16==12)
 - [ ] **A57** [sys/arch/i386/syscall.c:606] arch_fork_with_stack / arch_clone_thread return bare -1 (wrong errno contract)
 - [ ] **A58** [sys/drivers/video/psf.c:80] psf2_parse: unsigned underflow of (size - headersize) bypasses glyph-data bounds check
-- [ ] **A59** [sys/exec/formats/elf.c:1531] execve returns bare -1 (maps to EPERM) instead of correct errno
+- [x] **A59** [sys/exec/formats/elf.c:1531] execve returns bare -1 (maps to EPERM) instead of correct errno
 - [ ] **A60** [sys/exec/perso/compat.c:244] sys_mprotect end computation can wrap 32-bit, silently protecting nothing
 - [ ] **A61** [sys/exec/perso/perso_netbsd.c:34] getrusage wrappers return bare -1 instead of -errno
 - [ ] **A62** [sys/exec/perso/perso_svr3.c:46] SVR3/SVR4: ulimit(2) dispatched to sys_dup2
