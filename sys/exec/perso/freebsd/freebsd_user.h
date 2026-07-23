@@ -76,6 +76,33 @@ struct freebsd_timespec {
     int32_t tv_nsec;
 };
 
+/* FreeBSD i386 struct itimerval / rusage: built from the 8-byte timeval, so
+ * they are smaller than the native structs (64-bit time_t).  Used to marshal
+ * getitimer/getrusage/wait4 results into the caller's buffer without overrun. */
+struct freebsd_itimerval {
+    struct freebsd_timeval it_interval;
+    struct freebsd_timeval it_value;
+};
+
+struct freebsd_rusage {
+    struct freebsd_timeval ru_utime;
+    struct freebsd_timeval ru_stime;
+    int32_t ru_maxrss;
+    int32_t ru_ixrss;
+    int32_t ru_idrss;
+    int32_t ru_isrss;
+    int32_t ru_minflt;
+    int32_t ru_majflt;
+    int32_t ru_nswap;
+    int32_t ru_inblock;
+    int32_t ru_oublock;
+    int32_t ru_msgsnd;
+    int32_t ru_msgrcv;
+    int32_t ru_nsignals;
+    int32_t ru_nvcsw;
+    int32_t ru_nivcsw;
+};
+
 /*
  * FreeBSD iovec (for readv/writev)
  */

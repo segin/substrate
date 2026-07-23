@@ -50,6 +50,9 @@ int freebsd_sys_rtprio_thread(int function, long lwpid, void *rtp);
  * -> substrate native 0/1).  std::chrono::steady_clock depends on this. */
 int freebsd_sys_clock_gettime(int clk_id, void *tp);
 int freebsd_sys_gettimeofday(void *tv, void *tz);
+int freebsd_sys_getrusage(int who, void *usage);
+int freebsd_sys_getitimer(int which, void *curr_value);
+int freebsd_sys_wait4(int pid, int *status, int options, void *rusage);
 
 /* clock_getres(2) with the same FreeBSD clockid translation; reports the
  * 1/HZ tick resolution (substrate has no native sys_clock_getres). */

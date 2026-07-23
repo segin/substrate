@@ -13,7 +13,9 @@
 #include <sys/param.h>
 #include <sys/proc.h>
 #include <sys/random.h>
+#include <sys/resource.h>
 #include <sys/stat.h>
+#include <sys/time.h>
 #include <sys/syscall_impl.h>
 #include <sys/tty.h>
 #include <sys/umtx.h>
@@ -733,6 +735,83 @@ int freebsd_sys_gettimeofday(void *tv, void *tz) {
     }
     if (tz && copyout(&ktz, tz, sizeof(ktz)) != 0) return -EFAULT;
     return 0;
+}
+
+/* Marshal a native struct rusage into the 8-byte-timeval FreeBSD layout. */
+static void freebsd_marshal_rusage(const struct rusage *k, struct freebsd_rusage *f) {
+    f->ru_utime.tv_sec  = (int32_t)k->ru_utime.tv_sec;
+    f->ru_utime.tv_usec = (int32_t)k->ru_utime.tv_usec;
+    f->ru_stime.tv_sec  = (int32_t)k->ru_stime.tv_sec;
+    f->ru_stime.tv_usec = (int32_t)k->ru_stime.tv_usec;
+    f->ru_maxrss   = (int32_t)k->ru_maxrss;
+    f->ru_ixrss    = (int32_t)k->ru_ixrss;
+    f->ru_idrss    = (int32_t)k->ru_idrss;
+    f->ru_isrss    = (int32_t)k->ru_isrss;
+    f->ru_minflt   = (int32_t)k->ru_minflt;
+    f->ru_majflt   = (int32_t)k->ru_majflt;
+    f->ru_nswap    = (int32_t)k->ru_nswap;
+    f->ru_inblock  = (int32_t)k->ru_inblock;
+    f->ru_oublock  = (int32_t)k->ru_oublock;
+    f->ru_msgsnd   = (int32_t)k->ru_msgsnd;
+    f->ru_msgrcv   = (int32_t)k->ru_msgrcv;
+    f->ru_nsignals = (int32_t)k->ru_nsignals;
+    f->ru_nvcsw    = (int32_t)k->ru_nvcsw;
+    f->ru_nivcsw   = (int32_t)k->ru_nivcsw;
+}
+
+/*
+ * getrusage / getitimer / wait4 all embed struct timeval, so the native
+ * handlers copy out oversized structs (64-bit time_t) that overrun the
+ * FreeBSD caller's 8-byte-timeval buffers.  Marshal into the FreeBSD layout.
+ */
+int freebsd_sys_getrusage(int who, void *usage) {
+    struct rusage kru;
+
+    if (!usage || !current_process) return -EINVAL;
+    switch (who) {
+    case RUSAGE_SELF:
+    case RUSAGE_THREAD:  kru = current_process->rusage; break;
+    case RUSAGE_CHILDREN: kru = current_process->rusage_children; break;
+    default: return -EINVAL;
+    }
+
+    struct freebsd_rusage fru;
+    memset(&fru, 0, sizeof(fru));
+    freebsd_marshal_rusage(&kru, &fru);
+    if (copyout(&fru, usage, sizeof(fru)) != 0) return -EFAULT;
+    return 0;
+}
+
+int freebsd_sys_getitimer(int which, void *curr_value) {
+    struct itimerval kit;
+    int ret = kern_getitimer(which, &kit);
+    if (ret != 0) return ret;
+    if (curr_value) {
+        struct freebsd_itimerval fit;
+        fit.it_interval.tv_sec  = (int32_t)kit.it_interval.tv_sec;
+        fit.it_interval.tv_usec = (int32_t)kit.it_interval.tv_usec;
+        fit.it_value.tv_sec     = (int32_t)kit.it_value.tv_sec;
+        fit.it_value.tv_usec    = (int32_t)kit.it_value.tv_usec;
+        if (copyout(&fit, curr_value, sizeof(fit)) != 0) return -EFAULT;
+    }
+    return 0;
+}
+
+int freebsd_sys_wait4(int pid, int *status, int options, void *rusage) {
+    int kstatus = 0;
+    struct rusage kru;
+    memset(&kru, 0, sizeof(kru));
+    int ret = kern_wait4(pid, status ? &kstatus : NULL, options,
+                         rusage ? &kru : NULL);
+    if (ret < 0) return ret;
+    if (status && copyout(&kstatus, status, sizeof(int)) != 0) return -EFAULT;
+    if (rusage) {
+        struct freebsd_rusage fru;
+        memset(&fru, 0, sizeof(fru));
+        freebsd_marshal_rusage(&kru, &fru);
+        if (copyout(&fru, rusage, sizeof(fru)) != 0) return -EFAULT;
+    }
+    return ret;
 }
 
 int freebsd_sys_rtprio_thread(int function, long lwpid, void *rtp) {
