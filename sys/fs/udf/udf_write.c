@@ -62,6 +62,7 @@ int udf_read_space_bitmap(struct udf_fs *fs, uint32_t bitmap_loc, uint32_t bitma
     
     if (sectors > 4) {
         kprint("UDF: Space bitmap too large\n");
+        kfree(sector_buf, UDF_SECTOR_SIZE * 4);
         return -1;
     }
     
@@ -684,14 +685,21 @@ int udf_write_file(struct udf_fs *fs, struct udf_fe *fe, uint32_t fe_block,
     }
     
     struct udf_fe *disk_fe = (struct udf_fe *)sector_buf;
-    uint32_t total_needed = offset + size;
+    /* A85: compute in 64-bit so offset+size cannot wrap, and validate the
+     * untrusted on-disk ext_attr_length before using it as an offset into
+     * the fixed UDF_SECTOR_SIZE-byte sector buffer.  inline_base + 40 must
+     * fit within the sector or the original bound underflowed and let a
+     * bogus ext_attr_length steer the memcpy past sector_buf. */
+    uint64_t total_needed = (uint64_t)offset + size;
     uint8_t ad_type = disk_fe->icb_tag.flags & 0x7;
+    uint64_t inline_base = (uint64_t)sizeof(struct udf_fe) + disk_fe->ext_attr_length;
 
     /* For small files, try to use inline data */
     if (ad_type == UDF_ICB_FLAG_AD_INLINE &&
-        total_needed <= UDF_SECTOR_SIZE - sizeof(struct udf_fe) - disk_fe->ext_attr_length - 40) {
-        
-        uint8_t *alloc_area = sector_buf + sizeof(struct udf_fe) + disk_fe->ext_attr_length;
+        inline_base + 40 <= UDF_SECTOR_SIZE &&
+        total_needed <= UDF_SECTOR_SIZE - inline_base - 40) {
+
+        uint8_t *alloc_area = sector_buf + inline_base;
         memcpy(alloc_area + offset, data, size);
         
         if (total_needed > disk_fe->info_length) {
@@ -777,24 +785,34 @@ int udf_add_fid(struct udf_fs *fs, struct udf_fe *dir_fe, uint32_t dir_block,
     uint8_t *dir_buf = kmalloc(4096);
     if (!dir_buf) return -1;
     
-    /* Read directory data */
     off_t disk_off = (off_t)(fs->partition_start + dir_block) * UDF_SECTOR_SIZE;
-    fs->device->read(fs->device, disk_off, UDF_SECTOR_SIZE, dir_buf);
-    
     uint32_t dir_size = (uint32_t)dir_fe->info_length;
-    
+
     /* Calculate new FID size */
     uint8_t name_len = strlen(name);
     uint32_t fid_size = 38 + 0 + (name_len + 1);  /* +1 for compression type */
     fid_size = (fid_size + 3) & ~3;  /* Pad to 4 bytes */
-    
-    /* Bounds check: ensure FID fits in buffer */
-    if (dir_size + fid_size > 4096) {
+
+    /* Bounds check: ensure FID fits in buffer (guard each term so a bogus
+     * info_length cannot wrap the sum). */
+    if (dir_size > 4096 || fid_size > 4096 || dir_size + fid_size > 4096) {
         kprint("UDF: Directory full, cannot add entry\n");
         kfree(dir_buf, 4096);
         return -1;
     }
-    
+
+    /* A39: the directory may span more than one sector (info_length up to
+     * 4096 = 2 sectors).  Read every sector we will index into — not just
+     * the first — so the FID is never written into uninitialised heap, and
+     * persist that same span below.  Otherwise a multi-sector directory
+     * gets a garbage-checksummed, half-persisted entry. */
+    uint32_t used_sectors = (dir_size + fid_size + UDF_SECTOR_SIZE - 1) / UDF_SECTOR_SIZE;
+    if (used_sectors == 0) used_sectors = 1;
+    for (uint32_t i = 0; i < used_sectors; i++) {
+        fs->device->read(fs->device, disk_off + (off_t)i * UDF_SECTOR_SIZE,
+                         UDF_SECTOR_SIZE, dir_buf + i * UDF_SECTOR_SIZE);
+    }
+
     /* Create FID at end of directory */
     struct udf_fid *fid = (struct udf_fid *)(dir_buf + dir_size);
     memset(fid, 0, fid_size);
@@ -820,10 +838,13 @@ int udf_add_fid(struct udf_fs *fs, struct udf_fe *dir_fe, uint32_t dir_block,
     
     /* Update directory size */
     dir_fe->info_length = dir_size + fid_size;
-    
-    /* Write back */
-    fs->device->write(fs->device, disk_off, UDF_SECTOR_SIZE, dir_buf);
-    
+
+    /* Write back every sector we touched (see A39 above). */
+    for (uint32_t i = 0; i < used_sectors; i++) {
+        fs->device->write(fs->device, disk_off + (off_t)i * UDF_SECTOR_SIZE,
+                          UDF_SECTOR_SIZE, dir_buf + i * UDF_SECTOR_SIZE);
+    }
+
     return 0;
 }
 
@@ -1178,6 +1199,7 @@ int udf_truncate_file(struct udf_fs *fs, struct udf_fe *fe, uint32_t fe_block,
     if ((disk_fe->icb_tag.flags & 0x7) == UDF_ICB_FLAG_AD_INLINE) {
         if (new_size > UDF_SECTOR_SIZE - sizeof(struct udf_fe) - 100) {
             kprint("UDF: Cannot extend inline file beyond sector\n");
+            kfree(sector_buf, UDF_SECTOR_SIZE);
             return -1;
         }
         
@@ -1217,7 +1239,7 @@ int udf_truncate_file(struct udf_fs *fs, struct udf_fe *fe, uint32_t fe_block,
 
             /* Zero buffer for clearing new blocks */
             uint8_t *zero_buf = kmalloc(UDF_SECTOR_SIZE);
-            if (!zero_buf) return -1;
+            if (!zero_buf) { kfree(sector_buf, UDF_SECTOR_SIZE); return -1; }
             memset(zero_buf, 0, UDF_SECTOR_SIZE);
 
             /* Try to extend the last extent first */
@@ -1260,6 +1282,7 @@ int udf_truncate_file(struct udf_fs *fs, struct udf_fe *fe, uint32_t fe_block,
                 /* printf("DEBUG: Allocated block %u, needed %llu\n", new_block, (unsigned long long)needed); */
                 if (new_block == 0) {
                     kfree(zero_buf, UDF_SECTOR_SIZE);
+                    kfree(sector_buf, UDF_SECTOR_SIZE);
                     return -1;
                 }
 
@@ -1352,7 +1375,7 @@ int udf_truncate_file(struct udf_fs *fs, struct udf_fe *fe, uint32_t fe_block,
             uint64_t needed = new_size - disk_fe->info_length;
 
             uint8_t *zero_buf = kmalloc(UDF_SECTOR_SIZE);
-            if (!zero_buf) return -1;
+            if (!zero_buf) { kfree(sector_buf, UDF_SECTOR_SIZE); return -1; }
             memset(zero_buf, 0, UDF_SECTOR_SIZE);
 
             /* Try to extend the last extent first */
@@ -1391,6 +1414,7 @@ int udf_truncate_file(struct udf_fs *fs, struct udf_fe *fe, uint32_t fe_block,
                 uint32_t new_block = udf_alloc_block(fs);
                 if (new_block == 0) {
                     kfree(zero_buf, UDF_SECTOR_SIZE);
+                    kfree(sector_buf, UDF_SECTOR_SIZE);
                     return -1;
                 }
 
