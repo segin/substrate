@@ -268,7 +268,12 @@ void *kern_shmat(int shmid, const void *shmaddr, int shmflg, int *err)
     if (shmflg & SHM_EXEC)
         vm_prot |= VM_PROT_EXEC;
 
-    if (virt == 0) {
+    /* An explicit shmaddr replaces whatever is mapped there.  Capture that
+     * intent now (before find_space overwrites virt) but do NOT tear the old
+     * mapping down yet — see below (audit A66). */
+    int have_addr = (virt != 0);
+
+    if (!have_addr) {
         if (vm_map_find_space(map, &virt, length) != 0) {
             mutex_unlock(&shm_lock); *err = ENOMEM; return (void *)-1;
         }
@@ -276,12 +281,15 @@ void *kern_shmat(int shmid, const void *shmaddr, int shmflg, int *err)
         if (shmflg & SHM_RND)
             virt &= ~((uintptr_t)SHMLBA - 1);
         if (virt & 0xFFF) { mutex_unlock(&shm_lock); *err = EINVAL; return (void *)-1; }
-        /* Clear anything already mapped there (SHM_REMAP-ish behaviour). */
-        if (vm_map_remove(map, virt, virt + length) != 0) {
-            mutex_unlock(&shm_lock); *err = EINVAL; return (void *)-1;
-        }
     }
 
+    /*
+     * Acquire the backing object + pager BEFORE removing any existing mapping
+     * at an explicit shmaddr.  These are the memory-pressure-prone steps; doing
+     * them first means an ENOMEM here returns with the caller's address space
+     * untouched.  A failed shmat must not leave a hole where a live region used
+     * to be (audit A66): only once the resources are in hand do we tear down.
+     */
     vm_object_t *obj = vm_object_allocate(VM_OBJ_TYPE_DEVICE, length);
     if (!obj) { mutex_unlock(&shm_lock); *err = ENOMEM; return (void *)-1; }
     obj->pager = vm_pager_allocate(VM_OBJ_TYPE_DEVICE, (void *)phys, length,
@@ -293,6 +301,13 @@ void *kern_shmat(int shmid, const void *shmaddr, int shmflg, int *err)
     /* Plain RAM, not MMIO: map write-back cacheable so the shared mapping
      * runs at full memory speed (MIT-SHM image transfers). */
     vm_pager_set_cache_mode(obj->pager, VM_PAGER_CACHE_WB);
+
+    /* Now that the attach is guaranteed the resources it needs, clear anything
+     * already mapped at an explicit address (SHM_REMAP-ish behaviour). */
+    if (have_addr && vm_map_remove(map, virt, virt + length) != 0) {
+        vm_object_deallocate(obj);
+        mutex_unlock(&shm_lock); *err = EINVAL; return (void *)-1;
+    }
 
     if (vm_map_insert(map, obj, 0, virt, virt + length,
                       (uint8_t)vm_prot, (uint8_t)vm_prot, VM_INHERIT_NONE) != 0) {
