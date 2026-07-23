@@ -306,17 +306,9 @@ static thread_t *sleepq_wake_one_internal(void *chan, int type, int pid) {
         return NULL;
     }
 
-    thread_t *t = sq->sq_head;
-    sq->sq_head = t->next;
-    if (!sq->sq_head)
-        sq->sq_tail = NULL;
-    sq->sq_count--;
-
-    t->next = NULL;
-    t->wait_chan = NULL;
-    /* Dequeue-but-don't-resurrect guards.  A wake unlinks the waiter from
-     * the queue unconditionally, but only flips it back to READY if it was
-     * genuinely sleeping:
+    /* Dequeue-but-don't-resurrect guards.  A wake unlinks the head waiter
+     * from the queue unconditionally, but only flips it back to READY if it
+     * was genuinely sleeping:
      *   - THREAD_STOPPED: a SIGTSTP raced the enqueue; it stays stopped
      *     until SIGCONT.
      *   - THREAD_ZOMBIE: the waiter's process is exiting.  A thread killed
@@ -328,9 +320,29 @@ static thread_t *sleepq_wake_one_internal(void *chan, int type, int pid) {
      *     post-sched_yield while(1), and — with preemption disabled there —
      *     the CPU busy-spins forever.  Under a storm of concurrent SIGKILL
      *     reaps (a busy long-running system) this wedges the whole guest.
-     *     Same guard in every wake path below. */
-    if (t->state != THREAD_STOPPED && t->state != THREAD_ZOMBIE) {
-        t->state = THREAD_READY;
+     *     Same guard in every wake path below.
+     *
+     * A dead/stopped head must NOT consume the wake: single-wake consumers
+     * (mutex_unlock, sema_post, rw_*unlock, futex PI unlock) fire exactly one
+     * wake and ignore the result, so swallowing it here would strand the next
+     * eligible waiter on a now-free lock forever.  Skip past dead heads until
+     * a genuinely-sleeping waiter is resurrected (or the queue drains). */
+    thread_t *woken = NULL;
+    thread_t *t;
+    while ((t = sq->sq_head) != NULL) {
+        sq->sq_head = t->next;
+        if (!sq->sq_head)
+            sq->sq_tail = NULL;
+        sq->sq_count--;
+
+        t->next = NULL;
+        t->wait_chan = NULL;
+        if (t->state != THREAD_STOPPED && t->state != THREAD_ZOMBIE) {
+            t->state = THREAD_READY;
+            woken = t;
+            break;
+        }
+        /* dead/stopped: unlinked, but keep looking for a live waiter */
     }
 
     // Remove sleep queue if empty
@@ -339,7 +351,7 @@ static thread_t *sleepq_wake_one_internal(void *chan, int type, int pid) {
     }
 
     sq_unlock(hash, f);
-    return(t);
+    return(woken);
 }
 
 /*
@@ -440,10 +452,14 @@ static int sleepq_wake_n_internal(void *chan, int n, int type, int pid) {
 
         t->next = NULL;
         t->wait_chan = NULL;
+        /* Only a genuinely-sleeping waiter counts toward n; a dead/stopped
+         * head is unlinked but must not consume one of the n wakes, else a
+         * wake_n(chan,1) release swallows the wake and strands the real
+         * waiter (see sleepq_wake_one_internal). */
         if (t->state != THREAD_STOPPED && t->state != THREAD_ZOMBIE) {
             t->state = THREAD_READY;
+            woken++;
         }
-        woken++;
     }
 
     // Remove sleep queue if empty
@@ -501,9 +517,12 @@ static int sleepq_wake_bitset_internal(void *chan, int n, int type, int pid,
 
             t->next = NULL;
             t->wait_chan = NULL;
-            if (t->state != THREAD_STOPPED && t->state != THREAD_ZOMBIE)
+            /* A matching but dead/stopped waiter is unlinked but does not
+             * consume a wake slot (don't count it toward n). */
+            if (t->state != THREAD_STOPPED && t->state != THREAD_ZOMBIE) {
                 t->state = THREAD_READY;
-            woken++;
+                woken++;
+            }
             /* prev unchanged -- t was removed */
         } else {
             prev = t;
@@ -588,13 +607,15 @@ static int sleepq_requeue_internal(void *src_chan, void *dst_chan, int wake_n, i
             
             t->next = NULL;
             t->wait_chan = NULL;
+            /* Dead/stopped waiter: unlink but don't count it as a wake, so
+             * the requeue's wake phase delivers wake_n live wakes. */
             if (t->state != THREAD_STOPPED && t->state != THREAD_ZOMBIE) {
                 t->state = THREAD_READY;
+                woken_count++;
             }
-            woken_count++;
         }
     }
-    
+
     // 2. Requeue phase
     if (src_sq && src_sq->sq_count > 0 && requeue_n > 0) {
         // Prepare destination queue
