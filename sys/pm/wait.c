@@ -239,10 +239,16 @@ int kern_wait4(pid_t pid, int *status, int options, struct rusage *rusage) {
                 // Also accumulate grandchildren's usage
                 cur->rusage_children.ru_maxrss = (target->rusage_children.ru_maxrss > cur->rusage_children.ru_maxrss) 
                     ? target->rusage_children.ru_maxrss : cur->rusage_children.ru_maxrss;
-                cur->rusage_children.ru_minflt += target->rusage.ru_minflt + target->rusage_children.ru_minflt;
-                cur->rusage_children.ru_majflt += target->rusage.ru_majflt + target->rusage_children.ru_majflt;
-                cur->rusage_children.ru_nvcsw += target->rusage.ru_nvcsw + target->rusage_children.ru_nvcsw;
-                cur->rusage_children.ru_nivcsw += target->rusage.ru_nivcsw + target->rusage_children.ru_nivcsw;
+                /* rusage_finalize() already folded target->rusage_children into
+                 * target->rusage at exit, so target->rusage.ru_* includes the
+                 * grandchildren's counts.  Adding rusage_children again here
+                 * would double-count them (compounding per generation); mirror
+                 * the utime/stime accumulation above and take target->rusage
+                 * only. */
+                cur->rusage_children.ru_minflt += target->rusage.ru_minflt;
+                cur->rusage_children.ru_majflt += target->rusage.ru_majflt;
+                cur->rusage_children.ru_nvcsw += target->rusage.ru_nvcsw;
+                cur->rusage_children.ru_nivcsw += target->rusage.ru_nivcsw;
 
                 // Already unlinked from the parent's child list by
                 // find_and_claim_child (the atomic claim); just clear
