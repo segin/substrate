@@ -193,7 +193,13 @@ static size_t shmfs_read(fs_node_t *node, off_t off, size_t sz, uint8_t *buf) {
 static size_t shmfs_write(fs_node_t *node, off_t off, size_t sz, const uint8_t *buf) {
     shmfs_inode_t *inode = (shmfs_inode_t *)(uintptr_t)node->impl;
     if (!inode || off < 0) return 0;
-    size_t end = (size_t)off + sz;
+    /* Compute the end offset in 64-bit and reject anything that overflows
+     * size_t: (size_t)off + sz truncates the 64-bit off and can wrap, so
+     * shmfs_grow would under-allocate while the memcpy below still writes at
+     * the full offset — an out-of-bounds heap write. */
+    uint64_t end64 = (uint64_t)off + (uint64_t)sz;
+    if (end64 > (uint64_t)SIZE_MAX) return 0;
+    size_t end = (size_t)end64;
     if (shmfs_grow(inode, end) != 0) return 0;
     memcpy(inode->data + off, buf, sz);
     if ((uint64_t)end > (uint64_t)node->length) node->length = (off_t)end;

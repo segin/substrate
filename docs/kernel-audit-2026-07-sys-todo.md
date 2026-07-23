@@ -26,7 +26,7 @@ Source: `docs/kernel-audit-2026-07-sys.md`. Work one checkbox at a time: fix →
 - [ ] **A16** [sys/fs/fat/fat.c:946] Cluster allocator is not atomic — concurrent allocation cross-links files
 - [ ] **A17** [sys/fs/fat/fat.c:1086] FAT write/directory paths share function-static scratch buffers with no locking
 - [ ] **A18** [sys/fs/fat/fat.c:1367] FAT directory-entry write assumes physical contiguity across a cluster boundary
-- [ ] **A19** [sys/fs/shmfs.c:196] shmfs_write: size_t overflow of (off+sz) defeats grow → OOB write
+- [x] **A19** [sys/fs/shmfs.c:196] shmfs_write: size_t overflow of (off+sz) defeats grow → OOB write
 - [x] **A20** [sys/kern/geom/geom_gpt.c:148] GPT entry array parsed with unbounded on-disk entry_size -> OOB read
 - [x] **A21** [sys/kern/geom/geom_gpt.c:134] GPT entries_per_sector division by zero when entry_size > 512
 - [ ] **A22** [sys/kern/mutex.c:146] proc_exit force-releases mutexes of siblings still running on other CPUs
