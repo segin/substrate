@@ -23,7 +23,7 @@ Source: `docs/kernel-audit-2026-07-sys.md`. Work one checkbox at a time: fix →
 - [x] **A13** [sys/fs/ext2/ext2.c:680] Unbounded eh_ecount in ext4 extent resolver → OOB read
 - [x] **A14** [sys/fs/ext2/ext2.c:2213] blocks_per_group / inodes_per_group not bounded to block_size*8 → OOB bitmap scan
 - [x] **A15** [sys/fs/fat/fat.c:490] FAT root node not pinned in node cache — recycled after 64 lookups
-- [ ] **A16** [sys/fs/fat/fat.c:946] Cluster allocator is not atomic — concurrent allocation cross-links files
+- [x] **A16** [sys/fs/fat/fat.c:946] Cluster allocator is not atomic — concurrent allocation cross-links files
 - [ ] **A17** [sys/fs/fat/fat.c:1086] FAT write/directory paths share function-static scratch buffers with no locking
 - [ ] **A18** [sys/fs/fat/fat.c:1367] FAT directory-entry write assumes physical contiguity across a cluster boundary
 - [x] **A19** [sys/fs/shmfs.c:196] shmfs_write: size_t overflow of (off+sz) defeats grow → OOB write

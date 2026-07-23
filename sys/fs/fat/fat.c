@@ -3,6 +3,7 @@
 #include <kern/console.h>
 #include <string.h>
 #include <sys/errno.h>
+#include <sys/lock.h>
 #include <sys/mount.h>
 #include <vm/vm_kmem.h>
 
@@ -16,6 +17,22 @@
 static fat_node_t fat_node_cache[FAT_NODE_CACHE_SIZE];
 static fs_node_t fat_fs_node_cache[FAT_NODE_CACHE_SIZE];
 static int fat_node_cache_idx = 0;
+
+/* Serialises free-cluster allocation across all FAT mounts.  fat_alloc_cluster
+ * scans the FAT for a zero entry and marks it EOC in two separate steps; with
+ * no lock two concurrent allocators (or a preempted one) could both pick the
+ * same cluster and cross-link two files onto it.  A mutex (not a spinlock) is
+ * required because the scan issues block I/O that may sleep.  Lazily
+ * initialised on first use; the first mount comes up single-threaded. */
+static mutex_t fat_alloc_lock;
+static int fat_alloc_lock_ready = 0;
+
+static void fat_alloc_lock_ensure(void) {
+    if (!fat_alloc_lock_ready) {
+        mutex_init(&fat_alloc_lock, "fat_alloc");
+        fat_alloc_lock_ready = 1;
+    }
+}
 
 static uint32_t fat_cluster_to_sector(fat_fs_t *fs, uint32_t cluster);
 
@@ -962,6 +979,8 @@ static uint32_t fat_eoc(fat_fs_t *fs) {
 
 /* Allocate a free cluster; returns cluster number or 0 on failure */
 static uint32_t fat_alloc_cluster(fat_fs_t *fs) {
+    fat_alloc_lock_ensure();
+    mutex_lock(&fat_alloc_lock);
     for (uint32_t c = 2; c < fs->total_clusters + 2; c++) {
         uint32_t next = fat_get_next_cluster(fs, c);
         /* A free cluster has FAT entry == 0 */
@@ -1003,11 +1022,14 @@ static uint32_t fat_alloc_cluster(fat_fs_t *fs) {
 
         if (entry_val == 0) {
             /* Mark as EOC */
-            if (fat_set_fat_entry(fs, c, fat_eoc(fs)) == 0)
+            if (fat_set_fat_entry(fs, c, fat_eoc(fs)) == 0) {
+                mutex_unlock(&fat_alloc_lock);
                 return c;
+            }
         }
         (void)next;
     }
+    mutex_unlock(&fat_alloc_lock);
     return 0; /* No free cluster */
 }
 
