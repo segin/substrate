@@ -74,7 +74,7 @@ Source: `docs/kernel-audit-2026-07-sys.md`. Work one checkbox at a time: fix →
 - [x] **A58** [sys/drivers/video/psf.c:80] psf2_parse: unsigned underflow of (size - headersize) bypasses glyph-data bounds check
 - [x] **A59** [sys/exec/formats/elf.c:1531] execve returns bare -1 (maps to EPERM) instead of correct errno
 - [x] **A60** [sys/exec/perso/compat.c:244] sys_mprotect end computation can wrap 32-bit, silently protecting nothing
-- [~] **A61** [sys/exec/perso/perso_netbsd.c:34] getrusage wrappers return bare -1 instead of -errno (applied in-tree; netbsd files uncommitted — carry unrelated in-progress ksem work)
+- [x] **A61** [sys/exec/perso/perso_netbsd.c:34] getrusage wrappers return bare -1 instead of -errno (committed with ksem work)
 - [x] **A62** [sys/exec/perso/perso_svr3.c:46] SVR3/SVR4: ulimit(2) dispatched to sys_dup2
 - [x] **A63** [sys/fs/ext2/ext2.c:3235] rename '..' fixup trusts dot->rec_len → OOB access in dir block buffer
 - [x] **A64** [sys/fs/minix/minix.c:905] minix_finddir: kmalloc result used without NULL check
