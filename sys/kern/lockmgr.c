@@ -45,6 +45,31 @@ void    lockdestroy(struct lock *lkp)
 }
 
 /*
+ * Exclusive and upgrade waiters sleep on a channel distinct from the
+ * shared/drain waiters' channel (the lock object itself).  This lets the
+ * writer-preference gate in LK_SHARED be derived from the writer sleepq's
+ * *actual* live occupancy instead of a sticky LK_WANT_EXCL flag.
+ *
+ * The sticky flag was:
+ *   - A41: clobbered whenever any one writer won, a NOWAIT trylock failed, or
+ *     an upgrade ran — reopening the shared gate and starving other writers
+ *     still parked (they never re-asserted it), an unbounded writer starvation.
+ *   - A54: left permanently set when a parked writer was destroyed by
+ *     proc_exit() (which pulls the thread off its sleepq without running the
+ *     waiter's cleanup), hanging every future shared acquirer forever.
+ *
+ * Deriving the gate from sleepq_has_waiters() self-heals both: a killed writer
+ * is removed from the sleepq, and every gate check re-reads live state, so no
+ * writer can be clobbered off and none can be left phantom-wanted.  &lk_flags
+ * is a per-lock address distinct from the lock object itself (lk_interlock is
+ * the first member), so it never aliases the shared channel.
+ */
+static inline void *lk_excl_chan(struct lock *lkp)
+{
+    return &lkp->lk_flags;
+}
+
+/*
  * lockmgr - Unified lock manager
  *
  * Operations:
@@ -79,8 +104,11 @@ lockmgr(struct lock *lkp, uint32_t flags, spinlock_t *interlock)
         /*
          * Acquire shared lock.
          * Wait if exclusive lock is held or wanted (writer preference).
+         * A41/A54: writer preference is derived from live writer-sleepq
+         * occupancy, not a sticky LK_WANT_EXCL flag.
          */
-        while (lkp->lk_flags & (LK_HAVE_EXCL | LK_WANT_EXCL | LK_WANT_DRAIN)) {
+        while ((lkp->lk_flags & (LK_HAVE_EXCL | LK_WANT_DRAIN)) ||
+               sleepq_has_waiters(lk_excl_chan(lkp))) {
             if (flags & LK_NOWAIT) {
                 error = EBUSY;
                 break;
@@ -115,18 +143,21 @@ lockmgr(struct lock *lkp, uint32_t flags, spinlock_t *interlock)
             lkp->lk_exclusivecount++;
             break;
         }
-        lkp->lk_flags |= LK_WANT_EXCL;
         while (lkp->lk_sharecount > 0 ||
                (lkp->lk_flags & LK_HAVE_EXCL)) {
             if (flags & LK_NOWAIT) {
-                lkp->lk_flags &= ~LK_WANT_EXCL;
                 error = EBUSY;
                 break;
             }
             lkp->lk_waitcount++;
             if (lkp->lk_lockholder)
                 turnstile_block(lkp, lkp->lk_lockholder);
-            sleepq_add(lkp, td);
+            /*
+             * A41/A54: park on the dedicated writer channel so the LK_SHARED
+             * gate observes us via sleepq_has_waiters() (no sticky flag), and
+             * so a kill while parked self-heals the gate.
+             */
+            sleepq_add(lk_excl_chan(lkp), td);
             if (interlock)
                 spinlock_release(interlock);
             spinlock_release(&lkp->lk_interlock);
@@ -140,7 +171,6 @@ lockmgr(struct lock *lkp, uint32_t flags, spinlock_t *interlock)
             lkp->lk_waitcount--;
         }
         if (error == 0) {
-            lkp->lk_flags &= ~LK_WANT_EXCL;
             lkp->lk_flags |= LK_HAVE_EXCL;
             lkp->lk_lockholder = td;
             lkp->lk_exclusivecount = 1;
@@ -163,18 +193,19 @@ lockmgr(struct lock *lkp, uint32_t flags, spinlock_t *interlock)
             break;
         }
         lkp->lk_sharecount--;
-        lkp->lk_flags |= LK_WANT_EXCL | LK_WANT_UPGRADE;
+        lkp->lk_flags |= LK_WANT_UPGRADE;
         while (lkp->lk_sharecount > 0 ||
                (lkp->lk_flags & LK_HAVE_EXCL)) {
             if (flags & LK_NOWAIT) {
                 /* Restore shared hold on failure */
                 lkp->lk_sharecount++;
-                lkp->lk_flags &= ~(LK_WANT_EXCL | LK_WANT_UPGRADE);
+                lkp->lk_flags &= ~LK_WANT_UPGRADE;
                 error = EBUSY;
                 break;
             }
             lkp->lk_waitcount++;
-            sleepq_add(lkp, td);
+            /* A41/A54: park on the writer channel (see LK_EXCLUSIVE). */
+            sleepq_add(lk_excl_chan(lkp), td);
             if (interlock)
                 spinlock_release(interlock);
             spinlock_release(&lkp->lk_interlock);
@@ -188,7 +219,7 @@ lockmgr(struct lock *lkp, uint32_t flags, spinlock_t *interlock)
             lkp->lk_waitcount--;
         }
         if (error == 0) {
-            lkp->lk_flags &= ~(LK_WANT_EXCL | LK_WANT_UPGRADE);
+            lkp->lk_flags &= ~LK_WANT_UPGRADE;
             lkp->lk_flags |= LK_HAVE_EXCL;
             lkp->lk_lockholder = td;
             lkp->lk_exclusivecount = 1;
@@ -223,14 +254,20 @@ lockmgr(struct lock *lkp, uint32_t flags, spinlock_t *interlock)
                 lkp->lk_flags &= ~LK_HAVE_EXCL;
                 lkp->lk_lockholder = NULL;
                 turnstile_release(lkp);
-                if (lkp->lk_waitcount > 0)
+                if (lkp->lk_waitcount > 0) {
+                    /* Wake pending writers (own channel) and shared waiters. */
+                    sleepq_wake_all(lk_excl_chan(lkp));
                     sleepq_wake_all(lkp);
+                }
             }
         } else if (lkp->lk_sharecount > 0) {
             /* Releasing shared lock */
             lkp->lk_sharecount--;
-            if (lkp->lk_sharecount == 0 && lkp->lk_waitcount > 0)
+            if (lkp->lk_sharecount == 0 && lkp->lk_waitcount > 0) {
+                /* Last share gone: a pending writer can now acquire. */
+                sleepq_wake_all(lk_excl_chan(lkp));
                 sleepq_wake_all(lkp);
+            }
         } else {
             panic("lockmgr: release of unlocked lock");
         }
