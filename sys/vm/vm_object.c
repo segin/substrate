@@ -13,8 +13,22 @@ static int kmalloc_ready = 0;
 static spinlock_t vm_object_teardown_lock = SPINLOCK_INIT("vmobj_teardown");
 
 static vm_object_t *alloc_object(void) {
-    if (next_bootstrap_object < MAX_BOOTSTRAP_OBJECTS)
-        return &bootstrap_objects[next_bootstrap_object++];
+    /*
+     * Reserve a bootstrap slot atomically (A80): vm_object_allocate is
+     * reachable at runtime (mmap, fork shadow creation) on multiple CPUs,
+     * not just single-threaded boot.  A plain post-increment lets two CPUs
+     * read the same index and receive the same vm_object_t, which each then
+     * reinitializes — aliasing two mappings onto one object.  CAS only while
+     * the pool is unexhausted so the counter never runs past the array.
+     */
+    for (;;) {
+        int idx = __atomic_load_n(&next_bootstrap_object, __ATOMIC_RELAXED);
+        if (idx >= MAX_BOOTSTRAP_OBJECTS)
+            break;
+        if (__sync_bool_compare_and_swap(&next_bootstrap_object, idx, idx + 1))
+            return &bootstrap_objects[idx];
+        /* lost the race with another CPU — retry */
+    }
     if (kmalloc_ready)
         return kmalloc(sizeof(vm_object_t));
     return NULL;
