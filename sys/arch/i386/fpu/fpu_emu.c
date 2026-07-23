@@ -1,23 +1,43 @@
 #include <sys/proc.h>
+#include <sys/smp.h>
 #include <kern/console.h>
 #include <arch/i386/cpu.h>
 #include <arch/i386/idt.h>
 #include <arch/i386/fpu/fpu_emu.h>
+#include <arch/i386/percpu.h>
 #include <arch/x86-common/io.h>
 static int fpu_use_fxsave = 0;
 
 /*
  * Lazy-FPU owner: the process whose x87/SSE register state is currently live
- * in the hardware.  NULL means the registers belong to no live process (fresh
- * boot, or the owner exited).  The invariant that makes lazy save/restore
- * correct is: whenever a *different* process is scheduled, CR0.TS is re-armed
- * (fpu_switch below) so that process traps (#NM) before it can touch the FPU;
- * the handler then saves fpu_owner's still-live registers and loads the
- * faulting process's.  Because TS is set on every process change, no process
- * other than fpu_owner can dirty the registers between ownership changes, so
- * the save in the handler always captures the correct owner's state.
+ * in *a given CPU's* hardware FPU.  NULL means the registers belong to no live
+ * process (fresh boot, or the owner exited).  The invariant that makes lazy
+ * save/restore correct is: whenever a *different* process is scheduled on a
+ * CPU, that CPU's CR0.TS is re-armed (fpu_switch below) so the process traps
+ * (#NM) before it can touch the FPU; the handler then saves that CPU's owner's
+ * still-live registers and loads the faulting process's.  Because TS is set on
+ * every process change, no process other than the CPU's owner can dirty the
+ * registers between ownership changes, so the save in the handler always
+ * captures the correct owner's state.
+ *
+ * CR0.TS and the physical FPU registers are per-CPU hardware, so ownership must
+ * be tracked per-CPU too: with a single global, CPU1's #NM handler would save
+ * CPU1's live registers into the process CPU0 last named as owner, corrupting
+ * it.  Index by CPU id; each CPU's current_process (itself per-CPU) pairs with
+ * fpu_owner[cpu].
  */
-static struct process *fpu_owner = NULL;
+static struct process *fpu_owner[MAX_CPUS] = { NULL };
+
+/* Which CPU's FPU ownership slot to use.  Clamp defensively so an unexpected id
+ * (or a pre-percpu-init call) can never index out of bounds. */
+static inline int fpu_cpu(void) {
+#ifdef HOST_TEST
+    return 0;
+#else
+    int c = CPU_ID();
+    return (c >= 0 && c < MAX_CPUS) ? c : 0;
+#endif
+}
 
 /* FXSAVE/FXRSTOR fault (#GP) on a non-16-byte-aligned operand, and the
  * enclosing struct process is kmalloc'd with no 16-byte guarantee, so align
@@ -74,8 +94,12 @@ void fpu_switch(void) {
  * Its register contents are discarded (the process is dead).
  */
 void fpu_forget_process(struct process *p) {
-    if (fpu_owner == p)
-        fpu_owner = NULL;
+    /* The dying process may be named owner on any CPU it last ran on; clear
+     * every slot that references it so no #NM handler fnsaves into freed
+     * storage. */
+    for (int i = 0; i < MAX_CPUS; i++)
+        if (fpu_owner[i] == p)
+            fpu_owner[i] = NULL;
 }
 
 // FPU Device Not Available Exception (Interrupt 7)
@@ -91,20 +115,24 @@ void fpu_handler(registers_t *regs) {
 
     /* Kernel context with no current process: just enable the FPU for this
      * transient use and leave ownership untouched (the live registers still
-     * belong to fpu_owner; a kernel path must not clobber user FP state). */
+     * belong to this CPU's owner; a kernel path must not clobber user FP
+     * state). */
     if (!current_process)
         return;
 
-    /* We are already the owner: our registers are live and intact (TS kept
-     * every other process out since we last ran), so restoring here would
+    int cpu = fpu_cpu();
+
+    /* We are already this CPU's owner: our registers are live and intact (TS
+     * kept every other process out since we last ran), so restoring here would
      * overwrite them with a stale save.  Nothing to do but keep TS clear. */
-    if (fpu_owner == current_process)
+    if (fpu_owner[cpu] == current_process)
         return;
 
-    /* Ownership is changing.  Save the outgoing owner's still-live registers
-     * before we load ours, so a later switch back to it restores correctly. */
-    if (fpu_owner)
-        fpu_save_context(fpu_owner);
+    /* Ownership is changing on this CPU.  Save the outgoing owner's still-live
+     * registers before we load ours, so a later switch back to it restores
+     * correctly. */
+    if (fpu_owner[cpu])
+        fpu_save_context(fpu_owner[cpu]);
 
     if (!current_process->fpu_ctx.fpu_used) {
         // First use of the FPU by this process - initialize to a known state.
@@ -117,7 +145,7 @@ void fpu_handler(registers_t *regs) {
         fpu_restore_context(current_process);
     }
 
-    fpu_owner = current_process;
+    fpu_owner[cpu] = current_process;
 
     // Re-executing the faulting instruction will now work.
 }
