@@ -2226,7 +2226,12 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
 
     fs->inodes_per_group = fs->sb.s_inodes_per_group;
     fs->blocks_per_group = fs->sb.s_blocks_per_group;
-    if (fs->blocks_per_group == 0) {
+    /* The block bitmap for a group is a single block, so it holds at most
+     * block_size*8 bits — one per block in the group.  A blocks_per_group
+     * larger than that (attacker-controlled on-disk value) makes the free-block
+     * scan walk past the one-block bitmap buffer: an out-of-bounds read. */
+    if (fs->blocks_per_group == 0 ||
+        fs->blocks_per_group > fs->block_size * 8) {
         kprint("EXT2: Invalid blocks_per_group\n");
         kfree(fs, sizeof(ext2_fs_t));
         return NULL;
@@ -2237,7 +2242,8 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
      * kernel with a divide error on the first inode read; an absurdly
      * large value yields nonsensical group math.  Reject both. */
     if (fs->inodes_per_group == 0 ||
-        fs->inodes_per_group > fs->sb.s_inodes_count) {
+        fs->inodes_per_group > fs->sb.s_inodes_count ||
+        fs->inodes_per_group > fs->block_size * 8) {
         kprint("EXT2: Invalid inodes_per_group\n");
         kfree(fs, sizeof(ext2_fs_t));
         return NULL;
