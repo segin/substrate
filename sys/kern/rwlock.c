@@ -25,7 +25,7 @@ bool rw_try_rlock(rwlock_t *rw) {
     bool acquired = false;
 
     spinlock_acquire(&rw->lock);
-    if (!rw->writer && rw->waiting_writers == 0) {
+    if (!rw->writer && !sleepq_has_waiters(rwlock_writer_chan(rw))) {
         rw->readers++;
         acquired = true;
     }
@@ -36,7 +36,15 @@ bool rw_try_rlock(rwlock_t *rw) {
 
 void rw_rlock(rwlock_t *rw) {
     spinlock_acquire(&rw->lock);
-    while (rw->writer || rw->waiting_writers != 0) {
+    /*
+     * A42: gate reader admission on the writer sleepq's actual occupancy
+     * rather than a persistent waiting_writers counter.  proc_exit() removes a
+     * parked writer from its sleepq (without running rw_wlock's decrement) when
+     * a sibling thread exits, so a raw counter leaks permanently and blocks all
+     * future readers forever.  sleepq_has_waiters() reflects reality and heals
+     * automatically when a parked writer is destroyed.
+     */
+    while (rw->writer || sleepq_has_waiters(rwlock_writer_chan(rw))) {
         sleepq_add(rwlock_reader_chan(rw), current_thread);
         spinlock_release(&rw->lock);
         sched_yield();
@@ -55,7 +63,7 @@ void rw_runlock(rwlock_t *rw) {
     }
 
     rw->readers--;
-    if (rw->readers == 0 && rw->waiting_writers != 0) {
+    if (rw->readers == 0 && sleepq_has_waiters(rwlock_writer_chan(rw))) {
         sleepq_wake_one(rwlock_writer_chan(rw));
     }
 
@@ -86,7 +94,12 @@ void rw_wlock(rwlock_t *rw) {
         panic("Deadlock: recursive rw_wlock attempted");
     }
 
-    rw->waiting_writers++;
+    /*
+     * A42: no separate waiting_writers counter.  Being parked on the writer
+     * sleepq IS the record that a writer is waiting; if this thread is killed
+     * while parked, proc_exit() pulls it off the sleepq and readers are no
+     * longer blocked (see rw_rlock).
+     */
     while (rw->writer || rw->readers != 0) {
         sleepq_add(rwlock_writer_chan(rw), me);
         spinlock_release(&rw->lock);
@@ -94,7 +107,6 @@ void rw_wlock(rwlock_t *rw) {
         spinlock_acquire(&rw->lock);
     }
 
-    rw->waiting_writers--;
     rw->writer = 1;
     rw->owner = me;
 
@@ -116,7 +128,7 @@ void rw_wunlock(rwlock_t *rw) {
     rw->writer = 0;
     rw->owner = NULL;
 
-    if (rw->waiting_writers != 0) {
+    if (sleepq_has_waiters(rwlock_writer_chan(rw))) {
         sleepq_wake_one(rwlock_writer_chan(rw));
     } else {
         sleepq_wake_all(rwlock_reader_chan(rw));
