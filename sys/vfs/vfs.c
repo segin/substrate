@@ -92,18 +92,23 @@ static fs_node_t *vfs_cross_mountpoint(fs_node_t *node) {
 static fs_node_t *vfs_mount_root_parent(fs_node_t *node) {
     if (!node) return NULL;
     struct mount *mnt, *found = NULL;
+    char ppath[128];
+    ppath[0] = '\0';
+    /* Walk and snapshot the matched mount's path under vfs_mount_lock so a
+     * concurrent unmount can't unlink/free it mid-traversal (A28). */
+    spinlock_acquire(&vfs_mount_lock);
     TAILQ_FOREACH(mnt, &mountlist, mnt_list) {
         if (mnt->mnt_covered_ino != 0 && mnt->mnt_node_root &&
             node->inode == mnt->mnt_node_root->inode &&
             node->mp == mnt->mnt_node_root->mp) {
             found = mnt;
+            strlcpy(ppath, found->mnt_stat_path, sizeof(ppath));
             break;
         }
     }
-    if (!found || found->mnt_stat_path[0] != '/') return NULL;
+    spinlock_release(&vfs_mount_lock);
+    if (!found || ppath[0] != '/') return NULL;
 
-    char ppath[128];
-    strlcpy(ppath, found->mnt_stat_path, sizeof(ppath));
     ppath[sizeof(ppath) - 1] = '\0';
     char *slash = vfs_strrchr(ppath, '/');
     if (!slash) return NULL;
@@ -211,10 +216,12 @@ int vfs_resolve_label(const char *label, char *devpath, size_t len) {
  */
 static int vfs_remount(const char *path, uint32_t flags) {
     struct mount *mp = NULL, *m;
+    spinlock_acquire(&vfs_mount_lock);
     TAILQ_FOREACH(m, &mountlist, mnt_list) {
         if (strcmp(m->mnt_stat_path, path) == 0)
             mp = m;                 /* keep the last (topmost) match */
     }
+    spinlock_release(&vfs_mount_lock);
     if (!mp)
         return -EINVAL;             /* nothing mounted at this path */
 
@@ -418,7 +425,9 @@ int vfs_mount_legacy(const char *device, const char *path, const char *type, uin
         // Set mount reference on root node
         root->mp = mp;
 
+        spinlock_acquire(&vfs_mount_lock);
         TAILQ_INSERT_TAIL(&mountlist, mp, mnt_list);
+        spinlock_release(&vfs_mount_lock);
         kprintf("VFS: mount table add %s (%s)\n",
                 mp->mnt_stat.f_mntonname,
                 mp->mnt_stat.f_fstypename[0] ? mp->mnt_stat.f_fstypename : "unknown");
@@ -698,6 +707,7 @@ fs_node_t *vfs_lookup(fs_node_t *root, const char *path) {
          */
         {
             struct mount *mnt;
+            spinlock_acquire(&vfs_mount_lock);
             TAILQ_FOREACH(mnt, &mountlist, mnt_list) {
                 if (mnt->mnt_covered_ino != 0 &&
                     current->inode == mnt->mnt_covered_ino &&
@@ -706,6 +716,7 @@ fs_node_t *vfs_lookup(fs_node_t *root, const char *path) {
                     break;
                 }
             }
+            spinlock_release(&vfs_mount_lock);
         }
 
         /* Flag-based fast path for nodes with FS_MOUNTPOINT set */
@@ -714,7 +725,7 @@ fs_node_t *vfs_lookup(fs_node_t *root, const char *path) {
         // Skip trailing slash
         if (*p == '/') p++;
     }
-    
+
     return current;
 }
 
@@ -778,6 +789,7 @@ fs_node_t *vfs_lookup_lstat(fs_node_t *root, const char *path) {
         /* Mount crossing by node identity (see vfs_lookup comment) */
         {
             struct mount *mnt;
+            spinlock_acquire(&vfs_mount_lock);
             TAILQ_FOREACH(mnt, &mountlist, mnt_list) {
                 if (mnt->mnt_covered_ino != 0 &&
                     current->inode == mnt->mnt_covered_ino &&
@@ -786,6 +798,7 @@ fs_node_t *vfs_lookup_lstat(fs_node_t *root, const char *path) {
                     break;
                 }
             }
+            spinlock_release(&vfs_mount_lock);
         }
 
         /* Flag-based fast path for nodes with FS_MOUNTPOINT set */
@@ -1333,12 +1346,14 @@ int vfs_unmount_legacy_flags(const char *path, int flags) {
     // Find the mount structure first to check busy status
     struct mount *target_mp = NULL;
     struct mount *mp_iter;
+    spinlock_acquire(&vfs_mount_lock);
     TAILQ_FOREACH(mp_iter, &mountlist, mnt_list) {
         if (mp_iter->mnt_node_covered == mountpoint && mp_iter->mnt_node_root == root) {
             target_mp = mp_iter;
             break;
         }
     }
+    spinlock_release(&vfs_mount_lock);
 
     if (target_mp) {
         if (vfs_is_busy(target_mp)) {
@@ -1366,10 +1381,15 @@ int vfs_unmount_legacy_flags(const char *path, int flags) {
         root->unmount(root);
     }
     
-    // Remove from mount list and free
+    // Remove from mount list and free.  Under vfs_mount_lock so a concurrent
+    // path-lookup traversal never walks the TAILQ mid-unlink or dereferences
+    // a just-freed mount (A28).  kfree stays under the lock (non-sleeping UMA
+    // free path) — once TAILQ_REMOVE'd under the lock the mount is unreachable.
     if (target_mp) {
+        spinlock_acquire(&vfs_mount_lock);
         TAILQ_REMOVE(&mountlist, target_mp, mnt_list);
         kfree(target_mp, sizeof(struct mount));
+        spinlock_release(&vfs_mount_lock);
     }
 
     return 0;
@@ -1408,12 +1428,14 @@ void vfs_unmount_all(void) {
     int n = 0;
     struct mount *mp;
 
+    spinlock_acquire(&vfs_mount_lock);
     TAILQ_FOREACH(mp, &mountlist, mnt_list) {
         if (n >= 32) break;
         strlcpy(paths[n], mp->mnt_stat_path, sizeof(paths[n]));
         paths[n][sizeof(paths[n]) - 1] = '\0';
         n++;
     }
+    spinlock_release(&vfs_mount_lock);
 
     /* Insertion sort, deepest path first.  n is a handful of mounts. */
     for (int i = 1; i < n; i++) {
@@ -1460,6 +1482,7 @@ void vfs_force_unmount_dev(struct blkdev *dev) {
         char path[128];
         path[0] = '\0';
 
+        spinlock_acquire(&vfs_mount_lock);
         TAILQ_FOREACH(mp, &mountlist, mnt_list) {
             const char *from = mp->mnt_stat.f_mntfromname;
             const char *base = strrchr(from, '/');
@@ -1470,6 +1493,7 @@ void vfs_force_unmount_dev(struct blkdev *dev) {
                 break;
             }
         }
+        spinlock_release(&vfs_mount_lock);
 
         if (path[0] == '\0')
             return;                     /* no (more) mounts on this device */
