@@ -9,8 +9,10 @@
 #include <stdint.h>
 #include <string.h>
 
+#include <sys/copy.h>
 #include <sys/errno.h>
 #include <sys/futex.h>
+#include <sys/kern_syscalls.h>
 #include <sys/resource.h>
 #include <sys/syscall_impl.h>
 #include <sys/times.h>
@@ -50,25 +52,28 @@ int openbsd_sys_futex(int *uaddr, int op, int val, void *timeout, int *uaddr2) {
 
 // OpenBSD uses same logic as NetBSD for getrusage via times() wrapper if times syscall is missing
 int openbsd_sys_getrusage(int who, struct rusage *rusage) {
-    if (who != RUSAGE_SELF && who != RUSAGE_CHILDREN) return -1;
+    if (who != RUSAGE_SELF && who != RUSAGE_CHILDREN) return -EINVAL;
 
+    /* Fill a kernel struct via the kern helper, then copyout — `rusage` is a
+     * raw USER pointer, so building the result in it directly (memset + field
+     * writes) would fault the kernel on a bad/unmapped pointer.  sys_times()
+     * would also mis-copyout to the kernel-stack tms, so use kern_times(). */
     struct tms t;
-    if ((clock_t)sys_times(&t) == (clock_t)-1) return -1;
+    if (kern_times(&t) == (clock_t)-1) return -EFAULT;
 
-
-    memset(rusage, 0, sizeof(struct rusage));
+    struct rusage kru;
+    memset(&kru, 0, sizeof(kru));
 
     // Ticks to timeval. HZ=128.
-    // user time
     clock_t ut = (who == RUSAGE_SELF) ? t.tms_utime : t.tms_cutime;
-    rusage->ru_utime.tv_sec = ut / 128;
-    rusage->ru_utime.tv_usec = ((ut % 128) * 1000000) / 128;
+    kru.ru_utime.tv_sec = ut / 128;
+    kru.ru_utime.tv_usec = ((ut % 128) * 1000000) / 128;
 
-    // system time
     clock_t st = (who == RUSAGE_SELF) ? t.tms_stime : t.tms_cstime;
-    rusage->ru_stime.tv_sec = st / 128;
-    rusage->ru_stime.tv_usec = ((st % 128) * 1000000) / 128;
+    kru.ru_stime.tv_sec = st / 128;
+    kru.ru_stime.tv_usec = ((st % 128) * 1000000) / 128;
 
+    if (copyout(&kru, rusage, sizeof(kru)) != 0) return -EFAULT;
     return 0;
 }
 
