@@ -748,10 +748,14 @@ uint32_t elf_load(fs_node_t *file, uint32_t load_base, int is_main_image,
                 void *pa = pmm_alloc_block();
                 if (!pa) {
                     kprint("ELF: Out of physical memory\n");
-                    /* Free already-mapped pages for this segment (finding #11) */
+                    /* Free already-mapped pages for this segment (finding #11).
+                     * Pages already handed to seg_obj (vm_page_insert below)
+                     * are owned by it — free them ONLY via vm_object_deallocate,
+                     * never also via pmm_free_block, or the frame is freed
+                     * twice. */
                     for (int pi = 0; pi < num_pages; pi++) {
                         pmap_remove(pmap, page_maps[pi].va);
-                        pmm_free_block(page_maps[pi].pa);
+                        if (!seg_obj) pmm_free_block(page_maps[pi].pa);
                     }
                     if (seg_obj) vm_object_deallocate(seg_obj);
                     kfree(page_maps, segment_pages * sizeof(*page_maps));
@@ -764,10 +768,10 @@ uint32_t elf_load(fs_node_t *file, uint32_t load_base, int is_main_image,
                 uint32_t pa_phys = (uint32_t)(uintptr_t)pa - 0xC0000000;
                 if (pmap_enter(pmap, va, pa_phys, prot, 0) < 0) {
                     kprint("ELF: Failed to map page\n");
-                    pmm_free_block(pa);
+                    pmm_free_block(pa);   /* current page: not yet owned by seg_obj */
                     for (int pi = 0; pi < num_pages; pi++) {
                         pmap_remove(pmap, page_maps[pi].va);
-                        pmm_free_block(page_maps[pi].pa);
+                        if (!seg_obj) pmm_free_block(page_maps[pi].pa);
                     }
                     if (seg_obj) vm_object_deallocate(seg_obj);
                     kfree(page_maps, segment_pages * sizeof(*page_maps));
@@ -832,7 +836,7 @@ uint32_t elf_load(fs_node_t *file, uint32_t load_base, int is_main_image,
                             kprint("ELF: Failed to read segment data directly\n");
                             for (int ri = 0; ri < num_pages; ri++) {
                                 pmap_remove(pmap, page_maps[ri].va);
-                                pmm_free_block(page_maps[ri].pa);
+                                if (!seg_obj) pmm_free_block(page_maps[ri].pa);
                             }
                             if (seg_obj && !seg_obj_inserted) vm_object_deallocate(seg_obj);
                             kfree(page_maps, segment_pages * sizeof(*page_maps));

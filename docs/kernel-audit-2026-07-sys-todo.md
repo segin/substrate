@@ -16,7 +16,7 @@ Source: `docs/kernel-audit-2026-07-sys.md`. Work one checkbox at a time: fix →
 - [x] **A06** [sys/drivers/usb/uac.c:684] uac_detach: use-after-free of freed usb_device via feeder kthread on hot-unplug
 - [x] **A07** [sys/drivers/video/fb.c:593] Runtime FBIOPUT_VIDEO_MODE desyncs fb geometry from console shadow buffer -> OOB shadow read
 - [x] **A08** [sys/exec/formats/elf.c:1700] exec raises setuid/setgid credentials and resets signal dispositions before the last fallible step
-- [ ] **A09** [sys/exec/formats/elf.c:756] Double-free of segment pages on elf_load error paths
+- [x] **A09** [sys/exec/formats/elf.c:756] Double-free of segment pages on elf_load error paths
 - [x] **A10** [sys/exec/formats/elf.c:1743] Failed execve after setuid does not roll back credentials or signal state
 - [ ] **A11** [sys/exec/perso/perso_freebsd.c:106] FreeBSD gettimeofday overruns caller's 8-byte struct timeval
 - [ ] **A12** [sys/exec/perso/perso_openbsd.c:59] OpenBSD getrusage writes to unvalidated user pointer
