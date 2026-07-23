@@ -903,6 +903,9 @@ static fs_node_t *minix_finddir(fs_node_t *node, char *name) {
         if (strcmp(d->d_name, name) == 0) {
             minix_fs_t *fs = (minix_fs_t *)(uintptr_t)node->impl;
             result = (fs_node_t *)kmalloc(sizeof(fs_node_t));
+            if (result == NULL) {
+                return NULL;
+            }
             memset(result, 0, sizeof(fs_node_t));
             if (minix_read_inode(fs, d->d_ino, result) != 0) {
                 kfree(result, sizeof(fs_node_t));
