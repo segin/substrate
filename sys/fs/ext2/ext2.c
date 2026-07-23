@@ -2701,7 +2701,14 @@ void ext2_free_inode(ext2_fs_t *fs, uint32_t inode_num, int was_dir) {
      * loop will hand back the OLD node — same inode_num but with the
      * old mode bits and the old node->flags (FS_FILE vs FS_PIPE vs
      * FS_CHARDEVICE).  That manifested as torture_ipc tests 7 and 9
-     * failing S_ISFIFO/S_ISCHR after mknod-of-a-recycled-inode. */
+     * failing S_ISFIFO/S_ISCHR after mknod-of-a-recycled-inode.
+     *
+     * FS-01: take ext2_node_cache_lock across the whole scan.  Slot
+     * selection + kfree() of the scratch buffers + zeroing the slot must
+     * be atomic with respect to ext2_alloc_node(), which holds the same
+     * lock while it selects and populates a slot; otherwise the two race
+     * onto the same slot (double-free / half-populated node). */
+    mutex_lock(&ext2_node_cache_lock);
     for (int i = 0; i < EXT2_NODE_CACHE_SIZE; i++) {
         if (ext2_node_cache[i].fs == fs &&
             ext2_node_cache[i].inode_num == inode_num &&
@@ -2730,6 +2737,7 @@ void ext2_free_inode(ext2_fs_t *fs, uint32_t inode_num, int was_dir) {
             memset(&ext2_fs_node_cache[i], 0, sizeof(ext2_fs_node_cache[i]));
         }
     }
+    mutex_unlock(&ext2_node_cache_lock);
 
     // Calculate which group this inode belongs to
     uint32_t group = (inode_num - 1) / fs->inodes_per_group;
@@ -3254,10 +3262,20 @@ int ext2_rename(fs_node_t *old_parent, const char *old_name, fs_node_t *new_pare
             if (dotdot_block != 0) {
                 ext2_read_block(fs, dotdot_block, old_node_ctx->block_buf);
                 ext2_dirent_t *dot = (ext2_dirent_t *)old_node_ctx->block_buf;
-                ext2_dirent_t *dotdot = (ext2_dirent_t *)(old_node_ctx->block_buf + dot->rec_len);
-                if (dotdot->name_len == 2 && dotdot->name[0] == '.' && dotdot->name[1] == '.') {
-                    dotdot->inode = new_p_ctx->inode_num;
-                    ext2_write_block(fs, dotdot_block, old_node_ctx->block_buf);
+                /* A63: dot->rec_len is an untrusted uint16 read from disk.
+                 * Bound it so the '..' entry (8-byte dirent header + its
+                 * 2-char name) lies wholly inside the block buffer before
+                 * we dereference or write through dotdot.  A corrupt '.'
+                 * rec_len (e.g. 0xFFFA) would otherwise point far past
+                 * block_buf and read/write out of bounds. */
+                uint32_t dot_reclen = dot->rec_len;
+                if (dot_reclen >= sizeof(ext2_dirent_t) &&
+                    dot_reclen + sizeof(ext2_dirent_t) + 2 <= fs->block_size) {
+                    ext2_dirent_t *dotdot = (ext2_dirent_t *)(old_node_ctx->block_buf + dot_reclen);
+                    if (dotdot->name_len == 2 && dotdot->name[0] == '.' && dotdot->name[1] == '.') {
+                        dotdot->inode = new_p_ctx->inode_num;
+                        ext2_write_block(fs, dotdot_block, old_node_ctx->block_buf);
+                    }
                 }
             }
         }
