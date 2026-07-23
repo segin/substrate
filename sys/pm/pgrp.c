@@ -397,13 +397,19 @@ int sys_setpgid(int pid, int pgid) {
         pgrp_add_proc(new_pgrp, target);
     } else if (pgid == target->pid) {
         /* Create new pgrp with target as leader */
+        int new_sess = 0;
         if (!caller_sess) {
             /* Create a default session if none exists */
             caller_sess = session_alloc(target);
             if (!caller_sess) return -ENOMEM;
+            new_sess = 1;
         }
         new_pgrp = pgrp_alloc(target, caller_sess);
-        if (!new_pgrp) return -ENOMEM;
+        if (!new_pgrp) {
+            /* Don't orphan a session we just allocated (mirrors sys_setsid). */
+            if (new_sess) session_free(caller_sess);
+            return -ENOMEM;
+        }
         pgrp_add_proc(new_pgrp, target);
     } else {
         /* pgid must be an existing group or target->pid */
