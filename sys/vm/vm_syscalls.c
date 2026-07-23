@@ -691,7 +691,9 @@ static void *sys_brk_locked(void *addr) {
 #define MS_INVALIDATE 4
 
 int sys_msync(void *addr, size_t length, int flags) {
-    if (!current_process || !current_process->vm_map) return -1;
+    /* Return a real negated errno, not a bare -1 (the libc wrapper negates the
+     * kernel return into errno, so -1 would surface as EPERM) — audit A81. */
+    if (!current_process || !current_process->vm_map) return -EINVAL;
     if (length == 0) return 0;
 
     vm_map_t *map = current_process->vm_map;
