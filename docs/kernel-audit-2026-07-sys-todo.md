@@ -37,7 +37,7 @@ Source: `docs/kernel-audit-2026-07-sys.md`. Work one checkbox at a time: fix →
 - [x] **A27** [sys/pm/wait.c:160] Concurrent wait4() double-frees a zombie child
 - [ ] **A28** [sys/vfs/vfs.c:1371] mountlist traversed lock-free while mount/unmount mutate and kfree() entries
 - [ ] **A29** [sys/vm/uma_core.c:998] UMA page hash walked without slab lock — use-after-free of freed slab headers
-- [ ] **A30** [sys/vm/vm_fault.c:160] Write to PROT_READ / PROT_NONE private mapping silently granted (protection bypass)
+- [x] **A30** [sys/vm/vm_fault.c:160] Write to PROT_READ / PROT_NONE private mapping silently granted (protection bypass)
 - [ ] **A31** [sys/vm/vm_object.c:172] In-place COW eviction frees a still-mapped frame; later pmap_enter unholds a recycled frame
 
 ## MEDIUM
