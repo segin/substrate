@@ -1288,6 +1288,58 @@ int sys_connect(int fd, const struct sockaddr *uaddr, socklen_t addrlen) {
 /* AF_PACKET dispatcher: if `fd` is an AF_PACKET socket, route to
  * afpacket_{send,recv}to with a NULL addr (broadcast to current
  * bound ifindex).  Otherwise fall back to AF_UNIX semantics. */
+/* Chunk size for bouncing a user send payload into the kernel.  Large enough
+ * to hold a maximal SOCK_DGRAM datagram (<= 0xFFFF) in a single frame. */
+#define AFUNIX_SEND_CHUNK (64U * 1024U)
+
+/*
+ * Copy a user send() payload into a kernel bounce buffer before handing it to
+ * afunix_node_write(), which memcpy()s straight from the pointer into the peer
+ * ring.  write(2) already double-buffers via kern_write(), but send/sendto/
+ * sendmsg reach the node write directly with a raw USER pointer — memcpy'ing
+ * from that in kernel context would fault on an unbacked page or, for a kernel
+ * address, read kernel memory into the peer.  STREAM payloads are chunked (a
+ * short return is legal and the caller loops); a DGRAM must be framed in one
+ * node_write call, so it is bounced whole (rejected if it can't fit the u16
+ * frame header).
+ */
+static ssize_t afunix_send_bounced(afunix_sock_t *s, const void *ubuf, size_t len) {
+    if (len == 0)
+        return (ssize_t)afunix_node_write(&s->node, 0, 0, NULL);
+
+    if (s->type == SOCK_DGRAM && len > 0xFFFF)
+        return -EMSGSIZE;
+
+    /* A datagram must be delivered in one call; a stream can be chunked. */
+    size_t cap = (s->type == SOCK_DGRAM) ? len
+               : (len < AFUNIX_SEND_CHUNK ? len : AFUNIX_SEND_CHUNK);
+    uint8_t *kbuf = kmalloc(cap);
+    if (!kbuf)
+        return -ENOMEM;
+
+    ssize_t total = 0;
+    while ((size_t)total < len) {
+        size_t chunk = len - (size_t)total;
+        if (chunk > cap) chunk = cap;
+        if (copyin((const uint8_t *)ubuf + total, kbuf, chunk) != 0) {
+            kfree(kbuf, cap);
+            return total ? total : -EFAULT;
+        }
+        ssize_t w = (ssize_t)afunix_node_write(&s->node, 0, chunk, kbuf);
+        if (w < 0) {                     /* node_write returns (size_t)-errno */
+            kfree(kbuf, cap);
+            return total ? total : w;
+        }
+        total += w;
+        if ((size_t)w < chunk)           /* partial (nonblock/EAGAIN): stop */
+            break;
+        if (s->type == SOCK_DGRAM)       /* exactly one datagram */
+            break;
+    }
+    kfree(kbuf, cap);
+    return total;
+}
+
 ssize_t sys_send(int fd, const void *buf, size_t len, int flags) {
     if (sock_fd_invalid(fd)) return -EBADF;
     if (fd >= 0 && fd < MAX_FD && current_process) {
@@ -1320,7 +1372,7 @@ ssize_t sys_send(int fd, const void *buf, size_t len, int flags) {
     short saved_flag = sf ? sf->f_flag : 0;
     if (sf && (flags & MSG_DONTWAIT)) sf->f_flag |= FNONBLOCK;
     if (current_thread) current_thread->io_file = sf;
-    ssize_t r = (ssize_t)afunix_node_write(&s->node, 0, len, (const uint8_t *)buf);
+    ssize_t r = afunix_send_bounced(s, buf, len);
     if (current_thread) current_thread->io_file = saved;
     if (sf && (flags & MSG_DONTWAIT)) sf->f_flag = saved_flag;
     return r;
