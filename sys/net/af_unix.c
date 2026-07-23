@@ -580,8 +580,12 @@ static size_t afunix_node_write(fs_node_t *node, off_t off, size_t size, const u
                    (current_thread->io_file->f_flag & FNONBLOCK);
     if (s->type == SOCK_DGRAM) {
         /* Datagram: frame the whole message as [u16 len][payload] and write
-         * it atomically so the peer's reader sees one intact datagram. */
-        if (size + 2 > AFUNIX_BUF_SIZE) return (size_t)-EMSGSIZE;
+         * it atomically so the peer's reader sees one intact datagram.  The
+         * length header is 16-bit, so a payload > 0xFFFF (possible because the
+         * socket buffer is 256 KiB) would wrap in the header and desync every
+         * subsequent frame boundary — reject it.  The size>0xFFFF test also
+         * guards the size+2 addition against size_t wrap. */
+        if (size > 0xFFFF || size + 2 > AFUNIX_BUF_SIZE) return (size_t)-EMSGSIZE;
         afunix_sock_t *peer = s->peer;
         if (!peer || peer->closed || peer->rd_closed) return (size_t)-EPIPE;
         mutex_lock(&peer->lock);

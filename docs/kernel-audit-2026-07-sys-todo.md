@@ -54,7 +54,7 @@ Source: `docs/kernel-audit-2026-07-sys.md`. Work one checkbox at a time: fix →
 - [ ] **A41** [sys/kern/lockmgr.c:143] Single LK_WANT_EXCL bit clobbered across concurrent exclusive waiters
 - [ ] **A42** [sys/kern/rwlock.c:89] rwlock waiting_writers leaks permanently when a parked writer is killed
 - [ ] **A43** [sys/kern/turnstile.c:131] Turnstile pool exhaustion panics the kernel (128 contended locks)
-- [ ] **A44** [sys/net/af_unix.c:602] AF_UNIX SOCK_DGRAM datagram > 65535 bytes truncates its 2-byte length header, corrupting frame boundaries
+- [x] **A44** [sys/net/af_unix.c:602] AF_UNIX SOCK_DGRAM datagram > 65535 bytes truncates its 2-byte length header, corrupting frame boundaries
 - [ ] **A45** [sys/net/tcp.c:1176] Use-after-free of child PCBs in tcp_close() LISTEN teardown
 - [ ] **A46** [sys/pm/pgrp.c:278] pgrp/session syscalls return bare -1 instead of -errno
 - [ ] **A47** [sys/pm/process.c:480] fork failure returns bare -1 → userspace sees EPERM instead of ENOMEM/EAGAIN
