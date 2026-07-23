@@ -965,7 +965,19 @@ int sys_socketpair(int domain, int type, int protocol, int sv[2]) {
     afunix_unref(b);
     socket_apply_type_flags(fa, type);
     socket_apply_type_flags(fb, type);
-    sv[0] = fa; sv[1] = fb;
+
+    /* sv is a USER pointer — copyout the fds rather than dereferencing it in
+     * kernel context (a bad/unmapped sv would otherwise fault the kernel).
+     * On a bad pointer both fds are already installed, so close them to avoid
+     * leaking two descriptors. */
+    int ksv[2] = { fa, fb };
+    if (copyout(ksv, sv, sizeof(ksv)) != 0) {
+        file_close_ptr(current_process->fds[fa]);
+        proc_clear_fd(current_process, fa);
+        file_close_ptr(current_process->fds[fb]);
+        proc_clear_fd(current_process, fb);
+        return -EFAULT;
+    }
     return 0;
 }
 
