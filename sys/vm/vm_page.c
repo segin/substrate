@@ -602,8 +602,14 @@ void vm_page_free(vm_page_t *m) {
 	m->access_count = 0;
 	m->age = 0;
 	/* Preserve PG_PMM_ALLOC so vm_phys_free_page's free-of-unallocated
-	 * tripwire still sees the buddy-allocator state. */
-	m->flags &= PG_PMM_ALLOC;
+	 * tripwire still sees the buddy-allocator state.  Also preserve PG_FREE
+	 * (A52): if this page is already sitting on the buddy free list, PG_FREE
+	 * is set — stripping it here would let the double-free sail past
+	 * vm_phys_free_page()'s PG_FREE early-return and either panic
+	 * ('free of unallocated page') or, if the frame was meanwhile
+	 * re-allocated, buddy-free a live frame.  Keeping PG_FREE lets the
+	 * double-free guard fire. */
+	m->flags &= (PG_PMM_ALLOC | PG_FREE);
 
 	// Return to generic PMM (Buddy Allocator Coalescing)
 	vm_phys_free_page(m);
@@ -867,15 +873,18 @@ int vm_page_try_to_free(vm_page_t *m) {
 
 static int vm_page_reclaim_inactive_clean(int target) {
 	int freed = 0;
-	vm_page_t *m = inactive_queue;
 
+	// Read the queue head and every ->next link under the queue lock (A53):
+	// vm_page_t.next/prev double as the buddy allocator's free-list links,
+	// so loading m->next while another CPU frees m would redirect the walk
+	// into buddy-owned memory.  The lock is dropped only to call
+	// vm_page_free (which re-takes it — holding it would self-deadlock and
+	// it also calls pmm), then re-acquired to advance.
+	unsigned long f = spinlock_acquire_irq(&vm_page_queue_lock);
+	vm_page_t *m = inactive_queue;
 	while(m && freed < target) {
 		vm_page_t *next = m->next;
 
-		// Detach a clean/idle inactive page under the lock, then free it
-		// with the lock DROPPED (vm_page_free re-takes the queue lock —
-		// holding it here would self-deadlock, and it also calls pmm).
-		unsigned long f = spinlock_acquire_irq(&vm_page_queue_lock);
 		if((m->flags & PG_INACTIVE) && !(m->flags & PG_DIRTY) &&
 		   !(m->flags & PG_BUSY) && m->wire_count == 0) {
 			dequeue(&inactive_queue, m);
@@ -885,32 +894,41 @@ static int vm_page_reclaim_inactive_clean(int target) {
 			if(vm_page_try_to_free(m)) {
 				freed++;
 			}
-		} else {
-			spinlock_release_irq(&vm_page_queue_lock, f);
+
+			f = spinlock_acquire_irq(&vm_page_queue_lock);
 		}
 
 		m = next;
 	}
+	spinlock_release_irq(&vm_page_queue_lock, f);
 
 	return(freed);
 }
 
 static int vm_page_launder_inactive_dirty(int target) {
 	int freed = 0;
-	vm_page_t *m = inactive_queue;
 
+	// Hold the queue lock across the head and ->next loads (A53); drop it
+	// only for vm_page_launder / vm_page_free, which take it themselves.
+	unsigned long f = spinlock_acquire_irq(&vm_page_queue_lock);
+	vm_page_t *m = inactive_queue;
 	while(m && freed < target) {
 		vm_page_t *next = m->next;
 
 		if((m->flags & PG_DIRTY) && !(m->flags & PG_BUSY)) {
+			spinlock_release_irq(&vm_page_queue_lock, f);
+
 			vm_page_launder(m);
 			if(vm_page_try_to_free(m)) {
 				freed++;
 			}
+
+			f = spinlock_acquire_irq(&vm_page_queue_lock);
 		}
 
 		m = next;
 	}
+	spinlock_release_irq(&vm_page_queue_lock, f);
 
 	return(freed);
 }
@@ -1103,7 +1121,12 @@ void vm_page_writeback_done(vm_page_t *m) {
 // Periodic scan of all resident pages - decrement age if not accessed
 // Called by page daemon periodically
 void vm_page_age_scan(void) {
-	// Scan active queue - pages accessed get max age, others decrement
+	// Scan active queue - pages accessed get max age, others decrement.
+	// The queue head and every ->next link are read under the queue lock
+	// (A53) — vm_page_t.next aliases the buddy free-list link, so an unlocked
+	// load of m->next racing a concurrent free would walk into buddy memory.
+	// The lock is dropped only for the pmap A-bit probe (leaf discipline).
+	unsigned long f = spinlock_acquire_irq(&vm_page_queue_lock);
 	vm_page_t *m = active_queue;
 	while(m) {
 		vm_page_t *next = m->next;
@@ -1114,27 +1137,27 @@ void vm_page_age_scan(void) {
 			continue;
 		}
 
-		// Check A-bit via pmap and update access tracking (pmap probe
-		// outside the queue lock — leaf discipline).
-		if(pmap_page_is_referenced(m)) {
+		spinlock_release_irq(&vm_page_queue_lock, f);
+		int referenced = pmap_page_is_referenced(m);
+		if(referenced) {
+			pmap_page_clear_reference(m);
+		}
+		f = spinlock_acquire_irq(&vm_page_queue_lock);
+
+		if(referenced) {
 			// Page was accessed - reset age to max
 			m->age = VM_PAGE_AGE_MAX;
-			pmap_page_clear_reference(m);
-		} else {
+		} else if(m->flags & PG_ACTIVE) {
 			// Page not accessed - age it and, if aged out, move to inactive.
-			unsigned long f = spinlock_acquire_irq(&vm_page_queue_lock);
-			if(m->flags & PG_ACTIVE) {
-				if(m->age > 0) {
-					m->age--;
-				}
-				if(m->age == 0) {
-					dequeue(&active_queue, m);
-					m->flags &= ~PG_ACTIVE;
-					enqueue(&inactive_queue, m);
-					m->flags |= PG_INACTIVE;
-				}
+			if(m->age > 0) {
+				m->age--;
 			}
-			spinlock_release_irq(&vm_page_queue_lock, f);
+			if(m->age == 0) {
+				dequeue(&active_queue, m);
+				m->flags &= ~PG_ACTIVE;
+				enqueue(&inactive_queue, m);
+				m->flags |= PG_INACTIVE;
+			}
 		}
 
 		m = next;
@@ -1151,11 +1174,16 @@ void vm_page_age_scan(void) {
 			continue;
 		}
 
-		// Check if page was accessed while inactive
-		if(pmap_page_is_referenced(m)) {
+		spinlock_release_irq(&vm_page_queue_lock, f);
+		int referenced = pmap_page_is_referenced(m);
+		if(referenced) {
 			pmap_page_clear_reference(m);
+		}
+		f = spinlock_acquire_irq(&vm_page_queue_lock);
+
+		// Check if page was accessed while inactive
+		if(referenced) {
 			// Reactivate under the queue lock.
-			unsigned long f = spinlock_acquire_irq(&vm_page_queue_lock);
 			if(m->flags & PG_INACTIVE) {
 				dequeue(&inactive_queue, m);
 				m->flags &= ~PG_INACTIVE;
@@ -1163,12 +1191,12 @@ void vm_page_age_scan(void) {
 				m->flags |= PG_ACTIVE;
 				m->age = VM_PAGE_AGE_INITIAL;  // Give a second chance
 			}
-			spinlock_release_irq(&vm_page_queue_lock, f);
 			vm_stat_reactivations++;
 		}
 
 		m = next;
 	}
+	spinlock_release_irq(&vm_page_queue_lock, f);
 }
 
 // Check if page is a candidate for eviction (age=0, not wired, not busy)
@@ -1207,6 +1235,11 @@ void vm_page_get_stats(vm_page_stats_t *stats) {
 	stats->dirty_count = 0;
 	stats->free_count = 0;
 
+	// Traverse the queues under the queue lock (A53): the ->next links are
+	// spliced by vm_page_free/activate/deactivate under this same lock, and
+	// alias the buddy free-list links once a page is freed.
+	unsigned long f = spinlock_acquire_irq(&vm_page_queue_lock);
+
 	// Count active pages
 	vm_page_t *m = active_queue;
 	while(m) {
@@ -1222,6 +1255,7 @@ void vm_page_get_stats(vm_page_stats_t *stats) {
 		if(m->flags & PG_DIRTY) stats->dirty_count++;
 		m = m->next;
 	}
+	spinlock_release_irq(&vm_page_queue_lock, f);
 
 	// Read true free page count from Buddy Allocator
 	stats->free_count = vm_phys_get_free();
@@ -1234,6 +1268,9 @@ void vm_page_get_vmstat(vm_vmstat_t *stats) {
 
 	memset(stats, 0, sizeof(*stats));
 
+	// Traverse the page queues under the queue lock (A53) — see
+	// vm_page_get_stats().
+	unsigned long f = spinlock_acquire_irq(&vm_page_queue_lock);
 	for(vm_page_t *m = active_queue; m; m = m->next) {
 		stats->active_count++;
 	}
@@ -1246,6 +1283,7 @@ void vm_page_get_vmstat(vm_vmstat_t *stats) {
 	for(vm_page_t *m = laundry_queue; m; m = m->next) {
 		stats->laundry_count++;
 	}
+	spinlock_release_irq(&vm_page_queue_lock, f);
 
 	stats->free_count = (uint32_t)vm_phys_get_free();
 	stats->pageins = vm_stat_pageins;
