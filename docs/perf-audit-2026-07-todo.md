@@ -1,0 +1,48 @@
+# Kernel performance remediation checklist (2026-07-23)
+
+Source: `docs/perf-audit-2026-07.md`. 44 findings, ordered by impact.
+
+- [ ] **F01** (high) [sys/vm/uma_core.c:885] uma_curcpu() issues an MMIO LAPIC-ID read per alloc and per free on real SM
+- [ ] **F02** (high) [sys/pm/sched.c:399] sched_yield() linearly scans the ENTIRE thread registry on every schedule; 
+- [ ] **F03** (high) [sys/vm/vm_object.c:239] Object page lookup is an O(n) linked-list scan run on every fault → O(N^2) 
+- [ ] **F04** (medium) [sys/fs/ext2/ext2.c:795] ext2 contiguity scan re-reads the same indirect/dindirect/tindirect block o
+- [ ] **F05** (medium) [sys/fs/ext2/ext2.c:1330] ext2_alloc_node does up to three 256-entry linear scans (one pure-debug) pe
+- [ ] **F06** (medium) [sys/fs/ext2/ext2.c:261] ext2_read_inode kmalloc/kfree a full filesystem block on every inode read (
+- [ ] **F07** (medium) [sys/drivers/storage/ahci/ahci.c:612] AHCI bounces every disk transfer through a freshly-allocated+zeroed DMA buf
+- [ ] **F08** (medium) [sys/drivers/storage/ide/ide_wait.c:233] IDE DMA completion wait ignores the completion IRQ and only wakes on the ti
+- [ ] **F09** (medium) [sys/kern/spinlock.c:15] spinlock_acquire issues two lapic_get_id() reads plus a stable-snapshot sel
+- [ ] **F10** (medium) [sys/kern/rwlock.c:47] rwlock read acquire/release probe the sleepq bucket (hash + cli + bucket lo
+- [ ] **F11** (medium) [sys/kern/spinlock.c:53] spinlock stamps last_acquire_eip (debug-only) into the lock line on every a
+- [ ] **F12** (medium) [sys/vm/uma_core.c:1016] uma_zalloc/uma_zfree walk the global slab page-hash on every fast-path op j
+- [ ] **F13** (medium) [sys/vm/vm_kmem.c:101] kmem_stats_lock global spinlock taken twice per kmalloc and once per kfree 
+- [ ] **F14** (medium) [sys/vm/vm_kmem.c:187] kfree() calls uma_item_size() — a redundant THIRD global-slab-lock hash wal
+- [ ] **F15** (medium) [sys/net/af_inet.c:582] 48 KB UDP/RAW packet ring allocated (and freed) for every TCP socket and ev
+- [ ] **F16** (medium) [sys/net/tcp.c:398] tcp_find does a linear O(N) PCB scan (twice) per inbound segment in IRQ con
+- [ ] **F17** (medium) [sys/pm/sched.c:818] sched_wakeup_n() scans the entire registry per wakeup instead of using the 
+- [ ] **F18** (medium) [sys/pm/sched.c:658] sched_tick() walks the whole thread registry every timer tick to find expir
+- [ ] **F19** (medium) [sys/vm/vm_fault.c:137] vm_fault entry lookup falls back to an O(n) linear entry-list walk, ignorin
+- [ ] **F20** (low) [sys/vfs/vfs.c:710] Every path component walks the entire mountlist under a global spinlock
+- [ ] **F21** (low) [sys/vfs/vfs.c:632] Foreign-personality processes resolve every absolute path twice (no negativ
+- [ ] **F22** (low) [sys/kern/subr_copy.c:152] copyinstr calls non-inlined validate_user_addr once per byte
+- [ ] **F23** (low) [sys/kern/subr_copy.c:73] copyin/copyout use rep movsb instead of rep movsd + byte remainder
+- [ ] **F24** (low) [sys/lib/string.c:51] memmove always copies byte-at-a-time even for non-overlapping regions
+- [ ] **F25** (low) [sys/kern/mutex.c:112] mutex_unlock unconditionally takes the guard spinlock AND probes the sleepq
+- [ ] **F26** (low) [sys/arch/i386/pmm.c:1051] memtrack takes a global lock + does a hash probe on every physical page all
+- [ ] **F27** (low) [sys/vm/uma_core.c:239] UMA full/empty bucket depot is a single global list+lock shared across all 
+- [ ] **F28** (low) [sys/net/tcp.c:592] TCP rx ring copied byte-at-a-time in both directions (IRQ enqueue + recv dr
+- [ ] **F29** (low) [sys/net/tcp.c:188] tcp_xmit_raw bounces the segment payload through a 1.5 KB stack buffer on e
+- [ ] **F30** (low) [sys/net/af_inet.c:1178] afinet_deliver_v4/v6 walk the entire socket list per inbound datagram in ha
+- [ ] **F31** (low) [sys/net/loopback.c:110] Loopback frame copied twice per delivery (xmit into ring, drain into scratc
+- [ ] **F32** (low) [sys/arch/i386/percpu.c:22] THIS_CPU()/percpu_get_cpu_id() lack the UP short-circuit and issue LAPIC MM
+- [ ] **F33** (low) [sys/arch/i386/syscall.c:260] current_thread / current_process are opaque out-of-line calls, re-invoked ~
+- [ ] **F34** (low) [sys/kern/subr_copy.c:153] copyinstr calls validate_user_addr() once per byte on every path-taking sys
+- [ ] **F35** (low) [sys/arch/i386/syscall_abi.h:17] syscall arg extraction memsets 8 words then overwrites all 8 via copyin on 
+- [ ] **F36** (low) [sys/arch/i386/syscall.c:497] Two rdtsc + counter updates run unconditionally per syscall for stats only 
+- [ ] **F37** (low) [sys/arch/i386/syscall.c:273] exec_maybe_unpin_current_thread runs two nested out-of-line calls + slot lo
+- [ ] **F38** (low) [sys/kern/time.c:1126] timer_tick_context walks every process (FOREACH_PROC) on every tick
+- [ ] **F39** (low) [sys/pm/sched.c:667] sched_tick walks every thread and takes the registry lock on every tick
+- [ ] **F40** (low) [sys/kern/time.c:398] gettimeofday/clock_gettime do 64-bit ticks/HZ and ticks%HZ divides when the
+- [ ] **F41** (low) [sys/pm/sched.c:48] sched_vruntime_tick does a 64-bit divide on every tick
+- [ ] **F42** (low) [sys/kern/time.c:870] proc_ptimers_fire recomputes 'now' (rdtsc + divide) per armed timer instead
+- [ ] **F43** (low) [sys/vm/vm_fault.c:180] A single global mutex serializes every page fault system-wide
+- [ ] **F44** (low) [sys/arch/i386/pmap.c:1639] pmap_protect walks the range a second time just to issue INVLPGs
