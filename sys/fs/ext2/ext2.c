@@ -655,9 +655,19 @@ static uint32_t ext4_extent_resolve(ext2_fs_t *fs, ext2_inode_t *inode,
      * index whose ei_blk <= logical — that's the child covering this
      * logical block.  */
     uint8_t *node = (uint8_t *)&inode->i_block[0];
+    /* Bound the on-disk entry count to what the containing buffer can hold:
+     * the root header lives in the 60-byte i_block area, deeper nodes in a
+     * block-sized scratch buffer.  eh_ecount is an unbounded u16 from disk, so
+     * a corrupt filesystem could otherwise drive the idx[i]/ex[i] loops far
+     * past the buffer — an out-of-bounds read. */
+    size_t node_cap = sizeof(inode->i_block);
     for (int depth = eh->eh_depth; depth > 0; depth--) {
         ext4_extent_idx_t *idx = (ext4_extent_idx_t *)(node + sizeof(*eh));
         int n = eh->eh_ecount;
+        if (n <= 0) return 0;
+        size_t max_idx = (node_cap > sizeof(*eh))
+                       ? (node_cap - sizeof(*eh)) / sizeof(ext4_extent_idx_t) : 0;
+        if ((size_t)n > max_idx) n = (int)max_idx;
         if (n <= 0) return 0;
         int pick = -1;
         for (int i = 0; i < n; i++) {
@@ -670,6 +680,7 @@ static uint32_t ext4_extent_resolve(ext2_fs_t *fs, ext2_inode_t *inode,
         if (child == 0 || child >> 32) return 0;
         ext2_read_block(fs, (uint32_t)child, scratch);
         node = scratch;
+        node_cap = fs->block_size;
         eh = (ext4_extent_header_t *)node;
         if (eh->eh_magic != EXT4_EXT_MAGIC) return 0;
     }
@@ -678,6 +689,11 @@ static uint32_t ext4_extent_resolve(ext2_fs_t *fs, ext2_inode_t *inode,
      * [e_blk, e_blk + e_len).  Find the one containing `logical`.  */
     ext4_extent_t *ex = (ext4_extent_t *)(node + sizeof(*eh));
     int n = eh->eh_ecount;
+    {
+        size_t max_ex = (node_cap > sizeof(*eh))
+                      ? (node_cap - sizeof(*eh)) / sizeof(ext4_extent_t) : 0;
+        if ((size_t)n > max_ex) n = (int)max_ex;
+    }
     for (int i = 0; i < n; i++) {
         uint32_t ext_start = ex[i].e_blk;
         /* Uninitialised extent's e_len has the high bit set; mask

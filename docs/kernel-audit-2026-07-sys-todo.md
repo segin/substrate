@@ -20,7 +20,7 @@ Source: `docs/kernel-audit-2026-07-sys.md`. Work one checkbox at a time: fix →
 - [x] **A10** [sys/exec/formats/elf.c:1743] Failed execve after setuid does not roll back credentials or signal state
 - [x] **A11** [sys/exec/perso/perso_freebsd.c:106] FreeBSD gettimeofday overruns caller's 8-byte struct timeval
 - [x] **A12** [sys/exec/perso/perso_openbsd.c:59] OpenBSD getrusage writes to unvalidated user pointer
-- [ ] **A13** [sys/fs/ext2/ext2.c:680] Unbounded eh_ecount in ext4 extent resolver → OOB read
+- [x] **A13** [sys/fs/ext2/ext2.c:680] Unbounded eh_ecount in ext4 extent resolver → OOB read
 - [ ] **A14** [sys/fs/ext2/ext2.c:2213] blocks_per_group / inodes_per_group not bounded to block_size*8 → OOB bitmap scan
 - [ ] **A15** [sys/fs/fat/fat.c:490] FAT root node not pinned in node cache — recycled after 64 lookups
 - [ ] **A16** [sys/fs/fat/fat.c:946] Cluster allocator is not atomic — concurrent allocation cross-links files
