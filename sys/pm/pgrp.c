@@ -193,33 +193,42 @@ void pgrp_remove_proc(struct process *proc) {
     struct session *free_sess = NULL;
     int orphaned = 0;
     int has_stopped = 0;
+    int do_free = 0;
 
     if (!proc) return;
 
     old_pgrp = proc->p_pgrp;
     mutex_lock(&proctree_lock);
     __pgrp_remove_proc(proc);
-    if (old_pgrp && old_pgrp->pg_members) {
-        orphaned = __pgrp_is_orphaned(old_pgrp);
-        has_stopped = __pgrp_has_stopped(old_pgrp);
-    } else if (old_pgrp) {
-        free_sess = __pgrp_unlink_locked(old_pgrp);
+    if (old_pgrp) {
+        if (old_pgrp->pg_members == NULL) {
+            /* We removed the last member: unlink and take ownership to free,
+             * all under the lock.  Deciding this here — rather than re-reading
+             * old_pgrp->pg_members AFTER the unlock — is essential: two
+             * concurrent removers of the last two members would otherwise both
+             * observe the group empty post-unlock and double-free it (and one
+             * would read pg_members from freed memory). */
+            free_sess = __pgrp_unlink_locked(old_pgrp);
+            do_free = 1;
+        } else {
+            orphaned = __pgrp_is_orphaned(old_pgrp);
+            has_stopped = __pgrp_has_stopped(old_pgrp);
+        }
     }
     mutex_unlock(&proctree_lock);
 
     if (!old_pgrp) {
         return;
     }
-    if (free_sess || old_pgrp->pg_members == NULL) {
+    if (do_free) {
+        /* We hold the sole reference (unlinked under the lock). */
         kfree(old_pgrp, sizeof(struct pgrp));
         if (free_sess) {
             session_free(free_sess);
         }
-    } else {
-        if (orphaned && has_stopped) {
-            pgrp_signal(old_pgrp, 1);  /* SIGHUP */
-            pgrp_signal(old_pgrp, 18); /* SIGCONT */
-        }
+    } else if (orphaned && has_stopped) {
+        pgrp_signal(old_pgrp, 1);  /* SIGHUP */
+        pgrp_signal(old_pgrp, 18); /* SIGCONT */
     }
 }
 

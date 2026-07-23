@@ -32,7 +32,7 @@ Source: `docs/kernel-audit-2026-07-sys.md`. Work one checkbox at a time: fix →
 - [ ] **A22** [sys/kern/mutex.c:146] proc_exit force-releases mutexes of siblings still running on other CPUs
 - [x] **A23** [sys/net/af_unix.c:1319] send()/sendto()/sendmsg() memcpy raw user data buffer in kernel context (no copyin/bounce)
 - [x] **A24** [sys/net/af_unix.c:964] sys_socketpair writes result fds directly to user sv[] pointer without copyout
-- [ ] **A25** [sys/pm/pgrp.c:213] pgrp_remove_proc reads and frees old_pgrp after dropping proctree_lock
+- [x] **A25** [sys/pm/pgrp.c:213] pgrp_remove_proc reads and frees old_pgrp after dropping proctree_lock
 - [ ] **A26** [sys/pm/process.c:1792] proc_exit publishes reapable state while threads may still run on other CPUs
 - [x] **A27** [sys/pm/wait.c:160] Concurrent wait4() double-frees a zombie child
 - [ ] **A28** [sys/vfs/vfs.c:1371] mountlist traversed lock-free while mount/unmount mutate and kfree() entries
