@@ -120,8 +120,12 @@ static int geom_gpt_sniff(geom_disk_t *disk, uint64_t offset, int depth, const c
         return -1;
     }
     
-    /* Validate partition entry parameters */
-    if (hdr->num_entries == 0 || hdr->entry_size < 128) {
+    /* Validate partition entry parameters.  entry_size must be bounded on
+     * BOTH sides: the GPT spec requires >= 128 and a multiple of 128, and a
+     * value > 512 (a sector) would make entries_per_sector below zero out
+     * (division by zero) and blow max_entries*entry_size past entry_buf. */
+    if (hdr->num_entries == 0 || hdr->entry_size < 128 ||
+        hdr->entry_size > 512 || (hdr->entry_size % 128) != 0) {
         return -1;
     }
     
@@ -136,7 +140,13 @@ static int geom_gpt_sniff(geom_disk_t *disk, uint64_t offset, int depth, const c
     /* Allocate buffer for partition entries (max 16KB for 128 entries @ 128 bytes) */
     static uint8_t entry_buf[512 * 32];  /* Up to 32 sectors */
     if (entry_sectors > 32) entry_sectors = 32;
-    
+
+    /* Clamp the entry count to what actually fits in the read buffer, so the
+     * entries-CRC and the two iteration passes below (entry_buf + i*entry_size)
+     * never read past entry_buf even when entry_size > 128 shrinks capacity. */
+    uint32_t entries_in_buf = (entry_sectors * 512) / hdr->entry_size;
+    if (max_entries > entries_in_buf) max_entries = entries_in_buf;
+
     if (geom_read_sectors(disk, hdr->partition_lba, entry_sectors, entry_buf) != 0) {
         kprint("  ");
         kprint(disk->name);

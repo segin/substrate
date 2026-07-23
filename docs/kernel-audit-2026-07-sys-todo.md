@@ -27,8 +27,8 @@ Source: `docs/kernel-audit-2026-07-sys.md`. Work one checkbox at a time: fix →
 - [ ] **A17** [sys/fs/fat/fat.c:1086] FAT write/directory paths share function-static scratch buffers with no locking
 - [ ] **A18** [sys/fs/fat/fat.c:1367] FAT directory-entry write assumes physical contiguity across a cluster boundary
 - [ ] **A19** [sys/fs/shmfs.c:196] shmfs_write: size_t overflow of (off+sz) defeats grow → OOB write
-- [ ] **A20** [sys/kern/geom/geom_gpt.c:148] GPT entry array parsed with unbounded on-disk entry_size -> OOB read
-- [ ] **A21** [sys/kern/geom/geom_gpt.c:134] GPT entries_per_sector division by zero when entry_size > 512
+- [x] **A20** [sys/kern/geom/geom_gpt.c:148] GPT entry array parsed with unbounded on-disk entry_size -> OOB read
+- [x] **A21** [sys/kern/geom/geom_gpt.c:134] GPT entries_per_sector division by zero when entry_size > 512
 - [ ] **A22** [sys/kern/mutex.c:146] proc_exit force-releases mutexes of siblings still running on other CPUs
 - [ ] **A23** [sys/net/af_unix.c:1319] send()/sendto()/sendmsg() memcpy raw user data buffer in kernel context (no copyin/bounce)
 - [ ] **A24** [sys/net/af_unix.c:964] sys_socketpair writes result fds directly to user sv[] pointer without copyout
