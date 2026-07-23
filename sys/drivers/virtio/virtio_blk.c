@@ -39,7 +39,24 @@ static struct {
     struct vring_avail *avail;
     struct vring_used *used;
     uint16_t last_used_idx;
+
+    /* Serializes the whole request/poll cycle: descriptors 0-2, the avail-ring
+     * publish and the shared last_used_idx poll are a single global resource,
+     * so two concurrent callers (SMP, or two threads that both miss the block
+     * cache) would otherwise clobber each other's descriptor chain / status
+     * byte and mis-attribute completions.  Mirrors virtio_scsi's per-queue
+     * busy flag. */
+    volatile uint32_t io_busy;
 } vblk;
+
+static inline void vblk_lock(void) {
+    while (__sync_lock_test_and_set(&vblk.io_busy, 1) != 0)
+        __asm__ volatile("pause");
+}
+
+static inline void vblk_unlock(void) {
+    __sync_lock_release(&vblk.io_busy);
+}
 
 static int virtio_blk_read_sectors(geom_disk_t *disk, uint64_t lba, size_t count, void *buf);
 
@@ -155,7 +172,10 @@ static int virtio_blk_read_sectors(geom_disk_t *disk, uint64_t lba, size_t count
     int id0 = 0;
     int id1 = 1;
     int id2 = 2;
-    
+
+    /* Own the shared ring for the entire request/poll cycle. */
+    vblk_lock();
+
     vblk.desc[id0].addr = (uint64_t)pmap_extract(pmap_kernel(), (uintptr_t)&hdr);
     vblk.desc[id0].len = sizeof(hdr);
     vblk.desc[id0].flags = VRING_DESC_F_NEXT;
@@ -193,6 +213,8 @@ static int virtio_blk_read_sectors(geom_disk_t *disk, uint64_t lba, size_t count
     __asm__ volatile("lfence" ::: "memory");
     
     vblk.last_used_idx++;
-    
+
+    vblk_unlock();
+
     return (status == 0) ? 0 : -1;
 }
