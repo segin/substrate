@@ -1015,6 +1015,10 @@ ssize_t tcp_send_nb(tcp_pcb_t *p, const void *buf, size_t len) {
     return tcp_send_impl(p, buf, len, /*nonblock=*/1);
 }
 
+size_t tcp_recv_avail(const tcp_pcb_t *p) {
+    return p ? (size_t)p->rx_count : 0;
+}
+
 ssize_t tcp_recv_nb(tcp_pcb_t *p, void *buf, size_t len) {
     /* The rx ring (rxbuf, rx_head, rx_tail, rx_count) is written by
      * tcp_in_established() in IRQ context.  Drain it with IRQs off

@@ -17,6 +17,7 @@
 #include <sys/file.h>
 #include <sys/fcntl.h>
 #include <sys/poll.h>
+#include <sys/termios.h>   /* FIONREAD */
 #include <sys/socket.h>
 #include <sys/netdev.h>
 #include <net/inet.h>
@@ -173,8 +174,26 @@ static netdev_t *afinet_find_dev(const char *name) {
 }
 
 static int afinet_ioctl(fs_node_t *node, uint32_t request, void *arg) {
-    (void)node;
     if (!arg) return -EFAULT;
+
+    /* FIONREAD: bytes available to read without blocking.  Xlib (and many
+     * socket clients) call this on the connection to size the next read;
+     * returning ENOTTY makes Xlib declare the display dead ("XIO: fatal IO
+     * error ... (Not a typewriter)").  TCP reports its rx-ring occupancy;
+     * UDP/RAW reports the next datagram's length (BSD/Linux semantics). */
+    if (request == FIONREAD) {
+        afi_sock_t *s = node ? (afi_sock_t *)(uintptr_t)node->impl : NULL;
+        int avail = 0;
+        if (s) {
+            if (s->tcp) {
+                avail = (int)tcp_recv_avail(s->tcp);
+            } else if (s->count > 0) {
+                avail = (int)s->ring[s->tail].len;
+            }
+        }
+        if (copyout(&avail, arg, sizeof(avail)) != 0) return -EFAULT;
+        return 0;
+    }
 
     /* SIOCGIFCONF takes struct ifconf; everything else takes struct ifreq.
      * Both `arg` and (for SIOCGIFCONF) the ifc_req array it points at are

@@ -153,6 +153,8 @@ ssize_t    tcp_send_nb(tcp_pcb_t *p, const void *buf, size_t len);
 ssize_t    tcp_recv(tcp_pcb_t *p, void *buf, size_t len);
 void       tcp_endpoints(const tcp_pcb_t *p, uint32_t *laddr, uint16_t *lport, uint32_t *raddr, uint16_t *rport);
 ssize_t    tcp_recv_nb(tcp_pcb_t *p, void *buf, size_t len);
+/* Bytes currently sitting in the receive ring (for ioctl(FIONREAD)). */
+size_t     tcp_recv_avail(const tcp_pcb_t *p);
 ssize_t    tcp_peek(tcp_pcb_t *p, void *buf, size_t len);
 ssize_t    tcp_peek_nb(tcp_pcb_t *p, void *buf, size_t len);
 int        tcp_close(tcp_pcb_t *p);
