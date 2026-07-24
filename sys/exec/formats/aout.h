@@ -98,4 +98,14 @@ enum aout_flavor aout_classify(const struct aout_exec *hdr);
  */
 int aout_validate_header(const struct aout_exec *hdr, uint32_t file_size);
 
+#ifndef HOST_TEST
+/* Register the kernel-side a.out (Linux ZMAGIC/QMAGIC/OMAGIC) exec handler. */
+void aout_init_handler(void);
+
+/* Linux uselib(2): map an old-style a.out shared library (libc.so.4, ld.so)
+ * at its fixed embedded load address into the caller's address space. */
+int aout_sys_uselib(uint32_t upath, uint32_t a1, uint32_t a2, uint32_t a3,
+                    uint32_t a4, uint32_t a5, uint32_t a6, uint32_t a7);
+#endif
+
 #endif /* _AOUT_H */

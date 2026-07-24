@@ -29,6 +29,7 @@
 #include <exec/perso/linux/linux_errno.h>
 #include <exec/perso/linux/linux_exec.h>
 #include <exec/perso/linux/linux_syscalls.h>
+#include <exec/formats/aout.h>
 
 #define LINUX_UTS_FIELD_LEN 65
 #define LINUX_IOV_MAX 1024
@@ -1066,7 +1067,7 @@ static void *linux_syscalls[MAX_SYSCALLS] = {
     [LINUX_SYS_symlink]        = (void *)&kern_symlink,
     [LINUX_SYS_lstat]          = (void *)linux_sys_lstat,
     [LINUX_SYS_readlink]       = (void *)&kern_readlink,
-    [LINUX_SYS_uselib]         = NULL,
+    [LINUX_SYS_uselib]         = (void *)&aout_sys_uselib,
     [LINUX_SYS_swapon]         = NULL,
     [LINUX_SYS_reboot]         = (void *)&sys_reboot,
     [LINUX_SYS_readdir]        = (void *)&kern_getdents,

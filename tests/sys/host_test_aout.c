@@ -127,11 +127,19 @@ static void test_validate_basic(void) {
     EXPECT(aout_validate_header(&h, 0x10000) != 0,
            "garbage magic validated");
 
-    /* ZMAGIC entry == 0 must be rejected (text is page-aligned, not zero). */
+    /* Linux ZMAGIC uses N_TXTADDR == 0 and links crt0 first, so entry == 0
+     * is the normal `_start` address and must be accepted. */
     make_hdr(&h, midmag(AOUT_ZMAGIC_VAL, 0, 0),
              0x1000, 0x100, 0x100, 0, 0, 0);
+    EXPECT(aout_validate_header(&h, 0x10000) == 0,
+           "ZMAGIC entry==0 rejected");
+
+    /* QMAGIC's text VA is PAGE_SIZE (first page unmapped), so entry == 0
+     * is below the text segment and must be rejected. */
+    make_hdr(&h, midmag(AOUT_QMAGIC_VAL, 0, 0),
+             0x1000, 0x100, 0x100, 0, 0, 0);
     EXPECT(aout_validate_header(&h, 0x10000) != 0,
-           "ZMAGIC entry==0 accepted");
+           "QMAGIC entry==0 accepted");
 
     /* OMAGIC entry == 0 is allowed (text starts at offset 0). */
     make_hdr(&h, midmag(AOUT_OMAGIC_VAL, 0, 0),
