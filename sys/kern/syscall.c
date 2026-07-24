@@ -1169,61 +1169,6 @@ int kern_getdents(unsigned int fd, void *dirp, unsigned int count) {
     return bpos;
 }
 
-/*
- * Old Linux readdir(2) (i386 syscall 89) — the pre-getdents interface used by
- * a.out-era libc (Slackware 1.x).  Unlike getdents it reads exactly ONE entry
- * regardless of `count`, into a struct old_linux_dirent:
- *
- *     unsigned long  d_ino;
- *     unsigned long  d_offset;
- *     unsigned short d_namlen;
- *     char           d_name[1];   // d_namlen bytes + trailing NUL
- *
- * Returns 1 when an entry was read, 0 at end-of-directory, -errno on error.
- */
-struct old_linux_dirent {
-    unsigned long  d_ino;
-    unsigned long  d_offset;
-    unsigned short d_namlen;
-    char           d_name[256];
-};
-
-int kern_old_readdir(unsigned int fd, void *dirp, unsigned int count) {
-    (void)count;   /* old readdir ignores count and returns a single entry */
-
-    if (fd >= MAX_FD) return -EBADF;
-    file_t *f = current_process->fds[fd];
-    if (!f) return -EBADF;
-    if (!dirp) return -EFAULT;
-
-    struct dirent *d = readdir_fs((fs_node_t *)f->f_data, f->f_offset);
-    if (!d) {
-        return 0;   /* end of directory */
-    }
-
-    int name_len = 0;
-    while (d->d_name[name_len] && name_len < 255) name_len++;
-
-    struct old_linux_dirent kent;
-    kent.d_ino = d->d_ino;
-    kent.d_offset = (unsigned long)f->f_offset;
-    kent.d_namlen = (unsigned short)name_len;
-    for (int i = 0; i < name_len; i++) kent.d_name[i] = d->d_name[i];
-    kent.d_name[name_len] = '\0';
-
-    /* Only the used prefix is copied out: header (10 bytes on i386) + name. */
-    size_t sz = sizeof(unsigned long) * 2 + sizeof(unsigned short) +
-                (size_t)name_len + 1;
-    if (copyout(&kent, dirp, sz) != 0) {
-        return -EFAULT;
-    }
-
-    uint64_t cur_off = (uint64_t)f->f_offset;
-    uint64_t next_off = (d->d_off > cur_off) ? d->d_off : cur_off + 1;
-    f->f_offset = next_off;
-    return 1;
-}
-
 int kern_getdents64(unsigned int fd, void *dirp, unsigned int count) {
     if (fd >= MAX_FD) return -EBADF;
     file_t *f = current_process->fds[fd];

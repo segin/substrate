@@ -234,6 +234,8 @@ int linux_sys_fstat64(int fd, struct linux_stat64 *buf);
 int linux_sys_fstatat64(int dirfd, const char *path, struct linux_stat64 *buf, int flags);
 int linux_sys_statx(int dirfd, const char *path, int flags, unsigned int mask, struct linux_statx *buf);
 int linux_sys_getcwd(char *buf, size_t size);
+/* Old Linux readdir(2) (i386 syscall 89): one struct old_linux_dirent. */
+int linux_old_readdir(unsigned int fd, void *dirp, unsigned int count);
 int linux_sys_statfs(const char *path, struct linux_statfs *buf);
 int linux_sys_fstatfs(int fd, struct linux_statfs *buf);
 int linux_sys_statfs64(const char *path, size_t sz, struct linux_statfs64 *buf);
