@@ -44,6 +44,7 @@
 #include <sys/stat.h>
 #include <sys/socket.h>
 #include <sys/poll.h>
+#include <sys/termios.h>   /* FIONREAD */
 #include <kern/console.h>
 #include <kern/cmdline.h>
 #include <kern/sched.h>
@@ -801,6 +802,40 @@ static int afunix_node_poll(fs_node_t *node, void *waiter) {
     return ev;
 }
 
+/*
+ * ioctl(FIONREAD) — bytes available to read without blocking.  Xlib polls the
+ * X display connection with FIONREAD to size its next read; a socket that
+ * answers ENOTTY makes Xlib abort with "XIO: fatal IO error (Not a
+ * typewriter)".  STREAM sockets report the rx-ring occupancy; DGRAM sockets
+ * report the next framed datagram's payload length.
+ */
+static int afunix_node_ioctl(fs_node_t *node, uint32_t request, void *arg) {
+    afunix_sock_t *s = node ? (afunix_sock_t *)(uintptr_t)node->impl : NULL;
+
+    if (request == FIONREAD) {
+        int avail = 0;
+        if (!arg) return -EFAULT;
+        if (s) {
+            mutex_lock(&s->lock);
+            if (s->type == SOCK_DGRAM) {
+                /* Framed as [u16 len BE][payload]; peek the header without
+                 * consuming it. */
+                if (s->rx.count >= 2) {
+                    uint8_t h0 = s->rx.data[s->rx.tail];
+                    uint8_t h1 = s->rx.data[(s->rx.tail + 1) % AFUNIX_BUF_SIZE];
+                    avail = (int)(((uint32_t)h0 << 8) | h1);
+                }
+            } else {
+                avail = (int)s->rx.count;
+            }
+            mutex_unlock(&s->lock);
+        }
+        if (copyout(&avail, arg, sizeof(avail)) != 0) return -EFAULT;
+        return 0;
+    }
+    return -ENOTTY;
+}
+
 /* ============================================================
  * Helper: create a fresh socket struct
  * ============================================================ */
@@ -838,6 +873,7 @@ static afunix_sock_t *afunix_alloc(int type) {
     s->node.write = afunix_node_write;
     s->node.close = afunix_node_close;
     s->node.poll  = afunix_node_poll;
+    s->node.ioctl = afunix_node_ioctl;
     s->node.impl  = (uintptr_t)s;
     strlcpy(s->node.name, "<socket>", sizeof(s->node.name));
     return s;
