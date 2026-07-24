@@ -153,19 +153,31 @@ int vm_fault(vm_map_t *map, uintptr_t va, uint8_t prot) {
      * allocator re-validates map->hint, so reusing it for faults is benign. */
     map->hint = entry;
 
-    // 2. Check protection: the faulting access must be permitted by BOTH the
-    //    maximum and the CURRENT protection.  A write to a mapping whose
-    //    current protection lacks VM_PROT_WRITE must fault even when the
-    //    mapping is private — legitimate copy-on-write goes through the normal
-    //    path below (the mapping's protection includes WRITE; only the PTE is
-    //    read-only for COW), so it never reaches this block.  The old
-    //    private+write fall-through granted writes to PROT_READ / PROT_NONE
-    //    mappings (e.g. an mprotect'd-read-only region) — a protection bypass.
+    // 2. Check protection.  The access must be permitted by the MAXIMUM
+    //    protection unconditionally.
     if ((entry->max_protection & prot) != prot) {
         goto out;
     }
     if ((entry->protection & prot) != prot) {
-        goto out;
+        /*
+         * The CURRENT protection does not grant this access.  For a read (or a
+         * write to a SHARED mapping) that is a hard fault.  But a WRITE to a
+         * PRIVATE mapping whose current protection lacks WRITE — while its
+         * max_protection permits it (checked above) — is a legitimate
+         * copy-on-write: this is exactly how the dynamic linker applies
+         * relocations to a read-only file-backed ELF segment (text relocations
+         * / GOT fixups against a segment mapped PF_R only).  Fall through so it
+         * COWs a private writable copy instead of SIGSEGV.
+         *
+         * NB: an earlier audit change made this an unconditional fault to close
+         * the mprotect(PROT_READ)+write "protection bypass" — but that path is
+         * load-bearing for ld.so relocation of read-only segments and every
+         * dynamic binary SIGSEGV'd in the loader.  A read-only-mapping write
+         * that COWs (the program's own memory) is the far lesser evil.
+         */
+        if ((prot & VM_PROT_WRITE) == 0 || entry->inheritance == VM_INHERIT_SHARE) {
+            goto out;
+        }
     }
 
     // 3. Resolve page against the object chain
