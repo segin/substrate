@@ -474,6 +474,44 @@ static int signal_core_dump_permitted(process_t *p) {
     return p->rlimits[RLIMIT_CORE].rlim_cur != 0;
 }
 
+/*
+ * proc_exec_reset_signals - POSIX execve() signal-disposition reset.
+ *
+ * On exec(), every *caught* signal is reset to SIG_DFL (ignored signals stay
+ * ignored, defaulted signals stay defaulted); the per-process signal-restorer
+ * table, the sig_catch bitmask, the alternate signal stack, and per-process
+ * timers are all cleared.  Skipping this lets the new image inherit a stale
+ * handler pointer from the previous image and jump into now-unmapped code when
+ * that signal is delivered — e.g. an a.out program inheriting the shell's
+ * SIGCHLD handler and crashing when a child exits.  Called from every exec
+ * loader.
+ */
+void proc_exec_reset_signals(void) {
+    if (!current_process) return;
+
+    for (int sig = 1; sig <= NSIG; sig++) {
+        struct sigaction *act = &current_process->sig_actions[sig - 1];
+        if (act->sa_handler != SIG_IGN && act->sa_handler != SIG_DFL) {
+            act->sa_handler = SIG_DFL;
+            memset(&act->sa_mask, 0, sizeof(act->sa_mask));
+            act->sa_flags = 0;
+        }
+    }
+
+    memset(current_process->linux_sig_restorer, 0,
+           sizeof(current_process->linux_sig_restorer));
+    current_process->sig_catch = 0;   /* ignored signals stay ignored */
+
+    if (current_thread) {
+        current_thread->sig_alt_stack.ss_sp    = NULL;
+        current_thread->sig_alt_stack.ss_size  = 0;
+        current_thread->sig_alt_stack.ss_flags = SS_DISABLE;
+        current_thread->sig_on_stack           = 0;
+    }
+
+    proc_ptimers_clear(current_process);
+}
+
 // Signal System Calls
 int kern_sigaction(int sig, const struct sigaction *act, struct sigaction *oact) {
     if (sig <= 0 || sig >= NSIG) return -EINVAL;
@@ -489,7 +527,7 @@ int kern_sigaction(int sig, const struct sigaction *act, struct sigaction *oact)
     
     if (act) {
         current_process->sig_actions[sig - 1] = *act;
-        
+
         /* Update sig_catch and sig_ignore bitmasks */
         if (act->sa_handler == SIG_IGN) {
             current_process->sig_ignore |= mask;

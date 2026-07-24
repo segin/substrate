@@ -546,6 +546,12 @@ static int aout_load(int fd, const char *path, char *const argv[],
         return rc;
     }
 
+    /* POSIX: caught signal handlers are reset to SIG_DFL across exec.  Without
+     * this the a.out image inherits the previous image's handler pointers (e.g.
+     * the shell's SIGCHLD handler) and jumps into now-unmapped code the first
+     * time such a signal is delivered. */
+    proc_exec_reset_signals();
+
     /* Process state. */
     current_process->perso_id = PERS_LINUX;
     current_process->bitness = BITNESS_32;
