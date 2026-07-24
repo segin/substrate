@@ -325,21 +325,31 @@ static int aout_build_stack(pmap_t pmap, char **kargv, int argc,
     const uint32_t top = AOUT_USER_MAX;
     const uint32_t eager = 32;                 /* 128 KiB mapped up front */
     uint32_t base = top - eager * AOUT_PAGE;
-    uint32_t argv_ua[ARG_MAX_COUNT];
-    uint32_t envp_ua[ARG_MAX_COUNT];
+    /* argv/envp user-pointer arrays are heap-allocated: at ARG_MAX_COUNT
+     * entries they are 16 KiB each, far too large for the 16 KiB kernel
+     * stack (a real environment overflowed it and corrupted the return
+     * address -> return to 0xffffffff). */
+    uint32_t *argv_ua = kmalloc(sizeof(uint32_t) * (size_t)(argc + 1));
+    uint32_t *envp_ua = kmalloc(sizeof(uint32_t) * (size_t)(envc + 1));
     uint32_t sp;
     int i;
+
+    if (!argv_ua || !envp_ua) {
+        if (argv_ua) kfree(argv_ua, sizeof(uint32_t) * (size_t)(argc + 1));
+        if (envp_ua) kfree(envp_ua, sizeof(uint32_t) * (size_t)(envc + 1));
+        return -ENOMEM;
+    }
 
     for (uint32_t i2 = 0; i2 < eager; i2++) {
         void *pa = pmm_alloc_block();
         uint32_t phys;
         if (!pa) {
-            return -ENOMEM;
+            goto oom;
         }
         phys = (uint32_t)(uintptr_t)pa - 0xC0000000U;
         if (pmap_enter(pmap, base + i2 * AOUT_PAGE, phys, VM_PROT_WRITE, 0) < 0) {
             pmm_free_block(pa);
-            return -ENOMEM;
+            goto oom;
         }
         memset(pa, 0, AOUT_PAGE);
     }
@@ -399,7 +409,14 @@ static int aout_build_stack(pmap_t pmap, char **kargv, int argc,
     }
 
     *sp_out = sp;
+    kfree(argv_ua, sizeof(uint32_t) * (size_t)(argc + 1));
+    kfree(envp_ua, sizeof(uint32_t) * (size_t)(envc + 1));
     return 0;
+
+oom:
+    kfree(argv_ua, sizeof(uint32_t) * (size_t)(argc + 1));
+    kfree(envp_ua, sizeof(uint32_t) * (size_t)(envc + 1));
+    return -ENOMEM;
 }
 
 static int aout_load(int fd, const char *path, char *const argv[],
@@ -532,6 +549,10 @@ static int aout_load(int fd, const char *path, char *const argv[],
     /* Process state. */
     current_process->perso_id = PERS_LINUX;
     current_process->bitness = BITNESS_32;
+    /* ZMAGIC/OMAGIC map text at VA 0, so pointers into the first page (e.g. a
+     * uselib() path string in .text) are valid — let copyin/copyinstr accept
+     * the low region for this process. */
+    current_process->low_va_valid = (txtaddr == 0) ? 1 : 0;
     current_process->brk_start = AOUT_ROUND_UP(brk);
     current_process->brk = current_process->brk_start;
     {

@@ -169,6 +169,12 @@ typedef struct process {
     uint8_t  ac_flag;
     uint8_t  is_kernel_task; // 1 if kernel thread, 0 if user process
     uint8_t  bitness;        // Process execution mode (16/32/64)
+    /* Set by the a.out loader for Linux ZMAGIC/OMAGIC images, whose text
+     * segment is mapped at virtual address 0.  Tells validate_user_addr()
+     * that the low page region is legitimately mapped for this process, so
+     * copyin/copyinstr must not reject sub-USER_STACK_MIN pointers up front
+     * (an unmapped low access is still caught by the on_fault path). */
+    uint8_t  low_va_valid;
     struct rlimit rlimits[RLIM_NLIMITS];
     /* RLIMIT_MEMLOCK soft/hard limit, tracked directly (rlimits[] is only
      * sized for RLIMIT_CORE).  RLIM_INFINITY == "unset/no limit". */
