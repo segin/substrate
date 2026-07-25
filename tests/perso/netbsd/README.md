@@ -52,12 +52,40 @@ O_APPEND.
 Known gap not covered: NetBSD returns `EFTYPE` for `open(symlink, O_NOFOLLOW)`
 where substrate returns `ELOOP`, and substrate has no `EFTYPE` to map onto.
 
+## semtest
+
+Pins the POSIX semaphore surface that libpthread's `sem_*` sits on — the
+`_ksem_*(2)` kernel-semaphore syscall cluster.  This is what SDL's `sem_init()`
+needs, and it was the blocker behind psymp3's `Unable to init SDL: sem_init()
+failed`.
+
+| | case | expected |
+|---|---|---|
+| T1 | `sem_init(value=2)` + `sem_getvalue` | value == 2 |
+| T2 | drain to 0, then `sem_trywait` | `EAGAIN` |
+| T3 | `sem_post` | value back to 1 |
+| T4 | `sem_timedwait` on a drained sem | `ETIMEDOUT` |
+| T5 | `sem_destroy` on a fresh, untouched sem | success |
+| T6 | blocking `sem_wait` woken by a threaded `sem_post` | wakes |
+| T7 | pshared `sem_init` (the `KSEM_PSHARED` id marker path) | value round-trips |
+| T8 | named `sem_open` / `sem_unlink` | success |
+
+Known quirk not asserted against: on real NetBSD, `sem_destroy` on a semaphore
+that has had a waiter (T4's timedwait, T6's threaded wait) returns `EBUSY` from
+a lingering reference; substrate does not reproduce that refcount lifetime, so
+T5 destroys a *separate* fresh sem instead of the ones the other cases touch.
+
 ### Build + run
 
 On a NetBSD 10.1/i386 host:
 
     cc -O1 -Wall -Wextra -o lwptest lwptest.c
     ./lwptest            # must be ALL PASS — this is the reference
+
+`semtest` uses `sem_*` and spawns a thread, so it links libpthread:
+
+    cc -O1 -Wall -Wextra -o semtest semtest.c -lpthread
+    ./semtest            # must be ALL PASS — the reference
 
 Then, on the substrate side, stage the binary into the image and run it under
 the personality (`netbsd.img` is a local experiment image; a single-file
