@@ -44,6 +44,22 @@ struct aout_exec {
 
 #define AOUT_HEADER_SIZE  32U
 
+/*
+ * File offset of the text segment (Linux's N_TXTOFF).  ZMAGIC leaves a
+ * 1 KiB gap ahead of the text, QMAGIC maps the header as the head of the
+ * text segment, OMAGIC/NMAGIC put text immediately after the header.
+ *
+ * Whether this offset is page-aligned decides how the image can be loaded,
+ * and it is the same test Linux's binfmt_aout makes: only QMAGIC (offset 0)
+ * can be demand-paged from the file segment by segment; every other magic
+ * must be read flat into one anonymous region.
+ */
+#define AOUT_ZMAGIC_TXTOFF  1024U
+
+#define AOUT_TXTOFF(magic)                                                  \
+    ((magic) == AOUT_ZMAGIC_VAL ? AOUT_ZMAGIC_TXTOFF :                      \
+     ((magic) == AOUT_QMAGIC_VAL ? 0U : AOUT_HEADER_SIZE))
+
 /* Helper macros for parsing midmag. */
 #define AOUT_GETMAGIC(mm)  ((uint32_t)(mm) & 0xFFFFU)
 #define AOUT_GETMID(mm)    (((uint32_t)(mm) >> 16) & 0x3FFU)

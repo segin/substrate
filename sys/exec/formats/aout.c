@@ -426,7 +426,7 @@ static int aout_load(int fd, const char *path, char *const argv[],
     int argc = 0, envc = 0;
     uint32_t magic;
     uint32_t txtaddr, txtoff, dataddr, dataoff, bssaddr, brk;
-    uint8_t text_prot;
+    int flat;
     pmap_t pmap;
     vm_map_t *map;
     uint32_t sp;
@@ -454,25 +454,17 @@ static int aout_load(int fd, const char *path, char *const argv[],
     }
 
     magic = AOUT_GETMAGIC(hdr.a_midmag);
-    switch (magic) {
-    case AOUT_ZMAGIC_VAL:
-        txtaddr = 0; txtoff = 1024;
-        dataddr = AOUT_ROUND_UP(hdr.a_text);
-        text_prot = VM_PROT_READ | VM_PROT_EXEC;
-        break;
-    case AOUT_QMAGIC_VAL:
-        txtaddr = AOUT_PAGE; txtoff = 0;
-        dataddr = AOUT_PAGE + AOUT_ROUND_UP(hdr.a_text);
-        text_prot = VM_PROT_READ | VM_PROT_EXEC;
-        break;
-    default: /* OMAGIC / NMAGIC: contiguous, writable text */
-        txtaddr = 0; txtoff = sizeof(struct aout_exec);
-        dataddr = (magic == AOUT_OMAGIC_VAL)
-                      ? txtaddr + hdr.a_text
-                      : AOUT_ROUND_UP(hdr.a_text);
-        text_prot = VM_PROT_READ | VM_PROT_WRITE | VM_PROT_EXEC;
-        break;
-    }
+    txtoff = AOUT_TXTOFF(magic);
+    /* QMAGIC alone leaves the first page unmapped as the NULL guard and maps
+     * its header as the head of the text segment; every other Linux magic
+     * starts text at virtual address 0. */
+    txtaddr = (magic == AOUT_QMAGIC_VAL) ? AOUT_PAGE : 0;
+    /* A text offset that is not page-aligned cannot be demand-paged from the
+     * file, so Linux loads the whole image flat and text+data end up
+     * contiguous -- data at txtaddr + a_text, with no page rounding. */
+    flat = (txtoff & AOUT_PAGE_MASK) != 0;
+    dataddr = flat ? txtaddr + hdr.a_text
+                   : AOUT_ROUND_UP(txtaddr + hdr.a_text);
     dataoff = txtoff + hdr.a_text;
     bssaddr = dataddr + hdr.a_data;
     brk = bssaddr + hdr.a_bss;
@@ -518,25 +510,26 @@ static int aout_load(int fd, const char *path, char *const argv[],
         return -ENOMEM;
     }
 
-    if (magic == AOUT_OMAGIC_VAL || magic == AOUT_NMAGIC_VAL) {
-        /* Text + data are contiguous; map as one region, then extend for bss. */
-        rc = aout_map_region(pmap, map, txtaddr, hdr.a_text + hdr.a_data,
-                             hdr.a_text + hdr.a_data + hdr.a_bss, text_prot,
+    if (flat) {
+        /* Linux's vm_brk() + read_code() path: one anonymous, zero-filled,
+         * read/write/exec region spanning text, data and bss, with
+         * a_text + a_data read from txtoff as a single contiguous extent.
+         * The text is writable because the a.out shared-library scheme has
+         * the runtime linker patch jump-table slots in place at load time. */
+        rc = aout_map_region(pmap, map, txtaddr,
+                             hdr.a_text + hdr.a_data,
+                             hdr.a_text + hdr.a_data + hdr.a_bss,
+                             VM_PROT_READ | VM_PROT_WRITE | VM_PROT_EXEC,
                              fd, txtoff);
-        if (rc == 0 && hdr.a_data > 0) {
-            kern_lseek(fd, (off_t)dataoff, 0);
-            if (kern_read(fd, (void *)(uintptr_t)dataddr, (int)hdr.a_data)
-                != (int)hdr.a_data) {
-                rc = -EIO;
-            }
-        }
     } else {
+        /* QMAGIC: demand-paged, text and data mapped separately. */
         rc = aout_map_region(pmap, map, txtaddr, hdr.a_text, hdr.a_text,
-                             text_prot, fd, txtoff);
+                             VM_PROT_READ | VM_PROT_EXEC, fd, txtoff);
         if (rc == 0) {
             rc = aout_map_region(pmap, map, dataddr, hdr.a_data,
                                  hdr.a_data + hdr.a_bss,
-                                 VM_PROT_READ | VM_PROT_WRITE, fd, dataoff);
+                                 VM_PROT_READ | VM_PROT_WRITE | VM_PROT_EXEC,
+                                 fd, dataoff);
         }
     }
     if (rc != 0) {
@@ -613,13 +606,25 @@ static int aout_load(int fd, const char *path, char *const argv[],
  * carries its fixed load address in a_entry (libc.so.4 -> 0x60000000,
  * /lib/ld.so -> 0x62f00000); the crt0 of a dynamically-linked a.out binary
  * calls uselib() for each library, then jumps into the fixed jump-table
- * addresses baked into the executable.  We map the library's text (RX), data
- * (RW) and bss (zero) at that address in the current pmap — no new address
- * space, no transfer of control.
+ * addresses baked into the executable.  No new address space, no transfer of
+ * control.
+ *
+ * The layout follows Linux's load_aout_library() (fs/binfmt_aout.c), which
+ * maps a library as ONE region [load, load + a_text + a_data + a_bss) with
+ * read/write/exec permission and reads a_text + a_data from N_TXTOFF as a
+ * single contiguous extent.  Two consequences are load-bearing:
+ *
+ *   - the data segment begins at load + a_text with no page rounding.  The
+ *     library is linked for that address, so rounding the gap up would shift
+ *     every absolute pointer baked into its data, and
+ *   - the text is writable, because the a.out jump-table scheme has ld.so
+ *     patch call slots in place at runtime.  Mapping it read-only only
+ *     appeared to work because writes to a read-only private mapping are
+ *     currently granted silently (audit A30, reverted).
  */
 static int aout_load_library(const char *path) {
     struct aout_exec hdr;
-    uint32_t magic, load, txtoff, dataddr, dataoff, brk;
+    uint32_t magic, load, txtoff, filesz, memsz;
     pmap_t pmap;
     vm_map_t *map;
     int fd, rc;
@@ -645,51 +650,46 @@ static int aout_load_library(const char *path) {
     }
 
     magic = AOUT_GETMAGIC(hdr.a_midmag);
+    /* Linux accepts only the two demand-paged magics as a library, refuses
+     * one that still carries relocations, and requires ZMAGIC's load address
+     * to be page aligned. */
+    if (magic != AOUT_ZMAGIC_VAL && magic != AOUT_QMAGIC_VAL) {
+        kern_close(fd);
+        return -ENOEXEC;
+    }
+    if (hdr.a_trsize != 0 || hdr.a_drsize != 0) {
+        kern_close(fd);
+        return -ENOEXEC;
+    }
+    if (magic == AOUT_ZMAGIC_VAL && (hdr.a_entry & AOUT_PAGE_MASK) != 0) {
+        kern_close(fd);
+        return -ENOEXEC;
+    }
+
     /* A shared library carries its fixed load address in a_entry. */
     load = hdr.a_entry & ~AOUT_PAGE_MASK;
     if (load == 0) {
         kern_close(fd);
         return -ENOEXEC;
     }
-    if (magic == AOUT_ZMAGIC_VAL) {
-        txtoff = 1024;
-        dataddr = load + AOUT_ROUND_UP(hdr.a_text);
-    } else if (magic == AOUT_QMAGIC_VAL) {
-        txtoff = 0;
-        dataddr = load + AOUT_ROUND_UP(hdr.a_text);
-    } else { /* OMAGIC/NMAGIC */
-        txtoff = sizeof(struct aout_exec);
-        dataddr = (magic == AOUT_OMAGIC_VAL) ? load + hdr.a_text
-                                             : load + AOUT_ROUND_UP(hdr.a_text);
+    txtoff = AOUT_TXTOFF(magic);
+
+    /* aout_validate_header() has already bounded each segment to 1 GiB, so
+     * these sums cannot wrap; the load address is attacker-controlled, so
+     * the span still has to be confined to the user address space. */
+    filesz = hdr.a_text + hdr.a_data;
+    memsz = filesz + hdr.a_bss;
+    if (memsz > AOUT_USER_MAX || load > AOUT_USER_MAX - memsz) {
+        kern_close(fd);
+        return -ENOEXEC;
     }
-    dataoff = txtoff + hdr.a_text;
-    brk = dataddr + hdr.a_data + hdr.a_bss;
-    (void)brk;
 
     pmap = (pmap_t)current_process->pmap;
     map = current_process->vm_map;
 
-    if (magic == AOUT_OMAGIC_VAL || magic == AOUT_NMAGIC_VAL) {
-        rc = aout_map_region(pmap, map, load, hdr.a_text + hdr.a_data,
-                             hdr.a_text + hdr.a_data + hdr.a_bss,
-                             VM_PROT_READ | VM_PROT_WRITE | VM_PROT_EXEC,
-                             fd, txtoff);
-        if (rc == 0 && hdr.a_data > 0) {
-            kern_lseek(fd, (off_t)dataoff, 0);
-            if (kern_read(fd, (void *)(uintptr_t)dataddr, (int)hdr.a_data)
-                != (int)hdr.a_data) {
-                rc = -EIO;
-            }
-        }
-    } else {
-        rc = aout_map_region(pmap, map, load, hdr.a_text, hdr.a_text,
-                             VM_PROT_READ | VM_PROT_EXEC, fd, txtoff);
-        if (rc == 0) {
-            rc = aout_map_region(pmap, map, dataddr, hdr.a_data,
-                                 hdr.a_data + hdr.a_bss,
-                                 VM_PROT_READ | VM_PROT_WRITE, fd, dataoff);
-        }
-    }
+    rc = aout_map_region(pmap, map, load, filesz, memsz,
+                         VM_PROT_READ | VM_PROT_WRITE | VM_PROT_EXEC,
+                         fd, txtoff);
 
     if (aout_debug_enabled()) {
         char b[96];
