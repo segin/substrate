@@ -26,6 +26,15 @@
 #define RT_SIG_TRAMPOLINE_ADDR  0xFE000010  /* For SA_SIGINFO handlers -> rt_sigreturn */
 #define NBSD_SIG_TRAMPOLINE_ADDR 0xFE000020 /* NetBSD: loads EBX=scp before sigreturn */
 #define FBSD_SIG_TRAMPOLINE_ADDR 0xFE000030 /* FreeBSD: loads EBX=scp before sigreturn */
+/*
+ * Linux passes nothing to sigreturn on the stack: the kernel recovers the
+ * frame from ESP alone (frame = ESP - 8 legacy, ESP - 4 for rt).  These
+ * slots therefore must NOT push an argument the way the native slots above
+ * do -- a pushed argument shifts ESP and the kernel then reads the
+ * sigcontext from below the frame.
+ */
+#define LINUX_SIG_TRAMPOLINE_ADDR    0xFE000040 /* Linux: popl %eax, then sigreturn */
+#define LINUX_RT_SIG_TRAMPOLINE_ADDR 0xFE000050 /* Linux: rt_sigreturn, no pop */
 
 /*
  * Signal Context (sigcontext)
