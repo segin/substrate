@@ -1366,6 +1366,37 @@ void trapsignal(process_t *p, int sig, int code) {
     /* For trap signals, deliver to current thread specifically.
      * current_thread is the faulting thread that caused the exception. */
     if (current_thread && current_thread->proc == p) {
+        /*
+         * A hardware trap is synchronous: returning to userspace re-executes
+         * the faulting instruction.  So if this signal is blocked or ignored
+         * we would fault again immediately, forever, with the process
+         * spinning and unkillable -- signal_handle_pending() gates on
+         * `sig_pending & ~sig_mask`, so a masked SIGSEGV is simply never
+         * dequeued.  That is easy to hit by accident: a handler installed
+         * with sigfillset(&sa.sa_mask) runs with *every* signal masked
+         * (see the new_mask computation in the delivery path), so any fault
+         * inside such a handler livelocks the machine's console with
+         * repeated identical traps.
+         *
+         * POSIX leaves a blocked hardware-generated SIGSEGV/SIGBUS/SIGILL/
+         * SIGFPE undefined; Linux resolves it in force_sig_info() by
+         * resetting the disposition to SIG_DFL and unblocking, so the
+         * default action -- terminate -- always wins.  Do the same.  Only
+         * trap-generated signals come through here (every caller is a fault
+         * handler in idt.c), so kill(2)/raise(2) semantics are untouched:
+         * blocking SIGSEGV and then being sent one asynchronously still
+         * leaves it pending, as it should.
+         */
+        uint32_t tsig_mask = sigmask(sig);
+        struct sigaction *tact = &p->sig_actions[sig - 1];
+
+        if ((current_thread->sig_mask & tsig_mask) ||
+            tact->sa_handler == SIG_IGN) {
+            tact->sa_handler = SIG_DFL;
+            tact->sa_flags = 0;
+            current_thread->sig_mask &= ~tsig_mask;
+        }
+
         /* Store trap info in thread's pending siginfo for later
          * delivery.  trap_addr is the caller's responsibility — the
          * trap dispatch site has cr2 / instruction pointer / etc.
