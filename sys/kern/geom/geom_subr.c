@@ -70,6 +70,32 @@ void geom_register_class(geom_class_t *cls) {
  * ============================================================
  */
 
+/*
+ * A sector read transfers disk->sector_size bytes per sector, which is NOT
+ * always 512: an ATAPI optical drive reports 2048.  The partition sniffers
+ * all read into fixed 512-byte stack buffers, so reading one sector off a
+ * CD-ROM overran them by 1536 bytes and smashed the kernel stack -- merely
+ * attaching a CD triple-faulted the machine during boot-time partition
+ * scanning.  Take the destination size and refuse a transfer that cannot
+ * fit; a caller whose buffer is too small simply sees "no partition table",
+ * which is the right answer for optical media anyway.
+ */
+int geom_read_sector_bounded(geom_disk_t *disk, uint64_t lba, void *buf,
+                             size_t bufsz) {
+    if (!disk || !disk->read || !buf) return -1;
+    if (disk->sector_size == 0 || disk->sector_size > bufsz) return -1;
+    return disk->read(disk, lba, 1, buf);
+}
+
+int geom_read_sectors_bounded(geom_disk_t *disk, uint64_t lba, size_t count,
+                              void *buf, size_t bufsz) {
+    if (!disk || !disk->read || !buf || count == 0) return -1;
+    if (disk->sector_size == 0) return -1;
+    /* count * sector_size must fit, without overflowing the multiply. */
+    if (count > bufsz / disk->sector_size) return -1;
+    return disk->read(disk, lba, count, buf);
+}
+
 int geom_read_sector(geom_disk_t *disk, uint64_t lba, void *buf) {
     if (!disk || !disk->read || !buf) return -1;
     return disk->read(disk, lba, 1, buf);

@@ -73,7 +73,7 @@ static int parse_extended(geom_disk_t *disk, uint64_t ext_start, uint64_t ext_si
            ebr_iterations < 60) {
         ebr_iterations++;
         /* Read EBR */
-        if (geom_read_sector(disk, ebr_lba, buf) != 0) {
+        if (geom_read_sector_bounded(disk, ebr_lba, buf, sizeof(buf)) != 0) {
             kprintf("GEOM: failed to read EBR at LBA %llu\n", (unsigned long long)ebr_lba);
             break;
         }
@@ -146,7 +146,7 @@ static int geom_mbr_sniff(geom_disk_t *disk, uint64_t offset, int depth, const c
     mbr_logical_part_t logicals[60];
     
     /* Read sector at offset */
-    if (geom_read_sector(disk, offset, buf) != 0) {
+    if (geom_read_sector_bounded(disk, offset, buf, sizeof(buf)) != 0) {
         return -1;
     }
     

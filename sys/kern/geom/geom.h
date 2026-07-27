@@ -200,6 +200,16 @@ int geom_read_sector(geom_disk_t *disk, uint64_t lba, void *buf);
 /* Helper - read multiple sectors from disk */
 int geom_read_sectors(geom_disk_t *disk, uint64_t lba, size_t count, void *buf);
 
+/*
+ * Bounded variants: fail rather than transfer more than `bufsz` bytes.
+ * Partition sniffers must use these -- they read into fixed-size stack
+ * buffers, and sector_size is 2048 on optical media.
+ */
+int geom_read_sector_bounded(geom_disk_t *disk, uint64_t lba, void *buf,
+                             size_t bufsz);
+int geom_read_sectors_bounded(geom_disk_t *disk, uint64_t lba, size_t count,
+                              void *buf, size_t bufsz);
+
 /* Lookup partition by name */
 geom_partition_t *geom_find_partition(const char *name);
 

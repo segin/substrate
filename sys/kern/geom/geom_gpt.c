@@ -81,7 +81,7 @@ static int geom_gpt_sniff(geom_disk_t *disk, uint64_t offset, int depth, const c
     uint8_t buf[512];
     
     /* Read GPT header at LBA 1 */
-    if (geom_read_sector(disk, 1, buf) != 0) {
+    if (geom_read_sector_bounded(disk, 1, buf, sizeof(buf)) != 0) {
         return -1;
     }
     
@@ -147,7 +147,12 @@ static int geom_gpt_sniff(geom_disk_t *disk, uint64_t offset, int depth, const c
     uint32_t entries_in_buf = (entry_sectors * 512) / hdr->entry_size;
     if (max_entries > entries_in_buf) max_entries = entries_in_buf;
 
-    if (geom_read_sectors(disk, hdr->partition_lba, entry_sectors, entry_buf) != 0) {
+    /* Bounded: every size computation in this function is in units of
+     * 512-byte sectors, so a device with a larger sector would both overrun
+     * entry_buf and mis-index the entries.  The header sniff above already
+     * rejects such a disk; this keeps the invariant local and explicit. */
+    if (geom_read_sectors_bounded(disk, hdr->partition_lba, entry_sectors,
+                                  entry_buf, sizeof(entry_buf)) != 0) {
         kprint("  ");
         kprint(disk->name);
         kprint(": failed to read GPT entries\n");

@@ -683,7 +683,19 @@ int ide_scan_controller(void) {
                 bdev->read = ide_blkdev_read;
                 bdev->write = ide_blkdev_write;
 
-                blkdev_register_disk(bdev);
+                /*
+                 * ATAPI (optical) media carries no MBR/GPT/BSD label -- it
+                 * is ISO9660 -- so register it without a partition scan.
+                 * blkdev_register_disk() would scan, which is both pointless
+                 * and, before the sniffers were bounded, fatal: a 2048-byte
+                 * sector read overran their 512-byte stack buffers.  ATA
+                 * disks are scanned below via partition_scan[].
+                 */
+                if (type == 1) {
+                    blkdev_register(bdev);
+                } else {
+                    blkdev_register_disk(bdev);
+                }
                 kprint("  ");
                 kprint(bdev->name);
                 kprint(": ");
