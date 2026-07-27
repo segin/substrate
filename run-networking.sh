@@ -78,6 +78,14 @@ set -eu
 #            default), 2.0 = EHCI (usb-ehci), 3.0 = xHCI (qemu-xhci). All USB
 #            devices attach to it. substrate only drives UHCI today; 2.0/3.0
 #            need the in-progress EHCI/xHCI drivers or the guest sees no USB.
+#   --virtio
+#            boot the root filesystem off a virtio-blk device instead of the
+#            AHCI disk: rootfs.img is attached as virtio-blk-pci and the kernel
+#            gets root=/dev/storage/virtio0. The boot ich9-ahci controller is
+#            created (empty), so --drive still works -- and since port 0 is now
+#            free, --drive images start there, making AHCI port N the guest's
+#            sataN. Exercises the virtio-blk driver as a real root device
+#            rather than the AHCI path.
 GFX=0
 GFX_MODE="1024x768@32"   # used for bare --gfx; --gfx=WxH@bpp overrides
 KVM=0
@@ -92,6 +100,7 @@ EXTRA_DRIVES=""
 EXTRA_CTRL_DRIVES=""
 FLOPPY_IMAGES=""           # newline-separated floppy diskette images (fd0, fd1)
 USB_VERSION="1.1"          # 1.1=UHCI (default), 2.0=EHCI, 3.0=xHCI
+VIRTIO=0                   # 1 = root on virtio-blk instead of AHCI
 while [ $# -gt 0 ]; do
     case "$1" in
         --gfx)      GFX=1 ;;
@@ -151,6 +160,7 @@ $1" ;;
         --floppy=*)
             FLOPPY_IMAGES="$FLOPPY_IMAGES
 ${1#--floppy=}" ;;
+        --virtio)   VIRTIO=1 ;;
         --usb-version=*)
             USB_VERSION="${1#--usb-version=}"
             case "$USB_VERSION" in
@@ -178,7 +188,9 @@ echo "run-networking.sh: USB $USB_VERSION host controller (${USB_CTRL#-device })
 # controller, enumerated as guest /dev/storage/sata1, sata2, ... The list is
 # newline-separated so paths with spaces survive.
 EXTRA_DRIVE_ARGS=""
-port=1
+# With --virtio the root disk is not on AHCI, so port 0 is free and the first
+# extra drive can use it -- keeping AHCI port N == guest sataN.
+if [ "$VIRTIO" -eq 1 ]; then port=0; else port=1; fi
 OLDIFS=$IFS
 IFS='
 '
@@ -189,8 +201,15 @@ for f in $EXTRA_DRIVES; do
         exit 1
     fi
     if [ "$port" -gt 5 ]; then
-        echo "run-networking.sh: at most 5 extra --drive images (AHCI ports 1-5);" \
-             "add a second '-device ich9-ahci' for more" >&2
+        # ICH9 AHCI has 6 ports; the boot disk holds port 0 unless --virtio
+        # moved the root filesystem off AHCI entirely.
+        if [ "$VIRTIO" -eq 1 ]; then
+            echo "run-networking.sh: at most 6 --drive images with --virtio (AHCI ports 0-5);" \
+                 "use --drive-ctrl for more" >&2
+        else
+            echo "run-networking.sh: at most 5 extra --drive images (AHCI ports 1-5);" \
+                 "add a second '-device ich9-ahci' for more" >&2
+        fi
         exit 1
     fi
     EXTRA_DRIVE_ARGS="$EXTRA_DRIVE_ARGS -drive file=$f,format=raw,if=none,id=drive$port -device ide-hd,bus=sata0.$port,unit=0,drive=drive$port"
@@ -258,7 +277,20 @@ for f in $FLOPPY_IMAGES; do
 done
 IFS=$OLDIFS
 
-APPEND="root=/dev/storage/sata0 trap"
+# Root device. Default: the boot disk on port 0 of the boot ich9-ahci
+# (guest /dev/storage/sata0). --virtio instead hands rootfs.img to a
+# virtio-blk-pci device, which the guest's virtio-blk driver registers as
+# /dev/storage/virtio0. The AHCI controller is still created either way so
+# --drive keeps working.
+if [ "$VIRTIO" -eq 1 ]; then
+    ROOT_DEV_ARGS="-device virtio-blk-pci,drive=drive0,id=vblk0"
+    ROOT_DEV="/dev/storage/virtio0"
+    echo "run-networking.sh: root on virtio-blk (guest $ROOT_DEV)"
+else
+    ROOT_DEV_ARGS="-device ide-hd,bus=sata0.0,unit=0,drive=drive0"
+    ROOT_DEV="/dev/storage/sata0"
+fi
+APPEND="root=$ROOT_DEV trap"
 GFX_ARGS=""
 ACCEL_ARG=""
 if [ "$GFX" -eq 1 ]; then
@@ -474,7 +506,7 @@ qemu-system-i386 -cpu qemu32,+sse,+sse2 $ACCEL_ARG \
   $SNAPSHOT_ARG \
   -drive file=rootfs.img,format=raw,if=none,id=drive0 \
   -device ich9-ahci,id=sata0$BOOT_AHCI_ADDR \
-  -device ide-hd,bus=sata0.0,unit=0,drive=drive0 \
+  $ROOT_DEV_ARGS \
   $EXTRA_DRIVE_ARGS \
   $EXTRA_CTRL_ARGS \
   $FLOPPY_ARGS \
