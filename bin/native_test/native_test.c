@@ -6,16 +6,17 @@
  * Properly detects and displays symbolic links with their targets.
  */
 
+#include <dirent.h>
+#include <errno.h>
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <unistd.h>
-#include <dirent.h>
 #include <string.h>
+#include <unistd.h>
+
 #include <sys/stat.h>
-#include <fcntl.h>
-#include <sys/wait.h>
 #include <sys/utsname.h>
-#include <errno.h>
+#include <sys/wait.h>
 
 #define major(dev) ((unsigned int)(((dev) >> 8) & 0xffu))
 #define minor(dev) ((unsigned int)((dev) & 0xffu))

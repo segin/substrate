@@ -11,13 +11,14 @@
  *     -N      limit output to N lines
  *     name    show only sessions for that user (or "reboot")
  */
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
-#include <fcntl.h>
 #include <unistd.h>
-#include <utmp.h>
+
+#include "utmp.h"
 
 static void field(char *dst, const char *src, size_t n)
 {

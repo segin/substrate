@@ -1,10 +1,10 @@
-#include "ln.h"
-
 #include <errno.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include "ln.h"
 
 static ln_backup_mode_t
 ln_backup_mode_from_string(const char *method, bool *ok)

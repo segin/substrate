@@ -14,14 +14,15 @@
 #include <ctype.h>
 #include <dirent.h>
 #include <errno.h>
-#include <getopt.h>
 #include <regex.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
 #include <time.h>
+
+#include "getopt.h"
+#include <sys/stat.h>
 
 #define DIFF_VERSION "diff (Substrate) 1.0"
 

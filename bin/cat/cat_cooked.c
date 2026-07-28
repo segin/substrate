@@ -1,7 +1,7 @@
-#include "cat_cooked.h"
-
 #include <errno.h>
 #include <stdio.h>
+
+#include "cat_cooked.h"
 
 static int emit_bytes(cat_emit_fn emit, void *ctx, const unsigned char *data, size_t len)
 {

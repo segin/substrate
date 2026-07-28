@@ -1,10 +1,10 @@
-#include "cp_preserve.h"
-
 #include <errno.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/time.h>
 #include <unistd.h>
+
+#include "cp_preserve.h"
+#include <sys/time.h>
 
 #if defined(CP_HOST_BUILD) && defined(__has_include)
 # if __has_include(<sys/xattr.h>)

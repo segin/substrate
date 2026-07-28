@@ -1,10 +1,5 @@
-#include <sys/types.h>
-#include <sys/time.h>
-#include <sys/resource.h>
-#include <sys/wait.h>
 #include <errno.h>
 #include <fcntl.h>
-#include <getopt.h>
 #include <signal.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -12,6 +7,12 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
+
+#include "getopt.h"
+#include <sys/resource.h>
+#include <sys/time.h>
+#include <sys/types.h>
+#include <sys/wait.h>
 
 typedef enum {
     FORMAT_DEFAULT,

@@ -1,6 +1,6 @@
-#include "echo_escape.h"
-
 #include <stddef.h>
+
+#include "echo_escape.h"
 
 static int
 echo_emit_bytes(echo_emit_fn emit, void *emit_ctx, const unsigned char *data,

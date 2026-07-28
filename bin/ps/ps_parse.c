@@ -11,13 +11,13 @@
  *   --help, --version
  */
 
+#include <pwd.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <getopt.h>
-#include <pwd.h>
 
+#include "getopt.h"
 #include "ps_impl.h"
 
 /* Parse a comma-separated PID list ("123,456,789") into out[].

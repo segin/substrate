@@ -1,10 +1,9 @@
-#include "cal_opts.h"
-
-#include "cal_math.h"
-
-#include <getopt.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include "cal_math.h"
+#include "cal_opts.h"
+#include "getopt.h"
 
 enum {
     CAL_OPT_COLOR = 256,

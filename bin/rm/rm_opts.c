@@ -1,8 +1,8 @@
-#include "rm_opts.h"
-
-#include <getopt.h>
 #include <stddef.h>
 #include <string.h>
+
+#include "getopt.h"
+#include "rm_opts.h"
 
 enum {
     RM_OPT_INTERACTIVE = 256,

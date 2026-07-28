@@ -12,14 +12,15 @@
  * its tpgid, and the tty itself is identified by the /proc/<pid>/fd/0
  * symlink resolving to the line's /dev node.
  */
+#include <dirent.h>
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
-#include <fcntl.h>
 #include <unistd.h>
-#include <dirent.h>
-#include <utmp.h>
+
+#include "utmp.h"
 
 /*
  * Copy a utmp char field, replacing non-printable bytes with '?'. ut_host is

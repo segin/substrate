@@ -1,13 +1,14 @@
-#include "job.h"
-#include "exec.h"
-#include <stdlib.h>
-#include <stdio.h>
-#include <unistd.h>
-#include <sys/wait.h>
-#include <string.h>
 #include <signal.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <termios.h>
+#include <unistd.h>
+
+#include "exec.h"
+#include "job.h"
 #include "util.h"
+#include <sys/wait.h>
 
 job_t *first_job = NULL;
 

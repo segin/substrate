@@ -9,9 +9,10 @@
  * input-order definition is trying to buy but cheaper and deterministic.
  */
 
-#include "top.h"
 #include <stdlib.h>
 #include <string.h>
+
+#include "top.h"
 
 const char *top_sort_label(top_sortkey_t k) {
     switch (k) {

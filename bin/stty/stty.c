@@ -26,6 +26,7 @@
 #include <string.h>
 #include <termios.h>
 #include <unistd.h>
+
 #include <sys/ioctl.h>
 
 static const char *prog = "stty";

@@ -7,13 +7,13 @@
  * file mitigates the first two at the grep layer (REQ-GREP-070..074,
  * REQ-GREP-044/045); back-references remain deferred (spec DEFER-1).
  */
-#include "grep.h"
-
 #include <ctype.h>
 #include <errno.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include "grep.h"
 
 /* ------------------------------------------------------------------ */
 /* small growable byte buffer                                          */

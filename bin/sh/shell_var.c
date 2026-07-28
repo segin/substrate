@@ -1,10 +1,11 @@
-#include "shell_var.h"
-#include "exec.h"
-#include "util.h"
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdio.h>
 #include <unistd.h>
+
+#include "exec.h"
+#include "shell_var.h"
+#include "util.h"
 
 typedef struct shell_var {
     char *name;

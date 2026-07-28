@@ -7,14 +7,14 @@
  * support the optional argument of --color, and apply last-wins dialect
  * selection (REQ-GREP-001..009, 020..023, 105).
  */
-#include "grep.h"
-
 #include <ctype.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+
+#include "grep.h"
 
 static const char *base_name(const char *path)
 {

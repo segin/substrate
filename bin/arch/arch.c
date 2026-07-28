@@ -7,6 +7,7 @@
  */
 #include <stdio.h>
 #include <string.h>
+
 #include <sys/utsname.h>
 
 static void usage(FILE *out, const char *prog)

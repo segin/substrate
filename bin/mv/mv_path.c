@@ -1,7 +1,7 @@
-#include "mv_path.h"
-
 #include <stdlib.h>
 #include <string.h>
+
+#include "mv_path.h"
 #include <sys/stat.h>
 
 void mv_path_strip_trailing_slashes(char *path)

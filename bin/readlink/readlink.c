@@ -26,12 +26,13 @@
  *   --, --help, --version
  *   Multiple FILE operands are accepted (BSD and GNU).
  */
+#include <errno.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <errno.h>
-#include <limits.h>
 #include <unistd.h>
+
 #include <sys/stat.h>
 
 #ifndef PATH_MAX

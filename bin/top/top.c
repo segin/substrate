@@ -9,26 +9,26 @@
  * top_snapshot.c, rendering in top_render.c, ordering in top_sort.c.
  */
 
-#include "top.h"
+#include <ctype.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <poll.h>
+#include <pwd.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
-#include <errno.h>
-#include <ctype.h>
-#include <time.h>
-#include <pwd.h>
-#include <fcntl.h>
 #include <termios.h>
-#include <signal.h>
-#include <poll.h>
+#include <time.h>
+#include <unistd.h>
+
+#include "top.h"
 #include <sys/ioctl.h>
 #include <sys/resource.h>
+#include <sys/sysinfo.h>
 
 #define TOP_VERSION   "1.0"
 #define FRAME_CAP     (64 * 1024)   /* REQ-23-0092 */
-
-extern int sys_proc_info(pid_t pid, sys_procinfo_t *info);
 
 /* ---- terminal state (restored on every exit path, REQ-23-0020) ---- */
 static struct termios     g_saved_tio;

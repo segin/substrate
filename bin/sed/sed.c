@@ -11,14 +11,14 @@
  *   sed [-EnrsSz] [-i[ext]] [-e script ...] -f file ... [file ...]
  */
 #include <errno.h>
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
 #include <unistd.h>
-#include <fcntl.h>
 
 #include "sed.h"
+#include <sys/stat.h>
 
 /* Global execution state */
 sed_state_t G;

@@ -8,20 +8,13 @@
  * compute %CPU as (delta_jiffies / (system_delta * ncpu) * 100).
  */
 
-#include "top.h"
-#include <sys/sysinfo.h>
-#include <time.h>
-#include <string.h>
 #include <errno.h>
-
+#include <string.h>
+#include <time.h>
 #include <unistd.h>
 
-extern int sys_proc_count(void);
-extern int sys_proc_list(pid_t *pids, size_t count);
-extern int sys_proc_info(pid_t pid, sys_procinfo_t *info);
-extern int sys_vm_stats(sys_vmstat_t *stats);
-extern int sys_cpu_count(void);
-extern int sysinfo(struct sysinfo *info);
+#include "top.h"
+#include <sys/sysinfo.h>
 
 /* Jiffies per second (kernel HZ).  Substrate's HZ is 128; query it rather
  * than hardcode, falling back to 100 if the libc clock-tick is unknown. */

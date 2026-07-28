@@ -1,9 +1,9 @@
-#include "cp_copy.h"
-#include "cp_opts.h"
-
 #include <signal.h>
 #include <stdio.h>
 #include <string.h>
+
+#include "cp_copy.h"
+#include "cp_opts.h"
 
 static volatile sig_atomic_t g_stop_requested = 0;
 

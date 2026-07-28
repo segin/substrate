@@ -1,13 +1,12 @@
-#include "cp_atomic.h"
-
-#include "cp_path.h"
-
 #include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+
+#include "cp_atomic.h"
+#include "cp_path.h"
 
 static int cp_atomic_fsync_fd(int fd)
 {

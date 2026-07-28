@@ -1,13 +1,13 @@
-#include "mv.h"
-#include "mv_path.h"
-
 #include <errno.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
 #include <unistd.h>
+
+#include "mv.h"
+#include "mv_path.h"
+#include <sys/stat.h>
 
 static const char *progname_from_argv0(const char *argv0)
 {

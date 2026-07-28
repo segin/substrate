@@ -1,17 +1,17 @@
+#include <pwd.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
-#include <signal.h>
-#include <pwd.h>
 #include <time.h>
-#include "prompt.h"
-#include "util.h"
-#include "expand.h"
-#include "exec.h"   /* shell_promptvars */
-#include "shell_var.h"
+#include <unistd.h>
+
 #include "exec.h"
+#include "expand.h"
 #include "job.h"
+#include "prompt.h"
+#include "shell_var.h"
+#include "util.h"
 
 char *expand_prompt_escapes(const char *ps1, int command_count, int extended, int depth) {
     if (!ps1) return NULL;

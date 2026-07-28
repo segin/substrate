@@ -1,15 +1,14 @@
-#include "rm_walk.h"
-
-#include "rm_safety.h"
-#include "rm_scrub.h"
-
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
 #include <unistd.h>
+
+#include "rm_safety.h"
+#include "rm_scrub.h"
+#include "rm_walk.h"
+#include <sys/stat.h>
 
 static void
 rm_report_errno(const struct rm_options *opts, const char *path, int errnum)

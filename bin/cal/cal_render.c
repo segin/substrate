@@ -1,12 +1,11 @@
-#include "cal_render.h"
-
-#include "cal_math.h"
-
 #include <locale.h>
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
+
+#include "cal_math.h"
+#include "cal_render.h"
 
 static size_t
 cal_body_width(const struct cal_options *opts)

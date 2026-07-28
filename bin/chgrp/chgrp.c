@@ -1,6 +1,7 @@
 #include <ctype.h>
 #include <dirent.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <grp.h>
 #include <pwd.h>
 #include <stdbool.h>
@@ -12,8 +13,6 @@
 
 #include <sys/stat.h>
 #include <sys/types.h>
-
-#include <fcntl.h>
 
 /* Bound recursion (one dir fd held per level) — see chown. */
 #define CHGRP_MAX_DEPTH 512

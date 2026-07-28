@@ -6,10 +6,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
 #include <unistd.h>
 
 #include "cat_cooked.h"
+#include <sys/stat.h>
 
 #define CAT_STACK_BUFSIZE 65536u
 #define CAT_COOKED_SINK_BUFSIZE 4096u

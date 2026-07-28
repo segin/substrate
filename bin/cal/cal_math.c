@@ -1,7 +1,7 @@
-#include "cal_math.h"
-
 #include <string.h>
 #include <time.h>
+
+#include "cal_math.h"
 
 static void
 cal_gregorian_from_jdn(long jdn, struct cal_date *out)

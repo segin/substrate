@@ -16,10 +16,10 @@
  * GNU agree on: strip the trailing slash(es) and the last component;
  * "" and "/"-only inputs yield ".", "/" stays "/".
  */
+#include <libgen.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <libgen.h>
 
 static const char *progname = "dirname";
 

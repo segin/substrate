@@ -1,15 +1,16 @@
-#include "expand.h"
-#include "exec.h"
-#include "shell_var.h"
-#include "util.h"
+#include <ctype.h>
+#include <dirent.h>
+#include <limits.h>
+#include <pwd.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <ctype.h>
-#include <dirent.h>
 #include <unistd.h>
-#include <limits.h>
-#include <pwd.h>
+
+#include "exec.h"
+#include "expand.h"
+#include "shell_var.h"
+#include "util.h"
 #include <sys/wait.h>
 
 /* ctype wrappers: the classification functions are only defined for an int

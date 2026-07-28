@@ -2,9 +2,9 @@
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
 
 #include "ls_colors.h"
+#include <sys/stat.h>
 
 static char color_di[32] = "\033[01;34m";
 static char color_ln[32] = "\033[01;36m";

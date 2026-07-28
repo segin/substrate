@@ -13,7 +13,6 @@
  * next successful password change.
  */
 
-#include <crypt.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <pwd.h>
@@ -21,11 +20,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <termios.h>
+#include <unistd.h>
+
+#include "crypt.h"
 #include <sys/pwdb.h>
 #include <sys/stat.h>
 #include <sys/types.h>
-#include <termios.h>
-#include <unistd.h>
 
 /* Overwrite a buffer so the compiler cannot elide the clear (no
  * explicit_bzero on this target). */

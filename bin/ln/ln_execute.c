@@ -1,13 +1,13 @@
-#include "ln.h"
-
 #include <errno.h>
 #include <limits.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
 #include <unistd.h>
+
+#include "ln.h"
+#include <sys/stat.h>
 
 #ifndef PATH_MAX
 #define PATH_MAX 4096

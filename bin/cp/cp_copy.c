@@ -1,9 +1,3 @@
-#include "cp_copy.h"
-
-#include "cp_atomic.h"
-#include "cp_path.h"
-#include "cp_preserve.h"
-
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -11,9 +5,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
+
+#include "cp_atomic.h"
+#include "cp_copy.h"
+#include "cp_path.h"
+#include "cp_preserve.h"
 #include <sys/stat.h>
 #include <sys/time.h>
-#include <unistd.h>
 
 #ifndef EOPNOTSUPP
 #define EOPNOTSUPP ENOSYS

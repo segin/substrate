@@ -8,7 +8,8 @@
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
-#include <utmp.h>
+
+#include "utmp.h"
 
 /*
  * Copy a utmp char field (not guaranteed NUL-terminated), replacing any

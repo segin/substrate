@@ -1,11 +1,12 @@
-#include <sys/types.h>
-#include <sys/param.h>
-#include <getopt.h>
 #include <grp.h>
 #include <pwd.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <unistd.h>
+
+#include "getopt.h"
+#include <sys/param.h>
+#include <sys/types.h>
 
 #define MAX_GROUPS 16384
 

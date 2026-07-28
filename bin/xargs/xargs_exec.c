@@ -5,14 +5,14 @@
  * -o child-stdin-from-tty, -P parallel children, and the BSD/GNU exit-code
  * mapping (CR-4).
  */
-#include "xargs.h"
-
+#include <errno.h>
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <errno.h>
 #include <unistd.h>
-#include <fcntl.h>
+
+#include "xargs.h"
 #include <sys/wait.h>
 
 static int running;     /* live -P children */

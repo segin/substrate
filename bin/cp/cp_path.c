@@ -1,7 +1,7 @@
-#include "cp_path.h"
-
 #include <stdlib.h>
 #include <string.h>
+
+#include "cp_path.h"
 
 int cp_path_is_dot_or_dotdot(const char *name)
 {

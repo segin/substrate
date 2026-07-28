@@ -6,17 +6,17 @@
  * (recursive openat/unlinkat traversal), and rm_scrub.c (BSD -P
  * 3-pass overwrite).  This file only wires them together.
  */
-#include "rm.h"
-#include "rm_opts.h"
-#include "rm_safety.h"
-#include "rm_walk.h"
-
 #include <signal.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+
+#include "rm.h"
+#include "rm_opts.h"
+#include "rm_safety.h"
+#include "rm_walk.h"
 
 static volatile sig_atomic_t g_interrupted = 0;
 

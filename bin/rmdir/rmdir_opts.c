@@ -1,7 +1,7 @@
-#include "rmdir_opts.h"
-
-#include <getopt.h>
 #include <string.h>
+
+#include "getopt.h"
+#include "rmdir_opts.h"
 
 enum {
     RMDIR_OPT_IGNORE_FAIL_ON_NON_EMPTY = 256,

@@ -1,12 +1,13 @@
+#include <ctype.h>
+#include <stdarg.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <ctype.h>
-#include <stdarg.h>
 #include <unistd.h>
-#include <sys/wait.h>
-#include <stdint.h>
+
 #include "num.h"
+#include <sys/wait.h>
 
 /* Caps: a huge output base OOMs the printer, and a huge power exponent makes
  * a number with billions of digits — both DoS on untrusted input (DC-04). */
