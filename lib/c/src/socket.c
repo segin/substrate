@@ -16,16 +16,17 @@
  */
 
 #include <errno.h>
-#include <stdint.h>
-#include <string.h>
-#include <stdlib.h>
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <sys/un.h>
-#include <sys/syscall.h>
-#include <netinet/in.h>
 #include <netdb.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
+
 #include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <sys/syscall.h>
+#include <sys/types.h>
+#include <sys/un.h>
 
 long syscall(long number, ...);
 

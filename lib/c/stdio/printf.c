@@ -1,12 +1,12 @@
-#include <stdio.h>
-#include <stdarg.h>
-#include <string.h>
-#include <stdint.h>
-#include <stdlib.h>
-#include <unistd.h>
-#include <limits.h>
-#include <stddef.h>
 #include <errno.h>
+#include <limits.h>
+#include <stdarg.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
 
 // Helpers from kernel printf.c adapted for libc
 

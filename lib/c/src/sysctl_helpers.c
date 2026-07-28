@@ -1,11 +1,11 @@
-#include <sys/types.h>
-#include <sys/sysctl.h>
 #include <errno.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdint.h>
 
-extern int64_t _syscall6(int, intptr_t, intptr_t, intptr_t, intptr_t, intptr_t, intptr_t);
+#include <sys/sysctl.h>
+#include <sys/types.h>
+#include <sys_local.h>
 #define SYS_SYSCTL 243 // Matches sys/syscall.h syscall table
 
 int sysctl(int *name, unsigned int namelen, void *oldp, size_t *oldlenp, void *newp, size_t newlen) {

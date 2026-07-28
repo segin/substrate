@@ -12,11 +12,12 @@
  * copy-out, so two threads cannot clobber each other's static result mid-copy.
  */
 
-#include <netdb.h>
-#include <sys/socket.h>
-#include <string.h>
-#include <stdint.h>
 #include <errno.h>
+#include <netdb.h>
+#include <stdint.h>
+#include <string.h>
+
+#include <sys/socket.h>
 
 static volatile int netdb_lock;
 static void lock(void)   { while (__sync_lock_test_and_set(&netdb_lock, 1)) { } }

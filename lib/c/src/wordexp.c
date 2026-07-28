@@ -23,12 +23,12 @@
  * ( | & ; < > ( ) { } ) yield WRDE_BADCHAR, and unbalanced quotes WRDE_SYNTAX.
  */
 
-#include <wordexp.h>
 #include <glob.h>
+#include <pwd.h>
 #include <stdlib.h>
 #include <string.h>
-#include <pwd.h>
 #include <unistd.h>
+#include <wordexp.h>
 
 /* ---- a growable char buffer for the field being assembled ---- */
 struct buf {

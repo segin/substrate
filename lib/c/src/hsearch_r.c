@@ -7,10 +7,10 @@
  * most _r functions — because that is the documented hsearch_r() contract.
  */
 
+#include <errno.h>
 #include <search.h>
 #include <stdlib.h>
 #include <string.h>
-#include <errno.h>
 
 static int
 is_prime(unsigned int n)

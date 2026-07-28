@@ -1,13 +1,14 @@
-#include <time.h>
-#include <sys/types.h>
-#include <sys/time.h> // for gettimeofday
-#include <sys/times.h>
+#include <ctype.h>
 #include <errno.h>
-#include <string.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <ctype.h>
-#include <stdbool.h>
+#include <string.h>
+#include <time.h>
+
+#include <sys/time.h>
+#include <sys/times.h>
+#include <sys/types.h>
 
 #define SECS_PER_MIN  60
 #define SECS_PER_HOUR 3600

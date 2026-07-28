@@ -7,9 +7,10 @@
  * a sensible answer) but do not load anything.  This is enough to build and
  * run gettext-using software (GLib, etc.) without translations.
  */
-#include <libintl.h>
-#include <string.h>
 #include <stdlib.h>
+#include <string.h>
+
+#include <libintl.h>
 
 /* Single tracked text domain (gettext's default is "messages"). */
 static char *cur_domain;

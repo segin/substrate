@@ -8,17 +8,15 @@
  * _exit(127), which the parent observes via the normal wait path.
  */
 
-#include <spawn.h>
-#include <sched.h>
-#include <signal.h>
-#include <unistd.h>
-#include <stdlib.h>
-#include <string.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <sched.h>
+#include <signal.h>
+#include <spawn.h>
+#include <stdlib.h>
+#include <string.h>
 #include <termios.h>
-
-extern char **environ;
+#include <unistd.h>
 
 enum spawn_act_type { SPAWN_OPEN, SPAWN_CLOSE, SPAWN_DUP2, SPAWN_TCSETPGRP };
 

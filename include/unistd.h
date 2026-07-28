@@ -128,7 +128,10 @@ int execv(const char *path, char *const argv[]);
 int execvp(const char *file, char *const argv[]);
 int execl(const char *path, const char *arg, ...);
 int execlp(const char *file, const char *arg, ...);
-int execle(const char *path, const char *arg, ...);
+int execvpe(const char *file, char *const argv[], char *const envp[]);
+
+/* Global environment array */
+extern char **environ;
 pid_t waitpid(pid_t pid, int *status, int options);
 
 ssize_t read(int fd, void *buf, size_t count);

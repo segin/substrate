@@ -8,10 +8,11 @@
  * become -1, as glibc reports them.
  */
 
-#include <shadow.h>
-#include <string.h>
-#include <stdlib.h>
 #include <errno.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include <shadow.h>
 
 #define SHADOW_PATH "/etc/shadow"
 

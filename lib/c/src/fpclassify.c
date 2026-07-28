@@ -5,8 +5,8 @@
  * __issignaling*, __iseqsig* for math.h macros.
  */
 
-#include <math.h>
 #include <fenv.h>
+#include <math.h>
 #include <stdint.h>
 
 /*

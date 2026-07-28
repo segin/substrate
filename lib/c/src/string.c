@@ -1,8 +1,9 @@
-#include <string.h>
 #include <errno.h>
-#include <stdint.h>
-#include <stdlib.h>
 #include <stddef.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 #ifdef HOST_TEST
 #undef memchr
@@ -39,8 +40,7 @@ __attribute__((noinline, used))
 static void
 __substrate_libc_backtrace(uintptr_t fp)
 {
-    extern int fprintf(void *, const char *, ...);
-    extern void *stderr;
+
 
     fprintf(stderr, "  user backtrace:\n");
     for (int depth = 0; depth < 16; depth++) {
@@ -99,8 +99,7 @@ void *memcpy(void *dest, const void *src, size_t n) {
      * bail.  Caller continues with the destination unmodified — a
      * visible corruption beats a process kill. */
     if (__builtin_expect((!src || !dest) && n > 0, 0)) {
-        extern int fprintf(void *, const char *, ...);
-        extern void *stderr;
+
         fprintf(stderr,
                 "memcpy(NULL): dest=%p src=%p n=%u\n",
                 dest, src, (unsigned)n);
@@ -198,8 +197,7 @@ void *memset(void *s, int c, size_t n) {
      * memset's word-fill loop SIGSEGVs immediately, hiding the
      * caller.  Log the caller's return address and bail. */
     if (__builtin_expect(!s && n > 0, 0)) {
-        extern int fprintf(void *, const char *, ...);
-        extern void *stderr;
+
         fprintf(stderr,
                 "memset(NULL): s=%p c=%d n=%u\n",
                 s, c, (unsigned)n);
@@ -406,8 +404,7 @@ char *strdup(const char *s) {
      * caller is passing junk; return NULL with errno=EFAULT instead
      * of SIGSEGV'ing in strlen. */
     if ((uintptr_t)s < 0x10000) {
-        extern int fprintf(void *, const char *, ...);
-        extern void *stderr;
+
         fprintf(stderr, "strdup: junk arg s=%p\n", (void *)s);
         __substrate_libc_backtrace((uintptr_t)__builtin_frame_address(0));
         errno = EFAULT;

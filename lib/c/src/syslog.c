@@ -16,17 +16,18 @@
  * openlog().  Resends after a closelog() reopen lazily again.
  */
 
-#include <syslog.h>
-#include <unistd.h>
+#include <errno.h>
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/socket.h>
-#include <sys/un.h>
-#include <sys/time.h>
-#include <fcntl.h>
+#include <syslog.h>
 #include <time.h>
-#include <errno.h>
+#include <unistd.h>
+
+#include <sys/socket.h>
+#include <sys/time.h>
+#include <sys/un.h>
 
 /* BSD convention.  Substrate's /dev is a kernel-managed devfs that
  * can't host an arbitrary AF_UNIX socket inode (no backing storage),

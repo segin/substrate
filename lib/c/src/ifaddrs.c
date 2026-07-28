@@ -7,15 +7,16 @@
  * struct ifaddrs linked list.  IPv4 only, which is all SIOCGIFCONF reports.
  */
 
-#include <ifaddrs.h>
-#include <sys/socket.h>
-#include <sys/ioctl.h>
-#include <net/if.h>
-#include <netinet/in.h>
-#include <unistd.h>
+#include <errno.h>
 #include <stdlib.h>
 #include <string.h>
-#include <errno.h>
+#include <unistd.h>
+
+#include <ifaddrs.h>
+#include <net/if.h>
+#include <netinet/in.h>
+#include <sys/ioctl.h>
+#include <sys/socket.h>
 
 static struct sockaddr *dup_sa(const struct sockaddr *sa)
 {

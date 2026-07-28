@@ -5,13 +5,14 @@
  * Output to stderr, prefixed with the program name from
  * __progname / argv[0].
  */
-#include <err.h>
 #include <errno.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+
+#include <err.h>
 
 /* Weak so crt0 or the program itself can override; default keeps
  * err output sensible even if argv[0] capture isn't wired up. */

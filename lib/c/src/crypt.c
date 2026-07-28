@@ -9,9 +9,10 @@
  * thread safety use crypt_r with their own struct.
  */
 
-#include <crypt.h>
 #include <stddef.h>
 #include <string.h>
+
+#include <crypt.h>
 
 extern char *__crypt_sha256(const char *key, const char *setting,
                             char *out, size_t outsz);
