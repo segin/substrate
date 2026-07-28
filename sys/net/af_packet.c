@@ -16,17 +16,18 @@
  * without special-casing.
  */
 
-#include <vfs/vfs.h>
-#include <sys/proc.h>
-#include <sys/file.h>
-#include <sys/socket.h>
-#include <sys/netdev.h>
-#include <kern/sched.h>
-#include <kern/file.h>
-#include <vm/vm_kmem.h>
-#include <string.h>
-#include <stddef.h>
 #include <errno.h>
+#include <stddef.h>
+#include <string.h>
+
+#include <kern/file.h>
+#include <kern/sched.h>
+#include <sys/file.h>
+#include <sys/netdev.h>
+#include <sys/proc.h>
+#include <sys/socket.h>
+#include <vfs/vfs.h>
+#include <vm/vm_kmem.h>
 
 /* sockaddr_ll layout matches Linux's <linux/if_packet.h>.  Define
  * locally — substrate doesn't ship a Linux-style if_packet.h yet. */

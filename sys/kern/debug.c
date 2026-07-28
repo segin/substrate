@@ -1,10 +1,10 @@
 #include <stdio.h>
 #include <string.h>
 
-#include <sys/proc.h>
-#include <kern/sched.h>
-#include <kern/console.h>
 #include <exec/perso/personality.h>
+#include <kern/console.h>
+#include <kern/sched.h>
+#include <sys/proc.h>
 
 static const char *state_names[] = {
     "READY", "RUNNING", "BLOCKED", "ZOMBIE"

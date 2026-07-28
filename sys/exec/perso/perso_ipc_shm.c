@@ -12,14 +12,15 @@
  * returns it directly).  Only shmctl's shmid_ds (IPC_STAT/IPC_SET) differs.
  */
 
-#include <sys/shm.h>
-#include <sys/ipc.h>
-#include <sys/types.h>
-#include <sys/copy.h>
-#include <exec/perso/perso_ipc_shm.h>
 #include <errno.h>
-#include <string.h>
 #include <stdint.h>
+#include <string.h>
+
+#include <exec/perso/perso_ipc_shm.h>
+#include <sys/copy.h>
+#include <sys/ipc.h>
+#include <sys/shm.h>
+#include <sys/types.h>
 
 /* ======================================================================
  * Linux  (i386 ipc(2) multiplexer, syscall 117)

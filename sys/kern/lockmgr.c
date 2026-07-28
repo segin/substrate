@@ -5,15 +5,16 @@
  * drain, and priority inheritance (via turnstiles).
  */
 
-#include <sys/types.h>
+#include <string.h>
+
+#include <kern/panic.h>
+#include <kern/sched.h>
+#include <kern/sleepq.h>
+#include <kern/turnstile.h>
 #include <sys/errno.h>
 #include <sys/lock.h>
 #include <sys/proc.h>
-#include <kern/sched.h>
-#include <kern/sleepq.h>
-#include <kern/panic.h>
-#include <kern/turnstile.h>
-#include <string.h>
+#include <sys/types.h>
 
 /*
  * lockinit - Initialize a lockmgr lock

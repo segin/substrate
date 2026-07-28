@@ -19,21 +19,22 @@
  * personalities can each marshal their own ABI on top of it.
  */
 
-#include <sys/sem.h>
-#include <sys/ipc.h>
-#include <sys/types.h>
-#include <sys/proc.h>
-#include <sys/lock.h>
-#include <sys/copy.h>
-#include <sys/kern_syscalls.h>
-#include <vm/vm_kmem.h>
-#include <kern/sleepq.h>
-#include <kern/sched.h>
-#include <arch/i386/intr.h>
-#include <kern/time.h>
 #include <errno.h>
-#include <string.h>
 #include <stdint.h>
+#include <string.h>
+
+#include <arch/i386/intr.h>
+#include <kern/sched.h>
+#include <kern/sleepq.h>
+#include <kern/time.h>
+#include <sys/copy.h>
+#include <sys/ipc.h>
+#include <sys/kern_syscalls.h>
+#include <sys/lock.h>
+#include <sys/proc.h>
+#include <sys/sem.h>
+#include <sys/types.h>
+#include <vm/vm_kmem.h>
 
 struct ksem {
     int   val;        /* current value */

@@ -4,17 +4,18 @@
  * Core Device Management Implementation
  */
 
-#include <kern/device.h>
+#include <stdio.h>
+#include <string.h>
+
 #include <kern/bus.h>
+#include <kern/device.h>
 #include <kern/driver.h>
 #include <sys/errno.h>
 #include <sys/kobject.h>
 #include <sys/lock.h>
-#include <string.h>
-#include <stdio.h>
-#include <vm/vm_kmem.h> 
 #include <sys/types.h>
 #include <vfs/vfs.h>
+#include <vm/vm_kmem.h>
 
 static spinlock_t deferred_probe_lock = SPINLOCK_INIT("deferred_probe");
 static struct device *deferred_probe_head;

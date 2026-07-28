@@ -1,8 +1,9 @@
+#include <stdio.h>
+#include <string.h>
+
 #include <arch/i386/cpu.h>
 #include <arch/x86-common/msr.h>
 #include <kern/console.h>
-#include <stdio.h>
-#include <string.h>
 
 static struct i386_cpu_features cpu_features;
 static volatile uint32_t cpu_cycle_fallback = 0;

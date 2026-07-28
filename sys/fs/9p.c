@@ -1,11 +1,11 @@
-#include <vfs/vfs.h>
-#include <sys/9p.h>
-#include <string.h>
 #include <stddef.h>
-#include <vm/vm_kmem.h>
-#include <vfs/vfs.h>
+#include <string.h>
+
 #include <drivers/virtio/virtio.h>
+#include <sys/9p.h>
 #include <sys/errno.h>
+#include <vfs/vfs.h>
+#include <vm/vm_kmem.h>
 
 struct p9_fs {
     uint32_t next_fid;

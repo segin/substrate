@@ -1,15 +1,16 @@
-#include <sys/types.h>
-#include <sys/namei.h>
-#include <vfs/vnode.h>
-#include <sys/mount.h>
-#include <sys/proc.h>
-#include <sys/uio.h>
-#include <vm/vm_kmem.h>
-#include <sys/errno.h>
-#include <sys/signal.h>
 #include <string.h>
+
 #include <kern/panic.h>
+#include <sys/errno.h>
+#include <sys/mount.h>
+#include <sys/namei.h>
+#include <sys/proc.h>
+#include <sys/signal.h>
+#include <sys/types.h>
+#include <sys/uio.h>
+#include <vfs/vnode.h>
 #include <vm/uma.h>
+#include <vm/vm_kmem.h>
 
 /* MAXSYMLINKS defined in <sys/namei.h> */
 

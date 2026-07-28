@@ -7,63 +7,60 @@
  */
 
 /* Kernel internal includes */
-#include <kern/sched.h>
-#include <kern/sleepq.h>
-#include <sys/preempt.h>
-#include <kern/version.h>
-#include <kern/panic.h>
-#include <kern/console.h>
-#include <kern/cmdline.h>
-#include <exec/perso/personality.h>
-#include <exec/formats/elf.h>
-#include <pm/pm.h>
-#include <vm/vm_kmem.h>
-#include <vm/uma.h>
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdio.h>
+#include <string.h>
+
 #include <arch/i386/pmap.h>
-#include <sys/thr.h>
-#include <sys/acct.h>
-#include <sys/file.h>
-#include <sys/proc.h>
-#include <sys/signal.h>
-#include <sys/session.h>
-#include <sys/tty.h>
-#include <vfs/buf.h>
-#include <kern/version.h>
-#include <kern/file.h>
-#include <vfs/vfs.h>
-#include <drivers/console/uart/uart.h>
+#include <arch/x86-common/io.h>
 #include <drivers/console/console.h>
 #include <drivers/console/pty.h>
-#include <include/sys/sysinfo.h>
-#include <sys/kern_syscalls.h>
-#include <sys/utsname.h>
-
-#include <sys/smp.h>
-#include <sys/lock.h>
-#include <sys/types.h>
-#include <sys/param.h>
-#include <sys/mount.h>
-#include <sys/statvfs.h>
-#include <sys/stat.h>
+#include <drivers/console/uart/uart.h>
+#include <exec/formats/elf.h>
+#include <exec/perso/personality.h>
+#include <kern/cmdline.h>
+#include <kern/console.h>
+#include <kern/file.h>
+#include <kern/panic.h>
+#include <kern/sched.h>
+#include <kern/sleepq.h>
+#include <kern/time.h>
+#include <kern/version.h>
+#include <pm/pm.h>
+#include <sys/acct.h>
 #include <sys/errno.h>
+#include <sys/exec.h>
 #include <sys/fcntl.h>
+#include <sys/file.h>
 #include <sys/ioctl.h>
+#include <sys/kern_syscalls.h>
+#include <sys/lock.h>
+#include <sys/mount.h>
+#include <sys/namei.h>
+#include <sys/param.h>
+#include <sys/poll.h>
+#include <sys/preempt.h>
+#include <sys/proc.h>
 #include <sys/random.h>
 #include <sys/reboot.h>
-#include <sys/exec.h>
-#include <sys/namei.h>
-#include <arch/x86-common/io.h>
-#include <string.h>
-#include <stdbool.h>
-#include <stdio.h>
-#include <stddef.h>
-#include <vm/vm_map.h>
-#include <vm/vm_area.h>
-
-#include <sys/kern_syscalls.h>
-#include <sys/utsname.h>
+#include <sys/session.h>
+#include <sys/signal.h>
+#include <sys/smp.h>
+#include <sys/stat.h>
+#include <sys/statvfs.h>
+#include <sys/sysinfo.h>
+#include <sys/thr.h>
 #include <sys/time.h>
-#include <kern/time.h>
+#include <sys/tty.h>
+#include <sys/types.h>
+#include <sys/utsname.h>
+#include <vfs/buf.h>
+#include <vfs/vfs.h>
+#include <vm/uma.h>
+#include <vm/vm_area.h>
+#include <vm/vm_kmem.h>
+#include <vm/vm_map.h>
 
 // File structure allocator
 static uma_zone_t *file_zone = NULL;
@@ -2184,8 +2181,7 @@ int sys_removexattr(const char *path, const char *name)  { (void)path; (void)nam
 int sys_lremovexattr(const char *path, const char *name) { (void)path; (void)name; return -ENOSYS; }
 int sys_fremovexattr(int fd, const char *name)           { (void)fd;   (void)name; return -ENOSYS; }
 
-// poll() implementation
-#include <sys/poll.h>
+
 
 int sys_poll(struct pollfd *fds, unsigned int nfds, int timeout) {
     if (nfds > 1024) return -22;
@@ -3408,8 +3404,6 @@ int kern_waitpid(int pid, int *status, int options) {
 }
 
 int sys_getpid(void) { if(current_process) return current_process->pid; return 0; }
-
-#include <sys/exec.h>
 
 int sys_execve(const char *f, char *const a[], char *const e[]) {
     char kf[256];

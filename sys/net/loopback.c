@@ -29,15 +29,16 @@
  * loopback), the lookup is skipped.
  */
 
-#include <sys/netdev.h>
-#include <sys/kthread.h>
-#include <net/inet.h>
+#include <stddef.h>
+#include <string.h>
+
+#include <arch/i386/intr.h>
 #include <kern/console.h>
 #include <kern/sched.h>
 #include <kern/time.h>
-#include <string.h>
-#include <stddef.h>
-#include <arch/i386/intr.h>
+#include <net/inet.h>
+#include <sys/kthread.h>
+#include <sys/netdev.h>
 
 /*
  * Ring depth.  A TCP sender bursts up to a full receive window

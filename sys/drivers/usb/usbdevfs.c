@@ -11,15 +11,16 @@
  *                                    backend parses.
  */
 
-#include <drivers/usb/usb.h>
-#include <sys/usbdevfs.h>
-#include <sys/copy.h>
-#include <sys/errno.h>
-#include <vfs/vfs.h>
-#include <vm/vm_kmem.h>
-#include <kern/console.h>
 #include <stdio.h>
 #include <string.h>
+
+#include <drivers/usb/usb.h>
+#include <kern/console.h>
+#include <sys/copy.h>
+#include <sys/errno.h>
+#include <sys/usbdevfs.h>
+#include <vfs/vfs.h>
+#include <vm/vm_kmem.h>
 
 #define USBDEVFS_BUS 0u    /* one logical bus for now */
 

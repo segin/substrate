@@ -17,13 +17,14 @@
  * substrate EHCI/xHCI HCDs and the SCSI mid-layer's queue depth of 1 expect).
  * It plugs into the SCSI mid-layer via scsi_link_t exactly like usb_msc.c.
  */
-#include <string.h>
 #include <stdio.h>
+#include <string.h>
+
+#include <drivers/storage/scsi/scsi.h>
+#include <drivers/usb/usb.h>
+#include <kern/console.h>
 #include <sys/lock.h>
 #include <vm/vm_kmem.h>
-#include <kern/console.h>
-#include <drivers/usb/usb.h>
-#include <drivers/storage/scsi/scsi.h>
 
 /* UAS Information Unit IDs (first byte of every IU). */
 #define UAS_IU_COMMAND      0x01

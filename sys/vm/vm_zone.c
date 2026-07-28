@@ -1,7 +1,8 @@
-#include <vm/vm_zone.h>
 #include <stddef.h>
 #include <string.h>
-#include <arch/i386/pmm.h> // For raw page allocation
+
+#include <arch/i386/pmm.h>
+#include <vm/vm_zone.h>
 
 // Internal structure for free list items
 struct vm_zone_item {

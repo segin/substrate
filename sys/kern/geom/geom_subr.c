@@ -8,12 +8,13 @@
  * - Sector I/O helpers
  */
 
-#include <kern/geom/geom.h>
-#include <kern/console.h>
-#include <drivers/storage/blkdev.h>
-#include <vm/vm_kmem.h>
-#include <string.h>
 #include <stdio.h>
+#include <string.h>
+
+#include <drivers/storage/blkdev.h>
+#include <kern/console.h>
+#include <kern/geom/geom.h>
+#include <vm/vm_kmem.h>
 
 /*
  * ============================================================

@@ -5,9 +5,18 @@
  * Based on NetBSD 10.x i386 ABI.
  */
 
+#include <errno.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 
+#include <arch/i386/syscall.h>
+#include <exec/perso/compat.h>
+#include <exec/perso/netbsd/netbsd_syscalls.h>
+#include <exec/perso/netbsd/netbsd_user.h>
+#include <exec/perso/perso_ipc_sem.h>
+#include <exec/perso/perso_ipc_shm.h>
+#include <exec/perso/personality.h>
 #include <sys/errno.h>
 #include <sys/fcntl.h>
 #include <sys/futex.h>
@@ -17,16 +26,7 @@
 #include <sys/syscall_impl.h>
 #include <sys/time.h>
 #include <sys/times.h>
-#include <arch/i386/syscall.h>
 #include <vm/vm_kmem.h>
-#include <exec/perso/compat.h>
-#include <exec/perso/personality.h>
-#include <exec/perso/perso_ipc_sem.h>
-#include <exec/perso/perso_ipc_shm.h>
-#include <exec/perso/netbsd/netbsd_syscalls.h>
-#include <exec/perso/netbsd/netbsd_user.h>
-#include <string.h>
-#include <errno.h>
 
 /*
  * NetBSD getrusage(2) syscall 117 is the COMPAT_50 entry: its ABI is

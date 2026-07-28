@@ -4,11 +4,12 @@
  * Centralized user-kernel copy functions.
  */
 
+#include <string.h>
+
 #include <sys/copy.h>
+#include <sys/errno.h>
 #include <sys/param.h>
 #include <sys/proc.h>
-#include <sys/errno.h>
-#include <string.h>
 
 /*
  * validate_user_addr - Check if address range is valid user-space

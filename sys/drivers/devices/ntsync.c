@@ -17,17 +17,18 @@
 #define _KERNEL
 #endif
 
-#include <vfs/vfs.h>
+#include <errno.h>
+#include <string.h>
+
 #include <kern/console.h>
+#include <kern/file.h>
 #include <kern/sched.h>
 #include <kern/time.h>
-#include <kern/file.h>
 #include <sys/ntsync.h>
 #include <sys/proc.h>
 #include <sys/time.h>
+#include <vfs/vfs.h>
 #include <vm/vm_kmem.h>
-#include <string.h>
-#include <errno.h>
 
 /* Forward declarations */
 static int ntsync_ioctl(fs_node_t *node, uint32_t request, void *arg);

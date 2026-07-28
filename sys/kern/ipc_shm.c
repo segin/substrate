@@ -23,22 +23,23 @@
  * personalities can each marshal their own ABI on top of it.
  */
 
-#include <sys/shm.h>
-#include <sys/ipc.h>
-#include <sys/types.h>
-#include <sys/proc.h>
-#include <sys/lock.h>
-#include <sys/copy.h>
-#include <sys/kern_syscalls.h>
-#include <arch/i386/pmm.h>
+#include <errno.h>
+#include <stdint.h>
+#include <string.h>
+
 #include <arch/i386/pmap.h>
+#include <arch/i386/pmm.h>
+#include <sys/copy.h>
+#include <sys/ipc.h>
+#include <sys/kern_syscalls.h>
+#include <sys/lock.h>
+#include <sys/proc.h>
+#include <sys/shm.h>
+#include <sys/types.h>
 #include <vm/vm_kmem.h>
+#include <vm/vm_map.h>
 #include <vm/vm_object.h>
 #include <vm/vm_pager.h>
-#include <vm/vm_map.h>
-#include <errno.h>
-#include <string.h>
-#include <stdint.h>
 
 struct kshmseg {
     int             in_use;

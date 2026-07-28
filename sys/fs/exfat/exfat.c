@@ -13,13 +13,14 @@
  * ASCII case only, which covers the common case; non-ASCII names still read
  * and list correctly, they just aren't case-folded on lookup).
  */
-#include <fs/exfat/exfat.h>
+#include <string.h>
+
 #include <drivers/storage/blkdev.h>
+#include <fs/exfat/exfat.h>
 #include <kern/console.h>
 #include <kern/time.h>
-#include <string.h>
-#include <sys/errno.h>
 #include <sys/dirent.h>
+#include <sys/errno.h>
 #include <sys/mount.h>
 #include <sys/stat.h>
 #include <vm/vm_kmem.h>

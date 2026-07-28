@@ -5,16 +5,17 @@
  * and class driver matching for the Substrate kernel USB subsystem.
  */
 
-#include <drivers/usb/usb.h>
-#include <kern/console.h>
-#include <kern/time.h>
-#include <kern/device.h>
-#include <kern/bus.h>
-#include <kern/sched.h>
-#include <sys/kthread.h>
-#include <vm/vm_kmem.h>
 #include <stdio.h>
 #include <string.h>
+
+#include <drivers/usb/usb.h>
+#include <kern/bus.h>
+#include <kern/console.h>
+#include <kern/device.h>
+#include <kern/sched.h>
+#include <kern/time.h>
+#include <sys/kthread.h>
+#include <vm/vm_kmem.h>
 
 /* The USB bus in the kernel device tree (/proc/devtree).  Enumerated devices
  * are published here so userspace can see them alongside pci/isa. */

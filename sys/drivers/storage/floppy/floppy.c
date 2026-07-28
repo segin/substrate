@@ -1,7 +1,11 @@
-#include <drivers/storage/floppy/floppy.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
 
 #include <arch/x86-common/io.h>
 #include <drivers/storage/blkdev.h>
+#include <drivers/storage/floppy/floppy.h>
 #include <kern/console.h>
 #include <kern/isa.h>
 #include <kern/resource.h>
@@ -16,11 +20,6 @@
 #include <sys/param.h>
 #include <vm/phys_mem.h>
 #include <vm/vm_page.h>
-
-#include <stdint.h>
-#include <stddef.h>
-#include <stdio.h>
-#include <string.h>
 
 #define FDC_DMA_ADDR_PORT 0x04
 #define FDC_DMA_COUNT_PORT 0x05

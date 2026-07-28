@@ -1,12 +1,12 @@
-#include <vm/vm_map.h>
-#include <vm/vm_object.h>
-#include <vm/vm_commit.h>
-#include <arch/i386/pmap.h>
 #include <stddef.h>
 
-#include <vm/vm_kmem.h>
-#include <kern/panic.h>
+#include <arch/i386/pmap.h>
 #include <kern/console.h>
+#include <kern/panic.h>
+#include <vm/vm_commit.h>
+#include <vm/vm_kmem.h>
+#include <vm/vm_map.h>
+#include <vm/vm_object.h>
 
 /*
  * Release the strict-commit reservation a map entry holds over the

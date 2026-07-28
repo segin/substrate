@@ -1,14 +1,14 @@
-#include <exec/perso/linux/linux_user.h>
-#include <sys/kern_syscalls.h>
-#include <sys/copy.h>
 #include <string.h>
+
+#include <exec/perso/linux/linux_user.h>
+#include <sys/copy.h>
 #include <sys/errno.h>
-#include <vm/vm_kmem.h>
-#include <sys/mount.h>
-#include <sys/kern_syscalls.h>
-#include <sys/proc.h>
 #include <sys/file.h>
+#include <sys/kern_syscalls.h>
+#include <sys/mount.h>
+#include <sys/proc.h>
 #include <vfs/vfs.h>
+#include <vm/vm_kmem.h>
 
 
 /* Map a substrate filesystem (by its native f_fstypename) to the Linux

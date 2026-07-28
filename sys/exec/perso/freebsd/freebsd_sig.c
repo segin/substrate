@@ -1,13 +1,14 @@
-#include <sys/signal.h>
-#include <sys/proc.h>
+#include <string.h>
+
+#include <arch/i386/idt.h>
+#include <arch/i386/signal_arch.h>
+#include <exec/perso/freebsd/freebsd_user.h>
 #include <sys/copy.h>
 #include <sys/errno.h>
 #include <sys/kern_syscalls.h>
+#include <sys/proc.h>
+#include <sys/signal.h>
 #include <sys/syscall_impl.h>
-#include <exec/perso/freebsd/freebsd_user.h>
-#include <arch/i386/idt.h>
-#include <arch/i386/signal_arch.h>
-#include <string.h>
 
 /*
  * FreeBSD <-> substrate-native signal-number translation.

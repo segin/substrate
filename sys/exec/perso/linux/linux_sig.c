@@ -2,12 +2,12 @@
 #include <stdint.h>
 #include <string.h>
 
-#include <sys/copy.h>
-#include <sys/proc.h>
-#include <sys/signal.h>
 #include <arch/i386/idt.h>
 #include <arch/i386/signal_arch.h>
 #include <exec/perso/linux/linux_user.h>
+#include <sys/copy.h>
+#include <sys/proc.h>
+#include <sys/signal.h>
 
 /*
  * populate_linux_siginfo - Fill in linux_siginfo_t structure

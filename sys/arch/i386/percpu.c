@@ -9,11 +9,11 @@
 #include <stdio.h>
 #include <string.h>
 
-#include <kern/console.h>
 #include <arch/i386/gdt.h>
 #include <arch/i386/percpu.h>
 #include <arch/i386/smp.h>
 #include <arch/x86-common/lapic.h>
+#include <kern/console.h>
 
 // Per-CPU data array
 static struct percpu_data percpu_data_array[MAX_CPUS] __attribute__((aligned(64)));

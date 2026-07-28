@@ -9,6 +9,10 @@
 #include <stdint.h>
 #include <string.h>
 
+#include <arch/i386/syscall.h>
+#include <exec/perso/openbsd/openbsd_syscalls.h>
+#include <exec/perso/openbsd/openbsd_user.h>
+#include <exec/perso/personality.h>
 #include <sys/copy.h>
 #include <sys/errno.h>
 #include <sys/futex.h>
@@ -16,10 +20,6 @@
 #include <sys/resource.h>
 #include <sys/syscall_impl.h>
 #include <sys/times.h>
-#include <arch/i386/syscall.h>
-#include <exec/perso/personality.h>
-#include <exec/perso/openbsd/openbsd_syscalls.h>
-#include <exec/perso/openbsd/openbsd_user.h>
 
 /*
  * OpenBSD futex(2) (syscall 331), OpenBSD 6.2+.  Prototype:

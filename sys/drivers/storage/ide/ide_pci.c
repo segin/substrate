@@ -1,10 +1,9 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <drivers/storage/ide/ide.h>
 #include <kern/device.h>
 #include <kern/pci.h>
-
-#include <drivers/storage/ide/ide.h>
 
 static uintptr_t ide_pci_bar_base(const pci_device_t *pdev, int bar) {
     uint32_t value;

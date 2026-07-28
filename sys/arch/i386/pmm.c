@@ -1,15 +1,15 @@
 #include <stdio.h>
 #include <string.h>
 
-#include <sys/lock.h>
-#include <vm/phys_mem.h>
-#include <vm/vm_page.h>
-#include <kern/console.h>
-#include <kern/memtrack.h>
 #include <arch/i386/intr.h>
 #include <arch/i386/pmm.h>
 #include <arch/x86-common/e820.h>
 #include <arch/x86-common/multiboot.h>
+#include <kern/console.h>
+#include <kern/memtrack.h>
+#include <sys/lock.h>
+#include <vm/phys_mem.h>
+#include <vm/vm_page.h>
 
 /*
  * Locking Strategy:

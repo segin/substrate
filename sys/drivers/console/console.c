@@ -2,22 +2,23 @@
 #include <stdio.h>
 #include <string.h>
 
+#include <arch/i386/intr.h>
+#include <arch/x86-common/lapic.h>
+#include <drivers/console/uart/uart.h>
+#include <kern/console.h>
+#include <kern/file.h>
+#include <kern/sched.h>
+#include <kern/version.h>
 #include <sys/file.h>
 #include <sys/lock.h>
 #include <sys/major.h>
 #include <sys/proc.h>
 #include <sys/session.h>
+#include <sys/smp.h>
 #include <sys/tty.h>
 #include <sys/vt.h>
-#include <vm/vm_kmem.h>
 #include <vfs/vfs.h>
-#include <kern/console.h>
-#include <kern/sched.h>
-#include <kern/version.h>
-#include <arch/i386/intr.h>
-#include <drivers/console/uart/uart.h>
-#include <sys/smp.h>
-#include <arch/x86-common/lapic.h>
+#include <vm/vm_kmem.h>
 
 // Globals
 static console_backend_t *backends = NULL;
@@ -442,10 +443,7 @@ int kprintf(const char *fmt, ...) {
     return ret;
 }
 
-#include <kern/file.h>
-#include <sys/proc.h>
-#include <sys/tty.h>
-#include <string.h>
+
 
 int console_read(char *data, size_t len) {
     return (int)console_node_read(&console_node, 0, len, (uint8_t *)data);

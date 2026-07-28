@@ -5,13 +5,14 @@
  * BSD-derived with Sun extensions.
  */
 
-#include <exec/perso/personality.h>
 #include <stddef.h>
+
 #include <arch/i386/syscall.h>
-#include <sys/syscall_impl.h>
 #include <exec/perso/compat.h>
+#include <exec/perso/personality.h>
 #include <exec/perso/sunos/sunos_syscalls.h>
 #include <exec/perso/sunos/sunos_user.h>
+#include <sys/syscall_impl.h>
 
 /* SunOS Sun386i syscall table */
 static void *sunos_syscalls[MAX_SYSCALLS] = {

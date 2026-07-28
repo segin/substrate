@@ -4,18 +4,18 @@
  * Core Driver Management Implementation
  */
 
-#include <sys/types.h>
+#include <stddef.h>
+#include <stdio.h>
+#include <string.h>
+
+#include <kern/bus.h>
+#include <kern/console.h>
+#include <kern/device.h>
+#include <kern/driver.h>
 #include <sys/errno.h>
 #include <sys/kobject.h>
 #include <sys/lock.h>
-#include <string.h>
-#include <stddef.h>
-#include <stdio.h>
-#include <kern/console.h>
-
-#include <kern/driver.h>
-#include <kern/bus.h>
-#include <kern/device.h>
+#include <sys/types.h>
 
 #define MAX_BLACKLIST 32
 static const char *driver_blacklist[MAX_BLACKLIST];

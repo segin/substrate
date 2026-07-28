@@ -2,14 +2,15 @@
  * Swap Pager Implementation
  */
 
-#include <vm/vm_pager.h>
-#include <vm/vm_kmem.h>
-#include <vfs/vfs.h>
-#include <kern/console.h>
-#include <sys/lock.h>
-#include <vm/vm_swap.h>
 #include <stddef.h>
 #include <string.h>
+
+#include <kern/console.h>
+#include <sys/lock.h>
+#include <vfs/vfs.h>
+#include <vm/vm_kmem.h>
+#include <vm/vm_pager.h>
+#include <vm/vm_swap.h>
 
 // Simple bitmap-based swap allocator
 #define MAX_SWAP_PAGES 1024

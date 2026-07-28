@@ -13,13 +13,13 @@
  *   0xFE = start of sequence (combining chars, ignored here)
  */
 
-#include <stdint.h>
 #include <stddef.h>
+#include <stdint.h>
 #include <string.h>
-#include <vm/vm_kmem.h>
 
-#include <drivers/video/psf.h>
 #include <drivers/video/font_cache.h>
+#include <drivers/video/psf.h>
+#include <vm/vm_kmem.h>
 
 /* FNV-1a hash for 32-bit codepoint */
 static uint32_t hash_codepoint(uint32_t cp)

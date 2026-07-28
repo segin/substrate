@@ -31,13 +31,13 @@
  * etc.  ext2_xattr_split_name() turns that into (index, suffix);
  * ext2_xattr_join_name() reconstructs.
  */
-#include <stdint.h>
-#include <string.h>
-#include <stdlib.h>
 #include <errno.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
 
-#include <vfs/vfs.h>
 #include <ext2/ext2.h>
+#include <vfs/vfs.h>
 
 void *kmalloc(size_t);
 void  kfree(void *, size_t);

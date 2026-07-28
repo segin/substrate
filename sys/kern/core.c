@@ -1,13 +1,13 @@
 #include <stdio.h>
 #include <string.h>
 
+#include <arch/i386/idt.h>
+#include <exec/perso/personality.h>
+#include <kern/console.h>
 #include <sys/copy.h>
 #include <sys/core.h>
 #include <sys/ldt.h>
 #include <sys/proc.h>
-#include <kern/console.h>
-#include <arch/i386/idt.h>
-#include <exec/perso/personality.h>
 
 static struct core_record last_core_record;
 

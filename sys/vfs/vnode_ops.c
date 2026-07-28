@@ -4,15 +4,16 @@
  * This file contains high-level wrappers for VNode operations.
  */
 
-#include <sys/types.h>
-#include <sys/errno.h>
-#include <vfs/vnode.h>
-#include <sys/namei.h>
-#include <sys/mount.h>
-#include <sys/fcntl.h>
-#include <sys/uio.h>
-#include <sys/poll.h>
 #include <string.h>
+
+#include <sys/errno.h>
+#include <sys/fcntl.h>
+#include <sys/mount.h>
+#include <sys/namei.h>
+#include <sys/poll.h>
+#include <sys/types.h>
+#include <sys/uio.h>
+#include <vfs/vnode.h>
 
 #ifndef IO_APPEND
 #define IO_APPEND O_APPEND

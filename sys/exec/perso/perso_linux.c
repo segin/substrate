@@ -2,6 +2,16 @@
 #include <stdint.h>
 #include <string.h>
 
+#include <exec/formats/aout.h>
+#include <exec/perso/compat.h>
+#include <exec/perso/linux/linux_blkio.h>
+#include <exec/perso/linux/linux_errno.h>
+#include <exec/perso/linux/linux_exec.h>
+#include <exec/perso/linux/linux_syscalls.h>
+#include <exec/perso/linux_user.h>
+#include <exec/perso/perso_ipc_sem.h>
+#include <exec/perso/personality.h>
+#include <kern/sched.h>
 #include <sys/compiler.h>
 #include <sys/copy.h>
 #include <sys/errno.h>
@@ -18,18 +28,8 @@
 #include <sys/termios.h>
 #include <sys/types.h>
 #include <sys/uio.h>
-#include <vm/vm_kmem.h>
 #include <vfs/vfs.h>
-#include <kern/sched.h>
-#include <exec/perso/compat.h>
-#include <exec/perso/linux_user.h>
-#include <exec/perso/personality.h>
-#include <exec/perso/perso_ipc_sem.h>
-#include <exec/perso/linux/linux_blkio.h>
-#include <exec/perso/linux/linux_errno.h>
-#include <exec/perso/linux/linux_exec.h>
-#include <exec/perso/linux/linux_syscalls.h>
-#include <exec/formats/aout.h>
+#include <vm/vm_kmem.h>
 
 #define LINUX_UTS_FIELD_LEN 65
 #define LINUX_IOV_MAX 1024

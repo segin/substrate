@@ -9,35 +9,35 @@
 #include <stdio.h>
 #include <string.h>
 
+#include <arch/i386/pmap.h>
+#include <arch/i386/pmm.h>
+#include <drivers/console/console.h>
+#include <exec/perso/personality.h>
+#include <fs/procfs.h>
+#include <kern/bus.h>
+#include <kern/cmdline.h>
+#include <kern/memtrack.h>
+#include <kern/pci.h>
+#include <kern/resource.h>
+#include <kern/sched.h>
+#include <kern/time.h>
+#include <pm/pm.h>
 #include <sys/file.h>
+#include <sys/kobject.h>
+#include <sys/lock.h>
 #include <sys/mount.h>
+#include <sys/param.h>
 #include <sys/proc.h>
 #include <sys/session.h>
 #include <sys/tty.h>
+#include <vfs/buf.h>
+#include <vfs/vfs.h>
 #include <vm/vm_commit.h>
 #include <vm/vm_kmem.h>
 #include <vm/vm_map.h>
 #include <vm/vm_object.h>
 #include <vm/vm_page.h>
-#include <vfs/vfs.h>
-#include <vfs/buf.h>
-#include <sys/param.h>
 #include <vm/vm_swap.h>
-#include <fs/procfs.h>
-#include <pm/pm.h>
-#include <kern/cmdline.h>
-#include <kern/sched.h>
-#include <kern/time.h>
-#include <arch/i386/pmap.h>
-#include <arch/i386/pmm.h>
-#include <exec/perso/personality.h>
-#include <drivers/console/console.h>
-#include <kern/memtrack.h>
-#include <sys/lock.h>
-#include <kern/bus.h>
-#include <kern/pci.h>
-#include <kern/resource.h>
-#include <sys/kobject.h>
 
 /* Forward declarations */
 static size_t procfs_generic_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer);

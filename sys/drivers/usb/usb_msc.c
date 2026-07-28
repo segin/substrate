@@ -15,13 +15,14 @@
  *   SCSI Primary Commands (SPC-3)
  */
 
-#include <drivers/usb/usb.h>
+#include <stdio.h>
+#include <string.h>
+
 #include <drivers/storage/scsi/scsi.h>
+#include <drivers/usb/usb.h>
 #include <kern/console.h>
 #include <sys/dma.h>
 #include <sys/lock.h>
-#include <stdio.h>
-#include <string.h>
 
 /*
  * ============================================================

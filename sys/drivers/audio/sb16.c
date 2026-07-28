@@ -14,9 +14,12 @@
  * to on legacy systems.
  */
 
-#include <drivers/audio/sb16.h>
-#include <drivers/audio/audio.h>
+#include <stdio.h>
+#include <string.h>
 
+#include <arch/x86-common/io.h>
+#include <drivers/audio/audio.h>
+#include <drivers/audio/sb16.h>
 #include <kern/console.h>
 #include <kern/isa.h>
 #include <sys/audioio.h>
@@ -24,9 +27,6 @@
 #include <sys/irq.h>
 #include <vm/phys_mem.h>
 #include <vm/vm_page.h>
-#include <arch/x86-common/io.h>
-#include <stdio.h>
-#include <string.h>
 
 #define SB16_DMA_BUFFER_SIZE   (16U * 1024U)  /* 16 KB */
 #define SB16_DMA_LIMIT         0x01000000U    /* 16 MB ISA window */

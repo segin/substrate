@@ -4,9 +4,10 @@
  * O(1) scheduler with separate queues for RT, Timeshare, and Idle classes.
  */
 
+#include <string.h>
+
 #include <kern/runqueue.h>
 #include <sys/lock.h>
-#include <string.h>
 
 // Find first set bit (1-indexed, 0 if none)
 static inline int ffs64(uint64_t x) {

@@ -1,5 +1,6 @@
-#include <kern/cmdline.h>
 #include <string.h>
+
+#include <kern/cmdline.h>
 #include <kern/console.h>
 
 #ifdef HOST_TEST

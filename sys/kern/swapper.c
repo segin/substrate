@@ -9,11 +9,11 @@
 #include <stdint.h>
 #include <string.h>
 
-#include <sys/proc.h>
-#include <vm/vm_page.h>
+#include <arch/i386/intr.h>
 #include <kern/sched.h>
 #include <pm/pm.h>
-#include <arch/i386/intr.h>
+#include <sys/proc.h>
+#include <vm/vm_page.h>
 
 static process_t swapper_fallback_proc;
 static thread_t swapper_fallback_thread;

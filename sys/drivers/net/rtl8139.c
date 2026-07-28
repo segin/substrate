@@ -13,16 +13,17 @@
  * QEMU: -netdev user,id=n0 -device rtl8139,netdev=n0
  */
 
-#include <sys/netdev.h>
-#include <sys/irq.h>
-#include <arch/x86-common/io.h>
-#include <arch/i386/pmm.h>
-#include <kern/console.h>
-#include <kern/pci.h>
-#include <kern/driver.h>
-#include <vm/vm_kmem.h>
-#include <string.h>
 #include <errno.h>
+#include <string.h>
+
+#include <arch/i386/pmm.h>
+#include <arch/x86-common/io.h>
+#include <kern/console.h>
+#include <kern/driver.h>
+#include <kern/pci.h>
+#include <sys/irq.h>
+#include <sys/netdev.h>
+#include <vm/vm_kmem.h>
 
 /* PCI ID */
 #define RTL8139_VENDOR  0x10EC

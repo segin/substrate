@@ -12,28 +12,29 @@
  * automatic ephemeral port allocation on first sendto if not bound.
  */
 
-#include <vfs/vfs.h>
-#include <sys/proc.h>
-#include <sys/file.h>
-#include <sys/fcntl.h>
-#include <sys/poll.h>
-#include <sys/termios.h>   /* FIONREAD */
-#include <sys/socket.h>
-#include <sys/netdev.h>
-#include <net/inet.h>
+#include <errno.h>
+#include <stddef.h>
+#include <string.h>
+
+#include <kern/console.h>
+#include <kern/file.h>
+#include <kern/sched.h>
 #include <net/if.h>
+#include <net/inet.h>
 #include <netinet/ip.h>
 #include <netinet/ip6.h>
 #include <netinet/udp.h>
-#include <kern/sched.h>
-#include <kern/file.h>
-#include <kern/console.h>
-#include <vm/vm_kmem.h>
 #include <sys/copy.h>
+#include <sys/fcntl.h>
+#include <sys/file.h>
 #include <sys/lock.h>
-#include <string.h>
-#include <stddef.h>
-#include <errno.h>
+#include <sys/netdev.h>
+#include <sys/poll.h>
+#include <sys/proc.h>
+#include <sys/socket.h>
+#include <sys/termios.h>
+#include <vfs/vfs.h>
+#include <vm/vm_kmem.h>
 
 #ifndef AF_INET
 #define AF_INET  2

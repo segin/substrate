@@ -1,10 +1,11 @@
+#include <stdio.h>
+#include <string.h>
+
+#include <arch/i386/pmap.h>
+#include <arch/i386/pmm.h>
+#include <kern/console.h>
 #include <sys/types.h>
 #include <vfs/vfs.h>
-#include <arch/i386/pmm.h>
-#include <arch/i386/pmap.h>
-#include <kern/console.h>
-#include <string.h>
-#include <stdio.h>
 
 static void *test_page_virt = NULL;
 static uintptr_t test_page_phys = 0;

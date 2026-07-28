@@ -8,13 +8,13 @@
  *      convert hex bitmap data to binary glyph storage.
  */
 
-#include <stdint.h>
 #include <stddef.h>
+#include <stdint.h>
 #include <string.h>
-#include <vm/vm_kmem.h>
 
-#include <drivers/video/psf.h>
 #include <drivers/video/bdf_pcf.h>
+#include <drivers/video/psf.h>
+#include <vm/vm_kmem.h>
 
 /* ==================== PCF Helpers ==================== */
 

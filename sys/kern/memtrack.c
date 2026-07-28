@@ -13,9 +13,10 @@
  * being mis-attributed.
  */
 
+#include <string.h>
+
 #include <kern/memtrack.h>
 #include <sys/lock.h>
-#include <string.h>
 
 static memtrack_rec_t   memtrack_sites[MEMTRACK_SITES];
 static spinlock_t       memtrack_lock = SPINLOCK_INIT("memtrack");

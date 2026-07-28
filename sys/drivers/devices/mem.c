@@ -1,5 +1,8 @@
 #include <string.h>
 
+#include <arch/i386/pmap.h>
+#include <arch/i386/pmm.h>
+#include <kern/console.h>
 #include <sys/copy.h>
 #include <sys/errno.h>
 #include <sys/lock.h>
@@ -8,13 +11,10 @@
 #include <sys/stat.h>
 #include <sys/sysctl.h>
 #include <sys/types.h>
+#include <vfs/vfs.h>
 #include <vm/vm_map.h>
 #include <vm/vm_object.h>
 #include <vm/vm_pager.h>
-#include <vfs/vfs.h>
-#include <kern/console.h>
-#include <arch/i386/pmap.h>
-#include <arch/i386/pmm.h>
 
 #ifndef MAP_FIXED
 #define MAP_FIXED 0x010

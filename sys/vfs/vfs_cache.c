@@ -1,13 +1,14 @@
-#include <sys/types.h>
-#include <sys/namei.h>
-#include <vfs/vnode.h>
-#include <sys/mount.h>
-#include <sys/queue.h>
-#include <sys/errno.h>
-#include <vm/vm_kmem.h>
-#include <kern/panic.h>
-#include <sys/lock.h>
 #include <string.h>
+
+#include <kern/panic.h>
+#include <sys/errno.h>
+#include <sys/lock.h>
+#include <sys/mount.h>
+#include <sys/namei.h>
+#include <sys/queue.h>
+#include <sys/types.h>
+#include <vfs/vnode.h>
+#include <vm/vm_kmem.h>
 
 /*
  * Name Cache structure

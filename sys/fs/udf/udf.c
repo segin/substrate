@@ -4,16 +4,17 @@
  * Read-write UDF implementation based on ECMA-167 and OSTA UDF 2.60.
  */
 
-#include <vfs/vnode.h>
-#include <vfs/vfs.h>
+#include <string.h>
+
+#include <drivers/storage/blkdev.h>
+#include <fs/udf/udf.h>
 #include <kern/console.h>
 #include <sys/errno.h>
-#include <vm/vm_kmem.h>
 #include <sys/namei.h>
-#include <fs/udf/udf.h>
 #include <sys/proc.h>
-#include <string.h>
-#include <drivers/storage/blkdev.h>
+#include <vfs/vfs.h>
+#include <vfs/vnode.h>
+#include <vm/vm_kmem.h>
 
 /* UDF filesystem structure registration */
 static filesystem_t udf_filesystem;

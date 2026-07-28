@@ -15,14 +15,15 @@
  * the union by value).
  */
 
-#include <sys/sem.h>
-#include <sys/ipc.h>
-#include <sys/types.h>
-#include <sys/copy.h>
 #include <errno.h>
-#include <string.h>
 #include <stdint.h>
+#include <string.h>
+
 #include <exec/perso/perso_ipc_shm.h>
+#include <sys/copy.h>
+#include <sys/ipc.h>
+#include <sys/sem.h>
+#include <sys/types.h>
 
 /* native semctl command numbers (from <sys/sem.h>): GETPID=11 GETVAL=12
  * GETALL=13 GETNCNT=14 GETZCNT=15 SETVAL=16 SETALL=17.  Linux uses the same

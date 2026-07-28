@@ -23,16 +23,16 @@
 #include <string.h>
 
 #include <arch/i386/cpu.h>
-#include <sys/random.h>
+#include <drivers/storage/blkdev.h>
+#include <drivers/storage/ide/ide.h>
+#include <drivers/storage/ide/ide_priv.h>
+#include <kern/cmdline.h>
 #include <kern/console.h>
 #include <kern/driver.h>
 #include <kern/isa.h>
 #include <kern/pci.h>
-#include <kern/cmdline.h>
 #include <kern/sched.h>
-#include <drivers/storage/blkdev.h>
-#include <drivers/storage/ide/ide.h>
-#include <drivers/storage/ide/ide_priv.h>
+#include <sys/random.h>
 
 /*
  * ============================================================

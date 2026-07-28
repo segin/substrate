@@ -5,16 +5,17 @@
  * No autoconf or DAD yet — static config only.
  */
 
-#include <net/inet.h>
-#include <sys/netdev.h>
-#include <netinet/ip.h>      /* IPPROTO_* constants */
-#include <netinet/ip6.h>
-#include <netinet/icmp.h>
+#include <errno.h>
+#include <stddef.h>
+#include <string.h>
+
 #include <kern/console.h>
 #include <kern/sched.h>
-#include <string.h>
-#include <stddef.h>
-#include <errno.h>
+#include <net/inet.h>
+#include <netinet/icmp.h>
+#include <netinet/ip.h>
+#include <netinet/ip6.h>
+#include <sys/netdev.h>
 
 /* ------------------------------------------------------------------ */
 /* ND6 cache                                                          */

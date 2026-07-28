@@ -15,6 +15,15 @@
 
 #include <stdio.h>
 #include <string.h>
+
+#include <arch/i386/gdt.h>
+#include <arch/i386/pmap.h>
+#include <exec/formats/xout.h>
+#include <exec/perso/personality.h>
+#include <kern/arch.h>
+#include <kern/cmdline.h>
+#include <kern/console.h>
+#include <pm/pm.h>
 #include <sys/compiler.h>
 #include <sys/copy.h>
 #include <sys/errno.h>
@@ -26,14 +35,6 @@
 #include <sys/sysinfo.h>
 #include <vm/vm_map.h>
 #include <vm/vm_object.h>
-#include <pm/pm.h>
-#include <kern/arch.h>
-#include <kern/cmdline.h>
-#include <kern/console.h>
-#include <arch/i386/gdt.h>
-#include <arch/i386/pmap.h>
-#include <exec/formats/xout.h>
-#include <exec/perso/personality.h>
 
 /* Linear placement of the loaded segments.  Distinct, page-aligned windows
  * inside the user vm_map; the segment descriptor base is set to these so the

@@ -1,10 +1,11 @@
-#include <drivers/virtio/virtio.h>
-#include <arch/x86-common/io.h>
-#include <kern/console.h>
-#include <arch/i386/pmm.h>
-#include <kern/panic.h>
-#include <string.h>
 #include <stdio.h>
+#include <string.h>
+
+#include <arch/i386/pmm.h>
+#include <arch/x86-common/io.h>
+#include <drivers/virtio/virtio.h>
+#include <kern/console.h>
+#include <kern/panic.h>
 
 static struct {
     uint16_t io_base;

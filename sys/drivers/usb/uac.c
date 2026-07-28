@@ -24,21 +24,21 @@
  *      iso_schedule/reclaim ops), so the stream never gaps between writes.
  */
 
-#include <drivers/usb/usb.h>
-#include <drivers/audio/audio.h>
-#include <drivers/audio/audio_fifo.h>
-
-#include <sys/audioio.h>
-#include <sys/kthread.h>
-#include <sys/proc.h>
-#include <sys/dma.h>
-#include <kern/sched.h>
-#include <kern/time.h>
-#include <kern/console.h>
-#include <vm/vm_kmem.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+
+#include <drivers/audio/audio.h>
+#include <drivers/audio/audio_fifo.h>
+#include <drivers/usb/usb.h>
+#include <kern/console.h>
+#include <kern/sched.h>
+#include <kern/time.h>
+#include <sys/audioio.h>
+#include <sys/dma.h>
+#include <sys/kthread.h>
+#include <sys/proc.h>
+#include <vm/vm_kmem.h>
 
 /* Class-specific descriptor + request constants (UAC). */
 #define UAC_CS_INTERFACE          0x24

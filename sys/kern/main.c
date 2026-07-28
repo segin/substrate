@@ -3,6 +3,54 @@
 #include <stdio.h>
 #include <string.h>
 
+#include <arch/i386/cpu.h>
+#include <arch/i386/early_boot.h>
+#include <arch/i386/fpu/fpu_emu.h>
+#include <arch/i386/gdt.h>
+#include <arch/i386/idt.h>
+#include <arch/i386/intr.h>
+#include <arch/i386/pci.h>
+#include <arch/i386/percpu.h>
+#include <arch/i386/pmap.h>
+#include <arch/i386/pmm.h>
+#include <arch/i386/smp.h>
+#include <arch/x86-common/lapic.h>
+#include <arch/x86-common/multiboot.h>
+#include <arch/x86-common/rtc.h>
+#include <drivers/audio/audio.h>
+#include <drivers/console/uart/uart.h>
+#include <drivers/input/keyboard.h>
+#include <drivers/input/mouse.h>
+#include <drivers/storage/ahci/ahci.h>
+#include <drivers/storage/floppy/floppy.h>
+#include <drivers/storage/ide/ide.h>
+#include <drivers/storage/nvme/nvme.h>
+#include <drivers/storage/ramdisk.h>
+#include <drivers/storage/scsi/scsi.h>
+#include <drivers/usb/ehci.h>
+#include <drivers/usb/uhci.h>
+#include <drivers/usb/usb.h>
+#include <drivers/usb/xhci.h>
+#include <drivers/video/fb.h>
+#include <drivers/video/hw_text.h>
+#include <drivers/video/vga.h>
+#include <drivers/virtio/virtio.h>
+#include <exec/formats/elf.h>
+#include <fs/9p.h>
+#include <fs/fuse.h>
+#include <fs/procfs.h>
+#include <fs/pseudofs.h>
+#include <fs/sysfs.h>
+#include <kern/cmdline.h>
+#include <kern/console.h>
+#include <kern/efi_runtime.h>
+#include <kern/geom/geom.h>
+#include <kern/isa.h>
+#include <kern/panic.h>
+#include <kern/sched.h>
+#include <kern/time.h>
+#include <kern/version.h>
+#include <net/inet.h>
 #include <sys/crc32.h>
 #include <sys/exec.h>
 #include <sys/freebsd_boot.h>
@@ -20,66 +68,12 @@
 #include <sys/tests.h>
 #include <sys/tty.h>
 #include <sys/vt.h>
-#include <net/inet.h>
-
+#include <vfs/vfs.h>
 #include <vm/uma.h>
 #include <vm/vm_kmem.h>
 #include <vm/vm_object.h>
 #include <vm/vm_page.h>
 #include <vm/vm_zone.h>
-
-#include <vfs/vfs.h>
-#include <fs/9p.h>
-#include <fs/fuse.h>
-#include <fs/procfs.h>
-#include <fs/pseudofs.h>
-#include <fs/sysfs.h>
-
-#include <exec/formats/elf.h>
-
-#include <kern/cmdline.h>
-#include <kern/console.h>
-#include <kern/efi_runtime.h>
-#include <kern/isa.h>
-#include <kern/panic.h>
-#include <kern/sched.h>
-#include <kern/time.h>
-#include <kern/version.h>
-#include <kern/geom/geom.h>
-
-#include <arch/i386/cpu.h>
-#include <arch/i386/early_boot.h>
-#include <arch/i386/fpu/fpu_emu.h>
-#include <arch/i386/gdt.h>
-#include <arch/i386/idt.h>
-#include <arch/i386/intr.h>
-#include <arch/i386/pci.h>
-#include <arch/i386/percpu.h>
-#include <arch/i386/pmap.h>
-#include <arch/i386/pmm.h>
-#include <arch/i386/smp.h>
-#include <arch/x86-common/lapic.h>
-#include <arch/x86-common/multiboot.h>
-#include <arch/x86-common/rtc.h>
-
-#include <drivers/audio/audio.h>
-#include <drivers/console/uart/uart.h>
-#include <drivers/input/keyboard.h>
-#include <drivers/input/mouse.h>
-#include <drivers/storage/ahci/ahci.h>
-#include <drivers/storage/floppy/floppy.h>
-#include <drivers/storage/ide/ide.h>
-#include <drivers/storage/nvme/nvme.h>
-#include <drivers/storage/ramdisk.h>
-#include <drivers/storage/scsi/scsi.h>
-#include <drivers/usb/uhci.h>
-#include <drivers/usb/ehci.h>
-#include <drivers/usb/xhci.h>
-#include <drivers/usb/usb.h>
-#include <drivers/video/fb.h>
-#include <drivers/video/hw_text.h>
-#include <drivers/video/vga.h>
-#include <drivers/virtio/virtio.h>
 
 // Simple string functions to avoid depending on libc in core if not available
 int serial_debug_enabled = 0;

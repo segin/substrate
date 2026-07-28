@@ -1,9 +1,10 @@
-#include <vm/vm_pager.h>
-#include <vm/vm_kmem.h>
+#include <stddef.h>
+
 #include <arch/i386/pmap.h>
 #include <sys/lock.h>
 #include <vfs/vfs.h>
-#include <stddef.h>
+#include <vm/vm_kmem.h>
+#include <vm/vm_pager.h>
 
 typedef struct vm_vnode_pager {
     vm_pager_t base;

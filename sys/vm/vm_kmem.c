@@ -5,13 +5,14 @@
  * Provides kmalloc/kfree for general kernel allocations.
  */
 
-#include <vm/vm_kmem.h>
-#include <vm/uma.h>
+#include <stdint.h>
+#include <string.h>
+
 #include <arch/i386/pmm.h>
 #include <kern/console.h>
 #include <sys/lock.h>
-#include <stdint.h>
-#include <string.h>
+#include <vm/uma.h>
+#include <vm/vm_kmem.h>
 
 /* UMA zones for power-of-two sizes */
 static uma_zone_t *kmem_zones[KMEM_ZONES];

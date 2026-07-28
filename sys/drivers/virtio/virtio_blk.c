@@ -1,15 +1,16 @@
-#include <drivers/virtio/virtio.h>
-#include <arch/i386/cpu.h>
-#include <arch/x86-common/io.h>
-#include <kern/geom/geom.h>
-#include <drivers/storage/blkdev.h>
-#include <kern/console.h>
-#include <arch/i386/pmm.h>
-#include <arch/i386/pmap.h>
-#include <kern/pci.h>
-#include <kern/panic.h>
-#include <string.h>
 #include <stdio.h>
+#include <string.h>
+
+#include <arch/i386/cpu.h>
+#include <arch/i386/pmap.h>
+#include <arch/i386/pmm.h>
+#include <arch/x86-common/io.h>
+#include <drivers/storage/blkdev.h>
+#include <drivers/virtio/virtio.h>
+#include <kern/console.h>
+#include <kern/geom/geom.h>
+#include <kern/panic.h>
+#include <kern/pci.h>
 #include <sys/random.h>
 
 #define VIRTIO_BLK_F_SIZE_MAX   1

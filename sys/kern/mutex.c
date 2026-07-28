@@ -1,9 +1,10 @@
-#include <sys/lock.h>
-#include <sys/proc.h>
+#include <stddef.h>
+
+#include <kern/panic.h>
 #include <kern/sched.h>
 #include <kern/sleepq.h>
-#include <kern/panic.h>
-#include <stddef.h>
+#include <sys/lock.h>
+#include <sys/proc.h>
 
 static void mutex_track_owner(mutex_t *m, thread_t *owner) {
     if (!m || !owner) {

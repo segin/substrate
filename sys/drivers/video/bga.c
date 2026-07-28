@@ -1,12 +1,13 @@
-#include <sys/types.h>
-#include <sys/file.h>
-#include <kern/console.h>
-#include <kern/cmdline.h>
 #include <string.h>
-#include <drivers/video/fb.h>
+
 #include <arch/x86-common/io.h>
-#include <kern/resource.h>
+#include <drivers/video/fb.h>
+#include <kern/cmdline.h>
+#include <kern/console.h>
 #include <kern/pci.h>
+#include <kern/resource.h>
+#include <sys/file.h>
+#include <sys/types.h>
 
 #define VBE_DISPI_IOPORT_INDEX 0x01CE
 #define VBE_DISPI_IOPORT_DATA  0x01CF

@@ -1,11 +1,12 @@
-#include <sys/types.h>
-#include <sys/mount.h>
-#include <vfs/vnode.h>
-#include <sys/namei.h>
-#include <vm/vm_kmem.h>
-#include <sys/errno.h>
 #include <string.h>
+
 #include <kern/console.h>
+#include <sys/errno.h>
+#include <sys/mount.h>
+#include <sys/namei.h>
+#include <sys/types.h>
+#include <vfs/vnode.h>
+#include <vm/vm_kmem.h>
 
 
 /*

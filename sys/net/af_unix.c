@@ -38,28 +38,29 @@
  *   - True SO_* options
  */
 
-#include <vfs/vfs.h>
-#include <sys/proc.h>
-#include <sys/file.h>
-#include <sys/stat.h>
-#include <sys/socket.h>
-#include <sys/poll.h>
-#include <sys/termios.h>   /* FIONREAD */
-#include <kern/console.h>
+#include <errno.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <string.h>
+
+#include <arch/i386/intr.h>
 #include <kern/cmdline.h>
+#include <kern/console.h>
+#include <kern/file.h>
 #include <kern/sched.h>
 #include <kern/sleepq.h>
 #include <kern/time.h>
-#include <arch/i386/intr.h>
-#include <kern/file.h>
-#include <vm/vm_kmem.h>
-#include <sys/copy.h>
-#include <string.h>
-#include <stddef.h>
-#include <stdint.h>
-#include <sys/lock.h>
 #include <net/inet.h>
-#include <errno.h>
+#include <sys/copy.h>
+#include <sys/file.h>
+#include <sys/lock.h>
+#include <sys/poll.h>
+#include <sys/proc.h>
+#include <sys/socket.h>
+#include <sys/stat.h>
+#include <sys/termios.h>
+#include <vfs/vfs.h>
+#include <vm/vm_kmem.h>
 
 /* X-server fd-lifecycle trace, gated behind the `xfd` kernel cmdline
  * flag (or `debug=xfd`).  Logs accept/connect/read/write/close on

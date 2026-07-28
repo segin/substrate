@@ -1,18 +1,18 @@
 #include <stddef.h>
 #include <string.h>
 
+#include <arch/i386/intr.h>
+#include <kern/sched.h>
+#include <kern/sleepq.h>
+#include <kern/time.h>
 #include <sys/errno.h>
 #include <sys/file.h>
 #include <sys/lock.h>
 #include <sys/poll.h>
 #include <sys/proc.h>
 #include <sys/signal.h>
-#include <vm/vm_kmem.h>
 #include <vfs/vfs.h>
-#include <kern/sched.h>
-#include <kern/sleepq.h>
-#include <kern/time.h>
-#include <arch/i386/intr.h>
+#include <vm/vm_kmem.h>
 
 #define PIPE_SIZE 4096
 

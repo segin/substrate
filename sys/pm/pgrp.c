@@ -5,15 +5,16 @@
  * Based on 4.4BSD design patterns.
  */
 
-#include <sys/proc.h>
-#include <sys/session.h>
-#include <sys/lock.h>
-#include <sys/copy.h>
-#include <sys/errno.h>
-#include <sys/signal.h>
-#include <pm/pm.h>
 #include <stddef.h>
 #include <string.h>
+
+#include <pm/pm.h>
+#include <sys/copy.h>
+#include <sys/errno.h>
+#include <sys/lock.h>
+#include <sys/proc.h>
+#include <sys/session.h>
+#include <sys/signal.h>
 #include <vm/vm_kmem.h>
 
 

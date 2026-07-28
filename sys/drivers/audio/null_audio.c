@@ -7,11 +7,11 @@
  * hardware exists.
  */
 
-#include <drivers/audio/audio.h>
-
-#include <sys/audioio.h>
 #include <stdio.h>
 #include <string.h>
+
+#include <drivers/audio/audio.h>
+#include <sys/audioio.h>
 
 static audio_dev_t null_audio_dev;
 

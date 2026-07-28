@@ -8,10 +8,10 @@
 #include <stdint.h>
 #include <string.h>
 
-#include <sys/proc.h>
-#include <sys/preempt.h>
 #include <kern/panic.h>
 #include <kern/turnstile.h>
+#include <sys/preempt.h>
+#include <sys/proc.h>
 
 // Turnstile structure
 typedef struct turnstile {

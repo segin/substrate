@@ -1,17 +1,18 @@
+#include <string.h>
+
 #include <exec/perso/freebsd/freebsd_user.h>
-#include <sys/kern_syscalls.h>
-#include <sys/syscall_impl.h>
 #include <sys/copy.h>
-#include <sys/stat.h>
-#include <sys/file.h>
-#include <sys/proc.h>
-#include <sys/fcntl.h>
-#include <sys/namei.h>
 #include <sys/errno.h>
+#include <sys/fcntl.h>
+#include <sys/file.h>
+#include <sys/kern_syscalls.h>
 #include <sys/mount.h>
+#include <sys/namei.h>
+#include <sys/proc.h>
+#include <sys/stat.h>
+#include <sys/syscall_impl.h>
 #include <vfs/vfs.h>
 #include <vm/vm_kmem.h>
-#include <string.h>
 
 /* FreeBSD Stat Translation */
 static void translate_stat_to_freebsd(struct stat *native, struct freebsd_stat *fbsd) {

@@ -1,23 +1,24 @@
-#include <vm/vm_map.h>
-#include <vm/vm_object.h>
-#include <vm/vm_fault.h>
-#include <vm/vm_pager.h>
-#include <sys/proc.h>
-#include <sys/file.h>
-#include <vfs/vfs.h>
-#include <stdint.h>
 #include <stddef.h>
+#include <stdint.h>
 #include <string.h>
-#include <arch/i386/pmm.h>
+
 #include <arch/i386/pmap.h>
-#include <vm/vm_kmem.h>
-#include <vm/vm_commit.h>
+#include <arch/i386/pmm.h>
 #include <kern/cmdline.h>
 #include <kern/console.h>
 #include <kern/main.h>
+#include <sys/errno.h>
+#include <sys/file.h>
 #include <sys/lock.h>
 #include <sys/param.h>
-#include <sys/errno.h>
+#include <sys/proc.h>
+#include <vfs/vfs.h>
+#include <vm/vm_commit.h>
+#include <vm/vm_fault.h>
+#include <vm/vm_kmem.h>
+#include <vm/vm_map.h>
+#include <vm/vm_object.h>
+#include <vm/vm_pager.h>
 
 // mman.h flag definitions (duplicated here for kernel use)
 #define PROT_NONE  0x0
@@ -512,7 +513,7 @@ int sys_munmap(void *addr, size_t length) {
     return 0;
 }
 
-#include <string.h>
+
 
 
 

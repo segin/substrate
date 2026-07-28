@@ -6,13 +6,14 @@
  * passes the payload up.
  */
 
+#include <stddef.h>
+#include <string.h>
+
+#include <kern/console.h>
 #include <net/inet.h>
-#include <sys/netdev.h>
 #include <netinet/ip.h>
 #include <netinet/udp.h>
-#include <kern/console.h>
-#include <string.h>
-#include <stddef.h>
+#include <sys/netdev.h>
 
 void udp_input(netdev_t *dev, int family,
                const void *saddr, const void *daddr,

@@ -1,14 +1,15 @@
+#include <stdbool.h>
+#include <stdio.h>
+#include <string.h>
+
 #include <fs/minix/minix.h>
 #include <kern/console.h>
-#include <vm/vm_kmem.h>
-#include <vfs/vfs.h>
+#include <kern/time.h>
 #include <sys/errno.h>
 #include <sys/mount.h>
 #include <sys/stat.h>
-#include <kern/time.h>
-#include <string.h>
-#include <stdio.h>
-#include <stdbool.h>
+#include <vfs/vfs.h>
+#include <vm/vm_kmem.h>
 
 #define MINIX_BLOCK_SIZE 1024
 

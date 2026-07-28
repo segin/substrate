@@ -1,9 +1,10 @@
+#include <string.h>
+
+#include <arch/i386/intr.h>
+#include <sys/errno.h>
 #include <sys/irq.h>
 #include <sys/lock.h>
-#include <sys/errno.h>
-#include <string.h>
 #include <vm/vm_kmem.h>
-#include <arch/i386/intr.h>
 
 #define IRQ_LINE_COUNT 256
 #define IRQ_VECTOR_COUNT (IRQ_VECTOR_LAST - IRQ_VECTOR_FIRST + 1)

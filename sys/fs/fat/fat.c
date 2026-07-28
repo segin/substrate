@@ -1,7 +1,8 @@
-#include <fs/fat/fat.h>
-#include <drivers/storage/blkdev.h>
-#include <kern/console.h>
 #include <string.h>
+
+#include <drivers/storage/blkdev.h>
+#include <fs/fat/fat.h>
+#include <kern/console.h>
 #include <sys/errno.h>
 #include <sys/lock.h>
 #include <sys/mount.h>

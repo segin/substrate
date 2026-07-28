@@ -13,15 +13,16 @@
  *   USB HID Usage Tables 1.12, Mouse usage page (0x09)
  */
 
-#include <drivers/usb/usb.h>
-#include <sys/input.h>
-#include <sys/kthread.h>
-#include <kern/console.h>
-#include <kern/cmdline.h>
-#include <kern/time.h>
-#include <kern/sched.h>
 #include <stdio.h>
 #include <string.h>
+
+#include <drivers/usb/usb.h>
+#include <kern/cmdline.h>
+#include <kern/console.h>
+#include <kern/sched.h>
+#include <kern/time.h>
+#include <sys/input.h>
+#include <sys/kthread.h>
 
 #define HID_REQ_GET_REPORT      0x01
 #define HID_REQ_SET_IDLE        0x0A

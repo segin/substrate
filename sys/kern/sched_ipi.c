@@ -6,12 +6,12 @@
 
 #include <stdint.h>
 
-#include <sys/proc.h>
-#include <kern/sched.h>
-#include <kern/runqueue.h>
 #include <arch/i386/percpu.h>
 #include <arch/i386/smp.h>
 #include <arch/x86-common/lapic.h>
+#include <kern/runqueue.h>
+#include <kern/sched.h>
+#include <sys/proc.h>
 
 /* IPI vector defined in sched.h */
 

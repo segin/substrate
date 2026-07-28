@@ -8,6 +8,11 @@
 #include <stdio.h>
 #include <string.h>
 
+#include <arch/i386/pmm.h>
+#include <kern/memtrack.h>
+#include <kern/sched.h>
+#include <kern/time.h>
+#include <pm/pm.h>
 #include <sys/copy.h>
 #include <sys/errno.h>
 #include <sys/param.h>
@@ -16,11 +21,6 @@
 #include <vm/phys_mem.h>
 #include <vm/vm_page.h>
 #include <vm/vm_swap.h>
-#include <pm/pm.h>
-#include <kern/memtrack.h>
-#include <kern/sched.h>
-#include <kern/time.h>
-#include <arch/i386/pmm.h>
 
 
 /*

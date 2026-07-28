@@ -14,19 +14,20 @@
  * Low/full-speed devices on a root port are released to a companion controller
  * (PORTSC OWNER); high-speed devices (usb-storage) are served here directly.
  */
-#include <string.h>
 #include <stdio.h>
-#include <sys/dma.h>
-#include <sys/lock.h>
-#include <vm/vm_kmem.h>
+#include <string.h>
+
+#include <drivers/usb/ehci.h>
+#include <drivers/usb/usb.h>
 #include <kern/bus.h>
 #include <kern/console.h>
 #include <kern/driver.h>
 #include <kern/pci.h>
 #include <kern/resource.h>
 #include <kern/time.h>
-#include <drivers/usb/ehci.h>
-#include <drivers/usb/usb.h>
+#include <sys/dma.h>
+#include <sys/lock.h>
+#include <vm/vm_kmem.h>
 
 #define EHCI_BOUNCE_SIZE   (20 * 1024)   /* 5 qTD buffer pages */
 #define EHCI_MAX_QTD       8

@@ -11,6 +11,18 @@
 #include <stdio.h>
 #include <string.h>
 
+#include <arch/i386/intr.h>
+#include <arch/i386/pmap.h>
+#include <arch/x86-common/io.h>
+#include <drivers/audio/ac97.h>
+#include <drivers/audio/audio.h>
+#include <drivers/audio/audio_fifo.h>
+#include <kern/console.h>
+#include <kern/device.h>
+#include <kern/pci.h>
+#include <kern/sched.h>
+#include <kern/sleepq.h>
+#include <kern/time.h>
 #include <sys/audioio.h>
 #include <sys/dma.h>
 #include <sys/errno.h>
@@ -21,18 +33,6 @@
 #include <vm/vm_map.h>
 #include <vm/vm_object.h>
 #include <vm/vm_pager.h>
-#include <kern/console.h>
-#include <kern/device.h>
-#include <kern/pci.h>
-#include <kern/sched.h>
-#include <kern/sleepq.h>
-#include <kern/time.h>
-#include <arch/i386/intr.h>
-#include <arch/i386/pmap.h>
-#include <arch/x86-common/io.h>
-#include <drivers/audio/ac97.h>
-#include <drivers/audio/audio.h>
-#include <drivers/audio/audio_fifo.h>
 
 #define AC97_PCI_CLASS_MULTIMEDIA  0x04
 #define AC97_PCI_SUBCLASS_AUDIO    0x01

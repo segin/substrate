@@ -8,10 +8,10 @@
 #include <string.h>
 
 #include <arch/i386/cpu.h>
+#include <arch/x86-common/io.h>
 #include <drivers/storage/blkdev.h>
 #include <drivers/storage/ide/ide.h>
 #include <drivers/storage/ide/ide_priv.h>
-#include <arch/x86-common/io.h>
 #include <kern/console.h>
 #include <kern/device.h>
 #include <kern/driver.h>

@@ -3,13 +3,12 @@
  * read/write transfer operations.
  */
 
-#include <drivers/storage/ide/ide.h>
-#include <drivers/storage/ide/ide_priv.h>
-
 #include <stdio.h>
 #include <string.h>
 
 #include <arch/i386/pmap.h>
+#include <drivers/storage/ide/ide.h>
+#include <drivers/storage/ide/ide_priv.h>
 #include <kern/console.h>
 
 int ide_prdt_build_entries(prdt_entry_t *prdt, size_t max_entries,

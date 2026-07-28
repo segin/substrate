@@ -18,14 +18,15 @@
  * releases per-mount state and leaves the device alone.
  */
 
-#include <fs/sysv/sysv.h>
-#include <string.h>
 #include <stdio.h>
-#include <vm/vm_kmem.h>
+#include <string.h>
+
+#include <fs/sysv/sysv.h>
 #include <kern/console.h>
-#include <sys/statfs.h>
 #include <sys/dirent.h>
 #include <sys/stat.h>
+#include <sys/statfs.h>
+#include <vm/vm_kmem.h>
 
 /* ===================================================================
  * Forward decls

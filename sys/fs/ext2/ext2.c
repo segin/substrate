@@ -1,16 +1,17 @@
-#include <fs/ext2/ext2.h>
-#include <vfs/vfs.h>
-#include <drivers/storage/blkdev.h>
-#include <kern/console.h>
-#include <kern/cmdline.h>
-#include <kern/time.h>
 #include <string.h>
-#include <vm/vm_kmem.h>
-#include <vm/uma.h>
-#include <sys/errno.h>
-#include <sys/stat.h>
-#include <sys/mount.h>
+
 #include <crc32c.h>
+#include <drivers/storage/blkdev.h>
+#include <fs/ext2/ext2.h>
+#include <kern/cmdline.h>
+#include <kern/console.h>
+#include <kern/time.h>
+#include <sys/errno.h>
+#include <sys/mount.h>
+#include <sys/stat.h>
+#include <vfs/vfs.h>
+#include <vm/uma.h>
+#include <vm/vm_kmem.h>
 
 /*
  * ext2trace — gated on `debug=ext2trace` on the kernel command line.

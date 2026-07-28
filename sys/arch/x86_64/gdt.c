@@ -13,8 +13,9 @@
 
 #include <stdint.h>
 #include <string.h>
-#include <sys/smp.h>
+
 #include <arch/x86_64/gdt.h>
+#include <sys/smp.h>
 
 /* GDT Entry (8 bytes for normal, 16 bytes for system descriptors in LM) */
 struct gdt_entry {

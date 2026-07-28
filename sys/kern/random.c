@@ -12,17 +12,17 @@
 
 #include <string.h>
 
+#include <arch/i386/cpu.h>
+#include <arch/i386/percpu.h>
+#include <kern/console.h>
+#include <kern/random.h>
+#include <kern/sched.h>
 #include <sys/copy.h>
 #include <sys/errno.h>
 #include <sys/proc.h>
 #include <sys/random.h>
 #include <vfs/vfs.h>
 #include <vm/vm_kmem.h>
-#include <kern/console.h>
-#include <kern/random.h>
-#include <kern/sched.h>
-#include <arch/i386/cpu.h>
-#include <arch/i386/percpu.h>
 
 /* Global RNG state */
 struct rng_state rng_state;

@@ -7,13 +7,14 @@
  * ro,user_xattr,nouser_xattr — last wins).
  */
 
-#include <sys/mountopt.h>
-#include <sys/errno.h>
-#include <sys/mount.h>
-#include <vm/vm_kmem.h>
 #include <limits.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include <sys/errno.h>
+#include <sys/mount.h>
+#include <sys/mountopt.h>
+#include <vm/vm_kmem.h>
 
 static char *mo_strndup(const char *s, size_t n) {
     char *p = kmalloc(n + 1);

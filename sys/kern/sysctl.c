@@ -8,14 +8,14 @@
 #include <stdint.h>
 #include <string.h>
 
+#include <arch/i386/early_boot.h>
+#include <kern/console.h>
 #include <sys/copy.h>
 #include <sys/errno.h>
 #include <sys/lock.h>
 #include <sys/proc.h>
 #include <sys/smp.h>
 #include <sys/sysctl.h>
-#include <kern/console.h>
-#include <arch/i386/early_boot.h>
 
 /* Global lock for sysctl tree operations */
 static mutex_t sysctl_mutex;

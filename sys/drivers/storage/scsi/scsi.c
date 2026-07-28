@@ -9,12 +9,13 @@
  * - CDB construction helpers
  */
 
-#include <string.h>
 #include <stdio.h>
+#include <string.h>
+
+#include <drivers/storage/scsi/scsi.h>
 #include <kern/console.h>
 #include <kern/time.h>
 #include <sys/lock.h>
-#include <drivers/storage/scsi/scsi.h>
 
 /* Serialises the request free-list and the device lists below.  Two threads
  * driving I/O on different disks (e.g. AHCI + USB) enter scsi_request_alloc()

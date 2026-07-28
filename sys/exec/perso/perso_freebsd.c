@@ -2,17 +2,17 @@
 #include <stdint.h>
 #include <string.h>
 
+#include <arch/i386/syscall.h>
+#include <exec/perso/compat.h>
+#include <exec/perso/freebsd/freebsd_syscalls.h>
+#include <exec/perso/freebsd/freebsd_user.h>
+#include <exec/perso/perso_ipc_sem.h>
+#include <exec/perso/perso_ipc_shm.h>
+#include <exec/perso/personality.h>
+#include <kern/version.h>
 #include <sys/copy.h>
 #include <sys/kern_syscalls.h>
 #include <sys/syscall_impl.h>
-#include <kern/version.h>
-#include <arch/i386/syscall.h>
-#include <exec/perso/compat.h>
-#include <exec/perso/personality.h>
-#include <exec/perso/perso_ipc_sem.h>
-#include <exec/perso/perso_ipc_shm.h>
-#include <exec/perso/freebsd/freebsd_syscalls.h>
-#include <exec/perso/freebsd/freebsd_user.h>
 
 static void *freebsd_syscalls[MAX_SYSCALLS] = {
     [FREEBSD_SYS_semget]   = (void *)&freebsd_sys_semget,

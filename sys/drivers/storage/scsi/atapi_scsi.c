@@ -10,11 +10,11 @@
 #include <stdio.h>
 #include <string.h>
 
+#include <arch/x86-common/io.h>
+#include <drivers/storage/ide/ide.h>
+#include <drivers/storage/scsi/scsi.h>
 #include <kern/console.h>
 #include <kern/time.h>
-#include <drivers/storage/scsi/scsi.h>
-#include <drivers/storage/ide/ide.h>
-#include <arch/x86-common/io.h>
 
 /*
  * ============================================================

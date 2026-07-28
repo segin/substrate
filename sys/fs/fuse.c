@@ -1,8 +1,9 @@
-#include <vfs/vfs.h>
-#include <sys/fuse.h>
-#include <kern/sched.h>
-#include <string.h>
 #include <stddef.h>
+#include <string.h>
+
+#include <kern/sched.h>
+#include <sys/fuse.h>
+#include <vfs/vfs.h>
 #include <vm/vm_kmem.h>
 
 #define FUSE_QUEUE_SIZE 16

@@ -25,6 +25,11 @@
 #include <stdio.h>
 #include <string.h>
 
+#include <arch/i386/intr.h>
+#include <drivers/console/pty.h>
+#include <kern/console.h>
+#include <kern/sched.h>
+#include <pm/pm.h>
 #include <sys/copy.h>
 #include <sys/errno.h>
 #include <sys/ioctl.h>
@@ -36,11 +41,6 @@
 #include <sys/tty.h>
 #include <vfs/vfs.h>
 #include <vm/vm_kmem.h>
-#include <pm/pm.h>
-#include <kern/console.h>
-#include <kern/sched.h>
-#include <arch/i386/intr.h>
-#include <drivers/console/pty.h>
 
 #define PTY_MAGIC 0x50545932 /* "PTY2" */
 

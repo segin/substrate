@@ -1,7 +1,8 @@
+#include <errno.h>
+
 #include <arch/x86_64/syscall.h>
 #include <exec/perso/personality.h>
 #include <sys/proc.h>
-#include <errno.h>
 
 #ifdef HOST_TEST
 struct syscall64_host_snapshot {

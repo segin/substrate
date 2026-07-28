@@ -5,23 +5,24 @@
  * LED control, switchable keymap infrastructure, and function key escape
  * sequence generation.
  */
-#include <drivers/input/ps2.h>
-#include <arch/i386/cpu.h>
-#include <arch/x86-common/io.h>
-#include <sys/input.h>
-#include <sys/keycodes.h>
-#include <sys/random.h>
-#include <kern/console.h>
-#include <kern/sysrq.h>
-#include <kern/debug.h>
-#include <arch/i386/idt.h>
 #include <stdint.h>
 #include <string.h>
+
+#include <arch/i386/cpu.h>
+#include <arch/i386/idt.h>
+#include <arch/i386/intr.h>
+#include <arch/x86-common/io.h>
+#include <drivers/input/ps2.h>
+#include <kern/console.h>
+#include <kern/debug.h>
+#include <kern/sysrq.h>
+#include <sys/input.h>
+#include <sys/keycodes.h>
+#include <sys/lock.h>
+#include <sys/random.h>
+#include <sys/tty.h>
 #include <sys/vt.h>
 #include <sys/vtio.h>
-#include <sys/tty.h>
-#include <arch/i386/intr.h>
-#include <sys/lock.h>
 
 /* ---- Key Buffer ---- */
 

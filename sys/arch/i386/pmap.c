@@ -1,26 +1,27 @@
 #include <stdio.h>
 #include <string.h>
 
-#include <sys/copy.h>
-#include <sys/errno.h>
-#include <sys/lock.h>
-#include <sys/param.h>
-#include <sys/smp.h>
-#include <vm/phys_mem.h>
-#include <vm/vm_kmem.h>
-#include <vm/vm_object.h>
-#include <vm/vm_page.h>
-#include <kern/console.h>
-#include <kern/panic.h>
-#include <kern/sched.h>
 #include <arch/i386/cpu.h>
 #include <arch/i386/percpu.h>
-#include <sys/preempt.h>
 #include <arch/i386/pmap.h>
 #include <arch/i386/pmap_hal.h>
 #include <arch/i386/pmm.h>
 #include <arch/i386/signal_arch.h>
 #include <arch/x86-common/lapic.h>
+#include <kern/console.h>
+#include <kern/panic.h>
+#include <kern/sched.h>
+#include <sys/copy.h>
+#include <sys/errno.h>
+#include <sys/lock.h>
+#include <sys/param.h>
+#include <sys/preempt.h>
+#include <sys/proc.h>
+#include <sys/smp.h>
+#include <vm/phys_mem.h>
+#include <vm/vm_kmem.h>
+#include <vm/vm_object.h>
+#include <vm/vm_page.h>
 
 // Kernel Page Directory (Static for bootstrap)
 // We need it 4KB aligned.
@@ -36,8 +37,6 @@ __attribute__((aligned(4096)))
 static uint32_t kernel_page_tables[PMAP_BOOTSTRAP_PT_COUNT][1024];
 
 
-
-#include <sys/proc.h> // For current_process
 
 
 static struct pmap kernel_pmap_store;

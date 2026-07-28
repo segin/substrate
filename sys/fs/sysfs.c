@@ -1,9 +1,10 @@
-#include <vfs/vfs.h>
+#include <stddef.h>
+#include <string.h>
+
+#include <kern/time.h>
 #include <sys/kobject.h>
 #include <sys/mount.h>
-#include <kern/time.h>
-#include <string.h>
-#include <stddef.h>
+#include <vfs/vfs.h>
 
 static struct dirent sys_dirent;
 static fs_node_t sysfs_root_node;

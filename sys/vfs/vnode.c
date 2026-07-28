@@ -20,18 +20,19 @@
  * Per-vnode locks are ordered by address to avoid A-B / B-A deadlocks.
  */
 
-#include <vfs/vnode.h>
-#include <vfs/buf.h>
-#include <sys/namei.h>
+#include <string.h>
+
 #include <kern/console.h>
 #include <kern/panic.h>
 #include <kern/sched.h>
 #include <kern/sleepq.h>
+#include <sys/errno.h>
 #include <sys/lock.h>
 #include <sys/mount.h>
-#include <sys/errno.h>
+#include <sys/namei.h>
+#include <vfs/buf.h>
+#include <vfs/vnode.h>
 #include <vm/uma.h>
-#include <string.h>
 
 /* Vnode zone for allocation */
 static uma_zone_t *vnode_zone;

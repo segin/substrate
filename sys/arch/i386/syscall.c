@@ -1,31 +1,12 @@
 
 
+#include <errno.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
-#include <sys/acct.h>
-#include <sys/copy.h>
-#include <sys/errno.h>
-#include <errno.h>   /* socket/network errno symbols for bsd_errno_xlate */
-#include <sys/exec.h>
-#include <sys/file.h>
-#include <sys/kern_syscalls.h>
-#include <sys/proc.h>
-#include <sys/session.h>
-#include <sys/signal.h>
-#include <sys/sysinfo.h>
-#include <sys/types.h>
-#include <sys/thr.h>
-#include <vfs/vfs.h>
-#include <kern/console.h>
-#include <kern/main.h>
-#include <kern/panic.h>
-#include <kern/sched.h>
-#include <kern/version.h>
-#include <pm/pm.h>
 #include <arch/i386/gdt.h>
 #include <arch/i386/idt.h>
 #include <arch/i386/intr.h>
@@ -34,6 +15,25 @@
 #include <arch/i386/syscall_abi.h>
 #include <drivers/console/uart/uart.h>
 #include <exec/perso/personality.h>
+#include <kern/console.h>
+#include <kern/main.h>
+#include <kern/panic.h>
+#include <kern/sched.h>
+#include <kern/version.h>
+#include <pm/pm.h>
+#include <sys/acct.h>
+#include <sys/copy.h>
+#include <sys/errno.h>
+#include <sys/exec.h>
+#include <sys/file.h>
+#include <sys/kern_syscalls.h>
+#include <sys/proc.h>
+#include <sys/session.h>
+#include <sys/signal.h>
+#include <sys/sysinfo.h>
+#include <sys/thr.h>
+#include <sys/types.h>
+#include <vfs/vfs.h>
 
 
 /* Arch-independent syscalls are now in kern/syscall.c */

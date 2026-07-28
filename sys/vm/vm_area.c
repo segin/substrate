@@ -1,6 +1,7 @@
-#include <vm/vm_area.h>
-#include <arch/i386/pmm.h>
 #include <string.h>
+
+#include <arch/i386/pmm.h>
+#include <vm/vm_area.h>
 
 vm_area_t *vm_area_create(uint32_t start, uint32_t end, uint32_t prot, uint32_t flags) {
     vm_area_t *area = (vm_area_t *)pmm_alloc_block();

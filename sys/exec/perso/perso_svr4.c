@@ -2,11 +2,12 @@
  * perso_svr4.c - AT&T UNIX System V Release 4 Personality
  */
 
-#include <exec/perso/personality.h>
 #include <stddef.h>
+
 #include <arch/i386/syscall.h>
-#include <sys/syscall_impl.h>
+#include <exec/perso/personality.h>
 #include <exec/perso/svr4/svr4_syscalls.h>
+#include <sys/syscall_impl.h>
 
 static void *svr4_syscalls[MAX_SYSCALLS] = {
     [SVR4_SYS_exit]        = &sys_exit,

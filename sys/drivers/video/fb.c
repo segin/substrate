@@ -9,21 +9,6 @@
 #include <stdint.h>
 #include <string.h>
 
-#include <sys/copy.h>
-#include <sys/errno.h>
-#include <sys/fb.h>
-#include <sys/file.h>
-#include <sys/lock.h>
-#include <sys/mman.h>
-#include <sys/proc.h>
-#include <vm/vm_kmem.h>
-#include <vm/vm_map.h>
-#include <vm/vm_object.h>
-#include <vm/vm_pager.h>
-#include <vfs/vfs.h>
-#include <kern/cmdline.h>
-#include <kern/console.h>
-#include <kern/resource.h>
 #include <arch/i386/pmap.h>
 #include <arch/i386/pmm.h>
 #include <drivers/video/bga.h>
@@ -31,6 +16,21 @@
 #include <drivers/video/fb_console.h>
 #include <drivers/video/font.h>
 #include <drivers/video/hw_text.h>
+#include <kern/cmdline.h>
+#include <kern/console.h>
+#include <kern/resource.h>
+#include <sys/copy.h>
+#include <sys/errno.h>
+#include <sys/fb.h>
+#include <sys/file.h>
+#include <sys/lock.h>
+#include <sys/mman.h>
+#include <sys/proc.h>
+#include <vfs/vfs.h>
+#include <vm/vm_kmem.h>
+#include <vm/vm_map.h>
+#include <vm/vm_object.h>
+#include <vm/vm_pager.h>
 
 /* ==================== Global State ==================== */
 

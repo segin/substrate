@@ -15,15 +15,16 @@
  * QEMU: -netdev user,id=n0 -device virtio-net-pci,netdev=n0
  */
 
-#include <drivers/virtio/virtio.h>
-#include <sys/netdev.h>
-#include <sys/irq.h>
-#include <arch/x86-common/io.h>
+#include <errno.h>
+#include <string.h>
+
 #include <arch/i386/pmm.h>
+#include <arch/x86-common/io.h>
+#include <drivers/virtio/virtio.h>
 #include <kern/console.h>
 #include <kern/pci.h>
-#include <string.h>
-#include <errno.h>
+#include <sys/irq.h>
+#include <sys/netdev.h>
 
 #define VIRTIO_NET_HDR_LEN 10
 #define VNET_FRAME_MAX     1526        /* 14 + 1500 + 12 */

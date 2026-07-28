@@ -1,15 +1,16 @@
-#include <vfs/vfs.h>
-#include <sys/mount.h>
-#include <pm/pm.h>
-#include <sys/proc.h>
-#include <sys/tty.h>
-#include <kern/time.h>
-#include <string.h>
-#include <stdio.h>
 #include <stddef.h>
-#include <vm/vm_kmem.h>
+#include <stdio.h>
+#include <string.h>
+
 #include <drivers/console/console.h>
 #include <exec/perso/personality.h>
+#include <kern/time.h>
+#include <pm/pm.h>
+#include <sys/mount.h>
+#include <sys/proc.h>
+#include <sys/tty.h>
+#include <vfs/vfs.h>
+#include <vm/vm_kmem.h>
 
 static size_t tty_read_proxy(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
     (void)node;

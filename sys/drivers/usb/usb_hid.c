@@ -13,17 +13,18 @@
  *   USB HID Usage Tables 1.12 (usb.org)
  */
 
+#include <stdio.h>
+#include <string.h>
+
 #include <drivers/usb/usb.h>
+#include <kern/console.h>
+#include <kern/sched.h>
+#include <kern/time.h>
 #include <keyboard.h>
 #include <sys/input.h>
 #include <sys/keycodes.h>
 #include <sys/kthread.h>
-#include <kern/console.h>
-#include <kern/time.h>
-#include <kern/sched.h>
-#include <sys/param.h>     /* for HZ */
-#include <stdio.h>
-#include <string.h>
+#include <sys/param.h>
 
 /*
  * ============================================================

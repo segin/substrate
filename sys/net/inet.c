@@ -8,19 +8,20 @@
  * a one-NIC test rig; multi-NIC routing comes later.
  */
 
-#include <net/inet.h>
-#include <sys/netdev.h>
-#include <netinet/ip.h>
-#include <netinet/if_arp.h>
-#include <netinet/icmp.h>
-#include <netinet/udp.h>
+#include <errno.h>
+#include <stddef.h>
+#include <string.h>
+
+#include <arch/i386/intr.h>
 #include <kern/console.h>
 #include <kern/sched.h>
+#include <net/inet.h>
+#include <netinet/icmp.h>
+#include <netinet/if_arp.h>
+#include <netinet/ip.h>
+#include <netinet/udp.h>
+#include <sys/netdev.h>
 #include <vm/vm_kmem.h>
-#include <arch/i386/intr.h>
-#include <string.h>
-#include <stddef.h>
-#include <errno.h>
 
 /* ------------------------------------------------------------------ */
 /* Generic 16-bit one's-complement checksum                           */

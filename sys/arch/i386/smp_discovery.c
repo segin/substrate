@@ -1,12 +1,7 @@
-#include <stdio.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 
-#include <sys/proc.h>
-#include <sys/smp.h>
-#include <kern/console.h>
-#include <kern/sched.h>
-#include <pm/pm.h>
 #include <arch/i386/cpu.h>
 #include <arch/i386/early_boot.h>
 #include <arch/i386/gdt.h>
@@ -14,8 +9,13 @@
 #include <arch/i386/percpu.h>
 #include <arch/i386/pmap.h>
 #include <arch/i386/smp.h>
-#include <arch/x86-common/lapic.h>
 #include <arch/x86-common/ioapic.h>
+#include <arch/x86-common/lapic.h>
+#include <kern/console.h>
+#include <kern/sched.h>
+#include <pm/pm.h>
+#include <sys/proc.h>
+#include <sys/smp.h>
 
 /*
  * Early boot page tables in boot.S map only the first 16MB into the higher

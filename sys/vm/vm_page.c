@@ -1,23 +1,24 @@
-#include <vm/vm_page.h>
-#include <vm/vm_pager.h>
-#include <vm/vm_object.h>
-#include <vm/vm_kmem.h>
-#include <vm/uma.h>
+#include <stddef.h>
+#include <string.h>
+
 #include <arch/i386/pmap.h>
 #include <arch/i386/pmm.h>
 #include <drivers/console/console.h>
-#include <vfs/buf.h>
-#include <kern/time.h>
 #include <kern/sched.h>
+#include <kern/time.h>
 #include <pm/pm.h>
+#include <sys/lock.h>
 #include <sys/param.h>
 #include <sys/signal.h>
-#include <stddef.h>
-#include <string.h>
-#include <vm/vm_area.h>
+#include <vfs/buf.h>
 #include <vm/phys_mem.h>
+#include <vm/uma.h>
+#include <vm/vm_area.h>
+#include <vm/vm_kmem.h>
 #include <vm/vm_map.h>
-#include <sys/lock.h>
+#include <vm/vm_object.h>
+#include <vm/vm_page.h>
+#include <vm/vm_pager.h>
 
 // System Page Queues
 static vm_page_t *active_queue = NULL;

@@ -1,12 +1,11 @@
-#include <drivers/storage/nvme/nvme.h>
+#include <stdio.h>
+#include <string.h>
 
+#include <drivers/storage/nvme/nvme.h>
 #include <kern/console.h>
 #include <kern/device.h>
 #include <kern/pci.h>
 #include <kern/time.h>
-
-#include <stdio.h>
-#include <string.h>
 #include <sys/dma.h>
 
 #define NVME_PCI_CLASS_STORAGE 0x01

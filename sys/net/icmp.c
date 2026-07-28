@@ -11,14 +11,15 @@
  * ping(8) sees the reply.
  */
 
+#include <stddef.h>
+#include <string.h>
+
+#include <kern/console.h>
 #include <net/inet.h>
-#include <sys/netdev.h>
+#include <netinet/icmp.h>
 #include <netinet/ip.h>
 #include <netinet/ip6.h>
-#include <netinet/icmp.h>
-#include <kern/console.h>
-#include <string.h>
-#include <stddef.h>
+#include <sys/netdev.h>
 
 /* ------------------------------------------------------------------ */
 /* ICMPv4                                                             */

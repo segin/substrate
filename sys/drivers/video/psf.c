@@ -6,12 +6,12 @@
  * PSF2: 32-byte header; variable width/height, optional Unicode table.
  */
 
-#include <stdint.h>
 #include <stddef.h>
+#include <stdint.h>
 #include <string.h>
 
-#include <drivers/video/psf.h>
 #include <drivers/video/font.h>
+#include <drivers/video/psf.h>
 
 int psf1_parse(const void *data, size_t size, struct font_info *out)
 {

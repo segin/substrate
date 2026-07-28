@@ -2,16 +2,16 @@
 #include <stdio.h>
 #include <string.h>
 
-#include <sys/copy.h>
-#include <kern/console.h>
-#include <kern/panic.h>
-#include <kern/stacktrace.h>
 #include <arch/i386/idt.h>
 #include <arch/x86-common/lapic.h>
 #include <drivers/console/uart/uart.h>
 #include <drivers/video/fb.h>
 #include <drivers/video/hw_text.h>
 #include <drivers/video/vga.h>
+#include <kern/console.h>
+#include <kern/panic.h>
+#include <kern/stacktrace.h>
+#include <sys/copy.h>
 
 #ifdef HOST_TEST
 void panic_test_halt(void);

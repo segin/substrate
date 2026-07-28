@@ -23,17 +23,18 @@
  * non-NULL _umtx_time is honoured as a relative timeout (see umtx_read_time).
  */
 
-#include <sys/umtx.h>
-#include <sys/proc.h>
-#include <sys/errno.h>
-#include <sys/time.h>
-#include <sys/copy.h>
+#include <stddef.h>
+#include <stdint.h>
+
+#include <arch/i386/pmap.h>
 #include <kern/sched.h>
 #include <kern/sleepq.h>
 #include <kern/time.h>
-#include <arch/i386/pmap.h>
-#include <stddef.h>
-#include <stdint.h>
+#include <sys/copy.h>
+#include <sys/errno.h>
+#include <sys/proc.h>
+#include <sys/time.h>
+#include <sys/umtx.h>
 
 /* FreeBSD UMTX_OP_* operation codes (sys/sys/umtx.h). */
 #define UMTX_OP_LOCK              0   /* COMPAT10 */

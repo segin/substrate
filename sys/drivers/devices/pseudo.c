@@ -1,17 +1,18 @@
-#include <arch/x86-common/io.h>
-#include <drivers/input/keyboard.h>
-#include <drivers/console/uart/uart.h>
-#include <kern/console.h>
 #include <string.h>
-#include <sys/errno.h>
-#include <sys/proc.h>
-#include <vfs/vfs.h>
-#include <sys/tty.h>
-#include <drivers/devices/null.h>
-#include <drivers/devices/zero.h>
+
+#include <arch/x86-common/io.h>
+#include <drivers/console/uart/uart.h>
+#include <drivers/devices/kmem.h>
 #include <drivers/devices/lpt.h>
 #include <drivers/devices/mem.h>
-#include <drivers/devices/kmem.h>
+#include <drivers/devices/null.h>
+#include <drivers/devices/zero.h>
+#include <drivers/input/keyboard.h>
+#include <kern/console.h>
+#include <sys/errno.h>
+#include <sys/proc.h>
+#include <sys/tty.h>
+#include <vfs/vfs.h>
 
 // /dev/null
 // Implemented in null.c

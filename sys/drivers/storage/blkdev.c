@@ -1,11 +1,12 @@
+#include <string.h>
+
 #include <drivers/storage/blkdev.h>
-#include <vfs/buf.h>
-#include <vfs/vfs.h>
-#include <kern/geom/geom.h>
 #include <kern/console.h>
+#include <kern/geom/geom.h>
 #include <sys/errno.h>
 #include <sys/lock.h>
-#include <string.h>
+#include <vfs/buf.h>
+#include <vfs/vfs.h>
 #include <vm/vm_kmem.h>
 
 #define STACK_BUF_SIZE 512

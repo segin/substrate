@@ -34,25 +34,26 @@
  * wrappers do the copyin/copyout.
  */
 
-#include <sys/mqueue.h>
-#include <sys/ipc.h>
-#include <sys/types.h>
-#include <sys/proc.h>
-#include <sys/lock.h>
-#include <sys/copy.h>
-#include <sys/signal.h>
-#include <sys/time.h>
-#include <sys/fcntl.h>
-#include <sys/kern_syscalls.h>
-#include <vm/vm_kmem.h>
-#include <kern/sleepq.h>
+#include <errno.h>
+#include <stdint.h>
+#include <string.h>
+
+#include <arch/i386/intr.h>
 #include <kern/sched.h>
+#include <kern/sleepq.h>
 #include <kern/time.h>
 #include <pm/pm.h>
-#include <arch/i386/intr.h>
-#include <errno.h>
-#include <string.h>
-#include <stdint.h>
+#include <sys/copy.h>
+#include <sys/fcntl.h>
+#include <sys/ipc.h>
+#include <sys/kern_syscalls.h>
+#include <sys/lock.h>
+#include <sys/mqueue.h>
+#include <sys/proc.h>
+#include <sys/signal.h>
+#include <sys/time.h>
+#include <sys/types.h>
+#include <vm/vm_kmem.h>
 
 /* One queued message; the payload is stored inline after the header. */
 struct mq_msg {

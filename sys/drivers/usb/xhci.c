@@ -14,19 +14,20 @@
  * address->slot map; all later transfers route by address (or, pre-address, by
  * root port) to the slot's per-endpoint transfer ring.
  */
-#include <string.h>
 #include <stdio.h>
-#include <sys/dma.h>
-#include <sys/lock.h>
-#include <vm/vm_kmem.h>
+#include <string.h>
+
+#include <drivers/usb/usb.h>
+#include <drivers/usb/xhci.h>
 #include <kern/bus.h>
 #include <kern/console.h>
 #include <kern/driver.h>
 #include <kern/pci.h>
 #include <kern/resource.h>
 #include <kern/time.h>
-#include <drivers/usb/xhci.h>
-#include <drivers/usb/usb.h>
+#include <sys/dma.h>
+#include <sys/lock.h>
+#include <vm/vm_kmem.h>
 
 #define XHCI_RING_TRBS     64      /* TRBs per ring segment */
 #define XHCI_MAX_SLOTS     16

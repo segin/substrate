@@ -1,6 +1,15 @@
 #include <stddef.h>
 #include <string.h>
 
+#include <arch/i386/idt.h>
+#include <exec/perso/personality.h>
+#include <kern/cmdline.h>
+#include <kern/console.h>
+#include <kern/panic.h>
+#include <kern/sched.h>
+#include <kern/sleepq.h>
+#include <kern/time.h>
+#include <pm/pm.h>
 #include <sys/copy.h>
 #include <sys/core.h>
 #include <sys/errno.h>
@@ -10,15 +19,6 @@
 #include <sys/session.h>
 #include <sys/signal.h>
 #include <sys/time.h>
-#include <pm/pm.h>
-#include <kern/console.h>
-#include <kern/cmdline.h>
-#include <kern/panic.h>
-#include <kern/sched.h>
-#include <kern/sleepq.h>
-#include <kern/time.h>
-#include <arch/i386/idt.h>
-#include <exec/perso/personality.h>
 
 /*
  * POSIX real-time signal queue (the per-process rtsig_q[] in sys/proc.h).

@@ -9,16 +9,14 @@
  * If the kernel was not booted via EFI, all entry points are no-ops.
  */
 
-#include <stdint.h>
-#include <stddef.h>
 #include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 #include <string.h>
 
+#include <arch/i386/efi.h>
 #include <kern/console.h>
 #include <kern/efi_runtime.h>
-
-/* Pull in EFI types used by the saved pointer (arch-specific). */
-#include <arch/i386/efi.h>
 
 /* Symbols exported by efi_boot.c (NULL when not EFI-booted). */
 extern EFI_RUNTIME_SERVICES *efi_saved_runtime_services __attribute__((weak));

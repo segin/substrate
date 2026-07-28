@@ -2,20 +2,21 @@
  * sys/drivers/console/vt.c - Virtual Terminal Logic
  */
 
-#include <sys/vt.h>
-#include <sys/vtio.h>           /* K_XLATE / K_RAW / KDSKBMODE */
-#include <drivers/video/hw_text.h>
-#include <drivers/video/fb_console.h>
-#include <drivers/video/fb.h>
-#include <drivers/input/keyboard.h>
-#include <kern/console.h>
-#include <string.h>
-#include <sys/tty.h>
-#include <sys/lock.h>
-#include <arch/i386/intr.h>
-#include <kern/time.h>
-#include <arch/x86-common/rtc.h>
 #include <stdio.h>
+#include <string.h>
+
+#include <arch/i386/intr.h>
+#include <arch/x86-common/rtc.h>
+#include <drivers/input/keyboard.h>
+#include <drivers/video/fb.h>
+#include <drivers/video/fb_console.h>
+#include <drivers/video/hw_text.h>
+#include <kern/console.h>
+#include <kern/time.h>
+#include <sys/lock.h>
+#include <sys/tty.h>
+#include <sys/vt.h>
+#include <sys/vtio.h>
 #include <vm/vm_kmem.h>
 
 static vt_state_t vt_states[VT_MAX];

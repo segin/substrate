@@ -20,19 +20,20 @@
  * Syscall numbering matches System V.3 (shared with perso_svr3.c).
  */
 
+#include <stddef.h>
+#include <stdio.h>
+#include <string.h>
+
+#include <arch/i386/idt.h>
 #include <exec/perso/personality.h>
 #include <exec/perso/svr3/svr3_syscalls.h>
-#include <arch/i386/idt.h>
-#include <sys/syscall_impl.h>
-#include <sys/proc.h>
-#include <sys/ldt.h>
-#include <sys/copy.h>
-#include <sys/errno.h>
 #include <kern/cmdline.h>
 #include <kern/console.h>
-#include <stdio.h>
-#include <stddef.h>
-#include <string.h>
+#include <sys/copy.h>
+#include <sys/errno.h>
+#include <sys/ldt.h>
+#include <sys/proc.h>
+#include <sys/syscall_impl.h>
 
 #define XENIX_EFLAGS_CF   0x00000001U   /* carry flag */
 #define XENIX_LCALL_LEN   7U            /* 9A off32 sel16 */

@@ -38,21 +38,22 @@
  * devfs creates at init time.
  */
 
+#include <errno.h>
+#include <stddef.h>
+#include <string.h>
+
+#include <arch/i386/pmap.h>
+#include <arch/i386/pmm.h>
+#include <kern/time.h>
+#include <sys/lock.h>
+#include <sys/mman.h>
+#include <sys/mount.h>
+#include <sys/proc.h>
 #include <vfs/vfs.h>
 #include <vm/vm_kmem.h>
 #include <vm/vm_map.h>
 #include <vm/vm_object.h>
 #include <vm/vm_pager.h>
-#include <sys/mount.h>
-#include <sys/mman.h>
-#include <sys/lock.h>
-#include <kern/time.h>
-#include <sys/proc.h>
-#include <arch/i386/pmap.h>
-#include <arch/i386/pmm.h>
-#include <string.h>
-#include <stddef.h>
-#include <errno.h>
 
 #ifndef SHMFS_NAME_MAX
 #define SHMFS_NAME_MAX 128

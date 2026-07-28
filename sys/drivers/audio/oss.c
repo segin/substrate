@@ -16,17 +16,17 @@
  * right handler.
  */
 
-#include <drivers/audio/audio.h>
+#include <stdio.h>
+#include <string.h>
 
+#include <drivers/audio/audio.h>
+#include <kern/console.h>
 #include <sys/audioio.h>
 #include <sys/copy.h>
 #include <sys/errno.h>
 #include <sys/major.h>
 #include <sys/soundcard.h>
-#include <kern/console.h>
 #include <vfs/vfs.h>
-#include <stdio.h>
-#include <string.h>
 
 static fs_node_t oss_nodes[AUDIO_MAX_DEVICES];
 

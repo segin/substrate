@@ -27,21 +27,22 @@
  * Still TBD: send window/cwnd, SACK, RTT-driven RTO, IPv6 transport.
  */
 
+#include <errno.h>
+#include <stddef.h>
+#include <string.h>
+
+#include <arch/i386/intr.h>
+#include <kern/console.h>
+#include <kern/sched.h>
+#include <kern/time.h>
 #include <net/inet.h>
+#include <netinet/ip.h>
+#include <netinet/tcp.h>
+#include <sys/kthread.h>
 #include <sys/netdev.h>
 #include <sys/poll.h>
 #include <sys/proc.h>
-#include <sys/kthread.h>
-#include <netinet/ip.h>
-#include <netinet/tcp.h>
-#include <kern/sched.h>
-#include <kern/time.h>
-#include <kern/console.h>
 #include <vm/vm_kmem.h>
-#include <string.h>
-#include <stddef.h>
-#include <errno.h>
-#include <arch/i386/intr.h>
 
 /*
  * Netstack synchronisation.  tcp_segment_input() and everything it

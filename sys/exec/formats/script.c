@@ -9,12 +9,13 @@
  * Recursion depth is limited to prevent infinite loops.
  */
 
-#include <exec/formats/script.h>
-#include <sys/exec.h>
-#include <sys/errno.h>
-#include <sys/kern_syscalls.h>
-#include <kern/sched.h>
 #include <string.h>
+
+#include <exec/formats/script.h>
+#include <kern/sched.h>
+#include <sys/errno.h>
+#include <sys/exec.h>
+#include <sys/kern_syscalls.h>
 
 #define SCRIPT_MAX_RECURSION 4
 #define SCRIPT_MAX_ARGV      256

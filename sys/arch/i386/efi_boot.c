@@ -6,16 +6,13 @@
  * boot.S provides for legacy multiboot loaders, then jumps to kmain.
  */
 
-#include <stdint.h>
-#include <stddef.h>
 #include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 
-// Include Multiboot definitions
-// The Makefile adds -I../x86-common/include
-#include <multiboot.h>
-
-#include <kern/main.h>
 #include <arch/i386/efi.h>
+#include <kern/main.h>
+#include <multiboot.h>
 
 // --------------------------------------------------------------------------------
 // Globals and Imports

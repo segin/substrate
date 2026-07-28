@@ -8,11 +8,11 @@
 #include <stdint.h>
 #include <string.h>
 
+#include <kern/sched.h>
+#include <kern/sleepq.h>
 #include <sys/preempt.h>
 #include <sys/proc.h>
 #include <vm/vm_kmem.h>
-#include <kern/sched.h>
-#include <kern/sleepq.h>
 
 #define SLEEPQ_TYPE_SHARED 0
 #define SLEEPQ_TYPE_PRIVATE 1

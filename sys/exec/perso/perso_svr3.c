@@ -2,11 +2,12 @@
  * perso_svr3.c - AT&T UNIX System V Release 3 Personality
  */
 
-#include <exec/perso/personality.h>
 #include <stddef.h>
+
 #include <arch/i386/syscall.h>
-#include <sys/syscall_impl.h>
+#include <exec/perso/personality.h>
 #include <exec/perso/svr3/svr3_syscalls.h>
+#include <sys/syscall_impl.h>
 
 static void *svr3_syscalls[MAX_SYSCALLS] = {
     [SVR3_SYS_exit]     = &sys_exit,

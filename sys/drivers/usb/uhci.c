@@ -14,20 +14,20 @@
 
 #include <string.h>
 
-#include <sys/dma.h>
-#include <sys/irq.h>
-#include <sys/lock.h>
-#include <vm/vm_kmem.h>
+#include <arch/i386/intr.h>
+#include <arch/x86-common/io.h>
+#include <drivers/usb/uhci.h>
+#include <drivers/usb/usb.h>
 #include <kern/bus.h>
 #include <kern/console.h>
 #include <kern/driver.h>
 #include <kern/pci.h>
 #include <kern/sched.h>
 #include <kern/time.h>
-#include <arch/i386/intr.h>
-#include <arch/x86-common/io.h>
-#include <drivers/usb/uhci.h>
-#include <drivers/usb/usb.h>
+#include <sys/dma.h>
+#include <sys/irq.h>
+#include <sys/lock.h>
+#include <vm/vm_kmem.h>
 
 /*
  * ============================================================

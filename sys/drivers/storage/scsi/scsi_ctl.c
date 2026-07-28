@@ -8,16 +8,17 @@
  *   /dev/storage/scsiN      - High-level block device alias
  */
 
-#include <string.h>
 #include <stdio.h>
-#include <kern/console.h>
-#include <vfs/vfs.h>
+#include <string.h>
+
 #include <drivers/storage/blkdev.h>
-#include <sys/kern_syscalls.h>
-#include <sys/errno.h>
-#include <sys/proc.h>
-#include <vm/vm_kmem.h>
 #include <drivers/storage/scsi/scsi.h>
+#include <kern/console.h>
+#include <sys/errno.h>
+#include <sys/kern_syscalls.h>
+#include <sys/proc.h>
+#include <vfs/vfs.h>
+#include <vm/vm_kmem.h>
 
 /*
  * ============================================================

@@ -1,7 +1,17 @@
 #include <stdint.h>
 #include <string.h>
-#include <time.h>
 
+#include <arch/i386/cpu.h>
+#include <arch/i386/intr.h>
+#include <arch/i386/percpu.h>
+#include <arch/x86-common/io.h>
+#include <drivers/storage/floppy/floppy.h>
+#include <drivers/video/fb_console.h>
+#include <drivers/video/hw_text.h>
+#include <kern/console.h>
+#include <kern/sched.h>
+#include <kern/time.h>
+#include <pm/pm.h>
 #include <sys/copy.h>
 #include <sys/errno.h>
 #include <sys/kern_syscalls.h>
@@ -12,17 +22,7 @@
 #include <sys/time.h>
 #include <sys/times.h>
 #include <sys/vt.h>
-#include <pm/pm.h>
-#include <kern/console.h>
-#include <kern/sched.h>
-#include <kern/time.h>
-#include <arch/i386/cpu.h>
-#include <arch/i386/intr.h>
-#include <arch/i386/percpu.h>
-#include <arch/x86-common/io.h>
-#include <drivers/storage/floppy/floppy.h>
-#include <drivers/video/fb_console.h>
-#include <drivers/video/hw_text.h>
+#include <time.h>
 
 time_t boot_time = 0;
 

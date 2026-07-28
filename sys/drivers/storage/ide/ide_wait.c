@@ -6,7 +6,6 @@
 
 #include <drivers/storage/ide/ide.h>
 #include <drivers/storage/ide/ide_priv.h>
-
 #include <kern/console.h>
 #include <kern/sched.h>
 #include <kern/time.h>

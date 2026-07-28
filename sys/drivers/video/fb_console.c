@@ -5,25 +5,26 @@
  * on top of the framebuffer driver.
  */
 
-#include <string.h>
 #include <stdint.h>
-#include <kern/console.h>
-#include <kern/sched.h>
-#include <kern/time.h>
 #include <stdio.h>
-#include <sys/lock.h>
-#include <sys/tty.h>
-#include <sys/vt.h>
-#include <sys/vtio.h>
-#include <sys/copy.h>
-#include <sys/errno.h>
-#include <sys/proc.h>
+#include <string.h>
+
 #include <arch/i386/intr.h>
-#include <vm/vm_kmem.h>
 #include <drivers/video/fb.h>
 #include <drivers/video/fb_console.h>
 #include <drivers/video/fb_ops.h>
 #include <drivers/video/font.h>
+#include <kern/console.h>
+#include <kern/sched.h>
+#include <kern/time.h>
+#include <sys/copy.h>
+#include <sys/errno.h>
+#include <sys/lock.h>
+#include <sys/proc.h>
+#include <sys/tty.h>
+#include <sys/vt.h>
+#include <sys/vtio.h>
+#include <vm/vm_kmem.h>
 
 /* ==================== Constants ==================== */
 

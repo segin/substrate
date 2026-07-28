@@ -1,9 +1,10 @@
-#include <sys/lock.h>
-#include <sys/proc.h>
+#include <stddef.h>
+
+#include <kern/panic.h>
 #include <kern/sched.h>
 #include <kern/sleepq.h>
-#include <kern/panic.h>
-#include <stddef.h>
+#include <sys/lock.h>
+#include <sys/proc.h>
 
 void sema_init(semaphore_t *s, int value, const char *name) {
     if (value < 0) {

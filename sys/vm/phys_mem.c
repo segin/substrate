@@ -1,11 +1,11 @@
-#include <vm/phys_mem.h>
-#include <sys/lock.h>
 #include <stddef.h>
 #include <string.h>
 
 #include <intr.h>
 #include <kern/console.h>
 #include <kern/panic.h>
+#include <sys/lock.h>
+#include <vm/phys_mem.h>
 
 
 

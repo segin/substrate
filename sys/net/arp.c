@@ -11,14 +11,15 @@
  * until evicted.  Fine for SLIRP/LAN test scenarios.
  */
 
+#include <stddef.h>
+#include <string.h>
+
+#include <kern/console.h>
 #include <net/inet.h>
-#include <sys/netdev.h>
 #include <netinet/if_arp.h>
 #include <netinet/ip.h>
-#include <kern/console.h>
 #include <sys/lock.h>
-#include <string.h>
-#include <stddef.h>
+#include <sys/netdev.h>
 
 #define ARP_CACHE_SIZE 32
 

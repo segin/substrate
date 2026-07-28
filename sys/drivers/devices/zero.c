@@ -11,14 +11,14 @@
 
 #include <string.h>
 
+#include <arch/i386/pmap.h>
+#include <arch/i386/pmm.h>
+#include <kern/console.h>
 #include <sys/errno.h>
 #include <sys/mman.h>
 #include <sys/poll.h>
 #include <sys/proc.h>
 #include <vfs/vfs.h>
-#include <kern/console.h>
-#include <arch/i386/pmap.h>
-#include <arch/i386/pmm.h>
 
 #define KERNEL_DIRECT_MAP_BASE 0xC0000000U
 

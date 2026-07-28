@@ -4,10 +4,11 @@
  * Manages interrupt routing from external devices to CPUs via the I/O APIC.
  */
 
+#include <stdio.h>
+
+#include <arch/i386/pmap.h>
 #include <ioapic.h>
 #include <kern/console.h>
-#include <arch/i386/pmap.h>
-#include <stdio.h>
 
 // Maximum number of IO-APICs supported
 #define MAX_IOAPICS 8

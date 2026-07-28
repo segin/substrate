@@ -6,9 +6,9 @@
 
 #include <string.h>
 
-#include <sys/proc.h>
-#include <kern/sched.h>
 #include <arch/i386/percpu.h>
+#include <kern/sched.h>
+#include <sys/proc.h>
 
 /* MAX_CPUS defined in sched.h */
 

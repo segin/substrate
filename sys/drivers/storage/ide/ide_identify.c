@@ -1,7 +1,7 @@
-#include <drivers/storage/ide/ide.h>
-
 #include <stdio.h>
 #include <string.h>
+
+#include <drivers/storage/ide/ide.h>
 
 static void ide_copy_identify_string(char *dst, size_t dst_size,
                                      const uint16_t *src, size_t words) {
