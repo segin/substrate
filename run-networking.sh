@@ -1,17 +1,7 @@
 #!/bin/sh
 # Run substrate under qemu with networking.
 #
-# Networking back-ends:
-#   default (macvtap): bridge the guest NIC onto a real host interface. The
-#     guest gets its own MAC on the LAN and DHCP reaches the real router.
-#     Host<->guest traffic is not possible with macvtap. Requires sudo and an
-#     Ethernet-like default-route NIC; fails on wifi and point-to-point
-#     tun/VPN devices ("RTNETLINK answers: Invalid argument").
-#   --user (slirp): guest behind QEMU's built-in NAT (gateway 10.0.2.2, guest
-#     10.0.2.15). No sudo, no host NIC; works over wifi/VPN. Inbound needs
-#     hostfwd ($HOSTFWD, e.g. HOSTFWD=hostfwd=tcp::2222-:22).
-#
-# $NIC overrides the host NIC in macvtap mode (default: default-route iface).
+# Options and environment variables: ./run-networking.sh --help
 #
 # $MEM sets the guest RAM size (default 8G; any qemu -m syntax, e.g. MEM=512M).
 # Note what the guest can actually do with it: qemu puts only about 3 GiB below
@@ -25,101 +15,140 @@ set -eu
 
 MEM=${MEM:-8G}
 
-# Flags:
-#   --boot=MODE
-#            how the machine starts. The three modes exercise genuinely
-#            different code paths, so a change that works in one can still be
-#            broken in another -- test the one you actually care about.
-#
-#              kernel  (default) direct kernel boot: qemu loads sys/kernel.bin
-#                      itself via -kernel and the kernel gets $APPEND on its
-#                      command line. Fastest edit-run loop, and the only mode
-#                      where --gfx/--debug/root= on this script's command line
-#                      mean anything. No bootloader is involved at all.
-#              bios    boot rootfs.img the way real hardware would: the BIOS
-#                      runs GRUB out of the MBR + post-MBR gap, GRUB finds the
-#                      root filesystem by LABEL and loads /vmunix from it.
-#              uefi    same image, firmware side: OVMF runs
-#                      /EFI/BOOT/BOOTX64.EFI off the FAT32 ESP, which loads
-#                      /vmunix via multiboot2. Needs edk2/OVMF installed and
-#                      runs qemu-system-x86_64 (the x64 firmware needs a
-#                      64-bit CPU; the guest kernel is still 32-bit).
-#
-#            In bios/uefi the kernel and its arguments come from the grub.cfg
-#            baked into the image, NOT from this script -- rebuild the image
-#            with ./build-rootfs.sh --image to pick up a new kernel, and edit
-#            the ESP's /boot/grub/grub.cfg to change boot arguments.
-#   --gfx[=WxH@bpp]
-#            bring up substrate's fb driver (adds vga=<mode> + -vga std). Bare
-#            --gfx uses 1024x768@32 (BGA linear); e.g. --gfx=640x480@4 (planar
-#            VGA), --gfx=800x600@16. Without --gfx, qemu's text mode is used.
-#   --kvm    enable -accel kvm. Default is TCG: KVM has an i386 coherence bug
-#            that corrupts a single-byte read right after a SIGALRM reaches a
-#            userland handler (tests/lib/c/torture_heap_stdio sc9f; passes
-#            under TCG). Use --kvm for speed when that risk is acceptable.
-#   --smp[=N]
-#            boot with N virtual CPUs. Bare --smp uses 2; --smp=4 sets the
-#            count. Default is 1 (uniprocessor). Substrate SMP is new: it boots
-#            multi-core cleanly, but races under sustained load may still remain.
-#   --snapshot
-#            add -snapshot: every writable disk (rootfs.img, --drive,
-#            --drive-ctrl) is backed by a throwaway overlay, so guest writes
-#            are discarded on exit and the images stay pristine. Use for test
-#            boots.
-#   --user   QEMU user-mode (slirp) networking instead of macvtap. No sudo or
-#            host NIC.
-#   --debug  enable the serial_debug boot arg (verbose kernel serial output,
-#            off by default because it slows the serial console) and start
-#            QEMU's GDB stub on tcp::1234 ($GDBPORT overrides). GDBHALT=1 also
-#            freezes the CPU at reset so breakpoints can be set before boot.
-#   --usb-host=SPEC
-#            pass a real host USB device through via -device usb-host (storage,
-#            HID, serial, audio, ...). SPEC is VID:PID in hex (e.g. 05ac:110b,
-#            from lsusb) or BUS.ADDR in decimal (e.g. 1.5, to disambiguate
-#            identical devices). Repeatable. QEMU claims the device from its
-#            host driver, so this needs root or access to the matching
-#            /dev/bus/usb/BUS/DEV node. Devices share the UHCI root hub with
-#            usb-kbd/usb-mouse (few ports); grab only a couple.
-#   --usb-audio
-#            replace the emulated AC'97 with QEMU's USB Audio Class device
-#            (UAC 1.0) on UHCI; substrate's uac driver binds it as /dev/audio0.
-#   --usb-audio-host[=VID:PID]
-#            --usb-host=<dev> that also drops the emulated AC'97, so the
-#            passed-through USB audio device is the guest's only audio device
-#            (/dev/audio0). Default VID:PID 05ac:110b (Apple EarPods); audio
-#            plays on the physical device. Mutually exclusive with --usb-audio.
-#            $AUDIODRV overrides the host backend for the AC'97 / --usb-audio
-#            modes (default sdl; e.g. AUDIODRV=pa, AUDIODRV=alsa).
-#   --drive FILE
-#            attach a raw disk image on the next free port of the shared boot
-#            AHCI controller. Repeatable; the boot disk is sata0.0, so extras
-#            land on ports 1..5 as guest /dev/storage/sata1, sata2, ... (mount
-#            them yourself, e.g. mount /dev/storage/sata1 /mnt ext2). ICH9 AHCI
-#            has 6 ports, so at most 5 extra drives.
-#   --drive-ctrl FILE
-#            like --drive but on a dedicated ich9-ahci controller per image.
-#            Repeatable up to AHCI_MAX_CONTROLLERS-1 (3). Exercises substrate's
-#            multiple-AHCI-controller support; disks appear as /dev/storage/sataN
-#            in PCI-probe order (verify with ls /dev/storage/; if only the first
-#            HBA binds, fall back to --drive). Raw format only; edit format=
-#            below for qcow2 etc.
-#   --floppy FILE
-#            attach FILE as a floppy diskette (qemu if=floppy). Repeatable for
-#            the PC's two drives: first --floppy is fd0 (A:), second fd1 (B:).
-#            Raw; a 1.44 MB diskette is 1474560 bytes.
-#   --usb-version=VER
-#            select the emulated USB host controller: 1.1 = UHCI (piix3-usb-uhci,
-#            default), 2.0 = EHCI (usb-ehci), 3.0 = xHCI (qemu-xhci). All USB
-#            devices attach to it. substrate only drives UHCI today; 2.0/3.0
-#            need the in-progress EHCI/xHCI drivers or the guest sees no USB.
-#   --virtio
-#            boot the root filesystem off a virtio-blk device instead of the
-#            AHCI disk: rootfs.img is attached as virtio-blk-pci and the kernel
-#            finds it by label all the same. The boot ich9-ahci controller is
-#            created (empty), so --drive still works -- and since port 0 is now
-#            free, --drive images start there, making AHCI port N the guest's
-#            sataN. Exercises the virtio-blk driver as a real root device
-#            rather than the AHCI path.
+# The flag reference lives in usage() rather than in a comment here: it is the
+# same text either way, and a copy that only exists in the source is a copy
+# nobody reads and everybody forgets to update.  `./run-networking.sh --help`.
+usage() {
+    cat <<'EOF'
+Usage: ./run-networking.sh [options]
+
+Boots substrate under qemu.  With no options: direct kernel boot of
+sys/kernel.bin, root found by volume label, macvtap networking, 8G of RAM.
+
+Boot mode
+  --boot=MODE        How the machine starts.  The three modes exercise
+                     genuinely different code paths, so a change that works in
+                     one can still be broken in another -- test the one you
+                     care about.
+                       kernel  (default) qemu loads sys/kernel.bin via -kernel.
+                               No bootloader involved.  Fastest edit-run loop,
+                               and the only mode where --gfx, --debug's
+                               serial_debug and $ROOT mean anything.
+                       bios    boot rootfs.img as real hardware would: the BIOS
+                               runs GRUB from the MBR + post-MBR gap, GRUB finds
+                               the root by LABEL and loads /vmunix from it.
+                       uefi    same image, firmware side: OVMF runs
+                               /EFI/BOOT/BOOTX64.EFI off the FAT32 ESP, which
+                               loads /vmunix via multiboot2.  Needs edk2/OVMF,
+                               and runs qemu-system-x86_64 because the x64
+                               firmware needs a 64-bit CPU (the guest kernel is
+                               still 32-bit).
+                     In bios/uefi the kernel and its boot arguments come from
+                     the grub.cfg baked into the image, NOT from this script.
+                     Rebuild with ./build-rootfs.sh --image to pick up a new
+                     kernel; edit the ESP's /boot/grub/grub.cfg for boot args.
+
+Machine
+  --kvm              Use -accel kvm.  Default is TCG: KVM has an i386 coherence
+                     bug that corrupts a single-byte read right after SIGALRM
+                     reaches a userland handler (tests/lib/c/torture_heap_stdio
+                     sc9f; passes under TCG).  Use --kvm for speed when that
+                     risk is acceptable.
+  --smp[=N]          Boot with N CPUs.  Bare --smp means 2; default is 1.
+                     Substrate SMP boots multi-core cleanly, but races under
+                     sustained load may remain.
+  --gfx[=WxH@bpp]    Bring up substrate's framebuffer driver (adds vga=<mode>
+                     and -vga std).  Bare --gfx is 1024x768@32 (BGA linear);
+                     e.g. --gfx=640x480@4 (planar VGA), --gfx=800x600@16.
+                     Ignored in --boot=bios/uefi, where GRUB picks the mode.
+  --snapshot         Back every writable disk with a throwaway overlay, so guest
+                     writes are discarded on exit and the images stay pristine.
+                     Use this for test boots.
+
+Networking
+  --user             QEMU user-mode (slirp) NAT instead of macvtap: gateway
+                     10.0.2.2, guest 10.0.2.15.  No sudo and no host NIC, so it
+                     works over wifi and VPNs.  Inbound needs $HOSTFWD.
+                     The default is macvtap, which bridges the guest onto a real
+                     host interface -- the guest gets its own MAC on the LAN and
+                     DHCP reaches the real router, but host<->guest traffic is
+                     impossible.  It needs sudo and an Ethernet-like
+                     default-route NIC; it fails on wifi and point-to-point
+                     tun/VPN devices ("RTNETLINK answers: Invalid argument").
+
+Storage
+  --drive FILE       Attach a raw image on the next free port of the boot AHCI
+                     controller.  Repeatable.  The boot disk holds sata0.0, so
+                     extras land on ports 1..5 as guest /dev/storage/sata1,
+                     sata2, ... (mount them yourself: mount /dev/storage/sata1
+                     /mnt ext2).  ICH9 AHCI has 6 ports, so 5 extra drives max.
+  --drive-ctrl FILE  Like --drive but on a dedicated ich9-ahci controller per
+                     image, exercising multiple-HBA support.  Up to 3
+                     (AHCI_MAX_CONTROLLERS is 4 including the boot HBA).  Disks
+                     appear as /dev/storage/sataN in PCI-probe order; if only
+                     the first HBA binds, fall back to --drive.
+  --floppy FILE      Attach FILE as a diskette.  Repeatable for the PC's two
+                     drives: first is fd0 (A:), second fd1 (B:).  Raw; a 1.44 MB
+                     diskette is 1474560 bytes.
+  --virtio           Put the root filesystem on virtio-blk instead of AHCI.  The
+                     kernel still finds it by label.  The boot ich9-ahci is
+                     created empty so --drive keeps working, and since port 0 is
+                     free, --drive images start there.
+
+USB and audio
+  --usb-version=VER  Emulated USB host controller: 1.1 = UHCI (default),
+                     2.0 = EHCI, 3.0 = xHCI.  All USB devices attach to it.
+                     Substrate only drives UHCI today; 2.0/3.0 need the
+                     in-progress drivers or the guest sees no USB at all.
+  --usb-host SPEC    Pass a real host USB device through (storage, HID, serial,
+                     audio, ...).  SPEC is VID:PID in hex (05ac:110b, from
+                     lsusb) or BUS.ADDR in decimal (1.5, to pick one of several
+                     identical devices).  Repeatable.  QEMU claims the device
+                     from its host driver, so this needs root or access to the
+                     matching /dev/bus/usb/BUS/DEV node.  These share the root
+                     hub with usb-kbd/usb-mouse, so grab only a couple.
+  --usb-audio        Replace the emulated AC'97 with QEMU's USB Audio Class
+                     device (UAC 1.0); substrate's uac driver binds it as
+                     /dev/audio0.
+  --usb-audio-host[=VID:PID]
+                     A --usb-host passthrough that also drops the AC'97, so a
+                     real USB audio device is the guest's only audio device and
+                     sound plays on the physical hardware.  Defaults to
+                     05ac:110b (Apple EarPods).  Excludes --usb-audio.
+
+Debugging
+  --debug            Enable the serial_debug boot argument (verbose kernel
+                     serial output, off by default because it slows the console)
+                     and start QEMU's GDB stub on tcp::1234.  In image modes the
+                     command line comes from grub.cfg, so this only adds the
+                     stub -- pick the "serial console + verbose" GRUB entry for
+                     the equivalent.
+  --help, -h         This message.
+
+Environment
+  MEM        Guest RAM (default 8G; any qemu -m syntax).  See the note at the
+             top of this script: substrate can only address the first 992 MiB.
+  ROOT       Root filesystem for --boot=kernel (default LABEL=sub-root).  Set
+             it to e.g. /dev/storage/sata0 for images predating the label
+             layout.
+  NIC        Host interface to bridge in macvtap mode (default: the
+             default-route interface).
+  MACVTAP    Name of the macvtap link to create (default macvtap0).
+  HOSTFWD    Port forwards for --user, e.g. HOSTFWD=hostfwd=tcp::2222-:22
+  AUDIODRV   Host audio backend (default: pa when PulseAudio/PipeWire is
+             reachable, else sdl).
+  GDBPORT    Port for the --debug GDB stub (default 1234).
+  GDBHALT    GDBHALT=1 freezes the CPU at reset so breakpoints can be set
+             before the kernel runs.
+
+Examples
+  ./run-networking.sh --user --kvm --snapshot     quick throwaway test boot
+  ./run-networking.sh --boot=uefi --snapshot      check the UEFI path
+  MEM=512M ./run-networking.sh --boot=bios        BIOS boot, smaller guest
+  ./run-networking.sh --debug --user              boot and wait for gdb :1234
+EOF
+}
+
 BOOTMODE=kernel            # kernel = -kernel sys/kernel.bin, bios/uefi = boot rootfs.img
 GFX=0
 GFX_MODE="1024x768@32"   # used for bare --gfx; --gfx=WxH@bpp overrides
@@ -138,6 +167,7 @@ USB_VERSION="1.1"          # 1.1=UHCI (default), 2.0=EHCI, 3.0=xHCI
 VIRTIO=0                   # 1 = root on virtio-blk instead of AHCI
 while [ $# -gt 0 ]; do
     case "$1" in
+        --help|-h)  usage; exit 0 ;;
         --boot=*)   BOOTMODE="${1#--boot=}"
                     case "$BOOTMODE" in
                         kernel|bios|uefi) : ;;
@@ -209,6 +239,7 @@ ${1#--floppy=}" ;;
             esac ;;
         *)
             echo "run-networking.sh: unknown argument '$1'" >&2
+            echo "Try './run-networking.sh --help'." >&2
             exit 1 ;;
     esac
     shift
