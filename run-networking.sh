@@ -312,12 +312,24 @@ IFS=$OLDIFS
 #
 # substrate probes PCI slots in descending order, so the highest-slot HBA
 # enumerates first as sata0. To keep the boot disk on sata0, pin the boot
-# controller to the top slot (0x1f, on the qemu line below) and walk the extra
-# controllers down from 0x1e; the guest then sees boot=sata0, then sata1,
-# sata2, ... in --drive-ctrl order.
+# controller to the top of a slot window and walk the extra controllers down
+# from there; the guest then sees boot=sata0, then sata1, sata2, ... in
+# --drive-ctrl order.
+#
+# The window starts at 0x1e, not 0x1f. Slot 0x1f is free on the i440FX "pc"
+# machine but is the ICH9-LPC southbridge on q35 -- which --boot=uefi uses --
+# so pinning there killed the run outright:
+#
+#   qemu-system-x86_64: -device ich9-ahci,id=sata0,addr=0x1f: PCI: slot 31
+#   function 0 not available for ich9-ahci, in use by ICH9-LPC
+#
+# 0x1e down to 0x18 are free on both machines, and only four slots are ever
+# needed (boot + 3), so one window serves every boot mode. Only the ordering
+# among our own HBAs matters, not being the highest slot on the bus.
 #
 # The AHCI driver caps total HBAs at AHCI_MAX_CONTROLLERS (4), so at most 3
 # --drive-ctrl images; raise that constant and rebuild for more.
+AHCI_TOP_SLOT=30                # 0x1e
 BOOT_AHCI_ADDR=""
 EXTRA_CTRL_ARGS=""
 cidx=1
@@ -335,8 +347,8 @@ for f in $EXTRA_CTRL_DRIVES; do
              "(AHCI_MAX_CONTROLLERS=4 incl. the boot HBA)" >&2
         exit 1
     fi
-    BOOT_AHCI_ADDR=",addr=0x1f"
-    ctrladdr=$(printf '0x%x' $((31 - cidx)))   # 0x1e, 0x1d, 0x1c
+    BOOT_AHCI_ADDR=",addr=$(printf '0x%x' "$AHCI_TOP_SLOT")"
+    ctrladdr=$(printf '0x%x' $((AHCI_TOP_SLOT - cidx)))   # 0x1d, 0x1c, 0x1b
     EXTRA_CTRL_ARGS="$EXTRA_CTRL_ARGS -drive file=$f,format=raw,if=none,id=cdrive$cidx -device ich9-ahci,id=ahci$cidx,addr=$ctrladdr -device ide-hd,bus=ahci$cidx.0,unit=0,drive=cdrive$cidx"
     echo "run-networking.sh: extra drive $f -> own controller ahci$cidx -> guest /dev/storage/sata$cidx"
     cidx=$((cidx + 1))
