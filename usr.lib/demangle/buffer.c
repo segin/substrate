@@ -1,9 +1,9 @@
-#include "demangle_internal.h"
-
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include <demangle_internal.h>
 
 #define DEMANGLE_BUF_INITIAL_CAP 256u
 /* Per-call output cap.  A real demangled symbol is at most a few KB;

@@ -1,9 +1,8 @@
-#include <demangle.h>
-
 #include <stdlib.h>
 #include <string.h>
 
-#include "demangle_internal.h"
+#include <demangle.h>
+#include <demangle_internal.h>
 
 #define DEMANGLE_SCHEME_MASK (DEMANGLE_AUTO | DEMANGLE_ITANIUM | DEMANGLE_RUST | DEMANGLE_DLANG)
 #define DEMANGLE_SUPPORTED_MASK (DEMANGLE_NO_PARAMS | DEMANGLE_NO_VERBOSE | DEMANGLE_TYPES | DEMANGLE_SCHEME_MASK)

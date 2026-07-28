@@ -9,10 +9,10 @@ BUILD_MODE := $(if $(NATIVE_BUILD),native,target)
 MODE_STAMP = .build-mode
 
 ifndef NATIVE_BUILD
-PIC_CFLAGS := $(SHLIB_CFLAGS) -I../../include
+PIC_CFLAGS := $(SHLIB_CFLAGS) -I../../include -I.
 endif
 
-CFLAGS += -I../../include
+CFLAGS += -I../../include -I.
 
 # Hardened build flags for the host (NATIVE_BUILD=1).  The cross-target
 # build is already restricted to -nostdlib / -ffreestanding so most of
