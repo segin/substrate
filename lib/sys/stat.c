@@ -3,10 +3,11 @@
  *
  * Provides typed wrappers for the STAT and LSTAT system calls.
  */
-#include <sys/syscall.h>
-#include <sys/stat.h>
-#include <unistd.h>
 #include <errno.h>
+#include <unistd.h>
+
+#include <sys/stat.h>
+#include <sys/syscall.h>
 
 int sys_stat(const char *path, struct stat *buf) {
     int ret = (int)syscall(SYS_STAT, path, buf);

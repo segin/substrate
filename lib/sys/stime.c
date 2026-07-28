@@ -4,12 +4,12 @@
  * stime syscall wrapper.
  */
 
-#include <sys/syscall.h>
+#include <errno.h>
 #include <time.h>
 #include <unistd.h>
-#include <errno.h>
 
-#include "sysret.h"
+#include <sys/syscall.h>
+#include <sysret.h>
 
 long syscall(long number, ...);
 

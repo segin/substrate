@@ -4,13 +4,13 @@
  * ioctl syscall wrapper.
  */
 
-#include <sys/syscall.h>
-#include <sys/ioctl.h>
-#include <unistd.h>
-#include <stdarg.h>
 #include <errno.h>
+#include <stdarg.h>
+#include <unistd.h>
 
-#include "sysret.h"
+#include <sys/ioctl.h>
+#include <sys/syscall.h>
+#include <sysret.h>
 
 long syscall(long number, ...);
 

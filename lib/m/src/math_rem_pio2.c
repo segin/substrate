@@ -27,7 +27,7 @@
 
 #include <stdint.h>
 
-#include "math_rem_pio2.h"
+#include <math_rem_pio2.h>
 
 /* Access the two 32-bit halves of a double (little-endian / i386). */
 #define __HI(x) (((int32_t *)&(x))[1])

@@ -12,7 +12,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "math_rem_pio2.h"
+#include <math_rem_pio2.h>
 
 /*
  * Large-argument range reduction.

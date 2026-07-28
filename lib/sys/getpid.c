@@ -4,9 +4,10 @@
  * getpid() and getppid() wrappers
  */
 
-#include <sys/syscall.h>
-#include <unistd.h>
 #include <errno.h>
+#include <unistd.h>
+
+#include <sys/syscall.h>
 
 long syscall(long number, ...);
 

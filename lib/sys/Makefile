@@ -5,8 +5,8 @@ include ../../Makefile.inc
 # (for dynamic binaries — libc.so.0 declares DT_NEEDED libsys.so.0
 # so any program that pulls in libc transitively gets libsys too).
 
-CFLAGS    := $(USER_CFLAGS) -fno-builtin
-PICFLAGS  := $(SHLIB_CFLAGS) -fno-builtin
+CFLAGS    := $(USER_CFLAGS) -fno-builtin -I.
+PICFLAGS  := $(SHLIB_CFLAGS) -fno-builtin -I.
 ASFLAGS   := $(USER_CFLAGS)
 PICASFLAGS:= $(SHLIB_CFLAGS)
 

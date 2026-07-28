@@ -1,9 +1,9 @@
+#include <errno.h>
+#include <unistd.h>
+
 #include <sys/syscall.h>
 #include <sys/sysinfo.h>
-#include <unistd.h>
-#include <errno.h>
-
-#include "sysret.h"
+#include <sysret.h>
 
 int sys_proc_count(void) {
     return (int)__sysret(syscall(SYS_PROC_COUNT, 0, 0, 0, 0, 0, 0));

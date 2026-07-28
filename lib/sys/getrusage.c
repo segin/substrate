@@ -4,12 +4,12 @@
  * getrusage syscall wrapper.
  */
 
-#include <sys/syscall.h>
-#include <sys/resource.h>
-#include <unistd.h>
 #include <errno.h>
+#include <unistd.h>
 
-#include "sysret.h"
+#include <sys/resource.h>
+#include <sys/syscall.h>
+#include <sysret.h>
 
 long syscall(long number, ...);
 

@@ -1077,7 +1077,6 @@ long double lgammal_r(long double x, int *signp)
 
 long double lgammal(long double x)
 {
-    extern int signgam;
     return lgammal_r(x, &signgam);
 }
 
