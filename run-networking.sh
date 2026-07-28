@@ -12,7 +12,18 @@
 #     hostfwd ($HOSTFWD, e.g. HOSTFWD=hostfwd=tcp::2222-:22).
 #
 # $NIC overrides the host NIC in macvtap mode (default: default-route iface).
+#
+# $MEM sets the guest RAM size (default 8G; any qemu -m syntax, e.g. MEM=512M).
+# Note what the guest can actually do with it: qemu puts only about 3 GiB below
+# the 4 GiB PCI hole and the remainder above it, which a non-PAE 32-bit kernel
+# cannot address, so substrate reports ~3071 MiB of an 8G guest.  Of that it
+# uses the first 992 MiB -- PMM_DIRECTMAP_PHYS_LIMIT, where the higher-half
+# direct map stops below the signal trampoline.  The rest is inert.  Sizing the
+# guest well past that ceiling is still worth doing: it is what shook out the
+# trampoline corruption (a47480ceb), which was invisible under 992 MiB.
 set -eu
+
+MEM=${MEM:-8G}
 
 # Flags:
 #   --boot=MODE
@@ -671,7 +682,7 @@ esac
 
 "$QEMU_BIN" -cpu "$QEMU_CPU" $ACCEL_ARG \
   -smp "$SMP" \
-  -m 512M \
+  -m "$MEM" \
   -machine "$QEMU_MACHINE" \
   $SNAPSHOT_ARG \
   "$@" \

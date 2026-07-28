@@ -1,5 +1,5 @@
-#include "elf_private.h"
-#include "leb128.h"
+#include <elf_private.h>
+#include <leb128.h>
 
 #define DW_LNS_copy 1
 #define DW_LNS_advance_pc 2

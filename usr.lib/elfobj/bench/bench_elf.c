@@ -1,9 +1,10 @@
-#include <elfobj.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+
+#include <elfobj.h>
 
 static double ms_clock(clock_t a, clock_t b) {
     return ((double)(b - a) * 1000.0) / (double)CLOCKS_PER_SEC;

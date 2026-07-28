@@ -1,4 +1,4 @@
-#include "elf_private.h"
+#include <elf_private.h>
 
 /* Overflow-safe alignment: fails if `a` is not a power of two or if
  * rounding `v` up would wrap uint64. */

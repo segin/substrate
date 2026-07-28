@@ -1,4 +1,4 @@
-#include "elf_private.h"
+#include <elf_private.h>
 
 #define ELFOBJ_MAX_RELOC_BACKENDS 16
 

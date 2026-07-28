@@ -1,8 +1,9 @@
-#include "elf_private.h"
 #include <fcntl.h>
+#include <unistd.h>
+
+#include <elf_private.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
-#include <unistd.h>
 
 typedef struct {
     size_t sec_index;
