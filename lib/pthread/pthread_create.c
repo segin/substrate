@@ -2,15 +2,16 @@
  * thread registry and creation trampoline.  Other pthread functions live
  * in pthread_mutex.c, pthread_cond.c, pthread_sig.c. */
 
-#include "pthread.h"
-#include "pthread_internal.h"
+#include <errno.h>
+#include <pthread.h>
+#include <sched.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <unistd.h>
-#include <errno.h>
-#include <sched.h>
+
+#include <pthread_internal.h>
 #include <sys/syscall.h>
 #include <sys/thr.h>
-#include <stdint.h>
 
 /*
  * Per-thread bookkeeping is a lock-protected singly-linked list of

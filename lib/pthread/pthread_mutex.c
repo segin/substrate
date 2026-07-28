@@ -18,12 +18,13 @@
  * Other pthread functions live in pthread_create.c, pthread_cond.c,
  * pthread_sig.c. */
 
-#include "pthread.h"
-#include <unistd.h>
 #include <errno.h>
-#include <stdlib.h>
+#include <pthread.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <time.h>
+#include <unistd.h>
+
 #include <sys/syscall.h>
 #include <sys/thr.h>
 

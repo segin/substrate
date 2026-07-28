@@ -3,8 +3,8 @@
  * surface needed by larger consumers such as GLib.  Core threading lives in
  * pthread_create.c / pthread_mutex.c / pthread_cond.c.
  */
-#include "pthread.h"
 #include <errno.h>
+#include <pthread.h>
 #include <sched.h>
 #include <time.h>
 
