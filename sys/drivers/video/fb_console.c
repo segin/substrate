@@ -2206,6 +2206,15 @@ void fb_console_init(void) {
     fb_console_refresh_tty_winsizes();
     fb_console_redraw_active();
     vt_render_statusline(vt_get_state(vt_get_active()));
+
+    /* Say so, the way hw_text does.  Whether this console is the one driving
+     * the screen, and what geometry it settled on, is otherwise invisible --
+     * and when it is wrong the symptom (a blank screen with a stray status
+     * line) points nowhere near the cause. */
+    kprintf("FB console: %dx%d chars on %ux%u@%u framebuffer%s\n",
+            vt_get_width(), vt_get_visible_height(),
+            fb.width, fb.height, fb.bpp,
+            fbcon_shadow_ok() ? "" : " (no shadow, direct)");
 }
 
 /* Re-sync console state to the current framebuffer geometry after a runtime

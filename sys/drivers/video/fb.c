@@ -1275,11 +1275,31 @@ void fb_init(multiboot_info_t *mbi) {
     fb_devices[0] = fb;
     fb_device_count = 1;
 
-    /* Register Console (unless hw_text active and not overridden) */
-    if (!hw_text_active || have_video_arg || have_vga_arg) {
-        fb_console_init();
-    }
-    
+    /*
+     * Take the console.  Reaching here means fb_active is 1: a linear
+     * framebuffer is up and the caller did not ask for text mode -- video=text,
+     * vga=text and the "no driver" paths all returned above with fb_active
+     * cleared.
+     *
+     * This used to be conditional on `!hw_text_active || have_video_arg ||
+     * have_vga_arg`, which looks like "don't steal the console from the VGA
+     * text driver" but is unsatisfiable in the case that matters.
+     * hw_text_init() sets hw_text_active unconditionally, so booting via GRUB
+     * -- which hands us a framebuffer through the multiboot info and no vga=
+     * argument -- left all three false and fb_console_init() was never called
+     * at all.  The result was a console owned by hw_text: it wrote VGA text
+     * cells to 0xB8000, which nothing displays in a graphics mode, and it left
+     * the VT at its 80x25 geometry.  With GRUB's 800x600 that put the status
+     * line 200 pixels up from the bottom and 160 short of the right edge, with
+     * the rest of the screen never painted.
+     *
+     * If a way to keep the text console over a live framebuffer is ever wanted,
+     * it belongs in the argument parsing above with the other text-mode
+     * requests, where it can clear fb_active and mean something.
+     */
+    fb_console_init();
+
+
     /* Register /dev/fb0 */
     fb_register_devfs_node(0);
 }
