@@ -129,11 +129,41 @@ static void ps2_log_port_test_failure(const char *port, uint8_t response) {
     kprint(buf);
 }
 
+/*
+ * ps2_present - Is there an i8042 behind the status port at all?
+ *
+ * Every status-register bit set at once is not a state a real controller can
+ * report: it would mean both buffers full, the keyboard inhibited, and the
+ * parity and timeout errors all latched simultaneously.  What it actually
+ * means is that nobody is decoding port 0x64 and the read floated to 0xFF --
+ * a machine built without the controller (qemu's i8042=off, which is how
+ * run-networking.sh starts substrate), or one where firmware handed the ports
+ * to a USB-legacy emulation that has since been shut off.
+ *
+ * Checking costs one inb.  Not checking costs about six seconds: ps2_init()
+ * runs five separate PS2_TIMEOUT_LOOPS waits before it concludes anything is
+ * wrong, and under KVM every one of those 100000 iterations is a port-I/O VM
+ * exit into userspace.  The boot appears to hang at "Initializing
+ * controller..." for long enough to look like a crash.
+ */
+static int ps2_present(void) {
+    /* Two reads: a single 0xFF could in principle be caught mid-transition on
+     * real hardware, but the float does not go away on its own. */
+    if (inb(PS2_STATUS_PORT) != 0xFF)
+        return 1;
+    return inb(PS2_STATUS_PORT) != 0xFF;
+}
+
 int ps2_init(void) {
     uint8_t config, response;
-    
+
+    if (!ps2_present()) {
+        kprint("PS/2: no controller present (port 0x64 floats high)\n");
+        return -1;
+    }
+
     kprint("PS/2: Initializing controller...\n");
-    
+
     /* Step 1: Disable devices to prevent interference */
     ps2_write_command(PS2_CMD_DISABLE_P1);
     ps2_write_command(PS2_CMD_DISABLE_P2);
