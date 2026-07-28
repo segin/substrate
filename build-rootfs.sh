@@ -6,7 +6,9 @@ set -e
 TOP="$(cd "$(dirname "$0")" && pwd)"
 DIST="$TOP/dist"
 IMAGE="${IMAGE:-$TOP/rootfs.img}"
-IMAGE_SIZE_MIB=4096
+# Overridable so a smaller image can be baked for a quick boot test:
+#   IMAGE_SIZE_MIB=512 ./build-rootfs.sh --image
+IMAGE_SIZE_MIB="${IMAGE_SIZE_MIB:-4096}"
 BOOT_DIR="$TOP/sys/boot"
 EXT2BOOT_DIR="$TOP/contrib/ext2-boot"
 
@@ -247,8 +249,17 @@ install_to_dist() {
     echo "Installing kernel to dist/boot and dist/vmunix..."
     cp "$TOP/sys/kernel.bin" "$DIST/boot/"
     cp "$TOP/sys/kernel.multiboot" "$DIST/boot/"
-    # Install kernel as /vmunix for the ext2 bootloader
-    cp "$TOP/sys/kernel.multiboot" "$DIST/vmunix"
+    [ -f "$TOP/sys/kernel.fb.bin" ] && cp "$TOP/sys/kernel.fb.bin" "$DIST/boot/"
+    # /vmunix is what every bootloader loads: GRUB (BIOS and EFI) and the
+    # ext2 stage2.  Use the FRAMEBUFFER variant -- its multiboot header asks
+    # for a linear framebuffer (mode_type=0) rather than EGA text, and UEFI
+    # has no EGA text mode to give, so the text variant cannot be booted from
+    # an ESP at all.  It is also what reaches the graphical login on BIOS.
+    if [ -f "$TOP/sys/kernel.fb.bin" ]; then
+        cp "$TOP/sys/kernel.fb.bin" "$DIST/vmunix"
+    else
+        cp "$TOP/sys/kernel.multiboot" "$DIST/vmunix"
+    fi
 
     echo "Installing libc + runtime libraries to dist/usr/lib + dist/lib..."
     mkdir -p "$DIST/usr/include"
@@ -585,18 +596,110 @@ install_to_dist() {
     echo "Root filesystem prepared in: $DIST"
 }
 
+#
+# Partition layout.  The image is a real MBR disk, not a bare filesystem,
+# so it can be written to a USB stick and booted on BIOS *or* UEFI:
+#
+#   LBA 0        MBR: GRUB boot.img + the partition table
+#   LBA 1..2047  post-MBR gap: GRUB core.img (BIOS path)
+#   p1  1 MiB    FAT32, type EF (EFI System Partition), label sub-boot
+#                  /EFI/BOOT/BOOT{X64,IA32}.EFI  - UEFI path
+#                  /boot/grub/grub.cfg           - menu, shared by both
+#   p2  +50 MiB  ext2, label sub-root - the root filesystem, holds /vmunix
+#
+# p1 starts at LBA 2048 (1 MiB) both because that is the conventional
+# alignment for flash media and because it leaves 2047 sectors of gap, which
+# GRUB's ~350-sector core.img needs.
+#
+BOOT_PART_MIB=50
+BOOT_PART_LBA=2048                                   # 1 MiB
+BOOT_PART_SECTORS=$((BOOT_PART_MIB * 1024 * 2))      # 50 MiB in 512B sectors
+ROOT_PART_LBA=$((BOOT_PART_LBA + BOOT_PART_SECTORS))
+BOOT_LABEL=sub-boot
+ROOT_LABEL=sub-root
+
+# GRUB modules baked into every core image.  part_msdos+fat get us to the
+# ESP; ext2 lets GRUB read /vmunix off the root partition; search_label
+# implements `search --label`; multiboot/multiboot2 are the two handoff
+# protocols (mb1 for BIOS, mb2 for EFI).
+# all_video is a meta-module and exists for i386-pc, i386-efi and x86_64-efi
+# alike, so one list serves every target.  It is not optional: /vmunix is the
+# framebuffer kernel, and without a video driver GRUB answers the multiboot
+# framebuffer request with "no suitable video mode found" and hands over a
+# console the kernel cannot draw on -- fatal under UEFI, which has no EGA
+# text mode to fall back to.
+GRUB_MODULES="part_msdos fat ext2 normal configfile search search_label echo test multiboot multiboot2 boot linux gzio serial terminal all_video"
+
+# Emit the shared grub.cfg.  One config serves BIOS and UEFI: $grub_platform
+# picks the handoff protocol, and the root filesystem is located by LABEL so
+# neither the BIOS drive number nor the UEFI device path has to be known.
+write_grub_cfg() {
+    cat > "$1" <<EOF
+serial --unit=0 --speed=115200
+terminal_output serial console
+terminal_input serial console
+set timeout=5
+set default=0
+
+insmod part_msdos
+insmod fat
+insmod ext2
+insmod search_label
+
+# Find the root filesystem by volume label rather than by (hdN,msdosM):
+# on a USB stick the drive number depends on what else is plugged in.
+search --no-floppy --label $ROOT_LABEL --set=subroot
+
+menuentry "Substrate" {
+    set root=\$subroot
+    echo "Loading /vmunix from $ROOT_LABEL ..."
+    if [ "\$grub_platform" = "efi" ]; then
+        multiboot2 /vmunix root=LABEL=$ROOT_LABEL
+    else
+        multiboot /vmunix root=LABEL=$ROOT_LABEL
+    fi
+    boot
+}
+
+menuentry "Substrate (serial console + verbose)" {
+    set root=\$subroot
+    if [ "\$grub_platform" = "efi" ]; then
+        multiboot2 /vmunix root=LABEL=$ROOT_LABEL serial_debug console=serial0
+    else
+        multiboot /vmunix root=LABEL=$ROOT_LABEL serial_debug console=serial0
+    fi
+    boot
+}
+EOF
+}
+
 create_image() {
-    echo "Creating ${IMAGE_SIZE_MIB}MiB ext2 filesystem image: $IMAGE"
-    
+    echo "Creating ${IMAGE_SIZE_MIB}MiB bootable disk image: $IMAGE"
+    echo "  p1 = ${BOOT_PART_MIB}MiB FAT32 ESP '$BOOT_LABEL' (GRUB, BIOS + UEFI)"
+    echo "  p2 = ext2 '$ROOT_LABEL' (root filesystem, /vmunix)"
+
     # Check if dist directory exists and is not empty
     if [ ! -d "$DIST" ] || [ -z "$(ls -A "$DIST")" ]; then
         echo "Error: dist/ directory is empty. Run with --dist first."
         exit 1
     fi
 
+    for t in sfdisk mkfs.vfat mmd mcopy grub-mkimage; do
+        command -v "$t" >/dev/null 2>&1 || {
+            echo "Error: $t is required to bake the bootable image." >&2; exit 1; }
+    done
+
     # Create the image file
     rm -f "$IMAGE"
     truncate -s "${IMAGE_SIZE_MIB}M" "$IMAGE"
+
+    echo "Writing MBR partition table..."
+    sfdisk -q "$IMAGE" >/dev/null <<EOF
+label: dos
+unit: sectors
+start=$BOOT_PART_LBA, size=$BOOT_PART_SECTORS, type=ef, bootable
+start=$ROOT_PART_LBA, type=83
+EOF
 
     # 1. Create AND populate the filesystem in one atomic mke2fs -d pass,
     #    under fakeroot so the image is ROOT-OWNED.
@@ -625,22 +728,128 @@ create_image() {
         echo "Error: fakeroot is required to bake a root-owned image. Install it." >&2
         exit 1
     fi
-    echo "Creating + populating image from $DIST (fakeroot -> root-owned)..."
+    #    -E offset= writes the filesystem into partition 2 in place, so no
+    #    multi-GiB temporary file or loop device (i.e. no root) is needed.
+    #    The explicit block count is required with -E offset: without it
+    #    mke2fs would size the filesystem to the whole image and run off the
+    #    end of the partition.  -L stamps the volume label that
+    #    LABEL=sub-root resolves against at boot.
+    echo "Creating + populating ext2 '$ROOT_LABEL' from $DIST (fakeroot -> root-owned)..."
+    root_blocks=$(( (IMAGE_SIZE_MIB * 1024 * 2 - ROOT_PART_LBA) / 2 ))
     fakeroot -- sh -c '
         chown -R 0:0 "$1"
         [ -e "$1/bin/su" ] && chmod 4755 "$1/bin/su"
-        mke2fs -F -q -b 1024 -I 128 -O ^resize_inode -d "$1" "$2"
-    ' _ "$DIST" "$IMAGE"
+        mke2fs -F -q -b 1024 -I 128 -O ^resize_inode -L "$4" \
+               -E offset=$(( $3 * 512 )) -d "$1" "$2" "$5"
+    ' _ "$DIST" "$IMAGE" "$ROOT_PART_LBA" "$ROOT_LABEL" "$root_blocks"
 
-    # 2. Install the bootloader AFTER population: ext2-install-boot writes
-    #    stage1 to boot block 0 (always reserved by ext2, s_first_data_block=1)
-    #    and stage2 to reserved inode 5 (EXT2_BOOT_LOADER_INO) — both independent
-    #    of the populated files, so ordering no longer matters.
+    install_grub
+
+    # The ext2 stage1 bootloader is deliberately NOT installed here.  It
+    # expects the image to *be* a bare ext2 filesystem, so it writes its
+    # stage1 to LBA 0 — which on this layout is the MBR holding GRUB's
+    # boot.img and the partition table.  Installing it would destroy both.
+    # GRUB is the bootloader for the partitioned image; ext2boot remains
+    # available for the old bare-filesystem layout via tools/ext2-install-boot.
     if [ "$DO_BOOT" = true ]; then
-        install_bootloader
+        echo "Note: skipping ext2boot stage1 — GRUB owns the MBR on a"
+        echo "      partitioned image (see install_grub)."
     fi
 
     echo "Image created: $IMAGE"
+    sfdisk -l "$IMAGE" 2>/dev/null | tail -4
+}
+
+#
+# Build the FAT32 ESP and install both GRUB boot paths into it.
+#
+# BIOS and UEFI need completely different GRUB binaries but share one
+# grub.cfg.  Nothing here needs root: the FAT filesystem is built in a
+# scratch file and populated with mtools (no mount), and the BIOS MBR/gap
+# embedding is done by tools/grub-embed-mbr (grub-bios-setup refuses to
+# operate on a plain file -- see that script's header).
+#
+# Stage a private copy of one of GRUB's EFI module trees and relax the
+# relocator's .text so GRUB can still write its own handoff state through
+# its W^X enforcement.  Without this every EFI boot of a multiboot kernel
+# dies in a firmware page fault before the kernel runs at all -- see
+# tools/grub-unprotect-relocator for the full diagnosis.  The system GRUB is
+# never touched; grub-mkimage is pointed at the copy with -d.
+efi_moddir() {
+    local target="$1" dest="$2"
+
+    mkdir -p "$dest" || return 1
+    cp /usr/lib/grub/"$target"/* "$dest"/ 2>/dev/null || return 1
+    if [ -f "$dest/relocator.mod" ]; then
+        python3 "$TOP/tools/grub-unprotect-relocator" "$dest/relocator.mod" \
+            >/dev/null || return 1
+    fi
+    return 0
+}
+
+install_grub() {
+    local esp gdir
+    esp=$(mktemp -t substrate-esp-XXXXXX.img)
+    gdir=$(mktemp -d -t substrate-grub-XXXXXX)
+    # shellcheck disable=SC2064
+    trap "rm -rf '$esp' '$gdir'" RETURN
+
+    echo "Building ${BOOT_PART_MIB}MiB FAT32 ESP '$BOOT_LABEL'..."
+    truncate -s "${BOOT_PART_MIB}M" "$esp"
+    # -n sets BS_VolLab *and* the root-directory volume-label entry, which is
+    # what fat_read_label() (and therefore LABEL=sub-boot) actually reads.
+    mkfs.vfat -F 32 -n "$BOOT_LABEL" "$esp" >/dev/null 2>&1
+
+    write_grub_cfg "$gdir/grub.cfg"
+
+    mmd -i "$esp" ::/EFI ::/EFI/BOOT ::/boot ::/boot/grub >/dev/null 2>&1
+    mcopy -i "$esp" "$gdir/grub.cfg" ::/boot/grub/grub.cfg
+
+    # --- UEFI ---------------------------------------------------------
+    # Removable-media path: firmware with no NVRAM boot entry (i.e. a USB
+    # stick on a machine that has never seen it) falls back to
+    # /EFI/BOOT/BOOT<arch>.EFI.  Ship both arches: x86_64 firmware is the
+    # common case, but 32-bit UEFI exists on older tablets/netbooks, which
+    # is exactly the hardware a 32-bit OS is interesting on.
+    local built_efi=""
+    if [ -d /usr/lib/grub/x86_64-efi ]; then
+        efi_moddir "x86_64-efi" "$gdir/mod-x64" &&
+        grub-mkimage -d "$gdir/mod-x64" -O x86_64-efi \
+            -o "$gdir/BOOTX64.EFI" -p "/boot/grub" $GRUB_MODULES >/dev/null 2>&1 &&
+        mcopy -i "$esp" "$gdir/BOOTX64.EFI" ::/EFI/BOOT/BOOTX64.EFI &&
+        built_efi="$built_efi x64"
+    fi
+    if [ -d /usr/lib/grub/i386-efi ]; then
+        efi_moddir "i386-efi" "$gdir/mod-ia32" &&
+        grub-mkimage -d "$gdir/mod-ia32" -O i386-efi \
+            -o "$gdir/BOOTIA32.EFI" -p "/boot/grub" $GRUB_MODULES >/dev/null 2>&1 &&
+        mcopy -i "$esp" "$gdir/BOOTIA32.EFI" ::/EFI/BOOT/BOOTIA32.EFI &&
+        built_efi="$built_efi ia32"
+    fi
+    [ -n "$built_efi" ] && echo "  UEFI GRUB:$built_efi"
+
+    # --- BIOS ---------------------------------------------------------
+    # core.img goes in the post-MBR gap, not on the ESP: the MBR boot code
+    # can only reach it by LBA, having no filesystem driver at that point.
+    # The modules are still copied to the ESP so GRUB can load extras and
+    # find its config via the baked-in prefix.
+    if [ -d /usr/lib/grub/i386-pc ]; then
+        mmd -i "$esp" ::/boot/grub/i386-pc >/dev/null 2>&1
+        mcopy -i "$esp" /usr/lib/grub/i386-pc/*.mod ::/boot/grub/i386-pc/ >/dev/null 2>&1
+        grub-mkimage -O i386-pc -o "$gdir/core.img" \
+            -p "(hd0,msdos1)/boot/grub" biosdisk $GRUB_MODULES >/dev/null 2>&1
+        mcopy -i "$esp" "$gdir/core.img" ::/boot/grub/i386-pc/core.img
+    fi
+
+    # Splice the finished ESP into partition 1.
+    dd if="$esp" of="$IMAGE" bs=512 seek="$BOOT_PART_LBA" conv=notrunc status=none
+
+    if [ -f "$gdir/core.img" ]; then
+        python3 "$TOP/tools/grub-embed-mbr" "$IMAGE" \
+            --boot-img /usr/lib/grub/i386-pc/boot.img \
+            --core-img "$gdir/core.img" \
+            --first-partition-lba "$BOOT_PART_LBA"
+    fi
 }
 
 install_bootloader() {
