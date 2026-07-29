@@ -843,6 +843,13 @@ void procfs_release_pid_nodes(int pid) {
  * The entry pointer is stored in node->impl
  */
 static size_t procfs_generic_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
+    /* sys_lseek() accepts a negative offset and read_fs() passes f_offset
+     * through unchanged, so a signed off_t can arrive negative here.  Every
+     * bound below compares it against an int/uint32 length, which a negative
+     * value passes, leaving read_len == size and memcpy reading from
+     * buf + offset -- i.e. kernel memory BEFORE the buffer, copied out to
+     * userspace. */
+    if (offset < 0) return 0;
     struct procfs_runtime_entry *entry = (struct procfs_runtime_entry *)(uintptr_t)node->impl;
     if (!entry || !entry->generator) return 0;
     
@@ -1002,6 +1009,13 @@ static int proc_generate_maps(char *b, size_t s, process_t *proc) {
 }
 
 static size_t proc_pid_maps_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
+    /* sys_lseek() accepts a negative offset and read_fs() passes f_offset
+     * through unchanged, so a signed off_t can arrive negative here.  Every
+     * bound below compares it against an int/uint32 length, which a negative
+     * value passes, leaving read_len == size and memcpy reading from
+     * buf + offset -- i.e. kernel memory BEFORE the buffer, copied out to
+     * userspace. */
+    if (offset < 0) return 0;
     int pid = node->inode;
     process_t *p = proc_find(pid);
     if (!p) return 0;
@@ -1028,6 +1042,13 @@ static size_t proc_pid_maps_read(fs_node_t *node, off_t offset, size_t size, uin
 }
 
 static size_t proc_pid_status_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
+    /* sys_lseek() accepts a negative offset and read_fs() passes f_offset
+     * through unchanged, so a signed off_t can arrive negative here.  Every
+     * bound below compares it against an int/uint32 length, which a negative
+     * value passes, leaving read_len == size and memcpy reading from
+     * buf + offset -- i.e. kernel memory BEFORE the buffer, copied out to
+     * userspace. */
+    if (offset < 0) return 0;
     int pid = node->inode;
     process_t *p = proc_find(pid);
     if (!p) return 0;
@@ -1702,6 +1723,9 @@ static int procfs_task_collect(fs_node_t *node, struct procfs_tid_lookup *l) {
 static size_t procfs_emit_slice(const char *src, int len, off_t offset,
                                 size_t size, uint8_t *buffer) {
     if (len < 0) return 0;
+    /* A negative offset passes the `offset >= len` test below and makes the
+     * memcpy read before src.  See procfs_generic_read(). */
+    if (offset < 0) return 0;
     if (offset >= (off_t)len) return 0;
     size_t n = size;
     if ((off_t)(offset + n) > (off_t)len) n = (size_t)(len - offset);
