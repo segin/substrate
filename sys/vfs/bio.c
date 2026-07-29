@@ -43,9 +43,13 @@ uint32_t pmm_get_free_memory(void);
  * The old fixed 8192-buffer ceiling was a 4 MiB cache (8192 * 512 B) — far
  * too small for build/grep/link workloads, so hot data was evicted almost
  * immediately and nearly every demand-page fault fell through to a
- * synchronous device read.  bio_reclaim() is not yet wired to the VM
- * pressure path, so the cache never shrinks once grown; keep the ceiling at
- * 1/8 of RAM so the other 7/8 stays available to userland regardless.
+ * synchronous device read.
+ *
+ * The ceiling stays at 1/8 of RAM so the other 7/8 remains available to
+ * userland.  Note this is no longer forced: bio_reclaim() IS wired to the VM
+ * pressure path (vm_page.c calls it from vm_pageout()), so the cache does
+ * shrink once grown, and the fraction could be revisited.  An earlier version
+ * of this comment claimed the opposite -- do not re-derive the policy from it.
  */
 #define BIO_CACHE_RAM_SHIFT 3        /* total_ram >> 3 == 1/8 of RAM */
 static uint32_t bio_nbuf_ceiling = BIO_NBUF_FLOOR;
@@ -537,6 +541,13 @@ bwrite(struct buf *bp)
     if (error) {
         bp->b_error = error;
         bp->b_flags |= B_ERROR;
+        /* B_DELWRI was cleared above, before the I/O was attempted.  Leaving
+         * it clear on failure files the buffer on BQ_CLEAN via brelse(), so
+         * the block stays cached, valid and "already written" while its
+         * contents never reached the device -- the write is lost silently
+         * (bufsync's EIO is discarded by syncer_daemon).  Put it back so the
+         * block is retried rather than believed. */
+        bp->b_flags |= B_DELWRI;
         biodone(bp);
     } else if ((bp->b_flags & B_DONE) == 0) {
         biodone(bp);
@@ -583,7 +594,11 @@ brelse(struct buf *bp)
 
     spinlock_acquire(&bio_lock);
 
-    if (bp->b_qindex == BQ_LOCKED)
+    /* Unlink from whichever queue it is on, not just BQ_LOCKED: a second
+     * brelse() would otherwise insert an already-queued buffer into the same
+     * TAILQ again, producing a self-linked node that spins the next
+     * TAILQ_FOREACH in bufsync/bio_get_stats/bio_reclaim forever. */
+    if (bp->b_qindex != -1)
         bio_remove_from_queue(bp);
 
     bp->b_flags &= ~B_BUSY;
@@ -864,8 +879,10 @@ bio_reclaim(size_t target_bytes)
     struct buf *next;
     size_t freed;
     size_t bsize;
+    size_t reclaimed;
 
     freed = 0;
+    reclaimed = 0;
     spinlock_acquire(&bio_lock);
 
     /* Drain BQ_EMPTY first — these have no data so we mainly recover bp
@@ -883,7 +900,11 @@ bio_reclaim(size_t target_bytes)
             kfree(bp->b_data, bsize);
             freed += bsize;
         }
+        /* The struct buf itself goes back too; the caller is asking for bytes,
+         * so credit them rather than reporting only the data pages. */
         kfree(bp, sizeof(*bp));
+        freed += sizeof(*bp);
+        reclaimed++;
         if (bio_nbuf > 0)
             bio_nbuf--;
         if (target_bytes && freed >= target_bytes)
@@ -904,7 +925,11 @@ bio_reclaim(size_t target_bytes)
             kfree(bp->b_data, bsize);
             freed += bsize;
         }
+        /* The struct buf itself goes back too; the caller is asking for bytes,
+         * so credit them rather than reporting only the data pages. */
         kfree(bp, sizeof(*bp));
+        freed += sizeof(*bp);
+        reclaimed++;
         if (bio_nbuf > 0)
             bio_nbuf--;
         if (target_bytes && freed >= target_bytes)
@@ -912,7 +937,9 @@ bio_reclaim(size_t target_bytes)
     }
 
 done:
-    bio_reclaims++;
+    /* Count buffers reclaimed, not calls -- the stat exported through
+     * bio_get_stats() was previously a call count wearing a buffer name. */
+    bio_reclaims += reclaimed;
     spinlock_release(&bio_lock);
     return freed;
 }
