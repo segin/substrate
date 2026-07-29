@@ -23,6 +23,19 @@
 
 static blkdev_t *blkdev_list = NULL;
 
+/*
+ * Serialises the registration list.  There is a live asynchronous producer:
+ * USB unplug (usb_msc / uas -> scsi_unregister_link -> scsi_dev_detach ->
+ * blkdev_unregister, which then memsets the embedded blkdev_t) runs against
+ * VFS mount lookups walking the same list via blkdev_get().  Unsynchronised,
+ * a walker could step into a node being unlinked and zeroed, or two
+ * registrations could lose one another's head update.
+ *
+ * Held only across list mutation and traversal -- never across device I/O,
+ * force-unmount or kfree, all of which can block.  No ISR touches the list.
+ */
+static spinlock_t blkdev_list_lock = SPINLOCK_INIT("blkdev_list");
+
 typedef struct blkdev_geom_provider {
     blkdev_t *blkdev;
     geom_disk_t disk;
@@ -80,8 +93,10 @@ void blkdev_register(blkdev_t *dev) {
     devfs_register_device(&dev->node);
     
     // Add to list
+    spinlock_acquire(&blkdev_list_lock);
     dev->next = blkdev_list;
     blkdev_list = dev;
+    spinlock_release(&blkdev_list_lock);
     
     kprintf("Block device /dev/storage/%s registered (%llu bytes)\n",
             dev->name, (unsigned long long)dev->node.length);
@@ -100,11 +115,18 @@ void blkdev_unregister(blkdev_t *dev) {
      * (DRV-14).  Partition blkdevs have dev->geom == NULL, so this does not
      * recurse. */
     if (dev->geom) {
+        geom_disk_t *disk = dev->geom;
         blkdev_geom_provider_t *provider =
-            (blkdev_geom_provider_t *)((char *)dev->geom -
+            (blkdev_geom_provider_t *)((char *)disk -
                 offsetof(blkdev_geom_provider_t, disk));
-        geom_unregister_disk(dev->geom);
+        /* Clear dev->geom BEFORE the walk.  geom_unregister_disk() unregisters
+         * each partition, which force-unmounts it and flushes dirty buffers
+         * back through blkdev_do_write() on this raw device -- and that calls
+         * blkdev_invalidate_partitions(), which re-reads dev->geom and walks
+         * the partition list currently being freed.  With the field already
+         * NULL that walk is a no-op. */
         dev->geom = NULL;
+        geom_unregister_disk(disk);
         kfree(provider, sizeof(*provider));
     }
 
@@ -119,6 +141,7 @@ void blkdev_unregister(blkdev_t *dev) {
     dev->dead = 1;
     vfs_force_unmount_dev(dev);
 
+    spinlock_acquire(&blkdev_list_lock);
     pp = &blkdev_list;
     while (*pp) {
         if (*pp == dev) {
@@ -127,6 +150,7 @@ void blkdev_unregister(blkdev_t *dev) {
         }
         pp = &(*pp)->next;
     }
+    spinlock_release(&blkdev_list_lock);
 
     devfs_unregister_device(&dev->node);
 
@@ -421,12 +445,18 @@ void blkdev_register_disk(blkdev_t *dev) {
 }
 
 blkdev_t *blkdev_get(const char *name) {
-    blkdev_t *dev = blkdev_list;
-    while (dev) {
-        if (strcmp(dev->name, name) == 0) return dev;
-        dev = dev->next;
+    blkdev_t *dev;
+
+    spinlock_acquire(&blkdev_list_lock);
+    for (dev = blkdev_list; dev; dev = dev->next) {
+        if (strcmp(dev->name, name) == 0) break;
     }
-    return NULL;
+    spinlock_release(&blkdev_list_lock);
+    /* NOTE: the caller gets an unreferenced pointer.  The list walk is now
+     * safe, but nothing yet stops the device being unregistered between this
+     * return and the caller's use -- that needs refcounting on blkdev_t and
+     * is deliberately left for a follow-up (#403). */
+    return dev;
 }
 
 /* First device in the registration list; walk with ->next.  Used by the
