@@ -1144,47 +1144,50 @@ int scsi_scan_bus(scsi_link_t *link, uint8_t bus) {
              */
             scsi_device_t *lun0_dev = scsi_device_lookup(bus, target, 0);
             if (lun0_dev) {
-                int have_report_luns = 0;
                 struct scsi_report_luns_data luns_data;
                 if (scsi_report_luns(lun0_dev, &luns_data) == 0) {
                     uint32_t list_len = scsi_be32((uint8_t*)&luns_data.length);
                     uint32_t num_luns = list_len / 8;  /* Each LUN is 8 bytes */
-                    have_report_luns = 1;
-                    
+
                     /* Cap at reasonable limit */
                     if (num_luns > SCSI_MAX_LUNS_RESPONSE) {
                         num_luns = SCSI_MAX_LUNS_RESPONSE;
                     }
-                    
+
                     /* Probe each reported LUN (skip LUN 0, already probed) */
                     for (uint32_t i = 0; i < num_luns; i++) {
-                        /*
-                         * LUN descriptor format (SPC-3 6.21.2):
-                         * Bytes 0-1: Address method and LUN
-                         * For simple single-level LUNs, byte 1 is the LUN number
-                         */
-                        uint64_t lun_desc = luns_data.luns[i];
-                        /* Extract LUN from first two bytes (big-endian) */
-                        uint16_t lun = (uint16_t)((lun_desc >> 48) & 0xFFFF);
-                        /* Simple addressing: second byte is LUN number */
-                        uint8_t lun_num = (lun >> 8) & 0xFF;
-                        if ((lun & 0xC000) == 0) {
-                            /* Peripheral device addressing */
-                            lun_num = lun & 0xFF;
+                        uint16_t lun_num;
+
+                        if (scsi_lun_from_report_desc(
+                                (const uint8_t *)&luns_data.luns[i],
+                                &lun_num) != 0) {
+                            continue;  /* Multi-level address, not a flat LUN */
                         }
-                        
-                        if (lun_num != 0) {  /* Skip LUN 0, already done */
-                            if (scsi_probe_lun(link, bus, target, lun_num) == 0) {
-                                devices_found++;
-                            }
+
+                        if (lun_num == 0) {
+                            continue;  /* Already probed */
+                        }
+                        if (scsi_probe_lun(link, bus, target, lun_num) == 0) {
+                            devices_found++;
                         }
                     }
                 }
-                if (!have_report_luns) {
-                    for (uint16_t lun = 1; lun < link->max_luns; lun++) {
-                        if (scsi_probe_lun(link, bus, target, lun) == 0) {
-                            devices_found++;
-                        }
+
+                /*
+                 * REPORT LUNS is advisory, not exhaustive.  USB Bulk-Only
+                 * multi-slot card readers declare their slot count through
+                 * GET MAX LUN (which is what set link->max_luns) and then
+                 * either STALL REPORT LUNS or answer it with LUN 0 alone,
+                 * so keying the sweep off REPORT LUNS alone leaves every
+                 * slot but the first invisible.  Probe the declared range
+                 * as well, skipping addresses already registered above.
+                 */
+                for (uint16_t lun = 1; lun < link->max_luns; lun++) {
+                    if (scsi_device_lookup(bus, target, lun)) {
+                        continue;
+                    }
+                    if (scsi_probe_lun(link, bus, target, lun) == 0) {
+                        devices_found++;
                     }
                 }
             }

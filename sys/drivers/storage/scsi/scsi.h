@@ -415,6 +415,43 @@ static inline uint64_t scsi_be64(const uint8_t *p) {
            ((uint64_t)p[6] << 8) | p[7];
 }
 
+/*
+ * Decode one 8-byte REPORT LUNS descriptor (SPC-3 6.21.2).
+ *
+ * The descriptor is big-endian on the wire, so it must be read a byte at a
+ * time: loading it as a native uint64_t on a little-endian host reverses it
+ * and lands on the always-zero trailing bytes, which decodes every entry as
+ * LUN 0 and makes multi-LUN devices (USB card readers, enclosures) look
+ * single-LUN.
+ *
+ * Only the two first-level addressing methods yield a flat LUN number:
+ *   00b peripheral device - byte 0 bits 5-0 = bus, byte 1 = LUN
+ *   01b flat space        - 14-bit LUN spanning bytes 0-1
+ * The rest are multi-level; report them as undecodable rather than
+ * inventing a single-level number.
+ *
+ * Returns 0 and stores the LUN on success, -1 if the addressing method is
+ * not single-level.
+ */
+static inline int scsi_lun_from_report_desc(const uint8_t *d, uint16_t *lun_out) {
+    uint8_t method;
+
+    if (!d || !lun_out) {
+        return -1;
+    }
+
+    method = (uint8_t)((d[0] >> 6) & 0x3);
+    if (method == 0x0) {
+        *lun_out = d[1];
+        return 0;
+    }
+    if (method == 0x1) {
+        *lun_out = (uint16_t)(((uint16_t)(d[0] & 0x3F) << 8) | d[1]);
+        return 0;
+    }
+    return -1;
+}
+
 static inline void scsi_put_be16(uint8_t *p, uint16_t val) {
     p[0] = (val >> 8) & 0xFF;
     p[1] = val & 0xFF;

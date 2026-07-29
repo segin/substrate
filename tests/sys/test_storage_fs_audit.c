@@ -199,6 +199,79 @@ static void test_size_truncation_is_real(void)
     kprint("  done\n");
 }
 
+/* ------------------------------------------------------------------
+ * SCSI-03: a REPORT LUNS descriptor is big-endian on the wire and must be
+ * decoded a byte at a time.
+ *
+ * The bug: scsi_scan_bus() loaded the descriptor as a native uint64_t and
+ * took (desc >> 48), which on little-endian x86 reads wire bytes 7 and 6 --
+ * always zero for single-level addressing.  Every reported LUN decoded as 0,
+ * was skipped as "already probed", and because REPORT LUNS had *succeeded*
+ * the max_luns fallback sweep was suppressed.  Net effect: no device ever
+ * enumerated more than one LUN, so a 4-slot USB card reader exposed only its
+ * first slot.
+ *
+ * This is the test that would have caught it: a real 4-LUN response.
+ * ------------------------------------------------------------------ */
+static void test_report_luns_descriptor_byte_order(void)
+{
+    /* Wire format, peripheral addressing (method 00b), bus 0, LUNs 0-3 --
+     * exactly what a Genesys Logic all-in-one reader returns. */
+    static const uint8_t desc[4][8] = {
+        { 0x00, 0x00, 0, 0, 0, 0, 0, 0 },
+        { 0x00, 0x01, 0, 0, 0, 0, 0, 0 },
+        { 0x00, 0x02, 0, 0, 0, 0, 0, 0 },
+        { 0x00, 0x03, 0, 0, 0, 0, 0, 0 },
+    };
+    uint16_t lun;
+    int i;
+
+    kprint("test_report_luns_descriptor_byte_order:\n");
+
+    for (i = 0; i < 4; i++) {
+        lun = 0xFFFF;
+        TEST_ASSERT(scsi_lun_from_report_desc(desc[i], &lun) == 0,
+                    "SCSI-03: peripheral-addressed descriptor was rejected");
+        TEST_ASSERT(lun == (uint16_t)i,
+                    "SCSI-03: descriptor decoded to the wrong LUN -- the "
+                    "decode is reading the wrong end of the big-endian "
+                    "descriptor, so multi-LUN devices look single-LUN");
+    }
+
+    /* Flat-space addressing (method 01b): 14-bit LUN across bytes 0-1. */
+    {
+        static const uint8_t flat[8] = { 0x41, 0x23, 0, 0, 0, 0, 0, 0 };
+        lun = 0;
+        TEST_ASSERT(scsi_lun_from_report_desc(flat, &lun) == 0,
+                    "SCSI-03: flat-space descriptor was rejected");
+        TEST_ASSERT(lun == 0x0123,
+                    "SCSI-03: flat-space LUN mis-decoded");
+    }
+
+    /* Multi-level addressing must be reported as undecodable rather than
+     * silently collapsing onto some unrelated flat LUN. */
+    {
+        static const uint8_t multi[8] = { 0x80, 0x07, 0, 0, 0, 0, 0, 0 };
+        lun = 0xFFFF;
+        TEST_ASSERT(scsi_lun_from_report_desc(multi, &lun) != 0,
+                    "SCSI-03: logical-unit addressing was decoded as a flat "
+                    "LUN");
+    }
+
+    /* The naive implementation this replaced, spelled out: if this ever
+     * matches the byte-wise decode, the target became big-endian and the
+     * whole class of bug changes shape. */
+    {
+        uint64_t native;
+        memcpy(&native, desc[3], sizeof(native));
+        TEST_ASSERT((uint16_t)((native >> 48) & 0xFFFF) != 0x0003,
+                    "SCSI-03: this target is big-endian -- re-derive the "
+                    "REPORT LUNS decode instead of trusting this test");
+    }
+
+    kprint("  done\n");
+}
+
 void run_storage_fs_audit_tests(void)
 {
     kprint("\n=== Storage / Filesystem Audit Regressions ===\n");
@@ -211,6 +284,7 @@ void run_storage_fs_audit_tests(void)
     test_blkdev_rejects_bad_args_with_errno();
     test_off_t_is_signed();
     test_size_truncation_is_real();
+    test_report_luns_descriptor_byte_order();
 
     kprintf("\nStorage/FS audit regressions: %d passed, %d failed\n",
             tests_passed, tests_failed);
