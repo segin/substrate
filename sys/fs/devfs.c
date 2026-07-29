@@ -73,6 +73,22 @@ typedef struct devfs_entry {
     uint32_t perso_mask;
 } devfs_entry_t;
 
+/*
+ * Serialises the whole devfs tree.
+ *
+ * Entries are spliced in and out from driver / hotplug context
+ * (devfs_register_device, devfs_unregister_device) while readdir and finddir
+ * walk the same child lists from syscall context.  Unsynchronised, a walker
+ * can step into an entry that devfs_remove_entry() is unlinking and
+ * devfs_destroy_entry() is about to kfree.
+ *
+ * Held across tree traversal and mutation only.  The internal helpers
+ * (devfs_find_child, devfs_add_entry, devfs_remove_entry, devfs_lookup_path,
+ * ...) assume the caller already holds it, so the lock is taken at the public
+ * entry points and nowhere else -- spinlocks here are not recursive.
+ */
+static spinlock_t devfs_lock = SPINLOCK_INIT("devfs");
+
 static devfs_entry_t *root_entry = NULL;
 static struct dirent dev_dirent;
 static fs_node_t devfs_root_node;
@@ -291,9 +307,13 @@ static struct dirent *devfs_dir_readdir(fs_node_t *node, uint64_t index) {
     devfs_entry_t *entry = (devfs_entry_t *)node->impl;
     devfs_entry_t *child;
     uint64_t i = 0;
+    struct dirent *result = NULL;
 
     if (!entry) return NULL;
 
+    /* Walk under the tree lock: a hotplug unregister can be unlinking and
+     * freeing entries from this very list. */
+    spinlock_acquire(&devfs_lock);
     for (child = entry->child; child; child = child->next) {
         if (!devfs_entry_visible(child)) continue;
         if (devfs_entry_shadowed(entry, child)) continue;
@@ -301,11 +321,13 @@ static struct dirent *devfs_dir_readdir(fs_node_t *node, uint64_t index) {
             strlcpy(dev_dirent.d_name, child->name, sizeof(dev_dirent.d_name));
             dev_dirent.d_name[sizeof(dev_dirent.d_name) - 1] = '\0';
             dev_dirent.d_ino = (uintptr_t)child;
-            return &dev_dirent;
+            result = &dev_dirent;
+            break;
         }
         i++;
     }
-    return NULL;
+    spinlock_release(&devfs_lock);
+    return result;
 }
 
 static fs_node_t *devfs_dir_finddir(fs_node_t *node, char *name) {
@@ -332,10 +354,13 @@ static fs_node_t *devfs_dir_finddir(fs_node_t *node, char *name) {
         return node;   /* devfs root with no covered node — self */
     }
 
+    spinlock_acquire(&devfs_lock);
     child = devfs_present_child(entry, name);
-    if (child) {
-        devfs_refresh_timestamps(child->node);
-        return child->node;
+    fs_node_t *found = child ? child->node : NULL;
+    spinlock_release(&devfs_lock);
+    if (found) {
+        devfs_refresh_timestamps(found);
+        return found;
     }
 
     return NULL;
@@ -550,22 +575,27 @@ void devfs_register_device_perso(fs_node_t *node, uint32_t perso_mask) {
 
     devfs_refresh_timestamps(node);
 
+    spinlock_acquire(&devfs_lock);
+
     /* Queue for replay if devfs tree is not yet initialized */
     if (!root_entry) {
         if (devfs_deferred.count < DEVFS_DEFERRED_MAX) {
             devfs_deferred.mask[devfs_deferred.count] = perso_mask;
             devfs_deferred.nodes[devfs_deferred.count++] = node;
         }
+        spinlock_release(&devfs_lock);
         return;
     }
 
     if (!devfs_path_allowed(node->name)) {
+        spinlock_release(&devfs_lock);
         kprintf("devfs: rejected device path '%s'\n", node->name);
         return;
     }
 
     if (strchr(node->name, '/')) {
         (void)devfs_add_entry(node->name, node, perso_mask);
+        spinlock_release(&devfs_lock);
         return;
     }
 
@@ -574,10 +604,12 @@ void devfs_register_device_perso(fs_node_t *node, uint32_t perso_mask) {
         path[sizeof(path) - 1] = '\0';
         strncat(path, node->name, sizeof(path) - strlen(path) - 1);
         (void)devfs_add_entry(path, node, perso_mask);
+        spinlock_release(&devfs_lock);
         return;
     }
 
     (void)devfs_add_entry(node->name, node, perso_mask);
+    spinlock_release(&devfs_lock);
 }
 
 void devfs_register_device(fs_node_t *node) {
@@ -591,10 +623,12 @@ void devfs_unregister_device(fs_node_t *node) {
         return;
     }
 
+    spinlock_acquire(&devfs_lock);
     entry = devfs_find_entry_by_node(root_entry->child, node);
     if (entry != NULL) {
         devfs_remove_entry(entry);
     }
+    spinlock_release(&devfs_lock);
 }
 
 int devfs_register_alias_perso(const char *path, const char *target,
@@ -669,12 +703,15 @@ int devfs_register_alias(const char *path, const char *target) {
 void devfs_unregister_alias(const char *path) {
     devfs_entry_t *entry;
 
+    spinlock_acquire(&devfs_lock);
     entry = devfs_lookup_path(path);
     if (entry == NULL || entry->node == NULL || (entry->node->flags & 0x7) != FS_SYMLINK) {
+        spinlock_release(&devfs_lock);
         return;
     }
 
     devfs_remove_entry(entry);
+    spinlock_release(&devfs_lock);
 }
 
 static fs_node_t *devfs_mount(const char *device, uint32_t flags, void *data) {
