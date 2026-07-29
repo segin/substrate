@@ -176,6 +176,15 @@ int udf_read_vds(fs_node_t *dev, struct udf_extent_ad *vds_extent,
     
     uint32_t start = vds_extent->location;
     uint32_t count = vds_extent->length / UDF_SECTOR_SIZE;
+
+    /* length comes from the AVDP with no bound: 0xFFFFFFFF asks for two
+     * million device reads at mount time, with the mount lock held.  A VDS
+     * is a handful of descriptors; udf_read_label() already caps this at 64
+     * for exactly this reason. */
+    if (count > UDF_VDS_MAX_SECTORS)
+        count = UDF_VDS_MAX_SECTORS;
+    if (start > 0xFFFFFFFFU - count)
+        return -1;
     
     int found_pvd = 0, found_pd = 0, found_lvd = 0;
     

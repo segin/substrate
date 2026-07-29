@@ -854,15 +854,24 @@ int udf_add_fid(struct udf_fs *fs, struct udf_fe *dir_fe, uint32_t dir_block,
  */
 int udf_remove_fid(struct udf_fs *fs, struct udf_fe *dir_fe, uint32_t dir_block,
                    const char *name) {
-    uint8_t *dir_buf = kmalloc(4096);
+    enum { UDF_REMOVE_FID_BUFSZ = 4096 };
+    uint8_t *dir_buf = kmalloc(UDF_REMOVE_FID_BUFSZ);
     if (!dir_buf) return -1;
-    
+
     off_t disk_off = (off_t)(fs->partition_start + dir_block) * UDF_SECTOR_SIZE;
     fs->device->read(fs->device, disk_off, UDF_SECTOR_SIZE, dir_buf);
-    
+
+    /* dir_buf is a POINTER, so the old `sizeof(dir_buf)` was 4 -- dir_size was
+     * clamped to 4 bytes and the `pos + 38 <= dir_size` scan below never
+     * executed, so udf_remove_fid() always reported "not found" and unlink()
+     * and rmdir() on UDF ALWAYS failed.  (The same sizeof-on-a-pointer bug was
+     * already fixed in udf_vfs_readdir/finddir; this site was missed.)
+     *
+     * Only one sector was read, so bound by that as well as by the buffer --
+     * scanning past what we actually read would walk uninitialised heap. */
     uint32_t dir_size = (uint32_t)dir_fe->info_length;
-    if (dir_size > sizeof(dir_buf))
-        dir_size = sizeof(dir_buf);
+    if (dir_size > UDF_SECTOR_SIZE)
+        dir_size = UDF_SECTOR_SIZE;
     uint32_t pos = 0;
     
     while (pos + 38 <= dir_size) {
@@ -1479,7 +1488,9 @@ int udf_truncate_file(struct udf_fs *fs, struct udf_fe *fe, uint32_t fe_block,
 
             fs->device->write(fs->device, disk_off, UDF_SECTOR_SIZE, sector_buf);
             memcpy(fe, disk_fe, sizeof(struct udf_fe));
-            kfree(zero_buf, UDF_SECTOR_SIZE);
+            /* zero_buf was already freed above, before the checksum/write --
+             * freeing it again here corrupted the allocator on every successful
+             * long-AD extend.  The short-AD sibling frees exactly once. */
             kfree(sector_buf, UDF_SECTOR_SIZE);
             return 0;
         }

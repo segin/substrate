@@ -12,6 +12,10 @@
 #include <stddef.h>   /* size_t (udf_read_label declaration) */
 
 /* UDF Constants */
+/* Upper bound on the Volume Descriptor Sequence scan.  A VDS holds a handful
+ * of descriptors; the extent length that drives the walk is untrusted. */
+#define UDF_VDS_MAX_SECTORS 64
+
 #define UDF_SECTOR_SIZE     2048
 #define UDF_AVDP_SECTOR     256     /* Anchor at sector 256 */
 
