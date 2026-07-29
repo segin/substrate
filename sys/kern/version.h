@@ -2,7 +2,11 @@
 #define _SYS_VERSION_H
 
 #define OS_NAME "substrate"
-#define OS_VERSION "0.3.0"
+
+/* OS_RELEASE / OS_VERSION / OS_OSRELEASE / OS_VERSION_LONG.  Kept in their own
+ * header so a file needing only the version -- kern/sysctl.c -- can have it
+ * without the externs below. */
+#include <kern/osversion.h>
 
 /* Build target architecture, for the boot banner / version strings.  Detected
  * from the compiler so it tracks whatever target the kernel is built for. */
