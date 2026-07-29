@@ -948,7 +948,24 @@ void floppy_poll(void) {
         }
 
         ctlr = &fdc_controllers[drive->controller_index];
-        spinlock_acquire(&ctlr->lock);
+        /*
+         * This runs in the timer ISR (timer_tick_context -> floppy_poll), and
+         * ctlr->lock is held in process context by fdc_transfer_sectors() /
+         * fdc_format_track() across seeks, per-byte FIFO waits and the IRQ
+         * wait -- all busy-waits that can exceed the motor-idle threshold.
+         *
+         * spinlock_acquire() disables preemption but NOT interrupts, and
+         * panics on a same-CPU recursive acquire, so a blocking acquire here
+         * turns a stalled floppy read into "Deadlock: Spinlock already held by
+         * current CPU".  On SMP it would instead spin inside the ISR for
+         * seconds, stalling timekeeping.
+         *
+         * Dropping the motor is pure housekeeping: if the lock is busy the
+         * drive is in use anyway, and the next tick will retry.
+         */
+        if (!spinlock_try_acquire(&ctlr->lock)) {
+            continue;
+        }
         if (drive->motor_on && drive->last_activity_ms != 0 &&
             (now - drive->last_activity_ms) >= FDC_MOTOR_IDLE_MS) {
             fdc_motor_set(drive, 0);
