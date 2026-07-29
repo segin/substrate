@@ -242,7 +242,21 @@ uint32_t fat_get_next_cluster(fat_fs_t *fs, uint32_t cluster) {
 }
 
 // Convert cluster to sector
+/* A data cluster number is valid only in [2, total_clusters + 2).  Directory
+ * entries carry this value straight off the disk, and fat_cluster_to_sector()
+ * computes (cluster - 2) * sectors_per_cluster in 32-bit -- so an out-of-range
+ * value (0, 1, or something huge) underflows or wraps and aims file I/O at an
+ * arbitrary sector of the volume, including the boot sector and the FAT. */
+static int fat_cluster_valid(fat_fs_t *fs, uint32_t cluster) {
+    return cluster >= 2 && cluster < fs->total_clusters + 2;
+}
+
 static uint32_t fat_cluster_to_sector(fat_fs_t *fs, uint32_t cluster) {
+    if (!fat_cluster_valid(fs, cluster)) {
+        /* Callers treat 0 as "no such sector"; never hand back a wrapped
+         * address computed from a bogus cluster. */
+        return 0;
+    }
     return fs->first_data_sector + (cluster - 2) * fs->bpb.sectors_per_cluster;
 }
 
@@ -977,12 +991,25 @@ static int fat_set_fat_entry(fat_fs_t *fs, uint32_t cluster, uint32_t value) {
             uint32_t sector = fat_sector_base + fat_offset / fs->bpb.bytes_per_sector;
             uint32_t byte_off = fat_offset % fs->bpb.bytes_per_sector;
             uint8_t sector_buf[4096];
+            uint8_t next_sector_buf[4096];
+            int straddles = (byte_off + 1 >= fs->bpb.bytes_per_sector);
             if (fat_read_sectors(fs, sector, 1, sector_buf) != 0) return -1;
-            /* Handle boundary across two sectors */
+            /* A 12-bit entry can straddle the sector boundary.  The high byte
+             * then lives at offset 0 of the NEXT sector and must be READ before
+             * it is merged: seeding it with 0 and then doing
+             * `hi = (hi & 0xF0) | ...` for an even cluster zeroed the high
+             * nibble, which holds the low 4 bits of cluster c+1's entry --
+             * silently repointing the neighbouring chain (c=682, 1706, 2730,
+             * 3754 on a standard 512-byte-sector floppy). */
             uint8_t lo = sector_buf[byte_off];
-            uint8_t hi = (byte_off + 1 < fs->bpb.bytes_per_sector)
-                         ? sector_buf[byte_off + 1]
-                         : 0;
+            uint8_t hi;
+            if (straddles) {
+                if (fat_read_sectors(fs, sector + 1, 1, next_sector_buf) != 0)
+                    return -1;
+                hi = next_sector_buf[0];
+            } else {
+                hi = sector_buf[byte_off + 1];
+            }
             if (cluster & 1) {
                 lo = (lo & 0x0F) | (uint8_t)((value & 0x0F) << 4);
                 hi = (uint8_t)((value >> 4) & 0xFF);
@@ -991,14 +1018,13 @@ static int fat_set_fat_entry(fat_fs_t *fs, uint32_t cluster, uint32_t value) {
                 hi = (hi & 0xF0) | (uint8_t)((value >> 8) & 0x0F);
             }
             sector_buf[byte_off] = lo;
-            if (byte_off + 1 < fs->bpb.bytes_per_sector) {
+            if (!straddles) {
                 sector_buf[byte_off + 1] = hi;
                 if (fat_write_sectors(fs, sector, 1, sector_buf) != 0) return -1;
             } else {
-                /* Split across sector boundary */
+                /* Split across sector boundary: next_sector_buf already holds
+                 * the neighbouring sector, so only the byte we own changes. */
                 if (fat_write_sectors(fs, sector, 1, sector_buf) != 0) return -1;
-                uint8_t next_sector_buf[4096];
-                if (fat_read_sectors(fs, sector + 1, 1, next_sector_buf) != 0) return -1;
                 next_sector_buf[0] = hi;
                 if (fat_write_sectors(fs, sector + 1, 1, next_sector_buf) != 0) return -1;
             }
@@ -1421,8 +1447,11 @@ static int fat_find_dir_space_locked(fat_fs_t *fs, uint32_t dir_cluster,
             if (nc == 0) return -1;
             fat_set_fat_entry(fs, cluster, nc);
             fat_set_fat_entry(fs, nc, fat_eoc(fs));
-            /* Zero out new cluster */
-            uint8_t zero_buf[32768];
+            /* Zero out new cluster.  static, like every other 32 KiB scratch
+             * buffer in this file (a 32 KiB automatic array overflows the
+             * 16 KiB kernel stack outright); this path runs under the
+             * caller's fat_io_lock. */
+            static uint8_t zero_buf[32768];
             __builtin_memset(zero_buf, 0, cluster_size);
             fat_write_sectors(fs, fat_cluster_to_sector(fs, nc), fs->bpb.sectors_per_cluster, zero_buf);
             next = nc;
