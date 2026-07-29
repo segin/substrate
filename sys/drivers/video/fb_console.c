@@ -494,8 +494,39 @@ int fb_console_active(void) {
  * are gated through this predicate, so a VT switch or KD_TEXT restore can
  * repaint the up-to-date contents from the backing buffer.
  */
+/*
+ * Count of VTs currently in KD_GRAPHICS, i.e. how many userland processes
+ * believe they own the framebuffer.
+ *
+ * The per-VT graphics_mode flag alone is not enough to decide whether the
+ * kernel may draw, because substrate has exactly one framebuffer but the VT
+ * that owns it need not be the active one -- and in the X case it never is.
+ * kdrive's LinuxInit does:
+ *
+ *     open("/dev/tty0"); ioctl(VT_OPENQRY, &vtno);   -> a *different* VT
+ *     LinuxConsoleFd = open("/dev/ttyN");
+ *     ioctl(LinuxConsoleFd, VT_ACTIVATE, vtno);      -> we accept and ignore
+ *     ioctl(LinuxConsoleFd, KDSETMODE, KD_GRAPHICS); -> marks that VT
+ *
+ * VT_OPENQRY hands out a VT other than the caller's by construction (that is
+ * what "free VT" means), and VT_ACTIVATE is accept-and-ignore here because
+ * substrate does not implement VT switching.  So X correctly takes ownership
+ * of VT N while the active VT stays 1.  Gating on the active VT's flag then
+ * lets the console keep painting the one framebuffer X is drawing into --
+ * kernel CORE dumps land on top of a running X session.
+ *
+ * Until VT_ACTIVATE really switches, ownership is a property of the display,
+ * not of a VT: if anyone holds it, nobody in the kernel draws.
+ */
+static int fbcon_graphics_owners = 0;
+
+static inline int fb_console_fb_owned_by_userland(void) {
+    return fbcon_graphics_owners > 0;
+}
+
 static inline int fb_console_vt_visible(const vt_state_t *vt) {
-    return vt && vt->id == vt_get_active() && !vt->graphics_mode;
+    return vt && vt->id == vt_get_active() && !vt->graphics_mode &&
+           !fb_console_fb_owned_by_userland();
 }
 
 void fb_console_redraw_active(void) {
@@ -951,6 +982,7 @@ static void fb_vt_tty_close(struct tty *tty) {
             vt->id);
     vt->graphics_mode = 0;
     vt->kbd_mode = K_XLATE;
+    if (fbcon_graphics_owners > 0) fbcon_graphics_owners--;
     if (vt->id == vt_get_active()) {
         fb_console_redraw_active();
         vt_render_statusline(vt);
@@ -1656,6 +1688,7 @@ static int fb_vt_tty_ioctl(struct tty *tty, uint32_t cmd, unsigned long arg) {
              * scrolled; Xfbdev launched from a shell did not. */
             vt->graphics_mode = 1;
             vt->graphics_owner = (void *)current_process;
+            fbcon_graphics_owners++;
             FB_LOCK();
             fb_console_hide_cursor();
             view_y_offset = 0;
@@ -1670,6 +1703,7 @@ static int fb_vt_tty_ioctl(struct tty *tty, uint32_t cmd, unsigned long arg) {
              * framebuffer now belongs to whatever X drew last. */
             vt->graphics_mode = 0;
             vt->graphics_owner = NULL;
+            if (fbcon_graphics_owners > 0) fbcon_graphics_owners--;
             if (vt->id == vt_get_active()) {
                 fb_console_redraw_active();
                 vt_render_statusline(vt);
@@ -2077,8 +2111,10 @@ static int fb_console_cursor_should_be_visible(void) {
     if (!vt) {
         return 1;
     }
-    if (vt->graphics_mode) {
-        /* X owns the framebuffer — never paint the text cursor over it. */
+    if (vt->graphics_mode || fb_console_fb_owned_by_userland()) {
+        /* X owns the framebuffer — never paint the text cursor over it.
+         * The owner may be a VT other than the active one; see
+         * fb_console_fb_owned_by_userland(). */
         return 0;
     }
     if (!vt->cursor_visible) {
@@ -2159,12 +2195,15 @@ static void fb_console_backend_write(const char *data, size_t len) {
         return;
     }
 
-    /* X server (or any framebuffer-owning userland) has put this VT
-     * into KD_GRAPHICS mode.  Drop console writes silently so we
-     * don't paint text over its pixel output.  Output still goes to
-     * the UART backend via console_write's backend iteration, so
-     * serial logging continues to work. */
-    if (vt->graphics_mode) {
+    /* X server (or any framebuffer-owning userland) has put a VT into
+     * KD_GRAPHICS mode.  Drop console writes silently so we don't paint text
+     * over its pixel output.  Output still goes to the UART backend via
+     * console_write's backend iteration, so serial logging continues to work.
+     *
+     * Check both this VT and the global owner count: X owns a VT that is not
+     * the active one (see fb_console_fb_owned_by_userland), so testing only
+     * the active VT let kernel CORE dumps scribble over a running session. */
+    if (vt->graphics_mode || fb_console_fb_owned_by_userland()) {
         return;
     }
 
@@ -2457,7 +2496,7 @@ void fb_console_tick(void) {
      * shim, which we must convert to the planes here so its frames appear;
      * rate-limited to the console flush cadence (a full-screen plane
      * conversion is not free). */
-    if (vt && vt->graphics_mode) {
+    if ((vt && vt->graphics_mode) || fb_console_fb_owned_by_userland()) {
         static unsigned int gfx_present_ticks;
         if (++gfx_present_ticks >= fb_console_flush_period_ticks()) {
             gfx_present_ticks = 0;
