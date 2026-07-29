@@ -1248,7 +1248,7 @@ int kern_uname(struct utsname *buf) {
     buf->sysname[255] = '\0';
     strlcpy(buf->nodename, kernel_hostname, sizeof(buf->nodename));
     buf->nodename[255] = '\0';
-    strlcpy(buf->release, "0.2", sizeof(buf->release));
+    strlcpy(buf->release, "0.3", sizeof(buf->release));
     buf->release[255] = '\0';
     strlcpy(buf->version, "Kernel", sizeof(buf->version));
     buf->version[255] = '\0';

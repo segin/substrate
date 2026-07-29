@@ -2,7 +2,7 @@
 #define _SYS_VERSION_H
 
 #define OS_NAME "substrate"
-#define OS_VERSION "0.2.0"
+#define OS_VERSION "0.3.0"
 
 /* Build target architecture, for the boot banner / version strings.  Detected
  * from the compiler so it tracks whatever target the kernel is built for. */
