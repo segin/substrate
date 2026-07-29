@@ -122,9 +122,20 @@ static void uma_hash_report_corrupt(uint32_t bucket, uma_slab_t *slab, uint32_t 
         return;
     }
     uma_hash_corrupt_reports++;
+    /* us_data is part of the wreckage, so report the page containing the header
+     * too: an on-page header lives at page + 4096 - overhead, so that address
+     * still identifies the slab's own page even when every field reads zero.
+     * The first words of the page usually say what the memory was last used
+     * for, which is the fastest route to the culprit. */
+    uintptr_t hdr_page = (uintptr_t)slab & ~(uintptr_t)0xFFF;
     kprintf("UMA: hash bucket %u entry %u (slab %p, us_data %p, us_hnext %p) has a "
-            "NULL owner zone -- its header was recycled while still hashed\n",
+            "NULL owner zone -- header recycled or overrun while still hashed\n",
             bucket, depth, (void *)slab, slab->us_data, (void *)slab->us_hnext);
+    kprintf("UMA:   header page 0x%08x, offset 0x%x into it; page[0..3] = "
+            "%08x %08x %08x %08x\n",
+            (uint32_t)hdr_page, (uint32_t)((uintptr_t)slab - hdr_page),
+            ((const uint32_t *)hdr_page)[0], ((const uint32_t *)hdr_page)[1],
+            ((const uint32_t *)hdr_page)[2], ((const uint32_t *)hdr_page)[3]);
 }
 
 static void uma_hash_report_runaway(uint32_t bucket) {
