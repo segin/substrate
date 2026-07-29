@@ -678,6 +678,26 @@ fs_node_t *vfs_lookup(fs_node_t *root, const char *path) {
         }
 
         if (component[0] == '.' && component[1] == '.' && component[2] == '\0') {
+            /*
+             * ".." at the lookup root stays put.  `root` is the process's
+             * root_node, so for a chroot'ed process this is what confines it:
+             * without the check, ".." followed the filesystem's real parent
+             * link straight out of the jail, and "/../../etc/master.passwd"
+             * resolved outside it for any process inside.  POSIX requires
+             * "/.." to be "/" for the process root; a mount root is already
+             * special-cased below.
+             *
+             * Identity is the (mp, inode) tuple rather than the pointer:
+             * filesystems such as ext2 hand back a freshly allocated
+             * fs_node_t on every finddir, so `current == root` is not
+             * reliable -- the same reasoning the mount-crossing code below
+             * spells out.
+             */
+            if (root && current &&
+                current->inode == root->inode && current->mp == root->mp) {
+                if (*p == '/') p++;
+                continue;
+            }
             /* At a mount root, ".." escapes to the mountpoint's parent
              * (e.g. /proc/.. -> /); otherwise the normal in-fs parent. */
             fs_node_t *esc = vfs_mount_root_parent(current);
@@ -766,6 +786,13 @@ fs_node_t *vfs_lookup_lstat(fs_node_t *root, const char *path) {
         }
 
         if (component[0] == '.' && component[1] == '.' && component[2] == '\0') {
+            /* Same process-root containment as vfs_lookup(); lstat must not
+             * be a way around the jail either. */
+            if (root && current &&
+                current->inode == root->inode && current->mp == root->mp) {
+                if (*p == '/') p++;
+                continue;
+            }
             /* At a mount root, ".." escapes to the mountpoint's parent
              * (e.g. /proc/.. -> /); otherwise the normal in-fs parent. */
             fs_node_t *esc = vfs_mount_root_parent(current);
