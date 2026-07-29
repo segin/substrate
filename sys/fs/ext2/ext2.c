@@ -995,6 +995,22 @@ static int ext4_extent_alloc_inode_block(ext2_fs_t *fs, ext2_inode_t *inode,
     uint16_t n = eh->eh_ecount;
     uint16_t max = eh->eh_max;
 
+    /*
+     * eh_ecount and eh_max come straight off the disk and are used below as
+     * indices into the inline extent array, which lives inside the 60-byte
+     * i_block[].  ext4_extent_resolve() clamps them; this allocator did not,
+     * so an inode claiming eh_ecount = 500 made `&exts[n-1]` a read and
+     * `&exts[n]` a 12-byte WRITE several kilobytes past the inode -- straight
+     * through the static ext2_node_cache[] into neighbouring slots.
+     */
+    uint16_t capacity = (uint16_t)((sizeof(inode->i_block) - sizeof(*eh)) /
+                                   sizeof(ext4_extent_t));
+    if (max > capacity || n > max) {
+        kprintf("ext2: bogus inline extent header (ecount=%u max=%u cap=%u)\n",
+                n, max, capacity);
+        return -1;
+    }
+
     if (n == 0) {
         if (max == 0) return -1;
         uint32_t blk = ext2_alloc_block(fs);
@@ -2323,6 +2339,19 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
     fs->inode_size = (fs->sb.s_rev_level >= 1) ? fs->sb.s_inode_size : EXT2_GOOD_OLD_INODE_SIZE;
 
     // Validate inode_size is non-zero and fits within a block
+    /* ext2_read_inode() unconditionally memcpy's EXT2_GOOD_OLD_INODE_SIZE
+     * bytes out of the block, and the csum helpers touch fixed offsets up to
+     * 130, so anything smaller reads (and, with metadata_csum, WRITES) past
+     * the block buffer.  A non-divisor also makes the last inode of a block
+     * straddle its end. */
+    if (fs->inode_size < EXT2_GOOD_OLD_INODE_SIZE ||
+        (fs->inode_size & (fs->inode_size - 1)) != 0 ||
+        (fs->block_size % fs->inode_size) != 0) {
+        kprintf("ext2: bad inode size %u (block size %u)\n",
+                fs->inode_size, fs->block_size);
+        kfree(fs, sizeof(ext2_fs_t));
+        return NULL;
+    }
     if (fs->inode_size == 0 || fs->inode_size > fs->block_size) {
         kprint("EXT2: Invalid inode_size\n");
         kfree(fs, sizeof(ext2_fs_t));
@@ -2910,6 +2939,23 @@ static int ext2_free_indirect_tree(ext2_fs_t *fs, uint32_t block_num, uint32_t d
 
 static int ext2_free_inode_blocks(ext2_fs_t *fs, ext2_inode_t *inode) {
     if (!fs || !inode) return -EINVAL;
+
+    /*
+     * For an ext4 extent inode, i_block[] is NOT an array of block pointers:
+     * it holds the packed ext4_extent_header plus up to four extents.  Walking
+     * it as direct/indirect pointers frees blocks that belong to other files
+     * (i_block[0] is magic|entry-count, i_block[1] is max|depth, and with four
+     * extents i_block[12..14] -- the "indirect" slots -- are extent payload,
+     * every non-zero word of which would then be read as an indirect block and
+     * its contents freed too).  One unlink corrupts the whole filesystem.
+     *
+     * Extent-tree teardown is not implemented, so refuse rather than destroy:
+     * the blocks leak, which fsck can reclaim, instead of being handed to the
+     * next allocator while another file still points at them.
+     */
+    if (inode->i_flags & EXT4_EXTENTS_FL) {
+        return -EOPNOTSUPP;
+    }
 
     for (uint32_t i = 0; i < 12; i++) {
         if (inode->i_block[i] != 0) {
