@@ -2,6 +2,7 @@
 #include <string.h>
 
 #include <arch/i386/cpu.h>
+#include <arch/i386/intr.h>
 #include <arch/i386/pmap.h>
 #include <arch/i386/pmm.h>
 #include <arch/x86-common/io.h>
@@ -89,13 +90,38 @@ static struct {
     volatile uint32_t io_busy;
 } vblk;
 
-static inline void vblk_lock(void) {
+/*
+ * Interrupts must be masked for the whole request/poll cycle, not just
+ * preemption disabled.
+ *
+ * The block layer is reachable from interrupt context (an ISR that ends up in
+ * blkdev_read_bytes -> bio_dev_cached -> geom_part_read -> vblk_bdev_read).
+ * With interrupts live, an interrupt could land while this non-recursive
+ * test-and-set was held -- typically during the used-ring poll in
+ * virtio_blk_submit -- and the handler's own read would spin here forever on a
+ * lock its *own* CPU already owns.  Because the ISR runs with IF clear, the
+ * interrupted holder can never be resumed to release it, so the machine wedges
+ * with no panic and no owner recorded: an unbreakable silent hang.  That was
+ * observed as a page-fault read (vnode_pager_getpages -> ext2_file_read ->
+ * blkdev_vfs_read) holding the lock when an ISR re-entered the block layer.
+ *
+ * Masking first makes the interposition impossible rather than merely
+ * unlikely, and it costs nothing here: virtio_blk_submit() completes by
+ * polling the used ring and sets VRING_AVAIL_F_NO_INTERRUPT, so no interrupt
+ * is required to make forward progress inside the critical section.
+ */
+static inline uint32_t vblk_lock(void) {
+    uint32_t flags = intr_disable();
+
     while (__sync_lock_test_and_set(&vblk.io_busy, 1) != 0)
         __asm__ volatile("pause");
+
+    return flags;
 }
 
-static inline void vblk_unlock(void) {
+static inline void vblk_unlock(uint32_t flags) {
     __sync_lock_release(&vblk.io_busy);
+    intr_restore(flags);
 }
 
 /* Physical address of a direct-mapped kernel pointer.  Only valid for
@@ -376,8 +402,9 @@ static int virtio_blk_rw(uint64_t lba, uint32_t count, void *buf, int write) {
 
     random_harvest_fast(&entropy_data, sizeof(entropy_data));
 
-    /* Own the shared ring and bounce buffer for the whole transfer. */
-    vblk_lock();
+    /* Own the shared ring and bounce buffer for the whole transfer, with
+     * interrupts masked so an ISR cannot re-enter the block layer here. */
+    uint32_t vblk_flags = vblk_lock();
 
     while (count > 0) {
         uint32_t chunk = (count > VIRTIO_BLK_BOUNCE_SECTORS)
@@ -399,7 +426,7 @@ static int virtio_blk_rw(uint64_t lba, uint32_t count, void *buf, int write) {
         count -= chunk;
     }
 
-    vblk_unlock();
+    vblk_unlock(vblk_flags);
     return rc;
 }
 
