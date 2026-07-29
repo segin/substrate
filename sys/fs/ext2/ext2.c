@@ -853,6 +853,15 @@ void ext2_get_blocks_extent(ext2_fs_t *fs, ext2_inode_t *inode, uint32_t block_i
 
 // Read data from an inode at a given offset
 uint32_t ext2_inode_read(ext2_node_t *node, off_t offset, uint32_t size, void *buffer) {
+    /* off_t is signed and sys_lseek() accepts a negative offset, which
+     * read_fs()/write_fs() pass straight through.  Every bound below is an
+     * unsigned comparison that a negative value silently passes, after which
+     * block_offset = (uint32_t)(offset % block_size) is huge and
+     * memcpy(block_buf + block_offset, ...) lands BEFORE the kmalloc'd block
+     * buffer -- an attacker-controlled write (or heap disclosure on read)
+     * reachable from any unprivileged process via
+     * lseek(fd, -100, SEEK_SET); write(fd, buf, 64). */
+    if (offset < 0) return 0;
     ext2_fs_t *fs = node->fs;
     ext2_inode_t *inode = &node->inode;
 
@@ -1180,6 +1189,15 @@ int ext2_alloc_inode_block(ext2_fs_t *fs, ext2_inode_t *inode, uint32_t block_id
 
 // Write data to an inode at a given offset
 uint32_t ext2_inode_write(ext2_node_t *node, off_t offset, uint32_t size, const void *buffer) {
+    /* off_t is signed and sys_lseek() accepts a negative offset, which
+     * read_fs()/write_fs() pass straight through.  Every bound below is an
+     * unsigned comparison that a negative value silently passes, after which
+     * block_offset = (uint32_t)(offset % block_size) is huge and
+     * memcpy(block_buf + block_offset, ...) lands BEFORE the kmalloc'd block
+     * buffer -- an attacker-controlled write (or heap disclosure on read)
+     * reachable from any unprivileged process via
+     * lseek(fd, -100, SEEK_SET); write(fd, buf, 64). */
+    if (offset < 0) return 0;
     ext2_fs_t *fs = node->fs;
     ext2_inode_t *inode = &node->inode;
 
@@ -1790,8 +1808,18 @@ struct dirent *ext2_readdir(fs_node_t *node, uint64_t index) {
             block_off += de->rec_len;
             pos += de->rec_len;
         }
+
+        /* Same guard ext2_add_entry() carries: the inner loop `break`s on a
+         * malformed record (rec_len < 8, or one running past the block) WITHOUT
+         * advancing pos.  The outer loop then recomputes the identical
+         * block_idx, re-reads the same block, breaks again -- an unkillable
+         * 100%-CPU kernel spin, here with ctx->lock held so every other user of
+         * this directory blocks behind it.  Skip to the next block instead. */
+        uint32_t block_end = (block_idx + 1) * fs->block_size;
+        if (pos < block_end)
+            pos = block_end;
     }
-    
+
 cleanup:
     mutex_unlock(&ctx->lock);
     return result;
@@ -3433,8 +3461,18 @@ static int ext2_remove_entry(fs_node_t *dir, const char *name) {
             block_off += de->rec_len;
             pos += de->rec_len;
         }
+
+        /* Same guard ext2_add_entry() carries: the inner loop `break`s on a
+         * malformed record (rec_len < 8, or one running past the block) WITHOUT
+         * advancing pos.  The outer loop then recomputes the identical
+         * block_idx, re-reads the same block, breaks again -- an unkillable
+         * 100%-CPU kernel spin, here with ctx->lock held so every other user of
+         * this directory blocks behind it.  Skip to the next block instead. */
+        uint32_t block_end = (block_idx + 1) * fs->block_size;
+        if (pos < block_end)
+            pos = block_end;
     }
-    
+
 cleanup:
     mutex_unlock(&ctx->lock);
     return result;
