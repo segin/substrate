@@ -1040,12 +1040,21 @@ static int minix_dir_add(fs_node_t *dir, const char *name, uint32_t inode_num) {
         return -1;
     }
 
-    // Update directory inode size on disk
+    /* Update the directory's on-disk size.
+     *
+     * This used to cast dir->ptr to minix_inode_v1 * and call
+     * minix_write_inode_raw(), which hardcodes 32-byte inodes and 32 per
+     * block.  On a MINIX V2 filesystem -- which minix_mount() accepts --
+     * inodes are 64 bytes, 16 per block, so the write landed in the wrong
+     * block at the wrong offset, on top of an unrelated inode's
+     * mode/links/uid/gid/size.  Setting cached->i_size at V1 offset 4 also
+     * wrote over V2's i_uid/i_gid.
+     *
+     * minix_write_inode() is version-aware and already takes the size from
+     * node->length, so it is both correct and the smaller change. */
     minix_fs_t *fs = (minix_fs_t *)(uintptr_t)dir->impl;
-    struct minix_inode_v1 *cached = (struct minix_inode_v1 *)dir->ptr;
-    if (cached) {
-        cached->i_size = dir->length;
-        minix_write_inode_raw(fs, dir->inode, cached);
+    if (dir->ptr) {
+        minix_write_inode(fs, dir);
     }
 
     return 0;
@@ -1378,7 +1387,6 @@ static int minix_dir_is_empty(fs_node_t *node) {
 static int minix_rmdir(fs_node_t *dir, const char *name) {
     minix_fs_t *fs;
     fs_node_t *target;
-    struct minix_inode_v1 *dir_inode;
     int ret;
 
     if (!dir || !name || !name[0]) return -1;
@@ -1403,9 +1411,23 @@ static int minix_rmdir(fs_node_t *dir, const char *name) {
         return ret;
     }
 
-    dir_inode = (struct minix_inode_v1 *)dir->ptr;
-    if (dir_inode && dir_inode->i_nlinks > 0) {
-        dir_inode->i_nlinks--;
+    /* Drop the parent's link count for the removed subdirectory's "..".
+     *
+     * i_nlinks sits at a DIFFERENT offset in the two inode layouts (V1 byte 9,
+     * V2 byte 2), so reading it through a minix_inode_v1 * on a V2 filesystem
+     * decremented a byte of i_size instead -- masked immediately afterwards by
+     * minix_write_inode() rewriting i_size from node->length, so the real link
+     * count was never decremented and fsck reported drifting counts on every
+     * rmdir. */
+    if (dir->ptr) {
+        if (fs->sb.s_magic == MINIX_V2_Magic ||
+            fs->sb.s_magic == MINIX_V2_Magic_14) {
+            struct minix_inode_v2 *di = (struct minix_inode_v2 *)dir->ptr;
+            if (di->i_nlinks > 0) di->i_nlinks--;
+        } else {
+            struct minix_inode_v1 *di = (struct minix_inode_v1 *)dir->ptr;
+            if (di->i_nlinks > 0) di->i_nlinks--;
+        }
         minix_write_inode(fs, dir);
     }
 
