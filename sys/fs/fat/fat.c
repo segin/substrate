@@ -381,7 +381,12 @@ struct dirent *fat_readdir(fs_node_t *node, uint64_t index) {
     dirent->d_off = 0;
     uint8_t *dir_buf = kmalloc(fs->cluster_size);
     if (!dir_buf) return NULL;
-    char lfn_buffer[256];
+    /* Zeroed at declaration: fat_parse_lfn() only clears this when it sees an
+     * entry carrying the 0x40 "last" bit, so an LFN sequence that does not
+     * start with one leaves the low bytes untouched.  fat_readdir/finddir then
+     * NUL-terminate at lfn_len and copy the result to userspace, leaking
+     * whatever was on the kernel stack. */
+    char lfn_buffer[256] = {0};
     uint32_t bytes_per_sector = fs->bpb.bytes_per_sector;
     uint32_t cluster_size = fs->bpb.bytes_per_sector * fs->bpb.sectors_per_cluster;
 
@@ -436,6 +441,16 @@ struct dirent *fat_readdir(fs_node_t *node, uint64_t index) {
                     }
 
                     uint32_t cluster_num = ((uint32_t)entry->cluster_high << 16) | entry->cluster_low;
+                    /* A subdirectory's ".." stores cluster 0 to mean "the
+                     * volume root".  On FAT12/16 the root is outside the data
+                     * area and the caller's `first_cluster == 0` test catches
+                     * it, but FAT32's root IS a normal cluster chain, so a
+                     * literal 0 fell through and fat_cluster_to_sector(0)
+                     * addressed first_data_sector - 2*spc -- the tail of the
+                     * FAT, parsed as directory entries. */
+                    if (cluster_num == 0 && fs->fat_type == 32) {
+                        cluster_num = fs->ext_bpb.root_cluster;
+                    }
                     dirent->d_ino = fat_make_synth_inode(fs, 0, sector_i, i, cluster_num);
                     kfree(root_sector_buf, fs->bpb.bytes_per_sector);
                     kfree(dir_buf, fs->cluster_size);
@@ -505,6 +520,16 @@ struct dirent *fat_readdir(fs_node_t *node, uint64_t index) {
                 }
                 
                 uint32_t cluster_num = ((uint32_t)entry->cluster_high << 16) | entry->cluster_low;
+                    /* A subdirectory's ".." stores cluster 0 to mean "the
+                     * volume root".  On FAT12/16 the root is outside the data
+                     * area and the caller's `first_cluster == 0` test catches
+                     * it, but FAT32's root IS a normal cluster chain, so a
+                     * literal 0 fell through and fat_cluster_to_sector(0)
+                     * addressed first_data_sector - 2*spc -- the tail of the
+                     * FAT, parsed as directory entries. */
+                    if (cluster_num == 0 && fs->fat_type == 32) {
+                        cluster_num = fs->ext_bpb.root_cluster;
+                    }
                 dirent->d_ino = fat_make_synth_inode(fs, ctx->first_cluster, 0, i, cluster_num);
                 kfree(dir_buf, fs->cluster_size);
                 return dirent;
@@ -615,7 +640,12 @@ fs_node_t *fat_finddir(fs_node_t *node, char *name) {
     if (ctx->first_cluster == 0 && fs->fat_type != 32) {
         root_sector_buf = kmalloc(bytes_per_sector);
         if (!root_sector_buf) return NULL;
-        char lfn_buffer[256];
+        /* Zeroed at declaration: fat_parse_lfn() only clears this when it sees an
+     * entry carrying the 0x40 "last" bit, so an LFN sequence that does not
+     * start with one leaves the low bytes untouched.  fat_readdir/finddir then
+     * NUL-terminate at lfn_len and copy the result to userspace, leaking
+     * whatever was on the kernel stack. */
+    char lfn_buffer[256] = {0};
         int lfn_len = 0;
 
         for (uint32_t sector_i = 0; sector_i < fs->root_dir_sectors; sector_i++) {
@@ -658,6 +688,16 @@ fs_node_t *fat_finddir(fs_node_t *node, char *name) {
 
                 if (fat_name_matches(entry_name, name)) {
                     uint32_t cluster_num = ((uint32_t)entry->cluster_high << 16) | entry->cluster_low;
+                    /* A subdirectory's ".." stores cluster 0 to mean "the
+                     * volume root".  On FAT12/16 the root is outside the data
+                     * area and the caller's `first_cluster == 0` test catches
+                     * it, but FAT32's root IS a normal cluster chain, so a
+                     * literal 0 fell through and fat_cluster_to_sector(0)
+                     * addressed first_data_sector - 2*spc -- the tail of the
+                     * FAT, parsed as directory entries. */
+                    if (cluster_num == 0 && fs->fat_type == 32) {
+                        cluster_num = fs->ext_bpb.root_cluster;
+                    }
                     uint64_t inode = fat_make_synth_inode(fs, 0, sector_i, i, cluster_num);
                     fs_node_t *ret = fat_alloc_node(fs, entry_name, inode, cluster_num, entry->file_size, entry->attr);
                     if (ret) {
@@ -682,7 +722,12 @@ fs_node_t *fat_finddir(fs_node_t *node, char *name) {
     
     uint8_t *dir_buf = kmalloc(cluster_size);
     if (!dir_buf) return NULL;
-    char lfn_buffer[256];
+    /* Zeroed at declaration: fat_parse_lfn() only clears this when it sees an
+     * entry carrying the 0x40 "last" bit, so an LFN sequence that does not
+     * start with one leaves the low bytes untouched.  fat_readdir/finddir then
+     * NUL-terminate at lfn_len and copy the result to userspace, leaking
+     * whatever was on the kernel stack. */
+    char lfn_buffer[256] = {0};
     int lfn_len = 0;
     uint32_t visited = 0;
     
@@ -739,6 +784,16 @@ fs_node_t *fat_finddir(fs_node_t *node, char *name) {
             if (fat_name_matches(entry_name, name)) {
                 // Found it - create and return node
                 uint32_t cluster_num = ((uint32_t)entry->cluster_high << 16) | entry->cluster_low;
+                    /* A subdirectory's ".." stores cluster 0 to mean "the
+                     * volume root".  On FAT12/16 the root is outside the data
+                     * area and the caller's `first_cluster == 0` test catches
+                     * it, but FAT32's root IS a normal cluster chain, so a
+                     * literal 0 fell through and fat_cluster_to_sector(0)
+                     * addressed first_data_sector - 2*spc -- the tail of the
+                     * FAT, parsed as directory entries. */
+                    if (cluster_num == 0 && fs->fat_type == 32) {
+                        cluster_num = fs->ext_bpb.root_cluster;
+                    }
                 uint64_t inode = fat_make_synth_inode(fs, ctx->first_cluster, 0, i, cluster_num);
                 fs_node_t *ret = fat_alloc_node(fs, entry_name, inode, cluster_num, entry->file_size, entry->attr);
                 if (ret) {
@@ -1139,6 +1194,28 @@ static void fat_flush_dirent(fat_fs_t *fs, fat_node_t *ctx) {
 }
 
 /* Write file data */
+/*
+ * Zero a freshly allocated data cluster.
+ *
+ * fat_alloc_cluster() hands back whatever the cluster last held, and both the
+ * extend paths below link it into the chain while raising the recorded file
+ * size -- so a plain ftruncate()+read(), or a sparse write past EOF, returned
+ * the contents of a previously deleted file to any user with write access to
+ * the volume.  exFAT has valid_data_length to track this properly; FAT does
+ * not, so the only correct option is to zero on allocation.
+ */
+static int fat_zero_cluster(fat_fs_t *fs, uint32_t cluster) {
+    static uint8_t zero_cluster_buf[32768];
+    uint32_t sector = fat_cluster_to_sector(fs, cluster);
+    uint32_t cluster_size = (uint32_t)fs->bpb.sectors_per_cluster *
+                            fs->bpb.bytes_per_sector;
+
+    if (sector == 0 || cluster_size > sizeof(zero_cluster_buf)) return -1;
+    __builtin_memset(zero_cluster_buf, 0, cluster_size);
+    return fat_write_sectors(fs, sector, fs->bpb.sectors_per_cluster,
+                             zero_cluster_buf);
+}
+
 static size_t fat_file_write(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer) {
     fat_io_lock();
     size_t r = fat_file_write_locked(node, offset, size, buffer);
@@ -1161,6 +1238,7 @@ static size_t fat_file_write_locked(fs_node_t *node, off_t offset, size_t size, 
     if (ctx->first_cluster < 2) {
         uint32_t nc = fat_alloc_cluster(fs);
         if (nc == 0) return 0;
+        (void)fat_zero_cluster(fs, nc);
         ctx->first_cluster = nc;
         node->inode = nc;
         /* first cluster is persisted to the dir entry by fat_flush_dirent() below */
@@ -1177,6 +1255,7 @@ static size_t fat_file_write_locked(fs_node_t *node, off_t offset, size_t size, 
             /* Extend */
             uint32_t nc = fat_alloc_cluster(fs);
             if (nc == 0) break;
+            (void)fat_zero_cluster(fs, nc);
             fat_set_fat_entry(fs, cluster, nc);
             fat_set_fat_entry(fs, nc, fat_eoc(fs));
             cluster = nc;
@@ -1263,6 +1342,7 @@ static int fat_truncate(fs_node_t *node, off_t new_size) {
             /* Extend if truncating to larger size */
             uint32_t nc = fat_alloc_cluster(fs);
             if (nc == 0) return -1;
+            (void)fat_zero_cluster(fs, nc);
             fat_set_fat_entry(fs, cluster, nc);
             fat_set_fat_entry(fs, nc, fat_eoc(fs));
             cluster = nc;
