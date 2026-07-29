@@ -100,9 +100,40 @@ static void uma_slab_lock_release(unsigned long f) {
 
 static uma_slab_t *uma_page_hash[UMA_HASH_SIZE];
 
+/* No legitimate bucket holds anywhere near this many slabs: the hash has 4096
+ * buckets, so a chain this long means the links themselves are garbage. */
+#define UMA_HASH_MAX_CHAIN 1024
+
 static inline uint32_t uma_hash(void *addr) {
     uintptr_t p = (uintptr_t)addr >> UMA_HASH_SHIFT;
     return (uint32_t)(p & UMA_HASH_MASK);
+}
+
+/*
+ * Corruption reporters for the page hash.  Rate-limited: the condition they
+ * describe repeats on every subsequent kfree of a nearby pointer, and a console
+ * flooded from IRQ context is worse than the corruption it reports.
+ */
+static int uma_hash_corrupt_reports = 0;
+#define UMA_HASH_MAX_REPORTS 8
+
+static void uma_hash_report_corrupt(uint32_t bucket, uma_slab_t *slab, uint32_t depth) {
+    if (uma_hash_corrupt_reports >= UMA_HASH_MAX_REPORTS) {
+        return;
+    }
+    uma_hash_corrupt_reports++;
+    kprintf("UMA: hash bucket %u entry %u (slab %p, us_data %p, us_hnext %p) has a "
+            "NULL owner zone -- its header was recycled while still hashed\n",
+            bucket, depth, (void *)slab, slab->us_data, (void *)slab->us_hnext);
+}
+
+static void uma_hash_report_runaway(uint32_t bucket) {
+    if (uma_hash_corrupt_reports >= UMA_HASH_MAX_REPORTS) {
+        return;
+    }
+    uma_hash_corrupt_reports++;
+    kprintf("UMA: hash bucket %u chain exceeds %u entries -- walk truncated\n",
+            bucket, UMA_HASH_MAX_CHAIN);
 }
 
 /*
@@ -131,24 +162,55 @@ static inline void uma_bucket_depot_release(unsigned long flags) {
 #endif
 }
 
+/*
+ * Both mutators take the slab lock themselves rather than trusting callers.
+ *
+ * uma_zalloc_slab/uma_zfree_slab wrap their bodies in it, but uma_zdestroy,
+ * uma_reclaim and uma_zone_reserve reach uma_slab_alloc/uma_slab_free directly
+ * with nothing held -- and reclaim runs with interrupts enabled, so an IRQ-context
+ * kfree (the network RX path frees from the NIC handler) lands mid-splice:
+ *
+ *   reclaim  insert: slab->us_hnext = hash[b]      -- reads B
+ *   IRQ      remove: hash[b] = B->us_hnext; B's page -> pmm_free_block()
+ *   reclaim  insert: hash[b] = slab                -- B is live again via us_hnext
+ *
+ * B is now reachable through a chain but its page belongs to the PMM.  An ON-PAGE
+ * slab header lives *inside* that page, so the next reuse zeroes it, and the next
+ * walker faults on slab->us_zone->uz_rsize with us_zone == NULL (CR2 0xC).
+ *
+ * The lock is recursive per-CPU, so nesting inside the already-locked fast paths
+ * costs only a depth counter.
+ */
 static void uma_hash_insert(uma_slab_t *slab) {
     uint32_t bucket = uma_hash(slab->us_data);
+#ifndef HOST_TEST
+    unsigned long f = uma_slab_lock_acquire();
+#endif
     slab->us_hnext = uma_page_hash[bucket];
     uma_page_hash[bucket] = slab;
+#ifndef HOST_TEST
+    uma_slab_lock_release(f);
+#endif
 }
 
 static void uma_hash_remove(uma_slab_t *slab) {
     uint32_t bucket = uma_hash(slab->us_data);
+#ifndef HOST_TEST
+    unsigned long f = uma_slab_lock_acquire();
+#endif
     uma_slab_t **pp = &uma_page_hash[bucket];
-    
+
     while (*pp) {
         if (*pp == slab) {
             *pp = slab->us_hnext;
             slab->us_hnext = NULL;
-            return;
+            break;
         }
         pp = &(*pp)->us_hnext;
     }
+#ifndef HOST_TEST
+    uma_slab_lock_release(f);
+#endif
 }
 
 /* Forward declarations */
@@ -438,22 +500,32 @@ uma_zone_t *uma_zcreate(
 void uma_zdestroy(uma_zone_t *zone) {
     if (!zone) return;
     
-    /* Free all slabs */
+    /* Free all slabs.  Under the slab lock: these walks read uz_*_slabs while a
+     * concurrent uma_zfree_slab could be relinking the very same lists. */
     uma_slab_t *slab, *next;
-    
+
+#ifndef HOST_TEST
+    unsigned long dzf = uma_slab_lock_acquire();
+#endif
     for (slab = zone->uz_full_slabs; slab; slab = next) {
         next = slab->us_next;
         uma_slab_free(zone, slab);
     }
+    zone->uz_full_slabs = NULL;
     for (slab = zone->uz_part_slabs; slab; slab = next) {
         next = slab->us_next;
         uma_slab_free(zone, slab);
     }
+    zone->uz_part_slabs = NULL;
     for (slab = zone->uz_free_slabs; slab; slab = next) {
         next = slab->us_next;
         uma_slab_free(zone, slab);
     }
-    
+    zone->uz_free_slabs = NULL;
+#ifndef HOST_TEST
+    uma_slab_lock_release(dzf);
+#endif
+
     /* Remove from global list */
     if (uma_zones == zone) {
         uma_zones = zone->uz_next;
@@ -707,15 +779,39 @@ size_t uma_item_size(void *item) {
      * header mid-walk, turning slab->us_hnext into a use-after-free.  The lock
      * is recursive per-CPU, so callers already holding it nest safely. */
     size_t result = 0;
+    uint32_t steps = 0;
 #ifndef HOST_TEST
     unsigned long f = uma_slab_lock_acquire();
 #endif
     for (uma_slab_t *slab = uma_page_hash[bucket]; slab; slab = slab->us_hnext) {
-        uintptr_t slab_start = (uintptr_t)slab->us_data + slab->us_offset;
-        uintptr_t slab_end = slab_start + slab->us_zone->uz_rsize * slab->us_zone->uz_ipers;
+        uintptr_t slab_start;
+        uintptr_t slab_end;
         uintptr_t ptr = (uintptr_t)item;
         uintptr_t offset;
         uintptr_t object_offset;
+
+        /* A recycled header also poisons us_hnext, so bound the walk before
+         * touching the entry -- otherwise a cycle or a chain of corrupt links
+         * spins here forever.  Counted for every entry, including the ones
+         * skipped below. */
+        if (++steps > UMA_HASH_MAX_CHAIN) {
+            uma_hash_report_runaway(bucket);
+            break;
+        }
+
+        /* us_zone is written once when the slab is created and never cleared,
+         * so reading NULL here means this header's memory was recycled while
+         * the slab was still linked on the hash -- heap corruption upstream.
+         * Dereferencing it faults at CR2 0xC (uz_rsize) and buries the real
+         * cause under an unhandled kernel exception; report the chain instead
+         * and keep walking so the caller still gets its answer. */
+        if (!slab->us_zone) {
+            uma_hash_report_corrupt(bucket, slab, steps);
+            continue;
+        }
+
+        slab_start = (uintptr_t)slab->us_data + slab->us_offset;
+        slab_end = slab_start + slab->us_zone->uz_rsize * slab->us_zone->uz_ipers;
 
         if (ptr < slab_start || ptr >= slab_end) {
             continue;
@@ -1144,14 +1240,24 @@ void uma_reclaim(void) {
             }
         }
 
-        /* Free all completely free slabs */
+        /* Free all completely free slabs.  Detach the list under the slab lock
+         * and free under it too: uma_slab_free() unhashes, and an IRQ-context
+         * kfree racing that splice is what leaves freed slabs on the hash. */
         uma_slab_t *slab, *next;
+#ifndef HOST_TEST
+        unsigned long rcf = uma_slab_lock_acquire();
+#endif
         for (slab = zone->uz_free_slabs; slab; slab = next) {
             next = slab->us_next;
             uma_slab_free(zone, slab);
         }
         zone->uz_free_slabs = NULL;
+#ifndef HOST_TEST
+        uma_slab_lock_release(rcf);
+#endif
 
+        /* Callback runs unlocked: it is arbitrary subsystem code and must not
+         * execute under a cli'd spinlock. */
         if (zone->uz_reclaim) {
             zone->uz_reclaim();
         }
@@ -1180,6 +1286,9 @@ void uma_zone_set_max(uma_zone_t *zone, int max) {
 
 int uma_zone_reserve(uma_zone_t *zone, int count) {
     int reserved = 0;
+#ifndef HOST_TEST
+    unsigned long f = uma_slab_lock_acquire();
+#endif
     while (reserved < count) {
         uma_slab_t *slab = uma_slab_alloc(zone);
         if (!slab) break;
@@ -1187,6 +1296,9 @@ int uma_zone_reserve(uma_zone_t *zone, int count) {
         zone->uz_free_slabs = slab;
         reserved += zone->uz_ipers;
     }
+#ifndef HOST_TEST
+    uma_slab_lock_release(f);
+#endif
     return reserved;
 }
 
