@@ -43,6 +43,18 @@
  * reads (each a VM-exit under KVM) burning the CPU for the whole DMA. */
 #define AHCI_IRQ_FASTSPIN      64
 
+/* COMRESET assert time.  SATA requires PxSCTL.DET=1 be held for at least
+ * 1 ms; get_uptime_ms() advances in 4 ms ticks at HZ=250, so a deadline of
+ * "+1" can expire on the very next tick after ~0 real time.  Ask for enough
+ * ticks that at least 1 ms has provably elapsed. */
+#define AHCI_COMRESET_HOLD_MS  10
+
+/* ahci_port_issue_cmd() return for "the command failed AND the port could not
+ * be quiesced".  Distinct from -1 because the HBA may still own the command
+ * slot: the caller must leave every buffer it handed us alone rather than
+ * returning it to the allocator. */
+#define AHCI_CMD_WEDGED        (-2)
+
 /* Per-port interrupt-enable mask: command-completion FIS interrupts plus the
  * fatal error bits the wait loop already checks (so an error wakes the waiter
  * immediately rather than after the re-check timeout). */
@@ -104,6 +116,19 @@ typedef struct ahci_port {
      * waiting for completion instead of pinning it (a spinlock would
      * disable preemption across the whole DMA, freezing the scheduler). */
     mutex_t            cmd_lock;
+
+    /* PxIS bits the ISR has already consumed.  ahci_irq() must RW1C the
+     * port's interrupt status to stop the interrupt reasserting, which
+     * destroys exactly the FATAL bits the command waiter polls for -- so
+     * the ISR ORs what it cleared in here and the waiter tests both.
+     * Written by the ISR, cleared by the waiter before each command. */
+    volatile uint32_t  pending_is;
+
+    /* Set when the port could not be quiesced after a failed command.  The
+     * HBA may still own the command slot and DMA into the buffers we handed
+     * it, so nothing may be reclaimed and no further command may be issued
+     * on this port. */
+    int                wedged;
 } ahci_port_t;
 
 /*
@@ -200,8 +225,10 @@ static int ahci_port_stop(hba_port_t *port) {
     return 0;
 }
 
-/* Start command engine on a port */
-static void ahci_port_start(hba_port_t *port) {
+/* Start command engine on a port.  Returns 0 on success, -1 if CR never
+ * cleared -- in which case NOTHING was enabled and the caller must not
+ * assume the port is usable. */
+static int ahci_port_start(hba_port_t *port) {
     uint64_t deadline;
 
     /* Wait until CR clears before setting ST */
@@ -209,13 +236,69 @@ static void ahci_port_start(hba_port_t *port) {
     while (port->cmd & HBA_PXCMD_CR) {
         if (ahci_time_ms() > deadline) {
             kprint("ahci: port start timeout (CR stuck)\n");
-            return;
+            return -1;
         }
         __asm__ volatile("pause");
     }
 
     port->cmd |= HBA_PXCMD_FRE;
     port->cmd |= HBA_PXCMD_ST;
+    return 0;
+}
+
+/*
+ * Quiesce a port after a failed command, so the HBA provably no longer owns
+ * the command slot or the buffers its PRDT points at.
+ *
+ * A plain stop/start is not enough.  When ahci_port_stop() gives up with
+ * "CR stuck" the engine is still running, it never even reaches the FRE
+ * clear, and ahci_port_start() then bails at its own CR wait having enabled
+ * nothing -- leaving ST=0, CR=1, FRE=1, the slot outstanding, and the caller
+ * free to hand the buffers back to the allocator.  AHCI 1.3.1 s10.4.2 says
+ * the only recovery when CR will not clear is a port reset, so do that.
+ *
+ * Returns 0 when the port is quiesced and restarted (safe to reclaim
+ * buffers), -1 when it is not (caller must reclaim nothing).
+ */
+static int ahci_port_recover(ahci_port_t *ap) {
+    hba_port_t *port = ap->regs;
+    uint64_t deadline;
+
+    /* Clear latched errors first so the restart does not immediately trip. */
+    port->serr = port->serr;
+    port->is   = port->is;
+
+    if (ahci_port_stop(port) == 0)
+        return ahci_port_start(port);
+
+    /* Stop failed: COMRESET.  DET=1 asserts the reset; it must be held for
+     * at least 1 ms, then cleared, after which DET should read 3 (device
+     * present, PHY communication established). */
+    port->sctl = (port->sctl & ~HBA_PXSCTL_DET_MASK) | HBA_PXSCTL_DET_INIT;
+    deadline = ahci_time_ms() + AHCI_COMRESET_HOLD_MS;
+    while (ahci_time_ms() < deadline)
+        __asm__ volatile("pause");
+    port->sctl &= ~(uint32_t)HBA_PXSCTL_DET_MASK;
+
+    deadline = ahci_time_ms() + 500;
+    while ((port->ssts & HBA_PXSSTS_DET_MASK) != HBA_PXSSTS_DET_ACTIVE) {
+        if (ahci_time_ms() > deadline) {
+            kprint("ahci: port reset failed; port left wedged\n");
+            return -1;
+        }
+        __asm__ volatile("pause");
+    }
+
+    port->serr = port->serr;
+    port->is   = port->is;
+
+    /* The reset dropped the engine, so CR must be clear now; if the stop
+     * still will not take, give up rather than pretend. */
+    if (ahci_port_stop(port) != 0) {
+        kprint("ahci: engine still running after reset; port left wedged\n");
+        return -1;
+    }
+    return ahci_port_start(port);
 }
 
 /*
@@ -390,7 +473,14 @@ static int ahci_irq(unsigned int irq, void *dev_id, void *frame) {
         if (!(is & (1U << p))) continue;
         ahci_port_t *ap = &ctrl->ports[p];
         if (!ap->regs) continue;
-        ap->regs->is = ap->regs->is;        /* clear this port's PxIS (RW1C) */
+        /* RW1C the port status -- but record what we cleared first.  The
+         * command waiter's only error check is PxIS.FATAL, and clearing it
+         * here without saving it leaves the waiter unable to see that the
+         * command failed (PxCI is not cleared on a task-file error either),
+         * so it spins to the full timeout on every recoverable device error. */
+        uint32_t pis = ap->regs->is;
+        ap->pending_is |= pis;
+        ap->regs->is = pis;
         sched_wakeup(&ap->io_wait);          /* wake the command waiter, if any */
     }
 
@@ -460,7 +550,14 @@ static int ahci_port_issue_cmd(ahci_port_t *ap, uint32_t timeout_ms) {
     hba_port_t *port = ap->regs;
     uint64_t deadline;
 
-    /* Clear interrupt status */
+    /* A port we failed to quiesce may still have the HBA writing into the
+     * previous command's buffers.  Issuing another command would hand it a
+     * second set. */
+    if (ap->wedged)
+        return AHCI_CMD_WEDGED;
+
+    /* Clear interrupt status, and the copy the ISR accumulates for us. */
+    ap->pending_is = 0;
     port->is = 0xFFFFFFFF;
 
     /* Issue command in slot 0 */
@@ -475,18 +572,21 @@ static int ahci_port_issue_cmd(ahci_port_t *ap, uint32_t timeout_ms) {
             break;
         }
 
-        /* Check for fatal errors */
-        if (port->is & HBA_PXIS_FATAL) {
+        /* Check for fatal errors.  Test the ISR's accumulator too: once the
+         * completion IRQ is live, ahci_irq() RW1Cs PxIS before we get here,
+         * which would otherwise erase the very bits we are looking for and
+         * leave us spinning until the timeout. */
+        if ((port->is | ap->pending_is) & HBA_PXIS_FATAL) {
             char buf[96];
             snprintf(buf, sizeof(buf),
                      "ahci: port %d fatal error IS=0x%08x SERR=0x%08x TFD=0x%08x\n",
-                     ap->port_num, port->is, port->serr, port->tfd);
+                     ap->port_num, port->is | ap->pending_is, port->serr,
+                     port->tfd);
             kprint(buf);
-            /* Clear errors and restart command engine */
-            port->serr = port->serr;
-            port->is = port->is;
-            ahci_port_stop(port);
-            ahci_port_start(port);
+            if (ahci_port_recover(ap) != 0) {
+                ap->wedged = 1;
+                return AHCI_CMD_WEDGED;
+            }
             return -1;
         }
 
@@ -505,11 +605,15 @@ static int ahci_port_issue_cmd(ahci_port_t *ap, uint32_t timeout_ms) {
              * the command engine to make the HBA relinquish the slot, clear
              * the latched errors, and restart, mirroring the fatal-error
              * path above (IDE quiesces on timeout the same way).
+             *
+             * ahci_port_recover() reports whether that actually worked.  If
+             * it did not, the slot is still outstanding and the caller must
+             * not give the buffers back to the allocator.
              */
-            port->serr = port->serr;
-            port->is = port->is;
-            ahci_port_stop(port);
-            ahci_port_start(port);
+            if (ahci_port_recover(ap) != 0) {
+                ap->wedged = 1;
+                return AHCI_CMD_WEDGED;
+            }
             return -1;
         }
 
@@ -642,7 +746,12 @@ static int ahci_ata_dma_cmd(ahci_port_t *ap, uint8_t command,
         if (!is_write && ret == 0) {
             memcpy(data_virt, dma_buf, byte_count);
         }
-        ahci_dma_bounce_free(dma_buf, byte_count);
+        /* AHCI_CMD_WEDGED means the port could not be quiesced, so the HBA may
+         * still complete this transfer into dma_buf.  Handing those pages back
+         * to the allocator would let it DMA a sector into whatever is allocated
+         * next; deliberately leak them instead. */
+        if (ret != AHCI_CMD_WEDGED)
+            ahci_dma_bounce_free(dma_buf, byte_count);
     }
 
     mutex_unlock(&ap->cmd_lock);
@@ -708,7 +817,9 @@ static int ahci_identify(ahci_port_t *ap) {
 
     ret = ahci_port_issue_cmd(ap, AHCI_TIMEOUT_IDENTIFY);
     if (ret < 0) {
-        dma_free_coherent(id_buf, 512);
+        /* See ahci_ata_dma_cmd(): a wedged port may still write id_buf. */
+        if (ret != AHCI_CMD_WEDGED)
+            dma_free_coherent(id_buf, 512);
         return -1;
     }
 
@@ -988,7 +1099,9 @@ static int ahci_scsi_execute(scsi_link_t *link, scsi_request_t *req) {
         if (!(req->flags & SCSI_REQ_WRITE) && ret == 0) {
             memcpy(req->data, dma_buf, req->data_len);
         }
-        ahci_dma_bounce_free(dma_buf, req->data_len);
+        /* See ahci_ata_dma_cmd(): never reclaim from a wedged port. */
+        if (ret != AHCI_CMD_WEDGED)
+            ahci_dma_bounce_free(dma_buf, req->data_len);
     }
 
     if (ret < 0) {
