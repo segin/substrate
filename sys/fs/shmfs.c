@@ -160,7 +160,11 @@ static void shmfs_refresh_timestamps(fs_node_t *node) {
  * -------------------------------------------------------------- */
 static int shmfs_grow(shmfs_inode_t *inode, size_t want) {
     if (want <= inode->data_cap) return 0;
-    /* Round up to a 4 KiB page boundary — the allocation unit is the page. */
+    /* Round up to a 4 KiB page boundary — the allocation unit is the page.
+     * Guard the round-up itself: for want > SIZE_MAX-4095 the addition wraps,
+     * and a wrapped newcap smaller than data_cap would make the memset below
+     * compute a huge length. */
+    if (want > SIZE_MAX - 4095) return -ENOMEM;
     size_t newcap = (want + 4095) & ~(size_t)4095;
     size_t npages = newcap >> 12;
     uint8_t *nb = (uint8_t *)pmm_alloc_contiguous(npages);
@@ -326,7 +330,14 @@ static void *shmfs_node_mmap(fs_node_t *node, void *addr, size_t length,
      * closes (see shmfs_maybe_free_inode).  All inode-state mutation is
      * done under shmfs_lock; the VM-layer work below runs WITHOUT it to
      * keep shmfs_lock a leaf lock (no shmfs_lock -> vm_map ordering). */
-    size_t end = (size_t)offset + length;
+    /* Compute the window end in 64-bit.  (size_t)offset + length truncates
+     * the 64-bit offset on a 32-bit kernel and can wrap, which would let
+     * shmfs_grow() see a small end (no allocation) while phys_base below is
+     * still derived from the full offset -- a mapping whose frames lie
+     * outside the object entirely. */
+    uint64_t end64 = (uint64_t)offset + (uint64_t)length;
+    if (end64 > (uint64_t)SIZE_MAX) return (void *)-1;
+    size_t end = (size_t)end64;
     mutex_lock(&shmfs_lock);
     if (shmfs_grow(inode, end) != 0) {
         mutex_unlock(&shmfs_lock);
@@ -378,7 +389,13 @@ static void *shmfs_node_mmap(fs_node_t *node, void *addr, size_t length,
     }
     /* Bound the mapping to the object's real extent: a fault on a page wholly
      * past orig_len (from this mapping's offset) SIGBUSes instead of mapping an
-     * out-of-object frame (POSIX mmap-past-end, mmap/11-3).  0 == no limit. */
+     * out-of-object frame (POSIX mmap-past-end, mmap/11-3).
+     *
+     * 0 means ZERO valid pages, not "no limit": vm_pager_allocate() defaults
+     * the field to (uint64_t)-1 for unlimited and the device pager SIGBUSes a
+     * fault at pindex >= valid_pages (sys/vm/vm_pager.c:36,131).  So the
+     * offset >= orig_len arm below correctly makes every page of this mapping
+     * fault.  (The previous comment here claimed the opposite.) */
     vm_pager_device_set_valid_pages(obj->pager,
         (uint64_t)orig_len > (uint64_t)offset
             ? (((uint64_t)orig_len - (uint64_t)offset + 4095) / 4096)
@@ -420,11 +437,20 @@ fail:
 static int shmfs_truncate(fs_node_t *node, off_t len) {
     shmfs_inode_t *inode = (shmfs_inode_t *)(uintptr_t)node->impl;
     if (!inode || len < 0) return -EINVAL;
+    /* off_t is 64-bit but size_t is 32-bit here, so (size_t)len truncates.
+     * The old code compared the TRUNCATED value against data_cap to decide
+     * whether to grow, then stored the UNtruncated len into node->length:
+     * ftruncate(fd, 0x100001000) looked like 0x1000, skipped the grow, and
+     * left a ~4 GiB length over a one-page object.  shmfs_read then bounded
+     * only against node->length and read far past the allocation.  Same
+     * 64-bit guard shmfs_write already uses. */
+    if ((uint64_t)len > (uint64_t)SIZE_MAX) return -EFBIG;
+    size_t nlen = (size_t)len;
     /* Serialise against shmfs_node_mmap's shmfs_grow (both realloc
      * inode->data); shmfs_lock protects the backing-store fields. */
     mutex_lock(&shmfs_lock);
-    if ((size_t)len > inode->data_cap) {
-        int r = shmfs_grow(inode, (size_t)len);
+    if (nlen > inode->data_cap) {
+        int r = shmfs_grow(inode, nlen);
         if (r < 0) { mutex_unlock(&shmfs_lock); return r; }
     }
     /* Shrinking: zero the now-tail to satisfy "reads past length
