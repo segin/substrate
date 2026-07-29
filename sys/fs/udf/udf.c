@@ -380,6 +380,7 @@ uint32_t udf_read_file(struct udf_fs *fs, struct udf_fe *fe,
                 offset += ext_read;
                 ext_read = 0;
             } else if (type == 3) {
+                kfree(sector_buf, UDF_SECTOR_SIZE);
                 return total_read;
             }
 
@@ -404,6 +405,7 @@ uint32_t udf_read_file(struct udf_fs *fs, struct udf_fe *fe,
             
             file_pos += ext_len;
         }
+        kfree(sector_buf, UDF_SECTOR_SIZE);
         return total_read;
     }
     
@@ -442,6 +444,7 @@ uint32_t udf_read_file(struct udf_fs *fs, struct udf_fe *fe,
                 offset += ext_read;
                 ext_read = 0;
             } else if (type == 3) {
+                kfree(sector_buf, UDF_SECTOR_SIZE);
                 return total_read;
             }
 
@@ -466,9 +469,11 @@ uint32_t udf_read_file(struct udf_fs *fs, struct udf_fe *fe,
 
             file_pos += ext_len;
         }
+        kfree(sector_buf, UDF_SECTOR_SIZE);
         return total_read;
     }
 
+    kfree(sector_buf, UDF_SECTOR_SIZE);
     return 0;
 }
 
