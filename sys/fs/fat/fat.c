@@ -77,6 +77,7 @@ static int fat_dir_remove_entry_locked(fat_fs_t *fs, uint32_t dir_cluster, const
 static int fat_create_entry_locked(fs_node_t *parent, const char *name, uint8_t attr);
 
 static uint32_t fat_cluster_to_sector(fat_fs_t *fs, uint32_t cluster);
+static int fat_raw_fat_entry(fat_fs_t *fs, uint32_t cluster, uint32_t *out);
 
 /* Write support forward declarations */
 static size_t fat_file_write(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer);
@@ -559,7 +560,11 @@ static int fat_statfs(fs_node_t *node, struct statfs *buf) {
     uint32_t total = fs->total_clusters;
     uint32_t freec = 0;
     for (uint32_t c = 2; c < total + 2; c++) {
-        if (fat_get_next_cluster(fs, c) == 0)
+        uint32_t entry_val;
+        /* Must read the raw entry: fat_get_next_cluster() maps a free entry to
+         * the EOC sentinel, never to 0, so the old test could not match and df
+         * reported every FAT volume as 100% full. */
+        if (fat_raw_fat_entry(fs, c, &entry_val) == 0 && entry_val == 0)
             freec++;
     }
 
@@ -1101,47 +1106,65 @@ static uint32_t fat_eoc(fat_fs_t *fs) {
 }
 
 /* Allocate a free cluster; returns cluster number or 0 on failure */
+/*
+ * Read the RAW FAT entry for a cluster.
+ *
+ * fat_get_next_cluster() is a chain walker: it maps a free entry (value < 2)
+ * to the EOC sentinel 0x0FFFFFFF, so it can never report "free".  Anything
+ * that needs to know whether a cluster is allocated -- the allocator, statfs --
+ * has to look at the entry itself.
+ *
+ * Returns 0 and stores the entry on success, -1 if the FAT could not be read.
+ * Callers MUST distinguish those: treating a failed read as entry 0 marks a
+ * cluster that is in use as free, which hands it to the next allocation and
+ * cross-links two files.
+ */
+static int fat_raw_fat_entry(fat_fs_t *fs, uint32_t cluster, uint32_t *out) {
+    if (fs->fat_type == 32) {
+        if (fs->fat_table && (cluster * 4 + 4) <= fs->fat_table_size) {
+            uint32_t *fat32 = (uint32_t *)fs->fat_table;
+            *out = fat32[cluster] & 0x0FFFFFFF;
+            return 0;
+        }
+        uint8_t raw[4];
+        if (fat_read_fat_bytes(fs, cluster * 4, 4, raw) != 0) return -1;
+        *out = ((uint32_t)raw[0] | ((uint32_t)raw[1] << 8) |
+                ((uint32_t)raw[2] << 16) | ((uint32_t)raw[3] << 24)) & 0x0FFFFFFF;
+        return 0;
+    } else if (fs->fat_type == 16) {
+        if (fs->fat_table && (cluster * 2 + 2) <= fs->fat_table_size) {
+            uint16_t *fat16 = (uint16_t *)fs->fat_table;
+            *out = fat16[cluster];
+            return 0;
+        }
+        uint8_t raw[2];
+        if (fat_read_fat_bytes(fs, cluster * 2, 2, raw) != 0) return -1;
+        *out = (uint32_t)raw[0] | ((uint32_t)raw[1] << 8);
+        return 0;
+    } else { /* FAT12 */
+        uint32_t offset = cluster + (cluster / 2);
+        uint8_t raw[2] = {0, 0};
+        if (fs->fat_table && (offset + 2) <= fs->fat_table_size) {
+            raw[0] = fs->fat_table[offset];
+            raw[1] = fs->fat_table[offset + 1];
+        } else if (fat_read_fat_bytes(fs, offset, 2, raw) != 0) {
+            return -1;
+        }
+        uint16_t val = (uint16_t)raw[0] | ((uint16_t)raw[1] << 8);
+        *out = (cluster & 1) ? (uint32_t)(val >> 4) : (uint32_t)(val & 0x0FFF);
+        return 0;
+    }
+}
+
 static uint32_t fat_alloc_cluster(fat_fs_t *fs) {
     fat_alloc_lock_ensure();
     mutex_lock(&fat_alloc_lock);
     for (uint32_t c = 2; c < fs->total_clusters + 2; c++) {
-        uint32_t next = fat_get_next_cluster(fs, c);
-        /* A free cluster has FAT entry == 0 */
         uint32_t entry_val;
-        if (fs->fat_type == 32) {
-            if (fs->fat_table && (c * 4 + 4) <= fs->fat_table_size) {
-                uint32_t *fat32 = (uint32_t *)fs->fat_table;
-                entry_val = fat32[c] & 0x0FFFFFFF;
-            } else {
-                entry_val = next; /* fat_get_next_cluster already returns 0x0FFFFFFF for non-free */
-                /* Reread raw */
-                uint8_t raw[4];
-                uint32_t off = c * 4;
-                if (fat_read_fat_bytes(fs, off, 4, raw) != 0) continue;
-                entry_val = ((uint32_t)raw[0] | ((uint32_t)raw[1]<<8) | ((uint32_t)raw[2]<<16) | ((uint32_t)raw[3]<<24)) & 0x0FFFFFFF;
-            }
-        } else if (fs->fat_type == 16) {
-            if (fs->fat_table && (c * 2 + 2) <= fs->fat_table_size) {
-                uint16_t *fat16 = (uint16_t *)fs->fat_table;
-                entry_val = fat16[c];
-            } else {
-                uint8_t raw[2];
-                uint32_t off = c * 2;
-                if (fat_read_fat_bytes(fs, off, 2, raw) != 0) continue;
-                entry_val = (uint32_t)raw[0] | ((uint32_t)raw[1] << 8);
-            }
-        } else { /* FAT12 */
-            uint32_t offset = c + (c / 2);
-            uint8_t raw[2] = {0, 0};
-            if (fs->fat_table && (offset + 2) <= fs->fat_table_size) {
-                raw[0] = fs->fat_table[offset];
-                raw[1] = fs->fat_table[offset + 1];
-            } else {
-                fat_read_fat_bytes(fs, offset, 2, raw);
-            }
-            uint16_t val = (uint16_t)raw[0] | ((uint16_t)raw[1] << 8);
-            entry_val = (c & 1) ? (val >> 4) : (val & 0x0FFF);
-        }
+        /* A read failure must NOT be read as "free" -- see fat_raw_fat_entry.
+         * The FAT12 path previously ignored the result and fell through with a
+         * zeroed buffer, so a transient error handed out a cluster in use. */
+        if (fat_raw_fat_entry(fs, c, &entry_val) != 0) continue;
 
         if (entry_val == 0) {
             /* Mark as EOC */
@@ -1150,7 +1173,6 @@ static uint32_t fat_alloc_cluster(fat_fs_t *fs) {
                 return c;
             }
         }
-        (void)next;
     }
     mutex_unlock(&fat_alloc_lock);
     return 0; /* No free cluster */
@@ -1704,12 +1726,37 @@ static int fat_dir_remove_entry_locked(fat_fs_t *fs, uint32_t dir_cluster, const
                 }
 
                 if (fat_name_matches(entry_name, name)) {
-                    /* Delete LFN entries */
+                    /* Mark the short entry FIRST and flush it.
+                     *
+                     * The old order did the LFN slots first, into a freshly
+                     * re-read buffer, and then wrote the STALE dir_buf snapshot
+                     * back over the same sector -- restoring every 0xE5 it had
+                     * just written whenever the LFN slots shared a sector with
+                     * the short entry, which is the normal case.  The orphaned
+                     * slots then attached the deleted name to whatever short
+                     * entry came next, so `ls` showed the wrong name and open()
+                     * returned the wrong file.
+                     *
+                     * Doing the short entry first means the LFN loop below
+                     * re-reads a sector that already has this change in it. */
+                    dir_buf[off] = 0xE5;
+                    if (fat_write_sectors(fs, sector, 1, dir_buf) != 0) return -1;
+
                     if (lfn_len > 0) {
                         uint32_t ds = lfn_start_sector;
                         uint32_t doff = lfn_start_off;
                         for (int li = 0; li < lfn_count; li++) {
                             uint8_t sb[4096];
+                            /* Stay inside the directory extent we are walking.
+                             * Sectors are contiguous within a cluster but
+                             * clusters are not, so stepping past the end of
+                             * this one lands on whatever physically follows --
+                             * previously an unrelated file, one 0xE5 per slot.
+                             * An entry set that began in an earlier cluster
+                             * leaves orphaned LFN slots behind instead, which
+                             * fsck can clean and which no longer corrupt data. */
+                            if (ds < sector_start || ds >= sector_start + nsectors)
+                                break;
                             if (fat_read_sectors(fs, ds, 1, sb) == 0) {
                                 sb[doff] = 0xE5;
                                 fat_write_sectors(fs, ds, 1, sb);
@@ -1718,9 +1765,6 @@ static int fat_dir_remove_entry_locked(fat_fs_t *fs, uint32_t dir_cluster, const
                             if (doff >= fs->bpb.bytes_per_sector) { doff = 0; ds++; }
                         }
                     }
-                    /* Delete short entry */
-                    dir_buf[off] = 0xE5;
-                    fat_write_sectors(fs, sector, 1, dir_buf);
                     return 0;
                 }
                 lfn_len = 0; lfn_count = 0;
