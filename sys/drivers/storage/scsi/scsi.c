@@ -1085,22 +1085,38 @@ int scsi_probe_lun(scsi_link_t *link, uint8_t bus, uint8_t target, uint16_t lun)
         dev->revision[i] = '\0';
     }
     
-    /* For block devices, get capacity */
-    if (dtype == SCSI_TYPE_DISK || dtype == SCSI_TYPE_ROM || 
+    /*
+     * For block devices, get capacity.
+     *
+     * A removable device with an empty slot answers INQUIRY perfectly well
+     * but fails READ CAPACITY with "medium not present" (sense key 2, ASC
+     * 0x3A), so a successful capacity read -- not the INQUIRY -- is what
+     * tells us there is anything to talk to.  An all-in-one card reader
+     * presents one LUN per slot and most of them are usually empty; a
+     * CD/DVD drive with no disc is the same case.
+     */
+    int have_media = 1;
+
+    if (dtype == SCSI_TYPE_DISK || dtype == SCSI_TYPE_ROM ||
         dtype == SCSI_TYPE_OPTICAL || dtype == SCSI_TYPE_RBC) {
         uint64_t sectors = 0;
         uint32_t sector_sz = 0;
-        if (scsi_read_capacity(dev, &sectors, &sector_sz) == 0) {
+        if (scsi_read_capacity(dev, &sectors, &sector_sz) == 0 && sectors > 0) {
             dev->capacity = sectors;
             dev->sector_size = sector_sz;
         } else {
             /* Default to 512-byte sectors if capacity read fails */
             dev->sector_size = 512;
+            dev->capacity = 0;
+            have_media = 0;
         }
     }
-    
+
     dev->online = 1;
-    dev->media_present = 1;  /* Assume present, will be updated by TUR later */
+    /* Report what the capacity read actually found rather than assuming;
+     * claiming media on an empty slot makes the block layer issue reads
+     * that cannot succeed. */
+    dev->media_present = (uint8_t)have_media;
     dev->flags |= SCSI_DEV_ONLINE;
     
     /* Register device */

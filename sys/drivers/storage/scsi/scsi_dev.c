@@ -257,8 +257,32 @@ int scsi_dev_attach(scsi_device_t *scsi_dev) {
     sbd->blkdev.read = scsi_blk_read;
     sbd->blkdev.write = scsi_blk_write;
     
-    /* Register raw disk node and scan for partitions. */
-    blkdev_register_disk(&sbd->blkdev);
+    /*
+     * Register the raw disk node, but only scan for partitions when there is
+     * media behind it.
+     *
+     * scsi_dev_refresh_capacity() above has already had its retry, so a
+     * still-zero capacity means the slot is genuinely empty.  Sniffing a
+     * partition table off such a device issues reads that cannot succeed:
+     * every one fails, each is retried, and on a USB Bulk-Only reader the
+     * resulting timeout drives a Mass Storage Reset that resets the whole
+     * device -- disturbing the *other* LUNs, including a slot that has a
+     * working card in it.  An empty AHCI/ATAPI tray does the same thing more
+     * cheaply, as a burst of TFES (task file error) completions.
+     *
+     * The /dev/storage/scsiN node is still created, so nothing that expects
+     * the device to exist breaks; only the doomed scan is skipped.
+     */
+    if (sbd->blkdev.total_sectors == 0) {
+        blkdev_register(&sbd->blkdev);
+        char nm_buf[96];
+        snprintf(nm_buf, sizeof(nm_buf),
+                 "  %s: no media, partition scan skipped\n",
+                 sbd->blkdev.name);
+        kprint(nm_buf);
+    } else {
+        blkdev_register_disk(&sbd->blkdev);
+    }
     
     /* Add to list */
     sbd->next = scsi_dev_list;
