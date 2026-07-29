@@ -270,12 +270,14 @@ static inline int ide_channel_index_from_io(uint16_t bus, uint8_t *channel) {
 }
 
 /* PIO Transfers */
-int ide_read_sectors(uint16_t bus, uint8_t drive, uint32_t lba, 
-                     uint8_t count, void *buffer);
+/* count is 1..256; 256 is encoded on the wire as a sector-count register of
+ * 0, so it must not be narrowed to uint8_t before the transfer loop. */
+int ide_read_sectors(uint16_t bus, uint8_t drive, uint32_t lba,
+                     uint16_t count, void *buffer);
 int ide_read_sectors_ext(uint16_t bus, uint8_t drive, uint64_t lba, 
                          uint16_t count, void *buffer);
-int ide_write_sectors(uint16_t bus, uint8_t drive, uint32_t lba, 
-                      uint8_t count, const void *buffer);
+int ide_write_sectors(uint16_t bus, uint8_t drive, uint32_t lba,
+                      uint16_t count, const void *buffer);
 int ide_write_sectors_ext(uint16_t bus, uint8_t drive, uint64_t lba, 
                           uint16_t count, const void *buffer);
 

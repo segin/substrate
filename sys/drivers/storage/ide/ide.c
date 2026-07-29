@@ -139,7 +139,7 @@ int ide_transfer_read_once(ide_drive_ctx_t *ctx, uint64_t sector,
     }
 
     if (sector < 0x10000000ULL && count <= 256) {
-        return ide_read_sectors(bus, drive, (uint32_t)sector, (uint8_t)count, buffer);
+        return ide_read_sectors(bus, drive, (uint32_t)sector, (uint16_t)count, buffer);
     }
 
     return ide_read_sectors_ext(bus, drive, sector, (uint16_t)count, buffer);
@@ -170,7 +170,7 @@ int ide_transfer_write_once(ide_drive_ctx_t *ctx, uint64_t sector,
     }
 
     if (sector < 0x10000000ULL && count <= 256) {
-        return ide_write_sectors(bus, drive, (uint32_t)sector, (uint8_t)count, buffer);
+        return ide_write_sectors(bus, drive, (uint32_t)sector, (uint16_t)count, buffer);
     }
 
     return ide_write_sectors_ext(bus, drive, sector, (uint16_t)count, buffer);
