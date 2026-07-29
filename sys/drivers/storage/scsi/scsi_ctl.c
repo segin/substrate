@@ -143,6 +143,13 @@ static int sg_ioctl(fs_node_t *node, uint32_t request, void *arg) {
         if (kcmd.data_len > 0) {
             kdata = kmalloc(kcmd.data_len);
             if (!kdata) return -ENOMEM;
+            /* kmalloc does not zero (kzalloc is the zeroing variant), and the
+             * READ copy-out below is bounded by the transport's reported
+             * data_xfer -- which the in-tree transports set to the full
+             * requested length regardless of the real residual.  An INQUIRY
+             * returning 36 bytes with data_len 65536 would otherwise copy
+             * ~65 KB of whatever this allocation last held to userspace. */
+            memset(kdata, 0, kcmd.data_len);
 
             if (kcmd.direction == 2) { /* WRITE */
                 if (copyin(kcmd.data, kdata, kcmd.data_len) != 0) {
