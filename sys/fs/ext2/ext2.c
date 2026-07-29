@@ -1856,7 +1856,14 @@ static uint32_t ext2_scan_leaf(uint8_t *block, uint32_t block_size,
     while (off + 8 <= block_size) {
         ext2_dirent_t *de = (ext2_dirent_t *)(block + off);
         if (de->rec_len < 8 || off + de->rec_len > block_size) return 0;
-        if (de->inode != 0 && de->name_len == name_len &&
+/* de->name_len is on-disk and unbounded; only rec_len was checked against the
+ * block.  A last-in-block record with rec_len 8 and name_len 200 made the
+ * memcmp below read 200 bytes past the kmalloc'd directory block.  The name
+ * has to fit in the record, after the 8-byte header.  (ext2_readdir already
+ * clamps this way; these three comparison sites did not.) */
+        if (de->inode != 0 && de->rec_len >= 8 &&
+            de->name_len <= (uint32_t)(de->rec_len - 8) &&
+            de->name_len == name_len &&
             memcmp(de->name, name, name_len) == 0) {
             return de->inode;
         }
@@ -2099,7 +2106,9 @@ fs_node_t *ext2_finddir(fs_node_t *node, char *name) {
 
             if (de->inode != 0 && de->name_len > 0) {
                 // Compare names
-                if (de->name_len == name_len &&
+                if (de->rec_len >= 8 &&
+                    de->name_len <= (uint32_t)(de->rec_len - 8) &&
+                    de->name_len == name_len &&
                     memcmp(de->name, name, de->name_len) == 0) {
                     // Found it - read the inode and return a node
                     ext2_inode_t inode;
@@ -3468,7 +3477,9 @@ static int ext2_remove_entry(fs_node_t *dir, const char *name) {
             if (de->rec_len < 8 || block_off + de->rec_len > fs->block_size) break;
             
             // Is this the entry to remove?
-            if (de->inode != 0 && de->name_len == name_len &&
+            if (de->inode != 0 && de->rec_len >= 8 &&
+            de->name_len <= (uint32_t)(de->rec_len - 8) &&
+            de->name_len == name_len &&
                 memcmp(de->name, name, de->name_len) == 0) {
 
                 uint32_t removed_inode = de->inode;
@@ -3534,6 +3545,14 @@ static int ext2_mknod(fs_node_t *dir, const char *name, uint16_t mode, uint32_t 
 
     if (!dir || !name || !name[0]) return -EINVAL;
     if ((dir->flags & 0x7) != FS_DIRECTORY) return -ENOTDIR;
+    {
+        /* Every other mutating op checks this; mknod and symlink did not, so
+         * they allocated inodes and blocks and rewrote the superblock counts
+         * on a volume mounted -o ro, or force-mounted read-only because it
+         * carries RO_COMPAT features this driver does not implement. */
+        ext2_node_t *roc = (ext2_node_t *)(uintptr_t)dir->impl;
+        if (roc && EXT2_RO_REFUSE(roc->fs)) return -EROFS;
+    }
     if (!strcmp(name, ".") || !strcmp(name, "..")) return -EINVAL;
     if (ext2_finddir(dir, (char *)name) != NULL) return -EEXIST;
 
@@ -3578,6 +3597,11 @@ static int ext2_mknod(fs_node_t *dir, const char *name, uint16_t mode, uint32_t 
 static int ext2_symlink(fs_node_t *dir, const char *target, const char *name) {
     if (!dir || !target || !name || !name[0]) return -EINVAL;
     if ((dir->flags & 0x7) != FS_DIRECTORY) return -ENOTDIR;
+    {
+        /* See ext2_mknod(): read-only mounts must refuse this too. */
+        ext2_node_t *roc = (ext2_node_t *)(uintptr_t)dir->impl;
+        if (roc && EXT2_RO_REFUSE(roc->fs)) return -EROFS;
+    }
     if (!strcmp(name, ".") || !strcmp(name, "..")) return -EINVAL;
     if (ext2_finddir(dir, (char *)name) != NULL) return -EEXIST;
 
