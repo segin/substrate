@@ -508,6 +508,12 @@ static fifo_reg_t *fifo_lookup_or_create(uint32_t dev, uint64_t inum) {
     fifo_reg_t *f = g_fifo_registry;
     while (f) {
         if (f->dev == dev && f->inum == inum) {
+            /* Take the reference HERE, under the registry lock.  Returning an
+             * unreferenced entry and letting the caller bump it after
+             * mutex_lock(&p->lock) leaves a window in which the last existing
+             * endpoint closes, drops refcount to 0, and frees f->pipe->buffer,
+             * f->pipe and f -- so the caller then locks a freed mutex. */
+            f->refcount++;
             mutex_unlock(&g_fifo_reg_lock);
             return f;
         }
@@ -533,6 +539,9 @@ static fifo_reg_t *fifo_lookup_or_create(uint32_t dev, uint64_t inum) {
     f->pipe->wait_read  = &f->pipe->head;
     f->pipe->wait_write = &f->pipe->tail;
     mutex_init(&f->pipe->lock, "fifo_pipe");
+    /* Same reference the hit path takes, so both return an entry the caller
+     * already owns a count on. */
+    f->refcount++;
     f->next = g_fifo_registry;
     g_fifo_registry = f;
     mutex_unlock(&g_fifo_reg_lock);
@@ -576,17 +585,33 @@ int fifo_open(fs_node_t *inode, int oflags, fs_node_t **out) {
 
     int is_writer = (accmode == O_WRONLY);
     fs_node_t *node = fifo_endpoint_new(fifo, is_writer);
-    if (!node) return -ENOMEM;
+    if (!node) {
+        /* fifo_lookup_or_create() handed us a reference; release it, and tear
+         * the entry down if we were the only holder. */
+        mutex_lock(&g_fifo_reg_lock);
+        fifo->refcount--;
+        int drop = (fifo->refcount == 0);
+        if (drop) {
+            fifo_reg_t **pp = &g_fifo_registry;
+            while (*pp && *pp != fifo) pp = &(*pp)->next;
+            if (*pp == fifo) *pp = fifo->next;
+        }
+        mutex_unlock(&g_fifo_reg_lock);
+        if (drop) {
+            kfree(fifo->pipe->buffer, PIPE_SIZE);
+            kfree(fifo->pipe, sizeof(*fifo->pipe));
+            kfree(fifo, sizeof(*fifo));
+        }
+        return -ENOMEM;
+    }
 
     pipe_t *p = fifo->pipe;
     mutex_lock(&p->lock);
-    /* Bump role counters + registry refcount before any potential
-     * wait — guarantees the pipe stays alive for the duration. */
+    /* Bump role counters before any potential wait.  The registry refcount
+     * that keeps the pipe alive for the duration was already taken by
+     * fifo_lookup_or_create() under the registry lock. */
     if (accmode == O_RDONLY || accmode == O_RDWR) p->readers_open++;
     if (accmode == O_WRONLY || accmode == O_RDWR) p->writers_open++;
-    mutex_lock(&g_fifo_reg_lock);
-    fifo->refcount++;
-    mutex_unlock(&g_fifo_reg_lock);
 
     /* O_RDWR never blocks. */
     if (accmode == O_RDONLY && !nonblock) {
