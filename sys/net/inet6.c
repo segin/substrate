@@ -163,7 +163,13 @@ int ip6_output(const uint8_t daddr[16], uint8_t next_header,
     int via_gw = 0;
     netdev_t *dev = route_for_v6(daddr, &via_gw);
     if (!dev) return -ENETUNREACH;
-    if (payload_len + sizeof(struct ip6_hdr) > NETDEV_MTU_MAX) return -EMSGSIZE;
+    /*
+     * Subtract rather than add: payload_len is a size_t, so the old
+     * `payload_len + sizeof(struct ip6_hdr) > NETDEV_MTU_MAX` wrapped for
+     * payload_len >= 0xFFFFFFD0 and let the memcpy below run off the end of
+     * pkt[] and up the kernel stack.  Same defect as the IPv4 path.
+     */
+    if (payload_len > NETDEV_MTU_MAX - sizeof(struct ip6_hdr)) return -EMSGSIZE;
 
     uint8_t pkt[NETDEV_MTU_MAX];
     struct ip6_hdr *h = (struct ip6_hdr *)pkt;

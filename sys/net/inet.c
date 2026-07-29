@@ -157,7 +157,22 @@ int ip4_output(uint32_t daddr, uint8_t protocol,
     int via_gw = 0;
     netdev_t *dev = route_for_v4(daddr, &via_gw);
     if (!dev) return -ENETUNREACH;
-    if (payload_len + sizeof(struct iphdr) > NETDEV_MTU_MAX) return -EMSGSIZE;
+    /*
+     * Bound payload_len by SUBTRACTING from the buffer size rather than
+     * adding to the payload length.  payload_len is a size_t, so the old
+     * `payload_len + sizeof(struct iphdr) > NETDEV_MTU_MAX` wrapped for
+     * payload_len >= 0xFFFFFFEC: the sum came out small, the check passed,
+     * and the memcpy below then ran off the end of pkt[] and up the kernel
+     * stack.  That was reachable from unprivileged userland, because the
+     * SOCK_RAW send path hands this function the caller's length with no
+     * validation of its own (af_inet.c: the SOCK_RAW branch, unlike the
+     * DGRAM branch beside it, has no AFI_DATA_MAX check) and SOCK_RAW
+     * creation is not privileged.
+     *
+     * NETDEV_MTU_MAX is much larger than the header, so the subtraction
+     * cannot underflow and folds to a constant.
+     */
+    if (payload_len > NETDEV_MTU_MAX - sizeof(struct iphdr)) return -EMSGSIZE;
 
     uint8_t pkt[NETDEV_MTU_MAX];
     struct iphdr *ih = (struct iphdr *)pkt;
