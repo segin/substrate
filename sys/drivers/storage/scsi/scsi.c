@@ -457,9 +457,25 @@ int scsi_execute(scsi_request_t *req) {
 int scsi_execute_sync(scsi_device_t *dev, uint8_t *cdb, uint8_t cdb_len,
                       void *data, uint32_t data_len, uint16_t flags,
                       uint32_t timeout_ms) {
+    /*
+     * cdb_len is a uint8_t, so a caller can name up to 255 bytes, but
+     * req->cdb is SCSI_MAX_CDB_LEN (16).  Every in-tree caller passes a
+     * literal 6/10/12/16, but this is an exported symbol and the copy below
+     * had no bound, so one caller computing a length from a device-supplied
+     * field would overflow the request struct.
+     *
+     * Reject rather than clamp: silently truncating a CDB does not produce a
+     * shorter version of the same command, it produces a different command
+     * with the tail of the opcode's operands missing, which the target may
+     * well execute.
+     */
+    if (!cdb || cdb_len == 0 || cdb_len > SCSI_MAX_CDB_LEN) {
+        return -1;
+    }
+
     scsi_request_t *req = scsi_request_alloc();
     if (!req) return -1;
-    
+
     scsi_request_init(req, dev);
     memcpy(req->cdb, cdb, cdb_len);
     req->cdb_len = cdb_len;
