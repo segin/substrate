@@ -377,13 +377,49 @@ static int is_sparse_backup(uint32_t group) {
     return 0;
 }
 
+/*
+ * The on-disk superblock is 1024 bytes, but ext2_superblock_t only describes
+ * the leading fields this driver actually models -- it ends at s_algo_bitmap.
+ * Writing 1024 bytes straight out of &fs->sb therefore read far past the
+ * struct (and past the ext2_fs_t allocation holding it), publishing kernel
+ * heap -- including the fs->bgd / fs->device pointers -- into the filesystem
+ * image, and overwriting every extended field we do not model: s_hash_seed,
+ * s_desc_size, s_checksum_seed, s_default_mount_opts and s_checksum.  On a
+ * metadata_csum volume that alone makes the next mount fail validation.
+ *
+ * So the superblock is always written read-modify-write: pull the existing
+ * 1024 bytes, patch in the sizeof(fs->sb) prefix we own, and put it back.
+ */
+static int ext2_super_rmw(ext2_fs_t *fs, uint8_t *buf, size_t buf_len) {
+    if (buf_len < sizeof(fs->sb)) return -EIO;
+
+    if (!fs->device->read ||
+        fs->device->read(fs->device, 1024, buf_len, buf) != buf_len) {
+        /* Nothing readable to preserve: start from zeros rather than from
+         * whatever the allocator last left in this buffer. */
+        memset(buf, 0, buf_len);
+    }
+    memcpy(buf, &fs->sb, sizeof(fs->sb));
+    return 0;
+}
+
 static int ext2_flush_super(ext2_fs_t *fs) {
     if (!fs || !fs->device || !fs->device->write) return -EIO;
-    
+
     // Write primary superblock
-    if (fs->device->write(fs->device, 1024, 1024, (uint8_t *)&fs->sb) != 1024) {
+    uint8_t *sb_buf = kmalloc(1024);
+    if (!sb_buf) return -ENOMEM;
+
+    if (ext2_super_rmw(fs, sb_buf, 1024) != 0) {
+        kfree(sb_buf, 1024);
         return -EIO;
     }
+
+    if (fs->device->write(fs->device, 1024, 1024, sb_buf) != 1024) {
+        kfree(sb_buf, 1024);
+        return -EIO;
+    }
+    kfree(sb_buf, 1024);
 
     // Write backups if necessary (EXT2_FEATURE_RO_COMPAT_SPARSE_SUPER = 0x0001)
     int sparse = (fs->sb.s_feature_ro_compat & 0x0001);
@@ -399,8 +435,13 @@ static int ext2_flush_super(ext2_fs_t *fs) {
             backup_err = -ENOMEM;
             continue;
         }
-        memset(tmp, 0, fs->block_size);
-        memcpy(tmp, &fs->sb, 1024);
+        /* Same read-modify-write as the primary: copying 1024 bytes out of
+         * a 204-byte struct over-reads, and blindly zeroing the rest of the
+         * block would wipe the backup's extended superblock fields too. */
+        if (ext2_read_block(fs, block, tmp) != fs->block_size) {
+            memset(tmp, 0, fs->block_size);
+        }
+        memcpy(tmp, &fs->sb, sizeof(fs->sb));
         /* Don't drop write errors silently — a failed backup write
          * leaves the on-disk image inconsistent with the primary. */
         if (ext2_write_block(fs, block, tmp) != fs->block_size) {
