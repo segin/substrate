@@ -4,6 +4,12 @@
 #include <stdbool.h>
 
 void run_kernel_tests(void);
+void run_storage_fs_audit_tests(void);
+/* Declared here so test_runner.c does not call them implicitly -- the
+ * KERNEL_TESTS=1 build failed on these three with -Werror. */
+void run_vnode_ops_tests(void);
+void test_vnode_create(void);
+void run_vgone_tests(void);
 void run_vm_expanded_tests(void);
 void run_vm_map_tests(void);
 void run_vm_map_benchmark(void);

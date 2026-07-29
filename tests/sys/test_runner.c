@@ -309,6 +309,11 @@ void run_kernel_tests(void) {
         run_uma_tests();
     }
 
+    /* Regressions for the 2026-07 block storage / filesystem audit. */
+    if (all || strcmp(test_arg, "storagefs") == 0) {
+        run_storage_fs_audit_tests();
+    }
+
     if (all || strcmp(test_arg, "udf") == 0) {
         extern void run_udf_tests(void);
         run_udf_tests();
