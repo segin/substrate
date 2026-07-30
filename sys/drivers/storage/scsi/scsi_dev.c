@@ -258,30 +258,53 @@ int scsi_dev_attach(scsi_device_t *scsi_dev) {
     sbd->blkdev.write = scsi_blk_write;
     
     /*
-     * Register the raw disk node, but only scan for partitions when there is
-     * media behind it.
+     * Register the raw node, and only hand the device to GEOM for a partition
+     * scan when scanning it actually makes sense.
      *
-     * scsi_dev_refresh_capacity() above has already had its retry, so a
-     * still-zero capacity means the slot is genuinely empty.  Sniffing a
-     * partition table off such a device issues reads that cannot succeed:
-     * every one fails, each is retried, and on a USB Bulk-Only reader the
-     * resulting timeout drives a Mass Storage Reset that resets the whole
-     * device -- disturbing the *other* LUNs, including a slot that has a
-     * working card in it.  An empty AHCI/ATAPI tray does the same thing more
-     * cheaply, as a burst of TFES (task file error) completions.
+     * Two cases are skipped:
      *
-     * The /dev/storage/scsiN node is still created, so nothing that expects
-     * the device to exist breaks; only the doomed scan is skipped.
+     * 1. OPTICAL MEDIA (ROM / OPTICAL / WORM).  Never scanned, regardless of
+     *    whether a disc is present.  Optical media carries no MBR/GPT/BSD
+     *    label -- it is ISO9660 -- so the scan is pointless, and it is
+     *    actively hazardous: these devices use 2048-byte sectors, and a
+     *    2048-byte sector read overran the sniffers' 512-byte stack buffers
+     *    before they were bounded (the CD-ROM boot crash).  The IDE probe has
+     *    always done this for ATAPI -- see the matching comment in
+     *    ide_probe.c -- and the SCSI attach path simply never got the same
+     *    rule, so every SATAPI/USB/ATAPI-over-SCSI drive was being sniffed.
+     *
+     * 2. NO MEDIA (capacity still zero).  scsi_dev_refresh_capacity() above
+     *    has already had its retry, so a zero capacity means the slot is
+     *    genuinely empty.  Sniffing it issues reads that cannot succeed:
+     *    every one fails, each is retried, and on a USB Bulk-Only reader the
+     *    resulting timeout drives a Mass Storage Reset of the whole device,
+     *    disturbing the other LUNs -- including a slot with a working card.
+     *
+     * The /dev/storage/scsiN node is created either way, so nothing that
+     * expects the device to exist breaks; only the scan is skipped, and the
+     * reason is logged rather than being silent.
      */
-    if (sbd->blkdev.total_sectors == 0) {
-        blkdev_register(&sbd->blkdev);
-        char nm_buf[96];
-        snprintf(nm_buf, sizeof(nm_buf),
-                 "  %s: no media, partition scan skipped\n",
-                 sbd->blkdev.name);
-        kprint(nm_buf);
-    } else {
-        blkdev_register_disk(&sbd->blkdev);
+    {
+        int optical = (scsi_dev->type == SCSI_TYPE_ROM ||
+                       scsi_dev->type == SCSI_TYPE_OPTICAL ||
+                       scsi_dev->type == SCSI_TYPE_WORM);
+        const char *skip = NULL;
+
+        if (optical) {
+            skip = "optical media, partition scan skipped";
+        } else if (sbd->blkdev.total_sectors == 0) {
+            skip = "no media, partition scan skipped";
+        }
+
+        if (skip) {
+            blkdev_register(&sbd->blkdev);
+            char nm_buf[96];
+            snprintf(nm_buf, sizeof(nm_buf), "  %s: %s\n",
+                     sbd->blkdev.name, skip);
+            kprint(nm_buf);
+        } else {
+            blkdev_register_disk(&sbd->blkdev);
+        }
     }
     
     /* Add to list */
