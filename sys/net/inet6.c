@@ -18,6 +18,7 @@
 #include <netinet/ip6.h>
 #include <sys/lock.h>
 #include <sys/netdev.h>
+#include <vm/vm_kmem.h>
 
 /* ------------------------------------------------------------------ */
 /* ND6 cache                                                          */
@@ -204,6 +205,22 @@ static netdev_t *route_for_v6(const uint8_t daddr[16], int *via_gw_out) {
     return NULL;
 }
 
+/* STACK-01: v6 transmit scratch.  Separate slot from the v4 one purely for
+ * clarity -- a single hard IRQ only ever runs one of the two -- and, like
+ * them, this must become per-CPU when APs start scheduling. */
+#define NETBUF6_SIZE (NETDEV_MTU_MAX + ETH_HLEN)
+static uint8_t g_irq_pktbuf6[NETBUF6_SIZE];
+
+static uint8_t *netbuf_get_v6(int *heap) {
+    if (!intr_enabled()) { *heap = 0; return g_irq_pktbuf6; }
+    *heap = 1;
+    return (uint8_t *)kmalloc(NETBUF6_SIZE);
+}
+
+static void netbuf_put_v6(uint8_t *b, int heap) {
+    if (heap && b) kfree(b, NETBUF6_SIZE);
+}
+
 /* UDP-03 (v6 twin of ip4_source_for): the source address routing will pick,
  * so the UDP send path can compute the mandatory IPv6 pseudo-header
  * checksum.  A zero UDP checksum is illegal over IPv6, so conformant peers
@@ -229,7 +246,12 @@ int ip6_output(const uint8_t daddr[16], uint8_t next_header,
      */
     if (payload_len > NETDEV_MTU_MAX - sizeof(struct ip6_hdr)) return -EMSGSIZE;
 
-    uint8_t pkt[NETDEV_MTU_MAX];
+    /* STACK-01 (v6 twin): off the interrupt stack -- see netbuf_get() in
+     * inet.c.  This path is reached from hard IRQ via
+     * ip6_input -> icmp6_input -> ip6_output. */
+    int heap = 0;
+    uint8_t *pkt = netbuf_get_v6(&heap);
+    if (!pkt) return -ENOMEM;
     struct ip6_hdr *h = (struct ip6_hdr *)pkt;
     memset(h, 0, sizeof(*h));
     h->vtcfl = __builtin_bswap32(6u << 28);
@@ -266,18 +288,24 @@ int ip6_output(const uint8_t daddr[16], uint8_t next_header,
              * packet after firing the solicitation and let the upper layer
              * resend once the cache is populated.
              */
-            if (!intr_enabled())
+            if (!intr_enabled()) {
+                netbuf_put_v6(pkt, heap);
                 return -EHOSTUNREACH;
+            }
             for (int i = 0; i < 32; i++) {
                 sched_yield();
                 if (nd6_lookup(dev, nh, mac) == 0) break;
             }
-            if (nd6_lookup(dev, nh, mac) != 0)
+            if (nd6_lookup(dev, nh, mac) != 0) {
+                netbuf_put_v6(pkt, heap);
                 return -EHOSTUNREACH;
+            }
         }
     }
-    return eth_send(dev, mac, __builtin_bswap16(0x86DD),
-                    pkt, sizeof(*h) + payload_len);
+    int rc = eth_send(dev, mac, __builtin_bswap16(0x86DD),
+                      pkt, sizeof(*h) + payload_len);
+    netbuf_put_v6(pkt, heap);
+    return rc;
 }
 
 /* ------------------------------------------------------------------ */

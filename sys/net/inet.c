@@ -90,12 +90,51 @@ uint16_t inet_csum_pseudo6(const uint8_t saddr[16], const uint8_t daddr[16],
 /* Ethernet send                                                      */
 /* ------------------------------------------------------------------ */
 
+/*
+ * STACK-01: keep the transmit path's MTU-sized buffers OFF the stack.
+ *
+ * The worst chain runs entirely in hard-IRQ context on the 16 KiB interrupt
+ * stack: icmp_input's reply[1500] (or tcp_xmit_raw's buf[1480]) calls
+ * ip4_output, whose pkt[1600] calls eth_send, whose frame[1614] then calls
+ * the driver -- about 4.7 KiB of nested frames before the NIC doorbell, plus
+ * whatever the driver itself uses.  That is a quarter of the stack consumed
+ * by buffers that never needed to be automatic.
+ *
+ * Hard-IRQ context on this UP kernel runs with IF=0, so exactly one flow can
+ * be inside a given function at a time and a dedicated static per call site
+ * is safe.  ip4_output and eth_send NEST, so they need separate ones.
+ * Process context can be preempted, so it allocates instead; a failed
+ * allocation drops the packet, which is what a transmit path should do
+ * under memory pressure anyway.
+ *
+ * SMP NOTE: when APs start scheduling these statics must become per-CPU.
+ * The same caveat applies to tcp_lock (audit TCP-21) and is tracked there.
+ */
+#define NETBUF_SIZE (NETDEV_MTU_MAX + ETH_HLEN)
+
+static uint8_t g_irq_pktbuf[NETBUF_SIZE];   /* ip4_output / ip6_output */
+static uint8_t g_irq_frmbuf[NETBUF_SIZE];   /* eth_send                */
+
+/* Returns a buffer of at least NETBUF_SIZE bytes, or NULL.  `heap` is set
+ * when the caller must free it. */
+static uint8_t *netbuf_get(uint8_t *irq_slot, int *heap) {
+    if (!intr_enabled()) { *heap = 0; return irq_slot; }
+    *heap = 1;
+    return (uint8_t *)kmalloc(NETBUF_SIZE);
+}
+
+static void netbuf_put(uint8_t *b, int heap) {
+    if (heap && b) kfree(b, NETBUF_SIZE);
+}
+
 int eth_send(netdev_t *dev, const uint8_t dst_mac[6], uint16_t ethertype,
              const void *payload, size_t payload_len) {
     if (!dev) return -ENODEV;
     if (payload_len > NETDEV_MTU_MAX) return -EMSGSIZE;
 
-    uint8_t frame[NETDEV_MTU_MAX + ETH_HLEN];
+    int heap = 0;
+    uint8_t *frame = netbuf_get(g_irq_frmbuf, &heap);
+    if (!frame) return -ENOMEM;
     struct ether_hdr *eh = (struct ether_hdr *)frame;
     memcpy(eh->dst, dst_mac, 6);
     memcpy(eh->src, dev->hwaddr, 6);
@@ -107,7 +146,9 @@ int eth_send(netdev_t *dev, const uint8_t dst_mac[6], uint16_t ethertype,
         memset(frame + total, 0, 60 - total);
         total = 60;
     }
-    return netdev_xmit(dev, frame, total);
+    int rc = netdev_xmit(dev, frame, total);
+    netbuf_put(frame, heap);
+    return rc;
 }
 
 /* ------------------------------------------------------------------ */
@@ -189,7 +230,11 @@ int ip4_output(uint32_t daddr, uint8_t protocol,
      */
     if (payload_len > NETDEV_MTU_MAX - sizeof(struct iphdr)) return -EMSGSIZE;
 
-    uint8_t pkt[NETDEV_MTU_MAX];
+    /* STACK-01: see netbuf_get() -- this used to be pkt[NETDEV_MTU_MAX] on
+     * the (interrupt) stack, nested inside eth_send's frame buffer. */
+    int heap = 0;
+    uint8_t *pkt = netbuf_get(g_irq_pktbuf, &heap);
+    if (!pkt) return -ENOMEM;
     struct iphdr *ih = (struct iphdr *)pkt;
     memset(ih, 0, sizeof(*ih));
     ih->ihl_version = (4 << 4) | 5;
@@ -223,18 +268,24 @@ int ip4_output(uint32_t daddr, uint8_t protocol,
              * upper layer (TCP retransmit timer, higher-level retry) resends
              * once it does — a one-RTT delay, never a sleep in IRQ.
              */
-            if (!intr_enabled())
+            if (!intr_enabled()) {
+                netbuf_put(pkt, heap);
                 return -EHOSTUNREACH;
+            }
             for (int i = 0; i < 32; i++) {
                 sched_yield();
                 if (arp_lookup(dev, nexthop, mac) == 0) break;
             }
-            if (arp_lookup(dev, nexthop, mac) != 0)
+            if (arp_lookup(dev, nexthop, mac) != 0) {
+                netbuf_put(pkt, heap);
                 return -EHOSTUNREACH;
+            }
         }
     }
-    return eth_send(dev, mac, __builtin_bswap16(ETHERTYPE_IP),
-                    pkt, sizeof(*ih) + payload_len);
+    int rc = eth_send(dev, mac, __builtin_bswap16(ETHERTYPE_IP),
+                      pkt, sizeof(*ih) + payload_len);
+    netbuf_put(pkt, heap);
+    return rc;
 }
 
 /* ------------------------------------------------------------------ */
