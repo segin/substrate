@@ -1,3 +1,0 @@
-[submodule "contrib/ext2-boot"]
-	path = contrib/ext2-boot
-	url = https://github.com/lazear/ext2-boot

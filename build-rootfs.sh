@@ -10,7 +10,6 @@ IMAGE="${IMAGE:-$TOP/rootfs.img}"
 #   IMAGE_SIZE_MIB=512 ./build-rootfs.sh --image
 IMAGE_SIZE_MIB="${IMAGE_SIZE_MIB:-4096}"
 BOOT_DIR="$TOP/sys/boot"
-EXT2BOOT_DIR="$TOP/contrib/ext2-boot"
 
 usage() {
     echo "Usage: $0 [options]"
@@ -20,7 +19,7 @@ usage() {
     echo "  --toolchain  Overlay contrib stage-2 toolchain staging trees onto dist/usr/"
     echo "               (gcc + binutils built by contrib/build-toolchain.sh --stage=2)"
     echo "  --image      Create a ${IMAGE_SIZE_MIB}MiB ext2 filesystem image (rootfs.img)"
-    echo "  --no-boot    Skip ext2-boot bootloader installation"
+    echo "  --no-boot    Skip building the sys/boot bootloader"
     echo "  --help       Show this help message"
     echo ""
     echo "Typical full bootstrap sequence:"
@@ -96,15 +95,6 @@ clean_dist() {
     chmod 0644 "$DIST/var/run/utmp" "$DIST/var/log/wtmp" "$DIST/var/log/lastlog"
     chmod 1777 "$DIST/var/tmp"
     chmod 1777 "$DIST/tmp"
-}
-
-build_ext2boot() {
-    if [ ! -d "$EXT2BOOT_DIR" ]; then
-        echo "Warning: contrib/ext2-boot not found (run: git submodule update --init)"
-        return 1
-    fi
-    echo "Building ext2-boot bootloader..."
-    make -C "$EXT2BOOT_DIR" -f Makefile.substrate
 }
 
 build_bootloader() {
@@ -722,8 +712,9 @@ EOF
     #
     #    su(1) is the one setuid-root binary (dist/ has no other setuid files);
     #    chown clears the bit so it is re-set inside the fakeroot session.
-    #    -I 128 prints a harmless post-2038-date warning; ext2-boot hardcodes
-    #    128-byte inodes.
+    #    -I 128 prints a harmless post-2038-date warning.  128-byte inodes
+    #    are kept because tools/ext2-install-boot and the ext2 boot-block
+    #    scheme assume them; see docs/specs/bootloader_ext2_boot.md.
     if ! command -v fakeroot >/dev/null 2>&1; then
         echo "Error: fakeroot is required to bake a root-owned image. Install it." >&2
         exit 1
@@ -745,16 +736,11 @@ EOF
 
     install_grub
 
-    # The ext2 stage1 bootloader is deliberately NOT installed here.  It
-    # expects the image to *be* a bare ext2 filesystem, so it writes its
-    # stage1 to LBA 0 — which on this layout is the MBR holding GRUB's
-    # boot.img and the partition table.  Installing it would destroy both.
-    # GRUB is the bootloader for the partitioned image; ext2boot remains
-    # available for the old bare-filesystem layout via tools/ext2-install-boot.
-    if [ "$DO_BOOT" = true ]; then
-        echo "Note: skipping ext2boot stage1 — GRUB owns the MBR on a"
-        echo "      partitioned image (see install_grub)."
-    fi
+    # GRUB owns the MBR on this partitioned layout: boot.img plus the
+    # partition table live at LBA 0.  Anything that writes a stage1 to LBA 0
+    # (the old bare-ext2-filesystem scheme) would destroy both; that scheme is
+    # no longer part of the image build.  tools/ext2-install-boot still exists
+    # for hand-installing a stage1/stage2 pair into a bare ext2 image.
 
     echo "Image created: $IMAGE"
     sfdisk -l "$IMAGE" 2>/dev/null | tail -4

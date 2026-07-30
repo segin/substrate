@@ -31,4 +31,9 @@ This document captures the current Substrate `sys/boot/` BIOS bootloader archite
 
 ## Reference Material
 
-`contrib/ext2-boot` retains the lazear/ext2-boot MIT-licensed reference submodule.
+The lazear/ext2-boot submodule that used to live at `contrib/ext2-boot` has
+been removed; upstream is <https://github.com/lazear/ext2-boot> (MIT) if the
+reference implementation is needed again.  This document remains as the
+specification of the ext2 boot-block layout, which `tools/ext2-install-boot`
+still implements for bare-ext2 images.  GRUB owns the boot path for the
+partitioned `rootfs.img` layout.

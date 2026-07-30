@@ -52,8 +52,6 @@ downloaded tarball — useful after editing a patch.
 
 | dir | what it is |
 |-----|-----------|
-| `ext2-boot/` | BIOS ext2 bootloader (not built via fetch.sh/build.sh; submodule + Makefile pair).  Used when booting from a real ext2 partition instead of QEMU's `-kernel`. |
-| `ext2-boot-tmp/` | scratch directory for ext2-boot work; nothing committed. |
 | `tzdata/` | IANA tzdata 2024a; ships zone files under `/usr/share/zoneinfo` for libc's tz parsing. |
 
 ### Skeletons — fetched but not yet building

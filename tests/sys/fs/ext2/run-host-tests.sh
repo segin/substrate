@@ -65,9 +65,8 @@ prep_rootfs() {
 # Boot substrate with extra disk + serial→file.  Mirrors the user's
 # run-networking.sh approach: load the multiboot kernel directly via
 # -kernel and attach the rootfs as SATA AHCI (drive0) and the test
-# disk as second SATA (drive1).  This bypasses the ext2-boot
-# bootloader (which can't always find /vmunix when invoked via
-# qemu-system-i386 -drive if=ide).
+# disk as second SATA (drive1).  Loading the kernel directly keeps the
+# test independent of any on-disk bootloader.
 boot_with() {
     # boot_with <rootfs> <test-disk> <log> <timeout>
     local root=$1 disk=$2 log=$3 t=${4:-40}
