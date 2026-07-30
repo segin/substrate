@@ -52,6 +52,7 @@ downloaded tarball — useful after editing a patch.
 
 | dir | what it is |
 |-----|-----------|
+| `grub/` | GNU GRUB 2.12.  **Host-tool port**, not Substrate userland: the bootloader that loads the kernel plus the utilities that bake it into `rootfs.img` (`grub-mkimage`, `grub-file`, `grub-mkrescue`) and the `i386-pc` / `x86_64-efi` / `i386-efi` module trees.  `build-rootfs.sh` and `mkgrub.sh` prefer it over the host GRUB.  See `README.SUBSTRATE.md`. |
 | `tzdata/` | IANA tzdata 2024a; ships zone files under `/usr/share/zoneinfo` for libc's tz parsing. |
 
 ### Skeletons — fetched but not yet building

@@ -674,10 +674,19 @@ create_image() {
         exit 1
     fi
 
-    for t in sfdisk mkfs.vfat mmd mcopy grub-mkimage; do
+    for t in sfdisk mkfs.vfat mmd mcopy; do
         command -v "$t" >/dev/null 2>&1 || {
             echo "Error: $t is required to bake the bootable image." >&2; exit 1; }
     done
+    # grub-mkimage may come from contrib/grub instead of the host, so only
+    # insist on a host copy when the vendored port has not been built.
+    if [ ! -x "$TOP/contrib/grub/dist-grub/usr/bin/grub-mkimage" ]; then
+        command -v grub-mkimage >/dev/null 2>&1 || {
+            echo "Error: grub-mkimage is required to bake the bootable image." >&2
+            echo "       Either install GRUB, or build the vendored one:" >&2
+            echo "         contrib/grub/fetch.sh && contrib/grub/build.sh" >&2
+            exit 1; }
+    fi
 
     # Create the image file
     rm -f "$IMAGE"
@@ -761,11 +770,35 @@ EOF
 # dies in a firmware page fault before the kernel runs at all -- see
 # tools/grub-unprotect-relocator for the full diagnosis.  The system GRUB is
 # never touched; grub-mkimage is pointed at the copy with -d.
+#
+# GRUB provenance.  contrib/grub builds GRUB from a PGP-verified upstream
+# tarball and stages it under contrib/grub/dist-grub/usr; prefer that so the
+# image does not depend on whatever GRUB the build host happens to have (or
+# on it being installed at all).  Falls back to the host paths when the port
+# has not been built.
+#
+grub_setup() {
+    local staged="$TOP/contrib/grub/dist-grub/usr"
+    if [ -x "$staged/bin/grub-mkimage" ] && [ -d "$staged/lib/grub" ]; then
+        GRUB_BIN="$staged/bin"
+        GRUB_LIB="$staged/lib/grub"
+        GRUB_SRC="contrib/grub (vendored $("$staged/bin/grub-mkimage" --version 2>/dev/null | awk '{print $NF}'))"
+    else
+        GRUB_BIN=""          # empty: use $PATH
+        GRUB_LIB="/usr/lib/grub"
+        GRUB_SRC="host"
+    fi
+}
+
+grub_mkimage() {
+    if [ -n "$GRUB_BIN" ]; then "$GRUB_BIN/grub-mkimage" "$@"; else grub-mkimage "$@"; fi
+}
+
 efi_moddir() {
     local target="$1" dest="$2"
 
     mkdir -p "$dest" || return 1
-    cp /usr/lib/grub/"$target"/* "$dest"/ 2>/dev/null || return 1
+    cp "$GRUB_LIB/$target"/* "$dest"/ 2>/dev/null || return 1
     if [ -f "$dest/relocator.mod" ]; then
         python3 "$TOP/tools/grub-unprotect-relocator" "$dest/relocator.mod" \
             >/dev/null || return 1
@@ -779,6 +812,9 @@ install_grub() {
     gdir=$(mktemp -d -t substrate-grub-XXXXXX)
     # shellcheck disable=SC2064
     trap "rm -rf '$esp' '$gdir'" RETURN
+
+    grub_setup
+    echo "  GRUB: $GRUB_SRC"
 
     echo "Building ${BOOT_PART_MIB}MiB FAT32 ESP '$BOOT_LABEL'..."
     truncate -s "${BOOT_PART_MIB}M" "$esp"
@@ -798,16 +834,16 @@ install_grub() {
     # common case, but 32-bit UEFI exists on older tablets/netbooks, which
     # is exactly the hardware a 32-bit OS is interesting on.
     local built_efi=""
-    if [ -d /usr/lib/grub/x86_64-efi ]; then
+    if [ -d "$GRUB_LIB/x86_64-efi" ]; then
         efi_moddir "x86_64-efi" "$gdir/mod-x64" &&
-        grub-mkimage -d "$gdir/mod-x64" -O x86_64-efi \
+        grub_mkimage -d "$gdir/mod-x64" -O x86_64-efi \
             -o "$gdir/BOOTX64.EFI" -p "/boot/grub" $GRUB_MODULES >/dev/null 2>&1 &&
         mcopy -i "$esp" "$gdir/BOOTX64.EFI" ::/EFI/BOOT/BOOTX64.EFI &&
         built_efi="$built_efi x64"
     fi
-    if [ -d /usr/lib/grub/i386-efi ]; then
+    if [ -d "$GRUB_LIB/i386-efi" ]; then
         efi_moddir "i386-efi" "$gdir/mod-ia32" &&
-        grub-mkimage -d "$gdir/mod-ia32" -O i386-efi \
+        grub_mkimage -d "$gdir/mod-ia32" -O i386-efi \
             -o "$gdir/BOOTIA32.EFI" -p "/boot/grub" $GRUB_MODULES >/dev/null 2>&1 &&
         mcopy -i "$esp" "$gdir/BOOTIA32.EFI" ::/EFI/BOOT/BOOTIA32.EFI &&
         built_efi="$built_efi ia32"
@@ -819,10 +855,10 @@ install_grub() {
     # can only reach it by LBA, having no filesystem driver at that point.
     # The modules are still copied to the ESP so GRUB can load extras and
     # find its config via the baked-in prefix.
-    if [ -d /usr/lib/grub/i386-pc ]; then
+    if [ -d "$GRUB_LIB/i386-pc" ]; then
         mmd -i "$esp" ::/boot/grub/i386-pc >/dev/null 2>&1
-        mcopy -i "$esp" /usr/lib/grub/i386-pc/*.mod ::/boot/grub/i386-pc/ >/dev/null 2>&1
-        grub-mkimage -O i386-pc -o "$gdir/core.img" \
+        mcopy -i "$esp" "$GRUB_LIB"/i386-pc/*.mod ::/boot/grub/i386-pc/ >/dev/null 2>&1
+        grub_mkimage -O i386-pc -o "$gdir/core.img" \
             -p "(hd0,msdos1)/boot/grub" biosdisk $GRUB_MODULES >/dev/null 2>&1
         mcopy -i "$esp" "$gdir/core.img" ::/boot/grub/i386-pc/core.img
     fi
@@ -832,7 +868,7 @@ install_grub() {
 
     if [ -f "$gdir/core.img" ]; then
         python3 "$TOP/tools/grub-embed-mbr" "$IMAGE" \
-            --boot-img /usr/lib/grub/i386-pc/boot.img \
+            --boot-img "$GRUB_LIB/i386-pc/boot.img" \
             --core-img "$gdir/core.img" \
             --first-partition-lba "$BOOT_PART_LBA"
     fi

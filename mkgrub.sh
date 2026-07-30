@@ -44,10 +44,28 @@ while [ $# -gt 0 ]; do
     shift
 done
 
-for t in grub-mkrescue xorriso; do
-    command -v "$t" >/dev/null 2>&1 || {
-        echo "mkgrub.sh: $t not installed" >&2; exit 1; }
-done
+# Prefer the vendored GRUB from contrib/grub over whatever the host has, so
+# the ISO does not depend on the build host having GRUB installed.  Falls back
+# to $PATH when the port has not been built.
+GRUB_STAGE="$(dirname "$0")/contrib/grub/dist-grub/usr"
+if [ -x "$GRUB_STAGE/bin/grub-mkrescue" ]; then
+    GRUB_MKRESCUE="$GRUB_STAGE/bin/grub-mkrescue"
+    GRUB_FILE="$GRUB_STAGE/bin/grub-file"
+    # grub-mkrescue locates its platform modules and the rescue boot images
+    # relative to this prefix.
+    GRUB_MKRESCUE="$GRUB_MKRESCUE -d $GRUB_STAGE/lib/grub"
+    echo "mkgrub.sh: using vendored GRUB from contrib/grub"
+else
+    GRUB_MKRESCUE="grub-mkrescue"
+    GRUB_FILE="grub-file"
+    command -v grub-mkrescue >/dev/null 2>&1 || {
+        echo "mkgrub.sh: grub-mkrescue not installed, and contrib/grub is not built" >&2
+        echo "           run: contrib/grub/fetch.sh && contrib/grub/build.sh" >&2
+        exit 1; }
+fi
+
+command -v xorriso >/dev/null 2>&1 || {
+    echo "mkgrub.sh: xorriso not installed" >&2; exit 1; }
 
 if [ ! -f sys/kernel.bin ] || [ ! -f sys/kernel.fb.bin ]; then
     echo "mkgrub.sh: sys/kernel.bin or sys/kernel.fb.bin missing -- run 'make -C sys' first" >&2
@@ -58,7 +76,7 @@ fi
 # the same parser GRUB itself uses, so a "not multiboot" here means the
 # header is broken, not that GRUB dislikes us.
 for k in sys/kernel.bin sys/kernel.fb.bin; do
-    if ! grub-file --is-x86-multiboot "$k"; then
+    if ! $GRUB_FILE --is-x86-multiboot "$k"; then
         echo "mkgrub.sh: $k is not a valid x86 multiboot image" >&2
         exit 1
     fi
@@ -90,7 +108,7 @@ menuentry "substrate (framebuffer)" {
 }
 EOF
 
-grub-mkrescue -o "$ISO" "$ISODIR" >/dev/null 2>&1
+$GRUB_MKRESCUE -o "$ISO" "$ISODIR" >/dev/null 2>&1
 echo "mkgrub.sh: wrote $ISO ($(( $(stat -c %s "$ISO") / 1024 / 1024 )) MiB)"
 
 [ "$RUN" -eq 1 ] || exit 0
