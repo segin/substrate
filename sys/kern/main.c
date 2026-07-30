@@ -674,12 +674,24 @@ static void init_storage_and_vfs(multiboot_info_t *mboot_info) {
     register_boot_ramdisks(mboot_info);
     ntsync_init();
 
-    run_kernel_tests();
-
     vfs_init();
     console_register_devfs();
     init_root_fs();
 
+    /*
+     * Run the in-kernel test suite last.  It used to run before vfs_init(),
+     * which meant every VFS and filesystem test executed against subsystems
+     * that had not been brought up yet: getnewvnode() hit "uma_zalloc: zone
+     * is NULL", and the bio-cache and ext2 tests dereferenced NULL and took
+     * the kernel down with a page fault.  Nothing in the suite depends on
+     * running early -- the VM and pmap groups only need what is already up
+     * by this point -- so the tests now see a fully initialised kernel.
+     *
+     * (In a normal build this is kern/tests_stub.c's no-op, and even under
+     * KERNEL_TESTS=1 it returns immediately unless test= is on the command
+     * line, so the position of this call does not affect a real boot.)
+     */
+    run_kernel_tests();
 }
 
 static void reclaim_bootloader_state(void) {
