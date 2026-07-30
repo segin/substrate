@@ -400,7 +400,13 @@ uint32_t ext2_read_block(ext2_fs_t *fs, uint32_t block_num, void *buffer);
 uint32_t ext2_write_block(ext2_fs_t *fs, uint32_t block_num, const void *buffer);
 // Optimized versions taking ext2_node_t for cached buffers
 uint32_t ext2_inode_read(ext2_node_t *node, off_t offset, uint32_t size, void *buffer);
-uint32_t ext2_inode_write(ext2_node_t *node, off_t offset, uint32_t size, const void *buffer);
+/* Writes up to `size` bytes and returns the count actually written.  A short
+ * or zero return needs a reason: `errp`, when non-NULL, receives 0 on full
+ * success or a negative errno describing why the write stopped early
+ * (-ENOSPC, -ENOMEM, -EINVAL).  Callers that report to userspace must consult
+ * it -- returning 0 for a non-zero count is a POSIX violation (EXT2-15). */
+uint32_t ext2_inode_write(ext2_node_t *node, off_t offset, uint32_t size,
+                          const void *buffer, int *errp);
 uint32_t ext2_alloc_block(ext2_fs_t *fs);
 void ext2_free_block(ext2_fs_t *fs, uint32_t block_num);
 uint32_t ext2_alloc_inode(ext2_fs_t *fs, int is_dir);

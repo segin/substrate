@@ -153,7 +153,14 @@ static int ext2_xattr_walk_get(const uint8_t *entries,
             uint32_t vsize = e->e_value_size;
             uint32_t voff  = e->e_value_offs;
             if (e->e_value_block != 0) return -ENOTSUP;
-            if ((size_t)voff + vsize > value_max_off) return -EINVAL;
+            /* EXT2-14: voff and vsize are both untrusted u32 straight off the
+             * disk, and size_t is 32 bits here -- so `voff + vsize` wraps and
+             * a crafted pair passes the bound.  The NULL-out query path then
+             * hands the caller a ~4 GiB required size, and a caller that
+             * believes it and allocates gets a memcpy from far outside the
+             * block.  Compare without adding. */
+            if (voff > value_max_off || vsize > value_max_off - voff)
+                return -EINVAL;
             *result_size = vsize;
             if (out != NULL) {
                 if (out_size < vsize) return -ERANGE;
