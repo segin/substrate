@@ -12,6 +12,7 @@
 #include <arch/x86-common/ioapic.h>
 #include <arch/x86-common/lapic.h>
 #include <kern/console.h>
+#include <kern/resource.h>
 #include <kern/sched.h>
 #include <pm/pm.h>
 #include <sys/proc.h>
@@ -122,6 +123,56 @@ static void *smp_map_phys_default(uint32_t phys, uint32_t map_limit) {
         return NULL;
     }
     return P2V(phys);
+}
+
+/*
+ * Reach an ACPI table that may sit above the direct map.
+ *
+ * The direct map ends at FULL_DIRECTMAP_LIMIT (0x3EC00000) because
+ * 0xC0000000 + 0x3EC00000 is 0xFEC00000, where IO-APIC MMIO begins -- so on a
+ * 3G/1G split the kernel can never direct-map more than ~1004MB of RAM no
+ * matter how much the machine has.  Firmware puts the ACPI tables just below
+ * the top of low RAM, which means that on any machine with more than that the
+ * RSDT and MADT are unreachable through P2V() and ACPI discovery could not run
+ * at all: it fell through to the MP tables, which on a modern board describe a
+ * single CPU (or are absent), so the kernel came up UP on hardware that has
+ * several cores.  A 1GB QEMU guest is already past the limit.
+ *
+ * ioremap() gives us a temporary window for exactly the bytes we need,
+ * including a non-page-aligned start.  It depends on pmap and kmalloc, so it
+ * is only used once the full direct map exists -- which is the same condition
+ * that tells us pmap_bootstrap() has run.  Below the limit we keep using the
+ * direct map and map nothing, so the early passes are unaffected.
+ */
+static void *smp_acpi_map(uint32_t phys, size_t len, uint32_t map_limit,
+                          int *mapped) {
+    *mapped = 0;
+
+    if (phys == 0 || len == 0) {
+        return NULL;
+    }
+    /* Overflow guard: a bogus firmware pointer must not wrap the compare. */
+    if (phys > UINT32_MAX - (uint32_t)len) {
+        return NULL;
+    }
+    if (phys + (uint32_t)len <= map_limit) {
+        return P2V(phys);
+    }
+    if (map_limit != FULL_DIRECTMAP_LIMIT) {
+        return NULL;    /* too early for ioremap; caller falls back */
+    }
+
+    void *va = ioremap((resource_size_t)phys, len);
+    if (va != NULL) {
+        *mapped = 1;
+    }
+    return va;
+}
+
+static void smp_acpi_unmap(void *va, int mapped) {
+    if (mapped && va != NULL) {
+        iounmap(va);
+    }
 }
 
 static int smp_checksum_ok(const void *base, size_t len) {
@@ -354,6 +405,23 @@ void smp_discover_cores(void) {
     cpus[0].processor_id = 0; // Unknown from LAPIC, will fill from MADT if found?
     cpus[0].flags = 1;
 
+    /*
+     * ACPI table state.  Declared before the first goto so no jump to
+     * acpi_failed skips an initialiser.
+     *
+     * Every table address below is physical and may be above the direct map --
+     * firmware parks the ACPI tables just under the top of low RAM, which is
+     * past FULL_DIRECTMAP_LIMIT on anything with more than ~1004MB -- so each
+     * one goes through smp_acpi_map() rather than a bare P2V().  The RSDT is
+     * mapped twice: once for its header, to learn its length, then for the
+     * whole table so the entry array is readable.
+     */
+    struct acpi_header *rsdt = NULL;
+    struct acpi_header *madt = NULL;
+    int rsdt_mapped = 0, madt_mapped = 0;
+    uint32_t madt_phys = 0, madt_len = 0;
+    const char *fail_reason = "SMP: MADT not found.\n";
+
     // 1. Search for RSDP
     // Standard search: 0xE0000 to 0xFFFFF
     struct rsdp_desc *rsdp = NULL;
@@ -366,71 +434,74 @@ void smp_discover_cores(void) {
     }
 
     if (!rsdp) {
-        if (smp_try_mp_tables(bsp_id, map_limit, smp_map_phys_default)) {
-            early_uart_print("SMP: MP Tables found.\n");
-            early_uart_print("SMP: Detected CPU count: ");
-            smp_emit_u32(early_uart_print, (uint32_t)cpu_count);
-            early_uart_print("\n");
-            return;
-        }
-        early_uart_print("SMP: ACPI RSDP not found, falling back to UP.\n");
-        return;
+        fail_reason = "SMP: ACPI RSDP not found.\n";
+        goto acpi_failed;
     }
 
-    // 2. Locate MADT
-    // rsdp->rsdt_addr is physical, convert to virtual
-    if (rsdp->rsdt_addr >= map_limit) {
-        if (smp_try_mp_tables(bsp_id, map_limit, smp_map_phys_default)) {
-            early_uart_print("SMP: MP Tables found.\n");
-            early_uart_print("SMP: Detected CPU count: ");
-            smp_emit_u32(early_uart_print, (uint32_t)cpu_count);
-            early_uart_print("\n");
-            return;
-        }
-        early_uart_print("SMP: RSDT above early map, falling back to UP.\n");
-        return;
+    /* 2. Locate the MADT. */
+    rsdt = smp_acpi_map(rsdp->rsdt_addr, sizeof(struct acpi_header),
+                        map_limit, &rsdt_mapped);
+    if (rsdt == NULL) {
+        fail_reason = "SMP: RSDT unreachable, falling back to UP.\n";
+        goto acpi_failed;
     }
-    struct acpi_header *rsdt = (struct acpi_header*)P2V(rsdp->rsdt_addr);
-
-    // Validate RSDT signature
     if (memcmp(rsdt->signature, "RSDT", 4) != 0) {
-        if (smp_try_mp_tables(bsp_id, map_limit, smp_map_phys_default)) {
-            early_uart_print("SMP: MP Tables found.\n");
-            early_uart_print("SMP: Detected CPU count: ");
-            smp_emit_u32(early_uart_print, (uint32_t)cpu_count);
-            early_uart_print("\n");
-            return;
-        }
-        early_uart_print("SMP: RSDT Invalid signature!\n");
-        return;
-    }
-    int entries = (rsdt->length - sizeof(struct acpi_header)) / 4;
-    uint32_t *ptrs = (uint32_t*)((uintptr_t)rsdt + sizeof(struct acpi_header));
-
-    struct acpi_header *madt = NULL;
-    for (int i = 0; i < entries; i++) {
-        // ptrs[i] contains physical address of a table
-        if (ptrs[i] >= map_limit) {
-            continue;
-        }
-        struct acpi_header *h = (struct acpi_header*)P2V(ptrs[i]);
-        if (memcmp(h->signature, "APIC", 4) == 0) {
-            madt = h;
-            break;
-        }
+        fail_reason = "SMP: RSDT Invalid signature!\n";
+        goto acpi_failed;
     }
 
-    if (!madt) {
-        if (smp_try_mp_tables(bsp_id, map_limit, smp_map_phys_default)) {
-            early_uart_print("SMP: MP Tables found.\n");
-            early_uart_print("SMP: Detected CPU count: ");
-            smp_emit_u32(early_uart_print, (uint32_t)cpu_count);
-            early_uart_print("\n");
-            return;
+    {
+        uint32_t rsdt_len = rsdt->length;
+
+        if (rsdt_len < sizeof(struct acpi_header)) {
+            fail_reason = "SMP: RSDT length too short.\n";
+            goto acpi_failed;
         }
-        early_uart_print("SMP: MADT not found.\n");
-        return;
+
+        /* Remap at full length now that we know it. */
+        smp_acpi_unmap(rsdt, rsdt_mapped);
+        rsdt = smp_acpi_map(rsdp->rsdt_addr, rsdt_len, map_limit, &rsdt_mapped);
+        if (rsdt == NULL) {
+            fail_reason = "SMP: RSDT body unreachable.\n";
+            goto acpi_failed;
+        }
+
+        int entries = (int)((rsdt_len - sizeof(struct acpi_header)) / 4);
+        uint32_t *ptrs = (uint32_t*)((uintptr_t)rsdt + sizeof(struct acpi_header));
+
+        for (int i = 0; i < entries; i++) {
+            int hdr_mapped = 0;
+            struct acpi_header *h = smp_acpi_map(ptrs[i],
+                                                 sizeof(struct acpi_header),
+                                                 map_limit, &hdr_mapped);
+            if (h == NULL) {
+                continue;
+            }
+            if (memcmp(h->signature, "APIC", 4) == 0) {
+                madt_phys = ptrs[i];
+                madt_len = h->length;
+            }
+            smp_acpi_unmap(h, hdr_mapped);
+            if (madt_phys != 0) {
+                break;
+            }
+        }
     }
+
+    if (madt_phys == 0 || madt_len < sizeof(struct acpi_header) + 8) {
+        goto acpi_failed;
+    }
+
+    madt = smp_acpi_map(madt_phys, madt_len, map_limit, &madt_mapped);
+    if (madt == NULL) {
+        fail_reason = "SMP: MADT unreachable.\n";
+        goto acpi_failed;
+    }
+
+    /* The RSDT is only needed to find the MADT; release it before parsing. */
+    smp_acpi_unmap(rsdt, rsdt_mapped);
+    rsdt = NULL;
+    rsdt_mapped = 0;
 
     early_uart_print("SMP: MADT found.\n");
 
@@ -481,9 +552,33 @@ void smp_discover_cores(void) {
         p += length;
     }
 
+    smp_acpi_unmap(madt, madt_mapped);
+
     early_uart_print("SMP: Detected CPU count: ");
     smp_emit_u32(early_uart_print, (uint32_t)cpu_count);
     early_uart_print("\n");
+    return;
+
+acpi_failed:
+    /*
+     * ACPI could not be read.  Release whatever we did map, then fall back to
+     * the MP tables the same way the other failure paths always have.  Each
+     * fallback now reports why ACPI was abandoned, because they all used to
+     * print the identical "MP Tables found." line and there was no way to tell
+     * from a boot log which one had fired.
+     */
+    smp_acpi_unmap(madt, madt_mapped);
+    smp_acpi_unmap(rsdt, rsdt_mapped);
+
+    early_uart_print(fail_reason);
+    if (smp_try_mp_tables(bsp_id, map_limit, smp_map_phys_default)) {
+        early_uart_print("SMP: MP Tables found.\n");
+        early_uart_print("SMP: Detected CPU count: ");
+        smp_emit_u32(early_uart_print, (uint32_t)cpu_count);
+        early_uart_print("\n");
+        return;
+    }
+    early_uart_print("SMP: no usable CPU topology, falling back to UP.\n");
 }
 
 #ifndef HOST_TEST
