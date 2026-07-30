@@ -195,6 +195,10 @@ geom_partition_t *geom_add_partition(geom_disk_t *disk, const char *name,
         bdev->priv = part;
         bdev->read = geom_part_read;
         bdev->write = geom_part_write;
+        /* BLK-03: record where this partition starts on the raw disk.  The
+         * parent pointer itself is wired by blkdev_register_disk(), which is
+         * the only place that has both the raw blkdev and the geom_disk. */
+        bdev->part_offset = start;
 
         blkdev_register(bdev);
         /* Remember the child blkdev so the parent disk can invalidate its

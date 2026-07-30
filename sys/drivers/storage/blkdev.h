@@ -36,6 +36,19 @@ typedef struct blkdev {
     uint32_t ra_window;         // current read-ahead window (sectors)
     void    *ra_buf;            // lazily-allocated read-ahead scratch
     volatile int ra_busy;       // 1 while a prefetch owns ra_buf
+    /* BLK-07: the sector size ra_buf was sized for.  A device whose sector
+     * size changes (ATAPI 512 <-> 2048 on media change) must re-allocate, or
+     * the buffer overflows and its kfree is mis-sized. */
+    uint32_t ra_ss;
+    /*
+     * BLK-03: for a PARTITION blkdev, the raw disk it lives on and the
+     * absolute sector its sector 0 maps to.  A write through a partition
+     * node has to invalidate the raw device's cache of the same physical
+     * sectors; without this back-pointer only the raw->partition direction
+     * was covered, so raw reads kept serving pre-write bytes indefinitely.
+     */
+    struct blkdev *parent;
+    uint64_t       part_offset;
 
     /* For a raw disk registered via blkdev_register_disk(): the GEOM disk
      * whose partition child blkdevs derive from this device.  NULL for

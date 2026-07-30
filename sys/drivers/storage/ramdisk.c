@@ -1,3 +1,4 @@
+#include <errno.h>
 #include <stddef.h>
 #include <string.h>
 
@@ -14,7 +15,9 @@ static int ramdisk_count = 0;
 // Read callback
 static int ramdisk_read(blkdev_t *dev, uint64_t sector, uint32_t count, void *buffer) {
     void *addr = dev->priv;
-    if (!addr) return -1;
+    /* RAM-01: a bare -1 surfaces in userland as EPERM.  No backing store is
+     * ENXIO; an out-of-range request is EINVAL. */
+    if (!addr) return -ENXIO;
     
     uint64_t offset = sector * 512;
     uint64_t size = (uint64_t)count * 512;
@@ -22,7 +25,7 @@ static int ramdisk_read(blkdev_t *dev, uint64_t sector, uint32_t count, void *bu
     // Bounds check (overflow-safe: check components separately)
     if (sector > dev->total_sectors || count > dev->total_sectors ||
         offset + size > dev->total_sectors * 512) {
-        return -1;
+        return -EINVAL;
     }
     
     memcpy(buffer, (uint8_t *)addr + offset, size);
@@ -32,7 +35,7 @@ static int ramdisk_read(blkdev_t *dev, uint64_t sector, uint32_t count, void *bu
 // Write callback
 static int ramdisk_write(blkdev_t *dev, uint64_t sector, uint32_t count, const void *buffer) {
     void *addr = dev->priv;
-    if (!addr) return -1;
+    if (!addr) return -ENXIO;
     
     uint64_t offset = sector * 512;
     uint64_t size = (uint64_t)count * 512;
@@ -40,7 +43,7 @@ static int ramdisk_write(blkdev_t *dev, uint64_t sector, uint32_t count, const v
     // Bounds check (overflow-safe: check components separately)
     if (sector > dev->total_sectors || count > dev->total_sectors ||
         offset + size > dev->total_sectors * 512) {
-        return -1;
+        return -EINVAL;
     }
     
     memcpy((uint8_t *)addr + offset, buffer, size);
@@ -49,8 +52,8 @@ static int ramdisk_write(blkdev_t *dev, uint64_t sector, uint32_t count, const v
 
 // Create and register a RAM disk
 int ramdisk_create(void *addr, size_t size) {
-    if (!addr || size == 0) return -1;
-    if (ramdisk_count >= MAX_RAMDISKS) return -1;
+    if (!addr || size == 0) return -EINVAL;
+    if (ramdisk_count >= MAX_RAMDISKS) return -ENOSPC;
     
     blkdev_t *bdev = &ramdisks[ramdisk_count];
     memset(bdev, 0, sizeof(blkdev_t));
