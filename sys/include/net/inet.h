@@ -54,6 +54,12 @@ void arp_input(netdev_t *dev, const uint8_t *arp_pkt, size_t len);
 
 int  nd6_lookup(netdev_t *dev, const uint8_t ip6[16], uint8_t mac[6]);
 void nd6_insert(netdev_t *dev, const uint8_t ip6[16], const uint8_t mac[6]);
+/* Refresh an existing binding only; never creates.  ND-03: an unsolicited
+ * Neighbor Advertisement may update what we already believe but must not be
+ * able to introduce a new neighbour, which is how one forged NA could
+ * redirect all IPv6 traffic. */
+int  nd6_update_existing(netdev_t *dev, const uint8_t ip6[16],
+                         const uint8_t mac[6]);
 int  nd6_solicit(netdev_t *dev, const uint8_t target_ip6[16]);
 
 /* -- Ethernet send wrapper ------------------------------------------ */

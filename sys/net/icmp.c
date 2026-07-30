@@ -118,11 +118,32 @@ static void icmp6_handle_ns(netdev_t *dev, const uint8_t saddr[16],
 
 static void icmp6_handle_na(netdev_t *dev, const uint8_t *pkt, size_t len) {
     if (len < sizeof(struct icmp6_hdr) + 16 + 8) return;
+    const struct icmp6_hdr *nh = (const struct icmp6_hdr *)pkt;
     const uint8_t *target = pkt + sizeof(struct icmp6_hdr);
     const struct nd_opt_lladdr *opt =
         (const struct nd_opt_lladdr *)(pkt + sizeof(struct icmp6_hdr) + 16);
-    if (opt->type == 2 && opt->len == 1)
-        nd6_insert(dev, target, opt->mac);
+    if (opt->type != 2 || opt->len != 1) return;
+
+    /*
+     * ND-03: an advertisement may REFRESH a binding we already hold; it may
+     * not CREATE one.  This used to call nd6_insert() unconditionally, which
+     * creates -- with no solicitation match, no source check and without
+     * even looking at the Solicited/Override flags -- so one forged NA
+     * naming the router redirected all IPv6 traffic, and 32 of them evicted
+     * the whole cache.  The ARP path already restricts creation this way
+     * (arp.c: only a reply to a request we sent creates an entry); ND did
+     * not.  An address we have never resolved is simply not interesting to
+     * us, so dropping the NA costs nothing: if we later need that neighbour
+     * we send our own solicitation and take the answer to it.
+     *
+     * RFC 4861 4.4: the Override flag (0x20000000 in the flags word) says
+     * whether the sender may replace a cached link-layer address at all.
+     * Honour it rather than overwriting unconditionally.
+     */
+    uint32_t flags = __builtin_bswap32(nh->data);
+    if (!(flags & 0x20000000u)) return;      /* O=0: do not override */
+
+    (void)nd6_update_existing(dev, target, opt->mac);
 }
 
 static void icmp6_handle_echo(const uint8_t saddr[16], const uint8_t daddr[16],

@@ -16,6 +16,7 @@
 #include <netinet/icmp.h>
 #include <netinet/ip.h>
 #include <netinet/ip6.h>
+#include <sys/lock.h>
 #include <sys/netdev.h>
 
 /* ------------------------------------------------------------------ */
@@ -33,6 +34,16 @@ struct nd6_entry {
 static struct nd6_entry g_nd6_cache[ND6_CACHE_SIZE];
 static unsigned          g_nd6_next;
 
+/*
+ * ND-02: the cache is written by icmp6_input() in IRQ/RX context and read
+ * by nd6_lookup() from process context, with non-atomic 16-byte and 6-byte
+ * memcpy()s on both sides -- so a reader could observe half of one binding
+ * and half of another and send to a torn MAC.  The ARP cache was given an
+ * IRQ-safe spinlock as NET-09; this is the mirror that was missed.
+ * Critical sections stay tiny: no transmit happens under the lock.
+ */
+static spinlock_t g_nd6_lock = SPINLOCK_INIT("nd6_cache");
+
 static int ip6_zero(const uint8_t a[16]) {
     for (int i = 0; i < 16; i++) if (a[i]) return 0;
     return 1;
@@ -40,24 +51,57 @@ static int ip6_zero(const uint8_t a[16]) {
 
 int nd6_lookup(netdev_t *dev, const uint8_t ip6[16], uint8_t mac[6]) {
     if (!dev) return -1;
+    unsigned long f = spinlock_acquire_irq(&g_nd6_lock);   /* ND-02 */
     for (unsigned i = 0; i < ND6_CACHE_SIZE; i++) {
         struct nd6_entry *e = &g_nd6_cache[i];
         if (e->ifindex == dev->ifindex &&
             memcmp(e->ip6, ip6, 16) == 0 &&
             !ip6_zero(e->ip6)) {
             memcpy(mac, e->mac, 6);
+            spinlock_release_irq(&g_nd6_lock, f);
             return 0;
         }
     }
+    spinlock_release_irq(&g_nd6_lock, f);
     return -1;
+}
+
+/*
+ * Update the MAC of an existing binding.  Returns 1 if one was updated, 0
+ * if no entry exists for (ip6, ifindex).
+ *
+ * ND-03: this exists so an unsolicited Neighbor Advertisement can refresh a
+ * binding we already believed without being able to CREATE one.  Previously
+ * icmp6_input handed every NA straight to nd6_insert(), which creates, with
+ * no solicitation match and no source check -- so a single forged NA naming
+ * the router redirected all IPv6 traffic, and 32 of them flushed the cache.
+ * The ARP path already draws this create/update distinction; ND did not.
+ */
+int nd6_update_existing(netdev_t *dev, const uint8_t ip6[16],
+                        const uint8_t mac[6]) {
+    if (!dev || ip6_zero(ip6)) return 0;
+    unsigned long f = spinlock_acquire_irq(&g_nd6_lock);
+    for (unsigned i = 0; i < ND6_CACHE_SIZE; i++) {
+        struct nd6_entry *e = &g_nd6_cache[i];
+        if (e->ifindex == dev->ifindex && !ip6_zero(e->ip6) &&
+            memcmp(e->ip6, ip6, 16) == 0) {
+            memcpy(e->mac, mac, 6);
+            spinlock_release_irq(&g_nd6_lock, f);
+            return 1;
+        }
+    }
+    spinlock_release_irq(&g_nd6_lock, f);
+    return 0;
 }
 
 void nd6_insert(netdev_t *dev, const uint8_t ip6[16], const uint8_t mac[6]) {
     if (!dev || ip6_zero(ip6)) return;
+    unsigned long f = spinlock_acquire_irq(&g_nd6_lock);   /* ND-02 */
     for (unsigned i = 0; i < ND6_CACHE_SIZE; i++) {
         struct nd6_entry *e = &g_nd6_cache[i];
         if (e->ifindex == dev->ifindex && memcmp(e->ip6, ip6, 16) == 0) {
             memcpy(e->mac, mac, 6);
+            spinlock_release_irq(&g_nd6_lock, f);
             return;
         }
     }
@@ -66,6 +110,7 @@ void nd6_insert(netdev_t *dev, const uint8_t ip6[16], const uint8_t mac[6]) {
     memcpy(slot->ip6, ip6, 16);
     memcpy(slot->mac, mac, 6);
     slot->ifindex = dev->ifindex;
+    spinlock_release_irq(&g_nd6_lock, f);
 }
 
 /* RFC 4861: NS goes to the solicited-node multicast — ff02::1:ffXX:XXXX
