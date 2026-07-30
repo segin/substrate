@@ -89,6 +89,22 @@ int ext2_xattr_split_name(const char *full, const char **suffix) {
     if (!dot || dot == full || dot[1] == '\0') return -1;
     size_t prefix_len = dot - full;
     *suffix = dot + 1;
+    /*
+     * EXT2-25: POSIX ACLs are not "system.*" entries with a suffix -- they
+     * get their own name indices (2 and 3) and are stored with an EMPTY
+     * name.  Falling through to the "system" case below returned index 7
+     * with suffix "posix_acl_access", which matches nothing on disk, so
+     * getxattr("system.posix_acl_access") always failed even on a
+     * filesystem that had the ACL.  Recognise the two whole names.
+     */
+    if (strcmp(full, "system.posix_acl_access") == 0) {
+        *suffix = full + strlen(full);      /* empty name */
+        return EXT4_XATTR_INDEX_POSIX_ACL_ACCESS;
+    }
+    if (strcmp(full, "system.posix_acl_default") == 0) {
+        *suffix = full + strlen(full);      /* empty name */
+        return EXT4_XATTR_INDEX_POSIX_ACL_DEFAULT;
+    }
     if (prefix_len == 4 && memcmp(full, "user", 4) == 0)
         return EXT4_XATTR_INDEX_USER;
     if (prefix_len == 7 && memcmp(full, "trusted", 7) == 0)
@@ -97,10 +113,6 @@ int ext2_xattr_split_name(const char *full, const char **suffix) {
         return EXT4_XATTR_INDEX_SECURITY;
     if (prefix_len == 6 && memcmp(full, "system", 6) == 0)
         return EXT4_XATTR_INDEX_SYSTEM;
-    /* POSIX ACLs are stored under prefix "system.posix_acl_access"
-     * / ".._default" but the index distinguishes them from generic
-     * "system.*"; let the namespace check above swallow the prefix
-     * and use ACL-namespace-aware suffix recognition.  */
     return -1;
 }
 
@@ -110,10 +122,14 @@ static const char *ext2_xattr_index_prefix(uint8_t idx) {
     case EXT4_XATTR_INDEX_TRUSTED:  return "trusted.";
     case EXT4_XATTR_INDEX_SECURITY: return "security.";
     case EXT4_XATTR_INDEX_SYSTEM:   return "system.";
+    /* EXT2-25: no trailing separator.  These entries carry an empty name, so
+     * listxattr concatenates prefix + "" -- with the colon it produced
+     * "system.posix_acl_access:", a name that getxattr could not resolve.
+     * The attribute's full name IS the prefix. */
     case EXT4_XATTR_INDEX_POSIX_ACL_ACCESS:
-        return "system.posix_acl_access:";
+        return "system.posix_acl_access";
     case EXT4_XATTR_INDEX_POSIX_ACL_DEFAULT:
-        return "system.posix_acl_default:";
+        return "system.posix_acl_default";
     }
     return NULL;
 }

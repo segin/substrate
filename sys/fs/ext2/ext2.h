@@ -32,6 +32,9 @@
 // Special inodes
 #define EXT2_ROOT_INO      2
 #define EXT2_GOOD_OLD_INODE_SIZE 128
+/* First inode a revision-0 filesystem makes available to files; revision 1+
+ * carries the real value in s_first_ino.  Inodes 1..10 are reserved. */
+#define EXT2_GOOD_OLD_FIRST_INO  11
 
 /* Inode flags (i_flags) — substrate handles a subset.  The ext4
  * EXTENTS flag is the load-bearing one: when set, i_block[] is
@@ -279,6 +282,9 @@ typedef struct {
      * of accumulated changes, on sync, and on unmount — instead of on every
      * single alloc/free.  A crash before a flush costs only fsck-fixable
      * free-count discrepancies, never data or allocation state. */
+    uint32_t bgd_size;          // bytes actually kmalloc'd for bgd (EXT2-21:
+                                // rounded up to whole blocks, so it is not
+                                // group_count * sizeof(ext2_group_desc_t))
     uint8_t *bgd_dirty;         // per-group dirty bitmap (group_count bits)
     int      sb_dirty;          // superblock free counts need flushing
     uint32_t meta_dirty_ops;    // deferred metadata ops since last flush

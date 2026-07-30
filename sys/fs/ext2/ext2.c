@@ -1636,7 +1636,16 @@ static int ext2_chmod(fs_node_t *node, uint32_t mode) {
     if (EXT2_RO_REFUSE(ctx->fs)) return -EROFS;
 
     ctx->inode.i_mode = (uint16_t)((ctx->inode.i_mode & 0xF000U) | (mode & 0x0FFFU));
-    ctx->inode.i_ctime = (uint32_t)node->ctime;
+    /* EXT2-22: this copied the *existing* cached ctime back over itself, so
+     * chmod() never advanced it.  POSIX requires a successful chmod to set
+     * ctime to the current time -- tools that detect metadata changes by
+     * ctime (backup programs, `find -newerct`, intrusion detection) saw
+     * nothing happen. */
+    {
+        time_t now = get_time();
+        ctx->inode.i_ctime = (uint32_t)now;
+        node->ctime        = now;
+    }
 
     if (ext2_write_inode(ctx->fs, ctx->inode_num, &ctx->inode) != 0) {
         return -EIO;
@@ -2441,7 +2450,23 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
         kfree(fs, sizeof(ext2_fs_t));
         return NULL;
     }
-    fs->group_count = (fs->sb.s_blocks_count + fs->blocks_per_group - 1) / fs->blocks_per_group;
+    /* EXT2-24: block numbering starts at s_first_data_block (1 on a 1 KiB-block
+     * filesystem, 0 otherwise), so the number of groups is derived from the
+     * count of *addressable* blocks.  Including the pre-first_data_block gap
+     * could yield one group too many, and the extra bgd slot -- plus its
+     * metadata_csum check -- then read past the real group descriptor table. */
+    {
+        uint32_t first = fs->sb.s_first_data_block;
+        uint32_t addressable = (fs->sb.s_blocks_count > first)
+                             ? (fs->sb.s_blocks_count - first) : 0;
+        fs->group_count = (addressable + fs->blocks_per_group - 1) /
+                          fs->blocks_per_group;
+    }
+    if (fs->group_count == 0) {
+        kprint("EXT2: filesystem has no block groups\n");
+        kfree(fs, sizeof(ext2_fs_t));
+        return NULL;
+    }
     
     fs->inode_size = (fs->sb.s_rev_level >= 1) ? fs->sb.s_inode_size : EXT2_GOOD_OLD_INODE_SIZE;
 
@@ -2480,12 +2505,23 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
     uint32_t bgd_blocks = (raw_bgd_size + fs->block_size - 1) / fs->block_size;
     uint32_t bgd_size = bgd_blocks * fs->block_size;
 
+    /* Declared up here so the shared `fail:` label below can free them
+     * whichever failure path jumps to it. */
+    uint8_t *gdt_raw = NULL;
+    uint32_t on_disk_size = 0;
+
     fs->bgd = kmalloc(bgd_size);
     if (!fs->bgd) {
         kfree(fs, sizeof(ext2_fs_t));
         return NULL;
     }
     memset(fs->bgd, 0, bgd_size);
+    /* EXT2-21: bgd is allocated rounded up to whole blocks, but unmount used
+     * to free it as group_count * sizeof(ext2_group_desc_t).  kfree derives
+     * the true size from the pointer so nothing was corrupted, but kmem_stats
+     * drifted by the rounding on every mount/unmount cycle.  Keep the real
+     * size so the free matches the alloc. */
+    fs->bgd_size = bgd_size;
 
     /* Per-group dirty bitmap for deferred metadata flush (see ext2_fs_t).
      * Tiny (group_count/8 bytes); if it ever fails to allocate,
@@ -2517,9 +2553,7 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
         if (on_disk < 32 || on_disk > 1024 || (on_disk & 3)) {
 
             kprintf("ext2: implausible s_desc_size %u\n", on_disk);
-            kfree(fs->bgd, bgd_size);
-            kfree(fs, sizeof(ext2_fs_t));
-            return NULL;
+            goto fail;
         }
         fs->desc_size = on_disk;
     }
@@ -2530,14 +2564,22 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
      * staging buffer, copy the first 32 bytes of each, and reject
      * the mount if any high-half field is non-zero (we have no way
      * to address those blocks with uint32_t internals).  */
-    uint32_t on_disk_total = fs->group_count * fs->desc_size;
+    /* EXT2-28: the ceiling above bounded group_count * 32 (the in-memory slot
+     * size).  The staging buffer is group_count * desc_size, and desc_size is
+     * accepted up to 1024 -- so a superblock that passed the first check could
+     * still ask for 32x more here, up to half a gigabyte.  Bound what we are
+     * about to allocate, not a proxy for it. */
+    uint64_t on_disk_total64 = (uint64_t)fs->group_count * fs->desc_size;
+    if (on_disk_total64 > (16ULL << 20)) {
+        kprint("EXT2: on-disk group descriptor table too large; refusing mount\n");
+        goto fail;
+    }
+    uint32_t on_disk_total = (uint32_t)on_disk_total64;
     uint32_t on_disk_blocks = (on_disk_total + fs->block_size - 1) / fs->block_size;
-    uint32_t on_disk_size   = on_disk_blocks * fs->block_size;
-    uint8_t *gdt_raw = kmalloc(on_disk_size);
+    on_disk_size   = on_disk_blocks * fs->block_size;
+    gdt_raw = kmalloc(on_disk_size);
     if (!gdt_raw) {
-        kfree(fs->bgd, bgd_size);
-        kfree(fs, sizeof(ext2_fs_t));
-        return NULL;
+        goto fail;
     }
     for (uint32_t i = 0; i < on_disk_blocks; i++) {
         ext2_read_block(fs, bgd_block + i, gdt_raw + i * fs->block_size);
@@ -2553,10 +2595,7 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
 
                 kprintf("ext2: bg %u uses >32-bit addresses (bb_hi=%x ib_hi=%x it_hi=%x) — refuse mount\n",
                         g, bb_hi, ib_hi, it_hi);
-                kfree(gdt_raw, on_disk_size);
-                kfree(fs->bgd, bgd_size);
-                kfree(fs, sizeof(ext2_fs_t));
-                return NULL;
+                goto fail;
             }
         }
         memcpy(&fs->bgd[g], src, sizeof(ext2_group_desc_t));
@@ -2586,10 +2625,7 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
             if (expect != actual) {
                 kprintf("ext2: bg descriptor %u csum mismatch want=%04x got=%04x — refuse mount\n",
                         g, expect, actual);
-                kfree(gdt_raw, on_disk_size);
-                kfree(fs->bgd, bgd_size);
-                kfree(fs, sizeof(ext2_fs_t));
-                return NULL;
+                goto fail;
             }
         }
         kprintf("ext2: %u group descriptor csums verified (desc_size=%u)\n",
@@ -2601,18 +2637,14 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
     ext2_inode_t root_inode;
     if (ext2_read_inode(fs, EXT2_ROOT_INO, &root_inode) != 0) {
         kprint("EXT2: Failed to read root inode\n");
-        kfree(fs->bgd, bgd_size);
-        kfree(fs, sizeof(ext2_fs_t));
-        return NULL;
+        goto fail;
     }
 
     // Initialize active block bitmap cache
     fs->active_bg_group = (uint32_t)-1;
     fs->active_bg_bitmap = kmalloc(fs->block_size);
     if (!fs->active_bg_bitmap) {
-        kfree(fs->bgd, bgd_size);
-        kfree(fs, sizeof(ext2_fs_t));
-        return NULL;
+        goto fail;
     }
     memset(fs->active_bg_bitmap, 0, fs->block_size);
 
@@ -2620,10 +2652,7 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
     fs->active_inode_bg_group = (uint32_t)-1;
     fs->active_inode_bg_bitmap = kmalloc(fs->block_size);
     if (!fs->active_inode_bg_bitmap) {
-        kfree(fs->active_bg_bitmap, fs->block_size);
-        kfree(fs->bgd, bgd_size);
-        kfree(fs, sizeof(ext2_fs_t));
-        return NULL;
+        goto fail;
     }
     memset(fs->active_inode_bg_bitmap, 0, fs->block_size);
 
@@ -2631,11 +2660,7 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
     fs_node_t *root_node = ext2_alloc_node(fs, EXT2_ROOT_INO, &root_inode);
     if (!root_node) {
         kprint("EXT2: Failed to allocate root node\n");
-        kfree(fs->active_inode_bg_bitmap, fs->block_size);
-        kfree(fs->active_bg_bitmap, fs->block_size);
-        kfree(fs->bgd, bgd_size);
-        kfree(fs, sizeof(ext2_fs_t));
-        return NULL;
+        goto fail;
     }
 
     strlcpy(root_node->name, "/", sizeof(root_node->name));
@@ -2646,6 +2671,27 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
     
     kprint("EXT2: Mounted successfully\n");
     return root_node;
+
+    /*
+     * EXT2-20: every one of the failure paths above used to unwind by hand,
+     * and not one of them freed fs->bgd_dirty -- so each rejected mount
+     * (bad descriptor size, csum mismatch, unreadable root inode, any failed
+     * allocation) leaked (group_count+7)/8 bytes.  A mount that fails is
+     * retried, so this repeated per attempt.  One label, one unwind order,
+     * every allocation released exactly once.
+     */
+fail:
+    if (gdt_raw)                    kfree(gdt_raw, on_disk_size);
+    if (fs->active_inode_bg_bitmap) kfree(fs->active_inode_bg_bitmap, fs->block_size);
+    if (fs->active_bg_bitmap)       kfree(fs->active_bg_bitmap, fs->block_size);
+    if (fs->bgd_dirty) {
+        uint32_t dsz = (fs->group_count + 7u) / 8u;
+        if (dsz == 0) dsz = 1;
+        kfree(fs->bgd_dirty, dsz);
+    }
+    if (fs->bgd)                    kfree(fs->bgd, fs->bgd_size);
+    kfree(fs, sizeof(ext2_fs_t));
+    return NULL;
 }
 
 /*
@@ -2852,8 +2898,23 @@ uint32_t ext2_alloc_inode(ext2_fs_t *fs, int is_dir) {
         
         uint8_t *bitmap_buf = fs->active_inode_bg_bitmap;
 
-        // Find the first free bit (skip reserved inodes in first group)
-        uint32_t start = (group == 0) ? fs->sb.s_first_ino : 0;
+        /*
+         * Find the first free bit (skip reserved inodes in first group).
+         *
+         * EXT2-23: two bugs here.  Bit i of group 0 describes inode i+1, so
+         * using s_first_ino directly as the bit index skipped one bit too
+         * many and permanently wasted the first usable inode.  And
+         * s_first_ino was taken raw off the disk: revision-0 filesystems do
+         * not have the field at all (it reads as whatever is at that offset,
+         * often 0), and a value of 0 combined with cleared reserved bits let
+         * this loop hand out inode 2 -- the root directory.  Default it for
+         * rev 0 and never go below the reserved range.
+         */
+        uint32_t first_ino = (fs->sb.s_rev_level >= 1) ? fs->sb.s_first_ino
+                                                       : EXT2_GOOD_OLD_FIRST_INO;
+        if (first_ino < EXT2_GOOD_OLD_FIRST_INO)
+            first_ino = EXT2_GOOD_OLD_FIRST_INO;
+        uint32_t start = (group == 0) ? (first_ino - 1) : 0;
         uint32_t bits_in_group = fs->inodes_per_group;
         
         for (uint32_t i = start; i < bits_in_group; i++) {
@@ -3790,6 +3851,14 @@ static int ext2_symlink(fs_node_t *dir, const char *target, const char *name) {
     }
 
     if (ext2_add_entry(dir, name, inode_num, EXT2_FT_SYMLINK) != 0) {
+        /* EXT2-27: a slow symlink (target > 60 bytes) has a data block
+         * allocated and written above.  Freeing only the inode here left that
+         * block marked in-use with nothing referencing it -- an unreachable
+         * block that only fsck could recover.  Re-read the inode we just
+         * committed and release its blocks too. */
+        ext2_inode_t li;
+        if (target_len > 60 && ext2_read_inode(fs, inode_num, &li) == 0)
+            (void)ext2_free_inode_blocks(fs, &li);
         ext2_free_inode(fs, inode_num, 0);
         return -EIO;
     }
@@ -4083,7 +4152,13 @@ int ext2_statfs(fs_node_t *node, struct statfs *buf) {
     buf->f_iosize       = fs->block_size;
     buf->f_blocks       = fs->sb.s_blocks_count;
     buf->f_bfree        = fs->sb.s_free_blocks_count;
-    buf->f_bavail       = fs->sb.s_free_blocks_count;
+    /* EXT2-26: f_bfree is every free block; f_bavail is what an unprivileged
+     * writer may actually use, which excludes the s_r_blocks_count reserve.
+     * Reporting the reserve as available made df(1) promise space that write()
+     * refused with ENOSPC. */
+    buf->f_bavail       = (fs->sb.s_free_blocks_count > fs->sb.s_r_blocks_count)
+                        ? (fs->sb.s_free_blocks_count - fs->sb.s_r_blocks_count)
+                        : 0;
     buf->f_files        = fs->sb.s_inodes_count;
     buf->f_ffree        = fs->sb.s_free_inodes_count;
     buf->f_fsid         = 0;
@@ -4140,7 +4215,9 @@ int ext2_unmount(fs_node_t *node) {
 
     if (fs->active_bg_bitmap) kfree(fs->active_bg_bitmap, fs->block_size);
     if (fs->active_inode_bg_bitmap) kfree(fs->active_inode_bg_bitmap, fs->block_size);
-    if (fs->bgd) kfree(fs->bgd, fs->group_count * sizeof(ext2_group_desc_t));
+    /* EXT2-21: free with the size actually allocated (rounded up to whole
+     * blocks), not the unrounded descriptor-array size. */
+    if (fs->bgd) kfree(fs->bgd, fs->bgd_size);
     if (fs->bgd_dirty) {
         uint32_t sz = (fs->group_count + 7u) / 8u;
         if (sz == 0) sz = 1;
