@@ -40,6 +40,7 @@
 #include <netinet/tcp.h>
 #include <sys/kthread.h>
 #include <sys/netdev.h>
+#include <sys/param.h>
 #include <sys/poll.h>
 #include <sys/proc.h>
 #include <vm/vm_kmem.h>
@@ -66,10 +67,32 @@ static inline void     tcp_unlock(uint32_t f) { intr_restore(f); }
 #define IPPROTO_TCP        6
 #define TCP_RING_LEN       (32 * 1024)
 #define TCP_MSS            1460
-#define TCP_RTO_TICKS      64            /* ~500ms at HZ=128 */
+/*
+ * TCP-06: every timer constant here was hardcoded for HZ=128 while
+ * <sys/param.h> defines HZ 250, so each was HALF its documented value --
+ * RTO 256ms instead of 500ms, TIME_WAIT 512ms instead of 1s, and a total
+ * retry budget of about 1.5s.  Any peer with an RTT over 256ms had every
+ * segment spuriously retransmitted and never converged, a 2s outage
+ * aborted every connection with ETIMEDOUT, and connect() gave up after
+ * ~1.5s.  Derive them from HZ so they mean what they say, and give the
+ * RTO the exponential backoff RFC 6298 requires (it was reset flat on
+ * every retransmit, with no doubling at all).
+ *
+ * RFC 6298 3.1 mandates an initial RTO of at least 1 second; RFC 1122
+ * 4.2.3.5 wants the total budget (R2) to be generous before abort.  With
+ * a 1s base doubling per attempt, TCP_MAX_RETX of 6 gives
+ * 1+2+4+8+16+32 = 63s, which is in the right region.  A full
+ * SRTT/RTTVAR estimator is still absent and remains on the task.
+ */
+#define TCP_RTO_BASE_TICKS  (1 * HZ)     /* 1s initial RTO (RFC 6298 3.1) */
+#define TCP_RTO_MAX_TICKS   (60 * HZ)    /* never back off past a minute */
 #define TCP_MAX_RETX       6
-#define TCP_TIMER_PERIOD   32            /* ~250ms kthread wake interval */
-#define TCP_TIME_WAIT_TICKS 128          /* 1s */
+#define TCP_TIMER_PERIOD   (HZ / 8)      /* ~125ms kthread wake interval */
+#define TCP_TIME_WAIT_TICKS (1 * HZ)     /* 1s */
+/* TCP-05: bound on how long we hold a PCB whose peer has stopped closing.
+ * Generous enough not to break a slow-but-live peer, short enough that the
+ * leak is bounded. */
+#define TCP_FIN_WAIT_2_TICKS (60 * HZ)   /* 60s */
 #define TCP_DUP_ACK_FAST   3             /* fast-retx trigger */
 /* Safety-net poll interval for the blocking recv/accept/connect waits.
  * sched_sleep() is not race-free against sched_wakeup() — a wakeup that
@@ -77,7 +100,7 @@ static inline void     tcp_unlock(uint32_t f) { intr_restore(f); }
  * with this deadline guarantees the waiter re-checks even if its wakeup
  * was missed, turning a permanent wedge into at most this much latency.
  * ~64ms at HZ=128; the wakeup still drives the common fast path. */
-#define TCP_SLEEP_POLL     8
+#define TCP_SLEEP_POLL     (HZ / 16)
 
 enum tcp_state {
     TCP_CLOSED = 0,
@@ -128,6 +151,9 @@ typedef struct tcp_pcb {
     int       dup_ack;
     /* Time-bound state expiries.  */
     uint64_t  time_wait_until;
+    /* TCP-05: deadline for a FIN_WAIT_2 whose peer never closes its half.
+     * 0 while not in FIN_WAIT_2. */
+    uint64_t  fin_wait2_until;
     /* SO_ERROR (cleared by getsockopt).  */
     int       so_error;
     /* Backlog for LISTEN sockets */
@@ -357,6 +383,12 @@ static void tcp_timer_tick(uint64_t now) {
             if (p->parent && !tcp_child_in_accept_q(p)) { tcp_free(p); continue; }
             continue;
         }
+        /* TCP-05: reap a FIN_WAIT_2 whose peer never sent its FIN. */
+        if (p->state == TCP_FIN_WAIT_2 && p->fin_wait2_until &&
+            now >= p->fin_wait2_until) {
+            tcp_kill_pcb(p, ETIMEDOUT);
+            continue;
+        }
         if (p->state == TCP_TIME_WAIT && now >= p->time_wait_until) {
             /* Drop to CLOSED now; freed on the next tick once no RX
              * can still be matching a late segment against it. */
@@ -365,7 +397,11 @@ static void tcp_timer_tick(uint64_t now) {
         }
         tcp_seg_t *head = p->unacked_head;
         if (!head) continue;
-        if (now - head->sent_tick < TCP_RTO_TICKS) continue;
+        /* TCP-06: back the RTO off exponentially per attempt rather than
+         * retrying at a flat interval forever. */
+        uint64_t rto = (uint64_t)TCP_RTO_BASE_TICKS << (unsigned)head->retx;
+        if (rto > TCP_RTO_MAX_TICKS) rto = TCP_RTO_MAX_TICKS;
+        if (now - head->sent_tick < rto) continue;
         if (head->retx >= TCP_MAX_RETX) {
             tcp_kill_pcb(p, ETIMEDOUT);
             continue;
@@ -601,6 +637,23 @@ static void tcp_in_established(tcp_pcb_t *p, uint32_t seq, uint32_t ack,
 
     /* Process ACK: prune unacked segments and run dup-ACK fast-retx. */
     if (flags & TCP_ACK) {
+        /*
+         * TCP-03: RFC 793 requires SND.UNA < SEG.ACK <= SND.NXT.  The upper
+         * bound was missing here (it IS enforced in SYN_SENT), so an ACK for
+         * data we never sent was accepted.  That did two things: it pruned
+         * unacked segments the peer had never received, silently losing
+         * data; and it drove snd_una past snd_nxt, making the
+         * `snd_nxt - snd_una` in-flight calculation underflow to ~2^32 so
+         * the send window read as permanently full -- an unrecoverable
+         * write-side wedge from a single forged segment.
+         */
+        if ((int32_t)(ack - p->snd_nxt) > 0) {
+            /* Unacceptable ACK.  RFC 793 3.9: in a synchronized state,
+             * respond with an empty ACK carrying our current state and
+             * drop the segment. */
+            tcp_xmit_raw(p, p->snd_nxt, TCP_ACK, NULL, 0);
+            return;
+        }
         if ((int32_t)(ack - p->snd_una) > 0) {
             p->snd_una = ack;
             tcp_unacked_prune(p, ack);
@@ -664,6 +717,20 @@ static void tcp_in_established(tcp_pcb_t *p, uint32_t seq, uint32_t ack,
     if (p->state == TCP_FIN_WAIT_1 && (flags & TCP_ACK) &&
         ack == p->snd_nxt && !p->unacked_head) {
         p->state = TCP_FIN_WAIT_2;
+        /*
+         * TCP-05: arm a deadline.  A FIN_WAIT_2 PCB is not TIME_WAIT and
+         * has an empty unacked queue, so the timer tick skipped it and it
+         * was never touched again -- if the peer simply never sent its own
+         * FIN the PCB and its 32 KiB receive ring leaked forever.  That is
+         * remote-driven and unbounded: open N connections, let this side
+         * close, ACK the FIN and stop.  RFC 1122 4.2.3.6 permits this
+         * timeout provided it is no shorter than 10 minutes when the
+         * connection is otherwise idle; we are far more constrained on
+         * memory than a general-purpose host, so use a shorter bound and
+         * treat expiry as an abort of a peer that is not finishing its
+         * half of the close.
+         */
+        p->fin_wait2_until = get_ticks() + TCP_FIN_WAIT_2_TICKS;
     }
 
     /* LAST_ACK → CLOSED when the peer ACKs our FIN.  The final segment
@@ -712,14 +779,52 @@ void tcp_input(uint32_t saddr, uint32_t daddr,
     size_t   dlen  = len - hlen;
     const uint8_t *payload = seg + hlen;
 
+    /*
+     * TCP-02: verify the segment checksum before acting on ANY of it.
+     * tcp_csum() existed but had only output callers, and ip4_input
+     * validates the IP header only -- which covers no payload -- so every
+     * received seq/ack/flag/window/data byte was accepted with no
+     * end-to-end check at all.  A single bit flip delivered corrupt stream
+     * data or turned a data segment into a RST, and a blind off-path
+     * attacker had one fewer field to get right.
+     *
+     * A checksum of zero means "not computed" for UDP but NOT for TCP,
+     * where it is mandatory, so a zero field is simply a wrong checksum
+     * unless the segment genuinely sums to zero -- which the standard
+     * one's-complement check below handles correctly either way.
+     */
+    if (tcp_csum(saddr, daddr, seg, len) != 0) {
+        /* Silently drop: replying would let a corrupt segment elicit
+         * traffic, and RFC 793 requires no response to a bad checksum. */
+        return;
+    }
+
     tcp_pcb_t *p = tcp_find(saddr, sport, daddr, dport);
     if (!p) {
         tcp_send_rst(saddr, daddr, th, flags, seq, ack, dlen);
         return;
     }
 
-    /* Track peer's advertised window for our flow-control sketch.  */
-    p->snd_wnd = __builtin_bswap16(th->window);
+    /*
+     * TCP-04: only an ACK-bearing segment may move the send window, and
+     * only when its acknowledgement is one we can actually accept.  This
+     * used to take snd_wnd from EVERY segment, before the state dispatch,
+     * with no ACK bit and no acceptability test -- so one forged packet
+     * advertising window 0 parked the sender indefinitely, and a reordered
+     * old segment "un-updated" the window to a stale value.  The SYN_SENT
+     * and LISTEN states run their own handlers below and take the window
+     * from the segment that establishes the connection.
+     */
+    if ((flags & TCP_ACK) && p->state != TCP_LISTEN && p->state != TCP_SYN_SENT) {
+        /* Window updates track the highest ACK seen, so an old duplicate
+         * cannot walk the window backwards. */
+        if ((int32_t)(ack - p->snd_una) >= 0 &&
+            (int32_t)(ack - p->snd_nxt) <= 0) {
+            p->snd_wnd = __builtin_bswap16(th->window);
+        }
+    } else if (p->state == TCP_LISTEN || p->state == TCP_SYN_SENT) {
+        p->snd_wnd = __builtin_bswap16(th->window);
+    }
 
     switch (p->state) {
     case TCP_LISTEN:
