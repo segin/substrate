@@ -16,12 +16,14 @@
 #include <errno.h>
 #include <string.h>
 
+#include <arch/i386/intr.h>
 #include <arch/i386/pmm.h>
 #include <arch/x86-common/io.h>
 #include <kern/console.h>
 #include <kern/driver.h>
 #include <kern/pci.h>
 #include <sys/irq.h>
+#include <sys/lock.h>
 #include <sys/netdev.h>
 #include <vm/vm_kmem.h>
 
@@ -83,6 +85,22 @@ static struct {
     int      registered;
 } rtl;
 
+/*
+ * RTL-02: the TX path is re-entered from the hard IRQ handler with no
+ * serialization at all.  rtl_irq -> rtl_rx_drain -> netdev_rx ->
+ * inet_eth_input -> arp_input -> eth_send -> netdev_xmit -> rtl_xmit, so an
+ * inbound ARP request transmits a reply from inside the ISR.  A
+ * process-context rtl_xmit interrupted between its memcpy and the TSD write
+ * has not yet advanced tx_cur, so the IRQ-side call takes the SAME slot,
+ * overwrites the buffer and programs TSAD/TSD -- and on return the process
+ * context writes TSD again for a descriptor the NIC now owns.
+ *
+ * Must be IRQ-safe: a plain spinlock_acquire() here deadlocks the instant
+ * the ISR interrupts a lock holder, which is exactly the virtio-blk vblk_lock
+ * bug fixed in 985b46796.
+ */
+static spinlock_t rtl_tx_lock = SPINLOCK_INIT("rtl_tx");
+
 /* ----- RX path ----- */
 
 static void rtl_rx_drain(void) {
@@ -114,7 +132,19 @@ static void rtl_rx_drain(void) {
 static int rtl_xmit(netdev_t *dev, const void *frame, size_t len) {
     (void)dev;
     if (len > 1792) return -EMSGSIZE;
-    if (len < 60) len = 60;   /* pad short frames; ignore upper layer's len */
+    if (!frame || len == 0) return -EINVAL;
+    /*
+     * RTL-01: `len` is the caller's real frame length and must stay that way
+     * until after the copy.  This used to clamp it UP to 60 here and then
+     * memcpy(buf, frame, len), reading up to 40 bytes past the end of a
+     * short frame -- and putting them on the wire.  (The memset below it was
+     * dead: len was already >= 60 by then.)  Reachable from userland through
+     * AF_PACKET, so the leaked bytes were whatever sat after the caller's
+     * buffer, and a buffer ending on a page boundary faulted inside memcpy.
+     * Copy exactly what we were given, zero the pad, and only then round the
+     * length up for the hardware.
+     */
+    unsigned long txf = spinlock_acquire_irq(&rtl_tx_lock);   /* RTL-02 */
     int slot = rtl.tx_cur;
 
     /* Wait for this descriptor's previous transmit to finish before
@@ -132,20 +162,32 @@ static int rtl_xmit(netdev_t *dev, const void *frame, size_t len) {
      * wait on a slot we've actually used (its initial TSD state is
      * don't-care). */
     if (rtl.tx_started[slot]) {
+        /* RTL-06: this poll can run inside rtl_irq with IF=0, where seconds
+         * of spinning freeze the machine.  Bound it much more tightly when
+         * we cannot afford to wait, and just drop the frame -- the upper
+         * layer retransmits. */
+        uint32_t limit = intr_enabled() ? 2000000u : 10000u;
         uint32_t spins = 0;
         while (!(inl(rtl.io_base + R_TSD0 + slot * 4) & TSD_OWN)) {
-            if (++spins > 2000000u) return -EBUSY;   /* NIC wedged */
+            if (++spins > limit) {
+                spinlock_release_irq(&rtl_tx_lock, txf);
+                return -EBUSY;                        /* NIC wedged / busy */
+            }
             __asm__ volatile("pause");
         }
     }
 
     uint8_t *buf = rtl.tx_buf[slot];
-    memcpy(buf, frame, len);
-    if (len < 60) memset(buf + len, 0, 60 - len);
+    memcpy(buf, frame, len);                 /* exactly what we were given */
+    if (len < 60) {
+        memset(buf + len, 0, 60 - len);      /* pad with zeroes, not memory */
+        len = 60;                            /* minimum Ethernet frame */
+    }
     outl(rtl.io_base + R_TSAD0 + slot * 4, rtl.tx_buf_phys[slot]);
     outl(rtl.io_base + R_TSD0  + slot * 4, (uint32_t)len);
     rtl.tx_started[slot] = 1;
     rtl.tx_cur = (slot + 1) % RTL_TX_DESCS;
+    spinlock_release_irq(&rtl_tx_lock, txf);
     return 0;
 }
 
@@ -222,7 +264,20 @@ int rtl8139_setup(pci_device_t *pdev) {
     /* Start RX + TX. */
     outb(rtl.io_base + R_CR, CR_RE | CR_TE);
 
-    if (rtl.irq) request_irq(rtl.irq, rtl_irq, 0, "rtl8139", &rtl);
+    /* RTL-03: PCI INTx is routinely shared (this NIC lands on the same line
+     * as virtio-blk / AHCI under QEMU).  Without IRQF_SHARED one of the two
+     * registrations is refused with -EBUSY: either the NIC gets no handler
+     * and the interface is dead, or the sibling loses its own.  And since
+     * INTx is level-triggered, an unserviced line re-delivers forever --
+     * the storm this project already hit with AHCI.  Ask for sharing, and
+     * check the answer instead of discarding it. */
+    if (rtl.irq) {
+        int rc = request_irq(rtl.irq, rtl_irq, IRQF_SHARED, "rtl8139", &rtl);
+        if (rc != 0) {
+            kprint("rtl8139: could not install IRQ handler\n");
+            return -1;
+        }
+    }
 
     /* Register. */
     strlcpy(rtl.netdev.name, "eth0", NETDEV_NAME_MAX);
