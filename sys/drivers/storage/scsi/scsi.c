@@ -265,6 +265,10 @@ int scsi_device_register(scsi_device_t *dev) {
 
 void scsi_device_unregister(scsi_device_t *dev) {
     if (!dev) return;
+
+    /* SCSI-06: drop the /dev/storage/scsi/B:T:L node first, so no ioctl can
+     * reach a scsi_device_t that is on its way out. */
+    scsi_destroy_generic_node(dev);
     
     unsigned long flags = spinlock_acquire_irq(&scsi_pool_lock);
     scsi_device_t **pp = &scsi_device_list;
@@ -462,6 +466,20 @@ int scsi_execute(scsi_request_t *req) {
         req->callback(req);
     }
     
+    /*
+     * SCSI-11: report the REQUEST's outcome, not the transport's.
+     *
+     * `ret` is what the transport returned for the last attempt.  A command
+     * that exhausted its retries and landed in SCSI_REQ_STATE_ERROR still
+     * returned 0 whenever the final transport call itself succeeded -- which
+     * is the normal shape of a CHECK CONDITION: the transport delivered the
+     * CDB and collected sense perfectly well, and the COMMAND failed.  So
+     * a caller saw success for a command that never completed, and read
+     * whatever was (or was not) in its buffer.
+     */
+    if (req->state == SCSI_REQ_STATE_ERROR)
+        return req->error ? req->error : -1;
+
     return ret;
 }
 
@@ -665,33 +683,73 @@ int scsi_inquiry(scsi_device_t *dev, struct scsi_inquiry_data *inq) {
                             SCSI_REQ_READ, 5000);
 }
 
+/*
+ * SCSI-09: a capacity is device-supplied data and has to be treated as such.
+ *
+ * A sector size of 0 divides by zero in every geometry calculation above
+ * this; 0xFFFFFFFF (or any absurd value) multiplies out to a nonsense
+ * device size; and a non-power-of-two size breaks the shift-based block
+ * arithmetic the block layer uses.  None of it was checked.
+ */
+static int scsi_capacity_sane(uint64_t sectors, uint32_t ss) {
+    if (ss < 512 || ss > 65536) return 0;
+    if (ss & (ss - 1)) return 0;              /* not a power of two */
+    if (sectors == 0) return 0;
+    /* Reject a total that cannot be addressed as bytes in 64 bits with room
+     * to spare -- a real device this large does not exist, and the value is
+     * far more likely to be a parse error or a lying target. */
+    if (sectors > (uint64_t)1 << 48) return 0;
+    return 1;
+}
+
 int scsi_read_capacity(scsi_device_t *dev, uint64_t *sectors, uint32_t *sector_size) {
     uint8_t cdb[10];
     struct scsi_read_capacity_10 cap;
-    
+
+    /*
+     * SCSI-09: zero the buffer first.  A transport that reports success
+     * without actually transferring data (a short read, or a stub that only
+     * checks the command) left this stack struct uninitialised and its
+     * contents were parsed as a capacity -- so the device size came from
+     * whatever the previous stack frame happened to contain.
+     */
+    memset(&cap, 0, sizeof(cap));
+
     scsi_cdb_read_capacity_10(cdb);
     int ret = scsi_execute_sync(dev, cdb, 10, &cap, sizeof(cap), SCSI_REQ_READ, 5000);
-    
+
     if (ret == 0) {
         uint32_t last_lba = scsi_be32((uint8_t *)&cap.lba);
-
-        *sectors = (uint64_t)last_lba + 1U;
-        *sector_size = scsi_be32((uint8_t *)&cap.block_size);
+        uint64_t nsect    = (uint64_t)last_lba + 1U;
+        uint32_t ss       = scsi_be32((uint8_t *)&cap.block_size);
 
         if (last_lba == 0xFFFFFFFFU) {
             uint8_t cdb16[16];
             struct scsi_read_capacity_16 cap16;
 
+            memset(&cap16, 0, sizeof(cap16));
             scsi_cdb_read_capacity_16(cdb16, sizeof(cap16));
             ret = scsi_execute_sync(dev, cdb16, 16, &cap16, sizeof(cap16),
                                     SCSI_REQ_READ, 5000);
             if (ret == 0) {
-                *sectors = scsi_be64(cap16.last_lba) + 1U;
-                *sector_size = scsi_be32(cap16.block_size);
+                nsect = scsi_be64(cap16.last_lba) + 1U;
+                ss    = scsi_be32(cap16.block_size);
             }
         }
+
+        if (ret == 0 && !scsi_capacity_sane(nsect, ss)) {
+            kprintf("scsi: %u:%u:%u reported an implausible capacity "
+                    "(%u-byte sectors); ignoring\n",
+                    dev ? dev->bus : 0, dev ? dev->target : 0,
+                    dev ? dev->lun : 0, ss);
+            return -1;
+        }
+        if (ret == 0) {
+            *sectors     = nsect;
+            *sector_size = ss;
+        }
     }
-    
+
     return ret;
 }
 

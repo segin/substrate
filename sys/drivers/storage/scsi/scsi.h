@@ -384,6 +384,10 @@ void scsi_complete_request(scsi_request_t *req, int status);  /* Mark complete *
 
 /* Discovery */
 int scsi_scan_bus(scsi_link_t *link, uint8_t bus);
+
+/* SCSI-06: release the generic (/dev/storage/scsi/B:T:L) node for a device
+ * that is going away, so the slot and the devfs entry cannot outlive it. */
+void scsi_destroy_generic_node(scsi_device_t *dev);
 int scsi_probe_lun(scsi_link_t *link, uint8_t bus, uint8_t target, uint16_t lun);
 int scsi_create_bus_node(scsi_link_t *link, uint8_t bus_id);
 void scsi_auto_attach(scsi_device_t *dev);
