@@ -235,6 +235,14 @@ static uint8_t *uma_item_marker(uma_zone_t *zone, void *item);
  * Initialize UMA subsystem
  */
 void uma_startup(void) {
+    /*
+     * Informational only -- do NOT size uz_cpu[] from this.  uma_startup()
+     * runs before the APs are counted (main.c calls it right after the first
+     * smp_discover_cores(), which defaults cpu_count to 1 when it finds no
+     * local APIC), so this snapshot can be 1 on a machine that later runs
+     * many cores.  Zones are sized for UMA_MAX_CPUS in uma_zcreate() for
+     * exactly that reason.
+     */
     uma_ncpu = smp_get_cpu_count();
     uma_bootstrap_idx = 0;
     uma_bucket_idx = 0;
@@ -381,7 +389,35 @@ uma_zone_t *uma_zcreate(
             return NULL;
         }
     } else {
-        zone = kzalloc(sizeof(uma_zone_t) + (uma_ncpu - 1) * sizeof(uma_cache_t));
+        /*
+         * Size the per-CPU cache array for MAX_CPUS, not uma_ncpu.
+         *
+         * uz_cpu[] is indexed by uma_curcpu() == smp_get_cpu_id(), which
+         * returns a percpu index bounded only by MAX_CPUS.  uma_ncpu is a
+         * snapshot taken once in uma_startup(), which main.c runs at line 174
+         * -- after only the *first* smp_discover_cores(), which defaults
+         * cpu_count to 1 when it cannot find a local APIC.  The real core
+         * count is not known until the second smp_discover_cores() (line 557)
+         * and the APs do not come online until smp_init() (line 997).
+         *
+         * So on a multi-core machine every dynamically-created zone was sized
+         * for ONE cache while uma_curcpu() could legitimately return a larger
+         * index, and uma_zalloc()/uma_zfree() then read uz_cpu[cpu] past the
+         * end of the allocation.  The garbage picked up there is used directly
+         * as uc_allocbucket and dereferenced.
+         *
+         * That is the real-hardware panic: a page fault inside uma_zalloc's
+         * per-CPU fast path, reached from the first file_alloc() in
+         * console_attach_std_fds(), faulting on an address that is neither
+         * kernel nor mapped because it was simply adjacent heap data.  It
+         * never reproduced under QEMU -smp 1, where the index is always 0.
+         *
+         * UMA_ZONE_SIZE_MAX is what the bootstrap path above already uses;
+         * matching it here costs (MAX_CPUS-1) * sizeof(uma_cache_t) of slack
+         * per zone and removes the whole class of problem, including APs
+         * allocating from zones created before they were counted.
+         */
+        zone = kzalloc(UMA_ZONE_SIZE_MAX);
         if (!zone) return NULL;
     }
     zone->uz_name = name;
@@ -479,8 +515,10 @@ uma_zone_t *uma_zcreate(
     zone->uz_reclaim = NULL;
     zone->uz_arg = NULL;
     
-    /* Initialize per-CPU cache */
-    for (int i = 0; i < uma_ncpu; i++) {
+    /* Initialize per-CPU cache.  Bound by UMA_MAX_CPUS, matching the
+     * allocation above: uma_curcpu() can return any index < MAX_CPUS, and an
+     * uninitialised slot yields a garbage uc_allocbucket. */
+    for (int i = 0; i < UMA_MAX_CPUS; i++) {
         zone->uz_cpu[i].uc_freebucket = NULL;
         zone->uz_cpu[i].uc_allocbucket = NULL;
         zone->uz_cpu[i].uc_allocs = 0;
@@ -555,7 +593,7 @@ void uma_zdestroy(uma_zone_t *zone) {
     uintptr_t bend = bstart + sizeof(uma_bootstrap_mem);
 
     if (zaddr < bstart || zaddr >= bend) {
-        kfree(zone, sizeof(uma_zone_t) + (uma_ncpu - 1) * sizeof(uma_cache_t));
+        kfree(zone, UMA_ZONE_SIZE_MAX);
     }
 }
 
