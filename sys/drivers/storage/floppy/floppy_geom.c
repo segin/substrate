@@ -1,11 +1,25 @@
 #include <drivers/storage/floppy/floppy.h>
 
+/*
+ * FDC-04: the CCR data-rate codes were wrong for two entries.
+ *
+ * The code selects the controller's data rate: 0 = 500 kbps, 1 = 300 kbps,
+ * 2 = 250 kbps, 3 = 1 Mbps.
+ *
+ *   720K (3.5" DD) runs at 250 kbps, so it needs 2, not 1.  300 kbps is the
+ *   rate for a 360K disc in a 1.2M drive, not for 720K -- so every type-3
+ *   drive failed every read and the mount always failed.
+ *
+ *   2.88M needs 1 Mbps, so it needs 3, not 0.  36 sectors per track is
+ *   physically unattainable at 500 kbps, so a type-5 drive advertised 5760
+ *   sectors while only the first 18 per track were ever readable.
+ */
 static const fdc_geometry_t fdc_geometries[] = {
-    { 1, "360K", 40, 2, 9, 2 },
-    { 2, "1.2M", 80, 2, 15, 0 },
-    { 3, "720K", 80, 2, 9, 1 },
-    { 4, "1.44M", 80, 2, 18, 0 },
-    { 5, "2.88M", 80, 2, 36, 0 },
+    { 1, "360K",  40, 2,  9, 2, FDC_GAP3_DD },  /* 250 kbps */
+    { 2, "1.2M",  80, 2, 15, 0, FDC_GAP3_HD },  /* 500 kbps */
+    { 3, "720K",  80, 2,  9, 2, FDC_GAP3_DD },  /* 250 kbps (was 1=300k) */
+    { 4, "1.44M", 80, 2, 18, 0, FDC_GAP3_HD },  /* 500 kbps */
+    { 5, "2.88M", 80, 2, 36, 3, FDC_GAP3_HD },  /* 1 Mbps  (was 0=500k) */
 };
 
 const fdc_geometry_t *fdc_geometry_from_cmos(uint8_t type) {

@@ -946,9 +946,22 @@ void kinit_task(void) {
     };
     for (int i = 0; init_paths[i] != NULL; i++) {
         char *default_argv[] = { (char *)init_paths[i], NULL };
+        /*
+         * Name the candidate BEFORE trying it.  Without this a hang inside
+         * the exec (or inside the new program before its own first output)
+         * is indistinguishable from a hang in this loop -- the last thing on
+         * screen is "Trying default init paths..." either way, which is
+         * exactly the report from real hardware that prompted this.
+         */
+        kprint("kinit: exec ");
+        kprint(init_paths[i]);
+        kprint("\n");
         if (kern_execve(init_paths[i], default_argv, init_envp) == 0) {
             goto exec_success;
         }
+        kprint("kinit: ");
+        kprint(init_paths[i]);
+        kprint(" failed, trying next\n");
     }
 
     panic("kinit: No init found. Try passing init= option to kernel.");

@@ -371,6 +371,19 @@ main(int argc, char **argv)
         if (cfd != 2) dup2(cfd, 2);
         if (cfd > 2)  close(cfd);
     }
+    /*
+     * Progress markers for the prologue.
+     *
+     * Everything from here to the first fprintf() below runs with no output
+     * at all -- the console open, three dup2s, the SIGHUP handler and the
+     * TIOCNOTTY that hangs the boot ctty.  A stall anywhere in there looks
+     * from the screen exactly like the kernel hanging in its init-path loop,
+     * which is precisely how a real-hardware hang here was reported and why
+     * it could not be localised.  These are raw write(2)s, not stdio: stdio
+     * is not set up yet and a buffered write would not reach the screen
+     * before the stall.
+     */
+    (void)write(2, "init: console attached\n", 23);
 
     /*
      * Release tty1 as a controlling terminal.  kinit_task() calls
@@ -385,7 +398,9 @@ main(int argc, char **argv)
     struct sigaction hup_ign = { 0 };
     hup_ign.sa_handler = SIG_IGN;
     sigaction(SIGHUP, &hup_ign, NULL);
+    (void)write(2, "init: releasing boot ctty\n", 26);
     (void)ioctl(0, TIOCNOTTY, 0);
+    (void)write(2, "init: ctty released\n", 20);
 
     struct sigaction sa = { 0 };
     sa.sa_handler = on_shutdown_signal;
