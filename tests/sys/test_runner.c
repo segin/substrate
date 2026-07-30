@@ -314,6 +314,14 @@ void run_kernel_tests(void) {
         run_storage_fs_audit_tests();
     }
 
+    /* run_udf_tests() ends in a mount assertion that needs a real UDF device
+     * and panics without one (pre-existing, tracked on #425).  That killed the
+     * whole group before the write tests ever ran, so give them their own
+     * selector: `test=udf_write`. */
+    if (strcmp(test_arg, "udf_write") == 0) {
+        run_udf_write_tests();
+    }
+
     if (all || strcmp(test_arg, "udf") == 0) {
         extern void run_udf_tests(void);
         run_udf_tests();

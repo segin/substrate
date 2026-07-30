@@ -67,12 +67,27 @@ static void test_udf_allocation_writeback(void) {
     /* Data starts at sizeof(struct udf_space_bitmap) */
     uint8_t *data = mock_disk + sizeof(struct udf_space_bitmap);
 
-    /* Pre-allocate bit 0 to ensure we get block 1, distinguishing from error 0 */
-    data[0] = 1;
+    /*
+     * UDF-03: this fixture used to encode the driver's INVERTED polarity --
+     * an all-zero bitmap read as "everything free" and a set bit as
+     * "allocated".  ECMA-167 4/14.12.1.1 (and Linux's udf_bitmap_new_block,
+     * which tests for a set bit to find a free block and clears it to
+     * allocate) define the opposite: a SET bit is FREE.  Mark everything free
+     * and then clear bit 0, so block 0 is taken and the allocator must return
+     * block 1 -- which also keeps 0 usable as the error sentinel.
+     */
+    memset(data, 0xFF, 8);
+    data[0] &= (uint8_t)~1u;
 
-    /* Calculate initial CRC/Checksum */
-    sbm->tag.desc_crc_len = 8;
-    sbm->tag.desc_crc = udf_crc(data, 8);
+    /* Calculate initial CRC/Checksum.
+     * UDF-01: a descriptor CRC covers everything AFTER the 16-byte tag, so
+     * here that is num_bits + num_bytes (8 bytes) plus the 8-byte bit array.
+     * The old fixture hashed only the bit array, matching the driver's
+     * then-confused pointer rather than the format. */
+    uint8_t *desc_body = (uint8_t *)sbm + sizeof(struct udf_tag);
+    uint32_t body_len = 8 + 8;          /* num_bits, num_bytes, bitmap */
+    sbm->tag.desc_crc_len = body_len;
+    sbm->tag.desc_crc = udf_crc(desc_body, body_len);
     sbm->tag.tag_checksum = udf_tag_checksum(&sbm->tag);
 
     /* Setup UDF context */
@@ -101,15 +116,16 @@ static void test_udf_allocation_writeback(void) {
         return;
     }
 
-    /* Verify bit 1 is set in mock_disk */
-    /* data[0] should be 1 | 2 = 3 */
-    if (data[0] != 3) {
-        kprintf("FAILED: Bit 1 not set in disk. Byte is 0x%x\n", data[0]);
+    /* UDF-03: allocating marks a block IN USE, which under ECMA-167 means
+     * CLEARING its bit.  Bit 0 was cleared by the fixture and bit 1 by the
+     * allocation, so the byte must read 0xFC. */
+    if (data[0] != 0xFC) {
+        kprintf("FAILED: bit 1 not cleared on disk. Byte is 0x%x\n", data[0]);
         return;
     }
 
-    /* Verify CRC updated */
-    uint16_t new_crc = udf_crc(data, 8);
+    /* Verify CRC updated (same span as the fixture set up). */
+    uint16_t new_crc = udf_crc(desc_body, body_len);
     if (sbm->tag.desc_crc != new_crc) {
         kprintf("FAILED: CRC not updated correctly. Got 0x%x, expected 0x%x\n", sbm->tag.desc_crc, new_crc);
         return;
@@ -136,9 +152,11 @@ static void test_udf_large_file_write(void) {
     sbm->num_bits = 64; /* 8 bytes */
     sbm->num_bytes = 8;
 
-    /* Mark sector 0 (SBM) and 1 (FE) as allocated */
+    /* Mark sector 0 (SBM) and 1 (FE) as allocated.
+     * UDF-03: free == set, so "allocated" means the bit is CLEAR. */
     uint8_t *bitmap_data = mock_disk + sizeof(struct udf_space_bitmap);
-    bitmap_data[0] = 0x03; // Bits 0 and 1 set
+    memset(bitmap_data, 0xFF, 8);
+    bitmap_data[0] &= (uint8_t)~0x03u;   /* blocks 0 and 1 in use */
 
     /* Setup UDF context */
     udf_ctx.device = &mock_dev;
@@ -219,9 +237,10 @@ static void test_udf_truncate_extent(void) {
     sbm->num_bytes = 4;
 
     uint8_t *bitmap_data = mock_disk + sizeof(struct udf_space_bitmap);
-    /* Mark block 2, 3 as allocated (where we put our file data) */
-    /* Block 2 -> byte 0, bit 2. Block 3 -> byte 0, bit 3. */
-    bitmap_data[0] |= (1 << 2) | (1 << 3);
+    /* Mark block 2, 3 as allocated (where we put our file data).
+     * UDF-03: free == set, so allocated means the bit is CLEAR. */
+    memset(bitmap_data, 0xFF, 4);
+    bitmap_data[0] &= (uint8_t)~((1 << 2) | (1 << 3));
 
     /* Calculate CRC */
     sbm->tag.desc_crc_len = 4;
@@ -294,8 +313,8 @@ static void test_udf_truncate_extent(void) {
         return;
     }
 
-    /* Verify Block 3 still allocated (bit 3 set) */
-    if (!(bitmap_data[0] & (1 << 3))) {
+    /* Verify Block 3 still allocated.  UDF-03: allocated == bit CLEAR. */
+    if (bitmap_data[0] & (1 << 3)) {
          kprintf("FAILED: Block 3 was freed incorrectly\n");
          return;
     }
@@ -334,7 +353,8 @@ static void test_udf_truncate_extent(void) {
     /* Verify Block 3 Freed */
     /* Reload bitmap from disk (since udf_free_block writes it back) */
     /* udf_free_block updates the mock_disk directly */
-    if (bitmap_data[0] & (1 << 3)) {
+    /* UDF-03: freed == bit SET. */
+    if (!(bitmap_data[0] & (1 << 3))) {
         kprintf("FAILED: Block 3 was NOT freed\n");
         return;
     }
@@ -360,9 +380,10 @@ static void test_udf_truncate_extent_long(void) {
     sbm->num_bytes = 4;
 
     uint8_t *bitmap_data = mock_disk + sizeof(struct udf_space_bitmap);
-    /* Mark block 2, 3 as allocated (where we put our file data) */
-    /* Block 2 -> byte 0, bit 2. Block 3 -> byte 0, bit 3. */
-    bitmap_data[0] |= (1 << 2) | (1 << 3);
+    /* Mark block 2, 3 as allocated (where we put our file data).
+     * UDF-03: free == set, so allocated means the bit is CLEAR. */
+    memset(bitmap_data, 0xFF, 4);
+    bitmap_data[0] &= (uint8_t)~((1 << 2) | (1 << 3));
 
     /* Calculate CRC */
     sbm->tag.desc_crc_len = 4;
@@ -437,8 +458,8 @@ static void test_udf_truncate_extent_long(void) {
         return;
     }
 
-    /* Verify Block 3 still allocated (bit 3 set) */
-    if (!(bitmap_data[0] & (1 << 3))) {
+    /* Verify Block 3 still allocated.  UDF-03: allocated == bit CLEAR. */
+    if (bitmap_data[0] & (1 << 3)) {
          kprintf("FAILED: Block 3 was freed incorrectly\n");
          return;
     }
@@ -477,7 +498,8 @@ static void test_udf_truncate_extent_long(void) {
     /* Verify Block 3 Freed */
     /* Reload bitmap from disk (since udf_free_block writes it back) */
     /* udf_free_block updates the mock_disk directly */
-    if (bitmap_data[0] & (1 << 3)) {
+    /* UDF-03: freed == bit SET. */
+    if (!(bitmap_data[0] & (1 << 3))) {
         kprintf("FAILED: Block 3 was NOT freed\n");
         return;
     }
