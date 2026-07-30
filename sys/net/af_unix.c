@@ -559,19 +559,33 @@ static int afunix_wait(void *chan, mutex_t *m) {
  * close(): it still marks us closed, clears the peer and wakes us -- it only
  * defers the kfree() until we are off the struct.
  */
-static size_t afunix_node_read_body(afunix_sock_t *s, size_t size, uint8_t *buf);
+static size_t afunix_node_read_body(afunix_sock_t *s, size_t size, uint8_t *buf,
+                                    char *srcpath, int *srclen);
 
 static size_t afunix_node_read(fs_node_t *node, off_t off, size_t size, uint8_t *buf) {
     (void)off;
     afunix_sock_t *s = (afunix_sock_t *)(uintptr_t)node->impl;
     if (!s) return 0;
     afunix_ref(s);
-    size_t r = afunix_node_read_body(s, size, buf);
+    size_t r = afunix_node_read_body(s, size, buf, NULL, NULL);
     afunix_unref(s);
     return r;
 }
 
-static size_t afunix_node_read_body(afunix_sock_t *s, size_t size, uint8_t *buf) {
+/* UNIX-05: recvfrom() needs the sender, which read(2) does not.  srcpath (at
+ * least AFUNIX_PATH_MAX bytes) and srclen are optional; when supplied they
+ * receive the sender's bound path from the datagram frame. */
+static size_t afunix_recvfrom_body(afunix_sock_t *s, size_t size, uint8_t *buf,
+                                   char *srcpath, int *srclen) {
+    afunix_ref(s);
+    size_t r = afunix_node_read_body(s, size, buf, srcpath, srclen);
+    afunix_unref(s);
+    return r;
+}
+
+static size_t afunix_node_read_body(afunix_sock_t *s, size_t size, uint8_t *buf,
+                                    char *srcpath, int *srclen) {
+    if (srclen) *srclen = 0;
     XFD("node_read pid=%d s=%p closed=%d rx.count=%u size=%u",
         current_process ? (int)current_process->pid : -1,
         s, s ? s->closed : -1,
@@ -587,8 +601,24 @@ static size_t afunix_node_read_body(afunix_sock_t *s, size_t size, uint8_t *buf)
         /* Datagram socket: messages are framed in rx as [u16 len][payload]
          * (written atomically), so return exactly one datagram per read and
          * preserve message boundaries. */
+        /*
+         * UNIX-05: an unconnected datagram socket has no peer, and the old
+         * loop treated "no peer" as EOF -- so a bound server with an empty
+         * queue got 0 back instead of waiting for a client, which is the
+         * single reason AF_UNIX datagram servers did not work at all.  A
+         * bound socket is a valid endpoint whether or not anyone has
+         * written yet; only a CONNECTED socket can reach EOF, by its peer
+         * going away.
+         */
         while (s->rx.count < 2) {
-            if (!s->peer || s->peer->closed || s->peer->wr_closed) {
+            int connected = (s->state == AFUS_CONNECTED);
+            if (connected &&
+                (!s->peer || s->peer->closed || s->peer->wr_closed)) {
+                mutex_unlock(&s->lock); return 0;
+            }
+            if (!connected && s->state != AFUS_BOUND) {
+                /* Never bound and never connected: nothing can ever
+                 * arrive, so this really is EOF rather than a wait. */
                 mutex_unlock(&s->lock); return 0;
             }
             if (nonblock) { mutex_unlock(&s->lock); return (size_t)-EAGAIN; }
@@ -601,9 +631,20 @@ static size_t afunix_node_read_body(afunix_sock_t *s, size_t size, uint8_t *buf)
             }
             if (s->rd_closed) { mutex_unlock(&s->lock); return 0; }
         }
-        uint8_t hdr[2];
-        afbuf_read(&s->rx, hdr, 2);
+        uint8_t hdr[3];
+        afbuf_read(&s->rx, hdr, 3);
         size_t mlen = ((size_t)hdr[0] << 8) | hdr[1];
+        size_t slen = hdr[2];
+        /* Frame is [u16 total][u8 srclen][src][payload]; total counts the
+         * srclen byte and the path, so the payload is what is left. */
+        if (slen + 1 > mlen) slen = 0;           /* corrupt frame: no source */
+        char spath[AFUNIX_PATH_MAX];
+        if (slen) afbuf_read(&s->rx, (uint8_t *)spath, slen);
+        if (srcpath && srclen) {
+            memcpy(srcpath, spath, slen);
+            *srclen = (int)slen;
+        }
+        mlen -= 1 + slen;
         size_t n = mlen < size ? mlen : size;
         if (n) afbuf_read(&s->rx, buf, n);
         for (size_t rem = mlen - n; rem; ) {     /* drop truncated tail */
@@ -695,11 +736,11 @@ static size_t afunix_node_write_body(afunix_sock_t *s, size_t size,
          * socket buffer is 256 KiB) would wrap in the header and desync every
          * subsequent frame boundary — reject it.  The size>0xFFFF test also
          * guards the size+2 addition against size_t wrap. */
-        if (size > 0xFFFF || size + 2 > AFUNIX_BUF_SIZE) return (size_t)-EMSGSIZE;
+        if (size > 0xFFFF || size + 3 > AFUNIX_BUF_SIZE) return (size_t)-EMSGSIZE;
         afunix_sock_t *peer = s->peer;
         if (!peer || peer->closed || peer->rd_closed) return (size_t)-EPIPE;
         mutex_lock(&peer->lock);
-        while (peer->rx.count + size + 2 > AFUNIX_BUF_SIZE
+        while (peer->rx.count + size + 3 > AFUNIX_BUF_SIZE
                && !peer->closed && !peer->rd_closed && !s->wr_closed) {
             if (nonblock) { mutex_unlock(&peer->lock); return (size_t)-EAGAIN; }
             if (current_thread &&
@@ -713,11 +754,16 @@ static size_t afunix_node_write_body(afunix_sock_t *s, size_t size,
         if (peer->closed || peer->rd_closed || s->wr_closed) {
             mutex_unlock(&peer->lock); return (size_t)-EPIPE;
         }
-        if (afbuf_reserve(&peer->rx, size + 2) != 0) {
+        /* UNIX-05: the frame is [u16 total][u8 srclen][src][payload].  On a
+         * connected socket the receiver already knows the peer, so we name
+         * no source (srclen 0) -- but the srclen byte itself is part of the
+         * format and must be present or the reader misparses every frame. */
+        if (afbuf_reserve(&peer->rx, size + 3) != 0) {
             mutex_unlock(&peer->lock); return (size_t)-ENOBUFS;
         }
-        uint8_t hdr[2] = { (uint8_t)(size >> 8), (uint8_t)(size & 0xFF) };
-        afbuf_write(&peer->rx, hdr, 2);
+        size_t total = size + 1;
+        uint8_t hdr[3] = { (uint8_t)(total >> 8), (uint8_t)(total & 0xFF), 0 };
+        afbuf_write(&peer->rx, hdr, 3);
         if (size) afbuf_write(&peer->rx, buf, size);
         sleepq_wake_all(peer->rx_chan);
         mutex_unlock(&peer->lock);
@@ -905,7 +951,22 @@ static int afunix_node_poll(fs_node_t *node, void *waiter) {
         break;
     }
 
-    default:    /* UNCONNECTED / BOUND / DISCONNECTED */
+    case AFUS_BOUND:
+        /*
+         * UNIX-05: a bound datagram socket used to fall into the default
+         * arm below and report a bare POLLHUP, so it was never readable and
+         * a poll/select-driven datagram server never woke for a client.  It
+         * is a live endpoint: readable when a datagram is queued, always
+         * writable (sendto names its own destination), and never hung up.
+         */
+        if (s->rx.count > 0 || s->rd_closed)
+            ev |= POLLIN | POLLRDNORM;
+        ev |= POLLOUT | POLLWRNORM;
+        if (!(ev & (POLLIN | POLLRDNORM)) && waiter)
+            *(void **)waiter = s->rx_chan;
+        break;
+
+    default:    /* UNCONNECTED / DISCONNECTED */
         ev |= POLLHUP;
         break;
     }
@@ -932,10 +993,15 @@ static int afunix_node_ioctl(fs_node_t *node, uint32_t request, void *arg) {
             if (s->type == SOCK_DGRAM) {
                 /* Framed as [u16 len BE][payload]; peek the header without
                  * consuming it. */
-                if (s->rx.count >= 2 && s->rx.data) {
+                if (s->rx.count >= 3 && s->rx.data) {
                     uint8_t h0 = s->rx.data[s->rx.tail];
                     uint8_t h1 = s->rx.data[(s->rx.tail + 1) % s->rx.cap];
-                    avail = (int)(((uint32_t)h0 << 8) | h1);
+                    uint8_t sl = s->rx.data[(s->rx.tail + 2) % s->rx.cap];
+                    /* UNIX-05: the framed length now covers the srclen byte
+                     * and the sender path; FIONREAD must report only what a
+                     * read() would hand back. */
+                    uint32_t total = ((uint32_t)h0 << 8) | h1;
+                    avail = (total >= 1u + sl) ? (int)(total - 1u - sl) : 0;
                 }
             } else {
                 avail = (int)s->rx.count;
@@ -1606,7 +1672,10 @@ static ssize_t recv_into_kbuf(int fd, void *kbuf, size_t len, int flags,
         if (n->read == (void *)afinet_node_read)
             return afinet_recvfrom(fd, kbuf, len, flags, kaddr, alp);
     }
-    if (kaddrlen) *kaddrlen = 0;       /* AF_UNIX has no source address */
+    /* Remember the caller's buffer capacity BEFORE reporting "no address":
+     * *kaddrlen is both the in (capacity) and out (length) parameter. */
+    socklen_t kacap = kaddrlen ? *kaddrlen : 0;
+    if (kaddrlen) *kaddrlen = 0;
     afunix_sock_t *s = afunix_from_fd(fd);
     if (!s) return -ENOTSOCK;
     /*
@@ -1623,7 +1692,26 @@ static ssize_t recv_into_kbuf(int fd, void *kbuf, size_t len, int flags,
     short saved_flag = f ? f->f_flag : 0;
     if (f && (flags & MSG_DONTWAIT)) f->f_flag |= FNONBLOCK;
     if (current_thread) current_thread->io_file = f;
-    ssize_t r = (ssize_t)afunix_node_read(&s->node, 0, len, (uint8_t *)kbuf);
+    /*
+     * UNIX-05: this used to hardcode *kaddrlen = 0, so a bound datagram
+     * server learned nothing about who had written to it and could not
+     * reply.  The frame carries the sender's path now; unpack it into the
+     * caller's kernel-side sockaddr_un.  An unbound sender yields srclen 0,
+     * which stays a zero-length address.
+     */
+    char   spath[AFUNIX_PATH_MAX];
+    int    slen = 0;
+    ssize_t r = (ssize_t)afunix_recvfrom_body(s, len, (uint8_t *)kbuf,
+                                              spath, &slen);
+    if (r >= 0 && slen > 0 && kaddr && kaddrlen &&
+        kacap >= (socklen_t)(2 + slen + 1)) {
+        struct sockaddr_un_k { uint16_t sun_family; char sun_path[AFUNIX_PATH_MAX]; };
+        struct sockaddr_un_k *un = (struct sockaddr_un_k *)kaddr;
+        un->sun_family = AF_UNIX;
+        memcpy(un->sun_path, spath, (size_t)slen);
+        un->sun_path[slen] = '\0';
+        *kaddrlen = (socklen_t)(2 + slen + 1);
+    }
     if (current_thread) current_thread->io_file = saved;
     if (f && (flags & MSG_DONTWAIT)) f->f_flag = saved_flag;
     return r;
@@ -1691,9 +1779,27 @@ ssize_t sys_recv(int fd, void *buf, size_t len, int flags) {
  * interruptibly while the destination rx buffer is full (the destination's
  * reader wakes its own tx_chan for these connectionless senders).  Returns
  * the byte count sent, or a negative errno. */
-static ssize_t afunix_dgram_deliver(afunix_sock_t *dst, const uint8_t *buf,
-                                    size_t size, int nonblock) {
-    if (size + 2 > AFUNIX_BUF_SIZE) return -EMSGSIZE;
+/*
+ * UNIX-05: a datagram frame now carries the sender's bound path.
+ *
+ * The wire format in the ring is
+ *     [u16 total][u8 srclen][srclen bytes of sender path][payload]
+ * with total = 1 + srclen + payloadlen.  It used to be [u16 len][payload]
+ * with no sender at all, which is why recv_into_kbuf could only hardcode
+ * *kaddrlen = 0 -- a bound datagram server learned nothing about who had
+ * written to it and so could not reply, making the whole socket type
+ * useless for the request/response pattern every AF_UNIX datagram service
+ * uses.  An unbound sender contributes srclen == 0, which recvfrom()
+ * reports as a zero-length address, exactly as Linux does.
+ */
+static ssize_t afunix_dgram_deliver_from(afunix_sock_t *dst,
+                                         const uint8_t *buf, size_t size,
+                                         int nonblock,
+                                         const char *srcpath, int srclen) {
+    if (srclen < 0 || srclen > AFUNIX_PATH_MAX) srclen = 0;
+    size_t frame = 1 + (size_t)srclen + size;
+    if (frame + 2 > AFUNIX_BUF_SIZE) return -EMSGSIZE;
+    size = frame;                  /* the rest of this function frames `size` */
     mutex_lock(&dst->lock);
     while (dst->rx.count + size + 2 > AFUNIX_BUF_SIZE &&
            !dst->closed && !dst->rd_closed) {
@@ -1712,13 +1818,17 @@ static ssize_t afunix_dgram_deliver(afunix_sock_t *dst, const uint8_t *buf,
     if (afbuf_reserve(&dst->rx, size + 2) != 0) {
         mutex_unlock(&dst->lock); return -ENOBUFS;
     }
-    uint8_t hdr[2] = { (uint8_t)(size >> 8), (uint8_t)(size & 0xFF) };
-    afbuf_write(&dst->rx, hdr, 2);
-    if (size) afbuf_write(&dst->rx, buf, size);
+    uint8_t hdr[3] = { (uint8_t)(size >> 8), (uint8_t)(size & 0xFF),
+                       (uint8_t)srclen };
+    afbuf_write(&dst->rx, hdr, 3);
+    if (srclen) afbuf_write(&dst->rx, (const uint8_t *)srcpath, (size_t)srclen);
+    size_t payload = size - 1 - (size_t)srclen;
+    if (payload) afbuf_write(&dst->rx, buf, payload);
     sleepq_wake_all(dst->rx_chan);
     mutex_unlock(&dst->lock);
-    return (ssize_t)size;
+    return (ssize_t)payload;
 }
+
 
 ssize_t sys_sendto(int fd, const void *buf, size_t len, int flags,
                    const struct sockaddr *addr, socklen_t addrlen) {
@@ -1796,6 +1906,9 @@ ssize_t sys_sendto(int fd, const void *buf, size_t len, int flags,
             /* `dst` carries a transient reference pinning it against a
              * concurrent close() while we deliver into its rx buffer. */
             if (dst->type != SOCK_DGRAM) { afunix_unref(dst); return -ECONNREFUSED; }
+            /* UNIX-05: name ourselves in the frame so the server can reply.
+             * An unbound sender has pathlen 0 and stays anonymous. */
+            afunix_sock_t *src = afunix_from_fd(fd);
             int nonblock = 0;
             if (fd >= 0 && fd < MAX_FD && current_process) {
                 file_t *ff = current_process->fds[fd];
@@ -1811,7 +1924,9 @@ ssize_t sys_sendto(int fd, const void *buf, size_t len, int flags,
              */
             ssize_t dr;
             if (len == 0) {
-                dr = afunix_dgram_deliver(dst, NULL, 0, nonblock);
+                dr = afunix_dgram_deliver_from(dst, NULL, 0, nonblock,
+                                               src ? src->path : NULL,
+                                               src ? src->pathlen : 0);
             } else if (len > 0xFFFF) {
                 dr = -EMSGSIZE;         /* one datagram, same cap as send() */
             } else {
@@ -1822,7 +1937,9 @@ ssize_t sys_sendto(int fd, const void *buf, size_t len, int flags,
                     kfree(kpay, len);
                     dr = -EFAULT;
                 } else {
-                    dr = afunix_dgram_deliver(dst, kpay, len, nonblock);
+                    dr = afunix_dgram_deliver_from(dst, kpay, len, nonblock,
+                                                   src ? src->path : NULL,
+                                                   src ? src->pathlen : 0);
                     kfree(kpay, len);
                 }
             }
