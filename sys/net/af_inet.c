@@ -800,15 +800,75 @@ int afinet_accept(int fd, void *addr, socklen_t *addrlen) {
     g_afi_head = c;
     spinlock_release_irq(&afi_lock, fl);
 
-    /* Fill the accept() out-param with the peer's address, BSD/POSIX
-     * convention.  addr may be NULL if the caller doesn't want it. */
-    if (addr && addrlen && *addrlen > 0) {
-        socklen_t cap = *addrlen;
-        (void)afinet_pack_sockaddr(c->family, c->peer_port, c->peer_addr,
-                                   addr, &cap);
-        *addrlen = cap;
+    /*
+     * Fill the accept() out-param with the peer's address, BSD/POSIX
+     * convention.  addr may be NULL if the caller doesn't want it.
+     *
+     * SOCK-01: addr/addrlen are raw userspace pointers straight off the
+     * syscall table.  This used to pack the sockaddr directly through `addr`
+     * and assign through `*addrlen`, so
+     *     accept(lfd, (void *)0xC0100000, &len)
+     * wrote a sockaddr wherever the caller pointed -- an arbitrary kernel
+     * write from an unprivileged process -- and an addrlen pointing into
+     * kernel memory read it back out.  Build in a kernel buffer, then copy
+     * out under length validation.
+     */
+    {
+        uint8_t kaddr[SOCK_UADDR_MAX];
+        socklen_t klen = sizeof(kaddr);
+
+        memset(kaddr, 0, sizeof(kaddr));
+        if (afinet_pack_sockaddr(c->family, c->peer_port, c->peer_addr,
+                                 kaddr, &klen) == 0) {
+            if (klen > (socklen_t)sizeof(kaddr)) klen = sizeof(kaddr);
+            /* A bad user pointer must not cost us the connection we just
+             * accepted: report the failure but keep the fd installed, since
+             * the peer is already connected and unwinding it here would
+             * silently drop an established connection. */
+            (void)sock_copyout_sockaddr(kaddr, klen, addr, addrlen);
+        }
     }
     return newfd;
+}
+
+/*
+ * Userspace boundary helpers shared by the socket syscalls.  See the
+ * commentary in <net/inet.h> for why these exist; the short version is that
+ * accept/sendto/recvfrom were writing and reading through raw user pointers,
+ * which is an arbitrary kernel write and an unrecoverable kernel fault on a
+ * bad pointer respectively.
+ */
+int sock_copyin_addrlen(const socklen_t *ulen, socklen_t *out)
+{
+    socklen_t v;
+
+    if (!ulen || !out) return -EINVAL;
+    if (copyin(ulen, &v, sizeof(v)) != 0) return -EFAULT;
+    /* socklen_t is signed on some ABIs and userspace controls this value;
+     * a negative capacity must not become a huge unsigned copy length. */
+    if ((int)v < 0) return -EINVAL;
+    *out = v;
+    return 0;
+}
+
+int sock_copyout_sockaddr(const void *src, socklen_t srclen,
+                          void *addr, socklen_t *ulen)
+{
+    socklen_t cap, cpy;
+    int rc;
+
+    /* accept(2): a caller that does not want the peer address passes NULL. */
+    if (!addr || !ulen) return 0;
+    if (!src) return -EINVAL;
+
+    rc = sock_copyin_addrlen(ulen, &cap);
+    if (rc != 0) return rc;
+
+    cpy = (cap < srclen) ? cap : srclen;
+    if (cpy > 0 && copyout(src, addr, cpy) != 0) return -EFAULT;
+    /* Untruncated length, per POSIX -- see the header comment. */
+    if (copyout(&srclen, ulen, sizeof(srclen)) != 0) return -EFAULT;
+    return 0;
 }
 
 /* Common helper: fill a struct sockaddr_in / sockaddr_in6 from
@@ -942,8 +1002,14 @@ int afinet_connect(int fd, const void *addr, socklen_t len) {
     return 0;
 }
 
-ssize_t afinet_sendto(int fd, const void *buf, size_t len, int flags,
-                      const void *addr, socklen_t addrlen) {
+/*
+ * Kernel-buffer core of afinet_sendto().  `buf` MUST already be kernel
+ * memory: everything below memcpy()s it into a packet or hands it to
+ * tcp_send / ip4_output / ip6_output, none of which can take a fault.  The
+ * public entry point below is what copies the caller's payload in.
+ */
+static ssize_t afinet_sendto_k(int fd, const void *buf, size_t len, int flags,
+                               const void *addr, socklen_t addrlen) {
     (void)flags;
     afi_sock_t *s = afi_from_fd(fd);
     if (!s) return -ENOTSOCK;
@@ -1027,6 +1093,67 @@ ssize_t afinet_sendto(int fd, const void *buf, size_t len, int flags,
         int rc = ip6_output(daddr_buf, IPPROTO_UDP_NUM, pkt, sizeof(*uh) + len);
         return rc < 0 ? rc : (ssize_t)len;
     }
+}
+
+/*
+ * SOCK-02: bounce the caller's payload into kernel memory before it reaches
+ * the transmit path.
+ *
+ * send/sendto/sendmsg used to hand the raw user pointer all the way down to
+ * memcpy(pkt + sizeof(*uh), buf, len) / ip4_output() / tcp_send(), so
+ *     sendto(fd, (void *)0xC0000000, 1400, 0, &dst, 16)
+ * put 1400 bytes of kernel memory on the wire -- remote kernel memory
+ * disclosure from an unprivileged process -- and an unmapped buf took an
+ * unrecoverable kernel fault ("Unhandled Kernel Exception") instead of
+ * returning EFAULT.  write(2) was never affected because kern_write()
+ * already bounces.
+ *
+ * A datagram must be copied whole (it is one packet, and the per-family size
+ * limits below reject anything oversized anyway); a stream may be chunked,
+ * which is what keeps a multi-megabyte TCP send working without a
+ * multi-megabyte kernel allocation.
+ */
+#define AFI_SEND_CHUNK (64U * 1024U)
+
+ssize_t afinet_sendto(int fd, const void *ubuf, size_t len, int flags,
+                      const void *addr, socklen_t addrlen) {
+    afi_sock_t *s = afi_from_fd(fd);
+    if (!s) return -ENOTSOCK;
+    if (!ubuf && len) return -EINVAL;   /* len==0 is a valid empty datagram */
+    if (len == 0)
+        return afinet_sendto_k(fd, ubuf, 0, flags, addr, addrlen);
+
+    int stream = (s->type == SOCK_STREAM && s->tcp) ? 1 : 0;
+
+    /* Reject an oversized datagram before allocating for it. */
+    if (!stream && len > AFI_DATA_MAX)
+        return -EMSGSIZE;
+
+    size_t cap = stream ? (len < AFI_SEND_CHUNK ? len : AFI_SEND_CHUNK) : len;
+    uint8_t *kbuf = kmalloc(cap);
+    if (!kbuf) return -ENOMEM;
+
+    ssize_t total = 0;
+    while ((size_t)total < len) {
+        size_t chunk = len - (size_t)total;
+        if (chunk > cap) chunk = cap;
+        if (copyin((const uint8_t *)ubuf + total, kbuf, chunk) != 0) {
+            kfree(kbuf, cap);
+            return total ? total : -EFAULT;
+        }
+        ssize_t w = afinet_sendto_k(fd, kbuf, chunk, flags, addr, addrlen);
+        if (w < 0) {
+            kfree(kbuf, cap);
+            return total ? total : w;
+        }
+        total += w;
+        if ((size_t)w < chunk)   /* partial send (nonblock / window full) */
+            break;
+        if (!stream)             /* exactly one datagram */
+            break;
+    }
+    kfree(kbuf, cap);
+    return total;
 }
 
 ssize_t afinet_recvfrom(int fd, void *buf, size_t len, int flags,

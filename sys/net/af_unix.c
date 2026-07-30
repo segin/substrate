@@ -87,6 +87,7 @@ static int sock_fd_invalid(int fd) {
     return fd < 0 || fd >= MAX_FD || !current_process || !current_process->fds[fd];
 }
 
+
 /* Substrate uses BSD-style msghdr; mirror the user-visible field set
  * for the iov walk in sys_send/recvmsg.  Kernel socket.h has a
  * narrower form, so cast through this struct's interpretation. */
@@ -905,6 +906,29 @@ static afunix_sock_t *afunix_from_fd(int fd) {
     return (afunix_sock_t *)(uintptr_t)n->impl;
 }
 
+/*
+ * Does this descriptor actually refer to a socket of any family?
+ *
+ * SOCK-09: sys_setsockopt() used to return 0 for anything at all, so a caller
+ * probing an fd with setsockopt() was told "socket" about a regular file, a
+ * directory or a closed descriptor.  The family test mirrors the dispatch
+ * already used by sys_send/sys_sendto: AF_UNIX sockets answer
+ * afunix_from_fd(), the other families are identified by their node read
+ * handler.
+ */
+static int sock_fd_is_socket(int fd) {
+    if (sock_fd_invalid(fd)) return 0;
+    if (afunix_from_fd(fd)) return 1;
+
+    file_t *f = current_process->fds[fd];
+    if (f && f->f_data) {
+        fs_node_t *n = (fs_node_t *)f->f_data;
+        if (n->read == (void *)afinet_node_read) return 1;
+        if (n->read == (void *)afpkt_node_read) return 1;
+    }
+    return 0;
+}
+
 /* ============================================================
  * Syscalls
  * ============================================================ */
@@ -1034,9 +1058,15 @@ int sys_bind(int fd, const struct sockaddr *uaddr, socklen_t addrlen) {
 
     if (addr->sa_family == AF_UNIX) {
         const char *p = ((const struct sockaddr_un *)addr)->sun_path;
+        /* UNIX-08: this ran before the addrlen > AFUNIX_PATH_MAX+2 rejection
+         * below and took its %.*s precision from the caller's addrlen, which
+         * can exceed what actually landed in kbuf -- printing ~170 bytes of
+         * adjacent kernel stack.  Bound the precision by the bytes we really
+         * copied, not by what the caller claimed. */
+        socklen_t tracelen = clen >= 2 ? clen - 2 : 0;
         XFD("sys_bind pid=%d fd=%d af_unix path='%.*s'",
             current_process ? (int)current_process->pid : -1, fd,
-            (int)(addrlen >= 2 ? addrlen - 2 : 0),
+            (int)tracelen,
             p ? p : "(null)");
     }
     if (addr->sa_family == AF_PACKET) {
@@ -1207,11 +1237,21 @@ int sys_accept(int fd, struct sockaddr *addr, socklen_t *addrlen) {
     /* Installed: drop the working (R3) reference.  server_side is now held by
      * its fd and its peer link — the steady-state connected pair. */
     afunix_unref(server_side);
-    if (addr && addrlen && *addrlen >= 2) {
-        /* No peer address on AF_UNIX without explicit bind. */
-        ((struct sockaddr_un *)addr)->sun_family = AF_UNIX;
-        ((struct sockaddr_un *)addr)->sun_path[0] = '\0';
-        *addrlen = 2;
+    /*
+     * SOCK-01: addr/addrlen arrive as raw userspace pointers.  This used to
+     * assign through them directly, so accept(lfd, (void *)0xC0100000, &len)
+     * wrote AF_UNIX plus a NUL into kernel memory at an address of the
+     * caller's choosing -- an arbitrary kernel write available to any process
+     * that can create a socket -- and *addrlen was read raw as well.  Build
+     * the answer in kernel memory and copy it out under validation.
+     */
+    if (addr && addrlen) {
+        struct sockaddr_un kun;
+
+        memset(&kun, 0, sizeof(kun));
+        kun.sun_family = AF_UNIX;
+        /* No peer address on AF_UNIX without an explicit bind: family only. */
+        (void)sock_copyout_sockaddr(&kun, 2, addr, addrlen);
     }
     XFD("sys_accept fd=%d -> newfd=%d server_side=%p peer=%p",
         fd, newfd, server_side, server_side->peer);
@@ -1570,12 +1610,35 @@ static ssize_t afunix_dgram_deliver(afunix_sock_t *dst, const uint8_t *buf,
 ssize_t sys_sendto(int fd, const void *buf, size_t len, int flags,
                    const struct sockaddr *addr, socklen_t addrlen) {
     if (sock_fd_invalid(fd)) return -EBADF;
-    /* Route by destination address family first. */
+
+    /*
+     * SOCK-02: `addr` is a raw userspace pointer.  Reading addr->sa_family
+     * directly here dereferenced it in kernel context, so a bad pointer
+     * panicked the kernel rather than returning EFAULT, and every downstream
+     * user of `addr` (including the AF_UNIX path walk below) then worked off
+     * user memory that could change underneath it.  Copy it in once, up
+     * front, and route off the kernel copy -- the same treatment sys_bind()
+     * already applies.
+     */
+    uint8_t kaddrbuf[SOCK_UADDR_MAX];
+    const struct sockaddr *kaddr = NULL;
+    socklen_t kaddrlen = 0;
     if (addr && addrlen >= 2) {
-        if (addr->sa_family == AF_PACKET)
-            return afpacket_sendto(fd, buf, len, flags, addr, addrlen);
-        if (addr->sa_family == AF_INET || addr->sa_family == AF_INET6)
-            return afinet_sendto(fd, buf, len, flags, addr, addrlen);
+        kaddrlen = addrlen > (socklen_t)sizeof(kaddrbuf)
+                       ? (socklen_t)sizeof(kaddrbuf) : addrlen;
+        memset(kaddrbuf, 0, sizeof(kaddrbuf));
+        if (copyin(addr, kaddrbuf, kaddrlen) != 0) return -EFAULT;
+        kaddr = (const struct sockaddr *)kaddrbuf;
+    }
+
+    /* Route by destination address family first.  The payload bounce happens
+     * inside afpacket_sendto/afinet_sendto, which know their own size
+     * limits. */
+    if (kaddr) {
+        if (kaddr->sa_family == AF_PACKET)
+            return afpacket_sendto(fd, buf, len, flags, kaddr, kaddrlen);
+        if (kaddr->sa_family == AF_INET || kaddr->sa_family == AF_INET6)
+            return afinet_sendto(fd, buf, len, flags, kaddr, kaddrlen);
     }
     /* No addr: route by fd type. */
     if (fd >= 0 && fd < MAX_FD && current_process) {
@@ -1593,11 +1656,14 @@ ssize_t sys_sendto(int fd, const void *buf, size_t len, int flags,
     }
     /* AF_UNIX named SOCK_DGRAM: sendto() delivers to the addressed,
      * unconnected destination (resolved by path), not a connected peer. */
-    if (addr && addrlen > 2 && addr->sa_family == AF_UNIX) {
+    if (kaddr && kaddrlen > 2 && kaddr->sa_family == AF_UNIX) {
         afunix_sock_t *s = afunix_from_fd(fd);
         if (s && s->type == SOCK_DGRAM) {
-            socklen_t pathlen = addrlen - 2;
-            const char *path = ((const struct sockaddr_un *)addr)->sun_path;
+            /* Path comes from the kernel copy taken above, so the walk below
+             * (norm_pathlen / memcmp / memcpy into kpath) can no longer read
+             * user memory or race a concurrent remap. */
+            socklen_t pathlen = kaddrlen - 2;
+            const char *path = ((const struct sockaddr_un *)kaddr)->sun_path;
             if (pathlen > AFUNIX_PATH_MAX) pathlen = AFUNIX_PATH_MAX;
             pathlen = afunix_norm_pathlen(path, pathlen);
             afunix_sock_t *dst = afunix_find_bound(path, pathlen);
@@ -1622,7 +1688,31 @@ ssize_t sys_sendto(int fd, const void *buf, size_t len, int flags,
                 file_t *ff = current_process->fds[fd];
                 if (ff && (ff->f_flag & FNONBLOCK)) nonblock = 1;
             }
-            ssize_t dr = afunix_dgram_deliver(dst, (const uint8_t *)buf, len, nonblock);
+            /*
+             * UNIX-01: this used to hand the raw user pointer to
+             * afunix_dgram_deliver(), which memcpy()s it into the
+             * destination socket's receive buffer.  That was a clean
+             * arbitrary kernel READ: point buf at kernel memory, send to a
+             * socket you own, then read the kernel's bytes back out of it.
+             * Bounce through kernel memory we control.
+             */
+            ssize_t dr;
+            if (len == 0) {
+                dr = afunix_dgram_deliver(dst, NULL, 0, nonblock);
+            } else if (len > 0xFFFF) {
+                dr = -EMSGSIZE;         /* one datagram, same cap as send() */
+            } else {
+                uint8_t *kpay = kmalloc(len);
+                if (!kpay) {
+                    dr = -ENOMEM;
+                } else if (copyin(buf, kpay, len) != 0) {
+                    kfree(kpay, len);
+                    dr = -EFAULT;
+                } else {
+                    dr = afunix_dgram_deliver(dst, kpay, len, nonblock);
+                    kfree(kpay, len);
+                }
+            }
             afunix_unref(dst);   /* drop transient ref */
             return dr;
         }
@@ -2011,6 +2101,18 @@ int sys_getpeername(int fd, struct sockaddr *uaddr, socklen_t *uaddrlen) {
 
 int sys_setsockopt(int fd, int level, int optname,
                    const void *optval, socklen_t optlen) {
+    /*
+     * SOCK-09: this used to return 0 unconditionally, so setsockopt() on a
+     * closed fd, a regular file or a directory reported success.  Callers
+     * that probe with setsockopt() to decide whether they hold a socket were
+     * told yes about anything.  Validate the descriptor first; the option
+     * itself may still be a silent no-op, but the fd has to be a socket.
+     */
+    if (sock_fd_invalid(fd)) return -EBADF;
+    if (!sock_fd_is_socket(fd)) return -ENOTSOCK;
+    /* An option that names a value must name a plausible amount of it. */
+    if (optval && optlen > SOCK_UADDR_MAX) return -EINVAL;
+
     /* SO_REUSEADDR is the one option with observable behaviour — it relaxes
      * bind()'s EADDRINUSE check — so record it on the AF_INET socket.  All
      * other options are accepted silently. */

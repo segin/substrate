@@ -181,4 +181,39 @@ ssize_t afpacket_recvfrom(int fd, void *buf, size_t len, int flags,
                           void *sll, socklen_t *addrlen);
 size_t  afpkt_node_read(struct fs_node *, off_t, size_t, uint8_t *);
 
+/* -- userspace boundary helpers for the socket syscalls --------------- *
+ *
+ * The socket syscalls receive raw userspace pointers.  Dereferencing one
+ * directly is both a security hole (a caller-chosen kernel address gets
+ * written or read) and a stability hole (an unmapped pointer takes an
+ * unrecoverable kernel fault instead of returning EFAULT).  Task #156
+ * (NET-03) fixed this for bind/getsockname/getsockopt; these helpers exist
+ * so accept/sendto/recvfrom get the same treatment without each call site
+ * re-deriving the copyin/copyout dance.
+ *
+ * SOCK_UADDR_MAX bounds the on-stack sockaddr copy.  It covers
+ * sockaddr_un (2 + 108), sockaddr_in6 (28) and sockaddr_ll (20) with room
+ * to spare; a caller naming more than this gets its address truncated to
+ * the bound, which is exactly what the BSD API says may happen.
+ */
+#define SOCK_UADDR_MAX 128
+
+/* Read a user socklen_t.  Returns 0 and stores the value, or -EFAULT. */
+int sock_copyin_addrlen(const socklen_t *ulen, socklen_t *out);
+
+/*
+ * Copy a kernel-built sockaddr out to a user buffer whose capacity is named
+ * by *ulen, then write back the address length.
+ *
+ * At most *ulen bytes are copied, but the value written back is `srclen` --
+ * the full, untruncated size.  That is deliberate and required: POSIX says
+ * the returned length "shall refer to the value before truncation", which is
+ * the only way a caller can tell that its buffer was too small.  Reporting
+ * the copied length instead would silently hide truncation.
+ *
+ * addr == NULL or ulen == NULL is a no-op success, matching accept(2).
+ */
+int sock_copyout_sockaddr(const void *src, socklen_t srclen,
+                          void *addr, socklen_t *ulen);
+
 #endif /* _SYS_NET_INET_H */

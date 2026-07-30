@@ -217,7 +217,28 @@ ssize_t afpacket_sendto(int fd, const void *buf, size_t len, int flags,
     if (ifindex <= 0) return -EDESTADDRREQ;
     netdev_t *dev = netdev_by_index((uint32_t)ifindex);
     if (!dev) return -ENODEV;
-    int rc = netdev_xmit(dev, buf, len);
+
+    /*
+     * SOCK-02: `buf` is a raw userspace pointer from send/sendto/sendmsg and
+     * this used to pass it straight to netdev_xmit(), which DMAs it onto the
+     * wire.  sendto(fd, (void *)0xC0000000, 1400, ...) therefore transmitted
+     * kernel memory, and an unmapped buf faulted in the driver instead of
+     * returning EFAULT.  One frame, so one bounce -- no chunking.
+     */
+    if (!buf && len) return -EINVAL;
+    if (len == 0) return 0;
+    /* An AF_PACKET frame carries its own link header; bound it to what the
+     * device can actually put on the wire rather than trusting `len`. */
+    if (len > NETDEV_MTU_MAX) return -EMSGSIZE;
+
+    uint8_t *kbuf = kmalloc(len);
+    if (!kbuf) return -ENOMEM;
+    if (copyin(buf, kbuf, len) != 0) {
+        kfree(kbuf, len);
+        return -EFAULT;
+    }
+    int rc = netdev_xmit(dev, kbuf, len);
+    kfree(kbuf, len);
     if (rc < 0) return rc;
     return (ssize_t)len;
 }
