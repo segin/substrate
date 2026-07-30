@@ -481,6 +481,42 @@ size_t afinet_node_read(fs_node_t *node, off_t off, size_t size, uint8_t *buf) {
     }
 }
 
+/*
+ * UDP-03: compute the transmit checksum.
+ *
+ * Every UDP send path wrote `uh->check = 0` and left it there.  Over IPv4
+ * that is legal-but-lazy (a zero checksum means "not computed", so silent
+ * corruption of our datagrams went undetected on the wire); over IPv6 a zero
+ * checksum is ILLEGAL (RFC 8200 8.1), so a conformant peer discarded every
+ * v6 datagram we ever sent.  The primitives already existed and TCP, ICMPv6
+ * and inet6 all used them -- UDP simply never did.
+ *
+ * The source address is the one routing will pick, which is why this needs
+ * ip4_source_for()/ip6_source_for(): the socket does not know it.  RFC 768
+ * reserves the value 0 to mean "no checksum", so a genuine 0 is transmitted
+ * as 0xFFFF (the equivalent one's-complement representation).
+ *
+ * `dgram` covers the UDP header AND payload, so these must be called after
+ * the payload has been copied in.
+ */
+static void udp_csum4(struct udphdr *uh, uint32_t daddr, size_t dgram_len) {
+    uh->check = 0;
+    uint32_t saddr = ip4_source_for(daddr);
+    uint16_t c = inet_csum_pseudo4(saddr, daddr, IPPROTO_UDP_NUM,
+                                   (uint16_t)dgram_len, uh);
+    uh->check = c ? c : 0xFFFF;
+}
+
+static void udp_csum6(struct udphdr *uh, const uint8_t daddr[16],
+                      size_t dgram_len) {
+    uint8_t saddr[16];
+    uh->check = 0;
+    if (ip6_source_for(daddr, saddr) != 0) return;  /* unroutable; send fails */
+    uint16_t c = inet_csum_pseudo6(saddr, daddr, IPPROTO_UDP_NUM,
+                                   (uint32_t)dgram_len, uh);
+    uh->check = c ? c : 0xFFFF;
+}
+
 static size_t afinet_node_write(fs_node_t *node, off_t off, size_t size, const uint8_t *buf) {
     (void)off;
     afi_sock_t *s = (afi_sock_t *)(uintptr_t)node->impl;
@@ -505,10 +541,10 @@ static size_t afinet_node_write(fs_node_t *node, off_t off, size_t size, const u
             if (!s->local_port) s->local_port = __builtin_bswap16(uh->source);
             uh->dest   = __builtin_bswap16(s->peer_port);
             uh->len    = __builtin_bswap16((uint16_t)(sizeof(*uh) + size));
-            uh->check  = 0;
             memcpy(pkt + sizeof(*uh), buf, size);
             uint32_t daddr;
             memcpy(&daddr, s->peer_addr, 4);
+            udp_csum4(uh, daddr, sizeof(*uh) + size);
             int rc = ip4_output(daddr, IPPROTO_UDP_NUM, pkt, sizeof(*uh) + size);
             return rc < 0 ? (size_t)rc : size;
         } else {
@@ -529,8 +565,8 @@ static size_t afinet_node_write(fs_node_t *node, off_t off, size_t size, const u
             if (!s->local_port) s->local_port = __builtin_bswap16(uh->source);
             uh->dest   = __builtin_bswap16(s->peer_port);
             uh->len    = __builtin_bswap16((uint16_t)(sizeof(*uh) + size));
-            uh->check  = 0;
             memcpy(pkt + sizeof(*uh), buf, size);
+            udp_csum6(uh, s->peer_addr, sizeof(*uh) + size);
             int rc = ip6_output(s->peer_addr, IPPROTO_UDP_NUM, pkt, sizeof(*uh) + size);
             return rc < 0 ? (size_t)rc : size;
         } else {
@@ -1098,10 +1134,10 @@ static ssize_t afinet_sendto_k(int fd, const void *buf, size_t len, int flags,
         uh->source = __builtin_bswap16(sport);
         uh->dest   = __builtin_bswap16(dport);
         uh->len    = __builtin_bswap16((uint16_t)(sizeof(*uh) + len));
-        uh->check  = 0;
         memcpy(pkt + sizeof(*uh), buf, len);
         uint32_t d;
         memcpy(&d, daddr_buf, 4);
+        udp_csum4(uh, d, sizeof(*uh) + len);
         int rc = ip4_output(d, IPPROTO_UDP_NUM, pkt, sizeof(*uh) + len);
         return rc < 0 ? rc : (ssize_t)len;
     } else {
@@ -1119,8 +1155,8 @@ static ssize_t afinet_sendto_k(int fd, const void *buf, size_t len, int flags,
         uh->source = __builtin_bswap16(sport);
         uh->dest   = __builtin_bswap16(dport);
         uh->len    = __builtin_bswap16((uint16_t)(sizeof(*uh) + len));
-        uh->check  = 0;
         memcpy(pkt + sizeof(*uh), buf, len);
+        udp_csum6(uh, daddr_buf, sizeof(*uh) + len);
         int rc = ip6_output(daddr_buf, IPPROTO_UDP_NUM, pkt, sizeof(*uh) + len);
         return rc < 0 ? rc : (ssize_t)len;
     }
@@ -1293,30 +1329,60 @@ ssize_t afinet_recvfrom(int fd, void *buf, size_t len, int flags,
 /* Upper-half delivery — called from IP/UDP input paths               */
 /* ------------------------------------------------------------------ */
 
-static int sock_matches_v4(afi_sock_t *s, uint8_t proto, uint16_t dport) {
-    if (s->closed) return 0;
-    if (s->family != AF_INET) return 0;
-    if (s->type == SOCK_RAW) {
-        return s->protocol == 0 || s->protocol == (int)proto;
-    }
-    /* DGRAM/UDP: only a datagram socket bound to the destination port
-     * receives.  A SOCK_STREAM socket never matches here, and an unbound
-     * socket (local_port==0) is NOT a promiscuous catch-all — that made
-     * every stray TCP/UDP socket swallow a copy of every datagram and
-     * corrupted delivery (duplicate/out-of-order receives). */
-    if (s->type != SOCK_DGRAM) return 0;
-    if (proto != IPPROTO_UDP_NUM) return 0;
-    return s->local_port != 0 && s->local_port == dport;
+/*
+ * UDP-01: score a datagram socket against a received datagram's full
+ * 4-tuple, not just its local port.
+ *
+ * The demux used to be "local_port == dport" and nothing else -- daddr was
+ * explicitly thrown away ("(void)daddr;") and the delivery loop enqueued a
+ * COPY into every socket that matched.  Three separate defects fell out of
+ * that:
+ *
+ *   - a connect()ed UDP socket accepted datagrams from any source, so a
+ *     spoofed reply beat the real server's; POSIX requires that a connected
+ *     datagram socket receive only from its peer;
+ *   - bind(127.0.0.1, X) received datagrams that arrived on a real
+ *     interface, because the bound local address was never compared;
+ *   - two sockets sharing a port each got the whole datagram, so two
+ *     resolvers read each other's answers.
+ *
+ * Returns -1 for "does not match at all", otherwise a specificity score;
+ * the caller delivers a unicast datagram to the single highest-scoring
+ * socket, which is the BSD best-match rule.  A wildcard bind (0.0.0.0/::)
+ * and an unconnected socket both still match -- they just lose to a socket
+ * that named the address or the peer.
+ */
+static int addr_is_wild(const uint8_t *a, size_t n) {
+    for (size_t i = 0; i < n; i++) if (a[i]) return 0;
+    return 1;
 }
-static int sock_matches_v6(afi_sock_t *s, uint8_t proto, uint16_t dport) {
-    if (s->closed) return 0;
-    if (s->family != AF_INET6) return 0;
-    if (s->type == SOCK_RAW) {
-        return s->protocol == 0 || s->protocol == (int)proto;
+
+static int sock_score(afi_sock_t *s, int family, uint8_t proto,
+                      const void *saddr, const void *daddr,
+                      uint16_t sport, uint16_t dport, size_t alen) {
+    if (s->closed) return -1;
+    if (s->family != family) return -1;
+    if (s->type == SOCK_RAW)
+        return (s->protocol == 0 || s->protocol == (int)proto) ? 0 : -1;
+    /* DGRAM/UDP: a SOCK_STREAM socket never matches here, and an unbound
+     * socket (local_port==0) is NOT a promiscuous catch-all — that made
+     * every stray TCP/UDP socket swallow a copy of every datagram. */
+    if (s->type != SOCK_DGRAM) return -1;
+    if (proto != IPPROTO_UDP_NUM) return -1;
+    if (s->local_port == 0 || s->local_port != dport) return -1;
+
+    int score = 0;
+    if (!addr_is_wild(s->local_addr, alen)) {
+        if (memcmp(s->local_addr, daddr, alen) != 0) return -1;
+        score += 1;
     }
-    if (s->type != SOCK_DGRAM) return 0;
-    if (proto != IPPROTO_UDP_NUM) return 0;
-    return s->local_port != 0 && s->local_port == dport;
+    if (s->connected) {
+        if (s->peer_port != sport) return -1;
+        if (!addr_is_wild(s->peer_addr, alen) &&
+            memcmp(s->peer_addr, saddr, alen) != 0) return -1;
+        score += 2;
+    }
+    return score;
 }
 
 static void enqueue(afi_sock_t *s, uint8_t family, uint8_t proto, uint16_t port,
@@ -1339,7 +1405,7 @@ static void enqueue(afi_sock_t *s, uint8_t family, uint8_t proto, uint16_t port,
 int afinet_deliver_v4(uint32_t saddr, uint32_t daddr,
                       uint8_t protocol,
                       const uint8_t *pkt, size_t len, int for_dgram) {
-    (void)daddr;
+    /* UDP-01: daddr is now part of the demux key (see sock_score). */
     int delivered = 0;
     uint16_t sport = 0, dport = 0;
 
@@ -1373,21 +1439,31 @@ int afinet_deliver_v4(uint32_t saddr, uint32_t daddr,
      * about to enqueue into its ring, and enqueue()'s ring-counter
      * mutation is serialised against process-context readers. */
     unsigned long fl = spinlock_acquire_irq(&afi_lock);
+    afi_sock_t *best = NULL;
+    int best_score = -1;
     for (afi_sock_t *s = g_afi_head; s; s = s->next) {
-        if (!sock_matches_v4(s, protocol, dport)) continue;
+        int score = sock_score(s, AF_INET, protocol, &saddr, &daddr,
+                               sport, dport, 4);
+        if (score < 0) continue;
         if (s->type == SOCK_RAW) {
             /* RAW gets the full IP packet, delivered only via the ip4_input
              * path (for_dgram==0) — NOT also from udp_input, else every
-             * datagram is enqueued twice. */
+             * datagram is enqueued twice.  RAW legitimately fans out: every
+             * subscriber to a protocol sees every packet of it. */
             if (for_dgram) continue;
             enqueue(s, AF_INET, protocol, sport, &saddr, pkt, len);
+            delivered = 1;
         } else {
-            /* DGRAM: payload after UDP header, delivered only via udp_input. */
+            /* DGRAM: delivered only via udp_input, to the single best match
+             * (UDP-01) rather than to every socket on the port. */
             if (!for_dgram) continue;
-            enqueue(s, AF_INET, protocol, sport, &saddr,
-                    payload + sizeof(struct udphdr),
-                    payload_len - sizeof(struct udphdr));
+            if (score > best_score) { best_score = score; best = s; }
         }
+    }
+    if (best) {
+        enqueue(best, AF_INET, protocol, sport, &saddr,
+                payload + sizeof(struct udphdr),
+                payload_len - sizeof(struct udphdr));
         delivered = 1;
     }
     spinlock_release_irq(&afi_lock, fl);
@@ -1397,7 +1473,7 @@ int afinet_deliver_v4(uint32_t saddr, uint32_t daddr,
 int afinet_deliver_v6(const uint8_t saddr[16], const uint8_t daddr[16],
                       uint8_t protocol,
                       const uint8_t *pkt, size_t len, int for_dgram) {
-    (void)daddr;
+    /* UDP-01: daddr is now part of the demux key (see sock_score). */
     int delivered = 0;
     uint16_t sport = 0, dport = 0;
 
@@ -1420,8 +1496,12 @@ int afinet_deliver_v6(const uint8_t saddr[16], const uint8_t daddr[16],
 
     /* NET-01: walk + enqueue under afi_lock — see afinet_deliver_v4. */
     unsigned long fl = spinlock_acquire_irq(&afi_lock);
+    afi_sock_t *best = NULL;
+    int best_score = -1;
     for (afi_sock_t *s = g_afi_head; s; s = s->next) {
-        if (!sock_matches_v6(s, protocol, dport)) continue;
+        int score = sock_score(s, AF_INET6, protocol, saddr, daddr,
+                               sport, dport, 16);
+        if (score < 0) continue;
         if (s->type == SOCK_RAW) {
             if (for_dgram) continue;
             /* RAW v6 traditionally gets the payload (no IPv6 hdr).
@@ -1433,12 +1513,17 @@ int afinet_deliver_v6(const uint8_t saddr[16], const uint8_t daddr[16],
                 blen = len - sizeof(struct ip6_hdr);
             }
             enqueue(s, AF_INET6, protocol, sport, saddr, body, blen);
+            delivered = 1;
         } else {
+            /* UDP-01: single best match, not a copy to every socket. */
             if (!for_dgram) continue;
-            enqueue(s, AF_INET6, protocol, sport, saddr,
-                    payload + sizeof(struct udphdr),
-                    payload_len - sizeof(struct udphdr));
+            if (score > best_score) { best_score = score; best = s; }
         }
+    }
+    if (best) {
+        enqueue(best, AF_INET6, protocol, sport, saddr,
+                payload + sizeof(struct udphdr),
+                payload_len - sizeof(struct udphdr));
         delivered = 1;
     }
     spinlock_release_irq(&afi_lock, fl);

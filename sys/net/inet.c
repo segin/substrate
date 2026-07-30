@@ -152,6 +152,21 @@ static netdev_t *route_for_v4(uint32_t daddr, int *via_gw_out) {
 
 static uint16_t g_ip_id_counter;
 
+/*
+ * UDP-03: the source address a datagram will actually leave with, so a
+ * caller can build the pseudo-header checksum before handing the packet to
+ * ip4_output().  UDP had no checksum at all -- it wrote uh->check = 0 on
+ * every transmit -- because the source address is chosen here by routing,
+ * not by the socket, and the send path had no way to ask for it.  Now it
+ * can.  Returns 0.0.0.0 when the destination is unroutable; the send will
+ * fail with ENETUNREACH a moment later anyway.
+ */
+uint32_t ip4_source_for(uint32_t daddr) {
+    int via_gw = 0;
+    netdev_t *dev = route_for_v4(daddr, &via_gw);
+    return dev ? dev->ip4_addr : 0;
+}
+
 int ip4_output(uint32_t daddr, uint8_t protocol,
                const void *payload, size_t payload_len) {
     int via_gw = 0;

@@ -1778,8 +1778,23 @@ ssize_t sys_sendmsg(int fd, const struct msghdr *umsg, int flags) {
         size_t off = 0;
         while (off + sizeof(struct kcmsghdr) <= cmsglen) {
             const struct kcmsghdr *c = (const struct kcmsghdr *)(cmsgbuf + off);
-            if (c->cmsg_len < sizeof(*c) || off + c->cmsg_len > cmsglen)
-                return -EINVAL;
+            /*
+             * UNIX-02: `off + c->cmsg_len > cmsglen` is a 32-bit add and
+             * cmsg_len is entirely attacker-chosen, so it WRAPPED: a second
+             * cmsg claiming cmsg_len 0xFFFFFFFD made 12 + 0xFFFFFFFD come
+             * out as 9, which passed the bound.  KCMSG_ALIGN(0xFFFFFFFD) is
+             * then 0, so `off` never advanced and the loop spun forever in
+             * kernel context with no signal check -- an unkillable thread
+             * burning a CPU permanently, from one 24-byte control buffer.
+             *
+             * Bound by subtraction so nothing can wrap, and require the
+             * aligned advance to be non-zero so the loop must make progress
+             * whatever else happens.
+             */
+            if (c->cmsg_len < sizeof(*c)) return -EINVAL;
+            if (c->cmsg_len > cmsglen - off) return -EINVAL;
+            size_t advance = KCMSG_ALIGN(c->cmsg_len);
+            if (advance == 0 || advance > cmsglen - off) return -EINVAL;
             if (c->cmsg_level == SOL_SOCKET && c->cmsg_type == SCM_RIGHTS) {
                 size_t datalen = c->cmsg_len - sizeof(*c);
                 if (datalen % sizeof(int) != 0) return -EINVAL;
@@ -1816,7 +1831,7 @@ ssize_t sys_sendmsg(int fd, const struct msghdr *umsg, int flags) {
                 s->peer->rx_fdq_count += queued;
                 mutex_unlock(&s->peer->lock);
             }
-            off += KCMSG_ALIGN(c->cmsg_len);
+            off += advance;
         }
     }
 
@@ -2159,7 +2174,24 @@ int sys_getsockopt(int fd, int level, int optname,
     #define SO_ACCEPTCONN_K 30
     if (level == SOL_SOCKET_K) {
         if (optname == SO_ERROR_K) {
-            return getsockopt_ret_int(afinet_so_error(fd), optval, optlen);
+            /*
+             * SOCK-07: afinet_so_error() returns -ENOTSOCK for anything that
+             * is not an AF_INET socket, and that value was handed straight to
+             * getsockopt_ret_int() -- so getsockopt() SUCCEEDED and wrote -88
+             * into the caller's int.  Every `if (so_error) fail();` idiom
+             * (libICE/DCOP, curl, ssh) then saw a phantom error on any
+             * AF_UNIX socket or socketpair.
+             *
+             * An AF_UNIX socket has no asynchronous error state to report --
+             * connect() on one either succeeds or fails synchronously -- so
+             * SO_ERROR is 0 for it, which is the truthful answer.  A genuine
+             * "not a socket" is reported as the getsockopt() return value,
+             * where a caller can actually see it, not as the option data.
+             */
+            if (afunix_from_fd(fd)) return getsockopt_ret_int(0, optval, optlen);
+            int e = afinet_so_error(fd);
+            if (e < 0) return e;
+            return getsockopt_ret_int(e, optval, optlen);
         }
         if (optname == SO_TYPE_K) {
             /* Report the socket's actual type (SOCK_STREAM / SOCK_DGRAM / ...).

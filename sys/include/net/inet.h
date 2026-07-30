@@ -84,6 +84,11 @@ void ip4_input(netdev_t *dev, const uint8_t *pkt, size_t len);
 int  ip4_output(uint32_t daddr, uint8_t protocol,
                 const void *payload, size_t payload_len);
 
+/* Source address routing will choose for `daddr` — needed to build a UDP
+ * pseudo-header checksum before the packet reaches ip4_output/ip6_output. */
+uint32_t ip4_source_for(uint32_t daddr);
+int      ip6_source_for(const uint8_t daddr[16], uint8_t out[16]);
+
 /* -- IPv6 input/output ---------------------------------------------- */
 
 void ip6_input(netdev_t *dev, const uint8_t *pkt, size_t len);

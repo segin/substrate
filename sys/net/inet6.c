@@ -204,6 +204,18 @@ static netdev_t *route_for_v6(const uint8_t daddr[16], int *via_gw_out) {
     return NULL;
 }
 
+/* UDP-03 (v6 twin of ip4_source_for): the source address routing will pick,
+ * so the UDP send path can compute the mandatory IPv6 pseudo-header
+ * checksum.  A zero UDP checksum is illegal over IPv6, so conformant peers
+ * were discarding every v6 datagram we sent. */
+int ip6_source_for(const uint8_t daddr[16], uint8_t out[16]) {
+    int via_gw = 0;
+    netdev_t *dev = route_for_v6(daddr, &via_gw);
+    if (!dev) return -1;
+    memcpy(out, dev->ip6_addr, 16);
+    return 0;
+}
+
 int ip6_output(const uint8_t daddr[16], uint8_t next_header,
                const void *payload, size_t payload_len) {
     int via_gw = 0;
