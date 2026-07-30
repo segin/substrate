@@ -81,10 +81,16 @@ typedef struct xhci_hc {
     uint8_t  enum_slot;            /* slot of the current address-0 device */
     uint8_t  enum_port;
 
+    char      name[8];  /* "xhciN", backs hcd.name */
     usb_hcd_t hcd;
 } xhci_hc_t;
 
-static xhci_hc_t xhci_ctrl;
+/*
+ * One instance per PCI function.  Machines with more than one xHCI controller
+ * (common once front-panel USB 3 headers sit behind a second controller) used
+ * to get only the first one; the rest of the ports were dead.
+ */
+static uint8_t xhci_instances;
 
 /* ---- register access ---- */
 static inline uint32_t rd32(volatile uint8_t *b, uint32_t r) { return *(volatile uint32_t *)(b + r); }
@@ -699,9 +705,33 @@ static int xhci_start(xhci_hc_t *hc)
     return 0;
 }
 
+/*
+ * Release everything xhci_start() may have acquired, then the controller
+ * state itself.  Needed because each controller is now a separate heap
+ * allocation: dropping the xhci_hc_t on a failed attach would otherwise
+ * strand its DMA rings with no pointer left to free them through.
+ */
+static void xhci_teardown(xhci_hc_t *hc)
+{
+    if (hc->bounce)
+        dma_free_coherent(hc->bounce, XHCI_BOUNCE_SIZE);
+    if (hc->erst)
+        dma_free_coherent(hc->erst, 64);
+    if (hc->event_ring)
+        dma_free_coherent(hc->event_ring,
+                          XHCI_RING_TRBS * sizeof(struct xhci_trb));
+    if (hc->cmd_ring.trb)
+        dma_free_coherent(hc->cmd_ring.trb,
+                          XHCI_RING_TRBS * sizeof(struct xhci_trb));
+    if (hc->dcbaa)
+        dma_free_coherent(hc->dcbaa, (XHCI_MAX_SLOTS + 1) * 8);
+    if (hc->mmio)
+        iounmap((void *)hc->mmio);
+    kfree(hc, sizeof(*hc));
+}
+
 static int xhci_pci_attach(struct device *dev)
 {
-    if (xhci_ctrl.initialized) return -1;
     pci_device_t *pdev = pci_find_device_by_kdev(dev);
     if (!pdev) return -1;
 
@@ -714,9 +744,17 @@ static int xhci_pci_attach(struct device *dev)
     pci_write_config16(pdev->bus, pdev->slot, pdev->func, PCI_CONFIG_COMMAND,
                        cmd | 0x0002 | 0x0004);
 
-    xhci_hc_t *hc = &xhci_ctrl;
+    xhci_hc_t *hc = kzalloc(sizeof(*hc));
+    if (!hc) {
+        kprintf("xhci: out of memory allocating controller state\n");
+        return -1;
+    }
     hc->mmio = ioremap(phys, 0x4000);   /* cover cap+op(0)+runtime(0x1000)+doorbell(0x2000) */
-    if (!hc->mmio) { kprintf("xhci: ioremap failed\n"); return -1; }
+    if (!hc->mmio) {
+        kprintf("xhci: ioremap failed\n");
+        xhci_teardown(hc);
+        return -1;
+    }
     uint8_t caplen = *(volatile uint8_t *)(hc->mmio + XHCI_CAP_CAPLENGTH);
     hc->op = hc->mmio + caplen;
     hc->rt = hc->mmio + (rd32(hc->mmio, XHCI_CAP_RTSOFF) & ~0x1Fu);
@@ -729,10 +767,16 @@ static int xhci_pci_attach(struct device *dev)
     if (hc->nports == 0) hc->nports = 1;
 
     mutex_init(&hc->submit_lock, "xhci_submit");
-    if (xhci_start(hc) != 0) return -1;
+    if (xhci_start(hc) != 0) {
+        xhci_teardown(hc);
+        return -1;
+    }
+
+    snprintf(hc->name, sizeof(hc->name), "xhci%u", xhci_instances);
 
     hc->hcd.priv = hc;
-    hc->hcd.name = "xhci0";
+    hc->hcd.name = hc->name;
+    hc->hcd.hcd_index = xhci_instances;
     hc->hcd.nports = hc->nports;
     hc->hcd.submit = xhci_submit;
     hc->hcd.port_status = xhci_port_status;
@@ -740,8 +784,9 @@ static int xhci_pci_attach(struct device *dev)
     hc->hcd.port_enable = xhci_port_enable;
     usb_register_hcd(&hc->hcd);
     hc->initialized = 1;
-    kprintf("xhci: USB 3.x controller at 0x%x, %u ports, %u slots, ctx=%u\n",
-            (unsigned)phys, hc->nports, hc->maxslots, hc->ctx_size);
+    xhci_instances++;
+    kprintf("xhci: %s: USB 3.x controller at 0x%x, %u ports, %u slots, ctx=%u\n",
+            hc->name, (unsigned)phys, hc->nports, hc->maxslots, hc->ctx_size);
     return 0;
 }
 

@@ -47,10 +47,19 @@ typedef struct ehci_hc {
     void             *setup_buf;     dma_addr_t setup_dma;
     void             *bounce;        dma_addr_t bounce_dma;
 
+    char              name[8];  /* "ehciN", backs hcd.name */
     usb_hcd_t         hcd;
 } ehci_hc_t;
 
-static ehci_hc_t ehci_ctrl;
+/*
+ * One instance per PCI function.  A PC chipset commonly exposes two EHCI
+ * controllers (one per companion group), and every controller past the first
+ * used to be refused here -- leaving its root ports dead, and, because
+ * ehci_port_reset() hands low/full-speed devices off to a companion
+ * controller, leaving low-speed devices on *this* controller unreachable too
+ * if that companion was also refused.
+ */
+static uint8_t ehci_instances;
 
 /* ---- register access ---- */
 static inline uint32_t ehci_op_rd(ehci_hc_t *hc, uint32_t reg)
@@ -426,10 +435,30 @@ static int ehci_start(ehci_hc_t *hc)
     return 0;
 }
 
+/*
+ * Release everything ehci_start() may have acquired.  Needed because each
+ * controller is now a separate heap allocation: dropping the ehci_hc_t on a
+ * failed attach would otherwise strand its DMA buffers with no pointer left
+ * to free them through.
+ */
+static void ehci_teardown(ehci_hc_t *hc)
+{
+    if (hc->async_qh)
+        dma_free_coherent(hc->async_qh, sizeof(struct ehci_qh));
+    if (hc->qtd)
+        dma_free_coherent(hc->qtd, EHCI_MAX_QTD * sizeof(struct ehci_qtd));
+    if (hc->setup_buf)
+        dma_free_coherent(hc->setup_buf, 64);
+    if (hc->bounce)
+        dma_free_coherent(hc->bounce, EHCI_BOUNCE_SIZE);
+    if (hc->mmio)
+        iounmap((void *)hc->mmio);
+    kfree(hc, sizeof(*hc));
+}
+
 static int ehci_pci_attach(struct device *dev)
 {
-    if (ehci_ctrl.initialized)
-        return -1;
+    ehci_hc_t *hc;
 
     pci_device_t *pdev = pci_find_device_by_kdev(dev);
     if (!pdev)
@@ -442,40 +471,53 @@ static int ehci_pci_attach(struct device *dev)
     uint32_t bar0 = pci_read_config32(pdev->bus, pdev->slot, pdev->func, 0x10);
     uintptr_t phys = bar0 & ~0xFUL;
 
+    hc = kzalloc(sizeof(*hc));
+    if (!hc) {
+        kprintf("ehci: out of memory allocating controller state\n");
+        return -1;
+    }
+
     /* Enable memory space + bus mastering. */
     uint16_t cmd = pci_read_config16(pdev->bus, pdev->slot, pdev->func, PCI_CONFIG_COMMAND);
     pci_write_config16(pdev->bus, pdev->slot, pdev->func, PCI_CONFIG_COMMAND,
                        cmd | 0x0002 | 0x0004);
 
-    ehci_ctrl.mmio = ioremap(phys, 0x1000);
-    if (!ehci_ctrl.mmio) {
+    hc->mmio = ioremap(phys, 0x1000);
+    if (!hc->mmio) {
         kprintf("ehci: ioremap of BAR0 0x%x failed\n", (unsigned)phys);
+        ehci_teardown(hc);
         return -1;
     }
-    uint8_t caplen = *(volatile uint8_t *)(ehci_ctrl.mmio + EHCI_CAP_CAPLENGTH);
-    ehci_ctrl.op = ehci_ctrl.mmio + caplen;
-    uint32_t hcs = *(volatile uint32_t *)(ehci_ctrl.mmio + EHCI_CAP_HCSPARAMS);
-    ehci_ctrl.nports = EHCI_HCSPARAMS_N_PORTS(hcs);
-    if (ehci_ctrl.nports == 0) ehci_ctrl.nports = 1;
-    ehci_ctrl.irq = (uint8_t)pci_get_irq(pdev);
+    uint8_t caplen = *(volatile uint8_t *)(hc->mmio + EHCI_CAP_CAPLENGTH);
+    hc->op = hc->mmio + caplen;
+    uint32_t hcs = *(volatile uint32_t *)(hc->mmio + EHCI_CAP_HCSPARAMS);
+    hc->nports = EHCI_HCSPARAMS_N_PORTS(hcs);
+    if (hc->nports == 0) hc->nports = 1;
+    hc->irq = (uint8_t)pci_get_irq(pdev);
 
-    mutex_init(&ehci_ctrl.submit_lock, "ehci_submit");
+    mutex_init(&hc->submit_lock, "ehci_submit");
 
-    if (ehci_start(&ehci_ctrl) != 0)
+    if (ehci_start(hc) != 0) {
+        ehci_teardown(hc);
         return -1;
+    }
 
-    ehci_ctrl.hcd.priv = &ehci_ctrl;
-    ehci_ctrl.hcd.name = "ehci0";
-    ehci_ctrl.hcd.nports = ehci_ctrl.nports;
-    ehci_ctrl.hcd.submit = ehci_submit;
-    ehci_ctrl.hcd.port_status = ehci_port_status;
-    ehci_ctrl.hcd.port_reset = ehci_port_reset;
-    ehci_ctrl.hcd.port_enable = ehci_port_enable;
+    snprintf(hc->name, sizeof(hc->name), "ehci%u", ehci_instances);
 
-    usb_register_hcd(&ehci_ctrl.hcd);
-    ehci_ctrl.initialized = 1;
-    kprintf("ehci: EHCI USB 2.0 controller at 0x%x, %u ports\n",
-            (unsigned)phys, ehci_ctrl.nports);
+    hc->hcd.priv = hc;
+    hc->hcd.name = hc->name;
+    hc->hcd.hcd_index = ehci_instances;
+    hc->hcd.nports = hc->nports;
+    hc->hcd.submit = ehci_submit;
+    hc->hcd.port_status = ehci_port_status;
+    hc->hcd.port_reset = ehci_port_reset;
+    hc->hcd.port_enable = ehci_port_enable;
+
+    usb_register_hcd(&hc->hcd);
+    hc->initialized = 1;
+    ehci_instances++;
+    kprintf("ehci: %s: EHCI USB 2.0 controller at 0x%x, %u ports\n",
+            hc->name, (unsigned)phys, hc->nports);
     return 0;
 }
 

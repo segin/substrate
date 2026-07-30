@@ -12,6 +12,7 @@
  *   - Root hub port status and reset
  */
 
+#include <stdio.h>
 #include <string.h>
 
 #include <arch/i386/intr.h>
@@ -71,12 +72,22 @@ typedef struct uhci_hc {
     /* Serializes access to the shared async schedule and TD/QH pools. */
     mutex_t submit_lock;
 
+    char name[8];               /* "uhciN", backs hcd.name */
+
     /* USB HCD handle */
     usb_hcd_t hcd;
 } uhci_hc_t;
 
-static uhci_hc_t uhci_ctrl;
-static int uhci_initialized;
+/*
+ * One instance per PCI function.  Intel ICH-era chipsets expose four to six
+ * UHCI companion controllers alongside their EHCI controllers, and every one
+ * past the first used to be refused here ("Only support one UHCI
+ * controller") -- so most of the machine's USB ports were dead, and any
+ * low/full-speed device that EHCI handed off to a companion via PORTSC OWNER
+ * landed on a controller nobody was driving.  A low-speed USB keyboard
+ * disappears exactly that way.
+ */
+static uint8_t uhci_instances;
 
 /*
  * ============================================================
@@ -1008,14 +1019,32 @@ static int uhci_submit(usb_hcd_t *hcd, usb_transfer_t *xfer)
  * ============================================================
  */
 
+/*
+ * Release everything uhci_alloc_structures() may have acquired, then the
+ * controller state itself.  Needed because each controller is now a separate
+ * heap allocation: dropping the uhci_hc_t on a failed attach would otherwise
+ * strand its DMA pools with no pointer left to free them through.
+ */
+static void uhci_teardown(uhci_hc_t *hc)
+{
+    if (hc->setup_buf)
+        dma_free_coherent(hc->setup_buf, 8);
+    if (hc->qh_pool)
+        dma_free_coherent(hc->qh_pool, UHCI_MAX_QHS * sizeof(struct uhci_qh));
+    if (hc->td_pool)
+        dma_free_coherent(hc->td_pool, UHCI_MAX_TDS * sizeof(struct uhci_td));
+    if (hc->frame_list)
+        dma_free_coherent(hc->frame_list,
+                          UHCI_FRAME_LIST_SIZE * sizeof(uint32_t));
+    kfree(hc, sizeof(*hc));
+}
+
 static int uhci_pci_attach(struct device *dev)
 {
+    uhci_hc_t *hc;
     pci_device_t *pdev;
     uint16_t cmd;
     uint32_t bar4;
-
-    if (uhci_initialized)
-        return -1;  /* Only support one UHCI controller */
 
     pdev = pci_find_device_by_kdev(dev);
     if (!pdev)
@@ -1025,59 +1054,72 @@ static int uhci_pci_attach(struct device *dev)
     if (pci_bar_type(pdev, 4) != PCI_BAR_IO)
         return -1;
 
+    hc = kzalloc(sizeof(*hc));
+    if (!hc) {
+        kprintf("uhci: out of memory allocating controller state\n");
+        return -1;
+    }
+
     bar4 = pci_read_config32(pdev->bus, pdev->slot, pdev->func, 0x20);
-    uhci_ctrl.iobase = (uint16_t)(bar4 & ~0x1F);
+    hc->iobase = (uint16_t)(bar4 & ~0x1F);
 
     /* Enable I/O space and bus mastering */
     cmd = pci_read_config16(pdev->bus, pdev->slot, pdev->func, PCI_CONFIG_COMMAND);
     pci_write_config16(pdev->bus, pdev->slot, pdev->func, PCI_CONFIG_COMMAND,
                        cmd | PCI_COMMAND_IO | PCI_COMMAND_MASTER);
 
-    uhci_ctrl.irq = (uint8_t)pci_get_irq(pdev);
-    mutex_init(&uhci_ctrl.submit_lock, "uhci_submit");
+    hc->irq = (uint8_t)pci_get_irq(pdev);
+    mutex_init(&hc->submit_lock, "uhci_submit");
 
     kprintf("uhci: PCI %02x:%02x.%x iobase=0x%04x irq=%u\n",
             pdev->bus, pdev->slot, pdev->func,
-            uhci_ctrl.iobase, uhci_ctrl.irq);
+            hc->iobase, hc->irq);
 
     /* Reset the HC */
-    if (uhci_reset(&uhci_ctrl) < 0)
-        return -1;
-
-    /* Allocate DMA structures */
-    if (uhci_alloc_structures(&uhci_ctrl) < 0)
-        return -1;
-
-    /* Setup schedule */
-    uhci_setup_schedule(&uhci_ctrl);
-
-    /* Start the HC */
-    uhci_start(&uhci_ctrl);
-
-    /* Verify HC is running */
-    if (uhci_readw(&uhci_ctrl, UHCI_USBSTS) & UHCI_STS_HCH) {
-        kprintf("uhci: controller failed to start\n");
+    if (uhci_reset(hc) < 0) {
+        uhci_teardown(hc);
         return -1;
     }
 
+    /* Allocate DMA structures */
+    if (uhci_alloc_structures(hc) < 0) {
+        uhci_teardown(hc);
+        return -1;
+    }
+
+    /* Setup schedule */
+    uhci_setup_schedule(hc);
+
+    /* Start the HC */
+    uhci_start(hc);
+
+    /* Verify HC is running */
+    if (uhci_readw(hc, UHCI_USBSTS) & UHCI_STS_HCH) {
+        kprintf("uhci: controller failed to start\n");
+        uhci_teardown(hc);
+        return -1;
+    }
+
+    snprintf(hc->name, sizeof(hc->name), "uhci%u", uhci_instances);
+
     /* Register as USB HCD */
-    uhci_ctrl.hcd.name = "uhci0";
-    uhci_ctrl.hcd.hcd_index = 0;
-    uhci_ctrl.hcd.submit = uhci_submit;
-    uhci_ctrl.hcd.nports = UHCI_NUM_PORTS;
-    uhci_ctrl.hcd.port_status = uhci_port_status;
-    uhci_ctrl.hcd.port_reset = uhci_port_reset;
-    uhci_ctrl.hcd.port_enable = uhci_port_enable;
-    uhci_ctrl.hcd.frame_number = uhci_hcd_frame_number;
-    uhci_ctrl.hcd.iso_schedule = uhci_hcd_iso_schedule;
-    uhci_ctrl.hcd.iso_reclaim = uhci_hcd_iso_reclaim;
-    uhci_ctrl.hcd.priv = &uhci_ctrl;
+    hc->hcd.name = hc->name;
+    hc->hcd.hcd_index = uhci_instances;
+    hc->hcd.submit = uhci_submit;
+    hc->hcd.nports = UHCI_NUM_PORTS;
+    hc->hcd.port_status = uhci_port_status;
+    hc->hcd.port_reset = uhci_port_reset;
+    hc->hcd.port_enable = uhci_port_enable;
+    hc->hcd.frame_number = uhci_hcd_frame_number;
+    hc->hcd.iso_schedule = uhci_hcd_iso_schedule;
+    hc->hcd.iso_reclaim = uhci_hcd_iso_reclaim;
+    hc->hcd.priv = hc;
 
-    usb_register_hcd(&uhci_ctrl.hcd);
+    usb_register_hcd(&hc->hcd);
 
-    uhci_initialized = 1;
+    uhci_instances++;
 
-    kprintf("uhci: controller initialized and running\n");
+    kprintf("uhci: %s initialized and running\n", hc->name);
     return 0;
 }
 
