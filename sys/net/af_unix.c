@@ -102,12 +102,75 @@ struct iovec_local { void *iov_base; size_t iov_len; };
 #define AFUNIX_BACKLOG_MAX 128
 #define AFUNIX_FDQ_MAX     16    /* maximum SCM_RIGHTS fds queued per socket */
 
+/*
+ * UNIX-04: the ring used to be `uint8_t data[AFUNIX_BUF_SIZE]` embedded in
+ * the socket, so every socket() / socketpair() (twice) / inbound connect()
+ * kmalloc'd ~263 KiB up front whether or not a single byte was ever sent.
+ * With MAX_FD sockets open that is on the order of a gigabyte requested on
+ * a 32-bit kernel -- and none of it reclaimable.
+ *
+ * The storage is now allocated on first write and doubles on demand up to
+ * the same AFUNIX_BUF_SIZE ceiling, so an idle socket costs nothing and a
+ * busy one ends up exactly where it was before.  AFUNIX_BUF_SIZE keeps its
+ * old meaning everywhere else in the file: the maximum the ring may reach,
+ * which is the level the blocking send paths test against.  `cap` is what
+ * is allocated right now, and it -- not the ceiling -- is the modulus for
+ * head/tail.
+ */
+#define AFUNIX_BUF_INIT 8192
+
 typedef struct {
-    uint8_t  data[AFUNIX_BUF_SIZE];
+    uint8_t *data;    /* NULL until the first byte is written */
+    uint32_t cap;     /* bytes currently allocated (0 when data == NULL) */
     uint32_t head;
     uint32_t tail;
     uint32_t count;
 } afunix_buf_t;
+
+static void afbuf_free(afunix_buf_t *b) {
+    if (b->data) kfree(b->data, b->cap);
+    b->data = NULL;
+    b->cap = b->head = b->tail = b->count = 0;
+}
+
+/* Ensure at least `need` bytes of capacity (clamped to the ceiling).
+ * Returns 0 on success, -1 if the allocation failed -- in which case the
+ * ring keeps whatever it already had. */
+static int afbuf_grow(afunix_buf_t *b, size_t need) {
+    if (need <= b->cap) return 0;
+    if (need > AFUNIX_BUF_SIZE) need = AFUNIX_BUF_SIZE;
+    uint32_t ncap = b->cap ? b->cap : AFUNIX_BUF_INIT;
+    while (ncap < need) ncap *= 2;
+    if (ncap > AFUNIX_BUF_SIZE) ncap = AFUNIX_BUF_SIZE;
+
+    uint8_t *nd = (uint8_t *)kmalloc(ncap);
+    if (!nd) return -1;
+    /* Re-linearise: the live bytes move to offset 0 of the new buffer. */
+    if (b->count) {
+        size_t first = b->cap - b->tail;
+        if (first > b->count) first = b->count;
+        memcpy(nd, b->data + b->tail, first);
+        if (b->count > first) memcpy(nd + first, b->data, b->count - first);
+    }
+    if (b->data) kfree(b->data, b->cap);
+    b->data = nd;
+    b->cap  = ncap;
+    b->tail = 0;
+    b->head = b->count % ncap;   /* count == ncap (full) wraps to 0 */
+    return 0;
+}
+
+/*
+ * Reserve room for a whole datagram before any of it is written.  A framed
+ * write must be all-or-nothing: afbuf_write() can now come up short if the
+ * ring cannot grow, and half a frame in the ring desyncs every frame
+ * boundary after it.  Callers that write a [u16 len][payload] pair call this
+ * first and give up cleanly on failure.
+ */
+static int afbuf_reserve(afunix_buf_t *b, size_t need) {
+    return afbuf_grow(b, b->count + need) == 0 &&
+           b->cap - b->count >= need ? 0 : -1;
+}
 
 /* Ring copy with at most two memcpy()s (one when the run wraps the end of the
  * buffer) instead of a byte-at-a-time loop with a modulo (a divide) per byte.
@@ -117,11 +180,16 @@ static size_t afbuf_write(afunix_buf_t *b, const uint8_t *src, size_t n) {
     size_t space = AFUNIX_BUF_SIZE - b->count;
     if (n > space) n = space;
     if (n == 0) return 0;
-    size_t first = AFUNIX_BUF_SIZE - b->head;     /* contiguous run to the end */
+    /* Grow towards the ceiling; if that fails, write only what already
+     * fits rather than failing the write outright. */
+    (void)afbuf_grow(b, b->count + n);
+    if (b->count >= b->cap) return 0;
+    if (n > b->cap - b->count) n = b->cap - b->count;
+    size_t first = b->cap - b->head;              /* contiguous run to the end */
     if (first > n) first = n;
     memcpy(b->data + b->head, src, first);
     if (n > first) memcpy(b->data, src + first, n - first);
-    b->head = (uint32_t)((b->head + n) % AFUNIX_BUF_SIZE);
+    b->head = (uint32_t)((b->head + n) % b->cap);
     b->count += (uint32_t)n;
     return n;
 }
@@ -129,11 +197,11 @@ static size_t afbuf_write(afunix_buf_t *b, const uint8_t *src, size_t n) {
 static size_t afbuf_read(afunix_buf_t *b, uint8_t *dst, size_t n) {
     if (n > b->count) n = b->count;
     if (n == 0) return 0;
-    size_t first = AFUNIX_BUF_SIZE - b->tail;     /* contiguous run to the end */
+    size_t first = b->cap - b->tail;              /* contiguous run to the end */
     if (first > n) first = n;
     memcpy(dst, b->data + b->tail, first);
     if (n > first) memcpy(dst + first, b->data, n - first);
-    b->tail = (uint32_t)((b->tail + n) % AFUNIX_BUF_SIZE);
+    b->tail = (uint32_t)((b->tail + n) % b->cap);
     b->count -= (uint32_t)n;
     return n;
 }
@@ -350,6 +418,7 @@ static void afunix_sock_free(afunix_sock_t *s) {
      * path.  g_bound_unlink is a no-op when we are not in the list. */
     if (s->pathlen > 0) g_bound_unlink(s);
 
+    afbuf_free(&s->rx);          /* UNIX-04: the ring is a separate object now */
     kfree(s, sizeof(*s));
 }
 
@@ -606,6 +675,9 @@ static size_t afunix_node_write(fs_node_t *node, off_t off, size_t size, const u
         if (peer->closed || peer->rd_closed || s->wr_closed) {
             mutex_unlock(&peer->lock); return (size_t)-EPIPE;
         }
+        if (afbuf_reserve(&peer->rx, size + 2) != 0) {
+            mutex_unlock(&peer->lock); return (size_t)-ENOBUFS;
+        }
         uint8_t hdr[2] = { (uint8_t)(size >> 8), (uint8_t)(size & 0xFF) };
         afbuf_write(&peer->rx, hdr, 2);
         if (size) afbuf_write(&peer->rx, buf, size);
@@ -822,9 +894,9 @@ static int afunix_node_ioctl(fs_node_t *node, uint32_t request, void *arg) {
             if (s->type == SOCK_DGRAM) {
                 /* Framed as [u16 len BE][payload]; peek the header without
                  * consuming it. */
-                if (s->rx.count >= 2) {
+                if (s->rx.count >= 2 && s->rx.data) {
                     uint8_t h0 = s->rx.data[s->rx.tail];
-                    uint8_t h1 = s->rx.data[(s->rx.tail + 1) % AFUNIX_BUF_SIZE];
+                    uint8_t h1 = s->rx.data[(s->rx.tail + 1) % s->rx.cap];
                     avail = (int)(((uint32_t)h0 << 8) | h1);
                 }
             } else {
@@ -1598,6 +1670,9 @@ static ssize_t afunix_dgram_deliver(afunix_sock_t *dst, const uint8_t *buf,
     }
     if (dst->closed || dst->rd_closed) {
         mutex_unlock(&dst->lock); return -ECONNREFUSED;
+    }
+    if (afbuf_reserve(&dst->rx, size + 2) != 0) {
+        mutex_unlock(&dst->lock); return -ENOBUFS;
     }
     uint8_t hdr[2] = { (uint8_t)(size >> 8), (uint8_t)(size & 0xFF) };
     afbuf_write(&dst->rx, hdr, 2);
