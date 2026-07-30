@@ -17,6 +17,7 @@
 #include <sys/un.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <sys/wait.h>
 
 static int passed, failed;
 
@@ -218,6 +219,44 @@ static void test_so_error_unix(void)
     close(sv[1]);
 }
 
+/*
+ * UDP-07: a raw socket reads every packet of its protocol regardless of who
+ * it was for, and writes caller-composed payloads onto the wire.  Creating
+ * one required no privilege at all.
+ */
+static void test_raw_socket_privileged(void)
+{
+    printf("UDP-07: raw and packet sockets are root-only\n");
+
+    /* init runs as root, so both must still be creatable here -- a gate that
+     * refuses root would break ping(8) and dhclient outright. */
+    int r = socket(AF_INET, SOCK_RAW, 1 /*ICMP*/);
+    ok("root can still open SOCK_RAW", r >= 0, "root was refused");
+    if (r >= 0) close(r);
+
+    int p = socket(17 /*AF_PACKET*/, SOCK_RAW, 0);
+    ok("root can still open AF_PACKET", p >= 0, "root was refused");
+    if (p >= 0) close(p);
+
+    /* Drop to an unprivileged uid in a child and try again. */
+    pid_t kid = fork();
+    if (kid == 0) {
+        setuid(1000);
+        int cr = socket(AF_INET, SOCK_RAW, 1);
+        int cp = socket(17, SOCK_RAW, 0);
+        if (cr >= 0) close(cr);
+        if (cp >= 0) close(cp);
+        _exit((cr < 0 ? 1 : 0) | (cp < 0 ? 2 : 0));
+    }
+    int st = 0;
+    waitpid(kid, &st, 0);
+    int code = WIFEXITED(st) ? WEXITSTATUS(st) : -1;
+    ok("non-root is refused SOCK_RAW", (code & 1) != 0,
+       "an unprivileged process opened a raw IP socket");
+    ok("non-root is refused AF_PACKET", (code & 2) != 0,
+       "an unprivileged process opened a packet socket");
+}
+
 int main(void)
 {
     printf("torture_udp: UDP demux + checksum regressions (#430)\n\n");
@@ -226,6 +265,7 @@ int main(void)
     test_no_duplicate_delivery();
     test_connected_peer_filter();
     test_so_error_unix();
+    test_raw_socket_privileged();
 
     printf("\nResult: %d passed, %d failed -- %s\n",
            passed, failed, failed ? "FAILED" : "PASSED");

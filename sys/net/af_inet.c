@@ -697,6 +697,17 @@ int afinet_socket(int family, int type, int protocol) {
     if (family != AF_INET) return -EAFNOSUPPORT;
     if (type != SOCK_RAW && type != SOCK_DGRAM && type != SOCK_STREAM)
         return -EPROTONOSUPPORT;
+    /*
+     * UDP-07: a raw socket is a privileged object -- it reads every packet
+     * of its protocol regardless of who they were for, and writes
+     * caller-composed IP payloads straight onto the wire.  Creating one
+     * required no privilege at all, so any unprivileged process could sniff
+     * and forge.  (It is also the path the SOCK_RAW length bugs fixed under
+     * #432 were reachable through.)  Every Unix restricts this to root; the
+     * companion check for AF_PACKET is in af_packet.c.
+     */
+    if (type == SOCK_RAW && (!current_process || current_process->euid != 0))
+        return -EACCES;
     /* Validate protocol against the type (POSIX): STREAM takes 0 or TCP,
      * DGRAM takes 0 or UDP; RAW takes any.  A bogus protocol is rejected
      * at socket() rather than silently ignored. */

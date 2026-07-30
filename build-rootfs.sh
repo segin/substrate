@@ -719,8 +719,12 @@ EOF
     #       fakes `chown -R 0:0` (without touching the real dist/) so mke2fs
     #       records uid/gid 0 — matching what the old debugfs path produced.
     #
-    #    su(1) is the one setuid-root binary (dist/ has no other setuid files);
-    #    chown clears the bit so it is re-set inside the fakeroot session.
+    #    su(1) and ping(8) are the setuid-root binaries (dist/ has no other
+    #    setuid files); chown clears the bit so it is re-set inside the
+    #    fakeroot session.  ping needs it because opening a SOCK_RAW socket is
+    #    now root-only (audit UDP-07) -- it was already written to drop the
+    #    privilege immediately after socket() (CU-PING-01), which only makes
+    #    sense for a setuid binary, but the bit was never actually set.
     #    -I 128 prints a harmless post-2038-date warning.  128-byte inodes
     #    are kept because tools/ext2-install-boot and the ext2 boot-block
     #    scheme assume them; see docs/specs/bootloader_ext2_boot.md.
@@ -739,6 +743,7 @@ EOF
     fakeroot -- sh -c '
         chown -R 0:0 "$1"
         [ -e "$1/bin/su" ] && chmod 4755 "$1/bin/su"
+        [ -e "$1/bin/ping" ] && chmod 4755 "$1/bin/ping"
         mke2fs -F -q -b 1024 -I 128 -O ^resize_inode -L "$4" \
                -E offset=$(( $3 * 512 )) -d "$1" "$2" "$5"
     ' _ "$DIST" "$IMAGE" "$ROOT_PART_LBA" "$ROOT_LABEL" "$root_blocks"

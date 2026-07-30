@@ -163,6 +163,14 @@ int afpacket_socket(int type, int protocol) {
     (void)protocol;  /* honor ETH_P_ALL; the netdev fanout doesn't filter */
     if (type != SOCK_RAW && type != SOCK_DGRAM)
         return -EPROTONOSUPPORT;
+    /*
+     * UDP-07 (AF_PACKET half): an AF_PACKET socket sees every frame on
+     * every NIC and can transmit arbitrary link-layer frames, which is
+     * strictly more power than a SOCK_RAW IP socket.  It needed no
+     * privilege whatsoever to open.  Root only, as everywhere else.
+     */
+    if (!current_process || current_process->euid != 0)
+        return -EACCES;
 
     afpkt_sock_t *s = (afpkt_sock_t *)kmalloc(sizeof(*s));
     if (!s) return -ENOMEM;
