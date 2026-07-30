@@ -547,9 +547,31 @@ static int afunix_wait(void *chan, mutex_t *m) {
  * fs_node_t adapter — so existing read(2)/write(2) work on socket fds
  * ============================================================ */
 
+/*
+ * SOCK-03: hold the socket across the whole call.
+ *
+ * The blocking body below sleeps on s->rx_chan with no reference taken, so a
+ * concurrent close() on another thread dropped the last one and freed the
+ * struct -- the sleeper then woke straight into mutex_lock(&s->lock) on
+ * freed memory.  The refcount discipline this file already uses everywhere
+ * else (see "Reference counting" above) is exactly the right tool; the node
+ * ops were simply not participating in it.  A held reference does not block
+ * close(): it still marks us closed, clears the peer and wakes us -- it only
+ * defers the kfree() until we are off the struct.
+ */
+static size_t afunix_node_read_body(afunix_sock_t *s, size_t size, uint8_t *buf);
+
 static size_t afunix_node_read(fs_node_t *node, off_t off, size_t size, uint8_t *buf) {
     (void)off;
     afunix_sock_t *s = (afunix_sock_t *)(uintptr_t)node->impl;
+    if (!s) return 0;
+    afunix_ref(s);
+    size_t r = afunix_node_read_body(s, size, buf);
+    afunix_unref(s);
+    return r;
+}
+
+static size_t afunix_node_read_body(afunix_sock_t *s, size_t size, uint8_t *buf) {
     XFD("node_read pid=%d s=%p closed=%d rx.count=%u size=%u",
         current_process ? (int)current_process->pid : -1,
         s, s ? s->closed : -1,
@@ -627,9 +649,25 @@ static size_t afunix_node_read(fs_node_t *node, off_t off, size_t size, uint8_t 
     return r;
 }
 
+/* SOCK-03 (write twin of afunix_node_read): the send path sleeps on the
+ * PEER's tx_chan, so both this socket and its peer have to survive the
+ * sleep.  Hold ours here; the peer link is itself a counted reference that
+ * close() clears only after waking us. */
+static size_t afunix_node_write_body(afunix_sock_t *s, size_t size,
+                                     const uint8_t *buf);
+
 static size_t afunix_node_write(fs_node_t *node, off_t off, size_t size, const uint8_t *buf) {
     (void)off;
     afunix_sock_t *s = (afunix_sock_t *)(uintptr_t)node->impl;
+    if (!s) return (size_t)-EPIPE;
+    afunix_ref(s);
+    size_t r = afunix_node_write_body(s, size, buf);
+    afunix_unref(s);
+    return r;
+}
+
+static size_t afunix_node_write_body(afunix_sock_t *s, size_t size,
+                                     const uint8_t *buf) {
     XFD("node_write pid=%d s=%p closed=%d peer=%p size=%u",
         current_process ? (int)current_process->pid : -1,
         s, s ? s->closed : -1,
@@ -1842,14 +1880,35 @@ ssize_t sys_sendmsg(int fd, const struct msghdr *umsg, int flags) {
 
     afunix_sock_t *s = afunix_from_fd(fd);
 
+    /*
+     * UNIX-03: pin the peer before touching it.
+     *
+     * This used to read s->peer unlocked and then lock THROUGH it
+     * (mutex_lock(&s->peer->lock), s->peer->rx_fdq[...]), while s->peer is
+     * guarded by s->lock everywhere else -- close() clears it under that
+     * lock and then drops its reference.  A peer closing in the window gave
+     * a lock or a write on freed memory.  Take the snapshot and the
+     * reference together under s->lock, which is the rule the "Reference
+     * counting" comment above states, then use only the pinned pointer.
+     */
+    afunix_sock_t *peer = NULL;
+    if (s) {
+        mutex_lock(&s->lock);
+        peer = s->peer;
+        afunix_ref(peer);           /* NULL-safe */
+        mutex_unlock(&s->lock);
+    }
+    ssize_t cmsg_err = 0;
+
     /* SCM_RIGHTS plumbing only applies to AF_UNIX peers.  AF_INET
      * sockets fall through to the iov-only path below. */
-    if (s && s->peer && msg->msg_control && msg->msg_controllen > 0) {
+    if (peer && msg->msg_control && msg->msg_controllen > 0) {
         size_t cmsglen = (size_t)msg->msg_controllen;
-        if (cmsglen > AFUNIX_CMSG_MAX) return -EINVAL;
         unsigned char cmsgbuf[AFUNIX_CMSG_MAX];
-        if (copyin(msg->msg_control, cmsgbuf, cmsglen) != 0)
-            return -EFAULT;
+        if (cmsglen > AFUNIX_CMSG_MAX) { cmsg_err = -EINVAL; goto cmsg_done; }
+        if (copyin(msg->msg_control, cmsgbuf, cmsglen) != 0) {
+            cmsg_err = -EFAULT; goto cmsg_done;
+        }
         size_t off = 0;
         while (off + sizeof(struct kcmsghdr) <= cmsglen) {
             const struct kcmsghdr *c = (const struct kcmsghdr *)(cmsgbuf + off);
@@ -1866,23 +1925,25 @@ ssize_t sys_sendmsg(int fd, const struct msghdr *umsg, int flags) {
              * aligned advance to be non-zero so the loop must make progress
              * whatever else happens.
              */
-            if (c->cmsg_len < sizeof(*c)) return -EINVAL;
-            if (c->cmsg_len > cmsglen - off) return -EINVAL;
+            if (c->cmsg_len < sizeof(*c)) { cmsg_err = -EINVAL; goto cmsg_done; }
+            if (c->cmsg_len > cmsglen - off) { cmsg_err = -EINVAL; goto cmsg_done; }
             size_t advance = KCMSG_ALIGN(c->cmsg_len);
-            if (advance == 0 || advance > cmsglen - off) return -EINVAL;
+            if (advance == 0 || advance > cmsglen - off) {
+                cmsg_err = -EINVAL; goto cmsg_done;
+            }
             if (c->cmsg_level == SOL_SOCKET && c->cmsg_type == SCM_RIGHTS) {
                 size_t datalen = c->cmsg_len - sizeof(*c);
-                if (datalen % sizeof(int) != 0) return -EINVAL;
+                if (datalen % sizeof(int) != 0) { cmsg_err = -EINVAL; goto cmsg_done; }
                 int nfds = (int)(datalen / sizeof(int));
                 const int *fds = (const int *)(cmsgbuf + off + sizeof(*c));
                 /* Look up each fd in the sender's table.  Queue them
                  * on the peer's rx_fdq.  All-or-nothing: if any fd is
                  * invalid or the queue would overflow, undo previous
                  * fref's and fail. */
-                mutex_lock(&s->peer->lock);
-                if (s->peer->rx_fdq_count + nfds > AFUNIX_FDQ_MAX) {
-                    mutex_unlock(&s->peer->lock);
-                    return -EMSGSIZE;
+                mutex_lock(&peer->lock);
+                if (peer->rx_fdq_count + nfds > AFUNIX_FDQ_MAX) {
+                    mutex_unlock(&peer->lock);
+                    cmsg_err = -EMSGSIZE; goto cmsg_done;
                 }
                 int queued = 0;
                 for (int i = 0; i < nfds; i++) {
@@ -1890,25 +1951,29 @@ ssize_t sys_sendmsg(int fd, const struct msghdr *umsg, int flags) {
                     file_t *f = current_process->fds[fds[i]];
                     if (!f) goto fd_fail;
                     __sync_fetch_and_add(&f->f_count, 1);   /* atomic (A48) */
-                    s->peer->rx_fdq[s->peer->rx_fdq_count + queued] = f;
+                    peer->rx_fdq[peer->rx_fdq_count + queued] = f;
                     queued++;
                     continue;
                 fd_fail:
                     /* Roll back. */
                     for (int j = 0; j < queued; j++) {
-                        file_t *qf = s->peer->rx_fdq[s->peer->rx_fdq_count + j];
+                        file_t *qf = peer->rx_fdq[peer->rx_fdq_count + j];
                         if (qf && qf->f_count > 0) __sync_fetch_and_sub(&qf->f_count, 1);
-                        s->peer->rx_fdq[s->peer->rx_fdq_count + j] = NULL;
+                        peer->rx_fdq[peer->rx_fdq_count + j] = NULL;
                     }
-                    mutex_unlock(&s->peer->lock);
-                    return -EBADF;
+                    mutex_unlock(&peer->lock);
+                    cmsg_err = -EBADF; goto cmsg_done;
                 }
-                s->peer->rx_fdq_count += queued;
-                mutex_unlock(&s->peer->lock);
+                peer->rx_fdq_count += queued;
+                mutex_unlock(&peer->lock);
             }
             off += advance;
         }
     }
+
+cmsg_done:
+    afunix_unref(peer);
+    if (cmsg_err) return cmsg_err;
 
     ssize_t total = 0;
     /* kiov was copied in above; iov_base entries are still user pointers,

@@ -429,8 +429,36 @@ static int afi_node_nonblock(const fs_node_t *node) {
     return 0;
 }
 
+/*
+ * SOCK-03: pin the socket BEFORE the first dereference, not after.
+ *
+ * NET-01 already added a reference around the datagram ring walk, but it
+ * was taken well down the function -- after s->closed / s->rd_shut / s->tcp
+ * had been read, and, for a stream socket, after tcp_recv() had been
+ * entered and blocked.  A concurrent close() in that window frees the
+ * struct out from under a sleeping reader, which is the same defect NET-01
+ * fixed for the ring.  Taking the reference at entry closes the window for
+ * every path through the function; the inner acquire/release stays as it
+ * is (nested references are fine) so the ring code keeps working unchanged.
+ */
+static size_t afinet_node_read_body(fs_node_t *node, size_t size, uint8_t *buf);
+
 size_t afinet_node_read(fs_node_t *node, off_t off, size_t size, uint8_t *buf) {
     (void)off;
+    afi_sock_t *s = (afi_sock_t *)(uintptr_t)node->impl;
+    if (!s) return 0;
+    unsigned long fl0 = spinlock_acquire_irq(&afi_lock);
+    s->refcount++;
+    spinlock_release_irq(&afi_lock, fl0);
+
+    size_t r = afinet_node_read_body(node, size, buf);
+
+    unsigned long fl1 = spinlock_acquire_irq(&afi_lock);
+    afi_rele_unlock(s, fl1);            /* may free; s must not be touched */
+    return r;
+}
+
+static size_t afinet_node_read_body(fs_node_t *node, size_t size, uint8_t *buf) {
     afi_sock_t *s = (afi_sock_t *)(uintptr_t)node->impl;
     if (!s || s->closed) return 0;
     if (s->rd_shut) return 0;            /* shutdown(SHUT_RD): EOF */
@@ -517,8 +545,28 @@ static void udp_csum6(struct udphdr *uh, const uint8_t daddr[16],
     uh->check = c ? c : 0xFFFF;
 }
 
+/* SOCK-03 (write twin of afinet_node_read): tcp_send() blocks on a full
+ * send window with nothing holding the socket, so pin at entry here too. */
+static size_t afinet_node_write_body(fs_node_t *node, size_t size,
+                                     const uint8_t *buf);
+
 static size_t afinet_node_write(fs_node_t *node, off_t off, size_t size, const uint8_t *buf) {
     (void)off;
+    afi_sock_t *s = (afi_sock_t *)(uintptr_t)node->impl;
+    if (!s) return 0;
+    unsigned long fl0 = spinlock_acquire_irq(&afi_lock);
+    s->refcount++;
+    spinlock_release_irq(&afi_lock, fl0);
+
+    size_t r = afinet_node_write_body(node, size, buf);
+
+    unsigned long fl1 = spinlock_acquire_irq(&afi_lock);
+    afi_rele_unlock(s, fl1);            /* may free; s must not be touched */
+    return r;
+}
+
+static size_t afinet_node_write_body(fs_node_t *node, size_t size,
+                                     const uint8_t *buf) {
     afi_sock_t *s = (afi_sock_t *)(uintptr_t)node->impl;
     if (!s || s->closed) return 0;
     if (s->type == SOCK_STREAM && s->tcp) {
