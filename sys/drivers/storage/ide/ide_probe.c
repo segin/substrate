@@ -62,11 +62,21 @@ void ide_refresh_device_slot(uint8_t channel, uint8_t drive) {
         uint32_t lba;
         uint32_t blk_size;
 
-        if (ide_atapi_read_capacity(channel, drive, &lba, &blk_size) == 0) {
+        /*
+         * IDE-06: validate what the device reports.  blk_size was stored
+         * verbatim, so a drive answering 0 (or a parse error yielding 0)
+         * published sector_size 0 to the block layer, which divides by it in
+         * every geometry calculation.  An absurd value is equally a lie.
+         * Same class as SCSI-09; fall back to the ATAPI default rather than
+         * trusting it.
+         */
+        if (ide_atapi_read_capacity(channel, drive, &lba, &blk_size) == 0 &&
+            blk_size >= 512U && blk_size <= 65536U &&
+            (blk_size & (blk_size - 1U)) == 0U) {
             total_sectors = (uint64_t)lba + 1;
             sector_size = blk_size;
         } else {
-            sector_size = 2048;
+            sector_size = ATAPI_DEFAULT_SECTOR_SIZE;
         }
     }
 
@@ -650,12 +660,17 @@ int ide_scan_controller(void) {
                     /* ATAPI size calculation */
                     uint32_t lba, blk_size;
                     /* Try to read capacity. If fails (no media), size=0 */
-                    if (ide_atapi_read_capacity(ch, d, &lba, &blk_size) == 0) {
+                    /* IDE-06: same validation as the refresh path above --
+                     * a reported block size of 0 publishes sector_size 0 to
+                     * the block layer, which divides by it. */
+                    if (ide_atapi_read_capacity(ch, d, &lba, &blk_size) == 0 &&
+                        blk_size >= 512U && blk_size <= 65536U &&
+                        (blk_size & (blk_size - 1U)) == 0U) {
                         total_sectors = (uint64_t)lba + 1;
                         sector_size = blk_size;
                     } else {
-                        /* Default for CD-ROM if no media */
-                        sector_size = 2048;
+                        /* Default for CD-ROM if no media or a bogus report */
+                        sector_size = ATAPI_DEFAULT_SECTOR_SIZE;
                     }
                 }
 

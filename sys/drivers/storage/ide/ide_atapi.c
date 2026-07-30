@@ -174,7 +174,29 @@ int ide_atapi_read_capacity(uint8_t channel, uint8_t drive,
  */
 int ide_atapi_read_sectors(uint8_t channel, uint8_t drive,
                            uint32_t lba, uint16_t count, void *buffer) {
+    return ide_atapi_read_sectors_ss(channel, drive, lba, count, buffer,
+                                     ATAPI_DEFAULT_SECTOR_SIZE);
+}
+
+/*
+ * IDE-02: the transfer length has to come from the device's OWN sector size.
+ *
+ * This used to compute `count * 2048` unconditionally while the probe path
+ * (ide_refresh_device_slot) correctly takes the size from READ CAPACITY and
+ * publishes it as blkdev.sector_size.  A device reporting anything other
+ * than 2048 therefore had its block count multiplied by the wrong figure:
+ * the caller sized its buffer from the negotiated size and this asked the
+ * drive for a different number of bytes, so either the tail of every
+ * transfer was dropped or the drive was told to write past the buffer.
+ */
+int ide_atapi_read_sectors_ss(uint8_t channel, uint8_t drive,
+                              uint32_t lba, uint16_t count, void *buffer,
+                              uint32_t sector_size) {
     uint8_t packet[12] = {0};
+
+    if (sector_size == 0) {
+        sector_size = ATAPI_DEFAULT_SECTOR_SIZE;
+    }
 
     /* All uint16_t counts fit in READ10 (max 65535 sectors) */
     /* Use READ10 - 10-byte CDB */
@@ -193,8 +215,7 @@ int ide_atapi_read_sectors(uint8_t channel, uint8_t drive,
     packet[9] = 0;
     /* Remaining bytes are zeros */
 
-    /* CD-ROM sectors are typically 2048 bytes */
-    uint32_t buffer_len = (uint32_t)count * 2048;
+    uint32_t buffer_len = (uint32_t)count * sector_size;
 
     return ide_atapi_packet(channel, drive, packet, 12,
                             buffer, buffer_len, 0);

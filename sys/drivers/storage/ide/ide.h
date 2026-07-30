@@ -309,6 +309,13 @@ int ide_atapi_packet(uint8_t channel, uint8_t drive,
                      void *buffer, uint32_t buffer_len, int write);
 int ide_atapi_read_capacity(uint8_t channel, uint8_t drive, 
                             uint32_t *lba, uint32_t *block_size);
+/* IDE-02: ATAPI media is not always 2048-byte-sectored; the _ss form takes
+ * the size the probe negotiated from READ CAPACITY.  The plain form keeps
+ * the historical 2048 default for callers that have no better answer. */
+#define ATAPI_DEFAULT_SECTOR_SIZE 2048u
+int ide_atapi_read_sectors_ss(uint8_t channel, uint8_t drive,
+                              uint32_t lba, uint16_t count, void *buffer,
+                              uint32_t sector_size);
 int ide_atapi_read_sectors(uint8_t channel, uint8_t drive, 
                            uint32_t lba, uint16_t count, void *buffer);
 int ide_atapi_read_toc(uint8_t channel, uint8_t drive,

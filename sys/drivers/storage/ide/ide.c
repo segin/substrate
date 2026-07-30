@@ -126,8 +126,10 @@ int ide_transfer_read_once(ide_drive_ctx_t *ctx, uint64_t sector,
     ide_device_t *dev = &ide_devices[ctx->index];
 
     if (ctx->type == 1) {
-        return ide_atapi_read_sectors(channel, drive, (uint32_t)sector,
-                                      (uint16_t)count, buffer);
+        /* IDE-02: use the size negotiated at probe time, not a constant. */
+        return ide_atapi_read_sectors_ss(channel, drive, (uint32_t)sector,
+                                         (uint16_t)count, buffer,
+                                         ide_blkdevs[ctx->index].sector_size);
     }
 
     if (ide_attached && ide_channels[channel].dma_capable &&
