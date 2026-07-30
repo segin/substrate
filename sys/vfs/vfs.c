@@ -189,6 +189,29 @@ int vfs_resolve_label(const char *label, char *devpath, size_t len) {
     const size_t plen = sizeof(prefix) - 1;
     char buf[64];
     for (blkdev_t *dev = blkdev_first(); dev; dev = dev->next) {
+        /*
+         * Skip devices with no media before touching them.  A multi-slot USB
+         * card reader registers one block device per slot, and the empty slots
+         * come up with total_sectors == 0 -- there is nothing to read a label
+         * from, and probing them anyway makes blkdev reject every request past
+         * the (zero) end of the device:
+         *
+         *   blkdev: scsi3 EOF (sector 1024 >= 0)
+         *   blkdev: scsi2 EOF (sector 2 >= 0)
+         *
+         * one line per superblock offset per empty slot, on a boot that has
+         * not even mounted root yet.  Observed on real hardware booting from
+         * an SD card in a reader whose CF/TF/MS slots were empty.
+         *
+         * This is the VFS-side companion to the SCSI fix that stopped GEOM
+         * partition-scanning no-media devices: that one keeps the block layer
+         * from sniffing them, this one keeps label resolution from reading
+         * them.  Both need it, because a device with no media is still
+         * legitimately registered and can gain media later.
+         */
+        if (dev->total_sectors == 0) {
+            continue;
+        }
         if (vfs_read_label(dev, buf, sizeof(buf)) != 0) {
             continue;
         }
