@@ -18,6 +18,18 @@
 static fat_node_t fat_node_cache[FAT_NODE_CACHE_SIZE];
 static fs_node_t fat_fs_node_cache[FAT_NODE_CACHE_SIZE];
 static int fat_node_cache_idx = 0;
+/* FAT-F3: guards slot selection, the pin counts, and the memset that
+ * re-populates a slot.  A mutex (not a spinlock) because callers may sleep on
+ * block I/O elsewhere in the same paths; nothing here touches IRQ context. */
+static mutex_t fat_node_cache_lock;
+static int fat_node_cache_lock_ready = 0;
+
+static void fat_node_cache_lock_ensure(void) {
+    if (!fat_node_cache_lock_ready) {
+        mutex_init(&fat_node_cache_lock, "fat_ncache");
+        fat_node_cache_lock_ready = 1;
+    }
+}
 
 /* Serialises free-cluster allocation across all FAT mounts.  fat_alloc_cluster
  * scans the FAT for a zero entry and marks it EOC in two separate steps; with
@@ -588,17 +600,83 @@ static int fat_statfs(fs_node_t *node, struct statfs *buf) {
     return 0;
 }
 
+/*
+ * FAT-F3: pin/unpin, installed as the node's open/close hooks.
+ *
+ * sys_open() stores the fs_node_t* that fat_alloc_node() returns directly in
+ * f->f_data (only character devices get cloned), so the slot must survive for
+ * as long as the fd does.  open_fs()/close_fs() bracket exactly that lifetime.
+ */
+static void fat_node_open(fs_node_t *node) {
+    fat_node_t *ctx = node ? (fat_node_t *)(uintptr_t)node->impl : NULL;
+    if (!ctx) return;
+    fat_node_cache_lock_ensure();
+    mutex_lock(&fat_node_cache_lock);
+    ctx->pin++;
+    mutex_unlock(&fat_node_cache_lock);
+}
+
+static void fat_node_close(fs_node_t *node) {
+    fat_node_t *ctx = node ? (fat_node_t *)(uintptr_t)node->impl : NULL;
+    if (!ctx) return;
+    fat_node_cache_lock_ensure();
+    mutex_lock(&fat_node_cache_lock);
+    if (ctx->pin > 0) ctx->pin--;
+    mutex_unlock(&fat_node_cache_lock);
+}
+
 static fs_node_t *fat_alloc_node(fat_fs_t *fs, const char *name, uint64_t inode,
                                  uint32_t first_cluster, uint32_t size, uint8_t attr) {
-    int idx = fat_node_cache_idx++ % FAT_NODE_CACHE_SIZE;
-    
-    fat_node_t *ctx = &fat_node_cache[idx];
-    fs_node_t *node = &fat_fs_node_cache[idx];
+    fat_node_t *ctx = NULL;
+    fs_node_t *node = NULL;
 
-    // If node was previously used by a different filesystem, or for a different inode,
-    // we should probably clear it.
+    /*
+     * FAT-F3: slot selection.  This was `fat_node_cache_idx++ % 64` -- a
+     * non-atomic read-modify-write shared by every caller (so two concurrent
+     * finddirs could be handed the SAME slot), followed by an unconditional
+     * memset of whatever was there.  Now: reuse the slot that already
+     * describes this (fs, inode) if there is one, else take an unpinned slot,
+     * all under the cache lock.
+     */
+    fat_node_cache_lock_ensure();
+    mutex_lock(&fat_node_cache_lock);
+
+    for (int i = 0; i < FAT_NODE_CACHE_SIZE; i++) {
+        if (fat_node_cache[i].fs == fs && fat_fs_node_cache[i].inode == inode &&
+            fat_fs_node_cache[i].name[0] != '\0') {
+            ctx  = &fat_node_cache[i];
+            node = &fat_fs_node_cache[i];
+            break;
+        }
+    }
+
+    if (!ctx) {
+        int start = fat_node_cache_idx;
+        for (int n = 0; n < FAT_NODE_CACHE_SIZE; n++) {
+            int i = (start + n) % FAT_NODE_CACHE_SIZE;
+            if (fat_node_cache[i].pin == 0) {
+                fat_node_cache_idx = (i + 1) % FAT_NODE_CACHE_SIZE;
+                ctx  = &fat_node_cache[i];
+                node = &fat_fs_node_cache[i];
+                break;
+            }
+        }
+    }
+
+    if (!ctx) {
+        /* Every slot is held by a live fd.  Refusing is the only safe answer:
+         * recycling one is exactly the corruption this fix exists to stop. */
+        mutex_unlock(&fat_node_cache_lock);
+        kprintf("fat: node cache exhausted (all %d slots pinned)\n",
+                FAT_NODE_CACHE_SIZE);
+        return NULL;
+    }
+
+    uint32_t keep_pin = ctx->pin;
     memset(node, 0, sizeof(fs_node_t));
     memset(ctx, 0, sizeof(fat_node_t));
+    ctx->pin = keep_pin;        /* re-populating a slot must not drop its pins */
+    mutex_unlock(&fat_node_cache_lock);
     
     ctx->fs = fs;
     ctx->first_cluster = first_cluster;
@@ -615,6 +693,8 @@ static fs_node_t *fat_alloc_node(fat_fs_t *fs, const char *name, uint64_t inode,
     node->uid = 0;
     node->gid = 0;
     node->statfs = fat_statfs;
+    node->open   = fat_node_open;
+    node->close  = fat_node_close;
 
     if (attr & FAT_ATTR_DIRECTORY) {
         node->flags = FS_DIRECTORY;

@@ -105,6 +105,15 @@ typedef struct fat_node {
     uint32_t dirent_sector;         // Abs LBA of the on-disk dir entry (0=root/unknown)
     uint16_t dirent_off;            // Byte offset of the entry within that sector
     struct dirent current_dirent;   // Per-node readdir result (avoids static)
+    /*
+     * FAT-F3: number of live opens holding this slot.  fat_alloc_node() used
+     * to hand out &cache[idx++ % 64] unconditionally, and sys_open stores that
+     * pointer straight into f->f_data for regular files -- so 64 further path
+     * lookups on the mount silently recycled a slot out from under an open
+     * fd, and the holder's next read()/write() landed on a DIFFERENT FILE.
+     * A slot with pin > 0 is never recycled.
+     */
+    uint32_t pin;
 } fat_node_t;
 
 // Public functions

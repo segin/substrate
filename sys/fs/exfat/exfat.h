@@ -160,6 +160,11 @@ typedef struct exfat_node {
     uint8_t  secondary_count;          /* # of secondary entries in the set */
 
     struct dirent current_dirent;      /* per-node readdir scratch */
+    /* exFAT-F3: live-open count; a pinned slot is never recycled.  Same
+     * hazard the root-node comment in exfat_alloc_node() describes, but for
+     * every other slot: sys_open puts this pointer straight into f->f_data,
+     * so recycling a slot redirects an existing fd to a different file. */
+    uint32_t pin;
 } exfat_node_t;
 
 #define EXFAT_NODE_CACHE_SIZE 128

@@ -37,6 +37,34 @@
 static exfat_node_t exfat_node_cache[EXFAT_NODE_CACHE_SIZE];
 static fs_node_t    exfat_fs_node_cache[EXFAT_NODE_CACHE_SIZE];
 static uint32_t     exfat_node_cache_idx;
+/* exFAT-F3: guards slot selection, pin counts and the re-populating memset. */
+static mutex_t      exfat_node_cache_lock;
+static int          exfat_node_cache_lock_ready;
+
+static void exfat_node_cache_lock_ensure(void) {
+    if (!exfat_node_cache_lock_ready) {
+        mutex_init(&exfat_node_cache_lock, "exfat_ncache");
+        exfat_node_cache_lock_ready = 1;
+    }
+}
+
+static void exfat_node_open(fs_node_t *node) {
+    exfat_node_t *ctx = node ? (exfat_node_t *)(uintptr_t)node->impl : NULL;
+    if (!ctx) return;
+    exfat_node_cache_lock_ensure();
+    mutex_lock(&exfat_node_cache_lock);
+    ctx->pin++;
+    mutex_unlock(&exfat_node_cache_lock);
+}
+
+static void exfat_node_close(fs_node_t *node) {
+    exfat_node_t *ctx = node ? (exfat_node_t *)(uintptr_t)node->impl : NULL;
+    if (!ctx) return;
+    exfat_node_cache_lock_ensure();
+    mutex_lock(&exfat_node_cache_lock);
+    if (ctx->pin > 0) ctx->pin--;
+    mutex_unlock(&exfat_node_cache_lock);
+}
 
 /* forward decls */
 static struct dirent *exfat_readdir(fs_node_t *node, uint64_t index);
@@ -429,16 +457,61 @@ static fs_node_t *exfat_alloc_node(exfat_fs_t *fs, const char *name, uint64_t in
      * different, often non-directory, inode.  That is what broke reading back
      * anything substantial (untar onto exFAT failed with ENOTDIR, `ls` came up
      * empty).  Pin the root to slot 0 and round-robin only the rest. */
-    uint32_t idx;
+    /*
+     * exFAT-F3: the round-robin above the root special case had the same
+     * defect the root comment describes, for every other slot -- and
+     * exfat_node_cache_idx++ was a non-atomic RMW shared by all callers, so
+     * two concurrent lookups could be handed the same slot.  Reuse the slot
+     * already describing this (fs, inode) if there is one, else take an
+     * UNPINNED slot, all under the cache lock.
+     */
+    exfat_node_t *ctx = NULL;
+    fs_node_t *node = NULL;
+    uint32_t idx = 0;
+
+    exfat_node_cache_lock_ensure();
+    mutex_lock(&exfat_node_cache_lock);
+
     if (inode == EXFAT_ROOT_INO) {
         idx = 0;
+        ctx  = &exfat_node_cache[0];
+        node = &exfat_fs_node_cache[0];
     } else {
-        idx = 1 + (exfat_node_cache_idx++ % (EXFAT_NODE_CACHE_SIZE - 1));
+        for (uint32_t i = 1; i < EXFAT_NODE_CACHE_SIZE; i++) {
+            if (exfat_node_cache[i].fs == fs &&
+                exfat_fs_node_cache[i].inode == inode &&
+                exfat_fs_node_cache[i].name[0] != '\0') {
+                idx = i; ctx = &exfat_node_cache[i];
+                node = &exfat_fs_node_cache[i];
+                break;
+            }
+        }
+        if (!ctx) {
+            uint32_t start = exfat_node_cache_idx;
+            for (uint32_t n = 0; n < EXFAT_NODE_CACHE_SIZE - 1; n++) {
+                uint32_t i = 1 + ((start + n) % (EXFAT_NODE_CACHE_SIZE - 1));
+                if (exfat_node_cache[i].pin == 0) {
+                    exfat_node_cache_idx = (start + n + 1) % (EXFAT_NODE_CACHE_SIZE - 1);
+                    idx = i; ctx = &exfat_node_cache[i];
+                    node = &exfat_fs_node_cache[i];
+                    break;
+                }
+            }
+        }
+        if (!ctx) {
+            mutex_unlock(&exfat_node_cache_lock);
+            kprintf("exfat: node cache exhausted (all %d slots pinned)\n",
+                    EXFAT_NODE_CACHE_SIZE - 1);
+            return NULL;
+        }
     }
-    exfat_node_t *ctx = &exfat_node_cache[idx];
-    fs_node_t *node = &exfat_fs_node_cache[idx];
+    (void)idx;
+
+    uint32_t keep_pin = ctx->pin;
     memset(ctx, 0, sizeof(*ctx));
     memset(node, 0, sizeof(*node));
+    ctx->pin = keep_pin;   /* re-populating a slot must not drop its pins */
+    mutex_unlock(&exfat_node_cache_lock);
 
     ctx->fs = fs;
     ctx->first_cluster = first_cluster;
@@ -462,6 +535,8 @@ static fs_node_t *exfat_alloc_node(exfat_fs_t *fs, const char *name, uint64_t in
     node->mtime = mod;
     node->ctime = crt;
     node->statfs = exfat_statfs;
+    node->open   = exfat_node_open;
+    node->close  = exfat_node_close;
 
     if (attr & EXFAT_ATTR_DIRECTORY) {
         node->flags = FS_DIRECTORY;
