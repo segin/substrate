@@ -32,6 +32,16 @@ void icmp_input(netdev_t *dev, uint32_t saddr, uint32_t daddr,
     if (ih->type != ICMP_ECHO) return;
 
     /*
+     * ICMP-02: verify the received checksum.  It was never checked, so a
+     * corrupted echo request was reflected back as a perfectly-formed
+     * reply carrying the corrupted payload -- we became a laundering
+     * service for bit errors, and the sender saw a valid response for data
+     * it never sent.  ICMP's checksum covers the whole message, so this is
+     * a straight one's-complement check over len.
+     */
+    if (inet_csum(pkt, len) != 0) return;
+
+    /*
      * ICMP-01: never answer an echo request sent to a broadcast address.
      * daddr used to be discarded outright ("(void)daddr"), so a request
      * addressed to 255.255.255.255 or the subnet broadcast was answered by

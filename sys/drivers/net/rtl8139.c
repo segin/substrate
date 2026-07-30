@@ -55,6 +55,8 @@
 #define ISR_TOK         0x0004
 #define ISR_RER         0x0002
 #define ISR_TER         0x0008
+#define ISR_RXOVW       0x0010   /* RX buffer overflow */
+#define ISR_FOVW        0x0040   /* RX FIFO overflow */
 
 /* RCR bits — accept broadcast + my MAC + multicast + WRAP */
 #define RCR_AAP         0x01   /* accept all (promisc) */
@@ -103,6 +105,30 @@ static spinlock_t rtl_tx_lock = SPINLOCK_INIT("rtl_tx");
 
 /* ----- RX path ----- */
 
+/*
+ * RTL-04: reset the receiver and resynchronize the ring.
+ *
+ * The old error path just `break`-ed out of the drain loop with a comment
+ * claiming "let RX path reset on next IRQ" -- but no such reset existed
+ * anywhere in the driver, and the break advanced neither rx_offset nor
+ * CAPR.  The ring therefore stayed pointed at the bad packet forever and
+ * the interface was permanently wedged after a single receive error.
+ *
+ * Recovery per the datasheet: stop the receiver, re-point RBSTART, clear
+ * our read cursor and CAPR, then re-enable.  Anything still in the ring is
+ * discarded, which is correct -- we no longer know where the packet
+ * boundaries are.
+ */
+static void rtl_rx_reset(void) {
+    uint8_t cr = inb(rtl.io_base + R_CR);
+    outb(rtl.io_base + R_CR, (uint8_t)(cr & ~CR_RE));      /* RX off */
+    rtl.rx_offset = 0;
+    outl(rtl.io_base + R_RBSTART, rtl.rx_ring_phys);
+    outw(rtl.io_base + R_CAPR, (uint16_t)(0 - 16));
+    outl(rtl.io_base + R_RCR, RCR_APM | RCR_AB | RCR_AM | RCR_WRAP);
+    outb(rtl.io_base + R_CR, (uint8_t)(cr | CR_RE));       /* RX on */
+}
+
 static void rtl_rx_drain(void) {
     while (!(inb(rtl.io_base + R_CR) & CR_BUFE)) {
         /* Each packet in the ring: 4-byte header (status:2, length:2)
@@ -111,13 +137,27 @@ static void rtl_rx_drain(void) {
         uint16_t status = (uint16_t)p[0] | ((uint16_t)p[1] << 8);
         uint16_t length = (uint16_t)p[2] | ((uint16_t)p[3] << 8);
         if (!(status & 0x01)) {
-            /* Receive error — bail and let RX path reset on next IRQ. */
-            break;
+            /* RTL-04: a receive error leaves the ring position unknown.
+             * Reset the receiver rather than spinning on it forever. */
+            rtl.netdev.rx_dropped++;
+            rtl_rx_reset();
+            return;
         }
-        if (length >= 60 && length <= 1518) {
-            /* Drop the trailing 4-byte CRC. */
-            netdev_rx(&rtl.netdev, p + 4, length - 4);
+        /*
+         * RTL-04: `length` comes from the device.  It was used RAW to
+         * advance the ring while only the netdev_rx call was gated on a
+         * plausible range, so an early-receive header (0xFFF0, "packet
+         * still arriving") or any absurd value walked rx_offset to a
+         * position the device did not agree with -- desynchronizing the
+         * ring permanently.  Validate before using it for anything.
+         */
+        if (length < 60 || length > 1518) {
+            rtl.netdev.rx_dropped++;
+            rtl_rx_reset();
+            return;
         }
+        /* Drop the trailing 4-byte CRC. */
+        netdev_rx(&rtl.netdev, p + 4, length - 4);
         /* Advance past header + packet, then 4-byte align. */
         rtl.rx_offset = (uint16_t)((rtl.rx_offset + length + 4 + 3) & ~3);
         rtl.rx_offset = (uint16_t)(rtl.rx_offset % (8 * 1024));
@@ -200,6 +240,13 @@ static int rtl_irq(unsigned int irq, void *dev_id, void *frame) {
     /* Ack first to avoid losing edges. */
     outw(rtl.io_base + R_ISR, isr);
     if (isr & ISR_ROK) rtl_rx_drain();
+    /* RTL-05: an overflow means the ring position is no longer trustworthy;
+     * drain whatever is intact, then resynchronize. */
+    if (isr & (ISR_RXOVW | ISR_FOVW)) {
+        rtl.netdev.rx_dropped++;
+        rtl_rx_reset();
+    }
+    if (isr & ISR_RER) rtl.netdev.rx_dropped++;
     return 1;
 }
 
@@ -259,7 +306,11 @@ int rtl8139_setup(pci_device_t *pdev) {
     outl(rtl.io_base + R_TCR, (3 << 8));   /* MaxDMA = 1 KiB */
 
     /* Enable interrupts for ROK + TOK + errors. */
-    outw(rtl.io_base + R_IMR, ISR_ROK | ISR_TOK | ISR_RER | ISR_TER);
+    /* RTL-05: RxOverflow and RxFIFOOver were masked off and unhandled, so
+     * an overflow silently wedged the ring with no way to notice.  Take
+     * them and recover in the ISR. */
+    outw(rtl.io_base + R_IMR,
+         ISR_ROK | ISR_TOK | ISR_RER | ISR_TER | ISR_RXOVW | ISR_FOVW);
 
     /* Start RX + TX. */
     outb(rtl.io_base + R_CR, CR_RE | CR_TE);

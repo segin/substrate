@@ -269,9 +269,9 @@ void ip4_input(netdev_t *dev, const uint8_t *pkt, size_t len) {
 
     /* Accept if dst is ours, broadcast, or limited-broadcast. */
     uint32_t bcast = (dev->ip4_addr & dev->ip4_netmask) | ~dev->ip4_netmask;
-    if (ih->daddr != dev->ip4_addr &&
-        ih->daddr != 0xFFFFFFFFu &&
-        ih->daddr != bcast) {
+    int for_bcast = (ih->daddr == 0xFFFFFFFFu ||
+                     (dev->ip4_netmask != 0 && ih->daddr == bcast));
+    if (ih->daddr != dev->ip4_addr && !for_bcast) {
         return;
     }
 
@@ -285,6 +285,16 @@ void ip4_input(netdev_t *dev, const uint8_t *pkt, size_t len) {
             udp_input(dev, /*AF_INET=*/2, &ih->saddr, &ih->daddr, l4, l4_len);
             break;
         case 6 /*IPPROTO_TCP*/:
+            /*
+             * IP-03: TCP has no broadcast or multicast semantics, and
+             * broadcast delivery was not flagged to L4 at all -- so a
+             * broadcast segment reached tcp_input, matched no PCB, and every
+             * host on the segment emitted a RST at whatever source address
+             * the attacker chose.  One frame, N reflected RSTs.  RFC 1122
+             * 4.2.3.10 requires a broadcast or multicast segment to be
+             * silently discarded.
+             */
+            if (for_bcast) break;
             tcp_input(ih->saddr, ih->daddr, l4, l4_len);
             break;
         default:

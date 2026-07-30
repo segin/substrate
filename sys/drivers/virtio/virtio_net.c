@@ -191,6 +191,18 @@ static void vnet_rx_drain(void) {
             q->last_used_idx++;
             continue;
         }
+        /*
+         * VNET-06: `total` is the device-written used-ring length and was
+         * never bounded.  desc_id was validated but this was not, so a
+         * buggy or hostile device could name a length far past the 4 KiB
+         * buffer we posted; only netdev_rx's own clamp stood between that
+         * and a kernel over-read, which is an accidental save in a
+         * different file.  Bound it here, at the point we actually know
+         * how big the buffer is.
+         */
+        if (total > VIRTIO_NET_HDR_LEN + VNET_FRAME_MAX) {
+            total = VIRTIO_NET_HDR_LEN + VNET_FRAME_MAX;
+        }
         if (total > VIRTIO_NET_HDR_LEN) {
             uint8_t *buf = (uint8_t *)q->bufs[desc_id];
             /* Skip the virtio_net_hdr prefix.  Substrate's AF_PACKET
