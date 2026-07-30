@@ -323,7 +323,9 @@ void device_unpublish(struct device *dev) {
         return;
     }
     if (dev->devfs_alias[0] != '\0') {
-        devfs_unregister_alias(dev->devfs_alias);
+        /* device_publish registers through devfs_register_alias(), i.e. a
+         * universal (mask 0) alias -- remove that one specifically. */
+        devfs_unregister_alias(dev->devfs_alias, 0);
         dev->devfs_alias[0] = '\0';
     }
     if (dev->devnode != NULL) {

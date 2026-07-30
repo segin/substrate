@@ -5,6 +5,7 @@
 #include <drivers/console/console.h>
 #include <exec/perso/personality.h>
 #include <kern/time.h>
+#include <sys/errno.h>
 #include <pm/pm.h>
 #include <sys/mount.h>
 #include <sys/proc.h>
@@ -39,7 +40,10 @@ static int tty_ioctl_proxy(fs_node_t *node, uint32_t request, void *arg) {
     }
     fs_node_t *cons = console_get_node();
     if (cons && cons->ioctl) return cons->ioctl(cons, request, arg);
-    return -1;
+    /* Not a terminal and no console to forward to.  A bare -1 reached
+     * userspace as EPERM, so every caller that branches on ENOTTY -- isatty(3)
+     * among them -- saw the wrong reason. */
+    return -ENOTTY;
 }
 
 static fs_node_t tty_node = {
@@ -71,7 +75,20 @@ typedef struct devfs_entry {
      * which is how a node is "overridden" per personality.
      */
     uint32_t perso_mask;
+    /*
+     * DEVFS-12: this used to be the entry's heap ADDRESS, both here (via
+     * node->inode) and as readdir's d_ino -- and sys_stat copies node->inode
+     * straight into st_ino.  Any user running `stat /dev/tty` or `ls -i /dev`
+     * therefore read back kernel-heap addresses: a reliable heap-layout
+     * oracle, and precisely what an attacker needs to aim a use-after-free.
+     * A monotonic counter gives the same stable per-entry identity that
+     * find_name_by_inode()/getcwd need, and discloses nothing.
+     */
+    uint64_t ino;
 } devfs_entry_t;
+
+/* Never reused; 0 stays reserved as "unset" and 1 for the devfs root. */
+static uint64_t devfs_next_ino = 2;
 
 /*
  * Serialises the whole devfs tree.
@@ -96,7 +113,7 @@ static fs_node_t devfs_root_node;
 static int devfs_statfs(fs_node_t *node, struct statfs *buf)
 {
     (void)node;
-    if (!buf) return -1;
+    if (!buf) return -EINVAL;   /* was a bare -1, i.e. EPERM to userspace */
     memset(buf, 0, sizeof(*buf));
     buf->f_bsize  = 4096;
     buf->f_iosize = 4096;
@@ -259,11 +276,11 @@ static devfs_entry_t *devfs_create_entry(const char *name, fs_node_t *node,
 
     /* Stamp the inode field with the same per-entry identifier that
      * devfs_dir_readdir emits as d_ino.  Without this, find_name_by_
-     * inode() in kern_getcwd can never match — readdir says d_ino =
-     * (uintptr_t)child, but every devfs node->inode is still 0.  cwd
-     * resolution then falls through to "/" the moment you cd into a
-     * devfs subdirectory (e.g. /dev/pts, /dev/storage). */
-    node->inode = (uint64_t)(uintptr_t)entry;
+     * inode() in kern_getcwd can never match — readdir and node->inode
+     * must agree, or cwd resolution falls through to "/" the moment you
+     * cd into a devfs subdirectory (e.g. /dev/pts, /dev/storage). */
+    entry->ino  = devfs_next_ino++;
+    node->inode = entry->ino;
     return entry;
 }
 
@@ -287,12 +304,12 @@ static int devfs_symlink_readlink(fs_node_t *node, char *buf, size_t size) {
     size_t len;
 
     if (node == NULL || buf == NULL || size == 0) {
-        return -1;
+        return -EINVAL;
     }
 
     entry = (devfs_entry_t *)node->impl;
     if (entry == NULL) {
-        return -1;
+        return -EINVAL;
     }
 
     len = strlen(entry->link_target);
@@ -311,6 +328,24 @@ static struct dirent *devfs_dir_readdir(fs_node_t *node, uint64_t index) {
 
     if (!entry) return NULL;
 
+    /*
+     * DEVFS-21: devfs_dir_finddir resolves "." and ".." but readdir did not
+     * emit them, so lookup and enumeration disagreed: `ls -a /dev` and
+     * /dev/pts showed no dot entries (unlike /proc, /sys and /dev/shm), and
+     * tree-walkers that expect ".." from getdents mis-handled devfs.  Emit
+     * them at indices 0 and 1, ahead of the children.
+     */
+    if (index == 0 || index == 1) {
+        spinlock_acquire(&devfs_lock);
+        strlcpy(dev_dirent.d_name, index == 0 ? "." : "..",
+                sizeof(dev_dirent.d_name));
+        dev_dirent.d_ino = (index == 0 || !entry->parent)
+                         ? entry->ino : entry->parent->ino;
+        spinlock_release(&devfs_lock);
+        return &dev_dirent;
+    }
+    index -= 2;
+
     /* Walk under the tree lock: a hotplug unregister can be unlinking and
      * freeing entries from this very list. */
     spinlock_acquire(&devfs_lock);
@@ -320,7 +355,7 @@ static struct dirent *devfs_dir_readdir(fs_node_t *node, uint64_t index) {
         if (i == index) {
             strlcpy(dev_dirent.d_name, child->name, sizeof(dev_dirent.d_name));
             dev_dirent.d_name[sizeof(dev_dirent.d_name) - 1] = '\0';
-            dev_dirent.d_ino = (uintptr_t)child;
+            dev_dirent.d_ino = child->ino;
             result = &dev_dirent;
             break;
         }
@@ -411,7 +446,17 @@ static int devfs_path_allowed(const char *path) {
     return 1;
 }
 
-static devfs_entry_t *devfs_lookup_path(const char *path) {
+/*
+ * DEVFS-33: this walked every component with devfs_find_child(), which
+ * returns the FIRST name match regardless of personality mask, while
+ * registration places entries with devfs_find_child_mask().  With both a
+ * universal entry and a personality-scoped override of the same name -- the
+ * exact shape devfs_init builds for ttyv* -- an unregister removed whichever
+ * happened to be first in the list, quite possibly the wrong one.  The leaf
+ * is now matched on (name, perso_mask) like registration does; intermediate
+ * components stay universal, which is what devfs_add_entry creates them as.
+ */
+static devfs_entry_t *devfs_lookup_path(const char *path, uint32_t perso_mask) {
     devfs_entry_t *current = root_entry;
     const char *p = path;
     char name_buf[128];
@@ -430,7 +475,8 @@ static devfs_entry_t *devfs_lookup_path(const char *path) {
         strncpy(name_buf, p, len);
         name_buf[len] = '\0';
 
-        current = devfs_find_child(current, name_buf);
+        current = sep ? devfs_find_child(current, name_buf)
+                      : devfs_find_child_mask(current, name_buf, perso_mask);
         if (current == NULL) {
             return NULL;
         }
@@ -546,10 +592,29 @@ static int devfs_add_entry(const char *path, fs_node_t *node, uint32_t perso_mas
          * personality-specific override of the same name coexist. */
         next = devfs_find_child_mask(current, name_buf, perso_mask);
         if (next != NULL) {
+            /*
+             * DEVFS-13: replacing an existing leaf used to just overwrite
+             * next->node.  Two bugs followed.  If the old node was
+             * devfs-owned (owns_node = 1 -- an alias, kmalloc'd here) it
+             * leaked.  Worse, owns_node stayed SET while the new node might
+             * be a driver's file-scope static (tty_node and friends), so a
+             * later unregister did kfree(entry->node, sizeof(fs_node_t)) on
+             * a static object and corrupted the allocator.
+             *
+             * Release the old node if we owned it, then clear the flag: the
+             * caller supplied this node and owns its lifetime.
+             */
+            if (next->owns_node && next->node && next->node != node) {
+                kfree(next->node, sizeof(fs_node_t));
+            }
+            next->owns_node = 0;
             next->node = node;
             if (!node->impl) {
                 node->impl = (uintptr_t)next;
             }
+            /* Keep the identity the entry already published: readdir emits
+             * next->ino, so the replacement node must report the same one. */
+            node->inode = next->ino;
             return 0;
         }
 
@@ -657,7 +722,7 @@ int devfs_register_alias_perso(const char *path, const char *target,
 
     /* Reuse an existing entry only when its mask matches — otherwise a
      * personality-specific alias must coexist with a universal one. */
-    entry = devfs_lookup_path(path);
+    entry = devfs_lookup_path(path, perso_mask);
     if (entry != NULL && entry->perso_mask == perso_mask) {
         if (entry->node == NULL || (entry->node->flags & 0x7) != FS_SYMLINK) {
             return -1;
@@ -700,11 +765,14 @@ int devfs_register_alias(const char *path, const char *target) {
     return devfs_register_alias_perso(path, target, 0);
 }
 
-void devfs_unregister_alias(const char *path) {
+void devfs_unregister_alias(const char *path, uint32_t perso_mask) {
     devfs_entry_t *entry;
 
     spinlock_acquire(&devfs_lock);
-    entry = devfs_lookup_path(path);
+    /* DEVFS-33: match the mask, or a universal alias and a perso-scoped
+     * override of the same name are indistinguishable here and whichever sits
+     * first in the child list gets removed. */
+    entry = devfs_lookup_path(path, perso_mask);
     if (entry == NULL || entry->node == NULL || (entry->node->flags & 0x7) != FS_SYMLINK) {
         spinlock_release(&devfs_lock);
         return;

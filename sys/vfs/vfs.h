@@ -260,7 +260,11 @@ void devfs_unregister_device(fs_node_t *node);
 int devfs_register_alias(const char *path, const char *target);
 int devfs_register_alias_perso(const char *path, const char *target,
                                uint32_t perso_mask);
-void devfs_unregister_alias(const char *path);
+/* Removes the alias registered at `path` with this exact perso_mask.  The
+ * mask matters: a universal alias and a personality-scoped override of the
+ * same name coexist, and passing the wrong one removes the wrong entry
+ * (DEVFS-33).  Use 0 for aliases made with devfs_register_alias(). */
+void devfs_unregister_alias(const char *path, uint32_t perso_mask);
 
 /* shmfs — POSIX shared-memory filesystem.  Mounted at /dev/shm
  * immediately after devfs by sys/kern/main.c. */
