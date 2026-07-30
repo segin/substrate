@@ -111,10 +111,16 @@ static int test_init_protection(void) {
     
     // Find init's thread
     thread_t *it = NULL;
-    for(int i=0; i<MAX_THREADS; i++) {
-        extern thread_t threads[];
-        if (threads[i].tid != -1 && threads[i].proc == init) {
-            it = &threads[i];
+    /*
+     * #425: the static threads[MAX_THREADS] array no longer exists -- threads
+     * live on the t_allthread_next registry, walked with thread_first() /
+     * thread_next().  This `extern thread_t threads[]` also declared a symbol
+     * the kernel does not define, which is exactly the kind of stale
+     * declaration that only surfaces when the tests are actually built.
+     */
+    for (thread_t *t = thread_first(); t != NULL; t = thread_next(t)) {
+        if (t->proc == init) {
+            it = t;
             break;
         }
     }

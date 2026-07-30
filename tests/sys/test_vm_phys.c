@@ -480,6 +480,12 @@ static void test_vm_phys_add_range(void) {
     TEST_PASS("vm_phys_add_range");
 }
 
+/* #425: defined below the runner -- forward-declare so the call above is not
+ * an implicit declaration (which also made it non-static and then "defined
+ * but not used" under -Werror). */
+static void test_contiguous_below_basic(void);
+
+
 /* Test entry point */
 void test_vm_phys(void) {
     kprint("=== Physical Memory Manager Integration Tests ===\n");

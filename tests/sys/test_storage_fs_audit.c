@@ -21,6 +21,9 @@
 #include <vm/vm_kmem.h>
 
 #include "tests.h"
+/* #425: scsi_lun_from_report_desc(), scsi_not_ready_is_transient() and the
+ * SCSI_ASC / SCSI_ASCQ constants this test exercises all live here. */
+#include <drivers/storage/scsi/scsi.h>
 
 static int tests_passed = 0;
 static int tests_failed = 0;

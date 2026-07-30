@@ -1,5 +1,11 @@
 #include <sys/utsname.h>
 #include <string.h>
+/*
+ * #425: this called uname(), the LIBC wrapper, which does not exist inside
+ * the kernel -- the kernel-side entry point is sys_uname().  An in-kernel
+ * test has to call the kernel function.
+ */
+#include <sys/syscall_impl.h>
 #include <kern/console.h>
 #include "tests.h"
 
@@ -19,7 +25,7 @@ static void test_uname_basic(void) {
     struct utsname name;
     memset(&name, 0, sizeof(name));
     
-    int ret = uname(&name);
+    int ret = sys_uname(&name);
     TEST_ASSERT(ret == 0, "uname syscall succeeded");
     
     TEST_ASSERT(strcmp(name.sysname, "Substrate") == 0, "sysname is Substrate");

@@ -6,14 +6,19 @@
 #include <kern/console.h>
 #include <sys/mman.h>
 
-// Rename symbols to avoid conflict with kernel proper
-#define sys_mmap test_sys_mmap
-#define sys_munmap test_sys_munmap
-#define sys_mprotect test_sys_mprotect
+/*
+ * #425: this test used to #include <vm/vm_mmap.c> and rename its symbols, so
+ * it linked against a private copy of the implementation.  vm_mmap.c was
+ * deleted in 20ef7a89f -- sys_mmap/munmap moved into vm_syscalls.c, which IS
+ * built into vm.o, so a second copy would now be a duplicate definition (and
+ * sys_mprotect lives in sys/exec/perso/compat.c and never moved at all).
+ * The tests operate on the calling process's own vm_map either way, so call
+ * the real kernel entry points that are already linked into this image.
+ */
+#include <sys/syscall_impl.h>
 
 // Include implementation files directly
 #include <vm/vm_area.c>
-#include <vm/vm_mmap.c>
 
 static int tests_passed = 0;
 static int tests_failed = 0;

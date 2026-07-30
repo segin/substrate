@@ -298,9 +298,15 @@ void test_vm_pageout_oom_kills_largest_user_process(void) {
 
     init = proc_find(1);
     if (init) {
-        for (int i = 0; i < MAX_THREADS; i++) {
-            if (threads[i].tid != -1 && threads[i].proc == init) {
-                init_thread = &threads[i];
+        /*
+         * #425: the static threads[MAX_THREADS] array is long gone -- threads
+         * live on the t_allthread_next registry now, walked via
+         * thread_first()/thread_next().  This test was never updated, which
+         * is part of why KERNEL_TESTS=1 stopped building.
+         */
+        for (thread_t *t = thread_first(); t != NULL; t = thread_next(t)) {
+            if (t->proc == init) {
+                init_thread = t;
                 break;
             }
         }

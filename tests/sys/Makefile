@@ -15,6 +15,8 @@ SRCS += test_nanosleep.c test_reboot.c test_pipe_race.c test_chacha20.c
 SRCS += test_floppy_qemu.c test_uname.c test_native_personality.c test_freebsd_personality.c
 SRCS += test_storage_fs_audit.c
 SRCS += test_vnode_create.c test_vgone.c
+# #425: test_runner.c calls run_vnode_ref_tests() but this was never listed.
+SRCS += test_vnode_ref.c
 
 OBJS = $(SRCS:.c=.o)
 

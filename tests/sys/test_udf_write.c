@@ -7,13 +7,20 @@
 #include <fs/udf/udf.h>
 #include <vfs/vfs.h>
 
-/* External symbols from UDF driver */
-extern struct udf_fs udf_ctx;
-extern int udf_read_space_bitmap(fs_node_t *dev, uint32_t partition_start, uint32_t bitmap_loc, uint32_t bitmap_len);
-extern uint32_t udf_alloc_block(void);
-extern int udf_write_file(fs_node_t *dev, struct udf_fe *fe, uint32_t fe_block,
-                   uint32_t offset, uint32_t size, const uint8_t *data);
-extern int udf_truncate(fs_node_t *dev, struct udf_fe *fe, uint32_t fe_block, uint64_t new_size);
+/*
+ * External symbols from the UDF driver.
+ *
+ * #425: these used to be hand-written externs taking (fs_node_t *dev,
+ * uint32_t partition_start, ...).  The driver was refactored to pass the
+ * whole `struct udf_fs` -- which carries exactly those two fields -- and the
+ * local copies were never updated, so every one of them conflicted with the
+ * real declaration the moment the tests were built again.  Take the
+ * prototypes from the header instead of restating them here, which is what
+ * stops them drifting a second time.
+ */
+/* #425: udf_ctx used to be a global in udf.c; mount state is now per-fs.
+ * These tests drive a mock device, so the test owns the context. */
+static struct udf_fs udf_ctx;
 
 /* Mock Device */
 static uint8_t mock_disk[UDF_SECTOR_SIZE * 16];
@@ -73,7 +80,7 @@ static void test_udf_allocation_writeback(void) {
 
     /* Load Bitmap */
     /* partition_start=0, loc=0, len=sizeof(header)+8 */
-    int res = udf_read_space_bitmap(&mock_dev, 0, 0, sizeof(struct udf_space_bitmap) + 8);
+    int res = udf_read_space_bitmap(&udf_ctx, 0, sizeof(struct udf_space_bitmap) + 8);
     if (res != 0) {
         kprintf("FAILED: udf_read_space_bitmap returned error\n");
         return;
@@ -81,7 +88,7 @@ static void test_udf_allocation_writeback(void) {
 
     /* Allocate a block */
     /* Should return block 1 (next free bit) */
-    uint32_t block = udf_alloc_block();
+    uint32_t block = udf_alloc_block(&udf_ctx);
 
     if (block != 1) {
         kprintf("FAILED: Expected block 1, got %d\n", block);
@@ -138,7 +145,7 @@ static void test_udf_large_file_write(void) {
     udf_ctx.partition_start = 0;
 
     /* Load Bitmap */
-    udf_read_space_bitmap(&mock_dev, 0, 0, sizeof(struct udf_space_bitmap) + 8);
+    udf_read_space_bitmap(&udf_ctx, 0, sizeof(struct udf_space_bitmap) + 8);
 
     /* Create a File Entry at sector 1 */
     struct udf_fe fe;
@@ -157,7 +164,7 @@ static void test_udf_large_file_write(void) {
     for (int i = 0; i < 4096; i++) large_data[i] = (uint8_t)(i % 256);
 
     /* Attempt to write 4KB to file */
-    int res = udf_write_file(&mock_dev, &fe, 1, 0, 4096, large_data);
+    int res = udf_write_file(&udf_ctx, &fe, 1, 0, 4096, large_data);
 
     if (res != 0) {
         kprintf("test_udf_large_file_write: FAILED (Expected success, got %d)\n", res);
@@ -223,7 +230,7 @@ static void test_udf_truncate_extent(void) {
 
     /* Load bitmap */
     udf_ctx.device = &mock_dev;
-    if (udf_read_space_bitmap(&mock_dev, 0, 0, sizeof(struct udf_space_bitmap) + 4) != 0) {
+    if (udf_read_space_bitmap(&udf_ctx, 0, sizeof(struct udf_space_bitmap) + 4) != 0) {
         kprintf("FAILED: Setup bitmap failed\n");
         return;
     }
@@ -261,7 +268,7 @@ static void test_udf_truncate_extent(void) {
     struct udf_fe fe_copy;
     memcpy(&fe_copy, fe, sizeof(struct udf_fe));
 
-    int res = udf_truncate(&mock_dev, &fe_copy, fe_sector, 3000);
+    int res = udf_truncate_file(&udf_ctx, &fe_copy, fe_sector, 3000);
 
     if (res != 0) {
         kprintf("FAILED: udf_truncate returned %d (expected 0)\n", res);
@@ -297,7 +304,7 @@ static void test_udf_truncate_extent(void) {
     /* Should keep Block 2 (partial), Remove Block 3 */
     /* Block 3 should be freed */
 
-    res = udf_truncate(&mock_dev, &fe_copy, fe_sector, 1024);
+    res = udf_truncate_file(&udf_ctx, &fe_copy, fe_sector, 1024);
 
     if (res != 0) {
         kprintf("FAILED: udf_truncate (2) returned %d\n", res);
@@ -364,7 +371,7 @@ static void test_udf_truncate_extent_long(void) {
 
     /* Load bitmap */
     udf_ctx.device = &mock_dev;
-    if (udf_read_space_bitmap(&mock_dev, 0, 0, sizeof(struct udf_space_bitmap) + 4) != 0) {
+    if (udf_read_space_bitmap(&udf_ctx, 0, sizeof(struct udf_space_bitmap) + 4) != 0) {
         kprintf("FAILED: Setup bitmap failed\n");
         return;
     }
@@ -404,7 +411,7 @@ static void test_udf_truncate_extent_long(void) {
     struct udf_fe fe_copy;
     memcpy(&fe_copy, fe, sizeof(struct udf_fe));
 
-    int res = udf_truncate(&mock_dev, &fe_copy, fe_sector, 3000);
+    int res = udf_truncate_file(&udf_ctx, &fe_copy, fe_sector, 3000);
 
     if (res != 0) {
         kprintf("FAILED: udf_truncate returned %d (expected 0)\n", res);
@@ -440,7 +447,7 @@ static void test_udf_truncate_extent_long(void) {
     /* Should keep Block 2 (partial), Remove Block 3 */
     /* Block 3 should be freed */
 
-    res = udf_truncate(&mock_dev, &fe_copy, fe_sector, 1024);
+    res = udf_truncate_file(&udf_ctx, &fe_copy, fe_sector, 1024);
 
     if (res != 0) {
         kprintf("FAILED: udf_truncate (2) returned %d\n", res);
@@ -478,7 +485,8 @@ static void test_udf_truncate_extent_long(void) {
     kprintf("test_udf_truncate_extent_long: PASSED\n");
 }
 
-extern int udf_remove_fid(fs_node_t *dev, struct udf_fe *dir_fe, uint32_t dir_block, const char *name);
+/* #425: declared by <fs/udf/udf.h>; the local copy predated the
+ * struct udf_fs refactor and conflicted with it. */
 
 static void test_udf_remove_fid(void) {
     kprintf("Running test_udf_remove_fid...\n");
@@ -542,7 +550,7 @@ static void test_udf_remove_fid(void) {
     dir_fe.info_length = pos; /* Directory length is the total FID sizes */
 
     /* Remove "file2" */
-    int res = udf_remove_fid(&mock_dev, &dir_fe, dir_block, "file2");
+    int res = udf_remove_fid(&udf_ctx, &dir_fe, dir_block, "file2");
 
     if (res != 0) {
         kprintf("test_udf_remove_fid: FAILED (udf_remove_fid returned %d, expected 0)\n", res);
@@ -562,7 +570,7 @@ static void test_udf_remove_fid(void) {
     }
 
     /* Verify removing non-existent file returns -1 */
-    res = udf_remove_fid(&mock_dev, &dir_fe, dir_block, "nonexistent");
+    res = udf_remove_fid(&udf_ctx, &dir_fe, dir_block, "nonexistent");
     if (res != -1) {
         kprintf("test_udf_remove_fid: FAILED (udf_remove_fid returned %d for nonexistent file, expected -1)\n", res);
         return;
