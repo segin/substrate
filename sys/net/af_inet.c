@@ -1061,6 +1061,25 @@ ssize_t afinet_recvfrom(int fd, void *buf, size_t len, int flags,
      * kernel-local storage under the lock; the fill-out of the caller's
      * buffers runs unlocked.  `addr`/`addrlen` here are the kernel bounce
      * buffers supplied by recv_into_kbuf(), so the copy is safe. */
+    /*
+     * Resolve non-blocking BEFORE taking the ring lock, and honour both the
+     * per-call MSG_DONTWAIT and the fd's FNONBLOCK -- exactly what the TCP arm
+     * above already does.  The datagram path used to test MSG_DONTWAIT only,
+     * so a socket made non-blocking with fcntl(F_SETFL, O_NONBLOCK) and then
+     * read with recv(..., 0) slept in sched_sleep() forever instead of
+     * returning EAGAIN.  That silently breaks every poll/deadline-driven UDP
+     * client (DNS resolvers, rpcbind, DHCP), which believe the read cannot
+     * block; the AF_PACKET twin of this bug is what hung dhclient at
+     * "DHCPDISCOVER ... (try 1/4)".
+     */
+    int nb_dgram;
+    {
+        file_t *nf = (current_process && fd >= 0 && fd < MAX_FD)
+                         ? current_process->fds[fd] : NULL;
+        nb_dgram = (flags & MSG_DONTWAIT) ||
+                   (nf && (nf->f_flag & FNONBLOCK));
+    }
+
     unsigned long fl = spinlock_acquire_irq(&afi_lock);
     s->refcount++;
     int fam = s->family;
@@ -1096,8 +1115,9 @@ ssize_t afinet_recvfrom(int fd, void *buf, size_t len, int flags,
             }
             return (ssize_t)n;
         }
-        /* Non-blocking via MSG_DONTWAIT (Linux convention). */
-        if (flags & 0x40 /* MSG_DONTWAIT */) { afi_rele_unlock(s, fl); return -EAGAIN; }
+        /* Non-blocking: MSG_DONTWAIT (Linux convention) or the fd's
+         * FNONBLOCK, resolved above. */
+        if (nb_dgram) { afi_rele_unlock(s, fl); return -EAGAIN; }
         spinlock_release_irq(&afi_lock, fl);
         current_thread->flags |= THREAD_F_INTERRUPTIBLE;
         sched_sleep(s->wait_chan);
