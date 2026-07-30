@@ -68,11 +68,31 @@ size_t afpkt_node_read(fs_node_t *node, off_t off, size_t size, uint8_t *buf) {
     (void)off;
     afpkt_sock_t *s = (afpkt_sock_t *)(uintptr_t)node->impl;
     if (!s || s->closed) return 0;
+
+    /*
+     * Honour O_NONBLOCK.  read()/recv() stash the file_t on the thread for the
+     * duration of the node op, which is how the AF_UNIX paths recover the flag
+     * (see af_unix.c afunix_node_read).  Without this the sleep below is
+     * unconditional, so a caller that set O_NONBLOCK with fcntl() and then
+     * polls with a wall-clock deadline blocks forever on its first read and
+     * the deadline loop never iterates.
+     *
+     * That is exactly how dhclient hung: it takes an AF_PACKET SOCK_RAW
+     * socket, sets O_NONBLOCK via fcntl (sbin/dhclient/dhclient.c), and then
+     * runs `while (now_sec() < deadline) { usleep(5000); recv(..., 0); }`.
+     * With the flag ignored it stuck on "DHCPDISCOVER ... (try 1/4)" and never
+     * retried or gave up, so boot stalled at 20-network whenever nothing
+     * answered DHCP (e.g. a tap netdev with no server on the bridge).
+     */
+    int nonblock = current_thread && current_thread->io_file &&
+                   (current_thread->io_file->f_flag & FNONBLOCK);
+
     for (;;) {
         uint32_t ifindex;
         ssize_t n = netdev_sub_recv(s->sub, buf, size, &ifindex);
         if (n > 0) return (size_t)n;
         if (n < 0) return (size_t)n;
+        if (nonblock) return (size_t)-EAGAIN;
         /* No data — sleep on the subscriber's wake channel until a
          * frame arrives.  Interruptible so SIGINT yanks us out. */
         void *chan = netdev_sub_wait_chan(s->sub);
@@ -204,10 +224,42 @@ ssize_t afpacket_sendto(int fd, const void *buf, size_t len, int flags,
 
 ssize_t afpacket_recvfrom(int fd, void *buf, size_t len, int flags,
                           struct sockaddr_ll_kern *from, socklen_t *fromlen) {
-    (void)flags;
     afpkt_sock_t *s = afpkt_from_fd(fd);
     if (!s) return -ENOTSOCK;
     if (s->closed) return 0;
+
+    /*
+     * Respect both the per-call MSG_DONTWAIT and the fd's O_NONBLOCK, matching
+     * afinet_recvfrom's TCP arm (af_inet.c).  `flags` was previously discarded
+     * outright with (void)flags, so neither mechanism worked and this sleep was
+     * unconditional -- see the O_NONBLOCK note in afpkt_node_read above for the
+     * dhclient hang this produced.
+     */
+    {
+        int nb = (flags & MSG_DONTWAIT) != 0;
+        if (!nb && fd >= 0 && fd < MAX_FD && current_process) {
+            file_t *f = current_process->fds[fd];
+            nb = (f && (f->f_flag & FNONBLOCK)) ? 1 : 0;
+        }
+        if (nb) {
+            uint32_t ifindex;
+            ssize_t n = netdev_sub_recv(s->sub, buf, len, &ifindex);
+            if (n == 0) return -EAGAIN;
+            if (n < 0) return n;
+            if (from && fromlen && *fromlen >= (socklen_t)sizeof(*from)) {
+                memset(from, 0, sizeof(*from));
+                from->sll_family = AF_PACKET;
+                from->sll_ifindex = (int32_t)ifindex;
+                netdev_t *d = netdev_by_index(ifindex);
+                if (d) {
+                    from->sll_halen = NETDEV_HWADDR_LEN;
+                    memcpy(from->sll_addr, d->hwaddr, NETDEV_HWADDR_LEN);
+                }
+                *fromlen = (socklen_t)sizeof(*from);
+            }
+            return n;
+        }
+    }
 
     for (;;) {
         uint32_t ifindex;
