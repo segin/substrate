@@ -176,11 +176,51 @@ typedef struct tcp_pcb {
     int        shut_rd;
     /* Parent (for SYN_RECEIVED children before accept) */
     struct tcp_pcb *parent;
+    /*
+     * TCP-01: number of blocked callers currently holding this PCB across a
+     * sleep.  The timer kthread is the sole reaper, and it must not free a
+     * PCB that a sleeping tcp_recv/accept/connect is about to re-dereference
+     * when it wakes.  0 = only the socket owns it, which is the reapable
+     * state.  Manipulated under tcp_lock().
+     */
+    int        holds;
     /* Linked list */
     struct tcp_pcb *next;
 } tcp_pcb_t;
 
 static tcp_pcb_t *g_tcp_pcbs;
+
+/*
+ * TCP-01: pin a PCB across a blocking wait.
+ *
+ * tcp_close() only marks the PCB detached; the timer kthread frees it (and
+ * its 32 KiB receive ring) once it reaches CLOSED.  But tcp_recv, tcp_accept
+ * and tcp_connect capture the PCB pointer and re-dereference it after every
+ * sched_sleep_until() wake, so the classic sequence -- thread A blocked in
+ * recv(), thread B close()s the shared fd, the peer's FIN walks the state
+ * machine to CLOSED, the next tick frees it -- had A wake up and read
+ * p->rxbuf out of a freed slab and write p->rx_count back into it.  The
+ * remote peer controls that timing.
+ *
+ * A hold keeps the reaper off the PCB for the duration of the call; the
+ * reaper simply skips a held PCB and collects it on a later tick.  Note the
+ * hold must span the whole blocking function, not just the sleep: releasing
+ * before the final state check would reopen the same window.
+ */
+static void tcp_hold(tcp_pcb_t *p) {
+    if (!p) return;
+    uint32_t f = tcp_lock();
+    p->holds++;
+    tcp_unlock(f);
+}
+
+static void tcp_unhold(tcp_pcb_t *p) {
+    if (!p) return;
+    uint32_t f = tcp_lock();
+    if (p->holds > 0) p->holds--;
+    tcp_unlock(f);
+}
+
 
 /* ------------------------------------------------------------------ */
 /* Helpers                                                            */
@@ -373,14 +413,19 @@ static void tcp_timer_tick(uint64_t now) {
         if (p->state == TCP_CLOSED) {
             /* Terminal.  Reap if orphaned — tcp_find() never returns a
              * CLOSED PCB, so no RX path can be holding this pointer. */
-            if (p->detached) { tcp_free(p); continue; }
+            /* TCP-01: never free a PCB a blocked caller is still holding;
+             * it will be reaped on a later tick once that caller returns. */
+            if (p->detached && p->holds == 0) { tcp_free(p); continue; }
+            if (p->detached) continue;
             /* NET-04: a never-accepted child (->parent still set) that
              * died in the handshake — e.g. SYN_RECEIVED retransmit
              * timeout or a RST (NET-06) — has no userspace owner and no
              * fd.  Free it now instead of leaking its rxbuf until the
              * listener closes.  Skip it while still in the listener's
              * accept queue, where a pending accept() could claim it. */
-            if (p->parent && !tcp_child_in_accept_q(p)) { tcp_free(p); continue; }
+            if (p->parent && !tcp_child_in_accept_q(p) && p->holds == 0) {
+                tcp_free(p); continue;
+            }
             continue;
         }
         /* TCP-05: reap a FIN_WAIT_2 whose peer never sent its FIN. */
@@ -943,21 +988,27 @@ static void tcp_connect_start(tcp_pcb_t *p, uint32_t raddr, uint16_t rport) {
 }
 
 int tcp_connect(tcp_pcb_t *p, uint32_t raddr, uint16_t rport) {
+    int ret;
+    tcp_hold(p);                                    /* TCP-01 */
     tcp_connect_start(p, raddr, rport);
     /* Wait — the retransmit kthread enforces the overall timeout via
      * TCP_MAX_RETX.  Loop on state changes.  */
     for (;;) {
-        if (p->state == TCP_ESTABLISHED) return 0;
+        if (p->state == TCP_ESTABLISHED) { ret = 0; break; }
         if (p->state == TCP_CLOSED) {
-            int err = p->so_error ? -p->so_error : -ECONNREFUSED;
-            return err;
+            ret = p->so_error ? -p->so_error : -ECONNREFUSED;
+            break;
         }
         current_thread->flags |= THREAD_F_INTERRUPTIBLE;
         sched_sleep_until(p->connect_chan, get_ticks() + TCP_SLEEP_POLL);
         current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
-        if (current_thread->sig_pending & ~current_thread->sig_mask)
-            return -EINTR;
+        if (current_thread->sig_pending & ~current_thread->sig_mask) {
+            ret = -EINTR;
+            break;
+        }
     }
+    tcp_unhold(p);
+    return ret;
 }
 
 int tcp_connect_nb(tcp_pcb_t *p, uint32_t raddr, uint16_t rport) {
@@ -1031,6 +1082,8 @@ int tcp_is_listening(const tcp_pcb_t *p) {
  * EAGAIN); otherwise blocks.  NULL from the blocking path means the
  * wait was interrupted by a signal. */
 tcp_pcb_t *tcp_accept(tcp_pcb_t *listen_p, int nonblock) {
+    tcp_pcb_t *ret = NULL;
+    tcp_hold(listen_p);                             /* TCP-01 */
     for (;;) {
         /* accept_q / accept_count are appended by tcp_in_syn_received
          * in IRQ context — dequeue with IRQs off so the shift-down
@@ -1043,16 +1096,19 @@ tcp_pcb_t *tcp_accept(tcp_pcb_t *listen_p, int nonblock) {
             listen_p->accept_count--;
             c->parent = NULL;
             tcp_unlock(f);
-            return c;
+            ret = c;
+            break;
         }
         tcp_unlock(f);
-        if (nonblock) return NULL;
+        if (nonblock) break;
         current_thread->flags |= THREAD_F_INTERRUPTIBLE;
         sched_sleep_until(listen_p->accept_chan, get_ticks() + TCP_SLEEP_POLL);
         current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
         if (current_thread->sig_pending & ~current_thread->sig_mask)
-            return NULL;
+            break;
     }
+    tcp_unhold(listen_p);
+    return ret;
 }
 
 static ssize_t tcp_send_impl(tcp_pcb_t *p, const void *buf, size_t len, int nonblock) {
@@ -1174,15 +1230,21 @@ ssize_t tcp_recv_nb(tcp_pcb_t *p, void *buf, size_t len) {
 }
 
 ssize_t tcp_recv(tcp_pcb_t *p, void *buf, size_t len) {
+    ssize_t ret;
+    tcp_hold(p);                                    /* TCP-01 */
     for (;;) {
         ssize_t r = tcp_recv_nb(p, buf, len);
-        if (r != -EAGAIN) return r;
+        if (r != -EAGAIN) { ret = r; break; }
         current_thread->flags |= THREAD_F_INTERRUPTIBLE;
         sched_sleep_until(p->recv_chan, get_ticks() + TCP_SLEEP_POLL);
         current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
-        if (current_thread->sig_pending & ~current_thread->sig_mask)
-            return -EINTR;
+        if (current_thread->sig_pending & ~current_thread->sig_mask) {
+            ret = -EINTR;
+            break;
+        }
     }
+    tcp_unhold(p);
+    return ret;
 }
 
 /* MSG_PEEK: copy up to len bytes from the rx ring WITHOUT consuming them,
