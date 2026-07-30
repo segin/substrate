@@ -136,7 +136,17 @@
 /* Limits */
 #define USB_MAX_DEVICES         32
 #define USB_MAX_ENDPOINTS       16
-#define USB_MAX_CONFIG_SIZE     512
+/*
+ * Sanity cap on a device's total configuration-descriptor length.  This is
+ * not a buffer size -- config_data is allocated at the device's actual
+ * wTotalLength -- only a bound so a hostile or wedged device can't make us
+ * allocate up to the 64 KiB the field can encode.  It used to be 512, the
+ * size of a fixed inline array, and any device with a larger config
+ * descriptor was refused outright: real composite devices (UVC webcams, USB
+ * audio, docking stations, keyboards with extra HID interfaces) commonly
+ * report 1-3 KiB, and one reporting 1093 bytes is what exposed this.
+ */
+#define USB_MAX_CONFIG_SIZE     8192
 #define USB_MAX_HCDS            4
 
 /*
@@ -251,8 +261,9 @@ typedef struct usb_device {
     /* Cached full device descriptor */
     struct usb_device_descriptor dev_desc;
 
-    /* Raw config descriptor data */
-    uint8_t  config_data[USB_MAX_CONFIG_SIZE];
+    /* Raw config descriptor data, allocated at config_len bytes during
+     * enumeration and freed by usb_free_device().  NULL until then. */
+    uint8_t  *config_data;
     uint16_t config_len;
 
     /* Parsed endpoints (excluding EP0) */

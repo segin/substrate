@@ -199,6 +199,12 @@ void usb_free_device(usb_device_t *dev)
     if (dev->slot < USB_MAX_DEVICES)
         usb_devices[dev->slot] = NULL;
 
+    if (dev->config_data) {
+        kfree(dev->config_data, dev->config_len);
+        dev->config_data = NULL;
+        dev->config_len = 0;
+    }
+
     kfree(dev, sizeof(usb_device_t));
 }
 
@@ -464,6 +470,9 @@ static void usb_parse_config(usb_device_t *dev)
 
     dev->num_endpoints = 0;
 
+    if (!ptr)
+        return;
+
     while (ptr + 2 <= end) {
         uint8_t bLength = ptr[0];
         uint8_t bType = ptr[1];
@@ -719,14 +728,22 @@ static int usb_enumerate_device_inner(usb_hcd_t *hcd, uint8_t port, uint8_t spee
         return -1;
     }
 
-    /* Read full configuration descriptor.  USB_MAX_CONFIG_SIZE bounds
-     * the per-device cache so a hostile/buggy device can't make us
-     * allocate unbounded memory; reject the device if its config
-     * legitimately exceeds the cache so we don't silently lose
-     * trailing endpoints / interfaces. */
-    if (cd.wTotalLength > USB_MAX_CONFIG_SIZE) {
-        kprintf("usb: addr %u: config descriptor %u B exceeds cache (%u); skipping\n",
+    /* Read the full configuration descriptor into a cache sized to this
+     * device.  USB_MAX_CONFIG_SIZE is only a sanity bound against a
+     * hostile/wedged device claiming an absurd wTotalLength -- a device
+     * within it gets exactly the space it asked for, so we never silently
+     * lose trailing interfaces or endpoints. */
+    if (cd.wTotalLength < sizeof(cd) || cd.wTotalLength > USB_MAX_CONFIG_SIZE) {
+        kprintf("usb: addr %u: implausible config descriptor length %u B "
+                "(max %u); skipping\n",
                 addr, cd.wTotalLength, USB_MAX_CONFIG_SIZE);
+        usb_free_device(dev);
+        return -1;
+    }
+    dev->config_data = kzalloc(cd.wTotalLength);
+    if (!dev->config_data) {
+        kprintf("usb: addr %u: out of memory for %u B config descriptor\n",
+                addr, cd.wTotalLength);
         usb_free_device(dev);
         return -1;
     }

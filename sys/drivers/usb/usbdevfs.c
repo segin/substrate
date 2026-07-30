@@ -146,25 +146,38 @@ static size_t usbdevfs_dev_read(fs_node_t *node, off_t offset, size_t size,
                                 uint8_t *buffer)
 {
     usb_device_t *dev = (usb_device_t *)(uintptr_t)node->impl;
-    uint8_t blob[sizeof(struct usb_device_descriptor) + USB_MAX_CONFIG_SIZE];
-    size_t n, off = (size_t)offset;
+    size_t dlen = sizeof(dev->dev_desc);
+    size_t clen, total, off = (size_t)offset, done = 0;
 
     if (dev == NULL) {
         return 0;
     }
-    memcpy(blob, &dev->dev_desc, sizeof(dev->dev_desc));
-    n = sizeof(dev->dev_desc);
-    if (dev->config_len > 0 && n + dev->config_len <= sizeof(blob)) {
-        memcpy(blob + n, dev->config_data, dev->config_len);
-        n += dev->config_len;
-    }
-    if (off >= n) {
+    clen = (dev->config_data != NULL) ? dev->config_len : 0;
+    total = dlen + clen;
+
+    if (off >= total) {
         return 0;
     }
-    if (size > n - off) {
-        size = n - off;
+    if (size > total - off) {
+        size = total - off;
     }
-    memcpy(buffer, blob + off, size);
+
+    /* Copy straight out of the two cached descriptors rather than
+     * concatenating them into a scratch buffer first: config descriptors run
+     * to several KiB on composite devices, which does not belong on a kernel
+     * stack. */
+    if (off < dlen) {
+        size_t n = dlen - off;
+        if (n > size) {
+            n = size;
+        }
+        memcpy(buffer, (const uint8_t *)&dev->dev_desc + off, n);
+        done = n;
+        off += n;
+    }
+    if (done < size) {
+        memcpy(buffer + done, dev->config_data + (off - dlen), size - done);
+    }
     return size;
 }
 
