@@ -426,6 +426,16 @@ static afunix_sock_t *afunix_find_bound(const char *path, int len) {
     g_bound_lock_init();
     mutex_lock(&g_bound_lock);
     for (afunix_bound_node_t *n = g_bound_list; n; n = n->next) {
+        /*
+         * UNIX-07: skip a socket that has already been closed.  The list is
+         * prepended so the newest binding for a path wins, which is what
+         * makes the standard unlink(path); bind(path) server restart work
+         * (see sys_bind) -- but an entry whose socket is closed and merely
+         * awaiting its last reference is not a binding anyone can use, and
+         * returning it hands the caller a dead endpoint.  Ordering stays the
+         * arbiter among LIVE bindings; state decides which ones qualify.
+         */
+        if (n->sock->closed) continue;
         if (n->sock->pathlen == len && memcmp(n->sock->path, path, len) == 0) {
             afunix_sock_t *s = n->sock;
             /* Pin the socket BEFORE releasing g_bound_lock.  While it is in
@@ -560,14 +570,15 @@ static int afunix_wait(void *chan, mutex_t *m) {
  * defers the kfree() until we are off the struct.
  */
 static size_t afunix_node_read_body(afunix_sock_t *s, size_t size, uint8_t *buf,
-                                    char *srcpath, int *srclen);
+                                    char *srcpath, int *srclen,
+                                    int peek, size_t *truelen);
 
 static size_t afunix_node_read(fs_node_t *node, off_t off, size_t size, uint8_t *buf) {
     (void)off;
     afunix_sock_t *s = (afunix_sock_t *)(uintptr_t)node->impl;
     if (!s) return 0;
     afunix_ref(s);
-    size_t r = afunix_node_read_body(s, size, buf, NULL, NULL);
+    size_t r = afunix_node_read_body(s, size, buf, NULL, NULL, 0, NULL);
     afunix_unref(s);
     return r;
 }
@@ -576,24 +587,32 @@ static size_t afunix_node_read(fs_node_t *node, off_t off, size_t size, uint8_t 
  * least AFUNIX_PATH_MAX bytes) and srclen are optional; when supplied they
  * receive the sender's bound path from the datagram frame. */
 static size_t afunix_recvfrom_body(afunix_sock_t *s, size_t size, uint8_t *buf,
-                                   char *srcpath, int *srclen) {
+                                   char *srcpath, int *srclen,
+                                   int peek, size_t *truelen) {
     afunix_ref(s);
-    size_t r = afunix_node_read_body(s, size, buf, srcpath, srclen);
+    size_t r = afunix_node_read_body(s, size, buf, srcpath, srclen,
+                                     peek, truelen);
     afunix_unref(s);
     return r;
 }
 
 static size_t afunix_node_read_body(afunix_sock_t *s, size_t size, uint8_t *buf,
-                                    char *srcpath, int *srclen) {
+                                    char *srcpath, int *srclen,
+                                    int peek, size_t *truelen) {
     if (srclen) *srclen = 0;
+    if (truelen) *truelen = 0;
     XFD("node_read pid=%d s=%p closed=%d rx.count=%u size=%u",
         current_process ? (int)current_process->pid : -1,
         s, s ? s->closed : -1,
         s ? (unsigned)s->rx.count : 0,
         (unsigned)size);
     if (!s || s->closed) return 0;
-    int nonblock = current_thread && current_thread->io_file &&
-                   (current_thread->io_file->f_flag & FNONBLOCK);
+    /* SOCK-08: per-call MSG_DONTWAIT now rides on the thread rather than
+     * on the shared file description. */
+    int nonblock = current_thread &&
+                   (((current_thread->flags & THREAD_F_IO_NONBLOCK) != 0) ||
+                    (current_thread->io_file &&
+                     (current_thread->io_file->f_flag & FNONBLOCK)));
     mutex_lock(&s->lock);
     /* Self-side SHUT_RD: every read is EOF, even with bytes in rx. */
     if (s->rd_closed) { mutex_unlock(&s->lock); return 0; }
@@ -631,27 +650,47 @@ static size_t afunix_node_read_body(afunix_sock_t *s, size_t size, uint8_t *buf,
             }
             if (s->rd_closed) { mutex_unlock(&s->lock); return 0; }
         }
+        /*
+         * SOCK-05: MSG_PEEK must leave the datagram in the ring.  A peek
+         * used to consume it like any other read, so the caller got its
+         * look at the data and the message was gone -- the opposite of what
+         * MSG_PEEK means, and a silent loss for anyone who peeks to size a
+         * buffer before reading for real.  The ring is a byte queue with no
+         * random access, so a peek copies through a snapshot of the frame
+         * and simply does not advance the tail.
+         */
+        afunix_buf_t snap;
+        afunix_buf_t *src = &s->rx;
+        if (peek) { snap = s->rx; src = &snap; }   /* private cursor copy */
+
         uint8_t hdr[3];
-        afbuf_read(&s->rx, hdr, 3);
+        afbuf_read(src, hdr, 3);
         size_t mlen = ((size_t)hdr[0] << 8) | hdr[1];
         size_t slen = hdr[2];
         /* Frame is [u16 total][u8 srclen][src][payload]; total counts the
          * srclen byte and the path, so the payload is what is left. */
         if (slen + 1 > mlen) slen = 0;           /* corrupt frame: no source */
         char spath[AFUNIX_PATH_MAX];
-        if (slen) afbuf_read(&s->rx, (uint8_t *)spath, slen);
+        if (slen) afbuf_read(src, (uint8_t *)spath, slen);
         if (srcpath && srclen) {
             memcpy(srcpath, spath, slen);
             *srclen = (int)slen;
         }
         mlen -= 1 + slen;
+        /* SOCK-06: the datagram's real length, for MSG_TRUNC.  Without it a
+         * short buffer and a short datagram are indistinguishable. */
+        if (truelen) *truelen = mlen;
         size_t n = mlen < size ? mlen : size;
-        if (n) afbuf_read(&s->rx, buf, n);
+        if (n) afbuf_read(src, buf, n);
         for (size_t rem = mlen - n; rem; ) {     /* drop truncated tail */
             uint8_t junk[128];
             size_t d = rem < sizeof(junk) ? rem : sizeof(junk);
-            afbuf_read(&s->rx, junk, d);
+            afbuf_read(src, junk, d);
             rem -= d;
+        }
+        if (peek) {                 /* leave the ring exactly as we found it */
+            mutex_unlock(&s->lock);
+            return n;
         }
         if (s->peer) sleepq_wake_all(s->peer->tx_chan);
         /* Also wake our own tx_chan: unconnected senders (sendto-by-path)
@@ -727,8 +766,12 @@ static size_t afunix_node_write_body(afunix_sock_t *s, size_t size,
     /* O_NONBLOCK is carried on the file_t, which only the syscall layer sees;
      * it stashes it on the thread (current_thread->io_file) for the duration
      * of the write so we can reach it from this fs_node callback. */
-    int nonblock = current_thread && current_thread->io_file &&
-                   (current_thread->io_file->f_flag & FNONBLOCK);
+    /* SOCK-08: per-call MSG_DONTWAIT now rides on the thread rather than
+     * on the shared file description. */
+    int nonblock = current_thread &&
+                   (((current_thread->flags & THREAD_F_IO_NONBLOCK) != 0) ||
+                    (current_thread->io_file &&
+                     (current_thread->io_file->f_flag & FNONBLOCK)));
     if (s->type == SOCK_DGRAM) {
         /* Datagram: frame the whole message as [u16 len][payload] and write
          * it atomically so the peer's reader sees one intact datagram.  The
@@ -1322,6 +1365,15 @@ int sys_listen(int fd, int backlog) {
     }
     afunix_sock_t *s = afunix_from_fd(fd);
     if (!s) return -ENOTSOCK;
+    /*
+     * UNIX-06: listen() never checked the socket type, so listen() on a
+     * SOCK_DGRAM socket "succeeded" and put it in AFUS_LISTENING -- after
+     * which a connect() to it produced a type-confused pair (the server half
+     * is hardcoded SOCK_STREAM below), and the client's [u16 len] framing
+     * was delivered to a datagram reader as raw data.  POSIX: EOPNOTSUPP for
+     * a socket type that does not support listening.
+     */
+    if (s->type != SOCK_STREAM) return -EOPNOTSUPP;
     if (s->state != AFUS_BOUND) return -EINVAL;
     mutex_lock(&s->lock);
     if (backlog < 1) backlog = 1;
@@ -1485,13 +1537,24 @@ int sys_connect(int fd, const struct sockaddr *uaddr, socklen_t addrlen) {
         afunix_unref(server);
         return -ECONNREFUSED;
     }
+    /* UNIX-06: and the two halves must agree on the socket type -- the
+     * server side allocated below is a SOCK_STREAM unconditionally, so a
+     * datagram client connecting to a stream listener would be handed a
+     * peer that frames its data differently than it reads it. */
+    if (client->type != server->type) {
+        afunix_unref(server);
+        return -EPROTOTYPE;
+    }
 
     /* Allocate the server-side socket now and fully peer both halves
      * BEFORE returning from connect().  This matches BSD/Linux: a
      * successful connect() returns as soon as the kernel has queued
      * the connection onto the listen backlog — it does not wait for
      * the server process to actually invoke accept(). */
-    afunix_sock_t *server_side = afunix_alloc(SOCK_STREAM);   /* alloc ref = 1 */
+    /* UNIX-06: use the type both ends agreed on, not a hardcoded
+     * SOCK_STREAM (they are equal by the check above; naming it here keeps
+     * the two from drifting apart again). */
+    afunix_sock_t *server_side = afunix_alloc(server->type);  /* alloc ref = 1 */
     if (!server_side) { afunix_unref(server); return -ENOMEM; }
     server_side->state = AFUS_CONNECTED;
     server_side->peer  = client;         afunix_ref(client);       /* SS->peer link */
@@ -1634,12 +1697,20 @@ ssize_t sys_send(int fd, const void *buf, size_t len, int flags) {
      */
     file_t *sf = current_process ? current_process->fds[fd] : NULL;
     file_t *saved = current_thread ? current_thread->io_file : NULL;
-    short saved_flag = sf ? sf->f_flag : 0;
-    if (sf && (flags & MSG_DONTWAIT)) sf->f_flag |= FNONBLOCK;
-    if (current_thread) current_thread->io_file = sf;
+    /* SOCK-08: scope MSG_DONTWAIT to this thread instead of mutating the
+     * shared file description -- see THREAD_F_IO_NONBLOCK. */
+    uint32_t saved_nb = current_thread
+                            ? (current_thread->flags & THREAD_F_IO_NONBLOCK) : 0;
+    if (current_thread) {
+        if (flags & MSG_DONTWAIT) current_thread->flags |= THREAD_F_IO_NONBLOCK;
+        current_thread->io_file = sf;
+    }
     ssize_t r = afunix_send_bounced(s, buf, len);
-    if (current_thread) current_thread->io_file = saved;
-    if (sf && (flags & MSG_DONTWAIT)) sf->f_flag = saved_flag;
+    if (current_thread) {
+        current_thread->io_file = saved;
+        current_thread->flags =
+            (current_thread->flags & ~THREAD_F_IO_NONBLOCK) | saved_nb;
+    }
     return r;
 }
 
@@ -1689,9 +1760,14 @@ static ssize_t recv_into_kbuf(int fd, void *kbuf, size_t len, int flags,
      * af_inet path is immune — it reads f->f_flag directly.)
      */
     file_t *saved = current_thread ? current_thread->io_file : NULL;
-    short saved_flag = f ? f->f_flag : 0;
-    if (f && (flags & MSG_DONTWAIT)) f->f_flag |= FNONBLOCK;
-    if (current_thread) current_thread->io_file = f;
+    /* SOCK-08: thread-scoped MSG_DONTWAIT, not a write to the shared
+     * file description -- see THREAD_F_IO_NONBLOCK. */
+    uint32_t saved_nb = current_thread
+                            ? (current_thread->flags & THREAD_F_IO_NONBLOCK) : 0;
+    if (current_thread) {
+        if (flags & MSG_DONTWAIT) current_thread->flags |= THREAD_F_IO_NONBLOCK;
+        current_thread->io_file = f;
+    }
     /*
      * UNIX-05: this used to hardcode *kaddrlen = 0, so a bound datagram
      * server learned nothing about who had written to it and could not
@@ -1701,8 +1777,14 @@ static ssize_t recv_into_kbuf(int fd, void *kbuf, size_t len, int flags,
      */
     char   spath[AFUNIX_PATH_MAX];
     int    slen = 0;
+    /* SOCK-05/SOCK-06: MSG_PEEK must leave the datagram queued, and
+     * MSG_TRUNC reports the datagram's real length rather than how much of
+     * it fitted.  `truelen` comes back from the body for both. */
+    size_t truelen = 0;
     ssize_t r = (ssize_t)afunix_recvfrom_body(s, len, (uint8_t *)kbuf,
-                                              spath, &slen);
+                                              spath, &slen,
+                                              (flags & MSG_PEEK) ? 1 : 0,
+                                              &truelen);
     if (r >= 0 && slen > 0 && kaddr && kaddrlen &&
         kacap >= (socklen_t)(2 + slen + 1)) {
         struct sockaddr_un_k { uint16_t sun_family; char sun_path[AFUNIX_PATH_MAX]; };
@@ -1712,8 +1794,12 @@ static ssize_t recv_into_kbuf(int fd, void *kbuf, size_t len, int flags,
         un->sun_path[slen] = '\0';
         *kaddrlen = (socklen_t)(2 + slen + 1);
     }
-    if (current_thread) current_thread->io_file = saved;
-    if (f && (flags & MSG_DONTWAIT)) f->f_flag = saved_flag;
+    if (current_thread) {
+        current_thread->io_file = saved;
+        current_thread->flags =
+            (current_thread->flags & ~THREAD_F_IO_NONBLOCK) | saved_nb;
+    }
+    if (r >= 0 && (flags & MSG_TRUNC)) return (ssize_t)truelen;
     return r;
 }
 
@@ -1830,8 +1916,15 @@ static ssize_t afunix_dgram_deliver_from(afunix_sock_t *dst,
 }
 
 
-ssize_t sys_sendto(int fd, const void *buf, size_t len, int flags,
-                   const struct sockaddr *addr, socklen_t addrlen) {
+/*
+ * SOCK-04: sendmsg() on a datagram socket has to emit ONE datagram carrying
+ * all of the iovecs, so it gathers them into kernel memory first and needs a
+ * send entry that does not copyin again.  `kernel_payload` says buf is
+ * already ours; every other caller passes 0 and behaviour is unchanged.
+ */
+static ssize_t sys_sendto_impl(int fd, const void *buf, size_t len, int flags,
+                               const struct sockaddr *addr, socklen_t addrlen,
+                               int kernel_payload) {
     if (sock_fd_invalid(fd)) return -EBADF;
 
     /*
@@ -1929,6 +2022,11 @@ ssize_t sys_sendto(int fd, const void *buf, size_t len, int flags,
                                                src ? src->pathlen : 0);
             } else if (len > 0xFFFF) {
                 dr = -EMSGSIZE;         /* one datagram, same cap as send() */
+            } else if (kernel_payload) {
+                dr = afunix_dgram_deliver_from(dst, (const uint8_t *)buf, len,
+                                               nonblock,
+                                               src ? src->path : NULL,
+                                               src ? src->pathlen : 0);
             } else {
                 uint8_t *kpay = kmalloc(len);
                 if (!kpay) {
@@ -1948,7 +2046,20 @@ ssize_t sys_sendto(int fd, const void *buf, size_t len, int flags,
         }
     }
     (void)addrlen;
+    if (kernel_payload) {
+        /* Connected / no-name case with a kernel payload: the node write
+         * already takes kernel memory, which is what sys_send bounces to. */
+        afunix_sock_t *us = afunix_from_fd(fd);
+        if (us)
+            return (ssize_t)afunix_node_write(&us->node, 0, len,
+                                              (const uint8_t *)buf);
+    }
     return sys_send(fd, buf, len, flags);
+}
+
+ssize_t sys_sendto(int fd, const void *buf, size_t len, int flags,
+                   const struct sockaddr *addr, socklen_t addrlen) {
+    return sys_sendto_impl(fd, buf, len, flags, addr, addrlen, 0);
 }
 
 ssize_t sys_recvfrom(int fd, void *buf, size_t len, int flags,
@@ -1979,6 +2090,32 @@ struct kcmsghdr {
  * plain send() chain.  The msghdr, its iovec array, and the control
  * buffer are all pulled into the kernel with copyin() before use —
  * never dereferenced straight off the user pointer. */
+/*
+ * SOCK-04: is this fd a datagram socket, i.e. one where message boundaries
+ * are part of the contract?  sendmsg/recvmsg looped over the iovecs calling
+ * sys_send/sys_recv once each, which on a datagram socket emitted N
+ * datagrams for one sendmsg and consumed N datagrams for one recvmsg --
+ * framing destroyed on the wire.  On a stream there are no boundaries, so
+ * iterating is correct and stays.
+ */
+static int sock_fd_is_dgram(int fd) {
+    afunix_sock_t *u = afunix_from_fd(fd);
+    if (u) return u->type == SOCK_DGRAM;
+    int t = afinet_so_type(fd);
+    return (t == SOCK_DGRAM || t == SOCK_RAW);
+}
+
+/* Sum the iovec lengths, rejecting an overflowing total. */
+static ssize_t iov_total(const struct iovec_local *iov, int n, size_t *out) {
+    size_t total = 0;
+    for (int i = 0; i < n; i++) {
+        if (iov[i].iov_len > (size_t)0xFFFFFFFFu - total) return -EMSGSIZE;
+        total += iov[i].iov_len;
+    }
+    *out = total;
+    return 0;
+}
+
 ssize_t sys_sendmsg(int fd, const struct msghdr *umsg, int flags) {
     if (!umsg) return -EFAULT;
     struct msghdr kmsg;
@@ -2096,6 +2233,38 @@ cmsg_done:
     /* kiov was copied in above; iov_base entries are still user pointers,
      * but sys_send/sys_sendto copyin them on their own. */
     struct iovec_local *iov = kiov;
+
+    /*
+     * SOCK-04: on a datagram socket the iovecs are ONE message.  Gather them
+     * into a single kernel buffer and send exactly one datagram; the old
+     * per-iovec loop turned an N-iovec sendmsg into N datagrams, which is
+     * what destroys framing for libtirpc's svc_dg_reply (named in the
+     * audit) and for anything else that builds a header and a body as two
+     * iovecs.  A stream socket keeps the loop -- it has no boundaries.
+     */
+    if (msg->msg_iovlen > 1 && sock_fd_is_dgram(fd)) {
+        size_t need = 0;
+        if (iov_total(kiov, (int)msg->msg_iovlen, &need) != 0) return -EMSGSIZE;
+        if (need == 0) return 0;
+        uint8_t *gath = kmalloc(need);
+        if (!gath) return -ENOMEM;
+        size_t off = 0;
+        for (int i = 0; i < (int)msg->msg_iovlen; i++) {
+            if (iov[i].iov_len == 0) continue;
+            if (copyin(iov[i].iov_base, gath + off, iov[i].iov_len) != 0) {
+                kfree(gath, need);
+                return -EFAULT;
+            }
+            off += iov[i].iov_len;
+        }
+        ssize_t r = sys_sendto_impl(fd, gath, need, flags,
+                                    (const struct sockaddr *)msg->msg_name,
+                                    (socklen_t)msg->msg_namelen,
+                                    /*kernel_payload=*/1);
+        kfree(gath, need);
+        return r;
+    }
+
     for (int i = 0; i < (int)msg->msg_iovlen; i++) {
         ssize_t r;
         if (msg->msg_name && msg->msg_namelen > 0) {
@@ -2146,6 +2315,46 @@ ssize_t sys_recvmsg(int fd, struct msghdr *umsg, int flags) {
 
     ssize_t total = 0;
     struct iovec_local *iov = kiov;
+
+    /*
+     * SOCK-04 (receive half): one recvmsg must consume exactly ONE datagram
+     * and scatter it across the iovecs.  The loop below called sys_recv per
+     * iovec, so an N-iovec recvmsg swallowed N datagrams and glued them
+     * together -- the caller saw one "message" assembled from several,
+     * with the boundaries gone.  Receive once into a kernel buffer sized to
+     * the whole iovec set, then distribute.
+     */
+    if (msg->msg_iovlen > 1 && sock_fd_is_dgram(fd)) {
+        size_t cap = 0;
+        if (iov_total(kiov, (int)msg->msg_iovlen, &cap) != 0) return -EMSGSIZE;
+        if (cap == 0) return 0;
+        uint8_t *scat = kmalloc(cap);
+        if (!scat) return -ENOMEM;
+        /* Receive into a userspace-invisible buffer via the same path the
+         * single-iovec case uses, so msg_name is still filled in. */
+        ssize_t r;
+        if (msg->msg_name && msg->msg_namelen > 0)
+            r = recv_into_kbuf(fd, scat, cap, flags,
+                               (struct sockaddr *)msg->msg_name,
+                               (socklen_t *)&umsg->msg_namelen);
+        else
+            r = recv_into_kbuf(fd, scat, cap, flags, NULL, NULL);
+        if (r < 0) { kfree(scat, cap); return r; }
+        size_t off = 0, left = (size_t)r;
+        for (int i = 0; i < (int)msg->msg_iovlen && left; i++) {
+            size_t take = iov[i].iov_len < left ? iov[i].iov_len : left;
+            if (take == 0) continue;
+            if (copyout(scat + off, iov[i].iov_base, take) != 0) {
+                kfree(scat, cap);
+                return off ? (ssize_t)off : -EFAULT;
+            }
+            off += take;
+            left -= take;
+        }
+        kfree(scat, cap);
+        return (ssize_t)off;
+    }
+
     for (int i = 0; i < (int)msg->msg_iovlen; i++) {
         ssize_t r;
         if (i == 0 && msg->msg_name && msg->msg_namelen > 0) {
@@ -2274,6 +2483,13 @@ int sys_shutdown(int fd, int how) {
     afunix_sock_t *s = afunix_from_fd(fd);
     if (!s) return -ENOTSOCK;
     if (how != SHUT_RD && how != SHUT_WR && how != SHUT_RDWR) return -EINVAL;
+    /*
+     * SOCK-10: POSIX requires ENOTCONN when the socket is not connected.
+     * shutdown() on a fresh or merely-bound AF_UNIX socket reported success
+     * and did nothing, so a caller using the return value to decide whether
+     * a teardown actually happened was misled.
+     */
+    if (s->state != AFUS_CONNECTED) return -ENOTCONN;
 
     mutex_lock(&s->lock);
     if (how == SHUT_RD || how == SHUT_RDWR) {

@@ -19,6 +19,8 @@
 #include <kern/console.h>
 #include <kern/file.h>
 #include <kern/sched.h>
+#include <kern/sleepq.h>
+#include <kern/time.h>
 #include <net/if.h>
 #include <net/inet.h>
 #include <netinet/ip.h>
@@ -76,14 +78,37 @@ struct sin6_kern {
 /* ------------------------------------------------------------------ */
 
 #define AFI_RING_LEN 32
-#define AFI_DATA_MAX 1500
+/*
+ * UDP-04: the largest UDP payload that can actually cross this stack.
+ *
+ * This was 1500, which silently truncated on receive and refused on send
+ * anything between 1501 and the real link maximum -- a datagram that the
+ * NIC delivered whole was cut short with no indication to the caller.
+ *
+ * The audit asked for 65507 (the protocol maximum), and that is NOT what
+ * this is, deliberately: reaching it requires IP fragmentation on send and
+ * reassembly on receive, and this stack has neither -- ip4_input drops every
+ * fragment outright (inet.c: "Drop fragments -- we don't reassemble yet")
+ * and ip4_output emits a single unfragmented packet.  A >MTU datagram
+ * therefore cannot arrive or leave regardless of what this constant says,
+ * and raising it to 65507 would cost 32x that per socket ring for no
+ * behavioural gain.  What it CAN do is stop truncating what does fit, so it
+ * is now exactly MTU minus the IPv4 and UDP headers.  Real 65507 support is
+ * an IP-fragmentation feature, not a socket-layer one.
+ */
+#define AFI_DATA_MAX (NETDEV_MTU_MAX - 20 - 8)
 
 typedef struct afi_pkt {
     uint8_t  family;    /* AF_INET or AF_INET6 */
     uint8_t  proto;
     uint16_t port;      /* source port for UDP, 0 for RAW */
     uint8_t  addr[16];  /* source address (4 bytes for v4) */
-    uint16_t len;
+    uint16_t len;       /* bytes stored in data[] */
+    /* SOCK-06: the datagram's length as it arrived, which can exceed `len`
+     * if it did not fit.  recv(MSG_TRUNC) reports this so a caller can tell
+     * "your buffer was too small" from "the datagram really was this short";
+     * without it the two were indistinguishable. */
+    uint16_t truelen;
     uint8_t  data[AFI_DATA_MAX];
 } afi_pkt_t;
 
@@ -163,6 +188,31 @@ static uint16_t afinet_alloc_ephemeral(void) {
     uint16_t port = g_ephemeral_next++;
     if (g_ephemeral_next == 0) g_ephemeral_next = 49152;
     return port;
+}
+
+static int afinet_port_taken(const afi_sock_t *self, uint16_t port);
+
+/*
+ * UDP-05: hand out an ephemeral port that is not already in use.
+ *
+ * The bare counter above is incremented without any check that the port it
+ * lands on is free, so two sockets could be handed the same one -- after
+ * which the demux (even the fixed best-match one) has an ambiguous key and
+ * one of them quietly receives the other's traffic.  Sweep the whole
+ * dynamic range rather than trusting the counter; 16384 candidates is a
+ * bounded walk and the common case exits on the first.
+ *
+ * Callers must also record the result in s->local_port BEFORE anyone else
+ * can allocate, and set s->bound -- an implicitly-bound socket that leaves
+ * `bound` clear is invisible to afinet_port_taken(), which is how the
+ * collision persisted even once a check existed.
+ */
+static uint16_t afinet_alloc_ephemeral_free(afi_sock_t *s) {
+    for (int i = 0; i < 16384; i++) {
+        uint16_t port = afinet_alloc_ephemeral();
+        if (!afinet_port_taken(s, port)) return port;
+    }
+    return 0;   /* range exhausted; caller reports EADDRINUSE */
 }
 
 /* ------------------------------------------------------------------ */
@@ -430,6 +480,56 @@ static int afi_node_nonblock(const fs_node_t *node) {
 }
 
 /*
+ * UDP-06: register on the sleep queue BEFORE dropping the ring lock.
+ *
+ * The receive loops used to do
+ *      spinlock_release_irq(&afi_lock, fl);
+ *      sched_sleep(s->wait_chan);
+ * with a window in between.  A datagram delivered in that window ran
+ * enqueue() -> sched_wakeup() against a thread that was not yet asleep, so
+ * the wakeup hit nothing and the reader then slept on an already-full ring
+ * -- woken only by the next datagram or the ~50 ms fallback deadline.  For a
+ * request/response protocol that is up to a full extra deadline of latency
+ * per exchange, and with no further traffic it is an outright hang until the
+ * deadline fires.
+ *
+ * afunix_wait() already had the right shape: add to the sleep queue with
+ * interrupts disabled, THEN release the lock, so a wakeup racing the release
+ * finds us queued.  This is the AF_INET twin, with the ring's IRQ-safe
+ * spinlock in place of the mutex.  Returns 0 normally, -EINTR if a signal is
+ * pending on wake.  On return afi_lock is held again with `*fl` refreshed.
+ */
+static int afi_wait(afi_sock_t *s, unsigned long *fl) {
+    if (!current_thread) {
+        spinlock_release_irq(&afi_lock, *fl);
+        sched_yield();
+        *fl = spinlock_acquire_irq(&afi_lock);
+        return 0;
+    }
+    current_thread->flags |= THREAD_F_INTERRUPTIBLE;
+    /* afi_lock was taken with spinlock_acquire_irq, so interrupts are
+     * already off here -- the enqueue path cannot run between the
+     * sleepq_add and the release below. */
+    sleepq_add(s->wait_chan, current_thread);
+    if (current_thread->sleep_expiry == 0) {
+        uint32_t hz = get_hz();
+        uint64_t span = hz ? (hz / 20u) : 8u;   /* ~50 ms backstop */
+        if (span == 0) span = 1;
+        current_thread->sleep_expiry = get_ticks() + span;
+    }
+    spinlock_release_irq(&afi_lock, *fl);
+    if (current_thread->wait_chan == s->wait_chan)
+        sched_yield();
+    current_thread->sleep_expiry = 0;
+    sleepq_remove_thread(current_thread);
+    *fl = spinlock_acquire_irq(&afi_lock);
+    current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
+    if (current_thread->sig_pending & ~current_thread->sig_mask)
+        return -EINTR;
+    return 0;
+}
+
+/*
  * SOCK-03: pin the socket BEFORE the first dereference, not after.
  *
  * NET-01 already added a reference around the datagram ring walk, but it
@@ -494,14 +594,9 @@ static size_t afinet_node_read_body(fs_node_t *node, size_t size, uint8_t *buf) 
             return n;
         }
         if (nb) { afi_rele_unlock(s, fl); return (size_t)-EAGAIN; }
-        spinlock_release_irq(&afi_lock, fl);
-        /* Make the sleep signal-interruptible so SIGINT (and friends)
-         * yank ping/etc out of a blocked recv. */
-        current_thread->flags |= THREAD_F_INTERRUPTIBLE;
-        sched_sleep(s->wait_chan);
-        current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
-        fl = spinlock_acquire_irq(&afi_lock);
-        if (current_thread->sig_pending & ~current_thread->sig_mask) {
+        /* UDP-06: queue-then-release, and signal-interruptible so SIGINT
+         * (and friends) yank ping/etc out of a blocked recv. */
+        if (afi_wait(s, &fl) == -EINTR) {
             afi_rele_unlock(s, fl);
             return (size_t)-EINTR;
         }
@@ -585,8 +680,16 @@ static size_t afinet_node_write_body(fs_node_t *node, size_t size,
             /* NET-07: allocate via afinet_alloc_ephemeral() — the inline
              * ++g_ephemeral_next bypassed its wrap-to-49152 guard and is
              * non-atomic, yielding port 0 / low ports past 65535. */
-            uh->source = __builtin_bswap16(s->local_port ? s->local_port : afinet_alloc_ephemeral());
-            if (!s->local_port) s->local_port = __builtin_bswap16(uh->source);
+            /* UDP-05: an implicit bind must pick a FREE port and record it
+             * as bound, or the socket stays invisible to the collision
+             * check and a later bind() can hand the same port out again. */
+            if (!s->local_port) {
+                uint16_t eph = afinet_alloc_ephemeral_free(s);
+                if (eph == 0) return (size_t)-EADDRINUSE;
+                s->local_port = eph;
+                s->bound = 1;
+            }
+            uh->source = __builtin_bswap16(s->local_port);
             uh->dest   = __builtin_bswap16(s->peer_port);
             uh->len    = __builtin_bswap16((uint16_t)(sizeof(*uh) + size));
             memcpy(pkt + sizeof(*uh), buf, size);
@@ -609,8 +712,16 @@ static size_t afinet_node_write_body(fs_node_t *node, size_t size,
             /* NET-07: allocate via afinet_alloc_ephemeral() — the inline
              * ++g_ephemeral_next bypassed its wrap-to-49152 guard and is
              * non-atomic, yielding port 0 / low ports past 65535. */
-            uh->source = __builtin_bswap16(s->local_port ? s->local_port : afinet_alloc_ephemeral());
-            if (!s->local_port) s->local_port = __builtin_bswap16(uh->source);
+            /* UDP-05: an implicit bind must pick a FREE port and record it
+             * as bound, or the socket stays invisible to the collision
+             * check and a later bind() can hand the same port out again. */
+            if (!s->local_port) {
+                uint16_t eph = afinet_alloc_ephemeral_free(s);
+                if (eph == 0) return (size_t)-EADDRINUSE;
+                s->local_port = eph;
+                s->bound = 1;
+            }
+            uh->source = __builtin_bswap16(s->local_port);
             uh->dest   = __builtin_bswap16(s->peer_port);
             uh->len    = __builtin_bswap16((uint16_t)(sizeof(*uh) + size));
             memcpy(pkt + sizeof(*uh), buf, size);
@@ -789,7 +900,13 @@ int afinet_bind(int fd, const void *addr, socklen_t len) {
             return -EADDRINUSE;
         /* bind(port 0): assign an ephemeral port now so getsockname()
          * reflects it (POSIX/BSD) — see afinet_alloc_ephemeral(). */
-        s->local_port = req ? req : afinet_alloc_ephemeral();
+        if (req) {
+            s->local_port = req;
+        } else {
+            uint16_t eph = afinet_alloc_ephemeral_free(s);
+            if (eph == 0) return -EADDRINUSE;
+            s->local_port = eph;
+        }
         memcpy(s->local_addr, &sin->sin_addr, 4);
         if (s->tcp) {
             uint32_t la; memcpy(&la, s->local_addr, 4);
@@ -800,8 +917,11 @@ int afinet_bind(int fd, const void *addr, socklen_t len) {
         const struct sin6_kern *sin6 = (const struct sin6_kern *)addr;
         if (sin6->sin6_family != AF_INET6) return -EAFNOSUPPORT;
         s->local_port = __builtin_bswap16(sin6->sin6_port);
-        if (s->local_port == 0)
-            s->local_port = afinet_alloc_ephemeral();
+        if (s->local_port == 0) {
+            uint16_t eph = afinet_alloc_ephemeral_free(s);
+            if (eph == 0) return -EADDRINUSE;
+            s->local_port = eph;
+        }
         memcpy(s->local_addr, sin6->sin6_addr, 16);
         /* tcp_pcb_t is IPv4-only today; the v6 bind still has to
          * propagate the PORT into the PCB or the LISTEN socket
@@ -849,8 +969,14 @@ int afinet_shutdown(int fd, int how) {
     if (!s) return -ENOTSOCK;
     if (how != SHUT_RD && how != SHUT_WR && how != SHUT_RDWR)
         return -EINVAL;
-    /* shutdown on a socket that was never connected -> ENOTCONN (TCP). */
-    if (s->tcp && !s->connected) return -ENOTCONN;
+    /*
+     * SOCK-10: POSIX requires ENOTCONN when the socket is not connected.
+     * The check only covered TCP, so shutdown() on an unconnected datagram
+     * or raw socket reported success and did nothing -- a caller using the
+     * return value to decide whether a teardown happened was misled.  A
+     * datagram socket becomes "connected" via connect(), same as a stream.
+     */
+    if (!s->connected) return -ENOTCONN;
     if (how == SHUT_RD || how == SHUT_RDWR) {
         s->rd_shut = 1;
         sched_wakeup(s->wait_chan);          /* UDP/RAW blocked readers */
@@ -1185,8 +1311,14 @@ static ssize_t afinet_sendto_k(int fd, const void *buf, size_t len, int flags,
         /* DGRAM/UDP */
         /* NET-07: use the wrap-guarded ephemeral allocator, not the raw
          * (non-atomic, unguarded) ++g_ephemeral_next. */
-        uint16_t sport = s->local_port ? s->local_port : afinet_alloc_ephemeral();
-        if (!s->local_port) s->local_port = sport;
+        /* UDP-05: as above -- free port, recorded, marked bound. */
+        if (!s->local_port) {
+            uint16_t eph = afinet_alloc_ephemeral_free(s);
+            if (eph == 0) return -EADDRINUSE;
+            s->local_port = eph;
+            s->bound = 1;
+        }
+        uint16_t sport = s->local_port;
         uint8_t pkt[AFI_DATA_MAX + sizeof(struct udphdr)];
         if (len > AFI_DATA_MAX) return -EMSGSIZE;
         struct udphdr *uh = (struct udphdr *)pkt;
@@ -1206,8 +1338,14 @@ static ssize_t afinet_sendto_k(int fd, const void *buf, size_t len, int flags,
         }
         /* NET-07: use the wrap-guarded ephemeral allocator, not the raw
          * (non-atomic, unguarded) ++g_ephemeral_next. */
-        uint16_t sport = s->local_port ? s->local_port : afinet_alloc_ephemeral();
-        if (!s->local_port) s->local_port = sport;
+        /* UDP-05: as above -- free port, recorded, marked bound. */
+        if (!s->local_port) {
+            uint16_t eph = afinet_alloc_ephemeral_free(s);
+            if (eph == 0) return -EADDRINUSE;
+            s->local_port = eph;
+            s->bound = 1;
+        }
+        uint16_t sport = s->local_port;
         uint8_t pkt[AFI_DATA_MAX + sizeof(struct udphdr)];
         if (len > AFI_DATA_MAX) return -EMSGSIZE;
         struct udphdr *uh = (struct udphdr *)pkt;
@@ -1300,9 +1438,9 @@ ssize_t afinet_recvfrom(int fd, void *buf, size_t len, int flags,
         if (tcp_is_listening(s->tcp)) return -ENOTCONN;
         file_t *f = (fd >= 0 && fd < MAX_FD)
                         ? current_process->fds[fd] : NULL;
-        int nb = (flags & 0x40 /*MSG_DONTWAIT*/) ||
+        int nb = (flags & MSG_DONTWAIT) ||
                  (f && (f->f_flag & FNONBLOCK));
-        if (flags & 0x02 /*MSG_PEEK*/)
+        if (flags & MSG_PEEK)
             return nb ? tcp_peek_nb(s->tcp, buf, len)
                       : tcp_peek   (s->tcp, buf, len);
         return nb ? tcp_recv_nb(s->tcp, buf, len)
@@ -1343,10 +1481,21 @@ ssize_t afinet_recvfrom(int fd, void *buf, size_t len, int flags,
             uint8_t tmp[AFI_DATA_MAX];
             uint8_t paddr[16];
             uint16_t pport = p->port;
+            uint16_t ptrue = p->truelen;
             memcpy(tmp, p->data, n);
             memcpy(paddr, p->addr, 16);
-            s->tail = (s->tail + 1) % AFI_RING_LEN;
-            s->count--;
+            /*
+             * SOCK-05: MSG_PEEK has to LEAVE the datagram queued.  The ring
+             * was advanced unconditionally, so a peek consumed it -- the
+             * caller got its look at the data and the datagram was gone,
+             * which is the exact opposite of what MSG_PEEK means and
+             * silently loses a message for anyone who peeks before deciding
+             * how large a buffer to allocate.
+             */
+            if (!(flags & MSG_PEEK)) {
+                s->tail = (s->tail + 1) % AFI_RING_LEN;
+                s->count--;
+            }
             afi_rele_unlock(s, fl);
             memcpy(buf, tmp, n);
             if (addr && addrlen) {
@@ -1366,17 +1515,20 @@ ssize_t afinet_recvfrom(int fd, void *buf, size_t len, int flags,
                     *addrlen = sizeof(*sin6);
                 }
             }
+            /*
+             * SOCK-06: with MSG_TRUNC, report the datagram's real length
+             * rather than how much of it fitted.  Without it a short buffer
+             * and a short datagram are indistinguishable, so a caller can
+             * never tell that it lost the tail of a message.
+             */
+            if (flags & MSG_TRUNC) return (ssize_t)ptrue;
             return (ssize_t)n;
         }
         /* Non-blocking: MSG_DONTWAIT (Linux convention) or the fd's
          * FNONBLOCK, resolved above. */
         if (nb_dgram) { afi_rele_unlock(s, fl); return -EAGAIN; }
-        spinlock_release_irq(&afi_lock, fl);
-        current_thread->flags |= THREAD_F_INTERRUPTIBLE;
-        sched_sleep(s->wait_chan);
-        current_thread->flags &= ~THREAD_F_INTERRUPTIBLE;
-        fl = spinlock_acquire_irq(&afi_lock);
-        if (current_thread->sig_pending & ~current_thread->sig_mask) {
+        /* UDP-06: queue-then-release; see afi_wait(). */
+        if (afi_wait(s, &fl) == -EINTR) {
             afi_rele_unlock(s, fl);
             return -EINTR;
         }
@@ -1456,6 +1608,7 @@ static void enqueue(afi_sock_t *s, uint8_t family, uint8_t proto, uint16_t port,
     size_t n = len > AFI_DATA_MAX ? AFI_DATA_MAX : len;
     memcpy(p->data, data, n);
     p->len = (uint16_t)n;
+    p->truelen = (uint16_t)(len > 0xFFFF ? 0xFFFF : len);
     s->head = (s->head + 1) % AFI_RING_LEN;
     s->count++;
     sched_wakeup(s->wait_chan);

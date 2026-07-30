@@ -366,6 +366,19 @@ typedef struct thread {
 #define THREAD_F_WAKE_PENDING  0x0004 // thr_wake() seen before thr_suspend() — latched
 #define THREAD_F_DETACHED      0x0008 // Detached LWP: self-reap on exit, no join
 #define THREAD_F_SUSPENDED     0x0010 // _lwp_suspend: off-CPU until _lwp_continue
+/*
+ * SOCK-08: per-call MSG_DONTWAIT, scoped to the calling thread.
+ *
+ * recv/send used to implement MSG_DONTWAIT by OR-ing FNONBLOCK into the
+ * file_t's f_flag for the duration of the call and restoring it after.
+ * f_flag belongs to the open file DESCRIPTION, which is shared across
+ * threads and across dup()/fork(), so one thread's MSG_DONTWAIT made every
+ * other user of that description non-blocking for the window, and the
+ * wholesale restore afterwards silently reverted a concurrent
+ * fcntl(F_SETFL) -- a lost update on a flag userland believes it owns.
+ * The flag lives on the thread instead, where its scope actually is.
+ */
+#define THREAD_F_IO_NONBLOCK   0x0020 // MSG_DONTWAIT for the in-flight socket call
                                       // (distinct from job-control THREAD_STOPPED)
 
     // Scheduling - Runqueue linkage
