@@ -27,10 +27,35 @@
 
 void icmp_input(netdev_t *dev, uint32_t saddr, uint32_t daddr,
                 const uint8_t *pkt, size_t len) {
-    (void)dev; (void)daddr;
     if (len < sizeof(struct icmphdr)) return;
     const struct icmphdr *ih = (const struct icmphdr *)pkt;
     if (ih->type != ICMP_ECHO) return;
+
+    /*
+     * ICMP-01: never answer an echo request sent to a broadcast address.
+     * daddr used to be discarded outright ("(void)daddr"), so a request
+     * addressed to 255.255.255.255 or the subnet broadcast was answered by
+     * every host that saw it, with the reply going to the attacker-chosen
+     * source -- a classic smurf amplifier, and one that ran inside the NIC
+     * ISR at that.  RFC 1122 3.2.2.6 requires silent discard.
+     */
+    if (dev) {
+        uint32_t bcast = (dev->ip4_addr & dev->ip4_netmask) | ~dev->ip4_netmask;
+        if (daddr == 0xFFFFFFFFu || daddr == bcast) return;
+    }
+
+    /*
+     * And never reply to a request that claims an unusable source, since the
+     * reply is addressed to it: 0.0.0.0, loopback from off-box, a broadcast
+     * address (the reply would itself be broadcast), or multicast.
+     */
+    {
+        uint32_t s = __builtin_bswap32(saddr);
+        if (s == 0 ||                       /* "this host" */
+            (s >> 24) == 127 ||             /* 127/8 arriving on a NIC */
+            (s >> 28) == 0xE ||             /* 224/4 multicast */
+            saddr == 0xFFFFFFFFu) return;
+    }
 
     /* Build a reply with type=0 (reply), same id/sequence, same data. */
     uint8_t reply[1500];

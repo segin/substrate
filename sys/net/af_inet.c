@@ -224,6 +224,13 @@ static int afinet_ioctl(fs_node_t *node, uint32_t request, void *arg) {
      * by ifindex).  Handle them before the by-name lookup. */
     if (request == SIOCGIFADDR_IN6 || request == SIOCSIFADDR_IN6 ||
         request == SIOCDIFADDR_IN6 || request == SIOCSIFGW_IN6) {
+        /* CFG-01: same rule as the IPv4 setters below -- these mutate the
+         * interface address and the v6 gateway, which is the whole of the
+         * IPv6 routing state. */
+        if (request != SIOCGIFADDR_IN6 &&
+            (!current_process || current_process->euid != 0))
+            return -EPERM;
+
         struct in6_ifreq kr6;
         if (copyin(arg, &kr6, sizeof(kr6)) != 0) return -EFAULT;
         struct in6_ifreq *r6 = &kr6;
@@ -259,6 +266,30 @@ static int afinet_ioctl(fs_node_t *node, uint32_t request, void *arg) {
     struct ifreq *r = &kr;
     netdev_t *dev = afinet_find_dev(r->ifr_name);
     if (!dev) return -ENODEV;
+
+    /*
+     * CFG-01: the SIOCSIF* commands mutate dev->ip4_addr / ip4_netmask /
+     * ip4_gateway / hwaddr / mtu / flags directly, and on this stack those
+     * fields ARE the routing table -- route_for_v4() reads nothing else.
+     * With no privilege check any unprivileged process could repoint the
+     * default gateway, change the interface address, or set IFF_PROMISC and
+     * have the IP/ARP layers ingest every frame on the segment.  Interface
+     * configuration is a root operation; the SIOCGIF* queries stay open.
+     */
+    switch (request) {
+        case SIOCSIFFLAGS:
+        case SIOCSIFMTU:
+        case SIOCSIFHWADDR:
+        case SIOCSIFADDR:
+        case SIOCSIFNETMASK:
+        case SIOCSIFBRDADDR:
+        case SIOCSIFGATEWAY:
+            if (!current_process || current_process->euid != 0)
+                return -EPERM;
+            break;
+        default:
+            break;
+    }
 
     /* "Get" commands fill the kernel copy `kr` and fall through to the
      * copyout at out_get; "set"/no-op commands mutate the device and

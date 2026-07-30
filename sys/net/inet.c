@@ -241,6 +241,32 @@ void ip4_input(netdev_t *dev, const uint8_t *pkt, size_t len) {
     /* Drop fragments — we don't reassemble yet. */
     if ((__builtin_bswap16(ih->frag_off) & 0x3FFF) != 0) return;
 
+    /*
+     * IP-02: reject martian source addresses.  Only the destination used to
+     * be checked, so a frame arriving on a real NIC claiming saddr =
+     * 127.0.0.1 was accepted and handed up -- defeating any userland
+     * "the peer is localhost, therefore trusted" check -- and a broadcast
+     * source made replies (ICMP echo, TCP RST) route to the whole segment.
+     * A loopback source is legitimate only on the loopback device.
+     */
+    {
+        uint32_t s = __builtin_bswap32(ih->saddr);
+        if (s == 0 ||                                  /* 0.0.0.0 */
+            (s >> 28) == 0xE ||                        /* 224/4 multicast */
+            ih->saddr == 0xFFFFFFFFu) {                /* limited broadcast */
+            return;
+        }
+        if ((s >> 24) == 127 && !(dev->flags & NETDEV_IFF_LOOPBACK)) {
+            return;                                    /* 127/8 off-box */
+        }
+        /* A source equal to this link's broadcast address is equally bogus. */
+        {
+            uint32_t bcast = (dev->ip4_addr & dev->ip4_netmask) |
+                             ~dev->ip4_netmask;
+            if (dev->ip4_netmask != 0 && ih->saddr == bcast) return;
+        }
+    }
+
     /* Accept if dst is ours, broadcast, or limited-broadcast. */
     uint32_t bcast = (dev->ip4_addr & dev->ip4_netmask) | ~dev->ip4_netmask;
     if (ih->daddr != dev->ip4_addr &&

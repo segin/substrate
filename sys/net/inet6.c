@@ -9,6 +9,7 @@
 #include <stddef.h>
 #include <string.h>
 
+#include <arch/i386/intr.h>
 #include <kern/console.h>
 #include <kern/sched.h>
 #include <net/inet.h>
@@ -195,6 +196,21 @@ int ip6_output(const uint8_t daddr[16], uint8_t next_header,
         const uint8_t *nh = via_gw ? dev->ip6_gateway : daddr;
         if (nd6_lookup(dev, nh, mac) != 0) {
             nd6_solicit(dev, nh);
+            /*
+             * ND-01: the same rule ip4_output got as NET-05, which this
+             * path never received.  ip6_output is reachable from hard IRQ
+             * context with IF=0 -- rtl_irq -> netdev_rx -> ip6_input ->
+             * icmp6_input -> icmp6_handle_echo/ns -> ip6_output -- and the
+             * sched_yield() spin below sleeps.  Switching away from an
+             * interrupt handler corrupts the interrupted thread's state,
+             * and a single ICMPv6 echo from a source not already in the
+             * 32-entry ND cache was enough to reach it.  Only wait for the
+             * advertisement when interrupts are enabled; otherwise drop the
+             * packet after firing the solicitation and let the upper layer
+             * resend once the cache is populated.
+             */
+            if (!intr_enabled())
+                return -EHOSTUNREACH;
             for (int i = 0; i < 32; i++) {
                 sched_yield();
                 if (nd6_lookup(dev, nh, mac) == 0) break;
