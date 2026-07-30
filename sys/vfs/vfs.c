@@ -117,6 +117,8 @@ static fs_node_t *vfs_mount_root_parent(fs_node_t *node) {
 void vfs_init(void) {
     kprint("VFS: Initializing...\n");
 
+    vfs_readdir_init();
+
     bio_init();
     
     // Register real filesystem drivers
@@ -503,12 +505,42 @@ void close_fs(fs_node_t *node) {
         node->close(node);
 }
 
-struct dirent *readdir_fs(fs_node_t *node, uint64_t index) {
+/*
+ * Serializes [ call fs->readdir  ->  copy the result into the caller's
+ * dirent ].  Every filesystem driver returns a pointer to storage it owns
+ * and reuses on the next call -- six of them use a single file-scope struct
+ * dirent shared by every caller (procfs, devfs, sysfs, shmfs, udf, sysv),
+ * and ext2 returns &ctx->current_dirent after dropping the node lock.  Two
+ * processes in getdents() on the same filesystem therefore raced: between
+ * one returning and copying d_name out, the other overwrote the buffer, and
+ * the first reported a name and d_ino from the other caller's scan position.
+ * `ls /proc` on a busy system silently showed entries from another scan.
+ *
+ * The window is entirely inside readdir_fs(), so holding a lock across the
+ * copy closes it for every driver at once -- no driver has to change, and
+ * per-node storage would not have fixed two readers of the same directory
+ * anyway.  readdir is not a hot path (each call already does block I/O), so
+ * one global mutex is the right trade against touching ten drivers.
+ */
+static mutex_t readdir_lock;
+
+void vfs_readdir_init(void) {
+    mutex_init(&readdir_lock, "vfs_readdir");
+}
+
+struct dirent *readdir_fs(fs_node_t *node, uint64_t index, struct dirent *out) {
+    if (!node || !out) return 0;
     if ((node->flags & 0x7) == FS_DIRECTORY && node->readdir != 0) {
-        struct dirent *de = node->readdir(node, index);
+        struct dirent *de;
+        mutex_lock(&readdir_lock);
+        de = node->readdir(node, index);
         if (de)
-            node->atime = get_time();
-        return de;
+            memcpy(out, de, sizeof(*out));
+        mutex_unlock(&readdir_lock);
+        if (!de)
+            return 0;
+        node->atime = get_time();
+        return out;
     } else
         return 0;
 }

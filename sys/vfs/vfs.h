@@ -186,7 +186,11 @@ size_t read_fs(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer);
 size_t write_fs(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer);
 void open_fs(fs_node_t *node, uint8_t read, uint8_t write);
 void close_fs(fs_node_t *node);
-struct dirent *readdir_fs(fs_node_t *node, uint64_t index);
+/* Fills *out with directory entry `index` and returns `out`, or NULL at end
+ * of directory.  The caller supplies the storage: filesystem drivers hand
+ * back a buffer they reuse, so a shared one races concurrent readers. */
+struct dirent *readdir_fs(fs_node_t *node, uint64_t index, struct dirent *out);
+void vfs_readdir_init(void);
 fs_node_t *finddir_fs(fs_node_t *node, char *name);
 int ioctl_fs(fs_node_t *node, uint32_t request, void *arg);
 void *mmap_fs(fs_node_t *node, void *addr, size_t length, int prot, int flags, off_t offset);

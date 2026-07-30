@@ -431,7 +431,8 @@ int linux_old_readdir(unsigned int fd, void *dirp, unsigned int count) {
     if (!f) return -EBADF;
     if (!dirp) return -EFAULT;
 
-    struct dirent *d = readdir_fs((fs_node_t *)f->f_data, f->f_offset);
+    struct dirent dent;
+    struct dirent *d = readdir_fs((fs_node_t *)f->f_data, f->f_offset, &dent);
     if (!d) {
         return 0;   /* end of directory */
     }

@@ -1122,7 +1122,8 @@ int kern_getdents(unsigned int fd, void *dirp, unsigned int count) {
     
     while (bpos < count) {
         // Read one entry
-        struct dirent *d = readdir_fs((fs_node_t*)f->f_data, f->f_offset);
+        struct dirent dent;
+        struct dirent *d = readdir_fs((fs_node_t*)f->f_data, f->f_offset, &dent);
         if (!d) {
             // EOF
             if (bpos == 0) return 0; // EOF on first try
@@ -1176,7 +1177,8 @@ int kern_getdents64(unsigned int fd, void *dirp, unsigned int count) {
     struct linux_dirent64 *kld = (struct linux_dirent64 *)temp_buf;
 
     while (bpos < count) {
-        struct dirent *d = readdir_fs((fs_node_t *)f->f_data, f->f_offset);
+        struct dirent dent;
+        struct dirent *d = readdir_fs((fs_node_t *)f->f_data, f->f_offset, &dent);
         if (!d) {
             if (bpos == 0) return 0;
             break;
@@ -3695,7 +3697,8 @@ static char *find_name_by_inode(fs_node_t *dir, uint64_t inode) {
     // caps a broken FS independently of the cursor's unit.
     uint64_t index = 0;
     for (int guard = 0; guard < 1000000; guard++) {
-        struct dirent *d = readdir_fs(dir, index);
+        struct dirent dent;
+        struct dirent *d = readdir_fs(dir, index, &dent);
         if (!d) break; // End of directory
 
         uint64_t next = (d->d_off > index) ? d->d_off : index + 1;

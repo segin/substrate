@@ -540,9 +540,10 @@ ssize_t freebsd_sys_getdirentries_v11(int fd, char *buf, unsigned int nbytes, in
 
     unsigned int bpos = 0;
     struct freebsd11_dirent kfbd;
+    struct dirent dent;
 
     for (;;) {
-        struct dirent *d = readdir_fs((fs_node_t *)f->f_data, f->f_offset);
+        struct dirent *d = readdir_fs((fs_node_t *)f->f_data, f->f_offset, &dent);
         if (!d) break;
 
         /* readdir_fs's index is an opaque BYTE OFFSET (ext2 is byte-offset
@@ -605,9 +606,10 @@ ssize_t freebsd_sys_getdirentries(int fd, char *buf, size_t nbytes, int64_t *bas
 
     size_t bpos = 0;
     struct freebsd_dirent kfbd;
+    struct dirent dent;
 
     for (;;) {
-        struct dirent *d = readdir_fs((fs_node_t *)f->f_data, f->f_offset);
+        struct dirent *d = readdir_fs((fs_node_t *)f->f_data, f->f_offset, &dent);
         if (!d) break;
 
         /* readdir_fs's index is an opaque BYTE OFFSET into the directory

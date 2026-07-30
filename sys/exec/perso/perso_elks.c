@@ -1904,7 +1904,8 @@ static int elks_sys_readdir(uint32_t fd, uint32_t buf_off, uint32_t count,
         return -EFAULT;
     }
 
-    d = readdir_fs(node, f->f_offset);
+    struct dirent dent;
+    d = readdir_fs(node, f->f_offset, &dent);
     if (!d) {
         return 0;
     }
