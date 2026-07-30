@@ -415,8 +415,19 @@ int scsi_execute(scsi_request_t *req) {
                 should_retry = 1;
                 break;
             case SCSI_SENSE_NOT_READY:
-                should_retry = 1;
-                retry_delay_ms = 250;
+                /*
+                 * Only retry a NOT READY that can clear by itself.  An empty
+                 * removable slot reports 0x04/0x03 "manual intervention
+                 * required" (or 0x3A "medium not present"), neither of which
+                 * changes until somebody inserts media -- so the retries just
+                 * burned 3 x retry_delay_ms and logged a failed command per
+                 * attempt.  A card reader with four empty slots paid that
+                 * four times over on every boot.
+                 */
+                should_retry = scsi_not_ready_is_transient(
+                        scsi_sense_asc(req->sense, req->sense_len),
+                        scsi_sense_ascq(req->sense, req->sense_len));
+                retry_delay_ms = should_retry ? 250 : 0;
                 break;
             case SCSI_SENSE_ABORTED_COMMAND:
                 should_retry = 1;
@@ -1166,6 +1177,17 @@ int scsi_scan_bus(scsi_link_t *link, uint8_t bus) {
      * - If LUN 0 responds, optionally probe more LUNs (REPORT LUNS in L621)
      */
     for (uint8_t target = 0; target < link->max_targets; target++) {
+        /*
+         * Don't re-probe an address we already have.  The per-LUN sweep below
+         * already skips registered addresses, but LUN 0 did not: a rescan of
+         * the same link replayed TEST UNIT READY plus a full READ CAPACITY
+         * retry series against LUN 0 only to throw the answer away at
+         * scsi_device_register(), which is where the stray "Device already
+         * registered at N:0:0" plus its BOT transfer failures came from.
+         */
+        if (scsi_device_lookup(bus, target, 0)) {
+            continue;
+        }
         /* Probe LUN 0 first */
         if (scsi_probe_lun(link, bus, target, 0) == 0) {
             devices_found++;

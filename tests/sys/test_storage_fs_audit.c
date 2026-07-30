@@ -272,6 +272,53 @@ static void test_report_luns_descriptor_byte_order(void)
     kprint("  done\n");
 }
 
+/* ------------------------------------------------------------------
+ * A permanently-not-ready unit must not be retried.
+ *
+ * The bug: scsi_execute() retried every NOT READY sense with a 250 ms delay
+ * and max_retries=3.  An empty removable slot reports NOT READY with ASC 0x04
+ * / ASCQ 0x03 ("manual intervention required") or ASC 0x3A ("medium not
+ * present"), neither of which clears without a human -- so each empty slot
+ * cost four failed commands and 750 ms of boot time, times one LUN per slot on
+ * an all-in-one card reader.  Only the "in progress" qualifiers describe a
+ * unit that becomes ready on its own.
+ * ------------------------------------------------------------------ */
+static void test_not_ready_retry_classification(void)
+{
+    kprint("test_not_ready_retry_classification:\n");
+
+    /* Permanent: what an empty slot / open tray actually reports. */
+    TEST_ASSERT(!scsi_not_ready_is_transient(SCSI_ASC_LUN_NOT_READY, 0x03),
+                "SCSI: 0x04/0x03 manual-intervention-required treated as "
+                "transient -- every empty card slot pays the full retry "
+                "series on each boot");
+    TEST_ASSERT(!scsi_not_ready_is_transient(SCSI_ASC_MEDIUM_NOT_PRESENT, 0x00),
+                "SCSI: 0x3A medium-not-present treated as transient");
+    TEST_ASSERT(!scsi_not_ready_is_transient(SCSI_ASC_LUN_NOT_READY, 0x00),
+                "SCSI: 0x04/0x00 cause-not-reportable treated as transient");
+    TEST_ASSERT(!scsi_not_ready_is_transient(SCSI_ASC_LUN_NOT_READY, 0x02),
+                "SCSI: 0x04/0x02 initializing-command-required treated as "
+                "transient -- it needs START UNIT, not a retry");
+
+    /* Transient: these do clear on their own, so they must still retry. */
+    TEST_ASSERT(scsi_not_ready_is_transient(SCSI_ASC_LUN_NOT_READY,
+                                           SCSI_ASCQ_LUN_BECOMING_READY),
+                "SCSI: a spinning-up disk must still be retried");
+    TEST_ASSERT(scsi_not_ready_is_transient(SCSI_ASC_LUN_NOT_READY,
+                                           SCSI_ASCQ_LUN_FORMAT_IN_PROG),
+                "SCSI: format-in-progress must still be retried");
+    TEST_ASSERT(scsi_not_ready_is_transient(SCSI_ASC_LUN_NOT_READY,
+                                           SCSI_ASCQ_LUN_SELF_TEST_IN_PROG),
+                "SCSI: self-test-in-progress must still be retried");
+
+    /* Unparseable sense: scsi_sense_asc()/ascq() return -1, which must not
+     * be mistaken for a retryable code. */
+    TEST_ASSERT(!scsi_not_ready_is_transient(-1, -1),
+                "SCSI: unparseable sense classified as transient");
+
+    kprint("  done\n");
+}
+
 void run_storage_fs_audit_tests(void)
 {
     kprint("\n=== Storage / Filesystem Audit Regressions ===\n");
@@ -285,6 +332,7 @@ void run_storage_fs_audit_tests(void)
     test_off_t_is_signed();
     test_size_truncation_is_real();
     test_report_luns_descriptor_byte_order();
+    test_not_ready_retry_classification();
 
     kprintf("\nStorage/FS audit regressions: %d passed, %d failed\n",
             tests_passed, tests_failed);

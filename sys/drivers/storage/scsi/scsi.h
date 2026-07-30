@@ -73,6 +73,26 @@
 #define SCSI_SENSE_MISCOMPARE       0xE
 #define SCSI_SENSE_COMPLETED        0xF
 
+/*
+ * Additional Sense Codes / Qualifiers (SPC-3 Table 28) needed to tell a
+ * transient NOT READY from a permanent one.  Only ASC 0x04 with one of the
+ * "in progress" qualifiers below describes a unit that becomes ready on its
+ * own; everything else under NOT READY -- no medium (0x3A), or 0x04 with
+ * "manual intervention required" / "initializing command required", which is
+ * what an empty removable slot actually reports -- stays that way until
+ * somebody inserts media, so retrying only burns the retry delay.  An
+ * all-in-one card reader presents one LUN per slot with most slots empty,
+ * which is where this cost shows up.
+ */
+#define SCSI_ASC_LUN_NOT_READY      0x04
+#define SCSI_ASCQ_LUN_BECOMING_READY    0x01
+#define SCSI_ASCQ_LUN_FORMAT_IN_PROG    0x04
+#define SCSI_ASCQ_LUN_REBUILD_IN_PROG   0x05
+#define SCSI_ASCQ_LUN_RECALC_IN_PROG    0x06
+#define SCSI_ASCQ_LUN_OPERATION_IN_PROG 0x07
+#define SCSI_ASCQ_LUN_SELF_TEST_IN_PROG 0x09
+#define SCSI_ASC_MEDIUM_NOT_PRESENT 0x3A
+
 /* Device Type Codes (SPC-3 Table 82) */
 #define SCSI_TYPE_DISK              0x00  /* Direct Access (SBC) */
 #define SCSI_TYPE_TAPE              0x01  /* Sequential Access (SSC) */
@@ -383,6 +403,32 @@ int scsi_sense_key(const uint8_t *sense, uint8_t len);
 int scsi_sense_asc(const uint8_t *sense, uint8_t len);
 int scsi_sense_ascq(const uint8_t *sense, uint8_t len);
 const char *scsi_sense_string(uint8_t key, uint8_t asc, uint8_t ascq);
+
+/*
+ * Is a NOT READY sense worth retrying?  True only for the ASC/ASCQ pairs that
+ * describe a unit which becomes ready without outside help, so that a
+ * permanently-not-ready unit (an empty card-reader slot, an open tray) is
+ * probed once instead of once per retry.  Takes the int results of
+ * scsi_sense_asc()/scsi_sense_ascq() directly, including their -1 for
+ * unparseable sense, which is treated as non-transient.
+ */
+static inline int scsi_not_ready_is_transient(int asc, int ascq)
+{
+    if (asc != SCSI_ASC_LUN_NOT_READY) {
+        return 0;
+    }
+    switch (ascq) {
+    case SCSI_ASCQ_LUN_BECOMING_READY:
+    case SCSI_ASCQ_LUN_FORMAT_IN_PROG:
+    case SCSI_ASCQ_LUN_REBUILD_IN_PROG:
+    case SCSI_ASCQ_LUN_RECALC_IN_PROG:
+    case SCSI_ASCQ_LUN_OPERATION_IN_PROG:
+    case SCSI_ASCQ_LUN_SELF_TEST_IN_PROG:
+        return 1;
+    default:
+        return 0;
+    }
+}
 
 /* CDB Helpers */
 void scsi_cdb_read_10(uint8_t *cdb, uint32_t lba, uint16_t count);
