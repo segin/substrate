@@ -161,7 +161,12 @@ namei(struct nameidata *ndp)
             /* Cache miss - perform full lookup */
             error = VOP_LOOKUP(dp, &ndp->ni_vp, cnp);
             if (error) {
+                /* [VNODE-21] This is the ENOENT path -- i.e. EVERY failed
+                 * lookup -- and it leaked the 1024-byte cn_pnbuf every
+                 * time. */
                 vrele(dp);
+                if (namei_zone) uma_zfree(namei_zone, cnp->cn_pnbuf);
+                else kfree(cnp->cn_pnbuf, 1024);
                 return error;
             }
             /* Enter into cache if successful */
@@ -177,8 +182,11 @@ namei(struct nameidata *ndp)
             
             error = VFS_ROOT(mp, &tvp);
             if (error) {
+                /* [VNODE-21] Same leak on the VFS_ROOT failure path. */
                 vrele(ndp->ni_vp);
                 vrele(dp);
+                if (namei_zone) uma_zfree(namei_zone, cnp->cn_pnbuf);
+                else kfree(cnp->cn_pnbuf, 1024);
                 return error;
             }
             vrele(ndp->ni_vp);

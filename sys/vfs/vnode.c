@@ -188,10 +188,29 @@ static struct vnode *vnode_recycle(void)
     vnstats.freevnodes--;
     
     spinlock_release(&vnode_freelist_lock);
-    
+
+    /*
+     * [VNODE-16] Remove from the hash BEFORE vclean().
+     *
+     * vnode_recycle() never did this at all, and it cannot be deferred:
+     * vnode_cache_remove() early-returns on !v_mount, and vclean() is what
+     * clears v_mount -- so after the clean the entry could never be removed.
+     * getnewvnode() then memset v_hash_next, truncating the bucket chain
+     * (orphaning every later entry, so the same file gets duplicate vnodes)
+     * and, once the vnode is re-inserted into that same bucket, closing it
+     * into a CYCLE that hangs the next lookup miss with vnode_hash_lock held.
+     *
+     * [VNODE-17] And purge the name cache, which vnode_reclaim() already
+     * does for exactly the same reason.  Without it the namecache keeps
+     * mapping the OLD path to this vnode, so a lookup of one file can return
+     * the vnode now backing a completely different one.
+     */
+    vnode_cache_remove(vp);
+    cache_purge(vp);
+
     /* Clean the vnode for reuse */
     vclean(vp, 0);
-    
+
     vnstats.vnode_recycle++;
     return vp;
 }
@@ -315,8 +334,18 @@ void vrele(struct vnode *vp)
             }
         }
 
-        /* If doomed, reclaim immediately */
-        if (vp->v_flag & VDOOMED) {
+        /*
+         * [VNODE-18] Reclaim only when there is no HOLD outstanding either.
+         *
+         * This tested v_usecount alone, while vgone() correctly requires
+         * v_usecount == 0 && v_holdcount == 0.  A vhold() followed by
+         * vgone() and vrele() therefore freed the vnode with a hold still
+         * live -- the holder's next dereference is a use-after-free.  A held
+         * doomed vnode goes to the freelist instead; vnode_recycle() already
+         * skips entries with v_holdcount != 0, and the last vdrop() reclaims
+         * it.
+         */
+        if ((vp->v_flag & VDOOMED) && vp->v_holdcount == 0) {
             spinlock_release(&vp->v_interlock);
             vnode_reclaim(vp);
             return; /* vp is freed by vnode_reclaim, do not touch */
