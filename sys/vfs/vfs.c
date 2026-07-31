@@ -780,7 +780,27 @@ fs_node_t *vfs_lookup(fs_node_t *root, const char *path) {
             component[i++] = *p++;
         }
         component[i] = '\0';
-        
+
+        /*
+         * [VFS-27] The copy loop stops at 255 with *p still in the MIDDLE of
+         * the component, so the next iteration used to carry on from there
+         * and treat the remainder as a fresh component: a 300-character
+         * name silently became a lookup of its first 255 characters followed
+         * by a lookup of the last 45 *inside that result*.  That does not
+         * merely fail -- it can resolve to a real but entirely different
+         * file, which is a correctness and containment problem, not a
+         * cosmetic one.
+         *
+         * A component this long cannot be named here.  These functions
+         * report failure as NULL (callers map it to ENOENT; there is no
+         * error channel to return ENAMETOOLONG through without changing
+         * every caller), so fail the lookup rather than resolve the wrong
+         * path.
+         */
+        if (i == 255 && *p != '\0' && *p != '/') {
+            return NULL;
+        }
+
         if (i == 0) {
             if (*p == '/') p++;
             continue;
@@ -888,7 +908,27 @@ fs_node_t *vfs_lookup_lstat(fs_node_t *root, const char *path) {
             component[i++] = *p++;
         }
         component[i] = '\0';
-        
+
+        /*
+         * [VFS-27] The copy loop stops at 255 with *p still in the MIDDLE of
+         * the component, so the next iteration used to carry on from there
+         * and treat the remainder as a fresh component: a 300-character
+         * name silently became a lookup of its first 255 characters followed
+         * by a lookup of the last 45 *inside that result*.  That does not
+         * merely fail -- it can resolve to a real but entirely different
+         * file, which is a correctness and containment problem, not a
+         * cosmetic one.
+         *
+         * A component this long cannot be named here.  These functions
+         * report failure as NULL (callers map it to ENOENT; there is no
+         * error channel to return ENAMETOOLONG through without changing
+         * every caller), so fail the lookup rather than resolve the wrong
+         * path.
+         */
+        if (i == 255 && *p != '\0' && *p != '/') {
+            return NULL;
+        }
+
         if (i == 0) {
             if (*p == '/') p++;
             continue;
