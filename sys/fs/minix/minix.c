@@ -70,6 +70,59 @@ void minix_init(void) {
 /* Bounds-check a zone number that came from disk before using it as a
  * device offset.  s_nzones (v1) / s_zones (v2) gives the filesystem's
  * extent; anything outside that window is corrupt or hostile. */
+/*
+ * MINIX-17: mount accepts the 14-character-name variants (MINIX_V1_Magic_14
+ * 0x138F, MINIX_V2_Magic_14 0x2478), but every directory routine hardcoded
+ * sizeof(struct minix_dirent_v1) == 32.  Those variants use a 16-byte stride
+ * (2-byte inode + 14-byte name), so readdir read entry 0 as {ino, name[30]}
+ * spanning TWO on-disk entries: names carried the next entry's inode number,
+ * every second entry was invisible, and d_ino alternated real and garbage --
+ * straight into read_inode and unlink.  Derive both the stride and the name
+ * length from the magic.
+ */
+static inline uint32_t minix_dirent_namelen(const minix_fs_t *fs) {
+    return (fs->sb.s_magic == MINIX_V1_Magic_14 ||
+            fs->sb.s_magic == MINIX_V2_Magic_14) ? 14u : 30u;
+}
+
+static inline uint32_t minix_dirent_size(const minix_fs_t *fs) {
+    return 2u + minix_dirent_namelen(fs);   /* uint16 inode + name[] */
+}
+
+/*
+ * MINIX-19: minix_get_zone_v1/v2 validated the INDIRECT block pointer before
+ * reading it but returned buf[index] unchecked, so a corrupt indirect block
+ * handed an arbitrary 16/32-bit zone number straight to the caller.  read_fs
+ * then computed `minix_zone_off(zone)` in uint32_t: zone 0x00400000
+ * truncates to offset 0, which returns the SUPERBLOCK on a read and lets
+ * minix_write scribble over it.  Validate on the way out, and do the offset
+ * arithmetic in 64 bits.
+ */
+/*
+ * MINIX-18: the zone bitmap is NOT indexed by zone number.  MINIX maps bit i
+ * to zone i + s_firstdatazone - 1, i.e. bit 1 is the first data zone.  This
+ * driver used the zone number directly, which is self-consistent as long as
+ * only substrate touches the volume -- but fsck.minix and Linux read the same
+ * bitmap with the correct mapping, see those bits as describing entirely
+ * different zones, consider substrate's allocated zones free, and hand them
+ * out again.  Silent cross-linking on any shared volume.
+ *
+ * Returns 0 for a zone below the first data zone (no bitmap bit describes it).
+ */
+static inline uint32_t minix_zone_bit(const minix_fs_t *fs, uint32_t zone) {
+    uint32_t first = fs->sb.s_firstdatazone;
+    if (first == 0 || zone < first) return 0;
+    return zone - first + 1;
+}
+
+static inline uint32_t minix_bit_zone(const minix_fs_t *fs, uint32_t bit) {
+    return bit + fs->sb.s_firstdatazone - 1;
+}
+
+static inline off_t minix_zone_off(uint32_t zone) {
+    return (off_t)zone * (off_t)MINIX_BLOCK_SIZE;
+}
+
 static inline uint32_t minix_zone_ok(minix_fs_t *fs, uint32_t z) {
     uint32_t max = fs->sb.s_zones ? fs->sb.s_zones : fs->sb.s_nzones;
     if (max == 0) return 0;        /* unknown size — be conservative */
@@ -91,10 +144,13 @@ static uint32_t minix_get_zone_v1(minix_fs_t *fs, struct minix_inode_v1 *inode, 
         if (!minix_zone_ok(fs, z)) return 0;
 
         uint16_t buf[MINIX_BLOCK_SIZE / 2];
-        if (read_fs(fs->block_device, z * MINIX_BLOCK_SIZE, MINIX_BLOCK_SIZE, (uint8_t *)buf) != MINIX_BLOCK_SIZE) {
+        if (read_fs(fs->block_device, minix_zone_off(z), MINIX_BLOCK_SIZE, (uint8_t *)buf) != MINIX_BLOCK_SIZE) {
             return 0;
         }
-        return buf[indirect_index];
+        {
+            uint32_t out = buf[indirect_index];      /* MINIX-19 */
+            return minix_zone_ok(fs, out) ? out : 0;
+        }
     }
 
     // Double indirect zone (8)
@@ -104,14 +160,14 @@ static uint32_t minix_get_zone_v1(minix_fs_t *fs, struct minix_inode_v1 *inode, 
         if (!minix_zone_ok(fs, z)) return 0;
 
         uint16_t buf[MINIX_BLOCK_SIZE / 2];
-        if (read_fs(fs->block_device, z * MINIX_BLOCK_SIZE, MINIX_BLOCK_SIZE, (uint8_t *)buf) != MINIX_BLOCK_SIZE) {
+        if (read_fs(fs->block_device, minix_zone_off(z), MINIX_BLOCK_SIZE, (uint8_t *)buf) != MINIX_BLOCK_SIZE) {
             return 0;
         }
 
         uint16_t indirect_block = buf[double_indirect_index / entries_per_block];
         if (!minix_zone_ok(fs, indirect_block)) return 0;
 
-        if (read_fs(fs->block_device, indirect_block * MINIX_BLOCK_SIZE, MINIX_BLOCK_SIZE, (uint8_t *)buf) != MINIX_BLOCK_SIZE) {
+        if (read_fs(fs->block_device, minix_zone_off(indirect_block), MINIX_BLOCK_SIZE, (uint8_t *)buf) != MINIX_BLOCK_SIZE) {
             return 0;
         }
 
@@ -137,10 +193,13 @@ static uint32_t minix_get_zone_v2(minix_fs_t *fs, struct minix_inode_v2 *inode, 
         if (!minix_zone_ok(fs, z)) return 0;
 
         uint32_t buf[MINIX_BLOCK_SIZE / 4];
-        if (read_fs(fs->block_device, z * MINIX_BLOCK_SIZE, MINIX_BLOCK_SIZE, (uint8_t *)buf) != MINIX_BLOCK_SIZE) {
+        if (read_fs(fs->block_device, minix_zone_off(z), MINIX_BLOCK_SIZE, (uint8_t *)buf) != MINIX_BLOCK_SIZE) {
             return 0;
         }
-        return buf[indirect_index];
+        {
+            uint32_t out = buf[indirect_index];      /* MINIX-19 */
+            return minix_zone_ok(fs, out) ? out : 0;
+        }
     }
 
     // Double indirect zone (8)
@@ -150,14 +209,14 @@ static uint32_t minix_get_zone_v2(minix_fs_t *fs, struct minix_inode_v2 *inode, 
         if (!minix_zone_ok(fs, z)) return 0;
 
         uint32_t buf[MINIX_BLOCK_SIZE / 4];
-        if (read_fs(fs->block_device, z * MINIX_BLOCK_SIZE, MINIX_BLOCK_SIZE, (uint8_t *)buf) != MINIX_BLOCK_SIZE) {
+        if (read_fs(fs->block_device, minix_zone_off(z), MINIX_BLOCK_SIZE, (uint8_t *)buf) != MINIX_BLOCK_SIZE) {
             return 0;
         }
 
         uint32_t indirect_block = buf[double_indirect_index / entries_per_block];
         if (!minix_zone_ok(fs, indirect_block)) return 0;
 
-        if (read_fs(fs->block_device, indirect_block * MINIX_BLOCK_SIZE, MINIX_BLOCK_SIZE, (uint8_t *)buf) != MINIX_BLOCK_SIZE) {
+        if (read_fs(fs->block_device, minix_zone_off(indirect_block), MINIX_BLOCK_SIZE, (uint8_t *)buf) != MINIX_BLOCK_SIZE) {
             return 0;
         }
 
@@ -189,7 +248,7 @@ static int minix_zero_zone(minix_fs_t *fs, uint32_t zone) {
     uint8_t zero_buf[MINIX_BLOCK_SIZE];
     memset(zero_buf, 0, sizeof(zero_buf));
 
-    if (write_fs(fs->block_device, zone * MINIX_BLOCK_SIZE, MINIX_BLOCK_SIZE, zero_buf) != MINIX_BLOCK_SIZE) {
+    if (write_fs(fs->block_device, minix_zone_off(zone), MINIX_BLOCK_SIZE, zero_buf) != MINIX_BLOCK_SIZE) {
         return -1;
     }
     return 0;
@@ -210,9 +269,10 @@ static int minix_statfs(fs_node_t *node, struct statfs *buf) {
     uint8_t  bm[MINIX_BLOCK_SIZE];
     uint32_t free_zones = 0, free_inodes = 0;
 
-    /* Zone bitmap starts after the 2 boot/super blocks and the inode
-     * bitmap.  Bit N covers zone N; only bits in
-     * [first_data .. total_zones) name real data zones. */
+    /* Zone bitmap starts after the 2 boot/super blocks and the inode bitmap.
+     * MINIX-18: bit i covers zone i + s_firstdatazone - 1, NOT zone i, so
+     * counting bit N as zone N reported a free count for the wrong range of
+     * zones entirely.  Bit 0 is not a data zone. */
     uint32_t zmap_start = 2 + fs->sb.s_imap_blocks;
     for (uint32_t b = 0; b < fs->sb.s_zmap_blocks; b++) {
         if (read_fs(fs->block_device,
@@ -220,7 +280,9 @@ static int minix_statfs(fs_node_t *node, struct statfs *buf) {
                     MINIX_BLOCK_SIZE, bm) != MINIX_BLOCK_SIZE)
             break;
         for (uint32_t i = 0; i < MINIX_BLOCK_SIZE * 8; i++) {
-            uint32_t zone = b * MINIX_BLOCK_SIZE * 8 + i;
+            uint32_t bit = b * MINIX_BLOCK_SIZE * 8 + i;
+            if (bit == 0) continue;                 /* bit 0 names no zone */
+            uint32_t zone = minix_bit_zone(fs, bit);
             if (zone < first_data) continue;
             if (zone >= total_zones) goto zmap_done;
             if (!(bm[i / 8] & (1u << (i % 8))))
@@ -279,8 +341,10 @@ static uint32_t minix_alloc_zone(minix_fs_t *fs) {
 
     for (uint32_t attempt = 0; attempt < range; attempt++) {
         uint32_t zone = first_data_zone + ((start_zone - first_data_zone + attempt) % range);
-        uint32_t block_index = zone / (MINIX_BLOCK_SIZE * 8);
-        uint32_t bit_offset = zone % (MINIX_BLOCK_SIZE * 8);
+        uint32_t bit = minix_zone_bit(fs, zone);          /* MINIX-18 */
+        if (bit == 0) continue;
+        uint32_t block_index = bit / (MINIX_BLOCK_SIZE * 8);
+        uint32_t bit_offset = bit % (MINIX_BLOCK_SIZE * 8);
 
         if (block_index >= fs->sb.s_zmap_blocks) continue;
 
@@ -598,8 +662,10 @@ static void minix_free_block(minix_fs_t *fs, uint32_t zone) {
     if (zone == 0) return;
 
     uint32_t zmap_start_block = 2 + fs->sb.s_imap_blocks;
-    uint32_t block_index = zone / (MINIX_BLOCK_SIZE * 8);
-    uint32_t bit_offset = zone % (MINIX_BLOCK_SIZE * 8);
+    uint32_t bit = minix_zone_bit(fs, zone);              /* MINIX-18 */
+    if (bit == 0) return;
+    uint32_t block_index = bit / (MINIX_BLOCK_SIZE * 8);
+    uint32_t bit_offset = bit % (MINIX_BLOCK_SIZE * 8);
 
     if (block_index >= fs->sb.s_zmap_blocks) return;
 
@@ -793,7 +859,7 @@ static size_t minix_read(fs_node_t *node, off_t offset, size_t size, uint8_t *bu
         }
 
         uint8_t block_buf[MINIX_BLOCK_SIZE];
-        if (read_fs(fs->block_device, zone * MINIX_BLOCK_SIZE, MINIX_BLOCK_SIZE, block_buf) != MINIX_BLOCK_SIZE) {
+        if (read_fs(fs->block_device, minix_zone_off(zone), MINIX_BLOCK_SIZE, block_buf) != MINIX_BLOCK_SIZE) {
             break;
         }
 
@@ -807,8 +873,27 @@ static size_t minix_read(fs_node_t *node, off_t offset, size_t size, uint8_t *bu
     return read_bytes;
 }
 
+/* Largest byte offset a MINIX file can name: zone numbers are 32-bit and a
+ * zone is MINIX_BLOCK_SIZE bytes, but the on-disk i_size fields this driver
+ * maintains are 32-bit, so that is the real ceiling. */
+#define MINIX_MAX_FILE_OFF  0xFFFFFFFFu
+
 static size_t minix_write(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer) {
     minix_fs_t *fs = (minix_fs_t *)(uintptr_t)node->impl;
+
+    /*
+     * MINIX-20: there was no offset bound at all, and off_t (signed 64-bit)
+     * was truncated straight into a uint32_t.  A negative offset from
+     * lseek(fd, -1, SEEK_SET) became ~4 GiB, and any offset above 4 GiB
+     * wrapped to a small one -- so a write intended past the end landed on
+     * the START of the file, or with the zone-offset truncation in MINIX-19,
+     * on the superblock.
+     */
+    if (offset < 0) return 0;
+    if ((uint64_t)offset > MINIX_MAX_FILE_OFF) return 0;
+    if (size > MINIX_MAX_FILE_OFF - (uint64_t)offset) {
+        size = (size_t)(MINIX_MAX_FILE_OFF - (uint64_t)offset);
+    }
 
     size_t written = 0;
     uint32_t current_offset = (uint32_t)offset;
@@ -830,7 +915,7 @@ static size_t minix_write(fs_node_t *node, off_t offset, size_t size, const uint
         bool need_read = ((block_offset != 0) || (chunk != MINIX_BLOCK_SIZE)) && (ensure_rc == 0);
 
         if (need_read) {
-             if (read_fs(fs->block_device, zone * MINIX_BLOCK_SIZE, MINIX_BLOCK_SIZE, block_buf) != MINIX_BLOCK_SIZE) {
+             if (read_fs(fs->block_device, minix_zone_off(zone), MINIX_BLOCK_SIZE, block_buf) != MINIX_BLOCK_SIZE) {
                  break;
              }
         } else {
@@ -839,7 +924,7 @@ static size_t minix_write(fs_node_t *node, off_t offset, size_t size, const uint
 
         memcpy(block_buf + block_offset, buffer + written, chunk);
 
-        if (write_fs(fs->block_device, zone * MINIX_BLOCK_SIZE, MINIX_BLOCK_SIZE, block_buf) != MINIX_BLOCK_SIZE) {
+        if (write_fs(fs->block_device, minix_zone_off(zone), MINIX_BLOCK_SIZE, block_buf) != MINIX_BLOCK_SIZE) {
             break;
         }
 
@@ -865,12 +950,17 @@ static int minix_readlink(fs_node_t *node, char *buf, size_t size) {
 }
 
 static struct dirent *minix_readdir(fs_node_t *node, uint64_t index) {
-    uint32_t entry_size = sizeof(struct minix_dirent_v1);
+    minix_fs_t *fs = (minix_fs_t *)(uintptr_t)node->impl;
+    if (!fs) return NULL;
+    /* MINIX-17: stride and name length come from the on-disk variant. */
+    uint32_t entry_size = minix_dirent_size(fs);
+    uint32_t namelen    = minix_dirent_namelen(fs);
     uint32_t offset = 0;
     uint64_t seen = 0;
     struct minix_dirent_v1 entry;
 
     while (offset < node->length) {
+        memset(&entry, 0, sizeof(entry));
         if (minix_read(node, offset, entry_size, (uint8_t *)&entry) != entry_size) {
             return NULL;
         }
@@ -884,8 +974,8 @@ static struct dirent *minix_readdir(fs_node_t *node, uint64_t index) {
         }
 
         struct minix_inode_wrapper *wrapper = (struct minix_inode_wrapper *)node->ptr;
-        strncpy(wrapper->dirent.d_name, entry.name, 30);
-        wrapper->dirent.d_name[30] = '\0';
+        strncpy(wrapper->dirent.d_name, entry.name, namelen);
+        wrapper->dirent.d_name[namelen] = '\0';
         wrapper->dirent.d_ino = entry.inode;
         /* Entry-index readdir; 0 d_off => getdents +1 fallback. */
         wrapper->dirent.d_off = 0;
@@ -1217,19 +1307,35 @@ static int minix_link(fs_node_t *dir, fs_node_t *node, const char *name) {
     uint32_t free_offset = 0;
     bool found = false;
 
+    /* MINIX-17: stride from the on-disk variant, not a hardcoded 32. */
+    uint32_t ent_size = minix_dirent_size(fs);
+    uint32_t namelen  = minix_dirent_namelen(fs);
     uint8_t buf[sizeof(struct minix_dirent_v1)];
 
+    /*
+     * MINIX-31: this loop stopped at the first free slot without ever
+     * comparing names, so creating a name that already existed appended a
+     * SECOND entry for it.  Which one a later lookup found then depended on
+     * scan order, and unlink removed only one of them.  Scan the whole
+     * directory: reject a duplicate, and remember the first free slot.
+     */
     while (offset < dir_size) {
-        if (minix_read(dir, offset, sizeof(struct minix_dirent_v1), buf) != sizeof(struct minix_dirent_v1)) {
+        memset(buf, 0, sizeof(buf));
+        if (minix_read(dir, offset, ent_size, buf) != ent_size) {
             break;
         }
         struct minix_dirent_v1 *d = (struct minix_dirent_v1 *)buf;
         if (d->inode == 0) {
-            free_offset = offset;
-            found = true;
-            break;
+            if (!found) { free_offset = offset; found = true; }
+        } else {
+            char have[31];
+            strncpy(have, d->name, namelen);
+            have[namelen] = '\0';
+            if (strcmp(have, name) == 0) {
+                return -1;              /* name already present */
+            }
         }
-        offset += sizeof(struct minix_dirent_v1);
+        offset += ent_size;
     }
 
     if (!found) {
@@ -1261,10 +1367,11 @@ static int minix_link(fs_node_t *dir, fs_node_t *node, const char *name) {
 
     // 3. Write directory entry
     struct minix_dirent_v1 entry;
+    memset(&entry, 0, sizeof(entry));
     entry.inode = node->inode;
-    strncpy(entry.name, name, 30);
+    strncpy(entry.name, name, namelen);
 
-    if (minix_write(dir, free_offset, sizeof(struct minix_dirent_v1), (uint8_t *)&entry) != sizeof(struct minix_dirent_v1)) {
+    if (minix_write(dir, free_offset, ent_size, (uint8_t *)&entry) != ent_size) {
         // Rollback
         if (v2) {
             ((struct minix_inode_v2 *)node->ptr)->i_nlinks--;
@@ -1301,13 +1408,17 @@ static int minix_unlink(fs_node_t *dir, const char *name) {
 
     uint32_t offset = 0;
     bool v2 = (fs->sb.s_magic == MINIX_V2_Magic || fs->sb.s_magic == MINIX_V2_Magic_14);
+    /* MINIX-17: stride and name length from the on-disk variant. */
+    uint32_t ent_size = minix_dirent_size(fs);
+    uint32_t namelen  = minix_dirent_namelen(fs);
 
     while (offset < dir->length) {
-        if (minix_read(dir, offset, sizeof(entry), (uint8_t *)&entry) != sizeof(entry)) {
+        memset(&entry, 0, sizeof(entry));
+        if (minix_read(dir, offset, ent_size, (uint8_t *)&entry) != ent_size) {
             return -1;
         }
 
-        if (entry.inode != 0 && strncmp(entry.name, name, 30) == 0) {
+        if (entry.inode != 0 && strncmp(entry.name, name, namelen) == 0) {
             uint32_t target_inode_num = entry.inode;
 
             // Read target inode FIRST
@@ -1321,10 +1432,23 @@ static int minix_unlink(fs_node_t *dir, const char *name) {
                 return -1;
             }
 
+            /*
+             * MINIX-31: unlink never checked the target's type, so
+             * unlink("somedir") removed the directory entry and dropped the
+             * link count -- orphaning the whole subtree beneath it, with its
+             * inodes and zones still marked in use and no name to reach them.
+             * POSIX reserves directory removal for rmdir(2); unlink must
+             * refuse with EISDIR.
+             */
+            if ((target.flags & 0x7) == FS_DIRECTORY) {
+                kfree(target.ptr, sizeof(struct minix_inode_wrapper));
+                return -EISDIR;
+            }
+
             // Remove directory entry
             entry.inode = 0;
-            memset(entry.name, 0, 30);
-            if (minix_write(dir, offset, sizeof(entry), (uint8_t *)&entry) != sizeof(entry)) {
+            memset(entry.name, 0, sizeof(entry.name));
+            if (minix_write(dir, offset, ent_size, (uint8_t *)&entry) != ent_size) {
                 kfree(target.ptr, sizeof(struct minix_inode_wrapper));
                 return -1;
             }
@@ -1362,7 +1486,7 @@ static int minix_unlink(fs_node_t *dir, const char *name) {
 
             return 0;
         }
-        offset += sizeof(entry);
+        offset += ent_size;          /* MINIX-17 */
     }
 
     return -1;
