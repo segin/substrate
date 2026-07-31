@@ -2180,10 +2180,22 @@ fs_node_t *ext2_finddir(fs_node_t *node, char *name) {
                 }
             }
         } else if (htr == 0) {
-            /* htree said "not here" — trust the indexer and return
-             * NULL.  This is the FreeBSD behaviour; linear-scanning
-             * after a successful htree miss is a waste.  */
-            goto cleanup;
+            /*
+             * [EXT2-08] This used to `goto cleanup` -- treating the htree
+             * miss as authoritative, which is correct ONLY if every entry in
+             * the directory is actually present in the index.  Substrate has
+             * no write-side htree support at all: ext2_add_entry appends to
+             * a leaf (or a fresh block) and never inserts into the index.  A
+             * file created here is therefore missed by the index and, with
+             * the miss trusted, becomes invisible -- open() returns ENOENT
+             * for a name that plainly exists in the directory.
+             *
+             * An htree leaf block is an ordinary linear dirent block, so a
+             * full linear scan always finds every entry.  Fall through to it
+             * until index insertion exists; the cost is a slow lookup on the
+             * miss path, which is much cheaper than a lost file.
+             */
+            ext2_finddir_htree_bypass++;
         }
         if (htr < 0) ext2_finddir_htree_bypass++;
         /* fall through to linear scan */
@@ -3244,6 +3256,22 @@ int ext2_truncate(fs_node_t *node, off_t length) {
 }
 
 // Add directory entry
+/*
+ * [EXT2-08] Does this directory carry EXT2_INDEX_FL (an htree)?
+ *
+ * Substrate honours the flag on the READ side only (ext2_htree_lookup) and
+ * has no index maintenance at all, so any structural change would corrupt
+ * the tree.  The check lives at the ENTRY points, before an inode is
+ * allocated -- refusing after allocation leaks the inode, which is what an
+ * e2fsck of the test volume caught ("Inode bitmap differences: +3014").
+ */
+static int ext2_dir_is_indexed(fs_node_t *dir) {
+    ext2_node_t *c;
+    if (!dir) return 0;
+    c = (ext2_node_t *)(uintptr_t)dir->impl;
+    return c && (c->inode.i_flags & EXT2_INDEX_FL);
+}
+
 static int ext2_add_entry(fs_node_t *dir, const char *name, uint32_t inode, uint8_t file_type) {
     if (!dir || !name || inode == 0) return -1;
     
@@ -3257,6 +3285,27 @@ static int ext2_add_entry(fs_node_t *dir, const char *name, uint32_t inode, uint
     uint32_t required_size = ((8 + name_len + 3) / 4) * 4;
     
     mutex_lock(&ctx->lock);
+
+    /*
+     * [EXT2-08] Refuse to modify an indexed (htree) directory.
+     *
+     * EXT2_INDEX_FL is honoured on the READ side (ext2_htree_lookup) and
+     * nowhere on the write side.  An htree root block is "." (rec_len 12)
+     * followed by ".." with rec_len = block_size - 12, where that oversized
+     * ".." record HIDES dx_root_info and the index array.  The linear
+     * insert below sees a 12-byte "." and enormous slack, takes the split
+     * path, and writes a fresh dirent at byte offset 24 -- directly over
+     * h_hash_version / h_info_len / h_ind_levels and the first index
+     * entries.  The directory is then structurally corrupt to every other
+     * ext2 implementation.
+     *
+     * Until index maintenance exists, fail cleanly instead.  Reads still
+     * work: ext2_finddir falls back to a linear scan.
+     */
+    if (ctx->inode.i_flags & EXT2_INDEX_FL) {
+        mutex_unlock(&ctx->lock);
+        return -EOPNOTSUPP;
+    }
 
     // Invalidate dcache entry if it matches
     for (int k = 0; k < EXT2_DCACHE_SIZE; k++) {
@@ -3427,6 +3476,9 @@ cleanup:
 
 // Implement ext2_link
 int ext2_link(fs_node_t *parent, fs_node_t *source, const char *name) {
+    if (ext2_dir_is_indexed(parent))
+        return -EOPNOTSUPP;   /* [EXT2-08] */
+
     if (!parent || !source || !name || !name[0]) return -EINVAL;
     if ((parent->flags & 0x7) != FS_DIRECTORY) return -ENOTDIR;
     if ((source->flags & 0x7) == FS_DIRECTORY) return -EPERM; // POSIX doesn't allow hard links to directories
@@ -3468,6 +3520,9 @@ int ext2_link(fs_node_t *parent, fs_node_t *source, const char *name) {
 
 // Implement ext2_rename
 int ext2_rename(fs_node_t *old_parent, const char *old_name, fs_node_t *new_parent, const char *new_name) {
+    if (ext2_dir_is_indexed(old_parent) || ext2_dir_is_indexed(new_parent))
+        return -EOPNOTSUPP;   /* [EXT2-08] */
+
     if (!old_parent || !old_name || !new_parent || !new_name) return -EINVAL;
     {
         ext2_node_t *oc = (ext2_node_t *)(uintptr_t)old_parent->impl;
@@ -3616,6 +3671,27 @@ static int ext2_remove_entry(fs_node_t *dir, const char *name) {
 
     mutex_lock(&ctx->lock);
 
+    /*
+     * [EXT2-08] Refuse to modify an indexed (htree) directory.
+     *
+     * EXT2_INDEX_FL is honoured on the READ side (ext2_htree_lookup) and
+     * nowhere on the write side.  An htree root block is "." (rec_len 12)
+     * followed by ".." with rec_len = block_size - 12, where that oversized
+     * ".." record HIDES dx_root_info and the index array.  The linear
+     * insert below sees a 12-byte "." and enormous slack, takes the split
+     * path, and writes a fresh dirent at byte offset 24 -- directly over
+     * h_hash_version / h_info_len / h_ind_levels and the first index
+     * entries.  The directory is then structurally corrupt to every other
+     * ext2 implementation.
+     *
+     * Until index maintenance exists, fail cleanly instead.  Reads still
+     * work: ext2_finddir falls back to a linear scan.
+     */
+    if (ctx->inode.i_flags & EXT2_INDEX_FL) {
+        mutex_unlock(&ctx->lock);
+        return -EOPNOTSUPP;
+    }
+
     // Invalidate dcache entry if it matches
     for (int k = 0; k < EXT2_DCACHE_SIZE; k++) {
         if (ctx->dcache[k].inode_num != 0 &&
@@ -3722,6 +3798,9 @@ cleanup:
 }
 
 static int ext2_mknod(fs_node_t *dir, const char *name, uint16_t mode, uint32_t dev) {
+    if (ext2_dir_is_indexed(dir))
+        return -EOPNOTSUPP;   /* [EXT2-08] */
+
     ext2_node_t *dir_ctx;
     ext2_fs_t *fs;
     ext2_inode_t inode;
@@ -3781,6 +3860,9 @@ static int ext2_mknod(fs_node_t *dir, const char *name, uint16_t mode, uint32_t 
 }
 
 static int ext2_symlink(fs_node_t *dir, const char *target, const char *name) {
+    if (ext2_dir_is_indexed(dir))
+        return -EOPNOTSUPP;   /* [EXT2-08] */
+
     if (!dir || !target || !name || !name[0]) return -EINVAL;
     if ((dir->flags & 0x7) != FS_DIRECTORY) return -ENOTDIR;
     {
@@ -3867,6 +3949,9 @@ static int ext2_symlink(fs_node_t *dir, const char *target, const char *name) {
 }
 
 int ext2_mkdir(fs_node_t *dir, const char *name, uint16_t permission) {
+    if (ext2_dir_is_indexed(dir))
+        return -EOPNOTSUPP;   /* [EXT2-08] */
+
     ext2_node_t *dir_ctx;
     ext2_fs_t *fs;
     ext2_inode_t inode;
@@ -3974,6 +4059,9 @@ int ext2_mkdir(fs_node_t *dir, const char *name, uint16_t permission) {
 }
 
 int ext2_unlink(fs_node_t *dir, const char *name) {
+    if (ext2_dir_is_indexed(dir))
+        return -EOPNOTSUPP;   /* [EXT2-08] */
+
     fs_node_t *victim;
     ext2_node_t *victim_ctx;
     ext2_fs_t *fs;
@@ -4064,6 +4152,9 @@ static int ext2_dir_is_empty(fs_node_t *node) {
 }
 
 int ext2_rmdir(fs_node_t *dir, const char *name) {
+    if (ext2_dir_is_indexed(dir))
+        return -EOPNOTSUPP;   /* [EXT2-08] */
+
     fs_node_t *victim;
     ext2_node_t *dir_ctx;
     ext2_node_t *victim_ctx;
