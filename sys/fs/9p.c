@@ -10,14 +10,61 @@
 /* Rread header: size[4] type[1] tag[2] count[4] */
 #define P9_RREAD_HDR_LEN 11
 
+/*
+ * [9P-25] Every request used to carry tag 0.  A tag is what lets a client
+ * match a reply to the request it answers; with a single constant there is
+ * nothing to check, so a reply arriving out of order -- or belonging to
+ * another in-flight request -- was accepted as this one's.  The transport is
+ * now serialised (virtio_9p.c), which removes the concurrency, but the tag is
+ * still what proves the server answered THIS message.  P9_NOTAG is reserved
+ * for Tversion, so allocation skips it.
+ */
 struct p9_fs {
     uint32_t next_fid;
     uint32_t root_fid;
     uint32_t msize;
+    uint16_t next_tag;
 };
 
+static uint16_t p9_alloc_tag(struct p9_fs *fs) {
+    uint16_t tag = fs->next_tag++;
+    if (fs->next_tag == P9_NOTAG)
+        fs->next_tag = 0;
+    return tag;
+}
+
+/*
+ * [9P-25] Fids were handed out by a bare post-increment that never recycled
+ * and never checked for exhaustion, so a long-lived mount eventually wrapped
+ * through P9_NOFID (0xFFFFFFFF) -- the reserved "no fid" value -- and then
+ * kept going into fids the server already had open under different names.
+ *
+ * There is no fid table to recycle from yet (the client opens exactly one,
+ * the root, and nothing else can allocate a node), so the honest fix is to
+ * refuse rather than wrap.  When a walk/finddir path is added, this is the
+ * single place a real free list has to go.
+ */
 static uint32_t p9_alloc_fid(struct p9_fs *fs) {
+    if (fs->next_fid >= P9_NOFID)
+        return P9_NOFID;
     return fs->next_fid++;
+}
+
+/*
+ * Common reply validation: enough bytes for size[4] type[1] tag[2], the type
+ * the caller expected, and the tag it sent.  Returns 1 when the reply can be
+ * parsed further.
+ */
+static int p9_reply_ok(const uint8_t *rmsg, int rlen, uint8_t want_type,
+                       uint16_t want_tag) {
+    uint16_t got_tag;
+
+    if (rlen < 7)
+        return 0;
+    if (rmsg[4] != want_type)
+        return 0;
+    memcpy(&got_tag, rmsg + 5, sizeof(got_tag));
+    return got_tag == want_tag;
 }
 
 static int p9_version(struct p9_fs *fs) {
@@ -52,12 +99,11 @@ static int p9_version(struct p9_fs *fs) {
      * dereferenced. */
     int success = 0;
     int rlen = virtio_9p_send(msg, msize, rmsg, rsize_max);
-    if (rlen >= 5) {
-        p = rmsg + 4;
-        if (*p == P9_RVERSION) {
-            success = 1;
-            // Ideally we should check the negotiated version and msize
-        }
+    /* Tversion is the one message that legitimately uses NOTAG, and the
+     * server must echo it. */
+    if (p9_reply_ok(rmsg, rlen, P9_RVERSION, P9_NOTAG)) {
+        success = 1;
+        // Ideally we should check the negotiated version and msize
     }
 
     kfree(msg, msize);
@@ -68,7 +114,12 @@ static int p9_version(struct p9_fs *fs) {
 static uint32_t p9_attach(struct p9_fs *fs) {
     // Tattach: size[4] Tattach[1] tag[2] fid[4] afid[4] uname[s] aname[s]
     uint32_t fid = p9_alloc_fid(fs);
+    uint16_t tag;
     const char *uname = "root";
+
+    if (fid == P9_NOFID)
+        return P9_NOFID;            /* [9P-25] fid space exhausted */
+
     const char *aname = ""; // Empty for root
     uint16_t uname_len = strlen(uname);
     uint16_t aname_len = strlen(aname);
@@ -80,7 +131,8 @@ static uint32_t p9_attach(struct p9_fs *fs) {
     uint8_t *p = msg;
     *(uint32_t*)p = msize; p += 4;
     *p = P9_TATTACH; p += 1;
-    *(uint16_t*)p = 0; p += 2; // Tag 0
+    tag = p9_alloc_tag(fs);
+    *(uint16_t*)p = tag; p += 2;
     *(uint32_t*)p = fid; p += 4;
     *(uint32_t*)p = P9_NOFID; p += 4; // No authentication
     *(uint16_t*)p = uname_len; p += 2;
@@ -100,11 +152,8 @@ static uint32_t p9_attach(struct p9_fs *fs) {
     /* [9P-09] As above: bound the parse by what actually arrived. */
     uint32_t result_fid = P9_NOFID;
     int rlen = virtio_9p_send(msg, msize, rmsg, rsize_max);
-    if (rlen >= 5) {
-        p = rmsg + 4;
-        if (*p == P9_RATTACH) {
-            result_fid = fid;
-        }
+    if (p9_reply_ok(rmsg, rlen, P9_RATTACH, tag)) {
+        result_fid = fid;
     }
 
     kfree(msg, msize);
@@ -112,41 +161,87 @@ static uint32_t p9_attach(struct p9_fs *fs) {
     return result_fid;
 }
 
-static uint32_t p9_vfs_read(fs_node_t *node, off_t offset, uint32_t size, uint8_t *buffer) {
+/*
+ * [9P-26] This was declared as
+ *     static uint32_t p9_vfs_read(fs_node_t *, off_t, uint32_t, uint8_t *)
+ * and assigned to fs_node_t::read, which is
+ *     size_t (*)(struct fs_node *, off_t, size_t, uint8_t *).
+ * That is a call through an incompatible function-pointer type; it happens to
+ * work only because size_t is uint32_t on i386, and becomes an ABI mismatch
+ * (64-bit size argument read out of a 32-bit slot) the moment this is built
+ * for x86_64.  Match the real prototype.
+ */
+static size_t p9_vfs_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
     // 1. Create TREAD message
     // 2. Send over transport (VirtIO/TCP)
     // 3. Parse RREAD response
-    
+
+    struct p9_fs *fs;
+    uint32_t fid;
+    uint16_t tag;
+    uint32_t req_size;
+
     uint32_t msize = 4 + 1 + 2 + 4 + 8 + 4;
     uint8_t msg[msize];
-    
+
     // Helper pointers
     uint8_t *p = msg;
-    
+
+    if (!node || !buffer)
+        return 0;
+
+    fs = (struct p9_fs *)node->impl;
+    if (!fs)
+        return 0;
+
+    /*
+     * [9P-25] The fid is what names the file on the server, and this sent
+     * fs->root_fid for EVERY node -- so the moment a second node exists,
+     * reading any file returns the contents of the mount root instead.  The
+     * node carries its own fid; the root node is created with root_fid, and
+     * any node a future walk/finddir creates must set its own.  A node with
+     * no fid is not readable rather than silently the root.
+     */
+    fid = (uint32_t)node->inode;
+    if (fid == P9_NOFID)
+        return 0;
+
+    /* Tread's count field is 32-bit, and the reply must fit the negotiated
+     * msize; clamp instead of truncating silently. */
+    if (size > UINT32_MAX)
+        size = UINT32_MAX;
+    req_size = (uint32_t)size;
+    if (fs->msize > P9_RREAD_HDR_LEN &&
+        req_size > fs->msize - P9_RREAD_HDR_LEN) {
+        req_size = fs->msize - P9_RREAD_HDR_LEN;
+    }
+    if (req_size == 0)
+        return 0;
+
     // Size (inclusive)
     *(uint32_t*)p = msize; p += 4;
     // Type
     *p = P9_TREAD; p += 1;
-    // Tag (0 for now)
-    *(uint16_t*)p = 0; p += 2;
+    // Tag
+    tag = p9_alloc_tag(fs);
+    *(uint16_t*)p = tag; p += 2;
     // FID
-    struct p9_fs *fs = (struct p9_fs *)node->impl;
-    *(uint32_t*)p = fs->root_fid; p += 4;
+    *(uint32_t*)p = fid; p += 4;
     // Offset
     *(uint64_t*)p = offset; p += 8;
     // Count
-    *(uint32_t*)p = size; p += 4;
+    *(uint32_t*)p = req_size; p += 4;
     
     // Response Buffer
     // RREAD: size[4] RREAD[1] tag[2] count[4] data[count]
     // We need enough space for header + data
     uint32_t header_size = 4 + 1 + 2 + 4;
 
-    if (size > UINT32_MAX - header_size) {
+    if (req_size > UINT32_MAX - header_size) {
         return 0;
     }
 
-    uint32_t rsize_max = header_size + size;
+    uint32_t rsize_max = header_size + req_size;
     uint8_t *rmsg = kmalloc(rsize_max);
     if (!rmsg) {
         return 0;
@@ -173,25 +268,22 @@ static uint32_t p9_vfs_read(fs_node_t *node, off_t offset, uint32_t size, uint8_
         goto cleanup;
     }
 
-    // Parse Response
-    p = rmsg;
-    p += 4;                       /* size[4] -- bounded by rlen instead */
-    uint8_t r_type = *p; p += 1;
-    
-    if (r_type == P9_RERROR) {
+    /*
+     * [9P-25] Parse only after the reply is confirmed to be an Rread carrying
+     * OUR tag.  The type alone was checked before, so a reply belonging to a
+     * different request -- or a stale one still in the ring -- was copied out
+     * as if it answered this read.
+     */
+    if (!p9_reply_ok(rmsg, rlen, P9_RREAD, tag)) {
         goto cleanup;
     }
-    
-    if (r_type != P9_RREAD) {
-        goto cleanup;
-    }
-    
-    p += 2; // Skip Tag
+
+    p = rmsg + P9_RREAD_HDR_LEN - 4;    /* at count[4] */
     uint32_t count = *(uint32_t*)p; p += 4;
 
     uint32_t avail = (uint32_t)rlen - P9_RREAD_HDR_LEN;
-    if (count > avail) count = avail;   /* server over-claimed */
-    if (count > size)  count = size;    /* never exceed what was asked for */
+    if (count > avail)    count = avail;      /* server over-claimed */
+    if (count > req_size) count = req_size;   /* never exceed what was asked */
 
     memcpy(buffer, p, count);
     ret_count = count;
@@ -210,9 +302,10 @@ static int p9_unmount(fs_node_t *root) {
     uint32_t msize = 4 + 1 + 2 + 4;
     uint8_t msg[11];
     uint8_t *p = msg;
+    uint16_t tag = p9_alloc_tag(fs);
     *(uint32_t*)p = msize; p += 4;
     *p = P9_TCLUNK; p += 1;
-    *(uint16_t*)p = 0; p += 2;
+    *(uint16_t*)p = tag; p += 2;
     *(uint32_t*)p = fs->root_fid;
     
     uint8_t rmsg[7]; // Rclunk: size[4] RCLUNK[1] tag[2]
@@ -229,6 +322,7 @@ static fs_node_t *p9_mount(const char *device, uint32_t flags, void *data) {
     memset(fs, 0, sizeof(struct p9_fs));
     fs->msize = 8192;
     fs->next_fid = 1;
+    fs->next_tag = 0;
 
     fs_node_t *p9_root = kmalloc(sizeof(fs_node_t));
     if (!p9_root) {
@@ -257,6 +351,10 @@ static fs_node_t *p9_mount(const char *device, uint32_t flags, void *data) {
     p9_root->read = &p9_vfs_read;
     p9_root->unmount = &p9_unmount;
     p9_root->impl = (uintptr_t)fs;
+    /* [9P-25] The node's own fid.  p9_vfs_read reads it from here instead of
+     * unconditionally using fs->root_fid, so a node added by a future
+     * walk/finddir cannot silently read the mount root. */
+    p9_root->inode = root_fid;
 
     return p9_root;
 }
