@@ -42,7 +42,7 @@ int ide_atapi_packet(uint8_t channel, uint8_t drive,
 
     /* Select drive */
     ide_select_drive(channel, drive);
-    if (ide_wait_ready(channel, IDE_TIMEOUT_PACKET_MS, "packet-select") < 0) return -1;
+    if (ide_wait_ready_ex(channel, IDE_TIMEOUT_PACKET_MS, "packet-select", 0) < 0) return -1;
 
     /* Set byte count limit (in LBA_MID and LBA_HIGH) */
     /* This tells the device the maximum transfer size */

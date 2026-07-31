@@ -313,7 +313,8 @@ int ide_program_dma_mode(ide_device_t *dev) {
     }
 
     ide_select_drive(dev->channel, dev->drive);
-    if (ide_wait_ready(dev->channel, IDE_TIMEOUT_READY_MS, "set-features") < 0) {
+    if (ide_wait_ready_ex(dev->channel, IDE_TIMEOUT_READY_MS, "set-features", 0) < 0) {
+        dev->dma_mode = 0;   /* [IDE-10] never programmed: don't claim a mode */
         return -1;
     }
 
@@ -322,12 +323,14 @@ int ide_program_dma_mode(ide_device_t *dev) {
     ide_write_reg(dev->channel, ATA_REG_COMMAND, ATA_CMD_SET_FEATURES);
 
     if (ide_wait_bsy(dev->channel, IDE_TIMEOUT_READY_MS, "set-features") < 0) {
+        dev->dma_mode = 0;   /* [IDE-10] */
         ide_bm_set_drive_dma_capable(dev->channel, dev->drive, 0);
         return -1;
     }
 
     status = ide_read_reg(dev->channel, ATA_REG_STATUS);
     if ((status & (ATA_SR_ERR | ATA_SR_DF)) != 0) {
+        dev->dma_mode = 0;   /* [IDE-10] SET FEATURES was rejected */
         ide_bm_set_drive_dma_capable(dev->channel, dev->drive, 0);
         return -1;
     }
@@ -514,7 +517,7 @@ int ide_check_power_mode(uint16_t bus, uint8_t drive, uint8_t *mode) {
         return -1;
     }
 
-    if (ide_wait_ready(channel, IDE_TIMEOUT_READY_MS, "check-power-mode") < 0) {
+    if (ide_wait_ready_ex(channel, IDE_TIMEOUT_READY_MS, "check-power-mode", 0) < 0) {
         return -1;
     }
 
@@ -546,7 +549,7 @@ int ide_configure_spindown_timer(uint16_t bus, uint8_t drive, uint8_t timer_code
         return -1;
     }
 
-    if (ide_wait_ready(channel, IDE_TIMEOUT_READY_MS, "standby-timer") < 0) {
+    if (ide_wait_ready_ex(channel, IDE_TIMEOUT_READY_MS, "standby-timer", 0) < 0) {
         return -1;
     }
 

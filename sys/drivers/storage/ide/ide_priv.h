@@ -69,6 +69,22 @@ void ide_delay_ms(uint32_t delay_ms);
 void ide_400ns(uint8_t channel);
 int ide_wait_bsy(uint8_t channel, uint32_t timeout_ms, const char *op);
 int ide_wait_drq(uint8_t channel, uint32_t timeout_ms, const char *op);
+/*
+ * Wait for BSY=0 && DRDY=1.
+ *
+ * honor_err selects what STATUS.ERR/DF means to the caller:
+ *
+ *  1  the wait follows a command's data phase, so ERR/DF describes THAT
+ *     command and must be reported as a failure.
+ *  0  the wait precedes issuing a new command.  ATA leaves ERR/DF latched
+ *     from the PREVIOUS command until a new one is written to the command
+ *     register, so treating it as failure here (IDE-09) let a single media
+ *     error block every subsequent command on the channel.
+ */
+int ide_wait_ready_ex(uint8_t channel, int timeout_ms, const char *op,
+                      int honor_err);
+
+/* Equivalent to ide_wait_ready_ex(..., 1). */
 int ide_wait_ready(uint8_t channel, int timeout_ms, const char *op);
 int ide_wait_irq_completion(uint8_t channel, uint32_t timeout_ms,
                             const char *op);

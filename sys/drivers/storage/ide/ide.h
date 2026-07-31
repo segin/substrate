@@ -150,7 +150,23 @@
 
 /* Bus Master Command Register bits */
 #define BM_CMD_START       0x01  /* Start/Stop DMA */
-#define BM_CMD_WRITE       0x08  /* Direction: 0=read, 1=write */
+/*
+ * [IDE-03] Bus Master IDE Command register bit 3, "Read or Write Control"
+ * (RWCON) in SFF-8038i.  It names the direction of the PCI-SIDE transfer,
+ * not the disk-side one, and the two are opposites:
+ *
+ *   RWCON = 1  the bus master WRITES to memory   -> reading FROM the disk
+ *   RWCON = 0  the bus master READS from memory  -> writing TO the disk
+ *
+ * The old name (BM_CMD_WRITE) and comment said "1 = write", which read
+ * naturally as "set it for a disk write" -- and that is exactly what the
+ * driver did, inverting every transfer.  On real hardware a disk READ then
+ * programmed the engine to pump the buffer out to the device (hang, or
+ * BM_STAT_ERROR) and a disk WRITE programmed it to write INTO the caller's
+ * buffer, corrupting the source.  qemu derives direction from the ATA
+ * opcode and ignores RWCON entirely, which is why this survived.
+ */
+#define BM_CMD_RWCON       0x08  /* 1 = bus master writes memory = disk read */
 
 /* Bus Master Status Register bits */
 #define BM_STAT_ACTIVE     0x01  /* DMA Active */

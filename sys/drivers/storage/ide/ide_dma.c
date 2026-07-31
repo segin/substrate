@@ -67,6 +67,30 @@ int ide_prdt_build_entries(prdt_entry_t *prdt, size_t max_entries,
  * 64KB boundary; PRD entries are dword-aligned; the table must not cross
  * a 64KB boundary (guaranteed by the page-aligned ide_prdts[] slot).
  */
+/*
+ * [IDE-05] Translate a DIRECT-MAPPED kernel virtual address to physical.
+ *
+ * This used to call pmap_extract(pmap_kernel(), va).  pmap_extract opens with
+ *
+ *     if (pmap->pdir_phys != cr3) return 0;
+ *
+ * so it can only translate whichever pmap is currently loaded in CR3 -- and
+ * block I/O is issued in USER process context, where CR3 holds the user
+ * pmap, not the kernel one.  It therefore returned 0 every time, the setup
+ * failed, and ide_disable_device_dma() latched dma_forced_pio permanently on
+ * the first attempt.
+ *
+ * Every buffer reaching here is in the kernel direct map, so the translation
+ * is the fixed KERN_BASE offset and needs no page-table walk at all.
+ */
+#define IDE_KERN_BASE  0xC0000000U
+
+static inline uint32_t ide_kva_to_phys(uintptr_t va) {
+    if (va < IDE_KERN_BASE)
+        return 0;                       /* not a direct-mapped kernel address */
+    return (uint32_t)(va - IDE_KERN_BASE);
+}
+
 int ide_prdt_setup(uint8_t channel, void *buffer, uint32_t byte_count) {
     uintptr_t va;
     uintptr_t phys;
@@ -91,7 +115,7 @@ int ide_prdt_setup(uint8_t channel, void *buffer, uint32_t byte_count) {
             return -1;
         }
 
-        phys = pmap_extract(pmap_kernel(), va);
+        phys = ide_kva_to_phys(va);      /* [IDE-05] */
         if (phys == 0) {
             return -1;
         }
@@ -116,8 +140,7 @@ int ide_prdt_setup(uint8_t channel, void *buffer, uint32_t byte_count) {
     ide_prdts[channel][entry - 1].eot = 1;
 
     /* Program PRDT base address into Bus Master */
-    prdt_phys = (uint32_t)pmap_extract(pmap_kernel(),
-                                       (uintptr_t)ide_prdts[channel]);
+    prdt_phys = ide_kva_to_phys((uintptr_t)ide_prdts[channel]);   /* [IDE-05] */
     if (prdt_phys == 0) {
         return -1;
     }
@@ -134,8 +157,10 @@ int ide_prdt_setup(uint8_t channel, void *buffer, uint32_t byte_count) {
 
 void ide_bm_start(uint8_t channel, int write) {
     uint8_t cmd = BM_CMD_START;
-    if (write) {
-        cmd |= BM_CMD_WRITE;
+    /* [IDE-03] RWCON describes the PCI side: set it when the bus master must
+     * WRITE to memory, which is a disk READ.  This was inverted. */
+    if (!write) {
+        cmd |= BM_CMD_RWCON;
     }
     ide_bm_write8(channel, BM_REG_COMMAND, cmd);
 }
@@ -218,13 +243,14 @@ int ide_dma_read(uint8_t channel, uint8_t drive, uint64_t lba,
         return -1;
     }
 
-    /* Clear status and set direction */
+    /* Clear status and set direction.  [IDE-03] A disk read means the bus
+     * master writes into memory, i.e. RWCON = 1. */
     ide_bm_clear_interrupt(channel);
-    ide_bm_write8(channel, BM_REG_COMMAND, 0);
+    ide_bm_write8(channel, BM_REG_COMMAND, BM_CMD_RWCON);
 
     /* Select drive and ensure it is ready (BSY clear AND DRDY set) */
     ide_select_drive(channel, drive);
-    if (ide_wait_ready(channel, IDE_TIMEOUT_READY_MS, "dma-read") < 0) {
+    if (ide_wait_ready_ex(channel, IDE_TIMEOUT_READY_MS, "dma-read", 0) < 0) {
         if (ide_debug_enabled()) {
             kprintf("ide: dma-read wait ready failed ch=%u\n", channel);
         }
@@ -286,6 +312,18 @@ int ide_dma_read(uint8_t channel, uint8_t drive, uint64_t lba,
     ide_bm_stop(channel);
     ide_bm_clear_interrupt(channel);
 
+    /*
+     * [IDE-11] BM_STAT_ACTIVE still set with no error bit means the engine
+     * never reached end-of-transfer: the PRDT was not exhausted, so part of
+     * the buffer holds whatever was in it before.  Checking only the error
+     * bits let that short transfer be cached as valid data.
+     */
+    if (bm_status & BM_STAT_ACTIVE) {
+        kprintf("ide: short DMA transfer on channel %u (bm=%02x)\n",
+                channel, bm_status);
+        return -1;
+    }
+
     if ((bm_status & BM_STAT_ERROR) || (ide_status & ATA_SR_ERR)) {
         return -1;
     }
@@ -313,13 +351,14 @@ int ide_dma_write(uint8_t channel, uint8_t drive, uint64_t lba,
         return -1;
     }
 
-    /* Clear status and set direction */
+    /* Clear status and set direction.  [IDE-03] A disk write means the bus
+     * master reads from memory, i.e. RWCON = 0. */
     ide_bm_clear_interrupt(channel);
-    ide_bm_write8(channel, BM_REG_COMMAND, BM_CMD_WRITE);
+    ide_bm_write8(channel, BM_REG_COMMAND, 0);
 
     /* Select drive and ensure it is ready (BSY clear AND DRDY set) */
     ide_select_drive(channel, drive);
-    if (ide_wait_ready(channel, IDE_TIMEOUT_READY_MS, "dma-write") < 0) {
+    if (ide_wait_ready_ex(channel, IDE_TIMEOUT_READY_MS, "dma-write", 0) < 0) {
         if (ide_debug_enabled()) {
             kprintf("ide: dma-write wait ready failed ch=%u\n", channel);
         }
@@ -375,6 +414,18 @@ int ide_dma_write(uint8_t channel, uint8_t drive, uint64_t lba,
 
     ide_bm_stop(channel);
     ide_bm_clear_interrupt(channel);
+
+    /*
+     * [IDE-11] BM_STAT_ACTIVE still set with no error bit means the engine
+     * never reached end-of-transfer: the PRDT was not exhausted, so part of
+     * the buffer holds whatever was in it before.  Checking only the error
+     * bits let that short transfer be cached as valid data.
+     */
+    if (bm_status & BM_STAT_ACTIVE) {
+        kprintf("ide: short DMA transfer on channel %u (bm=%02x)\n",
+                channel, bm_status);
+        return -1;
+    }
 
     if ((bm_status & BM_STAT_ERROR) || (ide_status & ATA_SR_ERR)) {
         return -1;

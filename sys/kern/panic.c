@@ -233,12 +233,36 @@ static void panic_dump_regs(const registers_t *regs) {
      * traps the saved esp is the kernel stack pointer (regs->esp from pusha). */
     fault_esp = is_user ? regs->useresp : regs->esp;
 
-    snprintf(line, sizeof(line),
-            "REGS eip=%08x cs=%04x eflags=%08x esp=%08x ss=%04x int=%u err=%08x\n",
-            regs->eip, (unsigned)(regs->cs & 0xFFFF), regs->eflags,
-            fault_esp, (unsigned)(regs->ss & 0xFFFF),
-            (unsigned)regs->int_no, regs->err_code);
+    /*
+     * [USB-HW-03] SS and USERESP are pushed by the CPU only on a ring
+     * transition.  On a CPL0 -> CPL0 fault they are simply not part of the
+     * frame, so regs->ss aliases whatever happens to sit above it -- which
+     * is why the hardware dumps show nonsense like ss=c844 (the low half of
+     * a value visible at STK +18).  fault_esp already picks the right source;
+     * ss must be suppressed the same way rather than printed as fact.
+     */
+    if (is_user) {
+        snprintf(line, sizeof(line),
+                "REGS eip=%08x cs=%04x eflags=%08x esp=%08x ss=%04x int=%u err=%08x\n",
+                regs->eip, (unsigned)(regs->cs & 0xFFFF), regs->eflags,
+                fault_esp, (unsigned)(regs->ss & 0xFFFF),
+                (unsigned)regs->int_no, regs->err_code);
+    } else {
+        snprintf(line, sizeof(line),
+                "REGS eip=%08x cs=%04x eflags=%08x esp=%08x ss=(none) int=%u err=%08x\n",
+                regs->eip, (unsigned)(regs->cs & 0xFFFF), regs->eflags,
+                fault_esp, (unsigned)regs->int_no, regs->err_code);
+    }
     kprint(line);
+
+    /* CR2 used to be printed only by idt.c's unserialised block, so the one
+     * value that says WHICH address faulted was the easiest to lose. */
+    if (regs->int_no == 14) {
+        uint32_t cr2;
+        __asm__ volatile("mov %%cr2, %0" : "=r"(cr2));
+        snprintf(line, sizeof(line), "CR2: %08x\n", cr2);
+        kprint(line);
+    }
     snprintf(line, sizeof(line), "REGS eax=%08x ebx=%08x ecx=%08x edx=%08x\n",
             regs->eax, regs->ebx, regs->ecx, regs->edx);
     kprint(line);
