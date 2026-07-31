@@ -622,11 +622,28 @@ static int kern_open_from(const char *path, int flags, int mode, fs_node_t *root
     // Lookup file
     fs_node_t *node = 0;
 
+    /*
+     * [VFS-06] Clear the per-thread ELOOP marker before the lookup so what
+     * we read afterwards belongs to THIS lookup.  vfs_lookup() reports every
+     * failure as NULL, so without it a symlink loop was reported as ENOENT
+     * -- the same answer as a genuinely missing file, and useless for
+     * diagnosing the loop.
+     */
+    if (current_thread) current_thread->vfs_symlink_eloop = 0;
     node = vfs_perso_lookup(root, cwd, path);
 
     if (!node) {
         fs_node_t *parent = NULL;
         int error;
+
+        /* A chain too long to follow is ELOOP, and stays ELOOP even with
+         * O_CREAT -- the path could not be resolved, so there is nothing to
+         * create it relative to. */
+        if (current_thread && current_thread->vfs_symlink_eloop) {
+            current_thread->vfs_symlink_eloop = 0;
+            proc_clear_fd(current_process, fd);
+            return -ELOOP;
+        }
 
         if (!(flags & O_CREAT)) {
             proc_clear_fd(current_process, fd);

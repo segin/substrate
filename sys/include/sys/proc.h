@@ -397,6 +397,15 @@ typedef struct thread {
     uint8_t        exec_pin_active; // Exec path temporarily pinned this thread
     uint8_t        exec_saved_no_preempt; // Preserve preempt state across exec pin
     uint8_t        vfs_symlink_depth; // Current symlink-follow recursion depth
+    /*
+     * [VFS-06] Set when a lookup gave up because the symlink chain was too
+     * long.  finddir_fs_internal()/vfs_lookup() report every failure as
+     * NULL, which callers map to ENOENT, so a symlink loop was reported as
+     * "no such file" -- indistinguishable from a genuinely missing path and
+     * useless for diagnosing one.  The flag lets the syscall layer return
+     * ELOOP instead.  Cleared by the caller before a top-level lookup.
+     */
+    uint8_t        vfs_symlink_eloop;
     uint32_t       preempt_count; // Non-preemptible nesting depth (spinlocks).
                                   // Kernel preemption only fires when 0.
     

@@ -641,16 +641,24 @@ fs_node_t *finddir_fs(fs_node_t *node, char *name) {
 }
 
 /*
- * Maximum symlink recursion depth.  Linux uses 8, but our stack frames
- * are larger (vfs_lookup's local 512-byte ppath buffer dominates) and
- * each "absolute symlink" cycle creates 4–6 nested frames between
- * finddir_fs_internal's absolute branch, vfs_lookup's prefix recursion,
- * and the directory walk loop.  Six full cycles already overflow the
- * 8 KB kernel stack — deeper here means an unrecoverable PF in kernel
- * mode rather than a clean ELOOP.  Drop to 4 until we shrink the
- * frame sizes (or move ppath to kmalloc).
+ * Maximum symlink recursion depth.
+ *
+ * [VFS-06] This was 4 -- below the POSIX minimum of 8 -- so a legal
+ * five-deep chain failed outright, which is routine in /usr/lib and the
+ * CDE/TDE trees.  The reason was stack, not policy: vfs_lookup's local
+ * 512-byte ppath buffer dominated its frame (~800 bytes), and each
+ * "absolute symlink" cycle creates 4-6 nested frames between
+ * finddir_fs_internal's absolute branch, vfs_lookup's prefix recursion and
+ * the directory walk loop, so six cycles overflowed the 8 KB kernel stack.
+ * Overflowing there is an unrecoverable page fault in kernel mode, which is
+ * far worse than a wrong errno -- hence the deliberately low cap.
+ *
+ * ppath now lives on the heap (see the personality branch in vfs_lookup),
+ * cutting the frame to roughly a third, so 8 fits with the same margin 4
+ * had before.  Raising this WITHOUT that change would trade a clean failure
+ * for a kernel fault; the two belong together.
  */
-#define MAX_SYMLINK_DEPTH 4
+#define MAX_SYMLINK_DEPTH 8
 
 static fs_node_t *finddir_fs_internal(fs_node_t *node, char *name, int depth, int follow_symlinks) {
     if (!node) return 0; // Safety
@@ -678,7 +686,11 @@ static fs_node_t *finddir_fs_internal(fs_node_t *node, char *name, int depth, in
 
             // Check recursion depth limit
             if (depth >= MAX_SYMLINK_DEPTH) {
-                // Too many symlink levels - return NULL to signal ELOOP (finding #32)
+                /* [VFS-06] Record WHY this failed.  Every failure here is
+                 * reported as NULL and mapped to ENOENT by the callers, so a
+                 * symlink loop was indistinguishable from a missing file.
+                 * The flag lets the syscall layer answer ELOOP. */
+                if (current_thread) current_thread->vfs_symlink_eloop = 1;
                 return NULL;
             }
             
@@ -709,6 +721,7 @@ static fs_node_t *finddir_fs_internal(fs_node_t *node, char *name, int depth, in
                 fs_node_t *target;
                 if (current_thread &&
                     current_thread->vfs_symlink_depth >= MAX_SYMLINK_DEPTH) {
+                    current_thread->vfs_symlink_eloop = 1;   /* [VFS-06] */
                     return NULL;
                 }
                 if (current_thread) current_thread->vfs_symlink_depth++;
@@ -769,9 +782,27 @@ fs_node_t *vfs_lookup(fs_node_t *root, const char *path) {
         strncmp(path, "/perso/", 7) != 0) {
         const char *pname = perso_name(current_process->perso_id);
         if (pname) {
-            char ppath[512];
+            /*
+             * [VFS-06 prerequisite] This 512-byte buffer used to live on the
+             * stack and dominated vfs_lookup's frame (~800 bytes).  Since
+             * vfs_lookup recurses -- through this branch, through the
+             * symlink resolution in finddir_fs_internal, and through the
+             * mount-parent walk -- that frame size is what forced
+             * MAX_SYMLINK_DEPTH down to 4, below the POSIX minimum of 8:
+             * six symlink cycles already overflowed the 8 KB kernel stack,
+             * turning a should-be-ELOOP into an unrecoverable kernel page
+             * fault.
+             *
+             * Moving it to the heap cuts the frame to roughly a third,
+             * which is what makes raising the depth limit safe.  A failed
+             * allocation just skips the personality rewrite and falls
+             * through to the normal lookup -- degraded, not fatal.
+             */
+            char *ppath = kmalloc(512);
             char lname[32];
             size_t k, count = 0;
+
+            if (!ppath) goto perso_done;
             for (k = 0; pname[k] && count < 31; k++) {
                 char c = pname[k];
                 if ((c >= 'A' && c <= 'Z')) {
@@ -784,12 +815,17 @@ fs_node_t *vfs_lookup(fs_node_t *root, const char *path) {
             lname[count] = '\0';
 
             if (count > 0) {
-                snprintf(ppath, sizeof(ppath), "/perso/%s%s", lname, path);
+                snprintf(ppath, 512, "/perso/%s%s", lname, path);
                 fs_node_t *pnode = vfs_lookup(fs_root, ppath);
-                if (pnode) return pnode;
+                if (pnode) {
+                    kfree(ppath, 512);
+                    return pnode;
+                }
             }
+            kfree(ppath, 512);
         }
     }
+perso_done:
 
     if (path[0] == '/') path++; // Skip leading /
     if (path[0] == '\0') return root; // Root itself
