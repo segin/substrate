@@ -31,10 +31,45 @@ void panic_test_halt(void);
  * which holds no locks and uses polled THR-empty.  After two levels
  * of recursion we simply halt.
  *
- * Single global is fine: i386 has no SMP-safe panic protocol here,
- * and once one CPU panics the others are about to be stopped anyway.
+ * [USB-HW-03] This used to be the WHOLE story, and `int d = ++panic_depth`
+ * on a plain volatile int is not an atomic read-modify-write: two CPUs
+ * faulting at the same moment both read 0, both compute 1, and both take
+ * the full rich-console path.  Their output then interleaves character by
+ * character, which is exactly the unreadable doubled exception dump
+ * photographed on real hardware.  Even with the increment made atomic the
+ * guard would still be wrong for SMP, because it counts RECURSION and
+ * cannot tell "this CPU faulted again while dumping" (where serial-only is
+ * right) from "a different CPU also panicked" (where the second dump must
+ * simply wait its turn).
+ *
+ * So ownership is now explicit.  The first CPU to arrive claims panic_owner
+ * with a compare-and-swap and prints the rich dump; panic_depth is its
+ * private recursion counter.  Any other CPU waits for the owner to finish
+ * and then emits a compact serial-only dump of its own, so a genuine
+ * multi-CPU fault yields two readable dumps in sequence instead of two
+ * shredded ones on top of each other.
  */
+#define PANIC_NO_OWNER  (-1)
+
+static volatile int panic_owner = PANIC_NO_OWNER;
 static volatile int panic_depth = 0;
+static volatile int panic_dump_done = 0;
+
+#ifdef HOST_TEST
+/* The host test drives this to exercise the owner/secondary/recursive
+ * arbitration without needing real CPUs. */
+extern int panic_test_cpu_id;
+#endif
+
+static int panic_cpu_id(void) {
+#ifdef HOST_TEST
+    return panic_test_cpu_id;
+#else
+    /* Before the LAPIC is up there is only one CPU running, so 0 is right
+     * and lapic_get_id() would be reading an unmapped MMIO window. */
+    return lapic_is_initialized() ? (int)lapic_get_id() : 0;
+#endif
+}
 
 static void panic_serial_emit(const char *s) {
     if (!s) return;
@@ -198,6 +233,13 @@ static void panic_finish(void) {
 
     kprint("\nSystem Halted.\n");
 
+    /* Release any CPU waiting to print its own dump after ours.  This must
+     * happen after the last kprint and before we halt, or a concurrent
+     * panic on another CPU either interleaves with us (too early) or is
+     * never printed at all (too late — we never leave the halt loop). */
+    panic_dump_done = 1;
+    __sync_synchronize();
+
 #ifdef HOST_TEST
     panic_test_halt();
     return;
@@ -239,12 +281,88 @@ static void panic_serial_only(const char *msg, const registers_t *regs) {
     while (1) { __asm__ volatile("hlt"); }
 }
 
-void panic_with_regs(const char *msg, const registers_t *regs) {
-    int depth = ++panic_depth;
-    if (depth > 1) {
-        panic_serial_only(msg, regs);
-        return;
+/*
+ * A second CPU panicked while the first was still printing.  Wait for the
+ * owner to finish its dump, then emit ours straight to the COM port.
+ *
+ * The wait is bounded: if the owner wedges part-way through its dump we
+ * would rather append a slightly-interleaved second dump than print
+ * nothing at all, because on a two-CPU fault the second CPU's registers
+ * are frequently the interesting ones.
+ */
+static void panic_secondary(int cpu, const char *msg, const registers_t *regs) {
+#ifndef HOST_TEST
+    __asm__ volatile("cli");
+
+    for (uint32_t spins = 0; spins < 400000000u; spins++) {
+        if (panic_dump_done)
+            break;
+        __asm__ volatile("pause");
     }
+#endif
+
+    panic_serial_emit("\n*** KERNEL PANIC on CPU ");
+    panic_serial_hex32((uint32_t)cpu);
+    panic_serial_emit(" (concurrent with the dump above) ***\n");
+    panic_serial_emit("Fatal Error: ");
+    panic_serial_emit(msg ? msg : "(null)");
+    panic_serial_emit("\n");
+    if (regs) {
+        panic_serial_emit("eip=");  panic_serial_hex32(regs->eip);
+        panic_serial_emit(" esp=");
+        panic_serial_hex32((regs->cs & 0x3) ? regs->useresp : regs->esp);
+        panic_serial_emit(" eflags="); panic_serial_hex32(regs->eflags);
+        panic_serial_emit("\n cs=");  panic_serial_hex32(regs->cs);
+        panic_serial_emit(" ds=");    panic_serial_hex32(regs->ds);
+        panic_serial_emit(" err=");   panic_serial_hex32(regs->err_code);
+        panic_serial_emit("\n");
+    }
+    panic_serial_emit("System Halted (secondary CPU).\n");
+
+#ifdef HOST_TEST
+    panic_test_halt();
+    return;
+#endif
+    while (1) { __asm__ volatile("hlt"); }
+}
+
+/*
+ * Decide this CPU's role in the panic.  Returns 1 if we own the dump and
+ * should take the rich console path, 0 if we already handled it (recursive
+ * or secondary) and the caller must return immediately.
+ */
+static int panic_enter(const char *msg, const registers_t *regs) {
+    int cpu = panic_cpu_id();
+
+    if (__sync_bool_compare_and_swap(&panic_owner, PANIC_NO_OWNER, cpu)) {
+        panic_depth = 1;
+        return 1;                       /* we own it: print the full dump */
+    }
+
+    if (panic_owner == cpu) {
+        /* Same CPU faulted again inside its own dump — the console/VT path
+         * is the usual culprit, so drop to the lock-free serial emitter. */
+        if (++panic_depth > 8) {
+            /* Wedged in recursion; stop emitting entirely. */
+#ifndef HOST_TEST
+            __asm__ volatile("cli");
+            while (1) { __asm__ volatile("hlt"); }
+#else
+            panic_test_halt();
+            return 0;
+#endif
+        }
+        panic_serial_only(msg, regs);
+        return 0;
+    }
+
+    panic_secondary(cpu, msg, regs);
+    return 0;
+}
+
+void panic_with_regs(const char *msg, const registers_t *regs) {
+    if (!panic_enter(msg, regs))
+        return;
     panic_emit_header(msg);
     if (regs) {
         panic_dump_regs(regs);
@@ -253,11 +371,8 @@ void panic_with_regs(const char *msg, const registers_t *regs) {
 }
 
 void panic(const char *msg) {
-    int depth = ++panic_depth;
-    if (depth > 1) {
-        panic_serial_only(msg, NULL);
+    if (!panic_enter(msg, NULL))
         return;
-    }
     panic_emit_header(msg);
     /* No trap frame available; synthesize the call site so the operator at
      * least sees where panic() was invoked from and a peek at the kernel
