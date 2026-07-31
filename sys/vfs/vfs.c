@@ -592,23 +592,48 @@ struct dirent *readdir_fs(fs_node_t *node, uint64_t index, struct dirent *out) {
 // Internal with follow control
 static fs_node_t *finddir_fs_internal(fs_node_t *node, char *name, int depth, int follow_symlinks);
 
-// Check if a filesystem is busy
+/*
+ * Check if a filesystem is busy.
+ *
+ * [VFS-26] Two problems, both fixed here:
+ *
+ *  1. The walk ran with NO lock at all.  proc_first()/proc_next() are safe
+ *     against concurrent INSERTION (that happens at the head), but a process
+ *     exiting mid-walk frees the struct under us -- and this is called from
+ *     umount, which is exactly when a shell that had the mount as its cwd is
+ *     likely to be going away.  proc_registry_lock() is what the signal
+ *     walkers already use for the same reason (see #179).
+ *
+ *  2. Every fd's f_data was cast to fs_node_t* and dereferenced.  f_data is
+ *     a union in practice -- close_fs's own comment notes it holds other
+ *     payloads, and sockets leave it NULL -- so a process with a socket or
+ *     pipe fd had unrelated memory read as if it were an fs_node_t and its
+ *     ->mp compared.  A false "busy" merely refuses a umount; a false "not
+ *     busy" force-unmounts a filesystem still in use.  f_type is the
+ *     discriminator, so only DTYPE_VNODE descriptors are inspected.
+ */
 static int vfs_is_busy(struct mount *mp) {
+    int busy = 0;
+
     if (!mp) return 0;
 
-    // Check all processes
+    proc_registry_lock();
     FOREACH_PROC(p) {
-        if (p->cwd_node && p->cwd_node->mp == mp) return 1;
-        if (p->root_node && p->root_node->mp == mp) return 1;
+        if (p->cwd_node && p->cwd_node->mp == mp)  { busy = 1; break; }
+        if (p->root_node && p->root_node->mp == mp) { busy = 1; break; }
 
         for (int j = 0; j < MAX_FD; j++) {
-            if (p->fds[j] && p->fds[j]->f_data) {
-                fs_node_t *fn = (fs_node_t*)p->fds[j]->f_data;
-                if (fn->mp == mp) return 1;
+            struct file *f = p->fds[j];
+            if (!f || f->f_type != DTYPE_VNODE || !f->f_data) {
+                continue;
             }
+            if (((fs_node_t *)f->f_data)->mp == mp) { busy = 1; break; }
         }
+        if (busy) break;
     }
-    return 0;
+    proc_registry_unlock();
+
+    return busy;
 }
 
 fs_node_t *finddir_fs(fs_node_t *node, char *name) {

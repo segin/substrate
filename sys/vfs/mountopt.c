@@ -180,51 +180,42 @@ int mountopt_get_bool(mountopt_t *head, const char *key, int *out) {
 int mountopt_apply_generic(mountopt_t *head, uint32_t *flags) {
     if (!flags) return -EINVAL;
 
-    int saw_ro = 0, saw_rw = 0;
-    int saw_nosuid = 0, saw_suid = 0;
-    int saw_nodev = 0, saw_dev = 0;
-    int saw_noexec = 0, saw_exec = 0;
-    int saw_sync = 0, saw_async = 0;
-
-    for (mountopt_t *m = head; m; m = m->next) {
-        if      (strcmp(m->key, "ro")     == 0) saw_ro = 1;
-        else if (strcmp(m->key, "rw")     == 0) saw_rw = 1;
-        else if (strcmp(m->key, "nosuid") == 0) saw_nosuid = 1;
-        else if (strcmp(m->key, "suid")   == 0) saw_suid = 1;
-        else if (strcmp(m->key, "nodev")  == 0) saw_nodev = 1;
-        else if (strcmp(m->key, "dev")    == 0) saw_dev = 1;
-        else if (strcmp(m->key, "noexec") == 0) saw_noexec = 1;
-        else if (strcmp(m->key, "exec")   == 0) saw_exec = 1;
-        else if (strcmp(m->key, "sync")   == 0) saw_sync = 1;
-        else if (strcmp(m->key, "async")  == 0) saw_async = 1;
-    }
-
-    /* Conflict detection. */
-    if ((saw_ro && saw_rw) ||
-        (saw_nosuid && saw_suid) ||
-        (saw_nodev && saw_dev) ||
-        (saw_noexec && saw_exec) ||
-        (saw_sync && saw_async)) {
-        return -EINVAL;
-    }
-
-    if (saw_ro)     *flags |=  MNT_RDONLY;       else if (saw_rw)   *flags &= ~MNT_RDONLY;
-    if (saw_nosuid) *flags |=  MNT_NOSUID;       else if (saw_suid) *flags &= ~MNT_NOSUID;
-    if (saw_nodev)  *flags |=  MNT_NODEV;        else if (saw_dev)  *flags &= ~MNT_NODEV;
-    if (saw_noexec) *flags |=  MNT_NOEXEC;       else if (saw_exec) *flags &= ~MNT_NOEXEC;
     /*
-     * [VFS-29] `sync` must CLEAR MNT_ASYNC, the way every other pair here
-     * clears its opposite.  It only ever set MNT_SYNCHRONOUS, so
-     * "remount,sync" over a filesystem already carrying MNT_ASYNC left both
-     * bits set and the two flags then disagreed about the write policy.
-     * `async` likewise clears MNT_SYNCHRONOUS.
+     * [VFS-30] Apply in list order, LAST OCCURRENCE WINS.
+     *
+     * This used to collect saw_ro/saw_rw/... booleans and then reject any
+     * pair that both appeared:
+     *
+     *     if ((saw_ro && saw_rw) || ...) return -EINVAL;
+     *
+     * which directly contradicts mountopt_lookup(), whose own comment says
+     * "Last-occurrence wins so \"ro,rw\" yields rw" -- the same option
+     * string is accepted by the parser and rejected by the applier.  It is
+     * also what every other Unix does, and it is what makes option
+     * shorthands work: the moment `defaults` expands to
+     * "rw,suid,dev,exec,async", `-o defaults,ro` becomes "rw,...,ro" and
+     * would have been rejected outright.
+     *
+     * Applying each option as it is encountered gives last-wins for free
+     * and needs no conflict table.
      */
-    if (saw_sync) {
-        *flags |=  MNT_SYNCHRONOUS;
-        *flags &= ~MNT_ASYNC;
-    } else if (saw_async) {
-        *flags |=  MNT_ASYNC;
-        *flags &= ~MNT_SYNCHRONOUS;
+    for (mountopt_t *m = head; m; m = m->next) {
+        if      (strcmp(m->key, "ro")     == 0) *flags |=  MNT_RDONLY;
+        else if (strcmp(m->key, "rw")     == 0) *flags &= ~MNT_RDONLY;
+        else if (strcmp(m->key, "nosuid") == 0) *flags |=  MNT_NOSUID;
+        else if (strcmp(m->key, "suid")   == 0) *flags &= ~MNT_NOSUID;
+        else if (strcmp(m->key, "nodev")  == 0) *flags |=  MNT_NODEV;
+        else if (strcmp(m->key, "dev")    == 0) *flags &= ~MNT_NODEV;
+        else if (strcmp(m->key, "noexec") == 0) *flags |=  MNT_NOEXEC;
+        else if (strcmp(m->key, "exec")   == 0) *flags &= ~MNT_NOEXEC;
+        else if (strcmp(m->key, "sync")   == 0) {
+            /* [VFS-29] each of the pair clears its opposite. */
+            *flags |=  MNT_SYNCHRONOUS;
+            *flags &= ~MNT_ASYNC;
+        } else if (strcmp(m->key, "async") == 0) {
+            *flags |=  MNT_ASYNC;
+            *flags &= ~MNT_SYNCHRONOUS;
+        }
     }
 
     return 0;
