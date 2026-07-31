@@ -28,6 +28,7 @@
 #include <kern/time.h>
 #include <kern/sched.h>
 #include <sys/dma.h>
+#include <sys/errno.h>
 #include <sys/lock.h>
 #include <sys/irq.h>
 
@@ -62,6 +63,18 @@
  * "+1" can expire on the very next tick after ~0 real time.  Ask for enough
  * ticks that at least 1 ms has provably elapsed. */
 #define AHCI_COMRESET_HOLD_MS  10
+
+/* [AHCI-15] How long to wait after asserting PxCMD.SUD for the PHY to come
+ * up.  The spec's own deadline is 10 ms, but that assumes the platters are
+ * already turning; on a controller with staggered spin-up the whole point is
+ * that they are not, and a cold 7200 rpm drive needs on the order of a second
+ * before it answers.  Still bounded, so a dead port costs one second once. */
+#define AHCI_SPINUP_TIMEOUT_MS   1000
+
+/* [AHCI-15] How long to wait for a link asked to leave Partial/Slumber to
+ * report Active.  The transition is a PHY handshake measured in microseconds;
+ * this is a generous ceiling, not an expected duration. */
+#define AHCI_ICC_TIMEOUT_MS      100
 
 /* ahci_port_issue_cmd() return for "the command failed AND the port could not
  * be quiesced".  Distinct from -1 because the HBA may still own the command
@@ -114,6 +127,17 @@ typedef struct ahci_port {
     char               serial[21];
     char               firmware[9];
     int                lba48;
+
+    /* [AHCI-19] IDENTIFY PACKET DEVICE word 62 bit 15: the device requires
+     * the DMADIR bit in the PACKET command's Feature field to know which way
+     * the data is going.  Devices that do NOT set it may abort a PACKET that
+     * carries DMADIR, so it must not be asserted blindly. */
+    int                dmadir;
+
+    /* [AHCI-18] IDENTIFY word 82 bit 5 / word 85 bit 5: the device has a
+     * volatile write cache, and it is enabled.  Only then is there anything
+     * for FLUSH CACHE to push to media. */
+    int                write_cache;
 
     /* Block device (for SATA disks) */
     blkdev_t           bdev;
@@ -464,12 +488,93 @@ static int ahci_port_init(ahci_port_t *ap, hba_port_t *port_regs, int port_num) 
  * ============================================================
  */
 
+/*
+ * [AHCI-15] Spin the device up and bring the link out of a low-power state.
+ *
+ * Two independent things used to be assumed rather than done:
+ *
+ *  1. On an HBA that reports CAP.SSS (staggered spin-up), every port comes
+ *     out of reset with PxCMD.SUD CLEAR and the attached drive not spinning.
+ *     PxSSTS.DET therefore reads 0 -- "no device, no phy" -- and the probe
+ *     loop's cheap pre-check skipped the port before anything could set SUD.
+ *     On such a controller NO disks were ever found.  Software has to assert
+ *     SUD (and PxCMD.POD where the port reports cold presence detection) and
+ *     then wait for the PHY to come up.
+ *
+ *  2. Detection required PxSSTS.IPM == 1 (Active) exactly.  A link that has
+ *     drifted into Partial (2) or Slumber (6) -- which the HBA may do on its
+ *     own with aggressive link power management, and which a device may be
+ *     left in by firmware -- read as "no device".  PxCMD.ICC exists precisely
+ *     to request the Active state, and was never written.
+ *
+ * Returns 1 if the port has a live PHY afterwards, 0 if it does not.
+ */
+static int ahci_port_spinup(ahci_port_t *ap, uint32_t cap) {
+    hba_port_t *port = ap->regs;
+    uint64_t deadline;
+    uint32_t cmd;
+
+    cmd = port->cmd;
+
+    if (cap & HBA_CAP_SSS) {
+        /* Power the receptacle first where the port supports it, then
+         * request spin-up.  Both are sticky bits in PxCMD. */
+        if (cmd & HBA_PXCMD_CPD)
+            cmd |= HBA_PXCMD_POD;
+        cmd |= HBA_PXCMD_SUD;
+        port->cmd = cmd;
+
+        /*
+         * AHCI 1.3.1 s10.1.1: after SUD is set, DET should read 1 or 3
+         * within 10 ms.  A drive that must actually spin its platters can
+         * take far longer to establish comms, so allow a second -- still
+         * short next to the COMRESET paths above.
+         */
+        deadline = ahci_time_ms() + AHCI_SPINUP_TIMEOUT_MS;
+        while ((port->ssts & HBA_PXSSTS_DET_MASK) != HBA_PXSSTS_DET_ACTIVE) {
+            if (ahci_time_ms() > deadline)
+                break;
+            __asm__ volatile("pause");
+        }
+    }
+
+    if ((port->ssts & HBA_PXSSTS_DET_MASK) != HBA_PXSSTS_DET_ACTIVE)
+        return 0;
+
+    /* Link is up.  If it is parked in Partial/Slumber, ask for Active. */
+    if ((port->ssts & HBA_PXSSTS_IPM_MASK) != HBA_PXSSTS_IPM_ACTIVE) {
+        cmd = port->cmd;
+        cmd &= ~(uint32_t)HBA_PXCMD_ICC_MASK;
+        cmd |= HBA_PXCMD_ICC_ACTIVE;
+        port->cmd = cmd;
+
+        deadline = ahci_time_ms() + AHCI_ICC_TIMEOUT_MS;
+        while ((port->ssts & HBA_PXSSTS_IPM_MASK) != HBA_PXSSTS_IPM_ACTIVE) {
+            if (ahci_time_ms() > deadline)
+                break;
+            __asm__ volatile("pause");
+        }
+    }
+
+    /* Spinning up or waking the link latches PHY-change errors; clear them
+     * so the first command does not trip on stale status. */
+    port->serr = port->serr;
+
+    return (port->ssts & HBA_PXSSTS_DET_MASK) == HBA_PXSSTS_DET_ACTIVE;
+}
+
 static int ahci_port_detect_device(ahci_port_t *ap) {
     uint32_t ssts = ap->regs->ssts;
     uint8_t  det = ssts & HBA_PXSSTS_DET_MASK;
     uint8_t  ipm = (ssts & HBA_PXSSTS_IPM_MASK) >> 8;
 
-    if (det != 0x03 || ipm != 0x01) {
+    /*
+     * [AHCI-15] ipm == 0 means the PHY really has no device.  Anything else
+     * (Active, Partial, Slumber, DevSleep) means one is attached;
+     * ahci_port_spinup() has already asked for Active, and a device that
+     * will not leave Slumber is still better addressed than declared absent.
+     */
+    if (det != HBA_PXSSTS_DET_ACTIVE || ipm == 0x00) {
         ap->type = AHCI_PORT_TYPE_NONE;
         return 0;   /* No device or not active */
     }
@@ -953,6 +1058,38 @@ static int ahci_identify(ahci_port_t *ap) {
         ap->firmware[i] = '\0';
     }
 
+    /*
+     * [AHCI-19] For an ATAPI device the interesting bit is word 62 bit 15:
+     * "DMADIR is required for PACKET DMA commands".  The PACKET builder used
+     * to set DMADIR on every read unconditionally.  A device that does not
+     * require it is entitled to treat the bit as reserved and abort the
+     * command, which presents as an optical drive that enumerates and then
+     * fails every read.  Record the capability and let the builder decide.
+     *
+     * The geometry parsing below is ATA-only -- an ATAPI device reports its
+     * capacity through READ CAPACITY, not IDENTIFY -- so stop here rather
+     * than leave ap->sectors holding a number that means nothing.
+     */
+    if (ap->type == AHCI_PORT_TYPE_SATAPI) {
+        ap->dmadir      = (id_buf[62] & (1U << 15)) ? 1 : 0;
+        ap->write_cache = 0;
+        ap->sector_size = AHCI_SECTOR_SIZE;
+        ap->lba48       = 0;
+        ap->sectors     = 0;
+        dma_free_coherent(id_buf, 512);
+        mutex_unlock(&ap->cmd_lock);
+        return 0;
+    }
+
+    /*
+     * [AHCI-18] Word 82 bit 5 says the device HAS a volatile write cache;
+     * word 85 bit 5 says it is currently enabled.  FLUSH CACHE is only
+     * meaningful when both hold -- and issuing it to a device without the
+     * cache is a command abort, not a no-op.
+     */
+    ap->write_cache = ((id_buf[82] & (1U << 5)) &&
+                       (id_buf[85] & (1U << 5))) ? 1 : 0;
+
     /* Sector size.  The IDENTIFY response is attacker-controlled (a
      * malicious or buggy SATA device).  An out-of-range value here
      * cascades into byte_count overflow in PRDT setup and division by
@@ -1106,6 +1243,46 @@ static int ahci_bdev_write(blkdev_t *bdev, uint64_t sector,
     return 0;
 }
 
+/*
+ * [AHCI-18] Push the drive's volatile write cache to media.
+ *
+ * AHCI_ATA_CMD_FLUSH_CACHE_EXT was defined and never issued, and bdev.ioctl
+ * was left NULL, so sync(2) and unmount drained the kernel's bio cache into
+ * the DEVICE and stopped there.  A disk with write caching on acknowledges
+ * those writes from its own DRAM; on power loss the data is gone even though
+ * every layer above reported success.
+ *
+ * This carries no data, which is why it needed AHCI-16 (prdtl must be 0 for
+ * a zero-length command) before it could be issued at all.
+ */
+static int ahci_bdev_ioctl(blkdev_t *bdev, uint32_t request, void *arg) {
+    ahci_port_t *ap = (ahci_port_t *)bdev->priv;
+
+    (void)arg;
+
+    if (!ap)
+        return -EINVAL;
+
+    switch (request) {
+    case BLKIOC_FLUSH:
+        if (bdev->dead)
+            return -EIO;
+        /* Nothing volatile to flush: report success rather than send a
+         * command the device is entitled to abort. */
+        if (!ap->write_cache)
+            return 0;
+        if (ahci_ata_dma_cmd(ap,
+                             ap->lba48 ? AHCI_ATA_CMD_FLUSH_CACHE_EXT
+                                       : AHCI_ATA_CMD_FLUSH_CACHE,
+                             0, 0, NULL, 0) < 0) {
+            return -EIO;
+        }
+        return 0;
+    default:
+        return -ENOTTY;
+    }
+}
+
 static void ahci_register_disk(ahci_port_t *ap) {
     char buf[128];
 
@@ -1118,6 +1295,7 @@ static void ahci_register_disk(ahci_port_t *ap) {
     ap->bdev.priv          = ap;
     ap->bdev.read          = ahci_bdev_read;
     ap->bdev.write         = ahci_bdev_write;
+    ap->bdev.ioctl         = ahci_bdev_ioctl;   /* [AHCI-18] */
 
     blkdev_register_disk(&ap->bdev);
 
@@ -1200,8 +1378,20 @@ static int ahci_scsi_execute(scsi_link_t *link, scsi_request_t *req) {
     fis->fis_type = FIS_TYPE_REG_H2D;
     fis->pmport_c = 0x80;
     fis->command  = AHCI_ATA_CMD_PACKET;
-    /* Feature bit 0 = DMA mode, bit 2 = DMADIR (1=D2H read, 0=H2D write) */
-    fis->featurel = (req->flags & SCSI_REQ_WRITE) ? 0x01 : 0x05;
+    /*
+     * Feature bit 0 = DMA mode, bit 2 = DMADIR (1=D2H read, 0=H2D write).
+     *
+     * [AHCI-19] DMADIR used to be set on every read regardless of the
+     * device.  It is only defined for devices that report "DMADIR required"
+     * in IDENTIFY PACKET DEVICE word 62 bit 15 -- typically SATA bridges in
+     * front of a PATA optical drive.  A native SATA drive is free to treat
+     * the bit as reserved and abort the PACKET, which looks like a drive
+     * that enumerates fine and then fails every read.  ap->dmadir comes from
+     * the IDENTIFY PACKET issued at probe.
+     */
+    fis->featurel = 0x01;                            /* DMA */
+    if (ap->dmadir && !(req->flags & SCSI_REQ_WRITE))
+        fis->featurel |= 0x04;                       /* DMADIR: device -> host */
     /*
      * [AHCI-06] The ATAPI byte-count-limit is 16 bits, and req->data_len is a
      * uint32.  scsi_ctl.c explicitly permits data_len == 65536, which
@@ -1302,9 +1492,6 @@ static int ahci_scsi_reset_bus(scsi_link_t *link) {
 static void ahci_register_satapi_devices(void) {
     int satapi_count = 0;
 
-    if (ahci_scsi_registered) {
-        return;
-    }
     for (int c = 0; c < ahci_ctrl_count; c++) {
         for (int i = 0; i < AHCI_MAX_PORTS; i++) {
             if (ahci_ctrls[c].ports[i].type == AHCI_PORT_TYPE_SATAPI) {
@@ -1314,6 +1501,40 @@ static void ahci_register_satapi_devices(void) {
     }
 
     if (satapi_count == 0) {
+        return;
+    }
+
+    /* Four controllers x 32 ports is more addresses than the SCSI midlayer
+     * has target IDs.  Say so rather than register a max_targets the scan
+     * cannot honour. */
+    if (satapi_count > SCSI_MAX_TARGETS) {
+        kprintf("ahci: %d SATAPI devices found but only %d SCSI targets "
+                "available; the rest are not exposed\n",
+                satapi_count, SCSI_MAX_TARGETS);
+        satapi_count = SCSI_MAX_TARGETS;
+    }
+
+    /*
+     * [AHCI-20] This used to bail out at the top when ahci_scsi_registered
+     * was set, so only the FIRST controller's optical drives were ever
+     * exposed: a second HBA found later added SATAPI ports that nothing
+     * enumerated, and max_targets stayed frozen at the first controller's
+     * count -- which also capped the scan even for drives on the original
+     * link.  The target-to-port mapping in ahci_scsi_execute() is computed
+     * over every controller on each request, so the link itself was always
+     * capable of addressing them.
+     *
+     * Rather than register a second link for the same transport, widen the
+     * existing one and rescan.  scsi_scan_bus() skips addresses that are
+     * already registered, so this adds only what is new.
+     */
+    if (ahci_scsi_registered) {
+        if (satapi_count > (int)ahci_scsi_link.max_targets) {
+            ahci_scsi_link.max_targets = (uint8_t)satapi_count;
+            kprintf("ahci: SATAPI device count grew to %d; rescanning\n",
+                    satapi_count);
+            scsi_scan_bus(&ahci_scsi_link, ahci_scsi_link.bus_id);
+        }
         return;
     }
 
@@ -1442,19 +1663,26 @@ static void ahci_probe_ports(ahci_controller_t *ctrl) {
     for (port = 0; port < AHCI_MAX_PORTS; port++) {
         ahci_port_t *ap;
         const char *type_str;
-        uint32_t ssts;
 
         if (!(pi & (1U << port))) {
             continue;
         }
 
-        /* Quick pre-check: if port shows no device at all, skip init */
-        ssts = ctrl->abar->ports[port].ssts & HBA_PXSSTS_DET_MASK;
-        if (ssts == 0x00) {
+        ap = &ctrl->ports[port];
+        ap->regs = &ctrl->abar->ports[port];
+
+        /*
+         * [AHCI-15] Spin the device up BEFORE deciding the port is empty.
+         * On a CAP.SSS controller PxCMD.SUD is clear out of reset and DET
+         * reads 0 for a perfectly good drive, so the old pre-check --
+         *     if ((ssts & DET) == 0) continue;
+         * -- skipped every port and the HBA came up with no disks at all.
+         * On a controller without staggered spin-up this is just the same
+         * cheap DET read it always was.
+         */
+        if (!ahci_port_spinup(ap, ctrl->cap)) {
             continue;  /* No device, no phy — skip expensive COMRESET */
         }
-
-        ap = &ctrl->ports[port];
 
         if (ahci_port_init(ap, &ctrl->abar->ports[port], port) < 0) {
             snprintf(buf, sizeof(buf),
@@ -1483,6 +1711,25 @@ static void ahci_probe_ports(ahci_controller_t *ctrl) {
         kprint(buf);
 
         ctrl->port_count++;
+
+        /*
+         * [AHCI-19] IDENTIFY PACKET DEVICE for optical drives too, not just
+         * IDENTIFY for disks.  ahci_identify() already picks the right
+         * opcode from ap->type; it simply was never called for SATAPI, so
+         * ap->dmadir stayed 0 and the PACKET builder guessed instead.  A
+         * failure here is not fatal for an ATAPI device -- it just means we
+         * default to not asserting DMADIR -- so only disks get the retry
+         * complaint below.
+         */
+        if (ap->type == AHCI_PORT_TYPE_SATAPI) {
+            if (ahci_identify(ap) != 0) {
+                snprintf(buf, sizeof(buf),
+                         "ahci: port %d: IDENTIFY PACKET failed; "
+                         "assuming no DMADIR\n", port);
+                kprint(buf);
+                ap->dmadir = 0;
+            }
+        }
 
         /* IDENTIFY for SATA disks */
         if (ap->type == AHCI_PORT_TYPE_SATA) {

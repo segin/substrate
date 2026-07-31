@@ -17,6 +17,7 @@
 #include <drivers/console/console.h>
 #include <drivers/console/pty.h>
 #include <drivers/console/uart/uart.h>
+#include <drivers/storage/blkdev.h>
 #include <exec/formats/elf.h>
 #include <exec/perso/personality.h>
 #include <kern/cmdline.h>
@@ -2934,6 +2935,14 @@ int sys_sync(void) {
      * stat() reports.  */
 
     (void)bufsync(0);
+
+    /*
+     * [AHCI-18] bufsync() only gets the data as far as the DEVICE.  A disk
+     * with write caching enabled acknowledges from its own DRAM, so without
+     * this the guarantee sync(2) is supposed to give -- "on-disk state
+     * matches what stat() reports" -- stopped one power failure short.
+     */
+    (void)blkdev_flush_all();
     return 0;
 }
 

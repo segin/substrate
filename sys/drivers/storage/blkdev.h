@@ -62,6 +62,23 @@ typedef struct blkdev {
     struct blkdev *next;        // Linked list
 } blkdev_t;
 
+/*
+ * Block-device ioctl requests.
+ *
+ * BLKIOC_FLUSH: push the DEVICE's own volatile write cache to media.  This is
+ * a different thing from bufsync(), which only drains the kernel's bio cache
+ * into the device -- where a modern disk is entitled to acknowledge the write
+ * from DRAM and lose it on power failure.  arg is unused.  A driver whose
+ * device has no write cache (or that cannot flush it) returns 0; -ENOTTY
+ * means the driver has no ioctl at all.
+ */
+#define BLKIOC_FLUSH  0x4210
+
+/* Ask every registered block device to flush its write cache.  Best effort:
+ * devices with no ->ioctl are skipped.  Returns the number that reported a
+ * failure. */
+int blkdev_flush_all(void);
+
 // Register a block device (creates DevFS entry)
 void blkdev_register(blkdev_t *dev);
 void blkdev_unregister(blkdev_t *dev);

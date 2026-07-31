@@ -561,6 +561,50 @@ blkdev_t *blkdev_first(void) {
     return blkdev_list;
 }
 
+/*
+ * [AHCI-18] Push every device's own write cache to media.
+ *
+ * bufsync() drains the kernel's bio cache INTO the devices; it does not make
+ * the devices durable.  A disk with write caching enabled acknowledges a
+ * write as soon as it is in the drive's DRAM, so after sync(2) returned,
+ * everything above the driver believed the data was safe while the disk had
+ * not necessarily written a byte of it.  Drivers that can flush implement
+ * BLKIOC_FLUSH; the rest report -ENOTTY and are skipped.
+ *
+ * Only raw disks are asked: a partition blkdev shares its parent's cache, so
+ * flushing each partition would issue the same FLUSH CACHE N times.
+ */
+int blkdev_flush_all(void) {
+    blkdev_t *dev;
+    int failures = 0;
+
+    /*
+     * The list is walked without the lock held across the ioctl: flushing is
+     * a sleeping operation (it issues a command and waits) and
+     * blkdev_list_lock is a spinlock that disables preemption.  Registration
+     * only ever appends, and unregistration is not concurrent with sync in
+     * practice; the same caveat as blkdev_get() applies until blkdev_t is
+     * refcounted (#403).
+     */
+    for (dev = blkdev_list; dev; dev = dev->next) {
+        int r;
+
+        if (!dev->ioctl || dev->dead)
+            continue;
+        if (dev->parent)                /* partition: parent covers it */
+            continue;
+
+        r = dev->ioctl(dev, BLKIOC_FLUSH, NULL);
+        if (r < 0 && r != -ENOTTY) {
+            kprintf("blkdev: %s: cache flush failed (%d)\n",
+                    dev->name[0] ? dev->name : "(unnamed)", r);
+            failures++;
+        }
+    }
+
+    return failures;
+}
+
 // Byte-oriented read - handles sector alignment
 size_t blkdev_read_bytes(blkdev_t *dev, uint64_t offset, size_t size, void *buffer) {
     if (!dev || !dev->read || dev->sector_size == 0) return 0;
