@@ -27,13 +27,28 @@ int ide_prdt_build_entries(prdt_entry_t *prdt, size_t max_entries,
 
     while (remaining > 0 && entry < max_entries) {
         uint32_t region_size = remaining;
-        uint32_t boundary = (phys_addr & ~0xFFFFUL) + 0x10000UL;
+        /*
+         * [IDE-18] Distance to the next 64 KiB boundary, computed as an
+         * OFFSET rather than an absolute address.
+         *
+         * This used to be
+         *     boundary = (phys_addr & ~0xFFFFUL) + 0x10000UL;
+         *     if (phys_addr + region_size > boundary) ...
+         * which wraps for any phys_addr in the last 64 KiB of the 32-bit
+         * space: boundary computes 0x100000000, truncates to 0, the
+         * comparison is then trivially true, and region_size becomes
+         * 0 - phys_addr -- a near-4-GiB region that survives the
+         * region_size == 0 check and is then truncated into a 16-bit
+         * byte_count.  The offset form is in 1..65536 by construction and
+         * cannot wrap.
+         */
+        uint32_t to_boundary = 0x10000U - (phys_addr & 0xFFFFU);
 
         if (region_size > 65536U) {
             region_size = 65536U;
         }
-        if (phys_addr + region_size > boundary) {
-            region_size = boundary - phys_addr;
+        if (region_size > to_boundary) {
+            region_size = to_boundary;
         }
         if (region_size == 0) {
             return -1;
@@ -44,9 +59,18 @@ int ide_prdt_build_entries(prdt_entry_t *prdt, size_t max_entries,
         prdt[entry].reserved = 0;
         prdt[entry].eot = 0;
 
-        phys_addr += region_size;
         remaining -= region_size;
         entry++;
+
+        /* [IDE-18] A transfer ending exactly at the 4 GiB mark leaves
+         * phys_addr wrapped to 0.  That is fine only if nothing is left to
+         * describe; otherwise the next entry would point at physical 0. */
+        if (phys_addr + region_size < phys_addr) {
+            if (remaining != 0) {
+                return -1;
+            }
+        }
+        phys_addr += region_size;
     }
 
     if (remaining != 0 || entry == 0) {
@@ -107,12 +131,27 @@ int ide_prdt_setup(uint8_t channel, void *buffer, uint32_t byte_count) {
     remaining = byte_count;
     entry = 0;
 
+    /*
+     * [IDE-16] Build the PRDT, COALESCING physically adjacent pages.
+     *
+     * This used to emit one entry per page fragment unconditionally, so a
+     * 128 KiB transfer needed 33 entries against MAX_PRD_ENTRIES 32, returned
+     * -1, and the caller treated that as a DEVICE fault and permanently
+     * demoted the drive to PIO on the first large read.  Buffers here come
+     * from the kernel direct map, where consecutive virtual pages are usually
+     * consecutive physical ones, so merging them collapses that 33-entry case
+     * to a handful.  A PRD's byte count field is 16 bits with 0 meaning 64
+     * KiB, so a run is capped at 64 KiB.
+     */
     while (remaining > 0) {
         uint32_t page_off;
         uint32_t chunk;
 
         if (entry >= MAX_PRD_ENTRIES) {
-            return -1;
+            /* Genuinely too fragmented.  This is a limitation of OUR
+             * descriptor table, not a fault of the device; the caller must
+             * not read it as a reason to disable DMA forever. */
+            return IDE_DMA_UNSUPPORTED;
         }
 
         phys = ide_kva_to_phys(va);      /* [IDE-05] */
@@ -124,6 +163,40 @@ int ide_prdt_setup(uint8_t channel, void *buffer, uint32_t byte_count) {
         chunk = 4096U - page_off;
         if (chunk > remaining) {
             chunk = remaining;
+        }
+
+        /*
+         * Extend this entry over any following pages that are physically
+         * contiguous with it.
+         *
+         * Two hard limits apply, and BOTH matter -- a single PRD region may
+         * be at most 64 KiB (the byte-count field is 16 bits, 0 meaning
+         * 64 KiB) and it may not cross a 64 KiB physical boundary.  The
+         * per-page code below never crossed a boundary because 4 KiB pages
+         * nest inside 64 KiB blocks; merging them can, so the boundary
+         * distance caps the run explicitly.
+         */
+        {
+            uint32_t to_boundary = 0x10000U - ((uint32_t)phys & 0xFFFFU);
+            uint32_t cap = (to_boundary < 65536U) ? to_boundary : 65536U;
+
+            if (chunk > cap)
+                chunk = cap;
+
+            while (chunk < remaining && chunk < cap) {
+                uintptr_t next_va = va + chunk;
+                uint32_t next_phys = ide_kva_to_phys(next_va);
+                uint32_t add;
+
+                if (next_phys == 0 || next_phys != (uint32_t)phys + chunk)
+                    break;                       /* not contiguous */
+
+                add = 4096U;
+                if (add > remaining - chunk) add = remaining - chunk;
+                if (chunk + add > cap)       add = cap - chunk;
+                if (add == 0) break;
+                chunk += add;
+            }
         }
 
         ide_prdts[channel][entry].phys_addr = (uint32_t)phys;
@@ -236,11 +309,18 @@ int ide_dma_read(uint8_t channel, uint8_t drive, uint64_t lba,
     uint32_t byte_count = (uint32_t)count * 512;
 
     /* Setup PRDT */
-    if (ide_prdt_setup(channel, buffer, byte_count) < 0) {
-        if (ide_debug_enabled()) {
-            kprintf("ide: dma-read prdt setup failed ch=%u\n", channel);
+    {
+        int pr = ide_prdt_setup(channel, buffer, byte_count);
+        if (pr < 0) {
+            if (ide_debug_enabled()) {
+                kprintf("ide: dma-read prdt setup failed ch=%u (%d)\n", channel, pr);
+            }
+            /* [IDE-16] -2 means OUR descriptor table ran out of entries for a
+             * badly fragmented buffer.  That is not a device fault, so pass it
+             * up distinctly: the caller falls back to PIO for this request
+             * without permanently demoting the drive. */
+            return (pr == IDE_DMA_UNSUPPORTED) ? IDE_DMA_UNSUPPORTED : -1;
         }
-        return -1;
     }
 
     /* Clear status and set direction.  [IDE-03] A disk read means the bus
@@ -344,11 +424,18 @@ int ide_dma_write(uint8_t channel, uint8_t drive, uint64_t lba,
     uint32_t byte_count = (uint32_t)count * 512;
 
     /* Setup PRDT (cast away const - buffer won't be modified for write) */
-    if (ide_prdt_setup(channel, (void *)buffer, byte_count) < 0) {
-        if (ide_debug_enabled()) {
-            kprintf("ide: dma-write prdt setup failed ch=%u\n", channel);
+    {
+        int pr = ide_prdt_setup(channel, (void *)buffer, byte_count);
+        if (pr < 0) {
+            if (ide_debug_enabled()) {
+                kprintf("ide: dma-write prdt setup failed ch=%u (%d)\n", channel, pr);
+            }
+            /* [IDE-16] -2 means OUR descriptor table ran out of entries for a
+             * badly fragmented buffer.  That is not a device fault, so pass it
+             * up distinctly: the caller falls back to PIO for this request
+             * without permanently demoting the drive. */
+            return (pr == IDE_DMA_UNSUPPORTED) ? IDE_DMA_UNSUPPORTED : -1;
         }
-        return -1;
     }
 
     /* Clear status and set direction.  [IDE-03] A disk write means the bus

@@ -196,6 +196,14 @@ typedef struct __attribute__((packed)) {
 #define MAX_PRD_ENTRIES 32
 
 /*
+ * [IDE-16] ide_dma_read/ide_dma_write return this when the transfer could not
+ * be described by a PRDT of MAX_PRD_ENTRIES entries.  Distinct from -1 so the
+ * caller retries in PIO for that one request instead of calling
+ * ide_disable_device_dma(), which is permanent.
+ */
+#define IDE_DMA_UNSUPPORTED  (-2)
+
+/*
  * ============================================================
  * IDE Channel State
  * ============================================================

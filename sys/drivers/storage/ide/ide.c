@@ -139,10 +139,17 @@ int ide_transfer_read_once(ide_drive_ctx_t *ctx, uint64_t sector,
 
     if (ide_attached && ide_channels[channel].dma_capable &&
         !dev->dma_forced_pio && dev->dma_mode != 0 && count <= 256) {
-        if (ide_dma_read(channel, drive, sector, (uint16_t)count, buffer) == 0) {
+        int dr = ide_dma_read(channel, drive, sector, (uint16_t)count, buffer);
+        if (dr == 0) {
             return 0;
         }
-        ide_disable_device_dma(dev, "read");
+        /* [IDE-16] A PRDT that could not describe THIS buffer is a limit of
+         * our descriptor table, not evidence the device cannot do DMA.  Fall
+         * back to PIO for this request only; ide_disable_device_dma() is
+         * permanent. */
+        if (dr != IDE_DMA_UNSUPPORTED) {
+            ide_disable_device_dma(dev, "read");
+        }
     }
 
     if (sector < 0x10000000ULL && count <= 256) {
@@ -165,15 +172,20 @@ int ide_transfer_write_once(ide_drive_ctx_t *ctx, uint64_t sector,
 
     if (ide_attached && ide_channels[channel].dma_capable &&
         !dev->dma_forced_pio && dev->dma_mode != 0 && count <= 256) {
-        if (ide_dma_write(channel, drive, sector, (uint16_t)count, buffer) == 0) {
+        int dw = ide_dma_write(channel, drive, sector, (uint16_t)count, buffer);
+        if (dw == 0) {
             return 0;
         }
         /*
          * Mirror the read path: on a DMA write failure, disable DMA for
          * this device and fall through to the PIO write path rather than
-         * failing the whole transfer.
+         * failing the whole transfer.  [IDE-16] -- except when the failure
+         * was only our PRDT running out of entries, which says nothing about
+         * the device.
          */
-        ide_disable_device_dma(dev, "write");
+        if (dw != IDE_DMA_UNSUPPORTED) {
+            ide_disable_device_dma(dev, "write");
+        }
     }
 
     if (sector < 0x10000000ULL && count <= 256) {

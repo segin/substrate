@@ -40,6 +40,10 @@ void ide_select_drive(uint8_t channel, uint8_t drive) {
 int ide_wait_ready(uint8_t channel, int timeout_ms, const char *op) {
     (void)channel; (void)timeout_ms; (void)op; return 0;
 }
+int ide_wait_ready_ex(uint8_t channel, int timeout_ms, const char *op,
+                      int honor_err) {
+    (void)channel; (void)timeout_ms; (void)op; (void)honor_err; return 0;
+}
 int ide_wait_irq_completion(uint8_t channel, uint32_t timeout_ms,
                             const char *op) {
     (void)channel; (void)timeout_ms; (void)op; return 0;
@@ -100,12 +104,51 @@ static void test_zero_length_rejected(void) {
     assert(count == -1);
 }
 
+/*
+ * [IDE-18] A region that runs off the top of the 32-bit physical space must
+ * be rejected, not wrapped.
+ *
+ * The boundary used to be an absolute address, (phys & ~0xFFFF) + 0x10000,
+ * which computes 0x100000000 for anything in the last 64 KiB and truncates
+ * to 0.  Every "phys + size > boundary" test then passed, region_size became
+ * 0 - phys, and -- worse -- the running phys_addr wrapped, so the SECOND
+ * entry of this transfer described physical address 0.  A bus-master write
+ * to PRD 0 lands on the real-mode IVT/BDA.
+ */
+static void test_four_gib_wrap_rejected(void) {
+    prdt_entry_t prdt[MAX_PRD_ENTRIES];
+    int count, i;
+
+    memset(prdt, 0, sizeof(prdt));
+    count = ide_prdt_build_entries(prdt, MAX_PRD_ENTRIES, 0xFFFFF000U, 8192);
+    assert(count == -1);
+
+    /* And nothing was left describing physical 0 with a live length. */
+    for (i = 0; i < MAX_PRD_ENTRIES; i++)
+        assert(!(prdt[i].phys_addr == 0 && prdt[i].byte_count != 0));
+}
+
+/* The last region ending exactly at the 4 GiB mark is legal: it does not
+ * wrap into a following entry. */
+static void test_ends_exactly_at_four_gib(void) {
+    prdt_entry_t prdt[MAX_PRD_ENTRIES];
+    int count;
+
+    count = ide_prdt_build_entries(prdt, MAX_PRD_ENTRIES, 0xFFFFF000U, 4096);
+    assert(count == 1);
+    assert(prdt[0].phys_addr == 0xFFFFF000U);
+    assert(prdt[0].byte_count == 4096);
+    assert(prdt[0].eot == 1);
+}
+
 int main(void) {
     test_single_entry();
     test_boundary_split();
     test_64k_encoding();
     test_entry_limit();
     test_zero_length_rejected();
+    test_four_gib_wrap_rejected();
+    test_ends_exactly_at_four_gib();
     puts("host_test_ide_prdt: PASS");
     return 0;
 }
