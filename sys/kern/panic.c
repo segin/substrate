@@ -89,6 +89,68 @@ static void panic_serial_hex32(uint32_t v) {
     panic_serial_emit(buf);
 }
 
+/*
+ * [USB-HW-03 lead (c)] Is every page of [va, va+len) present in the CURRENT
+ * address space?
+ *
+ * The dump helpers below used to gate their raw reads on a pure RANGE check
+ * (see panic_addr_is_kernel_text).  A range check is not a mapped-ness check:
+ * a kernel virtual address inside [KERN_BASE, 0xFF000000) that has no page
+ * table entry faults the instant we touch it -- and we are already inside a
+ * fault handler, so that is a re-entrant fault taken while printing the dump
+ * of the first one.  This matters precisely for the corrupted-register case
+ * we are trying to diagnose: the hardware report has ebp/ds = 0x1B232B00,
+ * i.e. exactly the garbage-pointer situation where the dump would fault.
+ *
+ * The page directory is walked straight off CR3 rather than through pmap_*
+ * so this depends on no kernel state beyond the hardware's own tables, which
+ * is the only thing we can still trust here.
+ */
+static int panic_va_readable(uintptr_t va, size_t len) {
+#ifdef HOST_TEST
+    (void)va; (void)len;
+    return 0;
+#else
+    uint32_t cr3;
+    uintptr_t page, last;
+
+    if (len == 0)
+        return 0;
+
+    __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
+
+    /* The page directory itself must be reachable through the direct map. */
+    if ((cr3 & 0xFFFFF000U) >= (0xFFFFFFFFU - KERN_BASE))
+        return 0;
+
+    uint32_t *pd = (uint32_t *)((cr3 & 0xFFFFF000U) + KERN_BASE);
+
+    last = va + (len - 1);
+    if (last < va)                    /* wrapped */
+        return 0;
+
+    for (page = va & ~0xFFFU; page <= (last & ~0xFFFU); page += 0x1000) {
+        uint32_t pde = pd[page >> 22];
+
+        if (!(pde & 0x1))             /* not present */
+            return 0;
+        if (pde & 0x80)               /* 4 MiB page: present, no page table */
+            continue;
+
+        if ((pde & 0xFFFFF000U) >= (0xFFFFFFFFU - KERN_BASE))
+            return 0;
+        uint32_t *pt = (uint32_t *)((pde & 0xFFFFF000U) + KERN_BASE);
+        if (!(pt[(page >> 12) & 0x3FF] & 0x1))
+            return 0;
+    }
+    return 1;
+#endif
+}
+
+int panic_addr_readable(uintptr_t va, size_t len) {
+    return panic_va_readable(va, len);
+}
+
 static int panic_addr_is_kernel_text(uintptr_t va) {
 #ifdef HOST_TEST
     /* Host unit tests have no kernel address space; never treat a host
@@ -117,7 +179,8 @@ static void panic_dump_bytes_at(uintptr_t va, int is_user) {
             kprint("CODE @eip: <user not mapped>\n");
             return;
         }
-    } else if (panic_addr_is_kernel_text(va)) {
+    } else if (panic_addr_is_kernel_text(va) &&
+               panic_va_readable(va, sizeof(buf))) {
         memcpy(buf, (const void *)va, sizeof(buf));
     } else {
         kprint("CODE @eip: <unsafe to read>\n");
@@ -142,7 +205,8 @@ static void panic_dump_stack_words(uintptr_t esp, int is_user) {
             kprint("STK: <user not mapped>\n");
             return;
         }
-    } else if (panic_addr_is_kernel_text(esp)) {
+    } else if (panic_addr_is_kernel_text(esp) &&
+               panic_va_readable(esp, sizeof(buf))) {
         memcpy(buf, (const void *)esp, sizeof(buf));
     } else {
         kprint("STK: <unsafe to read>\n");
