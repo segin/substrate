@@ -503,24 +503,66 @@ int vfs_mount_legacy(const char *device, const char *path, const char *type, uin
     return 0;
 }
 
-size_t read_fs(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
-    if (node->read != 0) {
-        size_t result = node->read(node, offset, size, buffer);
-        node->atime = get_time();
-        return result;
-    } else
-        return 0;
+/*
+ * [VFS-28] Backends signal failure by returning a negated errno cast to
+ * size_t -- (size_t)-EIO is 0xFFFFFFFA.  read_fs/write_fs returned that
+ * verbatim as an unsigned count, so an I/O error arrived at the caller as a
+ * FOUR-BILLION-BYTE SUCCESSFUL TRANSFER.  Callers that compared against an
+ * expected length happened to notice; callers that used the value as a
+ * length did not.
+ *
+ * Rather than re-type every backend's read/write hook (dozens of functions
+ * across every filesystem), recognise the error range on the way out, the
+ * same way Linux's IS_ERR_VALUE does.  A transfer can never legitimately be
+ * this large -- `size` is bounded far below 4 GiB - 4096 -- so the range is
+ * unambiguous.
+ */
+#define VFS_MAX_ERRNO  4095
+static inline int vfs_is_err_value(size_t v) {
+    return v >= (size_t)-VFS_MAX_ERRNO;
 }
 
-size_t write_fs(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer) {
-    if (node->write != 0) {
-        size_t result = node->write(node, offset, size, buffer);
-        int64_t now = get_time();
-        node->mtime = now;
-        node->ctime = now;
-        return result;
-    } else
-        return 0;
+ssize_t read_fs(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
+    size_t result;
+
+    if (!node) return -EINVAL;
+
+    /*
+     * [VFS-28] A node with no read method is not an empty file.  Returning
+     * 0 made "this object cannot be read" indistinguishable from a clean
+     * EOF, so callers looping until 0 silently treated a directory or a
+     * write-only device as an empty one.
+     */
+    if (node->read == 0) return -EINVAL;
+
+    result = node->read(node, offset, size, buffer);
+    if (vfs_is_err_value(result)) {
+        /* [VFS-28] Do NOT stamp atime for a read that failed -- it used to
+         * be updated unconditionally, before the result was even looked at,
+         * so a failing read still advanced the access time. */
+        return (ssize_t)result;
+    }
+
+    node->atime = get_time();
+    return (ssize_t)result;
+}
+
+ssize_t write_fs(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer) {
+    size_t result;
+    int64_t now;
+
+    if (!node) return -EINVAL;
+    if (node->write == 0) return -EINVAL;
+
+    result = node->write(node, offset, size, buffer);
+    if (vfs_is_err_value(result)) {
+        return (ssize_t)result;      /* no mtime/ctime bump on failure */
+    }
+
+    now = get_time();
+    node->mtime = now;
+    node->ctime = now;
+    return (ssize_t)result;
 }
 
 /* Leak instrumentation — counts open_fs / close_fs invocations to

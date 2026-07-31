@@ -182,8 +182,15 @@ typedef struct vfs_mount {
 } vfs_mount_t;
 
 // Standard VFS functions
-size_t read_fs(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer);
-size_t write_fs(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer);
+/*
+ * [VFS-28] SIGNED return.  A backend reports failure as a negated errno
+ * cast through size_t; these translate that into a negative ssize_t rather
+ * than handing the caller a ~4 GiB "successful" transfer.  A NULL node, or
+ * a node with no read/write method, is -EINVAL -- not 0, which used to be
+ * indistinguishable from EOF.
+ */
+ssize_t read_fs(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer);
+ssize_t write_fs(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer);
 void open_fs(fs_node_t *node, uint8_t read, uint8_t write);
 void close_fs(fs_node_t *node);
 /* Fills *out with directory entry `index` and returns `out`, or NULL at end

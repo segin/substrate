@@ -182,7 +182,10 @@ static int elf_dt_needs_substrate_libc(fs_node_t *node, const Elf32_Ehdr *eh) {
     if (eh->e_phentsize != sizeof(Elf32_Phdr) || phnum == 0 || phnum > 32)
         return 0;
     phbytes = (size_t)phnum * sizeof(Elf32_Phdr);
-    if (read_fs(node, eh->e_phoff, phbytes, (uint8_t *)ph) < phbytes)
+    /* [VFS-28] read_fs is signed now: a short read AND an error both fail
+     * this test, where an error used to compare as a huge unsigned value and
+     * pass it. */
+    if (read_fs(node, eh->e_phoff, phbytes, (uint8_t *)ph) < (ssize_t)phbytes)
         return 0;
 
     for (uint16_t i = 0; i < phnum; i++) {
@@ -195,7 +198,7 @@ static int elf_dt_needs_substrate_libc(fs_node_t *node, const Elf32_Ehdr *eh) {
         return 0;
     if (dyn_sz > sizeof(dyn))
         dyn_sz = sizeof(dyn);
-    if (read_fs(node, dyn_off, dyn_sz, dyn) < dyn_sz)
+    if (read_fs(node, dyn_off, dyn_sz, dyn) < (ssize_t)dyn_sz)
         return 0;
 
     /* First pass: locate DT_STRTAB (a virtual address) and map it to a file
@@ -241,7 +244,7 @@ static int vfs_node_is_substrate_object(fs_node_t *node) {
     const Elf32_Ehdr *eh = (const Elf32_Ehdr *)hdr;
     if (!node || (node->flags & 0x7) != FS_FILE)
         return 0;
-    if (read_fs(node, 0, sizeof(hdr), hdr) < sizeof(hdr))
+    if (read_fs(node, 0, sizeof(hdr), hdr) < (ssize_t)sizeof(hdr))
         return 0;
     if (hdr[0] != 0x7f || hdr[1] != 'E' || hdr[2] != 'L' || hdr[3] != 'F')
         return 0;
