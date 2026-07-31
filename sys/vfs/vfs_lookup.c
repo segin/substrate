@@ -49,7 +49,7 @@ namei(struct nameidata *ndp)
         cnp->cn_pnbuf = kmalloc(1024);
     }
     if (cnp->cn_pnbuf == NULL)
-        return ENOMEM;
+        return -ENOMEM;
 
     /*
      * Copy the pathname from user or kernel space.
@@ -65,7 +65,7 @@ namei(struct nameidata *ndp)
         size_t len = strlen(ndp->ni_dirp);
         if (len >= 1024) {
             if (namei_zone) uma_zfree(namei_zone, cnp->cn_pnbuf); else kfree(cnp->cn_pnbuf, 1024);
-            return ENAMETOOLONG;
+            return -ENAMETOOLONG;
         }
         strlcpy(cnp->cn_pnbuf, ndp->ni_dirp, 1024);
         cnp->cn_pnbuf[1023] = '\0';
@@ -93,7 +93,7 @@ namei(struct nameidata *ndp)
 
     if (dp == NULL) {
         if (namei_zone) uma_zfree(namei_zone, cnp->cn_pnbuf); else kfree(cnp->cn_pnbuf, 1024);
-        return ENOENT;
+        return -ENOENT;
     }
 
     vref(dp);
@@ -122,7 +122,7 @@ namei(struct nameidata *ndp)
             vrele(dp);
             if (namei_zone) uma_zfree(namei_zone, cnp->cn_pnbuf);
             else kfree(cnp->cn_pnbuf, 1024);
-            return ENAMETOOLONG;
+            return -ENAMETOOLONG;
         }
         memcpy(component, ndp->ni_dirp, cnp->cn_namelen);
         component[cnp->cn_namelen] = '\0';
@@ -213,7 +213,7 @@ namei(struct nameidata *ndp)
                 vrele(ndp->ni_vp);
                 vrele(dp);
                 if (namei_zone) uma_zfree(namei_zone, cnp->cn_pnbuf); else kfree(cnp->cn_pnbuf, 1024);
-                return ELOOP;
+                return -ELOOP;
             }
 
             /* Read symlink target */
@@ -222,7 +222,7 @@ namei(struct nameidata *ndp)
                 vrele(ndp->ni_vp);
                 vrele(dp);
                 if (namei_zone) uma_zfree(namei_zone, cnp->cn_pnbuf); else kfree(cnp->cn_pnbuf, 1024);
-                return ENOMEM;
+                return -ENOMEM;
             }
 
             struct iovec aiov;
@@ -251,7 +251,7 @@ namei(struct nameidata *ndp)
                 vrele(ndp->ni_vp);
                 vrele(dp);
                 if (namei_zone) uma_zfree(namei_zone, cnp->cn_pnbuf); else kfree(cnp->cn_pnbuf, 1024);
-                return ENAMETOOLONG;
+                return -ENAMETOOLONG;
             }
             target[target_len] = '\0';
 
@@ -264,7 +264,7 @@ namei(struct nameidata *ndp)
                 vrele(ndp->ni_vp);
                 vrele(dp);
                 if (namei_zone) uma_zfree(namei_zone, cnp->cn_pnbuf); else kfree(cnp->cn_pnbuf, 1024);
-                return ENAMETOOLONG;
+                return -ENAMETOOLONG;
             }
 
             char *new_path = namei_zone ? uma_zalloc(namei_zone, 0) : kmalloc(1024);
@@ -273,7 +273,7 @@ namei(struct nameidata *ndp)
                 vrele(ndp->ni_vp);
                 vrele(dp);
                 if (namei_zone) uma_zfree(namei_zone, cnp->cn_pnbuf); else kfree(cnp->cn_pnbuf, 1024);
-                return ENOMEM;
+                return -ENOMEM;
             }
 
             memcpy(new_path, target, target_len);
@@ -316,7 +316,7 @@ namei(struct nameidata *ndp)
             vrele(dp);
             if (namei_zone) uma_zfree(namei_zone, cnp->cn_pnbuf);
             else kfree(cnp->cn_pnbuf, 1024);
-            return ENOTDIR;
+            return -ENOTDIR;
         }
     }
 

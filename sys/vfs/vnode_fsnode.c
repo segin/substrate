@@ -40,11 +40,12 @@
  * because they need the uio machinery, which no caller uses; they report
  * EOPNOTSUPP rather than pretending.
  *
- * ERRNO CONVENTION: this layer returns POSITIVE errno throughout (see
- * vnode_ops.c).  That disagrees with the kernel's negative convention and is
- * a known open audit item; this file follows the layer it plugs into so that
- * namei() behaves consistently, and the sign flip must happen across the
- * whole layer at once, not here.
+ * ERRNO CONVENTION: negative errno, matching the rest of the kernel, so a
+ * value can be handed to the syscall boundary unchanged.  The layer used to
+ * be split -- vnode_ops.c / vfs_lookup.c / vfs_mount.c returned POSITIVE
+ * errno while vnode.c already returned negative (-EAGAIN, -EBUSY, a bare
+ * -12) -- which meant a caller could not tell a failure from a small success
+ * without knowing which file it came from.  All of it is negative now.
  */
 
 #include <stddef.h>
@@ -93,7 +94,7 @@ int fsnode_vget(struct mount *mp, fs_node_t *n, struct vnode **vpp)
     int error;
 
     if (!n || !vpp)
-        return EINVAL;
+        return -EINVAL;
 
     /* Already have a vnode for this fs_node_t?  See the identity note above:
      * the key is the node address, not its inode number. */
@@ -137,22 +138,22 @@ static int fsnode_vop_lookup(struct vnode *dvp, struct vnode **vpp,
     char name[256];
 
     if (!dvp || !vpp || !cnp || !cnp->cn_nameptr)
-        return EINVAL;
+        return -EINVAL;
     if (dvp->v_type != VDIR)
-        return ENOTDIR;
+        return -ENOTDIR;
 
     dir = VTOFSNODE(dvp);
     if (!dir)
-        return EINVAL;
+        return -EINVAL;
 
     if (cnp->cn_namelen >= sizeof(name))
-        return ENAMETOOLONG;
+        return -ENAMETOOLONG;
     memcpy(name, cnp->cn_nameptr, cnp->cn_namelen);
     name[cnp->cn_namelen] = '\0';
 
     child = finddir_fs(dir, name);
     if (!child)
-        return ENOENT;
+        return -ENOENT;
 
     return fsnode_vget(dvp->v_mount, child, vpp);
 }
@@ -164,10 +165,10 @@ static int fsnode_vop_getattr(struct vnode *vp, struct vattr *vap,
 
     (void)cred;
     if (!vp || !vap)
-        return EINVAL;
+        return -EINVAL;
     n = VTOFSNODE(vp);
     if (!n)
-        return EINVAL;
+        return -EINVAL;
 
     VATTR_NULL(vap);
     vap->va_type      = fsnode_to_vtype(n);
@@ -187,8 +188,8 @@ static int fsnode_vop_getattr(struct vnode *vp, struct vattr *vap,
 
 /*
  * vop_access — defer to the live VFS's permission check so the two layers
- * cannot disagree about who may traverse what.  vfs_check_permissions_groups
- * answers 0 or -1 ("denied"); translate to this layer's positive convention.
+ * cannot disagree about who may traverse what.  vfs_check_permissions()
+ * answers 0 or -1 ("denied"); translate that into a negative errno.
  */
 static int fsnode_vop_access(struct vnode *vp, int mode, struct ucred *cred)
 {
@@ -196,13 +197,13 @@ static int fsnode_vop_access(struct vnode *vp, int mode, struct ucred *cred)
 
     (void)cred;
     if (!vp)
-        return EINVAL;
+        return -EINVAL;
     n = VTOFSNODE(vp);
     if (!n)
-        return EINVAL;
+        return -EINVAL;
 
     if (vfs_check_permissions(n, 0, 0, mode) != 0)
-        return EACCES;
+        return -EACCES;
     return 0;
 }
 
@@ -211,15 +212,15 @@ static int fsnode_vop_readlink(struct vnode *vp, struct uio *uio,
 {
     (void)uio; (void)cred;
     if (!vp)
-        return EINVAL;
+        return -EINVAL;
     if (vp->v_type != VLNK)
-        return EINVAL;
+        return -EINVAL;
     /*
      * namei() reads link targets through its own path, and no caller drives
      * uio yet.  Report honestly rather than silently returning an empty
      * target, which would look like a link to "".
      */
-    return EOPNOTSUPP;
+    return -EOPNOTSUPP;
 }
 
 /*
@@ -269,7 +270,7 @@ int vnode_bridge_init(void)
 
     if (!fs_root) {
         kprintf("vnode: bridge init skipped, no fs_root yet\n");
-        return EINVAL;
+        return -EINVAL;
     }
     if (rootvnode) {
         return 0;               /* already published */

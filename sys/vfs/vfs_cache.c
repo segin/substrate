@@ -75,7 +75,7 @@ cache_lookup(struct vnode *dvp, struct vnode **vpp, const char *name, size_t len
                 TAILQ_REMOVE(&nclru, ncp, nc_lru);
                 TAILQ_INSERT_TAIL(&nclru, ncp, nc_lru);
                 rw_wunlock(&nchash_lock);
-                return ENOENT;
+                return -ENOENT;
             }
             *vpp = ncp->nc_vp;
             vref(*vpp);
@@ -89,7 +89,7 @@ cache_lookup(struct vnode *dvp, struct vnode **vpp, const char *name, size_t len
     }
 
     rw_wunlock(&nchash_lock);
-    return ENOENT;
+    return -ENOENT;
 }
 
 /*

@@ -38,12 +38,12 @@ vop_lookup(struct vnode *dvp, struct vnode **vpp, struct componentname *cnp)
 {
     /* Check if dvp is a directory */
     if (dvp->v_type != VDIR)
-        return ENOTDIR;
+        return -ENOTDIR;
 
     if (dvp->v_op && dvp->v_op->vop_lookup)
         return dvp->v_op->vop_lookup(dvp, vpp, cnp);
     
-    return EOPNOTSUPP;
+    return -EOPNOTSUPP;
 }
 
 /*
@@ -80,12 +80,12 @@ int
 vop_create(struct vnode *dvp, struct vnode **vpp, struct componentname *cnp, struct vattr *vap)
 {
     if (dvp->v_type != VDIR)
-        return ENOTDIR;
+        return -ENOTDIR;
 
     if (dvp->v_op && dvp->v_op->vop_create)
         return dvp->v_op->vop_create(dvp, vpp, cnp, vap);
 
-    return EOPNOTSUPP;
+    return -EOPNOTSUPP;
 }
 
 /*
@@ -96,12 +96,12 @@ int
 vop_mknod(struct vnode *dvp, struct vnode **vpp, struct componentname *cnp, struct vattr *vap)
 {
     if (dvp->v_type != VDIR)
-        return ENOTDIR;
+        return -ENOTDIR;
 
     if (dvp->v_op && dvp->v_op->vop_mknod)
         return dvp->v_op->vop_mknod(dvp, vpp, cnp, vap);
 
-    return EOPNOTSUPP;
+    return -EOPNOTSUPP;
 }
 
 /*
@@ -112,12 +112,12 @@ int
 vop_mkdir(struct vnode *dvp, struct vnode **vpp, struct componentname *cnp, struct vattr *vap)
 {
     if (dvp->v_type != VDIR)
-        return ENOTDIR;
+        return -ENOTDIR;
 
     if (dvp->v_op && dvp->v_op->vop_mkdir)
         return dvp->v_op->vop_mkdir(dvp, vpp, cnp, vap);
 
-    return EOPNOTSUPP;
+    return -EOPNOTSUPP;
 }
 
 /*
@@ -130,7 +130,7 @@ vop_remove(struct vnode *dvp, struct vnode *vp, struct componentname *cnp)
     int error;
 
     if (dvp->v_type != VDIR)
-        return ENOTDIR;
+        return -ENOTDIR;
 
     if (dvp->v_op && dvp->v_op->vop_remove) {
         error = dvp->v_op->vop_remove(dvp, vp, cnp);
@@ -142,7 +142,7 @@ vop_remove(struct vnode *dvp, struct vnode *vp, struct componentname *cnp)
         return error;
     }
 
-    return EOPNOTSUPP;
+    return -EOPNOTSUPP;
 }
 
 /*
@@ -155,7 +155,7 @@ vop_rmdir(struct vnode *dvp, struct vnode *vp, struct componentname *cnp)
     int error;
 
     if (dvp->v_type != VDIR)
-        return ENOTDIR;
+        return -ENOTDIR;
 
     if (dvp->v_op && dvp->v_op->vop_rmdir) {
         error = dvp->v_op->vop_rmdir(dvp, vp, cnp);
@@ -167,7 +167,7 @@ vop_rmdir(struct vnode *dvp, struct vnode *vp, struct componentname *cnp)
         return error;
     }
 
-    return EOPNOTSUPP;
+    return -EOPNOTSUPP;
 }
 
 /*
@@ -178,15 +178,15 @@ int
 vop_link(struct vnode *tdvp, struct vnode *vp, struct componentname *cnp)
 {
     if (tdvp->v_type != VDIR)
-        return ENOTDIR;
+        return -ENOTDIR;
 
     if (vp->v_type == VDIR)
-        return EPERM;
+        return -EPERM;
 
     if (tdvp->v_op && tdvp->v_op->vop_link)
         return tdvp->v_op->vop_link(tdvp, vp, cnp);
 
-    return EOPNOTSUPP;
+    return -EOPNOTSUPP;
 }
 
 /*
@@ -197,12 +197,12 @@ int
 vop_whiteout(struct vnode *dvp, struct componentname *cnp, int flags)
 {
     if (dvp->v_type != VDIR)
-        return ENOTDIR;
+        return -ENOTDIR;
 
     if (dvp->v_op && dvp->v_op->vop_whiteout)
         return dvp->v_op->vop_whiteout(dvp, cnp, flags);
 
-    return EOPNOTSUPP;
+    return -EOPNOTSUPP;
 }
 
 /*
@@ -227,7 +227,7 @@ vop_access(struct vnode *vp, int mode, struct ucred *cred)
      */
     if (cred->cr_uid == 0) {
         if ((mode & 1) && (va.va_mode & 0111) == 0)
-            return EACCES;
+            return -EACCES;
         return 0;
     }
 
@@ -260,7 +260,7 @@ vop_access(struct vnode *vp, int mode, struct ucred *cred)
         }
     }
 
-    return ((unsigned int)va.va_mode & (unsigned int)mask) == (unsigned int)mask ? 0 : EACCES;
+    return ((unsigned int)va.va_mode & (unsigned int)mask) == (unsigned int)mask ? 0 : -EACCES;
 }
 
 /*
@@ -273,7 +273,7 @@ vop_getattr(struct vnode *vp, struct vattr *vap, struct ucred *cred)
     if (vp->v_op && vp->v_op->vop_getattr)
         return vp->v_op->vop_getattr(vp, vap, cred);
 
-    return EOPNOTSUPP;
+    return -EOPNOTSUPP;
 }
 
 /*
@@ -286,7 +286,7 @@ vop_setattr(struct vnode *vp, struct vattr *vap, struct ucred *cred)
     if (vp->v_op && vp->v_op->vop_setattr)
         return vp->v_op->vop_setattr(vp, vap, cred);
 
-    return EOPNOTSUPP;
+    return -EOPNOTSUPP;
 }
 
 /*
@@ -299,7 +299,7 @@ vop_pathconf(struct vnode *vp, int name, register_t *retval)
     if (vp->v_op && vp->v_op->vop_pathconf)
         return vp->v_op->vop_pathconf(vp, name, retval);
 
-    return EOPNOTSUPP;
+    return -EOPNOTSUPP;
 }
 
 /*
@@ -336,10 +336,17 @@ vop_open(struct vnode *vp, int mode, struct ucred *cred)
             return error;
     }
 
+    /*
+     * [VNODE-20] Take the open reference through vref(), not by touching
+     * v_usecount directly.  A raw increment leaves an OPEN vnode sitting on
+     * the LRU freelist -- vref() is what unlinks it -- so vnode_recycle()
+     * could clean a vnode that a process had open.
+     */
+    vref(vp);
+
     spinlock_acquire(&vp->v_interlock);
     if ((mode & O_ACCMODE) == O_WRONLY || (mode & O_ACCMODE) == O_RDWR)
         vp->v_writecount++;
-    vp->v_usecount++;
     spinlock_release(&vp->v_interlock);
 
     return 0;
@@ -369,14 +376,28 @@ vop_close(struct vnode *vp, int fflag, struct ucred *cred)
         if (vp->v_writecount == 0)
             do_fsync = 1;
     }
-    if (vp->v_usecount > 0)
-        vp->v_usecount--;
     spinlock_release(&vp->v_interlock);
 
+    /*
+     * fsync BEFORE dropping the reference: vrele() may take the count to
+     * zero, which fires VOP_INACTIVE and can put the vnode on the freelist,
+     * and flushing a vnode we no longer hold is a use-after-free waiting to
+     * happen.
+     */
     if (do_fsync)
-        return vop_fsync(vp, MNT_WAIT, cred);
+        error = vop_fsync(vp, MNT_WAIT, cred);
+    else
+        error = 0;
 
-    return 0;
+    /*
+     * [VNODE-20] Drop the open reference through vrele().  Decrementing
+     * v_usecount by hand skipped the 1->0 transition entirely, so
+     * VOP_INACTIVE never fired on last close (no truncate-on-last-close, and
+     * the vnode never reached the freelist to be reclaimed).
+     */
+    vrele(vp);
+
+    return error;
 }
 
 /*
@@ -392,7 +413,7 @@ vop_read(struct vnode *vp, struct uio *uio, int ioflag, struct ucred *cred)
     (void)ioflag;
 
     if (uio == NULL || uio->uio_iov == NULL || uio->uio_iovcnt <= 0)
-        return EINVAL;
+        return -EINVAL;
 
     if (uio->uio_resid == 0)
         return 0;
@@ -401,7 +422,7 @@ vop_read(struct vnode *vp, struct uio *uio, int ioflag, struct ucred *cred)
         return 0;
 
     if (!(vp->v_op && vp->v_op->vop_read))
-        return EOPNOTSUPP;
+        return -EOPNOTSUPP;
 
     resid_before = uio->uio_resid;
     error = vp->v_op->vop_read(vp, uio, ioflag, cred);
@@ -426,10 +447,10 @@ vop_write(struct vnode *vp, struct uio *uio, int ioflag, struct ucred *cred)
     int error;
 
     if (uio == NULL || uio->uio_iov == NULL || uio->uio_iovcnt <= 0)
-        return EINVAL;
+        return -EINVAL;
 
     if (!(vp->v_op && vp->v_op->vop_write))
-        return EOPNOTSUPP;
+        return -EOPNOTSUPP;
 
     if (ioflag & IO_APPEND)
         uio->uio_offset = vp->v_size;
@@ -467,7 +488,7 @@ vop_ioctl(struct vnode *vp, uint32_t command, void *data, int fflag, struct ucre
     if (vp->v_op && vp->v_op->vop_ioctl)
         return vp->v_op->vop_ioctl(vp, command, data, fflag, cred);
 
-    return EOPNOTSUPP;
+    return -EOPNOTSUPP;
 }
 
 /*
@@ -494,7 +515,7 @@ vop_fsync(struct vnode *vp, int waitfor, struct ucred *cred)
     int error;
 
     if (waitfor != MNT_WAIT && waitfor != MNT_NOWAIT)
-        return EINVAL;
+        return -EINVAL;
 
     if (vp->v_op && vp->v_op->vop_fsync) {
         error = vp->v_op->vop_fsync(vp, waitfor, cred);
@@ -518,7 +539,7 @@ vop_bmap(struct vnode *vp, off_t offset, struct vnode **vpp, uint64_t *bnp,
         return vp->v_op->vop_bmap(vp, offset, vpp, bnp, runp, runb);
 
     if (bnp == NULL)
-        return EINVAL;
+        return -EINVAL;
 
     if (vpp)
         *vpp = vp;
@@ -538,12 +559,12 @@ int
 vop_strategy(struct vnode *vp, void *bp)
 {
     if (bp == NULL)
-        return EINVAL;
+        return -EINVAL;
 
     if (vp->v_op && vp->v_op->vop_strategy)
         return vp->v_op->vop_strategy(vp, bp);
 
-    return EOPNOTSUPP;
+    return -EOPNOTSUPP;
 }
 
 /*
@@ -554,12 +575,12 @@ int
 vop_readdir(struct vnode *vp, struct uio *uio, struct ucred *cred, int *eofflag, int *ncookies, uint64_t **cookies)
 {
     if (vp->v_type != VDIR)
-        return ENOTDIR;
+        return -ENOTDIR;
 
     if (vp->v_op && vp->v_op->vop_readdir)
         return vp->v_op->vop_readdir(vp, uio, cred, eofflag, ncookies, cookies);
 
-    return EOPNOTSUPP;
+    return -EOPNOTSUPP;
 }
 
 
@@ -574,10 +595,10 @@ vop_rename(struct vnode *fdvp, struct vnode *fvp, struct componentname *fcnp,
     int error;
 
     if (fdvp->v_type != VDIR || tdvp->v_type != VDIR)
-        return ENOTDIR;
+        return -ENOTDIR;
 
     if (fdvp->v_mount != tdvp->v_mount)
-        return EXDEV;
+        return -EXDEV;
 
     if (fdvp->v_op && fdvp->v_op->vop_rename) {
         error = fdvp->v_op->vop_rename(fdvp, fvp, fcnp, tdvp, tvp, tcnp);
@@ -592,7 +613,7 @@ vop_rename(struct vnode *fdvp, struct vnode *fvp, struct componentname *fcnp,
         return error;
     }
 
-    return EOPNOTSUPP;
+    return -EOPNOTSUPP;
 }
 
 /*
@@ -604,12 +625,12 @@ vop_symlink(struct vnode *dvp, struct vnode **vpp, struct componentname *cnp,
             struct vattr *vap, const char *target)
 {
     if (dvp->v_type != VDIR)
-        return ENOTDIR;
+        return -ENOTDIR;
 
     if (dvp->v_op && dvp->v_op->vop_symlink)
         return dvp->v_op->vop_symlink(dvp, vpp, cnp, vap, target);
 
-    return EOPNOTSUPP;
+    return -EOPNOTSUPP;
 }
 
 /*
@@ -620,12 +641,12 @@ int
 vop_readlink(struct vnode *vp, struct uio *uio, struct ucred *cred)
 {
     if (vp->v_type != VLNK)
-        return EINVAL;
+        return -EINVAL;
 
     if (vp->v_op && vp->v_op->vop_readlink)
         return vp->v_op->vop_readlink(vp, uio, cred);
 
-    return EOPNOTSUPP;
+    return -EOPNOTSUPP;
 }
 
 /*
@@ -664,7 +685,7 @@ vop_print(struct vnode *vp)
     if (vp->v_op && vp->v_op->vop_print)
         return vp->v_op->vop_print(vp);
 
-    return EOPNOTSUPP;
+    return -EOPNOTSUPP;
 }
 
 /*
@@ -718,5 +739,5 @@ vop_advlock(struct vnode *vp, void *id, int op, void *fl, int flags) {
     (void)op;
     (void)fl;
     (void)flags;
-    return EOPNOTSUPP;
+    return -EOPNOTSUPP;
 }
