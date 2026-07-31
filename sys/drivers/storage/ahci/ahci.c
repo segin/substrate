@@ -43,6 +43,20 @@
  * reads (each a VM-exit under KVM) burning the CPU for the whole DMA. */
 #define AHCI_IRQ_FASTSPIN      64
 
+/*
+ * [AHCI-10] Largest bounce buffer a single command will ask for.
+ *
+ * max_sectors used to advertise 4 MiB, so every large I/O called
+ * pmm_alloc_contiguous for a 1024-page PHYSICALLY CONTIGUOUS run, memset it,
+ * DMA'd, then memcpy'd out -- and on allocation failure the whole request
+ * failed, with no fallback to a smaller chunk.  Once memory is fragmented a
+ * contiguous 4 MiB run is exactly what you cannot get, so the root disk began
+ * failing reads instead of degrading.  128 KiB is 32 contiguous pages, which
+ * an allocator under pressure can still satisfy; the read/write loops already
+ * chunk, so the only cost is more commands per request.
+ */
+#define AHCI_MAX_XFER_BYTES  (128u * 1024u)
+
 /* COMRESET assert time.  SATA requires PxSCTL.DET=1 be held for at least
  * 1 ms; get_uptime_ms() advances in 4 ms ticks at HZ=250, so a deadline of
  * "+1" can expire on the very next tick after ~0 real time.  Ask for enough
@@ -347,6 +361,38 @@ static int ahci_port_alloc(ahci_port_t *ap) {
     return 0;
 }
 
+/*
+ * [AHCI-11] Undo ahci_port_init.  It allocates three DMA regions and STARTS
+ * the port's command engine, but the caller only decides whether a device is
+ * present afterwards -- and the no-device path was a bare `continue`, which
+ * leaked all three allocations and left ST/FRE set with the HBA pointing at
+ * memory nothing tracked any more.
+ */
+static void ahci_port_teardown(ahci_port_t *ap) {
+    if (!ap)
+        return;
+
+    /* Stop the engine first: the HBA must not be looking at these regions
+     * when they go back to the allocator. */
+    if (ap->regs)
+        (void)ahci_port_stop(ap->regs);
+
+    if (ap->cmd_table) {
+        dma_free_coherent(ap->cmd_table, sizeof(hba_cmd_table_t));
+        ap->cmd_table = NULL;
+    }
+    if (ap->fis_recv) {
+        dma_free_coherent(ap->fis_recv, sizeof(hba_fis_t));
+        ap->fis_recv = NULL;
+    }
+    if (ap->cmd_list) {
+        dma_free_coherent(ap->cmd_list,
+                          sizeof(hba_cmd_header_t) * AHCI_MAX_CMD_SLOTS);
+        ap->cmd_list = NULL;
+    }
+    ap->type = AHCI_PORT_TYPE_NONE;
+}
+
 static int ahci_port_init(ahci_port_t *ap, hba_port_t *port_regs, int port_num) {
     ap->port_num = port_num;
     ap->regs = port_regs;
@@ -561,6 +607,17 @@ static int ahci_port_issue_cmd(ahci_port_t *ap, uint32_t timeout_ms) {
     ap->pending_is = 0;
     port->is = 0xFFFFFFFF;
 
+    /*
+     * [AHCI-17] The command list, command table and PRDT are ordinary
+     * (non-volatile) memory; PxCI is volatile MMIO.  Nothing stopped the
+     * compiler from sinking those descriptor stores past this one, handing
+     * the HBA a slot whose table it has not finished writing.  It has not
+     * bitten at -O2 because the intervening volatile MMIO accesses happen to
+     * order it, but that is luck, not a guarantee -- LTO or -O3 could
+     * reorder it.  Make the dependency explicit.
+     */
+    __sync_synchronize();
+
     /* Issue command in slot 0 */
     port->ci = (1U << AHCI_CMD_SLOT);
 
@@ -737,7 +794,15 @@ static int ahci_ata_dma_cmd(ahci_port_t *ap, uint8_t command,
     hdr->b     = 0;
     hdr->c     = 1;    /* Clear BSY on R_OK */
     hdr->pmp   = 0;
-    hdr->prdtl = 1;    /* 1 PRDT entry */
+    /*
+     * [AHCI-16] prdtl was hardcoded to 1 even when byte_count == 0, leaving
+     * the HBA a PRDT entry that is entirely zero: dba = 0 and dbc = 0, which
+     * on AHCI means a ONE-byte transfer to physical address 0.  A
+     * zero-length command must advertise no PRDT entries at all.  Currently
+     * unreachable (every caller passes sector_count >= 1) but it is what
+     * blocks issuing a FLUSH CACHE, which carries no data.
+     */
+    hdr->prdtl = (byte_count > 0) ? 1 : 0;
     hdr->prdbc = 0;
 
     /* Issue and wait */
@@ -799,6 +864,16 @@ static int ahci_identify(ahci_port_t *ap) {
         return -1;
     }
 
+    /*
+     * [AHCI-13] There is one command table per port and this is the third
+     * producer that scribbles on it, but it was the only one not taking
+     * cmd_lock.  That was safe only by the accident that probing runs
+     * serially -- and ahci_register_disk publishes sataN while later ports
+     * are still being probed, so the assumption was already thin.  Take the
+     * lock like ahci_ata_dma_cmd and ahci_scsi_execute do.
+     */
+    mutex_lock(&ap->cmd_lock);
+
     memset(ap->cmd_table, 0, sizeof(hba_cmd_table_t));
 
     /* Choose IDENTIFY command based on device type */
@@ -839,6 +914,7 @@ static int ahci_identify(ahci_port_t *ap) {
         /* See ahci_ata_dma_cmd(): a wedged port may still write id_buf. */
         if (ret != AHCI_CMD_WEDGED)
             dma_free_coherent(id_buf, 512);
+        mutex_unlock(&ap->cmd_lock);
         return -1;
     }
 
@@ -931,6 +1007,7 @@ static int ahci_identify(ahci_port_t *ap) {
     }
 
     dma_free_coherent(id_buf, 512);
+    mutex_unlock(&ap->cmd_lock);
     return 0;
 }
 
@@ -955,8 +1032,10 @@ static int ahci_bdev_read(blkdev_t *bdev, uint64_t sector,
         return -1;
     }
 
-    /* Max sectors per command: limited by PRDT (single entry, ~4MB) */
-    max_sectors = (4 * 1024 * 1024) / ap->sector_size;
+    /* Max sectors per command: bounded by the bounce buffer we can actually
+     * allocate contiguously (see AHCI_MAX_XFER_BYTES). */
+    max_sectors = AHCI_MAX_XFER_BYTES / ap->sector_size;
+    if (max_sectors == 0) max_sectors = 1;
     if (max_sectors > 65535) {
         max_sectors = 65535;
     }
@@ -1000,7 +1079,8 @@ static int ahci_bdev_write(blkdev_t *bdev, uint64_t sector,
         return -1;
     }
 
-    max_sectors = (4 * 1024 * 1024) / ap->sector_size;
+    max_sectors = AHCI_MAX_XFER_BYTES / ap->sector_size;   /* [AHCI-10] */
+    if (max_sectors == 0) max_sectors = 1;
     if (max_sectors > 65535) {
         max_sectors = 65535;
     }
@@ -1385,6 +1465,7 @@ static void ahci_probe_ports(ahci_controller_t *ctrl) {
         ap->ctrl = ctrl;   /* back-pointer so issue_cmd can see irq_ready */
 
         if (!ahci_port_detect_device(ap)) {
+            ahci_port_teardown(ap);   /* [AHCI-11] don't abandon it running */
             continue;
         }
 
@@ -1466,6 +1547,7 @@ static int ahci_pci_attach(struct device *dev) {
 
     if (ahci_ctrl_count >= AHCI_MAX_CONTROLLERS) {
         kprint("ahci: too many AHCI controllers; ignoring this one\n");
+        iounmap(mmio_base);   /* [AHCI-12] don't leak the BAR5 mapping */
         return -1;
     }
 
@@ -1476,7 +1558,11 @@ static int ahci_pci_attach(struct device *dev) {
     ctrl->pci_dev = pdev;
 
     if (ahci_hba_init(ctrl) < 0) {
+        /* [AHCI-12] Currently unreachable -- ahci_hba_init always returns 0 --
+         * but it must not leak the mapping if that ever changes. */
         kprint("ahci: HBA init failed\n");
+        ctrl->abar = NULL;
+        iounmap(mmio_base);
         return -1;
     }
 
