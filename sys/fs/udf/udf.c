@@ -681,14 +681,14 @@ static fs_node_t *udf_vfs_finddir(fs_node_t *node, char *name) {
 }
 
 static int udf_vfs_mkdir(fs_node_t *parent, const char *name, uint16_t permission) {
-    if (!parent || !name) return -1;
+    if (!parent || !name) return -EINVAL;
     
     udf_node_t *pctx = (udf_node_t *)(uintptr_t)parent->impl;
     struct udf_fs *fs = pctx->fs;
     
     /* Allocate block for new directory */
     uint32_t block = udf_alloc_block(fs);
-    if (block == 0) return -1; // No space
+    if (block == 0) return -ENOSPC; // No space
 
     // Get current process credentials
     uint32_t uid = current_process ? current_process->uid : 0;
@@ -697,7 +697,7 @@ static int udf_vfs_mkdir(fs_node_t *parent, const char *name, uint16_t permissio
     /* Create new directory FE */
     if (udf_create_fe(fs, block, UDF_FILETYPE_DIR, uid, gid, permission) != 0) {
         udf_free_block(fs, block);
-        return -1;
+        return -EIO;
     }
     
     /* Create ICB to point to new directory */
@@ -711,14 +711,14 @@ static int udf_vfs_mkdir(fs_node_t *parent, const char *name, uint16_t permissio
     struct udf_fe *pfe = (struct udf_fe *)pctx->fe_sector;
     if (udf_add_fid(fs, pfe, pctx->icb.block, name, &new_icb, UDF_FID_DIRECTORY) != 0) {
         udf_free_block(fs, block);
-        return -1;
+        return -EIO;
     }
     
     /* Add . and .. to new directory */
     struct udf_fe new_fe;
     struct udf_long_ad fe_icb = new_icb;
     // Read the newly created FE so we can add to it
-    if (udf_read_fe(fs, &fe_icb, &new_fe) != 0) return -1;
+    if (udf_read_fe(fs, &fe_icb, &new_fe) != 0) return -EIO;
     
     // Add .. (parent)
     if (udf_add_fid(fs, &new_fe, block, "..", &pctx->icb, UDF_FID_DIRECTORY | UDF_FID_PARENT) != 0) {
@@ -763,11 +763,11 @@ static int udf_vop_mkdir(struct vnode *dvp, struct vnode **vpp, struct component
 }
 
 static int udf_unmount(fs_node_t *root) {
-    if (!root) return -1;
+    if (!root) return -EINVAL;
     udf_node_t *ctx = (udf_node_t *)(uintptr_t)root->impl;
-    if (!ctx) return -1;
+    if (!ctx) return -EINVAL;
     struct udf_fs *fs = ctx->fs;
-    if (!fs) return -1;
+    if (!fs) return -EINVAL;
 
     // Invalidate node cache for this filesystem
     for (int i = 0; i < UDF_NODE_CACHE_SIZE; i++) {

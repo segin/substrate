@@ -1339,9 +1339,9 @@ static int exfat_statfs(fs_node_t *node, struct statfs *buf) {
 }
 
 static int exfat_unmount(fs_node_t *root) {
-    if (!root) return -1;
+    if (!root) return -EINVAL;
     exfat_node_t *ctx = (exfat_node_t *)(uintptr_t)root->impl;
-    if (!ctx || !ctx->fs) return -1;
+    if (!ctx || !ctx->fs) return -EINVAL;
     exfat_fs_t *fs = ctx->fs;
 
     for (uint32_t i = 0; i < EXFAT_NODE_CACHE_SIZE; i++) {

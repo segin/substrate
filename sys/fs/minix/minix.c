@@ -1059,7 +1059,7 @@ static fs_node_t *minix_mount(const char *device, uint32_t flags, void *data) {
 }
 
 static int minix_unmount(fs_node_t *root) {
-    if (!root) return -1;
+    if (!root) return -EINVAL;
     minix_fs_t *fs = (minix_fs_t *)(uintptr_t)root->impl;
 
     if (root->ptr) {
@@ -1155,7 +1155,7 @@ static int minix_mknod(fs_node_t *dir, const char *name, uint16_t mode, uint32_t
 
     // 1. Allocate Inode
     int inode_num = minix_alloc_inode(fs);
-    if (inode_num < 0) return -1;
+    if (inode_num < 0) return -ENOSPC;
 
     // 2. Prepare FS Node wrapper
     fs_node_t new_node;
@@ -1183,7 +1183,7 @@ static int minix_mknod(fs_node_t *dir, const char *name, uint16_t mode, uint32_t
     void *raw_inode = kmalloc(sizeof(struct minix_inode_wrapper));
     if (!raw_inode) {
         minix_free_inode(fs, (uint32_t)inode_num);
-        return -1;
+        return -EIO;
     }
     memset(raw_inode, 0, sizeof(struct minix_inode_wrapper));
 
@@ -1204,7 +1204,7 @@ static int minix_mknod(fs_node_t *dir, const char *name, uint16_t mode, uint32_t
     if (minix_write_inode(fs, &new_node) != 0) {
         kfree(raw_inode, sizeof(struct minix_inode_wrapper));
         minix_free_inode(fs, (uint32_t)inode_num);
-        return -1;
+        return -EIO;
     }
 
     kfree(raw_inode, sizeof(struct minix_inode_wrapper));
@@ -1213,7 +1213,7 @@ static int minix_mknod(fs_node_t *dir, const char *name, uint16_t mode, uint32_t
     // 5. Add to Directory
     if (minix_dir_add(dir, name, inode_num) != 0) {
         minix_free_inode(fs, (uint32_t)inode_num);
-        return -1;
+        return -EIO;
     }
 
     return 0;
@@ -1224,7 +1224,7 @@ static int minix_symlink(fs_node_t *dir, const char *name, const char *target) {
 
     // 1. Allocate Inode
     int inode_num_int = minix_alloc_inode(fs);
-    if (inode_num_int < 0) return -1;
+    if (inode_num_int < 0) return -ENOSPC;
     uint32_t inode_num = (uint32_t)inode_num_int;
 
     // 2. Initialize Inode
@@ -1243,7 +1243,7 @@ static int minix_symlink(fs_node_t *dir, const char *name, const char *target) {
     new_node.ptr = kmalloc(sizeof(struct minix_inode_wrapper));
     if (!new_node.ptr) {
         minix_free_inode(fs, inode_num);
-        return -1;
+        return -EIO;
     }
     memset(new_node.ptr, 0, sizeof(struct minix_inode_wrapper));
     if (v2) ((struct minix_inode_v2 *)new_node.ptr)->i_nlinks = 1;
@@ -1254,7 +1254,7 @@ static int minix_symlink(fs_node_t *dir, const char *name, const char *target) {
     if (zone == 0) {
         kfree(new_node.ptr, sizeof(struct minix_inode_wrapper));
         minix_free_inode(fs, inode_num);
-        return -1;
+        return -EIO;
     }
 
     if (v2) ((struct minix_inode_v2 *)new_node.ptr)->i_zone[0] = zone;
@@ -1268,14 +1268,14 @@ static int minix_symlink(fs_node_t *dir, const char *name, const char *target) {
         kfree(new_node.ptr, sizeof(struct minix_inode_wrapper));
         minix_free_block(fs, zone);
         minix_free_inode(fs, inode_num);
-        return -1;
+        return -EIO;
     }
 
     if (minix_write_inode(fs, &new_node) != 0) {
         kfree(new_node.ptr, sizeof(struct minix_inode_wrapper));
         minix_free_block(fs, zone);
         minix_free_inode(fs, inode_num);
-        return -1;
+        return -EIO;
     }
 
     kfree(new_node.ptr, sizeof(struct minix_inode_wrapper));
@@ -1284,15 +1284,15 @@ static int minix_symlink(fs_node_t *dir, const char *name, const char *target) {
     if (minix_dir_add(dir, name, (uint16_t)inode_num) != 0) {
         minix_free_block(fs, zone);
         minix_free_inode(fs, inode_num);
-        return -1;
+        return -EIO;
     }
 
     return 0;
 }
 
 static int minix_link(fs_node_t *dir, fs_node_t *node, const char *name) {
-    if (!dir || !node || !name) return -1;
-    if (strlen(name) > 30) return -1;
+    if (!dir || !node || !name) return -EINVAL;
+    if (strlen(name) > 30) return -ENAMETOOLONG;
 
     minix_fs_t *fs = (minix_fs_t *)(uintptr_t)dir->impl;
 
@@ -1332,7 +1332,7 @@ static int minix_link(fs_node_t *dir, fs_node_t *node, const char *name) {
             strncpy(have, d->name, namelen);
             have[namelen] = '\0';
             if (strcmp(have, name) == 0) {
-                return -1;              /* name already present */
+                return -EEXIST;              /* name already present */
             }
         }
         offset += ent_size;
@@ -1345,23 +1345,23 @@ static int minix_link(fs_node_t *dir, fs_node_t *node, const char *name) {
 
     // 2. Increment link count
     bool v2 = (fs->sb.s_magic == MINIX_V2_Magic || fs->sb.s_magic == MINIX_V2_Magic_14);
-    if (!node->ptr) return -1;
+    if (!node->ptr) return -EIO;
 
     if (v2) {
         struct minix_inode_v2 *inode = (struct minix_inode_v2 *)node->ptr;
-        if (inode->i_nlinks == 0xFFFFU) return -1;
+        if (inode->i_nlinks == 0xFFFFU) return -EMLINK;
         inode->i_nlinks++;
         if (minix_write_inode(fs, node) != 0) {
             inode->i_nlinks--;
-            return -1;
+            return -EIO;
         }
     } else {
         struct minix_inode_v1 *inode = (struct minix_inode_v1 *)node->ptr;
-        if (inode->i_nlinks == 255U) return -1;
+        if (inode->i_nlinks == 255U) return -EMLINK;
         inode->i_nlinks++;
         if (minix_write_inode(fs, node) != 0) {
             inode->i_nlinks--;
-            return -1;
+            return -EIO;
         }
     }
 
@@ -1379,7 +1379,7 @@ static int minix_link(fs_node_t *dir, fs_node_t *node, const char *name) {
             ((struct minix_inode_v1 *)node->ptr)->i_nlinks--;
         }
         minix_write_inode(fs, node);
-        return -1;
+        return -EIO;
     }
 
     // Update directory inode (size)
@@ -1415,7 +1415,7 @@ static int minix_unlink(fs_node_t *dir, const char *name) {
     while (offset < dir->length) {
         memset(&entry, 0, sizeof(entry));
         if (minix_read(dir, offset, ent_size, (uint8_t *)&entry) != ent_size) {
-            return -1;
+            return -EIO;
         }
 
         if (entry.inode != 0 && strncmp(entry.name, name, namelen) == 0) {
@@ -1425,11 +1425,11 @@ static int minix_unlink(fs_node_t *dir, const char *name) {
             fs_node_t target;
             memset(&target, 0, sizeof(target));
             if (minix_read_inode(fs, target_inode_num, &target) != 0) {
-                return -1;
+                return -EIO;
             }
 
             if (!target.ptr) {
-                return -1;
+                return -EIO;
             }
 
             /*
@@ -1450,7 +1450,7 @@ static int minix_unlink(fs_node_t *dir, const char *name) {
             memset(entry.name, 0, sizeof(entry.name));
             if (minix_write(dir, offset, ent_size, (uint8_t *)&entry) != ent_size) {
                 kfree(target.ptr, sizeof(struct minix_inode_wrapper));
-                return -1;
+                return -EIO;
             }
 
             if (v2) {
@@ -1489,7 +1489,7 @@ static int minix_unlink(fs_node_t *dir, const char *name) {
         offset += ent_size;          /* MINIX-17 */
     }
 
-    return -1;
+    return -ENOENT;
 }
 
 static int minix_dir_is_empty(fs_node_t *node) {
@@ -1513,19 +1513,19 @@ static int minix_rmdir(fs_node_t *dir, const char *name) {
     fs_node_t *target;
     int ret;
 
-    if (!dir || !name || !name[0]) return -1;
-    if (!(dir->flags & FS_DIRECTORY)) return -1;
-    if (!strcmp(name, ".") || !strcmp(name, "..")) return -1;
+    if (!dir || !name || !name[0]) return -EINVAL;
+    if (!(dir->flags & FS_DIRECTORY)) return -ENOTDIR;
+    if (!strcmp(name, ".") || !strcmp(name, "..")) return -EINVAL;
 
     target = minix_finddir(dir, (char *)name);
-    if (!target) return -1;
+    if (!target) return -ENOENT;
     if (!(target->flags & FS_DIRECTORY)) {
         if (target->ptr) kfree(target->ptr, sizeof(struct minix_inode_wrapper));
-        return -1;
+        return -ENOTDIR;
     }
     if (!minix_dir_is_empty(target)) {
         if (target->ptr) kfree(target->ptr, sizeof(struct minix_inode_wrapper));
-        return -1;
+        return -ENOTEMPTY;
     }
 
     fs = (minix_fs_t *)(uintptr_t)dir->impl;

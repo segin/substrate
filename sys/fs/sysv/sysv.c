@@ -27,6 +27,7 @@
 #include <sys/stat.h>
 #include <sys/statfs.h>
 #include <vm/vm_kmem.h>
+#include <sys/errno.h>
 
 /* ===================================================================
  * Forward decls
@@ -443,7 +444,7 @@ fs_node_t *sysv_mount(const char *device, uint32_t flags, void *data) {
 }
 
 static int sysv_unmount(fs_node_t *root) {
-    if (!root) return -1;
+    if (!root) return -EINVAL;
     sysv_node_t *nd = (sysv_node_t *)root->ptr;
     if (nd) {
         sysv_fs_t *fs = nd->fs;
