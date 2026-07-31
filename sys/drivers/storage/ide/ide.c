@@ -126,6 +126,11 @@ int ide_transfer_read_once(ide_drive_ctx_t *ctx, uint64_t sector,
     ide_device_t *dev = &ide_devices[ctx->index];
 
     if (ctx->type == 1) {
+        /* [IDE-19] count is uint32 and was narrowed to uint16 with no bound
+         * check, so a request for exactly 65536 sectors became 0. */
+        if (count == 0 || count > 0xFFFFU) {
+            return -1;
+        }
         /* IDE-02: use the size negotiated at probe time, not a constant. */
         return ide_atapi_read_sectors_ss(channel, drive, (uint32_t)sector,
                                          (uint16_t)count, buffer,

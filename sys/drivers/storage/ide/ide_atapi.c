@@ -44,13 +44,32 @@ int ide_atapi_packet(uint8_t channel, uint8_t drive,
     ide_select_drive(channel, drive);
     if (ide_wait_ready_ex(channel, IDE_TIMEOUT_PACKET_MS, "packet-select", 0) < 0) return -1;
 
-    /* Set byte count limit (in LBA_MID and LBA_HIGH) */
-    /* This tells the device the maximum transfer size */
-    ide_write_reg(channel, ATA_REG_LBA_MID, buffer_len & 0xFF);
-    ide_write_reg(channel, ATA_REG_LBA_HIGH, (buffer_len >> 8) & 0xFF);
+    /*
+     * [IDE-07] The byte-count limit is a 16-bit field split across LBA_MID
+     * and LBA_HIGH.  buffer_len is 32-bit and was written straight in with
+     * `& 0xFF` / `>> 8 & 0xFF`, discarding bits 16 and up: a 256-sector CD
+     * read-ahead (524288 bytes) programmed a BCL of 0x0000, which is
+     * illegal, so the transfer failed spuriously -- and three of those drove
+     * ide_mark_offline() and reset the channel.  Clamp to the largest legal
+     * even value instead of silently truncating.
+     */
+    uint32_t bcl = buffer_len;
+    if (bcl > 0xFFFEU)
+        bcl = 0xFFFEU;
+    bcl &= ~1U;                     /* BCL must be even */
+    if (bcl == 0)
+        return -1;                  /* a zero limit is not expressible */
+
+    ide_write_reg(channel, ATA_REG_LBA_MID, bcl & 0xFF);
+    ide_write_reg(channel, ATA_REG_LBA_HIGH, (bcl >> 8) & 0xFF);
 
     /* Issue PACKET command */
     ide_write_reg(channel, ATA_REG_COMMAND, ATA_CMD_PACKET);
+
+    /* [IDE-17] The command register write needs the 400 ns settle before
+     * STATUS is meaningful; without it the first read can still show the
+     * pre-command state and the ATAPI path returns a spurious error. */
+    ide_400ns(channel);
 
     /* Wait for DRQ to send the command packet */
     if (ide_wait_bsy(channel, IDE_TIMEOUT_PACKET_MS, "packet-command") < 0) {

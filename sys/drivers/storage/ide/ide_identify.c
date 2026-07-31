@@ -81,7 +81,17 @@ void ide_parse_identify_data(ide_device_t *dev, const uint16_t *buffer,
     }
 
     if (type == 0) {
-        if ((feature_flags & IDE_FEATURE_LBA48) != 0) {
+        /*
+         * [IDE-20] Word 83's contents are only meaningful when its validity
+         * bits (15:14) read 01; on a floating bus every word reads 0xFFFF,
+         * which sets bits 15:14 to 11 and made the LBA48 branch fire with
+         * words 100-103 all 0xFFFF -- a reported capacity of
+         * 0xFFFFFFFFFFFF sectors.  Require the validity pattern before
+         * trusting the 48-bit capacity, and fall back to the 28-bit words.
+         */
+        int word83_valid = ((buffer[83] & 0xC000U) == 0x4000U);
+
+        if ((feature_flags & IDE_FEATURE_LBA48) != 0 && word83_valid) {
             total_sectors = (uint64_t)buffer[100] |
                             ((uint64_t)buffer[101] << 16) |
                             ((uint64_t)buffer[102] << 32) |
@@ -89,6 +99,12 @@ void ide_parse_identify_data(ide_device_t *dev, const uint16_t *buffer,
         } else {
             total_sectors = (uint64_t)buffer[60] |
                             ((uint64_t)buffer[61] << 16);
+        }
+
+        /* A 48-bit command cannot address beyond 2^48 sectors, and an
+         * all-ones IDENTIFY must not be believed. */
+        if (total_sectors >= (1ULL << 48)) {
+            total_sectors = 0;
         }
     }
 
