@@ -252,6 +252,22 @@ struct fis_dev_bits {
 #define AHCI_ATA_CMD_IDENTIFY_PACKET 0xA1
 #define AHCI_ATA_CMD_READ_DMA_EXT    0x25
 #define AHCI_ATA_CMD_WRITE_DMA_EXT   0x35
+/*
+ * [AHCI-07] The 28-bit counterparts.  READ/WRITE DMA EXT are 48-bit-only
+ * opcodes: a drive that does not implement LBA48 aborts them, so a driver
+ * that issues them unconditionally enumerates an LBA28 disk with a correct
+ * size and then fails every single I/O to it.
+ */
+#define AHCI_ATA_CMD_READ_DMA        0xC8
+#define AHCI_ATA_CMD_WRITE_DMA       0xCA
+
+/* An LBA28 command addresses 2^28 sectors and counts at most 256 per
+ * command (sector count 0 means 256). */
+#define AHCI_LBA28_MAX_SECTORS       256u
+#define AHCI_LBA28_MAX_LBA           (1ULL << 28)
+/* An LBA48 command carries a 48-bit LBA; anything above cannot be expressed
+ * and would silently wrap into the low bits (see AHCI-08). */
+#define AHCI_LBA48_MAX_LBA           (1ULL << 48)
 #define AHCI_ATA_CMD_FLUSH_CACHE_EXT 0xEA
 #define AHCI_ATA_CMD_PACKET          0xA0
 

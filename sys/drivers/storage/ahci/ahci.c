@@ -146,6 +146,7 @@ typedef struct ahci_controller {
     ahci_port_t     ports[AHCI_MAX_PORTS];
     int             port_count;     /* Number of active ports */
     int             disk_count;     /* Running sata disk index */
+    size_t          bar_sz;         /* bytes actually ioremap'd for BAR5 */
     uint8_t         irq;            /* PCI interrupt line */
     volatile int    irq_ready;      /* completion IRQ hooked + enabled */
 } ahci_controller_t;
@@ -742,6 +743,24 @@ static int ahci_ata_dma_cmd(ahci_port_t *ap, uint8_t command,
     /* Issue and wait */
     int ret = ahci_port_issue_cmd(ap, AHCI_TIMEOUT_CMD);
 
+    /*
+     * [AHCI-04] hdr->prdbc is the HBA's report of how many bytes it actually
+     * moved.  It is zeroed before every command and declared volatile in
+     * ahci.h for exactly this read-back -- which never happened.  A short
+     * transfer was therefore indistinguishable from a complete one, and
+     * because the bounce buffer comes from dma_alloc_coherent (zero-filled),
+     * the untransferred tail was handed back as genuine zero data under a
+     * SUCCESS return.  Silent corruption, not a visible I/O error.
+     */
+    if (ret == 0) {
+        uint32_t moved = hdr->prdbc;
+        if (moved != byte_count) {
+            kprintf("ahci: short transfer on port %d: %u of %u bytes\n",
+                    ap->port_num, moved, byte_count);
+            ret = -1;
+        }
+    }
+
     if (dma_buf) {
         if (!is_write && ret == 0) {
             memcpy(data_virt, dma_buf, byte_count);
@@ -892,6 +911,25 @@ static int ahci_identify(ahci_port_t *ap) {
         ap->sectors = (uint64_t)id_buf[60] | ((uint64_t)id_buf[61] << 16);
     }
 
+    /*
+     * [AHCI-08] sector_size is already sanity-checked above; the capacity was
+     * taken verbatim from IDENTIFY.  ahci_build_h2d_fis writes only lba0..lba5
+     * -- 48 bits -- so a device reporting 2^48 + 5 sectors would let an access
+     * to that sector silently wrap and land on LBA 5, i.e. straight through
+     * the partition table.  Clamp to what the command set can actually
+     * address.
+     */
+    {
+        uint64_t max = ap->lba48 ? AHCI_LBA48_MAX_LBA : AHCI_LBA28_MAX_LBA;
+        if (ap->sectors > max) {
+            kprintf("ahci: device claims %llu sectors, clamping to %llu "
+                    "(LBA%d addressing limit)\n",
+                    (unsigned long long)ap->sectors,
+                    (unsigned long long)max, ap->lba48 ? 48 : 28);
+            ap->sectors = max;
+        }
+    }
+
     dma_free_coherent(id_buf, 512);
     return 0;
 }
@@ -922,11 +960,23 @@ static int ahci_bdev_read(blkdev_t *bdev, uint64_t sector,
     if (max_sectors > 65535) {
         max_sectors = 65535;
     }
+    /* [AHCI-07] An LBA28 command counts at most 256 sectors. */
+    if (!ap->lba48 && max_sectors > AHCI_LBA28_MAX_SECTORS) {
+        max_sectors = AHCI_LBA28_MAX_SECTORS;
+    }
 
     while (count > 0) {
         chunk = (count > max_sectors) ? max_sectors : count;
 
-        if (ahci_ata_dma_cmd(ap, AHCI_ATA_CMD_READ_DMA_EXT,
+        /*
+         * [AHCI-07] ap->lba48 was computed at identify time and then read
+         * nowhere: both paths issued READ/WRITE DMA EXT unconditionally.
+         * Those opcodes are 48-bit-only, so an LBA28 drive enumerated with a
+         * correct capacity and then aborted every transfer.
+         */
+        if (ahci_ata_dma_cmd(ap,
+                              ap->lba48 ? AHCI_ATA_CMD_READ_DMA_EXT
+                                        : AHCI_ATA_CMD_READ_DMA,
                               sector, chunk, buf, 0) < 0) {
             return -1;
         }
@@ -954,11 +1004,16 @@ static int ahci_bdev_write(blkdev_t *bdev, uint64_t sector,
     if (max_sectors > 65535) {
         max_sectors = 65535;
     }
+    if (!ap->lba48 && max_sectors > AHCI_LBA28_MAX_SECTORS) {   /* [AHCI-07] */
+        max_sectors = AHCI_LBA28_MAX_SECTORS;
+    }
 
     while (count > 0) {
         chunk = (count > max_sectors) ? max_sectors : count;
 
-        if (ahci_ata_dma_cmd(ap, AHCI_ATA_CMD_WRITE_DMA_EXT,
+        if (ahci_ata_dma_cmd(ap,
+                              ap->lba48 ? AHCI_ATA_CMD_WRITE_DMA_EXT
+                                        : AHCI_ATA_CMD_WRITE_DMA,
                               sector, chunk, (void *)buf, 1) < 0) {
             return -1;
         }
@@ -1016,6 +1071,21 @@ static int ahci_scsi_execute(scsi_link_t *link, scsi_request_t *req) {
         return -1;
     }
 
+    /*
+     * [AHCI-06] Reject transfer lengths the hardware fields cannot express
+     * before building the command.  The ATAPI byte-count-limit is 16 bits
+     * (so 0 and >= 65536 are both unrepresentable -- BCL 0 is illegal per
+     * ACS-3), and the PRDT dbc field is 22 bits, so anything above 4 MiB
+     * truncates silently.
+     */
+    if (req->data_len == 0 || req->data_len > 65534u) {
+        kprintf("ahci: rejecting ATAPI transfer of %u bytes "
+                "(byte-count-limit is 16-bit, 1..65534)\n", req->data_len);
+        req->status = SCSI_STATUS_CHECK_CONDITION;
+        req->data_xfer = 0;
+        return -1;
+    }
+
     /* Map SCSI target to AHCI port.
      * Target ID is the port index in our registration order. */
     port_idx = req->device->target;
@@ -1052,6 +1122,14 @@ static int ahci_scsi_execute(scsi_link_t *link, scsi_request_t *req) {
     fis->command  = AHCI_ATA_CMD_PACKET;
     /* Feature bit 0 = DMA mode, bit 2 = DMADIR (1=D2H read, 0=H2D write) */
     fis->featurel = (req->flags & SCSI_REQ_WRITE) ? 0x01 : 0x05;
+    /*
+     * [AHCI-06] The ATAPI byte-count-limit is 16 bits, and req->data_len is a
+     * uint32.  scsi_ctl.c explicitly permits data_len == 65536, which
+     * truncates to a BCL of 0 -- illegal per ACS-3 -- and data_len == 0
+     * likewise gives BCL 0.  The same value also feeds the PRDT's 22-bit dbc
+     * field, where anything over 4 MiB truncates silently.  Reject what
+     * cannot be expressed rather than issuing a malformed command.
+     */
     fis->lba1     = (uint8_t)(req->data_len);         /* Byte count low */
     fis->lba2     = (uint8_t)(req->data_len >> 8);    /* Byte count high */
 
@@ -1111,7 +1189,20 @@ static int ahci_scsi_execute(scsi_link_t *link, scsi_request_t *req) {
     }
 
     req->status = SCSI_STATUS_GOOD;
-    req->data_xfer = req->data_len;
+    /*
+     * [AHCI-09] data_xfer was set to the full requested length regardless of
+     * what the device actually returned, and scsi_ctl.c uses it as the
+     * copyout length -- so a device answering an INQUIRY with 36 bytes had
+     * the rest of the caller's buffer filled from the zero-filled bounce
+     * allocation and reported as real data.  Report what the HBA says it
+     * moved, clamped to what was asked for.
+     */
+    {
+        uint32_t moved = hdr->prdbc;
+        if (moved > req->data_len)
+            moved = req->data_len;
+        req->data_xfer = moved;
+    }
     mutex_unlock(&ap->cmd_lock);
     return 0;
 }
@@ -1201,6 +1292,37 @@ static int ahci_hba_init(ahci_controller_t *ctrl) {
     ctrl->cap = abar->cap;
     ctrl->pi  = abar->pi;
     ctrl->num_ports = (ctrl->cap & HBA_CAP_NP_MASK) + 1;
+
+    /*
+     * [AHCI-05] ctrl->pi comes straight from the device and every one of its
+     * 32 bits used to be walked, dereferencing abar->ports[port] at offsets up
+     * to 0x100 + 31*0x80 = 0x1080.  pci_iomap maps exactly bar_sz bytes, and
+     * num_ports (from CAP.NP) was computed, printed, and then never used to
+     * bound anything -- so an HBA with a 0x1000-byte BAR5 and PI=0xFFFFFFFF
+     * had us reading AND WRITING past the end of the ioremap region.
+     *
+     * Keep only the bits that are implemented per CAP.NP, fit inside the
+     * mapping we actually made, and fit our port array.
+     */
+    {
+        unsigned mappable = 0;
+        if (ctrl->bar_sz > 0x100)
+            mappable = (unsigned)((ctrl->bar_sz - 0x100) / sizeof(hba_port_t));
+
+        unsigned limit = AHCI_MAX_PORTS;
+        if ((unsigned)ctrl->num_ports < limit) limit = (unsigned)ctrl->num_ports;
+        if (mappable < limit)                  limit = mappable;
+
+        uint32_t allowed = (limit >= 32) ? 0xFFFFFFFFu
+                                         : ((1u << limit) - 1u);
+        if (ctrl->pi & ~allowed) {
+            kprintf("ahci: PI=0x%08x exceeds %u usable ports "
+                    "(CAP.NP=%d, BAR5=%u bytes); masking to 0x%08x\n",
+                    ctrl->pi, limit, ctrl->num_ports,
+                    (unsigned)ctrl->bar_sz, ctrl->pi & allowed);
+            ctrl->pi &= allowed;
+        }
+    }
     ctrl->num_cmd_slots = ((ctrl->cap & HBA_CAP_NCS_MASK) >> HBA_CAP_NCS_SHIFT) + 1;
     version = abar->vs;
 
@@ -1350,6 +1472,7 @@ static int ahci_pci_attach(struct device *dev) {
     ahci_controller_t *ctrl = &ahci_ctrls[ahci_ctrl_count];
     memset(ctrl, 0, sizeof(*ctrl));
     ctrl->abar    = (hba_mem_t *)mmio_base;
+    ctrl->bar_sz  = bar_sz;          /* [AHCI-05] bound the PI walk to this */
     ctrl->pci_dev = pdev;
 
     if (ahci_hba_init(ctrl) < 0) {
