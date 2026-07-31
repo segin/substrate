@@ -384,7 +384,26 @@ void ide_register_irqs(void) {
     for (uint8_t channel = 0; channel < MAX_IDE_CHANNELS; channel++) {
         unsigned long flags = 0;
 
-        if (!ide_channels[channel].dma_capable || ide_channel_irq_registered[channel]) {
+        /*
+         * [IDE-04] This used to require dma_capable, which NOTHING ever sets
+         * -- ide_dma_init()/ide_dma_init_pair() have no callers anywhere in
+         * sys/ -- so no handler was ever registered for IRQ 14/15.  Probe
+         * then cleared nIEN at the end (see below), leaving device
+         * interrupts ENABLED with nothing to service them: every PIO
+         * completion raised an unhandled interrupt, and on a shared
+         * level-triggered PCI line that is an IRQ storm (the same failure
+         * mode as the reverted AHCI/NIC shared-INTx work).
+         *
+         * Registration no longer depends on DMA.  A channel needs a usable
+         * IRQ line and a device present; whether it goes on to do DMA is a
+         * separate question.
+         */
+        if (ide_channel_irq_registered[channel]) {
+            continue;
+        }
+        if (ide_channels[channel].io_base == 0 ||
+            ide_channels[channel].irq == 0 ||
+            ide_channels[channel].irq == 0xFF) {
             continue;
         }
 
@@ -396,6 +415,16 @@ void ide_register_irqs(void) {
         if (request_irq(ide_channels[channel].irq, ide_irq_dispatch, flags,
                         name, &ide_channels[channel]) == 0) {
             ide_channel_irq_registered[channel] = 1;
+            kprintf("ide: channel %u IRQ %u handler installed%s\n",
+                    (unsigned)channel, (unsigned)ide_channels[channel].irq,
+                    (flags & IRQF_SHARED) ? " (shared)" : "");
+        } else {
+            /* [IDE-04] Say so: the channel will be left with nIEN set and
+             * driven purely by polling, which is a materially different
+             * operating mode and used to be invisible. */
+            kprintf("ide: channel %u could not claim IRQ %u; "
+                    "interrupts stay masked (polled)\n",
+                    (unsigned)channel, (unsigned)ide_channels[channel].irq);
         }
     }
 }
@@ -732,9 +761,19 @@ int ide_scan_controller(void) {
         }
     }
 
-    /* Re-enable interrupts */
+    /*
+     * [IDE-04] Unmask device interrupts ONLY on channels whose handler was
+     * actually installed.  Clearing nIEN unconditionally is what turned an
+     * unregistered IRQ into a storm; a channel with no handler stays masked
+     * and is driven purely by polling, which is what the PIO paths already
+     * do.
+     */
     for (int ch = 0; ch < MAX_IDE_CHANNELS; ch++) {
-        ide_write_ctrl((uint8_t)ch, 0);
+        if (ide_channel_irq_registered[ch]) {
+            ide_write_ctrl((uint8_t)ch, 0);
+        } else {
+            ide_write_ctrl((uint8_t)ch, ATA_CTRL_NIEN);
+        }
     }
 
     for (size_t i = 0; i < partition_scan_count; i++) {
