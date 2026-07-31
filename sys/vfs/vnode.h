@@ -450,4 +450,14 @@ int vop_print(struct vnode *vp);
 
 extern struct vnode *rootvnode;
 
+/*
+ * fs_node_t bridge (vnode_fsnode.c): one vnodeops vector that forwards VOP_*
+ * to the live VFS's fs_node_t hooks, so the vnode layer works against every
+ * existing filesystem without a per-filesystem vnodeops implementation.
+ */
+struct fs_node;
+extern struct vnodeops fsnode_vnodeops;
+int fsnode_vget(struct mount *mp, struct fs_node *n, struct vnode **vpp);
+int vnode_bridge_init(void);
+
 #endif /* _SYS_VNODE_H */

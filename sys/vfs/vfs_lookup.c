@@ -103,7 +103,11 @@ namei(struct nameidata *ndp)
      */
     for (;;) {
         if (*ndp->ni_dirp == '\0') {
+            /* [VNODE-21] Lookup of "/" (or a path that is all slashes)
+             * returned here without freeing cn_pnbuf. */
             ndp->ni_vp = dp;
+            if (namei_zone) uma_zfree(namei_zone, cnp->cn_pnbuf);
+            else kfree(cnp->cn_pnbuf, 1024);
             return 0;
         }
 
@@ -114,7 +118,10 @@ namei(struct nameidata *ndp)
         
         cnp->cn_namelen = p - ndp->ni_dirp;
         if (cnp->cn_namelen >= sizeof(component)) {
+            /* [VNODE-21] ...and on an over-long component. */
             vrele(dp);
+            if (namei_zone) uma_zfree(namei_zone, cnp->cn_pnbuf);
+            else kfree(cnp->cn_pnbuf, 1024);
             return ENAMETOOLONG;
         }
         memcpy(component, ndp->ni_dirp, cnp->cn_namelen);
@@ -140,7 +147,10 @@ namei(struct nameidata *ndp)
          */
         if (cnp->cn_namelen == 2 && component[0] == '.' && component[1] == '.') {
             for (;;) {
-                if (dp->v_flag & VROOT) {
+                /* [VNODE-22] VROOT without a v_mount faulted here.  The
+                 * fs_node_t bridge publishes vnodes with no struct mount at
+                 * all, so this is now reachable rather than theoretical. */
+                if ((dp->v_flag & VROOT) && dp->v_mount != NULL) {
                     struct vnode *tvp = dp->v_mount->mnt_vnodecovered;
                     if (tvp != NULL) {
                         vref(tvp);
@@ -301,7 +311,11 @@ namei(struct nameidata *ndp)
 
         /* Terminal check: must be a directory to continue */
         if (dp->v_type != VDIR) {
+            /* [VNODE-21] ...and when a mid-path component is not a
+             * directory, which is a perfectly ordinary lookup failure. */
             vrele(dp);
+            if (namei_zone) uma_zfree(namei_zone, cnp->cn_pnbuf);
+            else kfree(cnp->cn_pnbuf, 1024);
             return ENOTDIR;
         }
     }

@@ -69,6 +69,7 @@
 #include <sys/tty.h>
 #include <sys/vt.h>
 #include <vfs/vfs.h>
+#include <vfs/vnode.h>
 #include <vm/uma.h>
 #include <vm/vm_kmem.h>
 #include <vm/vm_object.h>
@@ -872,6 +873,27 @@ static void init_root_fs(void) {
     } else {
         kprint("VFS: Mounted sysfs on /sys\n");
     }
+
+    /*
+     * Publish rootvnode now that the tree is fully assembled.
+     *
+     * The BSD vnode layer (vnode.c / vfs_lookup.c / vfs_cache.c) has been
+     * present but unreachable: namei() starts every absolute path at
+     * rootvnode, and rootvnode was only ever assigned NULL, so nothing could
+     * use it.  vnode_bridge_init() wraps fs_root in a vnode backed by the
+     * fs_node_t bridge (vnode_fsnode.c), which is what makes namei() work
+     * against every mounted filesystem without each one growing its own
+     * vnodeops vector.
+     *
+     * It goes AFTER the pseudo-filesystem mounts, not before: run earlier and
+     * the first namei() of /dev or /proc caches the bare ext2 mountpoint
+     * directory, and the namecache would then keep serving that stale answer
+     * after devfs and procfs had covered it.
+     *
+     * Failure here is not fatal: nothing in the boot path depends on the
+     * vnode layer yet, so a failed bridge just leaves it as it was.
+     */
+    (void)vnode_bridge_init();
 }
 
 // kinit - kernel init task (becomes PID 1 after exec)
