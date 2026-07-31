@@ -427,6 +427,42 @@ void ide_register_irqs(void) {
                     (unsigned)channel, (unsigned)ide_channels[channel].irq);
         }
     }
+
+    /*
+     * [IDE-04] Enable bus-master DMA, now that a handler exists to complete
+     * it.
+     *
+     * dma_capable was never set by anything -- ide_dma_init() and
+     * ide_dma_init_pair() have no callers -- so ide_dma_read()/write()
+     * returned -1 at their first line and every transfer went through PIO,
+     * even though ide_pci_configure_channels() had already found the
+     * bus-master base and set PCI_COMMAND_MASTER on the controller.
+     *
+     * Two conditions, both necessary:
+     *   - a bus-master I/O base from PCI BAR 4, which is what the PRDT and
+     *     the BM command/status registers are addressed through;
+     *   - an installed IRQ handler, because ide_dma_read()/write() wait on
+     *     ide_wait_irq_completion().  On a polled channel that wait can only
+     *     ever time out, so leaving DMA off there is not a limitation, it is
+     *     the only correct choice.
+     *
+     * A device that then fails a DMA transfer is demoted to PIO by
+     * ide_disable_device_dma(); a transfer this driver's PRDT simply cannot
+     * describe falls back to PIO for that request alone (IDE_DMA_UNSUPPORTED,
+     * see IDE-16) without condemning the drive.
+     */
+    for (uint8_t channel = 0; channel < MAX_IDE_CHANNELS; channel++) {
+        if (ide_channels[channel].bm_base == 0)
+            continue;
+        if (!ide_channel_irq_registered[channel])
+            continue;
+        if (ide_channels[channel].dma_capable)
+            continue;
+
+        ide_channels[channel].dma_capable = 1;
+        kprintf("ide: channel %u bus-master DMA enabled (bm_base 0x%x)\n",
+                (unsigned)channel, (unsigned)ide_channels[channel].bm_base);
+    }
 }
 
 /*
