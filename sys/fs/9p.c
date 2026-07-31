@@ -7,6 +7,9 @@
 #include <vfs/vfs.h>
 #include <vm/vm_kmem.h>
 
+/* Rread header: size[4] type[1] tag[2] count[4] */
+#define P9_RREAD_HDR_LEN 11
+
 struct p9_fs {
     uint32_t next_fid;
     uint32_t root_fid;
@@ -44,8 +47,12 @@ static int p9_version(struct p9_fs *fs) {
         return 0;
     }
 
+    /* [9P-09] virtio_9p_send now returns how many bytes the server actually
+     * wrote; a reply too short to contain size[4] type[1] must not be
+     * dereferenced. */
     int success = 0;
-    if (virtio_9p_send(msg, msize, rmsg, rsize_max) == 0) {
+    int rlen = virtio_9p_send(msg, msize, rmsg, rsize_max);
+    if (rlen >= 5) {
         p = rmsg + 4;
         if (*p == P9_RVERSION) {
             success = 1;
@@ -90,8 +97,10 @@ static uint32_t p9_attach(struct p9_fs *fs) {
         return P9_NOFID;
     }
 
+    /* [9P-09] As above: bound the parse by what actually arrived. */
     uint32_t result_fid = P9_NOFID;
-    if (virtio_9p_send(msg, msize, rmsg, rsize_max) == 0) {
+    int rlen = virtio_9p_send(msg, msize, rmsg, rsize_max);
+    if (rlen >= 5) {
         p = rmsg + 4;
         if (*p == P9_RATTACH) {
             result_fid = fid;
@@ -145,14 +154,28 @@ static uint32_t p9_vfs_read(fs_node_t *node, off_t offset, uint32_t size, uint8_
 
     uint32_t ret_count = 0;
     
-    if (virtio_9p_send(msg, msize, rmsg, rsize_max) != 0) {
+    /*
+     * [9P-09] This is the one that mattered.  virtio_9p_send returned only
+     * 0/-1, the reply's own size[4] field was read and then explicitly
+     * discarded (the `r_len` line was commented out), and `count` was taken
+     * from the reply body and clamped ONLY against the caller's requested
+     * size.  A server answering a 4096-byte Tread with an 11-byte Rread that
+     * claims count=4096 therefore had 4085 bytes of freshly-kmalloc'd,
+     * never-initialised kernel heap memcpy'd out to the caller.  Wire data
+     * from the server was trusted completely.
+     *
+     * Now the transport reports how many bytes actually arrived, and the
+     * payload must fit inside them: the header is size[4] type[1] tag[2]
+     * count[4] = 11 bytes, so at most rlen - 11 bytes of data can be real.
+     */
+    int rlen = virtio_9p_send(msg, msize, rmsg, rsize_max);
+    if (rlen < P9_RREAD_HDR_LEN) {
         goto cleanup;
     }
-    
+
     // Parse Response
     p = rmsg;
-    // uint32_t r_len = *(uint32_t*)p; 
-    p += 4;
+    p += 4;                       /* size[4] -- bounded by rlen instead */
     uint8_t r_type = *p; p += 1;
     
     if (r_type == P9_RERROR) {
@@ -165,9 +188,11 @@ static uint32_t p9_vfs_read(fs_node_t *node, off_t offset, uint32_t size, uint8_
     
     p += 2; // Skip Tag
     uint32_t count = *(uint32_t*)p; p += 4;
-    
-    if (count > size) count = size; // Should not happen
-    
+
+    uint32_t avail = (uint32_t)rlen - P9_RREAD_HDR_LEN;
+    if (count > avail) count = avail;   /* server over-claimed */
+    if (count > size)  count = size;    /* never exceed what was asked for */
+
     memcpy(buffer, p, count);
     ret_count = count;
 

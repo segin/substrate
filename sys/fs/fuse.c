@@ -1,6 +1,9 @@
 #include <stddef.h>
+#include <stdio.h>
+#include <sys/errno.h>
 #include <string.h>
 
+#include <kern/console.h>
 #include <kern/sched.h>
 #include <sys/fuse.h>
 #include <vfs/vfs.h>
@@ -11,29 +14,44 @@ static struct fuse_in_header request_queue[FUSE_QUEUE_SIZE];
 static int fuse_q_head = 0;
 static int fuse_q_tail = 0;
 
+/*
+ * [FUSE-10] This used to be:
+ *
+ *     while (fuse_q_head == fuse_q_tail)
+ *         sched_sleep(&request_queue);
+ *
+ * fuse_q_head is written nowhere in the kernel -- it is initialised to 0 and
+ * only ever compared -- and nothing calls sched_wakeup(&request_queue).  The
+ * condition is therefore permanently true and the sleep is permanently
+ * unsatisfiable.  Worse, sched_sleep here is not interruptible, so a process
+ * that opened /dev/fuse and read from it parked a thread that even SIGKILL
+ * could not recover.  /dev/fuse is registered by vfs_init(), so this was
+ * reachable by any user, not dormant.
+ *
+ * There is no request path to wait for: fuse_vfs_read never enqueues
+ * anything.  Until one exists, say so instead of hanging.
+ */
 static size_t fuse_dev_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
-    (void)node; (void)offset;
-    if (size < sizeof(struct fuse_in_header)) return 0;
-
-    // Block until a request is available
-    while (fuse_q_head == fuse_q_tail) {
-        sched_sleep(&request_queue);
-    }
-
-    struct fuse_in_header *req = &request_queue[fuse_q_tail];
-    memcpy(buffer, req, sizeof(struct fuse_in_header));
-    fuse_q_tail = (fuse_q_tail + 1) % FUSE_QUEUE_SIZE;
-
-    return sizeof(struct fuse_in_header);
+    (void)node; (void)offset; (void)size; (void)buffer;
+    (void)request_queue; (void)fuse_q_head; (void)fuse_q_tail;
+    return (size_t)-ENOSYS;
 }
 
+/*
+ * [FUSE-27] This cast an unvalidated user buffer straight to a 16-byte
+ * struct fuse_out_header with no length check, then returned `size` --
+ * reporting success for a reply nothing reads.  Nothing dispatches replies
+ * (there are no outstanding requests to match them against), so the honest
+ * answer is ENOSYS; the length check stays so that a future implementation
+ * cannot inherit the unchecked cast.
+ */
 static size_t fuse_dev_write(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer) {
     (void)node; (void)offset;
-    // Process response from userspace
-    struct fuse_out_header *out = (struct fuse_out_header *)buffer;
-    (void)out;
-    // In a real system, we'd find the original request and wake the waiting thread.
-    return size;
+
+    if (!buffer || size < sizeof(struct fuse_out_header))
+        return (size_t)-EINVAL;
+
+    return (size_t)-ENOSYS;
 }
 
 static fs_node_t fuse_device_node;
@@ -65,15 +83,23 @@ static int fuse_unmount(fs_node_t *root) {
     return 0;
 }
 
+/*
+ * [FUSE-28] This used to succeed unconditionally: no FUSE_INIT handshake, no
+ * /dev/fuse session bound to the mount, no owning uid, and the node it
+ * returned had NULL readdir and NULL finddir.  Mounting it over a real
+ * directory therefore replaced that directory with an empty one nothing could
+ * enumerate or look up -- `mount -t fuse none /etc` would hide /etc from the
+ * whole system, and the mount reported success while doing it.
+ *
+ * There is no request path (see fuse_dev_read), so no mount can be serviced.
+ * Refuse instead of shadowing a directory with a black hole.  Returning NULL
+ * is how a mount handler reports failure to vfs_mount.
+ */
 static fs_node_t *fuse_mount(const char *device, uint32_t flags, void *data) {
     (void)device; (void)flags; (void)data;
-    fs_node_t *fuse_root = kmalloc(sizeof(fs_node_t));
-    if (!fuse_root) return NULL;
-    memset(fuse_root, 0, sizeof(fs_node_t));
-    fuse_root->flags = FS_DIRECTORY;
-    fuse_root->read = &fuse_vfs_read;
-    fuse_root->unmount = &fuse_unmount;
-    return fuse_root;
+    (void)fuse_vfs_read; (void)fuse_unmount;
+    kprintf("fuse: mount refused -- the FUSE request path is not implemented\n");
+    return NULL;
 }
 
 static filesystem_t fuse_fs = {

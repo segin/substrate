@@ -79,6 +79,8 @@ void virtio_9p_setup(uint8_t bus, uint8_t slot, uint8_t func) {
     kprint("VirtIO-9P Initialized.\n");
 }
 
+#define VIRTIO_9P_WAIT_SPINS  200000000u
+
 int virtio_9p_send(void *out_buf, uint32_t out_len, void *in_buf, uint32_t in_len) {
     if (!v9p.io_base) return -1;
     
@@ -104,10 +106,34 @@ int virtio_9p_send(void *out_buf, uint32_t out_len, void *in_buf, uint32_t in_le
     
     outw(v9p.io_base + VIRTIO_REG_QUEUE_NOTIFY, 0);
     
+    /*
+     * [9P-25] The wait used to be an unbounded `while (...) pause;`.  A server
+     * that never completes the request wedged the calling thread forever with
+     * no way out.  Bound it; a 9P server that has not answered in this many
+     * spins is not going to.
+     */
+    uint32_t spins = 0;
     while (v9p.last_used_idx == v9p.used->idx) {
+        if (++spins > VIRTIO_9P_WAIT_SPINS)
+            return -1;
         __asm__ volatile("pause");
     }
-    
+
+    /*
+     * [9P-09] The used-ring element carries how many bytes the device
+     * actually wrote into our IN buffer.  This was thrown away and the
+     * function returned a bare 0, so every caller had to take the reply
+     * body's own self-declared length on trust -- letting a malicious or
+     * buggy server claim a count far larger than it wrote and walk the
+     * caller off the end of freshly-kmalloc'd (uninitialised) heap.
+     * Return the real length so callers can bound their parse by it.
+     */
+    uint32_t used_len = v9p.used->ring[v9p.last_used_idx % v9p.q_size].len;
     v9p.last_used_idx++;
-    return 0;
+
+    /* The device must never claim to have written more than we offered. */
+    if (used_len > in_len)
+        used_len = in_len;
+
+    return (int)used_len;
 }

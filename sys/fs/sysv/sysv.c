@@ -137,6 +137,22 @@ static uint32_t sysv_resolve_block(sysv_fs_t *fs, sysv_node_t *node,
     }
     logical -= ppb * ppb;
 
+    /*
+     * [SYSV-22] The single and double branches above are guarded by
+     * `logical < ppb` and `logical < ppb*ppb`, but the triple branch had no
+     * bound at all: whatever was left simply fell through to here.  With
+     * 512-byte blocks (ppb = 170) and an i_size of 0xFFFFFFFF, the top index
+     * logical/(ppb*ppb) reaches 289, so indir + 289*3 reads at indir[867..869]
+     * -- still inside the 2048-byte array, so no overflow is detected, but far
+     * past the 512 bytes actually read from disk.  The block number then comes
+     * out of uninitialised kernel stack and is handed to the block layer.
+     *
+     * Refuse offsets the triple-indirect tree cannot address.  The division
+     * form avoids computing ppb*ppb*ppb, which can overflow 32 bits.
+     */
+    if (ppb == 0 || logical / ppb / ppb >= ppb)
+        return 0;
+
     /* triple indirect at node->addr[12] */
     if (node->addr[12] == 0) return 0;
     if (sysv_read_block_range(fs, node->addr[12], 0, indir, fs->block_size) != fs->block_size)
@@ -267,15 +283,36 @@ static struct dirent *sysv_readdir(fs_node_t *node, uint64_t index) {
     if (!node || !node->ptr) return NULL;
     sysv_node_t *nd = (sysv_node_t *)node->ptr;
     sysv_fs_t   *fs = nd->fs;
-    off_t        off = (off_t)index * (off_t)sizeof(struct sysv_dirent);
-    if (off >= node->length) return NULL;
-
+    /*
+     * [SYSV-21] This used to compute one slot from `index` and give up the
+     * moment it found d_ino == 0:
+     *
+     *     if (de.d_ino == 0) return NULL;
+     *
+     * V7/Xenix delete a directory entry by zeroing its inode number IN PLACE,
+     * leaving a hole rather than compacting the directory.  So any directory
+     * that has ever had a file removed stopped listing at the hole, hiding
+     * every entry after it -- while sysv_finddir correctly skips holes, which
+     * is why such a file stayed openable by name but invisible to ls.
+     *
+     * Free slots are skipped instead, and `index` counts entries that exist:
+     * the caller walks 0,1,2,... and gets successive real entries.  The only
+     * terminating condition is running off the end of the directory.
+     */
     struct sysv_dirent de;
-    if (sysv_file_read(node, off, sizeof(de), (uint8_t *)&de) != sizeof(de)) {
-        return NULL;
-    }
-    if (de.d_ino == 0) {
-        return NULL;
+    off_t off = 0;
+    uint64_t seen = 0;
+
+    for (;;) {
+        if (off >= node->length) return NULL;
+        if (sysv_file_read(node, off, sizeof(de), (uint8_t *)&de) != sizeof(de))
+            return NULL;
+        off += (off_t)sizeof(de);
+        if (de.d_ino == 0)
+            continue;                  /* deleted slot -- keep scanning */
+        if (seen == index)
+            break;                     /* this is the entry asked for */
+        seen++;
     }
     memset(&g_dirent, 0, sizeof(g_dirent));
     g_dirent.d_ino = de.d_ino;
