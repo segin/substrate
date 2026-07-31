@@ -202,9 +202,9 @@ cleanup:
 }
 
 static int p9_unmount(fs_node_t *root) {
-    if (!root) return -1;
+    if (!root) return -EINVAL;
     struct p9_fs *fs = (struct p9_fs *)root->impl;
-    if (!fs) return -1;
+    if (!fs) return -EINVAL;
 
     // Tclunk: size[4] Tclunk[1] tag[2] fid[4]
     uint32_t msize = 4 + 1 + 2 + 4;

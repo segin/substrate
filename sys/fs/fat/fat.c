@@ -1929,12 +1929,12 @@ static int fat_unlink(fs_node_t *parent, const char *name) {
 
     /* Find the file to get its cluster */
     fs_node_t *child = fat_finddir(parent, (char *)name);
-    if (!child) return -1;
+    if (!child) return -ENOENT;
     fat_node_t *cctx = (fat_node_t *)(uintptr_t)child->impl;
     uint32_t first_cluster = cctx->first_cluster;
 
     /* Remove dir entry */
-    if (fat_dir_remove_entry(fs, pctx->first_cluster, name) != 0) return -1;
+    if (fat_dir_remove_entry(fs, pctx->first_cluster, name) != 0) return -EIO;
 
     /* Free cluster chain */
     if (first_cluster >= 2)
@@ -1950,15 +1950,19 @@ static int fat_rmdir_vfs(fs_node_t *parent, const char *name) {
 
     /* Check directory is empty (only . and .. entries) */
     fs_node_t *child = fat_finddir(parent, (char *)name);
-    if (!child) return -1;
+    if (!child) return -ENOENT;
     fat_node_t *cctx = (fat_node_t *)(uintptr_t)child->impl;
 
     /* readdir index 0 should be ".", index 1 "..", index 2 should be NULL */
     struct dirent *de = fat_readdir(child, 2);
-    if (de != NULL) return -1; /* Directory not empty (ENOTEMPTY) */
+    /* [errno sweep] This already knew it meant ENOTEMPTY -- it said so in the
+     * comment -- but returned a bare -1, which libc negates into EPERM.  So
+     * `rmdir` on a non-empty FAT directory reported "Operation not
+     * permitted". */
+    if (de != NULL) return -ENOTEMPTY;
 
     uint32_t dir_cluster = cctx->first_cluster;
-    if (fat_dir_remove_entry(fs, pctx->first_cluster, name) != 0) return -1;
+    if (fat_dir_remove_entry(fs, pctx->first_cluster, name) != 0) return -EIO;
     if (dir_cluster >= 2)
         fat_free_chain(fs, dir_cluster);
 
@@ -1974,7 +1978,7 @@ static int fat_rename(fs_node_t *old_parent, const char *old_name,
 
     /* Find source */
     fs_node_t *src = fat_finddir(old_parent, (char *)old_name);
-    if (!src) return -1;
+    if (!src) return -ENOENT;
     fat_node_t *src_ctx = (fat_node_t *)(uintptr_t)src->impl;
 
     /* If destination exists, remove it */

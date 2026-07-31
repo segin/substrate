@@ -1387,7 +1387,7 @@ int vfs_unmount_legacy_flags(const char *path, int flags) {
     if (last_slash) {
         *last_slash = '\0';
         name = last_slash + 1;
-        if (*name == '\0') return -1; // "foo/" -> invalid for unmount usually
+        if (*name == '\0') return -EINVAL;   /* "foo/" is not a mount point */
         
         if (path_buf[0] == '\0') {
              // "/foo" -> parent is root
@@ -1401,22 +1401,23 @@ int vfs_unmount_legacy_flags(const char *path, int flags) {
         name = path_buf;
     }
     
-    if (!parent_node) return -1;
-    if ((parent_node->flags & 0x7) != FS_DIRECTORY) return -1;
+    if (!parent_node) return -ENOENT;
+    if ((parent_node->flags & 0x7) != FS_DIRECTORY) return -ENOTDIR;
     
     // Now find child 'name' in 'parent_node'
     // But DO NOT traverse if it is a mountpoint.
     // We need access to the underlying finddir.
     
-    if (!parent_node->finddir) return -1;
+    if (!parent_node->finddir) return -ENOTDIR;
     
     fs_node_t *mountpoint = parent_node->finddir(parent_node, name);
-    if (!mountpoint) return -1;
+    if (!mountpoint) return -ENOENT;
     
     // Check if it is a mountpoint
     if (!(mountpoint->flags & FS_MOUNTPOINT)) {
-        // Not a mountpoint
-        return -22; // EINVAL
+        /* Not a mountpoint.  This was a literal -22 -- correct by value,
+         * but only by coincidence of EINVAL's numbering. */
+        return -EINVAL;
     }
     
     // Capture root of mounted fs
