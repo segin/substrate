@@ -212,7 +212,20 @@ int mountopt_apply_generic(mountopt_t *head, uint32_t *flags) {
     if (saw_nosuid) *flags |=  MNT_NOSUID;       else if (saw_suid) *flags &= ~MNT_NOSUID;
     if (saw_nodev)  *flags |=  MNT_NODEV;        else if (saw_dev)  *flags &= ~MNT_NODEV;
     if (saw_noexec) *flags |=  MNT_NOEXEC;       else if (saw_exec) *flags &= ~MNT_NOEXEC;
-    if (saw_sync)   *flags |=  MNT_SYNCHRONOUS;  else if (saw_async)*flags |=  MNT_ASYNC;
+    /*
+     * [VFS-29] `sync` must CLEAR MNT_ASYNC, the way every other pair here
+     * clears its opposite.  It only ever set MNT_SYNCHRONOUS, so
+     * "remount,sync" over a filesystem already carrying MNT_ASYNC left both
+     * bits set and the two flags then disagreed about the write policy.
+     * `async` likewise clears MNT_SYNCHRONOUS.
+     */
+    if (saw_sync) {
+        *flags |=  MNT_SYNCHRONOUS;
+        *flags &= ~MNT_ASYNC;
+    } else if (saw_async) {
+        *flags |=  MNT_ASYNC;
+        *flags &= ~MNT_SYNCHRONOUS;
+    }
 
     return 0;
 }

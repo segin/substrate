@@ -378,6 +378,26 @@ int vfs_mount_legacy(const char *device, const char *path, const char *type, uin
     // Handle Root Mount
     fs_node_t *mountpoint = NULL;
     if (strcmp(path, "/") == 0) {
+        /*
+         * [VFS-10] Replacing an already-mounted root silently strands
+         * everything that still points into the old tree: every process's
+         * cwd_node and root_node, and every open fd.  Those nodes are not
+         * re-resolved, so they keep referring to a filesystem nothing can
+         * reach or unmount, and the old fs is never flushed.
+         *
+         * kern_mount's overlay protection covers /dev, /proc and /sys but
+         * not /.  Allow the initial root mount (fs_root == NULL, the boot
+         * path) and refuse to swap it afterwards; a real root pivot needs
+         * to migrate those references, which is not something this call can
+         * do behind the caller's back.
+         */
+        if (fs_root != NULL) {
+            kprintf("VFS: mount(%s on /): root is already mounted\n", type);
+            if (root->unmount) {
+                root->unmount(root);
+            }
+            return -EBUSY;
+        }
         fs_root = root;
     } else {
         // Handle mount on existing directory
@@ -402,9 +422,31 @@ int vfs_mount_legacy(const char *device, const char *path, const char *type, uin
              return -ENOTDIR;
         }
         
+        /*
+         * [VFS-09] Refuse to mount over an existing mount.
+         *
+         * This used to overwrite mountpoint->ptr unconditionally.  There is
+         * no mount stacking here -- a single ->ptr per node -- so the first
+         * filesystem simply vanished from the tree while staying in
+         * mountlist: nothing could reach it, unmount matched only the
+         * second mount, and its dirty buffers were never flushed.  Silent
+         * data loss dressed up as a successful mount.
+         *
+         * Tested under the lock together with the attach, so two concurrent
+         * mounts of the same directory cannot both see it free.
+         */
+        spinlock_acquire(&vfs_mount_lock);
+        if (mountpoint->flags & FS_MOUNTPOINT) {
+            spinlock_release(&vfs_mount_lock);
+            kprintf("VFS: mount(%s on %s): already a mount point\n",
+                    type, path);
+            if (root->unmount) {
+                root->unmount(root);
+            }
+            return -EBUSY;
+        }
         // Attach (locked — concurrent traversals must see both fields
         // updated together).
-        spinlock_acquire(&vfs_mount_lock);
         mountpoint->ptr = root;
         mountpoint->flags |= FS_MOUNTPOINT;
         spinlock_release(&vfs_mount_lock);
@@ -655,9 +697,26 @@ static fs_node_t *finddir_fs_internal(fs_node_t *node, char *name, int depth, in
                 if (target) {
                     return target;
                 }
-                // If symlink resolution fails, return the symlink node itself (or NULL? Linux returns ENOENT)
-                // Returning result roughly mimics getting the link itself so we can see it exists but is broken?
-                // Correct behavior is usually ENOENT, but returning the node is safer for some "ls" ops.
+                /*
+                 * [VFS-05] A symlink whose target does not resolve is a
+                 * BROKEN symlink, and a follow_symlinks lookup of one must
+                 * fail.
+                 *
+                 * This used to fall through to `return result` -- the
+                 * SYMLINK node itself -- on the theory that it was "safer
+                 * for some ls ops".  It is not: open() on a dangling link
+                 * then succeeded and handed back an fd on the link, writes
+                 * through it hit the link rather than creating the target,
+                 * and stat() became indistinguishable from lstat() because
+                 * both returned the same node.  The caller asked us to
+                 * follow the link; if we cannot, the answer is "no such
+                 * file", which is what every caller already maps NULL to.
+                 *
+                 * Callers that genuinely want the link itself (lstat,
+                 * readlink, ls -l) pass follow_symlinks == 0 and returned
+                 * above, before any of this.
+                 */
+                return NULL;
             }
         }
         return result;
@@ -1413,20 +1472,32 @@ int vfs_unmount_legacy_flags(const char *path, int flags) {
     fs_node_t *mountpoint = parent_node->finddir(parent_node, name);
     if (!mountpoint) return -ENOENT;
     
-    // Check if it is a mountpoint
+    /*
+     * [VFS-04] Read the mount state under the lock.
+     *
+     * The FS_MOUNTPOINT test and the mountpoint->ptr read used to happen
+     * out here in the open while the detach below happened under the lock.
+     * Two concurrent umounts -- or a umount racing vfs_force_unmount_dev()
+     * from a hot-unplug -- therefore both saw the flag set, both snapshotted
+     * the same root, and both went on to call root->unmount(root) and
+     * TAILQ_REMOVE the same struct mount.  A double free of the filesystem
+     * instance and of the mount record.
+     *
+     * The claim is now made atomically further down; this pass only gathers
+     * state.
+     */
+    fs_node_t *root = NULL;
+    struct mount *target_mp = NULL;
+    struct mount *mp_iter;
+
+    spinlock_acquire(&vfs_mount_lock);
     if (!(mountpoint->flags & FS_MOUNTPOINT)) {
+        spinlock_release(&vfs_mount_lock);
         /* Not a mountpoint.  This was a literal -22 -- correct by value,
          * but only by coincidence of EINVAL's numbering. */
         return -EINVAL;
     }
-    
-    // Capture root of mounted fs
-    fs_node_t *root = mountpoint->ptr;
-
-    // Find the mount structure first to check busy status
-    struct mount *target_mp = NULL;
-    struct mount *mp_iter;
-    spinlock_acquire(&vfs_mount_lock);
+    root = mountpoint->ptr;
     TAILQ_FOREACH(mp_iter, &mountlist, mnt_list) {
         if (mp_iter->mnt_node_covered == mountpoint && mp_iter->mnt_node_root == root) {
             target_mp = mp_iter;
@@ -1448,28 +1519,43 @@ int vfs_unmount_legacy_flags(const char *path, int flags) {
         }
     }
 
-    // Detach (locked so concurrent vfs_cross_mountpoint either sees
-    // a fully attached mount or a fully detached node — never the
-    // FS_MOUNTPOINT flag with ptr cleared, which would race-deref NULL).
+    /*
+     * [VFS-04] CLAIM the mount: clear FS_MOUNTPOINT, drop ptr and unlink the
+     * mount record, all in one critical section.
+     *
+     * Clearing the flag is the gate.  Exactly one caller can observe it set
+     * and clear it, so exactly one caller proceeds to root->unmount() and
+     * kfree() below; any concurrent umount that got this far re-tests here
+     * and loses cleanly with -EINVAL rather than double-freeing.
+     *
+     * Locked also so a concurrent vfs_cross_mountpoint() sees either a fully
+     * attached mount or a fully detached node -- never FS_MOUNTPOINT set with
+     * ptr already NULL, which would race-deref NULL.  The TAILQ unlink joins
+     * the same section so a path-lookup traversal never walks it mid-splice
+     * (A28).
+     */
     spinlock_acquire(&vfs_mount_lock);
+    if (!(mountpoint->flags & FS_MOUNTPOINT)) {
+        /* Another unmount claimed it between the gather above and here. */
+        spinlock_release(&vfs_mount_lock);
+        return -EINVAL;
+    }
     mountpoint->flags &= ~FS_MOUNTPOINT;
     mountpoint->ptr = NULL;
+    if (target_mp) {
+        TAILQ_REMOVE(&mountlist, target_mp, mnt_list);
+    }
     spinlock_release(&vfs_mount_lock);
-    
+
     // Cleanup fs instance
     if (root && root->unmount) {
         root->unmount(root);
     }
-    
-    // Remove from mount list and free.  Under vfs_mount_lock so a concurrent
-    // path-lookup traversal never walks the TAILQ mid-unlink or dereferences
-    // a just-freed mount (A28).  kfree stays under the lock (non-sleeping UMA
-    // free path) — once TAILQ_REMOVE'd under the lock the mount is unreachable.
+
+    /* Unreachable once TAILQ_REMOVE'd under the lock, so freeing outside it
+     * is safe -- and keeps a potentially sleeping path out of the section. */
     if (target_mp) {
-        spinlock_acquire(&vfs_mount_lock);
-        TAILQ_REMOVE(&mountlist, target_mp, mnt_list);
         kfree(target_mp, sizeof(struct mount));
-        spinlock_release(&vfs_mount_lock);
     }
 
     return 0;
@@ -1508,14 +1594,34 @@ void vfs_unmount_all(void) {
     int n = 0;
     struct mount *mp;
 
+    /*
+     * [VFS-31] Both bounds here silently discard work on shutdown: a 33rd
+     * mount was dropped from the list entirely and never unmounted (its
+     * dirty buffers never flushed), and a mount path longer than 127 bytes
+     * was truncated -- which is worse than dropping it, because the
+     * truncated string may name a DIFFERENT, shallower mount that then gets
+     * force-unmounted in its place.  Neither said anything.  Say so.
+     */
+    int dropped = 0;
     spinlock_acquire(&vfs_mount_lock);
     TAILQ_FOREACH(mp, &mountlist, mnt_list) {
-        if (n >= 32) break;
+        if (n >= 32) { dropped++; continue; }
+        if (strlen(mp->mnt_stat_path) >= sizeof(paths[0])) {
+            dropped++;
+            continue;               /* never unmount a truncated path */
+        }
         strlcpy(paths[n], mp->mnt_stat_path, sizeof(paths[n]));
         paths[n][sizeof(paths[n]) - 1] = '\0';
         n++;
     }
     spinlock_release(&vfs_mount_lock);
+
+    if (dropped) {
+        kprintf("reboot: WARNING: %d mount(s) not unmounted "
+                "(over %d mounts, or path longer than %u bytes); "
+                "their dirty buffers were not flushed\n",
+                dropped, 32, (unsigned)sizeof(paths[0]) - 1);
+    }
 
     /* Insertion sort, deepest path first.  n is a handful of mounts. */
     for (int i = 1; i < n; i++) {
