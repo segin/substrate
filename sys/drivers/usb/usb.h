@@ -137,6 +137,16 @@
 #define USB_MAX_DEVICES         32
 #define USB_MAX_ENDPOINTS       16
 /*
+ * A device's configuration can expose many interfaces, and many alternate
+ * settings per interface.  We record every interface descriptor we see (alt
+ * settings included) so each endpoint can be attributed to the interface that
+ * declared it; matching only ever considers alternate setting 0, since we do
+ * not issue SET_INTERFACE during enumeration.  8 covers real composite
+ * devices (a keyboard with a consumer-control interface, a UVC webcam, a UAC
+ * headset) without making usb_device_t unreasonably large.
+ */
+#define USB_MAX_INTERFACES      8
+/*
  * Sanity cap on a device's total configuration-descriptor length.  This is
  * not a buffer size -- config_data is allocated at the device's actual
  * wTotalLength -- only a bound so a hostile or wedged device can't make us
@@ -238,6 +248,23 @@ typedef struct usb_endpoint {
 } usb_endpoint_t;
 
 /*
+ * One interface descriptor from the active configuration.  ep_first/ep_count
+ * delimit this interface's endpoints inside the device's flat endpoints[]
+ * array, so a driver can ask for "the interrupt IN endpoint of MY interface"
+ * rather than "the first interrupt IN endpoint anywhere in the config" --
+ * which on a composite device is frequently a different interface's.
+ */
+typedef struct usb_interface {
+    uint8_t  number;        /* bInterfaceNumber */
+    uint8_t  alt_setting;   /* bAlternateSetting */
+    uint8_t  if_class;      /* bInterfaceClass */
+    uint8_t  if_subclass;   /* bInterfaceSubClass */
+    uint8_t  if_protocol;   /* bInterfaceProtocol */
+    uint8_t  ep_first;      /* index of first endpoint in dev->endpoints[] */
+    uint8_t  ep_count;      /* number of endpoints belonging to it */
+} usb_interface_t;
+
+/*
  * ============================================================
  * USB Device
  * ============================================================
@@ -273,7 +300,22 @@ typedef struct usb_device {
     /* Control endpoint (EP0) */
     usb_endpoint_t ep0;
 
-    /* Interface class info from first interface */
+    /*
+     * Every interface descriptor in the active configuration, in descriptor
+     * order, alternate settings included.
+     */
+    usb_interface_t interfaces[USB_MAX_INTERFACES];
+    uint8_t  num_interfaces;
+
+    /*
+     * The interface this device is bound to -- set by usb_match_driver()
+     * before it calls a driver's probe(), so probe/attach and every
+     * USB_RECIP_INTERFACE control request see the interface actually being
+     * driven rather than always interface 0.  Defaults to the first
+     * interface so a device with no matching driver still reports something
+     * meaningful.
+     */
+    uint8_t  if_number;
     uint8_t  if_class;
     uint8_t  if_subclass;
     uint8_t  if_protocol;
@@ -322,6 +364,15 @@ typedef struct usb_transfer {
     struct usb_setup_packet setup;
     uint8_t  is_control;    /* 1 for control transfers */
     uint16_t stream_id;     /* xHCI bulk stream ID (0 = no stream) */
+
+    /*
+     * Per-transfer completion timeout in milliseconds; 0 means "use the HCD's
+     * default".  An interrupt IN endpoint NAKs continuously while the device
+     * has nothing to report, so a poll of one must give up after a few
+     * milliseconds rather than sitting on the controller's multi-second bulk
+     * timeout.
+     */
+    uint32_t timeout_ms;
 } usb_transfer_t;
 
 /*
@@ -431,6 +482,16 @@ int usb_control_transfer(usb_device_t *dev,
                          uint16_t wValue, uint16_t wIndex,
                          void *data, uint16_t wLength);
 
+/*
+ * Poll an interrupt endpoint once.  timeout_ms bounds how long to wait for the
+ * device to produce a packet; a device with nothing to report NAKs for the
+ * whole window and the call returns USB_XFER_NAK (or USB_XFER_TIMEOUT), which
+ * is the normal idle result and not an error.
+ */
+int usb_interrupt_transfer(usb_device_t *dev, usb_endpoint_t *ep,
+                           void *data, uint32_t length,
+                           uint32_t *actual_length, uint32_t timeout_ms);
+
 int usb_bulk_transfer(usb_device_t *dev, usb_endpoint_t *ep,
                       void *data, uint32_t length,
                       uint32_t *actual_length);
@@ -483,6 +544,16 @@ void usbdevfs_unpublish(usb_device_t *dev);
 void usb_enumerate_bus(usb_hcd_t *hcd);
 
 /* Endpoint Lookup Helpers */
+/*
+ * Find an endpoint of the given type and direction belonging to the interface
+ * the device is bound to (dev->if_number, alternate setting 0).  Scoping to
+ * the bound interface is what stops a composite device from handing a driver
+ * a different interface's endpoint.
+ */
 usb_endpoint_t *usb_find_endpoint(usb_device_t *dev, uint8_t type, uint8_t dir);
+
+/* As above, but for an explicit interface number and alternate setting. */
+usb_endpoint_t *usb_find_endpoint_iface(usb_device_t *dev, uint8_t ifnum,
+                                        uint8_t alt, uint8_t type, uint8_t dir);
 
 #endif /* _USB_H */

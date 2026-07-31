@@ -240,6 +240,32 @@ int usb_control_transfer(usb_device_t *dev,
     return dev->hcd->submit(dev->hcd, &xfer);
 }
 
+int usb_interrupt_transfer(usb_device_t *dev, usb_endpoint_t *ep,
+                           void *data, uint32_t length,
+                           uint32_t *actual_length, uint32_t timeout_ms)
+{
+    usb_transfer_t xfer;
+    int ret;
+
+    if (!dev || !dev->hcd || !dev->hcd->submit || !ep)
+        return USB_XFER_ERROR;
+
+    memset(&xfer, 0, sizeof(xfer));
+    xfer.dev = dev;
+    xfer.ep = ep;
+    xfer.is_control = 0;
+    xfer.data = data;
+    xfer.length = length;
+    xfer.timeout_ms = timeout_ms;
+
+    ret = dev->hcd->submit(dev->hcd, &xfer);
+
+    if (actual_length)
+        *actual_length = xfer.actual_length;
+
+    return ret;
+}
+
 int usb_bulk_transfer(usb_device_t *dev, usb_endpoint_t *ep,
                       void *data, uint32_t length,
                       uint32_t *actual_length)
@@ -445,13 +471,57 @@ int usb_clear_halt(usb_device_t *dev, usb_endpoint_t *ep)
  * ============================================================
  */
 
+usb_endpoint_t *usb_find_endpoint_iface(usb_device_t *dev, uint8_t ifnum,
+                                        uint8_t alt, uint8_t type, uint8_t dir)
+{
+    if (!dev)
+        return NULL;
+
+    for (int i = 0; i < dev->num_interfaces; i++) {
+        usb_interface_t *iface = &dev->interfaces[i];
+
+        if (iface->number != ifnum || iface->alt_setting != alt)
+            continue;
+
+        for (int j = 0; j < iface->ep_count; j++) {
+            int idx = iface->ep_first + j;
+            if (idx >= dev->num_endpoints)
+                break;
+            usb_endpoint_t *ep = &dev->endpoints[idx];
+            if ((ep->address & USB_EP_DIR_MASK) == dir && ep->type == type)
+                return ep;
+        }
+    }
+    return NULL;
+}
+
 usb_endpoint_t *usb_find_endpoint(usb_device_t *dev, uint8_t type, uint8_t dir)
 {
+    usb_endpoint_t *ep;
+
+    if (!dev)
+        return NULL;
+
+    /*
+     * Prefer an endpoint belonging to the interface this device is bound to.
+     * Before interfaces were tracked, this searched every endpoint in the
+     * whole configuration in descriptor order, so on a composite device a
+     * driver could be handed an endpoint owned by an interface it does not
+     * drive.
+     */
+    ep = usb_find_endpoint_iface(dev, dev->if_number, 0, type, dir);
+    if (ep)
+        return ep;
+
+    /*
+     * Fall back to the flat scan.  A device whose interface descriptors we
+     * failed to record (more than USB_MAX_INTERFACES, or a malformed config)
+     * still gets the old behaviour rather than no endpoint at all.
+     */
     for (int i = 0; i < dev->num_endpoints; i++) {
-        usb_endpoint_t *ep = &dev->endpoints[i];
-        if ((ep->address & USB_EP_DIR_MASK) == dir &&
-            ep->type == type)
-            return ep;
+        usb_endpoint_t *e = &dev->endpoints[i];
+        if ((e->address & USB_EP_DIR_MASK) == dir && e->type == type)
+            return e;
     }
     return NULL;
 }
@@ -467,8 +537,10 @@ static void usb_parse_config(usb_device_t *dev)
     uint8_t *ptr = dev->config_data;
     uint8_t *end = ptr + dev->config_len;
     uint8_t first_iface_seen = 0;
+    usb_interface_t *cur_iface = NULL;   /* interface currently being filled */
 
     dev->num_endpoints = 0;
+    dev->num_interfaces = 0;
 
     if (!ptr)
         return;
@@ -480,13 +552,48 @@ static void usb_parse_config(usb_device_t *dev)
         if (bLength < 2 || ptr + bLength > end)
             break;
 
-        if (bType == USB_DT_INTERFACE && bLength >= 9 && !first_iface_seen) {
+        if (bType == USB_DT_INTERFACE && bLength >= 9) {
             struct usb_interface_descriptor *iface =
                 (struct usb_interface_descriptor *)ptr;
-            dev->if_class = iface->bInterfaceClass;
-            dev->if_subclass = iface->bInterfaceSubClass;
-            dev->if_protocol = iface->bInterfaceProtocol;
-            first_iface_seen = 1;
+
+            /*
+             * Record every interface, alternate settings included, so each
+             * endpoint below can be attributed to the interface that declared
+             * it.  Endpoints are appended to the flat dev->endpoints[] array
+             * in descriptor order, so an interface's endpoints are exactly the
+             * ones added between its descriptor and the next one -- which is
+             * what ep_first/ep_count capture.
+             */
+            if (dev->num_interfaces < USB_MAX_INTERFACES) {
+                cur_iface = &dev->interfaces[dev->num_interfaces++];
+                cur_iface->number      = iface->bInterfaceNumber;
+                cur_iface->alt_setting = iface->bAlternateSetting;
+                cur_iface->if_class    = iface->bInterfaceClass;
+                cur_iface->if_subclass = iface->bInterfaceSubClass;
+                cur_iface->if_protocol = iface->bInterfaceProtocol;
+                cur_iface->ep_first    = dev->num_endpoints;
+                cur_iface->ep_count    = 0;
+            } else {
+                /* Out of interface slots: stop attributing endpoints rather
+                 * than attributing them to the wrong interface. */
+                cur_iface = NULL;
+            }
+
+            /*
+             * dev->if_* still defaults to the first interface so a device
+             * with no matching driver reports something meaningful, but
+             * usb_match_driver() overwrites these with whichever interface
+             * actually binds.  It used to be first-interface-only, which is
+             * why a composite device whose interface 0 was not the functional
+             * one never matched any driver.
+             */
+            if (!first_iface_seen) {
+                dev->if_number   = iface->bInterfaceNumber;
+                dev->if_class    = iface->bInterfaceClass;
+                dev->if_subclass = iface->bInterfaceSubClass;
+                dev->if_protocol = iface->bInterfaceProtocol;
+                first_iface_seen = 1;
+            }
         }
 
         if (bType == USB_DT_ENDPOINT && bLength >= 7) {
@@ -515,6 +622,8 @@ static void usb_parse_config(usb_device_t *dev)
                     ep->toggle = 0;
                     ep->max_streams = 0;
                     dev->num_endpoints++;
+                    if (cur_iface)
+                        cur_iface->ep_count++;
                 }
             }
         }
@@ -557,12 +666,94 @@ int usb_bulk_stream_transfer(usb_device_t *dev, usb_endpoint_t *ep,
  * ============================================================
  */
 
+/*
+ * Try to bind one driver to one interface.  Returns 1 if the device is now
+ * bound.  dev->if_* is published before probe() so the driver sees the
+ * interface being offered -- probe() and attach() read dev->if_class and
+ * friends, and every USB_RECIP_INTERFACE control request needs
+ * dev->if_number as its wIndex.
+ */
+static int usb_try_bind(usb_device_t *dev, usb_class_driver_t *drv,
+                        const usb_interface_t *iface)
+{
+    uint8_t save_number   = dev->if_number;
+    uint8_t save_class    = dev->if_class;
+    uint8_t save_subclass = dev->if_subclass;
+    uint8_t save_protocol = dev->if_protocol;
+
+    uint8_t if_class = iface->if_class;
+    if (if_class == 0)
+        if_class = dev->dev_desc.bDeviceClass;
+
+    if (drv->if_class != if_class)
+        return 0;
+    if (drv->if_subclass != 0xFF && drv->if_subclass != iface->if_subclass)
+        return 0;
+    if (drv->if_protocol != 0xFF && drv->if_protocol != iface->if_protocol)
+        return 0;
+
+    dev->if_number   = iface->number;
+    dev->if_class    = iface->if_class;
+    dev->if_subclass = iface->if_subclass;
+    dev->if_protocol = iface->if_protocol;
+
+    if (drv->probe && drv->probe(dev) != 0)
+        goto restore;
+
+    if (drv->attach) {
+        dev->driver_data = NULL;
+        if (drv->attach(dev) == 0) {
+            dev->driver = drv;       /* remember for disconnect dispatch */
+            kprintf("usb: device %u:%u interface %u bound to driver '%s'\n",
+                    dev->hcd->hcd_index, dev->address,
+                    iface->number, drv->name);
+            return 1;
+        }
+        /* Defensive: if attach failed but left a dangling pointer, clear it
+         * so a future driver match doesn't dereference freed memory. */
+        dev->driver_data = NULL;
+    }
+
+restore:
+    dev->if_number   = save_number;
+    dev->if_class    = save_class;
+    dev->if_subclass = save_subclass;
+    dev->if_protocol = save_protocol;
+    return 0;
+}
+
 static void usb_match_driver(usb_device_t *dev)
 {
     usb_class_driver_t *drv;
 
+    /*
+     * Offer every interface (alternate setting 0 only -- we never issue
+     * SET_INTERFACE during enumeration, so the alt-0 descriptors describe the
+     * device as it is right now) to every driver.  This used to consider only
+     * the first interface descriptor in the configuration, so a composite
+     * device -- a keyboard with a separate consumer-control interface, a
+     * headset, a dock -- was matched on whatever function happened to be
+     * listed first and its other functions were unreachable.
+     */
+    for (int i = 0; i < dev->num_interfaces; i++) {
+        usb_interface_t *iface = &dev->interfaces[i];
+
+        if (iface->alt_setting != 0)
+            continue;
+
+        for (drv = usb_class_drivers; drv; drv = drv->next) {
+            if (usb_try_bind(dev, drv, iface))
+                return;
+        }
+    }
+
+    /*
+     * Nothing matched by interface.  Fall back to the device-descriptor class
+     * for devices that declare their class at the device level and leave the
+     * interface class zero, and for the degenerate case of a configuration we
+     * could not parse any interface out of at all.
+     */
     for (drv = usb_class_drivers; drv; drv = drv->next) {
-        /* Check class/subclass/protocol match */
         uint8_t dev_class = dev->if_class;
         if (dev_class == 0) dev_class = dev->dev_desc.bDeviceClass;
 

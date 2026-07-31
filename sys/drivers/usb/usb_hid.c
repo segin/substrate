@@ -76,6 +76,15 @@ typedef struct usb_hid_dev {
     usb_device_t *udev;
     input_dev_t   input_dev;
     struct hid_kbd_report prev_report;
+    /*
+     * The interrupt IN endpoint carrying input reports, and the interface
+     * number that declared it.  Every HID class request is USB_RECIP_INTERFACE
+     * and must carry this number as its wIndex -- it used to be hardcoded to
+     * 0, which addressed the wrong interface on any device whose keyboard is
+     * not interface 0.
+     */
+    usb_endpoint_t *intr_ep;
+    uint8_t  if_number;
     uint8_t  active;
     uint8_t  poll_exited;    /* set by poll thread before kthread_exit() */
     int      poll_chan;      /* wait channel for kthread sleep */
@@ -90,6 +99,14 @@ typedef struct usb_hid_dev {
     uint64_t repeat_press_tick;
     uint64_t repeat_last_tick;
 } usb_hid_dev_t;
+
+/*
+ * How long one interrupt-IN poll waits for a report.  An idle keyboard NAKs
+ * for the entire window, so this is the per-iteration cost of an idle device
+ * on a controller without interrupt-completion callbacks; keep it comfortably
+ * under the poll interval.
+ */
+#define USB_HID_INTR_TIMEOUT_MS     4
 
 #define USB_HID_REPEAT_DELAY_TICKS  (HZ / 2)        /* 500 ms */
 #define USB_HID_REPEAT_PERIOD_TICKS (HZ / 30 ? HZ / 30 : 1)  /* ~30 Hz */
@@ -328,14 +345,46 @@ static void usb_hid_poll_thread(void *arg)
         interval_ticks = 1;
 
     while (hid->active) {
-        int ret = usb_control_transfer(hid->udev,
-            USB_DIR_IN | USB_TYPE_CLASS | USB_RECIP_INTERFACE,
-            HID_REQ_GET_REPORT,
-            (uint16_t)((HID_REPORT_TYPE_INPUT << 8) | 0),
-            0,
-            &report, sizeof(report));
+        int ret;
 
-        if (ret == USB_XFER_OK)
+        if (hid->intr_ep) {
+            /*
+             * The interrupt IN endpoint is the mandatory input path for a HID
+             * device, and the only one that reports edges: the device sends a
+             * report when its state CHANGES.  The driver used to poll
+             * GET_REPORT over the control pipe instead, which is (a) an
+             * optional request that real keyboards routinely STALL or
+             * implement badly -- qemu's emulated usb-kbd answers it faithfully,
+             * which is why this worked in a VM and not on hardware -- and (b)
+             * a snapshot of current state, so any key pressed and released
+             * between two polls was silently lost.
+             *
+             * An idle device NAKs for the whole window; that is the normal
+             * result, not an error, so a short timeout keeps the loop cheap.
+             */
+            uint32_t got = 0;
+            memset(&report, 0, sizeof(report));
+            ret = usb_interrupt_transfer(hid->udev, hid->intr_ep,
+                                         &report, sizeof(report), &got,
+                                         USB_HID_INTR_TIMEOUT_MS);
+            /* A short packet still carries a valid boot report prefix. */
+            if ((ret == USB_XFER_OK || ret == USB_XFER_SHORT) && got == 0)
+                ret = USB_XFER_NAK;
+        } else {
+            /*
+             * No interrupt IN endpoint on this interface (or the descriptors
+             * did not parse).  Fall back to the control-pipe poll so such a
+             * device is no worse off than before.
+             */
+            ret = usb_control_transfer(hid->udev,
+                USB_DIR_IN | USB_TYPE_CLASS | USB_RECIP_INTERFACE,
+                HID_REQ_GET_REPORT,
+                (uint16_t)((HID_REPORT_TYPE_INPUT << 8) | 0),
+                hid->if_number,
+                &report, sizeof(report));
+        }
+
+        if (ret == USB_XFER_OK || ret == USB_XFER_SHORT)
             usb_hid_process_kbd_report(hid, &report);
 
         /* Boot-protocol HID has no hardware typematic — synthesize
@@ -389,23 +438,43 @@ static int usb_hid_attach(usb_device_t *dev)
     memset(hid, 0, sizeof(*hid));
     hid->udev = dev;
     hid->active = 1;
+    hid->if_number = dev->if_number;
     dev->driver_data = hid;
 
-    /* Request boot protocol mode */
+    /*
+     * Locate this interface's interrupt IN endpoint -- the one the device
+     * pushes input reports on.  Scoping the search to our own interface
+     * matters on a composite device, where the first interrupt IN endpoint in
+     * the configuration frequently belongs to a different function (a
+     * consumer-control/media interface, a vendor interface) and polling it
+     * would yield no keystrokes.
+     */
+    hid->intr_ep = usb_find_endpoint_iface(dev, hid->if_number, 0,
+                                           USB_EP_TYPE_INTERRUPT,
+                                           USB_EP_DIR_IN);
+    if (!hid->intr_ep)
+        kprintf("usb_hid: interface %u has no interrupt IN endpoint; "
+                "falling back to GET_REPORT polling\n", hid->if_number);
+
+    /* Request boot protocol mode.  wIndex is the interface number: these are
+     * USB_RECIP_INTERFACE requests, and sending them to interface 0 on a
+     * device whose keyboard lives elsewhere either STALLs or reconfigures the
+     * wrong function. */
     ret = usb_control_transfer(dev,
         USB_DIR_OUT | USB_TYPE_CLASS | USB_RECIP_INTERFACE,
         HID_REQ_SET_PROTOCOL,
         HID_PROTOCOL_BOOT,
-        0, NULL, 0);
+        hid->if_number, NULL, 0);
     if (ret != USB_XFER_OK)
-        kprintf("usb_hid: SET_PROTOCOL(boot) failed (err=%d)\n", ret);
+        kprintf("usb_hid: SET_PROTOCOL(boot) on interface %u failed (err=%d)\n",
+                hid->if_number, ret);
 
     /* Set idle rate to 0 (report only on state change) */
     usb_control_transfer(dev,
         USB_DIR_OUT | USB_TYPE_CLASS | USB_RECIP_INTERFACE,
         HID_REQ_SET_IDLE,
         0,      /* wValue: duration=0 (indefinite), report_id=0 */
-        0, NULL, 0);
+        hid->if_number, NULL, 0);
 
     /* Register with input subsystem */
     snprintf(hid->input_dev.name, sizeof(hid->input_dev.name),
@@ -422,7 +491,9 @@ static int usb_hid_attach(usb_device_t *dev)
         return -1;
     }
 
-    kprintf("usb_hid: keyboard attached (addr %u)\n", dev->address);
+    kprintf("usb_hid: keyboard attached (addr %u, interface %u, %s)\n",
+            dev->address, hid->if_number,
+            hid->intr_ep ? "interrupt IN" : "GET_REPORT fallback");
     return 0;
 }
 

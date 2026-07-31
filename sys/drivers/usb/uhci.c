@@ -754,8 +754,11 @@ static int uhci_bulk_transfer(uhci_hc_t *hc, usb_transfer_t *xfer)
     /* Insert into async QH */
     hc->async_qh->element_link = (uint32_t)first_phys;
 
-    /* Poll for completion */
-    ret = uhci_poll_td(hc, first_td, 5000, &actual);
+    /* Poll for completion.  An interrupt endpoint being polled for input NAKs
+     * for the whole window whenever the device has nothing to report, so its
+     * caller passes a short timeout; everything else keeps the 5 s default. */
+    ret = uhci_poll_td(hc, first_td,
+                       xfer->timeout_ms ? xfer->timeout_ms : 5000, &actual);
 
     /* Remove from schedule */
     hc->async_qh->element_link = UHCI_QH_LINK_T;
@@ -1001,7 +1004,20 @@ static int uhci_submit(usb_hcd_t *hcd, usb_transfer_t *xfer)
     mutex_lock(&hc->submit_lock);
     if (xfer->is_control) {
         ret = uhci_control_transfer(hc, xfer);
-    } else if (xfer->ep->type == USB_EP_TYPE_BULK) {
+    } else if (xfer->ep->type == USB_EP_TYPE_BULK ||
+               xfer->ep->type == USB_EP_TYPE_INTERRUPT) {
+        /*
+         * Interrupt transfers use the same TD mechanics as bulk -- same
+         * tokens, same data toggle, same low-speed bit.  The difference is
+         * scheduling: a proper implementation places them in the periodic
+         * frame list so the controller polls at bInterval.  Here the driver
+         * does its own periodic polling from a kthread, so issuing each poll
+         * on the async queue transfers exactly the same data; what we give up
+         * is the guaranteed bandwidth reservation, not correctness.  Without
+         * this, UHCI rejected every interrupt transfer outright ("unsupported
+         * transfer type 3"), which is why the HID drivers polled GET_REPORT
+         * over the control pipe instead.
+         */
         ret = uhci_bulk_transfer(hc, xfer);
     } else if (xfer->ep->type == USB_EP_TYPE_ISO) {
         ret = uhci_iso_out_transfer(hc, xfer);
