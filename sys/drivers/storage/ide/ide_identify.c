@@ -109,7 +109,20 @@ void ide_parse_identify_data(ide_device_t *dev, const uint16_t *buffer,
     }
 
     mwdma_modes = (uint8_t)(buffer[63] & 0xFF);
-    udma_modes = (uint8_t)(buffer[88] & 0xFF);
+    /*
+     * [IDE-15] UDMA modes come from word 88, but modes above UDMA2 (i.e.
+     * faster than 33 MB/s) require an 80-conductor cable, which word 93
+     * bit 13 reports.  Selecting UDMA5 across a 40-conductor cable does not
+     * fail cleanly -- it produces intermittent CRC-corrupted reads, which is
+     * far worse than running slower.  Also mask off bit 7, which is reserved
+     * (there is no UDMA7).
+     */
+    udma_modes = (uint8_t)(buffer[88] & 0x7F);
+
+    if ((buffer[93] & (1U << 13)) == 0) {
+        /* 40-conductor cable (or word 93 not reported): cap at UDMA2. */
+        udma_modes &= 0x07;
+    }
 
     dev->size = total_sectors;
     dev->feature_flags = feature_flags;

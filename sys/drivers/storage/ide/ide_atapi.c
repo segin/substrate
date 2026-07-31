@@ -10,6 +10,7 @@
 #include <drivers/storage/ide/ide_priv.h>
 
 #include <arch/x86-common/io.h>
+#include <kern/console.h>
 
 /* SCSI Command Codes (subset for CD-ROM) */
 #define SCSI_TEST_UNIT_READY   0x00
@@ -102,6 +103,7 @@ int ide_atapi_packet(uint8_t channel, uint8_t drive,
     /* Data transfer phase */
     uint16_t *buf = (uint16_t *)buffer;
     uint32_t transferred = 0;
+    int short_transfer = 0;   /* [IDE-08] */
 
     while (transferred < buffer_len) {
         /* Wait for DRQ or completion */
@@ -124,11 +126,20 @@ int ide_atapi_packet(uint8_t channel, uint8_t drive,
                              (ide_read_reg(channel, ATA_REG_LBA_HIGH) << 8);
 
         /* Transfer data */
-        uint16_t words = byte_count / 2;
+        /*
+         * [IDE-08] The device dictates byte_count; it can exceed what is
+         * left of the caller's buffer, or be odd.  The old code clamped
+         * `words` and then `break`'d when the clamp reached zero -- walking
+         * away with DRQ still asserted and data pending in the drive, so the
+         * NEXT command was issued into a desynchronised device.  Whatever we
+         * cannot store must still be pulled off the bus (or padded out on a
+         * write) before the command can be considered over.
+         */
+        uint16_t dev_words = byte_count / 2;
+        uint16_t words = dev_words;
 
-        /* Ensure we don't overflow the buffer */
-        if (transferred + words * 2 > buffer_len) {
-             words = (buffer_len - transferred) / 2;
+        if (transferred + (uint32_t)words * 2 > buffer_len) {
+            words = (uint16_t)((buffer_len - transferred) / 2);
         }
 
         if (words > 0) {
@@ -138,10 +149,30 @@ int ide_atapi_packet(uint8_t channel, uint8_t drive,
                 insw(bus + ATA_REG_DATA, buf, words);
             }
             buf += words;
-            transferred += words * 2;
-        } else {
-            /* No words to transfer in this chunk? (odd length/zero) */
-            break;
+            transferred += (uint32_t)words * 2;
+        }
+
+        /* Drain (or pad) the remainder of the drive's declared byte count so
+         * the data phase completes and DRQ drops. */
+        for (uint16_t i = words; i < dev_words; i++) {
+            if (write) {
+                uint16_t zero = 0;
+                outsw(bus + ATA_REG_DATA, &zero, 1);
+            } else {
+                uint16_t discard;
+                insw(bus + ATA_REG_DATA, &discard, 1);
+            }
+            short_transfer = 1;
+        }
+
+        /* An odd byte_count leaves a trailing byte the word loop cannot
+         * express; the drive still expects the full transfer. */
+        if (byte_count & 1) {
+            short_transfer = 1;
+        }
+
+        if (dev_words == 0) {
+            break;      /* device declared a zero-length chunk */
         }
     }
 
@@ -151,7 +182,23 @@ int ide_atapi_packet(uint8_t channel, uint8_t drive,
     }
     status = ide_read_reg(channel, ATA_REG_STATUS);
 
-    return (status & ATA_SR_ERR) ? -1 : 0;
+    if (status & ATA_SR_ERR)
+        return -1;
+
+    /*
+     * [IDE-08] The data phase completed (DRQ has dropped, because everything
+     * the drive declared was consumed above), but some of it could not be
+     * stored in the caller's buffer.  Report that rather than claiming a
+     * full transfer -- the drive is now in a sane state either way, which is
+     * the part that used to be broken.
+     */
+    if (short_transfer) {
+        kprintf("ide: ATAPI short transfer on channel %u (%u of %u bytes)\n",
+                channel, (unsigned)transferred, (unsigned)buffer_len);
+        return -1;
+    }
+
+    return 0;
 }
 
 /*
