@@ -203,6 +203,12 @@ isr_spurious:
 .extern isr_handler
 .extern syscall_handler
 
+/* Global so stack traces can name it.  It is the return path for EVERY
+ * interrupt and exception, so an unnamed symbol here means the nearest
+ * PRECEDING global absorbs its addresses -- which is exactly what happened
+ * when isr_spurious was added just above: real faults in this epilogue
+ * started reporting as "isr_spurious+0x36" and sent debugging the wrong way. */
+.global isr_common_stub
 isr_common_stub:
     pusha
     

@@ -47,6 +47,7 @@
 #define R_TCR               0x40   /* transmit config, 32-bit */
 #define R_RCR               0x44   /* receive config, 32-bit */
 #define R_CFG9346           0x50   /* register-write lock */
+#define R_MISC              0xF0   /* misc control, 32-bit (8168G and later) */
 #define R_PHYSTATUS         0x6C
 #define R_RMS               0xDA   /* rx max packet size, 16-bit */
 #define R_CPCR              0xE0   /* C+ command, 16-bit */
@@ -89,6 +90,29 @@
 /* TCR bits. */
 #define TCR_MXDMA_UNLIMITED (7u << 8)
 #define TCR_IFG_NORMAL      (3u << 24)
+#define TCR_HWREV_MASK      0x7CC00000u  /* stepping ID lives in TCR */
+
+/* MISC bits (8168G and later). */
+#define MISC_RXDV_GATED_EN  (1u << 19)
+
+/*
+ * Per-stepping quirks, transcribed from NetBSD rtl8169.c's hwrev switch.
+ * Only the ones that change INITIALISATION are modelled; NOJUMBO, DESCV2,
+ * NOEECMD and PHYWAKE_PM do not apply to a driver that does no jumbo, no
+ * offload, no EEPROM access and no power management.
+ */
+#define Q_MACSTAT           0x0001   /* set MACSTAT_DIS, and TXENB only */
+#define Q_RXDV_GATED        0x0002   /* must clear MISC.RXDV_GATED_EN */
+#define Q_TXRXEN_LATER      0x0004   /* enable CR TE|RE after TCR/RCR */
+#define Q_EARLYOFF          0x0008   /* RCR early-off (8168E-VL, 8168F) */
+#define Q_EARLYOFFV2        0x0010   /* RCR early-off v2 (8168G and later) */
+
+/* RCR early-off bits. */
+#define RCR_EARLYOFF        0x00003800u
+#define RCR_EARLYOFFV2      0x00000800u
+
+/* CPCR MACSTAT_DIS. */
+#define CPCR_MACSTAT_DIS    0x0080
 
 /* CPCR (C+ command) bits.  TXENB/RXENB enable the DESCRIPTOR engine and are
  * distinct from the CR RE/TE bits, which drive the legacy 8139-style path. */
@@ -144,6 +168,8 @@ static struct {
     uint32_t           tx_buf_phys;
     uint32_t           rx_cur;
     uint32_t           tx_cur;
+    uint32_t           hwrev;
+    uint32_t           quirks;
     netdev_t           netdev;
     int                registered;
 } rt;
@@ -300,6 +326,70 @@ static const struct netdev_ops r8168_ops = {
     .xmit = r8168_xmit,
 };
 
+/* ----- stepping identification ----- */
+
+/*
+ * The stepping ID is in the TX config register, not PCI config space: one PCI
+ * ID (0x8168) covers fifteen years of silicon whose init sequences differ.
+ * Values and quirk assignments transcribed from NetBSD rtl8169.c.
+ */
+static const struct {
+    uint32_t hwrev;
+    uint32_t quirks;
+    const char *name;
+} r8168_hwrevs[] = {
+    /* 8168B: MACSTAT only. */
+    { 0x30000000, Q_MACSTAT, "8168B" },
+    { 0x38000000, Q_MACSTAT, "8168B" },
+    { 0x38400000, Q_MACSTAT, "8168B" },
+    /* 8168C/CP/D/DP. */
+    { 0x3C000000, Q_MACSTAT, "8168C" },
+    { 0x3C400000, Q_MACSTAT, "8168C" },
+    { 0x3C800000, Q_MACSTAT, "8168CP" },
+    { 0x28000000, Q_MACSTAT, "8168D" },
+    { 0x28800000, Q_MACSTAT, "8168DP" },
+    /* 8168E. */
+    { 0x2C000000, Q_MACSTAT, "8168E" },
+    /* 8168E-VL and 8168F add the early-off receive tweak. */
+    { 0x2C800000, Q_MACSTAT | Q_EARLYOFF, "8168E-VL" },
+    { 0x48000000, Q_MACSTAT | Q_EARLYOFF, "8168F" },
+    { 0x48800000, Q_MACSTAT, "8411" },
+    /*
+     * 8168G and later -- the generation on any 2013+ board, which is what a
+     * Haswell Lenovo C460 will have.  These need RXDV gating cleared and the
+     * TX/RX enable moved AFTER the config registers, and like every MACSTAT
+     * part they take TXENB WITHOUT RXENB in the C+ command word.
+     */
+    { 0x4C000000, Q_MACSTAT | Q_RXDV_GATED | Q_TXRXEN_LATER | Q_EARLYOFFV2, "8168G" },
+    { 0x4C100000, Q_MACSTAT | Q_RXDV_GATED | Q_TXRXEN_LATER | Q_EARLYOFFV2, "8168G" },
+    { 0x50000000, Q_MACSTAT | Q_RXDV_GATED | Q_TXRXEN_LATER | Q_EARLYOFFV2, "8168EP" },
+    { 0x50800000, Q_MACSTAT | Q_RXDV_GATED | Q_TXRXEN_LATER | Q_EARLYOFFV2, "8168GU" },
+    { 0x50900000, Q_MACSTAT | Q_RXDV_GATED | Q_TXRXEN_LATER | Q_EARLYOFFV2, "8168G" },
+    { 0x54000000, Q_MACSTAT | Q_RXDV_GATED | Q_TXRXEN_LATER | Q_EARLYOFFV2, "8168H" },
+    { 0x54100000, Q_MACSTAT | Q_RXDV_GATED | Q_TXRXEN_LATER | Q_EARLYOFFV2, "8168H" },
+    { 0x54800000, Q_MACSTAT | Q_RXDV_GATED | Q_TXRXEN_LATER | Q_EARLYOFFV2, "8168FP" },
+    { 0x5C800000, Q_MACSTAT | Q_RXDV_GATED | Q_TXRXEN_LATER | Q_EARLYOFFV2, "8411B" },
+    { 0, 0, NULL },
+};
+
+static const char *r8168_identify(void) {
+    rt.hwrev = rt_r32(R_TCR) & TCR_HWREV_MASK;
+    for (int i = 0; r8168_hwrevs[i].name != NULL; i++) {
+        if (r8168_hwrevs[i].hwrev == rt.hwrev) {
+            rt.quirks = r8168_hwrevs[i].quirks;
+            return r8168_hwrevs[i].name;
+        }
+    }
+    /*
+     * Unknown stepping.  Assume the MODERN behaviour rather than the ancient
+     * one: everything from the 8168B onwards wants MACSTAT, and every part
+     * new enough not to be in this table is newer than 8168G.  Guessing "old"
+     * for a new chip sets RXENB on a part that must not have it.
+     */
+    rt.quirks = Q_MACSTAT | Q_RXDV_GATED | Q_TXRXEN_LATER | Q_EARLYOFFV2;
+    return NULL;
+}
+
 /* ----- setup ----- */
 
 static int r8168_setup(pci_device_t *pdev) {
@@ -338,6 +428,10 @@ static int r8168_setup(pci_device_t *pdev) {
     }
 
     rt_w8(R_CFG9346, CFG9346_UNLOCK);
+
+    /* Identify the stepping BEFORE configuring anything: the quirks it
+     * selects change the C+ command word and the enable ordering. */
+    const char *revname = r8168_identify();
 
     /* MAC out of IDR0..5.  Loaded from the EEPROM by the chip at reset. */
     for (int i = 0; i < 6; i++)
@@ -405,12 +499,22 @@ static int r8168_setup(pci_device_t *pdev) {
      */
     /*
      * The C+ command register comes FIRST -- "we must configure the C+
-     * register before all others" (NetBSD rtl8169.c).  And it must carry
-     * TXENB|RXENB: those enable the DESCRIPTOR engine, which is a different
-     * thing from the CR TE|RE bits below (those drive the legacy 8139-style
-     * datapath).  Without them the chip never looks at the rings at all.
+     * register before all others" (NetBSD rtl8169.c).  It carries the
+     * DESCRIPTOR-engine enables, which are a different thing from the CR
+     * TE|RE bits below (those drive the legacy 8139-style datapath).
+     *
+     * The enable bits are stepping-dependent and NOT symmetric: on every
+     * MACSTAT part -- which is everything from the 8168B onwards, including
+     * the 8168G generation in any recent machine -- the word is
+     * MACSTAT_DIS|TXENB with RXENB deliberately ABSENT.  Setting RXENB there
+     * is wrong.  Only the pre-8168B parts take RXENB|TXENB.
      */
-    rt_w16(R_CPCR, CPCR_PCI_MUL_RW | CPCR_TXENB | CPCR_RXENB);
+    uint16_t cpcr = CPCR_PCI_MUL_RW;
+    if (rt.quirks & Q_MACSTAT)
+        cpcr |= CPCR_MACSTAT_DIS | CPCR_TXENB;
+    else
+        cpcr |= CPCR_RXENB | CPCR_TXENB;
+    rt_w16(R_CPCR, cpcr);
 
     /* The BSDs sleep 10ms here before touching anything else. */
     for (volatile int i = 0; i < 1000000; i++) { }
@@ -427,12 +531,33 @@ static int r8168_setup(pci_device_t *pdev) {
     rt_w32(R_RDSAR + 4, 0);
     rt_w32(R_RDSAR,     rt.rx_ring_phys);
 
-    /* Enable, THEN configure TX/RX -- again the BSD order. */
-    rt_w8(R_CR, CR_TE | CR_RE);
+    /*
+     * 8168G and later gate the receive data valid signal after reset and will
+     * receive nothing until it is ungated.  Harmless to skip on older parts,
+     * fatal to skip on new ones.
+     */
+    if (rt.quirks & Q_RXDV_GATED)
+        rt_w32(R_MISC, rt_r32(R_MISC) & ~MISC_RXDV_GATED_EN);
+
+    /*
+     * Enable ordering is stepping-dependent.  Most parts want TE|RE set
+     * before TCR/RCR; the 8168G generation wants it AFTER (RTKQ_TXRXEN_LATER).
+     */
+    if (!(rt.quirks & Q_TXRXEN_LATER))
+        rt_w8(R_CR, CR_TE | CR_RE);
 
     rt_w32(R_TCR, TCR_MXDMA_UNLIMITED | TCR_IFG_NORMAL);
     rt_w8(R_ETHRESH, 16);                     /* early TX threshold */
-    rt_w32(R_RCR, RCR_MXDMA_UNLIMITED | RCR_RXFTH_NONE | RCR_RXBUF_64);
+
+    uint32_t rcr = RCR_MXDMA_UNLIMITED | RCR_RXFTH_NONE | RCR_RXBUF_64;
+    if (rt.quirks & Q_EARLYOFF)
+        rcr |= RCR_EARLYOFF;
+    else if (rt.quirks & Q_EARLYOFFV2)
+        rcr |= RCR_EARLYOFFV2;
+    rt_w32(R_RCR, rcr);
+
+    if (rt.quirks & Q_TXRXEN_LATER)
+        rt_w8(R_CR, CR_TE | CR_RE);
 
     /*
      * Receive filter: OR the accept bits into whatever the chip reports, so
@@ -474,10 +599,19 @@ static int r8168_setup(pci_device_t *pdev) {
 
     /* PHYstatus is worth printing on first bring-up: if the link never comes
      * up, this says whether the PHY negotiated at all. */
-    kprintf("r8168: %02x:%02x:%02x:%02x:%02x:%02x irq %u phy 0x%02x\n",
+    kprintf("r8168: %s (hwrev 0x%08x quirks 0x%x) "
+            "%02x:%02x:%02x:%02x:%02x:%02x irq %u phy 0x%02x\n",
+            revname ? revname : "UNKNOWN stepping",
+            (unsigned)rt.hwrev, (unsigned)rt.quirks,
             rt.netdev.hwaddr[0], rt.netdev.hwaddr[1], rt.netdev.hwaddr[2],
             rt.netdev.hwaddr[3], rt.netdev.hwaddr[4], rt.netdev.hwaddr[5],
             (unsigned)rt.irq, (unsigned)rt_r8(R_PHYSTATUS));
+    if (revname == NULL) {
+        /* Say so loudly: the quirk guess is the most likely reason a
+         * bring-up on new silicon misbehaves, and hwrev above is exactly
+         * what a new table entry needs. */
+        kprint("r8168: stepping not in table, assuming 8168G-class quirks\n");
+    }
     return 0;
 }
 
