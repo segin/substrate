@@ -183,6 +183,13 @@ void idt_init(void) {
     idt_set_gate(TLB_SHOOTDOWN_VECTOR, (uint32_t)(uintptr_t)isr254,
                  KERNEL_CODE_SELECTOR, IDT_FLAG_KERNEL_INT_GATE);
 
+    /* [USB-HW-03] LAPIC spurious-interrupt vector.  lapic_enable(0xFF) puts
+     * 0xFF in the SVR on the BSP and on every AP, but nothing ever installed
+     * a gate for it, so the entry stayed not-present and a spurious interrupt
+     * raised #GP.  See isr_spurious in isr.S for why it does not EOI. */
+    idt_set_gate(LAPIC_SPURIOUS_VECTOR, (uint32_t)(uintptr_t)isr_spurious,
+                 KERNEL_CODE_SELECTOR, IDT_FLAG_KERNEL_INT_GATE);
+
     /* Dynamic (MSI/MSI-X) vectors 0x50..0xBF: install a gate per vector so
      * LAPIC-delivered messages reach isr_handler, which routes them to
      * irq_dispatch() + a LAPIC EOI. */

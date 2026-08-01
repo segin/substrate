@@ -21,6 +21,9 @@ static irq_action_t *irq_lines[IRQ_LINE_COUNT];
 static uint8_t irq_vector_used[IRQ_VECTOR_COUNT];
 static spinlock_t irq_lock = SPINLOCK_INIT("irq");
 
+/* Actions unlinked by free_irq().  Never freed; see the note there. */
+static irq_action_t *irq_retired;
+
 int request_irq(unsigned int irq, irq_handler_t handler, unsigned long flags,
                 const char *name, void *dev_id) {
     irq_action_t *action;
@@ -89,9 +92,29 @@ void free_irq(unsigned int irq, void *dev_id) {
             } else {
                 irq_lines[irq] = curr->next;
             }
+            /*
+             * [USB-HW-03] RETIRE the action instead of freeing it.
+             *
+             * irq_dispatch() walks this chain with no lock at all (see the
+             * comment there for why it must not take a plain spinlock), so a
+             * CPU can be sitting on `curr` right now -- APs run sti and take
+             * interrupts, they just never schedule.  kfree()ing it here hands
+             * that CPU a freed node: it reads curr->next and calls
+             * curr->handler out of memory the allocator has already recycled.
+             * If the block has been zeroed that is a call to 0 with IF=0 in
+             * supervisor mode.
+             *
+             * Retiring leaks sizeof(irq_action_t) per free_irq(), and
+             * free_irq() is called from exactly two places (AHCI teardown and
+             * the floppy probe's failure path), so the bound is a few dozen
+             * bytes for the life of the system.  That is the cheapest correct
+             * answer until there is real RCU to defer the free against.
+             */
+            curr->handler = NULL;
+            curr->next = irq_retired;
+            irq_retired = curr;
             spinlock_release(&irq_lock);
             intr_restore(flags_saved);
-            kfree(curr, sizeof(*curr));
             return;
         }
         prev = curr;
@@ -109,25 +132,36 @@ int irq_dispatch(unsigned int irq, void *frame) {
         return 0;
     }
 
-    /* No irq_lock here.
+    /* No irq_lock here, deliberately.
      *
-     * irq_dispatch runs in interrupt context — the CPU has IF=0 on
-     * entry, so request_irq / free_irq (which both intr_disable()
-     * around their lock-held mutation of irq_lines[]) cannot run
-     * concurrently on this CPU.  Substrate is UP today; a future
-     * SMP port will need a real lock, but it MUST NOT be a plain
-     * spinlock — it has to be either dropped before invoking the
-     * handler chain (so a handler that re-enables IF and takes a
-     * nested IRQ doesn't re-enter irq_lock), or replaced with a
-     * read-side-lockless scheme (RCU-style).
+     * Acquiring it would deadlock: a handler that re-enables IF and takes a
+     * nested IRQ on the same CPU re-enters irq_lock while it is still held.
+     * That is a bug we actually hit (telnet's NIC path was the trigger) and
+     * it tripped the deadlock detector.  So the read side has to stay
+     * lockless.
      *
-     * The historical bug we hit: acquiring irq_lock here meant any
-     * handler that enabled interrupts (telnet's NIC path was the
-     * trigger) and let a second IRQ fire on the same CPU deadlocked
-     * on the still-held lock and tripped the deadlock detector.  */
+     * [USB-HW-03] This used to say "Substrate is UP today", and made
+     * correctness rest on that.  It is NOT true: smp_ap_entry() runs sti and
+     * parks in hlt, so every AP accepts interrupts — they simply never
+     * schedule.  irq_dispatch() therefore runs concurrently on several CPUs
+     * on any multi-core machine, which is the one condition QEMU was not
+     * reproducing.  Safety now comes from the write side instead: free_irq()
+     * retires actions rather than freeing them, so a node this walk is
+     * holding can never become freed memory, and a retired node is caught by
+     * the NULL-handler check below. */
     curr = irq_lines[irq];
     while (curr != NULL) {
-        handled |= curr->handler(irq, curr->dev_id, frame);
+        irq_handler_t fn = curr->handler;
+
+        /* [USB-HW-03] A retired action has a NULL handler (free_irq clears it
+         * before unlinking).  Calling through it would be a jump to 0 with
+         * IF=0 in supervisor mode -- eip=0, CR2=0, err=0 -- which is precisely
+         * the fault signature reported from real hardware.  Stop rather than
+         * vector through it. */
+        if (fn == NULL)
+            break;
+
+        handled |= fn(irq, curr->dev_id, frame);
         curr = curr->next;
     }
     return handled;

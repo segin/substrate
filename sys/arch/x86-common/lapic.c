@@ -110,6 +110,11 @@ bool lapic_is_initialized(void) {
     return lapic_initialized;
 }
 
+/* Incremented by isr_spurious (isr.S) on every LAPIC spurious interrupt.
+ * Nonzero here means the hardware really does raise them -- see USB-HW-03,
+ * where the vector had no IDT gate at all and each one took #GP. */
+volatile uint32_t lapic_spurious_count = 0;
+
 // Enable LAPIC and set Spurious Interrupt Vector
 void lapic_enable(uint8_t spurious_vector) {
     if (!lapic_base) return;

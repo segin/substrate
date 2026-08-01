@@ -88,6 +88,7 @@ extern void isr128(void); // Syscall
 extern void isr253(void); // SCHED_IPI_VECTOR   (0xFD)
 extern void isr254(void); // TLB_SHOOTDOWN_VECTOR (0xFE)
 extern void isr_panic_ipi(void);
+extern void isr_spurious(void);  // LAPIC spurious (LAPIC_SPURIOUS_VECTOR)
 
 /* Entry points for the dynamic (MSI) vector stubs 0x50..0xBF, indexed by
  * (vector - IRQ_VECTOR_FIRST).  Defined in isr.S. */

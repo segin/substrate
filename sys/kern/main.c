@@ -559,7 +559,7 @@ static void init_core_subsystems(multiboot_info_t *mboot_info) {
 
     if (i386_cpu_has_apic()) {
         lapic_init();
-        lapic_enable(0xFF);
+        lapic_enable(LAPIC_SPURIOUS_VECTOR);
     } else {
         kprint("SMP: Running in PIC/UP mode.\n");
     }

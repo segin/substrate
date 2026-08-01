@@ -638,7 +638,7 @@ void smp_ap_entry(void) {
     kprintf("SMP: AP Core online (LAPIC ID: %u)\n", id);
     
     // Enable LAPIC on this AP
-    lapic_enable(0xFF);  // Spurious vector
+    lapic_enable(LAPIC_SPURIOUS_VECTOR);
     
     // Enable Interrupts
     __asm__ volatile("sti");
