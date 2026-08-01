@@ -894,10 +894,27 @@ static int ahci_ata_dma_cmd(ahci_port_t *ap, uint8_t command,
     hdr->cfl   = sizeof(struct fis_reg_h2d) / 4;  /* 5 DWORDs */
     hdr->a     = 0;
     hdr->w     = is_write ? 1 : 0;
-    hdr->p     = 1;    /* Prefetchable */
+    /*
+     * [AHCI-21] P (Prefetchable) and C (Clear Busy upon R_OK) were both set on
+     * every command.  C is the damaging one: AHCI 1.3.1 s4.2.2 says the HBA
+     * shall clear PxTFD.STS.BSY and the PxCI bit "after transmitting this FIS
+     * and receiving R_OK" -- that is, as soon as the COMMAND is acknowledged,
+     * before the data phase has run.  The driver then polls CI, sees it clear,
+     * reads PRDBC (still zero, nothing has moved yet) and reports a short
+     * transfer of 0 bytes.  On a Lenovo C460 that made every IDENTIFY return
+     * nothing, so both SATA disks came up as "0 sectors, no partition table".
+     * QEMU completes the whole command regardless of C, which is why this only
+     * ever appeared on hardware.
+     *
+     * C belongs on a Soft Reset and nothing else -- FreeBSD sets it in exactly
+     * one place, alongside AHCI_CMD_RESET (ahci.c:1702), and this driver has no
+     * soft-reset path at all.  P is only set for ATAPI by FreeBSD (ahci.c:1689)
+     * and Linux; leave it clear here too.
+     */
+    hdr->p     = 0;
     hdr->r     = 0;
     hdr->b     = 0;
-    hdr->c     = 1;    /* Clear BSY on R_OK */
+    hdr->c     = 0;
     hdr->pmp   = 0;
     /*
      * [AHCI-16] prdtl was hardcoded to 1 even when byte_count == 0, leaving
@@ -1006,10 +1023,11 @@ static int ahci_identify(ahci_port_t *ap) {
     hdr->cfl   = sizeof(struct fis_reg_h2d) / 4;
     hdr->a     = 0;
     hdr->w     = 0;     /* D2H (read) */
-    hdr->p     = 1;
+    hdr->p     = 0;     /* [AHCI-21] see ahci_ata_dma_cmd() */
     hdr->r     = 0;
     hdr->b     = 0;
-    hdr->c     = 1;
+    hdr->c     = 0;     /* [AHCI-21] Soft Reset only; clearing BSY early made
+                         * IDENTIFY report 0 of 512 bytes on real hardware */
     hdr->pmp   = 0;
     hdr->prdtl = 1;
     hdr->prdbc = 0;
@@ -1434,10 +1452,10 @@ static int ahci_scsi_execute(scsi_link_t *link, scsi_request_t *req) {
     hdr->cfl   = sizeof(struct fis_reg_h2d) / 4;
     hdr->a     = 1;    /* ATAPI command */
     hdr->w     = (req->flags & SCSI_REQ_WRITE) ? 1 : 0;
-    hdr->p     = 1;
+    hdr->p     = 1;    /* both references pair Prefetchable with ATAPI */
     hdr->r     = 0;
     hdr->b     = 0;
-    hdr->c     = 1;
+    hdr->c     = 0;    /* [AHCI-21] see ahci_ata_dma_cmd() */
     hdr->pmp   = 0;
     hdr->prdbc = 0;
 
