@@ -601,10 +601,16 @@ static void ehci_take_controller(ehci_hc_t *hc, pci_device_t *pdev)
             bios_sem = pci_read_config8(pdev->bus, pdev->slot, pdev->func,
                                         off + EHCI_LEGSUP_BIOS_SEM);
             if (bios_sem) {
-                kprintf("ehci: waiting for the BIOS to release the controller\n");
+                kprintf("ehci: waiting up to 5s for the BIOS to release the "
+                        "controller\n");
                 pci_write_config8(pdev->bus, pdev->slot, pdev->func,
                                   off + EHCI_LEGSUP_OS_SEM, 1);
                 for (i = 0; i < 5000; i++) {
+                    /* Tick once a second.  Without this the wait looks
+                     * indistinguishable from a hang, which is precisely how it
+                     * was first reported. */
+                    if (i && (i % 1000) == 0)
+                        kprintf("ehci: still waiting (%ds)\n", i / 1000);
                     bios_sem = pci_read_config8(pdev->bus, pdev->slot, pdev->func,
                                                 off + EHCI_LEGSUP_BIOS_SEM);
                     if (bios_sem == 0)
@@ -616,11 +622,13 @@ static void ehci_take_controller(ehci_hc_t *hc, pci_device_t *pdev)
                      * ourselves — we are about to reset the controller either
                      * way, so leaving SMM believing it still owns the hardware
                      * is the worse outcome. */
-                    kprintf("ehci: BIOS never released the controller; "
-                            "claiming it anyway\n");
+                    kprintf("ehci: BIOS never released the controller after "
+                            "5s; claiming it anyway\n");
                     pci_write_config8(pdev->bus, pdev->slot, pdev->func,
                                       off + EHCI_LEGSUP_BIOS_SEM, 0);
                 }
+                else
+                    kprintf("ehci: BIOS released the controller after %dms\n", i);
             }
             /* Disarm every SMI source and acknowledge what is pending. */
             pci_write_config32(pdev->bus, pdev->slot, pdev->func,

@@ -1041,6 +1041,27 @@ static int ahci_identify(ahci_port_t *ap) {
         return -1;
     }
 
+    /*
+     * The command "succeeded" -- PxCI cleared with no error bit -- but that
+     * does not mean 512 bytes arrived.  This path never checked, so a drive
+     * that answered with nothing produced an all-zero descriptor and the
+     * driver went on to report an empty model string and a zero capacity with
+     * no indication anything had gone wrong.  On a Lenovo C460 that is exactly
+     * what happens, while ordinary DMA reads on the same port work, so say
+     * enough about the failure to tell the two protocols apart.
+     */
+    if (hdr->prdbc != 512) {
+        kprintf("ahci: port %d: IDENTIFY moved %u of 512 bytes "
+                "(tfd=0x%08x serr=0x%08x is=0x%08x cmd=0x%08x)\n",
+                ap->port_num, hdr->prdbc, ap->regs->tfd, ap->regs->serr,
+                ap->regs->is, ap->regs->cmd);
+    }
+    if (id_buf[0] == 0 && id_buf[27] == 0) {
+        kprintf("ahci: port %d: IDENTIFY data is empty "
+                "(prdbc=%u, first words %04x %04x %04x)\n",
+                ap->port_num, hdr->prdbc, id_buf[0], id_buf[1], id_buf[2]);
+    }
+
     /* Parse IDENTIFY data */
     /* Model string: words 27-46 (byte-swapped pairs) */
     for (i = 0; i < 20; i++) {
