@@ -20,6 +20,7 @@
 #include <drivers/usb/usb.h>
 #include <drivers/usb/xhci.h>
 #include <kern/bus.h>
+#include <kern/cmdline.h>
 #include <kern/console.h>
 #include <kern/driver.h>
 #include <kern/pci.h>
@@ -719,15 +720,19 @@ static void xhci_intel_port_switch(pci_device_t *pdev)
         return;
 
     mask = pci_read_config32(pdev->bus, pdev->slot, pdev->func, XHCI_INTEL_USB3PRM);
-    if (mask != 0xFFFFFFFFu && mask != 0)
+    if (mask != 0xFFFFFFFFu && mask != 0) {
+        kprintf("xhci: enabling SuperSpeed on Intel USB3 ports 0x%x\n",
+                (unsigned)mask);
         pci_write_config32(pdev->bus, pdev->slot, pdev->func,
                            XHCI_INTEL_USB3_PSSEN, mask);
+    }
 
     mask = pci_read_config32(pdev->bus, pdev->slot, pdev->func, XHCI_INTEL_USB2PRM);
     if (mask != 0xFFFFFFFFu && mask != 0) {
+        kprintf("xhci: routing Intel USB2 ports 0x%x to xHCI\n", (unsigned)mask);
         pci_write_config32(pdev->bus, pdev->slot, pdev->func,
                            XHCI_INTEL_XUSB2PR, mask);
-        kprintf("xhci: routed Intel USB2 ports 0x%x to xHCI\n", (unsigned)mask);
+        kprintf("xhci: USB2 ports routed\n");
     }
 }
 
@@ -749,9 +754,21 @@ static int xhci_reset(xhci_hc_t *hc)
     return -1;
 }
 
+/*
+ * Bring-up trace.  Every step below touches controller MMIO and can wedge on
+ * firmware-configured hardware in ways no emulator reproduces, so each one
+ * announces itself: a boot that stops here names the register access that did
+ * it instead of just going quiet.  Gated on "xhcidebug" so normal boots stay
+ * quiet.
+ */
+static int xhci_trace;
+#define XHCI_STEP(msg) do { if (xhci_trace) kprintf("xhci: " msg "\n"); } while (0)
+
 static int xhci_start(xhci_hc_t *hc)
 {
+    XHCI_STEP("resetting controller");
     if (xhci_reset(hc) != 0) { kprintf("xhci: reset timeout\n"); return -1; }
+    XHCI_STEP("reset complete");
 
     wr32(hc->op, XHCI_OP_CONFIG, hc->maxslots);
 
@@ -780,12 +797,16 @@ static int xhci_start(xhci_hc_t *hc)
     wr64(hc->rt, XHCI_RT_IR0 + XHCI_IR_ERSTBA, hc->erst_dma);
     wr32(hc->rt, XHCI_RT_IR0 + XHCI_IR_IMAN, 0);   /* polling: no interrupts */
 
+    XHCI_STEP("rings allocated");
+
     hc->bounce = dma_alloc_coherent(XHCI_BOUNCE_SIZE, &hc->bounce_dma);
     if (!hc->bounce) return -1;
 
+    XHCI_STEP("starting controller");
     wr32(hc->op, XHCI_OP_USBCMD, XHCI_CMD_RUN);
     for (int i = 0; i < 100 && (rd32(hc->op, XHCI_OP_USBSTS) & XHCI_STS_HCH); i++)
         xhci_delay_ms(1);
+    XHCI_STEP("controller running");
 
     /* Power all ports. */
     for (uint8_t p = 1; p <= hc->nports; p++) {
@@ -793,6 +814,7 @@ static int xhci_start(xhci_hc_t *hc)
         portsc_wr(hc, p, psc | XHCI_PORT_PP);
     }
     xhci_delay_ms(20);
+    XHCI_STEP("ports powered");
     return 0;
 }
 
@@ -859,11 +881,17 @@ static int xhci_pci_attach(struct device *dev)
 
     mutex_init(&hc->submit_lock, "xhci_submit");
 
-    /* Both have to happen before the controller is reset and its ports are
+    /*
+     * Both have to happen before the controller is reset and its ports are
      * powered: one settles who owns the controller, the other decides which
-     * ports it owns. */
-    xhci_take_controller(hc);
-    xhci_intel_port_switch(pdev);
+     * ports it owns.  Each is separately defeatable from the kernel command
+     * line — they poke firmware-owned state that cannot be exercised under
+     * emulation, so a machine they wedge has to stay bootable.
+     */
+    if (!cmdline_has("nousbhandoff"))
+        xhci_take_controller(hc);
+    if (!cmdline_has("noxhciroute"))
+        xhci_intel_port_switch(pdev);
 
     if (xhci_start(hc) != 0) {
         xhci_teardown(hc);
@@ -899,5 +927,6 @@ static struct driver xhci_pci_driver = {
 void xhci_init(void)
 {
     if (!pci_present()) return;
+    xhci_trace = cmdline_has("xhcidebug");
     driver_register(&xhci_pci_driver, &pci_bus_type);
 }

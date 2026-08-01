@@ -20,6 +20,7 @@
 #include <drivers/usb/ehci.h>
 #include <drivers/usb/usb.h>
 #include <kern/bus.h>
+#include <kern/cmdline.h>
 #include <kern/console.h>
 #include <kern/driver.h>
 #include <kern/pci.h>
@@ -558,8 +559,11 @@ static int ehci_pci_attach(struct device *dev)
 
     mutex_init(&hc->submit_lock, "ehci_submit");
 
-    /* Own the controller before resetting it. */
-    ehci_take_controller(hc, pdev);
+    /* Own the controller before resetting it.  Defeatable from the command
+     * line for the same reason as the xHCI handoff: it touches state only real
+     * firmware sets up, so it has to be possible to boot without it. */
+    if (!cmdline_has("nousbhandoff"))
+        ehci_take_controller(hc, pdev);
 
     if (ehci_start(hc) != 0) {
         ehci_teardown(hc);
