@@ -31,6 +31,7 @@
 #define USB_SPEED_LOW           0   /* 1.5 Mbps */
 #define USB_SPEED_FULL          1   /* 12 Mbps */
 #define USB_SPEED_HIGH          2   /* 480 Mbps */
+#define USB_SPEED_SUPER         3   /* 5 Gbps -- USB 3.x */
 
 /* Descriptor Types */
 #define USB_DT_DEVICE           1
@@ -40,6 +41,7 @@
 #define USB_DT_ENDPOINT         5
 #define USB_DT_SS_EP_COMP     0x30  /* SuperSpeed endpoint companion */
 #define USB_DT_HUB             0x29
+#define USB_DT_SS_HUB          0x2A  /* SuperSpeed hubs answer to this, not 0x29 */
 
 /* Standard Request Codes */
 #define USB_REQ_GET_STATUS      0x00
@@ -120,6 +122,11 @@
 #define USB_HUB_FEAT_C_PORT_CONNECT 16
 #define USB_HUB_FEAT_C_PORT_ENABLE  17
 #define USB_HUB_FEAT_C_PORT_RESET   20
+
+/* Root-port status extras.  The core learns a port's speed from these bits;
+ * SuperSpeed has no encoding in the USB 2.0 hub status word, so it gets a
+ * private one the HCDs set and usb_enumerate_* reads. */
+#define USB_PORT_STAT_SUPER_SPEED   0x0800
 
 /* Hub port status bits */
 #define USB_PORT_STAT_CONNECTION    0x0001
@@ -479,6 +486,15 @@ typedef struct usb_hcd {
      * EHCI need nothing and leave this NULL.
      */
     int      (*set_hub)(struct usb_hcd *hcd, usb_device_t *dev, uint8_t nports);
+
+    /*
+     * Optional: the real EP0 max packet size has been read from the device
+     * descriptor.  xHCI programs an endpoint context at Address Device time
+     * from the core's guess and must be corrected once the true value is known
+     * (xHCI 1.1 s4.3.4); UHCI and EHCI read ep0.max_packet per transfer and
+     * need nothing.
+     */
+    int      (*set_ep0_mps)(struct usb_hcd *hcd, usb_device_t *dev, uint16_t mps);
 
     /*
      * Optional isochronous-OUT streaming ops (USB audio).  frame_number()

@@ -1463,8 +1463,8 @@
         - [x] USB-08: `USBDEVFS_CONTROL` IN transfers never copy data out (`ret > 0` is never true — `USB_XFER_OK` is 0).
         - [x] USB-09: only UHCI honours `usb_transfer_t.timeout_ms`; EHCI and xHCI use fixed 1 s timeouts.
         - [ ] USB-10: EHCI runs interrupt endpoints on the async schedule, so `bInterval` is ignored.
-        - [ ] USB-11: no Evaluate Context after learning the real `bMaxPacketSize0` (xHCI 1.1 §4.3.4).
-        - [ ] USB-12: SuperSpeed `bMaxPacketSize0` is an exponent, used as a literal.
+        - [x] USB-11: no Evaluate Context after learning the real `bMaxPacketSize0` (xHCI 1.1 §4.3.4).
+        - [x] USB-12: SuperSpeed `bMaxPacketSize0` is an exponent, used as a literal.
         - [x] USB-13: device descriptor contents are never validated (type, bLength, HS MPS0 == 64).
         - [ ] USB-14: hub port state is polled by control transfer instead of the status-change interrupt endpoint.
     - [ ] **LOW**
@@ -1474,7 +1474,7 @@
         - [x] USB-18: `USBDEVFS_CLAIMINTERFACE`/`SETCONFIGURATION`/`RESET` are unchecked no-ops.
         - [ ] USB-19: the global device table and address bitmap have no locking.
         - [x] USB-20: `usb_hotplug_scan` cannot throttle root ports at or above index 32.
-        - [ ] USB-21: a USB 3.x hub is asked for a 0x29 hub descriptor instead of 0x2A.
+        - [x] USB-21: a USB 3.x hub is asked for a 0x29 hub descriptor instead of 0x2A.
         - [x] USB-22: `usb_set_configuration(0)` is recorded as configured when it unconfigures the device.
 
 

@@ -292,9 +292,26 @@ static uint32_t xhci_port_status(usb_hcd_t *hcd, uint8_t port)
     uint32_t out = 0;
     if (psc & XHCI_PORT_CCS) out |= USB_PORT_STAT_CONNECTION;
     if (psc & XHCI_PORT_PED) out |= USB_PORT_STAT_ENABLE;
-    /* xHCI usb-storage is SuperSpeed/High: report high-speed for the core. */
-    if (psc & XHCI_PORT_CCS) out |= USB_PORT_STAT_HIGH_SPEED;
-    else xhci_port_disconnect(hc, port);   /* [A34] reap the departed slot */
+    if (psc & XHCI_PORT_CCS) {
+        /*
+         * Report the port's actual speed.  This used to claim high-speed for
+         * everything, so a full-speed device got a 64-byte EP0 it never agreed
+         * to and a SuperSpeed one was never recognised as such -- which also
+         * meant bMaxPacketSize0's exponent encoding was read as a literal.
+         * PORTSC bits 13:10 hold the Protocol Speed ID; 1..4 are the standard
+         * FS/LS/HS/SS assignments (xHCI 1.1 s7.2.2.1.1). [USB-12]
+         */
+        uint32_t psid = (psc & XHCI_PORT_SPEED_MASK) >> XHCI_PORT_SPEED_SHIFT;
+        switch (psid) {
+        case 1: break;                                      /* full speed */
+        case 2: out |= USB_PORT_STAT_LOW_SPEED;   break;
+        case 3: out |= USB_PORT_STAT_HIGH_SPEED;  break;
+        case 4: out |= USB_PORT_STAT_SUPER_SPEED; break;
+        default: out |= USB_PORT_STAT_HIGH_SPEED; break;    /* unknown: assume HS */
+        }
+    } else {
+        xhci_port_disconnect(hc, port);   /* [A34] reap the departed slot */
+    }
     return out;
 }
 
@@ -581,6 +598,53 @@ static int xhci_set_hub(usb_hcd_t *hcd, usb_device_t *dev, uint8_t nports)
 
     if (cc != XHCI_CC_SUCCESS) {
         kprintf("xhci: marking slot %u as a hub failed (cc=%d)\n", slot, cc);
+        return -1;
+    }
+    return 0;
+}
+
+/*
+ * Correct EP0's Max Packet Size once the device descriptor has been read.  The
+ * slot was addressed with the core's pre-descriptor guess, which for a
+ * full-speed device (8) versus the assumed 64 is simply wrong.  Evaluate
+ * Context with only the EP0 add flag is the amendment the spec provides
+ * (xHCI 1.1 s4.3.4). [USB-11]
+ */
+static int xhci_set_ep0_mps(usb_hcd_t *hcd, usb_device_t *dev, uint16_t mps)
+{
+    xhci_hc_t *hc = hcd->priv;
+    uint8_t slot;
+    uint32_t *icc, *ep0;
+    int cc;
+
+    if (mps == 0)
+        return -1;
+
+    /* Pre-SET_ADDRESS the device is still the one being enumerated. */
+    slot = dev->address ? hc->addr_slot[dev->address & 0x7F] : hc->enum_slot;
+    if (slot == 0 || slot > XHCI_MAX_SLOTS || !hc->slots[slot].in_ctx)
+        return -1;
+
+    mutex_lock(&hc->submit_lock);
+
+    icc = (uint32_t *)in_ctrl_of(hc->slots[slot].in_ctx);
+    icc[0] = 0;
+    icc[1] = 0x2;               /* A1: EP0 context only */
+
+    ep0 = (uint32_t *)in_ep_of(hc, hc->slots[slot].in_ctx, 1);
+    ep0[1] = (ep0[1] & ~(0xFFFFu << XHCI_EP_MPS_SHIFT)) |
+             ((uint32_t)mps << XHCI_EP_MPS_SHIFT);
+
+    cc = xhci_run_command(hc, hc->slots[slot].in_ctx_dma,
+                          XHCI_TRB_TYPE(TRB_EVAL_CONTEXT) |
+                          ((uint32_t)slot << 24), NULL);
+
+    icc[1] = 0x3;               /* restore slot + EP0 for the transfer path */
+    mutex_unlock(&hc->submit_lock);
+
+    if (cc != XHCI_CC_SUCCESS) {
+        kprintf("xhci: setting EP0 max packet %u on slot %u failed (cc=%d)\n",
+                mps, slot, cc);
         return -1;
     }
     return 0;
@@ -993,6 +1057,7 @@ static int xhci_pci_attach(struct device *dev)
     hc->hcd.port_reset = xhci_port_reset;
     hc->hcd.port_enable = xhci_port_enable;
     hc->hcd.set_hub = xhci_set_hub;
+    hc->hcd.set_ep0_mps = xhci_set_ep0_mps;
     usb_register_hcd(&hc->hcd);
     hc->initialized = 1;
     xhci_instances++;

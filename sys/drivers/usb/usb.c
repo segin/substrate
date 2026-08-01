@@ -1041,14 +1041,30 @@ static int usb_enumerate_device_inner(usb_hcd_t *hcd, uint8_t port, uint8_t spee
         return -1;
     }
 
-    dev->ep0.max_packet = dd.bMaxPacketSize0;
+    /*
+     * For SuperSpeed, bMaxPacketSize0 is log2(size) and the only legal value
+     * is 9, meaning 512 (USB 3.2 s9.6.1).  Taken literally it yields an EP0
+     * packet size of 9. [USB-12]
+     */
+    if (speed == USB_SPEED_SUPER) {
+        if (dd.bMaxPacketSize0 != 9) {
+            kprintf("usb: port %u: SuperSpeed device reports EP0 exponent %u, "
+                    "forcing 9\n", port, dd.bMaxPacketSize0);
+            dd.bMaxPacketSize0 = 9;
+        }
+        dev->ep0.max_packet = 512;
+    } else {
+        dev->ep0.max_packet = dd.bMaxPacketSize0;
+    }
     /*
      * Legal control-endpoint packet sizes are 8/16/32/64 (USB 2.0 s5.5.3), and
      * a high-speed device must use 64.  Anything else is a misread, so fall
      * back to the conservative 8 rather than framing transfers to a size the
      * device never agreed to.
      */
-    if (speed == USB_SPEED_HIGH && dev->ep0.max_packet != 64) {
+    if (speed == USB_SPEED_SUPER) {
+        /* already resolved above */
+    } else if (speed == USB_SPEED_HIGH && dev->ep0.max_packet != 64) {
         kprintf("usb: port %u: high-speed device reports EP0 max packet %u, "
                 "forcing 64\n", port, dev->ep0.max_packet);
         dev->ep0.max_packet = 64;
@@ -1058,6 +1074,15 @@ static int usb_enumerate_device_inner(usb_hcd_t *hcd, uint8_t port, uint8_t spee
                 port, dev->ep0.max_packet);
         dev->ep0.max_packet = 8;
     }
+
+    /*
+     * Tell the controller the real EP0 packet size.  xHCI baked the core's
+     * guess into the endpoint context when the slot was addressed, so a
+     * full-speed device with an 8-byte EP0 would otherwise be driven with a
+     * context claiming 64. [USB-11]
+     */
+    if (hcd->set_ep0_mps)
+        (void)hcd->set_ep0_mps(hcd, dev, dev->ep0.max_packet);
 
     /*
      * Reset the port once more before addressing the device.  Windows does
@@ -1235,7 +1260,9 @@ void usb_enumerate_bus(usb_hcd_t *hcd)
             continue;
 
         /* Determine speed */
-        if (status & USB_PORT_STAT_LOW_SPEED)
+        if (status & USB_PORT_STAT_SUPER_SPEED)
+            speed = USB_SPEED_SUPER;
+        else if (status & USB_PORT_STAT_LOW_SPEED)
             speed = USB_SPEED_LOW;
         else if (status & USB_PORT_STAT_HIGH_SPEED)
             speed = USB_SPEED_HIGH;
@@ -1374,9 +1401,10 @@ static void usb_hotplug_scan(void)
                     if (fails) (*fails)++;
                     continue;
                 }
-                uint8_t speed = (st & USB_PORT_STAT_LOW_SPEED)  ? USB_SPEED_LOW  :
-                                (st & USB_PORT_STAT_HIGH_SPEED) ? USB_SPEED_HIGH :
-                                                                  USB_SPEED_FULL;
+                uint8_t speed = (st & USB_PORT_STAT_SUPER_SPEED) ? USB_SPEED_SUPER :
+                                (st & USB_PORT_STAT_LOW_SPEED)   ? USB_SPEED_LOW   :
+                                (st & USB_PORT_STAT_HIGH_SPEED)  ? USB_SPEED_HIGH  :
+                                                                   USB_SPEED_FULL;
                 if (usb_enumerate_device(hcd, port, speed) != 0 && fails) {
                     if (++(*fails) >= USB_ENUM_MAX_TRIES)
                         kprintf("usb: %s port %u: enumeration failed %u times,"

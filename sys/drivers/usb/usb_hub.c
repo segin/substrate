@@ -372,14 +372,20 @@ static int usb_hub_attach(usb_device_t *dev)
 	memset(hub, 0, sizeof(*hub));
 	hub->udev = dev;
 
-	/* Read hub descriptor to learn port count */
+	/* Read hub descriptor to learn port count.  A SuperSpeed hub answers only
+	 * to descriptor type 0x2A and STALLs the USB 2.0 0x29, so ask for the one
+	 * this hub actually implements. [USB-21] */
 	memset(&hdesc, 0, sizeof(hdesc));
-	ret = usb_control_transfer(dev,
-		USB_DIR_IN | USB_TYPE_CLASS | USB_RECIP_DEVICE,
-		USB_HUB_REQ_GET_DESCRIPTOR,
-		(uint16_t)(USB_DT_HUB << 8),
-		0,
-		&hdesc, sizeof(hdesc));
+	{
+		uint8_t dtype = (dev->speed == USB_SPEED_SUPER) ? USB_DT_SS_HUB
+		                                                : USB_DT_HUB;
+		ret = usb_control_transfer(dev,
+			USB_DIR_IN | USB_TYPE_CLASS | USB_RECIP_DEVICE,
+			USB_HUB_REQ_GET_DESCRIPTOR,
+			(uint16_t)(dtype << 8),
+			0,
+			&hdesc, sizeof(hdesc));
+	}
 
 	if(ret != USB_XFER_OK) {
 		kprintf("usb_hub: failed to read hub descriptor (err=%d)\n", ret);
