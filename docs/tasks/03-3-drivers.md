@@ -1454,8 +1454,8 @@
     - [ ] **HIGH**
         - [ ] USB-01: xHCI slot context sets no Route String / Hub / NumPorts / MTT / TT fields, so no device behind an external hub can be addressed.
         - [ ] USB-02: every EHCI queue head is built high-speed with no split-transaction fields, so no full/low-speed device behind a hub can transfer.
-        - [ ] USB-03: enumeration gives up after one failed initial descriptor read; NetBSD retries ten times with port resets.
-        - [ ] USB-04: no second port reset between the initial descriptor read and SET_ADDRESS.
+        - [x] USB-03: enumeration gives up after one failed initial descriptor read; NetBSD retries ten times with port resets.
+        - [x] USB-04: no second port reset between the initial descriptor read and SET_ADDRESS.
         - [ ] USB-05: `usbdevfs_meta_read` lets the snprintf accumulator exceed the 384-byte buffer and uses it as a memcpy length (kernel stack disclosure).
     - [ ] **MEDIUM**
         - [ ] USB-06: `wMaxPacketSize` mult bits (12:11) are never masked off; xHCI writes them into the EP context MPS field.
@@ -1465,7 +1465,7 @@
         - [ ] USB-10: EHCI runs interrupt endpoints on the async schedule, so `bInterval` is ignored.
         - [ ] USB-11: no Evaluate Context after learning the real `bMaxPacketSize0` (xHCI 1.1 §4.3.4).
         - [ ] USB-12: SuperSpeed `bMaxPacketSize0` is an exponent, used as a literal.
-        - [ ] USB-13: device descriptor contents are never validated (type, bLength, HS MPS0 == 64).
+        - [x] USB-13: device descriptor contents are never validated (type, bLength, HS MPS0 == 64).
         - [ ] USB-14: hub port state is polled by control transfer instead of the status-change interrupt endpoint.
     - [ ] **LOW**
         - [ ] USB-15: `bCBWCBLength` is written before the CDB length is clamped to 16.

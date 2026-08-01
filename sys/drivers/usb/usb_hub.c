@@ -112,6 +112,62 @@ static int usb_hub_clear_port_feature(usb_device_t *dev, uint8_t port,
  */
 
 /*
+ * Drive SET_FEATURE(PORT_RESET) on one downstream port and wait for the hub to
+ * report it complete.  Returns 0 on success.
+ *
+ * Exported (as usb_hub_reset_port) because the core enumeration path needs it:
+ * a device that fails its first descriptor read has to be re-reset and retried,
+ * and the port must be reset again between that read and SET_ADDRESS.  For a
+ * root-hub port the core uses hcd->port_reset; for anything behind a hub, the
+ * reset is a class request and only this driver can issue it.
+ */
+static int usb_hub_do_port_reset(usb_device_t *hubdev, uint8_t port)
+{
+	struct usb_hub_port_status ps;
+	uint64_t deadline;
+
+	if(usb_hub_set_port_feature(hubdev, port,
+	                            USB_HUB_FEAT_PORT_RESET) != USB_XFER_OK) {
+		kprintf("usb_hub: port %u reset request failed\n", port);
+		return -1;
+	}
+
+	/* Wait for reset to complete (up to 200ms) */
+	deadline = (uint64_t)get_uptime_ms() + 200;
+	for(;;) {
+		if((uint64_t)get_uptime_ms() > deadline) {
+			kprintf("usb_hub: port %u reset timeout\n", port);
+			return -1;
+		}
+
+		/* Brief pause between polls */
+		{
+			uint64_t d = (uint64_t)get_uptime_ms() + 10;
+			while((uint64_t)get_uptime_ms() < d)
+				__asm__ volatile("pause");
+		}
+
+		if(usb_hub_get_port_status(hubdev, port, &ps) != USB_XFER_OK)
+			return -1;
+
+		/* Reset complete when C_PORT_RESET is set */
+		if(ps.wPortChange & USB_PORT_STAT_C_RESET) {
+			usb_hub_clear_port_feature(hubdev, port,
+			                           USB_HUB_FEAT_C_PORT_RESET);
+			break;
+		}
+	}
+	return 0;
+}
+
+int usb_hub_reset_port(usb_device_t *hubdev, uint8_t port)
+{
+	if(!hubdev)
+		return -1;
+	return usb_hub_do_port_reset(hubdev, port);
+}
+
+/*
  * Reset one downstream port and enumerate whatever is on it.  Split out of
  * usb_hub_enumerate_ports() so the hot-plug rescan can bring up a single
  * port without re-powering and re-walking the whole hub.
@@ -121,7 +177,6 @@ static int usb_hub_clear_port_feature(usb_device_t *dev, uint8_t port,
 static int usb_hub_bringup_port(usb_hub_dev_t *hub, uint8_t port)
 {
 	struct usb_hub_port_status ps;
-	uint64_t deadline;
 
 	/* Read port status */
 	if(usb_hub_get_port_status(hub->udev, port, &ps) != USB_XFER_OK)
@@ -136,38 +191,9 @@ static int usb_hub_bringup_port(usb_hub_dev_t *hub, uint8_t port)
 	if(!(ps.wPortStatus & USB_PORT_STAT_CONNECTION))
 		return 0;
 
-	/* Reset the port */
-	if(usb_hub_set_port_feature(hub->udev, port,
-	                            USB_HUB_FEAT_PORT_RESET) != USB_XFER_OK) {
-		kprintf("usb_hub: port %u reset request failed\n", port);
-		return 0;
-	}
-
-	/* Wait for reset to complete (up to 200ms) */
-	deadline = (uint64_t)get_uptime_ms() + 200;
-	for(;;) {
-		if((uint64_t)get_uptime_ms() > deadline) {
-			kprintf("usb_hub: port %u reset timeout\n", port);
-			break;
-		}
-
-		/* Brief pause between polls */
-		{
-			uint64_t d = (uint64_t)get_uptime_ms() + 10;
-			while((uint64_t)get_uptime_ms() < d)
-				__asm__ volatile("pause");
-		}
-
-		if(usb_hub_get_port_status(hub->udev, port, &ps) != USB_XFER_OK)
-			break;
-
-		/* Reset complete when C_PORT_RESET is set */
-		if(ps.wPortChange & USB_PORT_STAT_C_RESET) {
-			usb_hub_clear_port_feature(hub->udev, port,
-			                           USB_HUB_FEAT_C_PORT_RESET);
-			break;
-		}
-	}
+	/* Reset the port.  A reset that times out is still worth following up on:
+	 * the status re-read below decides whether the port actually came up. */
+	(void)usb_hub_do_port_reset(hub->udev, port);
 
 	/* Re-read status after reset */
 	if(usb_hub_get_port_status(hub->udev, port, &ps) != USB_XFER_OK)

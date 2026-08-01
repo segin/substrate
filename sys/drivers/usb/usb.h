@@ -155,6 +155,18 @@
  * and took the kernel down within seconds of reaching userspace.
  */
 #define USB_ENUM_MAX_TRIES      3
+/*
+ * Attempts at the initial 8-byte device-descriptor read before a port is
+ * declared unenumerable, and the pause between them.  A device slower than
+ * spec -- which describes most cheap hubs and keyboards in the window right
+ * after a port reset -- does not answer the first request, and giving up there
+ * made such a device permanently invisible.  NetBSD (usb_subr.c,
+ * usbd_new_device) uses exactly these numbers and re-resets the port every
+ * fourth attempt; FreeBSD re-enumerates twice.  Only a port that is failing
+ * pays the cost, and USB_ENUM_MAX_TRIES then bounds how often that repeats.
+ */
+#define USB_ENUM_DESC_TRIES     10
+#define USB_ENUM_DESC_DELAY_MS  200
 #define USB_MAX_ROOT_PORTS      32
 #define USB_MAX_ENDPOINTS       16
 /*
@@ -566,6 +578,10 @@ int usb_enumerate_device_parent(usb_hcd_t *hcd, uint8_t port, uint8_t speed,
  * on the hot-plug kthread; the other two let the hub driver reconcile its
  * downstream ports using the core's device table and teardown path. */
 void usb_hub_scan_ports(void);
+/* Reset one downstream port of an attached hub (a class request, so only the
+ * hub driver can issue it).  Used by the core enumeration path to retry a slow
+ * device and to re-reset the port before SET_ADDRESS. */
+int  usb_hub_reset_port(usb_device_t *hubdev, uint8_t port);
 void usb_disconnect_device(usb_device_t *dev);
 usb_device_t *usb_child_device_on_port(usb_device_t *parent, uint8_t port);
 

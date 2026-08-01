@@ -834,6 +834,29 @@ int usb_enumerate_device(usb_hcd_t *hcd, uint8_t port, uint8_t speed)
     return usb_enumerate_device_parent(hcd, port, speed, NULL);
 }
 
+/* Busy-wait; enumeration runs on the boot thread and on the hot-plug kthread,
+ * and the waits here are short and infrequent. */
+static void usb_delay_ms(uint32_t ms)
+{
+    uint64_t deadline = (uint64_t)get_uptime_ms() + ms;
+    while ((uint64_t)get_uptime_ms() < deadline)
+        __asm__ volatile("pause");
+}
+
+/*
+ * Reset the port this device sits on, whichever kind of port that is.  A root
+ * port is a register write the HCD owns; a downstream port is a hub class
+ * request only the hub driver can issue.
+ */
+static int usb_enum_reset_port(usb_hcd_t *hcd, uint8_t port, usb_device_t *parent)
+{
+    if (parent)
+        return usb_hub_reset_port(parent, port);
+    if (hcd && hcd->port_reset)
+        return hcd->port_reset(hcd, port);
+    return -1;
+}
+
 static int usb_enumerate_device_inner(usb_hcd_t *hcd, uint8_t port, uint8_t speed,
                                       usb_device_t *parent)
 {
@@ -855,18 +878,72 @@ static int usb_enumerate_device_inner(usb_hcd_t *hcd, uint8_t port, uint8_t spee
     /* Set EP0 max packet size based on speed */
     dev->ep0.max_packet = (speed == USB_SPEED_LOW) ? 8 : 64;
 
-    /* Get first 8 bytes of device descriptor to learn max packet size */
-    ret = usb_get_descriptor(dev, USB_DT_DEVICE, 0, &dd, 8);
+    /*
+     * Get the first 8 bytes of the device descriptor to learn the real EP0 max
+     * packet size.  Retry: a device outside spec timing does not answer the
+     * first request, and a single failure used to make the port permanently
+     * unenumerable.  Re-reset the port every fourth attempt, which is what
+     * shakes loose a device whose state machine is wedged rather than merely
+     * slow.  Mirrors NetBSD usbd_new_device(). [USB-03]
+     */
+    ret = USB_XFER_ERROR;
+    for (int attempt = 0; attempt < USB_ENUM_DESC_TRIES; attempt++) {
+        ret = usb_get_descriptor(dev, USB_DT_DEVICE, 0, &dd, 8);
+        if (ret == USB_XFER_OK)
+            break;
+        if (attempt + 1 == USB_ENUM_DESC_TRIES)
+            break;                  /* out of tries: don't pay the last delay */
+        usb_delay_ms(USB_ENUM_DESC_DELAY_MS);
+        if ((attempt & 3) == 3)
+            (void)usb_enum_reset_port(hcd, port, parent);
+    }
     if (ret != USB_XFER_OK) {
-        kprintf("usb: port %u: failed to get device descriptor (initial, err=%d)\n",
-                port, ret);
+        kprintf("usb: port %u: failed to get device descriptor after %d tries "
+                "(initial, err=%d)\n", port, USB_ENUM_DESC_TRIES, ret);
+        usb_free_device(dev);
+        return -1;
+    }
+
+    /*
+     * Validate what came back before trusting it.  A glitched read that returns
+     * plausible garbage would otherwise set an EP0 packet size like 0x2A and
+     * mis-frame every later control transfer -- which presents as a device that
+     * "sometimes fails to enumerate" rather than as a bad read. [USB-13]
+     */
+    if (dd.bDescriptorType != USB_DT_DEVICE) {
+        kprintf("usb: port %u: initial descriptor has type %u, not DEVICE\n",
+                port, dd.bDescriptorType);
         usb_free_device(dev);
         return -1;
     }
 
     dev->ep0.max_packet = dd.bMaxPacketSize0;
-    if (dev->ep0.max_packet == 0)
+    /*
+     * Legal control-endpoint packet sizes are 8/16/32/64 (USB 2.0 s5.5.3), and
+     * a high-speed device must use 64.  Anything else is a misread, so fall
+     * back to the conservative 8 rather than framing transfers to a size the
+     * device never agreed to.
+     */
+    if (speed == USB_SPEED_HIGH && dev->ep0.max_packet != 64) {
+        kprintf("usb: port %u: high-speed device reports EP0 max packet %u, "
+                "forcing 64\n", port, dev->ep0.max_packet);
+        dev->ep0.max_packet = 64;
+    } else if (dev->ep0.max_packet != 8 && dev->ep0.max_packet != 16 &&
+               dev->ep0.max_packet != 32 && dev->ep0.max_packet != 64) {
+        kprintf("usb: port %u: implausible EP0 max packet %u, using 8\n",
+                port, dev->ep0.max_packet);
         dev->ep0.max_packet = 8;
+    }
+
+    /*
+     * Reset the port once more before addressing the device.  Windows does
+     * this and devices are tuned against the Windows sequence, so ones that
+     * depend on it exist in quantity; NetBSD copies the behaviour for the same
+     * reason.  The device stays in Default state at address 0 either way, so
+     * nothing learned above is invalidated.  TRSTRCY is 10 ms. [USB-04]
+     */
+    (void)usb_enum_reset_port(hcd, port, parent);
+    usb_delay_ms(10);
 
     /* Assign unique address from the bitmap; address is freed on detach
      * via usb_free_device, so hot-plug cycles don't leak addresses. */
