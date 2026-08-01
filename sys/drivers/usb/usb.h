@@ -538,6 +538,13 @@ int usb_enumerate_device(usb_hcd_t *hcd, uint8_t port, uint8_t speed);
 int usb_enumerate_device_parent(usb_hcd_t *hcd, uint8_t port, uint8_t speed,
                                 usb_device_t *parent);
 
+/* Hot-plug plumbing.  usb_hub_scan_ports() is called by usb_hotplug_scan()
+ * on the hot-plug kthread; the other two let the hub driver reconcile its
+ * downstream ports using the core's device table and teardown path. */
+void usb_hub_scan_ports(void);
+void usb_disconnect_device(usb_device_t *dev);
+usb_device_t *usb_child_device_on_port(usb_device_t *parent, uint8_t port);
+
 /* Publish/unpublish a device under /dev/usb (libusb/lsusb backend). */
 void usbdevfs_publish(usb_device_t *dev);
 void usbdevfs_unpublish(usb_device_t *dev);

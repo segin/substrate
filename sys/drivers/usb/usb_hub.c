@@ -93,9 +93,97 @@ static int usb_hub_clear_port_feature(usb_device_t *dev, uint8_t port,
  * ============================================================
  */
 
-static void usb_hub_enumerate_ports(usb_hub_dev_t *hub)
+/*
+ * Reset one downstream port and enumerate whatever is on it.  Split out of
+ * usb_hub_enumerate_ports() so the hot-plug rescan can bring up a single
+ * port without re-powering and re-walking the whole hub.
+ *
+ * Returns 1 if a device was enumerated, 0 otherwise.
+ */
+static int usb_hub_bringup_port(usb_hub_dev_t *hub, uint8_t port)
 {
 	struct usb_hub_port_status ps;
+	uint64_t deadline;
+
+	/* Read port status */
+	if(usb_hub_get_port_status(hub->udev, port, &ps) != USB_XFER_OK)
+		return 0;
+
+	/* Clear any pending connection change */
+	if(ps.wPortChange & USB_PORT_STAT_C_CONNECTION)
+		usb_hub_clear_port_feature(hub->udev, port,
+		                           USB_HUB_FEAT_C_PORT_CONNECT);
+
+	/* Skip if nothing connected */
+	if(!(ps.wPortStatus & USB_PORT_STAT_CONNECTION))
+		return 0;
+
+	/* Reset the port */
+	if(usb_hub_set_port_feature(hub->udev, port,
+	                            USB_HUB_FEAT_PORT_RESET) != USB_XFER_OK) {
+		kprintf("usb_hub: port %u reset request failed\n", port);
+		return 0;
+	}
+
+	/* Wait for reset to complete (up to 200ms) */
+	deadline = (uint64_t)get_uptime_ms() + 200;
+	for(;;) {
+		if((uint64_t)get_uptime_ms() > deadline) {
+			kprintf("usb_hub: port %u reset timeout\n", port);
+			break;
+		}
+
+		/* Brief pause between polls */
+		{
+			uint64_t d = (uint64_t)get_uptime_ms() + 10;
+			while((uint64_t)get_uptime_ms() < d)
+				__asm__ volatile("pause");
+		}
+
+		if(usb_hub_get_port_status(hub->udev, port, &ps) != USB_XFER_OK)
+			break;
+
+		/* Reset complete when C_PORT_RESET is set */
+		if(ps.wPortChange & USB_PORT_STAT_C_RESET) {
+			usb_hub_clear_port_feature(hub->udev, port,
+			                           USB_HUB_FEAT_C_PORT_RESET);
+			break;
+		}
+	}
+
+	/* Re-read status after reset */
+	if(usb_hub_get_port_status(hub->udev, port, &ps) != USB_XFER_OK)
+		return 0;
+
+	/* Port must be enabled after reset */
+	if(!(ps.wPortStatus & USB_PORT_STAT_ENABLE))
+		return 0;
+
+	/* Determine speed */
+	uint8_t speed;
+	if(ps.wPortStatus & USB_PORT_STAT_LOW_SPEED)
+		speed = USB_SPEED_LOW;
+	else if(ps.wPortStatus & USB_PORT_STAT_HIGH_SPEED)
+		speed = USB_SPEED_HIGH;
+	else
+		speed = USB_SPEED_FULL;
+
+	/* Small settle delay after reset */
+	{
+		uint64_t d = (uint64_t)get_uptime_ms() + 10;
+		while((uint64_t)get_uptime_ms() < d)
+			__asm__ volatile("pause");
+	}
+
+	/* Enumerate the downstream device through the core USB stack,
+	 * recording this hub as its parent so the root-port hot-plug scan
+	 * doesn't mistake it for a root device and disconnect it. [DRV-04] */
+	usb_enumerate_device_parent(hub->udev->hcd, port, speed, hub->udev);
+	return 1;
+}
+
+static void usb_hub_enumerate_ports(usb_hub_dev_t *hub)
+{
 	uint64_t deadline;
 
 	for(uint8_t port = 1; port <= hub->nports; port++) {
@@ -117,81 +205,68 @@ static void usb_hub_enumerate_ports(usb_hub_dev_t *hub)
 			__asm__ volatile("pause");
 	}
 
-	for(uint8_t port = 1; port <= hub->nports; port++) {
-		/* Read port status */
-		if(usb_hub_get_port_status(hub->udev, port, &ps) != USB_XFER_OK)
+	for(uint8_t port = 1; port <= hub->nports; port++)
+		(void)usb_hub_bringup_port(hub, port);
+}
+
+/*
+ * ============================================================
+ * Downstream hot-plug
+ * ============================================================
+ *
+ * usb_hub_enumerate_ports() runs ONCE, when the hub itself is attached.  A
+ * device plugged into a hub after that point was therefore invisible forever,
+ * and one unplugged from a hub stayed in the device table as a stale entry
+ * until the hub itself was removed.  Only the ROOT ports were reconciled, by
+ * usb_hotplug_scan() in usb.c -- and everything behind a hub shares that hub's
+ * root-port connection bit, so that scan structurally cannot see it.
+ *
+ * Called from usb_hotplug_scan(), i.e. on the same ~4 Hz kthread.  Being on a
+ * thread matters: each port check is a CONTROL TRANSFER (unlike a root port,
+ * which is a register read), so this must be able to sleep and must never run
+ * from interrupt context.
+ *
+ * Teardown deliberately reuses usb_disconnect_device(), which already does the
+ * ordering that was expensive to get right: recurse into anything behind a
+ * nested hub, run the class driver's .detach (force-unmount, DMA quiesce),
+ * unregister the devtree node, unpublish the /dev/usb nodes, and only then
+ * free the struct and its USB address. [DRV-01][DRV-02][DRV-20][A33]
+ */
+void usb_hub_scan_ports(void)
+{
+	struct usb_hub_port_status ps;
+
+	for(int i = 0; i < USB_HUB_MAX_DEVICES; i++) {
+		usb_hub_dev_t *hub = &hub_devices[i];
+
+		if(!hub->active || !hub->udev)
 			continue;
 
-		/* Clear any pending connection change */
-		if(ps.wPortChange & USB_PORT_STAT_C_CONNECTION)
-			usb_hub_clear_port_feature(hub->udev, port,
-			                           USB_HUB_FEAT_C_PORT_CONNECT);
-
-		/* Skip if nothing connected */
-		if(!(ps.wPortStatus & USB_PORT_STAT_CONNECTION))
-			continue;
-
-		/* Reset the port */
-		if(usb_hub_set_port_feature(hub->udev, port,
-		                            USB_HUB_FEAT_PORT_RESET) != USB_XFER_OK) {
-			kprintf("usb_hub: port %u reset request failed\n", port);
-			continue;
-		}
-
-		/* Wait for reset to complete (up to 200ms) */
-		deadline = (uint64_t)get_uptime_ms() + 200;
-		for(;;) {
-			if((uint64_t)get_uptime_ms() > deadline) {
-				kprintf("usb_hub: port %u reset timeout\n", port);
-				break;
-			}
-
-			/* Brief pause between polls */
-			{
-				uint64_t d = (uint64_t)get_uptime_ms() + 10;
-				while((uint64_t)get_uptime_ms() < d)
-					__asm__ volatile("pause");
-			}
+		for(uint8_t port = 1; port <= hub->nports; port++) {
+			usb_device_t *child =
+				usb_child_device_on_port(hub->udev, port);
 
 			if(usb_hub_get_port_status(hub->udev, port, &ps) != USB_XFER_OK)
-				break;
+				continue;
 
-			/* Reset complete when C_PORT_RESET is set */
-			if(ps.wPortChange & USB_PORT_STAT_C_RESET) {
+			int connected =
+				(ps.wPortStatus & USB_PORT_STAT_CONNECTION) != 0;
+
+			/* Acknowledge the change bit either way, or the hub keeps
+			 * reporting it and (once the interrupt endpoint is used)
+			 * would re-notify forever. */
+			if(ps.wPortChange & USB_PORT_STAT_C_CONNECTION)
 				usb_hub_clear_port_feature(hub->udev, port,
-				                           USB_HUB_FEAT_C_PORT_RESET);
-				break;
+				                           USB_HUB_FEAT_C_PORT_CONNECT);
+
+			if(child && !connected) {
+				kprintf("usb_hub: device removed from port %u\n", port);
+				usb_disconnect_device(child);
+			} else if(!child && connected) {
+				kprintf("usb_hub: device attached on port %u\n", port);
+				(void)usb_hub_bringup_port(hub, port);
 			}
 		}
-
-		/* Re-read status after reset */
-		if(usb_hub_get_port_status(hub->udev, port, &ps) != USB_XFER_OK)
-			continue;
-
-		/* Port must be enabled after reset */
-		if(!(ps.wPortStatus & USB_PORT_STAT_ENABLE))
-			continue;
-
-		/* Determine speed */
-		uint8_t speed;
-		if(ps.wPortStatus & USB_PORT_STAT_LOW_SPEED)
-			speed = USB_SPEED_LOW;
-		else if(ps.wPortStatus & USB_PORT_STAT_HIGH_SPEED)
-			speed = USB_SPEED_HIGH;
-		else
-			speed = USB_SPEED_FULL;
-
-		/* Small settle delay after reset */
-		{
-			uint64_t d = (uint64_t)get_uptime_ms() + 10;
-			while((uint64_t)get_uptime_ms() < d)
-				__asm__ volatile("pause");
-		}
-
-		/* Enumerate the downstream device through the core USB stack,
-		 * recording this hub as its parent so the root-port hot-plug scan
-		 * doesn't mistake it for a root device and disconnect it. [DRV-04] */
-		usb_enumerate_device_parent(hub->udev->hcd, port, speed, hub->udev);
 	}
 }
 

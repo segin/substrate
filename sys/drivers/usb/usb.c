@@ -1061,7 +1061,7 @@ static usb_device_t *usb_root_device_on_port(usb_hcd_t *hcd, uint8_t port)
  * published node that stores a back-pointer to this usb_device_t must be
  * removed BEFORE the struct is freed, or those consumers dereference freed
  * memory. [DRV-01][DRV-02][DRV-20] */
-static void usb_disconnect_device(usb_device_t *dev)
+void usb_disconnect_device(usb_device_t *dev)
 {
     if (!dev)
         return;
@@ -1100,6 +1100,24 @@ static void usb_disconnect_device(usb_device_t *dev)
     usb_free_device(dev);
 }
 
+/*
+ * The device enumerated behind `parent` on downstream port `port`, or NULL.
+ * The hub driver uses this to reconcile physical port state against what is
+ * actually enumerated, the same way usb_root_device_on_port does for the
+ * root hub.
+ */
+usb_device_t *usb_child_device_on_port(usb_device_t *parent, uint8_t port)
+{
+    if (!parent)
+        return NULL;
+    for (int i = 0; i < USB_MAX_DEVICES; i++) {
+        usb_device_t *d = usb_devices[i];
+        if (d && d->parent == parent && d->port == port)
+            return d;
+    }
+    return NULL;
+}
+
 static void usb_hotplug_scan(void)
 {
     for (usb_hcd_t *hcd = usb_hcd_list; hcd; hcd = hcd->next) {
@@ -1127,6 +1145,14 @@ static void usb_hotplug_scan(void)
             }
         }
     }
+
+    /*
+     * Root ports only cover what is plugged directly into the controller.
+     * Everything behind a hub shares its hub's root-port connection bit, so
+     * the loop above can never see those come and go -- the hub driver has
+     * to walk its own downstream ports.
+     */
+    usb_hub_scan_ports();
 }
 
 static int usb_hotplug_chan;
