@@ -655,12 +655,27 @@ static int ehci_reset_controller(ehci_hc_t *hc)
     return -1;
 }
 
+/*
+ * Bring-up trace, and an off switch.
+ *
+ * On a PCH where xhci_intel_port_switch() has moved every USB2 port to the
+ * xHCI, this controller has no ports left to drive -- attaching it is all risk
+ * and no benefit, and it is the last thing running before the boot stops on a
+ * Lenovo C460.  "noehci" skips it entirely; "ehcidebug" narrates the bring-up
+ * so a hang names the register access that caused it.
+ */
+static int ehci_trace;
+#define EHCI_STEP(msg) do { if (ehci_trace) kprintf("ehci: " msg "\n"); } while (0)
+
 static int ehci_start(ehci_hc_t *hc)
 {
+    EHCI_STEP("resetting controller");
     if (ehci_reset_controller(hc) != 0) {
         kprintf("ehci: controller reset timeout\n");
         return -1;
     }
+
+    EHCI_STEP("reset complete");
 
     /* Allocate DMA structures (once). */
     hc->async_qh = dma_alloc_coherent(sizeof(struct ehci_qh), &hc->async_qh_dma);
@@ -695,6 +710,8 @@ static int ehci_start(ehci_hc_t *hc)
     hc->intr_qh->overlay_alt_next = EHCI_LINK_TERMINATE;
     hc->intr_qh->overlay_token = EHCI_QTD_STATUS_HALTED;
 
+    EHCI_STEP("DMA structures allocated");
+
     /* Program the controller. */
     ehci_op_wr(hc, EHCI_OP_CTRLDSSEG, 0);
     ehci_op_wr(hc, EHCI_OP_USBINTR, 0);              /* polling: no interrupts */
@@ -704,6 +721,7 @@ static int ehci_start(ehci_hc_t *hc)
                EHCI_CMD_RUN | EHCI_CMD_ASE | EHCI_CMD_PSE |
                EHCI_CMD_FLS_1024 | (8u << EHCI_CMD_ITC_SHIFT));
     ehci_op_wr(hc, EHCI_OP_CONFIGFLAG, EHCI_CONFIGFLAG_CF);
+    EHCI_STEP("controller running");
     ehci_delay_ms(5);
 
     /* Power all ports on. */
@@ -712,6 +730,7 @@ static int ehci_start(ehci_hc_t *hc)
         ehci_portsc_wr(hc, p, psc | EHCI_PORT_POWER);
     }
     ehci_delay_ms(20);
+    EHCI_STEP("ports powered");
     return 0;
 }
 
@@ -828,5 +847,10 @@ void ehci_init(void)
 {
     if (!pci_present())
         return;
+    if (cmdline_has("noehci")) {
+        kprintf("ehci: disabled by noehci\n");
+        return;
+    }
+    ehci_trace = cmdline_has("ehcidebug");
     driver_register(&ehci_pci_driver, &pci_bus_type);
 }
