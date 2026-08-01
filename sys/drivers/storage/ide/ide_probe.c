@@ -407,7 +407,23 @@ void ide_register_irqs(void) {
             continue;
         }
 
-        if (ide_channel_irq_shared[channel]) {
+        /*
+         * Share unless this is a legacy ISA line.
+         *
+         * ide_channel_irq_shared[] is set by ide_pci_apply_channel() when a
+         * channel takes its IRQ from PCI, but a channel can reach here with
+         * a PCI-routed line by other paths and then claim it EXCLUSIVELY --
+         * which locks every other device on that line out of request_irq()
+         * with -EBUSY.  Observed: "ide: channel 2 IRQ 11 handler installed"
+         * took IRQ 11 first and the e1000 on the same line got no handler,
+         * so the interface never registered.
+         *
+         * Only IRQ 14 and 15 are the legacy ATA lines, which are ISA-style
+         * edge-triggered and genuinely unshareable.  Anything else came from
+         * PCI interrupt routing and is level-triggered and shared by design.
+         */
+        if (ide_channel_irq_shared[channel] ||
+            (ide_channels[channel].irq != 14 && ide_channels[channel].irq != 15)) {
             flags |= IRQF_SHARED;
         }
 

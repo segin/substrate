@@ -670,6 +670,7 @@ static void init_storage_and_vfs(multiboot_info_t *mboot_info) {
     usb_init();
     virtio_init();
         rtl8139_init();
+        e1000_init();
         loopback_init();
         inet_init();
     register_boot_ramdisks(mboot_info);
