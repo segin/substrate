@@ -863,8 +863,23 @@ install_grub() {
     if [ -d "$GRUB_LIB/i386-pc" ]; then
         mmd -i "$esp" ::/boot/grub/i386-pc >/dev/null 2>&1
         mcopy -i "$esp" "$GRUB_LIB"/i386-pc/*.mod ::/boot/grub/i386-pc/ >/dev/null 2>&1
+        # Locate the ESP by LABEL, exactly as grub.cfg locates the root
+        # filesystem, instead of baking in a drive number.  The prefix used to
+        # be a literal "(hd0,msdos1)/boot/grub", which is only correct when the
+        # boot medium happens to be BIOS drive 0.  On a machine with internal
+        # disks -- a Lenovo C460 has two SATA drives -- a USB stick is not hd0,
+        # so core.img went looking for /boot/grub on an internal disk's first
+        # partition, found nothing, and dropped to a bare "grub>" prompt with
+        # no menu.  An embedded config runs before the prefix is needed and can
+        # search for the partition by name; `search` and `search_label` are
+        # already in GRUB_MODULES because grub.cfg needs them too.
+        cat > "$gdir/early.cfg" <<EOF
+search --no-floppy --label $BOOT_LABEL --set=root
+set prefix=(\$root)/boot/grub
+EOF
         grub_mkimage -O i386-pc -o "$gdir/core.img" \
-            -p "(hd0,msdos1)/boot/grub" biosdisk $GRUB_MODULES >/dev/null 2>&1
+            -c "$gdir/early.cfg" -p "/boot/grub" \
+            biosdisk $GRUB_MODULES >/dev/null 2>&1
         mcopy -i "$esp" "$gdir/core.img" ::/boot/grub/i386-pc/core.img
     fi
 
