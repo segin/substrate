@@ -1462,11 +1462,11 @@
         - [x] USB-07: a failed SET_ADDRESS leaks the allocated USB address for the lifetime of the boot.
         - [x] USB-08: `USBDEVFS_CONTROL` IN transfers never copy data out (`ret > 0` is never true — `USB_XFER_OK` is 0).
         - [x] USB-09: only UHCI honours `usb_transfer_t.timeout_ms`; EHCI and xHCI use fixed 1 s timeouts.
-        - [ ] USB-10: EHCI runs interrupt endpoints on the async schedule, so `bInterval` is ignored.
+        - [x] USB-10: EHCI runs interrupt endpoints on the async schedule, so `bInterval` is ignored.
         - [x] USB-11: no Evaluate Context after learning the real `bMaxPacketSize0` (xHCI 1.1 §4.3.4).
         - [x] USB-12: SuperSpeed `bMaxPacketSize0` is an exponent, used as a literal.
         - [x] USB-13: device descriptor contents are never validated (type, bLength, HS MPS0 == 64).
-        - [ ] USB-14: hub port state is polled by control transfer instead of the status-change interrupt endpoint.
+        - [x] USB-14: hub port state is polled by control transfer instead of the status-change interrupt endpoint.
     - [ ] **LOW**
         - [x] USB-15: `bCBWCBLength` is written before the CDB length is clamped to 16.
         - [x] USB-16: CSW `dCSWDataResidue` is trusted without bounding it by the requested length.

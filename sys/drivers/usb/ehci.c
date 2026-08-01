@@ -44,6 +44,11 @@ typedef struct ehci_hc {
     mutex_t           submit_lock;
 
     struct ehci_qh   *async_qh;      dma_addr_t async_qh_dma;
+    /* Periodic schedule: the frame list the controller walks once per frame,
+     * and the single interrupt QH this driver links into it for the duration
+     * of one polled transfer. [USB-10] */
+    uint32_t         *periodic;      dma_addr_t periodic_dma;
+    struct ehci_qh   *intr_qh;       dma_addr_t intr_qh_dma;
     struct ehci_qtd  *qtd;           dma_addr_t qtd_dma;   /* EHCI_MAX_QTD pool */
     void             *setup_buf;     dma_addr_t setup_dma;
     void             *bounce;        dma_addr_t bounce_dma;
@@ -426,6 +431,126 @@ static int ehci_bulk_transfer(ehci_hc_t *hc, usb_transfer_t *xfer)
     return r;
 }
 
+/*
+ * Run one interrupt transfer through the PERIODIC schedule.
+ *
+ * These used to be handed to ehci_bulk_transfer(), i.e. queued on the
+ * asynchronous ring.  That transfers -- the device NAKs until it has data --
+ * but the async ring is walked as fast as the controller can cycle it, so
+ * bInterval was ignored entirely and an idle endpoint burned async bandwidth
+ * continuously.  EHCI's periodic schedule is what implements a polling
+ * interval: the controller walks one frame-list entry per 1 ms frame, so a QH
+ * linked in every Nth entry is visited every N milliseconds. [USB-10]
+ *
+ * The driver is synchronous and holds submit_lock, so a single QH is linked in,
+ * polled, and unlinked per transfer rather than kept resident.
+ */
+static int ehci_intr_transfer(ehci_hc_t *hc, usb_transfer_t *xfer)
+{
+    uint32_t len = xfer->length;
+    int in = xfer->ep && (xfer->ep->address & 0x80);
+    struct ehci_qh *qh = hc->intr_qh;
+    uint32_t stride, qh_link;
+    uint64_t deadline;
+    int r = USB_XFER_OK;
+
+    if (len > EHCI_BOUNCE_SIZE)
+        return USB_XFER_ERROR;
+    if (!in && len)
+        memcpy(hc->bounce, xfer->data, len);
+
+    /*
+     * bInterval -> frame stride.  High speed encodes it as 2^(bInterval-1)
+     * MICROframes (8 per frame); full and low speed give frames directly.
+     * Clamp into the frame list so the QH is always reachable.
+     */
+    {
+        uint8_t bi = xfer->ep ? xfer->ep->interval : 1;
+        if (bi == 0)
+            bi = 1;
+        if (xfer->dev->speed == USB_SPEED_HIGH) {
+            uint32_t uframes = 1u << (bi > 16 ? 15 : (bi - 1));
+            stride = uframes / 8;
+        } else {
+            stride = bi;
+        }
+        if (stride == 0)
+            stride = 1;
+        if (stride > EHCI_FRAMELIST_ENTRIES / 2)
+            stride = EHCI_FRAMELIST_ENTRIES / 2;
+    }
+
+    /* One qTD, at the front of the pool -- submit_lock serialises us against
+     * the async path that also uses it. */
+    ehci_fill_qtd(hc, 0, 0, in ? EHCI_QTD_PID_IN : EHCI_QTD_PID_OUT, len,
+                  xfer->ep ? xfer->ep->toggle : 0, len ? hc->bounce_dma : 0, 1);
+
+    /* A periodic QH is NOT the head of a reclamation list: EHCI_QH_HEAD is an
+     * async-ring-only flag and setting it here would make the controller treat
+     * this QH as the start of the async list. */
+    qh->endp_char = ehci_endp_char(xfer, 0) | EHCI_QH_DTC;
+    qh->endp_cap  = ehci_endp_cap(xfer, xfer->ep && xfer->ep->mult
+                                        ? xfer->ep->mult : 1);
+    qh->hlink     = EHCI_LINK_TERMINATE;
+    qh->current_qtd = 0;
+    qh->overlay_next = ehci_qtd_dma(hc, 0);
+    qh->overlay_alt_next = EHCI_LINK_TERMINATE;
+    qh->overlay_token = 0;
+
+    /* Link it into every stride-th frame. */
+    qh_link = (uint32_t)hc->intr_qh_dma | EHCI_LINK_TYPE_QH;
+    for (uint32_t i = 0; i < EHCI_FRAMELIST_ENTRIES; i += stride)
+        hc->periodic[i] = qh_link;
+
+    deadline = (uint64_t)get_uptime_ms() +
+               (xfer->timeout_ms ? xfer->timeout_ms : EHCI_XFER_TIMEOUT_MS);
+    for (;;) {
+        uint32_t tok = hc->qtd[0].token;
+        if (tok & EHCI_QTD_STATUS_HALTED) { r = USB_XFER_STALL; break; }
+        if (!(tok & EHCI_QTD_STATUS_ACTIVE)) break;
+        if ((uint64_t)get_uptime_ms() > deadline) { r = USB_XFER_TIMEOUT; break; }
+        __asm__ volatile("pause");
+    }
+
+    /*
+     * Unlink before touching the buffer again.  There is no doorbell handshake
+     * for the periodic schedule (IAAD covers the async ring only), so terminate
+     * the frame-list entries and then let the controller advance past any frame
+     * it might already be executing: two frames of FRINDEX movement is enough,
+     * and the loop is bounded so a stopped controller cannot hang us.
+     */
+    for (uint32_t i = 0; i < EHCI_FRAMELIST_ENTRIES; i += stride)
+        hc->periodic[i] = EHCI_LINK_TERMINATE;
+    {
+        uint32_t start = ehci_op_rd(hc, EHCI_OP_FRINDEX) >> 3;
+        for (int guard = 0; guard < 20; guard++) {
+            uint32_t now = ehci_op_rd(hc, EHCI_OP_FRINDEX) >> 3;
+            if (((now - start) & (EHCI_FRAMELIST_ENTRIES - 1)) >= 2)
+                break;
+            ehci_delay_ms(1);
+        }
+    }
+    hc->qtd[0].token &= ~EHCI_QTD_STATUS_ACTIVE;
+    qh->overlay_next = EHCI_LINK_TERMINATE;
+    qh->overlay_alt_next = EHCI_LINK_TERMINATE;
+    qh->overlay_token = EHCI_QTD_STATUS_HALTED;
+
+    if (r == USB_XFER_OK) {
+        uint32_t residue = (hc->qtd[0].token >> EHCI_QTD_BYTES_SHIFT) & 0x7FFF;
+        xfer->actual_length = (len > residue) ? (len - residue) : 0;
+        if (in && xfer->actual_length)
+            memcpy(xfer->data, hc->bounce, xfer->actual_length);
+        if (xfer->ep) {
+            uint32_t mps = xfer->ep->max_packet ? xfer->ep->max_packet : 64;
+            uint32_t npkts = xfer->actual_length
+                             ? ((xfer->actual_length + mps - 1) / mps) : 1;
+            xfer->ep->toggle ^= (npkts & 1);   /* [DRV-07] parity, not +1 */
+        }
+    }
+    xfer->status = r;
+    return r;
+}
+
 static int ehci_submit(usb_hcd_t *hcd, usb_transfer_t *xfer)
 {
     ehci_hc_t *hc = hcd->priv;
@@ -436,7 +561,7 @@ static int ehci_submit(usb_hcd_t *hcd, usb_transfer_t *xfer)
     else if (xfer->ep && xfer->ep->type == USB_EP_TYPE_BULK)
         ret = ehci_bulk_transfer(hc, xfer);
     else if (xfer->ep && xfer->ep->type == USB_EP_TYPE_INTERRUPT)
-        ret = ehci_bulk_transfer(hc, xfer);   /* single-qTD IN, same path */
+        ret = ehci_intr_transfer(hc, xfer);   /* periodic schedule [USB-10] */
     else
         ret = USB_XFER_ERROR;
     mutex_unlock(&hc->submit_lock);
@@ -534,7 +659,11 @@ static int ehci_start(ehci_hc_t *hc)
     hc->qtd      = dma_alloc_coherent(EHCI_MAX_QTD * sizeof(struct ehci_qtd), &hc->qtd_dma);
     hc->setup_buf = dma_alloc_coherent(64, &hc->setup_dma);
     hc->bounce    = dma_alloc_coherent(EHCI_BOUNCE_SIZE, &hc->bounce_dma);
-    if (!hc->async_qh || !hc->qtd || !hc->setup_buf || !hc->bounce) {
+    hc->periodic  = dma_alloc_coherent(EHCI_FRAMELIST_ENTRIES * sizeof(uint32_t),
+                                       &hc->periodic_dma);
+    hc->intr_qh   = dma_alloc_coherent(sizeof(struct ehci_qh), &hc->intr_qh_dma);
+    if (!hc->async_qh || !hc->qtd || !hc->setup_buf || !hc->bounce ||
+        !hc->periodic || !hc->intr_qh) {
         kprintf("ehci: DMA allocation failed\n");
         return -1;
     }
@@ -547,13 +676,25 @@ static int ehci_start(ehci_hc_t *hc)
     hc->async_qh->overlay_alt_next = EHCI_LINK_TERMINATE;
     hc->async_qh->overlay_token = EHCI_QTD_STATUS_HALTED;
 
+    /* Periodic frame list: every entry terminated until an interrupt transfer
+     * links its QH in.  The controller walks one entry per frame from
+     * FRINDEX, so this must be valid before PSE is set. [USB-10] */
+    for (unsigned i = 0; i < EHCI_FRAMELIST_ENTRIES; i++)
+        hc->periodic[i] = EHCI_LINK_TERMINATE;
+    memset(hc->intr_qh, 0, sizeof(struct ehci_qh));
+    hc->intr_qh->hlink = EHCI_LINK_TERMINATE;
+    hc->intr_qh->overlay_next = EHCI_LINK_TERMINATE;
+    hc->intr_qh->overlay_alt_next = EHCI_LINK_TERMINATE;
+    hc->intr_qh->overlay_token = EHCI_QTD_STATUS_HALTED;
+
     /* Program the controller. */
     ehci_op_wr(hc, EHCI_OP_CTRLDSSEG, 0);
     ehci_op_wr(hc, EHCI_OP_USBINTR, 0);              /* polling: no interrupts */
     ehci_op_wr(hc, EHCI_OP_ASYNCLIST, (uint32_t)hc->async_qh_dma);
-    ehci_op_wr(hc, EHCI_OP_PERIODICLIST, 0);
+    ehci_op_wr(hc, EHCI_OP_PERIODICLIST, (uint32_t)hc->periodic_dma);
     ehci_op_wr(hc, EHCI_OP_USBCMD,
-               EHCI_CMD_RUN | EHCI_CMD_ASE | (8u << EHCI_CMD_ITC_SHIFT));
+               EHCI_CMD_RUN | EHCI_CMD_ASE | EHCI_CMD_PSE |
+               EHCI_CMD_FLS_1024 | (8u << EHCI_CMD_ITC_SHIFT));
     ehci_op_wr(hc, EHCI_OP_CONFIGFLAG, EHCI_CONFIGFLAG_CF);
     ehci_delay_ms(5);
 
@@ -574,6 +715,11 @@ static int ehci_start(ehci_hc_t *hc)
  */
 static void ehci_teardown(ehci_hc_t *hc)
 {
+    if (hc->intr_qh)
+        dma_free_coherent(hc->intr_qh, sizeof(struct ehci_qh));
+    if (hc->periodic)
+        dma_free_coherent(hc->periodic,
+                          EHCI_FRAMELIST_ENTRIES * sizeof(uint32_t));
     if (hc->async_qh)
         dma_free_coherent(hc->async_qh, sizeof(struct ehci_qh));
     if (hc->qtd)

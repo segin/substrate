@@ -64,6 +64,10 @@ void ehci_init(void);
 #define EHCI_CMD_ASE         0x00000020   /* asynchronous schedule enable */
 #define EHCI_CMD_IAAD        0x00000040   /* interrupt on async advance doorbell */
 #define EHCI_CMD_ITC_SHIFT   16           /* interrupt threshold control */
+#define EHCI_CMD_FLS_1024    0x00000000   /* frame list size: 1024 entries */
+
+/* Periodic frame list: one link pointer per frame, walked from FRINDEX. */
+#define EHCI_FRAMELIST_ENTRIES 1024
 
 /* USBSTS bits */
 #define EHCI_STS_HCHALTED    0x00001000

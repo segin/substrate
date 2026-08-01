@@ -57,6 +57,9 @@ typedef struct usb_hub_dev {
 	uint8_t          nports;
 	uint8_t          active;
 	uint8_t          pwr_on_2_pwr_good_2ms;  /* hub descriptor field */
+	/* Status-change interrupt endpoint: the hub reports a bitmap of which
+	 * ports changed, so a scan can skip the ones that did not. [USB-14] */
+	usb_endpoint_t  *intr_ep;
 	/* Consecutive failed enumeration attempts per downstream port, cleared
 	 * on disconnect.  See USB_ENUM_MAX_TRIES: without this a port holding a
 	 * device we cannot enumerate is reset and re-probed at the scan rate
@@ -282,17 +285,62 @@ static void usb_hub_enumerate_ports(usb_hub_dev_t *hub)
  * unregister the devtree node, unpublish the /dev/usb nodes, and only then
  * free the struct and its USB address. [DRV-01][DRV-02][DRV-20][A33]
  */
+/*
+ * Read the hub's status-change bitmap.  Returns a mask of ports to examine, or
+ * ~0 when the hub cannot tell us (no endpoint, or a transfer error) so the
+ * caller falls back to sweeping everything.  Bit 0 is hub-wide status and bit
+ * N is port N, so the mask is used directly.
+ *
+ * A hub with nothing to report NAKs for the whole (short) timeout, which is the
+ * normal idle result and the entire point: one transfer per hub per scan
+ * instead of one per PORT per scan. [USB-14]
+ */
+#define USB_HUB_CHANGE_ALL   0xFFFFFFFFu
+#define USB_HUB_INTR_TIMEOUT_MS 5
+
+static uint32_t usb_hub_change_mask(usb_hub_dev_t *hub)
+{
+	uint8_t buf[4];
+	uint32_t actual = 0;
+	uint32_t mask = 0;
+	int ret;
+
+	if(!hub->intr_ep)
+		return USB_HUB_CHANGE_ALL;
+
+	memset(buf, 0, sizeof(buf));
+	ret = usb_interrupt_transfer(hub->udev, hub->intr_ep, buf, sizeof(buf),
+	                             &actual, USB_HUB_INTR_TIMEOUT_MS);
+	if(ret == USB_XFER_NAK || ret == USB_XFER_TIMEOUT)
+		return 0;                       /* idle: nothing changed */
+	if(ret != USB_XFER_OK || actual == 0)
+		return USB_HUB_CHANGE_ALL;      /* cannot tell: be conservative */
+
+	for(uint32_t b = 0; b < actual && b < sizeof(buf); b++)
+		mask |= (uint32_t)buf[b] << (b * 8);
+	return mask;
+}
+
 void usb_hub_scan_ports(void)
 {
 	struct usb_hub_port_status ps;
 
 	for(int i = 0; i < USB_HUB_MAX_DEVICES; i++) {
 		usb_hub_dev_t *hub = &hub_devices[i];
+		uint32_t changed;
 
 		if(!hub->active || !hub->udev)
 			continue;
 
+		changed = usb_hub_change_mask(hub);
+		if(changed == 0)
+			continue;               /* hub says nothing moved */
+
 		for(uint8_t port = 1; port <= hub->nports; port++) {
+			/* Skip ports the hub did not flag -- unless it could not tell
+			 * us, in which case every bit is set and this is a no-op. */
+			if(port < 32 && !(changed & (1u << port)))
+				continue;
 			usb_device_t *child =
 				usb_child_device_on_port(hub->udev, port);
 
@@ -402,6 +450,13 @@ static int usb_hub_attach(usb_device_t *dev)
 		hub->nports = USB_HUB_MAX_PORTS;
 	}
 	hub->pwr_on_2_pwr_good_2ms = hdesc.bPwrOn2PwrGood;
+
+	/* A hub's one required endpoint is the status-change interrupt IN.  It is
+	 * what turns a scan from "ask every port" into "ask the ports the hub says
+	 * changed". [USB-14] */
+	hub->intr_ep = usb_find_endpoint(dev, USB_EP_TYPE_INTERRUPT, USB_EP_DIR_IN);
+	if (!hub->intr_ep)
+		kprintf("usb_hub: no status-change endpoint; polling every port\n");
 
 	hub->active = 1;
 	dev->driver_data = hub;
