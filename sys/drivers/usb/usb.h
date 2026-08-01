@@ -134,7 +134,15 @@
 #define USB_PORT_STAT_C_RESET       0x0010
 
 /* Limits */
-#define USB_MAX_DEVICES         32
+/*
+ * Total devices tracked across all controllers.  Raised with the hub limits:
+ * 16 hubs would otherwise consume half of a 32-entry table before a single
+ * peripheral was plugged in, so lifting the hub caps without this one would
+ * not actually let you attach more.  128 matches the USB address space that
+ * usb_addr_bitmap already covers (1..127); usb_devices[] is a pointer array,
+ * so the whole increase costs 512 bytes.
+ */
+#define USB_MAX_DEVICES         128
 #define USB_MAX_ENDPOINTS       16
 /*
  * A device's configuration can expose many interfaces, and many alternate

@@ -36,8 +36,21 @@ struct usb_hub_port_status {
  * ============================================================
  */
 
-#define USB_HUB_MAX_DEVICES     4
-#define USB_HUB_MAX_PORTS       8
+/*
+ * USB_HUB_MAX_DEVICES bounds hub_devices[], so it caps how many hubs can be
+ * attached at once; a fifth hub was simply refused.  USB allows five tiers of
+ * external hubs, and a branching tree reaches four trivially (a monitor hub
+ * feeding a dock feeding a keyboard hub is three before anything is plugged
+ * in).  Each entry is 8 bytes.
+ *
+ * USB_HUB_MAX_PORTS only CLAMPS hub->nports -- nothing is indexed by port
+ * number -- so ports above it were silently ignored: a 10-port hub presented
+ * as a 8-port one, with the last two dead and no diagnostic.  15 is the most
+ * downstream ports a USB 3.x hub can report, so nothing real is truncated
+ * now, and raising it further costs only loop iterations.
+ */
+#define USB_HUB_MAX_DEVICES     16
+#define USB_HUB_MAX_PORTS       15
 
 typedef struct usb_hub_dev {
 	usb_device_t    *udev;
@@ -323,8 +336,14 @@ static int usb_hub_attach(usb_device_t *dev)
 	}
 
 	hub->nports = hdesc.bNbrPorts;
-	if(hub->nports > USB_HUB_MAX_PORTS)
+	if(hub->nports > USB_HUB_MAX_PORTS) {
+		/* Say so.  This used to truncate in silence, so a hub with more
+		 * ports than the clamp had dead sockets and nothing explained
+		 * why. */
+		kprintf("usb_hub: %u ports reported, only %u supported\n",
+		        (unsigned)hub->nports, (unsigned)USB_HUB_MAX_PORTS);
 		hub->nports = USB_HUB_MAX_PORTS;
+	}
 	hub->pwr_on_2_pwr_good_2ms = hdesc.bPwrOn2PwrGood;
 
 	hub->active = 1;
