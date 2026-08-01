@@ -1472,7 +1472,7 @@
         - [x] USB-16: CSW `dCSWDataResidue` is trusted without bounding it by the requested length.
         - [x] USB-17: mass-storage data-phase loop trusts `actual <= chunk_size`.
         - [x] USB-18: `USBDEVFS_CLAIMINTERFACE`/`SETCONFIGURATION`/`RESET` are unchecked no-ops.
-        - [ ] USB-19: the global device table and address bitmap have no locking.
+        - [x] USB-19: the global device table and address bitmap have no locking.
         - [x] USB-20: `usb_hotplug_scan` cannot throttle root ports at or above index 32.
         - [x] USB-21: a USB 3.x hub is asked for a 0x29 hub descriptor instead of 0x2A.
         - [x] USB-22: `usb_set_configuration(0)` is recorded as configured when it unconfigures the device.

@@ -15,6 +15,7 @@
 #include <kern/sched.h>
 #include <kern/time.h>
 #include <sys/kthread.h>
+#include <sys/lock.h>
 #include <vm/vm_kmem.h>
 
 /* The USB bus in the kernel device tree (/proc/devtree).  Enumerated devices
@@ -67,7 +68,21 @@ static usb_device_t *usb_devices[USB_MAX_DEVICES];
  * monotonic counter that would have run out of addresses after ~127
  * cumulative hot-plug attach cycles. */
 static uint32_t      usb_addr_bitmap[4];   /* 128 bits */
-static inline int    usb_addr_alloc(void) {
+
+/*
+ * Guards usb_devices[] and usb_addr_bitmap[].  The hot-plug kthread walks the
+ * table while enumeration adds to it and class-driver detach paths remove from
+ * it, and none of that was serialised. [USB-19]
+ *
+ * Held only across the table and bitmap operations themselves -- never across
+ * a control transfer or a class driver's probe/attach/detach, which sleep and
+ * take locks of their own.  usb_disconnect_device() therefore snapshots a
+ * device's children under the lock and recurses with it dropped.
+ */
+static mutex_t usb_devtab_lock;
+
+/* Caller holds usb_devtab_lock. */
+static inline int    usb_addr_alloc_locked(void) {
     for (int a = 1; a < 128; a++) {
         if (!(usb_addr_bitmap[a >> 5] & (1U << (a & 31)))) {
             usb_addr_bitmap[a >> 5] |= (1U << (a & 31));
@@ -76,9 +91,18 @@ static inline int    usb_addr_alloc(void) {
     }
     return -1;
 }
+static inline int    usb_addr_alloc(void) {
+    int a;
+    mutex_lock(&usb_devtab_lock);
+    a = usb_addr_alloc_locked();
+    mutex_unlock(&usb_devtab_lock);
+    return a;
+}
 static inline void   usb_addr_free(uint8_t a) {
     if (a == 0 || a >= 128) return;
+    mutex_lock(&usb_devtab_lock);
     usb_addr_bitmap[a >> 5] &= ~(1U << (a & 31));
+    mutex_unlock(&usb_devtab_lock);
 }
 
 static usb_hcd_t           *usb_hcd_list;
@@ -162,17 +186,24 @@ usb_device_t *usb_alloc_device(usb_hcd_t *hcd)
     usb_device_t *dev;
     int slot;
 
-    /* Find free slot */
+    dev = kzalloc(sizeof(usb_device_t));
+    if (!dev)
+        return NULL;
+
+    /* Claim a slot under the lock so two enumerations cannot pick the same
+     * one; the allocation above is done first so it stays outside. */
+    mutex_lock(&usb_devtab_lock);
     for (slot = 0; slot < USB_MAX_DEVICES; slot++) {
         if (!usb_devices[slot])
             break;
     }
-    if (slot >= USB_MAX_DEVICES)
+    if (slot >= USB_MAX_DEVICES) {
+        mutex_unlock(&usb_devtab_lock);
+        kfree(dev, sizeof(usb_device_t));
         return NULL;
-
-    dev = kzalloc(sizeof(usb_device_t));
-    if (!dev)
-        return NULL;
+    }
+    usb_devices[slot] = dev;
+    mutex_unlock(&usb_devtab_lock);
 
     dev->hcd = hcd;
     dev->slot = (uint8_t)slot;
@@ -182,7 +213,6 @@ usb_device_t *usb_alloc_device(usb_hcd_t *hcd)
     dev->ep0.mult = 1;          /* control endpoints are never high-bandwidth */
     dev->ep0.toggle = 0;
 
-    usb_devices[slot] = dev;
     return dev;
 }
 
@@ -197,8 +227,10 @@ void usb_free_device(usb_device_t *dev)
     if (dev->address)
         usb_addr_free(dev->address);
 
-    if (dev->slot < USB_MAX_DEVICES)
+    mutex_lock(&usb_devtab_lock);
+    if (dev->slot < USB_MAX_DEVICES && usb_devices[dev->slot] == dev)
         usb_devices[dev->slot] = NULL;
+    mutex_unlock(&usb_devtab_lock);
 
     if (dev->config_data) {
         kfree(dev->config_data, dev->config_len);
@@ -1293,12 +1325,18 @@ void usb_enumerate_bus(usb_hcd_t *hcd)
 /* The ROOT device (parent == NULL) currently enumerated on hcd:port, or NULL. */
 static usb_device_t *usb_root_device_on_port(usb_hcd_t *hcd, uint8_t port)
 {
+    usb_device_t *found = NULL;
+
+    mutex_lock(&usb_devtab_lock);
     for (int i = 0; i < USB_MAX_DEVICES; i++) {
         usb_device_t *d = usb_devices[i];
-        if (d && d->hcd == hcd && d->parent == NULL && d->port == port)
-            return d;
+        if (d && d->hcd == hcd && d->parent == NULL && d->port == port) {
+            found = d;
+            break;
+        }
     }
-    return NULL;
+    mutex_unlock(&usb_devtab_lock);
+    return found;
 }
 
 /* Detach a vanished device.  Ordering matters: the bound driver must detach
@@ -1320,10 +1358,29 @@ void usb_disconnect_device(usb_device_t *dev)
      * thread quiesce) is skipped and its usb_device_t + USB address leak.
      * Children go first so their in-flight I/O drains before the parent hub
      * (which they depend on for transfers) is torn down. [A33] */
-    for (int i = 0; i < USB_MAX_DEVICES; i++) {
-        usb_device_t *child = usb_devices[i];
-        if (child && child != dev && child->parent == dev)
-            usb_disconnect_device(child);
+    /*
+     * Take one child at a time: look it up under the lock, then recurse with
+     * the lock dropped, because the child's teardown runs its class driver's
+     * .detach, which sleeps.  Snapshotting the whole list instead would put a
+     * 512-byte array on a stack that recurses to the hub-tier limit. [USB-19]
+     * Each pass removes a child, so the loop terminates.
+     */
+    for (;;) {
+        usb_device_t *child = NULL;
+
+        mutex_lock(&usb_devtab_lock);
+        for (int i = 0; i < USB_MAX_DEVICES; i++) {
+            usb_device_t *d = usb_devices[i];
+            if (d && d != dev && d->parent == dev) {
+                child = d;
+                break;
+            }
+        }
+        mutex_unlock(&usb_devtab_lock);
+
+        if (!child)
+            break;
+        usb_disconnect_device(child);
     }
 
     /* 1. Driver detach first: it drains outstanding I/O before we free. */
@@ -1353,14 +1410,20 @@ void usb_disconnect_device(usb_device_t *dev)
  */
 usb_device_t *usb_child_device_on_port(usb_device_t *parent, uint8_t port)
 {
+    usb_device_t *found = NULL;
+
     if (!parent)
         return NULL;
+    mutex_lock(&usb_devtab_lock);
     for (int i = 0; i < USB_MAX_DEVICES; i++) {
         usb_device_t *d = usb_devices[i];
-        if (d && d->parent == parent && d->port == port)
-            return d;
+        if (d && d->parent == parent && d->port == port) {
+            found = d;
+            break;
+        }
     }
-    return NULL;
+    mutex_unlock(&usb_devtab_lock);
+    return found;
 }
 
 static void usb_hotplug_scan(void)
@@ -1448,6 +1511,7 @@ void usb_init(void)
 {
     usb_hcd_t *hcd;
 
+    mutex_init(&usb_devtab_lock, "usb_devtab");
     memset(usb_devices, 0, sizeof(usb_devices));
     memset(usb_addr_bitmap, 0, sizeof(usb_addr_bitmap));
     usb_enum_depth = 0;
