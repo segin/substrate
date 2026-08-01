@@ -1003,14 +1003,22 @@ static int ahci_identify(ahci_port_t *ap) {
               ? AHCI_ATA_CMD_IDENTIFY_PACKET
               : AHCI_ATA_CMD_IDENTIFY;
 
-    /* Build command FIS */
+    /*
+     * Build the command FIS through the same helper the working read path
+     * uses, rather than by hand.  The two constructions had drifted: this one
+     * left the device register 0 where ahci_build_h2d_fis() is called with
+     * 0x40 (the LBA bit) everywhere else.  That was the ONLY field that
+     * differed -- with lba and count both 0 the rest is byte-identical -- and
+     * it is not the reason IDENTIFY returns nothing, because NetBSD sends 0
+     * too (ata.c:836-840 never assigns r_device for WDCC_IDENTIFY) while
+     * FreeBSD sends ATA_DEV_LBA (ata_xpt.c:373 via ata_28bit_cmd), and both
+     * work on real drives.  Route it through the builder anyway so the two
+     * paths cannot silently diverge again, and so identify matches the path
+     * this hardware demonstrably accepts.
+     */
     tbl = ap->cmd_table;
     fis = (struct fis_reg_h2d *)tbl->cfis;
-    memset(fis, 0, sizeof(*fis));
-    fis->fis_type = FIS_TYPE_REG_H2D;
-    fis->pmport_c = 0x80;
-    fis->command  = cmd;
-    fis->device   = 0;
+    ahci_build_h2d_fis(fis, cmd, 0, 0, 0x40);   /* LBA mode, as elsewhere */
 
     /* Single PRDT entry for 512-byte identify data */
     tbl->prdt[0].dba  = (uint32_t)id_dma;
@@ -1032,30 +1040,41 @@ static int ahci_identify(ahci_port_t *ap) {
     hdr->prdtl = 1;
     hdr->prdbc = 0;
 
-    ret = ahci_port_issue_cmd(ap, AHCI_TIMEOUT_IDENTIFY);
-    if (ret < 0) {
-        /* See ahci_ata_dma_cmd(): a wedged port may still write id_buf. */
-        if (ret != AHCI_CMD_WEDGED)
-            dma_free_coherent(id_buf, 512);
-        mutex_unlock(&ap->cmd_lock);
-        return -1;
+    /*
+     * Issue, and retry once if nothing arrived.  On the C460 the command
+     * completes clean -- PxTFD says DRDY with DRQ and ERR clear, PxSERR and
+     * PxIS are zero, CR and FR are both running -- and moves zero bytes.  The
+     * FIS is now identical to the read path's, so what is left is either the
+     * PIO protocol itself or the fact that this is the first command issued
+     * after the port was started.  A second attempt tells those apart: if the
+     * retry succeeds it is a start-up race, if it fails identically it is the
+     * protocol.
+     */
+    for (int attempt = 0; attempt < 2; attempt++) {
+        hdr->prdbc = 0;
+        ret = ahci_port_issue_cmd(ap, AHCI_TIMEOUT_IDENTIFY);
+        if (ret < 0) {
+            /* See ahci_ata_dma_cmd(): a wedged port may still write id_buf. */
+            if (ret != AHCI_CMD_WEDGED)
+                dma_free_coherent(id_buf, 512);
+            mutex_unlock(&ap->cmd_lock);
+            return -1;
+        }
+        if (hdr->prdbc == 512)
+            break;
+
+        kprintf("ahci: port %d: IDENTIFY attempt %d moved %u of 512 bytes "
+                "(tfd=0x%08x serr=0x%08x is=0x%08x cmd=0x%08x)\n",
+                ap->port_num, attempt + 1, hdr->prdbc, ap->regs->tfd,
+                ap->regs->serr, ap->regs->is, ap->regs->cmd);
+
+        if (attempt == 0) {
+            uint64_t until = ahci_time_ms() + 50;
+            while (ahci_time_ms() < until)
+                __asm__ volatile("pause");
+        }
     }
 
-    /*
-     * The command "succeeded" -- PxCI cleared with no error bit -- but that
-     * does not mean 512 bytes arrived.  This path never checked, so a drive
-     * that answered with nothing produced an all-zero descriptor and the
-     * driver went on to report an empty model string and a zero capacity with
-     * no indication anything had gone wrong.  On a Lenovo C460 that is exactly
-     * what happens, while ordinary DMA reads on the same port work, so say
-     * enough about the failure to tell the two protocols apart.
-     */
-    if (hdr->prdbc != 512) {
-        kprintf("ahci: port %d: IDENTIFY moved %u of 512 bytes "
-                "(tfd=0x%08x serr=0x%08x is=0x%08x cmd=0x%08x)\n",
-                ap->port_num, hdr->prdbc, ap->regs->tfd, ap->regs->serr,
-                ap->regs->is, ap->regs->cmd);
-    }
     if (id_buf[0] == 0 && id_buf[27] == 0) {
         kprintf("ahci: port %d: IDENTIFY data is empty "
                 "(prdbc=%u, first words %04x %04x %04x)\n",
