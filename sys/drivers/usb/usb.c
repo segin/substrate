@@ -214,13 +214,17 @@ void usb_free_device(usb_device_t *dev)
  * ============================================================
  */
 
-int usb_control_transfer(usb_device_t *dev,
-                         uint8_t bmRequestType, uint8_t bRequest,
-                         uint16_t wValue, uint16_t wIndex,
-                         void *data, uint16_t wLength)
+int usb_control_transfer_actual(usb_device_t *dev,
+                                uint8_t bmRequestType, uint8_t bRequest,
+                                uint16_t wValue, uint16_t wIndex,
+                                void *data, uint16_t wLength,
+                                uint32_t *actual_length)
 {
     usb_transfer_t xfer;
+    int ret;
 
+    if (actual_length)
+        *actual_length = 0;
     if (!dev || !dev->hcd || !dev->hcd->submit)
         return USB_XFER_ERROR;
 
@@ -237,7 +241,20 @@ int usb_control_transfer(usb_device_t *dev,
     xfer.setup.wIndex = wIndex;
     xfer.setup.wLength = wLength;
 
-    return dev->hcd->submit(dev->hcd, &xfer);
+    ret = dev->hcd->submit(dev->hcd, &xfer);
+
+    if (actual_length)
+        *actual_length = xfer.actual_length;
+    return ret;
+}
+
+int usb_control_transfer(usb_device_t *dev,
+                         uint8_t bmRequestType, uint8_t bRequest,
+                         uint16_t wValue, uint16_t wIndex,
+                         void *data, uint16_t wLength)
+{
+    return usb_control_transfer_actual(dev, bmRequestType, bRequest,
+                                       wValue, wIndex, data, wLength, NULL);
 }
 
 int usb_interrupt_transfer(usb_device_t *dev, usb_endpoint_t *ep,
@@ -427,7 +444,13 @@ int usb_set_configuration(usb_device_t *dev, uint8_t config)
                                0, NULL, 0);
     if (ret == USB_XFER_OK) {
         dev->config_value = config;
-        dev->configured = 1;
+        /*
+         * SET_CONFIGURATION(0) *un*configures the device -- it returns to
+         * Address state with no interfaces active.  Recording that as
+         * configured told every later caller the device was ready when it was
+         * not. [USB-22]
+         */
+        dev->configured = (config != 0);
     }
 
     return ret;
@@ -960,6 +983,15 @@ static int usb_enumerate_device_inner(usb_hcd_t *hcd, uint8_t port, uint8_t spee
     ret = usb_set_address(dev, addr);
     if (ret != USB_XFER_OK) {
         kprintf("usb: port %u: SET_ADDRESS failed (err=%d)\n", port, ret);
+        /*
+         * Return the address by hand.  usb_free_device() only frees it when
+         * dev->address is set, and usb_set_address() only sets that on
+         * success -- so a failure here used to burn one of the 127 addresses
+         * for the rest of the boot.  A machine with a few ports that report a
+         * device they cannot enumerate walks the space down and eventually
+         * hits "address space exhausted". [USB-07]
+         */
+        usb_addr_free(addr);
         usb_free_device(dev);
         return -1;
     }
@@ -1029,7 +1061,15 @@ static int usb_enumerate_device_inner(usb_hcd_t *hcd, uint8_t port, uint8_t spee
     /* Parse config: extract endpoints and interface class */
     usb_parse_config(dev);
 
-    /* Set configuration */
+    /* Set configuration.  A device whose only configuration is numbered 0 has
+     * no usable configuration at all -- selecting it unconfigures the device
+     * -- so refuse rather than proceeding with a device that is not
+     * configured. [USB-22] */
+    if (cd.bConfigurationValue == 0) {
+        kprintf("usb: addr %u: configuration value 0 is not selectable\n", addr);
+        usb_free_device(dev);
+        return -1;
+    }
     ret = usb_set_configuration(dev, cd.bConfigurationValue);
     if (ret != USB_XFER_OK) {
         kprintf("usb: addr %u: SET_CONFIGURATION failed (err=%d)\n", addr, ret);
@@ -1205,8 +1245,10 @@ static void usb_hotplug_scan(void)
             int connected = (st & USB_PORT_STAT_CONNECTION) != 0;
             usb_device_t *dev = usb_root_device_on_port(hcd, port);
 
-            uint8_t *fails = (port < USB_MAX_ROOT_PORTS)
-                             ? &hcd->enum_fail[port] : NULL;
+            /* Ports are 1-based; index from 0 so the last port is covered
+             * too. [USB-20] */
+            uint8_t *fails = (port >= 1 && port <= USB_MAX_ROOT_PORTS)
+                             ? &hcd->enum_fail[port - 1] : NULL;
 
             if (!connected && fails)
                 *fails = 0;      /* gone: a re-plug deserves a fresh try */

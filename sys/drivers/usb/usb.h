@@ -167,7 +167,17 @@
  */
 #define USB_ENUM_DESC_TRIES     10
 #define USB_ENUM_DESC_DELAY_MS  200
-#define USB_MAX_ROOT_PORTS      32
+/*
+ * Root ports the per-port enumeration-failure counter covers.  Ports are
+ * 1-based and the array is indexed [port - 1], so this is the highest port
+ * number that can be throttled.  It used to be indexed [port] against a
+ * 32-entry array, which both wasted slot 0 and left port 32 and up with no
+ * counter at all -- and a port with no counter is one the retry cap cannot
+ * stop from re-probing forever, which is the exact loop USB_ENUM_MAX_TRIES
+ * exists to break.  xHCI encodes up to 255 ports; 128 covers every real
+ * controller at one byte per port per HCD.
+ */
+#define USB_MAX_ROOT_PORTS      128
 #define USB_MAX_ENDPOINTS       16
 /*
  * A device's configuration can expose many interfaces, and many alternate
@@ -517,6 +527,18 @@ int usb_control_transfer(usb_device_t *dev,
                          uint8_t bmRequestType, uint8_t bRequest,
                          uint16_t wValue, uint16_t wIndex,
                          void *data, uint16_t wLength);
+
+/*
+ * As above, but also reports how many bytes actually moved.  The plain form
+ * returns only a USB_XFER_* status (USB_XFER_OK is 0), so a caller that needs
+ * a length -- usbfs relaying a control transfer to userspace -- cannot get one
+ * from it.
+ */
+int usb_control_transfer_actual(usb_device_t *dev,
+                                uint8_t bmRequestType, uint8_t bRequest,
+                                uint16_t wValue, uint16_t wIndex,
+                                void *data, uint16_t wLength,
+                                uint32_t *actual_length);
 
 /*
  * Poll an interrupt endpoint once.  timeout_ms bounds how long to wait for the

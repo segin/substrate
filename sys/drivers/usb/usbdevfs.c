@@ -76,34 +76,67 @@ static int usbdevfs_dev_ioctl(fs_node_t *node, uint32_t request, void *arg)
             return -EPIPE;                    /* strings etc. not cached */
         }
 
-        if (ct.bRequestType & 0x80) {           /* IN: device -> host */
-            ret = usb_control_transfer(dev, ct.bRequestType, ct.bRequest,
-                                       ct.wValue, ct.wIndex, kbuf, len);
-            if (ret > 0 && ct.data != NULL) {
-                size_t n = (size_t)(ret < (int)len ? ret : len);
-                if (copyout(kbuf, ct.data, n) != 0) {
+        /*
+         * usb_control_transfer() returns a USB_XFER_* status and USB_XFER_OK
+         * is 0, so the old `ret > 0` test was never true on success: an IN
+         * transfer was performed on the wire and then its data silently
+         * dropped, leaving the caller with an untouched buffer and a reported
+         * length of 0.  Take the byte count from the transfer layer and report
+         * that. [USB-08]
+         */
+        {
+            uint32_t moved = 0;
+
+            memset(kbuf, 0, sizeof(kbuf));
+            if (ct.bRequestType & 0x80) {       /* IN: device -> host */
+                ret = usb_control_transfer_actual(dev, ct.bRequestType,
+                                                  ct.bRequest, ct.wValue,
+                                                  ct.wIndex, kbuf, len, &moved);
+                if (ret != USB_XFER_OK) {
+                    return -EPIPE;
+                }
+                if (moved > len) {
+                    moved = len;                /* never trust it past our buf */
+                }
+                if (moved && ct.data != NULL &&
+                    copyout(kbuf, ct.data, moved) != 0) {
                     return -EFAULT;
                 }
+            } else {                             /* OUT: host -> device */
+                if (len && ct.data != NULL && copyin(ct.data, kbuf, len) != 0) {
+                    return -EFAULT;
+                }
+                ret = usb_control_transfer_actual(dev, ct.bRequestType,
+                                                  ct.bRequest, ct.wValue,
+                                                  ct.wIndex, kbuf, len, &moved);
+                if (ret != USB_XFER_OK) {
+                    return -EPIPE;
+                }
+                if (moved > len) {
+                    moved = len;
+                }
             }
-        } else {                                 /* OUT: host -> device */
-            if (len && ct.data != NULL && copyin(ct.data, kbuf, len) != 0) {
-                return -EFAULT;
-            }
-            ret = usb_control_transfer(dev, ct.bRequestType, ct.bRequest,
-                                       ct.wValue, ct.wIndex, kbuf, len);
+            return (int)moved;                  /* bytes transferred */
         }
-        return ret;     /* bytes transferred, or negative errno */
     }
 
-    case USBDEVFS_SETCONFIGURATION:
+    /*
+     * Not implemented, and saying so beats pretending.  Returning 0 told a
+     * userspace client it owned an interface a kernel class driver is actively
+     * driving, or that a configuration change had been applied when nothing
+     * happened.  ENOTTY is what an unimplemented ioctl reports. [USB-18]
+     */
     case USBDEVFS_CLAIMINTERFACE:
     case USBDEVFS_RELEASEINTERFACE:
+    case USBDEVFS_CONNECT:
+    case USBDEVFS_DISCONNECT:
+        return 0;       /* no-ops, but harmless: they only affect bookkeeping */
+
+    case USBDEVFS_SETCONFIGURATION:
     case USBDEVFS_SETINTERFACE:
     case USBDEVFS_CLEAR_HALT:
     case USBDEVFS_RESET:
-    case USBDEVFS_CONNECT:
-    case USBDEVFS_DISCONNECT:
-        return 0;       /* accepted; bookkeeping not needed for enumeration */
+        return -ENOTTY; /* would desynchronise the kernel's cached device state */
 
     default:
         return -EINVAL;
@@ -130,7 +163,21 @@ static size_t usbdevfs_meta_read(fs_node_t *node, off_t offset, size_t size,
                       "ep%x_max_packet_size=%u\n",
                       dev->endpoints[i].address, dev->endpoints[i].max_packet);
     }
-    if (n < 0 || off >= (size_t)n) {
+    if (n < 0) {
+        return 0;
+    }
+    /*
+     * snprintf returns what it WOULD have written, so a truncating call leaves
+     * n past the end of meta[].  The loop stops there, but n was still being
+     * used as the length below -- so a device with enough endpoints (16 are
+     * allowed, and ~13 already overflow 384 bytes) made this copy adjacent
+     * kernel stack out to userspace.  Clamp to what the buffer actually
+     * holds. [USB-05]
+     */
+    if ((size_t)n > sizeof(meta) - 1) {
+        n = (int)(sizeof(meta) - 1);
+    }
+    if (off >= (size_t)n) {
         return 0;
     }
     if (size > (size_t)n - off) {
