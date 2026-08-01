@@ -860,12 +860,98 @@ static void xhci_take_controller(xhci_hc_t *hc)
  * Gated on the vendor ID: 0xD0-0xDC is vendor-specific config space and means
  * something else entirely on a non-Intel controller.
  */
+/*
+ * Take every companion EHCI controller away from the BIOS before the reroute.
+ *
+ * Setting a controller's OS-owned semaphore is a request the firmware services
+ * in SMM.  If the USB2 ports have already been switched to the xHCI, that SMI
+ * handler goes looking for the keyboard it was emulating on an EHCI whose ports
+ * no longer exist -- and on a Lenovo C460 it never comes back.  The CPU stays
+ * in SMM, so timer interrupts stop, get_uptime_ms() freezes, and the "bounded"
+ * wait in ehci_take_controller() spins forever.  The observable is a boot that
+ * stops dead on the line announcing the wait.
+ *
+ * Linux avoids this by ordering: quirk_usb_early_handoff() claims every USB
+ * controller at PCI-enumeration time, and usb_enable_intel_xhci_ports() only
+ * runs afterwards.  Neither driver-attach order reproduces that on its own --
+ * EHCI-first hands the BIOS over in time but then enumerates devices the
+ * reroute is about to remove, and xHCI-first reroutes while the BIOS still owns
+ * the EHCI.  So the handoff has to happen here, before the switch, for the
+ * controllers that are about to lose their ports.
+ *
+ * The EHCI driver still performs its own handoff when it attaches; by then the
+ * semaphore is already clear and it is a no-op.
+ */
+static void xhci_release_companion_ehci(void)
+{
+    for (pci_device_t *d = pci_first_device(); d; d = pci_next_device(d)) {
+        volatile uint8_t *mmio;
+        uint32_t bar0, hcc;
+        uint8_t off;
+
+        /* class 0x0C, subclass 0x03, prog-if 0x20 = EHCI */
+        if ((d->class_code >> 8) != 0x000C03u || (d->class_code & 0xFF) != 0x20)
+            continue;
+
+        bar0 = pci_read_config32(d->bus, d->slot, d->func, 0x10);
+        if ((bar0 & 1) || (bar0 & ~0xFUL) == 0)
+            continue;                       /* not an MMIO BAR */
+
+        /* Memory space has to be decoding before HCCPARAMS can be read. */
+        {
+            uint16_t cmd = pci_read_config16(d->bus, d->slot, d->func,
+                                             PCI_CONFIG_COMMAND);
+            pci_write_config16(d->bus, d->slot, d->func, PCI_CONFIG_COMMAND,
+                               cmd | 0x0002);
+        }
+
+        mmio = ioremap((uintptr_t)(bar0 & ~0xFUL), 0x100);
+        if (!mmio)
+            continue;
+        hcc = *(volatile uint32_t *)(mmio + 0x08);   /* EHCI_CAP_HCCPARAMS */
+        off = (uint8_t)((hcc >> 8) & 0xFF);          /* EECP */
+        iounmap((void *)mmio);
+
+        for (int guard = 0; off >= 0x40 && guard < 32; guard++) {
+            uint32_t cap = pci_read_config32(d->bus, d->slot, d->func, off);
+            if (cap == 0xFFFFFFFFu)
+                break;
+            if ((cap & 0xFF) == 0x01) {     /* USB Legacy Support */
+                uint8_t sem = pci_read_config8(d->bus, d->slot, d->func, off + 2);
+                if (sem) {
+                    kprintf("xhci: releasing companion EHCI %02x:%02x.%u from "
+                            "the BIOS before rerouting its ports\n",
+                            d->bus, d->slot, d->func);
+                    pci_write_config8(d->bus, d->slot, d->func, off + 3, 1);
+                    for (int i = 0; i < 1000; i++) {
+                        sem = pci_read_config8(d->bus, d->slot, d->func, off + 2);
+                        if (sem == 0)
+                            break;
+                        xhci_delay_ms(1);
+                    }
+                    if (sem) {
+                        kprintf("xhci: companion EHCI did not release; "
+                                "clearing its semaphore\n");
+                        pci_write_config8(d->bus, d->slot, d->func, off + 2, 0);
+                    }
+                }
+                /* Disarm its SMI sources so the reroute cannot re-enter SMM. */
+                pci_write_config32(d->bus, d->slot, d->func, off + 4, 0);
+            }
+            off = (uint8_t)((cap >> 8) & 0xFF);
+        }
+    }
+}
+
 static void xhci_intel_port_switch(pci_device_t *pdev)
 {
     uint32_t mask;
 
     if (pdev->vendor_id != 0x8086)
         return;
+
+    /* The companions must be OS-owned before their ports move. */
+    xhci_release_companion_ehci();
 
     mask = pci_read_config32(pdev->bus, pdev->slot, pdev->func, XHCI_INTEL_USB3PRM);
     if (mask != 0xFFFFFFFFu && mask != 0) {
