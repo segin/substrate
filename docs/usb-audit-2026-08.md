@@ -446,6 +446,30 @@ recorded as configured while being anything but.
 - xHCI slot teardown (`xhci.c:335-378`) — frees stream contexts, per-stream
   rings and per-DCI rings, not just EP0's.
 
+## Status
+
+20 of 22 fixed, in commits d67cd42ff, d4d7dd218, a18ae9aac, 36e1e080e,
+edfde844b, 930468c9f, 547f3e50a.  Each is boot-verified under QEMU on all
+three HCDs; the hardware-only paths (split transactions to a full/low-speed
+device behind a high-speed hub, SuperSpeed enumeration) are implemented to the
+spec and to what both references do, but cannot be exercised under emulation
+and are labelled untested in their commits.
+
+Two remain open, both because they are missing *features* rather than
+defects, and both large enough that landing them alongside twenty behaviour
+changes would have made the whole set hard to bisect:
+
+- **USB-10** (EHCI runs interrupt endpoints on the async schedule).  Fixing it
+  means building a periodic schedule: the frame list, QH insertion ordered by
+  interval, and bandwidth accounting.  The current behaviour works -- the
+  device NAKs until it has data -- it just ignores `bInterval` and consumes
+  async bandwidth continuously.
+- **USB-14** (hub ports polled by control transfer instead of the status-change
+  interrupt endpoint).  The endpoint is already parsed during enumeration; what
+  is missing is an interrupt-driven path in the hub driver to replace the 4 Hz
+  control-transfer sweep.  USB-09 removed the part of this that hurt most: the
+  sweep no longer blocks a full second per port on EHCI/xHCI.
+
 ## Suggested order of work
 
 1. **USB-03 + USB-04** (retry loop and the pre-SET_ADDRESS reset). Small,
