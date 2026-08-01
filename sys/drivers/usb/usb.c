@@ -1128,20 +1128,41 @@ static void usb_hotplug_scan(void)
             int connected = (st & USB_PORT_STAT_CONNECTION) != 0;
             usb_device_t *dev = usb_root_device_on_port(hcd, port);
 
+            uint8_t *fails = (port < USB_MAX_ROOT_PORTS)
+                             ? &hcd->enum_fail[port] : NULL;
+
+            if (!connected && fails)
+                *fails = 0;      /* gone: a re-plug deserves a fresh try */
+
             if (dev && !connected) {
                 kprintf("usb: device removed from %s port %u\n",
                         hcd->name, port);
                 usb_disconnect_device(dev);
             } else if (!dev && connected && hcd->port_reset) {
-                if (hcd->port_reset(hcd, port) != 0)
+                /* Parked after repeated failures: a port that reports a
+                 * device it cannot enumerate must not be reset and re-probed
+                 * forever.  Only a disconnect clears this. */
+                if (fails && *fails >= USB_ENUM_MAX_TRIES)
                     continue;
+
+                if (hcd->port_reset(hcd, port) != 0) {
+                    if (fails) (*fails)++;
+                    continue;
+                }
                 st = hcd->port_status(hcd, port);
-                if (!(st & USB_PORT_STAT_ENABLE))
+                if (!(st & USB_PORT_STAT_ENABLE)) {
+                    if (fails) (*fails)++;
                     continue;
+                }
                 uint8_t speed = (st & USB_PORT_STAT_LOW_SPEED)  ? USB_SPEED_LOW  :
                                 (st & USB_PORT_STAT_HIGH_SPEED) ? USB_SPEED_HIGH :
                                                                   USB_SPEED_FULL;
-                usb_enumerate_device(hcd, port, speed);
+                if (usb_enumerate_device(hcd, port, speed) != 0 && fails) {
+                    if (++(*fails) >= USB_ENUM_MAX_TRIES)
+                        kprintf("usb: %s port %u: enumeration failed %u times,"
+                                " giving up until re-plug\n",
+                                hcd->name, port, USB_ENUM_MAX_TRIES);
+                }
             }
         }
     }

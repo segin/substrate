@@ -143,6 +143,19 @@
  * so the whole increase costs 512 bytes.
  */
 #define USB_MAX_DEVICES         128
+
+/*
+ * A port that reports a device but fails to enumerate is retried this many
+ * times and then PARKED until its connection state actually changes.
+ *
+ * Without this the hot-plug scan is an infinite retry loop: the port still
+ * reads connected, no device is tracked on it, so every pass resets it and
+ * re-runs enumeration -- printing a fresh failure each time.  On the Lenovo
+ * C460 that produced descriptor-read errors at exactly the scan rate (4 Hz)
+ * and took the kernel down within seconds of reaching userspace.
+ */
+#define USB_ENUM_MAX_TRIES      3
+#define USB_MAX_ROOT_PORTS      32
 #define USB_MAX_ENDPOINTS       16
 /*
  * A device's configuration can expose many interfaces, and many alternate
@@ -409,6 +422,9 @@ typedef struct usb_hcd {
      * port_enable: enable/disable port
      */
     uint8_t  nports;
+    /* Consecutive failed enumeration attempts per root port; cleared when the
+     * port goes disconnected so a re-plug always gets a fresh try. */
+    uint8_t  enum_fail[USB_MAX_ROOT_PORTS];
     uint32_t (*port_status)(struct usb_hcd *hcd, uint8_t port);
     int      (*port_reset)(struct usb_hcd *hcd, uint8_t port);
     int      (*port_enable)(struct usb_hcd *hcd, uint8_t port, int enable);

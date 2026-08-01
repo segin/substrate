@@ -57,6 +57,11 @@ typedef struct usb_hub_dev {
 	uint8_t          nports;
 	uint8_t          active;
 	uint8_t          pwr_on_2_pwr_good_2ms;  /* hub descriptor field */
+	/* Consecutive failed enumeration attempts per downstream port, cleared
+	 * on disconnect.  See USB_ENUM_MAX_TRIES: without this a port holding a
+	 * device we cannot enumerate is reset and re-probed at the scan rate
+	 * forever. */
+	uint8_t          enum_fail[USB_HUB_MAX_PORTS + 1];
 } usb_hub_dev_t;
 
 static usb_hub_dev_t hub_devices[USB_HUB_MAX_DEVICES];
@@ -191,7 +196,13 @@ static int usb_hub_bringup_port(usb_hub_dev_t *hub, uint8_t port)
 	/* Enumerate the downstream device through the core USB stack,
 	 * recording this hub as its parent so the root-port hot-plug scan
 	 * doesn't mistake it for a root device and disconnect it. [DRV-04] */
-	usb_enumerate_device_parent(hub->udev->hcd, port, speed, hub->udev);
+	/* Propagate the result.  This used to `return 1` unconditionally, which
+	 * would have made the retry cap dead code: a port whose enumeration
+	 * failed still looked like a success, so its failure counter never
+	 * advanced and it was re-probed forever. */
+	if(usb_enumerate_device_parent(hub->udev->hcd, port, speed,
+	                               hub->udev) != 0)
+		return 0;
 	return 1;
 }
 
@@ -272,12 +283,26 @@ void usb_hub_scan_ports(void)
 				usb_hub_clear_port_feature(hub->udev, port,
 				                           USB_HUB_FEAT_C_PORT_CONNECT);
 
+			if(!connected)
+				hub->enum_fail[port] = 0;   /* re-plug gets a fresh try */
+
 			if(child && !connected) {
 				kprintf("usb_hub: device removed from port %u\n", port);
 				usb_disconnect_device(child);
 			} else if(!child && connected) {
+				/* Parked after repeated failures.  Only a disconnect
+				 * clears it; otherwise this is an infinite reset +
+				 * re-enumerate loop at the scan rate. */
+				if(hub->enum_fail[port] >= USB_ENUM_MAX_TRIES)
+					continue;
+
 				kprintf("usb_hub: device attached on port %u\n", port);
-				(void)usb_hub_bringup_port(hub, port);
+				if(!usb_hub_bringup_port(hub, port)) {
+					if(++hub->enum_fail[port] >= USB_ENUM_MAX_TRIES)
+						kprintf("usb_hub: port %u: enumeration failed "
+						        "%u times, giving up until re-plug\n",
+						        port, USB_ENUM_MAX_TRIES);
+				}
 			}
 		}
 	}
