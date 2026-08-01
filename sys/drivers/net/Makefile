@@ -2,7 +2,7 @@ include ../../../Makefile.inc
 
 CFLAGS := $(KERNEL_CFLAGS) -I. -I../../include -I../../arch/i386 -I../../arch/x86-common
 
-SRCS = rtl8139.c e1000.c
+SRCS = rtl8139.c e1000.c r8168.c
 OBJS = $(SRCS:.c=.o)
 
 all: net_drv.o

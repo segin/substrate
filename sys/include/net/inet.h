@@ -144,6 +144,7 @@ void inet_init(void);
 void loopback_init(void);
 void rtl8139_init(void);
 void e1000_init(void);
+void r8168_init(void);
 
 /* -- TCP Control Block (PCB) API ------------------------------------ */
 struct tcp_pcb;
