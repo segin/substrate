@@ -1468,9 +1468,9 @@
         - [x] USB-13: device descriptor contents are never validated (type, bLength, HS MPS0 == 64).
         - [ ] USB-14: hub port state is polled by control transfer instead of the status-change interrupt endpoint.
     - [ ] **LOW**
-        - [ ] USB-15: `bCBWCBLength` is written before the CDB length is clamped to 16.
-        - [ ] USB-16: CSW `dCSWDataResidue` is trusted without bounding it by the requested length.
-        - [ ] USB-17: mass-storage data-phase loop trusts `actual <= chunk_size`.
+        - [x] USB-15: `bCBWCBLength` is written before the CDB length is clamped to 16.
+        - [x] USB-16: CSW `dCSWDataResidue` is trusted without bounding it by the requested length.
+        - [x] USB-17: mass-storage data-phase loop trusts `actual <= chunk_size`.
         - [x] USB-18: `USBDEVFS_CLAIMINTERFACE`/`SETCONFIGURATION`/`RESET` are unchecked no-ops.
         - [ ] USB-19: the global device table and address bitmap have no locking.
         - [x] USB-20: `usb_hotplug_scan` cannot throttle root ports at or above index 32.
