@@ -1458,10 +1458,10 @@
         - [x] USB-04: no second port reset between the initial descriptor read and SET_ADDRESS.
         - [x] USB-05: `usbdevfs_meta_read` lets the snprintf accumulator exceed the 384-byte buffer and uses it as a memcpy length (kernel stack disclosure).
     - [ ] **MEDIUM**
-        - [ ] USB-06: `wMaxPacketSize` mult bits (12:11) are never masked off; xHCI writes them into the EP context MPS field.
+        - [x] USB-06: `wMaxPacketSize` mult bits (12:11) are never masked off; xHCI writes them into the EP context MPS field.
         - [x] USB-07: a failed SET_ADDRESS leaks the allocated USB address for the lifetime of the boot.
         - [x] USB-08: `USBDEVFS_CONTROL` IN transfers never copy data out (`ret > 0` is never true — `USB_XFER_OK` is 0).
-        - [ ] USB-09: only UHCI honours `usb_transfer_t.timeout_ms`; EHCI and xHCI use fixed 1 s timeouts.
+        - [x] USB-09: only UHCI honours `usb_transfer_t.timeout_ms`; EHCI and xHCI use fixed 1 s timeouts.
         - [ ] USB-10: EHCI runs interrupt endpoints on the async schedule, so `bInterval` is ignored.
         - [ ] USB-11: no Evaluate Context after learning the real `bMaxPacketSize0` (xHCI 1.1 §4.3.4).
         - [ ] USB-12: SuperSpeed `bMaxPacketSize0` is an exponent, used as a literal.

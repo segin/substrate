@@ -226,11 +226,18 @@ static void ehci_quiesce_async(ehci_hc_t *hc, int first_qtd, int n_qtd)
  * [DRV-06] n_qtd counts the qTDs this transfer filled/linked (contiguous from
  * first_qtd); only those are polled, so stale qTDs left ACTIVE/HALTED by a prior
  * transfer (e.g. a STALLed GET_MAX_LUN) no longer poison this one. */
-static int ehci_run_qh(ehci_hc_t *hc, int first_qtd, int n_qtd, uint32_t endp_char)
+static int ehci_run_qh(ehci_hc_t *hc, int first_qtd, int n_qtd, uint32_t endp_char,
+                       uint32_t timeout_ms, uint8_t mult)
 {
+    if (mult == 0 || mult > 3)
+        mult = 1;
+
     struct ehci_qh *qh = hc->async_qh;
     qh->endp_char = endp_char | EHCI_QH_HEAD | EHCI_QH_DTC;
-    qh->endp_cap  = EHCI_QH_MULT_ONE;
+    /* Mult is the high-bandwidth transaction count from wMaxPacketSize bits
+     * 12:11; hardcoding 1 ran a 2x or 3x endpoint at a third of its declared
+     * bandwidth. [USB-06] */
+    qh->endp_cap  = (uint32_t)mult << EHCI_QH_MULT_SHIFT;
     qh->current_qtd = 0;
     /* Load the overlay: point at the first qTD, clear status. */
     qh->overlay_next = ehci_qtd_dma(hc, first_qtd);
@@ -238,7 +245,7 @@ static int ehci_run_qh(ehci_hc_t *hc, int first_qtd, int n_qtd, uint32_t endp_ch
     qh->overlay_token = 0;   /* not active/halted -> controller reloads from next */
 
     /* Poll the qTD chain until none is Active, or a Halt, or timeout. */
-    uint64_t deadline = (uint64_t)get_uptime_ms() + EHCI_XFER_TIMEOUT_MS;
+    uint64_t deadline = (uint64_t)get_uptime_ms() + timeout_ms;
     for (;;) {
         int active = 0, halted = 0;
         for (int i = first_qtd; i < first_qtd + n_qtd; i++) {   /* [DRV-06] this xfer only */
@@ -273,7 +280,7 @@ static uint32_t ehci_endp_char(usb_transfer_t *xfer, int is_control)
     uint32_t ec = (addr << EHCI_QH_ADDR_SHIFT) |
                   (ep   << EHCI_QH_ENDPT_SHIFT) |
                   EHCI_QH_EPS_HIGH |
-                  ((mpl & 0x7FF) << EHCI_QH_MPL_SHIFT);
+                  ((mpl & USB_EP_MPS_MASK) << EHCI_QH_MPL_SHIFT);
     return ec;
 }
 
@@ -309,7 +316,13 @@ static int ehci_control_transfer(ehci_hc_t *hc, usb_transfer_t *xfer)
                       EHCI_QTD_PID_SETUP, 8, 0, hc->setup_dma, 0);
     }
 
-    int r = ehci_run_qh(hc, setup_i, idx, ehci_endp_char(xfer, 1)); /* [DRV-06] idx qTDs */
+    /* Honour the caller's timeout: a HID poll asks to give up in milliseconds,
+     * and making it sit out the bulk timeout stalled the USB thread for a full
+     * second per idle poll. [USB-09] */
+    int r = ehci_run_qh(hc, setup_i, idx, ehci_endp_char(xfer, 1), /* [DRV-06] idx qTDs */
+                        xfer->timeout_ms ? xfer->timeout_ms
+                                         : EHCI_XFER_TIMEOUT_MS,
+                        1);        /* control endpoints are never high-bandwidth */
     if (r == USB_XFER_OK && in && len) {
         /* bytes actually moved = requested - residue from the data qTD */
         uint32_t residue = (hc->qtd[data_i].token >> EHCI_QTD_BYTES_SHIFT) & 0x7FFF;
@@ -336,7 +349,10 @@ static int ehci_bulk_transfer(ehci_hc_t *hc, usb_transfer_t *xfer)
     int toggle = xfer->ep ? xfer->ep->toggle : 0;
     ehci_fill_qtd(hc, 0, 0, pid, len, toggle, len ? hc->bounce_dma : 0, 1);
 
-    int r = ehci_run_qh(hc, 0, 1, ehci_endp_char(xfer, 0)); /* [DRV-06] single qTD */
+    int r = ehci_run_qh(hc, 0, 1, ehci_endp_char(xfer, 0), /* [DRV-06] single qTD */
+                        xfer->timeout_ms ? xfer->timeout_ms
+                                         : EHCI_XFER_TIMEOUT_MS,   /* [USB-09] */
+                        xfer->ep ? xfer->ep->mult : 1);            /* [USB-06] */
     if (r == USB_XFER_OK) {
         uint32_t residue = (hc->qtd[0].token >> EHCI_QTD_BYTES_SHIFT) & 0x7FFF;
         xfer->actual_length = len - residue;

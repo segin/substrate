@@ -281,10 +281,22 @@ struct usb_setup_packet {
  * USB Endpoint
  * ============================================================
  */
+/*
+ * wMaxPacketSize is not just a size: for a high-speed (or SuperSpeed)
+ * interrupt or isochronous endpoint, bits 12:11 hold "additional transactions
+ * per microframe" and only bits 10:0 are the packet size.  Storing the raw
+ * field meant a high-bandwidth endpoint declaring 2 x 1024 was read as a
+ * 5120-byte packet -- which xHCI wrote straight into the EP context's Max
+ * Packet Size field, a value no controller will accept.  Keep the two apart.
+ */
+#define USB_EP_MPS_MASK         0x07FF
+#define USB_EP_MPS_MULT(x)      ((((x) >> 11) & 0x3) + 1)
+
 typedef struct usb_endpoint {
     uint8_t  address;       /* bEndpointAddress (dir | num) */
     uint8_t  type;          /* USB_EP_TYPE_* */
-    uint16_t max_packet;    /* wMaxPacketSize */
+    uint16_t max_packet;    /* wMaxPacketSize bits 10:0 -- the size alone */
+    uint8_t  mult;          /* transactions per microframe (1..3; 1 = normal) */
     uint8_t  interval;      /* bInterval */
     uint8_t  toggle;        /* Data toggle (0 or 1) */
     uint8_t  max_streams;   /* SS companion MaxStreams exponent (0 = no streams) */

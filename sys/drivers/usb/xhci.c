@@ -157,9 +157,9 @@ static void xhci_doorbell(xhci_hc_t *hc, uint32_t slot, uint32_t target)
 /* Wait for and consume the next event; returns the completion code, and (if
  * non-NULL) the event's param and control words.  0 = no event within timeout. */
 static int xhci_wait_event(xhci_hc_t *hc, uint64_t *out_param, uint32_t *out_ctrl,
-                           uint32_t *out_status)
+                           uint32_t *out_status, uint32_t timeout_ms)
 {
-    uint64_t deadline = (uint64_t)get_uptime_ms() + XHCI_CMD_TIMEOUT_MS;
+    uint64_t deadline = (uint64_t)get_uptime_ms() + timeout_ms;
     for (;;) {
         struct xhci_trb *e = &hc->event_ring[hc->event_deq];
         uint32_t ctrl = e->control;
@@ -194,7 +194,7 @@ static int xhci_run_command(xhci_hc_t *hc, uint64_t param, uint32_t ctrl,
     xhci_doorbell(hc, 0, 0);   /* ring the command doorbell */
     uint64_t ep; uint32_t ec;
     for (int guard = 0; guard < 8; guard++) {
-        int cc = xhci_wait_event(hc, &ep, &ec, NULL);
+        int cc = xhci_wait_event(hc, &ep, &ec, NULL, XHCI_CMD_TIMEOUT_MS);
         if (cc == 0) return 0;   /* timeout */
         if (XHCI_TRB_GET_TYPE(ec) == TRB_CMD_COMPLETE) {
             if (out_slot) *out_slot = XHCI_TRB_GET_SLOT(ec);
@@ -213,11 +213,11 @@ static int xhci_run_command(xhci_hc_t *hc, uint64_t param, uint32_t ctrl,
  * code (0 on timeout); on a match *out_status gets the event's status dword.
  * Transfer Event control dword: [31:24] slot id, [20:16] endpoint id (DCI). */
 static int xhci_wait_transfer(xhci_hc_t *hc, uint8_t slot, int dci,
-                              uint32_t *out_status)
+                              uint32_t *out_status, uint32_t timeout_ms)
 {
     uint32_t ec, est;
     for (int guard = 0; guard < 8; guard++) {
-        int cc = xhci_wait_event(hc, NULL, &ec, &est);
+        int cc = xhci_wait_event(hc, NULL, &ec, &est, timeout_ms);
         if (cc == 0) return 0;   /* timeout */
         if (XHCI_TRB_GET_TYPE(ec) == TRB_TRANSFER_EVENT &&
             XHCI_TRB_GET_SLOT(ec) == slot &&
@@ -563,7 +563,12 @@ static int xhci_control(xhci_hc_t *hc, usb_transfer_t *xfer)
     xhci_doorbell(hc, slot, 1);   /* DCI 1 = EP0 */
 
     uint32_t evst;
-    int cc = xhci_wait_transfer(hc, slot, 1, &evst);   /* [DRV-03] EP0 = DCI 1 */
+    /* Honour the caller's timeout.  A HID poll asks to give up in a few
+     * milliseconds; making it wait out the bulk timeout instead put the USB
+     * thread in a permanent 1-second stall per idle poll. [USB-09] */
+    int cc = xhci_wait_transfer(hc, slot, 1, &evst,
+                                xfer->timeout_ms ? xfer->timeout_ms
+                                                 : XHCI_CMD_TIMEOUT_MS);
     if (cc != XHCI_CC_SUCCESS && cc != XHCI_CC_SHORT_PACKET)
         return (cc == 0) ? USB_XFER_TIMEOUT : USB_XFER_STALL;
 
@@ -614,7 +619,9 @@ static int xhci_bulk(xhci_hc_t *hc, usb_transfer_t *xfer)
     xhci_doorbell(hc, slot, db_target);
 
     uint32_t evst;
-    int cc = xhci_wait_transfer(hc, slot, dci, &evst);   /* [DRV-03] this EP's DCI */
+    int cc = xhci_wait_transfer(hc, slot, dci, &evst,   /* [DRV-03] this EP's DCI */
+                                xfer->timeout_ms ? xfer->timeout_ms
+                                                 : XHCI_CMD_TIMEOUT_MS); /* [USB-09] */
     if (cc != XHCI_CC_SUCCESS && cc != XHCI_CC_SHORT_PACKET)
         return (cc == 0) ? USB_XFER_TIMEOUT : USB_XFER_STALL;
 

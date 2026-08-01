@@ -179,6 +179,7 @@ usb_device_t *usb_alloc_device(usb_hcd_t *hcd)
     dev->ep0.address = 0;
     dev->ep0.type = USB_EP_TYPE_CONTROL;
     dev->ep0.max_packet = 8;    /* Default until descriptor read */
+    dev->ep0.mult = 1;          /* control endpoints are never high-bandwidth */
     dev->ep0.toggle = 0;
 
     usb_devices[slot] = dev;
@@ -638,9 +639,24 @@ static void usb_parse_config(usb_device_t *dev)
                 }
                 if (!duplicate) {
                     usb_endpoint_t *ep = &dev->endpoints[dev->num_endpoints];
+                    uint16_t wmps = ep_desc->wMaxPacketSize;
+
                     ep->address = addr;
                     ep->type = ep_desc->bmAttributes & USB_EP_TYPE_MASK;
-                    ep->max_packet = ep_desc->wMaxPacketSize;
+                    /*
+                     * Split the size from the transaction count.  Only
+                     * high-speed (and above) interrupt/isochronous endpoints
+                     * use bits 12:11; everywhere else they are zero, so the
+                     * mask is a no-op and mult comes out 1. [USB-06]
+                     */
+                    ep->max_packet = wmps & USB_EP_MPS_MASK;
+                    if (dev->speed == USB_SPEED_HIGH &&
+                        (ep->type == USB_EP_TYPE_INTERRUPT ||
+                         ep->type == USB_EP_TYPE_ISO)) {
+                        ep->mult = (uint8_t)USB_EP_MPS_MULT(wmps);
+                    } else {
+                        ep->mult = 1;
+                    }
                     ep->interval = ep_desc->bInterval;
                     ep->toggle = 0;
                     ep->max_streams = 0;
