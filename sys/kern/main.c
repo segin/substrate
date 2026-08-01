@@ -657,9 +657,12 @@ static void init_storage_and_vfs(multiboot_info_t *mboot_info) {
     floppy_init();
     ide_init();
     ahci_init();
+    /* xHCI first: on Intel PCHs its attach reroutes the shared USB2 ports away
+     * from the companion EHCI.  If EHCI bound first it would have enumerated
+     * devices on ports that are about to be taken out from under it. */
+    xhci_init();
     uhci_init();
     ehci_init();
-    xhci_init();
     usb_msc_init();
     uas_init();
     usb_hid_init();

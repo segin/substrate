@@ -29,6 +29,7 @@
 #include <sys/lock.h>
 #include <vm/vm_kmem.h>
 
+#define XHCI_MMIO_SIZE     0x4000  /* cap + op(0) + runtime(0x1000) + doorbell(0x2000) */
 #define XHCI_RING_TRBS     64      /* TRBs per ring segment */
 #define XHCI_MAX_SLOTS     16
 #define XHCI_BOUNCE_SIZE   (64 * 1024)
@@ -640,6 +641,96 @@ static int xhci_submit(usb_hcd_t *hcd, usb_transfer_t *xfer)
 }
 
 /* ---- init ---- */
+
+/*
+ * Take the controller away from the firmware.
+ *
+ * Real BIOSes keep the xHCI owned by SMM so USB keyboards work in setup and in
+ * a legacy boot loader.  Until the OS claims ownership through the USB Legacy
+ * Support extended capability, the SMI handler is still driving the same
+ * registers we are — which shows up as descriptor reads that fail at random or
+ * a controller that resets underneath us.  QEMU never asserts the BIOS
+ * semaphore, so this path only ever does anything on hardware.
+ *
+ * Must run before xhci_reset(): resetting a controller the BIOS still owns is
+ * exactly the race we are trying to close.
+ */
+static void xhci_take_controller(xhci_hc_t *hc)
+{
+    uint32_t hcc = rd32(hc->mmio, XHCI_CAP_HCCPARAMS1);
+    uint32_t off = XHCI_HCC1_XECP(hcc) * 4;
+
+    /* Each entry needs USBLEGSUP and USBLEGCTLSTS to be inside the mapping. */
+    while (off != 0 && off + 8 <= XHCI_MMIO_SIZE) {
+        uint32_t cap = rd32(hc->mmio, off);
+
+        if (cap == 0xFFFFFFFFu)
+            break;
+        if (XHCI_XECP_ID(cap) == XHCI_ECAP_ID_LEGACY) {
+            volatile uint8_t *bios_sem = hc->mmio + off + XHCI_LEGSUP_BIOS_SEM;
+            volatile uint8_t *os_sem   = hc->mmio + off + XHCI_LEGSUP_OS_SEM;
+            uint32_t ctl;
+
+            if (*bios_sem) {
+                kprintf("xhci: waiting for the BIOS to release the controller\n");
+                *os_sem = 1;
+                for (int i = 0; i < 5000 && *bios_sem; i++)
+                    xhci_delay_ms(1);
+                if (*bios_sem)
+                    kprintf("xhci: BIOS never released the controller; "
+                            "claiming it anyway\n");
+            }
+
+            /*
+             * Silence the firmware's SMI sources and acknowledge whatever is
+             * pending.  Leaving them armed lets SMM re-enter on every event we
+             * generate.  The RsvdP fields have to be written back unchanged;
+             * the status bits at 31:29 are write-1-to-clear.
+             */
+            ctl = rd32(hc->mmio, off + XHCI_LEGCTLSTS);
+            ctl &= XHCI_LEGCTL_RSVD;
+            ctl |= XHCI_LEGCTL_SMI_EVENTS;
+            wr32(hc->mmio, off + XHCI_LEGCTLSTS, ctl);
+        }
+        if (XHCI_XECP_NEXT(cap) == 0)
+            break;
+        off += XHCI_XECP_NEXT(cap) * 4;
+    }
+}
+
+/*
+ * Move the shared ports from the companion EHCI to this controller.
+ *
+ * On Intel PCHs the USB2 ports are muxed: unless software flips XUSB2PR they
+ * stay on EHCI and the xHCI sees dead root ports, so a USB 2.0 keyboard on a
+ * shared port never appears here.  The *PRM registers report which ports are
+ * switchable, so writing the mask routes everything the chipset permits and
+ * leaves fixed ports alone.  Parts with nothing to switch read the masks as
+ * zero and both writes become no-ops.
+ *
+ * Gated on the vendor ID: 0xD0-0xDC is vendor-specific config space and means
+ * something else entirely on a non-Intel controller.
+ */
+static void xhci_intel_port_switch(pci_device_t *pdev)
+{
+    uint32_t mask;
+
+    if (pdev->vendor_id != 0x8086)
+        return;
+
+    mask = pci_read_config32(pdev->bus, pdev->slot, pdev->func, XHCI_INTEL_USB3PRM);
+    if (mask != 0xFFFFFFFFu && mask != 0)
+        pci_write_config32(pdev->bus, pdev->slot, pdev->func,
+                           XHCI_INTEL_USB3_PSSEN, mask);
+
+    mask = pci_read_config32(pdev->bus, pdev->slot, pdev->func, XHCI_INTEL_USB2PRM);
+    if (mask != 0xFFFFFFFFu && mask != 0) {
+        pci_write_config32(pdev->bus, pdev->slot, pdev->func,
+                           XHCI_INTEL_XUSB2PR, mask);
+        kprintf("xhci: routed Intel USB2 ports 0x%x to xHCI\n", (unsigned)mask);
+    }
+}
+
 static int xhci_reset(xhci_hc_t *hc)
 {
     /* wait CNR clear */
@@ -749,7 +840,7 @@ static int xhci_pci_attach(struct device *dev)
         kprintf("xhci: out of memory allocating controller state\n");
         return -1;
     }
-    hc->mmio = ioremap(phys, 0x4000);   /* cover cap+op(0)+runtime(0x1000)+doorbell(0x2000) */
+    hc->mmio = ioremap(phys, XHCI_MMIO_SIZE);
     if (!hc->mmio) {
         kprintf("xhci: ioremap failed\n");
         xhci_teardown(hc);
@@ -767,6 +858,13 @@ static int xhci_pci_attach(struct device *dev)
     if (hc->nports == 0) hc->nports = 1;
 
     mutex_init(&hc->submit_lock, "xhci_submit");
+
+    /* Both have to happen before the controller is reset and its ports are
+     * powered: one settles who owns the controller, the other decides which
+     * ports it owns. */
+    xhci_take_controller(hc);
+    xhci_intel_port_switch(pdev);
+
     if (xhci_start(hc) != 0) {
         xhci_teardown(hc);
         return -1;

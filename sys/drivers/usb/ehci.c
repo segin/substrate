@@ -374,6 +374,67 @@ static int ehci_submit(usb_hcd_t *hcd, usb_transfer_t *xfer)
 }
 
 /* ---- controller init ---- */
+
+/*
+ * Take the controller away from the firmware.
+ *
+ * A BIOS that emulates a PS/2 keyboard from a USB one keeps owning the EHCI
+ * through SMM until the OS asks for it via the USB Legacy Support extended
+ * capability.  Resetting a controller SMM is still driving produces exactly the
+ * intermittent enumeration failures real hardware shows and QEMU never does —
+ * QEMU leaves the BIOS semaphore clear, so this is a no-op there.
+ *
+ * EHCI's extended capabilities live in PCI config space (unlike xHCI's, which
+ * are in the MMIO capability region), reached through HCCPARAMS' EECP field.
+ */
+static void ehci_take_controller(ehci_hc_t *hc, pci_device_t *pdev)
+{
+    uint32_t hcc = *(volatile uint32_t *)(hc->mmio + EHCI_CAP_HCCPARAMS);
+    uint8_t off = EHCI_HCCPARAMS_EECP(hcc);
+
+    /* The list lives above the standard 64-byte config header; bound the walk
+     * so a garbage next-pointer cannot spin here forever. */
+    for (int guard = 0; off >= 0x40 && guard < 32; guard++) {
+        uint32_t cap = pci_read_config32(pdev->bus, pdev->slot, pdev->func, off);
+
+        if (cap == 0xFFFFFFFFu)
+            break;
+        if (EHCI_EECP_ID(cap) == EHCI_ECAP_ID_LEGACY) {
+            uint8_t bios_sem;
+            int i;
+
+            bios_sem = pci_read_config8(pdev->bus, pdev->slot, pdev->func,
+                                        off + EHCI_LEGSUP_BIOS_SEM);
+            if (bios_sem) {
+                kprintf("ehci: waiting for the BIOS to release the controller\n");
+                pci_write_config8(pdev->bus, pdev->slot, pdev->func,
+                                  off + EHCI_LEGSUP_OS_SEM, 1);
+                for (i = 0; i < 5000; i++) {
+                    bios_sem = pci_read_config8(pdev->bus, pdev->slot, pdev->func,
+                                                off + EHCI_LEGSUP_BIOS_SEM);
+                    if (bios_sem == 0)
+                        break;
+                    ehci_delay_ms(1);
+                }
+                if (bios_sem) {
+                    /* Buggy firmware that never drops the semaphore.  Clear it
+                     * ourselves — we are about to reset the controller either
+                     * way, so leaving SMM believing it still owns the hardware
+                     * is the worse outcome. */
+                    kprintf("ehci: BIOS never released the controller; "
+                            "claiming it anyway\n");
+                    pci_write_config8(pdev->bus, pdev->slot, pdev->func,
+                                      off + EHCI_LEGSUP_BIOS_SEM, 0);
+                }
+            }
+            /* Disarm every SMI source and acknowledge what is pending. */
+            pci_write_config32(pdev->bus, pdev->slot, pdev->func,
+                               off + EHCI_LEGSUP_CTLSTS, 0);
+        }
+        off = EHCI_EECP_NEXT(cap);
+    }
+}
+
 static int ehci_reset_controller(ehci_hc_t *hc)
 {
     /* Halt, then HCReset. */
@@ -496,6 +557,9 @@ static int ehci_pci_attach(struct device *dev)
     hc->irq = (uint8_t)pci_get_irq(pdev);
 
     mutex_init(&hc->submit_lock, "ehci_submit");
+
+    /* Own the controller before resetting it. */
+    ehci_take_controller(hc, pdev);
 
     if (ehci_start(hc) != 0) {
         ehci_teardown(hc);

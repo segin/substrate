@@ -31,6 +31,44 @@ void xhci_init(void);
 #define XHCI_HCS1_MAXSLOTS(x)  ((x) & 0xFF)
 #define XHCI_HCS1_MAXPORTS(x)  (((x) >> 24) & 0xFF)
 #define XHCI_HCC1_CSZ          0x04
+#define XHCI_HCC1_XECP(x)      (((x) >> 16) & 0xFFFF)  /* ext-cap ptr, in dwords */
+
+/*
+ * ---- Extended capabilities ----
+ *
+ * A singly-linked list in the capability region starting at HCCPARAMS1's XECP
+ * field.  Each entry's low byte is its ID and the next byte the dword distance
+ * to the following entry (0 = end of list).
+ */
+#define XHCI_XECP_ID(x)        ((x) & 0xFF)
+#define XHCI_XECP_NEXT(x)      (((x) >> 8) & 0xFF)
+#define XHCI_ECAP_ID_LEGACY    0x01   /* USB Legacy Support */
+
+/*
+ * USB Legacy Support capability: USBLEGSUP at +0x00 (bit 16 = HC BIOS Owned,
+ * bit 24 = HC OS Owned — addressed as bytes so the semaphores can be written
+ * without disturbing the ID/next fields), USBLEGCTLSTS at +0x04.
+ */
+#define XHCI_LEGSUP_BIOS_SEM   0x02
+#define XHCI_LEGSUP_OS_SEM     0x03
+#define XHCI_LEGCTLSTS         0x04
+/* RsvdP fields of USBLEGCTLSTS: preserved, everything else (the SMI enables)
+ * is cleared.  Bits 31:29 are the RW1C SMI status bits. */
+#define XHCI_LEGCTL_RSVD       ((0x7u << 1) | (0xFFu << 5) | (0x7u << 17))
+#define XHCI_LEGCTL_SMI_EVENTS (0x7u << 29)
+
+/*
+ * ---- Intel chipset port routing (PCI config space) ----
+ *
+ * Intel PCHs (Panther/Lynx/Wildcat Point, BayTrail, Broadwell) come out of
+ * reset with the shared USB2 ports wired to the companion EHCI controller.
+ * These registers hand them to the xHCI; the *PRM masks report which ports the
+ * chipset actually lets software switch.
+ */
+#define XHCI_INTEL_XUSB2PR     0xD0   /* USB2 port routing */
+#define XHCI_INTEL_USB2PRM     0xD4   /* USB2 port routing mask */
+#define XHCI_INTEL_USB3_PSSEN  0xD8   /* USB3 port SuperSpeed enable */
+#define XHCI_INTEL_USB3PRM     0xDC   /* USB3 port routing mask */
 
 /* ---- Operational registers (from opbase = mmio + CAPLENGTH) ---- */
 #define XHCI_OP_USBCMD       0x00

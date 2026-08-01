@@ -26,6 +26,25 @@ void ehci_init(void);
 
 #define EHCI_HCSPARAMS_N_PORTS(x)   ((x) & 0x0F)
 #define EHCI_HCCPARAMS_64BIT        0x01
+/* EECP: PCI *config-space* offset of the extended capability list (0 = none). */
+#define EHCI_HCCPARAMS_EECP(x)      (((x) >> 8) & 0xFF)
+
+/*
+ * ---- Extended capabilities (PCI config space, walked from EECP) ----
+ *
+ * Unlike xHCI's, EHCI's extended capabilities live in PCI config space and use
+ * the standard capability-list encoding: ID in the low byte, config offset of
+ * the next entry in the second byte.
+ */
+#define EHCI_EECP_ID(x)             ((x) & 0xFF)
+#define EHCI_EECP_NEXT(x)           (((x) >> 8) & 0xFF)
+#define EHCI_ECAP_ID_LEGACY         0x01   /* USB Legacy Support */
+
+/* USB Legacy Support: bit 16 = HC BIOS Owned, bit 24 = HC OS Owned, both
+ * addressed as bytes; USBLEGCTLSTS follows at +0x04. */
+#define EHCI_LEGSUP_BIOS_SEM        0x02
+#define EHCI_LEGSUP_OS_SEM          0x03
+#define EHCI_LEGSUP_CTLSTS          0x04
 
 /* ---- Operational registers (offsets from opbase = mmio + CAPLENGTH) ---- */
 #define EHCI_OP_USBCMD       0x00
