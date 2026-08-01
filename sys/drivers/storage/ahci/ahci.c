@@ -1597,13 +1597,21 @@ static int ahci_hba_init(ahci_controller_t *ctrl) {
     /*
      * [AHCI-05] ctrl->pi comes straight from the device and every one of its
      * 32 bits used to be walked, dereferencing abar->ports[port] at offsets up
-     * to 0x100 + 31*0x80 = 0x1080.  pci_iomap maps exactly bar_sz bytes, and
-     * num_ports (from CAP.NP) was computed, printed, and then never used to
-     * bound anything -- so an HBA with a 0x1000-byte BAR5 and PI=0xFFFFFFFF
-     * had us reading AND WRITING past the end of the ioremap region.
+     * to 0x100 + 31*0x80 = 0x1080.  pci_iomap maps exactly bar_sz bytes and
+     * nothing bounded the walk against it, so an HBA with a 0x1000-byte BAR5
+     * and PI=0xFFFFFFFF had us reading AND WRITING past the end of the
+     * ioremap region.
      *
-     * Keep only the bits that are implemented per CAP.NP, fit inside the
-     * mapping we actually made, and fit our port array.
+     * Keep only the bits that fit inside the mapping we actually made and fit
+     * our port array.
+     *
+     * CAP.NP deliberately does NOT bound this.  It is a count of the ports the
+     * silicon supports, not the highest port number in use, and AHCI 1.3.1
+     * s3.1.9 lets PI be sparse: a Lynx Point HBA reports CAP.NP=4 with
+     * PI=0x12, meaning ports 1 and 4 -- two implemented ports, which is well
+     * within the four the part supports.  Folding NP into the bit mask capped
+     * PI at bit 3 and silently deleted port 4 along with whatever disk was
+     * attached to it.
      */
     {
         unsigned mappable = 0;
@@ -1611,16 +1619,15 @@ static int ahci_hba_init(ahci_controller_t *ctrl) {
             mappable = (unsigned)((ctrl->bar_sz - 0x100) / sizeof(hba_port_t));
 
         unsigned limit = AHCI_MAX_PORTS;
-        if ((unsigned)ctrl->num_ports < limit) limit = (unsigned)ctrl->num_ports;
-        if (mappable < limit)                  limit = mappable;
+        if (mappable < limit) limit = mappable;
 
         uint32_t allowed = (limit >= 32) ? 0xFFFFFFFFu
                                          : ((1u << limit) - 1u);
         if (ctrl->pi & ~allowed) {
-            kprintf("ahci: PI=0x%08x exceeds %u usable ports "
-                    "(CAP.NP=%d, BAR5=%u bytes); masking to 0x%08x\n",
-                    ctrl->pi, limit, ctrl->num_ports,
-                    (unsigned)ctrl->bar_sz, ctrl->pi & allowed);
+            kprintf("ahci: PI=0x%08x has ports past the %u the BAR5 mapping "
+                    "covers (%u bytes); masking to 0x%08x\n",
+                    ctrl->pi, limit, (unsigned)ctrl->bar_sz,
+                    ctrl->pi & allowed);
             ctrl->pi &= allowed;
         }
     }
