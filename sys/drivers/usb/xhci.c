@@ -406,11 +406,39 @@ static int xhci_setup_slot(xhci_hc_t *hc, usb_transfer_t *xfer, uint8_t port)
     uint32_t *icc = (uint32_t *)in_ctrl_of(s->in_ctx);
     icc[1] = 0x3;   /* add flags: bit0 slot, bit1 EP0 */
 
-    /* Slot context: 1 ctx entry (EP0), speed, root hub port. */
+    /*
+     * Slot context: 1 ctx entry (EP0), speed, root hub port -- plus the
+     * topology fields, without which the controller cannot reach anything
+     * behind a hub.  `port` here is the ROOT port; the device's own port
+     * number is only one tier of the route. [USB-01]
+     */
     uint32_t *sc = (uint32_t *)in_slot_of(hc, s->in_ctx);
     uint32_t speed = (portsc_rd(hc, port) & XHCI_PORT_SPEED_MASK) >> XHCI_PORT_SPEED_SHIFT;
-    sc[0] = (1u << XHCI_SLOT_CTX_ENTRIES_SHIFT) | (speed << XHCI_SLOT_SPEED_SHIFT);
+    usb_device_t *udev = xfer->dev;
+    uint32_t route = usb_route_string(udev);
+
+    sc[0] = (1u << XHCI_SLOT_CTX_ENTRIES_SHIFT) | (speed << XHCI_SLOT_SPEED_SHIFT) |
+            (route & XHCI_SLOT_ROUTE_MASK);
     sc[1] = (uint32_t)port << XHCI_SLOT_RHPORT_SHIFT;
+    sc[2] = 0;
+
+    /*
+     * A low/full-speed device behind a high-speed hub is reached through that
+     * hub's transaction translator; the controller needs its slot id and the
+     * port the device's branch occupies on it.  Both read 0 for a device that
+     * is high-speed itself or sits on a root port, which is what the spec
+     * requires there.
+     */
+    {
+        uint8_t ttport = 0;
+        usb_device_t *tthub = usb_tt_hub(udev, &ttport);
+
+        if (tthub && tthub->address && hc->addr_slot[tthub->address & 0x7F]) {
+            uint8_t ttslot = hc->addr_slot[tthub->address & 0x7F];
+            sc[2] = ((uint32_t)ttslot << XHCI_SLOT_TT_HUB_SHIFT) |
+                    ((uint32_t)ttport << XHCI_SLOT_TT_PORT_SHIFT);
+        }
+    }
 
     /* EP0 context: control endpoint, max packet, transfer ring deq ptr. */
     uint32_t mps = xfer->ep ? xfer->ep->max_packet : 64;
@@ -442,7 +470,8 @@ static uint8_t xhci_slot_for(xhci_hc_t *hc, usb_transfer_t *xfer)
     uint8_t addr = xfer->dev->address & 0x7F;
     if (addr != 0 && hc->addr_slot[addr])
         return hc->addr_slot[addr];
-    if (hc->enum_slot && hc->slots[hc->enum_slot].port == xfer->dev->port)
+    if (hc->enum_slot &&
+        hc->slots[hc->enum_slot].port == usb_root_port(xfer->dev))
         return hc->enum_slot;
     return 0;
 }
@@ -512,10 +541,58 @@ static int xhci_ensure_ep(xhci_hc_t *hc, uint8_t slot, usb_transfer_t *xfer)
     return dci;
 }
 
+/*
+ * The core has learned this device is a hub.  Re-issue its slot context with
+ * the Hub bit and downstream port count set: xHCI will not route a transfer
+ * past a slot that does not declare itself one.  Evaluate Context is the
+ * command for amending an already-addressed slot (xHCI 1.1 s4.6.7). [USB-01]
+ */
+static int xhci_set_hub(usb_hcd_t *hcd, usb_device_t *dev, uint8_t nports)
+{
+    xhci_hc_t *hc = hcd->priv;
+    uint8_t slot;
+    uint32_t *icc, *sc;
+    int cc;
+
+    if (!dev->address)
+        return -1;
+    slot = hc->addr_slot[dev->address & 0x7F];
+    if (slot == 0 || slot > XHCI_MAX_SLOTS || !hc->slots[slot].in_ctx)
+        return -1;
+
+    mutex_lock(&hc->submit_lock);
+
+    /* Evaluate Context looks at the Add flags: slot context only (A0). */
+    icc = (uint32_t *)in_ctrl_of(hc->slots[slot].in_ctx);
+    icc[0] = 0;
+    icc[1] = 0x1;
+
+    sc = (uint32_t *)in_slot_of(hc, hc->slots[slot].in_ctx);
+    sc[0] |= XHCI_SLOT_HUB;
+    sc[1] = (sc[1] & 0x00FFFFFFu) | ((uint32_t)nports << XHCI_SLOT_NPORTS_SHIFT);
+
+    cc = xhci_run_command(hc, hc->slots[slot].in_ctx_dma,
+                          XHCI_TRB_TYPE(TRB_EVAL_CONTEXT) |
+                          ((uint32_t)slot << 24), NULL);
+
+    /* Restore the add flags the transfer path expects (slot + EP0). */
+    icc[1] = 0x3;
+    mutex_unlock(&hc->submit_lock);
+
+    if (cc != XHCI_CC_SUCCESS) {
+        kprintf("xhci: marking slot %u as a hub failed (cc=%d)\n", slot, cc);
+        return -1;
+    }
+    return 0;
+}
+
 /* ---- transfers ---- */
 static int xhci_control(xhci_hc_t *hc, usb_transfer_t *xfer)
 {
-    uint8_t port = xfer->dev->port;
+    /* The ROOT port, not the device's own port number: for anything behind a
+     * hub those differ, and the slot context wants the root one (the rest of
+     * the path is the Route String). [USB-01] */
+    uint8_t port = usb_root_port(xfer->dev);
     uint8_t addr = xfer->dev->address & 0x7F;
 
     uint8_t slot = xhci_slot_for(hc, xfer);
@@ -915,6 +992,7 @@ static int xhci_pci_attach(struct device *dev)
     hc->hcd.port_status = xhci_port_status;
     hc->hcd.port_reset = xhci_port_reset;
     hc->hcd.port_enable = xhci_port_enable;
+    hc->hcd.set_hub = xhci_set_hub;
     usb_register_hcd(&hc->hcd);
     hc->initialized = 1;
     xhci_instances++;

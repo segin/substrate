@@ -552,6 +552,92 @@ usb_endpoint_t *usb_find_endpoint(usb_device_t *dev, uint8_t type, uint8_t dir)
 
 /*
  * ============================================================
+ * Bus Topology
+ * ============================================================
+ *
+ * dev->parent / dev->port already describe where a device sits; these turn
+ * that chain into the forms the controllers need.  The walks are bounded by
+ * USB_MAX_ENUM_DEPTH so a corrupted parent pointer cannot loop forever.
+ */
+
+uint8_t usb_root_port(const usb_device_t *dev)
+{
+    const usb_device_t *d = dev;
+    int guard;
+
+    if (!d)
+        return 0;
+    for (guard = 0; d->parent && guard < USB_MAX_ENUM_DEPTH; guard++)
+        d = d->parent;
+    return d->port;
+}
+
+uint32_t usb_route_string(const usb_device_t *dev)
+{
+    uint8_t ports[USB_MAX_ENUM_DEPTH];
+    int n = 0;
+    uint32_t route = 0;
+    const usb_device_t *d = dev;
+
+    if (!d)
+        return 0;
+
+    /* Collect the port at each tier, nearest-the-device first.  The device's
+     * own port only counts when it has a parent: a root-port device routes to
+     * 0, which is what tells the controller "this port's direct attachment". */
+    for (; d->parent && n < USB_MAX_ENUM_DEPTH; d = d->parent)
+        ports[n++] = d->port;
+
+    /* Emit deepest-last: tier 1 (the port on the root hub's downstream hub)
+     * lands in bits 3:0.  ports[n-1] is the topmost tier. */
+    for (int i = n - 1; i >= 0; i--) {
+        uint8_t p = ports[i];
+        if (p > 15)
+            p = 15;             /* xHCI 1.1 s4.5.2: >15 encodes as 15 */
+        route = (route << 4) | p;
+    }
+    return route & 0xFFFFF;     /* 20 bits, five tiers */
+}
+
+usb_device_t *usb_tt_hub(const usb_device_t *dev, uint8_t *ttport)
+{
+    const usb_device_t *child;
+    usb_device_t *hub;
+    int guard;
+
+    if (ttport)
+        *ttport = 0;
+    if (!dev || dev->speed == USB_SPEED_HIGH)
+        return NULL;            /* high-speed devices need no translator */
+
+    /* Walk up until a high-speed hub is found; the child we came through is
+     * the branch occupying its downstream port. */
+    child = dev;
+    hub = dev->parent;
+    for (guard = 0; hub && guard < USB_MAX_ENUM_DEPTH; guard++) {
+        if (hub->speed == USB_SPEED_HIGH && hub->is_hub) {
+            if (ttport)
+                *ttport = child->port;
+            return hub;
+        }
+        child = hub;
+        hub = hub->parent;
+    }
+    return NULL;                /* on a root port, or no HS hub in the path */
+}
+
+void usb_set_hub(usb_device_t *dev, uint8_t nports)
+{
+    if (!dev)
+        return;
+    dev->is_hub = 1;
+    dev->hub_nports = nports;
+    if (dev->hcd && dev->hcd->set_hub)
+        (void)dev->hcd->set_hub(dev->hcd, dev, nports);
+}
+
+/*
+ * ============================================================
  * Descriptor Parsing
  * ============================================================
  */
@@ -847,7 +933,6 @@ static void usb_match_driver(usb_device_t *dev)
  * stack puts us within margin of overflow at the deepest legal tree;
  * a malicious or buggy hub claiming to be deeper still would push us
  * over.  Bound it explicitly. */
-#define USB_MAX_ENUM_DEPTH 7
 static int usb_enum_depth = 0;
 
 static int usb_enumerate_device_inner(usb_hcd_t *hcd, uint8_t port, uint8_t speed,

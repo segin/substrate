@@ -178,6 +178,9 @@
  * controller at one byte per port per HCD.
  */
 #define USB_MAX_ROOT_PORTS      128
+/* USB allows at most 7 tiers of hubs; every parent-chain walk is bounded by
+ * this so a corrupted pointer cannot loop forever. */
+#define USB_MAX_ENUM_DEPTH      7
 #define USB_MAX_ENDPOINTS       16
 /*
  * A device's configuration can expose many interfaces, and many alternate
@@ -397,6 +400,12 @@ typedef struct usb_device {
     void          *usbfs_node;
     void          *usbfs_meta_node;
 
+    /* Hub topology.  Set by usb_set_hub() when the hub driver attaches; the
+     * xHCI slot context needs both before it will route to anything behind
+     * this device. */
+    uint8_t  is_hub;
+    uint8_t  hub_nports;
+
     /* State */
     uint8_t  slot;              /* Index in device table */
     uint8_t  configured;        /* Device has been configured */
@@ -462,6 +471,14 @@ typedef struct usb_hcd {
     uint32_t (*port_status)(struct usb_hcd *hcd, uint8_t port);
     int      (*port_reset)(struct usb_hcd *hcd, uint8_t port);
     int      (*port_enable)(struct usb_hcd *hcd, uint8_t port, int enable);
+
+    /*
+     * Optional: the core has learned this device is a hub with `nports`
+     * downstream ports.  xHCI must set the Hub bit and port count in the slot
+     * context or the controller will not route transfers past it; UHCI and
+     * EHCI need nothing and leave this NULL.
+     */
+    int      (*set_hub)(struct usb_hcd *hcd, usb_device_t *dev, uint8_t nports);
 
     /*
      * Optional isochronous-OUT streaming ops (USB audio).  frame_number()
@@ -618,6 +635,43 @@ void usb_hub_scan_ports(void);
 int  usb_hub_reset_port(usb_device_t *hubdev, uint8_t port);
 void usb_disconnect_device(usb_device_t *dev);
 usb_device_t *usb_child_device_on_port(usb_device_t *parent, uint8_t port);
+
+/*
+ * ---- Bus topology ----
+ *
+ * A device behind a hub cannot be addressed from its port number alone: xHCI
+ * needs a Route String naming the port at every tier, and EHCI needs the
+ * address and port of the nearest upstream high-speed hub so it can wrap the
+ * transfer in split transactions.  Both are derived from the dev->parent chain,
+ * which enumeration already records.
+ */
+
+/* Root-hub port this device ultimately hangs off, walking up through any hubs. */
+uint8_t usb_root_port(const usb_device_t *dev);
+
+/*
+ * xHCI Route String (xHCI 1.1 s4.5.2): 4 bits per tier, the port on the
+ * root-hub's immediate downstream hub in bits 3:0 and each deeper tier above
+ * it.  0 for a device attached straight to a root port.  Port numbers above 15
+ * cannot be encoded and clamp to 15, as the spec requires.
+ */
+uint32_t usb_route_string(const usb_device_t *dev);
+
+/*
+ * The nearest upstream high-speed hub for a low/full-speed device -- the one
+ * whose transaction translator has to bridge it onto the high-speed bus.  NULL
+ * when the device is high-speed itself, or is on a root port, or no high-speed
+ * hub is in its path.  *ttport, when non-NULL, gets the port number this
+ * device's branch occupies on that hub.
+ */
+usb_device_t *usb_tt_hub(const usb_device_t *dev, uint8_t *ttport);
+
+/*
+ * Record that a device is a hub with `nports` downstream ports.  Called by the
+ * hub driver at attach.  xHCI has to be told before it will route transfers to
+ * anything behind the hub; other controllers do not care.
+ */
+void usb_set_hub(usb_device_t *dev, uint8_t nports);
 
 /* Publish/unpublish a device under /dev/usb (libusb/lsusb backend). */
 void usbdevfs_publish(usb_device_t *dev);

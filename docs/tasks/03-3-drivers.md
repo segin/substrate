@@ -1452,8 +1452,8 @@
 
 - [ ] **USB Stack Audit vs FreeBSD/NetBSD (2026-08)** — findings and citations in `docs/usb-audit-2026-08.md`.
     - [ ] **HIGH**
-        - [ ] USB-01: xHCI slot context sets no Route String / Hub / NumPorts / MTT / TT fields, so no device behind an external hub can be addressed.
-        - [ ] USB-02: every EHCI queue head is built high-speed with no split-transaction fields, so no full/low-speed device behind a hub can transfer.
+        - [x] USB-01: xHCI slot context sets no Route String / Hub / NumPorts / MTT / TT fields, so no device behind an external hub can be addressed.
+        - [x] USB-02: every EHCI queue head is built high-speed with no split-transaction fields, so no full/low-speed device behind a hub can transfer.
         - [x] USB-03: enumeration gives up after one failed initial descriptor read; NetBSD retries ten times with port resets.
         - [x] USB-04: no second port reset between the initial descriptor read and SET_ADDRESS.
         - [x] USB-05: `usbdevfs_meta_read` lets the snprintf accumulator exceed the 384-byte buffer and uses it as a memcpy length (kernel stack disclosure).

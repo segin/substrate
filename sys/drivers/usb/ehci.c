@@ -227,17 +227,11 @@ static void ehci_quiesce_async(ehci_hc_t *hc, int first_qtd, int n_qtd)
  * first_qtd); only those are polled, so stale qTDs left ACTIVE/HALTED by a prior
  * transfer (e.g. a STALLed GET_MAX_LUN) no longer poison this one. */
 static int ehci_run_qh(ehci_hc_t *hc, int first_qtd, int n_qtd, uint32_t endp_char,
-                       uint32_t timeout_ms, uint8_t mult)
+                       uint32_t timeout_ms, uint32_t endp_cap)
 {
-    if (mult == 0 || mult > 3)
-        mult = 1;
-
     struct ehci_qh *qh = hc->async_qh;
     qh->endp_char = endp_char | EHCI_QH_HEAD | EHCI_QH_DTC;
-    /* Mult is the high-bandwidth transaction count from wMaxPacketSize bits
-     * 12:11; hardcoding 1 ran a 2x or 3x endpoint at a third of its declared
-     * bandwidth. [USB-06] */
-    qh->endp_cap  = (uint32_t)mult << EHCI_QH_MULT_SHIFT;
+    qh->endp_cap  = endp_cap;
     qh->current_qtd = 0;
     /* Load the overlay: point at the first qTD, clear status. */
     qh->overlay_next = ehci_qtd_dma(hc, first_qtd);
@@ -269,19 +263,76 @@ static int ehci_run_qh(ehci_hc_t *hc, int first_qtd, int n_qtd, uint32_t endp_ch
     return USB_XFER_OK;
 }
 
-/* Build the EHCI QH endpoint-characteristics word for this transfer. */
+/*
+ * Build the EHCI QH endpoint-characteristics word for this transfer.
+ *
+ * The speed comes from the device, not a constant: every queue head used to be
+ * built as EHCI_QH_EPS_HIGH, so a full- or low-speed device was described to
+ * the controller as something it is not and could never transfer.  A non-
+ * high-speed CONTROL endpoint additionally needs the Control Endpoint Flag so
+ * the controller knows to use the control split protocol. [USB-02]
+ */
 static uint32_t ehci_endp_char(usb_transfer_t *xfer, int is_control)
 {
     usb_device_t *dev = xfer->dev;
     uint32_t addr = dev->address & 0x7F;
     uint32_t ep   = xfer->ep ? (xfer->ep->address & 0x0F) : 0;
     uint32_t mpl  = xfer->ep ? xfer->ep->max_packet : 64;
+    uint32_t eps;
+    uint32_t ec;
+
     if (mpl == 0) mpl = is_control ? 64 : 512;
-    uint32_t ec = (addr << EHCI_QH_ADDR_SHIFT) |
-                  (ep   << EHCI_QH_ENDPT_SHIFT) |
-                  EHCI_QH_EPS_HIGH |
-                  ((mpl & USB_EP_MPS_MASK) << EHCI_QH_MPL_SHIFT);
+
+    switch (dev->speed) {
+    case USB_SPEED_LOW:  eps = EHCI_QH_EPS_LOW;  break;
+    case USB_SPEED_FULL: eps = EHCI_QH_EPS_FULL; break;
+    default:             eps = EHCI_QH_EPS_HIGH; break;
+    }
+
+    ec = (addr << EHCI_QH_ADDR_SHIFT) |
+         (ep   << EHCI_QH_ENDPT_SHIFT) |
+         eps |
+         ((mpl & USB_EP_MPS_MASK) << EHCI_QH_MPL_SHIFT);
+
+    if (is_control && dev->speed != USB_SPEED_HIGH)
+        ec |= EHCI_QH_CONTROL_EP;
+
+    /* NAK count reload: 4 for a high-speed asynchronous endpoint, 0 otherwise
+     * -- a split transaction must not be abandoned on NAKs. */
+    if (dev->speed == USB_SPEED_HIGH)
+        ec |= 4u << EHCI_QH_NRL_SHIFT;
+
     return ec;
+}
+
+/*
+ * Build the endpoint-capabilities word: the pipe multiplier plus, for a
+ * full/low-speed device, the address and port of the high-speed hub whose
+ * transaction translator bridges it.  Interrupt endpoints also need the
+ * start-split / complete-split microframe masks; the async schedule does not
+ * use them, which is why bulk and control leave them clear. [USB-02]
+ */
+static uint32_t ehci_endp_cap(usb_transfer_t *xfer, uint8_t mult)
+{
+    usb_device_t *dev = xfer->dev;
+    uint32_t cap = (uint32_t)mult << EHCI_QH_MULT_SHIFT;
+    int is_intr = xfer->ep && xfer->ep->type == USB_EP_TYPE_INTERRUPT;
+
+    if (is_intr)
+        cap |= (1u << 1) << EHCI_QH_SMASK_SHIFT;   /* start split in Y1 */
+
+    if (dev->speed != USB_SPEED_HIGH) {
+        uint8_t ttport = 0;
+        usb_device_t *tthub = usb_tt_hub(dev, &ttport);
+
+        if (tthub) {
+            cap |= ((uint32_t)(tthub->address & 0x7F) << EHCI_QH_HUBA_SHIFT) |
+                   ((uint32_t)(ttport & 0x7F) << EHCI_QH_PORT_SHIFT);
+        }
+        if (is_intr)
+            cap |= (0x7u << 3) << EHCI_QH_CMASK_SHIFT;  /* complete splits Y3-Y5 */
+    }
+    return cap;
 }
 
 static int ehci_control_transfer(ehci_hc_t *hc, usb_transfer_t *xfer)
@@ -322,7 +373,7 @@ static int ehci_control_transfer(ehci_hc_t *hc, usb_transfer_t *xfer)
     int r = ehci_run_qh(hc, setup_i, idx, ehci_endp_char(xfer, 1), /* [DRV-06] idx qTDs */
                         xfer->timeout_ms ? xfer->timeout_ms
                                          : EHCI_XFER_TIMEOUT_MS,
-                        1);        /* control endpoints are never high-bandwidth */
+                        ehci_endp_cap(xfer, 1)); /* control is never high-bandwidth */
     if (r == USB_XFER_OK && in && len) {
         /* bytes actually moved = requested - residue from the data qTD */
         uint32_t residue = (hc->qtd[data_i].token >> EHCI_QTD_BYTES_SHIFT) & 0x7FFF;
@@ -352,7 +403,9 @@ static int ehci_bulk_transfer(ehci_hc_t *hc, usb_transfer_t *xfer)
     int r = ehci_run_qh(hc, 0, 1, ehci_endp_char(xfer, 0), /* [DRV-06] single qTD */
                         xfer->timeout_ms ? xfer->timeout_ms
                                          : EHCI_XFER_TIMEOUT_MS,   /* [USB-09] */
-                        xfer->ep ? xfer->ep->mult : 1);            /* [USB-06] */
+                        ehci_endp_cap(xfer,
+                                      xfer->ep && xfer->ep->mult ? xfer->ep->mult
+                                                                 : 1));
     if (r == USB_XFER_OK) {
         uint32_t residue = (hc->qtd[0].token >> EHCI_QTD_BYTES_SHIFT) & 0x7FFF;
         xfer->actual_length = len - residue;

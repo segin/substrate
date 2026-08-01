@@ -400,6 +400,12 @@ static int usb_hub_attach(usb_device_t *dev)
 	hub->active = 1;
 	dev->driver_data = hub;
 
+	/* Tell the core (and through it the controller) that this is a hub.  xHCI
+	 * will not route a transfer to anything behind a slot whose Hub bit is
+	 * clear, so this has to happen before the downstream ports are walked.
+	 * [USB-01] */
+	usb_set_hub(dev, hub->nports);
+
 	kprintf("usb_hub: %04x:%04x hub with %u port(s)\n",
 	        dev->vendor_id, dev->product_id, hub->nports);
 

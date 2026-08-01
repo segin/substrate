@@ -171,6 +171,20 @@ struct xhci_ep_ctx {
 /* Slot context field[0] */
 #define XHCI_SLOT_CTX_ENTRIES_SHIFT 27
 #define XHCI_SLOT_SPEED_SHIFT 20
+/*
+ * Slot context fields that identify a device behind a hub (xHCI 1.1 s6.2.2).
+ * Root Hub Port Number alone names a port, not a device: without the Route
+ * String the controller aims every command at whatever is attached directly to
+ * that port, which for a downstream device is the hub in front of it.  MTT and
+ * the TT fields tell it to drive a low/full-speed device through the
+ * transaction translator of the high-speed hub above it.
+ */
+#define XHCI_SLOT_ROUTE_MASK  0x000FFFFFu   /* dword 0, bits 19:0 */
+#define XHCI_SLOT_MTT         (1u << 25)    /* dword 0: multi-TT hub */
+#define XHCI_SLOT_HUB         (1u << 26)    /* dword 0: this device is a hub */
+#define XHCI_SLOT_NPORTS_SHIFT 24           /* dword 1, bits 31:24 */
+#define XHCI_SLOT_TT_HUB_SHIFT 0            /* dword 2, bits 7:0 */
+#define XHCI_SLOT_TT_PORT_SHIFT 8           /* dword 2, bits 15:8 */
 /* Slot context field[1] */
 #define XHCI_SLOT_RHPORT_SHIFT 16
 /* EP context field[1] */

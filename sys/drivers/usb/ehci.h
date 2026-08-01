@@ -155,4 +155,17 @@ struct ehci_qh {
 #define EHCI_QH_MULT_SHIFT       30          /* high-bandwidth pipe multiplier */
 #define EHCI_QH_MULT_ONE         (1u << 30)
 
+/*
+ * Split-transaction fields.  A full- or low-speed device reached through a
+ * high-speed hub is not addressed directly: the controller issues a start-split
+ * to the hub's transaction translator and later a complete-split, and it needs
+ * the hub's address and the port the device hangs off to do that.  Without
+ * these (and with EPS left at HIGH) such a device is simply unreachable.
+ */
+#define EHCI_QH_SMASK_SHIFT      0           /* endp_cap: interrupt schedule mask */
+#define EHCI_QH_CMASK_SHIFT      8           /* endp_cap: split completion mask */
+#define EHCI_QH_HUBA_SHIFT       16          /* endp_cap: TT hub address (7 bits) */
+#define EHCI_QH_PORT_SHIFT       23          /* endp_cap: TT hub port (7 bits) */
+#define EHCI_QH_NRL_SHIFT        28          /* endp_char: NAK count reload */
+
 #endif /* _EHCI_H */
