@@ -51,7 +51,7 @@
 #define R_RMS               0xDA   /* rx max packet size, 16-bit */
 #define R_CPCR              0xE0   /* C+ command, 16-bit */
 #define R_RDSAR             0xE4   /* RX desc base, 64-bit */
-#define R_MTPS              0xEC   /* max tx packet size, 8-bit */
+#define R_ETHRESH           0xEC   /* early TX threshold, 8-bit */
 
 /* CR bits. */
 #define CR_TE               0x04
@@ -75,7 +75,7 @@
 #define INT_FOVW            0x0040   /* rx fifo overflow */
 #define INT_TDU             0x0080
 #define INT_TIMEOUT         0x4000
-#define INT_SERR            0x8000
+#define INT_SERR            0x8000   /* PCI system error */
 
 /* RCR bits. */
 #define RCR_AAP             0x00000001   /* accept all (promiscuous) */
@@ -84,12 +84,16 @@
 #define RCR_AB              0x00000008   /* accept broadcast */
 #define RCR_MXDMA_UNLIMITED (7u << 8)
 #define RCR_RXFTH_NONE      (7u << 13)   /* no rx threshold: forward whole frame */
+#define RCR_RXBUF_64        (3u << 11)   /* rx buffer length field (RL_RXBUF_64) */
 
 /* TCR bits. */
 #define TCR_MXDMA_UNLIMITED (7u << 8)
 #define TCR_IFG_NORMAL      (3u << 24)
 
-/* CPCR bits. */
+/* CPCR (C+ command) bits.  TXENB/RXENB enable the DESCRIPTOR engine and are
+ * distinct from the CR RE/TE bits, which drive the legacy 8139-style path. */
+#define CPCR_TXENB          0x0001
+#define CPCR_RXENB          0x0002
 #define CPCR_PCI_MUL_RW     0x0008
 
 /* Descriptor opts1 bits.  Length lives in bits 0..13. */
@@ -97,7 +101,21 @@
 #define DESC_EOR            0x40000000u   /* end of ring */
 #define DESC_FS             0x20000000u   /* first segment */
 #define DESC_LS             0x10000000u   /* last segment */
-#define DESC_LEN_MASK       0x00003FFFu
+/* Buffer size we PROGRAM is a 13-bit field; the frame length the gigE parts
+ * REPORT is 14 bits (they stole the frame-alignment bit for it). */
+#define DESC_BUFLEN_MASK    0x00001FFFu
+#define DESC_FRAGLEN_MASK   0x00003FFFu
+
+/*
+ * Receive status bits.  On the gigabit parts these sit ONE BIT HIGHER than on
+ * the 8139C+ -- Realtek removed the frame-alignment bit to widen the length
+ * field and shifted everything below FS/LS up.  OWN/EOR/FS/LS did not move.
+ * Shift the word right by one before testing these, exactly as FreeBSD's
+ * re(4) and NetBSD's rtl8169 do.
+ */
+#define RXSTAT_RXERRSUM     0x00100000u
+#define RXSTAT_RUNT         0x00080000u
+#define RXSTAT_CRCERR       0x00040000u
 
 #define R8168_RX_DESCS      64
 #define R8168_TX_DESCS      32
@@ -153,20 +171,28 @@ static void r8168_rx_drain(void) {
         if (opts1 & DESC_OWN)
             break;
 
-        uint32_t len = opts1 & DESC_LEN_MASK;
+        uint32_t len = opts1 & DESC_FRAGLEN_MASK;
 
         /*
-         * `len` is device-supplied.  Only accept a descriptor that is both
-         * the first and last segment of its frame (we never configured
-         * scatter receive, so anything else means the ring is not saying
-         * what we think) and whose length is a plausible Ethernet frame.
-         * Recycle either way, so one bad frame cannot wedge the receiver --
-         * the failure mode RTL-04 documents for the 8139.
+         * `len` and the status bits are device-supplied.
          *
-         * The FCS is included in `len` because RxCRC stripping is not
-         * enabled on this part; drop the trailing 4 bytes.
+         * The error bits live one place higher than the 8139C+ layout the
+         * datasheet tables are written against, so shift before testing them
+         * -- FreeBSD re(4) and NetBSD rtl8169 both do exactly this.  Testing
+         * them unshifted reads the WRONG bits and lets CRC-errored frames
+         * through as good data.
+         *
+         * Accept only a descriptor that is both first and last segment (we
+         * never configured scatter receive) with no error summary and a
+         * plausible length.  Recycle either way, so one bad frame cannot
+         * wedge the receiver -- the failure mode RTL-04 documents.
+         *
+         * The FCS is included in `len` (RxCRC stripping is not enabled on
+         * this part), so drop the trailing 4 bytes.
          */
+        uint32_t stat = opts1 >> 1;
         if ((opts1 & (DESC_FS | DESC_LS)) == (DESC_FS | DESC_LS) &&
+            (stat & RXSTAT_RXERRSUM) == 0 &&
             len >= 18 && len <= R8168_MAX_FRAME + 4) {
             netdev_rx(&rt.netdev, rt.rx_buf + rt.rx_cur * R8168_BUF_SIZE,
                       len - 4);
@@ -178,7 +204,7 @@ static void r8168_rx_drain(void) {
          * slot so the NIC wraps instead of running off the end. */
         uint32_t eor = (rt.rx_cur == R8168_RX_DESCS - 1) ? DESC_EOR : 0;
         d->opts2   = 0;
-        d->opts1   = DESC_OWN | eor | R8168_BUF_SIZE;
+        d->opts1   = DESC_OWN | eor | (R8168_BUF_SIZE & DESC_BUFLEN_MASK);
 
         rt.rx_cur = (rt.rx_cur + 1) % R8168_RX_DESCS;
     }
@@ -259,7 +285,8 @@ static int r8168_xmit(netdev_t *dev, const void *frame, size_t len) {
     d->addr_hi = 0;
     d->opts2   = 0;
     /* OWN last: everything else must be visible to the NIC first. */
-    d->opts1   = DESC_OWN | DESC_FS | DESC_LS | eor | xlen;
+    d->opts1   = DESC_OWN | DESC_FS | DESC_LS | eor |
+                 (xlen & DESC_BUFLEN_MASK);
 
     rt.tx_cur = (slot + 1) % R8168_TX_DESCS;
 
@@ -376,27 +403,45 @@ static int r8168_setup(pci_device_t *pdev) {
      * receive filter must be written AFTER RE is set or the first frames are
      * dropped.
      */
-    rt_w8(R_MTPS, 0x3B);                      /* max tx packet size units */
+    /*
+     * The C+ command register comes FIRST -- "we must configure the C+
+     * register before all others" (NetBSD rtl8169.c).  And it must carry
+     * TXENB|RXENB: those enable the DESCRIPTOR engine, which is a different
+     * thing from the CR TE|RE bits below (those drive the legacy 8139-style
+     * datapath).  Without them the chip never looks at the rings at all.
+     */
+    rt_w16(R_CPCR, CPCR_PCI_MUL_RW | CPCR_TXENB | CPCR_RXENB);
+
+    /* The BSDs sleep 10ms here before touching anything else. */
+    for (volatile int i = 0; i < 1000000; i++) { }
+
     rt_w16(R_RMS, R8168_BUF_SIZE);            /* accept up to a full buffer */
 
-    rt_w32(R_TCR, TCR_MXDMA_UNLIMITED | TCR_IFG_NORMAL);
-    rt_w32(R_RCR, RCR_MXDMA_UNLIMITED | RCR_RXFTH_NONE);
-
-    rt_w16(R_CPCR, rt_r16(R_CPCR) | CPCR_PCI_MUL_RW);
-
-    rt_w32(R_TNPDS,     rt.tx_ring_phys);
+    /*
+     * Descriptor bases, HIGH half first -- that is the order both BSDs use,
+     * and on a part with a 64-bit register pair the low write is what the
+     * chip latches on.
+     */
     rt_w32(R_TNPDS + 4, 0);
-    rt_w32(R_RDSAR,     rt.rx_ring_phys);
+    rt_w32(R_TNPDS,     rt.tx_ring_phys);
     rt_w32(R_RDSAR + 4, 0);
+    rt_w32(R_RDSAR,     rt.rx_ring_phys);
 
+    /* Enable, THEN configure TX/RX -- again the BSD order. */
     rt_w8(R_CR, CR_TE | CR_RE);
 
-    rt_w8(R_CFG9346, CFG9346_LOCK);
+    rt_w32(R_TCR, TCR_MXDMA_UNLIMITED | TCR_IFG_NORMAL);
+    rt_w8(R_ETHRESH, 16);                     /* early TX threshold */
+    rt_w32(R_RCR, RCR_MXDMA_UNLIMITED | RCR_RXFTH_NONE | RCR_RXBUF_64);
 
-    /* Receive filter: our MAC plus broadcast and multicast.  No AAP -- the
-     * stack does not want other stations' traffic. */
-    rt_w32(R_RCR, RCR_MXDMA_UNLIMITED | RCR_RXFTH_NONE |
-                  RCR_APM | RCR_AB | RCR_AM);
+    /*
+     * Receive filter: OR the accept bits into whatever the chip reports, so
+     * we do not clobber fields the part set for itself.  No AAP -- the stack
+     * does not want other stations' traffic.
+     */
+    rt_w32(R_RCR, rt_r32(R_RCR) | RCR_APM | RCR_AB | RCR_AM);
+
+    rt_w8(R_CFG9346, CFG9346_LOCK);
 
     rt_w16(R_ISR, 0xFFFF);                    /* clear anything latched */
 
@@ -414,8 +459,10 @@ static int r8168_setup(pci_device_t *pdev) {
         }
     }
 
+    /* Matches RL_INTRS_CPLUS / RTK_INTRS_CPLUS, including SERR: a PCI system
+     * error is exactly the thing you want to hear about on first bring-up. */
     rt_w16(R_IMR, INT_ROK | INT_RER | INT_TOK | INT_TER |
-                  INT_RDU | INT_FOVW | INT_LINKCHG);
+                  INT_RDU | INT_FOVW | INT_LINKCHG | INT_SERR);
 
     strlcpy(rt.netdev.name, "eth0", NETDEV_NAME_MAX);
     rt.netdev.mtu = 1500;
