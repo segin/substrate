@@ -364,7 +364,16 @@ int virtio_net_setup(uint8_t bus, uint8_t slot, uint8_t func) {
     if (vn.irq) {
         int rc = request_irq(vn.irq, vnet_irq, IRQF_SHARED, "virtio-net", &vn);
         if (rc != 0) {
-            kprint("virtio-net: could not install IRQ handler\n");
+            /* Say WHICH failure this is.  The bare message cost a debugging
+             * session: -EBUSY here means some driver that probed EARLIER
+             * claimed this line exclusively (flags 0), so asking politely for
+             * IRQF_SHARED is refused and the interface silently never
+             * registers -- the visible symptom is only "eth0: No such
+             * device" from rc.d/20-network, hundreds of lines later. */
+            kprintf("virtio-net: could not install IRQ %u handler (%d)%s\n",
+                    (unsigned)vn.irq, rc,
+                    rc == -EBUSY ? " - line held exclusively by another driver"
+                                 : "");
             return -1;
         }
     }

@@ -793,8 +793,9 @@ static int hda_attach(pci_device_t *pdev)
 	}
 
 	if (d->irq >= 0) {
+		/* Shared PCI INTx -- see the note in ac97.c. */
 		(void)request_irq((unsigned int)d->irq, hda_irq_handler,
-		                  0, "hda", d);
+		                  IRQF_SHARED, "hda", d);
 	}
 
 	d->audio.ops = &hda_ops;

@@ -672,7 +672,7 @@ static void ahci_enable_interrupts(ahci_controller_t *ctrl) {
         kprint("ahci: no free MSI vector; staying in polled mode\n");
         return;
     }
-    if (request_irq((unsigned int)vec, ahci_irq, 0, "ahci", ctrl) != 0) {
+    if (request_irq((unsigned int)vec, ahci_irq, IRQF_SHARED, "ahci", ctrl) != 0) {
         irq_free_vector(vec);
         kprint("ahci: request_irq failed; staying in polled mode\n");
         return;

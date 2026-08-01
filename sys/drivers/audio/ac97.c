@@ -946,8 +946,13 @@ static int ac97_attach(pci_device_t *pdev)
 	                (uint32_t)d->bdl_phys);
 
 	if (d->irq >= 0) {
+		/* PCI INTx is shared: on q35 the AC'97, virtio-net and the USB
+		 * controllers routinely land on the same line.  Registering
+		 * exclusively here made whichever driver probed LATER fail with
+		 * -EBUSY -- that is how virtio-net lost its IRQ and eth0 never
+		 * appeared under --boot=uefi. */
 		(void)request_irq((unsigned int)d->irq, ac97_irq_handler,
-		                  0, "ac97", d);
+		                  IRQF_SHARED, "ac97", d);
 	}
 
 	/* Hand off to the audio framework. */
