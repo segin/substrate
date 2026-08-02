@@ -14,6 +14,7 @@
 #include <kern/console.h>
 #include <kern/time.h>
 #include <sys/lock.h>
+#include <sys/smp.h>
 #include <sys/tty.h>
 #include <sys/vt.h>
 #include <sys/vtio.h>
@@ -79,7 +80,71 @@ static void vt_free_buffers(vt_state_t *vt, int cols, int rows) {
  */
 static spinlock_t vt_switch_lock = SPINLOCK_INIT("vt_switch");
 
+/*
+ * Scrollback state lock.
+ *
+ * The scrollback ring (head/count/view) and the redraw that walks it are
+ * reached from two contexts that genuinely run concurrently:
+ *
+ *   - console output.  Every kprintf and every tty write scrolls the active
+ *     VT, pushing lines into the ring and moving head/count.
+ *   - the keyboard.  Shift+PgUp/PgDn and Shift+Up/Down move `view` and force
+ *     a full redraw, arriving either from the PS/2 IRQ or -- on a machine
+ *     whose keyboard is USB -- from the USB-HID poll kthread.
+ *
+ * keyboard.c already serializes the modifier bits against exactly this pair
+ * of contexts (kbd_mod_lock, DRV-22), but the state behind them was left
+ * unguarded: process_keycode() runs straight on into vt_scrollback_*() and
+ * vt_redraw_active(), which touch far more.  An interleaved update tears the
+ * ring indices apart, which is how console output ends up spliced together
+ * mid-line and how the renderer walks a half-updated view.
+ *
+ * Recursive by construction, and it has to be: vt_redraw_active() calls into
+ * the framebuffer/hw-text renderer, which calls back out to
+ * vt_get_display_cell() and vt_get_scrollback_view() for every cell.  Those
+ * accessors are also entry points in their own right (the write path reaches
+ * them without going through a redraw), so they cannot simply be left bare --
+ * and a plain spinlock_acquire would trip its own recursive-acquire panic on
+ * the way back in.  Ownership is tracked by CPU id, which is what makes the
+ * depth check safe to read before acquiring: only the owning CPU can ever see
+ * its own id there.
+ *
+ * IRQ-safe: the PS/2 path really does call in from hard IRQ context, so the
+ * whole critical section runs with interrupts disabled.
+ */
+static spinlock_t vt_state_lock = SPINLOCK_INIT("vt_state");
+static int        vt_lock_cpu = -1;     /* owning CPU, -1 when free */
+static unsigned   vt_lock_depth;        /* recursion count, owner-only */
+static uint32_t   vt_lock_flags;        /* saved EFLAGS of the outermost */
+
+static void vt_state_lock_acquire(void) {
+    uint32_t flags = intr_disable();
+    int cpu = smp_get_cpu_id();
+
+    if (vt_lock_cpu == cpu) {
+        /* Already ours; interrupts are off from the outermost acquire. */
+        vt_lock_depth++;
+        return;
+    }
+    spinlock_acquire(&vt_state_lock);
+    vt_lock_cpu = cpu;
+    vt_lock_depth = 1;
+    vt_lock_flags = flags;
+}
+
+static void vt_state_lock_release(void) {
+    if (vt_lock_depth == 0)
+        return;                         /* unbalanced; nothing to undo */
+    if (--vt_lock_depth == 0) {
+        uint32_t flags = vt_lock_flags;
+        vt_lock_cpu = -1;               /* clear before releasing */
+        spinlock_release(&vt_state_lock);
+        intr_restore(flags);
+    }
+}
+
 void vt_redraw_active(void);
+static void vt_redraw_active_locked(void);
 
 static size_t vt_cell_count_internal(void) {
     return (size_t)vt_width * (size_t)vt_height;
@@ -508,14 +573,14 @@ void vt_activate(int n) {
     vt_redraw_active();
 }
 
-int vt_get_scrollback_view(const vt_state_t *vt) {
+static int vt_get_scrollback_view_locked(const vt_state_t *vt) {
     if (!vt) {
         return 0;
     }
     return vt->scrollback_view;
 }
 
-uint16_t vt_get_display_cell(const vt_state_t *vt, int row, int col) {
+static uint16_t vt_get_display_cell_locked(const vt_state_t *vt, int row, int col) {
     int visible_rows;
     int history_count;
     int view;
@@ -549,7 +614,7 @@ uint16_t vt_get_display_cell(const vt_state_t *vt, int row, int col) {
     return vt->buffer[vt_row_offset((size_t)seq_index) + (size_t)col];
 }
 
-void vt_capture_scrollback_top(vt_state_t *vt) {
+static void vt_capture_scrollback_top_locked(vt_state_t *vt) {
     size_t row_offset;
     size_t width;
 
@@ -567,7 +632,7 @@ void vt_capture_scrollback_top(vt_state_t *vt) {
     }
 }
 
-void vt_scrollback_page_up(void) {
+static void vt_scrollback_page_up_locked(void) {
     vt_state_t *vt;
     int step;
     int new_view;
@@ -589,10 +654,10 @@ void vt_scrollback_page_up(void) {
         return;
     }
     vt->scrollback_view = (uint16_t)new_view;
-    vt_redraw_active();
+    vt_redraw_active_locked();
 }
 
-void vt_scrollback_page_down(void) {
+static void vt_scrollback_page_down_locked(void) {
     vt_state_t *vt;
     int step;
     int new_view;
@@ -614,10 +679,10 @@ void vt_scrollback_page_down(void) {
         return;
     }
     vt->scrollback_view = (uint16_t)new_view;
-    vt_redraw_active();
+    vt_redraw_active_locked();
 }
 
-void vt_scrollback_line_up(void) {
+static void vt_scrollback_line_up_locked(void) {
     vt_state_t *vt;
     int new_view;
 
@@ -634,10 +699,10 @@ void vt_scrollback_line_up(void) {
         return;
     }
     vt->scrollback_view = (uint16_t)new_view;
-    vt_redraw_active();
+    vt_redraw_active_locked();
 }
 
-void vt_scrollback_line_down(void) {
+static void vt_scrollback_line_down_locked(void) {
     vt_state_t *vt;
 
     vt = vt_get_state(vt_get_active());
@@ -646,7 +711,7 @@ void vt_scrollback_line_down(void) {
     }
 
     vt->scrollback_view--;
-    vt_redraw_active();
+    vt_redraw_active_locked();
 }
 
 static void vt_civil_from_days(int64_t z, int *year, unsigned *month, unsigned *day) {
@@ -776,7 +841,7 @@ void vt_render_statusline(vt_state_t *vt) {
     }
 }
 
-void vt_redraw_active(void) {
+static void vt_redraw_active_locked(void) {
     vt_state_t *vt = vt_get_state(vt_get_active());
 
     if (!vt) {
@@ -795,6 +860,63 @@ void vt_redraw_active(void) {
     } else {
         hw_text_redraw_active();
     }
+}
+
+/*
+ * Public entry points.  Each takes the scrollback state lock and defers to the
+ * _locked body above; the lock is recursive, so a redraw that re-enters
+ * vt_get_display_cell()/vt_get_scrollback_view() from the renderer is fine.
+ */
+int vt_get_scrollback_view(const vt_state_t *vt) {
+    int r;
+    vt_state_lock_acquire();
+    r = vt_get_scrollback_view_locked(vt);
+    vt_state_lock_release();
+    return r;
+}
+
+uint16_t vt_get_display_cell(const vt_state_t *vt, int row, int col) {
+    uint16_t r;
+    vt_state_lock_acquire();
+    r = vt_get_display_cell_locked(vt, row, col);
+    vt_state_lock_release();
+    return r;
+}
+
+void vt_capture_scrollback_top(vt_state_t *vt) {
+    vt_state_lock_acquire();
+    vt_capture_scrollback_top_locked(vt);
+    vt_state_lock_release();
+}
+
+void vt_scrollback_page_up(void) {
+    vt_state_lock_acquire();
+    vt_scrollback_page_up_locked();
+    vt_state_lock_release();
+}
+
+void vt_scrollback_page_down(void) {
+    vt_state_lock_acquire();
+    vt_scrollback_page_down_locked();
+    vt_state_lock_release();
+}
+
+void vt_scrollback_line_up(void) {
+    vt_state_lock_acquire();
+    vt_scrollback_line_up_locked();
+    vt_state_lock_release();
+}
+
+void vt_scrollback_line_down(void) {
+    vt_state_lock_acquire();
+    vt_scrollback_line_down_locked();
+    vt_state_lock_release();
+}
+
+void vt_redraw_active(void) {
+    vt_state_lock_acquire();
+    vt_redraw_active_locked();
+    vt_state_lock_release();
 }
 
 void vt_tick_1hz(void) {
