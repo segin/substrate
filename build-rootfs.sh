@@ -640,26 +640,45 @@ insmod search_label
 # on a USB stick the drive number depends on what else is plugged in.
 search --no-floppy --label $ROOT_LABEL --set=subroot
 
-menuentry "Substrate" {
+# One function per handoff protocol so each menu entry is a single line and
+# the option list is impossible to get out of step between BIOS and UEFI.
+function substrate_boot {
     set root=\$subroot
-    echo "Loading /vmunix from $ROOT_LABEL ..."
+    echo "Loading /vmunix from $ROOT_LABEL \$*"
     if [ "\$grub_platform" = "efi" ]; then
-        multiboot2 /vmunix root=LABEL=$ROOT_LABEL
+        multiboot2 /vmunix root=LABEL=$ROOT_LABEL \$*
     else
-        multiboot /vmunix root=LABEL=$ROOT_LABEL
+        multiboot /vmunix root=LABEL=$ROOT_LABEL \$*
     fi
     boot
 }
 
-menuentry "Substrate (serial console + verbose)" {
-    set root=\$subroot
-    if [ "\$grub_platform" = "efi" ]; then
-        multiboot2 /vmunix root=LABEL=$ROOT_LABEL serial_debug console=serial0
-    else
-        multiboot /vmunix root=LABEL=$ROOT_LABEL serial_debug console=serial0
-    fi
-    boot
+menuentry "Substrate" {
+    substrate_boot
 }
+
+menuentry "Substrate (serial console + verbose)" {
+    substrate_boot serial_debug console=serial0
+}
+
+# Diagnostic entries.  These exist so the options can be SELECTED rather than
+# typed in at the GRUB prompt: an option that never reaches the kernel looks
+# exactly like an option that had no effect, and the two were confused for a
+# whole debugging round on a Lenovo C460.  Whichever entry is chosen, the
+# kernel echoes what it actually received on its "Boot Args:" line -- check
+# that line first, always.
+menuentry "Substrate (USB bring-up trace)" {
+    substrate_boot xhcidebug ehcidebug
+}
+
+menuentry "Substrate (USB quirks disabled)" {
+    substrate_boot noehci noxhciroute nousbhandoff
+}
+
+menuentry "Substrate (USB quirks disabled + trace)" {
+    substrate_boot noehci noxhciroute nousbhandoff xhcidebug ehcidebug
+}
+
 EOF
 }
 
